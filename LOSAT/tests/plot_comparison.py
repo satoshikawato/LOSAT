@@ -1,0 +1,240 @@
+#!/usr/bin/env python
+# coding: utf-8
+
+import pandas as pd
+import matplotlib.pyplot as plt
+import seaborn as sns
+import os
+
+# === Configuration: Output Directory ===
+PLOT_DIR = "./plots"
+os.makedirs(PLOT_DIR, exist_ok=True)
+
+# === Column Definitions (outfmt 7 / 6) ===
+COLUMNS = ['qseqid', 'sseqid', 'pident', 'length', 'mismatch', 'gapopen', 
+           'qstart', 'qend', 'sstart', 'send', 'evalue', 'bitscore']
+
+def load_blast(filepath, tool_name):
+    """Load a BLAST format file."""
+    if not os.path.exists(filepath):
+        print(f"[Warning] File not found: {filepath}")
+        return None
+    try:
+        # Load data, skipping comment lines starting with '#'
+        df = pd.read_csv(filepath, sep='\t', comment='#', names=COLUMNS, header=None)
+        
+        # Convert numeric columns
+        numeric_cols = ['pident', 'length', 'bitscore', 'evalue']
+        for col in numeric_cols:
+            df[col] = pd.to_numeric(df[col], errors='coerce')
+        
+        df['Tool'] = tool_name
+        return df
+    except Exception as e:
+        print(f"[Error] Failed to load {filepath}: {e}")
+        return None
+
+def generate_comparison_plot(config):
+    """Generate and save a comparison plot for a single pair."""
+    name = config['name']
+    ncbi_path = config['ncbi']
+    losat_path = config['losat']
+    mode_label = config['mode']
+
+    print(f"Processing: {name} ({mode_label})")
+
+    # Load data
+    df_ncbi = load_blast(ncbi_path, 'BLAST+')
+    df_losat = load_blast(losat_path, 'LOSAT')
+
+    if df_ncbi is None or df_losat is None:
+        print(f"  -> Skipped due to missing files.")
+        return
+
+    # Merge data
+    df_merged = pd.concat([df_ncbi, df_losat])
+
+    if df_merged.empty:
+        print("  -> Skipped (No data rows found).")
+        return
+
+    # === Create Plots ===
+    sns.set(style="whitegrid")
+    fig, axes = plt.subplots(2, 2, figsize=(16, 12))
+    fig.suptitle(f"Comparison: {name} ({mode_label})", fontsize=16)
+
+    # 1. Distribution of Alignment Lengths (Log Scale)
+    try:
+        sns.histplot(data=df_merged, x='length', hue='Tool', 
+                     element="step", stat="density", common_norm=False, 
+                     log_scale=True, ax=axes[0,0])
+        axes[0,0].set_title('Distribution of Alignment Lengths (Log Scale)')
+        axes[0,0].set_xlabel('Alignment Length (bp/aa)')
+    except Exception as e:
+        axes[0,0].text(0.5, 0.5, f"Error plotting hist: {e}", ha='center')
+
+    # 2. Distribution of Identity
+    try:
+        sns.histplot(data=df_merged, x='pident', hue='Tool', 
+                     element="step", stat="density", common_norm=False, 
+                     ax=axes[0,1])
+        axes[0,1].set_title('Distribution of Percentage Identity')
+        axes[0,1].set_xlabel('Identity (%)')
+    except Exception as e:
+        axes[0,1].text(0.5, 0.5, f"Error plotting hist: {e}", ha='center')
+
+    # 3. Alignment Length vs Identity (Scatter Plot)
+    try:
+        sns.scatterplot(data=df_merged, x='length', y='pident', hue='Tool', 
+                        alpha=0.5, style='Tool', ax=axes[1,0])
+        axes[1,0].set_xscale('log')
+        axes[1,0].set_title('Alignment Length vs Identity')
+        axes[1,0].set_xlabel('Alignment Length (bp/aa)')
+        axes[1,0].set_ylabel('Identity (%)')
+    except Exception as e:
+         axes[1,0].text(0.5, 0.5, "Data error", ha='center')
+
+    # 4. Alignment Length vs Bit Score (Scatter Plot)
+    try:
+        sns.scatterplot(data=df_merged, x='length', y='bitscore', hue='Tool', 
+                        alpha=0.5, ax=axes[1,1])
+        axes[1,1].set_xscale('log')
+        axes[1,1].set_yscale('log')
+        axes[1,1].set_title('Alignment Length vs Bit Score')
+        axes[1,1].set_xlabel('Alignment Length (bp/aa)')
+        axes[1,1].set_ylabel('Bit Score')
+    except Exception as e:
+         axes[1,1].text(0.5, 0.5, "Data error", ha='center')
+
+    # Save
+    output_filename = os.path.join(PLOT_DIR, f"compare_{name}_{mode_label}.png")
+    plt.tight_layout()
+    plt.savefig(output_filename)
+    plt.close() # Free memory
+    print(f"  -> Saved to {output_filename}")
+
+
+# === Comparison List (Corresponds to the bash script) ===
+comparisons = [
+    # --- TBLASTX ---
+    {
+        "name": "NZ_CP006932_Self",
+        "mode": "TBLASTX",
+        "ncbi":  "./blast_out/NZ_CP006932.NZ_CP006932.tblastx.n1.out",
+        "losat": "./losat_out/NZ_CP006932.NZ_CP006932.tlosatx.n1.out"
+    },
+    {
+        "name": "AP027132_vs_NZ_CP006932",
+        "mode": "TBLASTX",
+        "ncbi":  "./blast_out/AP027132.NZ_CP006932.tblastx.n1.out",
+        "losat": "./losat_out/AP027132.NZ_CP006932.tlosatx.n1.out"
+    },
+    {
+        "name": "AP027078_vs_AP027131",
+        "mode": "TBLASTX",
+        "ncbi":  "./blast_out/AP027078.AP027131.tblastx.n1.out",
+        "losat": "./losat_out/AP027078.AP027131.tlosatx.n1.out"
+    },
+    {
+        "name": "AP027131_vs_AP027133",
+        "mode": "TBLASTX",
+        "ncbi":  "./blast_out/AP027131.AP027133.tblastx.n1.out",
+        "losat": "./losat_out/AP027131.AP027133.tlosatx.n1.out"
+    },
+    {
+        "name": "AP027133_vs_AP027132",
+        "mode": "TBLASTX",
+        "ncbi":  "./blast_out/AP027133.AP027132.tblastx.n1.out",
+        "losat": "./losat_out/AP027133.AP027132.tlosatx.n1.out"
+    },
+
+    # --- BLASTN (Standard / Task:blastn) ---
+    {
+        "name": "NZ_CP006932_Self",
+        "mode": "BLASTN_Task",
+        "ncbi":  "./blast_out/NZ_CP006932.NZ_CP006932.task_blastn.out",
+        "losat": "./losat_out/NZ_CP006932.NZ_CP006932.losatn.blastn.out"
+    },
+    {
+        "name": "PesePMNV_vs_MjPMNV",
+        "mode": "BLASTN",
+        "ncbi":  "./blast_out/PesePMNV.MjPMNV.blastn.out",
+        "losat": "./losat_out/PesePMNV.MjPMNV.losatn.blastn.out"
+    },
+    {
+        "name": "MelaMJNV_vs_PemoMJNVA",
+        "mode": "BLASTN",
+        "ncbi":  "./blast_out/MelaMJNV.PemoMJNVA.blastn.out",
+        "losat": "./losat_out/MelaMJNV.PemoMJNVA.losatn.blastn.out"
+    },
+    {
+        "name": "SiNMV_vs_ChdeNMV",
+        "mode": "BLASTN",
+        "ncbi":  "./blast_out/SiNMV.ChdeNMV.blastn.out",
+        "losat": "./losat_out/SiNMV.ChdeNMV.losatn.blastn.out"
+    },
+    {
+        "name": "PmeNMV_vs_MjPMNV",
+        "mode": "BLASTN",
+        "ncbi":  "./blast_out/PmeNMV.MjPMNV.blastn.out",
+        "losat": "./losat_out/PmeNMV.MjPMNV.losatn.blastn.out"
+    },
+    {
+        "name": "PmeNMV_vs_PesePMNV",
+        "mode": "BLASTN",
+        "ncbi":  "./blast_out/PmeNMV.PesePMNV.blastn.out",
+        "losat": "./losat_out/PmeNMV.PesePMNV.losatn.blastn.out"
+    },
+    {
+        "name": "PeseMJNV_vs_PemoMJNVB",
+        "mode": "BLASTN",
+        "ncbi":  "./blast_out/PeseMJNV.PemoMJNVB.blastn.out",
+        "losat": "./losat_out/PeseMJNV.PemoMJNVB.losatn.blastn.out"
+    },
+    {
+        "name": "PemoMJNVA_vs_PeseMJNV",
+        "mode": "BLASTN",
+        "ncbi":  "./blast_out/PemoMJNVA.PeseMJNV.blastn.out",
+        "losat": "./losat_out/PemoMJNVA.PeseMJNV.losatn.blastn.out"
+    },
+    {
+        "name": "MjeNMV_vs_MelaMJNV",
+        "mode": "BLASTN",
+        "ncbi":  "./blast_out/MjeNMV.MelaMJNV.blastn.out",
+        "losat": "./losat_out/MjeNMV.MelaMJNV.losatn.blastn.out"
+    },
+    {
+        "name": "MjPMNV_vs_MlPMNV",
+        "mode": "BLASTN",
+        "ncbi":  "./blast_out/MjPMNV.MlPMNV.blastn.out",
+        "losat": "./losat_out/MjPMNV.MlPMNV.losatn.blastn.out"
+    },
+
+    # --- BLASTN (Megablast) ---
+    {
+        "name": "EDL933_vs_Sakai",
+        "mode": "Megablast",
+        "ncbi":  "./blast_out/EDL933.Sakai.blastn.megablast.out",
+        "losat": "./losat_out/EDL933.Sakai.losatn.megablast.out"
+    },
+    {
+        "name": "Sakai_vs_MG1655",
+        "mode": "Megablast",
+        "ncbi":  "./blast_out/Sakai.MG1655.blastn.megablast.out",
+        "losat": "./losat_out/Sakai.MG1655.losatn.megablast.out"
+    },
+]
+
+def main():
+    print("Starting batch plot generation...")
+    print(f"Output directory: {PLOT_DIR}")
+    
+    for config in comparisons:
+        generate_comparison_plot(config)
+        
+    print("All plots generated.")
+
+if __name__ == "__main__":
+    main()
+    
+    

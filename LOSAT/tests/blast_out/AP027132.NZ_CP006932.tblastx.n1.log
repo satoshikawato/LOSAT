@@ -1,0 +1,5 @@
+Warning: [tblastx] 'num_threads' is currently ignored when 'subject' is specified.
+
+real	6m18.702s
+user	6m18.325s
+sys	0m0.032s

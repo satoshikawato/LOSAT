@@ -427,8 +427,8 @@ mod tests {
 
     #[test]
     fn test_normalize_score() {
-        let lambda = 0.267;
-        let k = 0.041;
+        let lambda: f64 = 0.267;
+        let k: f64 = 0.041;
         let log_k = k.ln();
         let score = 100;
 

@@ -1,6 +1,6 @@
 use anyhow::Result;
 use clap::{Parser, Subcommand};
-use rust_blast::algorithm::{blastn, tblastx};
+use LOSAT::algorithm::{blastn, tblastx};
 
 #[derive(Parser)]
 #[command(name = "losat")]

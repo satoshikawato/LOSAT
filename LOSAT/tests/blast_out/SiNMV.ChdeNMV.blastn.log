@@ -1,5 +1,4 @@
-./run_comparison.sh: line 128: blastn: command not found
 
-real	0m0.010s
-user	0m0.001s
-sys	0m0.000s
+real	0m1.056s
+user	0m1.029s
+sys	0m0.021s

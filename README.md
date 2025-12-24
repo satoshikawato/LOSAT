@@ -6,4 +6,5 @@ LOSAT (LOcal Sequence Alignment Tool) aims to provide a miniaturized reimplement
 
 ## References
 [NCBI BLAST](https://blast.ncbi.nlm.nih.gov/Blast.cgi)
+
 [Wikipedia](https://en.wikipedia.org/wiki/MGM-166_LOSAT)

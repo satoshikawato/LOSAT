@@ -35,14 +35,56 @@ const GAP_EXTEND: i32 = -1; // BLAST_GAP_EXTN_PROT
 // Threshold for triggering gapped extension without two-hit requirement
 const HIGH_SCORE_THRESHOLD: i32 = 60;
 
-// Minimum ungapped score threshold for keeping hits
-// NCBI BLAST outputs down to bit score ~22.1, which corresponds to ungapped score ~14
-// Setting to 15 (from 20) to improve sensitivity for divergent sequences
-const MIN_UNGAPPED_SCORE: i32 = 15;
+// Minimum ungapped score threshold for keeping hits (floor value)
+// This is the absolute minimum, but the actual threshold is calculated dynamically
+// based on query/subject length and Karlin parameters
+const MIN_UNGAPPED_SCORE: i32 = 11;
+
+// Default internal cutoff e-value for calculating dynamic ungapped threshold
+// This is NOT the user's -evalue parameter, but an internal threshold
+// NCBI BLAST uses different values per program; for TBLASTX we use 0.05
+const INTERNAL_CUTOFF_EVALUE: f64 = 0.05;
 
 // Parameters for HSP chaining (similar to BLASTN)
 const MAX_GAP_AA: usize = 333; // ~1000bp / 3 for amino acids
 const MAX_DIAG_DRIFT_AA: isize = 33; // ~100bp / 3 for amino acids
+
+/// Calculate dynamic ungapped score cutoff based on query/subject length and Karlin parameters.
+///
+/// This implements a simplified approach inspired by NCBI BLAST:
+/// - For shorter sequences, use a lower threshold based on e-value calculation
+/// - For longer sequences, cap at a reasonable maximum to maintain sensitivity
+/// - The threshold is bounded between MIN_UNGAPPED_SCORE and MAX_UNGAPPED_CUTOFF
+///
+/// The formula is: S = ceil( log(K * searchsp / E) / Lambda )
+/// where searchsp = min(query_len, subj_len) * subj_len
+fn calculate_ungapped_cutoff(
+    query_len: usize,
+    subj_len: usize,
+    params: &KarlinParams,
+) -> i32 {
+    // Maximum ungapped cutoff to maintain sensitivity for long sequences
+    // This prevents the threshold from becoming too high for divergent sequences
+    // Set to 15 to match the previous fixed threshold that worked well
+    const MAX_UNGAPPED_CUTOFF: i32 = 15;
+    
+    // Calculate search space: min(query_len, subj_len) * subj_len
+    let searchsp = (query_len.min(subj_len) * subj_len) as f64;
+    
+    // Calculate cutoff score from e-value
+    // S = ceil( log(K * searchsp / E) / Lambda )
+    let cutoff_from_evalue = if searchsp > 0.0 && INTERNAL_CUTOFF_EVALUE > 0.0 {
+        ((params.k * searchsp / INTERNAL_CUTOFF_EVALUE).ln() / params.lambda).ceil() as i32
+    } else {
+        MIN_UNGAPPED_SCORE
+    };
+    
+    // The final cutoff is:
+    // - At least MIN_UNGAPPED_SCORE (floor)
+    // - At most MAX_UNGAPPED_CUTOFF (ceiling to maintain sensitivity)
+    // For short sequences, the e-value-based cutoff may be lower than MAX_UNGAPPED_CUTOFF
+    cutoff_from_evalue.clamp(MIN_UNGAPPED_SCORE, MAX_UNGAPPED_CUTOFF)
+}
 
 /// Diagnostic counters for tracking where hits are lost in the pipeline
 #[derive(Default)]
@@ -75,7 +117,7 @@ impl DiagnosticCounters {
         eprintln!("  Seeds passed to extension:  {}", self.seeds_passed.load(AtomicOrdering::Relaxed));
         eprintln!("Ungapped Extension Stage:");
         eprintln!("  Ungapped extensions run:    {}", self.ungapped_extensions.load(AtomicOrdering::Relaxed));
-        eprintln!("  Filtered (low score < {}):  {}", MIN_UNGAPPED_SCORE, self.ungapped_low_score.load(AtomicOrdering::Relaxed));
+        eprintln!("  Filtered (low score, dynamic threshold):  {}", self.ungapped_low_score.load(AtomicOrdering::Relaxed));
         eprintln!("Gapped Extension Stage:");
         eprintln!("  Ungapped-only hits:         {}", self.ungapped_only_hits.load(AtomicOrdering::Relaxed));
         eprintln!("  Gapped extensions run:      {}", self.gapped_extensions.load(AtomicOrdering::Relaxed));
@@ -1137,6 +1179,14 @@ pub fn run(args: TblastxArgs) -> Result<()> {
                                 let q_frame = &query_frames[q_idx as usize][q_f_idx as usize];
                                 let q_aa = &q_frame.aa_seq;
 
+                                // Calculate dynamic ungapped threshold for this query-subject pair
+                                // Uses NCBI BLAST formula: searchsp = min(q_len, s_len) * s_len
+                                let dynamic_ungapped_cutoff = calculate_ungapped_cutoff(
+                                    q_aa.len(),
+                                    s_aa.len(),
+                                    &params,
+                                );
+
                                 let seed_score = get_score(c1 as u8, q_aa[q_pos as usize])
                                     + get_score(c2 as u8, q_aa[q_pos as usize + 1])
                                     + get_score(c3 as u8, q_aa[q_pos as usize + 2]);
@@ -1184,8 +1234,9 @@ pub fn run(args: TblastxArgs) -> Result<()> {
                                     seed_score,
                                 );
 
-                                // Skip if ungapped score is too low
-                                if ungapped_score < MIN_UNGAPPED_SCORE {
+                                // Skip if ungapped score is below the dynamic threshold
+                                // The threshold is calculated per query-subject pair based on their lengths
+                                if ungapped_score < dynamic_ungapped_cutoff {
                                     if diag_enabled {
                                         diag_inner.ungapped_low_score.fetch_add(1, AtomicOrdering::Relaxed);
                                     }

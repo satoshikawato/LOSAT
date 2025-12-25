@@ -1,4 +1,4 @@
-# LOSAT🚙🚀
+# LOSAT🚀
 LOSAT (LOcal Sequence Alignment Tool) aims to provide a miniaturized reimplementation of NCBI BLAST algorithm with webassembly compatibility.
 
 ## Motivation

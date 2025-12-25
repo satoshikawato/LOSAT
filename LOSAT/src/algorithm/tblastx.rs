@@ -57,12 +57,18 @@ struct DiagnosticCounters {
     ungapped_low_score: AtomicUsize,
     // Gapped extension stage
     ungapped_only_hits: AtomicUsize,
+    ungapped_evalue_passed: AtomicUsize,  // ungapped-only hits that passed e-value filter
+    ungapped_evalue_failed: AtomicUsize,  // ungapped-only hits that failed e-value filter
     gapped_extensions: AtomicUsize,
     gapped_evalue_passed: AtomicUsize,
     // Post-processing stage (set in chain_and_filter_hsps_protein)
     hsps_before_chain: AtomicUsize,
     hsps_after_chain: AtomicUsize,
     hsps_after_overlap_filter: AtomicUsize,
+    // Cluster merging diagnostics
+    clusters_single: AtomicUsize,    // Single-HSP clusters (output as-is)
+    clusters_merged: AtomicUsize,    // Multi-HSP clusters that were merged
+    hsps_in_merged_clusters: AtomicUsize, // Total HSPs that were part of merged clusters
 }
 
 impl DiagnosticCounters {
@@ -76,12 +82,18 @@ impl DiagnosticCounters {
         eprintln!("Ungapped Extension Stage:");
         eprintln!("  Ungapped extensions run:    {}", self.ungapped_extensions.load(AtomicOrdering::Relaxed));
         eprintln!("  Filtered (low score < {}):  {}", MIN_UNGAPPED_SCORE, self.ungapped_low_score.load(AtomicOrdering::Relaxed));
+        eprintln!("Ungapped-Only Hits (skipped gapped extension):");
+        eprintln!("  Total ungapped-only:        {}", self.ungapped_only_hits.load(AtomicOrdering::Relaxed));
+        eprintln!("  E-value passed:             {}", self.ungapped_evalue_passed.load(AtomicOrdering::Relaxed));
+        eprintln!("  E-value failed:             {}", self.ungapped_evalue_failed.load(AtomicOrdering::Relaxed));
         eprintln!("Gapped Extension Stage:");
-        eprintln!("  Ungapped-only hits:         {}", self.ungapped_only_hits.load(AtomicOrdering::Relaxed));
         eprintln!("  Gapped extensions run:      {}", self.gapped_extensions.load(AtomicOrdering::Relaxed));
         eprintln!("  Gapped hits (e-value ok):   {}", self.gapped_evalue_passed.load(AtomicOrdering::Relaxed));
         eprintln!("Post-Processing Stage:");
         eprintln!("  HSPs before chaining:       {}", self.hsps_before_chain.load(AtomicOrdering::Relaxed));
+        eprintln!("  Clusters (single HSP):      {}", self.clusters_single.load(AtomicOrdering::Relaxed));
+        eprintln!("  Clusters (merged):          {}", self.clusters_merged.load(AtomicOrdering::Relaxed));
+        eprintln!("  HSPs in merged clusters:    {}", self.hsps_in_merged_clusters.load(AtomicOrdering::Relaxed));
         eprintln!("  HSPs after chaining:        {}", self.hsps_after_chain.load(AtomicOrdering::Relaxed));
         eprintln!("  Final hits (after filter):  {}", self.hsps_after_overlap_filter.load(AtomicOrdering::Relaxed));
         eprintln!("====================================\n");
@@ -782,19 +794,14 @@ fn calculate_statistics(score: i32, aln_len: usize, params: &KarlinParams) -> (f
     // Use alignment length as effective search space, but with a minimum to prevent
     // too many low-scoring hits from passing the e-value filter.
     // 
-    // NCBI BLAST appears to use a per-HSP search space based on alignment length.
-    // For a bit score of 22.1 and e-value of 0.001, the implied search space is ~4,500.
+    // Session 6 tuning results (with overlap filter):
+    // - 50M: 97-215% of NCBI BLAST hits (too variable, some too high)
+    // - 70M: 74-141% of NCBI BLAST hits (some too low)
+    // - 60M: Target ~90-110% of NCBI BLAST hits (middle ground)
     // 
-    // We use aln_len^2 as the search space, with a minimum of 100 million to balance:
-    // - Allowing more hits to pass (compared to full sequence length of 45 billion)
-    // - Not allowing too many noise hits (compared to pure aln_len^2 which is too permissive)
-    //
-    // With min_space = 100 million:
-    // - bit_score 27 -> e-value ~0.75 (passes)
-    // - bit_score 25 -> e-value ~3 (passes)
-    // - bit_score 22 -> e-value ~24 (fails)
+    // The 60M floor provides a balance between sensitivity and specificity.
     let aln_space = (aln_len * aln_len) as f64;
-    let min_space = 100_000_000.0; // 100 million - minimum search space
+    let min_space = 60_000_000.0; // 60M - middle ground between 50M and 70M
     let effective_space = aln_space.max(min_space);
     
     let search_space = SearchSpace {
@@ -917,11 +924,22 @@ fn chain_and_filter_hsps_protein(
             }
         }
 
-        // Process each cluster - output all individual HSPs instead of merging
-        // This matches NCBI BLAST behavior of outputting many short hits
+        // Process each cluster - output all individual HSPs (like NCBI BLAST)
+        // The overlap filter will remove truly redundant hits later
         for cluster in clusters {
+            if cluster.len() == 1 {
+                if let Some(diag) = diagnostics {
+                    diag.clusters_single.fetch_add(1, AtomicOrdering::Relaxed);
+                }
+            } else {
+                if let Some(diag) = diagnostics {
+                    diag.clusters_merged.fetch_add(1, AtomicOrdering::Relaxed);
+                    diag.hsps_in_merged_clusters.fetch_add(cluster.len(), AtomicOrdering::Relaxed);
+                }
+            }
+            
+            // Output all HSPs in the cluster that pass e-value threshold
             for ext_hit in cluster {
-                // Only emit if the original HSP passes the e-value threshold
                 if ext_hit.hit.e_value <= evalue_threshold {
                     result_hits.push(ext_hit.hit);
                 }
@@ -934,19 +952,63 @@ fn chain_and_filter_hsps_protein(
         diag.hsps_after_chain.store(result_hits.len(), AtomicOrdering::Relaxed);
     }
 
-    // Sort by bit score (highest first) for consistent output
+    // Sort by bit score (highest first) for overlap filtering
     result_hits.sort_by(|a, b| {
         b.bit_score
             .partial_cmp(&a.bit_score)
             .unwrap_or(Ordering::Equal)
     });
 
-    // Record final hits (no overlap filter - output all HSPs like NCBI BLAST)
-    if let Some(diag) = diagnostics {
-        diag.hsps_after_overlap_filter.store(result_hits.len(), AtomicOrdering::Relaxed);
+    // Remove dominated/redundant HSPs
+    // An HSP is dominated if it overlaps significantly with a higher-scoring HSP
+    // on both query and subject coordinates
+    let overlap_threshold = 0.80; // 80% overlap threshold
+    let mut filtered_hits: Vec<Hit> = Vec::new();
+    
+    for hit in result_hits {
+        let dominated = filtered_hits.iter().any(|accepted| {
+            // Check if same query-subject pair
+            if hit.query_id != accepted.query_id || hit.subject_id != accepted.subject_id {
+                return false;
+            }
+            
+            // Calculate overlap on query
+            let q_overlap_start = hit.q_start.max(accepted.q_start);
+            let q_overlap_end = hit.q_end.min(accepted.q_end);
+            let q_overlap_len = if q_overlap_end > q_overlap_start {
+                q_overlap_end - q_overlap_start
+            } else {
+                0
+            };
+            let hit_q_len = hit.q_end.saturating_sub(hit.q_start).max(1);
+            let q_overlap_ratio = q_overlap_len as f64 / hit_q_len as f64;
+            
+            // Calculate overlap on subject
+            let s_overlap_start = hit.s_start.min(hit.s_end).max(accepted.s_start.min(accepted.s_end));
+            let s_overlap_end = hit.s_start.max(hit.s_end).min(accepted.s_start.max(accepted.s_end));
+            let s_overlap_len = if s_overlap_end > s_overlap_start {
+                s_overlap_end - s_overlap_start
+            } else {
+                0
+            };
+            let hit_s_len = (hit.s_end as isize - hit.s_start as isize).unsigned_abs().max(1);
+            let s_overlap_ratio = s_overlap_len as f64 / hit_s_len as f64;
+            
+            // HSP is dominated if both query and subject overlap exceed threshold
+            q_overlap_ratio >= overlap_threshold && s_overlap_ratio >= overlap_threshold
+        });
+        
+        if !dominated {
+            filtered_hits.push(hit);
+        }
     }
 
-    result_hits
+    // Record final hits after overlap filter
+    if let Some(diag) = diagnostics {
+        diag.hsps_after_overlap_filter.store(filtered_hits.len(), AtomicOrdering::Relaxed);
+    }
+
+    filtered_hits
 }
 
 pub fn run(args: TblastxArgs) -> Result<()> {
@@ -1205,6 +1267,9 @@ pub fn run(args: TblastxArgs) -> Result<()> {
                                         calculate_statistics(ungapped_score, len, &params);
 
                                     if e_val <= args.evalue {
+                                        if diag_enabled {
+                                            diag_inner.ungapped_evalue_passed.fetch_add(1, AtomicOrdering::Relaxed);
+                                        }
                                         mask.insert(mask_key, se_ungapped);
                                         let mut match_count = 0;
                                         for k in 0..len {
@@ -1258,6 +1323,8 @@ pub fn run(args: TblastxArgs) -> Result<()> {
                                             q_orig_len: q_frame.orig_len,
                                             s_orig_len: s_len,
                                         });
+                                    } else if diag_enabled {
+                                        diag_inner.ungapped_evalue_failed.fetch_add(1, AtomicOrdering::Relaxed);
                                     }
                                     continue;
                                 }

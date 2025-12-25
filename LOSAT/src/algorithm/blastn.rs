@@ -245,6 +245,13 @@ fn is_kmer_masked(intervals: &[MaskedInterval], start: usize, kmer_len: usize) -
 }
 
 // ============================================================================
+// Phase 3: Rolling K-mer Extraction for Hash-based Lookup
+// ============================================================================
+// For large word sizes (>13), we use a hash-based lookup with rolling k-mer extraction.
+// PV prefiltering was tested but found to add overhead without benefit for large word sizes
+// because the k-mer space is very sparse and FxHashMap already provides fast O(1) lookup.
+
+// ============================================================================
 // Phase 2: Query Packing with Rolling K-mer Extraction
 // ============================================================================
 // Uses O(1) sliding window k-mer extraction for building lookup tables
@@ -393,6 +400,9 @@ fn build_pv_direct_lookup(
     }
 }
 
+/// Build hash-based lookup table using rolling k-mer extraction (O(1) per position)
+/// Phase 3 optimization: Replaces O(k) encode_kmer() calls with O(1) sliding window
+/// Note: PV prefiltering was tested but found to add overhead without benefit for large word sizes
 fn build_lookup(
     queries: &[fasta::Record],
     word_size: usize,
@@ -405,6 +415,10 @@ fn build_lookup(
     let mut total_positions = 0usize;
     let mut ambiguous_skipped = 0usize;
     let mut dust_skipped = 0usize;
+    let mut kmers_added = 0usize;
+
+    // K-mer mask for rolling window (keeps only the rightmost 2*k bits)
+    let kmer_mask: u64 = (1u64 << (2 * safe_word_size)) - 1;
 
     for (q_idx, record) in queries.iter().enumerate() {
         let seq = record.seq();
@@ -414,40 +428,64 @@ fn build_lookup(
 
         let masks = query_masks.get(q_idx).map(|v| v.as_slice()).unwrap_or(&[]);
 
-        for i in 0..=(seq.len() - safe_word_size) {
+        // Rolling k-mer state
+        let mut current_kmer: u64 = 0;
+        let mut valid_bases: usize = 0;
+
+        for pos in 0..seq.len() {
+            let base = seq[pos];
+            let code = ENCODE_LUT[base as usize];
+
+            if code == 0xFF {
+                // Ambiguous base - reset the rolling window
+                valid_bases = 0;
+                current_kmer = 0;
+                ambiguous_skipped += 1;
+                continue;
+            }
+
+            // Shift in the new base (O(1) operation)
+            current_kmer = ((current_kmer << 2) | (code as u64)) & kmer_mask;
+            valid_bases += 1;
+
+            // Only process if we have a complete k-mer
+            if valid_bases < safe_word_size {
+                continue;
+            }
+
+            // Calculate the starting position of this k-mer
+            let kmer_start = pos + 1 - safe_word_size;
             total_positions += 1;
-            
+
             // Skip k-mers that overlap with DUST-masked regions
-            if !masks.is_empty() && is_kmer_masked(masks, i, safe_word_size) {
+            if !masks.is_empty() && is_kmer_masked(masks, kmer_start, safe_word_size) {
                 dust_skipped += 1;
                 continue;
             }
-            
-            if let Some(kmer) = encode_kmer(seq, i, safe_word_size) {
-                lookup
-                    .entry(kmer)
-                    .or_default()
-                    .push((q_idx as u32, i as u32));
-            } else {
-                ambiguous_skipped += 1;
-            }
+
+            // Add to lookup table
+            lookup
+                .entry(current_kmer)
+                .or_default()
+                .push((q_idx as u32, kmer_start as u32));
+            kmers_added += 1;
         }
     }
 
     if debug_mode {
         eprintln!(
-            "[DEBUG] build_lookup: total_positions={}, ambiguous_skipped={} ({:.1}%), dust_skipped={} ({:.1}%), unique_kmers={}",
+            "[DEBUG] build_lookup: total_positions={}, ambiguous_skipped={} ({:.1}%), dust_skipped={} ({:.1}%), kmers_added={}, unique_kmers={}",
             total_positions,
             ambiguous_skipped,
-            100.0 * ambiguous_skipped as f64 / total_positions.max(1) as f64,
+            100.0 * ambiguous_skipped as f64 / (total_positions + ambiguous_skipped).max(1) as f64,
             dust_skipped,
             100.0 * dust_skipped as f64 / total_positions.max(1) as f64,
+            kmers_added,
             lookup.len()
         );
     }
 
     // Filter over-represented k-mers to prevent seed explosion
-    // This is critical for performance with smaller word sizes (e.g., blastn task with word_size=11)
     let before_filter = lookup.len();
     lookup.retain(|_, positions| positions.len() <= MAX_HITS_PER_KMER);
     let after_filter = lookup.len();
@@ -3113,7 +3151,9 @@ pub fn run(args: BlastnArgs) -> Result<()> {
     );
 
     // Build the appropriate lookup table
-    // Phase 2: Use PvDirectLookup with Presence-Vector for fast filtering
+    // Phase 2: Use PvDirectLookup with Presence-Vector for fast filtering (direct lookup only)
+    // Phase 3: Use rolling k-mer extraction for hash-based lookup (PV not beneficial for large word sizes)
+    let lookup_start = std::time::Instant::now();
     let pv_direct_lookup: Option<PvDirectLookup> = if use_direct_lookup {
         Some(build_pv_direct_lookup(&queries, effective_word_size, &query_masks))
     } else {
@@ -3124,6 +3164,8 @@ pub fn run(args: BlastnArgs) -> Result<()> {
     } else {
         None
     };
+    let lookup_time = lookup_start.elapsed();
+    eprintln!("Lookup table built in {:.3}s", lookup_time.as_secs_f64());
 
     if args.verbose {
         eprintln!("Searching...");
@@ -3270,6 +3312,7 @@ pub fn run(args: BlastnArgs) -> Result<()> {
     }
 
     // 修正: tx はここで所有権ごと渡す。for_each_with 終了時に自動でDropされるため、明示的な drop(tx) は不要。
+    let scan_start = std::time::Instant::now();
     subjects
         .par_iter()
         .enumerate()
@@ -3364,10 +3407,13 @@ pub fn run(args: BlastnArgs) -> Result<()> {
                 dbg_total_s_positions += 1;
 
                 // Phase 2: Use PV-based direct lookup (O(1) with fast PV filtering) or hash lookup
+                // Note: PV is only used for direct lookup (word_size <= 13). For hash-based lookup
+                // (megablast with word_size=28), PV adds overhead without benefit due to sparse k-mer space.
                 let matches_slice: &[(u32, u32)] = if use_direct_lookup {
-                    // Use PV for fast filtering before accessing the lookup table
+                    // Use PV for fast filtering before accessing the direct lookup table
                     pv_direct_lookup.as_ref().map(|pv_dl| pv_dl.get_hits_checked(current_kmer)).unwrap_or(&[])
                 } else {
+                    // Phase 3: Use rolling k-mer extraction with hash lookup (no PV - FxHashMap is already fast)
                     hash_lookup.as_ref().and_then(|hl| hl.get(&current_kmer).map(|v| v.as_slice())).unwrap_or(&[])
                 };
 
@@ -3568,6 +3614,8 @@ pub fn run(args: BlastnArgs) -> Result<()> {
         });
 
     bar.finish();
+    let scan_time = scan_start.elapsed();
+    eprintln!("Scanning completed in {:.3}s", scan_time.as_secs_f64());
     if args.verbose {
         eprintln!("[INFO] Parallel processing complete, sending completion signal...");
     }

@@ -10,6 +10,9 @@ import os
 PLOT_DIR = "./plots"
 os.makedirs(PLOT_DIR, exist_ok=True)
 
+# === Color Settings (Seaborn Deep Palette) ===
+CUSTOM_PALETTE = {"LOSAT": "#dd8452", "BLAST+": "#4c72b0"}
+
 # === Column Definitions (outfmt 7 / 6) ===
 COLUMNS = ['qseqid', 'sseqid', 'pident', 'length', 'mismatch', 'gapopen', 
            'qstart', 'qend', 'sstart', 'send', 'evalue', 'bitscore']
@@ -20,10 +23,7 @@ def load_blast(filepath, tool_name):
         print(f"[Warning] File not found: {filepath}")
         return None
     try:
-        # Load data, skipping comment lines starting with '#'
         df = pd.read_csv(filepath, sep='\t', comment='#', names=COLUMNS, header=None)
-        
-        # Convert numeric columns
         numeric_cols = ['pident', 'length', 'bitscore', 'evalue']
         for col in numeric_cols:
             df[col] = pd.to_numeric(df[col], errors='coerce')
@@ -43,7 +43,6 @@ def generate_comparison_plot(config):
 
     print(f"Processing: {name} ({mode_label})")
 
-    # Load data
     df_ncbi = load_blast(ncbi_path, 'BLAST+')
     df_losat = load_blast(losat_path, 'LOSAT')
 
@@ -51,7 +50,6 @@ def generate_comparison_plot(config):
         print(f"  -> Skipped due to missing files.")
         return
 
-    # Merge data
     df_merged = pd.concat([df_ncbi, df_losat])
 
     if df_merged.empty:
@@ -63,30 +61,39 @@ def generate_comparison_plot(config):
     fig, axes = plt.subplots(2, 2, figsize=(16, 12))
     fig.suptitle(f"Comparison: {name} ({mode_label})", fontsize=16)
 
-    # 1. Distribution of Alignment Lengths (Log Scale)
+    # 1. Accumulated Alignment Length by Length (Histogram)
     try:
+        # X軸: Length, Y軸: Lengthの積算 (weights='length')
         sns.histplot(data=df_merged, x='length', hue='Tool', 
-                     element="step", stat="density", common_norm=False, 
-                     log_scale=True, ax=axes[0,0])
-        axes[0,0].set_title('Distribution of Alignment Lengths (Log Scale)')
+                     weights='length',
+                     element="step", stat="count", common_norm=False, 
+                     log_scale=True, ax=axes[0,0],
+                     palette=CUSTOM_PALETTE)
+        axes[0,0].set_title('Accumulated Length vs Alignment Length')
         axes[0,0].set_xlabel('Alignment Length (bp/aa)')
+        axes[0,0].set_ylabel('Accumulated Length (bp/aa)')
     except Exception as e:
         axes[0,0].text(0.5, 0.5, f"Error plotting hist: {e}", ha='center')
 
-    # 2. Distribution of Identity
+    # 2. Accumulated Alignment Length by Identity (Histogram)
     try:
+        # X軸: Identity, Y軸: Lengthの積算 (weights='length')
         sns.histplot(data=df_merged, x='pident', hue='Tool', 
-                     element="step", stat="density", common_norm=False, 
-                     ax=axes[0,1])
-        axes[0,1].set_title('Distribution of Percentage Identity')
+                     weights='length', 
+                     element="step", stat="count", common_norm=False, 
+                     ax=axes[0,1],
+                     palette=CUSTOM_PALETTE)
+        axes[0,1].set_title('Accumulated Length vs Identity')
         axes[0,1].set_xlabel('Identity (%)')
+        axes[0,1].set_ylabel('Accumulated Length (bp/aa)')
     except Exception as e:
         axes[0,1].text(0.5, 0.5, f"Error plotting hist: {e}", ha='center')
 
-    # 3. Alignment Length vs Identity (Scatter Plot)
+    # 3. Alignment Length vs Identity (Scatter)
     try:
         sns.scatterplot(data=df_merged, x='length', y='pident', hue='Tool', 
-                        alpha=0.5, style='Tool', ax=axes[1,0])
+                        alpha=0.5, style='Tool', ax=axes[1,0],
+                        palette=CUSTOM_PALETTE)
         axes[1,0].set_xscale('log')
         axes[1,0].set_title('Alignment Length vs Identity')
         axes[1,0].set_xlabel('Alignment Length (bp/aa)')
@@ -94,10 +101,11 @@ def generate_comparison_plot(config):
     except Exception as e:
          axes[1,0].text(0.5, 0.5, "Data error", ha='center')
 
-    # 4. Alignment Length vs Bit Score (Scatter Plot)
+    # 4. Alignment Length vs Bit Score (Scatter)
     try:
         sns.scatterplot(data=df_merged, x='length', y='bitscore', hue='Tool', 
-                        alpha=0.5, ax=axes[1,1])
+                        alpha=0.5, ax=axes[1,1],
+                        palette=CUSTOM_PALETTE)
         axes[1,1].set_xscale('log')
         axes[1,1].set_yscale('log')
         axes[1,1].set_title('Alignment Length vs Bit Score')
@@ -110,11 +118,11 @@ def generate_comparison_plot(config):
     output_filename = os.path.join(PLOT_DIR, f"compare_{name}_{mode_label}.png")
     plt.tight_layout()
     plt.savefig(output_filename)
-    plt.close() # Free memory
+    plt.close()
     print(f"  -> Saved to {output_filename}")
 
 
-# === Comparison List (Corresponds to the bash script) ===
+# === Comparison List ===
 comparisons = [
     # --- TBLASTX ---
     {
@@ -236,5 +244,3 @@ def main():
 
 if __name__ == "__main__":
     main()
-    
-    

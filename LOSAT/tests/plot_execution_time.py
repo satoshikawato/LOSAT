@@ -12,6 +12,10 @@ LOG_DIR_LOSAT = "./losat_out"
 LOG_DIR_BLAST = "./blast_out"
 OUTPUT_IMAGE = "./plots/execution_time_comparison_all.png"
 
+# === Color Settings (Seaborn Deep Palette) ===
+# Explicitly define colors to match other plots
+CUSTOM_PALETTE = {"LOSAT": "#dd8452", "BLAST+": "#4c72b0"}
+
 # === Comparison List (Full Version) ===
 comparisons = [
     # --- TBLASTX ---
@@ -114,7 +118,7 @@ comparisons = [
 def parse_time(filepath):
     """Extract execution time (in seconds) from a log file."""
     if not os.path.exists(filepath):
-        # Return None to handle missing files later (instead of silent skip)
+        # Return None to handle missing files later
         return None
     
     try:
@@ -179,15 +183,15 @@ def main():
     # === Create Plots ===
     sns.set(style="whitegrid")
     
-    # Graph settings: Separate columns by Mode (Megablast, BLASTN, TBLASTX)
-    # sharex=False allows independent time scales for each mode
+    # Graph settings
     g = sns.catplot(
         data=df, kind="bar",
         y="Task", x="Time (s)", hue="Tool", col="Mode",
-        height=8, aspect=0.8,  # Taller aspect ratio for better readability
+        height=8, aspect=0.8,
         sharex=False, sharey=False,
-        palette="muted", errorbar=None,
-        col_wrap=3 # Arrange horizontally
+        palette=CUSTOM_PALETTE, # Apply the custom palette
+        errorbar=None,
+        col_wrap=3
     )
     
     g.despine(left=True)
@@ -207,7 +211,7 @@ def main():
         summary['Diff (s)'] = (summary['LOSAT'] - summary['BLAST+']).round(2)
         print(summary)
     except Exception as e:
-        print("Could not generate summary table (possibly duplicate entries?):", e)
+        print("Could not generate summary table:", e)
 
 if __name__ == "__main__":
     main()

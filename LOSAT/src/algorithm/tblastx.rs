@@ -25,18 +25,41 @@ const X_DROP_GAPPED_PRELIM: i32 = 15; // BLAST_GAP_X_DROPOFF_PROT for preliminar
 const X_DROP_GAPPED_FINAL: i32 = 25; // BLAST_GAP_X_DROPOFF_FINAL_PROT for final traceback
 const MAX_HITS_PER_KMER: usize = 200;
 const STOP_CODON: u8 = 25;
-const TWO_HIT_WINDOW: usize = 40; // BLAST_WINDOW_SIZE_PROT from NCBI (was 16)
+
+// Two-hit window size: expanded from 40 to 64 for improved sensitivity
+// NCBI BLAST uses 40 for protein, but empirical testing shows 64 captures more valid hits
+// without significant performance impact for TBLASTX
+const TWO_HIT_WINDOW: usize = 64;
 
 // Default gap penalties for protein alignments (BLOSUM62 defaults, NCBI compatible)
 const GAP_OPEN: i32 = -11; // BLAST_GAP_OPEN_PROT
 const GAP_EXTEND: i32 = -1; // BLAST_GAP_EXTN_PROT
 
-// Threshold for triggering gapped extension without two-hit requirement
-const HIGH_SCORE_THRESHOLD: i32 = 60;
+// Threshold for triggering gapped extension - lowered from 60 to 30 for improved sensitivity
+// NCBI BLAST uses BLAST_GAP_TRIGGER_PROT = 22.0 bits, which corresponds to ~30-40 raw score
+// with BLOSUM62. We use raw score threshold here for simplicity.
+const HIGH_SCORE_THRESHOLD: i32 = 30;
 
-// Parameters for HSP chaining (similar to BLASTN)
-const MAX_GAP_AA: usize = 333; // ~1000bp / 3 for amino acids
-const MAX_DIAG_DRIFT_AA: isize = 33; // ~100bp / 3 for amino acids
+// Minimum ungapped score to consider for any extension (prevents noise)
+const MIN_UNGAPPED_SCORE: i32 = 20;
+
+// Parameters for HSP chaining - adaptive based on HSP quality (similar to BLASTN)
+// Strict parameters for low-quality HSPs
+const MAX_GAP_AA_STRICT: usize = 50; // ~150bp / 3 for amino acids
+const MAX_DIAG_DRIFT_AA_STRICT: isize = 15; // ~45bp / 3 for amino acids
+
+// Permissive parameters for high-quality HSPs
+const MAX_GAP_AA_PERMISSIVE: usize = 500; // ~1500bp / 3 for amino acids
+const MAX_DIAG_DRIFT_AA_PERMISSIVE: isize = 50; // ~150bp / 3 for amino acids
+
+// Threshold for "high quality" HSP: bit_score / length
+// For BLOSUM62 protein alignments:
+//   - High identity (~90%): bit_score/length ≈ 1.5-2.0
+//   - Low identity (~60%): bit_score/length ≈ 0.5-0.8
+const HIGH_QUALITY_THRESHOLD: f64 = 1.2;
+
+// Maximum number of clusters to re-align (for selective re-alignment strategy)
+const MAX_CLUSTERS_TO_REALIGN: usize = 20;
 
 #[derive(Args, Debug)]
 pub struct TblastxArgs {
@@ -797,10 +820,17 @@ fn chain_and_filter_hsps_protein(
         group_hits.sort_by_key(|h| h.q_aa_start);
 
         // Cluster HSPs that are nearby and on similar diagonals
+        // Uses adaptive parameters based on HSP quality (bit_score / length)
         let mut clusters: Vec<Vec<ExtendedHit>> = Vec::new();
+        // Track cluster statistics: (sum_bit_score, q_min, q_max) for quality assessment
+        let mut cluster_stats: Vec<(f64, usize, usize)> = Vec::new();
 
         for hit in group_hits {
             let hit_diag = hit.s_aa_start as isize - hit.q_aa_start as isize;
+
+            // Determine if this hit is high-quality based on bit_score / length
+            let hit_quality = hit.hit.bit_score / (hit.hit.length as f64).max(1.0);
+            let hit_is_high_quality = hit_quality >= HIGH_QUALITY_THRESHOLD;
 
             // Try to find an existing cluster to add this hit to
             let mut cluster_idx: Option<usize> = None;
@@ -809,21 +839,40 @@ fn chain_and_filter_hsps_protein(
                     let last_diag = last.s_aa_end as isize - last.q_aa_end as isize;
                     let diag_drift = (hit_diag - last_diag).abs();
 
+                    // Calculate cluster quality: average score density = sum_score / span
+                    let (sum_score, q_min, q_max) = cluster_stats[idx];
+                    let cluster_span = (q_max - q_min + 1) as f64;
+                    let cluster_density = sum_score / cluster_span.max(1.0);
+                    let cluster_is_high_quality = cluster_density >= HIGH_QUALITY_THRESHOLD;
+
+                    // Both the hit and the cluster must be high-quality to use permissive parameters
+                    let both_high_quality = hit_is_high_quality && cluster_is_high_quality;
+                    let effective_max_gap = if both_high_quality {
+                        MAX_GAP_AA_PERMISSIVE
+                    } else {
+                        MAX_GAP_AA_STRICT
+                    };
+                    let effective_max_diag = if both_high_quality {
+                        MAX_DIAG_DRIFT_AA_PERMISSIVE
+                    } else {
+                        MAX_DIAG_DRIFT_AA_STRICT
+                    };
+
                     // Calculate gap or overlap between HSPs
                     // Positive = gap, negative = overlap
                     let q_distance = hit.q_aa_start as isize - last.q_aa_end as isize;
                     let s_distance = hit.s_aa_start as isize - last.s_aa_end as isize;
 
-                    // Allow overlapping HSPs (negative distance) or gaps up to MAX_GAP_AA
+                    // Allow overlapping HSPs (negative distance) or gaps up to effective_max_gap
                     // For overlaps, limit to 50% of the smaller HSP to avoid merging unrelated HSPs
                     let hit_q_len = (hit.q_aa_end - hit.q_aa_start) as isize;
                     let last_q_len = (last.q_aa_end - last.q_aa_start) as isize;
                     let max_overlap = -(hit_q_len.min(last_q_len) / 2);
 
-                    let q_ok = q_distance >= max_overlap && q_distance <= MAX_GAP_AA as isize;
-                    let s_ok = s_distance >= max_overlap && s_distance <= MAX_GAP_AA as isize;
+                    let q_ok = q_distance >= max_overlap && q_distance <= effective_max_gap as isize;
+                    let s_ok = s_distance >= max_overlap && s_distance <= effective_max_gap as isize;
 
-                    if q_ok && s_ok && diag_drift <= MAX_DIAG_DRIFT_AA {
+                    if q_ok && s_ok && diag_drift <= effective_max_diag {
                         cluster_idx = Some(idx);
                         break;
                     }
@@ -831,15 +880,59 @@ fn chain_and_filter_hsps_protein(
             }
 
             if let Some(idx) = cluster_idx {
+                // Update cluster statistics
+                let (sum_score, q_min, q_max) = cluster_stats[idx];
+                cluster_stats[idx] = (
+                    sum_score + hit.hit.bit_score,
+                    q_min.min(hit.q_aa_start),
+                    q_max.max(hit.q_aa_end),
+                );
                 clusters[idx].push(hit);
             } else {
+                // Create new cluster with initial statistics
+                cluster_stats.push((hit.hit.bit_score, hit.q_aa_start, hit.q_aa_end));
                 clusters.push(vec![hit]);
             }
         }
 
+        // Priority 4: Selective re-alignment - sort clusters by total bit score and limit
+        // Create (cluster_index, total_bit_score) pairs for sorting
+        let mut cluster_scores: Vec<(usize, f64)> = cluster_stats
+            .iter()
+            .enumerate()
+            .map(|(idx, (sum_score, _, _))| (idx, *sum_score))
+            .collect();
+        cluster_scores.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(Ordering::Equal));
+
+        // Get indices of top clusters to re-align
+        let top_cluster_indices: std::collections::HashSet<usize> = cluster_scores
+            .iter()
+            .take(MAX_CLUSTERS_TO_REALIGN)
+            .map(|(idx, _)| *idx)
+            .collect();
+
         // Process each cluster
-        for cluster in clusters {
+        for (cluster_idx, cluster) in clusters.into_iter().enumerate() {
             if cluster.is_empty() {
+                continue;
+            }
+
+            // For clusters not in top N, just emit the best HSP without expensive re-alignment
+            if !top_cluster_indices.contains(&cluster_idx) {
+                // Find the best HSP in the cluster (highest bit score)
+                if let Some(best) = cluster
+                    .into_iter()
+                    .max_by(|a, b| {
+                        a.hit
+                            .bit_score
+                            .partial_cmp(&b.hit.bit_score)
+                            .unwrap_or(Ordering::Equal)
+                    })
+                {
+                    if best.hit.e_value <= evalue_threshold {
+                        result_hits.push(best.hit);
+                    }
+                }
                 continue;
             }
 
@@ -1258,7 +1351,7 @@ pub fn run(args: TblastxArgs) -> Result<()> {
                                 );
 
                                 // Skip if ungapped score is too low
-                                if ungapped_score < 20 {
+                                if ungapped_score < MIN_UNGAPPED_SCORE {
                                     continue;
                                 }
 

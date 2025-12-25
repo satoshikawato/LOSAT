@@ -2808,10 +2808,17 @@ fn chain_and_filter_hsps(
     };
 
     // Final pass: remove redundant overlapping hits using spatial binning for O(n) instead of O(n²)
-    // IMPORTANT: For self-comparison, hits on different diagonals represent different biological
-    // alignments (e.g., repeats, duplications) and should NOT be filtered out even if they
-    // overlap on query coordinates. We only filter hits that overlap on BOTH query AND subject
-    // AND are on similar diagonals (same alignment region).
+    //
+    // BLAST-compatible mode (chain_enabled = false):
+    //   Uses NCBI BLAST's s_DominateTest algorithm which:
+    //   - Compares HSPs based on query coordinates only (not subject)
+    //   - Uses a score/length tradeoff formula to determine dominance
+    //   - Does NOT use diagonal gating (all HSPs are compared)
+    //   Reference: hspfilter_culling.c s_DominateTest()
+    //
+    // Chaining mode (chain_enabled = true):
+    //   Uses diagonal gating to preserve hits on different diagonals
+    //   (representing different biological alignments like repeats)
     let filter_start = std::time::Instant::now();
     let result_hits_count = result_hits.len();
 
@@ -2824,7 +2831,7 @@ fn chain_and_filter_hsps(
     // Use spatial binning to avoid O(n²) comparisons
     // Bin size of 1000bp - hits can only overlap if they share a bin
     const FILTER_BIN_SIZE: usize = 1000;
-    const MAX_DIAG_DIFF_FOR_SAME_ALIGNMENT: isize = 100; // Hits must be on similar diagonals to be considered redundant
+    const MAX_DIAG_DIFF_FOR_SAME_ALIGNMENT: isize = 100; // Only used when chaining is enabled
     let mut q_bins: FxHashMap<usize, Vec<usize>> = FxHashMap::default();
     let mut final_hits: Vec<Hit> = Vec::new();
 
@@ -2833,7 +2840,7 @@ fn chain_and_filter_hsps(
         let q_bin_start = hit.q_start / FILTER_BIN_SIZE;
         let q_bin_end = hit.q_end / FILTER_BIN_SIZE;
 
-        // Calculate diagonal for this hit (s_start - q_start)
+        // Calculate diagonal for this hit (s_start - q_start) - only used when chaining enabled
         let hit_diag = hit.s_start as isize - hit.q_start as isize;
 
         // Only check hits in overlapping bins
@@ -2843,49 +2850,128 @@ fn chain_and_filter_hsps(
                 for &kept_idx in kept_indices {
                     let kept = &final_hits[kept_idx];
 
-                    // First check if hits are on similar diagonals
-                    // Hits on different diagonals represent different biological alignments
-                    let kept_diag = kept.s_start as isize - kept.q_start as isize;
-                    let diag_diff = (hit_diag - kept_diag).abs();
-                    if diag_diff > MAX_DIAG_DIFF_FOR_SAME_ALIGNMENT {
-                        continue; // Different diagonal = different alignment, don't filter
-                    }
+                    if chain_enabled {
+                        // Chaining mode: use diagonal gating to preserve different alignments
+                        // Hits on different diagonals represent different biological alignments
+                        let kept_diag = kept.s_start as isize - kept.q_start as isize;
+                        let diag_diff = (hit_diag - kept_diag).abs();
+                        if diag_diff > MAX_DIAG_DIFF_FOR_SAME_ALIGNMENT {
+                            continue; // Different diagonal = different alignment, don't filter
+                        }
 
-                    // Check q overlap
-                    let q_overlap_start = hit.q_start.max(kept.q_start);
-                    let q_overlap_end = hit.q_end.min(kept.q_end);
-                    let q_overlap = if q_overlap_end > q_overlap_start {
-                        q_overlap_end - q_overlap_start
-                    } else {
-                        0
-                    };
-                    let q_hit_len = hit.q_end - hit.q_start;
-                    let q_overlap_frac = if q_hit_len > 0 {
-                        q_overlap as f64 / q_hit_len as f64
-                    } else {
-                        0.0
-                    };
+                        // Check q overlap (fixed off-by-one: use >= for inclusive ranges)
+                        let q_overlap_start = hit.q_start.max(kept.q_start);
+                        let q_overlap_end = hit.q_end.min(kept.q_end);
+                        let q_overlap = if q_overlap_end >= q_overlap_start {
+                            q_overlap_end - q_overlap_start + 1
+                        } else {
+                            0
+                        };
+                        let q_hit_len = hit.q_end - hit.q_start + 1;
+                        let q_overlap_frac = if q_hit_len > 0 {
+                            q_overlap as f64 / q_hit_len as f64
+                        } else {
+                            0.0
+                        };
 
-                    if q_overlap_frac < 0.5 {
-                        continue; // No significant q overlap, skip s check
-                    }
+                        if q_overlap_frac < 0.5 {
+                            continue; // No significant q overlap, skip s check
+                        }
 
-                    // Check s overlap
-                    let s_overlap_start = hit.s_start.max(kept.s_start);
-                    let s_overlap_end = hit.s_end.min(kept.s_end);
-                    let s_overlap = if s_overlap_end > s_overlap_start {
-                        s_overlap_end - s_overlap_start
-                    } else {
-                        0
-                    };
-                    let s_hit_len = hit.s_end - hit.s_start;
-                    let s_overlap_frac = if s_hit_len > 0 {
-                        s_overlap as f64 / s_hit_len as f64
-                    } else {
-                        0.0
-                    };
+                        // Check s overlap (fixed off-by-one)
+                        let s_overlap_start = hit.s_start.max(kept.s_start);
+                        let s_overlap_end = hit.s_end.min(kept.s_end);
+                        let s_overlap = if s_overlap_end >= s_overlap_start {
+                            s_overlap_end - s_overlap_start + 1
+                        } else {
+                            0
+                        };
+                        let s_hit_len = hit.s_end - hit.s_start + 1;
+                        let s_overlap_frac = if s_hit_len > 0 {
+                            s_overlap as f64 / s_hit_len as f64
+                        } else {
+                            0.0
+                        };
 
-                    if s_overlap_frac >= 0.5 {
+                        if s_overlap_frac >= 0.5 {
+                            dominated = true;
+                            break;
+                        }
+                    } else {
+                        // BLAST-compatible mode: diagonal-aware overlap filtering
+                        // 
+                        // NCBI BLAST's culling considers both query AND subject coordinates.
+                        // HSPs on different diagonals represent different biological alignments
+                        // (e.g., repeats, duplications) and should NOT be filtered even if
+                        // they overlap in query space.
+                        //
+                        // Key insight: For self-comparison, the full sequence match (diagonal 0)
+                        // should NOT dominate HSPs on other diagonals representing repeats.
+                        //
+                        // We use diagonal difference to determine if HSPs are in the same
+                        // alignment region. HSPs with large diagonal differences are preserved.
+
+                        // Calculate diagonals (s_start - q_start)
+                        let kept_diag = kept.s_start as isize - kept.q_start as isize;
+                        let diag_diff = (hit_diag - kept_diag).abs();
+
+                        // For BLAST-compatible mode, use a larger diagonal tolerance
+                        // This allows filtering of truly redundant HSPs while preserving
+                        // HSPs on different diagonals (repeats, etc.)
+                        // 
+                        // The key difference from chaining mode:
+                        // - Chaining mode uses MAX_DIAG_DIFF_FOR_SAME_ALIGNMENT = 100
+                        // - BLAST-compatible mode uses a proportional threshold based on
+                        //   the HSP length to handle both short and long alignments
+                        let hit_len = (hit.q_end - hit.q_start + 1).max(hit.s_end - hit.s_start + 1);
+                        let diag_tolerance = (hit_len / 10).max(50) as isize; // At least 50bp or 10% of length
+
+                        if diag_diff > diag_tolerance {
+                            continue; // Different diagonal = different alignment, don't filter
+                        }
+
+                        // Check query overlap (fixed off-by-one: use >= for inclusive ranges)
+                        let q_overlap_start = hit.q_start.max(kept.q_start);
+                        let q_overlap_end = hit.q_end.min(kept.q_end);
+                        let q_overlap = if q_overlap_end >= q_overlap_start {
+                            q_overlap_end - q_overlap_start + 1
+                        } else {
+                            0
+                        };
+                        let q_hit_len = hit.q_end - hit.q_start + 1;
+                        let q_overlap_frac = if q_hit_len > 0 {
+                            q_overlap as f64 / q_hit_len as f64
+                        } else {
+                            0.0
+                        };
+
+                        // Need >50% query overlap to be considered redundant
+                        if q_overlap_frac < 0.5 {
+                            continue;
+                        }
+
+                        // Check subject overlap as well
+                        let s_overlap_start = hit.s_start.max(kept.s_start);
+                        let s_overlap_end = hit.s_end.min(kept.s_end);
+                        let s_overlap = if s_overlap_end >= s_overlap_start {
+                            s_overlap_end - s_overlap_start + 1
+                        } else {
+                            0
+                        };
+                        let s_hit_len = hit.s_end - hit.s_start + 1;
+                        let s_overlap_frac = if s_hit_len > 0 {
+                            s_overlap as f64 / s_hit_len as f64
+                        } else {
+                            0.0
+                        };
+
+                        // Need >50% subject overlap as well
+                        if s_overlap_frac < 0.5 {
+                            continue;
+                        }
+
+                        // Both query and subject have >50% overlap AND similar diagonal
+                        // This is a redundant HSP - filter it out
                         dominated = true;
                         break;
                     }

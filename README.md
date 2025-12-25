@@ -10,6 +10,12 @@ As there seems to be no WebAssembly-comaptible builds for BLAST, I reimplemented
 - BLASTN
 - TBLASTX
 
+## Performance
+### Hit distribution
+![overall_trend_comparison.png](./LOSAT/tests/plots/overall_trend_comparison.png)
+### Execution time
+![execution_time_comparison_all.png](./LOSAT/tests/plots/execution_time_comparison_all.png)
+
 ## References
 [NCBI BLAST](https://blast.ncbi.nlm.nih.gov/Blast.cgi)
 

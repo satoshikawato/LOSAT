@@ -1,5 +1,6 @@
 pub mod algorithm;
 pub mod common;
+pub mod sequence;
 pub mod utils;
 
 pub mod align;

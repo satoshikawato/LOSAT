@@ -11,6 +11,7 @@ use std::sync::mpsc::channel;
 
 use crate::common::{write_output, Hit};
 use crate::config::NuclScoringSpec;
+use crate::sequence::packed_nucleotide::PackedSequence;
 use crate::stats::karlin::{bit_score as calc_bit_score, evalue as calc_evalue};
 use crate::stats::search_space::SearchSpace;
 use crate::stats::{lookup_nucl_params, KarlinParams};
@@ -3077,10 +3078,18 @@ pub fn run(args: BlastnArgs) -> Result<()> {
             let mut last_seed: FxHashMap<(u32, isize), usize> = FxHashMap::default();
             let safe_k = effective_word_size.min(31);
 
-            for s_pos in 0..=(s_len - safe_k) {
-                dbg_total_s_positions += 1;
+            // PHASE 1 OPTIMIZATION: Pack the subject sequence once for efficient k-mer extraction
+            // This uses 2-bit encoding (A=00, C=01, G=10, T=11) following NCBI BLAST's approach
+            // The packed format enables O(1) sliding window k-mer extraction instead of O(k) per position
+            let packed_subject = PackedSequence::new(s_seq);
 
-                if let Some(kmer) = encode_kmer(s_seq, s_pos, safe_k) {
+            // Use packed sequence iterator if available, otherwise fall back to original encode_kmer
+            if let Some(ref packed) = packed_subject {
+                // Use efficient k-mer iterator with sliding window optimization
+                // The iterator already skips k-mers containing ambiguous bases
+                for (s_pos, kmer) in packed.iter_kmers(safe_k) {
+                    dbg_total_s_positions += 1;
+
                     // Use direct lookup (O(1)) or hash lookup based on word size
                     let matches_slice: &[(u32, u32)] = if use_direct_lookup {
                         let idx = kmer as usize;
@@ -3266,6 +3275,155 @@ pub fn run(args: BlastnArgs) -> Result<()> {
                                 });
                             }
                         }
+                }
+            } else {
+                // Fallback: sequence couldn't be packed (e.g., contains only ambiguous bases)
+                // Use the original encode_kmer approach
+                for s_pos in 0..=(s_len - safe_k) {
+                    dbg_total_s_positions += 1;
+
+                    if let Some(kmer) = encode_kmer(s_seq, s_pos, safe_k) {
+                        // Use direct lookup (O(1)) or hash lookup based on word size
+                        let matches_slice: &[(u32, u32)] = if use_direct_lookup {
+                            let idx = kmer as usize;
+                            direct_lookup.as_ref().map(|dl| dl.get(idx).map(|v| v.as_slice()).unwrap_or(&[])).unwrap_or(&[])
+                        } else {
+                            hash_lookup.as_ref().and_then(|hl| hl.get(&kmer).map(|v| v.as_slice())).unwrap_or(&[])
+                        };
+
+                        for &(q_idx, q_pos) in matches_slice {
+                            dbg_seeds_found += 1;
+                            let diag = s_pos as isize - q_pos as isize;
+
+                            // Check if this seed is in the debug window
+                            let in_window = if let Some((q_start, q_end, s_start, s_end)) = debug_window {
+                                (q_pos as usize) >= q_start && (q_pos as usize) <= q_end &&
+                                s_pos >= s_start && s_pos <= s_end
+                            } else {
+                                false
+                            };
+
+                            if in_window {
+                                dbg_window_seeds += 1;
+                            }
+
+                            // Check if this region was already extended
+                            if !disable_mask {
+                                if let Some(&last_s_end) = mask.get(&(q_idx, diag)) {
+                                    if s_pos < last_s_end {
+                                        dbg_mask_skipped += 1;
+                                        continue;
+                                    }
+                                }
+                            }
+
+                            // Two-hit filter
+                            let trigger_extension =
+                                if let Some(&prev_s_pos) = last_seed.get(&(q_idx, diag)) {
+                                    s_pos.saturating_sub(prev_s_pos) <= TWO_HIT_WINDOW
+                                } else {
+                                    false
+                                };
+
+                            last_seed.insert((q_idx, diag), s_pos);
+
+                            if !trigger_extension {
+                                dbg_two_hit_failed += 1;
+                                continue;
+                            }
+
+                            let q_record = &queries[q_idx as usize];
+
+                            let (qs, qe, ss, _se, ungapped_score) = extend_hit_ungapped(
+                                q_record.seq(),
+                                s_seq,
+                                q_pos as usize,
+                                s_pos,
+                                reward,
+                                penalty,
+                            );
+
+                            if ungapped_score < min_ungapped_score {
+                                dbg_ungapped_low += 1;
+                                continue;
+                            }
+
+                            dbg_gapped_attempted += 1;
+
+                            let (
+                                final_qs,
+                                final_qe,
+                                final_ss,
+                                final_se,
+                                score,
+                                matches,
+                                mismatches,
+                                gaps,
+                                gap_letters,
+                                _dp_cells,
+                            ) = extend_gapped_heuristic(
+                                q_record.seq(),
+                                s_seq,
+                                qs,
+                                ss,
+                                qe - qs,
+                                reward,
+                                penalty,
+                                gap_open,
+                                gap_extend,
+                                X_DROP_GAPPED_FINAL,
+                                use_dp,
+                            );
+
+                            if !disable_mask {
+                                mask.insert((q_idx, diag), final_se);
+                            }
+
+                            let (bit_score, eval) = calculate_evalue(
+                                score,
+                                q_record.seq().len(),
+                                db_len_total,
+                                db_num_seqs,
+                                &params,
+                            );
+
+                            if eval <= args.evalue {
+                                let aln_len = matches + mismatches + gap_letters;
+                                let identity = if aln_len > 0 {
+                                    ((matches as f64 / aln_len as f64) * 100.0).min(100.0)
+                                } else {
+                                    0.0
+                                };
+
+                                let q_id = query_ids[q_idx as usize].clone();
+                                let pair_key = (q_id.clone(), s_id.clone());
+                                if !seen_pairs.contains(&pair_key) {
+                                    seen_pairs.insert(pair_key);
+                                    local_sequences.push((
+                                        q_id.clone(),
+                                        s_id.clone(),
+                                        q_record.seq().to_vec(),
+                                        s_seq.to_vec(),
+                                    ));
+                                }
+
+                                local_hits.push(Hit {
+                                    query_id: q_id,
+                                    subject_id: s_id.clone(),
+                                    identity,
+                                    length: aln_len,
+                                    mismatch: mismatches,
+                                    gapopen: gaps,
+                                    q_start: final_qs + 1,
+                                    q_end: final_qe,
+                                    s_start: final_ss + 1,
+                                    s_end: final_se,
+                                    e_value: eval,
+                                    bit_score,
+                                });
+                            }
+                        }
+                    }
                 }
             }
             // Print debug summary for this subject

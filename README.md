@@ -1,18 +1,25 @@
 # LOSAT 🚀
 
-**LOSAT** (LOcal Sequence Alignment Tool) aim to deliver a lightweight, high-performance reimplementation of the NCBI BLAST algorithm, written in Rust and optimized for WebAssembly (Wasm) environments.
+![Status](https://img.shields.io/badge/Status-Alpha-orange)
+![License](https://img.shields.io/github/license/satoshikawato/LOSAT)
+![Language](https://img.shields.io/badge/Language-Rust-red)
+![Platform](https://img.shields.io/badge/Platform-WebAssembly%20%7C%20CLI-blue)
 
-While originally designed to power web-based bioinformatics tools, LOSAT functions as both a standalone command-line interface (CLI) and an embeddable library. It aims to democratize sequence alignment by enabling it to run anywhere—from high-performance servers to edge devices and web browsers—without external dependencies.
+> 🚧 **Work in Progress:** This project is currently in the **Alpha** stage. Features, APIs, and performance characteristics are subject to change.
+
+**LOSAT** (LOcal Sequence Alignment Tool) aims to deliver a lightweight, high-performance reimplementation of the NCBI BLAST algorithm, written in **Rust** and optimized for **WebAssembly (Wasm)** environments.
+
+While originally designed to power web-based bioinformatics tools, LOSAT functions as both a standalone command-line interface (CLI) and an embeddable library. It aims to democratize sequence alignment by enabling it to run anywhere without external dependencies.
 
 ## Key Features
 
-### 🔒 Privacy & Security
+### 🔒 Privacy & Security (Local-First)
 - **Client-Side Processing:** All computations happen locally on the user's machine.
 - **Data Sovereignty:** Sensitive genomic data never needs to be uploaded to third-party servers, ensuring compliance with strict data privacy regulations.
 
 ### ⚡ Zero-Friction Infrastructure
 - **Serverless Architecture:** Removes the need to maintain expensive backend infrastructure for alignment tasks.
-- **Portability:** Compiled to WebAssembly, LOSAT runs natively in any modern web browser, regardless of the underlying operating system.
+- **Portability:** Compiled to **WebAssembly**, LOSAT runs natively in any modern web browser, regardless of the underlying operating system.
 
 ### 🚀 Seamless Integration
 - **Low Latency:** Eliminates the network overhead (uploading/downloading large FASTA files) associated with traditional server-side BLAST.
@@ -69,7 +76,7 @@ LOSAT is optimized for "local" alignments (e.g., comparing two viral genomes or 
 
 ## References
 - [NCBI BLAST](https://blast.ncbi.nlm.nih.gov/Blast.cgi)
-- [LOSAT](https://en.wikipedia.org/wiki/MGM-166_LOSAT)
+- [LOSAT (MGM-166)](https://en.wikipedia.org/wiki/MGM-166_LOSAT)
 
 ## License
 [MIT License](LICENSE)

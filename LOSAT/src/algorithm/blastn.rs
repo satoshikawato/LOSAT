@@ -203,6 +203,7 @@ pub struct PvDirectLookup {
     /// Presence vector - bit i is set if lookup[i] is non-empty
     pv: Vec<PvArrayType>,
     /// Word size used for this lookup table
+    #[allow(dead_code)]
     word_size: usize,
 }
 
@@ -233,6 +234,24 @@ impl PvDirectLookup {
             &[]
         }
     }
+}
+
+// ============================================================================
+// Phase 4: Key packing optimization for scanning HashMaps
+// ============================================================================
+// The scanning loop uses HashMaps with (q_idx, diag) tuple keys for `mask` and `last_seed`.
+// Tuple keys have overhead: 12 bytes for (u32, isize) + hashing overhead.
+// By packing into a single u64, we reduce key size and improve hashing performance.
+//
+// Packing scheme:
+// - High 32 bits: q_idx (query index)
+// - Low 32 bits: diag (diagonal, cast to u32 with wrapping)
+// This allows O(1) pack/unpack and faster hashing.
+
+/// Pack (q_idx, diag) into a single u64 key for faster HashMap operations
+#[inline(always)]
+fn pack_diag_key(q_idx: u32, diag: isize) -> u64 {
+    ((q_idx as u64) << 32) | ((diag as i32) as u32 as u64)
 }
 
 /// Check if a k-mer starting at position overlaps with any masked interval
@@ -3113,7 +3132,8 @@ pub fn run(args: BlastnArgs) -> Result<()> {
     );
 
     // Build the appropriate lookup table
-    // Phase 2: Use PvDirectLookup with Presence-Vector for fast filtering
+    // Phase 2: Use PvDirectLookup with Presence-Vector for fast filtering (word_size <= 13)
+    // For word_size > 13, use hash-based lookup
     let pv_direct_lookup: Option<PvDirectLookup> = if use_direct_lookup {
         Some(build_pv_direct_lookup(&queries, effective_word_size, &query_masks))
     } else {
@@ -3304,9 +3324,11 @@ pub fn run(args: BlastnArgs) -> Result<()> {
             let mut dbg_window_seeds = 0usize;
 
             // Mask to track already-extended regions on each diagonal
-            let mut mask: FxHashMap<(u32, isize), usize> = FxHashMap::default();
+            // Phase 4: Use packed u64 key instead of (u32, isize) tuple for faster hashing
+            let mut mask: FxHashMap<u64, usize> = FxHashMap::default();
             // Two-hit tracking: stores the last seed position on each diagonal for each query
-            let mut last_seed: FxHashMap<(u32, isize), usize> = FxHashMap::default();
+            // Phase 4: Use packed u64 key instead of (u32, isize) tuple for faster hashing
+            let mut last_seed: FxHashMap<u64, usize> = FxHashMap::default();
             let safe_k = effective_word_size.min(31);
 
             // PERFORMANCE OPTIMIZATION: Rolling k-mer scanner with O(1) sliding window
@@ -3363,11 +3385,13 @@ pub fn run(args: BlastnArgs) -> Result<()> {
                 let kmer_start = s_pos + 1 - safe_k;
                 dbg_total_s_positions += 1;
 
-                // Phase 2: Use PV-based direct lookup (O(1) with fast PV filtering) or hash lookup
+                // Phase 2: Use PV-based direct lookup (O(1) with fast PV filtering) for word_size <= 13
+                // For word_size > 13, use hash-based lookup
                 let matches_slice: &[(u32, u32)] = if use_direct_lookup {
                     // Use PV for fast filtering before accessing the lookup table
                     pv_direct_lookup.as_ref().map(|pv_dl| pv_dl.get_hits_checked(current_kmer)).unwrap_or(&[])
                 } else {
+                    // Use hash-based lookup for larger word sizes
                     hash_lookup.as_ref().and_then(|hl| hl.get(&current_kmer).map(|v| v.as_slice())).unwrap_or(&[])
                 };
 
@@ -3388,8 +3412,10 @@ pub fn run(args: BlastnArgs) -> Result<()> {
                     }
 
                     // Check if this region was already extended (skip if mask is disabled for debugging)
+                    // Phase 4: Use packed key for faster HashMap lookup
+                    let diag_key = pack_diag_key(q_idx, diag);
                     if !disable_mask {
-                        if let Some(&last_s_end) = mask.get(&(q_idx, diag)) {
+                        if let Some(&last_s_end) = mask.get(&diag_key) {
                             if kmer_start < last_s_end {
                                 dbg_mask_skipped += 1;
                                 if in_window && debug_mode {
@@ -3403,8 +3429,9 @@ pub fn run(args: BlastnArgs) -> Result<()> {
                     // PERFORMANCE OPTIMIZATION: Apply two-hit filter BEFORE ungapped extension
                     // This is the key optimization that makes NCBI BLAST fast
                     // Most seeds don't have a nearby seed on the same diagonal, so we skip them early
+                    // Phase 4: Use packed key (diag_key computed above) for faster HashMap lookup
                     let trigger_extension =
-                        if let Some(&prev_s_pos) = last_seed.get(&(q_idx, diag)) {
+                        if let Some(&prev_s_pos) = last_seed.get(&diag_key) {
                             // Check if the current seed is within the two-hit window
                             kmer_start.saturating_sub(prev_s_pos) <= TWO_HIT_WINDOW
                         } else {
@@ -3412,7 +3439,8 @@ pub fn run(args: BlastnArgs) -> Result<()> {
                         };
 
                     // Update the last seed position for this diagonal
-                    last_seed.insert((q_idx, diag), kmer_start);
+                    // Phase 4: Use packed key for faster HashMap insert
+                    last_seed.insert(diag_key, kmer_start);
 
                     // Skip ungapped extension if two-hit requirement is not met
                     // This is the key optimization - we skip most seeds without doing any extension
@@ -3494,8 +3522,9 @@ pub fn run(args: BlastnArgs) -> Result<()> {
                     let _ = dp_cells;
 
                     // Update mask (unless disabled for debugging via BLEMIR_DEBUG_NO_MASK=1)
+                    // Phase 4: Use packed key (diag_key computed earlier) for faster HashMap insert
                     if !disable_mask {
-                        mask.insert((q_idx, diag), final_se);
+                        mask.insert(diag_key, final_se);
                     }
 
                     let (bit_score, eval) = calculate_evalue(

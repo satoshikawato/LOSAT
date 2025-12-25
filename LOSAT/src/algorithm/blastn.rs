@@ -153,6 +153,88 @@ type DirectKmerLookup = Vec<Vec<(u32, u32)>>;
 /// Maximum word size for direct address table (4^14 = 268M entries = ~6GB, too large)
 const MAX_DIRECT_LOOKUP_WORD_SIZE: usize = 13;
 
+// ============================================================================
+// Phase 2: Presence-Vector (PV) for fast k-mer filtering
+// ============================================================================
+// Following NCBI BLAST's approach from blast_lookup.h:
+// - PV_ARRAY_TYPE is u32 (32-bit unsigned integer)
+// - PV_ARRAY_BTS is 5 (bits-to-shift from lookup_index to pv_array index)
+// - Each bit indicates whether a k-mer has any hits in the lookup table
+// - This allows O(1) filtering before accessing the lookup table
+
+/// Presence-Vector array type (matches NCBI BLAST's PV_ARRAY_TYPE)
+type PvArrayType = u32;
+
+/// Bits-to-shift from lookup index to PV array index (matches NCBI BLAST's PV_ARRAY_BTS)
+const PV_ARRAY_BTS: usize = 5;
+
+/// Mask for extracting bit position within a PV array element
+const PV_ARRAY_MASK: usize = (1 << PV_ARRAY_BTS) - 1; // 31
+
+/// Test if a k-mer is present in the presence vector
+/// Equivalent to NCBI BLAST's PV_TEST macro
+#[inline(always)]
+fn pv_test(pv: &[PvArrayType], index: usize) -> bool {
+    let array_idx = index >> PV_ARRAY_BTS;
+    let bit_pos = index & PV_ARRAY_MASK;
+    if array_idx < pv.len() {
+        (pv[array_idx] & (1u32 << bit_pos)) != 0
+    } else {
+        false
+    }
+}
+
+/// Set a bit in the presence vector
+/// Equivalent to NCBI BLAST's PV_SET macro
+#[inline(always)]
+fn pv_set(pv: &mut [PvArrayType], index: usize) {
+    let array_idx = index >> PV_ARRAY_BTS;
+    let bit_pos = index & PV_ARRAY_MASK;
+    if array_idx < pv.len() {
+        pv[array_idx] |= 1u32 << bit_pos;
+    }
+}
+
+/// Optimized lookup table with Presence-Vector for fast filtering
+/// Combines DirectKmerLookup with a bit vector for O(1) presence checking
+pub struct PvDirectLookup {
+    /// The actual lookup table storing (query_idx, position) pairs
+    lookup: DirectKmerLookup,
+    /// Presence vector - bit i is set if lookup[i] is non-empty
+    pv: Vec<PvArrayType>,
+    /// Word size used for this lookup table
+    word_size: usize,
+}
+
+impl PvDirectLookup {
+    /// Check if a k-mer has any hits using the presence vector (O(1))
+    #[inline(always)]
+    pub fn has_hits(&self, kmer: u64) -> bool {
+        pv_test(&self.pv, kmer as usize)
+    }
+
+    /// Get hits for a k-mer (only call after has_hits returns true)
+    #[inline(always)]
+    pub fn get_hits(&self, kmer: u64) -> &[(u32, u32)] {
+        let idx = kmer as usize;
+        if idx < self.lookup.len() {
+            &self.lookup[idx]
+        } else {
+            &[]
+        }
+    }
+
+    /// Get hits for a k-mer with PV check (combined operation)
+    #[inline(always)]
+    pub fn get_hits_checked(&self, kmer: u64) -> &[(u32, u32)] {
+        if self.has_hits(kmer) {
+            self.get_hits(kmer)
+        } else {
+            &[]
+        }
+    }
+}
+
 /// Check if a k-mer starting at position overlaps with any masked interval
 #[inline]
 fn is_kmer_masked(intervals: &[MaskedInterval], start: usize, kmer_len: usize) -> bool {
@@ -160,6 +242,155 @@ fn is_kmer_masked(intervals: &[MaskedInterval], start: usize, kmer_len: usize) -
     intervals.iter().any(|interval| {
         start < interval.end && end > interval.start
     })
+}
+
+// ============================================================================
+// Phase 2: Query Packing with Rolling K-mer Extraction
+// ============================================================================
+// Uses O(1) sliding window k-mer extraction for building lookup tables
+// This is more efficient than calling encode_kmer() for each position
+
+/// Lookup table for ASCII to 2-bit encoding (0xFF = invalid/ambiguous)
+/// Used for rolling k-mer extraction
+const ENCODE_LUT: [u8; 256] = {
+    let mut lut = [0xFFu8; 256];
+    lut[b'A' as usize] = 0;
+    lut[b'a' as usize] = 0;
+    lut[b'C' as usize] = 1;
+    lut[b'c' as usize] = 1;
+    lut[b'G' as usize] = 2;
+    lut[b'g' as usize] = 2;
+    lut[b'T' as usize] = 3;
+    lut[b't' as usize] = 3;
+    lut[b'U' as usize] = 3;
+    lut[b'u' as usize] = 3;
+    lut
+};
+
+/// Build optimized lookup table with Presence-Vector using rolling k-mer extraction
+/// This combines:
+/// 1. O(1) sliding window k-mer extraction (Phase 1 optimization)
+/// 2. Presence-Vector for fast filtering (Phase 2 optimization)
+fn build_pv_direct_lookup(
+    queries: &[fasta::Record],
+    word_size: usize,
+    query_masks: &[Vec<MaskedInterval>],
+) -> PvDirectLookup {
+    let safe_word_size = word_size.min(MAX_DIRECT_LOOKUP_WORD_SIZE);
+    let table_size = 1usize << (2 * safe_word_size); // 4^word_size
+    let pv_size = (table_size + 31) / 32; // Number of u32 elements needed for PV
+    let debug_mode = std::env::var("BLEMIR_DEBUG").is_ok();
+
+    if debug_mode {
+        eprintln!(
+            "[DEBUG] build_pv_direct_lookup: word_size={}, table_size={} ({:.1}MB), pv_size={} ({:.1}KB)",
+            safe_word_size,
+            table_size,
+            (table_size * 24) as f64 / 1_000_000.0,
+            pv_size,
+            (pv_size * 4) as f64 / 1_000.0
+        );
+    }
+
+    // Pre-allocate the table and presence vector
+    let mut lookup: Vec<Vec<(u32, u32)>> = vec![Vec::new(); table_size];
+    let mut pv: Vec<PvArrayType> = vec![0; pv_size];
+
+    let mut total_positions = 0usize;
+    let mut ambiguous_skipped = 0usize;
+    let mut dust_skipped = 0usize;
+    let mut kmers_added = 0usize;
+
+    // K-mer mask for rolling window
+    let kmer_mask: u64 = (1u64 << (2 * safe_word_size)) - 1;
+
+    for (q_idx, record) in queries.iter().enumerate() {
+        let seq = record.seq();
+        if seq.len() < safe_word_size {
+            continue;
+        }
+
+        let masks = query_masks.get(q_idx).map(|v| v.as_slice()).unwrap_or(&[]);
+
+        // Rolling k-mer state
+        let mut current_kmer: u64 = 0;
+        let mut valid_bases: usize = 0;
+
+        for pos in 0..seq.len() {
+            let base = seq[pos];
+            let code = ENCODE_LUT[base as usize];
+
+            if code == 0xFF {
+                // Ambiguous base - reset the rolling window
+                valid_bases = 0;
+                current_kmer = 0;
+                ambiguous_skipped += 1;
+                continue;
+            }
+
+            // Shift in the new base
+            current_kmer = ((current_kmer << 2) | (code as u64)) & kmer_mask;
+            valid_bases += 1;
+
+            // Only process if we have a complete k-mer
+            if valid_bases < safe_word_size {
+                continue;
+            }
+
+            // Calculate the starting position of this k-mer
+            let kmer_start = pos + 1 - safe_word_size;
+            total_positions += 1;
+
+            // Skip k-mers that overlap with DUST-masked regions
+            if !masks.is_empty() && is_kmer_masked(masks, kmer_start, safe_word_size) {
+                dust_skipped += 1;
+                continue;
+            }
+
+            // Add to lookup table
+            let idx = current_kmer as usize;
+            if idx < table_size {
+                lookup[idx].push((q_idx as u32, kmer_start as u32));
+                kmers_added += 1;
+            }
+        }
+    }
+
+    // Filter over-represented k-mers and build presence vector
+    let mut filtered_count = 0usize;
+    let mut non_empty_count = 0usize;
+
+    for (idx, positions) in lookup.iter_mut().enumerate() {
+        if positions.len() > MAX_HITS_PER_KMER {
+            positions.clear();
+            filtered_count += 1;
+        } else if !positions.is_empty() {
+            // Set bit in presence vector
+            pv_set(&mut pv, idx);
+            non_empty_count += 1;
+        }
+    }
+
+    if debug_mode {
+        eprintln!(
+            "[DEBUG] build_pv_direct_lookup: total_positions={}, ambiguous_skipped={} ({:.1}%), dust_skipped={} ({:.1}%)",
+            total_positions,
+            ambiguous_skipped,
+            100.0 * ambiguous_skipped as f64 / (total_positions + ambiguous_skipped).max(1) as f64,
+            dust_skipped,
+            100.0 * dust_skipped as f64 / total_positions.max(1) as f64
+        );
+        eprintln!(
+            "[DEBUG] build_pv_direct_lookup: kmers_added={}, filtered={}, non_empty_buckets={}",
+            kmers_added, filtered_count, non_empty_count
+        );
+    }
+
+    PvDirectLookup {
+        lookup,
+        pv,
+        word_size: safe_word_size,
+    }
 }
 
 fn build_lookup(
@@ -2877,13 +3108,14 @@ pub fn run(args: BlastnArgs) -> Result<()> {
     };
 
     eprintln!(
-        "Building lookup (Task: {}, Word: {}, Direct: {}, DUST: {})...",
-        args.task, effective_word_size, use_direct_lookup, args.dust
+        "Building lookup (Task: {}, Word: {}, Direct: {}, DUST: {}, PV: {})...",
+        args.task, effective_word_size, use_direct_lookup, args.dust, use_direct_lookup
     );
 
     // Build the appropriate lookup table
-    let direct_lookup: Option<DirectKmerLookup> = if use_direct_lookup {
-        Some(build_direct_lookup(&queries, effective_word_size, &query_masks))
+    // Phase 2: Use PvDirectLookup with Presence-Vector for fast filtering
+    let pv_direct_lookup: Option<PvDirectLookup> = if use_direct_lookup {
+        Some(build_pv_direct_lookup(&queries, effective_word_size, &query_masks))
     } else {
         None
     };
@@ -3131,10 +3363,10 @@ pub fn run(args: BlastnArgs) -> Result<()> {
                 let kmer_start = s_pos + 1 - safe_k;
                 dbg_total_s_positions += 1;
 
-                // Use direct lookup (O(1)) or hash lookup based on word size
+                // Phase 2: Use PV-based direct lookup (O(1) with fast PV filtering) or hash lookup
                 let matches_slice: &[(u32, u32)] = if use_direct_lookup {
-                    let idx = current_kmer as usize;
-                    direct_lookup.as_ref().map(|dl| dl.get(idx).map(|v| v.as_slice()).unwrap_or(&[])).unwrap_or(&[])
+                    // Use PV for fast filtering before accessing the lookup table
+                    pv_direct_lookup.as_ref().map(|pv_dl| pv_dl.get_hits_checked(current_kmer)).unwrap_or(&[])
                 } else {
                     hash_lookup.as_ref().and_then(|hl| hl.get(&current_kmer).map(|v| v.as_slice())).unwrap_or(&[])
                 };

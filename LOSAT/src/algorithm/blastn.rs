@@ -431,6 +431,10 @@ fn build_lookup(
     let mut total_positions = 0usize;
     let mut ambiguous_skipped = 0usize;
     let mut dust_skipped = 0usize;
+    let mut kmers_added = 0usize;
+
+    // K-mer mask for rolling window (keeps only the lower 2*word_size bits)
+    let kmer_mask: u64 = (1u64 << (2 * safe_word_size)) - 1;
 
     for (q_idx, record) in queries.iter().enumerate() {
         let seq = record.seq();
@@ -440,34 +444,90 @@ fn build_lookup(
 
         let masks = query_masks.get(q_idx).map(|v| v.as_slice()).unwrap_or(&[]);
 
-        for i in 0..=(seq.len() - safe_word_size) {
+        // Phase 4 optimization: Pre-compute DUST mask as bit array for O(1) lookup
+        // This replaces the O(intervals) linear scan in is_kmer_masked()
+        let dust_mask: Vec<bool> = if masks.is_empty() {
+            Vec::new()
+        } else {
+            let mut mask = vec![false; seq.len()];
+            for interval in masks {
+                let start = interval.start.min(seq.len());
+                let end = interval.end.min(seq.len());
+                for i in start..end {
+                    mask[i] = true;
+                }
+            }
+            mask
+        };
+
+        // Rolling k-mer state
+        let mut current_kmer: u64 = 0;
+        let mut valid_bases: usize = 0;
+        // Track how many masked bases are in the current k-mer window
+        let mut masked_in_window: usize = 0;
+
+        for pos in 0..seq.len() {
+            let base = seq[pos];
+            let code = ENCODE_LUT[base as usize];
+
+            // Update masked_in_window: add new position, remove old position
+            if !dust_mask.is_empty() {
+                if dust_mask[pos] {
+                    masked_in_window += 1;
+                }
+                // Remove the position that's sliding out of the window
+                if pos >= safe_word_size && dust_mask[pos - safe_word_size] {
+                    masked_in_window = masked_in_window.saturating_sub(1);
+                }
+            }
+
+            if code == 0xFF {
+                // Ambiguous base - reset the rolling window
+                valid_bases = 0;
+                current_kmer = 0;
+                ambiguous_skipped += 1;
+                // Reset masked_in_window since we're starting fresh
+                masked_in_window = 0;
+                continue;
+            }
+
+            // Shift in the new base (O(1) operation)
+            current_kmer = ((current_kmer << 2) | (code as u64)) & kmer_mask;
+            valid_bases += 1;
+
+            // Only process if we have a complete k-mer
+            if valid_bases < safe_word_size {
+                continue;
+            }
+
+            // Calculate the starting position of this k-mer
+            let kmer_start = pos + 1 - safe_word_size;
             total_positions += 1;
-            
-            // Skip k-mers that overlap with DUST-masked regions
-            if !masks.is_empty() && is_kmer_masked(masks, i, safe_word_size) {
+
+            // Skip k-mers that overlap with DUST-masked regions (O(1) check)
+            if masked_in_window > 0 {
                 dust_skipped += 1;
                 continue;
             }
-            
-            if let Some(kmer) = encode_kmer(seq, i, safe_word_size) {
-                lookup
-                    .entry(kmer)
-                    .or_default()
-                    .push((q_idx as u32, i as u32));
-            } else {
-                ambiguous_skipped += 1;
-            }
+
+            // Add to lookup table
+            lookup
+                .entry(current_kmer)
+                .or_default()
+                .push((q_idx as u32, kmer_start as u32));
+            kmers_added += 1;
         }
     }
 
     if debug_mode {
         eprintln!(
-            "[DEBUG] build_lookup: total_positions={}, ambiguous_skipped={} ({:.1}%), dust_skipped={} ({:.1}%), unique_kmers={}",
+            "[DEBUG] build_lookup: total_positions={}, ambiguous_skipped={} ({:.1}%), dust_skipped={} ({:.1}%), kmers_added={}, unique_kmers={}",
             total_positions,
             ambiguous_skipped,
-            100.0 * ambiguous_skipped as f64 / total_positions.max(1) as f64,
+            100.0 * ambiguous_skipped as f64 / (total_positions + ambiguous_skipped).max(1) as f64,
             dust_skipped,
             100.0 * dust_skipped as f64 / total_positions.max(1) as f64,
+            kmers_added,
             lookup.len()
         );
     }

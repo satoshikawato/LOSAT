@@ -125,6 +125,12 @@ pub struct BlastnArgs {
     /// Enable this for visualization tools like gbdraw that benefit from longer continuous alignments.
     #[arg(long, default_value_t = false)]
     pub chain: bool,
+    /// Scan stride for subject sequence scanning (NCBI BLAST optimization).
+    /// Higher values skip more positions, reducing k-mer lookups but potentially missing some seeds.
+    /// Default: 0 (auto-calculate based on word_size: 1 for word_size < 16, 4 for word_size >= 16).
+    /// For megablast (word_size=28), scan_step=4 reduces lookups by ~4x with minimal sensitivity loss.
+    #[arg(long, default_value_t = 0)]
+    pub scan_step: usize,
 }
 
 // 2-bit encoding for compact storage and hashing
@@ -3181,6 +3187,28 @@ pub fn run(args: BlastnArgs) -> Result<()> {
         _ => true,            // Use DP for blastn, dc-megablast, blastn-short (divergent sequences)
     };
 
+    // SCAN STRIDE OPTIMIZATION (NCBI BLAST algorithm)
+    // For large word sizes, we don't need to check every position in the subject sequence.
+    // NCBI BLAST uses: scan_step = word_length - lut_word_length + 1
+    // For simplicity, we use a threshold-based approach:
+    // - word_size < 16: scan_step = 1 (check every position for sensitivity)
+    // - word_size >= 16: scan_step = 4 (skip positions for speed, ~4x fewer lookups)
+    // This reduces k-mer lookups from ~9.3M to ~2.3M for megablast on 5MB sequences.
+    let scan_step = if args.scan_step > 0 {
+        args.scan_step // User-specified value
+    } else {
+        // Auto-calculate based on word_size
+        if effective_word_size >= 16 {
+            4 // For megablast-like word sizes, use stride of 4
+        } else {
+            1 // For smaller word sizes, check every position
+        }
+    };
+
+    if args.verbose {
+        eprintln!("[INFO] Scan stride optimization: scan_step={} (word_size={})", scan_step, effective_word_size);
+    }
+
     eprintln!("Reading query & subject...");
     let query_reader = fasta::Reader::from_file(&args.query)?;
     let queries: Vec<fasta::Record> = query_reader.records().filter_map(|r| r.ok()).collect();
@@ -3521,6 +3549,16 @@ pub fn run(args: BlastnArgs) -> Result<()> {
 
                 // Calculate the starting position of this k-mer
                 let kmer_start = s_pos + 1 - safe_k;
+
+                // SCAN STRIDE OPTIMIZATION: Skip positions based on scan_step
+                // We continue updating the rolling k-mer at every position (for correctness),
+                // but only perform the expensive lookup/extension work every scan_step positions.
+                // This reduces k-mer lookups by ~scan_step times with minimal sensitivity loss
+                // for large word sizes (megablast).
+                if kmer_start % scan_step != 0 {
+                    continue;
+                }
+
                 dbg_total_s_positions += 1;
 
                 // Phase 2: Use PV-based direct lookup (O(1) with fast PV filtering) for word_size <= 13

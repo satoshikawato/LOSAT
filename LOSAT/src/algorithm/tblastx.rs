@@ -69,6 +69,10 @@ struct DiagnosticCounters {
     clusters_single: AtomicUsize,    // Single-HSP clusters (output as-is)
     clusters_merged: AtomicUsize,    // Multi-HSP clusters that were merged
     hsps_in_merged_clusters: AtomicUsize, // Total HSPs that were part of merged clusters
+    // HSP culling diagnostics
+    output_from_ungapped: AtomicUsize,  // HSPs output from ungapped extension only
+    output_from_gapped: AtomicUsize,    // HSPs output from gapped extension
+    hsps_culled_dominated: AtomicUsize, // HSPs culled by domination test
 }
 
 impl DiagnosticCounters {
@@ -95,7 +99,11 @@ impl DiagnosticCounters {
         eprintln!("  Clusters (merged):          {}", self.clusters_merged.load(AtomicOrdering::Relaxed));
         eprintln!("  HSPs in merged clusters:    {}", self.hsps_in_merged_clusters.load(AtomicOrdering::Relaxed));
         eprintln!("  HSPs after chaining:        {}", self.hsps_after_chain.load(AtomicOrdering::Relaxed));
+        eprintln!("  HSPs culled (dominated):    {}", self.hsps_culled_dominated.load(AtomicOrdering::Relaxed));
         eprintln!("  Final hits (after filter):  {}", self.hsps_after_overlap_filter.load(AtomicOrdering::Relaxed));
+        eprintln!("Output Source:");
+        eprintln!("  From ungapped extension:    {}", self.output_from_ungapped.load(AtomicOrdering::Relaxed));
+        eprintln!("  From gapped extension:      {}", self.output_from_gapped.load(AtomicOrdering::Relaxed));
         eprintln!("====================================\n");
     }
 }
@@ -829,6 +837,67 @@ struct ExtendedHit {
     s_aa_end: usize,
     q_orig_len: usize,
     s_orig_len: usize,
+    from_gapped: bool,
+}
+
+/// NCBI BLAST-style HSP domination test.
+/// Based on s_DominateTest() from hspfilter_culling.c (lines 79-120).
+///
+/// Returns true if `p` dominates `y`, meaning `y` should be culled.
+///
+/// Key criteria:
+/// 1. HSPs must be in the same frame combination (critical for TBLASTX)
+/// 2. Overlap must be > 50% of the candidate HSP's length
+/// 3. Main criterion: weighted score/length comparison
+///    d = 4*s1*l1 + 2*s1*l2 - 2*s2*l1 - 4*s2*l2
+///    If d > 0, p dominates y
+fn hsp_dominates(p: &ExtendedHit, y: &ExtendedHit) -> bool {
+    // Critical: Only compare HSPs within the same frame combination
+    // Without this check, HSPs from different frames would incorrectly dominate each other
+    if p.q_frame != y.q_frame || p.s_frame != y.s_frame {
+        return false;
+    }
+
+    // Must be same query-subject pair
+    if p.hit.query_id != y.hit.query_id || p.hit.subject_id != y.hit.subject_id {
+        return false;
+    }
+
+    // Use query coordinates for overlap calculation (like NCBI BLAST uses query offsets)
+    let b1 = p.hit.q_start as i64;
+    let e1 = p.hit.q_end as i64;
+    let b2 = y.hit.q_start as i64;
+    let e2 = y.hit.q_end as i64;
+
+    let l1 = e1 - b1;
+    let l2 = e2 - b2;
+
+    // Calculate overlap
+    let overlap = e1.min(e2) - b1.max(b2);
+
+    // If not overlap by more than 50% of candidate's length, don't dominate
+    if 2 * overlap < l2 {
+        return false;
+    }
+
+    // Use bit_score as the score metric (higher is better)
+    let s1 = (p.hit.bit_score * 100.0) as i64;
+    let s2 = (y.hit.bit_score * 100.0) as i64;
+
+    // Main criterion: 2 * (%diff in score) + 1 * (%diff in length)
+    // Formula: d = 4*s1*l1 + 2*s1*l2 - 2*s2*l1 - 4*s2*l2
+    let d = 4 * s1 * l1 + 2 * s1 * l2 - 2 * s2 * l1 - 4 * s2 * l2;
+
+    // Tie-breaker for identical HSPs
+    if (s1 == s2 && b1 == b2 && l1 == l2) || d == 0 {
+        if s1 != s2 {
+            return s1 > s2;
+        }
+        // Use subject start as tie-breaker (like NCBI uses OID/subject.offset)
+        return p.hit.s_start < y.hit.s_start;
+    }
+
+    d > 0
 }
 
 /// Sequence data for re-alignment during HSP chaining
@@ -925,7 +994,7 @@ fn chain_and_filter_hsps_protein(
         }
 
         // Process each cluster - output all individual HSPs (like NCBI BLAST)
-        // The overlap filter will remove truly redundant hits later
+        // The domination filter will remove truly redundant hits later
         for cluster in clusters {
             if cluster.len() == 1 {
                 if let Some(diag) = diagnostics {
@@ -939,76 +1008,73 @@ fn chain_and_filter_hsps_protein(
             }
             
             // Output all HSPs in the cluster that pass e-value threshold
+            // Keep as ExtendedHit for domination test (needs frame info)
             for ext_hit in cluster {
                 if ext_hit.hit.e_value <= evalue_threshold {
-                    result_hits.push(ext_hit.hit);
+                    result_hits.push(ext_hit);
                 }
             }
         }
     }
 
-    // Record HSPs after chaining (before overlap filter)
+    // Record HSPs after chaining (before domination filter)
     if let Some(diag) = diagnostics {
         diag.hsps_after_chain.store(result_hits.len(), AtomicOrdering::Relaxed);
     }
 
-    // Sort by bit score (highest first) for overlap filtering
+    // Sort by bit score (highest first) for domination filtering
     result_hits.sort_by(|a, b| {
-        b.bit_score
-            .partial_cmp(&a.bit_score)
+        b.hit.bit_score
+            .partial_cmp(&a.hit.bit_score)
             .unwrap_or(Ordering::Equal)
     });
 
-    // Remove dominated/redundant HSPs
-    // An HSP is dominated if it overlaps significantly with a higher-scoring HSP
-    // on both query and subject coordinates
-    let overlap_threshold = 0.80; // 80% overlap threshold
-    let mut filtered_hits: Vec<Hit> = Vec::new();
+    // Remove dominated HSPs using NCBI BLAST-style domination test
+    // An HSP is dominated if a higher-scoring HSP overlaps it significantly
+    // and has better score/length ratio (within the same frame combination)
+    let mut filtered_hits: Vec<ExtendedHit> = Vec::new();
+    let mut culled_count = 0usize;
     
-    for hit in result_hits {
+    for ext_hit in result_hits {
         let dominated = filtered_hits.iter().any(|accepted| {
-            // Check if same query-subject pair
-            if hit.query_id != accepted.query_id || hit.subject_id != accepted.subject_id {
-                return false;
-            }
-            
-            // Calculate overlap on query
-            let q_overlap_start = hit.q_start.max(accepted.q_start);
-            let q_overlap_end = hit.q_end.min(accepted.q_end);
-            let q_overlap_len = if q_overlap_end > q_overlap_start {
-                q_overlap_end - q_overlap_start
-            } else {
-                0
-            };
-            let hit_q_len = hit.q_end.saturating_sub(hit.q_start).max(1);
-            let q_overlap_ratio = q_overlap_len as f64 / hit_q_len as f64;
-            
-            // Calculate overlap on subject
-            let s_overlap_start = hit.s_start.min(hit.s_end).max(accepted.s_start.min(accepted.s_end));
-            let s_overlap_end = hit.s_start.max(hit.s_end).min(accepted.s_start.max(accepted.s_end));
-            let s_overlap_len = if s_overlap_end > s_overlap_start {
-                s_overlap_end - s_overlap_start
-            } else {
-                0
-            };
-            let hit_s_len = (hit.s_end as isize - hit.s_start as isize).unsigned_abs().max(1);
-            let s_overlap_ratio = s_overlap_len as f64 / hit_s_len as f64;
-            
-            // HSP is dominated if both query and subject overlap exceed threshold
-            q_overlap_ratio >= overlap_threshold && s_overlap_ratio >= overlap_threshold
+            hsp_dominates(accepted, &ext_hit)
         });
         
         if !dominated {
-            filtered_hits.push(hit);
+            filtered_hits.push(ext_hit);
+        } else {
+            culled_count += 1;
         }
     }
 
-    // Record final hits after overlap filter
+    // Record culled HSPs
     if let Some(diag) = diagnostics {
-        diag.hsps_after_overlap_filter.store(filtered_hits.len(), AtomicOrdering::Relaxed);
+        diag.hsps_culled_dominated.store(culled_count, AtomicOrdering::Relaxed);
     }
 
-    filtered_hits
+    // Count output sources and convert to Hit
+    let mut output_from_ungapped = 0usize;
+    let mut output_from_gapped = 0usize;
+    let final_hits: Vec<Hit> = filtered_hits
+        .into_iter()
+        .map(|ext_hit| {
+            if ext_hit.from_gapped {
+                output_from_gapped += 1;
+            } else {
+                output_from_ungapped += 1;
+            }
+            ext_hit.hit
+        })
+        .collect();
+
+    // Record output source counts and final hits
+    if let Some(diag) = diagnostics {
+        diag.output_from_ungapped.store(output_from_ungapped, AtomicOrdering::Relaxed);
+        diag.output_from_gapped.store(output_from_gapped, AtomicOrdering::Relaxed);
+        diag.hsps_after_overlap_filter.store(final_hits.len(), AtomicOrdering::Relaxed);
+    }
+
+    final_hits
 }
 
 pub fn run(args: TblastxArgs) -> Result<()> {
@@ -1322,6 +1388,7 @@ pub fn run(args: TblastxArgs) -> Result<()> {
                                             s_aa_end: se_ungapped,
                                             q_orig_len: q_frame.orig_len,
                                             s_orig_len: s_len,
+                                            from_gapped: false,
                                         });
                                     } else if diag_enabled {
                                         diag_inner.ungapped_evalue_failed.fetch_add(1, AtomicOrdering::Relaxed);
@@ -1454,6 +1521,7 @@ pub fn run(args: TblastxArgs) -> Result<()> {
                                         s_aa_end: final_se,
                                         q_orig_len: q_frame.orig_len,
                                         s_orig_len: s_len,
+                                        from_gapped: true,
                                     });
                                 }
                             }

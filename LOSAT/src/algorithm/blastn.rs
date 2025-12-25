@@ -75,6 +75,53 @@ const X_DROP_GAPPED_FINAL: i32 = 100; // BLAST_GAP_X_DROPOFF_FINAL_NUCL for fina
 const TWO_HIT_WINDOW: usize = 64; // Increased from 40 for better sensitivity
 const MAX_HITS_PER_KMER: usize = 200;
 
+// Subject chunking parameters for parallel processing of long contigs
+// This enables multi-core utilization even for single long sequences
+const CHUNK_SIZE: usize = 500_000; // 500KB chunks for parallel processing
+const CHUNK_OVERLAP: usize = 10_000; // 10KB overlap to handle alignments spanning chunk boundaries
+const MIN_CHUNK_THRESHOLD: usize = 1_000_000; // Only chunk sequences longer than 1MB
+
+/// Represents a chunk of a subject sequence for parallel processing
+#[derive(Clone)]
+struct SubjectChunk<'a> {
+    /// Reference to the original subject sequence
+    seq: &'a [u8],
+    /// Subject ID
+    id: String,
+    /// Offset of this chunk in the original sequence (0 for non-chunked)
+    offset: usize,
+    /// Whether this is a chunked sequence (affects coordinate adjustment)
+    is_chunked: bool,
+    /// Original full sequence length (for reverse complement coordinate conversion)
+    full_len: usize,
+}
+
+/// Generate chunks for a subject sequence
+/// Returns a vector of (chunk_start, chunk_end) tuples
+fn generate_chunk_ranges(seq_len: usize) -> Vec<(usize, usize)> {
+    if seq_len < MIN_CHUNK_THRESHOLD {
+        // Don't chunk short sequences
+        return vec![(0, seq_len)];
+    }
+    
+    let mut chunks = Vec::new();
+    let mut start = 0;
+    
+    while start < seq_len {
+        let end = (start + CHUNK_SIZE).min(seq_len);
+        chunks.push((start, end));
+        
+        if end >= seq_len {
+            break;
+        }
+        
+        // Next chunk starts at (end - overlap) to ensure overlap
+        start = end.saturating_sub(CHUNK_OVERLAP);
+    }
+    
+    chunks
+}
+
 // Minimum ungapped score thresholds for triggering gapped extension
 // Higher threshold for blastn (smaller word size = more seeds) to reduce extension count
 // NCBI BLAST uses similar task-specific thresholds
@@ -3015,6 +3062,10 @@ fn chain_and_filter_hsps(
     final_hits
 }
 
+/// Optimized ungapped extension using u64 XOR for fast match detection
+/// For high-identity sequences (megablast), most positions are matches
+/// We can quickly scan through matching regions using u64 XOR (8 bytes at once)
+#[inline(always)]
 fn extend_hit_ungapped(
     q_seq: &[u8],
     s_seq: &[u8],
@@ -3026,11 +3077,35 @@ fn extend_hit_ungapped(
     let mut current_score = 0;
     let mut max_score = 0;
 
-    // Left
+    // Left extension
     let mut best_i = 0;
     let mut i = 0;
     let max_left = q_pos.min(s_pos);
 
+    // Fast path: use u64 XOR to find mismatches quickly
+    // For high-identity sequences, this skips over long matching regions
+    while i + 8 <= max_left {
+        let q_ptr = unsafe { q_seq.as_ptr().add(q_pos - i - 7) as *const u64 };
+        let s_ptr = unsafe { s_seq.as_ptr().add(s_pos - i - 7) as *const u64 };
+        let q_word = unsafe { q_ptr.read_unaligned() };
+        let s_word = unsafe { s_ptr.read_unaligned() };
+        let xor_result = q_word ^ s_word;
+        
+        if xor_result == 0 {
+            // All 8 bytes match - update score and continue
+            current_score += reward * 8;
+            if current_score > max_score {
+                max_score = current_score;
+                best_i = i + 8;
+            }
+            i += 8;
+        } else {
+            // Found mismatch - process byte by byte
+            break;
+        }
+    }
+
+    // Slow path: process remaining bytes one at a time
     while i <= max_left {
         let q = unsafe { *q_seq.get_unchecked(q_pos - i) };
         let s = unsafe { *s_seq.get_unchecked(s_pos - i) };
@@ -3046,12 +3121,36 @@ fn extend_hit_ungapped(
         i += 1;
     }
 
-    // Right
+    // Right extension
     let mut current_score_r = max_score;
     let mut max_score_total = max_score;
     let mut best_j = 0;
     let mut j = 1;
+    let max_right = (q_seq.len() - q_pos - 1).min(s_seq.len() - s_pos - 1);
 
+    // Fast path: use u64 XOR to find mismatches quickly
+    while j + 8 <= max_right {
+        let q_ptr = unsafe { q_seq.as_ptr().add(q_pos + j) as *const u64 };
+        let s_ptr = unsafe { s_seq.as_ptr().add(s_pos + j) as *const u64 };
+        let q_word = unsafe { q_ptr.read_unaligned() };
+        let s_word = unsafe { s_ptr.read_unaligned() };
+        let xor_result = q_word ^ s_word;
+        
+        if xor_result == 0 {
+            // All 8 bytes match - update score and continue
+            current_score_r += reward * 8;
+            if current_score_r > max_score_total {
+                max_score_total = current_score_r;
+                best_j = j + 7;
+            }
+            j += 8;
+        } else {
+            // Found mismatch - process byte by byte
+            break;
+        }
+    }
+
+    // Slow path: process remaining bytes one at a time
     while (q_pos + j) < q_seq.len() && (s_pos + j) < s_seq.len() {
         let q = unsafe { *q_seq.get_unchecked(q_pos + j) };
         let s = unsafe { *s_seq.get_unchecked(s_pos + j) };
@@ -3411,16 +3510,12 @@ pub fn run(args: BlastnArgs) -> Result<()> {
         }
     }
 
-    // 修正: tx はここで所有権ごと渡す。for_each_with 終了時に自動でDropされるため、明示的な drop(tx) は不要。
-    subjects
-        .par_iter()
-        .enumerate()
-        .for_each_with(tx, |tx, (_s_idx, s_record)| {
-            let mut local_hits: Vec<Hit> = Vec::new();
-            let mut local_sequences: Vec<(String, String, Vec<u8>, Vec<u8>)> = Vec::new();
-            let mut seen_pairs: std::collections::HashSet<(String, String)> =
-                std::collections::HashSet::new();
-
+    // PERFORMANCE OPTIMIZATION: Subject chunking for parallel processing of long contigs
+    // Generate chunks for all subjects - this enables multi-core utilization even for single long sequences
+    // Each chunk is processed independently, then results are merged with coordinate adjustment
+    let subject_chunks: Vec<SubjectChunk> = subjects
+        .iter()
+        .flat_map(|s_record| {
             let s_seq = s_record.seq();
             let s_len = s_seq.len();
             let s_id = s_record
@@ -3429,6 +3524,51 @@ pub fn run(args: BlastnArgs) -> Result<()> {
                 .next()
                 .unwrap_or("unknown")
                 .to_string();
+            
+            if s_len < effective_word_size {
+                return Vec::new();
+            }
+            
+            let chunk_ranges = generate_chunk_ranges(s_len);
+            let is_chunked = chunk_ranges.len() > 1;
+            
+            chunk_ranges
+                .into_iter()
+                .map(|(start, end)| SubjectChunk {
+                    seq: &s_seq[start..end],
+                    id: s_id.clone(),
+                    offset: start,
+                    is_chunked,
+                    full_len: s_len,
+                })
+                .collect::<Vec<_>>()
+        })
+        .collect();
+    
+    if args.verbose {
+        let chunked_count = subject_chunks.iter().filter(|c| c.is_chunked).count();
+        eprintln!(
+            "[INFO] Processing {} chunks from {} subjects ({} chunks from long sequences)",
+            subject_chunks.len(),
+            subjects.len(),
+            chunked_count
+        );
+    }
+
+    // 修正: tx はここで所有権ごと渡す。for_each_with 終了時に自動でDropされるため、明示的な drop(tx) は不要。
+    subject_chunks
+        .par_iter()
+        .for_each_with(tx, |tx, chunk| {
+            let mut local_hits: Vec<Hit> = Vec::new();
+            let mut local_sequences: Vec<(String, String, Vec<u8>, Vec<u8>)> = Vec::new();
+            let mut seen_pairs: std::collections::HashSet<(String, String)> =
+                std::collections::HashSet::new();
+
+            let s_seq = chunk.seq;
+            let s_len = s_seq.len();
+            let s_id = chunk.id.clone();
+            let chunk_offset = chunk.offset;
+            let full_s_len = chunk.full_len;
 
             if s_len < effective_word_size {
                 return;
@@ -3699,7 +3839,8 @@ pub fn run(args: BlastnArgs) -> Result<()> {
                             ));
                         }
 
-                        // Convert coordinates for minus strand hits
+                        // Convert coordinates for minus strand hits and apply chunk offset
+                        // For chunked sequences, we need to adjust coordinates to the full sequence
                         // For minus strand: positions in reverse complement need to be converted
                         // back to original subject coordinates, with s_start > s_end to indicate minus strand
                         let (hit_s_start, hit_s_end) = if is_minus_strand {
@@ -3708,11 +3849,13 @@ pub fn run(args: BlastnArgs) -> Result<()> {
                             // final_ss and final_se are 0-based positions in the reverse complement
                             // We need to convert them to 1-based positions in the original sequence
                             // with s_start > s_end to indicate minus strand
-                            let orig_s_start = s_len - final_ss; // 1-based, larger value
-                            let orig_s_end = s_len - final_se + 1; // 1-based, smaller value
+                            // For chunked sequences, use full_s_len for conversion and add chunk_offset
+                            let orig_s_start = full_s_len - (chunk_offset + final_ss); // 1-based, larger value
+                            let orig_s_end = full_s_len - (chunk_offset + final_se) + 1; // 1-based, smaller value
                             (orig_s_start, orig_s_end)
                         } else {
-                            (final_ss + 1, final_se)
+                            // For plus strand, add chunk_offset to convert to full sequence coordinates
+                            (chunk_offset + final_ss + 1, chunk_offset + final_se)
                         };
 
                         local_hits.push(Hit {

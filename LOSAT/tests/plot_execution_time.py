@@ -12,6 +12,10 @@ LOG_DIR_LOSAT = "./losat_out"
 LOG_DIR_BLAST = "./blast_out"
 OUTPUT_IMAGE = "./plots/execution_time_comparison_all.png"
 
+# === Color Settings (Seaborn Deep Palette) ===
+# Explicitly define colors to match other plots
+CUSTOM_PALETTE = {"LOSAT": "#dd8452", "BLAST+": "#4c72b0"}
+
 # === Comparison List (Full Version) ===
 comparisons = [
     # --- TBLASTX ---

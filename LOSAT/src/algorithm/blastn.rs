@@ -153,6 +153,88 @@ type DirectKmerLookup = Vec<Vec<(u32, u32)>>;
 /// Maximum word size for direct address table (4^14 = 268M entries = ~6GB, too large)
 const MAX_DIRECT_LOOKUP_WORD_SIZE: usize = 13;
 
+// ============================================================================
+// Phase 2: Presence-Vector (PV) for fast k-mer filtering
+// ============================================================================
+// Following NCBI BLAST's approach from blast_lookup.h:
+// - PV_ARRAY_TYPE is u32 (32-bit unsigned integer)
+// - PV_ARRAY_BTS is 5 (bits-to-shift from lookup_index to pv_array index)
+// - Each bit indicates whether a k-mer has any hits in the lookup table
+// - This allows O(1) filtering before accessing the lookup table
+
+/// Presence-Vector array type (matches NCBI BLAST's PV_ARRAY_TYPE)
+type PvArrayType = u32;
+
+/// Bits-to-shift from lookup index to PV array index (matches NCBI BLAST's PV_ARRAY_BTS)
+const PV_ARRAY_BTS: usize = 5;
+
+/// Mask for extracting bit position within a PV array element
+const PV_ARRAY_MASK: usize = (1 << PV_ARRAY_BTS) - 1; // 31
+
+/// Test if a k-mer is present in the presence vector
+/// Equivalent to NCBI BLAST's PV_TEST macro
+#[inline(always)]
+fn pv_test(pv: &[PvArrayType], index: usize) -> bool {
+    let array_idx = index >> PV_ARRAY_BTS;
+    let bit_pos = index & PV_ARRAY_MASK;
+    if array_idx < pv.len() {
+        (pv[array_idx] & (1u32 << bit_pos)) != 0
+    } else {
+        false
+    }
+}
+
+/// Set a bit in the presence vector
+/// Equivalent to NCBI BLAST's PV_SET macro
+#[inline(always)]
+fn pv_set(pv: &mut [PvArrayType], index: usize) {
+    let array_idx = index >> PV_ARRAY_BTS;
+    let bit_pos = index & PV_ARRAY_MASK;
+    if array_idx < pv.len() {
+        pv[array_idx] |= 1u32 << bit_pos;
+    }
+}
+
+/// Optimized lookup table with Presence-Vector for fast filtering
+/// Combines DirectKmerLookup with a bit vector for O(1) presence checking
+pub struct PvDirectLookup {
+    /// The actual lookup table storing (query_idx, position) pairs
+    lookup: DirectKmerLookup,
+    /// Presence vector - bit i is set if lookup[i] is non-empty
+    pv: Vec<PvArrayType>,
+    /// Word size used for this lookup table
+    word_size: usize,
+}
+
+impl PvDirectLookup {
+    /// Check if a k-mer has any hits using the presence vector (O(1))
+    #[inline(always)]
+    pub fn has_hits(&self, kmer: u64) -> bool {
+        pv_test(&self.pv, kmer as usize)
+    }
+
+    /// Get hits for a k-mer (only call after has_hits returns true)
+    #[inline(always)]
+    pub fn get_hits(&self, kmer: u64) -> &[(u32, u32)] {
+        let idx = kmer as usize;
+        if idx < self.lookup.len() {
+            &self.lookup[idx]
+        } else {
+            &[]
+        }
+    }
+
+    /// Get hits for a k-mer with PV check (combined operation)
+    #[inline(always)]
+    pub fn get_hits_checked(&self, kmer: u64) -> &[(u32, u32)] {
+        if self.has_hits(kmer) {
+            self.get_hits(kmer)
+        } else {
+            &[]
+        }
+    }
+}
+
 /// Check if a k-mer starting at position overlaps with any masked interval
 #[inline]
 fn is_kmer_masked(intervals: &[MaskedInterval], start: usize, kmer_len: usize) -> bool {
@@ -160,6 +242,155 @@ fn is_kmer_masked(intervals: &[MaskedInterval], start: usize, kmer_len: usize) -
     intervals.iter().any(|interval| {
         start < interval.end && end > interval.start
     })
+}
+
+// ============================================================================
+// Phase 2: Query Packing with Rolling K-mer Extraction
+// ============================================================================
+// Uses O(1) sliding window k-mer extraction for building lookup tables
+// This is more efficient than calling encode_kmer() for each position
+
+/// Lookup table for ASCII to 2-bit encoding (0xFF = invalid/ambiguous)
+/// Used for rolling k-mer extraction
+const ENCODE_LUT: [u8; 256] = {
+    let mut lut = [0xFFu8; 256];
+    lut[b'A' as usize] = 0;
+    lut[b'a' as usize] = 0;
+    lut[b'C' as usize] = 1;
+    lut[b'c' as usize] = 1;
+    lut[b'G' as usize] = 2;
+    lut[b'g' as usize] = 2;
+    lut[b'T' as usize] = 3;
+    lut[b't' as usize] = 3;
+    lut[b'U' as usize] = 3;
+    lut[b'u' as usize] = 3;
+    lut
+};
+
+/// Build optimized lookup table with Presence-Vector using rolling k-mer extraction
+/// This combines:
+/// 1. O(1) sliding window k-mer extraction (Phase 1 optimization)
+/// 2. Presence-Vector for fast filtering (Phase 2 optimization)
+fn build_pv_direct_lookup(
+    queries: &[fasta::Record],
+    word_size: usize,
+    query_masks: &[Vec<MaskedInterval>],
+) -> PvDirectLookup {
+    let safe_word_size = word_size.min(MAX_DIRECT_LOOKUP_WORD_SIZE);
+    let table_size = 1usize << (2 * safe_word_size); // 4^word_size
+    let pv_size = (table_size + 31) / 32; // Number of u32 elements needed for PV
+    let debug_mode = std::env::var("BLEMIR_DEBUG").is_ok();
+
+    if debug_mode {
+        eprintln!(
+            "[DEBUG] build_pv_direct_lookup: word_size={}, table_size={} ({:.1}MB), pv_size={} ({:.1}KB)",
+            safe_word_size,
+            table_size,
+            (table_size * 24) as f64 / 1_000_000.0,
+            pv_size,
+            (pv_size * 4) as f64 / 1_000.0
+        );
+    }
+
+    // Pre-allocate the table and presence vector
+    let mut lookup: Vec<Vec<(u32, u32)>> = vec![Vec::new(); table_size];
+    let mut pv: Vec<PvArrayType> = vec![0; pv_size];
+
+    let mut total_positions = 0usize;
+    let mut ambiguous_skipped = 0usize;
+    let mut dust_skipped = 0usize;
+    let mut kmers_added = 0usize;
+
+    // K-mer mask for rolling window
+    let kmer_mask: u64 = (1u64 << (2 * safe_word_size)) - 1;
+
+    for (q_idx, record) in queries.iter().enumerate() {
+        let seq = record.seq();
+        if seq.len() < safe_word_size {
+            continue;
+        }
+
+        let masks = query_masks.get(q_idx).map(|v| v.as_slice()).unwrap_or(&[]);
+
+        // Rolling k-mer state
+        let mut current_kmer: u64 = 0;
+        let mut valid_bases: usize = 0;
+
+        for pos in 0..seq.len() {
+            let base = seq[pos];
+            let code = ENCODE_LUT[base as usize];
+
+            if code == 0xFF {
+                // Ambiguous base - reset the rolling window
+                valid_bases = 0;
+                current_kmer = 0;
+                ambiguous_skipped += 1;
+                continue;
+            }
+
+            // Shift in the new base
+            current_kmer = ((current_kmer << 2) | (code as u64)) & kmer_mask;
+            valid_bases += 1;
+
+            // Only process if we have a complete k-mer
+            if valid_bases < safe_word_size {
+                continue;
+            }
+
+            // Calculate the starting position of this k-mer
+            let kmer_start = pos + 1 - safe_word_size;
+            total_positions += 1;
+
+            // Skip k-mers that overlap with DUST-masked regions
+            if !masks.is_empty() && is_kmer_masked(masks, kmer_start, safe_word_size) {
+                dust_skipped += 1;
+                continue;
+            }
+
+            // Add to lookup table
+            let idx = current_kmer as usize;
+            if idx < table_size {
+                lookup[idx].push((q_idx as u32, kmer_start as u32));
+                kmers_added += 1;
+            }
+        }
+    }
+
+    // Filter over-represented k-mers and build presence vector
+    let mut filtered_count = 0usize;
+    let mut non_empty_count = 0usize;
+
+    for (idx, positions) in lookup.iter_mut().enumerate() {
+        if positions.len() > MAX_HITS_PER_KMER {
+            positions.clear();
+            filtered_count += 1;
+        } else if !positions.is_empty() {
+            // Set bit in presence vector
+            pv_set(&mut pv, idx);
+            non_empty_count += 1;
+        }
+    }
+
+    if debug_mode {
+        eprintln!(
+            "[DEBUG] build_pv_direct_lookup: total_positions={}, ambiguous_skipped={} ({:.1}%), dust_skipped={} ({:.1}%)",
+            total_positions,
+            ambiguous_skipped,
+            100.0 * ambiguous_skipped as f64 / (total_positions + ambiguous_skipped).max(1) as f64,
+            dust_skipped,
+            100.0 * dust_skipped as f64 / total_positions.max(1) as f64
+        );
+        eprintln!(
+            "[DEBUG] build_pv_direct_lookup: kmers_added={}, filtered={}, non_empty_buckets={}",
+            kmers_added, filtered_count, non_empty_count
+        );
+    }
+
+    PvDirectLookup {
+        lookup,
+        pv,
+        word_size: safe_word_size,
+    }
 }
 
 fn build_lookup(
@@ -2877,13 +3108,14 @@ pub fn run(args: BlastnArgs) -> Result<()> {
     };
 
     eprintln!(
-        "Building lookup (Task: {}, Word: {}, Direct: {}, DUST: {})...",
-        args.task, effective_word_size, use_direct_lookup, args.dust
+        "Building lookup (Task: {}, Word: {}, Direct: {}, DUST: {}, PV: {})...",
+        args.task, effective_word_size, use_direct_lookup, args.dust, use_direct_lookup
     );
 
     // Build the appropriate lookup table
-    let direct_lookup: Option<DirectKmerLookup> = if use_direct_lookup {
-        Some(build_direct_lookup(&queries, effective_word_size, &query_masks))
+    // Phase 2: Use PvDirectLookup with Presence-Vector for fast filtering
+    let pv_direct_lookup: Option<PvDirectLookup> = if use_direct_lookup {
+        Some(build_pv_direct_lookup(&queries, effective_word_size, &query_masks))
     } else {
         None
     };
@@ -3077,197 +3309,247 @@ pub fn run(args: BlastnArgs) -> Result<()> {
             let mut last_seed: FxHashMap<(u32, isize), usize> = FxHashMap::default();
             let safe_k = effective_word_size.min(31);
 
-            for s_pos in 0..=(s_len - safe_k) {
+            // PERFORMANCE OPTIMIZATION: Rolling k-mer scanner with O(1) sliding window
+            // Instead of packing the entire sequence first (which adds O(n) overhead),
+            // we compute k-mers on-the-fly using a rolling window approach.
+            // This achieves O(1) per-position k-mer extraction without allocation overhead.
+            //
+            // Encoding: A=0, C=1, G=2, T=3 (same as NCBI BLAST's ncbi2na)
+            // The mask ensures we only keep the rightmost 2*k bits.
+            let kmer_mask: u64 = (1u64 << (2 * safe_k)) - 1;
+
+            // Lookup table for ASCII to 2-bit encoding (0xFF = invalid/ambiguous)
+            const ENCODE_LUT: [u8; 256] = {
+                let mut lut = [0xFFu8; 256];
+                lut[b'A' as usize] = 0;
+                lut[b'a' as usize] = 0;
+                lut[b'C' as usize] = 1;
+                lut[b'c' as usize] = 1;
+                lut[b'G' as usize] = 2;
+                lut[b'g' as usize] = 2;
+                lut[b'T' as usize] = 3;
+                lut[b't' as usize] = 3;
+                lut[b'U' as usize] = 3;
+                lut[b'u' as usize] = 3;
+                lut
+            };
+
+            // Rolling k-mer state
+            let mut current_kmer: u64 = 0;
+            let mut valid_bases: usize = 0; // Count of consecutive valid bases in current window
+
+            // Scan through the subject sequence with rolling k-mer
+            for s_pos in 0..s_len {
+                let base = s_seq[s_pos];
+                let code = ENCODE_LUT[base as usize];
+
+                if code == 0xFF {
+                    // Ambiguous base - reset the rolling window
+                    valid_bases = 0;
+                    current_kmer = 0;
+                    continue;
+                }
+
+                // Shift in the new base
+                current_kmer = ((current_kmer << 2) | (code as u64)) & kmer_mask;
+                valid_bases += 1;
+
+                // Only process if we have a complete k-mer
+                if valid_bases < safe_k {
+                    continue;
+                }
+
+                // Calculate the starting position of this k-mer
+                let kmer_start = s_pos + 1 - safe_k;
                 dbg_total_s_positions += 1;
 
-                if let Some(kmer) = encode_kmer(s_seq, s_pos, safe_k) {
-                    // Use direct lookup (O(1)) or hash lookup based on word size
-                    let matches_slice: &[(u32, u32)] = if use_direct_lookup {
-                        let idx = kmer as usize;
-                        direct_lookup.as_ref().map(|dl| dl.get(idx).map(|v| v.as_slice()).unwrap_or(&[])).unwrap_or(&[])
+                // Phase 2: Use PV-based direct lookup (O(1) with fast PV filtering) or hash lookup
+                let matches_slice: &[(u32, u32)] = if use_direct_lookup {
+                    // Use PV for fast filtering before accessing the lookup table
+                    pv_direct_lookup.as_ref().map(|pv_dl| pv_dl.get_hits_checked(current_kmer)).unwrap_or(&[])
+                } else {
+                    hash_lookup.as_ref().and_then(|hl| hl.get(&current_kmer).map(|v| v.as_slice())).unwrap_or(&[])
+                };
+
+                for &(q_idx, q_pos) in matches_slice {
+                    dbg_seeds_found += 1;
+                    let diag = kmer_start as isize - q_pos as isize;
+
+                    // Check if this seed is in the debug window
+                    let in_window = if let Some((q_start, q_end, s_start, s_end)) = debug_window {
+                        (q_pos as usize) >= q_start && (q_pos as usize) <= q_end &&
+                        kmer_start >= s_start && kmer_start <= s_end
                     } else {
-                        hash_lookup.as_ref().and_then(|hl| hl.get(&kmer).map(|v| v.as_slice())).unwrap_or(&[])
+                        false
                     };
 
-                    for &(q_idx, q_pos) in matches_slice {
-                            dbg_seeds_found += 1;
-                            let diag = s_pos as isize - q_pos as isize;
+                    if in_window {
+                        dbg_window_seeds += 1;
+                    }
 
-                            // Check if this seed is in the debug window
-                            let in_window = if let Some((q_start, q_end, s_start, s_end)) = debug_window {
-                                (q_pos as usize) >= q_start && (q_pos as usize) <= q_end &&
-                                s_pos >= s_start && s_pos <= s_end
-                            } else {
-                                false
-                            };
-
-                            if in_window {
-                                dbg_window_seeds += 1;
-                            }
-
-                            // Check if this region was already extended (skip if mask is disabled for debugging)
-                            if !disable_mask {
-                                if let Some(&last_s_end) = mask.get(&(q_idx, diag)) {
-                                    if s_pos < last_s_end {
-                                        dbg_mask_skipped += 1;
-                                        if in_window && debug_mode {
-                                            eprintln!("[DEBUG WINDOW] Seed at q={}, s={} SKIPPED by mask (last_s_end={})", q_pos, s_pos, last_s_end);
-                                        }
-                                        continue;
-                                    }
-                                }
-                            }
-
-                            // PERFORMANCE OPTIMIZATION: Apply two-hit filter BEFORE ungapped extension
-                            // This is the key optimization that makes NCBI BLAST fast
-                            // Most seeds don't have a nearby seed on the same diagonal, so we skip them early
-                            let trigger_extension =
-                                if let Some(&prev_s_pos) = last_seed.get(&(q_idx, diag)) {
-                                    // Check if the current seed is within the two-hit window
-                                    s_pos.saturating_sub(prev_s_pos) <= TWO_HIT_WINDOW
-                                } else {
-                                    false
-                                };
-
-                            // Update the last seed position for this diagonal
-                            last_seed.insert((q_idx, diag), s_pos);
-
-                            // Skip ungapped extension if two-hit requirement is not met
-                            // This is the key optimization - we skip most seeds without doing any extension
-                            if !trigger_extension {
-                                dbg_two_hit_failed += 1;
+                    // Check if this region was already extended (skip if mask is disabled for debugging)
+                    if !disable_mask {
+                        if let Some(&last_s_end) = mask.get(&(q_idx, diag)) {
+                            if kmer_start < last_s_end {
+                                dbg_mask_skipped += 1;
                                 if in_window && debug_mode {
-                                    eprintln!("[DEBUG WINDOW] Seed at q={}, s={} SKIPPED: two-hit not met", q_pos, s_pos);
+                                    eprintln!("[DEBUG WINDOW] Seed at q={}, s={} SKIPPED by mask (last_s_end={})", q_pos, kmer_start, last_s_end);
                                 }
                                 continue;
-                            }
-
-                            let q_record = &queries[q_idx as usize];
-
-                            // Now do ungapped extension (only for seeds that passed two-hit filter)
-                            let (qs, qe, ss, _se, ungapped_score) = extend_hit_ungapped(
-                                q_record.seq(),
-                                s_seq,
-                                q_pos as usize,
-                                s_pos,
-                                reward,
-                                penalty,
-                            );
-
-                            // Skip if ungapped score is too low
-                            // Use task-specific threshold: higher for blastn to reduce extension count
-                            if ungapped_score < min_ungapped_score {
-                                dbg_ungapped_low += 1;
-                                if in_window && debug_mode {
-                                    eprintln!("[DEBUG WINDOW] Seed at q={}, s={} SKIPPED: ungapped_score={} < {}", q_pos, s_pos, ungapped_score, min_ungapped_score);
-                                }
-                                continue;
-                            }
-
-                            dbg_gapped_attempted += 1;
-
-                            if in_window && debug_mode {
-                                eprintln!("[DEBUG WINDOW] Seed at q={}, s={} -> GAPPED EXTENSION (ungapped_score={}, seed_len={})", q_pos, s_pos, ungapped_score, qe - qs);
-                            }
-
-                            // Gapped extension with NCBI-style high X-drop for longer alignments
-                            // Using X_DROP_GAPPED_FINAL directly to allow alignments to push through
-                            // low-similarity regions (NCBI BLAST uses 100 for nucleotide)
-                            let (
-                                final_qs,
-                                final_qe,
-                                final_ss,
-                                final_se,
-                                score,
-                                matches,
-                                mismatches,
-                                gaps,
-                                gap_letters,
-                                dp_cells,
-                            ) = extend_gapped_heuristic(
-                                q_record.seq(),
-                                s_seq,
-                                qs,
-                                ss,
-                                qe - qs,
-                                reward,
-                                penalty,
-                                gap_open,
-                                gap_extend,
-                                X_DROP_GAPPED_FINAL,
-                                use_dp, // Use DP for blastn task, greedy for megablast
-                            );
-
-                            // Debug: show gapped extension results for window seeds
-                            if in_window && debug_mode {
-                                let aln_len = matches + mismatches + gap_letters;
-                                let identity = if aln_len > 0 { 100.0 * matches as f64 / aln_len as f64 } else { 0.0 };
-                                eprintln!(
-                                    "[DEBUG WINDOW] Gapped result: q={}-{}, s={}-{}, score={}, len={}, identity={:.1}%, gaps={}, dp_cells={}",
-                                    final_qs, final_qe, final_ss, final_se, score, aln_len, identity, gap_letters, dp_cells
-                                );
-                            }
-
-                            // Suppress unused variable warning when not in debug mode
-                            let _ = dp_cells;
-
-                            // Update mask (unless disabled for debugging via BLEMIR_DEBUG_NO_MASK=1)
-                            if !disable_mask {
-                                mask.insert((q_idx, diag), final_se);
-                            }
-
-                            let (bit_score, eval) = calculate_evalue(
-                                score,
-                                q_record.seq().len(),
-                                db_len_total,
-                                db_num_seqs,
-                                &params,
-                            );
-
-                            if eval <= args.evalue {
-                                // Calculate alignment length using BLAST's definition:
-                                // alignment_length = matches + mismatches + gap_letters (total aligned columns)
-                                let aln_len = matches + mismatches + gap_letters;
-
-                                // Identity is matches / alignment_length, capped at 100%
-                                let identity = if aln_len > 0 {
-                                    ((matches as f64 / aln_len as f64) * 100.0).min(100.0)
-                                } else {
-                                    0.0
-                                };
-
-                                let q_id = query_ids[q_idx as usize].clone();
-
-                                // Store sequence data for cluster-then-extend chaining
-                                let pair_key = (q_id.clone(), s_id.clone());
-                                if !seen_pairs.contains(&pair_key) {
-                                    seen_pairs.insert(pair_key);
-                                    local_sequences.push((
-                                        q_id.clone(),
-                                        s_id.clone(),
-                                        q_record.seq().to_vec(),
-                                        s_seq.to_vec(),
-                                    ));
-                                }
-
-                                local_hits.push(Hit {
-                                    query_id: q_id,
-                                    subject_id: s_id.clone(),
-                                    identity,
-                                    length: aln_len,
-                                    mismatch: mismatches,
-                                    gapopen: gaps,
-                                    q_start: final_qs + 1,
-                                    q_end: final_qe,
-                                    s_start: final_ss + 1,
-                                    s_end: final_se,
-                                    e_value: eval,
-                                    bit_score,
-                                });
                             }
                         }
+                    }
+
+                    // PERFORMANCE OPTIMIZATION: Apply two-hit filter BEFORE ungapped extension
+                    // This is the key optimization that makes NCBI BLAST fast
+                    // Most seeds don't have a nearby seed on the same diagonal, so we skip them early
+                    let trigger_extension =
+                        if let Some(&prev_s_pos) = last_seed.get(&(q_idx, diag)) {
+                            // Check if the current seed is within the two-hit window
+                            kmer_start.saturating_sub(prev_s_pos) <= TWO_HIT_WINDOW
+                        } else {
+                            false
+                        };
+
+                    // Update the last seed position for this diagonal
+                    last_seed.insert((q_idx, diag), kmer_start);
+
+                    // Skip ungapped extension if two-hit requirement is not met
+                    // This is the key optimization - we skip most seeds without doing any extension
+                    if !trigger_extension {
+                        dbg_two_hit_failed += 1;
+                        if in_window && debug_mode {
+                            eprintln!("[DEBUG WINDOW] Seed at q={}, s={} SKIPPED: two-hit not met", q_pos, kmer_start);
+                        }
+                        continue;
+                    }
+
+                    let q_record = &queries[q_idx as usize];
+
+                    // Now do ungapped extension (only for seeds that passed two-hit filter)
+                    let (qs, qe, ss, _se, ungapped_score) = extend_hit_ungapped(
+                        q_record.seq(),
+                        s_seq,
+                        q_pos as usize,
+                        kmer_start,
+                        reward,
+                        penalty,
+                    );
+
+                    // Skip if ungapped score is too low
+                    // Use task-specific threshold: higher for blastn to reduce extension count
+                    if ungapped_score < min_ungapped_score {
+                        dbg_ungapped_low += 1;
+                        if in_window && debug_mode {
+                            eprintln!("[DEBUG WINDOW] Seed at q={}, s={} SKIPPED: ungapped_score={} < {}", q_pos, kmer_start, ungapped_score, min_ungapped_score);
+                        }
+                        continue;
+                    }
+
+                    dbg_gapped_attempted += 1;
+
+                    if in_window && debug_mode {
+                        eprintln!("[DEBUG WINDOW] Seed at q={}, s={} -> GAPPED EXTENSION (ungapped_score={}, seed_len={})", q_pos, kmer_start, ungapped_score, qe - qs);
+                    }
+
+                    // Gapped extension with NCBI-style high X-drop for longer alignments
+                    // Using X_DROP_GAPPED_FINAL directly to allow alignments to push through
+                    // low-similarity regions (NCBI BLAST uses 100 for nucleotide)
+                    let (
+                        final_qs,
+                        final_qe,
+                        final_ss,
+                        final_se,
+                        score,
+                        matches,
+                        mismatches,
+                        gaps,
+                        gap_letters,
+                        dp_cells,
+                    ) = extend_gapped_heuristic(
+                        q_record.seq(),
+                        s_seq,
+                        qs,
+                        ss,
+                        qe - qs,
+                        reward,
+                        penalty,
+                        gap_open,
+                        gap_extend,
+                        X_DROP_GAPPED_FINAL,
+                        use_dp, // Use DP for blastn task, greedy for megablast
+                    );
+
+                    // Debug: show gapped extension results for window seeds
+                    if in_window && debug_mode {
+                        let aln_len = matches + mismatches + gap_letters;
+                        let identity = if aln_len > 0 { 100.0 * matches as f64 / aln_len as f64 } else { 0.0 };
+                        eprintln!(
+                            "[DEBUG WINDOW] Gapped result: q={}-{}, s={}-{}, score={}, len={}, identity={:.1}%, gaps={}, dp_cells={}",
+                            final_qs, final_qe, final_ss, final_se, score, aln_len, identity, gap_letters, dp_cells
+                        );
+                    }
+
+                    // Suppress unused variable warning when not in debug mode
+                    let _ = dp_cells;
+
+                    // Update mask (unless disabled for debugging via BLEMIR_DEBUG_NO_MASK=1)
+                    if !disable_mask {
+                        mask.insert((q_idx, diag), final_se);
+                    }
+
+                    let (bit_score, eval) = calculate_evalue(
+                        score,
+                        q_record.seq().len(),
+                        db_len_total,
+                        db_num_seqs,
+                        &params,
+                    );
+
+                    if eval <= args.evalue {
+                        // Calculate alignment length using BLAST's definition:
+                        // alignment_length = matches + mismatches + gap_letters (total aligned columns)
+                        let aln_len = matches + mismatches + gap_letters;
+
+                        // Identity is matches / alignment_length, capped at 100%
+                        let identity = if aln_len > 0 {
+                            ((matches as f64 / aln_len as f64) * 100.0).min(100.0)
+                        } else {
+                            0.0
+                        };
+
+                        let q_id = query_ids[q_idx as usize].clone();
+
+                        // Store sequence data for cluster-then-extend chaining
+                        let pair_key = (q_id.clone(), s_id.clone());
+                        if !seen_pairs.contains(&pair_key) {
+                            seen_pairs.insert(pair_key);
+                            local_sequences.push((
+                                q_id.clone(),
+                                s_id.clone(),
+                                q_record.seq().to_vec(),
+                                s_seq.to_vec(),
+                            ));
+                        }
+
+                        local_hits.push(Hit {
+                            query_id: q_id,
+                            subject_id: s_id.clone(),
+                            identity,
+                            length: aln_len,
+                            mismatch: mismatches,
+                            gapopen: gaps,
+                            q_start: final_qs + 1,
+                            q_end: final_qe,
+                            s_start: final_ss + 1,
+                            s_end: final_se,
+                            e_value: eval,
+                            bit_score,
+                        });
+                    }
                 }
             }
+
             // Print debug summary for this subject
             if debug_mode {
                 eprintln!(

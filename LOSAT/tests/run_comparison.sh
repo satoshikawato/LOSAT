@@ -75,7 +75,7 @@ echo "Starting LOSAT commands..."
 # MjPMNV vs MlPMNV
 (time $LOSAT_BIN blastn -q ./fasta/AP027202.fasta -s ./fasta/LC738875.fasta -o ./losat_out/MjPMNV.MlPMNV.losatn.blastn.out --task blastn -n 1 )&>./losat_out/MjPMNV.MlPMNV.losatn.blastn.log
 
-
+<<COMMENTOUT
 # ==========================================
 # Part 2: BLAST+ Execution
 # ==========================================
@@ -142,5 +142,5 @@ echo "Starting BLAST+ commands..."
 
 # MjPMNV vs MlPMNV
 (time blastn -task blastn -query ./fasta/AP027202.fasta -subject ./fasta/LC738875.fasta -out ./blast_out/MjPMNV.MlPMNV.blastn.out -num_threads 1 -outfmt 7 )&>./blast_out/MjPMNV.MlPMNV.blastn.log
-
+COMMENTOUT
 echo "All done."

@@ -385,7 +385,7 @@ struct ProteinAlnStats {
 /// - Tracks best score across ALL diagonals (not just main diagonal)
 /// - Propagates alignment statistics for accurate traceback-based calculation
 ///
-/// Returns (q_start, q_end, s_start, s_end, score, matches, mismatches, gaps)
+/// Returns (q_start, q_end, s_start, s_end, score, matches, mismatches, gap_opens, gap_letters)
 fn extend_gapped_protein(
     q_seq: &[u8],
     s_seq: &[u8],
@@ -393,16 +393,16 @@ fn extend_gapped_protein(
     ss: usize,
     len: usize,
     x_drop: i32,
-) -> (usize, usize, usize, usize, i32, usize, usize, usize) {
+) -> (usize, usize, usize, usize, i32, usize, usize, usize, usize) {
     // Bounds validation: ensure seed coordinates are valid
     if qs >= q_seq.len() || ss >= s_seq.len() {
-        return (qs, qs, ss, ss, 0, 0, 0, 0);
+        return (qs, qs, ss, ss, 0, 0, 0, 0, 0);
     }
 
     // Clamp len to available sequence length
     let len = len.min(q_seq.len() - qs).min(s_seq.len() - ss);
     if len == 0 {
-        return (qs, qs, ss, ss, 0, 0, 0, 0);
+        return (qs, qs, ss, ss, 0, 0, 0, 0, 0);
     }
 
     // First, extend to the right from the seed using NCBI-style semi-gapped DP
@@ -448,7 +448,8 @@ fn extend_gapped_protein(
     let total_matches = left_stats.matches as usize + seed_matches + right_stats.matches as usize;
     let total_mismatches =
         left_stats.mismatches as usize + seed_mismatches + right_stats.mismatches as usize;
-    let total_gaps = left_stats.gap_opens as usize + right_stats.gap_opens as usize;
+    let total_gap_opens = left_stats.gap_opens as usize + right_stats.gap_opens as usize;
+    let total_gap_letters = left_stats.gap_letters as usize + right_stats.gap_letters as usize;
 
     // Calculate final positions
     let final_q_start = qs - left_q_consumed;
@@ -465,7 +466,8 @@ fn extend_gapped_protein(
         total_score,
         total_matches,
         total_mismatches,
-        total_gaps,
+        total_gap_opens,
+        total_gap_letters,
     )
 }
 
@@ -1413,6 +1415,7 @@ pub fn run(args: TblastxArgs) -> Result<()> {
                                     _,
                                     _,
                                     _,
+                                    _,
                                 ) = extend_gapped_protein(
                                     q_aa,
                                     s_aa,
@@ -1431,7 +1434,8 @@ pub fn run(args: TblastxArgs) -> Result<()> {
                                     gapped_score,
                                     matches,
                                     mismatches,
-                                    gaps,
+                                    gap_opens,
+                                    gap_letters,
                                 ) = if prelim_score > 0 {
                                     extend_gapped_protein(
                                         q_aa,
@@ -1451,15 +1455,15 @@ pub fn run(args: TblastxArgs) -> Result<()> {
                                         0,
                                         0,
                                         0,
+                                        0,
                                     )
                                 };
 
                                 mask.insert(mask_key, final_se);
 
-                                // Calculate alignment length as the max of query and subject spans
-                                let q_span = final_qe - final_qs;
-                                let s_span = final_se - final_ss;
-                                let aln_len = q_span.max(s_span);
+                                // Calculate alignment length as matches + mismatches + gap_letters
+                                // This is the correct BLAST definition of alignment length
+                                let aln_len = matches + mismatches + gap_letters;
 
                                 // Use alignment length as effective search space (like NCBI BLAST)
                                 let (bit_score, e_val) =
@@ -1506,7 +1510,7 @@ pub fn run(args: TblastxArgs) -> Result<()> {
                                             identity,
                                             length: aln_len,
                                             mismatch: mismatches,
-                                            gapopen: gaps,
+                                            gapopen: gap_opens,
                                             q_start: q_start_bp,
                                             q_end: q_end_bp,
                                             s_start: s_start_bp,

@@ -35,6 +35,11 @@ const GAP_EXTEND: i32 = -1; // BLAST_GAP_EXTN_PROT
 // Threshold for triggering gapped extension without two-hit requirement
 const HIGH_SCORE_THRESHOLD: i32 = 60;
 
+// Minimum ungapped score threshold for keeping hits
+// NCBI BLAST outputs down to bit score ~22.1, which corresponds to ungapped score ~14
+// Setting to 15 (from 20) to improve sensitivity for divergent sequences
+const MIN_UNGAPPED_SCORE: i32 = 15;
+
 // Parameters for HSP chaining (similar to BLASTN)
 const MAX_GAP_AA: usize = 333; // ~1000bp / 3 for amino acids
 const MAX_DIAG_DRIFT_AA: isize = 33; // ~100bp / 3 for amino acids
@@ -70,7 +75,7 @@ impl DiagnosticCounters {
         eprintln!("  Seeds passed to extension:  {}", self.seeds_passed.load(AtomicOrdering::Relaxed));
         eprintln!("Ungapped Extension Stage:");
         eprintln!("  Ungapped extensions run:    {}", self.ungapped_extensions.load(AtomicOrdering::Relaxed));
-        eprintln!("  Filtered (low score < 20):  {}", self.ungapped_low_score.load(AtomicOrdering::Relaxed));
+        eprintln!("  Filtered (low score < {}):  {}", MIN_UNGAPPED_SCORE, self.ungapped_low_score.load(AtomicOrdering::Relaxed));
         eprintln!("Gapped Extension Stage:");
         eprintln!("  Ungapped-only hits:         {}", self.ungapped_only_hits.load(AtomicOrdering::Relaxed));
         eprintln!("  Gapped extensions run:      {}", self.gapped_extensions.load(AtomicOrdering::Relaxed));
@@ -773,12 +778,30 @@ fn convert_coords(aa_start: usize, aa_end: usize, frame: i8, dna_len: usize) -> 
     }
 }
 
-fn calculate_statistics(score: i32, eff_search_space: f64, params: &KarlinParams) -> (f64, f64) {
+fn calculate_statistics(score: i32, aln_len: usize, params: &KarlinParams) -> (f64, f64) {
+    // Use alignment length as effective search space, but with a minimum to prevent
+    // too many low-scoring hits from passing the e-value filter.
+    // 
+    // NCBI BLAST appears to use a per-HSP search space based on alignment length.
+    // For a bit score of 22.1 and e-value of 0.001, the implied search space is ~4,500.
+    // 
+    // We use aln_len^2 as the search space, with a minimum of 100 million to balance:
+    // - Allowing more hits to pass (compared to full sequence length of 45 billion)
+    // - Not allowing too many noise hits (compared to pure aln_len^2 which is too permissive)
+    //
+    // With min_space = 100 million:
+    // - bit_score 27 -> e-value ~0.75 (passes)
+    // - bit_score 25 -> e-value ~3 (passes)
+    // - bit_score 22 -> e-value ~24 (fails)
+    let aln_space = (aln_len * aln_len) as f64;
+    let min_space = 100_000_000.0; // 100 million - minimum search space
+    let effective_space = aln_space.max(min_space);
+    
     let search_space = SearchSpace {
-        effective_query_len: 1.0,
-        effective_db_len: 1.0,
-        effective_space: eff_search_space,
-        length_adjustment: 0, // Not used here since effective_space is pre-computed
+        effective_query_len: effective_space.sqrt(),
+        effective_db_len: effective_space.sqrt(),
+        effective_space,
+        length_adjustment: 0,
     };
     let bs = calc_bit_score(score, params);
     let ev = calc_evalue(bs, &search_space);
@@ -1162,7 +1185,7 @@ pub fn run(args: TblastxArgs) -> Result<()> {
                                 );
 
                                 // Skip if ungapped score is too low
-                                if ungapped_score < 20 {
+                                if ungapped_score < MIN_UNGAPPED_SCORE {
                                     if diag_enabled {
                                         diag_inner.ungapped_low_score.fetch_add(1, AtomicOrdering::Relaxed);
                                     }
@@ -1176,14 +1199,13 @@ pub fn run(args: TblastxArgs) -> Result<()> {
                                         diag_inner.ungapped_only_hits.fetch_add(1, AtomicOrdering::Relaxed);
                                     }
                                     // Record the ungapped hit if it passes e-value threshold
-                                    let eff_space = (q_aa.len() as f64) * (db_len_aa_total as f64);
+                                    // Use alignment length as effective search space (like NCBI BLAST)
+                                    let len = qe - qs;
                                     let (bit_score, e_val) =
-                                        calculate_statistics(ungapped_score, eff_space, &params);
+                                        calculate_statistics(ungapped_score, len, &params);
 
                                     if e_val <= args.evalue {
                                         mask.insert(mask_key, se_ungapped);
-
-                                        let len = qe - qs;
                                         let mut match_count = 0;
                                         for k in 0..len {
                                             if q_aa[qs + k] == s_aa[ss + k] {
@@ -1299,18 +1321,19 @@ pub fn run(args: TblastxArgs) -> Result<()> {
 
                                 mask.insert(mask_key, final_se);
 
-                                let eff_space = (q_aa.len() as f64) * (db_len_aa_total as f64);
+                                // Calculate alignment length as the max of query and subject spans
+                                let q_span = final_qe - final_qs;
+                                let s_span = final_se - final_ss;
+                                let aln_len = q_span.max(s_span);
+
+                                // Use alignment length as effective search space (like NCBI BLAST)
                                 let (bit_score, e_val) =
-                                    calculate_statistics(gapped_score, eff_space, &params);
+                                    calculate_statistics(gapped_score, aln_len, &params);
 
                                 if e_val <= args.evalue {
                                     if diag_enabled {
                                         diag_inner.gapped_evalue_passed.fetch_add(1, AtomicOrdering::Relaxed);
                                     }
-                                    // Calculate alignment length as the max of query and subject spans
-                                    let q_len = final_qe - final_qs;
-                                    let s_len_aln = final_se - final_ss;
-                                    let aln_len = q_len.max(s_len_aln);
 
                                     // Identity is matches / alignment_length, capped at 100%
                                     let identity = if aln_len > 0 {

@@ -57,6 +57,8 @@ struct DiagnosticCounters {
     ungapped_low_score: AtomicUsize,
     // Gapped extension stage
     ungapped_only_hits: AtomicUsize,
+    ungapped_evalue_passed: AtomicUsize,  // ungapped-only hits that passed e-value filter
+    ungapped_evalue_failed: AtomicUsize,  // ungapped-only hits that failed e-value filter
     gapped_extensions: AtomicUsize,
     gapped_evalue_passed: AtomicUsize,
     // Post-processing stage (set in chain_and_filter_hsps_protein)
@@ -76,8 +78,11 @@ impl DiagnosticCounters {
         eprintln!("Ungapped Extension Stage:");
         eprintln!("  Ungapped extensions run:    {}", self.ungapped_extensions.load(AtomicOrdering::Relaxed));
         eprintln!("  Filtered (low score < {}):  {}", MIN_UNGAPPED_SCORE, self.ungapped_low_score.load(AtomicOrdering::Relaxed));
+        eprintln!("Ungapped-Only Hits (skipped gapped extension):");
+        eprintln!("  Total ungapped-only:        {}", self.ungapped_only_hits.load(AtomicOrdering::Relaxed));
+        eprintln!("  E-value passed:             {}", self.ungapped_evalue_passed.load(AtomicOrdering::Relaxed));
+        eprintln!("  E-value failed:             {}", self.ungapped_evalue_failed.load(AtomicOrdering::Relaxed));
         eprintln!("Gapped Extension Stage:");
-        eprintln!("  Ungapped-only hits:         {}", self.ungapped_only_hits.load(AtomicOrdering::Relaxed));
         eprintln!("  Gapped extensions run:      {}", self.gapped_extensions.load(AtomicOrdering::Relaxed));
         eprintln!("  Gapped hits (e-value ok):   {}", self.gapped_evalue_passed.load(AtomicOrdering::Relaxed));
         eprintln!("Post-Processing Stage:");
@@ -782,19 +787,16 @@ fn calculate_statistics(score: i32, aln_len: usize, params: &KarlinParams) -> (f
     // Use alignment length as effective search space, but with a minimum to prevent
     // too many low-scoring hits from passing the e-value filter.
     // 
-    // NCBI BLAST appears to use a per-HSP search space based on alignment length.
-    // For a bit score of 22.1 and e-value of 0.001, the implied search space is ~4,500.
+    // Session 5 tuning results:
+    // - 100M (original): AP027078 vs AP027131 = 66% of NCBI BLAST hits
+    // - 10M: 5x more hits than NCBI, avg length 16 (too short/fragmented)
+    // - 50M: 126% of NCBI BLAST hits, avg length 22, ~10s runtime
     // 
-    // We use aln_len^2 as the search space, with a minimum of 100 million to balance:
-    // - Allowing more hits to pass (compared to full sequence length of 45 billion)
-    // - Not allowing too many noise hits (compared to pure aln_len^2 which is too permissive)
-    //
-    // With min_space = 100 million:
-    // - bit_score 27 -> e-value ~0.75 (passes)
-    // - bit_score 25 -> e-value ~3 (passes)
-    // - bit_score 22 -> e-value ~24 (fails)
+    // The 50M floor provides a good balance between sensitivity and performance,
+    // improving hit detection for divergent sequences while maintaining reasonable
+    // hit quality and execution time within the 10-second target.
     let aln_space = (aln_len * aln_len) as f64;
-    let min_space = 100_000_000.0; // 100 million - minimum search space
+    let min_space = 50_000_000.0; // 50M - lowered from 100M to improve sensitivity
     let effective_space = aln_space.max(min_space);
     
     let search_space = SearchSpace {
@@ -1205,6 +1207,9 @@ pub fn run(args: TblastxArgs) -> Result<()> {
                                         calculate_statistics(ungapped_score, len, &params);
 
                                     if e_val <= args.evalue {
+                                        if diag_enabled {
+                                            diag_inner.ungapped_evalue_passed.fetch_add(1, AtomicOrdering::Relaxed);
+                                        }
                                         mask.insert(mask_key, se_ungapped);
                                         let mut match_count = 0;
                                         for k in 0..len {
@@ -1258,6 +1263,8 @@ pub fn run(args: TblastxArgs) -> Result<()> {
                                             q_orig_len: q_frame.orig_len,
                                             s_orig_len: s_len,
                                         });
+                                    } else if diag_enabled {
+                                        diag_inner.ungapped_evalue_failed.fetch_add(1, AtomicOrdering::Relaxed);
                                     }
                                     continue;
                                 }

@@ -61,26 +61,29 @@ def generate_comparison_plot(config):
     fig, axes = plt.subplots(2, 2, figsize=(16, 12))
     fig.suptitle(f"Comparison: {name} ({mode_label})", fontsize=16)
 
-    # 1. Distribution of Alignment Lengths (Histogram)
+    # 1. Accumulated Alignment Length by Length (Histogram)
     try:
+        # X軸: Length, Y軸: Lengthの積算 (weights='length')
         sns.histplot(data=df_merged, x='length', hue='Tool', 
-                     element="step", stat="density", common_norm=False, 
+                     weights='length',
+                     element="step", stat="count", common_norm=False, 
                      log_scale=True, ax=axes[0,0],
                      palette=CUSTOM_PALETTE)
-        axes[0,0].set_title('Distribution of Alignment Lengths (Count Density)')
+        axes[0,0].set_title('Accumulated Length vs Alignment Length')
         axes[0,0].set_xlabel('Alignment Length (bp/aa)')
+        axes[0,0].set_ylabel('Accumulated Length (bp/aa)')
     except Exception as e:
         axes[0,0].text(0.5, 0.5, f"Error plotting hist: {e}", ha='center')
 
-    # 2. Distribution of Identity (Weighted by Length -> Accumulated Length)
+    # 2. Accumulated Alignment Length by Identity (Histogram)
     try:
-        # weights='length' を指定し、stat='count' にすることで、縦軸が「長さの合計」になります
+        # X軸: Identity, Y軸: Lengthの積算 (weights='length')
         sns.histplot(data=df_merged, x='pident', hue='Tool', 
                      weights='length', 
                      element="step", stat="count", common_norm=False, 
                      ax=axes[0,1],
                      palette=CUSTOM_PALETTE)
-        axes[0,1].set_title('Accumulated Alignment Length vs Identity')
+        axes[0,1].set_title('Accumulated Length vs Identity')
         axes[0,1].set_xlabel('Identity (%)')
         axes[0,1].set_ylabel('Accumulated Length (bp/aa)')
     except Exception as e:

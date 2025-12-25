@@ -101,17 +101,19 @@ def main():
         axes[i][0].text(-0.2, 0.5, mode, transform=axes[i][0].transAxes, 
                         fontsize=16, rotation=90, va='center', fontweight='bold')
 
-        # 1. Alignment Length Distribution (Count Density)
+        # 1. Accumulated Length vs Alignment Length
         sns.histplot(data=data_subset, x='length', hue='Tool', 
-                     element="step", stat="density", common_norm=False, 
+                     weights='length', # Accumulate Length
+                     element="step", stat="count", common_norm=False, 
                      log_scale=True, ax=axes[i][0],
                      palette=CUSTOM_PALETTE)
-        axes[i][0].set_title(f'Alignment Length Distribution')
+        axes[i][0].set_title(f'Accumulated Length vs Alignment Length')
         axes[i][0].set_xlabel('Length (bp or aa)')
+        axes[i][0].set_ylabel('Accumulated Length (bp/aa)')
 
-        # 2. Accumulated Alignment Length vs Identity
+        # 2. Accumulated Length vs Identity
         sns.histplot(data=data_subset, x='pident', hue='Tool', 
-                     weights='length', # Use length as weight
+                     weights='length', # Accumulate Length
                      element="step", stat="count", common_norm=False, 
                      ax=axes[i][1],
                      palette=CUSTOM_PALETTE)

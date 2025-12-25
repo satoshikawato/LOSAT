@@ -1,6 +1,6 @@
 # LOSAT 🚀
 
-**LOSAT** (LOcal Sequence Alignment Tool) is a lightweight, high-performance reimplementation of the NCBI BLAST algorithm, written entirely in **Rust** and optimized for **WebAssembly (Wasm)** environments.
+**LOSAT** (LOcal Sequence Alignment Tool) aim to deliver a lightweight, high-performance reimplementation of the NCBI BLAST algorithm, written in Rust and optimized for WebAssembly (Wasm) environments.
 
 While originally designed to power web-based bioinformatics tools, LOSAT functions as both a standalone command-line interface (CLI) and an embeddable library. It aims to democratize sequence alignment by enabling it to run anywhere—from high-performance servers to edge devices and web browsers—without external dependencies.
 
@@ -25,7 +25,7 @@ Currently, LOSAT focuses on nucleotide-nucleotide comparisons:
 - **BLASTN:** Standard nucleotide vs. nucleotide alignment.
 - **TBLASTX:** Translated nucleotide vs. translated nucleotide alignment (useful for finding distant relationships in coding regions).
 
-*Note: Protein alignment modes (BLASTP, BLASTX) are planned for future updates.*
+*Protein alignment modes (BLASTP, BLASTX) are planned for future updates.*
 
 ---
 
@@ -40,7 +40,7 @@ This limitation forced developers of tools like **[gbdraw](https://github.com/sa
 3.  **Import** the results back into the application.
 
 ### The Solution: Embedded Alignment
-LOSAT breaks this cycle. By porting the core alignment logic to Rust, we can compile the algorithm to WebAssembly. This allows `gbdraw` and similar tools to perform alignments **internally and instantly**. Users perceive the analysis as a native feature of the application, dramatically improving the User Experience (UX).
+LOSAT breaks this cycle. By porting the core alignment logic to Rust, we can compile the algorithm to WebAssembly. This allows `gbdraw` and similar tools to perform alignments internally and instantly. Users perceive the analysis as a native feature of the application, dramatically improving the user experience.
 
 ---
 
@@ -52,28 +52,24 @@ LOSAT is not a wrapper around existing C++ code but a native Rust implementation
 ---
 
 ## Performance
-We continuously benchmark LOSAT against standard implementations to ensure accuracy and speed.
-
 ### Hit Distribution (Sensitivity)
-LOSAT maintains a high degree of sensitivity comparable to standard parameters.
 ![overall_trend_comparison.png](./LOSAT/tests/plots/overall_trend_comparison.png)
 
 ### Execution Time
-Benchmarks show execution times suitable for interactive web applications.
 ![execution_time_comparison_all.png](./LOSAT/tests/plots/execution_time_comparison_all.png)
 
 ---
 
 ## Limitations
-While LOSAT is powerful, it is optimized for "local" alignments (e.g., comparing two viral genomes or gene clusters) rather than querying massive databases like GenBank/nt.
+LOSAT is optimized for "local" alignments (e.g., comparing two viral genomes or gene clusters) rather than querying massive databases like GenBank/nt.
 - **Database Size:** Best suited for small-to-medium datasets loaded in memory.
 - **Features:** Advanced BLAST+ parameters (like masking algorithms or specific output formats) may not yet be fully implemented.
 
 ---
 
 ## References
-- **Original Algorithm:** [NCBI BLAST](https://blast.ncbi.nlm.nih.gov/Blast.cgi)
-- **Namesake:** [MGM-166 LOSAT (Line-of-Sight Anti-Tank Missile)](https://en.wikipedia.org/wiki/MGM-166_LOSAT) - *Chosen for its speed and "Line-of-Sight" (direct) nature.*
+- [NCBI BLAST](https://blast.ncbi.nlm.nih.gov/Blast.cgi)
+- [LOSAT](https://en.wikipedia.org/wiki/MGM-166_LOSAT)
 
 ## License
 [MIT License](LICENSE)

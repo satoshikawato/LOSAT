@@ -3,6 +3,6 @@ Building lookup table...
 Reading subject file...
 Searching 1 Queries vs 1 Subjects...
 
-real	0m6.130s
-user	0m5.868s
-sys	0m0.130s
+real	0m6.875s
+user	0m6.612s
+sys	0m0.181s

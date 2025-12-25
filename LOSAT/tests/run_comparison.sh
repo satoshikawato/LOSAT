@@ -6,7 +6,7 @@
 mkdir -p losat_out blast_out
 
 # Path to LOSAT binary
-LOSAT_BIN="../target/release/losat"
+LOSAT_BIN="../target/release/LOSAT"
 
 # ==========================================
 # Part 1: LOSAT Execution

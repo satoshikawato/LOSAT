@@ -605,6 +605,20 @@ fn find_first_mismatch_ex(
         // Forward access (normal right extension)
         let s1 = &seq1[start1..];
         let s2 = &seq2[start2..];
+
+        // Word-at-a-time comparison: 8 bytes at a time using u64 operations
+        while count + 8 <= max_len {
+            let w1 = unsafe { (s1.as_ptr().add(count) as *const u64).read_unaligned() };
+            let w2 = unsafe { (s2.as_ptr().add(count) as *const u64).read_unaligned() };
+            if w1 != w2 {
+                let xor = w1 ^ w2;
+                let first_diff_byte = (xor.trailing_zeros() / 8) as usize;
+                return count + first_diff_byte;
+            }
+            count += 8;
+        }
+
+        // Handle remaining bytes
         while count < max_len {
             if unsafe { *s1.get_unchecked(count) != *s2.get_unchecked(count) } {
                 break;

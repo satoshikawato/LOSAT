@@ -1032,27 +1032,14 @@ fn chain_and_filter_hsps_protein(
             .unwrap_or(Ordering::Equal)
     });
 
-    // Remove dominated HSPs using NCBI BLAST-style domination test
-    // An HSP is dominated if a higher-scoring HSP overlaps it significantly
-    // and has better score/length ratio (within the same frame combination)
-    let mut filtered_hits: Vec<ExtendedHit> = Vec::new();
-    let mut culled_count = 0usize;
-    
-    for ext_hit in result_hits {
-        let dominated = filtered_hits.iter().any(|accepted| {
-            hsp_dominates(accepted, &ext_hit)
-        });
-        
-        if !dominated {
-            filtered_hits.push(ext_hit);
-        } else {
-            culled_count += 1;
-        }
-    }
+    // NCBI BLAST does not apply HSP culling for TBLASTX by default
+    // (see blast_options.c: "Gapped search is not allowed for tblastx")
+    // Skip domination filter to match NCBI BLAST behavior
+    let filtered_hits = result_hits;
 
-    // Record culled HSPs
+    // Record culled HSPs (always 0 since culling is disabled)
     if let Some(diag) = diagnostics {
-        diag.hsps_culled_dominated.store(culled_count, AtomicOrdering::Relaxed);
+        diag.hsps_culled_dominated.store(0, AtomicOrdering::Relaxed);
     }
 
     // Count output sources and convert to Hit
@@ -1323,9 +1310,10 @@ pub fn run(args: TblastxArgs) -> Result<()> {
                                     continue;
                                 }
 
-                                // For ungapped-only hits (no gapped extension), record if e-value passes
-                                // Only do gapped extension if two-hit requirement is met AND ungapped score is high enough
-                                if !two_hit_satisfied || ungapped_score < HIGH_SCORE_THRESHOLD {
+                                // NCBI BLAST does not allow gapped search for TBLASTX
+                                // (see blast_options.c: "Gapped search is not allowed for tblastx")
+                                // Always use ungapped-only path to match NCBI BLAST behavior
+                                if true {
                                     if diag_enabled {
                                         diag_inner.ungapped_only_hits.fetch_add(1, AtomicOrdering::Relaxed);
                                     }

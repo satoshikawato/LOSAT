@@ -11,11 +11,14 @@ PLOT_DIR = "./plots"
 OUTPUT_IMAGE = "./plots/overall_trend_comparison.png"
 os.makedirs(PLOT_DIR, exist_ok=True)
 
+# === Color Settings (Seaborn Deep Palette) ===
+CUSTOM_PALETTE = {"LOSAT": "#dd8452", "BLAST+": "#4c72b0"}
+
 # === Column Definitions ===
 COLUMNS = ['qseqid', 'sseqid', 'pident', 'length', 'mismatch', 'gapopen', 
            'qstart', 'qend', 'sstart', 'send', 'evalue', 'bitscore']
 
-# === Comparison List (Same as before) ===
+# === Comparison List ===
 comparisons = [
     # --- TBLASTX ---
     {"name": "NZ_CP006932_Self", "mode": "TBLASTX", "ncbi": "./blast_out/NZ_CP006932.NZ_CP006932.tblastx.n1.out", "losat": "./losat_out/NZ_CP006932.NZ_CP006932.tlosatx.n1.out"},
@@ -53,8 +56,8 @@ def load_blast(filepath, tool_name, mode_name, task_name):
             df[col] = pd.to_numeric(df[col], errors='coerce')
         
         df['Tool'] = tool_name
-        df['Mode'] = mode_name # e.g., "TBLASTX"
-        df['Task'] = task_name # e.g., "NZ_CP006932_Self"
+        df['Mode'] = mode_name 
+        df['Task'] = task_name 
         return df
     except Exception as e:
         print(f"Error loading {filepath}: {e}")
@@ -81,23 +84,13 @@ def main():
     print(f"Total alignment records loaded: {len(df_all)}")
 
     # === Plotting ===
-    # We want to separate "TBLASTX" vs "BLASTN" because length/scores are different units/scales
-    # We will treat "BLASTN (Megablast)" and "BLASTN (Task:blastn)" as basically the same category "Nucleotide"
-    # for visualization scaling, or keep them distinct if distributions vary wildly.
-    # Let's simplify into 2 main groups: Protein-level (TBLASTX) and Nucleotide-level (BLASTN variants)
-    
     df_all['Broad_Mode'] = df_all['Mode'].apply(lambda x: 'TBLASTX' if 'TBLASTX' in x else 'BLASTN (All Types)')
 
     sns.set(style="whitegrid")
     
-    # Create a FacetGrid-like figure manually with subplots
-    # Rows: Broad Mode (TBLASTX vs BLASTN)
-    # Cols: Length Dist, Identity Dist, Scatter (Len vs Ident)
-    
     modes = df_all['Broad_Mode'].unique()
     fig, axes = plt.subplots(len(modes), 3, figsize=(18, 6 * len(modes)))
     
-    # Handle case if only 1 mode exists (axes is 1D array)
     if len(modes) == 1:
         axes = [axes]
 
@@ -108,22 +101,25 @@ def main():
         axes[i][0].text(-0.2, 0.5, mode, transform=axes[i][0].transAxes, 
                         fontsize=16, rotation=90, va='center', fontweight='bold')
 
-        # 1. Alignment Length Distribution
+        # 1. Alignment Length Distribution (Count Density)
         sns.histplot(data=data_subset, x='length', hue='Tool', 
                      element="step", stat="density", common_norm=False, 
-                     log_scale=True, ax=axes[i][0])
+                     log_scale=True, ax=axes[i][0],
+                     palette=CUSTOM_PALETTE)
         axes[i][0].set_title(f'Alignment Length Distribution')
         axes[i][0].set_xlabel('Length (bp or aa)')
 
-        # 2. Identity Distribution
+        # 2. Accumulated Alignment Length vs Identity
         sns.histplot(data=data_subset, x='pident', hue='Tool', 
-                     element="step", stat="density", common_norm=False, 
-                     ax=axes[i][1])
-        axes[i][1].set_title(f'Percentage Identity Distribution')
+                     weights='length', # Use length as weight
+                     element="step", stat="count", common_norm=False, 
+                     ax=axes[i][1],
+                     palette=CUSTOM_PALETTE)
+        axes[i][1].set_title(f'Accumulated Length vs Identity')
         axes[i][1].set_xlabel('Identity (%)')
+        axes[i][1].set_ylabel('Accumulated Length (bp/aa)')
 
         # 3. Scatter: Length vs Identity
-        # Sampling points if too many to prevent overplotting and slow rendering
         if len(data_subset) > 5000:
             plot_data = data_subset.sample(5000, random_state=42)
             title_suffix = "(Subsampled 5k)"
@@ -132,7 +128,8 @@ def main():
             title_suffix = ""
             
         sns.scatterplot(data=plot_data, x='length', y='pident', hue='Tool', 
-                        style='Tool', alpha=0.5, ax=axes[i][2])
+                        style='Tool', alpha=0.5, ax=axes[i][2],
+                        palette=CUSTOM_PALETTE)
         axes[i][2].set_xscale('log')
         axes[i][2].set_title(f'Length vs Identity {title_suffix}')
         axes[i][2].set_xlabel('Length (bp or aa)')

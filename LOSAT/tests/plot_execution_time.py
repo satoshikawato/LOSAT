@@ -183,6 +183,10 @@ def main():
     # === Create Plots ===
     sns.set(style="whitegrid")
     
+    # Define custom colors: LOSAT = Orange, BLAST+ = Blue
+    # Using 'tab:blue' and 'tab:orange' to match standard matplotlib/seaborn defaults
+    CUSTOM_PALETTE = {"LOSAT": "#dd8452", "BLAST+": "#4c72b0"}
+
     # Graph settings
     g = sns.catplot(
         data=df, kind="bar",

@@ -122,9 +122,9 @@ def main():
         axes[i][1].set_ylabel('Accumulated Length (bp/aa)')
 
         # 3. Scatter: Length vs Identity
-        if len(data_subset) > 5000:
-            plot_data = data_subset.sample(5000, random_state=42)
-            title_suffix = "(Subsampled 5k)"
+        if len(data_subset) > 100000:
+            plot_data = data_subset.sample(100000, random_state=42)
+            title_suffix = "(Subsampled 100k)"
         else:
             plot_data = data_subset
             title_suffix = ""

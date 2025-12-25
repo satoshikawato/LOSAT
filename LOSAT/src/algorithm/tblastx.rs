@@ -290,6 +290,8 @@ fn get_score(a: u8, b: u8) -> i32 {
     unsafe { *MATRIX.get_unchecked((a as usize) * 27 + (b as usize)) as i32 }
 }
 
+/// One-hit ungapped extension: extends from a single seed position in both directions.
+/// Used when a single high-scoring seed triggers extension without two-hit requirement.
 fn extend_hit_ungapped(
     q_seq: &[u8],
     s_seq: &[u8],
@@ -300,7 +302,9 @@ fn extend_hit_ungapped(
     let mut current_score = seed_score;
     let mut max_score = current_score;
 
-    // Left
+    // Left extension
+    // NCBI BLAST uses the matrix score for all residues including stop codons.
+    // The BLOSUM62 matrix has appropriate scores for stop codons (typically -4).
     let mut best_i = 0;
     let mut i = 1;
     let max_left = q_pos.min(s_pos);
@@ -309,23 +313,19 @@ fn extend_hit_ungapped(
         let q_char = unsafe { *q_seq.get_unchecked(q_pos - i) };
         let s_char = unsafe { *s_seq.get_unchecked(s_pos - i) };
 
-        // ★修正: 終止コドンに出会ったらペナルティを与えてアライメントを切る
-        if q_char == STOP_CODON || s_char == STOP_CODON {
-            current_score -= 100;
-        } else {
-            current_score += get_score(q_char, s_char);
-        }
+        // Use matrix score for all residues including stop codons (NCBI BLAST compatible)
+        current_score += get_score(q_char, s_char);
 
         if current_score > max_score {
             max_score = current_score;
             best_i = i;
-        } else if (max_score - current_score) > X_DROP_UNGAPPED {
+        } else if (max_score - current_score) >= X_DROP_UNGAPPED {
             break;
         }
         i += 1;
     }
 
-    // Right
+    // Right extension
     let k_size = 3;
     let mut current_score_r = max_score;
     let mut max_score_total = max_score;
@@ -341,17 +341,13 @@ fn extend_hit_ungapped(
         let q_char = unsafe { *q_seq.get_unchecked(q_start_r + j) };
         let s_char = unsafe { *s_seq.get_unchecked(s_start_r + j) };
 
-        // ★修正: 終止コドンチェック
-        if q_char == STOP_CODON || s_char == STOP_CODON {
-            current_score_r -= 100;
-        } else {
-            current_score_r += get_score(q_char, s_char);
-        }
+        // Use matrix score for all residues including stop codons (NCBI BLAST compatible)
+        current_score_r += get_score(q_char, s_char);
 
         if current_score_r > max_score_total {
             max_score_total = current_score_r;
             best_j = k_size + j + 1;
-        } else if (max_score_total - current_score_r) > X_DROP_UNGAPPED {
+        } else if current_score_r <= 0 || (max_score_total - current_score_r) >= X_DROP_UNGAPPED {
             break;
         }
         j += 1;
@@ -364,6 +360,113 @@ fn extend_hit_ungapped(
         s_pos + best_j,
         max_score_total,
     )
+}
+
+/// Two-hit ungapped extension: NCBI BLAST style.
+/// Given two hits L (left/first) and R (right/second) on the same diagonal,
+/// extend from R to the left first. Only if the left extension reaches L,
+/// proceed with right extension. This prevents fragmentation of longer HSPs.
+///
+/// Unlike the one-hit extension, this always returns a result (the left extension
+/// at minimum), matching NCBI BLAST's behavior.
+fn extend_hit_two_hit(
+    q_seq: &[u8],
+    s_seq: &[u8],
+    s_left_off: usize,  // Position of first hit (L) in subject
+    s_right_off: usize, // Position of second hit (R) in subject
+    q_right_off: usize, // Position of second hit (R) in query
+) -> (usize, usize, usize, usize, i32, bool) {
+    let k_size = 3;
+    
+    // First, find the best scoring position within the word at R
+    let mut score = 0i32;
+    let mut left_score = 0i32;
+    let mut right_d = 0usize;
+    
+    for i in 0..k_size {
+        if q_right_off + i >= q_seq.len() || s_right_off + i >= s_seq.len() {
+            break;
+        }
+        let q_char = unsafe { *q_seq.get_unchecked(q_right_off + i) };
+        let s_char = unsafe { *s_seq.get_unchecked(s_right_off + i) };
+        score += get_score(q_char, s_char);
+        
+        if score > left_score {
+            left_score = score;
+            right_d = i + 1; // Position is one beyond the end of the word
+        }
+    }
+    
+    let q_right_off = q_right_off + right_d;
+    let s_right_off = s_right_off + right_d;
+    
+    // Extend to the left from R, trying to reach L
+    let mut current_score = 0i32;
+    let mut max_score = 0i32;
+    let mut left_disp = 0usize;
+    
+    let max_left = q_right_off.min(s_right_off);
+    let mut i = 0;
+    
+    while i < max_left {
+        let q_char = unsafe { *q_seq.get_unchecked(q_right_off - 1 - i) };
+        let s_char = unsafe { *s_seq.get_unchecked(s_right_off - 1 - i) };
+        
+        current_score += get_score(q_char, s_char);
+        
+        if current_score > max_score {
+            max_score = current_score;
+            left_disp = i + 1;
+        }
+        
+        if (max_score - current_score) >= X_DROP_UNGAPPED {
+            break;
+        }
+        i += 1;
+    }
+    
+    // Check if left extension reached the first hit
+    // The distance from R to L is (s_right_off - s_left_off)
+    // We need left_disp >= this distance for the extension to reach L
+    let distance_to_first_hit = s_right_off.saturating_sub(s_left_off);
+    let reached_first_hit = left_disp >= distance_to_first_hit;
+    
+    // Only extend to the right if left extension reached the first hit (NCBI BLAST behavior)
+    let mut right_disp = 0usize;
+    let mut max_score_total = max_score;
+    let mut right_extended = false;
+    
+    if reached_first_hit {
+        let mut right_score = max_score;
+        let q_limit = q_seq.len();
+        let s_limit = s_seq.len();
+        let mut j = 0;
+        
+        while (q_right_off + j) < q_limit && (s_right_off + j) < s_limit {
+            let q_char = unsafe { *q_seq.get_unchecked(q_right_off + j) };
+            let s_char = unsafe { *s_seq.get_unchecked(s_right_off + j) };
+            
+            right_score += get_score(q_char, s_char);
+            
+            if right_score > max_score_total {
+                max_score_total = right_score;
+                right_disp = j + 1;
+            }
+            
+            if right_score <= 0 || (max_score_total - right_score) >= X_DROP_UNGAPPED {
+                break;
+            }
+            j += 1;
+        }
+        right_extended = right_disp > 0;
+    }
+    
+    let q_start = q_right_off - left_disp;
+    let q_end = q_right_off + right_disp;
+    let s_start = s_right_off - left_disp;
+    let s_end = s_right_off + right_disp;
+    
+    (q_start, q_end, s_start, s_end, max_score_total, right_extended)
 }
 
 /// Alignment statistics propagated alongside DP scores for traceback-based calculation
@@ -1267,21 +1370,27 @@ pub fn run(args: TblastxArgs) -> Result<()> {
                                 }
 
                                 // Two-hit requirement: check if there's a previous seed on this diagonal
-                                // within the window distance. This gates BOTH ungapped and gapped extension
-                                // to avoid expensive extensions for every seed hit.
-                                let two_hit_satisfied =
-                                    if let Some(&prev_s_pos) = last_seed.get(&mask_key) {
-                                        s_pos.saturating_sub(prev_s_pos) <= TWO_HIT_WINDOW
+                                // within the window distance. NCBI BLAST style: when two hits occur,
+                                // extend from the second hit (R) to the left and require it to reach
+                                // the first hit (L) before doing the right extension.
+                                let prev_s_pos_opt = last_seed.get(&mask_key).copied();
+                                let two_hit_info = if let Some(prev_s_pos) = prev_s_pos_opt {
+                                    if s_pos.saturating_sub(prev_s_pos) <= TWO_HIT_WINDOW {
+                                        Some(prev_s_pos)
                                     } else {
-                                        false
-                                    };
+                                        None
+                                    }
+                                } else {
+                                    None
+                                };
 
                                 // Update the last seed position for this diagonal
                                 last_seed.insert(mask_key, s_pos);
 
                                 // Skip extension if two-hit not satisfied AND seed score is not exceptionally high
-                                // High seed scores (>= 15) can trigger extension without two-hit
-                                if !two_hit_satisfied && seed_score < 15 {
+                                // High seed scores (>= 26) can trigger extension without two-hit
+                                // Note: 26 is a strict threshold for 3-aa seeds (max ~33 for WWW)
+                                if two_hit_info.is_none() && seed_score < 26 {
                                     if diag_enabled {
                                         diag_inner.seeds_two_hit_failed.fetch_add(1, AtomicOrdering::Relaxed);
                                     }
@@ -1294,13 +1403,31 @@ pub fn run(args: TblastxArgs) -> Result<()> {
                                     diag_inner.ungapped_extensions.fetch_add(1, AtomicOrdering::Relaxed);
                                 }
 
-                                let (qs, qe, ss, se_ungapped, ungapped_score) = extend_hit_ungapped(
-                                    q_aa,
-                                    s_aa,
-                                    q_pos as usize,
-                                    s_pos,
-                                    seed_score,
-                                );
+                                // Use NCBI-style two-hit extension when two-hit is satisfied,
+                                // otherwise use one-hit extension for high-scoring seeds
+                                let k_size = 3usize;
+                                let (qs, qe, ss, se_ungapped, ungapped_score) = if let Some(prev_s_pos) = two_hit_info {
+                                    // Two-hit extension: extend from current seed (R) to the left,
+                                    // only extend right if left extension reaches the first hit (L)
+                                    // NCBI BLAST passes s_left_off = last_hit + wordsize (end of first word)
+                                    let (qs, qe, ss, se, score, _right_extended) = extend_hit_two_hit(
+                                        q_aa,
+                                        s_aa,
+                                        prev_s_pos + k_size,  // End of first hit (L + wordsize), NCBI BLAST style
+                                        s_pos,                // Second hit position (R)
+                                        q_pos as usize,
+                                    );
+                                    (qs, qe, ss, se, score)
+                                } else {
+                                    // One-hit extension for high-scoring seeds
+                                    extend_hit_ungapped(
+                                        q_aa,
+                                        s_aa,
+                                        q_pos as usize,
+                                        s_pos,
+                                        seed_score,
+                                    )
+                                };
 
                                 // Skip if ungapped score is too low
                                 if ungapped_score < MIN_UNGAPPED_SCORE {
@@ -1309,6 +1436,12 @@ pub fn run(args: TblastxArgs) -> Result<()> {
                                     }
                                     continue;
                                 }
+
+                                // NCBI BLAST style diagonal suppression: update mask after EVERY extension,
+                                // not just when e-value passes. This prevents re-extending inside
+                                // already-processed regions and reduces fragmentation.
+                                // Use the end position of the extension (se_ungapped) for suppression.
+                                mask.insert(mask_key, se_ungapped);
 
                                 // NCBI BLAST does not allow gapped search for TBLASTX
                                 // (see blast_options.c: "Gapped search is not allowed for tblastx")
@@ -1327,7 +1460,6 @@ pub fn run(args: TblastxArgs) -> Result<()> {
                                         if diag_enabled {
                                             diag_inner.ungapped_evalue_passed.fetch_add(1, AtomicOrdering::Relaxed);
                                         }
-                                        mask.insert(mask_key, se_ungapped);
                                         let mut match_count = 0;
                                         for k in 0..len {
                                             if q_aa[qs + k] == s_aa[ss + k] {

@@ -417,9 +417,16 @@ fn build_lookup(
     word_size: usize,
     query_masks: &[Vec<MaskedInterval>],
 ) -> KmerLookup {
-    let mut lookup: FxHashMap<u64, Vec<(u32, u32)>> = FxHashMap::default();
     let safe_word_size = word_size.min(31);
     let debug_mode = std::env::var("BLEMIR_DEBUG").is_ok();
+
+    // Phase 4 optimization: Pre-size HashMap based on estimated unique k-mers
+    // For large word sizes (>13), the number of unique k-mers is approximately
+    // equal to the total sequence length (since most k-mers are unique)
+    let total_seq_len: usize = queries.iter().map(|r| r.seq().len()).sum();
+    let estimated_unique_kmers = total_seq_len.saturating_sub(safe_word_size * queries.len());
+    let mut lookup: FxHashMap<u64, Vec<(u32, u32)>> =
+        FxHashMap::with_capacity_and_hasher(estimated_unique_kmers, Default::default());
 
     let mut total_positions = 0usize;
     let mut ambiguous_skipped = 0usize;

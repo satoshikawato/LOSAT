@@ -7,6 +7,7 @@ use rayon::prelude::*;
 use rustc_hash::FxHashMap;
 use std::cmp::Ordering;
 use std::path::PathBuf;
+use std::sync::atomic::{AtomicUsize, Ordering as AtomicOrdering};
 use std::sync::mpsc::channel;
 
 use crate::common::{write_output, Hit};
@@ -37,6 +38,55 @@ const HIGH_SCORE_THRESHOLD: i32 = 60;
 // Parameters for HSP chaining (similar to BLASTN)
 const MAX_GAP_AA: usize = 333; // ~1000bp / 3 for amino acids
 const MAX_DIAG_DRIFT_AA: isize = 33; // ~100bp / 3 for amino acids
+
+/// Diagnostic counters for tracking where hits are lost in the pipeline
+#[derive(Default)]
+struct DiagnosticCounters {
+    // Seed stage
+    kmer_matches: AtomicUsize,
+    seeds_low_score: AtomicUsize,
+    seeds_two_hit_failed: AtomicUsize,
+    seeds_passed: AtomicUsize,
+    // Ungapped extension stage
+    ungapped_extensions: AtomicUsize,
+    ungapped_low_score: AtomicUsize,
+    // Gapped extension stage
+    ungapped_only_hits: AtomicUsize,
+    gapped_extensions: AtomicUsize,
+    gapped_evalue_passed: AtomicUsize,
+    // Post-processing stage (set in chain_and_filter_hsps_protein)
+    hsps_before_chain: AtomicUsize,
+    hsps_after_chain: AtomicUsize,
+    hsps_after_overlap_filter: AtomicUsize,
+}
+
+impl DiagnosticCounters {
+    fn print_summary(&self) {
+        eprintln!("\n=== TBLASTX Pipeline Diagnostics ===");
+        eprintln!("Seed Stage:");
+        eprintln!("  K-mer matches found:        {}", self.kmer_matches.load(AtomicOrdering::Relaxed));
+        eprintln!("  Seeds filtered (low score): {}", self.seeds_low_score.load(AtomicOrdering::Relaxed));
+        eprintln!("  Seeds filtered (two-hit):   {}", self.seeds_two_hit_failed.load(AtomicOrdering::Relaxed));
+        eprintln!("  Seeds passed to extension:  {}", self.seeds_passed.load(AtomicOrdering::Relaxed));
+        eprintln!("Ungapped Extension Stage:");
+        eprintln!("  Ungapped extensions run:    {}", self.ungapped_extensions.load(AtomicOrdering::Relaxed));
+        eprintln!("  Filtered (low score < 20):  {}", self.ungapped_low_score.load(AtomicOrdering::Relaxed));
+        eprintln!("Gapped Extension Stage:");
+        eprintln!("  Ungapped-only hits:         {}", self.ungapped_only_hits.load(AtomicOrdering::Relaxed));
+        eprintln!("  Gapped extensions run:      {}", self.gapped_extensions.load(AtomicOrdering::Relaxed));
+        eprintln!("  Gapped hits (e-value ok):   {}", self.gapped_evalue_passed.load(AtomicOrdering::Relaxed));
+        eprintln!("Post-Processing Stage:");
+        eprintln!("  HSPs before chaining:       {}", self.hsps_before_chain.load(AtomicOrdering::Relaxed));
+        eprintln!("  HSPs after chaining:        {}", self.hsps_after_chain.load(AtomicOrdering::Relaxed));
+        eprintln!("  Final hits (after filter):  {}", self.hsps_after_overlap_filter.load(AtomicOrdering::Relaxed));
+        eprintln!("====================================\n");
+    }
+}
+
+/// Check if diagnostics are enabled via environment variable
+fn diagnostics_enabled() -> bool {
+    std::env::var("LOSAT_DIAGNOSTICS").map(|v| v == "1" || v.to_lowercase() == "true").unwrap_or(false)
+}
 
 #[derive(Args, Debug)]
 pub struct TblastxArgs {
@@ -769,9 +819,16 @@ fn chain_and_filter_hsps_protein(
     db_len_aa_total: usize,
     params: &KarlinParams,
     evalue_threshold: f64,
+    diagnostics: Option<&DiagnosticCounters>,
 ) -> Vec<Hit> {
     if hits.is_empty() {
         return Vec::new();
+    }
+
+    // Record HSPs before chaining
+    let hsps_before = hits.len();
+    if let Some(diag) = diagnostics {
+        diag.hsps_before_chain.store(hsps_before, AtomicOrdering::Relaxed);
     }
 
     // Group hits by query-subject pair AND frame combination
@@ -837,216 +894,36 @@ fn chain_and_filter_hsps_protein(
             }
         }
 
-        // Process each cluster
+        // Process each cluster - output all individual HSPs instead of merging
+        // This matches NCBI BLAST behavior of outputting many short hits
         for cluster in clusters {
-            if cluster.is_empty() {
-                continue;
-            }
-
-            if cluster.len() == 1 {
-                // Single HSP, no re-alignment needed
-                result_hits.push(cluster.into_iter().next().unwrap().hit);
-            } else {
-                // Multiple HSPs - try to merge using the best HSP as seed
-                let q_aa_start = cluster.iter().map(|h| h.q_aa_start).min().unwrap();
-                let q_aa_end = cluster.iter().map(|h| h.q_aa_end).max().unwrap();
-                let s_aa_start = cluster.iter().map(|h| h.s_aa_start).min().unwrap();
-                let s_aa_end = cluster.iter().map(|h| h.s_aa_end).max().unwrap();
-
-                // Find the best HSP in the cluster (highest bit score) to use as seed
-                let best_hsp = cluster
-                    .iter()
-                    .max_by(|a, b| {
-                        a.hit
-                            .bit_score
-                            .partial_cmp(&b.hit.bit_score)
-                            .unwrap_or(std::cmp::Ordering::Equal)
-                    })
-                    .unwrap();
-
-                let q_frame = best_hsp.q_frame;
-                let s_frame = best_hsp.s_frame;
-                let q_orig_len = best_hsp.q_orig_len;
-                let s_orig_len = best_hsp.s_orig_len;
-
-                // Get sequences for this query-subject-frame combination
-                let mut merged_successfully = false;
-                if let Some((q_aa_seq, s_aa_seq)) = sequences.get(&key) {
-                    // Extract the merged region
-                    let q_region_end = q_aa_end.min(q_aa_seq.len());
-                    let s_region_end = s_aa_end.min(s_aa_seq.len());
-
-                    if q_aa_start < q_region_end && s_aa_start < s_region_end {
-                        let q_region = &q_aa_seq[q_aa_start..q_region_end];
-                        let s_region = &s_aa_seq[s_aa_start..s_region_end];
-
-                        // Use the best HSP as seed for extension
-                        // Calculate seed position relative to the merged region
-                        let seed_q_start = best_hsp.q_aa_start.saturating_sub(q_aa_start);
-                        let seed_s_start = best_hsp.s_aa_start.saturating_sub(s_aa_start);
-                        let seed_len = (best_hsp.q_aa_end - best_hsp.q_aa_start)
-                            .min(best_hsp.s_aa_end - best_hsp.s_aa_start)
-                            .min(q_region.len().saturating_sub(seed_q_start))
-                            .min(s_region.len().saturating_sub(seed_s_start));
-
-                        if seed_len > 0 {
-                            let (
-                                final_qs,
-                                final_qe,
-                                final_ss,
-                                final_se,
-                                gapped_score,
-                                matches,
-                                mismatches,
-                                gaps,
-                            ) = extend_gapped_protein(
-                                q_region,
-                                s_region,
-                                seed_q_start,
-                                seed_s_start,
-                                seed_len,
-                                X_DROP_GAPPED_FINAL,
-                            );
-
-                            // Calculate alignment length and identity from actual extension results
-                            let aln_q_len = final_qe.saturating_sub(final_qs);
-                            let aln_s_len = final_se.saturating_sub(final_ss);
-                            let aln_len = aln_q_len.max(aln_s_len);
-
-                            let identity = if aln_len > 0 {
-                                ((matches as f64 / aln_len as f64) * 100.0).min(100.0)
-                            } else {
-                                0.0
-                            };
-
-                            // Calculate statistics
-                            let eff_space = (q_aa_seq.len() as f64) * (db_len_aa_total as f64);
-                            let (bit_score, e_value) =
-                                calculate_statistics(gapped_score, eff_space, params);
-
-                            // Only use merged result if it's valid and better than original HSPs
-                            if bit_score > 0.0
-                                && e_value.is_finite()
-                                && e_value <= evalue_threshold
-                                && aln_len > 0
-                            {
-                                // Convert amino acid coordinates back to DNA coordinates
-                                // Use the actual extension boundaries, not the cluster boundaries
-                                let actual_q_aa_start = q_aa_start + final_qs;
-                                let actual_q_aa_end = q_aa_start + final_qe;
-                                let actual_s_aa_start = s_aa_start + final_ss;
-                                let actual_s_aa_end = s_aa_start + final_se;
-
-                                let (q_start_bp, q_end_bp) = convert_coords(
-                                    actual_q_aa_start,
-                                    actual_q_aa_end,
-                                    q_frame,
-                                    q_orig_len,
-                                );
-                                let (s_start_bp, s_end_bp) = convert_coords(
-                                    actual_s_aa_start,
-                                    actual_s_aa_end,
-                                    s_frame,
-                                    s_orig_len,
-                                );
-
-                                result_hits.push(Hit {
-                                    query_id: key.0.clone(),
-                                    subject_id: key.1.clone(),
-                                    identity,
-                                    length: aln_len,
-                                    mismatch: mismatches,
-                                    gapopen: gaps,
-                                    q_start: q_start_bp,
-                                    q_end: q_end_bp,
-                                    s_start: s_start_bp,
-                                    s_end: s_end_bp,
-                                    e_value,
-                                    bit_score,
-                                });
-                                merged_successfully = true;
-                            }
-                        }
-                    }
-                }
-
-                // If merging failed, fall back to emitting the original HSPs
-                if !merged_successfully {
-                    for ext_hit in cluster {
-                        // Only emit if the original HSP passes the e-value threshold
-                        if ext_hit.hit.e_value <= evalue_threshold {
-                            result_hits.push(ext_hit.hit);
-                        }
-                    }
+            for ext_hit in cluster {
+                // Only emit if the original HSP passes the e-value threshold
+                if ext_hit.hit.e_value <= evalue_threshold {
+                    result_hits.push(ext_hit.hit);
                 }
             }
         }
     }
 
-    // Final pass: remove redundant overlapping hits
+    // Record HSPs after chaining (before overlap filter)
+    if let Some(diag) = diagnostics {
+        diag.hsps_after_chain.store(result_hits.len(), AtomicOrdering::Relaxed);
+    }
+
+    // Sort by bit score (highest first) for consistent output
     result_hits.sort_by(|a, b| {
         b.bit_score
             .partial_cmp(&a.bit_score)
             .unwrap_or(Ordering::Equal)
     });
 
-    let mut final_hits: Vec<Hit> = Vec::new();
-    for hit in result_hits {
-        let dominated = final_hits.iter().any(|kept| {
-            // Must be same query-subject pair
-            if hit.query_id != kept.query_id || hit.subject_id != kept.subject_id {
-                return false;
-            }
-
-            // Normalize coordinates for reverse strand hits (where start > end)
-            let hit_q_lo = hit.q_start.min(hit.q_end);
-            let hit_q_hi = hit.q_start.max(hit.q_end);
-            let kept_q_lo = kept.q_start.min(kept.q_end);
-            let kept_q_hi = kept.q_start.max(kept.q_end);
-
-            let q_overlap_start = hit_q_lo.max(kept_q_lo);
-            let q_overlap_end = hit_q_hi.min(kept_q_hi);
-            let q_overlap = if q_overlap_end > q_overlap_start {
-                q_overlap_end - q_overlap_start
-            } else {
-                0
-            };
-            let q_hit_len = hit_q_hi - hit_q_lo;
-            let q_overlap_frac = if q_hit_len > 0 {
-                q_overlap as f64 / q_hit_len as f64
-            } else {
-                0.0
-            };
-
-            // Normalize coordinates for reverse strand hits (where start > end)
-            let hit_s_lo = hit.s_start.min(hit.s_end);
-            let hit_s_hi = hit.s_start.max(hit.s_end);
-            let kept_s_lo = kept.s_start.min(kept.s_end);
-            let kept_s_hi = kept.s_start.max(kept.s_end);
-
-            let s_overlap_start = hit_s_lo.max(kept_s_lo);
-            let s_overlap_end = hit_s_hi.min(kept_s_hi);
-            let s_overlap = if s_overlap_end > s_overlap_start {
-                s_overlap_end - s_overlap_start
-            } else {
-                0
-            };
-            let s_hit_len = hit_s_hi - hit_s_lo;
-            let s_overlap_frac = if s_hit_len > 0 {
-                s_overlap as f64 / s_hit_len as f64
-            } else {
-                0.0
-            };
-
-            q_overlap_frac >= 0.5 && s_overlap_frac >= 0.5
-        });
-
-        if !dominated {
-            final_hits.push(hit);
-        }
+    // Record final hits (no overlap filter - output all HSPs like NCBI BLAST)
+    if let Some(diag) = diagnostics {
+        diag.hsps_after_overlap_filter.store(result_hits.len(), AtomicOrdering::Relaxed);
     }
 
-    final_hits
+    result_hits
 }
 
 pub fn run(args: TblastxArgs) -> Result<()> {
@@ -1057,6 +934,10 @@ pub fn run(args: TblastxArgs) -> Result<()> {
     };
     let query_code = GeneticCode::from_id(args.query_gencode);
     let db_code = GeneticCode::from_id(args.db_gencode);
+
+    // Initialize diagnostic counters if enabled
+    let diag_enabled = diagnostics_enabled();
+    let diagnostics = std::sync::Arc::new(DiagnosticCounters::default());
 
     rayon::ThreadPoolBuilder::new()
         .num_threads(num_threads)
@@ -1135,6 +1016,8 @@ pub fn run(args: TblastxArgs) -> Result<()> {
     let out_path = args.out.clone();
     let params_clone = params.clone();
     let evalue_threshold = args.evalue;
+    let diagnostics_clone = diagnostics.clone();
+    let diag_enabled_clone = diag_enabled;
     let writer_handle = std::thread::spawn(move || -> Result<()> {
         let mut all_hits: Vec<ExtendedHit> = Vec::new();
         let mut all_sequences: FxHashMap<SequenceKey, SequenceData> = FxHashMap::default();
@@ -1147,22 +1030,25 @@ pub fn run(args: TblastxArgs) -> Result<()> {
         }
 
         // Chain nearby HSPs into longer alignments using cluster-then-extend
+        let diag_ref = if diag_enabled_clone { Some(diagnostics_clone.as_ref()) } else { None };
         let filtered_hits = chain_and_filter_hsps_protein(
             all_hits,
             &all_sequences,
             db_len_aa_total,
             &params_clone,
             evalue_threshold,
+            diag_ref,
         );
 
         write_output(&filtered_hits, out_path.as_ref())?;
         Ok(())
     });
 
+    let diagnostics_for_parallel = diagnostics.clone();
     subjects_raw
         .par_iter()
         .enumerate()
-        .for_each_with(tx, |tx, (_s_idx, s_record)| {
+        .for_each_with((tx, diagnostics_for_parallel), |(tx, diag), (_s_idx, s_record)| {
             let s_frames = generate_frames(s_record.seq(), &db_code);
             let s_id = s_record
                 .id()
@@ -1174,6 +1060,7 @@ pub fn run(args: TblastxArgs) -> Result<()> {
 
             // Parallelize over subject frames for intra-subject parallelism
             // Each frame is independent since mask_key includes s_f_idx
+            let diag_inner = diag.clone();
             let frame_results: Vec<(Vec<ExtendedHit>, Vec<(SequenceKey, SequenceData)>)> =
                 s_frames
                     .par_iter()
@@ -1207,6 +1094,11 @@ pub fn run(args: TblastxArgs) -> Result<()> {
 
                             let matches = unsafe { lookup.get_unchecked(kmer) };
 
+                            // Count k-mer matches for diagnostics
+                            if diag_enabled && !matches.is_empty() {
+                                diag_inner.kmer_matches.fetch_add(matches.len(), AtomicOrdering::Relaxed);
+                            }
+
                             for &(q_idx, q_f_idx, q_pos) in matches {
                                 let diag = s_pos as isize - q_pos as isize;
                                 // Simplified mask_key since we're now per-frame (s_f_idx is implicit)
@@ -1227,6 +1119,9 @@ pub fn run(args: TblastxArgs) -> Result<()> {
                                     + get_score(c3 as u8, q_aa[q_pos as usize + 2]);
 
                                 if seed_score < 11 {
+                                    if diag_enabled {
+                                        diag_inner.seeds_low_score.fetch_add(1, AtomicOrdering::Relaxed);
+                                    }
                                     continue;
                                 }
 
@@ -1246,7 +1141,16 @@ pub fn run(args: TblastxArgs) -> Result<()> {
                                 // Skip extension if two-hit not satisfied AND seed score is not exceptionally high
                                 // High seed scores (>= 15) can trigger extension without two-hit
                                 if !two_hit_satisfied && seed_score < 15 {
+                                    if diag_enabled {
+                                        diag_inner.seeds_two_hit_failed.fetch_add(1, AtomicOrdering::Relaxed);
+                                    }
                                     continue;
+                                }
+
+                                // Count seeds that passed to extension
+                                if diag_enabled {
+                                    diag_inner.seeds_passed.fetch_add(1, AtomicOrdering::Relaxed);
+                                    diag_inner.ungapped_extensions.fetch_add(1, AtomicOrdering::Relaxed);
                                 }
 
                                 let (qs, qe, ss, se_ungapped, ungapped_score) = extend_hit_ungapped(
@@ -1259,12 +1163,18 @@ pub fn run(args: TblastxArgs) -> Result<()> {
 
                                 // Skip if ungapped score is too low
                                 if ungapped_score < 20 {
+                                    if diag_enabled {
+                                        diag_inner.ungapped_low_score.fetch_add(1, AtomicOrdering::Relaxed);
+                                    }
                                     continue;
                                 }
 
                                 // For ungapped-only hits (no gapped extension), record if e-value passes
                                 // Only do gapped extension if two-hit requirement is met AND ungapped score is high enough
                                 if !two_hit_satisfied || ungapped_score < HIGH_SCORE_THRESHOLD {
+                                    if diag_enabled {
+                                        diag_inner.ungapped_only_hits.fetch_add(1, AtomicOrdering::Relaxed);
+                                    }
                                     // Record the ungapped hit if it passes e-value threshold
                                     let eff_space = (q_aa.len() as f64) * (db_len_aa_total as f64);
                                     let (bit_score, e_val) =
@@ -1330,6 +1240,11 @@ pub fn run(args: TblastxArgs) -> Result<()> {
                                     continue;
                                 }
 
+                                // Count gapped extensions
+                                if diag_enabled {
+                                    diag_inner.gapped_extensions.fetch_add(1, AtomicOrdering::Relaxed);
+                                }
+
                                 // Two-phase gapped extension (NCBI-style):
                                 // Phase 1: Preliminary extension with lower X-drop
                                 let (
@@ -1389,6 +1304,9 @@ pub fn run(args: TblastxArgs) -> Result<()> {
                                     calculate_statistics(gapped_score, eff_space, &params);
 
                                 if e_val <= args.evalue {
+                                    if diag_enabled {
+                                        diag_inner.gapped_evalue_passed.fetch_add(1, AtomicOrdering::Relaxed);
+                                    }
                                     // Calculate alignment length as the max of query and subject spans
                                     let q_len = final_qe - final_qs;
                                     let s_len_aln = final_se - final_ss;
@@ -1469,6 +1387,11 @@ pub fn run(args: TblastxArgs) -> Result<()> {
 
     bar.finish();
     writer_handle.join().unwrap()?;
+
+    // Print diagnostic summary if enabled
+    if diag_enabled {
+        diagnostics.print_summary();
+    }
 
     Ok(())
 }

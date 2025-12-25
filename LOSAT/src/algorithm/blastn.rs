@@ -3312,7 +3312,7 @@ pub fn run(args: BlastnArgs) -> Result<()> {
                 return;
             }
 
-            // Debug counters for this subject
+            // Debug counters for this subject (only used when debug_mode is true)
             let mut dbg_total_s_positions = 0usize;
             let dbg_ambiguous_skipped = 0usize;
             let dbg_no_lookup_match = 0usize;
@@ -3321,14 +3321,25 @@ pub fn run(args: BlastnArgs) -> Result<()> {
             let mut dbg_ungapped_low = 0usize;
             let mut dbg_two_hit_failed = 0usize;
             let mut dbg_gapped_attempted = 0usize;
-            let mut dbg_window_seeds = 0usize;
+            let dbg_window_seeds = 0usize;
 
+            // PERFORMANCE OPTIMIZATION: Pre-allocate HashMaps with estimated capacity
+            // For typical bacterial genomes (~5MB), we expect ~100K-500K seeds on unique diagonals
+            // Using s_len / 100 as a reasonable estimate for number of unique diagonals
+            let estimated_diagonals = (s_len / 100).max(1000);
+            
             // Mask to track already-extended regions on each diagonal
             // Phase 4: Use packed u64 key instead of (u32, isize) tuple for faster hashing
-            let mut mask: FxHashMap<u64, usize> = FxHashMap::default();
+            let mut mask: FxHashMap<u64, usize> = FxHashMap::with_capacity_and_hasher(
+                estimated_diagonals,
+                Default::default()
+            );
             // Two-hit tracking: stores the last seed position on each diagonal for each query
             // Phase 4: Use packed u64 key instead of (u32, isize) tuple for faster hashing
-            let mut last_seed: FxHashMap<u64, usize> = FxHashMap::default();
+            let mut last_seed: FxHashMap<u64, usize> = FxHashMap::with_capacity_and_hasher(
+                estimated_diagonals,
+                Default::default()
+            );
             let safe_k = effective_word_size.min(31);
 
             // PERFORMANCE OPTIMIZATION: Rolling k-mer scanner with O(1) sliding window
@@ -3396,31 +3407,17 @@ pub fn run(args: BlastnArgs) -> Result<()> {
                 };
 
                 for &(q_idx, q_pos) in matches_slice {
-                    dbg_seeds_found += 1;
                     let diag = kmer_start as isize - q_pos as isize;
 
-                    // Check if this seed is in the debug window
-                    let in_window = if let Some((q_start, q_end, s_start, s_end)) = debug_window {
-                        (q_pos as usize) >= q_start && (q_pos as usize) <= q_end &&
-                        kmer_start >= s_start && kmer_start <= s_end
-                    } else {
-                        false
-                    };
-
-                    if in_window {
-                        dbg_window_seeds += 1;
-                    }
-
-                    // Check if this region was already extended (skip if mask is disabled for debugging)
+                    // PERFORMANCE OPTIMIZATION: Compute diag_key once and reuse
                     // Phase 4: Use packed key for faster HashMap lookup
                     let diag_key = pack_diag_key(q_idx, diag);
+                    
+                    // Check if this region was already extended (skip if mask is disabled for debugging)
                     if !disable_mask {
                         if let Some(&last_s_end) = mask.get(&diag_key) {
                             if kmer_start < last_s_end {
-                                dbg_mask_skipped += 1;
-                                if in_window && debug_mode {
-                                    eprintln!("[DEBUG WINDOW] Seed at q={}, s={} SKIPPED by mask (last_s_end={})", q_pos, kmer_start, last_s_end);
-                                }
+                                if debug_mode { dbg_mask_skipped += 1; }
                                 continue;
                             }
                         }
@@ -3429,7 +3426,6 @@ pub fn run(args: BlastnArgs) -> Result<()> {
                     // PERFORMANCE OPTIMIZATION: Apply two-hit filter BEFORE ungapped extension
                     // This is the key optimization that makes NCBI BLAST fast
                     // Most seeds don't have a nearby seed on the same diagonal, so we skip them early
-                    // Phase 4: Use packed key (diag_key computed above) for faster HashMap lookup
                     let trigger_extension =
                         if let Some(&prev_s_pos) = last_seed.get(&diag_key) {
                             // Check if the current seed is within the two-hit window
@@ -3439,18 +3435,17 @@ pub fn run(args: BlastnArgs) -> Result<()> {
                         };
 
                     // Update the last seed position for this diagonal
-                    // Phase 4: Use packed key for faster HashMap insert
                     last_seed.insert(diag_key, kmer_start);
 
                     // Skip ungapped extension if two-hit requirement is not met
                     // This is the key optimization - we skip most seeds without doing any extension
                     if !trigger_extension {
-                        dbg_two_hit_failed += 1;
-                        if in_window && debug_mode {
-                            eprintln!("[DEBUG WINDOW] Seed at q={}, s={} SKIPPED: two-hit not met", q_pos, kmer_start);
-                        }
+                        if debug_mode { dbg_two_hit_failed += 1; }
                         continue;
                     }
+                    
+                    // Debug counters (only increment when debug_mode is true)
+                    if debug_mode { dbg_seeds_found += 1; }
 
                     let q_record = &queries[q_idx as usize];
 
@@ -3467,18 +3462,11 @@ pub fn run(args: BlastnArgs) -> Result<()> {
                     // Skip if ungapped score is too low
                     // Use task-specific threshold: higher for blastn to reduce extension count
                     if ungapped_score < min_ungapped_score {
-                        dbg_ungapped_low += 1;
-                        if in_window && debug_mode {
-                            eprintln!("[DEBUG WINDOW] Seed at q={}, s={} SKIPPED: ungapped_score={} < {}", q_pos, kmer_start, ungapped_score, min_ungapped_score);
-                        }
+                        if debug_mode { dbg_ungapped_low += 1; }
                         continue;
                     }
 
-                    dbg_gapped_attempted += 1;
-
-                    if in_window && debug_mode {
-                        eprintln!("[DEBUG WINDOW] Seed at q={}, s={} -> GAPPED EXTENSION (ungapped_score={}, seed_len={})", q_pos, kmer_start, ungapped_score, qe - qs);
-                    }
+                    if debug_mode { dbg_gapped_attempted += 1; }
 
                     // Gapped extension with NCBI-style high X-drop for longer alignments
                     // Using X_DROP_GAPPED_FINAL directly to allow alignments to push through
@@ -3508,17 +3496,7 @@ pub fn run(args: BlastnArgs) -> Result<()> {
                         use_dp, // Use DP for blastn task, greedy for megablast
                     );
 
-                    // Debug: show gapped extension results for window seeds
-                    if in_window && debug_mode {
-                        let aln_len = matches + mismatches + gap_letters;
-                        let identity = if aln_len > 0 { 100.0 * matches as f64 / aln_len as f64 } else { 0.0 };
-                        eprintln!(
-                            "[DEBUG WINDOW] Gapped result: q={}-{}, s={}-{}, score={}, len={}, identity={:.1}%, gaps={}, dp_cells={}",
-                            final_qs, final_qe, final_ss, final_se, score, aln_len, identity, gap_letters, dp_cells
-                        );
-                    }
-
-                    // Suppress unused variable warning when not in debug mode
+                    // Suppress unused variable warning
                     let _ = dp_cells;
 
                     // Update mask (unless disabled for debugging via BLEMIR_DEBUG_NO_MASK=1)

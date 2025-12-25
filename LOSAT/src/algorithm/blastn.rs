@@ -120,6 +120,11 @@ pub struct BlastnArgs {
     pub dust_linker: usize,
     #[arg(long, short = 'v', default_value_t = false)]
     pub verbose: bool,
+    /// Enable HSP chaining to merge nearby HSPs into longer alignments.
+    /// By default, chaining is disabled for BLAST-compatible output (individual HSPs).
+    /// Enable this for visualization tools like gbdraw that benefit from longer continuous alignments.
+    #[arg(long, default_value_t = false)]
+    pub chain: bool,
 }
 
 // 2-bit encoding for compact storage and hashing
@@ -2346,6 +2351,7 @@ fn chain_and_filter_hsps(
     params: &KarlinParams,
     _use_dp: bool,
     verbose: bool,
+    chain_enabled: bool,
 ) -> Vec<Hit> {
     if hits.is_empty() {
         return hits;
@@ -2353,7 +2359,21 @@ fn chain_and_filter_hsps(
 
     let total_start = std::time::Instant::now();
 
-    // Parameters for chaining - adaptive based on HSP quality
+    // BLAST-compatible mode: when chaining is disabled, skip clustering/merging
+    // but still apply overlap filtering to remove redundant hits
+    // This matches NCBI BLAST's behavior of outputting individual HSPs without merging
+    let mut result_hits: Vec<Hit> = if !chain_enabled {
+        if verbose {
+            eprintln!(
+                "[INFO] Chaining disabled (BLAST-compatible mode): skipping clustering, {} raw HSPs",
+                hits.len()
+            );
+        }
+        hits // Use raw hits directly, skip to filtering step below
+    } else {
+        // === BEGIN CHAINING LOGIC ===
+
+        // Parameters for chaining - adaptive based on HSP quality
     // Key insight: use bit_score/length as a proxy for identity
     // High-quality HSPs (high identity) can be merged across larger gaps
     // Low-quality HSPs (low identity) should use strict gap limits
@@ -2761,11 +2781,15 @@ fn chain_and_filter_hsps(
         result_hits.extend(single_hsp_hits);
     }
 
-    // Log after cluster processing
-    if verbose {
-        eprintln!("[INFO] Cluster processing done: {} result_hits, {} align_region calls in {:.3}s, max_region={}bp",
-                  result_hits.len(), align_calls, total_align_time.as_secs_f64(), max_region_len);
-    }
+        // Log after cluster processing
+        if verbose {
+            eprintln!("[INFO] Cluster processing done: {} result_hits, {} align_region calls in {:.3}s, max_region={}bp",
+                      result_hits.len(), align_calls, total_align_time.as_secs_f64(), max_region_len);
+        }
+
+        result_hits // Return chained hits from else block
+        // === END CHAINING LOGIC ===
+    };
 
     // Final pass: remove redundant overlapping hits using spatial binning for O(n) instead of O(n²)
     // IMPORTANT: For self-comparison, hits on different diagonals represent different biological
@@ -2873,18 +2897,11 @@ fn chain_and_filter_hsps(
             "[INFO]   Total time: {:.3}s",
             total_start.elapsed().as_secs_f64()
         );
-        eprintln!(
-            "[INFO]   Clustering: {:.3}s ({} clusters, max size {})",
-            total_clustering_time.as_secs_f64(),
-            total_clusters,
-            max_cluster_size
-        );
-        eprintln!(
-            "[INFO]   Alignment: {:.3}s ({} calls, max region {}bp)",
-            total_align_time.as_secs_f64(),
-            align_calls,
-            max_region_len
-        );
+        if chain_enabled {
+            eprintln!("[INFO]   Chaining: enabled");
+        } else {
+            eprintln!("[INFO]   Chaining: disabled (BLAST-compatible mode)");
+        }
         eprintln!(
             "[INFO]   Filtering: {:.3}s ({} -> {} hits)",
             filter_time.as_secs_f64(),
@@ -3166,6 +3183,7 @@ pub fn run(args: BlastnArgs) -> Result<()> {
     // Keep a sender for the main thread to send the completion signal
     let tx_main = tx.clone();
     let verbose = args.verbose;
+    let chain_enabled = args.chain;
 
     let writer_handle = std::thread::spawn(move || -> Result<()> {
         if verbose {
@@ -3214,6 +3232,7 @@ pub fn run(args: BlastnArgs) -> Result<()> {
         let chain_start = std::time::Instant::now();
 
         // Chain nearby HSPs into longer alignments using cluster-then-extend
+        // When chain_enabled is false (default), this just returns individual HSPs for BLAST compatibility
         let filtered_hits = chain_and_filter_hsps(
             all_hits,
             &all_sequences,
@@ -3226,6 +3245,7 @@ pub fn run(args: BlastnArgs) -> Result<()> {
             &params_clone,
             use_dp,
             verbose,
+            chain_enabled,
         );
 
         if verbose {

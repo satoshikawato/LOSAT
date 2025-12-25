@@ -863,11 +863,12 @@ fn hsp_dominates(p: &ExtendedHit, y: &ExtendedHit) -> bool {
         return false;
     }
 
-    // Use query coordinates for overlap calculation (like NCBI BLAST uses query offsets)
-    let b1 = p.hit.q_start as i64;
-    let e1 = p.hit.q_end as i64;
-    let b2 = y.hit.q_start as i64;
-    let e2 = y.hit.q_end as i64;
+    // Normalize coordinates to plus strand (like NCBI BLAST's LinkedHSP.begin/end)
+    // For reverse-strand hits, q_start > q_end, so we use min/max to ensure b < e
+    let b1 = p.hit.q_start.min(p.hit.q_end) as i64;
+    let e1 = p.hit.q_start.max(p.hit.q_end) as i64;
+    let b2 = y.hit.q_start.min(y.hit.q_end) as i64;
+    let e2 = y.hit.q_start.max(y.hit.q_end) as i64;
 
     let l1 = e1 - b1;
     let l2 = e2 - b2;

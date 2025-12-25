@@ -147,6 +147,22 @@ fn encode_kmer(seq: &[u8], start: usize, k: usize) -> Option<u64> {
     Some(encoded)
 }
 
+/// Generate the reverse complement of a DNA sequence.
+/// Used for searching the minus strand of subject sequences.
+/// Complement: A<->T, C<->G, ambiguous bases become N
+fn reverse_complement(seq: &[u8]) -> Vec<u8> {
+    seq.iter()
+        .rev()
+        .map(|&b| match b {
+            b'A' | b'a' => b'T',
+            b'T' | b't' | b'U' | b'u' => b'A',
+            b'G' | b'g' => b'C',
+            b'C' | b'c' => b'G',
+            _ => b'N',
+        })
+        .collect()
+}
+
 type KmerLookup = FxHashMap<u64, Vec<(u32, u32)>>;
 
 /// Direct address table for k-mer lookup - O(1) access instead of hash lookup
@@ -3343,12 +3359,6 @@ pub fn run(args: BlastnArgs) -> Result<()> {
             let mut dbg_gapped_attempted = 0usize;
             let mut dbg_window_seeds = 0usize;
 
-            // Mask to track already-extended regions on each diagonal
-            // Phase 4: Use packed u64 key instead of (u32, isize) tuple for faster hashing
-            let mut mask: FxHashMap<u64, usize> = FxHashMap::default();
-            // Two-hit tracking: stores the last seed position on each diagonal for each query
-            // Phase 4: Use packed u64 key instead of (u32, isize) tuple for faster hashing
-            let mut last_seed: FxHashMap<u64, usize> = FxHashMap::default();
             let safe_k = effective_word_size.min(31);
 
             // PERFORMANCE OPTIMIZATION: Rolling k-mer scanner with O(1) sliding window
@@ -3376,14 +3386,36 @@ pub fn run(args: BlastnArgs) -> Result<()> {
                 lut
             };
 
-            // Rolling k-mer state
-            let mut current_kmer: u64 = 0;
-            let mut valid_bases: usize = 0; // Count of consecutive valid bases in current window
+            // Generate reverse complement for minus strand search
+            let s_seq_rc = reverse_complement(s_seq);
 
-            // Scan through the subject sequence with rolling k-mer
-            for s_pos in 0..s_len {
-                let base = s_seq[s_pos];
-                let code = ENCODE_LUT[base as usize];
+            // Search both strands: plus (forward) and minus (reverse complement)
+            // is_minus_strand: false = plus strand, true = minus strand
+            for is_minus_strand in [false, true] {
+                // Select the sequence to search based on strand
+                let search_seq: &[u8] = if is_minus_strand {
+                    &s_seq_rc
+                } else {
+                    s_seq
+                };
+
+                // Mask to track already-extended regions on each diagonal
+                // Phase 4: Use packed u64 key instead of (u32, isize) tuple for faster hashing
+                // Reset for each strand to avoid interference
+                let mut mask: FxHashMap<u64, usize> = FxHashMap::default();
+                // Two-hit tracking: stores the last seed position on each diagonal for each query
+                // Phase 4: Use packed u64 key instead of (u32, isize) tuple for faster hashing
+                // Reset for each strand to avoid interference
+                let mut last_seed: FxHashMap<u64, usize> = FxHashMap::default();
+
+                // Rolling k-mer state
+                let mut current_kmer: u64 = 0;
+                let mut valid_bases: usize = 0; // Count of consecutive valid bases in current window
+
+                // Scan through the subject sequence with rolling k-mer
+                for s_pos in 0..s_len {
+                    let base = search_seq[s_pos];
+                    let code = ENCODE_LUT[base as usize];
 
                 if code == 0xFF {
                     // Ambiguous base - reset the rolling window
@@ -3477,7 +3509,7 @@ pub fn run(args: BlastnArgs) -> Result<()> {
                     // Now do ungapped extension (only for seeds that passed two-hit filter)
                     let (qs, qe, ss, _se, ungapped_score) = extend_hit_ungapped(
                         q_record.seq(),
-                        s_seq,
+                        search_seq,
                         q_pos as usize,
                         kmer_start,
                         reward,
@@ -3516,7 +3548,7 @@ pub fn run(args: BlastnArgs) -> Result<()> {
                         dp_cells,
                     ) = extend_gapped_heuristic(
                         q_record.seq(),
-                        s_seq,
+                        search_seq,
                         qs,
                         ss,
                         qe - qs,
@@ -3581,6 +3613,22 @@ pub fn run(args: BlastnArgs) -> Result<()> {
                             ));
                         }
 
+                        // Convert coordinates for minus strand hits
+                        // For minus strand: positions in reverse complement need to be converted
+                        // back to original subject coordinates, with s_start > s_end to indicate minus strand
+                        let (hit_s_start, hit_s_end) = if is_minus_strand {
+                            // Convert from reverse complement coordinates to original coordinates
+                            // In reverse complement: position 0 corresponds to original position s_len-1
+                            // final_ss and final_se are 0-based positions in the reverse complement
+                            // We need to convert them to 1-based positions in the original sequence
+                            // with s_start > s_end to indicate minus strand
+                            let orig_s_start = s_len - final_ss; // 1-based, larger value
+                            let orig_s_end = s_len - final_se + 1; // 1-based, smaller value
+                            (orig_s_start, orig_s_end)
+                        } else {
+                            (final_ss + 1, final_se)
+                        };
+
                         local_hits.push(Hit {
                             query_id: q_id,
                             subject_id: s_id.clone(),
@@ -3590,14 +3638,15 @@ pub fn run(args: BlastnArgs) -> Result<()> {
                             gapopen: gaps,
                             q_start: final_qs + 1,
                             q_end: final_qe,
-                            s_start: final_ss + 1,
-                            s_end: final_se,
+                            s_start: hit_s_start,
+                            s_end: hit_s_end,
                             e_value: eval,
                             bit_score,
                         });
                     }
                 }
-            }
+                } // end of s_pos loop
+            } // end of strand loop
 
             // Print debug summary for this subject
             if debug_mode {

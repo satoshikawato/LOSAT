@@ -234,51 +234,6 @@ pub struct PvDirectLookup {
     word_size: usize,
 }
 
-/// Two-stage lookup table (like NCBI BLAST)
-/// - lut_word_length: Used for indexing (e.g., 8 for megablast)
-/// - word_length: Used for extension triggering (e.g., 28 for megablast)
-/// This allows O(1) direct array access even for large word_length values
-pub struct TwoStageLookup {
-    /// Lookup table using lut_word_length
-    pv_lookup: PvDirectLookup,
-    /// Lookup word length (for indexing)
-    lut_word_length: usize,
-    /// Extension word length (for triggering extension)
-    word_length: usize,
-}
-
-impl TwoStageLookup {
-    /// Check if a lut_word_length k-mer has any hits (O(1))
-    #[inline(always)]
-    pub fn has_hits(&self, lut_kmer: u64) -> bool {
-        self.pv_lookup.has_hits(lut_kmer)
-    }
-
-    /// Get hits for a lut_word_length k-mer
-    #[inline(always)]
-    pub fn get_hits(&self, lut_kmer: u64) -> &[(u32, u32)] {
-        self.pv_lookup.get_hits(lut_kmer)
-    }
-
-    /// Get lookup word length
-    #[inline(always)]
-    pub fn lut_word_length(&self) -> usize {
-        self.lut_word_length
-    }
-
-    /// Get extension word length
-    #[inline(always)]
-    pub fn word_length(&self) -> usize {
-        self.word_length
-    }
-
-    /// Calculate optimal scan step
-    #[inline(always)]
-    pub fn scan_step(&self) -> usize {
-        (self.word_length as isize - self.lut_word_length as isize + 1).max(1) as usize
-    }
-}
-
 impl PvDirectLookup {
     /// Check if a k-mer has any hits using the presence vector (O(1))
     #[inline(always)]
@@ -553,40 +508,6 @@ fn build_lookup(
     }
 
     lookup
-}
-
-/// Build two-stage lookup table (like NCBI BLAST)
-/// - lut_word_length: Used for indexing (typically 8 for megablast)
-/// - word_length: Used for extension triggering (typically 28 for megablast)
-/// This allows O(1) direct array access even for large word_length values
-fn build_two_stage_lookup(
-    queries: &[fasta::Record],
-    word_length: usize,
-    lut_word_length: usize,
-    query_masks: &[Vec<MaskedInterval>],
-) -> TwoStageLookup {
-    let debug_mode = std::env::var("BLEMIR_DEBUG").is_ok();
-    
-    if debug_mode {
-        eprintln!(
-            "[DEBUG] build_two_stage_lookup: word_length={}, lut_word_length={}",
-            word_length, lut_word_length
-        );
-    }
-
-    // Build the lookup table using lut_word_length
-    // We index all positions where a full word_length match is possible
-    let pv_lookup = build_pv_direct_lookup(queries, lut_word_length, query_masks);
-    
-    // Note: The actual word_length matching is done during scanning,
-    // where we check if the subject sequence has a word_length match
-    // starting at the position indicated by the lut_word_length lookup
-    
-    TwoStageLookup {
-        pv_lookup,
-        lut_word_length,
-        word_length,
-    }
 }
 
 /// Build direct address table for k-mer lookup (O(1) access)
@@ -3352,52 +3273,24 @@ pub fn run(args: BlastnArgs) -> Result<()> {
         vec![Vec::new(); queries.len()]
     };
 
-    // TWO-STAGE LOOKUP TABLE (NCBI BLAST algorithm)
-    // For word_size >= 16 (e.g., megablast with word_size=28), use two-stage lookup:
-    // - lut_word_length = 8 for indexing (direct array access, 65,536 entries)
-    // - word_length = 28 for extension triggering
-    // This provides O(1) lookup performance even for large word sizes
-    let use_two_stage = effective_word_size >= 16;
-    let lut_word_length = if use_two_stage {
-        8 // NCBI BLAST default for word_size >= 16
-    } else {
-        effective_word_size.min(MAX_DIRECT_LOOKUP_WORD_SIZE)
-    };
-
     eprintln!(
-        "Building lookup (Task: {}, Word: {}, TwoStage: {}, LUTWord: {}, Direct: {}, DUST: {})...",
-        args.task, effective_word_size, use_two_stage, lut_word_length, use_direct_lookup, args.dust
+        "Building lookup (Task: {}, Word: {}, Direct: {}, DUST: {}, PV: {})...",
+        args.task, effective_word_size, use_direct_lookup, args.dust, use_direct_lookup
     );
 
     // Build the appropriate lookup table
-    let two_stage_lookup: Option<TwoStageLookup> = if use_two_stage {
-        Some(build_two_stage_lookup(&queries, effective_word_size, lut_word_length, &query_masks))
-    } else {
-        None
-    };
-    let pv_direct_lookup: Option<PvDirectLookup> = if !use_two_stage && use_direct_lookup {
+    // Phase 2: Use PvDirectLookup with Presence-Vector for fast filtering (word_size <= 13)
+    // For word_size > 13, use hash-based lookup
+    let pv_direct_lookup: Option<PvDirectLookup> = if use_direct_lookup {
         Some(build_pv_direct_lookup(&queries, effective_word_size, &query_masks))
     } else {
         None
     };
-    let hash_lookup: Option<KmerLookup> = if !use_two_stage && !use_direct_lookup {
+    let hash_lookup: Option<KmerLookup> = if !use_direct_lookup {
         Some(build_lookup(&queries, effective_word_size, &query_masks))
     } else {
         None
     };
-    
-    // Update scan_step for two-stage lookup
-    let scan_step = if use_two_stage {
-        // NCBI BLAST formula: scan_step = word_length - lut_word_length + 1
-        (effective_word_size as isize - lut_word_length as isize + 1).max(1) as usize
-    } else {
-        scan_step
-    };
-    
-    if args.verbose && use_two_stage {
-        eprintln!("[INFO] Using two-stage lookup: lut_word_length={}, word_length={}, scan_step={}", 
-                  lut_word_length, effective_word_size, scan_step);
-    }
 
     if args.verbose {
         eprintln!("Searching...");
@@ -3547,8 +3440,6 @@ pub fn run(args: BlastnArgs) -> Result<()> {
     }
 
     // 修正: tx はここで所有権ごと渡す。for_each_with 終了時に自動でDropされるため、明示的な drop(tx) は不要。
-    // Also pass two_stage_lookup reference for use in the closure
-    let two_stage_lookup_ref = two_stage_lookup.as_ref();
     subjects
         .par_iter()
         .enumerate()
@@ -3667,95 +3558,58 @@ pub fn run(args: BlastnArgs) -> Result<()> {
                     FxHashMap::default()
                 };
 
-                // TWO-STAGE LOOKUP: Use separate rolling k-mer for lut_word_length
-                if let Some(two_stage) = two_stage_lookup_ref {
-                    // For two-stage lookup, use lut_word_length (8) for scanning
-                    let lut_word_length = two_stage.lut_word_length();
-                    let word_length = two_stage.word_length();
-                    let lut_kmer_mask: u64 = (1u64 << (2 * lut_word_length)) - 1;
-                    
-                    // Rolling k-mer state for lut_word_length
-                    let mut current_lut_kmer: u64 = 0;
-                    let mut valid_bases: usize = 0;
-                    
-                    // Scan through the subject sequence with rolling lut_word_length k-mer
-                    for s_pos in 0..s_len {
-                        let base = search_seq[s_pos];
-                        let code = ENCODE_LUT[base as usize];
-                        
-                        if code == 0xFF {
-                            // Ambiguous base - reset the rolling window
-                            valid_bases = 0;
-                            current_lut_kmer = 0;
-                            continue;
-                        }
-                        
-                        // Shift in the new base
-                        current_lut_kmer = ((current_lut_kmer << 2) | (code as u64)) & lut_kmer_mask;
-                        valid_bases += 1;
-                        
-                        // Only process if we have a complete lut_word_length k-mer
-                        if valid_bases < lut_word_length {
-                            continue;
-                        }
-                        
-                        // Calculate the starting position of this k-mer
-                        let kmer_start = s_pos + 1 - lut_word_length;
-                        
-                        // SCAN STRIDE OPTIMIZATION: Skip positions based on scan_step
-                        if kmer_start % scan_step != 0 {
-                            continue;
-                        }
-                        
-                        dbg_total_s_positions += 1;
-                        
-                        // Lookup using lut_word_length k-mer
-                        let matches_slice = two_stage.get_hits(current_lut_kmer);
-                        
-                        // For each match, check if word_length match exists
-                        for &(q_idx, q_pos) in matches_slice {
-                            dbg_seeds_found += 1;
-                            
-                            // Check if word_length match exists starting at these positions
-                            // Need to verify that subject[kmer_start..kmer_start+word_length] 
-                            // matches query[q_pos..q_pos+word_length]
-                            let q_seq = queries[q_idx as usize].seq();
-                            let q_pos_usize = q_pos as usize;
-                            
-                            // Skip if sequences are too short
-                            if q_pos_usize + word_length > q_seq.len() || kmer_start + word_length > s_len {
-                                continue;
-                            }
-                            
-                            // Quick check: verify the 8-mer at the lookup position matches
-                            // (it should, since we just looked it up, but verify for safety)
-                            let mut word_match = true;
-                            for i in 0..lut_word_length {
-                                if search_seq[kmer_start + i] != q_seq[q_pos_usize + i] {
-                                    word_match = false;
-                                    break;
-                                }
-                            }
-                            if !word_match {
-                                continue;
-                            }
-                            
-                            // For two-stage lookup, we only trigger extension if 
-                            // the full word_length match exists
-                            // This is critical for performance: most 8-mer matches won't have a 28-mer match
-                            // Check the full word_length match before proceeding
-                            let mut full_match = true;
-                            for i in 0..word_length {
-                                if search_seq[kmer_start + i] != q_seq[q_pos_usize + i] {
-                                    full_match = false;
-                                    break;
-                                }
-                            }
-                            if !full_match {
-                                continue; // Skip if full word_length match doesn't exist
-                            }
-                            
-                            let diag = kmer_start as isize - q_pos_usize as isize;
+                // Rolling k-mer state
+                let mut current_kmer: u64 = 0;
+                let mut valid_bases: usize = 0; // Count of consecutive valid bases in current window
+
+                // Scan through the subject sequence with rolling k-mer
+                for s_pos in 0..s_len {
+                    let base = search_seq[s_pos];
+                    let code = ENCODE_LUT[base as usize];
+
+                if code == 0xFF {
+                    // Ambiguous base - reset the rolling window
+                    valid_bases = 0;
+                    current_kmer = 0;
+                    continue;
+                }
+
+                // Shift in the new base
+                current_kmer = ((current_kmer << 2) | (code as u64)) & kmer_mask;
+                valid_bases += 1;
+
+                // Only process if we have a complete k-mer
+                if valid_bases < safe_k {
+                    continue;
+                }
+
+                // Calculate the starting position of this k-mer
+                let kmer_start = s_pos + 1 - safe_k;
+
+                // SCAN STRIDE OPTIMIZATION: Skip positions based on scan_step
+                // We continue updating the rolling k-mer at every position (for correctness),
+                // but only perform the expensive lookup/extension work every scan_step positions.
+                // This reduces k-mer lookups by ~scan_step times with minimal sensitivity loss
+                // for large word sizes (megablast).
+                if kmer_start % scan_step != 0 {
+                    continue;
+                }
+
+                    dbg_total_s_positions += 1;
+
+                    // Phase 2: Use PV-based direct lookup (O(1) with fast PV filtering) for word_size <= 13
+                    // For word_size > 13, use hash-based lookup
+                    let matches_slice: &[(u32, u32)] = if use_direct_lookup {
+                        // Use PV for fast filtering before accessing the lookup table
+                        pv_direct_lookup.as_ref().map(|pv_dl| pv_dl.get_hits_checked(current_kmer)).unwrap_or(&[])
+                    } else {
+                        // Use hash-based lookup for larger word sizes
+                        hash_lookup.as_ref().and_then(|hl| hl.get(&current_kmer).map(|v| v.as_slice())).unwrap_or(&[])
+                    };
+
+                    for &(q_idx, q_pos) in matches_slice {
+                        dbg_seeds_found += 1;
+                    let diag = kmer_start as isize - q_pos as isize;
 
                     // Check if this seed is in the debug window
                     let in_window = if let Some((q_start, q_end, s_start, s_end)) = debug_window {
@@ -3994,289 +3848,8 @@ pub fn run(args: BlastnArgs) -> Result<()> {
                             bit_score,
                         });
                     }
-                        } // end of for matches_slice in two-stage lookup
-                    } // end of s_pos loop for two-stage lookup
-                } else {
-                    // Original lookup method (for non-two-stage lookup)
-                    // Rolling k-mer state
-                    let mut current_kmer: u64 = 0;
-                    let mut valid_bases: usize = 0; // Count of consecutive valid bases in current window
-
-                    // Scan through the subject sequence with rolling k-mer
-                    for s_pos in 0..s_len {
-                        let base = search_seq[s_pos];
-                        let code = ENCODE_LUT[base as usize];
-
-                    if code == 0xFF {
-                        // Ambiguous base - reset the rolling window
-                        valid_bases = 0;
-                        current_kmer = 0;
-                        continue;
-                    }
-
-                    // Shift in the new base
-                    current_kmer = ((current_kmer << 2) | (code as u64)) & kmer_mask;
-                    valid_bases += 1;
-
-                    // Only process if we have a complete k-mer
-                    if valid_bases < safe_k {
-                        continue;
-                    }
-
-                    // Calculate the starting position of this k-mer
-                    let kmer_start = s_pos + 1 - safe_k;
-
-                    // SCAN STRIDE OPTIMIZATION: Skip positions based on scan_step
-                    // We continue updating the rolling k-mer at every position (for correctness),
-                    // but only perform the expensive lookup/extension work every scan_step positions.
-                    // This reduces k-mer lookups by ~scan_step times with minimal sensitivity loss
-                    // for large word sizes (megablast).
-                    if kmer_start % scan_step != 0 {
-                        continue;
-                    }
-
-                    dbg_total_s_positions += 1;
-
-                    // Phase 2: Use PV-based direct lookup (O(1) with fast PV filtering) for word_size <= 13
-                    // For word_size > 13, use hash-based lookup
-                    let matches_slice: &[(u32, u32)] = if use_direct_lookup {
-                        // Use PV for fast filtering before accessing the lookup table
-                        pv_direct_lookup.as_ref().map(|pv_dl| pv_dl.get_hits_checked(current_kmer)).unwrap_or(&[])
-                    } else {
-                        // Use hash-based lookup for larger word sizes
-                        hash_lookup.as_ref().and_then(|hl| hl.get(&current_kmer).map(|v| v.as_slice())).unwrap_or(&[])
-                    };
-
-                    for &(q_idx, q_pos) in matches_slice {
-                        dbg_seeds_found += 1;
-                        let diag = kmer_start as isize - q_pos as isize;
-
-                        // Check if this seed is in the debug window
-                        let in_window = if let Some((q_start, q_end, s_start, s_end)) = debug_window {
-                            (q_pos as usize) >= q_start && (q_pos as usize) <= q_end &&
-                            kmer_start >= s_start && kmer_start <= s_end
-                        } else {
-                            false
-                        };
-
-                        if in_window {
-                            dbg_window_seeds += 1;
-                        }
-
-                        // Check if this region was already extended (skip if mask is disabled for debugging)
-                        // PERFORMANCE OPTIMIZATION: Use direct array indexing for single query
-                        if !disable_mask {
-                            let should_skip = if use_array_indexing {
-                                let diag_idx = (diag + diag_offset) as usize;
-                                if diag_idx < diag_array_size {
-                                    if let Some(last_s_end) = mask_array[diag_idx] {
-                                        kmer_start < last_s_end
-                                    } else {
-                                        false
-                                    }
-                                } else {
-                                    false
-                                }
-                            } else {
-                                let diag_key = pack_diag_key(q_idx, diag);
-                                if let Some(&last_s_end) = mask_hash.get(&diag_key) {
-                                    kmer_start < last_s_end
-                                } else {
-                                    false
-                                }
-                            };
-                            if should_skip {
-                                dbg_mask_skipped += 1;
-                                if in_window && debug_mode {
-                                    eprintln!("[DEBUG WINDOW] Seed at q={}, s={} SKIPPED by mask", q_pos, kmer_start);
-                                }
-                                continue;
-                            }
-                        }
-
-                        // PERFORMANCE OPTIMIZATION: Apply two-hit filter BEFORE ungapped extension
-                        // This is the key optimization that makes NCBI BLAST fast
-                        // Most seeds don't have a nearby seed on the same diagonal, so we skip them early
-                        // PERFORMANCE OPTIMIZATION: Use direct array indexing for single query
-                        let trigger_extension = if use_array_indexing {
-                            let diag_idx = (diag + diag_offset) as usize;
-                            if diag_idx < diag_array_size {
-                                if let Some(prev_s_pos) = last_seed_array[diag_idx] {
-                                    kmer_start.saturating_sub(prev_s_pos) <= TWO_HIT_WINDOW
-                                } else {
-                                    false
-                                }
-                            } else {
-                                false
-                            }
-                        } else {
-                            let diag_key = pack_diag_key(q_idx, diag);
-                            if let Some(&prev_s_pos) = last_seed_hash.get(&diag_key) {
-                                kmer_start.saturating_sub(prev_s_pos) <= TWO_HIT_WINDOW
-                            } else {
-                                false
-                            }
-                        };
-
-                        // Update the last seed position for this diagonal
-                        // PERFORMANCE OPTIMIZATION: Use direct array indexing for single query
-                        if use_array_indexing {
-                            let diag_idx = (diag + diag_offset) as usize;
-                            if diag_idx < diag_array_size {
-                                last_seed_array[diag_idx] = Some(kmer_start);
-                            }
-                        } else {
-                            let diag_key = pack_diag_key(q_idx, diag);
-                            last_seed_hash.insert(diag_key, kmer_start);
-                        }
-
-                        // Skip ungapped extension if two-hit requirement is not met
-                        // This is the key optimization - we skip most seeds without doing any extension
-                        if !trigger_extension {
-                            dbg_two_hit_failed += 1;
-                            if in_window && debug_mode {
-                                eprintln!("[DEBUG WINDOW] Seed at q={}, s={} SKIPPED: two-hit not met", q_pos, kmer_start);
-                            }
-                            continue;
-                        }
-
-                        let q_record = &queries[q_idx as usize];
-
-                        // Now do ungapped extension (only for seeds that passed two-hit filter)
-                        let (qs, qe, ss, _se, ungapped_score) = extend_hit_ungapped(
-                            q_record.seq(),
-                            search_seq,
-                            q_pos as usize,
-                            kmer_start,
-                            reward,
-                            penalty,
-                        );
-
-                        // Skip if ungapped score is too low
-                        // Use task-specific threshold: higher for blastn to reduce extension count
-                        if ungapped_score < min_ungapped_score {
-                            dbg_ungapped_low += 1;
-                            if in_window && debug_mode {
-                                eprintln!("[DEBUG WINDOW] Seed at q={}, s={} SKIPPED: ungapped_score={} < {}", q_pos, kmer_start, ungapped_score, min_ungapped_score);
-                            }
-                            continue;
-                        }
-
-                        dbg_gapped_attempted += 1;
-
-                        if in_window && debug_mode {
-                            eprintln!("[DEBUG WINDOW] Seed at q={}, s={} -> GAPPED EXTENSION (ungapped_score={}, seed_len={})", q_pos, kmer_start, ungapped_score, qe - qs);
-                        }
-
-                        // Gapped extension with NCBI-style high X-drop for longer alignments
-                        // Using X_DROP_GAPPED_FINAL directly to allow alignments to push through
-                        // low-similarity regions (NCBI BLAST uses 100 for nucleotide)
-                        let (
-                            final_qs,
-                            final_qe,
-                            final_ss,
-                            final_se,
-                            score,
-                            matches,
-                            mismatches,
-                            gaps,
-                            gap_letters,
-                            dp_cells,
-                        ) = extend_gapped_heuristic(
-                            q_record.seq(),
-                            search_seq,
-                            qs,
-                            ss,
-                            qe - qs,
-                            reward,
-                            penalty,
-                            gap_open,
-                            gap_extend,
-                            X_DROP_GAPPED_FINAL,
-                            use_dp, // Use DP for blastn task, greedy for megablast
-                        );
-
-                        // Debug: show gapped extension results for window seeds
-                        if in_window && debug_mode {
-                            let aln_len = matches + mismatches + gap_letters;
-                            eprintln!("[DEBUG WINDOW] Gapped extension result: q={}-{}, s={}-{}, score={}, len={}", final_qs, final_qe, final_ss, final_se, score, aln_len);
-                        }
-
-                        // Calculate statistics
-                        let aln_len = matches + mismatches + gap_letters;
-                        let identity = if aln_len > 0 {
-                            (matches as f64) / (aln_len as f64)
-                        } else {
-                            0.0
-                        };
-
-                        // Calculate e-value and bit score using Karlin-Altschul statistics
-                        let (bit_score, eval) = calculate_evalue(
-                            score,
-                            q_record.seq().len(),
-                            db_len_total,
-                            db_num_seqs,
-                            &params,
-                        );
-                        
-                        // Skip if e-value is too high
-                        if eval > args.evalue {
-                            continue;
-                        }
-                        
-                        // Calculate alignment length and identity
-                        let aln_len = matches + mismatches + gap_letters;
-                        let identity = if aln_len > 0 {
-                            ((matches as f64 / aln_len as f64) * 100.0).min(100.0)
-                        } else {
-                            0.0
-                        };
-
-                        // Store sequence data for post-processing (only for pairs we haven't seen)
-                        let q_id = &query_ids[q_idx as usize];
-                        if !seen_pairs.contains(&(q_id.clone(), s_id.clone())) {
-                            seen_pairs.insert((q_id.clone(), s_id.clone()));
-                            local_sequences.push((
-                                q_id.clone(),
-                                s_id.clone(),
-                                q_record.seq().to_vec(),
-                                s_seq.to_vec(),
-                            ));
-                        }
-
-                        // Convert coordinates for minus strand hits
-                        // For minus strand: positions in reverse complement need to be converted
-                        // back to original subject coordinates, with s_start > s_end to indicate minus strand
-                        let (hit_s_start, hit_s_end) = if is_minus_strand {
-                            // Convert from reverse complement coordinates to original coordinates
-                            // In reverse complement: position 0 corresponds to original position s_len-1
-                            // final_ss and final_se are 0-based positions in the reverse complement
-                            // We need to convert them to 1-based positions in the original sequence
-                            // with s_start > s_end to indicate minus strand
-                            let orig_s_start = s_len - final_ss; // 1-based, larger value
-                            let orig_s_end = s_len - final_se + 1; // 1-based, smaller value
-                            (orig_s_start, orig_s_end)
-                        } else {
-                            (final_ss + 1, final_se)
-                        };
-
-                        local_hits.push(Hit {
-                            query_id: q_id.clone(),
-                            subject_id: s_id.clone(),
-                            identity,
-                            length: aln_len,
-                            mismatch: mismatches,
-                            gapopen: gaps,
-                            q_start: final_qs + 1,
-                            q_end: final_qe,
-                            s_start: hit_s_start,
-                            s_end: hit_s_end,
-                            e_value: eval,
-                            bit_score,
-                        });
-                    }
-                    } // end of s_pos loop for original lookup
-                } // end of if/else for two-stage vs original lookup
+                }
+                } // end of s_pos loop
             } // end of strand loop
 
             // Print debug summary for this subject

@@ -223,13 +223,13 @@ comparisons = [
         "name": "EDL933_vs_Sakai",
         "mode": "Megablast",
         "ncbi":  "./blast_out/EDL933.Sakai.blastn.megablast.out",
-        "losat": "./losat_out/EDL933.Sakai.losatn.megablast.out"
+        "losat": "./losat_out/EDL933.Sakai.blastn.megablast.out"
     },
     {
         "name": "Sakai_vs_MG1655",
         "mode": "Megablast",
         "ncbi":  "./blast_out/Sakai.MG1655.blastn.megablast.out",
-        "losat": "./losat_out/Sakai.MG1655.losatn.megablast.out"
+        "losat": "./losat_out/Sakai.MG1655.blastn.megablast.out"
     },
 ]
 

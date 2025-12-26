@@ -3,6 +3,6 @@ Applying DUST filter (level=20, window=64, linker=1)...
 DUST masked 24781 bases (8.26%) across 1 sequences
 Building lookup (Task: blastn, Word: 11, Direct: true, DUST: true, PV: true)...
 
-real	0m1.236s
-user	0m1.138s
-sys	0m0.021s
+real	0m1.280s
+user	0m1.177s
+sys	0m0.051s

@@ -1,2 +1,16 @@
 target/
 Cargo.lock
+routine.sh
+
+# Test results and logs
+tests/test_*.out
+tests/test_*.log
+tests/*.log
+
+# Analysis markdown files (keep only essential documentation)
+tests/*_performance.md
+tests/*_analysis.md
+tests/*_implementation.md
+tests/*_results.log
+tests/baseline_results.log
+tests/extract_timing.sh

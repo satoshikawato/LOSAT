@@ -3756,9 +3756,11 @@ pub fn run(args: BlastnArgs) -> Result<()> {
                         use_dp, // Use DP for blastn task, greedy for megablast
                     );
 
+                    // Calculate alignment length
+                    let aln_len = matches + mismatches + gap_letters;
+
                     // Debug: show gapped extension results for window seeds
                     if in_window && debug_mode {
-                        let aln_len = matches + mismatches + gap_letters;
                         let identity = if aln_len > 0 { 100.0 * matches as f64 / aln_len as f64 } else { 0.0 };
                         eprintln!(
                             "[DEBUG WINDOW] Gapped result: q={}-{}, s={}-{}, score={}, len={}, identity={:.1}%, gaps={}, dp_cells={}",
@@ -3792,10 +3794,6 @@ pub fn run(args: BlastnArgs) -> Result<()> {
                     );
 
                     if eval <= args.evalue {
-                        // Calculate alignment length using BLAST's definition:
-                        // alignment_length = matches + mismatches + gap_letters (total aligned columns)
-                        let aln_len = matches + mismatches + gap_letters;
-
                         // Identity is matches / alignment_length, capped at 100%
                         let identity = if aln_len > 0 {
                             ((matches as f64 / aln_len as f64) * 100.0).min(100.0)

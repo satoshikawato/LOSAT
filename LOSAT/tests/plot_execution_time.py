@@ -53,12 +53,12 @@ comparisons = [
     },
     {
         "name": "EDL933_vs_Sakai", "mode": "Megablast", 
-        "losat_log": "EDL933.Sakai.losatn.megablast.log", 
+        "losat_log": "EDL933.Sakai.blastn.megablast.log", 
         "blast_log": "EDL933.Sakai.blastn.megablast.log"
     },
     {
         "name": "Sakai_vs_MG1655", "mode": "Megablast", 
-        "losat_log": "Sakai.MG1655.losatn.megablast.log", 
+        "losat_log": "Sakai.MG1655.blastn.megablast.log", 
         "blast_log": "Sakai.MG1655.blastn.megablast.log"
     },
 

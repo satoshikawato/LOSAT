@@ -57,21 +57,64 @@ impl GreedyAlignMem {
     }
 
     /// Reset arrays to initial state (fill with sentinel values)
+    /// Uses slice::fill for better performance than element-by-element loops
     fn reset(&mut self, array_size: usize, max_score_size: usize) {
-        // Fill with sentinel values
-        for i in 0..array_size.min(self.last_seq2_off_a.len()) {
-            self.last_seq2_off_a[i] = -2;
-            self.last_seq2_off_b[i] = -2;
-        }
-        for i in 0..max_score_size.min(self.max_score.len()) {
-            self.max_score[i] = 0;
-        }
+        // Fill with sentinel values using slice::fill (more efficient than loops)
+        let a_len = array_size.min(self.last_seq2_off_a.len());
+        let b_len = array_size.min(self.last_seq2_off_b.len());
+        let score_len = max_score_size.min(self.max_score.len());
+        
+        self.last_seq2_off_a[..a_len].fill(-2);
+        self.last_seq2_off_b[..b_len].fill(-2);
+        self.max_score[..score_len].fill(0);
     }
 }
 
 thread_local! {
     /// Thread-local memory pool for non-affine greedy alignment
     static GREEDY_MEM: RefCell<GreedyAlignMem> = RefCell::new(GreedyAlignMem::new());
+    /// Thread-local memory pool for DP-based gapped alignment
+    static DP_BUFFER_POOL: RefCell<DpBufferPool> = RefCell::new(DpBufferPool::new());
+}
+
+/// DP cell for gapped alignment - stores score and alignment statistics
+#[derive(Clone, Copy, Default)]
+struct DpCell {
+    best: i32,
+    best_gap: i32,
+    stats: AlnStats,
+    gap_stats: AlnStats,
+}
+
+/// Alignment statistics propagated alongside DP scores
+#[derive(Clone, Copy, Default)]
+struct AlnStats {
+    matches: u32,
+    mismatches: u32,
+    gap_opens: u32,
+    gap_letters: u32,
+}
+
+/// Thread-local memory pool for DP-based gapped alignment.
+/// This avoids per-call allocation overhead by reusing memory across calls.
+struct DpBufferPool {
+    /// Score array for DP computation - directly accessible to avoid borrow issues
+    score_array: Vec<DpCell>,
+}
+
+impl DpBufferPool {
+    fn new() -> Self {
+        Self {
+            score_array: Vec::new(),
+        }
+    }
+
+    /// Ensure the buffer has enough capacity
+    fn ensure_capacity(&mut self, size: usize) {
+        if self.score_array.len() < size {
+            self.score_array.resize(size, DpCell::default());
+        }
+    }
 }
 
 // NCBI BLAST compatible X-drop parameters
@@ -2081,15 +2124,6 @@ fn extend_gapped_heuristic(
     )
 }
 
-/// Alignment statistics propagated alongside DP scores
-#[derive(Clone, Copy, Default)]
-struct AlnStats {
-    matches: u32,
-    mismatches: u32,
-    gap_opens: u32,
-    gap_letters: u32, // Total gap characters (for alignment length calculation)
-}
-
 /// Extend alignment in one direction using banded Smith-Waterman with affine gap penalties.
 ///
 /// This implements a proper row-by-row DP algorithm with counts propagation for accurate statistics.
@@ -2127,7 +2161,7 @@ fn extend_gapped_one_direction(
     // Key insight from Blast_SemiGappedAlign:
     // - Use dynamic window bounds (first_b_index to b_size) that expand/contract based on X-drop
     // - Window naturally expands as needed, but with a maximum limit to prevent explosion
-    // - Reallocate memory when window needs to grow
+    // - Use thread-local buffer pool to avoid per-call allocation overhead
 
     const NEG_INF: i32 = i32::MIN / 2;
     // Maximum window size to prevent computational explosion on very long high-identity alignments
@@ -2151,229 +2185,224 @@ fn extend_gapped_one_direction(
     // Start with a reasonable initial allocation, will grow as needed (up to MAX_WINDOW_SIZE)
     let mut alloc_size = initial_window.max(100).min(MAX_WINDOW_SIZE);
 
-    // DP score arrays - indexed by j (subject position)
-    // We use a 1D array approach like NCBI BLAST
-    #[derive(Clone, Copy, Default)]
-    struct DpCell {
-        best: i32,
-        best_gap: i32, // best score ending in a gap
-        stats: AlnStats,
-        gap_stats: AlnStats,
-    }
-
-    let mut score_array: Vec<DpCell> = vec![
-        DpCell {
+    // Use thread-local buffer pool to avoid per-call allocation
+    DP_BUFFER_POOL.with(|pool| {
+        let mut pool = pool.borrow_mut();
+        
+        // Ensure buffer has enough capacity
+        pool.ensure_capacity(alloc_size);
+        
+        // Reset the used portion of the array to initial state
+        let default_cell = DpCell {
             best: NEG_INF,
             best_gap: NEG_INF,
             stats: AlnStats::default(),
-            gap_stats: AlnStats::default()
+            gap_stats: AlnStats::default(),
         };
-        alloc_size
-    ];
+        pool.score_array[..alloc_size].fill(default_cell);
 
-    // Initialize row 0
-    let gap_open_extend = gap_open + gap_extend;
-    score_array[0].best = 0;
-    score_array[0].best_gap = gap_open_extend; // Cost to open gap at position 0
+        // Initialize row 0
+        let gap_open_extend = gap_open + gap_extend;
+        pool.score_array[0].best = 0;
+        pool.score_array[0].best_gap = gap_open_extend; // Cost to open gap at position 0
 
-    // Initialize leading gaps in subject (j > 0)
-    let mut score = gap_open_extend;
-    let mut b_size = 1usize;
-    for j in 1..=n.min(alloc_size - 1) {
-        if score < -x_drop {
-            break;
-        }
-        score_array[j].best = score;
-        score_array[j].best_gap = score + gap_open_extend;
-        score_array[j].stats = AlnStats {
-            matches: 0,
-            mismatches: 0,
-            gap_opens: 1,
-            gap_letters: j as u32,
-        };
-        score += gap_extend;
-        b_size = j + 1;
-    }
-
-    // Track best score and position
-    let mut best_score = 0;
-    let mut best_i = 0;
-    let mut best_j = 0;
-    let mut best_stats = AlnStats::default();
-
-    // Dynamic window bounds (NCBI-style)
-    let mut first_b_index = 0usize;
-
-    // DP cell counter for diagnostics
-    let mut dp_cells = 0usize;
-
-    // Process each row (query position)
-    for i in 1..=m {
-        let qc = q_seq[i - 1];
-
-        // Running scores for this row
-        let mut score_val = NEG_INF;
-        let mut score_gap_row = NEG_INF; // Best score ending in gap in query (Ix)
-        let mut score_gap_row_stats = AlnStats::default();
-        let mut score_stats = AlnStats::default();
-        let mut last_b_index = first_b_index;
-
-        for j in first_b_index..b_size {
-            let sc = if j < n { s_seq[j] } else { break };
-            dp_cells += 1;
-
-            // Get previous column's gap score
-            let score_gap_col = score_array[j].best_gap;
-            let score_gap_col_stats = score_array[j].gap_stats;
-
-            // Compute match/mismatch score
-            let is_match = qc == sc;
-            let match_score = if is_match { reward } else { penalty };
-            let next_score = if score_array[j].best > NEG_INF {
-                score_array[j].best + match_score
-            } else {
-                NEG_INF
+        // Initialize leading gaps in subject (j > 0)
+        let mut score = gap_open_extend;
+        let mut b_size = 1usize;
+        for j in 1..=n.min(alloc_size - 1) {
+            if score < -x_drop {
+                break;
+            }
+            pool.score_array[j].best = score;
+            pool.score_array[j].best_gap = score + gap_open_extend;
+            pool.score_array[j].stats = AlnStats {
+                matches: 0,
+                mismatches: 0,
+                gap_opens: 1,
+                gap_letters: j as u32,
             };
-            let mut next_stats = score_array[j].stats;
-            if is_match {
-                next_stats.matches += 1;
-            } else {
-                next_stats.mismatches += 1;
-            }
-
-            // Best of: continue from M, continue from Ix (gap in query), continue from Iy (gap in subject)
-            if score_val < score_gap_col {
-                score_val = score_gap_col;
-                score_stats = score_gap_col_stats;
-            }
-            if score_val < score_gap_row {
-                score_val = score_gap_row;
-                score_stats = score_gap_row_stats;
-            }
-
-            // X-drop check
-            if best_score - score_val > x_drop {
-                // Failed X-drop - mark this cell as invalid
-                if j == first_b_index {
-                    first_b_index += 1;
-                } else {
-                    score_array[j].best = NEG_INF;
-                }
-            } else {
-                last_b_index = j;
-
-                // Update best score
-                if score_val > best_score {
-                    best_score = score_val;
-                    best_i = i;
-                    best_j = j + 1; // Convert to 1-based
-                    best_stats = score_stats;
-                }
-
-                // Update gap scores for next iteration
-                // Gap in query (Ix): extend existing gap or open new gap
-                let extend_gap_row = score_gap_row + gap_extend;
-                let open_gap_row = score_val + gap_open_extend;
-                if open_gap_row > extend_gap_row {
-                    score_gap_row = open_gap_row;
-                    score_gap_row_stats = score_stats;
-                    score_gap_row_stats.gap_opens += 1;
-                    score_gap_row_stats.gap_letters += 1;
-                } else {
-                    score_gap_row = extend_gap_row;
-                    score_gap_row_stats.gap_letters += 1;
-                }
-
-                // Gap in subject (Iy): extend existing gap or open new gap
-                let extend_gap_col = score_gap_col + gap_extend;
-                let open_gap_col = score_val + gap_open_extend;
-                if open_gap_col > extend_gap_col {
-                    score_array[j].best_gap = open_gap_col;
-                    score_array[j].gap_stats = score_stats;
-                    score_array[j].gap_stats.gap_opens += 1;
-                    score_array[j].gap_stats.gap_letters += 1;
-                } else {
-                    score_array[j].best_gap = extend_gap_col;
-                    score_array[j].gap_stats.gap_letters += 1;
-                }
-
-                // Store current score
-                score_array[j].best = score_val;
-                score_array[j].stats = score_stats;
-            }
-
-            // Move to next cell
-            score_val = next_score;
-            score_stats = next_stats;
+            score += gap_extend;
+            b_size = j + 1;
         }
 
-        // Check if all positions failed X-drop
-        if first_b_index >= b_size {
-            break;
-        }
+        // Track best score and position
+        let mut best_score = 0;
+        let mut best_i = 0;
+        let mut best_j = 0;
+        let mut best_stats = AlnStats::default();
 
-        // Expand window if needed (NCBI-style adaptive banding, with MAX_WINDOW_SIZE limit)
-        if last_b_index + initial_window + 3 >= alloc_size && alloc_size < MAX_WINDOW_SIZE {
-            // Need to grow the array (but respect MAX_WINDOW_SIZE)
-            let new_alloc = (last_b_index + initial_window + 100)
-                .max(alloc_size * 2)
-                .min(MAX_WINDOW_SIZE);
-            score_array.resize(
-                new_alloc,
-                DpCell {
+        // Dynamic window bounds (NCBI-style)
+        let mut first_b_index = 0usize;
+
+        // DP cell counter for diagnostics
+        let mut dp_cells = 0usize;
+
+        // Process each row (query position)
+        for i in 1..=m {
+            let qc = q_seq[i - 1];
+
+            // Running scores for this row
+            let mut score_val = NEG_INF;
+            let mut score_gap_row = NEG_INF; // Best score ending in gap in query (Ix)
+            let mut score_gap_row_stats = AlnStats::default();
+            let mut score_stats = AlnStats::default();
+            let mut last_b_index = first_b_index;
+
+            for j in first_b_index..b_size {
+                let sc = if j < n { s_seq[j] } else { break };
+                dp_cells += 1;
+
+                // Get previous column's gap score
+                let score_gap_col = pool.score_array[j].best_gap;
+                let score_gap_col_stats = pool.score_array[j].gap_stats;
+
+                // Compute match/mismatch score
+                let is_match = qc == sc;
+                let match_score = if is_match { reward } else { penalty };
+                let next_score = if pool.score_array[j].best > NEG_INF {
+                    pool.score_array[j].best + match_score
+                } else {
+                    NEG_INF
+                };
+                let mut next_stats = pool.score_array[j].stats;
+                if is_match {
+                    next_stats.matches += 1;
+                } else {
+                    next_stats.mismatches += 1;
+                }
+
+                // Best of: continue from M, continue from Ix (gap in query), continue from Iy (gap in subject)
+                if score_val < score_gap_col {
+                    score_val = score_gap_col;
+                    score_stats = score_gap_col_stats;
+                }
+                if score_val < score_gap_row {
+                    score_val = score_gap_row;
+                    score_stats = score_gap_row_stats;
+                }
+
+                // X-drop check
+                if best_score - score_val > x_drop {
+                    // Failed X-drop - mark this cell as invalid
+                    if j == first_b_index {
+                        first_b_index += 1;
+                    } else {
+                        pool.score_array[j].best = NEG_INF;
+                    }
+                } else {
+                    last_b_index = j;
+
+                    // Update best score
+                    if score_val > best_score {
+                        best_score = score_val;
+                        best_i = i;
+                        best_j = j + 1; // Convert to 1-based
+                        best_stats = score_stats;
+                    }
+
+                    // Update gap scores for next iteration
+                    // Gap in query (Ix): extend existing gap or open new gap
+                    let extend_gap_row = score_gap_row + gap_extend;
+                    let open_gap_row = score_val + gap_open_extend;
+                    if open_gap_row > extend_gap_row {
+                        score_gap_row = open_gap_row;
+                        score_gap_row_stats = score_stats;
+                        score_gap_row_stats.gap_opens += 1;
+                        score_gap_row_stats.gap_letters += 1;
+                    } else {
+                        score_gap_row = extend_gap_row;
+                        score_gap_row_stats.gap_letters += 1;
+                    }
+
+                    // Gap in subject (Iy): extend existing gap or open new gap
+                    let extend_gap_col = score_gap_col + gap_extend;
+                    let open_gap_col = score_val + gap_open_extend;
+                    if open_gap_col > extend_gap_col {
+                        pool.score_array[j].best_gap = open_gap_col;
+                        pool.score_array[j].gap_stats = score_stats;
+                        pool.score_array[j].gap_stats.gap_opens += 1;
+                        pool.score_array[j].gap_stats.gap_letters += 1;
+                    } else {
+                        pool.score_array[j].best_gap = extend_gap_col;
+                        pool.score_array[j].gap_stats.gap_letters += 1;
+                    }
+
+                    // Store current score
+                    pool.score_array[j].best = score_val;
+                    pool.score_array[j].stats = score_stats;
+                }
+
+                // Move to next cell
+                score_val = next_score;
+                score_stats = next_stats;
+            }
+
+            // Check if all positions failed X-drop
+            if first_b_index >= b_size {
+                break;
+            }
+
+            // Expand window if needed (NCBI-style adaptive banding, with MAX_WINDOW_SIZE limit)
+            if last_b_index + initial_window + 3 >= alloc_size && alloc_size < MAX_WINDOW_SIZE {
+                // Need to grow the array (but respect MAX_WINDOW_SIZE)
+                let new_alloc = (last_b_index + initial_window + 100)
+                    .max(alloc_size * 2)
+                    .min(MAX_WINDOW_SIZE);
+                let default_cell = DpCell {
                     best: NEG_INF,
                     best_gap: NEG_INF,
                     stats: AlnStats::default(),
                     gap_stats: AlnStats::default(),
-                },
-            );
-            alloc_size = new_alloc;
-        }
+                };
+                pool.score_array.resize(new_alloc, default_cell);
+                alloc_size = new_alloc;
+            }
 
-        if last_b_index < b_size.saturating_sub(1) {
-            // This row ended earlier than last row - shrink window
-            b_size = last_b_index + 1;
-        } else {
-            // Extend window if we can continue with gaps (respect MAX_WINDOW_SIZE)
-            while score_gap_row >= best_score - x_drop
-                && b_size <= n
-                && b_size < alloc_size
-                && b_size < MAX_WINDOW_SIZE
-            {
-                score_array[b_size].best = score_gap_row;
-                score_array[b_size].stats = score_gap_row_stats;
-                score_array[b_size].best_gap = score_gap_row + gap_open_extend;
-                score_array[b_size].gap_stats = score_gap_row_stats;
-                score_array[b_size].gap_stats.gap_opens += 1;
-                score_array[b_size].gap_stats.gap_letters += 1;
-                score_gap_row += gap_extend;
-                score_gap_row_stats.gap_letters += 1;
+            if last_b_index < b_size.saturating_sub(1) {
+                // This row ended earlier than last row - shrink window
+                b_size = last_b_index + 1;
+            } else {
+                // Extend window if we can continue with gaps (respect MAX_WINDOW_SIZE)
+                while score_gap_row >= best_score - x_drop
+                    && b_size <= n
+                    && b_size < alloc_size
+                    && b_size < MAX_WINDOW_SIZE
+                {
+                    pool.score_array[b_size].best = score_gap_row;
+                    pool.score_array[b_size].stats = score_gap_row_stats;
+                    pool.score_array[b_size].best_gap = score_gap_row + gap_open_extend;
+                    pool.score_array[b_size].gap_stats = score_gap_row_stats;
+                    pool.score_array[b_size].gap_stats.gap_opens += 1;
+                    pool.score_array[b_size].gap_stats.gap_letters += 1;
+                    score_gap_row += gap_extend;
+                    score_gap_row_stats.gap_letters += 1;
+                    b_size += 1;
+                }
+            }
+
+            // Ensure we have a sentinel
+            if b_size <= n && b_size < alloc_size {
+                pool.score_array[b_size].best = NEG_INF;
+                pool.score_array[b_size].best_gap = NEG_INF;
                 b_size += 1;
             }
         }
 
-        // Ensure we have a sentinel
-        if b_size <= n && b_size < alloc_size {
-            score_array[b_size].best = NEG_INF;
-            score_array[b_size].best_gap = NEG_INF;
-            b_size += 1;
+        if best_score <= 0 {
+            return (0, 0, 0, 0, 0, 0, 0, dp_cells);
         }
-    }
 
-    if best_score <= 0 {
-        return (0, 0, 0, 0, 0, 0, 0, dp_cells);
-    }
-
-    (
-        best_i,
-        best_j,
-        best_score,
-        best_stats.matches as usize,
-        best_stats.mismatches as usize,
-        best_stats.gap_opens as usize,
-        best_stats.gap_letters as usize,
-        dp_cells,
-    )
+        (
+            best_i,
+            best_j,
+            best_score,
+            best_stats.matches as usize,
+            best_stats.mismatches as usize,
+            best_stats.gap_opens as usize,
+            best_stats.gap_letters as usize,
+            dp_cells,
+        )
+    })
 }
 
 fn calculate_evalue(

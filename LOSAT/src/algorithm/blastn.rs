@@ -57,15 +57,16 @@ impl GreedyAlignMem {
     }
 
     /// Reset arrays to initial state (fill with sentinel values)
+    /// Uses slice::fill for better performance than element-by-element loops
     fn reset(&mut self, array_size: usize, max_score_size: usize) {
-        // Fill with sentinel values
-        for i in 0..array_size.min(self.last_seq2_off_a.len()) {
-            self.last_seq2_off_a[i] = -2;
-            self.last_seq2_off_b[i] = -2;
-        }
-        for i in 0..max_score_size.min(self.max_score.len()) {
-            self.max_score[i] = 0;
-        }
+        // Fill with sentinel values using slice::fill (more efficient than loops)
+        let a_len = array_size.min(self.last_seq2_off_a.len());
+        let b_len = array_size.min(self.last_seq2_off_b.len());
+        let score_len = max_score_size.min(self.max_score.len());
+        
+        self.last_seq2_off_a[..a_len].fill(-2);
+        self.last_seq2_off_b[..b_len].fill(-2);
+        self.max_score[..score_len].fill(0);
     }
 }
 

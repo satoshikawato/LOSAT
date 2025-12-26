@@ -33,14 +33,17 @@ echo "Starting LOSAT commands..."
 
 # --- BLASTN Commands (Default / Megablast behavior) ---
 
-# NZ_CP006932 self (Default)
+# NZ_CP006932 self (Default/Megablast)
+(time $LOSAT_BIN blastn -q ./fasta/NZ_CP006932.fasta -s ./fasta/NZ_CP006932.fasta -o ./losat_out/NZ_CP006932.NZ_CP006932.blastn.megablast.out -n 1 )&>./losat_out/NZ_CP006932.NZ_CP006932.blastn.megablast.log
+
+# NZ_CP006932 self (Default, legacy name for compatibility)
 (time $LOSAT_BIN blastn -q ./fasta/NZ_CP006932.fasta -s ./fasta/NZ_CP006932.fasta -o ./losat_out/NZ_CP006932.NZ_CP006932.losatn.out -n 1 )&>./losat_out/NZ_CP006932.NZ_CP006932.losatn.log
 
 # EDL933 vs Sakai
-(time $LOSAT_BIN blastn -q ./fasta/EDL933.fna -s ./fasta/Sakai.fna -o ./losat_out/EDL933.Sakai.losatn.megablast.out -n 1 )&>./losat_out/EDL933.Sakai.losatn.megablast.log
+(time $LOSAT_BIN blastn -q ./fasta/EDL933.fna -s ./fasta/Sakai.fna -o ./losat_out/EDL933.Sakai.blastn.megablast.out -n 1 )&>./losat_out/EDL933.Sakai.blastn.megablast.log
 
 # Sakai vs MG1655
-(time $LOSAT_BIN blastn -q ./fasta/Sakai.fna -s ./fasta/MG1655.fna -o ./losat_out/Sakai.MG1655.losatn.megablast.out -n 1 )&>./losat_out/Sakai.MG1655.losatn.megablast.log
+(time $LOSAT_BIN blastn -q ./fasta/Sakai.fna -s ./fasta/MG1655.fna -o ./losat_out/Sakai.MG1655.blastn.megablast.out -n 1 )&>./losat_out/Sakai.MG1655.blastn.megablast.log
 
 
 # --- BLASTN Commands (Task: blastn) ---

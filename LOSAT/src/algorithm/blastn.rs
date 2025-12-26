@@ -3513,14 +3513,50 @@ pub fn run(args: BlastnArgs) -> Result<()> {
                     s_seq
                 };
 
+                // PERFORMANCE OPTIMIZATION: For single query, use direct array indexing instead of HashMap
+                // This eliminates millions of HashMap lookups and provides O(1) array access
+                // Diagonal range: from -s_len (query before subject) to +s_len (query after subject)
+                // We use an offset to map negative diagonals to positive array indices
+                // However, for very large subject sequences, array initialization overhead can be significant,
+                // so we only use array indexing for smaller sequences (< 1M bases)
+                const MAX_ARRAY_DIAG_SIZE: usize = 2_000_000; // ~1M diagonals max (for ~500KB subject)
+                let use_array_indexing = queries.len() == 1 && (s_len * 2 + 1) <= MAX_ARRAY_DIAG_SIZE;
+                let diag_offset = if use_array_indexing {
+                    s_len as isize // Offset to make all diagonals non-negative
+                } else {
+                    0
+                };
+                let diag_array_size = if use_array_indexing {
+                    (s_len * 2) + 1 // Range: [-s_len, +s_len] -> [0, 2*s_len]
+                } else {
+                    0
+                };
+
                 // Mask to track already-extended regions on each diagonal
-                // Phase 4: Use packed u64 key instead of (u32, isize) tuple for faster hashing
-                // Reset for each strand to avoid interference
-                let mut mask: FxHashMap<u64, usize> = FxHashMap::default();
+                // For single query: use Vec for O(1) access, otherwise use HashMap
+                let mut mask_array: Vec<Option<usize>> = if use_array_indexing {
+                    vec![None; diag_array_size]
+                } else {
+                    Vec::new()
+                };
+                let mut mask_hash: FxHashMap<u64, usize> = if !use_array_indexing {
+                    FxHashMap::default()
+                } else {
+                    FxHashMap::default()
+                };
+
                 // Two-hit tracking: stores the last seed position on each diagonal for each query
-                // Phase 4: Use packed u64 key instead of (u32, isize) tuple for faster hashing
-                // Reset for each strand to avoid interference
-                let mut last_seed: FxHashMap<u64, usize> = FxHashMap::default();
+                // For single query: use Vec for O(1) access, otherwise use HashMap
+                let mut last_seed_array: Vec<Option<usize>> = if use_array_indexing {
+                    vec![None; diag_array_size]
+                } else {
+                    Vec::new()
+                };
+                let mut last_seed_hash: FxHashMap<u64, usize> = if !use_array_indexing {
+                    FxHashMap::default()
+                } else {
+                    FxHashMap::default()
+                };
 
                 // Rolling k-mer state
                 let mut current_kmer: u64 = 0;
@@ -3588,35 +3624,71 @@ pub fn run(args: BlastnArgs) -> Result<()> {
                     }
 
                     // Check if this region was already extended (skip if mask is disabled for debugging)
-                    // Phase 4: Use packed key for faster HashMap lookup
-                    let diag_key = pack_diag_key(q_idx, diag);
+                    // PERFORMANCE OPTIMIZATION: Use direct array indexing for single query
                     if !disable_mask {
-                        if let Some(&last_s_end) = mask.get(&diag_key) {
-                            if kmer_start < last_s_end {
-                                dbg_mask_skipped += 1;
-                                if in_window && debug_mode {
-                                    eprintln!("[DEBUG WINDOW] Seed at q={}, s={} SKIPPED by mask (last_s_end={})", q_pos, kmer_start, last_s_end);
+                        let should_skip = if use_array_indexing {
+                            let diag_idx = (diag + diag_offset) as usize;
+                            if diag_idx < diag_array_size {
+                                if let Some(last_s_end) = mask_array[diag_idx] {
+                                    kmer_start < last_s_end
+                                } else {
+                                    false
                                 }
-                                continue;
+                            } else {
+                                false
                             }
+                        } else {
+                            let diag_key = pack_diag_key(q_idx, diag);
+                            if let Some(&last_s_end) = mask_hash.get(&diag_key) {
+                                kmer_start < last_s_end
+                            } else {
+                                false
+                            }
+                        };
+                        if should_skip {
+                            dbg_mask_skipped += 1;
+                            if in_window && debug_mode {
+                                eprintln!("[DEBUG WINDOW] Seed at q={}, s={} SKIPPED by mask", q_pos, kmer_start);
+                            }
+                            continue;
                         }
                     }
 
                     // PERFORMANCE OPTIMIZATION: Apply two-hit filter BEFORE ungapped extension
                     // This is the key optimization that makes NCBI BLAST fast
                     // Most seeds don't have a nearby seed on the same diagonal, so we skip them early
-                    // Phase 4: Use packed key (diag_key computed above) for faster HashMap lookup
-                    let trigger_extension =
-                        if let Some(&prev_s_pos) = last_seed.get(&diag_key) {
-                            // Check if the current seed is within the two-hit window
+                    // PERFORMANCE OPTIMIZATION: Use direct array indexing for single query
+                    let trigger_extension = if use_array_indexing {
+                        let diag_idx = (diag + diag_offset) as usize;
+                        if diag_idx < diag_array_size {
+                            if let Some(prev_s_pos) = last_seed_array[diag_idx] {
+                                kmer_start.saturating_sub(prev_s_pos) <= TWO_HIT_WINDOW
+                            } else {
+                                false
+                            }
+                        } else {
+                            false
+                        }
+                    } else {
+                        let diag_key = pack_diag_key(q_idx, diag);
+                        if let Some(&prev_s_pos) = last_seed_hash.get(&diag_key) {
                             kmer_start.saturating_sub(prev_s_pos) <= TWO_HIT_WINDOW
                         } else {
                             false
-                        };
+                        }
+                    };
 
                     // Update the last seed position for this diagonal
-                    // Phase 4: Use packed key for faster HashMap insert
-                    last_seed.insert(diag_key, kmer_start);
+                    // PERFORMANCE OPTIMIZATION: Use direct array indexing for single query
+                    if use_array_indexing {
+                        let diag_idx = (diag + diag_offset) as usize;
+                        if diag_idx < diag_array_size {
+                            last_seed_array[diag_idx] = Some(kmer_start);
+                        }
+                    } else {
+                        let diag_key = pack_diag_key(q_idx, diag);
+                        last_seed_hash.insert(diag_key, kmer_start);
+                    }
 
                     // Skip ungapped extension if two-hit requirement is not met
                     // This is the key optimization - we skip most seeds without doing any extension
@@ -3698,9 +3770,17 @@ pub fn run(args: BlastnArgs) -> Result<()> {
                     let _ = dp_cells;
 
                     // Update mask (unless disabled for debugging via BLEMIR_DEBUG_NO_MASK=1)
-                    // Phase 4: Use packed key (diag_key computed earlier) for faster HashMap insert
+                    // PERFORMANCE OPTIMIZATION: Use direct array indexing for single query
                     if !disable_mask {
-                        mask.insert(diag_key, final_se);
+                        if use_array_indexing {
+                            let diag_idx = (diag + diag_offset) as usize;
+                            if diag_idx < diag_array_size {
+                                mask_array[diag_idx] = Some(final_se);
+                            }
+                        } else {
+                            let diag_key = pack_diag_key(q_idx, diag);
+                            mask_hash.insert(diag_key, final_se);
+                        }
                     }
 
                     let (bit_score, eval) = calculate_evalue(

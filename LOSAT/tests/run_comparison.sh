@@ -13,6 +13,26 @@ LOSAT_BIN="../target/release/LOSAT"
 # ==========================================
 echo "Starting LOSAT commands..."
 
+
+# --- TBLASTX Commands (Genetic Code: 4) ---
+
+# NZ_CP006932 self
+(time $LOSAT_BIN tblastx -q ./fasta/NZ_CP006932.fasta -s ./fasta/NZ_CP006932.fasta -o ./losat_out/NZ_CP006932.NZ_CP006932.tlosatx.n1.out --query-gencode 4 --db-gencode 4 -n 1 )&>./losat_out/NZ_CP006932.NZ_CP006932.tlosatx.n1.log
+
+# AP027132 vs NZ_CP006932
+(time $LOSAT_BIN tblastx -q ./fasta/AP027132.fasta -s ./fasta/NZ_CP006932.fasta -o ./losat_out/AP027132.NZ_CP006932.tlosatx.n1.out --query-gencode 4 --db-gencode 4 -n 1 )&>./losat_out/AP027132.NZ_CP006932.tlosatx.n1.log
+
+# AP027078 vs AP027131
+(time $LOSAT_BIN tblastx -q ./fasta/AP027078.fasta -s ./fasta/AP027131.fasta -o ./losat_out/AP027078.AP027131.tlosatx.n1.out --query-gencode 4 --db-gencode 4 -n 1 )&>./losat_out/AP027078.AP027131.tlosatx.n1.log
+
+# AP027131 vs AP027133
+(time $LOSAT_BIN tblastx -q ./fasta/AP027131.fasta -s ./fasta/AP027133.fasta -o ./losat_out/AP027131.AP027133.tlosatx.n1.out --query-gencode 4 --db-gencode 4 -n 1 )&>./losat_out/AP027131.AP027133.tlosatx.n1.log
+
+# AP027133 vs AP027132
+(time $LOSAT_BIN tblastx -q ./fasta/AP027133.fasta -s ./fasta/AP027132.fasta -o ./losat_out/AP027133.AP027132.tlosatx.n1.out --query-gencode 4 --db-gencode 4 -n 1 )&>./losat_out/AP027133.AP027132.tlosatx.n1.log
+
+
+
 # --- BLASTN Commands (Default / Megablast behavior) ---
 
 # NZ_CP006932 self (Default/Megablast)
@@ -59,24 +79,6 @@ echo "Starting LOSAT commands..."
 
 # MjPMNV vs MlPMNV
 (time $LOSAT_BIN blastn -q ./fasta/AP027202.fasta -s ./fasta/LC738875.fasta -o ./losat_out/MjPMNV.MlPMNV.losatn.blastn.out --task blastn -n 1 )&>./losat_out/MjPMNV.MlPMNV.losatn.blastn.log
-
-
-# --- TBLASTX Commands (Genetic Code: 4) ---
-
-# NZ_CP006932 self
-(time $LOSAT_BIN tblastx -q ./fasta/NZ_CP006932.fasta -s ./fasta/NZ_CP006932.fasta -o ./losat_out/NZ_CP006932.NZ_CP006932.tlosatx.n1.out --query-gencode 4 --db-gencode 4 -n 1 )&>./losat_out/NZ_CP006932.NZ_CP006932.tlosatx.n1.log
-
-# AP027132 vs NZ_CP006932
-(time $LOSAT_BIN tblastx -q ./fasta/AP027132.fasta -s ./fasta/NZ_CP006932.fasta -o ./losat_out/AP027132.NZ_CP006932.tlosatx.n1.out --query-gencode 4 --db-gencode 4 -n 1 )&>./losat_out/AP027132.NZ_CP006932.tlosatx.n1.log
-
-# AP027078 vs AP027131
-(time $LOSAT_BIN tblastx -q ./fasta/AP027078.fasta -s ./fasta/AP027131.fasta -o ./losat_out/AP027078.AP027131.tlosatx.n1.out --query-gencode 4 --db-gencode 4 -n 1 )&>./losat_out/AP027078.AP027131.tlosatx.n1.log
-
-# AP027131 vs AP027133
-(time $LOSAT_BIN tblastx -q ./fasta/AP027131.fasta -s ./fasta/AP027133.fasta -o ./losat_out/AP027131.AP027133.tlosatx.n1.out --query-gencode 4 --db-gencode 4 -n 1 )&>./losat_out/AP027131.AP027133.tlosatx.n1.log
-
-# AP027133 vs AP027132
-(time $LOSAT_BIN tblastx -q ./fasta/AP027133.fasta -s ./fasta/AP027132.fasta -o ./losat_out/AP027133.AP027132.tlosatx.n1.out --query-gencode 4 --db-gencode 4 -n 1 )&>./losat_out/AP027133.AP027132.tlosatx.n1.log
 
 
 

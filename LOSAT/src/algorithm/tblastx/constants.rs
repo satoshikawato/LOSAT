@@ -2,10 +2,11 @@
 //!
 //! This module contains NCBI BLAST compatible parameters for translated BLAST searches.
 
-/// NCBI BLAST compatible X-drop parameters for protein alignments
-/// Using slightly higher X-drop (11 vs NCBI's 7) to allow longer extensions
-/// before termination, which helps match NCBI BLAST's average hit length
-pub const X_DROP_UNGAPPED: i32 = 11;
+/// NCBI BLAST standard X-drop for ungapped protein alignments
+/// Reference: ncbi-blast/c++/include/algo/blast/core/blast_options.h
+/// #define BLAST_UNGAPPED_X_DROPOFF_PROT 7
+/// Default is now NCBI-compatible (7) instead of the previous 11
+pub const X_DROP_UNGAPPED: i32 = 7;
 
 /// BLAST_GAP_X_DROPOFF_PROT for preliminary extension
 pub const X_DROP_GAPPED_PRELIM: i32 = 15;
@@ -19,8 +20,10 @@ pub const MAX_HITS_PER_KMER: usize = 200;
 /// Stop codon encoding (25 = 'Z' + 1, used for non-standard amino acids)
 pub const STOP_CODON: u8 = 25;
 
-/// BLAST_WINDOW_SIZE_PROT from NCBI (was 16)
+/// BLAST_WINDOW_SIZE_PROT from NCBI
 /// Window size for two-hit requirement in protein searches
+/// Reference: ncbi-blast/c++/include/algo/blast/core/blast_options.h:57
+/// #define BLAST_WINDOW_SIZE_PROT 40
 pub const TWO_HIT_WINDOW: usize = 40;
 
 /// Default gap penalties for protein alignments (BLOSUM62 defaults, NCBI compatible)
@@ -44,4 +47,18 @@ pub const MAX_GAP_AA: usize = 333;
 
 /// Maximum diagonal drift in amino acids (~100bp / 3 for amino acids)
 pub const MAX_DIAG_DRIFT_AA: isize = 33;
+
+/// NCBI BLAST cutoff E-value for TBLASTX ungapped extensions
+/// This is used to calculate the minimum score cutoff for extensions.
+/// Reference: ncbi-blast/c++/include/algo/blast/core/blast_parameters.h:80
+/// #define CUTOFF_E_TBLASTX 1e-300
+pub const CUTOFF_E_TBLASTX: f64 = 1e-300;
+
+/// NCBI BLAST gap trigger bit score for protein searches
+/// HSPs with bit scores above this threshold are considered significant enough
+/// to potentially trigger gapped alignment (though TBLASTX doesn't use gapped mode).
+/// This is also used as a ceiling for cutoff_score_max.
+/// Reference: ncbi-blast/c++/include/algo/blast/core/blast_options.h:137
+/// #define BLAST_GAP_TRIGGER_PROT 22.0
+pub const GAP_TRIGGER_BIT_SCORE: f64 = 22.0;
 

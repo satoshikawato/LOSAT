@@ -7,7 +7,7 @@ use crate::stats::KarlinParams;
 use crate::algorithm::common::evalue::calculate_evalue_alignment_length;
 use crate::utils::matrix::MATRIX;
 use super::constants::{
-    GAP_EXTEND, GAP_OPEN, STOP_CODON, X_DROP_GAPPED_FINAL, X_DROP_GAPPED_PRELIM, X_DROP_UNGAPPED,
+    GAP_EXTEND, GAP_OPEN, STOP_CODON, X_DROP_GAPPED_FINAL, X_DROP_GAPPED_PRELIM,
 };
 
 /// Get the substitution matrix score for two amino acids
@@ -34,12 +34,16 @@ struct ProteinAlnStats {
 /// 1. First, find the best scoring position within the word
 /// 2. Then extend left from that position
 /// 3. Then extend right from that position
+///
+/// # Arguments
+/// * `x_drop` - X-drop threshold (LOSAT default: 11, NCBI standard: 7)
 pub fn extend_hit_ungapped(
     q_seq: &[u8],
     s_seq: &[u8],
     q_pos: usize,
     s_pos: usize,
     _seed_score: i32,
+    x_drop: i32,
 ) -> (usize, usize, usize, usize, i32, usize) {
     let k_size = 3;
 
@@ -94,7 +98,7 @@ pub fn extend_hit_ungapped(
             left_disp = i + 1;
         }
 
-        if (max_score - current_score) >= X_DROP_UNGAPPED {
+        if (max_score - current_score) >= x_drop {
             break;
         }
         i += 1;
@@ -122,7 +126,7 @@ pub fn extend_hit_ungapped(
             right_disp = j + 1;
         }
 
-        if right_score <= 0 || (max_score_total - right_score) >= X_DROP_UNGAPPED {
+        if right_score <= 0 || (max_score_total - right_score) >= x_drop {
             break;
         }
         j += 1;
@@ -160,12 +164,16 @@ pub fn extend_hit_ungapped(
 /// at minimum), matching NCBI BLAST's behavior.
 /// Returns (q_start, q_end, s_start, s_end, score, right_extended, s_last_off)
 /// where s_last_off is the rightmost subject position scanned (for diagonal suppression)
+///
+/// # Arguments
+/// * `x_drop` - X-drop threshold (LOSAT default: 11, NCBI standard: 7)
 pub fn extend_hit_two_hit(
     q_seq: &[u8],
     s_seq: &[u8],
     s_left_off: usize,  // Position of first hit (L) in subject
     s_right_off: usize, // Position of second hit (R) in subject
     q_right_off: usize, // Position of second hit (R) in query
+    x_drop: i32,
 ) -> (usize, usize, usize, usize, i32, bool, usize) {
     let k_size = 3;
 
@@ -192,6 +200,8 @@ pub fn extend_hit_two_hit(
     let s_right_off = s_right_off + right_d;
 
     // Extend to the left from R, trying to reach L
+    // IMPORTANT: Stop at stop codons (NCBI BLAST behavior)
+    // Reference: ncbi-blast/c++/src/algo/blast/core/aa_ungapped.c
     let mut current_score = 0i32;
     let mut max_score = 0i32;
     let mut left_disp = 0usize;
@@ -203,6 +213,11 @@ pub fn extend_hit_two_hit(
         let q_char = unsafe { *q_seq.get_unchecked(q_right_off - 1 - i) };
         let s_char = unsafe { *s_seq.get_unchecked(s_right_off - 1 - i) };
 
+        // Stop codon terminates extension (NCBI BLAST behavior)
+        if q_char == STOP_CODON || s_char == STOP_CODON {
+            break;
+        }
+
         current_score += get_score(q_char, s_char);
 
         if current_score > max_score {
@@ -210,7 +225,7 @@ pub fn extend_hit_two_hit(
             left_disp = i + 1;
         }
 
-        if (max_score - current_score) >= X_DROP_UNGAPPED {
+        if (max_score - current_score) >= x_drop {
             break;
         }
         i += 1;
@@ -238,6 +253,11 @@ pub fn extend_hit_two_hit(
             let q_char = unsafe { *q_seq.get_unchecked(q_right_off + j) };
             let s_char = unsafe { *s_seq.get_unchecked(s_right_off + j) };
 
+            // Stop codon terminates extension (NCBI BLAST behavior)
+            if q_char == STOP_CODON || s_char == STOP_CODON {
+                break;
+            }
+
             right_score += get_score(q_char, s_char);
 
             if right_score > max_score_total {
@@ -245,7 +265,7 @@ pub fn extend_hit_two_hit(
                 right_disp = j + 1;
             }
 
-            if right_score <= 0 || (max_score_total - right_score) >= X_DROP_UNGAPPED {
+            if right_score <= 0 || (max_score_total - right_score) >= x_drop {
                 break;
             }
             j += 1;

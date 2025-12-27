@@ -34,5 +34,15 @@ pub struct TblastxArgs {
     pub dust_window: usize,
     #[arg(long, default_value_t = 1)]
     pub dust_linker: usize,
+    
+    /// Use NCBI BLAST compatible parameters (TWO_HIT_WINDOW=16, X_DROP_UNGAPPED=7)
+    /// When enabled, uses stricter parameters that match NCBI BLAST+ defaults
+    #[arg(long, default_value_t = false)]
+    pub ncbi_compat: bool,
+    
+    /// Two-hit window size for triggering ungapped extension (default: 40, NCBI: 16)
+    /// Smaller values are more strict, larger values are more sensitive
+    #[arg(long)]
+    pub two_hit_window: Option<usize>,
 }
 

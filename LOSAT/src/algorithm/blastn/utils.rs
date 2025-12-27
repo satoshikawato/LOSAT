@@ -1188,6 +1188,7 @@ pub fn run(args: BlastnArgs) -> Result<()> {
                                 kmer_start,
                                 reward,
                                 penalty,
+                                None, // Use default X-drop
                             );
 
                             // Skip if ungapped score is too low
@@ -1481,6 +1482,7 @@ pub fn run(args: BlastnArgs) -> Result<()> {
                             kmer_start,
                             reward,
                             penalty,
+                            None, // Use default X-drop
                         );
 
                         // Skip if ungapped score is too low

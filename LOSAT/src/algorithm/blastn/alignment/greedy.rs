@@ -2,6 +2,27 @@
 //!
 //! This module implements NCBI BLAST's greedy alignment algorithm (Zhang et al., 2000)
 //! for fast alignment of high-identity sequences.
+//!
+//! ## NCBI BLAST Compatibility Notes
+//!
+//! This implementation follows NCBI BLAST's greedy_align.c and blast_gapalign.c:
+//!
+//! - **Non-affine greedy** (`greedy_align_one_direction_with_max_dist`):
+//!   Implements BLAST_GreedyAlign with distance-based tracking and X-drop
+//!
+//! - **Affine greedy** (`affine_greedy_align_one_direction_with_max_dist`):
+//!   Implements BLAST_AffineGreedyAlign with three-state tracking (insert/match/delete)
+//!
+//! Key NCBI BLAST behaviors preserved:
+//! - Score normalization when reward is odd (doubles all scores)
+//! - Dynamic max_dist doubling for long alignments
+//! - X-drop scaled to match score units
+//! - Convergence detection via diagonal bounds
+//!
+//! Statistics estimation:
+//! - Since we don't perform full traceback, statistics (matches, mismatches,
+//!   gap_opens, gap_letters) are estimated from the alignment endpoints
+//! - NCBI BLAST's edit script traceback could be added for exact statistics if needed
 
 use std::cell::RefCell;
 use super::super::constants::{GREEDY_MAX_COST, GREEDY_MAX_COST_FRACTION, INVALID_OFFSET, INVALID_DIAG};

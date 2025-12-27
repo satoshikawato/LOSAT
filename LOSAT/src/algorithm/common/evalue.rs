@@ -85,10 +85,41 @@ pub fn calculate_evalue_alignment_length(
     (bs, ev)
 }
 
+/// Calculate bit score and E-value using NCBI BLAST style (query × subject with length adjustment)
+///
+/// This function uses the proper NCBI BLAST search space calculation:
+/// - Search space = (query_len - length_adj) × (subject_len - length_adj)
+/// - Length adjustment is calculated using Karlin-Altschul statistics
+///
+/// This is the recommended method for NCBI BLAST compatible E-values.
+///
+/// # Arguments
+/// * `score` - Raw alignment score
+/// * `query_len` - Query sequence length (in amino acids for protein)
+/// * `subject_len` - Subject sequence length (in amino acids for protein)
+/// * `params` - Karlin-Altschul statistical parameters
+///
+/// # Returns
+/// Tuple of (bit_score, e_value)
+pub fn calculate_evalue_ncbi_style(
+    score: i32,
+    query_len: usize,
+    subject_len: usize,
+    params: &KarlinParams,
+) -> (f64, f64) {
+    // Use NCBI-style length adjustment for single-sequence comparison
+    // Reference: ncbi-blast/c++/src/algo/blast/core/blast_setup.c:821-824
+    let search_space = SearchSpace::with_length_adjustment(query_len, subject_len, params);
+    let bs = calc_bit_score(score, params);
+    let ev = calc_evalue(bs, &search_space);
+    (bs, ev)
+}
+
 /// Calculate bit score from raw score
 ///
 /// This is a convenience function that wraps the bit score calculation.
 pub fn bit_score(score: i32, params: &KarlinParams) -> f64 {
     calc_bit_score(score, params)
 }
+
 

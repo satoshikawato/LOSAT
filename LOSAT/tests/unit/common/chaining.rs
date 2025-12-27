@@ -78,11 +78,12 @@ fn test_filter_overlapping_hsps_high_overlap() {
 fn test_filter_overlapping_hsps_low_overlap() {
     let hits = vec![
         make_hit("q1", "s1", 1, 100, 1, 100, 100.0),
-        make_hit("q1", "s1", 80, 120, 80, 120, 90.0), // Small overlap
+        make_hit("q1", "s1", 80, 120, 80, 120, 90.0), // Overlap: (80, 100) = 21 positions
     ];
     let filtered = filter_overlapping_hsps(hits, 0.5);
-    // Small overlap should not trigger filtering
-    assert_eq!(filtered.len(), 2);
+    // Overlap is 21/41 = 0.512 > 0.5, so lower-scoring hit should be filtered
+    assert_eq!(filtered.len(), 1);
+    assert_eq!(filtered[0].bit_score, 100.0);
 }
 
 #[test]

@@ -43,8 +43,13 @@ fn test_bit_score_zero_score() {
 
     let bs = bit_score(score, &params);
 
-    // Bit score for zero should be negative (since ln(K) > 0)
-    assert!(bs < 0.0);
+    // Bit score for zero: (lambda * 0 - ln(K)) / ln(2) = -ln(K) / ln(2)
+    // Since K < 1, ln(K) < 0, so -ln(K) > 0, meaning bit score is positive
+    // For default protein params (lambda=0.267, k=0.041), this is approximately 4.6
+    assert!(bs > 0.0);
+    // Verify the calculation
+    let expected = -params.k.ln() / 2.0_f64.ln();
+    assert!((bs - expected).abs() < 1e-10);
 }
 
 #[test]

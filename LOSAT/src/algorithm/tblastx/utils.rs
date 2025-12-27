@@ -22,7 +22,7 @@ use super::constants::{
     X_DROP_GAPPED_PRELIM,
 };
 use super::chaining::{chain_and_filter_hsps_protein, ExtendedHit, SequenceData, SequenceKey};
-use super::diagnostics::{diagnostics_enabled, DiagnosticCounters};
+use super::diagnostics::{diagnostics_enabled, DiagnosticCounters, print_summary as print_diagnostics_summary};
 use super::extension::{
     calculate_statistics, convert_coords, extend_gapped_protein, extend_hit_two_hit,
     extend_hit_ungapped, get_score,
@@ -200,7 +200,7 @@ pub fn run(args: TblastxArgs) -> Result<()> {
 
                             // Count k-mer matches for diagnostics
                             if diag_enabled && !matches.is_empty() {
-                                diag_inner.kmer_matches.fetch_add(matches.len(), AtomicOrdering::Relaxed);
+                                diag_inner.base.kmer_matches.fetch_add(matches.len(), AtomicOrdering::Relaxed);
                             }
 
                             for &(q_idx, q_f_idx, q_pos) in matches {
@@ -224,7 +224,7 @@ pub fn run(args: TblastxArgs) -> Result<()> {
 
                                 if seed_score < 11 {
                                     if diag_enabled {
-                                        diag_inner.seeds_low_score.fetch_add(1, AtomicOrdering::Relaxed);
+                                        diag_inner.base.seeds_low_score.fetch_add(1, AtomicOrdering::Relaxed);
                                     }
                                     continue;
                                 }
@@ -253,15 +253,15 @@ pub fn run(args: TblastxArgs) -> Result<()> {
                                 // Higher threshold compensates for increased X_DROP_UNGAPPED (11 vs 7)
                                 if two_hit_info.is_none() && seed_score < 30 {
                                     if diag_enabled {
-                                        diag_inner.seeds_two_hit_failed.fetch_add(1, AtomicOrdering::Relaxed);
+                                        diag_inner.base.seeds_two_hit_failed.fetch_add(1, AtomicOrdering::Relaxed);
                                     }
                                     continue;
                                 }
 
                                 // Count seeds that passed to extension
                                 if diag_enabled {
-                                    diag_inner.seeds_passed.fetch_add(1, AtomicOrdering::Relaxed);
-                                    diag_inner.ungapped_extensions.fetch_add(1, AtomicOrdering::Relaxed);
+                                    diag_inner.base.seeds_passed.fetch_add(1, AtomicOrdering::Relaxed);
+                                    diag_inner.base.ungapped_extensions.fetch_add(1, AtomicOrdering::Relaxed);
                                 }
 
                                 // Use NCBI-style two-hit extension when two-hit is satisfied,
@@ -303,7 +303,7 @@ pub fn run(args: TblastxArgs) -> Result<()> {
                                 // Skip if ungapped score is too low
                                 if ungapped_score < MIN_UNGAPPED_SCORE {
                                     if diag_enabled {
-                                        diag_inner.ungapped_low_score.fetch_add(1, AtomicOrdering::Relaxed);
+                                        diag_inner.base.ungapped_low_score.fetch_add(1, AtomicOrdering::Relaxed);
                                     }
                                     continue;
                                 }
@@ -538,7 +538,7 @@ pub fn run(args: TblastxArgs) -> Result<()> {
 
     // Print diagnostic summary if enabled
     if diag_enabled {
-        diagnostics.print_summary();
+        print_diagnostics_summary(&diagnostics);
     }
 
     Ok(())

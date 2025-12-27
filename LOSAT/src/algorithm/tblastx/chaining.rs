@@ -116,7 +116,7 @@ pub fn chain_and_filter_hsps_protein(
     // Record HSPs before chaining
     let hsps_before = hits.len();
     if let Some(diag) = diagnostics {
-        diag.hsps_before_chain.store(hsps_before, AtomicOrdering::Relaxed);
+        diag.base.hsps_before_chain.store(hsps_before, AtomicOrdering::Relaxed);
     }
 
     // Group hits by query-subject pair AND frame combination
@@ -187,12 +187,12 @@ pub fn chain_and_filter_hsps_protein(
         for cluster in clusters {
             if cluster.len() == 1 {
                 if let Some(diag) = diagnostics {
-                    diag.clusters_single.fetch_add(1, AtomicOrdering::Relaxed);
+                    diag.base.clusters_single.fetch_add(1, AtomicOrdering::Relaxed);
                 }
             } else {
                 if let Some(diag) = diagnostics {
-                    diag.clusters_merged.fetch_add(1, AtomicOrdering::Relaxed);
-                    diag.hsps_in_merged_clusters.fetch_add(cluster.len(), AtomicOrdering::Relaxed);
+                    diag.base.clusters_merged.fetch_add(1, AtomicOrdering::Relaxed);
+                    diag.base.hsps_in_merged_clusters.fetch_add(cluster.len(), AtomicOrdering::Relaxed);
                 }
             }
 
@@ -208,7 +208,7 @@ pub fn chain_and_filter_hsps_protein(
 
     // Record HSPs after chaining (before domination filter)
     if let Some(diag) = diagnostics {
-        diag.hsps_after_chain.store(result_hits.len(), AtomicOrdering::Relaxed);
+        diag.base.hsps_after_chain.store(result_hits.len(), AtomicOrdering::Relaxed);
     }
 
     // Sort by bit score (highest first) for domination filtering
@@ -225,7 +225,7 @@ pub fn chain_and_filter_hsps_protein(
 
     // Record culled HSPs (always 0 since culling is disabled)
     if let Some(diag) = diagnostics {
-        diag.hsps_culled_dominated.store(0, AtomicOrdering::Relaxed);
+        diag.base.hsps_culled_dominated.store(0, AtomicOrdering::Relaxed);
     }
 
     // Count output sources and convert to Hit
@@ -247,7 +247,7 @@ pub fn chain_and_filter_hsps_protein(
     if let Some(diag) = diagnostics {
         diag.output_from_ungapped.store(output_from_ungapped, AtomicOrdering::Relaxed);
         diag.output_from_gapped.store(output_from_gapped, AtomicOrdering::Relaxed);
-        diag.hsps_after_overlap_filter.store(final_hits.len(), AtomicOrdering::Relaxed);
+        diag.base.hsps_after_overlap_filter.store(final_hits.len(), AtomicOrdering::Relaxed);
     }
 
     final_hits

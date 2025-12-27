@@ -1,7 +1,6 @@
 use std::cell::RefCell;
-use crate::stats::karlin::{bit_score as calc_bit_score, evalue as calc_evalue};
-use crate::stats::search_space::SearchSpace;
 use crate::stats::KarlinParams;
+use crate::algorithm::common::evalue::calculate_evalue_database_search;
 use super::constants::{GREEDY_MAX_COST, GREEDY_MAX_COST_FRACTION, INVALID_OFFSET, INVALID_DIAG};
 use super::sequence_compare::{find_first_mismatch_ex, find_first_mismatch};
 
@@ -1394,11 +1393,7 @@ fn calculate_evalue(
     db_num_seqs: usize,
     params: &KarlinParams,
 ) -> (f64, f64) {
-    // Use NCBI-compatible length adjustment for database search
-    let search_space = SearchSpace::for_database_search(q_len, db_len, db_num_seqs, params, true);
-    let bs = calc_bit_score(score, params);
-    let ev = calc_evalue(bs, &search_space);
-    (bs, ev)
+    calculate_evalue_database_search(score, q_len, db_len, db_num_seqs, params)
 }
 
 /// Merge overlapping HSPs and filter redundant hits.

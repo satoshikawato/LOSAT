@@ -3,9 +3,8 @@
 //! This module implements ungapped and gapped extension algorithms for protein sequences,
 //! following NCBI BLAST's approach with X-drop termination and affine gap penalties.
 
-use crate::stats::karlin::{bit_score as calc_bit_score, evalue as calc_evalue};
-use crate::stats::search_space::SearchSpace;
 use crate::stats::KarlinParams;
+use crate::algorithm::common::evalue::calculate_evalue_alignment_length;
 use crate::utils::matrix::MATRIX;
 use super::constants::{
     GAP_EXTEND, GAP_OPEN, STOP_CODON, X_DROP_GAPPED_FINAL, X_DROP_GAPPED_PRELIM, X_DROP_UNGAPPED,
@@ -691,28 +690,10 @@ pub fn convert_coords(aa_start: usize, aa_end: usize, frame: i8, dna_len: usize)
 }
 
 /// Calculate bit score and E-value for a protein alignment
+///
+/// This function uses alignment length as the effective search space,
+/// which is appropriate for protein alignments.
 pub fn calculate_statistics(score: i32, aln_len: usize, params: &KarlinParams) -> (f64, f64) {
-    // Use alignment length as effective search space, but with a minimum to prevent
-    // too many low-scoring hits from passing the e-value filter.
-    //
-    // Session 6 tuning results (with overlap filter):
-    // - 50M: 97-215% of NCBI BLAST hits (too variable, some too high)
-    // - 70M: 74-141% of NCBI BLAST hits (some too low)
-    // - 60M: Target ~90-110% of NCBI BLAST hits (middle ground)
-    //
-    // The 60M floor provides a balance between sensitivity and specificity.
-    let aln_space = (aln_len * aln_len) as f64;
-    let min_space = 60_000_000.0; // 60M - middle ground between 50M and 70M
-    let effective_space = aln_space.max(min_space);
-
-    let search_space = SearchSpace {
-        effective_query_len: effective_space.sqrt(),
-        effective_db_len: effective_space.sqrt(),
-        effective_space,
-        length_adjustment: 0,
-    };
-    let bs = calc_bit_score(score, params);
-    let ev = calc_evalue(bs, &search_space);
-    (bs, ev)
+    calculate_evalue_alignment_length(score, aln_len, params)
 }
 

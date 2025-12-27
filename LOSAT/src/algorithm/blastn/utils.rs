@@ -4,12 +4,9 @@ use indicatif::{ProgressBar, ProgressStyle};
 use rayon::prelude::*;
 use rustc_hash::FxHashMap;
 use std::cmp::Ordering;
-use std::path::PathBuf;
 use std::sync::mpsc::channel;
 use crate::common::{write_output, Hit};
 use crate::config::NuclScoringSpec;
-use crate::stats::karlin::{bit_score as calc_bit_score, evalue as calc_evalue};
-use crate::stats::search_space::SearchSpace;
 use crate::stats::{lookup_nucl_params, KarlinParams};
 use crate::utils::dust::{DustMasker, MaskedInterval};
 use super::args::BlastnArgs;
@@ -19,19 +16,8 @@ use super::constants::{X_DROP_GAPPED_FINAL, X_DROP_UNGAPPED, TWO_HIT_WINDOW, MIN
 use super::lookup::{build_lookup, build_pv_direct_lookup, build_two_stage_lookup, build_direct_lookup, reverse_complement, TwoStageLookup, PvDirectLookup, DirectKmerLookup, KmerLookup, pack_diag_key, is_kmer_masked};
 use super::sequence_compare::{compare_28mer_simd, compare_sequences_simd, find_first_mismatch};
 
-pub fn calculate_evalue(
-    score: i32,
-    q_len: usize,
-    db_len: usize,
-    db_num_seqs: usize,
-    params: &KarlinParams,
-) -> (f64, f64) {
-    // Use NCBI-compatible length adjustment for database search
-    let search_space = SearchSpace::for_database_search(q_len, db_len, db_num_seqs, params, true);
-    let bs = calc_bit_score(score, params);
-    let ev = calc_evalue(bs, &search_space);
-    (bs, ev)
-}
+// Re-export for backward compatibility
+pub use crate::algorithm::common::evalue::calculate_evalue_database_search as calculate_evalue;
 pub fn chain_and_filter_hsps(
     mut hits: Vec<Hit>,
     sequences: &FxHashMap<(String, String), (Vec<u8>, Vec<u8>)>,

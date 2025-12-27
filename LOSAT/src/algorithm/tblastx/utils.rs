@@ -358,44 +358,34 @@ pub fn run(args: TblastxArgs) -> Result<()> {
                                 // Update the last seed position for this diagonal
                                 last_seed.insert(mask_key, s_pos);
 
-                                // NCBI BLAST behavior: Two-hit requirement controls right extension execution,
-                                // but left extension is always performed. If left extension score exceeds
-                                // cutoff_score, the HSP is saved even when two-hit requirement is not met.
-                                // Reference: ncbi-blast/c++/src/algo/blast/core/aa_ungapped.c:576-591
-                                // - Two-hit satisfied: left + right extension → higher score HSP
-                                // - Two-hit not satisfied: left extension only → left_score based HSP
-                                // Both cases: if score >= cutoff_score, save as HSP
-                                
-                                // Count seeds that passed to extension
-                                // Note: Even when two-hit requirement is not satisfied, extension is still performed
-                                // (left extension only, which may still produce valid HSPs if score >= cutoff_score)
+                                // NCBI BLAST behavior: Two-hit requirement must be satisfied to perform extension
+                                // If two-hit requirement is not met, skip extension (continue)
+                                // Reference: ncbi-blast/c++/src/algo/blast/core/aa_ungapped.c:538-573
+                                // - Two-hit satisfied: extension is performed (left + right if left reaches first hit)
+                                // - Two-hit not satisfied: continue (skip extension)
+                                if two_hit_info.is_none() {
+                                    // Two-hit requirement not satisfied: skip extension (NCBI BLAST behavior)
+                                    if diag_enabled {
+                                        diag_inner.base.seeds_two_hit_failed.fetch_add(1, AtomicOrdering::Relaxed);
+                                    }
+                                    continue;
+                                }
+
+                                // Count seeds that passed to extension (two-hit requirement satisfied)
                                 if diag_enabled {
                                     diag_inner.base.seeds_passed.fetch_add(1, AtomicOrdering::Relaxed);
                                     diag_inner.base.ungapped_extensions.fetch_add(1, AtomicOrdering::Relaxed);
-                                    if two_hit_info.is_none() {
-                                        // Track one-hit extensions (left-only, two-hit not satisfied)
-                                        diag_inner.base.ungapped_one_hit_extensions.fetch_add(1, AtomicOrdering::Relaxed);
-                                    } else {
-                                        // Track two-hit extensions (left+right, two-hit satisfied)
-                                        diag_inner.base.ungapped_two_hit_extensions.fetch_add(1, AtomicOrdering::Relaxed);
-                                    }
+                                    // Track two-hit extensions (left+right, two-hit satisfied)
+                                    diag_inner.base.ungapped_two_hit_extensions.fetch_add(1, AtomicOrdering::Relaxed);
                                 }
 
                                 let k_size = 3usize;
                                 // Two-hit extension: extend from current seed (R) to the left,
                                 // only extend right if left extension reaches the first hit (L)
                                 // NCBI BLAST passes s_left_off = last_hit + wordsize (end of first word)
-                                // When two-hit requirement is not met, use current seed position as s_left_off
-                                // so that left extension cannot reach it, resulting in left-only extension
                                 let (qs, qe, ss, se_ungapped, ungapped_score, right_extended, s_last_off) = {
-                                    let s_left_off = if let Some(prev_s_pos) = two_hit_info {
-                                        // Two-hit requirement satisfied: use first hit position
-                                        prev_s_pos + k_size  // End of first hit (L + wordsize), NCBI BLAST style
-                                    } else {
-                                        // Two-hit requirement not satisfied: use current seed position
-                                        // This ensures left extension cannot reach it, so only left extension is performed
-                                        s_pos + k_size
-                                    };
+                                    let prev_s_pos = two_hit_info.unwrap();  // Safe: we already checked two_hit_info.is_some()
+                                    let s_left_off = prev_s_pos + k_size;  // End of first hit (L + wordsize), NCBI BLAST style
                                     
                                     let (qs, qe, ss, se, score, right_ext, s_last) = extend_hit_two_hit(
                                         q_aa,
@@ -468,19 +458,85 @@ pub fn run(args: TblastxArgs) -> Result<()> {
                                         };
                                         let cutoff_from_evalue = raw_score_from_evalue(CUTOFF_E_TBLASTX, &params, &cutoff_search_space);
                                         
-                                        // Calculate gap_trigger from bit score: gap_trigger = (gap_trigger_bit * ln(2) + ln(K)) / lambda
-                                        // Reference: ncbi-blast/c++/src/algo/blast/core/blast_parameters.c:343-344
+                                        // Calculate cutoff_score_max FIRST (before gap_trigger)
+                                        // Reference: ncbi-blast/c++/src/algo/blast/core/blast_parameters.c:372-373, 943-946
+                                        // For TBLASTX, cutoff_score_max is set in BlastHitSavingParametersUpdate
+                                        // and is calculated from expect_value (default 10.0) using eff_searchsp
+                                        //
+                                        // IMPORTANT: NCBI BLAST uses eff_searchsp (with length adjustment) for cutoff_score_max,
+                                        // NOT the same search space as cutoff_score calculation.
+                                        // Reference: ncbi-blast/c++/src/algo/blast/core/blast_parameters.c:926
+                                        // searchsp = query_info->contexts[context].eff_searchsp;
+                                        // This is the key difference - eff_searchsp is smaller, making cutoff_score_max smaller
+                                        // and thus allowing lower-scoring hits to pass.
+                                        // Also, cutoff_score_max is scaled by scale_factor after calculation.
+                                        // Reference: ncbi-blast/c++/src/algo/blast/core/blast_parameters.c:985
+                                        // params->cutoffs[context].cutoff_score_max *= (Int4) scale_factor;
+                                        //
+                                        // IMPORTANT: The user's insight is that cutoff_score_max should allow hits with
+                                        // "evalue < 10 OR bitscore > threshold" (where threshold is gap_trigger = 22.0 bit score).
+                                        // This means cutoff_score_max should be calculated to allow hits with bit score >= 22.0,
+                                        // which corresponds to gap_trigger raw score (46). So cutoff_score_max should be
+                                        // at least gap_trigger, or calculated from an evalue that corresponds to gap_trigger.
+                                        let scale_factor = 1.0; // Default for TBLASTX (RPS-BLAST uses > 1.0)
+                                        
+                                        // Calculate gap_trigger first to determine the minimum cutoff_score_max
                                         use super::constants::GAP_TRIGGER_BIT_SCORE;
                                         use crate::stats::karlin::raw_score_from_bit_score;
                                         let gap_trigger = raw_score_from_bit_score(GAP_TRIGGER_BIT_SCORE, &params);
                                         
-                                        // Use MIN(cutoff_from_evalue, gap_trigger) as NCBI BLAST does
-                                        // Reference: ncbi-blast/c++/src/algo/blast/core/blast_parameters.c:367
-                                        let cutoff = cutoff_from_evalue.min(gap_trigger);
+                                        // Calculate cutoff_score_max from args.evalue (default 10.0)
+                                        let cutoff_score_max_from_evalue = (raw_score_from_evalue(args.evalue, &params, &search_space) as f64 * scale_factor) as i32;
+                                        
+                                        // IMPORTANT: cutoff_score_max should allow hits with "evalue < 10 OR bitscore > threshold"
+                                        // where threshold is gap_trigger (22.0 bit score = 46 raw score).
+                                        // This means cutoff_score_max should be gap_trigger to allow hits with bit score >= 22.0
+                                        // to pass even if their evalue >= 10.0.
+                                        // Reference: The user's insight that cutoff_score_max should be gap_trigger
+                                        let cutoff_score_max = gap_trigger;
+                                        
+                                        // gap_trigger is already calculated above
+                                        
+                                        // IMPORTANT: NCBI BLAST applies gap_trigger BEFORE cutoff_score_max, but
+                                        // if cutoff_score_max < gap_trigger, cutoff_score_max will override gap_trigger.
+                                        // However, if cutoff_score_max >= gap_trigger, gap_trigger is applied first.
+                                        // Reference: ncbi-blast/c++/src/algo/blast/core/blast_parameters.c:103-110, 372-373
+                                        // The actual NCBI BLAST code always applies gap_trigger first, then cutoff_score_max:
+                                        //   new_cutoff = MIN(new_cutoff, gap_trigger);
+                                        //   new_cutoff *= scale_factor;
+                                        //   new_cutoff = MIN(new_cutoff, cutoff_score_max);
+                                        // This means if cutoff_score_max >= gap_trigger, gap_trigger is the limiting factor.
+                                        // But the user wants cutoff_score_max to take precedence when it's larger.
+                                        // IMPORTANT: Since cutoff_score_max = gap_trigger (to allow "evalue < 10 OR bitscore > threshold"),
+                                        // we should use cutoff_score_max directly, not gap_trigger.
+                                        // This ensures that hits with bit score >= 22.0 (gap_trigger) can pass even if evalue >= 10.0.
+                                        let mut cutoff = cutoff_from_evalue.min(cutoff_score_max);
+                                        
+                                        // Apply scale_factor (usually 1.0 for TBLASTX)
+                                        // Reference: ncbi-blast/c++/src/algo/blast/core/blast_parameters.c:371
+                                        // Note: scale_factor is already applied to cutoff_score_max above
+                                        cutoff = (cutoff as f64 * scale_factor) as i32;
+                                        
+                                        // Apply cutoff_score_max limit (final check)
+                                        // This ensures cutoff_score_max is always respected
+                                        // Reference: ncbi-blast/c++/src/algo/blast/core/blast_parameters.c:372-373
+                                        let cutoff_before_max = cutoff;
+                                        cutoff = cutoff.min(cutoff_score_max);
                                         
                                         if diag_enabled {
-                                            eprintln!("[DEBUG] Cutoff score for context (q_frame={}, s_frame={}): cutoff_e={}, cutoff_from_evalue={}, gap_trigger={}, final_cutoff_score={}", 
-                                                q_frame.frame, s_frame.frame, CUTOFF_E_TBLASTX, cutoff_from_evalue, gap_trigger, cutoff);
+                                            let limiting_factor = if cutoff == cutoff_score_max && cutoff_score_max == gap_trigger {
+                                                "cutoff_score_max(gap_trigger)"
+                                            } else if cutoff == cutoff_score_max {
+                                                "cutoff_score_max"
+                                            } else if cutoff == gap_trigger {
+                                                "gap_trigger"
+                                            } else if cutoff == cutoff_from_evalue {
+                                                "cutoff_from_evalue"
+                                            } else {
+                                                "unknown"
+                                            };
+                                            eprintln!("[DEBUG] Cutoff score for context (q_frame={}, s_frame={}): cutoff_e={}, cutoff_from_evalue={}, gap_trigger={}, scale_factor={}, cutoff_score_max={}, cutoff_before_max={}, final_cutoff_score={}, limiting_factor={}", 
+                                                q_frame.frame, s_frame.frame, CUTOFF_E_TBLASTX, cutoff_from_evalue, gap_trigger, scale_factor, cutoff_score_max, cutoff_before_max, cutoff, limiting_factor);
                                         }
                                         cutoff
                                     });
@@ -490,6 +546,28 @@ pub fn run(args: TblastxArgs) -> Result<()> {
                                     if ungapped_score < cutoff_score {
                                         if diag_enabled {
                                             diag_inner.ungapped_cutoff_failed.fetch_add(1, AtomicOrdering::Relaxed);
+                                            // Track score range for cutoff_failed hits
+                                            use std::sync::atomic::Ordering as AtomicOrdering;
+                                            // Update minimum score
+                                            let mut current_min = diag_inner.ungapped_cutoff_failed_min_score.load(AtomicOrdering::Relaxed);
+                                            while ungapped_score < current_min {
+                                                match diag_inner.ungapped_cutoff_failed_min_score.compare_exchange_weak(
+                                                    current_min, ungapped_score, AtomicOrdering::Relaxed, AtomicOrdering::Relaxed
+                                                ) {
+                                                    Ok(_) => break,
+                                                    Err(x) => current_min = x,
+                                                }
+                                            }
+                                            // Update maximum score
+                                            let mut current_max = diag_inner.ungapped_cutoff_failed_max_score.load(AtomicOrdering::Relaxed);
+                                            while ungapped_score > current_max {
+                                                match diag_inner.ungapped_cutoff_failed_max_score.compare_exchange_weak(
+                                                    current_max, ungapped_score, AtomicOrdering::Relaxed, AtomicOrdering::Relaxed
+                                                ) {
+                                                    Ok(_) => break,
+                                                    Err(x) => current_max = x,
+                                                }
+                                            }
                                         }
                                         // Update mask even if cutoff_score check fails (NCBI BLAST behavior)
                                         let mask_end = if right_extended {

@@ -161,7 +161,7 @@ pub struct FilterConfig {
 impl Default for FilterConfig {
     fn default() -> Self {
         Self {
-            max_evalue: Some(10.0),
+            max_evalue: Some(crate::algorithm::tblastx::constants::EXPECT_VALUE),
             min_bit_score: None,
             min_identity: None,
             min_length: None,
@@ -176,7 +176,7 @@ impl FilterConfig {
     /// Configuration for NCBI BLAST compatible filtering (no overlap filtering)
     pub fn ncbi_compat() -> Self {
         Self {
-            max_evalue: Some(10.0),
+            max_evalue: Some(crate::algorithm::tblastx::constants::EXPECT_VALUE),
             min_bit_score: None,
             min_identity: None,
             min_length: None,

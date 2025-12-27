@@ -6,7 +6,7 @@
 //! The module uses a trait-based design to support both nucleotide and protein
 //! alignment diagnostics while sharing common infrastructure.
 
-use std::sync::atomic::{AtomicUsize, Ordering as AtomicOrdering};
+use std::sync::atomic::{AtomicUsize, AtomicI32, Ordering as AtomicOrdering};
 
 /// Check if diagnostics are enabled via environment variable
 pub fn diagnostics_enabled() -> bool {
@@ -30,7 +30,7 @@ pub struct BaseDiagnosticCounters {
     pub seeds_second_hit_overlap: AtomicUsize, // Second seed overlapping (diff < wordsize)
     // Ungapped extension stage
     pub ungapped_extensions: AtomicUsize,
-    pub ungapped_one_hit_extensions: AtomicUsize,  // Extensions with left-only (two-hit not satisfied)
+    pub ungapped_one_hit_extensions: AtomicUsize,  // Extensions with left-only (two-hit not satisfied) - NOTE: Always 0 in NCBI BLAST-compatible mode
     pub ungapped_two_hit_extensions: AtomicUsize,  // Extensions with left+right (two-hit satisfied)
     pub ungapped_low_score: AtomicUsize,
     // Post-processing stage
@@ -46,12 +46,13 @@ pub struct BaseDiagnosticCounters {
 }
 
 /// Diagnostic counters for protein/translated alignments (TBLASTX)
-#[derive(Default)]
 pub struct ProteinDiagnosticCounters {
     pub base: BaseDiagnosticCounters,
     // Gapped extension stage (protein-specific)
     pub ungapped_only_hits: AtomicUsize,
     pub ungapped_cutoff_failed: AtomicUsize,  // ungapped hits that failed cutoff_score filter
+    pub ungapped_cutoff_failed_min_score: AtomicI32,  // minimum score of hits that failed cutoff_score
+    pub ungapped_cutoff_failed_max_score: AtomicI32,  // maximum score of hits that failed cutoff_score
     pub ungapped_evalue_passed: AtomicUsize,  // ungapped-only hits that passed e-value filter
     pub ungapped_evalue_failed: AtomicUsize,  // ungapped-only hits that failed e-value filter
     pub gapped_extensions: AtomicUsize,
@@ -59,6 +60,24 @@ pub struct ProteinDiagnosticCounters {
     // Output source tracking
     pub output_from_ungapped: AtomicUsize,  // HSPs output from ungapped extension only
     pub output_from_gapped: AtomicUsize,    // HSPs output from gapped extension
+}
+
+impl Default for ProteinDiagnosticCounters {
+    fn default() -> Self {
+        Self {
+            base: BaseDiagnosticCounters::default(),
+            ungapped_only_hits: AtomicUsize::new(0),
+            ungapped_cutoff_failed: AtomicUsize::new(0),
+            ungapped_cutoff_failed_min_score: AtomicI32::new(i32::MAX),
+            ungapped_cutoff_failed_max_score: AtomicI32::new(i32::MIN),
+            ungapped_evalue_passed: AtomicUsize::new(0),
+            ungapped_evalue_failed: AtomicUsize::new(0),
+            gapped_extensions: AtomicUsize::new(0),
+            gapped_evalue_passed: AtomicUsize::new(0),
+            output_from_ungapped: AtomicUsize::new(0),
+            output_from_gapped: AtomicUsize::new(0),
+        }
+    }
 }
 
 impl ProteinDiagnosticCounters {
@@ -122,10 +141,38 @@ impl ProteinDiagnosticCounters {
             "  Total ungapped-only:        {}",
             self.ungapped_only_hits.load(AtomicOrdering::Relaxed)
         );
+        let cutoff_failed_count = self.ungapped_cutoff_failed.load(AtomicOrdering::Relaxed);
         eprintln!(
             "  Filtered (cutoff_score):     {}",
-            self.ungapped_cutoff_failed.load(AtomicOrdering::Relaxed)
+            cutoff_failed_count
         );
+        if cutoff_failed_count > 0 {
+            let min_score = self.ungapped_cutoff_failed_min_score.load(AtomicOrdering::Relaxed);
+            let max_score = self.ungapped_cutoff_failed_max_score.load(AtomicOrdering::Relaxed);
+            // Display score range if at least one value was updated
+            if min_score != i32::MAX || max_score != i32::MIN {
+                if min_score == i32::MAX {
+                    eprintln!(
+                        "    Score range:                N/A - {}",
+                        max_score
+                    );
+                } else if max_score == i32::MIN {
+                    eprintln!(
+                        "    Score range:                {} - N/A",
+                        min_score
+                    );
+                } else {
+                    eprintln!(
+                        "    Score range:                {} - {}",
+                        min_score, max_score
+                    );
+                }
+            } else {
+                eprintln!(
+                    "    Score range:                (not updated)"
+                );
+            }
+        }
         eprintln!(
             "  E-value passed:             {}",
             self.ungapped_evalue_passed.load(AtomicOrdering::Relaxed)

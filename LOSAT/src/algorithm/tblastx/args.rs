@@ -2,6 +2,7 @@
 
 use clap::Args;
 use std::path::PathBuf;
+use crate::algorithm::tblastx::constants::EXPECT_VALUE;
 
 /// Command-line arguments for TBLASTX (translated DNA vs translated DNA search)
 #[derive(Args, Debug)]
@@ -10,7 +11,7 @@ pub struct TblastxArgs {
     pub query: PathBuf,
     #[arg(short, long)]
     pub subject: PathBuf,
-    #[arg(short, long, default_value_t = 10.0)]
+    #[arg(short, long, default_value_t = EXPECT_VALUE)]
     pub evalue: f64,
     #[arg(short, long, default_value_t = 13)]
     pub threshold: i32,

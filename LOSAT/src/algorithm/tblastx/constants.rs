@@ -74,6 +74,13 @@ pub const CUTOFF_E_TBLASTX: f64 = 1e-300;
 /// #define BLAST_GAP_TRIGGER_PROT 22.0
 pub const GAP_TRIGGER_BIT_SCORE: f64 = 22.0;
 
+/// BLAST_EXPECT_VALUE from NCBI BLAST
+/// Default E-value threshold for filtering alignments
+/// By default, alignments whose expect value exceeds this number are discarded
+/// Reference: ncbi-blast/c++/include/algo/blast/core/blast_options.h:158-159
+/// #define BLAST_EXPECT_VALUE 10.0
+pub const EXPECT_VALUE: f64 = 10.0;
+
 /// Parameters for HSP chaining (similar to BLASTN)
 /// Maximum gap in amino acids (~1000bp / 3 for amino acids)
 pub const MAX_GAP_AA: usize = 333;

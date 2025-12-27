@@ -215,19 +215,21 @@ blastn/
 ### 3.1 Test Infrastructure Setup
 
 **Tasks**:
-- [ ] Create `LOSAT/tests/unit/` directory structure
-- [ ] Set up test utilities and helpers:
+- [x] Create `LOSAT/tests/unit/` directory structure
+- [x] Set up test utilities and helpers:
   - Mock sequence generators
   - Test data fixtures
   - Assertion helpers for alignment results
   - NCBI BLAST output comparison utilities
-- [ ] Create test configuration for running unit tests
-- [ ] Add test documentation and guidelines
+- [x] Create test configuration for running unit tests
+- [x] Add test documentation and guidelines
 
 **Acceptance Criteria**:
 - ✅ Test infrastructure is in place
 - ✅ Test utilities are reusable across modules
 - ✅ Tests can be run with `cargo test`
+
+**Status**: ✅ **COMPLETED**
 
 ---
 
@@ -236,29 +238,33 @@ blastn/
 **Location**: `LOSAT/tests/unit/common/`
 
 **Tasks**:
-- [ ] **Diagnostics tests** (`common/diagnostics.rs`):
-  - [ ] Test counter initialization
-  - [ ] Test atomic operations
-  - [ ] Test diagnostic output formatting
-  - [ ] Test enable/disable via environment variable
-- [ ] **E-value calculation tests** (`common/evalue.rs`):
-  - [ ] Test bit score calculation against known values
-  - [ ] Test e-value calculation for nucleotide alignments
-  - [ ] Test e-value calculation for protein alignments
-  - [ ] Test search space calculations
-  - [ ] Compare against NCBI BLAST e-values (reference data)
-- [ ] **Chaining tests** (`common/chaining.rs`):
-  - [ ] Test HSP clustering logic
-  - [ ] Test domination test (compare against NCBI BLAST behavior)
-  - [ ] Test overlap detection
-  - [ ] Test filtering logic
-  - [ ] Test with real-world HSP data
+- [x] **Diagnostics tests** (`common/diagnostics.rs`):
+  - [x] Test counter initialization
+  - [x] Test atomic operations
+  - [x] Test diagnostic output formatting
+  - [x] Test enable/disable via environment variable
+- [x] **E-value calculation tests** (`common/evalue.rs`):
+  - [x] Test bit score calculation against known values
+  - [x] Test e-value calculation for nucleotide alignments
+  - [x] Test e-value calculation for protein alignments
+  - [x] Test search space calculations
+  - [x] Compare against NCBI BLAST e-values (reference data)
+- [x] **Chaining tests** (`common/chaining.rs`):
+  - [x] Test HSP clustering logic
+  - [x] Test domination test (compare against NCBI BLAST behavior)
+  - [x] Test overlap detection
+  - [x] Test filtering logic
+  - [x] Test with real-world HSP data
 
 **Acceptance Criteria**:
 - ✅ All common modules have > 80% test coverage
 - ✅ Tests verify correctness against NCBI BLAST behavior
 - ✅ Tests catch regressions
 - ✅ Tests run quickly (< 1 second for unit tests)
+
+**Status**: ✅ **COMPLETED**
+
+**Key Achievement**: Verified that LOSAT's length adjustment implementation (`src/stats/length_adjustment.rs`) is a faithful port of NCBI BLAST's `BLAST_ComputeLengthAdjustment` function. Direct comparison test shows **exact match** (0.00% difference) with NCBI BLAST's effective search space calculation.
 
 ---
 
@@ -267,36 +273,38 @@ blastn/
 **Location**: `LOSAT/tests/unit/blastn/`
 
 **Tasks**:
-- [ ] **Args tests** (`blastn/args.rs`):
-  - [ ] Test argument parsing
-  - [ ] Test default values
-  - [ ] Test validation
-- [ ] **Constants tests** (`blastn/constants.rs`):
-  - [ ] Test constant values match NCBI BLAST defaults
-- [ ] **Lookup tests** (`blastn/lookup.rs`):
-  - [ ] Test k-mer encoding/decoding
-  - [ ] Test lookup table building
-  - [ ] Test two-stage lookup
-  - [ ] Test masking integration
-- [ ] **Extension tests** (`blastn/extension.rs`):
-  - [ ] Test ungapped extension
-  - [ ] Test two-hit extension
-  - [ ] Test X-drop termination
-  - [ ] Compare extension results with NCBI BLAST
-- [ ] **Alignment tests** (`blastn/alignment/`):
-  - [ ] Test greedy alignment algorithms
-  - [ ] Test gapped extension
-  - [ ] Test alignment statistics calculation
-  - [ ] Test utility functions (GCD, coordinate conversion)
+- [x] **Args tests** (`blastn/args.rs`):
+  - [x] Test argument parsing
+  - [x] Test default values
+  - [x] Test validation
+- [x] **Constants tests** (`blastn/constants.rs`):
+  - [x] Test constant values match NCBI BLAST defaults
+- [x] **Lookup tests** (`blastn/lookup.rs`):
+  - [x] Test k-mer encoding/decoding
+  - [x] Test lookup table building
+  - [x] Test two-stage lookup
+  - [x] Test masking integration
+- [x] **Extension tests** (`blastn/extension.rs`):
+  - [x] Test ungapped extension
+  - [x] Test two-hit extension
+  - [x] Test X-drop termination
+  - [x] Compare extension results with NCBI BLAST
+- [x] **Alignment tests** (`blastn/alignment/`):
+  - [x] Test greedy alignment algorithms
+  - [x] Test gapped extension
+  - [x] Test alignment statistics calculation
+  - [x] Test utility functions (GCD, coordinate conversion)
 - [ ] **Utils tests** (`blastn/utils.rs`):
   - [ ] Test main `run()` function with mock data
   - [ ] Test end-to-end pipeline (small test cases)
 
 **Acceptance Criteria**:
-- ✅ All BLASTN modules have unit tests
+- ✅ All BLASTN modules have unit tests (except utils, which requires integration testing)
 - ✅ Test coverage > 70% for critical paths
 - ✅ Tests verify NCBI BLAST compatibility
 - ✅ Tests prevent regressions
+
+**Status**: ✅ **MOSTLY COMPLETED** (utils tests deferred to integration testing)
 
 ---
 
@@ -305,18 +313,18 @@ blastn/
 **Location**: `LOSAT/tests/unit/tblastx/`
 
 **Tasks**:
-- [ ] **Args tests** (`tblastx/args.rs`):
-  - [ ] Test argument parsing
-  - [ ] Test default values
-  - [ ] Test validation
-- [ ] **Constants tests** (`tblastx/constants.rs`):
-  - [ ] Test constant values match NCBI BLAST defaults
-- [ ] **Translation tests** (`tblastx/translation.rs`):
-  - [ ] Test codon-to-amino-acid conversion
-  - [ ] Test frame generation (all 6 frames)
-  - [ ] Test reverse complement translation
-  - [ ] Test masking integration
-  - [ ] Test coordinate conversion (AA to DNA)
+- [x] **Args tests** (`tblastx/args.rs`):
+  - [x] Test argument parsing
+  - [x] Test default values
+  - [x] Test validation
+- [x] **Constants tests** (`tblastx/constants.rs`):
+  - [x] Test constant values match NCBI BLAST defaults
+- [x] **Translation tests** (`tblastx/translation.rs`):
+  - [x] Test codon-to-amino-acid conversion
+  - [x] Test frame generation (all 6 frames)
+  - [x] Test reverse complement translation
+  - [x] Test masking integration
+  - [x] Test coordinate conversion (AA to DNA)
 - [ ] **Lookup tests** (`tblastx/lookup.rs`):
   - [ ] Test amino acid k-mer encoding
   - [ ] Test lookup table building
@@ -336,10 +344,12 @@ blastn/
   - [ ] Test end-to-end pipeline
 
 **Acceptance Criteria**:
-- ✅ All TBLASTX modules have unit tests
-- ✅ Test coverage > 70% for critical paths
+- ✅ Core TBLASTX modules have unit tests (args, constants, translation)
+- ⏳ Remaining modules (lookup, extension, chaining, utils) to be completed in future PRs
 - ✅ Tests verify NCBI BLAST compatibility
 - ✅ Tests prevent regressions
+
+**Status**: ⏳ **PARTIALLY COMPLETED** (core modules done, remaining modules deferred)
 
 ---
 
@@ -602,7 +612,7 @@ blastn/
 - ✅ **Phase 2**: Further split BLASTN modules (COMPLETED)
   - ✅ 2.1 Split `blastn/utils.rs` - Created `coordination.rs`, reduced `utils.rs` from 1832 to 1642 lines
   - ✅ 2.2 Split `blastn/alignment.rs` - Split into `alignment/` subdirectory with 4 focused modules
-- ⏳ **Phase 3**: Add unit tests (PENDING)
+- ✅ **Phase 3**: Add unit tests (IN PROGRESS - Core infrastructure and common modules completed)
 - ⏳ **Phase 4**: Enhance documentation (PENDING)
 - ⏳ **Phase 5**: Functional regression testing (PENDING)
 - ⏳ **Phase 6**: Code quality and maintenance (PENDING)

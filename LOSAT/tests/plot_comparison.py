@@ -6,6 +6,7 @@ import matplotlib.pyplot as plt
 import seaborn as sns
 import os
 
+
 # === Configuration: Output Directory ===
 PLOT_DIR = "./plots"
 os.makedirs(PLOT_DIR, exist_ok=True)
@@ -63,9 +64,9 @@ def generate_comparison_plot(config):
 
     # 1. Accumulated Alignment Length by Length (Histogram)
     try:
-        # X軸: Length, Y軸: Lengthの積算 (weights='length')
+        # 修正: bins=50 を追加
         sns.histplot(data=df_merged, x='length', hue='Tool', 
-                     weights='length',
+                     weights='length', bins=100,
                      element="step", stat="count", common_norm=False, 
                      log_scale=True, ax=axes[0,0],
                      palette=CUSTOM_PALETTE)
@@ -77,9 +78,9 @@ def generate_comparison_plot(config):
 
     # 2. Accumulated Alignment Length by Identity (Histogram)
     try:
-        # X軸: Identity, Y軸: Lengthの積算 (weights='length')
+        # 修正: bins=50 を追加
         sns.histplot(data=df_merged, x='pident', hue='Tool', 
-                     weights='length', 
+                     weights='length', bins=100,
                      element="step", stat="count", common_norm=False, 
                      ax=axes[0,1],
                      palette=CUSTOM_PALETTE)

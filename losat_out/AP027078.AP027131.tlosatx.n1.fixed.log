@@ -1,0 +1,38 @@
+Reading queries...
+Building lookup table...
+Reading subject file...
+Searching 1 Queries vs 1 Subjects...
+
+=== TBLASTX Pipeline Diagnostics ===
+Seed Stage:
+  K-mer matches found:        60711343
+  Seeds filtered (low score): 17931811
+  Seeds filtered (two-hit):   41296459
+  Seeds passed to extension:  1411458
+Ungapped Extension Stage:
+  Ungapped extensions run:    1411458
+  Filtered (low score < 22):  0
+Ungapped-Only Hits (skipped gapped extension):
+  Total ungapped-only:        1411458
+  E-value passed:             4518
+  E-value failed:             1406940
+Gapped Extension Stage:
+  Gapped extensions run:      0
+  Gapped hits (e-value ok):   0
+Post-Processing Stage:
+  HSPs before chaining:       4518
+  Clusters (single HSP):      2087
+  Clusters (merged):          617
+  HSPs in merged clusters:    2431
+  HSPs after chaining:        4518
+  HSPs culled (dominated):    0
+  Final hits (after filter):  4518
+Output Source:
+  From ungapped extension:    4518
+  From gapped extension:      0
+====================================
+
+
+real	0m5.057s
+user	0m4.882s
+sys	0m0.090s

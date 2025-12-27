@@ -18,16 +18,16 @@ use crate::utils::genetic_code::GeneticCode;
 
 use super::args::TblastxArgs;
 use super::constants::{
-    GAP_EXTEND, GAP_OPEN, MIN_UNGAPPED_SCORE, TWO_HIT_WINDOW, X_DROP_GAPPED_FINAL,
+    CUTOFF_E_TBLASTX, GAP_EXTEND, GAP_OPEN, TWO_HIT_WINDOW, X_DROP_GAPPED_FINAL,
     X_DROP_GAPPED_PRELIM,
 };
-use super::chaining::{chain_and_filter_hsps_protein, ExtendedHit, SequenceData, SequenceKey};
+use super::chaining::{ExtendedHit, SequenceData, SequenceKey};
 use super::diagnostics::{diagnostics_enabled, DiagnosticCounters, print_summary as print_diagnostics_summary};
 use super::extension::{
     convert_coords, extend_gapped_protein, extend_hit_two_hit,
     get_score,
 };
-use crate::stats::karlin::{bit_score as calc_bit_score, evalue as calc_evalue};
+use crate::stats::karlin::{bit_score as calc_bit_score, evalue as calc_evalue, raw_score_from_evalue};
 use super::lookup::build_direct_lookup;
 use super::translation::{generate_frames, QueryFrame};
 
@@ -125,25 +125,63 @@ pub fn run(args: TblastxArgs) -> Result<()> {
     let diag_enabled_clone = diag_enabled;
     let writer_handle = std::thread::spawn(move || -> Result<()> {
         let mut all_hits: Vec<ExtendedHit> = Vec::new();
-        let mut all_sequences: FxHashMap<SequenceKey, SequenceData> = FxHashMap::default();
 
-        while let Ok((hits, seq_data)) = rx.recv() {
+        while let Ok((hits, _seq_data)) = rx.recv() {
             all_hits.extend(hits);
-            for (key, data) in seq_data {
-                all_sequences.entry(key).or_insert(data);
-            }
+            // Note: seq_data is not used since we skip HSP chaining for TBLASTX
+            // (NCBI BLAST does not call Blast_LinkHsps for TBLASTX)
         }
 
-        // Chain nearby HSPs into longer alignments using cluster-then-extend
+        // NCBI BLAST does not call Blast_LinkHsps for TBLASTX
+        // Reference: ncbi-blast/c++/src/algo/blast/core/link_hsps.c:1129
+        // ASSERT(program_number != eBlastTypeTblastx);
+        // For TBLASTX, individual HSPs are output directly without chaining
+        // Only apply e-value threshold filtering
         let diag_ref = if diag_enabled_clone { Some(diagnostics_clone.as_ref()) } else { None };
-        let filtered_hits = chain_and_filter_hsps_protein(
-            all_hits,
-            &all_sequences,
-            db_len_aa_total,
-            &params_clone,
-            evalue_threshold,
-            diag_ref,
-        );
+        
+        // Record HSPs before filtering
+        let hsps_before = all_hits.len();
+        if let Some(diag) = diag_ref {
+            diag.base.hsps_before_chain.store(hsps_before, AtomicOrdering::Relaxed);
+            diag.base.hsps_after_chain.store(hsps_before, AtomicOrdering::Relaxed);
+        }
+
+        // Sort by bit score (highest first) for consistent output order
+        all_hits.sort_by(|a, b| {
+            b.hit.bit_score
+                .partial_cmp(&a.hit.bit_score)
+                .unwrap_or(std::cmp::Ordering::Equal)
+        });
+
+        // NCBI BLAST does not apply HSP culling for TBLASTX by default
+        // (see blast_options.c: "Gapped search is not allowed for tblastx")
+        // Skip domination filter to match NCBI BLAST behavior
+        if let Some(diag) = diag_ref {
+            diag.base.hsps_culled_dominated.store(0, AtomicOrdering::Relaxed);
+        }
+
+        // Convert to Hit and filter by e-value threshold
+        let mut output_from_ungapped = 0usize;
+        let mut output_from_gapped = 0usize;
+        let filtered_hits: Vec<Hit> = all_hits
+            .into_iter()
+            .filter(|ext_hit| ext_hit.hit.e_value <= evalue_threshold)
+            .map(|ext_hit| {
+                if ext_hit.from_gapped {
+                    output_from_gapped += 1;
+                } else {
+                    output_from_ungapped += 1;
+                }
+                ext_hit.hit
+            })
+            .collect();
+
+        // Record output source counts and final hits
+        if let Some(diag) = diag_ref {
+            diag.output_from_ungapped.store(output_from_ungapped, AtomicOrdering::Relaxed);
+            diag.output_from_gapped.store(output_from_gapped, AtomicOrdering::Relaxed);
+            diag.base.hsps_after_overlap_filter.store(filtered_hits.len(), AtomicOrdering::Relaxed);
+        }
 
         write_output(&filtered_hits, out_path.as_ref())?;
         Ok(())
@@ -170,24 +208,50 @@ pub fn run(args: TblastxArgs) -> Result<()> {
                 s_frames
                     .par_iter()
                     .enumerate()
-                    .map(|(_s_f_idx, s_frame)| {
+                    .map(|(s_f_idx, s_frame)| {
                         let mut local_hits: Vec<ExtendedHit> = Vec::new();
                         let mut local_sequences: Vec<(SequenceKey, SequenceData)> = Vec::new();
                         let mut seen_pairs: std::collections::HashSet<SequenceKey> =
                             std::collections::HashSet::new();
 
                         // Mask to track already-extended regions on each diagonal (per frame)
+                        // NCBI BLAST style: use diag_coord = (query_offset - subject_offset) & diag_mask
+                        // Reference: ncbi-blast/c++/src/algo/blast/core/aa_ungapped.c:351
+                        //            ncbi-blast/c++/src/algo/blast/core/blast_extend.c:42-61
                         let mut mask: FxHashMap<(u32, u8, isize), usize> = FxHashMap::default();
                         // Two-hit tracking: stores the last seed position on each diagonal for each query/frame combination
+                        // NCBI BLAST style: use diag_coord instead of raw diagonal
                         let mut last_seed: FxHashMap<(u32, u8, isize), usize> =
                             FxHashMap::default();
                         let s_aa = &s_frame.aa_seq;
                         let s_aa_len = s_aa.len();
                         
+                        // Calculate diag_mask for each query frame (NCBI BLAST style)
+                        // diag_array_length = smallest power of 2 >= (query_length + window_size)
+                        // diag_mask = diag_array_length - 1
+                        // Reference: ncbi-blast/c++/src/algo/blast/core/blast_extend.c:52-61
+                        let mut diag_mask_cache: FxHashMap<(u32, u8), isize> = FxHashMap::default();
+                        for (q_idx, q_frames) in query_frames.iter().enumerate() {
+                            for (q_f_idx, q_frame) in q_frames.iter().enumerate() {
+                                let q_aa_len = q_frame.aa_seq.len();
+                                // Calculate diag_array_length as smallest power of 2 >= (q_aa_len + TWO_HIT_WINDOW)
+                                let mut diag_array_length = 1usize;
+                                while diag_array_length < (q_aa_len + TWO_HIT_WINDOW) {
+                                    diag_array_length <<= 1;
+                                }
+                                let diag_mask = (diag_array_length - 1) as isize;
+                                diag_mask_cache.insert((q_idx as u32, q_f_idx as u8), diag_mask);
+                            }
+                        }
+                        
                         // Cache effective search space per query-subject-frame combination
                         // NCBI BLAST calculates this once per context (query frame + subject frame)
                         // Reference: ncbi-blast/c++/src/algo/blast/core/blast_setup.c:846
-                        let mut search_space_cache: FxHashMap<(u32, u8), SearchSpace> = FxHashMap::default();
+                        // IMPORTANT: context_key must include subject frame index to match NCBI BLAST behavior
+                        let mut search_space_cache: FxHashMap<(u32, u8, u8), SearchSpace> = FxHashMap::default();
+                        // Cache cutoff_score per context (calculated from CUTOFF_E_TBLASTX = 1e-300)
+                        // Reference: ncbi-blast/c++/src/algo/blast/core/blast_parameters.c:349-360
+                        let mut cutoff_score_cache: FxHashMap<(u32, u8, u8), i32> = FxHashMap::default();
                         if s_aa.len() < 3 {
                             return (local_hits, local_sequences);
                         }
@@ -213,9 +277,18 @@ pub fn run(args: TblastxArgs) -> Result<()> {
                             }
 
                             for &(q_idx, q_f_idx, q_pos) in matches {
-                                let diag = s_pos as isize - q_pos as isize;
-                                // Simplified mask_key since we're now per-frame (s_f_idx is implicit)
-                                let mask_key = (q_idx, q_f_idx, diag);
+                                // NCBI BLAST style: diag_coord = (query_offset - subject_offset) & diag_mask
+                                // Reference: ncbi-blast/c++/src/algo/blast/core/aa_ungapped.c:351
+                                // Note: NCBI BLAST uses query_offset - subject_offset, but we use q_pos - s_pos
+                                // which is the same diagonal but with opposite sign convention
+                                let diag = q_pos as isize - s_pos as isize;
+                                // Get diag_mask for this query frame
+                                let diag_mask = *diag_mask_cache.get(&(q_idx, q_f_idx))
+                                    .unwrap_or(&((1isize << 20) - 1)); // Fallback: 2^20 - 1
+                                // Calculate diag_coord using NCBI BLAST style masking
+                                let diag_coord = diag & diag_mask;
+                                // Use diag_coord instead of raw diagonal for mask_key (NCBI BLAST compatible)
+                                let mask_key = (q_idx, q_f_idx, diag_coord);
 
                                 // Check if this region was already extended
                                 if let Some(&last_end) = mask.get(&mask_key) {
@@ -248,71 +321,100 @@ pub fn run(args: TblastxArgs) -> Result<()> {
                                 // within the window distance. NCBI BLAST style: when two hits occur,
                                 // extend from the second hit (R) to the left and require it to reach
                                 // the first hit (L) before doing the right extension.
+                                // Reference: ncbi-blast/c++/src/algo/blast/core/aa_ungapped.c:535-551
+                                let k_size = 3usize; // Word size for TBLASTX
                                 let prev_s_pos_opt = last_seed.get(&mask_key).copied();
                                 let two_hit_info = if let Some(prev_s_pos) = prev_s_pos_opt {
-                                    if s_pos.saturating_sub(prev_s_pos) <= TWO_HIT_WINDOW {
-                                        Some(prev_s_pos)
+                                    let diff = s_pos.saturating_sub(prev_s_pos);
+                                    // Check if distance is within window (diff <= window)
+                                    // Reference: aa_ungapped.c:538
+                                    if diff <= TWO_HIT_WINDOW {
+                                        // Check if hits overlap (diff < wordsize) - skip if they do
+                                        // Reference: aa_ungapped.c:549-551
+                                        if diff < k_size {
+                                            if diag_enabled {
+                                                diag_inner.base.seeds_second_hit_overlap.fetch_add(1, AtomicOrdering::Relaxed);
+                                            }
+                                            None
+                                        } else {
+                                            if diag_enabled {
+                                                diag_inner.base.seeds_second_hit_window.fetch_add(1, AtomicOrdering::Relaxed);
+                                            }
+                                            Some(prev_s_pos)
+                                        }
                                     } else {
+                                        if diag_enabled {
+                                            diag_inner.base.seeds_second_hit_too_far.fetch_add(1, AtomicOrdering::Relaxed);
+                                        }
                                         None
                                     }
                                 } else {
+                                    if diag_enabled {
+                                        diag_inner.base.seeds_first_hit.fetch_add(1, AtomicOrdering::Relaxed);
+                                    }
                                     None
                                 };
 
                                 // Update the last seed position for this diagonal
                                 last_seed.insert(mask_key, s_pos);
 
-                                // NCBI BLAST uses strict two-hit requirement for TBLASTX
-                                // Reference: ncbi-blast/c++/src/algo/blast/core/aa_ungapped.c:214-232
-                                // When multiple_hits is true (window_size > 0), s_BlastAaWordFinder_TwoHit is used
-                                // which requires two hits within the window before extension
-                                // No one-hit extension is allowed, even for high-scoring seeds
-                                if two_hit_info.is_none() {
-                                    if diag_enabled {
-                                        diag_inner.base.seeds_two_hit_failed.fetch_add(1, AtomicOrdering::Relaxed);
-                                    }
-                                    continue;
-                                }
-
+                                // NCBI BLAST behavior: Two-hit requirement controls right extension execution,
+                                // but left extension is always performed. If left extension score exceeds
+                                // cutoff_score, the HSP is saved even when two-hit requirement is not met.
+                                // Reference: ncbi-blast/c++/src/algo/blast/core/aa_ungapped.c:576-591
+                                // - Two-hit satisfied: left + right extension → higher score HSP
+                                // - Two-hit not satisfied: left extension only → left_score based HSP
+                                // Both cases: if score >= cutoff_score, save as HSP
+                                
                                 // Count seeds that passed to extension
+                                // Note: Even when two-hit requirement is not satisfied, extension is still performed
+                                // (left extension only, which may still produce valid HSPs if score >= cutoff_score)
                                 if diag_enabled {
                                     diag_inner.base.seeds_passed.fetch_add(1, AtomicOrdering::Relaxed);
                                     diag_inner.base.ungapped_extensions.fetch_add(1, AtomicOrdering::Relaxed);
+                                    if two_hit_info.is_none() {
+                                        // Track one-hit extensions (left-only, two-hit not satisfied)
+                                        diag_inner.base.ungapped_one_hit_extensions.fetch_add(1, AtomicOrdering::Relaxed);
+                                    } else {
+                                        // Track two-hit extensions (left+right, two-hit satisfied)
+                                        diag_inner.base.ungapped_two_hit_extensions.fetch_add(1, AtomicOrdering::Relaxed);
+                                    }
                                 }
 
-                                // NCBI BLAST always uses two-hit extension for TBLASTX
-                                // Reference: ncbi-blast/c++/src/algo/blast/core/aa_ungapped.c:576-583
                                 let k_size = 3usize;
                                 // Two-hit extension: extend from current seed (R) to the left,
                                 // only extend right if left extension reaches the first hit (L)
                                 // NCBI BLAST passes s_left_off = last_hit + wordsize (end of first word)
-                                let (qs, qe, ss, se_ungapped, ungapped_score, s_last_off) = {
-                                    let (qs, qe, ss, se, score, _right_extended, s_last) = extend_hit_two_hit(
+                                // When two-hit requirement is not met, use current seed position as s_left_off
+                                // so that left extension cannot reach it, resulting in left-only extension
+                                let (qs, qe, ss, se_ungapped, ungapped_score, right_extended, s_last_off) = {
+                                    let s_left_off = if let Some(prev_s_pos) = two_hit_info {
+                                        // Two-hit requirement satisfied: use first hit position
+                                        prev_s_pos + k_size  // End of first hit (L + wordsize), NCBI BLAST style
+                                    } else {
+                                        // Two-hit requirement not satisfied: use current seed position
+                                        // This ensures left extension cannot reach it, so only left extension is performed
+                                        s_pos + k_size
+                                    };
+                                    
+                                    let (qs, qe, ss, se, score, right_ext, s_last) = extend_hit_two_hit(
                                         q_aa,
                                         s_aa,
-                                        two_hit_info.unwrap() + k_size,  // End of first hit (L + wordsize), NCBI BLAST style
+                                        s_left_off,
                                         s_pos,                          // Second hit position (R)
                                         q_pos as usize,
                                     );
-                                    (qs, qe, ss, se, score, s_last)
+                                    (qs, qe, ss, se, score, right_ext, s_last)
                                 };
 
-                                // NCBI BLAST style diagonal suppression: update mask after EVERY extension,
-                                // using s_last_off (rightmost position scanned), not se_ungapped (best-scoring end).
-                                // This prevents re-extending inside already-scanned regions and reduces fragmentation.
-                                // NCBI BLAST uses: s_last_off - (wordsize - 1) for the mask value
-                                // IMPORTANT: Update mask BEFORE score check, so even low-scoring extensions
-                                // prevent re-extending in already-scanned regions (matches NCBI BLAST behavior)
-                                let mask_end = s_last_off.saturating_sub(k_size - 1);
-                                mask.insert(mask_key, mask_end);
-
-                                // Skip if ungapped score is too low
-                                if ungapped_score < MIN_UNGAPPED_SCORE {
-                                    if diag_enabled {
-                                        diag_inner.base.ungapped_low_score.fetch_add(1, AtomicOrdering::Relaxed);
-                                    }
-                                    continue;
-                                }
+                                // NCBI BLAST does not use a fixed MIN_UNGAPPED_SCORE threshold.
+                                // Instead, it uses cutoffs->cutoff_score which is dynamically calculated
+                                // from E-value (CUTOFF_E_TBLASTX = 1e-300) via BLAST_Cutoffs function.
+                                // Reference: ncbi-blast/c++/src/algo/blast/core/aa_ungapped.c:588
+                                //            ncbi-blast/c++/src/algo/blast/core/blast_parameters.c:360
+                                //            ncbi-blast/c++/include/algo/blast/core/blast_parameters.h:80
+                                // Since we filter by E-value later, we don't need a fixed score threshold here.
+                                // All hits will be filtered by E-value threshold, matching NCBI BLAST behavior.
 
                                 // NCBI BLAST does not allow gapped search for TBLASTX
                                 // Reference: ncbi-blast/c++/src/algo/blast/api/tblastx_options.cpp:73
@@ -332,12 +434,73 @@ pub fn run(args: TblastxArgs) -> Result<()> {
                                     // NCBI BLAST calculates effective search space once per context (query frame + subject frame)
                                     // and reuses it for all HSPs in that context
                                     // Reference: ncbi-blast/c++/src/algo/blast/core/blast_setup.c:846
-                                    let context_key = (q_idx, q_f_idx);
+                                    // IMPORTANT: context_key must include subject frame index (s_f_idx) to match NCBI BLAST
+                                    // Each context (query frame + subject frame combination) has its own effective search space
+                                    let context_key = (q_idx, q_f_idx, s_f_idx as u8);
                                     let search_space = *search_space_cache.entry(context_key).or_insert_with(|| {
                                         // Use NCBI-style length adjustment for single-sequence comparison
                                         // Reference: ncbi-blast/c++/src/algo/blast/core/blast_setup.c:821-824
-                                        SearchSpace::with_length_adjustment(q_aa_len, s_aa_len, &params)
+                                        let ss = SearchSpace::with_length_adjustment(q_aa_len, s_aa_len, &params);
+                                        // Log effective search space for debugging (first time only per context)
+                                        if diag_enabled {
+                                            eprintln!("[DEBUG] Effective search space for context (q_frame={}, s_frame={}): effective_query_len={:.1}, effective_db_len={:.1}, effective_space={:.1}, length_adj={}", 
+                                                q_frame.frame, s_frame.frame, ss.effective_query_len, ss.effective_db_len, ss.effective_space, ss.length_adjustment);
+                                        }
+                                        ss
                                     });
+                                    
+                                    // Calculate cutoff_score from CUTOFF_E_TBLASTX = 1e-300
+                                    // NCBI BLAST uses this to filter extension results before E-value check
+                                    // Reference: ncbi-blast/c++/src/algo/blast/core/blast_parameters.c:349-360
+                                    //            ncbi-blast/c++/src/algo/blast/core/aa_ungapped.c:588
+                                    // The search space used for cutoff_score calculation is MIN(q_len, s_len) * s_len
+                                    // Reference: ncbi-blast/c++/src/algo/blast/core/blast_parameters.c:361-362
+                                    // IMPORTANT: cutoff_score is capped by gap_trigger (BLAST_GAP_TRIGGER_PROT = 22.0 bit score)
+                                    // Reference: ncbi-blast/c++/src/algo/blast/core/blast_parameters.c:366-367
+                                    let cutoff_score = *cutoff_score_cache.entry(context_key).or_insert_with(|| {
+                                        // Use MIN(q_len, s_len) * s_len for cutoff_score calculation
+                                        // This matches NCBI BLAST's implementation
+                                        let cutoff_search_space = SearchSpace {
+                                            effective_query_len: (q_aa_len.min(s_aa_len)) as f64,
+                                            effective_db_len: s_aa_len as f64,
+                                            effective_space: ((q_aa_len.min(s_aa_len)) * s_aa_len) as f64,
+                                            length_adjustment: 0,
+                                        };
+                                        let cutoff_from_evalue = raw_score_from_evalue(CUTOFF_E_TBLASTX, &params, &cutoff_search_space);
+                                        
+                                        // Calculate gap_trigger from bit score: gap_trigger = (gap_trigger_bit * ln(2) + ln(K)) / lambda
+                                        // Reference: ncbi-blast/c++/src/algo/blast/core/blast_parameters.c:343-344
+                                        use super::constants::GAP_TRIGGER_BIT_SCORE;
+                                        use crate::stats::karlin::raw_score_from_bit_score;
+                                        let gap_trigger = raw_score_from_bit_score(GAP_TRIGGER_BIT_SCORE, &params);
+                                        
+                                        // Use MIN(cutoff_from_evalue, gap_trigger) as NCBI BLAST does
+                                        // Reference: ncbi-blast/c++/src/algo/blast/core/blast_parameters.c:367
+                                        let cutoff = cutoff_from_evalue.min(gap_trigger);
+                                        
+                                        if diag_enabled {
+                                            eprintln!("[DEBUG] Cutoff score for context (q_frame={}, s_frame={}): cutoff_e={}, cutoff_from_evalue={}, gap_trigger={}, final_cutoff_score={}", 
+                                                q_frame.frame, s_frame.frame, CUTOFF_E_TBLASTX, cutoff_from_evalue, gap_trigger, cutoff);
+                                        }
+                                        cutoff
+                                    });
+                                    
+                                    // NCBI BLAST checks cutoff_score AFTER extension, before E-value check
+                                    // Reference: ncbi-blast/c++/src/algo/blast/core/aa_ungapped.c:588
+                                    if ungapped_score < cutoff_score {
+                                        if diag_enabled {
+                                            diag_inner.ungapped_cutoff_failed.fetch_add(1, AtomicOrdering::Relaxed);
+                                        }
+                                        // Update mask even if cutoff_score check fails (NCBI BLAST behavior)
+                                        let mask_end = if right_extended {
+                                            s_last_off.saturating_sub(k_size - 1)
+                                        } else {
+                                            s_pos
+                                        };
+                                        mask.insert(mask_key, mask_end);
+                                        continue;
+                                    }
+                                    
                                     let bit_score = calc_bit_score(ungapped_score, &params);
                                     let e_val = calc_evalue(bit_score, &search_space);
 
@@ -402,6 +565,27 @@ pub fn run(args: TblastxArgs) -> Result<()> {
                                     } else if diag_enabled {
                                         diag_inner.ungapped_evalue_failed.fetch_add(1, AtomicOrdering::Relaxed);
                                     }
+                                    
+                                    // NCBI BLAST style diagonal suppression: update mask AFTER E-value check
+                                    // Reference: ncbi-blast/c++/src/algo/blast/core/aa_ungapped.c:593-606
+                                    // IMPORTANT: NCBI BLAST updates diag_array[diag_coord].last_hit AFTER
+                                    // the score check (line 588) and HSP saving (line 589-591).
+                                    // This means mask is updated regardless of whether the HSP was saved or passed E-value.
+                                    // The mask update happens after extension and score/E-value check, but before
+                                    // the next iteration, ensuring that even low-scoring extensions prevent
+                                    // re-extending in already-scanned regions.
+                                    let mask_end = if right_extended {
+                                        // Right extension happened: use s_last_off - (wordsize - 1)
+                                        // Reference: aa_ungapped.c:598-599
+                                        s_last_off.saturating_sub(k_size - 1)
+                                    } else {
+                                        // No right extension: use current seed position (subject_offset)
+                                        // Reference: aa_ungapped.c:604-605
+                                        // Note: In LOSAT, we don't have diag_offset separately, so we use s_pos directly
+                                        s_pos
+                                    };
+                                    mask.insert(mask_key, mask_end);
+                                    
                                     continue;
                                 }
 
@@ -477,7 +661,8 @@ pub fn run(args: TblastxArgs) -> Result<()> {
                                 // For TBLASTX, lengths are in amino acids (nucleotide length / 3)
                                 // NCBI BLAST calculates effective search space once per context (query frame + subject frame)
                                 // and reuses it for all HSPs in that context
-                                let context_key = (q_idx, q_f_idx);
+                                // IMPORTANT: context_key must include subject frame index (s_f_idx) to match NCBI BLAST
+                                let context_key = (q_idx, q_f_idx, s_f_idx as u8);
                                 let search_space = *search_space_cache.entry(context_key).or_insert_with(|| {
                                     // Use NCBI-style length adjustment for single-sequence comparison
                                     SearchSpace::with_length_adjustment(q_aa_len, s_aa_len, &params)

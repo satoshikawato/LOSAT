@@ -42,14 +42,37 @@ pub const GAP_EXTEND: i32 = -1;
 /// Threshold for triggering gapped extension without two-hit requirement
 pub const HIGH_SCORE_THRESHOLD: i32 = 60;
 
-/// Minimum ungapped score threshold for keeping hits
-/// NCBI BLAST outputs down to bit score ~22.1
-/// For BLOSUM62 with gap_open=11, gap_extend=1: lambda=0.267, K=0.041
-/// bit_score = (lambda * ungapped_score - ln(K)) / ln(2)
-/// bit_score 22.1 corresponds to ungapped_score ~45.4
-/// Setting to 22 (bit_score ~13.1) to filter out very short/low-scoring hits
-/// Note: This may be too high and could be filtering out valid low-identity hits
+/// Minimum ungapped score threshold (DEPRECATED - not used in TBLASTX)
+/// 
+/// NOTE: This constant is NOT used in TBLASTX implementation to match NCBI BLAST behavior.
+/// NCBI BLAST does not use a fixed MIN_UNGAPPED_SCORE threshold for TBLASTX.
+/// Instead, it uses cutoffs->cutoff_score which is dynamically calculated from E-value
+/// (CUTOFF_E_TBLASTX = 1e-300) via BLAST_Cutoffs function.
+/// 
+/// Reference:
+/// - ncbi-blast/c++/src/algo/blast/core/aa_ungapped.c:588
+/// - ncbi-blast/c++/src/algo/blast/core/blast_parameters.c:360
+/// - ncbi-blast/c++/include/algo/blast/core/blast_parameters.h:80
+/// 
+/// All hits are filtered by E-value threshold only, matching NCBI BLAST behavior.
+/// This constant is kept for backward compatibility with tests, but should not be used
+/// in the main implementation.
+#[allow(dead_code)]
 pub const MIN_UNGAPPED_SCORE: i32 = 22;
+
+/// CUTOFF_E_TBLASTX from NCBI BLAST
+/// Default E-value used to calculate cutoff_score for TBLASTX
+/// This is used to filter extension results before E-value threshold check
+/// Reference: ncbi-blast/c++/include/algo/blast/core/blast_parameters.h:80
+/// #define CUTOFF_E_TBLASTX 1e-300
+pub const CUTOFF_E_TBLASTX: f64 = 1e-300;
+
+/// BLAST_GAP_TRIGGER_PROT from NCBI BLAST
+/// Default bit score that will trigger gapped extension for protein-based searches
+/// This is also used as a maximum value for cutoff_score in ungapped searches
+/// Reference: ncbi-blast/c++/include/algo/blast/core/blast_options.h:137
+/// #define BLAST_GAP_TRIGGER_PROT 22.0
+pub const GAP_TRIGGER_BIT_SCORE: f64 = 22.0;
 
 /// Parameters for HSP chaining (similar to BLASTN)
 /// Maximum gap in amino acids (~1000bp / 3 for amino acids)

@@ -7,10 +7,14 @@ pub use crate::algorithm::common::diagnostics::{
     diagnostics_enabled, DiagnosticCounters, ProteinDiagnosticCounters,
 };
 
-use super::constants::MIN_UNGAPPED_SCORE;
-
-/// Print diagnostic summary for TBLASTX (with TBLASTX-specific constants)
+/// Print diagnostic summary for TBLASTX
+/// 
+/// Note: NCBI BLAST does not use a fixed MIN_UNGAPPED_SCORE threshold for TBLASTX.
+/// Instead, it uses cutoffs->cutoff_score which is dynamically calculated from E-value.
+/// Since we removed the fixed threshold to match NCBI BLAST behavior, the diagnostic
+/// will show 0 for "Filtered (low score)" since no such filtering occurs.
 pub fn print_summary(counters: &DiagnosticCounters) {
-    counters.print_summary(MIN_UNGAPPED_SCORE);
+    // Pass 0 since we don't use a fixed threshold (matches NCBI BLAST behavior)
+    counters.print_summary(0);
 }
 

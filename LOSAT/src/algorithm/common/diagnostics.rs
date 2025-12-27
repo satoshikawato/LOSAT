@@ -21,10 +21,17 @@ pub struct BaseDiagnosticCounters {
     // Seed stage
     pub kmer_matches: AtomicUsize,
     pub seeds_low_score: AtomicUsize,
-    pub seeds_two_hit_failed: AtomicUsize,
+    pub seeds_two_hit_failed: AtomicUsize,  // Seeds that don't satisfy two-hit requirement (but still extended)
     pub seeds_passed: AtomicUsize,
+    // Seed distribution tracking (for two-hit analysis)
+    pub seeds_first_hit: AtomicUsize,      // First seed on a diagonal (no previous seed)
+    pub seeds_second_hit_window: AtomicUsize, // Second seed within window (two-hit satisfied)
+    pub seeds_second_hit_too_far: AtomicUsize, // Second seed beyond window (diff > window)
+    pub seeds_second_hit_overlap: AtomicUsize, // Second seed overlapping (diff < wordsize)
     // Ungapped extension stage
     pub ungapped_extensions: AtomicUsize,
+    pub ungapped_one_hit_extensions: AtomicUsize,  // Extensions with left-only (two-hit not satisfied)
+    pub ungapped_two_hit_extensions: AtomicUsize,  // Extensions with left+right (two-hit satisfied)
     pub ungapped_low_score: AtomicUsize,
     // Post-processing stage
     pub hsps_before_chain: AtomicUsize,
@@ -44,6 +51,7 @@ pub struct ProteinDiagnosticCounters {
     pub base: BaseDiagnosticCounters,
     // Gapped extension stage (protein-specific)
     pub ungapped_only_hits: AtomicUsize,
+    pub ungapped_cutoff_failed: AtomicUsize,  // ungapped hits that failed cutoff_score filter
     pub ungapped_evalue_passed: AtomicUsize,  // ungapped-only hits that passed e-value filter
     pub ungapped_evalue_failed: AtomicUsize,  // ungapped-only hits that failed e-value filter
     pub gapped_extensions: AtomicUsize,
@@ -70,14 +78,39 @@ impl ProteinDiagnosticCounters {
             "  Seeds filtered (two-hit):   {}",
             self.base.seeds_two_hit_failed.load(AtomicOrdering::Relaxed)
         );
+        eprintln!("  Seed distribution (two-hit analysis):");
+        eprintln!(
+            "    First seed on diagonal:    {}",
+            self.base.seeds_first_hit.load(AtomicOrdering::Relaxed)
+        );
+        eprintln!(
+            "    Second seed (in window):   {}",
+            self.base.seeds_second_hit_window.load(AtomicOrdering::Relaxed)
+        );
+        eprintln!(
+            "    Second seed (too far):     {}",
+            self.base.seeds_second_hit_too_far.load(AtomicOrdering::Relaxed)
+        );
+        eprintln!(
+            "    Second seed (overlapping): {}",
+            self.base.seeds_second_hit_overlap.load(AtomicOrdering::Relaxed)
+        );
         eprintln!(
             "  Seeds passed to extension:  {}",
             self.base.seeds_passed.load(AtomicOrdering::Relaxed)
         );
         eprintln!("Ungapped Extension Stage:");
         eprintln!(
-            "  Ungapped extensions run:    {}",
+            "  Total extensions:           {}",
             self.base.ungapped_extensions.load(AtomicOrdering::Relaxed)
+        );
+        eprintln!(
+            "  One-hit extensions (left-only): {}",
+            self.base.ungapped_one_hit_extensions.load(AtomicOrdering::Relaxed)
+        );
+        eprintln!(
+            "  Two-hit extensions (left+right): {}",
+            self.base.ungapped_two_hit_extensions.load(AtomicOrdering::Relaxed)
         );
         eprintln!(
             "  Filtered (low score < {}):  {}",
@@ -88,6 +121,10 @@ impl ProteinDiagnosticCounters {
         eprintln!(
             "  Total ungapped-only:        {}",
             self.ungapped_only_hits.load(AtomicOrdering::Relaxed)
+        );
+        eprintln!(
+            "  Filtered (cutoff_score):     {}",
+            self.ungapped_cutoff_failed.load(AtomicOrdering::Relaxed)
         );
         eprintln!(
             "  E-value passed:             {}",
@@ -222,4 +259,5 @@ impl NucleotideDiagnosticCounters {
 
 // For backward compatibility, provide a type alias for TBLASTX
 pub type DiagnosticCounters = ProteinDiagnosticCounters;
+
 

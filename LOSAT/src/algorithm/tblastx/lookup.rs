@@ -9,8 +9,11 @@ use super::translation::QueryFrame;
 /// Direct lookup table type: Vec<Vec<(query_idx, frame_idx, aa_pos)>>
 pub type DirectLookup = Vec<Vec<(u32, u8, u32)>>;
 
-/// Encode a 3-amino-acid k-mer to an index (0-17575 = 26^3 - 1)
+/// Encode a 3-amino-acid k-mer to an index (0-15624 = 25^3 - 1)
+/// Uses NCBI BLAST amino acid order: ARNDCQEGHILKMFPSTWYVBJZX* (25 amino acids)
 /// Returns None if the k-mer contains a stop codon or invalid amino acid
+/// 
+/// Reference: NCBI BLAST uses 25 amino acids for k-mer encoding
 pub fn encode_aa_kmer(seq: &[u8], pos: usize) -> Option<usize> {
     if pos + 3 > seq.len() {
         return None;
@@ -19,11 +22,13 @@ pub fn encode_aa_kmer(seq: &[u8], pos: usize) -> Option<usize> {
     let c2 = unsafe { *seq.get_unchecked(pos + 1) } as usize;
     let c3 = unsafe { *seq.get_unchecked(pos + 2) } as usize;
 
-    // 終止コドン(25)を含むk-merはシードにしない
+    // Stop codon (24 = '*')を含むk-merはシードにしない
+    // NCBI BLAST order: indices 0-23 are valid, 24 is stop codon
     if c1 >= 25 || c2 >= 25 || c3 >= 25 {
         return None;
     }
-    Some(c1 * 676 + c2 * 26 + c3)
+    // 25^3 = 15,625 possible k-mers
+    Some(c1 * 625 + c2 * 25 + c3)
 }
 
 /// Check if a DNA position range overlaps with any masked interval
@@ -67,7 +72,7 @@ pub fn build_direct_lookup(
     queries: &[Vec<QueryFrame>],
     query_masks: &[Vec<MaskedInterval>],
 ) -> DirectLookup {
-    let table_size = 17576; // 26^3
+    let table_size = 15625; // 25^3 (NCBI BLAST uses 25 amino acids: ARNDCQEGHILKMFPSTWYVBJZX*)
     let mut lookup = vec![Vec::new(); table_size];
 
     for (q_idx, frames) in queries.iter().enumerate() {

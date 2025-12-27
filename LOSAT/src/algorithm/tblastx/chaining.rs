@@ -7,7 +7,7 @@ use crate::common::Hit;
 use crate::stats::KarlinParams;
 use rustc_hash::FxHashMap;
 use std::cmp::Ordering;
-use std::sync::atomic::{AtomicUsize, Ordering as AtomicOrdering};
+use std::sync::atomic::Ordering as AtomicOrdering;
 use super::constants::{MAX_DIAG_DRIFT_AA, MAX_GAP_AA};
 use super::diagnostics::DiagnosticCounters;
 

@@ -4,10 +4,14 @@ use LOSAT::algorithm::tblastx::constants::*;
 
 #[test]
 fn test_x_drop_constants() {
-    // X-drop values should match NCBI BLAST protein defaults
-    assert_eq!(X_DROP_UNGAPPED, 11);
-    assert_eq!(X_DROP_GAPPED_PRELIM, 15);
-    assert_eq!(X_DROP_GAPPED_FINAL, 25);
+    // X-drop values should match NCBI BLAST TBLASTX defaults
+    // Reference: ncbi-blast/c++/include/algo/blast/core/blast_options.h
+    // BLAST_UNGAPPED_X_DROPOFF_PROT = 7
+    assert_eq!(X_DROP_UNGAPPED, 7);
+    // BLAST_GAP_X_DROPOFF_TBLASTX = 0 (gapped extension disabled)
+    assert_eq!(X_DROP_GAPPED_PRELIM, 0);
+    // BLAST_GAP_X_DROPOFF_FINAL_TBLASTX = 0 (gapped extension disabled)
+    assert_eq!(X_DROP_GAPPED_FINAL, 0);
 }
 
 #[test]

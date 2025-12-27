@@ -7,7 +7,7 @@ use crate::stats::KarlinParams;
 use crate::algorithm::common::evalue::calculate_evalue_alignment_length;
 use crate::utils::matrix::MATRIX;
 use super::constants::{
-    GAP_EXTEND, GAP_OPEN, STOP_CODON, X_DROP_GAPPED_FINAL, X_DROP_GAPPED_PRELIM, X_DROP_UNGAPPED,
+    GAP_EXTEND, GAP_OPEN, STOP_CODON, X_DROP_UNGAPPED,
 };
 
 /// Get the substitution matrix score for two amino acids
@@ -31,9 +31,10 @@ struct ProteinAlnStats {
 /// where s_last_off is the rightmost subject position scanned (for diagonal suppression)
 ///
 /// This implementation follows NCBI BLAST's s_BlastAaExtendOneHit:
-/// 1. First, find the best scoring position within the word
-/// 2. Then extend left from that position
-/// 3. Then extend right from that position
+/// Reference: ncbi-blast/c++/src/algo/blast/core/aa_ungapped.c:1019-1086
+/// 1. First, find the best scoring position within the word (lines 1038-1052)
+/// 2. Then extend left from that position using s_BlastAaExtendLeft (lines 1071-1073)
+/// 3. Then extend right from that position using s_BlastAaExtendRight (lines 1075-1078)
 pub fn extend_hit_ungapped(
     q_seq: &[u8],
     s_seq: &[u8],
@@ -156,10 +157,16 @@ pub fn extend_hit_ungapped(
 /// extend from R to the left first. Only if the left extension reaches L,
 /// proceed with right extension. This prevents fragmentation of longer HSPs.
 ///
+/// Reference: ncbi-blast/c++/src/algo/blast/core/aa_ungapped.c:1088-1158
 /// Unlike the one-hit extension, this always returns a result (the left extension
 /// at minimum), matching NCBI BLAST's behavior.
 /// Returns (q_start, q_end, s_start, s_end, score, right_extended, s_last_off)
 /// where s_last_off is the rightmost subject position scanned (for diagonal suppression)
+///
+/// Key implementation details from NCBI BLAST:
+/// - Find best scoring position within word at R (lines 1108-1119)
+/// - Extend left from R trying to reach L (lines 1127-1135)
+/// - Only extend right if left extension reached L (line 1138)
 pub fn extend_hit_two_hit(
     q_seq: &[u8],
     s_seq: &[u8],
@@ -192,8 +199,9 @@ pub fn extend_hit_two_hit(
     let s_right_off = s_right_off + right_d;
 
     // Extend to the left from R, trying to reach L
-    let mut current_score = 0i32;
-    let mut max_score = 0i32;
+    // Start with the best score found within the word (NCBI BLAST behavior)
+    let mut current_score = left_score;
+    let mut max_score = left_score;
     let mut left_disp = 0usize;
 
     let max_left = q_right_off.min(s_right_off);
@@ -217,10 +225,13 @@ pub fn extend_hit_two_hit(
     }
 
     // Check if left extension reached the first hit
-    // The distance from R to L is (s_right_off - s_left_off)
-    // We need left_disp >= this distance for the extension to reach L
-    let distance_to_first_hit = s_right_off.saturating_sub(s_left_off);
-    let reached_first_hit = left_disp >= distance_to_first_hit;
+    // NCBI BLAST checks if left extension reached the end of first hit (s_left_off)
+    // Reference: ncbi-blast/c++/src/algo/blast/core/aa_ungapped.c:1138
+    // s_left_off is the end of first hit (L + wordsize) as passed from caller
+    let distance_to_first_hit_end = s_right_off.saturating_sub(s_left_off);
+    // left_disp is the distance extended to the left from q_right_off/s_right_off
+    // We need left_disp >= distance_to_first_hit_end to reach the end of first hit
+    let reached_first_hit = left_disp >= distance_to_first_hit_end;
 
     // Only extend to the right if left extension reached the first hit (NCBI BLAST behavior)
     let mut right_disp = 0usize;
@@ -674,15 +685,35 @@ fn extend_gapped_protein_one_direction(
 }
 
 /// Convert amino acid coordinates to DNA coordinates for a given frame
+///
+/// This function converts 0-based amino acid positions to 1-based DNA positions,
+/// matching NCBI BLAST's coordinate system for TBLASTX output.
+///
+/// # Arguments
+/// * `aa_start` - 0-based start position in amino acid sequence
+/// * `aa_end` - 0-based end position in amino acid sequence (exclusive)
+/// * `frame` - Frame number: 1..3 for forward, -1..-3 for reverse
+/// * `dna_len` - Original DNA sequence length
+///
+/// # Returns
+/// (start_bp, end_bp) as 1-based DNA coordinates
+///
+/// # Frame mapping
+/// - Forward frames (1, 2, 3): Start at positions 0, 1, 2 of DNA sequence
+/// - Reverse frames (-1, -2, -3): Start at positions dna_len-1, dna_len-2, dna_len-3
 pub fn convert_coords(aa_start: usize, aa_end: usize, frame: i8, dna_len: usize) -> (usize, usize) {
     let f_abs = frame.abs() as usize;
     let shift = f_abs - 1;
 
     if frame > 0 {
+        // Forward frames: Frame 1 starts at DNA position 0, Frame 2 at 1, Frame 3 at 2
+        // Convert 0-based AA position to 1-based DNA position
         let start_bp = aa_start * 3 + shift + 1;
-        let end_bp = (aa_end) * 3 + shift;
+        let end_bp = aa_end * 3 + shift;
         (start_bp, end_bp)
     } else {
+        // Reverse frames: Frame -1 starts at DNA position dna_len-1, etc.
+        // Convert 0-based AA position to 1-based DNA position (from end)
         let start_bp = dna_len - (aa_start * 3 + shift);
         let end_bp_calc = dna_len - (aa_end * 3 + shift - 1);
         (start_bp, end_bp_calc)

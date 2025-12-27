@@ -1,13 +1,16 @@
 use crate::utils::matrix::MATRIX;
 
-/// Size of the amino acid k-mer table (26^3 = 17,576 for 3-mers)
-pub const AA_TABLE_SIZE: usize = 26 * 26 * 26;
+/// Size of the amino acid k-mer table (25^3 = 15,625 for 3-mers)
+/// NCBI BLAST uses 25 amino acids: ARNDCQEGHILKMFPSTWYVBJZX*
+/// Reference: ncbi-blast/c++/src/util/tables/sm_blosum62.c
+pub const AA_TABLE_SIZE: usize = 25 * 25 * 25;
 
 /// Maximum hits per k-mer before filtering
 pub const MAX_HITS_PER_KMER: usize = 200;
 
-/// Stop codon index
-pub const STOP_CODON: u8 = 25;
+/// Stop codon index in NCBI BLAST order (24 = '*' position in ARNDCQEGHILKMFPSTWYVBJZX*)
+/// NCBI BLAST uses 25 amino acids: ARNDCQEGHILKMFPSTWYVBJZX* (indices 0-24)
+pub const STOP_CODON: u8 = 24;
 
 /// Type alias for amino acid k-mer lookup table
 /// Direct-address table: index = encoded k-mer, value = list of (query_idx, frame, position)
@@ -31,19 +34,22 @@ pub fn encode_aa_kmer(seq: &[u8], pos: usize) -> Option<usize> {
         return None;
     }
 
-    // Check bounds (amino acids are 0-25)
-    if c1 >= 26 || c2 >= 26 || c3 >= 26 {
+    // Check bounds (amino acids are 0-24 in NCBI BLAST order)
+    // NCBI BLAST uses 25 amino acids: ARNDCQEGHILKMFPSTWYVBJZX*
+    if c1 >= 25 || c2 >= 25 || c3 >= 25 {
         return None;
     }
 
-    Some((c1 as usize) * 676 + (c2 as usize) * 26 + (c3 as usize))
+    // 25^3 = 15,625 possible k-mers
+    Some((c1 as usize) * 625 + (c2 as usize) * 25 + (c3 as usize))
 }
 
 /// Decode an index back to a 3-amino acid k-mer
+/// Uses NCBI BLAST amino acid order: ARNDCQEGHILKMFPSTWYVBJZX* (25 amino acids)
 pub fn decode_aa_kmer(index: usize) -> [u8; 3] {
-    let c1 = (index / 676) as u8;
-    let c2 = ((index / 26) % 26) as u8;
-    let c3 = (index % 26) as u8;
+    let c1 = (index / 625) as u8;
+    let c2 = ((index / 25) % 25) as u8;
+    let c3 = (index % 25) as u8;
     [c1, c2, c3]
 }
 

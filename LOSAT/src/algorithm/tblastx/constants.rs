@@ -3,21 +3,30 @@
 //! This module contains NCBI BLAST compatible parameters for translated BLAST searches.
 
 /// NCBI BLAST compatible X-drop parameters for protein alignments
-/// Using slightly higher X-drop (11 vs NCBI's 7) to allow longer extensions
-/// before termination, which helps match NCBI BLAST's average hit length
-pub const X_DROP_UNGAPPED: i32 = 11;
+/// NCBI BLAST uses BLAST_UNGAPPED_X_DROPOFF_PROT = 7 for TBLASTX
+/// Reference: ncbi-blast/c++/include/algo/blast/core/blast_options.h:122
+/// #define BLAST_UNGAPPED_X_DROPOFF_PROT 7
+pub const X_DROP_UNGAPPED: i32 = 7;
 
-/// BLAST_GAP_X_DROPOFF_PROT for preliminary extension
-pub const X_DROP_GAPPED_PRELIM: i32 = 15;
+/// BLAST_GAP_X_DROPOFF_TBLASTX for preliminary extension
+/// NCBI BLAST sets this to 0 to disable gapped extension for TBLASTX
+/// Reference: ncbi-blast/c++/include/algo/blast/core/blast_options.h:134
+/// #define BLAST_GAP_X_DROPOFF_TBLASTX 0
+pub const X_DROP_GAPPED_PRELIM: i32 = 0;
 
-/// BLAST_GAP_X_DROPOFF_FINAL_PROT for final traceback
-pub const X_DROP_GAPPED_FINAL: i32 = 25;
+/// BLAST_GAP_X_DROPOFF_FINAL_TBLASTX for final traceback
+/// NCBI BLAST sets this to 0 to disable gapped extension for TBLASTX
+/// Reference: ncbi-blast/c++/include/algo/blast/core/blast_options.h:148
+/// #define BLAST_GAP_X_DROPOFF_FINAL_TBLASTX 0
+pub const X_DROP_GAPPED_FINAL: i32 = 0;
 
 /// Maximum number of hits per k-mer before masking the bucket
 pub const MAX_HITS_PER_KMER: usize = 200;
 
-/// Stop codon encoding (25 = 'Z' + 1, used for non-standard amino acids)
-pub const STOP_CODON: u8 = 25;
+/// Stop codon encoding in NCBI BLAST order (24 = '*' position in ARNDCQEGHILKMFPSTWYVBJZX*)
+/// NCBI BLAST uses 25 amino acids: ARNDCQEGHILKMFPSTWYVBJZX* (indices 0-24)
+/// Reference: ncbi-blast/c++/src/util/tables/sm_blosum62.c
+pub const STOP_CODON: u8 = 24;
 
 /// BLAST_WINDOW_SIZE_PROT from NCBI (was 16)
 /// Window size for two-hit requirement in protein searches
@@ -34,8 +43,12 @@ pub const GAP_EXTEND: i32 = -1;
 pub const HIGH_SCORE_THRESHOLD: i32 = 60;
 
 /// Minimum ungapped score threshold for keeping hits
-/// NCBI BLAST outputs down to bit score ~22.1, which corresponds to ungapped score ~14
-/// Setting to 22 to filter out short/low-scoring hits while allowing longer extensions
+/// NCBI BLAST outputs down to bit score ~22.1
+/// For BLOSUM62 with gap_open=11, gap_extend=1: lambda=0.267, K=0.041
+/// bit_score = (lambda * ungapped_score - ln(K)) / ln(2)
+/// bit_score 22.1 corresponds to ungapped_score ~45.4
+/// Setting to 22 (bit_score ~13.1) to filter out very short/low-scoring hits
+/// Note: This may be too high and could be filtering out valid low-identity hits
 pub const MIN_UNGAPPED_SCORE: i32 = 22;
 
 /// Parameters for HSP chaining (similar to BLASTN)

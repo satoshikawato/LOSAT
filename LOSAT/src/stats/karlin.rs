@@ -5,6 +5,10 @@ use super::tables::KarlinParams;
 ///
 /// Formula: S' = (lambda * S - ln(K)) / ln(2)
 /// where S is the raw score, S' is the bit score
+///
+/// Reference: ncbi-blast/c++/src/algo/blast/core/blast_kappa.c:113
+/// hsp->bit_score = (hsp->score*lambda*scoreDivisor - logK)/NCBIMATH_LN2;
+/// (For unscaled scores, scoreDivisor = 1, so this simplifies to our formula)
 pub fn bit_score(raw_score: i32, params: &KarlinParams) -> f64 {
     let ln2 = 2.0_f64.ln();
     (params.lambda * (raw_score as f64) - params.k.ln()) / ln2
@@ -14,6 +18,9 @@ pub fn bit_score(raw_score: i32, params: &KarlinParams) -> f64 {
 ///
 /// Formula: E = m * n * 2^(-S')
 /// where m*n is the effective search space, S' is the bit score
+///
+/// This matches NCBI BLAST's E-value calculation, which uses the effective
+/// search space (after length adjustment) rather than raw sequence lengths.
 pub fn evalue(bit_score: f64, search_space: &SearchSpace) -> f64 {
     search_space.effective_space * 2.0_f64.powf(-bit_score)
 }

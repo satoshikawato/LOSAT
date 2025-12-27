@@ -1,7 +1,14 @@
 // NCBI BLAST compatible X-drop parameters
+// Reference: ncbi-blast/c++/include/algo/blast/core/blast_options.h:124-125
 pub const X_DROP_UNGAPPED: i32 = 20; // BLAST_UNGAPPED_X_DROPOFF_NUCL
 pub const X_DROP_GAPPED_FINAL: i32 = 100; // BLAST_GAP_X_DROPOFF_FINAL_NUCL for final traceback
-pub const TWO_HIT_WINDOW: usize = 64; // Increased from 40 for better sensitivity
+
+/// Two-hit window size for BLASTN
+/// Note: NCBI BLAST default is BLAST_WINDOW_SIZE_NUCL = 0 (two-hit requirement disabled)
+/// Reference: ncbi-blast/c++/include/algo/blast/core/blast_options.h:58
+/// However, LOSAT uses 64 for practical two-hit filtering to reduce extension count
+/// This matches the behavior when window_size > 0 in na_ungapped.c:656
+pub const TWO_HIT_WINDOW: usize = 64;
 pub const MAX_HITS_PER_KMER: usize = 200;
 
 // Minimum ungapped score thresholds for triggering gapped extension
@@ -24,4 +31,5 @@ pub const GREEDY_MAX_COST_FRACTION: usize = 2;
 pub const INVALID_OFFSET: i32 = -2;
 /// Large value for invalid diagonal bounds
 pub const INVALID_DIAG: i32 = 100_000_000;
+
 

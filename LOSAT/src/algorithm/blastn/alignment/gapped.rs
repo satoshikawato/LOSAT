@@ -261,11 +261,17 @@ pub fn extend_gapped_one_direction(
     ];
 
     // Initialize row 0
+    // Reference: blast_gapalign.c:811-813
+    // NCBI BLAST uses: score_array[0].best = 0; score_array[0].best_gap = -gap_open_extend;
+    // Since gap_open and gap_extend are negative in LOSAT, we add them (which is equivalent to subtracting)
     let gap_open_extend = gap_open + gap_extend;
     score_array[0].best = 0;
-    score_array[0].best_gap = gap_open_extend; // Cost to open gap at position 0
+    score_array[0].best_gap = gap_open_extend; // gap_open_extend is negative, so this is equivalent to -gap_open_extend
 
     // Initialize leading gaps in subject (j > 0)
+    // Reference: blast_gapalign.c:815-822
+    // NCBI BLAST: score = -gap_open_extend; then score -= gap_extend in loop
+    // Since gap_open_extend and gap_extend are negative, we add them
     let mut score = gap_open_extend;
     let mut b_size = 1usize;
     for j in 1..=n.min(alloc_size - 1) {
@@ -273,14 +279,14 @@ pub fn extend_gapped_one_direction(
             break;
         }
         score_array[j].best = score;
-        score_array[j].best_gap = score + gap_open_extend;
+        score_array[j].best_gap = score + gap_open_extend; // gap_open_extend is negative, so this subtracts
         score_array[j].stats = AlnStats {
             matches: 0,
             mismatches: 0,
             gap_opens: 1,
             gap_letters: j as u32,
         };
-        score += gap_extend;
+        score += gap_extend; // gap_extend is negative, so this subtracts
         b_size = j + 1;
     }
 

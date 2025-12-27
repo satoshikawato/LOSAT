@@ -7,12 +7,12 @@ use bio::io::fasta;
 use indicatif::{ProgressBar, ProgressStyle};
 use rayon::prelude::*;
 use rustc_hash::FxHashMap;
-use std::sync::atomic::{AtomicUsize, Ordering as AtomicOrdering};
+use std::sync::atomic::Ordering as AtomicOrdering;
 use std::sync::mpsc::channel;
 
 use crate::common::{write_output, Hit};
 use crate::config::{ProteinScoringSpec, ScoringMatrix};
-use crate::stats::{lookup_protein_params, KarlinParams};
+use crate::stats::{lookup_protein_params, search_space::SearchSpace};
 use crate::utils::dust::{DustMasker, MaskedInterval};
 use crate::utils::genetic_code::GeneticCode;
 
@@ -24,9 +24,10 @@ use super::constants::{
 use super::chaining::{chain_and_filter_hsps_protein, ExtendedHit, SequenceData, SequenceKey};
 use super::diagnostics::{diagnostics_enabled, DiagnosticCounters, print_summary as print_diagnostics_summary};
 use super::extension::{
-    calculate_statistics, convert_coords, extend_gapped_protein, extend_hit_two_hit,
-    extend_hit_ungapped, get_score,
+    convert_coords, extend_gapped_protein, extend_hit_two_hit,
+    get_score,
 };
+use crate::stats::karlin::{bit_score as calc_bit_score, evalue as calc_evalue};
 use super::lookup::build_direct_lookup;
 use super::translation::{generate_frames, QueryFrame};
 
@@ -181,6 +182,12 @@ pub fn run(args: TblastxArgs) -> Result<()> {
                         let mut last_seed: FxHashMap<(u32, u8, isize), usize> =
                             FxHashMap::default();
                         let s_aa = &s_frame.aa_seq;
+                        let s_aa_len = s_aa.len();
+                        
+                        // Cache effective search space per query-subject-frame combination
+                        // NCBI BLAST calculates this once per context (query frame + subject frame)
+                        // Reference: ncbi-blast/c++/src/algo/blast/core/blast_setup.c:846
+                        let mut search_space_cache: FxHashMap<(u32, u8), SearchSpace> = FxHashMap::default();
                         if s_aa.len() < 3 {
                             return (local_hits, local_sequences);
                         }
@@ -191,10 +198,12 @@ pub fn run(args: TblastxArgs) -> Result<()> {
                             let c3 = unsafe { *s_aa.get_unchecked(s_pos + 2) } as usize;
 
                             // シードに終止コドンが含まれる場合はスキップ
+                            // NCBI BLAST uses 25 amino acids: ARNDCQEGHILKMFPSTWYVBJZX* (indices 0-24)
                             if c1 >= 25 || c2 >= 25 || c3 >= 25 {
                                 continue;
                             }
-                            let kmer = c1 * 676 + c2 * 26 + c3;
+                            // 25^3 = 15,625 possible k-mers
+                            let kmer = c1 * 625 + c2 * 25 + c3;
 
                             let matches = unsafe { lookup.get_unchecked(kmer) };
 
@@ -217,12 +226,18 @@ pub fn run(args: TblastxArgs) -> Result<()> {
 
                                 let q_frame = &query_frames[q_idx as usize][q_f_idx as usize];
                                 let q_aa = &q_frame.aa_seq;
+                                let q_aa_len = q_aa.len();
 
                                 let seed_score = get_score(c1 as u8, q_aa[q_pos as usize])
                                     + get_score(c2 as u8, q_aa[q_pos as usize + 1])
                                     + get_score(c3 as u8, q_aa[q_pos as usize + 2]);
 
-                                if seed_score < 11 {
+                                // NCBI BLAST uses BLAST_WORD_THRESHOLD_TBLASTX = 13 for seed score threshold
+                                // Reference: ncbi-blast/c++/include/algo/blast/core/blast_options.h:115
+                                // #define BLAST_WORD_THRESHOLD_TBLASTX 13
+                                // Also see: ncbi-blast/c++/src/algo/blast/core/blast_options.c:1204
+                                // For tblastx, it adds 2 to the base BLOSUM62 threshold (11) -> 13
+                                if seed_score < 13 {
                                     if diag_enabled {
                                         diag_inner.base.seeds_low_score.fetch_add(1, AtomicOrdering::Relaxed);
                                     }
@@ -247,11 +262,12 @@ pub fn run(args: TblastxArgs) -> Result<()> {
                                 // Update the last seed position for this diagonal
                                 last_seed.insert(mask_key, s_pos);
 
-                                // Skip extension if two-hit not satisfied AND seed score is not exceptionally high
-                                // High seed scores (>= 30) can trigger extension without two-hit
-                                // Note: 30 is a strict threshold for 3-aa seeds (max ~33 for WWW)
-                                // Higher threshold compensates for increased X_DROP_UNGAPPED (11 vs 7)
-                                if two_hit_info.is_none() && seed_score < 30 {
+                                // NCBI BLAST uses strict two-hit requirement for TBLASTX
+                                // Reference: ncbi-blast/c++/src/algo/blast/core/aa_ungapped.c:214-232
+                                // When multiple_hits is true (window_size > 0), s_BlastAaWordFinder_TwoHit is used
+                                // which requires two hits within the window before extension
+                                // No one-hit extension is allowed, even for high-scoring seeds
+                                if two_hit_info.is_none() {
                                     if diag_enabled {
                                         diag_inner.base.seeds_two_hit_failed.fetch_add(1, AtomicOrdering::Relaxed);
                                     }
@@ -264,29 +280,19 @@ pub fn run(args: TblastxArgs) -> Result<()> {
                                     diag_inner.base.ungapped_extensions.fetch_add(1, AtomicOrdering::Relaxed);
                                 }
 
-                                // Use NCBI-style two-hit extension when two-hit is satisfied,
-                                // otherwise use one-hit extension for high-scoring seeds
+                                // NCBI BLAST always uses two-hit extension for TBLASTX
+                                // Reference: ncbi-blast/c++/src/algo/blast/core/aa_ungapped.c:576-583
                                 let k_size = 3usize;
-                                let (qs, qe, ss, se_ungapped, ungapped_score, s_last_off) = if let Some(prev_s_pos) = two_hit_info {
-                                    // Two-hit extension: extend from current seed (R) to the left,
-                                    // only extend right if left extension reaches the first hit (L)
-                                    // NCBI BLAST passes s_left_off = last_hit + wordsize (end of first word)
+                                // Two-hit extension: extend from current seed (R) to the left,
+                                // only extend right if left extension reaches the first hit (L)
+                                // NCBI BLAST passes s_left_off = last_hit + wordsize (end of first word)
+                                let (qs, qe, ss, se_ungapped, ungapped_score, s_last_off) = {
                                     let (qs, qe, ss, se, score, _right_extended, s_last) = extend_hit_two_hit(
                                         q_aa,
                                         s_aa,
-                                        prev_s_pos + k_size,  // End of first hit (L + wordsize), NCBI BLAST style
-                                        s_pos,                // Second hit position (R)
+                                        two_hit_info.unwrap() + k_size,  // End of first hit (L + wordsize), NCBI BLAST style
+                                        s_pos,                          // Second hit position (R)
                                         q_pos as usize,
-                                    );
-                                    (qs, qe, ss, se, score, s_last)
-                                } else {
-                                    // One-hit extension for high-scoring seeds
-                                    let (qs, qe, ss, se, score, s_last) = extend_hit_ungapped(
-                                        q_aa,
-                                        s_aa,
-                                        q_pos as usize,
-                                        s_pos,
-                                        seed_score,
                                     );
                                     (qs, qe, ss, se, score, s_last)
                                 };
@@ -309,22 +315,37 @@ pub fn run(args: TblastxArgs) -> Result<()> {
                                 }
 
                                 // NCBI BLAST does not allow gapped search for TBLASTX
-                                // (see blast_options.c: "Gapped search is not allowed for tblastx")
+                                // Reference: ncbi-blast/c++/src/algo/blast/api/tblastx_options.cpp:73
+                                // m_Opts->SetGappedMode(false);
+                                // Also, BLAST_GAP_X_DROPOFF_TBLASTX = 0 and BLAST_GAP_X_DROPOFF_FINAL_TBLASTX = 0
+                                // Reference: ncbi-blast/c++/include/algo/blast/core/blast_options.h:134,148
                                 // Always use ungapped-only path to match NCBI BLAST behavior
                                 if true {
                                     if diag_enabled {
                                         diag_inner.ungapped_only_hits.fetch_add(1, AtomicOrdering::Relaxed);
                                     }
                                     // Record the ungapped hit if it passes e-value threshold
-                                    // Use alignment length as effective search space (like NCBI BLAST)
-                                    let len = qe - qs;
-                                    let (bit_score, e_val) =
-                                        calculate_statistics(ungapped_score, len, &params);
+                                    // NCBI BLAST uses query length and subject length (amino acid) for effective search space
+                                    // Reference: ncbi-blast/c++/src/algo/blast/core/blast_setup.c:842-843
+                                    // effective_search_space = effective_db_length * (query_length - length_adjustment)
+                                    // For TBLASTX, lengths are in amino acids (nucleotide length / 3)
+                                    // NCBI BLAST calculates effective search space once per context (query frame + subject frame)
+                                    // and reuses it for all HSPs in that context
+                                    // Reference: ncbi-blast/c++/src/algo/blast/core/blast_setup.c:846
+                                    let context_key = (q_idx, q_f_idx);
+                                    let search_space = *search_space_cache.entry(context_key).or_insert_with(|| {
+                                        // Use NCBI-style length adjustment for single-sequence comparison
+                                        // Reference: ncbi-blast/c++/src/algo/blast/core/blast_setup.c:821-824
+                                        SearchSpace::with_length_adjustment(q_aa_len, s_aa_len, &params)
+                                    });
+                                    let bit_score = calc_bit_score(ungapped_score, &params);
+                                    let e_val = calc_evalue(bit_score, &search_space);
 
                                     if e_val <= args.evalue {
                                         if diag_enabled {
                                             diag_inner.ungapped_evalue_passed.fetch_add(1, AtomicOrdering::Relaxed);
                                         }
+                                        let len = qe - qs;
                                         let mut match_count = 0;
                                         for k in 0..len {
                                             if q_aa[qs + k] == s_aa[ss + k] {
@@ -450,9 +471,19 @@ pub fn run(args: TblastxArgs) -> Result<()> {
                                 // This is the correct BLAST definition of alignment length
                                 let aln_len = matches + mismatches + gap_letters;
 
-                                // Use alignment length as effective search space (like NCBI BLAST)
-                                let (bit_score, e_val) =
-                                    calculate_statistics(gapped_score, aln_len, &params);
+                                // NCBI BLAST uses query length and subject length (amino acid) for effective search space
+                                // Reference: ncbi-blast/c++/src/algo/blast/core/blast_setup.c:842-843
+                                // effective_search_space = effective_db_length * (query_length - length_adjustment)
+                                // For TBLASTX, lengths are in amino acids (nucleotide length / 3)
+                                // NCBI BLAST calculates effective search space once per context (query frame + subject frame)
+                                // and reuses it for all HSPs in that context
+                                let context_key = (q_idx, q_f_idx);
+                                let search_space = *search_space_cache.entry(context_key).or_insert_with(|| {
+                                    // Use NCBI-style length adjustment for single-sequence comparison
+                                    SearchSpace::with_length_adjustment(q_aa_len, s_aa_len, &params)
+                                });
+                                let bit_score = calc_bit_score(gapped_score, &params);
+                                let e_val = calc_evalue(bit_score, &search_space);
 
                                 if e_val <= args.evalue {
                                     if diag_enabled {

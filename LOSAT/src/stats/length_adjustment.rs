@@ -10,9 +10,9 @@
 //!
 //! Reference: NCBI BLAST source code (blast_stat.c)
 //!   - Function: `BLAST_ComputeLengthAdjustment`
-//!   - Location: `c++/src/algo/blast/core/blast_stat.c`
-//!   - The implementation matches NCBI BLAST exactly, with only minor differences
-//!     due to floating-point precision between C and Rust.
+//!   - Location: `c++/src/algo/blast/core/blast_stat.c:5041-5126`
+//!   - The implementation matches NCBI BLAST exactly, including the comparison
+//!     `ell_min == ell_max` (line 5093) and direct cast `(Int4) ell_min` (lines 5110, 5122)
 
 use super::tables::KarlinParams;
 
@@ -115,7 +115,9 @@ pub fn compute_length_adjustment_ncbi(
                 converged = true;
                 break;
             }
-            if (ell_min - ell_max).abs() < f64::EPSILON {
+            // Match NCBI BLAST's exact comparison: ell_min == ell_max
+            // Reference: ncbi-blast/c++/src/algo/blast/core/blast_stat.c:5093
+            if ell_min == ell_max {
                 // There are no more points to check
                 break;
             }

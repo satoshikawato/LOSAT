@@ -21,13 +21,13 @@ fn test_encode_kmer_different_positions() {
     let encoded1 = encode_kmer(seq, 0, 4);
     assert_eq!(encoded1.unwrap(), 27);
     
-    // CGTA = 0b01100001 = 97
+    // CGTA = C<<6 | G<<4 | T<<2 | A = 1<<6 | 2<<4 | 3<<2 | 0 = 64 + 32 + 12 + 0 = 108
     let encoded2 = encode_kmer(seq, 1, 4);
-    assert_eq!(encoded2.unwrap(), 97);
+    assert_eq!(encoded2.unwrap(), 108);
     
-    // GTAC = 0b11010000 = 208
+    // GTAC = G<<6 | T<<4 | A<<2 | C = 2<<6 | 3<<4 | 0<<2 | 1 = 128 + 48 + 0 + 1 = 177
     let encoded3 = encode_kmer(seq, 2, 4);
-    assert_eq!(encoded3.unwrap(), 208);
+    assert_eq!(encoded3.unwrap(), 177);
 }
 
 #[test]

@@ -107,8 +107,9 @@ mod tests {
 
     #[test]
     fn test_encode_aa_kmer() {
-        let seq = b"ABC"; // A=0, B=1, C=2
-        let code = encode_aa_kmer(seq, 0);
+        // Amino acid indices: A=0, B=1, C=2 (not ASCII characters)
+        let seq = [0u8, 1u8, 2u8];
+        let code = encode_aa_kmer(&seq, 0);
         assert_eq!(code, Some(0 * 676 + 1 * 26 + 2)); // 28
         
         // Test with stop codon

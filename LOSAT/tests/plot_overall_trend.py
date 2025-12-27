@@ -83,7 +83,7 @@ def main():
     df_all = pd.concat(all_data, ignore_index=True)
     print(f"Total alignment records loaded: {len(df_all)}")
 
-    # === Plotting ===
+# === Plotting ===
     df_all['Broad_Mode'] = df_all['Mode'].apply(lambda x: 'TBLASTX' if 'TBLASTX' in x else 'BLASTN (All Types)')
 
     sns.set(style="whitegrid")
@@ -102,8 +102,9 @@ def main():
                         fontsize=16, rotation=90, va='center', fontweight='bold')
 
         # 1. Accumulated Length vs Alignment Length
+        # 修正: bins=50 を追加
         sns.histplot(data=data_subset, x='length', hue='Tool', 
-                     weights='length', # Accumulate Length
+                     weights='length', bins=100,
                      element="step", stat="count", common_norm=False, 
                      log_scale=True, ax=axes[i][0],
                      palette=CUSTOM_PALETTE)
@@ -112,8 +113,9 @@ def main():
         axes[i][0].set_ylabel('Accumulated Length (bp/aa)')
 
         # 2. Accumulated Length vs Identity
+        # 修正: bins=50 を追加
         sns.histplot(data=data_subset, x='pident', hue='Tool', 
-                     weights='length', # Accumulate Length
+                     weights='length', bins=100,
                      element="step", stat="count", common_norm=False, 
                      ax=axes[i][1],
                      palette=CUSTOM_PALETTE)

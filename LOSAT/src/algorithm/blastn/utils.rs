@@ -1,20 +1,18 @@
 use anyhow::{Context, Result};
-use bio::io::fasta;
 use indicatif::{ProgressBar, ProgressStyle};
 use rayon::prelude::*;
 use rustc_hash::FxHashMap;
 use std::cmp::Ordering;
 use std::sync::mpsc::channel;
 use crate::common::{write_output, Hit};
-use crate::config::NuclScoringSpec;
 use crate::stats::{lookup_nucl_params, KarlinParams};
-use crate::utils::dust::{DustMasker, MaskedInterval};
 use super::args::BlastnArgs;
 use super::alignment::extend_gapped_heuristic;
 use super::extension::extend_hit_ungapped;
-use super::constants::{X_DROP_GAPPED_FINAL, X_DROP_UNGAPPED, TWO_HIT_WINDOW, MIN_UNGAPPED_SCORE_MEGABLAST, MIN_UNGAPPED_SCORE_BLASTN, MAX_DIRECT_LOOKUP_WORD_SIZE};
-use super::lookup::{build_lookup, build_pv_direct_lookup, build_two_stage_lookup, build_direct_lookup, reverse_complement, TwoStageLookup, PvDirectLookup, DirectKmerLookup, KmerLookup, pack_diag_key, is_kmer_masked};
-use super::sequence_compare::{compare_28mer_simd, compare_sequences_simd, find_first_mismatch};
+use super::constants::{X_DROP_GAPPED_FINAL, TWO_HIT_WINDOW};
+use super::coordination::{configure_task, read_sequences, prepare_sequence_data, build_lookup_tables};
+use super::lookup::{reverse_complement, pack_diag_key};
+use super::sequence_compare::{compare_28mer_simd, compare_sequences_simd};
 
 // Re-export for backward compatibility
 pub use crate::algorithm::common::evalue::calculate_evalue_database_search as calculate_evalue;
@@ -386,7 +384,7 @@ pub fn chain_and_filter_hsps(
 
                     // Track region length for logging
                     let region_len =
-                        (final_q_end_0 - final_q_start_0).max(final_s_end_0 - final_s_start_0);
+                        (final_q_end_0 as usize - final_q_start_0 as usize).max(final_s_end_0 as usize - final_s_start_0 as usize);
                     max_region_len = max_region_len.max(region_len);
 
                     // Skip if no valid alignment found
@@ -690,247 +688,45 @@ pub fn run(args: BlastnArgs) -> Result<()> {
         .build_global()
         .context("Failed to build thread pool")?;
 
-    // Determine effective word size based on task
-    // If user specified default word_size (28) and task is not megablast, use task-appropriate defaults
-    let effective_word_size = match args.task.as_str() {
-        "megablast" => args.word_size,
-        "blastn" => {
-            if args.word_size == 28 {
-                11
-            } else {
-                args.word_size
-            }
-        }
-        "dc-megablast" => {
-            if args.word_size == 28 {
-                11
-            } else {
-                args.word_size
-            }
-        }
-        _ => args.word_size,
-    };
-
-    // Determine effective scoring parameters based on task
-    // NCBI BLAST uses different defaults for different tasks:
-    // - megablast: reward=1, penalty=-2, gapopen=0, gapextend=0 (linear gap)
-    // - blastn: reward=2, penalty=-3, gapopen=5, gapextend=2
-    // - dc-megablast: reward=2, penalty=-3, gapopen=5, gapextend=2
-    // - blastn-short: reward=1, penalty=-3, gapopen=5, gapextend=2
-    // Note: gap costs are stored as negative values internally for DP scoring
-    let (reward, penalty, gap_open, gap_extend) = match args.task.as_str() {
-        "megablast" => {
-            // Use user-specified values or megablast defaults
-            let r = if args.reward == 1 { 1 } else { args.reward };
-            let p = if args.penalty == -2 { -2 } else { args.penalty };
-            let go = if args.gap_open == 0 { 0 } else { args.gap_open };
-            let ge = if args.gap_extend == 0 {
-                0
-            } else {
-                args.gap_extend
-            }; // Linear gap (0 triggers non-affine greedy)
-            (r, p, go, ge)
-        }
-        "blastn" | "dc-megablast" => {
-            // Use user-specified values or blastn defaults (reward=2, penalty=-3)
-            let r = if args.reward == 1 { 2 } else { args.reward };
-            let p = if args.penalty == -2 { -3 } else { args.penalty };
-            let go = if args.gap_open == 0 {
-                -5
-            } else {
-                args.gap_open
-            };
-            let ge = if args.gap_extend == 0 {
-                -2
-            } else {
-                args.gap_extend
-            };
-            (r, p, go, ge)
-        }
-        "blastn-short" => {
-            // blastn-short: reward=1, penalty=-3, gapopen=5, gapextend=2
-            let r = if args.reward == 1 { 1 } else { args.reward };
-            let p = if args.penalty == -2 { -3 } else { args.penalty };
-            let go = if args.gap_open == 0 {
-                -5
-            } else {
-                args.gap_open
-            };
-            let ge = if args.gap_extend == 0 {
-                -2
-            } else {
-                args.gap_extend
-            };
-            (r, p, go, ge)
-        }
-        _ => (args.reward, args.penalty, args.gap_open, args.gap_extend),
-    };
-
-    // Task-specific ungapped score threshold for triggering gapped extension
-    // Higher threshold for blastn reduces the number of gapped extensions significantly
-    // This is critical for performance on self-comparison with many off-diagonal matches
-    let min_ungapped_score = match args.task.as_str() {
-        "megablast" => MIN_UNGAPPED_SCORE_MEGABLAST,
-        _ => MIN_UNGAPPED_SCORE_BLASTN,
-    };
-
-    // NCBI BLAST uses different extension algorithms based on task:
-    // - megablast: greedy alignment (eGreedyScoreOnly) - fast, good for high-identity sequences
-    // - blastn: DP-based alignment (eDynProgScoreOnly) - slower, but handles divergent sequences better
-    // This follows NCBI BLAST's approach for better alignment of divergent sequences
-    let use_dp = match args.task.as_str() {
-        "megablast" => false, // Use greedy for megablast (high-identity sequences)
-        _ => true,            // Use DP for blastn, dc-megablast, blastn-short (divergent sequences)
-    };
-
-    // SCAN STRIDE OPTIMIZATION (NCBI BLAST algorithm)
-    // NCBI BLAST uses: scan_step = word_length - lut_word_length + 1
-    // This will be recalculated after two-stage lookup is built if use_two_stage is true
-    let scan_step = if args.scan_step > 0 {
-        args.scan_step // User-specified value
-    } else {
-        // Auto-calculate based on word_size (will be overridden for two-stage lookup)
-        if effective_word_size >= 16 {
-            4 // For megablast-like word sizes, use stride of 4
-        } else if effective_word_size >= 11 {
-            // For blastn (word_size=11), initial value (will be recalculated for two-stage lookup)
-            2
-        } else {
-            1 // For very small word sizes, check every position
-        }
-    };
-
+    // Configure task-specific parameters
+    let config = configure_task(&args);
+    
     if args.verbose {
-        eprintln!("[INFO] Scan stride optimization: scan_step={} (word_size={})", scan_step, effective_word_size);
+        eprintln!("[INFO] Scan stride optimization: scan_step={} (word_size={})", config.scan_step, config.effective_word_size);
     }
 
-    eprintln!("Reading query & subject...");
-    let query_reader = fasta::Reader::from_file(&args.query)?;
-    let queries: Vec<fasta::Record> = query_reader.records().filter_map(|r| r.ok()).collect();
-    let query_ids: Vec<String> = queries
-        .iter()
-        .map(|r| {
-            r.id()
-                .split_whitespace()
-                .next()
-                .unwrap_or("unknown")
-                .to_string()
-        })
-        .collect();
-
-    let subject_reader = fasta::Reader::from_file(&args.subject)?;
-    let subjects: Vec<fasta::Record> = subject_reader.records().filter_map(|r| r.ok()).collect();
-
+    // Read sequences
+    let (queries, query_ids, subjects) = read_sequences(&args)?;
     if queries.is_empty() || subjects.is_empty() {
         return Ok(());
     }
 
-    let db_len_total: usize = subjects.iter().map(|r| r.seq().len()).sum();
-    let db_num_seqs: usize = subjects.len();
-
+    // Prepare sequence data (including DUST masking)
+    let seq_data = prepare_sequence_data(&args, queries, query_ids, subjects);
+    
+    // Get Karlin-Altschul parameters
+    use crate::config::NuclScoringSpec;
     let scoring_spec = NuclScoringSpec {
-        reward,
-        penalty,
-        gap_open,
-        gap_extend,
+        reward: config.reward,
+        penalty: config.penalty,
+        gap_open: config.gap_open,
+        gap_extend: config.gap_extend,
     };
     let params = lookup_nucl_params(&scoring_spec);
 
-    // Choose between direct address table (O(1) lookup) and HashMap based on word size
-    // Direct address table is much faster but requires 4^word_size memory
-    let use_direct_lookup = effective_word_size <= MAX_DIRECT_LOOKUP_WORD_SIZE;
-
-    // TWO-STAGE LOOKUP TABLE (NCBI BLAST algorithm)
-    // NCBI BLAST uses two-stage lookup for word_size >= 11:
-    // - For word_size >= 16 (megablast): lut_word_length = 8
-    // - For word_size = 11 (blastn): lut_word_length = 8 (when approx_table_entries < 12000)
-    // - word_length = effective_word_size for extension triggering
-    // This provides O(1) lookup performance even for large word sizes
-    // Following NCBI BLAST's approach: use two-stage lookup when word_size >= 11
-    let use_two_stage = effective_word_size >= 11;
-    let lut_word_length = if use_two_stage {
-        if effective_word_size >= 16 {
-            8 // NCBI BLAST default for megablast (word_size >= 16)
-        } else if effective_word_size == 11 {
-            // For blastn (word_size=11), use lut_word_length=8 following NCBI BLAST
-            // This matches NCBI BLAST's choice when approx_table_entries < 12000
-            8
-        } else {
-            // For other word sizes (12-15), use 8 as default
-            8
-        }
-    } else {
-        effective_word_size.min(MAX_DIRECT_LOOKUP_WORD_SIZE)
-    };
-
-    // Apply DUST filter to mask low-complexity regions in query sequences
-    let query_masks: Vec<Vec<MaskedInterval>> = if args.dust {
-        eprintln!(
-            "Applying DUST filter (level={}, window={}, linker={})...",
-            args.dust_level, args.dust_window, args.dust_linker
-        );
-        let masker = DustMasker::new(args.dust_level, args.dust_window, args.dust_linker);
-        let masks: Vec<Vec<MaskedInterval>> = queries
-            .iter()
-            .map(|record| masker.mask_sequence(record.seq()))
-            .collect();
-        
-        // Report DUST masking statistics
-        let total_masked: usize = masks.iter().map(|m| m.iter().map(|i| i.end - i.start).sum::<usize>()).sum();
-        let total_bases: usize = queries.iter().map(|r| r.seq().len()).sum();
-        if total_bases > 0 {
-            eprintln!(
-                "DUST masked {} bases ({:.2}%) across {} sequences",
-                total_masked,
-                100.0 * total_masked as f64 / total_bases as f64,
-                queries.len()
-            );
-        }
-        masks
-    } else {
-        vec![Vec::new(); queries.len()]
-    };
-
-    eprintln!(
-        "Building lookup (Task: {}, Word: {}, TwoStage: {}, LUTWord: {}, Direct: {}, DUST: {})...",
-        args.task, effective_word_size, use_two_stage, lut_word_length, use_direct_lookup, args.dust
+    // Build lookup tables
+    let (lookup_tables, scan_step) = build_lookup_tables(
+        &config,
+        &args,
+        &seq_data.queries,
+        &seq_data.query_masks,
     );
-
-    // Build the appropriate lookup table
-    let two_stage_lookup: Option<TwoStageLookup> = if use_two_stage {
-        Some(build_two_stage_lookup(&queries, effective_word_size, lut_word_length, &query_masks))
-    } else {
-        None
-    };
-    let pv_direct_lookup: Option<PvDirectLookup> = if !use_two_stage && use_direct_lookup {
-        Some(build_pv_direct_lookup(&queries, effective_word_size, &query_masks))
-    } else {
-        None
-    };
-    let hash_lookup: Option<KmerLookup> = if !use_two_stage && !use_direct_lookup {
-        Some(build_lookup(&queries, effective_word_size, &query_masks))
-    } else {
-        None
-    };
-    
-    // Update scan_step for two-stage lookup
-    let scan_step = if use_two_stage {
-        // NCBI BLAST formula: scan_step = word_length - lut_word_length + 1
-        (effective_word_size as isize - lut_word_length as isize + 1).max(1) as usize
-    } else {
-        scan_step
-    };
-    
-    if args.verbose && use_two_stage {
-        eprintln!("[INFO] Using two-stage lookup: lut_word_length={}, word_length={}, scan_step={}", 
-                  lut_word_length, effective_word_size, scan_step);
-    }
 
     if args.verbose {
         eprintln!("Searching...");
     }
 
-    let bar = ProgressBar::new(subjects.len() as u64);
+    let bar = ProgressBar::new(seq_data.subjects.len() as u64);
     bar.set_style(
         ProgressStyle::default_bar()
             .template("{spinner:.green} [{elapsed_precise}] [{bar:40.cyan/blue}] {pos}/{len}")
@@ -941,7 +737,6 @@ pub fn run(args: BlastnArgs) -> Result<()> {
     // Use Option to signal completion: None means "all subjects processed"
     let (tx, rx) = channel::<Option<(Vec<Hit>, Vec<(String, String, Vec<u8>, Vec<u8>)>)>>();
     let out_path = args.out.clone();
-    // Note: reward, penalty, gap_open, gap_extend are already defined above with task-adjusted values
     let params_clone = params.clone();
 
     // Keep a sender for the main thread to send the completion signal
@@ -1000,14 +795,14 @@ pub fn run(args: BlastnArgs) -> Result<()> {
         let filtered_hits = chain_and_filter_hsps(
             all_hits,
             &all_sequences,
-            reward,
-            penalty,
-            gap_open,
-            gap_extend,
-            db_len_total,
-            db_num_seqs,
+            config.reward,
+            config.penalty,
+            config.gap_open,
+            config.gap_extend,
+            seq_data.db_len_total,
+            seq_data.db_num_seqs,
             &params_clone,
-            use_dp,
+            config.use_dp,
             verbose,
             chain_enabled,
         );
@@ -1032,7 +827,6 @@ pub fn run(args: BlastnArgs) -> Result<()> {
         Ok(())
     });
 
-    // 修正: s_idx -> _s_idx (未使用抑制)
     // Debug mode: set BLEMIR_DEBUG=1 to enable, BLEMIR_DEBUG_WINDOW="q_start-q_end,s_start-s_end" to focus on a region
     let debug_mode = std::env::var("BLEMIR_DEBUG").is_ok();
     let debug_window: Option<(usize, usize, usize, usize)> =
@@ -1060,7 +854,7 @@ pub fn run(args: BlastnArgs) -> Result<()> {
         );
         eprintln!(
             "[DEBUG] Task: {}, Scoring: reward={}, penalty={}, gap_open={}, gap_extend={}",
-            args.task, reward, penalty, gap_open, gap_extend
+            args.task, config.reward, config.penalty, config.gap_open, config.gap_extend
         );
         if disable_mask {
             eprintln!("[DEBUG] Mask DISABLED for debugging");
@@ -1073,12 +867,28 @@ pub fn run(args: BlastnArgs) -> Result<()> {
         }
     }
 
-    // 修正: tx はここで所有権ごと渡す。for_each_with 終了時に自動でDropされるため、明示的な drop(tx) は不要。
-    // Also pass two_stage_lookup reference and queries for use in the closure
-    let two_stage_lookup_ref = two_stage_lookup.as_ref();
-    let queries_ref = &queries;
-    let query_ids_ref = &query_ids;
-    subjects
+    // Pass lookup tables and queries for use in the closure
+    let two_stage_lookup_ref = lookup_tables.two_stage_lookup.as_ref();
+    let pv_direct_lookup_ref = lookup_tables.pv_direct_lookup.as_ref();
+    let hash_lookup_ref = lookup_tables.hash_lookup.as_ref();
+    let queries_ref = &seq_data.queries;
+    let query_ids_ref = &seq_data.query_ids;
+    
+    // Capture config values for use in closure
+    let effective_word_size = config.effective_word_size;
+    let min_ungapped_score = config.min_ungapped_score;
+    let use_dp = config.use_dp;
+    let use_direct_lookup = config.use_direct_lookup;
+    let reward = config.reward;
+    let penalty = config.penalty;
+    let gap_open = config.gap_open;
+    let gap_extend = config.gap_extend;
+    let db_len_total = seq_data.db_len_total;
+    let db_num_seqs = seq_data.db_num_seqs;
+    let params_for_closure = params.clone();
+    let evalue_threshold = args.evalue;
+    
+    seq_data.subjects
         .par_iter()
         .enumerate()
         .for_each_with(tx, |tx, (_s_idx, s_record)| {
@@ -1458,10 +1268,10 @@ pub fn run(args: BlastnArgs) -> Result<()> {
                                 q_record.seq().len(),
                                 db_len_total,
                                 db_num_seqs,
-                                &params,
+                                &params_for_closure,
                             );
 
-                            if eval <= args.evalue {
+                            if eval <= evalue_threshold {
                                 // Identity is matches / alignment_length, capped at 100%
                                 let identity = if aln_len > 0 {
                                     ((matches as f64 / aln_len as f64) * 100.0).min(100.0)
@@ -1562,10 +1372,10 @@ pub fn run(args: BlastnArgs) -> Result<()> {
                         // For word_size > 13, use hash-based lookup
                         let matches_slice: &[(u32, u32)] = if use_direct_lookup {
                             // Use PV for fast filtering before accessing the lookup table
-                            pv_direct_lookup.as_ref().map(|pv_dl| pv_dl.get_hits_checked(current_kmer)).unwrap_or(&[])
+                            pv_direct_lookup_ref.map(|pv_dl| pv_dl.get_hits_checked(current_kmer)).unwrap_or(&[])
                         } else {
                             // Use hash-based lookup for larger word sizes
-                            hash_lookup.as_ref().and_then(|hl| hl.get(&current_kmer).map(|v| v.as_slice())).unwrap_or(&[])
+                            hash_lookup_ref.and_then(|hl| hl.get(&current_kmer).map(|v| v.as_slice())).unwrap_or(&[])
                         };
 
                         for &(q_idx, q_pos) in matches_slice {
@@ -1737,11 +1547,11 @@ pub fn run(args: BlastnArgs) -> Result<()> {
                             q_record.seq().len(),
                             db_len_total,
                             db_num_seqs,
-                            &params,
+                            &params_for_closure,
                         );
                         
                         // Skip if e-value is too high
-                        if eval > args.evalue {
+                        if eval > evalue_threshold {
                             continue;
                         }
                         

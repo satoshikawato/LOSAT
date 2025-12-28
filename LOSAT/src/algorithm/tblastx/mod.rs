@@ -10,9 +10,11 @@ pub mod translation;
 pub mod lookup;
 pub mod extension;
 pub mod chaining;
+pub mod sum_stats_linking;
 pub mod diagnostics;
 pub mod utils;
 
 pub use args::TblastxArgs;
 pub use utils::run;
+
 

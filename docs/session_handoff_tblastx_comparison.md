@@ -1,5 +1,8 @@
 # TBLASTX NCBI BLAST互換性改善 - セッション引継ぎ文書
 
+> **更新（2025-12-28）**: この文書の続き（sum-stats / even-gap linking 周りの進捗と残課題）は  
+> `docs/session_handoff_tblastx_sumstats.md` を参照してください。
+
 ## 概要
 LOSATのTBLASTX実装がNCBI BLASTと比較して大幅にヒット数が少ない問題の調査と修正を行った。
 

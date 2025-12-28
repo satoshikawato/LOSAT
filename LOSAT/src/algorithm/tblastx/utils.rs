@@ -21,14 +21,14 @@ use super::constants::{
     CUTOFF_E_TBLASTX, GAP_EXTEND, GAP_OPEN, TWO_HIT_WINDOW, X_DROP_GAPPED_FINAL,
     X_DROP_GAPPED_PRELIM, X_DROP_UNGAPPED,
 };
-use super::chaining::{ExtendedHit, SequenceData, SequenceKey};
+use super::chaining::ExtendedHit;
 use super::diagnostics::{diagnostics_enabled, DiagnosticCounters, print_summary as print_diagnostics_summary};
+use super::sum_stats_linking::apply_sum_stats_even_gap_linking;
 use super::extension::{
     convert_coords, extend_gapped_protein, extend_hit_two_hit, extend_hit_ungapped,
     get_score,
 };
 use crate::stats::karlin::{bit_score as calc_bit_score, evalue as calc_evalue, raw_score_from_evalue};
-use std::f64::consts::LN_2;
 use super::lookup::build_direct_lookup_with_threshold;
 use super::translation::{generate_frames, QueryFrame};
 
@@ -40,6 +40,19 @@ pub fn run(args: TblastxArgs) -> Result<()> {
     };
     let query_code = GeneticCode::from_id(args.query_gencode);
     let db_code = GeneticCode::from_id(args.db_gencode);
+    let only_qframe = args.only_qframe;
+    let only_sframe = args.only_sframe;
+    let valid_frame = |f: i8| matches!(f, 1 | 2 | 3 | -1 | -2 | -3);
+    if let Some(f) = only_qframe {
+        if !valid_frame(f) {
+            anyhow::bail!("--only-qframe must be one of 1,2,3,-1,-2,-3 (got {f})");
+        }
+    }
+    if let Some(f) = only_sframe {
+        if !valid_frame(f) {
+            anyhow::bail!("--only-sframe must be one of 1,2,3,-1,-2,-3 (got {f})");
+        }
+    }
     
     // Determine two-hit window size based on arguments
     // Use --window_size to set (default: 40)
@@ -86,8 +99,20 @@ pub fn run(args: TblastxArgs) -> Result<()> {
 
     let query_frames: Vec<Vec<QueryFrame>> = queries_raw
         .iter()
-        .map(|r| generate_frames(r.seq(), &query_code))
+        .map(|r| {
+            let mut frames = generate_frames(r.seq(), &query_code);
+            if let Some(f) = only_qframe {
+                frames.retain(|x| x.frame == f);
+            }
+            frames
+        })
         .collect();
+    if let Some(_f) = only_qframe {
+        // Safety: if the query is too short, a frame translation may be empty; prevent silent no-op searches.
+        if query_frames.iter().all(|v| v.is_empty()) {
+            anyhow::bail!("--only-qframe filtered out all query frames (query too short?)");
+        }
+    }
 
     eprintln!("Building lookup table...");
     // NCBI BLAST+ tblastx default: Neighboring words threshold = 13
@@ -131,8 +156,8 @@ pub fn run(args: TblastxArgs) -> Result<()> {
             .unwrap(),
     );
 
-    // Channel now sends ExtendedHit with sequence data for HSP chaining
-    type HitData = (Vec<ExtendedHit>, Vec<(SequenceKey, SequenceData)>);
+    // Channel sends ExtendedHit records for post-processing (sum-statistics linking, filtering, output)
+    type HitData = Vec<ExtendedHit>;
     let (tx, rx) = channel::<HitData>();
 
     let out_path = args.out.clone();
@@ -142,14 +167,9 @@ pub fn run(args: TblastxArgs) -> Result<()> {
     let diag_enabled_clone = diag_enabled;
     let writer_handle = std::thread::spawn(move || -> Result<()> {
         let mut all_hits: Vec<ExtendedHit> = Vec::new();
-        let mut seq_map: FxHashMap<SequenceKey, SequenceData> = FxHashMap::default();
 
-        while let Ok((hits, seq_data)) = rx.recv() {
+        while let Ok(hits) = rx.recv() {
             all_hits.extend(hits);
-            for (k, v) in seq_data {
-                // Keep the first copy we see (all are identical for a given key)
-                seq_map.entry(k).or_insert(v);
-            }
         }
 
         let diag_ref = if diag_enabled_clone { Some(diagnostics_clone.as_ref()) } else { None };
@@ -160,115 +180,12 @@ pub fn run(args: TblastxArgs) -> Result<()> {
             diag.base.hsps_before_chain.store(hsps_before, AtomicOrdering::Relaxed);
         }
 
-        // === NCBI-like sum-statistics behavior (simplified) ===
-        // NCBI tblastx enables sum statistics by default (CTBlastxOptionsHandle::SetSumStatisticsMode),
-        // and assigns a *set-level* E-value to each HSP after linking (BLAST_LinkHsps).
-        //
-        // Implementing the full DP linking algorithm is involved; as a first NCBI-anchored step,
-        // we cluster nearby collinear HSPs per (query, subject, frame combo) and assign a set-level
-        // E-value computed from the summed bit scores. This allows low-scoring HSPs to inherit
-        // significance from a strong surrounding chain, matching the key effect seen in NCBI output.
-        //
-        // Link parameters (NCBI defaults for ungapped linking):
-        //   gap_size = 40, overlap_size = 9  (blast_parameters.h)
-        // We use these to build simple greedy clusters.
-        // Allow "big gaps" to approximate NCBI's even-gap linking (which considers both
-        // small- and large-gap chaining). Small-gap default is 40 aa, but large-gap
-        // chaining can connect much farther-apart HSPs.
-        const LINK_GAP_AA: isize = 5000;
-        const LINK_OVERLAP_AA: isize = 9;
-        const LINK_DIAG_DRIFT_AA: isize = 33;
-        const GAP_DECAY_RATE: f64 = 0.5; // BLAST_GAP_DECAY_RATE for ungapped searches
-
-        // Group by query-subject + frame combination (like tblastx contexts)
-        let mut groups: FxHashMap<SequenceKey, Vec<ExtendedHit>> = FxHashMap::default();
-        for h in all_hits.into_iter() {
-            let key: SequenceKey = (
-                h.hit.query_id.clone(),
-                h.hit.subject_id.clone(),
-                h.q_frame,
-                h.s_frame,
-            );
-            groups.entry(key).or_default().push(h);
-        }
-
-        let mut linked_hits: Vec<ExtendedHit> = Vec::new();
-        for (key, mut hsps) in groups {
-            if hsps.is_empty() {
-                continue;
-            }
-            // Need sequence lengths to compute effective search space
-            let Some((q_seq, s_seq)) = seq_map.get(&key) else {
-                // Fallback: if we don't have sequence data, keep individual e-values
-                linked_hits.extend(hsps);
-                continue;
-            };
-            let q_len = q_seq.len();
-            let s_len = s_seq.len();
-            let ss = SearchSpace::with_length_adjustment(q_len, s_len, &params_clone);
-            let searchsp_eff = ss.effective_space.max(1.0);
-
-            // Sort by query AA start (then subject AA start)
-            hsps.sort_by(|a, b| {
-                a.q_aa_start
-                    .cmp(&b.q_aa_start)
-                    .then_with(|| a.s_aa_start.cmp(&b.s_aa_start))
-            });
-
-            // Greedy clustering on collinearity and small gaps/overlaps
-            let mut current: Vec<ExtendedHit> = Vec::new();
-            for h in hsps.into_iter() {
-                if current.is_empty() {
-                    current.push(h);
-                    continue;
-                }
-                let last = current.last().unwrap();
-                let q_gap = h.q_aa_start as isize - last.q_aa_end as isize;
-                let s_gap = h.s_aa_start as isize - last.s_aa_end as isize;
-                let last_diag = last.s_aa_start as isize - last.q_aa_start as isize;
-                let diag = h.s_aa_start as isize - h.q_aa_start as isize;
-                let diag_drift = (diag - last_diag).abs();
-
-                let q_ok = q_gap >= -LINK_OVERLAP_AA && q_gap <= LINK_GAP_AA;
-                let s_ok = s_gap >= -LINK_OVERLAP_AA && s_gap <= LINK_GAP_AA;
-                let diag_ok = diag_drift <= LINK_DIAG_DRIFT_AA;
-
-                if q_ok && s_ok && diag_ok {
-                    current.push(h);
-                } else {
-                    // finalize current cluster
-                    let n = current.len() as i32;
-                    let sum_bits: f64 = current.iter().map(|x| x.hit.bit_score).sum();
-                    // xsum (nats) = ln(2) * sum_bits
-                    let xsum = LN_2 * sum_bits;
-                    // Weight divisor: (1-decay) * decay^(n-1)  (blast_stat.c BLAST_GapDecayDivisor)
-                    let weight_div = (1.0 - GAP_DECAY_RATE) * GAP_DECAY_RATE.powi(n - 1);
-                    let mut set_e = searchsp_eff * (-xsum).exp();
-                    if weight_div > 0.0 {
-                        set_e /= weight_div;
-                    }
-                    for mut x in current.drain(..) {
-                        x.hit.e_value = set_e;
-                        linked_hits.push(x);
-                    }
-                    current.push(h);
-                }
-            }
-            if !current.is_empty() {
-                let n = current.len() as i32;
-                let sum_bits: f64 = current.iter().map(|x| x.hit.bit_score).sum();
-                let xsum = LN_2 * sum_bits;
-                let weight_div = (1.0 - GAP_DECAY_RATE) * GAP_DECAY_RATE.powi(n - 1);
-                let mut set_e = searchsp_eff * (-xsum).exp();
-                if weight_div > 0.0 {
-                    set_e /= weight_div;
-                }
-                for mut x in current.drain(..) {
-                    x.hit.e_value = set_e;
-                    linked_hits.push(x);
-                }
-            }
-        }
+        // === NCBI-like sum-statistics behavior ===
+        // NCBI tblastx assigns a *set-level* E-value to each HSP after linking (BLAST_LinkHsps).
+        // We apply an even-gap (small/large) linking step and overwrite `hit.e_value` with the
+        // resulting set-level E-value.
+        let linked_hits: Vec<ExtendedHit> =
+            apply_sum_stats_even_gap_linking(all_hits, &params_clone);
 
         // Record HSPs after "linking" (before threshold)
         if let Some(diag) = diag_ref {
@@ -327,7 +244,10 @@ pub fn run(args: TblastxArgs) -> Result<()> {
         .par_iter()
         .enumerate()
         .for_each_with((tx, diagnostics_for_parallel), |(tx, diag), (_s_idx, s_record)| {
-            let s_frames = generate_frames(s_record.seq(), &db_code);
+            let mut s_frames = generate_frames(s_record.seq(), &db_code);
+            if let Some(f) = only_sframe {
+                s_frames.retain(|x| x.frame == f);
+            }
             let s_id = s_record
                 .id()
                 .split_whitespace()
@@ -346,15 +266,12 @@ pub fn run(args: TblastxArgs) -> Result<()> {
             // Parallelize over subject frames for intra-subject parallelism
             // Each frame is independent since mask_key includes s_f_idx
             let diag_inner = diag.clone();
-            let frame_results: Vec<(Vec<ExtendedHit>, Vec<(SequenceKey, SequenceData)>)> =
+            let frame_results: Vec<Vec<ExtendedHit>> =
                 s_frames
                     .par_iter()
                     .enumerate()
                     .map(|(s_f_idx, s_frame)| {
                         let mut local_hits: Vec<ExtendedHit> = Vec::new();
-                        let mut local_sequences: Vec<(SequenceKey, SequenceData)> = Vec::new();
-                        let mut seen_pairs: std::collections::HashSet<SequenceKey> =
-                            std::collections::HashSet::new();
 
                         // Mask to track already-extended regions on each diagonal (per frame)
                         // NCBI BLAST style: use diag_coord = (query_offset - subject_offset) & diag_mask
@@ -401,7 +318,7 @@ pub fn run(args: TblastxArgs) -> Result<()> {
                         // Reference: ncbi-blast/c++/src/algo/blast/core/blast_parameters.c:349-360
                         let mut cutoff_score_cache: FxHashMap<(u32, u8, u8), i32> = FxHashMap::default();
                         if s_aa.len() < 3 {
-                            return (local_hits, local_sequences);
+                            return local_hits;
                         }
 
                         for s_pos in 0..=(s_aa.len() - 3) {
@@ -793,18 +710,6 @@ pub fn run(args: TblastxArgs) -> Result<()> {
                                     let (s_start_bp, s_end_bp) =
                                         convert_coords(ss, se_ungapped, s_frame.frame, s_len);
 
-                                    // Store sequence data for sum-statistics HSP linking / post-processing.
-                                    let seq_key: SequenceKey = (
-                                        query_ids[q_idx as usize].clone(),
-                                        s_id.clone(),
-                                        q_frame.frame,
-                                        s_frame.frame,
-                                    );
-                                    if !seen_pairs.contains(&seq_key) {
-                                        seen_pairs.insert(seq_key.clone());
-                                        local_sequences.push((seq_key.clone(), (q_aa.clone(), s_aa.clone())));
-                                    }
-
                                     local_hits.push(ExtendedHit {
                                         hit: Hit {
                                             query_id: query_ids[q_idx as usize].clone(),
@@ -821,6 +726,7 @@ pub fn run(args: TblastxArgs) -> Result<()> {
                                             e_value: e_val,
                                             bit_score,
                                         },
+                                        raw_score: ungapped_score,
                                         q_frame: q_frame.frame,
                                         s_frame: s_frame.frame,
                                         q_aa_start: qs,
@@ -989,19 +895,6 @@ pub fn run(args: TblastxArgs) -> Result<()> {
                                     let (s_start_bp, s_end_bp) =
                                         convert_coords(final_ss, final_se, s_frame.frame, s_len);
 
-                                    // Store sequence data for HSP chaining
-                                    let seq_key: SequenceKey = (
-                                        query_ids[q_idx as usize].clone(),
-                                        s_id.clone(),
-                                        q_frame.frame,
-                                        s_frame.frame,
-                                    );
-                                    if !seen_pairs.contains(&seq_key) {
-                                        seen_pairs.insert(seq_key.clone());
-                                        local_sequences
-                                            .push((seq_key.clone(), (q_aa.clone(), s_aa.clone())));
-                                    }
-
                                     local_hits.push(ExtendedHit {
                                         hit: Hit {
                                             query_id: query_ids[q_idx as usize].clone(),
@@ -1017,6 +910,7 @@ pub fn run(args: TblastxArgs) -> Result<()> {
                                             e_value: e_val,
                                             bit_score,
                                         },
+                                        raw_score: gapped_score,
                                         q_frame: q_frame.frame,
                                         s_frame: s_frame.frame,
                                         q_aa_start: final_qs,
@@ -1030,19 +924,17 @@ pub fn run(args: TblastxArgs) -> Result<()> {
                                 }
                             }
                         }
-                        (local_hits, local_sequences)
+                        local_hits
                     })
                     .collect();
 
             // Flatten frame results and send
             let mut all_hits: Vec<ExtendedHit> = Vec::new();
-            let mut all_sequences: Vec<(SequenceKey, SequenceData)> = Vec::new();
-            for (hits, seqs) in frame_results {
+            for hits in frame_results {
                 all_hits.extend(hits);
-                all_sequences.extend(seqs);
             }
             if !all_hits.is_empty() {
-                tx.send((all_hits, all_sequences)).unwrap();
+                tx.send(all_hits).unwrap();
             }
             bar.inc(1);
         });

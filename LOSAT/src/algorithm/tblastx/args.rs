@@ -45,5 +45,15 @@ pub struct TblastxArgs {
     /// Use 0 to enable one-hit mode (like NCBI BLAST's -window_size 0)
     #[arg(long, default_value_t = 40)]
     pub window_size: usize,
+
+    /// Restrict search to a single query translation frame (1,2,3,-1,-2,-3).
+    /// Useful for debugging slow one-hit (`--window-size 0`) runs.
+    #[arg(long, allow_hyphen_values = true)]
+    pub only_qframe: Option<i8>,
+
+    /// Restrict search to a single subject translation frame (1,2,3,-1,-2,-3).
+    /// Useful for debugging slow one-hit (`--window-size 0`) runs.
+    #[arg(long, allow_hyphen_values = true)]
+    pub only_sframe: Option<i8>,
 }
 

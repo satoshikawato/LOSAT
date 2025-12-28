@@ -17,6 +17,9 @@ use super::diagnostics::DiagnosticCounters;
 #[derive(Debug, Clone)]
 pub struct ExtendedHit {
     pub hit: Hit,
+    /// Raw alignment score (ungapped or gapped) used for sum-statistics linking.
+    /// This corresponds to NCBI `BlastHSP.score`.
+    pub raw_score: i32,
     pub q_frame: i8,
     pub s_frame: i8,
     pub q_aa_start: usize,

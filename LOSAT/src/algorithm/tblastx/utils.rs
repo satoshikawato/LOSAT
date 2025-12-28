@@ -28,7 +28,7 @@ use super::extension::{
     get_score,
 };
 use crate::stats::karlin::{bit_score as calc_bit_score, evalue as calc_evalue, raw_score_from_evalue};
-use super::lookup::build_direct_lookup;
+use super::lookup::build_direct_lookup_with_threshold;
 use super::translation::{generate_frames, QueryFrame};
 
 pub fn run(args: TblastxArgs) -> Result<()> {
@@ -41,9 +41,10 @@ pub fn run(args: TblastxArgs) -> Result<()> {
     let db_code = GeneticCode::from_id(args.db_gencode);
     
     // Determine two-hit window size based on arguments
-    // Default is now NCBI-compatible (16)
-    // Use --two_hit_window to override
-    let two_hit_window: usize = args.two_hit_window.unwrap_or(TWO_HIT_WINDOW);
+    // Use --window_size to set (default: 40)
+    // window_size = 0 enables one-hit mode (like NCBI BLAST's -window_size 0)
+    let two_hit_window: usize = args.window_size;
+    let one_hit_mode = two_hit_window == 0;
     
     // X-drop value (default is now NCBI-compatible: 7)
     let x_drop_ungapped: i32 = X_DROP_UNGAPPED;
@@ -88,7 +89,9 @@ pub fn run(args: TblastxArgs) -> Result<()> {
         .collect();
 
     eprintln!("Building lookup table...");
-    let lookup = build_direct_lookup(&query_frames, &query_masks);
+    // NCBI BLAST+ tblastx default: Neighboring words threshold = 13
+    // (confirmed via pairwise output header: "Neighboring words threshold: 13")
+    let lookup = build_direct_lookup_with_threshold(&query_frames, &query_masks, args.threshold);
 
     eprintln!("Reading subject file...");
     let subject_reader = fasta::Reader::from_file(&args.subject)?;
@@ -102,10 +105,15 @@ pub fn run(args: TblastxArgs) -> Result<()> {
     let db_len_total_bp: usize = subjects_raw.iter().map(|r| r.seq().len()).sum();
     let db_len_aa_total = db_len_total_bp / 3;
 
+    // TBLASTX uses UNGAPPED alignments, so we need ungapped Karlin-Altschul parameters
+    // Reference: ncbi-blast/c++/src/algo/blast/api/tblastx_options.cpp:73
+    // m_Opts->SetGappedMode(false);
+    // For ungapped BLOSUM62, use gap_open = i32::MAX, gap_extend = i32::MAX
+    // which corresponds to lambda=0.3176, K=0.134 (from blast_stat.c)
     let scoring_spec = ProteinScoringSpec {
         matrix: ScoringMatrix::Blosum62,
-        gap_open: GAP_OPEN.abs(),
-        gap_extend: GAP_EXTEND.abs(),
+        gap_open: i32::MAX, // Ungapped parameters
+        gap_extend: i32::MAX, // Ungapped parameters
     };
     let params = lookup_protein_params(&scoring_spec);
 
@@ -238,6 +246,12 @@ pub fn run(args: TblastxArgs) -> Result<()> {
                         // NCBI BLAST style: use diag_coord instead of raw diagonal
                         let mut last_seed: FxHashMap<(u32, u8, isize), usize> =
                             FxHashMap::default();
+                        // NCBI BLAST flag mechanism: tracks whether an extension just happened on a diagonal
+                        // Reference: ncbi-blast/c++/include/algo/blast/core/blast_extend.h:57-60
+                        // When flag = true, the next hit on this diagonal that is PAST the extension end
+                        // becomes a new first hit (not a two-hit pair).
+                        let mut diag_extended: FxHashMap<(u32, u8, isize), bool> =
+                            FxHashMap::default();
                         let s_aa = &s_frame.aa_seq;
                         let s_aa_len = s_aa.len();
                         
@@ -306,9 +320,12 @@ pub fn run(args: TblastxArgs) -> Result<()> {
                                 // Use diag_coord instead of raw diagonal for mask_key (NCBI BLAST compatible)
                                 let mask_key = (q_idx, q_f_idx, diag_coord);
 
-                                // Check if this region was already extended
+                                // Check if this region was already extended (mask check)
+                                // NCBI BLAST style diagonal suppression
+                                // Note: NCBI BLAST uses strict < comparison (subject_offset + diag_offset < last_hit)
+                                // This allows a hit exactly AT the extension end to start a new sequence
                                 if let Some(&last_end) = mask.get(&mask_key) {
-                                    if s_pos <= last_end {
+                                    if s_pos < last_end {
                                         if diag_enabled {
                                             diag_inner.base.seeds_masked.fetch_add(1, AtomicOrdering::Relaxed);
                                         }
@@ -324,79 +341,91 @@ pub fn run(args: TblastxArgs) -> Result<()> {
                                     + get_score(c2 as u8, q_aa[q_pos as usize + 1])
                                     + get_score(c3 as u8, q_aa[q_pos as usize + 2]);
 
-                                // NCBI BLAST uses BLAST_WORD_THRESHOLD_TBLASTX = 13 for seed score threshold
-                                // Reference: ncbi-blast/c++/include/algo/blast/core/blast_options.h:115
-                                // The neighborhood word lookup table already includes all words
-                                // that score >= threshold, so we only need a minimal check here.
-                                // Seeds with very low scores (< 9) are unlikely to extend well.
-                                if seed_score < 9 {
-                                    if diag_enabled {
-                                        diag_inner.base.seeds_low_score.fetch_add(1, AtomicOrdering::Relaxed);
-                                    }
-                                    continue;
-                                }
-
-                                // Two-hit requirement: check if there's a previous seed on this diagonal
-                                // within the window distance. NCBI BLAST style: when two hits occur,
-                                // extend from the second hit (R) to the left and require it to reach
-                                // the first hit (L) before doing the right extension.
+                                // NCBI BLAST two-hit/one-hit mechanism
+                                // Reference: ncbi-blast/c++/src/algo/blast/core/aa_ungapped.c:519-606
                                 let k_size = 3usize; // Word size for TBLASTX
-                                let prev_s_pos_opt = last_seed.get(&mask_key).copied();
-                                let two_hit_info = if let Some(prev_s_pos) = prev_s_pos_opt {
-                                    if s_pos.saturating_sub(prev_s_pos) <= two_hit_window {
-                                        Some(prev_s_pos)
-                                    } else {
-                                        None
-                                    }
+                                
+                                // One-hit mode: extend every seed (when window_size = 0)
+                                // Two-hit mode: require two hits within window to trigger extension
+                                let two_hit_info = if one_hit_mode {
+                                    // One-hit mode: bypass two-hit check, extend every seed
+                                    // Still check mask to avoid re-extending same region
+                                    None // Will use one-hit extension below
                                 } else {
-                                    None
-                                };
-
-                                // Update the last seed position for this diagonal
-                                last_seed.insert(mask_key, s_pos);
-
-                                // Skip extension if two-hit not satisfied AND seed score is not high enough
-                                // High seed scores (>= 22) can trigger extension without two-hit
-                                // This matches NCBI BLAST's behavior where significant seeds don't require two-hit
-                                // Reference: blast_options.c - higher quality seeds need less evidence
-                                if two_hit_info.is_none() && seed_score < 22 {
-                                    if diag_enabled {
-                                        diag_inner.base.seeds_two_hit_failed.fetch_add(1, AtomicOrdering::Relaxed);
+                                    // Two-hit mode
+                                    let prev_s_pos_opt = last_seed.get(&mask_key).copied();
+                                    let is_flag_set = *diag_extended.get(&mask_key).unwrap_or(&false);
+                                    
+                                    if is_flag_set {
+                                        // Flag is set: an extension just happened on this diagonal
+                                        // Reference: aa_ungapped.c:519-530
+                                        if let Some(prev_s_pos) = prev_s_pos_opt {
+                                            if s_pos < prev_s_pos {
+                                                // Current hit is before the extension end: skip
+                                                if diag_enabled {
+                                                    diag_inner.base.seeds_low_score.fetch_add(1, AtomicOrdering::Relaxed);
+                                                }
+                                                continue;
+                                            } else {
+                                                // Current hit is past the extension end: start new sequence
+                                                last_seed.insert(mask_key, s_pos);
+                                                diag_extended.insert(mask_key, false);
+                                                if diag_enabled {
+                                                    diag_inner.base.seeds_two_hit_failed.fetch_add(1, AtomicOrdering::Relaxed);
+                                                }
+                                                continue;
+                                            }
+                                        } else {
+                                            last_seed.insert(mask_key, s_pos);
+                                            diag_extended.insert(mask_key, false);
+                                            if diag_enabled {
+                                                diag_inner.base.seeds_two_hit_failed.fetch_add(1, AtomicOrdering::Relaxed);
+                                            }
+                                            continue;
+                                        }
+                                    } else if let Some(prev_s_pos) = prev_s_pos_opt {
+                                        // Flag is not set: normal two-hit logic
+                                        let diff = s_pos.saturating_sub(prev_s_pos);
+                                        
+                                        if diff >= two_hit_window {
+                                            last_seed.insert(mask_key, s_pos);
+                                            if diag_enabled {
+                                                diag_inner.base.seeds_two_hit_failed.fetch_add(1, AtomicOrdering::Relaxed);
+                                            }
+                                            continue;
+                                        } else if diff < k_size {
+                                            if diag_enabled {
+                                                diag_inner.base.seeds_low_score.fetch_add(1, AtomicOrdering::Relaxed);
+                                            }
+                                            continue;
+                                        } else {
+                                            // Valid pair: k_size <= diff < two_hit_window
+                                            Some(prev_s_pos)
+                                        }
+                                    } else {
+                                        // First hit on this diagonal: record and continue
+                                        last_seed.insert(mask_key, s_pos);
+                                        if diag_enabled {
+                                            diag_inner.base.seeds_two_hit_failed.fetch_add(1, AtomicOrdering::Relaxed);
+                                        }
+                                        continue;
                                     }
-                                    continue;
-                                }
+                                };
 
                                 // Count seeds that passed to extension
                                 if diag_enabled {
                                     diag_inner.base.seeds_passed.fetch_add(1, AtomicOrdering::Relaxed);
                                     diag_inner.base.ungapped_extensions.fetch_add(1, AtomicOrdering::Relaxed);
-                                    if two_hit_info.is_some() {
-                                        diag_inner.base.ungapped_two_hit_extensions.fetch_add(1, AtomicOrdering::Relaxed);
-                                    } else {
-                                        // High-scoring one-hit extension
+                                    if one_hit_mode {
                                         diag_inner.base.ungapped_one_hit_extensions.fetch_add(1, AtomicOrdering::Relaxed);
+                                    } else {
+                                        diag_inner.base.ungapped_two_hit_extensions.fetch_add(1, AtomicOrdering::Relaxed);
                                     }
                                 }
-                                // Use NCBI-style two-hit extension when two-hit is satisfied,
-                                // otherwise use one-hit extension for high-scoring seeds
-                                let (qs, qe, ss, se_ungapped, ungapped_score, right_extended, s_last_off) = if let Some(prev_s_pos) = two_hit_info {
-                                    // Two-hit extension: extend from current seed (R) to the left,
-                                    // only extend right if left extension reaches the first hit (L)
-                                    // NCBI BLAST passes s_left_off = last_hit + wordsize (end of first word)
-                                    let s_left_off = prev_s_pos + k_size;  // End of first hit (L + wordsize), NCBI BLAST style
-                                    
-                                    let (qs, qe, ss, se, score, right_ext, s_last) = extend_hit_two_hit(
-                                        q_aa,
-                                        s_aa,
-                                        s_left_off,
-                                        s_pos,                          // Second hit position (R)
-                                        q_pos as usize,
-                                        x_drop_ungapped,                // X-drop threshold
-                                    );
-                                    (qs, qe, ss, se, score, right_ext, s_last)
-                                } else {
-                                    // One-hit extension for high-scoring seeds (seed_score >= 22)
-                                    // Use simple ungapped extension in both directions
+                                
+                                // Extension: one-hit or two-hit mode
+                                let (qs, qe, ss, se_ungapped, ungapped_score, right_extended, s_last_off) = if one_hit_mode {
+                                    // One-hit extension: extend in both directions from current seed
                                     let (qs, qe, ss, se, score, s_last) = extend_hit_ungapped(
                                         q_aa,
                                         s_aa,
@@ -405,8 +434,22 @@ pub fn run(args: TblastxArgs) -> Result<()> {
                                         seed_score,
                                         x_drop_ungapped,
                                     );
-                                    // For one-hit extension, s_last_off is the extension end
                                     (qs, qe, ss, se, score, true, s_last)
+                                } else {
+                                    // Two-hit extension (NCBI BLAST style)
+                                    // Reference: aa_ungapped.c:576-583
+                                    let prev_s_pos = two_hit_info.unwrap();
+                                    let s_left_off = prev_s_pos + k_size;
+                                    
+                                    let (qs, qe, ss, se, score, right_ext, s_last) = extend_hit_two_hit(
+                                        q_aa,
+                                        s_aa,
+                                        s_left_off,
+                                        s_pos,
+                                        q_pos as usize,
+                                        x_drop_ungapped,
+                                    );
+                                    (qs, qe, ss, se, score, right_ext, s_last)
                                 };
 
                                 // NCBI BLAST does not use a fixed MIN_UNGAPPED_SCORE threshold.
@@ -589,8 +632,17 @@ pub fn run(args: TblastxArgs) -> Result<()> {
                                             s_pos
                                         };
                                         mask.insert(mask_key, mask_end);
-                                        // NCBI BLAST: Update last_hit to extension end
-                                        last_seed.insert(mask_key, mask_end);
+                                        // NCBI BLAST: Update last_hit and flag based on right_extended
+                                        // Reference: aa_ungapped.c:596-606
+                                        if right_extended {
+                                            // Set flag to indicate extension happened
+                                            // Next hit must be past mask_end to start new sequence
+                                            diag_extended.insert(mask_key, true);
+                                            last_seed.insert(mask_key, mask_end);
+                                        } else {
+                                            // No right extension: update last_hit to current position
+                                            last_seed.insert(mask_key, s_pos);
+                                        }
                                         if diag_enabled {
                                             diag_inner.base.mask_updates.fetch_add(1, AtomicOrdering::Relaxed);
                                         }
@@ -686,9 +738,17 @@ pub fn run(args: TblastxArgs) -> Result<()> {
                                         s_pos
                                     };
                                     mask.insert(mask_key, mask_end);
-                                    // NCBI BLAST: Update last_hit to extension end for two-hit tracking
-                                    // This ensures subsequent seeds start fresh after the extended region
-                                    last_seed.insert(mask_key, mask_end);
+                                    // NCBI BLAST: Update last_hit and flag based on right_extended
+                                    // Reference: aa_ungapped.c:596-606
+                                    if right_extended {
+                                        // Set flag to indicate extension happened
+                                        // Next hit must be past mask_end to start new sequence
+                                        diag_extended.insert(mask_key, true);
+                                        last_seed.insert(mask_key, mask_end);
+                                    } else {
+                                        // No right extension: update last_hit to current position
+                                        last_seed.insert(mask_key, s_pos);
+                                    }
                                     if diag_enabled {
                                         diag_inner.base.mask_updates.fetch_add(1, AtomicOrdering::Relaxed);
                                         // Track extension length

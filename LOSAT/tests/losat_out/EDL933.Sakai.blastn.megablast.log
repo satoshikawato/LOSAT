@@ -3,6 +3,6 @@ Applying DUST filter (level=20, window=64, linker=1)...
 DUST masked 2737 bases (0.05%) across 1 sequences
 Building lookup (Task: megablast, Word: 28, TwoStage: true, LUTWord: 8, Direct: false, DUST: true)...
 
-real	0m1.654s
-user	0m1.522s
-sys	0m0.010s
+real	0m1.736s
+user	0m1.567s
+sys	0m0.041s

@@ -6,6 +6,7 @@
 use crate::utils::dust::MaskedInterval;
 use crate::utils::matrix::MATRIX;
 use super::constants::MAX_HITS_PER_KMER;
+use super::diagnostics::diagnostics_enabled;
 use super::translation::QueryFrame;
 
 /// Direct lookup table type: Vec<Vec<(query_idx, frame_idx, aa_pos)>>
@@ -123,8 +124,9 @@ pub fn build_direct_lookup(
     queries: &[Vec<QueryFrame>],
     query_masks: &[Vec<MaskedInterval>],
 ) -> DirectLookup {
-    // NCBI BLAST uses threshold 11 for BLOSUM62 (reference: blast_options.c kB62_threshold)
-    build_direct_lookup_with_threshold(queries, query_masks, 11)
+    // NCBI BLAST+ tblastx default: Neighboring words threshold = 13
+    // (visible in pairwise output header: "Neighboring words threshold: 13")
+    build_direct_lookup_with_threshold(queries, query_masks, 13)
 }
 
 /// Build a direct lookup table with configurable threshold
@@ -136,6 +138,20 @@ pub fn build_direct_lookup_with_threshold(
     let table_size = 17576; // 26^3
     let mut lookup = vec![Vec::new(); table_size];
 
+    let diag_enabled = diagnostics_enabled();
+    let mut diag_query_positions_total: usize = 0;
+    let mut diag_query_positions_masked: usize = 0;
+    let mut diag_query_positions_stop: usize = 0;
+    let mut diag_query_positions_used: usize = 0;
+    let mut diag_unique_query_kmers: usize = 0;
+    let mut diag_neighbors_generated: usize = 0;
+    let mut diag_neighbors_max_per_pos: usize = 0;
+    let mut query_kmers_seen: Vec<bool> = if diag_enabled {
+        vec![false; table_size]
+    } else {
+        Vec::new()
+    };
+
     for (q_idx, frames) in queries.iter().enumerate() {
         let masks = &query_masks[q_idx];
         for (f_idx, frame) in frames.iter().enumerate() {
@@ -144,10 +160,16 @@ pub fn build_direct_lookup_with_threshold(
                 continue;
             }
             for i in 0..=(seq.len() - 3) {
+                if diag_enabled {
+                    diag_query_positions_total += 1;
+                }
                 // Check if this amino acid position corresponds to a masked DNA region
                 if !masks.is_empty() {
                     let (dna_start, dna_end) = aa_pos_to_dna_range(i, 3, frame.frame, frame.orig_len);
                     if is_dna_pos_masked(masks, dna_start, dna_end) {
+                        if diag_enabled {
+                            diag_query_positions_masked += 1;
+                        }
                         continue;
                     }
                 }
@@ -159,14 +181,30 @@ pub fn build_direct_lookup_with_threshold(
                 
                 // Skip if contains stop codon
                 if c1 >= 25 || c2 >= 25 || c3 >= 25 {
+                    if diag_enabled {
+                        diag_query_positions_stop += 1;
+                    }
                     continue;
                 }
                 
                 let query_kmer = [c1, c2, c3];
+
+                if diag_enabled {
+                    diag_query_positions_used += 1;
+                    let q_code = (c1 as usize) * 676 + (c2 as usize) * 26 + (c3 as usize);
+                    if !query_kmers_seen[q_code] {
+                        query_kmers_seen[q_code] = true;
+                        diag_unique_query_kmers += 1;
+                    }
+                }
                 
                 // Generate all neighboring words that score >= threshold
                 // and add them to the lookup table
                 let neighbors = generate_neighborhood_words(query_kmer, threshold);
+                if diag_enabled {
+                    diag_neighbors_generated += neighbors.len();
+                    diag_neighbors_max_per_pos = diag_neighbors_max_per_pos.max(neighbors.len());
+                }
                 for (code, _score) in neighbors {
                     lookup[code].push((q_idx as u32, f_idx as u8, i as u32));
                 }
@@ -174,11 +212,108 @@ pub fn build_direct_lookup_with_threshold(
         }
     }
 
+    // Compute and print lookup statistics before masking (diagnostics only)
+    let (mut buckets_nonempty_pre, mut total_entries_pre, mut max_bucket_pre) = (0usize, 0usize, 0usize);
+    let mut top_buckets_pre: Vec<(usize, usize)> = Vec::new(); // (len, code)
+    if diag_enabled {
+        top_buckets_pre.reserve(table_size);
+        for (code, bucket) in lookup.iter().enumerate() {
+            let len = bucket.len();
+            if len > 0 {
+                buckets_nonempty_pre += 1;
+                total_entries_pre += len;
+                if len > max_bucket_pre {
+                    max_bucket_pre = len;
+                }
+            }
+            top_buckets_pre.push((len, code));
+        }
+        top_buckets_pre.sort_by(|a, b| b.0.cmp(&a.0));
+    }
+
     // Mask buckets that have too many hits (prevents excessive extension)
+    let mut buckets_cleared: usize = 0;
+    let mut entries_cleared: usize = 0;
+    let mut max_cleared_bucket: usize = 0;
     for bucket in &mut lookup {
-        if bucket.len() > MAX_HITS_PER_KMER {
+        let len = bucket.len();
+        if len > MAX_HITS_PER_KMER {
+            if diag_enabled {
+                buckets_cleared += 1;
+                entries_cleared += len;
+                max_cleared_bucket = max_cleared_bucket.max(len);
+            }
             bucket.clear();
         }
+    }
+
+    // Compute and print lookup statistics after masking (diagnostics only)
+    if diag_enabled {
+        let (mut buckets_nonempty_post, mut total_entries_post, mut max_bucket_post) = (0usize, 0usize, 0usize);
+        for bucket in &lookup {
+            let len = bucket.len();
+            if len > 0 {
+                buckets_nonempty_post += 1;
+                total_entries_post += len;
+                if len > max_bucket_post {
+                    max_bucket_post = len;
+                }
+            }
+        }
+
+        eprintln!("\n=== TBLASTX Lookup Table Diagnostics ===");
+        eprintln!("Lookup construction:");
+        eprintln!("  Neighborhood threshold:     {}", threshold);
+        eprintln!("  Table size (26^3):          {}", table_size);
+        eprintln!("  Query positions scanned:    {}", diag_query_positions_total);
+        eprintln!("  Query positions masked:     {}", diag_query_positions_masked);
+        eprintln!("  Query positions stop-codon: {}", diag_query_positions_stop);
+        eprintln!("  Query positions used:       {}", diag_query_positions_used);
+        eprintln!("  Unique query k-mers:        {}", diag_unique_query_kmers);
+        if diag_query_positions_used > 0 {
+            eprintln!(
+                "  Neighbors generated:        {} (avg {:.1}, max {})",
+                diag_neighbors_generated,
+                diag_neighbors_generated as f64 / diag_query_positions_used as f64,
+                diag_neighbors_max_per_pos
+            );
+        } else {
+            eprintln!("  Neighbors generated:        {}", diag_neighbors_generated);
+        }
+
+        eprintln!("Bucket statistics (pre-mask):");
+        eprintln!(
+            "  Non-empty buckets:          {} / {}",
+            buckets_nonempty_pre, table_size
+        );
+        eprintln!("  Total entries:              {}", total_entries_pre);
+        eprintln!("  Max bucket size:            {}", max_bucket_pre);
+
+        eprintln!("Frequency masking (MAX_HITS_PER_KMER = {}):", MAX_HITS_PER_KMER);
+        eprintln!("  Buckets cleared:            {}", buckets_cleared);
+        eprintln!("  Entries removed:            {}", entries_cleared);
+        eprintln!("  Max cleared bucket size:    {}", max_cleared_bucket);
+
+        eprintln!("Bucket statistics (post-mask):");
+        eprintln!(
+            "  Non-empty buckets:          {} / {}",
+            buckets_nonempty_post, table_size
+        );
+        eprintln!("  Total entries:              {}", total_entries_post);
+        eprintln!("  Max bucket size:            {}", max_bucket_post);
+
+        // Print a small snapshot of the largest buckets to spot low-complexity dominance
+        eprintln!("Top buckets by size (pre-mask, top 10):");
+        for (len, code) in top_buckets_pre.iter().filter(|(l, _)| *l > 0).take(10) {
+            let aa1 = code / 676;
+            let aa2 = (code / 26) % 26;
+            let aa3 = code % 26;
+            eprintln!(
+                "  code {:5} [{:02},{:02},{:02}]  len {}",
+                code, aa1, aa2, aa3, len
+            );
+        }
+        eprintln!("========================================\n");
     }
     lookup
 }

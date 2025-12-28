@@ -40,9 +40,10 @@ pub struct TblastxArgs {
     #[arg(long, default_value_t = false)]
     pub ncbi_compat: bool,
     
-    /// Two-hit window size for triggering ungapped extension (default: 40, NCBI: 16)
+    /// Two-hit window size for triggering ungapped extension (default: 40)
     /// Smaller values are more strict, larger values are more sensitive
-    #[arg(long)]
-    pub two_hit_window: Option<usize>,
+    /// Use 0 to enable one-hit mode (like NCBI BLAST's -window_size 0)
+    #[arg(long, default_value_t = 40)]
+    pub window_size: usize,
 }
 

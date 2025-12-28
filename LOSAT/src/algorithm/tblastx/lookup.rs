@@ -5,7 +5,6 @@
 
 use crate::utils::dust::MaskedInterval;
 use crate::utils::matrix::MATRIX;
-use super::constants::MAX_HITS_PER_KMER;
 use super::diagnostics::diagnostics_enabled;
 use super::translation::QueryFrame;
 
@@ -231,36 +230,16 @@ pub fn build_direct_lookup_with_threshold(
         top_buckets_pre.sort_by(|a, b| b.0.cmp(&a.0));
     }
 
-    // Mask buckets that have too many hits (prevents excessive extension)
-    let mut buckets_cleared: usize = 0;
-    let mut entries_cleared: usize = 0;
-    let mut max_cleared_bucket: usize = 0;
-    for bucket in &mut lookup {
-        let len = bucket.len();
-        if len > MAX_HITS_PER_KMER {
-            if diag_enabled {
-                buckets_cleared += 1;
-                entries_cleared += len;
-                max_cleared_bucket = max_cleared_bucket.max(len);
-            }
-            bucket.clear();
-        }
-    }
+    // NCBI BLAST does not clear "frequent word" buckets at query lookup construction time.
+    // It stores variable-length hit lists per word (using overflow storage), and later stages
+    // decide how to handle high-hit-count words.
+    //
+    // LOSAT previously cleared buckets larger than MAX_HITS_PER_KMER, which can drastically
+    // reduce sensitivity (especially for low-scoring/off-diagonal hits). We intentionally
+    // keep all buckets to better match NCBI behavior.
 
-    // Compute and print lookup statistics after masking (diagnostics only)
+    // Compute and print lookup statistics (diagnostics only)
     if diag_enabled {
-        let (mut buckets_nonempty_post, mut total_entries_post, mut max_bucket_post) = (0usize, 0usize, 0usize);
-        for bucket in &lookup {
-            let len = bucket.len();
-            if len > 0 {
-                buckets_nonempty_post += 1;
-                total_entries_post += len;
-                if len > max_bucket_post {
-                    max_bucket_post = len;
-                }
-            }
-        }
-
         eprintln!("\n=== TBLASTX Lookup Table Diagnostics ===");
         eprintln!("Lookup construction:");
         eprintln!("  Neighborhood threshold:     {}", threshold);
@@ -288,19 +267,6 @@ pub fn build_direct_lookup_with_threshold(
         );
         eprintln!("  Total entries:              {}", total_entries_pre);
         eprintln!("  Max bucket size:            {}", max_bucket_pre);
-
-        eprintln!("Frequency masking (MAX_HITS_PER_KMER = {}):", MAX_HITS_PER_KMER);
-        eprintln!("  Buckets cleared:            {}", buckets_cleared);
-        eprintln!("  Entries removed:            {}", entries_cleared);
-        eprintln!("  Max cleared bucket size:    {}", max_cleared_bucket);
-
-        eprintln!("Bucket statistics (post-mask):");
-        eprintln!(
-            "  Non-empty buckets:          {} / {}",
-            buckets_nonempty_post, table_size
-        );
-        eprintln!("  Total entries:              {}", total_entries_post);
-        eprintln!("  Max bucket size:            {}", max_bucket_post);
 
         // Print a small snapshot of the largest buckets to spot low-complexity dominance
         eprintln!("Top buckets by size (pre-mask, top 10):");

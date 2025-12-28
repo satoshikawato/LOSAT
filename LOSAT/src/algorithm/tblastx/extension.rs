@@ -61,6 +61,10 @@ pub fn extend_hit_ungapped(
         }
         let q_char = unsafe { *q_seq.get_unchecked(q_pos + i) };
         let s_char = unsafe { *s_seq.get_unchecked(s_pos + i) };
+        // Stop codon terminates extension (NCBI BLAST behavior)
+        if q_char == STOP_CODON || s_char == STOP_CODON {
+            break;
+        }
         sum += get_score(q_char, s_char);
 
         if sum > score {
@@ -90,6 +94,10 @@ pub fn extend_hit_ungapped(
     while i < max_left {
         let q_char = unsafe { *q_seq.get_unchecked(q_left_off - 1 - i) };
         let s_char = unsafe { *s_seq.get_unchecked(s_left_off - 1 - i) };
+        // Stop codon terminates extension (NCBI BLAST behavior)
+        if q_char == STOP_CODON || s_char == STOP_CODON {
+            break;
+        }
 
         current_score += get_score(q_char, s_char);
 
@@ -118,6 +126,10 @@ pub fn extend_hit_ungapped(
     while q_start_r + j < q_limit && s_start_r + j < s_limit {
         let q_char = unsafe { *q_seq.get_unchecked(q_start_r + j) };
         let s_char = unsafe { *s_seq.get_unchecked(s_start_r + j) };
+        // Stop codon terminates extension (NCBI BLAST behavior)
+        if q_char == STOP_CODON || s_char == STOP_CODON {
+            break;
+        }
 
         right_score += get_score(q_char, s_char);
 

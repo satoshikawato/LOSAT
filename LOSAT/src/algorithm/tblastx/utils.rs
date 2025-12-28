@@ -28,6 +28,7 @@ use super::extension::{
     get_score,
 };
 use crate::stats::karlin::{bit_score as calc_bit_score, evalue as calc_evalue, raw_score_from_evalue};
+use std::f64::consts::LN_2;
 use super::lookup::build_direct_lookup_with_threshold;
 use super::translation::{generate_frames, QueryFrame};
 
@@ -141,56 +142,174 @@ pub fn run(args: TblastxArgs) -> Result<()> {
     let diag_enabled_clone = diag_enabled;
     let writer_handle = std::thread::spawn(move || -> Result<()> {
         let mut all_hits: Vec<ExtendedHit> = Vec::new();
+        let mut seq_map: FxHashMap<SequenceKey, SequenceData> = FxHashMap::default();
 
-        while let Ok((hits, _seq_data)) = rx.recv() {
+        while let Ok((hits, seq_data)) = rx.recv() {
             all_hits.extend(hits);
-            // Note: seq_data is not used since we skip HSP chaining for TBLASTX
-            // (NCBI BLAST does not call Blast_LinkHsps for TBLASTX)
+            for (k, v) in seq_data {
+                // Keep the first copy we see (all are identical for a given key)
+                seq_map.entry(k).or_insert(v);
+            }
         }
 
-        // NCBI BLAST does not call Blast_LinkHsps for TBLASTX
-        // Reference: ncbi-blast/c++/src/algo/blast/core/link_hsps.c:1129
-        // ASSERT(program_number != eBlastTypeTblastx);
-        // For TBLASTX, individual HSPs are output directly without chaining
-        // Only apply e-value threshold filtering
         let diag_ref = if diag_enabled_clone { Some(diagnostics_clone.as_ref()) } else { None };
         
         // Record HSPs before filtering
         let hsps_before = all_hits.len();
         if let Some(diag) = diag_ref {
             diag.base.hsps_before_chain.store(hsps_before, AtomicOrdering::Relaxed);
-            diag.base.hsps_after_chain.store(hsps_before, AtomicOrdering::Relaxed);
         }
 
-        // Sort by bit score (highest first) for consistent output order
-        all_hits.sort_by(|a, b| {
-            b.hit.bit_score
-                .partial_cmp(&a.hit.bit_score)
-                .unwrap_or(std::cmp::Ordering::Equal)
-        });
+        // === NCBI-like sum-statistics behavior (simplified) ===
+        // NCBI tblastx enables sum statistics by default (CTBlastxOptionsHandle::SetSumStatisticsMode),
+        // and assigns a *set-level* E-value to each HSP after linking (BLAST_LinkHsps).
+        //
+        // Implementing the full DP linking algorithm is involved; as a first NCBI-anchored step,
+        // we cluster nearby collinear HSPs per (query, subject, frame combo) and assign a set-level
+        // E-value computed from the summed bit scores. This allows low-scoring HSPs to inherit
+        // significance from a strong surrounding chain, matching the key effect seen in NCBI output.
+        //
+        // Link parameters (NCBI defaults for ungapped linking):
+        //   gap_size = 40, overlap_size = 9  (blast_parameters.h)
+        // We use these to build simple greedy clusters.
+        // Allow "big gaps" to approximate NCBI's even-gap linking (which considers both
+        // small- and large-gap chaining). Small-gap default is 40 aa, but large-gap
+        // chaining can connect much farther-apart HSPs.
+        const LINK_GAP_AA: isize = 5000;
+        const LINK_OVERLAP_AA: isize = 9;
+        const LINK_DIAG_DRIFT_AA: isize = 33;
+        const GAP_DECAY_RATE: f64 = 0.5; // BLAST_GAP_DECAY_RATE for ungapped searches
 
-        // NCBI BLAST does not apply HSP culling for TBLASTX by default
-        // (see blast_options.c: "Gapped search is not allowed for tblastx")
-        // Skip domination filter to match NCBI BLAST behavior
+        // Group by query-subject + frame combination (like tblastx contexts)
+        let mut groups: FxHashMap<SequenceKey, Vec<ExtendedHit>> = FxHashMap::default();
+        for h in all_hits.into_iter() {
+            let key: SequenceKey = (
+                h.hit.query_id.clone(),
+                h.hit.subject_id.clone(),
+                h.q_frame,
+                h.s_frame,
+            );
+            groups.entry(key).or_default().push(h);
+        }
+
+        let mut linked_hits: Vec<ExtendedHit> = Vec::new();
+        for (key, mut hsps) in groups {
+            if hsps.is_empty() {
+                continue;
+            }
+            // Need sequence lengths to compute effective search space
+            let Some((q_seq, s_seq)) = seq_map.get(&key) else {
+                // Fallback: if we don't have sequence data, keep individual e-values
+                linked_hits.extend(hsps);
+                continue;
+            };
+            let q_len = q_seq.len();
+            let s_len = s_seq.len();
+            let ss = SearchSpace::with_length_adjustment(q_len, s_len, &params_clone);
+            let searchsp_eff = ss.effective_space.max(1.0);
+
+            // Sort by query AA start (then subject AA start)
+            hsps.sort_by(|a, b| {
+                a.q_aa_start
+                    .cmp(&b.q_aa_start)
+                    .then_with(|| a.s_aa_start.cmp(&b.s_aa_start))
+            });
+
+            // Greedy clustering on collinearity and small gaps/overlaps
+            let mut current: Vec<ExtendedHit> = Vec::new();
+            for h in hsps.into_iter() {
+                if current.is_empty() {
+                    current.push(h);
+                    continue;
+                }
+                let last = current.last().unwrap();
+                let q_gap = h.q_aa_start as isize - last.q_aa_end as isize;
+                let s_gap = h.s_aa_start as isize - last.s_aa_end as isize;
+                let last_diag = last.s_aa_start as isize - last.q_aa_start as isize;
+                let diag = h.s_aa_start as isize - h.q_aa_start as isize;
+                let diag_drift = (diag - last_diag).abs();
+
+                let q_ok = q_gap >= -LINK_OVERLAP_AA && q_gap <= LINK_GAP_AA;
+                let s_ok = s_gap >= -LINK_OVERLAP_AA && s_gap <= LINK_GAP_AA;
+                let diag_ok = diag_drift <= LINK_DIAG_DRIFT_AA;
+
+                if q_ok && s_ok && diag_ok {
+                    current.push(h);
+                } else {
+                    // finalize current cluster
+                    let n = current.len() as i32;
+                    let sum_bits: f64 = current.iter().map(|x| x.hit.bit_score).sum();
+                    // xsum (nats) = ln(2) * sum_bits
+                    let xsum = LN_2 * sum_bits;
+                    // Weight divisor: (1-decay) * decay^(n-1)  (blast_stat.c BLAST_GapDecayDivisor)
+                    let weight_div = (1.0 - GAP_DECAY_RATE) * GAP_DECAY_RATE.powi(n - 1);
+                    let mut set_e = searchsp_eff * (-xsum).exp();
+                    if weight_div > 0.0 {
+                        set_e /= weight_div;
+                    }
+                    for mut x in current.drain(..) {
+                        x.hit.e_value = set_e;
+                        linked_hits.push(x);
+                    }
+                    current.push(h);
+                }
+            }
+            if !current.is_empty() {
+                let n = current.len() as i32;
+                let sum_bits: f64 = current.iter().map(|x| x.hit.bit_score).sum();
+                let xsum = LN_2 * sum_bits;
+                let weight_div = (1.0 - GAP_DECAY_RATE) * GAP_DECAY_RATE.powi(n - 1);
+                let mut set_e = searchsp_eff * (-xsum).exp();
+                if weight_div > 0.0 {
+                    set_e /= weight_div;
+                }
+                for mut x in current.drain(..) {
+                    x.hit.e_value = set_e;
+                    linked_hits.push(x);
+                }
+            }
+        }
+
+        // Record HSPs after "linking" (before threshold)
         if let Some(diag) = diag_ref {
+            diag.base.hsps_after_chain.store(linked_hits.len(), AtomicOrdering::Relaxed);
             diag.base.hsps_culled_dominated.store(0, AtomicOrdering::Relaxed);
         }
 
-        // Convert to Hit and filter by e-value threshold
+        // Filter by E-value threshold (now using set-level e-values)
         let mut output_from_ungapped = 0usize;
         let mut output_from_gapped = 0usize;
-        let filtered_hits: Vec<Hit> = all_hits
-            .into_iter()
-            .filter(|ext_hit| ext_hit.hit.e_value <= evalue_threshold)
-            .map(|ext_hit| {
+        let mut ungapped_evalue_passed = 0usize;
+        let mut ungapped_evalue_failed = 0usize;
+        let mut filtered_hits: Vec<Hit> = Vec::new();
+        filtered_hits.reserve(linked_hits.len());
+        for ext_hit in linked_hits.into_iter() {
+            if ext_hit.hit.e_value <= evalue_threshold {
+                ungapped_evalue_passed += 1;
                 if ext_hit.from_gapped {
                     output_from_gapped += 1;
                 } else {
                     output_from_ungapped += 1;
                 }
-                ext_hit.hit
-            })
-            .collect();
+                filtered_hits.push(ext_hit.hit);
+            } else {
+                ungapped_evalue_failed += 1;
+            }
+        }
+
+        if let Some(diag) = diag_ref {
+            diag.ungapped_evalue_passed
+                .store(ungapped_evalue_passed, AtomicOrdering::Relaxed);
+            diag.ungapped_evalue_failed
+                .store(ungapped_evalue_failed, AtomicOrdering::Relaxed);
+        }
+
+        // Sort by bit score (highest first) for consistent output order
+        filtered_hits.sort_by(|a, b| {
+            b.bit_score
+                .partial_cmp(&a.bit_score)
+                .unwrap_or(std::cmp::Ordering::Equal)
+        });
 
         // Record output source counts and final hits
         if let Some(diag) = diag_ref {
@@ -652,67 +771,66 @@ pub fn run(args: TblastxArgs) -> Result<()> {
                                     let bit_score = calc_bit_score(ungapped_score, &params);
                                     let e_val = calc_evalue(bit_score, &search_space);
 
-                                    if e_val <= args.evalue {
-                                        if diag_enabled {
-                                            diag_inner.ungapped_evalue_passed.fetch_add(1, AtomicOrdering::Relaxed);
+                                    // IMPORTANT (NCBI behavior):
+                                    // At this stage, NCBI BLAST only applies the raw-score cutoff (cutoffs->cutoff_score)
+                                    // and does NOT filter by the user E-value threshold yet. E-values are assigned later
+                                    // (and may be modified by sum-statistics linking), and only then are HSPs reaped by
+                                    // the E-value threshold.
+                                    //
+                                    // Therefore, we always save HSPs that pass cutoff_score here, and defer the E-value
+                                    // threshold filtering to the writer/post-processing stage.
+                                    let len = qe - qs;
+                                    let mut match_count = 0;
+                                    for k in 0..len {
+                                        if q_aa[qs + k] == s_aa[ss + k] {
+                                            match_count += 1;
                                         }
-                                        let len = qe - qs;
-                                        let mut match_count = 0;
-                                        for k in 0..len {
-                                            if q_aa[qs + k] == s_aa[ss + k] {
-                                                match_count += 1;
-                                            }
-                                        }
-                                        let identity = (match_count as f64 / len as f64) * 100.0;
-
-                                        let (q_start_bp, q_end_bp) =
-                                            convert_coords(qs, qe, q_frame.frame, q_frame.orig_len);
-                                        let (s_start_bp, s_end_bp) =
-                                            convert_coords(ss, se_ungapped, s_frame.frame, s_len);
-
-                                        // Store sequence data for HSP chaining
-                                        let seq_key: SequenceKey = (
-                                            query_ids[q_idx as usize].clone(),
-                                            s_id.clone(),
-                                            q_frame.frame,
-                                            s_frame.frame,
-                                        );
-                                        if !seen_pairs.contains(&seq_key) {
-                                            seen_pairs.insert(seq_key.clone());
-                                            local_sequences.push((
-                                                seq_key.clone(),
-                                                (q_aa.clone(), s_aa.clone()),
-                                            ));
-                                        }
-
-                                        local_hits.push(ExtendedHit {
-                                            hit: Hit {
-                                                query_id: query_ids[q_idx as usize].clone(),
-                                                subject_id: s_id.clone(),
-                                                identity,
-                                                length: len,
-                                                mismatch: len - match_count,
-                                                gapopen: 0,
-                                                q_start: q_start_bp,
-                                                q_end: q_end_bp,
-                                                s_start: s_start_bp,
-                                                s_end: s_end_bp,
-                                                e_value: e_val,
-                                                bit_score,
-                                            },
-                                            q_frame: q_frame.frame,
-                                            s_frame: s_frame.frame,
-                                            q_aa_start: qs,
-                                            q_aa_end: qe,
-                                            s_aa_start: ss,
-                                            s_aa_end: se_ungapped,
-                                            q_orig_len: q_frame.orig_len,
-                                            s_orig_len: s_len,
-                                            from_gapped: false,
-                                        });
-                                    } else if diag_enabled {
-                                        diag_inner.ungapped_evalue_failed.fetch_add(1, AtomicOrdering::Relaxed);
                                     }
+                                    let identity = (match_count as f64 / len as f64) * 100.0;
+
+                                    let (q_start_bp, q_end_bp) =
+                                        convert_coords(qs, qe, q_frame.frame, q_frame.orig_len);
+                                    let (s_start_bp, s_end_bp) =
+                                        convert_coords(ss, se_ungapped, s_frame.frame, s_len);
+
+                                    // Store sequence data for sum-statistics HSP linking / post-processing.
+                                    let seq_key: SequenceKey = (
+                                        query_ids[q_idx as usize].clone(),
+                                        s_id.clone(),
+                                        q_frame.frame,
+                                        s_frame.frame,
+                                    );
+                                    if !seen_pairs.contains(&seq_key) {
+                                        seen_pairs.insert(seq_key.clone());
+                                        local_sequences.push((seq_key.clone(), (q_aa.clone(), s_aa.clone())));
+                                    }
+
+                                    local_hits.push(ExtendedHit {
+                                        hit: Hit {
+                                            query_id: query_ids[q_idx as usize].clone(),
+                                            subject_id: s_id.clone(),
+                                            identity,
+                                            length: len,
+                                            mismatch: len - match_count,
+                                            gapopen: 0,
+                                            q_start: q_start_bp,
+                                            q_end: q_end_bp,
+                                            s_start: s_start_bp,
+                                            s_end: s_end_bp,
+                                            // Temporary individual E-value; may be overwritten by sum-statistics linking.
+                                            e_value: e_val,
+                                            bit_score,
+                                        },
+                                        q_frame: q_frame.frame,
+                                        s_frame: s_frame.frame,
+                                        q_aa_start: qs,
+                                        q_aa_end: qe,
+                                        s_aa_start: ss,
+                                        s_aa_end: se_ungapped,
+                                        q_orig_len: q_frame.orig_len,
+                                        s_orig_len: s_len,
+                                        from_gapped: false,
+                                    });
                                     
                                     // NCBI BLAST style diagonal suppression: update mask AFTER E-value check
                                     // Reference: ncbi-blast/c++/src/algo/blast/core/aa_ungapped.c:593-606

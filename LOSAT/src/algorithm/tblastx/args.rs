@@ -51,9 +51,23 @@ pub struct TblastxArgs {
     #[arg(long, allow_hyphen_values = true)]
     pub only_qframe: Option<i8>,
 
+    /// Restrict search to query strand only.
+    /// Values: 1 (plus strand; frames 1,2,3) or -1 (minus strand; frames -1,-2,-3).
+    ///
+    /// NOTE: If `--only-qframe` is provided, it takes precedence.
+    #[arg(long, allow_hyphen_values = true)]
+    pub only_qstrand: Option<i8>,
+
     /// Restrict search to a single subject translation frame (1,2,3,-1,-2,-3).
     /// Useful for debugging slow one-hit (`--window-size 0`) runs.
     #[arg(long, allow_hyphen_values = true)]
     pub only_sframe: Option<i8>,
+
+    /// Restrict search to subject strand only.
+    /// Values: 1 (plus strand; frames 1,2,3) or -1 (minus strand; frames -1,-2,-3).
+    ///
+    /// NOTE: If `--only-sframe` is provided, it takes precedence.
+    #[arg(long, allow_hyphen_values = true)]
+    pub only_sstrand: Option<i8>,
 }
 

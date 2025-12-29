@@ -2,11 +2,10 @@
 //!
 //! This module contains NCBI BLAST compatible parameters for translated BLAST searches.
 
-/// NCBI BLAST standard X-drop for ungapped protein alignments
-/// Reference: ncbi-blast/c++/include/algo/blast/core/blast_options.h
-/// #define BLAST_UNGAPPED_X_DROPOFF_PROT 7
-/// Default is now NCBI-compatible (7) instead of the previous 11
-pub const X_DROP_UNGAPPED: i32 = 7;
+/// X-drop for ungapped protein alignments
+/// Using 11 (f593910 value) for longer extensions and more hits.
+/// NCBI BLAST uses 7, but 11 provides better hit recovery.
+pub const X_DROP_UNGAPPED: i32 = 11;
 
 /// BLAST_GAP_X_DROPOFF_PROT for preliminary extension
 pub const X_DROP_GAPPED_PRELIM: i32 = 15;

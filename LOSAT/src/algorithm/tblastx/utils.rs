@@ -377,76 +377,43 @@ pub fn run(args: TblastxArgs) -> Result<()> {
                                     + get_score(c2 as u8, q_aa[q_pos as usize + 1])
                                     + get_score(c3 as u8, q_aa[q_pos as usize + 2]);
 
-                                // NCBI BLAST two-hit/one-hit mechanism
-                                // Reference: ncbi-blast/c++/src/algo/blast/core/aa_ungapped.c:519-606
-                                let k_size = 3usize; // Word size for TBLASTX
-                                
-                                // One-hit mode: extend every seed (when window_size = 0)
-                                // Two-hit mode: require two hits within window to trigger extension
-                                let two_hit_info = if one_hit_mode {
-                                    // One-hit mode: bypass two-hit check, extend every seed
-                                    // Still check mask to avoid re-extending same region
-                                    None // Will use one-hit extension below
-                                } else {
-                                    // Two-hit mode
-                                    let prev_s_pos_opt = last_seed.get(&mask_key).copied();
-                                    let is_flag_set = *diag_extended.get(&mask_key).unwrap_or(&false);
-                                    
-                                    if is_flag_set {
-                                        // Flag is set: an extension just happened on this diagonal
-                                        // Reference: aa_ungapped.c:519-530
-                                        if let Some(prev_s_pos) = prev_s_pos_opt {
-                                            if s_pos < prev_s_pos {
-                                                // Current hit is before the extension end: skip
-                                                if diag_enabled {
-                                                    diag_inner.base.seeds_low_score.fetch_add(1, AtomicOrdering::Relaxed);
-                                                }
-                                                continue;
-                                            } else {
-                                                // Current hit is past the extension end: start new sequence
-                                                last_seed.insert(mask_key, s_pos);
-                                                diag_extended.insert(mask_key, false);
-                                                if diag_enabled {
-                                                    diag_inner.base.seeds_two_hit_failed.fetch_add(1, AtomicOrdering::Relaxed);
-                                                }
-                                                continue;
-                                            }
-                                        } else {
-                                            last_seed.insert(mask_key, s_pos);
-                                            diag_extended.insert(mask_key, false);
-                                            if diag_enabled {
-                                                diag_inner.base.seeds_two_hit_failed.fetch_add(1, AtomicOrdering::Relaxed);
-                                            }
-                                            continue;
-                                        }
-                                    } else if let Some(prev_s_pos) = prev_s_pos_opt {
-                                        // Flag is not set: normal two-hit logic
-                                        let diff = s_pos.saturating_sub(prev_s_pos);
-                                        
-                                        if diff >= two_hit_window {
-                                            last_seed.insert(mask_key, s_pos);
-                                            if diag_enabled {
-                                                diag_inner.base.seeds_two_hit_failed.fetch_add(1, AtomicOrdering::Relaxed);
-                                            }
-                                            continue;
-                                        } else if diff < k_size {
-                                            if diag_enabled {
-                                                diag_inner.base.seeds_low_score.fetch_add(1, AtomicOrdering::Relaxed);
-                                            }
-                                            continue;
-                                        } else {
-                                            // Valid pair: k_size <= diff < two_hit_window
-                                            Some(prev_s_pos)
-                                        }
-                                    } else {
-                                        // First hit on this diagonal: record and continue
-                                        last_seed.insert(mask_key, s_pos);
-                                        if diag_enabled {
-                                            diag_inner.base.seeds_two_hit_failed.fetch_add(1, AtomicOrdering::Relaxed);
-                                        }
-                                        continue;
+                                // Early filtering: skip very low-scoring seeds (f593910 optimization)
+                                if seed_score < 11 {
+                                    if diag_enabled {
+                                        diag_inner.base.seeds_low_score.fetch_add(1, AtomicOrdering::Relaxed);
                                     }
+                                    continue;
+                                }
+
+                                // f593910-style two-hit mechanism (simpler and faster)
+                                let k_size = 3usize;
+                                let prev_s_pos_opt = last_seed.get(&mask_key).copied();
+                                
+                                let two_hit_info = if one_hit_mode {
+                                    // One-hit mode: bypass two-hit check
+                                    None
+                                } else if let Some(prev_s_pos) = prev_s_pos_opt {
+                                    // Check if within two-hit window
+                                    if s_pos.saturating_sub(prev_s_pos) <= two_hit_window {
+                                        Some(prev_s_pos)
+                                    } else {
+                                        None
+                                    }
+                                } else {
+                                    None
                                 };
+                                
+                                // Update the last seed position for this diagonal
+                                last_seed.insert(mask_key, s_pos);
+                                
+                                // f593910 optimization: require higher seed_score for first hits (no two-hit pair yet)
+                                // High seed scores (>= 30) can trigger extension without two-hit
+                                if two_hit_info.is_none() && seed_score < 30 && !one_hit_mode {
+                                    if diag_enabled {
+                                        diag_inner.base.seeds_two_hit_failed.fetch_add(1, AtomicOrdering::Relaxed);
+                                    }
+                                    continue;
+                                }
 
                                 // Count seeds that passed to extension
                                 if diag_enabled {
@@ -459,9 +426,21 @@ pub fn run(args: TblastxArgs) -> Result<()> {
                                     }
                                 }
                                 
-                                // Extension: one-hit or two-hit mode
-                                let (qs, qe, ss, se_ungapped, ungapped_score, right_extended, s_last_off) = if one_hit_mode {
-                                    // One-hit extension: extend in both directions from current seed
+                                // Extension: f593910 style - use two_hit_info to decide mode
+                                let (qs, qe, ss, se_ungapped, ungapped_score, right_extended, s_last_off) = if let Some(prev_s_pos) = two_hit_info {
+                                    // Two-hit extension: extend from current seed (R) to the left,
+                                    // only extend right if left extension reaches the first hit (L)
+                                    let (qs, qe, ss, se, score, right_ext, s_last) = extend_hit_two_hit(
+                                        q_aa,
+                                        s_aa,
+                                        prev_s_pos + k_size, // End of first hit (L + wordsize)
+                                        s_pos,               // Second hit position (R)
+                                        q_pos as usize,
+                                        x_drop_ungapped,
+                                    );
+                                    (qs, qe, ss, se, score, right_ext, s_last)
+                                } else {
+                                    // One-hit extension for high-scoring seeds (or one_hit_mode)
                                     let (qs, qe, ss, se, score, s_last) = extend_hit_ungapped(
                                         q_aa,
                                         s_aa,
@@ -471,21 +450,6 @@ pub fn run(args: TblastxArgs) -> Result<()> {
                                         x_drop_ungapped,
                                     );
                                     (qs, qe, ss, se, score, true, s_last)
-                                } else {
-                                    // Two-hit extension (NCBI BLAST style)
-                                    // Reference: aa_ungapped.c:576-583
-                                    let prev_s_pos = two_hit_info.unwrap();
-                                    let s_left_off = prev_s_pos + k_size;
-                                    
-                                    let (qs, qe, ss, se, score, right_ext, s_last) = extend_hit_two_hit(
-                                        q_aa,
-                                        s_aa,
-                                        s_left_off,
-                                        s_pos,
-                                        q_pos as usize,
-                                        x_drop_ungapped,
-                                    );
-                                    (qs, qe, ss, se, score, right_ext, s_last)
                                 };
 
                                 // NCBI BLAST does not use a fixed MIN_UNGAPPED_SCORE threshold.
@@ -579,12 +543,10 @@ pub fn run(args: TblastxArgs) -> Result<()> {
                                         // Calculate cutoff_score_max from args.evalue (default 10.0)
                                         let cutoff_score_max_from_evalue = (raw_score_from_evalue(args.evalue, &params, &search_space) as f64 * scale_factor) as i32;
                                         
-                                        // IMPORTANT: cutoff_score_max should allow hits with "evalue < 10 OR bitscore > threshold"
-                                        // where threshold is gap_trigger (22.0 bit score = 46 raw score).
-                                        // This means cutoff_score_max should be gap_trigger to allow hits with bit score >= 22.0
-                                        // to pass even if their evalue >= 10.0.
-                                        // Reference: The user's insight that cutoff_score_max should be gap_trigger
-                                        let cutoff_score_max = gap_trigger;
+                                        // Use MIN_UNGAPPED_SCORE (22) as cutoff to match f593910 behavior
+                                        // This allows more hits through at the extension stage; E-value filtering happens later
+                                        use super::constants::MIN_UNGAPPED_SCORE;
+                                        let cutoff_score_max = MIN_UNGAPPED_SCORE;
                                         
                                         // gap_trigger is already calculated above
                                         

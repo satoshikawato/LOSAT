@@ -4,7 +4,7 @@
 ![License](https://img.shields.io/github/license/satoshikawato/LOSAT)
 ![Language](https://img.shields.io/badge/Language-Rust-red)
 ![Platform](https://img.shields.io/badge/Platform-WebAssembly%20%7C%20CLI-blue)
-
+[![Ask DeepWiki](https://deepwiki.com/badge.svg)](https://deepwiki.com/satoshikawato/LOSAT)
 > 🚧 **Work in Progress:** This project is currently in the **Alpha** stage. Features, APIs, and performance characteristics are subject to change.
 
 **LOSAT** (LOcal Sequence Alignment Tool) aims to deliver a lightweight, high-performance reimplementation of the NCBI BLAST algorithm, written in **Rust** and optimized for **WebAssembly (Wasm)** environments.

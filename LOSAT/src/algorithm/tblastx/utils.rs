@@ -289,7 +289,8 @@ pub fn run(args: TblastxArgs) -> Result<()> {
                         let mut diag_extended: FxHashMap<(u32, u8, isize), bool> =
                             FxHashMap::default();
                         let s_aa = &s_frame.aa_seq;
-                        let s_aa_len = s_aa.len();
+                        // Use aa_len (actual amino acid count without sentinels) for calculations
+                        let s_aa_len = s_frame.aa_len;
                         
                         // Calculate diag_mask for each query frame (NCBI BLAST style)
                         // diag_array_length = smallest power of 2 >= (query_length + window_size)
@@ -298,7 +299,8 @@ pub fn run(args: TblastxArgs) -> Result<()> {
                         let mut diag_mask_cache: FxHashMap<(u32, u8), isize> = FxHashMap::default();
                         for (q_idx, q_frames) in query_frames.iter().enumerate() {
                             for (q_f_idx, q_frame) in q_frames.iter().enumerate() {
-                                let q_aa_len = q_frame.aa_seq.len();
+                                // Use aa_len (actual amino acid count without sentinels) for calculations
+                                let q_aa_len = q_frame.aa_len;
                                 // Calculate diag_array_length as smallest power of 2 >= (q_aa_len + two_hit_window)
                                 let mut diag_array_length = 1usize;
                                 while diag_array_length < (q_aa_len + two_hit_window) {
@@ -317,23 +319,26 @@ pub fn run(args: TblastxArgs) -> Result<()> {
                         // Cache cutoff_score per context (calculated from CUTOFF_E_TBLASTX = 1e-300)
                         // Reference: ncbi-blast/c++/src/algo/blast/core/blast_parameters.c:349-360
                         let mut cutoff_score_cache: FxHashMap<(u32, u8, u8), i32> = FxHashMap::default();
-                        if s_aa.len() < 3 {
+                        // aa_seq layout: [SENTINEL, aa0, aa1, ..., aaN-1, SENTINEL]
+                        // Need at least 5 bytes: sentinel + 3 AAs + sentinel
+                        if s_aa.len() < 5 {
                             return local_hits;
                         }
 
-                        for s_pos in 0..=(s_aa.len() - 3) {
+                        // Scan from raw position 1 to len-4 (skip sentinels)
+                        // s_pos is in RAW coordinates (index into aa_seq with sentinels)
+                        for s_pos in 1..=(s_aa.len() - 4) {
                             let c1 = unsafe { *s_aa.get_unchecked(s_pos) } as usize;
                             let c2 = unsafe { *s_aa.get_unchecked(s_pos + 1) } as usize;
                             let c3 = unsafe { *s_aa.get_unchecked(s_pos + 2) } as usize;
 
-                            // シードに終止コドンが含まれる場合はスキップ
-                            // NCBI BLAST uses 26 amino acid indices (0-24 for amino acids, 25 for stop codon)
-                            // Skip k-mers containing stop codons
-                            if c1 >= 25 || c2 >= 25 || c3 >= 25 {
+                            // Skip k-mers containing stop codons (24) or sentinels (255)
+                            // NCBI matrix order: 0-23 for amino acids, 24 for stop codon (*)
+                            if c1 >= 24 || c2 >= 24 || c3 >= 24 {
                                 continue;
                             }
-                            // 26^3 = 17,576 possible k-mers (matching lookup.rs encoding)
-                            let kmer = c1 * 676 + c2 * 26 + c3;
+                            // 24^3 = 13,824 possible k-mers (matching lookup.rs encoding)
+                            let kmer = c1 * 576 + c2 * 24 + c3;
 
                             let matches = unsafe { lookup.get_unchecked(kmer) };
 
@@ -343,11 +348,15 @@ pub fn run(args: TblastxArgs) -> Result<()> {
                             }
 
                             for &(q_idx, q_f_idx, q_pos) in matches {
+                                // q_pos is LOGICAL position (0-indexed, not counting sentinels)
+                                // s_pos is RAW position (index into aa_seq with sentinels)
+                                // Convert q_pos to raw for consistent diagonal calculation
+                                let q_pos_raw = q_pos as usize + 1;
+                                
                                 // NCBI BLAST style: diag_coord = (query_offset - subject_offset) & diag_mask
                                 // Reference: ncbi-blast/c++/src/algo/blast/core/aa_ungapped.c:351
-                                // Note: NCBI BLAST uses query_offset - subject_offset, but we use q_pos - s_pos
-                                // which is the same diagonal but with opposite sign convention
-                                let diag = q_pos as isize - s_pos as isize;
+                                // Both positions are now in RAW coordinates for consistent diagonal
+                                let diag = q_pos_raw as isize - s_pos as isize;
                                 // Get diag_mask for this query frame
                                 let diag_mask = *diag_mask_cache.get(&(q_idx, q_f_idx))
                                     .unwrap_or(&((1isize << 20) - 1)); // Fallback: 2^20 - 1
@@ -371,11 +380,13 @@ pub fn run(args: TblastxArgs) -> Result<()> {
 
                                 let q_frame = &query_frames[q_idx as usize][q_f_idx as usize];
                                 let q_aa = &q_frame.aa_seq;
-                                let q_aa_len = q_aa.len();
+                                // Use aa_len (actual amino acid count without sentinels) for calculations
+                                let q_aa_len = q_frame.aa_len;
 
-                                let seed_score = get_score(c1 as u8, q_aa[q_pos as usize])
-                                    + get_score(c2 as u8, q_aa[q_pos as usize + 1])
-                                    + get_score(c3 as u8, q_aa[q_pos as usize + 2]);
+                                // Access q_aa using RAW position (q_pos_raw = q_pos + 1)
+                                let seed_score = get_score(c1 as u8, q_aa[q_pos_raw])
+                                    + get_score(c2 as u8, q_aa[q_pos_raw + 1])
+                                    + get_score(c3 as u8, q_aa[q_pos_raw + 2]);
 
                                 // Early filtering: skip very low-scoring seeds (f593910 optimization)
                                 if seed_score < 11 {
@@ -387,28 +398,83 @@ pub fn run(args: TblastxArgs) -> Result<()> {
 
                                 // f593910-style two-hit mechanism (simpler and faster)
                                 let k_size = 3usize;
+                                
+                                // NCBI BLAST flag check: if an extension just happened on this diagonal,
+                                // skip seeds that are before the extension end
+                                // Reference: aa_ungapped.c:354-365, 519-530
+                                if let Some(&extended) = diag_extended.get(&mask_key) {
+                                    if extended {
+                                        // An extension happened on this diagonal
+                                        if let Some(&last_hit) = last_seed.get(&mask_key) {
+                                            if s_pos < last_hit {
+                                                // We've already extended past this hit, skip it
+                                                if diag_enabled {
+                                                    diag_inner.base.seeds_masked.fetch_add(1, AtomicOrdering::Relaxed);
+                                                }
+                                                continue;
+                                            } else {
+                                                // Past the extension end - start a new hit
+                                                // Reset flag and update last_hit
+                                                diag_extended.insert(mask_key, false);
+                                                last_seed.insert(mask_key, s_pos);
+                                            }
+                                        }
+                                    }
+                                }
+                                
                                 let prev_s_pos_opt = last_seed.get(&mask_key).copied();
                                 
-                                let two_hit_info = if one_hit_mode {
+                                // NCBI BLAST style two-hit logic
+                                // Reference: aa_ungapped.c:532-551
+                                let (two_hit_info, should_update_last_seed) = if one_hit_mode {
                                     // One-hit mode: bypass two-hit check
-                                    None
+                                    (None, true)
                                 } else if let Some(prev_s_pos) = prev_s_pos_opt {
-                                    // Check if within two-hit window
-                                    if s_pos.saturating_sub(prev_s_pos) <= two_hit_window {
-                                        Some(prev_s_pos)
+                                    let diff = s_pos.saturating_sub(prev_s_pos);
+                                    
+                                    if diff >= two_hit_window {
+                                        // Beyond the window - start a new hit
+                                        // Reference: aa_ungapped.c:538-543
+                                        if diag_enabled {
+                                            diag_inner.base.seeds_second_hit_too_far.fetch_add(1, AtomicOrdering::Relaxed);
+                                        }
+                                        (None, true)
+                                    } else if diff < k_size {
+                                        // Overlapping hits (diff < wordsize) - give up
+                                        // Reference: aa_ungapped.c:546-551
+                                        // IMPORTANT: Do NOT update last_seed in this case
+                                        if diag_enabled {
+                                            diag_inner.base.seeds_second_hit_overlap.fetch_add(1, AtomicOrdering::Relaxed);
+                                        }
+                                        continue;
                                     } else {
-                                        None
+                                        // Within two-hit window and not overlapping
+                                        // k_size <= diff < two_hit_window
+                                        // Proceed to extension
+                                        if diag_enabled {
+                                            diag_inner.base.seeds_second_hit_window.fetch_add(1, AtomicOrdering::Relaxed);
+                                        }
+                                        (Some(prev_s_pos), true)
                                     }
                                 } else {
-                                    None
+                                    // No previous hit on this diagonal - first hit
+                                    if diag_enabled {
+                                        diag_inner.base.seeds_first_hit.fetch_add(1, AtomicOrdering::Relaxed);
+                                    }
+                                    (None, true)
                                 };
                                 
                                 // Update the last seed position for this diagonal
-                                last_seed.insert(mask_key, s_pos);
+                                // (only if should_update_last_seed is true)
+                                if should_update_last_seed {
+                                    last_seed.insert(mask_key, s_pos);
+                                }
                                 
-                                // f593910 optimization: require higher seed_score for first hits (no two-hit pair yet)
-                                // High seed scores (>= 30) can trigger extension without two-hit
-                                if two_hit_info.is_none() && seed_score < 30 && !one_hit_mode {
+                                // NCBI BLAST two-hit mode: only extend when two-hit condition is met
+                                // Unlike the previous "f593910 optimization", NCBI does NOT extend
+                                // high-scoring seeds without a two-hit pair in two-hit mode.
+                                // Reference: aa_ungapped.c - no one-hit extension in s_BlastAaWordFinder_TwoHit
+                                if two_hit_info.is_none() && !one_hit_mode {
                                     if diag_enabled {
                                         diag_inner.base.seeds_two_hit_failed.fetch_add(1, AtomicOrdering::Relaxed);
                                     }
@@ -427,15 +493,17 @@ pub fn run(args: TblastxArgs) -> Result<()> {
                                 }
                                 
                                 // Extension: f593910 style - use two_hit_info to decide mode
-                                let (qs, qe, ss, se_ungapped, ungapped_score, right_extended, s_last_off) = if let Some(prev_s_pos) = two_hit_info {
+                                // All positions passed to extension functions are RAW coordinates
+                                // Results (qs_raw, qe_raw, ss_raw, se_raw) are also RAW coordinates
+                                let (qs_raw, qe_raw, ss_raw, se_ungapped_raw, ungapped_score, right_extended, s_last_off) = if let Some(prev_s_pos) = two_hit_info {
                                     // Two-hit extension: extend from current seed (R) to the left,
                                     // only extend right if left extension reaches the first hit (L)
                                     let (qs, qe, ss, se, score, right_ext, s_last) = extend_hit_two_hit(
                                         q_aa,
                                         s_aa,
-                                        prev_s_pos + k_size, // End of first hit (L + wordsize)
-                                        s_pos,               // Second hit position (R)
-                                        q_pos as usize,
+                                        prev_s_pos + k_size, // End of first hit (L + wordsize) - RAW
+                                        s_pos,               // Second hit position (R) - RAW
+                                        q_pos_raw,           // Query position - RAW
                                         x_drop_ungapped,
                                     );
                                     (qs, qe, ss, se, score, right_ext, s_last)
@@ -444,13 +512,22 @@ pub fn run(args: TblastxArgs) -> Result<()> {
                                     let (qs, qe, ss, se, score, s_last) = extend_hit_ungapped(
                                         q_aa,
                                         s_aa,
-                                        q_pos as usize,
-                                        s_pos,
+                                        q_pos_raw,           // Query position - RAW
+                                        s_pos,               // Subject position - RAW
                                         seed_score,
                                         x_drop_ungapped,
                                     );
                                     (qs, qe, ss, se, score, true, s_last)
                                 };
+                                
+                                // Convert RAW coordinates to LOGICAL coordinates (subtract 1 for sentinel offset)
+                                // Keep both RAW and LOGICAL for different uses:
+                                // - RAW: mask updates, array access (q_aa, s_aa)
+                                // - LOGICAL: coordinate conversion, length calculation
+                                let qs = qs_raw - 1;
+                                let qe = qe_raw - 1;
+                                let ss = ss_raw - 1;
+                                let se_ungapped = se_ungapped_raw - 1;
 
                                 // NCBI BLAST does not use a fixed MIN_UNGAPPED_SCORE threshold.
                                 // Instead, it uses cutoffs->cutoff_score which is dynamically calculated
@@ -543,10 +620,10 @@ pub fn run(args: TblastxArgs) -> Result<()> {
                                         // Calculate cutoff_score_max from args.evalue (default 10.0)
                                         let cutoff_score_max_from_evalue = (raw_score_from_evalue(args.evalue, &params, &search_space) as f64 * scale_factor) as i32;
                                         
-                                        // Use MIN_UNGAPPED_SCORE (22) as cutoff to match f593910 behavior
-                                        // This allows more hits through at the extension stage; E-value filtering happens later
-                                        use super::constants::MIN_UNGAPPED_SCORE;
-                                        let cutoff_score_max = MIN_UNGAPPED_SCORE;
+                                        // NCBI BLAST uses gap_trigger (22 bit score ≈ 46 raw score) as minimum cutoff
+                                        // This ensures short hits (like 3 aa) with low scores are filtered out
+                                        // Reference: ncbi-blast/c++/src/algo/blast/core/blast_parameters.c:366-373
+                                        let cutoff_score_max = gap_trigger as i32;
                                         
                                         // gap_trigger is already calculated above
                                         
@@ -623,11 +700,11 @@ pub fn run(args: TblastxArgs) -> Result<()> {
                                             }
                                         }
                                         // Update mask even if cutoff_score check fails (NCBI BLAST behavior)
-                                        // Use se_ungapped to properly suppress the entire aligned region
+                                        // Use RAW coordinates for mask (se_ungapped_raw) to properly suppress the aligned region
                                         let mask_end = if right_extended {
-                                            se_ungapped.max(s_last_off.saturating_sub(k_size - 1))
+                                            se_ungapped_raw.max(s_last_off.saturating_sub(k_size - 1))
                                         } else {
-                                            s_pos
+                                            s_pos  // s_pos is already RAW
                                         };
                                         mask.insert(mask_key, mask_end);
                                         // NCBI BLAST: Update last_hit and flag based on right_extended
@@ -660,8 +737,9 @@ pub fn run(args: TblastxArgs) -> Result<()> {
                                     // threshold filtering to the writer/post-processing stage.
                                     let len = qe - qs;
                                     let mut match_count = 0;
+                                    // Use RAW coordinates for array access (qs_raw, ss_raw)
                                     for k in 0..len {
-                                        if q_aa[qs + k] == s_aa[ss + k] {
+                                        if q_aa[qs_raw + k] == s_aa[ss_raw + k] {
                                             match_count += 1;
                                         }
                                     }
@@ -709,19 +787,17 @@ pub fn run(args: TblastxArgs) -> Result<()> {
                                     // the next iteration, ensuring that even low-scoring extensions prevent
                                     // re-extending in already-scanned regions.
                                     //
-                                    // FIX: Use the actual alignment end (se_ungapped) as the primary mask position.
-                                    // The original code used s_last_off - (k_size - 1), which could leave gaps
-                                    // allowing new seeds to start within the already-aligned region.
-                                    // This was causing the self-comparison issue where the entire genome became one hit.
+                                    // FIX: Use the actual alignment end (se_ungapped_raw) as the primary mask position.
+                                    // Use RAW coordinates for mask (consistent with s_pos which is RAW).
                                     let mask_end = if right_extended {
-                                        // Right extension happened: use the actual alignment end position
+                                        // Right extension happened: use the actual alignment end position (RAW)
                                         // to properly suppress the entire aligned region.
                                         // Also consider s_last_off (rightmost scanned position) for safety.
-                                        se_ungapped.max(s_last_off.saturating_sub(k_size - 1))
+                                        se_ungapped_raw.max(s_last_off.saturating_sub(k_size - 1))
                                     } else {
                                         // No right extension: use current seed position (subject_offset)
                                         // Reference: aa_ungapped.c:604-605
-                                        s_pos
+                                        s_pos  // s_pos is already RAW
                                     };
                                     mask.insert(mask_key, mask_end);
                                     // NCBI BLAST: Update last_hit and flag based on right_extended
@@ -775,9 +851,9 @@ pub fn run(args: TblastxArgs) -> Result<()> {
                                 ) = extend_gapped_protein(
                                     q_aa,
                                     s_aa,
-                                    qs,
-                                    ss,
-                                    qe - qs,
+                                    qs_raw,  // Use RAW coordinates for gapped extension
+                                    ss_raw,
+                                    qe_raw - qs_raw,
                                     X_DROP_GAPPED_PRELIM,
                                 );
 

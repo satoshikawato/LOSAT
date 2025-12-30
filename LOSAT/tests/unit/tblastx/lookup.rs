@@ -1,49 +1,50 @@
 //! Unit tests for tblastx/lookup.rs
 
 use LOSAT::algorithm::tblastx::lookup::{encode_aa_kmer, build_direct_lookup};
-use LOSAT::algorithm::tblastx::translation::{generate_frames, QueryFrame};
+use LOSAT::algorithm::tblastx::translation::generate_frames;
 use LOSAT::utils::genetic_code::GeneticCode;
 use LOSAT::utils::dust::MaskedInterval;
 
 #[test]
 fn test_encode_aa_kmer_basic() {
-    // Amino acid indices: A=0, B=1, C=2 (not ASCII characters)
+    // Amino acid indices in NCBI matrix order: A=0, R=1, N=2
+    // 24^3 = 13,824 possible k-mers (excluding stop codon 24)
     let seq = [0u8, 1u8, 2u8];
     let code = encode_aa_kmer(&seq, 0);
-    assert_eq!(code, Some(0 * 676 + 1 * 26 + 2)); // 28
+    assert_eq!(code, Some(0 * 576 + 1 * 24 + 2)); // 26
 }
 
 #[test]
 fn test_encode_aa_kmer_different_positions() {
-    let seq = [0u8, 1u8, 2u8, 3u8, 4u8, 5u8]; // ABCDEF
+    let seq = [0u8, 1u8, 2u8, 3u8, 4u8, 5u8]; // ARNDCQ in NCBI order
     
-    // ABC = 0*676 + 1*26 + 2 = 28
+    // ARN = 0*576 + 1*24 + 2 = 26
     let code1 = encode_aa_kmer(&seq, 0);
-    assert_eq!(code1, Some(28));
+    assert_eq!(code1, Some(26));
     
-    // BCD = 1*676 + 2*26 + 3 = 731
+    // RND = 1*576 + 2*24 + 3 = 627
     let code2 = encode_aa_kmer(&seq, 1);
-    assert_eq!(code2, Some(731));
+    assert_eq!(code2, Some(627));
     
-    // CDE = 2*676 + 3*26 + 4 = 1434
+    // NDC = 2*576 + 3*24 + 4 = 1228
     let code3 = encode_aa_kmer(&seq, 2);
-    assert_eq!(code3, Some(1434));
+    assert_eq!(code3, Some(1228));
 }
 
 #[test]
 fn test_encode_aa_kmer_with_stop_codon() {
-    // Stop codon is 25
-    let seq_with_stop = [0u8, 1u8, 25u8]; // Contains stop codon
+    // Stop codon is 24 in NCBI matrix order
+    let seq_with_stop = [0u8, 1u8, 24u8]; // Contains stop codon
     let code = encode_aa_kmer(&seq_with_stop, 0);
     assert_eq!(code, None);
     
     // Stop codon in middle
-    let seq_with_stop_middle = [0u8, 25u8, 2u8];
+    let seq_with_stop_middle = [0u8, 24u8, 2u8];
     let code = encode_aa_kmer(&seq_with_stop_middle, 0);
     assert_eq!(code, None);
     
     // Stop codon at start
-    let seq_with_stop_start = [25u8, 1u8, 2u8];
+    let seq_with_stop_start = [24u8, 1u8, 2u8];
     let code = encode_aa_kmer(&seq_with_stop_start, 0);
     assert_eq!(code, None);
 }
@@ -81,16 +82,16 @@ fn test_encode_aa_kmer_edge_cases() {
 
 #[test]
 fn test_encode_aa_kmer_max_values() {
-    // Test with maximum valid amino acid values (24 = Z)
-    // Z=24, Y=23, X=22
-    let seq = [24u8, 23u8, 22u8];
+    // Test with maximum valid amino acid values (23 = X, the last valid AA before stop codon)
+    // NCBI matrix order: ARNDCQEGHILKMFPSTWYVBJZX* (0-24)
+    // X=23, Z=22, J=21
+    let seq = [23u8, 22u8, 21u8];
     let code = encode_aa_kmer(&seq, 0);
-    assert_eq!(code, Some(24 * 676 + 23 * 26 + 22)); // 165,894
+    // 23*576 + 22*24 + 21 = 13,248 + 528 + 21 = 13,797
+    assert_eq!(code, Some(23 * 576 + 22 * 24 + 21));
     
-    // Verify it's within table size (26^3 = 17,576)
-    // Actually wait, 24*676 + 23*26 + 22 = 16,224 + 598 + 22 = 16,844
-    // But table size is 26^3 = 17,576, so this is valid
-    assert!(code.unwrap() < 17576);
+    // Verify it's within table size (24^3 = 13,824)
+    assert!(code.unwrap() < 13824);
 }
 
 #[test]
@@ -107,8 +108,8 @@ fn test_build_direct_lookup_basic() {
     
     let lookup = build_direct_lookup(&queries, &query_masks);
     
-    // Verify table size
-    assert_eq!(lookup.len(), 17576); // 26^3
+    // Verify table size (24^3 = 13,824 for amino acids 0-23, excluding stop codon)
+    assert_eq!(lookup.len(), 13824);
     
     // Check that some k-mers were found
     let total_hits: usize = lookup.iter().map(|bucket| bucket.len()).sum();
@@ -229,15 +230,14 @@ fn test_build_direct_lookup_amino_acid_positions() {
     
     let lookup = build_direct_lookup(&queries, &query_masks);
     
-    // Verify amino acid positions are valid
+    // Verify amino acid positions are LOGICAL (0-indexed, not counting sentinels)
     for bucket in &lookup {
         for (_query_idx, frame_idx, aa_pos) in bucket {
             let frame = &queries[0][*frame_idx as usize];
-            // AA position should be within sequence length
-            assert!(*aa_pos < frame.aa_seq.len() as u32);
-            // AA position should allow for 3-mer (pos + 3 <= len)
-            assert!(*aa_pos + 3 <= frame.aa_seq.len() as u32);
+            // AA position should be within actual amino acid count (not including sentinels)
+            assert!((*aa_pos as usize) < frame.aa_len);
+            // AA position should allow for 3-mer (pos + 3 <= aa_len)
+            assert!((*aa_pos as usize) + 3 <= frame.aa_len);
         }
     }
 }
-

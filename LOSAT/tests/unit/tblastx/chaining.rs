@@ -43,8 +43,13 @@ fn create_extended_hit(
     s_orig_len: usize,
     from_gapped: bool,
 ) -> ExtendedHit {
+    // Calculate raw_score from bit_score using BLOSUM62 Karlin params
+    // raw_score = (bit_score * ln(2) + ln(K)) / lambda
+    // For BLOSUM62: lambda=0.267, K=0.041
+    let raw_score = ((hit.bit_score * 0.693 + (-0.041_f64).ln()) / 0.267) as i32;
     ExtendedHit {
         hit,
+        raw_score,
         q_frame,
         s_frame,
         q_aa_start,
@@ -435,4 +440,5 @@ fn test_chain_and_filter_hsps_protein_gapped_vs_ungapped() {
     // Both hits should be kept regardless of gapped/ungapped source
     assert!(result.len() >= 1);
 }
+
 

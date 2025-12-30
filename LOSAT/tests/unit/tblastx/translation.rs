@@ -78,9 +78,11 @@ fn test_generate_frames_amino_acid_sequence() {
     
     // Each frame should have translated amino acid sequence
     for frame in &frames {
-        // Length should be approximately seq_len / 3 (may vary by frame offset)
+        // aa_len should be approximately seq_len / 3 (may vary by frame offset)
+        // Note: aa_seq includes sentinel bytes, so aa_seq.len() = aa_len + 2
         assert!(!frame.aa_seq.is_empty());
-        assert!(frame.aa_seq.len() <= seq.len() / 3);
+        assert!(frame.aa_len <= seq.len() / 3);
+        assert_eq!(frame.aa_seq.len(), frame.aa_len + 2); // +2 for sentinels
     }
 }
 

@@ -1,17 +1,13 @@
 //! NCBI-style sum-statistics (even-gap) HSP linking for TBLASTX.
 //!
-//! This module implements a simplified version of the even-gap linking algorithm 
-//! from NCBI BLAST's link_hsps.c. For performance, we use a diagonal-based approach
-//! that links nearby HSPs within the same context (query_id, subject_id, q_frame, s_frame).
-//!
-//! The key insight is that multiple HSPs in a chain have a combined E-value
-//! that is better than any individual HSP's E-value.
+//! This module implements the even-gap linking algorithm from NCBI BLAST's link_hsps.c.
+//! HSPs within the same context (query_id, subject_id, q_frame, s_frame) are linked.
 //!
 //! Reference: ncbi-blast/c++/src/algo/blast/core/link_hsps.c
 
 use rustc_hash::FxHashMap;
 use crate::stats::sum_statistics::{
-    gap_decay_divisor, large_gap_sum_e, normalize_score,
+    gap_decay_divisor, small_gap_sum_e, large_gap_sum_e, normalize_score,
     defaults::{GAP_DECAY_RATE_UNGAPPED, GAP_SIZE, OVERLAP_SIZE},
 };
 use crate::stats::KarlinParams;
@@ -22,14 +18,10 @@ use super::chaining::ExtendedHit;
 /// Key for grouping HSPs: (query_id, subject_id, q_frame, s_frame)
 type ContextKey = (String, String, i8, i8);
 
-/// Apply NCBI BLAST-style sum-statistics even-gap linking.
-///
-/// This implements a simplified greedy version of the algorithm from link_hsps.c:
-/// 1. Group HSPs by context (query_id, subject_id, q_frame, s_frame)
-/// 2. For each context, sort HSPs by query position
-/// 3. Use diagonal-based indexing to efficiently find chainable HSPs
-/// 4. Calculate set-level E-values using large-gap sum statistics
-/// 5. Assign set-level E-values to all HSPs in each chain
+/// NCBI BLAST default window size = gap_size + overlap_size + 1 = 40 + 9 + 1 = 50
+const WINDOW_SIZE: i32 = GAP_SIZE + OVERLAP_SIZE + 1;
+
+/// Apply NCBI BLAST-style sum-statistics even-gap linking (per-frame).
 pub fn apply_sum_stats_even_gap_linking(
     hits: Vec<ExtendedHit>,
     params: &KarlinParams,
@@ -38,7 +30,7 @@ pub fn apply_sum_stats_even_gap_linking(
         return hits;
     }
 
-    // Group HSPs by context
+    // Group HSPs by context (query_id, subject_id, q_frame, s_frame)
     let mut groups: FxHashMap<ContextKey, Vec<usize>> = FxHashMap::default();
     for (idx, hit) in hits.iter().enumerate() {
         let key = (
@@ -50,107 +42,95 @@ pub fn apply_sum_stats_even_gap_linking(
         groups.entry(key).or_default().push(idx);
     }
 
-    // Process each context group
     let mut result_hits = hits;
     let gap_decay_rate = GAP_DECAY_RATE_UNGAPPED;
-    // Use a larger window size for more aggressive linking
-    // NCBI default: GAP_SIZE=40, OVERLAP_SIZE=9 -> window_size=50
-    // We use a larger value to capture more chains
-    let window_size = 100i64;
+    let window_size = WINDOW_SIZE as i64;
     
     for (_key, indices) in groups {
-        if indices.is_empty() {
-            continue;
+        if indices.len() < 2 {
+            continue; // No linking needed for single HSP
         }
 
-        // Get context-specific search space from the first hit
         let first_hit = &result_hits[indices[0]];
         let q_aa_len = first_hit.q_orig_len / 3;
         let s_aa_len = first_hit.s_orig_len / 3;
         
-        // Calculate effective search space
         let search_space = SearchSpace::with_length_adjustment(q_aa_len, s_aa_len, params);
         let eff_searchsp = search_space.effective_space as i64;
 
-        // Sort indices by query amino acid position
+        // Sort by query position
         let mut sorted_indices = indices.clone();
-        sorted_indices.sort_by_key(|&idx| result_hits[idx].q_aa_start);
-
-        // Diagonal-based linking: use diagonal (q_pos - s_pos) as key
-        // HSPs on similar diagonals are candidates for linking
-        // Key: diagonal band (diagonal / window_size), Value: (chain_id, last_q_end, last_s_end)
-        let mut diag_chains: FxHashMap<i64, Vec<(usize, usize, usize)>> = FxHashMap::default();
-        let mut chains: Vec<Vec<usize>> = Vec::new();
-        
-        for &idx in &sorted_indices {
+        sorted_indices.sort_by_key(|&idx| {
             let hit = &result_hits[idx];
-            let diag = hit.q_aa_start as i64 - hit.s_aa_start as i64;
-            let diag_band = diag / window_size;
+            (hit.q_aa_start, hit.s_aa_start)
+        });
+
+        // Greedy chaining
+        let num_hsps = sorted_indices.len();
+        let mut chain_id: Vec<usize> = (0..num_hsps).collect();
+        let mut chain_score: Vec<i32> = sorted_indices.iter()
+            .map(|&idx| result_hits[idx].raw_score)
+            .collect();
+        let mut chain_xsum: Vec<f64> = sorted_indices.iter()
+            .map(|&idx| normalize_score(result_hits[idx].raw_score, params.lambda, params.k.ln()))
+            .collect();
+        let mut chain_len: Vec<usize> = vec![1; num_hsps];
+
+        for i in 1..num_hsps {
+            let hit_i = &result_hits[sorted_indices[i]];
+            let i_q_start = hit_i.q_aa_start as i64;
+            let i_s_start = hit_i.s_aa_start as i64;
             
-            // Check nearby diagonal bands for chainable HSPs
-            let mut best_chain: Option<usize> = None;
-            let mut best_chain_last_q = 0usize;
-            let mut best_chain_last_s = 0usize;
-            
-            for d in (diag_band - 1)..=(diag_band + 1) {
-                if let Some(chain_entries) = diag_chains.get(&d) {
-                    for &(chain_id, last_q_end, last_s_end) in chain_entries.iter().rev() {
-                        // Check if this HSP can be linked to the chain
-                        let q_gap = hit.q_aa_start as i64 - last_q_end as i64;
-                        let s_gap = hit.s_aa_start as i64 - last_s_end as i64;
-                        
-                        // Both gaps must be positive (no overlap) and within window
-                        if q_gap >= 0 && q_gap <= window_size 
-                           && s_gap >= 0 && s_gap <= window_size {
-                            // Found a valid chain to extend
-                            if best_chain.is_none() || last_q_end > best_chain_last_q {
-                                best_chain = Some(chain_id);
-                                best_chain_last_q = last_q_end;
-                                best_chain_last_s = last_s_end;
-                            }
-                        }
+            let mut best_j: Option<usize> = None;
+            let mut best_score = 0i32;
+
+            let start_j = if i > 50 { i - 50 } else { 0 };
+            for j in (start_j..i).rev() {
+                let hit_j = &result_hits[sorted_indices[j]];
+                let j_q_end = hit_j.q_aa_end as i64;
+                let j_s_end = hit_j.s_aa_end as i64;
+
+                let q_gap = i_q_start - j_q_end;
+                let s_gap = i_s_start - j_s_end;
+
+                if q_gap >= 0 && q_gap <= window_size 
+                   && s_gap >= 0 && s_gap <= window_size {
+                    if chain_score[j] > best_score {
+                        best_j = Some(j);
+                        best_score = chain_score[j];
                     }
                 }
             }
-            
-            let chain_id = if let Some(cid) = best_chain {
-                // Add to existing chain
-                chains[cid].push(idx);
-                cid
-            } else {
-                // Start a new chain
-                let cid = chains.len();
-                chains.push(vec![idx]);
-                cid
-            };
-            
-            // Update diagonal index
-            let entry = diag_chains.entry(diag_band).or_default();
-            // Remove old entries for this chain and add new one
-            entry.retain(|(cid, _, _)| *cid != chain_id);
-            entry.push((chain_id, hit.q_aa_end, hit.s_aa_end));
+
+            if let Some(j) = best_j {
+                let score_i = result_hits[sorted_indices[i]].raw_score;
+                let xsum_i = normalize_score(score_i, params.lambda, params.k.ln());
+                
+                chain_id[i] = chain_id[j];
+                chain_score[i] = chain_score[j] + score_i;
+                chain_xsum[i] = chain_xsum[j] + xsum_i;
+                chain_len[i] = chain_len[j] + 1;
+            }
         }
 
-        // Calculate set-level E-values for each chain
-        for chain in chains {
-            let num_hsps = chain.len();
-            
-            // Calculate cumulative normalized score (xsum)
-            let mut xsum = 0.0;
-            for &idx in &chain {
-                let hit = &result_hits[idx];
-                xsum += normalize_score(hit.raw_score, params.lambda, params.k.ln());
-            }
-            
-            // Calculate set-level E-value
-            let set_evalue = if num_hsps == 1 {
-                // Single HSP: use simple E-value formula
+        // Find final HSP for each chain
+        let mut chain_final: FxHashMap<usize, usize> = FxHashMap::default();
+        for i in 0..num_hsps {
+            chain_final.insert(chain_id[i], i);
+        }
+
+        // Assign E-values
+        for (&cid, &final_idx) in &chain_final {
+            let num_in_chain = chain_len[final_idx];
+            let xsum = chain_xsum[final_idx];
+            let divisor = gap_decay_divisor(gap_decay_rate, num_in_chain);
+
+            let e_small = if num_in_chain == 1 {
                 search_space.effective_space * (-xsum).exp()
             } else {
-                // Multiple HSPs: use large-gap sum statistics
-                let divisor = gap_decay_divisor(gap_decay_rate, num_hsps);
-                large_gap_sum_e(
-                    num_hsps as i16,
+                small_gap_sum_e(
+                    WINDOW_SIZE,
+                    num_in_chain as i16,
                     xsum,
                     q_aa_len as i32,
                     s_aa_len as i32,
@@ -158,10 +138,26 @@ pub fn apply_sum_stats_even_gap_linking(
                     divisor,
                 )
             };
-            
-            // Assign set-level E-value to all HSPs in the chain
-            for &idx in &chain {
-                result_hits[idx].hit.e_value = set_evalue;
+
+            let e_large = if num_in_chain == 1 {
+                search_space.effective_space * (-xsum).exp()
+            } else {
+                large_gap_sum_e(
+                    num_in_chain as i16,
+                    xsum,
+                    q_aa_len as i32,
+                    s_aa_len as i32,
+                    eff_searchsp,
+                    divisor,
+                )
+            };
+
+            let set_evalue = e_small.min(e_large);
+
+            for i in 0..num_hsps {
+                if chain_id[i] == cid {
+                    result_hits[sorted_indices[i]].hit.e_value = set_evalue;
+                }
             }
         }
     }

@@ -1,37 +1,53 @@
 //! Lookup table construction for TBLASTX
 //!
 //! This module handles building the k-mer lookup table for amino acid sequences.
-//! Implements NCBI BLAST's "neighborhood word" approach for finding similar seeds.
+//! Uses NCBI BLAST compatible neighborhood word expansion.
+//! Amino acids are encoded in NCBI matrix order: ARNDCQEGHILKMFPSTWYVBJZX* (0-24)
+//!
+//! IMPORTANT: QueryFrame.aa_seq contains sentinel bytes at positions 0 and len-1.
+//! When scanning for k-mers, we skip sentinel positions and report logical
+//! amino acid positions (0-indexed from the first actual amino acid).
 
 use crate::utils::dust::MaskedInterval;
 use crate::utils::matrix::MATRIX;
+use super::constants::STOP_CODON;
 use super::diagnostics::diagnostics_enabled;
 use super::translation::QueryFrame;
 
 /// Direct lookup table type: Vec<Vec<(query_idx, frame_idx, aa_pos)>>
+/// aa_pos is the LOGICAL position (0-indexed, not counting sentinels)
 pub type DirectLookup = Vec<Vec<(u32, u8, u32)>>;
 
-/// Encode a 3-amino-acid k-mer to an index (0-17575 = 26^3 - 1)
-/// Returns None if the k-mer contains a stop codon or invalid amino acid
+// Use MAX_HITS_PER_KMER from constants
+use super::constants::MAX_HITS_PER_KMER;
+
+/// Table size for 3-mer amino acid k-mers excluding stop codon
+/// NCBI uses 24 amino acids (0-23) for k-mers, excluding stop codon (24)
+/// 24^3 = 13824 possible k-mers
+const TABLE_SIZE: usize = 24 * 24 * 24;
+
+/// Encode a 3-amino-acid k-mer to an index (0-13823 = 24^3 - 1)
+/// Returns None if the k-mer contains a stop codon (24), sentinel (255), or invalid amino acid
+/// Amino acids must be in NCBI matrix order (0-24)
+#[inline]
 pub fn encode_aa_kmer(seq: &[u8], pos: usize) -> Option<usize> {
     if pos + 3 > seq.len() {
         return None;
     }
-    let c1 = unsafe { *seq.get_unchecked(pos) } as usize;
-    let c2 = unsafe { *seq.get_unchecked(pos + 1) } as usize;
-    let c3 = unsafe { *seq.get_unchecked(pos + 2) } as usize;
+    let c1 = unsafe { *seq.get_unchecked(pos) };
+    let c2 = unsafe { *seq.get_unchecked(pos + 1) };
+    let c3 = unsafe { *seq.get_unchecked(pos + 2) };
 
-    // 終止コドン(25)を含むk-merはシードにしない
-    if c1 >= 25 || c2 >= 25 || c3 >= 25 {
+    // Stop codon (24) or sentinel (255) makes k-mer invalid
+    if c1 >= STOP_CODON || c2 >= STOP_CODON || c3 >= STOP_CODON {
         return None;
     }
-    Some(c1 * 676 + c2 * 26 + c3)
+    Some((c1 as usize) * 576 + (c2 as usize) * 24 + (c3 as usize))
 }
 
 /// Check if a DNA position range overlaps with any masked interval
 fn is_dna_pos_masked(intervals: &[MaskedInterval], start: usize, end: usize) -> bool {
     for interval in intervals {
-        // Check if [start, end) overlaps with [interval.start, interval.end)
         if start < interval.end && end > interval.start {
             return true;
         }
@@ -39,17 +55,16 @@ fn is_dna_pos_masked(intervals: &[MaskedInterval], start: usize, end: usize) -> 
     false
 }
 
-/// Convert amino acid position to DNA position range for a given frame
+/// Convert LOGICAL amino acid position to DNA position range for a given frame.
+/// aa_pos is 0-indexed (not counting sentinels).
 fn aa_pos_to_dna_range(aa_pos: usize, kmer_len: usize, frame: i8, orig_len: usize) -> (usize, usize) {
     let aa_end = aa_pos + kmer_len;
     if frame > 0 {
-        // Forward frames: 1, 2, 3
         let offset = (frame - 1) as usize;
         let dna_start = aa_pos * 3 + offset;
         let dna_end = aa_end * 3 + offset;
         (dna_start, dna_end.min(orig_len))
     } else {
-        // Reverse frames: -1, -2, -3
         let offset = (-frame - 1) as usize;
         let dna_end = orig_len - (aa_pos * 3 + offset);
         let dna_start = orig_len - (aa_end * 3 + offset);
@@ -57,230 +72,195 @@ fn aa_pos_to_dna_range(aa_pos: usize, kmer_len: usize, frame: i8, orig_len: usiz
     }
 }
 
-/// Generate all neighboring k-mer codes that score >= threshold against a query k-mer
-/// 
-/// NCBI BLAST's neighborhood word approach: for each query word, find ALL words
-/// in the alphabet that score >= threshold when aligned against the query word.
-/// This allows finding similar (not just exact) matches.
+/// Build a direct lookup table for amino acid k-mers (exact match only)
 ///
-/// # Arguments
-/// * `query_kmer` - The query k-mer (3 amino acid indices)
-/// * `threshold` - Minimum score threshold (NCBI BLAST BLOSUM62 default = 11)
+/// Fast approach: each query k-mer is stored at its exact code position.
+/// No neighborhood expansion - seed extension handles similarity.
 ///
-/// # Returns
-/// Vector of (neighbor_code, score) pairs for all neighbors scoring >= threshold
-fn generate_neighborhood_words(query_kmer: [u8; 3], threshold: i32) -> Vec<(usize, i32)> {
-    let mut neighbors = Vec::new();
-    
-    // Iterate through all possible 3-mers (26^3 = 17576 combinations)
-    // For efficiency, we prune early based on partial scores
-    for aa1 in 0u8..25 {
-        // Matrix indexing: MATRIX[a * 27 + b]
-        let score1 = MATRIX[(query_kmer[0] as usize) * 27 + (aa1 as usize)] as i32;
-        // Early termination: if first position alone can't reach threshold
-        // with best possible scores for positions 2 and 3 (max ~11 each)
-        if score1 + 22 < threshold {
-            continue;
-        }
-        
-        for aa2 in 0u8..25 {
-            let score2 = MATRIX[(query_kmer[1] as usize) * 27 + (aa2 as usize)] as i32;
-            let partial_score = score1 + score2;
-            // Early termination: if first two positions can't reach threshold
-            // with best possible score for position 3
-            if partial_score + 11 < threshold {
-                continue;
-            }
-            
-            for aa3 in 0u8..25 {
-                let score3 = MATRIX[(query_kmer[2] as usize) * 27 + (aa3 as usize)] as i32;
-                let total_score = partial_score + score3;
-                
-                if total_score >= threshold {
-                    let code = (aa1 as usize) * 676 + (aa2 as usize) * 26 + (aa3 as usize);
-                    neighbors.push((code, total_score));
-                }
-            }
-        }
-    }
-    
-    neighbors
-}
-
-/// Build a direct lookup table for amino acid k-mers with neighborhood words
-///
-/// Implements NCBI BLAST's neighborhood word approach: for each query k-mer,
-/// add ALL neighboring words that score >= threshold to the lookup table.
-/// This significantly increases sensitivity compared to exact-match only.
-///
-/// # Arguments
-/// * `queries` - Vector of query frames for each query sequence
-/// * `query_masks` - Vector of masked intervals for each query sequence
-///
-/// # Returns
-/// Direct lookup table mapping k-mer codes to (query_idx, frame_idx, aa_pos) tuples
+/// NOTE: aa_seq contains sentinels at positions 0 and len-1.
+/// We scan from position 1 to len-4 (inclusive) and report logical positions (raw_pos - 1).
 pub fn build_direct_lookup(
     queries: &[Vec<QueryFrame>],
     query_masks: &[Vec<MaskedInterval>],
 ) -> DirectLookup {
-    // NCBI BLAST+ tblastx default: Neighboring words threshold = 13
-    // (visible in pairwise output header: "Neighboring words threshold: 13")
-    build_direct_lookup_with_threshold(queries, query_masks, 13)
-}
-
-/// Build a direct lookup table with configurable threshold
-pub fn build_direct_lookup_with_threshold(
-    queries: &[Vec<QueryFrame>],
-    query_masks: &[Vec<MaskedInterval>],
-    threshold: i32,
-) -> DirectLookup {
-    let table_size = 17576; // 26^3
-    let mut lookup = vec![Vec::new(); table_size];
+    let mut lookup: DirectLookup = vec![Vec::new(); TABLE_SIZE];
 
     let diag_enabled = diagnostics_enabled();
-    let mut diag_query_positions_total: usize = 0;
-    let mut diag_query_positions_masked: usize = 0;
-    let mut diag_query_positions_stop: usize = 0;
-    let mut diag_query_positions_used: usize = 0;
-    let mut diag_unique_query_kmers: usize = 0;
-    let mut diag_neighbors_generated: usize = 0;
-    let mut diag_neighbors_max_per_pos: usize = 0;
-    let mut query_kmers_seen: Vec<bool> = if diag_enabled {
-        vec![false; table_size]
-    } else {
-        Vec::new()
-    };
+    let mut diag_positions_used = 0usize;
 
     for (q_idx, frames) in queries.iter().enumerate() {
         let masks = &query_masks[q_idx];
         for (f_idx, frame) in frames.iter().enumerate() {
             let seq = &frame.aa_seq;
-            if seq.len() < 3 {
+            // aa_seq layout: [SENTINEL, aa0, aa1, ..., aaN-1, SENTINEL]
+            // Valid k-mer positions in raw array: 1 to len-4 (so k-mer doesn't touch end sentinel)
+            // For a sequence of N actual amino acids, aa_seq.len() = N + 2
+            // Valid raw positions: 1, 2, ..., N-2 (i.e., 1 to len-4)
+            if seq.len() < 5 {
+                // Need at least: SENTINEL + 3 AAs + SENTINEL = 5
                 continue;
             }
-            for i in 0..=(seq.len() - 3) {
-                if diag_enabled {
-                    diag_query_positions_total += 1;
-                }
+            // Scan from raw position 1 to len-4 (inclusive)
+            for raw_pos in 1..=(seq.len() - 4) {
+                // Logical AA position (0-indexed, not counting sentinels)
+                let logical_pos = raw_pos - 1;
+                
                 // Check if this amino acid position corresponds to a masked DNA region
                 if !masks.is_empty() {
-                    let (dna_start, dna_end) = aa_pos_to_dna_range(i, 3, frame.frame, frame.orig_len);
+                    let (dna_start, dna_end) = aa_pos_to_dna_range(logical_pos, 3, frame.frame, frame.orig_len);
                     if is_dna_pos_masked(masks, dna_start, dna_end) {
-                        if diag_enabled {
-                            diag_query_positions_masked += 1;
-                        }
+                        continue;
+                    }
+                }
+                if let Some(code) = encode_aa_kmer(seq, raw_pos) {
+                    // Store logical position (not raw position)
+                    lookup[code].push((q_idx as u32, f_idx as u8, logical_pos as u32));
+                    if diag_enabled {
+                        diag_positions_used += 1;
+                    }
+                }
+            }
+        }
+    }
+
+    // Mask buckets that have too many hits (low-complexity filter)
+    let mut buckets_cleared = 0usize;
+    for bucket in &mut lookup {
+        if bucket.len() > MAX_HITS_PER_KMER {
+            bucket.clear();
+            buckets_cleared += 1;
+        }
+    }
+
+    if diag_enabled {
+        let buckets_nonempty = lookup.iter().filter(|b| !b.is_empty()).count();
+        let total_entries: usize = lookup.iter().map(|b| b.len()).sum();
+        eprintln!("\n=== TBLASTX Lookup Table ===");
+        eprintln!("Query positions indexed: {}", diag_positions_used);
+        eprintln!("Buckets cleared (>{} hits): {}", MAX_HITS_PER_KMER, buckets_cleared);
+        eprintln!("Non-empty buckets: {} / {}", buckets_nonempty, TABLE_SIZE);
+        eprintln!("Total entries: {}", total_entries);
+        eprintln!("============================\n");
+    }
+
+    lookup
+}
+
+/// Calculate score between two 3-mers using BLOSUM62 matrix
+/// Amino acids must be in NCBI matrix order (0-23, excluding stop codon)
+#[inline]
+fn kmer_score(kmer1: &[u8; 3], kmer2: &[u8; 3]) -> i32 {
+    let mut score = 0i32;
+    for i in 0..3 {
+        let idx = (kmer1[i] as usize) * 25 + (kmer2[i] as usize);
+        score += MATRIX[idx] as i32;
+    }
+    score
+}
+
+/// Decode a k-mer index back to amino acid codes (NCBI matrix order 0-23)
+#[inline]
+fn decode_kmer(idx: usize) -> [u8; 3] {
+    let c1 = (idx / 576) as u8;
+    let c2 = ((idx % 576) / 24) as u8;
+    let c3 = (idx % 24) as u8;
+    [c1, c2, c3]
+}
+
+/// Build lookup table with NCBI BLAST compatible neighborhood word expansion
+///
+/// For each query k-mer, we add entries for ALL subject k-mers that would
+/// score >= threshold when aligned to that query k-mer.
+/// This is the reverse of what NeighborhoodIndex does - we need to find
+/// which subject k-mers hit each query k-mer.
+///
+/// NOTE: aa_seq contains sentinels at positions 0 and len-1.
+/// We scan from position 1 to len-4 (inclusive) and report logical positions (raw_pos - 1).
+pub fn build_direct_lookup_with_threshold(
+    queries: &[Vec<QueryFrame>],
+    query_masks: &[Vec<MaskedInterval>],
+    threshold: i32,
+) -> DirectLookup {
+    let mut lookup: DirectLookup = vec![Vec::new(); TABLE_SIZE];
+
+    let diag_enabled = diagnostics_enabled();
+    let mut diag_positions_used = 0usize;
+    let mut diag_neighbor_entries = 0usize;
+
+    for (q_idx, frames) in queries.iter().enumerate() {
+        let masks = &query_masks[q_idx];
+        for (f_idx, frame) in frames.iter().enumerate() {
+            let seq = &frame.aa_seq;
+            // aa_seq layout: [SENTINEL, aa0, aa1, ..., aaN-1, SENTINEL]
+            if seq.len() < 5 {
+                continue;
+            }
+            // Scan from raw position 1 to len-4 (inclusive)
+            for raw_pos in 1..=(seq.len() - 4) {
+                let logical_pos = raw_pos - 1;
+                
+                // Check if this amino acid position corresponds to a masked DNA region
+                if !masks.is_empty() {
+                    let (dna_start, dna_end) = aa_pos_to_dna_range(logical_pos, 3, frame.frame, frame.orig_len);
+                    if is_dna_pos_masked(masks, dna_start, dna_end) {
                         continue;
                     }
                 }
                 
-                // Get the query k-mer
-                let c1 = unsafe { *seq.get_unchecked(i) };
-                let c2 = unsafe { *seq.get_unchecked(i + 1) };
-                let c3 = unsafe { *seq.get_unchecked(i + 2) };
-                
-                // Skip if contains stop codon
-                if c1 >= 25 || c2 >= 25 || c3 >= 25 {
+                // Get the query k-mer (from raw position in aa_seq)
+                if let Some(_code) = encode_aa_kmer(seq, raw_pos) {
+                    let query_kmer = [
+                        unsafe { *seq.get_unchecked(raw_pos) },
+                        unsafe { *seq.get_unchecked(raw_pos + 1) },
+                        unsafe { *seq.get_unchecked(raw_pos + 2) },
+                    ];
+                    
                     if diag_enabled {
-                        diag_query_positions_stop += 1;
+                        diag_positions_used += 1;
                     }
-                    continue;
-                }
-                
-                let query_kmer = [c1, c2, c3];
-
-                if diag_enabled {
-                    diag_query_positions_used += 1;
-                    let q_code = (c1 as usize) * 676 + (c2 as usize) * 26 + (c3 as usize);
-                    if !query_kmers_seen[q_code] {
-                        query_kmers_seen[q_code] = true;
-                        diag_unique_query_kmers += 1;
+                    
+                    // For each possible subject k-mer (0 to 24^3-1), check if it scores >= threshold
+                    // against this query k-mer, and if so, add this query position
+                    // to that subject k-mer's bucket
+                    for subject_code in 0..TABLE_SIZE {
+                        let subject_kmer = decode_kmer(subject_code);
+                        
+                        let score = kmer_score(&query_kmer, &subject_kmer);
+                        if score >= threshold {
+                            // Store logical position
+                            lookup[subject_code].push((q_idx as u32, f_idx as u8, logical_pos as u32));
+                            if diag_enabled {
+                                diag_neighbor_entries += 1;
+                            }
+                        }
                     }
-                }
-                
-                // Generate all neighboring words that score >= threshold
-                // and add them to the lookup table
-                let neighbors = generate_neighborhood_words(query_kmer, threshold);
-                if diag_enabled {
-                    diag_neighbors_generated += neighbors.len();
-                    diag_neighbors_max_per_pos = diag_neighbors_max_per_pos.max(neighbors.len());
-                }
-                for (code, _score) in neighbors {
-                    lookup[code].push((q_idx as u32, f_idx as u8, i as u32));
                 }
             }
         }
     }
 
-    // Compute and print lookup statistics before masking (diagnostics only)
-    let (mut buckets_nonempty_pre, mut total_entries_pre, mut max_bucket_pre) = (0usize, 0usize, 0usize);
-    let mut top_buckets_pre: Vec<(usize, usize)> = Vec::new(); // (len, code)
-    if diag_enabled {
-        top_buckets_pre.reserve(table_size);
-        for (code, bucket) in lookup.iter().enumerate() {
-            let len = bucket.len();
-            if len > 0 {
-                buckets_nonempty_pre += 1;
-                total_entries_pre += len;
-                if len > max_bucket_pre {
-                    max_bucket_pre = len;
-                }
-            }
-            top_buckets_pre.push((len, code));
+    // Mask buckets that have too many hits (low-complexity filter)
+    let mut buckets_cleared = 0usize;
+    for bucket in &mut lookup {
+        if bucket.len() > MAX_HITS_PER_KMER {
+            bucket.clear();
+            buckets_cleared += 1;
         }
-        top_buckets_pre.sort_by(|a, b| b.0.cmp(&a.0));
     }
 
-    // NCBI BLAST does not clear "frequent word" buckets at query lookup construction time.
-    // It stores variable-length hit lists per word (using overflow storage), and later stages
-    // decide how to handle high-hit-count words.
-    //
-    // LOSAT previously cleared buckets larger than MAX_HITS_PER_KMER, which can drastically
-    // reduce sensitivity (especially for low-scoring/off-diagonal hits). We intentionally
-    // keep all buckets to better match NCBI behavior.
-
-    // Compute and print lookup statistics (diagnostics only)
     if diag_enabled {
-        eprintln!("\n=== TBLASTX Lookup Table Diagnostics ===");
-        eprintln!("Lookup construction:");
-        eprintln!("  Neighborhood threshold:     {}", threshold);
-        eprintln!("  Table size (26^3):          {}", table_size);
-        eprintln!("  Query positions scanned:    {}", diag_query_positions_total);
-        eprintln!("  Query positions masked:     {}", diag_query_positions_masked);
-        eprintln!("  Query positions stop-codon: {}", diag_query_positions_stop);
-        eprintln!("  Query positions used:       {}", diag_query_positions_used);
-        eprintln!("  Unique query k-mers:        {}", diag_unique_query_kmers);
-        if diag_query_positions_used > 0 {
-            eprintln!(
-                "  Neighbors generated:        {} (avg {:.1}, max {})",
-                diag_neighbors_generated,
-                diag_neighbors_generated as f64 / diag_query_positions_used as f64,
-                diag_neighbors_max_per_pos
-            );
-        } else {
-            eprintln!("  Neighbors generated:        {}", diag_neighbors_generated);
-        }
-
-        eprintln!("Bucket statistics (pre-mask):");
-        eprintln!(
-            "  Non-empty buckets:          {} / {}",
-            buckets_nonempty_pre, table_size
-        );
-        eprintln!("  Total entries:              {}", total_entries_pre);
-        eprintln!("  Max bucket size:            {}", max_bucket_pre);
-
-        // Print a small snapshot of the largest buckets to spot low-complexity dominance
-        eprintln!("Top buckets by size (pre-mask, top 10):");
-        for (len, code) in top_buckets_pre.iter().filter(|(l, _)| *l > 0).take(10) {
-            let aa1 = code / 676;
-            let aa2 = (code / 26) % 26;
-            let aa3 = code % 26;
-            eprintln!(
-                "  code {:5} [{:02},{:02},{:02}]  len {}",
-                code, aa1, aa2, aa3, len
-            );
-        }
-        eprintln!("========================================\n");
+        let buckets_nonempty = lookup.iter().filter(|b| !b.is_empty()).count();
+        let total_entries: usize = lookup.iter().map(|b| b.len()).sum();
+        eprintln!("\n=== TBLASTX Lookup Table (Neighborhood) ===");
+        eprintln!("Query positions indexed: {}", diag_positions_used);
+        eprintln!("Neighbor entries added: {}", diag_neighbor_entries);
+        eprintln!("Avg neighbors per position: {:.1}", diag_neighbor_entries as f64 / diag_positions_used.max(1) as f64);
+        eprintln!("Buckets cleared (>{} hits): {}", MAX_HITS_PER_KMER, buckets_cleared);
+        eprintln!("Non-empty buckets: {} / {}", buckets_nonempty, TABLE_SIZE);
+        eprintln!("Total entries: {}", total_entries);
+        eprintln!("===========================================\n");
     }
+
     lookup
 }
 
@@ -290,15 +270,40 @@ mod tests {
 
     #[test]
     fn test_encode_aa_kmer() {
-        // Amino acid indices: A=0, B=1, C=2 (not ASCII characters)
+        // Test with valid k-mer (A=0, R=1, N=2 in NCBI order)
         let seq = [0u8, 1u8, 2u8];
         let code = encode_aa_kmer(&seq, 0);
-        assert_eq!(code, Some(0 * 676 + 1 * 26 + 2)); // 28
+        assert_eq!(code, Some(0 * 576 + 1 * 24 + 2));
         
-        // Test with stop codon
-        let seq_with_stop = [0u8, 1u8, 25u8]; // Contains stop codon
+        // Test with stop codon (24) - should return None
+        let seq_with_stop = [0u8, 1u8, STOP_CODON];
         let code = encode_aa_kmer(&seq_with_stop, 0);
         assert_eq!(code, None);
+        
+        // Test with X (23) - should be valid (X is a valid amino acid in NCBI)
+        let seq_with_x = [0u8, 1u8, 23u8];
+        let code = encode_aa_kmer(&seq_with_x, 0);
+        assert_eq!(code, Some(0 * 576 + 1 * 24 + 23));
+        
+        // Test with sentinel (255) - should return None
+        let seq_with_sentinel = [0u8, 255u8, 2u8];
+        let code = encode_aa_kmer(&seq_with_sentinel, 0);
+        assert_eq!(code, None);
+    }
+    
+    #[test]
+    fn test_decode_kmer() {
+        // Test round-trip encoding/decoding
+        for c1 in 0..24u8 {
+            for c2 in 0..24u8 {
+                for c3 in 0..24u8 {
+                    let seq = [c1, c2, c3];
+                    if let Some(code) = encode_aa_kmer(&seq, 0) {
+                        let decoded = decode_kmer(code);
+                        assert_eq!(decoded, seq, "Failed for {:?}", seq);
+                    }
+                }
+            }
+        }
     }
 }
-

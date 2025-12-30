@@ -7,13 +7,26 @@ use crate::stats::KarlinParams;
 use crate::algorithm::common::evalue::calculate_evalue_alignment_length;
 use crate::utils::matrix::MATRIX;
 use super::constants::{
-    GAP_EXTEND, GAP_OPEN, STOP_CODON, X_DROP_GAPPED_FINAL, X_DROP_GAPPED_PRELIM,
+    GAP_EXTEND, GAP_OPEN, SENTINEL_BYTE, SENTINEL_PENALTY, STOP_CODON, X_DROP_GAPPED_FINAL, X_DROP_GAPPED_PRELIM,
 };
 
-/// Get the substitution matrix score for two amino acids
+/// Get the substitution matrix score for two amino acids.
+/// Amino acids must be in NCBI matrix order (0-24): ARNDCQEGHILKMFPSTWYVBJZX*
+/// 
+/// If either character is a sentinel byte (SENTINEL_BYTE = 255), returns
+/// SENTINEL_PENALTY to trigger X-drop termination at sequence boundaries.
+/// 
+/// Reference: ncbi-blast/c++/src/algo/blast/core/blast_encoding.c:120
+///   const Uint1 kProtSentinel = NULLB;
+/// Reference: ncbi-blast/c++/src/util/tables/sm_blosum62.c:95
+///   defscore = -4 (for characters not in the matrix)
 #[inline(always)]
 pub fn get_score(a: u8, b: u8) -> i32 {
-    unsafe { *MATRIX.get_unchecked((a as usize) * 27 + (b as usize)) as i32 }
+    // Check for sentinel bytes (NCBI BLAST style sequence boundary markers)
+    if a == SENTINEL_BYTE || b == SENTINEL_BYTE {
+        return SENTINEL_PENALTY;
+    }
+    unsafe { *MATRIX.get_unchecked((a as usize) * 25 + (b as usize)) as i32 }
 }
 
 /// Alignment statistics propagated alongside DP scores for traceback-based calculation
@@ -61,10 +74,8 @@ pub fn extend_hit_ungapped(
         }
         let q_char = unsafe { *q_seq.get_unchecked(q_pos + i) };
         let s_char = unsafe { *s_seq.get_unchecked(s_pos + i) };
-        // Stop codon terminates extension (NCBI BLAST behavior)
-        if q_char == STOP_CODON || s_char == STOP_CODON {
-            break;
-        }
+        // NCBI BLAST does NOT break on stop codons in word scanning
+        // Stop codons have very negative scores in BLOSUM62
         sum += get_score(q_char, s_char);
 
         if sum > score {
@@ -84,6 +95,8 @@ pub fn extend_hit_ungapped(
     let s_right_off = q_right_off + (s_pos - q_pos);
 
     // Step 2: Left extension from the best position
+    // NCBI BLAST does NOT break on stop codons in s_BlastAaExtendLeft
+    // Reference: aa_ungapped.c:886-921
     let mut current_score = score;
     let mut max_score = score;
     let mut left_disp = 0usize;
@@ -94,11 +107,9 @@ pub fn extend_hit_ungapped(
     while i < max_left {
         let q_char = unsafe { *q_seq.get_unchecked(q_left_off - 1 - i) };
         let s_char = unsafe { *s_seq.get_unchecked(s_left_off - 1 - i) };
-        // Stop codon terminates extension (NCBI BLAST behavior)
-        if q_char == STOP_CODON || s_char == STOP_CODON {
-            break;
-        }
 
+        // Stop codons are handled by the matrix (*-* = -4, AA-* = -4)
+        // X-drop will naturally terminate the extension
         current_score += get_score(q_char, s_char);
 
         if current_score > max_score {
@@ -126,11 +137,8 @@ pub fn extend_hit_ungapped(
     while q_start_r + j < q_limit && s_start_r + j < s_limit {
         let q_char = unsafe { *q_seq.get_unchecked(q_start_r + j) };
         let s_char = unsafe { *s_seq.get_unchecked(s_start_r + j) };
-        // Stop codon terminates extension (NCBI BLAST behavior)
-        if q_char == STOP_CODON || s_char == STOP_CODON {
-            break;
-        }
 
+        // Stop codons are handled by the matrix (*-* = -4, AA-* = -4)
         right_score += get_score(q_char, s_char);
 
         if right_score > max_score_total {
@@ -212,8 +220,9 @@ pub fn extend_hit_two_hit(
     let s_right_off = s_right_off + right_d;
 
     // Extend to the left from R, trying to reach L
-    // IMPORTANT: Stop at stop codons (NCBI BLAST behavior)
-    // Reference: ncbi-blast/c++/src/algo/blast/core/aa_ungapped.c
+    // Note: NCBI BLAST does NOT explicitly check for stop codons in s_BlastAaExtendLeft.
+    // Stop codons have very negative scores in BLOSUM62 (-4 to -5), so X-drop handles them.
+    // Reference: ncbi-blast/c++/src/algo/blast/core/aa_ungapped.c:886-921
     let mut current_score = 0i32;
     let mut max_score = 0i32;
     let mut left_disp = 0usize;
@@ -225,11 +234,8 @@ pub fn extend_hit_two_hit(
         let q_char = unsafe { *q_seq.get_unchecked(q_right_off - 1 - i) };
         let s_char = unsafe { *s_seq.get_unchecked(s_right_off - 1 - i) };
 
-        // Stop codon terminates extension (NCBI BLAST behavior)
-        if q_char == STOP_CODON || s_char == STOP_CODON {
-            break;
-        }
-
+        // Stop codons are handled by the matrix (*-* = -4, AA-* = -4)
+        // X-drop will naturally terminate the extension
         current_score += get_score(q_char, s_char);
 
         if current_score > max_score {
@@ -256,6 +262,11 @@ pub fn extend_hit_two_hit(
     let mut s_last_off = s_right_off; // Default to current position if no right extension
 
     if reached_first_hit {
+        // NCBI BLAST: right_extend is set to TRUE when we enter this block,
+        // regardless of how many characters are actually extended.
+        // Reference: aa_ungapped.c:1140
+        right_extended = true;
+        
         let mut right_score = max_score;
         let q_limit = q_seq.len();
         let s_limit = s_seq.len();
@@ -265,11 +276,7 @@ pub fn extend_hit_two_hit(
             let q_char = unsafe { *q_seq.get_unchecked(q_right_off + j) };
             let s_char = unsafe { *s_seq.get_unchecked(s_right_off + j) };
 
-            // Stop codon terminates extension (NCBI BLAST behavior)
-            if q_char == STOP_CODON || s_char == STOP_CODON {
-                break;
-            }
-
+            // Stop codons are handled by the matrix (*-* = -4, AA-* = -4)
             right_score += get_score(q_char, s_char);
 
             if right_score > max_score_total {
@@ -282,7 +289,6 @@ pub fn extend_hit_two_hit(
             }
             j += 1;
         }
-        right_extended = right_disp > 0;
         // s_last_off is the rightmost subject position scanned (NCBI BLAST style)
         s_last_off = s_right_off + j;
     }

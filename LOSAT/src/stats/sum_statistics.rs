@@ -27,17 +27,14 @@ pub fn ln_factorial(n: f64) -> f64 {
     if n <= 1.0 {
         return 0.0;
     }
-    if n < 10.0 {
-        // Direct calculation for small n
-        let mut result = 0.0;
-        let mut i = 2.0;
-        while i <= n {
-            result += i.ln();
-            i += 1.0;
-        }
-        return result;
+
+    // In our usage, n is almost always an integer (e.g. number of HSPs),
+    // so prefer an exact log-factorial for stability and NCBI-compatibility.
+    if (n.fract()).abs() < f64::EPSILON && n <= (i32::MAX as f64) {
+        return ln_factorial_int(n as i32);
     }
-    // Stirling's approximation for large n
+
+    // Fallback: Stirling's approximation for non-integers/large values.
     n * n.ln() - n + 0.5 * (2.0 * std::f64::consts::PI * n).ln()
 }
 
@@ -51,7 +48,8 @@ pub fn ln_gamma_int(n: i32) -> f64 {
     if n == 1 || n == 2 {
         return 0.0;
     }
-    ln_factorial((n - 1) as f64)
+    // Exact for integers: ln(Gamma(n)) = ln((n-1)!)
+    ln_factorial_int(n - 1)
 }
 
 /// Convert P-value to E-value.
@@ -59,12 +57,13 @@ pub fn ln_gamma_int(n: i32) -> f64 {
 /// E = -ln(1 - P)
 pub fn p_to_e(p: f64) -> f64 {
     if p < 0.0 || p > 1.0 {
-        return f64::MIN;
+        return i32::MIN as f64;
     }
     if p == 1.0 {
-        return f64::MAX;
+        return i32::MAX as f64;
     }
-    -(1.0 - p).ln()
+    // NCBI: -BLAST_Log1p(-p)
+    -(-p).ln_1p()
 }
 
 /// Convert E-value to P-value.
@@ -74,7 +73,25 @@ pub fn e_to_p(e: f64) -> f64 {
     if e < 0.0 {
         return 0.0;
     }
-    1.0 - (-e).exp()
+    // NCBI: -BLAST_Expm1(-e)
+    -(-e).exp_m1()
+}
+
+/// Exact ln(n!) for integers (n >= 0).
+///
+/// This is used heavily in sum-statistics and we want it to be stable and
+/// as close as possible to NCBI's `BLAST_LnFactorial` when called with integer n.
+fn ln_factorial_int(n: i32) -> f64 {
+    if n <= 1 {
+        return 0.0;
+    }
+    // Direct sum is exact enough for the small/medium n encountered here.
+    // (n is number of HSPs in a linked set.)
+    let mut sum = 0.0;
+    for i in 2..=n {
+        sum += (i as f64).ln();
+    }
+    sum
 }
 
 /// Lookup tables for s_BlastSumP interpolation (from NCBI BLAST).
@@ -104,10 +121,18 @@ const TAB4: &[f64] = &[
 ///
 /// This implements the numerical integration from NCBI BLAST's s_BlastSumPCalc.
 fn blast_sum_p_calc(r: i32, s: f64) -> f64 {
+    // Faithful port of NCBI BLAST's s_BlastSumPCalc + BLAST_RombergIntegrate.
+    // Reference:
+    // - ncbi-blast/c++/src/algo/blast/core/blast_stat.c:s_BlastSumPCalc
+    // - ncbi-blast/c++/src/algo/blast/core/ncbi_math.c:BLAST_RombergIntegrate
+
+    const SUMP_EPSILON: f64 = 0.002;
+
     if r == 1 {
         if s > 8.0 {
             return (-s).exp();
         }
+        // -BLAST_Expm1(-exp(-s))
         return -(-(-s).exp()).exp_m1();
     }
     if r < 1 {
@@ -115,53 +140,101 @@ fn blast_sum_p_calc(r: i32, s: f64) -> f64 {
     }
 
     // Early return for very negative scores
-    if r < 8 && s <= -2.3 * (r as f64) {
-        return 1.0;
-    } else if r < 15 && s <= -2.5 * (r as f64) {
-        return 1.0;
-    } else if r < 27 && s <= -3.0 * (r as f64) {
-        return 1.0;
-    } else if r < 51 && s <= -3.4 * (r as f64) {
-        return 1.0;
-    } else if r < 101 && s <= -4.0 * (r as f64) {
-        return 1.0;
+    let rf = r as f64;
+    if r < 8 {
+        if s <= -2.3 * rf {
+            return 1.0;
+        }
+    } else if r < 15 {
+        if s <= -2.5 * rf {
+            return 1.0;
+        }
+    } else if r < 27 {
+        if s <= -3.0 * rf {
+            return 1.0;
+        }
+    } else if r < 51 {
+        if s <= -3.4 * rf {
+            return 1.0;
+        }
+    } else if r < 101 {
+        if s <= -4.0 * rf {
+            return 1.0;
+        }
     }
 
-    let stddev = (r as f64).sqrt();
+    let stddev = rf.sqrt();
     let stddev4 = 4.0 * stddev;
     let r1 = r - 1;
 
     if r > 100 {
-        let est_mean = -(r as f64) * (r1 as f64);
+        // Calculate lower bound on the mean using inequality log(r) <= r
+        let est_mean = -(rf) * (r1 as f64);
         if s <= est_mean - stddev4 {
             return 1.0;
         }
     }
 
-    let logr = (r as f64).ln();
-    let mean = (r as f64) * (1.0 - logr) - 0.5;
+    // mean is close to the mode and is readily calculated
+    let logr = rf.ln();
+    let mean = rf * (1.0 - logr) - 0.5;
     if s <= mean - stddev4 {
         return 1.0;
     }
 
-    // For very high scores, use asymptotic approximation
-    if s >= mean + stddev4 {
-        let a = ln_gamma_int(r + 1);
-        let result = (r as f64) * ((r1 as f64) * s.ln() - s - a - a).exp();
-        return result.min(1.0);
-    }
+    // Choose integration upper bound t and minimum iterations itmin
+    let (t, mut itmin) = if s >= mean {
+        (s + 6.0 * stddev, 1_i32)
+    } else {
+        (mean + 6.0 * stddev, 2_i32)
+    };
 
-    // Use numerical integration (simplified Romberg)
-    // This is a simplified version - for full accuracy, implement full Romberg integration
-    let a = ln_gamma_int(r + 1);
-    let result = (r as f64) * ((r1 as f64) * s.abs().ln() - s.abs() - a - a).exp();
-    result.min(1.0).max(0.0)
+    // adj1 = (r-2)*log(r) - lnGamma(r-1) - lnGamma(r)
+    let adj1 = (r - 2) as f64 * logr - ln_gamma_int(r1) - ln_gamma_int(r);
+    let num_hsps_minus_2 = r - 2;
+
+    // Callback for outer integral
+    let mut outer_integral = |x: f64, adj2: f64, sdvir: f64| -> f64 {
+        let y = (x - sdvir).exp();
+        if !y.is_finite() {
+            return 0.0;
+        }
+        if num_hsps_minus_2 == 0 {
+            return (adj2 - y).exp();
+        }
+        if x == 0.0 {
+            return 0.0;
+        }
+        ((num_hsps_minus_2 as f64) * x.ln() + adj2 - y).exp()
+    };
+
+    // Callback for inner integral (calls outer via Romberg)
+    let mut inner_integral = |s_var: f64| -> f64 {
+        let adj2 = adj1 - s_var;
+        let sdvir = s_var / rf;
+        let mx = if s_var > 0.0 { sdvir + 3.0 } else { 3.0 };
+        let mut outer = |x: f64| outer_integral(x, adj2, sdvir);
+        romberg_integrate(&mut outer, 0.0, mx, SUMP_EPSILON, 0, 1)
+    };
+
+    // Integrate inner integral from s..t, with potential retries for small s<mean
+    loop {
+        let d = romberg_integrate(&mut inner_integral, s, t, SUMP_EPSILON, 0, itmin);
+        if !d.is_finite() {
+            return d;
+        }
+        if !(s < mean && d < 0.4 && itmin < 4) {
+            return d.min(1.0);
+        }
+        itmin += 1;
+    }
 }
 
 /// Estimate the Sum P-value by calculation or interpolation.
 ///
 /// Approx. 2-1/2 digits accuracy minimum throughout the range of r, s.
 fn blast_sum_p(r: i32, s: f64) -> f64 {
+    // Faithful port of NCBI BLAST's s_BlastSumP.
     if r == 1 {
         return -(-(-s).exp()).exp_m1();
     }
@@ -179,22 +252,22 @@ fn blast_sum_p(r: i32, s: f64) -> f64 {
         }
 
         if s > -2.0 * rf {
-            // Interpolate from tables
-            let a_val = s + s + 4.0 * rf;
-            let i = a_val as i32;
-            let a = a_val - (i as f64);
+            // Interpolate from tables (NCBI indexing)
+            let mut a = s + s + (4.0 * rf);
+            let mut i = a as i32;
+            a -= i as f64;
             let r2 = (r - 2) as usize;
 
-            let table = match r2 {
-                0 => TAB2,
-                1 => TAB3,
-                2 => TAB4,
+            let (table, tab_size) = match r2 {
+                0 => (TAB2, (TAB2.len() as i32) - 1),
+                1 => (TAB3, (TAB3.len() as i32) - 1),
+                2 => (TAB4, (TAB4.len() as i32) - 1),
                 _ => return blast_sum_p_calc(r, s),
             };
 
-            let tab_size = table.len() as i32 - 1;
-            let idx = (tab_size - i) as usize;
-
+            i = tab_size - i;
+            let idx = i as usize;
+            // NCBI assumes idx in-range for s > -2*r; clamp defensively.
             if idx > 0 && idx < table.len() {
                 return a * table[idx - 1] + (1.0 - a) * table[idx];
             }
@@ -203,6 +276,79 @@ fn blast_sum_p(r: i32, s: f64) -> f64 {
     }
 
     blast_sum_p_calc(r, s)
+}
+
+/// Romberg numerical integrator (NCBI BLAST compatible).
+///
+/// Reference: `ncbi_math.c:BLAST_RombergIntegrate`.
+fn romberg_integrate<F>(f: &mut F, p: f64, q: f64, eps: f64, epsit: i32, itmin: i32) -> f64
+where
+    F: FnMut(f64) -> f64,
+{
+    const MAX_DIAGS: usize = 20;
+
+    // itmin = min. no. of iterations to perform
+    let mut itmin = itmin.max(1);
+    itmin = itmin.min((MAX_DIAGS - 1) as i32);
+
+    // epsit = min. no. of consecutive iterations that must satisfy epsilon
+    let mut epsit = epsit.max(1);
+    epsit = epsit.min(3);
+
+    let epsck = itmin - epsit;
+
+    let mut romb = [0.0_f64; MAX_DIAGS];
+    let mut npts: i32 = 1;
+    let mut h = q - p;
+
+    let x0 = f(p);
+    if !x0.is_finite() {
+        return x0;
+    }
+    let y0 = f(q);
+    if !y0.is_finite() {
+        return y0;
+    }
+    romb[0] = 0.5 * h * (x0 + y0); // trapezoidal rule
+
+    let mut epsit_cnt: i32 = 0;
+    for i in 1..MAX_DIAGS {
+        let mut sum = 0.0;
+        // sum of ordinates for x = p+0.5*h, p+1.5*h, ..., q-0.5*h
+        let mut x = p + 0.5 * h;
+        for _k in 0..npts {
+            let y = f(x);
+            if !y.is_finite() {
+                return y;
+            }
+            sum += y;
+            x += h;
+        }
+        romb[i] = 0.5 * (romb[i - 1] + h * sum); // new trapezoidal estimate
+
+        // Update Romberg array with new column
+        let mut n: f64 = 4.0;
+        for j in (0..i).rev() {
+            romb[j] = (n * romb[j + 1] - romb[j]) / (n - 1.0);
+            n *= 4.0;
+        }
+
+        if (i as i32) > epsck {
+            if (romb[1] - romb[0]).abs() > eps * romb[0].abs() {
+                epsit_cnt = 0;
+            } else {
+                epsit_cnt += 1;
+                if (i as i32) >= itmin && epsit_cnt >= epsit {
+                    return romb[0];
+                }
+            }
+        }
+
+        npts *= 2;
+        h *= 0.5;
+    }
+
+    f64::INFINITY
 }
 
 /// Calculate E-value for alignments with "small" gaps.
@@ -236,9 +382,9 @@ pub fn small_gap_sum_e(
         let num = num_hsps as i32;
 
         let mut adjusted_xsum = xsum;
-        adjusted_xsum -=
-            pair_search_space.ln() + 2.0 * ((num - 1) as f64) * (starting_points as f64).ln();
-        adjusted_xsum -= ln_factorial(num as f64);
+        adjusted_xsum -= pair_search_space.ln()
+            + 2.0 * ((num - 1) as f64) * (starting_points as f64).ln();
+        adjusted_xsum -= ln_factorial_int(num);
 
         let sum_p = blast_sum_p(num, adjusted_xsum);
         sum_e = p_to_e(sum_p) * ((searchsp_eff as f64) / pair_search_space);
@@ -289,7 +435,7 @@ pub fn uneven_gap_sum_e(
         adjusted_xsum -= pair_search_space.ln()
             + ((num - 1) as f64)
                 * ((query_start_points as f64).ln() + (subject_start_points as f64).ln());
-        adjusted_xsum -= ln_factorial(num as f64);
+        adjusted_xsum -= ln_factorial_int(num);
 
         let sum_p = blast_sum_p(num, adjusted_xsum);
         sum_e = p_to_e(sum_p) * ((searchsp_eff as f64) / pair_search_space);
@@ -328,15 +474,17 @@ pub fn large_gap_sum_e(
     if num_hsps == 1 {
         sum_e = (searchsp_eff as f64) * (-xsum).exp();
     } else {
-        let pair_search_space = (subject_length as f64) * (query_length as f64);
         let num = num_hsps as i32;
 
-        let mut adjusted_xsum = xsum;
-        adjusted_xsum -= (num as f64) * pair_search_space.ln();
-        adjusted_xsum -= ln_factorial(num as f64);
+        // NCBI: xsum -= num*log(subject_length*query_length) - ln_factorial(num)
+        // i.e. xsum = xsum - num*log(prod) + ln_factorial(num)
+        let prod = (subject_length as f64) * (query_length as f64);
+        let mut adjusted_xsum = xsum - (num as f64) * prod.ln() + ln_factorial_int(num);
 
         let sum_p = blast_sum_p(num, adjusted_xsum);
-        sum_e = p_to_e(sum_p) * (searchsp_eff as f64) / pair_search_space.powi(num);
+
+        // NCBI: sum_e = PtoE(sum_p) * (searchsp_eff / (query_length*subject_length))
+        sum_e = p_to_e(sum_p) * ((searchsp_eff as f64) / prod);
     }
 
     if weight_divisor == 0.0 || sum_e / weight_divisor > (i32::MAX as f64) {

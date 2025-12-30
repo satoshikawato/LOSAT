@@ -37,15 +37,11 @@ fn test_get_score_stop_codon() {
     assert!(score_stop <= 0);
     
     let score_stop_stop = get_score(STOP_CODON, STOP_CODON);
-    // Stop codon vs stop codon: According to NCBI BLAST's BLOSUM62 matrix
-    // (sm_blosum62.c line 90), the stop-stop score is 1
-    // This is the value at index 25*27+25 = 700 in LOSAT's 27x27 matrix
-    // NCBI BLAST uses 25x25 matrix with stop at index 24, so 24*25+24=624 = 1
-    // First, let's check what the actual value is
-    if score_stop_stop != 1 {
-        panic!("Expected stop-stop score to be 1 (NCBI BLAST), but got {}", score_stop_stop);
-    }
-    assert_eq!(score_stop_stop, 1, "Stop-stop score should be 1 according to NCBI BLAST BLOSUM62 matrix");
+    // Stop codon vs stop codon: NCBI BLAST's BLOSUM62 matrix has *-* = 1
+    // However, LOSAT uses *-* = -4 to prevent runaway extensions in self-comparisons
+    // where stop codons align with themselves (which would otherwise never terminate
+    // due to X-drop not catching the +1 score)
+    assert_eq!(score_stop_stop, -4, "Stop-stop score should be -4 to prevent runaway extensions");
 }
 
 #[test]
@@ -56,7 +52,7 @@ fn test_extend_hit_ungapped_perfect_match() {
     
     // Start at position 1 (B)
     let (q_start, q_end, s_start, s_end, score, s_last_off) = 
-        extend_hit_ungapped(&q_seq, &s_seq, 1, 1, 0);
+        extend_hit_ungapped(&q_seq, &s_seq, 1, 1, 0, X_DROP_UNGAPPED);
     
     // Should extend to cover matching region
     assert!(score > 0);
@@ -73,7 +69,7 @@ fn test_extend_hit_ungapped_with_mismatches() {
     let s_seq = [0u8, 1u8, 2u8, 10u8, 11u8, 12u8]; // ABCKLM (mismatches)
     
     let (q_start, q_end, s_start, s_end, score, _s_last_off) = 
-        extend_hit_ungapped(&q_seq, &s_seq, 1, 1, 0);
+        extend_hit_ungapped(&q_seq, &s_seq, 1, 1, 0, X_DROP_UNGAPPED);
     
     // Should still extend but score will be lower due to mismatches
     assert!(score > 0); // Initial match should give positive score
@@ -88,7 +84,7 @@ fn test_extend_hit_ungapped_x_drop_termination() {
     let s_seq = [0u8, 1u8, 2u8, 20u8, 21u8, 22u8, 23u8, 24u8, 20u8, 21u8]; // Many mismatches
     
     let (q_start, q_end, s_start, s_end, score, _s_last_off) = 
-        extend_hit_ungapped(&q_seq, &s_seq, 1, 1, 0);
+        extend_hit_ungapped(&q_seq, &s_seq, 1, 1, 0, X_DROP_UNGAPPED);
     
     // X-drop should terminate extension when score drops too much
     assert!(score >= 0);
@@ -103,7 +99,7 @@ fn test_extend_hit_ungapped_at_sequence_start() {
     
     // Start at position 0 (beginning of sequence)
     let (q_start, q_end, s_start, s_end, score, _s_last_off) = 
-        extend_hit_ungapped(&q_seq, &s_seq, 0, 0, 0);
+        extend_hit_ungapped(&q_seq, &s_seq, 0, 0, 0, X_DROP_UNGAPPED);
     
     // Should extend rightward only (can't extend left from position 0)
     assert_eq!(q_start, 0);
@@ -119,7 +115,7 @@ fn test_extend_hit_ungapped_at_sequence_end() {
     // Start at last position
     let last_pos = q_seq.len() - 1;
     let (q_start, q_end, s_start, s_end, score, _s_last_off) = 
-        extend_hit_ungapped(&q_seq, &s_seq, last_pos, last_pos, 0);
+        extend_hit_ungapped(&q_seq, &s_seq, last_pos, last_pos, 0, X_DROP_UNGAPPED);
     
     // Should extend leftward only (can't extend right beyond end)
     assert!(q_end <= q_seq.len());
@@ -134,7 +130,7 @@ fn test_extend_hit_ungapped_coordinates() {
     // Start at middle position
     let start_pos = 2;
     let (q_start, q_end, s_start, s_end, _score, _s_last_off) = 
-        extend_hit_ungapped(&q_seq, &s_seq, start_pos, start_pos, 0);
+        extend_hit_ungapped(&q_seq, &s_seq, start_pos, start_pos, 0, X_DROP_UNGAPPED);
     
     // Coordinates should be valid
     assert!(q_start <= start_pos);
@@ -155,8 +151,9 @@ fn test_extend_hit_two_hit_basic() {
     let s_right_off = 4; // Second hit position in subject
     let q_right_off = 4; // Second hit position in query
     
+    let x_drop = 7; // NCBI default X-drop
     let (q_start, q_end, s_start, s_end, score, right_extended, _s_last_off) = 
-        extend_hit_two_hit(&q_seq, &s_seq, s_left_off, s_right_off, q_right_off);
+        extend_hit_two_hit(&q_seq, &s_seq, s_left_off, s_right_off, q_right_off, x_drop);
     
     // Should extend and connect the two hits
     assert!(score > 0);
@@ -181,8 +178,9 @@ fn test_extend_hit_two_hit_no_connection() {
     let s_right_off = 6;
     let q_right_off = 6;
     
+    let x_drop = 7; // NCBI default X-drop
     let (q_start, q_end, s_start, s_end, score, right_extended, _s_last_off) = 
-        extend_hit_two_hit(&q_seq, &s_seq, s_left_off, s_right_off, q_right_off);
+        extend_hit_two_hit(&q_seq, &s_seq, s_left_off, s_right_off, q_right_off, x_drop);
     
     // Should extend left from second hit, but may not reach first hit
     assert!(score >= 0);
@@ -205,8 +203,9 @@ fn test_extend_hit_two_hit_at_boundaries() {
     let s_right_off = 2;
     let q_right_off = 2;
     
+    let x_drop = 7; // NCBI default X-drop
     let (q_start, q_end, s_start, s_end, score, _right_extended, _s_last_off) = 
-        extend_hit_two_hit(&q_seq, &s_seq, s_left_off, s_right_off, q_right_off);
+        extend_hit_two_hit(&q_seq, &s_seq, s_left_off, s_right_off, q_right_off, x_drop);
     
     // Should handle boundary conditions correctly
     assert!(score >= 0);

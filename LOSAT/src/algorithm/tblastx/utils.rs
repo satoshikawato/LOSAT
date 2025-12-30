@@ -15,20 +15,21 @@ use crate::config::{ProteinScoringSpec, ScoringMatrix};
 use crate::stats::{lookup_protein_params, search_space::SearchSpace};
 use crate::utils::dust::{DustMasker, MaskedInterval};
 use crate::utils::genetic_code::GeneticCode;
+use crate::utils::seg::SegMasker;
 
 use super::args::TblastxArgs;
 use super::constants::{
     CUTOFF_E_TBLASTX, GAP_EXTEND, GAP_OPEN, TWO_HIT_WINDOW, X_DROP_GAPPED_FINAL,
     X_DROP_GAPPED_PRELIM, X_DROP_UNGAPPED,
 };
-use super::chaining::{ExtendedHit, SequenceData, SequenceKey};
+use super::chaining::ExtendedHit;
 use super::diagnostics::{diagnostics_enabled, DiagnosticCounters, print_summary as print_diagnostics_summary};
+use super::sum_stats_linking::apply_sum_stats_even_gap_linking;
 use super::extension::{
     convert_coords, extend_gapped_protein, extend_hit_two_hit, extend_hit_ungapped,
     get_score,
 };
 use crate::stats::karlin::{bit_score as calc_bit_score, evalue as calc_evalue, raw_score_from_evalue};
-use std::f64::consts::LN_2;
 use super::lookup::build_direct_lookup_with_threshold;
 use super::translation::{generate_frames, QueryFrame};
 
@@ -40,6 +41,19 @@ pub fn run(args: TblastxArgs) -> Result<()> {
     };
     let query_code = GeneticCode::from_id(args.query_gencode);
     let db_code = GeneticCode::from_id(args.db_gencode);
+    let only_qframe = args.only_qframe;
+    let only_sframe = args.only_sframe;
+    let valid_frame = |f: i8| matches!(f, 1 | 2 | 3 | -1 | -2 | -3);
+    if let Some(f) = only_qframe {
+        if !valid_frame(f) {
+            anyhow::bail!("--only-qframe must be one of 1,2,3,-1,-2,-3 (got {f})");
+        }
+    }
+    if let Some(f) = only_sframe {
+        if !valid_frame(f) {
+            anyhow::bail!("--only-sframe must be one of 1,2,3,-1,-2,-3 (got {f})");
+        }
+    }
     
     // Determine two-hit window size based on arguments
     // Use --window_size to set (default: 40)
@@ -74,7 +88,8 @@ pub fn run(args: TblastxArgs) -> Result<()> {
         })
         .collect();
 
-    let query_masks: Vec<Vec<MaskedInterval>> = if args.dust {
+    // Apply DUST filter to DNA sequences (if enabled)
+    let mut query_masks: Vec<Vec<MaskedInterval>> = if args.dust {
         let masker = DustMasker::new(args.dust_level, args.dust_window, args.dust_linker);
         queries_raw
             .iter()
@@ -84,10 +99,152 @@ pub fn run(args: TblastxArgs) -> Result<()> {
         queries_raw.iter().map(|_| Vec::new()).collect()
     };
 
-    let query_frames: Vec<Vec<QueryFrame>> = queries_raw
+    // Generate query frames
+    let mut query_frames: Vec<Vec<QueryFrame>> = queries_raw
         .iter()
-        .map(|r| generate_frames(r.seq(), &query_code))
+        .map(|r| {
+            let mut frames = generate_frames(r.seq(), &query_code);
+            if let Some(f) = only_qframe {
+                frames.retain(|x| x.frame == f);
+            }
+            frames
+        })
         .collect();
+    if let Some(_f) = only_qframe {
+        // Safety: if the query is too short, a frame translation may be empty; prevent silent no-op searches.
+        if query_frames.iter().all(|v| v.is_empty()) {
+            anyhow::bail!("--only-qframe filtered out all query frames (query too short?)");
+        }
+    }
+
+    // Apply SEG filter to translated amino acid sequences (if enabled)
+    // SEG masks low-complexity regions by replacing amino acids with 'X' (code 23)
+    // This causes extensions to naturally terminate at masked regions (X has low scores)
+    // NCBI BLAST Reference: blast_filter.c - SEG replaces residues with 'X'
+    const AA_X: u8 = 23; // NCBI encoding for 'X' (unknown amino acid)
+    
+    if args.seg {
+        eprintln!(
+            "Applying SEG filter (window={}, locut={}, hicut={})...",
+            args.seg_window, args.seg_locut, args.seg_hicut
+        );
+        let seg_masker = SegMasker::new(args.seg_window, args.seg_locut, args.seg_hicut);
+        
+        let mut total_aa_masked = 0usize;
+        let mut total_aa = 0usize;
+        
+        for (q_idx, frames) in query_frames.iter_mut().enumerate() {
+            let orig_len = queries_raw[q_idx].seq().len();
+            let mut seg_masks_dna: Vec<MaskedInterval> = Vec::new();
+            
+            for frame in frames.iter_mut() {
+                // Apply SEG to amino acid sequence (skip sentinels at positions 0 and len-1)
+                // aa_seq layout: [SENTINEL, aa0, aa1, ..., aaN-1, SENTINEL]
+                // Extract actual amino acids (positions 1 to len-2)
+                if frame.aa_seq.len() < 3 {
+                    continue; // Need at least sentinel + 1 AA + sentinel
+                }
+                
+                total_aa += frame.aa_len;
+                
+                // Apply SEG filter to get masked intervals
+                let aa_seq_slice = &frame.aa_seq[1..frame.aa_seq.len() - 1];
+                let aa_masks = seg_masker.mask_sequence(aa_seq_slice);
+                
+                // Replace masked amino acids with 'X' in the aa_seq
+                // This causes extensions to naturally terminate at masked regions
+                for aa_mask in &aa_masks {
+                    // aa_mask coordinates are 0-indexed logical positions
+                    // In aa_seq, position i corresponds to aa_seq[i + 1] (due to leading sentinel)
+                    for pos in aa_mask.start..aa_mask.end {
+                        if pos + 1 < frame.aa_seq.len() - 1 {
+                            frame.aa_seq[pos + 1] = AA_X;
+                            total_aa_masked += 1;
+                        }
+                    }
+                }
+                
+                // Also convert AA mask coordinates to DNA coordinates for lookup table filtering
+                for aa_mask in aa_masks {
+                    let (dna_start, dna_end) = if frame.frame > 0 {
+                        // Forward frame: frame 1,2,3 have offset 0,1,2
+                        let offset = (frame.frame - 1) as usize;
+                        let dna_start = aa_mask.start * 3 + offset;
+                        let dna_end = (aa_mask.end * 3 + offset).min(orig_len);
+                        (dna_start, dna_end)
+                    } else {
+                        // Reverse frame: -1,-2,-3
+                        let offset = (-frame.frame - 1) as usize;
+                        let dna_end = orig_len - (aa_mask.start * 3 + offset);
+                        let dna_start = orig_len.saturating_sub(aa_mask.end * 3 + offset);
+                        (dna_start.max(0), dna_end)
+                    };
+                    
+                    if dna_start < dna_end {
+                        seg_masks_dna.push(MaskedInterval::new(dna_start, dna_end));
+                    }
+                }
+            }
+            
+            // Merge SEG masks with DUST masks for lookup table filtering
+            if !seg_masks_dna.is_empty() {
+                // Sort by start position
+                seg_masks_dna.sort_by_key(|m| m.start);
+                
+                // Merge overlapping or adjacent intervals
+                let mut merged: Vec<MaskedInterval> = Vec::new();
+                for mask in seg_masks_dna {
+                    if let Some(last) = merged.last_mut() {
+                        if mask.start <= last.end + 1 {
+                            last.end = last.end.max(mask.end);
+                        } else {
+                            merged.push(mask);
+                        }
+                    } else {
+                        merged.push(mask);
+                    }
+                }
+                
+                // Merge with existing DUST masks
+                let mut all_masks = query_masks[q_idx].clone();
+                all_masks.extend(merged);
+                
+                // Sort and merge all masks together
+                all_masks.sort_by_key(|m| m.start);
+                let mut final_masks: Vec<MaskedInterval> = Vec::new();
+                for mask in all_masks {
+                    if let Some(last) = final_masks.last_mut() {
+                        if mask.start <= last.end + 1 {
+                            last.end = last.end.max(mask.end);
+                        } else {
+                            final_masks.push(mask);
+                        }
+                    } else {
+                        final_masks.push(mask);
+                    }
+                }
+                
+                query_masks[q_idx] = final_masks;
+            }
+        }
+        
+        // Print statistics
+        let total_masked_dna: usize = query_masks.iter().map(|m| m.iter().map(|i| i.end - i.start).sum::<usize>()).sum();
+        let total_bases: usize = queries_raw.iter().map(|r| r.seq().len()).sum();
+        if total_bases > 0 {
+            eprintln!(
+                "SEG masked {} aa ({:.2}%) of {} total aa across all frames",
+                total_aa_masked,
+                100.0 * total_aa_masked as f64 / total_aa as f64,
+                total_aa
+            );
+            eprintln!(
+                "Combined DNA masks: {} bases ({:.2}%)",
+                total_masked_dna,
+                100.0 * total_masked_dna as f64 / total_bases as f64
+            );
+        }
+    }
 
     eprintln!("Building lookup table...");
     // NCBI BLAST+ tblastx default: Neighboring words threshold = 13
@@ -131,8 +288,8 @@ pub fn run(args: TblastxArgs) -> Result<()> {
             .unwrap(),
     );
 
-    // Channel now sends ExtendedHit with sequence data for HSP chaining
-    type HitData = (Vec<ExtendedHit>, Vec<(SequenceKey, SequenceData)>);
+    // Channel sends ExtendedHit records for post-processing (sum-statistics linking, filtering, output)
+    type HitData = Vec<ExtendedHit>;
     let (tx, rx) = channel::<HitData>();
 
     let out_path = args.out.clone();
@@ -142,14 +299,9 @@ pub fn run(args: TblastxArgs) -> Result<()> {
     let diag_enabled_clone = diag_enabled;
     let writer_handle = std::thread::spawn(move || -> Result<()> {
         let mut all_hits: Vec<ExtendedHit> = Vec::new();
-        let mut seq_map: FxHashMap<SequenceKey, SequenceData> = FxHashMap::default();
 
-        while let Ok((hits, seq_data)) = rx.recv() {
+        while let Ok(hits) = rx.recv() {
             all_hits.extend(hits);
-            for (k, v) in seq_data {
-                // Keep the first copy we see (all are identical for a given key)
-                seq_map.entry(k).or_insert(v);
-            }
         }
 
         let diag_ref = if diag_enabled_clone { Some(diagnostics_clone.as_ref()) } else { None };
@@ -160,115 +312,12 @@ pub fn run(args: TblastxArgs) -> Result<()> {
             diag.base.hsps_before_chain.store(hsps_before, AtomicOrdering::Relaxed);
         }
 
-        // === NCBI-like sum-statistics behavior (simplified) ===
-        // NCBI tblastx enables sum statistics by default (CTBlastxOptionsHandle::SetSumStatisticsMode),
-        // and assigns a *set-level* E-value to each HSP after linking (BLAST_LinkHsps).
-        //
-        // Implementing the full DP linking algorithm is involved; as a first NCBI-anchored step,
-        // we cluster nearby collinear HSPs per (query, subject, frame combo) and assign a set-level
-        // E-value computed from the summed bit scores. This allows low-scoring HSPs to inherit
-        // significance from a strong surrounding chain, matching the key effect seen in NCBI output.
-        //
-        // Link parameters (NCBI defaults for ungapped linking):
-        //   gap_size = 40, overlap_size = 9  (blast_parameters.h)
-        // We use these to build simple greedy clusters.
-        // Allow "big gaps" to approximate NCBI's even-gap linking (which considers both
-        // small- and large-gap chaining). Small-gap default is 40 aa, but large-gap
-        // chaining can connect much farther-apart HSPs.
-        const LINK_GAP_AA: isize = 5000;
-        const LINK_OVERLAP_AA: isize = 9;
-        const LINK_DIAG_DRIFT_AA: isize = 33;
-        const GAP_DECAY_RATE: f64 = 0.5; // BLAST_GAP_DECAY_RATE for ungapped searches
-
-        // Group by query-subject + frame combination (like tblastx contexts)
-        let mut groups: FxHashMap<SequenceKey, Vec<ExtendedHit>> = FxHashMap::default();
-        for h in all_hits.into_iter() {
-            let key: SequenceKey = (
-                h.hit.query_id.clone(),
-                h.hit.subject_id.clone(),
-                h.q_frame,
-                h.s_frame,
-            );
-            groups.entry(key).or_default().push(h);
-        }
-
-        let mut linked_hits: Vec<ExtendedHit> = Vec::new();
-        for (key, mut hsps) in groups {
-            if hsps.is_empty() {
-                continue;
-            }
-            // Need sequence lengths to compute effective search space
-            let Some((q_seq, s_seq)) = seq_map.get(&key) else {
-                // Fallback: if we don't have sequence data, keep individual e-values
-                linked_hits.extend(hsps);
-                continue;
-            };
-            let q_len = q_seq.len();
-            let s_len = s_seq.len();
-            let ss = SearchSpace::with_length_adjustment(q_len, s_len, &params_clone);
-            let searchsp_eff = ss.effective_space.max(1.0);
-
-            // Sort by query AA start (then subject AA start)
-            hsps.sort_by(|a, b| {
-                a.q_aa_start
-                    .cmp(&b.q_aa_start)
-                    .then_with(|| a.s_aa_start.cmp(&b.s_aa_start))
-            });
-
-            // Greedy clustering on collinearity and small gaps/overlaps
-            let mut current: Vec<ExtendedHit> = Vec::new();
-            for h in hsps.into_iter() {
-                if current.is_empty() {
-                    current.push(h);
-                    continue;
-                }
-                let last = current.last().unwrap();
-                let q_gap = h.q_aa_start as isize - last.q_aa_end as isize;
-                let s_gap = h.s_aa_start as isize - last.s_aa_end as isize;
-                let last_diag = last.s_aa_start as isize - last.q_aa_start as isize;
-                let diag = h.s_aa_start as isize - h.q_aa_start as isize;
-                let diag_drift = (diag - last_diag).abs();
-
-                let q_ok = q_gap >= -LINK_OVERLAP_AA && q_gap <= LINK_GAP_AA;
-                let s_ok = s_gap >= -LINK_OVERLAP_AA && s_gap <= LINK_GAP_AA;
-                let diag_ok = diag_drift <= LINK_DIAG_DRIFT_AA;
-
-                if q_ok && s_ok && diag_ok {
-                    current.push(h);
-                } else {
-                    // finalize current cluster
-                    let n = current.len() as i32;
-                    let sum_bits: f64 = current.iter().map(|x| x.hit.bit_score).sum();
-                    // xsum (nats) = ln(2) * sum_bits
-                    let xsum = LN_2 * sum_bits;
-                    // Weight divisor: (1-decay) * decay^(n-1)  (blast_stat.c BLAST_GapDecayDivisor)
-                    let weight_div = (1.0 - GAP_DECAY_RATE) * GAP_DECAY_RATE.powi(n - 1);
-                    let mut set_e = searchsp_eff * (-xsum).exp();
-                    if weight_div > 0.0 {
-                        set_e /= weight_div;
-                    }
-                    for mut x in current.drain(..) {
-                        x.hit.e_value = set_e;
-                        linked_hits.push(x);
-                    }
-                    current.push(h);
-                }
-            }
-            if !current.is_empty() {
-                let n = current.len() as i32;
-                let sum_bits: f64 = current.iter().map(|x| x.hit.bit_score).sum();
-                let xsum = LN_2 * sum_bits;
-                let weight_div = (1.0 - GAP_DECAY_RATE) * GAP_DECAY_RATE.powi(n - 1);
-                let mut set_e = searchsp_eff * (-xsum).exp();
-                if weight_div > 0.0 {
-                    set_e /= weight_div;
-                }
-                for mut x in current.drain(..) {
-                    x.hit.e_value = set_e;
-                    linked_hits.push(x);
-                }
-            }
-        }
+        // === NCBI-like sum-statistics behavior ===
+        // NCBI tblastx assigns a *set-level* E-value to each HSP after linking (BLAST_LinkHsps).
+        // We apply an even-gap (small/large) linking step and overwrite `hit.e_value` with the
+        // resulting set-level E-value.
+        let linked_hits: Vec<ExtendedHit> =
+            apply_sum_stats_even_gap_linking(all_hits, &params_clone);
 
         // Record HSPs after "linking" (before threshold)
         if let Some(diag) = diag_ref {
@@ -327,7 +376,10 @@ pub fn run(args: TblastxArgs) -> Result<()> {
         .par_iter()
         .enumerate()
         .for_each_with((tx, diagnostics_for_parallel), |(tx, diag), (_s_idx, s_record)| {
-            let s_frames = generate_frames(s_record.seq(), &db_code);
+            let mut s_frames = generate_frames(s_record.seq(), &db_code);
+            if let Some(f) = only_sframe {
+                s_frames.retain(|x| x.frame == f);
+            }
             let s_id = s_record
                 .id()
                 .split_whitespace()
@@ -346,15 +398,12 @@ pub fn run(args: TblastxArgs) -> Result<()> {
             // Parallelize over subject frames for intra-subject parallelism
             // Each frame is independent since mask_key includes s_f_idx
             let diag_inner = diag.clone();
-            let frame_results: Vec<(Vec<ExtendedHit>, Vec<(SequenceKey, SequenceData)>)> =
+            let frame_results: Vec<Vec<ExtendedHit>> =
                 s_frames
                     .par_iter()
                     .enumerate()
                     .map(|(s_f_idx, s_frame)| {
                         let mut local_hits: Vec<ExtendedHit> = Vec::new();
-                        let mut local_sequences: Vec<(SequenceKey, SequenceData)> = Vec::new();
-                        let mut seen_pairs: std::collections::HashSet<SequenceKey> =
-                            std::collections::HashSet::new();
 
                         // Mask to track already-extended regions on each diagonal (per frame)
                         // NCBI BLAST style: use diag_coord = (query_offset - subject_offset) & diag_mask
@@ -372,7 +421,8 @@ pub fn run(args: TblastxArgs) -> Result<()> {
                         let mut diag_extended: FxHashMap<(u32, u8, isize), bool> =
                             FxHashMap::default();
                         let s_aa = &s_frame.aa_seq;
-                        let s_aa_len = s_aa.len();
+                        // Use aa_len (actual amino acid count without sentinels) for calculations
+                        let s_aa_len = s_frame.aa_len;
                         
                         // Calculate diag_mask for each query frame (NCBI BLAST style)
                         // diag_array_length = smallest power of 2 >= (query_length + window_size)
@@ -381,7 +431,8 @@ pub fn run(args: TblastxArgs) -> Result<()> {
                         let mut diag_mask_cache: FxHashMap<(u32, u8), isize> = FxHashMap::default();
                         for (q_idx, q_frames) in query_frames.iter().enumerate() {
                             for (q_f_idx, q_frame) in q_frames.iter().enumerate() {
-                                let q_aa_len = q_frame.aa_seq.len();
+                                // Use aa_len (actual amino acid count without sentinels) for calculations
+                                let q_aa_len = q_frame.aa_len;
                                 // Calculate diag_array_length as smallest power of 2 >= (q_aa_len + two_hit_window)
                                 let mut diag_array_length = 1usize;
                                 while diag_array_length < (q_aa_len + two_hit_window) {
@@ -400,23 +451,26 @@ pub fn run(args: TblastxArgs) -> Result<()> {
                         // Cache cutoff_score per context (calculated from CUTOFF_E_TBLASTX = 1e-300)
                         // Reference: ncbi-blast/c++/src/algo/blast/core/blast_parameters.c:349-360
                         let mut cutoff_score_cache: FxHashMap<(u32, u8, u8), i32> = FxHashMap::default();
-                        if s_aa.len() < 3 {
-                            return (local_hits, local_sequences);
+                        // aa_seq layout: [SENTINEL, aa0, aa1, ..., aaN-1, SENTINEL]
+                        // Need at least 5 bytes: sentinel + 3 AAs + sentinel
+                        if s_aa.len() < 5 {
+                            return local_hits;
                         }
 
-                        for s_pos in 0..=(s_aa.len() - 3) {
+                        // Scan from raw position 1 to len-4 (skip sentinels)
+                        // s_pos is in RAW coordinates (index into aa_seq with sentinels)
+                        for s_pos in 1..=(s_aa.len() - 4) {
                             let c1 = unsafe { *s_aa.get_unchecked(s_pos) } as usize;
                             let c2 = unsafe { *s_aa.get_unchecked(s_pos + 1) } as usize;
                             let c3 = unsafe { *s_aa.get_unchecked(s_pos + 2) } as usize;
 
-                            // シードに終止コドンが含まれる場合はスキップ
-                            // NCBI BLAST uses 26 amino acid indices (0-24 for amino acids, 25 for stop codon)
-                            // Skip k-mers containing stop codons
-                            if c1 >= 25 || c2 >= 25 || c3 >= 25 {
+                            // Skip k-mers containing stop codons (24) or sentinels (255)
+                            // NCBI matrix order: 0-23 for amino acids, 24 for stop codon (*)
+                            if c1 >= 24 || c2 >= 24 || c3 >= 24 {
                                 continue;
                             }
-                            // 26^3 = 17,576 possible k-mers (matching lookup.rs encoding)
-                            let kmer = c1 * 676 + c2 * 26 + c3;
+                            // 24^3 = 13,824 possible k-mers (matching lookup.rs encoding)
+                            let kmer = c1 * 576 + c2 * 24 + c3;
 
                             let matches = unsafe { lookup.get_unchecked(kmer) };
 
@@ -426,11 +480,15 @@ pub fn run(args: TblastxArgs) -> Result<()> {
                             }
 
                             for &(q_idx, q_f_idx, q_pos) in matches {
+                                // q_pos is LOGICAL position (0-indexed, not counting sentinels)
+                                // s_pos is RAW position (index into aa_seq with sentinels)
+                                // Convert q_pos to raw for consistent diagonal calculation
+                                let q_pos_raw = q_pos as usize + 1;
+                                
                                 // NCBI BLAST style: diag_coord = (query_offset - subject_offset) & diag_mask
                                 // Reference: ncbi-blast/c++/src/algo/blast/core/aa_ungapped.c:351
-                                // Note: NCBI BLAST uses query_offset - subject_offset, but we use q_pos - s_pos
-                                // which is the same diagonal but with opposite sign convention
-                                let diag = q_pos as isize - s_pos as isize;
+                                // Both positions are now in RAW coordinates for consistent diagonal
+                                let diag = q_pos_raw as isize - s_pos as isize;
                                 // Get diag_mask for this query frame
                                 let diag_mask = *diag_mask_cache.get(&(q_idx, q_f_idx))
                                     .unwrap_or(&((1isize << 20) - 1)); // Fallback: 2^20 - 1
@@ -454,82 +512,106 @@ pub fn run(args: TblastxArgs) -> Result<()> {
 
                                 let q_frame = &query_frames[q_idx as usize][q_f_idx as usize];
                                 let q_aa = &q_frame.aa_seq;
-                                let q_aa_len = q_aa.len();
+                                // Use aa_len (actual amino acid count without sentinels) for calculations
+                                let q_aa_len = q_frame.aa_len;
 
-                                let seed_score = get_score(c1 as u8, q_aa[q_pos as usize])
-                                    + get_score(c2 as u8, q_aa[q_pos as usize + 1])
-                                    + get_score(c3 as u8, q_aa[q_pos as usize + 2]);
+                                // Access q_aa using RAW position (q_pos_raw = q_pos + 1)
+                                let seed_score = get_score(c1 as u8, q_aa[q_pos_raw])
+                                    + get_score(c2 as u8, q_aa[q_pos_raw + 1])
+                                    + get_score(c3 as u8, q_aa[q_pos_raw + 2]);
 
-                                // NCBI BLAST two-hit/one-hit mechanism
-                                // Reference: ncbi-blast/c++/src/algo/blast/core/aa_ungapped.c:519-606
-                                let k_size = 3usize; // Word size for TBLASTX
+                                // Early filtering: skip very low-scoring seeds (f593910 optimization)
+                                if seed_score < 11 {
+                                    if diag_enabled {
+                                        diag_inner.base.seeds_low_score.fetch_add(1, AtomicOrdering::Relaxed);
+                                    }
+                                    continue;
+                                }
+
+                                // f593910-style two-hit mechanism (simpler and faster)
+                                let k_size = 3usize;
                                 
-                                // One-hit mode: extend every seed (when window_size = 0)
-                                // Two-hit mode: require two hits within window to trigger extension
-                                let two_hit_info = if one_hit_mode {
-                                    // One-hit mode: bypass two-hit check, extend every seed
-                                    // Still check mask to avoid re-extending same region
-                                    None // Will use one-hit extension below
-                                } else {
-                                    // Two-hit mode
-                                    let prev_s_pos_opt = last_seed.get(&mask_key).copied();
-                                    let is_flag_set = *diag_extended.get(&mask_key).unwrap_or(&false);
-                                    
-                                    if is_flag_set {
-                                        // Flag is set: an extension just happened on this diagonal
-                                        // Reference: aa_ungapped.c:519-530
-                                        if let Some(prev_s_pos) = prev_s_pos_opt {
-                                            if s_pos < prev_s_pos {
-                                                // Current hit is before the extension end: skip
+                                // NCBI BLAST flag check: if an extension just happened on this diagonal,
+                                // skip seeds that are before the extension end
+                                // Reference: aa_ungapped.c:354-365, 519-530
+                                if let Some(&extended) = diag_extended.get(&mask_key) {
+                                    if extended {
+                                        // An extension happened on this diagonal
+                                        if let Some(&last_hit) = last_seed.get(&mask_key) {
+                                            if s_pos < last_hit {
+                                                // We've already extended past this hit, skip it
                                                 if diag_enabled {
-                                                    diag_inner.base.seeds_low_score.fetch_add(1, AtomicOrdering::Relaxed);
+                                                    diag_inner.base.seeds_masked.fetch_add(1, AtomicOrdering::Relaxed);
                                                 }
                                                 continue;
                                             } else {
-                                                // Current hit is past the extension end: start new sequence
-                                                last_seed.insert(mask_key, s_pos);
+                                                // Past the extension end - start a new hit
+                                                // Reset flag and update last_hit
                                                 diag_extended.insert(mask_key, false);
-                                                if diag_enabled {
-                                                    diag_inner.base.seeds_two_hit_failed.fetch_add(1, AtomicOrdering::Relaxed);
-                                                }
-                                                continue;
+                                                last_seed.insert(mask_key, s_pos);
                                             }
-                                        } else {
-                                            last_seed.insert(mask_key, s_pos);
-                                            diag_extended.insert(mask_key, false);
-                                            if diag_enabled {
-                                                diag_inner.base.seeds_two_hit_failed.fetch_add(1, AtomicOrdering::Relaxed);
-                                            }
-                                            continue;
                                         }
-                                    } else if let Some(prev_s_pos) = prev_s_pos_opt {
-                                        // Flag is not set: normal two-hit logic
-                                        let diff = s_pos.saturating_sub(prev_s_pos);
-                                        
-                                        if diff >= two_hit_window {
-                                            last_seed.insert(mask_key, s_pos);
-                                            if diag_enabled {
-                                                diag_inner.base.seeds_two_hit_failed.fetch_add(1, AtomicOrdering::Relaxed);
-                                            }
-                                            continue;
-                                        } else if diff < k_size {
-                                            if diag_enabled {
-                                                diag_inner.base.seeds_low_score.fetch_add(1, AtomicOrdering::Relaxed);
-                                            }
-                                            continue;
-                                        } else {
-                                            // Valid pair: k_size <= diff < two_hit_window
-                                            Some(prev_s_pos)
-                                        }
-                                    } else {
-                                        // First hit on this diagonal: record and continue
-                                        last_seed.insert(mask_key, s_pos);
+                                    }
+                                }
+                                
+                                let prev_s_pos_opt = last_seed.get(&mask_key).copied();
+                                
+                                // NCBI BLAST style two-hit logic
+                                // Reference: aa_ungapped.c:532-551
+                                let (two_hit_info, should_update_last_seed) = if one_hit_mode {
+                                    // One-hit mode: bypass two-hit check
+                                    (None, true)
+                                } else if let Some(prev_s_pos) = prev_s_pos_opt {
+                                    let diff = s_pos.saturating_sub(prev_s_pos);
+                                    
+                                    if diff >= two_hit_window {
+                                        // Beyond the window - start a new hit
+                                        // Reference: aa_ungapped.c:538-543
                                         if diag_enabled {
-                                            diag_inner.base.seeds_two_hit_failed.fetch_add(1, AtomicOrdering::Relaxed);
+                                            diag_inner.base.seeds_second_hit_too_far.fetch_add(1, AtomicOrdering::Relaxed);
+                                        }
+                                        (None, true)
+                                    } else if diff < k_size {
+                                        // Overlapping hits (diff < wordsize) - give up
+                                        // Reference: aa_ungapped.c:546-551
+                                        // IMPORTANT: Do NOT update last_seed in this case
+                                        if diag_enabled {
+                                            diag_inner.base.seeds_second_hit_overlap.fetch_add(1, AtomicOrdering::Relaxed);
                                         }
                                         continue;
+                                    } else {
+                                        // Within two-hit window and not overlapping
+                                        // k_size <= diff < two_hit_window
+                                        // Proceed to extension
+                                        if diag_enabled {
+                                            diag_inner.base.seeds_second_hit_window.fetch_add(1, AtomicOrdering::Relaxed);
+                                        }
+                                        (Some(prev_s_pos), true)
                                     }
+                                } else {
+                                    // No previous hit on this diagonal - first hit
+                                    if diag_enabled {
+                                        diag_inner.base.seeds_first_hit.fetch_add(1, AtomicOrdering::Relaxed);
+                                    }
+                                    (None, true)
                                 };
+                                
+                                // Update the last seed position for this diagonal
+                                // (only if should_update_last_seed is true)
+                                if should_update_last_seed {
+                                    last_seed.insert(mask_key, s_pos);
+                                }
+                                
+                                // NCBI BLAST two-hit mode: only extend when two-hit condition is met
+                                // Unlike the previous "f593910 optimization", NCBI does NOT extend
+                                // high-scoring seeds without a two-hit pair in two-hit mode.
+                                // Reference: aa_ungapped.c - no one-hit extension in s_BlastAaWordFinder_TwoHit
+                                if two_hit_info.is_none() && !one_hit_mode {
+                                    if diag_enabled {
+                                        diag_inner.base.seeds_two_hit_failed.fetch_add(1, AtomicOrdering::Relaxed);
+                                    }
+                                    continue;
+                                }
 
                                 // Count seeds that passed to extension
                                 if diag_enabled {
@@ -542,34 +624,42 @@ pub fn run(args: TblastxArgs) -> Result<()> {
                                     }
                                 }
                                 
-                                // Extension: one-hit or two-hit mode
-                                let (qs, qe, ss, se_ungapped, ungapped_score, right_extended, s_last_off) = if one_hit_mode {
-                                    // One-hit extension: extend in both directions from current seed
+                                // Extension: f593910 style - use two_hit_info to decide mode
+                                // All positions passed to extension functions are RAW coordinates
+                                // Results (qs_raw, qe_raw, ss_raw, se_raw) are also RAW coordinates
+                                let (qs_raw, qe_raw, ss_raw, se_ungapped_raw, ungapped_score, right_extended, s_last_off) = if let Some(prev_s_pos) = two_hit_info {
+                                    // Two-hit extension: extend from current seed (R) to the left,
+                                    // only extend right if left extension reaches the first hit (L)
+                                    let (qs, qe, ss, se, score, right_ext, s_last) = extend_hit_two_hit(
+                                        q_aa,
+                                        s_aa,
+                                        prev_s_pos + k_size, // End of first hit (L + wordsize) - RAW
+                                        s_pos,               // Second hit position (R) - RAW
+                                        q_pos_raw,           // Query position - RAW
+                                        x_drop_ungapped,
+                                    );
+                                    (qs, qe, ss, se, score, right_ext, s_last)
+                                } else {
+                                    // One-hit extension for high-scoring seeds (or one_hit_mode)
                                     let (qs, qe, ss, se, score, s_last) = extend_hit_ungapped(
                                         q_aa,
                                         s_aa,
-                                        q_pos as usize,
-                                        s_pos,
+                                        q_pos_raw,           // Query position - RAW
+                                        s_pos,               // Subject position - RAW
                                         seed_score,
                                         x_drop_ungapped,
                                     );
                                     (qs, qe, ss, se, score, true, s_last)
-                                } else {
-                                    // Two-hit extension (NCBI BLAST style)
-                                    // Reference: aa_ungapped.c:576-583
-                                    let prev_s_pos = two_hit_info.unwrap();
-                                    let s_left_off = prev_s_pos + k_size;
-                                    
-                                    let (qs, qe, ss, se, score, right_ext, s_last) = extend_hit_two_hit(
-                                        q_aa,
-                                        s_aa,
-                                        s_left_off,
-                                        s_pos,
-                                        q_pos as usize,
-                                        x_drop_ungapped,
-                                    );
-                                    (qs, qe, ss, se, score, right_ext, s_last)
                                 };
+                                
+                                // Convert RAW coordinates to LOGICAL coordinates (subtract 1 for sentinel offset)
+                                // Keep both RAW and LOGICAL for different uses:
+                                // - RAW: mask updates, array access (q_aa, s_aa)
+                                // - LOGICAL: coordinate conversion, length calculation
+                                let qs = qs_raw - 1;
+                                let qe = qe_raw - 1;
+                                let ss = ss_raw - 1;
+                                let se_ungapped = se_ungapped_raw - 1;
 
                                 // NCBI BLAST does not use a fixed MIN_UNGAPPED_SCORE threshold.
                                 // Instead, it uses cutoffs->cutoff_score which is dynamically calculated
@@ -662,12 +752,10 @@ pub fn run(args: TblastxArgs) -> Result<()> {
                                         // Calculate cutoff_score_max from args.evalue (default 10.0)
                                         let cutoff_score_max_from_evalue = (raw_score_from_evalue(args.evalue, &params, &search_space) as f64 * scale_factor) as i32;
                                         
-                                        // IMPORTANT: cutoff_score_max should allow hits with "evalue < 10 OR bitscore > threshold"
-                                        // where threshold is gap_trigger (22.0 bit score = 46 raw score).
-                                        // This means cutoff_score_max should be gap_trigger to allow hits with bit score >= 22.0
-                                        // to pass even if their evalue >= 10.0.
-                                        // Reference: The user's insight that cutoff_score_max should be gap_trigger
-                                        let cutoff_score_max = gap_trigger;
+                                        // NCBI BLAST uses gap_trigger (22 bit score ≈ 46 raw score) as minimum cutoff
+                                        // This ensures short hits (like 3 aa) with low scores are filtered out
+                                        // Reference: ncbi-blast/c++/src/algo/blast/core/blast_parameters.c:366-373
+                                        let cutoff_score_max = gap_trigger as i32;
                                         
                                         // gap_trigger is already calculated above
                                         
@@ -744,11 +832,11 @@ pub fn run(args: TblastxArgs) -> Result<()> {
                                             }
                                         }
                                         // Update mask even if cutoff_score check fails (NCBI BLAST behavior)
-                                        // Use se_ungapped to properly suppress the entire aligned region
+                                        // Use RAW coordinates for mask (se_ungapped_raw) to properly suppress the aligned region
                                         let mask_end = if right_extended {
-                                            se_ungapped.max(s_last_off.saturating_sub(k_size - 1))
+                                            se_ungapped_raw.max(s_last_off.saturating_sub(k_size - 1))
                                         } else {
-                                            s_pos
+                                            s_pos  // s_pos is already RAW
                                         };
                                         mask.insert(mask_key, mask_end);
                                         // NCBI BLAST: Update last_hit and flag based on right_extended
@@ -781,8 +869,9 @@ pub fn run(args: TblastxArgs) -> Result<()> {
                                     // threshold filtering to the writer/post-processing stage.
                                     let len = qe - qs;
                                     let mut match_count = 0;
+                                    // Use RAW coordinates for array access (qs_raw, ss_raw)
                                     for k in 0..len {
-                                        if q_aa[qs + k] == s_aa[ss + k] {
+                                        if q_aa[qs_raw + k] == s_aa[ss_raw + k] {
                                             match_count += 1;
                                         }
                                     }
@@ -792,18 +881,6 @@ pub fn run(args: TblastxArgs) -> Result<()> {
                                         convert_coords(qs, qe, q_frame.frame, q_frame.orig_len);
                                     let (s_start_bp, s_end_bp) =
                                         convert_coords(ss, se_ungapped, s_frame.frame, s_len);
-
-                                    // Store sequence data for sum-statistics HSP linking / post-processing.
-                                    let seq_key: SequenceKey = (
-                                        query_ids[q_idx as usize].clone(),
-                                        s_id.clone(),
-                                        q_frame.frame,
-                                        s_frame.frame,
-                                    );
-                                    if !seen_pairs.contains(&seq_key) {
-                                        seen_pairs.insert(seq_key.clone());
-                                        local_sequences.push((seq_key.clone(), (q_aa.clone(), s_aa.clone())));
-                                    }
 
                                     local_hits.push(ExtendedHit {
                                         hit: Hit {
@@ -821,6 +898,7 @@ pub fn run(args: TblastxArgs) -> Result<()> {
                                             e_value: e_val,
                                             bit_score,
                                         },
+                                        raw_score: ungapped_score,
                                         q_frame: q_frame.frame,
                                         s_frame: s_frame.frame,
                                         q_aa_start: qs,
@@ -841,19 +919,17 @@ pub fn run(args: TblastxArgs) -> Result<()> {
                                     // the next iteration, ensuring that even low-scoring extensions prevent
                                     // re-extending in already-scanned regions.
                                     //
-                                    // FIX: Use the actual alignment end (se_ungapped) as the primary mask position.
-                                    // The original code used s_last_off - (k_size - 1), which could leave gaps
-                                    // allowing new seeds to start within the already-aligned region.
-                                    // This was causing the self-comparison issue where the entire genome became one hit.
+                                    // FIX: Use the actual alignment end (se_ungapped_raw) as the primary mask position.
+                                    // Use RAW coordinates for mask (consistent with s_pos which is RAW).
                                     let mask_end = if right_extended {
-                                        // Right extension happened: use the actual alignment end position
+                                        // Right extension happened: use the actual alignment end position (RAW)
                                         // to properly suppress the entire aligned region.
                                         // Also consider s_last_off (rightmost scanned position) for safety.
-                                        se_ungapped.max(s_last_off.saturating_sub(k_size - 1))
+                                        se_ungapped_raw.max(s_last_off.saturating_sub(k_size - 1))
                                     } else {
                                         // No right extension: use current seed position (subject_offset)
                                         // Reference: aa_ungapped.c:604-605
-                                        s_pos
+                                        s_pos  // s_pos is already RAW
                                     };
                                     mask.insert(mask_key, mask_end);
                                     // NCBI BLAST: Update last_hit and flag based on right_extended
@@ -907,9 +983,9 @@ pub fn run(args: TblastxArgs) -> Result<()> {
                                 ) = extend_gapped_protein(
                                     q_aa,
                                     s_aa,
-                                    qs,
-                                    ss,
-                                    qe - qs,
+                                    qs_raw,  // Use RAW coordinates for gapped extension
+                                    ss_raw,
+                                    qe_raw - qs_raw,
                                     X_DROP_GAPPED_PRELIM,
                                 );
 
@@ -989,19 +1065,6 @@ pub fn run(args: TblastxArgs) -> Result<()> {
                                     let (s_start_bp, s_end_bp) =
                                         convert_coords(final_ss, final_se, s_frame.frame, s_len);
 
-                                    // Store sequence data for HSP chaining
-                                    let seq_key: SequenceKey = (
-                                        query_ids[q_idx as usize].clone(),
-                                        s_id.clone(),
-                                        q_frame.frame,
-                                        s_frame.frame,
-                                    );
-                                    if !seen_pairs.contains(&seq_key) {
-                                        seen_pairs.insert(seq_key.clone());
-                                        local_sequences
-                                            .push((seq_key.clone(), (q_aa.clone(), s_aa.clone())));
-                                    }
-
                                     local_hits.push(ExtendedHit {
                                         hit: Hit {
                                             query_id: query_ids[q_idx as usize].clone(),
@@ -1017,6 +1080,7 @@ pub fn run(args: TblastxArgs) -> Result<()> {
                                             e_value: e_val,
                                             bit_score,
                                         },
+                                        raw_score: gapped_score,
                                         q_frame: q_frame.frame,
                                         s_frame: s_frame.frame,
                                         q_aa_start: final_qs,
@@ -1030,19 +1094,17 @@ pub fn run(args: TblastxArgs) -> Result<()> {
                                 }
                             }
                         }
-                        (local_hits, local_sequences)
+                        local_hits
                     })
                     .collect();
 
             // Flatten frame results and send
             let mut all_hits: Vec<ExtendedHit> = Vec::new();
-            let mut all_sequences: Vec<(SequenceKey, SequenceData)> = Vec::new();
-            for (hits, seqs) in frame_results {
+            for hits in frame_results {
                 all_hits.extend(hits);
-                all_sequences.extend(seqs);
             }
             if !all_hits.is_empty() {
-                tx.send((all_hits, all_sequences)).unwrap();
+                tx.send(all_hits).unwrap();
             }
             bar.inc(1);
         });

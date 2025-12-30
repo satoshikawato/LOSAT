@@ -157,3 +157,4 @@ grep -v "^#" tests/blast_out/NZ_CP006932.NZ_CP006932.tblastx.n1.out | wc -l
 
 3. **診断モード**: `LOSAT_TBLASTX_DIAGNOSTICS=1`環境変数で診断出力が有効になる。
 
+

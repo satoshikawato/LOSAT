@@ -334,3 +334,4 @@ pub fn find_first_mismatch(seq1: &[u8], seq2: &[u8], start1: usize, start2: usiz
     find_first_mismatch_ex(seq1, seq2, seq1.len(), seq2.len(), start1, start2, false)
 }
 
+

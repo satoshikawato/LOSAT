@@ -105,3 +105,4 @@ fn test_gdb3_prime_numbers() {
     assert_eq!(c, 23);
 }
 
+

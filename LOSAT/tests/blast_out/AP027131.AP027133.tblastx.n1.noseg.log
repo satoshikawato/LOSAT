@@ -1,2 +1,6 @@
 Warning: [tblastx] Number of threads was reduced to 20 to match the number of available CPUs
 Warning: [tblastx] 'num_threads' is currently ignored when 'subject' is specified.
+
+real	104m41.958s
+user	104m41.306s
+sys	0m0.270s

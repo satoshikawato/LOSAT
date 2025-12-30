@@ -33,6 +33,9 @@ pub struct QueryFrame {
     pub aa_len: usize,
     /// Original DNA sequence length
     pub orig_len: usize,
+    /// SEG-masked AA intervals (logical positions, frame-specific)
+    /// Seeds should not be generated from these positions
+    pub seg_masks: Vec<(usize, usize)>,
 }
 
 /// Convert a codon to amino acid index in NCBI matrix order (0-24)
@@ -94,6 +97,7 @@ pub fn generate_frames(seq: &[u8], table: &GeneticCode) -> Vec<QueryFrame> {
                 aa_seq,
                 aa_len,
                 orig_len: seq_len,
+                seg_masks: Vec::new(),
             });
         }
     }
@@ -106,6 +110,7 @@ pub fn generate_frames(seq: &[u8], table: &GeneticCode) -> Vec<QueryFrame> {
                 aa_seq,
                 aa_len,
                 orig_len: seq_len,
+                seg_masks: Vec::new(),
             });
         }
     }

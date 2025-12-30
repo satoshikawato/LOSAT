@@ -1,0 +1,8 @@
+error: unexpected argument 'false' found
+
+Usage: losat tblastx [OPTIONS] --query <QUERY> --subject <SUBJECT>
+
+For more information, try '--help'.
+Command exited with non-zero status 2
+0.00user 0.00system 0:00.04elapsed 20%CPU (0avgtext+0avgdata 3152maxresident)k
+2784inputs+0outputs (13major+133minor)pagefaults 0swaps

@@ -68,3 +68,4 @@ NCBIスタイルのeven-gap linkingを正しく実装すると、E-value計算�
 - NCBI: `ncbi-blast/c++/src/algo/blast/core/link_hsps.c`
 - LOSAT: `LOSAT/src/stats/sum_statistics.rs`（関数は実装済み）
 
+

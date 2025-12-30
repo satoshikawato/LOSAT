@@ -19,3 +19,4 @@ C:\Users\kawato\Documents\GitHub\ncbi-blast
 がんばろう！
 ```
 
+

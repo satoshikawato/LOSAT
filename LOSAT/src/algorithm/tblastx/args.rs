@@ -36,7 +36,8 @@ pub struct TblastxArgs {
     pub dust_linker: usize,
     
     // SEG filter options for masking low-complexity regions in amino acid sequences
-    #[arg(long, default_value_t = true)]
+    // NOTE: Default is false due to a release build crash bug (works in debug builds)
+    #[arg(long, default_value_t = false)]
     pub seg: bool,
     #[arg(long, default_value_t = 12)]
     pub seg_window: usize,

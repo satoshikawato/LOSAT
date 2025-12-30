@@ -8,27 +8,27 @@ use LOSAT::utils::dust::MaskedInterval;
 #[test]
 fn test_encode_aa_kmer_basic() {
     // Amino acid indices in NCBI matrix order: A=0, R=1, N=2
-    // 24^3 = 13,824 possible k-mers (excluding stop codon 24)
+    // NCBI-style lookup index uses bit-shift encoding (charsize=5 for 0..=23).
     let seq = [0u8, 1u8, 2u8];
     let code = encode_aa_kmer(&seq, 0);
-    assert_eq!(code, Some(0 * 576 + 1 * 24 + 2)); // 26
+    assert_eq!(code, Some((0 << 10) | (1 << 5) | 2)); // 34
 }
 
 #[test]
 fn test_encode_aa_kmer_different_positions() {
     let seq = [0u8, 1u8, 2u8, 3u8, 4u8, 5u8]; // ARNDCQ in NCBI order
     
-    // ARN = 0*576 + 1*24 + 2 = 26
+    // ARN = (0<<10) | (1<<5) | 2 = 34
     let code1 = encode_aa_kmer(&seq, 0);
-    assert_eq!(code1, Some(26));
+    assert_eq!(code1, Some((0 << 10) | (1 << 5) | 2));
     
-    // RND = 1*576 + 2*24 + 3 = 627
+    // RND = (1<<10) | (2<<5) | 3 = 1091
     let code2 = encode_aa_kmer(&seq, 1);
-    assert_eq!(code2, Some(627));
+    assert_eq!(code2, Some((1 << 10) | (2 << 5) | 3));
     
-    // NDC = 2*576 + 3*24 + 4 = 1228
+    // NDC = (2<<10) | (3<<5) | 4 = 2148
     let code3 = encode_aa_kmer(&seq, 2);
-    assert_eq!(code3, Some(1228));
+    assert_eq!(code3, Some((2 << 10) | (3 << 5) | 4));
 }
 
 #[test]
@@ -87,11 +87,11 @@ fn test_encode_aa_kmer_max_values() {
     // X=23, Z=22, J=21
     let seq = [23u8, 22u8, 21u8];
     let code = encode_aa_kmer(&seq, 0);
-    // 23*576 + 22*24 + 21 = 13,248 + 528 + 21 = 13,797
-    assert_eq!(code, Some(23 * 576 + 22 * 24 + 21));
+    // (23<<10) | (22<<5) | 21 = 24,277
+    assert_eq!(code, Some((23 << 10) | (22 << 5) | 21));
     
-    // Verify it's within table size (24^3 = 13,824)
-    assert!(code.unwrap() < 13824);
+    // Verify it's within backbone size (max index + 1 for 0..=23 with charsize=5)
+    assert!(code.unwrap() < 24_312);
 }
 
 #[test]
@@ -108,8 +108,8 @@ fn test_build_direct_lookup_basic() {
     
     let lookup = build_direct_lookup(&queries, &query_masks);
     
-    // Verify table size (24^3 = 13,824 for amino acids 0-23, excluding stop codon)
-    assert_eq!(lookup.len(), 13824);
+    // Verify table size (NCBI-style backbone size for 0..=23 with charsize=5)
+    assert_eq!(lookup.len(), 24_312);
     
     // Check that some k-mers were found
     let total_hits: usize = lookup.iter().map(|bucket| bucket.len()).sum();

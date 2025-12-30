@@ -156,3 +156,4 @@ fn test_diagnostic_output_formatting_nucleotide() {
     counters.print_summary(20);
 }
 
+

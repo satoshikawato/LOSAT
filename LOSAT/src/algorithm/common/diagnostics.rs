@@ -16,13 +16,17 @@ pub fn diagnostics_enabled() -> bool {
 }
 
 /// Base diagnostic counters shared by all alignment types
-#[derive(Default)]
 pub struct BaseDiagnosticCounters {
     // Seed stage
     pub kmer_matches: AtomicUsize,
     pub seeds_low_score: AtomicUsize,
     pub seeds_two_hit_failed: AtomicUsize,  // Seeds that don't satisfy two-hit requirement (but still extended)
     pub seeds_passed: AtomicUsize,
+    // Seed score statistics (for analyzing seed filtering)
+    pub seed_score_min: AtomicI32,  // Minimum seed score seen
+    pub seed_score_max: AtomicI32,  // Maximum seed score seen
+    pub seed_score_sum: AtomicUsize, // Sum of seed scores (for average calculation)
+    pub seed_score_count: AtomicUsize, // Number of seeds with score tracking
     // Seed distribution tracking (for two-hit analysis)
     pub seeds_first_hit: AtomicUsize,      // First seed on a diagonal (no previous seed)
     pub seeds_second_hit_window: AtomicUsize, // Second seed within window (two-hit satisfied)
@@ -51,6 +55,41 @@ pub struct BaseDiagnosticCounters {
     pub hsps_in_merged_clusters: AtomicUsize, // Total HSPs that were part of merged clusters
     // HSP culling diagnostics
     pub hsps_culled_dominated: AtomicUsize, // HSPs culled by domination test
+}
+
+impl Default for BaseDiagnosticCounters {
+    fn default() -> Self {
+        Self {
+            kmer_matches: AtomicUsize::new(0),
+            seeds_low_score: AtomicUsize::new(0),
+            seeds_two_hit_failed: AtomicUsize::new(0),
+            seeds_passed: AtomicUsize::new(0),
+            seeds_first_hit: AtomicUsize::new(0),
+            seeds_second_hit_window: AtomicUsize::new(0),
+            seeds_second_hit_too_far: AtomicUsize::new(0),
+            seeds_second_hit_overlap: AtomicUsize::new(0),
+            mask_updates: AtomicUsize::new(0),
+            seeds_masked: AtomicUsize::new(0),
+            self_comparisons: AtomicUsize::new(0),
+            ungapped_extensions: AtomicUsize::new(0),
+            ungapped_one_hit_extensions: AtomicUsize::new(0),
+            ungapped_two_hit_extensions: AtomicUsize::new(0),
+            ungapped_low_score: AtomicUsize::new(0),
+            extension_total_length: AtomicUsize::new(0),
+            extension_max_length: AtomicUsize::new(0),
+            hsps_before_chain: AtomicUsize::new(0),
+            hsps_after_chain: AtomicUsize::new(0),
+            hsps_after_overlap_filter: AtomicUsize::new(0),
+            clusters_single: AtomicUsize::new(0),
+            clusters_merged: AtomicUsize::new(0),
+            hsps_in_merged_clusters: AtomicUsize::new(0),
+            hsps_culled_dominated: AtomicUsize::new(0),
+            seed_score_min: AtomicI32::new(i32::MAX),
+            seed_score_max: AtomicI32::new(i32::MIN),
+            seed_score_sum: AtomicUsize::new(0),
+            seed_score_count: AtomicUsize::new(0),
+        }
+    }
 }
 
 /// Diagnostic counters for protein/translated alignments (TBLASTX)
@@ -113,6 +152,29 @@ impl ProteinDiagnosticCounters {
             "  Seeds filtered (low score): {}",
             self.base.seeds_low_score.load(AtomicOrdering::Relaxed)
         );
+        // Seed score statistics
+        let seed_score_count = self.base.seed_score_count.load(AtomicOrdering::Relaxed);
+        if seed_score_count > 0 {
+            let seed_score_min = self.base.seed_score_min.load(AtomicOrdering::Relaxed);
+            let seed_score_max = self.base.seed_score_max.load(AtomicOrdering::Relaxed);
+            let seed_score_sum = self.base.seed_score_sum.load(AtomicOrdering::Relaxed);
+            let seed_score_avg = seed_score_sum as f64 / seed_score_count as f64;
+            eprintln!("  Seed score statistics:");
+            eprintln!(
+                "    Count:                      {}",
+                seed_score_count
+            );
+            if seed_score_min != i32::MAX && seed_score_max != i32::MIN {
+                eprintln!(
+                    "    Range:                      {} - {}",
+                    seed_score_min, seed_score_max
+                );
+                eprintln!(
+                    "    Average:                    {:.2}",
+                    seed_score_avg
+                );
+            }
+        }
         eprintln!(
             "  Seeds suppressed (mask):    {}",
             self.base.seeds_masked.load(AtomicOrdering::Relaxed)

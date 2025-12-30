@@ -66,3 +66,4 @@ fn test_effective_search_space_ncbi_comparison() {
     assert!(search_space.length_adjustment < query_len as i64);
 }
 
+

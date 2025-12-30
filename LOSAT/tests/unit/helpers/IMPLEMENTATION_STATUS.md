@@ -88,3 +88,4 @@ effective_space = effective_query_len * effective_db_len
 - NCBI BLASTとの完全一致を検証
 - 回帰を防ぐ
 
+

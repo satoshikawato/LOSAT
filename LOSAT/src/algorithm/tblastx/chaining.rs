@@ -7,7 +7,7 @@ use crate::common::Hit;
 use crate::stats::KarlinParams;
 use rustc_hash::FxHashMap;
 use std::cmp::Ordering;
-use std::sync::atomic::{AtomicUsize, Ordering as AtomicOrdering};
+use std::sync::atomic::Ordering as AtomicOrdering;
 use super::constants::{MAX_DIAG_DRIFT_AA, MAX_GAP_AA};
 use super::diagnostics::DiagnosticCounters;
 
@@ -29,6 +29,32 @@ pub struct ExtendedHit {
     pub q_orig_len: usize,
     pub s_orig_len: usize,
     pub from_gapped: bool,
+}
+
+/// Lightweight ungapped HSP used in the *hot path* before final output formatting.
+///
+/// This avoids per-hit `String` cloning and expensive identity/bit-score/e-value
+/// computation while scanning/extension is running.
+#[derive(Debug, Clone)]
+pub struct UngappedHit {
+    /// Query record index (into `query_ids`)
+    pub q_idx: u32,
+    /// Subject record index (into `subject_ids`)
+    pub s_idx: u32,
+    /// Query context index (into `tblastx::lookup::QueryContext` vector)
+    pub ctx_idx: usize,
+    /// Subject frame index within `generate_frames()` output for this subject
+    pub s_f_idx: usize,
+    pub q_frame: i8,
+    pub s_frame: i8,
+    pub q_aa_start: usize,
+    pub q_aa_end: usize,
+    pub s_aa_start: usize,
+    pub s_aa_end: usize,
+    pub q_orig_len: usize,
+    pub s_orig_len: usize,
+    pub raw_score: i32,
+    pub e_value: f64,
 }
 
 /// Sequence data for re-alignment during HSP chaining

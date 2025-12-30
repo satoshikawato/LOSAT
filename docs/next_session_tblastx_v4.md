@@ -125,3 +125,4 @@ comm -12 /tmp/losat_coords.txt /tmp/ncbi_coords.txt | wc -l  # Common
 2. **マスキングが鍵**: 同じ領域で複数ヒットを出力するかどうかが大きな違い
 3. **git状態**: `MIN_UNGAPPED_SCORE`, `X_DROP_UNGAPPED`, `sum_stats_linking.rs` が変更済み
 
+

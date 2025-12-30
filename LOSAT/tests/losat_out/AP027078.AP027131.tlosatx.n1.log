@@ -1,11 +1,17 @@
 Reading queries...
-Applying SEG filter (window=12, locut=2.2, hicut=2.5)...
-SEG masked 437160 aa (35.51%) of 1231240 total aa across all frames
-Combined DNA masks: 502304 bases (81.59%)
 Building lookup table...
-Reading subject file...
-Searching 1 Queries vs 1 Subjects...
 
-real	0m58.682s
-user	0m58.572s
-sys	0m0.050s
+=== NCBI Backbone Lookup Table ===
+Contexts: 6
+Backbone size: 24312 cells (0.4 MB)
+Non-empty cells: 8841
+Total entries: 2927743
+Overflow size: 2927743 (11.7 MB)
+==================================
+
+Reading subjects...
+Searching 1 queries vs 1 subjects...
+
+real	0m12.889s
+user	0m12.789s
+sys	0m0.030s

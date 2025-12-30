@@ -35,6 +35,16 @@ pub struct TblastxArgs {
     #[arg(long, default_value_t = 1)]
     pub dust_linker: usize,
     
+    // SEG filter options for masking low-complexity regions in amino acid sequences
+    #[arg(long, default_value_t = true)]
+    pub seg: bool,
+    #[arg(long, default_value_t = 12)]
+    pub seg_window: usize,
+    #[arg(long, default_value_t = 2.2)]
+    pub seg_locut: f64,
+    #[arg(long, default_value_t = 2.5)]
+    pub seg_hicut: f64,
+    
     /// Use NCBI BLAST compatible parameters (TWO_HIT_WINDOW=16, X_DROP_UNGAPPED=7)
     /// When enabled, uses stricter parameters that match NCBI BLAST+ defaults
     #[arg(long, default_value_t = false)]

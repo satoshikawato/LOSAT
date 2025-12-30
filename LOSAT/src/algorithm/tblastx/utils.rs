@@ -15,6 +15,7 @@ use crate::config::{ProteinScoringSpec, ScoringMatrix};
 use crate::stats::{lookup_protein_params, search_space::SearchSpace};
 use crate::utils::dust::{DustMasker, MaskedInterval};
 use crate::utils::genetic_code::GeneticCode;
+use crate::utils::seg::SegMasker;
 
 use super::args::TblastxArgs;
 use super::constants::{
@@ -87,7 +88,8 @@ pub fn run(args: TblastxArgs) -> Result<()> {
         })
         .collect();
 
-    let query_masks: Vec<Vec<MaskedInterval>> = if args.dust {
+    // Apply DUST filter to DNA sequences (if enabled)
+    let mut query_masks: Vec<Vec<MaskedInterval>> = if args.dust {
         let masker = DustMasker::new(args.dust_level, args.dust_window, args.dust_linker);
         queries_raw
             .iter()
@@ -97,7 +99,8 @@ pub fn run(args: TblastxArgs) -> Result<()> {
         queries_raw.iter().map(|_| Vec::new()).collect()
     };
 
-    let query_frames: Vec<Vec<QueryFrame>> = queries_raw
+    // Generate query frames
+    let mut query_frames: Vec<Vec<QueryFrame>> = queries_raw
         .iter()
         .map(|r| {
             let mut frames = generate_frames(r.seq(), &query_code);
@@ -111,6 +114,135 @@ pub fn run(args: TblastxArgs) -> Result<()> {
         // Safety: if the query is too short, a frame translation may be empty; prevent silent no-op searches.
         if query_frames.iter().all(|v| v.is_empty()) {
             anyhow::bail!("--only-qframe filtered out all query frames (query too short?)");
+        }
+    }
+
+    // Apply SEG filter to translated amino acid sequences (if enabled)
+    // SEG masks low-complexity regions by replacing amino acids with 'X' (code 23)
+    // This causes extensions to naturally terminate at masked regions (X has low scores)
+    // NCBI BLAST Reference: blast_filter.c - SEG replaces residues with 'X'
+    const AA_X: u8 = 23; // NCBI encoding for 'X' (unknown amino acid)
+    
+    if args.seg {
+        eprintln!(
+            "Applying SEG filter (window={}, locut={}, hicut={})...",
+            args.seg_window, args.seg_locut, args.seg_hicut
+        );
+        let seg_masker = SegMasker::new(args.seg_window, args.seg_locut, args.seg_hicut);
+        
+        let mut total_aa_masked = 0usize;
+        let mut total_aa = 0usize;
+        
+        for (q_idx, frames) in query_frames.iter_mut().enumerate() {
+            let orig_len = queries_raw[q_idx].seq().len();
+            let mut seg_masks_dna: Vec<MaskedInterval> = Vec::new();
+            
+            for frame in frames.iter_mut() {
+                // Apply SEG to amino acid sequence (skip sentinels at positions 0 and len-1)
+                // aa_seq layout: [SENTINEL, aa0, aa1, ..., aaN-1, SENTINEL]
+                // Extract actual amino acids (positions 1 to len-2)
+                if frame.aa_seq.len() < 3 {
+                    continue; // Need at least sentinel + 1 AA + sentinel
+                }
+                
+                total_aa += frame.aa_len;
+                
+                // Apply SEG filter to get masked intervals
+                let aa_seq_slice = &frame.aa_seq[1..frame.aa_seq.len() - 1];
+                let aa_masks = seg_masker.mask_sequence(aa_seq_slice);
+                
+                // Replace masked amino acids with 'X' in the aa_seq
+                // This causes extensions to naturally terminate at masked regions
+                for aa_mask in &aa_masks {
+                    // aa_mask coordinates are 0-indexed logical positions
+                    // In aa_seq, position i corresponds to aa_seq[i + 1] (due to leading sentinel)
+                    for pos in aa_mask.start..aa_mask.end {
+                        if pos + 1 < frame.aa_seq.len() - 1 {
+                            frame.aa_seq[pos + 1] = AA_X;
+                            total_aa_masked += 1;
+                        }
+                    }
+                }
+                
+                // Also convert AA mask coordinates to DNA coordinates for lookup table filtering
+                for aa_mask in aa_masks {
+                    let (dna_start, dna_end) = if frame.frame > 0 {
+                        // Forward frame: frame 1,2,3 have offset 0,1,2
+                        let offset = (frame.frame - 1) as usize;
+                        let dna_start = aa_mask.start * 3 + offset;
+                        let dna_end = (aa_mask.end * 3 + offset).min(orig_len);
+                        (dna_start, dna_end)
+                    } else {
+                        // Reverse frame: -1,-2,-3
+                        let offset = (-frame.frame - 1) as usize;
+                        let dna_end = orig_len - (aa_mask.start * 3 + offset);
+                        let dna_start = orig_len.saturating_sub(aa_mask.end * 3 + offset);
+                        (dna_start.max(0), dna_end)
+                    };
+                    
+                    if dna_start < dna_end {
+                        seg_masks_dna.push(MaskedInterval::new(dna_start, dna_end));
+                    }
+                }
+            }
+            
+            // Merge SEG masks with DUST masks for lookup table filtering
+            if !seg_masks_dna.is_empty() {
+                // Sort by start position
+                seg_masks_dna.sort_by_key(|m| m.start);
+                
+                // Merge overlapping or adjacent intervals
+                let mut merged: Vec<MaskedInterval> = Vec::new();
+                for mask in seg_masks_dna {
+                    if let Some(last) = merged.last_mut() {
+                        if mask.start <= last.end + 1 {
+                            last.end = last.end.max(mask.end);
+                        } else {
+                            merged.push(mask);
+                        }
+                    } else {
+                        merged.push(mask);
+                    }
+                }
+                
+                // Merge with existing DUST masks
+                let mut all_masks = query_masks[q_idx].clone();
+                all_masks.extend(merged);
+                
+                // Sort and merge all masks together
+                all_masks.sort_by_key(|m| m.start);
+                let mut final_masks: Vec<MaskedInterval> = Vec::new();
+                for mask in all_masks {
+                    if let Some(last) = final_masks.last_mut() {
+                        if mask.start <= last.end + 1 {
+                            last.end = last.end.max(mask.end);
+                        } else {
+                            final_masks.push(mask);
+                        }
+                    } else {
+                        final_masks.push(mask);
+                    }
+                }
+                
+                query_masks[q_idx] = final_masks;
+            }
+        }
+        
+        // Print statistics
+        let total_masked_dna: usize = query_masks.iter().map(|m| m.iter().map(|i| i.end - i.start).sum::<usize>()).sum();
+        let total_bases: usize = queries_raw.iter().map(|r| r.seq().len()).sum();
+        if total_bases > 0 {
+            eprintln!(
+                "SEG masked {} aa ({:.2}%) of {} total aa across all frames",
+                total_aa_masked,
+                100.0 * total_aa_masked as f64 / total_aa as f64,
+                total_aa
+            );
+            eprintln!(
+                "Combined DNA masks: {} bases ({:.2}%)",
+                total_masked_dna,
+                100.0 * total_masked_dna as f64 / total_bases as f64
+            );
         }
     }
 

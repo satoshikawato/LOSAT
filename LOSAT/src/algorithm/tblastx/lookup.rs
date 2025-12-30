@@ -201,6 +201,10 @@ pub struct QueryContext {
     pub f_idx: u8,
     pub frame: i8,
     pub aa_seq: Vec<u8>,
+    /// Unmasked query amino acid sequence (NCBI `sequence_nomask` semantics), including sentinels.
+    /// Present only when query filtering (e.g. SEG) was applied and the working `aa_seq`
+    /// was overwritten with X at masked positions.
+    pub aa_seq_nomask: Option<Vec<u8>>,
     pub aa_len: usize,
     pub orig_len: usize,
     pub frame_base: i32,
@@ -297,6 +301,7 @@ pub fn build_ncbi_lookup(
                 f_idx: f_idx as u8,
                 frame: frame.frame,
                 aa_seq: frame.aa_seq.clone(),
+                aa_seq_nomask: frame.aa_seq_nomask.clone(),
                 aa_len: frame.aa_len,
                 orig_len: frame.orig_len,
                 frame_base: base,

@@ -4,14 +4,10 @@ Building lookup table...
 === NCBI Backbone Lookup Table ===
 Contexts: 6
 Backbone size: 24312 cells (0.4 MB)
-Non-empty cells: 9167
-Total entries: 2885672
-Overflow size: 2885662 (11.5 MB)
+Non-empty cells: 9245
+Total entries: 2876460
+Overflow size: 2876450 (11.5 MB)
 ==================================
 
 Reading subjects...
 Searching 1 queries vs 1 subjects...
-
-real	0m24.224s
-user	0m24.145s
-sys	0m0.010s

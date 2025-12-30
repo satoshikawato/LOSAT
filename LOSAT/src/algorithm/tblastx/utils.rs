@@ -222,6 +222,34 @@ pub fn run(args: TblastxArgs) -> Result<()> {
                     for m in seg.mask_sequence(&frame.aa_seq[1..frame.aa_seq.len()-1]) {
                         frame.seg_masks.push((m.start, m.end));
                     }
+
+                    // NCBI BLAST query masking semantics (SEG, etc.): keep an unmasked copy
+                    // (`sequence_nomask`), then overwrite masked residues in the working
+                    // query sequence buffer with X.
+                    //
+                    // NCBI reference (verbatim):
+                    //   const Uint1 kProtMask = 21;     /* X in NCBISTDAA */
+                    //   query_blk->sequence_start_nomask = BlastMemDup(query_blk->sequence_start, total_length);
+                    //   query_blk->sequence_nomask = query_blk->sequence_start_nomask + 1;
+                    //   buffer[index] = kMaskingLetter;
+                    //
+                    // LOSAT note: we encode amino acids in NCBI packed matrix order
+                    // (ARNDCQEGHILKMFPSTWYVBJZX*) where X == 23, and we include
+                    // sentinel bytes at aa_seq[0] and aa_seq[len-1].
+                    if !frame.seg_masks.is_empty() {
+                        if frame.aa_seq_nomask.is_none() {
+                            frame.aa_seq_nomask = Some(frame.aa_seq.clone());
+                        }
+                        const X_MASK_NCBI_MATRIX: u8 = 23;
+                        let raw_end_exclusive = frame.aa_seq.len().saturating_sub(1); // keep last sentinel untouched
+                        for &(s, e) in &frame.seg_masks {
+                            let raw_s = 1usize.saturating_add(s);
+                            let raw_e = 1usize.saturating_add(e).min(raw_end_exclusive);
+                            for pos in raw_s..raw_e {
+                                frame.aa_seq[pos] = X_MASK_NCBI_MATRIX;
+                            }
+                        }
+                    }
                 }
             }
         }
@@ -469,12 +497,20 @@ pub fn run(args: TblastxArgs) -> Result<()> {
                     let s_frame = &s_frames[h.s_f_idx];
 
                     // Compute identity/mismatch on demand (final hits only)
+                    // NCBI computes identities using the *unmasked* query sequence buffer
+                    // (`sequence_nomask`), even when the working query sequence was masked
+                    // (e.g., SEG) to influence seeding/extension.
+                    //
+                    // NCBI reference (verbatim):
+                    //   const Uint1* query_nomask = query_blk->sequence_nomask +
+                    //       query_info->contexts[context].query_offset;
                     let len = h.q_aa_end.saturating_sub(h.q_aa_start);
                     let q0 = h.q_aa_start + 1; // +1 for sentinel
                     let s0 = h.s_aa_start + 1; // +1 for sentinel
+                    let q_seq_nomask: &[u8] = ctx.aa_seq_nomask.as_deref().unwrap_or(&ctx.aa_seq);
                     let mut matches = 0usize;
                     for k in 0..len {
-                        if ctx.aa_seq[q0 + k] == s_frame.aa_seq[s0 + k] {
+                        if q_seq_nomask[q0 + k] == s_frame.aa_seq[s0 + k] {
                             matches += 1;
                         }
                     }

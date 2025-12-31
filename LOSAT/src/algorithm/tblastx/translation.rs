@@ -29,6 +29,15 @@ pub struct QueryFrame {
     /// 
     /// Reference: ncbi-blast/c++/src/algo/blast/core/blast_util.c:438-453
     pub aa_seq: Vec<u8>,
+    /// Unmasked amino acid sequence (NCBI `sequence_nomask` semantics), including sentinels.
+    ///
+    /// NCBI BLAST preserves a copy of the unmasked query sequence buffer, then overwrites
+    /// masked residues in the working sequence with X.
+    ///
+    /// NCBI reference (verbatim):
+    ///   query_blk->sequence_start_nomask = BlastMemDup(query_blk->sequence_start, total_length);
+    ///   query_blk->sequence_nomask = query_blk->sequence_start_nomask + 1;
+    pub aa_seq_nomask: Option<Vec<u8>>,
     /// Number of actual amino acids (excluding sentinels)
     pub aa_len: usize,
     /// Original DNA sequence length
@@ -95,6 +104,7 @@ pub fn generate_frames(seq: &[u8], table: &GeneticCode) -> Vec<QueryFrame> {
             frames.push(QueryFrame {
                 frame: (i as i8) + 1,
                 aa_seq,
+                aa_seq_nomask: None,
                 aa_len,
                 orig_len: seq_len,
                 seg_masks: Vec::new(),
@@ -108,6 +118,7 @@ pub fn generate_frames(seq: &[u8], table: &GeneticCode) -> Vec<QueryFrame> {
             frames.push(QueryFrame {
                 frame: -((i as i8) + 1),
                 aa_seq,
+                aa_seq_nomask: None,
                 aa_len,
                 orig_len: seq_len,
                 seg_masks: Vec::new(),

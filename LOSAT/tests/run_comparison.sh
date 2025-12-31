@@ -91,19 +91,19 @@ echo "Starting BLAST+ commands..."
 # --- TBLASTX Commands (gencode 4) ---
 
 # NZ_CP006932 self
-(time tblastx -query ./fasta/NZ_CP006932.fasta -subject ./fasta/NZ_CP006932.fasta -out ./blast_out/NZ_CP006932.NZ_CP006932.tblastx.n1.out -query_gencode 4 -db_gencode 4 -num_threads 32 -outfmt 7 )&>./blast_out/NZ_CP006932.NZ_CP006932.tblastx.n1.log
+(time tblastx -query ./fasta/NZ_CP006932.fasta -subject ./fasta/NZ_CP006932.fasta -out ./blast_out/NZ_CP006932.NZ_CP006932.tblastx.n1.out -query_gencode 4 -db_gencode 4 -num_threads 1 -outfmt 7 )&>./blast_out/NZ_CP006932.NZ_CP006932.tblastx.n1.log
 
 # AP027132 vs NZ_CP006932
-(time tblastx -query ./fasta/AP027132.fasta -subject ./fasta/NZ_CP006932.fasta -out ./blast_out/AP027132.NZ_CP006932.tblastx.n1.out -query_gencode 4 -db_gencode 4 -num_threads 32 -outfmt 7 )&>./blast_out/AP027132.NZ_CP006932.tblastx.n1.log
+(time tblastx -query ./fasta/AP027132.fasta -subject ./fasta/NZ_CP006932.fasta -out ./blast_out/AP027132.NZ_CP006932.tblastx.n1.out -query_gencode 4 -db_gencode 4 -num_threads 1 -outfmt 7 )&>./blast_out/AP027132.NZ_CP006932.tblastx.n1.log
 
 # AP027078 vs AP027131
-(time tblastx -query ./fasta/AP027078.fasta -subject ./fasta/AP027131.fasta -out ./blast_out/AP027078.AP027131.tblastx.n1.out -query_gencode 4 -db_gencode 4 -num_threads 32 -outfmt 7 )&>./blast_out/AP027078.AP027131.tblastx.n1.log
+(time tblastx -query ./fasta/AP027078.fasta -subject ./fasta/AP027131.fasta -out ./blast_out/AP027078.AP027131.tblastx.n1.out -query_gencode 4 -db_gencode 4 -num_threads 1 -outfmt 7 )&>./blast_out/AP027078.AP027131.tblastx.n1.log
 
 # AP027131 vs AP027133
-(time tblastx -query ./fasta/AP027131.fasta -subject ./fasta/AP027133.fasta -out ./blast_out/AP027131.AP027133.tblastx.n1.out -query_gencode 4 -db_gencode 4 -num_threads 32 -outfmt 7 )&>./blast_out/AP027131.AP027133.tblastx.n1.log
+(time tblastx -query ./fasta/AP027131.fasta -subject ./fasta/AP027133.fasta -out ./blast_out/AP027131.AP027133.tblastx.n1.out -query_gencode 4 -db_gencode 4 -num_threads 1 -outfmt 7 )&>./blast_out/AP027131.AP027133.tblastx.n1.log
 
 # AP027133 vs AP027132
-(time tblastx -query ./fasta/AP027133.fasta -subject ./fasta/AP027132.fasta -out ./blast_out/AP027133.AP027132.tblastx.n1.out -query_gencode 4 -db_gencode 4 -num_threads 32 -outfmt 7 )&>./blast_out/AP027133.AP027132.tblastx.n1.log
+(time tblastx -query ./fasta/AP027133.fasta -subject ./fasta/AP027132.fasta -out ./blast_out/AP027133.AP027132.tblastx.n1.out -query_gencode 4 -db_gencode 4 -num_threads 1 -outfmt 7 )&>./blast_out/AP027133.AP027132.tblastx.n1.log
 
 
 # --- BLASTN Commands (Default / Megablast) ---

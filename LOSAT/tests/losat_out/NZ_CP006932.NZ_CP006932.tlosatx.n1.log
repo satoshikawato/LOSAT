@@ -1,7 +1,7 @@
 Reading queries (neighbor map mode)...
 Building neighbor lookup...
 Pre-computing filtered neighbor map (threshold=13)...
-Filtered neighbor map computed in 12.1806ms
+Filtered neighbor map computed in 14.1085ms
   Non-empty entries: 13005
   Total neighbor pairs: 184235
   Avg neighbors per k-mer: 14.2
@@ -18,3 +18,4 @@ Searching 1 queries vs 1 subjects (neighbor map mode)...
   X's near right boundary [41873-41903]: [41874, 41875, 41876, 41877, 41878, 41879, 41880, 41881, 41882, 41883, 41884, 41885, 41886, 41887, 41888, 41889]
 === Stage Counters ===
 [1] Raw ungapped hits (after extension): 232359
+[1b] After endpoint purge: 232275 hits (removed 84)

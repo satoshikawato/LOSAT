@@ -980,6 +980,86 @@ pub fn run(args: TblastxArgs) -> Result<()> {
     Ok(())
 }
 
+/// NCBI: Blast_HSPListPurgeHSPsWithCommonEndpoints
+/// Remove HSPs that share the same start OR end coordinates.
+/// Reference: blast_hits.c:2455-2534
+/// This reduces redundant HSPs before sum_stats_linking.
+fn purge_hsps_with_common_endpoints(hits: &mut Vec<super::chaining::UngappedHit>) {
+    if hits.len() <= 1 {
+        return;
+    }
+    
+    // Phase 1: Remove HSPs with common start points
+    // Sort by (q_frame, s_frame, q_aa_start, s_aa_start, score DESC)
+    hits.sort_by(|a, b| {
+        a.q_frame.cmp(&b.q_frame)
+            .then(a.s_frame.cmp(&b.s_frame))
+            .then(a.q_aa_start.cmp(&b.q_aa_start))
+            .then(a.s_aa_start.cmp(&b.s_aa_start))
+            .then(b.raw_score.cmp(&a.raw_score)) // higher score first
+    });
+    
+    let mut write_idx = 0;
+    let mut read_idx = 0;
+    while read_idx < hits.len() {
+        // Keep the first HSP of each group (highest score due to sort)
+        hits.swap(write_idx, read_idx);
+        let kept = &hits[write_idx];
+        let kept_qf = kept.q_frame;
+        let kept_sf = kept.s_frame;
+        let kept_qs = kept.q_aa_start;
+        let kept_ss = kept.s_aa_start;
+        write_idx += 1;
+        read_idx += 1;
+        
+        // Skip duplicates with same start point
+        while read_idx < hits.len() {
+            let h = &hits[read_idx];
+            if h.q_frame == kept_qf && h.s_frame == kept_sf 
+                && h.q_aa_start == kept_qs && h.s_aa_start == kept_ss {
+                read_idx += 1;
+            } else {
+                break;
+            }
+        }
+    }
+    hits.truncate(write_idx);
+    
+    // Phase 2: Remove HSPs with common end points
+    // Sort by (q_frame, s_frame, q_aa_end, s_aa_end, score DESC)
+    hits.sort_by(|a, b| {
+        a.q_frame.cmp(&b.q_frame)
+            .then(a.s_frame.cmp(&b.s_frame))
+            .then(a.q_aa_end.cmp(&b.q_aa_end))
+            .then(a.s_aa_end.cmp(&b.s_aa_end))
+            .then(b.raw_score.cmp(&a.raw_score)) // higher score first
+    });
+    
+    write_idx = 0;
+    read_idx = 0;
+    while read_idx < hits.len() {
+        hits.swap(write_idx, read_idx);
+        let kept = &hits[write_idx];
+        let kept_qf = kept.q_frame;
+        let kept_sf = kept.s_frame;
+        let kept_qe = kept.q_aa_end;
+        let kept_se = kept.s_aa_end;
+        write_idx += 1;
+        read_idx += 1;
+        
+        while read_idx < hits.len() {
+            let h = &hits[read_idx];
+            if h.q_frame == kept_qf && h.s_frame == kept_sf 
+                && h.q_aa_end == kept_qe && h.s_aa_end == kept_se {
+                read_idx += 1;
+            } else {
+                break;
+            }
+        }
+    }
+    hits.truncate(write_idx);
+}
+
 /// Run TBLASTX with pre-computed neighbor map using subject-side indexing.
 /// This approach:
 /// 1. Index query k-mers: query_lookup[kmer] = [(q_idx, f_idx, pos), ...]
@@ -1390,9 +1470,19 @@ fn run_with_neighbor_map(args: TblastxArgs) -> Result<()> {
 
     bar.finish();
 
-    let all_ungapped = all_ungapped.into_inner().unwrap();
+    let mut all_ungapped = all_ungapped.into_inner().unwrap();
     eprintln!("=== Stage Counters ===");
     eprintln!("[1] Raw ungapped hits (after extension): {}", all_ungapped.len());
+
+    // NCBI: Blast_HSPListPurgeHSPsWithCommonEndpoints
+    // Remove HSPs with common endpoints to reduce redundancy
+    // Reference: blast_hits.c:2455-2534
+    let before_purge = all_ungapped.len();
+    purge_hsps_with_common_endpoints(&mut all_ungapped);
+    if all_ungapped.len() < before_purge {
+        eprintln!("[1b] After endpoint purge: {} hits (removed {})", 
+            all_ungapped.len(), before_purge - all_ungapped.len());
+    }
 
     // Apply sum-stats linking (assigns E-values to chains)
     let linked_hits = apply_sum_stats_even_gap_linking(all_ungapped, &params);

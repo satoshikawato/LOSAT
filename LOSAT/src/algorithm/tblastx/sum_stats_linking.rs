@@ -10,6 +10,7 @@
 //! 6. Dual-index approach: index=0 (small gaps), index=1 (large gaps)
 
 use rustc_hash::FxHashMap;
+use rayon::prelude::*;
 use crate::stats::sum_statistics::{
     gap_decay_divisor, small_gap_sum_e, large_gap_sum_e, normalize_score,
     defaults::{GAP_DECAY_RATE_UNGAPPED, GAP_SIZE, OVERLAP_SIZE, GAP_PROB_UNGAPPED},
@@ -19,7 +20,10 @@ use crate::stats::search_space::SearchSpace;
 
 use super::chaining::UngappedHit;
 
-type ContextKey = (u32, u32, i8, i8);
+// NCBI groups by (query_context, subject_frame_sign) for linking
+// For tblastx, query_context is the query frame (1-6), subject_frame_sign is +/-
+// We extend this to include q_idx and s_idx for multi-sequence support
+type ContextKey = (u32, u32, i8, i8); // (q_idx, s_idx, q_frame, s_frame)
 
 const WINDOW_SIZE: i32 = GAP_SIZE + OVERLAP_SIZE + 1;
 const TRIM_SIZE: i32 = (OVERLAP_SIZE + 1) / 2;
@@ -119,507 +123,445 @@ pub fn apply_sum_stats_even_gap_linking(
         return hits;
     }
 
-    // Strand-based grouping (NCBI style)
-    let mut groups: FxHashMap<ContextKey, Vec<usize>> = FxHashMap::default();
-    for (idx, hit) in hits.iter().enumerate() {
+    // Group by (q_idx, s_idx, q_strand, s_strand) to match NCBI link_hsps.c
+    // NCBI groups by context/3 (query strand) and SIGN(subject.frame) (subject strand)
+    // Reference: link_hsps.c lines 524-525
+    let mut groups: FxHashMap<ContextKey, Vec<UngappedHit>> = FxHashMap::default();
+    for hit in hits {
         let q_strand: i8 = if hit.q_frame > 0 { 1 } else { -1 };
         let s_strand: i8 = if hit.s_frame > 0 { 1 } else { -1 };
         let key = (hit.q_idx, hit.s_idx, q_strand, s_strand);
-        groups.entry(key).or_default().push(idx);
+        groups.entry(key).or_default().push(hit);
+    }
+    
+    // Print group count for debugging
+    static PRINTED_GROUPS: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+    if !PRINTED_GROUPS.swap(true, std::sync::atomic::Ordering::Relaxed) {
+        eprintln!("[DEBUG] Number of (q_strand, s_strand) groups: {}", groups.len());
     }
 
-    let mut result_hits = hits;
+    // Process each group in parallel - all groups use NCBI-compliant linking
+    let results: Vec<Vec<UngappedHit>> = groups
+        .into_par_iter()
+        .map(|(_, group_hits)| {
+            link_hsp_group_ncbi(group_hits, params)
+        })
+        .collect();
+
+    results.into_iter().flatten().collect()
+}
+
+/// NCBI-style HSP linking for moderate-sized groups
+fn link_hsp_group_ncbi(
+    mut group_hits: Vec<UngappedHit>,
+    params: &KarlinParams,
+) -> Vec<UngappedHit> {
+    if group_hits.is_empty() {
+        return group_hits;
+    }
+    
+    let n = group_hits.len();
     let gap_decay_rate = GAP_DECAY_RATE_UNGAPPED;
     
-    for (_key, indices) in groups {
-        if indices.is_empty() { continue; }
+    let first_hit = &group_hits[0];
+    let q_aa_len = first_hit.q_orig_len / 3;
+    let s_aa_len = first_hit.s_orig_len / 3;
+    let search_space = SearchSpace::with_length_adjustment(q_aa_len, s_aa_len, params);
+    
+    // Debug output for first group only (to avoid spam)
+    static DEBUG_ONCE: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+    if !DEBUG_ONCE.swap(true, std::sync::atomic::Ordering::Relaxed) {
+        eprintln!("[DEBUG] link_hsp_group_ncbi first group:");
+        eprintln!("  q_aa_len={}, s_aa_len={}", q_aa_len, s_aa_len);
+        eprintln!("  effective_query_len={:.2}, effective_db_len={:.2}", 
+            search_space.effective_query_len, search_space.effective_db_len);
+        eprintln!("  effective_space={:.2e}, length_adjustment={}", 
+            search_space.effective_space, search_space.length_adjustment);
+        eprintln!("  lambda={}, k={}, logK={:.4}", params.lambda, params.k, params.k.ln());
+    }
+    
+    let (cutoffs, ignore_small_gaps) = calculate_link_hsp_cutoffs(q_aa_len, s_aa_len, params, gap_decay_rate);
+    
+    // Debug: print cutoffs for first group
+    static DEBUG_CUTOFFS: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+    if !DEBUG_CUTOFFS.swap(true, std::sync::atomic::Ordering::Relaxed) {
+        eprintln!("[DEBUG] Linking cutoffs: small_gap={}, big_gap={}, ignore_small_gaps={}", 
+            cutoffs[0], cutoffs[1], ignore_small_gaps);
+    }
 
-        let first_hit = &result_hits[indices[0]];
-        let q_aa_len = first_hit.q_orig_len / 3;
-        let s_aa_len = first_hit.s_orig_len / 3;
-        let search_space = SearchSpace::with_length_adjustment(q_aa_len, s_aa_len, params);
+    // Sort by query position DESCENDING (NCBI s_RevCompareHSPsTbx)
+    // Note: NCBI sorts by context and subject.frame first, but we've already grouped by those
+    group_hits.sort_by(|a, b| {
+        b.q_aa_start.cmp(&a.q_aa_start)
+            .then(b.q_aa_end.cmp(&a.q_aa_end))
+            .then(b.s_aa_start.cmp(&a.s_aa_start))
+            .then(b.s_aa_end.cmp(&a.s_aa_end))
+    });
+
+    // Initialize HspLink array (indices 0..n correspond to HSPs)
+    // NCBI uses 1-based indexing with lh_helper[0] as sentinel
+    // We use 0-based but handle the logic appropriately
+    let mut hsp_links: Vec<HspLink> = group_hits.iter().map(|hit| {
+        let ql = (hit.q_aa_end as i32 - hit.q_aa_start as i32).abs();
+        let sl = (hit.s_aa_end as i32 - hit.s_aa_start as i32).abs();
+        let qt = TRIM_SIZE.min(ql / 4);
+        let st = TRIM_SIZE.min(sl / 4);
+        let score = hit.raw_score;
+        let xsum_val = normalize_score(score, params.lambda, params.k.ln());
         
-        // Calculate cutoffs for both indices (NCBI link_hsps.c:492-495)
-        let (cutoffs, ignore_small_gaps) = calculate_link_hsp_cutoffs(q_aa_len, s_aa_len, params, gap_decay_rate);
+        HspLink {
+            score,
+            q_off_trim: hit.q_aa_start as i32 + qt,
+            s_off_trim: hit.s_aa_start as i32 + st,
+            q_end_trim: hit.q_aa_end as i32 - qt,
+            s_end_trim: hit.s_aa_end as i32 - st,
+            sum: [score - cutoffs[0], score - cutoffs[1]],
+            xsum: [xsum_val, xsum_val],
+            num: [1, 1],
+            link: [None, None],
+            changed: true,
+            linked_to: 0,
+        }
+    }).collect();
 
-        // Sort by query position DESCENDING (NCBI s_RevCompareHSPsTbx: link_hsps.c:359-374)
-        let mut sorted_indices = indices.clone();
-        sorted_indices.sort_by(|&a, &b| {
-            let ha = &result_hits[a];
-            let hb = &result_hits[b];
-            hb.q_aa_start.cmp(&ha.q_aa_start)
-                .then(hb.q_aa_end.cmp(&ha.q_aa_end))
-                .then(hb.s_aa_start.cmp(&ha.s_aa_start))
-                .then(hb.s_aa_end.cmp(&ha.s_aa_end))
-        });
+    // lh_helper array with sentinel at index 0
+    // Size is n+1: [sentinel, hsp0, hsp1, ..., hsp(n-1)]
+    let mut lh_helpers: Vec<LhHelper> = Vec::with_capacity(n + 1);
+    // Sentinel (NCBI lh_helper[0])
+    lh_helpers.push(LhHelper {
+        q_off_trim: 0,
+        s_off_trim: 0,
+        sum: [i32::MIN / 2, i32::MIN / 2],
+        next_larger: 0,
+    });
 
-        let n = sorted_indices.len();
+    let mut remaining = n;
+    let mut first_pass = true;
+    // NCBI: path_changed tracks whether any removed HSP had linked_to > 0
+    // If path_changed == 0, we can skip chain validation entirely
+    let mut path_changed = true;
+    let gap_prob = if ignore_small_gaps { 0.0 } else { GAP_PROB_UNGAPPED };
+
+    while remaining > 0 {
+        let mut best: [Option<usize>; 2] = [None, None];
+        let mut best_sum: [i32; 2] = [-cutoffs[0], -cutoffs[1]];
+        let mut use_current_max = false;
         
-        // Initialize HspLink array with both indices
-        let mut hsp_links: Vec<HspLink> = sorted_indices.iter().map(|&idx| {
-            let hit = &result_hits[idx];
-            let ql = (hit.q_aa_end as i32 - hit.q_aa_start as i32).abs();
-            let sl = (hit.s_aa_end as i32 - hit.s_aa_start as i32).abs();
-            let qt = TRIM_SIZE.min(ql / 4);
-            let st = TRIM_SIZE.min(sl / 4);
-            let score = hit.raw_score;
-            let xsum_val = normalize_score(score, params.lambda, params.k.ln());
-            
-            // NCBI initializes sum with (score - cutoff[index]) for each index
-            HspLink {
-                score,
-                q_off_trim: hit.q_aa_start as i32 + qt,
-                s_off_trim: hit.s_aa_start as i32 + st,
-                q_end_trim: hit.q_aa_end as i32 - qt,
-                s_end_trim: hit.s_aa_end as i32 - st,
-                sum: [score - cutoffs[0], score - cutoffs[1]],
-                xsum: [xsum_val, xsum_val],
-                num: [1, 1],
-                link: [None, None],
-                changed: true,
-                linked_to: 0,
+        // NCBI lines 597-652: Try to reuse previous max
+        if !first_pass {
+            // Find the current max sums
+            if !ignore_small_gaps {
+                for i in 0..n {
+                    if hsp_links[i].linked_to >= 0 && hsp_links[i].sum[0] >= best_sum[0] {
+                        best_sum[0] = hsp_links[i].sum[0];
+                        best[0] = Some(i);
+                    }
+                }
             }
-        }).collect();
-
-        // lh_helper array
-        let mut lh_helpers: Vec<LhHelper> = Vec::with_capacity(n);
-
-        let mut remaining = n;
-        let mut first_pass = true;
-        let mut path_changed = true;
-
-        while remaining > 0 {
-            let mut best: [Option<usize>; 2] = [None, None];
-            let mut best_sum: [i32; 2] = [i32::MIN, i32::MIN];
-            let mut use_current_max = false;
+            for i in 0..n {
+                if hsp_links[i].linked_to >= 0 && hsp_links[i].sum[1] >= best_sum[1] {
+                    best_sum[1] = hsp_links[i].sum[1];
+                    best[1] = Some(i);
+                }
+            }
             
-            if !first_pass {
-                // Find current max sum among active HSPs for both indices
+            // NCBI line 635: if(path_changed==0) use_current_max=1
+            if !path_changed {
+                // No path was changed, use these max sums directly
+                use_current_max = true;
+            } else {
+                // NCBI lines 639-650: If max path hasn't changed, we can use it
+                // Walk down best, give up if we find a removed item in path
+                use_current_max = true;
                 if !ignore_small_gaps {
-                    for i in 0..n {
-                        if hsp_links[i].linked_to != -1000 {
-                            if hsp_links[i].sum[0] > best_sum[0] {
-                                best_sum[0] = hsp_links[i].sum[0];
-                                best[0] = Some(i);
-                            }
+                    if let Some(bi) = best[0] {
+                        let mut cur = bi;
+                        while let Some(p) = hsp_links[cur].link[0] {
+                            if hsp_links[p].linked_to < 0 { use_current_max = false; break; }
+                            cur = p;
                         }
                     }
                 }
-                for i in 0..n {
-                    if hsp_links[i].linked_to != -1000 {
-                        if hsp_links[i].sum[1] > best_sum[1] {
-                            best_sum[1] = hsp_links[i].sum[1];
-                            best[1] = Some(i);
-                        }
-                    }
-                }
-                
-                if !path_changed {
-                    use_current_max = true;
-                } else {
-                    // Check if best chains were affected by removal
-                    use_current_max = true;
-                    if !ignore_small_gaps {
-                        if let Some(bi) = best[0] {
-                            let mut cur = bi;
-                            loop {
-                                if hsp_links[cur].linked_to == -1000 {
-                                    use_current_max = false;
-                                    break;
-                                }
-                                match hsp_links[cur].link[0] {
-                                    Some(p) => cur = p,
-                                    None => break,
-                                }
-                            }
-                        }
-                    }
-                    if use_current_max {
-                        if let Some(bi) = best[1] {
-                            let mut cur = bi;
-                            loop {
-                                if hsp_links[cur].linked_to == -1000 {
-                                    use_current_max = false;
-                                    break;
-                                }
-                                match hsp_links[cur].link[1] {
-                                    Some(p) => cur = p,
-                                    None => break,
-                                }
-                            }
+                if use_current_max {
+                    if let Some(bi) = best[1] {
+                        let mut cur = bi;
+                        while let Some(p) = hsp_links[cur].link[1] {
+                            if hsp_links[p].linked_to < 0 { use_current_max = false; break; }
+                            cur = p;
                         }
                     }
                 }
             }
+        }
 
-            if !use_current_max {
-                // Rebuild lh_helper array
-                lh_helpers.clear();
-                
-                let mut max_sum1: [i32; 3] = [i32::MIN; 3]; // For frame tracking (not used in tblastx)
-                
-                for i in 0..n {
-                    if hsp_links[i].linked_to == -1000 { 
-                        lh_helpers.push(LhHelper {
-                            q_off_trim: i32::MAX,
-                            s_off_trim: i32::MAX,
-                            sum: [i32::MIN, i32::MIN],
-                            next_larger: 0,
-                        });
-                        continue; 
-                    }
-                    
-                    // Compute next_larger based on sum[1]
+        if !use_current_max {
+            // Rebuild lh_helper array (NCBI lines 626-656)
+            lh_helpers.truncate(1); // Keep sentinel
+            let mut max_sum1 = i32::MIN / 2;
+            
+            for i in 0..n {
+                if hsp_links[i].linked_to < 0 {
+                    lh_helpers.push(LhHelper {
+                        q_off_trim: i32::MAX,
+                        s_off_trim: i32::MAX,
+                        sum: [i32::MIN / 2, i32::MIN / 2],
+                        next_larger: 0,
+                    });
+                } else {
                     let sum1 = hsp_links[i].sum[1];
-                    let mut prev = if i > 0 { i - 1 } else { 0 };
-                    if i > 0 {
-                        while prev > 0 {
-                            if hsp_links[prev].linked_to != -1000 {
-                                if hsp_links[prev].sum[1] > sum1 {
-                                    break;
-                                }
-                                let nl = if prev < lh_helpers.len() { lh_helpers[prev].next_larger } else { 0 };
-                                if nl == 0 || nl >= prev { break; }
-                                prev = nl;
-                            } else {
-                                prev -= 1;
-                            }
-                        }
-                    }
-                    let next_larger = if prev > 0 && hsp_links[prev].linked_to != -1000 && hsp_links[prev].sum[1] > sum1 {
-                        prev
-                    } else {
-                        0
-                    };
+                    max_sum1 = max_sum1.max(sum1);
                     
-                    // Track max sum for frame (simplified for tblastx)
-                    max_sum1[1] = max_sum1[1].max(sum1);
+                    // Compute next_larger (NCBI lines 647-655)
+                    let cur_idx = lh_helpers.len();
+                    let mut prev = cur_idx.saturating_sub(1);
+                    while prev > 0 && lh_helpers[prev].sum[1] <= sum1 {
+                        prev = lh_helpers[prev].next_larger;
+                    }
                     
                     lh_helpers.push(LhHelper {
                         q_off_trim: hsp_links[i].q_off_trim,
                         s_off_trim: hsp_links[i].s_off_trim,
                         sum: [hsp_links[i].sum[0], hsp_links[i].sum[1]],
-                        next_larger,
+                        next_larger: prev,
                     });
-                    
                     hsp_links[i].linked_to = 0;
                 }
+            }
 
-                best = [None, None];
-                best_sum = [i32::MIN, i32::MIN];
-                
-                // ============ INDEX 0 LOOP (SMALL GAPS) - NCBI lines 691-768 ============
-                if !ignore_small_gaps {
-                    for i in 0..n {
-                        if hsp_links[i].linked_to == -1000 { continue; }
-                        
-                        let mut h_hsp_num: i16 = 0;
-                        let mut h_hsp_sum: i32 = 0;
-                        let mut h_hsp_xsum: f64 = 0.0;
-                        let mut h_hsp_link: Option<usize> = None;
-                        
-                        if hsp_links[i].score > cutoffs[0] {
-                            let h_qe = hsp_links[i].q_end_trim;
-                            let h_se = hsp_links[i].s_end_trim;
-                            let h_qe_gap = h_qe + WINDOW_SIZE;
-                            let h_se_gap = h_se + WINDOW_SIZE;
-                            
-                            // Inner loop for small gaps
-                            if i > 0 {
-                                let mut j = i - 1;
-                                loop {
-                                    if hsp_links[j].linked_to == -1000 {
-                                        if j == 0 { break; }
-                                        j -= 1;
-                                        continue;
-                                    }
-                                    
-                                    let qo = lh_helpers[j].q_off_trim;
-                                    let so = lh_helpers[j].s_off_trim;
-                                    let sum = lh_helpers[j].sum[0];
-                                    
-                                    // Position constraints for small gaps (NCBI lines 720-734)
-                                    let b1 = qo <= h_qe;     // overlap in query
-                                    let b2 = so <= h_se;     // overlap in subject
-                                    let b4 = qo > h_qe_gap;  // beyond window in query
-                                    let b5 = so > h_se_gap;  // beyond window in subject
-                                    
-                                    // Early termination (NCBI line 733)
-                                    if qo > h_qe_gap + TRIM_SIZE {
-                                        break;
-                                    }
-                                    
-                                    if b1 || b2 || b4 || b5 {
-                                        if j == 0 { break; }
-                                        j -= 1;
-                                        continue;
-                                    }
-                                    
-                                    if sum > h_hsp_sum {
-                                        h_hsp_num = hsp_links[j].num[0];
-                                        h_hsp_sum = sum;
-                                        h_hsp_xsum = hsp_links[j].xsum[0];
-                                        h_hsp_link = Some(j);
-                                    }
-                                    
-                                    if j == 0 { break; }
-                                    j -= 1;
-                                }
-                            }
-                        }
-                        
-                        // Update link info for index 0
-                        let score = hsp_links[i].score;
-                        let new_sum = h_hsp_sum + (score - cutoffs[0]);
-                        let new_xsum = h_hsp_xsum + normalize_score(score, params.lambda, params.k.ln());
-                        
-                        hsp_links[i].sum[0] = new_sum;
-                        hsp_links[i].num[0] = h_hsp_num + 1;
-                        hsp_links[i].link[0] = h_hsp_link;
-                        hsp_links[i].xsum[0] = new_xsum;
-                        
-                        if i < lh_helpers.len() {
-                            lh_helpers[i].sum[0] = new_sum;
-                        }
-                        
-                        if new_sum > best_sum[0] {
-                            best_sum[0] = new_sum;
-                            best[0] = Some(i);
-                        }
-                        
-                        if let Some(link) = h_hsp_link {
-                            hsp_links[link].linked_to += 1;
-                        }
-                    }
-                }
-                
-                // ============ INDEX 1 LOOP (LARGE GAPS) - NCBI lines 771-896 ============
+            best = [None, None];
+            best_sum = [-cutoffs[0], -cutoffs[1]];
+
+            // INDEX 0 LOOP (small gaps) - NCBI lines 691-768
+            if !ignore_small_gaps {
                 for i in 0..n {
-                    if hsp_links[i].linked_to == -1000 { continue; }
+                    if hsp_links[i].linked_to < 0 { continue; }
                     
-                    let mut h_hsp_num: i16 = 0;
-                    let mut h_hsp_sum: i32 = 0;
-                    let mut h_hsp_xsum: f64 = 0.0;
-                    let mut h_hsp_link: Option<usize> = None;
+                    let mut h_sum = 0i32;
+                    let mut h_xsum = 0.0f64;
+                    let mut h_num = 0i16;
+                    let mut h_link: Option<usize> = None;
                     
-                    // Check if previous link is still valid
-                    let prev_link = hsp_links[i].link[1];
-                    let can_skip = !first_pass && 
-                        (prev_link.is_none() || 
-                         (prev_link.is_some() && !hsp_links[prev_link.unwrap()].changed));
-                    
-                    if can_skip {
-                        if let Some(pl) = prev_link {
-                            h_hsp_num = hsp_links[pl].num[1];
-                            h_hsp_sum = hsp_links[pl].sum[1];
-                            h_hsp_xsum = hsp_links[pl].xsum[1];
-                        }
-                        h_hsp_link = prev_link;
-                        hsp_links[i].changed = false;
-                    } else if hsp_links[i].score > cutoffs[1] {
-                        hsp_links[i].changed = true;
-                        
+                    if hsp_links[i].score > cutoffs[0] {
                         let h_qe = hsp_links[i].q_end_trim;
                         let h_se = hsp_links[i].s_end_trim;
+                        let h_qe_gap = h_qe + WINDOW_SIZE;
+                        let h_se_gap = h_se + WINDOW_SIZE;
                         
-                        // Initialize with previous best if still active
-                        if !first_pass {
-                            if let Some(pl) = prev_link {
-                                if hsp_links[pl].linked_to >= 0 {
-                                    h_hsp_sum = hsp_links[pl].sum[1] - 1;
-                                }
+                        // Inner loop: check previous HSPs (j < i)
+                        let h_idx = i + 1; // lh_helpers index (1-based)
+                        for j_idx in (1..h_idx).rev() {
+                            let qo = lh_helpers[j_idx].q_off_trim;
+                            let so = lh_helpers[j_idx].s_off_trim;
+                            let sum = lh_helpers[j_idx].sum[0];
+                            
+                            if qo > h_qe_gap + TRIM_SIZE { break; }
+                            if qo <= h_qe || so <= h_se || qo > h_qe_gap || so > h_se_gap { continue; }
+                            
+                            if sum > h_sum {
+                                let j = j_idx - 1; // Convert back to hsp_links index
+                                h_num = hsp_links[j].num[0];
+                                h_sum = hsp_links[j].sum[0];
+                                h_xsum = hsp_links[j].xsum[0];
+                                h_link = Some(j);
                             }
                         }
-                        
-                        // Inner loop for large gaps (no window constraint)
-                        if i > 0 {
-                            let mut j = i - 1;
-                            loop {
-                                if hsp_links[j].linked_to == -1000 {
-                                    if j == 0 { break; }
-                                    j -= 1;
-                                    continue;
-                                }
-                                
-                                let sum = lh_helpers[j].sum[1];
-                                let next_larger = lh_helpers[j].next_larger;
-                                let qo = lh_helpers[j].q_off_trim;
-                                let so = lh_helpers[j].s_off_trim;
-                                
-                                let b0 = sum <= h_hsp_sum;
-                                
-                                let next_j = if b0 && next_larger > 0 && next_larger < j {
-                                    next_larger
-                                } else if j > 0 {
-                                    j - 1
-                                } else {
-                                    0
-                                };
-                                
-                                // Position constraints (overlap only, no window)
-                                let b1 = qo <= h_qe;
-                                let b2 = so <= h_se;
-                                
-                                if !(b0 || b1 || b2) {
-                                    h_hsp_num = hsp_links[j].num[1];
-                                    h_hsp_sum = hsp_links[j].sum[1];
-                                    h_hsp_xsum = hsp_links[j].xsum[1];
-                                    h_hsp_link = Some(j);
-                                }
-                                
-                                if next_j == 0 && j == 0 { break; }
-                                if next_j >= j && j > 0 { j -= 1; } else { j = next_j; }
-                                if j == 0 && hsp_links[0].linked_to == -1000 { break; }
-                            }
-                        }
-                    } else {
-                        hsp_links[i].changed = true;
                     }
                     
-                    // Update link info for index 1
                     let score = hsp_links[i].score;
-                    let new_sum = h_hsp_sum + (score - cutoffs[1]);
-                    let new_xsum = h_hsp_xsum + normalize_score(score, params.lambda, params.k.ln());
+                    let new_sum = h_sum + (score - cutoffs[0]);
+                    let new_xsum = h_xsum + normalize_score(score, params.lambda, params.k.ln());
                     
-                    hsp_links[i].sum[1] = new_sum;
-                    hsp_links[i].num[1] = h_hsp_num + 1;
-                    hsp_links[i].link[1] = h_hsp_link;
-                    hsp_links[i].xsum[1] = new_xsum;
+                    hsp_links[i].sum[0] = new_sum;
+                    hsp_links[i].num[0] = h_num + 1;
+                    hsp_links[i].link[0] = h_link;
+                    hsp_links[i].xsum[0] = new_xsum;
+                    lh_helpers[i + 1].sum[0] = new_sum;
                     
-                    if i < lh_helpers.len() {
-                        lh_helpers[i].sum[1] = new_sum;
-                        
-                        // Update next_larger
-                        let mut prev = if i > 0 { i - 1 } else { 0 };
-                        while prev > 0 {
-                            if hsp_links[prev].linked_to != -1000 {
-                                if lh_helpers[prev].sum[1] > new_sum {
-                                    break;
-                                }
-                                let nl = lh_helpers[prev].next_larger;
-                                if nl == 0 || nl >= prev { break; }
-                                prev = nl;
-                            } else {
-                                prev -= 1;
+                    if new_sum >= best_sum[0] {
+                        best_sum[0] = new_sum;
+                        best[0] = Some(i);
+                    }
+                    if let Some(l) = h_link { hsp_links[l].linked_to += 1; }
+                }
+            }
+
+            // INDEX 1 LOOP (large gaps) with next_larger optimization - NCBI lines 771-896
+            for i in 0..n {
+                if hsp_links[i].linked_to < 0 { continue; }
+                
+                let mut h_sum = 0i32;
+                let mut h_xsum = 0.0f64;
+                let mut h_num = 0i16;
+                let mut h_link: Option<usize> = None;
+                
+                hsp_links[i].changed = true;
+                let prev_link = hsp_links[i].link[1];
+                
+                // Skip recomputation if previous link unchanged (NCBI lines 786-798)
+                let can_skip = !first_pass && 
+                    (prev_link.is_none() || 
+                     (prev_link.is_some() && !hsp_links[prev_link.unwrap()].changed && hsp_links[prev_link.unwrap()].linked_to >= 0));
+                
+                if can_skip {
+                    if let Some(pl) = prev_link {
+                        h_num = hsp_links[pl].num[1];
+                        h_sum = hsp_links[pl].sum[1];
+                        h_xsum = hsp_links[pl].xsum[1];
+                    }
+                    h_link = prev_link;
+                    hsp_links[i].changed = false;
+                } else if hsp_links[i].score > cutoffs[1] {
+                    let h_qe = hsp_links[i].q_end_trim;
+                    let h_se = hsp_links[i].s_end_trim;
+                    
+                    // Initialize with previous best if still valid (NCBI lines 812-824)
+                    if !first_pass {
+                        if let Some(pl) = prev_link {
+                            if hsp_links[pl].linked_to >= 0 {
+                                h_sum = hsp_links[pl].sum[1] - 1;
                             }
                         }
-                        lh_helpers[i].next_larger = if prev > 0 && hsp_links[prev].linked_to != -1000 && lh_helpers[prev].sum[1] > new_sum {
-                            prev
-                        } else {
-                            0
-                        };
                     }
                     
-                    if new_sum > best_sum[1] {
-                        best_sum[1] = new_sum;
-                        best[1] = Some(i);
-                    }
-                    
-                    if let Some(link) = h_hsp_link {
-                        hsp_links[link].linked_to += 1;
+                    // Inner loop with next_larger jump optimization (NCBI lines 829-859)
+                    let h_idx = i + 1;
+                    let mut j_idx = h_idx.saturating_sub(1);
+                    while j_idx > 0 {
+                        let sum = lh_helpers[j_idx].sum[1];
+                        let next_larger = lh_helpers[j_idx].next_larger;
+                        let qo = lh_helpers[j_idx].q_off_trim;
+                        let so = lh_helpers[j_idx].s_off_trim;
+                        
+                        let skip = sum <= h_sum;
+                        if skip {
+                            j_idx = next_larger; // Jump to larger sum
+                            continue;
+                        }
+                        
+                        j_idx -= 1;
+                        
+                        if qo <= h_qe || so <= h_se { continue; }
+                        
+                        let j = j_idx; // Already decremented, so this is correct hsp index
+                        if j < n && hsp_links[j].linked_to >= 0 {
+                            h_num = hsp_links[j].num[1];
+                            h_sum = hsp_links[j].sum[1];
+                            h_xsum = hsp_links[j].xsum[1];
+                            h_link = Some(j);
+                        }
                     }
                 }
                 
-                path_changed = false;
-                first_pass = false;
-            }
-            
-            // ============ SELECT BEST ORDERING METHOD (NCBI lines 901-952) ============
-            // Calculate E-values for both methods and select the better one
-            
-            let gap_prob = if ignore_small_gaps { 0.0 } else { GAP_PROB_UNGAPPED };
-            let mut prob: [f64; 2] = [f64::MAX, f64::MAX];
-            
-            // Calculate E-value for small gaps (index 0)
-            if !ignore_small_gaps {
-                if let Some(bi) = best[0] {
-                    // Restore sum by adding back cutoff * num (NCBI line 907-908)
-                    let restored_sum = hsp_links[bi].sum[0] + (hsp_links[bi].num[0] as i32) * cutoffs[0];
-                    let _ = restored_sum; // Used for debugging/verification
-                    
-                    let num = hsp_links[bi].num[0] as usize;
-                    let xsum = hsp_links[bi].xsum[0];
-                    let divisor = gap_decay_divisor(gap_decay_rate, num);
-                    
-                    prob[0] = small_gap_sum_e(WINDOW_SIZE, num as i16, xsum,
-                        search_space.effective_query_len as i32,
-                        search_space.effective_db_len as i32,
-                        search_space.effective_space as i64, divisor);
-                    
-                    // Adjust for gap probability (NCBI lines 918-922)
-                    if num > 1 && gap_prob > 0.0 {
-                        prob[0] /= gap_prob;
-                    }
-                }
-            }
-            
-            // Calculate E-value for large gaps (index 1)
-            if let Some(bi) = best[1] {
-                // Restore sum (NCBI line 942-943)
-                let restored_sum = hsp_links[bi].sum[1] + (hsp_links[bi].num[1] as i32) * cutoffs[1];
-                let _ = restored_sum;
+                let score = hsp_links[i].score;
+                let new_sum = h_sum + (score - cutoffs[1]);
+                let new_xsum = h_xsum + normalize_score(score, params.lambda, params.k.ln());
                 
-                let num = hsp_links[bi].num[1] as usize;
-                let xsum = hsp_links[bi].xsum[1];
+                hsp_links[i].sum[1] = new_sum;
+                hsp_links[i].num[1] = h_num + 1;
+                hsp_links[i].link[1] = h_link;
+                hsp_links[i].xsum[1] = new_xsum;
+                lh_helpers[i + 1].sum[1] = new_sum;
+                
+                // Update next_larger for this entry (NCBI lines 872-881)
+                let cur_idx = i + 1;
+                let mut prev = cur_idx.saturating_sub(1);
+                while prev > 0 && lh_helpers[prev].sum[1] <= new_sum {
+                    prev = lh_helpers[prev].next_larger;
+                }
+                lh_helpers[cur_idx].next_larger = prev;
+                
+                if new_sum >= best_sum[1] {
+                    best_sum[1] = new_sum;
+                    best[1] = Some(i);
+                }
+                if let Some(l) = h_link { hsp_links[l].linked_to += 1; }
+            }
+            
+            // NCBI line 897: path_changed=0 after first pass computation
+            path_changed = false;
+            first_pass = false;
+        }
+
+        // Select best ordering method (NCBI lines 901-952)
+        let mut prob = [f64::MAX, f64::MAX];
+        
+        if !ignore_small_gaps {
+            if let Some(bi) = best[0] {
+                let num = hsp_links[bi].num[0] as usize;
+                let xsum = hsp_links[bi].xsum[0];
                 let divisor = gap_decay_divisor(gap_decay_rate, num);
-                
-                prob[1] = large_gap_sum_e(num as i16, xsum,
+                prob[0] = small_gap_sum_e(WINDOW_SIZE, num as i16, xsum,
                     search_space.effective_query_len as i32,
                     search_space.effective_db_len as i32,
                     search_space.effective_space as i64, divisor);
-                
-                // Adjust for gap probability (NCBI lines 931-934)
-                if num > 1 && gap_prob > 0.0 && gap_prob < 1.0 {
-                    prob[1] /= 1.0 - gap_prob;
-                }
+                if num > 1 && gap_prob > 0.0 { prob[0] /= gap_prob; }
             }
+        }
+        
+        if let Some(bi) = best[1] {
+            let num = hsp_links[bi].num[1] as usize;
+            let xsum = hsp_links[bi].xsum[1];
+            let divisor = gap_decay_divisor(gap_decay_rate, num);
+            prob[1] = large_gap_sum_e(num as i16, xsum,
+                search_space.effective_query_len as i32,
+                search_space.effective_db_len as i32,
+                search_space.effective_space as i64, divisor);
+            if num > 1 && gap_prob > 0.0 && gap_prob < 1.0 { prob[1] /= 1.0 - gap_prob; }
             
-            // Select the ordering method with better (smaller) E-value (NCBI line 936-937)
-            let ordering_method = if !ignore_small_gaps && prob[0] <= prob[1] {
-                LINK_SMALL_GAPS
-            } else {
-                LINK_LARGE_GAPS
-            };
-            
-            let best_i = match best[ordering_method] {
-                Some(i) => i,
-                None => {
-                    // Fallback to other method if available
-                    if let Some(i) = best[1 - ordering_method] {
-                        i
-                    } else {
-                        break;
-                    }
-                }
-            };
-            
-            let evalue = prob[ordering_method];
+            // Debug: log the first few E-value calculations
+            static DEBUG_EVALUE_COUNT: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
+            let count = DEBUG_EVALUE_COUNT.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+            if count < 3 {
+                eprintln!("[DEBUG] E-value calc #{}: score={}, num={}, xsum={:.4}, divisor={:.4}, e={:.4e}",
+                    count, hsp_links[bi].score, num, xsum, divisor, prob[1]);
+            }
+        }
 
-            // Mark chain as removed and assign E-value
-            if hsp_links[best_i].linked_to > 0 {
+        let ordering = if !ignore_small_gaps && prob[0] <= prob[1] { 0 } else { 1 };
+        let best_i = match best[ordering] {
+            Some(i) => i,
+            None => match best[1 - ordering] {
+                Some(i) => i,
+                None => break,
+            }
+        };
+        
+        let evalue = prob[ordering];
+        
+        // Debug: count chain statistics
+        static CHAIN_STATS: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+        if !CHAIN_STATS.swap(true, std::sync::atomic::Ordering::Relaxed) {
+            // Count chain size for first group only
+            let chain_len = hsp_links[best_i].num[ordering];
+            eprintln!("[DEBUG] First chain: len={}, e-value={:.2e}, ordering={}", 
+                chain_len, evalue, ordering);
+        }
+
+        // NCBI lines 964-968: If best has linked_to > 0, set path_changed
+        // This means some other HSP was linking to this chain
+        if hsp_links[best_i].linked_to > 0 {
+            path_changed = true;
+        }
+
+        // Mark chain as removed (NCBI lines 961-1000)
+        let mut cur = best_i;
+        loop {
+            // NCBI line 968: if (H->linked_to>1) path_changed=1
+            if hsp_links[cur].linked_to > 1 {
                 path_changed = true;
             }
+            hsp_links[cur].linked_to = -1000;
+            hsp_links[cur].changed = true;
+            group_hits[cur].e_value = evalue;
+            remaining -= 1;
             
-            let mut cur = best_i;
-            loop {
-                if hsp_links[cur].linked_to > 1 {
-                    path_changed = true;
-                }
-                
-                hsp_links[cur].linked_to = -1000;
-                hsp_links[cur].changed = true;
-                
-                let orig_idx = sorted_indices[cur];
-                result_hits[orig_idx].e_value = evalue;
-                remaining -= 1;
-                
-                match hsp_links[cur].link[ordering_method] {
-                    Some(p) => cur = p,
-                    None => break,
-                }
+            match hsp_links[cur].link[ordering] {
+                Some(p) => cur = p,
+                None => break,
             }
         }
     }
 
-    result_hits
+    group_hits
 }
+

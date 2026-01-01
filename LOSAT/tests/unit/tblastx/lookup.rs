@@ -1,6 +1,7 @@
 //! Unit tests for tblastx/lookup.rs
 
 use LOSAT::algorithm::tblastx::lookup::{encode_aa_kmer, build_direct_lookup};
+use LOSAT::algorithm::tblastx::lookup::{build_ncbi_lookup, pv_test};
 use LOSAT::algorithm::tblastx::translation::generate_frames;
 use LOSAT::utils::genetic_code::GeneticCode;
 use LOSAT::utils::dust::MaskedInterval;
@@ -217,6 +218,62 @@ fn test_build_direct_lookup_frame_indices() {
             assert!(*frame_idx < num_frames as u8);
         }
     }
+}
+
+#[test]
+fn test_build_ncbi_lookup_indexes_low_self_score_exact_word() {
+    // NCBI behavior: even if a word's self-score is below the neighborhood threshold,
+    // the exact word occurrences must still be indexed (blast_aalookup.c s_AddWordHits()).
+    //
+    // Example: AAA has self-score 4+4+4 = 12 which is < 13 (tblastx default threshold),
+    // so it must still appear in the lookup table as an exact match.
+    let code = GeneticCode::from_id(1);
+
+    // 5 alanines (A) => 3 occurrences of AAA as a 3-mer.
+    let mut dna = Vec::new();
+    for _ in 0..5 {
+        dna.extend_from_slice(b"GCT"); // Ala in standard code
+    }
+
+    let mut frames = generate_frames(&dna, &code);
+    frames.retain(|f| f.frame == 1);
+    assert_eq!(frames.len(), 1);
+
+    let queries = vec![frames];
+    let query_masks = vec![Vec::<MaskedInterval>::new()];
+
+    let (lookup, _ctx) = build_ncbi_lookup(&queries, &query_masks, 13, true, true, None);
+
+    // AAA encodes to index 0 regardless of alphabet_size/word_length here.
+    assert!(pv_test(&lookup.pv, 0));
+    let hits = lookup.get_hits(0);
+    assert_eq!(hits.len(), 3);
+}
+
+#[test]
+fn test_build_ncbi_lookup_longest_chain_tracks_max_cell() {
+    // longest_chain should equal the max num_used over all cells (NCBI Finalize semantics).
+    let code = GeneticCode::from_id(1);
+
+    // 100 alanines => 98 AAA 3-mers in frame 1.
+    let mut dna = Vec::new();
+    for _ in 0..100 {
+        dna.extend_from_slice(b"GCT");
+    }
+
+    let mut frames = generate_frames(&dna, &code);
+    frames.retain(|f| f.frame == 1);
+    assert_eq!(frames.len(), 1);
+
+    let queries = vec![frames];
+    let query_masks = vec![Vec::<MaskedInterval>::new()];
+
+    let (lookup, _ctx) = build_ncbi_lookup(&queries, &query_masks, 13, true, true, None);
+
+    // AAA index is 0.
+    let hits = lookup.get_hits(0);
+    assert_eq!(lookup.longest_chain as usize, hits.len());
+    assert_eq!(lookup.longest_chain, 98);
 }
 
 #[test]

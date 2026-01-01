@@ -16,9 +16,10 @@
 pub const X_DROP_UNGAPPED_BITS: f64 = 7.0;
 
 /// Pre-calculated X-drop raw score for ungapped protein alignments
-/// This is the converted value: 7 bits * ln(2) / 0.3176 ≈ 15.27
+/// NCBI formula: ceil(7 bits * ln(2) / lambda) where lambda ≈ 0.3176 for BLOSUM62
+/// 7 * 0.693 / 0.3176 = 15.27 → ceil = 16
 /// Used directly in extension functions.
-pub const X_DROP_UNGAPPED: i32 = 15;
+pub const X_DROP_UNGAPPED: i32 = 16;
 
 /// BLAST_GAP_X_DROPOFF_PROT for preliminary extension
 pub const X_DROP_GAPPED_PRELIM: i32 = 15;
@@ -30,7 +31,7 @@ pub const X_DROP_GAPPED_FINAL: i32 = 25;
 /// High-frequency words generate too many hits for practical processing.
 /// This mimics NCBI's approach of skipping degenerate or common words.
 /// Value chosen to balance coverage vs performance.
-pub const MAX_HITS_PER_KMER: usize = 1000;
+pub const MAX_HITS_PER_KMER: usize = 50000;
 
 /// Stop codon encoding - index 24 in NCBI BLAST matrix order (ARNDCQEGHILKMFPSTWYVBJZX*)
 /// BLOSUM62 gives stop codon scores of -4 vs other AAs, +1 vs itself
@@ -97,7 +98,8 @@ pub const GAP_TRIGGER_BIT_SCORE: f64 = 22.0;
 pub const SENTINEL_BYTE: u8 = 255;
 
 /// Penalty applied when extension hits a sentinel byte.
-/// This should be large enough to trigger X-drop termination immediately.
-/// NCBI uses -4 (defscore), but we use a larger value to ensure termination.
-pub const SENTINEL_PENALTY: i32 = -100;
+/// NCBI uses defscore = -4 for unknown/sentinel residues.
+/// Reference: ncbi-blast/c++/src/util/tables/sm_blosum62.c:95
+/// We must match this exactly for correct extension behavior.
+pub const SENTINEL_PENALTY: i32 = -4;
 

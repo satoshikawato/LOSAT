@@ -30,18 +30,15 @@ fn test_get_score_matches() {
 
 #[test]
 fn test_get_score_stop_codon() {
-    // Stop codons (25) in BLOSUM62 matrix
-    // The matrix has 27x27 entries, with stop codon at index 25
+    // Stop codons (*) in BLOSUM62 matrix: index 24 in NCBI packed order (ARNDCQEGHILKMFPSTWYVBJZX*)
+    // The matrix has 25x25 entries (0..=24).
     let score_stop = get_score(STOP_CODON, 0);
     // Stop codon vs normal amino acid should be negative or zero
     assert!(score_stop <= 0);
     
     let score_stop_stop = get_score(STOP_CODON, STOP_CODON);
-    // Stop codon vs stop codon: NCBI BLAST's BLOSUM62 matrix has *-* = 1
-    // However, LOSAT uses *-* = -4 to prevent runaway extensions in self-comparisons
-    // where stop codons align with themselves (which would otherwise never terminate
-    // due to X-drop not catching the +1 score)
-    assert_eq!(score_stop_stop, -4, "Stop-stop score should be -4 to prevent runaway extensions");
+    // NCBI BLAST BLOSUM62: *-* = +1 (sm_blosum62.c)
+    assert_eq!(score_stop_stop, 1);
 }
 
 #[test]
@@ -153,7 +150,7 @@ fn test_extend_hit_two_hit_basic() {
     
     let x_drop = 7; // NCBI default X-drop
     let (q_start, q_end, s_start, s_end, score, right_extended, _s_last_off) = 
-        extend_hit_two_hit(&q_seq, &s_seq, s_left_off, s_right_off, q_right_off, x_drop);
+        extend_hit_two_hit(&q_seq, &s_seq, s_left_off, s_right_off, q_right_off, x_drop, true);
     
     // Should extend and connect the two hits
     assert!(score > 0);
@@ -180,7 +177,7 @@ fn test_extend_hit_two_hit_no_connection() {
     
     let x_drop = 7; // NCBI default X-drop
     let (q_start, q_end, s_start, s_end, score, right_extended, _s_last_off) = 
-        extend_hit_two_hit(&q_seq, &s_seq, s_left_off, s_right_off, q_right_off, x_drop);
+        extend_hit_two_hit(&q_seq, &s_seq, s_left_off, s_right_off, q_right_off, x_drop, true);
     
     // Should extend left from second hit, but may not reach first hit
     assert!(score >= 0);
@@ -205,7 +202,7 @@ fn test_extend_hit_two_hit_at_boundaries() {
     
     let x_drop = 7; // NCBI default X-drop
     let (q_start, q_end, s_start, s_end, score, _right_extended, _s_last_off) = 
-        extend_hit_two_hit(&q_seq, &s_seq, s_left_off, s_right_off, q_right_off, x_drop);
+        extend_hit_two_hit(&q_seq, &s_seq, s_left_off, s_right_off, q_right_off, x_drop, true);
     
     // Should handle boundary conditions correctly
     assert!(score >= 0);

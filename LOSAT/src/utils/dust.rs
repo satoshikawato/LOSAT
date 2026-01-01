@@ -549,8 +549,8 @@ mod tests {
     fn test_encode_triplet() {
         // AAA = 0b000000 = 0
         assert_eq!(DustMasker::encode_triplet(b'A', b'A', b'A'), Some(0));
-        // TTT = 0b110011 = 51
-        assert_eq!(DustMasker::encode_triplet(b'T', b'T', b'T'), Some(51));
+        // TTT = 0b111111 = 63
+        assert_eq!(DustMasker::encode_triplet(b'T', b'T', b'T'), Some(63));
         // ACG = 0b000110 = 6
         assert_eq!(DustMasker::encode_triplet(b'A', b'C', b'G'), Some(6));
     }
@@ -571,9 +571,42 @@ mod tests {
     fn test_complex_sequence() {
         let masker = DustMasker::with_defaults();
         
-        // Complex sequence should not be masked (or minimally masked)
-        let seq = b"ACGTACGTACGTACGTACGTACGTACGTACGTACGTACGTACGTACGTACGTACGTACGTACGT";
-        let intervals = masker.mask_sequence(seq);
+        // Use a de Bruijn sequence B(4,3) over A/C/G/T: each 3-mer appears exactly once.
+        // This is a more appropriate \"high complexity\" control than a short periodic repeat.
+        fn debruijn_acgt_k3() -> Vec<u8> {
+            fn db(t: usize, p: usize, k: usize, n: usize, a: &mut [usize], seq: &mut Vec<usize>) {
+                if t > n {
+                    if n % p == 0 {
+                        for i in 1..=p {
+                            seq.push(a[i]);
+                        }
+                    }
+                } else {
+                    a[t] = a[t - p];
+                    db(t + 1, p, k, n, a, seq);
+                    for j in (a[t - p] + 1)..k {
+                        a[t] = j;
+                        db(t + 1, t, k, n, a, seq);
+                    }
+                }
+            }
+
+            let alphabet: [u8; 4] = [b'A', b'C', b'G', b'T'];
+            let k = alphabet.len();
+            let n = 3usize;
+            let mut a = vec![0usize; k * n + 1];
+            let mut idx_seq: Vec<usize> = Vec::new();
+            db(1, 1, k, n, &mut a, &mut idx_seq);
+
+            let mut out: Vec<u8> = idx_seq.into_iter().map(|i| alphabet[i]).collect();
+            // Linearize the cyclic de Bruijn sequence by appending the first n-1 symbols.
+            let prefix: Vec<u8> = out[..(n - 1)].to_vec();
+            out.extend_from_slice(&prefix);
+            out
+        }
+
+        let seq = debruijn_acgt_k3();
+        let intervals = masker.mask_sequence(&seq);
         
         // Complex sequence should have few or no masked regions
         let total_masked: usize = intervals.iter().map(|i| i.end - i.start).sum();

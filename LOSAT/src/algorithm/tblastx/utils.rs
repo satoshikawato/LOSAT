@@ -1004,7 +1004,6 @@ fn run_with_neighbor_map(args: TblastxArgs) -> Result<()> {
     let wordsize: i32 = 3;
     let threshold = args.threshold;
     let x_drop = X_DROP_UNGAPPED;
-    let diag_enabled = diagnostics_enabled();
 
     rayon::ThreadPoolBuilder::new()
         .num_threads(num_threads)
@@ -1324,8 +1323,8 @@ fn run_with_neighbor_map(args: TblastxArgs) -> Result<()> {
                                 continue;
                             }
                             
-                            // Debug: print details for top-scoring hits (diagnostics only)
-                            if diag_enabled && score > 9000 && hsp_len > 1900 {
+                            // Debug: print details for top-scoring hits
+                            if score > 9000 && hsp_len > 1900 {
                                 eprintln!("[DEBUG TOP HIT] score={} len={} q_frame={} s_frame={}", 
                                     score, hsp_len, q_frame.frame, s_frame.frame);
                                 eprintln!("  coords: q_start={} q_end={} s_start={} s_end={}", 
@@ -1392,49 +1391,41 @@ fn run_with_neighbor_map(args: TblastxArgs) -> Result<()> {
     bar.finish();
 
     let all_ungapped = all_ungapped.into_inner().unwrap();
-    if diag_enabled {
-        eprintln!("=== Stage Counters ===");
-        eprintln!("[1] Raw ungapped hits (after extension): {}", all_ungapped.len());
-    }
+    eprintln!("=== Stage Counters ===");
+    eprintln!("[1] Raw ungapped hits (after extension): {}", all_ungapped.len());
 
     // Apply sum-stats linking (assigns E-values to chains)
     let linked_hits = apply_sum_stats_even_gap_linking(all_ungapped, &params);
-    if diag_enabled {
-        eprintln!("[2] After sum_stats_linking: {} hits", linked_hits.len());
-
-        // Count E-value distribution before final filter
-        let mut e_0 = 0usize;      // E <= 0 (0.0)
-        let mut e_tiny = 0usize;   // 0 < E <= 1e-50
-        let mut e_small = 0usize;  // 1e-50 < E <= 1e-10
-        let mut e_med = 0usize;    // 1e-10 < E <= 10
-        let mut e_large = 0usize;  // E > 10
-        let mut e_inf = 0usize;    // E == INF
-        for h in &linked_hits {
-            if h.e_value == f64::INFINITY {
-                e_inf += 1;
-            } else if h.e_value <= 0.0 {
-                e_0 += 1;
-            } else if h.e_value <= 1e-50 {
-                e_tiny += 1;
-            } else if h.e_value <= 1e-10 {
-                e_small += 1;
-            } else if h.e_value <= 10.0 {
-                e_med += 1;
-            } else {
-                e_large += 1;
-            }
+    eprintln!("[2] After sum_stats_linking: {} hits", linked_hits.len());
+    
+    // Count E-value distribution before final filter
+    let mut e_0 = 0usize;      // E <= 0 (0.0)
+    let mut e_tiny = 0usize;   // 0 < E <= 1e-50
+    let mut e_small = 0usize;  // 1e-50 < E <= 1e-10
+    let mut e_med = 0usize;    // 1e-10 < E <= 10
+    let mut e_large = 0usize;  // E > 10
+    let mut e_inf = 0usize;    // E == INF
+    for h in &linked_hits {
+        if h.e_value == f64::INFINITY {
+            e_inf += 1;
+        } else if h.e_value <= 0.0 {
+            e_0 += 1;
+        } else if h.e_value <= 1e-50 {
+            e_tiny += 1;
+        } else if h.e_value <= 1e-10 {
+            e_small += 1;
+        } else if h.e_value <= 10.0 {
+            e_med += 1;
+        } else {
+            e_large += 1;
         }
-        eprintln!("[3] E-value distribution (before final filter):");
-        eprintln!(
-            "    E=0: {}, E<=1e-50: {}, E<=1e-10: {}, E<=10: {}, E>10: {}, E=INF: {}",
-            e_0, e_tiny, e_small, e_med, e_large, e_inf
-        );
     }
+    eprintln!("[3] E-value distribution (before final filter):");
+    eprintln!("    E=0: {}, E<=1e-50: {}, E<=1e-10: {}, E<=10: {}, E>10: {}, E=INF: {}",
+        e_0, e_tiny, e_small, e_med, e_large, e_inf);
 
     // Pre-generate subject frames to avoid redundant translation
-    if diag_enabled {
-        eprintln!("Pre-generating subject frames for identity calculation...");
-    }
+    eprintln!("Pre-generating subject frames for identity calculation...");
     let subject_frames_cache: Vec<Vec<QueryFrame>> = subjects_raw
         .iter()
         .map(|s| generate_frames(s.seq(), &db_code))
@@ -1499,20 +1490,14 @@ fn run_with_neighbor_map(args: TblastxArgs) -> Result<()> {
         });
     }
 
-    if diag_enabled {
-        eprintln!(
-            "[4] Final hits after E-value filter (threshold={}): {}",
-            evalue_threshold,
-            final_hits.len()
-        );
-
-        // Report top hit alignment length
-        if !final_hits.is_empty() {
-            let max_len = final_hits.iter().map(|h| h.length).max().unwrap_or(0);
-            eprintln!("[5] Top alignment length: {} AA", max_len);
-        }
-        eprintln!("=== End Stage Counters ===");
+    eprintln!("[4] Final hits after E-value filter (threshold={}): {}", evalue_threshold, final_hits.len());
+    
+    // Report top hit alignment length
+    if !final_hits.is_empty() {
+        let max_len = final_hits.iter().map(|h| h.length).max().unwrap_or(0);
+        eprintln!("[5] Top alignment length: {} AA", max_len);
     }
+    eprintln!("=== End Stage Counters ===");
     
     // Sort by bit score descending
     final_hits.sort_by(|a, b| {

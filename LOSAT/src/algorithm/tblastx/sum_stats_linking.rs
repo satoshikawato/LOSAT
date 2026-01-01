@@ -98,6 +98,7 @@ struct LhHelper {
     s_off_trim: i32,
     sum: [i32; 2],      // sum for both indices (small gap, large gap)
     next_larger: usize, // index of next HSP with larger sum[1]
+    maxsum1: i32,       // NCBI: threshold for stopping link attempts (unused with if(0))
 }
 
 /// HSP link information (NCBI BlastHSPLink structure)
@@ -256,14 +257,16 @@ fn link_hsp_group_ncbi(
     // - lh_helpers[0], lh_helpers[1]: sentinels
     // - lh_helpers[i+2]: corresponds to hsp_links[i]
     // NCBI `link_hsps.c` allocates `lh_helper` with `calloc`, so the sentinel
-    // entries are zero-initialized. We mirror that (sums=0, next_larger=0).
+    // entries are zero-initialized. We mirror that exactly (sums=0, next_larger=0).
+    // NCBI line 576: lh_helper[0].maxsum1 = -10000;
     let mut lh_helpers: Vec<LhHelper> = vec![
         LhHelper {
             hsp_idx: SENTINEL_IDX,
             q_off_trim: 0,
             s_off_trim: 0,
-            sum: [0, 0],
+            sum: [0, 0],           // NCBI: calloc zero-initializes
             next_larger: 0,
+            maxsum1: -10000,       // NCBI line 576
         };
         n + 2
     ];
@@ -389,6 +392,9 @@ fn link_hsp_group_ncbi(
             // lh_helpers[0] and [1] are sentinels; active HSPs occupy [2..lh_len).
             let mut lh_len = 2usize;
             let mut cur = active_head;
+            // NCBI lines 669-671: track max sum[1] for maxsum1 calculation
+            // Since LOSAT groups by frame, all HSPs have the same frame sign, so we track one max
+            let mut running_max = -10000i32;
             while cur != SENTINEL_IDX {
                 let hsp_idx = cur;
 
@@ -401,11 +407,16 @@ fn link_hsp_group_ncbi(
                 lh_helpers[lh_len].s_off_trim = hsp_links[hsp_idx].s_off_trim;
                 lh_helpers[lh_len].sum = [hsp_links[hsp_idx].sum[0], hsp_links[hsp_idx].sum[1]];
 
+                // NCBI lines 669-671: update maxsum1
+                running_max = running_max.max(hsp_links[hsp_idx].sum[1]);
+                lh_helpers[lh_len].maxsum1 = running_max;
+
                 // NCBI lines 675-684: compute next_larger
+                // NCBI: while((cur_sum>=prev_sum) && (prev>0))
                 let cur_sum = lh_helpers[lh_len].sum[1];
                 let mut prev = lh_len - 1;
                 let mut prev_sum = lh_helpers[prev].sum[1];
-                while prev > 0 && cur_sum >= prev_sum {
+                while cur_sum >= prev_sum && prev > 0 {
                     prev = lh_helpers[prev].next_larger;
                     prev_sum = lh_helpers[prev].sum[1];
                 }
@@ -414,6 +425,8 @@ fn link_hsp_group_ncbi(
                 lh_len += 1;
                 cur = hsp_links[cur].next_active;
             }
+            // NCBI line 688: lh_helper[1].maxsum1 = -10000;
+            lh_helpers[1].maxsum1 = -10000;
             let active_count = lh_len - 2;
 
             best = [None, None];
@@ -503,9 +516,9 @@ fn link_hsp_group_ncbi(
                 //
                 // This is the original fast-path: if the previous best choice exists and
                 // was not changed in the last pass, it is still the best.
+                // NCBI checks only changed==0, NOT linked_to>=0 here.
                 let can_skip_ncbi = !first_pass
-                    && (prev_link == SENTINEL_IDX
-                        || !hsp_links[prev_link].changed);
+                    && (prev_link == SENTINEL_IDX || !hsp_links[prev_link].changed);
                 
                 if can_skip_ncbi {
                     if prev_link != SENTINEL_IDX {
@@ -593,11 +606,15 @@ fn link_hsp_group_ncbi(
                 let cur_sum = new_sum;
                 let mut prev = h_lh_idx - 1;
                 let mut prev_sum = lh_helpers[prev].sum[1];
-                while prev > 0 && cur_sum >= prev_sum {
+                while cur_sum >= prev_sum && prev > 0 {
                     prev = lh_helpers[prev].next_larger;
                     prev_sum = lh_helpers[prev].sum[1];
                 }
                 lh_helpers[h_lh_idx].next_larger = prev;
+                
+                // NCBI line 874: lh_helper[H_index].maxsum1 = MAX(lh_helper[H_index-1].maxsum1, new_sum);
+                // Note: maxsum1 is unused (NCBI line 850 is if(0)) but we compute it for strict parity
+                lh_helpers[h_lh_idx].maxsum1 = lh_helpers[h_lh_idx - 1].maxsum1.max(new_sum);
                 
                 if new_sum >= best_sum[1] {
                     best_sum[1] = new_sum;

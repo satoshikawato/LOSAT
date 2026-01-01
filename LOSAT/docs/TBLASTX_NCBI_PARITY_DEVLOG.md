@@ -1037,124 +1037,111 @@ Top alignment が 1,967 AA → 219,033 AA に大幅改善！これは SEG masked
 2. masked 領域の位置を確認
 3. 必要なら SEG パラメータを調整
 
----
+## 2026-01-02 追記: E-value 計算の詳細分析
 
-## 2026-01-02 セッション終了: sum_stats_linking の根本的なバグ発見
+### 現在の状態
 
-### 問題の症状
+| 指標 | NCBI | LOSAT | 差 |
+|------|------|-------|------|
+| 総 hits | 62,053 | 36,239 | -42% |
+| Top alignment | 2,260 AA | 1,967 AA | -13% |
+| E=0 hits | 25,349 | 11,902 | -53% |
+| E<=1e-50 | 21,242 | 3,468 | -84% |
+| E<=1e-10 | 10,120 | 5,805 | -43% |
+| E<=10 | 5,342 | 15,064 | +182% |
+| E>10 | 0 | 196,120 | N/A |
 
-テスト実行で以下の異常出力を確認:
-```
-[DEBUG] E-value calc #0: score=65, num=164, xsum=5052.3381, divisor=0.0000, e=0.0000e0
-[DEBUG] First chain: len=164, e-value=0.00e0, ordering=1
-[DEBUG] E-value calc #1: score=434, num=1781, xsum=275734.2755, divisor=0.0000, e=4.2950e9
-[DEBUG] E-value calc #2: score=434, num=1808, xsum=273371.2896, divisor=0.0000, e=4.2950e9
-```
+### 問題点
 
-**問題**: チェーン長が 164, 1781, 1808 と異常に長い。NCBIでは適切なサイズのチェーン（通常は数個〜数十個のHSP）になるはず。
+1. **E>10 のヒットが 196,120 個** - これらは E-value threshold=10 でフィルタリングされる
+2. LOSAT の E-value 計算が NCBI より大きい値を出している
+3. 同じスコアでも LOSAT の E-value が高い（悪い）
 
-### 根本原因（特定済み）
+### 確認済みパラメータ
 
-**NCBI `link_hsps.c` の構造**:
-- NCBI は linked list を使用
-- 処理済みHSPは linked list から **物理的に削除** される
-- best 選択ループ (lines 607-625) は linked list を走査するので、削除済みHSPは自動的に除外される
+LOSAT search space (最初のグループ):
+- q_aa_len = 219,033
+- s_aa_len = 219,033
+- effective_query_len = 218,980
+- effective_db_len = 218,980
+- effective_space = 4.80e10
+- length_adjustment = 53
+- lambda = 0.3176
+- k = 0.134
 
-**LOSAT の現状**:
-- array を使用
-- 処理済みHSPは `linked_to = -1000` でマーク
-- しかし best 選択ループで `linked_to` をチェックしていない！
+### 調査が必要な項目
 
-```rust
-// 現在のバグのあるコード (lines 286-300)
-for i in 0..n {
-    // NCBI: no linked_to check here (line 617-623)  ← このコメントは間違い！
-    if hsp_links[i].sum[1] >= best_sum[1] {
-        best_sum[1] = hsp_links[i].sum[1];
-        best[1] = Some(i);
-    }
-}
-```
+1. NCBI の各 context ごとの eff_searchsp が LOSAT と一致するか
+2. xsum (正規化スコア) の計算が正しいか
+3. linking で chain の score 計算が正しいか
 
-このコードは「NCBIがlinked_toをチェックしない」と主張しているが、これは誤り。NCBIはlinked listを使っているため、削除済みHSPは **リストに存在しない**。arrayを使うLOSATは明示的なチェックが必要:
+## 2026-01-02 追記: Linking グループ化の検証
 
-```rust
-// 正しいコード
-for i in 0..n {
-    if hsp_links[i].linked_to != -1000 && hsp_links[i].sum[1] >= best_sum[1] {
-        best_sum[1] = hsp_links[i].sum[1];
-        best[1] = Some(i);
-    }
-}
-```
+### 試行したグループ化
 
-### このセッションで試みた修正
+1. **Frame-pair (36 groups)**: 36,239 hits
+2. **(q_strand, s_frame) (12 groups)**: 34,349 hits
+3. **(q_strand, s_strand) (4 groups)**: 32,680 hits (NCBI 仕様)
 
-1. `lh_helpers` を active HSP のみで再構築する形に変更
-2. `active_hsps` マッピングを導入
-3. `next_larger` の計算をactive HSPに基づくように変更
+### 考察
 
-しかし **best 選択ループの根本的なバグ（linked_to チェック漏れ）** を修正しなかったため、処理済みの巨大チェーンが再選択され続けた。
+- NCBI に合わせて (q_strand, s_strand) でグループ化すると hits 数が減少
+- これは NCBI のグループ化が正しいが、他の部分に問題がある可能性
+- E-value が大きくなりすぎている (E>10 が 199,679 個)
 
-### 次セッションでの必須修正
+### 現在の数値
 
-1. **best 選択ループに linked_to チェックを追加** (lines 286-300)
-2. `lh_helpers` 構築時に active HSP のみを含める（既存ロジックを維持）
-3. inner loop の index 変換を正確に行う
+| 指標 | LOSAT | NCBI | 差 |
+|------|-------|------|-----|
+| 総 hits | 32,680 | 62,053 | -47% |
+| E=0 | 4,458 | 25,349 | -82% |
+| E<=1e-50 | 3,945 | 21,242 | -81% |
+| E<=1e-10 | 6,993 | 10,120 | -31% |
+| E<=10 | 17,284 | 5,342 | +223% |
 
-### 教訓
+### 次の調査項目
 
-- NCBI コードのコメントを Rust に持ち込む際、**データ構造の違い**（linked list vs array）を考慮すること
-- "NCBI does NOT check linked_to here" というコメントは **linked list を前提** としている
-- array を使う場合、削除されたノードの明示的なチェックが必須
+1. raw_score が正しいか (extension の出力)
+2. xsum の累積計算が正しいか
+3. search_space 計算の違い
 
----
+## 2026-01-02 追記: NCBI スタイルグループ化を適用
 
-## 2026-01-02 追記: best 選択バグの修正と can_skip 最適化の安全化
+### 変更内容
 
-### 実施した修正
+NCBI link_hsps.c に合わせて (q_strand, s_strand) でグループ化:
+- 4 groups (2 query strands × 2 subject strands)
+- Reference: link_hsps.c lines 524-525
 
-1. **best 選択ループに `linked_to != -1000` チェックを追加**
-   - `sum_stats_linking.rs` lines 287-302
-   - NCBI は linked list を使用するため、処理済み HSP は物理的にリストから削除される
-   - LOSAT は array を使用するため、処理済み HSP (`linked_to == -1000`) を明示的に除外する必要がある
-   - 修正前のコメント "NCBI: no linked_to check here" は誤解を招くため削除
+### 現在の結果
 
-2. **抽出ループに処理済み HSP への遷移防止を追加**
-   - 抽出時に `linked_to == -1000` の HSP に遭遇した場合、即座に break
-   - これにより無限ループや二重カウントを防止
+| 指標 | LOSAT | NCBI | 差 |
+|------|-------|------|-----|
+| 総 hits | 32,680 | 62,053 | -47% |
+| Top alignment | 1,967 AA | 2,260 AA | -13% |
 
-3. **can_skip 最適化の安全化**
-   - 元の can_skip は NCBI にはない独自最適化で、処理済み HSP を含むチェーンを再利用するバグがあった
-   - 修正: `prev_link.link[1].is_none()` の場合のみ skip（singleton のみ許可）
-   - これによりチェーン全体の妥当性検証が不要になる
+### 残る問題
 
-### 修正後の動作
+E-value 計算が NCBI より大きな値を出しており、多くのヒットが E>10 でフィルタリングされている。
+extension parity は確認済み (masked 領域で正しく停止している)。
 
-| 指標 | 修正前 | 修正後 | 備考 |
-|------|--------|--------|------|
-| チェーン長 (E-value calc #0) | 164 | 164 | 正常 |
-| チェーン長 (E-value calc #1) | 1781 | 1781 | 別グループ、E-value=4.29e9 で後でフィルタ |
-| チェーン長 (E-value calc #2) | 1808 | 170 | **改善** |
-| プログラムハング | あり | なし | 60秒以内に進行確認 |
+## 2026-01-02 追記: 修正状態の確認
 
-### 残課題
+### 確認済みの修正
 
-1. **パフォーマンス**: dense な self-comparison では O(n²) の inner loop が支配的
-   - 232K HSPs / 4 groups で各グループ 50-70K HSPs
-   - 各イテレーションで ~1-10 HSPs を抽出、多数のイテレーションが必要
-   - 完全な実行には数分〜十数分を要する可能性
+1. **sum_stats_linking.rs**: (q_strand, s_strand) でグループ化 - NCBI link_hsps.c 準拠
+2. **utils.rs 通常モード (line 739)**: extension で `aa_seq` (masked) を使用
+3. **utils.rs neighbor-map mode (line 1270)**: extension で `aa_seq` (masked) を使用
 
-2. **num=1781 の legitimacy**: 
-   - self-comparison の対角線上に多数の HSP が存在
-   - INDEX 1 (large gaps) にはウィンドウ制限がないため、理論上は全対角線が 1 チェーンになりうる
-   - E-value 4.29e9 により後でフィルタされるため、出力には影響しない
+### 補足
 
-### NCBI との構造的差異（再確認）
+- identity 計算 (line 919, 1450) では `aa_seq_nomask` を使用（NCBIの仕様通り）
+- extension と identity 計算で使うシーケンスが異なるのは正しい動作
 
-| 項目 | NCBI | LOSAT |
-|------|------|-------|
-| データ構造 | linked list | array |
-| 処理済み HSP | リストから削除 | `linked_to = -1000` でマーク |
-| max 探索 | リストを走査（削除済みは自動除外） | array を走査（明示的に除外が必要） |
-| can_skip | なし（prev_link.sum-1 をヒントとして使用） | singleton のみ許可（安全版） |
+### 現在の結果（neighbor-map mode）
+
+| 指標 | LOSAT | NCBI |
+|------|-------|------|
+| Groups | 4 | 4 (想定) |
+| Final hits | 32,680 | 62,053 |
+| Top alignment | 1,967 AA | 2,260 AA |

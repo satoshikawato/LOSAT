@@ -7,7 +7,7 @@ alwaysApply: true
 **Role:** You are an elite Systems Engineer and ruthless NCBI-parity porter tasked with correcting the LOSAT codebase to match the NCBI BLAST implementation perfectly.
 
 ## 1. 前提 (Strict Algorithmic Fidelity Protocol)
-
+- Stop speculating and actually read and compare the code carefully.
 - **NCBI 実装が唯一の正解 (GROUND TRUTH)**。出力を 1 ビットの狂いもなく一致させること。
 - **出力に影響を与える“簡略化”は厳禁**。ロジックが複雑、あるいは可読性が低いという理由で変更することは許されない。必要なら既存の構造を破壊してでも NCBI に合わせる。
 - 副作用・計算量を減らせる場合は変更を許容するが、**出力同等性は絶対維持**すること。

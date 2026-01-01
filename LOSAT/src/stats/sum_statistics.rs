@@ -19,259 +19,37 @@ pub fn gap_decay_divisor(decay_rate: f64, num_segments: usize) -> f64 {
     (1.0 - decay_rate) * decay_rate.powi((num_segments - 1) as i32)
 }
 
-// =============================================================================
-// NCBI math ports (blast_stat.c + ncbi_math.c)
-//
-// Strict fidelity requirement: NCBI is the ground truth. In particular, NCBI
-// uses BLAST_LnFactorial/BLAST_LnGammaInt (via s_LnGamma / s_PolyGamma) rather
-// than an "exact ln(n!) loop". That exact loop is both a behavioral divergence
-// and a major performance cost for large `num` (chains of 1000+ HSPs).
-// =============================================================================
-
-// NCBI `ncbi_math.c` (verbatim):
-//   #ifndef DBL_EPSILON
-//   #define DBL_EPSILON 2.2204460492503131e-16
-//   #endif
-const NCBI_DBL_EPSILON: f64 = 2.2204460492503131e-16;
-
-// NCBI `ncbi_math.h` (verbatim):
-//   #define NCBIMATH_PI  3.1415926535897932384626433832795
-//   #define NCBIMATH_LN2 0.69314718055994530941723212145818
-//   #define NCBIMATH_LNPI 1.1447298858494001741434273513531
-const NCBIMATH_PI: f64 = 3.1415926535897932384626433832795;
-const NCBIMATH_LN2: f64 = 0.69314718055994530941723212145818;
-const NCBIMATH_LNPI: f64 = 1.1447298858494001741434273513531;
-
-// NCBI `ncbi_math.c` (verbatim):
-//   static double _default_gamma_coef [] = {
-//        4.694580336184385e+04,
-//       -1.560605207784446e+05,
-//        2.065049568014106e+05,
-//       -1.388934775095388e+05,
-//        5.031796415085709e+04,
-//       -9.601592329182778e+03,
-//        8.785855930895250e+02,
-//       -3.155153906098611e+01,
-//        2.908143421162229e-01,
-//       -2.319827630494973e-04,
-//        1.251639670050933e-10
-//        };
-const DEFAULT_GAMMA_COEF: [f64; 11] = [
-    4.694580336184385e+04,
-    -1.560605207784446e+05,
-    2.065049568014106e+05,
-    -1.388934775095388e+05,
-    5.031796415085709e+04,
-    -9.601592329182778e+03,
-    8.785855930895250e+02,
-    -3.155153906098611e+01,
-    2.908143421162229e-01,
-    -2.319827630494973e-04,
-    1.251639670050933e-10,
-];
-
-// NCBI `ncbi_math.c` (verbatim):
-//   static const double kPrecomputedFactorial[] = { 1., 1., 2., 6., ... 34! };
-const PRECOMPUTED_FACTORIAL: [f64; 35] = [
-    1.0,
-    1.0,
-    2.0,
-    6.0,
-    24.0,
-    120.0,
-    720.0,
-    5040.0,
-    40320.0,
-    362880.0,
-    3628800.0,
-    39916800.0,
-    479001600.0,
-    6227020800.0,
-    87178291200.0,
-    1307674368000.0,
-    20922789888000.0,
-    355687428096000.0,
-    6402373705728000.0,
-    121645100408832000.0,
-    2432902008176640000.0,
-    51090942171709440000.0,
-    1124000727777607680000.0,
-    25852016738884976640000.0,
-    620448401733239439360000.0,
-    15511210043330985984000000.0,
-    403291461126605635584000000.0,
-    10888869450418352160768000000.0,
-    304888344611713860501504000000.0,
-    8841761993739701954543616000000.0,
-    265252859812191058636308480000000.0,
-    8222838654177922817725562880000000.0,
-    263130836933693530167218012160000000.0,
-    8683317618811886495518194401280000000.0,
-    295232799039604140847618609643520000000.0,
-];
-
-#[inline]
-fn blast_expm1(x: f64) -> f64 {
-    // NCBI `ncbi_math.c` (verbatim):
-    //   double BLAST_Expm1(double x)
-    //   {
-    //     double absx = ABS(x);
-    //     if (absx > .33) return exp(x) - 1.;
-    //     if (absx < 1.e-16) return x;
-    //     return x * (1. + x * (1./2. + x * (1./6. + ... )));
-    //   }
-    let absx = x.abs();
-    if absx > 0.33 {
-        return x.exp() - 1.0;
-    }
-    if absx < 1.0e-16 {
-        return x;
-    }
-    x * (1.0
-        + x * (1.0 / 2.0
-            + x * (1.0 / 6.0
-                + x * (1.0 / 24.0
-                    + x * (1.0 / 120.0
-                        + x * (1.0 / 720.0
-                            + x * (1.0 / 5040.0
-                                + x * (1.0 / 40320.0
-                                    + x * (1.0 / 362880.0
-                                        + x * (1.0 / 3628800.0
-                                            + x * (1.0 / 39916800.0 + x / 6227020800.0)))))))))))
-}
-
-#[inline]
-fn blast_log1p(x: f64) -> f64 {
-    // NCBI `ncbi_math.c` (verbatim):
-    //   double BLAST_Log1p(double x)
-    //   {
-    //     if (ABS(x) >= 0.2) return log(x+1.);
-    //     for (i=0, sum=0., y=x; i<500 ; ) {
-    //       sum += y/++i;
-    //       if (ABS(y) < DBL_EPSILON) break;
-    //       y *= x;
-    //       sum -= y/++i;
-    //       if (y < DBL_EPSILON) break;
-    //       y *= x;
-    //     }
-    //     return sum;
-    //   }
-    if x.abs() >= 0.2 {
-        return (x + 1.0).ln();
-    }
-    let mut i: i32 = 0;
-    let mut sum = 0.0;
-    let mut y = x;
-    while i < 500 {
-        i += 1;
-        sum += y / (i as f64);
-        if y.abs() < NCBI_DBL_EPSILON {
-            break;
-        }
-        y *= x;
-        i += 1;
-        sum -= y / (i as f64);
-        if y < NCBI_DBL_EPSILON {
-            break;
-        }
-        y *= x;
-    }
-    sum
-}
-
-#[inline]
-fn s_general_ln_gamma_order0(x: f64) -> f64 {
-    // NCBI `ncbi_math.c` (verbatim; s_GeneralLnGamma, order==0 path):
-    //   xx = x - 1.;
-    //   tx = xx + xgamma_dim;
-    //   tmp = tx;
-    //   coef = &_default_gamma_coef[xgamma_dim];
-    //   value = *--coef / tmp;
-    //   while (coef > _default_gamma_coef)
-    //      value += *--coef / --tmp;
-    //   y[0] = value;
-    //   ++y[0];
-    //   value = s_LogDerivative(0, y); // => log(y[0])
-    //   tmp = tx + 0.5;
-    //   value += ((NCBIMATH_LNPI+NCBIMATH_LN2) / 2.)
-    //            + (xx + 0.5) * log(tmp) - tmp;
-    let xx = x - 1.0;
-    let xgamma_dim = DEFAULT_GAMMA_COEF.len() as f64;
-    let tx = xx + xgamma_dim;
-
-    let mut tmp = tx;
-    let mut value = 0.0;
-    for coef in DEFAULT_GAMMA_COEF.iter().rev() {
-        value += *coef / tmp;
-        tmp -= 1.0;
-    }
-    let y0 = value + 1.0;
-    if y0 <= 0.0 {
-        return f64::INFINITY;
-    }
-    let mut out = y0.ln();
-    let tmp2 = tx + 0.5;
-    out += ((NCBIMATH_LNPI + NCBIMATH_LN2) / 2.0) + (xx + 0.5) * tmp2.ln() - tmp2;
-    out
-}
-
-#[inline]
-fn blast_ln_gamma(x: f64) -> f64 {
-    // NCBI `ncbi_math.c` (verbatim; s_PolyGamma(x,0) + s_LnGamma):
-    //   if (x >= 1.) return s_GeneralLnGamma(x, 0);
-    //   if (x < 0.) { value = s_GeneralLnGamma(1. - x, 0); value = -value; ... value += LNPI - log(|sin(pi*x)|); }
-    //   else { value = s_GeneralLnGamma(1. + x, 0); if (x == 0.) return HUGE_VAL; value -= log(x); }
-    if x >= 1.0 {
-        return s_general_ln_gamma_order0(x);
-    }
-    if x < 0.0 {
-        let mut value = -s_general_ln_gamma_order0(1.0 - x);
-        let sx = (NCBIMATH_PI * x).sin().abs();
-        if ((x < -0.1 && ((x.ceil() == x) || sx < 2.0 * NCBI_DBL_EPSILON)) || sx == 0.0) {
-            return f64::INFINITY;
-        }
-        value += NCBIMATH_LNPI - sx.ln();
-        return value;
-    }
-    // 0 <= x < 1
-    if x == 0.0 {
-        return f64::INFINITY;
-    }
-    s_general_ln_gamma_order0(1.0 + x) - x.ln()
-}
-
-/// Natural log of factorial (NCBI `BLAST_LnFactorial`).
+/// Natural log of factorial using Stirling's approximation for large n.
 ///
-/// NCBI reference (verbatim, `ncbi_math.c`):
-///   double BLAST_LnFactorial (double x) {
-///       if( x <= 0.0) return 0.0;
-///       else return s_LnGamma(x + 1.0);
-///   }
+/// For small n (< 10), uses direct calculation.
+/// For large n, uses Stirling's approximation: ln(n!) ≈ n*ln(n) - n + 0.5*ln(2*pi*n)
 pub fn ln_factorial(n: f64) -> f64 {
-    if n <= 0.0 {
+    if n <= 1.0 {
         return 0.0;
     }
-    blast_ln_gamma(n + 1.0)
+
+    // In our usage, n is almost always an integer (e.g. number of HSPs),
+    // so prefer an exact log-factorial for stability and NCBI-compatibility.
+    if (n.fract()).abs() < f64::EPSILON && n <= (i32::MAX as f64) {
+        return ln_factorial_int(n as i32);
+    }
+
+    // Fallback: Stirling's approximation for non-integers/large values.
+    n * n.ln() - n + 0.5 * (2.0 * std::f64::consts::PI * n).ln()
 }
 
-/// Natural log of gamma for integer n (NCBI `BLAST_LnGammaInt`).
+/// Natural log of gamma function for positive integers.
 ///
-/// NCBI reference (verbatim, `ncbi_math.c`):
-///   double BLAST_LnGammaInt(Int4 n)
-///   {
-///      if ( (n > 1) && (n < DIM(kPrecomputedFactorial) ) ) {
-///         return log(kPrecomputedFactorial[n-1]);
-///      }
-///      return s_LnGamma((double)n);
-///   }
+/// ln(Gamma(n)) = ln((n-1)!) for positive integers
 pub fn ln_gamma_int(n: i32) -> f64 {
-    if n > 1 {
-        let nu = n as usize;
-        if nu < PRECOMPUTED_FACTORIAL.len() {
-            return PRECOMPUTED_FACTORIAL[nu - 1].ln();
-        }
+    if n <= 0 {
+        return f64::INFINITY;
     }
-    blast_ln_gamma(n as f64)
+    if n == 1 || n == 2 {
+        return 0.0;
+    }
+    // Exact for integers: ln(Gamma(n)) = ln((n-1)!)
+    ln_factorial_int(n - 1)
 }
 
 /// Convert P-value to E-value.
@@ -285,7 +63,7 @@ pub fn p_to_e(p: f64) -> f64 {
         return i32::MAX as f64;
     }
     // NCBI: -BLAST_Log1p(-p)
-    -blast_log1p(-p)
+    -(-p).ln_1p()
 }
 
 /// Convert E-value to P-value.
@@ -296,7 +74,24 @@ pub fn e_to_p(e: f64) -> f64 {
         return 0.0;
     }
     // NCBI: -BLAST_Expm1(-e)
-    -blast_expm1(-e)
+    -(-e).exp_m1()
+}
+
+/// Exact ln(n!) for integers (n >= 0).
+///
+/// This is used heavily in sum-statistics and we want it to be stable and
+/// as close as possible to NCBI's `BLAST_LnFactorial` when called with integer n.
+fn ln_factorial_int(n: i32) -> f64 {
+    if n <= 1 {
+        return 0.0;
+    }
+    // Direct sum is exact enough for the small/medium n encountered here.
+    // (n is number of HSPs in a linked set.)
+    let mut sum = 0.0;
+    for i in 2..=n {
+        sum += (i as f64).ln();
+    }
+    sum
 }
 
 /// Lookup tables for s_BlastSumP interpolation (from NCBI BLAST).
@@ -337,8 +132,8 @@ fn blast_sum_p_calc(r: i32, s: f64) -> f64 {
         if s > 8.0 {
             return (-s).exp();
         }
-        // NCBI: -BLAST_Expm1(-exp(-s))
-        return -blast_expm1(-(-s).exp());
+        // -BLAST_Expm1(-exp(-s))
+        return -(-(-s).exp()).exp_m1();
     }
     if r < 1 {
         return 0.0;
@@ -441,8 +236,7 @@ fn blast_sum_p_calc(r: i32, s: f64) -> f64 {
 fn blast_sum_p(r: i32, s: f64) -> f64 {
     // Faithful port of NCBI BLAST's s_BlastSumP.
     if r == 1 {
-        // NCBI: -BLAST_Expm1(-exp(-s))
-        return -blast_expm1(-(-s).exp());
+        return -(-(-s).exp()).exp_m1();
     }
 
     if r <= 4 {
@@ -473,11 +267,9 @@ fn blast_sum_p(r: i32, s: f64) -> f64 {
 
             i = tab_size - i;
             let idx = i as usize;
-            // NCBI assumes idx in-range for s > -2*r.
-            // For strict parity, we follow the same assumption.
-            debug_assert!(idx > 0 && idx < table.len());
-            unsafe {
-                return a * *table.get_unchecked(idx - 1) + (1.0 - a) * *table.get_unchecked(idx);
+            // NCBI assumes idx in-range for s > -2*r; clamp defensively.
+            if idx > 0 && idx < table.len() {
+                return a * table[idx - 1] + (1.0 - a) * table[idx];
             }
         }
         return 1.0;
@@ -592,7 +384,7 @@ pub fn small_gap_sum_e(
         let mut adjusted_xsum = xsum;
         adjusted_xsum -= pair_search_space.ln()
             + 2.0 * ((num - 1) as f64) * (starting_points as f64).ln();
-        adjusted_xsum -= ln_factorial(num as f64);
+        adjusted_xsum -= ln_factorial_int(num);
 
         let sum_p = blast_sum_p(num, adjusted_xsum);
         sum_e = p_to_e(sum_p) * ((searchsp_eff as f64) / pair_search_space);
@@ -643,7 +435,7 @@ pub fn uneven_gap_sum_e(
         adjusted_xsum -= pair_search_space.ln()
             + ((num - 1) as f64)
                 * ((query_start_points as f64).ln() + (subject_start_points as f64).ln());
-        adjusted_xsum -= ln_factorial(num as f64);
+        adjusted_xsum -= ln_factorial_int(num);
 
         let sum_p = blast_sum_p(num, adjusted_xsum);
         sum_e = p_to_e(sum_p) * ((searchsp_eff as f64) / pair_search_space);
@@ -687,7 +479,7 @@ pub fn large_gap_sum_e(
         // NCBI: xsum -= num*log(subject_length*query_length) - ln_factorial(num)
         // i.e. xsum = xsum - num*log(prod) + ln_factorial(num)
         let prod = (subject_length as f64) * (query_length as f64);
-        let mut adjusted_xsum = xsum - (num as f64) * prod.ln() + ln_factorial(num as f64);
+        let mut adjusted_xsum = xsum - (num as f64) * prod.ln() + ln_factorial_int(num);
 
         let sum_p = blast_sum_p(num, adjusted_xsum);
 

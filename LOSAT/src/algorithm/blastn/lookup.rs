@@ -219,7 +219,8 @@ pub fn build_pv_direct_lookup(
     let safe_word_size = word_size.min(MAX_DIRECT_LOOKUP_WORD_SIZE);
     let table_size = 1usize << (2 * safe_word_size); // 4^word_size
     let pv_size = (table_size + 31) / 32; // Number of u32 elements needed for PV
-    let debug_mode = std::env::var("BLEMIR_DEBUG").is_ok();
+    // Gate debug output behind common diagnostics flag (avoid unconditional overhead).
+    let debug_mode = std::env::var("BLEMIR_DEBUG").is_ok() && crate::algorithm::common::diagnostics::diagnostics_enabled();
 
     if debug_mode {
         eprintln!(
@@ -340,7 +341,8 @@ pub fn build_lookup(
 ) -> KmerLookup {
     let mut lookup: FxHashMap<u64, Vec<(u32, u32)>> = FxHashMap::default();
     let safe_word_size = word_size.min(31);
-    let debug_mode = std::env::var("BLEMIR_DEBUG").is_ok();
+    // Gate debug output behind common diagnostics flag (avoid unconditional overhead).
+    let debug_mode = std::env::var("BLEMIR_DEBUG").is_ok() && crate::algorithm::common::diagnostics::diagnostics_enabled();
 
     let mut total_positions = 0usize;
     let mut ambiguous_skipped = 0usize;
@@ -414,7 +416,8 @@ pub fn build_two_stage_lookup(
     lut_word_length: usize,
     query_masks: &[Vec<MaskedInterval>],
 ) -> TwoStageLookup {
-    let debug_mode = std::env::var("BLEMIR_DEBUG").is_ok();
+    // Gate debug output behind common diagnostics flag (avoid unconditional overhead).
+    let debug_mode = std::env::var("BLEMIR_DEBUG").is_ok() && crate::algorithm::common::diagnostics::diagnostics_enabled();
     
     if debug_mode {
         eprintln!(
@@ -447,7 +450,8 @@ pub fn build_direct_lookup(
 ) -> DirectKmerLookup {
     let safe_word_size = word_size.min(MAX_DIRECT_LOOKUP_WORD_SIZE);
     let table_size = 1usize << (2 * safe_word_size); // 4^word_size
-    let debug_mode = std::env::var("BLEMIR_DEBUG").is_ok();
+    // Gate debug output behind common diagnostics flag (avoid unconditional overhead).
+    let debug_mode = std::env::var("BLEMIR_DEBUG").is_ok() && crate::algorithm::common::diagnostics::diagnostics_enabled();
 
     if debug_mode {
         eprintln!(

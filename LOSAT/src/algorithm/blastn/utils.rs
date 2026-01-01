@@ -828,7 +828,9 @@ pub fn run(args: BlastnArgs) -> Result<()> {
     });
 
     // Debug mode: set BLEMIR_DEBUG=1 to enable, BLEMIR_DEBUG_WINDOW="q_start-q_end,s_start-s_end" to focus on a region
-    let debug_mode = std::env::var("BLEMIR_DEBUG").is_ok();
+    // Gate ALL debug output behind common diagnostics flag to avoid unintended overhead.
+    let diag_enabled = crate::algorithm::common::diagnostics::diagnostics_enabled();
+    let debug_mode = diag_enabled && std::env::var("BLEMIR_DEBUG").is_ok();
     let debug_window: Option<(usize, usize, usize, usize)> =
         std::env::var("BLEMIR_DEBUG_WINDOW").ok().and_then(|s| {
             let parts: Vec<&str> = s.split(',').collect();
@@ -845,7 +847,7 @@ pub fn run(args: BlastnArgs) -> Result<()> {
         });
 
     // Check if mask should be disabled for debugging
-    let disable_mask = std::env::var("BLEMIR_DEBUG_NO_MASK").is_ok();
+    let disable_mask = debug_mode && std::env::var("BLEMIR_DEBUG_NO_MASK").is_ok();
 
     if debug_mode {
         // Build marker to verify correct code is running

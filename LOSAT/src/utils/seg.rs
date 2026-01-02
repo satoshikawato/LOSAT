@@ -662,10 +662,14 @@ mod tests {
 
     #[test]
     fn test_seg_params_validation() {
+        // NCBI: negative values become 0.0, not defaults
+        // if (sparamsp->locut < 0.0) sparamsp->locut = 0.0;
+        // if (sparamsp->hicut < 0.0) sparamsp->hicut = 0.0;
+        // if (sparamsp->locut > sparamsp->hicut) sparamsp->hicut = sparamsp->locut;
         let params = SegParams::new(0, -1.0, 1.0);
-        assert_eq!(params.window, 12); // Should default
-        assert_eq!(params.locut, 2.2); // Should default
-        assert_eq!(params.hicut, 2.5); // Should default to max(locut, 2.5)
+        assert_eq!(params.window, 12); // Should default to 12
+        assert_eq!(params.locut, 0.0); // Negative becomes 0.0
+        assert_eq!(params.hicut, 1.0); // 1.0 > 0.0, so stays at 1.0
     }
 
     #[test]
@@ -673,12 +677,14 @@ mod tests {
         let masker = SegMasker::with_defaults();
         
         // Low complexity: all same amino acid (entropy = 0)
-        let low_complex = vec![0u8; 12]; // All alanine (0)
+        // NCBISTDAA: A=1 (not 0, which is '-')
+        let low_complex = vec![1u8; 12]; // All alanine (NCBISTDAA code 1)
         let (entropy_low, _) = masker.calculate_entropy(&low_complex);
         assert!(entropy_low < 1.0, "Low complexity should have low entropy: got {}", entropy_low);
         
         // High complexity: all different amino acids
-        let high_complex: Vec<u8> = (0..12).map(|i| (i % 20) as u8).collect();
+        // Use valid NCBISTDAA codes: 1=A, 3-20=C..W, 22=Y
+        let high_complex: Vec<u8> = [1, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13].to_vec();
         let (entropy_high, _) = masker.calculate_entropy(&high_complex);
         assert!(entropy_high > 2.0, "High complexity should have high entropy: got {}", entropy_high);
     }
@@ -688,7 +694,8 @@ mod tests {
         let masker = SegMasker::with_defaults();
         
         // Simple repeat sequence should be masked
-        let seq: Vec<u8> = vec![0u8; 100]; // All alanine
+        // NCBISTDAA: A=1 (not 0, which is '-')
+        let seq: Vec<u8> = vec![1u8; 100]; // All alanine (NCBISTDAA code 1)
         let intervals = masker.mask_sequence(&seq);
         
         assert!(!intervals.is_empty(), "Poly-alanine sequence should be masked");
@@ -701,8 +708,9 @@ mod tests {
     fn test_mask_short_sequence() {
         let masker = SegMasker::with_defaults();
         
-        // Very short sequences should return empty
-        let seq = vec![0u8; 5];
+        // Very short sequences should return empty (shorter than window)
+        // NCBISTDAA: A=1
+        let seq = vec![1u8; 5];
         let intervals = masker.mask_sequence(&seq);
         assert!(intervals.is_empty());
     }

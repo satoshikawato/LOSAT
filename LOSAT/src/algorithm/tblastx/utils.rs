@@ -11,8 +11,8 @@ use std::sync::atomic::{AtomicI32, AtomicUsize, Ordering as AtomicOrdering};
 use std::sync::mpsc::channel;
 
 use crate::common::{write_output_ncbi_order, Hit};
-use crate::config::{ProteinScoringSpec, ScoringMatrix};
-use crate::stats::{lookup_protein_params, lookup_protein_params_ungapped};
+use crate::config::ScoringMatrix;
+use crate::stats::{lookup_protein_params_ungapped, KarlinParams};
 use crate::utils::dust::{DustMasker, MaskedInterval};
 use crate::utils::genetic_code::GeneticCode;
 use crate::utils::seg::SegMasker;
@@ -508,20 +508,31 @@ pub fn run(args: TblastxArgs) -> Result<()> {
         return Ok(());
     }
 
-    // NCBI BLAST uses two sets of Karlin params:
-    // - ungapped params (kbp_std) for gap_trigger calculation
-    // - gapped params (kbp_gap) for cutoff_score_max and E-value calculations
-    // Reference: blast_parameters.c:340-345 (gap_trigger uses kbp_std)
-    // Reference: blast_parameters.c:860-861 (cutoff_score_max uses kbp_gap)
+    // NCBI BLAST Karlin params for TBLASTX (ungapped-only algorithm):
+    // 
+    // TBLASTX is explicitly ungapped-only (blast_options.c line 869-873):
+    //   "Gapped search is not allowed for tblastx"
+    //
+    // For bit score and E-value calculation, NCBI uses sbp->kbp (ungapped):
+    //   blast_hits.c line 1833: kbp = (gapped_calculation ? sbp->kbp_gap : sbp->kbp);
+    //   blast_hits.c line 1918: same pattern in Blast_HSPListGetBitScores
+    //
+    // For cutoff score search space calculation, NCBI uses gapped params:
+    //   blast_parameters.c uses kbp_gap for eff_searchsp in cutoff calculation
+    //
+    // BLOSUM62 ungapped: lambda=0.3176, K=0.134
+    // BLOSUM62 gapped:   lambda=0.267,  K=0.041
     let ungapped_params = lookup_protein_params_ungapped(ScoringMatrix::Blosum62);
-    let gapped_scoring = ProteinScoringSpec {
-        matrix: ScoringMatrix::Blosum62,
-        gap_open: 11,
-        gap_extend: 1,
+    // Gapped params for cutoff score search space calculation
+    let gapped_params = KarlinParams {
+        lambda: 0.267,
+        k: 0.041,
+        h: 0.14,
+        alpha: 1.9,
+        beta: -30.0,
     };
-    let gapped_params = lookup_protein_params(&gapped_scoring);
-    // Keep `params` as gapped for E-value calculations in sum_stats_linking
-    let params = gapped_params.clone();
+    // Use UNGAPPED params for bit score and E-value (NCBI parity for tblastx)
+    let params = ungapped_params.clone();
 
     // Compute NCBI-style average query length for linking cutoffs
     // Reference: blast_parameters.c:CalculateLinkHSPCutoffs (lines 1023-1026)
@@ -1280,20 +1291,31 @@ fn run_with_neighbor_map(args: TblastxArgs) -> Result<()> {
         return Ok(());
     }
 
-    // NCBI BLAST uses two sets of Karlin params:
-    // - ungapped params (kbp_std) for gap_trigger calculation
-    // - gapped params (kbp_gap) for cutoff_score_max and E-value calculations
-    // Reference: blast_parameters.c:340-345 (gap_trigger uses kbp_std)
-    // Reference: blast_parameters.c:860-861 (cutoff_score_max uses kbp_gap)
+    // NCBI BLAST Karlin params for TBLASTX (ungapped-only algorithm):
+    // 
+    // TBLASTX is explicitly ungapped-only (blast_options.c line 869-873):
+    //   "Gapped search is not allowed for tblastx"
+    //
+    // For bit score and E-value calculation, NCBI uses sbp->kbp (ungapped):
+    //   blast_hits.c line 1833: kbp = (gapped_calculation ? sbp->kbp_gap : sbp->kbp);
+    //   blast_hits.c line 1918: same pattern in Blast_HSPListGetBitScores
+    //
+    // For cutoff score search space calculation, NCBI uses gapped params:
+    //   blast_parameters.c uses kbp_gap for eff_searchsp in cutoff calculation
+    //
+    // BLOSUM62 ungapped: lambda=0.3176, K=0.134
+    // BLOSUM62 gapped:   lambda=0.267,  K=0.041
     let ungapped_params = lookup_protein_params_ungapped(ScoringMatrix::Blosum62);
-    let gapped_scoring = ProteinScoringSpec {
-        matrix: ScoringMatrix::Blosum62,
-        gap_open: 11,
-        gap_extend: 1,
+    // Gapped params for cutoff score search space calculation
+    let gapped_params = KarlinParams {
+        lambda: 0.267,
+        k: 0.041,
+        h: 0.14,
+        alpha: 1.9,
+        beta: -30.0,
     };
-    let gapped_params = lookup_protein_params(&gapped_scoring);
-    // Keep `params` as gapped for E-value calculations in sum_stats_linking
-    let params = gapped_params.clone();
+    // Use UNGAPPED params for bit score and E-value (NCBI parity for tblastx)
+    let params = ungapped_params.clone();
 
     // Compute NCBI-style average query length for linking cutoffs
     // Reference: blast_parameters.c:CalculateLinkHSPCutoffs (lines 1023-1026)

@@ -1561,7 +1561,9 @@ fn run_with_neighbor_map(args: TblastxArgs) -> Result<()> {
                             // s_left_off = last_hit + wordsize (end of first hit word)
                             // s_right_off = subject_offset (second hit start)
                             // q_right_off = query_offset (second hit start)
-                            let s_left_off = (last_hit + wordsize) as usize;
+                            // last_hit = subject_offset which is 0-indexed, so add +1 for array index
+                            // (consistent with s_raw and q_raw which also have +1)
+                            let s_left_off = (last_hit + wordsize + 1) as usize;
                             let (hsp_q, hsp_qe, hsp_s, _hsp_se, score, right_extend, s_last_off) =
                                 extend_hit_two_hit(
                                     q_aa,

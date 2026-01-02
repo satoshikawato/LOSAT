@@ -1068,6 +1068,11 @@ fn link_hsp_group_ncbi(
             // NCBI line 972: H->linked_set = linked_set
             hsp_links[cur].linked_set = linked_set;
             
+            // NCBI line 973: H->ordering_method = ordering_method;
+            // This records which ordering method (small gap=0 / large gap=1) was used
+            // to select this chain for output.
+            group_hits[cur].ordering_method = ordering as u8;
+            
             // Set E-value for ALL HSPs in the chain (not just head)
             // This is key: chain members inherit the chain's E-value
             group_hits[cur].e_value = evalue;

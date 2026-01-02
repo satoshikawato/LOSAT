@@ -10,7 +10,7 @@ use rayon::prelude::*;
 use std::sync::atomic::{AtomicI32, AtomicUsize, Ordering as AtomicOrdering};
 use std::sync::mpsc::channel;
 
-use crate::common::{write_output, Hit};
+use crate::common::{write_output_ncbi_order, Hit};
 use crate::config::{ProteinScoringSpec, ScoringMatrix};
 use crate::stats::{lookup_protein_params, lookup_protein_params_ungapped};
 use crate::utils::dust::{DustMasker, MaskedInterval};
@@ -553,12 +553,9 @@ pub fn run(args: TblastxArgs) -> Result<()> {
             all.extend(h);
         }
         all.retain(|h| h.e_value <= evalue_threshold);
-        all.sort_by(|a, b| {
-            b.bit_score
-                .partial_cmp(&a.bit_score)
-                .unwrap_or(std::cmp::Ordering::Equal)
-        });
-        write_output(&all, out_path.as_ref())?;
+        // NCBI-style output ordering: query (input order) → subject (best_evalue/score/oid) → HSP (score/coords)
+        // Reference: BLAST_LinkHsps() + s_EvalueCompareHSPLists() + ScoreCompareHSPs()
+        write_output_ncbi_order(all, out_path.as_ref())?;
         Ok(())
     });
 
@@ -889,6 +886,7 @@ pub fn run(args: TblastxArgs) -> Result<()> {
                                     s_orig_len: s_len,
                                     raw_score: score,
                                     e_value: f64::INFINITY,
+                                    ordering_method: 0, // Set during sum_stats_linking
                                 });
                             } else if diag_enabled {
                                 diagnostics
@@ -989,6 +987,9 @@ pub fn run(args: TblastxArgs) -> Result<()> {
                         s_end,
                         e_value: h.e_value,
                         bit_score: bit,
+                        q_idx: ctx.q_idx,
+                        s_idx: h.s_idx,
+                        raw_score: h.raw_score,
                     });
                 }
 
@@ -1604,6 +1605,7 @@ fn run_with_neighbor_map(args: TblastxArgs) -> Result<()> {
                                 s_orig_len: s_len,
                                 raw_score: score,
                                 e_value: f64::INFINITY, // Will be computed by linking
+                                ordering_method: 0, // Set during sum_stats_linking
                             });
                         } // end for query_hits
                     } // end for neighbor_kmers
@@ -1770,6 +1772,9 @@ fn run_with_neighbor_map(args: TblastxArgs) -> Result<()> {
             s_end,
             e_value: h.e_value,
             bit_score,
+            q_idx: h.q_idx,
+            s_idx: h.s_idx,
+            raw_score: h.raw_score,
         });
     }
 
@@ -1782,14 +1787,9 @@ fn run_with_neighbor_map(args: TblastxArgs) -> Result<()> {
     }
     eprintln!("=== End Stage Counters ===");
     
-    // Sort by bit score descending
-    final_hits.sort_by(|a, b| {
-        b.bit_score
-            .partial_cmp(&a.bit_score)
-            .unwrap_or(std::cmp::Ordering::Equal)
-    });
-
-    write_output(&final_hits, args.out.as_ref())?;
+    // NCBI-style output ordering: query (input order) → subject (best_evalue/score/oid) → HSP (score/coords)
+    // Reference: BLAST_LinkHsps() + s_EvalueCompareHSPLists() + ScoreCompareHSPs()
+    write_output_ncbi_order(final_hits, args.out.as_ref())?;
     Ok(())
 }
 
@@ -1826,6 +1826,7 @@ mod purge_tests {
             s_orig_len: 1000,
             raw_score,
             e_value: 0.0,
+            ordering_method: 0,
         }
     }
 
@@ -1962,6 +1963,7 @@ mod purge_tests {
             s_orig_len: 100,
             raw_score: 100,
             e_value: 0.0,
+            ordering_method: 0,
         };
         let hit2 = UngappedHit {
             q_idx: 0,
@@ -1978,6 +1980,7 @@ mod purge_tests {
             s_orig_len: 100,
             raw_score: 90,
             e_value: 0.0,
+            ordering_method: 0,
         };
 
         // CORRECT: Purge per-subject separately (NCBI BlastHSPList semantics)

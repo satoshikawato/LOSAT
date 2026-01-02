@@ -256,6 +256,9 @@ impl HspChain {
             s_end: self.s_end,
             e_value: self.min_evalue,
             bit_score: self.total_score,
+            q_idx: 0,
+            s_idx: 0,
+            raw_score: (self.total_score * 2.0) as i32,
         }
     }
 }
@@ -319,6 +322,9 @@ mod tests {
             s_end,
             e_value: 1e-10,
             bit_score,
+            q_idx: 0,
+            s_idx: 0,
+            raw_score: (bit_score * 2.0) as i32,
         }
     }
 

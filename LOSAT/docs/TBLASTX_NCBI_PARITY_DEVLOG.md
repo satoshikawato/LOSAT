@@ -1414,108 +1414,80 @@ pub max_hsps_per_subject: usize,
 
 ---
 
-## 2026-01-02 追記: Plan A + Plan B 完了 - CalculateLinkHSPCutoffs NCBI 完全移植
+## 2026-01-02 追記: Plan C 実装完了 — endpoint purge の NCBI 準拠化
 
 ### 実施内容
 
-#### 1. `calculate_link_hsp_cutoffs_ncbi()` - NCBI verbatim port
+#### 1. `purge_hsps_with_common_endpoints()` を NCBI verbatim port に置換
 
-`sum_stats_linking.rs` に NCBI `blast_parameters.c:CalculateLinkHSPCutoffs()` (lines 998-1082) を完全移植:
+**NCBI Ground Truth**:
+- `blast_hits.c` の `s_QueryOffsetCompareHSPs()` (lines 2267-2321)
+- `blast_hits.c` の `s_QueryEndCompareHSPs()` (lines 2332-2387)
+- `blast_hits.c` の `Blast_HSPListPurgeHSPsWithCommonEndpoints()` (lines 2454-2535)
 
-```rust
-pub fn calculate_link_hsp_cutoffs_ncbi(
-    avg_query_length: i32,
-    subject_len_nucl: i64,
-    db_length: i64,           // 0 for -subject mode
-    cutoff_score_min: i32,    // word_params->cutoff_score_min
-    scale_factor: f64,        // sbp->scale_factor
-    gap_decay_rate: f64,
-    params: &KarlinParams,
-) -> LinkHspCutoffs
+**Phase 1 (start point purge)**:
+```
+Sort order: ctx_idx ASC → q_aa_start ASC → s_aa_start ASC →
+            raw_score DESC → q_aa_end DESC → s_aa_end DESC
+Duplicate key: (ctx_idx, q_aa_start, s_aa_start, s_frame)
 ```
 
-**修正した不一致点**:
-
-| 項目 | 修正前 | 修正後 (NCBI 準拠) |
-|------|--------|-------------------|
-| query_length | `q_orig_len / 3` | `compute_avg_query_length_ncbi()` - 全 context の平均 |
-| expected_length 丸め | 浮動小数 | `blast_nint()` - NCBI `BLAST_Nint` 移植 |
-| y_variable 分岐 | なし | `db_length > subject_length` 分岐を実装 |
-| cutoff_small_gap 下限 | なし | `MAX(cutoff_score_min, floor(log(x)/λ)+1)` |
-| scale_factor 乗算 | なし | `cutoff_* *= scale_factor` |
-| gap_prob 伝播 | 常に 0.5 | small search space で 0 に設定、linking に伝播 |
-
-#### 2. `compute_avg_query_length_ncbi()` - NCBI query_info 再現
-
-NCBI の `s_QueryInfo_SetContext` + `CalculateLinkHSPCutoffs` の query_length 計算を再現:
-
-```rust
-// NCBI 式:
-// query_length = (contexts[last].query_offset + contexts[last].query_length - 1) 
-//                / (last_context + 1)
+**Phase 2 (end point purge)**:
+```
+Sort order: ctx_idx ASC → q_aa_end ASC → s_aa_end ASC →
+            raw_score DESC → q_aa_start DESC → s_aa_start DESC
+Duplicate key: (ctx_idx, q_aa_end, s_aa_end, s_frame)
 ```
 
-- 各 query に対して 6 context (frames 0-5) を構築
-- `BLAST_GetTranslatedProteinLength` 相当で各 context の長さを計算
-- `s_QueryInfo_SetContext` 相当でオフセットを累積 (`prev_len ? prev_len + 1 : 0`)
+**重要な発見**: `s_frame` はソートキーに含まれない（重複判定のみ）。
 
-#### 3. `blast_nint()` - NCBI 丸め関数
+#### 2. NCBI parity 発見: ungapped tblastx では purge を呼ばない
 
-```rust
-/// NCBI BLAST_Nint (ncbi_math.c:437-441)
-fn blast_nint(x: f64) -> i32 {
-    let rounded = if x >= 0.0 { x + 0.5 } else { x - 0.5 };
-    rounded as i32
-}
-```
+**NCBI の呼び出し箇所を確認**:
+- `blast_engine.c` line 545: `if (score_options->gapped_calculation)` 内のみ
+- tblastx は ungapped なので、この purge は実行されない
 
-#### 4. `LinkingParams` 構造体
+**結論**: LOSAT も purge を呼ばないのが NCBI parity。
+- neighbor-map mode の `all_ungapped` への purge を削除
+- normal mode はもともと purge なし（変更なし）
 
-linking に必要なパラメータをまとめて渡す:
+#### 3. テスト追加 (4件 pass)
 
-```rust
-pub struct LinkingParams {
-    pub avg_query_length: i32,
-    pub subject_len_nucl: i64,
-    pub cutoff_score_min: i32,
-    pub scale_factor: f64,
-    pub gap_decay_rate: f64,
-}
-```
+| テスト名 | 内容 |
+|----------|------|
+| `test_purge_ncbi_parity` | NCBI `testCheckHSPCommonEndpoints` 相当（9 HSPs → 3 surviving） |
+| `test_purge_different_s_frame_not_duplicate` | s_frame は重複判定に使用 |
+| `test_purge_different_context_not_duplicate` | ctx_idx は重複判定に使用 |
+| `test_mixed_subject_purge_is_wrong` | 混在 purge 禁止の回帰テスト |
 
-#### 5. `utils.rs` の修正
+#### 4. コメント修正
 
-**normal mode (`run()`)**:
-- `avg_query_length` を全 query から一度だけ計算
-- 各 subject で `cutoff_score_min` を計算（全 context の最小値）
-- `LinkingParams` を作成して `apply_sum_stats_even_gap_linking()` に渡す
+Phase 1 tie-breaker のコメントが誤っていた:
+- 誤: "smaller end → larger value first (shorter range)"
+- 正: "DESC: larger end first (NCBI line 2310-2313)"
 
-**neighbor-map mode (`run_with_neighbor_map()`)**:
-- 同様に `avg_query_length` を計算
-- hits を `s_idx` 単位にグループ化
-- 各 subject group ごとに `cutoff_score_min` を計算
-- subject 単位で `apply_sum_stats_even_gap_linking()` を呼び出し
+NCBI コードは `if (h1->query.end < h2->query.end) return 1;` で、
+smaller end が後に来る = larger end first。
 
-### 検証結果
+### フィールド対応表（確定）
 
-テスト実行 (`MjeNMV.fasta` vs `MelaMJNV.fasta`):
-- `avg_query_length=102002` が正しく計算・表示される
-- normal mode / neighbor-map mode 両方で動作確認
-- E-value 分布が生成される
+| NCBI BlastHSP | LOSAT UngappedHit | 用途 |
+|---------------|-------------------|------|
+| `context` | `ctx_idx` | ソート + 重複判定 |
+| `query.offset` | `q_aa_start` | ソート + 重複判定 (Phase 1) |
+| `query.end` | `q_aa_end` | ソート + 重複判定 (Phase 2) |
+| `subject.offset` | `s_aa_start` | ソート + 重複判定 (Phase 1) |
+| `subject.end` | `s_aa_end` | ソート + 重複判定 (Phase 2) |
+| `subject.frame` | `s_frame` | 重複判定のみ（ソート対象外） |
+| `score` | `raw_score` | ソート tie-breaker |
 
-### NCBI 参照コード
+### Discrepancy #3 (Plan C) 修正完了
 
-| ファイル | 関数/定数 | 行番号 |
-|----------|-----------|--------|
-| blast_parameters.c | `CalculateLinkHSPCutoffs` | 998-1082 |
-| blast_parameters.h | `BLAST_GAP_PROB` | 66 |
-| blast_parameters.h | `BLAST_GAP_DECAY_RATE` | 68 |
-| ncbi_math.c | `BLAST_Nint` | 437-441 |
-| blast_setup_cxx.cpp | `s_QueryInfo_SetContext` | - |
-| blast_util.c | `BLAST_GetTranslatedProteinLength` | - |
+`LOSAT_BLAST_DISCREPANCIES.md` の Discrepancy #3 を "修正完了" にマーク。
 
-### 残課題
+### 今後の課題
 
-1. **Discrepancy #3**: endpoint purge の適用単位/キー (Plan C)
-2. **Discrepancy #5**: HSP チェーン復元/出力順 (Plan F)
-3. **hit 数差分の継続調査**: E-value 計算自体は NCBI 準拠になったが、他の要因で差分が残る可能性
+1. **Discrepancy #1**: devlog の「extension は sequence_nomask を使う」誤記（Plan D）
+2. **Discrepancy #4**: `--max-hsps-per-subject` が未接続（Plan E）
+3. **Discrepancy #5**: HSP チェーン復元/出力順（Plan F）
+4. **Needs verification**: gapped vs ungapped linking params

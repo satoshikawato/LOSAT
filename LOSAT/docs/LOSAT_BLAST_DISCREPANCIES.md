@@ -73,26 +73,34 @@ devlog 末尾から（ファイル順）:
   - `gap_prob` 伝播: NCBI の `link_hsp_params->gap_prob = 0` を `LinkHspCutoffs.gap_prob` で再現
   - subject 単位 linking: neighbor-map モードで hits を `s_idx` 単位に分割して適用
 
-### 3) `Blast_HSPListPurgeHSPsWithCommonEndpoints` 相当処理が NCBI と同等になっていない（適用単位/キー）
+### 3) ~~`Blast_HSPListPurgeHSPsWithCommonEndpoints` 相当処理が NCBI と同等になっていない（適用単位/キー）~~ **[修正完了: 2026-01-02]**
 
 - **対象**:
   - LOSAT: `LOSAT/src/algorithm/tblastx/utils.rs:purge_hsps_with_common_endpoints()`
   - NCBI: `blast_hits.c:Blast_HSPListPurgeHSPsWithCommonEndpoints()` + `s_QueryOffsetCompareHSPs()` / `s_QueryEndCompareHSPs()`
-- **不一致点（確定）**:
-  - **適用単位**:
-    - NCBI: `BlastHSPList`（= 特定 subject に対する HSP list）単位で purge（他 subject と混ざらない）。
-    - LOSAT: `Vec<UngappedHit>` に対して直接 purge（呼び出し側によっては **複数 subject / 複数 query を混在**しうる）。
-  - **比較キーの不足**:
-    - NCBI（開始点 purge）: `(context, query.offset, subject.offset, subject.frame)` が一致するものを重複扱い。
-    - NCBI（終点 purge）: `(context, query.end, subject.end, subject.frame)` が一致するものを重複扱い。
-    - LOSAT: `(q_frame, s_frame, q_aa_start, s_aa_start)` および `(q_frame, s_frame, q_aa_end, s_aa_end)` のみで判定しており、
-      `q_idx/s_idx`（multi-sequence）や `context` 相当（`ctx_idx`）が考慮されない。
+- **修正内容（Plan C 実施）**:
+  - **比較キーを NCBI 完全一致に置換**:
+    - Phase 1 sort: `ctx_idx ASC → q_aa_start ASC → s_aa_start ASC → raw_score DESC → q_aa_end DESC → s_aa_end DESC`
+    - Phase 1 duplicate key: `(ctx_idx, q_aa_start, s_aa_start, s_frame)`
+    - Phase 2 sort: `ctx_idx ASC → q_aa_end ASC → s_aa_end ASC → raw_score DESC → q_aa_start DESC → s_aa_start DESC`
+    - Phase 2 duplicate key: `(ctx_idx, q_aa_end, s_aa_end, s_frame)`
+    - NCBI C コードをコメントとして引用（`blast_hits.c` lines 2267-2387, 2482-2513）
+  - **適用単位を BlastHSPList 相当に修正**:
+    - neighbor-map mode: `all_ungapped` への混在 purge を撤去
+    - normal mode: もともと subject 単位で閉じているため変更なし
+  - **NCBI parity 発見**: ungapped tblastx では NCBI は purge を**呼ばない**
+    - `blast_engine.c` line 545 の purge は `if (score_options->gapped_calculation)` 内のみ
+    - tblastx は ungapped のため、この purge は実行されない
+    - LOSAT も同様に purge を呼ばないことで NCBI parity を達成
+  - **テスト追加**:
+    - `test_purge_ncbi_parity`: NCBI `testCheckHSPCommonEndpoints` 相当
+    - `test_purge_different_s_frame_not_duplicate`: s_frame は重複判定にのみ使用
+    - `test_purge_different_context_not_duplicate`: context は重複判定に使用
+    - `test_mixed_subject_purge_is_wrong`: 混在 purge 禁止の回帰テスト
 - **NCBI refs**:
   - `/mnt/c/Users/kawato/Documents/GitHub/ncbi-blast/c++/src/algo/blast/core/blast_hits.c:2455-2534`
   - `/mnt/c/Users/kawato/Documents/GitHub/ncbi-blast/c++/src/algo/blast/core/blast_hits.c:2268-2400`（比較関数）
-
-（注）tblastx では `purge |= (program != eBlastTypeBlastn)` により **常に purge=true** となるため、
-NCBI は重複 HSP を切り詰めず **free** する（=「最高スコアを残す」挙動）。LOSAT 側もこの前提で完全一致する必要がある。
+  - `/mnt/c/Users/kawato/Documents/GitHub/ncbi-blast/c++/src/algo/blast/core/blast_engine.c:545`（gapped-only 呼び出し）
 
 ### 4) devlogの「`--max-hsps-per-subject` を追加」記述に対して、実装が未接続（dead option）
 
@@ -238,16 +246,21 @@ NCBI は重複 HSP を切り詰めず **free** する（=「最高スコアを�
     - `prob[0] /= gap_prob` (gap_prob=0 の場合は INT4_MAX)
     - `prob[1] /= (1-gap_prob)` (1-gap_prob=0 の場合は INT4_MAX)
 
-### Plan C: endpoint purge を NCBI と同等にする（適用単位/キー/適用タイミング）
+### Plan C: endpoint purge を NCBI と同等にする（適用単位/キー/適用タイミング） **[実施完了: 2026-01-02]**
 
 - **対象ファイル**: `LOSAT/src/algorithm/tblastx/utils.rs`
 - **対象**: `purge_hsps_with_common_endpoints()`
-- **やること**:
-  - NCBI `Blast_HSPListPurgeHSPsWithCommonEndpoints()` と `s_QueryOffsetCompareHSPs` / `s_QueryEndCompareHSPs` を **比較キーまで含めて一致**させる:
-    - `(q_idx, s_idx, ctx_idx, s_frame, q_start, s_start)`（開始点）
-    - `(q_idx, s_idx, ctx_idx, s_frame, q_end, s_end)`（終点）
-  - **混在 purge を禁止**: 呼び出し側で「subject 単位（必要なら query 単位も）」に分割してから purge する。
-  - そもそも NCBI が tblastx でこの purge を適用している stage と LOSAT の適用 stage が一致しているか確認し、ズレるなら parity 経路では実行しない。
+- **実施内容**:
+  - **comparator を NCBI 完全一致に置換** (`s_QueryOffsetCompareHSPs` / `s_QueryEndCompareHSPs`):
+    - Phase 1 sort: `ctx_idx ASC → q_aa_start ASC → s_aa_start ASC → raw_score DESC → q_aa_end DESC → s_aa_end DESC`
+    - Phase 2 sort: `ctx_idx ASC → q_aa_end ASC → s_aa_end ASC → raw_score DESC → q_aa_start DESC → s_aa_start DESC`
+    - **注意**: `s_frame` はソートキーに含まれない（重複判定にのみ使用）
+  - **重複判定キーを NCBI 一致**:
+    - Phase 1: `(ctx_idx, q_aa_start, s_aa_start, s_frame)`
+    - Phase 2: `(ctx_idx, q_aa_end, s_aa_end, s_frame)`
+  - **混在 purge を撤去**: neighbor-map mode の `all_ungapped` への purge を削除
+  - **NCBI parity 発見**: ungapped tblastx では NCBI は purge を**呼ばない**ため、LOSAT も呼ばない
+  - **テスト追加**: NCBI `testCheckHSPCommonEndpoints` 相当 + 混在禁止回帰テスト（4件 pass）
 
 ### Plan D: devlog の誤りを修正（将来の誤移植を防ぐ）
 

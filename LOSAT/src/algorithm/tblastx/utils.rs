@@ -1023,80 +1023,166 @@ pub fn run(args: TblastxArgs) -> Result<()> {
 
 /// NCBI: Blast_HSPListPurgeHSPsWithCommonEndpoints
 /// Remove HSPs that share the same start OR end coordinates.
-/// Reference: blast_hits.c:2455-2534
-/// This reduces redundant HSPs before sum_stats_linking.
+///
+/// **NCBI Reference:** `blast_hits.c` lines 2454-2535
+///
+/// **When to use:** NCBI only calls this in the **gapped** path
+/// (`blast_engine.c` line 545, inside `if (score_options->gapped_calculation)`).
+/// For ungapped tblastx, this function should NOT be called for NCBI parity.
+/// It is retained here for potential future gapped implementation.
+///
+/// **Important:** This must be called per-subject (BlastHSPList semantics).
+/// Never call on a mixed collection containing multiple subjects.
+///
+/// Field mapping (NCBI → LOSAT):
+/// - `hsp->context` → `UngappedHit.ctx_idx`
+/// - `hsp->query.offset` → `UngappedHit.q_aa_start`
+/// - `hsp->query.end` → `UngappedHit.q_aa_end`
+/// - `hsp->subject.offset` → `UngappedHit.s_aa_start`
+/// - `hsp->subject.end` → `UngappedHit.s_aa_end`
+/// - `hsp->subject.frame` → `UngappedHit.s_frame`
+/// - `hsp->score` → `UngappedHit.raw_score`
+///
+/// **Note:** `subject.frame` is NOT in the sort comparators, but IS used
+/// in duplicate detection (NCBI lines 2487, 2513).
+#[allow(dead_code)]
 fn purge_hsps_with_common_endpoints(hits: &mut Vec<super::chaining::UngappedHit>) {
     if hits.len() <= 1 {
         return;
     }
-    
+
+    // =========================================================================
     // Phase 1: Remove HSPs with common start points
-    // Sort by (q_frame, s_frame, q_aa_start, s_aa_start, score DESC)
+    // =========================================================================
+    // NCBI s_QueryOffsetCompareHSPs (blast_hits.c:2267-2321):
+    // Sort order: context ASC → query.offset ASC → subject.offset ASC →
+    //             score DESC → query.end ASC → subject.end ASC
+    // ```c
+    // if (h1->context < h2->context) return -1;
+    // if (h1->context > h2->context) return 1;
+    // if (h1->query.offset < h2->query.offset) return -1;
+    // if (h1->query.offset > h2->query.offset) return 1;
+    // if (h1->subject.offset < h2->subject.offset) return -1;
+    // if (h1->subject.offset > h2->subject.offset) return 1;
+    // if (h1->score < h2->score) return 1;   // DESC
+    // if (h1->score > h2->score) return -1;  // DESC
+    // if (h1->query.end < h2->query.end) return 1;   // shorter range first
+    // if (h1->query.end > h2->query.end) return -1;
+    // if (h1->subject.end < h2->subject.end) return 1;
+    // if (h1->subject.end > h2->subject.end) return -1;
+    // ```
     hits.sort_by(|a, b| {
-        a.q_frame.cmp(&b.q_frame)
-            .then(a.s_frame.cmp(&b.s_frame))
-            .then(a.q_aa_start.cmp(&b.q_aa_start))
-            .then(a.s_aa_start.cmp(&b.s_aa_start))
-            .then(b.raw_score.cmp(&a.raw_score)) // higher score first
+        a.ctx_idx
+            .cmp(&b.ctx_idx)
+            .then_with(|| a.q_aa_start.cmp(&b.q_aa_start))
+            .then_with(|| a.s_aa_start.cmp(&b.s_aa_start))
+            .then_with(|| b.raw_score.cmp(&a.raw_score)) // DESC: higher score first
+            .then_with(|| b.q_aa_end.cmp(&a.q_aa_end)) // DESC: larger end first (NCBI line 2310-2313)
+            .then_with(|| b.s_aa_end.cmp(&a.s_aa_end)) // DESC: larger end first (NCBI line 2315-2318)
     });
-    
+
+    // NCBI duplicate detection (blast_hits.c:2482-2487):
+    // ```c
+    // while (i+j < hsp_count &&
+    //        hsp_array[i] && hsp_array[i+j] &&
+    //        hsp_array[i]->context == hsp_array[i+j]->context &&
+    //        hsp_array[i]->query.offset == hsp_array[i+j]->query.offset &&
+    //        hsp_array[i]->subject.offset == hsp_array[i+j]->subject.offset &&
+    //        hsp_array[i]->subject.frame == hsp_array[i+j]->subject.frame)
+    // ```
     let mut write_idx = 0;
-    let mut read_idx = 0;
-    while read_idx < hits.len() {
-        // Keep the first HSP of each group (highest score due to sort)
-        hits.swap(write_idx, read_idx);
-        let kept = &hits[write_idx];
-        let kept_qf = kept.q_frame;
-        let kept_sf = kept.s_frame;
-        let kept_qs = kept.q_aa_start;
-        let kept_ss = kept.s_aa_start;
+    let mut i = 0;
+    while i < hits.len() {
+        // Keep the first HSP of each duplicate group (highest score due to sort)
+        hits.swap(write_idx, i);
+        let kept_ctx = hits[write_idx].ctx_idx;
+        let kept_q_off = hits[write_idx].q_aa_start;
+        let kept_s_off = hits[write_idx].s_aa_start;
+        let kept_s_frame = hits[write_idx].s_frame;
         write_idx += 1;
-        read_idx += 1;
-        
-        // Skip duplicates with same start point
-        while read_idx < hits.len() {
-            let h = &hits[read_idx];
-            if h.q_frame == kept_qf && h.s_frame == kept_sf 
-                && h.q_aa_start == kept_qs && h.s_aa_start == kept_ss {
-                read_idx += 1;
+
+        // Skip duplicates with same (context, query.offset, subject.offset, subject.frame)
+        let mut j = 1;
+        while i + j < hits.len() {
+            let h = &hits[i + j];
+            if h.ctx_idx == kept_ctx
+                && h.q_aa_start == kept_q_off
+                && h.s_aa_start == kept_s_off
+                && h.s_frame == kept_s_frame
+            {
+                j += 1;
             } else {
                 break;
             }
         }
+        i += j;
     }
     hits.truncate(write_idx);
-    
+
+    // =========================================================================
     // Phase 2: Remove HSPs with common end points
-    // Sort by (q_frame, s_frame, q_aa_end, s_aa_end, score DESC)
+    // =========================================================================
+    // NCBI s_QueryEndCompareHSPs (blast_hits.c:2332-2387):
+    // Sort order: context ASC → query.end ASC → subject.end ASC →
+    //             score DESC → query.offset DESC → subject.offset DESC
+    // ```c
+    // if (h1->context < h2->context) return -1;
+    // if (h1->context > h2->context) return 1;
+    // if (h1->query.end < h2->query.end) return -1;
+    // if (h1->query.end > h2->query.end) return 1;
+    // if (h1->subject.end < h2->subject.end) return -1;
+    // if (h1->subject.end > h2->subject.end) return 1;
+    // if (h1->score < h2->score) return 1;   // DESC
+    // if (h1->score > h2->score) return -1;  // DESC
+    // if (h1->query.offset < h2->query.offset) return 1;   // shorter range first (larger offset)
+    // if (h1->query.offset > h2->query.offset) return -1;
+    // if (h1->subject.offset < h2->subject.offset) return 1;
+    // if (h1->subject.offset > h2->subject.offset) return -1;
+    // ```
     hits.sort_by(|a, b| {
-        a.q_frame.cmp(&b.q_frame)
-            .then(a.s_frame.cmp(&b.s_frame))
-            .then(a.q_aa_end.cmp(&b.q_aa_end))
-            .then(a.s_aa_end.cmp(&b.s_aa_end))
-            .then(b.raw_score.cmp(&a.raw_score)) // higher score first
+        a.ctx_idx
+            .cmp(&b.ctx_idx)
+            .then_with(|| a.q_aa_end.cmp(&b.q_aa_end))
+            .then_with(|| a.s_aa_end.cmp(&b.s_aa_end))
+            .then_with(|| b.raw_score.cmp(&a.raw_score)) // DESC: higher score first
+            .then_with(|| b.q_aa_start.cmp(&a.q_aa_start)) // DESC: larger offset first (NCBI line 2376-2379)
+            .then_with(|| b.s_aa_start.cmp(&a.s_aa_start)) // DESC: larger offset first (NCBI line 2381-2384)
     });
-    
+
+    // NCBI duplicate detection (blast_hits.c:2508-2513):
+    // ```c
+    // while (i+j < hsp_count &&
+    //        hsp_array[i] && hsp_array[i+j] &&
+    //        hsp_array[i]->context == hsp_array[i+j]->context &&
+    //        hsp_array[i]->query.end == hsp_array[i+j]->query.end &&
+    //        hsp_array[i]->subject.end == hsp_array[i+j]->subject.end &&
+    //        hsp_array[i]->subject.frame == hsp_array[i+j]->subject.frame)
+    // ```
     write_idx = 0;
-    read_idx = 0;
-    while read_idx < hits.len() {
-        hits.swap(write_idx, read_idx);
-        let kept = &hits[write_idx];
-        let kept_qf = kept.q_frame;
-        let kept_sf = kept.s_frame;
-        let kept_qe = kept.q_aa_end;
-        let kept_se = kept.s_aa_end;
+    i = 0;
+    while i < hits.len() {
+        hits.swap(write_idx, i);
+        let kept_ctx = hits[write_idx].ctx_idx;
+        let kept_q_end = hits[write_idx].q_aa_end;
+        let kept_s_end = hits[write_idx].s_aa_end;
+        let kept_s_frame = hits[write_idx].s_frame;
         write_idx += 1;
-        read_idx += 1;
-        
-        while read_idx < hits.len() {
-            let h = &hits[read_idx];
-            if h.q_frame == kept_qf && h.s_frame == kept_sf 
-                && h.q_aa_end == kept_qe && h.s_aa_end == kept_se {
-                read_idx += 1;
+
+        // Skip duplicates with same (context, query.end, subject.end, subject.frame)
+        let mut j = 1;
+        while i + j < hits.len() {
+            let h = &hits[i + j];
+            if h.ctx_idx == kept_ctx
+                && h.q_aa_end == kept_q_end
+                && h.s_aa_end == kept_s_end
+                && h.s_frame == kept_s_frame
+            {
+                j += 1;
             } else {
                 break;
             }
         }
+        i += j;
     }
     hits.truncate(write_idx);
 }
@@ -1534,19 +1620,17 @@ fn run_with_neighbor_map(args: TblastxArgs) -> Result<()> {
 
     bar.finish();
 
-    let mut all_ungapped = all_ungapped.into_inner().unwrap();
+    let all_ungapped = all_ungapped.into_inner().unwrap();
     eprintln!("=== Stage Counters ===");
     eprintln!("[1] Raw ungapped hits (after extension): {}", all_ungapped.len());
 
-    // NCBI: Blast_HSPListPurgeHSPsWithCommonEndpoints
-    // Remove HSPs with common endpoints to reduce redundancy
-    // Reference: blast_hits.c:2455-2534
-    let before_purge = all_ungapped.len();
-    purge_hsps_with_common_endpoints(&mut all_ungapped);
-    if all_ungapped.len() < before_purge {
-        eprintln!("[1b] After endpoint purge: {} hits (removed {})", 
-            all_ungapped.len(), before_purge - all_ungapped.len());
-    }
+    // NOTE: NCBI does NOT call Blast_HSPListPurgeHSPsWithCommonEndpoints in the
+    // ungapped tblastx path. The purge is only in the gapped path:
+    //   blast_engine.c line 545: inside `if (score_options->gapped_calculation)`
+    // Since tblastx is ungapped, we skip purge for NCBI parity.
+    //
+    // Additionally, if purge were needed, it must be per-subject (BlastHSPList),
+    // not on the entire all_ungapped collection which mixes multiple subjects.
 
     // Apply sum-stats linking per subject (NCBI CalculateLinkHSPCutoffs is subject-specific)
     // Reference: blast_parameters.c:CalculateLinkHSPCutoffs
@@ -1707,4 +1791,212 @@ fn run_with_neighbor_map(args: TblastxArgs) -> Result<()> {
 
     write_output(&final_hits, args.out.as_ref())?;
     Ok(())
+}
+
+// =============================================================================
+// Tests for purge_hsps_with_common_endpoints (NCBI parity)
+// =============================================================================
+#[cfg(test)]
+mod purge_tests {
+    use super::purge_hsps_with_common_endpoints;
+    use super::super::chaining::UngappedHit;
+
+    /// Helper to create a minimal UngappedHit for testing purge logic.
+    fn make_hit(
+        ctx_idx: usize,
+        q_start: usize,
+        q_end: usize,
+        s_start: usize,
+        s_end: usize,
+        s_frame: i8,
+        raw_score: i32,
+    ) -> UngappedHit {
+        UngappedHit {
+            q_idx: 0,
+            s_idx: 0,
+            ctx_idx,
+            s_f_idx: 0,
+            q_frame: 1,
+            s_frame,
+            q_aa_start: q_start,
+            q_aa_end: q_end,
+            s_aa_start: s_start,
+            s_aa_end: s_end,
+            q_orig_len: 1000,
+            s_orig_len: 1000,
+            raw_score,
+            e_value: 0.0,
+        }
+    }
+
+    /// NCBI parity test: equivalent to `testCheckHSPCommonEndpoints` from
+    /// `blasthits_unit_test.cpp` lines 1163-1221.
+    ///
+    /// Original NCBI test data:
+    /// ```c
+    /// const int kHspCountStart = 9;
+    /// const int kHspCountEnd = 3;
+    /// const int kScores[kHspCountStart] =
+    ///     { 1044, 995, 965, 219, 160, 125, 110, 107, 103 };
+    /// const int kQueryOffsets[kHspCountStart] =
+    ///     { 2, 2, 2, 236, 88, 259, 278, 259, 278 };
+    /// const int kQueryEnds[kHspCountStart] =
+    ///     { 322, 336, 300, 322, 182, 322, 341, 341, 341 };
+    /// const int kSubjectOffsets[kHspCountStart] =
+    ///     { 7, 7, 7, 194, 2, 194, 197, 194, 197 };
+    /// const int kSubjectEnds[kHspCountStart] =
+    ///     { 292, 293, 301, 292, 96, 292, 260, 260, 266 };
+    /// const int kSurvivingIndices[kHspCountEnd] = { 4, 0, 6 };
+    /// ```
+    ///
+    /// Expected surviving HSPs after purge: indices 4, 0, 6 (in output order).
+    #[test]
+    fn test_purge_ncbi_parity() {
+        let scores = [1044, 995, 965, 219, 160, 125, 110, 107, 103];
+        let q_offsets = [2, 2, 2, 236, 88, 259, 278, 259, 278];
+        let q_ends = [322, 336, 300, 322, 182, 322, 341, 341, 341];
+        let s_offsets = [7, 7, 7, 194, 2, 194, 197, 194, 197];
+        let s_ends = [292, 293, 301, 292, 96, 292, 260, 260, 266];
+
+        // Create HSPs with context=0, s_frame=0 (matching NCBI test which uses defaults)
+        let mut hits: Vec<UngappedHit> = (0..9)
+            .map(|i| {
+                make_hit(
+                    0,                   // ctx_idx (context)
+                    q_offsets[i],        // q_aa_start
+                    q_ends[i],           // q_aa_end
+                    s_offsets[i],        // s_aa_start
+                    s_ends[i],           // s_aa_end
+                    0,                   // s_frame
+                    scores[i] as i32,    // raw_score
+                )
+            })
+            .collect();
+
+        // Run purge
+        purge_hsps_with_common_endpoints(&mut hits);
+
+        // Expected: 3 surviving HSPs (indices 4, 0, 6 from original)
+        assert_eq!(hits.len(), 3, "Expected 3 surviving HSPs, got {}", hits.len());
+
+        // Verify the surviving HSPs match the expected ones.
+        // The order after purge depends on the phase 2 sort order.
+        // We check by finding each expected HSP in the result.
+        let surviving_indices = [4, 0, 6];
+        for &orig_idx in &surviving_indices {
+            let found = hits.iter().any(|h| {
+                h.q_aa_start == q_offsets[orig_idx]
+                    && h.q_aa_end == q_ends[orig_idx]
+                    && h.s_aa_start == s_offsets[orig_idx]
+                    && h.s_aa_end == s_ends[orig_idx]
+                    && h.raw_score == scores[orig_idx] as i32
+            });
+            assert!(
+                found,
+                "Expected HSP {} (score={}, q={}-{}, s={}-{}) not found in result",
+                orig_idx,
+                scores[orig_idx],
+                q_offsets[orig_idx],
+                q_ends[orig_idx],
+                s_offsets[orig_idx],
+                s_ends[orig_idx]
+            );
+        }
+    }
+
+    /// Test that subject.frame is used in duplicate detection.
+    /// HSPs with same coordinates but different subject.frame should NOT be purged.
+    #[test]
+    fn test_purge_different_s_frame_not_duplicate() {
+        // Two HSPs with identical coordinates but different s_frame
+        let mut hits = vec![
+            make_hit(0, 10, 50, 20, 60, 1, 100),  // s_frame = 1
+            make_hit(0, 10, 50, 20, 60, 2, 90),   // s_frame = 2
+        ];
+
+        purge_hsps_with_common_endpoints(&mut hits);
+
+        // Both should survive because s_frame differs
+        assert_eq!(hits.len(), 2, "HSPs with different s_frame should both survive");
+    }
+
+    /// Test that context (ctx_idx) is used in duplicate detection.
+    /// HSPs with same coordinates but different context should NOT be purged.
+    #[test]
+    fn test_purge_different_context_not_duplicate() {
+        // Two HSPs with identical coordinates but different context
+        let mut hits = vec![
+            make_hit(0, 10, 50, 20, 60, 1, 100),  // ctx_idx = 0
+            make_hit(1, 10, 50, 20, 60, 1, 90),   // ctx_idx = 1
+        ];
+
+        purge_hsps_with_common_endpoints(&mut hits);
+
+        // Both should survive because ctx_idx differs
+        assert_eq!(hits.len(), 2, "HSPs with different context should both survive");
+    }
+
+    /// Regression test documenting why mixed-subject purge is WRONG.
+    ///
+    /// NCBI's BlastHSPList is per-subject. If we purge a mixed collection,
+    /// HSPs from different subjects could incorrectly be treated as duplicates
+    /// if they happen to have the same ctx_idx + coordinates + s_frame.
+    ///
+    /// This test shows the CORRECT behavior: purging per-subject separately
+    /// preserves both HSPs, while incorrectly purging together would remove one.
+    #[test]
+    fn test_mixed_subject_purge_is_wrong() {
+        // Two HSPs from DIFFERENT subjects but with identical coordinates
+        let hit1 = UngappedHit {
+            q_idx: 0,
+            s_idx: 0,  // subject 0
+            ctx_idx: 0,
+            s_f_idx: 0,
+            q_frame: 1,
+            s_frame: 1,
+            q_aa_start: 10,
+            q_aa_end: 50,
+            s_aa_start: 20,
+            s_aa_end: 60,
+            q_orig_len: 100,
+            s_orig_len: 100,
+            raw_score: 100,
+            e_value: 0.0,
+        };
+        let hit2 = UngappedHit {
+            q_idx: 0,
+            s_idx: 1,  // subject 1 (DIFFERENT)
+            ctx_idx: 0,
+            s_f_idx: 0,
+            q_frame: 1,
+            s_frame: 1,
+            q_aa_start: 10,
+            q_aa_end: 50,
+            s_aa_start: 20,
+            s_aa_end: 60,
+            q_orig_len: 100,
+            s_orig_len: 100,
+            raw_score: 90,
+            e_value: 0.0,
+        };
+
+        // CORRECT: Purge per-subject separately (NCBI BlastHSPList semantics)
+        let mut subject0_hits = vec![hit1.clone()];
+        let mut subject1_hits = vec![hit2.clone()];
+        purge_hsps_with_common_endpoints(&mut subject0_hits);
+        purge_hsps_with_common_endpoints(&mut subject1_hits);
+        let correct_count = subject0_hits.len() + subject1_hits.len();
+        assert_eq!(correct_count, 2, "Per-subject purge should preserve both HSPs");
+
+        // WRONG (what we must NOT do): Purge mixed collection
+        // Note: The current implementation doesn't check s_idx, so mixing would
+        // incorrectly treat these as duplicates. This documents the requirement
+        // that purge must be called per-subject.
+        let mut mixed_hits = vec![hit1, hit2];
+        purge_hsps_with_common_endpoints(&mut mixed_hits);
+        // If purge incorrectly treats different subjects as duplicates:
+        // mixed_hits.len() would be 1 (wrong!)
+        // This test documents the CORRECT behavior requirement.
+        // The implementation relies on callers to split by subject first.
+    }
 }

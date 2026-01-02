@@ -277,17 +277,29 @@ pub fn cutoff_score_word_params(
 ///
 /// This combines all the NCBI cutoff calculation steps for -subject mode tblastx:
 /// 1. Compute gap_trigger using UNGAPPED params
-/// 2. Compute eff_searchsp using GAPPED params
-/// 3. Compute cutoff_score_max using GAPPED params
+/// 2. Compute eff_searchsp using UNGAPPED params (tblastx has no kbp_gap!)
+/// 3. Compute cutoff_score_max using UNGAPPED params (tblastx has no kbp_gap!)
 /// 4. Return MIN(gap_trigger, cutoff_score_max)
+///
+/// NCBI Reference (blast_parameters.c:860-866):
+/// ```c
+/// if (sbp->kbp_gap) {
+///     kbp_array = sbp->kbp_gap;
+/// } else if (sbp->kbp) {
+///     kbp_array = sbp->kbp;        // tblastx uses this path!
+///     gapped_calculation = FALSE;
+/// }
+/// ```
+/// For tblastx, kbp_gap is NULL because gapped alignment is not allowed,
+/// so kbp_array = sbp->kbp (ungapped params).
 ///
 /// # Arguments
 /// * `query_len_aa` - Query length in amino acids (for this context/frame)
 /// * `subject_len_nucl` - Subject length in nucleotides
 /// * `evalue_threshold` - E-value threshold (typically 10.0)
 /// * `gap_trigger_bits` - Gap trigger in bits (typically 22.0)
-/// * `ungapped_params` - UNGAPPED Karlin-Altschul parameters
-/// * `gapped_params` - GAPPED Karlin-Altschul parameters
+/// * `ungapped_params` - UNGAPPED Karlin-Altschul parameters (kbp_std / kbp)
+/// * `_gapped_params` - GAPPED Karlin-Altschul parameters (unused for tblastx)
 ///
 /// # Returns
 /// Cutoff score for ungapped extension (raw score)
@@ -297,20 +309,21 @@ pub fn compute_tblastx_cutoff_score(
     evalue_threshold: f64,
     gap_trigger_bits: f64,
     ungapped_params: &KarlinParams,
-    gapped_params: &KarlinParams,
+    _gapped_params: &KarlinParams,  // Unused for tblastx - kept for API compatibility
 ) -> i32 {
     // Step 1: Compute gap_trigger using UNGAPPED params
     let gap_trigger = gap_trigger_raw_score(gap_trigger_bits, ungapped_params);
     
-    // Step 2: Compute eff_searchsp using GAPPED params
+    // Step 2: Compute eff_searchsp using UNGAPPED params (tblastx has no kbp_gap!)
+    // NCBI uses kbp_array = sbp->kbp (ungapped) when kbp_gap is NULL (tblastx case)
     let eff_searchsp = compute_eff_searchsp_subject_mode_tblastx(
         query_len_aa,
         subject_len_nucl,
-        gapped_params,
+        ungapped_params,  // Use ungapped params, not gapped!
     );
     
-    // Step 3: Compute cutoff_score_max using GAPPED params
-    let cutoff_score_max = cutoff_score_from_evalue(evalue_threshold, eff_searchsp, gapped_params);
+    // Step 3: Compute cutoff_score_max using UNGAPPED params (tblastx has no kbp_gap!)
+    let cutoff_score_max = cutoff_score_from_evalue(evalue_threshold, eff_searchsp, ungapped_params);
     
     // Step 4: Return MIN(gap_trigger, cutoff_score_max)
     // Note: scale_factor = 1.0 for standard BLOSUM62

@@ -644,11 +644,16 @@ pub fn run(args: TblastxArgs) -> Result<()> {
             // NCBI word_params->cutoff_score_min = min of cutoffs across all contexts
             // Reference: blast_parameters.c BlastInitialWordParametersUpdate
             let mut cutoff_score_min = i32::MAX;
+            
+            // NCBI sum statistics cutoff (blast_parameters.c:951-976) is only applied
+            // when gapped_calculation == TRUE. For tblastx, gapped_calculation = FALSE,
+            // so we use only the regular cutoff based on E-value threshold.
+            
             for (ctx_idx, ctx) in contexts_ref.iter().enumerate() {
                 // NCBI: query_length = query_info->contexts[context].query_length
                 let query_len_aa = ctx.aa_len as i64;
                 
-                // Compute cutoff using NCBI algorithm
+                // Compute cutoff using NCBI algorithm (uses UNGAPPED params for tblastx)
                 let cutoff = compute_tblastx_cutoff_score(
                     query_len_aa,
                     subject_len_nucl,
@@ -1389,13 +1394,18 @@ fn run_with_neighbor_map(args: TblastxArgs) -> Result<()> {
         let subject_len_nucl = s_len as i64;
         let total_contexts: usize = query_frames.iter().map(|f| f.len()).sum();
         let mut cutoff_scores: Vec<Vec<i32>> = vec![vec![0; s_frames.len()]; total_contexts];
+        
+        // NCBI sum statistics cutoff (blast_parameters.c:951-976) is only applied
+        // when gapped_calculation == TRUE. For tblastx, gapped_calculation = FALSE,
+        // so we use only the regular cutoff based on E-value threshold.
+        
         let mut ctx_idx = 0;
         for q_frames in query_frames.iter() {
             for q_frame in q_frames.iter() {
                 // NCBI: query_length = query_info->contexts[context].query_length
                 let query_len_aa = q_frame.aa_len as i64;
                 
-                // Compute cutoff using NCBI algorithm
+                // Compute cutoff using NCBI algorithm (uses UNGAPPED params for tblastx)
                 let cutoff = compute_tblastx_cutoff_score(
                     query_len_aa,
                     subject_len_nucl,
@@ -1708,6 +1718,10 @@ fn run_with_neighbor_map(args: TblastxArgs) -> Result<()> {
         .flat_map(|(s_idx, subject_hits)| {
             // Get subject length for this subject
             let subject_len_nucl = subjects_raw[s_idx as usize].seq().len() as i64;
+            
+            // NCBI sum statistics cutoff (blast_parameters.c:951-976) is only applied
+            // when gapped_calculation == TRUE. For tblastx, gapped_calculation = FALSE,
+            // so we use only the regular cutoff based on E-value threshold.
             
             // Compute cutoff_score_min as minimum across all query contexts
             let mut cutoff_score_min = i32::MAX;

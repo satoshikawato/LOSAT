@@ -1008,6 +1008,40 @@ Top alignment が 1,967 AA → 219,033 AA に大幅改善！これは SEG masked
 
 次のステップ: NCBI の出力と詳細比較
 
+---
+
+### ⚠️ CORRECTION (2026-01-02): 上記「発見」と「修正」は誤りを含む
+
+**誤記（上記 line 976）**: 「NCBI は `sequence_nomask` (unmasked) を使う」
+
+**正しい NCBI ground truth**:
+- **Extension** は `query->sequence`（**マスク済み working buffer**）を使用する。
+- `sequence_nomask` は identity 計算や出力表示用途に**保持**されるだけで、スコア計算には使わない。
+
+**NCBI 根拠（verbatim）**:
+```c
+// ncbi-blast/c++/src/algo/blast/core/aa_ungapped.c:1089-1094
+// s_BlastAaExtendTwoHit() が参照するのは query->sequence（マスク済み）
+Uint1 *q = query->sequence;
+...
+score = matrix[q[q_right_off + i]][s[s_right_off + i]];
+```
+
+```c
+// ncbi-blast/c++/src/algo/blast/core/blast_filter.c:1350-1406
+// BlastSetUp_MaskQuery() は sequence_start_nomask に unmasked を保存し、
+// 実際のマスク文字は query->sequence に適用する。
+query_blk->sequence_start_nomask = BlastMemDup(query_blk->sequence_start, total_length);
+query_blk->sequence_nomask = query_blk->sequence_start_nomask + 1;
+...
+buffer[index] = kMaskingLetter;  // working buffer をマスク
+```
+
+**結論**: 上記「修正」で提案された `aa_seq_nomask` への変更は **NCBI 非準拠**。
+現在の LOSAT 実装は **正しく `aa_seq`（masked）を extension に使用**しており、
+`aa_seq_nomask` は identity 計算（出力用）にのみ使用している。
+
+---
 
 ## 2026-01-02 追記: Extension と座標変換の検証
 
@@ -1375,15 +1409,14 @@ NCBI でも同じ入力で同様に遅くなる可能性が高い:
 - INDEX 0 には `next_larger` 最適化がない
 - early break は同様に効かない
 
-### 追加した性能オプション
+### ~~追加した性能オプション~~ → **削除済み (2026-01-02 Plan E)**
 
-`--max-hsps-per-subject` オプションを追加:
-```rust
-#[arg(long, default_value_t = 0)]
-pub max_hsps_per_subject: usize,
-```
+~~`--max-hsps-per-subject` オプションを追加~~ → **dead option として削除**
 
-デフォルト 0 (無制限) で NCBI 準拠。self-comparison では 50,000 程度に設定することで高速化可能。
+このオプションは定義のみで実装に接続されていなかった（Discrepancy #4）。
+NCBI parity 経路を汚さないため、CLI から削除した。
+将来必要になった場合は、`utils.rs` の `apply_sum_stats_even_gap_linking` 呼び出し前に
+スコア降順で truncate する形で再実装すること。
 
 ### 残課題
 

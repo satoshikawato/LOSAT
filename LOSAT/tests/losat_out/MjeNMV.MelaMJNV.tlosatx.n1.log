@@ -1,7 +1,7 @@
 Reading queries (neighbor map mode)...
 Building neighbor lookup...
 Pre-computing filtered neighbor map (threshold=13)...
-Filtered neighbor map computed in 12.7533ms
+Filtered neighbor map computed in 12.3419ms
   Non-empty entries: 13005
   Total neighbor pairs: 184254
   Avg neighbors per k-mer: 14.2
@@ -19,6 +19,6 @@ Pre-generating subject frames for identity calculation...
 [5] Top alignment length: 1137 AA
 === End Stage Counters ===
 
-real	0m5.131s
-user	0m5.046s
-sys	0m0.030s
+real	0m5.508s
+user	0m5.434s
+sys	0m0.020s

@@ -15,9 +15,6 @@
    - `purge_hsps_with_common_endpoints`実装（NCBI `Blast_HSPListPurgeHSPsWithCommonEndpoints`相当）
    - 効果: 232,359 → 232,275 (84個削除) - self-comparisonでは限定的
 
-3. **`--max-hsps-per-subject`オプション追加**
-   - 定義のみ（実装未完了）
-
 ### 現在の問題
 
 | 指標 | 値 |
@@ -79,31 +76,7 @@
    - 一定数のHSPが生成されたら、低スコアの対角線をクリア
    - 出力に影響する可能性があるため慎重に
 
-### 優先度3 `--max-hsps-per-subject`オプション実装
-
-**目的**: self-comparisonなど大量HSP生成ケースで実用的な性能を確保
-
-**実装箇所**:
-- `utils.rs`の`run_with_neighbor_map`関数内
-- `sum_stats_linking`呼び出し前にHSP数制限を適用
-- スコア降順でソートし、上位N個のみ保持
-
-**制約**:
-- デフォルト0（無制限）でNCBI準拠を維持
-- ユーザーが明示的に指定した場合のみ制限を適用
-- 制限適用時は警告メッセージを出力
-
-**参考実装**:
-```rust
-if args.max_hsps_per_subject > 0 && all_ungapped.len() > args.max_hsps_per_subject {
-    eprintln!("[WARNING] Limiting HSPs from {} to {} (--max-hsps-per-subject)", 
-        all_ungapped.len(), args.max_hsps_per_subject);
-    all_ungapped.sort_by(|a, b| b.raw_score.cmp(&a.raw_score));
-    all_ungapped.truncate(args.max_hsps_per_subject);
-}
-```
-
-### 優先度4: 診断機能の強化
+### 優先度3: 診断機能の強化
 
 **目的**: パフォーマンスボトルネックの可視化
 
@@ -163,18 +136,12 @@ if args.max_hsps_per_subject > 0 && all_ungapped.len() > args.max_hsps_per_subje
 
 ## 成功基準
 
-1. **`--max-hsps-per-subject`実装完了**
-   - デフォルト0（無制限）でNCBI準拠
-   - 明示的指定時のみ制限適用
-   - 警告メッセージ出力
-
-2. **パフォーマンス改善（オプション）**
+1. **パフォーマンス改善（オプション）**
    - INDEX 0最適化が実装された場合、出力同等性を維持
    - 診断機能で改善効果を確認可能
 
-3. **ドキュメント更新**
+2. **ドキュメント更新**
    - DEVLOGに実装内容を追記
-   - オプションの使用方法を記載
 
 ## 注意事項
 

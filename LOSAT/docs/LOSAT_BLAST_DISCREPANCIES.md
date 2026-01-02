@@ -30,7 +30,7 @@ devlog 末尾から（ファイル順）:
 
 ## Discrepancies（確定）
 
-### 1) devlogの主張がNCBI実装と矛盾: 「extensionはunmasked(sequence_nomask)を使う」
+### 1) ~~devlogの主張がNCBI実装と矛盾: 「extensionはunmasked(sequence_nomask)を使う」~~ **[修正完了: 2026-01-02 Plan D]**
 
 - **devlog**: `2026-01-02 追記: 重大バグ発見と修正 - extension で masked sequence を使用していた` にて
   - 「LOSAT は extension 時に SEG masked された `aa_seq` を使用していた。NCBI は `sequence_nomask` (unmasked) を使う」
@@ -44,12 +44,14 @@ devlog 末尾から（ファイル順）:
     - `BlastSetUp_MaskQuery()` が `sequence_start_nomask` を作りつつ、マスクは `query_blk->sequence`（working buffer）に適用している。
   - `/mnt/c/Users/kawato/Documents/GitHub/ncbi-blast/c++/src/algo/blast/core/aa_ungapped.c:1089-1158`
     - `Uint1 *q = query->sequence;` を用いて ungapped extension を実施。
-- **LOSAT現状**:
-  - `LOSAT/src/algorithm/tblastx/utils.rs` の normal/neighbor-map の two-hit extension は `aa_seq`（working buffer）を渡している。
-  - これは **NCBI と整合**する可能性が高い。
-- **結論**:
-  - devlog の「NCBI は sequence_nomask を extension に使う」は **誤り**。
-  - もし実装が devlog 記述どおり `aa_seq_nomask` を extension に使うようになっている箇所が残っていれば、それは **NCBI 非準拠**（出力差分要因）となる。
+- **LOSAT現状（確認済み 2026-01-02）**:
+  - `LOSAT/src/algorithm/tblastx/utils.rs` の normal/neighbor-map の two-hit extension は `aa_seq`（masked working buffer）を渡している。
+  - `aa_seq_nomask` は identity 計算（出力用）にのみ使用されている。
+  - これは **NCBI と完全に整合**する。
+- **修正内容（Plan D）**:
+  - devlog の誤記を「⚠️ CORRECTION」セクションとして訂正（`TBLASTX_NCBI_PARITY_DEVLOG.md` 2026-01-02 追記部）
+  - NCBI 根拠コード（`aa_ungapped.c`, `blast_filter.c`）を verbatim 引用
+  - 現在の LOSAT 実装（extension=masked, nomask=identity）が正しいことを確認
 
 ### 2) ~~`sum_stats_linking` の link cutoffs 計算が NCBI `CalculateLinkHSPCutoffs()` と一致していない~~ **[修正完了: 2026-01-02]**
 
@@ -102,16 +104,17 @@ devlog 末尾から（ファイル順）:
   - `/mnt/c/Users/kawato/Documents/GitHub/ncbi-blast/c++/src/algo/blast/core/blast_hits.c:2268-2400`（比較関数）
   - `/mnt/c/Users/kawato/Documents/GitHub/ncbi-blast/c++/src/algo/blast/core/blast_engine.c:545`（gapped-only 呼び出し）
 
-### 4) devlogの「`--max-hsps-per-subject` を追加」記述に対して、実装が未接続（dead option）
+### 4) ~~devlogの「`--max-hsps-per-subject` を追加」記述に対して、実装が未接続（dead option）~~ **[修正完了: 2026-01-02 Plan E]**
 
 - **devlog**: `2026-01-02 追記: sum_stats_linking NCBI完全準拠修正` にて
-  - `--max-hsps-per-subject` を追加した旨の記述がある。
-- **LOSAT現状（確定）**:
-  - `LOSAT/src/algorithm/tblastx/args.rs` に `max_hsps_per_subject` は定義されているが、
-    `LOSAT/src/algorithm/tblastx/utils.rs` / `sum_stats_linking.rs` から参照されていない（=動作に影響しない）。
-- **影響**:
-  - parity そのものには直結しないが、devlog の「実装した」主張とコードが一致しておらず、
-    パフォーマンス検証・再現性の面で **不合理**（デバッグ/運用上の齟齬）。
+  - `--max-hsps-per-subject` を追加した旨の記述があった。
+- **問題**:
+  - `LOSAT/src/algorithm/tblastx/args.rs` に定義はあったが、実装に接続されていなかった（dead option）。
+- **修正内容（Plan E）**:
+  - `args.rs` から `--max-hsps-per-subject` オプションを削除
+  - `TBLASTX_NCBI_PARITY_DEVLOG.md` の該当セクションを「削除済み (Plan E)」と注記
+  - `NEXT_SESSION_PROMPT_2026-01-02_SUM_STATS_LINKING_PERF.md` から関連タスク/参考実装を除去
+  - NCBI parity 経路を汚さないため、非パリティ最適化は将来必要時に再実装すること
 
 ### 5) devlogの「`ordering_method` を保持する」主張と現コードが一致していない（HSPチェーン復元の欠落の可能性）
 
@@ -262,18 +265,23 @@ devlog 末尾から（ファイル順）:
   - **NCBI parity 発見**: ungapped tblastx では NCBI は purge を**呼ばない**ため、LOSAT も呼ばない
   - **テスト追加**: NCBI `testCheckHSPCommonEndpoints` 相当 + 混在禁止回帰テスト（4件 pass）
 
-### Plan D: devlog の誤りを修正（将来の誤移植を防ぐ）
+### Plan D: devlog の誤りを修正（将来の誤移植を防ぐ） **[実施完了: 2026-01-02]**
 
 - **対象**: `TBLASTX_NCBI_PARITY_DEVLOG.md`
-- **やること**:
-  - 「NCBI は extension に `sequence_nomask` を使う」等の誤記を修正し、根拠コード（`aa_ungapped.c`）を引用して訂正する。
+- **実施内容**:
+  - 「NCBI は extension に `sequence_nomask` を使う」という誤記を「⚠️ CORRECTION」セクションで訂正
+  - NCBI 根拠コード（`aa_ungapped.c:1089-1094`, `blast_filter.c:1350-1406`）を verbatim 引用
+  - 正しい NCBI 挙動: extension は `query->sequence`（masked）、`sequence_nomask` は identity 等の保持用
+  - 現在の LOSAT 実装が NCBI と整合していることを確認
 
-### Plan E: “非パリティ最適化” の整理（dead option を解消）
+### Plan E: "非パリティ最適化" の整理（dead option を解消） **[実施完了: 2026-01-02]**
 
 - **対象**: `LOSAT/src/algorithm/tblastx/args.rs` の `max_hsps_per_subject`
-- **やること**:
-  - 使うなら: 実際に `utils.rs` の「subject 単位」の ungapped hits に対して適用（score 降順に truncate）し、**デフォルト0で無効**を保証。
-  - 使わないなら: オプション削除（または devlog から削除/注意書きへ）。
+- **実施内容**:
+  - `--max-hsps-per-subject` オプションを `args.rs` から削除
+  - `TBLASTX_NCBI_PARITY_DEVLOG.md` に「削除済み (Plan E)」と注記
+  - `NEXT_SESSION_PROMPT_2026-01-02_SUM_STATS_LINKING_PERF.md` から関連タスク/参考実装を除去
+  - NCBI parity 経路を汚さないことを優先
 
 ### Plan F: HSP チェーン復元/出力順のパリティ要否を確定し、必要なら実装
 

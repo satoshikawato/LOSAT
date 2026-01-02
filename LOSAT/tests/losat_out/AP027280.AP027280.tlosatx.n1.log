@@ -1,31 +1,45 @@
 Reading queries (neighbor map mode)...
 Building neighbor lookup...
 Pre-computing filtered neighbor map (threshold=13)...
-Filtered neighbor map computed in 12.9498ms
+Filtered neighbor map computed in 12.034ms
   Non-empty entries: 13005
-  Total neighbor pairs: 184799
+  Total neighbor pairs: 184991
   Avg neighbors per k-mer: 14.2
-Query lookup: 495334 entries (exact matches only)
+Query lookup: 529022 entries (exact matches only)
 Using compressed neighbor index (no expanded_lookup)...
 Reading subjects...
 Searching 1 queries vs 1 subjects (neighbor map mode, avg_query_length=103854)...
-[DEBUG TOP HIT] score=9641 len=1929 q_frame=3 s_frame=3
+[DEBUG TOP HIT] score=13539 len=2798 q_frame=1 s_frame=1
+  coords: q_start=75307 q_end=78105 s_start=75307 s_end=78105
+  seed positions: s_left_off=75310 s_raw=75311
+  q_aa[raw 75308]=12  q_aa[raw-1 75307]=21 (X=21)
+  q_aa[raw end-1 78105]=8  q_aa[raw end 78106]=21 (X=21)
+  X's near left boundary [75277-75307]: [75286, 75287, 75288, 75289, 75290, 75291, 75292, 75293, 75294, 75295, 75296, 75297, 75298, 75299, 75300, 75301, 75302, 75303, 75304, 75305, 75306, 75307]
+  X's near right boundary [78105-78135]: [78106, 78107, 78108, 78109, 78110, 78111, 78112, 78113, 78114, 78115, 78116, 78117, 78118, 78119, 78120, 78121, 78122]
+[DEBUG TOP HIT] score=9851 len=1929 q_frame=3 s_frame=3
   coords: q_start=100945 q_end=102874 s_start=100945 s_end=102874
   seed positions: s_left_off=100948 s_raw=100949
   q_aa[raw 100946]=9  q_aa[raw-1 100945]=21 (X=21)
   q_aa[raw end-1 102874]=19  q_aa[raw end 102875]=21 (X=21)
-  X's near left boundary [100915-100945]: [100915, 100929, 100930, 100931, 100932, 100933, 100934, 100935, 100936, 100937, 100938, 100939, 100940, 100941, 100942, 100943, 100944, 100945]
+  X's near left boundary [100915-100945]: [100929, 100930, 100931, 100932, 100933, 100934, 100935, 100936, 100937, 100938, 100939, 100940, 100941, 100942, 100943, 100944, 100945]
   X's near right boundary [102874-102904]: [102875, 102876, 102877, 102878, 102879, 102880, 102881, 102882, 102883, 102884, 102885, 102886, 102887, 102888, 102889, 102890, 102891, 102892, 102893, 102894, 102895, 102896, 102897, 102898, 102899, 102900, 102901, 102902, 102903, 102904]
+[DEBUG TOP HIT] score=9868 len=1979 q_frame=-2 s_frame=-2
+  coords: q_start=96092 q_end=98071 s_start=96092 s_end=98071
+  seed positions: s_left_off=96095 s_raw=96096
+  q_aa[raw 96093]=3  q_aa[raw-1 96092]=21 (X=21)
+  q_aa[raw end-1 98071]=12  q_aa[raw end 98072]=21 (X=21)
+  X's near left boundary [96062-96092]: [96062, 96063, 96064, 96065, 96066, 96067, 96068, 96069, 96070, 96071, 96072, 96073, 96074, 96075, 96076, 96077, 96078, 96079, 96080, 96081, 96082, 96083, 96084, 96085, 96086, 96087, 96088, 96089, 96090, 96091, 96092]
+  X's near right boundary [98071-98101]: [98072, 98073, 98074, 98075, 98076, 98077, 98078, 98079, 98080, 98081, 98082, 98083, 98084, 98085, 98086]
 === Stage Counters ===
-[1] Raw ungapped hits (after extension): 60284
-[2] After sum_stats_linking: 60284 hits
+[1] Raw ungapped hits (after extension): 63489
+[2] After sum_stats_linking: 63489 hits
 [3] E-value distribution (before final filter):
-    E=0: 17767, E<=1e-50: 15436, E<=1e-10: 4128, E<=10: 3262, E>10: 19691, E=INF: 0
+    E=0: 18037, E<=1e-50: 16308, E<=1e-10: 4623, E<=10: 3118, E>10: 21403, E=INF: 0
 Pre-generating subject frames for identity calculation...
-[4] Final hits after E-value filter (threshold=10): 40593
-[5] Top alignment length: 1929 AA
+[4] Final hits after E-value filter (threshold=10): 42086
+[5] Top alignment length: 2798 AA
 === End Stage Counters ===
 
-real	0m21.069s
-user	0m20.942s
-sys	0m0.040s
+real	0m23.600s
+user	0m23.456s
+sys	0m0.030s

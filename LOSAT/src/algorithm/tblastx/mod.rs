@@ -11,6 +11,7 @@ pub mod lookup;
 pub mod extension;
 pub mod chaining;
 pub mod sum_stats_linking;
+pub mod reevaluate;
 pub mod diagnostics;
 pub mod ncbi_cutoffs;
 pub mod utils;

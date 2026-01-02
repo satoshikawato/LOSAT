@@ -29,6 +29,7 @@ use super::lookup::{
     build_ncbi_lookup, decode_kmer, encode_kmer, get_charsize, get_mask,
     BlastAaLookupTable, NeighborLookup, AA_HITS_PER_CELL, LOOKUP_ALPHABET_SIZE,
 };
+use super::reevaluate::reevaluate_ungapped_hit_ncbi_translated;
 use crate::utils::matrix::blosum62_score;
 use super::sum_stats_linking::{
     apply_sum_stats_even_gap_linking, compute_avg_query_length_ncbi, LinkingParams,
@@ -871,10 +872,26 @@ pub fn run(args: TblastxArgs) -> Result<()> {
                                         .ungapped_only_hits
                                         .fetch_add(1, AtomicOrdering::Relaxed);
                                 }
-                                let qs = hsp_q as usize;
-                                let qe = (hsp_q + hsp_len) as usize;
-                                let ss = hsp_s as usize;
-                                let se = (hsp_s + hsp_len) as usize;
+                                // NCBI: reevaluate ungapped HSP vs actual (possibly masked) residues
+                                // before linking (blast_hits.c:675-733).
+                                let mut qs = hsp_q as usize;
+                                let mut ss = hsp_s as usize;
+                                let mut len_u = hsp_len as usize;
+                                let mut score_u = score;
+                                if let Some((new_qs, new_ss, new_len, new_score)) =
+                                    reevaluate_ungapped_hit_ncbi_translated(query, subject, qs, ss, len_u, cutoff)
+                                {
+                                    qs = new_qs;
+                                    ss = new_ss;
+                                    len_u = new_len;
+                                    score_u = new_score;
+                                } else {
+                                    // Deleted by NCBI reevaluation (score < cutoff_score)
+                                    continue;
+                                }
+
+                                let qe = qs + len_u;
+                                let se = ss + len_u;
 
                                 // Convert to logical coords (subtract sentinel)
                                 let (qs_l, qe_l) = (qs.saturating_sub(1), qe.saturating_sub(1));
@@ -895,7 +912,7 @@ pub fn run(args: TblastxArgs) -> Result<()> {
                                     s_aa_end: se_l,
                                     q_orig_len: ctx.orig_len,
                                     s_orig_len: s_len,
-                                    raw_score: score,
+                                    raw_score: score_u,
                                     e_value: f64::INFINITY,
                                     ordering_method: 0, // Set during sum_stats_linking
                                 });
@@ -1566,6 +1583,27 @@ fn run_with_neighbor_map(args: TblastxArgs) -> Result<()> {
                                 continue;
                             }
                             
+                            // NCBI: reevaluate ungapped HSP vs actual (possibly masked) residues
+                            // before linking (blast_hits.c:675-733).
+                            //
+                            // This step can trim HSP boundaries to the best-scoring subsegment and
+                            // delete the HSP if it falls below the cutoff after rescoring.
+                            let mut hsp_q = hsp_q;
+                            let mut hsp_s = hsp_s;
+                            let mut hsp_len = hsp_len;
+                            let mut score = score;
+                            if let Some((new_qs, new_ss, new_len, new_score)) =
+                                reevaluate_ungapped_hit_ncbi_translated(q_aa, s_aa, hsp_q, hsp_s, hsp_len, cutoff)
+                            {
+                                hsp_q = new_qs;
+                                hsp_s = new_ss;
+                                hsp_len = new_len;
+                                score = new_score;
+                            } else {
+                                continue;
+                            }
+                            let hsp_qe = hsp_q + hsp_len;
+
                             // Convert to logical coordinates (subtract sentinel)
                             let qs_logical = hsp_q.saturating_sub(1);
                             let qe_logical = hsp_qe.saturating_sub(1);

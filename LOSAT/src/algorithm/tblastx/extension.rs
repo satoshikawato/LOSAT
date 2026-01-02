@@ -2,31 +2,31 @@
 //!
 //! This module implements ungapped and gapped extension algorithms for protein sequences,
 //! following NCBI BLAST's approach with X-drop termination and affine gap penalties.
+//!
+//! Sequences are encoded in NCBISTDAA (0-27), and scoring uses BLOSUM62 via
+//! the ncbistdaa_to_blosum62 conversion table.
 
 use crate::stats::KarlinParams;
 use crate::algorithm::common::evalue::calculate_evalue_alignment_length;
-use crate::utils::matrix::MATRIX;
+use crate::utils::matrix::{blosum62_score, ncbistdaa};
 use super::constants::{
-    GAP_EXTEND, GAP_OPEN, SENTINEL_BYTE, SENTINEL_PENALTY, STOP_CODON, X_DROP_GAPPED_FINAL, X_DROP_GAPPED_PRELIM,
+    GAP_EXTEND, GAP_OPEN, SENTINEL_BYTE, SENTINEL_PENALTY,
 };
 
-/// Get the substitution matrix score for two amino acids.
-/// Amino acids must be in NCBI matrix order (0-24): ARNDCQEGHILKMFPSTWYVBJZX*
+/// Get the substitution matrix score for two amino acids in NCBISTDAA encoding.
 /// 
 /// If either character is a sentinel byte (SENTINEL_BYTE = 255), returns
 /// SENTINEL_PENALTY to trigger X-drop termination at sequence boundaries.
 /// 
 /// Reference: ncbi-blast/c++/src/algo/blast/core/blast_encoding.c:120
 ///   const Uint1 kProtSentinel = NULLB;
-/// Reference: ncbi-blast/c++/src/util/tables/sm_blosum62.c:95
-///   defscore = -4 (for characters not in the matrix)
 #[inline(always)]
 pub fn get_score(a: u8, b: u8) -> i32 {
     // Check for sentinel bytes (NCBI BLAST style sequence boundary markers)
     if a == SENTINEL_BYTE || b == SENTINEL_BYTE {
         return SENTINEL_PENALTY;
     }
-    unsafe { *MATRIX.get_unchecked((a as usize) * 25 + (b as usize)) as i32 }
+    blosum62_score(a, b)
 }
 
 /// Alignment statistics propagated alongside DP scores for traceback-based calculation
@@ -357,7 +357,7 @@ pub fn extend_gapped_protein(
     for k in 0..len {
         let q_char = q_seq[qs + k];
         let s_char = s_seq[ss + k];
-        if q_char == STOP_CODON || s_char == STOP_CODON {
+        if q_char == ncbistdaa::STOP || s_char == ncbistdaa::STOP {
             seed_score -= 100;
             seed_mismatches += 1;
         } else {
@@ -534,12 +534,12 @@ fn extend_gapped_protein_one_direction(
             };
 
             // Match/mismatch score using BLOSUM62 matrix
-            let match_score = if qc == STOP_CODON || sc == STOP_CODON {
+            let match_score = if qc == ncbistdaa::STOP || sc == ncbistdaa::STOP {
                 -100
             } else {
                 get_score(qc, sc)
             };
-            let is_match = qc == sc && qc != STOP_CODON;
+            let is_match = qc == sc && qc != ncbistdaa::STOP;
 
             // Compute M[i,j]
             let from_m = if m_prev[k] > NEG_INF {

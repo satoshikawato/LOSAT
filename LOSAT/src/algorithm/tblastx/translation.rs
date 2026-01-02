@@ -9,7 +9,7 @@
 
 use bio::alphabets::dna;
 use crate::utils::genetic_code::GeneticCode;
-use crate::utils::matrix::aa_char_to_ncbi_index;
+use crate::utils::matrix::aa_char_to_ncbistdaa;
 use super::constants::SENTINEL_BYTE;
 
 /// A query frame containing translated sequence and metadata
@@ -21,7 +21,7 @@ pub struct QueryFrame {
     /// 
     /// Layout: [SENTINEL_BYTE, aa_0, aa_1, ..., aa_n-1, SENTINEL_BYTE]
     /// - aa_seq[0] = SENTINEL_BYTE (255)
-    /// - aa_seq[1..len-1] = actual amino acids (encoded in NCBI matrix order 0-24)
+    /// - aa_seq[1..len-1] = actual amino acids (encoded in NCBISTDAA 0-27)
     /// - aa_seq[len-1] = SENTINEL_BYTE (255)
     /// 
     /// When accessing amino acid at logical position i, use aa_seq[i + 1].
@@ -47,11 +47,11 @@ pub struct QueryFrame {
     pub seg_masks: Vec<(usize, usize)>,
 }
 
-/// Convert a codon to amino acid index in NCBI matrix order (0-24)
-/// NCBI order: ARNDCQEGHILKMFPSTWYVBJZX*
-fn codon_to_aa_idx(codon: &[u8], table: &GeneticCode) -> u8 {
+/// Convert a codon to amino acid index in NCBISTDAA encoding (0-27)
+/// Reference: NCBI BLAST uses NCBISTDAA for all internal sequence representation
+fn codon_to_aa_ncbistdaa(codon: &[u8], table: &GeneticCode) -> u8 {
     let aa = table.get(codon);
-    aa_char_to_ncbi_index(aa)
+    aa_char_to_ncbistdaa(aa)
 }
 
 /// Translate a DNA sequence to an amino acid sequence with NCBI-style sentinels.
@@ -73,7 +73,7 @@ fn translate_sequence(seq: &[u8], table: &GeneticCode) -> (Vec<u8>, usize) {
     
     for chunk in seq.chunks(3) {
         if chunk.len() == 3 {
-            aa_seq.push(codon_to_aa_idx(chunk, table));
+            aa_seq.push(codon_to_aa_ncbistdaa(chunk, table));
         }
     }
     
@@ -92,6 +92,7 @@ fn translate_sequence(seq: &[u8], table: &GeneticCode) -> (Vec<u8>, usize) {
 /// # Returns
 /// Vector of QueryFrame structures, one for each valid reading frame.
 /// Each frame's aa_seq contains sentinel bytes at positions 0 and len-1.
+/// Amino acids are encoded in NCBISTDAA (0-27).
 pub fn generate_frames(seq: &[u8], table: &GeneticCode) -> Vec<QueryFrame> {
     let mut frames = Vec::with_capacity(6);
     let rev_seq = dna::revcomp(seq);
@@ -169,5 +170,23 @@ mod tests {
         for i in 1..5 {
             assert_ne!(frame.aa_seq[i], SENTINEL_BYTE);
         }
+    }
+    
+    #[test]
+    fn test_ncbistdaa_encoding() {
+        use crate::utils::matrix::ncbistdaa;
+        
+        let code = GeneticCode::from_id(1);
+        // ATG = Met (M), NCBISTDAA M = 12
+        let seq = b"ATG";
+        let frames = generate_frames(seq, &code);
+        let frame = &frames[0];
+        assert_eq!(frame.aa_seq[1], ncbistdaa::M);
+        
+        // TAA = Stop (*), NCBISTDAA * = 25
+        let seq_stop = b"TAA";
+        let frames_stop = generate_frames(seq_stop, &code);
+        let frame_stop = &frames_stop[0];
+        assert_eq!(frame_stop.aa_seq[1], ncbistdaa::STOP);
     }
 }

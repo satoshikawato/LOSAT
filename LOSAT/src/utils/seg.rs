@@ -12,38 +12,82 @@
 
 use crate::utils::dust::MaskedInterval;
 
-/// Natural log of 20 (alphabet size for amino acids)
-const LN_20: f64 = 2.995732273553991;
+use super::seg_lnfact::LNFAC;
 
-use std::sync::OnceLock;
+/// Natural log of 20 (alphabet size for amino acids).
+/// Reference: ncbi-blast/c++/src/algo/blast/core/blast_seg.c:2196
+///   const double kLn20 = 2.9957322735539909;
+const K_LN20: f64 = 2.9957322735539909;
 
-/// Precomputed ln(n!) for n = 0..256 (NCBI style lookup table)
-/// Initialized on first access for fast subsequent lookups
-static LN_FACT: OnceLock<[f64; 256]> = OnceLock::new();
+/// NCBI BLAST ln(2) constant.
+/// Reference: ncbi-blast/c++/include/algo/blast/core/ncbi_math.h
+/// #define NCBIMATH_LN2 0.69314718055994530941723212145818
+const NCBIMATH_LN2: f64 = 0.69314718055994530941723212145818;
 
-fn init_ln_fact() -> [f64; 256] {
-    let mut arr = [0.0; 256];
-    let mut sum = 0.0;
-    for i in 0..256 {
-        if i > 1 {
-            sum += (i as f64).ln();
-        }
-        arr[i] = sum;
-    }
-    arr
-}
+/// Natural log values for 0.1, 0.2, 0.3, ... 1.0 used by NCBI when window total=10.
+/// Reference: ncbi-blast/c++/src/algo/blast/core/blast_seg.c:1305-1311
+const LOG_WIN10: [f64; 11] = [
+    0.0,
+    -2.30258509,
+    -1.60943791,
+    -1.203982804,
+    -0.91629073,
+    -0.6931478,
+    -0.510825623,
+    -0.356674944,
+    -0.22314355,
+    -0.105360515,
+    0.0,
+];
 
-/// Calculate ln(n!) using precomputed table or Stirling's approximation
-/// Reference: blast_seg.c s_lnfact()
+/// NCBI s_lnfact: log(n!) using either tabulated data (lnfact[]) or Stirling's formula.
+/// Reference: ncbi-blast/c++/src/algo/blast/core/blast_seg.c:1854-1859
+/// ```c
+/// static double s_lnfact(Int4 n) {
+///   if (n < sizeof(lnfact)/sizeof(*lnfact))
+///      return lnfact[n];
+///   else return ((n+0.5)*log(n) - n + 0.9189385332);
+/// }
+/// ```
 #[inline]
-fn ln_factorial(n: usize) -> f64 {
-    let table = LN_FACT.get_or_init(init_ln_fact);
-    if n < 256 {
-        table[n]
+fn s_lnfact(n: usize) -> f64 {
+    if n < LNFAC.len() {
+        LNFAC[n]
     } else {
-        // Stirling's approximation for large n
         let nf = n as f64;
         (nf + 0.5) * nf.ln() - nf + 0.9189385332
+    }
+}
+
+/// Map NCBISTDAA letter (0-27) to SEG's 20-letter alphabet index.
+///
+/// NCBI SEG uses ncbistdaa codes, but only a 20-letter subset is considered valid;
+/// everything else (including X) is "bogus".
+///
+/// NCBI reference (verbatim, blast_seg.c:2197-2216):
+/// ```c
+/// palpha->alphasize = 20;
+/// ...
+/// for (c=0, i=0; c<kCharSet; c++)
+/// {
+///    if (c == 1 || (c >= 3 && c <= 20) || c == 22) {
+///       alphaflag[c] = FALSE;
+///       alphaindex[c] = i;
+///       ++i;
+///    } else {
+///       alphaflag[c] = TRUE; alphaindex[c] = 20;
+///    }
+/// }
+/// ```
+///
+/// Valid letters (NCBISTDAA codes): A(1), C..W(3..20), Y(22) => 20 letters.
+#[inline]
+fn seg_alpha_index_ncbistdaa(letter: u8) -> Option<usize> {
+    match letter {
+        1 => Some(0),              // A
+        3..=20 => Some((letter - 2) as usize), // C..W => 1..18
+        22 => Some(19),            // Y
+        _ => None,                 // bogus: -, B, X, Z, U, *, O, J, etc.
     }
 }
 
@@ -62,11 +106,17 @@ fn compute_state_vector(counts: &[u32; 20]) -> Vec<i32> {
 /// This is equation 3 from Wootton & Federhen: ln(n!) - sum(ln(count_i!))
 /// Reference: blast_seg.c s_LnPerm()
 fn ln_perm(sv: &[i32], window_length: i32) -> f64 {
-    let mut ans = ln_factorial(window_length as usize);
+    // NCBI reference (verbatim, blast_seg.c:1867-1882):
+    // ```c
+    // ans = s_lnfact(window_length);
+    // for (i=0; sv[i]!=0; i++) { ans -= s_lnfact(sv[i]); }
+    // ```
+    let mut ans = s_lnfact(window_length as usize);
     for &count in sv {
-        if count > 0 {
-            ans -= ln_factorial(count as usize);
+        if count == 0 {
+            break;
         }
+        ans -= s_lnfact(count as usize);
     }
     ans
 }
@@ -75,35 +125,65 @@ fn ln_perm(sv: &[i32], window_length: i32) -> f64 {
 /// This is equation 1 from Wootton & Federhen
 /// Reference: blast_seg.c s_LnAss()
 fn ln_ass(sv: &[i32], alphasize: i32) -> f64 {
-    if sv.is_empty() {
-        return ln_factorial(alphasize as usize);
+    // NCBI reference (verbatim, blast_seg.c:1892-1933):
+    // ```c
+    // ans = lnfact[alphasize];
+    // if (sv[0] == 0) return ans;
+    // total = alphasize;
+    // class = 1;
+    // svi = *sv;
+    // svim1 = sv[0];
+    // for (i=0;; svim1 = svi) {
+    //   if (++i==alphasize) { ans -= s_lnfact(class); break; }
+    //   else if ((svi = *++sv) == svim1) { class++; continue; }
+    //   else {
+    //     total -= class;
+    //     ans -= s_lnfact(class);
+    //     if (svi == 0) { ans -= s_lnfact(total); break; }
+    //     else { class = 1; continue; }
+    //   }
+    // }
+    // return ans;
+    // ```
+    let a = alphasize as usize;
+    let mut ans = s_lnfact(a);
+
+    // sv is expected to be length `alphasize` with trailing zeros; our `sv` is
+    // typically the non-zero prefix. Treat missing entries as zeros.
+    let sv0 = if !sv.is_empty() { sv[0] } else { 0 };
+    if sv0 == 0 {
+        return ans;
     }
-    
-    let mut ans = ln_factorial(alphasize as usize);
-    let mut total = alphasize;
-    let mut class_count = 1;
-    let mut prev_val = sv[0];
-    
-    for i in 1..sv.len() {
-        if sv[i] == prev_val {
-            class_count += 1;
-        } else {
-            total -= class_count;
-            ans -= ln_factorial(class_count as usize);
-            class_count = 1;
-            prev_val = sv[i];
+
+    let mut total: i32 = alphasize;
+    let mut class: i32 = 1;
+    let mut svim1: i32 = sv0;
+
+    // NCBI-style loop: increment `i` first, then stop when i == alphasize,
+    // otherwise consume next sv entry and compare.
+    let mut i: usize = 0;
+    loop {
+        i += 1;
+        if i == a {
+            ans -= s_lnfact(class as usize);
+            break;
         }
+
+        let svi: i32 = if i < sv.len() { sv[i] } else { 0 };
+        if svi == svim1 {
+            class += 1;
+        } else {
+            total -= class;
+            ans -= s_lnfact(class as usize);
+            if svi == 0 {
+                ans -= s_lnfact(total as usize);
+                break;
+            }
+            class = 1;
+        }
+        svim1 = svi;
     }
-    
-    // Handle the last class
-    total -= class_count;
-    ans -= ln_factorial(class_count as usize);
-    
-    // Account for unused letters
-    if total > 0 {
-        ans -= ln_factorial(total as usize);
-    }
-    
+
     ans
 }
 
@@ -112,38 +192,41 @@ fn ln_ass(sv: &[i32], alphasize: i32) -> f64 {
 /// Reference: blast_seg.c s_GetProb()
 fn get_prob(sv: &[i32], window_length: i32) -> f64 {
     let alphasize = 20; // Standard amino acid alphabet
-    let totseq = (window_length as f64) * LN_20;
+    let totseq = (window_length as f64) * K_LN20;
     
     let ans1 = ln_ass(sv, alphasize);
-    let ans2 = ln_perm(sv, window_length);
+    // NCBI: guard ans2 computation with ans1 > -100000 and sv[0] != INT4_MIN
+    let ans2 = if ans1 > -100000.0 { ln_perm(sv, window_length) } else { 0.0 };
     
     ans1 + ans2 - totseq
 }
 
-/// Calculate Shannon entropy for a window (in bits)
-/// Reference: Original SEG algorithm (Wootton & Federhen)
-/// 
-/// The SEG thresholds (locut=2.2, hicut=2.5) are designed for Shannon entropy
-/// measured in bits (log base 2). Range is 0 (homogeneous) to ~4.32 (log2(20)).
-/// 
-/// Low complexity: entropy < locut (e.g., < 2.2)
-/// High complexity: entropy > hicut (e.g., > 2.5)
-fn calculate_shannon_entropy(counts: &[u32; 20], window_length: usize) -> f64 {
-    if window_length == 0 {
+/// NCBI SEG entropy (Shannon entropy, bits) implementation.
+/// Reference: ncbi-blast/c++/src/algo/blast/core/blast_seg.c:1592-1624 (s_Entropy)
+fn entropy_ncbi_from_counts(counts: &[u32; 20]) -> f64 {
+    // Build state vector (sorted counts, terminating at 0)
+    let mut sv: Vec<i32> = counts.iter().copied().filter(|&c| c > 0).map(|c| c as i32).collect();
+    sv.sort_by(|a, b| b.cmp(a));
+
+    let total: i32 = sv.iter().sum();
+    if total == 0 {
         return 0.0;
     }
-    
-    let total = window_length as f64;
-    let mut entropy = 0.0;
-    
-    for &count in counts {
-        if count > 0 {
-            let p = (count as f64) / total;
-            entropy -= p * p.log2();
+
+    let mut ent = 0.0f64;
+    if total == 10 {
+        for &c in &sv {
+            // c in 1..=10
+            ent += (c as f64) * LOG_WIN10[c as usize] / NCBIMATH_LN2;
+        }
+    } else {
+        let total_f = total as f64;
+        for &c in &sv {
+            ent += (c as f64) * ((c as f64) / total_f).ln() / NCBIMATH_LN2;
         }
     }
-    
-    entropy
+
+    (ent / (total as f64)).abs()
 }
 
 /// SEG filter parameters
@@ -175,13 +258,23 @@ impl Default for SegParams {
 
 impl SegParams {
     pub fn new(window: usize, locut: f64, hicut: f64) -> Self {
-        // Validate and clamp parameters to NCBI BLAST ranges
+        // NCBI parameter normalization (blast_seg.c:s_SegParametersCheck):
+        // ```c
+        // if (sparamsp->window <= 0) sparamsp->window = 12;
+        // if (sparamsp->locut < 0.0) sparamsp->locut = 0.0;
+        // if (sparamsp->hicut < 0.0) sparamsp->hicut = 0.0;
+        // if (sparamsp->locut > sparamsp->hicut)
+        //     sparamsp->hicut = sparamsp->locut;
+        // ```
         let window = if window > 0 { window } else { 12 };
-        let locut = if locut >= 0.0 { locut } else { 2.2 };
-        let hicut = if hicut >= 0.0 && hicut >= locut { hicut } else { locut.max(2.5) };
-        Self { 
-            window, 
-            locut, 
+        let mut locut = if locut >= 0.0 { locut } else { 0.0 };
+        let mut hicut = if hicut >= 0.0 { hicut } else { 0.0 };
+        if locut > hicut {
+            hicut = locut;
+        }
+        Self {
+            window,
+            locut,
             hicut,
             maxbogus: 2,
             maxtrim: 50,
@@ -260,27 +353,21 @@ impl SegMasker {
             return (0.0, 0);
         }
 
-        // Count amino acid frequencies (20 standard amino acids: 0-19 in NCBI encoding)
-        // Also count "bogus" (invalid) amino acids: stop codon (24), X (23), etc.
+        // NCBI SEG uses ncbistdaa codes but a 20-letter subset. Everything else is bogus.
+        // Reference: blast_seg.c Alpha init + s_CompOn bogus counting.
         let mut counts = [0u32; 20];
         let mut bogus_count = 0usize;
-        let mut valid_count = 0usize;
 
         for &aa in window {
-            if aa < 20 {
-                counts[aa as usize] += 1;
-                valid_count += 1;
+            if let Some(idx) = seg_alpha_index_ncbistdaa(aa) {
+                counts[idx] += 1;
             } else {
                 bogus_count += 1;
             }
         }
 
-        if valid_count == 0 {
-            return (-1.0, bogus_count); // Invalid window (all stop codons or invalid)
-        }
-
-        // Calculate Shannon entropy in bits
-        let entropy = calculate_shannon_entropy(&counts, valid_count);
+        // Calculate entropy in bits (NCBI s_Entropy)
+        let entropy = entropy_ncbi_from_counts(&counts);
         
         (entropy, bogus_count)
     }
@@ -324,41 +411,48 @@ impl SegMasker {
     /// Starting from position i, search left until entropy > hicut
     /// Reference: blast_seg.c:1813-1825 (s_FindLow)
     fn find_low(&self, i: usize, limit: usize, h: &[f64]) -> usize {
-        let mut j = i;
-        while j >= limit && j < h.len() {
-            if h[j] == -1.0 {
-                break;
-            }
-            if h[j] > self.hicut {
-                break;
-            }
-            if j == 0 {
+        // NCBI reference (verbatim):
+        // ```c
+        // for (j=i; j>=limit; j--) {
+        //   if (H[j]==-1.0) break;
+        //   if (H[j]>hicut) break;
+        // }
+        // return (j+1);
+        // ```
+        let mut j: isize = i as isize;
+        let limit: isize = limit as isize;
+        while j >= limit {
+            let v = h[j as usize];
+            if v == -1.0 || v > self.hicut {
                 break;
             }
             j -= 1;
         }
-        j + 1
+        (j + 1) as usize
     }
 
     /// Find the right boundary of a low-complexity region
     /// Starting from position i, search right until entropy > hicut
     /// Reference: blast_seg.c:1836-1848 (s_FindHigh)
     fn find_high(&self, i: usize, limit: usize, h: &[f64]) -> usize {
-        let mut j = i;
-        while j <= limit && j < h.len() {
-            if h[j] == -1.0 {
-                break;
-            }
-            if h[j] > self.hicut {
+        // NCBI reference (verbatim):
+        // ```c
+        // for (j=i; j<=limit; j++) {
+        //   if (H[j]==-1.0) break;
+        //   if (H[j]>hicut) break;
+        // }
+        // return (j-1);
+        // ```
+        let mut j: isize = i as isize;
+        let limit: isize = limit as isize;
+        while j <= limit {
+            let v = h[j as usize];
+            if v == -1.0 || v > self.hicut {
                 break;
             }
             j += 1;
         }
-        if j > 0 {
-            j - 1
-        } else {
-            0
-        }
+        (j - 1) as usize
     }
     
     /// Calculate probability for a subsequence
@@ -386,61 +480,79 @@ impl SegMasker {
         get_prob(&sv, valid_count as i32)
     }
     
-    /// Trim a segment to minimize the probability
-    /// This finds the optimal boundaries within the given segment
-    /// Reference: blast_seg.c:1974-2018 (s_Trim)
-    /// 
-    /// NCBI uses s_OpenWin/s_ShiftWin1/s_CloseWin for efficient incremental calculation.
-    /// This implementation uses a simplified but still efficient approach:
-    /// - Only search when segment is larger than window size
-    /// - Limit iterations by stepping through positions
+    /// NCBI s_Trim: trim [leftend..=rightend] to minimize s_GetProb.
+    /// Reference: ncbi-blast/c++/src/algo/blast/core/blast_seg.c:1974-2018
+    ///
+    /// Note: `leftend` and `rightend` are **inclusive** indices in `seq`.
     fn trim_segment(&self, seq: &[u8], leftend: usize, rightend: usize) -> (usize, usize) {
-        let seg_len = rightend.saturating_sub(leftend);
-        if seg_len == 0 || seg_len < self.window {
+        if leftend >= seq.len() || rightend >= seq.len() || leftend > rightend {
             return (leftend, rightend);
         }
-        
-        // If segment is small enough, use original boundaries
-        // Reference: NCBI's maxtrim limits how much trimming can occur
-        let max_trim_total = self.maxtrim.min(seg_len / 2);
-        if max_trim_total == 0 {
+        let seg_len = rightend - leftend + 1;
+        if seg_len == 0 {
             return (leftend, rightend);
         }
-        
-        // Calculate probability for original segment
-        let orig_prob = self.get_subseq_prob(&seq[leftend..rightend]);
-        
-        let mut best_left = leftend;
-        let mut best_right = rightend;
-        let mut min_prob = orig_prob;
-        
-        // Try trimming from left and right by small amounts
-        // This is a simplified version of NCBI's recursive trim
-        let step = 1.max(max_trim_total / 10); // Limit iterations
-        
-        for trim_left in (0..=max_trim_total).step_by(step) {
-            let new_left = leftend + trim_left;
-            let remaining = seg_len - trim_left;
-            let max_right_trim = max_trim_total.saturating_sub(trim_left).min(remaining.saturating_sub(self.window));
-            
-            for trim_right in (0..=max_right_trim).step_by(step) {
-                let new_right = rightend - trim_right;
-                
-                if new_left >= new_right || new_right > seq.len() || new_right - new_left < self.window {
-                    continue;
-                }
-                
-                let prob = self.get_subseq_prob(&seq[new_left..new_right]);
-                
-                if prob < min_prob {
-                    min_prob = prob;
-                    best_left = new_left;
-                    best_right = new_right;
+
+        // NCBI:
+        //   minlen = 1;
+        //   if ((seq->length-maxtrim)>minlen) minlen = seq->length-maxtrim;
+        let mut minlen: usize = 1;
+        if seg_len.saturating_sub(self.maxtrim) > minlen {
+            minlen = seg_len - self.maxtrim;
+        }
+
+        let mut best_lend: usize = 0;
+        let mut best_rend: usize = seg_len - 1;
+        let mut minprob: f64 = 1.0;
+
+        // For each candidate length, slide a window across the segment and find min prob.
+        // This is a direct port of NCBI's nested loop (len desc, shift by 1).
+        for cur_len in (minlen + 1..=seg_len).rev() {
+            // Initialize composition for window [0..cur_len)
+            let mut counts = [0u32; 20];
+            for &aa in &seq[leftend..leftend + cur_len] {
+                if let Some(idx) = seg_alpha_index_ncbistdaa(aa) {
+                    counts[idx] += 1;
                 }
             }
+
+            // Helper to compute prob from counts (K2 probability)
+            let mut prob_from_counts = |counts: &[u32; 20], total: i32| -> f64 {
+                if total <= 0 {
+                    return 1.0;
+                }
+                let sv = compute_state_vector(counts);
+                get_prob(&sv, total)
+            };
+
+            let mut i = 0usize;
+            loop {
+                let total: i32 = counts.iter().map(|&c| c as i32).sum();
+                let prob = prob_from_counts(&counts, cur_len as i32);
+                if prob < minprob {
+                    minprob = prob;
+                    best_lend = i;
+                    best_rend = i + cur_len - 1;
+                }
+
+                if i + cur_len >= seg_len {
+                    break;
+                }
+
+                // Slide by 1: remove outgoing, add incoming
+                let out_aa = seq[leftend + i];
+                if let Some(idx) = seg_alpha_index_ncbistdaa(out_aa) {
+                    counts[idx] = counts[idx].saturating_sub(1);
+                }
+                let in_aa = seq[leftend + i + cur_len];
+                if let Some(idx) = seg_alpha_index_ncbistdaa(in_aa) {
+                    counts[idx] += 1;
+                }
+                i += 1;
+            }
         }
-        
-        (best_left, best_right)
+
+        (leftend + best_lend, leftend + best_rend)
     }
 
     /// Mask a sequence and return the list of masked intervals
@@ -450,59 +562,89 @@ impl SegMasker {
             return Vec::new();
         }
 
-        let mut result: Vec<MaskedInterval> = Vec::new();
-        let h = self.calculate_entropy_array(seq);
+        // NCBI s_SegSeq returns inclusive [begin,end] segments; we collect those and then
+        // convert to [start,end) MaskedInterval at the end.
+        let mut segs_inclusive: Vec<(usize, usize)> = Vec::new();
 
-        let first = self.downset;
-        let last = seq.len().saturating_sub(self.upset);
-        let mut lowlim = first;
+        fn seg_seq(masker: &SegMasker, seq: &[u8], offset: usize, segs: &mut Vec<(usize, usize)>) {
+            if seq.len() < masker.window {
+                return;
+            }
 
-        // Scan for low-complexity regions
-        // Reference: blast_seg.c:2062-2112
-        let mut i = first;
-        while i <= last {
-            // Check if entropy is below locut threshold
-            if h[i] != -1.0 && h[i] <= self.locut {
-                // Find boundaries of low-complexity region
-                let loi = self.find_low(i, lowlim, &h);
-                let hii = self.find_high(i, last, &h);
+            let h = masker.calculate_entropy_array(seq);
+            let first = masker.downset;
+            let last = seq.len().saturating_sub(masker.upset);
+            let mut lowlim = first;
 
-                // Convert window-relative positions to sequence positions
-                // Reference: blast_seg.c:2070-2071
-                let mut leftend = loi.saturating_sub(self.downset);
-                let mut rightend = (hii + self.upset - 1).min(seq.len());
+            let mut i = first;
+            while i <= last {
+                if h[i] != -1.0 && h[i] <= masker.locut {
+                    let loi = masker.find_low(i, lowlim, &h);
+                    let hii = masker.find_high(i, last, &h);
 
-                // Apply trimming to optimize boundaries (NCBI s_Trim)
-                // Reference: blast_seg.c:2073-2079
-                if leftend < rightend && rightend <= seq.len() {
-                    let (trimmed_left, trimmed_right) = self.trim_segment(seq, leftend, rightend);
-                    leftend = trimmed_left;
-                    rightend = trimmed_right;
-                }
+                    // NCBI:
+                    //   leftend = loi - downset;
+                    //   rightend = hii + upset - 1;
+                    let mut leftend = loi - masker.downset;
+                    let mut rightend = hii + masker.upset - 1; // inclusive
 
-                if leftend < rightend {
-                    // Try to merge with previous interval if overlapping or adjacent
-                    if let Some(last_interval) = result.last_mut() {
-                        if leftend <= last_interval.end {
-                            last_interval.end = last_interval.end.max(rightend);
-                        } else {
-                            result.push(MaskedInterval::new(leftend, rightend));
+                    // Trim to minimize probability (NCBI s_Trim)
+                    (leftend, rightend) = masker.trim_segment(seq, leftend, rightend);
+
+                    // NCBI recursion for trigger window in left trim:
+                    //   if (i+upset-1 < leftend) { recurse on [lend..rend] }
+                    if i + masker.upset - 1 < leftend {
+                        let lend = loi - masker.downset;
+                        if lend < leftend {
+                            let rend = leftend - 1;
+                            if rend < seq.len() && lend <= rend {
+                                seg_seq(masker, &seq[lend..=rend], offset + lend, segs);
+                            }
                         }
-                    } else {
-                        result.push(MaskedInterval::new(leftend, rightend));
                     }
-                }
 
-                // Skip to after this region
-                // Reference: blast_seg.c:2110
-                i = hii.min(rightend.saturating_sub(self.downset)) + 1;
-                lowlim = i;
-            } else {
-                i += 1;
+                    // Record segment in original coordinates
+                    segs.push((leftend + offset, rightend + offset));
+
+                    // NCBI:
+                    //   i = MIN(hii, rightend+downset);
+                    //   lowlim = i + 1;
+                    i = hii.min(rightend + masker.downset);
+                    lowlim = i + 1;
+                    i += 1;
+                } else {
+                    i += 1;
+                }
             }
         }
 
-        result
+        seg_seq(self, seq, 0, &mut segs_inclusive);
+
+        // NCBI s_MergeSegs (hilenmin=0) semantics: merge overlapping segments only.
+        if !segs_inclusive.is_empty() {
+            // NCBI list order is descending begin due to prepend; mimic before merge.
+            segs_inclusive.sort_by(|a, b| b.0.cmp(&a.0));
+            let mut merged: Vec<(usize, usize)> = Vec::new();
+            let mut cur = segs_inclusive[0];
+            for &next in &segs_inclusive[1..] {
+                // overlap if cur.begin <= next.end (inclusive coords)
+                if cur.0 <= next.1 {
+                    cur.0 = cur.0.min(next.0);
+                    cur.1 = cur.1.max(next.1);
+                } else {
+                    merged.push(cur);
+                    cur = next;
+                }
+            }
+            merged.push(cur);
+            segs_inclusive = merged;
+        }
+
+        // Convert to MaskedInterval [start, end) with end exclusive
+        segs_inclusive
+            .into_iter()
+            .map(|(b, e)| MaskedInterval::new(b, e.saturating_add(1)))
+            .collect()
     }
 }
 
@@ -520,10 +662,14 @@ mod tests {
 
     #[test]
     fn test_seg_params_validation() {
+        // NCBI: negative values become 0.0, not defaults
+        // if (sparamsp->locut < 0.0) sparamsp->locut = 0.0;
+        // if (sparamsp->hicut < 0.0) sparamsp->hicut = 0.0;
+        // if (sparamsp->locut > sparamsp->hicut) sparamsp->hicut = sparamsp->locut;
         let params = SegParams::new(0, -1.0, 1.0);
-        assert_eq!(params.window, 12); // Should default
-        assert_eq!(params.locut, 2.2); // Should default
-        assert_eq!(params.hicut, 2.5); // Should default to max(locut, 2.5)
+        assert_eq!(params.window, 12); // Should default to 12
+        assert_eq!(params.locut, 0.0); // Negative becomes 0.0
+        assert_eq!(params.hicut, 1.0); // 1.0 > 0.0, so stays at 1.0
     }
 
     #[test]
@@ -531,12 +677,14 @@ mod tests {
         let masker = SegMasker::with_defaults();
         
         // Low complexity: all same amino acid (entropy = 0)
-        let low_complex = vec![0u8; 12]; // All alanine (0)
+        // NCBISTDAA: A=1 (not 0, which is '-')
+        let low_complex = vec![1u8; 12]; // All alanine (NCBISTDAA code 1)
         let (entropy_low, _) = masker.calculate_entropy(&low_complex);
         assert!(entropy_low < 1.0, "Low complexity should have low entropy: got {}", entropy_low);
         
         // High complexity: all different amino acids
-        let high_complex: Vec<u8> = (0..12).map(|i| (i % 20) as u8).collect();
+        // Use valid NCBISTDAA codes: 1=A, 3-20=C..W, 22=Y
+        let high_complex: Vec<u8> = [1, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13].to_vec();
         let (entropy_high, _) = masker.calculate_entropy(&high_complex);
         assert!(entropy_high > 2.0, "High complexity should have high entropy: got {}", entropy_high);
     }
@@ -546,7 +694,8 @@ mod tests {
         let masker = SegMasker::with_defaults();
         
         // Simple repeat sequence should be masked
-        let seq: Vec<u8> = vec![0u8; 100]; // All alanine
+        // NCBISTDAA: A=1 (not 0, which is '-')
+        let seq: Vec<u8> = vec![1u8; 100]; // All alanine (NCBISTDAA code 1)
         let intervals = masker.mask_sequence(&seq);
         
         assert!(!intervals.is_empty(), "Poly-alanine sequence should be masked");
@@ -559,8 +708,9 @@ mod tests {
     fn test_mask_short_sequence() {
         let masker = SegMasker::with_defaults();
         
-        // Very short sequences should return empty
-        let seq = vec![0u8; 5];
+        // Very short sequences should return empty (shorter than window)
+        // NCBISTDAA: A=1
+        let seq = vec![1u8; 5];
         let intervals = masker.mask_sequence(&seq);
         assert!(intervals.is_empty());
     }
@@ -578,4 +728,3 @@ mod tests {
         assert!(total_masked < seq.len() / 2, "Complex sequence should not be heavily masked");
     }
 }
-

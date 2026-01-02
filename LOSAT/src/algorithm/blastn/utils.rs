@@ -426,6 +426,9 @@ pub fn chain_and_filter_hsps(
                         s_end: final_s_end,
                         e_value,
                         bit_score,
+                        q_idx: 0,
+                        s_idx: 0,
+                        raw_score: score,
                     });
                 } else {
                     // Fallback: just use the best HSP (shouldn't happen)
@@ -1323,6 +1326,9 @@ pub fn run(args: BlastnArgs) -> Result<()> {
                                     s_end: hit_s_end,
                                     e_value: eval,
                                     bit_score,
+                                    q_idx: 0,
+                                    s_idx: 0,
+                                    raw_score: score,
                                 });
                             } // end of if eval <= args.evalue
                         } // end of for matches_slice in two-stage lookup
@@ -1606,6 +1612,9 @@ pub fn run(args: BlastnArgs) -> Result<()> {
                             s_end: hit_s_end,
                             e_value: eval,
                             bit_score,
+                            q_idx: 0,
+                            s_idx: 0,
+                            raw_score: score,
                         });
                     }
                     } // end of s_pos loop for original lookup

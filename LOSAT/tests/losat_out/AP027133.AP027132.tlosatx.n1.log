@@ -1,17 +1,13 @@
-Reading queries...
-Building lookup table...
-
-=== NCBI Backbone Lookup Table ===
-Contexts: 6
-Backbone size: 24312 cells (0.4 MB)
-Non-empty cells: 9070
-Total entries: 3021312
-Overflow size: 3021305 (12.1 MB)
-==================================
-
+Reading queries (neighbor map mode)...
+Building neighbor lookup...
+Pre-computing filtered neighbor map (threshold=13)...
+Filtered neighbor map computed in 12.5188ms
+  Non-empty entries: 13005
+  Total neighbor pairs: 184666
+  Avg neighbors per k-mer: 14.2
+Query lookup: 713201 entries (exact matches only)
+Using compressed neighbor index (no expanded_lookup)...
 Reading subjects...
-Searching 1 queries vs 1 subjects...
-
-real	1m29.830s
-user	1m29.766s
-sys	0m0.000s
+Searching 1 queries vs 1 subjects (neighbor map mode, avg_query_length=202064)...
+=== Stage Counters ===
+[1] Raw ungapped hits (after extension): 305127

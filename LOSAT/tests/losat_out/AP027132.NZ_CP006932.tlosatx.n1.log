@@ -1,17 +1,38 @@
-Reading queries...
-Building lookup table...
-
-=== NCBI Backbone Lookup Table ===
-Contexts: 6
-Backbone size: 24312 cells (0.4 MB)
-Non-empty cells: 9263
-Total entries: 2853018
-Overflow size: 2853001 (11.4 MB)
-==================================
-
+Reading queries (neighbor map mode)...
+Building neighbor lookup...
+Pre-computing filtered neighbor map (threshold=13)...
+Filtered neighbor map computed in 12.269ms
+  Non-empty entries: 13005
+  Total neighbor pairs: 184567
+  Avg neighbors per k-mer: 14.2
+Query lookup: 640159 entries (exact matches only)
+Using compressed neighbor index (no expanded_lookup)...
 Reading subjects...
-Searching 1 queries vs 1 subjects...
+Searching 1 queries vs 1 subjects (neighbor map mode, avg_query_length=214346)...
+[DEBUG TOP HIT] score=10781 len=2227 q_frame=-1 s_frame=-2
+  coords: q_start=1679 q_end=3906 s_start=1766 s_end=3993
+  seed positions: s_left_off=1770 s_raw=1770
+  q_aa[raw 1680]=15  q_aa[raw-1 1679]=21 (X=21)
+  q_aa[raw end-1 3906]=15  q_aa[raw end 3907]=9 (X=21)
+  X's near left boundary [1649-1679]: [1649, 1650, 1651, 1652, 1653, 1654, 1655, 1656, 1657, 1658, 1659, 1660, 1661, 1662, 1663, 1664, 1665, 1666, 1667, 1668, 1669, 1670, 1671, 1672, 1673, 1674, 1675, 1676, 1677, 1678, 1679]
+  X's near right boundary [3906-3936]: [3908, 3909, 3910, 3911, 3912, 3913, 3914, 3915, 3916, 3917, 3918, 3919, 3920, 3921, 3922, 3923, 3924, 3925, 3926, 3927]
+[DEBUG TOP HIT] score=11207 len=2225 q_frame=-1 s_frame=-2
+  coords: q_start=35797 q_end=38022 s_start=39811 s_end=42036
+  seed positions: s_left_off=39815 s_raw=39815
+  q_aa[raw 35798]=18  q_aa[raw-1 35797]=21 (X=21)
+  q_aa[raw end-1 38022]=10  q_aa[raw end 38023]=19 (X=21)
+  X's near left boundary [35767-35797]: [35772, 35773, 35774, 35775, 35776, 35777, 35778, 35779, 35780, 35781, 35782, 35783, 35784, 35785, 35786, 35787, 35788, 35789, 35790, 35791, 35792, 35793, 35794, 35795, 35796, 35797]
+  X's near right boundary [38022-38052]: [38024, 38025, 38026, 38027, 38028, 38029, 38030, 38031, 38032, 38033, 38034, 38035, 38036, 38037, 38038, 38039, 38040, 38041]
+=== Stage Counters ===
+[1] Raw ungapped hits (after extension): 161413
+[2] After sum_stats_linking: 161413 hits
+[3] E-value distribution (before final filter):
+    E=0: 15380, E<=1e-50: 24455, E<=1e-10: 6363, E<=10: 5864, E>10: 109351, E=INF: 0
+Pre-generating subject frames for identity calculation...
+[4] Final hits after E-value filter (threshold=10): 52062
+[5] Top alignment length: 2227 AA
+=== End Stage Counters ===
 
-real	4m7.024s
-user	4m6.933s
-sys	0m0.020s
+real	1m22.693s
+user	3m25.306s
+sys	0m0.110s

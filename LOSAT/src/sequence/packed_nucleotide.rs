@@ -545,8 +545,8 @@ mod tests {
         let packed = PackedSequence::new(seq).unwrap();
         
         // A=0, C=1, G=2, T=3
-        // Expected byte: (0 << 6) | (1 << 4) | (2 << 2) | 3 = 0b00010111 = 23
-        assert_eq!(packed.data()[0], 0b00010111);
+        // Expected byte: (0 << 6) | (1 << 4) | (2 << 2) | 3 = 0b00011011 = 27
+        assert_eq!(packed.data()[0], 0b00011011);
     }
 
     #[test]

@@ -156,7 +156,55 @@ comparisons = [
         "ncbi":  "./blast_out/AP027133.AP027132.tblastx.n1.out",
         "losat": "./losat_out/AP027133.AP027132.tlosatx.n1.out"
     },
-
+    {
+        "name": "MjeNMV_vs_MelaMJNV", "mode": "TBLASTX", 
+        "ncbi": "./blast_out/MjeNMV.MelaMJNV.tblastx.n1.out", 
+        "losat": "./losat_out/MjeNMV.MelaMJNV.tlosatx.n1.out"
+    },
+    {
+        "name": "MjeNMV_vs_MelaMJNV", "mode": "TBLASTX", 
+        "ncbi": "./blast_out/AP027280.AP027280.tblastx.n1.out", 
+        "losat": "./losat_out/AP027280.AP027280.tlosatx.n1.out"
+    },
+    {
+        "name": "MelaMJNV_vs_PemoMJNVA", "mode": "TBLASTX", 
+        "ncbi": "./blast_out/MelaMJNV.PemoMJNVA.tblastx.n1.out", 
+        "losat": "./losat_out/MelaMJNV.PemoMJNVA.tlosatx.n1.out"
+    },
+    {
+        "name": "PemoMJNVA_vs_PeseMJNV", "mode": "TBLASTX", 
+        "ncbi": "./blast_out/PemoMJNVA.PeseMJNV.tblastx.n1.out", 
+        "losat": "./losat_out/PemoMJNVA.PeseMJNV.tlosatx.n1.out"
+    },
+    {
+        "name": "PeseMJNV_vs_PemoMJNVB", "mode": "TBLASTX", 
+        "ncbi": "./blast_out/PeseMJNV.PemoMJNVB.tblastx.n1.out", 
+        "losat": "./losat_out/PeseMJNV.PemoMJNVB.tlosatx.n1.out"
+    },
+    {
+        "name": "PemoMJNVB_vs_LvMJNV", "mode": "TBLASTX", 
+        "ncbi": "./blast_out/PemoMJNVB.LvMJNV.tblastx.n1.out", 
+        "losat": "./losat_out/PemoMJNVB.LvMJNV.tlosatx.n1.out"
+    },
+    {
+        "name": "LvMJNV_vs_TrcuMJNV", "mode": "TBLASTX", 
+        "ncbi": "./blast_out/LvMJNV.TrcuMJNV.tblastx.n1.out", 
+        "losat": "./losat_out/LvMJNV.TrcuMJNV.tlosatx.n1.out"
+    },
+    {   "name": "TrcuMJNV_vs_MellatMJNV", "mode": "TBLASTX",
+        "ncbi": "./blast_out/TrcuMJNV.MellatMJNV.tblastx.n1.out", 
+        "losat": "./losat_out/TrcuMJNV.MellatMJNV.tlosatx.n1.out"
+    },
+    {
+        "name": "MellatMJNV_vs_MeenMJNV", "mode": "TBLASTX",
+        "ncbi": "./blast_out/MellatMJNV.MeenMJNV.tblastx.n1.out", 
+        "losat": "./losat_out/MellatMJNV.MeenMJNV.tlosatx.n1.out"
+    },
+    {
+        "name": "MeenMJNV_vs_MejoMJNV", "mode": "TBLASTX",
+        "ncbi": "./blast_out/MeenMJNV.MejoMJNV.tblastx.n1.out", 
+        "losat": "./losat_out/MeenMJNV.MejoMJNV.tlosatx.n1.out"
+    },
     # --- BLASTN (Standard / Task:blastn) ---
     {
         "name": "NZ_CP006932_Self",

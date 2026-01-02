@@ -1,6 +1,10 @@
 use super::search_space::SearchSpace;
 use super::tables::KarlinParams;
 
+// NCBI blast_stat.c uses kSmallFloat = 1e-297 in BlastKarlinEtoS_simple to avoid
+// floating-point issues when computing cutoffs from extremely small E-values.
+const K_SMALL_FLOAT: f64 = 1.0e-297;
+
 /// Calculate bit score from raw score using Karlin-Altschul statistics
 ///
 /// Formula: S' = (lambda * S - ln(K)) / ln(2)
@@ -32,22 +36,21 @@ pub fn calculate_statistics(
 /// Calculate raw score from E-value (inverse calculation)
 ///
 /// Formula: S = (ln(K) + ln(m*n) - ln(E)) / lambda
-pub fn raw_score_from_evalue(
-    e_value: f64,
-    params: &KarlinParams,
-    search_space: &SearchSpace,
-) -> i32 {
+pub fn raw_score_from_evalue(e_value: f64, params: &KarlinParams, search_space: &SearchSpace) -> i32 {
     if e_value <= 0.0 {
         return i32::MAX;
     }
-    let score = (params.k.ln() + search_space.effective_space.ln() - e_value.ln()) / params.lambda;
+    // NCBI clamps E to kSmallFloat in BlastKarlinEtoS_simple.
+    let e = e_value.max(K_SMALL_FLOAT);
+    let score = (params.k.ln() + search_space.effective_space.ln() - e.ln()) / params.lambda;
     score.ceil() as i32
 }
 
 /// Calculate raw score from E-value with gap decay adjustment (NCBI BLAST_Cutoffs compatible)
 ///
-/// When dodecay is true, the E-value is adjusted by gap_decay_divisor to get a more
-/// lenient cutoff score suitable for sum statistics linking.
+/// When dodecay is true, the E-value is adjusted by gap_decay_divisor to invert the
+/// weighting that will later be applied to compensate for choosing the best among
+/// multiple alignment collections.
 ///
 /// Reference: ncbi-blast/c++/src/algo/blast/core/blast_stat.c:4112-4118
 ///
@@ -62,19 +65,21 @@ pub fn raw_score_from_evalue_with_decay(
     gap_decay_rate: f64,
 ) -> i32 {
     use super::sum_statistics::gap_decay_divisor;
-    
+
     if e_value <= 0.0 {
         return i32::MAX;
     }
-    
+
     let adjusted_e = if dodecay && gap_decay_rate > 0.0 && gap_decay_rate < 1.0 {
-        // Apply gap decay divisor to get a more lenient cutoff
         // NCBI: e *= BLAST_GapDecayDivisor(gap_decay_rate, 1)
         e_value * gap_decay_divisor(gap_decay_rate, 1)
     } else {
         e_value
     };
-    
+
+    // Match NCBI's kSmallFloat clamp.
+    let adjusted_e = adjusted_e.max(K_SMALL_FLOAT);
+
     let score = (params.k.ln() + search_space.effective_space.ln() - adjusted_e.ln()) / params.lambda;
     score.ceil() as i32
 }
@@ -94,11 +99,7 @@ pub fn raw_score_from_bit_score(bit_score: f64, params: &KarlinParams) -> i32 {
 ///
 /// Formula: E = searchsp * exp(-Lambda * S + logK)
 /// where S is the raw score, searchsp is the effective search space
-pub fn evalue_from_raw_score(
-    raw_score: i32,
-    params: &KarlinParams,
-    search_space: f64,
-) -> f64 {
+pub fn evalue_from_raw_score(raw_score: i32, params: &KarlinParams, search_space: f64) -> f64 {
     if params.lambda < 0.0 || params.k < 0.0 {
         return -1.0;
     }
@@ -108,12 +109,7 @@ pub fn evalue_from_raw_score(
 /// Simple E-value calculation without length adjustment (BLEMIR default)
 ///
 /// This is the original BLEMIR calculation for backward compatibility
-pub fn simple_evalue(
-    raw_score: i32,
-    q_len: usize,
-    db_len: usize,
-    params: &KarlinParams,
-) -> (f64, f64) {
+pub fn simple_evalue(raw_score: i32, q_len: usize, db_len: usize, params: &KarlinParams) -> (f64, f64) {
     let search_space = (q_len as f64) * (db_len as f64);
     let bs = bit_score(raw_score, params);
     let ev = search_space * 2.0_f64.powf(-bs);
@@ -192,3 +188,5 @@ mod tests {
         assert!((original_score - recovered_score).abs() <= 1);
     }
 }
+
+

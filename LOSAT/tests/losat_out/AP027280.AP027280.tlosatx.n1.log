@@ -1,0 +1,57 @@
+Reading queries...
+Building lookup table...
+
+=== Phase 1a: Exact Indexing Diagnostics ===
+Total exact positions indexed: 529022
+Unique exact words: 9260
+Max offsets per exact word: 575
+Skipped (invalid residue): 0
+Skipped (DNA mask): 6599
+Skipped (SEG mask): 87487
+
+=== Phase 1b: Neighbor Generation Diagnostics ===
+Threshold: 13
+Exact entries added (self_score < threshold): 73204
+Neighbor entries added: 5908823
+Neighbor words generated (unique): 184991
+Words with exact-only additions: 870
+Words with neighbor generation: 8390
+Max neighbors generated for single word: 138
+  Word with max neighbors: idx=13972 (residues 13,20,20)
+Expansion factor (total_entries / exact_positions): 11.31x
+
+=== Phase 2: High-Frequency K-mer Analysis ===
+Top 10 high-frequency k-mers (before suppression):
+  #1: count=2297, idx=3171 (residues 3,3,3)
+  #2: count=2277, idx=3182 (residues 3,3,14)
+  #3: count=2246, idx=3523 (residues 3,14,3)
+  #4: count=2188, idx=3174 (residues 3,3,6)
+  #5: count=2115, idx=14435 (residues 14,3,3)
+  #6: count=2110, idx=6243 (residues 6,3,3)
+  #7: count=2084, idx=22627 (residues 22,3,3)
+  #8: count=2029, idx=3534 (residues 3,14,14)
+  #9: count=2018, idx=3267 (residues 3,6,3)
+  #10: count=2006, idx=14446 (residues 14,3,14)
+Hit count distribution:
+  2-10: 18 cells, 161 entries
+  11-100: 2986 cells, 172167 entries
+  101-500: 6149 cells, 1535158 entries
+  501-1000: 3161 cells, 2341560 entries
+  1001-5000: 1561 cells, 1932981 entries
+
+=== NCBI Backbone Lookup Table (BLASTAA_SIZE=28) ===
+Contexts: 6
+Backbone size: 28540 cells (0.5 MB)
+Non-empty cells: 13875
+Total entries: 5982027
+High-frequency suppression: 0 cells filtered (0 entries dropped), max_hits_per_kmer=18446744073709551615
+Overflow size: 5982027 (23.9 MB)
+Longest chain: 2297
+==========================================
+
+Reading subjects...
+Searching 1 queries vs 1 subjects... (avg_query_length=103854)
+
+real	0m23.227s
+user	0m23.097s
+sys	0m0.030s

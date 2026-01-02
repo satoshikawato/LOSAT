@@ -44,7 +44,55 @@ comparisons = [
         "losat_log": "AP027133.AP027132.tlosatx.n1.log", 
         "blast_log": "AP027133.AP027132.tblastx.n1.log"
     },
-
+    {
+        "name": "AP027280_Self", "mode": "TBLASTX", 
+        "losat_log": "AP027280.AP027280.tlosatx.n1.log", 
+        "blast_log": "AP027280.AP027280.tblastx.n1.log"
+    },
+         {
+        "name": "MjeNMV_vs_MelaMJNV", "mode": "TBLASTX", 
+        "losat_log": "MjeNMV.MelaMJNV.tlosatx.n1.log", 
+        "blast_log": "MjeNMV.MelaMJNV.tblastx.n1.log"
+    },
+    {
+        "name": "MelaMJNV_vs_PemoMJNVA", "mode": "TBLASTX", 
+        "losat_log": "MelaMJNV.PemoMJNVA.tlosatx.n1.log", 
+        "blast_log": "MelaMJNV.PemoMJNVA.tblastx.n1.log"
+    },
+    {
+        "name": "PemoMJNVA_vs_PeseMJNV", "mode": "TBLASTX", 
+        "losat_log": "PemoMJNVA.PeseMJNV.tlosatx.n1.log", 
+        "blast_log": "PemoMJNVA.PeseMJNV.tblastx.n1.log"
+    },
+    {
+        "name": "PeseMJNV_vs_PemoMJNVB", "mode": "TBLASTX", 
+        "losat_log": "PeseMJNV.PemoMJNVB.tlosatx.n1.log", 
+        "blast_log": "PeseMJNV.PemoMJNVB.tblastx.n1.log"
+    },
+    {
+        "name": "PemoMJNVB_vs_LvMJNV", "mode": "TBLASTX", 
+        "losat_log": "PemoMJNVB.LvMJNV.tlosatx.n1.log", 
+        "blast_log": "PemoMJNVB.LvMJNV.tblastx.n1.log"
+    },
+    {
+        "name": "LvMJNV_vs_TrcuMJNV", "mode": "TBLASTX", 
+        "losat_log": "LvMJNV.TrcuMJNV.tlosatx.n1.log", 
+        "blast_log": "LvMJNV.TrcuMJNV.tblastx.n1.log"
+    },
+    {   "name": "TrcuMJNV_vs_MellatMJNV", "mode": "TBLASTX",
+        "losat_log": "TrcuMJNV.MellatMJNV.tlosatx.n1.log", 
+        "blast_log": "TrcuMJNV.MellatMJNV.tblastx.n1.log"
+    },
+    {
+        "name": "MellatMJNV_vs_MeenMJNV", "mode": "TBLASTX",
+        "losat_log": "MellatMJNV.MeenMJNV.tlosatx.n1.log", 
+        "blast_log": "MellatMJNV.MeenMJNV.tblastx.n1.log"
+    },
+    {
+        "name": "MeenMJNV_vs_MejoMJNV", "mode": "TBLASTX",
+        "losat_log": "MeenMJNV.MejoMJNV.tlosatx.n1.log", 
+        "blast_log": "MeenMJNV.MejoMJNV.tblastx.n1.log"
+    },   
     # --- BLASTN (Default / Megablast) ---
     {
         "name": "NZ_CP006932_Self", "mode": "Megablast", 

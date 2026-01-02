@@ -1,0 +1,14 @@
+Reading queries...
+Building lookup table...
+
+=== NCBI Backbone Lookup Table ===
+Contexts: 6
+Backbone size: 25369 cells (0.4 MB)
+Non-empty cells: 13074
+Total entries: 8139984
+High-frequency suppression: disabled
+Overflow size: 8139957 (32.6 MB)
+==================================
+
+Reading subjects...
+Searching 1 queries vs 1 subjects...

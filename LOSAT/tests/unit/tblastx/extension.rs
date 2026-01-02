@@ -30,18 +30,15 @@ fn test_get_score_matches() {
 
 #[test]
 fn test_get_score_stop_codon() {
-    // Stop codons (25) in BLOSUM62 matrix
-    // The matrix has 27x27 entries, with stop codon at index 25
+    // Stop codons (*) in BLOSUM62 matrix: index 24 in NCBI packed order (ARNDCQEGHILKMFPSTWYVBJZX*)
+    // The matrix has 25x25 entries (0..=24).
     let score_stop = get_score(STOP_CODON, 0);
     // Stop codon vs normal amino acid should be negative or zero
     assert!(score_stop <= 0);
     
     let score_stop_stop = get_score(STOP_CODON, STOP_CODON);
-    // Stop codon vs stop codon: NCBI BLAST's BLOSUM62 matrix has *-* = 1
-    // However, LOSAT uses *-* = -4 to prevent runaway extensions in self-comparisons
-    // where stop codons align with themselves (which would otherwise never terminate
-    // due to X-drop not catching the +1 score)
-    assert_eq!(score_stop_stop, -4, "Stop-stop score should be -4 to prevent runaway extensions");
+    // NCBI BLAST BLOSUM62: *-* = +1 (sm_blosum62.c)
+    assert_eq!(score_stop_stop, 1);
 }
 
 #[test]

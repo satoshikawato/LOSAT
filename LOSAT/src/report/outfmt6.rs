@@ -279,6 +279,9 @@ mod tests {
             s_end: 100,
             e_value: 1e-50,
             bit_score: 185.5,
+            q_idx: 0,
+            s_idx: 0,
+            raw_score: 200,
         }
     }
 

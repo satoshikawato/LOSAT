@@ -1,0 +1,59 @@
+Reading queries...
+Building lookup table...
+
+=== Phase 1a: Exact Indexing Diagnostics ===
+Total exact positions indexed: 567564
+Unique exact words: 9246
+Max offsets per exact word: 645
+Skipped (invalid residue): 0
+Skipped (DNA mask): 179742
+Skipped (SEG mask): 566880
+
+=== Phase 1b: Neighbor Generation Diagnostics ===
+Threshold: 13
+Exact entries added (self_score < threshold): 83650
+Neighbor entries added: 7792205
+Neighbor words generated (unique): 184235
+Words with exact-only additions: 870
+Words with neighbor generation: 8376
+Max neighbors generated for single word: 138
+  Word with max neighbors: idx=13972 (residues 13,20,20)
+Expansion factor (total_entries / exact_positions): 13.88x
+
+=== Phase 2: High-Frequency K-mer Analysis ===
+Top 10 high-frequency k-mers (before suppression):
+  #1: count=6054, idx=20692 (residues 20,6,20)
+  #2: count=6008, idx=13972 (residues 13,20,20)
+  #3: count=5947, idx=20916 (residues 20,13,20)
+  #4: count=5907, idx=6804 (residues 6,20,20)
+  #5: count=5735, idx=21126 (residues 20,20,6)
+  #6: count=5580, idx=21133 (residues 20,20,13)
+  #7: count=5218, idx=21140 (residues 20,20,20)
+  #8: count=4917, idx=23188 (residues 22,20,20)
+  #9: count=4814, idx=22740 (residues 22,6,20)
+  #10: count=4756, idx=21204 (residues 20,22,20)
+Hit count distribution:
+  1-1: 3 cells, 3 entries
+  2-10: 235 cells, 1717 entries
+  11-100: 2877 cells, 153559 entries
+  101-500: 6422 cells, 1643903 entries
+  501-1000: 2047 cells, 1435745 entries
+  1001-5000: 2284 cells, 4600479 entries
+  5001-10000: 7 cells, 40449 entries
+
+=== NCBI Backbone Lookup Table (BLASTAA_SIZE=28) ===
+Contexts: 6
+Backbone size: 28540 cells (0.5 MB)
+Non-empty cells: 13875
+Total entries: 7875855
+High-frequency suppression: 0 cells filtered (0 entries dropped), max_hits_per_kmer=18446744073709551615
+Overflow size: 7875829 (31.5 MB)
+Longest chain: 6054
+==========================================
+
+Reading subjects...
+Searching 1 queries vs 1 subjects... (avg_query_length=219033)
+
+real	1m51.351s
+user	4m14.528s
+sys	0m0.040s

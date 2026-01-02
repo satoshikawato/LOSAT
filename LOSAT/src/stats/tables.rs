@@ -412,6 +412,52 @@ pub fn requires_even_scores(reward: i32, penalty: i32) -> bool {
     matches!((reward, penalty), (2, 7) | (2, 5) | (2, 3) | (3, 4))
 }
 
+/// Look up UNGAPPED Karlin-Altschul parameters for protein scoring scheme.
+///
+/// NCBI BLAST uses ungapped params (kbp_std) for gap_trigger calculation.
+/// These are stored as the first entry in each matrix table with gap_open=MAX, gap_extend=MAX.
+///
+/// Reference: ncbi-blast blast_parameters.c:340-345
+/// ```c
+/// if (sbp->kbp_std) {
+///    kbp = sbp->kbp_std[context];
+///    gap_trigger = (Int4)((kOptions->gap_trigger * NCBIMATH_LN2 + kbp->logK) / kbp->Lambda);
+/// }
+/// ```
+pub fn lookup_protein_params_ungapped(matrix: ScoringMatrix) -> KarlinParams {
+    let table: &[ParamEntry] = match matrix {
+        ScoringMatrix::Blosum45 => BLOSUM45,
+        ScoringMatrix::Blosum50 => BLOSUM50,
+        ScoringMatrix::Blosum62 => BLOSUM62,
+        ScoringMatrix::Blosum80 => BLOSUM80,
+        ScoringMatrix::Blosum90 => BLOSUM90,
+        ScoringMatrix::Pam30 => PAM30,
+        ScoringMatrix::Pam70 => PAM70,
+        ScoringMatrix::Pam250 => PAM250,
+    };
+
+    // Ungapped params are stored with gap_open=MAX, gap_extend=MAX (first entry)
+    for entry in table {
+        if entry.gap_open == i32::MAX && entry.gap_extend == i32::MAX {
+            return entry.to_karlin_params();
+        }
+    }
+
+    // Fallback: first entry should be ungapped
+    if !table.is_empty() {
+        return table[0].to_karlin_params();
+    }
+
+    // Default BLOSUM62 ungapped
+    KarlinParams {
+        lambda: 0.3176,
+        k: 0.134,
+        h: 0.4012,
+        alpha: 0.7916,
+        beta: -3.2,
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

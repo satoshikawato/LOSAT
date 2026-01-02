@@ -12,29 +12,29 @@ use std::sync::mpsc::channel;
 
 use crate::common::{write_output, Hit};
 use crate::config::{ProteinScoringSpec, ScoringMatrix};
-use crate::stats::{lookup_protein_params, search_space::SearchSpace};
+use crate::stats::{lookup_protein_params, lookup_protein_params_ungapped};
 use crate::utils::dust::{DustMasker, MaskedInterval};
 use crate::utils::genetic_code::GeneticCode;
 use crate::utils::seg::SegMasker;
 
 use super::args::TblastxArgs;
 use super::chaining::UngappedHit;
-use super::constants::{CUTOFF_E_TBLASTX, GAP_TRIGGER_BIT_SCORE, X_DROP_UNGAPPED};
+use super::constants::{GAP_TRIGGER_BIT_SCORE, X_DROP_UNGAPPED};
+use super::ncbi_cutoffs::compute_tblastx_cutoff_score;
 use super::diagnostics::{
     diagnostics_enabled, print_summary as print_diagnostics_summary, DiagnosticCounters,
 };
 use super::extension::{convert_coords, extend_hit_two_hit};
 use super::lookup::{
-    build_ncbi_lookup, decode_kmer, encode_kmer, get_charsize, get_mask, pv_test,
+    build_ncbi_lookup, decode_kmer, encode_kmer, get_charsize, get_mask,
     BlastAaLookupTable, NeighborLookup, AA_HITS_PER_CELL, LOOKUP_ALPHABET_SIZE,
 };
 use crate::utils::matrix::blosum62_score;
-use super::sum_stats_linking::apply_sum_stats_even_gap_linking;
-use super::translation::{generate_frames, QueryFrame};
-use crate::stats::karlin::{
-    bit_score as calc_bit_score, raw_score_from_bit_score, raw_score_from_evalue_with_decay,
+use super::sum_stats_linking::{
+    apply_sum_stats_even_gap_linking, compute_avg_query_length_ncbi, LinkingParams,
 };
-use crate::stats::sum_statistics::defaults::GAP_DECAY_RATE_UNGAPPED;
+use super::translation::{generate_frames, QueryFrame};
+use crate::stats::karlin::bit_score as calc_bit_score;
 
 // [C] typedef struct DiagStruct { Int4 last_hit; Uint1 flag; } DiagStruct;
 #[derive(Clone, Copy)]
@@ -508,17 +508,32 @@ pub fn run(args: TblastxArgs) -> Result<()> {
         return Ok(());
     }
 
-    let scoring = ProteinScoringSpec {
+    // NCBI BLAST uses two sets of Karlin params:
+    // - ungapped params (kbp_std) for gap_trigger calculation
+    // - gapped params (kbp_gap) for cutoff_score_max and E-value calculations
+    // Reference: blast_parameters.c:340-345 (gap_trigger uses kbp_std)
+    // Reference: blast_parameters.c:860-861 (cutoff_score_max uses kbp_gap)
+    let ungapped_params = lookup_protein_params_ungapped(ScoringMatrix::Blosum62);
+    let gapped_scoring = ProteinScoringSpec {
         matrix: ScoringMatrix::Blosum62,
-        gap_open: i32::MAX,
-        gap_extend: i32::MAX,
+        gap_open: 11,
+        gap_extend: 1,
     };
-    let params = lookup_protein_params(&scoring);
+    let gapped_params = lookup_protein_params(&gapped_scoring);
+    // Keep `params` as gapped for E-value calculations in sum_stats_linking
+    let params = gapped_params.clone();
+
+    // Compute NCBI-style average query length for linking cutoffs
+    // Reference: blast_parameters.c:CalculateLinkHSPCutoffs (lines 1023-1026)
+    // NCBI uses average over ALL contexts including zero-length (frame restriction via strand)
+    let query_nucl_lengths: Vec<usize> = queries_raw.iter().map(|r| r.seq().len()).collect();
+    let avg_query_length = compute_avg_query_length_ncbi(&query_nucl_lengths);
 
     eprintln!(
-        "Searching {} queries vs {} subjects...",
+        "Searching {} queries vs {} subjects... (avg_query_length={})",
         queries_raw.len(),
-        subjects_raw.len()
+        subjects_raw.len(),
+        avg_query_length
     );
 
     let bar = ProgressBar::new(subjects_raw.len() as u64);
@@ -573,6 +588,8 @@ pub fn run(args: TblastxArgs) -> Result<()> {
     let lookup_ref = &lookup;
     let contexts_ref = &contexts;
     let query_ids_ref = &query_ids;
+    let ungapped_params_ref = &ungapped_params;
+    let gapped_params_ref = &gapped_params;
 
     subjects_raw.par_iter().enumerate().for_each_init(
         || WorkerState {
@@ -604,31 +621,47 @@ pub fn run(args: TblastxArgs) -> Result<()> {
             // [C] diag_offset = diag->offset;  (per-thread, reused across subjects)
             let mut diag_offset: i32 = st.diag_offset;
 
-            // Precompute per-(context, subject-frame) cutoff scores.
-            // This is a hot-path replacement for NCBI's `cutoffs = word_params->cutoffs + curr_context`.
+            // Precompute per-context cutoff scores using NCBI BLAST algorithm.
+            // Reference: blast_parameters.c BlastInitialWordParametersUpdate
             //
-            // We do this once per subject record to avoid per-extension hashing/branching.
+            // NCBI uses:
+            // - gap_trigger from ungapped params (kbp_std)
+            // - cutoff_score_max from gapped params (kbp_gap) and eff_searchsp
+            // - Final cutoff = MIN(gap_trigger, cutoff_score_max)
+            //
+            // For -subject mode, subject_len_nucl is used (not per-frame AA length).
+            let subject_len_nucl = s_len as i64;
             let mut cutoff_scores: Vec<Vec<i32>> = vec![vec![0; s_frames.len()]; contexts_ref.len()];
+            // NCBI word_params->cutoff_score_min = min of cutoffs across all contexts
+            // Reference: blast_parameters.c BlastInitialWordParametersUpdate
+            let mut cutoff_score_min = i32::MAX;
             for (ctx_idx, ctx) in contexts_ref.iter().enumerate() {
-                for (sf_idx, sf) in s_frames.iter().enumerate() {
-                    let s_aa_len = sf.aa_len;
-                    let ss = SearchSpace {
-                        effective_query_len: ctx.aa_len.min(s_aa_len) as f64,
-                        effective_db_len: s_aa_len as f64,
-                        effective_space: (ctx.aa_len.min(s_aa_len) * s_aa_len) as f64,
-                        length_adjustment: 0,
-                    };
-                    let c = raw_score_from_evalue_with_decay(
-                        CUTOFF_E_TBLASTX,
-                        &params,
-                        &ss,
-                        true,
-                        GAP_DECAY_RATE_UNGAPPED,
-                    );
-                    let g = raw_score_from_bit_score(GAP_TRIGGER_BIT_SCORE, &params);
-                    cutoff_scores[ctx_idx][sf_idx] = c.min(g as i32);
+                // NCBI: query_length = query_info->contexts[context].query_length
+                let query_len_aa = ctx.aa_len as i64;
+                
+                // Compute cutoff using NCBI algorithm
+                let cutoff = compute_tblastx_cutoff_score(
+                    query_len_aa,
+                    subject_len_nucl,
+                    evalue_threshold,  // E-value threshold (typically 10.0)
+                    GAP_TRIGGER_BIT_SCORE,  // 22.0 bits
+                    ungapped_params_ref,
+                    gapped_params_ref,
+                );
+                
+                // Track minimum cutoff for linking
+                cutoff_score_min = cutoff_score_min.min(cutoff);
+                
+                // All subject frames use the same cutoff (NCBI behavior)
+                for sf_idx in 0..s_frames.len() {
+                    cutoff_scores[ctx_idx][sf_idx] = cutoff;
                 }
             }
+            // If no contexts, use 0 as fallback
+            if cutoff_score_min == i32::MAX {
+                cutoff_score_min = 0;
+            }
+            
             let mut ungapped_hits: Vec<UngappedHit> = Vec::new();
 
             for (s_f_idx, s_frame) in s_frames.iter().enumerate() {
@@ -879,7 +912,15 @@ pub fn run(args: TblastxArgs) -> Result<()> {
                         .hsps_before_chain
                         .fetch_add(ungapped_hits.len(), AtomicOrdering::Relaxed);
                 }
-                let linked = apply_sum_stats_even_gap_linking(ungapped_hits, &params);
+                // NCBI CalculateLinkHSPCutoffs parameters
+                let linking_params = LinkingParams {
+                    avg_query_length,
+                    subject_len_nucl,
+                    cutoff_score_min,
+                    scale_factor: 1.0, // Standard BLOSUM62
+                    gap_decay_rate: 0.5, // BLAST_GAP_DECAY_RATE
+                };
+                let linked = apply_sum_stats_even_gap_linking(ungapped_hits, &params, &linking_params);
                 if diag_enabled {
                     diagnostics
                         .base
@@ -1152,17 +1193,31 @@ fn run_with_neighbor_map(args: TblastxArgs) -> Result<()> {
         return Ok(());
     }
 
-    let scoring = ProteinScoringSpec {
+    // NCBI BLAST uses two sets of Karlin params:
+    // - ungapped params (kbp_std) for gap_trigger calculation
+    // - gapped params (kbp_gap) for cutoff_score_max and E-value calculations
+    // Reference: blast_parameters.c:340-345 (gap_trigger uses kbp_std)
+    // Reference: blast_parameters.c:860-861 (cutoff_score_max uses kbp_gap)
+    let ungapped_params = lookup_protein_params_ungapped(ScoringMatrix::Blosum62);
+    let gapped_scoring = ProteinScoringSpec {
         matrix: ScoringMatrix::Blosum62,
-        gap_open: i32::MAX,
-        gap_extend: i32::MAX,
+        gap_open: 11,
+        gap_extend: 1,
     };
-    let params = lookup_protein_params(&scoring);
+    let gapped_params = lookup_protein_params(&gapped_scoring);
+    // Keep `params` as gapped for E-value calculations in sum_stats_linking
+    let params = gapped_params.clone();
+
+    // Compute NCBI-style average query length for linking cutoffs
+    // Reference: blast_parameters.c:CalculateLinkHSPCutoffs (lines 1023-1026)
+    let query_nucl_lengths: Vec<usize> = queries_raw.iter().map(|r| r.seq().len()).collect();
+    let avg_query_length = compute_avg_query_length_ncbi(&query_nucl_lengths);
 
     eprintln!(
-        "Searching {} queries vs {} subjects (neighbor map mode)...",
+        "Searching {} queries vs {} subjects (neighbor map mode, avg_query_length={})...",
         queries_raw.len(),
-        subjects_raw.len()
+        subjects_raw.len(),
+        avg_query_length
     );
 
     let bar = ProgressBar::new(subjects_raw.len() as u64 * 6);
@@ -1178,6 +1233,8 @@ fn run_with_neighbor_map(args: TblastxArgs) -> Result<()> {
     let neighbor_map_ref = &neighbor_lookup.neighbor_map.map;
     let query_lookup_ref = &neighbor_lookup.query_lookup;
     let params_ref = &params;
+    let ungapped_params_ref = &ungapped_params;
+    let gapped_params_ref = &gapped_params;
 
     // Collect UngappedHit for sum_stats_linking
     // Key: (q_idx, s_idx)
@@ -1194,30 +1251,37 @@ fn run_with_neighbor_map(args: TblastxArgs) -> Result<()> {
         let s_len = s_rec.seq().len();
         let s_frames = generate_frames(s_rec.seq(), &db_code);
         
-        // Precompute per-(query_frame, subject_frame) cutoff scores
-        // This matches NCBI's `cutoffs = word_params->cutoffs + curr_context`
-        let mut cutoff_scores: Vec<Vec<i32>> = vec![vec![0; s_frames.len()]; query_frames.iter().map(|f| f.len()).sum()];
+        // Precompute per-context cutoff scores using NCBI BLAST algorithm.
+        // Reference: blast_parameters.c BlastInitialWordParametersUpdate
+        //
+        // NCBI uses:
+        // - gap_trigger from ungapped params (kbp_std)
+        // - cutoff_score_max from gapped params (kbp_gap) and eff_searchsp
+        // - Final cutoff = MIN(gap_trigger, cutoff_score_max)
+        //
+        // For -subject mode, subject_len_nucl is used (not per-frame AA length).
+        let subject_len_nucl = s_len as i64;
+        let total_contexts: usize = query_frames.iter().map(|f| f.len()).sum();
+        let mut cutoff_scores: Vec<Vec<i32>> = vec![vec![0; s_frames.len()]; total_contexts];
         let mut ctx_idx = 0;
         for q_frames in query_frames.iter() {
             for q_frame in q_frames.iter() {
-                for (sf_idx, sf) in s_frames.iter().enumerate() {
-                    let q_aa_len = q_frame.aa_len;
-                    let s_aa_len = sf.aa_len;
-                    let ss = SearchSpace {
-                        effective_query_len: q_aa_len.min(s_aa_len) as f64,
-                        effective_db_len: s_aa_len as f64,
-                        effective_space: (q_aa_len.min(s_aa_len) * s_aa_len) as f64,
-                        length_adjustment: 0,
-                    };
-                    let c = raw_score_from_evalue_with_decay(
-                        CUTOFF_E_TBLASTX,
-                        &params,
-                        &ss,
-                        true,
-                        GAP_DECAY_RATE_UNGAPPED,
-                    );
-                    let g = raw_score_from_bit_score(GAP_TRIGGER_BIT_SCORE, &params);
-                    cutoff_scores[ctx_idx][sf_idx] = c.min(g as i32);
+                // NCBI: query_length = query_info->contexts[context].query_length
+                let query_len_aa = q_frame.aa_len as i64;
+                
+                // Compute cutoff using NCBI algorithm
+                let cutoff = compute_tblastx_cutoff_score(
+                    query_len_aa,
+                    subject_len_nucl,
+                    evalue_threshold,  // E-value threshold (typically 10.0)
+                    GAP_TRIGGER_BIT_SCORE,  // 22.0 bits
+                    ungapped_params_ref,
+                    gapped_params_ref,
+                );
+                
+                // All subject frames use the same cutoff (NCBI behavior)
+                for sf_idx in 0..s_frames.len() {
+                    cutoff_scores[ctx_idx][sf_idx] = cutoff;
                 }
                 ctx_idx += 1;
             }
@@ -1484,8 +1548,53 @@ fn run_with_neighbor_map(args: TblastxArgs) -> Result<()> {
             all_ungapped.len(), before_purge - all_ungapped.len());
     }
 
-    // Apply sum-stats linking (assigns E-values to chains)
-    let linked_hits = apply_sum_stats_even_gap_linking(all_ungapped, &params);
+    // Apply sum-stats linking per subject (NCBI CalculateLinkHSPCutoffs is subject-specific)
+    // Reference: blast_parameters.c:CalculateLinkHSPCutoffs
+    // Step 1: Group hits by s_idx
+    let mut hits_by_subject: rustc_hash::FxHashMap<u32, Vec<UngappedHit>> = rustc_hash::FxHashMap::default();
+    for hit in all_ungapped {
+        hits_by_subject.entry(hit.s_idx).or_default().push(hit);
+    }
+    
+    // Step 2: Apply linking per subject with proper cutoffs
+    let linked_hits: Vec<UngappedHit> = hits_by_subject
+        .into_par_iter()
+        .flat_map(|(s_idx, subject_hits)| {
+            // Get subject length for this subject
+            let subject_len_nucl = subjects_raw[s_idx as usize].seq().len() as i64;
+            
+            // Compute cutoff_score_min as minimum across all query contexts
+            let mut cutoff_score_min = i32::MAX;
+            for frames in query_frames_ref.iter() {
+                for frame in frames.iter() {
+                    let query_len_aa = frame.aa_len as i64;
+                    let cutoff = compute_tblastx_cutoff_score(
+                        query_len_aa,
+                        subject_len_nucl,
+                        evalue_threshold,
+                        GAP_TRIGGER_BIT_SCORE,
+                        ungapped_params_ref,
+                        gapped_params_ref,
+                    );
+                    cutoff_score_min = cutoff_score_min.min(cutoff);
+                }
+            }
+            if cutoff_score_min == i32::MAX {
+                cutoff_score_min = 0;
+            }
+            
+            // Create NCBI-style linking params for this subject
+            let linking_params = LinkingParams {
+                avg_query_length,
+                subject_len_nucl,
+                cutoff_score_min,
+                scale_factor: 1.0,
+                gap_decay_rate: 0.5,
+            };
+            
+            apply_sum_stats_even_gap_linking(subject_hits, params_ref, &linking_params)
+        })
+        .collect();
     eprintln!("[2] After sum_stats_linking: {} hits", linked_hits.len());
     
     // Count E-value distribution before final filter

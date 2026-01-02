@@ -13,7 +13,7 @@ use rustc_hash::FxHashMap;
 use rayon::prelude::*;
 use crate::stats::sum_statistics::{
     gap_decay_divisor, small_gap_sum_e, large_gap_sum_e, normalize_score,
-    defaults::{GAP_DECAY_RATE_UNGAPPED, GAP_SIZE, OVERLAP_SIZE, GAP_PROB_UNGAPPED},
+    defaults::{GAP_SIZE, OVERLAP_SIZE},
 };
 use crate::stats::KarlinParams;
 use crate::stats::search_space::SearchSpace;
@@ -33,60 +33,323 @@ const TRIM_SIZE: i32 = (OVERLAP_SIZE + 1) / 2;
 const LINK_SMALL_GAPS: usize = 0;
 const LINK_LARGE_GAPS: usize = 1;
 
-/// Calculate cutoff_big_gap, cutoff_small_gap and ignore_small_gaps for HSP linking
+/// NCBI BLAST_GAP_PROB (ungapped search default)
+/// Reference: ncbi-blast/c++/include/algo/blast/core/blast_parameters.h:66
+const BLAST_GAP_PROB: f64 = 0.5;
+
+/// NCBI BLAST_GAP_DECAY_RATE (ungapped search default)  
+/// Reference: ncbi-blast/c++/include/algo/blast/core/blast_parameters.h:68
+const BLAST_GAP_DECAY_RATE: f64 = 0.5;
+
+/// NCBI BLAST_Nint - round to nearest integer
+/// Reference: ncbi-blast/c++/src/algo/blast/core/ncbi_math.c:437-441
+///
+/// ```c
+/// long BLAST_Nint(double x)
+/// {
+///    x += (x >= 0. ? 0.5 : -0.5);
+///    return (long)x;
+/// }
+/// ```
+#[inline]
+fn blast_nint(x: f64) -> i32 {
+    let rounded = if x >= 0.0 { x + 0.5 } else { x - 0.5 };
+    rounded as i32
+}
+
+/// Parameters for HSP linking cutoffs
+/// These are the outputs from calculate_link_hsp_cutoffs_ncbi()
+#[derive(Debug, Clone, Copy)]
+pub struct LinkHspCutoffs {
+    /// Cutoff for small gap linking (index 0)
+    pub cutoff_small_gap: i32,
+    /// Cutoff for big gap linking (index 1)
+    pub cutoff_big_gap: i32,
+    /// Gap probability (may be set to 0 for small search spaces)
+    pub gap_prob: f64,
+    /// Whether to ignore small gaps (when gap_prob=0)
+    pub ignore_small_gaps: bool,
+}
+
+/// Parameters required for NCBI-style linking
+/// These are computed once per subject and passed to linking
+#[derive(Debug, Clone)]
+pub struct LinkingParams {
+    /// Average query length in AA (NCBI CalculateLinkHSPCutoffs formula)
+    pub avg_query_length: i32,
+    /// Subject length in nucleotides
+    pub subject_len_nucl: i64,
+    /// Minimum cutoff score across all contexts for this subject
+    pub cutoff_score_min: i32,
+    /// Scale factor (typically 1.0 for standard BLOSUM62)
+    pub scale_factor: f64,
+    /// Gap decay rate
+    pub gap_decay_rate: f64,
+}
+
+impl Default for LinkingParams {
+    fn default() -> Self {
+        Self {
+            avg_query_length: 100,
+            subject_len_nucl: 300,
+            cutoff_score_min: 0,
+            scale_factor: 1.0,
+            gap_decay_rate: BLAST_GAP_DECAY_RATE,
+        }
+    }
+}
+
+/// Compute NCBI-style average query length from nucleotide lengths
+///
+/// This replicates NCBI's SetupQueryInfo_OMF + CalculateLinkHSPCutoffs logic:
+/// - For each query, compute 6 context lengths using BLAST_GetTranslatedProteinLength
+/// - Build context offsets using s_QueryInfo_SetContext pattern
+/// - Apply NCBI's average formula: (last_offset + last_length - 1) / num_contexts
+///
+/// Reference: 
+/// - blast_util.c:BLAST_GetTranslatedProteinLength
+/// - blast_setup_cxx.cpp:s_QueryInfo_SetContext  
+/// - blast_parameters.c:1023-1026
+///
+/// ```c
+/// query_length =
+///     (query_info->contexts[query_info->last_context].query_offset +
+///     query_info->contexts[query_info->last_context].query_length - 1)
+///     / (query_info->last_context + 1);
+/// ```
+pub fn compute_avg_query_length_ncbi(query_nucl_lengths: &[usize]) -> i32 {
+    if query_nucl_lengths.is_empty() {
+        return 1;
+    }
+    
+    // Build context offsets and lengths like NCBI
+    // Each query has 6 contexts (frames 0-5 in NCBI, which map to frames 1,2,3,-1,-2,-3)
+    let mut contexts: Vec<(i32, i32)> = Vec::new(); // (query_offset, query_length)
+    
+    for &nucl_len in query_nucl_lengths {
+        for context in 0..6u32 {
+            // NCBI BLAST_GetTranslatedProteinLength:
+            // return (nucleotide_length - context % CODON_LENGTH) / CODON_LENGTH;
+            let prot_len = if nucl_len == 0 || nucl_len <= (context % 3) as usize {
+                0
+            } else {
+                ((nucl_len - (context % 3) as usize) / 3) as i32
+            };
+            
+            // NCBI s_QueryInfo_SetContext offset calculation:
+            // Uint4 shift = prev_len ? prev_len + 1 : 0;
+            // qinfo->contexts[index].query_offset = prev_loc + shift;
+            let (prev_offset, prev_len) = contexts.last().copied().unwrap_or((0, 0));
+            let shift = if prev_len > 0 { prev_len + 1 } else { 0 };
+            let new_offset = prev_offset + shift;
+            
+            contexts.push((new_offset, prot_len));
+        }
+    }
+    
+    if contexts.is_empty() {
+        return 1;
+    }
+    
+    // NCBI average formula: (last_offset + last_length - 1) / num_contexts
+    let (last_offset, last_length) = contexts.last().copied().unwrap();
+    let num_contexts = contexts.len() as i32;
+    
+    let avg = (last_offset + last_length - 1) / num_contexts;
+    avg.max(1)
+}
+
+/// NCBI CalculateLinkHSPCutoffs - verbatim port
+///
 /// Reference: ncbi-blast/c++/src/algo/blast/core/blast_parameters.c:998-1082
-/// CalculateLinkHSPCutoffs()
-/// Returns (cutoff[0], cutoff[1], ignore_small_gaps)
-fn calculate_link_hsp_cutoffs(
-    q_aa_len: usize,
-    s_aa_len: usize,
-    params: &KarlinParams,
+///
+/// ```c
+/// void
+/// CalculateLinkHSPCutoffs(EBlastProgramType program, BlastQueryInfo* query_info, 
+///    const BlastScoreBlk* sbp, BlastLinkHSPParameters* link_hsp_params, 
+///    const BlastInitialWordParameters* word_params,
+///    Int8 db_length, Int4 subject_length)
+/// {
+///     Blast_KarlinBlk* kbp = NULL;
+///     double gap_prob, gap_decay_rate, x_variable, y_variable;
+///     Int4 expected_length, window_size, query_length;
+///     Int8 search_sp;
+///     const double kEpsilon = 1.0e-9;
+///
+///     if (!link_hsp_params)
+///         return;
+///
+///     /* Get KarlinBlk for context with smallest lambda (still greater than zero) */
+///     s_BlastFindSmallestLambda(sbp->kbp, query_info, &kbp);
+///     if (!kbp)
+///         return;
+///
+///     window_size
+///         = link_hsp_params->gap_size + link_hsp_params->overlap_size + 1;
+///     gap_prob = link_hsp_params->gap_prob = BLAST_GAP_PROB;
+///     gap_decay_rate = link_hsp_params->gap_decay_rate;
+///     /* Use average query length */
+///     
+///     query_length =
+///         (query_info->contexts[query_info->last_context].query_offset +
+///         query_info->contexts[query_info->last_context].query_length - 1)
+///         / (query_info->last_context + 1);
+///     
+///     if (Blast_SubjectIsTranslated(program) || program == eBlastTypeRpsTblastn) {
+///         /* Lengths in subsequent calculations should be on the protein scale */
+///         subject_length /= CODON_LENGTH;
+///         db_length /= CODON_LENGTH;
+///     }
+///
+///     
+///     /* Subtract off the expected score. */
+///    expected_length = (Int4)BLAST_Nint(log(kbp->K*((double) query_length)*
+///                                     ((double) subject_length))/(kbp->H));
+///    query_length = query_length - expected_length;
+///
+///    subject_length = subject_length - expected_length;
+///    query_length = MAX(query_length, 1);
+///    subject_length = MAX(subject_length, 1);
+///
+///    /* If this is a database search, use database length, else the single 
+///       subject sequence length */
+///    if (db_length > subject_length) {
+///       y_variable = log((double) (db_length)/(double) subject_length)*(kbp->K)/
+///          (gap_decay_rate);
+///    } else {
+///       y_variable = log((double) (subject_length + expected_length)/
+///                        (double) subject_length)*(kbp->K)/(gap_decay_rate);
+///    }
+///
+///    search_sp = ((Int8) query_length)* ((Int8) subject_length);
+///    x_variable = 0.25*y_variable*((double) search_sp);
+///
+///    /* To use "small" gaps the query and subject must be "large" compared to
+///       the gap size. If small gaps may be used, then the cutoff values must be
+///       adjusted for the "bayesian" possibility that both large and small gaps 
+///       are being checked for. */
+///
+///    if (search_sp > 8*window_size*window_size) {
+///       x_variable /= (1.0 - gap_prob + kEpsilon);
+///       link_hsp_params->cutoff_big_gap = 
+///          (Int4) floor((log(x_variable)/kbp->Lambda)) + 1;
+///       x_variable = y_variable*(window_size*window_size);
+///       x_variable /= (gap_prob + kEpsilon);
+///       link_hsp_params->cutoff_small_gap = 
+///          MAX(word_params->cutoff_score_min, 
+///              (Int4) floor((log(x_variable)/kbp->Lambda)) + 1);
+///    } else {
+///       link_hsp_params->cutoff_big_gap = 
+///          (Int4) floor((log(x_variable)/kbp->Lambda)) + 1;
+///       /* The following is equivalent to forcing small gap rule to be ignored
+///          when linking HSPs. */
+///       link_hsp_params->gap_prob = 0;
+///       link_hsp_params->cutoff_small_gap = 0;
+///    }	
+///
+///    link_hsp_params->cutoff_big_gap *= (Int4)sbp->scale_factor;
+///    link_hsp_params->cutoff_small_gap *= (Int4)sbp->scale_factor;
+/// }
+/// ```
+pub fn calculate_link_hsp_cutoffs_ncbi(
+    avg_query_length: i32,
+    subject_len_nucl: i64,
+    db_length: i64, // 0 for -subject mode
+    cutoff_score_min: i32,
+    scale_factor: f64,
     gap_decay_rate: f64,
-) -> ([i32; 2], bool) {
-    const EPSILON: f64 = 1.0e-9;
+    params: &KarlinParams,
+) -> LinkHspCutoffs {
+    const K_EPSILON: f64 = 1.0e-9;
     
-    // Calculate expected_length (length adjustment)
-    let query_length = q_aa_len as f64;
-    let subject_length = s_aa_len as f64;
-    let expected_length = (params.k * query_length * subject_length).ln() / params.h;
+    // NCBI: gap_prob = link_hsp_params->gap_prob = BLAST_GAP_PROB;
+    let mut gap_prob = BLAST_GAP_PROB;
     
-    // Adjusted lengths (NCBI lines 1036-1042)
-    let adj_query_len = (query_length - expected_length).max(1.0);
-    let adj_subject_len = (subject_length - expected_length).max(1.0);
+    // NCBI: window_size = link_hsp_params->gap_size + link_hsp_params->overlap_size + 1;
+    let window_size = WINDOW_SIZE;
     
-    // y_variable calculation (NCBI lines 1046-1052)
-    let y_variable = ((subject_length + expected_length) / subject_length).ln() 
-        * params.k / gap_decay_rate;
+    // NCBI: query_length already provided as avg_query_length
+    let mut query_length = avg_query_length;
     
-    // search_sp = adjusted query_length * adjusted subject_length
-    let search_sp = adj_query_len * adj_subject_len;
+    // NCBI: if (Blast_SubjectIsTranslated(program)) subject_length /= CODON_LENGTH;
+    // For tblastx, subject is translated, so divide by 3
+    let mut subject_length = (subject_len_nucl / 3) as i32;
+    let db_length = db_length / 3; // Also scale db_length for tblastx
     
-    // x_variable = 0.25 * y_variable * search_sp (NCBI line 1055)
-    let x_variable_base = 0.25 * y_variable * search_sp;
+    // NCBI: expected_length = (Int4)BLAST_Nint(log(kbp->K*q*s)/(kbp->H));
+    let expected_length = blast_nint(
+        (params.k * (query_length as f64) * (subject_length as f64)).ln() / params.h
+    );
     
-    // Check if search space is large enough for small gaps (NCBI line 1062)
-    let window_sq = (WINDOW_SIZE * WINDOW_SIZE) as f64;
-    let gap_prob = GAP_PROB_UNGAPPED;
+    // NCBI: query_length = query_length - expected_length;
+    query_length -= expected_length;
+    // NCBI: subject_length = subject_length - expected_length;
+    subject_length -= expected_length;
+    // NCBI: query_length = MAX(query_length, 1);
+    query_length = query_length.max(1);
+    // NCBI: subject_length = MAX(subject_length, 1);
+    subject_length = subject_length.max(1);
     
-    let ignore_small_gaps = search_sp <= 8.0 * window_sq;
-    
-    let cutoffs = if !ignore_small_gaps {
-        // Large search space: calculate both cutoffs (NCBI lines 1063-1070)
-        let x_big = x_variable_base / (1.0 - gap_prob + EPSILON);
-        let cutoff_big = (x_big.ln() / params.lambda).floor() as i32 + 1;
-        
-        // cutoff_small_gap uses window_size^2 (NCBI lines 1066-1068)
-        let x_small = y_variable * window_sq / (gap_prob + EPSILON);
-        let cutoff_small = (x_small.ln() / params.lambda).floor() as i32 + 1;
-        
-        [cutoff_small.max(0), cutoff_big]
+    // NCBI: y_variable calculation with db_length > subject_length branch
+    // For -subject mode, db_length = 0, so we always use the else branch
+    let y_variable = if db_length > subject_length as i64 {
+        // Database search mode
+        ((db_length as f64) / (subject_length as f64)).ln() * params.k / gap_decay_rate
     } else {
-        // Small search space: only big gap cutoff, small gap disabled (NCBI lines 1072-1078)
-        let cutoff_big = (x_variable_base.ln() / params.lambda).floor() as i32 + 1;
-        [0, cutoff_big]
+        // Subject mode (db_length == 0 or single sequence)
+        (((subject_length + expected_length) as f64) / (subject_length as f64)).ln()
+            * params.k / gap_decay_rate
     };
     
-    (cutoffs, ignore_small_gaps)
+    // NCBI: search_sp = ((Int8) query_length)* ((Int8) subject_length);
+    let search_sp = (query_length as i64) * (subject_length as i64);
+    
+    // NCBI: x_variable = 0.25*y_variable*((double) search_sp);
+    let mut x_variable = 0.25 * y_variable * (search_sp as f64);
+    
+    let window_sq = (window_size * window_size) as i64;
+    
+    let (cutoff_big_gap, cutoff_small_gap, ignore_small_gaps) = if search_sp > 8 * window_sq {
+        // NCBI: Large search space - use both small and big gap rules
+        // x_variable /= (1.0 - gap_prob + kEpsilon);
+        x_variable /= 1.0 - gap_prob + K_EPSILON;
+        
+        // cutoff_big_gap = (Int4) floor((log(x_variable)/kbp->Lambda)) + 1;
+        let cutoff_big = (x_variable.ln() / params.lambda).floor() as i32 + 1;
+        
+        // x_variable = y_variable*(window_size*window_size);
+        let x_small = y_variable * (window_sq as f64);
+        // x_variable /= (gap_prob + kEpsilon);
+        let x_small = x_small / (gap_prob + K_EPSILON);
+        
+        // cutoff_small_gap = MAX(word_params->cutoff_score_min, floor(log(x)/Lambda)+1);
+        let cutoff_small_raw = (x_small.ln() / params.lambda).floor() as i32 + 1;
+        let cutoff_small = cutoff_score_min.max(cutoff_small_raw);
+        
+        (cutoff_big, cutoff_small, false)
+    } else {
+        // NCBI: Small search space - disable small gap rule
+        // cutoff_big_gap = (Int4) floor((log(x_variable)/kbp->Lambda)) + 1;
+        let cutoff_big = (x_variable.ln() / params.lambda).floor() as i32 + 1;
+        
+        // link_hsp_params->gap_prob = 0;
+        gap_prob = 0.0;
+        // link_hsp_params->cutoff_small_gap = 0;
+        let cutoff_small = 0;
+        
+        (cutoff_big, cutoff_small, true)
+    };
+    
+    // NCBI: cutoff_big_gap *= (Int4)sbp->scale_factor;
+    // NCBI: cutoff_small_gap *= (Int4)sbp->scale_factor;
+    let scale = scale_factor as i32;
+    
+    LinkHspCutoffs {
+        cutoff_small_gap: cutoff_small_gap * scale,
+        cutoff_big_gap: cutoff_big_gap * scale,
+        gap_prob,
+        ignore_small_gaps,
+    }
 }
 
 /// lh_helper structure (NCBI link_hsps.c:100-109)
@@ -129,15 +392,36 @@ struct HspLink {
 /// Sentinel index indicating end of active list or "not in list"
 const SENTINEL_IDX: usize = usize::MAX;
 
+/// Apply NCBI-style sum-statistics even-gap linking
+///
+/// This is the main entry point for HSP linking with NCBI-compatible cutoffs.
+///
+/// # Arguments
+/// * `hits` - Vector of ungapped HSPs to link
+/// * `params` - Karlin-Altschul parameters for the scoring matrix
+/// * `linking_params` - NCBI-style linking parameters (avg query length, subject length, etc.)
 pub fn apply_sum_stats_even_gap_linking(
     hits: Vec<UngappedHit>,
     params: &KarlinParams,
+    linking_params: &LinkingParams,
 ) -> Vec<UngappedHit> {
     if hits.is_empty() {
         return hits;
     }
 
     let diag_enabled = diagnostics_enabled();
+
+    // Calculate cutoffs once for this subject using NCBI algorithm
+    // NCBI: CalculateLinkHSPCutoffs is called once per subject
+    let cutoffs = calculate_link_hsp_cutoffs_ncbi(
+        linking_params.avg_query_length,
+        linking_params.subject_len_nucl,
+        0, // db_length = 0 for -subject mode
+        linking_params.cutoff_score_min,
+        linking_params.scale_factor,
+        linking_params.gap_decay_rate,
+        params,
+    );
 
     // Group by (q_idx, s_idx, q_strand, s_strand) to match NCBI link_hsps.c
     // NCBI groups by context/3 (query strand) and SIGN(subject.frame) (subject strand)
@@ -154,7 +438,7 @@ pub fn apply_sum_stats_even_gap_linking(
     let results: Vec<Vec<UngappedHit>> = groups
         .into_par_iter()
         .map(|(_, group_hits)| {
-            link_hsp_group_ncbi(group_hits, params, diag_enabled)
+            link_hsp_group_ncbi(group_hits, params, &cutoffs, linking_params.gap_decay_rate, diag_enabled)
         })
         .collect();
 
@@ -162,9 +446,18 @@ pub fn apply_sum_stats_even_gap_linking(
 }
 
 /// NCBI-style HSP linking for moderate-sized groups
+///
+/// # Arguments
+/// * `group_hits` - HSPs in this group (same q_idx, s_idx, q_strand, s_strand)
+/// * `params` - Karlin-Altschul parameters
+/// * `cutoffs` - Pre-computed NCBI-style cutoffs for this subject
+/// * `gap_decay_rate` - Gap decay rate for E-value calculation
+/// * `diag_enabled` - Whether diagnostics are enabled
 fn link_hsp_group_ncbi(
     mut group_hits: Vec<UngappedHit>,
     params: &KarlinParams,
+    cutoffs: &LinkHspCutoffs,
+    gap_decay_rate: f64,
     diag_enabled: bool,
 ) -> Vec<UngappedHit> {
     if group_hits.is_empty() {
@@ -172,12 +465,17 @@ fn link_hsp_group_ncbi(
     }
     
     let n = group_hits.len();
-    let gap_decay_rate = GAP_DECAY_RATE_UNGAPPED;
     
     let first_hit = &group_hits[0];
     let q_aa_len = first_hit.q_orig_len / 3;
     let s_aa_len = first_hit.s_orig_len / 3;
     let search_space = SearchSpace::with_length_adjustment(q_aa_len, s_aa_len, params);
+    
+    // Use pre-computed cutoffs from NCBI algorithm
+    let cutoff_small = cutoffs.cutoff_small_gap;
+    let cutoff_big = cutoffs.cutoff_big_gap;
+    let gap_prob = cutoffs.gap_prob;
+    let ignore_small_gaps = cutoffs.ignore_small_gaps;
     
     // Debug output for first group only (to avoid spam)
     static DEBUG_ONCE: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
@@ -191,13 +489,11 @@ fn link_hsp_group_ncbi(
         eprintln!("  lambda={}, k={}, logK={:.4}", params.lambda, params.k, params.k.ln());
     }
     
-    let (cutoffs, ignore_small_gaps) = calculate_link_hsp_cutoffs(q_aa_len, s_aa_len, params, gap_decay_rate);
-    
     // Debug: print cutoffs for first group
     static DEBUG_CUTOFFS: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
     if diag_enabled && !DEBUG_CUTOFFS.swap(true, std::sync::atomic::Ordering::Relaxed) {
-        eprintln!("[DEBUG] Linking cutoffs: small_gap={}, big_gap={}, ignore_small_gaps={}", 
-            cutoffs[0], cutoffs[1], ignore_small_gaps);
+        eprintln!("[DEBUG] Linking cutoffs: small_gap={}, big_gap={}, ignore_small_gaps={}, gap_prob={}", 
+            cutoff_small, cutoff_big, ignore_small_gaps, gap_prob);
     }
 
     // Sort by query position DESCENDING (NCBI s_RevCompareHSPsTbx)
@@ -230,7 +526,7 @@ fn link_hsp_group_ncbi(
             s_off_trim: hit.s_aa_start as i32 + st,
             q_end_trim: hit.q_aa_end as i32 - qt,
             s_end_trim: hit.s_aa_end as i32 - st,
-            sum: [score - cutoffs[0], score - cutoffs[1]],
+            sum: [score - cutoff_small, score - cutoff_big],
             xsum: [xsum_val, xsum_val],
             num: [1, 1],
             link: [SENTINEL_IDX, SENTINEL_IDX],
@@ -279,13 +575,14 @@ fn link_hsp_group_ncbi(
     // NCBI `link_hsps.c` sets `gap_prob = link_hsp_params->gap_prob;` regardless
     // of `ignore_small_gaps` (cutoff[0]==0). The adjustment by `1-gap_prob`
     // for INDEX 1 is still applied when `num>1`.
-    let gap_prob = GAP_PROB_UNGAPPED;
+    // NOTE: gap_prob is now passed in from calculate_link_hsp_cutoffs_ncbi
+    // and may be 0 for small search spaces (NCBI line 1076)
 
     while remaining > 0 {
         // NCBI lines 607-625: Initialize max sums each pass
         // CRITICAL: must reset to -cutoff each pass to allow all HSPs to be candidates
         let mut best: [Option<usize>; 2] = [None, None];
-        let mut best_sum: [i32; 2] = [-cutoffs[0], -cutoffs[1]];
+        let mut best_sum: [i32; 2] = [-cutoff_small, -cutoff_big];
         let mut use_current_max = false;
         
         // NCBI lines 603-652: Try to reuse previous max
@@ -430,7 +727,7 @@ fn link_hsp_group_ncbi(
             let active_count = lh_len - 2;
 
             best = [None, None];
-            best_sum = [-cutoffs[0], -cutoffs[1]];
+            best_sum = [-cutoff_small, -cutoff_big];
 
             // INDEX 0 LOOP (small gaps) - NCBI lines 691-768
             if !ignore_small_gaps {
@@ -445,7 +742,7 @@ fn link_hsp_group_ncbi(
                     let mut h_link: usize = SENTINEL_IDX;
                     
                     // NCBI line 702: if (H->hsp->score > cutoff[index])
-                    if hsp_links[i].score > cutoffs[0] {
+                    if hsp_links[i].score > cutoff_small {
                         let h_qe = hsp_links[i].q_end_trim;
                         let h_se = hsp_links[i].s_end_trim;
                         let h_qe_gap = h_qe + WINDOW_SIZE;
@@ -475,7 +772,7 @@ fn link_hsp_group_ncbi(
                     
                     // NCBI lines 750-767: Update this HSP's link info
                     let score = hsp_links[i].score;
-                    let new_sum = h_sum + (score - cutoffs[0]);
+                    let new_sum = h_sum + (score - cutoff_small);
                     let new_xsum = h_xsum + normalize_score(score, params.lambda, params.k.ln());
                     
                     hsp_links[i].sum[0] = new_sum;
@@ -528,7 +825,7 @@ fn link_hsp_group_ncbi(
                     }
                     h_link = prev_link;
                     hsp_links[i].changed = false;
-                } else if hsp_links[i].score > cutoffs[1] {
+                } else if hsp_links[i].score > cutoff_big {
                     let h_qe = hsp_links[i].q_end_trim;
                     let h_se = hsp_links[i].s_end_trim;
                     
@@ -583,7 +880,7 @@ fn link_hsp_group_ncbi(
                 
                 // NCBI lines 863-895: Update this HSP's link info
                 let score = hsp_links[i].score;
-                let new_sum = h_sum + (score - cutoffs[1]);
+                let new_sum = h_sum + (score - cutoff_big);
                 let new_xsum = h_xsum + normalize_score(score, params.lambda, params.k.ln());
                 
                 hsp_links[i].sum[1] = new_sum;

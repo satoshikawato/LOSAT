@@ -1411,3 +1411,111 @@ pub max_hsps_per_subject: usize,
 | 実行時間 | < 60秒 |
 | ヒット数 | ~62,000 (NCBI ±10%) |
 | チェーン長 | 妥当な範囲（10-100 HSPs） |
+
+---
+
+## 2026-01-02 追記: Plan A + Plan B 完了 - CalculateLinkHSPCutoffs NCBI 完全移植
+
+### 実施内容
+
+#### 1. `calculate_link_hsp_cutoffs_ncbi()` - NCBI verbatim port
+
+`sum_stats_linking.rs` に NCBI `blast_parameters.c:CalculateLinkHSPCutoffs()` (lines 998-1082) を完全移植:
+
+```rust
+pub fn calculate_link_hsp_cutoffs_ncbi(
+    avg_query_length: i32,
+    subject_len_nucl: i64,
+    db_length: i64,           // 0 for -subject mode
+    cutoff_score_min: i32,    // word_params->cutoff_score_min
+    scale_factor: f64,        // sbp->scale_factor
+    gap_decay_rate: f64,
+    params: &KarlinParams,
+) -> LinkHspCutoffs
+```
+
+**修正した不一致点**:
+
+| 項目 | 修正前 | 修正後 (NCBI 準拠) |
+|------|--------|-------------------|
+| query_length | `q_orig_len / 3` | `compute_avg_query_length_ncbi()` - 全 context の平均 |
+| expected_length 丸め | 浮動小数 | `blast_nint()` - NCBI `BLAST_Nint` 移植 |
+| y_variable 分岐 | なし | `db_length > subject_length` 分岐を実装 |
+| cutoff_small_gap 下限 | なし | `MAX(cutoff_score_min, floor(log(x)/λ)+1)` |
+| scale_factor 乗算 | なし | `cutoff_* *= scale_factor` |
+| gap_prob 伝播 | 常に 0.5 | small search space で 0 に設定、linking に伝播 |
+
+#### 2. `compute_avg_query_length_ncbi()` - NCBI query_info 再現
+
+NCBI の `s_QueryInfo_SetContext` + `CalculateLinkHSPCutoffs` の query_length 計算を再現:
+
+```rust
+// NCBI 式:
+// query_length = (contexts[last].query_offset + contexts[last].query_length - 1) 
+//                / (last_context + 1)
+```
+
+- 各 query に対して 6 context (frames 0-5) を構築
+- `BLAST_GetTranslatedProteinLength` 相当で各 context の長さを計算
+- `s_QueryInfo_SetContext` 相当でオフセットを累積 (`prev_len ? prev_len + 1 : 0`)
+
+#### 3. `blast_nint()` - NCBI 丸め関数
+
+```rust
+/// NCBI BLAST_Nint (ncbi_math.c:437-441)
+fn blast_nint(x: f64) -> i32 {
+    let rounded = if x >= 0.0 { x + 0.5 } else { x - 0.5 };
+    rounded as i32
+}
+```
+
+#### 4. `LinkingParams` 構造体
+
+linking に必要なパラメータをまとめて渡す:
+
+```rust
+pub struct LinkingParams {
+    pub avg_query_length: i32,
+    pub subject_len_nucl: i64,
+    pub cutoff_score_min: i32,
+    pub scale_factor: f64,
+    pub gap_decay_rate: f64,
+}
+```
+
+#### 5. `utils.rs` の修正
+
+**normal mode (`run()`)**:
+- `avg_query_length` を全 query から一度だけ計算
+- 各 subject で `cutoff_score_min` を計算（全 context の最小値）
+- `LinkingParams` を作成して `apply_sum_stats_even_gap_linking()` に渡す
+
+**neighbor-map mode (`run_with_neighbor_map()`)**:
+- 同様に `avg_query_length` を計算
+- hits を `s_idx` 単位にグループ化
+- 各 subject group ごとに `cutoff_score_min` を計算
+- subject 単位で `apply_sum_stats_even_gap_linking()` を呼び出し
+
+### 検証結果
+
+テスト実行 (`MjeNMV.fasta` vs `MelaMJNV.fasta`):
+- `avg_query_length=102002` が正しく計算・表示される
+- normal mode / neighbor-map mode 両方で動作確認
+- E-value 分布が生成される
+
+### NCBI 参照コード
+
+| ファイル | 関数/定数 | 行番号 |
+|----------|-----------|--------|
+| blast_parameters.c | `CalculateLinkHSPCutoffs` | 998-1082 |
+| blast_parameters.h | `BLAST_GAP_PROB` | 66 |
+| blast_parameters.h | `BLAST_GAP_DECAY_RATE` | 68 |
+| ncbi_math.c | `BLAST_Nint` | 437-441 |
+| blast_setup_cxx.cpp | `s_QueryInfo_SetContext` | - |
+| blast_util.c | `BLAST_GetTranslatedProteinLength` | - |
+
+### 残課題
+
+1. **Discrepancy #3**: endpoint purge の適用単位/キー (Plan C)
+2. **Discrepancy #5**: HSP チェーン復元/出力順 (Plan F)
+3. **hit 数差分の継続調査**: E-value 計算自体は NCBI 準拠になったが、他の要因で差分が残る可能性

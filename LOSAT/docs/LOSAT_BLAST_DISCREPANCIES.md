@@ -51,40 +51,224 @@ devlog 末尾から（ファイル順）:
   - devlog の「NCBI は sequence_nomask を extension に使う」は **誤り**。
   - もし実装が devlog 記述どおり `aa_seq_nomask` を extension に使うようになっている箇所が残っていれば、それは **NCBI 非準拠**（出力差分要因）となる。
 
-### 2) `sum_stats_linking` の link cutoffs 計算が NCBI `CalculateLinkHSPCutoffs()` と一致していない
+### 2) ~~`sum_stats_linking` の link cutoffs 計算が NCBI `CalculateLinkHSPCutoffs()` と一致していない~~ **[修正完了: 2026-01-02]**
 
 - **対象**:
-  - LOSAT: `LOSAT/src/algorithm/tblastx/sum_stats_linking.rs:calculate_link_hsp_cutoffs()`
-  - NCBI: `blast_parameters.c:CalculateLinkHSPCutoffs()`（コメントでも参照されている）
-- **不一致点（確定）**:
-  - **`cutoff_small_gap` の下限**:
-    - NCBI: `cutoff_small_gap = MAX(word_params->cutoff_score_min, floor(log(x)/Lambda)+1)`
-    - LOSAT: `cutoff_small = floor(log(x)/lambda)+1`（`word_params->cutoff_score_min` 相当が反映されていない）
-  - **`gap_prob` の扱い（small search space 時）**:
-    - NCBI: `search_sp <= 8*window^2` の場合 `link_hsp_params->gap_prob = 0; cutoff_small_gap=0;`
-    - LOSAT: `ignore_small_gaps` は判定しているが、`gap_prob` は常に定数 `GAP_PROB_UNGAPPED` を使用しており、
-      `prob[1]` の「(1-gap_prob) で割る」補正が **NCBI と一致しない**（NCBIは gap_prob=0 → 割らない）。
-  - **`y_variable` の計算分岐**:
-    - NCBI: database search の場合 `db_length > subject_length` で `log(db_length/subject_length)` を使う分岐がある。
-    - LOSAT: `y_variable = log((subject_length + expected_length)/subject_length) * K / gap_decay_rate` のみ（db_length 分岐なし）。
-  - **expected length の丸め**:
-    - NCBI: `expected_length = BLAST_Nint(log(K*q*s)/H)`（整数丸め）
-    - LOSAT: 浮動小数のまま差し引き（`max(1.0)` でクランプ）
+  - LOSAT: `LOSAT/src/algorithm/tblastx/sum_stats_linking.rs:calculate_link_hsp_cutoffs_ncbi()` (新規追加)
+  - NCBI: `blast_parameters.c:CalculateLinkHSPCutoffs()`
+- **修正内容（Plan A + Plan B 実施）**:
+  - **query_length の算出方法**: ✅ `compute_avg_query_length_ncbi()` を追加し NCBI 式を再現
+  - **`cutoff_small_gap` の下限**: ✅ `cutoff_score_min.max(cutoff_small_raw)` で NCBI と同一
+  - **`sbp->scale_factor` の適用**: ✅ `scale_factor` パラメータを追加、cutoffs に乗算
+  - **`gap_prob` の扱い**: ✅ `LinkHspCutoffs` で `gap_prob` を返却し linking に伝播、small search space で 0 に設定
+  - **`y_variable` の計算分岐**: ✅ `db_length > subject_length` 分岐を実装（-subject モードでは else 分岐）
+  - **expected length の丸め**: ✅ `blast_nint()` 関数を追加し NCBI の `BLAST_Nint` を再現
 - **NCBI refs**:
   - `/mnt/c/Users/kawato/Documents/GitHub/ncbi-blast/c++/src/algo/blast/core/blast_parameters.c:998-1082`
+  - `/mnt/c/Users/kawato/Documents/GitHub/ncbi-blast/c++/src/algo/blast/core/ncbi_math.c:437-441`
+- **NCBI 完全一致確認（2026-01-02 検証）**:
+  - `blast_nint()`: NCBI `BLAST_Nint` と同一ロジック（`x + 0.5` for positive, `x - 0.5` for negative → trunc）
+  - `compute_avg_query_length_ncbi()`: NCBI `s_QueryInfo_SetContext` のオフセット構築と平均化を再現
+  - `calculate_link_hsp_cutoffs_ncbi()`: NCBI C コードをコメントとして引用、verbatim port
+  - `gap_prob` 伝播: NCBI の `link_hsp_params->gap_prob = 0` を `LinkHspCutoffs.gap_prob` で再現
+  - subject 単位 linking: neighbor-map モードで hits を `s_idx` 単位に分割して適用
 
-（注）この差分は **E-value 分布/最終 hit 数**に直結するため、Strict Algorithmic Fidelity Protocol 上「最優先で是正」対象。
+### 3) `Blast_HSPListPurgeHSPsWithCommonEndpoints` 相当処理が NCBI と同等になっていない（適用単位/キー）
+
+- **対象**:
+  - LOSAT: `LOSAT/src/algorithm/tblastx/utils.rs:purge_hsps_with_common_endpoints()`
+  - NCBI: `blast_hits.c:Blast_HSPListPurgeHSPsWithCommonEndpoints()` + `s_QueryOffsetCompareHSPs()` / `s_QueryEndCompareHSPs()`
+- **不一致点（確定）**:
+  - **適用単位**:
+    - NCBI: `BlastHSPList`（= 特定 subject に対する HSP list）単位で purge（他 subject と混ざらない）。
+    - LOSAT: `Vec<UngappedHit>` に対して直接 purge（呼び出し側によっては **複数 subject / 複数 query を混在**しうる）。
+  - **比較キーの不足**:
+    - NCBI（開始点 purge）: `(context, query.offset, subject.offset, subject.frame)` が一致するものを重複扱い。
+    - NCBI（終点 purge）: `(context, query.end, subject.end, subject.frame)` が一致するものを重複扱い。
+    - LOSAT: `(q_frame, s_frame, q_aa_start, s_aa_start)` および `(q_frame, s_frame, q_aa_end, s_aa_end)` のみで判定しており、
+      `q_idx/s_idx`（multi-sequence）や `context` 相当（`ctx_idx`）が考慮されない。
+- **NCBI refs**:
+  - `/mnt/c/Users/kawato/Documents/GitHub/ncbi-blast/c++/src/algo/blast/core/blast_hits.c:2455-2534`
+  - `/mnt/c/Users/kawato/Documents/GitHub/ncbi-blast/c++/src/algo/blast/core/blast_hits.c:2268-2400`（比較関数）
+
+（注）tblastx では `purge |= (program != eBlastTypeBlastn)` により **常に purge=true** となるため、
+NCBI は重複 HSP を切り詰めず **free** する（=「最高スコアを残す」挙動）。LOSAT 側もこの前提で完全一致する必要がある。
+
+### 4) devlogの「`--max-hsps-per-subject` を追加」記述に対して、実装が未接続（dead option）
+
+- **devlog**: `2026-01-02 追記: sum_stats_linking NCBI完全準拠修正` にて
+  - `--max-hsps-per-subject` を追加した旨の記述がある。
+- **LOSAT現状（確定）**:
+  - `LOSAT/src/algorithm/tblastx/args.rs` に `max_hsps_per_subject` は定義されているが、
+    `LOSAT/src/algorithm/tblastx/utils.rs` / `sum_stats_linking.rs` から参照されていない（=動作に影響しない）。
+- **影響**:
+  - parity そのものには直結しないが、devlog の「実装した」主張とコードが一致しておらず、
+    パフォーマンス検証・再現性の面で **不合理**（デバッグ/運用上の齟齬）。
+
+### 5) devlogの「`ordering_method` を保持する」主張と現コードが一致していない（HSPチェーン復元の欠落の可能性）
+
+- **devlog**: `2026-01-01 セッション: 侵入型リンクリスト実装と NCBI パリティ修正` にて
+  - `HspLink` に `ordering_method` を追加し、チェーン抽出時に `ordering` を保存する旨が書かれている。
+- **NCBI ground truth**:
+  - `link_hsps.c` は `LinkHSPStruct.ordering_method` を保持し（line 973 付近）、最終的に HSP を `next/prev` で「チェーン順」に接続する処理で参照する（line 1027 付近）。
+- **LOSAT現状（確定）**:
+  - `LOSAT/src/algorithm/tblastx/sum_stats_linking.rs` の `HspLink` に `ordering_method` は存在しない。
+  - `next/prev` での「NCBI同等のチェーン復元」も実装されていない（現状は `Vec<UngappedHit>` に E-value を付与して返すのみ）。
+- **影響（Needs verification）**:
+  - LOSAT の出力仕様が「NCBI の HSP チェーン出力順/連結」を要求する場合、**出力順や HSP セット構造が一致しない**要因になりうる。
+
+### 6) ~~normal mode の ungapped cutoff (`cutoff_score`) 計算が NCBI `word_params->cutoffs[curr_context].cutoff_score` と一致していない~~ **[修正完了: 2026-01-02]**
+
+- **対象**:
+  - LOSAT: `LOSAT/src/algorithm/tblastx/utils.rs`（normal mode の scan/extension 前に `cutoff_scores` を自前計算）
+  - NCBI: `aa_ungapped.c:s_BlastAaWordFinder_TwoHit()` 内の `cutoffs = word_params->cutoffs + curr_context;` と `if (score >= cutoffs->cutoff_score)`  
+    + `blast_parameters.c:BlastInitialWordParametersUpdate()`（`cutoff_score` を context ごとに更新）
+- **修正内容（Plan 0 実施）**:
+  - `LOSAT/src/algorithm/tblastx/ncbi_cutoffs.rs` を新規追加し、NCBI C コードを verbatim port:
+    - `gap_trigger_raw_score()`: ungapped params (kbp_std) を使用、trunc 丸め
+    - `compute_eff_searchsp_subject_mode_tblastx()`: gapped params (kbp_gap) を使用、length adjustment 計算
+    - `cutoff_score_from_evalue()`: gapped params、ceil 丸め、kSmallFloat=1e-297 clamp
+    - `compute_tblastx_cutoff_score()`: 上記を組み合わせて `MIN(gap_trigger, cutoff_score_max)` を計算
+  - `LOSAT/src/stats/tables.rs` に `lookup_protein_params_ungapped()` を追加
+  - `LOSAT/src/algorithm/tblastx/utils.rs` の normal mode / neighbor-map mode 両方で `compute_tblastx_cutoff_score()` を呼び出すように変更
+- **NCBI refs**:
+  - `/mnt/c/Users/kawato/Documents/GitHub/ncbi-blast/c++/src/algo/blast/core/blast_parameters.c:340-345`（gap_trigger は kbp_std を使用）
+  - `/mnt/c/Users/kawato/Documents/GitHub/ncbi-blast/c++/src/algo/blast/core/blast_parameters.c:860-861`（cutoff_score_max は kbp_gap を使用）
+  - `/mnt/c/Users/kawato/Documents/GitHub/ncbi-blast/c++/src/algo/blast/core/blast_parameters.c:368-374`（final cutoff = MIN(gap_trigger, cutoff_score_max)）
+  - `/mnt/c/Users/kawato/Documents/GitHub/ncbi-blast/c++/src/algo/blast/core/blast_stat.c:4040-4063`（BlastKarlinEtoS_simple）
+- **テスト結果**:
+  - `test_gap_trigger_raw_score`: BLOSUM62 ungapped, bits=22 → **41** (trunc, not ceil)
+  - `test_cutoff_score_cap_effective`: 小さい subject で cap が効くことを確認
+  - `test_cutoff_score_gap_trigger_wins`: 大きい subject で gap_trigger が勝つことを確認
+- **NCBI 完全一致確認（2026-01-02 再検証）**:
+  - **gap_trigger 計算**: NCBI `(Int4)((gap_trigger * LN2 + logK) / Lambda)` と bit-perfect 一致
+    - 丸め: `(Int4)` = trunc（LOSAT の `as i32` と同一）
+    - パラメータ: `kbp_std` (ungapped) を使用
+  - **cutoff_score_max 計算**: NCBI `BlastKarlinEtoS_simple` と bit-perfect 一致
+    - 式: `ceil(log(K * searchsp / E) / Lambda)`
+    - E clamp: `MAX(E, 1e-297)` = `e.max(K_SMALL_FLOAT)`
+    - パラメータ: `kbp_gap` (gapped) を使用
+  - **BLOSUM62 パラメータ**: NCBI `blast_stat.c:blosum62_values` と完全一致
+    - ungapped: λ=0.3176, K=0.134, H=0.4012, α=0.7916, β=-3.2
+    - gapped (11,1): λ=0.267, K=0.041, H=0.14, α=1.9, β=-30.0
+  - **GAP_TRIGGER_BIT_SCORE**: NCBI `BLAST_GAP_TRIGGER_PROT = 22.0` と一致
+  - **eff_searchsp 計算**: NCBI `db_length/3` + `BLAST_ComputeLengthAdjustment` と同一ロジック
+  - **最終 cutoff_score**: NCBI `MIN(gap_trigger * scale_factor, cutoff_score_max)` と一致（scale_factor=1.0）
+  - **結論**: 全計算式・パラメータ・丸め方法が NCBI C コードと bit-perfect に一致することを確認済み
 
 ---
 
 ## Needs verification（未確定）
 
-TBD
+- **gapped vs ungapped linking params**:
+  - LOSAT `sum_stats_linking` は `GAP_PROB_UNGAPPED=0.5` / `GAP_DECAY_RATE_UNGAPPED=0.5` を固定で使用している。
+  - NCBI は `BlastLinkHSPParametersNew(program, gapped_calculation)` により
+    - ungapped: `BLAST_GAP_PROB=0.5`, `BLAST_GAP_DECAY_RATE=0.5`
+    - gapped: `BLAST_GAP_PROB_GAPPED=1.0`, `BLAST_GAP_DECAY_RATE_GAPPED=0.1`
+    を切り替える。
+  - LOSAT が「NCBI default（gapped）出力」を目標にするなら、ここは一致していない可能性。
+- **per-context Karlin params**:
+  - NCBI `link_hsps.c` は `kbp[H->hsp->context]` を参照して `Lambda/logK` を context ごとに使用する。
+  - LOSAT は `params` を単一で使用している。composition-based stats 等で差が出るか要確認。
+- **出力順（determinism）**:
+  - LOSAT は `apply_sum_stats_even_gap_linking()` を group 単位で並列処理し、最終出力は主に bit score で sort している。
+  - NCBI の outfmt 出力順（query→subject→HSP の安定順）と一致するか要検証（同点 tie-break など）。
 
 ---
 
 ## 修正計画（本ドキュメントに基づく網羅計画）
 
-TBD
+### 方針
+
+- **NCBI 実装が ground truth**。ロジック差分は「NCBI の該当 C コードを Rust の直上に引用」し、verbatim port で潰す。
+- “性能のための拡張” は **デフォルトOFF** に隔離し、パリティ経路を汚さない（Strict Protocol）。
+
+### 優先順位（NCBIパリティ実現のための順序）
+
+1. **Plan 0**（Discrepancy #6）: **ungapped cutoff (`cutoff_score`) を NCBI の `word_params->cutoffs[curr_context].cutoff_score` に一致**
+2. **Plan A + Plan B**（Discrepancy #2）: `sum_stats_linking` の link cutoffs（`CalculateLinkHSPCutoffs`）/`gap_prob` 伝播を完全一致
+3. **Plan C**（Discrepancy #3）: endpoint purge の「適用単位/キー/タイミング」を NCBI と一致（または parity 経路から除外）
+4. **Plan F（必要なら）**（Discrepancy #5 / Needs verification）: chain 復元・出力順が parity 条件なら実装
+5. **Plan D / Plan E**（Discrepancy #1/#4）: 誤記・dead option の整理（将来の誤移植防止/再現性）
+
+### Plan 0: ungapped cutoff (`cutoff_score`) を NCBI に完全一致させる（最優先） **[実施完了: 2026-01-02]**
+
+- **対象ファイル**: `LOSAT/src/algorithm/tblastx/utils.rs`
+- **対象箇所**: normal mode / neighbor-map mode の「score >= cutoff なら HSP を保存」の cutoff 生成部
+- **実施内容**:
+  - `LOSAT/src/algorithm/tblastx/ncbi_cutoffs.rs` を新規追加
+  - NCBI `BlastInitialWordParametersUpdate()` の cutoff 計算ロジックを Rust へ verbatim port
+  - ungapped params (kbp_std) と gapped params (kbp_gap) を明確に分離
+  - `gap_trigger` は trunc 丸め（NCBI の `(Int4)` キャストを再現）
+  - `cutoff_score_max` は ceil 丸め + kSmallFloat clamp
+  - normal mode / neighbor-map mode 両方で `compute_tblastx_cutoff_score()` を使用
+- **検証結果**:
+  - 5 つの unit test すべて pass（gap_trigger=41, cap 動作確認済み）
+
+### Plan A: `sum_stats_linking` の link cutoffs 計算を NCBI `CalculateLinkHSPCutoffs()` に完全一致させる **[実施完了: 2026-01-02]**
+
+- **対象ファイル**: `LOSAT/src/algorithm/tblastx/sum_stats_linking.rs`
+- **対象関数**: `calculate_link_hsp_cutoffs_ncbi()` (新規追加)
+- **実施内容**:
+  - NCBI `blast_parameters.c:CalculateLinkHSPCutoffs()` (lines 998-1082) を **verbatim port**:
+    - `query_length` の **平均化式**: `compute_avg_query_length_ncbi()` を新規追加
+      - NCBI `s_QueryInfo_SetContext` のオフセット計算を再現
+      - 式: `(last_offset + last_length - 1) / num_contexts`
+    - `expected_length = BLAST_Nint(log(K*q*s)/H)`: `blast_nint()` 関数を追加
+    - `db_length > subject_length` 分岐での `y_variable` 計算: 実装済み（-subject モードでは db_length=0 なので else 分岐）
+    - small search space 時の `gap_prob=0`, `cutoff_small_gap=0`: `LinkHspCutoffs` 構造体で返却
+    - `cutoff_small_gap = MAX(word_params->cutoff_score_min, ...)`: `cutoff_score_min` パラメータを追加
+    - `cutoff_* *= sbp->scale_factor`: `scale_factor` パラメータを追加（現在は 1.0）
+  - `LinkingParams` 構造体を追加し、linking に必要なパラメータをまとめて渡す
+  - `utils.rs` で各 subject ごとに `cutoff_score_min` を計算（全 context の最小値）
+  - neighbor-map モードでは subject 単位で linking を適用するよう修正
+- **NCBI refs**:
+  - `/mnt/c/Users/kawato/Documents/GitHub/ncbi-blast/c++/src/algo/blast/core/blast_parameters.c:998-1082`
+  - `/mnt/c/Users/kawato/Documents/GitHub/ncbi-blast/c++/src/algo/blast/core/ncbi_math.c:437-441` (BLAST_Nint)
+  - `/mnt/c/Users/kawato/Documents/GitHub/ncbi-blast/c++/src/algo/blast/api/blast_setup_cxx.cpp` (s_QueryInfo_SetContext)
+
+### Plan B: `gap_prob` の取り扱いを NCBI の状態遷移どおりにする **[実施完了: 2026-01-02]**
+
+- **対象**: `sum_stats_linking.rs`（prob 補正）
+- **実施内容**:
+  - `calculate_link_hsp_cutoffs_ncbi()` から `LinkHspCutoffs` 構造体で `gap_prob` を返却
+  - small search space (`search_sp <= 8*window^2`) の場合、`gap_prob = 0` を設定
+  - `apply_sum_stats_even_gap_linking()` で cutoffs を計算し、`gap_prob` を `link_hsp_group_ncbi()` に伝播
+  - `link_hsp_group_ncbi()` 内の prob 補正で、伝播された `gap_prob` を使用:
+    - `prob[0] /= gap_prob` (gap_prob=0 の場合は INT4_MAX)
+    - `prob[1] /= (1-gap_prob)` (1-gap_prob=0 の場合は INT4_MAX)
+
+### Plan C: endpoint purge を NCBI と同等にする（適用単位/キー/適用タイミング）
+
+- **対象ファイル**: `LOSAT/src/algorithm/tblastx/utils.rs`
+- **対象**: `purge_hsps_with_common_endpoints()`
+- **やること**:
+  - NCBI `Blast_HSPListPurgeHSPsWithCommonEndpoints()` と `s_QueryOffsetCompareHSPs` / `s_QueryEndCompareHSPs` を **比較キーまで含めて一致**させる:
+    - `(q_idx, s_idx, ctx_idx, s_frame, q_start, s_start)`（開始点）
+    - `(q_idx, s_idx, ctx_idx, s_frame, q_end, s_end)`（終点）
+  - **混在 purge を禁止**: 呼び出し側で「subject 単位（必要なら query 単位も）」に分割してから purge する。
+  - そもそも NCBI が tblastx でこの purge を適用している stage と LOSAT の適用 stage が一致しているか確認し、ズレるなら parity 経路では実行しない。
+
+### Plan D: devlog の誤りを修正（将来の誤移植を防ぐ）
+
+- **対象**: `TBLASTX_NCBI_PARITY_DEVLOG.md`
+- **やること**:
+  - 「NCBI は extension に `sequence_nomask` を使う」等の誤記を修正し、根拠コード（`aa_ungapped.c`）を引用して訂正する。
+
+### Plan E: “非パリティ最適化” の整理（dead option を解消）
+
+- **対象**: `LOSAT/src/algorithm/tblastx/args.rs` の `max_hsps_per_subject`
+- **やること**:
+  - 使うなら: 実際に `utils.rs` の「subject 単位」の ungapped hits に対して適用（score 降順に truncate）し、**デフォルト0で無効**を保証。
+  - 使わないなら: オプション削除（または devlog から削除/注意書きへ）。
+
+### Plan F: HSP チェーン復元/出力順のパリティ要否を確定し、必要なら実装
+
+- **対象**: `sum_stats_linking.rs`（`ordering_method`/chain order）と最終出力ソート
+- **やること**:
+  - NCBI の `link_hsps.c` が最終的に `next/prev` で HSP を連結する出力順を、LOSAT の outfmt 仕様で要求するか決める。
+  - 要求するなら:
+    - `ordering_method` を保持し、NCBI 同等に chain を “next で辿れる形” に復元するか、
+    - もしくは outfmt の出力順ソートを NCBI と一致させる（tie-break 含む）。
 
 

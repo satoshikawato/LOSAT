@@ -1,7 +1,7 @@
 Reading queries (neighbor map mode)...
 Building neighbor lookup...
 Pre-computing filtered neighbor map (threshold=13)...
-Filtered neighbor map computed in 10.6908ms
+Filtered neighbor map computed in 12.1064ms
   Non-empty entries: 13005
   Total neighbor pairs: 184372
   Avg neighbors per k-mer: 14.2
@@ -17,16 +17,16 @@ Searching 1 queries vs 1 subjects (neighbor map mode)...
   X's near left boundary [35862-35892]: [35880, 35881, 35882, 35883, 35884, 35885, 35886, 35887, 35888, 35889, 35890, 35891, 35892]
   X's near right boundary [37859-37889]: [37860, 37861, 37862, 37863, 37864, 37865, 37866, 37867, 37868, 37869, 37870, 37871, 37872, 37873, 37874, 37875]
 === Stage Counters ===
-[1] Raw ungapped hits (after extension): 229725
-[1b] After endpoint purge: 229645 hits (removed 80)
-[2] After sum_stats_linking: 229645 hits
+[1] Raw ungapped hits (after extension): 279012
+[1b] After endpoint purge: 278919 hits (removed 93)
+[2] After sum_stats_linking: 278919 hits
 [3] E-value distribution (before final filter):
-    E=0: 13438, E<=1e-50: 27193, E<=1e-10: 14144, E<=10: 8796, E>10: 166074, E=INF: 0
+    E=0: 9196, E<=1e-50: 16520, E<=1e-10: 10579, E<=10: 7639, E>10: 234985, E=INF: 0
 Pre-generating subject frames for identity calculation...
-[4] Final hits after E-value filter (threshold=10): 63571
+[4] Final hits after E-value filter (threshold=10): 43934
 [5] Top alignment length: 1967 AA
 === End Stage Counters ===
 
-real	3m22.664s
-user	6m49.115s
-sys	0m0.160s
+real	1m33.353s
+user	4m2.027s
+sys	0m0.110s

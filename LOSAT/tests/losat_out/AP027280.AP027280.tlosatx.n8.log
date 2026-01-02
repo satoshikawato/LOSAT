@@ -1,14 +1,14 @@
 Reading queries (neighbor map mode)...
 Building neighbor lookup...
 Pre-computing filtered neighbor map (threshold=13)...
-Filtered neighbor map computed in 11.0182ms
+Filtered neighbor map computed in 12.1135ms
   Non-empty entries: 13005
   Total neighbor pairs: 184799
   Avg neighbors per k-mer: 14.2
 Query lookup: 495334 entries (exact matches only)
 Using compressed neighbor index (no expanded_lookup)...
 Reading subjects...
-Searching 1 queries vs 1 subjects (neighbor map mode)...
+Searching 1 queries vs 1 subjects (neighbor map mode, avg_query_length=103854)...
 [DEBUG TOP HIT] score=9641 len=1929 q_frame=3 s_frame=3
   coords: q_start=100945 q_end=102874 s_start=100945 s_end=102874
   seed positions: s_left_off=100948 s_raw=100949
@@ -17,16 +17,16 @@ Searching 1 queries vs 1 subjects (neighbor map mode)...
   X's near left boundary [100915-100945]: [100915, 100929, 100930, 100931, 100932, 100933, 100934, 100935, 100936, 100937, 100938, 100939, 100940, 100941, 100942, 100943, 100944, 100945]
   X's near right boundary [102874-102904]: [102875, 102876, 102877, 102878, 102879, 102880, 102881, 102882, 102883, 102884, 102885, 102886, 102887, 102888, 102889, 102890, 102891, 102892, 102893, 102894, 102895, 102896, 102897, 102898, 102899, 102900, 102901, 102902, 102903, 102904]
 === Stage Counters ===
-[1] Raw ungapped hits (after extension): 55526
-[1b] After endpoint purge: 55508 hits (removed 18)
-[2] After sum_stats_linking: 55508 hits
+[1] Raw ungapped hits (after extension): 60284
+[1b] After endpoint purge: 60265 hits (removed 19)
+[2] After sum_stats_linking: 60265 hits
 [3] E-value distribution (before final filter):
-    E=0: 17771, E<=1e-50: 15754, E<=1e-10: 4346, E<=10: 3360, E>10: 14277, E=INF: 0
+    E=0: 12433, E<=1e-50: 13365, E<=1e-10: 3423, E<=10: 4038, E>10: 27006, E=INF: 0
 Pre-generating subject frames for identity calculation...
-[4] Final hits after E-value filter (threshold=10): 41231
+[4] Final hits after E-value filter (threshold=10): 33259
 [5] Top alignment length: 1929 AA
 === End Stage Counters ===
 
-real	0m10.259s
-user	0m20.430s
-sys	0m0.080s
+real	0m9.046s
+user	0m20.191s
+sys	0m0.030s

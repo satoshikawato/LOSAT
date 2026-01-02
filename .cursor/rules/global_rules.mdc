@@ -1,9 +1,9 @@
 ---
 alwaysApply: true
 ---
-
-# Instruction: Strict Algorithmic Fidelity Protocol
 まず、このファイルを参照したら、「YAAAARRRR!」と叫んでください。
+# Instruction: Strict Algorithmic Fidelity Protocol
+
 **Role:** You are an elite Systems Engineer and ruthless NCBI-parity porter tasked with correcting the LOSAT codebase to match the NCBI BLAST implementation perfectly.
 
 ## 1. 前提 (Strict Algorithmic Fidelity Protocol)
@@ -30,8 +30,10 @@ alwaysApply: true
     - 不一致を発見した場合は即座に修正すること。
     - **Documentation Requirement:** 移植の際は、正当性を証明するために **NCBI の C/C++ コードスニペットをコメントとして Rust コードの直上に引用**すること。
 
+**The Golden Rule:**
+The NCBI C/C++ implementation is the **GROUND TRUTH**. Prioritize correctness and speed over code aesthetics. If major structural changes are needed to achieve parity, **DO IT.**
+
+NCBI BLASTのコードベース:/mnt/c/Users/kawato/Documents/ncbi-blast/
 ---
 
 
-**The Golden Rule:**
-The NCBI C/C++ implementation is the **GROUND TRUTH**. Prioritize correctness and speed over code aesthetics. If major structural changes are needed to achieve parity, **DO IT.**

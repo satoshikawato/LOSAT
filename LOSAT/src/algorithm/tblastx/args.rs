@@ -134,6 +134,13 @@ pub struct TblastxArgs {
     /// NOTE: If `--only-sframe` is provided, it takes precedence.
     #[arg(long, allow_hyphen_values = true)]
     pub only_sstrand: Option<i8>,
+
+    /// Maximum number of ungapped HSPs to process per subject (before sum_stats_linking).
+    /// When exceeded, only the highest-scoring HSPs are kept.
+    /// Default: unlimited (0 = no limit).
+    /// Set to a smaller value (e.g., 50000) for faster processing of self-comparisons.
+    #[arg(long, default_value_t = 0)]
+    pub max_hsps_per_subject: usize,
 }
 
 

@@ -242,7 +242,7 @@ fn test_build_ncbi_lookup_indexes_low_self_score_exact_word() {
     let queries = vec![frames];
     let query_masks = vec![Vec::<MaskedInterval>::new()];
 
-    let (lookup, _ctx) = build_ncbi_lookup(&queries, &query_masks, 13, true, true, None);
+    let (lookup, _ctx) = build_ncbi_lookup(&queries, &query_masks, 13, true, true, 0, false);
 
     // AAA encodes to index 0 regardless of alphabet_size/word_length here.
     assert!(pv_test(&lookup.pv, 0));
@@ -268,7 +268,7 @@ fn test_build_ncbi_lookup_longest_chain_tracks_max_cell() {
     let queries = vec![frames];
     let query_masks = vec![Vec::<MaskedInterval>::new()];
 
-    let (lookup, _ctx) = build_ncbi_lookup(&queries, &query_masks, 13, true, true, None);
+    let (lookup, _ctx) = build_ncbi_lookup(&queries, &query_masks, 13, true, true, 0, false);
 
     // AAA index is 0.
     let hits = lookup.get_hits(0);

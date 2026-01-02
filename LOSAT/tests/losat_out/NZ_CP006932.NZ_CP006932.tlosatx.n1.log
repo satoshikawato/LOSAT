@@ -25,3 +25,14 @@ Searching 1 queries vs 1 subjects (neighbor map mode, avg_query_length=219033)..
   X's near right boundary [42037-42067]: [42038, 42039, 42040, 42041, 42042, 42043, 42044, 42045, 42046, 42047, 42048, 42049, 42050, 42051, 42052, 42053, 42054, 42055]
 === Stage Counters ===
 [1] Raw ungapped hits (after extension): 339807
+[2] After sum_stats_linking: 339807 hits
+[3] E-value distribution (before final filter):
+    E=0: 20003, E<=1e-50: 34090, E<=1e-10: 10462, E<=10: 8161, E>10: 267091, E=INF: 0
+Pre-generating subject frames for identity calculation...
+[4] Final hits after E-value filter (threshold=10): 72716
+[5] Top alignment length: 2260 AA
+=== End Stage Counters ===
+
+real	4m56.663s
+user	12m24.407s
+sys	0m0.160s

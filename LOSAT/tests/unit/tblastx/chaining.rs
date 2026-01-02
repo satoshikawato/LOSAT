@@ -28,6 +28,9 @@ fn create_test_hit(
         s_end,
         e_value,
         bit_score,
+        q_idx: 0,
+        s_idx: 0,
+        raw_score: ((bit_score * 0.693 + (-0.041_f64).ln()) / 0.267) as i32,
     }
 }
 

@@ -1,24 +1,24 @@
 Reading queries (neighbor map mode)...
 Building neighbor lookup...
 Pre-computing filtered neighbor map (threshold=13)...
-Filtered neighbor map computed in 11.8889ms
+Filtered neighbor map computed in 12.8913ms
   Non-empty entries: 13005
-  Total neighbor pairs: 184684
+  Total neighbor pairs: 184720
   Avg neighbors per k-mer: 14.2
-Query lookup: 569059 entries (exact matches only)
+Query lookup: 651443 entries (exact matches only)
 Using compressed neighbor index (no expanded_lookup)...
 Reading subjects...
 Searching 1 queries vs 1 subjects (neighbor map mode, avg_query_length=220702)...
 === Stage Counters ===
-[1] Raw ungapped hits (after extension): 165961
-[2] After sum_stats_linking: 165961 hits
+[1] Raw ungapped hits (after extension): 220492
+[2] After sum_stats_linking: 220492 hits
 [3] E-value distribution (before final filter):
-    E=0: 5280, E<=1e-50: 3568, E<=1e-10: 2664, E<=10: 2759, E>10: 151690, E=INF: 0
+    E=0: 6565, E<=1e-50: 5210, E<=1e-10: 3815, E<=10: 3505, E>10: 201397, E=INF: 0
 Pre-generating subject frames for identity calculation...
-[4] Final hits after E-value filter (threshold=10): 14271
-[5] Top alignment length: 655 AA
+[4] Final hits after E-value filter (threshold=10): 19095
+[5] Top alignment length: 832 AA
 === End Stage Counters ===
 
-real	0m27.198s
-user	1m32.732s
-sys	0m0.070s
+real	0m54.781s
+user	3m18.447s
+sys	0m0.140s

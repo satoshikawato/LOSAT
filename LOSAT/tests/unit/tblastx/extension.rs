@@ -150,7 +150,7 @@ fn test_extend_hit_two_hit_basic() {
     
     let x_drop = 7; // NCBI default X-drop
     let (q_start, q_end, s_start, s_end, score, right_extended, _s_last_off) = 
-        extend_hit_two_hit(&q_seq, &s_seq, s_left_off, s_right_off, q_right_off, x_drop, true);
+        extend_hit_two_hit(&q_seq, &s_seq, s_left_off, s_right_off, q_right_off, x_drop);
     
     // Should extend and connect the two hits
     assert!(score > 0);
@@ -177,7 +177,7 @@ fn test_extend_hit_two_hit_no_connection() {
     
     let x_drop = 7; // NCBI default X-drop
     let (q_start, q_end, s_start, s_end, score, right_extended, _s_last_off) = 
-        extend_hit_two_hit(&q_seq, &s_seq, s_left_off, s_right_off, q_right_off, x_drop, true);
+        extend_hit_two_hit(&q_seq, &s_seq, s_left_off, s_right_off, q_right_off, x_drop);
     
     // Should extend left from second hit, but may not reach first hit
     assert!(score >= 0);
@@ -202,7 +202,7 @@ fn test_extend_hit_two_hit_at_boundaries() {
     
     let x_drop = 7; // NCBI default X-drop
     let (q_start, q_end, s_start, s_end, score, _right_extended, _s_last_off) = 
-        extend_hit_two_hit(&q_seq, &s_seq, s_left_off, s_right_off, q_right_off, x_drop, true);
+        extend_hit_two_hit(&q_seq, &s_seq, s_left_off, s_right_off, q_right_off, x_drop);
     
     // Should handle boundary conditions correctly
     assert!(score >= 0);

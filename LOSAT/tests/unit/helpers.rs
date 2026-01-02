@@ -32,6 +32,9 @@ pub fn make_hit(
         s_end,
         e_value: 1e-10,
         bit_score,
+        q_idx: 0,
+        s_idx: 0,
+        raw_score: 100,
     }
 }
 

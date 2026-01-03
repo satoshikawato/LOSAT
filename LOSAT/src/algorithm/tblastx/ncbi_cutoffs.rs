@@ -20,6 +20,44 @@ const NCBIMATH_LN2: f64 = 0.69314718055994530941723212145818;
 /// Reference: ncbi-blast/c++/src/algo/blast/core/blast_stat.c:4049
 const K_SMALL_FLOAT: f64 = 1.0e-297;
 
+/// Default E-value cutoff for tblastx in BlastInitialWordParametersUpdate
+/// Reference: ncbi-blast/c++/include/algo/blast/core/blast_parameters.h:80
+/// #define CUTOFF_E_TBLASTX 1e-300
+pub const CUTOFF_E_TBLASTX: f64 = 1e-300;
+
+/// Default gap decay rate for sum statistics
+/// Reference: ncbi-blast/c++/include/algo/blast/core/blast_hits.h:107
+/// #define BLAST_GAP_DECAY_RATE 0.5
+pub const BLAST_GAP_DECAY_RATE: f64 = 0.5;
+
+/// Calculate x_dropoff raw score from bit score using UNGAPPED Karlin params.
+///
+/// NCBI reference (verbatim from blast_parameters.c:219-221):
+/// ```c
+/// p->cutoffs[context].x_dropoff_init =
+///     (Int4)(sbp->scale_factor *
+///            ceil(word_options->x_dropoff * NCBIMATH_LN2 / kbp->Lambda));
+/// ```
+///
+/// CRITICAL: Uses UNGAPPED params (kbp_std), NOT gapped params (kbp_gap).
+/// CRITICAL: Uses ceil() rounding, NOT trunc.
+///
+/// # Arguments
+/// * `x_drop_bits` - X-drop in bits (NCBI default: 7.0 for protein)
+/// * `ungapped_params` - UNGAPPED Karlin-Altschul parameters (kbp_std)
+/// * `scale_factor` - Score scale factor (typically 1.0 for standard BLOSUM62)
+///
+/// # Returns
+/// x_dropoff raw score for ungapped extension (ceiling rounded)
+pub fn x_drop_raw_score(
+    x_drop_bits: f64,
+    ungapped_params: &KarlinParams,
+    scale_factor: f64,
+) -> i32 {
+    // NCBI: (Int4)(sbp->scale_factor * ceil(word_options->x_dropoff * NCBIMATH_LN2 / kbp->Lambda))
+    (scale_factor * (x_drop_bits * NCBIMATH_LN2 / ungapped_params.lambda).ceil()) as i32
+}
+
 /// Calculate gap_trigger raw score from bit score using UNGAPPED Karlin params.
 ///
 /// NCBI reference (verbatim from blast_parameters.c:340-345):
@@ -236,6 +274,118 @@ fn cutoff_score_from_evalue_with_decay(
     cutoff_score_from_evalue(adjusted_e, eff_searchsp, gapped_params)
 }
 
+/// Calculate cutoff_score for BlastInitialWordParametersUpdate (per-subject update).
+///
+/// This is the NCBI tblastx ungapped path in BlastInitialWordParametersUpdate.
+/// It uses a FIXED E-value cutoff (1e-300) and a simple searchsp formula
+/// WITHOUT length adjustment.
+///
+/// NCBI reference (verbatim from blast_parameters.c:348-374):
+/// ```c
+/// if (!gapped_calculation || sbp->matrix_only_scoring) {
+///     double cutoff_e = s_GetCutoffEvalue(program_number);  // = 1e-300 for tblastx!
+///     Int4 query_length = query_info->contexts[context].query_length;  // AA length
+///
+///     kbp = kbp_array[context];  // kbp_std for tblastx (ungapped)
+///     BLAST_Cutoffs(&new_cutoff, &cutoff_e, kbp,
+///                   MIN((Uint8)subj_length, (Uint8)query_length)*((Uint8)subj_length),
+///                   TRUE, gap_decay_rate);
+///
+///     // Blastn exception does not apply to tblastx
+///     new_cutoff = MIN(new_cutoff, gap_trigger);
+/// }
+/// new_cutoff *= (Int4)sbp->scale_factor;
+/// new_cutoff = MIN(new_cutoff, hit_params->cutoffs[context].cutoff_score_max);
+/// ```
+///
+/// CRITICAL: subj_length is in NUCLEOTIDES (NOT divided by 3!)
+/// CRITICAL: Uses CUTOFF_E_TBLASTX = 1e-300 (NOT user's E-value threshold)
+/// CRITICAL: searchsp = MIN(query_len_aa, subj_len_nucl) * subj_len_nucl (mixes AA and nucleotide!)
+/// CRITICAL: dodecay=TRUE with gap_decay_rate
+///
+/// # Arguments
+/// * `query_len_aa` - Query length in amino acids (translated frame)
+/// * `subject_len_nucl` - Subject length in NUCLEOTIDES (NOT divided by 3!)
+/// * `gap_trigger` - Gap trigger raw score (from gap_trigger_raw_score)
+/// * `cutoff_score_max` - Maximum cutoff from hit_params (from cutoff_score_max_for_tblastx)
+/// * `gap_decay_rate` - Gap decay rate (typically BLAST_GAP_DECAY_RATE = 0.5)
+/// * `ungapped_params` - UNGAPPED Karlin-Altschul parameters (kbp_std)
+/// * `scale_factor` - Score scale factor (typically 1.0 for standard BLOSUM62)
+///
+/// # Returns
+/// Per-subject cutoff_score for ungapped extension (raw score)
+pub fn cutoff_score_for_update_tblastx(
+    query_len_aa: i64,
+    subject_len_nucl: i64,
+    gap_trigger: i32,
+    cutoff_score_max: i32,
+    gap_decay_rate: f64,
+    ungapped_params: &KarlinParams,
+    scale_factor: f64,
+) -> i32 {
+    // NCBI: searchsp = MIN(subj_length, query_length) * subj_length
+    // NOTE: This intentionally mixes AA (query_len_aa) and nucleotide (subject_len_nucl) lengths!
+    // This is exactly what NCBI does - see blast_parameters.c:360-362
+    let min_len = (query_len_aa as u64).min(subject_len_nucl as u64);
+    let searchsp = (min_len * (subject_len_nucl as u64)) as i64;
+
+    // NCBI: cutoff_e = s_GetCutoffEvalue(program_number) = CUTOFF_E_TBLASTX = 1e-300
+    // NCBI: BLAST_Cutoffs(&new_cutoff, &cutoff_e, kbp, searchsp, TRUE, gap_decay_rate)
+    // dodecay=TRUE means we apply gap decay divisor
+    let mut new_cutoff = cutoff_score_from_evalue_with_decay(
+        CUTOFF_E_TBLASTX,
+        searchsp,
+        gap_decay_rate,
+        ungapped_params,
+    );
+
+    // NCBI: new_cutoff = MIN(new_cutoff, gap_trigger)
+    // (Blastn exception at line 366 does not apply to tblastx)
+    new_cutoff = new_cutoff.min(gap_trigger);
+
+    // NCBI: new_cutoff *= (Int4)sbp->scale_factor
+    new_cutoff = (new_cutoff as f64 * scale_factor) as i32;
+
+    // NCBI: new_cutoff = MIN(new_cutoff, hit_params->cutoffs[context].cutoff_score_max)
+    new_cutoff.min(cutoff_score_max)
+}
+
+/// Calculate cutoff_score_max for BlastHitSavingParametersNew.
+///
+/// This is the initial cutoff_score_max set during parameter setup, using
+/// the user's E-value threshold and the effective search space (WITH length adjustment).
+///
+/// NCBI reference (verbatim from blast_parameters.c:942-946):
+/// ```c
+/// // searchsp comes from query_info->contexts[context].eff_searchsp
+/// // which includes length adjustment from BLAST_CalcEffLengths
+/// BLAST_Cutoffs(&new_cutoff, &evalue, kbp, searchsp, FALSE, 0);
+/// params->cutoffs[context].cutoff_score = new_cutoff;
+/// params->cutoffs[context].cutoff_score_max = new_cutoff;
+/// ```
+///
+/// CRITICAL: Uses user's E-value threshold (NOT CUTOFF_E_TBLASTX)
+/// CRITICAL: Uses eff_searchsp WITH length adjustment (from BLAST_CalcEffLengths)
+/// CRITICAL: dodecay=FALSE, gap_decay_rate=0 (no decay)
+/// CRITICAL: For tblastx, uses UNGAPPED params (kbp) since kbp_gap is NULL
+///
+/// # Arguments
+/// * `eff_searchsp` - Effective search space (from compute_eff_searchsp_subject_mode_tblastx)
+/// * `evalue_threshold` - User's E-value threshold (typically 10.0)
+/// * `ungapped_params` - UNGAPPED Karlin-Altschul parameters (kbp for tblastx)
+///
+/// # Returns
+/// cutoff_score_max (raw score)
+pub fn cutoff_score_max_for_tblastx(
+    eff_searchsp: i64,
+    evalue_threshold: f64,
+    ungapped_params: &KarlinParams,
+) -> i32 {
+    // NCBI: BLAST_Cutoffs(&new_cutoff, &evalue, kbp, searchsp, FALSE, 0)
+    // dodecay=FALSE means no gap decay adjustment
+    cutoff_score_from_evalue(evalue_threshold, eff_searchsp, ungapped_params)
+}
+
 /// Calculate final cutoff_score for word_params (ungapped extension threshold).
 ///
 /// NCBI reference (verbatim from blast_parameters.c:348-374):
@@ -438,6 +588,175 @@ mod tests {
         
         // For large sequences, gap_trigger should be the limiting factor
         assert_eq!(cutoff, gap_trigger, "for large sequences, cutoff should equal gap_trigger");
+    }
+
+    #[test]
+    fn test_x_drop_raw_score_blosum62() {
+        let ungapped = blosum62_ungapped();
+        
+        // NCBI: x_dropoff_init = (Int4)(sbp->scale_factor * ceil(word_options->x_dropoff * NCBIMATH_LN2 / kbp->Lambda))
+        // For BLOSUM62: ceil(7.0 * 0.693147 / 0.3176) = ceil(15.27) = 16
+        let x_drop = x_drop_raw_score(7.0, &ungapped, 1.0);
+        assert_eq!(x_drop, 16, "x_drop should be 16 for BLOSUM62 with 7.0 bits");
+    }
+
+    #[test]
+    fn test_x_drop_uses_ceil_not_trunc() {
+        let ungapped = blosum62_ungapped();
+        
+        // Verify that we use ceil, not trunc
+        // 7.0 * 0.693147 / 0.3176 = 15.27
+        // ceil(15.27) = 16 (not 15)
+        let x_drop = x_drop_raw_score(7.0, &ungapped, 1.0);
+        assert_eq!(x_drop, 16, "x_drop should use ceil, resulting in 16");
+        assert!(x_drop > 15, "x_drop should be > 15 due to ceil rounding");
+    }
+
+    #[test]
+    fn test_x_drop_with_scale_factor() {
+        let ungapped = blosum62_ungapped();
+        
+        // Test that scale_factor is applied correctly
+        // With scale_factor = 2.0, result should be doubled
+        let x_drop_base = x_drop_raw_score(7.0, &ungapped, 1.0);
+        let x_drop_scaled = x_drop_raw_score(7.0, &ungapped, 2.0);
+        assert_eq!(x_drop_scaled, x_drop_base * 2, "x_drop with scale_factor=2.0 should be double");
+    }
+
+    #[test]
+    fn test_x_drop_different_bits() {
+        let ungapped = blosum62_ungapped();
+        
+        // Test with different bit values
+        // x_drop = ceil(bits * LN2 / lambda)
+        
+        // 10 bits: ceil(10.0 * 0.693147 / 0.3176) = ceil(21.83) = 22
+        let x_drop_10 = x_drop_raw_score(10.0, &ungapped, 1.0);
+        assert_eq!(x_drop_10, 22, "x_drop should be 22 for 10.0 bits");
+        
+        // 20 bits (NUCL default): ceil(20.0 * 0.693147 / 0.3176) = ceil(43.66) = 44
+        let x_drop_20 = x_drop_raw_score(20.0, &ungapped, 1.0);
+        assert_eq!(x_drop_20, 44, "x_drop should be 44 for 20.0 bits");
+    }
+
+    #[test]
+    fn test_cutoff_score_for_update_tblastx() {
+        let ungapped = blosum62_ungapped();
+        
+        // NCBI BlastInitialWordParametersUpdate for tblastx ungapped path
+        // Uses CUTOFF_E_TBLASTX = 1e-300 and searchsp = MIN(q_aa, s_nucl) * s_nucl
+        let query_len_aa = 500;
+        let subject_len_nucl = 3000;  // NUCLEOTIDE length, NOT AA!
+        let gap_trigger = gap_trigger_raw_score(22.0, &ungapped);  // 41
+        
+        // Compute cutoff_score_max first (uses user E-value)
+        let eff_searchsp = compute_eff_searchsp_subject_mode_tblastx(
+            query_len_aa,
+            subject_len_nucl,
+            &ungapped,
+        );
+        let cutoff_score_max = cutoff_score_max_for_tblastx(eff_searchsp, 10.0, &ungapped);
+        
+        // Compute per-subject cutoff
+        let cutoff = cutoff_score_for_update_tblastx(
+            query_len_aa,
+            subject_len_nucl,
+            gap_trigger,
+            cutoff_score_max,
+            BLAST_GAP_DECAY_RATE,  // 0.5
+            &ungapped,
+            1.0,
+        );
+        
+        // The result should be capped by either gap_trigger or cutoff_score_max
+        assert!(cutoff <= gap_trigger, "cutoff should be <= gap_trigger");
+        assert!(cutoff <= cutoff_score_max, "cutoff should be <= cutoff_score_max");
+        assert!(cutoff > 0, "cutoff should be positive");
+    }
+
+    #[test]
+    fn test_cutoff_score_max_for_tblastx() {
+        let ungapped = blosum62_ungapped();
+        
+        // NCBI BlastHitSavingParametersNew uses user E-value and eff_searchsp
+        let eff_searchsp = 1_000_000i64;
+        
+        let cutoff_max = cutoff_score_max_for_tblastx(eff_searchsp, 10.0, &ungapped);
+        
+        // Should be positive and reasonable
+        assert!(cutoff_max > 0, "cutoff_score_max should be positive");
+        
+        // With E-value = 10.0 and searchsp = 1e6, score should be moderate
+        // S = ceil(ln(K * searchsp / E) / Lambda)
+        // = ceil(ln(0.134 * 1e6 / 10) / 0.3176)
+        // = ceil(ln(13400) / 0.3176)
+        // = ceil(9.503 / 0.3176)
+        // = ceil(29.93)
+        // = 30
+        assert_eq!(cutoff_max, 30, "cutoff_score_max should be 30 for these parameters");
+    }
+
+    #[test]
+    fn test_cutoff_update_vs_legacy() {
+        // Verify that the new cutoff_score_for_update_tblastx produces
+        // different (typically lower) cutoffs than the old compute_tblastx_cutoff_score
+        // because it uses CUTOFF_E_TBLASTX = 1e-300 instead of user's E-value
+        
+        let ungapped = blosum62_ungapped();
+        let gapped = blosum62_gapped();
+        
+        let query_len_aa = 500;
+        let subject_len_nucl = 3000;
+        
+        // Old method (uses user E-value directly)
+        let old_cutoff = compute_tblastx_cutoff_score(
+            query_len_aa,
+            subject_len_nucl,
+            10.0,  // user E-value
+            22.0,  // gap_trigger_bits
+            &ungapped,
+            &gapped,
+        );
+        
+        // New method (uses CUTOFF_E_TBLASTX = 1e-300)
+        let gap_trigger = gap_trigger_raw_score(22.0, &ungapped);
+        let eff_searchsp = compute_eff_searchsp_subject_mode_tblastx(
+            query_len_aa,
+            subject_len_nucl,
+            &ungapped,
+        );
+        let cutoff_score_max = cutoff_score_max_for_tblastx(eff_searchsp, 10.0, &ungapped);
+        let new_cutoff = cutoff_score_for_update_tblastx(
+            query_len_aa,
+            subject_len_nucl,
+            gap_trigger,
+            cutoff_score_max,
+            BLAST_GAP_DECAY_RATE,
+            &ungapped,
+            1.0,
+        );
+        
+        // Both should be positive
+        assert!(old_cutoff > 0, "old_cutoff should be positive");
+        assert!(new_cutoff > 0, "new_cutoff should be positive");
+        
+        // New method may produce same or different result depending on caps
+        // The key difference is in the internal calculation path
+        // Both should be <= gap_trigger (41)
+        assert!(old_cutoff <= gap_trigger);
+        assert!(new_cutoff <= gap_trigger);
+    }
+
+    #[test]
+    fn test_cutoff_e_tblastx_constant() {
+        // Verify the CUTOFF_E_TBLASTX constant matches NCBI
+        assert_eq!(CUTOFF_E_TBLASTX, 1e-300, "CUTOFF_E_TBLASTX should be 1e-300");
+    }
+
+    #[test]
+    fn test_blast_gap_decay_rate_constant() {
+        // Verify the BLAST_GAP_DECAY_RATE constant matches NCBI
+        assert_eq!(BLAST_GAP_DECAY_RATE, 0.5, "BLAST_GAP_DECAY_RATE should be 0.5");
     }
 }
 

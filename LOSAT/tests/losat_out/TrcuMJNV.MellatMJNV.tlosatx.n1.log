@@ -11,13 +11,13 @@ Skipped (SEG mask): 129057
 === Phase 1b: Neighbor Generation Diagnostics ===
 Threshold: 13
 Exact entries added (self_score < threshold): 85406
-Neighbor entries added: 4137758
-Neighbor words generated (unique): 182946
+Neighbor entries added: 4043461
+Neighbor words generated (unique): 178011
 Words with exact-only additions: 870
 Words with neighbor generation: 8364
-Max neighbors generated for single word: 138
+Max neighbors generated for single word: 136
   Word with max neighbors: idx=13972 (residues 13,20,20)
-Expansion factor (total_entries / exact_positions): 9.66x
+Expansion factor (total_entries / exact_positions): 9.44x
 
 === Phase 2: High-Frequency K-mer Analysis ===
 Top 10 high-frequency k-mers (before suppression):
@@ -34,24 +34,24 @@ Top 10 high-frequency k-mers (before suppression):
 Hit count distribution:
   1-1: 1 cells, 1 entries
   2-10: 184 cells, 1371 entries
-  11-100: 3948 cells, 204667 entries
-  101-500: 6798 cells, 1765600 entries
-  501-1000: 2544 cells, 1733497 entries
-  1001-5000: 400 cells, 518028 entries
+  11-100: 3934 cells, 203493 entries
+  101-500: 6690 cells, 1735177 entries
+  501-1000: 2465 cells, 1679228 entries
+  1001-5000: 394 cells, 509597 entries
 
 === NCBI Backbone Lookup Table (BLASTAA_SIZE=28) ===
 Contexts: 6
 Backbone size: 28540 cells (0.5 MB)
-Non-empty cells: 13875
-Total entries: 4223164
+Non-empty cells: 13668
+Total entries: 4128867
 High-frequency suppression: 0 cells filtered (0 entries dropped), max_hits_per_kmer=18446744073709551615
-Overflow size: 4223149 (16.9 MB)
+Overflow size: 4128852 (16.5 MB)
 Longest chain: 3331
 ==========================================
 
 Reading subjects...
 Searching 1 queries vs 1 subjects... (avg_query_length=94383)
 
-real	0m16.256s
-user	0m16.185s
+real	0m7.061s
+user	0m20.014s
 sys	0m0.010s

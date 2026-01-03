@@ -15,6 +15,11 @@ pub const BLASTAA_SIZE: usize = 28;
 /// Size of BLOSUM62 matrix (25x25)
 pub const BLOSUM62_SIZE: usize = 25;
 
+/// Default score for unknown/sentinel residues (NCBI BLOSUM62 defscore)
+/// Reference: ncbi-blast/c++/src/util/tables/sm_blosum62.c:95
+///   const SNCBIPackedScoreMatrix NCBISM_Blosum62 = { ..., -4 };
+pub const DEFSCORE: i32 = -4;
+
 /// NCBISTDAA encoding (0-27)
 /// Reference: blast_encoding.c NCBISTDAA_TO_AMINOACID
 ///   '-','A','B','C','D','E','F','G','H','I','K','L','M',
@@ -181,8 +186,19 @@ pub static BLOSUM62: [i8; BLOSUM62_SIZE * BLOSUM62_SIZE] = [
 
 /// Get BLOSUM62 score for two amino acids in NCBISTDAA encoding
 /// Handles the conversion from NCBISTDAA (28) to BLOSUM62 order (25) internally
+/// 
+/// NCBI FSM (Full Score Matrix) behavior:
+/// - Index 0 (gap/sentinel) returns defscore (-4)
+/// - This ensures proper X-drop termination at sequence boundaries
+/// 
+/// Reference: ncbi-blast/c++/src/util/tables/raw_scoremat.c:91
+///   fsm->s[0][i] = psm->defscore;
 #[inline(always)]
 pub fn blosum62_score(aa1_ncbi: u8, aa2_ncbi: u8) -> i32 {
+    // NCBI FSM: index 0 (gap/sentinel) returns defscore
+    if aa1_ncbi == 0 || aa2_ncbi == 0 {
+        return DEFSCORE;
+    }
     let b1 = ncbistdaa_to_blosum62(aa1_ncbi) as usize;
     let b2 = ncbistdaa_to_blosum62(aa2_ncbi) as usize;
     BLOSUM62[b1 * BLOSUM62_SIZE + b2] as i32
@@ -237,5 +253,22 @@ mod tests {
         assert_eq!(blosum62_score(ncbistdaa::STOP, ncbistdaa::STOP), 1);
         // X-X = -1
         assert_eq!(blosum62_score(ncbistdaa::X, ncbistdaa::X), -1);
+    }
+    
+    #[test]
+    fn test_sentinel_defscore() {
+        // NCBI FSM behavior: index 0 (gap/sentinel) returns defscore (-4)
+        // Reference: ncbi-blast/c++/src/util/tables/raw_scoremat.c:91
+        //   fsm->s[0][i] = psm->defscore;
+        
+        // Sentinel (0) with any AA should return defscore
+        assert_eq!(blosum62_score(0, ncbistdaa::A), DEFSCORE);
+        assert_eq!(blosum62_score(ncbistdaa::A, 0), DEFSCORE);
+        assert_eq!(blosum62_score(0, 0), DEFSCORE);
+        assert_eq!(blosum62_score(0, ncbistdaa::STOP), DEFSCORE);
+        assert_eq!(blosum62_score(0, ncbistdaa::X), DEFSCORE);
+        
+        // Verify defscore value matches NCBI
+        assert_eq!(DEFSCORE, -4);
     }
 }

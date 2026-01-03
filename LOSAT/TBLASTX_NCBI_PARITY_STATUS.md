@@ -1,7 +1,7 @@
 # TBLASTX NCBI Parity Status Report
 
 **作成日時**: 2026-01-03  
-**更新日時**: 2026-01-03  
+**更新日時**: 2026-01-03 (3.1 Sentinel バイト値修正完了)  
 **現象**: LOSATがNCBI BLAST+より多くのヒットを出力する  
 **目標**: 出力を1ビットの狂いもなく一致させる
 
@@ -33,87 +33,227 @@
   - E-valueのチェイン全体への適用 ✅
 - **ファイル**: `sum_stats_linking.rs`
 
+### 1.4 X-drop 動的計算
+- **状態**: ✅ 完了
+- **修正日**: 2026-01-03
+- **問題だった点**: 
+  - **旧LOSAT**: `constants.rs` で `X_DROP_UNGAPPED: i32 = 16` として固定値を使用
+  - **NCBI**: `blast_parameters.c:219-221` で Lambda を使って動的に計算
+- **修正内容**:
+  - `ncbi_cutoffs.rs` に `x_drop_raw_score()` 関数を追加
+  - NCBI公式: `(Int4)(sbp->scale_factor * ceil(word_options->x_dropoff * NCBIMATH_LN2 / kbp->Lambda))`
+  - `utils.rs` の `run()` と `run_with_neighbor_map()` 両方で動的計算を使用
+- **NCBIコード場所**: `blast_parameters.c:219-221`
+- **LOSATコード**:
+  ```rust
+  // ncbi_cutoffs.rs
+  pub fn x_drop_raw_score(x_drop_bits: f64, ungapped_params: &KarlinParams, scale_factor: f64) -> i32 {
+      (scale_factor * (x_drop_bits * NCBIMATH_LN2 / ungapped_params.lambda).ceil()) as i32
+  }
+  
+  // utils.rs (両モードで使用)
+  let ungapped_params_for_xdrop = lookup_protein_params_ungapped(ScoringMatrix::Blosum62);
+  let dropoff = x_drop_raw_score(X_DROP_UNGAPPED_BITS, &ungapped_params_for_xdrop, 1.0);
+  ```
+- **検証**: BLOSUM62 で `ceil(7 * 0.693 / 0.3176) = 16` を確認 (ユニットテスト追加済み)
+- **ファイル**: `ncbi_cutoffs.rs`, `utils.rs`, `constants.rs`
+
+### 1.5 Per-Subject Cutoff Score 更新
+- **状態**: ✅ 完了
+- **修正日**: 2026-01-03
+- **問題だった点**: 
+  - **旧LOSAT**: `compute_tblastx_cutoff_score()` でユーザーのE-value (10.0) を直接使用し、searchsp も eff_searchsp (length adjustment 適用済み) を使用
+  - **NCBI**: `BlastInitialWordParametersUpdate` で `CUTOFF_E_TBLASTX = 1e-300` と **異なる searchsp 計算式** を使用
+- **NCBIコード**: `blast_parameters.c:348-374` (ungapped path for tblastx)
+  ```c
+  double cutoff_e = s_GetCutoffEvalue(program_number);  // = 1e-300 for tblastx!
+  // ※重要: subj_length は NUCLEOTIDE 長 (AA長ではない!)
+  // searchsp = MIN(query_len_aa, subject_len_nucl) * subject_len_nucl
+  BLAST_Cutoffs(&new_cutoff, &cutoff_e, kbp, 
+                MIN((Uint8)subj_length, (Uint8)query_length)*((Uint8)subj_length), 
+                TRUE, gap_decay_rate);
+  new_cutoff = MIN(new_cutoff, gap_trigger);
+  new_cutoff = MIN(new_cutoff, hit_params->cutoffs[context].cutoff_score_max);
+  ```
+- **NCBIの2つの searchsp 計算の違い**:
+  1. `BlastInitialWordParametersUpdate` (per-subject update):
+     - `searchsp = MIN(q_aa_len, s_nucl_len) * s_nucl_len` (**長さ調整なし、AA/ヌクレオチド混在**)
+     - `cutoff_e = 1e-300` (固定)
+     - `dodecay = TRUE`
+  2. `BlastHitSavingParametersNew` (初期設定の cutoff_score_max):
+     - `searchsp = eff_searchsp` (**長さ調整あり**)
+     - `cutoff_e = ユーザー指定 (10.0)`
+     - `dodecay = FALSE`
+- **修正内容**:
+  - `ncbi_cutoffs.rs` に定数追加: `CUTOFF_E_TBLASTX = 1e-300`, `BLAST_GAP_DECAY_RATE = 0.5`
+  - `cutoff_score_for_update_tblastx()` 関数追加: NCBIの `BlastInitialWordParametersUpdate` ungapped path をポート
+  - `cutoff_score_max_for_tblastx()` 関数追加: NCBIの `BlastHitSavingParametersNew` をポート
+  - `utils.rs` の `run()` と `run_with_neighbor_map()` を修正して新関数を使用
+- **実質的な cutoff 決定要因**:
+  - `CUTOFF_E_TBLASTX = 1e-300` から計算される cutoff は通常 1 または非常に低い値
+  - 最終的な cutoff は `MIN(update_cutoff, gap_trigger, cutoff_score_max)` で決定
+  - BLOSUM62 の場合: `gap_trigger = 41` が支配的になることが多い
+- **ファイル**: `ncbi_cutoffs.rs`, `utils.rs`
+
+### 1.6 X-dropoff の Per-Context 適用
+- **状態**: ✅ 完了
+- **修正日**: 2026-01-03
+- **問題だった点**: 
+  - **旧LOSAT**: 単一の `dropoff` / `x_drop` を全 context で共用
+  - **NCBI**: context ごとに `cutoffs[context].x_dropoff_init` を計算・参照
+- **NCBIコード**: `blast_parameters.c:219-221`, `aa_ungapped.c:575-579`
+  ```c
+  // 初期化時
+  p->cutoffs[context].x_dropoff_init =
+      (Int4)(sbp->scale_factor * ceil(word_options->x_dropoff * NCBIMATH_LN2 / kbp->Lambda));
+  
+  // extension 時
+  cutoffs = word_params->cutoffs + curr_context;
+  score = s_BlastAaExtendTwoHit(..., cutoffs->x_dropoff, ...);
+  ```
+- **修正内容**:
+  - `run()`: `x_dropoff_per_context: Vec<i32>` を `contexts` 作成後に生成
+  - `run_with_neighbor_map()`: per-subject で `x_dropoff_per_context` を生成
+  - extension 呼び出しで `x_dropoff_per_context[ctx_idx]` / `x_dropoff_per_context[ctx_flat]` を使用
+- **NCBIの挙動** (`blast_stat.c:2796-2797`):
+  - tblastx では全 context が `kbp_ideal` (BLOSUM62 ungapped Lambda=0.3176) を使用
+  - → **x_dropoff = 16 は全 context で同一** (実質的な出力変更なし)
+- **結論**: NCBIとの構造的 parity を達成
+- **ファイル**: `utils.rs`
+
+### 1.7 scale_factor の確認
+- **状態**: ✅ 完了
+- **確認日**: 2026-01-03
+- **問題だった点**: 
+  - NCBI の x_dropoff 計算には `sbp->scale_factor` が含まれる
+  - LOSAT は `x_drop_raw_score()` で `scale_factor = 1.0` を固定で渡している
+  - これが正しいか確認が必要だった
+- **NCBIコード確認結果**:
+  1. **デフォルト値**: `sbp->scale_factor = 1.0` (`blast_stat.c:919`)
+  2. **RPS-BLAST 専用の ASSERT** (`blast_parameters.c:466-469`):
+     ```c
+     if (sbp->scale_factor > 1.0) {
+         ASSERT(Blast_ProgramIsRpsBlast(program_number));
+         params->gap_x_dropoff *= (Int4)sbp->scale_factor;
+         params->gap_x_dropoff_final *= (Int4)sbp->scale_factor;
+     }
+     ```
+  3. **E-value 計算時** (`blast_engine.c:881-888`):
+     ```c
+     double scale_factor = 1.0;
+     if (isRPS) {
+         scale_factor = score_params->scale_factor;
+     }
+     Blast_HSPListGetEvalues(..., scale_factor);
+     ```
+     → **RPS-BLAST 以外では E-value 計算に scale_factor は影響しない**
+  4. **traceback でのスコア再スケーリング** (`blast_traceback.c:224-226, 244`):
+     ```c
+     double scale_factor =
+        (Blast_ProgramIsRpsBlast(program_number) ?
+        score_params->scale_factor : 1.0);
+     // ...
+     s_HSPListRescaleScores(hsp_list, score_params->scale_factor);
+     ```
+     → **tblastx では `scale_factor = 1.0` なので再スケーリングは実質無効**
+  5. NCBI ユニットテストでも全て `scale_factor = 1.0` を使用
+- **LOSATでの使用箇所** (全て `scale_factor = 1.0` で正しい):
+  - `x_drop_raw_score()` - x_dropoff 計算
+  - `cutoff_score_for_update_tblastx()` - per-subject cutoff 計算
+  - `cutoff_score_word_params()` - cutoff_score 計算
+  - `calculate_link_hsp_cutoffs_ncbi()` - linking cutoff 計算
+  - `LinkingParams` 構造体のフィールド
+- **結論**: **tblastx では常に `scale_factor = 1.0`** であり、LOSAT の現状実装は NCBI と完全に一致。コード修正不要。
+- **将来対応**: RPS-BLAST 対応時には `scale_factor` を動的に計算する必要あり
+- **ファイル**: `ncbi_cutoffs.rs`, `utils.rs`, `sum_stats_linking.rs`
+
 ---
 
 ## 2. 修正が必要と判明している点 (Known Required Fixes)
 
-### 2.1 ⚠️ X-drop 計算: 固定値 vs 動的計算
-- **状態**: ⚠️ 要修正 (CRITICAL)
-- **問題**: 
-  - **LOSAT**: `constants.rs` で `X_DROP_UNGAPPED: i32 = 16` として固定値を使用
-  - **NCBI**: `blast_parameters.c:219-221` で **Lambda を使って動的に計算**:
-    ```c
-    p->cutoffs[context].x_dropoff_init =
-        (Int4)(sbp->scale_factor *
-               ceil(word_options->x_dropoff * NCBIMATH_LN2 / kbp->Lambda));
-    ```
-  - NCBI は `BLAST_UNGAPPED_X_DROPOFF_PROT = 7` (bits) を入力とし、Lambda で raw score に変換
-  - BLOSUM62 (Lambda ≈ 0.3176): `ceil(7 * 0.693 / 0.3176) = ceil(15.27) = 16`
-  - **現状LOSATはたまたま16で一致しているが、異なる scoring matrix や異なる Lambda では不一致となる**
-- **NCBIコード場所**: 
-  - `blast_parameters.c:219-221` (初期化)
-  - `blast_parameters.c:380-383` (per-subject 更新)
-- **修正方針**: 
-  - `utils.rs` の extension 呼び出し時に `ceil(X_DROP_BITS * LN2 / lambda)` を計算して渡す
-  - または初期化時に ungapped_params.lambda を使って計算
-
-### 2.2 ⚠️ Per-Subject Cutoff Score 更新
-- **状態**: ⚠️ 要修正
-- **問題**: NCBIは `BlastInitialWordParametersUpdate` でサブジェクト長に基づき cutoff を再計算
-- **NCBIコード**: `blast_parameters.c:279-419`
+### 2.1 ✅ X-dropoff の Per-Context 適用
+- **状態**: ✅ 完了 → **1.6 に移動**
+- **修正日**: 2026-01-03
+- **問題だった点**: NCBIは context ごとに `cutoffs->x_dropoff` を持ち、extension 時にそれを参照
+- **NCBIコード**: `aa_ungapped.c:579`, `blast_parameters.c:219-221`
   ```c
-  Int2 BlastInitialWordParametersUpdate(EBlastProgramType program_number, 
-     const BlastHitSavingParameters* hit_params, 
-     const BlastScoreBlk* sbp, 
-     BlastQueryInfo* query_info, Uint4 subj_length,
-     BlastInitialWordParameters* parameters)
-  {
-     // ...
-     BLAST_Cutoffs(&new_cutoff, &cutoff_e, kbp, searchsp, TRUE, gap_decay_rate);
-     // ...
-     new_cutoff = MIN(new_cutoff, hit_params->cutoffs[context].cutoff_score_max);
-     curr_cutoffs->cutoff_score = new_cutoff;
-     curr_cutoffs->x_dropoff = curr_cutoffs->x_dropoff_init;
+  // 初期化時 (blast_parameters.c:219-221)
+  for (context = ...) {
+      kbp = sbp->kbp[context];
+      p->cutoffs[context].x_dropoff_init =
+          (Int4)(sbp->scale_factor * ceil(word_options->x_dropoff * NCBIMATH_LN2 / kbp->Lambda));
   }
-  ```
-- **LOSATの現状**: `ncbi_cutoffs.rs:compute_tblastx_cutoff_score` で計算しているが、per-context 更新ロジックが NCBI と完全一致するか未確認
-- **修正方針**: NCBI と同様に各サブジェクト処理前に cutoff を再計算
-
-### 2.3 ⚠️ X-dropoff の Per-Context 適用
-- **状態**: ⚠️ 要修正
-- **問題**: NCBIは context ごとに `cutoffs->x_dropoff` を持ち、extension 時にそれを参照
-- **NCBIコード**: `aa_ungapped.c:579`
-  ```c
+  
+  // extension 時 (aa_ungapped.c:575-579)
   cutoffs = word_params->cutoffs + curr_context;
-  score = s_BlastAaExtendTwoHit(matrix, subject, query,
-                                last_hit + wordsize,
-                                subject_offset, query_offset,
-                                cutoffs->x_dropoff, ...);  // <-- context-specific
+  score = s_BlastAaExtendTwoHit(..., cutoffs->x_dropoff, ...);
   ```
-- **LOSATの現状**: `utils.rs:833` で固定の `dropoff` を渡している
-  ```rust
-  let dropoff = X_DROP_UNGAPPED;  // line 419
-  // ... (line 833 で extend_hit_two_hit に dropoff を渡す)
+- **修正内容**:
+  - `run()`: `contexts` 作成後に `x_dropoff_per_context: Vec<i32>` を生成
+  - `run_with_neighbor_map()`: per-subject で `x_dropoff_per_context` を生成
+  - extension 呼び出しで `x_dropoff_per_context[ctx_idx]` を使用
+- **NCBIの挙動確認** (`blast_stat.c:2796-2797`):
+  ```c
+  // tblastx では計算された Lambda >= kbp_ideal->Lambda なら kbp_ideal に置換
+  if (check_ideal && kbp->Lambda >= sbp->kbp_ideal->Lambda)
+     Blast_KarlinBlkCopy(kbp, sbp->kbp_ideal);
   ```
-- **修正方針**: context ごとの x_dropoff を計算し、extension 呼び出し時に正しい値を使用
+  → **全 context で同じ kbp_ideal (BLOSUM62 ungapped Lambda=0.3176) を使用**
+  → **x_dropoff = 16 は全 context で同一** (実質的な出力変更なし)
+- **結論**: NCBIとの構造的 parity を達成。全 context で同じ値だが、per-context 配列を維持。
+- **ファイル**: `utils.rs`
+
+### 2.2 ✅ scale_factor の確認
+- **状態**: ✅ 完了 → **1.7 に移動**
+- **確認日**: 2026-01-03
+- **結論**: tblastx では常に `scale_factor = 1.0` であり、LOSAT の現状実装は正しい。詳細は 1.7 を参照。
 
 ---
 
 ## 3. "Might Need Adjustments" レベルの相違点
 
-### 3.1 🔶 Sentinel バイト値の違い
-- **状態**: 🔶 要検証 (低優先度)
-- **問題**: 
-  - **NCBI**: `NULLB = 0` を sentinel として使用 (`blast_encoding.c:120`)
-  - **LOSAT**: `SENTINEL_BYTE = 255` を使用 (`constants.rs:98`)
-- **影響分析**: 
-  - 両者とも BLOSUM62 マトリックスで対応する残基がないため、`defscore = -4` が返る
-  - LOSAT `extension.rs:24-29` では sentinel を明示的にチェックして `SENTINEL_PENALTY = -4` を返す
-  - **機能的には同等のはず**だが、NCBI の extension コードでは `matrix[q[i]][s[i]]` で直接参照
-- **調査状況**: 
-  - NCBI `aa_ungapped.c:847` のマトリックス参照を確認
-  - NCBI は NULLB (0) がマトリックス範囲外なら負のスコアを返す想定
-- **結論**: 両者で X-drop による終了タイミングが同じなら問題なし。X-drop が正しく計算されていれば影響なし。
+### 3.1 ✅ Sentinel バイト値の違い
+- **状態**: ✅ 完了
+- **修正日**: 2026-01-03
+- **問題だった点**: 
+  - **旧LOSAT**: `SENTINEL_BYTE = 255` を使用 (`constants.rs:98`)
+  - **NCBI**: `NULLB = 0` を sentinel として使用 (`blast_encoding.c:120`, `ncbi_std.h:181`)
+- **NCBIコード**:
+  ```c
+  // ncbi_std.h:181
+  #define NULLB '\0'
+  
+  // blast_encoding.c:120
+  const Uint1 kProtSentinel = NULLB;
+  
+  // sm_blosum62.c:92-95
+  const SNCBIPackedScoreMatrix NCBISM_Blosum62 = {
+      "ARNDCQEGHILKMFPSTWYVBJZX*",
+      s_Blosum62PSM,
+      -4  // defscore for unknown/sentinel residues
+  };
+  
+  // raw_scoremat.c:90-92 (FSM展開時)
+  for (i = 0; i < NCBI_FSM_DIM; ++i) {
+      fsm->s[0][i] = psm->defscore;  // index 0 に defscore を設定
+  }
+  ```
+- **修正内容**:
+  1. `constants.rs`: `SENTINEL_BYTE = 0` に変更 (NCBI NULLB と同一)
+  2. `matrix.rs`: `DEFSCORE = -4` 定数を追加
+  3. `matrix.rs`: `blosum62_score()` で index 0 をチェックして `-4` を返すように修正
+  4. コメントを更新 (`extension.rs`, `translation.rs`)
+- **NCBI の FSM 構築方式**:
+  - NCBI は packed matrix (25x25) を FSM (128x128) に展開
+  - 展開時に全体を `defscore = -4` で初期化
+  - 有効な AA ペアのみ上書き
+  - → index 0 (sentinel) は `-4` のまま
+- **LOSAT の実装方式**:
+  - packed matrix (25x25) + 変換テーブルを使用
+  - `blosum62_score()` で sentinel (0) を明示的にチェック
+  - → NCBI と同等の動作を保証
+- **結論**: 両者は完全に同等の動作 (sentinel に対して `-4` を返す)
+- **ファイル**: `constants.rs`, `matrix.rs`, `extension.rs`, `translation.rs`
 
 ### 3.2 🔶 Frame Base 計算の Sentinel 考慮
 - **状態**: 🔶 部分修正済み・要確認
@@ -124,32 +264,34 @@
   - LOSAT は frame ごとに独立した aa_seq を持つため、NCBI の concatenated buffer とは構造が異なる
 - **影響**: sum_stats_linking での abs_coords 計算に影響する可能性
 
-### 3.3 🔶 HSP ソート順序の細部
-- **状態**: 🔶 確認済み (問題なし)
-- **NCBIコード** (`link_hsps.c:331-375`):
+### 3.3 ✅ HSP ソート順序の細部
+- **状態**: ✅ 確認済み (LOSAT は NCBI と一致)
+- **検証日**: 2026-01-03
+- **NCBIコード** (`link_hsps.c:359-375`):
   ```c
-  static int s_RevCompareHSPsTbx(const void *v1, const void *v2) {
-     // 1. context/(NUM_FRAMES/2) で比較 (query strand+index)
-     // 2. SIGN(subject.frame) で比較 (subject strand)
-     // 3. query.offset descending
-     // 4. query.end descending
-     // 5. subject.offset ascending
-     // 6. subject.end ascending
-  }
+  // 全フィールドが同じパターン: h1 < h2 なら return 1 (DESCENDING)
+  if (h1->query.offset < h2->query.offset)   return  1;  // descending
+  if (h1->query.offset > h2->query.offset)   return -1;
+  if (h1->query.end < h2->query.end)         return  1;  // descending
+  if (h1->query.end > h2->query.end)         return -1;
+  if (h1->subject.offset < h2->subject.offset) return  1;  // descending (NOT ascending!)
+  if (h1->subject.offset > h2->subject.offset) return -1;
+  if (h1->subject.end < h2->subject.end)       return  1;  // descending (NOT ascending!)
+  if (h1->subject.end > h2->subject.end)       return -1;
   ```
+- **C qsort の仕様**: `compare(a,b) > 0` は「a は b の後に来る」を意味
+  - `if (h1 < h2) return 1` → h1 は h2 の後 → 小さい値が後 → **DESCENDING**
 - **LOSATコード** (`sum_stats_linking.rs:517-524`):
   ```rust
   group_hits.sort_by(|a, b| {
-      bqo.cmp(&aqo)           // query offset descending
-          .then(bqe.cmp(&aqe)) // query end descending
-          .then(bso.cmp(&aso)) // subject offset ascending? (NO! should be aso.cmp(&bso))
-          .then(bse.cmp(&ase)) // subject end ascending? (NO! should be ase.cmp(&bse))
+      bqo.cmp(&aqo)           // descending ✓
+          .then(bqe.cmp(&aqe)) // descending ✓
+          .then(bso.cmp(&aso)) // descending ✓ (NCBIと同じ!)
+          .then(bse.cmp(&ase)) // descending ✓ (NCBIと同じ!)
   });
   ```
-- **問題発見**: **subject の比較が逆順になっている!**
-  - NCBI: `if (h1->subject.offset < h2->subject.offset) return 1;` → ascending order
-  - LOSAT: `bso.cmp(&aso)` → descending order
-  - **これは修正が必要**
+- **結論**: ✅ **両者は一致している**。以前の分析で NCBI が ascending と誤解していたが、実際は全フィールドが DESCENDING。
+- **ユニットテスト**: `test_hsp_sort_order_matches_ncbi`, `test_ncbi_comparison_semantics` 追加済み
 
 ### 3.4 🔶 E-value 計算の丸め処理
 - **状態**: 🔶 確認済み (問題なし)
@@ -192,21 +334,47 @@
   ```
 - **結論**: ✅ 一致している
 
-### 3.7 🔶 Sum-Statistics の effective length 計算
-- **状態**: 🔶 要確認
-- **問題**: NCBI `link_hsps.c:560-571` で length_adjustment を context から取得
+### 3.7 ✅ Sum-Statistics の effective length 計算
+- **状態**: ✅ 完了
+- **修正日**: 2026-01-03
+- **問題だった点**: 
+  - **旧LOSAT**: `SearchSpace::with_length_adjustment()` を使用し、query と subject の両方から同じ `length_adjustment` を引いていた
+  - **NCBI**: tblastx では subject に対して `length_adjustment / 3` のみを適用
+- **NCBIコード** (`link_hsps.c:560-571`):
   ```c
-  query_context = hp_start->next->hsp->context;
   length_adjustment = query_info->contexts[query_context].length_adjustment;
   query_length = query_info->contexts[query_context].query_length;
   query_length = MAX(query_length - length_adjustment, 1);
+  subject_length = subject_length_orig; /* in nucleotides even for tblast[nx] */
+  /* If subject is translated, length adjustment is given in nucleotide
+     scale. */
+  if (Blast_SubjectIsTranslated(program_number))  // tblastx = TRUE
+  {
+     length_adjustment /= CODON_LENGTH;  // ★ 3 で割る
+     subject_length /= CODON_LENGTH;
+  }
   subject_length = MAX(subject_length - length_adjustment, 1);
   ```
-- **LOSATコード** (`sum_stats_linking.rs:532`):
+- **NCBI の計算** (tblastx):
+  - `eff_query = query_aa - length_adjustment` (全額を引く)
+  - `eff_subject = subject_aa - (length_adjustment / 3)` (1/3 のみ引く)
+- **修正内容**: `sum_stats_linking.rs:555-570` で NCBI と同等の計算を実装
   ```rust
-  let search_space = SearchSpace::with_length_adjustment(query_len_aa, subject_len_aa, params);
+  let length_adjustment = compute_length_adjustment_simple(
+      query_len_aa, subject_len_aa, params
+  ).length_adjustment;
+  
+  // query: 全額を引く
+  let eff_query_len = (query_len_aa - length_adjustment).max(1) as f64;
+  
+  // subject: 1/3 のみ引く (NCBI の length_adjustment /= CODON_LENGTH)
+  let length_adj_for_subject = length_adjustment / 3;  // 整数除算
+  let eff_subject_len = (subject_len_aa - length_adj_for_subject).max(1) as f64;
   ```
-- **調査状況**: `SearchSpace::with_length_adjustment` が NCBI と同じ計算をしているか確認が必要
+- **影響**: 
+  - effective search space が増加
+  - E-value が大きくなり、より多くの HSP がフィルタリングされる方向
+- **ファイル**: `sum_stats_linking.rs`
 
 ---
 
@@ -246,61 +414,310 @@
 - **概要**: HSP 間の重複排除ロジックが NCBI と一致するか
 - **関連NCBIコード**: `link_hsps.c` の culling 関連関数
 
----
-
-## 5. 発見した明確なバグ
-
-### 5.1 🐛 HSP ソートの subject 比較順序が逆
-- **ファイル**: `sum_stats_linking.rs:517-524`
-- **問題**: 
-  ```rust
-  // 現在のコード (間違い)
-  .then(bso.cmp(&aso)) // subject offset: descending
-  .then(bse.cmp(&ase)) // subject end: descending
-  
-  // NCBI の正しい順序
-  .then(aso.cmp(&bso)) // subject offset: ascending
-  .then(ase.cmp(&bse)) // subject end: ascending
+### 4.5 ❓ Context ごとの Karlin パラメータ計算
+- **状態**: ❓ 潜在的相違 (低優先度)
+- **概要**: NCBI はクエリのアミノ酸組成から context ごとに Karlin パラメータを計算
+- **関連NCBIコード**: `blast_stat.c:2781-2782`
+  ```c
+  sbp->kbp_std[context] = kbp = Blast_KarlinBlkNew();
+  Blast_KarlinBlkUngappedCalc(kbp, sbp->sfp[context]);
   ```
-- **影響**: リンキングの順序が変わり、結果が異なる可能性
+- **LOSATの現状**: 
+  - 固定のテーブル値 (BLOSUM62 ungapped) を全 context で使用
+  - `blast_stat.c:2796-2797` の `check_ideal` により tblastx では通常 `kbp_ideal` が使われるため、実質的な影響は小さい
+- **影響**: 極端にバイアスのあるアミノ酸組成のクエリで差異が生じる可能性
+
+### 4.6 ❓ BSearchContextInfo による Context 検索
+- **状態**: ❓ 要確認
+- **概要**: NCBI は query_offset から context を二分探索で取得
+- **関連NCBIコード**: `aa_ungapped.c:560`
+  ```c
+  curr_context = BSearchContextInfo(query_offset, query_info);
+  ```
+- **LOSATの現状**: 
+  - `run()`: `lookup_ref.get_context_idx(query_offset)` を使用
+  - `run_with_neighbor_map()`: `ctx_flat = ctx_base[q_idx] + q_f_idx` で直接計算
+- **確認必要**: LOSATの実装が NCBI と同等の結果を返すか
 
 ---
 
-## 6. 推定される根本原因
+## 5. NCBI 設計の技術的注記
+
+### 5.1 📝 tblastx の 2 つの searchsp 計算
+
+NCBIは tblastx で**2種類の searchsp 計算**を使い分けている。これは意図的な設計であり、LOSATでも同様に実装する必要がある。
+
+| 用途 | 関数 | 計算式 | 備考 |
+|------|------|--------|------|
+| Per-subject cutoff update | `BlastInitialWordParametersUpdate` | `MIN(q_aa_len, s_nucl_len) * s_nucl_len` | 長さ調整なし、**AA長とヌクレオチド長を混在** |
+| cutoff_score_max / E-value | `BlastHitSavingParametersNew` | `eff_searchsp` (with length adjustment) | 通常の effective search space 計算 |
+
+**重要**: `BlastInitialWordParametersUpdate` で subject_length として渡されるのは**ヌクレオチド長**であり、翻訳後のAA長ではない。これは `BlastSeqSrcGetSeqLen()` がヌクレオチド配列の長さを返すため。
+
+**NCBIコード参照** (`blast_parameters.c:348`):
+```c
+// query_length は AA 長
+// subj_length は NUCL 長 (BlastSeqSrcGetSeqLen から取得)
+searchsp = MIN((Uint8)subj_length, (Uint8)query_length)*((Uint8)subj_length);
+```
+
+### 5.2 📝 Context ごとの Karlin パラメータ計算と check_ideal
+
+NCBIは context ごとに**アミノ酸組成から Karlin パラメータを計算**する。
+
+**NCBIコード参照** (`blast_stat.c:2781-2782`):
+```c
+sbp->kbp_std[context] = kbp = Blast_KarlinBlkNew();
+loop_status = Blast_KarlinBlkUngappedCalc(kbp, sbp->sfp[context]);  // sfp = score frequency profile
+```
+
+しかし、**tblastx/blastx/rpstblastn では `check_ideal` フラグ**が有効になる:
+
+**NCBIコード参照** (`blast_stat.c:2744-2748, 2796-2797`):
+```c
+Boolean check_ideal =
+   (program == eBlastTypeBlastx || program == eBlastTypeTblastx ||
+    program == eBlastTypeRpsTblastn);
+
+// ...later...
+// 計算された Lambda が kbp_ideal 以上なら置換 (より保守的な値を使用)
+if (check_ideal && kbp->Lambda >= sbp->kbp_ideal->Lambda)
+   Blast_KarlinBlkCopy(kbp, sbp->kbp_ideal);
+```
+
+**LOSATの現状**:
+- 固定のテーブル値 (BLOSUM62 ungapped: Lambda=0.3176, K=0.134) を使用
+- context ごとのアミノ酸組成からの計算は行っていない
+- **結論**: NCBI の `check_ideal` ロジックにより、tblastx では通常 `kbp_ideal` が使用されるため、LOSATの固定値アプローチは実質的に正しい
+
+**潜在的な相違**:
+- 極端にバイアスのあるアミノ酸組成のクエリでは、計算された Lambda が kbp_ideal より小さくなる可能性がある
+- その場合、NCBI は計算値を使用し、LOSAT は固定値を使用するため差異が生じる
+- **将来対応**: 完全な parity が必要な場合は context ごとの Karlin パラメータ計算を実装
+
+### 5.3 📝 cutoff_score の 3 段階キャップ
+
+tblastx の cutoff_score は以下の 3 つの値の最小値で決定される:
+
+1. **BLAST_Cutoffs からの値**: `CUTOFF_E_TBLASTX = 1e-300` と `dodecay=TRUE` を使用
+   - 極端に小さい E-value のため、通常は 1 または非常に低い値になる
+2. **gap_trigger**: BLOSUM62 の場合 41 (22.0 bits)
+3. **cutoff_score_max**: ユーザー指定の E-value から計算
+
+実質的には `gap_trigger` または `cutoff_score_max` が支配的な値となる。
+
+### 5.4 📝 HSP グルーピングとソートの実装構造の違い
+
+NCBIとLOSATは HSP のフレーム/ストランド別処理において、**異なる実装構造**を採用しているが、**結果は同等**である。
+
+**NCBIのアプローチ**: 「全体ソート → フレーム境界で分割」
+
+```c
+// link_hsps.c:484-486
+// 全HSPを一括でソート (比較関数内でcontext/frameを考慮)
+qsort(link_hsp_array, total_number_of_hsps, sizeof(LinkHSPStruct*), 
+      s_RevCompareHSPsTbx);
+
+// s_RevCompareHSPsTbx の比較順序:
+// 1. context/(NUM_FRAMES/2) - query strand + query index
+// 2. SIGN(subject.frame)    - subject strand
+// 3. query.offset descending
+// 4-6. その他の座標 descending
+
+// link_hsps.c:510-533
+// ソート後にフレーム境界を検出して分割
+for (index = 0; index < number_of_hsps; index++) {
+    if (H->prev != NULL && 
+        ((H->hsp->context/strand_factor) != (H->prev->hsp->context/strand_factor) ||
+         (SIGN(H->hsp->subject.frame) != SIGN(H->prev->hsp->subject.frame))))
+    {
+        // フレーム境界で新しいリストを開始
+        hp_frame_start[++cur_frame] = H;
+        H->prev->next = NULL;
+        H->prev = NULL;
+    }
+}
+```
+
+**LOSATのアプローチ**: 「事前グルーピング → グループ内ソート」
+
+```rust
+// sum_stats_linking.rs:29
+type ContextKey = (u32, u32, i8, i8); // (q_idx, s_idx, q_strand, s_strand)
+
+// 先にグルーピング (group_by_context)
+let mut groups: FxHashMap<ContextKey, Vec<UngappedHit>> = FxHashMap::default();
+for hit in hits {
+    let key = (hit.q_idx, hit.s_idx, hit.q_frame.signum(), hit.s_frame.signum());
+    groups.entry(key).or_default().push(hit);
+}
+
+// 各グループ内でソート (座標のみで比較、context/frameは既に分離済み)
+group_hits.sort_by(|a, b| {
+    bqo.cmp(&aqo)
+        .then(bqe.cmp(&aqe))
+        .then(bso.cmp(&aso))
+        .then(bse.cmp(&ase))
+});
+```
+
+**同等性の理由**:
+- NCBIのソート比較関数は、まず `context` と `subject.frame` で比較し、同一の場合のみ座標比較に進む
+- LOSATは事前に `context` と `frame` でグルーピングするため、ソート時は座標比較のみで同じ結果が得られる
+- 最終的な HSP の処理順序は両者で同一
+
+**実装上の利点**:
+- LOSAT: 並列処理 (rayon) との相性が良い。各グループを独立して処理可能
+- NCBI: メモリ効率が良い。追加のハッシュマップが不要
+
+### 5.5 📝 Sum-Stats の length_adjustment 適用の非対称性
+
+NCBI `link_hsps.c:560-571` では、tblastx において `length_adjustment` の適用方法が query と subject で**異なる**。
+
+**NCBIコード参照** (`link_hsps.c:560-571`):
+```c
+length_adjustment = query_info->contexts[query_context].length_adjustment;
+query_length = query_info->contexts[query_context].query_length;
+query_length = MAX(query_length - length_adjustment, 1);  // ★ query: 全額を引く
+subject_length = subject_length_orig; /* in nucleotides even for tblast[nx] */
+/* If subject is translated, length adjustment is given in nucleotide
+   scale. */
+if (Blast_SubjectIsTranslated(program_number))  // tblastx = TRUE
+{
+   length_adjustment /= CODON_LENGTH;  // ★ 3 で割る
+   subject_length /= CODON_LENGTH;
+}
+subject_length = MAX(subject_length - length_adjustment, 1);  // ★ subject: 1/3 のみ引く
+```
+
+**重要な発見**:
+- `length_adjustment` は `blast_setup.c` で AA 単位で計算・保存される
+- query に対しては全額 (`length_adjustment`) を引く
+- subject に対しては 1/3 (`length_adjustment / 3`) のみを引く
+- **NCBI のコメント "length adjustment is given in nucleotide scale" は誤解を招く**: 実際には AA 単位で格納されており、subject に適用する際に `/3` している
+
+**LOSAT の対応**:
+- `sum_stats_linking.rs:555-570` で NCBI と同等のロジックを実装
+- `compute_length_adjustment_simple()` で length_adjustment を計算
+- query: `eff_query_len = query_len_aa - length_adjustment`
+- subject: `eff_subject_len = subject_len_aa - (length_adjustment / 3)`
+
+### 5.6 📝 BLOSUM62 defscore と FSM 構築
+
+NCBI は packed matrix (25x25) を FSM (Full Score Matrix, 128x128) に展開する。この際、未知/sentinel 残基には `defscore` が適用される。
+
+**NCBIコード参照** (`sm_blosum62.c:92-95`):
+```c
+const SNCBIPackedScoreMatrix NCBISM_Blosum62 = {
+    "ARNDCQEGHILKMFPSTWYVBJZX*",
+    s_Blosum62PSM,
+    -4  // defscore for unknown/sentinel residues
+};
+```
+
+**FSM 展開時** (`raw_scoremat.c:90-95`):
+```c
+// 全体を defscore で初期化
+for (i = 0; i < NCBI_FSM_DIM; ++i) {
+    fsm->s[0][i] = psm->defscore;  // -4
+}
+for (i = 1; i < NCBI_FSM_DIM; ++i) {
+    memcpy(fsm->s[i], fsm->s[0], NCBI_FSM_DIM * sizeof(fsm->s[0][0]));
+}
+// その後、有効な AA ペアのみ上書き
+```
+
+**LOSAT の実装方式**:
+- packed matrix (25x25) + 変換テーブルを使用 (FSM 展開なし)
+- `blosum62_score()` で sentinel (0) を明示的にチェックして `DEFSCORE = -4` を返す
+- メモリ効率が良い (25x25 vs 128x128)
+- 動作は NCBI と完全に同等
+
+**重要**:
+- NCBISTDAA index 0 は gap ('-') を表す
+- NCBI BLAST では `kProtSentinel = NULLB = 0`
+- つまり、gap と sentinel は同じ値であり、どちらも `-4` を返す
+
+---
+
+## 6. 発見した明確なバグ
+
+### ~~6.1 🐛 HSP ソートの subject 比較順序が逆~~ → ✅ 分析誤り (バグではない)
+- **状態**: ✅ 問題なし (分析誤りを訂正)
+- **検証日**: 2026-01-03
+- **ファイル**: `sum_stats_linking.rs:517-524`
+- **誤った分析**: 
+  ```
+  NCBI が subject.offset/end を ascending でソートしていると誤解していた
+  ```
+- **正しい解釈**:
+  - NCBI の `if (h1->subject.offset < h2->subject.offset) return 1;` は **DESCENDING**
+  - C qsort では `compare(a,b) > 0` は「a は b の後に来る」
+  - `h1 < h2 → return 1` は h1 が h2 の後 → 小さい値が後 → **DESCENDING**
+- **LOSAT のコード `bso.cmp(&aso)`** は `b.cmp(&a)` = **DESCENDING** であり、NCBI と一致
+- **結論**: **コード修正不要。LOSAT は既に NCBI と同一のソート順序を使用している。**
+- **ユニットテスト追加**: `sum_stats_linking.rs` に以下のテストを追加
+  - `test_hsp_sort_order_matches_ncbi()` - ソート順序が期待通りか検証
+  - `test_hsp_sort_identical_coords()` - 同一座標の安定ソート検証
+  - `test_ncbi_comparison_semantics()` - NCBI の比較セマンティクス検証
+
+---
+
+## 7. 推定される根本原因
 
 LOSATがNCBIより多くのヒットを出力する原因として、以下が推定される:
 
-1. **X-drop / Cutoff の不整合**: 
-   - X-drop が固定値で、context-specific な値を使っていない
-   - Per-subject cutoff 更新が NCBI と異なる可能性
+1. ~~**X-drop / Cutoff の不整合**~~: 
+   - ~~X-drop が固定値で、context-specific な値を使っていない~~ → ✅ **1.4で修正済み**
+   - ~~Per-subject cutoff 更新が NCBI と異なる~~ → ✅ **1.5で修正済み**
 
-2. **HSP ソート順序のバグ**: 
-   - Subject offset/end の比較順序が逆
-   - リンキング結果が変わり、E-value 計算に影響
+2. ~~**HSP ソート順序のバグ**~~: 
+   - ~~Subject offset/end の比較順序が逆~~ → ✅ **分析誤り (6.1で検証済み)**
+   - ~~リンキング結果が変わり、E-value 計算に影響~~ → **LOSAT は NCBI と同一のソート順序**
 
-3. **Sum-Statistics の Length Adjustment**: 
-   - effective length の計算が NCBI と異なる可能性
-   - Search space が異なれば E-value も異なる
-
----
-
-## 7. 優先度順の修正作業リスト
-
-| 優先度 | ID | 内容 | 推定工数 | ファイル |
-|--------|-----|------|----------|----------|
-| **1** | 5.1 | HSP ソート順序 subject ascending 修正 | 小 | `sum_stats_linking.rs` |
-| **2** | 2.1 | X-drop 動的計算 (ceil(7*LN2/Lambda)) | 小 | `utils.rs`, `constants.rs` |
-| **3** | 2.3 | X-drop の per-context 適用 | 中 | `utils.rs` |
-| **4** | 2.2 | Per-subject cutoff 更新ロジック確認 | 中 | `utils.rs`, `ncbi_cutoffs.rs` |
-| **5** | 3.7 | Sum-stats effective length 計算確認 | 小 | `sum_stats_linking.rs` |
-| **6** | 3.2 | Frame base 計算の再検証 | 小 | `lookup.rs` |
-| **7** | 4.1-4.4 | 未調査領域の調査 | 大 | 各種 |
+3. ~~**Sum-Statistics の Length Adjustment**~~: 
+   - ~~effective length の計算が NCBI と異なる可能性~~ → ✅ **3.7で修正済み**
+   - ~~Search space が異なれば E-value も異なる~~ → **NCBI と同一の計算方法に修正**
 
 ---
 
-## 8. 次のアクション
+## 8. 優先度順の修正作業リスト
 
-1. **🐛 HSP ソート順序を修正** (`sum_stats_linking.rs:517-524`)
-2. **⚠️ X-drop を動的計算に変更** (`utils.rs`)
-3. **⚠️ Per-context x_dropoff を extension に渡す** (`utils.rs`)
-4. **差分確認テストを実行し、残存差異を特定**
+| 優先度 | ID | 内容 | 推定工数 | ファイル | 状態 |
+|--------|-----|------|----------|----------|------|
+| ~~**1**~~ | ~~1.4~~ | ~~X-drop 動的計算 (ceil(7*LN2/Lambda))~~ | ~~小~~ | ~~`ncbi_cutoffs.rs`, `utils.rs`~~ | ✅ 完了 |
+| ~~**2**~~ | ~~1.5~~ | ~~Per-subject cutoff 更新ロジック~~ | ~~中~~ | ~~`utils.rs`, `ncbi_cutoffs.rs`~~ | ✅ 完了 |
+| ~~**3**~~ | ~~1.6~~ | ~~X-drop の per-context 適用~~ | ~~小~~ | ~~`utils.rs`~~ | ✅ 完了 |
+| ~~**4**~~ | ~~6.1~~ | ~~HSP ソート順序 subject ascending 修正~~ | ~~小~~ | ~~`sum_stats_linking.rs`~~ | ✅ 分析誤り (修正不要) |
+| ~~**5**~~ | ~~3.7~~ | ~~Sum-stats effective length 計算確認~~ | ~~小~~ | ~~`sum_stats_linking.rs`~~ | ✅ 完了 |
+| **1** | 3.2 | Frame base 計算の再検証 | 小 | `lookup.rs` | 未着手 |
+| **2** | 4.1-4.6 | 未調査領域の調査 | 大 | 各種 | 未着手 |
+
+---
+
+## 9. 次のアクション
+
+1. ~~**⚠️ X-drop を動的計算に変更** (`utils.rs`)~~ → ✅ **完了 (1.4)**
+2. ~~**⚠️ Per-subject cutoff 更新ロジック確認** (`utils.rs`, `ncbi_cutoffs.rs`)~~ → ✅ **完了 (1.5)**
+3. ~~**⚠️ X-drop の per-context 適用** (`utils.rs`)~~ → ✅ **完了 (1.6)**
+4. ~~**🐛 HSP ソート順序を修正** (`sum_stats_linking.rs:517-524`)~~ → ✅ **分析誤り・修正不要 (6.1)**
+5. ~~**Sum-Stats Effective Length 計算確認** (`sum_stats_linking.rs`)~~ → ✅ **完了 (3.7)**
+6. **Frame Base 計算の再検証** (`lookup.rs`) → 次の優先 (3.2)
+7. **差分確認テストを実行し、残存差異を特定**
+
+---
+
+## 10. 変更履歴
+
+| 日付 | 変更内容 |
+|------|----------|
+| 2026-01-03 | 初版作成 |
+| 2026-01-03 | 1.4 X-drop動的計算を完了。`x_drop_raw_score()` 関数を `ncbi_cutoffs.rs` に追加し、`utils.rs` の両モードで使用するように変更。2.1 の per-context 適用について、tblastx では全 context で同一の Lambda を使用するため低優先度に変更。 |
+| 2026-01-03 | 1.5 Per-Subject Cutoff Score更新を完了。`cutoff_score_for_update_tblastx()` と `cutoff_score_max_for_tblastx()` を追加。NCBIの `BlastInitialWordParametersUpdate` ungapped path を忠実にポート。`CUTOFF_E_TBLASTX = 1e-300` と `BLAST_GAP_DECAY_RATE = 0.5` を使用。searchsp計算がAA長とヌクレオチド長を混在させる点を発見・対応。 |
+| 2026-01-03 | 1.6 X-dropoff の Per-Context 適用を完了。`run()` と `run_with_neighbor_map()` の両方で `x_dropoff_per_context: Vec<i32>` を生成し、extension 呼び出しで context ごとの x_dropoff を使用。NCBI `blast_stat.c:2796-2797` で tblastx は全 context が `kbp_ideal` を使用するため実質的な出力変更はなし。構造的 parity を達成。 |
+| 2026-01-03 | セクション4に 4.5 (Context ごとの Karlin パラメータ計算), 4.6 (BSearchContextInfo による Context 検索) を追加。セクション5に 5.2 (check_ideal ロジック) を追加。調査中に発見した潜在的相違点を記録。 |
+| 2026-01-03 | 1.7 scale_factor の確認を完了。NCBI コードベース調査により `blast_parameters.c:466-469` の ASSERT で tblastx では常に `scale_factor = 1.0` であることを確認。LOSAT の現状実装は NCBI と完全一致。コード修正不要。2.2 → 1.7 へ移動。 |
+| 2026-01-03 | 6.1 HSP ソート順序を検証。**分析誤りを発見**: NCBI の `if (h1 < h2) return 1` は DESCENDING (ascending ではない)。C qsort では正の戻り値は「第1引数は第2引数の後に来る」を意味。LOSAT の `bso.cmp(&aso)` (DESCENDING) は NCBI と一致しており、修正不要。`sum_stats_linking.rs` にユニットテスト3件を追加して検証。セクション 3.3, 6.1, 7, 8, 9 を更新。 |
+| 2026-01-03 | セクション 5.4 を追加: HSP グルーピングとソートの実装構造の違いを記録。NCBI は「全体ソート→フレーム境界で分割」、LOSAT は「事前グルーピング→グループ内ソート」という異なるアプローチを採用しているが、最終的な処理順序は同等。`link_hsps.c:484-533` のフレーム分割ロジックを引用。 |
+| 2026-01-03 | 3.7 Sum-Stats Effective Length 計算を修正完了。NCBI `link_hsps.c:560-571` の詳細分析により、tblastx では subject に対して `length_adjustment / 3` のみを適用することを発見。旧LOSAT は `SearchSpace::with_length_adjustment()` で両方に同じ調整を適用していた。`sum_stats_linking.rs:555-570` で NCBI と同等の計算を直接実装。セクション 3.7, 7, 8, 9 を更新。 |
+| 2026-01-03 | 3.1 Sentinel バイト値を NCBI と同一 (0) に修正。`constants.rs` で `SENTINEL_BYTE = 0` に変更。`matrix.rs` に `DEFSCORE = -4` 定数を追加し、`blosum62_score()` で sentinel (0) をチェックして `-4` を返すように修正。NCBI の FSM 構築方式 (`raw_scoremat.c:90-95`) を調査し、defscore の適用方法を確認。セクション 5.6 を追加して技術的詳細を記録。 |

@@ -18,8 +18,11 @@ use crate::utils::seg::SegMasker;
 
 use super::args::TblastxArgs;
 use super::chaining::UngappedHit;
-use super::constants::{GAP_TRIGGER_BIT_SCORE, X_DROP_UNGAPPED};
-use super::ncbi_cutoffs::compute_tblastx_cutoff_score;
+use super::constants::{GAP_TRIGGER_BIT_SCORE, X_DROP_UNGAPPED_BITS};
+use super::ncbi_cutoffs::{
+    compute_eff_searchsp_subject_mode_tblastx, cutoff_score_for_update_tblastx,
+    cutoff_score_max_for_tblastx, gap_trigger_raw_score, x_drop_raw_score, BLAST_GAP_DECAY_RATE,
+};
 use super::diagnostics::{
     diagnostics_enabled, print_summary as print_diagnostics_summary, DiagnosticCounters,
 };
@@ -416,7 +419,20 @@ pub fn run(args: TblastxArgs) -> Result<()> {
     let window = args.window_size as i32;
     // [C] wordsize = lookup->word_length;
     let wordsize: i32 = 3;
-    let dropoff = X_DROP_UNGAPPED;
+
+    // NCBI BLAST computes x_dropoff per-context using kbp[context]->Lambda:
+    //   p->cutoffs[context].x_dropoff_init =
+    //       (Int4)(sbp->scale_factor * ceil(word_options->x_dropoff * NCBIMATH_LN2 / kbp->Lambda));
+    // Reference: blast_parameters.c:219-221
+    //
+    // For tblastx, NCBI uses kbp_ideal->Lambda for all contexts (blast_stat.c:2796-2797):
+    //   if (check_ideal && kbp->Lambda >= sbp->kbp_ideal->Lambda)
+    //      Blast_KarlinBlkCopy(kbp, sbp->kbp_ideal);
+    // So all contexts get the same x_dropoff, but we maintain per-context structure for parity.
+    //
+    // x_dropoff_per_context is populated after build_ncbi_lookup() creates the contexts.
+    let ungapped_params_for_xdrop = lookup_protein_params_ungapped(ScoringMatrix::Blosum62);
+
     let diag_enabled = diagnostics_enabled();
     let diagnostics = std::sync::Arc::new(DiagnosticCounters::default());
 
@@ -506,6 +522,18 @@ pub fn run(args: TblastxArgs) -> Result<()> {
         args.max_hits_per_kmer,
         false, // lazy_neighbors disabled - use neighbor_map mode instead
     );
+
+    // NCBI BLAST: word_params->cutoffs[context].x_dropoff_init
+    // Compute per-context x_dropoff using kbp[context]->Lambda.
+    // Reference: blast_parameters.c:219-221
+    //
+    // For tblastx, all contexts use kbp_ideal (BLOSUM62 ungapped Lambda = 0.3176),
+    // so x_dropoff = ceil(7.0 * LN2 / 0.3176) = 16 for all contexts.
+    // We maintain per-context structure for NCBI parity.
+    let x_dropoff_per_context: Vec<i32> = contexts
+        .iter()
+        .map(|_| x_drop_raw_score(X_DROP_UNGAPPED_BITS, &ungapped_params_for_xdrop, 1.0))
+        .collect();
 
     eprintln!("Reading subjects...");
     let subject_reader = fasta::Reader::from_file(&args.subject)?;
@@ -610,7 +638,7 @@ pub fn run(args: TblastxArgs) -> Result<()> {
     let contexts_ref = &contexts;
     let query_ids_ref = &query_ids;
     let ungapped_params_ref = &ungapped_params;
-    let gapped_params_ref = &gapped_params;
+    let _gapped_params_ref = &gapped_params;  // Unused for tblastx (ungapped only)
 
     subjects_raw.par_iter().enumerate().for_each_init(
         || WorkerState {
@@ -647,34 +675,52 @@ pub fn run(args: TblastxArgs) -> Result<()> {
             // Precompute per-context cutoff scores using NCBI BLAST algorithm.
             // Reference: blast_parameters.c BlastInitialWordParametersUpdate
             //
-            // NCBI uses:
-            // - gap_trigger from ungapped params (kbp_std)
-            // - cutoff_score_max from gapped params (kbp_gap) and eff_searchsp
-            // - Final cutoff = MIN(gap_trigger, cutoff_score_max)
+            // NCBI cutoff calculation for tblastx ungapped path:
+            // 1. gap_trigger from ungapped params (kbp_std)
+            // 2. cutoff_score_max from BlastHitSavingParametersNew (uses user's E-value)
+            // 3. Per-subject update: cutoff_score_for_update_tblastx with CUTOFF_E_TBLASTX=1e-300
+            // 4. Final cutoff = MIN(update_cutoff, gap_trigger, cutoff_score_max)
             //
             // For -subject mode, subject_len_nucl is used (not per-frame AA length).
             let subject_len_nucl = s_len as i64;
             let mut cutoff_scores: Vec<Vec<i32>> = vec![vec![0; s_frames.len()]; contexts_ref.len()];
             // NCBI word_params->cutoff_score_min = min of cutoffs across all contexts
-            // Reference: blast_parameters.c BlastInitialWordParametersUpdate
+            // Reference: blast_parameters.c BlastInitialWordParametersUpdate line 401-403
             let mut cutoff_score_min = i32::MAX;
             
-            // NCBI sum statistics cutoff (blast_parameters.c:951-976) is only applied
-            // when gapped_calculation == TRUE. For tblastx, gapped_calculation = FALSE,
-            // so we use only the regular cutoff based on E-value threshold.
+            // Precompute gap_trigger once (same for all contexts with same params)
+            // Reference: blast_parameters.c:343-344
+            let gap_trigger = gap_trigger_raw_score(GAP_TRIGGER_BIT_SCORE, ungapped_params_ref);
             
             for (ctx_idx, ctx) in contexts_ref.iter().enumerate() {
                 // NCBI: query_length = query_info->contexts[context].query_length
                 let query_len_aa = ctx.aa_len as i64;
                 
-                // Compute cutoff using NCBI algorithm (uses UNGAPPED params for tblastx)
-                let cutoff = compute_tblastx_cutoff_score(
+                // Step 1: Compute cutoff_score_max from BlastHitSavingParametersNew
+                // This uses the effective search space WITH length adjustment
+                // Reference: blast_parameters.c:942-946
+                let eff_searchsp = compute_eff_searchsp_subject_mode_tblastx(
                     query_len_aa,
                     subject_len_nucl,
-                    evalue_threshold,  // E-value threshold (typically 10.0)
-                    GAP_TRIGGER_BIT_SCORE,  // 22.0 bits
+                    ungapped_params_ref,  // tblastx uses ungapped params (kbp_gap is NULL)
+                );
+                let cutoff_score_max = cutoff_score_max_for_tblastx(
+                    eff_searchsp,
+                    evalue_threshold,  // User's E-value (typically 10.0)
                     ungapped_params_ref,
-                    gapped_params_ref,
+                );
+                
+                // Step 2: Compute per-subject cutoff using BlastInitialWordParametersUpdate
+                // This uses CUTOFF_E_TBLASTX=1e-300 and a simple searchsp formula
+                // Reference: blast_parameters.c:348-374
+                let cutoff = cutoff_score_for_update_tblastx(
+                    query_len_aa,
+                    subject_len_nucl,  // NUCLEOTIDE length, NOT divided by 3!
+                    gap_trigger,
+                    cutoff_score_max,
+                    BLAST_GAP_DECAY_RATE,  // 0.5
+                    ungapped_params_ref,
+                    1.0,  // scale_factor (standard BLOSUM62)
                 );
                 
                 // Track minimum cutoff for linking
@@ -818,6 +864,9 @@ pub fn run(args: TblastxArgs) -> Result<()> {
 
                             // [C] cutoffs = word_params->cutoffs + curr_context;
                             let cutoff = unsafe { *cutoff_scores.get_unchecked(ctx_idx).get_unchecked(s_f_idx) };
+                            // [C] cutoffs->x_dropoff (per-context x_dropoff)
+                            // Reference: aa_ungapped.c:579
+                            let x_dropoff = unsafe { *x_dropoff_per_context.get_unchecked(ctx_idx) };
 
                             // [C] score = s_BlastAaExtendTwoHit(matrix, subject, query,
                             //                                   last_hit + wordsize, subject_offset, query_offset, ...)
@@ -830,7 +879,7 @@ pub fn run(args: TblastxArgs) -> Result<()> {
                                     (last_hit + wordsize) as usize, // s_left_off (end of first hit word)
                                     subject_offset as usize, // s_right_off (second hit start)
                                     q_raw as usize,          // q_right_off (second hit start, local)
-                                    dropoff,                 // x_dropoff (raw)
+                                    x_dropoff,               // x_dropoff (per-context, NCBI parity)
                                 );
 
                             let hsp_q: i32 = hsp_q_u as i32;
@@ -1296,7 +1345,15 @@ fn run_with_neighbor_map(args: TblastxArgs) -> Result<()> {
     // NCBI: wordsize = lookup->word_length (always 3 for protein/tblastx)
     let wordsize: i32 = 3;
     let threshold = args.threshold;
-    let x_drop = X_DROP_UNGAPPED;
+
+    // NCBI BLAST computes x_dropoff per-context using kbp[context]->Lambda:
+    //   p->cutoffs[context].x_dropoff_init =
+    //       (Int4)(sbp->scale_factor * ceil(word_options->x_dropoff * NCBIMATH_LN2 / kbp->Lambda));
+    // Reference: blast_parameters.c:219-221
+    //
+    // For tblastx, NCBI uses kbp_ideal->Lambda for all contexts (blast_stat.c:2796-2797).
+    // x_dropoff_per_context is populated per-subject after counting total_contexts.
+    let ungapped_params_for_xdrop = lookup_protein_params_ungapped(ScoringMatrix::Blosum62);
 
     rayon::ThreadPoolBuilder::new()
         .num_threads(num_threads)
@@ -1411,7 +1468,7 @@ fn run_with_neighbor_map(args: TblastxArgs) -> Result<()> {
     let query_contexts_ref = &neighbor_lookup.contexts;
     let params_ref = &params;
     let ungapped_params_ref = &ungapped_params;
-    let gapped_params_ref = &gapped_params;
+    let _gapped_params_ref = &gapped_params;  // Unused for tblastx (ungapped only)
 
     // Collect UngappedHit for sum_stats_linking
     // Key: (q_idx, s_idx)
@@ -1431,19 +1488,31 @@ fn run_with_neighbor_map(args: TblastxArgs) -> Result<()> {
         // Precompute per-context cutoff scores using NCBI BLAST algorithm.
         // Reference: blast_parameters.c BlastInitialWordParametersUpdate
         //
-        // NCBI uses:
-        // - gap_trigger from ungapped params (kbp_std)
-        // - cutoff_score_max from gapped params (kbp_gap) and eff_searchsp
-        // - Final cutoff = MIN(gap_trigger, cutoff_score_max)
+        // NCBI cutoff calculation for tblastx ungapped path:
+        // 1. gap_trigger from ungapped params (kbp_std)
+        // 2. cutoff_score_max from BlastHitSavingParametersNew (uses user's E-value)
+        // 3. Per-subject update: cutoff_score_for_update_tblastx with CUTOFF_E_TBLASTX=1e-300
+        // 4. Final cutoff = MIN(update_cutoff, gap_trigger, cutoff_score_max)
         //
         // For -subject mode, subject_len_nucl is used (not per-frame AA length).
         let subject_len_nucl = s_len as i64;
         let total_contexts: usize = query_frames.iter().map(|f| f.len()).sum();
         let mut cutoff_scores: Vec<Vec<i32>> = vec![vec![0; s_frames.len()]; total_contexts];
         
-        // NCBI sum statistics cutoff (blast_parameters.c:951-976) is only applied
-        // when gapped_calculation == TRUE. For tblastx, gapped_calculation = FALSE,
-        // so we use only the regular cutoff based on E-value threshold.
+        // NCBI BLAST: word_params->cutoffs[context].x_dropoff_init
+        // Compute per-context x_dropoff using kbp[context]->Lambda.
+        // Reference: blast_parameters.c:219-221
+        //
+        // For tblastx, all contexts use kbp_ideal (BLOSUM62 ungapped Lambda = 0.3176),
+        // so x_dropoff = ceil(7.0 * LN2 / 0.3176) = 16 for all contexts.
+        // We maintain per-context structure for NCBI parity.
+        let x_dropoff_per_context: Vec<i32> = (0..total_contexts)
+            .map(|_| x_drop_raw_score(X_DROP_UNGAPPED_BITS, &ungapped_params_for_xdrop, 1.0))
+            .collect();
+        
+        // Precompute gap_trigger once (same for all contexts with same params)
+        // Reference: blast_parameters.c:343-344
+        let gap_trigger = gap_trigger_raw_score(GAP_TRIGGER_BIT_SCORE, ungapped_params_ref);
         
         let mut ctx_idx = 0;
         for q_frames in query_frames.iter() {
@@ -1451,14 +1520,31 @@ fn run_with_neighbor_map(args: TblastxArgs) -> Result<()> {
                 // NCBI: query_length = query_info->contexts[context].query_length
                 let query_len_aa = q_frame.aa_len as i64;
                 
-                // Compute cutoff using NCBI algorithm (uses UNGAPPED params for tblastx)
-                let cutoff = compute_tblastx_cutoff_score(
+                // Step 1: Compute cutoff_score_max from BlastHitSavingParametersNew
+                // This uses the effective search space WITH length adjustment
+                // Reference: blast_parameters.c:942-946
+                let eff_searchsp = compute_eff_searchsp_subject_mode_tblastx(
                     query_len_aa,
                     subject_len_nucl,
-                    evalue_threshold,  // E-value threshold (typically 10.0)
-                    GAP_TRIGGER_BIT_SCORE,  // 22.0 bits
+                    ungapped_params_ref,  // tblastx uses ungapped params (kbp_gap is NULL)
+                );
+                let cutoff_score_max = cutoff_score_max_for_tblastx(
+                    eff_searchsp,
+                    evalue_threshold,  // User's E-value (typically 10.0)
                     ungapped_params_ref,
-                    gapped_params_ref,
+                );
+                
+                // Step 2: Compute per-subject cutoff using BlastInitialWordParametersUpdate
+                // This uses CUTOFF_E_TBLASTX=1e-300 and a simple searchsp formula
+                // Reference: blast_parameters.c:348-374
+                let cutoff = cutoff_score_for_update_tblastx(
+                    query_len_aa,
+                    subject_len_nucl,  // NUCLEOTIDE length, NOT divided by 3!
+                    gap_trigger,
+                    cutoff_score_max,
+                    BLAST_GAP_DECAY_RATE,  // 0.5
+                    ungapped_params_ref,
+                    1.0,  // scale_factor (standard BLOSUM62)
                 );
                 
                 // All subject frames use the same cutoff (NCBI behavior)
@@ -1469,6 +1555,7 @@ fn run_with_neighbor_map(args: TblastxArgs) -> Result<()> {
             }
         }
         let cutoff_scores_ref = &cutoff_scores;
+        let x_dropoff_per_context_ref = &x_dropoff_per_context;
 
         // Process each subject frame in parallel
         let frame_hits: Vec<UngappedHit> = s_frames
@@ -1603,6 +1690,10 @@ fn run_with_neighbor_map(args: TblastxArgs) -> Result<()> {
                                 continue;
                             }
                             
+                            // [C] cutoffs->x_dropoff (per-context x_dropoff)
+                            // Reference: aa_ungapped.c:579
+                            let x_dropoff = x_dropoff_per_context_ref[ctx_flat];
+                            
                             // NCBI aa_ungapped.c:576-583: s_BlastAaExtendTwoHit
                             // s_left_off = last_hit + wordsize (end of first hit word)
                             // s_right_off = subject_offset (second hit start)
@@ -1617,7 +1708,7 @@ fn run_with_neighbor_map(args: TblastxArgs) -> Result<()> {
                                     s_left_off,      // s_left_off (end of first hit word, raw coords)
                                     s_raw,           // s_right_off (second hit start, raw coords)
                                     q_raw,           // q_right_off (second hit start, raw coords)
-                                    x_drop,
+                                    x_dropoff,       // x_dropoff (per-context, NCBI parity)
                                 );
                             
                             let hsp_len = hsp_qe.saturating_sub(hsp_q);
@@ -1767,22 +1858,36 @@ fn run_with_neighbor_map(args: TblastxArgs) -> Result<()> {
             // Get subject length for this subject
             let subject_len_nucl = subjects_raw[s_idx as usize].seq().len() as i64;
             
-            // NCBI sum statistics cutoff (blast_parameters.c:951-976) is only applied
-            // when gapped_calculation == TRUE. For tblastx, gapped_calculation = FALSE,
-            // so we use only the regular cutoff based on E-value threshold.
-            
             // Compute cutoff_score_min as minimum across all query contexts
+            // using the NCBI BlastInitialWordParametersUpdate logic
+            // Reference: blast_parameters.c:348-374, 401-403
+            let gap_trigger = gap_trigger_raw_score(GAP_TRIGGER_BIT_SCORE, ungapped_params_ref);
             let mut cutoff_score_min = i32::MAX;
             for frames in query_frames_ref.iter() {
                 for frame in frames.iter() {
                     let query_len_aa = frame.aa_len as i64;
-                    let cutoff = compute_tblastx_cutoff_score(
+                    
+                    // Step 1: cutoff_score_max from BlastHitSavingParametersNew
+                    let eff_searchsp = compute_eff_searchsp_subject_mode_tblastx(
                         query_len_aa,
                         subject_len_nucl,
-                        evalue_threshold,
-                        GAP_TRIGGER_BIT_SCORE,
                         ungapped_params_ref,
-                        gapped_params_ref,
+                    );
+                    let cutoff_score_max = cutoff_score_max_for_tblastx(
+                        eff_searchsp,
+                        evalue_threshold,
+                        ungapped_params_ref,
+                    );
+                    
+                    // Step 2: Per-subject cutoff from BlastInitialWordParametersUpdate
+                    let cutoff = cutoff_score_for_update_tblastx(
+                        query_len_aa,
+                        subject_len_nucl,
+                        gap_trigger,
+                        cutoff_score_max,
+                        BLAST_GAP_DECAY_RATE,
+                        ungapped_params_ref,
+                        1.0,
                     );
                     cutoff_score_min = cutoff_score_min.min(cutoff);
                 }

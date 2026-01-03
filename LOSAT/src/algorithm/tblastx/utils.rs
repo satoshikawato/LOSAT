@@ -13,7 +13,6 @@ use std::sync::mpsc::channel;
 use crate::common::{write_output_ncbi_order, Hit};
 use crate::config::ScoringMatrix;
 use crate::stats::{lookup_protein_params_ungapped, KarlinParams};
-use crate::utils::dust::{DustMasker, MaskedInterval};
 use crate::utils::genetic_code::GeneticCode;
 use crate::utils::seg::SegMasker;
 
@@ -433,13 +432,20 @@ pub fn run(args: TblastxArgs) -> Result<()> {
         .iter()
         .map(|r| r.id().split_whitespace().next().unwrap_or("unknown").to_string())
         .collect();
-
-    let query_masks: Vec<Vec<MaskedInterval>> = if args.dust {
-        let masker = DustMasker::new(args.dust_level, args.dust_window, args.dust_linker);
-        queries_raw.iter().map(|r| masker.mask_sequence(r.seq())).collect()
-    } else {
-        queries_raw.iter().map(|_| Vec::new()).collect()
-    };
+    // NCBI tblastx low-complexity filtering uses SEG on translated protein sequences.
+    // No nucleotide-level DUST masking is applied.
+    //
+    // NCBI reference (verbatim):
+    //   else if (*ptr == 'L' || *ptr == 'T')
+    //   { /* do low-complexity filtering; dust for blastn, otherwise seg.*/
+    //       if (program_number == eBlastTypeBlastn
+    //           || program_number == eBlastTypeMapping)
+    //           SDustOptionsNew(&dustOptions);
+    //       else
+    //           SSegOptionsNew(&segOptions);
+    //       ptr++;
+    //   }
+    // Source: ncbi-blast/c++/src/algo/blast/core/blast_filter.c:572-580
 
     let mut query_frames: Vec<Vec<QueryFrame>> = queries_raw
         .iter()
@@ -494,7 +500,6 @@ pub fn run(args: TblastxArgs) -> Result<()> {
     eprintln!("Building lookup table...");
     let (lookup, contexts) = build_ncbi_lookup(
         &query_frames,
-        &query_masks,
         args.threshold,
         args.include_stop_seeds,
         args.ncbi_stop_stop_score,
@@ -571,22 +576,29 @@ pub fn run(args: TblastxArgs) -> Result<()> {
         Ok(())
     });
 
-    // [C] diag_mask = diag->diag_mask; (power of 2 - 1)
-    let max_q: i32 = *lookup.frame_bases.last().unwrap_or(&0)
-        + contexts
-            .last()
-            .map(|c| c.aa_seq.len() as i32)
-            .unwrap_or(0);
-    let max_s: i32 = subjects_raw
-        .iter()
-        .map(|r| r.seq().len() as i32 / 3 + 10)
-        .max()
+    // Diagonal array sizing MUST match NCBI's `s_BlastDiagTableNew`:
+    // it depends only on (query_length + window_size), not on subject length.
+    //
+    // NCBI reference (verbatim):
+    //   diag_array_length = 1;
+    //   while (diag_array_length < (qlen+window_size))
+    //       diag_array_length = diag_array_length << 1;
+    //   diag_table->diag_array_length = diag_array_length;
+    //   diag_table->diag_mask = diag_array_length-1;
+    // Source: ncbi-blast/c++/src/algo/blast/core/blast_extend.c:52-61
+    //
+    // `query_length` here is the concatenated translated query buffer length
+    // (frames share a boundary sentinel). In LOSAT this equals the end offset
+    // of the last query context buffer.
+    let query_length: i32 = contexts
+        .last()
+        .map(|c| c.frame_base + (c.aa_seq.len() as i32 - 1))
         .unwrap_or(0);
-    let mut diag_array_size = 1i32;
-    while diag_array_size < (max_q + max_s + window + 1) {
+    let mut diag_array_size: i32 = 1;
+    while diag_array_size < (query_length + window) {
         diag_array_size <<= 1;
     }
-    let diag_mask = diag_array_size - 1;
+    let diag_mask: i32 = diag_array_size - 1;
 
     // [C] array_size for offset_pairs
     // NCBI: GetOffsetArraySize() = OFFSET_ARRAY_SIZE (4096) + lookup->longest_chain
@@ -605,7 +617,9 @@ pub fn run(args: TblastxArgs) -> Result<()> {
             tx: tx.clone(),
             offset_pairs: vec![OffsetPair::default(); offset_array_size as usize],
             diag_array: vec![DiagStruct::default(); diag_array_size as usize],
-            diag_offset: max_q + max_s,
+            // NCBI: diag_table->offset = window_size;
+            // Source: ncbi-blast/c++/src/algo/blast/core/blast_extend.c:63
+            diag_offset: window,
         },
         |st, (s_idx, s_rec)| {
             let mut s_frames = generate_frames(s_rec.seq(), &db_code);
@@ -933,7 +947,24 @@ pub fn run(args: TblastxArgs) -> Result<()> {
                 }
 
                 // [C] Blast_ExtendWordExit(ewp, subject->length);
-                diag_offset += s_aa_len as i32;
+                //
+                // NCBI reference (verbatim):
+                //   if (ewp->diag_table->offset >= INT4_MAX / 4) {
+                //       ewp->diag_table->offset = ewp->diag_table->window;
+                //       s_BlastDiagClear(ewp->diag_table);
+                //   } else {
+                //       ewp->diag_table->offset += subject_length + ewp->diag_table->window;
+                //   }
+                // Source: ncbi-blast/c++/src/algo/blast/core/blast_extend.c:167-173
+                if diag_offset >= i32::MAX / 4 {
+                    diag_offset = window;
+                    // s_BlastDiagClear(): clear all diagonal state when offset risks overflow.
+                    for d in diag_array.iter_mut() {
+                        *d = DiagStruct::default();
+                    }
+                } else {
+                    diag_offset += s_aa_len as i32 + window;
+                }
             }
 
             if !ungapped_hits.is_empty() {
@@ -951,7 +982,28 @@ pub fn run(args: TblastxArgs) -> Result<()> {
                     scale_factor: 1.0, // Standard BLOSUM62
                     gap_decay_rate: 0.5, // BLAST_GAP_DECAY_RATE
                 };
-                let linked = apply_sum_stats_even_gap_linking(ungapped_hits, &params, &linking_params);
+                // Build NCBI-style subject frame base offsets for sum-statistics linking.
+                // In NCBI, HSP coords live in a concatenated translation buffer with sentinels.
+                // LOSAT uses per-frame sequences; for linking we emulate absolute offsets by
+                // concatenating frames in the same order as `generate_frames()`.
+                let mut subject_frame_bases: Vec<i32> = Vec::with_capacity(s_frames.len());
+                let mut base: i32 = 0;
+                for f in &s_frames {
+                    subject_frame_bases.push(base);
+                    // NCBI concatenation shares the trailing NULLB sentinel between frames:
+                    //   offset += length + 1;
+                    // where `length` is the number of residues (excluding sentinels).
+                    // Source: ncbi-blast/c++/src/algo/blast/core/blast_util.c:1098-1101
+                    base += f.aa_seq.len() as i32 - 1;
+                }
+
+                let linked = apply_sum_stats_even_gap_linking(
+                    ungapped_hits,
+                    &params,
+                    &linking_params,
+                    contexts_ref,
+                    &subject_frame_bases,
+                );
                 if diag_enabled {
                     diagnostics
                         .base
@@ -1259,13 +1311,6 @@ fn run_with_neighbor_map(args: TblastxArgs) -> Result<()> {
         .map(|r| r.id().split_whitespace().next().unwrap_or("unknown").to_string())
         .collect();
 
-    let query_masks: Vec<Vec<MaskedInterval>> = if args.dust {
-        let masker = DustMasker::new(args.dust_level, args.dust_window, args.dust_linker);
-        queries_raw.iter().map(|r| masker.mask_sequence(r.seq())).collect()
-    } else {
-        queries_raw.iter().map(|_| Vec::new()).collect()
-    };
-
     let mut query_frames: Vec<Vec<QueryFrame>> = queries_raw
         .iter()
         .map(|r| generate_frames(r.seq(), &query_code))
@@ -1300,7 +1345,7 @@ fn run_with_neighbor_map(args: TblastxArgs) -> Result<()> {
     }
 
     eprintln!("Building neighbor lookup...");
-    let neighbor_lookup = NeighborLookup::build(&query_frames, &query_masks, threshold);
+    let neighbor_lookup = NeighborLookup::build(&query_frames, threshold);
     
     // Use compressed neighbor index: no expanded_lookup pre-computation
     // Instead, resolve neighbors on-the-fly during scan
@@ -1363,6 +1408,7 @@ fn run_with_neighbor_map(args: TblastxArgs) -> Result<()> {
     let query_ids_ref = &query_ids;
     let neighbor_map_ref = &neighbor_lookup.neighbor_map.map;
     let query_lookup_ref = &neighbor_lookup.query_lookup;
+    let query_contexts_ref = &neighbor_lookup.contexts;
     let params_ref = &params;
     let ungapped_params_ref = &ungapped_params;
     let gapped_params_ref = &gapped_params;
@@ -1665,7 +1711,7 @@ fn run_with_neighbor_map(args: TblastxArgs) -> Result<()> {
                             local_hits.push(UngappedHit {
                                 q_idx,
                                 s_idx: s_idx as u32,
-                                ctx_idx: q_f_idx as usize,
+                                ctx_idx: ctx_flat,
                                 s_f_idx,
                                 q_frame: q_frame.frame,
                                 s_frame: s_frame.frame,
@@ -1753,8 +1799,37 @@ fn run_with_neighbor_map(args: TblastxArgs) -> Result<()> {
                 scale_factor: 1.0,
                 gap_decay_rate: 0.5,
             };
-            
-            apply_sum_stats_even_gap_linking(subject_hits, params_ref, &linking_params)
+
+            // Subject frame bases in the concatenated translation buffer order.
+            // We match `generate_frames()` ordering (forward 1,2,3 then reverse -1,-2,-3)
+            // and each frame has its own leading+trailing sentinel in LOSAT's current model.
+            let subject_len = subject_len_nucl as usize;
+            let mut subject_frame_bases: Vec<i32> = Vec::with_capacity(6);
+            let mut base: i32 = 0;
+            for shift in 0..3usize {
+                if shift + 3 <= subject_len {
+                    let aa_len = ((subject_len - shift) / 3) as i32;
+                    subject_frame_bases.push(base);
+                    // NCBI concatenation shares the boundary NULLB between frames:
+                    // increment is (aa_len + 1), not (aa_len + 2).
+                    base += aa_len + 1;
+                }
+            }
+            for shift in 0..3usize {
+                if shift + 3 <= subject_len {
+                    let aa_len = ((subject_len - shift) / 3) as i32;
+                    subject_frame_bases.push(base);
+                    base += aa_len + 1;
+                }
+            }
+
+            apply_sum_stats_even_gap_linking(
+                subject_hits,
+                params_ref,
+                &linking_params,
+                query_contexts_ref,
+                &subject_frame_bases,
+            )
         })
         .collect();
     eprintln!("[2] After sum_stats_linking: {} hits", linked_hits.len());
@@ -1807,8 +1882,10 @@ fn run_with_neighbor_map(args: TblastxArgs) -> Result<()> {
             .next()
             .unwrap_or("unknown");
         
-        let q_frame_obj = &query_frames_ref[h.q_idx as usize][h.ctx_idx];
-        let q_aa = q_frame_obj.aa_seq_nomask.as_ref().unwrap_or(&q_frame_obj.aa_seq);
+        // `ctx_idx` is the global query context index (NCBI `hsp->context` equivalent).
+        // Use the pre-built `QueryContext` buffer to access the (possibly unmasked) query AA sequence.
+        let q_ctx = &query_contexts_ref[h.ctx_idx];
+        let q_aa = q_ctx.aa_seq_nomask.as_deref().unwrap_or(&q_ctx.aa_seq);
         
         // Get subject frame from cache (no redundant translation)
         let s_frame_obj = &subject_frames_cache[h.s_idx as usize][h.s_f_idx];

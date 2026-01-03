@@ -10,7 +10,6 @@
 //! - overflow: flat i32 array for cells with >3 hits
 //! - pv: presence vector bitfield
 
-use crate::utils::dust::MaskedInterval;
 use crate::utils::matrix::{BLASTAA_SIZE, blosum62_score};
 use super::translation::QueryFrame;
 
@@ -197,21 +196,6 @@ impl BlastAaLookupTable {
     }
 }
 
-fn aa_pos_to_dna_range(aa_pos: usize, kmer_len: usize, frame: i8, orig_len: usize) -> (usize, usize) {
-    let aa_end = aa_pos + kmer_len;
-    if frame > 0 {
-        let offset = (frame - 1) as usize;
-        (aa_pos * 3 + offset, (aa_end * 3 + offset).min(orig_len))
-    } else {
-        let offset = (-frame - 1) as usize;
-        (orig_len.saturating_sub(aa_end * 3 + offset), orig_len - (aa_pos * 3 + offset))
-    }
-}
-
-fn is_dna_pos_masked(intervals: &[MaskedInterval], start: usize, end: usize) -> bool {
-    intervals.iter().any(|i| start < i.end && end > i.start)
-}
-
 fn compute_unmasked_intervals(seg_masks: &[(usize, usize)], aa_len: usize) -> Vec<(usize, usize)> {
     if seg_masks.is_empty() {
         return vec![(0, aa_len)];
@@ -240,7 +224,6 @@ fn compute_unmasked_intervals(seg_masks: &[(usize, usize)], aa_len: usize) -> Ve
 /// lookup table size but requires neighbor computation at scan time.
 pub fn build_ncbi_lookup(
     queries: &[Vec<QueryFrame>],
-    query_masks: &[Vec<MaskedInterval>],
     threshold: i32,
     _include_stop_seeds: bool, // Ignored - NCBI always uses full 28-char alphabet
     _ncbi_stop_stop_score: bool, // Ignored - always use NCBI BLOSUM62 (*-* = +1)
@@ -271,7 +254,18 @@ pub fn build_ncbi_lookup(
                 orig_len: frame.orig_len,
                 frame_base: base,
             });
-            base += frame.aa_seq.len() as i32;
+            // NCBI concatenates translated frames by *sharing* the boundary sentinel NULLB.
+            // BLAST_GetTranslation writes both leading+trailing NULLB; the next frame starts
+            // at the previous frame's trailing NULLB, so the offset advances by (aa_len + 1),
+            // not (aa_len + 2).
+            //
+            // NCBI reference (verbatim):
+            //   /* Increment offset by 1 extra byte for the sentinel NULLB
+            //      between frames. */
+            //   offset += length + 1;
+            //   frame_offsets[context+1] = offset;
+            // Source: ncbi-blast/c++/src/algo/blast/core/blast_util.c:1098-1101
+            base += frame.aa_seq.len() as i32 - 1;
         }
     }
 
@@ -290,12 +284,10 @@ pub fn build_ncbi_lookup(
     let mut exact_offsets: Vec<Vec<i32>> = vec![Vec::new(); backbone_size];
     let mut total_exact_positions = 0usize;
     let mut skipped_invalid_residue = 0usize;
-    let mut skipped_dna_mask = 0usize;
     let mut skipped_seg_mask = 0usize;
 
     let mut ctx_idx = 0usize;
     for (q_idx, frames) in queries.iter().enumerate() {
-        let dna_masks = &query_masks[q_idx];
         for frame in frames.iter() {
             let frame_base = frame_bases[ctx_idx];
             let seq = &frame.aa_seq;
@@ -310,15 +302,6 @@ pub fn build_ncbi_lookup(
                 
                 for (start, end) in unmasked {
                     for aa_pos in start..end.saturating_sub(word_length - 1) {
-                        if !dna_masks.is_empty() {
-                            let (ds, de) =
-                                aa_pos_to_dna_range(aa_pos, word_length, frame.frame, frame.orig_len);
-                            if is_dna_pos_masked(dna_masks, ds, de) {
-                                skipped_dna_mask += 1;
-                                continue;
-                            }
-                        }
-
                         let raw_pos = aa_pos + 1;
                         let c0 = seq[raw_pos] as usize;
                         let c1 = seq[raw_pos + 1] as usize;
@@ -348,7 +331,6 @@ pub fn build_ncbi_lookup(
     eprintln!("Unique exact words: {}", unique_exact_words);
     eprintln!("Max offsets per exact word: {}", max_exact_per_word);
     eprintln!("Skipped (invalid residue): {}", skipped_invalid_residue);
-    eprintln!("Skipped (DNA mask): {}", skipped_dna_mask);
     eprintln!("Skipped (SEG mask): {}", skipped_seg_mask);
 
     // Phase 1b: Add neighboring words (or just exact matches for lazy mode)
@@ -684,7 +666,6 @@ pub fn build_ncbi_lookup(
 /// Build a simple direct (exact) 3-mer lookup table for tests and diagnostics.
 pub fn build_direct_lookup(
     queries: &[Vec<QueryFrame>],
-    query_masks: &[Vec<MaskedInterval>],
 ) -> Vec<Vec<(u32, u8, u32)>> {
     let word_length = LOOKUP_WORD_LENGTH;
     let alphabet_size = LOOKUP_ALPHABET_SIZE;
@@ -695,8 +676,6 @@ pub fn build_direct_lookup(
     let mut table: Vec<Vec<(u32, u8, u32)>> = vec![Vec::new(); backbone_size];
 
     for (q_idx, frames) in queries.iter().enumerate() {
-        let dna_masks = &query_masks[q_idx];
-
         for (f_idx, frame) in frames.iter().enumerate() {
             if frame.aa_len < 3 || frame.aa_seq.len() < 5 {
                 continue;
@@ -705,13 +684,6 @@ pub fn build_direct_lookup(
             let unmasked = compute_unmasked_intervals(&frame.seg_masks, frame.aa_len);
             for (start, end) in unmasked {
                 for aa_pos in start..end.saturating_sub(2) {
-                    if !dna_masks.is_empty() {
-                        let (ds, de) = aa_pos_to_dna_range(aa_pos, 3, frame.frame, frame.orig_len);
-                        if is_dna_pos_masked(dna_masks, ds, de) {
-                            continue;
-                        }
-                    }
-
                     let raw_pos = aa_pos + 1;
                     let c0 = frame.aa_seq[raw_pos] as usize;
                     let c1 = frame.aa_seq[raw_pos + 1] as usize;
@@ -970,11 +942,10 @@ pub struct NeighborLookup {
 impl NeighborLookup {
     pub fn build(
         queries: &[Vec<QueryFrame>],
-        query_masks: &[Vec<MaskedInterval>],
         threshold: i32,
     ) -> Self {
         // Build exact query lookup
-        let query_lookup = build_direct_lookup(queries, query_masks);
+        let query_lookup = build_direct_lookup(queries);
         
         // Build presence vector
         let pv_size = (query_lookup.len() + PV_BUCKET_BITS - 1) / PV_BUCKET_BITS;
@@ -1003,7 +974,8 @@ impl NeighborLookup {
                     orig_len: frame.orig_len,
                     frame_base: base,
                 });
-                base += frame.aa_seq.len() as i32;
+                // See build_ncbi_lookup() above: share the trailing NULLB sentinel between frames.
+                base += frame.aa_seq.len() as i32 - 1;
             }
         }
         

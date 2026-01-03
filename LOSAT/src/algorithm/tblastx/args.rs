@@ -26,14 +26,23 @@ pub struct TblastxArgs {
     pub db_gencode: u8,
     #[arg(long, default_value_t = 500)]
     pub max_target_seqs: usize,
-    #[arg(long, default_value_t = true)]
-    pub dust: bool,
-    #[arg(long, default_value_t = 20)]
-    pub dust_level: u32,
-    #[arg(long, default_value_t = 64)]
-    pub dust_window: usize,
-    #[arg(long, default_value_t = 1)]
-    pub dust_linker: usize,
+    // NCBI low-complexity filtering selection:
+    // - dust is used only for blastn (and mapping)
+    // - otherwise seg is used
+    //
+    // NCBI reference (verbatim):
+    //   else if (*ptr == 'L' || *ptr == 'T')
+    //   { /* do low-complexity filtering; dust for blastn, otherwise seg.*/
+    //       if (program_number == eBlastTypeBlastn
+    //           || program_number == eBlastTypeMapping)
+    //           SDustOptionsNew(&dustOptions);
+    //       else
+    //           SSegOptionsNew(&segOptions);
+    //       ptr++;
+    //   }
+    // Source: ncbi-blast/c++/src/algo/blast/core/blast_filter.c:572-580
+    //
+    // Therefore, for tblastx we do NOT apply nucleotide-level DUST masking.
 
     // SEG filter options for masking low-complexity regions in amino acid sequences
     // NCBI BLAST default: enabled for translated/protein searches.

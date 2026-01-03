@@ -30,10 +30,10 @@ fn test_default_values() {
     assert_eq!(args.query_gencode, 1);
     assert_eq!(args.db_gencode, 1);
     assert_eq!(args.max_target_seqs, 500);
-    assert_eq!(args.dust, true);
-    assert_eq!(args.dust_level, 20);
-    assert_eq!(args.dust_window, 64);
-    assert_eq!(args.dust_linker, 1);
+    assert_eq!(args.seg, true);
+    assert_eq!(args.seg_window, 12);
+    assert_eq!(args.seg_locut, 2.2);
+    assert_eq!(args.seg_hicut, 2.5);
 }
 
 #[test]
@@ -78,20 +78,18 @@ fn test_custom_max_target_seqs() {
 }
 
 #[test]
-fn test_dust_options() {
-    // Note: --dust is a bool flag, so we can't set it to false directly
-    // We'll test the other dust options instead
+fn test_seg_options() {
     let args = parse_args(&[
         "-q", "query.fasta", "-s", "subject.fasta",
-        "--dust-level", "30",
-        "--dust-window", "32",
-        "--dust-linker", "2",
+        "--seg=false",
+        "--seg-window", "15",
+        "--seg-locut", "1.9",
+        "--seg-hicut", "2.3",
     ]);
-    // dust defaults to true
-    assert_eq!(args.dust, true);
-    assert_eq!(args.dust_level, 30);
-    assert_eq!(args.dust_window, 32);
-    assert_eq!(args.dust_linker, 2);
+    assert_eq!(args.seg, false);
+    assert_eq!(args.seg_window, 15);
+    assert_eq!(args.seg_locut, 1.9);
+    assert_eq!(args.seg_hicut, 2.3);
 }
 
 #[test]

@@ -34,7 +34,8 @@ use super::lookup::{
 use super::reevaluate::reevaluate_ungapped_hit_ncbi_translated;
 use crate::utils::matrix::blosum62_score;
 use super::sum_stats_linking::{
-    apply_sum_stats_even_gap_linking, compute_avg_query_length_ncbi, LinkingParams,
+    apply_sum_stats_even_gap_linking, compute_avg_query_length_ncbi, 
+    find_smallest_lambda_params, LinkingParams,
 };
 use super::translation::{generate_frames, QueryFrame};
 use crate::stats::karlin::bit_score as calc_bit_score;
@@ -521,6 +522,7 @@ pub fn run(args: TblastxArgs) -> Result<()> {
         args.ncbi_stop_stop_score,
         args.max_hits_per_kmer,
         false, // lazy_neighbors disabled - use neighbor_map mode instead
+        &ungapped_params_for_xdrop, // NCBI: kbp[context] for each context
     );
 
     // NCBI BLAST: word_params->cutoffs[context].x_dropoff_init
@@ -1046,9 +1048,17 @@ pub fn run(args: TblastxArgs) -> Result<()> {
                     base += f.aa_seq.len() as i32 - 1;
                 }
 
+                // NCBI parity: s_BlastFindSmallestLambda selects Karlin params with smallest lambda
+                // Reference: blast_parameters.c:92-112, 1012-1013
+                // For tblastx, all contexts use kbp_ideal (same lambda), so this is equivalent
+                // to using ungapped_params directly. We maintain this structure for parity.
+                let context_params: Vec<KarlinParams> = contexts_ref.iter().map(|_| params.clone()).collect();
+                let linking_params_for_cutoff = find_smallest_lambda_params(&context_params)
+                    .unwrap_or_else(|| params.clone());
+
                 let linked = apply_sum_stats_even_gap_linking(
                     ungapped_hits,
-                    &params,
+                    &linking_params_for_cutoff,
                     &linking_params,
                     contexts_ref,
                     &subject_frame_bases,
@@ -1402,7 +1412,7 @@ fn run_with_neighbor_map(args: TblastxArgs) -> Result<()> {
     }
 
     eprintln!("Building neighbor lookup...");
-    let neighbor_lookup = NeighborLookup::build(&query_frames, threshold);
+    let neighbor_lookup = NeighborLookup::build(&query_frames, threshold, &ungapped_params_for_xdrop);
     
     // Use compressed neighbor index: no expanded_lookup pre-computation
     // Instead, resolve neighbors on-the-fly during scan
@@ -1928,9 +1938,17 @@ fn run_with_neighbor_map(args: TblastxArgs) -> Result<()> {
                 }
             }
 
+            // NCBI parity: s_BlastFindSmallestLambda selects Karlin params with smallest lambda
+            // Reference: blast_parameters.c:92-112, 1012-1013
+            // For tblastx, all contexts use kbp_ideal (same lambda), so this is equivalent
+            // to using params_ref directly. We maintain this structure for parity.
+            let context_params: Vec<KarlinParams> = query_contexts_ref.iter().map(|_| params_ref.clone()).collect();
+            let linking_params_for_cutoff = find_smallest_lambda_params(&context_params)
+                .unwrap_or_else(|| params_ref.clone());
+
             apply_sum_stats_even_gap_linking(
                 subject_hits,
-                params_ref,
+                &linking_params_for_cutoff,
                 &linking_params,
                 query_contexts_ref,
                 &subject_frame_bases,

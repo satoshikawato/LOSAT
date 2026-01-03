@@ -1,7 +1,7 @@
 # TBLASTX NCBI Parity Status Report
 
 **作成日時**: 2026-01-03  
-**更新日時**: 2026-01-03 (3.2 Frame Base / 座標システム修正完了)  
+**更新日時**: 2026-01-03 (4.8 Sum-Statistics Linking 調査完了 + 実装差異詳細追記)  
 **現象**: LOSATがNCBI BLAST+より多くのヒットを出力する  
 **目標**: 出力を1ビットの狂いもなく一致させる
 
@@ -460,6 +460,129 @@
   - `run_with_neighbor_map()`: `ctx_flat = ctx_base[q_idx] + q_f_idx` で直接計算
 - **確認必要**: LOSATの実装が NCBI と同等の結果を返すか
 
+### 4.7 🔴 Extension スコア計算の詳細
+- **状態**: 🔴 **差分確認テストで差異検出** (優先度2)
+- **発見日**: 2026-01-03
+- **概要**: 多数のヒットで LOSAT のスコアが NCBI より +1 bit score (raw score 約 2 点) 高い
+- **特徴**:
+  - identity, aln_len は完全一致
+  - strand や alignment length に特定パターンなし
+  - MeenMJNV.MejoMJNV: 40 ヒット、AP027280.AP027280: 305 ヒットで差異
+- **関連NCBIコード**: 
+  - `aa_ungapped.c:831-921` (`s_BlastAaExtendLeft`, `s_BlastAaExtendRight`)
+  - `aa_ungapped.c:1019-1086` (`s_BlastAaExtendOneHit`)
+  - `aa_ungapped.c:1088-1158` (`s_BlastAaExtendTwoHit`)
+- **LOSATコード**: `extension.rs:55-303`
+- **調査ポイント**:
+  1. word 内スコア計算での初期値
+  2. left/right extension への初期スコア渡し
+  3. 終了条件 (`>=` vs `>`)
+  4. `maxscore` 更新タイミング
+
+### 4.8 ✅ Sum-Statistics Linking のチェイン構造
+- **状態**: ✅ **調査完了 - NCBI と同等の実装を確認**
+- **調査日**: 2026-01-03
+- **結論**: **LOSATの実装はNCBIと同等であり、コード修正不要**
+
+#### 調査結果詳細
+
+NCBI `link_hsps.c` と LOSAT `sum_stats_linking.rs` を徹底比較し、全コンポーネントの一致を確認:
+
+| コンポーネント | NCBI (行番号) | LOSAT (行番号) | 結果 |
+|--------------|--------------|----------------|------|
+| `lh_helper` 構造体 | 660-686 | 792-828 | ✅ 一致 |
+| `next_larger` skip-list | 676-684, 876-884 | 815-822, 1005-1012 | ✅ 一致 |
+| Frame/strand グルーピング | 510-533 (ソート後分割) | 433-439 (事前グルーピング) | ✅ 同等の結果 |
+| Index 0 (small gap) DPループ | 690-768 | 835-895 | ✅ 一致 |
+| Index 1 (large gap) DPループ | 771-896 | 898-1025 | ✅ 一致 |
+| `linked_to` カウンター | 685, 766, 894 | 801, 893, 1023 | ✅ 一致 |
+| E-value チェイン適用 | 955-980 | 1139-1197 | ✅ 一致 |
+| Gap probability 調整 | 918-935 | 1049-1077 | ✅ 一致 |
+| `small_gap_sum_e` | blast_stat.c:4418-4463 | sum_statistics.rs:367-399 | ✅ 一致 |
+| `large_gap_sum_e` | blast_stat.c:4532-4573 | sum_statistics.rs:464-496 | ✅ 一致 |
+| `s_BlastSumP` (ルックアップテーブル) | blast_stat.c:4357-4408 | sum_statistics.rs:97-278 | ✅ 一致 |
+
+#### 観察された差異の真因
+
+NCBI-only ヒットが同一 E-value を持つパターンは、**リンキングアルゴリズムではなく上流工程の差異**が原因:
+
+1. **Extension スコア差異** (4.7): +1 bit score の差があり、raw score が異なる → 異なる HSP がリンキングに入力される
+2. **Reverse strand 座標計算** (4.9): reverse strand の座標差で HSP が異なる
+3. **E-value 閾値判定** (4.10): 閾値境界でのフィルタリング差
+
+#### 実装構造の違いと同等性
+
+**NCBI**: 全体ソート → フレーム境界で分割
+```c
+qsort(link_hsp_array, total_number_of_hsps, sizeof(LinkHSPStruct*), s_RevCompareHSPsTbx);
+// ソート後にフレーム境界を検出して分割
+```
+
+**LOSAT**: 事前グルーピング → グループ内ソート
+```rust
+let mut groups: FxHashMap<ContextKey, Vec<UngappedHit>> = FxHashMap::default();
+// 各グループ内でソート
+```
+
+両者は異なるアプローチだが、HSP の最終的な処理順序は同一。LOSAT のアプローチは並列処理 (rayon) との相性が良い。
+
+#### 実装差異の詳細と影響なしの根拠
+
+| 差異点 | NCBI 実装 | LOSAT 実装 | 影響なしの根拠 |
+|--------|-----------|------------|----------------|
+| **maxsum1 チェック** | `if(0) if(H2_helper->maxsum1<=H_hsp_sum)break;` (line 850) | 未実装 | NCBI で `if(0)` により**無効化**されているため使用されない |
+| **maxsum1 計算方式** | `max[SIGN(s_frame)+1]` で3バケット追跡 | 単一 `running_max` | LOSAT は事前にフレーム符号でグルーピングするため、グループ内では単一maxで同等 |
+| **グルーピングキー** | `(context/strand_factor, SIGN(subject.frame))` | `(q_idx, s_idx, q_strand, s_strand)` | NCBI は per-subject 呼び出し。LOSAT は複数サブジェクト一括処理のため `s_idx` を追加。結果は同等 |
+| **ln_factorial** | `lgamma(n+1)` via `BLAST_LnGammaInt` | 直接計算 `sum ln(i)` | リンクされる HSP 数は通常 2-10 個程度で、直接計算が十分な精度を持つ |
+| **ルックアップテーブル** | TAB2(19), TAB3(38), TAB4(55) | TAB2(19), TAB3(38), TAB4(55) | **完全一致** |
+
+**特記事項: `maxsum1` について**
+
+NCBI コードには `maxsum1` フィールドが存在し計算も行われるが、実際に使用される箇所 (`link_hsps.c:850`) は `if(0)` で無効化されている:
+
+```c
+// NCBI link_hsps.c:850 - このチェックは無効
+if(0) if(H2_helper->maxsum1<=H_hsp_sum)break;
+```
+
+したがって `maxsum1` の計算方式の違いは出力に影響しない。LOSAT は厳密パリティのため計算は行うが、使用はしない。
+
+- **関連NCBIコード**: `link_hsps.c`, `blast_stat.c`, `ncbi_math.c`
+- **LOSATコード**: `sum_stats_linking.rs`, `sum_statistics.rs`
+
+### 4.9 🔴 Reverse Strand 処理
+- **状態**: 🔴 **差分確認テストで差異検出** (優先度3)
+- **発見日**: 2026-01-03
+- **概要**: TrcuMJNV.MellatMJNV の NCBI-only ヒット 113 件が**全て reverse strand**
+- **推定原因**:
+  - reverse strand の frame 変換
+  - 座標計算 (nucleotide → AA)
+  - ソート時の `SIGN(subject.frame)` vs `signum()` の違い
+- **関連NCBIコード**:
+  - `link_hsps.c:359-375` (`s_RevCompareHSPsTbx` 比較関数)
+  - `blast_gapalign.c:s_AdjustInitialHSPOffsets` (座標調整)
+- **LOSATコード**: 
+  - `translation.rs` (frame 変換)
+  - `utils.rs` (座標計算)
+  - `sum_stats_linking.rs:517-524` (ソート)
+- **調査ポイント**:
+  1. reverse strand の AA 座標が正しいか
+  2. ソート時の strand 比較が NCBI と同等か
+
+### 4.10 🟡 E-value 閾値判定
+- **状態**: 🟡 **差分確認テストで差異検出** (優先度4)
+- **発見日**: 2026-01-03
+- **概要**: LOSAT-only ヒットの多くが E-value 0.1-10.0 の閾値付近
+- **具体例**:
+  - MeenMJNV.MejoMJNV: 46 件中 35 件が E-value 0.1-10.0
+  - AP027280.AP027280: 74 件中 37 件が E-value 0.1-10.0
+- **推定原因**:
+  - search space 計算の微妙な差
+  - 浮動小数点の丸め (Rust `f64` vs C `double`)
+  - cutoff_score 計算の差
+- **関連NCBIコード**: `blast_parameters.c:BlastHitSavingParametersNew`
+- **LOSATコード**: `ncbi_cutoffs.rs:cutoff_score_max_for_tblastx()`
+
 ---
 
 ## 5. NCBI 設計の技術的注記
@@ -753,19 +876,43 @@ LOSATがNCBIより多くのヒットを出力する原因として、以下が�
 
 ## 8. 優先度順の修正作業リスト
 
+### 完了済み作業
+
+| 優先度 | ID | 内容 | ファイル | 状態 |
+|--------|-----|------|----------|------|
+| ~~1~~ | ~~1.4~~ | ~~X-drop 動的計算~~ | ~~`ncbi_cutoffs.rs`, `utils.rs`~~ | ✅ 完了 |
+| ~~2~~ | ~~1.5~~ | ~~Per-subject cutoff 更新ロジック~~ | ~~`utils.rs`, `ncbi_cutoffs.rs`~~ | ✅ 完了 |
+| ~~3~~ | ~~1.6~~ | ~~X-drop の per-context 適用~~ | ~~`utils.rs`~~ | ✅ 完了 |
+| ~~4~~ | ~~6.1~~ | ~~HSP ソート順序 subject ascending 修正~~ | ~~`sum_stats_linking.rs`~~ | ✅ 分析誤り |
+| ~~5~~ | ~~3.7~~ | ~~Sum-stats effective length 計算~~ | ~~`sum_stats_linking.rs`~~ | ✅ 完了 |
+| ~~6~~ | ~~3.2~~ | ~~Frame base / 座標システムの修正~~ | ~~`sum_stats_linking.rs`~~ | ✅ 完了 |
+| ~~7~~ | - | ~~差分確認テスト実行~~ | - | ✅ 完了 |
+
+### 🔴 残存差異対応 (差分確認テストで発見)
+
 | 優先度 | ID | 内容 | 推定工数 | ファイル | 状態 |
 |--------|-----|------|----------|----------|------|
-| ~~**1**~~ | ~~1.4~~ | ~~X-drop 動的計算 (ceil(7*LN2/Lambda))~~ | ~~小~~ | ~~`ncbi_cutoffs.rs`, `utils.rs`~~ | ✅ 完了 |
-| ~~**2**~~ | ~~1.5~~ | ~~Per-subject cutoff 更新ロジック~~ | ~~中~~ | ~~`utils.rs`, `ncbi_cutoffs.rs`~~ | ✅ 完了 |
-| ~~**3**~~ | ~~1.6~~ | ~~X-drop の per-context 適用~~ | ~~小~~ | ~~`utils.rs`~~ | ✅ 完了 |
-| ~~**4**~~ | ~~6.1~~ | ~~HSP ソート順序 subject ascending 修正~~ | ~~小~~ | ~~`sum_stats_linking.rs`~~ | ✅ 分析誤り (修正不要) |
-| ~~**5**~~ | ~~3.7~~ | ~~Sum-stats effective length 計算確認~~ | ~~小~~ | ~~`sum_stats_linking.rs`~~ | ✅ 完了 |
-| ~~**6**~~ | ~~3.2~~ | ~~Frame base / 座標システムの修正~~ | ~~小~~ | ~~`sum_stats_linking.rs`~~ | ✅ 完了 |
-| **1** | 4.1-4.6 | 未調査領域の調査 | 大 | 各種 | 未着手 |
+| ~~**1**~~ | ~~4.8~~ | ~~Sum-Statistics Linking チェイン構造~~ | ~~大~~ | ~~`sum_stats_linking.rs`, `link_hsps.c`~~ | ✅ 調査完了 (NCBI同等) |
+| **1** | 4.7 | Extension スコア計算 (+1 bit score 差) | 中 | `extension.rs`, `aa_ungapped.c` | 🔴 未着手 |
+| **2** | 4.9 | Reverse strand 処理 | 中 | `translation.rs`, `utils.rs` | 🔴 未着手 |
+| **3** | 4.10 | E-value 閾値判定 | 小 | `ncbi_cutoffs.rs`, `karlin.rs` | 🟡 未着手 |
+
+### 低優先度 (未調査領域)
+
+| 優先度 | ID | 内容 | ファイル | 状態 |
+|--------|-----|------|----------|------|
+| 5 | 4.1 | Two-hit Window 詳細 | `utils.rs` | ❓ 未調査 |
+| 6 | 4.2 | Lookup Table 構築詳細 | `lookup.rs` | ❓ 未調査 |
+| 7 | 4.3 | Masked Region Extension 処理 | `utils.rs` | ❓ 未調査 |
+| 8 | 4.4 | HSP 重複排除 (Culling) | `sum_stats_linking.rs` | ❓ 未調査 |
+| 9 | 4.5 | Context 別 Karlin パラメータ | `karlin.rs` | ❓ 低優先度 |
+| 10 | 4.6 | BSearchContextInfo 検索 | `utils.rs` | ❓ 未確認 |
 
 ---
 
 ## 9. 次のアクション
+
+### 完了済み
 
 1. ~~**⚠️ X-drop を動的計算に変更** (`utils.rs`)~~ → ✅ **完了 (1.4)**
 2. ~~**⚠️ Per-subject cutoff 更新ロジック確認** (`utils.rs`, `ncbi_cutoffs.rs`)~~ → ✅ **完了 (1.5)**
@@ -773,12 +920,212 @@ LOSATがNCBIより多くのヒットを出力する原因として、以下が�
 4. ~~**🐛 HSP ソート順序を修正** (`sum_stats_linking.rs:517-524`)~~ → ✅ **分析誤り・修正不要 (6.1)**
 5. ~~**Sum-Stats Effective Length 計算確認** (`sum_stats_linking.rs`)~~ → ✅ **完了 (3.7)**
 6. ~~**Frame Base / 座標システムの修正** (`sum_stats_linking.rs`)~~ → ✅ **完了 (3.2)**
-7. **差分確認テストを実行し、残存差異を特定**
-8. **未調査領域の調査** (4.1-4.6) → 次の優先
+7. ~~**差分確認テストを実行し、残存差異を特定**~~ → ✅ **完了**
+
+### 🔴 次の作業 (残存差異対応)
+
+1. ~~**🔥 Sum-Statistics Linking チェイン構造調査** (4.8)~~ → ✅ **調査完了 - NCBIと同等の実装を確認 (2026-01-03)**
+   - `link_hsps.c` と `sum_stats_linking.rs` を全コンポーネント比較
+   - **結論**: リンキングアルゴリズムは正しい。差異の原因は上流工程 (Extension, Reverse strand, E-value閾値)
+   - 詳細 → セクション 4.8 参照
+
+2. **🔥 Extension スコア計算調査** (4.7)
+   - `aa_ungapped.c:831-1158` の extension 関数と `extension.rs` を比較
+   - +1 bit score 差の原因特定
+   - 詳細手順 → セクション 10.3 参照
+
+3. **🔶 Reverse strand 処理調査** (4.9)
+   - TrcuMJNV の reverse strand バイアスの原因特定
+   - 詳細手順 → セクション 10.3 参照
+
+4. **🔶 E-value 閾値判定調査** (4.10)
+   - LOSAT-only ヒットの E-value 境界問題調査
+   - 詳細手順 → セクション 10.3 参照
 
 ---
 
-## 10. 変更履歴
+## 10. 差分確認テスト結果 (2026-01-03)
+
+### 10.1 テスト対象ファイル (10ペア)
+
+| ファイルペア | LOSAT | NCBI | 差分 | 差分率 |
+|-------------|-------|------|-----|-------|
+| MeenMJNV.MejoMJNV | 23285 | 23240 | +45 | +0.19% |
+| MellatMJNV.MeenMJNV | 18586 | 18560 | +26 | +0.14% |
+| TrcuMJNV.MellatMJNV | 5749 | 5804 | **-55** | -0.95% |
+| LvMJNV.TrcuMJNV | 3311 | 3301 | +10 | +0.30% |
+| PemoMJNVB.LvMJNV | 16186 | 16173 | +13 | +0.08% |
+| PeseMJNV.PemoMJNVB | 44899 | 44838 | +61 | +0.14% |
+| PemoMJNVA.PeseMJNV | 34117 | 34062 | +55 | +0.16% |
+| MelaMJNV.PemoMJNVA | 4844 | 4794 | +50 | +1.04% |
+| MjeNMV.MelaMJNV | 23766 | 23709 | +57 | +0.24% |
+| AP027280.AP027280 | 42797 | 42733 | +64 | +0.15% |
+
+**統計**: 共通ヒット率 ~99.8%, スコア完全一致率 ~95-98%
+
+### 10.2 残存差異の分類
+
+#### 🔶 差異1: スコア差異 (+1 bit score)
+
+**現象**: 多数のヒットで LOSAT のスコアが NCBI より **1 bit score 高い**
+
+| ファイル | +1 差異ヒット数 |
+|---------|---------------|
+| MeenMJNV.MejoMJNV | 40 |
+| TrcuMJNV.MellatMJNV | 14 |
+| AP027280.AP027280 | 305 |
+
+**特徴**:
+- identity, aln_len は完全一致
+- raw score で約 **2 点** の差に相当
+- strand や alignment length mod 3 には特定パターンなし
+
+**分析**: NCBI の bit score フォーマットは `%4.1lf` (小数点以下1桁) で LOSAT と同一。問題は raw score 計算にある可能性。
+
+#### 🔴 差異2: LOSAT-only ヒット (偽陽性候補)
+
+**現象**: NCBI に存在しないヒットが LOSAT に存在
+
+| ファイル | LOSAT-only | スコア範囲 | 特徴 |
+|---------|-----------|-----------|------|
+| MeenMJNV.MejoMJNV | 46 | 22-30 | E-value 閾値付近 (0.1-10.0) |
+| TrcuMJNV.MellatMJNV | 58 | 22-30 | reverse strand に偏り |
+| AP027280.AP027280 | 74 | 22-31 | E-value 閾値付近 |
+
+**分析**: 低スコア・閾値ギリギリのヒット。E-value 10.0 境界での判定差、または extension 終了条件の微妙な差が原因の可能性。
+
+#### 🔵 差異3: NCBI-only ヒット (偽陰性候補)
+
+**現象**: LOSAT に存在しないヒットが NCBI に存在
+
+| ファイル | NCBI-only | 特徴 |
+|---------|-----------|------|
+| MeenMJNV.MejoMJNV | 1 | 単一ヒット |
+| TrcuMJNV.MellatMJNV | 113 | **全て reverse strand**, E-value が 0.002/0.010/1.1 の3グループ |
+| AP027280.AP027280 | 10 | **全て同一 E-value (5.33e-09)** → Sum-Statistics チェイン |
+
+**重要な発見**:
+1. **同一 E-value パターン**: Sum-Statistics Linking でチェイン化された HSP が LOSAT では異なるグループ化になっている可能性
+2. **Reverse strand バイアス**: TrcuMJNV の 113 件全てが reverse strand。特定の処理パスで差異がある
+3. **NEARBY LOSAT 存在**: 一部の NCBI-only ヒットには座標が微妙に異なる LOSAT ヒットあり (Extension 差)
+
+### 10.3 優先度順の調査項目 (詳細手順付き)
+
+#### ✅ ~~優先度1: Sum-Statistics Linking の E-value 適用~~ → 調査完了 (2026-01-03)
+
+**結論**: **LOSATの実装はNCBIと同等。コード修正不要。**
+
+**調査結果**:
+- 全コンポーネント (`lh_helper`, `next_larger`, DPループ, `linked_to`, E-valueチェイン適用等) が NCBI と一致
+- フレーム分割の実装構造は異なるが、最終的な HSP 処理順序は同等
+- NCBI-only ヒットの原因は上流工程 (Extension, Reverse strand, E-value閾値) の差異
+
+詳細 → セクション 4.8 参照
+
+---
+
+#### 🔥 優先度1: Extension スコア計算 (+1 bit score 差)
+
+**問題**: 多数のヒットで LOSAT のスコアが NCBI より +1 bit score (raw score で約 2 点) 高い。identity/aln_len は完全一致。
+
+**調査手順**:
+1. **NCBI `s_BlastAaExtendOneHit` / `s_BlastAaExtendTwoHit`** (`aa_ungapped.c:1019-1158`)
+   - word scanning ループでの `maxscore` 初期化・更新
+   - left extension への初期スコア渡し方
+   - right extension への初期スコア渡し方
+2. **LOSAT `extend_hit_ungapped` / `extend_hit_two_hit`** (`extension.rs:55-303`)
+   - **確認**: one-hit extension で `score` を left extension の初期値にしているか ✅ (行 102-103)
+   - **確認**: two-hit extension で左方向拡張の初期値が 0 か ✅ (行 228-229)
+3. **word 内スコア計算の差異**:
+   - NCBI: `for (i = 0; i < word_size; i++)` で word_size 分ループ
+   - LOSAT: `for i in 0..k_size` で k_size (=3) 分ループ
+   - **確認**: `word_size` と `k_size` が同じか (NCBI デフォルトは 3)
+4. **Extension 終了条件**:
+   - NCBI `s_BlastAaExtendRight` (`aa_ungapped.c:831-885`): `if (score <= 0 || (maxscore - score) >= dropoff) break;`
+   - LOSAT (`extension.rs:151`): `if right_score <= 0 || (max_score_total - right_score) >= x_drop { break; }`
+   - **確認**: `>=` vs `>` の差がないか
+5. **具体的なヒットでの検証**:
+   - +1 差があるヒットの座標を特定
+   - その座標で LOSAT/NCBI の extension を step-by-step で比較
+
+**関連ファイル**: `extension.rs`, `aa_ungapped.c`
+
+---
+
+#### 🔶 優先度2: Reverse strand 処理
+
+**問題**: TrcuMJNV.MellatMJNV の NCBI-only ヒット 113 件が**全て reverse strand**。LOSAT には forward strand のみ?
+
+**調査手順**:
+1. **Frame 変換の確認** (`translation.rs`)
+   - reverse strand の frame (-1, -2, -3) の翻訳が正しいか
+   - 座標変換 (nucleotide → AA) が reverse strand で正しく動作するか
+2. **Extension の座標計算** (`utils.rs`)
+   - reverse strand で `q_aa_start`/`q_aa_end` の計算が正しいか
+   - `s_aa_start`/`s_aa_end` の計算が正しいか
+3. **Sum-Statistics でのソート順序**:
+   - NCBI `s_RevCompareHSPsTbx`: `SIGN(subject.frame)` で subject strand を比較
+   - LOSAT: `s_frame.signum()` を使用
+   - **確認**: `signum()` が NCBI の `SIGN()` マクロと同じ動作か
+4. **座標出力の確認**:
+   - reverse strand のヒットが出力時に正しい座標形式になっているか
+   - `q_start > q_end` (reverse) のパターンが正しく処理されるか
+5. **TrcuMJNV の具体的なヒット分析**:
+   - NCBI-only の座標付近で LOSAT の挙動を確認
+   - LOSAT にも同じ座標のヒットがあるが異なる形式で出力されていないか
+
+**関連ファイル**: `translation.rs`, `utils.rs`, `sum_stats_linking.rs`
+
+---
+
+#### 🔶 優先度3: E-value 閾値判定
+
+**問題**: LOSAT-only ヒットの多くが E-value 0.1-10.0 の閾値付近。NCBI では閾値で除外されたが LOSAT では通過?
+
+**調査手順**:
+1. **E-value 閾値の適用箇所**:
+   - NCBI: `BlastHitSavingParametersNew` で `cutoff_score_max` を計算し、E-value 10.0 から逆算
+   - LOSAT: `cutoff_score_max_for_tblastx()` が同等か確認
+2. **search space 計算の確認**:
+   - E-value = K × m × n × exp(-λS) で計算
+   - `m × n` (search space) が LOSAT と NCBI で同一か
+3. **浮動小数点の丸め**:
+   - E-value 計算時の丸め差で閾値境界のヒットが通過/除外される可能性
+   - Rust の `f64` と C の `double` の精度差
+4. **具体的なヒットでの検証**:
+   - LOSAT-only ヒット (E-value ≈ 9.5-10.0) の raw score を確認
+   - その score での E-value を NCBI 方式で再計算して比較
+
+**関連ファイル**: `ncbi_cutoffs.rs`, `karlin.rs`, `sum_stats_linking.rs`
+
+---
+
+### 10.4 確認済み項目
+
+- **bit score フォーマット**: NCBI `%4.1lf` (小数点以下1桁) で LOSAT と同一 ✅
+- **E-value チェイン適用**: LOSAT は chain 全メンバーに同じ E-value を適用 (`sum_stats_linking.rs:1178-1180`) ✅
+- **Sum-Statistics Linking チェイン構造**: LOSAT の実装は NCBI と同等 (全コンポーネント一致を確認) ✅ (2026-01-03 調査完了)
+- **maxsum1 計算差異**: NCBI `link_hsps.c:850` で `if(0)` により無効化されているため、計算方式の違いは出力に影響しない ✅
+- **Sum-Statistics ルックアップテーブル**: TAB2(19要素), TAB3(38要素), TAB4(55要素) が NCBI と完全一致 ✅
+- **ln_factorial 実装**: LOSAT の直接計算と NCBI の lgamma(n+1) は小さな n で同等精度 ✅
+- **グルーピングキー s_idx**: LOSAT はマルチサブジェクト一括処理のため追加。per-subject 処理と結果は同等 ✅
+
+### 10.5 🔧 出力フォーマットの相違点 (未修正)
+
+以下はパリティに影響しない出力フォーマットの違い。機能的には同等だが、diff で差異として検出される。
+
+| 項目 | LOSAT | NCBI | 影響 |
+|------|-------|------|------|
+| **E-value 表記** | `0.0e0`, `7.2e-295` (科学表記) | `0.0`, `0.0` (通常表記) | 数値は同等 |
+| **bit score 小数** | `692.0` (常に小数1桁) | `692` (整数の場合は .0 なし?) | 数値は同等 |
+| **ヘッダー行** | なし | `# TBLASTX 2.17.0+` 等のコメント行あり | 解析ツール依存 |
+| **ヒット数コメント** | なし | `# 23240 hits found` | 情報目的 |
+
+**対応方針**: 機能的には同等なので低優先度。完全一致が必要な場合は `report/outfmt6.rs` を修正。
+
+---
+
+## 12. 変更履歴
 
 | 日付 | 変更内容 |
 |------|----------|
@@ -793,3 +1140,10 @@ LOSATがNCBIより多くのヒットを出力する原因として、以下が�
 | 2026-01-03 | 3.7 Sum-Stats Effective Length 計算を修正完了。NCBI `link_hsps.c:560-571` の詳細分析により、tblastx では subject に対して `length_adjustment / 3` のみを適用することを発見。旧LOSAT は `SearchSpace::with_length_adjustment()` で両方に同じ調整を適用していた。`sum_stats_linking.rs:555-570` で NCBI と同等の計算を直接実装。セクション 3.7, 7, 8, 9 を更新。 |
 | 2026-01-03 | 3.1 Sentinel バイト値を NCBI と同一 (0) に修正。`constants.rs` で `SENTINEL_BYTE = 0` に変更。`matrix.rs` に `DEFSCORE = -4` 定数を追加し、`blosum62_score()` で sentinel (0) をチェックして `-4` を返すように修正。NCBI の FSM 構築方式 (`raw_scoremat.c:90-95`) を調査し、defscore の適用方法を確認。セクション 5.6 を追加して技術的詳細を記録。 |
 | 2026-01-03 | 3.2 Frame Base / 座標システムを修正完了。**問題**: 旧LOSAT の `abs_coords` 関数が concatenated buffer 内の絶対座標 (`frame_base + hit.aa_start + 1`) を計算していたが、NCBI の `link_hsps.c:s_RevCompareHSPsTbx` は frame 内相対座標 (0-indexed) を使用。**修正**: `abs_coords` を `frame_relative_coords` に変更し、frame 内相対座標を直接使用 (`hit.q_aa_start` 等)。NCBI では `s_AdjustInitialHSPOffsets` で context offset を引いて frame 内相対座標に変換している。HspLink 初期化 (trim 座標計算) も同様に修正。ユニットテスト3件が成功。 |
+| 2026-01-03 | **差分確認テストを完了**。10ペアのテストファイルで比較分析。共通ヒット率 ~99.8%。残存差異として(1) +1 bit score 差 (raw score ~2点差)、(2) LOSAT-only ヒット (E-value閾値付近)、(3) NCBI-only ヒット (Sum-Statistics チェインの差異、reverse strand バイアス) を特定。セクション10を追加。 |
+| 2026-01-03 | **セクション4に 4.7-4.10 を追加**: 差分確認テストで発見した残存差異を調査項目として追加。(4.7) Extension スコア計算、(4.8) Sum-Statistics Linking チェイン構造、(4.9) Reverse strand 処理、(4.10) E-value 閾値判定。各項目に NCBI/LOSAT のファイル参照と調査ポイントを記載。 |
+| 2026-01-03 | **セクション8, 9 を更新**: 残存差異対応として 4.7-4.10 を優先度付きで追加。完了済み作業と未着手作業を分離して整理。 |
+| 2026-01-03 | **セクション10.3 に詳細調査手順を追加**: 各優先度項目について、具体的な調査手順(NCBI コード参照箇所、LOSAT 対応ファイル、確認ポイント)を記載。 |
+| 2026-01-03 | **セクション10.5 を追加**: 出力フォーマットの相違点(E-value 表記、bit score 小数、ヘッダー行)を記録。機能的には同等だが diff で差異として検出される点。 |
+| 2026-01-03 | **4.8 Sum-Statistics Linking チェイン構造の調査完了**。NCBI `link_hsps.c` と LOSAT `sum_stats_linking.rs` を全コンポーネント比較。結果: **LOSATの実装はNCBIと同等であり、コード修正不要**。比較項目: `lh_helper`構造、`next_larger` skip-list、Index 0/1 DPループ、`linked_to`カウンター、E-valueチェイン適用、gap probability調整、sum statistics関数群。観察された差異はリンキングではなく上流工程 (Extension, Reverse strand, E-value閾値) が原因。セクション 4.8, 8, 9, 10.3 を更新。 |
+| 2026-01-03 | **4.8 実装差異の詳細追記**。再検証により以下の差異が結果に影響しないことを確認: (1) `maxsum1` チェックは NCBI `if(0)` (line 850) で無効化されているため計算方式の違いは無関係、(2) `s_idx` グルーピングキーは LOSAT のマルチサブジェクト一括処理対応のため追加されたもので結果は同等、(3) `ln_factorial` は LOSAT が直接計算 (sum ln(i))、NCBI が lgamma(n+1) を使用するが小さな n で同等精度、(4) ルックアップテーブル TAB2(19)/TAB3(38)/TAB4(55) は完全一致を確認。セクション 4.8 に詳細表を追加。 |

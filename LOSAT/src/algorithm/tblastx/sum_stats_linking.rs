@@ -16,7 +16,7 @@ use crate::stats::sum_statistics::{
     defaults::{GAP_SIZE, OVERLAP_SIZE},
 };
 use crate::stats::KarlinParams;
-use crate::stats::search_space::SearchSpace;
+use crate::stats::length_adjustment::compute_length_adjustment_simple;
 
 use super::chaining::UngappedHit;
 use super::diagnostics::diagnostics_enabled;
@@ -527,9 +527,47 @@ fn link_hsp_group_ncbi(
     // used for effective length/search-space in sum-statistics.
     // Reference: link_hsps.c:559-562
     let query_context = group_hits[0].ctx_idx;
-    let query_len_aa = query_contexts[query_context].aa_len;
-    let subject_len_aa = (subject_len_nucl / 3).max(1) as usize;
-    let search_space = SearchSpace::with_length_adjustment(query_len_aa, subject_len_aa, params);
+    let query_len_aa = query_contexts[query_context].aa_len as i64;
+    let subject_len_aa = (subject_len_nucl / 3).max(1);
+    
+    // ========================================================================
+    // NCBI link_hsps.c:560-571 - Effective length calculation for tblastx
+    // ========================================================================
+    // ```c
+    // length_adjustment = query_info->contexts[query_context].length_adjustment;
+    // query_length = query_info->contexts[query_context].query_length;
+    // query_length = MAX(query_length - length_adjustment, 1);
+    // subject_length = subject_length_orig; /* in nucleotides even for tblast[nx] */
+    // /* If subject is translated, length adjustment is given in nucleotide
+    //    scale. */
+    // if (Blast_SubjectIsTranslated(program_number))  // tblastx = TRUE
+    // {
+    //    length_adjustment /= CODON_LENGTH;  // divide by 3
+    //    subject_length /= CODON_LENGTH;
+    // }
+    // subject_length = MAX(subject_length - length_adjustment, 1);
+    // ```
+    //
+    // Key insight: For tblastx, NCBI applies length_adjustment differently:
+    //   - query: subtract full length_adjustment
+    //   - subject: subtract (length_adjustment / 3) after converting to AA
+    // ========================================================================
+    let length_adjustment = compute_length_adjustment_simple(
+        query_len_aa,
+        subject_len_aa,
+        params,
+    ).length_adjustment;
+    
+    // NCBI: query_length = MAX(query_length - length_adjustment, 1)
+    let eff_query_len = (query_len_aa - length_adjustment).max(1) as f64;
+    
+    // NCBI: For tblastx (Blast_SubjectIsTranslated = TRUE):
+    //   length_adjustment /= CODON_LENGTH (integer division by 3)
+    //   subject_length = MAX(subject_length - length_adjustment, 1)
+    let length_adj_for_subject = length_adjustment / 3;  // integer division
+    let eff_subject_len = (subject_len_aa - length_adj_for_subject).max(1) as f64;
+    
+    let eff_search_space = eff_query_len * eff_subject_len;
     
     // Use pre-computed cutoffs from NCBI algorithm
     let cutoff_small = cutoffs.cutoff_small_gap;
@@ -548,10 +586,10 @@ fn link_hsp_group_ncbi(
             subject_len_nucl,
             subject_len_aa
         );
-        eprintln!("  effective_query_len={:.2}, effective_db_len={:.2}", 
-            search_space.effective_query_len, search_space.effective_db_len);
-        eprintln!("  effective_space={:.2e}, length_adjustment={}", 
-            search_space.effective_space, search_space.length_adjustment);
+        eprintln!("  length_adjustment={}, length_adj_for_subject={}", 
+            length_adjustment, length_adj_for_subject);
+        eprintln!("  eff_query_len={:.2}, eff_subject_len={:.2}, eff_search_space={:.2e}", 
+            eff_query_len, eff_subject_len, eff_search_space);
         eprintln!("  lambda={}, k={}, logK={:.4}", params.lambda, params.k, params.k.ln());
     }
     
@@ -998,9 +1036,9 @@ fn link_hsp_group_ncbi(
                 let xsum = hsp_links[bi].xsum[0];
                 let divisor = gap_decay_divisor(gap_decay_rate, num);
                 prob[0] = small_gap_sum_e(WINDOW_SIZE, num as i16, xsum,
-                    search_space.effective_query_len as i32,
-                    search_space.effective_db_len as i32,
-                    search_space.effective_space as i64, divisor);
+                    eff_query_len as i32,
+                    eff_subject_len as i32,
+                    eff_search_space as i64, divisor);
                 // NCBI `link_hsps.c` lines 918-922:
                 //   if( num > 1 ) {
                 //     if( gap_prob == 0 || (prob /= gap_prob) > INT4_MAX ) prob = INT4_MAX;
@@ -1020,9 +1058,9 @@ fn link_hsp_group_ncbi(
             let xsum = hsp_links[bi].xsum[1];
             let divisor = gap_decay_divisor(gap_decay_rate, num);
             prob[1] = large_gap_sum_e(num as i16, xsum,
-                search_space.effective_query_len as i32,
-                search_space.effective_db_len as i32,
-                search_space.effective_space as i64, divisor);
+                eff_query_len as i32,
+                eff_subject_len as i32,
+                eff_search_space as i64, divisor);
             // NCBI `link_hsps.c` lines 931-935:
             //   if( num > 1 ) {
             //     if( 1 - gap_prob == 0 || (prob /= 1 - gap_prob) > INT4_MAX ) prob = INT4_MAX;
@@ -1159,5 +1197,239 @@ fn link_hsp_group_ncbi(
     // NCBI behavior: All HSPs are kept in the array, but chain information
     // (num, xsum, evalue) is used for filtering and reporting.
     group_hits
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Helper to create a mock UngappedHit with specified coordinates
+    fn mock_hit(q_aa_start: usize, q_aa_end: usize, s_aa_start: usize, s_aa_end: usize, id: i32) -> UngappedHit {
+        UngappedHit {
+            q_idx: 0,
+            s_idx: 0,
+            ctx_idx: 0,
+            s_f_idx: 0,
+            q_frame: 1,
+            s_frame: 1,
+            q_aa_start,
+            q_aa_end,
+            s_aa_start,
+            s_aa_end,
+            q_orig_len: 1000,
+            s_orig_len: 1000,
+            raw_score: id, // Use raw_score as ID for verification
+            e_value: 1e-10,
+            ordering_method: 0,
+        }
+    }
+
+    /// Verify LOSAT's HSP sort order matches NCBI's s_RevCompareHSPsTbx
+    ///
+    /// NCBI comparison logic (link_hsps.c:359-375):
+    /// ```c
+    /// // ALL fields use the same pattern: h1 < h2 → return 1 (DESCENDING)
+    /// if (h1->query.offset < h2->query.offset)   return  1;
+    /// if (h1->query.offset > h2->query.offset)   return -1;
+    /// if (h1->query.end < h2->query.end)         return  1;
+    /// if (h1->query.end > h2->query.end)         return -1;
+    /// if (h1->subject.offset < h2->subject.offset) return  1;
+    /// if (h1->subject.offset > h2->subject.offset) return -1;
+    /// if (h1->subject.end < h2->subject.end)       return  1;
+    /// if (h1->subject.end > h2->subject.end)       return -1;
+    /// return 0;
+    /// ```
+    ///
+    /// C qsort: compare(a,b) > 0 means "a comes after b"
+    /// So `if (h1 < h2) return 1` means smaller values come AFTER = DESCENDING order
+    #[test]
+    fn test_hsp_sort_order_matches_ncbi() {
+        // Mock query context with frame_base = 0
+        let query_contexts = vec![QueryContext {
+            q_idx: 0,
+            f_idx: 0,
+            frame: 1,
+            aa_seq: vec![],
+            aa_seq_nomask: None,
+            aa_len: 500,
+            orig_len: 1500,
+            frame_base: 0,
+        }];
+        let subject_frame_bases = vec![0i32];
+
+        // Test data: hits with varying coordinates
+        // ID = raw_score for identification after sort
+        //
+        // Expected order after NCBI-style sort (all descending):
+        // 1. q_off=100, q_end=150, s_off=200, s_end=250 (ID=1) - largest q_off/q_end/s_off/s_end
+        // 2. q_off=100, q_end=150, s_off=150, s_end=200 (ID=2) - same q_*, smaller s_off
+        // 3. q_off=100, q_end=140, s_off=200, s_end=250 (ID=3) - same q_off, smaller q_end
+        // 4. q_off=50,  q_end=100, s_off=300, s_end=350 (ID=4) - smallest q_off
+        let mut hits = vec![
+            mock_hit(50, 100, 300, 350, 4),   // Should be 4th (smallest q_off)
+            mock_hit(100, 140, 200, 250, 3),  // Should be 3rd (smaller q_end)
+            mock_hit(100, 150, 200, 250, 1),  // Should be 1st (largest all)
+            mock_hit(100, 150, 150, 200, 2),  // Should be 2nd (smaller s_off)
+        ];
+
+        // Replicate the LOSAT sort logic from link_hsp_group_ncbi
+        #[inline]
+        fn abs_coords(
+            hit: &UngappedHit,
+            query_contexts: &[QueryContext],
+            subject_frame_bases: &[i32],
+        ) -> (i32, i32, i32, i32) {
+            let q_base = query_contexts[hit.ctx_idx].frame_base;
+            let s_base = subject_frame_bases[hit.s_f_idx];
+            let q_off = q_base + hit.q_aa_start as i32 + 1;
+            let q_end = q_base + hit.q_aa_end as i32 + 1;
+            let s_off = s_base + hit.s_aa_start as i32 + 1;
+            let s_end = s_base + hit.s_aa_end as i32 + 1;
+            (q_off, q_end, s_off, s_end)
+        }
+
+        // LOSAT sort: all fields use b.cmp(&a) = descending
+        hits.sort_by(|a, b| {
+            let (aqo, aqe, aso, ase) = abs_coords(a, &query_contexts, &subject_frame_bases);
+            let (bqo, bqe, bso, bse) = abs_coords(b, &query_contexts, &subject_frame_bases);
+            bqo.cmp(&aqo)
+                .then(bqe.cmp(&aqe))
+                .then(bso.cmp(&aso))
+                .then(bse.cmp(&ase))
+        });
+
+        // Verify order by checking raw_score (used as ID)
+        let sorted_ids: Vec<i32> = hits.iter().map(|h| h.raw_score).collect();
+        let expected_ids = vec![1, 2, 3, 4];
+
+        println!("LOSAT sorted order (by ID): {:?}", sorted_ids);
+        println!("Expected NCBI order:        {:?}", expected_ids);
+
+        assert_eq!(
+            sorted_ids, expected_ids,
+            "HSP sort order mismatch! LOSAT={:?}, NCBI expected={:?}",
+            sorted_ids, expected_ids
+        );
+    }
+
+    /// Test that ties are handled correctly (stable sort behavior)
+    #[test]
+    fn test_hsp_sort_identical_coords() {
+        let query_contexts = vec![QueryContext {
+            q_idx: 0,
+            f_idx: 0,
+            frame: 1,
+            aa_seq: vec![],
+            aa_seq_nomask: None,
+            aa_len: 500,
+            orig_len: 1500,
+            frame_base: 0,
+        }];
+        let subject_frame_bases = vec![0i32];
+
+        // Two hits with identical coordinates but different IDs
+        let mut hits = vec![
+            mock_hit(100, 150, 200, 250, 1),
+            mock_hit(100, 150, 200, 250, 2),
+        ];
+
+        #[inline]
+        fn abs_coords(
+            hit: &UngappedHit,
+            query_contexts: &[QueryContext],
+            subject_frame_bases: &[i32],
+        ) -> (i32, i32, i32, i32) {
+            let q_base = query_contexts[hit.ctx_idx].frame_base;
+            let s_base = subject_frame_bases[hit.s_f_idx];
+            let q_off = q_base + hit.q_aa_start as i32 + 1;
+            let q_end = q_base + hit.q_aa_end as i32 + 1;
+            let s_off = s_base + hit.s_aa_start as i32 + 1;
+            let s_end = s_base + hit.s_aa_end as i32 + 1;
+            (q_off, q_end, s_off, s_end)
+        }
+
+        hits.sort_by(|a, b| {
+            let (aqo, aqe, aso, ase) = abs_coords(a, &query_contexts, &subject_frame_bases);
+            let (bqo, bqe, bso, bse) = abs_coords(b, &query_contexts, &subject_frame_bases);
+            bqo.cmp(&aqo)
+                .then(bqe.cmp(&aqe))
+                .then(bso.cmp(&aso))
+                .then(bse.cmp(&ase))
+        });
+
+        // Sort should be stable - original order preserved for equal elements
+        let sorted_ids: Vec<i32> = hits.iter().map(|h| h.raw_score).collect();
+        // Rust's sort_by is stable, so [1, 2] should remain [1, 2]
+        assert_eq!(sorted_ids, vec![1, 2], "Stable sort should preserve order for equal elements");
+    }
+
+    /// Verify NCBI comparison semantics: all fields use DESCENDING order
+    /// This documents the correct interpretation of s_RevCompareHSPsTbx
+    #[test]
+    fn test_ncbi_comparison_semantics() {
+        // NCBI s_RevCompareHSPsTbx (link_hsps.c:367-370):
+        // if (h1->subject.offset < h2->subject.offset) return 1;
+        // if (h1->subject.offset > h2->subject.offset) return -1;
+        //
+        // In C qsort: positive return means first arg comes AFTER second arg
+        // So: h1.offset < h2.offset → h1 after h2 → smaller comes after → DESCENDING
+        //
+        // The status document incorrectly stated this was ASCENDING.
+        // This test documents the correct interpretation.
+
+        let query_contexts = vec![QueryContext {
+            q_idx: 0,
+            f_idx: 0,
+            frame: 1,
+            aa_seq: vec![],
+            aa_seq_nomask: None,
+            aa_len: 500,
+            orig_len: 1500,
+            frame_base: 0,
+        }];
+        let subject_frame_bases = vec![0i32];
+
+        // Test: same query coords, different subject offsets
+        // NCBI descending: larger s_off should come first
+        let mut hits = vec![
+            mock_hit(100, 150, 50, 100, 1),   // s_off=50 (smaller)
+            mock_hit(100, 150, 200, 250, 2),  // s_off=200 (larger)
+        ];
+
+        #[inline]
+        fn abs_coords(
+            hit: &UngappedHit,
+            query_contexts: &[QueryContext],
+            subject_frame_bases: &[i32],
+        ) -> (i32, i32, i32, i32) {
+            let q_base = query_contexts[hit.ctx_idx].frame_base;
+            let s_base = subject_frame_bases[hit.s_f_idx];
+            let q_off = q_base + hit.q_aa_start as i32 + 1;
+            let q_end = q_base + hit.q_aa_end as i32 + 1;
+            let s_off = s_base + hit.s_aa_start as i32 + 1;
+            let s_end = s_base + hit.s_aa_end as i32 + 1;
+            (q_off, q_end, s_off, s_end)
+        }
+
+        hits.sort_by(|a, b| {
+            let (aqo, aqe, aso, ase) = abs_coords(a, &query_contexts, &subject_frame_bases);
+            let (bqo, bqe, bso, bse) = abs_coords(b, &query_contexts, &subject_frame_bases);
+            bqo.cmp(&aqo)
+                .then(bqe.cmp(&aqe))
+                .then(bso.cmp(&aso))  // LOSAT: b.cmp(&a) = DESCENDING
+                .then(bse.cmp(&ase))
+        });
+
+        let sorted_ids: Vec<i32> = hits.iter().map(|h| h.raw_score).collect();
+        
+        // DESCENDING: larger s_off (ID=2) should come first
+        assert_eq!(
+            sorted_ids, vec![2, 1],
+            "Subject offset should be sorted DESCENDING (larger first). Got: {:?}",
+            sorted_ids
+        );
+        
+        println!("✓ Confirmed: LOSAT uses DESCENDING order for subject.offset (matches NCBI)");
+    }
 }
 

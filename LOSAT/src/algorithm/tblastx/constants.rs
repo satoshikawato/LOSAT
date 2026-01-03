@@ -90,12 +90,15 @@ pub const GAP_TRIGGER_BIT_SCORE: f64 = 22.0;
 /// 
 /// Reference: ncbi-blast/c++/src/algo/blast/core/blast_encoding.c:120
 ///   const Uint1 kProtSentinel = NULLB;
+/// Reference: ncbi-blast/c++/include/algo/blast/core/ncbi_std.h:181
+///   #define NULLB '\0'
 /// Reference: ncbi-blast/c++/src/util/tables/sm_blosum62.c:95
 ///   defscore = -4 (for characters not in the matrix)
 /// 
-/// In LOSAT, we use 255 as the sentinel value (outside the 0-24 amino acid range).
-/// The extension functions check for this value and apply a large penalty.
-pub const SENTINEL_BYTE: u8 = 255;
+/// LOSAT uses the same value (0) as NCBI for full parity.
+/// The extension functions and blosum62_score() check for this value and apply
+/// the defscore penalty (-4).
+pub const SENTINEL_BYTE: u8 = 0;
 
 /// Penalty applied when extension hits a sentinel byte.
 /// NCBI uses defscore = -4 for unknown/sentinel residues.

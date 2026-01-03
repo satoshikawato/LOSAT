@@ -20,14 +20,16 @@ pub struct QueryFrame {
     /// Translated amino acid sequence with NCBI-style sentinel bytes.
     /// 
     /// Layout: [SENTINEL_BYTE, aa_0, aa_1, ..., aa_n-1, SENTINEL_BYTE]
-    /// - aa_seq[0] = SENTINEL_BYTE (255)
-    /// - aa_seq[1..len-1] = actual amino acids (encoded in NCBISTDAA 0-27)
-    /// - aa_seq[len-1] = SENTINEL_BYTE (255)
+    /// - aa_seq[0] = SENTINEL_BYTE (0) - NCBI NULLB
+    /// - aa_seq[1..len-1] = actual amino acids (encoded in NCBISTDAA 1-27)
+    /// - aa_seq[len-1] = SENTINEL_BYTE (0) - NCBI NULLB
     /// 
     /// When accessing amino acid at logical position i, use aa_seq[i + 1].
     /// When reporting coordinates, subtract 1 from the raw position.
     /// 
     /// Reference: ncbi-blast/c++/src/algo/blast/core/blast_util.c:438-453
+    ///   prot_seq[0] = NULLB;  // sentinel at beginning
+    ///   prot_seq[index_prot] = NULLB;  // sentinel at end
     pub aa_seq: Vec<u8>,
     /// Unmasked amino acid sequence (NCBI `sequence_nomask` semantics), including sentinels.
     ///
@@ -161,12 +163,13 @@ mod tests {
         let frames = generate_frames(seq, &code);
         
         let frame = &frames[0]; // Frame 1
-        // aa_seq should be: [SENTINEL, aa0, aa1, aa2, aa3, SENTINEL]
+        // aa_seq should be: [SENTINEL(0), aa0, aa1, aa2, aa3, SENTINEL(0)]
         assert_eq!(frame.aa_seq.len(), 6); // 4 AAs + 2 sentinels
         assert_eq!(frame.aa_len, 4);
         assert_eq!(frame.aa_seq[0], SENTINEL_BYTE);
         assert_eq!(frame.aa_seq[5], SENTINEL_BYTE);
         // Middle positions should be valid amino acids (not sentinels)
+        // Note: NCBISTDAA encodes actual AAs as 1-27, so they are never 0
         for i in 1..5 {
             assert_ne!(frame.aa_seq[i], SENTINEL_BYTE);
         }

@@ -15,11 +15,13 @@ use super::constants::{
 
 /// Get the substitution matrix score for two amino acids in NCBISTDAA encoding.
 /// 
-/// If either character is a sentinel byte (SENTINEL_BYTE = 255), returns
-/// SENTINEL_PENALTY to trigger X-drop termination at sequence boundaries.
+/// If either character is a sentinel byte (SENTINEL_BYTE = 0, NCBI NULLB), returns
+/// SENTINEL_PENALTY (-4) to trigger X-drop termination at sequence boundaries.
 /// 
 /// Reference: ncbi-blast/c++/src/algo/blast/core/blast_encoding.c:120
 ///   const Uint1 kProtSentinel = NULLB;
+/// Reference: ncbi-blast/c++/include/algo/blast/core/ncbi_std.h:181
+///   #define NULLB '\0'
 #[inline(always)]
 pub fn get_score(a: u8, b: u8) -> i32 {
     // Check for sentinel bytes (NCBI BLAST style sequence boundary markers)

@@ -1,13 +1,58 @@
-Reading queries (neighbor map mode)...
-Building neighbor lookup...
-Pre-computing filtered neighbor map (threshold=13)...
-Filtered neighbor map computed in 11.9325ms
-  Non-empty entries: 13005
-  Total neighbor pairs: 184952
-  Avg neighbors per k-mer: 14.2
-Query lookup: 728968 entries (exact matches only)
-Using compressed neighbor index (no expanded_lookup)...
+Reading queries...
+Building lookup table...
+
+=== Phase 1a: Exact Indexing Diagnostics ===
+Total exact positions indexed: 871586
+Unique exact words: 9260
+Max offsets per exact word: 1101
+Skipped (invalid residue): 0
+Skipped (SEG mask): 359642
+
+=== Phase 1b: Neighbor Generation Diagnostics ===
+Threshold: 13
+Exact entries added (self_score < threshold): 124613
+Neighbor entries added: 12177230
+Neighbor words generated (unique): 185005
+Words with exact-only additions: 870
+Words with neighbor generation: 8390
+Max neighbors generated for single word: 138
+  Word with max neighbors: idx=13972 (residues 13,20,20)
+Expansion factor (total_entries / exact_positions): 14.11x
+
+=== Phase 2: High-Frequency K-mer Analysis ===
+Top 10 high-frequency k-mers (before suppression):
+  #1: count=8325, idx=6804 (residues 6,20,20)
+  #2: count=8325, idx=21133 (residues 20,20,13)
+  #3: count=8248, idx=13972 (residues 13,20,20)
+  #4: count=8193, idx=20692 (residues 20,6,20)
+  #5: count=8043, idx=20916 (residues 20,13,20)
+  #6: count=7819, idx=21126 (residues 20,20,6)
+  #7: count=7199, idx=6868 (residues 6,22,20)
+  #8: count=7158, idx=22740 (residues 22,6,20)
+  #9: count=7116, idx=6356 (residues 6,6,20)
+  #10: count=6978, idx=13524 (residues 13,6,20)
+Hit count distribution:
+  1-1: 2 cells, 2 entries
+  2-10: 97 cells, 741 entries
+  11-100: 2199 cells, 117161 entries
+  101-500: 5600 cells, 1538577 entries
+  501-1000: 2377 cells, 1665025 entries
+  1001-5000: 3387 cells, 7774592 entries
+  5001-10000: 213 cells, 1205745 entries
+
+=== NCBI Backbone Lookup Table (BLASTAA_SIZE=28) ===
+Contexts: 6
+Backbone size: 28540 cells (0.5 MB)
+Non-empty cells: 13875
+Total entries: 12301843
+High-frequency suppression: 0 cells filtered (0 entries dropped), max_hits_per_kmer=18446744073709551615
+Overflow size: 12301824 (49.2 MB)
+Longest chain: 8325
+==========================================
+
 Reading subjects...
-Searching 1 queries vs 1 subjects (neighbor map mode, avg_query_length=205207)...
-=== Stage Counters ===
-[1] Raw ungapped hits (after extension): 150919
+Searching 1 queries vs 1 subjects... (avg_query_length=205207)
+
+real	5m28.314s
+user	19m24.188s
+sys	0m0.110s

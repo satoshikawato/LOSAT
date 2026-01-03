@@ -1,38 +1,58 @@
-Reading queries (neighbor map mode)...
-Building neighbor lookup...
-Pre-computing filtered neighbor map (threshold=13)...
-Filtered neighbor map computed in 12.269ms
-  Non-empty entries: 13005
-  Total neighbor pairs: 184567
-  Avg neighbors per k-mer: 14.2
-Query lookup: 640159 entries (exact matches only)
-Using compressed neighbor index (no expanded_lookup)...
-Reading subjects...
-Searching 1 queries vs 1 subjects (neighbor map mode, avg_query_length=214346)...
-[DEBUG TOP HIT] score=10781 len=2227 q_frame=-1 s_frame=-2
-  coords: q_start=1679 q_end=3906 s_start=1766 s_end=3993
-  seed positions: s_left_off=1770 s_raw=1770
-  q_aa[raw 1680]=15  q_aa[raw-1 1679]=21 (X=21)
-  q_aa[raw end-1 3906]=15  q_aa[raw end 3907]=9 (X=21)
-  X's near left boundary [1649-1679]: [1649, 1650, 1651, 1652, 1653, 1654, 1655, 1656, 1657, 1658, 1659, 1660, 1661, 1662, 1663, 1664, 1665, 1666, 1667, 1668, 1669, 1670, 1671, 1672, 1673, 1674, 1675, 1676, 1677, 1678, 1679]
-  X's near right boundary [3906-3936]: [3908, 3909, 3910, 3911, 3912, 3913, 3914, 3915, 3916, 3917, 3918, 3919, 3920, 3921, 3922, 3923, 3924, 3925, 3926, 3927]
-[DEBUG TOP HIT] score=11207 len=2225 q_frame=-1 s_frame=-2
-  coords: q_start=35797 q_end=38022 s_start=39811 s_end=42036
-  seed positions: s_left_off=39815 s_raw=39815
-  q_aa[raw 35798]=18  q_aa[raw-1 35797]=21 (X=21)
-  q_aa[raw end-1 38022]=10  q_aa[raw end 38023]=19 (X=21)
-  X's near left boundary [35767-35797]: [35772, 35773, 35774, 35775, 35776, 35777, 35778, 35779, 35780, 35781, 35782, 35783, 35784, 35785, 35786, 35787, 35788, 35789, 35790, 35791, 35792, 35793, 35794, 35795, 35796, 35797]
-  X's near right boundary [38022-38052]: [38024, 38025, 38026, 38027, 38028, 38029, 38030, 38031, 38032, 38033, 38034, 38035, 38036, 38037, 38038, 38039, 38040, 38041]
-=== Stage Counters ===
-[1] Raw ungapped hits (after extension): 161413
-[2] After sum_stats_linking: 161413 hits
-[3] E-value distribution (before final filter):
-    E=0: 15380, E<=1e-50: 24455, E<=1e-10: 6363, E<=10: 5864, E>10: 109351, E=INF: 0
-Pre-generating subject frames for identity calculation...
-[4] Final hits after E-value filter (threshold=10): 52062
-[5] Top alignment length: 2227 AA
-=== End Stage Counters ===
+Reading queries...
+Building lookup table...
 
-real	1m22.693s
-user	3m25.306s
-sys	0m0.110s
+=== Phase 1a: Exact Indexing Diagnostics ===
+Total exact positions indexed: 849034
+Unique exact words: 9254
+Max offsets per exact word: 1335
+Skipped (invalid residue): 0
+Skipped (SEG mask): 437028
+
+=== Phase 1b: Neighbor Generation Diagnostics ===
+Threshold: 13
+Exact entries added (self_score < threshold): 124745
+Neighbor entries added: 11124712
+Neighbor words generated (unique): 184686
+Words with exact-only additions: 870
+Words with neighbor generation: 8384
+Max neighbors generated for single word: 138
+  Word with max neighbors: idx=13972 (residues 13,20,20)
+Expansion factor (total_entries / exact_positions): 13.25x
+
+=== Phase 2: High-Frequency K-mer Analysis ===
+Top 10 high-frequency k-mers (before suppression):
+  #1: count=8152, idx=20692 (residues 20,6,20)
+  #2: count=7921, idx=6804 (residues 6,20,20)
+  #3: count=7885, idx=13972 (residues 13,20,20)
+  #4: count=7779, idx=20916 (residues 20,13,20)
+  #5: count=7505, idx=21126 (residues 20,20,6)
+  #6: count=7073, idx=21133 (residues 20,20,13)
+  #7: count=7010, idx=6356 (residues 6,6,20)
+  #8: count=7009, idx=6790 (residues 6,20,6)
+  #9: count=6974, idx=22740 (residues 22,6,20)
+  #10: count=6820, idx=13524 (residues 13,6,20)
+Hit count distribution:
+  1-1: 2 cells, 2 entries
+  2-10: 163 cells, 1225 entries
+  11-100: 2334 cells, 123506 entries
+  101-500: 5661 cells, 1500817 entries
+  501-1000: 2369 cells, 1675379 entries
+  1001-5000: 3235 cells, 7309417 entries
+  5001-10000: 111 cells, 639111 entries
+
+=== NCBI Backbone Lookup Table (BLASTAA_SIZE=28) ===
+Contexts: 6
+Backbone size: 28540 cells (0.5 MB)
+Non-empty cells: 13875
+Total entries: 11249457
+High-frequency suppression: 0 cells filtered (0 entries dropped), max_hits_per_kmer=18446744073709551615
+Overflow size: 11249440 (45.0 MB)
+Longest chain: 8152
+==========================================
+
+Reading subjects...
+Searching 1 queries vs 1 subjects... (avg_query_length=214346)
+
+real	8m50.314s
+user	26m59.858s
+sys	0m0.050s

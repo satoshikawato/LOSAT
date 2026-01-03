@@ -4,7 +4,6 @@ use LOSAT::algorithm::tblastx::lookup::{encode_aa_kmer, build_direct_lookup};
 use LOSAT::algorithm::tblastx::lookup::{build_ncbi_lookup, pv_test};
 use LOSAT::algorithm::tblastx::translation::generate_frames;
 use LOSAT::utils::genetic_code::GeneticCode;
-use LOSAT::utils::dust::MaskedInterval;
 
 #[test]
 fn test_encode_aa_kmer_basic() {
@@ -105,9 +104,7 @@ fn test_build_direct_lookup_basic() {
     
     // Build lookup table
     let queries = vec![frames];
-    let query_masks = vec![Vec::<MaskedInterval>::new()]; // No masking
-    
-    let lookup = build_direct_lookup(&queries, &query_masks);
+    let lookup = build_direct_lookup(&queries);
     
     // Verify table size (NCBI-style backbone size for 0..=23 with charsize=5)
     assert_eq!(lookup.len(), 24_312);
@@ -124,9 +121,7 @@ fn test_build_direct_lookup_multiple_frames() {
     let frames = generate_frames(dna_seq, &code);
     
     let queries = vec![frames];
-    let query_masks = vec![Vec::<MaskedInterval>::new()];
-    
-    let lookup = build_direct_lookup(&queries, &query_masks);
+    let lookup = build_direct_lookup(&queries);
     
     // Each frame should contribute k-mers
     // With 6 frames and ~6 codons per frame, we should have multiple hits
@@ -145,9 +140,7 @@ fn test_build_direct_lookup_multiple_queries() {
     let frames2 = generate_frames(dna_seq2, &code);
     
     let queries = vec![frames1, frames2];
-    let query_masks = vec![Vec::<MaskedInterval>::new(), Vec::<MaskedInterval>::new()];
-    
-    let lookup = build_direct_lookup(&queries, &query_masks);
+    let lookup = build_direct_lookup(&queries);
     
     // Both queries should contribute hits
     let total_hits: usize = lookup.iter().map(|bucket| bucket.len()).sum();
@@ -162,22 +155,25 @@ fn test_build_direct_lookup_multiple_queries() {
 }
 
 #[test]
-fn test_build_direct_lookup_with_masking() {
+fn test_build_direct_lookup_with_seg_masking() {
     let code = GeneticCode::from_id(1);
     let dna_seq = b"ATGCGATCGATCGATCG"; // 18 bases
-    let frames = generate_frames(dna_seq, &code);
-    
-    // Mask positions 0-5 (first 6 bases, which affects frame 1)
-    let mask = vec![MaskedInterval { start: 0, end: 6 }];
-    
-    let queries = vec![frames];
-    let query_masks = vec![mask];
-    
-    let lookup = build_direct_lookup(&queries, &query_masks);
-    
-    // Some k-mers should be filtered out due to masking
-    let total_hits: usize = lookup.iter().map(|bucket| bucket.len()).sum();
-    assert!(total_hits >= 0); // May be reduced due to masking
+    let mut frames_nomask = generate_frames(dna_seq, &code);
+    // Keep just one frame to make the hit count comparison stable.
+    frames_nomask.retain(|f| f.frame == 1);
+    assert_eq!(frames_nomask.len(), 1);
+
+    let mut frames_masked = frames_nomask.clone();
+    // Mask first few logical AA positions; seeds should not be generated from them.
+    frames_masked[0].seg_masks.push((0, 3));
+
+    let lookup_nomask = build_direct_lookup(&vec![frames_nomask]);
+    let lookup_masked = build_direct_lookup(&vec![frames_masked]);
+
+    let total_hits_nomask: usize = lookup_nomask.iter().map(|bucket| bucket.len()).sum();
+    let total_hits_masked: usize = lookup_masked.iter().map(|bucket| bucket.len()).sum();
+
+    assert!(total_hits_masked <= total_hits_nomask);
 }
 
 #[test]
@@ -189,9 +185,7 @@ fn test_build_direct_lookup_short_sequence() {
     let frames = generate_frames(dna_seq, &code);
     
     let queries = vec![frames];
-    let query_masks = vec![Vec::<MaskedInterval>::new()];
-    
-    let lookup = build_direct_lookup(&queries, &query_masks);
+    let lookup = build_direct_lookup(&queries);
     
     // With only 1 codon, we can't form any 3-mer k-mers
     // So lookup should be mostly empty
@@ -206,9 +200,7 @@ fn test_build_direct_lookup_frame_indices() {
     let frames = generate_frames(dna_seq, &code);
     
     let queries = vec![frames];
-    let query_masks = vec![Vec::<MaskedInterval>::new()];
-    
-    let lookup = build_direct_lookup(&queries, &query_masks);
+    let lookup = build_direct_lookup(&queries);
     
     // Verify frame indices are valid
     let num_frames = queries[0].len();
@@ -240,9 +232,7 @@ fn test_build_ncbi_lookup_indexes_low_self_score_exact_word() {
     assert_eq!(frames.len(), 1);
 
     let queries = vec![frames];
-    let query_masks = vec![Vec::<MaskedInterval>::new()];
-
-    let (lookup, _ctx) = build_ncbi_lookup(&queries, &query_masks, 13, true, true, 0, false);
+    let (lookup, _ctx) = build_ncbi_lookup(&queries, 13, true, true, 0, false);
 
     // AAA encodes to index 0 regardless of alphabet_size/word_length here.
     assert!(pv_test(&lookup.pv, 0));
@@ -266,9 +256,7 @@ fn test_build_ncbi_lookup_longest_chain_tracks_max_cell() {
     assert_eq!(frames.len(), 1);
 
     let queries = vec![frames];
-    let query_masks = vec![Vec::<MaskedInterval>::new()];
-
-    let (lookup, _ctx) = build_ncbi_lookup(&queries, &query_masks, 13, true, true, 0, false);
+    let (lookup, _ctx) = build_ncbi_lookup(&queries, 13, true, true, 0, false);
 
     // AAA index is 0.
     let hits = lookup.get_hits(0);
@@ -283,9 +271,7 @@ fn test_build_direct_lookup_amino_acid_positions() {
     let frames = generate_frames(dna_seq, &code);
     
     let queries = vec![frames];
-    let query_masks = vec![Vec::<MaskedInterval>::new()];
-    
-    let lookup = build_direct_lookup(&queries, &query_masks);
+    let lookup = build_direct_lookup(&queries);
     
     // Verify amino acid positions are LOGICAL (0-indexed, not counting sentinels)
     for bucket in &lookup {

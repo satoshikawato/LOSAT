@@ -1,24 +1,56 @@
-Reading queries (neighbor map mode)...
-Building neighbor lookup...
-Pre-computing filtered neighbor map (threshold=13)...
-Filtered neighbor map computed in 13.7944ms
-  Non-empty entries: 13005
-  Total neighbor pairs: 184404
-  Avg neighbors per k-mer: 14.2
-Query lookup: 455989 entries (exact matches only)
-Using compressed neighbor index (no expanded_lookup)...
-Reading subjects...
-Searching 1 queries vs 1 subjects (neighbor map mode, avg_query_length=98048)...
-=== Stage Counters ===
-[1] Raw ungapped hits (after extension): 43315
-[2] After sum_stats_linking: 43315 hits
-[3] E-value distribution (before final filter):
-    E=0: 19083, E<=1e-50: 8015, E<=1e-10: 2221, E<=10: 1771, E>10: 12225, E=INF: 0
-Pre-generating subject frames for identity calculation...
-[4] Final hits after E-value filter (threshold=10): 31090
-[5] Top alignment length: 848 AA
-=== End Stage Counters ===
+Reading queries...
+Building lookup table...
 
-real	0m11.568s
-user	0m11.515s
-sys	0m0.010s
+=== Phase 1a: Exact Indexing Diagnostics ===
+Total exact positions indexed: 471848
+Unique exact words: 9253
+Max offsets per exact word: 1641
+Skipped (invalid residue): 0
+Skipped (SEG mask): 116424
+
+=== Phase 1b: Neighbor Generation Diagnostics ===
+Threshold: 13
+Exact entries added (self_score < threshold): 70752
+Neighbor entries added: 4556608
+Neighbor words generated (unique): 184404
+Words with exact-only additions: 870
+Words with neighbor generation: 8383
+Max neighbors generated for single word: 138
+  Word with max neighbors: idx=13972 (residues 13,20,20)
+Expansion factor (total_entries / exact_positions): 9.81x
+
+=== Phase 2: High-Frequency K-mer Analysis ===
+Top 10 high-frequency k-mers (before suppression):
+  #1: count=1947, idx=22646 (residues 22,3,22)
+  #2: count=1874, idx=22627 (residues 22,3,3)
+  #3: count=1863, idx=23235 (residues 22,22,3)
+  #4: count=1794, idx=23240 (residues 22,22,8)
+  #5: count=1792, idx=3190 (residues 3,3,22)
+  #6: count=1773, idx=3798 (residues 3,22,22)
+  #7: count=1744, idx=3779 (residues 3,22,3)
+  #8: count=1648, idx=16483 (residues 16,3,3)
+  #9: count=1641, idx=26425 (residues 25,25,25)
+  #10: count=1637, idx=3184 (residues 3,3,16)
+Hit count distribution:
+  2-10: 75 cells, 590 entries
+  11-100: 3293 cells, 178903 entries
+  101-500: 6897 cells, 1816089 entries
+  501-1000: 3291 cells, 2250312 entries
+  1001-5000: 319 cells, 381466 entries
+
+=== NCBI Backbone Lookup Table (BLASTAA_SIZE=28) ===
+Contexts: 6
+Backbone size: 28540 cells (0.5 MB)
+Non-empty cells: 13875
+Total entries: 4627360
+High-frequency suppression: 0 cells filtered (0 entries dropped), max_hits_per_kmer=18446744073709551615
+Overflow size: 4627345 (18.5 MB)
+Longest chain: 1947
+==========================================
+
+Reading subjects...
+Searching 1 queries vs 1 subjects... (avg_query_length=98048)
+
+real	0m8.344s
+user	0m8.221s
+sys	0m0.040s

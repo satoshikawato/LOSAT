@@ -20,11 +20,13 @@ use crate::stats::search_space::SearchSpace;
 
 use super::chaining::UngappedHit;
 use super::diagnostics::diagnostics_enabled;
+use super::lookup::QueryContext;
 
-// NCBI groups by (query_context, subject_frame_sign) for linking
-// For tblastx, query_context is the query frame (1-6), subject_frame_sign is +/-
-// We extend this to include q_idx and s_idx for multi-sequence support
-type ContextKey = (u32, u32, i8, i8); // (q_idx, s_idx, q_frame, s_frame)
+// NCBI groups by `(context/3)` (query strand + query index) and `SIGN(subject.frame)` (subject strand).
+// For LOSAT multi-sequence support we explicitly include `(q_idx, s_idx)` and store only the strand signs.
+//
+// Reference: ncbi-blast/c++/src/algo/blast/core/link_hsps.c:522-525
+type ContextKey = (u32, u32, i8, i8); // (q_idx, s_idx, q_strand, s_strand)
 
 const WINDOW_SIZE: i32 = GAP_SIZE + OVERLAP_SIZE + 1;
 const TRIM_SIZE: i32 = (OVERLAP_SIZE + 1) / 2;
@@ -404,6 +406,8 @@ pub fn apply_sum_stats_even_gap_linking(
     hits: Vec<UngappedHit>,
     params: &KarlinParams,
     linking_params: &LinkingParams,
+    query_contexts: &[QueryContext],
+    subject_frame_bases: &[i32],
 ) -> Vec<UngappedHit> {
     if hits.is_empty() {
         return hits;
@@ -438,7 +442,16 @@ pub fn apply_sum_stats_even_gap_linking(
     let results: Vec<Vec<UngappedHit>> = groups
         .into_par_iter()
         .map(|(_, group_hits)| {
-            link_hsp_group_ncbi(group_hits, params, &cutoffs, linking_params.gap_decay_rate, diag_enabled)
+            link_hsp_group_ncbi(
+                group_hits,
+                params,
+                &cutoffs,
+                linking_params.gap_decay_rate,
+                diag_enabled,
+                linking_params.subject_len_nucl,
+                query_contexts,
+                subject_frame_bases,
+            )
         })
         .collect();
 
@@ -459,6 +472,9 @@ fn link_hsp_group_ncbi(
     cutoffs: &LinkHspCutoffs,
     gap_decay_rate: f64,
     diag_enabled: bool,
+    subject_len_nucl: i64,
+    query_contexts: &[QueryContext],
+    subject_frame_bases: &[i32],
 ) -> Vec<UngappedHit> {
     if group_hits.is_empty() {
         return group_hits;
@@ -466,10 +482,54 @@ fn link_hsp_group_ncbi(
     
     let n = group_hits.len();
     
-    let first_hit = &group_hits[0];
-    let q_aa_len = first_hit.q_orig_len / 3;
-    let s_aa_len = first_hit.s_orig_len / 3;
-    let search_space = SearchSpace::with_length_adjustment(q_aa_len, s_aa_len, params);
+    // Convert LOSAT per-frame logical AA coordinates into NCBI-style absolute offsets
+    // within the concatenated translation buffers (frames are separated by sentinel bytes).
+    //
+    // NCBI stores HSP coordinates in these absolute offsets and sorts/links across
+    // `(context/3)` (strand+query index) and `SIGN(subject.frame)`.
+    //
+    // NCBI reference (verbatim comparator for tblastx reverse sort):
+    //   if (h1->query.offset < h2->query.offset) return  1;
+    //   if (h1->query.offset > h2->query.offset) return -1;
+    //   if (h1->query.end   < h2->query.end)   return  1;
+    //   if (h1->query.end   > h2->query.end)   return -1;
+    //   if (h1->subject.offset < h2->subject.offset) return  1;
+    //   if (h1->subject.offset > h2->subject.offset) return -1;
+    //   if (h1->subject.end   < h2->subject.end)   return  1;
+    //   if (h1->subject.end   > h2->subject.end)   return -1;
+    // Source: ncbi-blast/c++/src/algo/blast/core/link_hsps.c:s_RevCompareHSPsTbx (lines ~359-374)
+    #[inline]
+    fn abs_coords(
+        hit: &UngappedHit,
+        query_contexts: &[QueryContext],
+        subject_frame_bases: &[i32],
+    ) -> (i32, i32, i32, i32) {
+        let q_base = query_contexts[hit.ctx_idx].frame_base;
+        let s_base = subject_frame_bases[hit.s_f_idx];
+        let q_off = q_base + hit.q_aa_start as i32 + 1; // +1 for leading sentinel
+        let q_end = q_base + hit.q_aa_end as i32 + 1;   // +1 for leading sentinel
+        let s_off = s_base + hit.s_aa_start as i32 + 1; // +1 for leading sentinel
+        let s_end = s_base + hit.s_aa_end as i32 + 1;   // +1 for leading sentinel
+        (q_off, q_end, s_off, s_end)
+    }
+
+    // Sort by reverse position in the absolute concatenated coordinate system (NCBI parity).
+    group_hits.sort_by(|a, b| {
+        let (aqo, aqe, aso, ase) = abs_coords(a, query_contexts, subject_frame_bases);
+        let (bqo, bqe, bso, bse) = abs_coords(b, query_contexts, subject_frame_bases);
+        bqo.cmp(&aqo)
+            .then(bqe.cmp(&aqe))
+            .then(bso.cmp(&aso))
+            .then(bse.cmp(&ase))
+    });
+
+    // NCBI uses the first HSP in this frame/strand group to select the query context
+    // used for effective length/search-space in sum-statistics.
+    // Reference: link_hsps.c:559-562
+    let query_context = group_hits[0].ctx_idx;
+    let query_len_aa = query_contexts[query_context].aa_len;
+    let subject_len_aa = (subject_len_nucl / 3).max(1) as usize;
+    let search_space = SearchSpace::with_length_adjustment(query_len_aa, subject_len_aa, params);
     
     // Use pre-computed cutoffs from NCBI algorithm
     let cutoff_small = cutoffs.cutoff_small_gap;
@@ -481,7 +541,13 @@ fn link_hsp_group_ncbi(
     static DEBUG_ONCE: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
     if diag_enabled && !DEBUG_ONCE.swap(true, std::sync::atomic::Ordering::Relaxed) {
         eprintln!("[DEBUG] link_hsp_group_ncbi first group:");
-        eprintln!("  q_aa_len={}, s_aa_len={}", q_aa_len, s_aa_len);
+        eprintln!(
+            "  query_context={}, q_aa_len={}, subject_len_nucl={}, subject_aa_len={}",
+            query_context,
+            query_len_aa,
+            subject_len_nucl,
+            subject_len_aa
+        );
         eprintln!("  effective_query_len={:.2}, effective_db_len={:.2}", 
             search_space.effective_query_len, search_space.effective_db_len);
         eprintln!("  effective_space={:.2e}, length_adjustment={}", 
@@ -496,14 +562,7 @@ fn link_hsp_group_ncbi(
             cutoff_small, cutoff_big, ignore_small_gaps, gap_prob);
     }
 
-    // Sort by query position DESCENDING (NCBI s_RevCompareHSPsTbx)
-    // Note: NCBI sorts by context and subject.frame first, but we've already grouped by those
-    group_hits.sort_by(|a, b| {
-        b.q_aa_start.cmp(&a.q_aa_start)
-            .then(b.q_aa_end.cmp(&a.q_aa_end))
-            .then(b.s_aa_start.cmp(&a.s_aa_start))
-            .then(b.s_aa_end.cmp(&a.s_aa_end))
-    });
+    // NOTE: We already sorted group_hits above using NCBI's reverse comparator semantics.
 
     // NCBI `link_hsps.c` does NOT pre-initialize per-HSP e-values here.
     // Every HSP receives its (possibly linked-set) e-value during the
@@ -513,19 +572,21 @@ fn link_hsp_group_ncbi(
     // NCBI uses 1-based indexing with lh_helper[0] as sentinel
     // We use 0-based but handle the logic appropriately
     let mut hsp_links: Vec<HspLink> = group_hits.iter().enumerate().map(|(i, hit)| {
-        let ql = (hit.q_aa_end as i32 - hit.q_aa_start as i32).abs();
-        let sl = (hit.s_aa_end as i32 - hit.s_aa_start as i32).abs();
-        let qt = TRIM_SIZE.min(ql / 4);
-        let st = TRIM_SIZE.min(sl / 4);
+        // Absolute coordinates in concatenated translation buffers (NCBI HSP coords)
+        let (q_off, q_end, s_off, s_end) = abs_coords(hit, query_contexts, subject_frame_bases);
+        let q_len_quarter = (q_end - q_off) / 4;
+        let s_len_quarter = (s_end - s_off) / 4;
+        let qt = TRIM_SIZE.min(q_len_quarter);
+        let st = TRIM_SIZE.min(s_len_quarter);
         let score = hit.raw_score;
         let xsum_val = normalize_score(score, params.lambda, params.k.ln());
         
         HspLink {
             score,
-            q_off_trim: hit.q_aa_start as i32 + qt,
-            s_off_trim: hit.s_aa_start as i32 + st,
-            q_end_trim: hit.q_aa_end as i32 - qt,
-            s_end_trim: hit.s_aa_end as i32 - st,
+            q_off_trim: q_off + qt,
+            s_off_trim: s_off + st,
+            q_end_trim: q_end - qt,
+            s_end_trim: s_end - st,
             sum: [score - cutoff_small, score - cutoff_big],
             xsum: [xsum_val, xsum_val],
             num: [1, 1],

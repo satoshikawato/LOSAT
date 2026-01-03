@@ -360,3 +360,27 @@ Missing hit の詳細分析で、同一DNA diagonal上に異なるframe組み合
 
 **これは商用リリース前に修正必須のバグ。**
 
+### 調査進捗 (2026-01-02 追加)
+
+詳細調査の結果、問題箇所を特定：
+
+1. **Raw hits の差**: 
+   - 標準パス: 64,358 raw hits
+   - Neighbor-map: 63,489 raw hits
+   - **差: 869 raw hits** (extension 前の段階で既に差がある)
+
+2. **調査済みの箇所**:
+   - `s_left_off` の座標変換 (+1 for sentinel) → 効果なし
+   - Diagonal tracking の構造 → 正しく分離されている
+   - 閾値・x_drop 値 → 両パスで同一 (`X_DROP_UNGAPPED`, `args.threshold`)
+   - SEG masking → 両パスで `frame.aa_seq` (masked) を使用
+
+3. **未調査の箇所**:
+   - Lookup table の実際のエントリ数の比較
+   - Neighbor map のフィルタリングロジック (`pv_test`)
+   - Two-hit window の diagonal 座標計算
+
+4. **次回の調査方針**:
+   - 両パスで同じ (q_pos, s_pos) ペアを入力として、どこで分岐するかトレース
+   - デバッグ出力を追加して specific missing hit の生成過程を追跡
+

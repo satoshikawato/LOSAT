@@ -5,6 +5,12 @@ use std::fs::File;
 use std::io::{self, BufWriter, Write};
 use std::path::PathBuf;
 
+use crate::report::{
+    OutputFormat, OutputConfig, ReportContext, 
+    format_hit, write_outfmt7, 
+    PairwiseConfig, write_pairwise_simple,
+};
+
 #[derive(Debug, Clone)]
 pub struct Hit {
     pub query_id: String, // インデックスではなくIDを持つように変更（並列処理後の出力順序制御のため）
@@ -186,6 +192,56 @@ pub fn write_output(hits: &[Hit], out_path: Option<&PathBuf>) -> Result<()> {
     Ok(())
 }
 
+// =============================================================================
+// NCBI-compatible output with format selection
+// =============================================================================
+
+/// Write output with NCBI-compatible formatting and format selection
+///
+/// Supports:
+/// - outfmt 0: Pairwise alignment view
+/// - outfmt 6: Tabular output (default)
+/// - outfmt 7: Tabular with comment lines
+pub fn write_output_with_format(
+    hits: &[Hit],
+    out_path: Option<&PathBuf>,
+    outfmt: OutputFormat,
+    context: &ReportContext,
+) -> Result<()> {
+    let stdout = io::stdout();
+    let mut writer: Box<dyn Write> = if let Some(path) = out_path {
+        Box::new(BufWriter::new(File::create(path)?))
+    } else {
+        Box::new(BufWriter::new(stdout.lock()))
+    };
+    
+    // NCBI-compatible output config
+    let config = OutputConfig::ncbi_compat();
+    
+    match outfmt {
+        OutputFormat::Pairwise => {
+            // outfmt 0: Pairwise alignment view
+            let pairwise_config = PairwiseConfig {
+                program: context.program.clone(),
+                ..Default::default()
+            };
+            write_pairwise_simple(hits, &mut writer, &pairwise_config, context)?;
+        }
+        OutputFormat::Tabular => {
+            // outfmt 6: Tabular output
+            for hit in hits {
+                writeln!(writer, "{}", format_hit(hit, &config))?;
+            }
+        }
+        OutputFormat::TabularWithComments => {
+            // outfmt 7: Tabular with comment lines
+            write_outfmt7(hits, &mut writer, &config, context)?;
+        }
+    }
+    
+    Ok(())
+}
+
 /// Write output with NCBI-style ordering:
 /// 1. Group by query (input order)
 /// 2. Within query, sort subjects by s_EvalueCompareHSPLists (best_evalue ASC → best_score DESC → oid DESC)
@@ -195,7 +251,22 @@ pub fn write_output(hits: &[Hit], out_path: Option<&PathBuf>) -> Result<()> {
 /// - BLAST_LinkHsps() calls Blast_HSPListSortByScore() after linking
 /// - BlastHitList sorts subjects by s_EvalueCompareHSPLists
 /// - Final output iterates query → subject → HSP
-pub fn write_output_ncbi_order(mut hits: Vec<Hit>, out_path: Option<&PathBuf>) -> Result<()> {
+pub fn write_output_ncbi_order(hits: Vec<Hit>, out_path: Option<&PathBuf>) -> Result<()> {
+    write_output_ncbi_order_with_format(hits, out_path, OutputFormat::Tabular, &ReportContext::default())
+}
+
+/// Write output with NCBI-style ordering and format selection
+///
+/// Supports:
+/// - outfmt 0: Pairwise alignment view  
+/// - outfmt 6: Tabular output (default)
+/// - outfmt 7: Tabular with comment lines
+pub fn write_output_ncbi_order_with_format(
+    mut hits: Vec<Hit>,
+    out_path: Option<&PathBuf>,
+    outfmt: OutputFormat,
+    context: &ReportContext,
+) -> Result<()> {
     let stdout = io::stdout();
     let mut writer: Box<dyn Write> = if let Some(path) = out_path {
         Box::new(BufWriter::new(File::create(path)?))
@@ -204,8 +275,17 @@ pub fn write_output_ncbi_order(mut hits: Vec<Hit>, out_path: Option<&PathBuf>) -
     };
 
     if hits.is_empty() {
+        // For outfmt 7, still write header even with no hits
+        if outfmt == OutputFormat::TabularWithComments {
+            crate::report::write_outfmt7_header(&mut writer, context, 0)?;
+        } else if outfmt == OutputFormat::Pairwise {
+            writeln!(writer, " ***** No hits found *****")?;
+        }
         return Ok(());
     }
+
+    // NCBI-compatible output config
+    let config = OutputConfig::ncbi_compat();
 
     // Step 1: Group by query (preserving input order via q_idx)
     // Collect unique queries in order
@@ -226,6 +306,9 @@ pub fn write_output_ncbi_order(mut hits: Vec<Hit>, out_path: Option<&PathBuf>) -
             .or_default()
             .push(h);
     }
+
+    // For outfmt 0 (pairwise), we need to collect all sorted hits first
+    let mut all_sorted_hits: Vec<Hit> = Vec::new();
 
     // Step 2: For each query, build subject groups and sort
     for &q_idx in &query_order {
@@ -268,26 +351,45 @@ pub fn write_output_ncbi_order(mut hits: Vec<Hit>, out_path: Option<&PathBuf>) -
         // Sort subjects by s_EvalueCompareHSPLists
         subject_groups.sort_by(compare_subject_groups);
 
-        // Step 3: Output in order
-        for group in subject_groups {
-            for hit in group.hits {
-                writeln!(
-                    writer,
-                    "{}\t{}\t{:.3}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{:.1e}\t{:.1}",
-                    hit.query_id,
-                    hit.subject_id,
-                    hit.identity,
-                    hit.length,
-                    hit.mismatch,
-                    hit.gapopen,
-                    hit.q_start,
-                    hit.q_end,
-                    hit.s_start,
-                    hit.s_end,
-                    hit.e_value,
-                    hit.bit_score
-                )?;
+        // Step 3: Output in order based on format
+        match outfmt {
+            OutputFormat::Pairwise => {
+                // Collect hits for later pairwise output
+                for group in subject_groups {
+                    all_sorted_hits.extend(group.hits);
+                }
             }
+            OutputFormat::Tabular => {
+                // outfmt 6: Tabular output with NCBI formatting
+                for group in subject_groups {
+                    for hit in group.hits {
+                        writeln!(writer, "{}", format_hit(&hit, &config))?;
+                    }
+                }
+            }
+            OutputFormat::TabularWithComments => {
+                // outfmt 7: Collect for later output with headers
+                for group in subject_groups {
+                    all_sorted_hits.extend(group.hits);
+                }
+            }
+        }
+    }
+
+    // Handle formats that need post-processing
+    match outfmt {
+        OutputFormat::Pairwise => {
+            let pairwise_config = PairwiseConfig {
+                program: context.program.clone(),
+                ..Default::default()
+            };
+            write_pairwise_simple(&all_sorted_hits, &mut writer, &pairwise_config, context)?;
+        }
+        OutputFormat::TabularWithComments => {
+            write_outfmt7(&all_sorted_hits, &mut writer, &config, context)?;
+        }
+        OutputFormat::Tabular => {
+            // Already written above
         }
     }
 

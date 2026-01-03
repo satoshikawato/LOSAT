@@ -52,6 +52,6 @@ Longest chain: 5245
 Reading subjects...
 Searching 1 queries vs 1 subjects... (avg_query_length=97424)
 
-real	0m45.445s
-user	2m19.493s
+real	2m7.071s
+user	2m6.960s
 sys	0m0.030s

@@ -11,6 +11,7 @@
 //! - pv: presence vector bitfield
 
 use crate::utils::matrix::{BLASTAA_SIZE, blosum62_score};
+use crate::stats::KarlinParams;
 use super::translation::QueryFrame;
 
 pub const AA_HITS_PER_CELL: usize = 3;
@@ -161,6 +162,9 @@ pub struct QueryContext {
     pub aa_len: usize,
     pub orig_len: usize,
     pub frame_base: i32,
+    /// NCBI: kbp[context] - Karlin parameters for this context
+    /// Reference: link_hsps.c line 750-752, 866-867
+    pub karlin_params: KarlinParams,
 }
 
 impl BlastAaLookupTable {
@@ -229,6 +233,7 @@ pub fn build_ncbi_lookup(
     _ncbi_stop_stop_score: bool, // Ignored - always use NCBI BLOSUM62 (*-* = +1)
     max_hits_per_kmer: usize,
     lazy_neighbors: bool,
+    karlin_params: &KarlinParams, // NCBI: kbp[context] for each context
 ) -> (BlastAaLookupTable, Vec<QueryContext>) {
     let word_length = LOOKUP_WORD_LENGTH;
     let alphabet_size = LOOKUP_ALPHABET_SIZE; // 28
@@ -253,6 +258,7 @@ pub fn build_ncbi_lookup(
                 aa_len: frame.aa_len,
                 orig_len: frame.orig_len,
                 frame_base: base,
+                karlin_params: karlin_params.clone(),
             });
             // NCBI concatenates translated frames by *sharing* the boundary sentinel NULLB.
             // BLAST_GetTranslation writes both leading+trailing NULLB; the next frame starts
@@ -943,6 +949,7 @@ impl NeighborLookup {
     pub fn build(
         queries: &[Vec<QueryFrame>],
         threshold: i32,
+        karlin_params: &KarlinParams, // NCBI: kbp[context] for each context
     ) -> Self {
         // Build exact query lookup
         let query_lookup = build_direct_lookup(queries);
@@ -973,6 +980,7 @@ impl NeighborLookup {
                     aa_len: frame.aa_len,
                     orig_len: frame.orig_len,
                     frame_base: base,
+                    karlin_params: karlin_params.clone(),
                 });
                 // See build_ncbi_lookup() above: share the trailing NULLB sentinel between frames.
                 base += frame.aa_seq.len() as i32 - 1;

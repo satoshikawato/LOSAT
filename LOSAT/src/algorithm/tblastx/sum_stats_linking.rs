@@ -101,6 +101,55 @@ impl Default for LinkingParams {
     }
 }
 
+/// Find Karlin parameters with smallest Lambda from a list of context parameters
+///
+/// This replicates NCBI's s_BlastFindSmallestLambda (blast_parameters.c:92-112)
+/// which finds the Karlin block with the smallest lambda value.
+///
+/// For tblastx, all contexts typically use kbp_ideal (same lambda), but we
+/// maintain this logic for NCBI structural parity.
+///
+/// Reference:
+/// ```c
+/// static double
+/// s_BlastFindSmallestLambda(Blast_KarlinBlk** kbp_in, 
+///                           const BlastQueryInfo* query_info,
+///                           Blast_KarlinBlk** kbp_out)
+/// {
+///     Int4 i;
+///     double min_lambda = (double) INT4_MAX;
+///
+///     for (i=query_info->first_context; i<=query_info->last_context; i++) {
+///         if (s_BlastKarlinBlkIsValid(kbp_in[i])) {
+///             if (min_lambda > kbp_in[i]->Lambda)
+///             {
+///                 min_lambda = kbp_in[i]->Lambda;
+///                 if (kbp_out)
+///                   *kbp_out = kbp_in[i];
+///             }
+///         }
+///     }
+///     return min_lambda;
+/// }
+/// ```
+pub fn find_smallest_lambda_params(params_list: &[KarlinParams]) -> Option<KarlinParams> {
+    params_list
+        .iter()
+        .filter(|p| p.lambda > 0.0)
+        .min_by(|a, b| a.lambda.partial_cmp(&b.lambda).unwrap_or(std::cmp::Ordering::Equal))
+        .cloned()
+}
+
+/// Find smallest Lambda value from a list of context parameters
+/// Returns the minimum lambda value (f64::MAX if list is empty or all invalid)
+pub fn find_smallest_lambda(params_list: &[KarlinParams]) -> f64 {
+    params_list
+        .iter()
+        .filter(|p| p.lambda > 0.0)
+        .map(|p| p.lambda)
+        .fold(f64::MAX, f64::min)
+}
+
 /// Compute NCBI-style average query length from nucleotide lengths
 ///
 /// This replicates NCBI's SetupQueryInfo_OMF + CalculateLinkHSPCutoffs logic:
@@ -371,6 +420,7 @@ struct LhHelper {
 #[derive(Clone)]
 struct HspLink {
     score: i32,
+    ctx_idx: usize,          // NCBI: H->hsp->context - for kbp[context] lookup
     q_off_trim: i32,
     s_off_trim: i32,
     q_end_trim: i32,
@@ -403,7 +453,7 @@ const SENTINEL_IDX: usize = usize::MAX;
 /// * `params` - Karlin-Altschul parameters for the scoring matrix
 /// * `linking_params` - NCBI-style linking parameters (avg query length, subject length, etc.)
 pub fn apply_sum_stats_even_gap_linking(
-    hits: Vec<UngappedHit>,
+    mut hits: Vec<UngappedHit>,
     params: &KarlinParams,
     linking_params: &LinkingParams,
     query_contexts: &[QueryContext],
@@ -427,35 +477,111 @@ pub fn apply_sum_stats_even_gap_linking(
         params,
     );
 
-    // Group by (q_idx, s_idx, q_strand, s_strand) to match NCBI link_hsps.c
-    // NCBI groups by context/3 (query strand) and SIGN(subject.frame) (subject strand)
-    // Reference: link_hsps.c lines 524-525
-    let mut groups: FxHashMap<ContextKey, Vec<UngappedHit>> = FxHashMap::default();
-    for hit in hits {
-        let q_strand: i8 = if hit.q_frame > 0 { 1 } else { -1 };
-        let s_strand: i8 = if hit.s_frame > 0 { 1 } else { -1 };
-        let key = (hit.q_idx, hit.s_idx, q_strand, s_strand);
-        groups.entry(key).or_default().push(hit);
+    // Debug output for cutoffs (controlled by LOSAT_DEBUG_CUTOFFS env var)
+    static DEBUG_CUTOFFS_PRINTED: std::sync::atomic::AtomicBool = 
+        std::sync::atomic::AtomicBool::new(false);
+    if std::env::var("LOSAT_DEBUG_CUTOFFS").is_ok() 
+        && !DEBUG_CUTOFFS_PRINTED.swap(true, std::sync::atomic::Ordering::SeqCst) 
+    {
+        eprintln!("=== LOSAT Linking Cutoffs Debug ===");
+        eprintln!("  avg_query_length: {}", linking_params.avg_query_length);
+        eprintln!("  subject_len_nucl: {}", linking_params.subject_len_nucl);
+        eprintln!("  cutoff_score_min: {}", linking_params.cutoff_score_min);
+        eprintln!("  lambda: {:.6}", params.lambda);
+        eprintln!("  K: {:.6}", params.k);
+        eprintln!("  H: {:.6}", params.h);
+        eprintln!("  cutoff_small_gap: {}", cutoffs.cutoff_small_gap);
+        eprintln!("  cutoff_big_gap: {}", cutoffs.cutoff_big_gap);
+        eprintln!("  gap_prob: {:.6}", cutoffs.gap_prob);
+        eprintln!("  ignore_small_gaps: {}", cutoffs.ignore_small_gaps);
+        eprintln!("  WINDOW_SIZE: {}", WINDOW_SIZE);
+        eprintln!("  TRIM_SIZE: {}", TRIM_SIZE);
+        eprintln!("===================================");
     }
 
-    // Process each group in parallel - all groups use NCBI-compliant linking
-    let results: Vec<Vec<UngappedHit>> = groups
-        .into_par_iter()
-        .map(|(_, group_hits)| {
-            link_hsp_group_ncbi(
-                group_hits,
-                params,
-                &cutoffs,
-                linking_params.gap_decay_rate,
-                diag_enabled,
-                linking_params.subject_len_nucl,
-                query_contexts,
-                subject_frame_bases,
-            )
-        })
-        .collect();
-
-    results.into_iter().flatten().collect()
+    // =======================================================================
+    // NCBI link_hsps.c EXACT REPLICATION:
+    // 1. Sort ALL HSPs by s_RevCompareHSPsTbx (lines 484-490)
+    // 2. Scan sorted list and detect frame boundaries (lines 514-534)
+    // 3. Process each frame group SEQUENTIALLY (lines 553-982)
+    // =======================================================================
+    
+    // Step 1: Sort ALL HSPs using s_RevCompareHSPsTbx order
+    // NCBI: qsort(link_hsp_array, ..., s_RevCompareHSPsTbx)
+    // Sort key: (q_idx, s_idx, context/3, SIGN(s_frame), q_off desc, q_end desc, s_off desc, s_end desc)
+    hits.sort_unstable_by(|a, b| {
+        // Primary: q_idx, s_idx (for multi-query/subject)
+        a.q_idx.cmp(&b.q_idx)
+            .then(a.s_idx.cmp(&b.s_idx))
+            // NCBI line 343-349: context/(NUM_FRAMES/2) = context/3 for query strand
+            .then_with(|| {
+                let a_qstrand = if a.q_frame > 0 { 0 } else { 1 };
+                let b_qstrand = if b.q_frame > 0 { 0 } else { 1 };
+                a_qstrand.cmp(&b_qstrand)
+            })
+            // NCBI line 351-357: SIGN(subject.frame)
+            .then_with(|| {
+                let a_ssign = a.s_frame.signum();
+                let b_ssign = b.s_frame.signum();
+                // NCBI: if h1->subject.frame > h2->subject.frame return 1
+                b_ssign.cmp(&a_ssign)
+            })
+            // NCBI lines 359-374: all descending
+            .then(b.q_aa_start.cmp(&a.q_aa_start))
+            .then(b.q_aa_end.cmp(&a.q_aa_end))
+            .then(b.s_aa_start.cmp(&a.s_aa_start))
+            .then(b.s_aa_end.cmp(&a.s_aa_end))
+    });
+    
+    // Step 2: Detect frame boundaries in sorted list (NCBI lines 514-534)
+    // Split into groups where (context/3, SIGN(s_frame)) changes
+    let mut frame_groups: Vec<Vec<UngappedHit>> = Vec::new();
+    let mut current_group: Vec<UngappedHit> = Vec::new();
+    
+    for hit in hits {
+        let q_strand = if hit.q_frame > 0 { 1i8 } else { -1i8 };
+        let s_sign = hit.s_frame.signum();
+        
+        if let Some(prev) = current_group.last() {
+            let prev_q_strand = if prev.q_frame > 0 { 1i8 } else { -1i8 };
+            let prev_s_sign = prev.s_frame.signum();
+            
+            // NCBI line 522-525: frame boundary detection
+            if prev.q_idx != hit.q_idx 
+                || prev.s_idx != hit.s_idx
+                || prev_q_strand != q_strand 
+                || prev_s_sign != s_sign 
+            {
+                // Frame switch - start new group
+                if !current_group.is_empty() {
+                    frame_groups.push(std::mem::take(&mut current_group));
+                }
+            }
+        }
+        current_group.push(hit);
+    }
+    if !current_group.is_empty() {
+        frame_groups.push(current_group);
+    }
+    
+    // Step 3: Process each frame group SEQUENTIALLY (NCBI does not parallelize)
+    // NCBI line 553: for (frame_index=0; frame_index<num_query_frames; frame_index++)
+    let mut results: Vec<UngappedHit> = Vec::new();
+    for group_hits in frame_groups {
+        let processed = link_hsp_group_ncbi(
+            group_hits,
+            params,
+            &cutoffs,
+            linking_params.gap_decay_rate,
+            diag_enabled,
+            linking_params.subject_len_nucl,
+            query_contexts,
+            subject_frame_bases,
+        );
+        results.extend(processed);
+    }
+    
+    results
 }
 
 /// NCBI-style HSP linking for moderate-sized groups
@@ -516,7 +642,8 @@ fn link_hsp_group_ncbi(
     }
 
     // Sort by reverse position using frame-relative coordinates (NCBI parity).
-    group_hits.sort_by(|a, b| {
+    // NCBI uses qsort (unstable), so we use sort_unstable_by for parity.
+    group_hits.sort_unstable_by(|a, b| {
         let (aqo, aqe, aso, ase) = frame_relative_coords(a);
         let (bqo, bqe, bso, bse) = frame_relative_coords(b);
         bqo.cmp(&aqo)
@@ -550,9 +677,20 @@ fn link_hsp_group_ncbi(
     // subject_length = MAX(subject_length - length_adjustment, 1);
     // ```
     //
-    // Key insight: For tblastx, NCBI applies length_adjustment differently:
-    //   - query: subtract full length_adjustment
-    //   - subject: subtract (length_adjustment / 3) after converting to AA
+    // Key insight: For tblastx, NCBI applies length_adjustment differently
+    // in TWO SEPARATE PLACES:
+    //
+    // 1. LOCAL effective lengths (link_hsps.c:560-571) - for BLAST_SmallGapSumE arguments:
+    //    - query: subtract full length_adjustment
+    //    - subject: subtract (length_adjustment / 3) after converting to AA
+    //
+    // 2. eff_searchsp (blast_setup.c:836-843, BLAST_CalcEffLengths) - for searchsp_eff argument:
+    //    - query: subtract full length_adjustment
+    //    - subject: subtract full length_adjustment (NOT 1/3!)
+    //    - eff_searchsp = (db_length - num_seqs*length_adj) * (query_length - length_adj)
+    //
+    // NCBI passes these as THREE INDEPENDENT arguments to BLAST_SmallGapSumE:
+    //   (query_length, subject_length, query_info->contexts[ctx].eff_searchsp)
     // ========================================================================
     let length_adjustment = compute_length_adjustment_simple(
         query_len_aa,
@@ -563,13 +701,21 @@ fn link_hsp_group_ncbi(
     // NCBI: query_length = MAX(query_length - length_adjustment, 1)
     let eff_query_len = (query_len_aa - length_adjustment).max(1) as f64;
     
+    // NCBI parity: eff_searchsp uses full length_adjustment for BOTH query AND subject
+    // Reference: blast_setup.c:836-843 (BLAST_CalcEffLengths)
+    //   effective_db_length = db_length - ((Int8)db_num_seqs * length_adjustment);
+    //   effective_search_space = effective_db_length * (query_length - length_adjustment);
+    // For subject mode (num_seqs=1): eff_searchsp = (subject_aa - length_adj) * (query_aa - length_adj)
+    let eff_subject_for_searchsp = (subject_len_aa - length_adjustment).max(1) as f64;
+    let eff_search_space = eff_query_len * eff_subject_for_searchsp;
+    
+    // LOCAL effective subject length for BLAST_SmallGapSumE/LargeGapSumE arguments
+    // (uses 1/3 adjustment for subject per link_hsps.c:566-571)
     // NCBI: For tblastx (Blast_SubjectIsTranslated = TRUE):
     //   length_adjustment /= CODON_LENGTH (integer division by 3)
     //   subject_length = MAX(subject_length - length_adjustment, 1)
     let length_adj_for_subject = length_adjustment / 3;  // integer division
     let eff_subject_len = (subject_len_aa - length_adj_for_subject).max(1) as f64;
-    
-    let eff_search_space = eff_query_len * eff_subject_len;
     
     // Use pre-computed cutoffs from NCBI algorithm
     let cutoff_small = cutoffs.cutoff_small_gap;
@@ -590,8 +736,10 @@ fn link_hsp_group_ncbi(
         );
         eprintln!("  length_adjustment={}, length_adj_for_subject={}", 
             length_adjustment, length_adj_for_subject);
-        eprintln!("  eff_query_len={:.2}, eff_subject_len={:.2}, eff_search_space={:.2e}", 
-            eff_query_len, eff_subject_len, eff_search_space);
+        eprintln!("  eff_query_len={:.2}, eff_subject_len={:.2} (local), eff_subject_for_searchsp={:.2}", 
+            eff_query_len, eff_subject_len, eff_subject_for_searchsp);
+        eprintln!("  eff_search_space={:.2e} (uses full length_adj for subject)", 
+            eff_search_space);
         eprintln!("  lambda={}, k={}, logK={:.4}", params.lambda, params.k, params.k.ln());
     }
     
@@ -620,10 +768,15 @@ fn link_hsp_group_ncbi(
         let qt = TRIM_SIZE.min(q_len_quarter);
         let st = TRIM_SIZE.min(s_len_quarter);
         let score = hit.raw_score;
-        let xsum_val = normalize_score(score, params.lambda, params.k.ln());
+        let ctx_idx = hit.ctx_idx;
+        // NCBI line 750-752: kbp[H->hsp->context]->Lambda, kbp[H->hsp->context]->logK
+        let ctx_lambda = query_contexts[ctx_idx].karlin_params.lambda;
+        let ctx_log_k = query_contexts[ctx_idx].karlin_params.k.ln();
+        let xsum_val = normalize_score(score, ctx_lambda, ctx_log_k);
         
         HspLink {
             score,
+            ctx_idx,
             q_off_trim: q_off + qt,
             s_off_trim: s_off + st,
             q_end_trim: q_end - qt,
@@ -875,7 +1028,11 @@ fn link_hsp_group_ncbi(
                     // NCBI lines 750-767: Update this HSP's link info
                     let score = hsp_links[i].score;
                     let new_sum = h_sum + (score - cutoff_small);
-                    let new_xsum = h_xsum + normalize_score(score, params.lambda, params.k.ln());
+                    // NCBI line 750-752: kbp[H->hsp->context]->Lambda, kbp[H->hsp->context]->logK
+                    let ctx_idx = hsp_links[i].ctx_idx;
+                    let ctx_lambda = query_contexts[ctx_idx].karlin_params.lambda;
+                    let ctx_log_k = query_contexts[ctx_idx].karlin_params.k.ln();
+                    let new_xsum = h_xsum + normalize_score(score, ctx_lambda, ctx_log_k);
                     
                     hsp_links[i].sum[0] = new_sum;
                     hsp_links[i].num[0] = h_num + 1;
@@ -983,7 +1140,11 @@ fn link_hsp_group_ncbi(
                 // NCBI lines 863-895: Update this HSP's link info
                 let score = hsp_links[i].score;
                 let new_sum = h_sum + (score - cutoff_big);
-                let new_xsum = h_xsum + normalize_score(score, params.lambda, params.k.ln());
+                // NCBI line 866-867: kbp[H->hsp->context]->Lambda, kbp[H->hsp->context]->logK
+                let ctx_idx = hsp_links[i].ctx_idx;
+                let ctx_lambda = query_contexts[ctx_idx].karlin_params.lambda;
+                let ctx_log_k = query_contexts[ctx_idx].karlin_params.k.ln();
+                let new_xsum = h_xsum + normalize_score(score, ctx_lambda, ctx_log_k);
                 
                 hsp_links[i].sum[1] = new_sum;
                 hsp_links[i].num[1] = h_num + 1;
@@ -1035,6 +1196,10 @@ fn link_hsp_group_ncbi(
         
         if !ignore_small_gaps {
             if let Some(bi) = best[0] {
+                // NCBI lines 907-908: Add back cutoff*num that was subtracted during DP
+                // best[0]->hsp_link.sum[0] += (best[0]->hsp_link.num[0])*cutoff[0];
+                hsp_links[bi].sum[0] += (hsp_links[bi].num[0] as i32) * cutoff_small;
+                
                 let num = hsp_links[bi].num[0] as usize;
                 let xsum = hsp_links[bi].xsum[0];
                 let divisor = gap_decay_divisor(gap_decay_rate, num);
@@ -1054,43 +1219,45 @@ fn link_hsp_group_ncbi(
                     }
                 }
             }
-        }
-        
-        if let Some(bi) = best[1] {
-            let num = hsp_links[bi].num[1] as usize;
-            let xsum = hsp_links[bi].xsum[1];
-            let divisor = gap_decay_divisor(gap_decay_rate, num);
-            prob[1] = large_gap_sum_e(num as i16, xsum,
-                eff_query_len as i32,
-                eff_subject_len as i32,
-                eff_search_space as i64, divisor);
-            // NCBI `link_hsps.c` lines 931-935:
-            //   if( num > 1 ) {
-            //     if( 1 - gap_prob == 0 || (prob /= 1 - gap_prob) > INT4_MAX ) prob = INT4_MAX;
-            //   }
-            if num > 1 {
-                let denom = 1.0 - gap_prob;
-                if denom == 0.0 || (prob[1] / denom) > int4_max {
-                    prob[1] = int4_max;
-                } else {
-                    prob[1] /= denom;
+            
+            // NCBI lines 924-935: Also compute prob[1] for large gaps when small gaps enabled
+            if let Some(bi) = best[1] {
+                let num = hsp_links[bi].num[1] as usize;
+                let xsum = hsp_links[bi].xsum[1];
+                let divisor = gap_decay_divisor(gap_decay_rate, num);
+                prob[1] = large_gap_sum_e(num as i16, xsum,
+                    eff_query_len as i32,
+                    eff_subject_len as i32,
+                    eff_search_space as i64, divisor);
+                if num > 1 {
+                    let denom = 1.0 - gap_prob;
+                    if denom == 0.0 || (prob[1] / denom) > int4_max {
+                        prob[1] = int4_max;
+                    } else {
+                        prob[1] /= denom;
+                    }
                 }
             }
-            if diag_enabled {
-                // Debug: log the first few E-value calculations
-                static DEBUG_EVALUE_COUNT: std::sync::atomic::AtomicUsize =
-                    std::sync::atomic::AtomicUsize::new(0);
-                let count = DEBUG_EVALUE_COUNT.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-                if count < 3 {
-                    eprintln!(
-                        "[DEBUG] E-value calc #{}: score={}, num={}, xsum={:.4}, divisor={:.4}, e={:.4e}",
-                        count,
-                        hsp_links[bi].score,
-                        num,
-                        xsum,
-                        divisor,
-                        prob[1]
-                    );
+        } else {
+            // NCBI lines 939-952: Only consider large gaps
+            if let Some(bi) = best[1] {
+                // NCBI lines 942-943: Add back cutoff*num
+                hsp_links[bi].sum[1] += (hsp_links[bi].num[1] as i32) * cutoff_big;
+                
+                let num = hsp_links[bi].num[1] as usize;
+                let xsum = hsp_links[bi].xsum[1];
+                let divisor = gap_decay_divisor(gap_decay_rate, num);
+                prob[1] = large_gap_sum_e(num as i16, xsum,
+                    eff_query_len as i32,
+                    eff_subject_len as i32,
+                    eff_search_space as i64, divisor);
+                if num > 1 {
+                    let denom = 1.0 - gap_prob;
+                    if denom == 0.0 || (prob[1] / denom) > int4_max {
+                        prob[1] = int4_max;
+                    } else {
+                        prob[1] /= denom;
+                    }
                 }
             }
         }

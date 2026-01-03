@@ -474,7 +474,7 @@ fn link_hsp_group_ncbi(
     diag_enabled: bool,
     subject_len_nucl: i64,
     query_contexts: &[QueryContext],
-    subject_frame_bases: &[i32],
+    _subject_frame_bases: &[i32], // Kept for API compatibility; no longer used after frame-relative coord fix
 ) -> Vec<UngappedHit> {
     if group_hits.is_empty() {
         return group_hits;
@@ -482,11 +482,14 @@ fn link_hsp_group_ncbi(
     
     let n = group_hits.len();
     
-    // Convert LOSAT per-frame logical AA coordinates into NCBI-style absolute offsets
-    // within the concatenated translation buffers (frames are separated by sentinel bytes).
+    // ========================================================================
+    // NCBI parity: Use frame-relative coordinates for sorting, NOT concatenated
+    // absolute offsets.
     //
-    // NCBI stores HSP coordinates in these absolute offsets and sorts/links across
-    // `(context/3)` (strand+query index) and `SIGN(subject.frame)`.
+    // NCBI's hsp->query.offset and hsp->subject.offset are frame-relative
+    // coordinates (0-indexed) after s_AdjustInitialHSPOffsets subtracts the
+    // context offset. LOSAT pre-groups by strand, so within a group, we compare
+    // frame-relative coordinates directly.
     //
     // NCBI reference (verbatim comparator for tblastx reverse sort):
     //   if (h1->query.offset < h2->query.offset) return  1;
@@ -498,25 +501,24 @@ fn link_hsp_group_ncbi(
     //   if (h1->subject.end   < h2->subject.end)   return  1;
     //   if (h1->subject.end   > h2->subject.end)   return -1;
     // Source: ncbi-blast/c++/src/algo/blast/core/link_hsps.c:s_RevCompareHSPsTbx (lines ~359-374)
+    // ========================================================================
     #[inline]
-    fn abs_coords(
-        hit: &UngappedHit,
-        query_contexts: &[QueryContext],
-        subject_frame_bases: &[i32],
-    ) -> (i32, i32, i32, i32) {
-        let q_base = query_contexts[hit.ctx_idx].frame_base;
-        let s_base = subject_frame_bases[hit.s_f_idx];
-        let q_off = q_base + hit.q_aa_start as i32 + 1; // +1 for leading sentinel
-        let q_end = q_base + hit.q_aa_end as i32 + 1;   // +1 for leading sentinel
-        let s_off = s_base + hit.s_aa_start as i32 + 1; // +1 for leading sentinel
-        let s_end = s_base + hit.s_aa_end as i32 + 1;   // +1 for leading sentinel
-        (q_off, q_end, s_off, s_end)
+    fn frame_relative_coords(hit: &UngappedHit) -> (i32, i32, i32, i32) {
+        // NCBI parity: hsp->query.offset is frame-relative (0-indexed after
+        // s_AdjustInitialHSPOffsets subtracts context offset).
+        // LOSAT's hit.q_aa_start is already 0-indexed frame-relative.
+        (
+            hit.q_aa_start as i32,
+            hit.q_aa_end as i32,
+            hit.s_aa_start as i32,
+            hit.s_aa_end as i32,
+        )
     }
 
-    // Sort by reverse position in the absolute concatenated coordinate system (NCBI parity).
+    // Sort by reverse position using frame-relative coordinates (NCBI parity).
     group_hits.sort_by(|a, b| {
-        let (aqo, aqe, aso, ase) = abs_coords(a, query_contexts, subject_frame_bases);
-        let (bqo, bqe, bso, bse) = abs_coords(b, query_contexts, subject_frame_bases);
+        let (aqo, aqe, aso, ase) = frame_relative_coords(a);
+        let (bqo, bqe, bso, bse) = frame_relative_coords(b);
         bqo.cmp(&aqo)
             .then(bqe.cmp(&aqe))
             .then(bso.cmp(&aso))
@@ -610,8 +612,9 @@ fn link_hsp_group_ncbi(
     // NCBI uses 1-based indexing with lh_helper[0] as sentinel
     // We use 0-based but handle the logic appropriately
     let mut hsp_links: Vec<HspLink> = group_hits.iter().enumerate().map(|(i, hit)| {
-        // Absolute coordinates in concatenated translation buffers (NCBI HSP coords)
-        let (q_off, q_end, s_off, s_end) = abs_coords(hit, query_contexts, subject_frame_bases);
+        // NCBI parity: Use frame-relative coordinates for trim calculations
+        // Reference: link_hsps.c:545-549
+        let (q_off, q_end, s_off, s_end) = frame_relative_coords(hit);
         let q_len_quarter = (q_end - q_off) / 4;
         let s_len_quarter = (s_end - s_off) / 4;
         let qt = TRIM_SIZE.min(q_len_quarter);
@@ -1244,19 +1247,6 @@ mod tests {
     /// So `if (h1 < h2) return 1` means smaller values come AFTER = DESCENDING order
     #[test]
     fn test_hsp_sort_order_matches_ncbi() {
-        // Mock query context with frame_base = 0
-        let query_contexts = vec![QueryContext {
-            q_idx: 0,
-            f_idx: 0,
-            frame: 1,
-            aa_seq: vec![],
-            aa_seq_nomask: None,
-            aa_len: 500,
-            orig_len: 1500,
-            frame_base: 0,
-        }];
-        let subject_frame_bases = vec![0i32];
-
         // Test data: hits with varying coordinates
         // ID = raw_score for identification after sort
         //
@@ -1272,26 +1262,21 @@ mod tests {
             mock_hit(100, 150, 150, 200, 2),  // Should be 2nd (smaller s_off)
         ];
 
-        // Replicate the LOSAT sort logic from link_hsp_group_ncbi
+        // NCBI parity: Use frame-relative coordinates (not concatenated absolute)
         #[inline]
-        fn abs_coords(
-            hit: &UngappedHit,
-            query_contexts: &[QueryContext],
-            subject_frame_bases: &[i32],
-        ) -> (i32, i32, i32, i32) {
-            let q_base = query_contexts[hit.ctx_idx].frame_base;
-            let s_base = subject_frame_bases[hit.s_f_idx];
-            let q_off = q_base + hit.q_aa_start as i32 + 1;
-            let q_end = q_base + hit.q_aa_end as i32 + 1;
-            let s_off = s_base + hit.s_aa_start as i32 + 1;
-            let s_end = s_base + hit.s_aa_end as i32 + 1;
-            (q_off, q_end, s_off, s_end)
+        fn frame_relative_coords(hit: &UngappedHit) -> (i32, i32, i32, i32) {
+            (
+                hit.q_aa_start as i32,
+                hit.q_aa_end as i32,
+                hit.s_aa_start as i32,
+                hit.s_aa_end as i32,
+            )
         }
 
         // LOSAT sort: all fields use b.cmp(&a) = descending
         hits.sort_by(|a, b| {
-            let (aqo, aqe, aso, ase) = abs_coords(a, &query_contexts, &subject_frame_bases);
-            let (bqo, bqe, bso, bse) = abs_coords(b, &query_contexts, &subject_frame_bases);
+            let (aqo, aqe, aso, ase) = frame_relative_coords(a);
+            let (bqo, bqe, bso, bse) = frame_relative_coords(b);
             bqo.cmp(&aqo)
                 .then(bqe.cmp(&aqe))
                 .then(bso.cmp(&aso))
@@ -1315,42 +1300,26 @@ mod tests {
     /// Test that ties are handled correctly (stable sort behavior)
     #[test]
     fn test_hsp_sort_identical_coords() {
-        let query_contexts = vec![QueryContext {
-            q_idx: 0,
-            f_idx: 0,
-            frame: 1,
-            aa_seq: vec![],
-            aa_seq_nomask: None,
-            aa_len: 500,
-            orig_len: 1500,
-            frame_base: 0,
-        }];
-        let subject_frame_bases = vec![0i32];
-
         // Two hits with identical coordinates but different IDs
         let mut hits = vec![
             mock_hit(100, 150, 200, 250, 1),
             mock_hit(100, 150, 200, 250, 2),
         ];
 
+        // NCBI parity: Use frame-relative coordinates (not concatenated absolute)
         #[inline]
-        fn abs_coords(
-            hit: &UngappedHit,
-            query_contexts: &[QueryContext],
-            subject_frame_bases: &[i32],
-        ) -> (i32, i32, i32, i32) {
-            let q_base = query_contexts[hit.ctx_idx].frame_base;
-            let s_base = subject_frame_bases[hit.s_f_idx];
-            let q_off = q_base + hit.q_aa_start as i32 + 1;
-            let q_end = q_base + hit.q_aa_end as i32 + 1;
-            let s_off = s_base + hit.s_aa_start as i32 + 1;
-            let s_end = s_base + hit.s_aa_end as i32 + 1;
-            (q_off, q_end, s_off, s_end)
+        fn frame_relative_coords(hit: &UngappedHit) -> (i32, i32, i32, i32) {
+            (
+                hit.q_aa_start as i32,
+                hit.q_aa_end as i32,
+                hit.s_aa_start as i32,
+                hit.s_aa_end as i32,
+            )
         }
 
         hits.sort_by(|a, b| {
-            let (aqo, aqe, aso, ase) = abs_coords(a, &query_contexts, &subject_frame_bases);
-            let (bqo, bqe, bso, bse) = abs_coords(b, &query_contexts, &subject_frame_bases);
+            let (aqo, aqe, aso, ase) = frame_relative_coords(a);
+            let (bqo, bqe, bso, bse) = frame_relative_coords(b);
             bqo.cmp(&aqo)
                 .then(bqe.cmp(&aqe))
                 .then(bso.cmp(&aso))
@@ -1377,18 +1346,6 @@ mod tests {
         // The status document incorrectly stated this was ASCENDING.
         // This test documents the correct interpretation.
 
-        let query_contexts = vec![QueryContext {
-            q_idx: 0,
-            f_idx: 0,
-            frame: 1,
-            aa_seq: vec![],
-            aa_seq_nomask: None,
-            aa_len: 500,
-            orig_len: 1500,
-            frame_base: 0,
-        }];
-        let subject_frame_bases = vec![0i32];
-
         // Test: same query coords, different subject offsets
         // NCBI descending: larger s_off should come first
         let mut hits = vec![
@@ -1396,24 +1353,20 @@ mod tests {
             mock_hit(100, 150, 200, 250, 2),  // s_off=200 (larger)
         ];
 
+        // NCBI parity: Use frame-relative coordinates (not concatenated absolute)
         #[inline]
-        fn abs_coords(
-            hit: &UngappedHit,
-            query_contexts: &[QueryContext],
-            subject_frame_bases: &[i32],
-        ) -> (i32, i32, i32, i32) {
-            let q_base = query_contexts[hit.ctx_idx].frame_base;
-            let s_base = subject_frame_bases[hit.s_f_idx];
-            let q_off = q_base + hit.q_aa_start as i32 + 1;
-            let q_end = q_base + hit.q_aa_end as i32 + 1;
-            let s_off = s_base + hit.s_aa_start as i32 + 1;
-            let s_end = s_base + hit.s_aa_end as i32 + 1;
-            (q_off, q_end, s_off, s_end)
+        fn frame_relative_coords(hit: &UngappedHit) -> (i32, i32, i32, i32) {
+            (
+                hit.q_aa_start as i32,
+                hit.q_aa_end as i32,
+                hit.s_aa_start as i32,
+                hit.s_aa_end as i32,
+            )
         }
 
         hits.sort_by(|a, b| {
-            let (aqo, aqe, aso, ase) = abs_coords(a, &query_contexts, &subject_frame_bases);
-            let (bqo, bqe, bso, bse) = abs_coords(b, &query_contexts, &subject_frame_bases);
+            let (aqo, aqe, aso, ase) = frame_relative_coords(a);
+            let (bqo, bqe, bso, bse) = frame_relative_coords(b);
             bqo.cmp(&aqo)
                 .then(bqe.cmp(&aqe))
                 .then(bso.cmp(&aso))  // LOSAT: b.cmp(&a) = DESCENDING

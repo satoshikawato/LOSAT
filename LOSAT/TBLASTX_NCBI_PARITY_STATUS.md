@@ -1,7 +1,7 @@
 # TBLASTX NCBI Parity Status Report
 
 **作成日時**: 2026-01-03  
-**更新日時**: 2026-01-03 (3.1 Sentinel バイト値修正完了)  
+**更新日時**: 2026-01-03 (3.2 Frame Base / 座標システム修正完了)  
 **現象**: LOSATがNCBI BLAST+より多くのヒットを出力する  
 **目標**: 出力を1ビットの狂いもなく一致させる
 
@@ -255,14 +255,35 @@
 - **結論**: 両者は完全に同等の動作 (sentinel に対して `-4` を返す)
 - **ファイル**: `constants.rs`, `matrix.rs`, `extension.rs`, `translation.rs`
 
-### 3.2 🔶 Frame Base 計算の Sentinel 考慮
-- **状態**: 🔶 部分修正済み・要確認
-- **変更内容**: `lookup.rs` で `base += frame.aa_seq.len().saturating_sub(1)` に修正
-- **問題**: NCBI は frame 間に sentinel 1バイトを挿入し、次のフレームの開始は `+length+1`
-- **調査状況**: 
-  - NCBI `blast_setup.c` / `blast_util.c` の `BLAST_GetTranslation` を確認したが、LOSAT との完全比較は未完了
-  - LOSAT は frame ごとに独立した aa_seq を持つため、NCBI の concatenated buffer とは構造が異なる
-- **影響**: sum_stats_linking での abs_coords 計算に影響する可能性
+### 3.2 ✅ Frame Base 計算の Sentinel 考慮と座標システム
+- **状態**: ✅ 完了
+- **修正日**: 2026-01-03
+- **問題だった点**:
+  - **旧LOSAT**: `sum_stats_linking.rs` の `abs_coords` 関数が concatenated buffer 内の絶対座標 (`frame_base + hit.aa_start + 1`) を計算していた
+  - **NCBI**: `link_hsps.c` の比較関数 `s_RevCompareHSPsTbx` は **frame 内相対座標** (0-indexed) を使用
+  - **不一致**: 同じグループ (strand) 内で異なるフレームの HSP は異なる `frame_base` を持つため、ソート順序が NCBI と異なっていた
+- **NCBIの座標システム**:
+  1. `aa_ungapped.c`: extension 結果は concatenated buffer 内の絶対座標
+  2. `blast_gapalign.c:s_AdjustInitialHSPOffsets`: context offset を引いて frame 内相対座標に変換
+     ```c
+     init_hsp->ungapped_data->q_start -= query_start;
+     ```
+  3. `link_hsps.c`: HSP の `query.offset` / `subject.offset` は frame 内相対座標として比較
+- **修正内容**:
+  - `abs_coords` 関数を `frame_relative_coords` に変更
+  - concatenated 絶対座標の計算を削除し、frame 内相対座標を直接使用:
+    ```rust
+    fn frame_relative_coords(hit: &UngappedHit) -> (i32, i32, i32, i32) {
+        (hit.q_aa_start as i32, hit.q_aa_end as i32,
+         hit.s_aa_start as i32, hit.s_aa_end as i32)
+    }
+    ```
+  - HspLink 初期化 (trim 座標計算) も frame 内相対座標を使用
+- **変更しなかった箇所**:
+  - `lookup.rs` の `frame_base` 計算 (`base += frame.aa_seq.len() as i32 - 1`) は正しい
+  - ただし、`sum_stats_linking.rs` では `frame_base` を使用しないことで NCBI parity を達成
+- **検証**: ユニットテスト3件が成功
+- **ファイル**: `sum_stats_linking.rs`
 
 ### 3.3 ✅ HSP ソート順序の細部
 - **状態**: ✅ 確認済み (LOSAT は NCBI と一致)
@@ -638,6 +659,55 @@ for (i = 1; i < NCBI_FSM_DIM; ++i) {
 - NCBI BLAST では `kProtSentinel = NULLB = 0`
 - つまり、gap と sentinel は同じ値であり、どちらも `-4` を返す
 
+### 5.7 📝 HSP 座標の変換フロー (NCBI vs LOSAT)
+
+NCBI と LOSAT では HSP 座標の管理方法が異なる。
+
+**NCBI の座標変換フロー**:
+
+```mermaid
+flowchart TD
+    A[aa_ungapped.c: Extension] -->|hsp_q = 絶対座標| B[BlastSaveInitHsp]
+    B -->|ungapped_data->q_start = 絶対座標| C[blast_gapalign.c]
+    C -->|s_AdjustInitialHSPOffsets| D[frame内相対座標]
+    D --> E[link_hsps.c: ソート・リンキング]
+```
+
+1. **Extension 時** (`aa_ungapped.c`): `hsp_q` は concatenated buffer 内の絶対座標
+2. **座標調整** (`blast_gapalign.c:s_AdjustInitialHSPOffsets`):
+   ```c
+   init_hsp->ungapped_data->q_start -= query_start;
+   // query_start = query_info->contexts[context].query_offset
+   ```
+3. **リンキング時** (`link_hsps.c`): `hsp->query.offset` は frame 内相対座標 (0-indexed)
+
+**LOSAT の座標フロー**:
+
+```mermaid
+flowchart TD
+    A[utils.rs: Extension] -->|raw coords in frame buffer| B[論理座標変換]
+    B -->|hit.q_aa_start = frame内相対座標| C[sum_stats_linking.rs]
+    C --> D[ソート・リンキング]
+```
+
+1. **Extension 時** (`utils.rs`): frame ごとに独立した `aa_seq` バッファで extension
+2. **論理座標変換**: `qs_l = qs.saturating_sub(1)` で leading sentinel を除外
+3. **リンキング時**: `hit.q_aa_start` は最初から frame 内相対座標
+
+**LOSAT の設計上の利点**:
+- frame ごとに独立したバッファなので、座標調整 (`s_AdjustInitialHSPOffsets` 相当) が不要
+- 並列処理との相性が良い
+
+**LOSAT の旧実装の問題点**:
+- `sum_stats_linking.rs` の `abs_coords` 関数が `frame_base + hit.aa_start + 1` を計算
+- これは NCBI の「調整前」の絶対座標をエミュレートしていた
+- しかし NCBI のリンキングは「調整後」の相対座標を使用
+- → ソート順序の不一致が発生
+
+**修正後**:
+- `frame_relative_coords` 関数で `hit.q_aa_start` 等を直接使用
+- NCBI の「調整後」座標と同等
+
 ---
 
 ## 6. 発見した明確なバグ
@@ -690,8 +760,8 @@ LOSATがNCBIより多くのヒットを出力する原因として、以下が�
 | ~~**3**~~ | ~~1.6~~ | ~~X-drop の per-context 適用~~ | ~~小~~ | ~~`utils.rs`~~ | ✅ 完了 |
 | ~~**4**~~ | ~~6.1~~ | ~~HSP ソート順序 subject ascending 修正~~ | ~~小~~ | ~~`sum_stats_linking.rs`~~ | ✅ 分析誤り (修正不要) |
 | ~~**5**~~ | ~~3.7~~ | ~~Sum-stats effective length 計算確認~~ | ~~小~~ | ~~`sum_stats_linking.rs`~~ | ✅ 完了 |
-| **1** | 3.2 | Frame base 計算の再検証 | 小 | `lookup.rs` | 未着手 |
-| **2** | 4.1-4.6 | 未調査領域の調査 | 大 | 各種 | 未着手 |
+| ~~**6**~~ | ~~3.2~~ | ~~Frame base / 座標システムの修正~~ | ~~小~~ | ~~`sum_stats_linking.rs`~~ | ✅ 完了 |
+| **1** | 4.1-4.6 | 未調査領域の調査 | 大 | 各種 | 未着手 |
 
 ---
 
@@ -702,8 +772,9 @@ LOSATがNCBIより多くのヒットを出力する原因として、以下が�
 3. ~~**⚠️ X-drop の per-context 適用** (`utils.rs`)~~ → ✅ **完了 (1.6)**
 4. ~~**🐛 HSP ソート順序を修正** (`sum_stats_linking.rs:517-524`)~~ → ✅ **分析誤り・修正不要 (6.1)**
 5. ~~**Sum-Stats Effective Length 計算確認** (`sum_stats_linking.rs`)~~ → ✅ **完了 (3.7)**
-6. **Frame Base 計算の再検証** (`lookup.rs`) → 次の優先 (3.2)
+6. ~~**Frame Base / 座標システムの修正** (`sum_stats_linking.rs`)~~ → ✅ **完了 (3.2)**
 7. **差分確認テストを実行し、残存差異を特定**
+8. **未調査領域の調査** (4.1-4.6) → 次の優先
 
 ---
 
@@ -721,3 +792,4 @@ LOSATがNCBIより多くのヒットを出力する原因として、以下が�
 | 2026-01-03 | セクション 5.4 を追加: HSP グルーピングとソートの実装構造の違いを記録。NCBI は「全体ソート→フレーム境界で分割」、LOSAT は「事前グルーピング→グループ内ソート」という異なるアプローチを採用しているが、最終的な処理順序は同等。`link_hsps.c:484-533` のフレーム分割ロジックを引用。 |
 | 2026-01-03 | 3.7 Sum-Stats Effective Length 計算を修正完了。NCBI `link_hsps.c:560-571` の詳細分析により、tblastx では subject に対して `length_adjustment / 3` のみを適用することを発見。旧LOSAT は `SearchSpace::with_length_adjustment()` で両方に同じ調整を適用していた。`sum_stats_linking.rs:555-570` で NCBI と同等の計算を直接実装。セクション 3.7, 7, 8, 9 を更新。 |
 | 2026-01-03 | 3.1 Sentinel バイト値を NCBI と同一 (0) に修正。`constants.rs` で `SENTINEL_BYTE = 0` に変更。`matrix.rs` に `DEFSCORE = -4` 定数を追加し、`blosum62_score()` で sentinel (0) をチェックして `-4` を返すように修正。NCBI の FSM 構築方式 (`raw_scoremat.c:90-95`) を調査し、defscore の適用方法を確認。セクション 5.6 を追加して技術的詳細を記録。 |
+| 2026-01-03 | 3.2 Frame Base / 座標システムを修正完了。**問題**: 旧LOSAT の `abs_coords` 関数が concatenated buffer 内の絶対座標 (`frame_base + hit.aa_start + 1`) を計算していたが、NCBI の `link_hsps.c:s_RevCompareHSPsTbx` は frame 内相対座標 (0-indexed) を使用。**修正**: `abs_coords` を `frame_relative_coords` に変更し、frame 内相対座標を直接使用 (`hit.q_aa_start` 等)。NCBI では `s_AdjustInitialHSPOffsets` で context offset を引いて frame 内相対座標に変換している。HspLink 初期化 (trim 座標計算) も同様に修正。ユニットテスト3件が成功。 |

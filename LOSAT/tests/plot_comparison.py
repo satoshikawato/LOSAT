@@ -127,6 +127,12 @@ def generate_comparison_plot(config):
 comparisons = [
     # --- TBLASTX ---
     {
+        "name": "AP027280_Self",
+        "mode": "TBLASTX",
+        "ncbi":  "./blast_out/AP027280.AP027280.tblastx.n1.out",
+        "losat": "./losat_out/AP027280.AP027280.tlosatx.n1.out"
+    },
+    {
         "name": "NZ_CP006932_Self",
         "mode": "TBLASTX",
         "ncbi":  "./blast_out/NZ_CP006932.NZ_CP006932.tblastx.n1.out",

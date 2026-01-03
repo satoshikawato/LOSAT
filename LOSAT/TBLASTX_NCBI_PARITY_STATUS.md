@@ -1,7 +1,7 @@
 # TBLASTX NCBI Parity Status Report
 
 **作成日時**: 2026-01-03  
-**更新日時**: 2026-01-03 (4.8 Sum-Statistics Linking 調査完了 + 実装差異詳細追記)  
+**更新日時**: 2026-01-03 (10.5 出力フォーマット実装完了: outfmt 0/6/7 対応)  
 **現象**: LOSATがNCBI BLAST+より多くのヒットを出力する  
 **目標**: 出力を1ビットの狂いもなく一致させる
 
@@ -808,19 +808,65 @@ if (H->prev != NULL &&
   - `extension.rs:717-730` (座標変換)
   - `sum_stats_linking.rs:433-438, 519-526` (グルーピング、ソート)
 
-### 4.10 🟡 E-value 閾値判定
-- **状態**: 🟡 **差分確認テストで差異検出** (優先度4)
+### 4.10 ✅ E-value 閾値判定
+- **状態**: ✅ **調査完了・修正完了** (2026-01-03)
 - **発見日**: 2026-01-03
+- **修正日**: 2026-01-03
 - **概要**: LOSAT-only ヒットの多くが E-value 0.1-10.0 の閾値付近
 - **具体例**:
   - MeenMJNV.MejoMJNV: 46 件中 35 件が E-value 0.1-10.0
   - AP027280.AP027280: 74 件中 37 件が E-value 0.1-10.0
-- **推定原因**:
-  - search space 計算の微妙な差
-  - 浮動小数点の丸め (Rust `f64` vs C `double`)
-  - cutoff_score 計算の差
-- **関連NCBIコード**: `blast_parameters.c:BlastHitSavingParametersNew`
-- **LOSATコード**: `ncbi_cutoffs.rs:cutoff_score_max_for_tblastx()`
+
+#### 発見した根本原因
+
+**sum-statistics E-value 計算での `eff_searchsp` の計算方法が NCBI と異なっていた。**
+
+NCBI では `BLAST_SmallGapSumE` / `BLAST_LargeGapSumE` に3つの独立した引数を渡す:
+1. `query_length`: `query_aa - length_adjustment` (全額)
+2. `subject_length`: `subject_aa - (length_adjustment/3)` (1/3)
+3. `searchsp_eff`: `query_info->contexts[context].eff_searchsp` (事前計算済み)
+
+**NCBI の `eff_searchsp` 計算** (`blast_setup.c:836-843`):
+```c
+// tblastx では db_length は AA 長に変換済み (line 734-735)
+Int8 effective_db_length = db_length - ((Int8)db_num_seqs * length_adjustment);
+effective_search_space = effective_db_length * (query_length - length_adjustment);
+```
+→ subject に **全額の length_adjustment** を適用
+
+**旧 LOSAT の計算** (`sum_stats_linking.rs`):
+```rust
+let eff_subject_len = (subject_len_aa - length_adj_for_subject).max(1);  // 1/3
+let eff_search_space = eff_query_len * eff_subject_len;  // ローカル計算
+```
+→ subject に **1/3 の length_adjustment** を適用
+
+この差により E-value の `searchsp_eff / pair_search_space` 比率が異なり、閾値付近で判定が分かれていた。
+
+#### 修正内容
+
+`sum_stats_linking.rs` の `link_hsps_for_group` 関数内の `eff_search_space` 計算を修正:
+
+```rust
+// 修正前: subject に 1/3 を適用 (誤り)
+let eff_subject_len = (subject_len_aa - length_adj_for_subject).max(1) as f64;
+let eff_search_space = eff_query_len * eff_subject_len;
+
+// 修正後: subject に全額を適用 (NCBI parity)
+let eff_subject_for_searchsp = (subject_len_aa - length_adjustment).max(1) as f64;
+let eff_search_space = eff_query_len * eff_subject_for_searchsp;
+
+// ローカルの subject_length は 1/3 を維持 (BLAST_SmallGapSumE 引数用)
+let length_adj_for_subject = length_adjustment / 3;
+let eff_subject_len = (subject_len_aa - length_adj_for_subject).max(1) as f64;
+```
+
+- **関連NCBIコード**: 
+  - `blast_setup.c:836-843` (`BLAST_CalcEffLengths` - `eff_searchsp` 計算)
+  - `link_hsps.c:560-571` (ローカル `query_length`/`subject_length` 計算)
+  - `link_hsps.c:909-927` (`BLAST_SmallGapSumE`/`BLAST_LargeGapSumE` 呼び出し)
+  - `blast_stat.c:4418-4463` (`BLAST_SmallGapSumE` 実装)
+- **LOSATコード**: `sum_stats_linking.rs:557-590`
 
 ---
 
@@ -1070,6 +1116,51 @@ flowchart TD
 - `frame_relative_coords` 関数で `hit.q_aa_start` 等を直接使用
 - NCBI の「調整後」座標と同等
 
+### 5.8 📝 Sum-Statistics での eff_searchsp と local lengths の設計上の分離
+
+**発見日**: 2026-01-03
+
+NCBI の `BLAST_SmallGapSumE` / `BLAST_LargeGapSumE` には **3つの独立した長さパラメータ** が渡される。これらは**異なる場所で、異なる方法で計算**される。
+
+**NCBIコード参照** (`link_hsps.c:460-470`):
+```c
+// BLAST_SmallGapSumE(score, num, xsum, query_length, subject_length,
+//                    searchsp_eff, gap_decay_rate, kbp)
+```
+
+| パラメータ | 計算場所 | length_adjustment の適用 |
+|-----------|---------|-------------------------|
+| `query_length` | `link_hsps.c` (ローカル) | 全額 (`- length_adjustment`) |
+| `subject_length` | `link_hsps.c` (ローカル) | 1/3 (`- length_adjustment/3`) |
+| `searchsp_eff` | `blast_setup.c` (`BLAST_CalcEffLengths`) | **両方に全額** |
+
+**NCBI での eff_searchsp 計算** (`blast_setup.c:1335-1339`):
+```c
+// eff_searchsp = (eff_query_len) * (db_length - num_seqs * length_adjustment)
+// For single subject (num_seqs=1):
+//   eff_searchsp = (query_len - length_adj) * (subject_len_aa - length_adj)
+// 注: subject_len_aa への適用時、/3 しない
+```
+
+**設計上の意図**:
+- `query_length`/`subject_length`: HSP のローカルな重なりチェックに使用
+- `searchsp_eff`: 統計的有意性の計算に使用 (E-value)
+- 両者を分離することで、アルゴリズムの柔軟性を確保
+
+**LOSAT での対応** (`sum_stats_linking.rs:563-576`):
+```rust
+// ローカル長 (NCBI link_hsps.c 相当)
+let eff_query_len = (query_len_aa - length_adjustment).max(1) as f64;
+let length_adj_for_subject_local = length_adjustment / 3;
+let eff_subject_len_local = (subject_len_aa - length_adj_for_subject_local).max(1) as f64;
+
+// eff_searchsp (NCBI blast_setup.c 相当) - 両方に全額適用
+let eff_search_space = (query_len_aa - length_adjustment).max(1) as f64 
+    * (subject_len_aa - length_adjustment).max(1) as f64;
+```
+
+**この設計分離を理解していなかったことが、E-value 計算の差異の原因だった。**
+
 ---
 
 ## 6. 発見した明確なバグ
@@ -1127,14 +1218,14 @@ LOSATがNCBIより多くのヒットを出力する原因として、以下が�
 | ~~6~~ | ~~3.2~~ | ~~Frame base / 座標システムの修正~~ | ~~`sum_stats_linking.rs`~~ | ✅ 完了 |
 | ~~7~~ | - | ~~差分確認テスト実行~~ | - | ✅ 完了 |
 
-### 🔴 残存差異対応 (差分確認テストで発見)
+### ✅ 残存差異対応 (差分確認テストで発見) - 全項目完了
 
 | 優先度 | ID | 内容 | 推定工数 | ファイル | 状態 |
 |--------|-----|------|----------|----------|------|
 | ~~**1**~~ | ~~4.8~~ | ~~Sum-Statistics Linking チェイン構造~~ | ~~大~~ | ~~`sum_stats_linking.rs`, `link_hsps.c`~~ | ✅ 調査完了 (NCBI同等) |
 | ~~**1**~~ | ~~4.7~~ | ~~Extension スコア計算 (+1 bit score 差)~~ | ~~中~~ | ~~`extension.rs`, `aa_ungapped.c`~~ | ✅ 調査完了 (NCBI同等) |
 | ~~**1**~~ | ~~4.9~~ | ~~Reverse strand 処理~~ | ~~中~~ | ~~`translation.rs`, `utils.rs`, `extension.rs`~~ | ✅ 調査完了 (NCBI同等) |
-| **1** | 4.10 | E-value 閾値判定 | 小 | `ncbi_cutoffs.rs`, `karlin.rs` | 🟡 未着手 |
+| ~~**1**~~ | ~~4.10~~ | ~~E-value 閾値判定 (eff_searchsp 計算)~~ | ~~小~~ | ~~`sum_stats_linking.rs`~~ | ✅ **修正完了** |
 
 ### 低優先度 (未調査領域)
 
@@ -1179,9 +1270,10 @@ LOSATがNCBIより多くのヒットを出力する原因として、以下が�
    - 113件の NCBI-only ヒットは E-value 閾値境界効果または比較方法論の問題と推定
    - 詳細 → セクション 4.9 参照
 
-4. **🔥 E-value 閾値判定調査** (4.10)
-   - LOSAT-only ヒットの E-value 境界問題調査
-   - 詳細手順 → セクション 10.3 参照
+4. ~~**🔥 E-value 閾値判定調査** (4.10)~~ → ✅ **調査完了・修正完了 (2026-01-03)**
+   - sum-statistics での `eff_searchsp` 計算が NCBI と異なっていた (subject に 1/3 vs 全額の length_adjustment を適用)
+   - **修正**: `sum_stats_linking.rs` で `eff_search_space` の計算を NCBI 方式に変更
+   - 詳細 → セクション 4.10 参照
 
 ---
 
@@ -1311,25 +1403,34 @@ LOSATがNCBIより多くのヒットを出力する原因として、以下が�
 
 ---
 
-#### 🔥 優先度1: E-value 閾値判定
+#### ✅ ~~優先度1: E-value 閾値判定~~ → 調査完了・修正完了 (2026-01-03)
 
 **問題**: LOSAT-only ヒットの多くが E-value 0.1-10.0 の閾値付近。NCBI では閾値で除外されたが LOSAT では通過?
 
-**調査手順**:
-1. **E-value 閾値の適用箇所**:
-   - NCBI: `BlastHitSavingParametersNew` で `cutoff_score_max` を計算し、E-value 10.0 から逆算
-   - LOSAT: `cutoff_score_max_for_tblastx()` が同等か確認
-2. **search space 計算の確認**:
-   - E-value = K × m × n × exp(-λS) で計算
-   - `m × n` (search space) が LOSAT と NCBI で同一か
-3. **浮動小数点の丸め**:
-   - E-value 計算時の丸め差で閾値境界のヒットが通過/除外される可能性
-   - Rust の `f64` と C の `double` の精度差
-4. **具体的なヒットでの検証**:
-   - LOSAT-only ヒット (E-value ≈ 9.5-10.0) の raw score を確認
-   - その score での E-value を NCBI 方式で再計算して比較
+**発見した根本原因**: sum-statistics での `eff_searchsp` 計算が NCBI と異なっていた
 
-**関連ファイル**: `ncbi_cutoffs.rs`, `karlin.rs`, `sum_stats_linking.rs`
+NCBI では `BLAST_SmallGapSumE`/`BLAST_LargeGapSumE` に渡す引数が独立:
+- `query_length`: `query_aa - length_adjustment` (全額)
+- `subject_length`: `subject_aa - (length_adjustment/3)` (1/3)
+- `searchsp_eff`: `(query_aa - length_adj) × (subject_aa - length_adj)` ← **subject に全額!**
+
+旧 LOSAT は `eff_search_space = eff_query_len × eff_subject_len` をローカル計算していたが、
+これは subject に 1/3 の length_adjustment を適用した値を使っていた。
+
+**修正内容**:
+```rust
+// 修正: eff_searchsp 用には subject に全額の length_adjustment を適用
+let eff_subject_for_searchsp = (subject_len_aa - length_adjustment).max(1);
+let eff_search_space = eff_query_len * eff_subject_for_searchsp;  // NCBI parity!
+
+// ローカルの subject_length (BLAST_SmallGapSumE 引数用) は 1/3 を維持
+let length_adj_for_subject = length_adjustment / 3;
+let eff_subject_len = (subject_len_aa - length_adj_for_subject).max(1);
+```
+
+**関連ファイル**: `sum_stats_linking.rs:557-590`
+
+詳細 → セクション 4.10 参照
 
 ---
 
@@ -1343,19 +1444,114 @@ LOSATがNCBIより多くのヒットを出力する原因として、以下が�
 - **ln_factorial 実装**: LOSAT の直接計算と NCBI の lgamma(n+1) は小さな n で同等精度 ✅
 - **グルーピングキー s_idx**: LOSAT はマルチサブジェクト一括処理のため追加。per-subject 処理と結果は同等 ✅
 - **Reverse strand 処理**: SIGN()/signum() 同等、frame生成正常、座標変換正常、グルーピング/ソート正常 ✅ (2026-01-03 調査完了)
+- **eff_searchsp 計算**: sum-statistics での E-value 計算に使用する `eff_searchsp` を NCBI と同一方式で計算するよう修正 (subject に全額の length_adjustment を適用) ✅ (2026-01-03 修正完了)
 
-### 10.5 🔧 出力フォーマットの相違点 (未修正)
+### 10.5 ✅ 出力フォーマットの相違点 (修正完了)
 
-以下はパリティに影響しない出力フォーマットの違い。機能的には同等だが、diff で差異として検出される。
+**修正日**: 2026-01-03
 
-| 項目 | LOSAT | NCBI | 影響 |
-|------|-------|------|------|
+#### 修正前の相違点
+
+| 項目 | 旧LOSAT | NCBI | 影響 |
+|------|---------|------|------|
 | **E-value 表記** | `0.0e0`, `7.2e-295` (科学表記) | `0.0`, `0.0` (通常表記) | 数値は同等 |
-| **bit score 小数** | `692.0` (常に小数1桁) | `692` (整数の場合は .0 なし?) | 数値は同等 |
+| **bit score 小数** | `692.0` (常に小数1桁) | `692` (整数の場合は .0 なし) | 数値は同等 |
 | **ヘッダー行** | なし | `# TBLASTX 2.17.0+` 等のコメント行あり | 解析ツール依存 |
 | **ヒット数コメント** | なし | `# 23240 hits found` | 情報目的 |
 
-**対応方針**: 機能的には同等なので低優先度。完全一致が必要な場合は `report/outfmt6.rs` を修正。
+#### 実装内容
+
+以下の機能を `report/outfmt6.rs`, `report/pairwise.rs`, `common.rs` に実装:
+
+1. **E-value/Bit score フォーマットをNCBI完全一致に修正**
+   - `format_evalue_ncbi()`: NCBI `align_format_util.cpp:GetScoreString()` + `tabular.cpp:SetScores()` を完全再現
+   - `format_bitscore_ncbi()`: NCBI の bit score フォーマットを完全再現
+   
+   | 値範囲 | E-value | Bit score |
+   |--------|---------|-----------|
+   | < 1e-180 | `"0.0"` | - |
+   | < 1e-99 | `{:.0e}` (1e-100) | - |
+   | < 0.0009 | `{:.2e}` (1.23e-50) | - |
+   | < 0.1 | `{:.3}` (0.005) | - |
+   | < 1.0 | `{:.2}` (0.50) | - |
+   | < 10.0 | `{:.1}` (5.5) | - |
+   | ≥ 10.0 | `{:.0}` (100) | - |
+   | ≤ 99.9 | - | `{:.1}` (50.5) |
+   | > 99.9 | - | `{:.0}` (692) |
+   | > 99999 | - | `{:.3e}` (1.234e5) |
+
+2. **OutputFormat enum を追加**
+   ```rust
+   pub enum OutputFormat {
+       Pairwise = 0,           // Traditional BLAST output
+       Tabular = 6,            // Tab-separated (default)
+       TabularWithComments = 7, // Tab-separated with headers
+   }
+   ```
+
+3. **`--outfmt` 引数を追加** (`TblastxArgs`, `BlastnArgs`)
+   - デフォルト値: `"6"` (Tabular)
+   - パース関数: `OutputFormat::parse()` でフォーマットとカスタムフィールドを解析
+
+4. **outfmt 7 (コメント行付きTabular) を実装**
+   - `write_outfmt7_header()`: NCBI形式のヘッダー出力
+   - `write_outfmt7()`: ヘッダー + ヒットデータ出力
+   - `write_outfmt7_grouped()`: クエリごとにヘッダーを出力
+   
+   出力例:
+   ```
+   # TBLASTX 0.1.0
+   # Query: query_name
+   # Database: database_name
+   # Fields: qaccver, saccver, pident, length, mismatch, gapopen, qstart, qend, sstart, send, evalue, bitscore
+   # 5 hits found
+   ```
+
+5. **outfmt 0 (Pairwise) を実装** (`report/pairwise.rs`)
+   - `PairwiseHit`: アライメントシーケンス等の拡張情報を保持
+   - `PairwiseConfig`: 出力設定 (line_length, show_gi, show_frame 等)
+   - `write_pairwise()`: 完全な Pairwise 出力
+   - `write_pairwise_simple()`: Hit のみから出力 (シーケンスなし)
+   
+   出力例:
+   ```
+   TBLASTX 0.1.0
+
+   Query= query_name
+
+   Database: database_name
+
+   >subject_id
+   Length=500
+
+    Score = 186 bits (200),  Expect = 1.00e-50
+    Identities = 95/100 (95%), Positives = 95/100 (95%), Gaps = 0/100 (0%)
+    Frame = +1/+2
+
+   Query  1    [... alignment ...]  100
+   Sbjct  1    [... alignment ...]  100
+   ```
+
+6. **common.rs に統合出力関数を追加**
+   - `write_output_with_format()`: フォーマット選択付き出力
+   - `write_output_ncbi_order_with_format()`: NCBI順序 + フォーマット選択
+
+#### 関連ファイル
+- `LOSAT/src/report/outfmt6.rs`: E-value/Bit score フォーマット、OutputFormat enum、outfmt 7
+- `LOSAT/src/report/pairwise.rs`: outfmt 0 (Pairwise) 実装 (新規作成)
+- `LOSAT/src/report/mod.rs`: モジュール公開
+- `LOSAT/src/algorithm/tblastx/args.rs`: `--outfmt` 引数追加
+- `LOSAT/src/algorithm/blastn/args.rs`: `--outfmt` 引数追加
+- `LOSAT/src/common.rs`: 統合出力関数
+
+#### テスト結果
+全18件のテストがパス:
+- E-value フォーマット: 6件
+- Bit score フォーマット: 3件
+- OutputFormat parse: 1件
+- outfmt 6/7 出力: 4件
+- Pairwise 出力: 3件
+- 後方互換性: 1件
 
 ---
 
@@ -1384,3 +1580,6 @@ LOSATがNCBIより多くのヒットを出力する原因として、以下が�
 | 2026-01-03 | **4.7 Extension スコア計算の調査完了**。LOSAT `extend_hit_two_hit` (`extension.rs:192-304`) と NCBI `s_BlastAaExtendTwoHit` (`aa_ungapped.c:1088-1158`) を全コンポーネント比較。結果: **アルゴリズムは完全に同等であり、コード修正不要**。比較項目: Word scanning ループ、Position 調整、`right_d` リセット、Left extension 初期値、Right extension 初期値、終了条件、Length 計算、Return 値。Reevaluation ロジック (`reevaluate.rs:80-145` vs `blast_hits.c:675-733`) も完全一致。+1 bit score 差の原因は Extension アルゴリズムではなく上流工程 (HSP 生成) または比較方法論にある可能性。セクション 4.7, 8, 9, 10.3 を更新。 |
 | 2026-01-03 | **4.7 追加検証: 座標系一貫性の確認**。`run()` と `run_with_neighbor_map()` の座標系を再検証。前者は 1-based (raw) 座標、後者は 0-based (logical) 座標を使用するが、extension 呼び出し時には両方とも同じ raw 座標 (`s_left_off`) を生成することを数値例で確認 (logical 5 → 両方とも raw 9)。また、`extend_hit_ungapped` は TBLASTX では未使用であることを確認 (BLASTN のみが使用)。セクション 4.7 に「追加検証」と「未使用コードの確認」を追記。 |
 | 2026-01-03 | **4.9 Reverse strand 処理の調査完了**。TrcuMJNV.MellatMJNV の NCBI-only ヒット 113 件が全て reverse strand という報告に基づき徹底調査。結果: **LOSATの実装はNCBIと同等であり、コード修正不要**。確認項目: (1) `SIGN()` vs `signum()` 同等性 (`ncbi_std.h:127` 参照)、(2) Frame 生成 (`translation.rs` vs `blast_util.c:428-456`)、(3) 座標変換 AA→DNA (`extension.rs:717-730`)、(4) グルーピング (`sum_stats_linking.rs:433-438` vs `link_hsps.c:522-528`)、(5) ソート順序 (全フィールド DESCENDING)。113件の差異は E-value 閾値境界効果または比較方法論の問題と推定。セクション 4.9, 8, 9, 10.3, 10.4 を更新。 |
+| 2026-01-03 | **4.10 E-value 閾値判定の調査・修正完了**。sum-statistics での `eff_searchsp` 計算が NCBI と異なっていたことを発見。**問題**: 旧LOSAT は `eff_search_space = eff_query_len * eff_subject_len` としてローカル計算し、subject に 1/3 の length_adjustment を適用。**NCBI**: `eff_searchsp` は `BLAST_CalcEffLengths` (blast_setup.c:836-843) で事前計算され、subject に **全額** の length_adjustment を適用。**修正**: `sum_stats_linking.rs:557-590` で `eff_subject_for_searchsp = (subject_len_aa - length_adjustment).max(1)` として全額を適用し、`eff_search_space = eff_query_len * eff_subject_for_searchsp` で計算するよう変更。ローカルの `eff_subject_len` (BLAST_SmallGapSumE 引数用) は 1/3 を維持。セクション 4.10, 8, 9, 10.3, 10.4 を更新。 |
+| 2026-01-03 | **セクション5.8 を追加**: Sum-Statistics での `eff_searchsp` と local lengths の設計上の分離について技術的注記を追加。NCBI では `BLAST_SmallGapSumE`/`BLAST_LargeGapSumE` に渡される3つの長さパラメータ (`query_length`, `subject_length`, `searchsp_eff`) が独立して計算され、異なる length_adjustment 適用方法を使用することを記録。 |
+| 2026-01-03 | **10.5 出力フォーマットの相違点を修正完了**。以下を実装: (1) `format_evalue_ncbi()` / `format_bitscore_ncbi()` - NCBI `GetScoreString()` を完全再現、(2) `OutputFormat` enum (0=Pairwise, 6=Tabular, 7=TabularWithComments)、(3) `--outfmt` 引数を `TblastxArgs` と `BlastnArgs` に追加、(4) outfmt 7 (コメント行付きTabular) 実装、(5) outfmt 0 (Pairwise) 実装 (`report/pairwise.rs` 新規作成)、(6) `common.rs` に統合出力関数 `write_output_with_format()` / `write_output_ncbi_order_with_format()` を追加。全18件のテストがパス。 |

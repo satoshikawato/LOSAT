@@ -143,6 +143,20 @@ pub struct TblastxArgs {
     /// NOTE: If `--only-sframe` is provided, it takes precedence.
     #[arg(long, allow_hyphen_values = true)]
     pub only_sstrand: Option<i8>,
+
+    /// Output format (NCBI BLAST compatible).
+    ///
+    /// Supported formats:
+    ///   0 = Pairwise alignment view (traditional BLAST output)
+    ///   6 = Tabular (tab-separated values, default)
+    ///   7 = Tabular with comment lines (headers)
+    ///
+    /// Custom field specification is supported for formats 6 and 7:
+    ///   -outfmt "6 qaccver saccver pident length"
+    ///
+    /// Default fields: qaccver saccver pident length mismatch gapopen qstart qend sstart send evalue bitscore
+    #[arg(long, default_value = "6")]
+    pub outfmt: String,
 }
 
 

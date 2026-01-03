@@ -550,9 +550,20 @@ fn link_hsp_group_ncbi(
     // subject_length = MAX(subject_length - length_adjustment, 1);
     // ```
     //
-    // Key insight: For tblastx, NCBI applies length_adjustment differently:
-    //   - query: subtract full length_adjustment
-    //   - subject: subtract (length_adjustment / 3) after converting to AA
+    // Key insight: For tblastx, NCBI applies length_adjustment differently
+    // in TWO SEPARATE PLACES:
+    //
+    // 1. LOCAL effective lengths (link_hsps.c:560-571) - for BLAST_SmallGapSumE arguments:
+    //    - query: subtract full length_adjustment
+    //    - subject: subtract (length_adjustment / 3) after converting to AA
+    //
+    // 2. eff_searchsp (blast_setup.c:836-843, BLAST_CalcEffLengths) - for searchsp_eff argument:
+    //    - query: subtract full length_adjustment
+    //    - subject: subtract full length_adjustment (NOT 1/3!)
+    //    - eff_searchsp = (db_length - num_seqs*length_adj) * (query_length - length_adj)
+    //
+    // NCBI passes these as THREE INDEPENDENT arguments to BLAST_SmallGapSumE:
+    //   (query_length, subject_length, query_info->contexts[ctx].eff_searchsp)
     // ========================================================================
     let length_adjustment = compute_length_adjustment_simple(
         query_len_aa,
@@ -563,13 +574,21 @@ fn link_hsp_group_ncbi(
     // NCBI: query_length = MAX(query_length - length_adjustment, 1)
     let eff_query_len = (query_len_aa - length_adjustment).max(1) as f64;
     
+    // NCBI parity: eff_searchsp uses full length_adjustment for BOTH query AND subject
+    // Reference: blast_setup.c:836-843 (BLAST_CalcEffLengths)
+    //   effective_db_length = db_length - ((Int8)db_num_seqs * length_adjustment);
+    //   effective_search_space = effective_db_length * (query_length - length_adjustment);
+    // For subject mode (num_seqs=1): eff_searchsp = (subject_aa - length_adj) * (query_aa - length_adj)
+    let eff_subject_for_searchsp = (subject_len_aa - length_adjustment).max(1) as f64;
+    let eff_search_space = eff_query_len * eff_subject_for_searchsp;
+    
+    // LOCAL effective subject length for BLAST_SmallGapSumE/LargeGapSumE arguments
+    // (uses 1/3 adjustment for subject per link_hsps.c:566-571)
     // NCBI: For tblastx (Blast_SubjectIsTranslated = TRUE):
     //   length_adjustment /= CODON_LENGTH (integer division by 3)
     //   subject_length = MAX(subject_length - length_adjustment, 1)
     let length_adj_for_subject = length_adjustment / 3;  // integer division
     let eff_subject_len = (subject_len_aa - length_adj_for_subject).max(1) as f64;
-    
-    let eff_search_space = eff_query_len * eff_subject_len;
     
     // Use pre-computed cutoffs from NCBI algorithm
     let cutoff_small = cutoffs.cutoff_small_gap;
@@ -590,8 +609,10 @@ fn link_hsp_group_ncbi(
         );
         eprintln!("  length_adjustment={}, length_adj_for_subject={}", 
             length_adjustment, length_adj_for_subject);
-        eprintln!("  eff_query_len={:.2}, eff_subject_len={:.2}, eff_search_space={:.2e}", 
-            eff_query_len, eff_subject_len, eff_search_space);
+        eprintln!("  eff_query_len={:.2}, eff_subject_len={:.2} (local), eff_subject_for_searchsp={:.2}", 
+            eff_query_len, eff_subject_len, eff_subject_for_searchsp);
+        eprintln!("  eff_search_space={:.2e} (uses full length_adj for subject)", 
+            eff_search_space);
         eprintln!("  lambda={}, k={}, logK={:.4}", params.lambda, params.k, params.k.ln());
     }
     

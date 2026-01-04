@@ -168,6 +168,80 @@ unsafe fn copy_offset_pairs_overflow_sse2(
     }
 }
 
+#[cfg(target_arch = "x86_64")]
+#[target_feature(enable = "avx2")]
+unsafe fn pv_test_mask4_avx2(pv: *const u64, idxs: &[usize; 4]) -> u8 {
+    use std::arch::x86_64::*;
+
+    // NCBI BLAST reference (blast_aascan.c:83-92):
+    //   index = ComputeTableIndexIncremental(...);
+    //   if (PV_TEST(pv, index, PV_ARRAY_BTS)) {
+    //       numhits = bbc[index].num_used;
+    //       ...
+    //   }
+
+    let w0 = (idxs[0] >> 6) as i32;
+    let w1 = (idxs[1] >> 6) as i32;
+    let w2 = (idxs[2] >> 6) as i32;
+    let w3 = (idxs[3] >> 6) as i32;
+
+    // Gather 4x u64 PV words (scale=8 bytes)
+    let vindex = _mm_set_epi32(w3, w2, w1, w0);
+    let pv_words = _mm256_i32gather_epi64(pv as *const i64, vindex, 8);
+
+    // Compute bit masks: 1u64 << (idx & 63) per lane
+    let b0 = (idxs[0] & 63) as i64;
+    let b1 = (idxs[1] & 63) as i64;
+    let b2 = (idxs[2] & 63) as i64;
+    let b3 = (idxs[3] & 63) as i64;
+    let shifts = _mm256_set_epi64x(b3, b2, b1, b0);
+    let ones = _mm256_set1_epi64x(1);
+    let bitmask = _mm256_sllv_epi64(ones, shifts);
+
+    let hits = _mm256_and_si256(pv_words, bitmask);
+
+    let mut m = 0u8;
+    // Extract hit flags (lane order preserved: 0..3) without spilling to memory.
+    // `_mm256_extract_epi64` requires a const index, which is fine here.
+    let h0 = _mm256_extract_epi64::<0>(hits) as u64;
+    let h1 = _mm256_extract_epi64::<1>(hits) as u64;
+    let h2 = _mm256_extract_epi64::<2>(hits) as u64;
+    let h3 = _mm256_extract_epi64::<3>(hits) as u64;
+
+    if h0 != 0 { m |= 1; }
+    if h1 != 0 { m |= 2; }
+    if h2 != 0 { m |= 4; }
+    if h3 != 0 { m |= 8; }
+    m
+}
+
+#[cfg(target_arch = "x86_64")]
+#[target_feature(enable = "avx2")]
+unsafe fn pv_test_mask8_avx2(pv: *const u64, idxs: &[usize; 8]) -> u8 {
+    let a0 = [idxs[0], idxs[1], idxs[2], idxs[3]];
+    let a1 = [idxs[4], idxs[5], idxs[6], idxs[7]];
+
+    let m0 = pv_test_mask4_avx2(pv, &a0);
+    let m1 = pv_test_mask4_avx2(pv, &a1);
+    m0 | (m1 << 4)
+}
+
+#[cfg(target_arch = "x86_64")]
+#[target_feature(enable = "avx2")]
+unsafe fn pv_test_mask16_avx2(pv: *const u64, idxs: &[usize; 16]) -> u16 {
+    let a0 = [idxs[0], idxs[1], idxs[2], idxs[3]];
+    let a1 = [idxs[4], idxs[5], idxs[6], idxs[7]];
+    let a2 = [idxs[8], idxs[9], idxs[10], idxs[11]];
+    let a3 = [idxs[12], idxs[13], idxs[14], idxs[15]];
+
+    let m0 = pv_test_mask4_avx2(pv, &a0) as u16;
+    let m1 = pv_test_mask4_avx2(pv, &a1) as u16;
+    let m2 = pv_test_mask4_avx2(pv, &a2) as u16;
+    let m3 = pv_test_mask4_avx2(pv, &a3) as u16;
+
+    m0 | (m1 << 4) | (m2 << 8) | (m3 << 12)
+}
+
 /// NCBI BlastInitHSP equivalent - stores initial HSP with absolute coordinates
 /// Reference: blast_hits.h:BlastInitHSP, blast_extend.c:360-375 BlastSaveInitHsp
 /// 
@@ -515,9 +589,9 @@ fn s_blast_aa_scan_subject(
 
     // Precompute CPU feature flags once per scan call.
     #[cfg(target_arch = "x86_64")]
-    let avx2_copy = is_x86_feature_detected!("avx2");
+    let has_avx2 = is_x86_feature_detected!("avx2");
     #[cfg(not(target_arch = "x86_64"))]
-    let avx2_copy = false;
+    let has_avx2 = false;
 
     // NCBI subject masking support (masksubj.inl). In NCBI this walks
     // `subject->seq_ranges[]`; in LOSAT each translated frame is one contiguous
@@ -549,6 +623,193 @@ fn s_blast_aa_scan_subject(
 
         // [C] for (s = s_first; s <= s_last; s++)
         let mut s = s_first;
+
+        // AVX2: batch PV_TEST for consecutive positions (rolling index stays scalar/ordered)
+        #[cfg(target_arch = "x86_64")]
+        if has_avx2 {
+            unsafe {
+                while s + 15 <= s_last {
+                    // Compute 16 consecutive indices (must be sequential to preserve rolling dependency)
+                    let mut idxs = [0usize; 16];
+                    for i in 0..16 {
+                        let new_char = *subject.get_unchecked(s + 2 + i) as usize;
+                        index = ((index << charsize) | new_char) & mask;
+                        idxs[i] = index;
+                    }
+
+                    let hit_mask = pv_test_mask16_avx2(pv, &idxs);
+
+                    // Process hits strictly in order (NCBI-compatible)
+                    for lane in 0..16usize {
+                        if (hit_mask & (1u16 << lane)) == 0 {
+                            continue;
+                        }
+
+                        let idx = idxs[lane];
+                        let cell = &*backbone.add(idx);
+                        let numhits = cell.num_used;
+
+                        if numhits <= array_size - totalhits {
+                            let s_off = (s + lane) as i32;
+                            let dest_base = totalhits as usize;
+
+                            if numhits as usize <= AA_HITS_PER_CELL {
+                                let dest = offset_pairs.as_mut_ptr().add(dest_base);
+                                match numhits {
+                                    1 => {
+                                        (*dest) = OffsetPair { q_off: cell.entries[0], s_off };
+                                    }
+                                    2 => {
+                                        (*dest) = OffsetPair { q_off: cell.entries[0], s_off };
+                                        (*dest.add(1)) = OffsetPair { q_off: cell.entries[1], s_off };
+                                    }
+                                    3 => {
+                                        (*dest) = OffsetPair { q_off: cell.entries[0], s_off };
+                                        (*dest.add(1)) = OffsetPair { q_off: cell.entries[1], s_off };
+                                        (*dest.add(2)) = OffsetPair { q_off: cell.entries[2], s_off };
+                                    }
+                                    _ => {}
+                                }
+                            } else {
+                                let cursor = cell.entries[0] as usize;
+                                let src = overflow.add(cursor);
+                                let dest = offset_pairs.as_mut_ptr().add(dest_base);
+                                copy_offset_pairs_overflow_avx2(src, dest, numhits as usize, s_off);
+                            }
+
+                            totalhits += numhits;
+                        } else {
+                            // Not enough space in the destination array; return early
+                            s_range[1] = (s + lane) as i32;
+                            return totalhits;
+                        }
+                    }
+
+                    s += 16;
+                }
+
+                while s + 7 <= s_last {
+                    // Compute 8 consecutive indices (must be sequential to preserve rolling dependency)
+                    let mut idxs = [0usize; 8];
+                    for i in 0..8 {
+                        let new_char = *subject.get_unchecked(s + 2 + i) as usize;
+                        index = ((index << charsize) | new_char) & mask;
+                        idxs[i] = index;
+                    }
+
+                    let hit_mask = pv_test_mask8_avx2(pv, &idxs);
+
+                    // Process hits strictly in order (NCBI-compatible)
+                    for lane in 0..8usize {
+                        if (hit_mask & (1u8 << lane)) == 0 {
+                            continue;
+                        }
+
+                        let idx = idxs[lane];
+                        let cell = &*backbone.add(idx);
+                        let numhits = cell.num_used;
+
+                        if numhits <= array_size - totalhits {
+                            let s_off = (s + lane) as i32;
+                            let dest_base = totalhits as usize;
+
+                            if numhits as usize <= AA_HITS_PER_CELL {
+                                let dest = offset_pairs.as_mut_ptr().add(dest_base);
+                                match numhits {
+                                    1 => {
+                                        (*dest) = OffsetPair { q_off: cell.entries[0], s_off };
+                                    }
+                                    2 => {
+                                        (*dest) = OffsetPair { q_off: cell.entries[0], s_off };
+                                        (*dest.add(1)) = OffsetPair { q_off: cell.entries[1], s_off };
+                                    }
+                                    3 => {
+                                        (*dest) = OffsetPair { q_off: cell.entries[0], s_off };
+                                        (*dest.add(1)) = OffsetPair { q_off: cell.entries[1], s_off };
+                                        (*dest.add(2)) = OffsetPair { q_off: cell.entries[2], s_off };
+                                    }
+                                    _ => {}
+                                }
+                            } else {
+                                let cursor = cell.entries[0] as usize;
+                                let src = overflow.add(cursor);
+                                let dest = offset_pairs.as_mut_ptr().add(dest_base);
+                                copy_offset_pairs_overflow_avx2(src, dest, numhits as usize, s_off);
+                            }
+
+                            totalhits += numhits;
+                        } else {
+                            // Not enough space in the destination array; return early
+                            s_range[1] = (s + lane) as i32;
+                            return totalhits;
+                        }
+                    }
+
+                    s += 8;
+                }
+
+                while s + 3 <= s_last {
+                    // Compute 4 consecutive indices (must be sequential to preserve rolling dependency)
+                    let mut idxs = [0usize; 4];
+                    for i in 0..4 {
+                        let new_char = *subject.get_unchecked(s + 2 + i) as usize;
+                        index = ((index << charsize) | new_char) & mask;
+                        idxs[i] = index;
+                    }
+
+                    let hit_mask = pv_test_mask4_avx2(pv, &idxs);
+
+                    // Process hits strictly in order (NCBI-compatible)
+                    for lane in 0..4usize {
+                        if (hit_mask & (1u8 << lane)) == 0 {
+                            continue;
+                        }
+
+                        let idx = idxs[lane];
+                        let cell = &*backbone.add(idx);
+                        let numhits = cell.num_used;
+
+                        if numhits <= array_size - totalhits {
+                            let s_off = (s + lane) as i32;
+                            let dest_base = totalhits as usize;
+
+                            if numhits as usize <= AA_HITS_PER_CELL {
+                                let dest = offset_pairs.as_mut_ptr().add(dest_base);
+                                match numhits {
+                                    1 => {
+                                        (*dest) = OffsetPair { q_off: cell.entries[0], s_off };
+                                    }
+                                    2 => {
+                                        (*dest) = OffsetPair { q_off: cell.entries[0], s_off };
+                                        (*dest.add(1)) = OffsetPair { q_off: cell.entries[1], s_off };
+                                    }
+                                    3 => {
+                                        (*dest) = OffsetPair { q_off: cell.entries[0], s_off };
+                                        (*dest.add(1)) = OffsetPair { q_off: cell.entries[1], s_off };
+                                        (*dest.add(2)) = OffsetPair { q_off: cell.entries[2], s_off };
+                                    }
+                                    _ => {}
+                                }
+                            } else {
+                                let cursor = cell.entries[0] as usize;
+                                let src = overflow.add(cursor);
+                                let dest = offset_pairs.as_mut_ptr().add(dest_base);
+                                copy_offset_pairs_overflow_avx2(src, dest, numhits as usize, s_off);
+                            }
+
+                            totalhits += numhits;
+                        } else {
+                            // Not enough space in the destination array; return early
+                            s_range[1] = (s + lane) as i32;
+                            return totalhits;
+                        }
+                    }
+
+                    s += 4;
+                }
+            }
+        }
+
         while s <= s_last {
             // [C] index = ComputeTableIndexIncremental(word_length, lookup->charsize, lookup->mask, s, index);
             // Rolling index computation: shift in the new character
@@ -600,7 +861,7 @@ fn s_blast_aa_scan_subject(
                             let dest = offset_pairs.as_mut_ptr().add(dest_base);
                             #[cfg(target_arch = "x86_64")]
                             {
-                                if avx2_copy {
+                                if has_avx2 {
                                     copy_offset_pairs_overflow_avx2(src, dest, numhits as usize, s_off);
                                 } else {
                                     copy_offset_pairs_overflow_sse2(src, dest, numhits as usize, s_off);

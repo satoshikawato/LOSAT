@@ -541,11 +541,17 @@ pub fn apply_sum_stats_even_gap_linking(
                 a_qstrand.cmp(&b_qstrand)
             })
             // NCBI line 351-357: SIGN(subject.frame)
+            // In NCBI qsort: return 1 means h1 comes AFTER h2
+            // if h1->subject.frame > h2->subject.frame: return 1 (h1 after h2)
+            // This means negative frames come FIRST, then positive frames.
+            // In Rust sort_by: Greater means a comes AFTER b
+            // So we want: if a.frame > b.frame, return Greater (a after b)
             .then_with(|| {
                 let a_ssign = a.s_frame.signum();
                 let b_ssign = b.s_frame.signum();
                 // NCBI: if h1->subject.frame > h2->subject.frame return 1
-                b_ssign.cmp(&a_ssign)
+                // Rust equivalent: a_ssign.cmp(&b_ssign) gives ascending order
+                a_ssign.cmp(&b_ssign)
             })
             // NCBI lines 359-374: all descending
             .then(b.q_aa_start.cmp(&a.q_aa_start))
@@ -855,10 +861,15 @@ fn link_hsp_group_ncbi(
             // NCBI lines 607-625: Find the current max sums
             // Using intrusive linked list traversal (O(active) instead of O(n))
             // This matches NCBI's hp_start->next traversal where processed HSPs are removed
+            // NCBI parity fix: Add linked_to != -1000 check to exclude processed HSPs
+            // In NCBI, processed HSPs are physically removed from the linked list.
+            // In LOSAT, we use an array with intrusive list, so processed HSPs might
+            // still appear in traversal if unlinking has edge cases.
+            // This defensive check ensures we never select a processed HSP as best.
             if !ignore_small_gaps {
                 let mut cur = active_head;
                 while cur != SENTINEL_IDX {
-                    if hsp_links[cur].sum[0] >= best_sum[0] {
+                    if hsp_links[cur].linked_to != -1000 && hsp_links[cur].sum[0] >= best_sum[0] {
                         best_sum[0] = hsp_links[cur].sum[0];
                         best[0] = Some(cur);
                     }
@@ -868,7 +879,7 @@ fn link_hsp_group_ncbi(
             {
                 let mut cur = active_head;
                 while cur != SENTINEL_IDX {
-                    if hsp_links[cur].sum[1] >= best_sum[1] {
+                    if hsp_links[cur].linked_to != -1000 && hsp_links[cur].sum[1] >= best_sum[1] {
                         best_sum[1] = hsp_links[cur].sum[1];
                         best[1] = Some(cur);
                     }
@@ -1082,9 +1093,11 @@ fn link_hsp_group_ncbi(
                 //
                 // This is the original fast-path: if the previous best choice exists and
                 // was not changed in the last pass, it is still the best.
-                // NCBI checks only changed==0, NOT linked_to>=0 here.
+                // NCBI physically removes processed HSPs from the linked list, so they
+                // can't appear as prev_link. In LOSAT, we must explicitly check.
                 let can_skip_ncbi = !first_pass
-                    && (prev_link == SENTINEL_IDX || !hsp_links[prev_link].changed);
+                    && (prev_link == SENTINEL_IDX 
+                        || (hsp_links[prev_link].linked_to != -1000 && !hsp_links[prev_link].changed));
                 
                 if can_skip_ncbi {
                     if prev_link != SENTINEL_IDX {

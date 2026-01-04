@@ -62,6 +62,41 @@ struct OffsetPair {
     s_off: i32,
 }
 
+/// NCBI BlastInitHSP equivalent - stores initial HSP with absolute coordinates
+/// Reference: blast_hits.h:BlastInitHSP, blast_extend.c:360-375 BlastSaveInitHsp
+/// 
+/// This structure stores HSPs after extension but before coordinate conversion.
+/// Coordinates are stored as absolute positions in the concatenated buffer.
+#[derive(Clone, Copy)]
+struct InitHSP {
+    /// Query absolute coordinate (in concatenated buffer, with sentinel)
+    q_start_absolute: i32,
+    /// Query end absolute coordinate (in concatenated buffer, with sentinel)
+    q_end_absolute: i32,
+    /// Subject coordinate (frame-relative, with sentinel)
+    s_start: i32,
+    /// Subject end coordinate (frame-relative, with sentinel)
+    s_end: i32,
+    /// Raw score from extension
+    score: i32,
+    /// Query context index
+    ctx_idx: usize,
+    /// Subject frame index
+    s_f_idx: usize,
+    /// Query record index
+    q_idx: u32,
+    /// Subject record index
+    s_idx: u32,
+    /// Query frame
+    q_frame: i8,
+    /// Subject frame
+    s_frame: i8,
+    /// Query original length
+    q_orig_len: usize,
+    /// Subject original length
+    s_orig_len: usize,
+}
+
 struct WorkerState {
     tx: std::sync::mpsc::Sender<Vec<Hit>>,
     offset_pairs: Vec<OffsetPair>,
@@ -100,6 +135,250 @@ fn atomic_max_i32(dst: &AtomicI32, val: i32) {
             Err(next) => cur = next,
         }
     }
+}
+
+/// NCBI s_AdjustInitialHSPOffsets equivalent
+/// Reference: blast_gapalign.c:2384-2392
+/// 
+/// NCBI code:
+/// ```c
+/// static NCBI_INLINE void
+/// s_AdjustInitialHSPOffsets(BlastInitHSP* init_hsp, Int4 query_start)
+/// {
+///     init_hsp->offsets.qs_offsets.q_off -= query_start;
+///     if (init_hsp->ungapped_data) {
+///         init_hsp->ungapped_data->q_start -= query_start;  // ★座標変換
+///     }
+///     ASSERT(init_hsp->ungapped_data == NULL ||
+///            init_hsp->ungapped_data->q_start >= 0);
+/// }
+/// ```
+/// 
+/// Converts absolute coordinates to context-relative coordinates.
+/// This is called in BLAST_GetUngappedHSPList (blast_gapalign.c:4756-4758).
+#[inline]
+fn adjust_initial_hsp_offsets(
+    hsp_q_absolute: i32,  // Absolute coordinate in concatenated buffer
+    frame_base: i32,      // Context start position (absolute)
+) -> i32 {
+    // NCBI: init_hsp->ungapped_data->q_start -= query_start;
+    hsp_q_absolute - frame_base
+}
+
+/// NCBI BLAST_GetUngappedHSPList equivalent
+/// Reference: blast_gapalign.c:4719-4775
+/// 
+/// NCBI code flow:
+/// 1. Get context for each InitHSP (s_GetUngappedHSPContext)
+/// 2. Adjust coordinates (s_AdjustInitialHSPOffsets)
+/// 3. Initialize HSP (Blast_HSPInit)
+/// 4. Add to hsp_list
+/// 
+/// This function converts InitHSPs (with absolute coordinates) to UngappedHits
+/// (with context-relative coordinates). Reevaluation is performed separately
+/// by Blast_HSPListReevaluateUngapped equivalent.
+/// 
+/// NCBI reference (verbatim, blast_gapalign.c:4756-4768):
+/// ```c
+/// context = s_GetUngappedHSPContext(query_info, init_hsp);
+/// s_AdjustInitialHSPOffsets(init_hsp, query_info->contexts[context].query_offset);
+/// ungapped_data = init_hsp->ungapped_data;
+/// Blast_HSPInit(ungapped_data->q_start,
+///               ungapped_data->length+ungapped_data->q_start,
+///               ungapped_data->s_start,
+///               ungapped_data->length+ungapped_data->s_start,
+///               init_hsp->offsets.qs_offsets.q_off,
+///               init_hsp->offsets.qs_offsets.s_off,
+///               context, query_info->contexts[context].frame,
+///               subject->frame, ungapped_data->score, NULL, &new_hsp);
+/// Blast_HSPListSaveHSP(hsp_list, new_hsp);
+/// ```
+fn get_ungapped_hsp_list(
+    init_hsps: Vec<InitHSP>,
+    contexts: &[super::lookup::QueryContext],
+    s_frames: &[super::translation::QueryFrame],
+) -> Vec<UngappedHit> {
+    let mut ungapped_hits = Vec::new();
+    
+    for init_hsp in init_hsps {
+        let ctx = &contexts[init_hsp.ctx_idx];
+        let s_frame = &s_frames[init_hsp.s_f_idx];
+        
+        // NCBI: s_GetUngappedHSPContext equivalent
+        // Context is already stored in init_hsp.ctx_idx
+        
+        // NCBI: s_AdjustInitialHSPOffsets (blast_gapalign.c:2384-2392)
+        // Convert absolute coordinates to context-relative coordinates
+        // NCBI: init_hsp->ungapped_data->q_start -= query_start;
+        // where query_start = query_info->contexts[context].query_offset
+        let q_start_relative = adjust_initial_hsp_offsets(init_hsp.q_start_absolute, ctx.frame_base);
+        let q_end_relative = adjust_initial_hsp_offsets(init_hsp.q_end_absolute, ctx.frame_base);
+        
+        // NCBI: Blast_HSPInit (blast_hits.c:150-189)
+        // query.offset = ungapped_data->q_start (context-relative, sentinel included)
+        // query.end = ungapped_data->length + ungapped_data->q_start
+        // 
+        // In LOSAT, q_start_relative is context-relative coordinate (sentinel included).
+        // We store it as array index into ctx.aa_seq (which has sentinel at index 0).
+        let qs = q_start_relative as usize;
+        let qe = q_end_relative as usize;
+        let ss = init_hsp.s_start as usize;
+        let se = init_hsp.s_end as usize;
+        let len_u = qe.saturating_sub(qs);
+        
+        if len_u == 0 {
+            continue;
+        }
+        
+        // Convert to logical coords (subtract sentinel for reporting)
+        // NCBI stores offsets as sentinel-inclusive, but reports as sentinel-exclusive
+        let (qs_l, qe_l) = (qs.saturating_sub(1), qe.saturating_sub(1));
+        let (ss_l, se_l) = (ss.saturating_sub(1), se.saturating_sub(1));
+        
+        // Create UngappedHit with context-relative coordinates (before reevaluation)
+        // NCBI: Blast_HSPInit creates HSP with original extension score
+        ungapped_hits.push(UngappedHit {
+            q_idx: init_hsp.q_idx,
+            s_idx: init_hsp.s_idx,
+            ctx_idx: init_hsp.ctx_idx,
+            s_f_idx: init_hsp.s_f_idx,
+            q_frame: init_hsp.q_frame,
+            s_frame: init_hsp.s_frame,
+            q_aa_start: qs_l,
+            q_aa_end: qe_l,
+            s_aa_start: ss_l,
+            s_aa_end: se_l,
+            q_orig_len: init_hsp.q_orig_len,
+            s_orig_len: init_hsp.s_orig_len,
+            raw_score: init_hsp.score,  // Original extension score (before reevaluation)
+            e_value: f64::INFINITY,
+            num_ident: 0,  // Will be computed during reevaluation
+            ordering_method: 0,
+            linked_set: false,
+            start_of_chain: false,
+        });
+    }
+    
+    // NCBI: Sort the HSP array by score
+    // Reference: blast_gapalign.c:4772
+    ungapped_hits.sort_by(|a, b| b.raw_score.cmp(&a.raw_score));
+    
+    ungapped_hits
+}
+
+/// NCBI Blast_HSPListReevaluateUngapped equivalent
+/// Reference: blast_hits.c:2609-2737, blast_engine.c:1492-1497
+/// 
+/// NCBI code flow:
+/// 1. For each HSP in the list
+/// 2. Get context and compute query_start (context start position)
+/// 3. Call Blast_HSPReevaluateWithAmbiguitiesUngapped
+/// 4. Call Blast_HSPGetNumIdentitiesAndPositives and Blast_HSPTest
+/// 5. Delete HSPs that fail tests
+/// 6. Sort by score (scores may have changed)
+/// 
+/// NCBI reference (verbatim, blast_hits.c:2694-2706):
+/// ```c
+/// context = hsp->context;
+/// query_start = query_blk->sequence + query_info->contexts[context].query_offset;
+/// if (kTranslateSubject)
+///     subject_start = Blast_HSPGetTargetTranslation(target_t, hsp, NULL);
+/// if (kNucleotideSubject) {
+///     delete_hsp = Blast_HSPReevaluateWithAmbiguitiesUngapped(hsp, query_start,
+///         subject_start, word_params, sbp, kTranslateSubject);
+/// }
+/// ```
+/// 
+/// This function performs batch reevaluation on all HSPs in the list,
+/// updating scores and trimming boundaries. HSPs that fail reevaluation
+/// or subsequent tests are removed from the list.
+fn reevaluate_ungapped_hsp_list(
+    mut ungapped_hits: Vec<UngappedHit>,
+    contexts: &[super::lookup::QueryContext],
+    s_frames: &[super::translation::QueryFrame],
+    cutoff_scores: &[Vec<i32>],
+    args: &super::args::TblastxArgs,
+) -> Vec<UngappedHit> {
+    let mut kept_hits = Vec::new();
+    
+    for mut hit in ungapped_hits {
+        let ctx = &contexts[hit.ctx_idx];
+        let s_frame = &s_frames[hit.s_f_idx];
+        let cutoff = cutoff_scores[hit.ctx_idx][hit.s_f_idx];
+        
+        // NCBI: query_start = query_blk->sequence + query_info->contexts[context].query_offset;
+        // In LOSAT, ctx.aa_seq is the frame sequence (with sentinel at index 0)
+        // query_start is the start of the context sequence (sentinel included)
+        let query = &ctx.aa_seq;
+        let subject = &s_frame.aa_seq;
+        
+        // NCBI: query = query_start + hsp->query.offset
+        // hsp->query.offset is context-relative coordinate (sentinel included)
+        // In LOSAT, q_aa_start is sentinel-exclusive, so we add 1 to get sentinel-inclusive
+        let qs = (hit.q_aa_start + 1) as usize;  // +1 for sentinel
+        let ss = (hit.s_aa_start + 1) as usize;  // +1 for sentinel
+        let len_u = hit.q_aa_end.saturating_sub(hit.q_aa_start);
+        
+        if len_u == 0 {
+            continue;
+        }
+        
+        // NCBI: Blast_HSPReevaluateWithAmbiguitiesUngapped (blast_hits.c:2702-2705)
+        // Reference: blast_hits.c:675-733
+        let (new_qs, new_ss, new_len, new_score) = if let Some(result) =
+            reevaluate_ungapped_hit_ncbi_translated(query, subject, qs, ss, len_u, cutoff)
+        {
+            result
+        } else {
+            // Deleted by NCBI reevaluation (score < cutoff_score)
+            continue;
+        };
+        
+        // NCBI: Blast_HSPGetNumIdentitiesAndPositives and Blast_HSPTest
+        // Reference: blast_hits.c:2708-2720
+        let query_nomask = ctx.aa_seq_nomask.as_ref().unwrap_or(&ctx.aa_seq);
+        let num_ident = if let Some((num_ident, _align_length)) =
+            get_num_identities_and_positives_ungapped(
+                query_nomask,
+                subject,
+                new_qs,
+                new_ss,
+                new_len,
+            ) {
+            num_ident
+        } else {
+            continue;
+        };
+        
+        // NCBI: Blast_HSPTest (blast_hits.c:2719)
+        let percent_identity = args.percent_identity;
+        let min_hit_length = args.min_hit_length;
+        if hsp_test(num_ident, new_len, percent_identity, min_hit_length) {
+            continue;
+        }
+        
+        // Update hit with reevaluated coordinates and score
+        // Convert from sentinel-inclusive to sentinel-exclusive for reporting
+        let new_qe = new_qs + new_len;
+        let new_se = new_ss + new_len;
+        let (qs_l, qe_l) = (new_qs.saturating_sub(1), new_qe.saturating_sub(1));
+        let (ss_l, se_l) = (new_ss.saturating_sub(1), new_se.saturating_sub(1));
+        
+        hit.q_aa_start = qs_l;
+        hit.q_aa_end = qe_l;
+        hit.s_aa_start = ss_l;
+        hit.s_aa_end = se_l;
+        hit.raw_score = new_score;
+        hit.num_ident = num_ident;
+        
+        kept_hits.push(hit);
+    }
+    
+    // NCBI: Sort the HSP array by score (scores may have changed!)
+    // Reference: blast_hits.c:2734
+    kept_hits.sort_by(|a, b| b.raw_score.cmp(&a.raw_score));
+    
+    kept_hits
 }
 
 /// s_BlastAaScanSubject - NCBI BLAST style scan
@@ -775,7 +1054,9 @@ pub fn run(args: TblastxArgs) -> Result<()> {
                 cutoff_score_min = 0;
             }
 
-            let mut ungapped_hits: Vec<UngappedHit> = Vec::new();
+            // NCBI: BlastSaveInitHsp equivalent - store initial HSPs with absolute coordinates
+            // Reference: blast_extend.c:360-375 BlastSaveInitHsp
+            let mut init_hsps: Vec<InitHSP> = Vec::new();
             
             // Statistics for HSP saving analysis (long sequences only)
             let is_long_sequence = subject_len_nucl > 600_000;
@@ -994,93 +1275,31 @@ pub fn run(args: TblastxArgs) -> Result<()> {
                                         .ungapped_only_hits
                                         .fetch_add(1, AtomicOrdering::Relaxed);
                                 }
-                                // NCBI: reevaluate ungapped HSP vs actual (possibly masked) residues
-                                // before linking (blast_hits.c:675-733).
-                                let mut qs = hsp_q as usize;
-                                let mut ss = hsp_s as usize;
-                                let mut len_u = hsp_len as usize;
-                                let mut score_u = score;
-                                if let Some((new_qs, new_ss, new_len, new_score)) =
-                                    reevaluate_ungapped_hit_ncbi_translated(query, subject, qs, ss, len_u, cutoff)
-                                {
-                                    qs = new_qs;
-                                    ss = new_ss;
-                                    len_u = new_len;
-                                    score_u = new_score;
-                                } else {
-                                    // Deleted by NCBI reevaluation (score < cutoff_score)
-                                    if is_long_sequence {
-                                        stats_hsp_filtered_by_reeval += 1;
-                                    }
-                                    continue;
-                                }
-
-                                // NCBI: Blast_HSPGetNumIdentitiesAndPositives and Blast_HSPTest
-                                // Reference: blast_hits.c:2708-2720
-                                // Use query_nomask (unmasked sequence) for identity calculation
-                                // If aa_seq_nomask is None, use aa_seq (masked) as fallback
-                                // Note: qs and ss are relative offsets within query/subject (sentinel included)
-                                // Both query_nomask and query have sentinels, so qs can be used directly
-                                let query_nomask = ctx.aa_seq_nomask.as_ref().unwrap_or(&ctx.aa_seq);
-                                let num_ident = if let Some((num_ident, _align_length)) =
-                                    get_num_identities_and_positives_ungapped(
-                                        query_nomask,
-                                        subject,
-                                        qs, // qs is already relative to query (context start), same for query_nomask
-                                        ss, // ss is relative to subject (sentinel included)
-                                        len_u,
-                                    ) {
-                                    num_ident
-                                } else {
-                                    // Length mismatch - skip this HSP
-                                    continue;
-                                };
-
-                                // NCBI: Blast_HSPTest (blast_hits.c:2719)
-                                // Default values: percent_identity = 0.0, min_hit_length = 0 (from calloc)
-                                // So by default, this test always returns false (no filtering)
-                                let percent_identity = args.percent_identity;
-                                let min_hit_length = args.min_hit_length;
-                                if hsp_test(num_ident, len_u, percent_identity, min_hit_length) {
-                                    // HSP deleted by Blast_HSPTest
-                                    if is_long_sequence {
-                                        stats_hsp_filtered_by_hsp_test += 1;
-                                    }
-                                    continue;
-                                }
+                                // NCBI: BlastSaveInitHsp equivalent
+                                // Reference: blast_extend.c:360-375 BlastSaveInitHsp
+                                // Store HSP with absolute coordinates (before coordinate conversion)
+                                //
+                                // hsp_q is frame-relative coordinate (with sentinel, array index)
+                                // frame_base is concatenated buffer start position (with sentinel, array index)
+                                // Calculate absolute coordinate in concatenated buffer
+                                // NCBI: ungapped_data->q_start = q_start (absolute, sentinel included)
+                                let hsp_q_absolute = ctx.frame_base + (hsp_q as i32);
+                                let hsp_qe_absolute = ctx.frame_base + ((hsp_q + hsp_len) as i32);
                                 
-                                if is_long_sequence {
-                                    stats_hsp_saved += 1;
-                                }
-
-                                let qe = qs + len_u;
-                                let se = ss + len_u;
-
-                                // Convert to logical coords (subtract sentinel)
-                                let (qs_l, qe_l) = (qs.saturating_sub(1), qe.saturating_sub(1));
-                                let (ss_l, se_l) = (ss.saturating_sub(1), se.saturating_sub(1));
-
-                                // Hot-path record: postpone string clones, identity, and bit/evalue until after
-                                // sum-statistics linking + final filtering.
-                                ungapped_hits.push(UngappedHit {
-                                    q_idx: ctx.q_idx,
-                                    s_idx: s_idx as u32,
+                                init_hsps.push(InitHSP {
+                                    q_start_absolute: hsp_q_absolute,
+                                    q_end_absolute: hsp_qe_absolute,
+                                    s_start: hsp_s,
+                                    s_end: hsp_s + hsp_len,
+                                    score,
                                     ctx_idx,
                                     s_f_idx,
+                                    q_idx: ctx.q_idx,
+                                    s_idx: s_idx as u32,
                                     q_frame: ctx.frame,
                                     s_frame: s_frame.frame,
-                                    q_aa_start: qs_l,
-                                    q_aa_end: qe_l,
-                                    s_aa_start: ss_l,
-                                    s_aa_end: se_l,
                                     q_orig_len: ctx.orig_len,
                                     s_orig_len: s_len,
-                                    raw_score: score_u,
-                                    e_value: f64::INFINITY,
-                                    num_ident,
-                                    ordering_method: 0, // Set during sum_stats_linking
-                                    linked_set: false,
-                                    start_of_chain: false,
                                 });
                             } else if diag_enabled {
                                 diagnostics
@@ -1114,19 +1333,39 @@ pub fn run(args: TblastxArgs) -> Result<()> {
                 }
             }
 
-            if !ungapped_hits.is_empty() {
-                if diag_enabled {
-                    diagnostics
-                        .base
-                        .hsps_before_chain
-                        .fetch_add(ungapped_hits.len(), AtomicOrdering::Relaxed);
-                }
-                // NCBI CalculateLinkHSPCutoffs parameters
-                let linking_params = LinkingParams {
-                    avg_query_length,
-                    subject_len_nucl,
-                    cutoff_score_min,
-                    scale_factor: 1.0, // Standard BLOSUM62
+                // NCBI: BLAST_GetUngappedHSPList equivalent
+                // Reference: blast_gapalign.c:4719-4775
+                // Convert InitHSPs (with absolute coordinates) to UngappedHits (with context-relative coordinates)
+                let ungapped_hits = get_ungapped_hsp_list(
+                    init_hsps,
+                    contexts_ref,
+                    &s_frames,
+                );
+                
+                // NCBI: Blast_HSPListReevaluateUngapped equivalent
+                // Reference: blast_engine.c:1492-1497, blast_hits.c:2609-2737
+                // Perform batch reevaluation on all HSPs
+                let ungapped_hits = reevaluate_ungapped_hsp_list(
+                    ungapped_hits,
+                    contexts_ref,
+                    &s_frames,
+                    &cutoff_scores,
+                    &args,
+                );
+                
+                if !ungapped_hits.is_empty() {
+                    if diag_enabled {
+                        diagnostics
+                            .base
+                            .hsps_before_chain
+                            .fetch_add(ungapped_hits.len(), AtomicOrdering::Relaxed);
+                    }
+                    // NCBI CalculateLinkHSPCutoffs parameters
+                    let linking_params = LinkingParams {
+                        avg_query_length,
+                        subject_len_nucl,
+                        cutoff_score_min,
+                        scale_factor: 1.0, // Standard BLOSUM62
                     gap_decay_rate: 0.5, // BLAST_GAP_DECAY_RATE
                 };
                 // Build NCBI-style subject frame base offsets for sum-statistics linking.
@@ -1722,7 +1961,9 @@ fn run_with_neighbor_map(args: TblastxArgs) -> Result<()> {
                     return Vec::new();
                 }
 
-                let mut local_hits: Vec<UngappedHit> = Vec::new();
+                // NCBI: BlastSaveInitHsp equivalent - store initial HSPs with absolute coordinates
+                // Reference: blast_extend.c:360-375 BlastSaveInitHsp
+                let mut init_hsps: Vec<InitHSP> = Vec::new();
                 let s_aa_len = s_aa.len();
                 
                 // Count total query contexts for Vec-based diagonal tracking
@@ -1886,92 +2127,76 @@ fn run_with_neighbor_map(args: TblastxArgs) -> Result<()> {
                                 continue;
                             }
                             
-                            // NCBI: reevaluate ungapped HSP vs actual (possibly masked) residues
-                            // before linking (blast_hits.c:675-733).
+                            // NCBI: BlastSaveInitHsp equivalent
+                            // Reference: blast_extend.c:360-375 BlastSaveInitHsp
+                            // Store HSP with absolute coordinates (before coordinate conversion)
                             //
-                            // This step can trim HSP boundaries to the best-scoring subsegment and
-                            // delete the HSP if it falls below the cutoff after rescoring.
-                            let mut hsp_q = hsp_q;
-                            let mut hsp_s = hsp_s;
-                            let mut hsp_len = hsp_len;
-                            let mut score = score;
-                            if let Some((new_qs, new_ss, new_len, new_score)) =
-                                reevaluate_ungapped_hit_ncbi_translated(q_aa, s_aa, hsp_q, hsp_s, hsp_len, cutoff)
-                            {
-                                hsp_q = new_qs;
-                                hsp_s = new_ss;
-                                hsp_len = new_len;
-                                score = new_score;
-                            } else {
-                                continue;
-                            }
-
-                            // NCBI: Blast_HSPGetNumIdentitiesAndPositives and Blast_HSPTest
-                            // Reference: blast_hits.c:2708-2720
-                            // Use query_nomask (unmasked sequence) for identity calculation
-                            // If aa_seq_nomask is None, use aa_seq (masked) as fallback
-                            // Note: hsp_q and hsp_s are relative offsets within q_frame/s_aa (sentinel included)
-                            // Both aa_seq_nomask and aa_seq have sentinels, so hsp_q can be used directly
-                            let q_frame_nomask = q_frame.aa_seq_nomask.as_ref().unwrap_or(&q_frame.aa_seq);
-                            let num_ident = if let Some((num_ident, _align_length)) =
-                                get_num_identities_and_positives_ungapped(
-                                    q_frame_nomask,
-                                    s_aa,
-                                    hsp_q, // hsp_q is already relative to q_frame (sentinel included), same for q_frame_nomask
-                                    hsp_s, // hsp_s is relative to s_aa (sentinel included)
-                                    hsp_len,
-                                ) {
-                                num_ident
-                            } else {
-                                // Length mismatch - skip this HSP
-                                continue;
-                            };
-
-                            // NCBI: Blast_HSPTest (blast_hits.c:2719)
-                            // Default values: percent_identity = 0.0, min_hit_length = 0 (from calloc)
-                            // So by default, this test always returns false (no filtering)
-                            let percent_identity = args.percent_identity;
-                            let min_hit_length = args.min_hit_length;
-                            if hsp_test(num_ident, hsp_len, percent_identity, min_hit_length) {
-                                // HSP deleted by Blast_HSPTest
-                                continue;
-                            }
-
-                            let hsp_qe = hsp_q + hsp_len;
-
-                            // Convert to logical coordinates (subtract sentinel)
-                            let qs_logical = hsp_q.saturating_sub(1);
-                            let qe_logical = hsp_qe.saturating_sub(1);
-                            let ss_logical = hsp_s.saturating_sub(1);
-                            let se_logical = ss_logical + hsp_len;
+                            // In neighbor-map mode, each query frame is independent with frame_base=0
+                            // hsp_q is frame-relative coordinate (with sentinel)
+                            // Calculate absolute coordinate in concatenated buffer
+                            let frame_base = 0i32;  // Each query frame is independent in neighbor-map mode
+                            let hsp_q_absolute = frame_base + (hsp_q as i32) - 1;  // -1 for sentinel
+                            let hsp_qe_absolute = frame_base + ((hsp_q + hsp_len) as i32) - 1;  // -1 for sentinel
                             
-                            if hsp_len == 0 {
-                                continue;
-                            }
-                            
-                            local_hits.push(UngappedHit {
-                                q_idx,
-                                s_idx: s_idx as u32,
+                            init_hsps.push(InitHSP {
+                                q_start_absolute: hsp_q_absolute,
+                                q_end_absolute: hsp_qe_absolute,
+                                s_start: hsp_s as i32,
+                                s_end: (hsp_s + hsp_len) as i32,
+                                score,
                                 ctx_idx: ctx_flat,
                                 s_f_idx,
+                                q_idx,
+                                s_idx: s_idx as u32,
                                 q_frame: q_frame.frame,
                                 s_frame: s_frame.frame,
-                                q_aa_start: qs_logical,
-                                q_aa_end: qe_logical,
-                                s_aa_start: ss_logical,
-                                s_aa_end: se_logical,
                                 q_orig_len: q_frame.orig_len,
                                 s_orig_len: s_len,
-                                raw_score: score,
-                                e_value: f64::INFINITY, // Will be computed by linking
-                                num_ident,
-                                ordering_method: 0, // Set during sum_stats_linking
-                                linked_set: false,
-                                start_of_chain: false,
                             });
                         } // end for query_hits
                     } // end for neighbor_kmers
                 } // end for s_pos
+
+                // NCBI: BLAST_GetUngappedHSPList equivalent
+                // Reference: blast_gapalign.c:4719-4775
+                // Convert InitHSPs (with absolute coordinates) to UngappedHits (with context-relative coordinates)
+                // and perform batch reevaluation
+                //
+                // In neighbor-map mode, each query frame is independent with frame_base=0
+                // Create temporary contexts for get_ungapped_hsp_list
+                let mut temp_contexts = Vec::new();
+                for (q_idx, frames) in query_frames_ref.iter().enumerate() {
+                    for (f_idx, frame) in frames.iter().enumerate() {
+                        temp_contexts.push(super::lookup::QueryContext {
+                            q_idx: q_idx as u32,
+                            f_idx: f_idx as u8,
+                            frame: frame.frame,
+                            aa_seq: frame.aa_seq.clone(),
+                            aa_seq_nomask: frame.aa_seq_nomask.clone(),
+                            aa_len: frame.aa_len,
+                            orig_len: frame.orig_len,
+                            frame_base: 0,  // Each query frame is independent
+                            karlin_params: ungapped_params_ref.clone(),
+                        });
+                    }
+                }
+                // NCBI: BLAST_GetUngappedHSPList equivalent
+                // Convert InitHSPs (with absolute coordinates) to UngappedHits (with context-relative coordinates)
+                let local_hits = get_ungapped_hsp_list(
+                    init_hsps,
+                    &temp_contexts,
+                    &s_frames,
+                );
+                
+                // NCBI: Blast_HSPListReevaluateUngapped equivalent
+                // Perform batch reevaluation on all HSPs
+                let local_hits = reevaluate_ungapped_hsp_list(
+                    local_hits,
+                    &temp_contexts,
+                    &s_frames,
+                    cutoff_scores_ref,
+                    &args,
+                );
 
                 bar.inc(1);
                 local_hits

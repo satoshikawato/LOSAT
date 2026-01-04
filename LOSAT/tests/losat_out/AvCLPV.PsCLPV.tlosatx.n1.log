@@ -93,6 +93,6 @@ Searching 1 queries vs 1 subjects... (avg_query_length=138689)
 [DEBUG CUTOFF_CALC] log(K*searchsp/E)=7.068389e2, score_before_ceil=2.225563e3
 [DEBUG CUTOFF_CALC] final_score=2226 (ceil)
 
-real	1m43.899s
-user	1m43.701s
-sys	0m0.090s
+real	22m7.511s
+user	22m7.329s
+sys	0m0.060s

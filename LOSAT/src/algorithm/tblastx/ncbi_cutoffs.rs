@@ -89,7 +89,95 @@ pub fn gap_trigger_raw_score(bit_trigger: f64, ungapped_params: &KarlinParams) -
     raw as i32
 }
 
+/// Result of effective length calculation for TBLASTX -subject mode.
+/// 
+/// This struct mirrors NCBI's `query_info->contexts[ctx].length_adjustment` and
+/// `query_info->contexts[ctx].eff_searchsp` fields which are computed once in
+/// `BLAST_CalcEffLengths` and then referenced by cutoff and sum-stats logic.
+#[derive(Debug, Clone, Copy)]
+pub struct EffLengthsResult {
+    /// Length adjustment (Int4 in NCBI: query_info->contexts[ctx].length_adjustment)
+    pub length_adjustment: i64,
+    /// Effective search space (Int8 in NCBI: query_info->contexts[ctx].eff_searchsp)
+    pub eff_searchsp: i64,
+}
+
+/// Calculate effective lengths for -subject mode (single subject as database).
+///
+/// This is the NCBI-parity function that computes BOTH length_adjustment and eff_searchsp
+/// in a single call, matching `BLAST_CalcEffLengths` from blast_setup.c:700-850.
+/// These values are then stored and referenced by cutoff and sum-stats calculations.
+///
+/// NCBI reference (verbatim from blast_setup.c:734-847):
+/// ```c
+/// // For translated subjects (tblastx):
+/// if (Blast_SubjectIsTranslated(program_number))
+///    db_length = db_length/3;
+///
+/// db_num_seqs = eff_len_params->real_num_seqs;  // = 1 for -subject mode
+///
+/// kbp = kbp_ptr[index];  // kbp_gap_std for gapped, kbp for ungapped
+///
+/// BLAST_ComputeLengthAdjustment(kbp->K, kbp->logK,
+///                               alpha/kbp->Lambda, beta,
+///                               query_length, db_length,
+///                               db_num_seqs, &length_adjustment);
+///
+/// Int8 effective_db_length = db_length - ((Int8)db_num_seqs * length_adjustment);
+/// if (effective_db_length <= 0)
+///     effective_db_length = 1;
+///
+/// effective_search_space = effective_db_length * (query_length - length_adjustment);
+///
+/// query_info->contexts[index].eff_searchsp = effective_search_space;
+/// query_info->contexts[index].length_adjustment = length_adjustment;
+/// ```
+///
+/// # Arguments
+/// * `query_len_aa` - Query length in amino acids (for this context/frame)
+/// * `subject_len_nucl` - Subject length in nucleotides (will be divided by 3)
+/// * `karlin_params` - Karlin-Altschul parameters
+///
+/// # Returns
+/// `EffLengthsResult` containing both length_adjustment and eff_searchsp
+pub fn compute_eff_lengths_subject_mode_tblastx(
+    query_len_aa: i64,
+    subject_len_nucl: i64,
+    karlin_params: &KarlinParams,
+) -> EffLengthsResult {
+    // NCBI blast_setup.c:734-735: db_length = db_length/3 for translated subjects (tblastx)
+    let db_length = subject_len_nucl / 3;
+    
+    // NCBI: db_num_seqs = 1 for -subject mode
+    let db_num_seqs: i64 = 1;
+    
+    // NCBI blast_setup.c:821-824: BLAST_ComputeLengthAdjustment(...)
+    let result = compute_length_adjustment_ncbi(
+        query_len_aa,
+        db_length,
+        db_num_seqs,
+        karlin_params,
+    );
+    let length_adjustment = result.length_adjustment;
+    
+    // NCBI blast_setup.c:836: effective_db_length = db_length - (db_num_seqs * length_adjustment)
+    let effective_db_length = (db_length - db_num_seqs * length_adjustment).max(1);
+    
+    // NCBI blast_setup.c:842-843: effective_search_space = effective_db_length * (query_length - length_adjustment)
+    let effective_query_length = (query_len_aa - length_adjustment).max(1);
+    let eff_searchsp = effective_db_length * effective_query_length;
+    
+    EffLengthsResult {
+        length_adjustment,
+        eff_searchsp,
+    }
+}
+
 /// Calculate effective search space for -subject mode (single subject as database).
+///
+/// This is a convenience wrapper that returns only eff_searchsp.
+/// For cutoff and sum-stats that need length_adjustment too, use
+/// `compute_eff_lengths_subject_mode_tblastx()` instead.
 ///
 /// NCBI reference (verbatim from blast_setup.c:734-846):
 /// ```c
@@ -122,28 +210,8 @@ pub fn compute_eff_searchsp_subject_mode_tblastx(
     subject_len_nucl: i64,
     gapped_params: &KarlinParams,
 ) -> i64 {
-    // NCBI: db_length = db_length/3 for translated subjects (tblastx)
-    let db_length = subject_len_nucl / 3;
-    
-    // NCBI: db_num_seqs = 1 for -subject mode
-    let db_num_seqs: i64 = 1;
-    
-    // NCBI: BLAST_ComputeLengthAdjustment(...)
-    let result = compute_length_adjustment_ncbi(
-        query_len_aa,
-        db_length,
-        db_num_seqs,
-        gapped_params,
-    );
-    let length_adjustment = result.length_adjustment;
-    
-    // NCBI: effective_db_length = db_length - (db_num_seqs * length_adjustment)
-    let effective_db_length = (db_length - db_num_seqs * length_adjustment).max(1);
-    
-    // NCBI: effective_search_space = effective_db_length * (query_length - length_adjustment)
-    let effective_query_length = (query_len_aa - length_adjustment).max(1);
-    
-    effective_db_length * effective_query_length
+    compute_eff_lengths_subject_mode_tblastx(query_len_aa, subject_len_nucl, gapped_params)
+        .eff_searchsp
 }
 
 /// Calculate cutoff_score from E-value using BLAST_Cutoffs (dodecay=FALSE).

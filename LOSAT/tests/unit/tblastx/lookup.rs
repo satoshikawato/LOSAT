@@ -4,6 +4,7 @@ use LOSAT::algorithm::tblastx::lookup::{encode_aa_kmer, build_direct_lookup};
 use LOSAT::algorithm::tblastx::lookup::{build_ncbi_lookup, pv_test};
 use LOSAT::algorithm::tblastx::translation::generate_frames;
 use LOSAT::utils::genetic_code::GeneticCode;
+use LOSAT::stats::KarlinParams;
 
 #[test]
 fn test_encode_aa_kmer_basic() {
@@ -232,7 +233,8 @@ fn test_build_ncbi_lookup_indexes_low_self_score_exact_word() {
     assert_eq!(frames.len(), 1);
 
     let queries = vec![frames];
-    let (lookup, _ctx) = build_ncbi_lookup(&queries, 13, true, true, 0, false);
+    let karlin = KarlinParams::default();
+    let (lookup, _ctx) = build_ncbi_lookup(&queries, 13, true, true, 0, false, &karlin);
 
     // AAA encodes to index 0 regardless of alphabet_size/word_length here.
     assert!(pv_test(&lookup.pv, 0));
@@ -256,7 +258,8 @@ fn test_build_ncbi_lookup_longest_chain_tracks_max_cell() {
     assert_eq!(frames.len(), 1);
 
     let queries = vec![frames];
-    let (lookup, _ctx) = build_ncbi_lookup(&queries, 13, true, true, 0, false);
+    let karlin = KarlinParams::default();
+    let (lookup, _ctx) = build_ncbi_lookup(&queries, 13, true, true, 0, false, &karlin);
 
     // AAA index is 0.
     let hits = lookup.get_hits(0);

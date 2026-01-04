@@ -20,7 +20,7 @@ use super::args::TblastxArgs;
 use super::chaining::UngappedHit;
 use super::constants::{GAP_TRIGGER_BIT_SCORE, X_DROP_UNGAPPED_BITS};
 use super::ncbi_cutoffs::{
-    compute_eff_lengths_subject_mode_tblastx, cutoff_score_for_update_tblastx,
+    compute_eff_searchsp_subject_mode_tblastx, cutoff_score_for_update_tblastx,
     cutoff_score_max_for_tblastx, gap_trigger_raw_score, x_drop_raw_score, BLAST_GAP_DECAY_RATE,
 };
 use super::diagnostics::{
@@ -640,7 +640,7 @@ pub fn run(args: TblastxArgs) -> Result<()> {
     let contexts_ref = &contexts;
     let query_ids_ref = &query_ids;
     let ungapped_params_ref = &ungapped_params;
-    let _gapped_params_ref = &gapped_params;  // Unused - tblastx uses ungapped params
+    let _gapped_params_ref = &gapped_params;  // Unused for tblastx (ungapped only)
 
     subjects_raw.par_iter().enumerate().for_each_init(
         || WorkerState {
@@ -690,18 +690,6 @@ pub fn run(args: TblastxArgs) -> Result<()> {
             // Reference: blast_parameters.c BlastInitialWordParametersUpdate line 401-403
             let mut cutoff_score_min = i32::MAX;
             
-            // =======================================================================
-            // NCBI Parity: Pre-compute length_adjustment and eff_searchsp per context
-            // =======================================================================
-            // NCBI stores these in query_info->contexts[ctx].length_adjustment and
-            // query_info->contexts[ctx].eff_searchsp via BLAST_CalcEffLengths (blast_setup.c:700-850).
-            // We precompute them here and pass to sum_stats_linking for NCBI parity.
-            // Reference: blast_setup.c:846-847
-            //   query_info->contexts[index].eff_searchsp = effective_search_space;
-            //   query_info->contexts[index].length_adjustment = length_adjustment;
-            let mut length_adj_per_context: Vec<i64> = Vec::with_capacity(contexts_ref.len());
-            let mut eff_searchsp_per_context: Vec<i64> = Vec::with_capacity(contexts_ref.len());
-            
             // Precompute gap_trigger once (same for all contexts with same params)
             // Reference: blast_parameters.c:343-344
             let gap_trigger = gap_trigger_raw_score(GAP_TRIGGER_BIT_SCORE, ungapped_params_ref);
@@ -710,24 +698,14 @@ pub fn run(args: TblastxArgs) -> Result<()> {
                 // NCBI: query_length = query_info->contexts[context].query_length
                 let query_len_aa = ctx.aa_len as i64;
                 
-                // =======================================================================
-                // NCBI Parity: Use compute_eff_lengths_subject_mode_tblastx to get BOTH
-                // length_adjustment and eff_searchsp from a single source of truth.
-                // This mirrors BLAST_CalcEffLengths which computes and stores both values.
-                // Reference: blast_setup.c:821-847
-                // =======================================================================
-                let eff_lengths = compute_eff_lengths_subject_mode_tblastx(
+                // Step 1: Compute cutoff_score_max from BlastHitSavingParametersNew
+                // This uses the effective search space WITH length adjustment
+                // Reference: blast_parameters.c:942-946
+                let eff_searchsp = compute_eff_searchsp_subject_mode_tblastx(
                     query_len_aa,
                     subject_len_nucl,
                     ungapped_params_ref,  // tblastx uses ungapped params (kbp_gap is NULL)
                 );
-                let eff_searchsp = eff_lengths.eff_searchsp;
-                length_adj_per_context.push(eff_lengths.length_adjustment);
-                eff_searchsp_per_context.push(eff_searchsp);
-                
-                // Step 1: Compute cutoff_score_max from BlastHitSavingParametersNew
-                // This uses the effective search space WITH length adjustment
-                // Reference: blast_parameters.c:942-946
                 let cutoff_score_max = cutoff_score_max_for_tblastx(
                     eff_searchsp,
                     evalue_threshold,  // User's E-value (typically 10.0)
@@ -747,17 +725,6 @@ pub fn run(args: TblastxArgs) -> Result<()> {
                     1.0,  // scale_factor (standard BLOSUM62)
                 );
                 
-                // DEBUG: Print cutoff values for first context
-                static PRINTED: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
-                if ctx_idx == 0 && !PRINTED.swap(true, std::sync::atomic::Ordering::Relaxed) {
-                    eprintln!("[DEBUG CUTOFF] query_len_aa={}, subject_len_nucl={}", query_len_aa, subject_len_nucl);
-                    eprintln!("[DEBUG CUTOFF] eff_searchsp={}", eff_searchsp);
-                    eprintln!("[DEBUG CUTOFF] length_adjustment={}", eff_lengths.length_adjustment);
-                    eprintln!("[DEBUG CUTOFF] cutoff_score_max={}", cutoff_score_max);
-                    eprintln!("[DEBUG CUTOFF] gap_trigger={}", gap_trigger);
-                    eprintln!("[DEBUG CUTOFF] final cutoff={}", cutoff);
-                }
-                
                 // Track minimum cutoff for linking
                 cutoff_score_min = cutoff_score_min.min(cutoff);
                 
@@ -770,7 +737,7 @@ pub fn run(args: TblastxArgs) -> Result<()> {
             if cutoff_score_min == i32::MAX {
                 cutoff_score_min = 0;
             }
-
+            
             let mut ungapped_hits: Vec<UngappedHit> = Vec::new();
 
             for (s_f_idx, s_frame) in s_frames.iter().enumerate() {
@@ -1018,8 +985,8 @@ pub fn run(args: TblastxArgs) -> Result<()> {
                                     raw_score: score_u,
                                     e_value: f64::INFINITY,
                                     ordering_method: 0, // Set during sum_stats_linking
-                                    linked_set: false,
-                                    start_of_chain: false,
+                                    linked_set: false,  // Set during sum_stats_linking
+                                    start_of_chain: false, // Set during sum_stats_linking
                                 });
                             } else if diag_enabled {
                                 diagnostics
@@ -1091,17 +1058,12 @@ pub fn run(args: TblastxArgs) -> Result<()> {
                 let linking_params_for_cutoff = find_smallest_lambda_params(&context_params)
                     .unwrap_or_else(|| params.clone());
 
-                // NCBI Parity: Pass pre-computed length_adjustment and eff_searchsp per context
-                // These values are stored in query_info->contexts[ctx] in NCBI and referenced
-                // by link_hsps.c for BLAST_SmallGapSumE/BLAST_LargeGapSumE calculations.
                 let linked = apply_sum_stats_even_gap_linking(
                     ungapped_hits,
                     &linking_params_for_cutoff,
                     &linking_params,
                     contexts_ref,
                     &subject_frame_bases,
-                    &length_adj_per_context,
-                    &eff_searchsp_per_context,
                 );
                 if diag_enabled {
                     diagnostics
@@ -1111,6 +1073,11 @@ pub fn run(args: TblastxArgs) -> Result<()> {
                 }
                 let mut final_hits: Vec<Hit> = Vec::new();
                 for h in linked {
+                    // NOTE: NCBI link_hsps.c:1018-1020 skips chain members during
+                    // linked-list construction, but then follows the chain via
+                    // hsp_link.link[] to include ALL chain members in output.
+                    // Therefore we do NOT filter chain members here.
+                    
                     if h.e_value > evalue_threshold {
                         if diag_enabled {
                             diagnostics
@@ -1119,7 +1086,6 @@ pub fn run(args: TblastxArgs) -> Result<()> {
                         }
                         continue;
                     }
-                    
                     if diag_enabled {
                         diagnostics
                             .ungapped_evalue_passed
@@ -1519,7 +1485,7 @@ fn run_with_neighbor_map(args: TblastxArgs) -> Result<()> {
     let query_contexts_ref = &neighbor_lookup.contexts;
     let params_ref = &params;
     let ungapped_params_ref = &ungapped_params;
-    let _gapped_params_ref = &gapped_params;  // Unused - tblastx uses ungapped params
+    let _gapped_params_ref = &gapped_params;  // Unused for tblastx (ungapped only)
 
     // Collect UngappedHit for sum_stats_linking
     // Key: (q_idx, s_idx)
@@ -1550,18 +1516,6 @@ fn run_with_neighbor_map(args: TblastxArgs) -> Result<()> {
         let total_contexts: usize = query_frames.iter().map(|f| f.len()).sum();
         let mut cutoff_scores: Vec<Vec<i32>> = vec![vec![0; s_frames.len()]; total_contexts];
         
-        // =======================================================================
-        // NCBI Parity: Pre-compute length_adjustment and eff_searchsp per context
-        // =======================================================================
-        // NCBI stores these in query_info->contexts[ctx].length_adjustment and
-        // query_info->contexts[ctx].eff_searchsp via BLAST_CalcEffLengths (blast_setup.c:700-850).
-        // We precompute them here and pass to sum_stats_linking for NCBI parity.
-        // Reference: blast_setup.c:846-847
-        //   query_info->contexts[index].eff_searchsp = effective_search_space;
-        //   query_info->contexts[index].length_adjustment = length_adjustment;
-        let mut length_adj_per_context: Vec<i64> = Vec::with_capacity(total_contexts);
-        let mut eff_searchsp_per_context: Vec<i64> = Vec::with_capacity(total_contexts);
-        
         // NCBI BLAST: word_params->cutoffs[context].x_dropoff_init
         // Compute per-context x_dropoff using kbp[context]->Lambda.
         // Reference: blast_parameters.c:219-221
@@ -1583,24 +1537,14 @@ fn run_with_neighbor_map(args: TblastxArgs) -> Result<()> {
                 // NCBI: query_length = query_info->contexts[context].query_length
                 let query_len_aa = q_frame.aa_len as i64;
                 
-                // =======================================================================
-                // NCBI Parity: Use compute_eff_lengths_subject_mode_tblastx to get BOTH
-                // length_adjustment and eff_searchsp from a single source of truth.
-                // This mirrors BLAST_CalcEffLengths which computes and stores both values.
-                // Reference: blast_setup.c:821-847
-                // =======================================================================
-                let eff_lengths = compute_eff_lengths_subject_mode_tblastx(
+                // Step 1: Compute cutoff_score_max from BlastHitSavingParametersNew
+                // This uses the effective search space WITH length adjustment
+                // Reference: blast_parameters.c:942-946
+                let eff_searchsp = compute_eff_searchsp_subject_mode_tblastx(
                     query_len_aa,
                     subject_len_nucl,
                     ungapped_params_ref,  // tblastx uses ungapped params (kbp_gap is NULL)
                 );
-                let eff_searchsp = eff_lengths.eff_searchsp;
-                length_adj_per_context.push(eff_lengths.length_adjustment);
-                eff_searchsp_per_context.push(eff_searchsp);
-                
-                // Step 1: Compute cutoff_score_max from BlastHitSavingParametersNew
-                // This uses the effective search space WITH length adjustment
-                // Reference: blast_parameters.c:942-946
                 let cutoff_score_max = cutoff_score_max_for_tblastx(
                     eff_searchsp,
                     evalue_threshold,  // User's E-value (typically 10.0)
@@ -1629,8 +1573,6 @@ fn run_with_neighbor_map(args: TblastxArgs) -> Result<()> {
         }
         let cutoff_scores_ref = &cutoff_scores;
         let x_dropoff_per_context_ref = &x_dropoff_per_context;
-        let length_adj_per_context_ref = &length_adj_per_context;
-        let eff_searchsp_per_context_ref = &eff_searchsp_per_context;
 
         // Process each subject frame in parallel
         let frame_hits: Vec<UngappedHit> = s_frames
@@ -1838,6 +1780,42 @@ fn run_with_neighbor_map(args: TblastxArgs) -> Result<()> {
                                 continue;
                             }
                             
+                            // Debug: print details for top-scoring hits
+                            if score > 9000 && hsp_len > 1900 {
+                                eprintln!("[DEBUG TOP HIT] score={} len={} q_frame={} s_frame={}", 
+                                    score, hsp_len, q_frame.frame, s_frame.frame);
+                                eprintln!("  coords: q_start={} q_end={} s_start={} s_end={}", 
+                                    qs_logical, qe_logical, ss_logical, se_logical);
+                                eprintln!("  seed positions: s_left_off={} s_raw={}", s_left_off, s_raw);
+                                
+                                // Show what's at the boundaries (use raw coords since q_aa has sentinels)
+                                // q_aa[hsp_q] = logical position qs_logical = hsp_q - 1
+                                if hsp_q > 0 && hsp_q < q_aa.len() {
+                                    let q_at_start = q_aa[hsp_q];  // Raw position = logical + 1
+                                    let q_before_start = if hsp_q > 1 { q_aa[hsp_q - 1] } else { 0 };
+                                    eprintln!("  q_aa[raw {}]={}  q_aa[raw-1 {}]={} (X=21)", 
+                                        hsp_q, q_at_start, hsp_q - 1, q_before_start);
+                                }
+                                if hsp_qe > 0 && hsp_qe < q_aa.len() {
+                                    let q_at_end = q_aa[hsp_qe - 1];  // Last position in alignment
+                                    let q_after_end = if hsp_qe < q_aa.len() { q_aa[hsp_qe] } else { 0 };
+                                    eprintln!("  q_aa[raw end-1 {}]={}  q_aa[raw end {}]={} (X=21)", 
+                                        hsp_qe - 1, q_at_end, hsp_qe, q_after_end);
+                                }
+                                
+                                // Show masked (X=21) positions near the boundaries
+                                let left_boundary = qs_logical.saturating_sub(30);
+                                let right_boundary = (qe_logical + 30).min(q_aa.len().saturating_sub(1));
+                                let left_xs: Vec<usize> = (left_boundary..=qs_logical)
+                                    .filter(|&i| i < q_aa.len() && q_aa[i] == 21)
+                                    .collect();
+                                let right_xs: Vec<usize> = (qe_logical..=right_boundary)
+                                    .filter(|&i| i < q_aa.len() && q_aa[i] == 21)
+                                    .collect();
+                                eprintln!("  X's near left boundary [{}-{}]: {:?}", left_boundary, qs_logical, left_xs);
+                                eprintln!("  X's near right boundary [{}-{}]: {:?}", qe_logical, right_boundary, right_xs);
+                            }
+                            
                             local_hits.push(UngappedHit {
                                 q_idx,
                                 s_idx: s_idx as u32,
@@ -1854,8 +1832,8 @@ fn run_with_neighbor_map(args: TblastxArgs) -> Result<()> {
                                 raw_score: score,
                                 e_value: f64::INFINITY, // Will be computed by linking
                                 ordering_method: 0, // Set during sum_stats_linking
-                                linked_set: false,
-                                start_of_chain: false,
+                                linked_set: false,  // Set during sum_stats_linking
+                                start_of_chain: false, // Set during sum_stats_linking
                             });
                         } // end for query_hits
                     } // end for neighbor_kmers
@@ -1899,16 +1877,6 @@ fn run_with_neighbor_map(args: TblastxArgs) -> Result<()> {
             // Get subject length for this subject
             let subject_len_nucl = subjects_raw[s_idx as usize].seq().len() as i64;
             
-            // =======================================================================
-            // NCBI Parity: Pre-compute length_adjustment and eff_searchsp per context
-            // =======================================================================
-            // NCBI stores these in query_info->contexts[ctx].length_adjustment and
-            // query_info->contexts[ctx].eff_searchsp via BLAST_CalcEffLengths (blast_setup.c:700-850).
-            // We precompute them here for each subject and pass to sum_stats_linking.
-            let total_contexts: usize = query_frames_ref.iter().map(|f| f.len()).sum();
-            let mut length_adj_per_context: Vec<i64> = Vec::with_capacity(total_contexts);
-            let mut eff_searchsp_per_context: Vec<i64> = Vec::with_capacity(total_contexts);
-            
             // Compute cutoff_score_min as minimum across all query contexts
             // using the NCBI BlastInitialWordParametersUpdate logic
             // Reference: blast_parameters.c:348-374, 401-403
@@ -1918,19 +1886,12 @@ fn run_with_neighbor_map(args: TblastxArgs) -> Result<()> {
                 for frame in frames.iter() {
                     let query_len_aa = frame.aa_len as i64;
                     
-                    // NCBI Parity: Use compute_eff_lengths_subject_mode_tblastx to get BOTH
-                    // length_adjustment and eff_searchsp from a single source of truth.
-                    // Reference: blast_setup.c:821-847
-                    let eff_lengths = compute_eff_lengths_subject_mode_tblastx(
+                    // Step 1: cutoff_score_max from BlastHitSavingParametersNew
+                    let eff_searchsp = compute_eff_searchsp_subject_mode_tblastx(
                         query_len_aa,
                         subject_len_nucl,
-                        ungapped_params_ref,  // tblastx uses ungapped params (kbp_gap is NULL)
+                        ungapped_params_ref,
                     );
-                    let eff_searchsp = eff_lengths.eff_searchsp;
-                    length_adj_per_context.push(eff_lengths.length_adjustment);
-                    eff_searchsp_per_context.push(eff_searchsp);
-                    
-                    // Step 1: cutoff_score_max from BlastHitSavingParametersNew
                     let cutoff_score_max = cutoff_score_max_for_tblastx(
                         eff_searchsp,
                         evalue_threshold,
@@ -1994,17 +1955,12 @@ fn run_with_neighbor_map(args: TblastxArgs) -> Result<()> {
             let linking_params_for_cutoff = find_smallest_lambda_params(&context_params)
                 .unwrap_or_else(|| params_ref.clone());
 
-            // NCBI Parity: Pass pre-computed length_adjustment and eff_searchsp per context
-            // These values are stored in query_info->contexts[ctx] in NCBI and referenced
-            // by link_hsps.c for BLAST_SmallGapSumE/BLAST_LargeGapSumE calculations.
             apply_sum_stats_even_gap_linking(
                 subject_hits,
                 &linking_params_for_cutoff,
                 &linking_params,
                 query_contexts_ref,
                 &subject_frame_bases,
-                &length_adj_per_context,
-                &eff_searchsp_per_context,
             )
         })
         .collect();
@@ -2047,6 +2003,11 @@ fn run_with_neighbor_map(args: TblastxArgs) -> Result<()> {
     let mut final_hits: Vec<Hit> = Vec::with_capacity(linked_hits.len());
     
     for h in linked_hits {
+        // NOTE: NCBI link_hsps.c:1018-1020 skips chain members during
+        // linked-list construction, but then follows the chain via
+        // hsp_link.link[] to include ALL chain members in output.
+        // Therefore we do NOT filter chain members here.
+        
         if h.e_value > evalue_threshold {
             continue;
         }

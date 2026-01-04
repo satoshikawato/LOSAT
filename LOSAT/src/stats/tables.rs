@@ -458,6 +458,56 @@ pub fn lookup_protein_params_ungapped(matrix: ScoringMatrix) -> KarlinParams {
     }
 }
 
+/// Look up GAPPED Karlin-Altschul parameters for protein scoring scheme.
+///
+/// NCBI BLAST uses gapped params (kbp_gap_std with gap_open=11, gap_extend=1 for BLOSUM62)
+/// for length_adjustment calculation in BLAST_CalcEffLengths.
+///
+/// Reference: ncbi-blast blast_setup.c:814-819
+/// ```c
+/// BLAST_GetAlphaBeta(sbp->name, &alpha, &beta,
+///                    scoring_options->gapped_calculation,  // TRUE
+///                    gap_open, gap_extend, sbp->kbp_std[index]);
+/// ```
+///
+/// For tblastx, scoring_options->gapped_calculation = TRUE (default),
+/// so BLAST_GetAlphaBeta returns gapped alpha/beta values.
+pub fn lookup_protein_params_gapped(matrix: ScoringMatrix) -> KarlinParams {
+    let table: &[ParamEntry] = match matrix {
+        ScoringMatrix::Blosum45 => BLOSUM45,
+        ScoringMatrix::Blosum50 => BLOSUM50,
+        ScoringMatrix::Blosum62 => BLOSUM62,
+        ScoringMatrix::Blosum80 => BLOSUM80,
+        ScoringMatrix::Blosum90 => BLOSUM90,
+        ScoringMatrix::Pam30 => PAM30,
+        ScoringMatrix::Pam70 => PAM70,
+        ScoringMatrix::Pam250 => PAM250,
+    };
+
+    // Gapped params: gap_open=11, gap_extend=1 (BLOSUM62 default)
+    for entry in table {
+        if entry.gap_open == 11 && entry.gap_extend == 1 {
+            return entry.to_karlin_params();
+        }
+    }
+
+    // Fallback: first non-ungapped entry
+    for entry in table {
+        if entry.gap_open != i32::MAX {
+            return entry.to_karlin_params();
+        }
+    }
+
+    // Default BLOSUM62 gapped (11/1)
+    KarlinParams {
+        lambda: 0.267,
+        k: 0.041,
+        h: 0.14,
+        alpha: 1.9,
+        beta: -30.0,
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

@@ -1,7 +1,7 @@
 //! Unit tests for tblastx/lookup.rs
 
 use LOSAT::algorithm::tblastx::lookup::{encode_aa_kmer, build_direct_lookup};
-use LOSAT::algorithm::tblastx::lookup::{build_ncbi_lookup, pv_test};
+use LOSAT::algorithm::tblastx::lookup::{build_ncbi_lookup, pv_test, BlastAaLookupTable};
 use LOSAT::algorithm::tblastx::translation::generate_frames;
 use LOSAT::utils::genetic_code::GeneticCode;
 use LOSAT::stats::KarlinParams;
@@ -34,18 +34,21 @@ fn test_encode_aa_kmer_different_positions() {
 
 #[test]
 fn test_encode_aa_kmer_with_stop_codon() {
-    // Stop codon is 24 in NCBI matrix order
-    let seq_with_stop = [0u8, 1u8, 24u8]; // Contains stop codon
+    // Stop codon is 25 in NCBISTDAA encoding (blast_encoding.c:115-118)
+    // NCBISTDAA: '-','A','B','C','D','E','F','G','H','I','K','L','M',
+    //            'N','P','Q','R','S','T','V','W','X','Y','Z','U','*','O','J'
+    // Stop codon '*' = 25
+    let seq_with_stop = [0u8, 1u8, 25u8]; // Contains stop codon
     let code = encode_aa_kmer(&seq_with_stop, 0);
     assert_eq!(code, None);
     
     // Stop codon in middle
-    let seq_with_stop_middle = [0u8, 24u8, 2u8];
+    let seq_with_stop_middle = [0u8, 25u8, 2u8];
     let code = encode_aa_kmer(&seq_with_stop_middle, 0);
     assert_eq!(code, None);
     
     // Stop codon at start
-    let seq_with_stop_start = [24u8, 1u8, 2u8];
+    let seq_with_stop_start = [25u8, 1u8, 2u8];
     let code = encode_aa_kmer(&seq_with_stop_start, 0);
     assert_eq!(code, None);
 }
@@ -83,15 +86,19 @@ fn test_encode_aa_kmer_edge_cases() {
 
 #[test]
 fn test_encode_aa_kmer_max_values() {
-    // Test with maximum valid amino acid values (23 = X, the last valid AA before stop codon)
-    // NCBI matrix order: ARNDCQEGHILKMFPSTWYVBJZX* (0-24)
-    // X=23, Z=22, J=21
-    let seq = [23u8, 22u8, 21u8];
+    // Test with high-value amino acids in NCBISTDAA encoding
+    // NCBISTDAA encoding (blast_encoding.c:115-118):
+    // '-','A','B','C','D','E','F','G','H','I','K','L','M',
+    // 'N','P','Q','R','S','T','V','W','X','Y','Z','U','*','O','J'
+    // X=21 (Unknown), Y=22, Z=23 (Glu or Gln), U=24 (Selenocysteine)
+    // Note: Lookup table uses BLASTAA_SIZE=28, so all residues 0-27 are valid
+    // but stop codon (*=25) and other special residues may be filtered
+    let seq = [21u8, 22u8, 23u8]; // X, Y, Z
     let code = encode_aa_kmer(&seq, 0);
-    // (23<<10) | (22<<5) | 21 = 24,277
-    assert_eq!(code, Some((23 << 10) | (22 << 5) | 21));
+    // (21<<10) | (22<<5) | 23 = 21,591
+    assert_eq!(code, Some((21 << 10) | (22 << 5) | 23));
     
-    // Verify it's within backbone size (max index + 1 for 0..=23 with charsize=5)
+    // Verify it's within backbone size (max index + 1 for 0..=27 with charsize=5)
     assert!(code.unwrap() < 24_312);
 }
 
@@ -285,5 +292,153 @@ fn test_build_direct_lookup_amino_acid_positions() {
             // AA position should allow for 3-mer (pos + 3 <= aa_len)
             assert!((*aa_pos as usize) + 3 <= frame.aa_len);
         }
+    }
+}
+
+#[test]
+fn test_get_context_idx_matches_ncbi() {
+    // Test get_context_idx against NCBI BSearchContextInfo behavior
+    // Reference: ncbi-blast/c++/src/algo/blast/unit_tests/api/queryinfo_unit_test.cpp:174-180
+    //
+    // NCBI test cases:
+    // - BSearchContextInfo(0, query_info) → 0 (first context)
+    // - BSearchContextInfo(length_1 + 1, query_info) → 1 (second context)
+    // - BSearchContextInfo(2 * (length_1 + 1), query_info) → 2 (third context)
+    //
+    // For tblastx, we have 6 frames per query, so contexts are:
+    // - Context 0: query 0, frame 0 (base = 0)
+    // - Context 1: query 0, frame 1 (base = frame_0_len - 1)
+    // - Context 2: query 0, frame 2 (base = frame_0_len - 1 + frame_1_len - 1)
+    // - ...
+    
+    let code = GeneticCode::from_id(1);
+    let karlin = KarlinParams::default();
+    
+    // Create two queries with different lengths
+    let dna_seq1 = b"ATGCGATCGATCGATCGATGCGATCGATCGATCG"; // 36 bases = 12 codons
+    let dna_seq2 = b"ATGCGATCGATCG"; // 14 bases = 4 codons (shorter)
+    
+    let frames1 = generate_frames(dna_seq1, &code);
+    let frames2 = generate_frames(dna_seq2, &code);
+    
+    let queries = vec![frames1, frames2];
+    let (lookup, contexts) = build_ncbi_lookup(&queries, 13, true, true, 0, false, &karlin);
+    
+    // Verify frame_bases structure
+    assert_eq!(lookup.frame_bases.len(), contexts.len());
+    assert_eq!(lookup.num_contexts, contexts.len());
+    
+    // Test 1: Offset 0 should return context 0 (first frame of first query)
+    let ctx_idx_0 = lookup.get_context_idx(0);
+    assert_eq!(ctx_idx_0, 0, "Offset 0 should return context 0");
+    assert_eq!(contexts[ctx_idx_0].q_idx, 0);
+    assert_eq!(contexts[ctx_idx_0].f_idx, 0);
+    
+    // Test 2: Offset at first frame base should return context 0
+    let frame_0_base = lookup.frame_bases[0];
+    let ctx_idx_frame0 = lookup.get_context_idx(frame_0_base);
+    assert_eq!(ctx_idx_frame0, 0, "Offset at first frame base should return context 0");
+    
+    // Test 3: Offset at second frame base should return context 1
+    if lookup.frame_bases.len() > 1 {
+        let frame_1_base = lookup.frame_bases[1];
+        let ctx_idx_frame1 = lookup.get_context_idx(frame_1_base);
+        assert_eq!(ctx_idx_frame1, 1, "Offset at second frame base should return context 1");
+        assert_eq!(contexts[ctx_idx_frame1].q_idx, 0);
+        assert_eq!(contexts[ctx_idx_frame1].f_idx, 1);
+    }
+    
+    // Test 4: Offset just before second frame base should return context 0
+    if lookup.frame_bases.len() > 1 {
+        let frame_1_base = lookup.frame_bases[1];
+        let ctx_idx_before_frame1 = lookup.get_context_idx(frame_1_base - 1);
+        assert_eq!(ctx_idx_before_frame1, 0, "Offset just before second frame base should return context 0");
+    }
+    
+    // Test 5: Offset at last frame base should return last context
+    let last_base = lookup.frame_bases[lookup.frame_bases.len() - 1];
+    let ctx_idx_last = lookup.get_context_idx(last_base);
+    assert_eq!(ctx_idx_last, lookup.frame_bases.len() - 1, 
+               "Offset at last frame base should return last context");
+    
+    // Test 6: Offset beyond last frame base should return last context (saturating)
+    let beyond_last = last_base + 1000;
+    let ctx_idx_beyond = lookup.get_context_idx(beyond_last);
+    assert_eq!(ctx_idx_beyond, lookup.frame_bases.len() - 1,
+               "Offset beyond last frame base should return last context");
+    
+    // Test 7: Verify all frame bases are in ascending order (required for binary search)
+    for i in 1..lookup.frame_bases.len() {
+        assert!(lookup.frame_bases[i] >= lookup.frame_bases[i-1],
+                "Frame bases must be in ascending order for binary search");
+    }
+    
+    // Test 8: For each context, verify get_context_idx returns correct index
+    for (idx, &base) in lookup.frame_bases.iter().enumerate() {
+        let ctx_idx = lookup.get_context_idx(base);
+        assert_eq!(ctx_idx, idx, 
+                   "get_context_idx should return correct index for frame base {}", base);
+    }
+}
+
+#[test]
+fn test_get_context_idx_edge_cases() {
+    // Test edge cases for get_context_idx
+    let code = GeneticCode::from_id(1);
+    let karlin = KarlinParams::default();
+    
+    // Single query with single frame (minimal case)
+    let dna_seq = b"ATGCGATCG"; // 9 bases = 3 codons
+    let mut frames = generate_frames(dna_seq, &code);
+    frames.retain(|f| f.frame == 1); // Keep only frame 1
+    assert_eq!(frames.len(), 1);
+    
+    let queries = vec![frames];
+    let (lookup, contexts) = build_ncbi_lookup(&queries, 13, true, true, 0, false, &karlin);
+    
+    // With single context, all offsets should return 0
+    assert_eq!(lookup.get_context_idx(0), 0);
+    assert_eq!(lookup.get_context_idx(100), 0);
+    assert_eq!(lookup.get_context_idx(-100), 0); // saturating_sub(1) handles negative
+    
+    // Verify context structure
+    assert_eq!(contexts.len(), 1);
+    assert_eq!(contexts[0].q_idx, 0);
+    assert_eq!(contexts[0].f_idx, 0);
+}
+
+#[test]
+fn test_get_context_idx_multiple_queries() {
+    // Test get_context_idx with multiple queries (similar to NCBI's multi-query test)
+    let code = GeneticCode::from_id(1);
+    let karlin = KarlinParams::default();
+    
+    let dna_seq1 = b"ATGCGATCGATCGATCG"; // 18 bases
+    let dna_seq2 = b"ATGCGATCGATCGATCGATGCGATCGATCGATCG"; // 36 bases (longer)
+    
+    let frames1 = generate_frames(dna_seq1, &code);
+    let frames2 = generate_frames(dna_seq2, &code);
+    
+    let queries = vec![frames1, frames2];
+    let (lookup, contexts) = build_ncbi_lookup(&queries, 13, true, true, 0, false, &karlin);
+    
+    // Should have 12 contexts (6 frames × 2 queries)
+    assert_eq!(contexts.len(), 12);
+    assert_eq!(lookup.frame_bases.len(), 12);
+    
+    // Verify query indices are correct
+    for (idx, ctx) in contexts.iter().enumerate() {
+        let expected_q_idx = (idx / 6) as u32;
+        assert_eq!(ctx.q_idx, expected_q_idx, 
+                   "Context {} should belong to query {}", idx, expected_q_idx);
+    }
+    
+    // Test: Offset at start of second query (context 6) should return context 6
+    if lookup.frame_bases.len() > 6 {
+        let query_1_base = lookup.frame_bases[6];
+        let ctx_idx = lookup.get_context_idx(query_1_base);
+        assert_eq!(ctx_idx, 6, "Offset at start of second query should return context 6");
+        assert_eq!(contexts[ctx_idx].q_idx, 1);
+        assert_eq!(contexts[ctx_idx].f_idx, 0);
     }
 }

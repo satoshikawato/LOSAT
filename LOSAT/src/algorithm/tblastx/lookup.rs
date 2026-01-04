@@ -11,7 +11,12 @@
 //! - pv: presence vector bitfield
 
 use crate::utils::matrix::{BLASTAA_SIZE, blosum62_score};
-use crate::stats::KarlinParams;
+use crate::stats::{KarlinParams, lookup_protein_params_ungapped};
+use crate::config::ScoringMatrix;
+use crate::stats::karlin_calc::{
+    compute_aa_composition, compute_std_aa_composition, compute_score_freq_profile,
+    compute_karlin_params_ungapped, apply_check_ideal,
+};
 use super::translation::QueryFrame;
 
 pub const AA_HITS_PER_CELL: usize = 3;
@@ -231,9 +236,8 @@ pub fn build_ncbi_lookup(
     threshold: i32,
     _include_stop_seeds: bool, // Ignored - NCBI always uses full 28-char alphabet
     _ncbi_stop_stop_score: bool, // Ignored - always use NCBI BLOSUM62 (*-* = +1)
-    max_hits_per_kmer: usize,
     lazy_neighbors: bool,
-    karlin_params: &KarlinParams, // NCBI: kbp[context] for each context
+    _karlin_params: &KarlinParams, // Unused - computed per context, kept for API compatibility
 ) -> (BlastAaLookupTable, Vec<QueryContext>) {
     let word_length = LOOKUP_WORD_LENGTH;
     let alphabet_size = LOOKUP_ALPHABET_SIZE; // 28
@@ -241,6 +245,14 @@ pub fn build_ncbi_lookup(
     let mask = compute_mask(word_length, charsize);
     let backbone_size = compute_backbone_size(word_length, alphabet_size, charsize);
 
+    // Compute ideal Karlin parameters (kbp_ideal) - used for check_ideal logic
+    // Reference: NCBI blast_stat.c:2754 Blast_ScoreBlkKbpIdealCalc
+    let ideal_params = lookup_protein_params_ungapped(ScoringMatrix::Blosum62);
+    
+    // Compute standard amino acid composition (for database/subject)
+    // Reference: NCBI blast_stat.c:2759 Blast_ResFreqStdComp
+    let std_comp = compute_std_aa_composition();
+    
     // Build contexts and frame bases
     let mut frame_bases: Vec<i32> = Vec::new();
     let mut contexts: Vec<QueryContext> = Vec::new();
@@ -249,6 +261,29 @@ pub fn build_ncbi_lookup(
     for (q_idx, frames) in queries.iter().enumerate() {
         for (f_idx, frame) in frames.iter().enumerate() {
             frame_bases.push(base);
+            
+            // Compute context-specific Karlin parameters
+            // Reference: NCBI blast_stat.c:2778-2797
+            // 1. Compute amino acid composition for this context
+            let ctx_comp = compute_aa_composition(&frame.aa_seq, frame.aa_len);
+            
+            // 2. Compute score frequency profile
+            // Use standard composition for subject (database composition)
+            let score_min = -4; // BLOSUM62 minimum
+            let score_max = 11; // BLOSUM62 maximum
+            let sfp = compute_score_freq_profile(&ctx_comp, &std_comp, score_min, score_max);
+            
+            // 3. Compute Karlin parameters
+            let computed_params = compute_karlin_params_ungapped(&sfp)
+                .unwrap_or_else(|_| {
+                    // Fallback to ideal if computation fails
+                    ideal_params
+                });
+            
+            // 4. Apply check_ideal logic (tblastx uses check_ideal = TRUE)
+            // Reference: NCBI blast_stat.c:2796-2797
+            let final_params = apply_check_ideal(computed_params, ideal_params);
+            
             contexts.push(QueryContext {
                 q_idx: q_idx as u32,
                 f_idx: f_idx as u8,
@@ -258,7 +293,7 @@ pub fn build_ncbi_lookup(
                 aa_len: frame.aa_len,
                 orig_len: frame.orig_len,
                 frame_base: base,
-                karlin_params: karlin_params.clone(),
+                karlin_params: final_params,
             });
             // NCBI concatenates translated frames by *sharing* the boundary sentinel NULLB.
             // BLAST_GetTranslation writes both leading+trailing NULLB; the next frame starts
@@ -580,16 +615,10 @@ pub fn build_ncbi_lookup(
     }
 
     let mut overflow_size = 0usize;
-    let mut filtered_cells = 0usize;
-    let mut filtered_entries = 0usize;
+    // NCBI BLAST does not filter over-represented k-mers - all k-mers are kept
+    // Reference: blast_lookup.c:33-77 (BlastLookupAddWordHit simply adds hits without filtering)
     for idx in 0..backbone_size {
         let count = counts[idx] as usize;
-        if count > max_hits_per_kmer {
-            filtered_cells += 1;
-            filtered_entries += count;
-            all_entries[idx].clear();
-            continue;
-        }
         if count > AA_HITS_PER_CELL {
             overflow_size += count;
         }
@@ -637,10 +666,6 @@ pub fn build_ncbi_lookup(
     );
     eprintln!("Non-empty cells: {}", nonempty);
     eprintln!("Total entries: {}", total);
-    eprintln!(
-        "High-frequency suppression: {} cells filtered ({} entries dropped), max_hits_per_kmer={}",
-        filtered_cells, filtered_entries, max_hits_per_kmer
-    );
     eprintln!(
         "Overflow size: {} ({:.1} MB)",
         overflow_cursor,
@@ -949,7 +974,7 @@ impl NeighborLookup {
     pub fn build(
         queries: &[Vec<QueryFrame>],
         threshold: i32,
-        karlin_params: &KarlinParams, // NCBI: kbp[context] for each context
+        _karlin_params: &KarlinParams, // Unused - computed per context
     ) -> Self {
         // Build exact query lookup
         let query_lookup = build_direct_lookup(queries);
@@ -963,6 +988,14 @@ impl NeighborLookup {
             }
         }
         
+        // Compute ideal Karlin parameters (kbp_ideal) - used for check_ideal logic
+        // Reference: NCBI blast_stat.c:2754 Blast_ScoreBlkKbpIdealCalc
+        let ideal_params = lookup_protein_params_ungapped(ScoringMatrix::Blosum62);
+        
+        // Compute standard amino acid composition (for database/subject)
+        // Reference: NCBI blast_stat.c:2759 Blast_ResFreqStdComp
+        let std_comp = compute_std_aa_composition();
+        
         // Build contexts and frame bases
         let mut frame_bases = Vec::new();
         let mut contexts = Vec::new();
@@ -971,6 +1004,29 @@ impl NeighborLookup {
         for (q_idx, frames) in queries.iter().enumerate() {
             for (f_idx, frame) in frames.iter().enumerate() {
                 frame_bases.push(base);
+                
+                // Compute context-specific Karlin parameters
+                // Reference: NCBI blast_stat.c:2778-2797
+                // 1. Compute amino acid composition for this context
+                let ctx_comp = compute_aa_composition(&frame.aa_seq, frame.aa_len);
+                
+                // 2. Compute score frequency profile
+                // Use standard composition for subject (database composition)
+                let score_min = -4; // BLOSUM62 minimum
+                let score_max = 11; // BLOSUM62 maximum
+                let sfp = compute_score_freq_profile(&ctx_comp, &std_comp, score_min, score_max);
+                
+                // 3. Compute Karlin parameters
+                let computed_params = compute_karlin_params_ungapped(&sfp)
+                    .unwrap_or_else(|_| {
+                        // Fallback to ideal if computation fails
+                        ideal_params
+                    });
+                
+                // 4. Apply check_ideal logic (tblastx uses check_ideal = TRUE)
+                // Reference: NCBI blast_stat.c:2796-2797
+                let final_params = apply_check_ideal(computed_params, ideal_params);
+                
                 contexts.push(QueryContext {
                     q_idx: q_idx as u32,
                     f_idx: f_idx as u8,
@@ -980,7 +1036,7 @@ impl NeighborLookup {
                     aa_len: frame.aa_len,
                     orig_len: frame.orig_len,
                     frame_base: base,
-                    karlin_params: karlin_params.clone(),
+                    karlin_params: final_params,
                 });
                 // See build_ncbi_lookup() above: share the trailing NULLB sentinel between frames.
                 base += frame.aa_seq.len() as i32 - 1;

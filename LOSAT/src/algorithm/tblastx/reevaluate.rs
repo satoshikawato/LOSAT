@@ -144,4 +144,150 @@ pub fn reevaluate_ungapped_hit_ncbi_translated(
     Some((new_q_off, new_s_off, new_len, score))
 }
 
+/// Get number of identical and positive residues for an ungapped HSP.
+///
+/// This is a direct port of NCBI:
+/// - `s_Blast_HSPGetNumIdentitiesAndPositives` (blast_hits.c:746-825), for the
+///   **ungapped** case (no gap_info).
+///
+/// NCBI reference (verbatim, blast_hits.c:746-792):
+/// ```c
+/// s_Blast_HSPGetNumIdentitiesAndPositives(const Uint1* query, const Uint1* subject,
+///                            			const BlastHSP* hsp, Int4* num_ident_ptr,
+///                            			Int4* align_length_ptr, const BlastScoreBlk* sbp,
+///                            			Int4* num_pos_ptr)
+/// {
+///    Int4 i, num_ident, align_length, q_off, s_off;
+///    Uint1* q,* s;
+///    Int4 q_length = hsp->query.end - hsp->query.offset;
+///    Int4 s_length = hsp->subject.end - hsp->subject.offset;
+///    Int4** matrix = NULL;
+///    Int4 num_pos = 0;
+///
+///    q_off = hsp->query.offset;
+///    s_off = hsp->subject.offset;
+///
+///    if ( !subject || !query || !hsp )
+///       return -1;
+///
+///    q = (Uint1*) &query[q_off];
+///    s = (Uint1*) &subject[s_off];
+///
+///    num_ident = 0;
+///    align_length = 0;
+///
+///    if(NULL != sbp)
+///    {
+/// 	    if(sbp->protein_alphabet)
+/// 		    matrix = sbp->matrix->data;
+///    }
+///
+///    if (!hsp->gap_info) {
+///       /* Ungapped case. Check that lengths are the same in query and subject,
+///          then count number of matches. */
+///       if (q_length != s_length)
+///          return -1;
+///       align_length = q_length;
+///       for (i=0; i<align_length; i++) {
+///          if (*q == *s)
+///             num_ident++;
+///          else if (NULL != matrix) {
+///         	 if (matrix[*q][*s] > 0)
+///         		 num_pos ++;
+///             }
+///          q++;
+///          s++;
+///       }
+///   	}
+/// }
+/// ```
+///
+/// # Arguments
+/// * `query_nomask` - Query sequence without masking (for identity calculation)
+/// * `subject` - Subject sequence
+/// * `q_off` - Query offset (0-based, into query_nomask)
+/// * `s_off` - Subject offset (0-based, into subject)
+/// * `hsp_len` - HSP length in residues
+///
+/// # Returns
+/// `(num_ident, align_length)` if successful, `None` if lengths don't match
+pub fn get_num_identities_and_positives_ungapped(
+    query_nomask: &[u8],
+    subject: &[u8],
+    q_off: usize,
+    s_off: usize,
+    hsp_len: usize,
+) -> Option<(usize, usize)> {
+    // NCBI: Check that lengths are the same in query and subject
+    if q_off + hsp_len > query_nomask.len() || s_off + hsp_len > subject.len() {
+        return None;
+    }
+
+    let mut num_ident = 0usize;
+    let align_length = hsp_len;
+
+    // NCBI: for (i=0; i<align_length; i++)
+    for i in 0..align_length {
+        let q = query_nomask[q_off + i];
+        let s = subject[s_off + i];
+        
+        // NCBI: if (*q == *s) num_ident++;
+        if q == s {
+            num_ident += 1;
+        }
+        // Note: NCBI also counts positives (matrix[*q][*s] > 0), but we only need num_ident for Blast_HSPTest
+    }
+
+    Some((num_ident, align_length))
+}
+
+/// Test if an HSP should be deleted based on percent identity and minimum hit length.
+///
+/// This is a direct port of NCBI:
+/// - `s_HSPTest` (blast_hits.c:993-1001)
+///
+/// NCBI reference (verbatim, blast_hits.c:993-1001):
+/// ```c
+/// static Boolean s_HSPTest(const BlastHSP* hsp,
+///                          const BlastHitSavingOptions* hit_options,
+///                          Int4 align_length)
+/// {
+/// 	return ((hsp->num_ident * 100.0 <
+/// 			align_length * hit_options->percent_identity) ||
+/// 			align_length < hit_options->min_hit_length) ;
+/// }
+/// ```
+///
+/// # Arguments
+/// * `num_ident` - Number of identical residues
+/// * `align_length` - Alignment length
+/// * `percent_identity` - Percent identity threshold (0.0 = disabled)
+/// * `min_hit_length` - Minimum hit length (0 = disabled)
+///
+/// # Returns
+/// `true` if HSP should be deleted, `false` otherwise
+pub fn hsp_test(
+    num_ident: usize,
+    align_length: usize,
+    percent_identity: f64,
+    min_hit_length: usize,
+) -> bool {
+    // NCBI: (hsp->num_ident * 100.0 < align_length * hit_options->percent_identity)
+    let identity_check = if percent_identity > 0.0 {
+        (num_ident as f64 * 100.0) < (align_length as f64 * percent_identity)
+    } else {
+        false
+    };
+
+    // NCBI: align_length < hit_options->min_hit_length
+    let length_check = if min_hit_length > 0 {
+        align_length < min_hit_length
+    } else {
+        false
+    };
+
+    // NCBI: return (identity_check || length_check)
+    identity_check || length_check
+}
+
 

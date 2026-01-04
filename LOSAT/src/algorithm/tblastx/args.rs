@@ -92,13 +92,6 @@ pub struct TblastxArgs {
     )]
     pub ncbi_stop_stop_score: bool,
 
-    /// Maximum number of lookup hits per k-mer before suppressing that k-mer (high-frequency word suppression).
-    ///
-    /// NCBI's standard protein lookup construction does not apply this suppression.
-    /// Default: disabled (usize::MAX) to match NCBI BLAST+ behavior exactly.
-    #[arg(long, default_value_t = usize::MAX)]
-    pub max_hits_per_kmer: usize,
-
     /// Use pre-computed neighbor map for fast scanning.
     ///
     /// When enabled, neighbor relationships are pre-computed once and reused during
@@ -113,6 +106,24 @@ pub struct TblastxArgs {
     /// When enabled, uses stricter parameters that match NCBI BLAST+ defaults
     #[arg(long, default_value_t = false)]
     pub ncbi_compat: bool,
+
+    /// Percent identity threshold for filtering HSPs (Blast_HSPTest).
+    ///
+    /// HSPs with percent identity below this threshold are filtered out.
+    /// Default: 0.0 (disabled, matches NCBI BLAST default from calloc initialization).
+    ///
+    /// NCBI reference: blast_hits.c:993-1001 (s_HSPTest)
+    #[arg(long, default_value_t = 0.0)]
+    pub percent_identity: f64,
+
+    /// Minimum hit length for filtering HSPs (Blast_HSPTest).
+    ///
+    /// HSPs with alignment length below this threshold are filtered out.
+    /// Default: 0 (disabled, matches NCBI BLAST default from calloc initialization).
+    ///
+    /// NCBI reference: blast_hits.c:993-1001 (s_HSPTest)
+    #[arg(long, default_value_t = 0)]
+    pub min_hit_length: usize,
 
     /// Two-hit window size for triggering ungapped extension (default: 40)
     /// Smaller values are more strict, larger values are more sensitive

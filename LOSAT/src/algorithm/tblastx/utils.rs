@@ -31,7 +31,10 @@ use super::lookup::{
     build_ncbi_lookup, decode_kmer, encode_kmer, get_charsize, get_mask,
     BlastAaLookupTable, NeighborLookup, AA_HITS_PER_CELL, LOOKUP_ALPHABET_SIZE,
 };
-use super::reevaluate::reevaluate_ungapped_hit_ncbi_translated;
+use super::reevaluate::{
+    get_num_identities_and_positives_ungapped, hsp_test,
+    reevaluate_ungapped_hit_ncbi_translated,
+};
 use crate::utils::matrix::blosum62_score;
 use super::sum_stats_linking::{
     apply_sum_stats_even_gap_linking, compute_avg_query_length_ncbi, 
@@ -515,14 +518,15 @@ pub fn run(args: TblastxArgs) -> Result<()> {
     }
 
     eprintln!("Building lookup table...");
+    // Note: karlin_params argument is now unused - computed per context in build_ncbi_lookup()
+    // We still pass it for x_dropoff calculation (which uses ideal params for all contexts in tblastx)
     let (lookup, contexts) = build_ncbi_lookup(
         &query_frames,
         args.threshold,
         args.include_stop_seeds,
         args.ncbi_stop_stop_score,
-        args.max_hits_per_kmer,
         false, // lazy_neighbors disabled - use neighbor_map mode instead
-        &ungapped_params_for_xdrop, // NCBI: kbp[context] for each context
+        &ungapped_params_for_xdrop, // Used for x_dropoff calculation only
     );
 
     // NCBI BLAST: word_params->cutoffs[context].x_dropoff_init
@@ -772,6 +776,14 @@ pub fn run(args: TblastxArgs) -> Result<()> {
             }
 
             let mut ungapped_hits: Vec<UngappedHit> = Vec::new();
+            
+            // Statistics for HSP saving analysis (long sequences only)
+            let is_long_sequence = subject_len_nucl > 600_000;
+            let mut stats_hsp_saved = 0usize;
+            let mut stats_hsp_filtered_by_cutoff = 0usize;
+            let mut stats_hsp_filtered_by_reeval = 0usize;
+            let mut stats_hsp_filtered_by_hsp_test = 0usize;
+            let mut stats_score_distribution: Vec<i32> = Vec::new();
 
             for (s_f_idx, s_frame) in s_frames.iter().enumerate() {
                 let subject = &s_frame.aa_seq;
@@ -969,6 +981,13 @@ pub fn run(args: TblastxArgs) -> Result<()> {
                             }
 
                             // [C] if (score >= cutoffs->cutoff_score)
+                            if is_long_sequence {
+                                if score >= cutoff {
+                                    stats_score_distribution.push(score);
+                                } else {
+                                    stats_hsp_filtered_by_cutoff += 1;
+                                }
+                            }
                             if score >= cutoff {
                                 if diag_enabled {
                                     diagnostics
@@ -990,7 +1009,48 @@ pub fn run(args: TblastxArgs) -> Result<()> {
                                     score_u = new_score;
                                 } else {
                                     // Deleted by NCBI reevaluation (score < cutoff_score)
+                                    if is_long_sequence {
+                                        stats_hsp_filtered_by_reeval += 1;
+                                    }
                                     continue;
+                                }
+
+                                // NCBI: Blast_HSPGetNumIdentitiesAndPositives and Blast_HSPTest
+                                // Reference: blast_hits.c:2708-2720
+                                // Use query_nomask (unmasked sequence) for identity calculation
+                                // If aa_seq_nomask is None, use aa_seq (masked) as fallback
+                                // Note: qs and ss are relative offsets within query/subject (sentinel included)
+                                // Both query_nomask and query have sentinels, so qs can be used directly
+                                let query_nomask = ctx.aa_seq_nomask.as_ref().unwrap_or(&ctx.aa_seq);
+                                let num_ident = if let Some((num_ident, _align_length)) =
+                                    get_num_identities_and_positives_ungapped(
+                                        query_nomask,
+                                        subject,
+                                        qs, // qs is already relative to query (context start), same for query_nomask
+                                        ss, // ss is relative to subject (sentinel included)
+                                        len_u,
+                                    ) {
+                                    num_ident
+                                } else {
+                                    // Length mismatch - skip this HSP
+                                    continue;
+                                };
+
+                                // NCBI: Blast_HSPTest (blast_hits.c:2719)
+                                // Default values: percent_identity = 0.0, min_hit_length = 0 (from calloc)
+                                // So by default, this test always returns false (no filtering)
+                                let percent_identity = args.percent_identity;
+                                let min_hit_length = args.min_hit_length;
+                                if hsp_test(num_ident, len_u, percent_identity, min_hit_length) {
+                                    // HSP deleted by Blast_HSPTest
+                                    if is_long_sequence {
+                                        stats_hsp_filtered_by_hsp_test += 1;
+                                    }
+                                    continue;
+                                }
+                                
+                                if is_long_sequence {
+                                    stats_hsp_saved += 1;
                                 }
 
                                 let qe = qs + len_u;
@@ -1017,6 +1077,7 @@ pub fn run(args: TblastxArgs) -> Result<()> {
                                     s_orig_len: s_len,
                                     raw_score: score_u,
                                     e_value: f64::INFINITY,
+                                    num_ident,
                                     ordering_method: 0, // Set during sum_stats_linking
                                     linked_set: false,
                                     start_of_chain: false,
@@ -1091,6 +1152,24 @@ pub fn run(args: TblastxArgs) -> Result<()> {
                 let linking_params_for_cutoff = find_smallest_lambda_params(&context_params)
                     .unwrap_or_else(|| params.clone());
 
+                // Output HSP saving statistics for long sequences
+                if is_long_sequence && (stats_hsp_saved > 0 || stats_hsp_filtered_by_cutoff > 0 || stats_hsp_filtered_by_reeval > 0 || stats_hsp_filtered_by_hsp_test > 0) {
+                    let total_attempted = stats_hsp_saved + stats_hsp_filtered_by_cutoff + stats_hsp_filtered_by_reeval + stats_hsp_filtered_by_hsp_test;
+                    eprintln!("[DEBUG HSP_SAVING] subject_len_nucl={}, cutoff={}", subject_len_nucl, cutoff_score_min);
+                    eprintln!("[DEBUG HSP_SAVING] total_attempted={}, saved={}, filtered_by_cutoff={}, filtered_by_reeval={}, filtered_by_hsp_test={}", 
+                        total_attempted, stats_hsp_saved, stats_hsp_filtered_by_cutoff, stats_hsp_filtered_by_reeval, stats_hsp_filtered_by_hsp_test);
+                    if !stats_score_distribution.is_empty() {
+                        stats_score_distribution.sort();
+                        let min_score = stats_score_distribution[0];
+                        let max_score = stats_score_distribution[stats_score_distribution.len() - 1];
+                        let median_score = stats_score_distribution[stats_score_distribution.len() / 2];
+                        let low_score_count = stats_score_distribution.iter().filter(|&&s| s < 30).count();
+                        eprintln!("[DEBUG HSP_SAVING] score_distribution: min={}, max={}, median={}, low_score(<30)={}/{} ({:.2}%)", 
+                            min_score, max_score, median_score, low_score_count, stats_score_distribution.len(),
+                            if stats_score_distribution.len() > 0 { (low_score_count as f64 / stats_score_distribution.len() as f64) * 100.0 } else { 0.0 });
+                    }
+                }
+                
                 // NCBI Parity: Pass pre-computed length_adjustment and eff_searchsp per context
                 // These values are stored in query_info->contexts[ctx] in NCBI and referenced
                 // by link_hsps.c for BLAST_SmallGapSumE/BLAST_LargeGapSumE calculations.
@@ -1826,6 +1905,38 @@ fn run_with_neighbor_map(args: TblastxArgs) -> Result<()> {
                             } else {
                                 continue;
                             }
+
+                            // NCBI: Blast_HSPGetNumIdentitiesAndPositives and Blast_HSPTest
+                            // Reference: blast_hits.c:2708-2720
+                            // Use query_nomask (unmasked sequence) for identity calculation
+                            // If aa_seq_nomask is None, use aa_seq (masked) as fallback
+                            // Note: hsp_q and hsp_s are relative offsets within q_frame/s_aa (sentinel included)
+                            // Both aa_seq_nomask and aa_seq have sentinels, so hsp_q can be used directly
+                            let q_frame_nomask = q_frame.aa_seq_nomask.as_ref().unwrap_or(&q_frame.aa_seq);
+                            let num_ident = if let Some((num_ident, _align_length)) =
+                                get_num_identities_and_positives_ungapped(
+                                    q_frame_nomask,
+                                    s_aa,
+                                    hsp_q, // hsp_q is already relative to q_frame (sentinel included), same for q_frame_nomask
+                                    hsp_s, // hsp_s is relative to s_aa (sentinel included)
+                                    hsp_len,
+                                ) {
+                                num_ident
+                            } else {
+                                // Length mismatch - skip this HSP
+                                continue;
+                            };
+
+                            // NCBI: Blast_HSPTest (blast_hits.c:2719)
+                            // Default values: percent_identity = 0.0, min_hit_length = 0 (from calloc)
+                            // So by default, this test always returns false (no filtering)
+                            let percent_identity = args.percent_identity;
+                            let min_hit_length = args.min_hit_length;
+                            if hsp_test(num_ident, hsp_len, percent_identity, min_hit_length) {
+                                // HSP deleted by Blast_HSPTest
+                                continue;
+                            }
+
                             let hsp_qe = hsp_q + hsp_len;
 
                             // Convert to logical coordinates (subtract sentinel)
@@ -1853,6 +1964,7 @@ fn run_with_neighbor_map(args: TblastxArgs) -> Result<()> {
                                 s_orig_len: s_len,
                                 raw_score: score,
                                 e_value: f64::INFINITY, // Will be computed by linking
+                                num_ident,
                                 ordering_method: 0, // Set during sum_stats_linking
                                 linked_set: false,
                                 start_of_chain: false,
@@ -2155,6 +2267,7 @@ mod purge_tests {
             s_orig_len: 1000,
             raw_score,
             e_value: 0.0,
+            num_ident: 0, // Mock value for tests
             ordering_method: 0,
             linked_set: false,
             start_of_chain: false,
@@ -2294,6 +2407,7 @@ mod purge_tests {
             s_orig_len: 100,
             raw_score: 100,
             e_value: 0.0,
+            num_ident: 0, // Mock value for tests
             ordering_method: 0,
             linked_set: false,
             start_of_chain: false,
@@ -2313,6 +2427,7 @@ mod purge_tests {
             s_orig_len: 100,
             raw_score: 90,
             e_value: 0.0,
+            num_ident: 0, // Mock value for tests
             ordering_method: 0,
             linked_set: false,
             start_of_chain: false,

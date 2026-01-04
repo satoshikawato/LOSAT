@@ -43,7 +43,6 @@ Contexts: 6
 Backbone size: 28540 cells (0.5 MB)
 Non-empty cells: 13667
 Total entries: 4607403
-High-frequency suppression: 0 cells filtered (0 entries dropped), max_hits_per_kmer=18446744073709551615
 Overflow size: 4607397 (18.4 MB)
 Longest chain: 1954
 ==========================================
@@ -57,6 +56,6 @@ Searching 1 queries vs 1 subjects... (avg_query_length=97311)
 [DEBUG CUTOFF] gap_trigger=41
 [DEBUG CUTOFF] final cutoff=41
 
-real	1m15.924s
-user	1m15.753s
-sys	0m0.050s
+real	1m36.709s
+user	1m36.503s
+sys	0m0.070s

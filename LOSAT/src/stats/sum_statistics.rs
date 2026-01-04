@@ -81,12 +81,30 @@ pub fn e_to_p(e: f64) -> f64 {
 ///
 /// This is used heavily in sum-statistics and we want it to be stable and
 /// as close as possible to NCBI's `BLAST_LnFactorial` when called with integer n.
+///
+/// NCBI reference: ncbi_math.c:473-480
+/// ```c
+/// double BLAST_LnFactorial (double x) {
+///     if( x <= 0.0)
+///         return 0.0;
+///     else
+///         return s_LnGamma(x + 1.0);  // s_LnGamma uses lgamma from C standard library
+/// }
+/// ```
+///
+/// Note: NCBI uses lgamma(n+1) for all n, but direct calculation is exact for integers
+/// and matches NCBI's precision for typical HSP chain sizes (2-10 HSPs, rarely up to 400+).
+/// For very large n (400+), direct calculation may have accumulated error, but tests
+/// show it remains within acceptable bounds for E-value calculation.
 fn ln_factorial_int(n: i32) -> f64 {
     if n <= 1 {
         return 0.0;
     }
-    // Direct sum is exact enough for the small/medium n encountered here.
-    // (n is number of HSPs in a linked set.)
+    
+    // Direct sum calculation: exact for integers and matches NCBI's precision
+    // for typical use cases. NCBI uses lgamma(n+1) which is more numerically
+    // stable for very large n, but direct calculation is sufficient for our
+    // use case (HSP chain sizes typically 2-10, rarely up to 400+).
     let mut sum = 0.0;
     for i in 2..=n {
         sum += (i as f64).ln();
@@ -390,10 +408,14 @@ pub fn small_gap_sum_e(
         sum_e = p_to_e(sum_p) * ((searchsp_eff as f64) / pair_search_space);
     }
 
-    if weight_divisor == 0.0 || sum_e / weight_divisor > (i32::MAX as f64) {
+    // NCBI: if( weight_divisor == 0.0 || (sum_e /= weight_divisor) > INT4_MAX )
+    if weight_divisor == 0.0 {
         sum_e = i32::MAX as f64;
     } else {
         sum_e /= weight_divisor;
+        if sum_e > (i32::MAX as f64) {
+            sum_e = i32::MAX as f64;
+        }
     }
 
     sum_e
@@ -441,10 +463,14 @@ pub fn uneven_gap_sum_e(
         sum_e = p_to_e(sum_p) * ((searchsp_eff as f64) / pair_search_space);
     }
 
-    if weight_divisor == 0.0 || sum_e / weight_divisor > (i32::MAX as f64) {
+    // NCBI: if( weight_divisor == 0.0 || (sum_e /= weight_divisor) > INT4_MAX )
+    if weight_divisor == 0.0 {
         sum_e = i32::MAX as f64;
     } else {
         sum_e /= weight_divisor;
+        if sum_e > (i32::MAX as f64) {
+            sum_e = i32::MAX as f64;
+        }
     }
 
     sum_e
@@ -479,7 +505,7 @@ pub fn large_gap_sum_e(
         // NCBI: xsum -= num*log(subject_length*query_length) - ln_factorial(num)
         // i.e. xsum = xsum - num*log(prod) + ln_factorial(num)
         let prod = (subject_length as f64) * (query_length as f64);
-        let mut adjusted_xsum = xsum - (num as f64) * prod.ln() + ln_factorial_int(num);
+        let adjusted_xsum = xsum - (num as f64) * prod.ln() + ln_factorial_int(num);
 
         let sum_p = blast_sum_p(num, adjusted_xsum);
 
@@ -487,10 +513,14 @@ pub fn large_gap_sum_e(
         sum_e = p_to_e(sum_p) * ((searchsp_eff as f64) / prod);
     }
 
-    if weight_divisor == 0.0 || sum_e / weight_divisor > (i32::MAX as f64) {
+    // NCBI: if( weight_divisor == 0.0 || (sum_e /= weight_divisor) > INT4_MAX )
+    if weight_divisor == 0.0 {
         sum_e = i32::MAX as f64;
     } else {
         sum_e /= weight_divisor;
+        if sum_e > (i32::MAX as f64) {
+            sum_e = i32::MAX as f64;
+        }
     }
 
     sum_e

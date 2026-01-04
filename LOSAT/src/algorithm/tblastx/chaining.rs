@@ -55,6 +55,9 @@ pub struct UngappedHit {
     pub s_orig_len: usize,
     pub raw_score: i32,
     pub e_value: f64,
+    /// Number of identical residues (for Blast_HSPTest)
+    /// Reference: blast_hits.c:Blast_HSPGetNumIdentitiesAndPositives
+    pub num_ident: usize,
     /// NCBI ELinkOrderingMethod: 0 = small gaps, 1 = large gaps
     /// Reference: link_hsps.c line 973: H->ordering_method = ordering_method;
     pub ordering_method: u8,

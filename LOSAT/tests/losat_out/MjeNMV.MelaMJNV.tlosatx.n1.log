@@ -55,7 +55,8 @@ Searching 1 queries vs 1 subjects... (avg_query_length=102002)
 [DEBUG CUTOFF] cutoff_score_max=59
 [DEBUG CUTOFF] gap_trigger=41
 [DEBUG CUTOFF] final cutoff=41
+Terminated
 
-real	0m31.233s
-user	0m31.100s
-sys	0m0.040s
+real	0m35.747s
+user	0m35.635s
+sys	0m0.030s

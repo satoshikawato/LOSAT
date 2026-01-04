@@ -55,6 +55,8 @@ pub struct BaseDiagnosticCounters {
     pub hsps_in_merged_clusters: AtomicUsize, // Total HSPs that were part of merged clusters
     // HSP culling diagnostics
     pub hsps_culled_dominated: AtomicUsize, // HSPs culled by domination test
+    // Chain member filtering (NCBI link_hsps.c:1018-1020)
+    pub hsps_chain_member_filtered: AtomicUsize, // HSPs filtered as chain members (linked_set && !start_of_chain)
 }
 
 impl Default for BaseDiagnosticCounters {
@@ -84,6 +86,7 @@ impl Default for BaseDiagnosticCounters {
             clusters_merged: AtomicUsize::new(0),
             hsps_in_merged_clusters: AtomicUsize::new(0),
             hsps_culled_dominated: AtomicUsize::new(0),
+            hsps_chain_member_filtered: AtomicUsize::new(0),
             seed_score_min: AtomicI32::new(i32::MAX),
             seed_score_max: AtomicI32::new(i32::MIN),
             seed_score_sum: AtomicUsize::new(0),

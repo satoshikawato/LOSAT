@@ -58,6 +58,12 @@ pub struct UngappedHit {
     /// NCBI ELinkOrderingMethod: 0 = small gaps, 1 = large gaps
     /// Reference: link_hsps.c line 973: H->ordering_method = ordering_method;
     pub ordering_method: u8,
+    /// NCBI: H->linked_set - TRUE if this HSP is part of a multi-HSP chain
+    /// Reference: link_hsps.c lines 959-962, 972
+    pub linked_set: bool,
+    /// NCBI: H->start_of_chain - TRUE if this HSP is the head of a chain
+    /// Reference: link_hsps.c line 955
+    pub start_of_chain: bool,
 }
 
 /// Sequence data for re-alignment during HSP chaining

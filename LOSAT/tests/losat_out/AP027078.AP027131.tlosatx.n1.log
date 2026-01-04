@@ -52,7 +52,13 @@ Longest chain: 8325
 
 Reading subjects...
 Searching 1 queries vs 1 subjects... (avg_query_length=205207)
+[DEBUG CUTOFF] query_len_aa=205207, subject_len_nucl=662108
+[DEBUG CUTOFF] eff_searchsp=45267450750
+[DEBUG CUTOFF] length_adjustment=52
+[DEBUG CUTOFF] cutoff_score_max=64
+[DEBUG CUTOFF] gap_trigger=41
+[DEBUG CUTOFF] final cutoff=41
 
-real	18m25.039s
-user	18m24.874s
-sys	0m0.070s
+real	22m4.739s
+user	22m4.442s
+sys	0m0.100s

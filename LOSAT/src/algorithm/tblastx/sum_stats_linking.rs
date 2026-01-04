@@ -9,14 +9,11 @@
 //! 5. `next_larger`: skip HSPs with too-small sum
 //! 6. Dual-index approach: index=0 (small gaps), index=1 (large gaps)
 
-use rustc_hash::FxHashMap;
-use rayon::prelude::*;
 use crate::stats::sum_statistics::{
     gap_decay_divisor, small_gap_sum_e, large_gap_sum_e, normalize_score,
     defaults::{GAP_SIZE, OVERLAP_SIZE},
 };
 use crate::stats::KarlinParams;
-use crate::stats::length_adjustment::compute_length_adjustment_simple;
 
 use super::chaining::UngappedHit;
 use super::diagnostics::diagnostics_enabled;
@@ -452,12 +449,36 @@ const SENTINEL_IDX: usize = usize::MAX;
 /// * `hits` - Vector of ungapped HSPs to link
 /// * `params` - Karlin-Altschul parameters for the scoring matrix
 /// * `linking_params` - NCBI-style linking parameters (avg query length, subject length, etc.)
+/// Apply sum-statistics even-gap HSP linking (NCBI s_BlastEvenGapLinkHSPs port)
+///
+/// # Arguments
+/// * `hits` - Input HSPs to link
+/// * `params` - Karlin-Altschul parameters (smallest lambda)
+/// * `linking_params` - Parameters for NCBI-style linking
+/// * `query_contexts` - Query context information
+/// * `subject_frame_bases` - Subject frame base offsets
+/// * `length_adj_per_context` - Pre-computed length adjustment per context
+///   (NCBI: query_info->contexts[ctx].length_adjustment)
+/// * `eff_searchsp_per_context` - Pre-computed effective search space per context
+///   (NCBI: query_info->contexts[ctx].eff_searchsp)
+///
+/// NCBI Parity Note:
+/// In NCBI, length_adjustment and eff_searchsp are calculated once per context
+/// in BLAST_CalcEffLengths (blast_setup.c:700-850) and stored in query_info->contexts[].
+/// link_hsps.c then references these stored values:
+/// ```c
+/// length_adjustment = query_info->contexts[query_context].length_adjustment;
+/// searchsp_eff = query_info->contexts[query_context].eff_searchsp;
+/// ```
+/// We now mirror this by accepting pre-computed vectors instead of recalculating.
 pub fn apply_sum_stats_even_gap_linking(
     mut hits: Vec<UngappedHit>,
     params: &KarlinParams,
     linking_params: &LinkingParams,
     query_contexts: &[QueryContext],
     subject_frame_bases: &[i32],
+    length_adj_per_context: &[i64],
+    eff_searchsp_per_context: &[i64],
 ) -> Vec<UngappedHit> {
     if hits.is_empty() {
         return hits;
@@ -577,6 +598,8 @@ pub fn apply_sum_stats_even_gap_linking(
             linking_params.subject_len_nucl,
             query_contexts,
             subject_frame_bases,
+            length_adj_per_context,
+            eff_searchsp_per_context,
         );
         results.extend(processed);
     }
@@ -592,6 +615,13 @@ pub fn apply_sum_stats_even_gap_linking(
 /// * `cutoffs` - Pre-computed NCBI-style cutoffs for this subject
 /// * `gap_decay_rate` - Gap decay rate for E-value calculation
 /// * `diag_enabled` - Whether diagnostics are enabled
+/// * `subject_len_nucl` - Subject length in nucleotides
+/// * `query_contexts` - Query context information
+/// * `subject_frame_bases` - Subject frame base offsets (unused, kept for API)
+/// * `length_adj_per_context` - Pre-computed length adjustment per context
+///   (NCBI: query_info->contexts[ctx].length_adjustment)
+/// * `eff_searchsp_per_context` - Pre-computed effective search space per context
+///   (NCBI: query_info->contexts[ctx].eff_searchsp)
 fn link_hsp_group_ncbi(
     mut group_hits: Vec<UngappedHit>,
     params: &KarlinParams,
@@ -601,6 +631,8 @@ fn link_hsp_group_ncbi(
     subject_len_nucl: i64,
     query_contexts: &[QueryContext],
     _subject_frame_bases: &[i32], // Kept for API compatibility; no longer used after frame-relative coord fix
+    length_adj_per_context: &[i64],
+    eff_searchsp_per_context: &[i64],
 ) -> Vec<UngappedHit> {
     if group_hits.is_empty() {
         return group_hits;
@@ -660,15 +692,31 @@ fn link_hsp_group_ncbi(
     let subject_len_aa = (subject_len_nucl / 3).max(1);
     
     // ========================================================================
-    // NCBI link_hsps.c:560-571 - Effective length calculation for tblastx
+    // NCBI Parity: Use pre-computed length_adjustment and eff_searchsp
     // ========================================================================
+    // NCBI stores these in query_info->contexts[ctx] via BLAST_CalcEffLengths
+    // (blast_setup.c:700-850) and references them in link_hsps.c:
     // ```c
     // length_adjustment = query_info->contexts[query_context].length_adjustment;
     // query_length = query_info->contexts[query_context].query_length;
     // query_length = MAX(query_length - length_adjustment, 1);
-    // subject_length = subject_length_orig; /* in nucleotides even for tblast[nx] */
-    // /* If subject is translated, length adjustment is given in nucleotide
-    //    scale. */
+    // ...
+    // // In BLAST_SmallGapSumE/BLAST_LargeGapSumE calls:
+    // BLAST_SmallGapSumE(..., query_info->contexts[query_context].eff_searchsp, ...);
+    // ```
+    //
+    // Previously we recalculated these locally via compute_length_adjustment_simple().
+    // Now we use the SAME pre-computed values from utils.rs for NCBI parity.
+    // ========================================================================
+    let length_adjustment = length_adj_per_context[query_context];
+    let eff_search_space = eff_searchsp_per_context[query_context];
+    
+    // NCBI: query_length = MAX(query_length - length_adjustment, 1)
+    let eff_query_len = (query_len_aa - length_adjustment).max(1) as f64;
+    
+    // LOCAL effective subject length for BLAST_SmallGapSumE/LargeGapSumE arguments
+    // (uses 1/3 adjustment for subject per link_hsps.c:566-571)
+    // ```c
     // if (Blast_SubjectIsTranslated(program_number))  // tblastx = TRUE
     // {
     //    length_adjustment /= CODON_LENGTH;  // divide by 3
@@ -676,44 +724,6 @@ fn link_hsp_group_ncbi(
     // }
     // subject_length = MAX(subject_length - length_adjustment, 1);
     // ```
-    //
-    // Key insight: For tblastx, NCBI applies length_adjustment differently
-    // in TWO SEPARATE PLACES:
-    //
-    // 1. LOCAL effective lengths (link_hsps.c:560-571) - for BLAST_SmallGapSumE arguments:
-    //    - query: subtract full length_adjustment
-    //    - subject: subtract (length_adjustment / 3) after converting to AA
-    //
-    // 2. eff_searchsp (blast_setup.c:836-843, BLAST_CalcEffLengths) - for searchsp_eff argument:
-    //    - query: subtract full length_adjustment
-    //    - subject: subtract full length_adjustment (NOT 1/3!)
-    //    - eff_searchsp = (db_length - num_seqs*length_adj) * (query_length - length_adj)
-    //
-    // NCBI passes these as THREE INDEPENDENT arguments to BLAST_SmallGapSumE:
-    //   (query_length, subject_length, query_info->contexts[ctx].eff_searchsp)
-    // ========================================================================
-    let length_adjustment = compute_length_adjustment_simple(
-        query_len_aa,
-        subject_len_aa,
-        params,
-    ).length_adjustment;
-    
-    // NCBI: query_length = MAX(query_length - length_adjustment, 1)
-    let eff_query_len = (query_len_aa - length_adjustment).max(1) as f64;
-    
-    // NCBI parity: eff_searchsp uses full length_adjustment for BOTH query AND subject
-    // Reference: blast_setup.c:836-843 (BLAST_CalcEffLengths)
-    //   effective_db_length = db_length - ((Int8)db_num_seqs * length_adjustment);
-    //   effective_search_space = effective_db_length * (query_length - length_adjustment);
-    // For subject mode (num_seqs=1): eff_searchsp = (subject_aa - length_adj) * (query_aa - length_adj)
-    let eff_subject_for_searchsp = (subject_len_aa - length_adjustment).max(1) as f64;
-    let eff_search_space = eff_query_len * eff_subject_for_searchsp;
-    
-    // LOCAL effective subject length for BLAST_SmallGapSumE/LargeGapSumE arguments
-    // (uses 1/3 adjustment for subject per link_hsps.c:566-571)
-    // NCBI: For tblastx (Blast_SubjectIsTranslated = TRUE):
-    //   length_adjustment /= CODON_LENGTH (integer division by 3)
-    //   subject_length = MAX(subject_length - length_adjustment, 1)
     let length_adj_for_subject = length_adjustment / 3;  // integer division
     let eff_subject_len = (subject_len_aa - length_adj_for_subject).max(1) as f64;
     
@@ -734,11 +744,11 @@ fn link_hsp_group_ncbi(
             subject_len_nucl,
             subject_len_aa
         );
-        eprintln!("  length_adjustment={}, length_adj_for_subject={}", 
+        eprintln!("  length_adjustment={} (pre-computed), length_adj_for_subject={}", 
             length_adjustment, length_adj_for_subject);
-        eprintln!("  eff_query_len={:.2}, eff_subject_len={:.2} (local), eff_subject_for_searchsp={:.2}", 
-            eff_query_len, eff_subject_len, eff_subject_for_searchsp);
-        eprintln!("  eff_search_space={:.2e} (uses full length_adj for subject)", 
+        eprintln!("  eff_query_len={:.2}, eff_subject_len={:.2} (local)", 
+            eff_query_len, eff_subject_len);
+        eprintln!("  eff_search_space={} (pre-computed, Int8)", 
             eff_search_space);
         eprintln!("  lambda={}, k={}, logK={:.4}", params.lambda, params.k, params.k.ln());
     }
@@ -1346,13 +1356,19 @@ fn link_hsp_group_ncbi(
             // This is key: chain members inherit the chain's E-value
             group_hits[cur].e_value = evalue;
             
+            // Transfer linked_set flag to UngappedHit for output filtering
+            // NCBI line 972: H->linked_set = linked_set
+            group_hits[cur].linked_set = linked_set;
+            
             if is_first {
                 // Chain head: mark as start_of_chain (NCBI line 955)
                 hsp_links[cur].start_of_chain = true;
+                group_hits[cur].start_of_chain = true;
                 is_first = false;
             } else {
                 // Non-head HSP in chain: mark as not start_of_chain
                 hsp_links[cur].start_of_chain = false;
+                group_hits[cur].start_of_chain = false;
             }
             remaining -= 1;
 
@@ -1364,8 +1380,13 @@ fn link_hsp_group_ncbi(
         }
     }
 
-    // NCBI behavior: All HSPs are kept in the array, but chain information
-    // (num, xsum, evalue) is used for filtering and reporting.
+    // NOTE: NCBI link_hsps.c:1016-1020 filters chain members (linked_set=true, 
+    // start_of_chain=false) during OUTPUT phase, not here. The flags are set
+    // so that downstream output code can perform the filtering.
+    // 
+    // Output filtering should happen in the format/output code, not here.
+    // This function returns ALL HSPs with their linked_set/start_of_chain flags
+    // properly set for downstream use.
     group_hits
 }
 
@@ -1391,6 +1412,8 @@ mod tests {
             raw_score: id, // Use raw_score as ID for verification
             e_value: 1e-10,
             ordering_method: 0,
+            linked_set: false,
+            start_of_chain: false,
         }
     }
 

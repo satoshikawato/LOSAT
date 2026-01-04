@@ -34,6 +34,310 @@ alwaysApply: true
 The NCBI C/C++ implementation is the **GROUND TRUTH**. Prioritize correctness and speed over code aesthetics. If major structural changes are needed to achieve parity, **DO IT.**
 
 NCBI BLASTのコードベース:/mnt/c/Users/kawato/Documents/ncbi-blast/
----
+
+# LOSAT Project Cursor Rules
+
+## Project Overview
+LOSAT is a Rust implementation of NCBI BLAST, specifically targeting **perfect parity** with NCBI BLAST+ output. The primary focus is TBLASTX, with the goal of achieving **bit-perfect output matching**.
+
+## Core Principles
+
+### 1. NCBI Parity is Ground Truth
+- **NCBI C/C++ implementation is the ONLY source of truth**
+- Output must match NCBI BLAST+ **bit-perfectly** (1ビットの狂いもなく一致)
+- Never simplify algorithms for "readability" if it affects output
+- When porting, always cite NCBI source code with file paths and line numbers
+
+### 2. Algorithmic Fidelity Over Code Aesthetics
+- **Stop speculating** - always read and compare code carefully
+- If NCBI uses complex state machines or special buffer management, implement equivalent logic in Rust
+- Performance optimizations are allowed ONLY if:
+  - Output results remain identical
+  - Algorithm core (Big O complexity) is maintained
+  - Structural changes are necessary for Rust memory model compatibility
+
+### 3. Documentation Requirements
+- When porting NCBI code, **always include NCBI C/C++ code snippets as comments** above the Rust implementation
+- Format: Include file path and line numbers
+- Example:
+  ```rust
+  // NCBI reference: blast_parameters.c:219-221
+  // Int4 x_dropoff = (Int4)(sbp->scale_factor * ceil(word_options->x_dropoff * NCBIMATH_LN2 / kbp->Lambda));
+  let x_dropoff = (scale_factor * (x_drop_bits * NCBIMATH_LN2 / ungapped_params.lambda).ceil()) as i32;
+  ```
+
+## Code Style
+
+### Rust Conventions
+- Use `cargo fmt` and `cargo clippy` standards
+- Prefer explicit types over inference in public APIs
+- Use `#[inline]` for hot-path functions (especially lookup/extension code)
+- Use `unsafe` only when necessary for performance (with safety comments)
+
+### File Organization
+- TBLASTX code: `src/algorithm/tblastx/`
+- Statistics: `src/stats/`
+- Common utilities: `src/utils/`
+- Tests: `tests/unit/tblastx/`
+
+### Naming Conventions
+- Match NCBI function names when porting: `s_BlastAaExtendTwoHit` → `extend_hit_two_hit`
+- Use snake_case for Rust functions
+- Keep NCBI terminology in comments: "query_offset", "subject_offset", "context", "frame"
+
+## NCBI Code Reference
+
+### Primary Reference Location
+- **NCBI BLAST source**: `/mnt/c/Users/kawato/Documents/GitHub/ncbi-blast/`
+- Key files:
+  - `c++/src/algo/blast/core/aa_ungapped.c` - Extension logic
+  - `c++/src/algo/blast/core/link_hsps.c` - Sum-statistics linking
+  - `c++/src/algo/blast/core/blast_parameters.c` - Cutoff calculations
+  - `c++/src/algo/blast/core/blast_query_info.c` - Context management
+  - `c++/src/algo/blast/core/blast_stat.c` - Karlin parameters, sum statistics
+
+### When Comparing Code
+1. Read NCBI source first
+2. Identify the exact algorithm/logic
+3. Port to Rust maintaining identical behavior
+4. Add NCBI code reference as comment
+5. Test against NCBI output
+
+## Testing Requirements
+
+### Unit Tests
+- Add tests for all NCBI-ported functions
+- Test edge cases (empty sequences, single residues, boundary conditions)
+- Reference NCBI unit tests when available: `ncbi-blast/c++/src/algo/blast/unit_tests/`
+
+### Integration Tests
+- Compare output with NCBI BLAST+ for real sequences
+- Target: < 0.2% difference in hit counts
+- Verify bit scores, E-values, and coordinates match
+
+### Test Files Location
+- Unit tests: `tests/unit/tblastx/`
+- Integration tests: Use real FASTA files from test datasets
+
+## Critical Areas
+
+### 1. Extension Logic (`extension.rs`)
+- Must match `aa_ungapped.c:s_BlastAaExtendTwoHit` exactly
+- X-drop termination conditions must be identical
+- Score calculation must match bit-perfectly
+
+### 2. Sum-Statistics Linking (`sum_stats_linking.rs`)
+- Must match `link_hsps.c:s_BlastEvenGapLinkHSPs` exactly
+- Chain formation logic is critical
+- E-value calculation must use identical formulas
+
+### 3. Cutoff Calculations (`ncbi_cutoffs.rs`)
+- Per-subject cutoff updates must match `BlastInitialWordParametersUpdate`
+- Use exact NCBI formulas (no approximations)
+- Handle edge cases (very long sequences, extreme E-values)
+
+### 4. Context Management (`lookup.rs`)
+- Frame bases calculation must match NCBI concatenation logic
+- Context indexing must match `BSearchContextInfo` behavior
+- Karlin parameters per context must match `check_ideal` logic
+
+## Common Pitfalls to Avoid
+
+### ❌ DO NOT:
+1. Simplify complex NCBI logic "for readability"
+2. Change algorithms without verifying output equivalence
+3. Skip edge cases or boundary conditions
+4. Use different floating-point precision than NCBI
+5. Optimize prematurely (correctness first, speed second)
+
+### ✅ DO:
+1. Always compare with NCBI source code
+2. Include NCBI code references in comments
+3. Test with both short and long sequences
+4. Verify bit-perfect output matching
+5. Document any deviations and their justification
+
+## Current Status
+
+### ✅ Completed
+- Two-hit window logic (4.1)
+- Lookup table construction (4.2)
+- Masked region extension (4.3)
+- HSP culling (4.4)
+- Context-specific Karlin parameters (4.5)
+- BSearchContextInfo context search (4.6)
+- Extension score calculation (4.7)
+- Sum-statistics linking chain structure (4.8)
+- Reverse strand processing (4.9)
+- E-value threshold calculation (4.10)
+
+### 🔴 Critical Issues (Unresolved)
+1. **Long sequences (600kb+)**: Excessive hits (2x NCBI)
+   - Root cause: Too many HSPs generated (338,859 vs 30,000-45,000)
+   - Investigation needed: Extension X-drop, seeding filters
+2. **Chain formation differences**: E-value mismatches
+   - Short HSPs incorrectly linked to high-score chains
+   - Investigation needed: Linking conditions, coordinate comparisons
+
+## Documentation
+
+### Status Report
+- Main document: `TBLASTX_NCBI_PARITY_STATUS.md`
+- Update when:
+  - Completing investigations
+  - Fixing bugs
+  - Discovering new discrepancies
+
+### Code Comments
+- Always include NCBI references for ported code
+- Explain any deviations from NCBI implementation
+- Document performance optimizations and their safety
+
+## Performance Considerations
+
+### Allowed Optimizations
+- Rust-specific memory optimizations (borrowing, zero-copy)
+- Parallel processing (rayon) where algorithm allows
+- Unsafe code for hot paths (with safety guarantees)
+
+### Forbidden Optimizations
+- Algorithm simplifications that change output
+- Approximations in mathematical calculations
+- Skipping validation or edge case handling
+
+## When in Doubt
+
+1. **Read NCBI source code first** - Don't guess
+2. **Compare line-by-line** - Find exact differences
+3. **Test with real data** - Verify output matches
+4. **Document findings** - Update status report
+5. **Ask for clarification** - If NCBI behavior is unclear
+
+## Key Constants and Values
+
+### NCBI Equivalents
+- `BLAST_WINDOW_SIZE_PROT = 40` (two-hit window size)
+- `BLAST_WORDSIZE_PROT = 3` (word size for protein searches)
+- `X_DROP_UNGAPPED_BITS = 7.0` (X-drop in bits, converted to raw score at runtime)
+- `CUTOFF_E_TBLASTX = 1e-300` (fixed E-value for per-subject cutoff updates)
+- `BLAST_GAP_DECAY_RATE = 0.5` (gap decay rate for ungapped searches)
+- `GAP_SIZE = 40` (for sum-statistics linking)
+- `OVERLAP_SIZE = 9` (for sum-statistics linking)
+- `WINDOW_SIZE = 50` (linking window: GAP_SIZE + OVERLAP_SIZE + 1 = 40 + 9 + 1)
+- `TRIM_SIZE = 5` (trim size: (OVERLAP_SIZE + 1) / 2 = (9 + 1) / 2)
+
+### BLOSUM62 Parameters
+- Ungapped: lambda=0.3176, K=0.134
+- Gapped: lambda=0.267, K=0.041
+
+## File-Specific Guidelines
+
+### `utils.rs`
+- Main TBLASTX execution logic
+- Two modes: `run()` (standard) and `run_with_neighbor_map()` (optimized)
+- Must maintain identical output between modes
+
+### `lookup.rs`
+- Lookup table construction
+- Context management
+- Frame bases calculation
+
+### `sum_stats_linking.rs`
+- Sum-statistics even-gap linking
+- Chain formation
+- E-value calculation
+
+### `extension.rs`
+- Two-hit extension logic
+- X-drop termination
+- Score calculation
+
+### `ncbi_cutoffs.rs`
+- Cutoff score calculations
+- Per-subject updates
+- Gap trigger calculations
+
+## Critical Implementation Details
+
+### Coordinate Systems
+- **NCBI**: Extension uses concatenated buffer absolute coordinates, then converts to frame-relative via `s_AdjustInitialHSPOffsets`
+- **LOSAT**: Extension uses frame-specific buffers, coordinates are already frame-relative
+- **Linking**: Both use **0-indexed frame-relative coordinates** (NOT absolute concatenated coordinates)
+- Reference: `TBLASTX_NCBI_PARITY_STATUS.md` section 5.7
+
+### Frame Concatenation
+- NCBI concatenates frames by **sharing boundary sentinels** (NULLB = 0)
+- Frame offset advances by `(aa_len + 1)`, NOT `(aa_len + 2)`
+- Next frame starts at previous frame's trailing sentinel
+- Reference: `blast_util.c:1098-1101`, `lookup.rs:299-310`
+
+### Length Adjustment Asymmetry (tblastx)
+- `length_adjustment` is stored in **AA units** (not nucleotide)
+- **Query**: Apply full `length_adjustment` → `eff_query = query_aa - length_adjustment`
+- **Subject**: Apply 1/3 → `eff_subject = subject_aa - (length_adjustment / 3)`
+- **eff_searchsp**: Apply full to both → `(query_aa - adj) * (subject_aa - adj)`
+- Reference: `link_hsps.c:560-571`, `sum_stats_linking.rs:555-570`
+
+### Two Types of Search Space Calculation
+1. **Per-subject cutoff update**: `MIN(q_aa_len, s_nucl_len) * s_nucl_len` (no length adjustment, **mixed AA/nucleotide lengths**)
+2. **cutoff_score_max / E-value**: `eff_searchsp` with length adjustment (standard calculation)
+- Reference: `blast_parameters.c:348-374`, `ncbi_cutoffs.rs`
+
+### Cutoff Score Three-Stage Capping
+tblastx cutoff is MIN of three values:
+1. From `BLAST_Cutoffs` with `CUTOFF_E_TBLASTX=1e-300` (usually very low, ~1)
+2. `gap_trigger` (BLOSUM62: 41 raw score = 22.0 bits)
+3. `cutoff_score_max` (from user's E-value)
+- Usually `gap_trigger` or `cutoff_score_max` dominates
+- Reference: `ncbi_cutoffs.rs:cutoff_score_for_update_tblastx`
+
+### Masking (SEG)
+- **Query only**: Subject is never masked in tblastx
+- **Extension**: Uses **masked sequence** (`ctx.aa_seq` with X=21)
+- **Identity calculation**: Uses **unmasked sequence** (`aa_seq_nomask`)
+- Sentinel byte `0` (NULLB) returns `-4` (defscore) in BLOSUM62
+- Reference: `blast_filter.c:1379-1405`, `utils.rs:478-511`
+
+### Subject Frame Sort Order
+- **Negative frames come FIRST** (ascending by frame value)
+- NCBI: `if (h1->subject.frame > h2->subject.frame) return 1` → positive frames go after
+- LOSAT: `a_ssign.cmp(&b_ssign)` (ascending)
+- Reference: `link_hsps.c:351-357`, `sum_stats_linking.rs:549-554`
+
+### Chain Member Filtering Timing
+- **CRITICAL**: Filter chain members (`linked_set && !start_of_chain`) during **OUTPUT phase**, NOT in linking phase
+- Linking function must return ALL HSPs with flags set
+- Filter in `utils.rs` output conversion loop, not in `sum_stats_linking.rs`
+- Reference: `link_hsps.c:1014-1020`, `utils.rs:1982-1992`
+
+### Scale Factor
+- **tblastx always uses `scale_factor = 1.0`**
+- Only RPS-BLAST uses `scale_factor > 1.0`
+- All calculations can assume `scale_factor = 1.0` for tblastx
+- Reference: `blast_parameters.c:466-469`, `blast_engine.c:881-888`
+
+### eff_searchsp vs Local Lengths Design Separation
+- `BLAST_SmallGapSumE`/`BLAST_LargeGapSumE` receive **3 independent length parameters**:
+  1. `query_length`: Local, query with full length_adjustment
+  2. `subject_length`: Local, subject with 1/3 length_adjustment
+  3. `searchsp_eff`: Pre-computed, both with full length_adjustment
+- These are calculated differently and serve different purposes
+- Reference: `link_hsps.c:560-571`, `blast_setup.c:836-843`, `sum_stats_linking.rs:563-576`
+
+### HSP Grouping and Sorting Structure
+- **NCBI**: Sort all HSPs → detect frame boundaries → split
+- **LOSAT**: Pre-group by `(q_idx, s_idx, q_strand, s_strand)` → sort within groups
+- Both produce identical processing order
+- LOSAT approach enables parallel processing
+- Reference: `link_hsps.c:484-533`, `sum_stats_linking.rs:433-438`
+
+### DiagStruct Initialization Difference
+- **NCBI**: `last_hit = -window` (initialized to -40)
+- **LOSAT**: `last_hit = 0`
+- **Behavior**: Both result in `diff >= window` on first hit (record only, no extension)
+- This difference does NOT affect output
+- Reference: `blast_extend.c:103`, `utils.rs:51`
+
+
 
 

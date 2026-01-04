@@ -27,12 +27,6 @@ pub const X_DROP_GAPPED_PRELIM: i32 = 15;
 /// BLAST_GAP_X_DROPOFF_FINAL_PROT for final traceback
 pub const X_DROP_GAPPED_FINAL: i32 = 25;
 
-/// Maximum number of hits per k-mer before skipping the word.
-/// High-frequency words generate too many hits for practical processing.
-/// This mimics NCBI's approach of skipping degenerate or common words.
-/// Value chosen to balance coverage vs performance.
-pub const MAX_HITS_PER_KMER: usize = 50000;
-
 /// Stop codon encoding - index 24 in NCBI BLAST matrix order (ARNDCQEGHILKMFPSTWYVBJZX*)
 /// BLOSUM62 gives stop codon scores of -4 vs other AAs, +1 vs itself
 pub const STOP_CODON: u8 = 24;

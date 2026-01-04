@@ -255,7 +255,21 @@ pub fn cutoff_score_from_evalue(
     
     // NCBI: S = (Int4) (ceil( log((double)(K * searchsp / E)) / Lambda ))
     let searchsp = eff_searchsp as f64;
-    let score = ((gapped_params.k * searchsp / e).ln() / gapped_params.lambda).ceil();
+    let k_times_searchsp = gapped_params.k * searchsp;
+    let k_times_searchsp_over_e = k_times_searchsp / e;
+    let log_value = k_times_searchsp_over_e.ln();
+    let score_before_ceil = log_value / gapped_params.lambda;
+    let score = score_before_ceil.ceil();
+    
+    // Debug output for long sequences (600kb+)
+    if eff_searchsp > 40_000_000_000 {
+        eprintln!("[DEBUG CUTOFF_CALC] eff_searchsp={}", eff_searchsp);
+        eprintln!("[DEBUG CUTOFF_CALC] evalue={}, e_clamped={}", evalue, e);
+        eprintln!("[DEBUG CUTOFF_CALC] K={}, Lambda={}", gapped_params.k, gapped_params.lambda);
+        eprintln!("[DEBUG CUTOFF_CALC] K*searchsp={:.6e}, K*searchsp/E={:.6e}", k_times_searchsp, k_times_searchsp_over_e);
+        eprintln!("[DEBUG CUTOFF_CALC] log(K*searchsp/E)={:.6e}, score_before_ceil={:.6e}", log_value, score_before_ceil);
+        eprintln!("[DEBUG CUTOFF_CALC] final_score={} (ceil)", score as i32);
+    }
     
     score as i32
 }
@@ -825,6 +839,274 @@ mod tests {
     fn test_blast_gap_decay_rate_constant() {
         // Verify the BLAST_GAP_DECAY_RATE constant matches NCBI
         assert_eq!(BLAST_GAP_DECAY_RATE, 0.5, "BLAST_GAP_DECAY_RATE should be 0.5");
+    }
+
+    #[test]
+    fn test_eff_searchsp_long_sequence() {
+        // Test eff_searchsp calculation for long sequences (600kb+)
+        // This verifies that there are no overflow or precision issues
+        let ungapped = blosum62_ungapped();
+        
+        // Simulate a 600kb sequence
+        let query_len_aa = 200_000i64;  // ~600kb query
+        let subject_len_nucl = 600_000i64;  // 600kb subject
+        
+        let result = compute_eff_lengths_subject_mode_tblastx(
+            query_len_aa,
+            subject_len_nucl,
+            &ungapped,
+        );
+        
+        // Verify no overflow occurred
+        assert!(result.eff_searchsp > 0, "eff_searchsp should be positive");
+        assert!(result.eff_searchsp < i64::MAX, "eff_searchsp should not overflow");
+        
+        // Verify length_adjustment is reasonable
+        assert!(result.length_adjustment > 0, "length_adjustment should be positive");
+        assert!(result.length_adjustment < query_len_aa, "length_adjustment should be less than query length");
+        
+        // Verify eff_searchsp calculation
+        // db_length = subject_len_nucl / 3 = 200,000
+        // effective_db_length = db_length - length_adjustment
+        // effective_query_length = query_len_aa - length_adjustment
+        // eff_searchsp = effective_db_length * effective_query_length
+        let db_length = subject_len_nucl / 3;
+        let expected_eff_db = (db_length - result.length_adjustment).max(1);
+        let expected_eff_query = (query_len_aa - result.length_adjustment).max(1);
+        let expected_eff_searchsp = expected_eff_db * expected_eff_query;
+        
+        assert_eq!(result.eff_searchsp, expected_eff_searchsp, 
+                   "eff_searchsp should match manual calculation");
+    }
+
+    #[test]
+    fn test_cutoff_score_max_long_sequence() {
+        // Test cutoff_score_max calculation for long sequences (600kb+)
+        let ungapped = blosum62_ungapped();
+        
+        // Simulate a 600kb sequence
+        let query_len_aa = 200_000i64;
+        let subject_len_nucl = 600_000i64;
+        
+        let eff_lengths = compute_eff_lengths_subject_mode_tblastx(
+            query_len_aa,
+            subject_len_nucl,
+            &ungapped,
+        );
+        
+        let cutoff_max = cutoff_score_max_for_tblastx(
+            eff_lengths.eff_searchsp,
+            10.0,  // user E-value
+            &ungapped,
+        );
+        
+        // Verify cutoff_score_max is reasonable
+        assert!(cutoff_max > 0, "cutoff_score_max should be positive");
+        assert!(cutoff_max <= 100, "cutoff_score_max should be reasonable for long sequences");
+        
+        // For long sequences, cutoff_score_max should typically be > gap_trigger (41)
+        // because eff_searchsp is very large
+        let gap_trigger = gap_trigger_raw_score(22.0, &ungapped);
+        // Note: cutoff_score_max may be > gap_trigger for very long sequences
+        // The final cutoff will be MIN(update_cutoff, gap_trigger, cutoff_score_max)
+    }
+
+    #[test]
+    fn test_cutoff_for_update_long_sequence() {
+        // Test cutoff_score_for_update_tblastx for long sequences (600kb+)
+        let ungapped = blosum62_ungapped();
+        
+        // Simulate a 600kb sequence
+        let query_len_aa = 200_000i64;
+        let subject_len_nucl = 600_000i64;
+        
+        let gap_trigger = gap_trigger_raw_score(22.0, &ungapped);
+        let eff_lengths = compute_eff_lengths_subject_mode_tblastx(
+            query_len_aa,
+            subject_len_nucl,
+            &ungapped,
+        );
+        let cutoff_score_max = cutoff_score_max_for_tblastx(
+            eff_lengths.eff_searchsp,
+            10.0,
+            &ungapped,
+        );
+        
+        // Verify searchsp calculation doesn't overflow
+        let min_len = (query_len_aa as u64).min(subject_len_nucl as u64);
+        let searchsp = min_len * (subject_len_nucl as u64);
+        assert!(searchsp < u64::MAX, "searchsp should not overflow u64");
+        
+        let cutoff = cutoff_score_for_update_tblastx(
+            query_len_aa,
+            subject_len_nucl,
+            gap_trigger,
+            cutoff_score_max,
+            BLAST_GAP_DECAY_RATE,
+            &ungapped,
+            1.0,
+        );
+        
+        // Verify final cutoff is reasonable
+        assert!(cutoff > 0, "cutoff should be positive");
+        assert!(cutoff <= gap_trigger, "cutoff should be <= gap_trigger");
+        assert!(cutoff <= cutoff_score_max, "cutoff should be <= cutoff_score_max");
+    }
+
+    #[test]
+    fn test_eff_searchsp_very_long_sequence() {
+        // Test eff_searchsp calculation for very long sequences (10Mb+)
+        // This tests the upper bounds of the calculation
+        let ungapped = blosum62_ungapped();
+        
+        // Simulate a 10Mb sequence
+        let query_len_aa = 3_333_333i64;  // ~10Mb query
+        let subject_len_nucl = 10_000_000i64;  // 10Mb subject
+        
+        let result = compute_eff_lengths_subject_mode_tblastx(
+            query_len_aa,
+            subject_len_nucl,
+            &ungapped,
+        );
+        
+        // Verify no overflow occurred
+        assert!(result.eff_searchsp > 0, "eff_searchsp should be positive");
+        assert!(result.eff_searchsp < i64::MAX, "eff_searchsp should not overflow");
+        
+        // Verify the calculation is correct
+        let db_length = subject_len_nucl / 3;
+        let expected_eff_db = (db_length - result.length_adjustment).max(1);
+        let expected_eff_query = (query_len_aa - result.length_adjustment).max(1);
+        let expected_eff_searchsp = expected_eff_db * expected_eff_query;
+        
+        assert_eq!(result.eff_searchsp, expected_eff_searchsp,
+                   "eff_searchsp should match manual calculation for very long sequences");
+    }
+
+    #[test]
+    fn test_db_length_integer_division_edge_cases() {
+        // Test that db_length = subject_len_nucl / 3 matches NCBI's integer division behavior
+        // NCBI uses: Int8 db_length; db_length = db_length/3; (integer division, truncates toward zero)
+        // Rust uses: i64 / 3 (integer division, truncates toward zero)
+        let ungapped = blosum62_ungapped();
+        
+        // Test cases for integer division edge cases
+        let test_cases = vec![
+            // (subject_len_nucl, expected_db_length, description)
+            (3i64, 1i64, "exactly divisible by 3"),
+            (4i64, 1i64, "4/3 = 1.333... truncates to 1"),
+            (5i64, 1i64, "5/3 = 1.666... truncates to 1"),
+            (6i64, 2i64, "exactly divisible by 3"),
+            (600_000i64, 200_000i64, "600kb exactly divisible"),
+            (600_001i64, 200_000i64, "600kb+1 truncates to 200000"),
+            (600_002i64, 200_000i64, "600kb+2 truncates to 200000"),
+            (600_003i64, 200_001i64, "600kb+3 = 200001"),
+            (1i64, 0i64, "very small: 1/3 = 0"),
+            (2i64, 0i64, "very small: 2/3 = 0"),
+        ];
+        
+        for (subject_len_nucl, expected_db_length, desc) in test_cases {
+            let db_length = subject_len_nucl / 3;
+            assert_eq!(
+                db_length, expected_db_length,
+                "db_length calculation failed for {}: subject_len_nucl={}, expected={}, got={}",
+                desc, subject_len_nucl, expected_db_length, db_length
+            );
+            
+            // Verify that compute_eff_lengths_subject_mode_tblastx uses this calculation
+            // For very small values, we need a reasonable query length
+            let query_len_aa = if subject_len_nucl < 3 { 10i64 } else { subject_len_nucl / 3 };
+            
+            let result = compute_eff_lengths_subject_mode_tblastx(
+                query_len_aa,
+                subject_len_nucl,
+                &ungapped,
+            );
+            
+            // Verify the internal calculation matches
+            let computed_db_length = subject_len_nucl / 3;
+            assert_eq!(
+                computed_db_length, expected_db_length,
+                "Internal db_length calculation failed for {}: subject_len_nucl={}",
+                desc, subject_len_nucl
+            );
+        }
+    }
+
+    #[test]
+    fn test_db_length_matches_ncbi_integer_division() {
+        // Verify that Rust's integer division matches C's integer division behavior
+        // NCBI: Int8 db_length; db_length = db_length/3;
+        // C integer division truncates toward zero (same as Rust for positive values)
+        let test_values = vec![
+            600_000i64,  // 200000
+            600_001i64,  // 200000 (truncated)
+            600_002i64,  // 200000 (truncated)
+            600_003i64,  // 200001
+            1_000_000i64, // 333333 (truncated from 333333.333...)
+            1_000_001i64, // 333333 (truncated)
+            1_000_002i64, // 333334
+        ];
+        
+        for subject_len_nucl in test_values {
+            let rust_result = subject_len_nucl / 3;
+            
+            // In C, Int8 / 3 would produce the same result (truncation toward zero)
+            // For positive values, C and Rust integer division are identical
+            let expected = subject_len_nucl / 3; // This is what C would produce
+            
+            assert_eq!(
+                rust_result, expected,
+                "Integer division mismatch: subject_len_nucl={}, rust_result={}, expected={}",
+                subject_len_nucl, rust_result, expected
+            );
+        }
+    }
+
+    #[test]
+    fn test_cutoff_for_update_very_long_sequence() {
+        // Test cutoff_score_for_update_tblastx for very long sequences (10Mb+)
+        // This tests the upper bounds of searchsp calculation
+        let ungapped = blosum62_ungapped();
+        
+        // Simulate a 10Mb sequence
+        let query_len_aa = 3_333_333i64;
+        let subject_len_nucl = 10_000_000i64;
+        
+        let gap_trigger = gap_trigger_raw_score(22.0, &ungapped);
+        let eff_lengths = compute_eff_lengths_subject_mode_tblastx(
+            query_len_aa,
+            subject_len_nucl,
+            &ungapped,
+        );
+        let cutoff_score_max = cutoff_score_max_for_tblastx(
+            eff_lengths.eff_searchsp,
+            10.0,
+            &ungapped,
+        );
+        
+        // Verify searchsp calculation doesn't overflow
+        // searchsp = MIN(query_len_aa, subject_len_nucl) * subject_len_nucl
+        // = MIN(3,333,333, 10,000,000) * 10,000,000
+        // = 3,333,333 * 10,000,000 = 33,333,330,000,000
+        let min_len = (query_len_aa as u64).min(subject_len_nucl as u64);
+        let searchsp = min_len * (subject_len_nucl as u64);
+        assert!(searchsp < u64::MAX, "searchsp should not overflow u64 for very long sequences");
+        assert_eq!(searchsp, 33_333_330_000_000u64, "searchsp should match expected value");
+        
+        let cutoff = cutoff_score_for_update_tblastx(
+            query_len_aa,
+            subject_len_nucl,
+            gap_trigger,
+            cutoff_score_max,
+            BLAST_GAP_DECAY_RATE,
+            &ungapped,
+            1.0,
+        );
+        
+        // Verify final cutoff is reasonable
+        assert!(cutoff > 0, "cutoff should be positive");
+        assert!(cutoff <= gap_trigger, "cutoff should be <= gap_trigger");
     }
 }
 

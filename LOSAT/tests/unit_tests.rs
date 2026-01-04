@@ -7,6 +7,7 @@ mod unit {
     pub mod helpers;
     pub mod blastn;
     pub mod tblastx;
+    pub mod stats;
 }
 
 // Direct NCBI BLAST comparison test

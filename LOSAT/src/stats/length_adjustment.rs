@@ -115,8 +115,9 @@ pub fn compute_length_adjustment_ncbi(
                 converged = true;
                 break;
             }
-            if (ell_min - ell_max).abs() < f64::EPSILON {
+            if ell_min == ell_max {
                 // There are no more points to check
+                // NCBI: if(ell_min == ell_max) { /* There are no more points to check */ break; }
                 break;
             }
         } else {

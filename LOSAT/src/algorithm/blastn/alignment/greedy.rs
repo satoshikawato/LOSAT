@@ -206,8 +206,10 @@ pub fn greedy_align_one_direction_with_max_dist(
     }
 
     // Calculate match and mismatch costs for distance-based tracking
+    // NCBI reference: greedy_align.c:380-453
     // NCBI BLAST doubles scores if reward is odd to avoid fractions
     // IMPORTANT: x_drop must also be doubled to maintain consistent units
+    // NCBI: if (match_score % 2 == 1) { match_score *= 2; mismatch_score *= 2; xdrop_threshold *= 2; }
     let (match_cost, mismatch_cost, scaled_xdrop) = if reward % 2 == 1 {
         (reward * 2, (-penalty) * 2, x_drop * 2)
     } else {
@@ -217,6 +219,8 @@ pub fn greedy_align_one_direction_with_max_dist(
     let op_cost = match_cost + mismatch_cost; // Cost of a mismatch in distance terms
 
     // X-drop offset for score comparison (using scaled_xdrop for consistent units)
+    // NCBI reference: greedy_align.c:452-453
+    // xdrop_offset = (xdrop_threshold + match_cost / 2) / (match_cost + mismatch_cost) + 1;
     let xdrop_offset = ((scaled_xdrop + match_cost / 2) / op_cost.max(1) + 1) as usize;
 
     // Find initial run of matches
@@ -300,13 +304,24 @@ pub fn greedy_align_one_direction_with_max_dist(
             }
 
             // X-drop score threshold (using scaled_xdrop for consistent units)
+            // NCBI reference: greedy_align.c:496, 531-533
+            // max_score = aux_data->max_score + xdrop_offset;  (pointer arithmetic)
+            // xdrop_score = max_score[d - xdrop_offset] + (match_cost + mismatch_cost) * d - xdrop_threshold;
+            // xdrop_score = (Int4)ceil((double)xdrop_score / (match_cost / 2));
+            // Note: In NCBI, max_score[d - xdrop_offset] accesses aux_data->max_score[d] when d >= xdrop_offset
+            // When d < xdrop_offset, d - xdrop_offset is negative, accessing before the array start
+            // NCBI initializes max_score[0..xdrop_offset] to 0, so negative index access returns 0
+            // LOSAT uses: mem.max_score[xdrop_idx + xdrop_offset] where xdrop_idx = max(0, d - xdrop_offset)
+            // This is equivalent: when d < xdrop_offset, we use max_score[xdrop_offset] = 0 (initialized)
             let xdrop_idx = if d >= xdrop_offset {
                 d - xdrop_offset
             } else {
-                0
+                0  // When d < xdrop_offset, use index 0 which maps to max_score[xdrop_offset] = 0
             };
             let xdrop_score = mem.max_score[xdrop_idx + xdrop_offset] + (op_cost * d as i32) - scaled_xdrop;
-            let xdrop_score = (xdrop_score + match_cost / 2 - 1) / (match_cost / 2); // Ceiling division matching NCBI
+            // NCBI uses ceil division: (Int4)ceil((double)xdrop_score / (match_cost / 2))
+            // Rust equivalent: (xdrop_score + match_cost / 2 - 1) / (match_cost / 2)
+            let xdrop_score = (xdrop_score + match_cost / 2 - 1) / (match_cost / 2);
 
             let mut curr_extent = 0i32;
             let mut curr_seq2_index = 0i32;
@@ -321,22 +336,26 @@ pub fn greedy_align_one_direction_with_max_dist(
                     continue;
                 }
 
-                // Find largest seq2 offset that increases distance from d-1 to d
-                // Access the "prev" array based on the flag
-                let (prev_k_plus, prev_k, prev_k_minus) = if use_a_as_prev {
-                    let p_plus = if ku + 1 < array_size { mem.last_seq2_off_a[ku + 1] } else { -2 };
-                    let p = mem.last_seq2_off_a[ku];
-                    let p_minus = if ku >= 1 { mem.last_seq2_off_a[ku - 1] } else { -2 };
-                    (p_plus, p, p_minus)
-                } else {
-                    let p_plus = if ku + 1 < array_size { mem.last_seq2_off_b[ku + 1] } else { -2 };
-                    let p = mem.last_seq2_off_b[ku];
-                    let p_minus = if ku >= 1 { mem.last_seq2_off_b[ku - 1] } else { -2 };
-                    (p_plus, p, p_minus)
-                };
+            // Find largest seq2 offset that increases distance from d-1 to d
+            // NCBI reference: greedy_align.c:548-550
+            // seq2_index = MAX(last_seq2_off[d - 1][k + 1], last_seq2_off[d - 1][k]) + 1;
+            // seq2_index = MAX(seq2_index, last_seq2_off[d - 1][k - 1]);
+            // Access the "prev" array based on the flag
+            let (prev_k_plus, prev_k, prev_k_minus) = if use_a_as_prev {
+                let p_plus = if ku + 1 < array_size { mem.last_seq2_off_a[ku + 1] } else { -2 };
+                let p = mem.last_seq2_off_a[ku];
+                let p_minus = if ku >= 1 { mem.last_seq2_off_a[ku - 1] } else { -2 };
+                (p_plus, p, p_minus)
+            } else {
+                let p_plus = if ku + 1 < array_size { mem.last_seq2_off_b[ku + 1] } else { -2 };
+                let p = mem.last_seq2_off_b[ku];
+                let p_minus = if ku >= 1 { mem.last_seq2_off_b[ku - 1] } else { -2 };
+                (p_plus, p, p_minus)
+            };
 
-                let mut seq2_index = prev_k_plus.max(prev_k) + 1;
-                seq2_index = seq2_index.max(prev_k_minus);
+            // NCBI: seq2_index = MAX(prev_k_plus, prev_k) + 1; then MAX(seq2_index, prev_k_minus)
+            let mut seq2_index = prev_k_plus.max(prev_k) + 1;
+            seq2_index = seq2_index.max(prev_k_minus);
 
                 let seq1_index = seq2_index + k - diag_origin as i32;
 
@@ -382,11 +401,21 @@ pub fn greedy_align_one_direction_with_max_dist(
                     }
 
                     // Clamp bounds
-                    if new_seq2_index as usize >= len2 {
+                    // NCBI reference: greedy_align.c:607-614
+                    // if (seq2_index == len2) {
+                    //     diag_lower = k + 1;
+                    //     end2_reached = TRUE;
+                    // }
+                    // if (seq1_index == len1) {
+                    //     diag_upper = k - 1;
+                    //     end1_reached = TRUE;
+                    // }
+                    // Note: new_seq2_index = seq2_index + matches, so we check == len2 (exact match)
+                    if new_seq2_index as usize == len2 {
                         diag_lower = k + 1;
                         end2_reached = true;
                     }
-                    if new_seq1_index as usize >= len1 {
+                    if new_seq1_index as usize == len1 {
                         diag_upper = k - 1;
                         end1_reached = true;
                     }
@@ -401,6 +430,17 @@ pub fn greedy_align_one_direction_with_max_dist(
             }
 
             // Compute max score for this distance
+            // NCBI reference: greedy_align.c:619-634
+            // curr_score = curr_extent * (match_cost / 2) - d * (match_cost + mismatch_cost);
+            // if (curr_score >= max_score[d - 1]) {
+            //     max_score[d] = curr_score;
+            //     best_dist = d;
+            //     best_diag = curr_diag;
+            //     *seq2_align_len = curr_seq2_index;
+            //     *seq1_align_len = curr_seq2_index + best_diag - diag_origin;
+            // } else {
+            //     max_score[d] = max_score[d - 1];
+            // }
             let curr_score = (curr_extent * match_cost) / 2 - (d as i32) * op_cost;
 
             if curr_score >= mem.max_score[d - 1 + xdrop_offset] {
@@ -482,11 +522,19 @@ pub fn affine_greedy_align_one_direction_with_max_dist(
     }
 
     // Score normalization (NCBI BLAST approach):
+    // NCBI reference: greedy_align.c:799-808
+    // if (match_score % 2 == 1) {
+    //     match_score *= 2;
+    //     mismatch_score *= 2;
+    //     xdrop_threshold *= 2;
+    //     in_gap_open *= 2;
+    //     in_gap_extend *= 2;
+    // }
     // Make sure bits of match_score don't disappear if divided by 2
     // IMPORTANT: In NCBI BLAST, mismatch_score is passed as -score_params->penalty,
     // where score_params->penalty is stored as a NEGATIVE value (e.g., -3).
     // So -(-3) = 3, meaning mismatch_score is the POSITIVE penalty magnitude.
-    // In blemir, penalty is stored as a POSITIVE value (e.g., 3), so we use it directly.
+    // In LOSAT, penalty is stored as a POSITIVE value (e.g., 3), so we use it directly.
     let (match_score, mismatch_penalty, xdrop_threshold, gap_open_in, gap_extend_in) =
         if reward % 2 == 1 {
             (reward * 2, penalty * 2, x_drop * 2, in_gap_open * 2, in_gap_extend * 2)
@@ -495,6 +543,14 @@ pub fn affine_greedy_align_one_direction_with_max_dist(
         };
 
     // Fill in derived scores and penalties (NCBI BLAST approach)
+    // NCBI reference: greedy_align.c:835-843
+    // match_score_half = match_score / 2;
+    // op_cost = match_score + mismatch_score;
+    // gap_open = in_gap_open;
+    // gap_extend = in_gap_extend + match_score_half;
+    // score_common_factor = BLAST_Gdb3(&op_cost, &gap_open, &gap_extend);
+    // gap_open_extend = gap_open + gap_extend;
+    // max_penalty = MAX(op_cost, gap_open_extend);
     // op_cost = match_score + mismatch_penalty (both positive, so op_cost is positive)
     // This represents the "cost" of a mismatch in distance units
     let match_score_half = match_score / 2;
@@ -562,6 +618,8 @@ pub fn affine_greedy_align_one_direction_with_max_dist(
     }; array_size]; num_rows];
 
     // Max score at each distance for X-drop
+    // NCBI reference: greedy_align.c:872-873
+    // xdrop_offset = (xdrop_threshold + match_score_half) / score_common_factor + 1;
     let xdrop_offset = ((xdrop_threshold + match_score_half) / score_common_factor.max(1) + 1) as usize;
     let max_score_size = scaled_max_dist_usize + xdrop_offset + 2;
     let mut max_score: Vec<i32> = vec![0; max_score_size];
@@ -615,14 +673,26 @@ pub fn affine_greedy_align_one_direction_with_max_dist(
     // For each distance
     while d <= scaled_max_dist {
         // Compute X-dropoff score threshold
+        // NCBI reference: greedy_align.c:920, 979-983
+        // max_score = aux_data->max_score + xdrop_offset;  (pointer arithmetic)
+        // xdrop_score = max_score[d - xdrop_offset] + score_common_factor * d - xdrop_threshold;
+        // xdrop_score = (Int4)ceil((double)xdrop_score / match_score_half);
+        // if (xdrop_score < 0) xdrop_score = 0;
+        // Note: In NCBI, max_score[d - xdrop_offset] accesses aux_data->max_score[d] when d >= xdrop_offset
+        // When d < xdrop_offset, d - xdrop_offset is negative, accessing before the array start
+        // NCBI initializes max_score[0..xdrop_offset] to 0, so negative index access returns 0
+        // LOSAT uses: max_score[xdrop_idx + xdrop_offset] where xdrop_idx = max(0, d - xdrop_offset)
+        // This is equivalent: when d < xdrop_offset, we use max_score[xdrop_offset] = 0 (initialized)
         let xdrop_idx = if d as usize >= xdrop_offset {
             (d as usize) - xdrop_offset
         } else {
-            0
+            0  // When d < xdrop_offset, use index 0 which maps to max_score[xdrop_offset] = 0
         };
         let xdrop_score_raw = max_score[xdrop_idx + xdrop_offset] 
             + score_common_factor * d - xdrop_threshold;
+        // NCBI: (Int4)ceil((double)xdrop_score / match_score_half)
         let xdrop_score = ((xdrop_score_raw as f64) / (match_score_half as f64)).ceil() as i32;
+        // NCBI: if (xdrop_score < 0) xdrop_score = 0;
         let xdrop_score = xdrop_score.max(0);
 
         let mut curr_extent = 0i32;
@@ -639,6 +709,19 @@ pub fn affine_greedy_align_one_direction_with_max_dist(
             }
 
             // Find best offset for DELETE (gap in seq1) - look at k+1 diagonal
+            // NCBI reference: greedy_align.c:1000-1021
+            // seq2_index = kInvalidOffset;
+            // if (k + 1 <= diag_upper[d - gap_open_extend] && k + 1 >= diag_lower[d - gap_open_extend]) {
+            //     seq2_index = last_seq2_off[d - gap_open_extend][k+1].match_off;
+            // }
+            // if (k + 1 <= diag_upper[d - gap_extend] && k + 1 >= diag_lower[d - gap_extend] &&
+            //     seq2_index < last_seq2_off[d - gap_extend][k+1].delete_off) {
+            //     seq2_index = last_seq2_off[d - gap_extend][k+1].delete_off;
+            // }
+            // if (seq2_index == kInvalidOffset)
+            //     last_seq2_off[d][k].delete_off = kInvalidOffset;
+            // else
+            //     last_seq2_off[d][k].delete_off = seq2_index + 1;
             let mut seq2_index_del = INVALID_OFFSET;
             
             // From gap opening (match -> delete)
@@ -646,6 +729,7 @@ pub fn affine_greedy_align_one_direction_with_max_dist(
             if d_open >= 0 {
                 let dl = get_diag_lower(&diag_lower_arr, d_open, max_penalty_usize);
                 let du = get_diag_upper(&diag_upper_arr, d_open, max_penalty_usize);
+                // NCBI: k + 1 <= diag_upper && k + 1 >= diag_lower
                 if k + 1 >= dl && k + 1 <= du && (d_open as usize) < last_seq2_off.len() {
                     let ku1 = (k + 1) as usize;
                     if ku1 < array_size {
@@ -655,6 +739,8 @@ pub fn affine_greedy_align_one_direction_with_max_dist(
             }
             
             // From gap extension (delete -> delete)
+            // NCBI: if (k + 1 <= diag_upper[d - gap_extend] && k + 1 >= diag_lower[d - gap_extend] &&
+            //      seq2_index < last_seq2_off[d - gap_extend][k+1].delete_off)
             let d_ext = d - gap_extend;
             if d_ext >= 0 {
                 let dl = get_diag_lower(&diag_lower_arr, d_ext, max_penalty_usize);
@@ -663,6 +749,7 @@ pub fn affine_greedy_align_one_direction_with_max_dist(
                     let ku1 = (k + 1) as usize;
                     if ku1 < array_size {
                         let ext_off = last_seq2_off[d_ext as usize][ku1].delete_off;
+                        // NCBI: seq2_index < last_seq2_off[d - gap_extend][k+1].delete_off
                         if ext_off > seq2_index_del {
                             seq2_index_del = ext_off;
                         }
@@ -671,6 +758,7 @@ pub fn affine_greedy_align_one_direction_with_max_dist(
             }
             
             // Save delete offset (deletion means seq2 offset slips by one)
+            // NCBI: if (seq2_index == kInvalidOffset) ... else ... seq2_index + 1
             let du = d as usize;
             if du < last_seq2_off.len() {
                 last_seq2_off[du][ku].delete_off = if seq2_index_del == INVALID_OFFSET {
@@ -681,12 +769,23 @@ pub fn affine_greedy_align_one_direction_with_max_dist(
             }
 
             // Find best offset for INSERT (gap in seq2) - look at k-1 diagonal
+            // NCBI reference: greedy_align.c:1026-1036
+            // seq2_index = kInvalidOffset;
+            // if (k - 1 <= diag_upper[d - gap_open_extend] && k - 1 >= diag_lower[d - gap_open_extend]) {
+            //     seq2_index = last_seq2_off[d - gap_open_extend][k-1].match_off;
+            // }
+            // if (k - 1 <= diag_upper[d - gap_extend] && k - 1 >= diag_lower[d - gap_extend] &&
+            //     seq2_index < last_seq2_off[d - gap_extend][k-1].insert_off) {
+            //     seq2_index = last_seq2_off[d - gap_extend][k-1].insert_off;
+            // }
+            // last_seq2_off[d][k].insert_off = seq2_index;
             let mut seq2_index_ins = INVALID_OFFSET;
             
             // From gap opening (match -> insert)
             if d_open >= 0 && k >= 1 {
                 let dl = get_diag_lower(&diag_lower_arr, d_open, max_penalty_usize);
                 let du_bound = get_diag_upper(&diag_upper_arr, d_open, max_penalty_usize);
+                // NCBI: k - 1 <= diag_upper && k - 1 >= diag_lower
                 if k - 1 >= dl && k - 1 <= du_bound && (d_open as usize) < last_seq2_off.len() {
                     let km1 = (k - 1) as usize;
                     if km1 < array_size {
@@ -696,6 +795,8 @@ pub fn affine_greedy_align_one_direction_with_max_dist(
             }
             
             // From gap extension (insert -> insert)
+            // NCBI: if (k - 1 <= diag_upper[d - gap_extend] && k - 1 >= diag_lower[d - gap_extend] &&
+            //      seq2_index < last_seq2_off[d - gap_extend][k-1].insert_off)
             if d_ext >= 0 && k >= 1 {
                 let dl = get_diag_lower(&diag_lower_arr, d_ext, max_penalty_usize);
                 let du_bound = get_diag_upper(&diag_upper_arr, d_ext, max_penalty_usize);
@@ -703,6 +804,7 @@ pub fn affine_greedy_align_one_direction_with_max_dist(
                     let km1 = (k - 1) as usize;
                     if km1 < array_size {
                         let ext_off = last_seq2_off[d_ext as usize][km1].insert_off;
+                        // NCBI: seq2_index < last_seq2_off[d - gap_extend][k-1].insert_off
                         if ext_off > seq2_index_ins {
                             seq2_index_ins = ext_off;
                         }
@@ -711,20 +813,28 @@ pub fn affine_greedy_align_one_direction_with_max_dist(
             }
             
             // Save insert offset (insertion doesn't change seq2 offset)
+            // NCBI: last_seq2_off[d][k].insert_off = seq2_index;
             if du < last_seq2_off.len() {
                 last_seq2_off[du][ku].insert_off = seq2_index_ins;
             }
 
             // Compare with mismatch path (from diagonal k at d - op_cost)
+            // NCBI reference: greedy_align.c:1041-1047
+            // seq2_index = MAX(last_seq2_off[d][k].insert_off, last_seq2_off[d][k].delete_off);
+            // if (k <= diag_upper[d - op_cost] && k >= diag_lower[d - op_cost]) {
+            //     seq2_index = MAX(seq2_index, last_seq2_off[d - op_cost][k].match_off + 1);
+            // }
             let mut seq2_index = last_seq2_off[du][ku].insert_off.max(last_seq2_off[du][ku].delete_off);
             
             let d_mismatch = d - op_cost;
             if d_mismatch >= 0 {
                 let dl = get_diag_lower(&diag_lower_arr, d_mismatch, max_penalty_usize);
                 let du_bound = get_diag_upper(&diag_upper_arr, d_mismatch, max_penalty_usize);
+                // NCBI: k <= diag_upper[d - op_cost] && k >= diag_lower[d - op_cost]
                 if k >= dl && k <= du_bound && (d_mismatch as usize) < last_seq2_off.len() {
                     let match_off = last_seq2_off[d_mismatch as usize][ku].match_off;
                     if match_off != INVALID_OFFSET {
+                        // NCBI: MAX(seq2_index, last_seq2_off[d - op_cost][k].match_off + 1)
                         seq2_index = seq2_index.max(match_off + 1);
                     }
                 }
@@ -771,20 +881,42 @@ pub fn affine_greedy_align_one_direction_with_max_dist(
             }
 
             // Clamp bounds to avoid walking off sequences
-            if new_seq1_index as usize >= len1 {
+            // NCBI reference: greedy_align.c:1103-1110
+            // if (seq1_index == len1) {
+            //     curr_diag_upper = k;
+            //     end1_diag = k - 1;
+            // }
+            // if (seq2_index == len2) {
+            //     curr_diag_lower = k;
+            //     end2_diag = k + 1;
+            // }
+            // Note: new_seq1_index = seq1_index + matches, so we check == len1 (exact match)
+            if new_seq1_index as usize == len1 {
                 curr_diag_upper = k;
                 end1_diag = k - 1;
             }
-            if new_seq2_index as usize >= len2 {
+            if new_seq2_index as usize == len2 {
                 curr_diag_lower = k;
                 end2_diag = k + 1;
             }
         }
 
         // Compute maximum score for distance d
+        // NCBI reference: greedy_align.c:1115-1129
+        // curr_score = curr_extent * match_score_half - d * score_common_factor;
+        // if (curr_score > max_score[d - 1]) {
+        //     max_score[d] = curr_score;
+        //     best_dist = d;
+        //     best_diag = curr_diag;
+        //     *seq2_align_len = curr_seq2_index;
+        //     *seq1_align_len = curr_seq2_index + best_diag - diag_origin;
+        // } else {
+        //     max_score[d] = max_score[d - 1];
+        // }
         let curr_score = curr_extent * match_score_half - d * score_common_factor;
 
         // Update best if this is better
+        // NCBI: if (curr_score > max_score[d - 1]) (strict greater than)
         let prev_max = if d >= 1 && (d - 1) as usize + xdrop_offset < max_score.len() {
             max_score[(d - 1) as usize + xdrop_offset]
         } else {
@@ -804,6 +936,16 @@ pub fn affine_greedy_align_one_direction_with_max_dist(
         }
 
         // Save diagonal bounds for this distance
+        // NCBI reference: greedy_align.c:1139-1147
+        // if (curr_diag_lower <= curr_diag_upper) {
+        //     num_nonempty_dist++;
+        //     diag_lower[d] = curr_diag_lower;
+        //     diag_upper[d] = curr_diag_upper;
+        // } else {
+        //     diag_lower[d] = kInvalidDiag;
+        //     diag_upper[d] = -kInvalidDiag;
+        // }
+        // Note: d maps to index (d + max_penalty) in the array
         let bounds_idx = (d + max_penalty) as usize;
         if bounds_idx < diag_lower_arr.len() {
             if curr_diag_lower <= curr_diag_upper {
@@ -817,10 +959,15 @@ pub fn affine_greedy_align_one_direction_with_max_dist(
         }
 
         // Check if we should decrement num_nonempty_dist
+        // NCBI reference: greedy_align.c:1149-1150
+        // if (diag_lower[d - max_penalty] <= diag_upper[d - max_penalty]) 
+        //     num_nonempty_dist--;
+        // Note: d - max_penalty maps to index (d - max_penalty + max_penalty) = d in the array
         let old_bounds_idx = (d - max_penalty + max_penalty) as usize;
-        if old_bounds_idx < diag_lower_arr.len() {
+        if old_bounds_idx < diag_lower_arr.len() && d >= max_penalty {
             let old_lower = diag_lower_arr[old_bounds_idx];
             let old_upper = diag_upper_arr[old_bounds_idx];
+            // NCBI: if (diag_lower[d - max_penalty] <= diag_upper[d - max_penalty])
             if old_lower <= old_upper {
                 num_nonempty_dist -= 1;
             }

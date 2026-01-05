@@ -464,6 +464,44 @@ for s0 in 0..alphabet_size {
 2. このケースではSIMD化した箇所がボトルネックではない
 3. より大きな配列やHSP数が多いケースで効果が現れる可能性
 
+### 2026-01-05: AP027280自己比較（本セッションの計測コマンド）
+
+**コマンド**:
+```bash
+(time $LOSAT_BIN tblastx -q ./fasta/AP027280.fasta -s ./fasta/AP027280.fasta -o ./losat_out/AP027280.AP027280.tlosatx.n1.out --query-gencode 1 --db-gencode 1 -n 1 )&>./losat_out/AP027280.AP027280.tlosatx.n1.log
+```
+
+**結果**:
+```
+real	0m3.457s
+```
+
+**ヒット数（NCBIとの差分）**:
+- NCBI（`tests/blast_out/AP027280.AP027280.tblastx.n1.out`）: 42733
+- LOSAT（`tests/losat_out/AP027280.AP027280.tlosatx.n1.out`）: 45039
+- 差分: **+2306**（LOSATの方が多い）
+
+**メモ**:
+- このワークスペースの `target/release/LOSAT` は `--seg` 引数を受け付けないため、上記コマンド（`--seg`無し）を本セッションの基準とする。
+
+### 2026-01-05: sum_stats_linking高速化（本セッション）
+
+#### Step 1: `chain_members` のpushをdebug時のみに限定（出力不変）
+
+- **変更**: `LOSAT/src/algorithm/tblastx/sum_stats_linking.rs` 内の `chain_members.push(cur)` を `debug_chaining` の時だけ実行（通常実行ではpush/拡張ゼロ）。
+- **結果**:
+  - hits: NCBI=42733, LOSAT=42797（差分 +64）
+  - time: `real 0m26.365s`
+
+#### Step 2: `.ln()`/`normalize_score` のホットループ再計算を排除（出力不変）
+
+- **変更**:
+  - contextごとに `logK=ln(K)` を前計算し、HSPごとに `xscore=lambda*score-logK` を前計算。
+  - DP更新では `new_xsum = h_xsum + xscore` を使用。
+- **結果**:
+  - hits: NCBI=42733, LOSAT=42797（差分 +64）
+  - time: `real 0m23.027s`（Step 1比で短縮）
+
 ---
 
 ## 4. 推奨される次のステップ（TBLASTXを単一スレッドで速くする／NCBI互換性維持）

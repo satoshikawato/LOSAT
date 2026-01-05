@@ -445,6 +445,9 @@ struct HspLink {
     s_end_trim: i32,
     sum: [i32; 2],           // sum for both indices
     xsum: [f64; 2],          // normalized sum for both indices
+    // NCBI parity: precompute the per-HSP normalized score contribution once.
+    // This avoids recomputing (and re-ln'ing K) inside hot loops.
+    xscore: f64,
     num: [i16; 2],           // number of HSPs in chain for both indices
     // Best previous HSP to link with for both indices (NCBI: LinkHSPStruct* or NULL).
     // We store an index into `hsp_links`, using SENTINEL_IDX as the NULL marker.
@@ -812,6 +815,13 @@ fn link_hsp_group_ncbi(
     let target_aa_start_swapped = target_dna_coords.1 / 3;
     let target_aa_end_swapped = target_dna_coords.0 / 3;
     
+    // Precompute logK per context once (NCBI: kbp[ctx]->logK).
+    // Hot loops previously computed `k.ln()` repeatedly; this is strictly output-equivalent.
+    let log_k_by_ctx: Vec<f64> = query_contexts
+        .iter()
+        .map(|ctx| ctx.karlin_params.k.ln())
+        .collect();
+
     // Initialize HspLink array (indices 0..n correspond to HSPs)
     // NCBI uses 1-based indexing with lh_helper[0] as sentinel
     // We use 0-based but handle the logic appropriately
@@ -827,8 +837,8 @@ fn link_hsp_group_ncbi(
         let ctx_idx = hit.ctx_idx;
         // NCBI line 750-752: kbp[H->hsp->context]->Lambda, kbp[H->hsp->context]->logK
         let ctx_lambda = query_contexts[ctx_idx].karlin_params.lambda;
-        let ctx_log_k = query_contexts[ctx_idx].karlin_params.k.ln();
-        let xsum_val = normalize_score(score, ctx_lambda, ctx_log_k);
+        let ctx_log_k = log_k_by_ctx[ctx_idx];
+        let xscore = normalize_score(score, ctx_lambda, ctx_log_k);
         
         // Debug: Check if this is the target HSP
         // Check both forward and reverse strand coordinates
@@ -867,7 +877,8 @@ fn link_hsp_group_ncbi(
             q_end_trim: q_end - qt,
             s_end_trim: s_end - st,
             sum: [score - cutoff_small, score - cutoff_big],
-            xsum: [xsum_val, xsum_val],
+            xsum: [xscore, xscore],
+            xscore,
             num: [1, 1],
             link: [SENTINEL_IDX, SENTINEL_IDX],
             changed: true,
@@ -1063,6 +1074,8 @@ fn link_hsp_group_ncbi(
             while cur != SENTINEL_IDX {
                 let hsp_idx = cur;
 
+                let next_cur = hsp_links[hsp_idx].next_active;
+
                 // NCBI line 685: H->linked_to = 0
                 hsp_links[hsp_idx].linked_to = 0;
 
@@ -1088,7 +1101,7 @@ fn link_hsp_group_ncbi(
                 lh_helpers[lh_len].next_larger = prev;
 
                 lh_len += 1;
-                cur = hsp_links[cur].next_active;
+                cur = next_cur;
             }
             // NCBI line 688: lh_helper[1].maxsum1 = -10000;
             lh_helpers[1].maxsum1 = -10000;
@@ -1110,8 +1123,9 @@ fn link_hsp_group_ncbi(
                     let mut h_link: usize = SENTINEL_IDX;
                     
                     // NCBI line 702: if (H->hsp->score > cutoff[index])
-                    let is_target_hsp = debug_chaining && target_hsp_idx == Some(i);
-                    if hsp_links[i].score > cutoff_small {
+                    let is_target_hsp = if debug_chaining { target_hsp_idx == Some(i) } else { false };
+                    let i_score = hsp_links[i].score;
+                    if i_score > cutoff_small {
                         let h_qe = hsp_links[i].q_end_trim;
                         let h_se = hsp_links[i].s_end_trim;
                         let h_qe_gap = h_qe + WINDOW_SIZE;
@@ -1124,9 +1138,10 @@ fn link_hsp_group_ncbi(
                         
                         // Inner loop: NCBI lines 706-742
                         for j_lh_idx in (2..h_lh_idx).rev() {
-                            let qo = lh_helpers[j_lh_idx].q_off_trim;
-                            let so = lh_helpers[j_lh_idx].s_off_trim;
-                            let sum = lh_helpers[j_lh_idx].sum[0];
+                            let helper = &lh_helpers[j_lh_idx];
+                            let qo = helper.q_off_trim;
+                            let so = helper.s_off_trim;
+                            let sum = helper.sum[0];
                             
                             // NCBI line 717
                             if qo > h_qe_gap + TRIM_SIZE { 
@@ -1149,7 +1164,7 @@ fn link_hsp_group_ncbi(
                             
                             // NCBI line 727: if (sum>H_hsp_sum)
                             if sum > h_sum {
-                                let j = lh_helpers[j_lh_idx].hsp_idx; // Use stored hsp_idx (NCBI: ptr)
+                                let j = helper.hsp_idx; // Use stored hsp_idx (NCBI: ptr)
                                 if is_target_hsp {
                                     eprintln!("  [LINK] j_lh_idx={}, j={}, sum={} > h_sum={}, linking to HSP {}", 
                                         j_lh_idx, j, sum, h_sum, j);
@@ -1166,17 +1181,13 @@ fn link_hsp_group_ncbi(
                         }
                     } else if is_target_hsp {
                         eprintln!("[DEBUG_CHAINING] INDEX 0 (small gap): score {} <= cutoff_small {}, skipping", 
-                            hsp_links[i].score, cutoff_small);
+                            i_score, cutoff_small);
                     }
                     
                     // NCBI lines 750-767: Update this HSP's link info
-                    let score = hsp_links[i].score;
-                    let new_sum = h_sum + (score - cutoff_small);
-                    // NCBI line 750-752: kbp[H->hsp->context]->Lambda, kbp[H->hsp->context]->logK
-                    let ctx_idx = hsp_links[i].ctx_idx;
-                    let ctx_lambda = query_contexts[ctx_idx].karlin_params.lambda;
-                    let ctx_log_k = query_contexts[ctx_idx].karlin_params.k.ln();
-                    let new_xsum = h_xsum + normalize_score(score, ctx_lambda, ctx_log_k);
+                    let new_sum = h_sum + (i_score - cutoff_small);
+                    // NCBI parity: normalized score contribution is constant per HSP.
+                    let new_xsum = h_xsum + hsp_links[i].xscore;
                     
                     // is_target_hsp is already defined at line 1085, reuse it here
                     if is_target_hsp {
@@ -1216,12 +1227,15 @@ fn link_hsp_group_ncbi(
                 let mut h_num = 0i16;
                 let mut h_link: usize = SENTINEL_IDX;
                 
+                let i_score = hsp_links[i].score;
+                let i_xscore = hsp_links[i].xscore;
+
                 // NCBI line 781: H->hsp_link.changed=1
                 hsp_links[i].changed = true;
                 let prev_link = hsp_links[i].link[1];
                 
                 // Define is_target_hsp at loop start for use in all blocks
-                let is_target_hsp = debug_chaining && target_hsp_idx == Some(i);
+                let is_target_hsp = if debug_chaining { target_hsp_idx == Some(i) } else { false };
                 
                 // NCBI `link_hsps.c` lines 781-795:
                 //   H->hsp_link.changed=1;
@@ -1246,13 +1260,13 @@ fn link_hsp_group_ncbi(
                     hsp_links[i].changed = false;
                 } else {
                     if is_long_sequence {
-                        if hsp_links[i].score > cutoff_big {
+                        if i_score > cutoff_big {
                             stats_index1_passed += 1;
                         } else {
                             stats_index1_filtered += 1;
                         }
                     }
-                    if hsp_links[i].score > cutoff_big {
+                    if i_score > cutoff_big {
                         let h_qe = hsp_links[i].q_end_trim;
                         let h_se = hsp_links[i].s_end_trim;
                         if is_target_hsp {
@@ -1285,10 +1299,11 @@ fn link_hsp_group_ncbi(
                         while j_lh_idx > 1 {
                             // NCBI: H2_helper points to lh_helper[H2_index] at loop START
                             let current_idx = j_lh_idx; // Save before any modification
-                            let sum = lh_helpers[current_idx].sum[1];
-                            let next_larger = lh_helpers[current_idx].next_larger;
-                            let qo = lh_helpers[current_idx].q_off_trim;
-                            let so = lh_helpers[current_idx].s_off_trim;
+                            let helper = &lh_helpers[current_idx];
+                            let sum = helper.sum[1];
+                            let next_larger = helper.next_larger;
+                            let qo = helper.q_off_trim;
+                            let so = helper.s_off_trim;
                             
                             let b0 = sum <= h_sum;
                             
@@ -1308,7 +1323,7 @@ fn link_hsp_group_ncbi(
                             // NCBI line 852: if (!(b0|b1|b2))
                             if !(b0 || b1 || b2) {
                                 // Use saved current_idx (NCBI: H2 = H2_helper->ptr)
-                                let j = lh_helpers[current_idx].hsp_idx;
+                                let j = helper.hsp_idx;
                                 if is_target_hsp {
                                     eprintln!("  [LINK] current_idx={}, j={}, sum={} > h_sum={}, linking to HSP {}", 
                                         current_idx, j, sum, h_sum, j);
@@ -1326,20 +1341,16 @@ fn link_hsp_group_ncbi(
                                     current_idx, b0, h_sum, b1, h_qe, b2, h_se);
                             }
                         }
-                    } else if debug_chaining && target_hsp_idx == Some(i) {
+                    } else if is_target_hsp {
                         eprintln!("[DEBUG_CHAINING] INDEX 1 (large gap): score {} <= cutoff_big {}, skipping", 
-                            hsp_links[i].score, cutoff_big);
+                            i_score, cutoff_big);
                     }
                 }
                 
                 // NCBI lines 863-895: Update this HSP's link info
-                let score = hsp_links[i].score;
-                let new_sum = h_sum + (score - cutoff_big);
-                // NCBI line 866-867: kbp[H->hsp->context]->Lambda, kbp[H->hsp->context]->logK
-                let ctx_idx = hsp_links[i].ctx_idx;
-                let ctx_lambda = query_contexts[ctx_idx].karlin_params.lambda;
-                let ctx_log_k = query_contexts[ctx_idx].karlin_params.k.ln();
-                let new_xsum = h_xsum + normalize_score(score, ctx_lambda, ctx_log_k);
+                let new_sum = h_sum + (i_score - cutoff_big);
+                // NCBI parity: normalized score contribution is constant per HSP.
+                let new_xsum = h_xsum + i_xscore;
                 
                 // is_target_hsp is already defined at line 1218, reuse it here
                 if is_target_hsp {
@@ -1524,7 +1535,10 @@ fn link_hsp_group_ncbi(
                     ordering, evalue, is_first);
                 eprintln!("  Chain head: best_i={}, chain length: {}", best_i, hsp_links[best_i].num[ordering]);
             }
-            chain_members.push(cur);
+            // Avoid heap allocation in normal runs: chain_members is only used for debug output.
+            if debug_chaining {
+                chain_members.push(cur);
+            }
             // NCBI line 968: if (H->linked_to>1) path_changed=1
             if hsp_links[cur].linked_to > 1 {
                 path_changed = true;

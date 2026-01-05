@@ -535,7 +535,7 @@ sha256sum baseline.out step1.out step2.out
 
 ## 6. 参考資料
 
-- NCBI BLAST ソースコード: `/mnt/c/Users/kawato/Documents/ncbi-blast/`
+- NCBI BLAST ソースコード: `/mnt/c/Users/kawato/Documents/GitHub/ncbi-blast/`
 - 主要な参照ファイル:
   - `blast_aascan.c`: Subject scanning
   - `aa_ungapped.c`: Ungapped extension

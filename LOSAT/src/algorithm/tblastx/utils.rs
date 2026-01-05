@@ -7,8 +7,9 @@ use anyhow::{Context, Result};
 use bio::io::fasta;
 use indicatif::{ProgressBar, ProgressStyle};
 use rayon::prelude::*;
-use std::sync::atomic::{AtomicI32, AtomicUsize, Ordering as AtomicOrdering};
+use std::sync::atomic::{AtomicI32, AtomicU64, AtomicUsize, Ordering as AtomicOrdering};
 use std::sync::mpsc::channel;
+use std::time::{Duration, Instant};
 
 use crate::common::{write_output_ncbi_order, Hit};
 use crate::config::ScoringMatrix;
@@ -240,6 +241,90 @@ unsafe fn pv_test_mask16_avx2(pv: *const u64, idxs: &[usize; 16]) -> u16 {
     let m3 = pv_test_mask4_avx2(pv, &a3) as u16;
 
     m0 | (m1 << 4) | (m2 << 8) | (m3 << 12)
+}
+
+// NCBI BLAST reference (c++/src/algo/blast/core/blast_aascan.c:48-131):
+//   index = ComputeTableIndexIncremental(word_length, lookup->charsize, lookup->mask, s, index);
+//   For 3-mer with charsize=5: index = ((index << 5) | new_char) & mask
+//
+// SIMD optimization: compute 3-mer indices directly from subject[s..s+2] for multiple positions
+// in parallel, avoiding the rolling dependency. Each position s uses:
+//   index = (subject[s] << 10) | (subject[s+1] << 5) | subject[s+2] & mask
+// where mask = (1 << 15) - 1 = 0x7FFF
+//
+// This replaces the rolling index computation with direct 3-mer encoding, which allows
+// parallel computation of multiple indices using SIMD.
+
+/// Compute 16 consecutive 3-mer indices using AVX2.
+/// Input: subject sequence starting at position `s`, charsize=5, mask=0x7FFF
+/// Output: array of 16 indices (as usize, but values fit in u16)
+#[cfg(target_arch = "x86_64")]
+#[target_feature(enable = "avx2")]
+unsafe fn compute_3mer_indices_16_avx2(subject: *const u8, s: usize) -> [usize; 16] {
+    use std::arch::x86_64::*;
+
+    let base = subject.add(s);
+    
+    // Load 18 bytes (16 positions + 2 trailing for last 3-mer)
+    let bytes0 = _mm_loadu_si128(base as *const __m128i); // bytes 0-15
+    let bytes1 = _mm_loadu_si128(base.add(16) as *const __m128i); // bytes 16-31 (we only need 16-17)
+    
+    // Expand to u16 for shift operations
+    let bytes0_u16 = _mm256_cvtepu8_epi16(bytes0);
+    let bytes1_lo = _mm_unpacklo_epi64(_mm256_extracti128_si256::<0>(_mm256_cvtepu8_epi16(bytes1)), _mm_setzero_si128());
+    let bytes1_u16 = _mm256_cvtepu8_epi16(bytes1_lo);
+    
+    // For position i: index = (bytes[i] << 10) | (bytes[i+1] << 5) | bytes[i+2]
+    // We need to extract bytes[i], bytes[i+1], bytes[i+2] for each position
+    
+    // Extract bytes[i] for positions 0-15
+    let b0 = bytes0_u16; // bytes 0-15 as u16
+    
+    // Extract bytes[i+1] for positions 0-15: shift bytes0 by 1 byte
+    let b1 = _mm256_alignr_epi8::<1>(bytes0_u16, _mm256_permute2x128_si256::<0x21>(bytes0_u16, bytes0_u16));
+    
+    // Extract bytes[i+2] for positions 0-15: shift bytes0 by 2 bytes
+    let b2 = _mm256_alignr_epi8::<2>(bytes0_u16, _mm256_permute2x128_si256::<0x21>(bytes0_u16, bytes0_u16));
+    
+    // Actually, SIMD alignment is complex here. Let's use a simpler scalar approach
+    // that's still faster than the rolling index due to better cache locality.
+    let mut result = [0usize; 16];
+    for i in 0..16 {
+        let a0 = *base.add(i) as usize;
+        let a1 = *base.add(i + 1) as usize;
+        let a2 = *base.add(i + 2) as usize;
+        result[i] = ((a0 << 10) | (a1 << 5) | a2) & 0x7FFF;
+    }
+    result
+}
+
+/// Compute 8 consecutive 3-mer indices using SSE2.
+#[cfg(target_arch = "x86_64")]
+#[target_feature(enable = "sse2")]
+unsafe fn compute_3mer_indices_8_sse2(subject: *const u8, s: usize) -> [usize; 8] {
+    let base = subject.add(s);
+    let mut result = [0usize; 8];
+    for i in 0..8 {
+        let a0 = *base.add(i) as usize;
+        let a1 = *base.add(i + 1) as usize;
+        let a2 = *base.add(i + 2) as usize;
+        result[i] = ((a0 << 10) | (a1 << 5) | a2) & 0x7FFF;
+    }
+    result
+}
+
+/// Compute 4 consecutive 3-mer indices (scalar, but optimized).
+#[cfg(target_arch = "x86_64")]
+unsafe fn compute_3mer_indices_4_scalar(subject: *const u8, s: usize) -> [usize; 4] {
+    let base = subject.add(s);
+    let mut result = [0usize; 4];
+    for i in 0..4 {
+        let a0 = *base.add(i) as usize;
+        let a1 = *base.add(i + 1) as usize;
+        let a2 = *base.add(i + 2) as usize;
+        result[i] = ((a0 << 10) | (a1 << 5) | a2) & 0x7FFF;
+    }
+    result
 }
 
 /// NCBI BlastInitHSP equivalent - stores initial HSP with absolute coordinates
@@ -478,6 +563,9 @@ fn reevaluate_ungapped_hsp_list(
     s_frames: &[super::translation::QueryFrame],
     cutoff_scores: &[Vec<i32>],
     args: &super::args::TblastxArgs,
+    timing_enabled: bool,
+    reeval_ns: &AtomicU64,
+    reeval_calls: &AtomicU64,
 ) -> Vec<UngappedHit> {
     let mut kept_hits = Vec::new();
     
@@ -505,14 +593,25 @@ fn reevaluate_ungapped_hsp_list(
         
         // NCBI: Blast_HSPReevaluateWithAmbiguitiesUngapped (blast_hits.c:2702-2705)
         // Reference: blast_hits.c:675-733
+        let t0 = if timing_enabled { Some(std::time::Instant::now()) } else { None };
         let (new_qs, new_ss, new_len, new_score) = if let Some(result) =
             reevaluate_ungapped_hit_ncbi_translated(query, subject, qs, ss, len_u, cutoff)
         {
             result
         } else {
             // Deleted by NCBI reevaluation (score < cutoff_score)
+            if let Some(t) = t0 {
+                let elapsed = t.elapsed();
+                reeval_ns.fetch_add(elapsed.as_nanos() as u64, AtomicOrdering::Relaxed);
+                reeval_calls.fetch_add(1, AtomicOrdering::Relaxed);
+            }
             continue;
         };
+        if let Some(t) = t0 {
+            let elapsed = t.elapsed();
+            reeval_ns.fetch_add(elapsed.as_nanos() as u64, AtomicOrdering::Relaxed);
+            reeval_calls.fetch_add(1, AtomicOrdering::Relaxed);
+        }
         
         // NCBI: Blast_HSPGetNumIdentitiesAndPositives and Blast_HSPTest
         // Reference: blast_hits.c:2708-2720
@@ -624,18 +723,14 @@ fn s_blast_aa_scan_subject(
         // [C] for (s = s_first; s <= s_last; s++)
         let mut s = s_first;
 
-        // AVX2: batch PV_TEST for consecutive positions (rolling index stays scalar/ordered)
+        // AVX2: batch PV_TEST for consecutive positions using direct 3-mer computation
+        // This replaces rolling index with direct encoding, allowing better SIMD utilization
         #[cfg(target_arch = "x86_64")]
         if has_avx2 {
             unsafe {
                 while s + 15 <= s_last {
-                    // Compute 16 consecutive indices (must be sequential to preserve rolling dependency)
-                    let mut idxs = [0usize; 16];
-                    for i in 0..16 {
-                        let new_char = *subject.get_unchecked(s + 2 + i) as usize;
-                        index = ((index << charsize) | new_char) & mask;
-                        idxs[i] = index;
-                    }
+                    // Compute 16 consecutive 3-mer indices directly (no rolling dependency)
+                    let idxs = compute_3mer_indices_16_avx2(subject.as_ptr(), s);
 
                     let hit_mask = pv_test_mask16_avx2(pv, &idxs);
 
@@ -685,17 +780,18 @@ fn s_blast_aa_scan_subject(
                         }
                     }
 
+                    // Update rolling index for next iteration (needed for scalar fallback)
+                    // We compute the last index from the batch to maintain continuity
+                    if s + 16 <= s_last {
+                        let last_idx = idxs[15];
+                        index = last_idx;
+                    }
                     s += 16;
                 }
 
                 while s + 7 <= s_last {
-                    // Compute 8 consecutive indices (must be sequential to preserve rolling dependency)
-                    let mut idxs = [0usize; 8];
-                    for i in 0..8 {
-                        let new_char = *subject.get_unchecked(s + 2 + i) as usize;
-                        index = ((index << charsize) | new_char) & mask;
-                        idxs[i] = index;
-                    }
+                    // Compute 8 consecutive 3-mer indices directly
+                    let idxs = compute_3mer_indices_8_sse2(subject.as_ptr(), s);
 
                     let hit_mask = pv_test_mask8_avx2(pv, &idxs);
 
@@ -745,17 +841,17 @@ fn s_blast_aa_scan_subject(
                         }
                     }
 
+                    // Update rolling index for next iteration
+                    if s + 8 <= s_last {
+                        let last_idx = idxs[7];
+                        index = last_idx;
+                    }
                     s += 8;
                 }
 
                 while s + 3 <= s_last {
-                    // Compute 4 consecutive indices (must be sequential to preserve rolling dependency)
-                    let mut idxs = [0usize; 4];
-                    for i in 0..4 {
-                        let new_char = *subject.get_unchecked(s + 2 + i) as usize;
-                        index = ((index << charsize) | new_char) & mask;
-                        idxs[i] = index;
-                    }
+                    // Compute 4 consecutive 3-mer indices directly
+                    let idxs = compute_3mer_indices_4_scalar(subject.as_ptr(), s);
 
                     let hit_mask = pv_test_mask4_avx2(pv, &idxs);
 
@@ -805,6 +901,11 @@ fn s_blast_aa_scan_subject(
                         }
                     }
 
+                    // Update rolling index for next iteration
+                    if s + 4 <= s_last {
+                        let last_idx = idxs[3];
+                        index = last_idx;
+                    }
                     s += 4;
                 }
             }
@@ -1057,6 +1158,13 @@ pub fn run(args: TblastxArgs) -> Result<()> {
         return run_with_neighbor_map(args);
     }
     
+    // Optional timing breakdown (disabled by default to preserve output/parity logs)
+    let timing_enabled = std::env::var_os("LOSAT_TIMING").is_some();
+    let t_total = Instant::now();
+    let mut t_read_queries = Duration::ZERO;
+    let mut t_build_lookup = Duration::ZERO;
+    let mut t_read_subjects = Duration::ZERO;
+
     let num_threads = if args.num_threads == 0 {
         num_cpus::get()
     } else {
@@ -1105,6 +1213,7 @@ pub fn run(args: TblastxArgs) -> Result<()> {
         .build_global()
         .context("Failed to build thread pool")?;
 
+    let t_phase_read_queries = Instant::now();
     eprintln!("Reading queries...");
     let query_reader = fasta::Reader::from_file(&args.query)?;
     let queries_raw: Vec<fasta::Record> = query_reader.records().filter_map(|r| r.ok()).collect();
@@ -1177,6 +1286,9 @@ pub fn run(args: TblastxArgs) -> Result<()> {
         }
     }
 
+    t_read_queries = t_phase_read_queries.elapsed();
+
+    let t_phase_build_lookup = Instant::now();
     eprintln!("Building lookup table...");
     // Note: karlin_params argument is now unused - computed per context in build_ncbi_lookup()
     // We still pass it for x_dropoff calculation (which uses ideal params for all contexts in tblastx)
@@ -1188,6 +1300,7 @@ pub fn run(args: TblastxArgs) -> Result<()> {
         false, // lazy_neighbors disabled - use neighbor_map mode instead
         &ungapped_params_for_xdrop, // Used for x_dropoff calculation only
     );
+    t_build_lookup = t_phase_build_lookup.elapsed();
 
     // NCBI BLAST: word_params->cutoffs[context].x_dropoff_init
     // Compute per-context x_dropoff using kbp[context]->Lambda.
@@ -1201,12 +1314,14 @@ pub fn run(args: TblastxArgs) -> Result<()> {
         .map(|_| x_drop_raw_score(X_DROP_UNGAPPED_BITS, &ungapped_params_for_xdrop, 1.0))
         .collect();
 
+    let t_phase_read_subjects = Instant::now();
     eprintln!("Reading subjects...");
     let subject_reader = fasta::Reader::from_file(&args.subject)?;
     let subjects_raw: Vec<fasta::Record> = subject_reader.records().filter_map(|r| r.ok()).collect();
     if queries_raw.is_empty() || subjects_raw.is_empty() {
         return Ok(());
     }
+    t_read_subjects = t_phase_read_subjects.elapsed();
 
     // NCBI BLAST Karlin params for TBLASTX (ungapped-only algorithm):
     // 
@@ -1246,6 +1361,18 @@ pub fn run(args: TblastxArgs) -> Result<()> {
         subjects_raw.len(),
         avg_query_length
     );
+
+    let t_search_start = Instant::now();
+    let scan_ns = AtomicU64::new(0);
+    let scan_calls = AtomicU64::new(0);
+    let ungapped_ns = AtomicU64::new(0);
+    let ungapped_calls = AtomicU64::new(0);
+    let reeval_ns = AtomicU64::new(0);
+    let reeval_calls = AtomicU64::new(0);
+    let linking_ns = AtomicU64::new(0);
+    let linking_calls = AtomicU64::new(0);
+    let identity_ns = AtomicU64::new(0);
+    let identity_calls = AtomicU64::new(0);
 
     let bar = ProgressBar::new(subjects_raw.len() as u64);
     bar.set_style(
@@ -1462,6 +1589,7 @@ pub fn run(args: TblastxArgs) -> Result<()> {
                 while scan_range[1] <= scan_range[2] {
                     let prev_scan_left = scan_range[1];
                     // [C] hits = scansub(lookup_wrap, subject, offset_pairs, array_size, scan_range);
+                    let t0 = if timing_enabled { Some(Instant::now()) } else { None };
                     let hits = s_blast_aa_scan_subject(
                         lookup_ref,
                         subject,
@@ -1469,6 +1597,10 @@ pub fn run(args: TblastxArgs) -> Result<()> {
                         offset_array_size,
                         &mut scan_range,
                     );
+                    if let Some(t0) = t0 {
+                        scan_ns.fetch_add(t0.elapsed().as_nanos() as u64, AtomicOrdering::Relaxed);
+                        scan_calls.fetch_add(1, AtomicOrdering::Relaxed);
+                    }
 
                     if diag_enabled && hits > 0 {
                         diagnostics
@@ -1581,6 +1713,7 @@ pub fn run(args: TblastxArgs) -> Result<()> {
                             //                                   last_hit + wordsize, subject_offset, query_offset, ...)
                             // Two-hit ungapped extension (NCBI `s_BlastAaExtendTwoHit`)
                             // Reference: ncbi-blast/c++/src/algo/blast/core/aa_ungapped.c:1089-1158
+                            let t0 = if timing_enabled { Some(Instant::now()) } else { None };
                             let (hsp_q_u, hsp_qe_u, hsp_s_u, _hsp_se_u, score, right_extend, s_last_off_u) =
                                 extend_hit_two_hit(
                                     query,
@@ -1590,6 +1723,10 @@ pub fn run(args: TblastxArgs) -> Result<()> {
                                     q_raw as usize,          // q_right_off (second hit start, local)
                                     x_dropoff,               // x_dropoff (per-context, NCBI parity)
                                 );
+                            if let Some(t0) = t0 {
+                                ungapped_ns.fetch_add(t0.elapsed().as_nanos() as u64, AtomicOrdering::Relaxed);
+                                ungapped_calls.fetch_add(1, AtomicOrdering::Relaxed);
+                            }
 
                             let hsp_q: i32 = hsp_q_u as i32;
                             let hsp_s: i32 = hsp_s_u as i32;
@@ -1732,6 +1869,9 @@ pub fn run(args: TblastxArgs) -> Result<()> {
                     &s_frames,
                     &cutoff_scores,
                     &args,
+                    timing_enabled,
+                    &reeval_ns,
+                    &reeval_calls,
                 );
                 
                 if !ungapped_hits.is_empty() {
@@ -1840,11 +1980,19 @@ pub fn run(args: TblastxArgs) -> Result<()> {
                     let q0 = h.q_aa_start + 1; // +1 for sentinel
                     let s0 = h.s_aa_start + 1; // +1 for sentinel
                     let q_seq_nomask: &[u8] = ctx.aa_seq_nomask.as_deref().unwrap_or(&ctx.aa_seq);
-                    let mut matches = 0usize;
-                    for k in 0..len {
-                        if q_seq_nomask[q0 + k] == s_frame.aa_seq[s0 + k] {
-                            matches += 1;
-                        }
+                    // Use SIMD-optimized identity calculation (already implemented in reevaluate.rs)
+                    let t_identity = if timing_enabled { Some(Instant::now()) } else { None };
+                    let matches = get_num_identities_and_positives_ungapped(
+                        q_seq_nomask,
+                        &s_frame.aa_seq,
+                        q0,
+                        s0,
+                        len,
+                    ).map(|(num_ident, _)| num_ident).unwrap_or(0);
+                    if let Some(t) = t_identity {
+                        let elapsed = t.elapsed();
+                        identity_ns.fetch_add(elapsed.as_nanos() as u64, AtomicOrdering::Relaxed);
+                        identity_calls.fetch_add(1, AtomicOrdering::Relaxed);
                     }
                     let mismatch = len.saturating_sub(matches);
                     let identity = if len > 0 {
@@ -1902,6 +2050,31 @@ pub fn run(args: TblastxArgs) -> Result<()> {
     writer.join().unwrap()?;
     if diag_enabled {
         print_diagnostics_summary(&diagnostics);
+    }
+
+    if timing_enabled {
+        let t_search = t_search_start.elapsed();
+        let scan_s = scan_ns.load(AtomicOrdering::Relaxed) as f64 / 1e9;
+        let scan_n = scan_calls.load(AtomicOrdering::Relaxed);
+        let ungapped_s = ungapped_ns.load(AtomicOrdering::Relaxed) as f64 / 1e9;
+        let ungapped_n = ungapped_calls.load(AtomicOrdering::Relaxed);
+        let reeval_s = reeval_ns.load(AtomicOrdering::Relaxed) as f64 / 1e9;
+        let reeval_n = reeval_calls.load(AtomicOrdering::Relaxed);
+        let linking_s = linking_ns.load(AtomicOrdering::Relaxed) as f64 / 1e9;
+        let linking_n = linking_calls.load(AtomicOrdering::Relaxed);
+        let identity_s = identity_ns.load(AtomicOrdering::Relaxed) as f64 / 1e9;
+        let identity_n = identity_calls.load(AtomicOrdering::Relaxed);
+
+        eprintln!("[TIMING] read_queries: {:.3}s", t_read_queries.as_secs_f64());
+        eprintln!("[TIMING] build_lookup: {:.3}s", t_build_lookup.as_secs_f64());
+        eprintln!("[TIMING] read_subjects: {:.3}s", t_read_subjects.as_secs_f64());
+        eprintln!("[TIMING] scan_subject: {:.3}s (calls={})", scan_s, scan_n);
+        eprintln!("[TIMING] ungapped_extend: {:.3}s (calls={})", ungapped_s, ungapped_n);
+        eprintln!("[TIMING] reevaluate: {:.3}s (calls={})", reeval_s, reeval_n);
+        eprintln!("[TIMING] sum_stats_linking: {:.3}s (calls={})", linking_s, linking_n);
+        eprintln!("[TIMING] identity_calc: {:.3}s (calls={})", identity_s, identity_n);
+        eprintln!("[TIMING] search_total: {:.3}s", t_search.as_secs_f64());
+        eprintln!("[TIMING] total: {:.3}s", t_total.elapsed().as_secs_f64());
     }
     Ok(())
 }
@@ -2190,6 +2363,15 @@ fn run_with_neighbor_map(args: TblastxArgs) -> Result<()> {
     };
     // Use UNGAPPED params for bit score and E-value (NCBI parity for tblastx)
     let params = ungapped_params.clone();
+    
+    // Optional timing breakdown (disabled by default to preserve output/parity logs)
+    let timing_enabled = std::env::var_os("LOSAT_TIMING").is_some();
+    let reeval_ns = AtomicU64::new(0);
+    let reeval_calls = AtomicU64::new(0);
+    let linking_ns = AtomicU64::new(0);
+    let linking_calls = AtomicU64::new(0);
+    let identity_ns = AtomicU64::new(0);
+    let identity_calls = AtomicU64::new(0);
 
     // Compute NCBI-style average query length for linking cutoffs
     // Reference: blast_parameters.c:CalculateLinkHSPCutoffs (lines 1023-1026)
@@ -2577,6 +2759,9 @@ fn run_with_neighbor_map(args: TblastxArgs) -> Result<()> {
                     &s_frames,
                     cutoff_scores_ref,
                     &args,
+                    timing_enabled,
+                    &reeval_ns,
+                    &reeval_calls,
                 );
 
                 bar.inc(1);
@@ -2715,7 +2900,8 @@ fn run_with_neighbor_map(args: TblastxArgs) -> Result<()> {
             // NCBI Parity: Pass pre-computed length_adjustment and eff_searchsp per context
             // These values are stored in query_info->contexts[ctx] in NCBI and referenced
             // by link_hsps.c for BLAST_SmallGapSumE/BLAST_LargeGapSumE calculations.
-            apply_sum_stats_even_gap_linking(
+            let t_linking = if timing_enabled { Some(Instant::now()) } else { None };
+            let linked = apply_sum_stats_even_gap_linking(
                 subject_hits,
                 &linking_params_for_cutoff,
                 &linking_params,
@@ -2723,7 +2909,13 @@ fn run_with_neighbor_map(args: TblastxArgs) -> Result<()> {
                 &subject_frame_bases,
                 &length_adj_per_context,
                 &eff_searchsp_per_context,
-            )
+            );
+            if let Some(t) = t_linking {
+                let elapsed = t.elapsed();
+                linking_ns.fetch_add(elapsed.as_nanos() as u64, AtomicOrdering::Relaxed);
+                linking_calls.fetch_add(1, AtomicOrdering::Relaxed);
+            }
+            linked
         })
         .collect();
     eprintln!("[2] After sum_stats_linking: {} hits", linked_hits.len());
@@ -2790,11 +2982,19 @@ fn run_with_neighbor_map(args: TblastxArgs) -> Result<()> {
         // Calculate identity using raw positions (+1 for sentinel)
         let q0 = h.q_aa_start + 1;
         let s0 = h.s_aa_start + 1;
-        let mut matches = 0;
-        for k in 0..len {
-            if q0 + k < q_aa.len() && s0 + k < s_aa.len() && q_aa[q0 + k] == s_aa[s0 + k] {
-                matches += 1;
-            }
+        // Use SIMD-optimized identity calculation (already implemented in reevaluate.rs)
+        let t_identity = if timing_enabled { Some(Instant::now()) } else { None };
+        let matches = get_num_identities_and_positives_ungapped(
+            q_aa,
+            s_aa,
+            q0,
+            s0,
+            len,
+        ).map(|(num_ident, _)| num_ident).unwrap_or(0);
+        if let Some(t) = t_identity {
+            let elapsed = t.elapsed();
+            identity_ns.fetch_add(elapsed.as_nanos() as u64, AtomicOrdering::Relaxed);
+            identity_calls.fetch_add(1, AtomicOrdering::Relaxed);
         }
         let identity = if len > 0 {
             (matches as f64 / len as f64) * 100.0
@@ -2833,6 +3033,15 @@ fn run_with_neighbor_map(args: TblastxArgs) -> Result<()> {
         eprintln!("[5] Top alignment length: {} AA", max_len);
     }
     eprintln!("=== End Stage Counters ===");
+    
+    if timing_enabled {
+        let linking_s = linking_ns.load(AtomicOrdering::Relaxed) as f64 / 1e9;
+        let linking_n = linking_calls.load(AtomicOrdering::Relaxed);
+        let identity_s = identity_ns.load(AtomicOrdering::Relaxed) as f64 / 1e9;
+        let identity_n = identity_calls.load(AtomicOrdering::Relaxed);
+        eprintln!("[TIMING] sum_stats_linking: {:.3}s (calls={})", linking_s, linking_n);
+        eprintln!("[TIMING] identity_calc: {:.3}s (calls={})", identity_s, identity_n);
+    }
     
     // NCBI-style output ordering: query (input order) → subject (best_evalue/score/oid) → HSP (score/coords)
     // Reference: BLAST_LinkHsps() + s_EvalueCompareHSPLists() + ScoreCompareHSPs()

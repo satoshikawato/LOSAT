@@ -128,8 +128,34 @@ Searching 1 queries vs 1 subjects... (avg_query_length=220702)
 [DEBUG CUTOFF_CALC] K*searchsp=1.792762e10, K*searchsp/E=1.792762e307
 [DEBUG CUTOFF_CALC] log(K*searchsp/E)=7.074774e2, score_before_ceil=2.227574e3
 [DEBUG CUTOFF_CALC] final_score=2228 (ceil)
-Terminated
+[DEBUG HSP_SAVING] subject_len_nucl=606194, cutoff=41
+[DEBUG HSP_SAVING] total_attempted=31524554, saved=0, filtered_by_cutoff=31524554, filtered_by_reeval=0, filtered_by_hsp_test=0
+[DEBUG HSP_SAVING] score_distribution: min=41, max=3520, median=43, low_score(<30)=0/338859 (0.00%)
+[DEBUG LINKING_CUTOFF] avg_query_length=220702, subject_len_nucl=606194
+[DEBUG LINKING_CUTOFF] query_length_after_adj=220646, subject_length_after_adj=202008
+[DEBUG LINKING_CUTOFF] expected_length=56
+[DEBUG LINKING_CUTOFF] search_sp=44572257168, window_sq=2500, 8*window_sq=20000
+[DEBUG LINKING_CUTOFF] search_sp > 8*window_sq: true
+[DEBUG LINKING_CUTOFF] y_variable=7.428379e-5
+[DEBUG LINKING_CUTOFF] x_variable_before_div=8.277491e5
+[DEBUG LINKING_CUTOFF] x_variable_after_div=1.655498e6
+[DEBUG LINKING_CUTOFF] x_small=3.714190e-1
+[DEBUG LINKING_CUTOFF] cutoff_small_gap_raw=41, cutoff_big_gap_raw=46
+[DEBUG LINKING_CUTOFF] scale_factor=1, final_cutoff_small=41, final_cutoff_big=46
+[DEBUG LINKING_CUTOFF] gap_prob=0.5, ignore_small_gaps=false
+[DEBUG LINKING_FILTER] subject_len_nucl=606194, group_size=85195
+[DEBUG LINKING_FILTER] INDEX 0 (small gap): cutoff=41, filtered=0, passed=0, total=0, filter_rate=0.00%
+[DEBUG LINKING_FILTER] INDEX 1 (large gap): cutoff=46, filtered=64187, passed=1344390, total=1408577, filter_rate=4.56%
+[DEBUG LINKING_FILTER] subject_len_nucl=606194, group_size=88150
+[DEBUG LINKING_FILTER] INDEX 0 (small gap): cutoff=41, filtered=0, passed=0, total=0, filter_rate=0.00%
+[DEBUG LINKING_FILTER] INDEX 1 (large gap): cutoff=46, filtered=66045, passed=1399593, total=1465638, filter_rate=4.51%
+[DEBUG LINKING_FILTER] subject_len_nucl=606194, group_size=80948
+[DEBUG LINKING_FILTER] INDEX 0 (small gap): cutoff=41, filtered=0, passed=0, total=0, filter_rate=0.00%
+[DEBUG LINKING_FILTER] INDEX 1 (large gap): cutoff=46, filtered=61050, passed=1275626, total=1336676, filter_rate=4.57%
+[DEBUG LINKING_FILTER] subject_len_nucl=606194, group_size=84566
+[DEBUG LINKING_FILTER] INDEX 0 (small gap): cutoff=41, filtered=0, passed=0, total=0, filter_rate=0.00%
+[DEBUG LINKING_FILTER] INDEX 1 (large gap): cutoff=46, filtered=63516, passed=1257266, total=1320782, filter_rate=4.81%
 
-real	0m35.743s
-user	0m35.429s
-sys	0m0.111s
+real	10m35.493s
+user	10m35.018s
+sys	0m0.170s

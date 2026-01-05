@@ -68,6 +68,147 @@ fn ungapped_score_table_32() -> &'static [i32; 32 * 32] {
     })
 }
 
+// NCBI BLAST reference (c++/src/algo/blast/core/aa_ungapped.c:886-921):
+//   n = MIN(s_off, q_off);
+//   best_i = n + 1;
+//   s = subject->sequence + s_off - n;
+//   q = query->sequence + q_off - n;
+//   for (i = n; i >= 0; i--) {
+//       score += matrix[q[i]][s[i]];
+//       if (score > maxscore) {
+//           maxscore = score;
+//           best_i = i;
+//       }
+//       if ((maxscore - score) >= dropoff)
+//           break;
+//   }
+//   *length = n - best_i + 1;
+//   return maxscore;
+//
+// LOSAT form uses (q_off-1-i, s_off-1-i) order; we keep that exact control flow,
+// but batch the score lookup with AVX2 gather. Accumulation and X-drop checks
+// remain strictly sequential to preserve 1-bit parity.
+
+#[inline(always)]
+fn extend_left_ungapped_scalar(
+    q_seq: &[u8],
+    s_seq: &[u8],
+    q_off: usize,
+    s_off: usize,
+    initial_score: i32,
+    x_drop: i32,
+) -> (i32, usize) {
+    let max_left = q_off.min(s_off);
+
+    let mut score = initial_score;
+    let mut max_score = initial_score;
+    let mut left_disp = 0usize;
+    let mut i = 0usize;
+
+    while i < max_left {
+        let q_char = unsafe { *q_seq.get_unchecked(q_off - 1 - i) };
+        let s_char = unsafe { *s_seq.get_unchecked(s_off - 1 - i) };
+
+        score += get_score(q_char, s_char);
+
+        if score > max_score {
+            max_score = score;
+            left_disp = i + 1;
+        }
+
+        if (max_score - score) >= x_drop {
+            break;
+        }
+        i += 1;
+    }
+
+    (max_score, left_disp)
+}
+
+#[cfg(target_arch = "x86_64")]
+#[target_feature(enable = "avx2")]
+unsafe fn extend_left_ungapped_avx2(
+    q_seq: &[u8],
+    s_seq: &[u8],
+    q_off: usize,
+    s_off: usize,
+    initial_score: i32,
+    x_drop: i32,
+) -> (i32, usize) {
+    let table = ungapped_score_table_32().as_ptr();
+    let max_left = q_off.min(s_off);
+
+    let mut score = initial_score;
+    let mut max_score = initial_score;
+    let mut left_disp = 0usize;
+    let mut i = 0usize;
+
+    // Process blocks of 8 residues. We must apply scores in the same order as the
+    // scalar loop: nearest first (q_off-1), then further left.
+    while i + 8 <= max_left {
+        let q_ptr = q_seq.as_ptr().add(q_off - i - 8);
+        let s_ptr = s_seq.as_ptr().add(s_off - i - 8);
+        let scores = gather_scores8_avx2(q_ptr, s_ptr, table); // [far..near]
+
+        for k in 0..8usize {
+            // Apply near..far: scores[7], scores[6], ...
+            score += scores[7 - k];
+            let ext_len = i + k + 1;
+
+            if score > max_score {
+                max_score = score;
+                left_disp = ext_len;
+            }
+
+            if (max_score - score) >= x_drop {
+                return (max_score, left_disp);
+            }
+        }
+
+        i += 8;
+    }
+
+    while i < max_left {
+        let q_char = *q_seq.get_unchecked(q_off - 1 - i);
+        let s_char = *s_seq.get_unchecked(s_off - 1 - i);
+
+        score += get_score(q_char, s_char);
+        let ext_len = i + 1;
+
+        if score > max_score {
+            max_score = score;
+            left_disp = ext_len;
+        }
+
+        if (max_score - score) >= x_drop {
+            break;
+        }
+        i += 1;
+    }
+
+    (max_score, left_disp)
+}
+
+#[inline(always)]
+fn extend_left_ungapped(
+    q_seq: &[u8],
+    s_seq: &[u8],
+    q_off: usize,
+    s_off: usize,
+    initial_score: i32,
+    x_drop: i32,
+) -> (i32, usize) {
+    #[cfg(target_arch = "x86_64")]
+    {
+        if is_x86_feature_detected!("avx2") {
+            unsafe {
+                return extend_left_ungapped_avx2(q_seq, s_seq, q_off, s_off, initial_score, x_drop);
+            }
+        }
+    }
+    extend_left_ungapped_scalar(q_seq, s_seq, q_off, s_off, initial_score, x_drop)
+}
+
 #[inline(always)]
 fn extend_right_ungapped_scalar(
     q_seq: &[u8],
@@ -312,31 +453,8 @@ pub fn extend_hit_ungapped(
     // Step 2: Left extension from the best position
     // NCBI BLAST does NOT break on stop codons in s_BlastAaExtendLeft
     // Reference: aa_ungapped.c:886-921
-    let mut current_score = score;
-    let mut max_score = score;
-    let mut left_disp = 0usize;
-
-    let max_left = q_left_off.min(s_left_off);
-    let mut i = 0;
-
-    while i < max_left {
-        let q_char = unsafe { *q_seq.get_unchecked(q_left_off - 1 - i) };
-        let s_char = unsafe { *s_seq.get_unchecked(s_left_off - 1 - i) };
-
-        // Stop codons are handled by the matrix (*-* = -4, AA-* = -4)
-        // X-drop will naturally terminate the extension
-        current_score += get_score(q_char, s_char);
-
-        if current_score > max_score {
-            max_score = current_score;
-            left_disp = i + 1;
-        }
-
-        if (max_score - current_score) >= x_drop {
-            break;
-        }
-        i += 1;
-    }
+    let (max_score, left_disp) =
+        extend_left_ungapped(q_seq, s_seq, q_left_off, s_left_off, score, x_drop);
 
     // Step 3: Right extension from the best position
     let q_start_r = q_right_off + 1;
@@ -415,31 +533,8 @@ pub fn extend_hit_two_hit(
     // Note: NCBI BLAST does NOT explicitly check for stop codons in s_BlastAaExtendLeft.
     // Stop codons have very negative scores in BLOSUM62 (-4 to -5), so X-drop handles them.
     // Reference: ncbi-blast/c++/src/algo/blast/core/aa_ungapped.c:886-921
-    let mut current_score = 0i32;
-    let mut max_score = 0i32;
-    let mut left_disp = 0usize;
-
-    let max_left = q_right_off.min(s_right_off);
-    let mut i = 0;
-
-    while i < max_left {
-        let q_char = unsafe { *q_seq.get_unchecked(q_right_off - 1 - i) };
-        let s_char = unsafe { *s_seq.get_unchecked(s_right_off - 1 - i) };
-
-        // Stop codons are handled by the matrix (*-* = -4, AA-* = -4)
-        // X-drop will naturally terminate the extension
-        current_score += get_score(q_char, s_char);
-
-        if current_score > max_score {
-            max_score = current_score;
-            left_disp = i + 1;
-        }
-
-        if (max_score - current_score) >= x_drop {
-            break;
-        }
-        i += 1;
-    }
+    let (max_score, left_disp) =
+        extend_left_ungapped(q_seq, s_seq, q_right_off, s_right_off, 0, x_drop);
 
     // Check if left extension reached the first hit
     // The distance from R to L is (s_right_off - s_left_off)

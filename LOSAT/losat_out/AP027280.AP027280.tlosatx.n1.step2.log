@@ -55,7 +55,14 @@ Searching 1 queries vs 1 subjects... (avg_query_length=103854)
 [DEBUG CUTOFF] cutoff_score_max=60
 [DEBUG CUTOFF] gap_trigger=41
 [DEBUG CUTOFF] final cutoff=41
+[TIMING] read_queries: 0.247s
+[TIMING] build_lookup: 0.034s
+[TIMING] read_subjects: 0.005s
+[TIMING] scan_subject: 0.132s (calls=38114)
+[TIMING] ungapped_extend: 0.442s (calls=4067119)
+[TIMING] search_total: 30.722s
+[TIMING] total: 31.011s
 
-real	1m11.842s
-user	1m11.650s
-sys	0m0.040s
+real	0m31.049s
+user	0m30.946s
+sys	0m0.020s

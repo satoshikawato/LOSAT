@@ -10,7 +10,7 @@ use anyhow::Result;
 use bio::io::fasta;
 use crate::utils::dust::{DustMasker, MaskedInterval};
 use super::args::BlastnArgs;
-use super::constants::{MIN_UNGAPPED_SCORE_MEGABLAST, MIN_UNGAPPED_SCORE_BLASTN, MAX_DIRECT_LOOKUP_WORD_SIZE};
+use super::constants::{MIN_UNGAPPED_SCORE_MEGABLAST, MIN_UNGAPPED_SCORE_BLASTN, MAX_DIRECT_LOOKUP_WORD_SIZE, X_DROP_GAPPED_NUCL, X_DROP_GAPPED_GREEDY};
 use super::lookup::{build_lookup, build_pv_direct_lookup, build_two_stage_lookup, TwoStageLookup, PvDirectLookup, KmerLookup};
 
 /// Task-specific configuration for BLASTN
@@ -26,6 +26,8 @@ pub struct TaskConfig {
     pub use_direct_lookup: bool,
     pub use_two_stage: bool,
     pub lut_word_length: usize,
+    pub x_drop_gapped: i32, // Task-specific gapped X-dropoff (blastn: 30, megablast: 25)
+    pub min_diag_separation: usize, // Task-specific minimum diagonal separation (blastn: 50, megablast: 6)
 }
 
 /// Lookup tables for seed finding
@@ -122,6 +124,26 @@ pub fn configure_task(args: &BlastnArgs) -> TaskConfig {
         _ => true,
     };
     
+    // NCBI BLAST: Task-specific gapped X-dropoff
+    // Reference: ncbi-blast/c++/include/algo/blast/core/blast_options.h:122-148
+    // blastn (non-greedy): 30, megablast (greedy): 25
+    let x_drop_gapped = match args.task.as_str() {
+        "megablast" => X_DROP_GAPPED_GREEDY, // 25
+        _ => X_DROP_GAPPED_NUCL, // 30
+    };
+    
+    // NCBI BLAST: Task-specific minimum diagonal separation
+    // Reference: ncbi-blast/c++/src/algo/blast/api/blast_nucl_options.cpp:231-270
+    // blastn: 50, megablast: 6
+    let min_diag_separation = if args.min_diag_separation > 0 {
+        args.min_diag_separation
+    } else {
+        match args.task.as_str() {
+            "megablast" => 6,
+            _ => 50, // blastn, dc-megablast, etc.
+        }
+    };
+    
     let scan_step = calculate_initial_scan_step(effective_word_size, args.scan_step);
     
     let use_direct_lookup = effective_word_size <= MAX_DIRECT_LOOKUP_WORD_SIZE;
@@ -150,6 +172,8 @@ pub fn configure_task(args: &BlastnArgs) -> TaskConfig {
         use_direct_lookup,
         use_two_stage,
         lut_word_length,
+        x_drop_gapped,
+        min_diag_separation,
     }
 }
 

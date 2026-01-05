@@ -1,7 +1,23 @@
 // NCBI BLAST compatible X-drop parameters
-pub const X_DROP_UNGAPPED: i32 = 20; // BLAST_UNGAPPED_X_DROPOFF_NUCL
-pub const X_DROP_GAPPED_FINAL: i32 = 100; // BLAST_GAP_X_DROPOFF_FINAL_NUCL for final traceback
-pub const TWO_HIT_WINDOW: usize = 64; // Increased from 40 for better sensitivity
+// Reference: ncbi-blast/c++/include/algo/blast/core/blast_options.h:122-148
+pub const X_DROP_UNGAPPED: i32 = 20; // BLAST_UNGAPPED_X_DROPOFF_NUCL (blastn, megablast 共通)
+pub const X_DROP_GAPPED_NUCL: i32 = 30; // BLAST_GAP_X_DROPOFF_NUCL (blastn, non-greedy)
+pub const X_DROP_GAPPED_GREEDY: i32 = 25; // BLAST_GAP_X_DROPOFF_GREEDY (megablast, greedy)
+pub const X_DROP_GAPPED_FINAL: i32 = 100; // BLAST_GAP_X_DROPOFF_FINAL_NUCL for final traceback (共通)
+
+/// Gap trigger bit score for nucleotide searches
+/// NCBI BLAST: HSPs with bit scores above this threshold trigger gapped extension
+/// Reference: ncbi-blast/c++/include/algo/blast/core/blast_options.h:137
+/// #define BLAST_GAP_TRIGGER_NUCL 27.0
+pub const GAP_TRIGGER_BIT_SCORE: f64 = 27.0; // BLAST_GAP_TRIGGER_NUCL (共通)
+
+/// Two-hit window size for nucleotide searches
+/// NCBI BLAST default: BLAST_WINDOW_SIZE_NUCL = 0 (one-hit mode)
+/// Reference: ncbi-blast/c++/include/algo/blast/core/blast_options.h:58
+/// When window_size = 0, all seeds trigger extension (one-hit mode)
+/// When window_size > 0, two-hit requirement is enforced
+/// NCBI reference: na_ungapped.c:656: Boolean two_hits = (window_size > 0);
+pub const TWO_HIT_WINDOW: usize = 0; // NCBI BLAST default (one-hit mode)
 pub const MAX_HITS_PER_KMER: usize = 200;
 
 // Minimum ungapped score thresholds for triggering gapped extension

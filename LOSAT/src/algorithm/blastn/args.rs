@@ -17,6 +17,19 @@ pub struct BlastnArgs {
     pub evalue: f64,
     #[arg(long, default_value_t = 500)]
     pub max_target_seqs: usize,
+    /// Maximum number of hits to save (NCBI BLAST hitlist_size)
+    /// Reference: ncbi-blast/c++/src/algo/blast/api/blast_nucl_options.cpp:231-270
+    #[arg(long, default_value_t = 500)]
+    pub hitlist_size: usize,
+    /// Maximum number of HSPs per subject (0 = unlimited)
+    /// Reference: ncbi-blast/c++/src/algo/blast/api/blast_nucl_options.cpp:231-270
+    #[arg(long, default_value_t = 0)]
+    pub max_hsps_per_subject: usize,
+    /// Minimum diagonal separation between HSPs on the same subject (0 = auto, task-specific)
+    /// Reference: ncbi-blast/c++/src/algo/blast/api/blast_nucl_options.cpp:231-270
+    /// Default: 50 for blastn, 6 for megablast
+    #[arg(long, default_value_t = 0)]
+    pub min_diag_separation: usize,
     #[arg(short, long)]
     pub out: Option<PathBuf>,
     // Scoring parameters - defaults are for megablast task

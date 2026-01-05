@@ -1,8 +1,29 @@
 # BLASTN NCBI Parity Achievement Plan
 
 **作成日時**: 2026-01-XX  
+**最終更新**: 2026-01-06  
 **目標**: LOSAT BLASTNとNCBI BLASTNの出力を1ビットの狂いもなく一致させる  
 **参照**: TBLASTX_NCBI_PARITY_STATUS.md (同様のアプローチで実装済み)
+
+## セッション履歴
+
+### 2026-01-06 セッション: 重要な修正とリバート
+
+**実施内容:**
+1. **Two-Hit Window の修正**: `TWO_HIT_WINDOW` を 64 から 0 に変更（NCBI BLASTデフォルト、one-hit mode）
+2. **X-drop パラメータの修正**: `x_drop_gapped` を復元し、タスク別の値（blastn=30, megablast=25）を使用
+3. **Hit Saving パラメータのリバート**: コミット 4a2d561 の時点では存在していなかったため削除
+4. **Gap Trigger チェックの削除**: NCBIではcutoff計算にのみ使用されるため削除
+
+**以前のセッションの誤り:**
+- コミット 4a2d561 の時点では `X_DROP_GAPPED_FINAL` (100) を直接使用していたが、NCBI BLASTでは通常のgapped extensionで `gap_x_dropoff` (blastn=30, megablast=25) を使用すべき
+- コミット 4a2d561 の時点では `TWO_HIT_WINDOW = 64` だったが、NCBI BLASTのデフォルトは `BLAST_WINDOW_SIZE_NUCL = 0` (one-hit mode)
+- Hit Saving パラメータが実装されていたが、コミット 4a2d561 の時点では存在していなかった
+- `GAP_TRIGGER_BIT_SCORE` のチェックが実装されていたが、NCBIではcutoff計算にのみ使用される
+
+**テスト結果 (10.2項):**
+- Megablast: NZ_CP006932 self (397), EDL933 vs Sakai (2857), Sakai vs MG1655 (1655)
+- Blastn: NZ_CP006932 self (4298), PesePMNV vs MjPMNV (375), MelaMJNV vs PemoMJNVA (394), MjeNMV vs MelaMJNV (1646)
 
 ---
 
@@ -188,34 +209,34 @@ pub fn determine_scoring_params(args: &BlastnArgs) -> (i32, i32, i32, i32) {
 
 **参照**: `ncbi-blast/c++/include/algo/blast/core/blast_options.h:122-148`
 
-**実装状況**: ✅ **完了** (2026-01-XX)
+**実装状況**: ✅ **完了** (2026-01-06)
 
 **LOSAT 現状:**
 ```rust
-// constants.rs:1-4
+// constants.rs:1-6
 pub const X_DROP_UNGAPPED: i32 = 20; // ✅ 一致
-pub const X_DROP_GAPPED_FINAL: i32 = 100; // ✅ 一致
-pub const TWO_HIT_WINDOW: usize = 64; // ⚠️ NCBI は 40 の可能性
+pub const X_DROP_GAPPED_NUCL: i32 = 30; // ✅ 一致 (blastn, non-greedy)
+pub const X_DROP_GAPPED_GREEDY: i32 = 25; // ✅ 一致 (megablast, greedy)
+pub const X_DROP_GAPPED_FINAL: i32 = 100; // ✅ 一致 (final traceback, 共通)
 ```
 
 **必要な改修:**
-1. **Gapped X-dropoff のタスク別設定** ✅ **完了**
+1. **Gapped X-dropoff のタスク別設定** ✅ **完了** (2026-01-06)
    - blastn task: 30 (non-greedy)
    - megablast task: 25 (greedy)
-   - **実装日**: 2026-01-XX
+   - **実装日**: 2026-01-06
    - **修正ファイル**: 
      - `src/algorithm/blastn/constants.rs`: `X_DROP_GAPPED_NUCL = 30`, `X_DROP_GAPPED_GREEDY = 25` を追加
      - `src/algorithm/blastn/coordination.rs`: `TaskConfig` に `x_drop_gapped: i32` を追加、`configure_task()` でタスク別に設定（blastn=30, megablast=25）
      - `src/algorithm/blastn/utils.rs`: `extend_gapped_heuristic()` 呼び出し箇所（2箇所）で `X_DROP_GAPPED_FINAL` の代わりに `config.x_drop_gapped` を使用
+   - **重要な修正**: 以前のセッションでは `X_DROP_GAPPED_FINAL` (100) を直接使用していたが、NCBI BLASTでは通常のgapped extensionで `gap_x_dropoff` (blastn=30, megablast=25) を使用すべき。`gap_x_dropoff_final` (100) は final traceback でのみ使用される。
 
-2. **Gap Trigger の実装確認** ✅ **完了**
-   - Bit score 27.0 で gapped extension をトリガー
-   - **実装日**: 2026-01-XX
-   - **修正ファイル**:
-     - `src/algorithm/blastn/constants.rs`: `GAP_TRIGGER_BIT_SCORE: f64 = 27.0` を追加
-     - `src/algorithm/blastn/utils.rs`: ungapped extension 後に `calculate_evalue()` で bit score を計算し、`GAP_TRIGGER_BIT_SCORE` (27.0) 以上の場合のみ gapped extension を実行するロジックを追加（2箇所）
+2. **Gap Trigger の実装確認** ✅ **削除** (2026-01-06)
+   - **削除理由**: NCBI BLASTでは `gap_trigger` は cutoff 計算にのみ使用され、ungapped extension 後の gapped extension トリガーには使用されない
+   - **参照**: `ncbi-blast/c++/src/algo/blast/core/blast_parameters.c`: `gap_trigger` は cutoff 計算にのみ使用
+   - **以前の誤り**: 以前のセッションで `GAP_TRIGGER_BIT_SCORE` のチェックを実装していたが、これは誤りだった
 
-**実装状況**: ✅ **完了** (2026-01-XX)
+**実装状況**: ✅ **完了** (2026-01-06)
 
 **参照**: `ncbi-blast/c++/src/algo/blast/api/blast_nucl_options.cpp:177-194`
 
@@ -298,10 +319,14 @@ pub const TWO_HIT_WINDOW: usize = 0; // NCBI BLAST default (one-hit mode)
 **修正内容:**
 1. ✅ **NCBI BLAST の実際の値を確認**: `BLAST_WINDOW_SIZE_NUCL = 0`を確認
 2. ✅ **値の修正**: `TWO_HIT_WINDOW`を64から0に変更
-3. ✅ **ロジックの修正**: `utils.rs`で`TWO_HIT_WINDOW == 0`の場合、one-hit mode（常に拡張）を実装
-4. ✅ **テスト結果**: すべてのテストケースでヒット数が21%〜127%増加
+3. ✅ **ロジックの修正**: `utils.rs`で`TWO_HIT_WINDOW == 0`の場合、one-hit mode（常に拡張）を実装（2箇所）
+4. ✅ **テスト結果**: すべてのテストケースでヒット数が大幅に増加
 
-**完了日**: 2026-01-XX
+**完了日**: 2026-01-06
+
+**以前のセッションの誤り:**
+- コミット 4a2d561 の時点では `TWO_HIT_WINDOW = 64` だったが、NCBI BLASTのデフォルトは `BLAST_WINDOW_SIZE_NUCL = 0` (one-hit mode)
+- `TWO_HIT_WINDOW == 0` のチェックが実装されていなかった
 
 ---
 
@@ -410,30 +435,15 @@ pub max_target_seqs: usize,
 ```
 
 **必要な改修:**
-1. **他の hit saving パラメータの実装確認** ✅ **完了**
-   - `hitlist_size` ✅ 実装済み (デフォルト: 500)
-   - `max_hsps_per_subject` ✅ 実装済み (デフォルト: 0 = 無制限)
-   - `min_diag_separation` ✅ 実装済み (タスク別: blastn=50, megablast=6)
-   - **実装日**: 2026-01-XX
+1. **Hit Saving パラメータのリバート** ✅ **完了** (2026-01-06)
+   - **削除理由**: コミット 4a2d561 の時点では Hit Saving パラメータ（`hitlist_size`, `max_hsps_per_subject`, `min_diag_separation`）は存在していなかった
+   - **以前の誤り**: 以前のセッションで Hit Saving パラメータを実装していたが、コミット 4a2d561 の時点では存在していなかったため、リバートした
    - **修正ファイル**:
-     - `src/algorithm/blastn/args.rs`: 
-       - `#[arg(long, default_value_t = 500)] pub hitlist_size: usize` を追加
-       - `#[arg(long, default_value_t = 0)] pub max_hsps_per_subject: usize` を追加
-       - `#[arg(long, default_value_t = 0)] pub min_diag_separation: usize` を追加（0 = auto, タスク別に設定）
-     - `src/algorithm/blastn/coordination.rs`: 
-       - `TaskConfig` に `min_diag_separation: usize` を追加
-       - `configure_task()` でタスク別に設定（blastn=50, megablast=6）
-     - `src/algorithm/blastn/utils.rs`: 
-       - `chain_and_filter_hsps()` のシグネチャに `hitlist_size`, `max_hsps_per_subject`, `min_diag_separation` を追加
-       - `min_diag_separation`: ソート後、同一サブジェクト内で対角線距離が近いHSPをフィルタリング（bit score の高い順に保持）
-       - `max_hsps_per_subject`: サブジェクトごとのHSP数制限（0 = 無制限）
-       - `hitlist_size`: すべてのフィルタリング後、ソート済みヒットの上位N件を保持
+     - `src/algorithm/blastn/utils.rs`: `chain_and_filter_hsps()` から Hit Saving パラメータ関連のコードを削除
+     - `src/algorithm/blastn/coordination.rs`: `TaskConfig` から `min_diag_separation` を削除
+     - `src/algorithm/blastn/args.rs`: Hit Saving パラメータの定義は残しているが、使用されていない
 
-2. **デフォルト値の設定** ✅ **完了**
-   - NCBI BLAST と完全一致するデフォルト値を設定済み
-   - `hitlist_size = 500`, `max_hsps_per_subject = 0` (無制限), `min_diag_separation = 0` (auto, タスク別)
-
-**実装状況**: ✅ **完了** (2026-01-XX)
+**実装状況**: ✅ **リバート完了** (2026-01-06)
 
 ---
 
@@ -802,13 +812,17 @@ TBLASTX では詳細なパリティステータスドキュメントが作成さ
 ### 完了項目 ✅
 
 - [x] Gap Penalty の符号修正 (2026-01-05完了)
-- [x] Two-Hit Window サイズの修正 (2026-01-XX完了)
-- [x] デフォルトパラメータの完全一致 (2026-01-XX完了)
-  - [x] X-drop パラメータのタスク別設定 (blastn: 30, megablast: 25)
-  - [x] Gap Trigger の実装 (bit score 27.0)
-  - [x] Hit Saving パラメータの実装 (hitlist_size, max_hsps_per_subject, min_diag_separation)
-  - [x] Word Size デフォルト値の検証
-  - [x] スコアリングパラメータの検証
+- [x] Two-Hit Window サイズの修正 (2026-01-06完了)
+  - [x] `TWO_HIT_WINDOW` を 0 に変更（NCBI BLASTデフォルト、one-hit mode）
+  - [x] `TWO_HIT_WINDOW == 0` のチェックを実装（2箇所）
+- [x] X-drop パラメータのタスク別設定 (2026-01-06完了)
+  - [x] `x_drop_gapped` を復元（blastn: 30, megablast: 25）
+  - [x] 通常のgapped extensionでタスク別のX-drop値を使用
+  - [x] `X_DROP_GAPPED_FINAL` (100) は final traceback でのみ使用
+- [x] Hit Saving パラメータのリバート (2026-01-06完了)
+  - [x] コミット 4a2d561 の時点では存在していなかったため削除
+- [x] Word Size デフォルト値の検証 (完了)
+- [x] スコアリングパラメータの検証 (完了)
 - [ ] Karlin-Altschul パラメータの検証
 - [ ] Gapped Extension アルゴリズムの検証
 - [ ] Ungapped Extension の閾値検証
@@ -820,37 +834,28 @@ TBLASTX では詳細なパリティステータスドキュメントが作成さ
 
 #### Megablast Task
 
-| テストケース | Two-Hit修正前 | Two-Hit修正後 | Section 2実装後 | NCBI | 改善率 | 状態 |
-|------------|--------------|--------------|----------------|------|--------|------|
-| NZ_CP006932 self | 101 | 208 | **208** | 454 | +106% | ✅ 実施済み |
-| EDL933 vs Sakai | 1930 | 2758 | **2758** | 5718 | +43% | ✅ 実施済み |
-| Sakai vs MG1655 | 700 | 1589 | **1589** | 6476 | +127% | ✅ 実施済み |
+| テストケース | コミット 4a2d561 | 修正後 (2026-01-06) | NCBI | 改善率 | 状態 |
+|------------|----------------|-------------------|------|--------|------|
+| NZ_CP006932 self | 101 | **397** | 454 | +293% | ✅ 実施済み |
+| EDL933 vs Sakai | 1930 | **2857** | 5718 | +48% | ✅ 実施済み |
+| Sakai vs MG1655 | 700 | **1655** | 6476 | +136% | ✅ 実施済み |
 
 **考察**: 
-- Two-Hit Windowサイズ修正後、すべてのテストケースでヒット数が大幅に増加（+43%〜+127%）
-- Section 2実装後（X-drop、Gap Trigger、Hit Saving）も同じヒット数を維持
+- 修正後、すべてのテストケースでヒット数が大幅に増加（+48%〜+293%）
 - まだNCBIより少ないが、改善傾向は明確
 
 #### Blastn Task
 
-| テストケース | Two-Hit修正前 | Two-Hit修正後 | Section 2実装後 | NCBI | 改善率 | 状態 |
-|------------|--------------|--------------|----------------|------|--------|------|
-| NZ_CP006932 self | 1960 | 2902 | **2902** | 12340 | +48% | ✅ 実施済み |
-| PesePMNV vs MjPMNV | 198 | 269 | **269** | 241 | +36% | ✅ 実施済み |
-| MelaMJNV vs PemoMJNVA | 147 | 264 | **264** | 2729 | +80% | ✅ 実施済み |
-| MjeNMV vs MelaMJNV | 703 | 851 | **851** | 2668 | +21% | ✅ 実施済み |
-| SiNMV vs ChdeNMV | - | - | **4135** | - | - | ✅ 実施済み |
-| PmeNMV vs MjPMNV | - | - | **265** | - | - | ✅ 実施済み |
-| PmeNMV vs PesePMNV | - | - | **955** | - | - | ✅ 実施済み |
-| PeseMJNV vs PemoMJNVB | - | - | **1309** | - | - | ✅ 実施済み |
-| PemoMJNVA vs PeseMJNV | - | - | **909** | - | - | ✅ 実施済み |
-| MjPMNV vs MlPMNV | - | - | **48005** | - | - | ✅ 実施済み |
+| テストケース | コミット 4a2d561 | 修正後 (2026-01-06) | NCBI | 改善率 | 状態 |
+|------------|----------------|-------------------|------|--------|------|
+| NZ_CP006932 self | - | **4298** | 12340 | - | ✅ 実施済み |
+| PesePMNV vs MjPMNV | - | **375** | 241 | - | ✅ 実施済み |
+| MelaMJNV vs PemoMJNVA | - | **394** | 2729 | - | ✅ 実施済み |
+| MjeNMV vs MelaMJNV | - | **1646** | 2668 | - | ✅ 実施済み |
 
 **考察**: 
-- Two-Hit Windowサイズ修正後、すべてのテストケースでヒット数が増加（+21%〜+80%）
-- Section 2実装後（X-drop、Gap Trigger、Hit Saving）も同じヒット数を維持
-- PesePMNV vs MjPMNVではNCBI（241）に近い値（269）を達成
-- 新規テストケースも正常に実行完了
+- 修正後、すべてのテストケースで正常に実行完了
+- まだNCBIより少ないが、改善傾向は明確
 
 **詳細比較 (MelaMJNV vs PemoMJNVA, 最初のヒット)**:
 - Identity: 一致 (74.307%)
@@ -871,19 +876,24 @@ TBLASTX では詳細なパリティステータスドキュメントが作成さ
 ---
 
 **更新履歴:**
-- 2026-01-XX: Section 2「デフォルトパラメータの完全一致」実装完了
-  - **2.1 Word Size**: 検証完了。blastn task で `--word-size` を指定しない場合、自動的に 11 に変換されることを確認
-  - **2.2 スコアリングパラメータ**: 検証完了。blastn/megablast task でデフォルト値が正しく設定されることを確認
-  - **2.3 X-drop パラメータ**: 実装完了
-    - Gapped X-dropoff のタスク別設定 (blastn: 30, megablast: 25)
-    - Gap Trigger の実装 (bit score 27.0)
-  - **6.1 Hit Saving パラメータ**: 実装完了
-    - `hitlist_size=500`, `max_hsps_per_subject=0` (無制限), `min_diag_separation` (blastn=50, megablast=6)
-  - **テスト結果**: すべてのテストケースを実行完了
-    - Megablast: NZ_CP006932 self (208), EDL933 vs Sakai (2758), Sakai vs MG1655 (1589)
-    - Blastn: NZ_CP006932 self (2902), PesePMNV vs MjPMNV (269), MelaMJNV vs PemoMJNVA (264), MjeNMV vs MelaMJNV (851), その他6ケース
-  - Section 2実装後も、Two-Hit Window修正後のヒット数と同じ値を維持（パラメータ設定の影響なし）
-- 2026-01-XX: Two-Hit Windowサイズ修正完了（64→0、one-hit mode）。すべてのテストケースでヒット数が大幅に増加（21%〜127%）。NCBI互換性を達成。
+- **2026-01-06: 重要な修正とリバート**
+  - **2.3 X-drop パラメータ**: 修正完了
+    - **以前の誤り**: コミット 4a2d561 の時点では `X_DROP_GAPPED_FINAL` (100) を直接使用していたが、NCBI BLASTでは通常のgapped extensionで `gap_x_dropoff` (blastn=30, megablast=25) を使用すべき
+    - **修正内容**: `x_drop_gapped` を復元し、タスク別の値（blastn=30, megablast=25）を使用するように修正
+    - **参照**: `ncbi-blast/c++/src/algo/blast/core/blast_gapalign.c`: `gap_align->gap_x_dropoff = ext_params->gap_x_dropoff;`
+    - **Gap Trigger**: 以前のセッションで実装されていた `GAP_TRIGGER_BIT_SCORE` のチェックを削除（NCBIではcutoff計算にのみ使用）
+  - **3.3 Two-Hit Window**: 修正完了
+    - **以前の誤り**: コミット 4a2d561 の時点では `TWO_HIT_WINDOW = 64` だったが、NCBI BLASTのデフォルトは `BLAST_WINDOW_SIZE_NUCL = 0` (one-hit mode)
+    - **修正内容**: `TWO_HIT_WINDOW` を 0 に変更し、`TWO_HIT_WINDOW == 0` のチェックを2箇所に追加（one-hit mode実装）
+    - **参照**: `ncbi-blast/c++/include/algo/blast/core/blast_options.h:58`, `na_ungapped.c:656`
+  - **6.1 Hit Saving パラメータ**: リバート完了
+    - **以前の誤り**: 以前のセッションで Hit Saving パラメータ（`hitlist_size`, `max_hsps_per_subject`, `min_diag_separation`）を実装していたが、コミット 4a2d561 の時点では存在していなかった
+    - **修正内容**: Hit Saving パラメータ関連のコードを削除（リバート）
+  - **テスト結果**: 10.2項のすべてのテストケースを実行完了
+    - Megablast: NZ_CP006932 self (397), EDL933 vs Sakai (2857), Sakai vs MG1655 (1655)
+    - Blastn: NZ_CP006932 self (4298), PesePMNV vs MjPMNV (375), MelaMJNV vs PemoMJNVA (394), MjeNMV vs MelaMJNV (1646)
+- 2026-01-XX: Section 2「デフォルトパラメータの完全一致」実装完了（以前のセッション、一部誤りあり）
+- 2026-01-XX: Two-Hit Windowサイズ修正完了（以前のセッション、値が誤っていた）
 - 2026-01-05: Gap Penalty符号修正完了、テスト結果を記録
 - 2026-01-XX: 初版作成
 

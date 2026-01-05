@@ -9,7 +9,7 @@ use crate::stats::{lookup_nucl_params, KarlinParams};
 use super::args::BlastnArgs;
 use super::alignment::extend_gapped_heuristic;
 use super::extension::extend_hit_ungapped;
-use super::constants::{TWO_HIT_WINDOW, GAP_TRIGGER_BIT_SCORE, X_DROP_GAPPED_FINAL};
+use super::constants::{X_DROP_GAPPED_FINAL, TWO_HIT_WINDOW};
 use super::coordination::{configure_task, read_sequences, prepare_sequence_data, build_lookup_tables};
 use super::lookup::{reverse_complement, pack_diag_key};
 use super::sequence_compare::{compare_28mer_simd, compare_sequences_simd};
@@ -29,9 +29,6 @@ pub fn chain_and_filter_hsps(
     _use_dp: bool,
     verbose: bool,
     chain_enabled: bool,
-    hitlist_size: usize,
-    max_hsps_per_subject: usize,
-    min_diag_separation: usize,
 ) -> Vec<Hit> {
     if hits.is_empty() {
         return hits;
@@ -495,69 +492,6 @@ pub fn chain_and_filter_hsps(
             .unwrap_or(Ordering::Equal)
     });
 
-    // NCBI BLAST Hit Saving: Apply min_diag_separation filter
-    // Remove HSPs on the same subject that are too close diagonally
-    // Reference: ncbi-blast/c++/src/algo/blast/api/blast_nucl_options.cpp:231-270
-    if min_diag_separation > 0 {
-        use rustc_hash::FxHashSet;
-        let mut subject_hits: FxHashMap<String, Vec<(usize, isize)>> = FxHashMap::default();
-        // Group hits by subject and calculate diagonals
-        for (idx, hit) in result_hits.iter().enumerate() {
-            let diag = hit.s_start as isize - hit.q_start as isize;
-            subject_hits.entry(hit.subject_id.clone()).or_default().push((idx, diag));
-        }
-        
-        // Filter hits that are too close diagonally on the same subject
-        let mut to_remove: FxHashSet<usize> = FxHashSet::default();
-        for (_subject_id, hits) in subject_hits.iter() {
-            // Sort by bit score (descending) to keep higher-scoring hits
-            let mut sorted_hits: Vec<(usize, isize)> = hits.clone();
-            sorted_hits.sort_by(|a, b| {
-                result_hits[b.0].bit_score.partial_cmp(&result_hits[a.0].bit_score).unwrap_or(Ordering::Equal)
-            });
-            
-            // Keep first hit, then check subsequent hits against kept ones
-            let mut kept_diags: Vec<isize> = vec![sorted_hits[0].1];
-            for (idx, diag) in sorted_hits.iter().skip(1) {
-                let too_close = kept_diags.iter().any(|&kept_diag| {
-                    (diag - kept_diag).abs() < min_diag_separation as isize
-                });
-                if too_close {
-                    to_remove.insert(*idx);
-                } else {
-                    kept_diags.push(*diag);
-                }
-            }
-        }
-        
-        // Remove filtered hits by creating new vector
-        if !to_remove.is_empty() {
-            result_hits = result_hits.into_iter().enumerate()
-                .filter(|(idx, _)| !to_remove.contains(idx))
-                .map(|(_, hit)| hit)
-                .collect();
-        }
-    }
-
-    // NCBI BLAST Hit Saving: Apply max_hsps_per_subject filter
-    // Limit number of HSPs per subject (0 = unlimited)
-    // Reference: ncbi-blast/c++/src/algo/blast/api/blast_nucl_options.cpp:231-270
-    if max_hsps_per_subject > 0 {
-        let mut subject_counts: FxHashMap<String, usize> = FxHashMap::default();
-        result_hits.retain(|hit| {
-            let count = subject_counts.entry(hit.subject_id.clone()).or_insert(0);
-            *count += 1;
-            *count <= max_hsps_per_subject
-        });
-    }
-
-    // NCBI BLAST Hit Saving: Apply hitlist_size limit
-    // Keep only top N hits by bit score
-    // Reference: ncbi-blast/c++/src/algo/blast/api/blast_nucl_options.cpp:231-270
-    if hitlist_size > 0 && result_hits.len() > hitlist_size {
-        result_hits.truncate(hitlist_size);
-    }
-
     // Use spatial binning to avoid O(n²) comparisons
     // Bin size of 1000bp - hits can only overlap if they share a bin
     const FILTER_BIN_SIZE: usize = 1000;
@@ -874,9 +808,6 @@ pub fn run(args: BlastnArgs) -> Result<()> {
             config.use_dp,
             verbose,
             chain_enabled,
-            args.hitlist_size,
-            args.max_hsps_per_subject,
-            config.min_diag_separation,
         );
 
         if verbose {
@@ -1279,34 +1210,16 @@ pub fn run(args: BlastnArgs) -> Result<()> {
                                 continue;
                             }
 
-                            // NCBI BLAST Gap Trigger: Check if ungapped bit score >= 27.0 before gapped extension
-                            // Reference: ncbi-blast/c++/include/algo/blast/core/blast_options.h:137
-                            // BLAST_GAP_TRIGGER_NUCL = 27.0
-                            let (ungapped_bit_score, _) = calculate_evalue(
-                                ungapped_score,
-                                q_record.seq().len(),
-                                db_len_total,
-                                db_num_seqs,
-                                &params_for_closure,
-                            );
-                            
-                            if ungapped_bit_score < GAP_TRIGGER_BIT_SCORE {
-                                // Ungapped bit score below gap trigger threshold - skip gapped extension
-                                if in_window && debug_mode {
-                                    eprintln!("[DEBUG WINDOW] Seed at q={}, s={} SKIPPED: ungapped_bit_score={:.1} < GAP_TRIGGER={:.1}", q_pos_usize, kmer_start, ungapped_bit_score, GAP_TRIGGER_BIT_SCORE);
-                                }
-                                continue;
-                            }
-
                             dbg_gapped_attempted += 1;
 
                             if in_window && debug_mode {
-                                eprintln!("[DEBUG WINDOW] Seed at q={}, s={} -> GAPPED EXTENSION (ungapped_score={}, ungapped_bit_score={:.1}, seed_len={})", q_pos_usize, kmer_start, ungapped_score, ungapped_bit_score, qe - qs);
+                                eprintln!("[DEBUG WINDOW] Seed at q={}, s={} -> GAPPED EXTENSION (ungapped_score={}, seed_len={})", q_pos_usize, kmer_start, ungapped_score, qe - qs);
                             }
 
                             // Gapped extension with task-specific X-drop
                             // NCBI BLAST: blastn uses 30 (non-greedy), megablast uses 25 (greedy)
                             // Reference: ncbi-blast/c++/include/algo/blast/core/blast_options.h:122-148
+                            // Reference: ncbi-blast/c++/src/algo/blast/core/blast_gapalign.c: gap_align->gap_x_dropoff = ext_params->gap_x_dropoff;
                             let (
                                 final_qs,
                                 final_qe,
@@ -1600,34 +1513,16 @@ pub fn run(args: BlastnArgs) -> Result<()> {
                             continue;
                         }
 
-                        // NCBI BLAST Gap Trigger: Check if ungapped bit score >= 27.0 before gapped extension
-                        // Reference: ncbi-blast/c++/include/algo/blast/core/blast_options.h:137
-                        // BLAST_GAP_TRIGGER_NUCL = 27.0
-                        let (ungapped_bit_score, _) = calculate_evalue(
-                            ungapped_score,
-                            q_record.seq().len(),
-                            db_len_total,
-                            db_num_seqs,
-                            &params_for_closure,
-                        );
-                        
-                        if ungapped_bit_score < GAP_TRIGGER_BIT_SCORE {
-                            // Ungapped bit score below gap trigger threshold - skip gapped extension
-                            if in_window && debug_mode {
-                                eprintln!("[DEBUG WINDOW] Seed at q={}, s={} SKIPPED: ungapped_bit_score={:.1} < GAP_TRIGGER={:.1}", q_pos, kmer_start, ungapped_bit_score, GAP_TRIGGER_BIT_SCORE);
-                            }
-                            continue;
-                        }
-
                         dbg_gapped_attempted += 1;
 
                         if in_window && debug_mode {
-                            eprintln!("[DEBUG WINDOW] Seed at q={}, s={} -> GAPPED EXTENSION (ungapped_score={}, ungapped_bit_score={:.1}, seed_len={})", q_pos, kmer_start, ungapped_score, ungapped_bit_score, qe - qs);
+                            eprintln!("[DEBUG WINDOW] Seed at q={}, s={} -> GAPPED EXTENSION (ungapped_score={}, seed_len={})", q_pos, kmer_start, ungapped_score, qe - qs);
                         }
 
                         // Gapped extension with task-specific X-drop
                         // NCBI BLAST: blastn uses 30 (non-greedy), megablast uses 25 (greedy)
                         // Reference: ncbi-blast/c++/include/algo/blast/core/blast_options.h:122-148
+                        // Reference: ncbi-blast/c++/src/algo/blast/core/blast_gapalign.c: gap_align->gap_x_dropoff = ext_params->gap_x_dropoff;
                         let (
                             final_qs,
                             final_qe,

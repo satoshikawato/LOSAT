@@ -1,14 +1,14 @@
 # TBLASTX NCBI Parity Status Report
 
 **作成日時**: 2026-01-03  
-**更新日時**: 2026-01-04 (Masked Region Extension 調査完了、Subject frame ソートバグ修正、HSP 過剰生成問題を特定)  
+**更新日時**: 2026-01-05 (ベンチノイズ抑制: `--verbose`/`LOSAT_DIAGNOSTICS`, AP027280 +64 再確認, extra HSP 抽出/トレース基盤追加)  
 **現象**: LOSATが長い配列 (600kb+) でNCBI BLAST+より多くのヒットを出力  
 **目標**: 出力を1ビットの狂いもなく一致させる
 
 **現在の状態**:
-- ✅ **短い配列 (AP027280, 300kb)**: LOSAT 42,797 vs NCBI 42,739 (差: 58, **0.14%**) - **解決済み**
+- 🔶 **短い配列 (AP027280, 300kb)**: LOSAT 42,797 vs NCBI 42,733 (差: +64, **0.15%**) - **調査中**
 - 🔴 **長い配列 (600kb+)**: LOSAT 29,766 vs NCBI 14,871 (**約2倍**) - **未解決**
-- ✅ チェーンメンバーフィルタリング: 修正完了 (短い配列では正常動作)
+- ⚠️ `link_hsps.c:1018-1020` の "Skip chain members" は **出力削除ではなく**、チェーン起点の二重処理を避けるための skip（チェーンメンバー自体は link を辿って出力に含まれる）。
 - ✅ Subject frame ソート順序: 修正完了 (負フレームが先にソートされるよう修正)
 - ✅ eff_searchsp 事前計算: 修正完了 (NCBI と同じアーキテクチャに変更)
 - 🔴 **根本原因特定**: HSP 生成数が多すぎる (338,859 vs 推定 30,000-45,000)
@@ -2333,83 +2333,41 @@ if qo <= h_qe || so <= h_se || qo > h_qe_gap || so > h_se_gap { continue; }
 
 ---
 
-### 11.2 ✅ チェーンメンバー出力フィルタリング
+### 11.2 ⚠️ 「チェーンメンバー出力フィルタ」の誤解を訂正
 
-**発見日**: 2026-01-04  
-**修正日**: 2026-01-04  
-**状態**: ✅ **修正完了**
+**更新日**: 2026-01-05  
+**状態**: ⚠️ **ドキュメント修正（出力からチェーンメンバーを削除しない）**
 
-#### 現象
+#### 背景
 
-AP027131 vs AP027133 (600kb+, gencode 4) で、LOSATがNCBIの約2倍のヒットを出力していた。
+NCBI `link_hsps.c:1018-1020` の `continue` 条件を「チェーンメンバーを出力から除外する」と誤解していた。
 
-#### 根本原因
+#### NCBI の実際の意図（重要）
 
-NCBI `link_hsps.c:1014-1020` では、**出力フェーズ**（`prev`/`next` リスト構築時）にチェーンメンバーをフィルタリング:
+NCBI は `LinkHSPStruct` の wrapper 配列を走査して `prev/next` リストを構築する際、
+**チェーンメンバーを “走査の起点” としてはスキップ**する。
+ただし、**チェーンヘッドから `link` を辿って `next` を接続する**ため、
+チェーンメンバー自体は結果リストに含まれる（＝出力から削除されない）。
+
+NCBI 該当箇所（`link_hsps.c:1018-1020`）:
 
 ```c
-// NCBI link_hsps.c lines 1014-1020:
-for (index=0, last_hsp=NULL;index<total_number_of_hsps; index++) 
-{
-   H = link_hsp_array[index];
-
-   /* If this is not a single piece or the start of a chain, then Skip it. */
-   if (H->linked_set == TRUE && H->start_of_chain == FALSE)
-      continue;
-   // ... build output linked list
-}
+/* If this is not a single piece or the start of a chain, then Skip it. */
+if (H->linked_set == TRUE && H->start_of_chain == FALSE)
+    continue;
 ```
 
-**重要な発見**: このフィルタリングは `s_BlastEvenGapLinkHSPs` のリンキングDP終了後の**出力構築フェーズ**で行われる。リンキング関数自体は全HSPを返す。
+#### LOSAT 側の検証
 
-#### 修正内容
+outfmt 変換時に `if h.linked_set && !h.start_of_chain { continue; }` を入れると、
+AP027280 でヒット数が **42,797 → 4,011** まで激減し、NCBI と大きく乖離した。
+よって **「出力フィルタ」として適用するのは誤り**であり採用しない。
 
-**失敗した修正** (`sum_stats_linking.rs` 内でフィルタリング):
-```rust
-// 間違った場所 - ヒット数が極端に減少
-group_hits.into_iter()
-    .filter(|h| !h.linked_set || h.start_of_chain)
-    .collect()
-```
+#### 次アクション
 
-**正しい修正** (`utils.rs` 出力変換ループでフィルタリング):
-```rust
-// utils.rs:1982-1992
-for h in linked_hits {
-    if h.e_value > evalue_threshold {
-        continue;
-    }
-    
-    // NCBI parity: link_hsps.c:1018-1020
-    // Filter chain members during OUTPUT phase (not in linking phase).
-    if h.linked_set && !h.start_of_chain {
-        continue;
-    }
-    // ... convert to Hit
-}
-```
-
-**フィルタリング位置の違いが重要だった理由**:
-- `sum_stats_linking.rs` 内でフィルタすると、`linked_set`/`start_of_chain` フラグがまだ設定されていないHSPも影響を受ける
-- `utils.rs` の出力変換時点では、全HSPのフラグが正しく設定済み
-
-#### 検証結果
-
-| データセット | NCBI | LOSAT (修正後) | 差 |
-|-------------|------|---------------|-----|
-| AP027280 vs AP027280 | 42,739 | 42,797 | +58 (+0.14%) |
-
-**修正前**: 4,011 ヒット (フィルタ位置が間違っていた)  
-**修正後**: 42,797 ヒット (NCBI とほぼ一致)
-
-#### 関連コード
-
-**NCBI (出力フェーズでのフィルタリング)**:
-- `link_hsps.c:1014-1020` - HSP "hook up" ループ
-
-**LOSAT (修正後)**:
-- `utils.rs:1982-1992` - 出力変換ループでフィルタリング
-- `sum_stats_linking.rs:1375-1382` - フラグ設定のみ、フィルタリングなし
+- `LOSAT_TRACE_HSP="qstart,qend,sstart,send"` で対象HSPを **seed→extension→reeval→linking→output** 追跡し、
+  **チェーン形成／E-value 付与の差異**をピンポイントで潰す。
+- `tests/find_tblastx_extra_hsp.py` で “LOSATにだけ出るHSP” を抽出し、対象を固定して調査する。
 
 ---
 
@@ -2449,8 +2407,8 @@ for h in linked_hits {
 | 2026-01-03 | **🔥 リンキングロジック完全NCBI化完了**。以下の修正を実施: **(1) グルーピング方法**: HashMap分類+並列処理 → NCBIと同じくソート後の連続フレーム境界検出+順次処理に変更 (`sum_stats_linking.rs:502-580`を全面書き換え)。 **(2) コンテキスト固有Karlinパラメータ**: `QueryContext`に`karlin_params: KarlinParams`フィールドを追加 (`lookup.rs`)。`normalize_score()`呼び出しを固定`params.lambda`から`query_contexts[ctx_idx].karlin_params.lambda`に変更。NCBI `link_hsps.c:750-752, 866-867`の`kbp[H->hsp->context]`と完全同等。 **(3) sum += num * cutoff補正追加**: NCBI `link_hsps.c:907-908, 942-943`の`best[i]->hsp_link.sum[i] += (num)*cutoff[i]`を追加。 **(4) ソート安定性**: `sort_by` → `sort_unstable_by`に変更 (NCBIのqsort互換)。 **(5) HspLink構造体にctx_idx追加**: コンテキスト情報をリンキング中に参照可能に。**結果**: AP027280自己比較で **33,000+ヒット差 → 64ヒット差** (99.8%削減)。ビットスコア分布は完全一致 (1ビット丸め誤差のみ)。 |
 | 2026-01-03 | **追加の構造変更**: (1) **並列処理の削除**: `sum_stats_linking.rs` の `into_par_iter()` を削除し、NCBIと同じ順次処理に変更。パフォーマンスへの影響は要測定。(2) **APIシグネチャ変更**: `build_ncbi_lookup()` と `NeighborLookup::build()` に `karlin_params: &KarlinParams` パラメータを追加。`utils.rs` の両モードで呼び出しを更新。 |
 | 2026-01-03 | **残り64ヒット差異の詳細分析完了**。差異はE-value閾値付近 (5-10) に集中: bit score 22で+46件、bit score 23で+8件。E-value > 5で+20件、E-value > 8で+19件。**原因推定**: 浮動小数点精度差、チェーン形成タイミングの微妙な差異。高スコア領域は完全一致。**結論**: 実用上問題なしレベル (0.15%差)。 |
-| 2026-01-04 | **🔴 AP027131 vs AP027133 (600kb+, gencode 4) で約2倍のヒット差を発見**。LOSAT 29,766 vs NCBI 14,871 (+100%)。**根本原因**: NCBIは `link_hsps.c:1018-1020` でチェーンメンバー (`linked_set == TRUE && start_of_chain == FALSE`) を出力から除外するが、LOSATは全HSPを出力。チェーンメンバーフィルタリングを試みたが、ヒット数が極端に減少 (42,797 → 4,011)。`linked_set`/`start_of_chain` フラグの設定に問題がある可能性。また、同じ座標のHSPでビットスコア差 (LOSAT > NCBI、例: 1616 vs 1533) を発見。セクション11.2を追加。 |
-| 2026-01-04 | **✅ 11.2 チェーンメンバー出力フィルタリングを修正完了**。**重要な発見**: フィルタリングの位置が間違っていた。NCBI `link_hsps.c:1014-1020` は**出力フェーズ** (`prev`/`next` リスト構築時) でフィルタリングする。`sum_stats_linking.rs` 内でフィルタしたため、フラグ未設定のHSPも除外されていた。**正しい修正**: `utils.rs:1982-1992` の出力変換ループでフィルタリング (`if h.linked_set && !h.start_of_chain { continue; }`)。AP027280 自己比較: NCBI 42,739 vs LOSAT 42,797 (差: 58, 0.14%)。パリティ改善率 99.9%。 |
+| 2026-01-04 | **🔴 AP027131 vs AP027133 (600kb+, gencode 4) で約2倍のヒット差を発見**。LOSAT 29,766 vs NCBI 14,871 (+100%)。**注記**: 当初 `link_hsps.c:1018-1020` を「チェーンメンバーを出力から除外」と誤解していたが、実際は **チェーン起点の二重処理を避けるための skip**（チェーンメンバー自体は `link` を辿ってリストに含まれる）。過剰ヒットの本質は上流（seeding/extension）側にある。 |
+| 2026-01-05 | **ベンチノイズ抑制 + extra HSP 追跡基盤を追加**。tblastx に `--verbose` を追加し、通常実行の大量ログを抑制。詳細診断は `LOSAT_DIAGNOSTICS=1` のときのみ出力。AP027280 自己比較は **NCBI 42,733 vs LOSAT 42,797（+64, 0.15%）** を再確認。`tests/find_tblastx_extra_hsp.py` を追加し “LOSATにだけ出るHSP” を抽出可能に。さらに `LOSAT_TRACE_HSP="qstart,qend,sstart,send"` により seed→extension→reeval→linking→output を追跡できるようにした。 |
 | 2026-01-04 | **🔴 長配列 (600kb+) での過剰ヒット問題を特定**。グラフ分析により、**短い配列 (~300kb) では正常だが、長い配列 (600kb+) では自己比較・異種比較どちらでも過剰ヒット**が発生することを確認。問題は「自己比較 vs 異種比較」ではなく**配列の長さに依存**。**過剰領域**: Alignment Length 30-100 AA, Identity 30-50%。**最有力仮説**: NCBI は複数の場所で異なる `eff_searchsp` を計算・使用しているが、LOSAT は硬直的に単一の計算式を使用。特に `BLAST_SmallGapSumE` に渡す `searchsp_eff` が `query_info->contexts[ctx].eff_searchsp` (事前計算済み) である点と、LOSAT がローカル計算している点に差異がある可能性。セクション13.1に詳細な調査方針を追加。 |
 | 2026-01-04 | **セクション 13.2.2 追加: 原因候補の再分析**。(1) **DPループ内のリンク条件**: trim座標計算は NCBI と同一 (`MIN(length/4, TRIM_SIZE)`) ✅。(2) **座標システム**: 両方とも 0-indexed frame 内相対座標を使用、差異なしと推定 ✅。(3) **早期終了条件**: NCBI と同一 ✅。(4) **E-value 数値精度**: 長いチェーンで累積誤差の可能性あり。(5) **active list 削除ロジック**: 「best選択ループで linked_to チェックがない」という指摘は**誤り**と判定。LOSAT は intrusive linked list (`next_active`/`prev_active`) で active HSP を管理し、処理済み HSP は O(1) でアンリンクされるため、NCBI の `hp_start->next` トラバースと等価。仮説7 を追加。 |
 | 2026-01-04 | **✅ 仮説6: eff_searchsp の運用の硬直性を修正完了**。NCBIと同様に「subject ごとに eff_searchsp/length_adjustment を事前計算し、cutoff と sum-stats で同一値を参照する」アーキテクチャに変更。**実装内容**: (1) `ncbi_cutoffs.rs` に `EffLengthsResult` 構造体と `compute_eff_lengths_subject_mode_tblastx()` 関数を追加（`length_adjustment` と `eff_searchsp` を同時に返す）。NCBI `blast_setup.c:821-847` の `BLAST_CalcEffLengths` と同等。(2) `utils.rs` の `run()` と `run_with_neighbor_map()` 両方で、subject 処理時に `length_adj_per_context: Vec<i64>` と `eff_searchsp_per_context: Vec<i64>` を事前計算。(3) `sum_stats_linking.rs` の `apply_sum_stats_even_gap_linking()` と `link_hsp_group_ncbi()` に `length_adj_per_context` と `eff_searchsp_per_context` 引数を追加。(4) `link_hsp_group_ncbi()` 内で `compute_length_adjustment_simple()` の再計算を撤去し、保存済みの値を参照するよう変更。(5) `eff_search_space` を f64 積から i64 直接参照に変更（NCBI の Int8 演算と構造一致）。**変更ファイル**: `ncbi_cutoffs.rs`, `utils.rs`, `sum_stats_linking.rs`。**NCBIコード参照**: `blast_setup.c:846-847` (`query_info->contexts[index].eff_searchsp`/`length_adjustment` 保存)、`link_hsps.c:560` (`query_info->contexts[query_context].length_adjustment` 参照)。 |
@@ -2471,13 +2429,13 @@ for h in linked_hits {
 ### 13.1 🔴 最優先: 長い配列 (600kb+) での過剰ヒット問題
 
 **観察された現象**:
-- AP027280 自己比較 (300kb): ✅ NCBI とほぼ一致 (差: 58, 0.14%)
+- AP027280 自己比較 (300kb): ✅ NCBI とほぼ一致 (差: +64, 0.15%)
 - AP027131 vs AP027133 (600kb+): ❌ LOSAT が約2倍のヒット
 - AP027078 vs AP027131: ❌ LOSAT が過剰
 - NZ_CP006932 自己比較 (長い配列): ❌ 分布に差異あり
 
 **重要な発見**: 問題は「自己比較 vs 異種比較」ではなく、**配列の長さ**に依存
-- 短い配列 (~300kb): ✅ 正常
+- 短い配列 (~300kb): ✅ ほぼ一致（AP027280 で差: +64, 0.15%）
 - 長い配列 (600kb+): ❌ 過剰ヒット（自己比較でも発生）
 
 **グラフ分析** (2026-01-04):
@@ -2764,21 +2722,22 @@ hsp_links[cur].prev_active = SENTINEL_IDX;
 
 | ファイル | 調査ポイント |
 |---------|-------------|
-| `utils.rs:1982-1992` | チェーンメンバーフィルタリング |
+| `tblastx/utils.rs` | 出力変換（E-value閾値）・`LOSAT_TRACE_HSP` による追跡 |
 | `sum_stats_linking.rs:557-590` | eff_searchsp 計算 |
 | `sum_stats_linking.rs` | cutoff 計算 (`calculate_link_hsp_cutoffs_ncbi`) |
 | `ncbi_cutoffs.rs` | per-subject cutoff 計算 |
 | NCBI `link_hsps.c` | 追加フィルタリングの有無 |
 | NCBI `blast_hits.c` | HSP reaping ロジック |
 
-### 13.2 ✅ 完了: チェーンメンバー出力フィルタリング (セクション11.2)
-- **修正完了**: `utils.rs` の出力変換ループでフィルタリングを実装
-- **結果**: AP027280 自己比較で 42,797 vs 42,739 (差: 58, 0.14%)
+### 13.2 ⚠️ 誤解訂正: 「チェーンメンバー出力フィルタ」ではない (セクション11.2)
+- **結論**: `link_hsps.c:1018-1020` の skip は「出力削除」ではなく、チェーン起点の二重処理を避けるための制御。
+- **検証**: outfmt 変換で `linked_set && !start_of_chain` を除外すると AP027280 が **42,797 → 4,011** に激減し、NCBI と大きく乖離するため不採用。
+- **現状**: AP027280 自己比較は **42,797 vs 42,733（+64, 0.15%）**。差分の根本は別（extra HSP / E-value閾値近傍 / チェーン形成差）で調査継続。
 
 ### 13.2 中優先
 1. **パフォーマンス測定**: 並列処理削除による影響を確認
 2. **大規模データセットテスト**: AP027131 vs AP027133 (600kb+) で再テスト
-3. **残り58ヒットの分析**: E-value閾値付近の差異を確認
+3. **残り64ヒットの分析**: E-value閾値付近の差異を確認
 
 ### 13.3 低優先
 1. **BLASTN モードへの適用**: 同様のNCBIパリティ改善が必要か確認
@@ -2789,7 +2748,7 @@ hsp_links[cur].prev_active = SENTINEL_IDX;
 - ~~コンテキスト固有Karlinパラメータ~~ ✅
 - ~~sum += num * cutoff補正~~ ✅
 - ~~ソート安定性~~ ✅
-- ~~チェーンメンバー出力フィルタリング~~ ✅ (2026-01-04)
+- ~~チェーンメンバー出力フィルタリング~~ ❌ (誤解: 2026-01-05 に訂正)
 
 ### 13.6 現在の状態サマリー
 
@@ -2798,10 +2757,10 @@ hsp_links[cur].prev_active = SENTINEL_IDX;
 |------|-----|
 | テストファイル | AP027280 自己比較 |
 | LOSAT ヒット数 | 42,797 |
-| NCBI ヒット数 | 42,739 |
-| 差 | 58 (0.14%) |
+| NCBI ヒット数 | 42,733 |
+| 差 | +64 (0.15%) |
 | ビットスコア分布 | 完全一致 (丸め誤差1ビット) |
-| パリティ改善率 | **99.9%** (33,000+ → 58) |
+| パリティ改善率 | **99.8%** (33,000+ → 64) |
 
 #### 🔴 長い配列: 600kb+ (自己比較・異種比較どちらでも発生)
 | 指標 | 短い配列 (300kb) | 長い配列 (600kb+) |
@@ -2813,7 +2772,7 @@ hsp_links[cur].prev_active = SENTINEL_IDX;
 
 **重要な発見**: 
 - 問題は **配列の長さ** に依存（自己比較 vs 異種比較ではない）
-- 短い配列 (~300kb) ではチェーンメンバーフィルタリングが正常動作
+- 短い配列 (~300kb) は差分 **+64 (0.15%)** まで縮小
 - 長い配列 (600kb+) では自己比較でも過剰ヒットが発生
 - **真の原因は HSP 生成数の多さ** (338,859 vs 推定 30,000-45,000) - seeding/extension の問題
 

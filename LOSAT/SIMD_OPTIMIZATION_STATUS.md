@@ -445,18 +445,21 @@ for s0 in 0..alphabet_size {
 
 ### Step 4後（sum_stats_linking 計測追加 → 真のボトルネック確定）
 ```
-[TIMING] scan_subject: 0.119s (calls=38114)
-[TIMING] ungapped_extend: 0.422s (calls=4067119)
-[TIMING] reevaluate: 0.008s (calls=65165)
-[TIMING] sum_stats_linking: 28.457s (calls=1)
+[TIMING] read_queries: 0.209s
+[TIMING] build_lookup: 0.036s
+[TIMING] read_subjects: 0.025s
+[TIMING] scan_subject: 0.183s (calls=38114)
+[TIMING] ungapped_extend: 0.490s (calls=4067119)
+[TIMING] reevaluate: 0.007s (calls=65165)
+[TIMING] sum_stats_linking: 22.794s (calls=1)
 [TIMING] identity_calc: 0.002s (calls=42797)
-[TIMING] search_total: 30.308s
-[TIMING] total: 30.613s
+[TIMING] search_total: 25.652s
+[TIMING] total: 25.999s
 ```
 
 **重要な発見**:
-- Reevaluationの時間は0.008秒（全体の0.03%）と非常に短く、ボトルネックではない
-- **実際のボトルネックは`sum_stats_linking`**（28.457秒 / search_total 30.308秒）
+- Reevaluationの時間は0.007秒（全体の0.03%）と非常に短く、ボトルネックではない
+- **実際のボトルネックは`sum_stats_linking`**（22.794秒 / search_total 25.652秒）
 - 短いHSP（16未満）はスカラー実装を使用することで、SIMD化のオーバーヘッドを回避
 
 **注意**: このテストケース（AP027280自己比較）では、SIMD化による明確な高速化は見られませんでした。これは以下の理由が考えられます：
@@ -473,16 +476,17 @@ for s0 in 0..alphabet_size {
 
 **結果**:
 ```
-real	0m3.457s
+real	0m23.379s
 ```
 
 **ヒット数（NCBIとの差分）**:
 - NCBI（`tests/blast_out/AP027280.AP027280.tblastx.n1.out`）: 42733
-- LOSAT（`tests/losat_out/AP027280.AP027280.tlosatx.n1.out`）: 45039
-- 差分: **+2306**（LOSATの方が多い）
+- LOSAT（`tests/losat_out/AP027280.AP027280.tlosatx.n1.out`）: 42797
+- 差分: **+64**（LOSATの方が多い）
 
 **メモ**:
-- このワークスペースの `target/release/LOSAT` は `--seg` 引数を受け付けないため、上記コマンド（`--seg`無し）を本セッションの基準とする。
+- **ベンチのノイズ削減**のため、tblastx はデフォルトで進捗/情報ログを出さない（`--verbose` で有効化）。
+- 詳細診断ログは `LOSAT_DIAGNOSTICS=1` のときのみ出す（通常は無出力）。
 
 ### 2026-01-05: sum_stats_linking高速化（本セッション）
 
@@ -527,9 +531,9 @@ DeepWikiの提案（座標変換・neighbor map・scan/extension SIMDなど）�
 ### 最優先: `sum_stats_linking` の高速化（最大ボトルネック）
 
 **根拠（AP027280自己比較, LOSAT_TIMING=1）**:
-- `[TIMING] sum_stats_linking: 28.457s (calls=1)`
-- `[TIMING] search_total: 30.308s`
-- 参考: `ungapped_extend`は0.422s、`reevaluate`は0.008s
+- `[TIMING] sum_stats_linking: 22.794s (calls=1)`
+- `[TIMING] search_total: 25.652s`
+- 参考: `ungapped_extend`は0.490s、`reevaluate`は0.007s
 
 **対象**:
 - `LOSAT/src/algorithm/tblastx/sum_stats_linking.rs` の `apply_sum_stats_even_gap_linking`
@@ -604,7 +608,7 @@ sha256sum baseline.out step1.out step2.out
   - Step 2: Identity計算のSIMD化（AVX2/SSE2実装完了）
   - Step 3: Reevaluation スコア計算ループのSIMD化（AVX2実装完了、短いHSPはスカラー実装を使用）
 - 2026-01-05: TBLASTXの真のボトルネックを確定（LOSAT_TIMING=1）
-  - `sum_stats_linking` が 28.457s / search_total 30.308s を占めることを確認
+  - `sum_stats_linking` が 22.794s / search_total 25.652s を占めることを確認
   - 次の優先順位を「sum_stats_linking高速化」+「長配列での座標変換（NCBI互換性）」に更新
 - 2026-01-XX: DeepWiki情報を反映して今後のSIMD化候補を整理
   - Smith-WatermanアライメントのDP計算を最優先候補に追加

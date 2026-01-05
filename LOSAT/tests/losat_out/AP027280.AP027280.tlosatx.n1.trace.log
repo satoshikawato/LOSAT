@@ -1,0 +1,9 @@
+[TRACE_HSP] stage=init_hsp_saved raw_score=50 ctx_idx=5 s_f_idx=4 q_frame=-3 s_frame=-2 q=111880-111860 s=163496-163476
+[TRACE_HSP] stage=after_get_ungapped_hsp_list raw_score=50 e=inf ctx_idx=5 s_f_idx=4 q_frame=-3 s_frame=-2 linked_set=false start_of_chain=false q=111880-111860 s=163496-163476
+[TRACE_HSP] stage=after_reevaluate raw_score=50 e=inf ctx_idx=5 s_f_idx=4 q_frame=-3 s_frame=-2 linked_set=false start_of_chain=false q=111880-111860 s=163496-163476
+[TRACE_HSP] stage=after_linking raw_score=50 e=0.05641883137722258 ctx_idx=5 s_f_idx=4 q_frame=-3 s_frame=-2 linked_set=true start_of_chain=true q=111880-111860 s=163496-163476
+[TRACE_HSP] stage=output_hit raw_score=50 bit=25.8 e=0.05641883137722258 q=111880-111860 s=163496-163476
+
+real	0m23.791s
+user	0m23.713s
+sys	0m0.038s

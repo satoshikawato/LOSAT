@@ -9,6 +9,7 @@ use indicatif::{ProgressBar, ProgressStyle};
 use rayon::prelude::*;
 use std::sync::atomic::{AtomicI32, AtomicU64, AtomicUsize, Ordering as AtomicOrdering};
 use std::sync::mpsc::channel;
+use std::sync::OnceLock;
 use std::time::{Duration, Instant};
 
 use crate::common::{write_output_ncbi_order, Hit};
@@ -362,6 +363,151 @@ struct InitHSP {
     s_orig_len: usize,
 }
 
+// ---------------------------------------------------------------------------
+// HSP tracing (opt-in via env var)
+// ---------------------------------------------------------------------------
+
+/// Trace a single HSP through the pipeline by matching the final outfmt6/7
+/// coordinates (qstart,qend,sstart,send).
+///
+/// Enable by setting:
+/// - `LOSAT_TRACE_HSP="qstart,qend,sstart,send"`
+///   Example: `LOSAT_TRACE_HSP="111880,111860,163496,163476"`
+#[derive(Clone, Copy, Debug)]
+struct TraceHspTarget {
+    q_start: i32,
+    q_end: i32,
+    s_start: i32,
+    s_end: i32,
+}
+
+static TRACE_HSP_TARGET: OnceLock<Option<TraceHspTarget>> = OnceLock::new();
+
+#[inline(always)]
+fn trace_hsp_target() -> Option<TraceHspTarget> {
+    *TRACE_HSP_TARGET.get_or_init(|| {
+        let raw = std::env::var("LOSAT_TRACE_HSP").ok()?;
+        let parts: Vec<&str> = raw
+            .split(|c: char| c == ',' || c == ':' || c == ';' || c.is_whitespace())
+            .filter(|p| !p.is_empty())
+            .collect();
+        if parts.len() != 4 {
+            eprintln!(
+                "[TRACE_HSP] invalid LOSAT_TRACE_HSP (expected 4 integers): {:?}",
+                raw
+            );
+            return None;
+        }
+        let q_start: i32 = parts[0].parse().ok()?;
+        let q_end: i32 = parts[1].parse().ok()?;
+        let s_start: i32 = parts[2].parse().ok()?;
+        let s_end: i32 = parts[3].parse().ok()?;
+        Some(TraceHspTarget {
+            q_start,
+            q_end,
+            s_start,
+            s_end,
+        })
+    })
+}
+
+#[inline(always)]
+fn trace_match_target(target: TraceHspTarget, q_start: usize, q_end: usize, s_start: usize, s_end: usize) -> bool {
+    q_start as i32 == target.q_start
+        && q_end as i32 == target.q_end
+        && s_start as i32 == target.s_start
+        && s_end as i32 == target.s_end
+}
+
+#[inline]
+fn trace_init_hsp_if_match(stage: &str, init: &InitHSP, contexts: &[super::lookup::QueryContext]) {
+    let Some(target) = trace_hsp_target() else {
+        return;
+    };
+
+    let ctx = &contexts[init.ctx_idx];
+    // Convert absolute query coords to context-relative (sentinel-inclusive) first.
+    let q_start_rel = adjust_initial_hsp_offsets(init.q_start_absolute, ctx.frame_base);
+    let q_end_rel = adjust_initial_hsp_offsets(init.q_end_absolute, ctx.frame_base);
+    if q_start_rel < 0 || q_end_rel < 0 || init.s_start < 0 || init.s_end < 0 {
+        return;
+    }
+
+    // Convert to logical AA coords (sentinel-exclusive, half-open).
+    let q_aa_start = (q_start_rel as usize).saturating_sub(1);
+    let q_aa_end = (q_end_rel as usize).saturating_sub(1);
+    let s_aa_start = (init.s_start as usize).saturating_sub(1);
+    let s_aa_end = (init.s_end as usize).saturating_sub(1);
+
+    let (q_start, q_end) = convert_coords(q_aa_start, q_aa_end, init.q_frame, init.q_orig_len);
+    let (s_start, s_end) = convert_coords(s_aa_start, s_aa_end, init.s_frame, init.s_orig_len);
+
+    if trace_match_target(target, q_start, q_end, s_start, s_end) {
+        eprintln!(
+            "[TRACE_HSP] stage={} raw_score={} ctx_idx={} s_f_idx={} q_frame={} s_frame={} q={}-{} s={}-{}",
+            stage,
+            init.score,
+            init.ctx_idx,
+            init.s_f_idx,
+            init.q_frame,
+            init.s_frame,
+            q_start,
+            q_end,
+            s_start,
+            s_end
+        );
+    }
+}
+
+#[inline]
+fn trace_ungapped_hit_if_match(stage: &str, h: &UngappedHit) {
+    let Some(target) = trace_hsp_target() else {
+        return;
+    };
+
+    let (q_start, q_end) = convert_coords(h.q_aa_start, h.q_aa_end, h.q_frame, h.q_orig_len);
+    let (s_start, s_end) = convert_coords(h.s_aa_start, h.s_aa_end, h.s_frame, h.s_orig_len);
+
+    if trace_match_target(target, q_start, q_end, s_start, s_end) {
+        eprintln!(
+            "[TRACE_HSP] stage={} raw_score={} e={} ctx_idx={} s_f_idx={} q_frame={} s_frame={} linked_set={} start_of_chain={} q={}-{} s={}-{}",
+            stage,
+            h.raw_score,
+            h.e_value,
+            h.ctx_idx,
+            h.s_f_idx,
+            h.q_frame,
+            h.s_frame,
+            h.linked_set,
+            h.start_of_chain,
+            q_start,
+            q_end,
+            s_start,
+            s_end
+        );
+    }
+}
+
+#[inline]
+fn trace_final_hit_if_match(stage: &str, h: &Hit) {
+    let Some(target) = trace_hsp_target() else {
+        return;
+    };
+    if trace_match_target(target, h.q_start, h.q_end, h.s_start, h.s_end) {
+        eprintln!(
+            "[TRACE_HSP] stage={} raw_score={} bit={:.1} e={} q={}-{} s={}-{}",
+            stage,
+            h.raw_score,
+            h.bit_score,
+            h.e_value,
+            h.q_start,
+            h.q_end,
+            h.s_start,
+            h.s_end
+        );
+    }
+}
+
 struct WorkerState {
     tx: std::sync::mpsc::Sender<Vec<Hit>>,
     offset_pairs: Vec<OffsetPair>,
@@ -502,7 +648,7 @@ fn get_ungapped_hsp_list(
         
         // Create UngappedHit with context-relative coordinates (before reevaluation)
         // NCBI: Blast_HSPInit creates HSP with original extension score
-        ungapped_hits.push(UngappedHit {
+        let uh = UngappedHit {
             q_idx: init_hsp.q_idx,
             s_idx: init_hsp.s_idx,
             ctx_idx: init_hsp.ctx_idx,
@@ -521,7 +667,9 @@ fn get_ungapped_hsp_list(
             ordering_method: 0,
             linked_set: false,
             start_of_chain: false,
-        });
+        };
+        trace_ungapped_hit_if_match("after_get_ungapped_hsp_list", &uh);
+        ungapped_hits.push(uh);
     }
     
     // NCBI: Sort the HSP array by score
@@ -650,6 +798,7 @@ fn reevaluate_ungapped_hsp_list(
         hit.raw_score = new_score;
         hit.num_ident = num_ident;
         
+        trace_ungapped_hit_if_match("after_reevaluate", &hit);
         kept_hits.push(hit);
     }
     
@@ -1809,6 +1958,39 @@ pub fn run(args: TblastxArgs) -> Result<()> {
                                         .ungapped_only_hits
                                         .fetch_add(1, AtomicOrdering::Relaxed);
                                 }
+
+                                // Extra debug for a traced HSP: print seed/extension inputs and cutoffs.
+                                if let Some(target) = trace_hsp_target() {
+                                    // Compute outfmt coords for this candidate init-hsp (same logic as trace_init_hsp_if_match).
+                                    let q_aa_start = (hsp_q_u as usize).saturating_sub(1);
+                                    let q_aa_end = (hsp_qe_u as usize).saturating_sub(1);
+                                    let s_aa_start = (hsp_s_u as usize).saturating_sub(1);
+                                    let s_aa_end = (_hsp_se_u as usize).saturating_sub(1);
+                                    let (q_start_dna, q_end_dna) =
+                                        convert_coords(q_aa_start, q_aa_end, ctx.frame, ctx.orig_len);
+                                    let (s_start_dna, s_end_dna) =
+                                        convert_coords(s_aa_start, s_aa_end, s_frame.frame, s_len);
+                                    if trace_match_target(target, q_start_dna, q_end_dna, s_start_dna, s_end_dna) {
+                                        eprintln!(
+                                            "[TRACE_HSP] seed/extend ctx_idx={} s_f_idx={} q_frame={} s_frame={} score={} cutoff={} x_dropoff={} last_hit={} subject_offset={} diff={} q_raw={} query_offset={} diag_coord={} right_extend={} s_last_off={}",
+                                            ctx_idx,
+                                            s_f_idx,
+                                            ctx.frame,
+                                            s_frame.frame,
+                                            score,
+                                            cutoff,
+                                            x_dropoff,
+                                            last_hit,
+                                            subject_offset,
+                                            diff,
+                                            q_raw,
+                                            query_offset,
+                                            diag_coord,
+                                            right_extend,
+                                            s_last_off,
+                                        );
+                                    }
+                                }
                                 // NCBI: BlastSaveInitHsp equivalent
                                 // Reference: blast_extend.c:360-375 BlastSaveInitHsp
                                 // Store HSP with absolute coordinates (before coordinate conversion)
@@ -1820,7 +2002,7 @@ pub fn run(args: TblastxArgs) -> Result<()> {
                                 let hsp_q_absolute = ctx.frame_base + (hsp_q as i32);
                                 let hsp_qe_absolute = ctx.frame_base + ((hsp_q + hsp_len) as i32);
                                 
-                                init_hsps.push(InitHSP {
+                                let init = InitHSP {
                                     q_start_absolute: hsp_q_absolute,
                                     q_end_absolute: hsp_qe_absolute,
                                     s_start: hsp_s,
@@ -1834,7 +2016,9 @@ pub fn run(args: TblastxArgs) -> Result<()> {
                                     s_frame: s_frame.frame,
                                     q_orig_len: ctx.orig_len,
                                     s_orig_len: s_len,
-                                });
+                                };
+                                trace_init_hsp_if_match("init_hsp_saved", &init, contexts_ref);
+                                init_hsps.push(init);
                             } else if diag_enabled {
                                 diagnostics
                                     .ungapped_cutoff_failed
@@ -1965,6 +2149,11 @@ pub fn run(args: TblastxArgs) -> Result<()> {
                     &length_adj_per_context,
                     &eff_searchsp_per_context,
                 );
+                if trace_hsp_target().is_some() {
+                    for h in &linked {
+                        trace_ungapped_hit_if_match("after_linking", h);
+                    }
+                }
                 if let Some(t) = t_linking {
                     let elapsed = t.elapsed();
                     linking_ns.fetch_add(elapsed.as_nanos() as u64, AtomicOrdering::Relaxed);
@@ -2034,7 +2223,7 @@ pub fn run(args: TblastxArgs) -> Result<()> {
                     let (s_start, s_end) =
                         convert_coords(h.s_aa_start, h.s_aa_end, s_frame.frame, s_len);
 
-                    final_hits.push(Hit {
+                    let out_hit = Hit {
                         query_id: query_ids_ref[ctx.q_idx as usize].clone(),
                         subject_id: s_id.clone(),
                         identity,
@@ -2050,7 +2239,9 @@ pub fn run(args: TblastxArgs) -> Result<()> {
                         q_idx: ctx.q_idx,
                         s_idx: h.s_idx,
                         raw_score: h.raw_score,
-                    });
+                    };
+                    trace_final_hit_if_match("output_hit", &out_hit);
+                    final_hits.push(out_hit);
                 }
 
                 if !final_hits.is_empty() {
@@ -2963,6 +3154,12 @@ fn run_with_neighbor_map(args: TblastxArgs) -> Result<()> {
             linked
         })
         .collect();
+
+    if trace_hsp_target().is_some() {
+        for h in &linked_hits {
+            trace_ungapped_hit_if_match("after_linking", h);
+        }
+    }
     if args.verbose {
         eprintln!("[2] After sum_stats_linking: {} hits", linked_hits.len());
     }
@@ -3059,7 +3256,7 @@ fn run_with_neighbor_map(args: TblastxArgs) -> Result<()> {
         let (q_start, q_end) = convert_coords(h.q_aa_start, h.q_aa_end, h.q_frame, h.q_orig_len);
         let (s_start, s_end) = convert_coords(h.s_aa_start, h.s_aa_end, h.s_frame, h.s_orig_len);
 
-        final_hits.push(Hit {
+        let out_hit = Hit {
             query_id: q_id.clone(),
             subject_id: s_id.to_string(),
             identity,
@@ -3075,7 +3272,9 @@ fn run_with_neighbor_map(args: TblastxArgs) -> Result<()> {
             q_idx: h.q_idx,
             s_idx: h.s_idx,
             raw_score: h.raw_score,
-        });
+        };
+        trace_final_hit_if_match("output_hit", &out_hit);
+        final_hits.push(out_hit);
     }
 
     if args.verbose {

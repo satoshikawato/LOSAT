@@ -1,73 +1,3 @@
-Reading queries...
-Building lookup table...
-
-=== Phase 1a: Exact Indexing Diagnostics ===
-Total exact positions indexed: 862165
-Unique exact words: 9255
-Max offsets per exact word: 1259
-Skipped (invalid residue): 0
-Skipped (SEG mask): 462035
-
-=== Phase 1b: Neighbor Generation Diagnostics ===
-Threshold: 13
-Exact entries added (self_score < threshold): 126185
-Neighbor entries added: 10969813
-Neighbor words generated (unique): 179824
-Words with exact-only additions: 870
-Words with neighbor generation: 8385
-Max neighbors generated for single word: 136
-  Word with max neighbors: idx=13972 (residues 13,20,20)
-Expansion factor (total_entries / exact_positions): 12.87x
-
-=== Phase 2: High-Frequency K-mer Analysis ===
-Top 10 high-frequency k-mers (before suppression):
-  #1: count=7645, idx=6804 (residues 6,20,20)
-  #2: count=7616, idx=20692 (residues 20,6,20)
-  #3: count=7169, idx=20916 (residues 20,13,20)
-  #4: count=7128, idx=13972 (residues 13,20,20)
-  #5: count=7109, idx=21133 (residues 20,20,13)
-  #6: count=7106, idx=21126 (residues 20,20,6)
-  #7: count=7019, idx=6356 (residues 6,6,20)
-  #8: count=6867, idx=6868 (residues 6,22,20)
-  #9: count=6832, idx=22740 (residues 22,6,20)
-  #10: count=6724, idx=6790 (residues 6,20,6)
-Hit count distribution:
-  2-10: 115 cells, 917 entries
-  11-100: 2314 cells, 124980 entries
-  101-500: 5687 cells, 1526729 entries
-  501-1000: 2249 cells, 1606660 entries
-  1001-5000: 3200 cells, 7248908 entries
-  5001-10000: 103 cells, 587804 entries
-
-=== NCBI Backbone Lookup Table (BLASTAA_SIZE=28) ===
-Contexts: 6
-Backbone size: 28540 cells (0.5 MB)
-Non-empty cells: 13668
-Total entries: 11095998
-Overflow size: 11095983 (44.4 MB)
-Longest chain: 7645
-==========================================
-
-Reading subjects...
-Searching 1 queries vs 1 subjects... (avg_query_length=220702)
-[DEBUG CUTOFF_CALC] eff_searchsp=44573947800
-[DEBUG CUTOFF_CALC] evalue=10, e_clamped=10
-[DEBUG CUTOFF_CALC] K=0.134, Lambda=0.3176
-[DEBUG CUTOFF_CALC] K*searchsp=5.972909e9, K*searchsp/E=5.972909e8
-[DEBUG CUTOFF_CALC] log(K*searchsp/E)=2.020791e1, score_before_ceil=6.362694e1
-[DEBUG CUTOFF_CALC] final_score=64 (ceil)
-[DEBUG CUTOFF_CALC] eff_searchsp=133788228188
-[DEBUG CUTOFF_CALC] evalue=0.0000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000005, e_clamped=0.000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000001
-[DEBUG CUTOFF_CALC] K=0.134, Lambda=0.3176
-[DEBUG CUTOFF_CALC] K*searchsp=1.792762e10, K*searchsp/E=1.792762e307
-[DEBUG CUTOFF_CALC] log(K*searchsp/E)=7.074774e2, score_before_ceil=2.227574e3
-[DEBUG CUTOFF_CALC] final_score=2228 (ceil)
-[DEBUG CUTOFF] query_len_aa=220702, subject_len_nucl=606194
-[DEBUG CUTOFF] eff_searchsp=44573947800
-[DEBUG CUTOFF] length_adjustment=52
-[DEBUG CUTOFF] cutoff_score_max=64
-[DEBUG CUTOFF] gap_trigger=41
-[DEBUG CUTOFF] final cutoff=41
 [DEBUG CUTOFF_CALC] eff_searchsp=44573947800
 [DEBUG CUTOFF_CALC] evalue=10, e_clamped=10
 [DEBUG CUTOFF_CALC] K=0.134, Lambda=0.3176
@@ -128,9 +58,18 @@ Searching 1 queries vs 1 subjects... (avg_query_length=220702)
 [DEBUG CUTOFF_CALC] K*searchsp=1.792762e10, K*searchsp/E=1.792762e307
 [DEBUG CUTOFF_CALC] log(K*searchsp/E)=7.074774e2, score_before_ceil=2.227574e3
 [DEBUG CUTOFF_CALC] final_score=2228 (ceil)
-[DEBUG HSP_SAVING] subject_len_nucl=606194, cutoff=41
-[DEBUG HSP_SAVING] total_attempted=31524554, saved=0, filtered_by_cutoff=31524554, filtered_by_reeval=0, filtered_by_hsp_test=0
-[DEBUG HSP_SAVING] score_distribution: min=41, max=3520, median=43, low_score(<30)=0/338859 (0.00%)
+[DEBUG CUTOFF_CALC] eff_searchsp=44573947800
+[DEBUG CUTOFF_CALC] evalue=10, e_clamped=10
+[DEBUG CUTOFF_CALC] K=0.134, Lambda=0.3176
+[DEBUG CUTOFF_CALC] K*searchsp=5.972909e9, K*searchsp/E=5.972909e8
+[DEBUG CUTOFF_CALC] log(K*searchsp/E)=2.020791e1, score_before_ceil=6.362694e1
+[DEBUG CUTOFF_CALC] final_score=64 (ceil)
+[DEBUG CUTOFF_CALC] eff_searchsp=133788228188
+[DEBUG CUTOFF_CALC] evalue=0.0000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000005, e_clamped=0.000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000001
+[DEBUG CUTOFF_CALC] K=0.134, Lambda=0.3176
+[DEBUG CUTOFF_CALC] K*searchsp=1.792762e10, K*searchsp/E=1.792762e307
+[DEBUG CUTOFF_CALC] log(K*searchsp/E)=7.074774e2, score_before_ceil=2.227574e3
+[DEBUG CUTOFF_CALC] final_score=2228 (ceil)
 [DEBUG LINKING_CUTOFF] avg_query_length=220702, subject_len_nucl=606194
 [DEBUG LINKING_CUTOFF] query_length_after_adj=220646, subject_length_after_adj=202008
 [DEBUG LINKING_CUTOFF] expected_length=56
@@ -149,7 +88,13 @@ Searching 1 queries vs 1 subjects... (avg_query_length=220702)
 [DEBUG LINKING_FILTER] subject_len_nucl=606194, group_size=88150
 [DEBUG LINKING_FILTER] INDEX 0 (small gap): cutoff=41, filtered=0, passed=0, total=0, filter_rate=0.00%
 [DEBUG LINKING_FILTER] INDEX 1 (large gap): cutoff=46, filtered=66045, passed=1399593, total=1465638, filter_rate=4.51%
+[DEBUG LINKING_FILTER] subject_len_nucl=606194, group_size=80948
+[DEBUG LINKING_FILTER] INDEX 0 (small gap): cutoff=41, filtered=0, passed=0, total=0, filter_rate=0.00%
+[DEBUG LINKING_FILTER] INDEX 1 (large gap): cutoff=46, filtered=61050, passed=1275626, total=1336676, filter_rate=4.57%
+[DEBUG LINKING_FILTER] subject_len_nucl=606194, group_size=84566
+[DEBUG LINKING_FILTER] INDEX 0 (small gap): cutoff=41, filtered=0, passed=0, total=0, filter_rate=0.00%
+[DEBUG LINKING_FILTER] INDEX 1 (large gap): cutoff=46, filtered=63516, passed=1257266, total=1320782, filter_rate=4.81%
 
-real	4m40.159s
-user	4m40.944s
-sys	0m0.180s
+real	5m18.059s
+user	5m16.276s
+sys	0m0.067s

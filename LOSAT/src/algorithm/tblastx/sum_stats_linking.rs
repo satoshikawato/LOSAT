@@ -14,9 +14,11 @@ use crate::stats::sum_statistics::{
     defaults::{GAP_SIZE, OVERLAP_SIZE},
 };
 use crate::stats::KarlinParams;
+use std::sync::OnceLock;
 
 use super::chaining::UngappedHit;
 use super::diagnostics::diagnostics_enabled;
+use super::extension::convert_coords;
 use super::lookup::QueryContext;
 
 // NCBI groups by `(context/3)` (query strand + query index) and `SIGN(subject.frame)` (subject strand).
@@ -39,6 +41,68 @@ const BLAST_GAP_PROB: f64 = 0.5;
 /// NCBI BLAST_GAP_DECAY_RATE (ungapped search default)  
 /// Reference: ncbi-blast/c++/include/algo/blast/core/blast_parameters.h:68
 const BLAST_GAP_DECAY_RATE: f64 = 0.5;
+
+// ---------------------------------------------------------------------------
+// HSP tracing (opt-in via env var)
+// ---------------------------------------------------------------------------
+
+/// Trace a single HSP through linking by matching final outfmt coordinates
+/// (qstart,qend,sstart,send).
+///
+/// Enable by setting:
+/// - `LOSAT_TRACE_HSP="qstart,qend,sstart,send"`
+#[derive(Clone, Copy, Debug)]
+struct TraceHspTarget {
+    q_start: i32,
+    q_end: i32,
+    s_start: i32,
+    s_end: i32,
+}
+
+static TRACE_HSP_TARGET: OnceLock<Option<TraceHspTarget>> = OnceLock::new();
+
+#[inline(always)]
+fn trace_hsp_target() -> Option<TraceHspTarget> {
+    *TRACE_HSP_TARGET.get_or_init(|| {
+        let raw = std::env::var("LOSAT_TRACE_HSP").ok()?;
+        let parts: Vec<&str> = raw
+            .split(|c: char| c == ',' || c == ':' || c == ';' || c.is_whitespace())
+            .filter(|p| !p.is_empty())
+            .collect();
+        if parts.len() != 4 {
+            eprintln!(
+                "[TRACE_HSP] invalid LOSAT_TRACE_HSP (expected 4 integers): {:?}",
+                raw
+            );
+            return None;
+        }
+        let q_start: i32 = parts[0].parse().ok()?;
+        let q_end: i32 = parts[1].parse().ok()?;
+        let s_start: i32 = parts[2].parse().ok()?;
+        let s_end: i32 = parts[3].parse().ok()?;
+        Some(TraceHspTarget {
+            q_start,
+            q_end,
+            s_start,
+            s_end,
+        })
+    })
+}
+
+#[inline(always)]
+fn trace_match_target(target: TraceHspTarget, q_start: usize, q_end: usize, s_start: usize, s_end: usize) -> bool {
+    q_start as i32 == target.q_start
+        && q_end as i32 == target.q_end
+        && s_start as i32 == target.s_start
+        && s_end as i32 == target.s_end
+}
+
+#[inline(always)]
+fn trace_hit_matches_target(target: TraceHspTarget, h: &UngappedHit) -> bool {
+    let (q_start, q_end) = convert_coords(h.q_aa_start, h.q_aa_end, h.q_frame, h.q_orig_len);
+    let (s_start, s_end) = convert_coords(h.s_aa_start, h.s_aa_end, h.s_frame, h.s_orig_len);
+    trace_match_target(target, q_start, q_end, s_start, s_end)
+}
 
 /// NCBI BLAST_Nint - round to nearest integer
 /// Reference: ncbi-blast/c++/src/algo/blast/core/ncbi_math.c:437-441
@@ -803,17 +867,10 @@ fn link_hsp_group_ncbi(
     // Every HSP receives its (possibly linked-set) e-value during the
     // extraction phase (NCBI lines 955-980).
 
-    // Debug: Check if we should trace a specific HSP (controlled by LOSAT_DEBUG_CHAINING env var)
-    // Target HSP: coordinates 635385-635362 (DNA), 8AA, bit_score=22.1
-    // Convert to AA coordinates: 635385/3 ≈ 211795, 635362/3 ≈ 211787
-    // Note: For reverse strand, coordinates may be swapped (end < start)
-    let debug_chaining = std::env::var("LOSAT_DEBUG_CHAINING").is_ok();
-    let target_dna_coords = (635385, 635362);
-    let target_aa_start = target_dna_coords.0 / 3; // ≈ 211795
-    let target_aa_end = target_dna_coords.1 / 3;   // ≈ 211787
-    // Also check swapped coordinates for reverse strand
-    let target_aa_start_swapped = target_dna_coords.1 / 3;
-    let target_aa_end_swapped = target_dna_coords.0 / 3;
+    // Debug: trace a specific HSP (via LOSAT_TRACE_HSP) through linking.
+    // Also supports legacy `LOSAT_DEBUG_CHAINING` to enable debug prints.
+    let trace_target = trace_hsp_target();
+    let debug_chaining = trace_target.is_some() || std::env::var("LOSAT_DEBUG_CHAINING").is_ok();
     
     // Precompute logK per context once (NCBI: kbp[ctx]->logK).
     // Hot loops previously computed `k.ln()` repeatedly; this is strictly output-equivalent.
@@ -839,36 +896,7 @@ fn link_hsp_group_ncbi(
         let ctx_lambda = query_contexts[ctx_idx].karlin_params.lambda;
         let ctx_log_k = log_k_by_ctx[ctx_idx];
         let xscore = normalize_score(score, ctx_lambda, ctx_log_k);
-        
-        // Debug: Check if this is the target HSP
-        // Check both forward and reverse strand coordinates
-        let is_target = debug_chaining && (
-            // Forward strand: exact match
-            (hit.q_aa_start == target_aa_start as usize && hit.q_aa_end == target_aa_end as usize) ||
-            (hit.s_aa_start == target_aa_start as usize && hit.s_aa_end == target_aa_end as usize) ||
-            // Reverse strand: swapped coordinates
-            (hit.q_aa_start == target_aa_end as usize && hit.q_aa_end == target_aa_start as usize) ||
-            (hit.s_aa_start == target_aa_end as usize && hit.s_aa_end == target_aa_start as usize) ||
-            // Also check swapped target coordinates
-            (hit.q_aa_start == target_aa_start_swapped as usize && hit.q_aa_end == target_aa_end_swapped as usize) ||
-            (hit.s_aa_start == target_aa_start_swapped as usize && hit.s_aa_end == target_aa_end_swapped as usize) ||
-            // Or approximate match (within 1 AA due to rounding)
-            (hit.q_aa_start.abs_diff(target_aa_start as usize) <= 1 && hit.q_aa_end.abs_diff(target_aa_end as usize) <= 1) ||
-            (hit.s_aa_start.abs_diff(target_aa_start as usize) <= 1 && hit.s_aa_end.abs_diff(target_aa_end as usize) <= 1)
-        );
-        
-        if is_target {
-            eprintln!("[DEBUG_CHAINING] Found target HSP at index {}:", i);
-            eprintln!("  q_aa: {}-{}, s_aa: {}-{}, score: {}, raw_score: {}", 
-                hit.q_aa_start, hit.q_aa_end, hit.s_aa_start, hit.s_aa_end, 
-                hit.e_value, score);
-            eprintln!("  q_off: {}, q_end: {}, s_off: {}, s_end: {}", q_off, q_end, s_off, s_end);
-            eprintln!("  qt: {}, st: {}, q_off_trim: {}, s_off_trim: {}, q_end_trim: {}, s_end_trim: {}", 
-                qt, st, q_off + qt, s_off + st, q_end - qt, s_end - st);
-            eprintln!("  cutoff_small: {}, cutoff_big: {}, score > cutoff_small: {}, score > cutoff_big: {}", 
-                cutoff_small, cutoff_big, score > cutoff_small, score > cutoff_big);
-        }
-        
+
         HspLink {
             score,
             ctx_idx,
@@ -891,28 +919,44 @@ fn link_hsp_group_ncbi(
         }
     }).collect();
     
-    // Store target HSP index for later debugging
-    let target_hsp_idx: Option<usize> = if debug_chaining {
-        group_hits.iter().enumerate().find_map(|(i, hit)| {
-            let is_target = (
-                // Forward strand: exact match
-                (hit.q_aa_start == target_aa_start as usize && hit.q_aa_end == target_aa_end as usize) ||
-                (hit.s_aa_start == target_aa_start as usize && hit.s_aa_end == target_aa_end as usize) ||
-                // Reverse strand: swapped coordinates
-                (hit.q_aa_start == target_aa_end as usize && hit.q_aa_end == target_aa_start as usize) ||
-                (hit.s_aa_start == target_aa_end as usize && hit.s_aa_end == target_aa_start as usize) ||
-                // Also check swapped target coordinates
-                (hit.q_aa_start == target_aa_start_swapped as usize && hit.q_aa_end == target_aa_end_swapped as usize) ||
-                (hit.s_aa_start == target_aa_start_swapped as usize && hit.s_aa_end == target_aa_end_swapped as usize) ||
-                // Or approximate match (within 1 AA due to rounding)
-                (hit.q_aa_start.abs_diff(target_aa_start as usize) <= 1 && hit.q_aa_end.abs_diff(target_aa_end as usize) <= 1) ||
-                (hit.s_aa_start.abs_diff(target_aa_start as usize) <= 1 && hit.s_aa_end.abs_diff(target_aa_end as usize) <= 1)
+    // Resolve the traced target HSP (if any) within this group (post-sort order).
+    let target_hsp_idx: Option<usize> = trace_target.and_then(|t| {
+        group_hits
+            .iter()
+            .position(|h| trace_hit_matches_target(t, h))
+    });
+
+    if debug_chaining {
+        if let Some(i) = target_hsp_idx {
+            let hit = &group_hits[i];
+            let (q_start, q_end) =
+                convert_coords(hit.q_aa_start, hit.q_aa_end, hit.q_frame, hit.q_orig_len);
+            let (s_start, s_end) =
+                convert_coords(hit.s_aa_start, hit.s_aa_end, hit.s_frame, hit.s_orig_len);
+            let link = &hsp_links[i];
+            eprintln!(
+                "[TRACE_LINKING] target_in_group idx={} raw_score={} q_frame={} s_frame={} q={}-{} s={}-{} q_aa={}-{} s_aa={}-{} q_trim={}..{} s_trim={}..{} cutoff_small={} cutoff_big={}",
+                i,
+                hit.raw_score,
+                hit.q_frame,
+                hit.s_frame,
+                q_start,
+                q_end,
+                s_start,
+                s_end,
+                hit.q_aa_start,
+                hit.q_aa_end,
+                hit.s_aa_start,
+                hit.s_aa_end,
+                link.q_off_trim,
+                link.q_end_trim,
+                link.s_off_trim,
+                link.s_end_trim,
+                cutoff_small,
+                cutoff_big,
             );
-            if is_target { Some(i) } else { None }
-        })
-    } else {
-        None
-    };
+        }
+    }
     
     // Head of active HSP list (first active HSP index, or SENTINEL_IDX if empty)
     let mut active_head: usize = if n > 0 { 0 } else { SENTINEL_IDX };
@@ -1603,8 +1647,44 @@ fn link_hsp_group_ncbi(
         }
         
         if debug_chaining && chain_members.iter().any(|&idx| target_hsp_idx == Some(idx)) {
-            eprintln!("[DEBUG_CHAINING] Chain members: {:?}", chain_members);
-            eprintln!("[DEBUG_CHAINING] Chain E-value: {:.2e}, ordering: {}", evalue, ordering);
+            eprintln!(
+                "[TRACE_LINKING] target_chain head_idx={} chain_len={} linked_set={} ordering={} evalue={:.3e}",
+                best_i,
+                hsp_links[best_i].num[ordering],
+                linked_set,
+                ordering,
+                evalue
+            );
+            for &idx in &chain_members {
+                let hit = &group_hits[idx];
+                let (q_start, q_end) =
+                    convert_coords(hit.q_aa_start, hit.q_aa_end, hit.q_frame, hit.q_orig_len);
+                let (s_start, s_end) =
+                    convert_coords(hit.s_aa_start, hit.s_aa_end, hit.s_frame, hit.s_orig_len);
+                let next = hsp_links[idx].link[ordering];
+                let next_str = if next == SENTINEL_IDX {
+                    "END".to_string()
+                } else {
+                    next.to_string()
+                };
+                let mark = if target_hsp_idx == Some(idx) { "*" } else { " " };
+                eprintln!(
+                    "  {}idx={} raw_score={} q={}-{} s={}-{} q_aa={}-{} s_aa={}-{} start_of_chain={} next={}",
+                    mark,
+                    idx,
+                    hit.raw_score,
+                    q_start,
+                    q_end,
+                    s_start,
+                    s_end,
+                    hit.q_aa_start,
+                    hit.q_aa_end,
+                    hit.s_aa_start,
+                    hit.s_aa_end,
+                    hit.start_of_chain,
+                    next_str,
+                );
+            }
         }
     }
 

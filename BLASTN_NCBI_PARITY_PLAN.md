@@ -919,7 +919,7 @@ TBLASTX では詳細なパリティステータスドキュメントが作成さ
 - [x] スコアリングパラメータの検証 (完了)
 - [x] Karlin-Altschul パラメータの検証 (完了)
 - [x] Gapped Extension アルゴリズムの検証 (完了)
-- [ ] Ungapped Extension の閾値検証
+- [x] Ungapped Extension の閾値検証 (完了)
 - [ ] Effective Search Space の検証テスト
 - [ ] 出力フォーマットの詳細検証
 - [ ] DUST フィルタリングの検証
@@ -1019,6 +1019,34 @@ TBLASTX では詳細なパリティステータスドキュメントが作成さ
       - `src/algorithm/blastn/alignment/gapped.rs`: DP-based extensionの初期化とDP更新ロジックを修正、NCBI参照コメントを追加
       - `src/algorithm/blastn/alignment/greedy.rs`: Greedy extensionのすべての不一致箇所を修正、NCBI参照コメントを追加
     - **テスト結果**: すべてのテストケースで正常に実行完了（megablast: 397 hits, blastn: 4298 hits）
+- **2026-01-XX: Ungapped Extension の閾値検証完了**
+  - **3.2 Ungapped Extension の閾値**: 検証完了、NCBI BLASTと完全一致
+    - NCBI BLASTの実装を確認: `na_ungapped.c:752` で `ungapped_data->score >= cutoffs->cutoff_score` を使用
+    - `cutoff_score` は動的に計算される（固定値ではない）
+    - NCBI BLASTの計算ロジック:
+      - `gap_trigger` を bit score 27.0 (`BLAST_GAP_TRIGGER_NUCL`) から raw score に変換
+      - `cutoff_score_max` を E-value から計算（gapped パラメータを使用）
+      - `cutoff_score = MIN(gap_trigger * scale_factor, cutoff_score_max)`
+    - LOSATの実装を修正:
+      - 固定値（`MIN_UNGAPPED_SCORE_MEGABLAST: 20`, `MIN_UNGAPPED_SCORE_BLASTN: 50`）を削除
+      - 動的に計算された `cutoff_score` を使用するように修正
+      - `src/algorithm/blastn/ncbi_cutoffs.rs` を新規作成（NCBI参照コメント付き）
+      - `src/algorithm/blastn/utils.rs` を修正（2箇所）: 固定値の代わりに `compute_blastn_cutoff_score()` を使用
+      - `src/algorithm/blastn/constants.rs` を更新: 固定値定数を非推奨としてマーク
+    - **修正ファイル**:
+      - `src/algorithm/blastn/ncbi_cutoffs.rs`: 新規作成（gap_trigger計算、cutoff_score_max計算、cutoff_score計算）
+      - `src/algorithm/blastn/utils.rs`: 固定値の代わりに動的計算を使用（2箇所修正）
+      - `src/algorithm/blastn/constants.rs`: 固定値定数を非推奨としてマーク
+      - `src/algorithm/blastn/mod.rs`: 新しいモジュールを追加
+    - **NCBI参照**:
+      - `ncbi-blast/c++/src/algo/blast/core/na_ungapped.c:752` (ungapped extension後のgapped extensionトリガー条件)
+      - `ncbi-blast/c++/src/algo/blast/core/blast_parameters.c:343-344` (gap_trigger計算)
+      - `ncbi-blast/c++/src/algo/blast/core/blast_parameters.c:368-374` (cutoff_score計算)
+      - `ncbi-blast/c++/include/algo/blast/core/blast_options.h:140` (BLAST_GAP_TRIGGER_NUCL = 27.0)
+    - **テスト結果**: 
+      - Megablast: NZ_CP006932 self (397 hits, NCBI: 454 hits) - 以前と同じ
+      - Blastn: NZ_CP006932 self (4298 hits, NCBI: 12340 hits) - 以前と同じ
+      - 最初のヒットは完全一致（100.000, 657101, 0, 0, 1, 657101, 1, 657101, 0.0e0, 1213436.5）
 - **2026-01-06: 重要な修正とリバート**
   - **2.3 X-drop パラメータ**: 修正完了
     - **以前の誤り**: コミット 4a2d561 の時点では `X_DROP_GAPPED_FINAL` (100) を直接使用していたが、NCBI BLASTでは通常のgapped extensionで `gap_x_dropoff` (blastn=30, megablast=25) を使用すべき

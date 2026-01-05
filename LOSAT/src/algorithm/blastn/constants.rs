@@ -15,11 +15,15 @@ pub const TWO_HIT_WINDOW: usize = 0; // NCBI BLAST default (one-hit mode)
 pub const MAX_HITS_PER_KMER: usize = 200;
 
 // Minimum ungapped score thresholds for triggering gapped extension
-// Higher threshold for blastn (smaller word size = more seeds) to reduce extension count
-// NCBI BLAST uses similar task-specific thresholds
-pub const MIN_UNGAPPED_SCORE_MEGABLAST: i32 = 20; // Lower threshold for megablast (larger seeds)
-pub const MIN_UNGAPPED_SCORE_BLASTN: i32 = 50; // Higher threshold for blastn (smaller seeds, more filtering needed)
-// Increased from 40 to 50 to better handle self-comparison cases with many matches
+// DEPRECATED: These fixed thresholds are replaced by dynamically calculated cutoff_score
+// based on NCBI BLAST's implementation (blast_parameters.c:368-374).
+// The dynamic calculation uses gap_trigger (bit score 27.0) and cutoff_score_max (from E-value).
+// NCBI reference: na_ungapped.c:752: if (off_found || ungapped_data->score >= cutoffs->cutoff_score)
+// NCBI reference: blast_parameters.c:343-344: gap_trigger calculation
+// NCBI reference: blast_parameters.c:368-374: cutoff_score = MIN(gap_trigger * scale_factor, cutoff_score_max)
+// These constants are kept for backward compatibility but are no longer used in the main code path.
+pub const MIN_UNGAPPED_SCORE_MEGABLAST: i32 = 20; // DEPRECATED: Use compute_blastn_cutoff_score() instead
+pub const MIN_UNGAPPED_SCORE_BLASTN: i32 = 50; // DEPRECATED: Use compute_blastn_cutoff_score() instead
 
 /// Maximum word size for direct address table (4^14 = 268M entries = ~6GB, too large)
 pub const MAX_DIRECT_LOOKUP_WORD_SIZE: usize = 13;

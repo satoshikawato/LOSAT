@@ -13,6 +13,7 @@ use super::constants::{X_DROP_GAPPED_FINAL, TWO_HIT_WINDOW};
 use super::coordination::{configure_task, read_sequences, prepare_sequence_data, build_lookup_tables};
 use super::lookup::{reverse_complement, pack_diag_key};
 use super::sequence_compare::{compare_28mer_simd, compare_sequences_simd};
+use super::ncbi_cutoffs::{compute_blastn_cutoff_score, GAP_TRIGGER_BIT_SCORE_NUCL};
 
 // Re-export for backward compatibility
 pub use crate::algorithm::common::evalue::calculate_evalue_database_search as calculate_evalue;
@@ -1064,8 +1065,25 @@ pub fn run(args: BlastnArgs) -> Result<()> {
                             // Check if word_length match exists starting at these positions
                             // Need to verify that subject[kmer_start..kmer_start+word_length] 
                             // matches query[q_pos..q_pos+word_length]
-                            let q_seq = queries[q_idx as usize].seq();
+                            let q_record = &queries[q_idx as usize];
+                            let q_seq = q_record.seq();
                             let q_pos_usize = q_pos as usize;
+                            
+                            // Calculate cutoff_score for this query-subject pair
+                            // NCBI reference: blast_parameters.c:368-374
+                            // For blastn in gapped mode: cutoff_score = MIN(gap_trigger * scale_factor, cutoff_score_max)
+                            // Query length includes both strands for blastn (query_len * 2)
+                            let query_len = q_seq.len() as i64 * 2; // Both strands for blastn
+                            let subject_len = s_len as i64;
+                            let cutoff_score = compute_blastn_cutoff_score(
+                                query_len,
+                                subject_len,
+                                evalue_threshold,
+                                GAP_TRIGGER_BIT_SCORE_NUCL,
+                                &params_for_closure, // ungapped params (same as gapped for blastn)
+                                &params_for_closure, // gapped params (same as ungapped for blastn)
+                                1.0, // scale_factor (typically 1.0 for standard scoring)
+                            );
                             
                             // Skip if sequences are too short
                             if q_pos_usize + word_length > q_seq.len() || kmer_start + word_length > s_len {
@@ -1187,11 +1205,9 @@ pub fn run(args: BlastnArgs) -> Result<()> {
                                 continue;
                             }
 
-                            let q_record = &queries[q_idx as usize];
-
                             // Now do ungapped extension (only for seeds that passed two-hit filter)
                             let (qs, qe, ss, _se, ungapped_score) = extend_hit_ungapped(
-                                q_record.seq(),
+                                q_seq,
                                 search_seq,
                                 q_pos_usize,
                                 kmer_start,
@@ -1201,8 +1217,10 @@ pub fn run(args: BlastnArgs) -> Result<()> {
                             );
 
                             // Skip if ungapped score is too low
-                            // Use task-specific threshold: higher for blastn to reduce extension count
-                            if ungapped_score < min_ungapped_score {
+                            // NCBI reference: na_ungapped.c:752
+                            // if (off_found || ungapped_data->score >= cutoffs->cutoff_score)
+                            // Use dynamically calculated cutoff_score instead of fixed threshold
+                            if ungapped_score < cutoff_score {
                                 dbg_ungapped_low += 1;
                                 if in_window && debug_mode {
                                     eprintln!("[DEBUG WINDOW] Seed at q={}, s={} SKIPPED: ungapped_score={} < {}", q_pos_usize, kmer_start, ungapped_score, min_ungapped_score);
@@ -1394,6 +1412,24 @@ pub fn run(args: BlastnArgs) -> Result<()> {
 
                         for &(q_idx, q_pos) in matches_slice {
                             dbg_seeds_found += 1;
+                            
+                            // Calculate cutoff_score for this query-subject pair
+                            // NCBI reference: blast_parameters.c:368-374
+                            // For blastn in gapped mode: cutoff_score = MIN(gap_trigger * scale_factor, cutoff_score_max)
+                            // Query length includes both strands for blastn (query_len * 2)
+                            let q_record = &queries[q_idx as usize];
+                            let query_len = q_record.seq().len() as i64 * 2; // Both strands for blastn
+                            let subject_len = s_len as i64;
+                            let cutoff_score = compute_blastn_cutoff_score(
+                                query_len,
+                                subject_len,
+                                evalue_threshold,
+                                GAP_TRIGGER_BIT_SCORE_NUCL,
+                                &params_for_closure, // ungapped params (same as gapped for blastn)
+                                &params_for_closure, // gapped params (same as ungapped for blastn)
+                                1.0, // scale_factor (typically 1.0 for standard scoring)
+                            );
+                            
                         let diag = kmer_start as isize - q_pos as isize;
 
                         // Check if this seed is in the debug window
@@ -1490,8 +1526,6 @@ pub fn run(args: BlastnArgs) -> Result<()> {
                             continue;
                         }
 
-                        let q_record = &queries[q_idx as usize];
-
                         // Now do ungapped extension (only for seeds that passed two-hit filter)
                         let (qs, qe, ss, _se, ungapped_score) = extend_hit_ungapped(
                             q_record.seq(),
@@ -1504,8 +1538,10 @@ pub fn run(args: BlastnArgs) -> Result<()> {
                         );
 
                         // Skip if ungapped score is too low
-                        // Use task-specific threshold: higher for blastn to reduce extension count
-                        if ungapped_score < min_ungapped_score {
+                        // NCBI reference: na_ungapped.c:752
+                        // if (off_found || ungapped_data->score >= cutoffs->cutoff_score)
+                        // Use dynamically calculated cutoff_score instead of fixed threshold
+                        if ungapped_score < cutoff_score {
                             dbg_ungapped_low += 1;
                             if in_window && debug_mode {
                                 eprintln!("[DEBUG WINDOW] Seed at q={}, s={} SKIPPED: ungapped_score={} < {}", q_pos, kmer_start, ungapped_score, min_ungapped_score);

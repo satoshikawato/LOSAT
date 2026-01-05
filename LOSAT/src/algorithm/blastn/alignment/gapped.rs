@@ -212,6 +212,12 @@ pub fn extend_gapped_one_direction(
     gap_extend: i32,
     x_drop: i32,
 ) -> (usize, usize, i32, usize, usize, usize, usize, usize) {
+    // NCBI BLAST: gap penalties are specified as positive values (cost), but used as negative in calculations
+    // Reference: ncbi-blast/c++/src/algo/blast/api/blast_nucl_options.cpp:198-229
+    // Convert positive gap penalties to negative for internal use
+    let gap_open = -gap_open;
+    let gap_extend = -gap_extend;
+
     // NCBI BLAST-style adaptive banding implementation
     // Key insight from Blast_SemiGappedAlign:
     // - Use dynamic window bounds (first_b_index to b_size) that expand/contract based on X-drop

@@ -135,26 +135,33 @@ pub fn determine_scoring_params(args: &BlastnArgs) -> (i32, i32, i32, i32) {
 }
 ```
 
-**🔴 重要な問題**: Gap penalty の符号が逆
+**🔴 重要な問題**: Gap penalty の符号が逆 ✅ **修正完了**
 
 **NCBI BLAST:**
 - Gap penalty は **正の値**で指定（コストとして扱う）
 - 内部計算では負の値として使用
 
-**LOSAT 現状:**
-- Gap penalty を **負の値**で設定している
+**LOSAT 現状（修正後）:**
+- Gap penalty を **正の値**で設定（coordination.rs）
+- 内部計算で負の値に変換（gapped.rs, statistics.rs）
 
 **必要な改修:**
-1. **Gap penalty の符号を正に修正**
+1. **Gap penalty の符号を正に修正** ✅ **完了**
    ```rust
    // coordination.rs:76-77 を修正
    let go = if args.gap_open == 0 { 5 } else { args.gap_open };  // 正の値
    let ge = if args.gap_extend == 0 { 2 } else { args.gap_extend };  // 正の値
    ```
+   - **実装日**: 2026-01-05
+   - **修正ファイル**: 
+     - `src/algorithm/blastn/coordination.rs` (64-89行目): 正の値（5, 2）を設定
+     - `src/algorithm/blastn/alignment/gapped.rs` (206-214行目): 関数先頭で負の値に変換
+     - `src/algorithm/blastn/alignment/statistics.rs` (41-48行目): 関数先頭で負の値に変換
 
-2. **Extension アルゴリズムでの使用を確認**
-   - Gap penalty を使用する箇所で符号を確認
-   - NCBI BLAST では内部で負の値に変換して使用
+2. **Extension アルゴリズムでの使用を確認** ✅ **完了**
+   - Gap penalty を使用する箇所で符号を確認済み
+   - NCBI BLAST では内部で負の値に変換して使用 → 実装済み
+   - `greedy.rs`は正の値を想定しており、修正不要
 
 **参照**: `ncbi-blast/c++/src/algo/blast/api/blast_nucl_options.cpp:198-229`
 
@@ -633,10 +640,12 @@ LOSAT_BIN="../target/release/LOSAT"
 
 ### Phase 1: 緊急修正（Critical Fixes）
 
-1. **Gap Penalty の符号修正** (Section 2.2)
+1. **Gap Penalty の符号修正** (Section 2.2) ✅ **完了**
    - 影響: スコア計算が完全に間違っている可能性
    - 工数: 1-2時間
    - 優先度: 🔴 最優先
+   - **完了日**: 2026-01-05
+   - **結果**: コンパイル・実行正常。最初のヒットのスコアはNCBIと非常に近い（bit score差0.5）
 
 2. **Two-Hit Window サイズの修正** (Section 3.3)
    - 影響: シード検出の感度が変わる
@@ -696,22 +705,22 @@ LOSAT_BIN="../target/release/LOSAT"
 ### 主要な参照ファイル
 
 1. **デフォルトパラメータ定義**
-   - `ncbi-blast/c++/include/algo/blast/core/blast_options.h`
+   - `/mnt/c/Users/genom/GitHub/ncbi-blast/c++/include/algo/blast/core/blast_options.h`
    - 定数定義（word size, gap penalties, X-drop など）
 
 2. **パラメータ設定ロジック**
-   - `ncbi-blast/c++/src/algo/blast/api/blast_nucl_options.cpp`
+   - `/mnt/c/Users/genom/GitHub/ncbi-blast/c++/src/algo/blast/api/blast_nucl_options.cpp`
    - Task 別のデフォルト設定
 
 3. **Extension アルゴリズム**
-   - `ncbi-blast/c++/src/algo/blast/core/` (詳細は NCBI ソースコードで確認)
+   - `/mnt/c/Users/genom/GitHub/ncbi-blast/c++/src/algo/blast/core/` (詳細は NCBI ソースコードで確認)
 
 4. **統計パラメータ**
-   - `ncbi-blast/c++/src/algo/blast/core/blast_stat.c`
+   - `/mnt/c/Users/genom/GitHub/ncbi-blast/c++/src/algo/blast/core/blast_stat.c`
    - Karlin-Altschul パラメータ計算
 
 5. **Length Adjustment**
-   - `ncbi-blast/c++/src/algo/blast/core/blast_stat.c`
+   - `/mnt/c/Users/genom/GitHub/ncbi-blast/c++/src/algo/blast/core/blast_stat.c`
    - `BLAST_ComputeLengthAdjustment` 関数
 
 ---
@@ -740,7 +749,7 @@ TBLASTX では詳細なパリティステータスドキュメントが作成さ
 
 ### 完了項目 ✅
 
-- [ ] Gap Penalty の符号修正
+- [x] Gap Penalty の符号修正 (2026-01-05完了)
 - [ ] Two-Hit Window サイズの修正
 - [ ] デフォルトパラメータの完全一致
 - [ ] X-drop パラメータのタスク別設定
@@ -757,21 +766,39 @@ TBLASTX では詳細なパリティステータスドキュメントが作成さ
 
 | テストケース | LOSAT | NCBI | 差 | 状態 |
 |------------|-------|------|-----|------|
-| NZ_CP006932 self | - | - | - | ⏳ 未実施 |
-| EDL933 vs Sakai | - | - | - | ⏳ 未実施 |
-| Sakai vs MG1655 | - | - | - | ⏳ 未実施 |
+| NZ_CP006932 self | 101 | 454 | -77.8% | ✅ 実施済み |
+| EDL933 vs Sakai | 1930 | 5718 | -66.2% | ✅ 実施済み |
+| Sakai vs MG1655 | 700 | 6476 | -89.2% | ✅ 実施済み |
+
+**考察**: Gap penalty修正後もヒット数に大きな差がある。Two-Hit Windowサイズやその他のパラメータの影響が考えられる。
 
 #### Blastn Task
 
 | テストケース | LOSAT | NCBI | 差 | 状態 |
 |------------|-------|------|-----|------|
-| NZ_CP006932 self | - | - | - | ⏳ 未実施 |
-| PesePMNV vs MjPMNV | - | - | - | ⏳ 未実施 |
-| MelaMJNV vs PemoMJNVA | - | - | - | ⏳ 未実施 |
-| MjeNMV vs MelaMJNV | - | - | - | ⏳ 未実施 |
+| NZ_CP006932 self | 1960 | 12340 | -84.1% | ✅ 実施済み |
+| PesePMNV vs MjPMNV | 198 | 241 | -17.8% | ✅ 実施済み |
+| MelaMJNV vs PemoMJNVA | 147 | 2729 | -94.6% | ✅ 実施済み |
+| MjeNMV vs MelaMJNV | 703 | 2668 | -73.7% | ✅ 実施済み |
+
+**詳細比較 (MelaMJNV vs PemoMJNVA, 最初のヒット)**:
+- Identity: 一致 (74.307%)
+- Length: 一致 (3608)
+- Mismatches: 一致 (807)
+- Gap opens: 一致 (30)
+- Query座標: 一致 (142903-146411)
+- Subject座標: 1ずれ (146177-149765 vs 146178-149764)
+- E-value: 一致 (0.0)
+- Bit score: 0.5の差 (2301.5 vs 2301)
+
+**考察**: 
+- Gap penalty修正後、最初のヒットのスコアは非常に近い（bit score差0.5）
+- ヒット数の大きな差は、gap penalty以外の要因による可能性が高い
+- Two-Hit Windowサイズ、Ungapped Extension閾値、Cutoff計算などの影響が考えられる
 
 ---
 
 **更新履歴:**
+- 2026-01-05: Gap Penalty符号修正完了、テスト結果を記録
 - 2026-01-XX: 初版作成
 

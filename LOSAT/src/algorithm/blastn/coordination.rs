@@ -73,15 +73,19 @@ pub fn determine_scoring_params(args: &BlastnArgs) -> (i32, i32, i32, i32) {
         "blastn" | "dc-megablast" => {
             let r = if args.reward == 1 { 2 } else { args.reward };
             let p = if args.penalty == -2 { -3 } else { args.penalty };
-            let go = if args.gap_open == 0 { -5 } else { args.gap_open };
-            let ge = if args.gap_extend == 0 { -2 } else { args.gap_extend };
+            // NCBI BLAST: gap penalties are specified as positive values (cost)
+            // Reference: ncbi-blast/c++/include/algo/blast/core/blast_options.h:84-96
+            let go = if args.gap_open == 0 { 5 } else { args.gap_open };
+            let ge = if args.gap_extend == 0 { 2 } else { args.gap_extend };
             (r, p, go, ge)
         }
         "blastn-short" => {
             let r = if args.reward == 1 { 1 } else { args.reward };
             let p = if args.penalty == -2 { -3 } else { args.penalty };
-            let go = if args.gap_open == 0 { -5 } else { args.gap_open };
-            let ge = if args.gap_extend == 0 { -2 } else { args.gap_extend };
+            // NCBI BLAST: gap penalties are specified as positive values (cost)
+            // Reference: ncbi-blast/c++/include/algo/blast/core/blast_options.h:84-96
+            let go = if args.gap_open == 0 { 5 } else { args.gap_open };
+            let ge = if args.gap_extend == 0 { 2 } else { args.gap_extend };
             (r, p, go, ge)
         }
         _ => (args.reward, args.penalty, args.gap_open, args.gap_extend),

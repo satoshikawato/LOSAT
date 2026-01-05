@@ -46,6 +46,12 @@ pub fn align_region(
     gap_open: i32,
     gap_extend: i32,
 ) -> (usize, usize, usize, usize, i32, usize, usize, usize, usize) {
+    // NCBI BLAST: gap penalties are specified as positive values (cost), but used as negative in calculations
+    // Reference: ncbi-blast/c++/src/algo/blast/api/blast_nucl_options.cpp:198-229
+    // Convert positive gap penalties to negative for internal use
+    let gap_open = -gap_open;
+    let gap_extend = -gap_extend;
+
     const BAND_WIDTH: usize = 256; // Wider band for NCBI BLAST compatibility
     const NEG_INF: i32 = i32::MIN / 2;
 

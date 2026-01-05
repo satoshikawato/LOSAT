@@ -76,6 +76,11 @@ comparisons = [
         "ncbi": "./blast_out/MeenMJNV.MejoMJNV.tblastx.n1.out", 
         "losat": "./losat_out/MeenMJNV.MejoMJNV.tlosatx.n1.out"
     },
+    {
+        "name": "AvCLPV_vs_PsCLPV", "mode": "TBLASTX",
+        "ncbi": "./blast_out/AvCLPV.PsCLPV.tblastx.n1.out", 
+        "losat": "./losat_out/AvCLPV.PsCLPV.tlosatx.n1.out"
+    },
     # --- BLASTN / Megablast ---
     {"name": "NZ_CP006932_Self(Mega)", "mode": "BLASTN (Megablast)", "ncbi": "./blast_out/NZ_CP006932.NZ_CP006932.blastn.out", "losat": "./losat_out/NZ_CP006932.NZ_CP006932.losatn.out"},
     {"name": "EDL933_vs_Sakai", "mode": "BLASTN (Megablast)", "ncbi": "./blast_out/EDL933.Sakai.blastn.megablast.out", "losat": "./losat_out/EDL933.Sakai.blastn.megablast.out"},

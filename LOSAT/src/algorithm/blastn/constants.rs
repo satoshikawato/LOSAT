@@ -1,15 +1,29 @@
 // NCBI BLAST compatible X-drop parameters
-pub const X_DROP_UNGAPPED: i32 = 20; // BLAST_UNGAPPED_X_DROPOFF_NUCL
-pub const X_DROP_GAPPED_FINAL: i32 = 100; // BLAST_GAP_X_DROPOFF_FINAL_NUCL for final traceback
-pub const TWO_HIT_WINDOW: usize = 64; // Increased from 40 for better sensitivity
+// Reference: ncbi-blast/c++/include/algo/blast/core/blast_options.h:122-148
+pub const X_DROP_UNGAPPED: i32 = 20; // BLAST_UNGAPPED_X_DROPOFF_NUCL (blastn, megablast 共通)
+pub const X_DROP_GAPPED_NUCL: i32 = 30; // BLAST_GAP_X_DROPOFF_NUCL (blastn, non-greedy)
+pub const X_DROP_GAPPED_GREEDY: i32 = 25; // BLAST_GAP_X_DROPOFF_GREEDY (megablast, greedy)
+pub const X_DROP_GAPPED_FINAL: i32 = 100; // BLAST_GAP_X_DROPOFF_FINAL_NUCL for final traceback (共通)
+
+/// Two-hit window size for nucleotide searches
+/// NCBI BLAST default: BLAST_WINDOW_SIZE_NUCL = 0 (one-hit mode)
+/// Reference: ncbi-blast/c++/include/algo/blast/core/blast_options.h:58
+/// When window_size = 0, all seeds trigger extension (one-hit mode)
+/// When window_size > 0, two-hit requirement is enforced
+/// NCBI reference: na_ungapped.c:656: Boolean two_hits = (window_size > 0);
+pub const TWO_HIT_WINDOW: usize = 0; // NCBI BLAST default (one-hit mode)
 pub const MAX_HITS_PER_KMER: usize = 200;
 
 // Minimum ungapped score thresholds for triggering gapped extension
-// Higher threshold for blastn (smaller word size = more seeds) to reduce extension count
-// NCBI BLAST uses similar task-specific thresholds
-pub const MIN_UNGAPPED_SCORE_MEGABLAST: i32 = 20; // Lower threshold for megablast (larger seeds)
-pub const MIN_UNGAPPED_SCORE_BLASTN: i32 = 50; // Higher threshold for blastn (smaller seeds, more filtering needed)
-// Increased from 40 to 50 to better handle self-comparison cases with many matches
+// DEPRECATED: These fixed thresholds are replaced by dynamically calculated cutoff_score
+// based on NCBI BLAST's implementation (blast_parameters.c:368-374).
+// The dynamic calculation uses gap_trigger (bit score 27.0) and cutoff_score_max (from E-value).
+// NCBI reference: na_ungapped.c:752: if (off_found || ungapped_data->score >= cutoffs->cutoff_score)
+// NCBI reference: blast_parameters.c:343-344: gap_trigger calculation
+// NCBI reference: blast_parameters.c:368-374: cutoff_score = MIN(gap_trigger * scale_factor, cutoff_score_max)
+// These constants are kept for backward compatibility but are no longer used in the main code path.
+pub const MIN_UNGAPPED_SCORE_MEGABLAST: i32 = 20; // DEPRECATED: Use compute_blastn_cutoff_score() instead
+pub const MIN_UNGAPPED_SCORE_BLASTN: i32 = 50; // DEPRECATED: Use compute_blastn_cutoff_score() instead
 
 /// Maximum word size for direct address table (4^14 = 268M entries = ~6GB, too large)
 pub const MAX_DIRECT_LOOKUP_WORD_SIZE: usize = 13;

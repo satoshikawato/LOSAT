@@ -4,53 +4,81 @@ use LOSAT::algorithm::tblastx::lookup::{encode_aa_kmer, build_direct_lookup};
 use LOSAT::algorithm::tblastx::lookup::{build_ncbi_lookup, pv_test, BlastAaLookupTable};
 use LOSAT::algorithm::tblastx::translation::generate_frames;
 use LOSAT::utils::genetic_code::GeneticCode;
+use LOSAT::utils::matrix::ncbistdaa;
 use LOSAT::stats::KarlinParams;
 
 #[test]
 fn test_encode_aa_kmer_basic() {
-    // Amino acid indices in NCBI matrix order: A=0, R=1, N=2
-    // NCBI-style lookup index uses bit-shift encoding (charsize=5 for 0..=23).
-    let seq = [0u8, 1u8, 2u8];
+    // Sequences are encoded in NCBISTDAA (0-27). Example: A=1, R=16, N=13.
+    // Lookup index uses bit-shift encoding (charsize=5 for alphabet_size=28).
+    let seq = [ncbistdaa::A, ncbistdaa::R, ncbistdaa::N];
     let code = encode_aa_kmer(&seq, 0);
-    assert_eq!(code, Some((0 << 10) | (1 << 5) | 2)); // 34
+    let expected = ((ncbistdaa::A as usize) << 10)
+        | ((ncbistdaa::R as usize) << 5)
+        | (ncbistdaa::N as usize);
+    assert_eq!(code, Some(expected));
 }
 
 #[test]
 fn test_encode_aa_kmer_different_positions() {
-    let seq = [0u8, 1u8, 2u8, 3u8, 4u8, 5u8]; // ARNDCQ in NCBI order
+    // A R N D C Q in NCBISTDAA encoding.
+    let seq = [
+        ncbistdaa::A,
+        ncbistdaa::R,
+        ncbistdaa::N,
+        ncbistdaa::D,
+        ncbistdaa::C,
+        ncbistdaa::Q,
+    ];
     
-    // ARN = (0<<10) | (1<<5) | 2 = 34
+    // ARN
     let code1 = encode_aa_kmer(&seq, 0);
-    assert_eq!(code1, Some((0 << 10) | (1 << 5) | 2));
+    let expected1 = ((ncbistdaa::A as usize) << 10)
+        | ((ncbistdaa::R as usize) << 5)
+        | (ncbistdaa::N as usize);
+    assert_eq!(code1, Some(expected1));
     
-    // RND = (1<<10) | (2<<5) | 3 = 1091
+    // RND
     let code2 = encode_aa_kmer(&seq, 1);
-    assert_eq!(code2, Some((1 << 10) | (2 << 5) | 3));
+    let expected2 = ((ncbistdaa::R as usize) << 10)
+        | ((ncbistdaa::N as usize) << 5)
+        | (ncbistdaa::D as usize);
+    assert_eq!(code2, Some(expected2));
     
-    // NDC = (2<<10) | (3<<5) | 4 = 2148
+    // NDC
     let code3 = encode_aa_kmer(&seq, 2);
-    assert_eq!(code3, Some((2 << 10) | (3 << 5) | 4));
+    let expected3 = ((ncbistdaa::N as usize) << 10)
+        | ((ncbistdaa::D as usize) << 5)
+        | (ncbistdaa::C as usize);
+    assert_eq!(code3, Some(expected3));
 }
 
 #[test]
 fn test_encode_aa_kmer_with_stop_codon() {
-    // Stop codon is 25 in NCBISTDAA encoding (blast_encoding.c:115-118)
-    // NCBISTDAA: '-','A','B','C','D','E','F','G','H','I','K','L','M',
-    //            'N','P','Q','R','S','T','V','W','X','Y','Z','U','*','O','J'
-    // Stop codon '*' = 25
-    let seq_with_stop = [0u8, 1u8, 25u8]; // Contains stop codon
+    // NCBI tblastx uses BLASTAA_SIZE=28 lookup alphabet and includes STOP ('*') in encoding.
+    // Stop codon is 25 in NCBISTDAA.
+    let seq_with_stop = [ncbistdaa::A, ncbistdaa::R, ncbistdaa::STOP];
     let code = encode_aa_kmer(&seq_with_stop, 0);
-    assert_eq!(code, None);
+    let expected = ((ncbistdaa::A as usize) << 10)
+        | ((ncbistdaa::R as usize) << 5)
+        | (ncbistdaa::STOP as usize);
+    assert_eq!(code, Some(expected));
     
     // Stop codon in middle
-    let seq_with_stop_middle = [0u8, 25u8, 2u8];
+    let seq_with_stop_middle = [ncbistdaa::A, ncbistdaa::STOP, ncbistdaa::N];
     let code = encode_aa_kmer(&seq_with_stop_middle, 0);
-    assert_eq!(code, None);
+    let expected = ((ncbistdaa::A as usize) << 10)
+        | ((ncbistdaa::STOP as usize) << 5)
+        | (ncbistdaa::N as usize);
+    assert_eq!(code, Some(expected));
     
     // Stop codon at start
-    let seq_with_stop_start = [25u8, 1u8, 2u8];
+    let seq_with_stop_start = [ncbistdaa::STOP, ncbistdaa::R, ncbistdaa::N];
     let code = encode_aa_kmer(&seq_with_stop_start, 0);
-    assert_eq!(code, None);
+    let expected = ((ncbistdaa::STOP as usize) << 10)
+        | ((ncbistdaa::R as usize) << 5)
+        | (ncbistdaa::N as usize);
+    assert_eq!(code, Some(expected));
 }
 
 #[test]
@@ -99,7 +127,7 @@ fn test_encode_aa_kmer_max_values() {
     assert_eq!(code, Some((21 << 10) | (22 << 5) | 23));
     
     // Verify it's within backbone size (max index + 1 for 0..=27 with charsize=5)
-    assert!(code.unwrap() < 24_312);
+    assert!(code.unwrap() < 28_540);
 }
 
 #[test]
@@ -115,7 +143,7 @@ fn test_build_direct_lookup_basic() {
     let lookup = build_direct_lookup(&queries);
     
     // Verify table size (NCBI-style backbone size for 0..=23 with charsize=5)
-    assert_eq!(lookup.len(), 24_312);
+    assert_eq!(lookup.len(), 28_540);
     
     // Check that some k-mers were found
     let total_hits: usize = lookup.iter().map(|bucket| bucket.len()).sum();
@@ -241,11 +269,13 @@ fn test_build_ncbi_lookup_indexes_low_self_score_exact_word() {
 
     let queries = vec![frames];
     let karlin = KarlinParams::default();
-    let (lookup, _ctx) = build_ncbi_lookup(&queries, 13, true, true, 0, false, &karlin);
+    let (lookup, _ctx) = build_ncbi_lookup(&queries, 13, true, true, false, &karlin);
 
-    // AAA encodes to index 0 regardless of alphabet_size/word_length here.
-    assert!(pv_test(&lookup.pv, 0));
-    let hits = lookup.get_hits(0);
+    // NCBISTDAA: A=1, so AAA index = (1<<10)|(1<<5)|1 = 1057.
+    let aaa_idx: usize =
+        ((ncbistdaa::A as usize) << 10) | ((ncbistdaa::A as usize) << 5) | (ncbistdaa::A as usize);
+    assert!(pv_test(&lookup.pv, aaa_idx));
+    let hits = lookup.get_hits(aaa_idx);
     assert_eq!(hits.len(), 3);
 }
 
@@ -266,10 +296,12 @@ fn test_build_ncbi_lookup_longest_chain_tracks_max_cell() {
 
     let queries = vec![frames];
     let karlin = KarlinParams::default();
-    let (lookup, _ctx) = build_ncbi_lookup(&queries, 13, true, true, 0, false, &karlin);
+    let (lookup, _ctx) = build_ncbi_lookup(&queries, 13, true, true, false, &karlin);
 
-    // AAA index is 0.
-    let hits = lookup.get_hits(0);
+    // AAA index in NCBISTDAA (A=1) is 1057.
+    let aaa_idx: usize =
+        ((ncbistdaa::A as usize) << 10) | ((ncbistdaa::A as usize) << 5) | (ncbistdaa::A as usize);
+    let hits = lookup.get_hits(aaa_idx);
     assert_eq!(lookup.longest_chain as usize, hits.len());
     assert_eq!(lookup.longest_chain, 98);
 }
@@ -322,7 +354,7 @@ fn test_get_context_idx_matches_ncbi() {
     let frames2 = generate_frames(dna_seq2, &code);
     
     let queries = vec![frames1, frames2];
-    let (lookup, contexts) = build_ncbi_lookup(&queries, 13, true, true, 0, false, &karlin);
+    let (lookup, contexts) = build_ncbi_lookup(&queries, 13, true, true, false, &karlin);
     
     // Verify frame_bases structure
     assert_eq!(lookup.frame_bases.len(), contexts.len());
@@ -394,7 +426,7 @@ fn test_get_context_idx_edge_cases() {
     assert_eq!(frames.len(), 1);
     
     let queries = vec![frames];
-    let (lookup, contexts) = build_ncbi_lookup(&queries, 13, true, true, 0, false, &karlin);
+    let (lookup, contexts) = build_ncbi_lookup(&queries, 13, true, true, false, &karlin);
     
     // With single context, all offsets should return 0
     assert_eq!(lookup.get_context_idx(0), 0);
@@ -420,7 +452,7 @@ fn test_get_context_idx_multiple_queries() {
     let frames2 = generate_frames(dna_seq2, &code);
     
     let queries = vec![frames1, frames2];
-    let (lookup, contexts) = build_ncbi_lookup(&queries, 13, true, true, 0, false, &karlin);
+    let (lookup, contexts) = build_ncbi_lookup(&queries, 13, true, true, false, &karlin);
     
     // Should have 12 contexts (6 frames × 2 queries)
     assert_eq!(contexts.len(), 12);

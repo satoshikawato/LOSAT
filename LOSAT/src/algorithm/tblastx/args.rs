@@ -18,6 +18,12 @@ pub struct TblastxArgs {
     pub word_size: usize,
     #[arg(short = 'n', long, default_value_t = 0)]
     pub num_threads: usize,
+
+    /// Verbose progress / informational logging to stderr.
+    ///
+    /// Default: off (quiet) to avoid timing noise in benchmarks.
+    #[arg(long, short = 'v', default_value_t = false)]
+    pub verbose: bool,
     #[arg(short, long)]
     pub out: Option<PathBuf>,
     #[arg(long, default_value_t = 1)]

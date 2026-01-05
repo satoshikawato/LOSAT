@@ -75,14 +75,19 @@ impl ParamEntry {
 // ============================================================================
 // NUCLEOTIDE STATISTICAL PARAMETERS (from NCBI blast_stat.c)
 // ============================================================================
+// NCBI reference: blast_stat.c:611-614
+// Format: { gap_open, gap_extend, lambda, k, h, alpha, beta, ... }
+// LOSAT uses: ParamEntry::new(gap_open, gap_extend, lambda, k, h, alpha, beta)
 
 /// Parameters for reward=1, penalty=-5
+/// NCBI reference: blast_stat.c:611-614 (blastn_values_1_5)
 const BLASTN_1_5: &[ParamEntry] = &[
     ParamEntry::new(0, 0, 1.39, 0.747, 1.38, 1.00, 0.0),
     ParamEntry::new(3, 3, 1.39, 0.747, 1.38, 1.00, 0.0),
 ];
 
 /// Parameters for reward=1, penalty=-4
+/// NCBI reference: blast_stat.c:617-623 (blastn_values_1_4)
 const BLASTN_1_4: &[ParamEntry] = &[
     ParamEntry::new(0, 0, 1.383, 0.738, 1.36, 1.02, 0.0),
     ParamEntry::new(1, 2, 1.36, 0.67, 1.2, 1.1, 0.0),
@@ -92,6 +97,9 @@ const BLASTN_1_4: &[ParamEntry] = &[
 ];
 
 /// Parameters for reward=2, penalty=-7 (even scores only)
+/// NCBI reference: blast_stat.c:629-635 (blastn_values_2_7)
+/// Note: These parameters can only be applied to even scores. Any odd score must be
+/// rounded down to the nearest even number before calculating the e-value.
 const BLASTN_2_7: &[ParamEntry] = &[
     ParamEntry::new(0, 0, 0.69, 0.73, 1.34, 0.515, 0.0),
     ParamEntry::new(2, 4, 0.68, 0.67, 1.2, 0.55, 0.0),
@@ -101,6 +109,7 @@ const BLASTN_2_7: &[ParamEntry] = &[
 ];
 
 /// Parameters for reward=1, penalty=-3
+/// NCBI reference: blast_stat.c:638-645 (blastn_values_1_3)
 const BLASTN_1_3: &[ParamEntry] = &[
     ParamEntry::new(0, 0, 1.374, 0.711, 1.31, 1.05, 0.0),
     ParamEntry::new(2, 2, 1.37, 0.70, 1.2, 1.1, 0.0),
@@ -111,6 +120,9 @@ const BLASTN_1_3: &[ParamEntry] = &[
 ];
 
 /// Parameters for reward=2, penalty=-5 (even scores only)
+/// NCBI reference: blast_stat.c:651-657 (blastn_values_2_5)
+/// Note: These parameters can only be applied to even scores. Any odd score must be
+/// rounded down to the nearest even number before calculating the e-value.
 const BLASTN_2_5: &[ParamEntry] = &[
     ParamEntry::new(0, 0, 0.675, 0.65, 1.1, 0.6, -1.0),
     ParamEntry::new(2, 4, 0.67, 0.59, 1.1, 0.6, -1.0),
@@ -119,7 +131,8 @@ const BLASTN_2_5: &[ParamEntry] = &[
     ParamEntry::new(2, 2, 0.56, 0.32, 0.59, 0.95, -4.0),
 ];
 
-/// Parameters for reward=1, penalty=-2 (BLASTN default)
+/// Parameters for reward=1, penalty=-2 (megablast task default)
+/// NCBI reference: blast_stat.c:660-668 (blastn_values_1_2)
 const BLASTN_1_2: &[ParamEntry] = &[
     ParamEntry::new(0, 0, 1.28, 0.46, 0.85, 1.5, -2.0),
     ParamEntry::new(2, 2, 1.33, 0.62, 1.1, 1.2, 0.0),
@@ -130,8 +143,11 @@ const BLASTN_1_2: &[ParamEntry] = &[
     ParamEntry::new(1, 1, 1.14, 0.26, 0.52, 2.2, -5.0),
 ];
 
-/// Parameters for reward=2, penalty=-3 (even scores only)
-/// Note: NCBI blastn task default is gap_open=5, gap_extend=2
+/// Parameters for reward=2, penalty=-3 (blastn task default)
+/// NCBI reference: blast_stat.c:674-684 (blastn_values_2_3)
+/// Note: These parameters can only be applied to even scores. Any odd score must be
+/// rounded down to the nearest even number before calculating the e-value.
+/// NCBI blastn task default: gap_open=5, gap_extend=2 → ParamEntry::new(5, 2, 0.625, 0.41, 0.78, 0.8, -2.0)
 const BLASTN_2_3: &[ParamEntry] = &[
     ParamEntry::new(0, 0, 0.55, 0.21, 0.46, 1.2, -5.0),
     ParamEntry::new(4, 4, 0.63, 0.42, 0.84, 0.75, -2.0),
@@ -145,6 +161,9 @@ const BLASTN_2_3: &[ParamEntry] = &[
 ];
 
 /// Parameters for reward=3, penalty=-4
+/// NCBI reference: blast_stat.c:687-694 (blastn_values_3_4)
+/// Note: These parameters can only be applied to even scores. Any odd score must be
+/// rounded down to the nearest even number before calculating the e-value.
 const BLASTN_3_4: &[ParamEntry] = &[
     ParamEntry::new(6, 3, 0.389, 0.25, 0.56, 0.7, -5.0),
     ParamEntry::new(5, 3, 0.375, 0.21, 0.47, 0.8, -6.0),
@@ -155,6 +174,7 @@ const BLASTN_3_4: &[ParamEntry] = &[
 ];
 
 /// Parameters for reward=4, penalty=-5
+/// NCBI reference: blast_stat.c:697-703 (blastn_values_4_5)
 const BLASTN_4_5: &[ParamEntry] = &[
     ParamEntry::new(0, 0, 0.22, 0.061, 0.22, 1.0, -15.0),
     ParamEntry::new(6, 5, 0.28, 0.21, 0.47, 0.6, -7.0),
@@ -164,6 +184,7 @@ const BLASTN_4_5: &[ParamEntry] = &[
 ];
 
 /// Parameters for reward=1, penalty=-1
+/// NCBI reference: blast_stat.c:706-714 (blastn_values_1_1)
 const BLASTN_1_1: &[ParamEntry] = &[
     ParamEntry::new(3, 2, 1.09, 0.31, 0.55, 2.0, -2.0),
     ParamEntry::new(2, 2, 1.07, 0.27, 0.49, 2.2, -3.0),
@@ -175,9 +196,11 @@ const BLASTN_1_1: &[ParamEntry] = &[
 ];
 
 /// Parameters for reward=3, penalty=-2
+/// NCBI reference: blast_stat.c:717-719 (blastn_values_3_2)
 const BLASTN_3_2: &[ParamEntry] = &[ParamEntry::new(5, 5, 0.208, 0.030, 0.072, 2.9, -47.0)];
 
 /// Parameters for reward=5, penalty=-4
+/// NCBI reference: blast_stat.c:722-724 (blastn_values_5_4)
 const BLASTN_5_4: &[ParamEntry] = &[
     ParamEntry::new(10, 6, 0.163, 0.068, 0.16, 1.0, -19.0),
     ParamEntry::new(8, 6, 0.146, 0.039, 0.11, 1.3, -29.0),
@@ -310,6 +333,16 @@ const PAM250: &[ParamEntry] = &[
 ];
 
 /// Look up Karlin-Altschul parameters for nucleotide scoring scheme
+///
+/// NCBI reference: blast_stat.c:3250-3350 (BLAST_GetNuclValuesArray)
+/// This function matches the reward/penalty combination and gap penalties to select
+/// the appropriate statistical parameters from precomputed tables.
+///
+/// Selection logic:
+/// 1. Match reward/penalty combination to select table
+/// 2. Find exact match for gap_open/gap_extend
+/// 3. If no match, use ungapped parameters (first entry with gap_open=0, gap_extend=0)
+/// 4. If table not found, default to reward=1, penalty=-2 ungapped parameters
 pub fn lookup_nucl_params(spec: &NuclScoringSpec) -> KarlinParams {
     let reward = spec.reward;
     let penalty = spec.penalty.abs();
@@ -330,7 +363,8 @@ pub fn lookup_nucl_params(spec: &NuclScoringSpec) -> KarlinParams {
         (3, 2) => BLASTN_3_2,
         (5, 4) => BLASTN_5_4,
         _ => {
-            // Default to reward=1, penalty=-2 parameters
+            // Default to reward=1, penalty=-2 ungapped parameters (megablast default)
+            // NCBI reference: blast_stat.c:3298-3304 (blastn_values_1_2, first entry)
             return KarlinParams {
                 lambda: 1.28,
                 k: 0.46,
@@ -342,6 +376,7 @@ pub fn lookup_nucl_params(spec: &NuclScoringSpec) -> KarlinParams {
     };
 
     // Find matching gap penalties or use ungapped (first entry)
+    // NCBI reference: blast_stat.c:3305-3312 (gap_open_max, gap_extend_max logic)
     for entry in table {
         if entry.gap_open == gap_open && entry.gap_extend == gap_extend {
             return entry.to_karlin_params();
@@ -349,6 +384,7 @@ pub fn lookup_nucl_params(spec: &NuclScoringSpec) -> KarlinParams {
     }
 
     // If no exact match, use ungapped parameters (first entry)
+    // NCBI BLAST uses the first entry (gap_open=0, gap_extend=0) as fallback
     if !table.is_empty() {
         return table[0].to_karlin_params();
     }
@@ -513,7 +549,9 @@ mod tests {
     use super::*;
 
     #[test]
-    fn test_lookup_nucl_params_default() {
+    fn test_lookup_nucl_params_megablast() {
+        // megablast task default: reward=1, penalty=-2, gap_open=0, gap_extend=0
+        // NCBI reference: blast_stat.c:660-668 (blastn_values_1_2, first entry)
         let spec = NuclScoringSpec {
             reward: 1,
             penalty: -2,
@@ -521,8 +559,77 @@ mod tests {
             gap_extend: 0,
         };
         let params = lookup_nucl_params(&spec);
-        assert!((params.lambda - 1.28).abs() < 0.01);
-        assert!((params.k - 0.46).abs() < 0.01);
+        assert!((params.lambda - 1.28).abs() < 0.0001, "lambda mismatch: expected 1.28, got {}", params.lambda);
+        assert!((params.k - 0.46).abs() < 0.0001, "k mismatch: expected 0.46, got {}", params.k);
+        assert!((params.h - 0.85).abs() < 0.0001, "h mismatch: expected 0.85, got {}", params.h);
+        assert!((params.alpha - 1.5).abs() < 0.0001, "alpha mismatch: expected 1.5, got {}", params.alpha);
+        assert!((params.beta - (-2.0)).abs() < 0.0001, "beta mismatch: expected -2.0, got {}", params.beta);
+    }
+
+    #[test]
+    fn test_lookup_nucl_params_blastn() {
+        // blastn task default: reward=2, penalty=-3, gap_open=5, gap_extend=2
+        // NCBI reference: blast_stat.c:674-684 (blastn_values_2_3, entry with gap_open=5, gap_extend=2)
+        let spec = NuclScoringSpec {
+            reward: 2,
+            penalty: -3,
+            gap_open: 5,
+            gap_extend: 2,
+        };
+        let params = lookup_nucl_params(&spec);
+        assert!((params.lambda - 0.625).abs() < 0.0001, "lambda mismatch: expected 0.625, got {}", params.lambda);
+        assert!((params.k - 0.41).abs() < 0.0001, "k mismatch: expected 0.41, got {}", params.k);
+        assert!((params.h - 0.78).abs() < 0.0001, "h mismatch: expected 0.78, got {}", params.h);
+        assert!((params.alpha - 0.8).abs() < 0.0001, "alpha mismatch: expected 0.8, got {}", params.alpha);
+        assert!((params.beta - (-2.0)).abs() < 0.0001, "beta mismatch: expected -2.0, got {}", params.beta);
+    }
+
+    #[test]
+    fn test_lookup_nucl_params_blastn_ungapped() {
+        // blastn task ungapped: reward=2, penalty=-3, gap_open=0, gap_extend=0
+        // NCBI reference: blast_stat.c:674-684 (blastn_values_2_3, first entry)
+        let spec = NuclScoringSpec {
+            reward: 2,
+            penalty: -3,
+            gap_open: 0,
+            gap_extend: 0,
+        };
+        let params = lookup_nucl_params(&spec);
+        assert!((params.lambda - 0.55).abs() < 0.0001, "lambda mismatch: expected 0.55, got {}", params.lambda);
+        assert!((params.k - 0.21).abs() < 0.0001, "k mismatch: expected 0.21, got {}", params.k);
+        assert!((params.h - 0.46).abs() < 0.0001, "h mismatch: expected 0.46, got {}", params.h);
+        assert!((params.alpha - 1.2).abs() < 0.0001, "alpha mismatch: expected 1.2, got {}", params.alpha);
+        assert!((params.beta - (-5.0)).abs() < 0.0001, "beta mismatch: expected -5.0, got {}", params.beta);
+    }
+
+    #[test]
+    fn test_lookup_nucl_params_unsupported_fallback() {
+        // Unsupported reward/penalty combination should fallback to reward=1, penalty=-2
+        let spec = NuclScoringSpec {
+            reward: 99,
+            penalty: -99,
+            gap_open: 0,
+            gap_extend: 0,
+        };
+        let params = lookup_nucl_params(&spec);
+        // Should return default (reward=1, penalty=-2 ungapped)
+        assert!((params.lambda - 1.28).abs() < 0.0001, "lambda mismatch: expected 1.28, got {}", params.lambda);
+        assert!((params.k - 0.46).abs() < 0.0001, "k mismatch: expected 0.46, got {}", params.k);
+    }
+
+    #[test]
+    fn test_lookup_nucl_params_gap_fallback() {
+        // If gap_open/gap_extend don't match, should use ungapped (first entry)
+        let spec = NuclScoringSpec {
+            reward: 2,
+            penalty: -3,
+            gap_open: 99,  // Not in table
+            gap_extend: 99,  // Not in table
+        };
+        let params = lookup_nucl_params(&spec);
+        // Should return first entry (ungapped: gap_open=0, gap_extend=0)
+        assert!((params.lambda - 0.55).abs() < 0.0001, "lambda mismatch: expected 0.55, got {}", params.lambda);
+        assert!((params.k - 0.21).abs() < 0.0001, "k mismatch: expected 0.21, got {}", params.k);
     }
 
     #[test]

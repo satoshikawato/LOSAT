@@ -1,0 +1,57 @@
+Reading queries...
+Building lookup table...
+
+=== Phase 1a: Exact Indexing Diagnostics ===
+Total exact positions indexed: 535621
+Unique exact words: 9260
+Max offsets per exact word: 578
+Skipped (invalid residue): 0
+Skipped (SEG mask): 87487
+
+=== Phase 1b: Neighbor Generation Diagnostics ===
+Threshold: 13
+Exact entries added (self_score < threshold): 74174
+Neighbor entries added: 5823383
+Neighbor words generated (unique): 180012
+Words with exact-only additions: 870
+Words with neighbor generation: 8390
+Max neighbors generated for single word: 136
+  Word with max neighbors: idx=13972 (residues 13,20,20)
+Expansion factor (total_entries / exact_positions): 11.01x
+
+=== Phase 2: High-Frequency K-mer Analysis ===
+Top 10 high-frequency k-mers (before suppression):
+  #1: count=2333, idx=3171 (residues 3,3,3)
+  #2: count=2299, idx=3182 (residues 3,3,14)
+  #3: count=2266, idx=3523 (residues 3,14,3)
+  #4: count=2256, idx=3174 (residues 3,3,6)
+  #5: count=2192, idx=6243 (residues 6,3,3)
+  #6: count=2136, idx=14435 (residues 14,3,3)
+  #7: count=2112, idx=22627 (residues 22,3,3)
+  #8: count=2088, idx=3267 (residues 3,6,3)
+  #9: count=2048, idx=3534 (residues 3,14,14)
+  #10: count=2011, idx=14446 (residues 14,3,14)
+Hit count distribution:
+  2-10: 18 cells, 161 entries
+  11-100: 2950 cells, 170393 entries
+  101-500: 6111 cells, 1526135 entries
+  501-1000: 3030 cells, 2255968 entries
+  1001-5000: 1559 cells, 1944900 entries
+
+=== NCBI Backbone Lookup Table (BLASTAA_SIZE=28) ===
+Contexts: 6
+Backbone size: 28540 cells (0.5 MB)
+Non-empty cells: 13668
+Total entries: 5897557
+Overflow size: 5897557 (23.6 MB)
+Longest chain: 2333
+==========================================
+
+Reading subjects...
+Searching 1 queries vs 1 subjects... (avg_query_length=103854)
+[DEBUG CUTOFF] query_len_aa=103854, subject_len_nucl=311562
+[DEBUG CUTOFF] eff_searchsp=10775478025
+[DEBUG CUTOFF] length_adjustment=49
+[DEBUG CUTOFF] cutoff_score_max=60
+[DEBUG CUTOFF] gap_trigger=41
+[DEBUG CUTOFF] final cutoff=41

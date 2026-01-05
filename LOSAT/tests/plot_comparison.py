@@ -211,6 +211,11 @@ comparisons = [
         "ncbi": "./blast_out/MeenMJNV.MejoMJNV.tblastx.n1.out", 
         "losat": "./losat_out/MeenMJNV.MejoMJNV.tlosatx.n1.out"
     },
+    {
+        "name": "AvCLPV_vs_PsCLPV", "mode": "TBLASTX",
+        "ncbi": "./blast_out/AvCLPV.PsCLPV.tblastx.n1.out", 
+        "losat": "./losat_out/AvCLPV.PsCLPV.tlosatx.n1.out"
+    },
     # --- BLASTN (Standard / Task:blastn) ---
     {
         "name": "NZ_CP006932_Self",

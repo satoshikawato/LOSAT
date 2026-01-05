@@ -55,7 +55,7 @@ LOSAT is a Rust implementation of NCBI BLAST, specifically targeting **perfect p
 ## NCBI Code Reference
 
 ### Primary Reference Location
-- **NCBI BLAST source**: `/mnt/c/Users/kawato/Documents/GitHub/ncbi-blast/`
+- **NCBI BLAST source**: `/mnt/c/Users/kawato/Documents/GitHub/ncbi-blast/`　or `/mnt/c/Users/genom/GitHub/ncbi-blast/`
 - Key files:
   - `c++/src/algo/blast/core/aa_ungapped.c` - Extension logic
   - `c++/src/algo/blast/core/link_hsps.c` - Sum-statistics linking

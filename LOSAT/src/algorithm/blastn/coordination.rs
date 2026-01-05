@@ -10,7 +10,7 @@ use anyhow::Result;
 use bio::io::fasta;
 use crate::utils::dust::{DustMasker, MaskedInterval};
 use super::args::BlastnArgs;
-use super::constants::{MIN_UNGAPPED_SCORE_MEGABLAST, MIN_UNGAPPED_SCORE_BLASTN, MAX_DIRECT_LOOKUP_WORD_SIZE};
+use super::constants::{MIN_UNGAPPED_SCORE_MEGABLAST, MIN_UNGAPPED_SCORE_BLASTN, MAX_DIRECT_LOOKUP_WORD_SIZE, X_DROP_GAPPED_NUCL, X_DROP_GAPPED_GREEDY};
 use super::lookup::{build_lookup, build_pv_direct_lookup, build_two_stage_lookup, TwoStageLookup, PvDirectLookup, KmerLookup};
 
 /// Task-specific configuration for BLASTN
@@ -26,6 +26,7 @@ pub struct TaskConfig {
     pub use_direct_lookup: bool,
     pub use_two_stage: bool,
     pub lut_word_length: usize,
+    pub x_drop_gapped: i32, // Task-specific gapped X-dropoff (blastn: 30, megablast: 25)
 }
 
 /// Lookup tables for seed finding
@@ -73,15 +74,19 @@ pub fn determine_scoring_params(args: &BlastnArgs) -> (i32, i32, i32, i32) {
         "blastn" | "dc-megablast" => {
             let r = if args.reward == 1 { 2 } else { args.reward };
             let p = if args.penalty == -2 { -3 } else { args.penalty };
-            let go = if args.gap_open == 0 { -5 } else { args.gap_open };
-            let ge = if args.gap_extend == 0 { -2 } else { args.gap_extend };
+            // NCBI BLAST: gap penalties are specified as positive values (cost)
+            // Reference: ncbi-blast/c++/include/algo/blast/core/blast_options.h:84-96
+            let go = if args.gap_open == 0 { 5 } else { args.gap_open };
+            let ge = if args.gap_extend == 0 { 2 } else { args.gap_extend };
             (r, p, go, ge)
         }
         "blastn-short" => {
             let r = if args.reward == 1 { 1 } else { args.reward };
             let p = if args.penalty == -2 { -3 } else { args.penalty };
-            let go = if args.gap_open == 0 { -5 } else { args.gap_open };
-            let ge = if args.gap_extend == 0 { -2 } else { args.gap_extend };
+            // NCBI BLAST: gap penalties are specified as positive values (cost)
+            // Reference: ncbi-blast/c++/include/algo/blast/core/blast_options.h:84-96
+            let go = if args.gap_open == 0 { 5 } else { args.gap_open };
+            let ge = if args.gap_extend == 0 { 2 } else { args.gap_extend };
             (r, p, go, ge)
         }
         _ => (args.reward, args.penalty, args.gap_open, args.gap_extend),
@@ -118,6 +123,15 @@ pub fn configure_task(args: &BlastnArgs) -> TaskConfig {
         _ => true,
     };
     
+    // NCBI BLAST: Task-specific gapped X-dropoff
+    // Reference: ncbi-blast/c++/include/algo/blast/core/blast_options.h:122-148
+    // blastn (non-greedy): 30, megablast (greedy): 25
+    // Reference: ncbi-blast/c++/src/algo/blast/api/blast_nucl_options.cpp:177-194
+    let x_drop_gapped = match args.task.as_str() {
+        "megablast" => X_DROP_GAPPED_GREEDY, // 25
+        _ => X_DROP_GAPPED_NUCL, // 30
+    };
+    
     let scan_step = calculate_initial_scan_step(effective_word_size, args.scan_step);
     
     let use_direct_lookup = effective_word_size <= MAX_DIRECT_LOOKUP_WORD_SIZE;
@@ -146,6 +160,7 @@ pub fn configure_task(args: &BlastnArgs) -> TaskConfig {
         use_direct_lookup,
         use_two_stage,
         lut_word_length,
+        x_drop_gapped,
     }
 }
 

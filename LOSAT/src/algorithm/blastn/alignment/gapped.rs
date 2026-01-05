@@ -212,6 +212,12 @@ pub fn extend_gapped_one_direction(
     gap_extend: i32,
     x_drop: i32,
 ) -> (usize, usize, i32, usize, usize, usize, usize, usize) {
+    // NCBI BLAST: gap penalties are specified as positive values (cost), but used as negative in calculations
+    // Reference: ncbi-blast/c++/src/algo/blast/api/blast_nucl_options.cpp:198-229
+    // Convert positive gap penalties to negative for internal use
+    let gap_open = -gap_open;
+    let gap_extend = -gap_extend;
+
     // NCBI BLAST-style adaptive banding implementation
     // Key insight from Blast_SemiGappedAlign:
     // - Use dynamic window bounds (first_b_index to b_size) that expand/contract based on X-drop
@@ -261,11 +267,23 @@ pub fn extend_gapped_one_direction(
     ];
 
     // Initialize row 0
+    // NCBI reference: blast_gapalign.c:811-822
+    // score = -gap_open_extend;
+    // score_array[0].best = 0;
+    // score_array[0].best_gap = -gap_open_extend;
+    // for (i = 1; i <= N; i++) {
+    //     if (score < -x_dropoff) break;
+    //     score_array[i].best = score;
+    //     score_array[i].best_gap = score - gap_open_extend;
+    //     score -= gap_extend;
+    // }
     let gap_open_extend = gap_open + gap_extend;
     score_array[0].best = 0;
-    score_array[0].best_gap = gap_open_extend; // Cost to open gap at position 0
+    score_array[0].best_gap = gap_open_extend; // After conversion: gap_open_extend (positive) = -(-gap_open_extend) (negative in NCBI)
 
     // Initialize leading gaps in subject (j > 0)
+    // NCBI uses: score = -gap_open_extend; then score -= gap_extend;
+    // After conversion: gap_open_extend and gap_extend are negative, so we use positive values
     let mut score = gap_open_extend;
     let mut b_size = 1usize;
     for j in 1..=n.min(alloc_size - 1) {
@@ -273,6 +291,8 @@ pub fn extend_gapped_one_direction(
             break;
         }
         score_array[j].best = score;
+        // NCBI: score_array[i].best_gap = score - gap_open_extend;
+        // After conversion: score - gap_open_extend = score + gap_open_extend (since gap_open_extend is negative)
         score_array[j].best_gap = score + gap_open_extend;
         score_array[j].stats = AlnStats {
             matches: 0,
@@ -280,6 +300,8 @@ pub fn extend_gapped_one_direction(
             gap_opens: 1,
             gap_letters: j as u32,
         };
+        // NCBI: score -= gap_extend;
+        // After conversion: score -= gap_extend = score += gap_extend (since gap_extend is negative)
         score += gap_extend;
         b_size = j + 1;
     }
@@ -312,7 +334,7 @@ pub fn extend_gapped_one_direction(
             dp_cells += 1;
 
             // Get previous column's gap score
-            let score_gap_col = score_array[j].best_gap;
+            let mut score_gap_col = score_array[j].best_gap;
             let score_gap_col_stats = score_array[j].gap_stats;
 
             // Compute match/mismatch score
@@ -360,29 +382,36 @@ pub fn extend_gapped_one_direction(
                 }
 
                 // Update gap scores for next iteration
-                // Gap in query (Ix): extend existing gap or open new gap
-                let extend_gap_row = score_gap_row + gap_extend;
-                let open_gap_row = score_val + gap_open_extend;
-                if open_gap_row > extend_gap_row {
+                // NCBI reference: blast_gapalign.c:903-907
+                // score_gap_row -= gap_extend;
+                // score_gap_col -= gap_extend;
+                // score_array[b_index].best_gap = MAX(score - gap_open_extend, score_gap_col);
+                // score_gap_row = MAX(score - gap_open_extend, score_gap_row);
+                // After conversion: gap_extend and gap_open_extend are negative, so we use addition
+                
+                // Gap in query (Ix): extend existing gap first, then compare with opening new gap
+                score_gap_row += gap_extend; // NCBI: score_gap_row -= gap_extend (gap_extend is negative in NCBI)
+                let open_gap_row = score_val + gap_open_extend; // NCBI: score - gap_open_extend (gap_open_extend is negative in NCBI)
+                if open_gap_row > score_gap_row {
                     score_gap_row = open_gap_row;
                     score_gap_row_stats = score_stats;
                     score_gap_row_stats.gap_opens += 1;
                     score_gap_row_stats.gap_letters += 1;
                 } else {
-                    score_gap_row = extend_gap_row;
+                    // Extended existing gap
                     score_gap_row_stats.gap_letters += 1;
                 }
 
-                // Gap in subject (Iy): extend existing gap or open new gap
-                let extend_gap_col = score_gap_col + gap_extend;
-                let open_gap_col = score_val + gap_open_extend;
-                if open_gap_col > extend_gap_col {
+                // Gap in subject (Iy): extend existing gap first, then compare with opening new gap
+                score_gap_col += gap_extend; // NCBI: score_gap_col -= gap_extend (gap_extend is negative in NCBI)
+                let open_gap_col = score_val + gap_open_extend; // NCBI: score - gap_open_extend (gap_open_extend is negative in NCBI)
+                if open_gap_col > score_gap_col {
                     score_array[j].best_gap = open_gap_col;
                     score_array[j].gap_stats = score_stats;
                     score_array[j].gap_stats.gap_opens += 1;
                     score_array[j].gap_stats.gap_letters += 1;
                 } else {
-                    score_array[j].best_gap = extend_gap_col;
+                    score_array[j].best_gap = score_gap_col;
                     score_array[j].gap_stats.gap_letters += 1;
                 }
 
@@ -424,6 +453,14 @@ pub fn extend_gapped_one_direction(
             b_size = last_b_index + 1;
         } else {
             // Extend window if we can continue with gaps (respect MAX_WINDOW_SIZE)
+            // NCBI reference: blast_gapalign.c:946-951
+            // while (score_gap_row >= (best_score - x_dropoff) && b_size <= N) {
+            //     score_array[b_size].best = score_gap_row;
+            //     score_array[b_size].best_gap = score_gap_row - gap_open_extend;
+            //     score_gap_row -= gap_extend;
+            //     b_size++;
+            // }
+            // After conversion: gap_open_extend and gap_extend are negative, so we use addition
             while score_gap_row >= best_score - x_drop
                 && b_size <= n
                 && b_size < alloc_size
@@ -431,10 +468,14 @@ pub fn extend_gapped_one_direction(
             {
                 score_array[b_size].best = score_gap_row;
                 score_array[b_size].stats = score_gap_row_stats;
+                // NCBI: score_array[b_size].best_gap = score_gap_row - gap_open_extend;
+                // After conversion: score_gap_row - gap_open_extend = score_gap_row + gap_open_extend
                 score_array[b_size].best_gap = score_gap_row + gap_open_extend;
                 score_array[b_size].gap_stats = score_gap_row_stats;
                 score_array[b_size].gap_stats.gap_opens += 1;
                 score_array[b_size].gap_stats.gap_letters += 1;
+                // NCBI: score_gap_row -= gap_extend;
+                // After conversion: score_gap_row -= gap_extend = score_gap_row += gap_extend
                 score_gap_row += gap_extend;
                 score_gap_row_stats.gap_letters += 1;
                 b_size += 1;

@@ -92,7 +92,12 @@ comparisons = [
         "name": "MeenMJNV_vs_MejoMJNV", "mode": "TBLASTX",
         "losat_log": "MeenMJNV.MejoMJNV.tlosatx.n1.log", 
         "blast_log": "MeenMJNV.MejoMJNV.tblastx.n1.log"
-    },   
+    },
+    {
+        "name": "AvCLPV_vs_PsCLPV", "mode": "TBLASTX",
+        "losat_log": "AvCLPV.PsCLPV.tlosatx.n1.log", 
+        "blast_log": "AvCLPV.PsCLPV.tblastx.n1.log"
+    },  
     # --- BLASTN (Default / Megablast) ---
     {
         "name": "NZ_CP006932_Self", "mode": "Megablast", 

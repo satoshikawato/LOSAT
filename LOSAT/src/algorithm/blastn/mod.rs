@@ -6,6 +6,7 @@ pub mod alignment;
 pub mod extension;
 pub mod coordination;
 pub mod utils;
+pub mod ncbi_cutoffs;
 
 pub use args::BlastnArgs;
 pub use utils::run;

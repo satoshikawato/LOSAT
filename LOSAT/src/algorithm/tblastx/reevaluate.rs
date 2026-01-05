@@ -9,6 +9,91 @@
 //! - ncbi-blast/c++/src/algo/blast/core/blast_hits.c:675-733
 
 use crate::utils::matrix::blosum62_score;
+use std::sync::OnceLock;
+
+// ---------------------------------------------------------------------------
+// SIMD optimization: Reevaluation score table and gather helpers
+// ---------------------------------------------------------------------------
+
+// NCBI BLAST reference (c++/src/algo/blast/core/blast_hits.c:675-733):
+//   for (index = 0; index < hsp_length; ++index) {
+//       sum += matrix[*query & kResidueMask][*subject];
+//       query++;
+//       subject++;
+//       if (sum < 0) {
+//           sum = 0;
+//           current_q_start = query;
+//           current_s_start = subject;
+//          if (score < cutoff_score) {
+//             best_q_start = best_q_end = query;
+//             best_s_start = best_s_end = subject;
+//             score = 0;
+//          }
+//       } else if (sum > score) {
+//          score = sum;
+//          best_q_end = query;
+//          best_s_end = subject;
+//          best_q_start = current_q_start;
+//          best_s_start = current_s_start;
+//       }
+//   }
+//
+// We batch the matrix lookup (blosum62_score) using AVX2 gather, but keep
+// the exact per-residue control flow (sum updates, branches) to preserve
+// 1-bit parity with NCBI.
+
+static REEVALUATE_SCORE_TABLE_32: OnceLock<[i32; 32 * 32]> = OnceLock::new();
+
+#[inline(always)]
+fn reevaluate_score_table_32() -> &'static [i32; 32 * 32] {
+    REEVALUATE_SCORE_TABLE_32.get_or_init(|| {
+        let mut t = [0i32; 32 * 32];
+        for a in 0..32u8 {
+            for b in 0..32u8 {
+                // Use blosum62_score directly to match scalar loop exactly
+                // (includes sentinel/defscore handling)
+                t[(a as usize) * 32 + (b as usize)] = blosum62_score(a, b);
+            }
+        }
+        t
+    })
+}
+
+/// Gather 8 BLOSUM62 scores using AVX2.
+/// 
+/// Loads 8 bytes from query and subject sequences, computes indices
+/// (q<<5)|s, and gathers scores from the 32x32 table.
+#[cfg(target_arch = "x86_64")]
+#[target_feature(enable = "avx2")]
+unsafe fn gather_scores8_reevaluate_avx2(
+    q_ptr: *const u8,
+    s_ptr: *const u8,
+    table: *const i32,
+) -> [i32; 8] {
+    use std::arch::x86_64::*;
+
+    // Load 8 bytes from each sequence.
+    let q8 = _mm_loadl_epi64(q_ptr as *const __m128i);
+    let s8 = _mm_loadl_epi64(s_ptr as *const __m128i);
+
+    // Expand to 8x u32 lanes.
+    let q32 = _mm256_cvtepu8_epi32(q8);
+    let s32 = _mm256_cvtepu8_epi32(s8);
+
+    // Index into 32x32 score table: (q<<5)|s.
+    let idx = _mm256_or_si256(_mm256_slli_epi32(q32, 5), s32);
+
+    // Gather 8 i32 scores.
+    let v = _mm256_i32gather_epi32(table, idx, 4);
+
+    let mut out = [0i32; 8];
+    _mm256_storeu_si256(out.as_mut_ptr() as *mut __m256i, v);
+    out
+}
+
+// ---------------------------------------------------------------------------
+// Reevaluation functions
+// ---------------------------------------------------------------------------
 
 /// Reevaluate an ungapped HSP against the actual (possibly masked) translated sequences.
 ///
@@ -93,6 +178,44 @@ pub fn reevaluate_ungapped_hit_ncbi_translated(
         return None;
     }
 
+    // For short HSPs (< 16 residues), scalar is faster due to SIMD overhead
+    // For longer HSPs, AVX2 gather can provide speedup
+    #[cfg(target_arch = "x86_64")]
+    {
+        if hsp_len >= 16 && is_x86_feature_detected!("avx2") {
+            unsafe {
+                return reevaluate_ungapped_hit_ncbi_translated_avx2(
+                    query_raw,
+                    subject_raw,
+                    q_off_raw,
+                    s_off_raw,
+                    hsp_len,
+                    cutoff_score,
+                );
+            }
+        }
+    }
+
+    reevaluate_ungapped_hit_ncbi_translated_scalar(
+        query_raw,
+        subject_raw,
+        q_off_raw,
+        s_off_raw,
+        hsp_len,
+        cutoff_score,
+    )
+}
+
+/// Scalar implementation of reevaluation (fallback and reference).
+#[inline(always)]
+fn reevaluate_ungapped_hit_ncbi_translated_scalar(
+    query_raw: &[u8],
+    subject_raw: &[u8],
+    q_off_raw: usize,
+    s_off_raw: usize,
+    hsp_len: usize,
+    cutoff_score: i32,
+) -> Option<(usize, usize, usize, i32)> {
     // NCBI variables (translated => residue mask 0xff, i.e. no masking needed here).
     let mut score: i32 = 0;
     let mut sum: i32 = 0;
@@ -126,6 +249,149 @@ pub fn reevaluate_ungapped_hit_ncbi_translated(
             best_end = idx + 1; // query pointer is one past the current residue
             best_start = current_start;
         }
+    }
+
+    // NCBI s_UpdateReevaluatedHSPUngapped:
+    // delete if score < cutoff_score
+    if score < cutoff_score {
+        return None;
+    }
+
+    let new_len = best_end.saturating_sub(best_start);
+    if new_len == 0 {
+        return None;
+    }
+
+    let new_q_off = q_off_raw + best_start;
+    let new_s_off = s_off_raw + best_start;
+    Some((new_q_off, new_s_off, new_len, score))
+}
+
+/// AVX2-optimized reevaluation that batches score lookup but preserves
+/// per-residue control flow for NCBI parity.
+#[cfg(target_arch = "x86_64")]
+#[target_feature(enable = "avx2")]
+unsafe fn reevaluate_ungapped_hit_ncbi_translated_avx2(
+    query_raw: &[u8],
+    subject_raw: &[u8],
+    q_off_raw: usize,
+    s_off_raw: usize,
+    hsp_len: usize,
+    cutoff_score: i32,
+) -> Option<(usize, usize, usize, i32)> {
+    let table = reevaluate_score_table_32().as_ptr();
+
+    // NCBI variables (translated => residue mask 0xff, i.e. no masking needed here).
+    let mut score: i32 = 0;
+    let mut sum: i32 = 0;
+
+    // Pointers expressed as offsets within the HSP segment: [0..hsp_len]
+    let mut best_start: usize = 0;
+    let mut best_end: usize = 0;
+    let mut current_start: usize = 0;
+
+    let mut idx = 0usize;
+
+    // Process blocks of 16 residues (2x8 gather calls)
+    while idx + 16 <= hsp_len {
+        let q_ptr = query_raw.as_ptr().add(q_off_raw + idx);
+        let s_ptr = subject_raw.as_ptr().add(s_off_raw + idx);
+
+        let scores0 = gather_scores8_reevaluate_avx2(q_ptr, s_ptr, table);
+        let scores1 = gather_scores8_reevaluate_avx2(q_ptr.add(8), s_ptr.add(8), table);
+
+        // Apply scores0[0..7] in order (strictly per-residue state machine)
+        for k in 0..8usize {
+            let pos = idx + k;
+            sum += scores0[k];
+
+            if sum < 0 {
+                sum = 0;
+                current_start = pos + 1;
+                if score < cutoff_score {
+                    best_start = pos + 1;
+                    best_end = pos + 1;
+                    score = 0;
+                }
+            } else if sum > score {
+                score = sum;
+                best_end = pos + 1;
+                best_start = current_start;
+            }
+        }
+
+        // Apply scores1[0..7] in order
+        for k in 0..8usize {
+            let pos = idx + 8 + k;
+            sum += scores1[k];
+
+            if sum < 0 {
+                sum = 0;
+                current_start = pos + 1;
+                if score < cutoff_score {
+                    best_start = pos + 1;
+                    best_end = pos + 1;
+                    score = 0;
+                }
+            } else if sum > score {
+                score = sum;
+                best_end = pos + 1;
+                best_start = current_start;
+            }
+        }
+
+        idx += 16;
+    }
+
+    // Process blocks of 8 residues
+    while idx + 8 <= hsp_len {
+        let q_ptr = query_raw.as_ptr().add(q_off_raw + idx);
+        let s_ptr = subject_raw.as_ptr().add(s_off_raw + idx);
+        let scores = gather_scores8_reevaluate_avx2(q_ptr, s_ptr, table);
+
+        for k in 0..8usize {
+            let pos = idx + k;
+            sum += scores[k];
+
+            if sum < 0 {
+                sum = 0;
+                current_start = pos + 1;
+                if score < cutoff_score {
+                    best_start = pos + 1;
+                    best_end = pos + 1;
+                    score = 0;
+                }
+            } else if sum > score {
+                score = sum;
+                best_end = pos + 1;
+                best_start = current_start;
+            }
+        }
+
+        idx += 8;
+    }
+
+    // Scalar tail
+    while idx < hsp_len {
+        let q = query_raw[q_off_raw + idx];
+        let s = subject_raw[s_off_raw + idx];
+        sum += blosum62_score(q, s);
+
+        if sum < 0 {
+            sum = 0;
+            current_start = idx + 1;
+            if score < cutoff_score {
+                best_start = idx + 1;
+                best_end = idx + 1;
+                score = 0;
+            }
+        } else if sum > score {
+            score = sum;
+            best_end = idx + 1;
+            best_start = current_start;
+        }
+
+        idx += 1;
     }
 
     // NCBI s_UpdateReevaluatedHSPUngapped:
@@ -223,22 +489,125 @@ pub fn get_num_identities_and_positives_ungapped(
         return None;
     }
 
-    let mut num_ident = 0usize;
     let align_length = hsp_len;
 
     // NCBI: for (i=0; i<align_length; i++)
-    for i in 0..align_length {
-        let q = query_nomask[q_off + i];
-        let s = subject[s_off + i];
+    //   if (*q == *s) num_ident++;
+    //
+    // SIMD optimization: use AVX2/SSE2 to compare 32/16 bytes at a time
+    let num_ident = unsafe {
+        let q_ptr = query_nomask.as_ptr().add(q_off);
+        let s_ptr = subject.as_ptr().add(s_off);
         
-        // NCBI: if (*q == *s) num_ident++;
-        if q == s {
-            num_ident += 1;
+        #[cfg(target_arch = "x86_64")]
+        {
+            if is_x86_feature_detected!("avx2") {
+                count_identities_avx2(q_ptr, s_ptr, align_length)
+            } else if is_x86_feature_detected!("sse2") {
+                count_identities_sse2(q_ptr, s_ptr, align_length)
+            } else {
+                count_identities_scalar(q_ptr, s_ptr, align_length)
+            }
         }
-        // Note: NCBI also counts positives (matrix[*q][*s] > 0), but we only need num_ident for Blast_HSPTest
-    }
+        #[cfg(not(target_arch = "x86_64"))]
+        {
+            count_identities_scalar(q_ptr, s_ptr, align_length)
+        }
+    };
 
     Some((num_ident, align_length))
+}
+
+/// Count identical residues using AVX2 (32 bytes at a time).
+#[cfg(target_arch = "x86_64")]
+#[target_feature(enable = "avx2")]
+unsafe fn count_identities_avx2(q_ptr: *const u8, s_ptr: *const u8, len: usize) -> usize {
+    use std::arch::x86_64::*;
+
+    let mut count = 0usize;
+    let mut i = 0usize;
+
+    // Process 32 bytes at a time
+    while i + 32 <= len {
+        let q_vec = _mm256_loadu_si256(q_ptr.add(i) as *const __m256i);
+        let s_vec = _mm256_loadu_si256(s_ptr.add(i) as *const __m256i);
+        
+        // Compare bytes: 0xFF where equal, 0x00 where different
+        let cmp = _mm256_cmpeq_epi8(q_vec, s_vec);
+        
+        // Get bitmask: each bit represents one byte comparison result
+        let mask = _mm256_movemask_epi8(cmp) as u32;
+        
+        // Count set bits (number of equal bytes)
+        count += mask.count_ones() as usize;
+        
+        i += 32;
+    }
+
+    // Process remaining bytes with SSE2 (16 bytes at a time)
+    while i + 16 <= len {
+        let q_vec = _mm_loadu_si128(q_ptr.add(i) as *const __m128i);
+        let s_vec = _mm_loadu_si128(s_ptr.add(i) as *const __m128i);
+        
+        let cmp = _mm_cmpeq_epi8(q_vec, s_vec);
+        let mask = _mm_movemask_epi8(cmp) as u16;
+        
+        count += mask.count_ones() as usize;
+        i += 16;
+    }
+
+    // Scalar tail
+    while i < len {
+        if *q_ptr.add(i) == *s_ptr.add(i) {
+            count += 1;
+        }
+        i += 1;
+    }
+
+    count
+}
+
+/// Count identical residues using SSE2 (16 bytes at a time).
+#[cfg(target_arch = "x86_64")]
+#[target_feature(enable = "sse2")]
+unsafe fn count_identities_sse2(q_ptr: *const u8, s_ptr: *const u8, len: usize) -> usize {
+    use std::arch::x86_64::*;
+
+    let mut count = 0usize;
+    let mut i = 0usize;
+
+    // Process 16 bytes at a time
+    while i + 16 <= len {
+        let q_vec = _mm_loadu_si128(q_ptr.add(i) as *const __m128i);
+        let s_vec = _mm_loadu_si128(s_ptr.add(i) as *const __m128i);
+        
+        let cmp = _mm_cmpeq_epi8(q_vec, s_vec);
+        let mask = _mm_movemask_epi8(cmp) as u16;
+        
+        count += mask.count_ones() as usize;
+        i += 16;
+    }
+
+    // Scalar tail
+    while i < len {
+        if *q_ptr.add(i) == *s_ptr.add(i) {
+            count += 1;
+        }
+        i += 1;
+    }
+
+    count
+}
+
+/// Count identical residues using scalar (fallback).
+unsafe fn count_identities_scalar(q_ptr: *const u8, s_ptr: *const u8, len: usize) -> usize {
+    let mut count = 0usize;
+    for i in 0..len {
+        if *q_ptr.add(i) == *s_ptr.add(i) {
+            count += 1;
+        }
+    }
+    count
 }
 
 /// Test if an HSP should be deleted based on percent identity and minimum hit length.

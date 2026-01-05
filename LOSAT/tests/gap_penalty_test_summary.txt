@@ -1,0 +1,72 @@
+=== Gap Penalty 符号修正後のテスト結果 ===
+
+## テスト実行日時
+$(date)
+
+## Blastn Task ヒット数比較
+MelaMJNV.PemoMJNVA:
+  LOSAT: 147
+  NCBI:  2729
+  差: -94.6% (LOSATが少ない)
+
+MjeNMV.MelaMJNV:
+  LOSAT: 703
+  NCBI:  2668
+  差: -73.7% (LOSATが少ない)
+
+PesePMNV.MjPMNV:
+  LOSAT: 198
+  NCBI:  241
+  差: -17.8% (LOSATが少ない)
+
+NZ_CP006932.NZ_CP006932:
+  LOSAT: 1960
+  NCBI:  12340
+  差: -84.1% (LOSATが少ない)
+
+## Megablast Task ヒット数比較
+NZ_CP006932.NZ_CP006932:
+  LOSAT: 101
+  NCBI:  454
+  差: -77.8% (LOSATが少ない)
+
+EDL933.Sakai:
+  LOSAT: 1930
+  NCBI:  5718
+  差: -66.2% (LOSATが少ない)
+
+Sakai.MG1655:
+  LOSAT: 700
+  NCBI:  6476
+  差: -89.2% (LOSATが少ない)
+
+## 詳細比較: MelaMJNV.PemoMJNVA (最初のヒット)
+LOSAT:
+  LC738874.1	LC738870.1	74.307	3608	807	30	142903	146411	146177	149765	0.0e0	2301.5
+
+NCBI BLAST:
+  LC738874.1	LC738870.1	74.307	3608	807	30	142903	146411	146178	149764	0.0	2301
+
+差異:
+  - Identity: 一致 (74.307%)
+  - Length: 一致 (3608)
+  - Mismatches: 一致 (807)
+  - Gap opens: 一致 (30)
+  - Query座標: 一致 (142903-146411)
+  - Subject座標: 1ずれ (146177-149765 vs 146178-149764)
+  - E-value: 一致 (0.0)
+  - Bit score: 0.5の差 (2301.5 vs 2301)
+
+## 考察
+1. Gap penaltyの符号修正は完了し、コンパイル・実行は正常
+2. 最初のヒットのスコアは非常に近い（bit score差0.5）
+3. ヒット数の大きな差は、gap penalty以外の要因による可能性が高い:
+   - Two-Hit Windowサイズ (Section 3.3: 現在64、NCBIは40の可能性)
+   - Ungapped Extension閾値 (Section 3.2)
+   - Cutoff計算 (Section 2.2)
+   - X-dropパラメータ (Section 2.3)
+
+## 次のステップ
+計画ドキュメントのPhase 1の残りの項目:
+- Two-Hit Windowサイズの修正 (Section 3.3)
+- その他のパラメータ検証 (Section 2)

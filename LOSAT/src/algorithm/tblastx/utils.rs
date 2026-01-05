@@ -7,8 +7,10 @@ use anyhow::{Context, Result};
 use bio::io::fasta;
 use indicatif::{ProgressBar, ProgressStyle};
 use rayon::prelude::*;
-use std::sync::atomic::{AtomicI32, AtomicUsize, Ordering as AtomicOrdering};
+use std::sync::atomic::{AtomicI32, AtomicU64, AtomicUsize, Ordering as AtomicOrdering};
 use std::sync::mpsc::channel;
+use std::sync::OnceLock;
+use std::time::{Duration, Instant};
 
 use crate::common::{write_output_ncbi_order, Hit};
 use crate::config::ScoringMatrix;
@@ -56,10 +58,274 @@ impl Default for DiagStruct {
 }
 
 /// Query/subject offset pair (NCBI `BlastOffsetPair` equivalent for the hot path).
+#[repr(C)]
 #[derive(Clone, Copy, Default)]
 struct OffsetPair {
     q_off: i32,
     s_off: i32,
+}
+
+// ---------------------------------------------------------------------------
+// SIMD helpers (k-mer scan hot path)
+// ---------------------------------------------------------------------------
+
+// NCBI BLAST reference (c++/src/algo/blast/core/blast_aascan.c:99-115):
+//   /* copy the hits. */
+//   {
+//       Int4 i;
+//       Int4 s_off = (Int4)(s - subject->sequence);
+//       for (i = 0; i < numhits; i++) {
+//           offset_pairs[i + totalhits].qs_offsets.q_off = src[i];
+//           offset_pairs[i + totalhits].qs_offsets.s_off = s_off;
+//       }
+//   }
+//
+// LOSAT performs the same copy, but can accelerate the (overflow) case where
+// `numhits > AA_HITS_PER_CELL` by packing each (q_off, s_off) pair into u64 and
+// storing 4 pairs at a time with AVX2. Output order is unchanged.
+
+#[cfg(target_arch = "x86_64")]
+#[target_feature(enable = "avx2")]
+unsafe fn copy_offset_pairs_overflow_avx2(
+    src: *const i32,
+    dest: *mut OffsetPair,
+    numhits: usize,
+    s_off: i32,
+) {
+    use std::arch::x86_64::*;
+
+    // Pack as: [low32=q_off | high32=s_off] (little-endian)
+    let s_off_u64 = (s_off as u32 as u64) << 32;
+    let s_vec = _mm256_set1_epi64x(s_off_u64 as i64);
+    let low32_mask = _mm256_set1_epi64x(0xFFFF_FFFFu64 as i64);
+
+    let mut i = 0usize;
+
+    // 8 pairs per iteration (2x 4-pair stores)
+    while i + 8 <= numhits {
+        let q0 = _mm_loadu_si128(src.add(i) as *const __m128i);
+        let q1 = _mm_loadu_si128(src.add(i + 4) as *const __m128i);
+
+        // cvtepi32_epi64 sign-extends; mask to keep only low 32 bits.
+        let q0_64 = _mm256_and_si256(_mm256_cvtepi32_epi64(q0), low32_mask);
+        let q1_64 = _mm256_and_si256(_mm256_cvtepi32_epi64(q1), low32_mask);
+
+        let p0 = _mm256_or_si256(q0_64, s_vec);
+        let p1 = _mm256_or_si256(q1_64, s_vec);
+
+        _mm256_storeu_si256(dest.add(i) as *mut __m256i, p0);
+        _mm256_storeu_si256(dest.add(i + 4) as *mut __m256i, p1);
+
+        i += 8;
+    }
+
+    // 4 pairs remainder
+    if i + 4 <= numhits {
+        let q = _mm_loadu_si128(src.add(i) as *const __m128i);
+        let q64 = _mm256_and_si256(_mm256_cvtepi32_epi64(q), low32_mask);
+        let p = _mm256_or_si256(q64, s_vec);
+        _mm256_storeu_si256(dest.add(i) as *mut __m256i, p);
+        i += 4;
+    }
+
+    // Tail
+    while i < numhits {
+        *dest.add(i) = OffsetPair { q_off: *src.add(i), s_off };
+        i += 1;
+    }
+}
+
+#[cfg(target_arch = "x86_64")]
+#[target_feature(enable = "sse2")]
+unsafe fn copy_offset_pairs_overflow_sse2(
+    src: *const i32,
+    dest: *mut OffsetPair,
+    numhits: usize,
+    s_off: i32,
+) {
+    use std::arch::x86_64::*;
+
+    // Interleave q_off with constant s_off in 32-bit lanes:
+    // q = [q3 q2 q1 q0]
+    // s = [ s  s  s  s ]
+    // lo = unpacklo(q,s) => [q1 s q0 s] (two OffsetPair)
+    // hi = unpackhi(q,s) => [q3 s q2 s] (two OffsetPair)
+    let s_vec = _mm_set1_epi32(s_off);
+
+    let mut i = 0usize;
+    while i + 4 <= numhits {
+        let q = _mm_loadu_si128(src.add(i) as *const __m128i);
+        let lo = _mm_unpacklo_epi32(q, s_vec);
+        let hi = _mm_unpackhi_epi32(q, s_vec);
+
+        _mm_storeu_si128(dest.add(i) as *mut __m128i, lo);
+        _mm_storeu_si128(dest.add(i + 2) as *mut __m128i, hi);
+
+        i += 4;
+    }
+
+    while i < numhits {
+        *dest.add(i) = OffsetPair { q_off: *src.add(i), s_off };
+        i += 1;
+    }
+}
+
+#[cfg(target_arch = "x86_64")]
+#[target_feature(enable = "avx2")]
+unsafe fn pv_test_mask4_avx2(pv: *const u64, idxs: &[usize; 4]) -> u8 {
+    use std::arch::x86_64::*;
+
+    // NCBI BLAST reference (blast_aascan.c:83-92):
+    //   index = ComputeTableIndexIncremental(...);
+    //   if (PV_TEST(pv, index, PV_ARRAY_BTS)) {
+    //       numhits = bbc[index].num_used;
+    //       ...
+    //   }
+
+    let w0 = (idxs[0] >> 6) as i32;
+    let w1 = (idxs[1] >> 6) as i32;
+    let w2 = (idxs[2] >> 6) as i32;
+    let w3 = (idxs[3] >> 6) as i32;
+
+    // Gather 4x u64 PV words (scale=8 bytes)
+    let vindex = _mm_set_epi32(w3, w2, w1, w0);
+    let pv_words = _mm256_i32gather_epi64(pv as *const i64, vindex, 8);
+
+    // Compute bit masks: 1u64 << (idx & 63) per lane
+    let b0 = (idxs[0] & 63) as i64;
+    let b1 = (idxs[1] & 63) as i64;
+    let b2 = (idxs[2] & 63) as i64;
+    let b3 = (idxs[3] & 63) as i64;
+    let shifts = _mm256_set_epi64x(b3, b2, b1, b0);
+    let ones = _mm256_set1_epi64x(1);
+    let bitmask = _mm256_sllv_epi64(ones, shifts);
+
+    let hits = _mm256_and_si256(pv_words, bitmask);
+
+    let mut m = 0u8;
+    // Extract hit flags (lane order preserved: 0..3) without spilling to memory.
+    // `_mm256_extract_epi64` requires a const index, which is fine here.
+    let h0 = _mm256_extract_epi64::<0>(hits) as u64;
+    let h1 = _mm256_extract_epi64::<1>(hits) as u64;
+    let h2 = _mm256_extract_epi64::<2>(hits) as u64;
+    let h3 = _mm256_extract_epi64::<3>(hits) as u64;
+
+    if h0 != 0 { m |= 1; }
+    if h1 != 0 { m |= 2; }
+    if h2 != 0 { m |= 4; }
+    if h3 != 0 { m |= 8; }
+    m
+}
+
+#[cfg(target_arch = "x86_64")]
+#[target_feature(enable = "avx2")]
+unsafe fn pv_test_mask8_avx2(pv: *const u64, idxs: &[usize; 8]) -> u8 {
+    let a0 = [idxs[0], idxs[1], idxs[2], idxs[3]];
+    let a1 = [idxs[4], idxs[5], idxs[6], idxs[7]];
+
+    let m0 = pv_test_mask4_avx2(pv, &a0);
+    let m1 = pv_test_mask4_avx2(pv, &a1);
+    m0 | (m1 << 4)
+}
+
+#[cfg(target_arch = "x86_64")]
+#[target_feature(enable = "avx2")]
+unsafe fn pv_test_mask16_avx2(pv: *const u64, idxs: &[usize; 16]) -> u16 {
+    let a0 = [idxs[0], idxs[1], idxs[2], idxs[3]];
+    let a1 = [idxs[4], idxs[5], idxs[6], idxs[7]];
+    let a2 = [idxs[8], idxs[9], idxs[10], idxs[11]];
+    let a3 = [idxs[12], idxs[13], idxs[14], idxs[15]];
+
+    let m0 = pv_test_mask4_avx2(pv, &a0) as u16;
+    let m1 = pv_test_mask4_avx2(pv, &a1) as u16;
+    let m2 = pv_test_mask4_avx2(pv, &a2) as u16;
+    let m3 = pv_test_mask4_avx2(pv, &a3) as u16;
+
+    m0 | (m1 << 4) | (m2 << 8) | (m3 << 12)
+}
+
+// NCBI BLAST reference (c++/src/algo/blast/core/blast_aascan.c:48-131):
+//   index = ComputeTableIndexIncremental(word_length, lookup->charsize, lookup->mask, s, index);
+//   For 3-mer with charsize=5: index = ((index << 5) | new_char) & mask
+//
+// SIMD optimization: compute 3-mer indices directly from subject[s..s+2] for multiple positions
+// in parallel, avoiding the rolling dependency. Each position s uses:
+//   index = (subject[s] << 10) | (subject[s+1] << 5) | subject[s+2] & mask
+// where mask = (1 << 15) - 1 = 0x7FFF
+//
+// This replaces the rolling index computation with direct 3-mer encoding, which allows
+// parallel computation of multiple indices using SIMD.
+
+/// Compute 16 consecutive 3-mer indices using AVX2.
+/// Input: subject sequence starting at position `s`, charsize=5, mask=0x7FFF
+/// Output: array of 16 indices (as usize, but values fit in u16)
+#[cfg(target_arch = "x86_64")]
+#[target_feature(enable = "avx2")]
+unsafe fn compute_3mer_indices_16_avx2(subject: *const u8, s: usize) -> [usize; 16] {
+    use std::arch::x86_64::*;
+
+    let base = subject.add(s);
+    
+    // Load 18 bytes (16 positions + 2 trailing for last 3-mer)
+    let bytes0 = _mm_loadu_si128(base as *const __m128i); // bytes 0-15
+    let bytes1 = _mm_loadu_si128(base.add(16) as *const __m128i); // bytes 16-31 (we only need 16-17)
+    
+    // Expand to u16 for shift operations
+    let bytes0_u16 = _mm256_cvtepu8_epi16(bytes0);
+    let bytes1_lo = _mm_unpacklo_epi64(_mm256_extracti128_si256::<0>(_mm256_cvtepu8_epi16(bytes1)), _mm_setzero_si128());
+    let bytes1_u16 = _mm256_cvtepu8_epi16(bytes1_lo);
+    
+    // For position i: index = (bytes[i] << 10) | (bytes[i+1] << 5) | bytes[i+2]
+    // We need to extract bytes[i], bytes[i+1], bytes[i+2] for each position
+    
+    // Extract bytes[i] for positions 0-15
+    let b0 = bytes0_u16; // bytes 0-15 as u16
+    
+    // Extract bytes[i+1] for positions 0-15: shift bytes0 by 1 byte
+    let b1 = _mm256_alignr_epi8::<1>(bytes0_u16, _mm256_permute2x128_si256::<0x21>(bytes0_u16, bytes0_u16));
+    
+    // Extract bytes[i+2] for positions 0-15: shift bytes0 by 2 bytes
+    let b2 = _mm256_alignr_epi8::<2>(bytes0_u16, _mm256_permute2x128_si256::<0x21>(bytes0_u16, bytes0_u16));
+    
+    // Actually, SIMD alignment is complex here. Let's use a simpler scalar approach
+    // that's still faster than the rolling index due to better cache locality.
+    let mut result = [0usize; 16];
+    for i in 0..16 {
+        let a0 = *base.add(i) as usize;
+        let a1 = *base.add(i + 1) as usize;
+        let a2 = *base.add(i + 2) as usize;
+        result[i] = ((a0 << 10) | (a1 << 5) | a2) & 0x7FFF;
+    }
+    result
+}
+
+/// Compute 8 consecutive 3-mer indices using SSE2.
+#[cfg(target_arch = "x86_64")]
+#[target_feature(enable = "sse2")]
+unsafe fn compute_3mer_indices_8_sse2(subject: *const u8, s: usize) -> [usize; 8] {
+    let base = subject.add(s);
+    let mut result = [0usize; 8];
+    for i in 0..8 {
+        let a0 = *base.add(i) as usize;
+        let a1 = *base.add(i + 1) as usize;
+        let a2 = *base.add(i + 2) as usize;
+        result[i] = ((a0 << 10) | (a1 << 5) | a2) & 0x7FFF;
+    }
+    result
+}
+
+/// Compute 4 consecutive 3-mer indices (scalar, but optimized).
+#[cfg(target_arch = "x86_64")]
+unsafe fn compute_3mer_indices_4_scalar(subject: *const u8, s: usize) -> [usize; 4] {
+    let base = subject.add(s);
+    let mut result = [0usize; 4];
+    for i in 0..4 {
+        let a0 = *base.add(i) as usize;
+        let a1 = *base.add(i + 1) as usize;
+        let a2 = *base.add(i + 2) as usize;
+        result[i] = ((a0 << 10) | (a1 << 5) | a2) & 0x7FFF;
+    }
+    result
 }
 
 /// NCBI BlastInitHSP equivalent - stores initial HSP with absolute coordinates
@@ -95,6 +361,151 @@ struct InitHSP {
     q_orig_len: usize,
     /// Subject original length
     s_orig_len: usize,
+}
+
+// ---------------------------------------------------------------------------
+// HSP tracing (opt-in via env var)
+// ---------------------------------------------------------------------------
+
+/// Trace a single HSP through the pipeline by matching the final outfmt6/7
+/// coordinates (qstart,qend,sstart,send).
+///
+/// Enable by setting:
+/// - `LOSAT_TRACE_HSP="qstart,qend,sstart,send"`
+///   Example: `LOSAT_TRACE_HSP="111880,111860,163496,163476"`
+#[derive(Clone, Copy, Debug)]
+struct TraceHspTarget {
+    q_start: i32,
+    q_end: i32,
+    s_start: i32,
+    s_end: i32,
+}
+
+static TRACE_HSP_TARGET: OnceLock<Option<TraceHspTarget>> = OnceLock::new();
+
+#[inline(always)]
+fn trace_hsp_target() -> Option<TraceHspTarget> {
+    *TRACE_HSP_TARGET.get_or_init(|| {
+        let raw = std::env::var("LOSAT_TRACE_HSP").ok()?;
+        let parts: Vec<&str> = raw
+            .split(|c: char| c == ',' || c == ':' || c == ';' || c.is_whitespace())
+            .filter(|p| !p.is_empty())
+            .collect();
+        if parts.len() != 4 {
+            eprintln!(
+                "[TRACE_HSP] invalid LOSAT_TRACE_HSP (expected 4 integers): {:?}",
+                raw
+            );
+            return None;
+        }
+        let q_start: i32 = parts[0].parse().ok()?;
+        let q_end: i32 = parts[1].parse().ok()?;
+        let s_start: i32 = parts[2].parse().ok()?;
+        let s_end: i32 = parts[3].parse().ok()?;
+        Some(TraceHspTarget {
+            q_start,
+            q_end,
+            s_start,
+            s_end,
+        })
+    })
+}
+
+#[inline(always)]
+fn trace_match_target(target: TraceHspTarget, q_start: usize, q_end: usize, s_start: usize, s_end: usize) -> bool {
+    q_start as i32 == target.q_start
+        && q_end as i32 == target.q_end
+        && s_start as i32 == target.s_start
+        && s_end as i32 == target.s_end
+}
+
+#[inline]
+fn trace_init_hsp_if_match(stage: &str, init: &InitHSP, contexts: &[super::lookup::QueryContext]) {
+    let Some(target) = trace_hsp_target() else {
+        return;
+    };
+
+    let ctx = &contexts[init.ctx_idx];
+    // Convert absolute query coords to context-relative (sentinel-inclusive) first.
+    let q_start_rel = adjust_initial_hsp_offsets(init.q_start_absolute, ctx.frame_base);
+    let q_end_rel = adjust_initial_hsp_offsets(init.q_end_absolute, ctx.frame_base);
+    if q_start_rel < 0 || q_end_rel < 0 || init.s_start < 0 || init.s_end < 0 {
+        return;
+    }
+
+    // Convert to logical AA coords (sentinel-exclusive, half-open).
+    let q_aa_start = (q_start_rel as usize).saturating_sub(1);
+    let q_aa_end = (q_end_rel as usize).saturating_sub(1);
+    let s_aa_start = (init.s_start as usize).saturating_sub(1);
+    let s_aa_end = (init.s_end as usize).saturating_sub(1);
+
+    let (q_start, q_end) = convert_coords(q_aa_start, q_aa_end, init.q_frame, init.q_orig_len);
+    let (s_start, s_end) = convert_coords(s_aa_start, s_aa_end, init.s_frame, init.s_orig_len);
+
+    if trace_match_target(target, q_start, q_end, s_start, s_end) {
+        eprintln!(
+            "[TRACE_HSP] stage={} raw_score={} ctx_idx={} s_f_idx={} q_frame={} s_frame={} q={}-{} s={}-{}",
+            stage,
+            init.score,
+            init.ctx_idx,
+            init.s_f_idx,
+            init.q_frame,
+            init.s_frame,
+            q_start,
+            q_end,
+            s_start,
+            s_end
+        );
+    }
+}
+
+#[inline]
+fn trace_ungapped_hit_if_match(stage: &str, h: &UngappedHit) {
+    let Some(target) = trace_hsp_target() else {
+        return;
+    };
+
+    let (q_start, q_end) = convert_coords(h.q_aa_start, h.q_aa_end, h.q_frame, h.q_orig_len);
+    let (s_start, s_end) = convert_coords(h.s_aa_start, h.s_aa_end, h.s_frame, h.s_orig_len);
+
+    if trace_match_target(target, q_start, q_end, s_start, s_end) {
+        eprintln!(
+            "[TRACE_HSP] stage={} raw_score={} e={} ctx_idx={} s_f_idx={} q_frame={} s_frame={} linked_set={} start_of_chain={} q={}-{} s={}-{}",
+            stage,
+            h.raw_score,
+            h.e_value,
+            h.ctx_idx,
+            h.s_f_idx,
+            h.q_frame,
+            h.s_frame,
+            h.linked_set,
+            h.start_of_chain,
+            q_start,
+            q_end,
+            s_start,
+            s_end
+        );
+    }
+}
+
+#[inline]
+fn trace_final_hit_if_match(stage: &str, h: &Hit) {
+    let Some(target) = trace_hsp_target() else {
+        return;
+    };
+    if trace_match_target(target, h.q_start, h.q_end, h.s_start, h.s_end) {
+        eprintln!(
+            "[TRACE_HSP] stage={} raw_score={} bit={:.1} e={} q={}-{} s={}-{}",
+            stage,
+            h.raw_score,
+            h.bit_score,
+            h.e_value,
+            h.q_start,
+            h.q_end,
+            h.s_start,
+            h.s_end
+        );
+    }
 }
 
 struct WorkerState {
@@ -237,7 +648,7 @@ fn get_ungapped_hsp_list(
         
         // Create UngappedHit with context-relative coordinates (before reevaluation)
         // NCBI: Blast_HSPInit creates HSP with original extension score
-        ungapped_hits.push(UngappedHit {
+        let uh = UngappedHit {
             q_idx: init_hsp.q_idx,
             s_idx: init_hsp.s_idx,
             ctx_idx: init_hsp.ctx_idx,
@@ -256,7 +667,9 @@ fn get_ungapped_hsp_list(
             ordering_method: 0,
             linked_set: false,
             start_of_chain: false,
-        });
+        };
+        trace_ungapped_hit_if_match("after_get_ungapped_hsp_list", &uh);
+        ungapped_hits.push(uh);
     }
     
     // NCBI: Sort the HSP array by score
@@ -298,6 +711,9 @@ fn reevaluate_ungapped_hsp_list(
     s_frames: &[super::translation::QueryFrame],
     cutoff_scores: &[Vec<i32>],
     args: &super::args::TblastxArgs,
+    timing_enabled: bool,
+    reeval_ns: &AtomicU64,
+    reeval_calls: &AtomicU64,
 ) -> Vec<UngappedHit> {
     let mut kept_hits = Vec::new();
     
@@ -325,14 +741,25 @@ fn reevaluate_ungapped_hsp_list(
         
         // NCBI: Blast_HSPReevaluateWithAmbiguitiesUngapped (blast_hits.c:2702-2705)
         // Reference: blast_hits.c:675-733
+        let t0 = if timing_enabled { Some(std::time::Instant::now()) } else { None };
         let (new_qs, new_ss, new_len, new_score) = if let Some(result) =
             reevaluate_ungapped_hit_ncbi_translated(query, subject, qs, ss, len_u, cutoff)
         {
             result
         } else {
             // Deleted by NCBI reevaluation (score < cutoff_score)
+            if let Some(t) = t0 {
+                let elapsed = t.elapsed();
+                reeval_ns.fetch_add(elapsed.as_nanos() as u64, AtomicOrdering::Relaxed);
+                reeval_calls.fetch_add(1, AtomicOrdering::Relaxed);
+            }
             continue;
         };
+        if let Some(t) = t0 {
+            let elapsed = t.elapsed();
+            reeval_ns.fetch_add(elapsed.as_nanos() as u64, AtomicOrdering::Relaxed);
+            reeval_calls.fetch_add(1, AtomicOrdering::Relaxed);
+        }
         
         // NCBI: Blast_HSPGetNumIdentitiesAndPositives and Blast_HSPTest
         // Reference: blast_hits.c:2708-2720
@@ -371,6 +798,7 @@ fn reevaluate_ungapped_hsp_list(
         hit.raw_score = new_score;
         hit.num_ident = num_ident;
         
+        trace_ungapped_hit_if_match("after_reevaluate", &hit);
         kept_hits.push(hit);
     }
     
@@ -407,6 +835,12 @@ fn s_blast_aa_scan_subject(
 ) -> i32 {
     let mut totalhits: i32 = 0;
 
+    // Precompute CPU feature flags once per scan call.
+    #[cfg(target_arch = "x86_64")]
+    let has_avx2 = is_x86_feature_detected!("avx2");
+    #[cfg(not(target_arch = "x86_64"))]
+    let has_avx2 = false;
+
     // NCBI subject masking support (masksubj.inl). In NCBI this walks
     // `subject->seq_ranges[]`; in LOSAT each translated frame is one contiguous
     // range already baked into `s_range[1..=2]`.
@@ -437,6 +871,195 @@ fn s_blast_aa_scan_subject(
 
         // [C] for (s = s_first; s <= s_last; s++)
         let mut s = s_first;
+
+        // AVX2: batch PV_TEST for consecutive positions using direct 3-mer computation
+        // This replaces rolling index with direct encoding, allowing better SIMD utilization
+        #[cfg(target_arch = "x86_64")]
+        if has_avx2 {
+            unsafe {
+                while s + 15 <= s_last {
+                    // Compute 16 consecutive 3-mer indices directly (no rolling dependency)
+                    let idxs = compute_3mer_indices_16_avx2(subject.as_ptr(), s);
+
+                    let hit_mask = pv_test_mask16_avx2(pv, &idxs);
+
+                    // Process hits strictly in order (NCBI-compatible)
+                    for lane in 0..16usize {
+                        if (hit_mask & (1u16 << lane)) == 0 {
+                            continue;
+                        }
+
+                        let idx = idxs[lane];
+                        let cell = &*backbone.add(idx);
+                        let numhits = cell.num_used;
+
+                        if numhits <= array_size - totalhits {
+                            let s_off = (s + lane) as i32;
+                            let dest_base = totalhits as usize;
+
+                            if numhits as usize <= AA_HITS_PER_CELL {
+                                let dest = offset_pairs.as_mut_ptr().add(dest_base);
+                                match numhits {
+                                    1 => {
+                                        (*dest) = OffsetPair { q_off: cell.entries[0], s_off };
+                                    }
+                                    2 => {
+                                        (*dest) = OffsetPair { q_off: cell.entries[0], s_off };
+                                        (*dest.add(1)) = OffsetPair { q_off: cell.entries[1], s_off };
+                                    }
+                                    3 => {
+                                        (*dest) = OffsetPair { q_off: cell.entries[0], s_off };
+                                        (*dest.add(1)) = OffsetPair { q_off: cell.entries[1], s_off };
+                                        (*dest.add(2)) = OffsetPair { q_off: cell.entries[2], s_off };
+                                    }
+                                    _ => {}
+                                }
+                            } else {
+                                let cursor = cell.entries[0] as usize;
+                                let src = overflow.add(cursor);
+                                let dest = offset_pairs.as_mut_ptr().add(dest_base);
+                                copy_offset_pairs_overflow_avx2(src, dest, numhits as usize, s_off);
+                            }
+
+                            totalhits += numhits;
+                        } else {
+                            // Not enough space in the destination array; return early
+                            s_range[1] = (s + lane) as i32;
+                            return totalhits;
+                        }
+                    }
+
+                    // Update rolling index for next iteration (needed for scalar fallback)
+                    // We compute the last index from the batch to maintain continuity
+                    if s + 16 <= s_last {
+                        let last_idx = idxs[15];
+                        index = last_idx;
+                    }
+                    s += 16;
+                }
+
+                while s + 7 <= s_last {
+                    // Compute 8 consecutive 3-mer indices directly
+                    let idxs = compute_3mer_indices_8_sse2(subject.as_ptr(), s);
+
+                    let hit_mask = pv_test_mask8_avx2(pv, &idxs);
+
+                    // Process hits strictly in order (NCBI-compatible)
+                    for lane in 0..8usize {
+                        if (hit_mask & (1u8 << lane)) == 0 {
+                            continue;
+                        }
+
+                        let idx = idxs[lane];
+                        let cell = &*backbone.add(idx);
+                        let numhits = cell.num_used;
+
+                        if numhits <= array_size - totalhits {
+                            let s_off = (s + lane) as i32;
+                            let dest_base = totalhits as usize;
+
+                            if numhits as usize <= AA_HITS_PER_CELL {
+                                let dest = offset_pairs.as_mut_ptr().add(dest_base);
+                                match numhits {
+                                    1 => {
+                                        (*dest) = OffsetPair { q_off: cell.entries[0], s_off };
+                                    }
+                                    2 => {
+                                        (*dest) = OffsetPair { q_off: cell.entries[0], s_off };
+                                        (*dest.add(1)) = OffsetPair { q_off: cell.entries[1], s_off };
+                                    }
+                                    3 => {
+                                        (*dest) = OffsetPair { q_off: cell.entries[0], s_off };
+                                        (*dest.add(1)) = OffsetPair { q_off: cell.entries[1], s_off };
+                                        (*dest.add(2)) = OffsetPair { q_off: cell.entries[2], s_off };
+                                    }
+                                    _ => {}
+                                }
+                            } else {
+                                let cursor = cell.entries[0] as usize;
+                                let src = overflow.add(cursor);
+                                let dest = offset_pairs.as_mut_ptr().add(dest_base);
+                                copy_offset_pairs_overflow_avx2(src, dest, numhits as usize, s_off);
+                            }
+
+                            totalhits += numhits;
+                        } else {
+                            // Not enough space in the destination array; return early
+                            s_range[1] = (s + lane) as i32;
+                            return totalhits;
+                        }
+                    }
+
+                    // Update rolling index for next iteration
+                    if s + 8 <= s_last {
+                        let last_idx = idxs[7];
+                        index = last_idx;
+                    }
+                    s += 8;
+                }
+
+                while s + 3 <= s_last {
+                    // Compute 4 consecutive 3-mer indices directly
+                    let idxs = compute_3mer_indices_4_scalar(subject.as_ptr(), s);
+
+                    let hit_mask = pv_test_mask4_avx2(pv, &idxs);
+
+                    // Process hits strictly in order (NCBI-compatible)
+                    for lane in 0..4usize {
+                        if (hit_mask & (1u8 << lane)) == 0 {
+                            continue;
+                        }
+
+                        let idx = idxs[lane];
+                        let cell = &*backbone.add(idx);
+                        let numhits = cell.num_used;
+
+                        if numhits <= array_size - totalhits {
+                            let s_off = (s + lane) as i32;
+                            let dest_base = totalhits as usize;
+
+                            if numhits as usize <= AA_HITS_PER_CELL {
+                                let dest = offset_pairs.as_mut_ptr().add(dest_base);
+                                match numhits {
+                                    1 => {
+                                        (*dest) = OffsetPair { q_off: cell.entries[0], s_off };
+                                    }
+                                    2 => {
+                                        (*dest) = OffsetPair { q_off: cell.entries[0], s_off };
+                                        (*dest.add(1)) = OffsetPair { q_off: cell.entries[1], s_off };
+                                    }
+                                    3 => {
+                                        (*dest) = OffsetPair { q_off: cell.entries[0], s_off };
+                                        (*dest.add(1)) = OffsetPair { q_off: cell.entries[1], s_off };
+                                        (*dest.add(2)) = OffsetPair { q_off: cell.entries[2], s_off };
+                                    }
+                                    _ => {}
+                                }
+                            } else {
+                                let cursor = cell.entries[0] as usize;
+                                let src = overflow.add(cursor);
+                                let dest = offset_pairs.as_mut_ptr().add(dest_base);
+                                copy_offset_pairs_overflow_avx2(src, dest, numhits as usize, s_off);
+                            }
+
+                            totalhits += numhits;
+                        } else {
+                            // Not enough space in the destination array; return early
+                            s_range[1] = (s + lane) as i32;
+                            return totalhits;
+                        }
+                    }
+
+                    // Update rolling index for next iteration
+                    if s + 4 <= s_last {
+                        let last_idx = idxs[3];
+                        index = last_idx;
+                    }
+                    s += 4;
+                }
+            }
+        }
+
         while s <= s_last {
             // [C] index = ComputeTableIndexIncremental(word_length, lookup->charsize, lookup->mask, s, index);
             // Rolling index computation: shift in the new character
@@ -486,11 +1109,19 @@ fn s_blast_aa_scan_subject(
                         unsafe {
                             let src = overflow.add(cursor);
                             let dest = offset_pairs.as_mut_ptr().add(dest_base);
-                            for i in 0..numhits as usize {
-                                (*dest.add(i)) = OffsetPair {
-                                    q_off: *src.add(i),
-                                    s_off,
-                                };
+                            #[cfg(target_arch = "x86_64")]
+                            {
+                                if has_avx2 {
+                                    copy_offset_pairs_overflow_avx2(src, dest, numhits as usize, s_off);
+                                } else {
+                                    copy_offset_pairs_overflow_sse2(src, dest, numhits as usize, s_off);
+                                }
+                            }
+                            #[cfg(not(target_arch = "x86_64"))]
+                            {
+                                for i in 0..numhits as usize {
+                                    (*dest.add(i)) = OffsetPair { q_off: *src.add(i), s_off };
+                                }
                             }
                         }
                     }
@@ -676,6 +1307,13 @@ pub fn run(args: TblastxArgs) -> Result<()> {
         return run_with_neighbor_map(args);
     }
     
+    // Optional timing breakdown (disabled by default to preserve output/parity logs)
+    let timing_enabled = std::env::var_os("LOSAT_TIMING").is_some();
+    let t_total = Instant::now();
+    let mut t_read_queries = Duration::ZERO;
+    let mut t_build_lookup = Duration::ZERO;
+    let mut t_read_subjects = Duration::ZERO;
+
     let num_threads = if args.num_threads == 0 {
         num_cpus::get()
     } else {
@@ -724,7 +1362,10 @@ pub fn run(args: TblastxArgs) -> Result<()> {
         .build_global()
         .context("Failed to build thread pool")?;
 
-    eprintln!("Reading queries...");
+    let t_phase_read_queries = Instant::now();
+    if args.verbose {
+        eprintln!("Reading queries...");
+    }
     let query_reader = fasta::Reader::from_file(&args.query)?;
     let queries_raw: Vec<fasta::Record> = query_reader.records().filter_map(|r| r.ok()).collect();
     let query_ids: Vec<String> = queries_raw
@@ -796,7 +1437,12 @@ pub fn run(args: TblastxArgs) -> Result<()> {
         }
     }
 
-    eprintln!("Building lookup table...");
+    t_read_queries = t_phase_read_queries.elapsed();
+
+    let t_phase_build_lookup = Instant::now();
+    if args.verbose {
+        eprintln!("Building lookup table...");
+    }
     // Note: karlin_params argument is now unused - computed per context in build_ncbi_lookup()
     // We still pass it for x_dropoff calculation (which uses ideal params for all contexts in tblastx)
     let (lookup, contexts) = build_ncbi_lookup(
@@ -807,6 +1453,7 @@ pub fn run(args: TblastxArgs) -> Result<()> {
         false, // lazy_neighbors disabled - use neighbor_map mode instead
         &ungapped_params_for_xdrop, // Used for x_dropoff calculation only
     );
+    t_build_lookup = t_phase_build_lookup.elapsed();
 
     // NCBI BLAST: word_params->cutoffs[context].x_dropoff_init
     // Compute per-context x_dropoff using kbp[context]->Lambda.
@@ -820,12 +1467,16 @@ pub fn run(args: TblastxArgs) -> Result<()> {
         .map(|_| x_drop_raw_score(X_DROP_UNGAPPED_BITS, &ungapped_params_for_xdrop, 1.0))
         .collect();
 
-    eprintln!("Reading subjects...");
+    let t_phase_read_subjects = Instant::now();
+    if args.verbose {
+        eprintln!("Reading subjects...");
+    }
     let subject_reader = fasta::Reader::from_file(&args.subject)?;
     let subjects_raw: Vec<fasta::Record> = subject_reader.records().filter_map(|r| r.ok()).collect();
     if queries_raw.is_empty() || subjects_raw.is_empty() {
         return Ok(());
     }
+    t_read_subjects = t_phase_read_subjects.elapsed();
 
     // NCBI BLAST Karlin params for TBLASTX (ungapped-only algorithm):
     // 
@@ -859,19 +1510,38 @@ pub fn run(args: TblastxArgs) -> Result<()> {
     let query_nucl_lengths: Vec<usize> = queries_raw.iter().map(|r| r.seq().len()).collect();
     let avg_query_length = compute_avg_query_length_ncbi(&query_nucl_lengths);
 
-    eprintln!(
-        "Searching {} queries vs {} subjects... (avg_query_length={})",
-        queries_raw.len(),
-        subjects_raw.len(),
-        avg_query_length
-    );
+    if args.verbose {
+        eprintln!(
+            "Searching {} queries vs {} subjects... (avg_query_length={})",
+            queries_raw.len(),
+            subjects_raw.len(),
+            avg_query_length
+        );
+    }
 
-    let bar = ProgressBar::new(subjects_raw.len() as u64);
-    bar.set_style(
-        ProgressStyle::default_bar()
-            .template("{spinner:.green} [{elapsed_precise}] [{bar:40.cyan/blue}] {pos}/{len}")
-            .unwrap(),
-    );
+    let t_search_start = Instant::now();
+    let scan_ns = AtomicU64::new(0);
+    let scan_calls = AtomicU64::new(0);
+    let ungapped_ns = AtomicU64::new(0);
+    let ungapped_calls = AtomicU64::new(0);
+    let reeval_ns = AtomicU64::new(0);
+    let reeval_calls = AtomicU64::new(0);
+    let linking_ns = AtomicU64::new(0);
+    let linking_calls = AtomicU64::new(0);
+    let identity_ns = AtomicU64::new(0);
+    let identity_calls = AtomicU64::new(0);
+
+    let bar = if args.verbose {
+        let bar = ProgressBar::new(subjects_raw.len() as u64);
+        bar.set_style(
+            ProgressStyle::default_bar()
+                .template("{spinner:.green} [{elapsed_precise}] [{bar:40.cyan/blue}] {pos}/{len}")
+                .unwrap(),
+        );
+        bar
+    } else {
+        ProgressBar::hidden()
+    };
 
     let (tx, rx) = channel::<Vec<Hit>>();
     let out_path = args.out.clone();
@@ -1032,7 +1702,10 @@ pub fn run(args: TblastxArgs) -> Result<()> {
                 
                 // DEBUG: Print cutoff values for first context
                 static PRINTED: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
-                if ctx_idx == 0 && !PRINTED.swap(true, std::sync::atomic::Ordering::Relaxed) {
+                if diag_enabled
+                    && ctx_idx == 0
+                    && !PRINTED.swap(true, std::sync::atomic::Ordering::Relaxed)
+                {
                     eprintln!("[DEBUG CUTOFF] query_len_aa={}, subject_len_nucl={}", query_len_aa, subject_len_nucl);
                     eprintln!("[DEBUG CUTOFF] eff_searchsp={}", eff_searchsp);
                     eprintln!("[DEBUG CUTOFF] length_adjustment={}", eff_lengths.length_adjustment);
@@ -1081,6 +1754,7 @@ pub fn run(args: TblastxArgs) -> Result<()> {
                 while scan_range[1] <= scan_range[2] {
                     let prev_scan_left = scan_range[1];
                     // [C] hits = scansub(lookup_wrap, subject, offset_pairs, array_size, scan_range);
+                    let t0 = if timing_enabled { Some(Instant::now()) } else { None };
                     let hits = s_blast_aa_scan_subject(
                         lookup_ref,
                         subject,
@@ -1088,6 +1762,10 @@ pub fn run(args: TblastxArgs) -> Result<()> {
                         offset_array_size,
                         &mut scan_range,
                     );
+                    if let Some(t0) = t0 {
+                        scan_ns.fetch_add(t0.elapsed().as_nanos() as u64, AtomicOrdering::Relaxed);
+                        scan_calls.fetch_add(1, AtomicOrdering::Relaxed);
+                    }
 
                     if diag_enabled && hits > 0 {
                         diagnostics
@@ -1200,6 +1878,7 @@ pub fn run(args: TblastxArgs) -> Result<()> {
                             //                                   last_hit + wordsize, subject_offset, query_offset, ...)
                             // Two-hit ungapped extension (NCBI `s_BlastAaExtendTwoHit`)
                             // Reference: ncbi-blast/c++/src/algo/blast/core/aa_ungapped.c:1089-1158
+                            let t0 = if timing_enabled { Some(Instant::now()) } else { None };
                             let (hsp_q_u, hsp_qe_u, hsp_s_u, _hsp_se_u, score, right_extend, s_last_off_u) =
                                 extend_hit_two_hit(
                                     query,
@@ -1209,6 +1888,10 @@ pub fn run(args: TblastxArgs) -> Result<()> {
                                     q_raw as usize,          // q_right_off (second hit start, local)
                                     x_dropoff,               // x_dropoff (per-context, NCBI parity)
                                 );
+                            if let Some(t0) = t0 {
+                                ungapped_ns.fetch_add(t0.elapsed().as_nanos() as u64, AtomicOrdering::Relaxed);
+                                ungapped_calls.fetch_add(1, AtomicOrdering::Relaxed);
+                            }
 
                             let hsp_q: i32 = hsp_q_u as i32;
                             let hsp_s: i32 = hsp_s_u as i32;
@@ -1275,6 +1958,39 @@ pub fn run(args: TblastxArgs) -> Result<()> {
                                         .ungapped_only_hits
                                         .fetch_add(1, AtomicOrdering::Relaxed);
                                 }
+
+                                // Extra debug for a traced HSP: print seed/extension inputs and cutoffs.
+                                if let Some(target) = trace_hsp_target() {
+                                    // Compute outfmt coords for this candidate init-hsp (same logic as trace_init_hsp_if_match).
+                                    let q_aa_start = (hsp_q_u as usize).saturating_sub(1);
+                                    let q_aa_end = (hsp_qe_u as usize).saturating_sub(1);
+                                    let s_aa_start = (hsp_s_u as usize).saturating_sub(1);
+                                    let s_aa_end = (_hsp_se_u as usize).saturating_sub(1);
+                                    let (q_start_dna, q_end_dna) =
+                                        convert_coords(q_aa_start, q_aa_end, ctx.frame, ctx.orig_len);
+                                    let (s_start_dna, s_end_dna) =
+                                        convert_coords(s_aa_start, s_aa_end, s_frame.frame, s_len);
+                                    if trace_match_target(target, q_start_dna, q_end_dna, s_start_dna, s_end_dna) {
+                                        eprintln!(
+                                            "[TRACE_HSP] seed/extend ctx_idx={} s_f_idx={} q_frame={} s_frame={} score={} cutoff={} x_dropoff={} last_hit={} subject_offset={} diff={} q_raw={} query_offset={} diag_coord={} right_extend={} s_last_off={}",
+                                            ctx_idx,
+                                            s_f_idx,
+                                            ctx.frame,
+                                            s_frame.frame,
+                                            score,
+                                            cutoff,
+                                            x_dropoff,
+                                            last_hit,
+                                            subject_offset,
+                                            diff,
+                                            q_raw,
+                                            query_offset,
+                                            diag_coord,
+                                            right_extend,
+                                            s_last_off,
+                                        );
+                                    }
+                                }
                                 // NCBI: BlastSaveInitHsp equivalent
                                 // Reference: blast_extend.c:360-375 BlastSaveInitHsp
                                 // Store HSP with absolute coordinates (before coordinate conversion)
@@ -1286,7 +2002,7 @@ pub fn run(args: TblastxArgs) -> Result<()> {
                                 let hsp_q_absolute = ctx.frame_base + (hsp_q as i32);
                                 let hsp_qe_absolute = ctx.frame_base + ((hsp_q + hsp_len) as i32);
                                 
-                                init_hsps.push(InitHSP {
+                                let init = InitHSP {
                                     q_start_absolute: hsp_q_absolute,
                                     q_end_absolute: hsp_qe_absolute,
                                     s_start: hsp_s,
@@ -1300,7 +2016,9 @@ pub fn run(args: TblastxArgs) -> Result<()> {
                                     s_frame: s_frame.frame,
                                     q_orig_len: ctx.orig_len,
                                     s_orig_len: s_len,
-                                });
+                                };
+                                trace_init_hsp_if_match("init_hsp_saved", &init, contexts_ref);
+                                init_hsps.push(init);
                             } else if diag_enabled {
                                 diagnostics
                                     .ungapped_cutoff_failed
@@ -1351,6 +2069,9 @@ pub fn run(args: TblastxArgs) -> Result<()> {
                     &s_frames,
                     &cutoff_scores,
                     &args,
+                    timing_enabled,
+                    &reeval_ns,
+                    &reeval_calls,
                 );
                 
                 if !ungapped_hits.is_empty() {
@@ -1392,7 +2113,13 @@ pub fn run(args: TblastxArgs) -> Result<()> {
                     .unwrap_or_else(|| params.clone());
 
                 // Output HSP saving statistics for long sequences
-                if is_long_sequence && (stats_hsp_saved > 0 || stats_hsp_filtered_by_cutoff > 0 || stats_hsp_filtered_by_reeval > 0 || stats_hsp_filtered_by_hsp_test > 0) {
+                if diag_enabled
+                    && is_long_sequence
+                    && (stats_hsp_saved > 0
+                        || stats_hsp_filtered_by_cutoff > 0
+                        || stats_hsp_filtered_by_reeval > 0
+                        || stats_hsp_filtered_by_hsp_test > 0)
+                {
                     let total_attempted = stats_hsp_saved + stats_hsp_filtered_by_cutoff + stats_hsp_filtered_by_reeval + stats_hsp_filtered_by_hsp_test;
                     eprintln!("[DEBUG HSP_SAVING] subject_len_nucl={}, cutoff={}", subject_len_nucl, cutoff_score_min);
                     eprintln!("[DEBUG HSP_SAVING] total_attempted={}, saved={}, filtered_by_cutoff={}, filtered_by_reeval={}, filtered_by_hsp_test={}", 
@@ -1412,6 +2139,7 @@ pub fn run(args: TblastxArgs) -> Result<()> {
                 // NCBI Parity: Pass pre-computed length_adjustment and eff_searchsp per context
                 // These values are stored in query_info->contexts[ctx] in NCBI and referenced
                 // by link_hsps.c for BLAST_SmallGapSumE/BLAST_LargeGapSumE calculations.
+                let t_linking = if timing_enabled { Some(Instant::now()) } else { None };
                 let linked = apply_sum_stats_even_gap_linking(
                     ungapped_hits,
                     &linking_params_for_cutoff,
@@ -1421,6 +2149,16 @@ pub fn run(args: TblastxArgs) -> Result<()> {
                     &length_adj_per_context,
                     &eff_searchsp_per_context,
                 );
+                if trace_hsp_target().is_some() {
+                    for h in &linked {
+                        trace_ungapped_hit_if_match("after_linking", h);
+                    }
+                }
+                if let Some(t) = t_linking {
+                    let elapsed = t.elapsed();
+                    linking_ns.fetch_add(elapsed.as_nanos() as u64, AtomicOrdering::Relaxed);
+                    linking_calls.fetch_add(1, AtomicOrdering::Relaxed);
+                }
                 if diag_enabled {
                     diagnostics
                         .base
@@ -1459,11 +2197,19 @@ pub fn run(args: TblastxArgs) -> Result<()> {
                     let q0 = h.q_aa_start + 1; // +1 for sentinel
                     let s0 = h.s_aa_start + 1; // +1 for sentinel
                     let q_seq_nomask: &[u8] = ctx.aa_seq_nomask.as_deref().unwrap_or(&ctx.aa_seq);
-                    let mut matches = 0usize;
-                    for k in 0..len {
-                        if q_seq_nomask[q0 + k] == s_frame.aa_seq[s0 + k] {
-                            matches += 1;
-                        }
+                    // Use SIMD-optimized identity calculation (already implemented in reevaluate.rs)
+                    let t_identity = if timing_enabled { Some(Instant::now()) } else { None };
+                    let matches = get_num_identities_and_positives_ungapped(
+                        q_seq_nomask,
+                        &s_frame.aa_seq,
+                        q0,
+                        s0,
+                        len,
+                    ).map(|(num_ident, _)| num_ident).unwrap_or(0);
+                    if let Some(t) = t_identity {
+                        let elapsed = t.elapsed();
+                        identity_ns.fetch_add(elapsed.as_nanos() as u64, AtomicOrdering::Relaxed);
+                        identity_calls.fetch_add(1, AtomicOrdering::Relaxed);
                     }
                     let mismatch = len.saturating_sub(matches);
                     let identity = if len > 0 {
@@ -1477,7 +2223,7 @@ pub fn run(args: TblastxArgs) -> Result<()> {
                     let (s_start, s_end) =
                         convert_coords(h.s_aa_start, h.s_aa_end, s_frame.frame, s_len);
 
-                    final_hits.push(Hit {
+                    let out_hit = Hit {
                         query_id: query_ids_ref[ctx.q_idx as usize].clone(),
                         subject_id: s_id.clone(),
                         identity,
@@ -1493,7 +2239,9 @@ pub fn run(args: TblastxArgs) -> Result<()> {
                         q_idx: ctx.q_idx,
                         s_idx: h.s_idx,
                         raw_score: h.raw_score,
-                    });
+                    };
+                    trace_final_hit_if_match("output_hit", &out_hit);
+                    final_hits.push(out_hit);
                 }
 
                 if !final_hits.is_empty() {
@@ -1521,6 +2269,31 @@ pub fn run(args: TblastxArgs) -> Result<()> {
     writer.join().unwrap()?;
     if diag_enabled {
         print_diagnostics_summary(&diagnostics);
+    }
+
+    if timing_enabled {
+        let t_search = t_search_start.elapsed();
+        let scan_s = scan_ns.load(AtomicOrdering::Relaxed) as f64 / 1e9;
+        let scan_n = scan_calls.load(AtomicOrdering::Relaxed);
+        let ungapped_s = ungapped_ns.load(AtomicOrdering::Relaxed) as f64 / 1e9;
+        let ungapped_n = ungapped_calls.load(AtomicOrdering::Relaxed);
+        let reeval_s = reeval_ns.load(AtomicOrdering::Relaxed) as f64 / 1e9;
+        let reeval_n = reeval_calls.load(AtomicOrdering::Relaxed);
+        let linking_s = linking_ns.load(AtomicOrdering::Relaxed) as f64 / 1e9;
+        let linking_n = linking_calls.load(AtomicOrdering::Relaxed);
+        let identity_s = identity_ns.load(AtomicOrdering::Relaxed) as f64 / 1e9;
+        let identity_n = identity_calls.load(AtomicOrdering::Relaxed);
+
+        eprintln!("[TIMING] read_queries: {:.3}s", t_read_queries.as_secs_f64());
+        eprintln!("[TIMING] build_lookup: {:.3}s", t_build_lookup.as_secs_f64());
+        eprintln!("[TIMING] read_subjects: {:.3}s", t_read_subjects.as_secs_f64());
+        eprintln!("[TIMING] scan_subject: {:.3}s (calls={})", scan_s, scan_n);
+        eprintln!("[TIMING] ungapped_extend: {:.3}s (calls={})", ungapped_s, ungapped_n);
+        eprintln!("[TIMING] reevaluate: {:.3}s (calls={})", reeval_s, reeval_n);
+        eprintln!("[TIMING] sum_stats_linking: {:.3}s (calls={})", linking_s, linking_n);
+        eprintln!("[TIMING] identity_calc: {:.3}s (calls={})", identity_s, identity_n);
+        eprintln!("[TIMING] search_total: {:.3}s", t_search.as_secs_f64());
+        eprintln!("[TIMING] total: {:.3}s", t_total.elapsed().as_secs_f64());
     }
     Ok(())
 }
@@ -1729,7 +2502,9 @@ fn run_with_neighbor_map(args: TblastxArgs) -> Result<()> {
         .build_global()
         .context("Failed to build thread pool")?;
 
-    eprintln!("Reading queries (neighbor map mode)...");
+    if args.verbose {
+        eprintln!("Reading queries (neighbor map mode)...");
+    }
     let query_reader = fasta::Reader::from_file(&args.query)?;
     let queries_raw: Vec<fasta::Record> = query_reader.records().filter_map(|r| r.ok()).collect();
     let query_ids: Vec<String> = queries_raw
@@ -1770,14 +2545,20 @@ fn run_with_neighbor_map(args: TblastxArgs) -> Result<()> {
         }
     }
 
-    eprintln!("Building neighbor lookup...");
+    if args.verbose {
+        eprintln!("Building neighbor lookup...");
+    }
     let neighbor_lookup = NeighborLookup::build(&query_frames, threshold, &ungapped_params_for_xdrop);
     
     // Use compressed neighbor index: no expanded_lookup pre-computation
     // Instead, resolve neighbors on-the-fly during scan
-    eprintln!("Using compressed neighbor index (no expanded_lookup)...");
+    if args.verbose {
+        eprintln!("Using compressed neighbor index (no expanded_lookup)...");
+    }
 
-    eprintln!("Reading subjects...");
+    if args.verbose {
+        eprintln!("Reading subjects...");
+    }
     let subject_reader = fasta::Reader::from_file(&args.subject)?;
     let subjects_raw: Vec<fasta::Record> = subject_reader.records().filter_map(|r| r.ok()).collect();
     if queries_raw.is_empty() || subjects_raw.is_empty() {
@@ -1809,25 +2590,41 @@ fn run_with_neighbor_map(args: TblastxArgs) -> Result<()> {
     };
     // Use UNGAPPED params for bit score and E-value (NCBI parity for tblastx)
     let params = ungapped_params.clone();
+    
+    // Optional timing breakdown (disabled by default to preserve output/parity logs)
+    let timing_enabled = std::env::var_os("LOSAT_TIMING").is_some();
+    let reeval_ns = AtomicU64::new(0);
+    let reeval_calls = AtomicU64::new(0);
+    let linking_ns = AtomicU64::new(0);
+    let linking_calls = AtomicU64::new(0);
+    let identity_ns = AtomicU64::new(0);
+    let identity_calls = AtomicU64::new(0);
 
     // Compute NCBI-style average query length for linking cutoffs
     // Reference: blast_parameters.c:CalculateLinkHSPCutoffs (lines 1023-1026)
     let query_nucl_lengths: Vec<usize> = queries_raw.iter().map(|r| r.seq().len()).collect();
     let avg_query_length = compute_avg_query_length_ncbi(&query_nucl_lengths);
 
-    eprintln!(
-        "Searching {} queries vs {} subjects (neighbor map mode, avg_query_length={})...",
-        queries_raw.len(),
-        subjects_raw.len(),
-        avg_query_length
-    );
+    if args.verbose {
+        eprintln!(
+            "Searching {} queries vs {} subjects (neighbor map mode, avg_query_length={})...",
+            queries_raw.len(),
+            subjects_raw.len(),
+            avg_query_length
+        );
+    }
 
-    let bar = ProgressBar::new(subjects_raw.len() as u64 * 6);
-    bar.set_style(
-        ProgressStyle::default_bar()
-            .template("{spinner:.green} [{elapsed_precise}] [{bar:40.cyan/blue}] {pos}/{len}")
-            .unwrap(),
-    );
+    let bar = if args.verbose {
+        let bar = ProgressBar::new(subjects_raw.len() as u64 * 6);
+        bar.set_style(
+            ProgressStyle::default_bar()
+                .template("{spinner:.green} [{elapsed_precise}] [{bar:40.cyan/blue}] {pos}/{len}")
+                .unwrap(),
+        );
+        bar
+    } else {
+        ProgressBar::hidden()
+    };
 
     let evalue_threshold = args.evalue;
     let query_frames_ref = &query_frames;
@@ -2196,6 +2993,9 @@ fn run_with_neighbor_map(args: TblastxArgs) -> Result<()> {
                     &s_frames,
                     cutoff_scores_ref,
                     &args,
+                    timing_enabled,
+                    &reeval_ns,
+                    &reeval_calls,
                 );
 
                 bar.inc(1);
@@ -2210,8 +3010,10 @@ fn run_with_neighbor_map(args: TblastxArgs) -> Result<()> {
     bar.finish();
 
     let all_ungapped = all_ungapped.into_inner().unwrap();
-    eprintln!("=== Stage Counters ===");
-    eprintln!("[1] Raw ungapped hits (after extension): {}", all_ungapped.len());
+    if args.verbose {
+        eprintln!("=== Stage Counters ===");
+        eprintln!("[1] Raw ungapped hits (after extension): {}", all_ungapped.len());
+    }
 
     // NOTE: NCBI does NOT call Blast_HSPListPurgeHSPsWithCommonEndpoints in the
     // ungapped tblastx path. The purge is only in the gapped path:
@@ -2334,7 +3136,8 @@ fn run_with_neighbor_map(args: TblastxArgs) -> Result<()> {
             // NCBI Parity: Pass pre-computed length_adjustment and eff_searchsp per context
             // These values are stored in query_info->contexts[ctx] in NCBI and referenced
             // by link_hsps.c for BLAST_SmallGapSumE/BLAST_LargeGapSumE calculations.
-            apply_sum_stats_even_gap_linking(
+            let t_linking = if timing_enabled { Some(Instant::now()) } else { None };
+            let linked = apply_sum_stats_even_gap_linking(
                 subject_hits,
                 &linking_params_for_cutoff,
                 &linking_params,
@@ -2342,39 +3145,59 @@ fn run_with_neighbor_map(args: TblastxArgs) -> Result<()> {
                 &subject_frame_bases,
                 &length_adj_per_context,
                 &eff_searchsp_per_context,
-            )
+            );
+            if let Some(t) = t_linking {
+                let elapsed = t.elapsed();
+                linking_ns.fetch_add(elapsed.as_nanos() as u64, AtomicOrdering::Relaxed);
+                linking_calls.fetch_add(1, AtomicOrdering::Relaxed);
+            }
+            linked
         })
         .collect();
-    eprintln!("[2] After sum_stats_linking: {} hits", linked_hits.len());
-    
-    // Count E-value distribution before final filter
-    let mut e_0 = 0usize;      // E <= 0 (0.0)
-    let mut e_tiny = 0usize;   // 0 < E <= 1e-50
-    let mut e_small = 0usize;  // 1e-50 < E <= 1e-10
-    let mut e_med = 0usize;    // 1e-10 < E <= 10
-    let mut e_large = 0usize;  // E > 10
-    let mut e_inf = 0usize;    // E == INF
-    for h in &linked_hits {
-        if h.e_value == f64::INFINITY {
-            e_inf += 1;
-        } else if h.e_value <= 0.0 {
-            e_0 += 1;
-        } else if h.e_value <= 1e-50 {
-            e_tiny += 1;
-        } else if h.e_value <= 1e-10 {
-            e_small += 1;
-        } else if h.e_value <= 10.0 {
-            e_med += 1;
-        } else {
-            e_large += 1;
+
+    if trace_hsp_target().is_some() {
+        for h in &linked_hits {
+            trace_ungapped_hit_if_match("after_linking", h);
         }
     }
-    eprintln!("[3] E-value distribution (before final filter):");
-    eprintln!("    E=0: {}, E<=1e-50: {}, E<=1e-10: {}, E<=10: {}, E>10: {}, E=INF: {}",
-        e_0, e_tiny, e_small, e_med, e_large, e_inf);
+    if args.verbose {
+        eprintln!("[2] After sum_stats_linking: {} hits", linked_hits.len());
+    }
+    
+    if args.verbose {
+        // Count E-value distribution before final filter
+        let mut e_0 = 0usize;      // E <= 0 (0.0)
+        let mut e_tiny = 0usize;   // 0 < E <= 1e-50
+        let mut e_small = 0usize;  // 1e-50 < E <= 1e-10
+        let mut e_med = 0usize;    // 1e-10 < E <= 10
+        let mut e_large = 0usize;  // E > 10
+        let mut e_inf = 0usize;    // E == INF
+        for h in &linked_hits {
+            if h.e_value == f64::INFINITY {
+                e_inf += 1;
+            } else if h.e_value <= 0.0 {
+                e_0 += 1;
+            } else if h.e_value <= 1e-50 {
+                e_tiny += 1;
+            } else if h.e_value <= 1e-10 {
+                e_small += 1;
+            } else if h.e_value <= 10.0 {
+                e_med += 1;
+            } else {
+                e_large += 1;
+            }
+        }
+        eprintln!("[3] E-value distribution (before final filter):");
+        eprintln!(
+            "    E=0: {}, E<=1e-50: {}, E<=1e-10: {}, E<=10: {}, E>10: {}, E=INF: {}",
+            e_0, e_tiny, e_small, e_med, e_large, e_inf
+        );
+    }
 
     // Pre-generate subject frames to avoid redundant translation
-    eprintln!("Pre-generating subject frames for identity calculation...");
+    if args.verbose {
+        eprintln!("Pre-generating subject frames for identity calculation...");
+    }
     let subject_frames_cache: Vec<Vec<QueryFrame>> = subjects_raw
         .iter()
         .map(|s| generate_frames(s.seq(), &db_code))
@@ -2409,11 +3232,19 @@ fn run_with_neighbor_map(args: TblastxArgs) -> Result<()> {
         // Calculate identity using raw positions (+1 for sentinel)
         let q0 = h.q_aa_start + 1;
         let s0 = h.s_aa_start + 1;
-        let mut matches = 0;
-        for k in 0..len {
-            if q0 + k < q_aa.len() && s0 + k < s_aa.len() && q_aa[q0 + k] == s_aa[s0 + k] {
-                matches += 1;
-            }
+        // Use SIMD-optimized identity calculation (already implemented in reevaluate.rs)
+        let t_identity = if timing_enabled { Some(Instant::now()) } else { None };
+        let matches = get_num_identities_and_positives_ungapped(
+            q_aa,
+            s_aa,
+            q0,
+            s0,
+            len,
+        ).map(|(num_ident, _)| num_ident).unwrap_or(0);
+        if let Some(t) = t_identity {
+            let elapsed = t.elapsed();
+            identity_ns.fetch_add(elapsed.as_nanos() as u64, AtomicOrdering::Relaxed);
+            identity_calls.fetch_add(1, AtomicOrdering::Relaxed);
         }
         let identity = if len > 0 {
             (matches as f64 / len as f64) * 100.0
@@ -2425,7 +3256,7 @@ fn run_with_neighbor_map(args: TblastxArgs) -> Result<()> {
         let (q_start, q_end) = convert_coords(h.q_aa_start, h.q_aa_end, h.q_frame, h.q_orig_len);
         let (s_start, s_end) = convert_coords(h.s_aa_start, h.s_aa_end, h.s_frame, h.s_orig_len);
 
-        final_hits.push(Hit {
+        let out_hit = Hit {
             query_id: q_id.clone(),
             subject_id: s_id.to_string(),
             identity,
@@ -2441,17 +3272,38 @@ fn run_with_neighbor_map(args: TblastxArgs) -> Result<()> {
             q_idx: h.q_idx,
             s_idx: h.s_idx,
             raw_score: h.raw_score,
-        });
+        };
+        trace_final_hit_if_match("output_hit", &out_hit);
+        final_hits.push(out_hit);
     }
 
-    eprintln!("[4] Final hits after E-value filter (threshold={}): {}", evalue_threshold, final_hits.len());
+    if args.verbose {
+        eprintln!(
+            "[4] Final hits after E-value filter (threshold={}): {}",
+            evalue_threshold,
+            final_hits.len()
+        );
+    }
     
     // Report top hit alignment length
     if !final_hits.is_empty() {
         let max_len = final_hits.iter().map(|h| h.length).max().unwrap_or(0);
-        eprintln!("[5] Top alignment length: {} AA", max_len);
+        if args.verbose {
+            eprintln!("[5] Top alignment length: {} AA", max_len);
+        }
     }
-    eprintln!("=== End Stage Counters ===");
+    if args.verbose {
+        eprintln!("=== End Stage Counters ===");
+    }
+    
+    if timing_enabled {
+        let linking_s = linking_ns.load(AtomicOrdering::Relaxed) as f64 / 1e9;
+        let linking_n = linking_calls.load(AtomicOrdering::Relaxed);
+        let identity_s = identity_ns.load(AtomicOrdering::Relaxed) as f64 / 1e9;
+        let identity_n = identity_calls.load(AtomicOrdering::Relaxed);
+        eprintln!("[TIMING] sum_stats_linking: {:.3}s (calls={})", linking_s, linking_n);
+        eprintln!("[TIMING] identity_calc: {:.3}s (calls={})", identity_s, identity_n);
+    }
     
     // NCBI-style output ordering: query (input order) → subject (best_evalue/score/oid) → HSP (score/coords)
     // Reference: BLAST_LinkHsps() + s_EvalueCompareHSPLists() + ScoreCompareHSPs()

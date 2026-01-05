@@ -96,6 +96,7 @@ pub fn e_to_p(e: f64) -> f64 {
 /// and matches NCBI's precision for typical HSP chain sizes (2-10 HSPs, rarely up to 400+).
 /// For very large n (400+), direct calculation may have accumulated error, but tests
 /// show it remains within acceptable bounds for E-value calculation.
+///
 fn ln_factorial_int(n: i32) -> f64 {
     if n <= 1 {
         return 0.0;

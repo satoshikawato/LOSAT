@@ -144,19 +144,7 @@ Searching 1 queries vs 1 subjects... (avg_query_length=214346)
 [DEBUG LINKING_CUTOFF] cutoff_small_gap_raw=41, cutoff_big_gap_raw=45
 [DEBUG LINKING_CUTOFF] scale_factor=1, final_cutoff_small=41, final_cutoff_big=45
 [DEBUG LINKING_CUTOFF] gap_prob=0.5, ignore_small_gaps=false
-[DEBUG LINKING_FILTER] subject_len_nucl=657101, group_size=121529
-[DEBUG LINKING_FILTER] INDEX 0 (small gap): cutoff=41, filtered=0, passed=0, total=0, filter_rate=0.00%
-[DEBUG LINKING_FILTER] INDEX 1 (large gap): cutoff=45, filtered=81001, passed=3164850, total=3245851, filter_rate=2.50%
-[DEBUG LINKING_FILTER] subject_len_nucl=657101, group_size=128731
-[DEBUG LINKING_FILTER] INDEX 0 (small gap): cutoff=41, filtered=0, passed=0, total=0, filter_rate=0.00%
-[DEBUG LINKING_FILTER] INDEX 1 (large gap): cutoff=45, filtered=78521, passed=15705606, total=15784127, filter_rate=0.50%
-[DEBUG LINKING_FILTER] subject_len_nucl=657101, group_size=135735
-[DEBUG LINKING_FILTER] INDEX 0 (small gap): cutoff=41, filtered=0, passed=0, total=0, filter_rate=0.00%
-[DEBUG LINKING_FILTER] INDEX 1 (large gap): cutoff=45, filtered=83184, passed=16118886, total=16202070, filter_rate=0.51%
-[DEBUG LINKING_FILTER] subject_len_nucl=657101, group_size=119136
-[DEBUG LINKING_FILTER] INDEX 0 (small gap): cutoff=41, filtered=0, passed=0, total=0, filter_rate=0.00%
-[DEBUG LINKING_FILTER] INDEX 1 (large gap): cutoff=45, filtered=79037, passed=3165120, total=3244157, filter_rate=2.44%
 
-real	38m44.869s
-user	38m44.348s
-sys	0m0.170s
+real	4m40.162s
+user	4m40.955s
+sys	0m0.180s

@@ -299,7 +299,7 @@ pub fn write_outfmt6<W: Write>(
 /// Write outfmt 7 header (comment lines) to a writer
 ///
 /// NCBI format (from tabular.cpp:1266-1284):
-/// ```
+/// ```text
 /// # TBLASTX 2.17.0+
 /// # Query: query_name
 /// # Database: database_name

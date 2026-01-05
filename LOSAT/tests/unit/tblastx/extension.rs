@@ -3,24 +3,25 @@
 use LOSAT::algorithm::tblastx::extension::{
     extend_hit_ungapped, extend_hit_two_hit, extend_gapped_protein, get_score,
 };
-use LOSAT::algorithm::tblastx::constants::{X_DROP_UNGAPPED, X_DROP_GAPPED_PRELIM, STOP_CODON};
+use LOSAT::algorithm::tblastx::constants::{X_DROP_UNGAPPED, X_DROP_GAPPED_PRELIM};
+use LOSAT::utils::matrix::ncbistdaa;
 
 #[test]
 fn test_get_score_basic() {
     // Test BLOSUM62 scoring
     // A-A match should have positive score
-    let score_aa = get_score(0, 0); // A-A
+    let score_aa = get_score(ncbistdaa::A, ncbistdaa::A); // A-A
     assert!(score_aa > 0);
     
     // A-B mismatch should have lower score than A-A
-    let score_ab = get_score(0, 1); // A-B
+    let score_ab = get_score(ncbistdaa::A, ncbistdaa::B); // A-B
     assert!(score_ab < score_aa);
 }
 
 #[test]
 fn test_get_score_matches() {
     // Identical amino acids should have positive scores
-    for aa in 0..25 {
+    for aa in 0u8..28u8 {
         let score = get_score(aa, aa);
         // Most amino acids have positive self-scores in BLOSUM62
         // (except some rare cases, but generally true)
@@ -30,13 +31,12 @@ fn test_get_score_matches() {
 
 #[test]
 fn test_get_score_stop_codon() {
-    // Stop codons (*) in BLOSUM62 matrix: index 24 in NCBI packed order (ARNDCQEGHILKMFPSTWYVBJZX*)
-    // The matrix has 25x25 entries (0..=24).
-    let score_stop = get_score(STOP_CODON, 0);
-    // Stop codon vs normal amino acid should be negative or zero
+    // Stop codon '*' is 25 in NCBISTDAA encoding.
+    let score_stop = get_score(ncbistdaa::STOP, ncbistdaa::A);
+    // Stop codon vs normal amino acid should be negative (BLOSUM62: -4) or zero.
     assert!(score_stop <= 0);
     
-    let score_stop_stop = get_score(STOP_CODON, STOP_CODON);
+    let score_stop_stop = get_score(ncbistdaa::STOP, ncbistdaa::STOP);
     // NCBI BLAST BLOSUM62: *-* = +1 (sm_blosum62.c)
     assert_eq!(score_stop_stop, 1);
 }
@@ -91,16 +91,17 @@ fn test_extend_hit_ungapped_x_drop_termination() {
 
 #[test]
 fn test_extend_hit_ungapped_at_sequence_start() {
-    let q_seq = [0u8, 1u8, 2u8];
-    let s_seq = [0u8, 1u8, 2u8];
+    // Sequence buffers are NCBISTDAA with leading/trailing sentinel (0 / NULLB).
+    let q_seq = [ncbistdaa::GAP, ncbistdaa::A, ncbistdaa::B, ncbistdaa::C, ncbistdaa::GAP];
+    let s_seq = [ncbistdaa::GAP, ncbistdaa::A, ncbistdaa::B, ncbistdaa::C, ncbistdaa::GAP];
     
-    // Start at position 0 (beginning of sequence)
+    // Start at first residue (position 1). Seeds never start at the sentinel.
     let (q_start, q_end, s_start, s_end, score, _s_last_off) = 
-        extend_hit_ungapped(&q_seq, &s_seq, 0, 0, 0, X_DROP_UNGAPPED);
+        extend_hit_ungapped(&q_seq, &s_seq, 1, 1, 0, X_DROP_UNGAPPED);
     
     // Should extend rightward only (can't extend left from position 0)
-    assert_eq!(q_start, 0);
-    assert!(q_end > 0);
+    assert_eq!(q_start, 1);
+    assert!(q_end > 1);
     assert!(score > 0);
 }
 
@@ -148,7 +149,8 @@ fn test_extend_hit_two_hit_basic() {
     let s_right_off = 4; // Second hit position in subject
     let q_right_off = 4; // Second hit position in query
     
-    let x_drop = 7; // NCBI default X-drop
+    // NCBI default is 7 bits => raw x-drop is 16 for BLOSUM62 ungapped.
+    let x_drop = X_DROP_UNGAPPED;
     let (q_start, q_end, s_start, s_end, score, right_extended, _s_last_off) = 
         extend_hit_two_hit(&q_seq, &s_seq, s_left_off, s_right_off, q_right_off, x_drop);
     
@@ -175,7 +177,7 @@ fn test_extend_hit_two_hit_no_connection() {
     let s_right_off = 6;
     let q_right_off = 6;
     
-    let x_drop = 7; // NCBI default X-drop
+    let x_drop = X_DROP_UNGAPPED;
     let (q_start, q_end, s_start, s_end, score, right_extended, _s_last_off) = 
         extend_hit_two_hit(&q_seq, &s_seq, s_left_off, s_right_off, q_right_off, x_drop);
     
@@ -200,7 +202,7 @@ fn test_extend_hit_two_hit_at_boundaries() {
     let s_right_off = 2;
     let q_right_off = 2;
     
-    let x_drop = 7; // NCBI default X-drop
+    let x_drop = X_DROP_UNGAPPED;
     let (q_start, q_end, s_start, s_end, score, _right_extended, _s_last_off) = 
         extend_hit_two_hit(&q_seq, &s_seq, s_left_off, s_right_off, q_right_off, x_drop);
     
@@ -334,7 +336,7 @@ fn test_extend_gapped_protein_zero_length_seed() {
 
 #[test]
 fn test_extend_gapped_protein_with_stop_codons() {
-    let q_seq = [0u8, 1u8, STOP_CODON, 3u8, 4u8, 5u8];
+    let q_seq = [0u8, 1u8, ncbistdaa::STOP, 3u8, 4u8, 5u8];
     let s_seq = [0u8, 1u8, 2u8, 3u8, 4u8, 5u8];
     
     let qs = 0;

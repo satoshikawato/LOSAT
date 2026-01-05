@@ -150,13 +150,3 @@ Searching 1 queries vs 1 subjects... (avg_query_length=219033)
 [DEBUG LINKING_FILTER] subject_len_nucl=657101, group_size=132615
 [DEBUG LINKING_FILTER] INDEX 0 (small gap): cutoff=41, filtered=0, passed=0, total=0, filter_rate=0.00%
 [DEBUG LINKING_FILTER] INDEX 1 (large gap): cutoff=46, filtered=88159, passed=13646216, total=13734375, filter_rate=0.64%
-[DEBUG LINKING_FILTER] subject_len_nucl=657101, group_size=137954
-[DEBUG LINKING_FILTER] INDEX 0 (small gap): cutoff=41, filtered=0, passed=0, total=0, filter_rate=0.00%
-[DEBUG LINKING_FILTER] INDEX 1 (large gap): cutoff=46, filtered=92364, passed=13722674, total=13815038, filter_rate=0.67%
-[DEBUG LINKING_FILTER] subject_len_nucl=657101, group_size=121003
-[DEBUG LINKING_FILTER] INDEX 0 (small gap): cutoff=41, filtered=0, passed=0, total=0, filter_rate=0.00%
-[DEBUG LINKING_FILTER] INDEX 1 (large gap): cutoff=46, filtered=87966, passed=2407268, total=2495234, filter_rate=3.53%
-
-real	33m23.557s
-user	33m23.073s
-sys	0m0.110s

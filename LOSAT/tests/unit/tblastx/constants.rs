@@ -5,8 +5,9 @@ use LOSAT::algorithm::tblastx::constants::*;
 #[test]
 fn test_x_drop_constants() {
     // X-drop values should match NCBI BLAST protein defaults
-    // X_DROP_UNGAPPED = 15 (raw score, converted from 7 bits)
-    assert_eq!(X_DROP_UNGAPPED, 15);
+    // NCBI uses 7 bits and converts to raw score at runtime:
+    //   ceil(7 * ln(2) / lambda) = ceil(15.27...) = 16  (BLOSUM62 ungapped lambda≈0.3176)
+    assert_eq!(X_DROP_UNGAPPED, 16);
     assert_eq!(X_DROP_GAPPED_PRELIM, 15);
     assert_eq!(X_DROP_GAPPED_FINAL, 25);
 }
@@ -16,13 +17,6 @@ fn test_two_hit_window() {
     // TWO_HIT_WINDOW should be reasonable for protein searches
     assert!(TWO_HIT_WINDOW > 0);
     assert_eq!(TWO_HIT_WINDOW, 40);
-}
-
-#[test]
-fn test_max_hits_per_kmer() {
-    // MAX_HITS_PER_KMER should limit memory usage
-    assert!(MAX_HITS_PER_KMER > 0);
-    assert_eq!(MAX_HITS_PER_KMER, 50000);
 }
 
 #[test]
@@ -65,9 +59,8 @@ fn test_chaining_constants() {
 
 #[test]
 fn test_sentinel_constants() {
-    // SENTINEL_BYTE should be outside the amino acid range (0-24)
-    assert_eq!(SENTINEL_BYTE, 255);
-    // SENTINEL_PENALTY should be negative enough to trigger X-drop termination
-    assert!(SENTINEL_PENALTY < -X_DROP_UNGAPPED);
-    assert_eq!(SENTINEL_PENALTY, -100);
+    // NCBI BLAST sentinel (NULLB) is 0.
+    assert_eq!(SENTINEL_BYTE, 0);
+    // Sentinel score must match NCBI BLOSUM62 defscore (-4).
+    assert_eq!(SENTINEL_PENALTY, -4);
 }

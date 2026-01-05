@@ -1214,7 +1214,9 @@ pub fn run(args: TblastxArgs) -> Result<()> {
         .context("Failed to build thread pool")?;
 
     let t_phase_read_queries = Instant::now();
-    eprintln!("Reading queries...");
+    if args.verbose {
+        eprintln!("Reading queries...");
+    }
     let query_reader = fasta::Reader::from_file(&args.query)?;
     let queries_raw: Vec<fasta::Record> = query_reader.records().filter_map(|r| r.ok()).collect();
     let query_ids: Vec<String> = queries_raw
@@ -1289,7 +1291,9 @@ pub fn run(args: TblastxArgs) -> Result<()> {
     t_read_queries = t_phase_read_queries.elapsed();
 
     let t_phase_build_lookup = Instant::now();
-    eprintln!("Building lookup table...");
+    if args.verbose {
+        eprintln!("Building lookup table...");
+    }
     // Note: karlin_params argument is now unused - computed per context in build_ncbi_lookup()
     // We still pass it for x_dropoff calculation (which uses ideal params for all contexts in tblastx)
     let (lookup, contexts) = build_ncbi_lookup(
@@ -1315,7 +1319,9 @@ pub fn run(args: TblastxArgs) -> Result<()> {
         .collect();
 
     let t_phase_read_subjects = Instant::now();
-    eprintln!("Reading subjects...");
+    if args.verbose {
+        eprintln!("Reading subjects...");
+    }
     let subject_reader = fasta::Reader::from_file(&args.subject)?;
     let subjects_raw: Vec<fasta::Record> = subject_reader.records().filter_map(|r| r.ok()).collect();
     if queries_raw.is_empty() || subjects_raw.is_empty() {
@@ -1355,12 +1361,14 @@ pub fn run(args: TblastxArgs) -> Result<()> {
     let query_nucl_lengths: Vec<usize> = queries_raw.iter().map(|r| r.seq().len()).collect();
     let avg_query_length = compute_avg_query_length_ncbi(&query_nucl_lengths);
 
-    eprintln!(
-        "Searching {} queries vs {} subjects... (avg_query_length={})",
-        queries_raw.len(),
-        subjects_raw.len(),
-        avg_query_length
-    );
+    if args.verbose {
+        eprintln!(
+            "Searching {} queries vs {} subjects... (avg_query_length={})",
+            queries_raw.len(),
+            subjects_raw.len(),
+            avg_query_length
+        );
+    }
 
     let t_search_start = Instant::now();
     let scan_ns = AtomicU64::new(0);
@@ -1374,12 +1382,17 @@ pub fn run(args: TblastxArgs) -> Result<()> {
     let identity_ns = AtomicU64::new(0);
     let identity_calls = AtomicU64::new(0);
 
-    let bar = ProgressBar::new(subjects_raw.len() as u64);
-    bar.set_style(
-        ProgressStyle::default_bar()
-            .template("{spinner:.green} [{elapsed_precise}] [{bar:40.cyan/blue}] {pos}/{len}")
-            .unwrap(),
-    );
+    let bar = if args.verbose {
+        let bar = ProgressBar::new(subjects_raw.len() as u64);
+        bar.set_style(
+            ProgressStyle::default_bar()
+                .template("{spinner:.green} [{elapsed_precise}] [{bar:40.cyan/blue}] {pos}/{len}")
+                .unwrap(),
+        );
+        bar
+    } else {
+        ProgressBar::hidden()
+    };
 
     let (tx, rx) = channel::<Vec<Hit>>();
     let out_path = args.out.clone();
@@ -1540,7 +1553,10 @@ pub fn run(args: TblastxArgs) -> Result<()> {
                 
                 // DEBUG: Print cutoff values for first context
                 static PRINTED: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
-                if ctx_idx == 0 && !PRINTED.swap(true, std::sync::atomic::Ordering::Relaxed) {
+                if diag_enabled
+                    && ctx_idx == 0
+                    && !PRINTED.swap(true, std::sync::atomic::Ordering::Relaxed)
+                {
                     eprintln!("[DEBUG CUTOFF] query_len_aa={}, subject_len_nucl={}", query_len_aa, subject_len_nucl);
                     eprintln!("[DEBUG CUTOFF] eff_searchsp={}", eff_searchsp);
                     eprintln!("[DEBUG CUTOFF] length_adjustment={}", eff_lengths.length_adjustment);
@@ -1913,7 +1929,13 @@ pub fn run(args: TblastxArgs) -> Result<()> {
                     .unwrap_or_else(|| params.clone());
 
                 // Output HSP saving statistics for long sequences
-                if is_long_sequence && (stats_hsp_saved > 0 || stats_hsp_filtered_by_cutoff > 0 || stats_hsp_filtered_by_reeval > 0 || stats_hsp_filtered_by_hsp_test > 0) {
+                if diag_enabled
+                    && is_long_sequence
+                    && (stats_hsp_saved > 0
+                        || stats_hsp_filtered_by_cutoff > 0
+                        || stats_hsp_filtered_by_reeval > 0
+                        || stats_hsp_filtered_by_hsp_test > 0)
+                {
                     let total_attempted = stats_hsp_saved + stats_hsp_filtered_by_cutoff + stats_hsp_filtered_by_reeval + stats_hsp_filtered_by_hsp_test;
                     eprintln!("[DEBUG HSP_SAVING] subject_len_nucl={}, cutoff={}", subject_len_nucl, cutoff_score_min);
                     eprintln!("[DEBUG HSP_SAVING] total_attempted={}, saved={}, filtered_by_cutoff={}, filtered_by_reeval={}, filtered_by_hsp_test={}", 
@@ -2289,7 +2311,9 @@ fn run_with_neighbor_map(args: TblastxArgs) -> Result<()> {
         .build_global()
         .context("Failed to build thread pool")?;
 
-    eprintln!("Reading queries (neighbor map mode)...");
+    if args.verbose {
+        eprintln!("Reading queries (neighbor map mode)...");
+    }
     let query_reader = fasta::Reader::from_file(&args.query)?;
     let queries_raw: Vec<fasta::Record> = query_reader.records().filter_map(|r| r.ok()).collect();
     let query_ids: Vec<String> = queries_raw
@@ -2330,14 +2354,20 @@ fn run_with_neighbor_map(args: TblastxArgs) -> Result<()> {
         }
     }
 
-    eprintln!("Building neighbor lookup...");
+    if args.verbose {
+        eprintln!("Building neighbor lookup...");
+    }
     let neighbor_lookup = NeighborLookup::build(&query_frames, threshold, &ungapped_params_for_xdrop);
     
     // Use compressed neighbor index: no expanded_lookup pre-computation
     // Instead, resolve neighbors on-the-fly during scan
-    eprintln!("Using compressed neighbor index (no expanded_lookup)...");
+    if args.verbose {
+        eprintln!("Using compressed neighbor index (no expanded_lookup)...");
+    }
 
-    eprintln!("Reading subjects...");
+    if args.verbose {
+        eprintln!("Reading subjects...");
+    }
     let subject_reader = fasta::Reader::from_file(&args.subject)?;
     let subjects_raw: Vec<fasta::Record> = subject_reader.records().filter_map(|r| r.ok()).collect();
     if queries_raw.is_empty() || subjects_raw.is_empty() {
@@ -2384,19 +2414,26 @@ fn run_with_neighbor_map(args: TblastxArgs) -> Result<()> {
     let query_nucl_lengths: Vec<usize> = queries_raw.iter().map(|r| r.seq().len()).collect();
     let avg_query_length = compute_avg_query_length_ncbi(&query_nucl_lengths);
 
-    eprintln!(
-        "Searching {} queries vs {} subjects (neighbor map mode, avg_query_length={})...",
-        queries_raw.len(),
-        subjects_raw.len(),
-        avg_query_length
-    );
+    if args.verbose {
+        eprintln!(
+            "Searching {} queries vs {} subjects (neighbor map mode, avg_query_length={})...",
+            queries_raw.len(),
+            subjects_raw.len(),
+            avg_query_length
+        );
+    }
 
-    let bar = ProgressBar::new(subjects_raw.len() as u64 * 6);
-    bar.set_style(
-        ProgressStyle::default_bar()
-            .template("{spinner:.green} [{elapsed_precise}] [{bar:40.cyan/blue}] {pos}/{len}")
-            .unwrap(),
-    );
+    let bar = if args.verbose {
+        let bar = ProgressBar::new(subjects_raw.len() as u64 * 6);
+        bar.set_style(
+            ProgressStyle::default_bar()
+                .template("{spinner:.green} [{elapsed_precise}] [{bar:40.cyan/blue}] {pos}/{len}")
+                .unwrap(),
+        );
+        bar
+    } else {
+        ProgressBar::hidden()
+    };
 
     let evalue_threshold = args.evalue;
     let query_frames_ref = &query_frames;
@@ -2782,8 +2819,10 @@ fn run_with_neighbor_map(args: TblastxArgs) -> Result<()> {
     bar.finish();
 
     let all_ungapped = all_ungapped.into_inner().unwrap();
-    eprintln!("=== Stage Counters ===");
-    eprintln!("[1] Raw ungapped hits (after extension): {}", all_ungapped.len());
+    if args.verbose {
+        eprintln!("=== Stage Counters ===");
+        eprintln!("[1] Raw ungapped hits (after extension): {}", all_ungapped.len());
+    }
 
     // NOTE: NCBI does NOT call Blast_HSPListPurgeHSPsWithCommonEndpoints in the
     // ungapped tblastx path. The purge is only in the gapped path:
@@ -2924,36 +2963,44 @@ fn run_with_neighbor_map(args: TblastxArgs) -> Result<()> {
             linked
         })
         .collect();
-    eprintln!("[2] After sum_stats_linking: {} hits", linked_hits.len());
-    
-    // Count E-value distribution before final filter
-    let mut e_0 = 0usize;      // E <= 0 (0.0)
-    let mut e_tiny = 0usize;   // 0 < E <= 1e-50
-    let mut e_small = 0usize;  // 1e-50 < E <= 1e-10
-    let mut e_med = 0usize;    // 1e-10 < E <= 10
-    let mut e_large = 0usize;  // E > 10
-    let mut e_inf = 0usize;    // E == INF
-    for h in &linked_hits {
-        if h.e_value == f64::INFINITY {
-            e_inf += 1;
-        } else if h.e_value <= 0.0 {
-            e_0 += 1;
-        } else if h.e_value <= 1e-50 {
-            e_tiny += 1;
-        } else if h.e_value <= 1e-10 {
-            e_small += 1;
-        } else if h.e_value <= 10.0 {
-            e_med += 1;
-        } else {
-            e_large += 1;
-        }
+    if args.verbose {
+        eprintln!("[2] After sum_stats_linking: {} hits", linked_hits.len());
     }
-    eprintln!("[3] E-value distribution (before final filter):");
-    eprintln!("    E=0: {}, E<=1e-50: {}, E<=1e-10: {}, E<=10: {}, E>10: {}, E=INF: {}",
-        e_0, e_tiny, e_small, e_med, e_large, e_inf);
+    
+    if args.verbose {
+        // Count E-value distribution before final filter
+        let mut e_0 = 0usize;      // E <= 0 (0.0)
+        let mut e_tiny = 0usize;   // 0 < E <= 1e-50
+        let mut e_small = 0usize;  // 1e-50 < E <= 1e-10
+        let mut e_med = 0usize;    // 1e-10 < E <= 10
+        let mut e_large = 0usize;  // E > 10
+        let mut e_inf = 0usize;    // E == INF
+        for h in &linked_hits {
+            if h.e_value == f64::INFINITY {
+                e_inf += 1;
+            } else if h.e_value <= 0.0 {
+                e_0 += 1;
+            } else if h.e_value <= 1e-50 {
+                e_tiny += 1;
+            } else if h.e_value <= 1e-10 {
+                e_small += 1;
+            } else if h.e_value <= 10.0 {
+                e_med += 1;
+            } else {
+                e_large += 1;
+            }
+        }
+        eprintln!("[3] E-value distribution (before final filter):");
+        eprintln!(
+            "    E=0: {}, E<=1e-50: {}, E<=1e-10: {}, E<=10: {}, E>10: {}, E=INF: {}",
+            e_0, e_tiny, e_small, e_med, e_large, e_inf
+        );
+    }
 
     // Pre-generate subject frames to avoid redundant translation
-    eprintln!("Pre-generating subject frames for identity calculation...");
+    if args.verbose {
+        eprintln!("Pre-generating subject frames for identity calculation...");
+    }
     let subject_frames_cache: Vec<Vec<QueryFrame>> = subjects_raw
         .iter()
         .map(|s| generate_frames(s.seq(), &db_code))
@@ -3031,14 +3078,24 @@ fn run_with_neighbor_map(args: TblastxArgs) -> Result<()> {
         });
     }
 
-    eprintln!("[4] Final hits after E-value filter (threshold={}): {}", evalue_threshold, final_hits.len());
+    if args.verbose {
+        eprintln!(
+            "[4] Final hits after E-value filter (threshold={}): {}",
+            evalue_threshold,
+            final_hits.len()
+        );
+    }
     
     // Report top hit alignment length
     if !final_hits.is_empty() {
         let max_len = final_hits.iter().map(|h| h.length).max().unwrap_or(0);
-        eprintln!("[5] Top alignment length: {} AA", max_len);
+        if args.verbose {
+            eprintln!("[5] Top alignment length: {} AA", max_len);
+        }
     }
-    eprintln!("=== End Stage Counters ===");
+    if args.verbose {
+        eprintln!("=== End Stage Counters ===");
+    }
     
     if timing_enabled {
         let linking_s = linking_ns.load(AtomicOrdering::Relaxed) as f64 / 1e9;

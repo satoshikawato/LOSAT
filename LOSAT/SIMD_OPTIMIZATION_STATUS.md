@@ -502,6 +502,22 @@ real	0m3.457s
   - hits: NCBI=42733, LOSAT=42797（差分 +64）
   - time: `real 0m23.027s`（Step 1比で短縮）
 
+#### Step 3: 参照/境界チェックの削減（出力不変）
+
+- **変更**:
+  - `lh_helpers[...]` の多重インデックス参照を `&helper` 参照にまとめる（bounds check/参照回数削減）。
+  - active list 走査で `next_active` を先に読み、更新用の追加インデックスを減らす。
+- **結果**:
+  - hits: NCBI=42733, LOSAT=42797（差分 +64）
+  - time: `real 0m22.335s`
+
+#### Step 4: `ln_factorial_int` キャッシュ（不採用）
+
+- **試行**: `LOSAT/src/stats/sum_statistics.rs` の `ln_factorial_int` をキャッシュ化（巨大な事前テーブル/小さめテーブル/thread_local growable を試行）。
+- **結果**: このベンチ（AP027280自己比較, 1プロセス1回実行）では **初期化/キャッシュ管理のオーバーヘッドが勝ち、timeが悪化傾向**。
+- **結論**: 本セッションでは **キャッシュ化をロールバック**し、最速だった `sum_stats_linking` 側の最適化（Step 2-3）を採用。
+- **参考（ロールバック後）**: `real 0m22.251s`（同条件での再計測）
+
 ---
 
 ## 4. 推奨される次のステップ（TBLASTXを単一スレッドで速くする／NCBI互換性維持）

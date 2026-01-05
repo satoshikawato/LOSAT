@@ -17,6 +17,7 @@ use crate::stats::karlin_calc::{
     compute_aa_composition, compute_std_aa_composition, compute_score_freq_profile,
     compute_karlin_params_ungapped, apply_check_ideal,
 };
+use super::diagnostics::diagnostics_enabled;
 use super::translation::QueryFrame;
 
 pub const AA_HITS_PER_CELL: usize = 3;
@@ -239,6 +240,7 @@ pub fn build_ncbi_lookup(
     lazy_neighbors: bool,
     _karlin_params: &KarlinParams, // Unused - computed per context, kept for API compatibility
 ) -> (BlastAaLookupTable, Vec<QueryContext>) {
+    let diag_enabled = diagnostics_enabled();
     let word_length = LOOKUP_WORD_LENGTH;
     let alphabet_size = LOOKUP_ALPHABET_SIZE; // 28
     let charsize = ilog2(alphabet_size) + 1;   // 5
@@ -364,15 +366,17 @@ pub fn build_ncbi_lookup(
         }
     }
     
-    // Phase 1a diagnostics
-    let unique_exact_words = exact_offsets.iter().filter(|v| !v.is_empty()).count();
-    let max_exact_per_word = exact_offsets.iter().map(|v| v.len()).max().unwrap_or(0);
-    eprintln!("\n=== Phase 1a: Exact Indexing Diagnostics ===");
-    eprintln!("Total exact positions indexed: {}", total_exact_positions);
-    eprintln!("Unique exact words: {}", unique_exact_words);
-    eprintln!("Max offsets per exact word: {}", max_exact_per_word);
-    eprintln!("Skipped (invalid residue): {}", skipped_invalid_residue);
-    eprintln!("Skipped (SEG mask): {}", skipped_seg_mask);
+    // Phase 1a diagnostics (guarded)
+    if diag_enabled {
+        let unique_exact_words = exact_offsets.iter().filter(|v| !v.is_empty()).count();
+        let max_exact_per_word = exact_offsets.iter().map(|v| v.len()).max().unwrap_or(0);
+        eprintln!("\n=== Phase 1a: Exact Indexing Diagnostics ===");
+        eprintln!("Total exact positions indexed: {}", total_exact_positions);
+        eprintln!("Unique exact words: {}", unique_exact_words);
+        eprintln!("Max offsets per exact word: {}", max_exact_per_word);
+        eprintln!("Skipped (invalid residue): {}", skipped_invalid_residue);
+        eprintln!("Skipped (SEG mask): {}", skipped_seg_mask);
+    }
 
     // Phase 1b: Add neighboring words (or just exact matches for lazy mode)
     let residue_mask: usize = (1usize << charsize) - 1;
@@ -388,8 +392,10 @@ pub fn build_ncbi_lookup(
 
     let thin_backbone: Vec<Vec<i32>> = if lazy_neighbors {
         // LAZY MODE: Only store exact matches, neighbors computed at scan time
-        eprintln!("\n=== Phase 1b: LAZY NEIGHBOR MODE ===");
-        eprintln!("Neighbors will be computed dynamically during scan");
+        if diag_enabled {
+            eprintln!("\n=== Phase 1b: LAZY NEIGHBOR MODE ===");
+            eprintln!("Neighbors will be computed dynamically during scan");
+        }
         
         let mut backbone: Vec<Vec<i32>> = vec![Vec::new(); backbone_size];
         
@@ -538,80 +544,94 @@ pub fn build_ncbi_lookup(
         counts[idx] = all_entries[idx].len() as u32;
     }
     
-    // Phase 1b diagnostics
-    eprintln!("\n=== Phase 1b: Neighbor Generation Diagnostics ===");
-    eprintln!("Threshold: {}", threshold);
-    eprintln!("Exact entries added (self_score < threshold): {}", exact_added_count);
-    eprintln!("Neighbor entries added: {}", neighbor_added_count);
-    eprintln!("Neighbor words generated (unique): {}", neighbor_words_generated);
-    eprintln!("Words with exact-only additions: {}", words_with_exact_only);
-    eprintln!("Words with neighbor generation: {}", words_with_neighbors);
-    eprintln!("Max neighbors generated for single word: {}", max_neighbors_for_single_word);
-    if max_neighbors_for_single_word > 0 {
-        let w0 = (max_neighbor_word_idx >> (2 * charsize)) & residue_mask;
-        let w1 = (max_neighbor_word_idx >> charsize) & residue_mask;
-        let w2 = max_neighbor_word_idx & residue_mask;
-        eprintln!("  Word with max neighbors: idx={} (residues {},{},{})", 
-                  max_neighbor_word_idx, w0, w1, w2);
+    // Phase 1b diagnostics (guarded)
+    if diag_enabled {
+        eprintln!("\n=== Phase 1b: Neighbor Generation Diagnostics ===");
+        eprintln!("Threshold: {}", threshold);
+        eprintln!("Exact entries added (self_score < threshold): {}", exact_added_count);
+        eprintln!("Neighbor entries added: {}", neighbor_added_count);
+        eprintln!("Neighbor words generated (unique): {}", neighbor_words_generated);
+        eprintln!("Words with exact-only additions: {}", words_with_exact_only);
+        eprintln!("Words with neighbor generation: {}", words_with_neighbors);
+        eprintln!("Max neighbors generated for single word: {}", max_neighbors_for_single_word);
+        if max_neighbors_for_single_word > 0 {
+            let w0 = (max_neighbor_word_idx >> (2 * charsize)) & residue_mask;
+            let w1 = (max_neighbor_word_idx >> charsize) & residue_mask;
+            let w2 = max_neighbor_word_idx & residue_mask;
+            eprintln!(
+                "  Word with max neighbors: idx={} (residues {},{},{})",
+                max_neighbor_word_idx, w0, w1, w2
+            );
+        }
+        let expansion_factor = if total_exact_positions > 0 {
+            (exact_added_count + neighbor_added_count) as f64 / total_exact_positions as f64
+        } else {
+            0.0
+        };
+        eprintln!("Expansion factor (total_entries / exact_positions): {:.2}x", expansion_factor);
     }
-    let expansion_factor = if total_exact_positions > 0 {
-        (exact_added_count + neighbor_added_count) as f64 / total_exact_positions as f64
-    } else {
-        0.0
-    };
-    eprintln!("Expansion factor (total_entries / exact_positions): {:.2}x", expansion_factor);
 
     // Phase 2: Finalize
     let mut backbone: Vec<BackboneCell> = vec![BackboneCell::default(); backbone_size];
     let pv_size = (backbone_size + PV_BUCKET_BITS - 1) / PV_BUCKET_BITS;
     let mut pv: Vec<u64> = vec![0u64; pv_size];
 
-    // Pre-finalize diagnostics: analyze high-frequency k-mers
-    eprintln!("\n=== Phase 2: High-Frequency K-mer Analysis ===");
-    
-    // Collect (count, idx) pairs and sort by count descending
-    let mut count_idx_pairs: Vec<(usize, usize)> = counts.iter()
-        .enumerate()
-        .filter(|(_, &c)| c > 0)
-        .map(|(i, &c)| (c as usize, i))
-        .collect();
-    count_idx_pairs.sort_by(|a, b| b.0.cmp(&a.0));
-    
-    // Show top 10 high-frequency k-mers
-    eprintln!("Top 10 high-frequency k-mers (before suppression):");
-    for (rank, &(count, idx)) in count_idx_pairs.iter().take(10).enumerate() {
-        let w0 = (idx >> (2 * charsize)) & residue_mask;
-        let w1 = (idx >> charsize) & residue_mask;
-        let w2 = idx & residue_mask;
-        eprintln!("  #{}: count={}, idx={} (residues {},{},{})", 
-                  rank + 1, count, idx, w0, w1, w2);
-    }
-    
-    // Distribution histogram
-    let hist_buckets = [1, 10, 100, 500, 1000, 5000, 10000, 50000, 100000, usize::MAX];
-    let mut hist: Vec<usize> = vec![0; hist_buckets.len()];
-    let mut hist_entries: Vec<usize> = vec![0; hist_buckets.len()];
-    for &(count, _) in &count_idx_pairs {
-        for (i, &bucket) in hist_buckets.iter().enumerate() {
-            if count <= bucket {
-                hist[i] += 1;
-                hist_entries[i] += count;
-                break;
+    // Pre-finalize diagnostics: analyze high-frequency k-mers (guarded)
+    if diag_enabled {
+        eprintln!("\n=== Phase 2: High-Frequency K-mer Analysis ===");
+
+        // Collect (count, idx) pairs and sort by count descending
+        let mut count_idx_pairs: Vec<(usize, usize)> = counts
+            .iter()
+            .enumerate()
+            .filter(|(_, &c)| c > 0)
+            .map(|(i, &c)| (c as usize, i))
+            .collect();
+        count_idx_pairs.sort_by(|a, b| b.0.cmp(&a.0));
+
+        // Show top 10 high-frequency k-mers
+        eprintln!("Top 10 high-frequency k-mers (before suppression):");
+        for (rank, &(count, idx)) in count_idx_pairs.iter().take(10).enumerate() {
+            let w0 = (idx >> (2 * charsize)) & residue_mask;
+            let w1 = (idx >> charsize) & residue_mask;
+            let w2 = idx & residue_mask;
+            eprintln!(
+                "  #{}: count={}, idx={} (residues {},{},{})",
+                rank + 1,
+                count,
+                idx,
+                w0,
+                w1,
+                w2
+            );
+        }
+
+        // Distribution histogram
+        let hist_buckets = [1, 10, 100, 500, 1000, 5000, 10000, 50000, 100000, usize::MAX];
+        let mut hist: Vec<usize> = vec![0; hist_buckets.len()];
+        let mut hist_entries: Vec<usize> = vec![0; hist_buckets.len()];
+        for &(count, _) in &count_idx_pairs {
+            for (i, &bucket) in hist_buckets.iter().enumerate() {
+                if count <= bucket {
+                    hist[i] += 1;
+                    hist_entries[i] += count;
+                    break;
+                }
             }
         }
-    }
-    eprintln!("Hit count distribution:");
-    let mut prev = 0;
-    for (i, &bucket) in hist_buckets.iter().enumerate() {
-        if hist[i] > 0 {
-            let label = if bucket == usize::MAX {
-                format!(">{}", prev)
-            } else {
-                format!("{}-{}", prev + 1, bucket)
-            };
-            eprintln!("  {}: {} cells, {} entries", label, hist[i], hist_entries[i]);
+        eprintln!("Hit count distribution:");
+        let mut prev = 0;
+        for (i, &bucket) in hist_buckets.iter().enumerate() {
+            if hist[i] > 0 {
+                let label = if bucket == usize::MAX {
+                    format!(">{}", prev)
+                } else {
+                    format!("{}-{}", prev + 1, bucket)
+                };
+                eprintln!("  {}: {} cells, {} entries", label, hist[i], hist_entries[i]);
+            }
+            prev = bucket;
         }
-        prev = bucket;
     }
 
     let mut overflow_size = 0usize;
@@ -657,22 +677,27 @@ pub fn build_ncbi_lookup(
 
     let nonempty = backbone.iter().filter(|c| c.num_used > 0).count();
     let total: usize = backbone.iter().map(|c| c.num_used.max(0) as usize).sum();
-    eprintln!("\n=== NCBI Backbone Lookup Table (BLASTAA_SIZE={}) ===", LOOKUP_ALPHABET_SIZE);
-    eprintln!("Contexts: {}", contexts.len());
-    eprintln!(
-        "Backbone size: {} cells ({:.1} MB)",
-        backbone_size,
-        (backbone_size * std::mem::size_of::<BackboneCell>()) as f64 / 1e6
-    );
-    eprintln!("Non-empty cells: {}", nonempty);
-    eprintln!("Total entries: {}", total);
-    eprintln!(
-        "Overflow size: {} ({:.1} MB)",
-        overflow_cursor,
-        (overflow_cursor * 4) as f64 / 1e6
-    );
-    eprintln!("Longest chain: {}", longest_chain);
-    eprintln!("==========================================\n");
+    if diag_enabled {
+        eprintln!(
+            "\n=== NCBI Backbone Lookup Table (BLASTAA_SIZE={}) ===",
+            LOOKUP_ALPHABET_SIZE
+        );
+        eprintln!("Contexts: {}", contexts.len());
+        eprintln!(
+            "Backbone size: {} cells ({:.1} MB)",
+            backbone_size,
+            (backbone_size * std::mem::size_of::<BackboneCell>()) as f64 / 1e6
+        );
+        eprintln!("Non-empty cells: {}", nonempty);
+        eprintln!("Total entries: {}", total);
+        eprintln!(
+            "Overflow size: {} ({:.1} MB)",
+            overflow_cursor,
+            (overflow_cursor * 4) as f64 / 1e6
+        );
+        eprintln!("Longest chain: {}", longest_chain);
+        eprintln!("==========================================\n");
+    }
 
     (
         BlastAaLookupTable {
@@ -748,11 +773,14 @@ impl NeighborMap {
     /// Pre-compute all neighbor relationships for a given threshold.
     /// This is O(alphabet^6) but only done once.
     pub fn new(threshold: i32) -> Self {
+        let diag_enabled = diagnostics_enabled();
         let alphabet_size = LOOKUP_ALPHABET_SIZE;
         let charsize = ilog2(alphabet_size) + 1;
         let backbone_size = compute_backbone_size(LOOKUP_WORD_LENGTH, alphabet_size, charsize);
         
-        eprintln!("Pre-computing neighbor map (threshold={})...", threshold);
+        if diag_enabled {
+            eprintln!("Pre-computing neighbor map (threshold={})...", threshold);
+        }
         let start = std::time::Instant::now();
         
         // For each possible k-mer (subject side), find all k-mers (query side) 
@@ -810,10 +838,15 @@ impl NeighborMap {
         let nonempty = map.iter().filter(|v| !v.is_empty()).count();
         let elapsed = start.elapsed();
         
-        eprintln!("Neighbor map computed in {:?}", elapsed);
-        eprintln!("  Non-empty entries: {}", nonempty);
-        eprintln!("  Total neighbor pairs: {}", total_neighbors);
-        eprintln!("  Avg neighbors per k-mer: {:.1}", total_neighbors as f64 / nonempty.max(1) as f64);
+        if diag_enabled {
+            eprintln!("Neighbor map computed in {:?}", elapsed);
+            eprintln!("  Non-empty entries: {}", nonempty);
+            eprintln!("  Total neighbor pairs: {}", total_neighbors);
+            eprintln!(
+                "  Avg neighbors per k-mer: {:.1}",
+                total_neighbors as f64 / nonempty.max(1) as f64
+            );
+        }
         
         Self {
             map,
@@ -834,6 +867,7 @@ impl NeighborMap {
         &self,
         query_lookup: &[Vec<(u32, u8, u32)>],
     ) -> Vec<Vec<(u32, u8, u32)>> {
+        let diag_enabled = diagnostics_enabled();
         let start = std::time::Instant::now();
         
         // For each subject k-mer, collect all query positions that would match
@@ -867,9 +901,11 @@ impl NeighborMap {
         let nonempty = expanded.iter().filter(|v| !v.is_empty()).count();
         let elapsed = start.elapsed();
         
-        eprintln!("Expanded lookup built in {:?}", elapsed);
-        eprintln!("  Total entries: {}", total_entries);
-        eprintln!("  Non-empty buckets: {}", nonempty);
+        if diag_enabled {
+            eprintln!("Expanded lookup built in {:?}", elapsed);
+            eprintln!("  Total entries: {}", total_entries);
+            eprintln!("  Non-empty buckets: {}", nonempty);
+        }
         
         expanded
     }
@@ -878,11 +914,14 @@ impl NeighborMap {
     /// the query k-mer actually exists in the query lookup table.
     /// This dramatically reduces the number of neighbors to check during scan.
     pub fn new_filtered(threshold: i32, query_pv: &[u64]) -> Self {
+        let diag_enabled = diagnostics_enabled();
         let alphabet_size = LOOKUP_ALPHABET_SIZE;
         let charsize = ilog2(alphabet_size) + 1;
         let backbone_size = compute_backbone_size(LOOKUP_WORD_LENGTH, alphabet_size, charsize);
         
-        eprintln!("Pre-computing filtered neighbor map (threshold={})...", threshold);
+        if diag_enabled {
+            eprintln!("Pre-computing filtered neighbor map (threshold={})...", threshold);
+        }
         let start = std::time::Instant::now();
         
         // For each possible k-mer (subject side), find all k-mers (query side) 
@@ -944,10 +983,15 @@ impl NeighborMap {
         let nonempty = map.iter().filter(|v| !v.is_empty()).count();
         let elapsed = start.elapsed();
         
-        eprintln!("Filtered neighbor map computed in {:?}", elapsed);
-        eprintln!("  Non-empty entries: {}", nonempty);
-        eprintln!("  Total neighbor pairs: {}", total_neighbors);
-        eprintln!("  Avg neighbors per k-mer: {:.1}", total_neighbors as f64 / nonempty.max(1) as f64);
+        if diag_enabled {
+            eprintln!("Filtered neighbor map computed in {:?}", elapsed);
+            eprintln!("  Non-empty entries: {}", nonempty);
+            eprintln!("  Total neighbor pairs: {}", total_neighbors);
+            eprintln!(
+                "  Avg neighbors per k-mer: {:.1}",
+                total_neighbors as f64 / nonempty.max(1) as f64
+            );
+        }
         
         Self {
             map,
@@ -976,6 +1020,7 @@ impl NeighborLookup {
         threshold: i32,
         _karlin_params: &KarlinParams, // Unused - computed per context
     ) -> Self {
+        let diag_enabled = diagnostics_enabled();
         // Build exact query lookup
         let query_lookup = build_direct_lookup(queries);
         
@@ -1047,7 +1092,9 @@ impl NeighborLookup {
         let neighbor_map = NeighborMap::new_filtered(threshold, &query_pv);
         
         let total_query_entries: usize = query_lookup.iter().map(|v| v.len()).sum();
-        eprintln!("Query lookup: {} entries (exact matches only)", total_query_entries);
+        if diag_enabled {
+            eprintln!("Query lookup: {} entries (exact matches only)", total_query_entries);
+        }
         
         Self {
             query_lookup,

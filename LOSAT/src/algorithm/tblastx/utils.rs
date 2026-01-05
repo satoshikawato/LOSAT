@@ -1933,6 +1933,7 @@ pub fn run(args: TblastxArgs) -> Result<()> {
                 // NCBI Parity: Pass pre-computed length_adjustment and eff_searchsp per context
                 // These values are stored in query_info->contexts[ctx] in NCBI and referenced
                 // by link_hsps.c for BLAST_SmallGapSumE/BLAST_LargeGapSumE calculations.
+                let t_linking = if timing_enabled { Some(Instant::now()) } else { None };
                 let linked = apply_sum_stats_even_gap_linking(
                     ungapped_hits,
                     &linking_params_for_cutoff,
@@ -1942,6 +1943,11 @@ pub fn run(args: TblastxArgs) -> Result<()> {
                     &length_adj_per_context,
                     &eff_searchsp_per_context,
                 );
+                if let Some(t) = t_linking {
+                    let elapsed = t.elapsed();
+                    linking_ns.fetch_add(elapsed.as_nanos() as u64, AtomicOrdering::Relaxed);
+                    linking_calls.fetch_add(1, AtomicOrdering::Relaxed);
+                }
                 if diag_enabled {
                     diagnostics
                         .base

@@ -443,9 +443,20 @@ for s0 in 0..alphabet_size {
 [TIMING] total: 30.225s
 ```
 
+### Step 4後（sum_stats_linking 計測追加 → 真のボトルネック確定）
+```
+[TIMING] scan_subject: 0.119s (calls=38114)
+[TIMING] ungapped_extend: 0.422s (calls=4067119)
+[TIMING] reevaluate: 0.008s (calls=65165)
+[TIMING] sum_stats_linking: 28.457s (calls=1)
+[TIMING] identity_calc: 0.002s (calls=42797)
+[TIMING] search_total: 30.308s
+[TIMING] total: 30.613s
+```
+
 **重要な発見**:
 - Reevaluationの時間は0.008秒（全体の0.03%）と非常に短く、ボトルネックではない
-- 実際のボトルネックは`search_total`内の他の処理（sum_stats_linkingなど）
+- **実際のボトルネックは`sum_stats_linking`**（28.457秒 / search_total 30.308秒）
 - 短いHSP（16未満）はスカラー実装を使用することで、SIMD化のオーバーヘッドを回避
 
 **注意**: このテストケース（AP027280自己比較）では、SIMD化による明確な高速化は見られませんでした。これは以下の理由が考えられます：
@@ -455,66 +466,53 @@ for s0 in 0..alphabet_size {
 
 ---
 
-## 4. 推奨される次のステップ
+## 4. 推奨される次のステップ（TBLASTXを単一スレッドで速くする／NCBI互換性維持）
 
-### 最優先: BLASTN Ungapped ExtensionのSIMD化
+DeepWikiの提案（座標変換・neighbor map・scan/extension SIMDなど）を踏まえつつ、**実測（LOSAT_TIMING=1）で判明したボトルネック**に合わせて優先順位を更新する。
 
-**理由**:
-1. **完全に未SIMD化**: 現在は完全にスカラー実装
-2. **高頻度**: BLASTNで頻繁に呼ばれる（two-hit filter通過後の全seedに対して実行）
-3. **SIMD化しやすい**: シンプルな文字比較とスコア計算
-4. **効果が大きい**: 複数位置の塩基比較を並列化できる（32塩基ずつ処理可能）
+### 最優先: `sum_stats_linking` の高速化（最大ボトルネック）
 
-**実装方針**:
-- AVX2を使用して32バイト（32塩基）を一度に処理
-- 文字比較: `_mm256_cmpeq_epi8(q_vec, s_vec)`
-- スコア適用: 比較結果に基づいてreward/penaltyを条件付き適用
-- スコア累積とX-drop判定は逐次処理（NCBI互換性維持）
+**根拠（AP027280自己比較, LOSAT_TIMING=1）**:
+- `[TIMING] sum_stats_linking: 28.457s (calls=1)`
+- `[TIMING] search_total: 30.308s`
+- 参考: `ungapped_extend`は0.422s、`reevaluate`は0.008s
 
-**期待効果**: 
-- BLASTNで10-20%の高速化が期待できる（完全に未SIMD化のため）
+**対象**:
+- `LOSAT/src/algorithm/tblastx/sum_stats_linking.rs` の `apply_sum_stats_even_gap_linking`
+- `LOSAT/src/stats/sum_statistics.rs`（`small_gap_sum_e` / `large_gap_sum_e` / Romberg積分）
 
-**参考実装**:
-- TBLASTXの`extend_left_ungapped_avx2`/`extend_right_ungapped_avx2`のパターンを参考
-- ただし、BLASTNは文字比較（`q == s`）なので、BLOSUM62マトリックスのgatherは不要
+**方針（出力1-bit一致を維持しつつ）**:
+- **まずリンク処理内部を更に分解して計測**（INDEX0/INDEX1、active list走査、prob計算、chain除去…）
+- NCBI `link_hsps.c` と 1:1 で対比し、**同じ制御フロー/状態更新のまま** Rust側のオーバーヘッドを削る
+  - バッファ再利用（`Vec`の再確保/ゼロ初期化を最小化）
+  - 内側ループの境界チェック削減（`get_unchecked`/生ポインタ。ただし不変条件はassertで担保）
+  - `small_gap_sum_e` / `large_gap_sum_e` の呼び出し回数がNCBIと同等か検証し、**不要な再計算があれば除去**
 
-### 第二優先: TBLASTX 初期Word内探索のSIMD化（効果は限定的）
+**期待効果**:
+- **TBLASTXの実時間を大きく短縮できる唯一の箇所**（現状ここが全体の9割以上）
 
-**理由**:
-1. 3残基のみなので効果は限定的
-2. ただし、非常に頻繁に呼ばれる（`calls=4067119`）
-3. 既存の`gather_scores8_avx2`を参考に実装可能
+### 最優先: 長配列での過剰HSP生成の根本修正（NCBI互換性）
 
-**注意**: 3残基のみなので、SIMD化のオーバーヘッドが大きい可能性がある。実装後、ベンチマークで効果を確認する必要がある。
+DeepWikiが指摘している通り、長配列（600kb+）ではHSP数が膨らみ、`sum_stats_linking`がO(n²)化して破綻する。
 
-**注意**: TBLASTXはungapped-onlyなので、Smith-Watermanアライメントは使用されません。BLASTNやBLASTPなどのgapped alignmentを使用するアルゴリズムでは、Smith-WatermanアライメントのSIMD化が有効です。
+**実装方針（NCBIのフローに合わせる）**:
+- `BlastSaveInitHsp`→`BLAST_GetUngappedHSPList` 相当の **「絶対座標→context内相対座標」変換** を実装
+- 座標変換後に `Blast_HSPListReevaluateUngapped` 相当の **一括reevaluate** を実行（NCBI順）
+- これにより、リンク対象HSP数/グループサイズをNCBI水準に戻す（=リンク入力を減らす）
 
-### 第二優先: BLASTN Ungapped ExtensionのSIMD化
+### 次点: scan/extension側の低レベル最適化（ボトルネック化したら）
 
-**理由**:
-1. **高頻度**: BLASTNで頻繁に呼ばれる
-2. **SIMD化しやすい**: シンプルな文字比較とスコア計算
-3. **効果が大きい**: 複数位置の塩基比較を並列化できる
+現状のAP027280ではscan/extensionは支配的ではないが、データセットによっては効く可能性がある。
 
-**実装方針**:
-- AVX2/AVX512を使用して32-64バイトを一度に処理
-- 文字比較とスコア計算を並列化
+- `s_blast_aa_scan_subject` のプリフェッチ、分岐ヒント、メモリアクセス局所性改善
+- `--neighbor-map` の単一スレッド最適化（lookup構築/メモリフットプリント削減）
+- `extend_hit_ungapped`/`extend_hit_two_hit` の初期word内探索（3残基）の改善（効果は限定的）
 
-**期待効果**: 
-- BLASTNで5-10%の高速化が期待できる
+### 付帯: コンパイル設定（単一スレッドの底上げ）
 
-### 第三優先: SEG/DUSTフィルタリングのSIMD化
-
-**理由**:
-1. **大量の配列に対して実行**: ウィンドウスライディング処理が計算集約的
-2. **並列化可能**: カウント配列の更新を並列化できる
-
-**実装方針**:
-- ウィンドウスライディング処理を並列化
-- カウント配列の更新をSIMD化
-
-**期待効果**: 
-- 大量の配列を処理する場合で5-10%の高速化が期待できる
+- `RUSTFLAGS="-C target-cpu=native"`（実行CPUに最適化）
+- `lto = "thin"`, `codegen-units = 1`（release最適化強化）
+- PGO（計測→最適化ビルド）※アルゴリズムや出力は変えない
 
 ---
 
@@ -551,6 +549,9 @@ sha256sum baseline.out step1.out step2.out
   - Step 1: 3-mer index生成のSIMD化（scalar fallback使用）
   - Step 2: Identity計算のSIMD化（AVX2/SSE2実装完了）
   - Step 3: Reevaluation スコア計算ループのSIMD化（AVX2実装完了、短いHSPはスカラー実装を使用）
+- 2026-01-05: TBLASTXの真のボトルネックを確定（LOSAT_TIMING=1）
+  - `sum_stats_linking` が 28.457s / search_total 30.308s を占めることを確認
+  - 次の優先順位を「sum_stats_linking高速化」+「長配列での座標変換（NCBI互換性）」に更新
 - 2026-01-XX: DeepWiki情報を反映して今後のSIMD化候補を整理
   - Smith-WatermanアライメントのDP計算を最優先候補に追加
   - BLASTN Ungapped Extensionを第二優先候補に追加

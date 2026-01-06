@@ -14,6 +14,7 @@ pub mod sum_stats_linking;
 pub mod reevaluate;
 pub mod diagnostics;
 pub mod ncbi_cutoffs;
+pub mod hsp_culling;
 pub mod utils;
 
 pub use args::TblastxArgs;

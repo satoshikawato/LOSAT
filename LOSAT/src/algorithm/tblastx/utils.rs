@@ -42,6 +42,7 @@ use super::sum_stats_linking::{
     apply_sum_stats_even_gap_linking, compute_avg_query_length_ncbi, 
     find_smallest_lambda_params, LinkingParams,
 };
+use super::hsp_culling;
 use super::translation::{generate_frames, QueryFrame};
 use crate::stats::karlin::bit_score as calc_bit_score;
 
@@ -2165,6 +2166,28 @@ pub fn run(args: TblastxArgs) -> Result<()> {
                         .hsps_after_chain
                         .fetch_add(linked.len(), AtomicOrdering::Relaxed);
                 }
+                
+                // NCBI HSP culling (conditional on culling_limit > 0)
+                // Reference: hspfilter_culling.c - applied after linking, before output
+                // Default for tblastx: culling_limit = 0 (disabled)
+                let linked_before_cull = linked.len();
+                let linked = if args.culling_limit > 0 {
+                    hsp_culling::apply_culling(
+                        linked,
+                        contexts_ref,
+                        args.culling_limit,
+                    )
+                } else {
+                    // Default: no culling (matches NCBI tblastx default)
+                    linked
+                };
+                if diag_enabled && args.culling_limit > 0 {
+                    diagnostics
+                        .base
+                        .hsps_culled_dominated
+                        .fetch_add(linked_before_cull.saturating_sub(linked.len()), AtomicOrdering::Relaxed);
+                }
+                
                 let mut final_hits: Vec<Hit> = Vec::new();
                 for h in linked {
                     if h.e_value > evalue_threshold {
@@ -2826,17 +2849,19 @@ fn run_with_neighbor_map(args: TblastxArgs) -> Result<()> {
                             
                             let diag_entry = &mut diag_array[ctx_flat][diag_coord];
                             
-                            // NCBI aa_ungapped.c:519-530 - flag==1 block
+                            // NCBI aa_ungapped.c:519-531 - flag==1 block
                             // "If the reset bit is set, an extension just happened."
                             if diag_entry.flag != 0 {
                                 // "If we've already extended past this hit, skip it."
                                 if subject_offset + diag_offset < diag_entry.last_hit {
                                     continue;
                                 }
-                                // "Otherwise, start a new hit." - reset and CONTINUE (don't extend this hit)
+                                // "Otherwise, start a new hit." - reset flag and last_hit, then FALL THROUGH
+                                // NCBI: After reset, control falls through to the else block (flag==0) below
+                                // to continue with extension logic. DO NOT continue here!
                                 diag_entry.last_hit = subject_offset + diag_offset;
                                 diag_entry.flag = 0;
-                                continue; // NCBI: after reset, move to next hit, don't extend
+                                // NO continue here - fall through to extension logic below
                             }
                             
                             // NCBI aa_ungapped.c:533-606 - flag==0 block

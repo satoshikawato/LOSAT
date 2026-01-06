@@ -174,6 +174,15 @@ pub struct TblastxArgs {
     /// Default fields: qaccver saccver pident length mismatch gapopen qstart qend sstart send evalue bitscore
     #[arg(long, default_value = "6")]
     pub outfmt: String,
+
+    /// HSP culling limit (number of HSPs allowed per query region).
+    ///
+    /// When > 0, applies NCBI's interval tree-based HSP culling algorithm to remove
+    /// dominated HSPs based on score/length tradeoff. Default: 0 (disabled, matches NCBI tblastx default).
+    ///
+    /// NCBI reference: hspfilter_culling.c, cmdline_flags.cpp:127-128 (kDfltArgCullingLimit = 0)
+    #[arg(long, default_value_t = 0)]
+    pub culling_limit: u32,
 }
 
 

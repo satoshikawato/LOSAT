@@ -1,6 +1,6 @@
 # TBLASTX NCBI BLAST パリティ改修計画
 
-## 調査日: 2026-01-XX
+## 調査日: 2026-01-06
 
 ## 概要
 
@@ -109,6 +109,42 @@ static Boolean s_DominateTest(LinkedHSP *p, LinkedHSP *y) {
 - `src/algorithm/tblastx/utils.rs`: HSP cullingの統合
 - `src/algorithm/tblastx/args.rs`: `--culling_limit`オプションの追加
 - `src/algorithm/tblastx/chaining.rs`: Domination filterの削除（cullingに置き換え）
+
+---
+
+## 2. Karlinパラメータ使用の明確化 ✅ 完了 (2026-01-06)
+
+### 問題点
+
+**旧LOSAT**:
+- コメントに「cutoff score search space calculation で gapped params を使用」と誤って記載
+- パラメータ名が `gapped_params` で誤解を招く可能性
+
+**NCBI実装**:
+- `blast_setup.c:768`: `kbp_ptr = (scoring_options->gapped_calculation ? sbp->kbp_gap_std : sbp->kbp)`
+- tblastxでは `gapped_calculation = FALSE` のため、**すべての計算で ungapped params (`sbp->kbp`) を使用**
+
+### 修正内容
+
+1. **コメント修正** (`utils.rs`):
+   - tblastxはすべての計算（eff_searchsp, cutoff, bit score, E-value）で ungapped params を使用することを明記
+   - NCBIコード参照 (`blast_setup.c:768`) を追加
+
+2. **パラメータ名の明確化** (`ncbi_cutoffs.rs`):
+   - `gapped_params` → `karlin_params` に変更
+   - 関数シグネチャとコメントを更新して、パラメータが gapped/ungapped のどちらでも使用可能であることを明記
+
+### 検証結果
+
+- eff_searchsp計算: ungapped params使用 ✅
+- cutoff_score_max計算: ungapped params使用 ✅
+- per-subject cutoff更新: ungapped params使用 ✅
+- bit score/E-value計算: ungapped params使用 ✅
+
+### 残存問題
+
+- ヒット数が2倍（29,766 vs 14,877）の問題は依然として未解決
+- 原因は拡張ロジック、カットオフ適用、またはSum-statistics E-value計算にある可能性
 
 ### 実装詳細
 

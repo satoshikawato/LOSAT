@@ -1488,13 +1488,15 @@ pub fn run(args: TblastxArgs) -> Result<()> {
     //   blast_hits.c line 1833: kbp = (gapped_calculation ? sbp->kbp_gap : sbp->kbp);
     //   blast_hits.c line 1918: same pattern in Blast_HSPListGetBitScores
     //
-    // For cutoff score search space calculation, NCBI uses gapped params:
-    //   blast_parameters.c uses kbp_gap for eff_searchsp in cutoff calculation
+    // NCBI reference (blast_setup.c:768):
+    //   kbp_ptr = (scoring_options->gapped_calculation ? sbp->kbp_gap_std : sbp->kbp);
+    // For tblastx, gapped_calculation = FALSE, so kbp_ptr = sbp->kbp (ungapped params)
+    // Therefore, ALL calculations (eff_searchsp, cutoff, bit score, E-value) use UNGAPPED params
     //
-    // BLOSUM62 ungapped: lambda=0.3176, K=0.134
-    // BLOSUM62 gapped:   lambda=0.267,  K=0.041
+    // BLOSUM62 ungapped: lambda=0.3176, K=0.134 (used for tblastx)
+    // BLOSUM62 gapped:   lambda=0.267,  K=0.041 (NOT used for tblastx)
     let ungapped_params = lookup_protein_params_ungapped(ScoringMatrix::Blosum62);
-    // Gapped params for cutoff score search space calculation
+    // Note: gapped_params is kept for API compatibility but NOT used for tblastx
     let gapped_params = KarlinParams {
         lambda: 0.267,
         k: 0.041,
@@ -1502,7 +1504,7 @@ pub fn run(args: TblastxArgs) -> Result<()> {
         alpha: 1.9,
         beta: -30.0,
     };
-    // Use UNGAPPED params for bit score and E-value (NCBI parity for tblastx)
+    // Use UNGAPPED params for all calculations (NCBI parity for tblastx)
     let params = ungapped_params.clone();
 
     // Compute NCBI-style average query length for linking cutoffs
@@ -2613,6 +2615,15 @@ fn run_with_neighbor_map(args: TblastxArgs) -> Result<()> {
     };
     // Use UNGAPPED params for bit score and E-value (NCBI parity for tblastx)
     let params = ungapped_params.clone();
+    
+    // NCBI reference (blast_setup.c:768):
+    //   kbp_ptr = (scoring_options->gapped_calculation ? sbp->kbp_gap_std : sbp->kbp);
+    // For tblastx, gapped_calculation = FALSE, so kbp_ptr = sbp->kbp (ungapped params)
+    // Therefore, ALL calculations (eff_searchsp, cutoff, bit score, E-value) use UNGAPPED params
+    //
+    // BLOSUM62 ungapped: lambda=0.3176, K=0.134 (used for tblastx)
+    // BLOSUM62 gapped:   lambda=0.267,  K=0.041 (NOT used for tblastx)
+    // Note: gapped_params is kept for API compatibility but NOT used for tblastx
     
     // Optional timing breakdown (disabled by default to preserve output/parity logs)
     let timing_enabled = std::env::var_os("LOSAT_TIMING").is_some();

@@ -1,7 +1,7 @@
 # TBLASTX NCBI Parity Status Report
 
 **作成日時**: 2026-01-03  
-**更新日時**: 2026-01-05 (ベンチノイズ抑制: `--verbose`/`LOSAT_DIAGNOSTICS`, AP027280 +64 再確認, extra HSP 抽出/トレース基盤追加)  
+**更新日時**: 2026-01-06 (Karlinパラメータ使用に関するコメント修正、パラメータ名明確化)  
 **現象**: LOSATが長い配列 (600kb+) でNCBI BLAST+より多くのヒットを出力  
 **目標**: 出力を1ビットの狂いもなく一致させる
 
@@ -105,7 +105,29 @@
   - BLOSUM62 の場合: `gap_trigger = 41` が支配的になることが多い
 - **ファイル**: `ncbi_cutoffs.rs`, `utils.rs`
 
-### 1.6 X-dropoff の Per-Context 適用
+### 1.6 Karlinパラメータ使用の明確化
+- **状態**: ✅ 完了
+- **修正日**: 2026-01-06
+- **問題だった点**: 
+  - **旧LOSAT**: コメントに「cutoff score search space calculation で gapped params を使用」と誤って記載
+  - **NCBI実装**: `blast_setup.c:768` で `kbp_ptr = (scoring_options->gapped_calculation ? sbp->kbp_gap_std : sbp->kbp)`
+  - tblastxでは `gapped_calculation = FALSE` のため、**すべての計算で ungapped params (`sbp->kbp`) を使用**
+- **修正内容**:
+  - `utils.rs` のコメントを修正: tblastxはすべての計算（eff_searchsp, cutoff, bit score, E-value）で ungapped params を使用することを明記
+  - `ncbi_cutoffs.rs` のパラメータ名を `gapped_params` から `karlin_params` に変更（汎用性を明確化）
+  - 関数シグネチャとコメントを更新して、パラメータが gapped/ungapped のどちらでも使用可能であることを明記
+- **検証結果**:
+  - eff_searchsp計算: ungapped params使用 ✅
+  - cutoff_score_max計算: ungapped params使用 ✅
+  - per-subject cutoff更新: ungapped params使用 ✅
+  - bit score/E-value計算: ungapped params使用 ✅
+- **NCBIコード参照**: 
+  - `blast_setup.c:768` - `kbp_ptr` 選択ロジック
+  - `blast_setup.c:782` - `kbp = kbp_ptr[index]` (tblastxでは ungapped)
+  - `blast_setup.c:821` - `BLAST_ComputeLengthAdjustment` で使用
+- **ファイル**: `ncbi_cutoffs.rs`, `utils.rs`
+
+### 1.7 X-dropoff の Per-Context 適用
 - **状態**: ✅ 完了
 - **修正日**: 2026-01-03
 - **問題だった点**: 
@@ -131,7 +153,7 @@
 - **結論**: NCBIとの構造的 parity を達成
 - **ファイル**: `utils.rs`
 
-### 1.7 scale_factor の確認
+### 1.8 scale_factor の確認
 - **状態**: ✅ 完了
 - **確認日**: 2026-01-03
 - **問題だった点**: 

@@ -248,24 +248,24 @@ pub fn compute_eff_searchsp_subject_mode_tblastx(
 pub fn cutoff_score_from_evalue(
     evalue: f64,
     eff_searchsp: i64,
-    gapped_params: &KarlinParams,
+    karlin_params: &KarlinParams,  // Named generically - can be gapped or ungapped depending on program
 ) -> i32 {
     // NCBI: E = MAX(E, kSmallFloat)
     let e = evalue.max(K_SMALL_FLOAT);
     
     // NCBI: S = (Int4) (ceil( log((double)(K * searchsp / E)) / Lambda ))
     let searchsp = eff_searchsp as f64;
-    let k_times_searchsp = gapped_params.k * searchsp;
+    let k_times_searchsp = karlin_params.k * searchsp;
     let k_times_searchsp_over_e = k_times_searchsp / e;
     let log_value = k_times_searchsp_over_e.ln();
-    let score_before_ceil = log_value / gapped_params.lambda;
+    let score_before_ceil = log_value / karlin_params.lambda;
     let score = score_before_ceil.ceil();
     
     // Debug output for long sequences (600kb+)
     if eff_searchsp > 40_000_000_000 {
         eprintln!("[DEBUG CUTOFF_CALC] eff_searchsp={}", eff_searchsp);
         eprintln!("[DEBUG CUTOFF_CALC] evalue={}, e_clamped={}", evalue, e);
-        eprintln!("[DEBUG CUTOFF_CALC] K={}, Lambda={}", gapped_params.k, gapped_params.lambda);
+        eprintln!("[DEBUG CUTOFF_CALC] K={}, Lambda={}", karlin_params.k, karlin_params.lambda);
         eprintln!("[DEBUG CUTOFF_CALC] K*searchsp={:.6e}, K*searchsp/E={:.6e}", k_times_searchsp, k_times_searchsp_over_e);
         eprintln!("[DEBUG CUTOFF_CALC] log(K*searchsp/E)={:.6e}, score_before_ceil={:.6e}", log_value, score_before_ceil);
         eprintln!("[DEBUG CUTOFF_CALC] final_score={} (ceil)", score as i32);
@@ -304,7 +304,7 @@ pub fn cutoff_score_sum_stats(
     avg_query_len: i32,
     avg_subject_len: i32,
     gap_decay_rate: f64,
-    gapped_params: &KarlinParams,
+    karlin_params: &KarlinParams,  // Named generically - can be gapped or ungapped depending on program
 ) -> i32 {
     // NCBI: evalue_hsp = 1.0 (fixed)
     let evalue_hsp: f64 = 1.0;
@@ -315,7 +315,7 @@ pub fn cutoff_score_sum_stats(
     
     // NCBI: BLAST_Cutoffs(&new_cutoff, &evalue_hsp, kbp, searchsp, TRUE, gap_decay_rate)
     // When dodecay=TRUE, apply gap decay divisor to E-value before conversion
-    cutoff_score_from_evalue_with_decay(evalue_hsp, searchsp, gap_decay_rate, gapped_params)
+    cutoff_score_from_evalue_with_decay(evalue_hsp, searchsp, gap_decay_rate, karlin_params)
 }
 
 /// Calculate cutoff_score from E-value with gap decay adjustment.
@@ -341,7 +341,7 @@ fn cutoff_score_from_evalue_with_decay(
     evalue: f64,
     eff_searchsp: i64,
     gap_decay_rate: f64,
-    gapped_params: &KarlinParams,
+    karlin_params: &KarlinParams,  // Named generically - can be gapped or ungapped depending on program
 ) -> i32 {
     // NCBI: BLAST_GapDecayDivisor(gap_decay_rate, 1) = (1 - gap_decay_rate)
     let divisor = 1.0 - gap_decay_rate;
@@ -353,7 +353,7 @@ fn cutoff_score_from_evalue_with_decay(
         evalue
     };
     
-    cutoff_score_from_evalue(adjusted_e, eff_searchsp, gapped_params)
+    cutoff_score_from_evalue(adjusted_e, eff_searchsp, karlin_params)
 }
 
 /// Calculate cutoff_score for BlastInitialWordParametersUpdate (per-subject update).

@@ -53,11 +53,6 @@ pub struct BlastnArgs {
     pub dust_linker: usize,
     #[arg(long, short = 'v', default_value_t = false)]
     pub verbose: bool,
-    /// Enable HSP chaining to merge nearby HSPs into longer alignments.
-    /// By default, chaining is disabled for BLAST-compatible output (individual HSPs).
-    /// Enable this for visualization tools like gbdraw that benefit from longer continuous alignments.
-    #[arg(long, default_value_t = false)]
-    pub chain: bool,
     /// Scan stride for subject sequence scanning (NCBI BLAST optimization).
     /// Higher values skip more positions, reducing k-mer lookups but potentially missing some seeds.
     /// Default: 0 (auto-calculate based on word_size: 1 for word_size < 16, 4 for word_size >= 16).

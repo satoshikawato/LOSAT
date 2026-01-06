@@ -12,7 +12,19 @@ pub const X_DROP_GAPPED_FINAL: i32 = 100; // BLAST_GAP_X_DROPOFF_FINAL_NUCL for 
 /// When window_size > 0, two-hit requirement is enforced
 /// NCBI reference: na_ungapped.c:656: Boolean two_hits = (window_size > 0);
 pub const TWO_HIT_WINDOW: usize = 0; // NCBI BLAST default (one-hit mode)
-pub const MAX_HITS_PER_KMER: usize = 200;
+// REMOVED: MAX_HITS_PER_KMER - Over-represented k-mer filtering does not exist in NCBI BLAST
+// NCBI reference: blast_lookup.c:BlastLookupAddWordHit (lines 33-77)
+// NCBI BLAST adds all k-mers to lookup table regardless of frequency
+// Database word count filtering (kDbFilter) exists but filters based on database counts, not query counts
+
+/// Scan range for off-diagonal hit detection
+/// NCBI reference: na_ungapped.c:658: Int4 Delta = MIN(word_params->options->scan_range, window_size - word_length);
+/// Default values:
+/// - blastn: 4 (enables off-diagonal search in two-hit mode)
+/// - megablast: 0 (off-diagonal search disabled)
+/// Reference: blast_options.h:63 (BLAST_SCAN_RANGE_NUCL = 0, but runtime value differs by task)
+pub const SCAN_RANGE_BLASTN: usize = 4;
+pub const SCAN_RANGE_MEGABLAST: usize = 0;
 
 // Minimum ungapped score thresholds for triggering gapped extension
 // DEPRECATED: These fixed thresholds are replaced by dynamically calculated cutoff_score

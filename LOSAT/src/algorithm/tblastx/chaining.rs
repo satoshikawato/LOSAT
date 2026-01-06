@@ -8,7 +8,7 @@ use crate::stats::KarlinParams;
 use rustc_hash::FxHashMap;
 use std::cmp::Ordering;
 use std::sync::atomic::Ordering as AtomicOrdering;
-use super::constants::{MAX_DIAG_DRIFT_AA, MAX_GAP_AA};
+// Removed MAX_DIAG_DRIFT_AA and MAX_GAP_AA - clustering logic removed (not in NCBI)
 use super::diagnostics::DiagnosticCounters;
 
 /// Extended hit structure that includes frame and amino acid coordinate information
@@ -174,75 +174,21 @@ pub fn chain_and_filter_hsps_protein(
 
     let mut result_hits = Vec::new();
 
+    // NCBI BLAST does NOT perform clustering for tblastx.
+    // This function is kept for compatibility but simply passes through HSPs
+    // after e-value filtering, matching NCBI's default behavior.
+    //
+    // NCBI reference: tblastx uses ungapped search only, no clustering/chaining
+    // is performed. HSPs are output directly after sum-statistics linking.
     for (_key, mut group_hits) in groups {
         if group_hits.is_empty() {
             continue;
         }
 
-        // Sort by query amino acid start position
-        group_hits.sort_by_key(|h| h.q_aa_start);
-
-        // Cluster HSPs that are nearby and on similar diagonals
-        let mut clusters: Vec<Vec<ExtendedHit>> = Vec::new();
-
-        for hit in group_hits {
-            let hit_diag = hit.s_aa_start as isize - hit.q_aa_start as isize;
-
-            // Try to find an existing cluster to add this hit to
-            let mut cluster_idx: Option<usize> = None;
-            for (idx, cluster) in clusters.iter().enumerate() {
-                if let Some(last) = cluster.last() {
-                    let last_diag = last.s_aa_end as isize - last.q_aa_end as isize;
-                    let diag_drift = (hit_diag - last_diag).abs();
-
-                    // Calculate gap or overlap between HSPs
-                    // Positive = gap, negative = overlap
-                    let q_distance = hit.q_aa_start as isize - last.q_aa_end as isize;
-                    let s_distance = hit.s_aa_start as isize - last.s_aa_end as isize;
-
-                    // Allow overlapping HSPs (negative distance) or gaps up to MAX_GAP_AA
-                    // For overlaps, limit to 50% of the smaller HSP to avoid merging unrelated HSPs
-                    let hit_q_len = (hit.q_aa_end - hit.q_aa_start) as isize;
-                    let last_q_len = (last.q_aa_end - last.q_aa_start) as isize;
-                    let max_overlap = -(hit_q_len.min(last_q_len) / 2);
-
-                    let q_ok = q_distance >= max_overlap && q_distance <= MAX_GAP_AA as isize;
-                    let s_ok = s_distance >= max_overlap && s_distance <= MAX_GAP_AA as isize;
-
-                    if q_ok && s_ok && diag_drift <= MAX_DIAG_DRIFT_AA {
-                        cluster_idx = Some(idx);
-                        break;
-                    }
-                }
-            }
-
-            if let Some(idx) = cluster_idx {
-                clusters[idx].push(hit);
-            } else {
-                clusters.push(vec![hit]);
-            }
-        }
-
-        // Process each cluster - output all individual HSPs (like NCBI BLAST)
-        // The domination filter will remove truly redundant hits later
-        for cluster in clusters {
-            if cluster.len() == 1 {
-                if let Some(diag) = diagnostics {
-                    diag.base.clusters_single.fetch_add(1, AtomicOrdering::Relaxed);
-                }
-            } else {
-                if let Some(diag) = diagnostics {
-                    diag.base.clusters_merged.fetch_add(1, AtomicOrdering::Relaxed);
-                    diag.base.hsps_in_merged_clusters.fetch_add(cluster.len(), AtomicOrdering::Relaxed);
-                }
-            }
-
-            // Output all HSPs in the cluster that pass e-value threshold
-            // Keep as ExtendedHit for domination test (needs frame info)
-            for ext_hit in cluster {
-                if ext_hit.hit.e_value <= evalue_threshold {
-                    result_hits.push(ext_hit);
-                }
+        // Output all HSPs that pass e-value threshold (no clustering)
+        for ext_hit in group_hits {
+            if ext_hit.hit.e_value <= evalue_threshold {
+                result_hits.push(ext_hit);
             }
         }
     }

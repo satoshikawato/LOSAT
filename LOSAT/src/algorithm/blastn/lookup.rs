@@ -1,7 +1,7 @@
 use bio::io::fasta;
 use rustc_hash::FxHashMap;
 use crate::utils::dust::MaskedInterval;
-use super::constants::{MAX_DIRECT_LOOKUP_WORD_SIZE, MAX_HITS_PER_KMER};
+use super::constants::MAX_DIRECT_LOOKUP_WORD_SIZE;
 
 /// 2-bit encoding for compact storage and hashing
 pub fn encode_kmer(seq: &[u8], start: usize, k: usize) -> Option<u64> {
@@ -244,14 +244,25 @@ pub fn build_pv_direct_lookup(
     // K-mer mask for rolling window
     let kmer_mask: u64 = (1u64 << (2 * safe_word_size)) - 1;
 
+    // NCBI reference: blast_lookup.c:BlastLookupIndexQueryExactMatches (lines 79-132)
+    // NCBI processes only unmasked regions (locations parameter)
+    // For each location, it iterates through positions and adds k-mers
+    // Reference: blast_nalookup.c:402-406, 571-575 (calls BlastLookupIndexQueryExactMatches)
+    //
+    // LOSAT processes entire sequence and filters masked regions (equivalent behavior)
     for (q_idx, record) in queries.iter().enumerate() {
         let seq = record.seq();
+        // NCBI reference: blast_lookup.c:99-100
+        // if (word_length > to - from + 1) continue;
         if seq.len() < safe_word_size {
             continue;
         }
 
         let masks = query_masks.get(q_idx).map(|v| v.as_slice()).unwrap_or(&[]);
 
+        // NCBI reference: blast_lookup.c:108-121
+        // Rolling window approach: word_target points to position where complete k-mer can be formed
+        // Ambiguous bases reset the window: if (*seq & invalid_mask) word_target = seq + lut_word_length + 1;
         // Rolling k-mer state
         let mut current_kmer: u64 = 0;
         let mut valid_bases: usize = 0;
@@ -260,6 +271,8 @@ pub fn build_pv_direct_lookup(
             let base = seq[pos];
             let code = ENCODE_LUT[base as usize];
 
+            // NCBI reference: blast_lookup.c:119-120
+            // if (*seq & invalid_mask) word_target = seq + lut_word_length + 1;
             if code == 0xFF {
                 // Ambiguous base - reset the rolling window
                 valid_bases = 0;
@@ -272,6 +285,8 @@ pub fn build_pv_direct_lookup(
             current_kmer = ((current_kmer << 2) | (code as u64)) & kmer_mask;
             valid_bases += 1;
 
+            // NCBI reference: blast_lookup.c:110-115
+            // if (seq >= word_target) { BlastLookupAddWordHit(...); }
             // Only process if we have a complete k-mer
             if valid_bases < safe_word_size {
                 continue;
@@ -281,12 +296,20 @@ pub fn build_pv_direct_lookup(
             let kmer_start = pos + 1 - safe_word_size;
             total_positions += 1;
 
+            // NCBI reference: blast_nalookup.c:402-406
+            // BlastLookupIndexQueryExactMatches processes only unmasked regions (locations)
+            // LOSAT processes entire sequence and filters masked regions (equivalent)
             // Skip k-mers that overlap with DUST-masked regions
             if !masks.is_empty() && is_kmer_masked(masks, kmer_start, safe_word_size) {
                 dust_skipped += 1;
                 continue;
             }
 
+            // NCBI reference: blast_lookup.c:BlastLookupAddWordHit (lines 33-77)
+            // Adds ALL hits without any frequency limit - no query-side filtering
+            // if (backbone[index] == NULL) { initialize new chain }
+            // else { use existing chain, realloc if full }
+            // chain[chain[1] + 2] = query_offset; chain[1]++;
             // Add to lookup table
             let idx = current_kmer as usize;
             if idx < table_size {
@@ -296,15 +319,18 @@ pub fn build_pv_direct_lookup(
         }
     }
 
-    // Filter over-represented k-mers and build presence vector
-    let mut filtered_count = 0usize;
+    // NCBI reference: blast_lookup.c:BlastLookupAddWordHit (lines 33-77)
+    // NCBI BLAST does NOT filter over-represented k-mers in the query
+    // All k-mers are added to the lookup table regardless of frequency
+    // Database word count filtering (kDbFilter) exists but is different:
+    // it filters based on database counts, not query counts
+    // Reference: blast_nalookup.c:1047-1060 (database word count filtering)
+    // 
+    // Build presence vector for all non-empty k-mers
     let mut non_empty_count = 0usize;
 
-    for (idx, positions) in lookup.iter_mut().enumerate() {
-        if positions.len() > MAX_HITS_PER_KMER {
-            positions.clear();
-            filtered_count += 1;
-        } else if !positions.is_empty() {
+    for (idx, positions) in lookup.iter().enumerate() {
+        if !positions.is_empty() {
             // Set bit in presence vector
             pv_set(&mut pv, idx);
             non_empty_count += 1;
@@ -321,8 +347,8 @@ pub fn build_pv_direct_lookup(
             100.0 * dust_skipped as f64 / total_positions.max(1) as f64
         );
         eprintln!(
-            "[DEBUG] build_pv_direct_lookup: kmers_added={}, filtered={}, non_empty_buckets={}",
-            kmers_added, filtered_count, non_empty_count
+            "[DEBUG] build_pv_direct_lookup: kmers_added={}, non_empty_buckets={}",
+            kmers_added, non_empty_count
         );
     }
 
@@ -346,24 +372,43 @@ pub fn build_lookup(
     let mut ambiguous_skipped = 0usize;
     let mut dust_skipped = 0usize;
 
+    // NCBI reference: blast_lookup.c:BlastLookupIndexQueryExactMatches (lines 79-132)
+    // NCBI processes only unmasked regions (locations parameter)
+    // Reference: blast_nalookup.c:402-406, 571-575 (calls BlastLookupIndexQueryExactMatches)
+    //
+    // LOSAT processes entire sequence and filters masked regions (equivalent behavior)
     for (q_idx, record) in queries.iter().enumerate() {
         let seq = record.seq();
+        // NCBI reference: blast_lookup.c:99-100
+        // if (word_length > to - from + 1) continue;
         if seq.len() < safe_word_size {
             continue;
         }
 
         let masks = query_masks.get(q_idx).map(|v| v.as_slice()).unwrap_or(&[]);
 
+        // NCBI reference: blast_lookup.c:108-121
+        // for (offset = from; offset <= to; offset++, seq++) {
+        //     if (seq >= word_target) { BlastLookupAddWordHit(...); }
+        //     if (*seq & invalid_mask) word_target = seq + lut_word_length + 1;
+        // }
         for i in 0..=(seq.len() - safe_word_size) {
             total_positions += 1;
             
+            // NCBI reference: blast_nalookup.c:402-406
+            // BlastLookupIndexQueryExactMatches processes only unmasked regions (locations)
+            // LOSAT processes entire sequence and filters masked regions (equivalent)
             // Skip k-mers that overlap with DUST-masked regions
             if !masks.is_empty() && is_kmer_masked(masks, i, safe_word_size) {
                 dust_skipped += 1;
                 continue;
             }
             
+            // NCBI reference: blast_lookup.c:119-120
+            // if (*seq & invalid_mask) word_target = seq + lut_word_length + 1;
             if let Some(kmer) = encode_kmer(seq, i, safe_word_size) {
+                // NCBI reference: blast_lookup.c:BlastLookupAddWordHit (lines 33-77)
+                // Adds ALL hits without any frequency limit - no query-side filtering
                 lookup
                     .entry(kmer)
                     .or_default()
@@ -386,20 +431,14 @@ pub fn build_lookup(
         );
     }
 
-    // Filter over-represented k-mers to prevent seed explosion
-    // This is critical for performance with smaller word sizes (e.g., blastn task with word_size=11)
-    let before_filter = lookup.len();
-    lookup.retain(|_, positions| positions.len() <= MAX_HITS_PER_KMER);
-    let after_filter = lookup.len();
-
-    if debug_mode {
-        eprintln!(
-            "[DEBUG] build_lookup: filtered {} high-frequency kmers (before={}, after={})",
-            before_filter - after_filter,
-            before_filter,
-            after_filter
-        );
-    }
+    // NCBI reference: blast_lookup.c:BlastLookupAddWordHit (lines 33-77)
+    // NCBI BLAST does NOT filter over-represented k-mers in the query
+    // All k-mers are added to the lookup table regardless of frequency
+    // Database word count filtering (kDbFilter) exists but is different:
+    // it filters based on database counts, not query counts
+    // Reference: blast_nalookup.c:1047-1060 (database word count filtering)
+    //
+    // REMOVED: Over-represented k-mer filtering (MAX_HITS_PER_KMER) - does not exist in NCBI BLAST
 
     lookup
 }
@@ -465,24 +504,43 @@ pub fn build_direct_lookup(
     let mut ambiguous_skipped = 0usize;
     let mut dust_skipped = 0usize;
 
+    // NCBI reference: blast_lookup.c:BlastLookupIndexQueryExactMatches (lines 79-132)
+    // NCBI processes only unmasked regions (locations parameter)
+    // Reference: blast_nalookup.c:402-406, 571-575 (calls BlastLookupIndexQueryExactMatches)
+    //
+    // LOSAT processes entire sequence and filters masked regions (equivalent behavior)
     for (q_idx, record) in queries.iter().enumerate() {
         let seq = record.seq();
+        // NCBI reference: blast_lookup.c:99-100
+        // if (word_length > to - from + 1) continue;
         if seq.len() < safe_word_size {
             continue;
         }
 
         let masks = query_masks.get(q_idx).map(|v| v.as_slice()).unwrap_or(&[]);
 
+        // NCBI reference: blast_lookup.c:108-121
+        // for (offset = from; offset <= to; offset++, seq++) {
+        //     if (seq >= word_target) { BlastLookupAddWordHit(...); }
+        //     if (*seq & invalid_mask) word_target = seq + lut_word_length + 1;
+        // }
         for i in 0..=(seq.len() - safe_word_size) {
             total_positions += 1;
             
+            // NCBI reference: blast_nalookup.c:402-406
+            // BlastLookupIndexQueryExactMatches processes only unmasked regions (locations)
+            // LOSAT processes entire sequence and filters masked regions (equivalent)
             // Skip k-mers that overlap with DUST-masked regions
             if !masks.is_empty() && is_kmer_masked(masks, i, safe_word_size) {
                 dust_skipped += 1;
                 continue;
             }
             
+            // NCBI reference: blast_lookup.c:119-120
+            // if (*seq & invalid_mask) word_target = seq + lut_word_length + 1;
             if let Some(kmer) = encode_kmer(seq, i, safe_word_size) {
+                // NCBI reference: blast_lookup.c:BlastLookupAddWordHit (lines 33-77)
+                // Adds ALL hits without any frequency limit - no query-side filtering
                 let idx = kmer as usize;
                 if idx < table_size {
                     lookup[idx].push((q_idx as u32, i as u32));
@@ -506,21 +564,14 @@ pub fn build_direct_lookup(
         );
     }
 
-    // Filter over-represented k-mers to prevent seed explosion
-    let mut filtered_count = 0usize;
-    for positions in lookup.iter_mut() {
-        if positions.len() > MAX_HITS_PER_KMER {
-            positions.clear();
-            filtered_count += 1;
-        }
-    }
-
-    if debug_mode {
-        eprintln!(
-            "[DEBUG] build_direct_lookup: filtered {} high-frequency kmers",
-            filtered_count
-        );
-    }
+    // NCBI reference: blast_lookup.c:BlastLookupAddWordHit (lines 33-77)
+    // NCBI BLAST does NOT filter over-represented k-mers in the query
+    // All k-mers are added to the lookup table regardless of frequency
+    // Database word count filtering (kDbFilter) exists but is different:
+    // it filters based on database counts, not query counts
+    // Reference: blast_nalookup.c:1047-1060 (database word count filtering)
+    //
+    // REMOVED: Over-represented k-mer filtering (MAX_HITS_PER_KMER) - does not exist in NCBI BLAST
 
     lookup
 }

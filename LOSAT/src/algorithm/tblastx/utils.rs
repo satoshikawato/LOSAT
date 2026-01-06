@@ -42,6 +42,7 @@ use super::sum_stats_linking::{
     apply_sum_stats_even_gap_linking, compute_avg_query_length_ncbi, 
     find_smallest_lambda_params, LinkingParams,
 };
+use super::hsp_culling;
 use super::translation::{generate_frames, QueryFrame};
 use crate::stats::karlin::bit_score as calc_bit_score;
 
@@ -1487,13 +1488,15 @@ pub fn run(args: TblastxArgs) -> Result<()> {
     //   blast_hits.c line 1833: kbp = (gapped_calculation ? sbp->kbp_gap : sbp->kbp);
     //   blast_hits.c line 1918: same pattern in Blast_HSPListGetBitScores
     //
-    // For cutoff score search space calculation, NCBI uses gapped params:
-    //   blast_parameters.c uses kbp_gap for eff_searchsp in cutoff calculation
+    // NCBI reference (blast_setup.c:768):
+    //   kbp_ptr = (scoring_options->gapped_calculation ? sbp->kbp_gap_std : sbp->kbp);
+    // For tblastx, gapped_calculation = FALSE, so kbp_ptr = sbp->kbp (ungapped params)
+    // Therefore, ALL calculations (eff_searchsp, cutoff, bit score, E-value) use UNGAPPED params
     //
-    // BLOSUM62 ungapped: lambda=0.3176, K=0.134
-    // BLOSUM62 gapped:   lambda=0.267,  K=0.041
+    // BLOSUM62 ungapped: lambda=0.3176, K=0.134 (used for tblastx)
+    // BLOSUM62 gapped:   lambda=0.267,  K=0.041 (NOT used for tblastx)
     let ungapped_params = lookup_protein_params_ungapped(ScoringMatrix::Blosum62);
-    // Gapped params for cutoff score search space calculation
+    // Note: gapped_params is kept for API compatibility but NOT used for tblastx
     let gapped_params = KarlinParams {
         lambda: 0.267,
         k: 0.041,
@@ -1501,7 +1504,7 @@ pub fn run(args: TblastxArgs) -> Result<()> {
         alpha: 1.9,
         beta: -30.0,
     };
-    // Use UNGAPPED params for bit score and E-value (NCBI parity for tblastx)
+    // Use UNGAPPED params for all calculations (NCBI parity for tblastx)
     let params = ungapped_params.clone();
 
     // Compute NCBI-style average query length for linking cutoffs
@@ -2165,6 +2168,28 @@ pub fn run(args: TblastxArgs) -> Result<()> {
                         .hsps_after_chain
                         .fetch_add(linked.len(), AtomicOrdering::Relaxed);
                 }
+                
+                // NCBI HSP culling (conditional on culling_limit > 0)
+                // Reference: hspfilter_culling.c - applied after linking, before output
+                // Default for tblastx: culling_limit = 0 (disabled)
+                let linked_before_cull = linked.len();
+                let linked = if args.culling_limit > 0 {
+                    hsp_culling::apply_culling(
+                        linked,
+                        contexts_ref,
+                        args.culling_limit,
+                    )
+                } else {
+                    // Default: no culling (matches NCBI tblastx default)
+                    linked
+                };
+                if diag_enabled && args.culling_limit > 0 {
+                    diagnostics
+                        .base
+                        .hsps_culled_dominated
+                        .fetch_add(linked_before_cull.saturating_sub(linked.len()), AtomicOrdering::Relaxed);
+                }
+                
                 let mut final_hits: Vec<Hit> = Vec::new();
                 for h in linked {
                     if h.e_value > evalue_threshold {
@@ -2591,6 +2616,15 @@ fn run_with_neighbor_map(args: TblastxArgs) -> Result<()> {
     // Use UNGAPPED params for bit score and E-value (NCBI parity for tblastx)
     let params = ungapped_params.clone();
     
+    // NCBI reference (blast_setup.c:768):
+    //   kbp_ptr = (scoring_options->gapped_calculation ? sbp->kbp_gap_std : sbp->kbp);
+    // For tblastx, gapped_calculation = FALSE, so kbp_ptr = sbp->kbp (ungapped params)
+    // Therefore, ALL calculations (eff_searchsp, cutoff, bit score, E-value) use UNGAPPED params
+    //
+    // BLOSUM62 ungapped: lambda=0.3176, K=0.134 (used for tblastx)
+    // BLOSUM62 gapped:   lambda=0.267,  K=0.041 (NOT used for tblastx)
+    // Note: gapped_params is kept for API compatibility but NOT used for tblastx
+    
     // Optional timing breakdown (disabled by default to preserve output/parity logs)
     let timing_enabled = std::env::var_os("LOSAT_TIMING").is_some();
     let reeval_ns = AtomicU64::new(0);
@@ -2826,17 +2860,19 @@ fn run_with_neighbor_map(args: TblastxArgs) -> Result<()> {
                             
                             let diag_entry = &mut diag_array[ctx_flat][diag_coord];
                             
-                            // NCBI aa_ungapped.c:519-530 - flag==1 block
+                            // NCBI aa_ungapped.c:519-531 - flag==1 block
                             // "If the reset bit is set, an extension just happened."
                             if diag_entry.flag != 0 {
                                 // "If we've already extended past this hit, skip it."
                                 if subject_offset + diag_offset < diag_entry.last_hit {
                                     continue;
                                 }
-                                // "Otherwise, start a new hit." - reset and CONTINUE (don't extend this hit)
+                                // "Otherwise, start a new hit." - reset flag and last_hit, then FALL THROUGH
+                                // NCBI: After reset, control falls through to the else block (flag==0) below
+                                // to continue with extension logic. DO NOT continue here!
                                 diag_entry.last_hit = subject_offset + diag_offset;
                                 diag_entry.flag = 0;
-                                continue; // NCBI: after reset, move to next hit, don't extend
+                                // NO continue here - fall through to extension logic below
                             }
                             
                             // NCBI aa_ungapped.c:533-606 - flag==0 block

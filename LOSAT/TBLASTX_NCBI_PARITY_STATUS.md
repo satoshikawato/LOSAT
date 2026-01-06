@@ -1,7 +1,7 @@
 # TBLASTX NCBI Parity Status Report
 
 **作成日時**: 2026-01-03  
-**更新日時**: 2026-01-05 (ベンチノイズ抑制: `--verbose`/`LOSAT_DIAGNOSTICS`, AP027280 +64 再確認, extra HSP 抽出/トレース基盤追加)  
+**更新日時**: 2026-01-06 (Karlinパラメータ使用に関するコメント修正、パラメータ名明確化)  
 **現象**: LOSATが長い配列 (600kb+) でNCBI BLAST+より多くのヒットを出力  
 **目標**: 出力を1ビットの狂いもなく一致させる
 
@@ -105,7 +105,29 @@
   - BLOSUM62 の場合: `gap_trigger = 41` が支配的になることが多い
 - **ファイル**: `ncbi_cutoffs.rs`, `utils.rs`
 
-### 1.6 X-dropoff の Per-Context 適用
+### 1.6 Karlinパラメータ使用の明確化
+- **状態**: ✅ 完了
+- **修正日**: 2026-01-06
+- **問題だった点**: 
+  - **旧LOSAT**: コメントに「cutoff score search space calculation で gapped params を使用」と誤って記載
+  - **NCBI実装**: `blast_setup.c:768` で `kbp_ptr = (scoring_options->gapped_calculation ? sbp->kbp_gap_std : sbp->kbp)`
+  - tblastxでは `gapped_calculation = FALSE` のため、**すべての計算で ungapped params (`sbp->kbp`) を使用**
+- **修正内容**:
+  - `utils.rs` のコメントを修正: tblastxはすべての計算（eff_searchsp, cutoff, bit score, E-value）で ungapped params を使用することを明記
+  - `ncbi_cutoffs.rs` のパラメータ名を `gapped_params` から `karlin_params` に変更（汎用性を明確化）
+  - 関数シグネチャとコメントを更新して、パラメータが gapped/ungapped のどちらでも使用可能であることを明記
+- **検証結果**:
+  - eff_searchsp計算: ungapped params使用 ✅
+  - cutoff_score_max計算: ungapped params使用 ✅
+  - per-subject cutoff更新: ungapped params使用 ✅
+  - bit score/E-value計算: ungapped params使用 ✅
+- **NCBIコード参照**: 
+  - `blast_setup.c:768` - `kbp_ptr` 選択ロジック
+  - `blast_setup.c:782` - `kbp = kbp_ptr[index]` (tblastxでは ungapped)
+  - `blast_setup.c:821` - `BLAST_ComputeLengthAdjustment` で使用
+- **ファイル**: `ncbi_cutoffs.rs`, `utils.rs`
+
+### 1.7 X-dropoff の Per-Context 適用
 - **状態**: ✅ 完了
 - **修正日**: 2026-01-03
 - **問題だった点**: 
@@ -131,7 +153,7 @@
 - **結論**: NCBIとの構造的 parity を達成
 - **ファイル**: `utils.rs`
 
-### 1.7 scale_factor の確認
+### 1.8 scale_factor の確認
 - **状態**: ✅ 完了
 - **確認日**: 2026-01-03
 - **問題だった点**: 
@@ -847,10 +869,11 @@ for s0 in 0..alphabet_size {
 - `reevaluate.rs:80-145` - Reevaluate 処理
 
 ### 4.4 ✅ HSP の重複排除 (Culling)
-- **状態**: ✅ **調査完了 - NCBI と同等の実装を確認**
+- **状態**: ✅ **実装完了 - NCBI interval tree culling を完全実装**
 - **調査日**: 2026-01-04
-- **概要**: HSP 間の重複排除ロジックが NCBI と一致するか
-- **結論**: **LOSAT の実装は NCBI tblastx のデフォルト動作と完全に一致。修正不要。**
+- **実装日**: 2026-01-06
+- **概要**: NCBI の interval tree ベース HSP culling アルゴリズムを完全実装
+- **結論**: **NCBI `hspfilter_culling.c` を完全にポート。デフォルト無効 (culling_limit=0) で NCBI と一致。**
 
 #### NCBI HSP Culling の仕組み
 
@@ -869,33 +892,82 @@ NCBI には **2種類の HSP 重複排除機構** が存在する:
 4. **`cmdline_flags.cpp:127-128`**: `kDfltArgCullingLimit = 0` - デフォルトで culling は無効
 5. **`blast_hits.c:2454-2535`**: `Blast_HSPListPurgeHSPsWithCommonEndpoints` - 端点重複削除 (gapped のみ)
 
-#### LOSAT 実装状況 (全て正しい)
+#### LOSAT 実装状況
 
 | ファイル | 状態 | 説明 |
 |---------|------|------|
-| **`utils.rs:1879-1886`** | ✅ 正しい | tblastx では purge をスキップ (NCBI parity のため)。コメントで NCBI `blast_engine.c:545` の条件を明記。 |
-| **`chaining.rs:259-262`** | ✅ 正しい | tblastx では domination filter をスキップ (NCBI parity のため)。`hsp_dominates()` 関数は実装済みだが未使用。 |
-| **`utils.rs:1235-1350`** | ✅ 正しい | `purge_hsps_with_common_endpoints` は NCBI `Blast_HSPListPurgeHSPsWithCommonEndpoints` の完全なポートとして実装済みだが、tblastx では未使用 (`#[allow(dead_code)]`)。将来の gapped 実装用に保持。 |
+| **`hsp_culling.rs`** | ✅ **新規実装完了** | NCBI `hspfilter_culling.c` の完全なポート。Interval tree、LinkedHSP、s_DominateTest、s_SaveHSP、s_RipHSPOffCTree を実装。 |
+| **`args.rs`** | ✅ **更新完了** | `culling_limit: u32` パラメータ追加 (デフォルト: 0) |
+| **`chaining.rs`** | ✅ **修正完了** | LOSAT 固有の clustering ロジック (lines 185-224) を削除。NCBI には存在しない。 |
+| **`utils.rs`** | ✅ **統合完了** | Linking 後に culling を条件付きで適用 (`culling_limit > 0` の場合のみ) |
+| **`utils.rs:1879-1886`** | ✅ 正しい | tblastx では purge をスキップ (NCBI parity のため) |
+| **`utils.rs:1235-1350`** | ✅ 正しい | `purge_hsps_with_common_endpoints` (未使用、将来用) |
+
+#### 実装詳細
+
+**NCBI コード参照 (hspfilter_culling.c):**
+
+1. **`s_DominateTest()` (lines 79-120)**: 
+   - 50%以上重複チェック: `2 * overlap < l2` → return FALSE
+   - スコア/長さ公式: `d = 4*s1*l1 + 2*s1*l2 - 2*s2*l1 - 4*s2*l2`
+   - `d > 0` なら p が y を支配
+   - Tie-breaker: score → OID → subject.offset
+
+2. **Interval Tree (CTreeNode, lines 201-207)**:
+   - Query 座標ベースの区間木
+   - 各ノードに HSP リストを保持
+   - 20個以上の HSP で子ノードに分割 (`kNumHSPtoFork = 20`)
+
+3. **Merit システム**:
+   - 各 HSP は初期値 `merit = culling_limit` を持つ
+   - 支配されるたびに `merit--`
+   - `merit <= 0` になった HSP は削除
+
+4. **座標変換 (lines 621-628)**:
+   - tblastx: `isBlastn = FALSE` なので `A.begin = query.offset`, `A.end = query.end`
+   - blastn の reverse strand: `begin = qlen - query.end`, `end = qlen - query.offset`
+
+**LOSAT 実装 (`hsp_culling.rs`):**
+
+- `LinkedHSP`: NCBI の LinkedHSP 構造体を完全にポート
+- `CTreeNode`: Interval tree ノード構造
+- `dominate_test()`: NCBI `s_DominateTest()` の完全なポート (raw_score 使用)
+- `save_hsp()`: NCBI `s_SaveHSP()` の完全なポート
+- `rip_hsp_off_ctree()`: NCBI `s_RipHSPOffCTree()` の完全なポート
+- `apply_culling()`: NCBI `s_BlastHSPCullingRun` + `s_BlastHSPCullingFinal` の統合
+
+**統合ポイント (`utils.rs`):**
+
+- Linking 後、`culling_limit > 0` の場合のみ culling を適用
+- デフォルト (`culling_limit = 0`) では culling をスキップ (NCBI と一致)
 
 #### 重要な発見
 
 1. **tblastx は ungapped search**: NCBI では `GetGappedScore = NULL` のため、`Blast_HSPListPurgeHSPsWithCommonEndpoints` は呼ばれない
 2. **Culling はオプショナル**: `--culling_limit` オプションは tblastx でも使用可能だが、デフォルト値は 0 (無効)
-3. **LOSAT の実装は正しい**: 両方の機構をスキップすることで、NCBI tblastx のデフォルト動作と完全に一致
+3. **LOSAT の実装**: NCBI の interval tree culling を完全実装。デフォルト無効で NCBI と一致
+4. **Clustering 削除**: LOSAT 固有の diagonal/overlap clustering を削除 (NCBI には存在しない)
 
-#### 将来の拡張 (パリティには影響なし)
+#### 実装の注意点
 
-- `--culling_limit` オプションのサポート追加を検討可能
-- ただし、デフォルト無効のため現在のパリティには影響しない
+- **Raw score 使用**: NCBI は `hsp->score` (raw_score) を使用。Bit score ではない。
+- **座標システム**: tblastx では reverse strand 変換不要 (`isBlastn = FALSE`)
+- **アルゴリズム忠実性**: Vec を使った再構築は Rust の所有権システムの制約によるが、アルゴリズムロジックは NCBI と完全一致
 
 - **関連NCBIコード**: 
-  - `hspfilter_culling.c` - Interval tree ベースの culling 実装
+  - `hspfilter_culling.c:79-120` - `s_DominateTest()` 支配判定
+  - `hspfilter_culling.c:430-470` - `s_SaveHSP()` 区間木挿入
+  - `hspfilter_culling.c:602-644` - `s_BlastHSPCullingRun()` メインループ
+  - `hspfilter_culling.c:500-593` - `s_BlastHSPCullingFinal()` 抽出
   - `blast_hits.c:2454-2535` - `Blast_HSPListPurgeHSPsWithCommonEndpoints`
   - `blast_engine.c:545` - gapped path での purge 呼び出し
   - `blast_options.c:869` - tblastx は gapped 不可
 - **LOSATコード**: 
+  - `hsp_culling.rs` - **新規**: NCBI interval tree culling の完全実装
+  - `args.rs` - `culling_limit` パラメータ追加
+  - `chaining.rs` - LOSAT 固有 clustering 削除
+  - `utils.rs:2168-2185` - Culling 統合 (linking 後)
   - `utils.rs:1879-1886` - purge スキップ (tblastx)
-  - `chaining.rs:259-262` - domination filter スキップ (tblastx)
   - `utils.rs:1235-1350` - `purge_hsps_with_common_endpoints` (未使用、将来用)
 
 ### 4.5 ✅ Context ごとの Karlin パラメータ計算

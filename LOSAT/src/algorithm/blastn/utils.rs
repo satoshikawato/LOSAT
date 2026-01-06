@@ -8,28 +8,47 @@ use crate::common::{write_output, Hit};
 use crate::stats::{lookup_nucl_params, KarlinParams};
 use super::args::BlastnArgs;
 use super::alignment::extend_gapped_heuristic;
-use super::extension::extend_hit_ungapped;
-use super::constants::{X_DROP_GAPPED_FINAL, TWO_HIT_WINDOW};
+use super::extension::{extend_hit_ungapped, type_of_word};
+use super::constants::TWO_HIT_WINDOW;
 use super::coordination::{configure_task, read_sequences, prepare_sequence_data, build_lookup_tables};
 use super::lookup::{reverse_complement, pack_diag_key};
-use super::sequence_compare::{compare_28mer_simd, compare_sequences_simd};
+// SIMD comparison functions removed - now using type_of_word instead
 use super::ncbi_cutoffs::{compute_blastn_cutoff_score, GAP_TRIGGER_BIT_SCORE_NUCL};
+
+// NCBI reference: blast_extend.h:57-60
+// typedef struct DiagStruct {
+//     Int4 last_hit;  /**< last hit position on this diagonal */
+//     Uint4 flag;     /**< flag indicating if hit was saved/extended */
+// } DiagStruct;
+/// Diagonal structure for tracking hits (equivalent to NCBI's DiagStruct)
+#[derive(Clone, Copy, Default)]
+struct DiagStruct {
+    /// Last hit position on this diagonal (with diag_offset added)
+    /// NCBI reference: blast_extend.c:103: diag_struct_array[i].last_hit = -diag->window;
+    /// LOSAT: Initialize to 0 (equivalent behavior for first hit)
+    last_hit: usize,
+    /// Flag indicating if hit was saved/extended (1 = extended, 0 = new hit)
+    /// NCBI reference: na_ungapped.c:666: hit_saved = hit_level_array[real_diag].flag;
+    flag: u8,
+}
 
 // Re-export for backward compatibility
 pub use crate::algorithm::common::evalue::calculate_evalue_database_search as calculate_evalue;
-pub fn chain_and_filter_hsps(
-    mut hits: Vec<Hit>,
-    sequences: &FxHashMap<(String, String), (Vec<u8>, Vec<u8>)>,
-    reward: i32,
-    penalty: i32,
-    gap_open: i32,
-    gap_extend: i32,
-    db_len_total: usize,
-    db_num_seqs: usize,
-    params: &KarlinParams,
+/// Filter HSPs to remove redundant overlapping hits.
+/// This function applies overlap filtering to match NCBI BLAST's behavior of outputting individual HSPs.
+/// Chaining/clustering functionality has been removed to match NCBI BLAST blastn behavior.
+pub fn filter_hsps(
+    hits: Vec<Hit>,
+    _sequences: &FxHashMap<(String, String), (Vec<u8>, Vec<u8>)>,
+    _reward: i32,
+    _penalty: i32,
+    _gap_open: i32,
+    _gap_extend: i32,
+    _db_len_total: usize,
+    _db_num_seqs: usize,
+    _params: &KarlinParams,
     _use_dp: bool,
     verbose: bool,
-    chain_enabled: bool,
 ) -> Vec<Hit> {
     if hits.is_empty() {
         return hits;
@@ -37,645 +56,174 @@ pub fn chain_and_filter_hsps(
 
     let total_start = std::time::Instant::now();
 
-    // BLAST-compatible mode: when chaining is disabled, skip clustering/merging
-    // but still apply overlap filtering to remove redundant hits
-    // This matches NCBI BLAST's behavior of outputting individual HSPs without merging
-    let mut result_hits: Vec<Hit> = if !chain_enabled {
-        if verbose {
-            eprintln!(
-                "[INFO] Chaining disabled (BLAST-compatible mode): skipping clustering, {} raw HSPs",
-                hits.len()
-            );
-        }
-        hits // Use raw hits directly, skip to filtering step below
-    } else {
-        // === BEGIN CHAINING LOGIC ===
+    // Always output individual HSPs (NCBI BLAST behavior)
+    // NCBI BLAST's blastn does not use chaining/clustering - all HSPs are saved individually
+    let mut result_hits: Vec<Hit> = hits;
 
-        // Parameters for chaining - adaptive based on HSP quality
-    // Key insight: use bit_score/length as a proxy for identity
-    // High-quality HSPs (high identity) can be merged across larger gaps
-    // Low-quality HSPs (low identity) should use strict gap limits
-    const MAX_GAP_STRICT: usize = 50; // For low-quality HSPs
-    const MAX_GAP_PERMISSIVE: usize = 5000; // For high-quality HSPs
-    const MAX_DIAG_DRIFT_STRICT: isize = 30; // For low-quality HSPs
-    const MAX_DIAG_DRIFT_PERMISSIVE: isize = 500; // For high-quality HSPs
-    const DIAG_BIN_SIZE: isize = 25; // Bin size for diagonal bucketing optimization
-
-    // Threshold for "high quality" HSP: bit_score / length
-    // For blastn with reward=2, penalty=-3:
-    //   - 95% identity: expected score ≈ 0.95*2 + 0.05*(-3) = 1.75 per base
-    //   - 74% identity: expected score ≈ 0.74*2 + 0.26*(-3) = 0.70 per base
-    // Bit score = (raw_score * lambda - ln(K)) / ln(2)
-    // For high identity (~95%), bit_score/length ≈ 1.5-1.8
-    // For low identity (~74%), bit_score/length ≈ 0.5-0.8
-    const HIGH_QUALITY_THRESHOLD: f64 = 1.2; // bit_score/length threshold
-
-    // Group hits by query-subject pair
-    let grouping_start = std::time::Instant::now();
-    let mut groups: FxHashMap<(String, String), Vec<Hit>> = FxHashMap::default();
-    for hit in hits.drain(..) {
-        let key = (hit.query_id.clone(), hit.subject_id.clone());
-        groups.entry(key).or_default().push(hit);
-    }
-    let grouping_time = grouping_start.elapsed();
-
-    let mut result_hits = Vec::new();
-    let mut total_clustering_time = std::time::Duration::ZERO;
-    let mut total_align_time = std::time::Duration::ZERO;
-    let mut align_calls = 0usize;
-    let mut max_region_len = 0usize;
-    let mut total_clusters = 0usize;
-    let mut max_cluster_size = 0usize;
-
-    if verbose {
-        eprintln!(
-            "[INFO] chain_and_filter_hsps: {} groups, grouping took {:.3}s",
-            groups.len(),
-            grouping_time.as_secs_f64()
-        );
-    }
-
-    for ((query_id, subject_id), mut group_hits) in groups {
-        if group_hits.is_empty() {
-            continue;
-        }
-
-        let group_size = group_hits.len();
-        let clustering_start = std::time::Instant::now();
-
-        // Sort by query start position
-        group_hits.sort_by_key(|h| h.q_start);
-
-        // Optimized clustering using diagonal bins and active cluster tracking
-        // Key insight: hits are sorted by q_start, so clusters whose last hit's q_end
-        // is more than MAX_GAP behind the current hit's q_start can never accept new hits
-
-        // Structure: diag_bin -> list of (cluster_idx, max_q_end)
-        // We track cluster quality separately using sum_score/span
-        let mut diag_bins: FxHashMap<isize, Vec<(usize, usize)>> = FxHashMap::default();
-        let mut clusters: Vec<Vec<Hit>> = Vec::new();
-        // Track cluster statistics for quality assessment: (sum_bit_score, q_min, q_max, current_bin)
-        let mut cluster_stats: Vec<(f64, usize, usize, isize)> = Vec::new();
-
-        for hit in group_hits {
-            let hit_diag = hit.s_start as isize - hit.q_start as isize;
-            let hit_diag_bin = hit_diag / DIAG_BIN_SIZE;
-
-            // Determine if this hit is high-quality based on bit_score / length
-            let hit_quality = hit.bit_score / (hit.length as f64);
-            let hit_is_high_quality = hit_quality >= HIGH_QUALITY_THRESHOLD;
-
-            // Use permissive search range for high-quality HSPs
-            let search_max_diag_drift = if hit_is_high_quality {
-                MAX_DIAG_DRIFT_PERMISSIVE
-            } else {
-                MAX_DIAG_DRIFT_STRICT
-            };
-
-            // Only search nearby diagonal bins (within search_max_diag_drift)
-            let bin_range = (search_max_diag_drift / DIAG_BIN_SIZE) + 1;
-            let mut cluster_idx: Option<usize> = None;
-
-            'bin_search: for bin_offset in -bin_range..=bin_range {
-                let search_bin = hit_diag_bin + bin_offset;
-                if let Some(bin_clusters) = diag_bins.get(&search_bin) {
-                    for &(idx, max_q_end) in bin_clusters.iter().rev() {
-                        // Calculate cluster quality: average score density = sum_score / span
-                        let (sum_score, q_min, q_max, _) = cluster_stats[idx];
-                        let cluster_span = (q_max - q_min + 1) as f64;
-                        let cluster_density = sum_score / cluster_span;
-                        let cluster_is_high_quality = cluster_density >= HIGH_QUALITY_THRESHOLD;
-
-                        // Both the hit and the cluster must be high-quality to use permissive parameters
-                        let both_high_quality = hit_is_high_quality && cluster_is_high_quality;
-                        let effective_max_gap = if both_high_quality {
-                            MAX_GAP_PERMISSIVE
-                        } else {
-                            MAX_GAP_STRICT
-                        };
-                        let effective_max_diag = if both_high_quality {
-                            MAX_DIAG_DRIFT_PERMISSIVE
-                        } else {
-                            MAX_DIAG_DRIFT_STRICT
-                        };
-
-                        // Skip clusters that are too far behind (can never match)
-                        if hit.q_start > max_q_end + effective_max_gap {
-                            continue;
-                        }
-
-                        let cluster = &clusters[idx];
-                        if let Some(last) = cluster.last() {
-                            let last_diag = last.s_end as isize - last.q_end as isize;
-                            let diag_drift = (hit_diag - last_diag).abs();
-
-                            let q_distance = hit.q_start as isize - last.q_end as isize;
-                            let s_distance = hit.s_start as isize - last.s_end as isize;
-
-                            let hit_q_len = (hit.q_end - hit.q_start) as isize;
-                            let last_q_len = (last.q_end - last.q_start) as isize;
-                            let max_overlap = -(hit_q_len.min(last_q_len) / 2);
-
-                            let q_ok = q_distance >= max_overlap
-                                && q_distance <= effective_max_gap as isize;
-                            let s_ok = s_distance >= max_overlap
-                                && s_distance <= effective_max_gap as isize;
-
-                            if q_ok && s_ok && diag_drift <= effective_max_diag as isize {
-                                cluster_idx = Some(idx);
-                                break 'bin_search;
-                            }
-                        }
-                    }
-                }
-            }
-
-            if let Some(idx) = cluster_idx {
-                clusters[idx].push(hit.clone());
-
-                // Update cluster stats
-                let (sum_score, q_min, q_max, old_bin) = cluster_stats[idx];
-                let new_sum_score = sum_score + hit.bit_score;
-                let new_q_min = q_min.min(hit.q_start);
-                let new_q_max = q_max.max(hit.q_end);
-                let new_diag = hit.s_end as isize - hit.q_end as isize;
-                let new_bin = new_diag / DIAG_BIN_SIZE;
-                cluster_stats[idx] = (new_sum_score, new_q_min, new_q_max, new_bin);
-
-                // Fix: properly re-index cluster when diagonal bin changes
-                if new_bin != old_bin {
-                    // Remove from old bin
-                    if let Some(old_bin_clusters) = diag_bins.get_mut(&old_bin) {
-                        old_bin_clusters.retain(|(i, _)| *i != idx);
-                    }
-                    // Add to new bin
-                    diag_bins.entry(new_bin).or_default().push((idx, new_q_max));
-                } else {
-                    // Just update max_q_end in the same bin
-                    if let Some(bin_clusters) = diag_bins.get_mut(&new_bin) {
-                        if let Some(entry) = bin_clusters.iter_mut().find(|(i, _)| *i == idx) {
-                            entry.1 = new_q_max;
-                        }
-                    }
-                }
-            } else {
-                let new_idx = clusters.len();
-                clusters.push(vec![hit.clone()]);
-                cluster_stats.push((hit.bit_score, hit.q_start, hit.q_end, hit_diag_bin));
-                diag_bins
-                    .entry(hit_diag_bin)
-                    .or_default()
-                    .push((new_idx, hit.q_end));
-            }
-        }
-
-        let clustering_time = clustering_start.elapsed();
-        total_clustering_time += clustering_time;
-        total_clusters += clusters.len();
-        max_cluster_size =
-            max_cluster_size.max(clusters.iter().map(|c| c.len()).max().unwrap_or(0));
-
-        if verbose && group_size > 1000 {
-            eprintln!(
-                "[INFO] Group {}/{}: {} hits -> {} clusters in {:.3}s",
-                query_id,
-                subject_id,
-                group_size,
-                clusters.len(),
-                clustering_time.as_secs_f64()
-            );
-        }
-
-        // PERFORMANCE OPTIMIZATION: Only run align_region on the best clusters
-        // NCBI BLAST is fast because it only does gapped extension on a small subset of candidates
-        // We score clusters by their total bit_score and only align the top ones
-        const MAX_ALIGN_REGION_CALLS: usize = 20; // Limit expensive align_region calls
-        const MIN_CLUSTER_SCORE_FOR_ALIGN: f64 = 500.0; // Minimum score to consider for align_region
-        
-        // Maximum region size for greedy re-alignment to prevent over-extension
-        // NCBI BLAST typically produces alignments up to ~50kbp for blastn task
-        // Larger regions should use the best HSP instead of re-alignment to match NCBI behavior
-        const MAX_REGION_SIZE_FOR_ALIGN: usize = 50000;
-
-        // Collect multi-HSP clusters with their scores for prioritization
-        let mut multi_hsp_clusters_with_scores: Vec<(usize, f64, Vec<Hit>)> = Vec::new();
-        let mut single_hsp_hits: Vec<Hit> = Vec::new();
-
-        for (idx, cluster) in clusters.into_iter().enumerate() {
-            if cluster.is_empty() {
-                continue;
-            }
-
-            if cluster.len() == 1 {
-                // Single HSP, no re-alignment needed
-                single_hsp_hits.push(cluster.into_iter().next().unwrap());
-            } else {
-                // Multi-HSP cluster - calculate total score
-                let (sum_score, _, _, _) = cluster_stats[idx];
-                multi_hsp_clusters_with_scores.push((idx, sum_score, cluster));
-            }
-        }
-
-        // Sort multi-HSP clusters by score (descending) and take top N
-        multi_hsp_clusters_with_scores
-            .sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
-
-        // Process each cluster with progress logging
-        let num_multi_clusters = multi_hsp_clusters_with_scores.len();
-        let mut processed_clusters = 0usize;
-        let mut aligned_clusters = 0usize;
-        let cluster_process_start = std::time::Instant::now();
-
-        for (_idx, sum_score, cluster) in multi_hsp_clusters_with_scores {
-            processed_clusters += 1;
-
-            // Progress logging every 100 clusters for multi-HSP
-            if verbose && processed_clusters % 100 == 0 {
-                eprintln!("[INFO] Processed {}/{} multi-HSP clusters, {} align_region calls, {:.3}s elapsed",
-                          processed_clusters, num_multi_clusters, align_calls,
-                          cluster_process_start.elapsed().as_secs_f64());
-            }
-
-            // Calculate cluster region size to check if it's too large for re-alignment
-            let cluster_q_min = cluster.iter().map(|h| h.q_start).min().unwrap_or(0);
-            let cluster_q_max = cluster.iter().map(|h| h.q_end).max().unwrap_or(0);
-            let cluster_s_min = cluster.iter().map(|h| h.s_start).min().unwrap_or(0);
-            let cluster_s_max = cluster.iter().map(|h| h.s_end).max().unwrap_or(0);
-            let cluster_region_size = (cluster_q_max.saturating_sub(cluster_q_min))
-                .max(cluster_s_max.saturating_sub(cluster_s_min));
-
-            // Only run align_region for top clusters with high scores AND reasonable region size
-            // For lower-scoring clusters or very large regions, just use the best single HSP
-            // This prevents over-extension that produces alignments much longer than NCBI BLAST
-            let should_align = aligned_clusters < MAX_ALIGN_REGION_CALLS
-                && sum_score >= MIN_CLUSTER_SCORE_FOR_ALIGN
-                && cluster_region_size <= MAX_REGION_SIZE_FOR_ALIGN;
-
-            if should_align {
-                aligned_clusters += 1;
-
-                // NCBI BLAST optimization: Instead of aligning the entire merged region
-                // (which can be 657kbp and takes O(n * band_size) time), we use greedy
-                // extension from the best HSP's center point. This is O(alignment_length)
-                // and much faster for high-identity sequences.
-                //
-                // Reference: NCBI BLAST's BLAST_GappedAlignmentWithTraceback in blast_gapalign.c
-                // extends LEFT and RIGHT from the HSP center using ALIGN_EX or greedy alignment.
-
-                // Get sequences for this query-subject pair
-                let key = (query_id.clone(), subject_id.clone());
-                if let Some((q_seq, s_seq)) = sequences.get(&key) {
-                    // Find the best HSP in the cluster to use as seed for extension
-                    let best_hsp = cluster
-                        .iter()
-                        .max_by(|a, b| {
-                            a.bit_score
-                                .partial_cmp(&b.bit_score)
-                                .unwrap_or(std::cmp::Ordering::Equal)
-                        })
-                        .unwrap();
-
-                    // Use the center of the best HSP as the seed point for extension
-                    // Convert 1-based coordinates to 0-based
-                    let seed_q_start = best_hsp.q_start.saturating_sub(1);
-                    let seed_q_end = best_hsp.q_end;
-                    let seed_s_start = best_hsp.s_start.saturating_sub(1);
-                    let seed_s_end = best_hsp.s_end;
-
-                    // Calculate seed center and length
-                    let seed_q_center = (seed_q_start + seed_q_end) / 2;
-                    let seed_s_center = (seed_s_start + seed_s_end) / 2;
-                    let seed_len = 1; // Start from a single point and extend
-
-                    let align_start = std::time::Instant::now();
-
-                    // ALWAYS use greedy extension in chaining phase (NCBI BLAST approach)
-                    // Greedy is better for chaining because:
-                    // 1. It doesn't have the MAX_WINDOW_SIZE limit that caps DP at ~10kbp
-                    // 2. It's faster and handles high-identity sequences well
-                    // 3. NCBI BLAST uses greedy for HSP extension even in blastn task
-                    // The use_dp parameter only affects the initial seed extension, not chaining
-                    let (
-                        final_q_start_0,
-                        final_q_end_0,
-                        final_s_start_0,
-                        final_s_end_0,
-                        score,
-                        matches,
-                        mismatches,
-                        gap_opens,
-                        gap_letters,
-                        _dp_cells,
-                    ) = extend_gapped_heuristic(
-                        q_seq,
-                        s_seq,
-                        seed_q_center,
-                        seed_s_center,
-                        seed_len,
-                        reward,
-                        penalty,
-                        gap_open,
-                        gap_extend,
-                        X_DROP_GAPPED_FINAL,
-                        false, // Always use greedy for chaining re-alignment
-                    );
-
-                    total_align_time += align_start.elapsed();
-                    align_calls += 1;
-
-                    // Track region length for logging
-                    let region_len =
-                        (final_q_end_0 as usize - final_q_start_0 as usize).max(final_s_end_0 as usize - final_s_start_0 as usize);
-                    max_region_len = max_region_len.max(region_len);
-
-                    // Skip if no valid alignment found
-                    if score <= 0 {
-                        // Fall back to best HSP
-                        result_hits.push(best_hsp.clone());
-                        continue;
-                    }
-
-                    // Calculate statistics using BLAST's definition:
-                    // alignment_length = matches + mismatches + gap_letters (total aligned columns)
-                    let aln_len = matches + mismatches + gap_letters;
-
-                    let identity = if aln_len > 0 {
-                        ((matches as f64 / aln_len as f64) * 100.0).min(100.0)
-                    } else {
-                        0.0
-                    };
-
-                    let (bit_score, e_value) =
-                        calculate_evalue(score, q_seq.len(), db_len_total, db_num_seqs, params);
-
-                    // Convert 0-based coordinates to 1-based for output
-                    let final_q_start = final_q_start_0 + 1;
-                    let final_q_end = final_q_end_0;
-                    let final_s_start = final_s_start_0 + 1;
-                    let final_s_end = final_s_end_0;
-
-                    result_hits.push(Hit {
-                        query_id: query_id.clone(),
-                        subject_id: subject_id.clone(),
-                        identity,
-                        length: aln_len,
-                        mismatch: mismatches,
-                        gapopen: gap_opens,
-                        q_start: final_q_start,
-                        q_end: final_q_end,
-                        s_start: final_s_start,
-                        s_end: final_s_end,
-                        e_value,
-                        bit_score,
-                        q_idx: 0,
-                        s_idx: 0,
-                        raw_score: score,
-                    });
-                } else {
-                    // Fallback: just use the best HSP (shouldn't happen)
-                    let best_hsp = cluster
-                        .into_iter()
-                        .max_by(|a, b| {
-                            a.bit_score
-                                .partial_cmp(&b.bit_score)
-                                .unwrap_or(std::cmp::Ordering::Equal)
-                        })
-                        .unwrap();
-                    result_hits.push(best_hsp);
-                }
-            } else {
-                // PERFORMANCE: For lower-scoring clusters, just use the best single HSP
-                // This avoids expensive align_region calls for clusters that won't produce top hits
-                let best_hsp = cluster
-                    .into_iter()
-                    .max_by(|a, b| {
-                        a.bit_score
-                            .partial_cmp(&b.bit_score)
-                            .unwrap_or(std::cmp::Ordering::Equal)
-                    })
-                    .unwrap();
-                result_hits.push(best_hsp);
-            }
-        }
-
-        // Add single-HSP hits
-        result_hits.extend(single_hsp_hits);
-    }
-
-        // Log after cluster processing
-        if verbose {
-            eprintln!("[INFO] Cluster processing done: {} result_hits, {} align_region calls in {:.3}s, max_region={}bp",
-                      result_hits.len(), align_calls, total_align_time.as_secs_f64(), max_region_len);
-        }
-
-        result_hits // Return chained hits from else block
-        // === END CHAINING LOGIC ===
-    };
-
-    // Final pass: remove redundant overlapping hits using spatial binning for O(n) instead of O(n²)
+    // Final pass: remove redundant overlapping hits using NCBI BLAST's s_DominateTest algorithm
+    // Reference: hspfilter_culling.c:s_DominateTest (lines 79-120)
     //
-    // BLAST-compatible mode (chain_enabled = false):
-    //   Uses NCBI BLAST's s_DominateTest algorithm which:
-    //   - Compares HSPs based on query coordinates only (not subject)
-    //   - Uses a score/length tradeoff formula to determine dominance
-    //   - Does NOT use diagonal gating (all HSPs are compared)
-    //   Reference: hspfilter_culling.c s_DominateTest()
-    //
-    // Chaining mode (chain_enabled = true):
-    //   Uses diagonal gating to preserve hits on different diagonals
-    //   (representing different biological alignments like repeats)
+    // Key features:
+    // - Uses query coordinates only (not subject coordinates)
+    // - No diagonal gating (all HSPs are compared)
+    // - Uses raw_score (not bit_score)
+    // - Score/length tradeoff formula: d = 4*s1*l1 + 2*s1*l2 - 2*s2*l1 - 4*s2*l2
+    // - 50% overlap check on candidate's length
     let filter_start = std::time::Instant::now();
     let result_hits_count = result_hits.len();
 
+    // Sort by raw_score (descending) to match NCBI BLAST's sorting order
+    // NCBI reference: blast_hits.c:ScoreCompareHSPs
+    // Order: score DESC → s_start ASC → s_end DESC → q_start ASC → q_end DESC
     result_hits.sort_by(|a, b| {
-        b.bit_score
-            .partial_cmp(&a.bit_score)
-            .unwrap_or(Ordering::Equal)
+        b.raw_score
+            .cmp(&a.raw_score)
+            .then_with(|| a.s_start.cmp(&b.s_start))  // s_start ASC
+            .then_with(|| b.s_end.cmp(&a.s_end))       // s_end DESC
+            .then_with(|| a.q_start.cmp(&b.q_start))    // q_start ASC
+            .then_with(|| b.q_end.cmp(&a.q_end))        // q_end DESC
     });
 
-    // Use spatial binning to avoid O(n²) comparisons
-    // Bin size of 1000bp - hits can only overlap if they share a bin
-    const FILTER_BIN_SIZE: usize = 1000;
-    const MAX_DIAG_DIFF_FOR_SAME_ALIGNMENT: isize = 100; // Only used when chaining is enabled
-    let mut q_bins: FxHashMap<usize, Vec<usize>> = FxHashMap::default();
+    // NCBI reference: hspfilter_culling.c:s_BlastHSPCullingRun
+    // NCBI uses interval tree for O(n log n) culling, but for simplicity we use O(n²) comparison
+    // which matches NCBI's s_DominateTest logic exactly
+    // NO SPATIAL BINNING - NCBI does NOT use binning, it compares all HSPs
     let mut final_hits: Vec<Hit> = Vec::new();
 
     for hit in result_hits {
-        // Calculate which q bins this hit spans
-        let q_bin_start = hit.q_start / FILTER_BIN_SIZE;
-        let q_bin_end = hit.q_end / FILTER_BIN_SIZE;
-
-        // Calculate diagonal for this hit (s_start - q_start) - only used when chaining enabled
-        let hit_diag = hit.s_start as isize - hit.q_start as isize;
-
-        // Only check hits in overlapping bins
+        // NCBI reference: hspfilter_culling.c:603-650
+        // Check if this hit is dominated by any already-kept hit
+        // NCBI: for each hsp in hsp_list, check if it's dominated by any kept hsp
         let mut dominated = false;
-        for bin in q_bin_start..=q_bin_end {
-            if let Some(kept_indices) = q_bins.get(&bin) {
-                for &kept_idx in kept_indices {
-                    let kept = &final_hits[kept_idx];
+        for kept in &final_hits {
+            // NCBI BLAST's s_DominateTest algorithm
+            // Reference: hspfilter_culling.c:79-120
+            
+            // Must be same query-subject pair
+            if hit.query_id != kept.query_id || hit.subject_id != kept.subject_id {
+                continue;
+            }
 
-                    if chain_enabled {
-                        // Chaining mode: use diagonal gating to preserve different alignments
-                        // Hits on different diagonals represent different biological alignments
-                        let kept_diag = kept.s_start as isize - kept.q_start as isize;
-                        let diag_diff = (hit_diag - kept_diag).abs();
-                        if diag_diff > MAX_DIAG_DIFF_FOR_SAME_ALIGNMENT {
-                            continue; // Different diagonal = different alignment, don't filter
-                        }
-
-                        // Check q overlap (fixed off-by-one: use >= for inclusive ranges)
-                        let q_overlap_start = hit.q_start.max(kept.q_start);
-                        let q_overlap_end = hit.q_end.min(kept.q_end);
-                        let q_overlap = if q_overlap_end >= q_overlap_start {
-                            q_overlap_end - q_overlap_start + 1
-                        } else {
-                            0
-                        };
-                        let q_hit_len = hit.q_end - hit.q_start + 1;
-                        let q_overlap_frac = if q_hit_len > 0 {
-                            q_overlap as f64 / q_hit_len as f64
-                        } else {
-                            0.0
-                        };
-
-                        if q_overlap_frac < 0.5 {
-                            continue; // No significant q overlap, skip s check
-                        }
-
-                        // Check s overlap (fixed off-by-one)
-                        let s_overlap_start = hit.s_start.max(kept.s_start);
-                        let s_overlap_end = hit.s_end.min(kept.s_end);
-                        let s_overlap = if s_overlap_end >= s_overlap_start {
-                            s_overlap_end - s_overlap_start + 1
-                        } else {
-                            0
-                        };
-                        let s_hit_len = hit.s_end - hit.s_start + 1;
-                        let s_overlap_frac = if s_hit_len > 0 {
-                            s_overlap as f64 / s_hit_len as f64
-                        } else {
-                            0.0
-                        };
-
-                        if s_overlap_frac >= 0.5 {
-                            dominated = true;
-                            break;
-                        }
-                    } else {
-                        // BLAST-compatible mode: diagonal-aware overlap filtering
-                        // 
-                        // NCBI BLAST's culling considers both query AND subject coordinates.
-                        // HSPs on different diagonals represent different biological alignments
-                        // (e.g., repeats, duplications) and should NOT be filtered even if
-                        // they overlap in query space.
-                        //
-                        // Key insight: For self-comparison, the full sequence match (diagonal 0)
-                        // should NOT dominate HSPs on other diagonals representing repeats.
-                        //
-                        // We use diagonal difference to determine if HSPs are in the same
-                        // alignment region. HSPs with large diagonal differences are preserved.
-
-                        // Calculate diagonals (s_start - q_start)
-                        let kept_diag = kept.s_start as isize - kept.q_start as isize;
-                        let diag_diff = (hit_diag - kept_diag).abs();
-
-                        // For BLAST-compatible mode, use a larger diagonal tolerance
-                        // This allows filtering of truly redundant HSPs while preserving
-                        // HSPs on different diagonals (repeats, etc.)
-                        // 
-                        // The key difference from chaining mode:
-                        // - Chaining mode uses MAX_DIAG_DIFF_FOR_SAME_ALIGNMENT = 100
-                        // - BLAST-compatible mode uses a proportional threshold based on
-                        //   the HSP length to handle both short and long alignments
-                        let hit_len = (hit.q_end - hit.q_start + 1).max(hit.s_end - hit.s_start + 1);
-                        let diag_tolerance = (hit_len / 10).max(50) as isize; // At least 50bp or 10% of length
-
-                        if diag_diff > diag_tolerance {
-                            continue; // Different diagonal = different alignment, don't filter
-                        }
-
-                        // Check query overlap (fixed off-by-one: use >= for inclusive ranges)
-                        let q_overlap_start = hit.q_start.max(kept.q_start);
-                        let q_overlap_end = hit.q_end.min(kept.q_end);
-                        let q_overlap = if q_overlap_end >= q_overlap_start {
-                            q_overlap_end - q_overlap_start + 1
-                        } else {
-                            0
-                        };
-                        let q_hit_len = hit.q_end - hit.q_start + 1;
-                        let q_overlap_frac = if q_hit_len > 0 {
-                            q_overlap as f64 / q_hit_len as f64
-                        } else {
-                            0.0
-                        };
-
-                        // Need >50% query overlap to be considered redundant
-                        if q_overlap_frac < 0.5 {
-                            continue;
-                        }
-
-                        // Check subject overlap as well
-                        let s_overlap_start = hit.s_start.max(kept.s_start);
-                        let s_overlap_end = hit.s_end.min(kept.s_end);
-                        let s_overlap = if s_overlap_end >= s_overlap_start {
-                            s_overlap_end - s_overlap_start + 1
-                        } else {
-                            0
-                        };
-                        let s_hit_len = hit.s_end - hit.s_start + 1;
-                        let s_overlap_frac = if s_hit_len > 0 {
-                            s_overlap as f64 / s_hit_len as f64
-                        } else {
-                            0.0
-                        };
-
-                        // Need >50% subject overlap as well
-                        if s_overlap_frac < 0.5 {
-                            continue;
-                        }
-
-                        // Both query and subject have >50% overlap AND similar diagonal
-                        // This is a redundant HSP - filter it out
+            // Query coordinates (already normalized to plus strand in blastn)
+            // NCBI reference: hspfilter_culling.c:80-83
+            // Int8 b1 = p->begin;
+            // Int8 b2 = y->begin;
+            // Int8 e1 = p->end;
+            // Int8 e2 = y->end;
+            // NCBI normalizes coordinates when creating LinkedHSP (lines 621-628)
+            // For blastn: plus strand uses offset/end directly, minus strand uses qlen - end/offset
+            // LOSAT stores coordinates already normalized (q_start < q_end always for blastn)
+            let b1 = hit.q_start as i64;
+            let e1 = hit.q_end as i64;
+            let b2 = kept.q_start as i64;
+            let e2 = kept.q_end as i64;
+            
+            // Query lengths
+            let l1 = e1 - b1;
+            let l2 = e2 - b2;
+            
+            // Calculate overlap (query coordinates only)
+            // NCBI reference: hspfilter_culling.c:412: overlap = MIN(e1,e2) - MAX(b1,b2)
+            // If overlap is negative (no overlap), it will fail the 50% check below
+            let overlap = e1.min(e2) - b1.max(b2);
+            
+            // If not overlap by more than 50% of candidate's length, don't dominate
+            // NCBI reference: hspfilter_culling.c:338: if(2 *overlap < l2) return FALSE;
+            // Note: if overlap < 0 (no overlap), this condition is always true
+            if overlap < 0 || 2 * overlap < l2 {
+                continue;
+            }
+            
+            // Raw scores (not bit_score)
+            let s1 = hit.raw_score as i64;
+            let s2 = kept.raw_score as i64;
+            
+            // Main criterion: 2 * (%diff in score) + 1 * (%diff in length)
+            // Formula: d = 4*s1*l1 + 2*s1*l2 - 2*s2*l1 - 4*s2*l2
+            // where s1, l1 = hit (candidate), s2, l2 = kept (already processed)
+            // NCBI reference: hspfilter_culling.c:344
+            let d = 4 * s1 * l1 + 2 * s1 * l2 - 2 * s2 * l1 - 4 * s2 * l2;
+            
+            // Tie-breaker for identical HSPs
+            // NCBI reference: hspfilter_culling.c:423-434
+            if (s1 == s2 && b1 == b2 && l1 == l2) || d == 0 {
+                if s1 != s2 {
+                    // Higher score wins - if hit has lower score, kept dominates
+                    if s1 < s2 {
                         dominated = true;
                         break;
                     }
-                }
-                if dominated {
-                    break;
+                    // If hit has higher score, hit is better, so kept doesn't dominate
+                    continue;
+                } else {
+                    // Same score: use subject_id, then subject offset
+                    // NCBI: if(p->sid != y->sid) return (p->sid < y->sid);
+                    // We're checking if kept dominates hit (s_DominateTest(kept, hit))
+                    // NCBI returns TRUE if p->sid < y->sid, meaning p dominates y
+                    // So kept dominates hit if kept.subject_id < hit.subject_id
+                    let subject_cmp = hit.subject_id.cmp(&kept.subject_id);
+                    if subject_cmp == Ordering::Greater {
+                        // hit.subject_id > kept.subject_id → kept.subject_id < hit.subject_id
+                        // NCBI: return (p->sid < y->sid) → kept dominates hit
+                        dominated = true;
+                        break;
+                    } else if subject_cmp == Ordering::Less {
+                        // hit.subject_id < kept.subject_id → kept.subject_id > hit.subject_id
+                        // NCBI: return (p->sid < y->sid) → kept does NOT dominate hit
+                        continue;
+                    } else {
+                        // Same subject: use subject offset (s_idx)
+                        // NCBI: if(p->hsp->subject.offset > y->hsp->subject.offset) return FALSE;
+                        //       return TRUE;  (default: p dominates y)
+                        // We're checking if kept dominates hit
+                        // NCBI returns FALSE if p.offset > y.offset, meaning p does NOT dominate y
+                        // So kept does NOT dominate hit if kept.s_idx > hit.s_idx
+                        // Otherwise, kept dominates hit (default case)
+                        if kept.s_idx > hit.s_idx {
+                            // kept.s_idx > hit.s_idx → kept does NOT dominate hit
+                            continue;
+                        } else {
+                            // kept.s_idx <= hit.s_idx → kept dominates hit (default case)
+                            dominated = true;
+                            break;
+                        }
+                    }
                 }
             }
+            
+            // If d < 0: kept dominates hit (hit should be filtered)
+            // If d > 0: hit is better than kept (hit should be kept, continue checking)
+            // NCBI reference: hspfilter_culling.c:436-439
+            if d < 0 {
+                dominated = true;
+                break;
+            }
+            
+            // d > 0: hit is better, so kept doesn't dominate hit
+            continue;
         }
 
         if !dominated {
-            let new_idx = final_hits.len();
-            // Register this hit in all bins it spans
-            for bin in q_bin_start..=q_bin_end {
-                q_bins.entry(bin).or_default().push(new_idx);
-            }
+            // NCBI reference: hspfilter_culling.c:650
+            // Add hit to final list if not dominated
             final_hits.push(hit);
         }
     }
     let filter_time = filter_start.elapsed();
 
-    if verbose {
-        eprintln!("[INFO] chain_and_filter_hsps summary:");
-        eprintln!(
-            "[INFO]   Total time: {:.3}s",
-            total_start.elapsed().as_secs_f64()
-        );
-        if chain_enabled {
-            eprintln!("[INFO]   Chaining: enabled");
-        } else {
-            eprintln!("[INFO]   Chaining: disabled (BLAST-compatible mode)");
+        if verbose {
+            eprintln!("[INFO] filter_hsps summary:");
+            eprintln!(
+                "[INFO]   Total time: {:.3}s",
+                total_start.elapsed().as_secs_f64()
+            );
+            eprintln!(
+                "[INFO]   Filtering: {:.3}s ({} -> {} hits)",
+                filter_time.as_secs_f64(),
+                result_hits_count,
+                final_hits.len()
+            );
         }
-        eprintln!(
-            "[INFO]   Filtering: {:.3}s ({} -> {} hits)",
-            filter_time.as_secs_f64(),
-            result_hits_count,
-            final_hits.len()
-        );
-    }
 
     final_hits
 }
@@ -746,7 +294,6 @@ pub fn run(args: BlastnArgs) -> Result<()> {
     // Keep a sender for the main thread to send the completion signal
     let tx_main = tx.clone();
     let verbose = args.verbose;
-    let chain_enabled = args.chain;
 
     let writer_handle = std::thread::spawn(move || -> Result<()> {
         if verbose {
@@ -794,9 +341,9 @@ pub fn run(args: BlastnArgs) -> Result<()> {
         }
         let chain_start = std::time::Instant::now();
 
-        // Chain nearby HSPs into longer alignments using cluster-then-extend
-        // When chain_enabled is false (default), this just returns individual HSPs for BLAST compatibility
-        let filtered_hits = chain_and_filter_hsps(
+        // Filter HSPs to remove redundant overlapping hits
+        // Always outputs individual HSPs (NCBI BLAST behavior - no chaining/clustering)
+        let filtered_hits = filter_hsps(
             all_hits,
             &all_sequences,
             config.reward,
@@ -808,7 +355,6 @@ pub fn run(args: BlastnArgs) -> Result<()> {
             &params_clone,
             config.use_dp,
             verbose,
-            chain_enabled,
         );
 
         if verbose {
@@ -848,8 +394,8 @@ pub fn run(args: BlastnArgs) -> Result<()> {
             None
         });
 
-    // Check if mask should be disabled for debugging
-    let disable_mask = std::env::var("BLEMIR_DEBUG_NO_MASK").is_ok();
+    // NCBI BLAST does NOT use mask_array/mask_hash for diagonal suppression
+    // REMOVED: disable_mask variable (no longer needed)
 
     if debug_mode {
         // Build marker to verify correct code is running
@@ -860,9 +406,6 @@ pub fn run(args: BlastnArgs) -> Result<()> {
             "[DEBUG] Task: {}, Scoring: reward={}, penalty={}, gap_open={}, gap_extend={}",
             args.task, config.reward, config.penalty, config.gap_open, config.gap_extend
         );
-        if disable_mask {
-            eprintln!("[DEBUG] Mask DISABLED for debugging");
-        }
         if let Some((q_start, q_end, s_start, s_end)) = debug_window {
             eprintln!(
                 "[DEBUG] Focusing on window: query {}-{}, subject {}-{}",
@@ -877,6 +420,7 @@ pub fn run(args: BlastnArgs) -> Result<()> {
     let hash_lookup_ref = lookup_tables.hash_lookup.as_ref();
     let queries_ref = &seq_data.queries;
     let query_ids_ref = &seq_data.query_ids;
+    let query_masks_ref = &seq_data.query_masks;
     
     // Capture config values for use in closure
     let effective_word_size = config.effective_word_size;
@@ -888,6 +432,7 @@ pub fn run(args: BlastnArgs) -> Result<()> {
     let gap_open = config.gap_open;
     let gap_extend = config.gap_extend;
     let x_drop_gapped = config.x_drop_gapped;
+    let scan_range = config.scan_range; // For off-diagonal hit detection
     let db_len_total = seq_data.db_len_total;
     let db_num_seqs = seq_data.db_num_seqs;
     let params_for_closure = params.clone();
@@ -922,7 +467,6 @@ pub fn run(args: BlastnArgs) -> Result<()> {
             let dbg_ambiguous_skipped = 0usize;
             let dbg_no_lookup_match = 0usize;
             let mut dbg_seeds_found = 0usize;
-            let mut dbg_mask_skipped = 0usize;
             let mut dbg_ungapped_low = 0usize;
             let mut dbg_two_hit_failed = 0usize;
             let mut dbg_gapped_attempted = 0usize;
@@ -987,27 +531,36 @@ pub fn run(args: BlastnArgs) -> Result<()> {
                     0
                 };
 
-                // Mask to track already-extended regions on each diagonal
-                // For single query: use Vec for O(1) access, otherwise use HashMap
-                let mut mask_array: Vec<Option<usize>> = if use_array_indexing {
-                    vec![None; diag_array_size]
-                } else {
-                    Vec::new()
-                };
-                let mut mask_hash: FxHashMap<u64, usize> = if !use_array_indexing {
-                    FxHashMap::default()
-                } else {
-                    FxHashMap::default()
-                };
+                // NCBI BLAST does NOT use a separate mask array for diagonal suppression
+                // NCBI only uses last_hit in hit_level_array (checked at line 753)
+                // This mask_array/mask_hash was LOSAT-specific and caused excessive filtering
+                // REMOVED to match NCBI BLAST behavior
 
-                // Two-hit tracking: stores the last seed position on each diagonal for each query
+                // NCBI reference: blast_extend.h:77-80, na_ungapped.c:660-666
+                // Two-hit tracking: DiagStruct array for tracking last_hit and flag per diagonal
+                // hit_level_array[diag] contains {last_hit, flag} (equivalent to NCBI's DiagStruct)
+                // hit_len_array[diag] contains hit length (0 = no hit, >0 = hit length)
                 // For single query: use Vec for O(1) access, otherwise use HashMap
-                let mut last_seed_array: Vec<Option<usize>> = if use_array_indexing {
-                    vec![None; diag_array_size]
+                let mut hit_level_array: Vec<DiagStruct> = if use_array_indexing {
+                    vec![DiagStruct::default(); diag_array_size]
                 } else {
                     Vec::new()
                 };
-                let mut last_seed_hash: FxHashMap<u64, usize> = if !use_array_indexing {
+                let mut hit_level_hash: FxHashMap<u64, DiagStruct> = if !use_array_indexing {
+                    FxHashMap::default()
+                } else {
+                    FxHashMap::default()
+                };
+                
+                // NCBI reference: na_ungapped.c:696, 705: diag_table->hit_len_array[off_diag]
+                // Hit length array: stores the length of the last hit on each diagonal
+                // 0 = no hit, >0 = hit length
+                let mut hit_len_array: Vec<usize> = if use_array_indexing {
+                    vec![0; diag_array_size]
+                } else {
+                    Vec::new()
+                };
+                let mut hit_len_hash: FxHashMap<u64, usize> = if !use_array_indexing {
                     FxHashMap::default()
                 } else {
                     FxHashMap::default()
@@ -1085,29 +638,30 @@ pub fn run(args: BlastnArgs) -> Result<()> {
                                 1.0, // scale_factor (typically 1.0 for standard scoring)
                             );
                             
-                            // Skip if sequences are too short
-                            if q_pos_usize + word_length > q_seq.len() || kmer_start + word_length > s_len {
+                            // NCBI reference: na_ungapped.c:1081-1140
+                            // CRITICAL: In two-stage lookup, seed finding phase ONLY finds lut_word_length matches.
+                            // The word_length matching happens LATER in s_BlastnExtendInitialHit (extension phase).
+                            //
+                            // NCBI BLAST flow:
+                            // 1. Seed finding: Find all lut_word_length matches (this phase)
+                            // 2. Extension: For each seed, call s_BlastnExtendInitialHit which:
+                            //    - Does LEFT extension (backwards from lut_word_length start)
+                            //    - Does RIGHT extension (forwards from lut_word_length end)
+                            //    - Verifies word_length match (ext_left + ext_right >= ext_to)
+                            //
+                            // We should NOT filter seeds during seed finding - pass ALL seeds to extension.
+                            // The extension phase will handle word_length matching.
+                            
+                            // Skip only if sequences are too short for lut_word_length match
+                            // (word_length check happens in extension phase)
+                            if q_pos_usize + lut_word_length > q_seq.len() || kmer_start + lut_word_length > s_len {
                                 continue;
                             }
                             
-                            // Use optimized SIMD comparison for 28-mer match check
-                            // For word_length == 28, use specialized 28-mer SIMD function
-                            let matches = if word_length == 28 {
-                                compare_28mer_simd(
-                                    &q_seq[q_pos_usize..q_pos_usize + word_length],
-                                    &search_seq[kmer_start..kmer_start + word_length],
-                                )
-                            } else {
-                                compare_sequences_simd(
-                                    &q_seq[q_pos_usize..q_pos_usize + word_length],
-                                    &search_seq[kmer_start..kmer_start + word_length],
-                                    word_length,
-                                )
-                            };
-                            
-                            if !matches {
-                                continue; // Skip if full word_length match doesn't exist
-                            }
+                            // For two-stage lookup, we use the lut_word_length match position
+                            // The actual word_length matching will happen in extension phase
+                            // NCBI BLAST: s_BlastnExtendInitialHit does left+right extension to verify word_length
+                            let extended = 0; // Will be calculated in extension phase
                             
                             let diag = kmer_start as isize - q_pos_usize as isize;
 
@@ -1123,94 +677,413 @@ pub fn run(args: BlastnArgs) -> Result<()> {
                                 dbg_window_seeds += 1;
                             }
 
-                            // Check if this region was already extended (skip if mask is disabled for debugging)
-                            // PERFORMANCE OPTIMIZATION: Use direct array indexing for single query
-                            if !disable_mask {
-                                let should_skip = if use_array_indexing {
-                                    let diag_idx = (diag + diag_offset) as usize;
-                                    if diag_idx < diag_array_size {
-                                        if let Some(last_s_end) = mask_array[diag_idx] {
-                                            kmer_start < last_s_end
-                                        } else {
-                                            false
-                                        }
-                                    } else {
-                                        false
-                                    }
-                                } else {
-                                    let diag_key = pack_diag_key(q_idx, diag);
-                                    if let Some(&last_s_end) = mask_hash.get(&diag_key) {
-                                        kmer_start < last_s_end
-                                    } else {
-                                        false
-                                    }
-                                };
-                                if should_skip {
-                                    dbg_mask_skipped += 1;
-                                    if in_window && debug_mode {
-                                        eprintln!("[DEBUG WINDOW] Seed at q={}, s={} SKIPPED by mask", q_pos_usize, kmer_start);
-                                    }
-                                    continue;
-                                }
-                            }
+                            // NCBI BLAST does NOT check mask_array/mask_hash at seed level
+                            // NCBI reference: na_ungapped.c:671-672
+                            // NCBI only checks: if (s_off_pos < last_hit) return 0;
+                            // This check happens below (line 753) using hit_level_array[real_diag].last_hit
+                            // The mask_array/mask_hash check above was LOSAT-specific and caused excessive filtering
+                            // REMOVED to match NCBI BLAST behavior
 
-                            // PERFORMANCE OPTIMIZATION: Apply two-hit filter BEFORE ungapped extension
-                            // This is the key optimization that makes NCBI BLAST fast
-                            // Most seeds don't have a nearby seed on the same diagonal, so we skip them early
-                            // NCBI reference: na_ungapped.c:656: Boolean two_hits = (window_size > 0);
-                            // When window_size = 0, all seeds trigger extension (one-hit mode)
-                            // PERFORMANCE OPTIMIZATION: Use direct array indexing for single query
-                            let trigger_extension = if TWO_HIT_WINDOW == 0 {
-                                // One-hit mode: always extend (NCBI BLAST default for nucleotide searches)
-                                true
-                            } else if use_array_indexing {
-                                let diag_idx = (diag + diag_offset) as usize;
-                                if diag_idx < diag_array_size {
-                                    if let Some(prev_s_pos) = last_seed_array[diag_idx] {
-                                        kmer_start.saturating_sub(prev_s_pos) <= TWO_HIT_WINDOW
-                                    } else {
-                                        false
-                                    }
-                                } else {
-                                    false
-                                }
+                            // NCBI reference: na_ungapped.c:656-672
+                            // Two-hit filter: check if there's a previous hit within window_size
+                            // NCBI: Boolean two_hits = (window_size > 0);
+                            // NCBI: last_hit = hit_level_array[real_diag].last_hit;
+                            // NCBI: hit_saved = hit_level_array[real_diag].flag;
+                            // NCBI: if (s_off_pos < last_hit) return 0;  // hit within explored area
+                            let diag_idx = if use_array_indexing {
+                                (diag + diag_offset) as usize
                             } else {
-                                let diag_key = pack_diag_key(q_idx, diag);
-                                if let Some(&prev_s_pos) = last_seed_hash.get(&diag_key) {
-                                    kmer_start.saturating_sub(prev_s_pos) <= TWO_HIT_WINDOW
-                                } else {
-                                    false
-                                }
+                                0 // Not used for hash indexing
                             };
-
-                            // Update the last seed position for this diagonal
-                            // PERFORMANCE OPTIMIZATION: Use direct array indexing for single query
-                            if use_array_indexing {
-                                let diag_idx = (diag + diag_offset) as usize;
-                                if diag_idx < diag_array_size {
-                                    last_seed_array[diag_idx] = Some(kmer_start);
-                                }
-                            } else {
+                            
+                            // Get current diagonal state
+                            let (last_hit, hit_saved) = if use_array_indexing && diag_idx < diag_array_size {
+                                let diag_entry = &hit_level_array[diag_idx];
+                                (diag_entry.last_hit, diag_entry.flag != 0)
+                            } else if !use_array_indexing {
                                 let diag_key = pack_diag_key(q_idx, diag);
-                                last_seed_hash.insert(diag_key, kmer_start);
-                            }
-
-                            // Skip ungapped extension if two-hit requirement is not met
-                            // This is the key optimization - we skip most seeds without doing any extension
-                            if !trigger_extension {
-                                dbg_two_hit_failed += 1;
-                                if in_window && debug_mode {
-                                    eprintln!("[DEBUG WINDOW] Seed at q={}, s={} SKIPPED: two-hit not met", q_pos_usize, kmer_start);
-                                }
+                                let diag_entry = hit_level_hash.get(&diag_key).copied().unwrap_or_default();
+                                (diag_entry.last_hit, diag_entry.flag != 0)
+                            } else {
+                                (0, false)
+                            };
+                            
+                            // NCBI: s_off_pos = s_off + diag_table->offset;
+                            // In LOSAT, we use kmer_start directly (0-based), but need to add offset for comparison
+                            let s_off_pos = kmer_start + diag_offset as usize;
+                            
+                            // NCBI: if (s_off_pos < last_hit) return 0;
+                            // Hit within explored area should be rejected
+                            if s_off_pos < last_hit {
                                 continue;
                             }
 
-                            // Now do ungapped extension (only for seeds that passed two-hit filter)
+                            // NCBI reference: na_ungapped.c:1081-1140
+                            // For two-stage lookup, verify word_length match BEFORE ungapped extension
+                            // This is done by left+right extension from the lut_word_length match position
+                            let (q_ext_start, s_ext_start) = if word_length > lut_word_length {
+                                // NCBI BLAST: s_BlastnExtendInitialHit does left+right extension
+                                // Reference: na_ungapped.c:1106-1120
+                                let ext_to = word_length - lut_word_length;
+                                
+                                // LEFT extension (backwards from lut_word_length start)
+                                // NCBI BLAST: na_ungapped.c:1101-1114
+                                // Int4 ext_left = 0;
+                                // Int4 s_off = s_offset;
+                                // Uint1 *q = query->sequence + q_offset;
+                                // Uint1 *s = subject->sequence + s_off / COMPRESSION_RATIO;
+                                // for (; ext_left < MIN(ext_to, s_offset); ++ext_left) {
+                                //     s_off--;
+                                //     q--;
+                                //     if (s_off % COMPRESSION_RATIO == 3)
+                                //         s--;
+                                //     if (((Uint1) (*s << (2 * (s_off % COMPRESSION_RATIO))) >> 6) != *q)
+                                //         break;
+                                // }
+                                // CRITICAL: NCBI relies on MIN(ext_to, s_offset) limit, NO explicit boundary check
+                                let mut ext_left = 0;
+                                let mut q_left = q_pos_usize;
+                                let mut s_left = kmer_start;
+                                
+                                // NCBI BLAST: MIN(ext_to, s_offset) - limit left extension by s_offset
+                                // s_offset (kmer_start) is the maximum number of positions we can extend left
+                                // NCBI reference: na_ungapped.c:1106-1114
+                                // for (; ext_left < MIN(ext_to, s_offset); ++ext_left) {
+                                //     s_off--;
+                                //     q--;
+                                //     if (s_off % COMPRESSION_RATIO == 3)
+                                //         s--;
+                                //     if (((Uint1) (*s << (2 * (s_off % COMPRESSION_RATIO))) >> 6) != *q)
+                                //         break;
+                                // }
+                                // CRITICAL: NCBI only limits by MIN(ext_to, s_offset) - NO query bounds check
+                                // NCBI doesn't check query bounds (undefined behavior if out of bounds)
+                                // For Rust safety, we use unsafe indexing but trust sequences are long enough
+                                // (lookup table only finds matches within valid ranges, so sequences should be long enough)
+                                let max_ext_left = ext_to.min(kmer_start);
+                                
+                                // NCBI BLAST: Loop condition is ext_left < MIN(ext_to, s_offset)
+                                // NO explicit boundary check inside loop (NCBI doesn't have it)
+                                // SAFETY: We've limited by subject bounds. For query, we trust sequences are long enough
+                                // (NCBI doesn't check query bounds either - it's undefined behavior if out of bounds)
+                                while ext_left < max_ext_left {
+                                    // NCBI BLAST: s_off--; q--;
+                                    // Reference: na_ungapped.c:1107-1108
+                                    q_left -= 1;
+                                    s_left -= 1;
+                                    // NCBI BLAST: if (base mismatch) break;
+                                    // Reference: na_ungapped.c:1111-1114
+                                    if unsafe { *q_seq.get_unchecked(q_left) } != unsafe { *search_seq.get_unchecked(s_left) } {
+                                        break;
+                                    }
+                                    ext_left += 1;
+                                }
+                                
+                                // RIGHT extension (forwards from lut_word_length end)
+                                // NCBI BLAST: na_ungapped.c:1120-1136
+                                // if (ext_left < ext_to) {
+                                //     Int4 ext_right = 0;
+                                //     s_off = s_offset + lut_word_length;
+                                //     if (s_off + ext_to - ext_left > s_range) 
+                                //         continue;
+                                //     q = query->sequence + q_offset + lut_word_length;
+                                //     s = subject->sequence + s_off / COMPRESSION_RATIO;
+                                //     for (; ext_right < ext_to - ext_left; ++ext_right) {
+                                //         if (((Uint1) (*s << (2 * (s_off % COMPRESSION_RATIO))) >> 6) != *q)
+                                //             break;
+                                //         s_off++;
+                                //         q++;
+                                //         if (s_off % COMPRESSION_RATIO == 0)
+                                //             s++;
+                                //     }
+                                // }
+                                // Only do right extension if left didn't get all bases
+                                // NCBI reference: na_ungapped.c:1120-1136
+                                // if (ext_left < ext_to) {
+                                //     Int4 ext_right = 0;
+                                //     s_off = s_offset + lut_word_length;
+                                //     if (s_off + ext_to - ext_left > s_range) 
+                                //         continue;
+                                //     q = query->sequence + q_offset + lut_word_length;
+                                //     s = subject->sequence + s_off / COMPRESSION_RATIO;
+                                //     for (; ext_right < ext_to - ext_left; ++ext_right) {
+                                //         if (mismatch) break;
+                                //         s_off++;
+                                //         q++;
+                                //     }
+                                // }
+                                if ext_left < ext_to {
+                                    // NCBI BLAST: s_off = s_offset + lut_word_length;
+                                    // NCBI BLAST: if (s_off + ext_to - ext_left > s_range) continue;
+                                    // Reference: na_ungapped.c:1122-1124
+                                    // CRITICAL: NCBI only checks subject bounds, NOT query bounds
+                                    let s_off = kmer_start + lut_word_length;
+                                    if s_off + (ext_to - ext_left) > s_len {
+                                        // Not enough room in subject, skip this seed (NCBI behavior)
+                                        continue;
+                                    }
+                                    
+                                    let mut ext_right = 0;
+                                    let q_off = q_pos_usize + lut_word_length;
+                                    let mut q_right = q_off;
+                                    let mut s_right = s_off;
+                                    
+                                    // NCBI BLAST: for (; ext_right < ext_to - ext_left; ++ext_right)
+                                    // Reference: na_ungapped.c:1128-1136
+                                    // NO bounds checks in loop condition (NCBI relies on pre-loop subject check only)
+                                    // NCBI doesn't check query bounds - it would access out of bounds (undefined behavior)
+                                    // For Rust safety, we use unsafe indexing but trust sequences are long enough
+                                    // (lookup table only finds matches within valid ranges, so sequences should be long enough)
+                                    while ext_right < (ext_to - ext_left) {
+                                        // NCBI BLAST: if (base mismatch) break;
+                                        // Reference: na_ungapped.c:1129-1131
+                                        // SAFETY: We've checked subject bounds above. For query, we trust sequences are long enough
+                                        // (NCBI doesn't check query bounds either - it's undefined behavior if out of bounds)
+                                        if unsafe { *q_seq.get_unchecked(q_right) } != unsafe { *search_seq.get_unchecked(s_right) } {
+                                            break;
+                                        }
+                                        ext_right += 1;
+                                        q_right += 1;
+                                        s_right += 1;
+                                    }
+                                    
+                                    // NCBI BLAST: if (ext_left + ext_right < ext_to) continue;
+                                    // Reference: na_ungapped.c:1125
+                                    if ext_left + ext_right < ext_to {
+                                        // Word_length match failed, skip this seed
+                                        continue;
+                                    }
+                                }
+                                
+                                // Adjust positions for type_of_word and ungapped extension
+                                // NCBI BLAST: q_offset -= ext_left; s_offset -= ext_left;
+                                // Reference: na_ungapped.c:1143-1144
+                                (q_pos_usize - ext_left, kmer_start - ext_left)
+                            } else {
+                                // word_length == lut_word_length, no extension needed
+                                (q_pos_usize, kmer_start)
+                            };
+                            
+                            // NCBI reference: na_ungapped.c:674-683
+                            // After word_length verification, call type_of_word for two-hit mode
+                            // if (two_hits && (hit_saved || s_end_pos > last_hit + window_size)) {
+                            //     word_type = s_TypeOfWord(...);
+                            //     if (!word_type) return 0;
+                            //     s_end += extended;
+                            //     s_end_pos += extended;
+                            // }
+                            let two_hits = TWO_HIT_WINDOW > 0;
+                            let q_off = q_ext_start;
+                            let s_off = s_ext_start;
+                            let mut s_end = s_ext_start + word_length;
+                            let mut s_end_pos = s_end + diag_offset as usize;
+                            let mut word_type = 1u8; // Default: single word (when word_length == lut_word_length)
+                            let mut extended = 0usize;
+                            let mut off_found = false;
+                            let mut hit_ready = true;
+                            
+                            // NCBI: if (two_hits && (hit_saved || s_end_pos > last_hit + window_size)) {
+                            if two_hits && (hit_saved || s_end_pos > last_hit + TWO_HIT_WINDOW) {
+                                // NCBI reference: na_ungapped.c:677-680
+                                // word_type = s_TypeOfWord(query, subject, &q_off, &s_off,
+                                //                          query_mask, query_info, s_range, 
+                                //                          word_length, lut_word_length, lut, TRUE, &extended);
+                                let query_mask = &query_masks_ref[q_idx as usize];
+                                let (wt, ext) = type_of_word(
+                                    q_seq,
+                                    search_seq,
+                                    q_off,
+                                    s_off,
+                                    query_mask,
+                                    word_length,
+                                    lut_word_length,
+                                    true, // check_double = TRUE
+                                );
+                                word_type = wt;
+                                extended = ext;
+                                
+                                // NCBI: if (!word_type) return 0;
+                                if word_type == 0 {
+                                    // Non-word, skip this hit
+                                    continue;
+                                }
+                                
+                                // NCBI: s_end += extended;
+                                // NCBI: s_end_pos += extended;
+                                s_end += extended;
+                                s_end_pos += extended;
+                                
+                                // NCBI reference: na_ungapped.c:685-717
+                                // for single word, also try off diagonals
+                                // if (word_type == 1) {
+                                //     /* try off-diagonals */
+                                //     Int4 orig_diag = real_diag + diag_table->diag_array_length;
+                                //     Int4 s_a = s_off_pos + word_length - window_size;
+                                //     Int4 s_b = s_end_pos - 2 * word_length;
+                                //     Int4 delta;
+                                //     if (Delta < 0) Delta = 0;
+                                //     for (delta = 1; delta <= Delta ; ++delta) {
+                                //         // Check diag + delta and diag - delta
+                                //         ...
+                                //     }
+                                //     if (!off_found) {
+                                //         hit_ready = 0;
+                                //     }
+                                // }
+                                if word_type == 1 {
+                                    // NCBI reference: na_ungapped.c:658, 692
+                                    // Int4 Delta = MIN(word_params->options->scan_range, window_size - word_length);
+                                    // if (Delta < 0) Delta = 0;
+                                    let window_size = TWO_HIT_WINDOW;
+                                    let delta_calc = window_size as isize - word_length as isize;
+                                    let mut delta_max = if delta_calc < 0 {
+                                        0
+                                    } else {
+                                        scan_range.min(delta_calc as usize) as isize
+                                    };
+                                    
+                                    // NCBI reference: na_ungapped.c:689-690
+                                    // Int4 s_a = s_off_pos + word_length - window_size;
+                                    // Int4 s_b = s_end_pos - 2 * word_length;
+                                    // CRITICAL: NCBI uses signed arithmetic (Int4), so s_a and s_b can be negative
+                                    // LOSAT must use signed arithmetic to match NCBI behavior
+                                    let s_a = s_off_pos as isize + word_length as isize - window_size as isize;
+                                    let s_b = s_end_pos as isize - 2 * word_length as isize;
+                                    
+                                    // NCBI reference: na_ungapped.c:688
+                                    // Int4 orig_diag = real_diag + diag_table->diag_array_length;
+                                    // In LOSAT, we use diag directly (not masked)
+                                    let orig_diag = diag;
+                                    
+                                    // NCBI reference: na_ungapped.c:693
+                                    // for (delta = 1; delta <= Delta ; ++delta) {
+                                    for delta in 1..=delta_max {
+                                        // NCBI reference: na_ungapped.c:694-702
+                                        // Int4 off_diag  = (orig_diag + delta) & diag_table->diag_mask;
+                                        // Int4 off_s_end = hit_level_array[off_diag].last_hit;
+                                        // Int4 off_s_l   = diag_table->hit_len_array[off_diag];
+                                        // if ( off_s_l
+                                        //  && off_s_end - delta >= s_a 
+                                        //  && off_s_end - off_s_l <= s_b) {
+                                        //     off_found = TRUE;
+                                        //     break;
+                                        // }
+                                        let off_diag = orig_diag + delta as isize;
+                                        let (off_s_end, off_s_l) = if use_array_indexing {
+                                            let off_diag_idx = (off_diag + diag_offset) as usize;
+                                            if off_diag_idx < diag_array_size {
+                                                let off_entry = &hit_level_array[off_diag_idx];
+                                                (off_entry.last_hit, hit_len_array[off_diag_idx])
+                                            } else {
+                                                (0, 0)
+                                            }
+                                        } else {
+                                            let off_diag_key = pack_diag_key(q_idx, off_diag);
+                                            let off_entry = hit_level_hash.get(&off_diag_key).copied().unwrap_or_default();
+                                            let off_len = hit_len_hash.get(&off_diag_key).copied().unwrap_or(0);
+                                            (off_entry.last_hit, off_len)
+                                        };
+                                        
+                                        // NCBI: off_s_end - delta >= s_a (signed comparison)
+                                        // Convert to signed for comparison to match NCBI behavior
+                                        if off_s_l > 0 
+                                            && (off_s_end as isize - delta as isize) >= s_a
+                                            && (off_s_end as isize - off_s_l as isize) <= s_b {
+                                            off_found = true;
+                                            break;
+                                        }
+                                        
+                                        // NCBI reference: na_ungapped.c:703-711
+                                        // off_diag  = (orig_diag - delta) & diag_table->diag_mask;
+                                        // off_s_end = hit_level_array[off_diag].last_hit;
+                                        // off_s_l   = diag_table->hit_len_array[off_diag];
+                                        // if ( off_s_l
+                                        //  && off_s_end >= s_a 
+                                        //  && off_s_end - off_s_l + delta <= s_b) {
+                                        //     off_found = TRUE;
+                                        //     break;
+                                        // }
+                                        let off_diag = orig_diag - delta as isize;
+                                        let (off_s_end, off_s_l) = if use_array_indexing {
+                                            let off_diag_idx = (off_diag + diag_offset) as usize;
+                                            if off_diag_idx < diag_array_size {
+                                                let off_entry = &hit_level_array[off_diag_idx];
+                                                (off_entry.last_hit, hit_len_array[off_diag_idx])
+                                            } else {
+                                                (0, 0)
+                                            }
+                                        } else {
+                                            let off_diag_key = pack_diag_key(q_idx, off_diag);
+                                            let off_entry = hit_level_hash.get(&off_diag_key).copied().unwrap_or_default();
+                                            let off_len = hit_len_hash.get(&off_diag_key).copied().unwrap_or(0);
+                                            (off_entry.last_hit, off_len)
+                                        };
+                                        
+                                        // NCBI: off_s_end >= s_a (signed comparison)
+                                        // Convert to signed for comparison to match NCBI behavior
+                                        if off_s_l > 0 
+                                            && (off_s_end as isize) >= s_a
+                                            && (off_s_end as isize - off_s_l as isize + delta as isize) <= s_b {
+                                            off_found = true;
+                                            break;
+                                        }
+                                    }
+                                    
+                                    // NCBI: if (!off_found) {
+                                    //     hit_ready = 0;
+                                    // }
+                                    if !off_found {
+                                        // NCBI reference: na_ungapped.c:713-716
+                                        // if (!off_found) {
+                                        //     /* This is a new hit */
+                                        //     hit_ready = 0;
+                                        // }
+                                        hit_ready = false;
+                                    }
+                                }
+                            } else {
+                                // NCBI reference: na_ungapped.c:718-726
+                                // else if (check_masks) {
+                                //     /* check the masks for the word */
+                                //     if(!s_TypeOfWord(query, subject, &q_off, &s_off,
+                                //                     query_mask, query_info, s_range, 
+                                //                     word_length, lut_word_length, lut, FALSE, &extended)) return 0;
+                                //     /* update the right end*/
+                                //     s_end += extended;
+                                //     s_end_pos += extended;
+                                // }
+                                // In NCBI, check_masks is TRUE by default (only FALSE when lut->stride is true)
+                                // For LOSAT, we always check masks (equivalent to check_masks = TRUE)
+                                let query_mask = &query_masks_ref[q_idx as usize];
+                                let (wt, ext) = type_of_word(
+                                    q_seq,
+                                    search_seq,
+                                    q_off,
+                                    s_off,
+                                    query_mask,
+                                    word_length,
+                                    lut_word_length,
+                                    false, // check_double = FALSE (not in two-hit block)
+                                );
+                                if wt == 0 {
+                                    // Non-word, skip this hit
+                                    continue;
+                                }
+                                // NCBI: s_end += extended;
+                                // NCBI: s_end_pos += extended;
+                                s_end += ext;
+                                s_end_pos += ext;
+                                // hit_ready remains true (default) - extension will proceed
+                            }
+                            
+                            // Now do ungapped extension from the adjusted position
+                            // NCBI BLAST: s_BlastnExtendInitialHit calls ungapped extension after word_length verification
+                            // Use q_off and s_off (adjusted by type_of_word if called)
                             let (qs, qe, ss, _se, ungapped_score) = extend_hit_ungapped(
                                 q_seq,
                                 search_seq,
-                                q_pos_usize,
-                                kmer_start,
+                                q_off,
+                                s_off,
                                 reward,
                                 penalty,
                                 None, // Use default X-drop
@@ -1220,10 +1093,29 @@ pub fn run(args: BlastnArgs) -> Result<()> {
                             // NCBI reference: na_ungapped.c:752
                             // if (off_found || ungapped_data->score >= cutoffs->cutoff_score)
                             // Use dynamically calculated cutoff_score instead of fixed threshold
-                            if ungapped_score < cutoff_score {
+                            // off_found is set by off-diagonal search (Step 3)
+                            // NCBI: if (off_found || ungapped_data->score >= cutoffs->cutoff_score)
+                            if !(off_found || ungapped_score >= cutoff_score) {
                                 dbg_ungapped_low += 1;
                                 if in_window && debug_mode {
                                     eprintln!("[DEBUG WINDOW] Seed at q={}, s={} SKIPPED: ungapped_score={} < {}", q_pos_usize, kmer_start, ungapped_score, min_ungapped_score);
+                                }
+                                // NCBI reference: na_ungapped.c:768-771
+                                // Update hit_level_array and hit_len_array even if extension is skipped
+                                // hit_level_array[real_diag].last_hit = s_end_pos;
+                                // hit_level_array[real_diag].flag = hit_ready;
+                                // diag_table->hit_len_array[real_diag] = (hit_ready) ? 0 : s_end_pos - s_off_pos;
+                                if use_array_indexing && diag_idx < diag_array_size {
+                                    hit_level_array[diag_idx].last_hit = s_end_pos;
+                                    hit_level_array[diag_idx].flag = if hit_ready { 1 } else { 0 };
+                                    hit_len_array[diag_idx] = if hit_ready { 0 } else { s_end_pos - s_off_pos };
+                                } else if !use_array_indexing {
+                                    let diag_key = pack_diag_key(q_idx, diag);
+                                    hit_level_hash.insert(diag_key, DiagStruct {
+                                        last_hit: s_end_pos,
+                                        flag: if hit_ready { 1 } else { 0 },
+                                    });
+                                    hit_len_hash.insert(diag_key, if hit_ready { 0 } else { s_end_pos - s_off_pos });
                                 }
                                 continue;
                             }
@@ -1278,18 +1170,33 @@ pub fn run(args: BlastnArgs) -> Result<()> {
                             // Suppress unused variable warning when not in debug mode
                             let _ = dp_cells;
 
-                            // Update mask (unless disabled for debugging via BLEMIR_DEBUG_NO_MASK=1)
-                            // PERFORMANCE OPTIMIZATION: Use direct array indexing for single query
-                            if !disable_mask {
-                                if use_array_indexing {
-                                    let diag_idx = (diag + diag_offset) as usize;
-                                    if diag_idx < diag_array_size {
-                                        mask_array[diag_idx] = Some(final_se);
-                                    }
-                                } else {
-                                    let diag_key = pack_diag_key(q_idx, diag);
-                                    mask_hash.insert(diag_key, final_se);
-                                }
+                            // NCBI BLAST does NOT update mask_array/mask_hash
+                            // NCBI reference: na_ungapped.c:768-771
+                            // NCBI only updates: hit_level_array[real_diag].last_hit = s_end_pos;
+                            // This update happens below (line 1214) using hit_level_array
+                            // The mask_array/mask_hash update above was LOSAT-specific and caused excessive filtering
+                            // REMOVED to match NCBI BLAST behavior
+                            
+                            // NCBI reference: na_ungapped.c:768-771
+                            // Update hit_level_array and hit_len_array after successful extension
+                            // hit_level_array[real_diag].last_hit = s_end_pos;
+                            // hit_level_array[real_diag].flag = hit_ready;
+                            // diag_table->hit_len_array[real_diag] = (hit_ready) ? 0 : s_end_pos - s_off_pos;
+                            // NCBI: s_end_pos = ungapped_data->length + ungapped_data->s_start + diag_table->offset;
+                            // In LOSAT, we use final_se (end position after gapped extension) + diag_offset
+                            let final_s_end_pos = final_se + diag_offset as usize;
+                            hit_ready = true; // Extension was successful
+                            if use_array_indexing && diag_idx < diag_array_size {
+                                hit_level_array[diag_idx].last_hit = final_s_end_pos;
+                                hit_level_array[diag_idx].flag = 1; // hit_ready = true
+                                hit_len_array[diag_idx] = 0; // hit_ready, so set to 0
+                            } else if !use_array_indexing {
+                                let diag_key = pack_diag_key(q_idx, diag);
+                                hit_level_hash.insert(diag_key, DiagStruct {
+                                    last_hit: final_s_end_pos,
+                                    flag: 1, // hit_ready = true
+                                });
+                                hit_len_hash.insert(diag_key, 0); // hit_ready, so set to 0
                             }
 
                             let (bit_score, eval) = calculate_evalue(
@@ -1310,7 +1217,7 @@ pub fn run(args: BlastnArgs) -> Result<()> {
 
                                 let q_id = query_ids[q_idx as usize].clone();
 
-                                // Store sequence data for cluster-then-extend chaining
+                                // Store sequence data for overlap filtering
                                 let pair_key = (q_id.clone(), s_id.clone());
                                 if !seen_pairs.contains(&pair_key) {
                                     seen_pairs.insert(pair_key);
@@ -1444,94 +1351,249 @@ pub fn run(args: BlastnArgs) -> Result<()> {
                             dbg_window_seeds += 1;
                         }
 
-                        // Check if this region was already extended (skip if mask is disabled for debugging)
-                        // PERFORMANCE OPTIMIZATION: Use direct array indexing for single query
-                        if !disable_mask {
-                            let should_skip = if use_array_indexing {
-                                let diag_idx = (diag + diag_offset) as usize;
-                                if diag_idx < diag_array_size {
-                                    if let Some(last_s_end) = mask_array[diag_idx] {
-                                        kmer_start < last_s_end
-                                    } else {
-                                        false
-                                    }
-                                } else {
-                                    false
-                                }
-                            } else {
-                                let diag_key = pack_diag_key(q_idx, diag);
-                                if let Some(&last_s_end) = mask_hash.get(&diag_key) {
-                                    kmer_start < last_s_end
-                                } else {
-                                    false
-                                }
-                            };
-                            if should_skip {
-                                dbg_mask_skipped += 1;
-                                if in_window && debug_mode {
-                                    eprintln!("[DEBUG WINDOW] Seed at q={}, s={} SKIPPED by mask", q_pos, kmer_start);
-                                }
-                                continue;
-                            }
-                        }
+                        // NCBI BLAST does NOT check mask_array/mask_hash at seed level
+                        // NCBI reference: na_ungapped.c:671-672
+                        // NCBI only checks: if (s_off_pos < last_hit) return 0;
+                        // This check happens below using hit_level_array[real_diag].last_hit
+                        // The mask_array/mask_hash check above was LOSAT-specific and caused excessive filtering
+                        // REMOVED to match NCBI BLAST behavior
 
-                        // PERFORMANCE OPTIMIZATION: Apply two-hit filter BEFORE ungapped extension
-                        // This is the key optimization that makes NCBI BLAST fast
-                        // Most seeds don't have a nearby seed on the same diagonal, so we skip them early
-                        // NCBI reference: na_ungapped.c:656: Boolean two_hits = (window_size > 0);
-                        // When window_size = 0, all seeds trigger extension (one-hit mode)
-                        // PERFORMANCE OPTIMIZATION: Use direct array indexing for single query
-                        let trigger_extension = if TWO_HIT_WINDOW == 0 {
-                            // One-hit mode: always extend (NCBI BLAST default for nucleotide searches)
-                            true
-                        } else if use_array_indexing {
-                            let diag_idx = (diag + diag_offset) as usize;
-                            if diag_idx < diag_array_size {
-                                if let Some(prev_s_pos) = last_seed_array[diag_idx] {
-                                    kmer_start.saturating_sub(prev_s_pos) <= TWO_HIT_WINDOW
-                                } else {
-                                    false
-                                }
-                            } else {
-                                false
-                            }
+                        // NCBI reference: na_ungapped.c:656-672
+                        // Two-hit filter: check if there's a previous hit within window_size
+                        // NCBI: Boolean two_hits = (window_size > 0);
+                        // NCBI: last_hit = hit_level_array[real_diag].last_hit;
+                        // NCBI: hit_saved = hit_level_array[real_diag].flag;
+                        // NCBI: if (s_off_pos < last_hit) return 0;  // hit within explored area
+                        // NCBI: if (two_hits && (hit_saved || s_end_pos > last_hit + window_size)) { ... }
+                        let diag_idx = if use_array_indexing {
+                            (diag + diag_offset) as usize
                         } else {
-                            let diag_key = pack_diag_key(q_idx, diag);
-                            if let Some(&prev_s_pos) = last_seed_hash.get(&diag_key) {
-                                kmer_start.saturating_sub(prev_s_pos) <= TWO_HIT_WINDOW
-                            } else {
-                                false
-                            }
+                            0 // Not used for hash indexing
                         };
-
-                        // Update the last seed position for this diagonal
-                        // PERFORMANCE OPTIMIZATION: Use direct array indexing for single query
-                        if use_array_indexing {
-                            let diag_idx = (diag + diag_offset) as usize;
-                            if diag_idx < diag_array_size {
-                                last_seed_array[diag_idx] = Some(kmer_start);
-                            }
-                        } else {
+                        
+                        // Get current diagonal state
+                        let (last_hit, hit_saved) = if use_array_indexing && diag_idx < diag_array_size {
+                            let diag_entry = &hit_level_array[diag_idx];
+                            (diag_entry.last_hit, diag_entry.flag != 0)
+                        } else if !use_array_indexing {
                             let diag_key = pack_diag_key(q_idx, diag);
-                            last_seed_hash.insert(diag_key, kmer_start);
-                        }
-
-                        // Skip ungapped extension if two-hit requirement is not met
-                        // This is the key optimization - we skip most seeds without doing any extension
-                        if !trigger_extension {
-                            dbg_two_hit_failed += 1;
-                            if in_window && debug_mode {
-                                eprintln!("[DEBUG WINDOW] Seed at q={}, s={} SKIPPED: two-hit not met", q_pos, kmer_start);
-                            }
+                            let diag_entry = hit_level_hash.get(&diag_key).copied().unwrap_or_default();
+                            (diag_entry.last_hit, diag_entry.flag != 0)
+                        } else {
+                            (0, false)
+                        };
+                        
+                        // NCBI: s_off_pos = s_off + diag_table->offset;
+                        // In LOSAT, we use kmer_start directly (0-based), but need to add offset for comparison
+                        let s_off_pos = kmer_start + diag_offset as usize;
+                        
+                        // NCBI: if (s_off_pos < last_hit) return 0;
+                        // Hit within explored area should be rejected
+                        if s_off_pos < last_hit {
                             continue;
                         }
+                        
+                        // NCBI reference: na_ungapped.c:674-683
+                        // After two-hit check, call type_of_word for two-hit mode
+                        // if (two_hits && (hit_saved || s_end_pos > last_hit + window_size)) {
+                        //     word_type = s_TypeOfWord(...);
+                        //     if (!word_type) return 0;
+                        //     s_end += extended;
+                        //     s_end_pos += extended;
+                        // }
+                        let two_hits = TWO_HIT_WINDOW > 0;
+                        let q_off = q_pos as usize;
+                        let s_off = kmer_start;
+                        let mut s_end = kmer_start + safe_k;
+                        let mut s_end_pos = s_end + diag_offset as usize;
+                        let mut word_type = 1u8; // Default: single word (when word_length == lut_word_length)
+                        let mut extended = 0usize;
+                        let mut off_found = false;
+                        let mut hit_ready = true;
+                        
+                        // NCBI: if (two_hits && (hit_saved || s_end_pos > last_hit + window_size)) {
+                        if two_hits && (hit_saved || s_end_pos > last_hit + TWO_HIT_WINDOW) {
+                            // NCBI reference: na_ungapped.c:677-680
+                            // word_type = s_TypeOfWord(query, subject, &q_off, &s_off,
+                            //                          query_mask, query_info, s_range, 
+                            //                          word_length, lut_word_length, lut, TRUE, &extended);
+                            // For non-two-stage lookup, word_length == lut_word_length, so type_of_word returns (1, 0)
+                            let query_mask = &query_masks_ref[q_idx as usize];
+                            let (wt, ext) = type_of_word(
+                                q_record.seq(),
+                                search_seq,
+                                q_off,
+                                s_off,
+                                query_mask,
+                                safe_k, // word_length
+                                safe_k, // lut_word_length (same for non-two-stage)
+                                true, // check_double = TRUE
+                            );
+                            word_type = wt;
+                            extended = ext;
+                            
+                            // NCBI: if (!word_type) return 0;
+                            if word_type == 0 {
+                                // Non-word, skip this hit
+                                continue;
+                            }
+                            
+                            // NCBI: s_end += extended;
+                            // NCBI: s_end_pos += extended;
+                            s_end += extended;
+                            s_end_pos += extended;
+                            
+                            // NCBI reference: na_ungapped.c:852-881 - off-diagonal search (DiagHash version)
+                            if word_type == 1 {
+                                // NCBI reference: na_ungapped.c:858
+                                // Int4 Delta = MIN(word_params->options->scan_range, window_size - word_length);
+                                // if (Delta < 0) Delta = 0;
+                                let window_size = TWO_HIT_WINDOW;
+                                let delta_calc = window_size as isize - safe_k as isize;
+                                let mut delta_max = if delta_calc < 0 {
+                                    0
+                                } else {
+                                    scan_range.min(delta_calc as usize) as isize
+                                };
+                                
+                                // NCBI reference: na_ungapped.c:855-856
+                                // Int4 s_a = s_off_pos + word_length - window_size;
+                                // Int4 s_b = s_end_pos - 2 * word_length;
+                                // CRITICAL: NCBI uses signed arithmetic (Int4), so s_a and s_b can be negative
+                                // LOSAT must use signed arithmetic to match NCBI behavior
+                                let s_a = s_off_pos as isize + safe_k as isize - window_size as isize;
+                                let s_b = s_end_pos as isize - 2 * safe_k as isize;
+                                
+                                let orig_diag = diag;
+                                
+                                // NCBI reference: na_ungapped.c:859
+                                // for (delta = 1; delta <= Delta; ++delta) {
+                                for delta in 1..=delta_max {
+                                    // NCBI reference: na_ungapped.c:860-871
+                                    // Int4 off_s_end = 0;
+                                    // Int4 off_s_l = 0;
+                                    // Int4 off_hit_saved = 0;
+                                    // Int4 off_rc = s_BlastDiagHashRetrieve(hash_table, diag + delta, 
+                                    //               &off_s_end, &off_s_l, &off_hit_saved);
+                                    // if ( off_rc
+                                    //   && off_s_l
+                                    //   && off_s_end - delta >= s_a
+                                    //   && off_s_end - off_s_l <= s_b) {
+                                    //      off_found = TRUE;
+                                    //      break;
+                                    // }
+                                    let off_diag = orig_diag + delta as isize;
+                                    let (off_s_end, off_s_l) = if use_array_indexing {
+                                        let off_diag_idx = (off_diag + diag_offset) as usize;
+                                        if off_diag_idx < diag_array_size {
+                                            let off_entry = &hit_level_array[off_diag_idx];
+                                            (off_entry.last_hit, hit_len_array[off_diag_idx])
+                                        } else {
+                                            (0, 0)
+                                        }
+                                    } else {
+                                        let off_diag_key = pack_diag_key(q_idx, off_diag);
+                                        let off_entry = hit_level_hash.get(&off_diag_key).copied().unwrap_or_default();
+                                        let off_len = hit_len_hash.get(&off_diag_key).copied().unwrap_or(0);
+                                        (off_entry.last_hit, off_len)
+                                    };
+                                    
+                                    // NCBI: off_s_end - delta >= s_a (signed comparison)
+                                    // Convert to signed for comparison to match NCBI behavior
+                                    if off_s_l > 0 
+                                        && (off_s_end as isize - delta as isize) >= s_a
+                                        && (off_s_end as isize - off_s_l as isize) <= s_b {
+                                        off_found = true;
+                                        break;
+                                    }
+                                    
+                                    // NCBI reference: na_ungapped.c:872-880
+                                    // off_rc = s_BlastDiagHashRetrieve(hash_table, diag - delta, 
+                                    //               &off_s_end, &off_s_l, &off_hit_saved);
+                                    // if ( off_rc
+                                    //   && off_s_l
+                                    //   && off_s_end >= s_a
+                                    //   && off_s_end - off_s_l + delta <= s_b) {
+                                    //      off_found = TRUE;
+                                    //      break;
+                                    // }
+                                    let off_diag = orig_diag - delta as isize;
+                                    let (off_s_end, off_s_l) = if use_array_indexing {
+                                        let off_diag_idx = (off_diag + diag_offset) as usize;
+                                        if off_diag_idx < diag_array_size {
+                                            let off_entry = &hit_level_array[off_diag_idx];
+                                            (off_entry.last_hit, hit_len_array[off_diag_idx])
+                                        } else {
+                                            (0, 0)
+                                        }
+                                    } else {
+                                        let off_diag_key = pack_diag_key(q_idx, off_diag);
+                                        let off_entry = hit_level_hash.get(&off_diag_key).copied().unwrap_or_default();
+                                        let off_len = hit_len_hash.get(&off_diag_key).copied().unwrap_or(0);
+                                        (off_entry.last_hit, off_len)
+                                    };
+                                    
+                                    // NCBI: off_s_end >= s_a (signed comparison)
+                                    // Convert to signed for comparison to match NCBI behavior
+                                    if off_s_l > 0 
+                                        && (off_s_end as isize) >= s_a
+                                        && (off_s_end as isize - off_s_l as isize + delta as isize) <= s_b {
+                                        off_found = true;
+                                        break;
+                                    }
+                                }
+                                
+                                if !off_found {
+                                    // NCBI reference: na_ungapped.c:713-716
+                                    // if (!off_found) {
+                                    //     /* This is a new hit */
+                                    //     hit_ready = 0;
+                                    // }
+                                    hit_ready = false;
+                                }
+                            }
+                        } else {
+                            // NCBI reference: na_ungapped.c:718-726
+                            // else if (check_masks) {
+                            //     /* check the masks for the word */
+                            //     if(!s_TypeOfWord(query, subject, &q_off, &s_off,
+                            //                     query_mask, query_info, s_range, 
+                            //                     word_length, lut_word_length, lut, FALSE, &extended)) return 0;
+                            //     /* update the right end*/
+                            //     s_end += extended;
+                            //     s_end_pos += extended;
+                            // }
+                            // In NCBI, check_masks is TRUE by default (only FALSE when lut->stride is true)
+                            // For LOSAT, we always check masks (equivalent to check_masks = TRUE)
+                            let query_mask = &query_masks_ref[q_idx as usize];
+                            let (wt, ext) = type_of_word(
+                                q_record.seq(),
+                                search_seq,
+                                q_off,
+                                s_off,
+                                query_mask,
+                                safe_k, // word_length
+                                safe_k, // lut_word_length (same for non-two-stage)
+                                false, // check_double = FALSE (not in two-hit block)
+                            );
+                            if wt == 0 {
+                                // Non-word, skip this hit
+                                continue;
+                            }
+                            // NCBI: s_end += extended;
+                            // NCBI: s_end_pos += extended;
+                            s_end += ext;
+                            s_end_pos += ext;
+                            // hit_ready remains true (default) - extension will proceed
+                        }
 
-                        // Now do ungapped extension (only for seeds that passed two-hit filter)
+                        // Now do ungapped extension from the adjusted position
+                        // Use q_off and s_off (adjusted by type_of_word if called)
                         let (qs, qe, ss, _se, ungapped_score) = extend_hit_ungapped(
                             q_record.seq(),
                             search_seq,
-                            q_pos as usize,
-                            kmer_start,
+                            q_off,
+                            s_off,
                             reward,
                             penalty,
                             None, // Use default X-drop
@@ -1541,7 +1603,23 @@ pub fn run(args: BlastnArgs) -> Result<()> {
                         // NCBI reference: na_ungapped.c:752
                         // if (off_found || ungapped_data->score >= cutoffs->cutoff_score)
                         // Use dynamically calculated cutoff_score instead of fixed threshold
-                        if ungapped_score < cutoff_score {
+                        // off_found is set by off-diagonal search
+                        // NCBI: if (off_found || ungapped_data->score >= cutoffs->cutoff_score)
+                        if !(off_found || ungapped_score >= cutoff_score) {
+                            // NCBI reference: na_ungapped.c:768-771
+                            // Update hit_level_array and hit_len_array even if extension is skipped
+                            if use_array_indexing && diag_idx < diag_array_size {
+                                hit_level_array[diag_idx].last_hit = s_end_pos;
+                                hit_level_array[diag_idx].flag = if hit_ready { 1 } else { 0 };
+                                hit_len_array[diag_idx] = if hit_ready { 0 } else { s_end_pos - s_off_pos };
+                            } else if !use_array_indexing {
+                                let diag_key = pack_diag_key(q_idx, diag);
+                                hit_level_hash.insert(diag_key, DiagStruct {
+                                    last_hit: s_end_pos,
+                                    flag: if hit_ready { 1 } else { 0 },
+                                });
+                                hit_len_hash.insert(diag_key, if hit_ready { 0 } else { s_end_pos - s_off_pos });
+                            }
                             dbg_ungapped_low += 1;
                             if in_window && debug_mode {
                                 eprintln!("[DEBUG WINDOW] Seed at q={}, s={} SKIPPED: ungapped_score={} < {}", q_pos, kmer_start, ungapped_score, min_ungapped_score);
@@ -1665,6 +1743,28 @@ pub fn run(args: BlastnArgs) -> Result<()> {
                             s_idx: 0,
                             raw_score: score,
                         });
+                        
+                        // NCBI reference: na_ungapped.c:768-771
+                        // Update hit_level_array and hit_len_array after successful extension
+                        // hit_level_array[real_diag].last_hit = s_end_pos;
+                        // hit_level_array[real_diag].flag = hit_ready;
+                        // diag_table->hit_len_array[real_diag] = (hit_ready) ? 0 : s_end_pos - s_off_pos;
+                        // NCBI: s_end_pos = ungapped_data->length + ungapped_data->s_start + diag_table->offset;
+                        // In LOSAT, we use final_se (end position after gapped extension) + diag_offset
+                        let final_s_end_pos = final_se + diag_offset as usize;
+                        hit_ready = true; // Extension was successful
+                        if use_array_indexing && diag_idx < diag_array_size {
+                            hit_level_array[diag_idx].last_hit = final_s_end_pos;
+                            hit_level_array[diag_idx].flag = 1; // hit_ready = true
+                            hit_len_array[diag_idx] = 0; // hit_ready, so set to 0
+                        } else if !use_array_indexing {
+                            let diag_key = pack_diag_key(q_idx, diag);
+                            hit_level_hash.insert(diag_key, DiagStruct {
+                                last_hit: final_s_end_pos,
+                                flag: 1, // hit_ready = true
+                            });
+                            hit_len_hash.insert(diag_key, 0); // hit_ready, so set to 0
+                        }
                     }
                     } // end of s_pos loop for original lookup
                 } // end of if/else for two-stage vs original lookup
@@ -1673,13 +1773,13 @@ pub fn run(args: BlastnArgs) -> Result<()> {
             // Print debug summary for this subject
             if debug_mode {
                 eprintln!(
-                    "[DEBUG] Subject {}: positions={}, seeds_found={}, mask_skipped={}, ungapped_low={}, two_hit_failed={}, gapped_attempted={}, window_seeds={}, hits={}",
-                    s_id, dbg_total_s_positions, dbg_seeds_found, dbg_mask_skipped, dbg_ungapped_low, dbg_two_hit_failed, dbg_gapped_attempted, dbg_window_seeds, local_hits.len()
+                    "[DEBUG] Subject {}: positions={}, seeds_found={}, ungapped_low={}, two_hit_failed={}, gapped_attempted={}, window_seeds={}, hits={}",
+                    s_id, dbg_total_s_positions, dbg_seeds_found, dbg_ungapped_low, dbg_two_hit_failed, dbg_gapped_attempted, dbg_window_seeds, local_hits.len()
                 );
             }
 
             // Suppress unused variable warnings when not in debug mode
-            let _ = (dbg_total_s_positions, dbg_ambiguous_skipped, dbg_no_lookup_match, dbg_seeds_found, dbg_mask_skipped, dbg_ungapped_low, dbg_two_hit_failed, dbg_gapped_attempted, dbg_window_seeds);
+            let _ = (dbg_total_s_positions, dbg_ambiguous_skipped, dbg_no_lookup_match, dbg_seeds_found, dbg_ungapped_low, dbg_two_hit_failed, dbg_gapped_attempted, dbg_window_seeds);
 
             if !local_hits.is_empty() {
                 tx.send(Some((local_hits, local_sequences))).unwrap();

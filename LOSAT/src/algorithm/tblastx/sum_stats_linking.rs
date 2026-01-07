@@ -1300,11 +1300,12 @@ fn link_hsp_group_ncbi(
                 //
                 // This is the original fast-path: if the previous best choice exists and
                 // was not changed in the last pass, it is still the best.
-                // NCBI physically removes processed HSPs from the linked list, so they
-                // can't appear as prev_link. In LOSAT, we must explicitly check.
+                // NCBI only checks H2->hsp_link.changed==0 (no linked_to check needed).
+                // When an HSP is processed, both linked_to=-1000 and hsp_link.changed=1 are set,
+                // so changed==0 is sufficient to determine the HSP hasn't been processed.
                 let can_skip_ncbi = !first_pass
                     && (prev_link == SENTINEL_IDX 
-                        || (hsp_links[prev_link].linked_to != -1000 && !hsp_links[prev_link].changed));
+                        || !hsp_links[prev_link].changed);
                 
                 if can_skip_ncbi {
                     if prev_link != SENTINEL_IDX {

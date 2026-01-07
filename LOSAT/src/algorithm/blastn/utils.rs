@@ -7,7 +7,7 @@ use std::sync::mpsc::channel;
 use crate::common::{write_output, Hit};
 use crate::stats::{lookup_nucl_params, KarlinParams};
 use super::args::BlastnArgs;
-use super::alignment::extend_gapped_heuristic;
+use super::alignment::{extend_gapped_heuristic, extend_final_traceback};
 use super::extension::{extend_hit_ungapped, type_of_word};
 use super::constants::TWO_HIT_WINDOW;
 use super::coordination::{configure_task, read_sequences, prepare_sequence_data, build_lookup_tables};
@@ -34,6 +34,97 @@ struct DiagStruct {
 
 // Re-export for backward compatibility
 pub use crate::algorithm::common::evalue::calculate_evalue_database_search as calculate_evalue;
+
+/// Purge HSPs with common start or end positions.
+///
+/// NCBI reference: blast_hits.c:2455-2535 Blast_HSPListPurgeHSPsWithCommonEndpoints
+///
+/// This function removes redundant HSPs that share the same:
+/// 1. Start position: (strand, q_start, s_start) - keeps highest scoring
+/// 2. End position: (strand, q_end, s_end) - keeps highest scoring
+///
+/// For blastn, "frame" is represented by strand (plus vs minus).
+/// Minus strand is indicated by s_start > s_end in the output.
+pub fn purge_hsps_with_common_endpoints(mut hits: Vec<Hit>) -> Vec<Hit> {
+    if hits.len() <= 1 {
+        return hits;
+    }
+
+    // Helper to determine strand: minus if s_start > s_end
+    let is_minus_strand = |h: &Hit| h.s_start > h.s_end;
+
+    // Helper to get canonical subject start (smaller value for sorting)
+    let subject_start = |h: &Hit| h.s_start.min(h.s_end);
+
+    // Helper to get canonical subject end (larger value for sorting)
+    let subject_end = |h: &Hit| h.s_start.max(h.s_end);
+
+    // Pass 1: Remove HSPs with common START positions
+    // NCBI reference: blast_hits.c:2478 - s_QueryOffsetCompareHSPs
+    // Sort by: (strand, q_start, s_start) with score DESC as tiebreaker
+    hits.sort_by(|a, b| {
+        let a_minus = is_minus_strand(a);
+        let b_minus = is_minus_strand(b);
+
+        a_minus.cmp(&b_minus)
+            .then_with(|| a.q_start.cmp(&b.q_start))
+            .then_with(|| subject_start(a).cmp(&subject_start(b)))
+            .then_with(|| b.raw_score.cmp(&a.raw_score)) // DESC - higher score first
+    });
+
+    // Remove consecutive HSPs with same (strand, q_start, s_start)
+    // Keep first (highest score) for each unique combination
+    let mut i = 0;
+    while i < hits.len() {
+        let mut j = i + 1;
+        while j < hits.len() {
+            let same_strand = is_minus_strand(&hits[i]) == is_minus_strand(&hits[j]);
+            let same_q_start = hits[i].q_start == hits[j].q_start;
+            let same_s_start = subject_start(&hits[i]) == subject_start(&hits[j]);
+
+            if same_strand && same_q_start && same_s_start {
+                hits.remove(j);
+            } else {
+                break;
+            }
+        }
+        i += 1;
+    }
+
+    // Pass 2: Remove HSPs with common END positions
+    // NCBI reference: blast_hits.c:2504 - s_QueryEndCompareHSPs
+    // Sort by: (strand, q_end, s_end) with score DESC as tiebreaker
+    hits.sort_by(|a, b| {
+        let a_minus = is_minus_strand(a);
+        let b_minus = is_minus_strand(b);
+
+        a_minus.cmp(&b_minus)
+            .then_with(|| a.q_end.cmp(&b.q_end))
+            .then_with(|| subject_end(a).cmp(&subject_end(b)))
+            .then_with(|| b.raw_score.cmp(&a.raw_score)) // DESC - higher score first
+    });
+
+    // Remove consecutive HSPs with same (strand, q_end, s_end)
+    let mut i = 0;
+    while i < hits.len() {
+        let mut j = i + 1;
+        while j < hits.len() {
+            let same_strand = is_minus_strand(&hits[i]) == is_minus_strand(&hits[j]);
+            let same_q_end = hits[i].q_end == hits[j].q_end;
+            let same_s_end = subject_end(&hits[i]) == subject_end(&hits[j]);
+
+            if same_strand && same_q_end && same_s_end {
+                hits.remove(j);
+            } else {
+                break;
+            }
+        }
+        i += 1;
+    }
+
+    hits
+}
+
 /// Filter HSPs to remove redundant overlapping hits.
 /// This function applies overlap filtering to match NCBI BLAST's behavior of outputting individual HSPs.
 /// Chaining/clustering functionality has been removed to match NCBI BLAST blastn behavior.
@@ -60,15 +151,10 @@ pub fn filter_hsps(
     // NCBI BLAST's blastn does not use chaining/clustering - all HSPs are saved individually
     let mut result_hits: Vec<Hit> = hits;
 
-    // Final pass: remove redundant overlapping hits using NCBI BLAST's s_DominateTest algorithm
-    // Reference: hspfilter_culling.c:s_DominateTest (lines 79-120)
-    //
-    // Key features:
-    // - Uses query coordinates only (not subject coordinates)
-    // - No diagonal gating (all HSPs are compared)
-    // - Uses raw_score (not bit_score)
-    // - Score/length tradeoff formula: d = 4*s1*l1 + 2*s1*l2 - 2*s2*l1 - 4*s2*l2
-    // - 50% overlap check on candidate's length
+    // NCBI blastn does NOT apply culling by default (culling_limit = 0)
+    // Culling is only applied when -culling_limit is explicitly set
+    // Reference: blast_options.c:1496 - culling_limit defaults to 0
+    // For NCBI parity, we skip the domination filtering entirely
     let filter_start = std::time::Instant::now();
     let result_hits_count = result_hits.len();
 
@@ -84,131 +170,35 @@ pub fn filter_hsps(
             .then_with(|| b.q_end.cmp(&a.q_end))        // q_end DESC
     });
 
-    // NCBI reference: hspfilter_culling.c:s_BlastHSPCullingRun
-    // NCBI uses interval tree for O(n log n) culling, but for simplicity we use O(n²) comparison
-    // which matches NCBI's s_DominateTest logic exactly
-    // NO SPATIAL BINNING - NCBI does NOT use binning, it compares all HSPs
-    let mut final_hits: Vec<Hit> = Vec::new();
+    // Remove duplicate HSPs with identical coordinates and scores
+    // This handles cases where multiple seeds lead to the same gapped alignment
+    // NCBI reference: blast_hits.c - HSPs with identical coordinates are considered duplicates
+    use rustc_hash::FxHashSet;
+    let mut seen: FxHashSet<(usize, usize, usize, usize, i32)> = FxHashSet::default();
+    let before_dedup = result_hits.len();
+    result_hits.retain(|h| {
+        let key = (h.q_start, h.q_end, h.s_start, h.s_end, h.raw_score);
+        seen.insert(key)
+    });
 
-    for hit in result_hits {
-        // NCBI reference: hspfilter_culling.c:603-650
-        // Check if this hit is dominated by any already-kept hit
-        // NCBI: for each hsp in hsp_list, check if it's dominated by any kept hsp
-        let mut dominated = false;
-        for kept in &final_hits {
-            // NCBI BLAST's s_DominateTest algorithm
-            // Reference: hspfilter_culling.c:79-120
-            
-            // Must be same query-subject pair
-            if hit.query_id != kept.query_id || hit.subject_id != kept.subject_id {
-                continue;
-            }
-
-            // Query coordinates (already normalized to plus strand in blastn)
-            // NCBI reference: hspfilter_culling.c:80-83
-            // Int8 b1 = p->begin;
-            // Int8 b2 = y->begin;
-            // Int8 e1 = p->end;
-            // Int8 e2 = y->end;
-            // NCBI normalizes coordinates when creating LinkedHSP (lines 621-628)
-            // For blastn: plus strand uses offset/end directly, minus strand uses qlen - end/offset
-            // LOSAT stores coordinates already normalized (q_start < q_end always for blastn)
-            let b1 = hit.q_start as i64;
-            let e1 = hit.q_end as i64;
-            let b2 = kept.q_start as i64;
-            let e2 = kept.q_end as i64;
-            
-            // Query lengths
-            let l1 = e1 - b1;
-            let l2 = e2 - b2;
-            
-            // Calculate overlap (query coordinates only)
-            // NCBI reference: hspfilter_culling.c:412: overlap = MIN(e1,e2) - MAX(b1,b2)
-            // If overlap is negative (no overlap), it will fail the 50% check below
-            let overlap = e1.min(e2) - b1.max(b2);
-            
-            // If not overlap by more than 50% of candidate's length, don't dominate
-            // NCBI reference: hspfilter_culling.c:338: if(2 *overlap < l2) return FALSE;
-            // Note: if overlap < 0 (no overlap), this condition is always true
-            if overlap < 0 || 2 * overlap < l2 {
-                continue;
-            }
-            
-            // Raw scores (not bit_score)
-            let s1 = hit.raw_score as i64;
-            let s2 = kept.raw_score as i64;
-            
-            // Main criterion: 2 * (%diff in score) + 1 * (%diff in length)
-            // Formula: d = 4*s1*l1 + 2*s1*l2 - 2*s2*l1 - 4*s2*l2
-            // where s1, l1 = hit (candidate), s2, l2 = kept (already processed)
-            // NCBI reference: hspfilter_culling.c:344
-            let d = 4 * s1 * l1 + 2 * s1 * l2 - 2 * s2 * l1 - 4 * s2 * l2;
-            
-            // Tie-breaker for identical HSPs
-            // NCBI reference: hspfilter_culling.c:423-434
-            if (s1 == s2 && b1 == b2 && l1 == l2) || d == 0 {
-                if s1 != s2 {
-                    // Higher score wins - if hit has lower score, kept dominates
-                    if s1 < s2 {
-                        dominated = true;
-                        break;
-                    }
-                    // If hit has higher score, hit is better, so kept doesn't dominate
-                    continue;
-                } else {
-                    // Same score: use subject_id, then subject offset
-                    // NCBI: if(p->sid != y->sid) return (p->sid < y->sid);
-                    // We're checking if kept dominates hit (s_DominateTest(kept, hit))
-                    // NCBI returns TRUE if p->sid < y->sid, meaning p dominates y
-                    // So kept dominates hit if kept.subject_id < hit.subject_id
-                    let subject_cmp = hit.subject_id.cmp(&kept.subject_id);
-                    if subject_cmp == Ordering::Greater {
-                        // hit.subject_id > kept.subject_id → kept.subject_id < hit.subject_id
-                        // NCBI: return (p->sid < y->sid) → kept dominates hit
-                        dominated = true;
-                        break;
-                    } else if subject_cmp == Ordering::Less {
-                        // hit.subject_id < kept.subject_id → kept.subject_id > hit.subject_id
-                        // NCBI: return (p->sid < y->sid) → kept does NOT dominate hit
-                        continue;
-                    } else {
-                        // Same subject: use subject offset (s_idx)
-                        // NCBI: if(p->hsp->subject.offset > y->hsp->subject.offset) return FALSE;
-                        //       return TRUE;  (default: p dominates y)
-                        // We're checking if kept dominates hit
-                        // NCBI returns FALSE if p.offset > y.offset, meaning p does NOT dominate y
-                        // So kept does NOT dominate hit if kept.s_idx > hit.s_idx
-                        // Otherwise, kept dominates hit (default case)
-                        if kept.s_idx > hit.s_idx {
-                            // kept.s_idx > hit.s_idx → kept does NOT dominate hit
-                            continue;
-                        } else {
-                            // kept.s_idx <= hit.s_idx → kept dominates hit (default case)
-                            dominated = true;
-                            break;
-                        }
-                    }
-                }
-            }
-            
-            // If d < 0: kept dominates hit (hit should be filtered)
-            // If d > 0: hit is better than kept (hit should be kept, continue checking)
-            // NCBI reference: hspfilter_culling.c:436-439
-            if d < 0 {
-                dominated = true;
-                break;
-            }
-            
-            // d > 0: hit is better, so kept doesn't dominate hit
-            continue;
-        }
-
-        if !dominated {
-            // NCBI reference: hspfilter_culling.c:650
-            // Add hit to final list if not dominated
-            final_hits.push(hit);
-        }
+    if verbose && before_dedup != result_hits.len() {
+        eprintln!("[INFO]   Deduplication: {} -> {} hits", before_dedup, result_hits.len());
     }
+
+    // NCBI BLAST: Purge HSPs with common start or end positions
+    // NCBI reference: blast_hits.c:2455-2535 Blast_HSPListPurgeHSPsWithCommonEndpoints
+    // Called from blast_engine.c:545 and blast_traceback.c:668
+    let before_purge = result_hits.len();
+    let result_hits = purge_hsps_with_common_endpoints(result_hits);
+    if verbose && before_purge != result_hits.len() {
+        eprintln!("[INFO]   Endpoint purge: {} -> {} hits", before_purge, result_hits.len());
+    }
+
+    // NCBI blastn does NOT apply culling by default (culling_limit = 0)
+    // Culling is only applied when -culling_limit is explicitly set
+    // Reference: blast_options.c:1496 - culling_limit defaults to 0
+    // For NCBI parity, we skip the domination filtering entirely and return sorted hits
+    let final_hits: Vec<Hit> = result_hits;
     let filter_time = filter_start.elapsed();
 
         if verbose {
@@ -432,6 +422,7 @@ pub fn run(args: BlastnArgs) -> Result<()> {
     let gap_open = config.gap_open;
     let gap_extend = config.gap_extend;
     let x_drop_gapped = config.x_drop_gapped;
+    let x_drop_final = config.x_drop_final;  // Final traceback X-drop (100)
     let scan_range = config.scan_range; // For off-diagonal hit detection
     let db_len_total = seq_data.db_len_total;
     let db_num_seqs = seq_data.db_num_seqs;
@@ -1155,6 +1146,36 @@ pub fn run(args: BlastnArgs) -> Result<()> {
                                 use_dp, // Use DP for blastn task, greedy for megablast
                             );
 
+                            // NCBI BLAST: Final traceback extension with larger X-drop (100)
+                            // Reference: blast_traceback.c - BLAST_GappedAlignmentWithTraceback
+                            // Uses gap_x_dropoff_final (100) instead of preliminary gap_x_dropoff (25-30)
+                            // This allows alignments to extend further through low-scoring regions
+                            let (
+                                final_qs,
+                                final_qe,
+                                final_ss,
+                                final_se,
+                                score,
+                                matches,
+                                mismatches,
+                                gaps,
+                                gap_letters,
+                                dp_cells,
+                            ) = extend_final_traceback(
+                                q_record.seq(),
+                                search_seq,
+                                final_qs,
+                                final_qe,
+                                final_ss,
+                                final_se,
+                                reward,
+                                penalty,
+                                gap_open,
+                                gap_extend,
+                                x_drop_final, // Final traceback: 100 for all nucleotide tasks
+                                use_dp,
+                            );
+
                             // Calculate alignment length
                             let aln_len = matches + mismatches + gap_letters;
 
@@ -1660,6 +1681,34 @@ pub fn run(args: BlastnArgs) -> Result<()> {
                             gap_extend,
                             x_drop_gapped, // Task-specific: blastn=30, megablast=25
                             use_dp, // Use DP for blastn task, greedy for megablast
+                        );
+
+                        // NCBI BLAST: Final traceback extension with larger X-drop (100)
+                        // Reference: blast_traceback.c - BLAST_GappedAlignmentWithTraceback
+                        let (
+                            final_qs,
+                            final_qe,
+                            final_ss,
+                            final_se,
+                            score,
+                            matches,
+                            mismatches,
+                            gaps,
+                            gap_letters,
+                            dp_cells,
+                        ) = extend_final_traceback(
+                            q_record.seq(),
+                            search_seq,
+                            final_qs,
+                            final_qe,
+                            final_ss,
+                            final_se,
+                            reward,
+                            penalty,
+                            gap_open,
+                            gap_extend,
+                            x_drop_final, // Final traceback: 100 for all nucleotide tasks
+                            use_dp,
                         );
 
                         // Debug: show gapped extension results for window seeds

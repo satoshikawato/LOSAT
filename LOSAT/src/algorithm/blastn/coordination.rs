@@ -10,7 +10,7 @@ use anyhow::Result;
 use bio::io::fasta;
 use crate::utils::dust::{DustMasker, MaskedInterval};
 use super::args::BlastnArgs;
-use super::constants::{MIN_UNGAPPED_SCORE_MEGABLAST, MIN_UNGAPPED_SCORE_BLASTN, MAX_DIRECT_LOOKUP_WORD_SIZE, X_DROP_GAPPED_NUCL, X_DROP_GAPPED_GREEDY, SCAN_RANGE_BLASTN, SCAN_RANGE_MEGABLAST};
+use super::constants::{MIN_UNGAPPED_SCORE_MEGABLAST, MIN_UNGAPPED_SCORE_BLASTN, MAX_DIRECT_LOOKUP_WORD_SIZE, X_DROP_GAPPED_NUCL, X_DROP_GAPPED_GREEDY, X_DROP_GAPPED_FINAL, SCAN_RANGE_BLASTN, SCAN_RANGE_MEGABLAST};
 use super::lookup::{build_lookup, build_pv_direct_lookup, build_two_stage_lookup, TwoStageLookup, PvDirectLookup, KmerLookup};
 
 /// Task-specific configuration for BLASTN
@@ -27,6 +27,7 @@ pub struct TaskConfig {
     pub use_two_stage: bool,
     pub lut_word_length: usize,
     pub x_drop_gapped: i32, // Task-specific gapped X-dropoff (blastn: 30, megablast: 25)
+    pub x_drop_final: i32, // Final traceback X-dropoff (100 for all nucleotide tasks)
     pub scan_range: usize, // Scan range for off-diagonal hit detection (blastn: 4, megablast: 0)
 }
 
@@ -132,6 +133,12 @@ pub fn configure_task(args: &BlastnArgs) -> TaskConfig {
         "megablast" => X_DROP_GAPPED_GREEDY, // 25
         _ => X_DROP_GAPPED_NUCL, // 30
     };
+
+    // NCBI BLAST: Final traceback X-dropoff (100 for all nucleotide tasks)
+    // Reference: ncbi-blast/c++/include/algo/blast/core/blast_options.h:146
+    // BLAST_GAP_X_DROPOFF_FINAL_NUCL = 100
+    // Used in traceback phase to extend alignments further than preliminary extension
+    let x_drop_final = X_DROP_GAPPED_FINAL; // 100
     
     let scan_step = calculate_initial_scan_step(effective_word_size, args.scan_step);
     
@@ -169,6 +176,7 @@ pub fn configure_task(args: &BlastnArgs) -> TaskConfig {
         use_two_stage,
         lut_word_length,
         x_drop_gapped,
+        x_drop_final,
         scan_range,
     }
 }

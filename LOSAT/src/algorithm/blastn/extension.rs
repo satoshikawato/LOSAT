@@ -70,10 +70,10 @@ pub fn extend_hit_ungapped(
         let sc = if q == s { reward } else { penalty };
         current_score_r += sc;
 
-        if current_score_r > max_score_total {
+        if current_score_r >= max_score_total {
             max_score_total = current_score_r;
             best_j = j;
-        } else if (max_score_total - current_score_r) > x_drop_val {
+        } else if current_score_r <= 0 || (max_score_total - current_score_r) > x_drop_val {
             break;
         }
         j += 1;

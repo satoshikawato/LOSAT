@@ -506,3 +506,69 @@ pub fn extend_gapped_one_direction(
     )
 }
 
+/// Re-extend an existing gapped alignment with a larger X-drop for final traceback.
+///
+/// NCBI reference: blast_traceback.c - BLAST_GappedAlignmentWithTraceback
+/// Uses gap_x_dropoff_final (100) instead of preliminary gap_x_dropoff (25-30)
+///
+/// This allows the alignment to extend further through low-scoring regions,
+/// producing longer alignments that match NCBI BLAST output.
+///
+/// The function picks a seed point within the preliminary alignment and
+/// re-extends in both directions using the larger X-drop value.
+///
+/// Returns: (final_qs, final_qe, final_ss, final_se, score, matches, mismatches, gaps, gap_letters, dp_cells)
+pub fn extend_final_traceback(
+    q_seq: &[u8],
+    s_seq: &[u8],
+    prelim_qs: usize,  // Preliminary alignment query start
+    prelim_qe: usize,  // Preliminary alignment query end
+    prelim_ss: usize,  // Preliminary alignment subject start
+    prelim_se: usize,  // Preliminary alignment subject end
+    reward: i32,
+    penalty: i32,
+    gap_open: i32,
+    gap_extend: i32,
+    x_drop_final: i32,  // Final X-drop (100 for nucleotide)
+    use_dp: bool,
+) -> (usize, usize, usize, usize, i32, usize, usize, usize, usize, usize) {
+    // NCBI BLAST picks the "gapped_start" point (usually the highest-scoring position within the HSP)
+    // For simplicity, we use the center of the preliminary alignment as the seed point
+    // This ensures we have sequence on both sides to extend
+
+    let prelim_q_len = prelim_qe.saturating_sub(prelim_qs);
+    let prelim_s_len = prelim_se.saturating_sub(prelim_ss);
+
+    if prelim_q_len == 0 || prelim_s_len == 0 {
+        return (prelim_qs, prelim_qe, prelim_ss, prelim_se, 0, 0, 0, 0, 0, 0);
+    }
+
+    // Use the center of the preliminary alignment as the seed point
+    // NCBI uses gapped_start which is typically near the best-scoring region
+    let seed_q_pos = prelim_qs + prelim_q_len / 2;
+    let seed_s_pos = prelim_ss + prelim_s_len / 2;
+
+    // Ensure seed positions are within bounds
+    if seed_q_pos >= q_seq.len() || seed_s_pos >= s_seq.len() {
+        return (prelim_qs, prelim_qe, prelim_ss, prelim_se, 0, 0, 0, 0, 0, 0);
+    }
+
+    // Re-extend from the seed point with the larger X-drop
+    // This is equivalent to calling extend_gapped_heuristic with x_drop_final
+    // but starting from a known good position within the alignment
+
+    extend_gapped_heuristic(
+        q_seq,
+        s_seq,
+        seed_q_pos,
+        seed_s_pos,
+        1, // Use a minimal seed length - the extension will find the true boundaries
+        reward,
+        penalty,
+        gap_open,
+        gap_extend,
+        x_drop_final,
+        use_dp,
+    )
+}
+

@@ -132,14 +132,12 @@ pub fn filter_hsps(
             
             // Calculate overlap (query coordinates only)
             // NCBI reference: hspfilter_culling.c:88: overlap = MIN(e1,e2) - MAX(b1,b2)
-            // If overlap is negative (no overlap), it will fail the 50% check below
             let overlap = e1.min(e2) - b1.max(b2);
             
             // If not overlap by more than 50% of candidate's length, don't dominate
             // NCBI reference: hspfilter_culling.c:92: if(2 *overlap < l2) return FALSE;
             // l2 = y->end - y->begin (candidate's length)
-            // Note: if overlap < 0 (no overlap), this condition is always true
-            if overlap < 0 || 2 * overlap < l2 {
+            if 2 * overlap < l2 {
                 continue;
             }
             
@@ -198,8 +196,14 @@ pub fn filter_hsps(
                 // Same subject: use subject offset
                 // NCBI: if(p->hsp->subject.offset > y->hsp->subject.offset) return FALSE;
                 //       return TRUE;  (default: p dominates y)
-                // p->hsp->subject.offset = kept.s_start, y->hsp->subject.offset = hit.s_start
-                if kept.s_start > hit.s_start {
+                // NCBI reference: blast_hits.h:98 - BlastSeg.offset is 0-based (Int4 offset)
+                // LOSAT: s_start is 1-based (usize), so convert to 0-based for exact match
+                // p->hsp->subject.offset = kept.s_start - 1 (0-based)
+                // y->hsp->subject.offset = hit.s_start - 1 (0-based)
+                // CRITICAL: Use saturating_sub to handle edge case (s_start = 0, though it shouldn't happen)
+                let kept_offset_0based = kept.s_start.saturating_sub(1);
+                let hit_offset_0based = hit.s_start.saturating_sub(1);
+                if kept_offset_0based > hit_offset_0based {
                     // NCBI: return FALSE;  // p does NOT dominate y
                     continue;
                 }

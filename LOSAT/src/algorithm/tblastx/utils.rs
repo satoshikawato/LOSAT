@@ -769,9 +769,28 @@ fn reevaluate_ungapped_hsp_list(
     let mut kept_hits = Vec::new();
     
     // Debug logging for reevaluation filtering
+    // NCBI reference: blast_hits.c:2609-2737 (Blast_HSPListReevaluateUngapped)
     let debug_cutoffs = std::env::var("LOSAT_DEBUG_CUTOFFS").is_ok();
+    struct ReevalStats {
+        total: usize,
+        passed_reeval: usize,
+        passed_identity: usize,
+        per_context: std::collections::HashMap<(usize, usize), (i32, usize, usize, usize)>, // (ctx_idx, s_f_idx) -> (cutoff, total, passed_reeval, passed_identity)
+    }
     let mut reeval_stats = if debug_cutoffs {
-        Some((0usize, 0usize, 0usize)) // (total, passed_reeval, passed_identity)
+        Some(ReevalStats {
+            total: 0,
+            passed_reeval: 0,
+            passed_identity: 0,
+            per_context: std::collections::HashMap::new(),
+        })
+    } else {
+        None
+    };
+    
+    // Track score distribution for debugging
+    let mut score_distribution: Option<std::collections::HashMap<i32, usize>> = if debug_cutoffs {
+        Some(std::collections::HashMap::new())
     } else {
         None
     };
@@ -782,6 +801,13 @@ fn reevaluate_ungapped_hsp_list(
         let ctx = &contexts[hit.ctx_idx];
         let s_frame = &s_frames[hit.s_f_idx];
         let cutoff = cutoff_scores[hit.ctx_idx][hit.s_f_idx];
+        
+        // Track cutoff values per context/subject frame
+        if let Some(ref mut stats) = reeval_stats {
+            let key = (hit.ctx_idx, hit.s_f_idx);
+            let entry = stats.per_context.entry(key).or_insert((cutoff, 0, 0, 0));
+            entry.1 += 1; // total for this context/subject frame
+        }
         
         // NCBI: query_start = query_blk->sequence + query_info->contexts[context].query_offset (blast_hits.c:2696-2697)
         // In LOSAT, ctx.aa_seq is the frame sequence (with sentinel at index 0)
@@ -818,14 +844,30 @@ fn reevaluate_ungapped_hsp_list(
         //   }
         //   return delete_hsp; (line 476)
         // Returns TRUE if HSP should be deleted (score < cutoff_score)
+        // NCBI reference: blast_hits.c:439-477 (s_UpdateReevaluatedHSP)
+        //   hsp->score = score; (line 451)
+        //   if (hsp->score >= cutoff_score) { ... } (line 453)
+        //   return delete_hsp; (line 476)
         if let Some(ref mut stats) = reeval_stats {
-            stats.0 += 1; // Total HSPs before reevaluation
+            stats.total += 1; // Total HSPs before reevaluation
         }
+        
+        // Track original score for distribution
+        let original_score = hit.raw_score;
+        if let Some(ref mut dist) = score_distribution {
+            *dist.entry(original_score).or_insert(0) += 1;
+        }
+        
         let (new_qs, new_ss, new_len, new_score) = if let Some(result) =
             reevaluate_ungapped_hit_ncbi_translated(query, subject, qs, ss, len_u, cutoff)
         {
+            // NCBI: score >= cutoff_score, HSP kept (s_UpdateReevaluatedHSP returns FALSE)
             if let Some(ref mut stats) = reeval_stats {
-                stats.1 += 1; // Passed reevaluation cutoff
+                stats.passed_reeval += 1; // Passed reevaluation cutoff
+                let key = (hit.ctx_idx, hit.s_f_idx);
+                if let Some(entry) = stats.per_context.get_mut(&key) {
+                    entry.2 += 1; // passed_reeval for this context/subject frame
+                }
             }
             result
         } else {
@@ -863,7 +905,11 @@ fn reevaluate_ungapped_hsp_list(
             continue;
         }
         if let Some(ref mut stats) = reeval_stats {
-            stats.2 += 1; // Passed identity test
+            stats.passed_identity += 1; // Passed identity test
+            let key = (hit.ctx_idx, hit.s_f_idx);
+            if let Some(entry) = stats.per_context.get_mut(&key) {
+                entry.3 += 1; // passed_identity for this context/subject frame
+            }
         }
         
         // NCBI: s_UpdateReevaluatedHSPUngapped updates HSP coordinates (blast_hits.c:455-458)
@@ -899,13 +945,59 @@ fn reevaluate_ungapped_hsp_list(
     kept_hits.sort_by(|a, b| b.raw_score.cmp(&a.raw_score));
     
     // Debug logging for reevaluation statistics
+    // NCBI reference: blast_hits.c:2609-2737 (Blast_HSPListReevaluateUngapped)
     if let Some(stats) = reeval_stats {
         eprintln!("=== LOSAT Reevaluation Stats ===");
-        eprintln!("  Total HSPs before reevaluation: {}", stats.0);
-        eprintln!("  Passed reevaluation cutoff: {}", stats.1);
-        eprintln!("  Passed identity test: {}", stats.2);
-        eprintln!("  Filtered by reevaluation: {}", stats.0 - stats.1);
-        eprintln!("  Filtered by identity: {}", stats.1 - stats.2);
+        eprintln!("  Total HSPs before reevaluation: {}", stats.total);
+        eprintln!("  Passed reevaluation cutoff: {}", stats.passed_reeval);
+        eprintln!("  Passed identity test: {}", stats.passed_identity);
+        eprintln!("  Filtered by reevaluation: {}", stats.total - stats.passed_reeval);
+        eprintln!("  Filtered by identity: {}", stats.passed_reeval - stats.passed_identity);
+        eprintln!("  Final HSPs kept: {}", kept_hits.len());
+        
+        // Per-context/subject frame statistics
+        eprintln!("  Per-context/subject frame cutoff statistics:");
+        let mut sorted_keys: Vec<_> = stats.per_context.keys().collect();
+        sorted_keys.sort();
+        for &key in sorted_keys.iter().take(20) { // Limit to first 20 for readability
+            let (cutoff, total, passed_reeval, passed_identity) = stats.per_context[key];
+            eprintln!("    ctx_idx={}, s_f_idx={}: cutoff={}, total={}, passed_reeval={}, passed_identity={}, filtered_reeval={}, filtered_identity={}",
+                key.0, key.1, cutoff, total, passed_reeval, passed_identity,
+                total - passed_reeval, passed_reeval - passed_identity);
+        }
+        if stats.per_context.len() > 20 {
+            eprintln!("    ... ({} more context/subject frame combinations)", stats.per_context.len() - 20);
+        }
+        
+        // Score distribution (before reevaluation)
+        if let Some(ref dist) = score_distribution {
+            eprintln!("  Score distribution (before reevaluation):");
+            let mut sorted_scores: Vec<_> = dist.keys().collect();
+            sorted_scores.sort();
+            let mut buckets: std::collections::HashMap<&str, usize> = std::collections::HashMap::new();
+            for &score in sorted_scores.iter() {
+                let count = dist[score];
+                let bucket = if *score < 20 {
+                    "< 20"
+                } else if *score < 30 {
+                    "20-29"
+                } else if *score < 40 {
+                    "30-39"
+                } else if *score < 50 {
+                    "40-49"
+                } else if *score < 60 {
+                    "50-59"
+                } else {
+                    ">= 60"
+                };
+                *buckets.entry(bucket).or_insert(0) += count;
+            }
+            for bucket in &["< 20", "20-29", "30-39", "40-49", "50-59", ">= 60"] {
+                if let Some(&count) = buckets.get(bucket) {
+                    eprintln!("    {}: {}", bucket, count);
+                }
+            }
+        }
     }
     
     kept_hits
@@ -2180,9 +2272,29 @@ pub fn run(args: TblastxArgs) -> Result<()> {
                 );
                 
                 // Debug logging for extension statistics
-                if std::env::var("LOSAT_DEBUG_CUTOFFS").is_ok() {
+                // NCBI reference: aa_ungapped.c:575-591 (extension cutoff check)
+                let debug_cutoffs = std::env::var("LOSAT_DEBUG_CUTOFFS").is_ok();
+                if debug_cutoffs {
                     eprintln!("=== LOSAT Extension Stats (Subject: {}) ===", s_id);
                     eprintln!("  HSPs after extension (before reevaluation): {}", ungapped_hits.len());
+                    
+                    // Log cutoff values per context/subject frame used in extension
+                    let mut cutoff_map: std::collections::HashMap<(usize, usize), i32> = std::collections::HashMap::new();
+                    for ctx_idx in 0..contexts_ref.len() {
+                        for s_f_idx in 0..s_frames.len() {
+                            let cutoff = cutoff_scores[ctx_idx][s_f_idx];
+                            cutoff_map.insert((ctx_idx, s_f_idx), cutoff);
+                        }
+                    }
+                    eprintln!("  Cutoff values per context/subject frame (used in extension):");
+                    let mut sorted_keys: Vec<_> = cutoff_map.keys().collect();
+                    sorted_keys.sort();
+                    for &key in sorted_keys.iter().take(20) {
+                        eprintln!("    ctx_idx={}, s_f_idx={}: cutoff={}", key.0, key.1, cutoff_map[key]);
+                    }
+                    if cutoff_map.len() > 20 {
+                        eprintln!("    ... ({} more context/subject frame combinations)", cutoff_map.len() - 20);
+                    }
                 }
                 
                 // NCBI: Blast_HSPListReevaluateUngapped equivalent
@@ -2294,10 +2406,17 @@ pub fn run(args: TblastxArgs) -> Result<()> {
                 }
                 
                 // DEBUG: Collect statistics before filtering
+                // NCBI reference: link_hsps.c:1010-1088 (output conversion and chain traversal)
+                let debug_cutoffs = std::env::var("LOSAT_DEBUG_CUTOFFS").is_ok();
                 let total_linked = linked.len();
                 let mut stats_single_hsps = 0usize;
                 let mut stats_chain_heads = 0usize;
                 let mut stats_chain_members = 0usize;
+                let mut evalue_distribution: Option<std::collections::HashMap<&str, usize>> = if debug_cutoffs {
+                    Some(std::collections::HashMap::new())
+                } else {
+                    None
+                };
                 for h in &linked {
                     if h.linked_set && !h.start_of_chain {
                         stats_chain_members += 1;
@@ -2306,10 +2425,45 @@ pub fn run(args: TblastxArgs) -> Result<()> {
                     } else if h.start_of_chain {
                         stats_chain_heads += 1;
                     }
+                    
+                    // Track E-value distribution
+                    if let Some(ref mut dist) = evalue_distribution {
+                        let bucket = if h.e_value <= 1e-100 {
+                            "<= 1e-100"
+                        } else if h.e_value <= 1e-50 {
+                            "1e-100 < x <= 1e-50"
+                        } else if h.e_value <= 1e-10 {
+                            "1e-50 < x <= 1e-10"
+                        } else if h.e_value <= 1e-5 {
+                            "1e-10 < x <= 1e-5"
+                        } else if h.e_value <= 1.0 {
+                            "1e-5 < x <= 1.0"
+                        } else {
+                            "> 1.0"
+                        };
+                        *dist.entry(bucket).or_insert(0) += 1;
+                    }
+                }
+                
+                if debug_cutoffs {
+                    eprintln!("=== LOSAT Linking Stats (Subject: {}) ===", s_id);
+                    eprintln!("  Total HSPs after linking: {}", total_linked);
+                    eprintln!("  Single HSPs: {}", stats_single_hsps);
+                    eprintln!("  Chain heads: {}", stats_chain_heads);
+                    eprintln!("  Chain members: {}", stats_chain_members);
+                    if let Some(ref dist) = evalue_distribution {
+                        eprintln!("  E-value distribution:");
+                        for bucket in &["<= 1e-100", "1e-100 < x <= 1e-50", "1e-50 < x <= 1e-10", "1e-10 < x <= 1e-5", "1e-5 < x <= 1.0", "> 1.0"] {
+                            if let Some(&count) = dist.get(bucket) {
+                                eprintln!("    {}: {}", bucket, count);
+                            }
+                        }
+                    }
                 }
                 
                 let mut final_hits: Vec<Hit> = Vec::new();
                 let mut filtered_by_evalue = 0usize;
+                let debug_cutoffs = std::env::var("LOSAT_DEBUG_CUTOFFS").is_ok();
                 for h in linked {
                     // NCBI reference (verbatim, link_hsps.c:1018-1020):
                     //   /* If this is not a single piece or the start of a chain, then Skip it. */
@@ -2403,6 +2557,12 @@ pub fn run(args: TblastxArgs) -> Result<()> {
                     };
                     trace_final_hit_if_match("output_hit", &out_hit);
                     final_hits.push(out_hit);
+                }
+                
+                if debug_cutoffs {
+                    eprintln!("=== LOSAT Output Stats (Subject: {}) ===", s_id);
+                    eprintln!("  HSPs after E-value filtering: {}", final_hits.len());
+                    eprintln!("  Filtered by E-value: {}", filtered_by_evalue);
                 }
                 
                 if !final_hits.is_empty() {

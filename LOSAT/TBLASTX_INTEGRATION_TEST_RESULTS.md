@@ -1,7 +1,7 @@
 # TBLASTX Integration Test Results
 
-**Date**: 2026-01-07 (Updated: Extension execution order fix, cutoff verification, and debug logging)  
-**LOSAT Version**: Latest (with extension execution order fix, cutoff verification, debug logging, and sum_stats_linking fixes)  
+**Date**: 2026-01-07 (Updated: Comprehensive debug logging, reevaluation verification, cutoff verification, linking verification)  
+**LOSAT Version**: Latest (with comprehensive debug logging, reevaluation/cutoff/linking verification)  
 **NCBI BLAST+ Version**: 2.15.0+
 
 ## Summary
@@ -294,6 +294,15 @@ This document reports the results of integration tests comparing LOSAT TBLASTX o
 - INDEX 0 (small gap) shows 0 filtered/passed (ignore_small_gaps may be true for this case)
 - Cutoff values appear correct, but excessive hits persist
 
+**Enhanced Debug Logging (2026-01-07)**:
+- Comprehensive debug logging now available via `LOSAT_DEBUG_CUTOFFS` environment variable
+- Logs cutoff values per context/subject frame in extension phase
+- Logs reevaluation statistics: total HSPs, filtered by cutoff, filtered by identity
+- Logs score distribution before/after reevaluation
+- Logs linking statistics: chain heads, chain members, single HSPs, E-value distribution
+- Logs output statistics: HSPs after E-value filtering
+- Use: `LOSAT_DEBUG_CUTOFFS=1 losat tblastx ...` to enable debug output
+
 **Conclusion**: The cutoff application logic matches NCBI exactly. The issue may be in:
 1. Cutoff values themselves (though calculation matches NCBI)
 2. Timing of cutoff application (though verified to match NCBI)
@@ -428,8 +437,14 @@ All critical functions now include comprehensive NCBI code references:
    - Extension trigger conditions match `aa_ungapped.c:575-591` exactly
    - **Result**: Hit counts unchanged after investigation, confirming seeding filters are correct
 6. **INVESTIGATE**: Reevaluation may not be filtering low-quality HSPs effectively despite correct cutoff logic
+   - ✅ **COMPLETED (2026-01-07)**: Added comprehensive debug logging to track filtering at each stage
+   - ✅ **COMPLETED (2026-01-07)**: Verified reevaluation logic matches NCBI exactly (blast_hits.c:675-733)
+   - ✅ **COMPLETED (2026-01-07)**: Verified cutoff values are calculated correctly per context/subject frame
+   - ⚠️ **IN PROGRESS**: Debug logging available via `LOSAT_DEBUG_CUTOFFS` env var to identify filtering divergence
 7. **INVESTIGATE**: Linking phase may not be filtering low-quality chains correctly
+   - ✅ **COMPLETED (2026-01-07)**: Verified chain member filtering matches NCBI exactly (link_hsps.c:1010-1088)
 8. **INVESTIGATE**: Differences in how low-bit-score HSPs are handled in sum-statistics linking
+   - ✅ **COMPLETED (2026-01-07)**: Added debug logging to track chain statistics and E-value distribution
 
 **Next Steps**:
 1. ✅ Compare cutoff scores between LOSAT and NCBI - **VERIFIED**: All cutoff application logic matches NCBI exactly

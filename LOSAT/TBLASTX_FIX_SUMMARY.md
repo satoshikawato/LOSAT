@@ -1,6 +1,7 @@
 # TBLASTX Score Calculation Parity Fix Summary
 
-**修正日**: 2026-01-06
+**修正日**: 2026-01-06  
+**更新日**: 2026-01-06 (Long Sequence Excess HSP Fix Plan追加)
 
 ## Summary of Changes
 
@@ -24,30 +25,77 @@
 - `blast_setup.c:768`: `kbp_ptr = (scoring_options->gapped_calculation ? sbp->kbp_gap_std : sbp->kbp)`
 - tblastxでは `gapped_calculation = FALSE` → `kbp_ptr = sbp->kbp` (ungapped)
 
-### Remaining Issue:
+### Critical Issue Identified:
 
-#### ヒット数が2倍の問題
-- **現象**: LOSAT 29,766 vs NCBI 14,877 (約2倍)
-- **Bitscore**: LOSATがわずかに高い
-- **テストケース**: AP027131.AP027133 (長い配列、600kb+)
+#### 長い配列での過剰なHSP生成（7倍の差）
+- **現象**: LOSAT 338,859 HSPs vs NCBI 30,000-45,000 HSPs（約7倍）
+- **特に低ビットスコア範囲（<30 bits）で過剰なHSPが生成される**
+- **テストケース**: 長い配列（600kb+）
 
-#### 推定原因:
-1. **Extension logic**: 過剰なHSP生成
-2. **Cutoff application**: カットオフ適用/フィルタリングの問題
-3. **Sum-statistics E-value**: E-value計算の問題
+#### 根本原因分析:
+
+1. **Cutoff計算の問題**:
+   - 長い配列（600kb+）での`searchsp`計算: `MIN(query_aa, subject_nucl) * subject_nucl = 120 billion`
+   - `CUTOFF_E_TBLASTX = 1e-300`とgap decay (0.5)により、実効的なcutoffが非常に低くなる
+   - `cutoff_score_max`（ユーザーのE-value=10.0から計算）が41未満の場合、それが制限要因になる
+   - **参照**: `ncbi_cutoffs.rs:399-433` (`cutoff_score_for_update_tblastx`)
+   - **NCBI参照**: `blast_parameters.c:348-374` (`BlastInitialWordParametersUpdate`)
+
+2. **HSP Filteringのタイミング**:
+   - Extension直後のcutoffチェックは正しく実装されている
+   - しかし、計算されたcutoff値が長い配列で低すぎる可能性がある
+   - **参照**: `utils.rs:1950-1958` (Extension後のcutoffチェック)
+   - **NCBI参照**: `aa_ungapped.c:575-591` (Extension後のcutoffチェック)
+
+3. **Reevaluationの効果**:
+   - 座標変換は正しく実装されている（`get_ungapped_hsp_list`）
+   - Reevaluationでcutoffチェックが実行されている
+   - しかし、低すぎるcutoffにより、低スコアHSPが通過してしまう可能性がある
+   - **参照**: `utils.rs:708-757` (`reevaluate_ungapped_hsp_list`)
+   - **NCBI参照**: `blast_hits.c:675-733` (`Blast_HSPReevaluateWithAmbiguitiesUngapped`)
 
 ### Next Steps:
 
-追加調査が必要な項目:
-1. Extension X-drop終了条件の再検証
-2. Extensionでのカットオフ適用の確認
-3. Sum-statistics linkingのE-value計算の詳細確認
+#### Phase 1: Cutoff計算の検証と修正（最優先）
+1. **Cutoff計算のデバッグ出力追加** (`ncbi_cutoffs.rs`)
+   - 長い配列（600kb+）でのcutoff計算過程を記録
+   - `searchsp`, `update_cutoff`, `gap_trigger`, `cutoff_score_max`, `final_cutoff`を出力
+   - **参照**: `TBLASTX_LONG_SEQUENCE_HSP_FIX_PLAN.md` Phase 1.1
+
+2. **Cutoff適用の検証** (`utils.rs`)
+   - Extension直後のcutoffチェックが正しく動作しているか確認
+   - 長い配列でのcutoff適用統計を追加
+   - **参照**: `TBLASTX_LONG_SEQUENCE_HSP_FIX_PLAN.md` Phase 1.2
+
+#### Phase 2: Reevaluationの検証と修正
+3. **Reevaluationのcutoff適用確認** (`utils.rs`, `reevaluate.rs`)
+   - Reevaluationで使用されるcutoffが正しいか確認
+   - Reevaluationで削除されるHSPの統計を追加
+   - **参照**: `TBLASTX_LONG_SEQUENCE_HSP_FIX_PLAN.md` Phase 2.1
+
+4. **座標変換の再確認** (`utils.rs`)
+   - `get_ungapped_hsp_list`の座標変換が正しく動作しているか確認
+   - NCBIの`s_AdjustInitialHSPOffsets`と完全に一致しているか検証
+   - **参照**: `TBLASTX_LONG_SEQUENCE_HSP_FIX_PLAN.md` Phase 2.2
+
+#### Phase 3: 統計とデバッグ出力の追加
+5. **HSP生成統計の追加** (`utils.rs`)
+   - 長い配列でのHSP生成統計を追加
+   - Cutoff適用前後のHSP数、Reevaluation前後のHSP数、スコア分布を記録
+   - **参照**: `TBLASTX_LONG_SEQUENCE_HSP_FIX_PLAN.md` Phase 3.1
+
+6. **デバッグ出力の追加** (`utils.rs`)
+   - 長い配列での処理過程をデバッグ出力
+   - Cutoff値、HSP数、スコア分布を出力
+   - **参照**: `TBLASTX_LONG_SEQUENCE_HSP_FIX_PLAN.md` Phase 3.2
 
 ### 修正ファイル:
-- `LOSAT/src/algorithm/tblastx/ncbi_cutoffs.rs`
-- `LOSAT/src/algorithm/tblastx/utils.rs`
+- `LOSAT/src/algorithm/tblastx/ncbi_cutoffs.rs`: Cutoff計算のデバッグ出力追加
+- `LOSAT/src/algorithm/tblastx/utils.rs`: HSP filtering, reevaluation, 統計追加
+- `LOSAT/src/algorithm/tblastx/reevaluate.rs`: Reevaluationのcutoff適用確認
 
 ### 関連ドキュメント:
 - `TBLASTX_NCBI_PARITY_STATUS.md` - 詳細なステータスレポート
 - `TBLASTX_NCBI_PARITY_FIX_PLAN.md` - 修正計画
+- **`TBLASTX_LONG_SEQUENCE_HSP_FIX_PLAN.md`** - **長い配列での過剰なHSP生成の修正計画（新規）**
 

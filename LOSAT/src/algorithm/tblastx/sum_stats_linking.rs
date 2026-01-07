@@ -1534,8 +1534,14 @@ fn link_hsp_group_ncbi(
         } else if let Some(i) = best[1 - ordering] {
             i
         } else {
-            // Edge case: active list became empty but remaining > 0
-            // This can happen if all remaining HSPs were already processed
+            // NCBI reference: link_hsps.c:589-982
+            // In NCBI, the while (number_of_hsps > 0) loop processes ALL HSPs.
+            // If active_head becomes SENTINEL_IDX but remaining > 0, this indicates
+            // a bug in the linking logic. NCBI would never reach this state.
+            // However, we must handle this gracefully to avoid panic.
+            if is_long_sequence && remaining > 0 {
+                eprintln!("[DEBUG LINKING] WARNING: active_head=SENTINEL but remaining={}, this should not happen in NCBI", remaining);
+            }
             // Break out of the loop to avoid panic
             break;
         };
@@ -1563,8 +1569,19 @@ fn link_hsp_group_ncbi(
         }
 
         // NCBI lines 959-963: Determine if this is a linked set (multi-HSP chain)
+        // NCBI reference (verbatim, link_hsps.c:959-962):
+        //   if (best[ordering_method]->hsp_link.link[ordering_method])
+        //      linked_set = TRUE;
+        //   else
+        //      linked_set = FALSE;
         // If best has a link, it's a linked set (multiple HSPs)
         let linked_set = hsp_links[best_i].link[ordering] != SENTINEL_IDX;
+        
+        // NCBI line 955: best[ordering_method]->start_of_chain = TRUE;
+        // CRITICAL: NCBI sets start_of_chain = TRUE for ALL selected HSPs (both single and chain heads)
+        // This is set BEFORE the loop that processes chain members
+        hsp_links[best_i].start_of_chain = true;
+        group_hits[best_i].start_of_chain = true;
         
         // Mark chain head and remove chain from consideration (NCBI lines 961-1000)
         // IMPORTANT: Set the chain's E-value to ALL members of the chain,
@@ -1612,6 +1629,9 @@ fn link_hsp_group_ncbi(
             }
             
             // NCBI line 972: H->linked_set = linked_set
+            // NCBI reference (verbatim, link_hsps.c:972):
+            //   H->linked_set = linked_set;
+            // This is set for ALL HSPs in the chain (both head and members)
             hsp_links[cur].linked_set = linked_set;
             
             // NCBI line 973: H->ordering_method = ordering_method;
@@ -1621,6 +1641,8 @@ fn link_hsp_group_ncbi(
             
             // Set E-value for ALL HSPs in the chain (not just head)
             // This is key: chain members inherit the chain's E-value
+            // NCBI reference (verbatim, link_hsps.c:974):
+            //   H->hsp->evalue = prob[ordering_method];
             group_hits[cur].e_value = evalue;
             
             // Transfer linked_set flag to UngappedHit for output filtering
@@ -1628,12 +1650,13 @@ fn link_hsp_group_ncbi(
             group_hits[cur].linked_set = linked_set;
             
             if is_first {
-                // Chain head: mark as start_of_chain (NCBI line 955)
-                hsp_links[cur].start_of_chain = true;
-                group_hits[cur].start_of_chain = true;
+                // Chain head: start_of_chain already set to true above (NCBI line 955)
+                // This matches NCBI: best[ordering_method]->start_of_chain = TRUE (before loop)
                 is_first = false;
             } else {
                 // Non-head HSP in chain: mark as not start_of_chain
+                // NCBI reference: Only the first HSP in the loop (best[ordering_method]) has start_of_chain=TRUE
+                // All subsequent HSPs in the chain have start_of_chain=FALSE (default from initialization)
                 hsp_links[cur].start_of_chain = false;
                 group_hits[cur].start_of_chain = false;
             }
@@ -1695,6 +1718,13 @@ fn link_hsp_group_ncbi(
     // Output filtering should happen in the format/output code, not here.
     // This function returns ALL HSPs with their linked_set/start_of_chain flags
     // properly set for downstream use.
+    //
+    // NCBI reference: link_hsps.c:589-982
+    // In NCBI, the while (number_of_hsps > 0) loop processes ALL HSPs.
+    // HSPs that are not selected as best in one iteration are still processed
+    // in subsequent iterations. Therefore, there are NO unprocessed HSPs in NCBI.
+    // If active_head becomes SENTINEL_IDX but remaining > 0, this indicates
+    // a bug in the linking logic, not a valid case for E-value calculation.
     
     // Output filtering statistics for long sequences
     if is_long_sequence && (stats_index0_filtered > 0 || stats_index0_passed > 0 || stats_index1_filtered > 0 || stats_index1_passed > 0) {

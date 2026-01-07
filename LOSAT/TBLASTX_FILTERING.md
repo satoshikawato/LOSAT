@@ -219,3 +219,57 @@ TBLASTXで実装されているフィルタリングは以下の通りです：
 - Cutoff計算は`MIN(update_cutoff, gap_trigger, cutoff_score_max)`で決定されます
 - Reevaluationのタイミングは異なるが、機能的には同等
 
+## 8. 長い配列での過剰なHSP生成の問題（2026-01-06追加）
+
+### 問題の概要
+- **現象**: 長い配列（600kb+）でLOSATが約338,859 HSPsを生成 vs NCBIの30,000-45,000（約7倍の過剰生成）
+- **特に低ビットスコア範囲（<30 bits）で過剰なHSPが生成される**
+
+### 根本原因
+
+#### 8.1 Cutoff計算の問題
+- **実装場所**: `ncbi_cutoffs.rs:399-433` (`cutoff_score_for_update_tblastx`)
+- **NCBI参照**: `blast_parameters.c:348-374` (`BlastInitialWordParametersUpdate`)
+- **問題点**:
+  1. 長い配列（600kb+）での`searchsp`計算: `MIN(query_aa, subject_nucl) * subject_nucl = 120 billion`
+  2. `CUTOFF_E_TBLASTX = 1e-300`とgap decay (0.5)により、実効的なcutoffが非常に低くなる
+  3. `cutoff_score_max`（ユーザーのE-value=10.0から計算）が41未満の場合、それが制限要因になる
+  4. 結果として、低スコアHSP（<30 bits）が通過してしまう
+
+#### 8.2 HSP Filteringのタイミング
+- **実装場所**: `utils.rs:1950-1958` (Extension後のcutoffチェック)
+- **NCBI参照**: `aa_ungapped.c:575-591` (Extension後のcutoffチェック)
+- **問題点**:
+  - Extension直後のcutoffチェックは正しく実装されている
+  - しかし、計算されたcutoff値が長い配列で低すぎる可能性がある
+  - 低スコアHSPがcutoffを通過してしまう
+
+#### 8.3 Reevaluationの効果
+- **実装場所**: `utils.rs:708-757` (`reevaluate_ungapped_hsp_list`)
+- **NCBI参照**: `blast_hits.c:675-733` (`Blast_HSPReevaluateWithAmbiguitiesUngapped`)
+- **問題点**:
+  - 座標変換は正しく実装されている（`get_ungapped_hsp_list`）
+  - Reevaluationでcutoffチェックが実行されている
+  - しかし、低すぎるcutoffにより、低スコアHSPが通過してしまう可能性がある
+
+### 修正計画
+詳細は `TBLASTX_LONG_SEQUENCE_HSP_FIX_PLAN.md` を参照してください。
+
+**主な修正項目**:
+1. **Phase 1**: Cutoff計算の検証と修正（最優先）
+   - Cutoff計算のデバッグ出力追加
+   - Cutoff適用の検証
+2. **Phase 2**: Reevaluationの検証と修正
+   - Reevaluationのcutoff適用確認
+   - 座標変換の再確認
+3. **Phase 3**: 統計とデバッグ出力の追加
+   - HSP生成統計の追加
+   - デバッグ出力の追加
+
+### 期待される結果
+修正後、以下の改善が期待されます：
+1. **HSP生成数の削減**: 338,859 → 30,000-45,000（NCBIと同等）
+2. **低ビットスコアHSPの削減**: <30 bitsのHSPが適切にフィルタリングされる
+3. **Cutoff計算の正確性**: 長い配列でも正しいcutoffが計算される
+4. **NCBIとの完全一致**: HSP生成数、スコア分布がNCBIと一致する
+

@@ -80,5 +80,3 @@ LOSAT is optimized for "local" alignments (e.g., comparing two viral genomes or 
 
 ## License
 [MIT License](LICENSE)
-
-[Devin Referral](https://app.devin.ai/invite/KvUrhw4lViPOEAl6)

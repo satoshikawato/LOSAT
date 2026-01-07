@@ -15,6 +15,7 @@ use crate::stats::sum_statistics::{
 };
 use crate::stats::KarlinParams;
 use std::sync::OnceLock;
+use rayon::prelude::*;
 
 use super::chaining::UngappedHit;
 use super::diagnostics::diagnostics_enabled;
@@ -679,24 +680,35 @@ pub fn apply_sum_stats_even_gap_linking(
         frame_groups.push(current_group);
     }
     
-    // Step 3: Process each frame group SEQUENTIALLY (NCBI does not parallelize)
-    // NCBI line 553: for (frame_index=0; frame_index<num_query_frames; frame_index++)
-    let mut results: Vec<UngappedHit> = Vec::new();
-    for group_hits in frame_groups {
-        let processed = link_hsp_group_ncbi(
-            group_hits,
-            params,
-            &cutoffs,
-            linking_params.gap_decay_rate,
-            diag_enabled,
-            linking_params.subject_len_nucl,
-            query_contexts,
-            subject_frame_bases,
-            length_adj_per_context,
-            eff_searchsp_per_context,
-        );
-        results.extend(processed);
-    }
+    // Step 3: Process each frame group IN PARALLEL
+    // NCBI reference: link_hsps.c:553-702
+    // NCBI processes frame groups sequentially, but each group is independent:
+    //   for (frame_index=0; frame_index<num_query_frames; frame_index++)
+    //   {
+    //       // Each iteration uses: hp_frame_start[frame_index], hp_frame_number[frame_index]
+    //       // Local variables: hp_start, lh_helper, max, best (no shared state)
+    //       // Process group independently
+    //   }
+    // LOSAT parallelizes this loop for performance while maintaining output equivalence.
+    // Each frame group is processed independently with no shared mutable state.
+    // Final sorting (NCBI order) ensures identical output regardless of processing order.
+    let results: Vec<UngappedHit> = frame_groups
+        .into_par_iter()
+        .flat_map(|group_hits| {
+            link_hsp_group_ncbi(
+                group_hits,
+                params,
+                &cutoffs,
+                linking_params.gap_decay_rate,
+                diag_enabled,
+                linking_params.subject_len_nucl,
+                query_contexts,
+                subject_frame_bases,
+                length_adj_per_context,
+                eff_searchsp_per_context,
+            )
+        })
+        .collect();
     
     results
 }

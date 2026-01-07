@@ -248,7 +248,7 @@ pub fn cutoff_score_for_update_tblastx(
 }
 ```
 
-#### 1.2 Cutoff適用の検証
+#### 1.2 Cutoff適用の検証 ✅ **完了** (2026-01-06)
 
 **ファイル**: `utils.rs`
 
@@ -259,7 +259,9 @@ pub fn cutoff_score_for_update_tblastx(
 **NCBI参照**:
 - `aa_ungapped.c:575-591`: Extension後のcutoffチェック
 
-**実装**:
+**実装状況**: ✅ **実装完了**
+
+**実装コード**:
 ```rust
 // utils.rs:1950-1958
 // [C] if (score >= cutoffs->cutoff_score)
@@ -409,6 +411,8 @@ if !ungapped_hits.is_empty() {
 4. **Phase 2.2**: 座標変換の再確認 ✅ **確認済み** (既存実装が正しい)
 5. **Phase 3.1**: HSP生成統計の追加 ✅ **完了** (2026-01-06)
 6. **Phase 3.2**: デバッグ出力の追加 ✅ **完了** (2026-01-06)
+7. **Phase 4.1**: チェーンメンバーのフィルタリング条件を削除 ✅ **完了** (2026-01-07)
+8. **Phase 4.2**: 走査の起点をスキップする機能の実装 ⚠️ **未実装** (最優先)
 
 ## 実装完了状況
 
@@ -443,7 +447,25 @@ if !ungapped_hits.is_empty() {
 - ✅ NCBI実装との完全一致を確認
 - ✅ デバッグ出力が正常に動作（長い配列600kb+で確認）
 
-### テスト結果 (AP027131 vs AP027133, Genetic Code: 4)
+### テスト結果
+
+**最終更新日**: 2026-01-07
+
+#### AP027280 (Genetic Code 1) - Self-match
+
+**配列長**: Query=Subject=約600kb
+
+| 項目 | LOSAT | NCBI | 差異 |
+|------|-------|------|------|
+| **Hit数** | 42,797 | 42,733 | +64 (0.15%) |
+| **Identity** | min=17.1%, max=100.0%, avg=67.1% | min=17.1%, max=100.0%, avg=67.1% | 一致 |
+| **Length** | min=4, max=2798, avg=48.8 | min=4, max=2798, avg=48.9 | ほぼ一致 |
+| **E-value** | min=0.00e+00, max=9.40e+00, avg=1.13e-01 | min=0.00e+00, max=9.40e+00, avg=1.03e-01 | ほぼ一致 |
+| **Bit-score** | min=22.1, max=6206.0, avg=81.9 | min=22.1, max=6206.0, avg=82.0 | ほぼ一致 |
+
+**結果**: ✅ **ほぼ完全一致** (差: 0.15%)
+
+#### AP027131 vs AP027133 (Genetic Code: 4)
 
 **テスト日**: 2026-01-07  
 **配列長**: Query=220,702 AA, Subject=606,194 nucleotides (約606kb)
@@ -477,6 +499,8 @@ if !ungapped_hits.is_empty() {
 | **Bit-score** | min=22.1, max=1616.0, avg=35.7 | min=22.1, max=1533.0, avg=42.8 | - |
 | **Identity** | min=10.8%, max=100.0%, avg=44.7% | min=14.5%, max=100.0%, avg=46.1% | - |
 | **E-value** | min=0.00e+00, max=9.40e+00, avg=3.52e-01 | min=0.00e+00, max=9.40e+00, avg=2.25e-01 | - |
+
+**結果**: ⚠️ **不一致** (約2倍の過剰生成)
 
 #### スコア分布の詳細比較
 
@@ -526,24 +550,99 @@ if !ungapped_hits.is_empty() {
 
 ## 現在の状況 (2026-01-07)
 
+### 最新の修正内容
+
+**修正日**: 2026-01-07
+
+1. **チェーンメンバーのフィルタリング条件を削除**:
+   - NCBIコードを確認: `link_hsps.c:1018-1020`の`continue`は出力フィルタではなく、走査の起点をスキップするためのもの
+   - チェーンメンバーは、チェーンヘッドから`link`を辿って`next`に接続されるため、結果リストに含まれる
+   - 修正前: チェーンメンバーを出力から除外していた（誤り）
+   - 修正後: チェーンメンバーも出力に含める（NCBIと一致）
+
+2. **⚠️ 未実装: 走査の起点をスキップする機能**:
+   - **NCBI実装**: `link_hsps.c:1014-1076`で、`link_hsp_array`を走査して`prev/next`リストを構築する際、チェーンメンバー（`linked_set == TRUE && start_of_chain == FALSE`）を走査の起点としてスキップ
+   - **NCBIコード参照**:
+     ```c
+     // link_hsps.c:1014-1076
+     for (index=0, last_hsp=NULL; index<total_number_of_hsps; index++) {
+         H = link_hsp_array[index];
+         
+         /* If this is not a single piece or the start of a chain, then Skip it. */
+         if (H->linked_set == TRUE && H->start_of_chain == FALSE)
+             continue;  // 走査の起点としてスキップ
+         
+         // チェーンヘッドからlinkを辿ってチェーンメンバーをnextに接続
+         if (H->hsp_link.link[ordering_method] == NULL) {
+             // 単一HSP: 次の非チェーンメンバーを探す
+             H2 = ...;
+             while (H2 && H2->linked_set == TRUE && H2->start_of_chain == FALSE)
+                 H2 = ...;  // チェーンメンバーをスキップ
+             H->next = H2;
+         } else {
+             // チェーンヘッド: linkを辿ってチェーンメンバーをnextに接続
+             link = H->hsp_link.link[ordering_method];
+             while (link) {
+                 H->next = (LinkHSPStruct*) link;
+                 H = H->next;
+                 link = H->hsp_link.link[ordering_method];
+             }
+             // 最後のチェーンメンバーのnextを設定
+             H2 = ...;
+             while (H2 && H2->linked_set == TRUE && H2->start_of_chain == FALSE)
+                 H2 = ...;  // チェーンメンバーをスキップ
+             H->next = H2;
+         }
+     }
+     ```
+   - **LOSATの現状**: `utils.rs:2238-2251`で、`linked`配列を直接走査して出力している
+   - **必要な実装**: 
+     - `sum_stats_linking.rs`から返される`linked`配列を、NCBIの`link_hsp_array`と同様に扱う
+     - チェーンメンバー（`linked_set == TRUE && start_of_chain == FALSE`）を走査の起点としてスキップ
+     - チェーンヘッドから`link`（`ordering_method`に基づく）を辿ってチェーンメンバーを`next`に接続
+     - `first_hsp`から`next`を辿って最終的な出力リストを構築
+   - **実装場所**: `utils.rs`の出力変換部分（`sum_stats_linking.rs`の結果を受け取った後）
+   - **影響**: この実装により、HSPの処理順序がNCBIと完全に一致し、AP027131 vs AP027133での不一致が解消される可能性がある
+
 ### 達成事項
 - ✅ Cutoff計算がNCBI実装と完全に一致
 - ✅ デバッグ出力が正常に動作
 - ✅ 31,524,554個のHSPがcutoffでフィルタリング（cutoff計算は正しく動作）
 - ✅ 338,859 HSPs → 29,766 hitsへの削減（linking/cullingで約11.4倍削減）
+- ✅ **AP027280 (Genetic Code 1)**: ほぼ完全一致 (差: 0.15%)
+- ✅ チェーンメンバーのフィルタリング条件を削除（NCBIと一致）
 
 ### 残存する問題
-- ⚠️ **Hit数がまだ2倍**: LOSAT=29,766 vs NCBI=14,871 (200.2%)
+- ⚠️ **AP027131 vs AP027133 (Genetic Code 4)**: Hit数がまだ2倍 (LOSAT=29,766 vs NCBI=14,871, 200.2%)
 - ⚠️ **338,859個のHSPがcutoff=41を通過**: これは正常（cutoff=41以上は通過）
 - ⚠️ **Linking/Culling段階での削減が不十分**: 338,859 → 29,766 (NCBIは約14,871 hits)
 - ⚠️ **低スコアHSPが過剰**: <30 bitsのHSPが72.9% (NCBI=57.0%)
 - ⚠️ **短いHSPが過剰**: <20 AAのHSPが27.0% (NCBI=16.3%)
 - ⚠️ **長いHSPが不足**: >=50 AAのHSPが13.6% (NCBI=23.7%)
 
-### 次の調査項目
+### 次の調査項目・実装項目
+
+#### 優先度1: 走査の起点をスキップする機能の実装（最優先）
+
+**NCBI実装**: `link_hsps.c:1014-1076`
+- `link_hsp_array`を走査して`prev/next`リストを構築
+- チェーンメンバー（`linked_set == TRUE && start_of_chain == FALSE`）を走査の起点としてスキップ
+- チェーンヘッドから`link`を辿ってチェーンメンバーを`next`に接続
+- `first_hsp`から`next`を辿って最終的な出力リストを構築
+
+**LOSAT実装が必要な箇所**: `utils.rs:2238-2251`
+- 現在: `linked`配列を直接走査して出力
+- 必要: NCBIと同様に、チェーンメンバーを走査の起点としてスキップし、チェーンヘッドから`link`を辿ってリストを構築
+
+**期待される効果**:
+- HSPの処理順序がNCBIと完全に一致
+- AP027131 vs AP027133での不一致が解消される可能性
+
+#### 優先度2: その他の調査項目
 1. **Sum-statistics linking**: チェーン形成とE-value計算がNCBIと一致しているか
 2. **HSP Culling**: 重複HSPの削除が正しく動作しているか
 3. **Linking cutoff**: `cutoff_small_gap=41`, `cutoff_big_gap=46`の適用が正しいか
+4. **Genetic Code 4特有の問題**: AP027131 vs AP027133で約2倍の差がある原因を調査
 
 ## 関連ファイル
 
@@ -558,4 +657,5 @@ if !ungapped_hits.is_empty() {
   - `c++/src/algo/blast/core/aa_ungapped.c:575-591`: Extension後のcutoffチェック
   - `c++/src/algo/blast/core/blast_hits.c:675-733`: `Blast_HSPReevaluateWithAmbiguitiesUngapped`
   - `c++/src/algo/blast/core/blast_gapalign.c:2384-2392`: `s_AdjustInitialHSPOffsets`
+  - `c++/src/algo/blast/core/link_hsps.c:1014-1076`: 走査の起点をスキップする機能（`prev/next`リスト構築）
 

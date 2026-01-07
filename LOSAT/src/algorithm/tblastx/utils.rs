@@ -715,6 +715,8 @@ fn reevaluate_ungapped_hsp_list(
     timing_enabled: bool,
     reeval_ns: &AtomicU64,
     reeval_calls: &AtomicU64,
+    is_long_sequence: bool,
+    stats_hsp_filtered_by_reeval: &mut usize,
 ) -> Vec<UngappedHit> {
     let mut kept_hits = Vec::new();
     
@@ -742,6 +744,10 @@ fn reevaluate_ungapped_hsp_list(
         
         // NCBI: Blast_HSPReevaluateWithAmbiguitiesUngapped (blast_hits.c:2702-2705)
         // Reference: blast_hits.c:675-733
+        // NCBI reference (verbatim, blast_hits.c:688):
+        //   Int4 cutoff_score = word_params->cutoffs[hsp->context].cutoff_score;
+        //   return s_UpdateReevaluatedHSPUngapped(hsp, cutoff_score, score, ...);
+        // If score < cutoff_score, the HSP is deleted (s_UpdateReevaluatedHSPUngapped returns FALSE)
         let t0 = if timing_enabled { Some(std::time::Instant::now()) } else { None };
         let (new_qs, new_ss, new_len, new_score) = if let Some(result) =
             reevaluate_ungapped_hit_ncbi_translated(query, subject, qs, ss, len_u, cutoff)
@@ -749,6 +755,10 @@ fn reevaluate_ungapped_hsp_list(
             result
         } else {
             // Deleted by NCBI reevaluation (score < cutoff_score)
+            // NCBI reference: blast_hits.c:730-732 (s_UpdateReevaluatedHSPUngapped returns FALSE)
+            if is_long_sequence {
+                *stats_hsp_filtered_by_reeval += 1;
+            }
             if let Some(t) = t0 {
                 let elapsed = t.elapsed();
                 reeval_ns.fetch_add(elapsed.as_nanos() as u64, AtomicOrdering::Relaxed);
@@ -1948,9 +1958,11 @@ pub fn run(args: TblastxArgs) -> Result<()> {
                             }
 
                             // [C] if (score >= cutoffs->cutoff_score)
+                            // NCBI reference: aa_ungapped.c:575-591 (Extension後のcutoffチェック)
                             if is_long_sequence {
                                 if score >= cutoff {
                                     stats_score_distribution.push(score);
+                                    stats_hsp_saved += 1;  // Count saved HSPs
                                 } else {
                                     stats_hsp_filtered_by_cutoff += 1;
                                 }
@@ -2075,9 +2087,25 @@ pub fn run(args: TblastxArgs) -> Result<()> {
                     timing_enabled,
                     &reeval_ns,
                     &reeval_calls,
+                    is_long_sequence,
+                    &mut stats_hsp_filtered_by_reeval,
                 );
                 
                 if !ungapped_hits.is_empty() {
+                    // DEBUG: Print HSP statistics for long sequences
+                    if is_long_sequence {
+                        eprintln!("[DEBUG HSP_STATS] After reevaluation: {} HSPs", ungapped_hits.len());
+                        eprintln!("[DEBUG HSP_STATS] Saved by cutoff: {}", stats_hsp_saved);
+                        eprintln!("[DEBUG HSP_STATS] Filtered by cutoff: {}", stats_hsp_filtered_by_cutoff);
+                        eprintln!("[DEBUG HSP_STATS] Filtered by reeval: {}", stats_hsp_filtered_by_reeval);
+                        if !stats_score_distribution.is_empty() {
+                            let min_score = stats_score_distribution.iter().min().unwrap();
+                            let max_score = stats_score_distribution.iter().max().unwrap();
+                            let avg_score = stats_score_distribution.iter().sum::<i32>() as f64 / stats_score_distribution.len() as f64;
+                            eprintln!("[DEBUG HSP_STATS] Score range: {} - {} (avg: {:.2})", 
+                                      min_score, max_score, avg_score);
+                        }
+                    }
                     if diag_enabled {
                         diagnostics
                             .base
@@ -2190,9 +2218,42 @@ pub fn run(args: TblastxArgs) -> Result<()> {
                         .fetch_add(linked_before_cull.saturating_sub(linked.len()), AtomicOrdering::Relaxed);
                 }
                 
+                // DEBUG: Collect statistics before filtering
+                let total_linked = linked.len();
+                let mut stats_single_hsps = 0usize;
+                let mut stats_chain_heads = 0usize;
+                let mut stats_chain_members = 0usize;
+                for h in &linked {
+                    if h.linked_set && !h.start_of_chain {
+                        stats_chain_members += 1;
+                    } else if !h.linked_set {
+                        stats_single_hsps += 1;
+                    } else if h.start_of_chain {
+                        stats_chain_heads += 1;
+                    }
+                }
+                
                 let mut final_hits: Vec<Hit> = Vec::new();
+                let mut filtered_by_evalue = 0usize;
                 for h in linked {
+                    // NCBI reference (verbatim, link_hsps.c:1018-1020):
+                    //   /* If this is not a single piece or the start of a chain, then Skip it. */
+                    //   if (H->linked_set == TRUE && H->start_of_chain == FALSE)
+                    //       continue;
+                    // CRITICAL: This continue is NOT an output filter!
+                    // NCBI reference: TBLASTX_NCBI_PARITY_STATUS.md section 11.1
+                    // NCBI skips chain members only as "traversal starting points" in the array scan.
+                    // However, chain members are still included in the output list by following
+                    // the `link` pointer from the chain head (link_hsps.c:1047-1059).
+                    // Therefore, we MUST NOT filter chain members during output conversion.
+                    // All HSPs (including chain members) should be output.
+                    // NCBI reference: link_hsps.c:1047-1059 (chain members are connected via link pointer)
+                    // DO NOT filter chain members here - they are part of the output list
+                    
+                    // NCBI reference: E-value filtering is applied during output conversion
+                    // The exact timing may differ, but the threshold check is standard
                     if h.e_value > evalue_threshold {
+                        filtered_by_evalue += 1;
                         if diag_enabled {
                             diagnostics
                                 .ungapped_evalue_failed
@@ -2268,6 +2329,18 @@ pub fn run(args: TblastxArgs) -> Result<()> {
                     trace_final_hit_if_match("output_hit", &out_hit);
                     final_hits.push(out_hit);
                 }
+                
+                // DEBUG: Print output filtering statistics
+                // NCBI reference: link_hsps.c:1018-1020 - continue is NOT an output filter
+                // Chain members are included in output via link pointer traversal
+                // Always print for debugging hit count discrepancy
+                eprintln!("[DEBUG OUTPUT_FILTER] Total linked HSPs: {}", total_linked);
+                eprintln!("[DEBUG OUTPUT_FILTER] Single HSPs (linked_set=false): {}", stats_single_hsps);
+                eprintln!("[DEBUG OUTPUT_FILTER] Chain heads (linked_set=true, start_of_chain=true): {}", stats_chain_heads);
+                eprintln!("[DEBUG OUTPUT_FILTER] Chain members (linked_set=true, start_of_chain=false): {} (included in output)", stats_chain_members);
+                eprintln!("[DEBUG OUTPUT_FILTER] Filtered by E-value (threshold={}): {}", evalue_threshold, filtered_by_evalue);
+                eprintln!("[DEBUG OUTPUT_FILTER] Expected after E-value filter: {} (all HSPs - E-value filtered)", total_linked - filtered_by_evalue);
+                eprintln!("[DEBUG OUTPUT_FILTER] Final hits after filtering: {}", final_hits.len());
 
                 if !final_hits.is_empty() {
                     if diag_enabled {
@@ -3023,6 +3096,8 @@ fn run_with_neighbor_map(args: TblastxArgs) -> Result<()> {
                 
                 // NCBI: Blast_HSPListReevaluateUngapped equivalent
                 // Perform batch reevaluation on all HSPs
+                // Note: Statistics collection is disabled in neighbor-map mode (parallel processing)
+                let mut dummy_stats = 0usize;
                 let local_hits = reevaluate_ungapped_hsp_list(
                     local_hits,
                     &temp_contexts,
@@ -3032,6 +3107,8 @@ fn run_with_neighbor_map(args: TblastxArgs) -> Result<()> {
                     timing_enabled,
                     &reeval_ns,
                     &reeval_calls,
+                    false,  // is_long_sequence: statistics not collected in neighbor-map mode
+                    &mut dummy_stats,
                 );
 
                 bar.inc(1);

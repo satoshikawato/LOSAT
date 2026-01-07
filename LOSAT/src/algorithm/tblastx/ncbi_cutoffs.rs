@@ -411,6 +411,15 @@ pub fn cutoff_score_for_update_tblastx(
     let min_len = (query_len_aa as u64).min(subject_len_nucl as u64);
     let searchsp = (min_len * (subject_len_nucl as u64)) as i64;
 
+    // DEBUG: Print for long sequences
+    // NCBI reference: blast_parameters.c:348-374 (BlastInitialWordParametersUpdate)
+    if subject_len_nucl > 600_000 {
+        eprintln!("[DEBUG CUTOFF_UPDATE] query_len_aa={}, subject_len_nucl={}", 
+                  query_len_aa, subject_len_nucl);
+        eprintln!("[DEBUG CUTOFF_UPDATE] searchsp={} (MIN({}, {}) * {})", 
+                  searchsp, query_len_aa, subject_len_nucl, subject_len_nucl);
+    }
+
     // NCBI: cutoff_e = s_GetCutoffEvalue(program_number) = CUTOFF_E_TBLASTX = 1e-300
     // NCBI: BLAST_Cutoffs(&new_cutoff, &cutoff_e, kbp, searchsp, TRUE, gap_decay_rate)
     // dodecay=TRUE means we apply gap decay divisor
@@ -421,6 +430,14 @@ pub fn cutoff_score_for_update_tblastx(
         ungapped_params,
     );
 
+    // DEBUG: Print intermediate values
+    if subject_len_nucl > 600_000 {
+        eprintln!("[DEBUG CUTOFF_UPDATE] update_cutoff={} (from CUTOFF_E_TBLASTX=1e-300, searchsp={}, gap_decay={})", 
+                  new_cutoff, searchsp, gap_decay_rate);
+        eprintln!("[DEBUG CUTOFF_UPDATE] gap_trigger={}, cutoff_score_max={}", 
+                  gap_trigger, cutoff_score_max);
+    }
+
     // NCBI: new_cutoff = MIN(new_cutoff, gap_trigger)
     // (Blastn exception at line 366 does not apply to tblastx)
     new_cutoff = new_cutoff.min(gap_trigger);
@@ -429,7 +446,15 @@ pub fn cutoff_score_for_update_tblastx(
     new_cutoff = (new_cutoff as f64 * scale_factor) as i32;
 
     // NCBI: new_cutoff = MIN(new_cutoff, hit_params->cutoffs[context].cutoff_score_max)
-    new_cutoff.min(cutoff_score_max)
+    let final_cutoff = new_cutoff.min(cutoff_score_max);
+
+    // DEBUG: Print final cutoff
+    if subject_len_nucl > 600_000 {
+        eprintln!("[DEBUG CUTOFF_UPDATE] final_cutoff={} (MIN(update_cutoff={}, gap_trigger={}, cutoff_score_max={}))", 
+                  final_cutoff, new_cutoff, gap_trigger, cutoff_score_max);
+    }
+
+    final_cutoff
 }
 
 /// Calculate cutoff_score_max for BlastHitSavingParametersNew.

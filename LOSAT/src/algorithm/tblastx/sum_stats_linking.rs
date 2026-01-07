@@ -1018,17 +1018,23 @@ fn link_hsp_group_ncbi(
         // NCBI lines 603-652: Try to reuse previous max
         if !first_pass {
             // NCBI lines 607-625: Find the current max sums
-            // Using intrusive linked list traversal (O(active) instead of O(n))
-            // This matches NCBI's hp_start->next traversal where processed HSPs are removed
-            // NCBI parity fix: Add linked_to != -1000 check to exclude processed HSPs
-            // In NCBI, processed HSPs are physically removed from the linked list.
-            // In LOSAT, we use an array with intrusive list, so processed HSPs might
-            // still appear in traversal if unlinking has edge cases.
-            // This defensive check ensures we never select a processed HSP as best.
+            // NCBI reference (verbatim, link_hsps.c:610-623):
+            //   for (H=hp_start->next; H!=NULL; H=H->next) {
+            //      Int4 sum0=H->hsp_link.sum[0];
+            //      Int4 sum1=H->hsp_link.sum[1];
+            //      if(sum0>=max0) { max0=sum0; best[0]=H; }
+            //      if(sum1>=max1) { max1=sum1; best[1]=H; }
+            //   }
+            // NCBI does NOT check linked_to or changed flags here.
+            // Processed HSPs are physically removed from the linked list (lines 975-978),
+            // so they cannot appear in hp_start->next traversal.
+            // In LOSAT, we also unlink processed HSPs (lines 1623-1642), so they cannot
+            // appear in active_head traversal either. No defensive checks needed.
             if !ignore_small_gaps {
                 let mut cur = active_head;
                 while cur != SENTINEL_IDX {
-                    if hsp_links[cur].linked_to != -1000 && hsp_links[cur].sum[0] >= best_sum[0] {
+                    // NCBI line 613: if(sum0>=max0)
+                    if hsp_links[cur].sum[0] >= best_sum[0] {
                         best_sum[0] = hsp_links[cur].sum[0];
                         best[0] = Some(cur);
                     }
@@ -1038,7 +1044,8 @@ fn link_hsp_group_ncbi(
             {
                 let mut cur = active_head;
                 while cur != SENTINEL_IDX {
-                    if hsp_links[cur].linked_to != -1000 && hsp_links[cur].sum[1] >= best_sum[1] {
+                    // NCBI line 618: if(sum1>=max1)
+                    if hsp_links[cur].sum[1] >= best_sum[1] {
                         best_sum[1] = hsp_links[cur].sum[1];
                         best[1] = Some(cur);
                     }

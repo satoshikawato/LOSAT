@@ -7,6 +7,7 @@ pub mod extension;
 pub mod coordination;
 pub mod utils;
 pub mod ncbi_cutoffs;
+pub mod query_info;
 
 pub use args::BlastnArgs;
 pub use utils::run;

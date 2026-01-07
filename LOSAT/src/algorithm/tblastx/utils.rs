@@ -627,8 +627,21 @@ fn get_ungapped_hsp_list(
         let q_end_relative = adjust_initial_hsp_offsets(init_hsp.q_end_absolute, ctx.frame_base);
         
         // NCBI: Blast_HSPInit (blast_hits.c:150-189)
-        // query.offset = ungapped_data->q_start (context-relative, sentinel included)
-        // query.end = ungapped_data->length + ungapped_data->q_start
+        // NCBI code (blast_gapalign.c:4760-4767):
+        //   Blast_HSPInit(ungapped_data->q_start,
+        //                 ungapped_data->length+ungapped_data->q_start,
+        //                 ungapped_data->s_start,
+        //                 ungapped_data->length+ungapped_data->s_start,
+        //                 init_hsp->offsets.qs_offsets.q_off,
+        //                 init_hsp->offsets.qs_offsets.s_off,
+        //                 context, query_info->contexts[context].frame,
+        //                 subject->frame, ungapped_data->score, NULL, &new_hsp);
+        // NCBI: Blast_HSPInit sets (blast_hits.c:170-173):
+        //   new_hsp->query.offset = query_start; (context-relative, sentinel included)
+        //   new_hsp->query.end = query_end; (where query_end = ungapped_data->length + ungapped_data->q_start)
+        //   new_hsp->subject.offset = subject_start;
+        //   new_hsp->subject.end = subject_end;
+        //   new_hsp->score = score; (original extension score, before reevaluation)
         // 
         // In LOSAT, q_start_relative is context-relative coordinate (sentinel included).
         // We store it as array index into ctx.aa_seq (which has sentinel at index 0).
@@ -648,7 +661,7 @@ fn get_ungapped_hsp_list(
         let (ss_l, se_l) = (ss.saturating_sub(1), se.saturating_sub(1));
         
         // Create UngappedHit with context-relative coordinates (before reevaluation)
-        // NCBI: Blast_HSPInit creates HSP with original extension score
+        // NCBI: Blast_HSPInit creates HSP with original extension score (ungapped_data->score)
         let uh = UngappedHit {
             q_idx: init_hsp.q_idx,
             s_idx: init_hsp.s_idx,
@@ -683,55 +696,103 @@ fn get_ungapped_hsp_list(
 /// NCBI Blast_HSPListReevaluateUngapped equivalent
 /// Reference: blast_hits.c:2609-2737, blast_engine.c:1492-1497
 /// 
-/// NCBI code flow:
-/// 1. For each HSP in the list
-/// 2. Get context and compute query_start (context start position)
-/// 3. Call Blast_HSPReevaluateWithAmbiguitiesUngapped
-/// 4. Call Blast_HSPGetNumIdentitiesAndPositives and Blast_HSPTest
-/// 5. Delete HSPs that fail tests
-/// 6. Sort by score (scores may have changed)
+/// NCBI code flow (blast_hits.c:2687-2736):
+/// 1. For each HSP in the list: for (index = 0; index < hspcnt; ++index)
+/// 2. Get context: context = hsp->context (line 2694)
+/// 3. Compute query_start: query_start = query_blk->sequence + query_info->contexts[context].query_offset (lines 2696-2697)
+/// 4. Get subject_start: if (kTranslateSubject) subject_start = Blast_HSPGetTargetTranslation(...) (lines 2699-2700)
+/// 5. Call Blast_HSPReevaluateWithAmbiguitiesUngapped (lines 2702-2705)
+/// 6. If not deleted, call Blast_HSPGetNumIdentitiesAndPositives and Blast_HSPTest (lines 2708-2719)
+/// 7. Delete HSPs that fail tests (lines 2721-2724)
+/// 8. Sort by score: Blast_HSPListSortByScore(hsp_list) (line 2734)
 /// 
-/// NCBI reference (verbatim, blast_hits.c:2694-2706):
+/// NCBI reference (verbatim, blast_hits.c:2687-2736):
 /// ```c
-/// context = hsp->context;
-/// query_start = query_blk->sequence + query_info->contexts[context].query_offset;
-/// if (kTranslateSubject)
-///     subject_start = Blast_HSPGetTargetTranslation(target_t, hsp, NULL);
-/// if (kNucleotideSubject) {
-///     delete_hsp = Blast_HSPReevaluateWithAmbiguitiesUngapped(hsp, query_start,
-///         subject_start, word_params, sbp, kTranslateSubject);
+/// purge = FALSE;
+/// for (index = 0; index < hspcnt; ++index) {
+///     Boolean delete_hsp = FALSE;
+///     if (hsp_array[index] == NULL)
+///         continue;
+///     else
+///         hsp = hsp_array[index];
+/// 
+///     context = hsp->context;
+/// 
+///     query_start = query_blk->sequence +
+///         query_info->contexts[context].query_offset;
+/// 
+///     if (kTranslateSubject)
+///         subject_start = Blast_HSPGetTargetTranslation(target_t, hsp, NULL);
+/// 
+///     if (kNucleotideSubject) {
+///         delete_hsp =
+///             Blast_HSPReevaluateWithAmbiguitiesUngapped(hsp, query_start,
+///                subject_start, word_params, sbp, kTranslateSubject);
+///     }
+/// 
+///     if (!delete_hsp) {
+///         const Uint1* query_nomask = query_blk->sequence_nomask +
+///             query_info->contexts[context].query_offset;
+///         Int4 align_length = 0;
+///         Blast_HSPGetNumIdentitiesAndPositives(query_nomask,
+///                                               subject_start,
+///                                               hsp,
+///                                               score_params->options,
+///                                               &align_length,
+///                                               sbp);
+/// 
+///         delete_hsp = Blast_HSPTest(hsp, hit_params->options, align_length);
+///     }
+///     if (delete_hsp) { /* This HSP is now below the cutoff */
+///         hsp_array[index] = Blast_HSPFree(hsp_array[index]);
+///         purge = TRUE;
+///     }
 /// }
+/// 
+/// if (purge)
+///     Blast_HSPListPurgeNullHSPs(hsp_list);
+/// 
+/// /* Sort the HSP array by score (scores may have changed!) */
+/// Blast_HSPListSortByScore(hsp_list);
+/// Blast_HSPListAdjustOddBlastnScores(hsp_list, FALSE, sbp);
 /// ```
 /// 
-/// This function performs batch reevaluation on all HSPs in the list,
-/// updating scores and trimming boundaries. HSPs that fail reevaluation
-/// or subsequent tests are removed from the list.
+/// NOTE: Blast_HSPListAdjustOddBlastnScores (line 2735) is only for blastn,
+/// not needed for tblastx (translated subject).
 fn reevaluate_ungapped_hsp_list(
     mut ungapped_hits: Vec<UngappedHit>,
     contexts: &[super::lookup::QueryContext],
     s_frames: &[super::translation::QueryFrame],
     cutoff_scores: &[Vec<i32>],
     args: &super::args::TblastxArgs,
-    timing_enabled: bool,
-    reeval_ns: &AtomicU64,
-    reeval_calls: &AtomicU64,
-    is_long_sequence: bool,
-    stats_hsp_filtered_by_reeval: &mut usize,
 ) -> Vec<UngappedHit> {
     let mut kept_hits = Vec::new();
     
+    // Debug logging for reevaluation filtering
+    let debug_cutoffs = std::env::var("LOSAT_DEBUG_CUTOFFS").is_ok();
+    let mut reeval_stats = if debug_cutoffs {
+        Some((0usize, 0usize, 0usize)) // (total, passed_reeval, passed_identity)
+    } else {
+        None
+    };
+    
+    // NCBI: for (index = 0; index < hspcnt; ++index) (blast_hits.c:2687)
     for mut hit in ungapped_hits {
+        // NCBI: context = hsp->context (blast_hits.c:2694)
         let ctx = &contexts[hit.ctx_idx];
         let s_frame = &s_frames[hit.s_f_idx];
         let cutoff = cutoff_scores[hit.ctx_idx][hit.s_f_idx];
         
-        // NCBI: query_start = query_blk->sequence + query_info->contexts[context].query_offset;
+        // NCBI: query_start = query_blk->sequence + query_info->contexts[context].query_offset (blast_hits.c:2696-2697)
         // In LOSAT, ctx.aa_seq is the frame sequence (with sentinel at index 0)
         // query_start is the start of the context sequence (sentinel included)
         let query = &ctx.aa_seq;
+        
+        // NCBI: if (kTranslateSubject) subject_start = Blast_HSPGetTargetTranslation(target_t, hsp, NULL) (blast_hits.c:2699-2700)
+        // For tblastx, kTranslateSubject is TRUE, so we get the translated subject frame
         let subject = &s_frame.aa_seq;
         
-        // NCBI: query = query_start + hsp->query.offset
+        // NCBI: query = query_start + hsp->query.offset (blast_hits.c:692)
         // hsp->query.offset is context-relative coordinate (sentinel included)
         // In LOSAT, q_aa_start is sentinel-exclusive, so we add 1 to get sentinel-inclusive
         let qs = (hit.q_aa_start + 1) as usize;  // +1 for sentinel
@@ -742,39 +803,45 @@ fn reevaluate_ungapped_hsp_list(
             continue;
         }
         
-        // NCBI: Blast_HSPReevaluateWithAmbiguitiesUngapped (blast_hits.c:2702-2705)
+        // NCBI: if (kNucleotideSubject) { delete_hsp = Blast_HSPReevaluateWithAmbiguitiesUngapped(...) } (blast_hits.c:2702-2705)
         // Reference: blast_hits.c:675-733
-        // NCBI reference (verbatim, blast_hits.c:688):
-        //   Int4 cutoff_score = word_params->cutoffs[hsp->context].cutoff_score;
-        //   return s_UpdateReevaluatedHSPUngapped(hsp, cutoff_score, score, ...);
-        // If score < cutoff_score, the HSP is deleted (s_UpdateReevaluatedHSPUngapped returns FALSE)
-        let t0 = if timing_enabled { Some(std::time::Instant::now()) } else { None };
+        // NCBI: Blast_HSPReevaluateWithAmbiguitiesUngapped calls s_UpdateReevaluatedHSPUngapped (line 730)
+        // NCBI: s_UpdateReevaluatedHSPUngapped (blast_hits.c:663-673) calls s_UpdateReevaluatedHSP with gapped=FALSE (line 670)
+        // NCBI: s_UpdateReevaluatedHSP (blast_hits.c:439-477):
+        //   hsp->score = score; (line 451)
+        //   if (hsp->score >= cutoff_score) {
+        //       hsp->query.offset = (Int4)(best_q_start - query_start); (line 455)
+        //       hsp->query.end = (Int4)(hsp->query.offset + best_q_end - best_q_start); (line 456)
+        //       hsp->subject.offset = (Int4)(best_s_start - subject_start); (line 457)
+        //       hsp->subject.end = (Int4)(hsp->subject.offset + best_s_end - best_s_start); (line 458)
+        //       delete_hsp = FALSE; (line 473)
+        //   }
+        //   return delete_hsp; (line 476)
+        // Returns TRUE if HSP should be deleted (score < cutoff_score)
+        if let Some(ref mut stats) = reeval_stats {
+            stats.0 += 1; // Total HSPs before reevaluation
+        }
         let (new_qs, new_ss, new_len, new_score) = if let Some(result) =
             reevaluate_ungapped_hit_ncbi_translated(query, subject, qs, ss, len_u, cutoff)
         {
+            if let Some(ref mut stats) = reeval_stats {
+                stats.1 += 1; // Passed reevaluation cutoff
+            }
             result
         } else {
-            // Deleted by NCBI reevaluation (score < cutoff_score)
-            // NCBI reference: blast_hits.c:730-732 (s_UpdateReevaluatedHSPUngapped returns FALSE)
-            if is_long_sequence {
-                *stats_hsp_filtered_by_reeval += 1;
-            }
-            if let Some(t) = t0 {
-                let elapsed = t.elapsed();
-                reeval_ns.fetch_add(elapsed.as_nanos() as u64, AtomicOrdering::Relaxed);
-                reeval_calls.fetch_add(1, AtomicOrdering::Relaxed);
-            }
+            // NCBI: delete_hsp = TRUE (s_UpdateReevaluatedHSPUngapped returns TRUE)
+            // NCBI reference: blast_hits.c:730-732, s_UpdateReevaluatedHSP (lines 453-474)
+            // HSP deleted because score < cutoff_score
             continue;
         };
-        if let Some(t) = t0 {
-            let elapsed = t.elapsed();
-            reeval_ns.fetch_add(elapsed.as_nanos() as u64, AtomicOrdering::Relaxed);
-            reeval_calls.fetch_add(1, AtomicOrdering::Relaxed);
-        }
         
-        // NCBI: Blast_HSPGetNumIdentitiesAndPositives and Blast_HSPTest
-        // Reference: blast_hits.c:2708-2720
+        // NCBI: if (!delete_hsp) { ... } (blast_hits.c:2708)
+        // NCBI: const Uint1* query_nomask = query_blk->sequence_nomask + query_info->contexts[context].query_offset (lines 2709-2710)
         let query_nomask = ctx.aa_seq_nomask.as_ref().unwrap_or(&ctx.aa_seq);
+        
+        // NCBI: Blast_HSPGetNumIdentitiesAndPositives(query_nomask, subject_start, hsp, score_params->options, &align_length, sbp) (blast_hits.c:2712-2717)
+        // NCBI: Int4 align_length = 0; (line 2711)
+        // NOTE: align_length is passed to Blast_HSPTest but not used for tblastx filtering
         let num_ident = if let Some((num_ident, _align_length)) =
             get_num_identities_and_positives_ungapped(
                 query_nomask,
@@ -788,20 +855,32 @@ fn reevaluate_ungapped_hsp_list(
             continue;
         };
         
-        // NCBI: Blast_HSPTest (blast_hits.c:2719)
+        // NCBI: delete_hsp = Blast_HSPTest(hsp, hit_params->options, align_length) (blast_hits.c:2719)
         let percent_identity = args.percent_identity;
         let min_hit_length = args.min_hit_length;
         if hsp_test(num_ident, new_len, percent_identity, min_hit_length) {
+            // NCBI: delete_hsp = TRUE (Blast_HSPTest returns TRUE)
             continue;
         }
+        if let Some(ref mut stats) = reeval_stats {
+            stats.2 += 1; // Passed identity test
+        }
         
-        // Update hit with reevaluated coordinates and score
-        // Convert from sentinel-inclusive to sentinel-exclusive for reporting
+        // NCBI: s_UpdateReevaluatedHSPUngapped updates HSP coordinates (blast_hits.c:455-458)
+        // hsp->query.offset = (Int4)(best_q_start - query_start);
+        // hsp->query.end = (Int4)(hsp->query.offset + best_q_end - best_q_start);
+        // In LOSAT: new_qs = q_off_raw + best_start (equivalent to best_q_start - query_start)
+        //            new_len = best_end - best_start (equivalent to best_q_end - best_q_start)
+        //            new_qe = new_qs + new_len (equivalent to offset + length)
         let new_qe = new_qs + new_len;
         let new_se = new_ss + new_len;
+        
+        // Convert from sentinel-inclusive to sentinel-exclusive for reporting
+        // NCBI stores offsets as sentinel-inclusive, but reports as sentinel-exclusive
         let (qs_l, qe_l) = (new_qs.saturating_sub(1), new_qe.saturating_sub(1));
         let (ss_l, se_l) = (new_ss.saturating_sub(1), new_se.saturating_sub(1));
         
+        // NCBI: hsp->score = score (blast_hits.c:451)
         hit.q_aa_start = qs_l;
         hit.q_aa_end = qe_l;
         hit.s_aa_start = ss_l;
@@ -815,7 +894,19 @@ fn reevaluate_ungapped_hsp_list(
     
     // NCBI: Sort the HSP array by score (scores may have changed!)
     // Reference: blast_hits.c:2734
+    // NOTE: Blast_HSPListAdjustOddBlastnScores (line 2735) is only for blastn,
+    // not needed for tblastx (translated subject)
     kept_hits.sort_by(|a, b| b.raw_score.cmp(&a.raw_score));
+    
+    // Debug logging for reevaluation statistics
+    if let Some(stats) = reeval_stats {
+        eprintln!("=== LOSAT Reevaluation Stats ===");
+        eprintln!("  Total HSPs before reevaluation: {}", stats.0);
+        eprintln!("  Passed reevaluation cutoff: {}", stats.1);
+        eprintln!("  Passed identity test: {}", stats.2);
+        eprintln!("  Filtered by reevaluation: {}", stats.0 - stats.1);
+        eprintln!("  Filtered by identity: {}", stats.1 - stats.2);
+    }
     
     kept_hits
 }
@@ -1713,19 +1804,6 @@ pub fn run(args: TblastxArgs) -> Result<()> {
                     1.0,  // scale_factor (standard BLOSUM62)
                 );
                 
-                // DEBUG: Print cutoff values for first context
-                static PRINTED: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
-                if diag_enabled
-                    && ctx_idx == 0
-                    && !PRINTED.swap(true, std::sync::atomic::Ordering::Relaxed)
-                {
-                    eprintln!("[DEBUG CUTOFF] query_len_aa={}, subject_len_nucl={}", query_len_aa, subject_len_nucl);
-                    eprintln!("[DEBUG CUTOFF] eff_searchsp={}", eff_searchsp);
-                    eprintln!("[DEBUG CUTOFF] length_adjustment={}", eff_lengths.length_adjustment);
-                    eprintln!("[DEBUG CUTOFF] cutoff_score_max={}", cutoff_score_max);
-                    eprintln!("[DEBUG CUTOFF] gap_trigger={}", gap_trigger);
-                    eprintln!("[DEBUG CUTOFF] final cutoff={}", cutoff);
-                }
                 
                 // Track minimum cutoff for linking
                 cutoff_score_min = cutoff_score_min.min(cutoff);
@@ -1740,17 +1818,20 @@ pub fn run(args: TblastxArgs) -> Result<()> {
                 cutoff_score_min = 0;
             }
 
+            // Debug logging for cutoff values (controlled by LOSAT_DEBUG_CUTOFFS env var)
+            if std::env::var("LOSAT_DEBUG_CUTOFFS").is_ok() {
+                eprintln!("=== LOSAT Cutoff Debug (Subject: {}) ===", s_id);
+                eprintln!("  subject_len_nucl: {}", subject_len_nucl);
+                eprintln!("  cutoff_score_min: {}", cutoff_score_min);
+                for (ctx_idx, ctx) in contexts_ref.iter().enumerate() {
+                    let cutoff = cutoff_scores[ctx_idx][0]; // All subject frames have same cutoff
+                    eprintln!("  context[{}] (frame={}): cutoff={}", ctx_idx, ctx.frame, cutoff);
+                }
+            }
+
             // NCBI: BlastSaveInitHsp equivalent - store initial HSPs with absolute coordinates
             // Reference: blast_extend.c:360-375 BlastSaveInitHsp
             let mut init_hsps: Vec<InitHSP> = Vec::new();
-            
-            // Statistics for HSP saving analysis (long sequences only)
-            let is_long_sequence = subject_len_nucl > 600_000;
-            let mut stats_hsp_saved = 0usize;
-            let mut stats_hsp_filtered_by_cutoff = 0usize;
-            let mut stats_hsp_filtered_by_reeval = 0usize;
-            let mut stats_hsp_filtered_by_hsp_test = 0usize;
-            let mut stats_score_distribution: Vec<i32> = Vec::new();
 
             for (s_f_idx, s_frame) in s_frames.iter().enumerate() {
                 let subject = &s_frame.aa_seq;
@@ -1911,6 +1992,8 @@ pub fn run(args: TblastxArgs) -> Result<()> {
                             let hsp_len: i32 = (hsp_qe_u - hsp_q_u) as i32;
                             let s_last_off: i32 = s_last_off_u as i32;
 
+                            // NCBI aa_ungapped.c:585: ++hits_extended;
+                            // (hits_extended is counted before cutoff check in NCBI)
                             if diag_enabled {
                                 diagnostics
                                     .base
@@ -1939,34 +2022,9 @@ pub fn run(args: TblastxArgs) -> Result<()> {
                                 }
                             }
 
-                            // [C] if (right_extend)
-                            if right_extend {
-                                // [C] diag_array[diag_coord].flag = 1;
-                                // [C] diag_array[diag_coord].last_hit = s_last_off - (wordsize - 1) + diag_offset;
-                                diag_entry.flag = 1;
-                                diag_entry.last_hit =
-                                    s_last_off - (wordsize - 1) + diag_offset;
-                                if diag_enabled {
-                                    diagnostics
-                                        .base
-                                        .mask_updates
-                                        .fetch_add(1, AtomicOrdering::Relaxed);
-                                }
-                            } else {
-                                // [C] diag_array[diag_coord].last_hit = subject_offset + diag_offset;
-                                diag_entry.last_hit = subject_offset + diag_offset;
-                            }
-
-                            // [C] if (score >= cutoffs->cutoff_score)
-                            // NCBI reference: aa_ungapped.c:575-591 (Extension後のcutoffチェック)
-                            if is_long_sequence {
-                                if score >= cutoff {
-                                    stats_score_distribution.push(score);
-                                    stats_hsp_saved += 1;  // Count saved HSPs
-                                } else {
-                                    stats_hsp_filtered_by_cutoff += 1;
-                                }
-                            }
+                            // NCBI aa_ungapped.c:587-591: if (score >= cutoffs->cutoff_score) BlastSaveInitHsp(...)
+                            // CRITICAL: Cutoff check happens BEFORE right_extend processing in NCBI
+                            // Reference: aa_ungapped.c:588-591 (cutoff check) then 593-600 (right_extend)
                             if score >= cutoff {
                                 if diag_enabled {
                                     diagnostics
@@ -2041,6 +2099,27 @@ pub fn run(args: TblastxArgs) -> Result<()> {
                                 atomic_min_i32(&diagnostics.ungapped_cutoff_failed_min_score, score);
                                 atomic_max_i32(&diagnostics.ungapped_cutoff_failed_max_score, score);
                             }
+
+                            // NCBI aa_ungapped.c:593-600: right_extend processing happens AFTER cutoff check
+                            // Reference: aa_ungapped.c:588-591 (cutoff check) then 593-600 (right_extend)
+                            // CRITICAL: This is OUTSIDE the cutoff check if statement in NCBI
+                            if right_extend {
+                                // [C] diag_array[diag_coord].flag = 1;
+                                // [C] diag_array[diag_coord].last_hit = s_last_off - (wordsize - 1) + diag_offset;
+                                diag_entry.flag = 1;
+                                diag_entry.last_hit =
+                                    s_last_off - (wordsize - 1) + diag_offset;
+                                if diag_enabled {
+                                    diagnostics
+                                        .base
+                                        .mask_updates
+                                        .fetch_add(1, AtomicOrdering::Relaxed);
+                                }
+                            } else {
+                                // [C] diag_array[diag_coord].last_hit = subject_offset + diag_offset;
+                                // NCBI aa_ungapped.c:601-603: "Otherwise, make the present hit into the previous hit for this diagonal"
+                                diag_entry.last_hit = subject_offset + diag_offset;
+                            }
                         }
                     }
                 }
@@ -2075,8 +2154,17 @@ pub fn run(args: TblastxArgs) -> Result<()> {
                     &s_frames,
                 );
                 
+                // Debug logging for extension statistics
+                if std::env::var("LOSAT_DEBUG_CUTOFFS").is_ok() {
+                    eprintln!("=== LOSAT Extension Stats (Subject: {}) ===", s_id);
+                    eprintln!("  HSPs after extension (before reevaluation): {}", ungapped_hits.len());
+                }
+                
                 // NCBI: Blast_HSPListReevaluateUngapped equivalent
                 // Reference: blast_engine.c:1492-1497, blast_hits.c:2609-2737
+                // NCBI: status = Blast_HSPListReevaluateUngapped(program_number, hsp_list, query,
+                //       seq_arg.seq, word_params, hit_params, query_info, sbp, score_params,
+                //       seq_src, seq_arg.seq->gen_code_string) (blast_engine.c:1492-1497)
                 // Perform batch reevaluation on all HSPs
                 let ungapped_hits = reevaluate_ungapped_hsp_list(
                     ungapped_hits,
@@ -2084,28 +2172,14 @@ pub fn run(args: TblastxArgs) -> Result<()> {
                     &s_frames,
                     &cutoff_scores,
                     &args,
-                    timing_enabled,
-                    &reeval_ns,
-                    &reeval_calls,
-                    is_long_sequence,
-                    &mut stats_hsp_filtered_by_reeval,
                 );
                 
+                // Debug logging for final statistics
+                if std::env::var("LOSAT_DEBUG_CUTOFFS").is_ok() {
+                    eprintln!("  HSPs after reevaluation: {}", ungapped_hits.len());
+                }
+                
                 if !ungapped_hits.is_empty() {
-                    // DEBUG: Print HSP statistics for long sequences
-                    if is_long_sequence {
-                        eprintln!("[DEBUG HSP_STATS] After reevaluation: {} HSPs", ungapped_hits.len());
-                        eprintln!("[DEBUG HSP_STATS] Saved by cutoff: {}", stats_hsp_saved);
-                        eprintln!("[DEBUG HSP_STATS] Filtered by cutoff: {}", stats_hsp_filtered_by_cutoff);
-                        eprintln!("[DEBUG HSP_STATS] Filtered by reeval: {}", stats_hsp_filtered_by_reeval);
-                        if !stats_score_distribution.is_empty() {
-                            let min_score = stats_score_distribution.iter().min().unwrap();
-                            let max_score = stats_score_distribution.iter().max().unwrap();
-                            let avg_score = stats_score_distribution.iter().sum::<i32>() as f64 / stats_score_distribution.len() as f64;
-                            eprintln!("[DEBUG HSP_STATS] Score range: {} - {} (avg: {:.2})", 
-                                      min_score, max_score, avg_score);
-                        }
-                    }
                     if diag_enabled {
                         diagnostics
                             .base
@@ -2143,30 +2217,6 @@ pub fn run(args: TblastxArgs) -> Result<()> {
                 let linking_params_for_cutoff = find_smallest_lambda_params(&context_params)
                     .unwrap_or_else(|| params.clone());
 
-                // Output HSP saving statistics for long sequences
-                if diag_enabled
-                    && is_long_sequence
-                    && (stats_hsp_saved > 0
-                        || stats_hsp_filtered_by_cutoff > 0
-                        || stats_hsp_filtered_by_reeval > 0
-                        || stats_hsp_filtered_by_hsp_test > 0)
-                {
-                    let total_attempted = stats_hsp_saved + stats_hsp_filtered_by_cutoff + stats_hsp_filtered_by_reeval + stats_hsp_filtered_by_hsp_test;
-                    eprintln!("[DEBUG HSP_SAVING] subject_len_nucl={}, cutoff={}", subject_len_nucl, cutoff_score_min);
-                    eprintln!("[DEBUG HSP_SAVING] total_attempted={}, saved={}, filtered_by_cutoff={}, filtered_by_reeval={}, filtered_by_hsp_test={}", 
-                        total_attempted, stats_hsp_saved, stats_hsp_filtered_by_cutoff, stats_hsp_filtered_by_reeval, stats_hsp_filtered_by_hsp_test);
-                    if !stats_score_distribution.is_empty() {
-                        stats_score_distribution.sort();
-                        let min_score = stats_score_distribution[0];
-                        let max_score = stats_score_distribution[stats_score_distribution.len() - 1];
-                        let median_score = stats_score_distribution[stats_score_distribution.len() / 2];
-                        let low_score_count = stats_score_distribution.iter().filter(|&&s| s < 30).count();
-                        eprintln!("[DEBUG HSP_SAVING] score_distribution: min={}, max={}, median={}, low_score(<30)={}/{} ({:.2}%)", 
-                            min_score, max_score, median_score, low_score_count, stats_score_distribution.len(),
-                            if stats_score_distribution.len() > 0 { (low_score_count as f64 / stats_score_distribution.len() as f64) * 100.0 } else { 0.0 });
-                    }
-                }
-                
                 // NCBI Parity: Pass pre-computed length_adjustment and eff_searchsp per context
                 // These values are stored in query_info->contexts[ctx] in NCBI and referenced
                 // by link_hsps.c for BLAST_SmallGapSumE/BLAST_LargeGapSumE calculations.
@@ -2330,18 +2380,6 @@ pub fn run(args: TblastxArgs) -> Result<()> {
                     final_hits.push(out_hit);
                 }
                 
-                // DEBUG: Print output filtering statistics
-                // NCBI reference: link_hsps.c:1018-1020 - continue is NOT an output filter
-                // Chain members are included in output via link pointer traversal
-                // Always print for debugging hit count discrepancy
-                eprintln!("[DEBUG OUTPUT_FILTER] Total linked HSPs: {}", total_linked);
-                eprintln!("[DEBUG OUTPUT_FILTER] Single HSPs (linked_set=false): {}", stats_single_hsps);
-                eprintln!("[DEBUG OUTPUT_FILTER] Chain heads (linked_set=true, start_of_chain=true): {}", stats_chain_heads);
-                eprintln!("[DEBUG OUTPUT_FILTER] Chain members (linked_set=true, start_of_chain=false): {} (included in output)", stats_chain_members);
-                eprintln!("[DEBUG OUTPUT_FILTER] Filtered by E-value (threshold={}): {}", evalue_threshold, filtered_by_evalue);
-                eprintln!("[DEBUG OUTPUT_FILTER] Expected after E-value filter: {} (all HSPs - E-value filtered)", total_linked - filtered_by_evalue);
-                eprintln!("[DEBUG OUTPUT_FILTER] Final hits after filtering: {}", final_hits.len());
-
                 if !final_hits.is_empty() {
                     if diag_enabled {
                         diagnostics
@@ -3014,7 +3052,46 @@ fn run_with_neighbor_map(args: TblastxArgs) -> Result<()> {
                             
                             let hsp_len = hsp_qe.saturating_sub(hsp_q);
                             
-                            // NCBI aa_ungapped.c:596-606: Update diag_array after extension
+                            // NCBI aa_ungapped.c:587-591: Check score threshold FIRST
+                            // cutoffs = word_params->cutoffs + curr_context
+                            // if (score >= cutoffs->cutoff_score) ...
+                            // CRITICAL: Cutoff check happens BEFORE right_extend processing in NCBI
+                            // Reference: aa_ungapped.c:588-591 (cutoff check) then 593-600 (right_extend)
+                            let cutoff = cutoff_scores_ref[ctx_flat][s_f_idx];
+                            
+                            if score >= cutoff {
+                                // NCBI: BlastSaveInitHsp equivalent
+                                // Reference: blast_extend.c:360-375 BlastSaveInitHsp
+                                // Store HSP with absolute coordinates (before coordinate conversion)
+                                //
+                                // In neighbor-map mode, each query frame is independent with frame_base=0
+                                // hsp_q is frame-relative coordinate (with sentinel)
+                                // Calculate absolute coordinate in concatenated buffer
+                                let frame_base = 0i32;  // Each query frame is independent in neighbor-map mode
+                                let hsp_q_absolute = frame_base + (hsp_q as i32) - 1;  // -1 for sentinel
+                                let hsp_qe_absolute = frame_base + ((hsp_q + hsp_len) as i32) - 1;  // -1 for sentinel
+                                
+                                init_hsps.push(InitHSP {
+                                    q_start_absolute: hsp_q_absolute,
+                                    q_end_absolute: hsp_qe_absolute,
+                                    s_start: hsp_s as i32,
+                                    s_end: (hsp_s + hsp_len) as i32,
+                                    score,
+                                    ctx_idx: ctx_flat,
+                                    s_f_idx,
+                                    q_idx,
+                                    s_idx: s_idx as u32,
+                                    q_frame: q_frame.frame,
+                                    s_frame: s_frame.frame,
+                                    q_orig_len: q_frame.orig_len,
+                                    s_orig_len: s_len,
+                                });
+                            }
+                            
+                            // NCBI aa_ungapped.c:593-600: right_extend processing happens AFTER cutoff check
+                            // Reference: aa_ungapped.c:588-591 (cutoff check) then 593-600 (right_extend)
+                            // CRITICAL: This is OUTSIDE the cutoff check if statement in NCBI
+                            // Even if score < cutoff, we still update last_hit for next iteration
                             if right_extend {
                                 // "If an extension to the right happened, reset the last hit so that
                                 //  future hits to this diagonal must start over."
@@ -3024,41 +3101,6 @@ fn run_with_neighbor_map(args: TblastxArgs) -> Result<()> {
                                 // "Otherwise, make the present hit into the previous hit for this diagonal"
                                 diag_entry.last_hit = subject_offset + diag_offset;
                             }
-                            
-                            // NCBI aa_ungapped.c:588-591: Check score threshold
-                            // cutoffs = word_params->cutoffs + curr_context
-                            // if (score >= cutoffs->cutoff_score) ...
-                            let cutoff = cutoff_scores_ref[ctx_flat][s_f_idx];
-                            if score < cutoff {
-                                continue;
-                            }
-                            
-                            // NCBI: BlastSaveInitHsp equivalent
-                            // Reference: blast_extend.c:360-375 BlastSaveInitHsp
-                            // Store HSP with absolute coordinates (before coordinate conversion)
-                            //
-                            // In neighbor-map mode, each query frame is independent with frame_base=0
-                            // hsp_q is frame-relative coordinate (with sentinel)
-                            // Calculate absolute coordinate in concatenated buffer
-                            let frame_base = 0i32;  // Each query frame is independent in neighbor-map mode
-                            let hsp_q_absolute = frame_base + (hsp_q as i32) - 1;  // -1 for sentinel
-                            let hsp_qe_absolute = frame_base + ((hsp_q + hsp_len) as i32) - 1;  // -1 for sentinel
-                            
-                            init_hsps.push(InitHSP {
-                                q_start_absolute: hsp_q_absolute,
-                                q_end_absolute: hsp_qe_absolute,
-                                s_start: hsp_s as i32,
-                                s_end: (hsp_s + hsp_len) as i32,
-                                score,
-                                ctx_idx: ctx_flat,
-                                s_f_idx,
-                                q_idx,
-                                s_idx: s_idx as u32,
-                                q_frame: q_frame.frame,
-                                s_frame: s_frame.frame,
-                                q_orig_len: q_frame.orig_len,
-                                s_orig_len: s_len,
-                            });
                         } // end for query_hits
                     } // end for neighbor_kmers
                 } // end for s_pos
@@ -3095,20 +3137,17 @@ fn run_with_neighbor_map(args: TblastxArgs) -> Result<()> {
                 );
                 
                 // NCBI: Blast_HSPListReevaluateUngapped equivalent
+                // Reference: blast_engine.c:1492-1497, blast_hits.c:2609-2737
+                // NCBI: status = Blast_HSPListReevaluateUngapped(program_number, hsp_list, query,
+                //       seq_arg.seq, word_params, hit_params, query_info, sbp, score_params,
+                //       seq_src, seq_arg.seq->gen_code_string) (blast_engine.c:1492-1497)
                 // Perform batch reevaluation on all HSPs
-                // Note: Statistics collection is disabled in neighbor-map mode (parallel processing)
-                let mut dummy_stats = 0usize;
                 let local_hits = reevaluate_ungapped_hsp_list(
                     local_hits,
                     &temp_contexts,
                     &s_frames,
                     cutoff_scores_ref,
                     &args,
-                    timing_enabled,
-                    &reeval_ns,
-                    &reeval_calls,
-                    false,  // is_long_sequence: statistics not collected in neighbor-map mode
-                    &mut dummy_stats,
                 );
 
                 bar.inc(1);

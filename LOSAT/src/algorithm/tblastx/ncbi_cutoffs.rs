@@ -214,34 +214,216 @@ pub fn compute_eff_searchsp_subject_mode_tblastx(
         .eff_searchsp
 }
 
-/// Calculate cutoff_score from E-value using BLAST_Cutoffs (dodecay=FALSE).
+/// BlastKarlinEtoS_simple - Calculate cutoff score from E-value.
 ///
 /// NCBI reference (verbatim from blast_stat.c:4040-4063):
 /// ```c
 /// static Int4
-/// BlastKarlinEtoS_simple(double E, const Blast_KarlinBlk* kbp, Int8 searchsp)
+/// BlastKarlinEtoS_simple(double E, /* Expect value */
+///    const Blast_KarlinBlk*  kbp,
+///    Int8  searchsp)   /* size of search space */
 /// {
+///    double   Lambda, K, H; /* parameters for Karlin statistics */
+///    Int4  S;
+///    /* Smallest float that might not cause a floating point exception in
+///       S = (Int4) (ceil( log((double)(K * searchsp / E)) / Lambda )); below.  */
 ///    const double kSmallFloat = 1.0e-297;
+///
 ///    Lambda = kbp->Lambda;
 ///    K = kbp->K;
+///    H = kbp->H;
+///    if (Lambda < 0. || K < 0. || H < 0.0)
+///    {
+///       return BLAST_SCORE_MIN;
+///    }
+///
 ///    E = MAX(E, kSmallFloat);
+///
 ///    S = (Int4) (ceil( log((double)(K * searchsp / E)) / Lambda ));
 ///    return S;
 /// }
 /// ```
 ///
-/// And from blast_parameters.c:942-943:
+/// CRITICAL: Uses ceil() rounding, NOT trunc.
+/// CRITICAL: Calculation order: K * searchsp / E, then log(), then / Lambda, then ceil().
+///
+/// # Arguments
+/// * `evalue` - Expected value threshold
+/// * `eff_searchsp` - Effective search space (Int8 in NCBI)
+/// * `karlin_params` - Karlin-Altschul parameters (can be gapped or ungapped depending on program)
+///
+/// # Returns
+/// Cutoff score (raw score, Int4 in NCBI)
+fn blast_karlin_eto_s_simple(
+    evalue: f64,
+    eff_searchsp: i64,
+    karlin_params: &KarlinParams,
+) -> i32 {
+    // NCBI blast_stat.c:4051-4057: Validate parameters
+    if karlin_params.lambda < 0.0 || karlin_params.k < 0.0 || karlin_params.h < 0.0 {
+        return i32::MIN; // BLAST_SCORE_MIN
+    }
+    
+    // NCBI blast_stat.c:4059: E = MAX(E, kSmallFloat)
+    let e = evalue.max(K_SMALL_FLOAT);
+    
+    // NCBI blast_stat.c:4061: S = (Int4) (ceil( log((double)(K * searchsp / E)) / Lambda ))
+    // Calculation order matches NCBI exactly: K * searchsp / E, then log(), then / Lambda, then ceil()
+    let searchsp = eff_searchsp as f64;
+    let k_times_searchsp = karlin_params.k * searchsp;
+    let k_times_searchsp_over_e = k_times_searchsp / e;
+    let log_value = k_times_searchsp_over_e.ln();
+    let score_before_ceil = log_value / karlin_params.lambda;
+    let score = score_before_ceil.ceil();
+    
+    score as i32
+}
+
+/// BLAST_Cutoffs - Calculate the cutoff score from E-value with optional gap decay.
+///
+/// NCBI reference (verbatim from blast_stat.c:4089-4149):
+/// ```c
+/// Int2
+/// BLAST_Cutoffs(Int4 *S, /* cutoff score */
+///    double* E, /* expected no. of HSPs scoring at or above S */
+///    Blast_KarlinBlk* kbp,
+///    Int8 searchsp, /* size of search space. */
+///    Boolean dodecay,  /* TRUE ==> use gapdecay feature */
+///    double gap_decay_rate)
+/// {
+///    Int4  s = *S, es;
+///    double   e = *E, esave;
+///    Boolean     s_changed = FALSE;
+///
+///    if (kbp->Lambda == -1. || kbp->K == -1. || kbp->H == -1.)
+///       return 1;
+///
+///    /*
+///    Calculate a cutoff score, S, from the Expected
+///    (or desired) number of reported HSPs, E.
+///    */
+///    es = 1;
+///    esave = e;
+///    if (e > 0.)
+///    {
+///         if (dodecay) {
+///             /* Invert the adjustment to the e-value that will be applied
+///              * to compensate for the effect of choosing the best among
+///              * multiple alignments */
+///             if( gap_decay_rate > 0 && gap_decay_rate < 1 ) {
+///                 e *= BLAST_GapDecayDivisor(gap_decay_rate, 1);
+///             }
+///         }
+///         es = BlastKarlinEtoS_simple(e, kbp, searchsp);
+///    }
+///    /*
+///    Pick the larger cutoff score between the user's choice
+///    and that calculated from the value of E.
+///    */
+///    if (es > s) {
+///       s_changed = TRUE;
+///       *S = s = es;
+///    }
+///
+///    /*
+///       Re-calculate E from the cutoff score, if E going in was too high
+///    */
+///    if (esave <= 0. || !s_changed)
+///    {
+///       e = BLAST_KarlinStoE_simple(s, kbp, searchsp);
+///       if (dodecay) {
+///             /* Weight the e-value to compensate for the effect of
+///              * choosing the best of more than one collection of
+///              * distinct alignments */
+///             if( gap_decay_rate > 0 && gap_decay_rate < 1 ) {
+///                 e /= BLAST_GapDecayDivisor(gap_decay_rate, 1);
+///             }
+///         }
+///       *E = e;
+///    }
+///
+///    return 0;
+/// }
+/// ```
+///
+/// CRITICAL: Takes initial `*S` value (typically 1) and only updates if calculated `es > s`.
+/// CRITICAL: For tblastx, initial `S=1` is set in `BlastInitialWordParametersUpdate` (blast_parameters.c:321).
+///
+/// # Arguments
+/// * `initial_s` - Initial cutoff score (typically 1, from blast_parameters.c:321)
+/// * `evalue` - Expected value threshold (input/output, may be modified)
+/// * `eff_searchsp` - Effective search space (Int8 in NCBI)
+/// * `dodecay` - Whether to apply gap decay (Boolean in NCBI)
+/// * `gap_decay_rate` - Gap decay rate (typically 0.5 for ungapped)
+/// * `karlin_params` - Karlin-Altschul parameters
+///
+/// # Returns
+/// Final cutoff score (raw score, Int4 in NCBI)
+fn blast_cutoffs(
+    initial_s: i32,
+    evalue: f64,
+    eff_searchsp: i64,
+    dodecay: bool,
+    gap_decay_rate: f64,
+    karlin_params: &KarlinParams,
+) -> i32 {
+    // NCBI blast_stat.c:4097-4099: Initialize local variables
+    let mut s = initial_s;
+    let mut e = evalue;
+    let esave = e;
+    let mut s_changed = false;
+    
+    // NCBI blast_stat.c:4101-4102: Validate Karlin parameters
+    if karlin_params.lambda == -1.0 || karlin_params.k == -1.0 || karlin_params.h == -1.0 {
+        return s; // Return initial value if invalid (NCBI returns 1, but we return initial_s)
+    }
+    
+    // NCBI blast_stat.c:4108-4121: Calculate cutoff score from E-value
+    let mut es = 1i32; // NCBI: es = 1
+    if e > 0.0 {
+        // NCBI blast_stat.c:4112-4119: Apply gap decay if requested
+        if dodecay {
+            if gap_decay_rate > 0.0 && gap_decay_rate < 1.0 {
+                // NCBI: e *= BLAST_GapDecayDivisor(gap_decay_rate, 1)
+                // BLAST_GapDecayDivisor(gap_decay_rate, 1) = (1 - gap_decay_rate)
+                let divisor = 1.0 - gap_decay_rate;
+                e *= divisor;
+            }
+        }
+        // NCBI blast_stat.c:4120: es = BlastKarlinEtoS_simple(e, kbp, searchsp)
+        es = blast_karlin_eto_s_simple(e, eff_searchsp, karlin_params);
+    }
+    
+    // NCBI blast_stat.c:4126-4129: Pick the larger cutoff score
+    if es > s {
+        s_changed = true;
+        s = es;
+    }
+    
+    // NCBI blast_stat.c:4134-4146: Re-calculate E from cutoff score if needed
+    // (This part modifies *E in NCBI, but we don't need to return it for our use case)
+    // We skip this since we only need the cutoff score, not the modified E-value
+    
+    s
+}
+
+/// Calculate cutoff_score from E-value using BLAST_Cutoffs (dodecay=FALSE).
+///
+/// This is a convenience wrapper for `BLAST_Cutoffs` with `dodecay=FALSE`.
+/// Used in `BlastHitSavingParametersNew` (blast_parameters.c:942-943).
+///
+/// NCBI reference (verbatim from blast_parameters.c:942-943):
 /// ```c
 /// BLAST_Cutoffs(&new_cutoff, &evalue, kbp, searchsp, FALSE, 0);
 /// ```
 ///
-/// CRITICAL: Uses GAPPED params (kbp_gap/kbp_gap_std).
-/// CRITICAL: Uses ceil() rounding, NOT trunc.
+/// CRITICAL: Initial `new_cutoff = 1` is set before this call (blast_parameters.c:916).
+/// CRITICAL: Uses GAPPED params (kbp_gap/kbp_gap_std) for most programs, but UNGAPPED for tblastx.
 ///
 /// # Arguments
 /// * `evalue` - Expected value threshold
 /// * `eff_searchsp` - Effective search space
-/// * `gapped_params` - GAPPED Karlin-Altschul parameters
+/// * `karlin_params` - Karlin-Altschul parameters (can be gapped or ungapped depending on program)
 ///
 /// # Returns
 /// cutoff_score_max (raw score)
@@ -250,28 +432,9 @@ pub fn cutoff_score_from_evalue(
     eff_searchsp: i64,
     karlin_params: &KarlinParams,  // Named generically - can be gapped or ungapped depending on program
 ) -> i32 {
-    // NCBI: E = MAX(E, kSmallFloat)
-    let e = evalue.max(K_SMALL_FLOAT);
-    
-    // NCBI: S = (Int4) (ceil( log((double)(K * searchsp / E)) / Lambda ))
-    let searchsp = eff_searchsp as f64;
-    let k_times_searchsp = karlin_params.k * searchsp;
-    let k_times_searchsp_over_e = k_times_searchsp / e;
-    let log_value = k_times_searchsp_over_e.ln();
-    let score_before_ceil = log_value / karlin_params.lambda;
-    let score = score_before_ceil.ceil();
-    
-    // Debug output for long sequences (600kb+)
-    if eff_searchsp > 40_000_000_000 {
-        eprintln!("[DEBUG CUTOFF_CALC] eff_searchsp={}", eff_searchsp);
-        eprintln!("[DEBUG CUTOFF_CALC] evalue={}, e_clamped={}", evalue, e);
-        eprintln!("[DEBUG CUTOFF_CALC] K={}, Lambda={}", karlin_params.k, karlin_params.lambda);
-        eprintln!("[DEBUG CUTOFF_CALC] K*searchsp={:.6e}, K*searchsp/E={:.6e}", k_times_searchsp, k_times_searchsp_over_e);
-        eprintln!("[DEBUG CUTOFF_CALC] log(K*searchsp/E)={:.6e}, score_before_ceil={:.6e}", log_value, score_before_ceil);
-        eprintln!("[DEBUG CUTOFF_CALC] final_score={} (ceil)", score as i32);
-    }
-    
-    score as i32
+    // NCBI blast_parameters.c:916: Int4 new_cutoff = 1;
+    // NCBI blast_parameters.c:943: BLAST_Cutoffs(&new_cutoff, &evalue, kbp, searchsp, FALSE, 0);
+    blast_cutoffs(1, evalue, eff_searchsp, false, 0.0, karlin_params)
 }
 
 /// Calculate cutoff_score for sum statistics path.
@@ -320,6 +483,9 @@ pub fn cutoff_score_sum_stats(
 
 /// Calculate cutoff_score from E-value with gap decay adjustment.
 ///
+/// This is a convenience wrapper for `BLAST_Cutoffs` with `dodecay=TRUE`.
+/// Used in `BlastInitialWordParametersUpdate` (blast_parameters.c:360-363).
+///
 /// NCBI reference (verbatim from blast_stat.c:4112-4121):
 /// ```c
 /// if (dodecay) {
@@ -337,23 +503,33 @@ pub fn cutoff_score_sum_stats(
 /// }
 /// ```
 /// For nsegs=1: divisor = (1 - decayrate) * decayrate^0 = (1 - decayrate)
+///
+/// NCBI reference (verbatim from blast_parameters.c:321, 360-363):
+/// ```c
+/// Int4 new_cutoff = 1;
+/// ...
+/// BLAST_Cutoffs(&new_cutoff, &cutoff_e, kbp,
+///               MIN((Uint8)subj_length, (Uint8)query_length)*((Uint8)subj_length),
+///               TRUE, gap_decay_rate);
+/// ```
+///
+/// # Arguments
+/// * `evalue` - Expected value threshold
+/// * `eff_searchsp` - Effective search space
+/// * `gap_decay_rate` - Gap decay rate (typically 0.5 for ungapped)
+/// * `karlin_params` - Karlin-Altschul parameters
+///
+/// # Returns
+/// Cutoff score (raw score)
 fn cutoff_score_from_evalue_with_decay(
     evalue: f64,
     eff_searchsp: i64,
     gap_decay_rate: f64,
     karlin_params: &KarlinParams,  // Named generically - can be gapped or ungapped depending on program
 ) -> i32 {
-    // NCBI: BLAST_GapDecayDivisor(gap_decay_rate, 1) = (1 - gap_decay_rate)
-    let divisor = 1.0 - gap_decay_rate;
-    
-    // NCBI: e *= BLAST_GapDecayDivisor(gap_decay_rate, 1)
-    let adjusted_e = if gap_decay_rate > 0.0 && gap_decay_rate < 1.0 {
-        evalue * divisor
-    } else {
-        evalue
-    };
-    
-    cutoff_score_from_evalue(adjusted_e, eff_searchsp, karlin_params)
+    // NCBI blast_parameters.c:321: Int4 new_cutoff = 1;
+    // NCBI blast_parameters.c:360-363: BLAST_Cutoffs(&new_cutoff, &cutoff_e, kbp, searchsp, TRUE, gap_decay_rate);
+    blast_cutoffs(1, evalue, eff_searchsp, true, gap_decay_rate, karlin_params)
 }
 
 /// Calculate cutoff_score for BlastInitialWordParametersUpdate (per-subject update).
@@ -405,23 +581,29 @@ pub fn cutoff_score_for_update_tblastx(
     ungapped_params: &KarlinParams,
     scale_factor: f64,
 ) -> i32 {
-    // NCBI: searchsp = MIN(subj_length, query_length) * subj_length
-    // NOTE: This intentionally mixes AA (query_len_aa) and nucleotide (subject_len_nucl) lengths!
-    // This is exactly what NCBI does - see blast_parameters.c:360-362
-    let min_len = (query_len_aa as u64).min(subject_len_nucl as u64);
-    let searchsp = (min_len * (subject_len_nucl as u64)) as i64;
+    // NCBI blast_parameters.c:360-362: searchsp calculation
+    // BLAST_Cutoffs(&new_cutoff, &cutoff_e, kbp,
+    //               MIN((Uint8)subj_length, (Uint8)query_length)*((Uint8)subj_length),
+    //               TRUE, gap_decay_rate);
+    //
+    // CRITICAL: NCBI uses (Uint8) casts (unsigned 64-bit) throughout.
+    // CRITICAL: This intentionally mixes AA (query_len_aa) and nucleotide (subject_len_nucl) lengths!
+    // CRITICAL: subj_length is Uint4 (unsigned 32-bit) but cast to Uint8.
+    // CRITICAL: query_length is Int4 (signed 32-bit) but cast to Uint8.
+    // CRITICAL: Multiplication: MIN(...) * subj_length (both Uint8).
+    //
+    // We use u64 (unsigned) throughout to match NCBI's Uint8 behavior exactly.
+    let query_len_u64 = query_len_aa as u64;
+    let subject_len_u64 = subject_len_nucl as u64;
+    let min_len = query_len_u64.min(subject_len_u64);
+    let searchsp_u64 = min_len * subject_len_u64;
+    // Convert to i64 for function signature (NCBI uses Int8 for searchsp parameter)
+    let searchsp = searchsp_u64 as i64;
 
-    // DEBUG: Print for long sequences
-    // NCBI reference: blast_parameters.c:348-374 (BlastInitialWordParametersUpdate)
-    if subject_len_nucl > 600_000 {
-        eprintln!("[DEBUG CUTOFF_UPDATE] query_len_aa={}, subject_len_nucl={}", 
-                  query_len_aa, subject_len_nucl);
-        eprintln!("[DEBUG CUTOFF_UPDATE] searchsp={} (MIN({}, {}) * {})", 
-                  searchsp, query_len_aa, subject_len_nucl, subject_len_nucl);
-    }
-
-    // NCBI: cutoff_e = s_GetCutoffEvalue(program_number) = CUTOFF_E_TBLASTX = 1e-300
-    // NCBI: BLAST_Cutoffs(&new_cutoff, &cutoff_e, kbp, searchsp, TRUE, gap_decay_rate)
+    // NCBI blast_parameters.c:349: double cutoff_e = s_GetCutoffEvalue(program_number);
+    // NCBI blast_parameters.c:150: return CUTOFF_E_TBLASTX; (for eBlastTypeTblastx)
+    // NCBI blast_parameters.c:321: Int4 new_cutoff = 1;
+    // NCBI blast_parameters.c:360-363: BLAST_Cutoffs(&new_cutoff, &cutoff_e, kbp, searchsp, TRUE, gap_decay_rate);
     // dodecay=TRUE means we apply gap decay divisor
     let mut new_cutoff = cutoff_score_from_evalue_with_decay(
         CUTOFF_E_TBLASTX,
@@ -430,29 +612,19 @@ pub fn cutoff_score_for_update_tblastx(
         ungapped_params,
     );
 
-    // DEBUG: Print intermediate values
-    if subject_len_nucl > 600_000 {
-        eprintln!("[DEBUG CUTOFF_UPDATE] update_cutoff={} (from CUTOFF_E_TBLASTX=1e-300, searchsp={}, gap_decay={})", 
-                  new_cutoff, searchsp, gap_decay_rate);
-        eprintln!("[DEBUG CUTOFF_UPDATE] gap_trigger={}, cutoff_score_max={}", 
-                  gap_trigger, cutoff_score_max);
-    }
-
-    // NCBI: new_cutoff = MIN(new_cutoff, gap_trigger)
-    // (Blastn exception at line 366 does not apply to tblastx)
+    // NCBI blast_parameters.c:365-367: MIN(new_cutoff, gap_trigger) check
+    // /* Perform this check for compatibility with the old code */
+    // if (program_number != eBlastTypeBlastn)
+    //    new_cutoff = MIN(new_cutoff, gap_trigger);
+    // (Blastn exception does not apply to tblastx)
     new_cutoff = new_cutoff.min(gap_trigger);
 
-    // NCBI: new_cutoff *= (Int4)sbp->scale_factor
+    // NCBI blast_parameters.c:371: new_cutoff *= (Int4)sbp->scale_factor
     new_cutoff = (new_cutoff as f64 * scale_factor) as i32;
 
-    // NCBI: new_cutoff = MIN(new_cutoff, hit_params->cutoffs[context].cutoff_score_max)
+    // NCBI blast_parameters.c:372-373: MIN(new_cutoff, cutoff_score_max)
+    // new_cutoff = MIN(new_cutoff, hit_params->cutoffs[context].cutoff_score_max);
     let final_cutoff = new_cutoff.min(cutoff_score_max);
-
-    // DEBUG: Print final cutoff
-    if subject_len_nucl > 600_000 {
-        eprintln!("[DEBUG CUTOFF_UPDATE] final_cutoff={} (MIN(update_cutoff={}, gap_trigger={}, cutoff_score_max={}))", 
-                  final_cutoff, new_cutoff, gap_trigger, cutoff_score_max);
-    }
 
     final_cutoff
 }

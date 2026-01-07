@@ -3,22 +3,29 @@ use crate::utils::dust::MaskedInterval;
 
 /// Extend an ungapped hit in both directions using X-drop termination.
 /// 
+/// NCBI reference: na_ungapped.c:148-243 (s_NuclUngappedExtendExact)
+/// 
+/// FAITHFUL TRANSPILE of NCBI BLAST's ungapped extension algorithm.
+/// 
+/// # NCBI Implementation Details:
+/// - X is negative and when sum becomes more negative than X we break out of the loop
+/// - Left extension: sum += matrix[*--q][...], if (sum > 0) { score += sum; sum = 0; } else if (sum < X) break;
+/// - Right extension: sum += matrix[*q++][...], if (sum > 0) { score += sum; X_current = (-score > X) ? -score : X; sum = 0; } else if (sum < X_current) break;
+/// 
 /// # Index Semantics
 /// - Left extension starts at i=0 (the seed position itself), extending leftward
 /// - Right extension starts at j=1 (position after seed), avoiding double-counting
 /// - The seed position (q_pos, s_pos) is scored once in the left extension loop
 ///
-/// This follows NCBI BLAST's na_ungapped.c pattern where the extension includes
-/// the starting position and extends outward in both directions.
-///
 /// # Arguments
-/// * `q_seq` - Query sequence
-/// * `s_seq` - Subject sequence
+/// * `q_seq` - Query sequence (uncompressed, unlike NCBI which uses compressed)
+/// * `s_seq` - Subject sequence (uncompressed, unlike NCBI which uses compressed)
 /// * `q_pos` - Seed position in query
 /// * `s_pos` - Seed position in subject
 /// * `reward` - Score for match (typically positive, e.g., 2)
 /// * `penalty` - Score for mismatch (typically negative, e.g., -3)
 /// * `x_drop` - X-drop threshold for termination (optional, uses default if None)
+///              NOTE: NCBI passes negative value: -(cutoffs->x_dropoff)
 ///
 /// # Returns
 /// (q_start, q_end, s_start, s_end, score) - Half-open interval [start, end)
@@ -31,14 +38,33 @@ pub fn extend_hit_ungapped(
     penalty: i32,
     x_drop: Option<i32>,
 ) -> (usize, usize, usize, usize, i32) {
-    let x_drop_val = x_drop.unwrap_or(X_DROP_UNGAPPED);
-    let mut current_score = 0;
-    let mut max_score = 0;
+    // NCBI reference: na_ungapped.c:744
+    // s_NuclUngappedExtendExact(..., -(cutoffs->x_dropoff), ungapped_data);
+    // CRITICAL: X is negative in NCBI implementation
+    // LOSAT receives positive value, so we negate it to match NCBI
+    let x_drop_positive = x_drop.unwrap_or(X_DROP_UNGAPPED);
+    let x = -x_drop_positive; // NCBI: X is negative
 
-    // Left extension: starts at i=0 (seed position) and extends leftward
-    // When i=0: accesses q_seq[q_pos] and s_seq[s_pos] (the seed position)
-    // When i=1: accesses q_seq[q_pos-1] and s_seq[s_pos-1] (one left of seed)
-    let mut best_i = 0;
+    // NCBI reference: na_ungapped.c:177-178
+    // score = 0;
+    // sum = 0;
+    let mut score = 0i32;
+    let mut sum = 0i32;
+
+    // NCBI reference: na_ungapped.c:188-204 (Left extension)
+    // /* extend to the left */
+    // while ((s > start) || (s == start && base < remainder)) {
+    //     if (base == 3) { s--; base = 0; } else { ++base; }
+    //     ch = *s;
+    //     if ((sum += matrix[*--q][NCBI2NA_UNPACK_BASE(ch, base)]) > 0) {
+    //         q_beg = q;
+    //         score += sum;
+    //         sum = 0;
+    //     } else if (sum < X) {
+    //         break;
+    //     }
+    // }
+    let mut q_beg = q_pos;
     let mut i = 0;
     let max_left = q_pos.min(s_pos);
 
@@ -46,45 +72,126 @@ pub fn extend_hit_ungapped(
         let q = unsafe { *q_seq.get_unchecked(q_pos - i) };
         let s = unsafe { *s_seq.get_unchecked(s_pos - i) };
         let sc = if q == s { reward } else { penalty };
-        current_score += sc;
-
-        if current_score > max_score {
-            max_score = current_score;
-            best_i = i;
-        } else if (max_score - current_score) > x_drop_val {
+        
+        // NCBI: sum += matrix[*--q][NCBI2NA_UNPACK_BASE(ch, base)]
+        sum += sc;
+        
+        // NCBI: if ((sum += ...) > 0) {
+        //     q_beg = q;
+        //     score += sum;
+        //     sum = 0;
+        // } else if (sum < X) {
+        //     break;
+        // }
+        if sum > 0 {
+            q_beg = q_pos - i;
+            score += sum;
+            sum = 0;
+        } else if sum < x {
+            // NCBI reference: na_ungapped.c:201-202
+            // else if (sum < X) {
+            //     break;
+            // }
             break;
         }
         i += 1;
     }
 
-    // Right extension: starts at j=1 to avoid double-counting seed position
-    // When j=1: accesses q_seq[q_pos+1] and s_seq[s_pos+1]
-    let mut current_score_r = max_score;
-    let mut max_score_total = max_score;
-    let mut best_j = 0;
-    let mut j = 1;
+    // NCBI reference: na_ungapped.c:206-207
+    // ungapped_data->q_start = (Int4)(q_beg - query->sequence);
+    // ungapped_data->s_start = s_off - (q_off - ungapped_data->q_start);
+    let q_start = q_beg;
+    let s_start = s_pos - (q_pos - q_start);
 
+    // NCBI reference: na_ungapped.c:217-239 (Right extension)
+    // /* extend to the right */
+    // q = query->sequence + q_off;
+    // s = subject0 + s_off / COMPRESSION_RATIO;
+    // sum = 0;
+    // base = 3 - (s_off % COMPRESSION_RATIO);
+    //
+    // /* X_current is used to break out of loop if score goes negative */
+    // Int4 X_current=X;
+    // while (s < sf || (s == sf && base > remainder)) {
+    //     ch = *s;
+    //     if ((sum += matrix[*q++][NCBI2NA_UNPACK_BASE(ch, base)]) > 0) {
+    //         q_end = q;
+    //         score += sum;
+    //         X_current = (-score > X) ? -score : X;
+    //         sum = 0;
+    //     } else if (sum < X_current)
+    //         break;
+    //     ...
+    // }
+    let mut q_end = q_pos;
+    sum = 0;
+    
+    // NCBI reference: na_ungapped.c:223-224
+    // /* X_current is used to break out of loop if score goes negative */
+    // Int4 X_current=X;
+    let mut x_current = x;
+    
+    // NCBI reference: na_ungapped.c:218-219
+    // /* extend to the right */
+    // q = query->sequence + q_off;
+    // s = subject0 + s_off / COMPRESSION_RATIO;
+    // CRITICAL: Right extension starts at q_off (seed position), NOT q_off+1
+    // NCBI uses *q++ which means it scores q_off first, then moves right
+    let mut j = 0; // NCBI: Right extension starts at seed position (q_off)
     while (q_pos + j) < q_seq.len() && (s_pos + j) < s_seq.len() {
         let q = unsafe { *q_seq.get_unchecked(q_pos + j) };
         let s = unsafe { *s_seq.get_unchecked(s_pos + j) };
         let sc = if q == s { reward } else { penalty };
-        current_score_r += sc;
-
-        if current_score_r > max_score_total {
-            max_score_total = current_score_r;
-            best_j = j;
-        } else if (max_score_total - current_score_r) > x_drop_val {
+        
+        // NCBI: sum += matrix[*q++][NCBI2NA_UNPACK_BASE(ch, base)]
+        // *q++ means: use current q, then increment
+        // So seed position (j=0) IS scored in right extension
+        sum += sc;
+        
+        // NCBI: if ((sum += ...) > 0) {
+        //     q_end = q;
+        //     score += sum;
+        //     X_current = (-score > X) ? -score : X;
+        //     sum = 0;
+        // } else if (sum < X_current)
+        //     break;
+        if sum > 0 {
+            // NCBI reference: na_ungapped.c:227-228
+            // if ((sum += matrix[*q++][NCBI2NA_UNPACK_BASE(ch, base)]) > 0) {
+            //     q_end = q;
+            // CRITICAL: *q++ means use current q, then increment
+            // So q_end = q points to position AFTER the last scored position
+            // We need to use q_pos + j + 1 to match NCBI behavior
+            q_end = q_pos + j + 1;
+            score += sum;
+            // NCBI reference: na_ungapped.c:230
+            // X_current = (-score > X) ? -score : X;
+            x_current = if -score > x { -score } else { x };
+            sum = 0;
+        } else if sum < x_current {
+            // NCBI reference: na_ungapped.c:232-233
+            // else if (sum < X_current)
+            //     break;
             break;
         }
         j += 1;
     }
 
+    // NCBI reference: na_ungapped.c:241-242
+    // ungapped_data->length = (Int4)(q_end - q_beg);
+    // ungapped_data->score = score;
+    // CRITICAL: q_end already points to position AFTER last scored position (due to *q++)
+    // So q_end - q_beg is the length (inclusive of both endpoints)
+    // For half-open interval [start, end), we use q_end directly
+    let q_end_pos = q_end; // q_end already points to position after last scored
+    let s_end_pos = s_start + (q_end_pos - q_start);
+
     (
-        q_pos - best_i,
-        q_pos + best_j + 1,
-        s_pos - best_i,
-        s_pos + best_j + 1,
-        max_score_total,
+        q_start,
+        q_end_pos,
+        s_start,
+        s_end_pos,
+        score,
     )
 }
 

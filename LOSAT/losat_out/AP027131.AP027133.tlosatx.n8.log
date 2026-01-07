@@ -1,0 +1,8 @@
+Error: Failed to read fasta from "./fasta/AP027131.fasta"
+
+Caused by:
+    No such file or directory (os error 2)
+
+real	0m0.205s
+user	0m0.000s
+sys	0m0.008s

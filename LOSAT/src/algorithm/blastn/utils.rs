@@ -14,6 +14,7 @@ use super::coordination::{configure_task, read_sequences, prepare_sequence_data,
 use super::lookup::{reverse_complement, pack_diag_key};
 // SIMD comparison functions removed - now using type_of_word instead
 use super::ncbi_cutoffs::{compute_blastn_cutoff_score, GAP_TRIGGER_BIT_SCORE_NUCL};
+use super::query_info::QueryInfo;
 
 // NCBI reference: blast_extend.h:57-60
 // typedef struct DiagStruct {
@@ -274,8 +275,50 @@ pub fn run(args: BlastnArgs) -> Result<()> {
         &seq_data.query_masks,
     );
 
+    // Initialize query info for context management
+    // NCBI reference: blast_setup.c (query info initialization)
+    // For blastn, each query has 2 contexts: forward strand (0) and reverse strand (1)
+    let query_seqs: Vec<Vec<u8>> = seq_data.queries.iter().map(|r| r.seq().to_vec()).collect();
+    let query_info = QueryInfo::new_blastn(&query_seqs);
+
+    // Pre-compute cutoff scores per context
+    // NCBI reference: blast_parameters.c:368-374
+    // Per-context cutoff calculation in BlastInitialWordParametersUpdate
+    // cutoffs[context].cutoff_score = MIN(gap_trigger * scale_factor, 
+    //                                     cutoffs[context].cutoff_score_max);
+    let evalue_threshold = args.evalue;
+    let mut cutoff_scores: Vec<i32> = Vec::with_capacity(query_info.contexts.len());
+    for context in &query_info.contexts {
+        // For each context, compute cutoff_score using context-specific query_length
+        // NCBI: cutoff_score calculation uses query_info->contexts[context].query_length
+        let query_len = context.query_length as i64 * 2; // Both strands for blastn (already per-strand in context)
+        // For blastn, we use the same query_length for both forward and reverse strands
+        // The context already represents a single strand, so we don't multiply by 2
+        let query_len_for_cutoff = context.query_length as i64;
+        
+        // Use a representative subject length for cutoff calculation
+        // In practice, cutoff_score is computed per-subject, but we pre-compute
+        // a baseline here. The actual cutoff may be updated per-subject.
+        let subject_len = if !seq_data.subjects.is_empty() {
+            seq_data.subjects[0].seq().len() as i64
+        } else {
+            1000 // Default fallback
+        };
+        
+        let cutoff_score = compute_blastn_cutoff_score(
+            query_len_for_cutoff,
+            subject_len,
+            evalue_threshold,
+            GAP_TRIGGER_BIT_SCORE_NUCL,
+            &params, // ungapped params (same as gapped for blastn)
+            &params, // gapped params (same as ungapped for blastn)
+            1.0, // scale_factor (typically 1.0 for standard scoring)
+        );
+        cutoff_scores.push(cutoff_score);
+    }
+
     if args.verbose {
-        eprintln!("Searching...");
+        eprintln!("Searching... ({} contexts, cutoff_scores: {:?})", query_info.contexts.len(), cutoff_scores);
     }
 
     let bar = ProgressBar::new(seq_data.subjects.len() as u64);
@@ -437,6 +480,8 @@ pub fn run(args: BlastnArgs) -> Result<()> {
     let db_num_seqs = seq_data.db_num_seqs;
     let params_for_closure = params.clone();
     let evalue_threshold = args.evalue;
+    let query_info_ref = &query_info;
+    let cutoff_scores_ref = &cutoff_scores;
     
     seq_data.subjects
         .par_iter()
@@ -460,6 +505,35 @@ pub fn run(args: BlastnArgs) -> Result<()> {
 
             if s_len < effective_word_size {
                 return;
+            }
+
+            // NCBI reference: blast_parameters.c:368-374
+            // Per-subject cutoff_score update
+            // NCBI: BlastInitialWordParametersUpdate recalculates cutoff_score per-subject
+            // because cutoff_score depends on subject length (used in eff_searchsp calculation)
+            // Reference: blast_parameters.c:348-374
+            let subject_len = s_len as i64;
+            let mut per_subject_cutoff_scores = cutoff_scores_ref.clone();
+            
+            // NCBI reference: blast_parameters.c:368-374
+            // Recompute cutoff_score for each context with actual subject length
+            // NCBI: cutoff_score calculation uses subject length in eff_searchsp
+            for (ctx_idx, context) in query_info_ref.contexts.iter().enumerate() {
+                if ctx_idx < per_subject_cutoff_scores.len() {
+                    // NCBI reference: blast_parameters.c:368-374
+                    // Recompute cutoff_score for this context with actual subject length
+                    let query_len = context.query_length as i64;
+                    let updated_cutoff = compute_blastn_cutoff_score(
+                        query_len,
+                        subject_len,
+                        evalue_threshold,
+                        GAP_TRIGGER_BIT_SCORE_NUCL,
+                        &params_for_closure,
+                        &params_for_closure,
+                        1.0,
+                    );
+                    per_subject_cutoff_scores[ctx_idx] = updated_cutoff;
+                }
             }
 
             // Debug counters for this subject
@@ -502,6 +576,27 @@ pub fn run(args: BlastnArgs) -> Result<()> {
             // Generate reverse complement for minus strand search
             let s_seq_rc = reverse_complement(s_seq);
 
+            // NCBI reference: blast_extend.c:52-61, 141
+            // s_BlastDiagTableNew(query_length, multiple_hits, word_params->options->window_size)
+            // NCBI creates diag_table per query with query_length
+            // diag_array_length is calculated as smallest power of 2 >= (qlen + window_size)
+            // NCBI processes each query separately with its own diag_table
+            // Reference: blast_extend.c:141
+            // ewp->diag_table = diag_table = s_BlastDiagTableNew(query_length, multiple_hits, word_params->options->window_size);
+            
+            // Pre-compute diag_array_length for each query (NCBI creates diag_table per query)
+            let query_diag_lengths: Vec<(usize, usize)> = queries.iter().map(|q| {
+                let q_len = q.seq().len();
+                let mut diag_array_length = 1usize;
+                // NCBI reference: blast_extend.c:54-56
+                // while (diag_array_length < (qlen+window_size)) { diag_array_length = diag_array_length << 1; }
+                while diag_array_length < (q_len + TWO_HIT_WINDOW) {
+                    diag_array_length <<= 1;
+                }
+                let diag_mask = diag_array_length - 1;
+                (diag_array_length, diag_mask)
+            }).collect();
+
             // Search both strands: plus (forward) and minus (reverse complement)
             // is_minus_strand: false = plus strand, true = minus strand
             for is_minus_strand in [false, true] {
@@ -511,25 +606,20 @@ pub fn run(args: BlastnArgs) -> Result<()> {
                 } else {
                     s_seq
                 };
-
-                // PERFORMANCE OPTIMIZATION: For single query, use direct array indexing instead of HashMap
-                // This eliminates millions of HashMap lookups and provides O(1) array access
-                // Diagonal range: from -s_len (query before subject) to +s_len (query after subject)
-                // We use an offset to map negative diagonals to positive array indices
-                // However, for very large subject sequences, array initialization overhead can be significant,
-                // so we only use array indexing for smaller sequences (< 1M bases)
-                const MAX_ARRAY_DIAG_SIZE: usize = 2_000_000; // ~1M diagonals max (for ~500KB subject)
-                let use_array_indexing = queries.len() == 1 && (s_len * 2 + 1) <= MAX_ARRAY_DIAG_SIZE;
-                let diag_offset = if use_array_indexing {
-                    s_len as isize // Offset to make all diagonals non-negative
-                } else {
-                    0
-                };
-                let diag_array_size = if use_array_indexing {
-                    (s_len * 2) + 1 // Range: [-s_len, +s_len] -> [0, 2*s_len]
-                } else {
-                    0
-                };
+                
+                // NCBI reference: na_ungapped.c:663-664
+                // NCBI uses real_diag (masked diag) directly as array index
+                // Array size is diag_array_length (power of 2)
+                // NCBI reference: blast_extend.c:141
+                // NCBI creates diag_table per query, so each query has its own hit_level_array
+                // For multiple queries, NCBI processes each query separately
+                // LOSAT uses HashMap for multiple queries (NCBI would create separate diag_table for each)
+                const MAX_ARRAY_DIAG_SIZE: usize = 2_000_000; // ~1M diagonals max
+                // NCBI creates diag_table per query, so check if all queries can use array indexing
+                let all_queries_small = queries.len() == 1 && query_diag_lengths[0].0 <= MAX_ARRAY_DIAG_SIZE;
+                let use_array_indexing = all_queries_small;
+                // NCBI does NOT use diag_offset - it uses real_diag (masked) directly
+                let diag_offset = 0isize; // Not used in NCBI approach
 
                 // NCBI BLAST does NOT use a separate mask array for diagonal suppression
                 // NCBI only uses last_hit in hit_level_array (checked at line 753)
@@ -540,12 +630,25 @@ pub fn run(args: BlastnArgs) -> Result<()> {
                 // Two-hit tracking: DiagStruct array for tracking last_hit and flag per diagonal
                 // hit_level_array[diag] contains {last_hit, flag} (equivalent to NCBI's DiagStruct)
                 // hit_len_array[diag] contains hit length (0 = no hit, >0 = hit length)
-                // For single query: use Vec for O(1) access, otherwise use HashMap
+                // NCBI reference: blast_extend.c:141, 145-149
+                // NCBI creates diag_table per query with query_length
+                // diag_table->hit_level_array = calloc(diag_table->diag_array_length, sizeof(DiagStruct))
+                // diag_table->hit_len_array = calloc(diag_table->diag_array_length, sizeof(Uint1))
+                // NCBI processes each query separately, so each query has its own hit_level_array
+                // LOSAT processes multiple queries together, so we use HashMap keyed by (q_idx, real_diag)
+                // For single query: use Vec for O(1) access (matches NCBI), otherwise use HashMap
+                let diag_array_size = if use_array_indexing {
+                    query_diag_lengths[0].0 // NCBI uses diag_array_length directly (per query)
+                } else {
+                    0
+                };
                 let mut hit_level_array: Vec<DiagStruct> = if use_array_indexing {
                     vec![DiagStruct::default(); diag_array_size]
                 } else {
                     Vec::new()
                 };
+                // NCBI creates diag_table per query, so for multiple queries we need per-query tracking
+                // Use HashMap with (q_idx, real_diag) as key to match NCBI behavior
                 let mut hit_level_hash: FxHashMap<u64, DiagStruct> = if !use_array_indexing {
                     FxHashMap::default()
                 } else {
@@ -555,16 +658,22 @@ pub fn run(args: BlastnArgs) -> Result<()> {
                 // NCBI reference: na_ungapped.c:696, 705: diag_table->hit_len_array[off_diag]
                 // Hit length array: stores the length of the last hit on each diagonal
                 // 0 = no hit, >0 = hit length
+                // NCBI reference: blast_extend.c:148-149
+                // diag_table->hit_len_array = calloc(diag_table->diag_array_length, sizeof(Uint1))
+                // NCBI creates diag_table per query, so each query has its own hit_len_array
                 let mut hit_len_array: Vec<usize> = if use_array_indexing {
                     vec![0; diag_array_size]
                 } else {
                     Vec::new()
                 };
+                // NCBI creates diag_table per query, so for multiple queries we need per-query tracking
+                // Use HashMap with (q_idx, real_diag) as key to match NCBI behavior
                 let mut hit_len_hash: FxHashMap<u64, usize> = if !use_array_indexing {
                     FxHashMap::default()
                 } else {
                     FxHashMap::default()
                 };
+
 
                 // TWO-STAGE LOOKUP: Use separate rolling k-mer for lut_word_length
                 if let Some(two_stage) = two_stage_lookup_ref {
@@ -622,21 +731,35 @@ pub fn run(args: BlastnArgs) -> Result<()> {
                             let q_seq = q_record.seq();
                             let q_pos_usize = q_pos as usize;
                             
-                            // Calculate cutoff_score for this query-subject pair
-                            // NCBI reference: blast_parameters.c:368-374
-                            // For blastn in gapped mode: cutoff_score = MIN(gap_trigger * scale_factor, cutoff_score_max)
-                            // Query length includes both strands for blastn (query_len * 2)
-                            let query_len = q_seq.len() as i64 * 2; // Both strands for blastn
-                            let subject_len = s_len as i64;
-                            let cutoff_score = compute_blastn_cutoff_score(
-                                query_len,
-                                subject_len,
-                                evalue_threshold,
-                                GAP_TRIGGER_BIT_SCORE_NUCL,
-                                &params_for_closure, // ungapped params (same as gapped for blastn)
-                                &params_for_closure, // gapped params (same as ungapped for blastn)
-                                1.0, // scale_factor (typically 1.0 for standard scoring)
-                            );
+                            // NCBI reference: na_ungapped.c:730-731
+                            // Int4 context = BSearchContextInfo(q_off, query_info);
+                            // cutoffs = word_params->cutoffs + context;
+                            // For blastn, we need to determine context from q_off
+                            // However, q_off is relative to the query, not the concatenated super-query
+                            // For blastn, each query has 2 contexts: 0 (forward) and 1 (reverse)
+                            // We need to determine which strand we're on based on the query sequence
+                            // For now, we'll use q_idx * 2 as the base context (forward strand)
+                            // and determine if we need reverse strand based on the actual query
+                            // In practice, blastn processes forward and reverse strands separately
+                            // For simplicity, we'll use context 0 (forward) for now
+                            // TODO: Determine strand from actual query processing
+                            let context = (q_idx as usize) * 2; // Forward strand context
+                            let cutoff_score = if context < cutoff_scores_ref.len() {
+                                per_subject_cutoff_scores[context]
+                            } else {
+                                // Fallback: compute cutoff_score if context is out of bounds
+                                let query_len = q_seq.len() as i64;
+                                let subject_len = s_len as i64;
+                                compute_blastn_cutoff_score(
+                                    query_len,
+                                    subject_len,
+                                    evalue_threshold,
+                                    GAP_TRIGGER_BIT_SCORE_NUCL,
+                                    &params_for_closure,
+                                    &params_for_closure,
+                                    1.0,
+                                )
+                            };
                             
                             // NCBI reference: na_ungapped.c:1081-1140
                             // CRITICAL: In two-stage lookup, seed finding phase ONLY finds lut_word_length matches.
@@ -663,7 +786,16 @@ pub fn run(args: BlastnArgs) -> Result<()> {
                             // NCBI BLAST: s_BlastnExtendInitialHit does left+right extension to verify word_length
                             let extended = 0; // Will be calculated in extension phase
                             
-                            let diag = kmer_start as isize - q_pos_usize as isize;
+                            // NCBI reference: na_ungapped.c:663-664
+                            // diag = s_off + diag_table->diag_array_length - q_off;
+                            // real_diag = diag & diag_table->diag_mask;
+                            // CRITICAL: Must match NCBI calculation exactly
+                            // NCBI creates diag_table per query, so use query-specific diag_array_length
+                            let (q_diag_array_length, q_diag_mask) = query_diag_lengths[q_idx as usize];
+                            let s_off = kmer_start as isize;
+                            let q_off = q_pos_usize as isize;
+                            let diag = s_off + q_diag_array_length as isize - q_off;
+                            let real_diag = (diag as usize) & q_diag_mask;
 
                             // Check if this seed is in the debug window
                             let in_window = if let Some((q_start, q_end, s_start, s_end)) = debug_window {
@@ -684,17 +816,13 @@ pub fn run(args: BlastnArgs) -> Result<()> {
                             // The mask_array/mask_hash check above was LOSAT-specific and caused excessive filtering
                             // REMOVED to match NCBI BLAST behavior
 
-                            // NCBI reference: na_ungapped.c:656-672
-                            // Two-hit filter: check if there's a previous hit within window_size
-                            // NCBI: Boolean two_hits = (window_size > 0);
-                            // NCBI: last_hit = hit_level_array[real_diag].last_hit;
-                            // NCBI: hit_saved = hit_level_array[real_diag].flag;
-                            // NCBI: if (s_off_pos < last_hit) return 0;  // hit within explored area
-                            let diag_idx = if use_array_indexing {
-                                (diag + diag_offset) as usize
-                            } else {
-                                0 // Not used for hash indexing
-                            };
+                            // NCBI reference: na_ungapped.c:665-666, 672
+                            // last_hit = hit_level_array[real_diag].last_hit;
+                            // hit_saved = hit_level_array[real_diag].flag;
+                            // if (s_off_pos < last_hit) return 0;  // hit within explored area
+                            // CRITICAL: Use real_diag (masked) directly as array index, matching NCBI exactly
+                            // NCBI uses real_diag directly: hit_level_array[real_diag]
+                            let diag_idx = real_diag; // NCBI uses real_diag directly
                             
                             // Get current diagonal state
                             let (last_hit, hit_saved) = if use_array_indexing && diag_idx < diag_array_size {
@@ -708,9 +836,11 @@ pub fn run(args: BlastnArgs) -> Result<()> {
                                 (0, false)
                             };
                             
-                            // NCBI: s_off_pos = s_off + diag_table->offset;
-                            // In LOSAT, we use kmer_start directly (0-based), but need to add offset for comparison
-                            let s_off_pos = kmer_start + diag_offset as usize;
+                            // NCBI reference: na_ungapped.c:668
+                            // s_off_pos = s_off + diag_table->offset;
+                            // diag_table->offset = window_size (blast_extend.c:63)
+                            // CRITICAL: Match NCBI exactly
+                            let s_off_pos = kmer_start + TWO_HIT_WINDOW;
                             
                             // NCBI: if (s_off_pos < last_hit) return 0;
                             // Hit within explored area should be rejected
@@ -872,11 +1002,31 @@ pub fn run(args: BlastnArgs) -> Result<()> {
                             //     s_end += extended;
                             //     s_end_pos += extended;
                             // }
+                            // NCBI reference: na_ungapped.c:656-658
+                            // Boolean two_hits = (window_size > 0);
+                            // Boolean off_found = FALSE;
+                            // Int4 Delta = MIN(word_params->options->scan_range, window_size - word_length);
+                            // CRITICAL: Delta must be calculated at function start, BEFORE two_hits block
+                            // This matches NCBI implementation exactly (na_ungapped.c:658)
                             let two_hits = TWO_HIT_WINDOW > 0;
+                            let window_size = TWO_HIT_WINDOW;
+                            // NCBI: Int4 Delta = MIN(word_params->options->scan_range, window_size - word_length);
+                            let mut delta = scan_range.min(window_size.saturating_sub(word_length)) as isize;
                             let q_off = q_ext_start;
                             let s_off = s_ext_start;
+                            // NCBI reference: na_ungapped.c:667-669
+                            // s_end = s_off + word_length;
+                            // s_off_pos = s_off + diag_table->offset;
+                            // s_end_pos = s_end + diag_table->offset;
+                            // diag_table->offset = window_size (blast_extend.c:63)
+                            // CRITICAL: Match NCBI exactly
                             let mut s_end = s_ext_start + word_length;
-                            let mut s_end_pos = s_end + diag_offset as usize;
+                            // NCBI reference: na_ungapped.c:668
+                            // s_off_pos = s_off + diag_table->offset;
+                            // diag_table->offset = window_size (blast_extend.c:63)
+                            // CRITICAL: Match NCBI exactly - s_off_pos is required for off-diagonal search
+                            let s_off_pos = s_off + TWO_HIT_WINDOW;
+                            let mut s_end_pos = s_end + TWO_HIT_WINDOW;
                             let mut word_type = 1u8; // Default: single word (when word_length == lut_word_length)
                             let mut extended = 0usize;
                             let mut off_found = false;
@@ -931,16 +1081,14 @@ pub fn run(args: BlastnArgs) -> Result<()> {
                                 //     }
                                 // }
                                 if word_type == 1 {
-                                    // NCBI reference: na_ungapped.c:658, 692
-                                    // Int4 Delta = MIN(word_params->options->scan_range, window_size - word_length);
+                                    // NCBI reference: na_ungapped.c:692
                                     // if (Delta < 0) Delta = 0;
-                                    let window_size = TWO_HIT_WINDOW;
-                                    let delta_calc = window_size as isize - word_length as isize;
-                                    let mut delta_max = if delta_calc < 0 {
-                                        0
-                                    } else {
-                                        scan_range.min(delta_calc as usize) as isize
-                                    };
+                                    // CRITICAL: Delta was calculated at function start (line 658)
+                                    // Here we only check if it's negative and set to 0
+                                    if delta < 0 {
+                                        delta = 0;
+                                    }
+                                    let delta_max = delta;
                                     
                                     // NCBI reference: na_ungapped.c:689-690
                                     // Int4 s_a = s_off_pos + word_length - window_size;
@@ -950,10 +1098,13 @@ pub fn run(args: BlastnArgs) -> Result<()> {
                                     let s_a = s_off_pos as isize + word_length as isize - window_size as isize;
                                     let s_b = s_end_pos as isize - 2 * word_length as isize;
                                     
-                                    // NCBI reference: na_ungapped.c:688
+                                    // NCBI reference: na_ungapped.c:688, 694
                                     // Int4 orig_diag = real_diag + diag_table->diag_array_length;
-                                    // In LOSAT, we use diag directly (not masked)
-                                    let orig_diag = diag;
+                                    // Int4 off_diag  = (orig_diag + delta) & diag_table->diag_mask;
+                                    // CRITICAL: Match NCBI exactly
+                                    // NCBI creates diag_table per query, so use query-specific diag_array_length
+                                    let (q_diag_array_length, q_diag_mask) = query_diag_lengths[q_idx as usize];
+                                    let orig_diag = real_diag as isize + q_diag_array_length as isize;
                                     
                                     // NCBI reference: na_ungapped.c:693
                                     // for (delta = 1; delta <= Delta ; ++delta) {
@@ -968,20 +1119,29 @@ pub fn run(args: BlastnArgs) -> Result<()> {
                                         //     off_found = TRUE;
                                         //     break;
                                         // }
-                                        let off_diag = orig_diag + delta as isize;
-                                        let (off_s_end, off_s_l) = if use_array_indexing {
-                                            let off_diag_idx = (off_diag + diag_offset) as usize;
-                                            if off_diag_idx < diag_array_size {
-                                                let off_entry = &hit_level_array[off_diag_idx];
-                                                (off_entry.last_hit, hit_len_array[off_diag_idx])
-                                            } else {
-                                                (0, 0)
-                                            }
-                                        } else {
-                                            let off_diag_key = pack_diag_key(q_idx, off_diag);
+                                        // CRITICAL: Match NCBI exactly - off_diag is masked and used directly as array index
+                                        // NCBI reference: na_ungapped.c:694
+                                        // Int4 off_diag  = (orig_diag + delta) & diag_table->diag_mask;
+                                        // Int4 off_s_end = hit_level_array[off_diag].last_hit;
+                                        // CRITICAL: off_diag is already masked, use directly as array index (no diag_offset)
+                                        let off_diag = ((orig_diag + delta as isize) as usize) & q_diag_mask;
+                                        // NCBI reference: na_ungapped.c:695-696
+                                        // Int4 off_s_end = hit_level_array[off_diag].last_hit;
+                                        // Int4 off_s_l   = diag_table->hit_len_array[off_diag];
+                                        // CRITICAL: off_diag is already masked, use directly as array index
+                                        let (off_s_end, off_s_l) = if use_array_indexing && off_diag < diag_array_size {
+                                            let off_entry = &hit_level_array[off_diag];
+                                            (off_entry.last_hit, hit_len_array[off_diag])
+                                        } else if !use_array_indexing {
+                                            // For hash indexing, we need to use the original diag value
+                                            // But NCBI doesn't use hash indexing - it always uses array
+                                            // This is a fallback for LOSAT when array is too large
+                                            let off_diag_key = pack_diag_key(q_idx, off_diag as isize);
                                             let off_entry = hit_level_hash.get(&off_diag_key).copied().unwrap_or_default();
                                             let off_len = hit_len_hash.get(&off_diag_key).copied().unwrap_or(0);
                                             (off_entry.last_hit, off_len)
+                                        } else {
+                                            (0, 0)
                                         };
                                         
                                         // NCBI: off_s_end - delta >= s_a (signed comparison)
@@ -1003,20 +1163,26 @@ pub fn run(args: BlastnArgs) -> Result<()> {
                                         //     off_found = TRUE;
                                         //     break;
                                         // }
-                                        let off_diag = orig_diag - delta as isize;
-                                        let (off_s_end, off_s_l) = if use_array_indexing {
-                                            let off_diag_idx = (off_diag + diag_offset) as usize;
-                                            if off_diag_idx < diag_array_size {
-                                                let off_entry = &hit_level_array[off_diag_idx];
-                                                (off_entry.last_hit, hit_len_array[off_diag_idx])
-                                            } else {
-                                                (0, 0)
-                                            }
-                                        } else {
-                                            let off_diag_key = pack_diag_key(q_idx, off_diag);
+                                        // CRITICAL: Match NCBI exactly - off_diag is masked and used directly as array index
+                                        // NCBI creates diag_table per query, so use query-specific diag_mask
+                                        let off_diag = ((orig_diag - delta as isize) as usize) & q_diag_mask;
+                                        // NCBI reference: na_ungapped.c:704-705
+                                        // Int4 off_s_end = hit_level_array[off_diag].last_hit;
+                                        // Int4 off_s_l   = diag_table->hit_len_array[off_diag];
+                                        // CRITICAL: off_diag is already masked, use directly as array index
+                                        let (off_s_end, off_s_l) = if use_array_indexing && off_diag < diag_array_size {
+                                            let off_entry = &hit_level_array[off_diag];
+                                            (off_entry.last_hit, hit_len_array[off_diag])
+                                        } else if !use_array_indexing {
+                                            // For hash indexing, we need to use the original diag value
+                                            // But NCBI doesn't use hash indexing - it always uses array
+                                            // This is a fallback for LOSAT when array is too large
+                                            let off_diag_key = pack_diag_key(q_idx, off_diag as isize);
                                             let off_entry = hit_level_hash.get(&off_diag_key).copied().unwrap_or_default();
                                             let off_len = hit_len_hash.get(&off_diag_key).copied().unwrap_or(0);
                                             (off_entry.last_hit, off_len)
+                                        } else {
+                                            (0, 0)
                                         };
                                         
                                         // NCBI: off_s_end >= s_a (signed comparison)
@@ -1089,180 +1255,185 @@ pub fn run(args: BlastnArgs) -> Result<()> {
                                 None, // Use default X-drop
                             );
 
-                            // Skip if ungapped score is too low
-                            // NCBI reference: na_ungapped.c:752
-                            // if (off_found || ungapped_data->score >= cutoffs->cutoff_score)
-                            // Use dynamically calculated cutoff_score instead of fixed threshold
-                            // off_found is set by off-diagonal search (Step 3)
-                            // NCBI: if (off_found || ungapped_data->score >= cutoffs->cutoff_score)
+                            // NCBI reference: na_ungapped.c:752-772
+                            // if (off_found || ungapped_data->score >= cutoffs->cutoff_score) {
+                            //     s_end_pos = ungapped_data->length + ungapped_data->s_start + diag_table->offset;
+                            // } else {
+                            //     hit_ready = 0;
+                            // }
+                            // hit_level_array[real_diag].last_hit = s_end_pos;
+                            // hit_level_array[real_diag].flag = hit_ready;
+                            // diag_table->hit_len_array[real_diag] = (hit_ready) ? 0 : s_end_pos - s_off_pos;
+                            // CRITICAL: NCBI updates hit_level_array ALWAYS at the END, after all processing
+                            // If extension fails, hit_ready = 0 but s_end_pos is NOT updated (remains at pre-extension value)
+                            // If extension succeeds, s_end_pos = ungapped_data->length + ungapped_data->s_start + diag_table->offset
+                            let mut final_s_end_pos = s_end_pos; // Default: pre-extension position
                             if !(off_found || ungapped_score >= cutoff_score) {
+                                // NCBI reference: na_ungapped.c:759-761
+                                // If extension is skipped, hit_ready = 0, but s_end_pos is NOT updated
+                                hit_ready = false;
                                 dbg_ungapped_low += 1;
                                 if in_window && debug_mode {
                                     eprintln!("[DEBUG WINDOW] Seed at q={}, s={} SKIPPED: ungapped_score={} < {}", q_pos_usize, kmer_start, ungapped_score, min_ungapped_score);
                                 }
-                                // NCBI reference: na_ungapped.c:768-771
-                                // Update hit_level_array and hit_len_array even if extension is skipped
-                                // hit_level_array[real_diag].last_hit = s_end_pos;
-                                // hit_level_array[real_diag].flag = hit_ready;
-                                // diag_table->hit_len_array[real_diag] = (hit_ready) ? 0 : s_end_pos - s_off_pos;
-                                if use_array_indexing && diag_idx < diag_array_size {
-                                    hit_level_array[diag_idx].last_hit = s_end_pos;
-                                    hit_level_array[diag_idx].flag = if hit_ready { 1 } else { 0 };
-                                    hit_len_array[diag_idx] = if hit_ready { 0 } else { s_end_pos - s_off_pos };
-                                } else if !use_array_indexing {
-                                    let diag_key = pack_diag_key(q_idx, diag);
-                                    hit_level_hash.insert(diag_key, DiagStruct {
-                                        last_hit: s_end_pos,
-                                        flag: if hit_ready { 1 } else { 0 },
-                                    });
-                                    hit_len_hash.insert(diag_key, if hit_ready { 0 } else { s_end_pos - s_off_pos });
+                                // final_s_end_pos remains at s_end_pos (pre-extension position)
+                                // hit_level_array will be updated immediately after this block (before gapped extension)
+                            } else {
+                                // NCBI reference: na_ungapped.c:757-758
+                                // s_end_pos = ungapped_data->length + ungapped_data->s_start + diag_table->offset;
+                                // ungapped_data->s_start = ss (subject start after ungapped extension)
+                                // ungapped_data->length = (qe - qs) (ungapped extension length)
+                                // diag_table->offset = window_size (blast_extend.c:63)
+                                final_s_end_pos = ss + (qe - qs) + TWO_HIT_WINDOW;
+                                hit_ready = true; // Extension was successful
+
+                                dbg_gapped_attempted += 1;
+
+                                if in_window && debug_mode {
+                                    eprintln!("[DEBUG WINDOW] Seed at q={}, s={} -> GAPPED EXTENSION (ungapped_score={}, seed_len={})", q_pos_usize, kmer_start, ungapped_score, qe - qs);
                                 }
-                                continue;
                             }
 
-                            dbg_gapped_attempted += 1;
-
-                            if in_window && debug_mode {
-                                eprintln!("[DEBUG WINDOW] Seed at q={}, s={} -> GAPPED EXTENSION (ungapped_score={}, seed_len={})", q_pos_usize, kmer_start, ungapped_score, qe - qs);
-                            }
-
-                            // Gapped extension with task-specific X-drop
-                            // NCBI BLAST: blastn uses 30 (non-greedy), megablast uses 25 (greedy)
-                            // Reference: ncbi-blast/c++/include/algo/blast/core/blast_options.h:122-148
-                            // Reference: ncbi-blast/c++/src/algo/blast/core/blast_gapalign.c: gap_align->gap_x_dropoff = ext_params->gap_x_dropoff;
-                            let (
-                                final_qs,
-                                final_qe,
-                                final_ss,
-                                final_se,
-                                score,
-                                matches,
-                                mismatches,
-                                gaps,
-                                gap_letters,
-                                dp_cells,
-                            ) = extend_gapped_heuristic(
-                                q_record.seq(),
-                                search_seq,
-                                qs,
-                                ss,
-                                qe - qs,
-                                reward,
-                                penalty,
-                                gap_open,
-                                gap_extend,
-                                x_drop_gapped, // Task-specific: blastn=30, megablast=25
-                                use_dp, // Use DP for blastn task, greedy for megablast
-                            );
-
-                            // Calculate alignment length
-                            let aln_len = matches + mismatches + gap_letters;
-
-                            // Debug: show gapped extension results for window seeds
-                            if in_window && debug_mode {
-                                let identity = if aln_len > 0 { 100.0 * matches as f64 / aln_len as f64 } else { 0.0 };
-                                eprintln!(
-                                    "[DEBUG WINDOW] Gapped result: q={}-{}, s={}-{}, score={}, len={}, identity={:.1}%, gaps={}, dp_cells={}",
-                                    final_qs, final_qe, final_ss, final_se, score, aln_len, identity, gap_letters, dp_cells
-                                );
-                            }
-
-                            // Suppress unused variable warning when not in debug mode
-                            let _ = dp_cells;
-
-                            // NCBI BLAST does NOT update mask_array/mask_hash
-                            // NCBI reference: na_ungapped.c:768-771
-                            // NCBI only updates: hit_level_array[real_diag].last_hit = s_end_pos;
-                            // This update happens below (line 1214) using hit_level_array
-                            // The mask_array/mask_hash update above was LOSAT-specific and caused excessive filtering
-                            // REMOVED to match NCBI BLAST behavior
-                            
-                            // NCBI reference: na_ungapped.c:768-771
-                            // Update hit_level_array and hit_len_array after successful extension
+                            // NCBI reference: na_ungapped.c:768-772
                             // hit_level_array[real_diag].last_hit = s_end_pos;
                             // hit_level_array[real_diag].flag = hit_ready;
-                            // diag_table->hit_len_array[real_diag] = (hit_ready) ? 0 : s_end_pos - s_off_pos;
-                            // NCBI: s_end_pos = ungapped_data->length + ungapped_data->s_start + diag_table->offset;
-                            // In LOSAT, we use final_se (end position after gapped extension) + diag_offset
-                            let final_s_end_pos = final_se + diag_offset as usize;
-                            hit_ready = true; // Extension was successful
+                            // if (two_hits) {
+                            //     diag_table->hit_len_array[real_diag] = (hit_ready) ? 0 : s_end_pos - s_off_pos;
+                            // }
+                            // CRITICAL: NCBI updates hit_level_array IMMEDIATELY after ungapped extension,
+                            // BEFORE gapped extension (na_ungapped.c:768 is executed before function returns)
+                            // This is different from LOSAT's previous implementation where it was updated after gapped extension
                             if use_array_indexing && diag_idx < diag_array_size {
                                 hit_level_array[diag_idx].last_hit = final_s_end_pos;
-                                hit_level_array[diag_idx].flag = 1; // hit_ready = true
-                                hit_len_array[diag_idx] = 0; // hit_ready, so set to 0
+                                hit_level_array[diag_idx].flag = if hit_ready { 1 } else { 0 };
+                                if TWO_HIT_WINDOW > 0 {
+                                    // NCBI reference: na_ungapped.c:770-771
+                                    // Only update hit_len_array if two_hits (window_size > 0)
+                                    hit_len_array[diag_idx] = if hit_ready { 0 } else { final_s_end_pos - s_off_pos };
+                                }
                             } else if !use_array_indexing {
                                 let diag_key = pack_diag_key(q_idx, diag);
-                                hit_level_hash.insert(diag_key, DiagStruct {
-                                    last_hit: final_s_end_pos,
-                                    flag: 1, // hit_ready = true
-                                });
-                                hit_len_hash.insert(diag_key, 0); // hit_ready, so set to 0
+                                hit_level_hash.insert(
+                                    diag_key,
+                                    DiagStruct {
+                                        last_hit: final_s_end_pos,
+                                        flag: if hit_ready { 1 } else { 0 },
+                                    },
+                                );
+                                if TWO_HIT_WINDOW > 0 {
+                                    hit_len_hash.insert(diag_key, if hit_ready { 0 } else { final_s_end_pos - s_off_pos });
+                                }
                             }
 
-                            let (bit_score, eval) = calculate_evalue(
-                                score,
-                                q_record.seq().len(),
-                                db_len_total,
-                                db_num_seqs,
-                                &params_for_closure,
-                            );
+                            // NCBI reference: na_ungapped.c:756-758
+                            // BLAST_SaveInitialHit saves ungapped hit to init_hitlist
+                            // Gapped extension happens later in blast_gapalign.c (separate function call)
+                            // NCBI reference: na_ungapped.c:768-772
+                            // hit_level_array is updated AFTER ungapped extension, BEFORE gapped extension
+                            // LOSAT performs gapped extension inline (structural difference from NCBI),
+                            // but execution order matches NCBI: hit_level_array update → gapped extension
+                            if hit_ready {
+                                let q_record = &queries[q_idx as usize];
+                                // Gapped extension with task-specific X-drop
+                                // NCBI BLAST: blastn uses 30 (non-greedy), megablast uses 25 (greedy)
+                                // Reference: ncbi-blast/c++/include/algo/blast/core/blast_options.h:122-148
+                                // Reference: ncbi-blast/c++/src/algo/blast/core/blast_gapalign.c: gap_align->gap_x_dropoff = ext_params->gap_x_dropoff;
+                                let (
+                                    final_qs,
+                                    final_qe,
+                                    final_ss,
+                                    final_se,
+                                    score,
+                                    matches,
+                                    mismatches,
+                                    gaps,
+                                    gap_letters,
+                                    dp_cells,
+                                ) = extend_gapped_heuristic(
+                                    q_record.seq(),
+                                    search_seq,
+                                    qs,
+                                    ss,
+                                    qe - qs,
+                                    reward,
+                                    penalty,
+                                    gap_open,
+                                    gap_extend,
+                                    x_drop_gapped, // Task-specific: blastn=30, megablast=25
+                                    use_dp, // Use DP for blastn task, greedy for megablast
+                                );
 
-                            if eval <= evalue_threshold {
-                                // Identity is matches / alignment_length, capped at 100%
-                                let identity = if aln_len > 0 {
-                                    ((matches as f64 / aln_len as f64) * 100.0).min(100.0)
-                                } else {
-                                    0.0
-                                };
+                                // Calculate alignment length
+                                let aln_len = matches + mismatches + gap_letters;
 
-                                let q_id = query_ids[q_idx as usize].clone();
-
-                                // Store sequence data for overlap filtering
-                                let pair_key = (q_id.clone(), s_id.clone());
-                                if !seen_pairs.contains(&pair_key) {
-                                    seen_pairs.insert(pair_key);
-                                    local_sequences.push((
-                                        q_id.clone(),
-                                        s_id.clone(),
-                                        q_record.seq().to_vec(),
-                                        s_seq.to_vec(),
-                                    ));
+                                // Debug: show gapped extension results for window seeds
+                                if in_window && debug_mode {
+                                    let identity = if aln_len > 0 { 100.0 * matches as f64 / aln_len as f64 } else { 0.0 };
+                                    eprintln!(
+                                        "[DEBUG WINDOW] Gapped result: q={}-{}, s={}-{}, score={}, len={}, identity={:.1}%, gaps={}, dp_cells={}",
+                                        final_qs, final_qe, final_ss, final_se, score, aln_len, identity, gap_letters, dp_cells
+                                    );
                                 }
 
-                                // Convert coordinates for minus strand hits
-                                // For minus strand: positions in reverse complement need to be converted
-                                // back to original subject coordinates, with s_start > s_end to indicate minus strand
-                                let (hit_s_start, hit_s_end) = if is_minus_strand {
-                                    // Convert from reverse complement coordinates to original coordinates
-                                    // In reverse complement: position 0 corresponds to original position s_len-1
-                                    // final_ss and final_se are 0-based positions in the reverse complement
-                                    // We need to convert them to 1-based positions in the original sequence
-                                    // with s_start > s_end to indicate minus strand
-                                    let orig_s_start = s_len - final_ss; // 1-based, larger value
-                                    let orig_s_end = s_len - final_se + 1; // 1-based, smaller value
-                                    (orig_s_start, orig_s_end)
-                                } else {
-                                    (final_ss + 1, final_se)
-                                };
+                                // Suppress unused variable warning when not in debug mode
+                                let _ = dp_cells;
 
-                                local_hits.push(Hit {
-                                    query_id: q_id.clone(),
-                                    subject_id: s_id.clone(),
-                                    identity,
-                                    length: aln_len,
-                                    mismatch: mismatches,
-                                    gapopen: gaps,
-                                    q_start: final_qs + 1,
-                                    q_end: final_qe,
-                                    s_start: hit_s_start,
-                                    s_end: hit_s_end,
-                                    e_value: eval,
-                                    bit_score,
-                                    q_idx: 0,
-                                    s_idx: 0,
-                                    raw_score: score,
-                                });
-                            } // end of if eval <= args.evalue
+                                let (bit_score, eval) = calculate_evalue(
+                                    score,
+                                    q_record.seq().len(),
+                                    db_len_total,
+                                    db_num_seqs,
+                                    &params_for_closure,
+                                );
+
+                                if eval <= evalue_threshold {
+                                    // Identity is matches / alignment_length, capped at 100%
+                                    let identity = if aln_len > 0 {
+                                        ((matches as f64 / aln_len as f64) * 100.0).min(100.0)
+                                    } else {
+                                        0.0
+                                    };
+
+                                    // Store sequence data for post-processing (only for pairs we haven't seen)
+                                    let q_id = &query_ids[q_idx as usize];
+                                    if !seen_pairs.contains(&(q_id.clone(), s_id.clone())) {
+                                        seen_pairs.insert((q_id.clone(), s_id.clone()));
+                                        local_sequences.push((
+                                            q_id.clone(),
+                                            s_id.clone(),
+                                            q_record.seq().to_vec(),
+                                            s_seq.to_vec(),
+                                        ));
+                                    }
+
+                                    // Convert coordinates for minus strand hits
+                                    let (hit_s_start, hit_s_end) = if is_minus_strand {
+                                        let orig_s_start = s_len - final_ss; // 1-based, larger value
+                                        let orig_s_end = s_len - final_se + 1; // 1-based, smaller value
+                                        (orig_s_start, orig_s_end)
+                                    } else {
+                                        (final_ss + 1, final_se)
+                                    };
+
+                                    local_hits.push(Hit {
+                                        query_id: q_id.clone(),
+                                        subject_id: s_id.clone(),
+                                        identity,
+                                        length: aln_len,
+                                        mismatch: mismatches,
+                                        gapopen: gaps,
+                                        q_start: final_qs + 1,
+                                        q_end: final_qe,
+                                        s_start: hit_s_start,
+                                        s_end: hit_s_end,
+                                        e_value: eval,
+                                        bit_score,
+                                        q_idx: 0,
+                                        s_idx: 0,
+                                        raw_score: score,
+                                    });
+                                }
+                            }
                         } // end of for matches_slice in two-stage lookup
                     } // end of s_pos loop for two-stage lookup
                 }
@@ -1320,24 +1491,41 @@ pub fn run(args: BlastnArgs) -> Result<()> {
                         for &(q_idx, q_pos) in matches_slice {
                             dbg_seeds_found += 1;
                             
-                            // Calculate cutoff_score for this query-subject pair
-                            // NCBI reference: blast_parameters.c:368-374
-                            // For blastn in gapped mode: cutoff_score = MIN(gap_trigger * scale_factor, cutoff_score_max)
-                            // Query length includes both strands for blastn (query_len * 2)
                             let q_record = &queries[q_idx as usize];
-                            let query_len = q_record.seq().len() as i64 * 2; // Both strands for blastn
-                            let subject_len = s_len as i64;
-                            let cutoff_score = compute_blastn_cutoff_score(
-                                query_len,
-                                subject_len,
-                                evalue_threshold,
-                                GAP_TRIGGER_BIT_SCORE_NUCL,
-                                &params_for_closure, // ungapped params (same as gapped for blastn)
-                                &params_for_closure, // gapped params (same as ungapped for blastn)
-                                1.0, // scale_factor (typically 1.0 for standard scoring)
-                            );
                             
-                        let diag = kmer_start as isize - q_pos as isize;
+                            // NCBI reference: na_ungapped.c:730-731
+                            // Int4 context = BSearchContextInfo(q_off, query_info);
+                            // cutoffs = word_params->cutoffs + context;
+                            // For blastn, we need to determine context from q_idx
+                            // Each query has 2 contexts: 0 (forward) and 1 (reverse)
+                            let context = (q_idx as usize) * 2; // Forward strand context
+                            let cutoff_score = if context < cutoff_scores_ref.len() {
+                                per_subject_cutoff_scores[context]
+                            } else {
+                                // Fallback: compute cutoff_score if context is out of bounds
+                                let query_len = q_record.seq().len() as i64;
+                                let subject_len = s_len as i64;
+                                compute_blastn_cutoff_score(
+                                    query_len,
+                                    subject_len,
+                                    evalue_threshold,
+                                    GAP_TRIGGER_BIT_SCORE_NUCL,
+                                    &params_for_closure,
+                                    &params_for_closure,
+                                    1.0,
+                                )
+                            };
+                            
+                        // NCBI reference: na_ungapped.c:663-664
+                        // diag = s_off + diag_table->diag_array_length - q_off;
+                        // real_diag = diag & diag_table->diag_mask;
+                        // CRITICAL: Must match NCBI calculation exactly
+                        // NCBI creates diag_table per query, so use query-specific diag_array_length
+                        let (q_diag_array_length, q_diag_mask) = query_diag_lengths[q_idx as usize];
+                        let s_off = kmer_start as isize;
+                        let q_off = q_pos as isize;
+                        let diag = s_off + q_diag_array_length as isize - q_off;
+                        let real_diag = (diag as usize) & q_diag_mask;
 
                         // Check if this seed is in the debug window
                         let in_window = if let Some((q_start, q_end, s_start, s_end)) = debug_window {
@@ -1358,18 +1546,13 @@ pub fn run(args: BlastnArgs) -> Result<()> {
                         // The mask_array/mask_hash check above was LOSAT-specific and caused excessive filtering
                         // REMOVED to match NCBI BLAST behavior
 
-                        // NCBI reference: na_ungapped.c:656-672
-                        // Two-hit filter: check if there's a previous hit within window_size
-                        // NCBI: Boolean two_hits = (window_size > 0);
-                        // NCBI: last_hit = hit_level_array[real_diag].last_hit;
-                        // NCBI: hit_saved = hit_level_array[real_diag].flag;
-                        // NCBI: if (s_off_pos < last_hit) return 0;  // hit within explored area
-                        // NCBI: if (two_hits && (hit_saved || s_end_pos > last_hit + window_size)) { ... }
-                        let diag_idx = if use_array_indexing {
-                            (diag + diag_offset) as usize
-                        } else {
-                            0 // Not used for hash indexing
-                        };
+                        // NCBI reference: na_ungapped.c:665-666, 672
+                        // last_hit = hit_level_array[real_diag].last_hit;
+                        // hit_saved = hit_level_array[real_diag].flag;
+                        // if (s_off_pos < last_hit) return 0;  // hit within explored area
+                        // CRITICAL: Use real_diag (masked) directly as array index, matching NCBI exactly
+                        // NCBI uses real_diag directly: hit_level_array[real_diag]
+                        let diag_idx = real_diag; // NCBI uses real_diag directly
                         
                         // Get current diagonal state
                         let (last_hit, hit_saved) = if use_array_indexing && diag_idx < diag_array_size {
@@ -1383,9 +1566,11 @@ pub fn run(args: BlastnArgs) -> Result<()> {
                             (0, false)
                         };
                         
-                        // NCBI: s_off_pos = s_off + diag_table->offset;
-                        // In LOSAT, we use kmer_start directly (0-based), but need to add offset for comparison
-                        let s_off_pos = kmer_start + diag_offset as usize;
+                        // NCBI reference: na_ungapped.c:668
+                        // s_off_pos = s_off + diag_table->offset;
+                        // diag_table->offset = window_size (blast_extend.c:63)
+                        // CRITICAL: Match NCBI exactly
+                        let s_off_pos = kmer_start + TWO_HIT_WINDOW;
                         
                         // NCBI: if (s_off_pos < last_hit) return 0;
                         // Hit within explored area should be rejected
@@ -1401,15 +1586,37 @@ pub fn run(args: BlastnArgs) -> Result<()> {
                         //     s_end += extended;
                         //     s_end_pos += extended;
                         // }
+                        // NCBI reference: na_ungapped.c:667-669
+                        // s_end = s_off + word_length;
+                        // s_off_pos = s_off + diag_table->offset;
+                        // s_end_pos = s_end + diag_table->offset;
+                        // diag_table->offset = window_size (blast_extend.c:63)
+                        // CRITICAL: Match NCBI exactly
+                        // NCBI reference: na_ungapped.c:656-658
+                        // Boolean two_hits = (window_size > 0);
+                        // Boolean off_found = FALSE;
+                        // Int4 Delta = MIN(word_params->options->scan_range, window_size - word_length);
+                        // CRITICAL: Delta must be calculated at function start, BEFORE two_hits block
+                        // This matches NCBI implementation exactly (na_ungapped.c:658)
                         let two_hits = TWO_HIT_WINDOW > 0;
+                        let window_size = TWO_HIT_WINDOW;
+                        // NCBI: Int4 Delta = MIN(word_params->options->scan_range, window_size - word_length);
+                        let mut delta = scan_range.min(window_size.saturating_sub(safe_k)) as isize;
                         let q_off = q_pos as usize;
                         let s_off = kmer_start;
                         let mut s_end = kmer_start + safe_k;
-                        let mut s_end_pos = s_end + diag_offset as usize;
+                        // NCBI reference: na_ungapped.c:668
+                        // s_off_pos = s_off + diag_table->offset;
+                        // diag_table->offset = window_size (blast_extend.c:63)
+                        // CRITICAL: Match NCBI exactly - s_off_pos is required for off-diagonal search
+                        let s_off_pos = s_off + TWO_HIT_WINDOW;
+                        let mut s_end_pos = s_end + TWO_HIT_WINDOW;
                         let mut word_type = 1u8; // Default: single word (when word_length == lut_word_length)
                         let mut extended = 0usize;
                         let mut off_found = false;
                         let mut hit_ready = true;
+                        
+                        let q_record = &queries[q_idx as usize];
                         
                         // NCBI: if (two_hits && (hit_saved || s_end_pos > last_hit + window_size)) {
                         if two_hits && (hit_saved || s_end_pos > last_hit + TWO_HIT_WINDOW) {
@@ -1446,15 +1653,13 @@ pub fn run(args: BlastnArgs) -> Result<()> {
                             // NCBI reference: na_ungapped.c:852-881 - off-diagonal search (DiagHash version)
                             if word_type == 1 {
                                 // NCBI reference: na_ungapped.c:858
-                                // Int4 Delta = MIN(word_params->options->scan_range, window_size - word_length);
                                 // if (Delta < 0) Delta = 0;
-                                let window_size = TWO_HIT_WINDOW;
-                                let delta_calc = window_size as isize - safe_k as isize;
-                                let mut delta_max = if delta_calc < 0 {
-                                    0
-                                } else {
-                                    scan_range.min(delta_calc as usize) as isize
-                                };
+                                // CRITICAL: Delta was calculated at function start (line 825 for Hash version, line 658 for Array version)
+                                // Here we only check if it's negative and set to 0
+                                if delta < 0 {
+                                    delta = 0;
+                                }
+                                let delta_max = delta;
                                 
                                 // NCBI reference: na_ungapped.c:855-856
                                 // Int4 s_a = s_off_pos + word_length - window_size;
@@ -1464,7 +1669,13 @@ pub fn run(args: BlastnArgs) -> Result<()> {
                                 let s_a = s_off_pos as isize + safe_k as isize - window_size as isize;
                                 let s_b = s_end_pos as isize - 2 * safe_k as isize;
                                 
-                                let orig_diag = diag;
+                                // NCBI reference: na_ungapped.c:688, 694
+                                // Int4 orig_diag = real_diag + diag_table->diag_array_length;
+                                // Int4 off_diag  = (orig_diag + delta) & diag_table->diag_mask;
+                                // CRITICAL: Match NCBI exactly
+                                // NCBI creates diag_table per query, so use query-specific diag_array_length
+                                let (q_diag_array_length, q_diag_mask) = query_diag_lengths[q_idx as usize];
+                                let orig_diag = real_diag as isize + q_diag_array_length as isize;
                                 
                                 // NCBI reference: na_ungapped.c:859
                                 // for (delta = 1; delta <= Delta; ++delta) {
@@ -1482,20 +1693,26 @@ pub fn run(args: BlastnArgs) -> Result<()> {
                                     //      off_found = TRUE;
                                     //      break;
                                     // }
-                                    let off_diag = orig_diag + delta as isize;
-                                    let (off_s_end, off_s_l) = if use_array_indexing {
-                                        let off_diag_idx = (off_diag + diag_offset) as usize;
-                                        if off_diag_idx < diag_array_size {
-                                            let off_entry = &hit_level_array[off_diag_idx];
-                                            (off_entry.last_hit, hit_len_array[off_diag_idx])
-                                        } else {
-                                            (0, 0)
-                                        }
-                                    } else {
-                                        let off_diag_key = pack_diag_key(q_idx, off_diag);
+                                    // CRITICAL: Match NCBI exactly - off_diag is masked and used directly as array index
+                                    // NCBI creates diag_table per query, so use query-specific diag_mask
+                                    let off_diag = ((orig_diag + delta as isize) as usize) & q_diag_mask;
+                                    // NCBI reference: na_ungapped.c:695-696
+                                    // Int4 off_s_end = hit_level_array[off_diag].last_hit;
+                                    // Int4 off_s_l   = diag_table->hit_len_array[off_diag];
+                                    // CRITICAL: off_diag is already masked, use directly as array index
+                                    let (off_s_end, off_s_l) = if use_array_indexing && off_diag < diag_array_size {
+                                        let off_entry = &hit_level_array[off_diag];
+                                        (off_entry.last_hit, hit_len_array[off_diag])
+                                    } else if !use_array_indexing {
+                                        // For hash indexing, we need to use the original diag value
+                                        // But NCBI doesn't use hash indexing - it always uses array
+                                        // This is a fallback for LOSAT when array is too large
+                                        let off_diag_key = pack_diag_key(q_idx, off_diag as isize);
                                         let off_entry = hit_level_hash.get(&off_diag_key).copied().unwrap_or_default();
                                         let off_len = hit_len_hash.get(&off_diag_key).copied().unwrap_or(0);
                                         (off_entry.last_hit, off_len)
+                                    } else {
+                                        (0, 0)
                                     };
                                     
                                     // NCBI: off_s_end - delta >= s_a (signed comparison)
@@ -1517,20 +1734,26 @@ pub fn run(args: BlastnArgs) -> Result<()> {
                                     //      off_found = TRUE;
                                     //      break;
                                     // }
-                                    let off_diag = orig_diag - delta as isize;
-                                    let (off_s_end, off_s_l) = if use_array_indexing {
-                                        let off_diag_idx = (off_diag + diag_offset) as usize;
-                                        if off_diag_idx < diag_array_size {
-                                            let off_entry = &hit_level_array[off_diag_idx];
-                                            (off_entry.last_hit, hit_len_array[off_diag_idx])
-                                        } else {
-                                            (0, 0)
-                                        }
-                                    } else {
-                                        let off_diag_key = pack_diag_key(q_idx, off_diag);
+                                    // CRITICAL: Match NCBI exactly - off_diag is masked and used directly as array index
+                                    // NCBI creates diag_table per query, so use query-specific diag_mask
+                                    let off_diag = ((orig_diag - delta as isize) as usize) & q_diag_mask;
+                                    // NCBI reference: na_ungapped.c:704-705
+                                    // Int4 off_s_end = hit_level_array[off_diag].last_hit;
+                                    // Int4 off_s_l   = diag_table->hit_len_array[off_diag];
+                                    // CRITICAL: off_diag is already masked, use directly as array index
+                                    let (off_s_end, off_s_l) = if use_array_indexing && off_diag < diag_array_size {
+                                        let off_entry = &hit_level_array[off_diag];
+                                        (off_entry.last_hit, hit_len_array[off_diag])
+                                    } else if !use_array_indexing {
+                                        // For hash indexing, we need to use the original diag value
+                                        // But NCBI doesn't use hash indexing - it always uses array
+                                        // This is a fallback for LOSAT when array is too large
+                                        let off_diag_key = pack_diag_key(q_idx, off_diag as isize);
                                         let off_entry = hit_level_hash.get(&off_diag_key).copied().unwrap_or_default();
                                         let off_len = hit_len_hash.get(&off_diag_key).copied().unwrap_or(0);
                                         (off_entry.last_hit, off_len)
+                                    } else {
+                                        (0, 0)
                                     };
                                     
                                     // NCBI: off_s_end >= s_a (signed comparison)
@@ -1565,6 +1788,7 @@ pub fn run(args: BlastnArgs) -> Result<()> {
                             // }
                             // In NCBI, check_masks is TRUE by default (only FALSE when lut->stride is true)
                             // For LOSAT, we always check masks (equivalent to check_masks = TRUE)
+                            let q_record = &queries[q_idx as usize];
                             let query_mask = &query_masks_ref[q_idx as usize];
                             let (wt, ext) = type_of_word(
                                 q_record.seq(),
@@ -1599,175 +1823,198 @@ pub fn run(args: BlastnArgs) -> Result<()> {
                             None, // Use default X-drop
                         );
 
-                        // Skip if ungapped score is too low
-                        // NCBI reference: na_ungapped.c:752
-                        // if (off_found || ungapped_data->score >= cutoffs->cutoff_score)
-                        // Use dynamically calculated cutoff_score instead of fixed threshold
-                        // off_found is set by off-diagonal search
-                        // NCBI: if (off_found || ungapped_data->score >= cutoffs->cutoff_score)
+                        // NCBI reference: na_ungapped.c:752-772
+                        // if (off_found || ungapped_data->score >= cutoffs->cutoff_score) {
+                        //     s_end_pos = ungapped_data->length + ungapped_data->s_start + diag_table->offset;
+                        // } else {
+                        //     hit_ready = 0;
+                        // }
+                        // hit_level_array[real_diag].last_hit = s_end_pos;
+                        // hit_level_array[real_diag].flag = hit_ready;
+                        // diag_table->hit_len_array[real_diag] = (hit_ready) ? 0 : s_end_pos - s_off_pos;
+                        // CRITICAL: NCBI updates hit_level_array IMMEDIATELY after ungapped extension,
+                        // BEFORE gapped extension (na_ungapped.c:768 is executed before function returns)
+                        let mut final_s_end_pos = s_end_pos; // Default: pre-extension position
                         if !(off_found || ungapped_score >= cutoff_score) {
-                            // NCBI reference: na_ungapped.c:768-771
-                            // Update hit_level_array and hit_len_array even if extension is skipped
-                            if use_array_indexing && diag_idx < diag_array_size {
-                                hit_level_array[diag_idx].last_hit = s_end_pos;
-                                hit_level_array[diag_idx].flag = if hit_ready { 1 } else { 0 };
-                                hit_len_array[diag_idx] = if hit_ready { 0 } else { s_end_pos - s_off_pos };
-                            } else if !use_array_indexing {
-                                let diag_key = pack_diag_key(q_idx, diag);
-                                hit_level_hash.insert(diag_key, DiagStruct {
-                                    last_hit: s_end_pos,
-                                    flag: if hit_ready { 1 } else { 0 },
-                                });
-                                hit_len_hash.insert(diag_key, if hit_ready { 0 } else { s_end_pos - s_off_pos });
-                            }
+                            // NCBI reference: na_ungapped.c:759-761
+                            // If extension is skipped, hit_ready = 0, but s_end_pos is NOT updated
+                            hit_ready = false;
                             dbg_ungapped_low += 1;
                             if in_window && debug_mode {
                                 eprintln!("[DEBUG WINDOW] Seed at q={}, s={} SKIPPED: ungapped_score={} < {}", q_pos, kmer_start, ungapped_score, min_ungapped_score);
                             }
-                            continue;
-                        }
-
-                        dbg_gapped_attempted += 1;
-
-                        if in_window && debug_mode {
-                            eprintln!("[DEBUG WINDOW] Seed at q={}, s={} -> GAPPED EXTENSION (ungapped_score={}, seed_len={})", q_pos, kmer_start, ungapped_score, qe - qs);
-                        }
-
-                        // Gapped extension with task-specific X-drop
-                        // NCBI BLAST: blastn uses 30 (non-greedy), megablast uses 25 (greedy)
-                        // Reference: ncbi-blast/c++/include/algo/blast/core/blast_options.h:122-148
-                        // Reference: ncbi-blast/c++/src/algo/blast/core/blast_gapalign.c: gap_align->gap_x_dropoff = ext_params->gap_x_dropoff;
-                        let (
-                            final_qs,
-                            final_qe,
-                            final_ss,
-                            final_se,
-                            score,
-                            matches,
-                            mismatches,
-                            gaps,
-                            gap_letters,
-                            dp_cells,
-                        ) = extend_gapped_heuristic(
-                            q_record.seq(),
-                            search_seq,
-                            qs,
-                            ss,
-                            qe - qs,
-                            reward,
-                            penalty,
-                            gap_open,
-                            gap_extend,
-                            x_drop_gapped, // Task-specific: blastn=30, megablast=25
-                            use_dp, // Use DP for blastn task, greedy for megablast
-                        );
-
-                        // Debug: show gapped extension results for window seeds
-                        if in_window && debug_mode {
-                            let aln_len = matches + mismatches + gap_letters;
-                            eprintln!("[DEBUG WINDOW] Gapped extension result: q={}-{}, s={}-{}, score={}, len={}", final_qs, final_qe, final_ss, final_se, score, aln_len);
-                        }
-
-                        // Calculate statistics
-                        let aln_len = matches + mismatches + gap_letters;
-                        let identity = if aln_len > 0 {
-                            (matches as f64) / (aln_len as f64)
+                            // final_s_end_pos remains at s_end_pos (pre-extension position)
+                            // hit_level_array will be updated immediately after this block (before gapped extension)
                         } else {
-                            0.0
-                        };
+                            // NCBI reference: na_ungapped.c:757-758
+                            // s_end_pos = ungapped_data->length + ungapped_data->s_start + diag_table->offset;
+                            // ungapped_data->s_start = ss (subject start after ungapped extension)
+                            // ungapped_data->length = (qe - qs) (ungapped extension length)
+                            // diag_table->offset = window_size (blast_extend.c:63)
+                            final_s_end_pos = ss + (qe - qs) + TWO_HIT_WINDOW;
+                            hit_ready = true; // Extension was successful
 
-                        // Calculate e-value and bit score using Karlin-Altschul statistics
-                        let (bit_score, eval) = calculate_evalue(
-                            score,
-                            q_record.seq().len(),
-                            db_len_total,
-                            db_num_seqs,
-                            &params_for_closure,
-                        );
-                        
-                        // Skip if e-value is too high
-                        if eval > evalue_threshold {
-                            continue;
-                        }
-                        
-                        // Calculate alignment length and identity
-                        let aln_len = matches + mismatches + gap_letters;
-                        let identity = if aln_len > 0 {
-                            ((matches as f64 / aln_len as f64) * 100.0).min(100.0)
-                        } else {
-                            0.0
-                        };
+                            dbg_gapped_attempted += 1;
 
-                        // Store sequence data for post-processing (only for pairs we haven't seen)
-                        let q_id = &query_ids[q_idx as usize];
-                        if !seen_pairs.contains(&(q_id.clone(), s_id.clone())) {
-                            seen_pairs.insert((q_id.clone(), s_id.clone()));
-                            local_sequences.push((
-                                q_id.clone(),
-                                s_id.clone(),
-                                q_record.seq().to_vec(),
-                                s_seq.to_vec(),
-                            ));
+                            if in_window && debug_mode {
+                                eprintln!("[DEBUG WINDOW] Seed at q={}, s={} -> GAPPED EXTENSION (ungapped_score={}, seed_len={})", q_pos, kmer_start, ungapped_score, qe - qs);
+                            }
                         }
 
-                        // Convert coordinates for minus strand hits
-                        // For minus strand: positions in reverse complement need to be converted
-                        // back to original subject coordinates, with s_start > s_end to indicate minus strand
-                        let (hit_s_start, hit_s_end) = if is_minus_strand {
-                            // Convert from reverse complement coordinates to original coordinates
-                            // In reverse complement: position 0 corresponds to original position s_len-1
-                            // final_ss and final_se are 0-based positions in the reverse complement
-                            // We need to convert them to 1-based positions in the original sequence
-                            // with s_start > s_end to indicate minus strand
-                            let orig_s_start = s_len - final_ss; // 1-based, larger value
-                            let orig_s_end = s_len - final_se + 1; // 1-based, smaller value
-                            (orig_s_start, orig_s_end)
-                        } else {
-                            (final_ss + 1, final_se)
-                        };
-
-                        local_hits.push(Hit {
-                            query_id: q_id.clone(),
-                            subject_id: s_id.clone(),
-                            identity,
-                            length: aln_len,
-                            mismatch: mismatches,
-                            gapopen: gaps,
-                            q_start: final_qs + 1,
-                            q_end: final_qe,
-                            s_start: hit_s_start,
-                            s_end: hit_s_end,
-                            e_value: eval,
-                            bit_score,
-                            q_idx: 0,
-                            s_idx: 0,
-                            raw_score: score,
-                        });
-                        
-                        // NCBI reference: na_ungapped.c:768-771
-                        // Update hit_level_array and hit_len_array after successful extension
+                        // NCBI reference: na_ungapped.c:768-772
                         // hit_level_array[real_diag].last_hit = s_end_pos;
                         // hit_level_array[real_diag].flag = hit_ready;
-                        // diag_table->hit_len_array[real_diag] = (hit_ready) ? 0 : s_end_pos - s_off_pos;
-                        // NCBI: s_end_pos = ungapped_data->length + ungapped_data->s_start + diag_table->offset;
-                        // In LOSAT, we use final_se (end position after gapped extension) + diag_offset
-                        let final_s_end_pos = final_se + diag_offset as usize;
-                        hit_ready = true; // Extension was successful
+                        // if (two_hits) {
+                        //     diag_table->hit_len_array[real_diag] = (hit_ready) ? 0 : s_end_pos - s_off_pos;
+                        // }
+                        // CRITICAL: NCBI updates hit_level_array IMMEDIATELY after ungapped extension,
+                        // BEFORE gapped extension (na_ungapped.c:768 is executed before function returns)
+                        // This is different from LOSAT's previous implementation where it was updated after gapped extension
                         if use_array_indexing && diag_idx < diag_array_size {
                             hit_level_array[diag_idx].last_hit = final_s_end_pos;
-                            hit_level_array[diag_idx].flag = 1; // hit_ready = true
-                            hit_len_array[diag_idx] = 0; // hit_ready, so set to 0
+                            hit_level_array[diag_idx].flag = if hit_ready { 1 } else { 0 };
+                            if TWO_HIT_WINDOW > 0 {
+                                // NCBI reference: na_ungapped.c:770-771
+                                // Only update hit_len_array if two_hits (window_size > 0)
+                                hit_len_array[diag_idx] = if hit_ready { 0 } else { final_s_end_pos - s_off_pos };
+                            }
                         } else if !use_array_indexing {
                             let diag_key = pack_diag_key(q_idx, diag);
-                            hit_level_hash.insert(diag_key, DiagStruct {
-                                last_hit: final_s_end_pos,
-                                flag: 1, // hit_ready = true
-                            });
-                            hit_len_hash.insert(diag_key, 0); // hit_ready, so set to 0
+                            hit_level_hash.insert(
+                                diag_key,
+                                DiagStruct {
+                                    last_hit: final_s_end_pos,
+                                    flag: if hit_ready { 1 } else { 0 },
+                                },
+                            );
+                            if TWO_HIT_WINDOW > 0 {
+                                hit_len_hash.insert(diag_key, if hit_ready { 0 } else { final_s_end_pos - s_off_pos });
+                            }
                         }
-                    }
+
+                        // NCBI reference: na_ungapped.c:756-758
+                        // BLAST_SaveInitialHit saves ungapped hit to init_hitlist
+                        // Gapped extension happens later in blast_gapalign.c (separate function call)
+                        // NCBI reference: na_ungapped.c:768-772
+                        // hit_level_array is updated AFTER ungapped extension, BEFORE gapped extension
+                        // LOSAT performs gapped extension inline (structural difference from NCBI),
+                        // but execution order matches NCBI: hit_level_array update → gapped extension
+                        if hit_ready {
+                            let q_record = &queries[q_idx as usize];
+                            // Gapped extension with task-specific X-drop
+                            // NCBI BLAST: blastn uses 30 (non-greedy), megablast uses 25 (greedy)
+                            // Reference: ncbi-blast/c++/include/algo/blast/core/blast_options.h:122-148
+                            // Reference: ncbi-blast/c++/src/algo/blast/core/blast_gapalign.c: gap_align->gap_x_dropoff = ext_params->gap_x_dropoff;
+                            let (
+                                final_qs,
+                                final_qe,
+                                final_ss,
+                                final_se,
+                                score,
+                                matches,
+                                mismatches,
+                                gaps,
+                                gap_letters,
+                                dp_cells,
+                            ) = extend_gapped_heuristic(
+                                q_record.seq(),
+                                search_seq,
+                                qs,
+                                ss,
+                                qe - qs,
+                                reward,
+                                penalty,
+                                gap_open,
+                                gap_extend,
+                                x_drop_gapped, // Task-specific: blastn=30, megablast=25
+                                use_dp, // Use DP for blastn task, greedy for megablast
+                            );
+
+                            // Debug: show gapped extension results for window seeds
+                            if in_window && debug_mode {
+                                let aln_len = matches + mismatches + gap_letters;
+                                eprintln!("[DEBUG WINDOW] Gapped extension result: q={}-{}, s={}-{}, score={}, len={}", final_qs, final_qe, final_ss, final_se, score, aln_len);
+                            }
+
+                            // Calculate statistics
+                            let aln_len = matches + mismatches + gap_letters;
+                            let identity = if aln_len > 0 {
+                                (matches as f64) / (aln_len as f64)
+                            } else {
+                                0.0
+                            };
+
+                            // Calculate e-value and bit score using Karlin-Altschul statistics
+                            let (bit_score, eval) = calculate_evalue(
+                                score,
+                                q_record.seq().len(),
+                                db_len_total,
+                                db_num_seqs,
+                                &params_for_closure,
+                            );
+                            
+                            // Skip if e-value is too high
+                            if eval > evalue_threshold {
+                                // hit_level_array was already updated above, regardless of e-value filtering
+                            } else {
+                                // Calculate alignment length and identity
+                                let aln_len = matches + mismatches + gap_letters;
+                                let identity = if aln_len > 0 {
+                                    ((matches as f64 / aln_len as f64) * 100.0).min(100.0)
+                                } else {
+                                    0.0
+                                };
+
+                                // Store sequence data for post-processing (only for pairs we haven't seen)
+                                let q_id = &query_ids[q_idx as usize];
+                                if !seen_pairs.contains(&(q_id.clone(), s_id.clone())) {
+                                    seen_pairs.insert((q_id.clone(), s_id.clone()));
+                                    local_sequences.push((
+                                        q_id.clone(),
+                                        s_id.clone(),
+                                        q_record.seq().to_vec(),
+                                        s_seq.to_vec(),
+                                    ));
+                                }
+
+                                // Convert coordinates for minus strand hits
+                                // For minus strand: positions in reverse complement need to be converted
+                                // back to original subject coordinates, with s_start > s_end to indicate minus strand
+                                let (hit_s_start, hit_s_end) = if is_minus_strand {
+                                    // Convert from reverse complement coordinates to original coordinates
+                                    // In reverse complement: position 0 corresponds to original position s_len-1
+                                    // final_ss and final_se are 0-based positions in the reverse complement
+                                    // We need to convert them to 1-based positions in the original sequence
+                                    // with s_start > s_end to indicate minus strand
+                                    let orig_s_start = s_len - final_ss; // 1-based, larger value
+                                    let orig_s_end = s_len - final_se + 1; // 1-based, smaller value
+                                    (orig_s_start, orig_s_end)
+                                } else {
+                                    (final_ss + 1, final_se)
+                                };
+
+                                local_hits.push(Hit {
+                                    query_id: q_id.clone(),
+                                    subject_id: s_id.clone(),
+                                    identity,
+                                    length: aln_len,
+                                    mismatch: mismatches,
+                                    gapopen: gaps,
+                                    q_start: final_qs + 1,
+                                    q_end: final_qe,
+                                    s_start: hit_s_start,
+                                    s_end: hit_s_end,
+                                    e_value: eval,
+                                    bit_score,
+                                    q_idx: 0,
+                                    s_idx: 0,
+                                    raw_score: score,
+                                });
+                            }
+                        }
                     } // end of s_pos loop for original lookup
-                } // end of if/else for two-stage vs original lookup
+                } // end of if two_stage_lookup_ref.is_none()
+                } // end of if let Some(two_stage)
             } // end of strand loop
 
             // Print debug summary for this subject

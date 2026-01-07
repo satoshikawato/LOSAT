@@ -2,7 +2,6 @@ use anyhow::{Context, Result};
 use indicatif::{ProgressBar, ProgressStyle};
 use rayon::prelude::*;
 use rustc_hash::FxHashMap;
-use std::cmp::Ordering;
 use std::sync::mpsc::channel;
 use crate::common::{write_output, Hit};
 use crate::stats::{lookup_nucl_params, KarlinParams};
@@ -106,102 +105,124 @@ pub fn filter_hsps(
             }
 
             // Query coordinates (already normalized to plus strand in blastn)
-            // NCBI reference: hspfilter_culling.c:80-83
-            // Int8 b1 = p->begin;
-            // Int8 b2 = y->begin;
-            // Int8 e1 = p->end;
-            // Int8 e2 = y->end;
-            // NCBI normalizes coordinates when creating LinkedHSP (lines 621-628)
-            // For blastn: plus strand uses offset/end directly, minus strand uses qlen - end/offset
-            // LOSAT stores coordinates already normalized (q_start < q_end always for blastn)
-            let b1 = hit.q_start as i64;
-            let e1 = hit.q_end as i64;
-            let b2 = kept.q_start as i64;
-            let e2 = kept.q_end as i64;
+            // NCBI reference: hspfilter_culling.c:79-87
+            // static Boolean s_DominateTest(LinkedHSP *p, LinkedHSP *y) {
+            //     Int8 b1 = p->begin;  // p = already kept HSP
+            //     Int8 b2 = y->begin;  // y = candidate HSP
+            //     Int8 e1 = p->end;
+            //     Int8 e2 = y->end;
+            //     Int8 s1 = p->hsp->score;  // p's score
+            //     Int8 s2 = y->hsp->score;  // y's score
+            //     Int8 l1 = e1 - b1;  // p's length
+            //     Int8 l2 = e2 - b2;  // y's length (candidate)
+            // }
+            // In LOSAT: kept = p (already kept), hit = y (candidate)
+            // CRITICAL: Match NCBI variable mapping exactly
+            let b1 = kept.q_start as i64;  // p->begin (already kept)
+            let e1 = kept.q_end as i64;    // p->end (already kept)
+            let b2 = hit.q_start as i64;   // y->begin (candidate)
+            let e2 = hit.q_end as i64;     // y->end (candidate)
             
             // Query lengths
-            let l1 = e1 - b1;
-            let l2 = e2 - b2;
+            // NCBI reference: hspfilter_culling.c:86-87
+            // Int8 l1 = e1 - b1;  // p's length (already kept)
+            // Int8 l2 = e2 - b2;  // y's length (candidate)
+            let l1 = e1 - b1;  // kept's length (already kept)
+            let l2 = e2 - b2;  // hit's length (candidate)
             
             // Calculate overlap (query coordinates only)
-            // NCBI reference: hspfilter_culling.c:412: overlap = MIN(e1,e2) - MAX(b1,b2)
+            // NCBI reference: hspfilter_culling.c:88: overlap = MIN(e1,e2) - MAX(b1,b2)
             // If overlap is negative (no overlap), it will fail the 50% check below
             let overlap = e1.min(e2) - b1.max(b2);
             
             // If not overlap by more than 50% of candidate's length, don't dominate
-            // NCBI reference: hspfilter_culling.c:338: if(2 *overlap < l2) return FALSE;
+            // NCBI reference: hspfilter_culling.c:92: if(2 *overlap < l2) return FALSE;
+            // l2 = y->end - y->begin (candidate's length)
             // Note: if overlap < 0 (no overlap), this condition is always true
             if overlap < 0 || 2 * overlap < l2 {
                 continue;
             }
             
             // Raw scores (not bit_score)
-            let s1 = hit.raw_score as i64;
-            let s2 = kept.raw_score as i64;
+            // NCBI reference: hspfilter_culling.c:84-85
+            // Int8 s1 = p->hsp->score;  // already kept HSP's score
+            // Int8 s2 = y->hsp->score;  // candidate HSP's score
+            let s1 = kept.raw_score as i64;  // p's score (already kept)
+            let s2 = hit.raw_score as i64;   // y's score (candidate)
             
             // Main criterion: 2 * (%diff in score) + 1 * (%diff in length)
             // Formula: d = 4*s1*l1 + 2*s1*l2 - 2*s2*l1 - 4*s2*l2
-            // where s1, l1 = hit (candidate), s2, l2 = kept (already processed)
-            // NCBI reference: hspfilter_culling.c:344
+            // where s1, l1 = kept (already kept), s2, l2 = hit (candidate)
+            // NCBI reference: hspfilter_culling.c:99
             let d = 4 * s1 * l1 + 2 * s1 * l2 - 2 * s2 * l1 - 4 * s2 * l2;
             
             // Tie-breaker for identical HSPs
-            // NCBI reference: hspfilter_culling.c:423-434
+            // NCBI reference: hspfilter_culling.c:101-113
+            // if(((s1 == s2) && (b1==b2) && (l1 == l2)) || (d == 0)) {
+            //     if(s1 != s2) {
+            //         return (s1>s2);  // p dominates y if p's score > y's score
+            //     }
+            //     if(p->sid != y->sid) {
+            //         return (p->sid < y->sid);  // p dominates y if p->sid < y->sid
+            //     }
+            //     if(p->hsp->subject.offset > y->hsp->subject.offset) {
+            //         return FALSE;  // p does NOT dominate y
+            //     }
+            //     return TRUE;  // p dominates y (default)
+            // }
             if (s1 == s2 && b1 == b2 && l1 == l2) || d == 0 {
                 if s1 != s2 {
-                    // Higher score wins - if hit has lower score, kept dominates
-                    if s1 < s2 {
+                    // NCBI: return (s1>s2);  // p dominates y if p's score > y's score
+                    // s1 = kept.raw_score (p's score), s2 = hit.raw_score (y's score)
+                    if s1 > s2 {
+                        // kept's score > hit's score → kept dominates hit
                         dominated = true;
                         break;
                     }
-                    // If hit has higher score, hit is better, so kept doesn't dominate
+                    // kept's score <= hit's score → kept does NOT dominate hit
                     continue;
-                } else {
-                    // Same score: use subject_id, then subject offset
-                    // NCBI: if(p->sid != y->sid) return (p->sid < y->sid);
-                    // We're checking if kept dominates hit (s_DominateTest(kept, hit))
-                    // NCBI returns TRUE if p->sid < y->sid, meaning p dominates y
-                    // So kept dominates hit if kept.subject_id < hit.subject_id
-                    let subject_cmp = hit.subject_id.cmp(&kept.subject_id);
-                    if subject_cmp == Ordering::Greater {
-                        // hit.subject_id > kept.subject_id → kept.subject_id < hit.subject_id
-                        // NCBI: return (p->sid < y->sid) → kept dominates hit
+                }
+                // Same score: use subject_id, then subject offset
+                // NCBI: if(p->sid != y->sid) return (p->sid < y->sid);
+                // p->sid = kept.subject_id, y->sid = hit.subject_id
+                if kept.subject_id != hit.subject_id {
+                    // NCBI: return (p->sid < y->sid);  // p dominates y if p->sid < y->sid
+                    if kept.subject_id < hit.subject_id {
+                        // kept.subject_id < hit.subject_id → kept dominates hit
                         dominated = true;
                         break;
-                    } else if subject_cmp == Ordering::Less {
-                        // hit.subject_id < kept.subject_id → kept.subject_id > hit.subject_id
-                        // NCBI: return (p->sid < y->sid) → kept does NOT dominate hit
-                        continue;
-                    } else {
-                        // Same subject: use subject offset (s_idx)
-                        // NCBI: if(p->hsp->subject.offset > y->hsp->subject.offset) return FALSE;
-                        //       return TRUE;  (default: p dominates y)
-                        // We're checking if kept dominates hit
-                        // NCBI returns FALSE if p.offset > y.offset, meaning p does NOT dominate y
-                        // So kept does NOT dominate hit if kept.s_idx > hit.s_idx
-                        // Otherwise, kept dominates hit (default case)
-                        if kept.s_idx > hit.s_idx {
-                            // kept.s_idx > hit.s_idx → kept does NOT dominate hit
-                            continue;
-                        } else {
-                            // kept.s_idx <= hit.s_idx → kept dominates hit (default case)
-                            dominated = true;
-                            break;
-                        }
                     }
+                    // kept.subject_id >= hit.subject_id → kept does NOT dominate hit
+                    continue;
                 }
-            }
-            
-            // If d < 0: kept dominates hit (hit should be filtered)
-            // If d > 0: hit is better than kept (hit should be kept, continue checking)
-            // NCBI reference: hspfilter_culling.c:436-439
-            if d < 0 {
+                // Same subject: use subject offset
+                // NCBI: if(p->hsp->subject.offset > y->hsp->subject.offset) return FALSE;
+                //       return TRUE;  (default: p dominates y)
+                // p->hsp->subject.offset = kept.s_start, y->hsp->subject.offset = hit.s_start
+                if kept.s_start > hit.s_start {
+                    // NCBI: return FALSE;  // p does NOT dominate y
+                    continue;
+                }
+                // NCBI: return TRUE;  // p dominates y (default)
                 dominated = true;
                 break;
             }
             
-            // d > 0: hit is better, so kept doesn't dominate hit
-            continue;
+            // If d < 0: kept does NOT dominate hit (hit should be kept)
+            // If d > 0: kept dominates hit (hit should be filtered)
+            // NCBI reference: hspfilter_culling.c:115-119
+            // if (d < 0) {
+            //     return FALSE;  // p does NOT dominate y
+            // }
+            // return TRUE;  // p dominates y
+            if d < 0 {
+                // kept does NOT dominate hit
+                continue;
+            }
+            
+            // d >= 0: kept dominates hit (hit should be filtered)
+            dominated = true;
+            break;
         }
 
         if !dominated {

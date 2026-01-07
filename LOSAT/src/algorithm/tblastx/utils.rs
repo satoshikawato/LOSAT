@@ -1910,12 +1910,21 @@ pub fn run(args: TblastxArgs) -> Result<()> {
                         }
                         // [C] else
                         else {
-                            // [C] last_hit = diag_array[diag_coord].last_hit - diag_offset;
+                            // NCBI reference: aa_ungapped.c:533-536
+                            // /* find the distance to the last hit on this diagonal */
+                            // last_hit = diag_array[diag_coord].last_hit - diag_offset;
+                            // diff = subject_offset - last_hit;
                             let last_hit = diag_entry.last_hit - diag_offset;
-                            // [C] diff = subject_offset - last_hit;
                             let diff = subject_offset - last_hit;
 
-                            // [C] if (diff >= window)
+                            // NCBI reference: aa_ungapped.c:538-543
+                            // if (diff >= window) {
+                            //     /* We are beyond the window for this diagonal; start a
+                            //        new hit */
+                            //     diag_array[diag_coord].last_hit =
+                            //         subject_offset + diag_offset;
+                            //     continue;
+                            // }
                             if diff >= window {
                                 if diag_enabled {
                                     diagnostics
@@ -1927,7 +1936,12 @@ pub fn run(args: TblastxArgs) -> Result<()> {
                                 continue;
                             }
 
-                            // [C] if (diff < wordsize)
+                            // NCBI reference: aa_ungapped.c:546-551
+                            // /* If the difference is less than the wordsize (i.e. last
+                            //    hit and this hit overlap), give up */
+                            // if (diff < wordsize) {
+                            //     continue;
+                            // }
                             if diff < wordsize {
                                 if diag_enabled {
                                     diagnostics
@@ -1938,14 +1952,25 @@ pub fn run(args: TblastxArgs) -> Result<()> {
                                 continue;
                             }
 
-                            // [C] curr_context = BSearchContextInfo(query_offset, query_info);
+                            // NCBI reference: aa_ungapped.c:560
+                            // curr_context = BSearchContextInfo(query_offset, query_info);
                             let ctx_idx = lookup_ref.get_context_idx(query_offset);
                             let ctx = unsafe { contexts_ref.get_unchecked(ctx_idx) };
                             let q_raw = (query_offset - ctx.frame_base) as usize;
                             // NCBI uses masked sequence for extension (same as neighbor-map mode)
                             let query = &ctx.aa_seq;
 
-                            // [C] if (query_offset - diff < query_info->contexts[curr_context].query_offset)
+                            // NCBI reference: aa_ungapped.c:562-573
+                            // /* Check if the last hit hits current query. Because last_hit
+                            //    is never reset, it may contain a hit to the previous
+                            //    concatenated query */
+                            // if (query_offset - diff <
+                            //     query_info->contexts[curr_context].query_offset) {
+                            //     /* there was no last hit for this diagnol; start a new hit */
+                            //     diag_array[diag_coord].last_hit =
+                            //         subject_offset + diag_offset;
+                            //     continue;
+                            // }
                             if query_offset - diff < ctx.frame_base {
                                 diag_entry.last_hit = subject_offset + diag_offset;
                                 continue;

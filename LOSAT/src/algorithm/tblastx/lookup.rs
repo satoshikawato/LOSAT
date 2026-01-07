@@ -428,20 +428,51 @@ pub fn build_ncbi_lookup(
                 continue;
             }
 
+            // NCBI reference: blast_aalookup.c:492-496
+            // score = matrix[w[0]][w[0]];
+            // for (i = 1; i < lookup->word_length; i++)
+            //     score += matrix[w[i]][w[i]];
             let self_score = blosum62_score(w0 as u8, w0 as u8)
                 + blosum62_score(w1 as u8, w1 as u8)
                 + blosum62_score(w2 as u8, w2 as u8);
             
+            // NCBI reference: blast_aalookup.c:498-514
+            // /* If the self-score is above the threshold, then the neighboring
+            //    computation will automatically add the word to the lookup table.
+            //    Otherwise, either the score is too low or neighboring is not done at
+            //    all, so that all of these exact matches must be explicitly added to
+            //    the lookup table */
+            // if (lookup->threshold == 0 || score < lookup->threshold) {
+            //     for (i = 0; i < offset_list[1]; i++) {
+            //         BlastLookupAddWordHit(lookup->thin_backbone, lookup->word_length,
+            //                               lookup->charsize, w,
+            //                               query_bias + offset_list[i + 2]);
+            //     }
+            // } else {
+            //     /* exact matches NOT added - will be added via neighbor generation */
+            // }
             // NCBI: if threshold==0 or self_score < threshold, add exact matches
             if threshold == 0 || self_score < threshold {
                 entry_counts[idx] += num_offsets;
             }
+            // Note: if self_score >= threshold, exact matches are NOT added here.
+            // They will be added via neighbor generation (query word itself is a neighbor).
             
+            // NCBI reference: blast_aalookup.c:516-519
+            // /* check if neighboring words need to be found */
+            // if (lookup->threshold == 0)
+            //     return;
             if threshold == 0 {
                 continue;
             }
 
-            // Count neighbor contributions
+            // NCBI reference: blast_aalookup.c:535-543
+            // /* compute the largest possible score that any neighboring word can have */
+            // score = row_max[w[0]];
+            // for (i = 1; i < lookup->word_length; i++)
+            //     score += row_max[w[i]];
+            // s_AddWordHitsCore(&info, score, 0);
+            // Count neighbor contributions (including query word itself if self_score >= threshold)
             let rm12 = row_max[w1] + row_max[w2];
             let rm2 = row_max[w2];
             for s0 in 0..alphabet_size {
@@ -455,6 +486,17 @@ pub fn build_ncbi_lookup(
                         continue;
                     }
                     for s2 in 0..alphabet_size {
+                        // NCBI reference: blast_aalookup.c:580-592 (s_AddWordHitsCore)
+                        // if (score + row[i] >= threshold) {
+                        //     subject_word[current_pos] = i;
+                        //     for (j = 0; j < offset_list[1]; j++) {
+                        //         BlastLookupAddWordHit(lookup->thin_backbone, wordsize,
+                        //                               charsize, subject_word,
+                        //                               query_bias + offset_list[j + 2]);
+                        //     }
+                        // }
+                        // Note: This includes the query word itself (s0==w0 && s1==w1 && s2==w2)
+                        // when self_score >= threshold, ensuring it is added via neighbor generation.
                         if sc1 + blosum62_score(w2 as u8, s2 as u8) >= threshold {
                             let nidx = encode_kmer_3(s0, s1, s2, charsize) & mask;
                             entry_counts[nidx] += num_offsets;
@@ -483,21 +525,51 @@ pub fn build_ncbi_lookup(
                 continue;
             }
 
+            // NCBI reference: blast_aalookup.c:492-496 (same as Pass 1)
             let self_score = blosum62_score(w0 as u8, w0 as u8)
                 + blosum62_score(w1 as u8, w1 as u8)
                 + blosum62_score(w2 as u8, w2 as u8);
             
+            // NCBI reference: blast_aalookup.c:504-514 (same logic as Pass 1)
+            // if (lookup->threshold == 0 || score < lookup->threshold) {
+            //     for (i = 0; i < offset_list[1]; i++) {
+            //         BlastLookupAddWordHit(lookup->thin_backbone, lookup->word_length,
+            //                               lookup->charsize, w,
+            //                               query_bias + offset_list[i + 2]);
+            //     }
+            // } else {
+            //     /* exact matches NOT added - will be added via neighbor generation */
+            // }
             // NCBI: if threshold==0 or self_score < threshold, add exact matches
             if threshold == 0 || self_score < threshold {
                 backbone[idx].extend_from_slice(offsets);
                 exact_added_count += offsets.len();
                 words_with_exact_only += 1;
             }
+            // Note: if self_score >= threshold, exact matches are NOT added here.
+            // They will be added via neighbor generation below (query word itself is a neighbor).
             
+            // NCBI reference: blast_aalookup.c:516-519 (same as Pass 1)
             if threshold == 0 {
                 continue;
             }
 
+            // NCBI reference: blast_aalookup.c:546-605 (s_AddWordHitsCore)
+            // Neighbor generation: for each position, try all alphabet_size residues
+            // and recursively build subject words that score >= threshold.
+            // At the bottom of recursion (current_pos == wordsize - 1), add all
+            // neighbors that meet threshold to the lookup table.
+            // Reference: blast_aalookup.c:580-592
+            //   for (i = 0; i < alphabet_size; i++) {
+            //       if (score + row[i] >= threshold) {
+            //           subject_word[current_pos] = i;
+            //           for (j = 0; j < offset_list[1]; j++) {
+            //               BlastLookupAddWordHit(lookup->thin_backbone, wordsize,
+            //                                     charsize, subject_word,
+            //                                     query_bias + offset_list[j + 2]);
+            //           }
+            //       }
+            //   }
             // Add neighbors - use extend_from_slice for batch addition
             let mut local_neighbor_count = 0usize;
             let rm12 = row_max[w1] + row_max[w2];
@@ -513,6 +585,17 @@ pub fn build_ncbi_lookup(
                         continue;
                     }
                     for s2 in 0..alphabet_size {
+                        // NCBI reference: blast_aalookup.c:580-592 (s_AddWordHitsCore)
+                        // if (score + row[i] >= threshold) {
+                        //     subject_word[current_pos] = i;
+                        //     for (j = 0; j < offset_list[1]; j++) {
+                        //         BlastLookupAddWordHit(lookup->thin_backbone, wordsize,
+                        //                               charsize, subject_word,
+                        //                               query_bias + offset_list[j + 2]);
+                        //     }
+                        // }
+                        // Note: This includes the query word itself (s0==w0 && s1==w1 && s2==w2)
+                        // when self_score >= threshold, ensuring it is added via neighbor generation.
                         if sc1 + blosum62_score(w2 as u8, s2 as u8) >= threshold {
                             let nidx = encode_kmer_3(s0, s1, s2, charsize) & mask;
                             // Use extend_from_slice for efficient batch addition

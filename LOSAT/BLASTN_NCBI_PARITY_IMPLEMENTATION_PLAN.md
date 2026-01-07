@@ -887,20 +887,88 @@ LOSAT_BIN="../target/release/LOSAT"
 
 **Megablast:**
 - NZ_CP006932 self: LOSAT=270, NCBI=N/A
-- EDL933 vs Sakai: LOSAT=1508, NCBI=N/A
-- Sakai vs MG1655: LOSAT=1202, NCBI=N/A
+- EDL933 vs Sakai: LOSAT=1,508, NCBI=N/A
+- Sakai vs MG1655: LOSAT=1,202, NCBI=N/A
 
 **Blastn:**
-- NZ_CP006932 self: LOSAT=6529, NCBI=454 (1438.1%) - NCBIファイルが存在しない可能性
-- MelaMJNV vs PemoMJNVA: LOSAT=742, NCBI=2729 (27.2%)
-- MjeNMV vs MelaMJNV: LOSAT=1371, NCBI=2668 (51.4%)
-- MjPMNV vs MlPMNV: LOSAT=2258, NCBI=54402 (4.2%)
+- NZ_CP006932 self: LOSAT=6,529, NCBI=454 (1438.1%) 🔴 Issue
+- PesePMNV vs MjPMNV: LOSAT=394, NCBI=241 (163.5%) ⚠️ Warning
+- MelaMJNV vs PemoMJNVA: LOSAT=742, NCBI=2,729 (27.2%) 🔴 Issue
+- SiNMV vs ChdeNMV: LOSAT=1,852, NCBI=4,367 (42.4%) 🔴 Issue
+- PmeNMV vs MjPMNV: LOSAT=372, NCBI=208 (178.8%) ⚠️ Warning
+- PmeNMV vs PesePMNV: LOSAT=505, NCBI=1,431 (35.3%) 🔴 Issue
+- PeseMJNV vs PemoMJNVB: LOSAT=1,403, NCBI=11,668 (12.0%) 🔴 Issue
+- PemoMJNVA vs PeseMJNV: LOSAT=1,187, NCBI=2,940 (40.4%) 🔴 Issue
+- MjeNMV vs MelaMJNV: LOSAT=1,371, NCBI=2,668 (51.4%) ⚠️ Warning
+- MjPMNV vs MlPMNV: LOSAT=2,258, NCBI=54,402 (4.2%) 🔴 Issue
+
+**詳細統計 (NZ_CP006932 self - blastn):**
+- Alignment Length: LOSAT mean=258.0, NCBI mean=2064.3 (12.5%)
+- Bit Score: LOSAT mean=400.7, NCBI mean=3157.1 (12.7%)
+- E-value: LOSAT mean=2.82e+00, NCBI mean=2.64e-07
+- Identity: LOSAT mean=83.5%, NCBI mean=83.7%
+
+**詳細統計 (MjPMNV vs MlPMNV):**
+- Alignment Length: LOSAT mean=217.1, NCBI mean=144.8 (150.0%)
+- Bit Score: LOSAT mean=311.8, NCBI mean=122.3 (255.0%)
+- E-value: LOSAT mean=4.32e-01, NCBI mean=3.46e-01
+- Identity: LOSAT mean=87.8%, NCBI mean=80.4%
 
 **考察:**
 - Contextごとのcutoff_score計算と適用を実装
 - Per-subjectでcutoff_scoreを更新するように修正
-- しかし、ヒット数の差異は依然として大きい（特に`MjPMNV.MlPMNV.blastn`で4.2%）
+- 各queryごとの`diag_array_length`計算を実装（NCBI準拠）
+- しかし、ヒット数の差異は依然として大きい
+  - **過多**: NZ_CP006932 self (1438.1%) - 小さいヒットが多く生成されている
+  - **過少**: MjPMNV vs MlPMNV (4.2%) - 非常に少ないヒット数
+  - **過少**: PeseMJNV vs PemoMJNVB (12.0%) - 非常に少ないヒット数
+- LOSATの平均アライメント長がNCBIより短いケースが多い（小さいヒットが多い）
+- LOSATの平均bitscoreがNCBIより低いケースが多い（低スコアのヒットが多い）
 - 次のステップ: Extension実装の詳細確認が必要
+
+**修正日**: 2025-01-24
+
+### Step 2.4.1: diag_array_lengthの各queryごとの計算実装 ✅ 完了
+
+#### 実装内容
+1. **各queryごとのdiag_array_length計算**: `utils.rs:587-598`
+   - NCBI参照: `blast_extend.c:52-61, 141`
+   - NCBIは各queryごとに`diag_table`を作成（`s_BlastDiagTableNew(query_length, ...)`）
+   - LOSATは複数queryを一度に処理するため、各queryごとに`diag_array_length`と`diag_mask`を事前計算
+   - 計算式: `while (diag_array_length < (qlen + window_size)) { diag_array_length <<= 1; }`
+   - `diag_mask = diag_array_length - 1`
+
+2. **各queryごとのdiag_array_length使用**: 
+   - `diag`と`real_diag`の計算（`utils.rs:786-787, 1521-1522`）
+     - NCBI参照: `na_ungapped.c:663-664`
+     - `diag = s_off + diag_table->diag_array_length - q_off`
+     - `real_diag = diag & diag_table->diag_mask`
+     - 各queryごとの値を使用: `query_diag_lengths[q_idx]`
+   
+   - `orig_diag`の計算（`utils.rs:1096, 1667`）
+     - NCBI参照: `na_ungapped.c:688`
+     - `orig_diag = real_diag + diag_table->diag_array_length`
+     - 各queryごとの値を使用
+   
+   - `off_diag`の計算（`utils.rs:1116, 1156, 1686, 1726`）
+     - NCBI参照: `na_ungapped.c:694, 703`
+     - `off_diag = (orig_diag + delta) & diag_table->diag_mask`
+     - `off_diag = (orig_diag - delta) & diag_table->diag_mask`
+     - 各queryごとの値を使用
+
+3. **hit_level_arrayとhit_len_arrayのサイズ**:
+   - NCBI参照: `blast_extend.c:145-149`
+   - 単一queryの場合: `diag_array_length`のサイズで作成（NCBIと一致）
+   - 複数queryの場合: HashMapを使用（NCBIは各queryごとに`diag_table`を作成）
+
+#### 修正前の問題
+- 最大query lengthを使用して1つの`diag_array_length`を計算していた
+- NCBIは各queryごとに`diag_table`を作成するため、各queryごとに異なる`diag_array_length`を使用する必要がある
+
+#### 修正後の実装
+- 各queryごとに`diag_array_length`と`diag_mask`を事前計算
+- 各queryごとの値を使用して`diag`、`real_diag`、`orig_diag`、`off_diag`を計算
+- NCBI実装に完全に準拠
 
 **修正日**: 2025-01-24
 
@@ -919,6 +987,7 @@ LOSAT_BIN="../target/release/LOSAT"
 - [x] Step 2.2.1: s_off_pos定義の追加（新規） ✅ 完了 (2025-01-XX)
 - [x] Step 2.2.2: Delta計算タイミングの修正（関数の最初に移動） ✅ 完了 (2025-01-XX)
 - [x] Step 2.4: Cutoff score適用の確認 ✅ 完了 (2025-01-24)
+- [x] Step 2.4.1: diag_array_lengthの各queryごとの計算実装 ✅ 完了 (2025-01-24)
 - [ ] Step 2.5: Extension実装の確認
 
 ### Phase 3: テストと検証
@@ -1019,30 +1088,53 @@ LOSAT_BIN="../target/release/LOSAT"
 **修正日:**
 2025-01-24
 
-#### テスト結果 (Step 2.4修正後)
+#### テスト結果 (Step 2.4.1修正後 - 2025-01-24)
 
-| Test Case | LOSAT Hits | NCBI Hits | Ratio | Avg Length (LOSAT/NCBI) | Avg Bitscore (LOSAT/NCBI) | Avg Identity (LOSAT/NCBI) | Avg E-value (LOSAT/NCBI) |
-|-----------|------------|-----------|-------|-------------------------|---------------------------|----------------------------|--------------------------|
-| NZ_CP006932.NZ_CP006932.megablast | 270 | N/A | N/A | 2805.3 / N/A | 4887.3 / N/A | 87.31% / N/A | 3.78e-08 / N/A |
-| EDL933.Sakai.megablast | 1508 | 5718 | 26.4% | 4264.3 / 1438.7 | 7653.6 / 2483.4 | 92.16% / 93.23% | 3.57e-05 / 7.78e-05 |
-| Sakai.MG1655.megablast | 1202 | N/A | N/A | 3677.0 / N/A | 6348.0 / N/A | 93.66% / N/A | 2.47e-05 / N/A |
-| NZ_CP006932.NZ_CP006932.blastn | 6190 | N/A | N/A | 244.1 / N/A | 376.8 / N/A | 83.84% / N/A | 2.79e+00 / N/A |
-| PesePMNV.MjPMNV.blastn | 389 | N/A | N/A | 409.4 / N/A | 295.0 / N/A | 77.51% / N/A | 2.25e-01 / N/A |
-| MelaMJNV.PemoMJNVA.blastn | 712 | 2729 | 26.1% | 181.9 / 86.3 | 128.0 / 60.4 | 80.32% / 84.04% | 6.79e-01 / 2.37e+00 |
-| SiNMV.ChdeNMV.blastn | 1836 | N/A | N/A | 230.0 / N/A | 329.7 / N/A | 89.02% / N/A | 6.42e-01 / N/A |
-| PmeNMV.MjPMNV.blastn | 366 | N/A | N/A | 437.3 / N/A | 320.5 / N/A | 77.45% / N/A | 3.29e-01 / N/A |
-| PmeNMV.PesePMNV.blastn | 503 | N/A | N/A | 456.7 / N/A | 442.7 / N/A | 81.45% / N/A | 5.53e-01 / N/A |
-| PeseMJNV.PemoMJNVB.blastn | 1384 | N/A | N/A | 208.9 / N/A | 181.8 / N/A | 81.76% / N/A | 8.19e-01 / N/A |
-| PemoMJNVA.PeseMJNV.blastn | 1179 | N/A | N/A | 333.9 / N/A | 455.6 / N/A | 86.05% / N/A | 5.75e-01 / N/A |
-| MjeNMV.MelaMJNV.blastn | 1342 | 2668 | 50.3% | 315.9 / 252.0 | 476.8 / 290.1 | 87.14% / 84.14% | 6.88e-01 / 1.67e+00 |
-| MjPMNV.MlPMNV.blastn | 2246 | 54402 | 4.1% | 218.0 / 144.8 | 313.2 / 122.3 | 87.84% / 80.41% | 4.26e-01 / 3.46e-01 |
+**Megablast:**
+
+| Test Case | LOSAT Hits | NCBI Hits | Ratio | Status |
+|-----------|------------|-----------|-------|--------|
+| NZ_CP006932 self | 270 | N/A | - | ⚠️ No NCBI data |
+| EDL933 vs Sakai | 1,508 | N/A | - | ⚠️ No NCBI data |
+| Sakai vs MG1655 | 1,202 | N/A | - | ⚠️ No NCBI data |
+
+**Blastn:**
+
+| Test Case | LOSAT Hits | NCBI Hits | Ratio | Status | Avg Length (LOSAT/NCBI) | Avg Bitscore (LOSAT/NCBI) | Avg Identity (LOSAT/NCBI) |
+|-----------|------------|-----------|-------|--------|-------------------------|---------------------------|----------------------------|
+| NZ_CP006932 self | 6,529 | 454 | 1438.1% | 🔴 Issue | 258.0 / 2064.3 (12.5%) | 400.7 / 3157.1 (12.7%) | 83.5% / 83.7% |
+| PesePMNV vs MjPMNV | 394 | 241 | 163.5% | ⚠️ Warning | 406.5 / 771.5 (52.7%) | 292.7 / 448.6 (65.2%) | 77.5% / 79.6% |
+| MelaMJNV vs PemoMJNVA | 742 | 2,729 | 27.2% | 🔴 Issue | 177.5 / 86.3 (205.6%) | 124.5 / 60.4 (206.0%) | 80.2% / 84.0% |
+| SiNMV vs ChdeNMV | 1,852 | 4,367 | 42.4% | 🔴 Issue | 229.3 / 266.1 (86.2%) | 328.2 / 311.4 (105.4%) | 88.9% / 86.1% |
+| PmeNMV vs MjPMNV | 372 | 208 | 178.8% | ⚠️ Warning | 431.8 / 868.5 (49.7%) | 316.1 / 523.9 (60.3%) | 77.4% / 78.9% |
+| PmeNMV vs PesePMNV | 505 | 1,431 | 35.3% | 🔴 Issue | 455.0 / 287.7 (158.2%) | 441.2 / 221.5 (199.2%) | 81.5% / 77.9% |
+| PeseMJNV vs PemoMJNVB | 1,403 | 11,668 | 12.0% | 🔴 Issue | 207.1 / 118.3 (175.0%) | 179.9 / 75.0 (239.9%) | 81.7% / 82.1% |
+| PemoMJNVA vs PeseMJNV | 1,187 | 2,940 | 40.4% | 🔴 Issue | 332.7 / 291.7 (114.1%) | 453.9 / 282.5 (160.7%) | 86.1% / 82.6% |
+| MjeNMV vs MelaMJNV | 1,371 | 2,668 | 51.4% | ⚠️ Warning | 310.6 / 252.0 (123.3%) | 467.5 / 290.1 (161.2%) | 87.0% / 84.1% |
+| MjPMNV vs MlPMNV | 2,258 | 54,402 | 4.2% | 🔴 Issue | 217.1 / 144.8 (150.0%) | 311.8 / 122.3 (255.0%) | 87.8% / 80.4% |
+
+**主要な問題点:**
+
+1. **過多のヒット数**:
+   - NZ_CP006932 self (1438.1%): 小さいヒットが多く生成されている（平均長258.0 vs 2064.3）
+
+2. **過少のヒット数**:
+   - MjPMNV vs MlPMNV (4.2%): 非常に少ない（2,258 vs 54,402）
+   - PeseMJNV vs PemoMJNVB (12.0%): 非常に少ない（1,403 vs 11,668）
+   - その他複数のテストケースで50%未満
+
+3. **統計の傾向**:
+   - LOSATの平均アライメント長がNCBIより短いケースが多い（小さいヒットが多い）
+   - LOSATの平均bitscoreがNCBIより低いケースが多い（低スコアのヒットが多い）
+   - E-valueの平均がNCBIより高いケースが多い（低品質のヒットが多い）
 
 **考察:**
-- `hit_level_array`の更新タイミングをNCBI実装に合わせて修正（ungapped extension後、gapped extension前）
-- しかし、ヒット数の差異は依然として大きい（特に`MjPMNV.MlPMNV.blastn`で4.1%）
-- LOSATの平均ヒット長がNCBIより長い傾向がある（フィルタリングが不十分な可能性）
-- LOSATの平均bitscoreがNCBIより高い傾向がある（高スコアのヒットのみが残っている可能性）
-- 次のステップ: Cutoff score適用の確認とExtension実装の詳細確認が必要
+- 各queryごとの`diag_array_length`計算を実装（NCBI準拠）
+- Contextごとのcutoff_score計算と適用を実装
+- Per-subjectでcutoff_scoreを更新するように修正
+- しかし、ヒット数の差異は依然として大きい
+- 特に長い配列や類似度が低いケースで差異が大きい
+- 次のステップ: Extension実装の詳細確認が必要
 
 ## 注意事項
 
@@ -1063,9 +1155,54 @@ LOSAT_BIN="../target/release/LOSAT"
 
 ## 参考文献
 
-- NCBI BLAST source: `/mnt/c/Users/genom/GitHub/ncbi-blast/`
+- NCBI BLAST source: `/mnt/c/Users/genom/GitHub/ncbi-blast/` or `/mnt/c/Users/kawato/Documents/GitHub/ncbi-blast/`
 - Key files:
   - `c++/src/algo/blast/core/na_ungapped.c` - Extension logic
   - `c++/src/algo/blast/core/blast_parameters.c` - Cutoff calculations
+  - `c++/src/algo/blast/core/blast_extend.c` - DiagTable creation (diag_array_length calculation)
+  - `c++/src/algo/blast/core/blast_query_info.c` - Query context management
   - `c++/include/algo/blast/core/blast_options.h` - Default values
+
+## 最新の実装状況 (2025-01-24)
+
+### 完了した実装
+
+1. **Step 2.4: Cutoff score適用の確認** ✅ 完了 (2025-01-24)
+   - QueryInfo構造体の実装 (`src/algorithm/blastn/query_info.rs`)
+   - Contextごとのcutoff_score計算
+   - Per-subject cutoff_score更新
+   - NCBI参照: `blast_parameters.c:368-374`, `na_ungapped.c:730-752`
+
+2. **Step 2.4.1: diag_array_lengthの各queryごとの計算実装** ✅ 完了 (2025-01-24)
+   - 各queryごとの`diag_array_length`と`diag_mask`の事前計算
+   - 各queryごとの値を使用した`diag`、`real_diag`、`orig_diag`、`off_diag`の計算
+   - NCBI参照: `blast_extend.c:52-61, 141`, `na_ungapped.c:663-664, 688, 694, 703`
+   - 「for efficiency」コメントを削除し、NCBI実装に完全準拠
+
+### 残っている問題
+
+1. **ヒット数の大きな差異**:
+   - **過多**: NZ_CP006932 self (1438.1%) - 小さいヒットが多く生成
+   - **過少**: MjPMNV vs MlPMNV (4.2%), PeseMJNV vs PemoMJNVB (12.0%) など
+   - 多くのテストケースで50%未満のヒット数
+
+2. **統計の傾向**:
+   - LOSATの平均アライメント長がNCBIより短い（小さいヒットが多い）
+   - LOSATの平均bitscoreがNCBIより低い（低スコアのヒットが多い）
+   - E-valueの平均がNCBIより高い（低品質のヒットが多い）
+
+### 次のステップ
+
+1. **Extension実装の詳細確認**:
+   - Ungapped extensionの実装確認
+   - Gapped extensionの実装確認
+   - X-drop termination条件の確認
+
+2. **Cutoff score適用条件の再確認**:
+   - `off_found`フラグの設定タイミング
+   - Cutoff score適用の条件分岐
+
+3. **フィルタリング条件の確認**:
+   - 過剰なフィルタリングがないか
+   - 不足しているフィルタリングがないか
 

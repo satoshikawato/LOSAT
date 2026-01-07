@@ -680,22 +680,32 @@ pub fn apply_sum_stats_even_gap_linking(
         frame_groups.push(current_group);
     }
     
-    // Step 3: Process each frame group IN PARALLEL
-    // NCBI reference: link_hsps.c:553-702
-    // NCBI processes frame groups sequentially, but each group is independent:
+    // Step 3: Process each frame group IN PARALLEL (with order preservation)
+    // NCBI reference: link_hsps.c:553-983
+    // NCBI processes frame groups sequentially:
     //   for (frame_index=0; frame_index<num_query_frames; frame_index++)
     //   {
+    //       hp_start->next = hp_frame_start[frame_index];
+    //       number_of_hsps = hp_frame_number[frame_index];
     //       // Each iteration uses: hp_frame_start[frame_index], hp_frame_number[frame_index]
     //       // Local variables: hp_start, lh_helper, max, best (no shared state)
     //       // Process group independently
     //   }
+    // NCBI processes groups in frame_index order (0, 1, 2, ...), which matches
+    // the order of frame_groups in LOSAT (created from sorted HSP list).
+    //
     // LOSAT parallelizes this loop for performance while maintaining output equivalence.
     // Each frame group is processed independently with no shared mutable state.
-    // Final sorting (NCBI order) ensures identical output regardless of processing order.
-    let results: Vec<UngappedHit> = frame_groups
+    // To preserve NCBI order, we:
+    //   1. Use enumerate() to track group index
+    //   2. Process groups in parallel with map()
+    //   3. Sort results by group index
+    //   4. Flatten to final Vec<UngappedHit>
+    let mut indexed_results: Vec<(usize, Vec<UngappedHit>)> = frame_groups
         .into_par_iter()
-        .flat_map(|group_hits| {
-            link_hsp_group_ncbi(
+        .enumerate()
+        .map(|(group_idx, group_hits)| {
+            let processed = link_hsp_group_ncbi(
                 group_hits,
                 params,
                 &cutoffs,
@@ -706,8 +716,19 @@ pub fn apply_sum_stats_even_gap_linking(
                 subject_frame_bases,
                 length_adj_per_context,
                 eff_searchsp_per_context,
-            )
+            );
+            (group_idx, processed)
         })
+        .collect();
+    
+    // Sort by group index to preserve NCBI processing order
+    // NCBI: for (frame_index=0; frame_index<num_query_frames; frame_index++)
+    indexed_results.sort_by_key(|(idx, _)| *idx);
+    
+    // Flatten results while maintaining order
+    let results: Vec<UngappedHit> = indexed_results
+        .into_iter()
+        .flat_map(|(_, hits)| hits)
         .collect();
     
     results

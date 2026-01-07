@@ -1,7 +1,7 @@
 # TBLASTX NCBI Parity Status Report
 
 **作成日時**: 2026-01-03  
-**更新日時**: 2026-01-06 (Karlinパラメータ使用に関するコメント修正、パラメータ名明確化)  
+**更新日時**: 2026-01-06 (Frame Group 並列化実装、順序保持対応)  
 **現象**: LOSATが長い配列 (600kb+) でNCBI BLAST+より多くのヒットを出力  
 **目標**: 出力を1ビットの狂いもなく一致させる
 
@@ -41,7 +41,63 @@
   - `gap_prob` / `(1 - gap_prob)` 適用 (num > 1 の場合) ✅
   - `cutoff_small_gap` / `cutoff_big_gap` 計算 (NCBI `CalculateLinkHSPCutoffs` ポート) ✅
   - E-valueのチェイン全体への適用 ✅
+  - **Frame Group 並列化 (順序保持)** ✅ (2026-01-06 追加)
 - **ファイル**: `sum_stats_linking.rs`
+
+### 1.3.1 Frame Group 並列化 (順序保持)
+- **状態**: ✅ 完了
+- **実装日**: 2026-01-06
+- **問題点**: 
+  - 旧実装は `into_par_iter().flat_map()` を使用していたが、`flat_map` は並列実行時に順序を保持しない
+  - NCBI は `for (frame_index=0; frame_index<num_query_frames; frame_index++)` で順次処理するため、出力順序が重要
+- **NCBI参照**: `link_hsps.c:553-983`
+  ```c
+  for (frame_index=0; frame_index<num_query_frames; frame_index++)
+  {
+      hp_start->next = hp_frame_start[frame_index];
+      number_of_hsps = hp_frame_number[frame_index];
+      // Each iteration uses: hp_frame_start[frame_index], hp_frame_number[frame_index]
+      // Local variables: hp_start, lh_helper, max, best (no shared state)
+      // Process group independently
+  }
+  ```
+- **実装内容**:
+  - `enumerate()` でグループインデックスを保持
+  - `map()` で各グループを並列処理
+  - 処理結果を `(group_index, processed_hits)` タプルで保持
+  - `collect()` 後にインデックス順にソート
+  - ソート後にフラット化して最終結果を生成
+- **実装コード** (`sum_stats_linking.rs:683-734`):
+  ```rust
+  // Step 3: Process each frame group IN PARALLEL (with order preservation)
+  let mut indexed_results: Vec<(usize, Vec<UngappedHit>)> = frame_groups
+      .into_par_iter()
+      .enumerate()
+      .map(|(group_idx, group_hits)| {
+          let processed = link_hsp_group_ncbi(...);
+          (group_idx, processed)
+      })
+      .collect();
+  
+  // Sort by group index to preserve NCBI processing order
+  indexed_results.sort_by_key(|(idx, _)| *idx);
+  
+  // Flatten results while maintaining order
+  let results: Vec<UngappedHit> = indexed_results
+      .into_iter()
+      .flat_map(|(_, hits)| hits)
+      .collect();
+  ```
+- **独立性の確認**:
+  - 各フレームグループは独立に処理可能（共有される可変状態なし）
+  - `link_hsp_group_ncbi()` は `&LinkHspCutoffs` (不変参照) のみ共有
+  - 各グループのローカル変数 (`hsp_links`, `lh_helpers`, `best`, `max`) は独立
+- **検証結果**:
+  - AP027280 (n1, n8): LOSAT 42,797 vs NCBI 42,733 (差: +64, **0.15%**) ✅
+  - E-value範囲: 0.00e+00..9.40e+00 (NCBIと一致) ✅
+  - Bitscore範囲: 22.1..6206.0 (NCBIと一致) ✅
+  - 並列化前後で出力順序が一致することを確認 ✅
+- **ファイル**: `sum_stats_linking.rs:683-734`
 
 ### 1.4 X-drop 動的計算
 - **状態**: ✅ 完了

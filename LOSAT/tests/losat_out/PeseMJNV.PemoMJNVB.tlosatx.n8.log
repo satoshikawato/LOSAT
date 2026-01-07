@@ -6,6 +6,6 @@
 [DEBUG OUTPUT_FILTER] Expected after E-value filter: 44899 (all HSPs - E-value filtered)
 [DEBUG OUTPUT_FILTER] Final hits after filtering: 44899
 
-real	0m17.603s
-user	0m36.319s
-sys	0m0.010s
+real	0m16.169s
+user	0m31.726s
+sys	0m0.031s

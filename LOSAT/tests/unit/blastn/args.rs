@@ -37,7 +37,6 @@ fn test_default_values() {
     assert_eq!(args.dust_window, 64);
     assert_eq!(args.dust_linker, 1);
     assert_eq!(args.verbose, false);
-    assert_eq!(args.chain, false);
     assert_eq!(args.scan_step, 0);
 }
 
@@ -107,12 +106,6 @@ fn test_dust_options() {
 fn test_verbose_flag() {
     let args = parse_args(&[ "-q", "query.fasta", "-s", "subject.fasta", "-v"]);
     assert_eq!(args.verbose, true);
-}
-
-#[test]
-fn test_chain_flag() {
-    let args = parse_args(&[ "-q", "query.fasta", "-s", "subject.fasta", "--chain"]);
-    assert_eq!(args.chain, true);
 }
 
 #[test]

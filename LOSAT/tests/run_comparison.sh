@@ -70,7 +70,7 @@ echo "Starting AP027078 vs AP027131..."
 (time $LOSAT_BIN tblastx -q ./fasta/AP027078.fasta -s ./fasta/AP027131.fasta -o ./losat_out/AP027078.AP027131.tlosatx.n1.out --query-gencode 4 --db-gencode 4 -n 1 )&>./losat_out/AP027078.AP027131.tlosatx.n1.log 
 echo "Starting AP027131 vs AP027133..."
 # AP027131 vs AP027133
-(time $LOSAT_BIN tblastx -q ./fasta/AP027131.fasta -s ./fasta/AP027133.fasta -o ./losat_out/AP027131.AP027133.tlosatx.n1.out --query-gencode 4 --db-gencode 4 -n 1 )&>./losat_out/AP027131.AP027133.tlosatx.n1.log 
+(time $LOSAT_BIN tblastx -q ./fasta/AP027131.fasta -s ./fasta/AP027133.fasta -o ./losat_out/AP027131.AP027133.tlosatx.n1.out --query-gencode 4 --db-gencode 4 -n 8 )&>./losat_out/AP027131.AP027133.tlosatx.n8.log 
 echo "Starting AP027133 vs AP027132..."
 # AP027133 vs AP027132
 (time $LOSAT_BIN tblastx -q ./fasta/AP027133.fasta -s ./fasta/AP027132.fasta -o ./losat_out/AP027133.AP027132.tlosatx.n1.out --query-gencode 4 --db-gencode 4 -n 1 )&>./losat_out/AP027133.AP027132.tlosatx.n1.log 

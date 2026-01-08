@@ -48,7 +48,8 @@
       "Bash(LOSAT_USE_NEIGHBOR_MAP=1 ./target/release/LOSAT:*)",
       "Bash(cargo test:*)",
       "Bash(tree:*)",
-      "Bash(find:*)"
+      "Bash(find:*)",
+      "Bash(cargo clippy:*)"
     ]
   }
 }

@@ -1,6 +1,7 @@
 //! Unit tests for blastn/constants.rs
 
 use LOSAT::algorithm::blastn::constants::*;
+use LOSAT::seed::aa_word_finder::MAX_HITS_PER_KMER;
 
 #[test]
 fn test_x_drop_constants() {
@@ -11,9 +12,8 @@ fn test_x_drop_constants() {
 
 #[test]
 fn test_two_hit_window() {
-    // TWO_HIT_WINDOW should be a reasonable value for two-hit extension
-    assert!(TWO_HIT_WINDOW > 0);
-    assert_eq!(TWO_HIT_WINDOW, 64);
+    // TWO_HIT_WINDOW is 0 for one-hit mode (NCBI BLAST default for megablast)
+    assert_eq!(TWO_HIT_WINDOW, 0);
 }
 
 #[test]

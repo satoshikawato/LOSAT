@@ -44,7 +44,8 @@
       "Bash(head -1 done echo \"\" echo \"=== NCBI-only hits \\(sample with scores\\) ===\" comm -13 /tmp/losat_coords.txt /tmp/ncbi_coords.txt head -5 /tmp/ncbi_only.txt)",
       "Bash(tee:*)",
       "Bash(awk:*)",
-      "Bash(LOSAT_DIAGNOSTICS=1 LOSAT_NO_SIMD=1 ./target/release/LOSAT:*)"
+      "Bash(LOSAT_DIAGNOSTICS=1 LOSAT_NO_SIMD=1 ./target/release/LOSAT:*)",
+      "Bash(LOSAT_USE_NEIGHBOR_MAP=1 ./target/release/LOSAT:*)"
     ]
   }
 }

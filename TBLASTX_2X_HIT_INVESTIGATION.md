@@ -259,6 +259,58 @@ Key metrics:
 
 ---
 
+## CHANGES MADE (2026-01-08 Session 6)
+
+### 3. Per-Subject Diagonal Array Reset
+
+**File:** `utils.rs:1637-1655`
+
+**Change:** Reset diagonal array for EACH subject sequence to match NCBI's Blast_ExtendWordNew behavior.
+
+**NCBI behavior:** Creates a new ewp (diagonal table) for each subject via calloc (zeros all entries).
+
+**LOSAT now matches:**
+```rust
+// Reset diagonal state for each subject to match NCBI behavior:
+for d in st.diag_array.iter_mut() {
+    *d = DiagStruct::default();
+}
+st.diag_offset = window;
+```
+
+**Result:** No change in hit count. Still 29,756 vs 14,877 = 2.0x
+
+### 4. Per-Frame init_hsps Reset
+
+**File:** `utils.rs:1787-1789, 2135-2150`
+
+**Change:** Reset init_hsps between subject frames to match NCBI's BlastInitHitListReset behavior.
+
+**NCBI behavior:**
+- blast_engine.c:491 calls `BlastInitHitListReset(init_hitlist)` before each frame
+- blast_engine.c:561-584 calls `BLAST_GetUngappedHSPList` per-frame, then `Blast_HSPListsMerge`
+
+**LOSAT now matches:**
+```rust
+for (s_f_idx, s_frame) in s_frames.iter().enumerate() {
+    // NCBI: BlastInitHitListReset(init_hitlist) - reset per-frame
+    let mut init_hsps: Vec<InitHSP> = Vec::new();
+
+    // ... two-hit detection and extension ...
+
+    // NCBI: BLAST_GetUngappedHSPList - per-frame conversion
+    if !init_hsps.is_empty() {
+        let frame_ungapped_hits = get_ungapped_hsp_list(init_hsps, ...);
+        // NCBI: Blast_HSPListsMerge - merge per-frame results
+        combined_ungapped_hits.extend(frame_ungapped_hits);
+    }
+}
+```
+
+**Result:** No change in hit count. Still 29,756 vs 14,877 = 2.0x
+
+---
+
 ## ROOT CAUSE HYPOTHESIS (Updated)
 
 The excess is in LOW-SCORE HSPs (0-30 bits), not high-score ones. This suggests:
@@ -268,13 +320,22 @@ The excess is in LOW-SCORE HSPs (0-30 bits), not high-score ones. This suggests:
 3. **Different E-value/filtering for low-score HSPs** - Though E-values look similar
 4. **Different sum-statistics linking** - Chain formation may differ for low-score HSPs
 
+### Verified NOT the cause:
+- Per-subject diagonal array reset (now matches NCBI)
+- Per-frame init_hsps reset (now matches NCBI)
+- Neighbor word expansion (now matches NCBI)
+- Flag update condition (now matches NCBI)
+
+The 2x issue persists despite matching all verified NCBI behaviors. The root cause is still unknown.
+
 ## Next Investigation Steps
 
 1. **Compare extension scores** - Same (q_start, s_start) should produce same raw score
 2. **Check for chain-related duplicates** - Low-score HSPs may be fragments of chains
 3. **Compare X-drop termination** - Different x-drop could produce different HSP lengths
 4. **Focus on 20-30 bit score range** - This is where the biggest ratio difference is
+5. **Compare two-hit trigger rates** - Verify same seeds trigger two-hit detection
 
 ---
 
-*Last updated: 2026-01-08 (Session 4)*
+*Last updated: 2026-01-08 (Session 6)*

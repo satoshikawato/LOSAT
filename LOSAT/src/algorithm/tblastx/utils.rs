@@ -1634,19 +1634,16 @@ pub fn run(args: TblastxArgs) -> Result<()> {
             diag_offset: window,
         },
         |st, (s_idx, s_rec)| {
-            // NCBI: Creates ewp (diagonal table) ONCE per query via BlastExtendWordNew
-            // (blast_engine.c:1002) and reuses it across ALL subjects.
-            // The diagonal state persists - NO per-subject reset in NCBI.
-            // Reference: blast_extend.c:109-180 (BlastExtendWordNew)
+            // NCBI: Creates ewp (diagonal table) ONCE per SUBJECT via BlastExtendWordNew
+            // (blast_engine.c:1002). Each subject sequence gets a fresh diagonal array.
+            // Reference: blast_extend.c:109-180 (BlastExtendWordNew) allocates with calloc,
+            // which zeros all entries. The diag_offset is initialized to window.
             //
-            // COMMENTED OUT per-subject reset to match NCBI behavior:
-            // for d in st.diag_array.iter_mut() {
-            //     d.last_hit = 0;
-            //     d.flag = 0;
-            // }
-            // st.diag_offset = window;
-
-            // Use existing diagonal state from WorkerState (initialized once per worker)
+            // Reset diagonal state for each subject to match NCBI behavior:
+            for d in st.diag_array.iter_mut() {
+                *d = DiagStruct::default();
+            }
+            st.diag_offset = window;
 
             let mut s_frames = generate_frames(s_rec.seq(), &db_code);
             if let Some(f) = only_sframe {
@@ -1667,7 +1664,7 @@ pub fn run(args: TblastxArgs) -> Result<()> {
             // [C] DiagStruct *diag_array = diag->hit_level_array;
             let diag_array = &mut st.diag_array;
 
-            // [C] diag_offset = diag->offset;  (per-thread, reused across subjects)
+            // [C] diag_offset = diag->offset;  (reset to window per-subject)
             let mut diag_offset: i32 = st.diag_offset;
 
             // Precompute per-context cutoff scores using NCBI BLAST algorithm.
@@ -1770,10 +1767,10 @@ pub fn run(args: TblastxArgs) -> Result<()> {
                 cutoff_score_min = 0;
             }
 
-            // NCBI: BlastSaveInitHsp equivalent - store initial HSPs with absolute coordinates
-            // Reference: blast_extend.c:360-375 BlastSaveInitHsp
-            let mut init_hsps: Vec<InitHSP> = Vec::new();
-            
+            // NCBI: Each subject frame gets its own init_hitlist that is reset between frames.
+            // Reference: blast_engine.c:491 BlastInitHitListReset(init_hitlist)
+            // After each frame, init_hsps are converted and merged into combined_ungapped_hits.
+
             // Statistics for HSP saving analysis (long sequences only)
             let is_long_sequence = subject_len_nucl > 600_000;
             let mut stats_hsp_saved = 0usize;
@@ -1782,11 +1779,19 @@ pub fn run(args: TblastxArgs) -> Result<()> {
             let mut stats_hsp_filtered_by_hsp_test = 0usize;
             let mut stats_score_distribution: Vec<i32> = Vec::new();
 
+            // NCBI: Combined HSP list across all subject frames
+            // Reference: blast_engine.c:438 BlastHSPList* combined_hsp_list
+            let mut combined_ungapped_hits: Vec<UngappedHit> = Vec::new();
+
             for (s_f_idx, s_frame) in s_frames.iter().enumerate() {
+                // NCBI: BlastInitHitListReset(init_hitlist) - reset per-frame
+                // Reference: blast_engine.c:491
+                let mut init_hsps: Vec<InitHSP> = Vec::new();
+
                 // NCBI: Diagonal state is NOT reset between subject frames.
                 // NCBI shares ewp (diag_table) across all 6 subject frame iterations.
                 // Reference: blast_engine.c:805-855
-                // The per-subject reset (above, line ~1625) matches NCBI's Blast_ExtendWordNew calloc.
+                // The per-subject reset (above, line ~1646) matches NCBI's Blast_ExtendWordNew calloc.
                 // Blast_ExtendWordExit at the end of this loop increments diag_offset.
 
                 let subject = &s_frame.aa_seq;
@@ -1998,12 +2003,17 @@ pub fn run(args: TblastxArgs) -> Result<()> {
                                 }
                             }
 
-                            // [C] if (score >= cutoffs->cutoff_score)
-                            // NCBI sets flag=1 based on SCORE, not whether right extension happened
-                            // Reference: aa_ungapped.c:575-591
-                            if score >= cutoff {
-                                // [C] diag_array[diag_coord].flag = 1;
-                                // [C] diag_array[diag_coord].last_hit = s_last_off - (wordsize - 1) + diag_offset;
+                            // NCBI: Update diagonal state based on right_extend
+                            // Reference: aa_ungapped.c:596-606
+                            // if (right_extend) {
+                            //     diag_array[diag_coord].flag = 1;
+                            //     diag_array[diag_coord].last_hit = s_last_off - (wordsize - 1) + diag_offset;
+                            // } else {
+                            //     diag_array[diag_coord].last_hit = subject_offset + diag_offset;
+                            // }
+                            if right_extend {
+                                // "If an extension to the right happened, reset the last hit
+                                //  so that future hits to this diagonal must start over."
                                 diag_entry.flag = 1;
                                 diag_entry.last_hit =
                                     s_last_off - (wordsize - 1) + diag_offset;
@@ -2014,7 +2024,7 @@ pub fn run(args: TblastxArgs) -> Result<()> {
                                         .fetch_add(1, AtomicOrdering::Relaxed);
                                 }
                             } else {
-                                // [C] diag_array[diag_coord].last_hit = subject_offset + diag_offset;
+                                // "Otherwise, make the present hit into the previous hit for this diagonal"
                                 diag_entry.last_hit = subject_offset + diag_offset;
                             }
 
@@ -2126,34 +2136,41 @@ pub fn run(args: TblastxArgs) -> Result<()> {
                 } else {
                     diag_offset += s_aa_len as i32 + window;
                 }
-            }
 
-                // NCBI: BLAST_GetUngappedHSPList equivalent
-                // Reference: blast_gapalign.c:4719-4775
-                // Convert InitHSPs (with absolute coordinates) to UngappedHits (with context-relative coordinates)
-                let ungapped_hits = get_ungapped_hsp_list(
-                    init_hsps,
-                    contexts_ref,
-                    &s_frames,
-                );
-                
-                // NCBI: Blast_HSPListReevaluateUngapped equivalent
-                // Reference: blast_engine.c:1492-1497, blast_hits.c:2609-2737
-                // Perform batch reevaluation on all HSPs
-                let ungapped_hits = reevaluate_ungapped_hsp_list(
-                    ungapped_hits,
-                    contexts_ref,
-                    &s_frames,
-                    &cutoff_scores,
-                    &args,
-                    timing_enabled,
-                    &reeval_ns,
-                    &reeval_calls,
-                    is_long_sequence,
-                    &mut stats_hsp_filtered_by_reeval,
-                );
-                
-                if !ungapped_hits.is_empty() {
+                // NCBI: BLAST_GetUngappedHSPList equivalent - per-frame conversion
+                // Reference: blast_engine.c:561-562
+                // BLAST_GetUngappedHSPList(init_hitlist, query_info, subject,
+                //         hit_params->options, &hsp_list);
+                if !init_hsps.is_empty() {
+                    let frame_ungapped_hits = get_ungapped_hsp_list(
+                        init_hsps,
+                        contexts_ref,
+                        &s_frames,
+                    );
+
+                    // NCBI: Blast_HSPListsMerge - merge per-frame results
+                    // Reference: blast_engine.c:581-584
+                    combined_ungapped_hits.extend(frame_ungapped_hits);
+                }
+            } // End of subject frame loop
+
+            // NCBI: Blast_HSPListReevaluateUngapped equivalent
+            // Reference: blast_engine.c:1492-1497, blast_hits.c:2609-2737
+            // Perform batch reevaluation on all HSPs after merging all frames
+            let ungapped_hits = reevaluate_ungapped_hsp_list(
+                combined_ungapped_hits,
+                contexts_ref,
+                &s_frames,
+                &cutoff_scores,
+                &args,
+                timing_enabled,
+                &reeval_ns,
+                &reeval_calls,
+                is_long_sequence,
+                &mut stats_hsp_filtered_by_reeval,
+            );
+
+            if !ungapped_hits.is_empty() {
                     // DEBUG: Print HSP statistics for long sequences
                     if is_long_sequence {
                         eprintln!("[DEBUG HSP_STATS] After reevaluation: {} HSPs", ungapped_hits.len());

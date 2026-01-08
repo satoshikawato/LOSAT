@@ -321,12 +321,25 @@ The excess is in LOW-SCORE HSPs (0-30 bits), not high-score ones. This suggests:
 4. **Different sum-statistics linking** - Chain formation may differ for low-score HSPs
 
 ### Verified NOT the cause:
-- Per-subject diagonal array reset (now matches NCBI)
-- Per-frame init_hsps reset (now matches NCBI)
-- Neighbor word expansion (now matches NCBI)
-- Flag update condition (now matches NCBI)
+- Per-subject diagonal array reset (now matches NCBI) - tested, no change
+- Per-frame init_hsps reset (now matches NCBI) - tested, no change
+- Neighbor word expansion (now matches NCBI) - tested, no change
+- Flag update condition (reverted to `right_extend`) - tested, no change
+- Separate diagonal arrays per query context (neighbor_map mode) - tested, same 29,766 hits
+- Window size variation (tested window=50) - tested, same ~2x ratio
+- Wordsize check (`diff < wordsize`) - verified identical to NCBI
+- Diff calculation (`subject_offset - last_hit`) - verified identical to NCBI
+- Initial diagonal state (calloc zeros) - verified identical to NCBI
+- Cutoff score calculation - both use 41 raw score → ~22 bit minimum
 
 The 2x issue persists despite matching all verified NCBI behaviors. The root cause is still unknown.
+
+### Key Observations:
+1. Short sequences (125kb): 23,766 vs 23,715 = **1.002x** (near parity)
+2. Long sequences (600kb): 29,766 vs 14,877 = **2.0x** (double)
+3. The difference scales with sequence length
+4. Minimum bit score is identical (22.1) in both outputs
+5. The excess is concentrated in 22-30 bit score range
 
 ## Next Investigation Steps
 
@@ -337,5 +350,20 @@ The 2x issue persists despite matching all verified NCBI behaviors. The root cau
 5. **Compare two-hit trigger rates** - Verify same seeds trigger two-hit detection
 
 ---
+
+### Additional Verifications (Session 6 continued):
+- HSP test filter (percent_identity, min_hit_length) - both use defaults (0.0, 0) = disabled
+- LOSAT has Blast_HSPTest equivalent in reevaluate.rs:638
+- No duplicate HSPs in output (all coordinate tuples unique)
+- Score distribution comparison shows excess concentrated in 22-30 bit range
+
+### Summary:
+The 2x hit count excess for long sequences remains unexplained despite:
+1. All verified algorithm components matching NCBI exactly
+2. Short sequences having near-parity (1.002x)
+3. Same minimum bit scores (22.1) in both outputs
+4. No obvious code differences in two-hit detection or extension
+
+The issue must be in some subtle interaction that scales with sequence length, but the exact mechanism is not yet identified.
 
 *Last updated: 2026-01-08 (Session 6)*

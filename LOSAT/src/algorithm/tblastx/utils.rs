@@ -7,6 +7,7 @@ use anyhow::{Context, Result};
 use bio::io::fasta;
 use indicatif::{ProgressBar, ProgressStyle};
 use rayon::prelude::*;
+use std::collections::HashSet;
 use std::sync::atomic::{AtomicI32, AtomicU64, AtomicUsize, Ordering as AtomicOrdering};
 use std::sync::mpsc::channel;
 use std::sync::OnceLock;
@@ -53,8 +54,18 @@ struct DiagStruct {
     flag: u8,
 }
 impl Default for DiagStruct {
+    // NCBI: calloc zeros memory for initial allocation
     fn default() -> Self {
         Self { last_hit: 0, flag: 0 }
+    }
+}
+impl DiagStruct {
+    // NCBI s_BlastDiagClear (blast_extend.c:101-103):
+    //   diag_struct_array[i].flag = 0;
+    //   diag_struct_array[i].last_hit = -diag->window;
+    #[inline]
+    fn clear(window: i32) -> Self {
+        Self { last_hit: -window, flag: 0 }
     }
 }
 
@@ -847,8 +858,9 @@ fn s_blast_aa_scan_subject(
     let mut totalhits: i32 = 0;
 
     // Precompute CPU feature flags once per scan call.
+    // Use LOSAT_NO_SIMD=1 to force scalar-only processing for debugging
     #[cfg(target_arch = "x86_64")]
-    let has_avx2 = is_x86_feature_detected!("avx2");
+    let has_avx2 = is_x86_feature_detected!("avx2") && std::env::var("LOSAT_NO_SIMD").is_err();
     #[cfg(not(target_arch = "x86_64"))]
     let has_avx2 = false;
 
@@ -1473,10 +1485,18 @@ pub fn run(args: TblastxArgs) -> Result<()> {
     // For tblastx, all contexts use kbp_ideal (BLOSUM62 ungapped Lambda = 0.3176),
     // so x_dropoff = ceil(7.0 * LN2 / 0.3176) = 16 for all contexts.
     // We maintain per-context structure for NCBI parity.
-    let x_dropoff_per_context: Vec<i32> = contexts
-        .iter()
-        .map(|_| x_drop_raw_score(X_DROP_UNGAPPED_BITS, &ungapped_params_for_xdrop, 1.0))
-        .collect();
+    //
+    // NCBI BLAST dynamic x_dropoff (blast_parameters.c:380-383):
+    //   if (curr_cutoffs->x_dropoff_init == 0)
+    //      curr_cutoffs->x_dropoff = new_cutoff;  // x_dropoff = cutoff_score
+    //   else
+    //      curr_cutoffs->x_dropoff = curr_cutoffs->x_dropoff_init;
+    //
+    // For TBLASTX, x_dropoff_init = 16 (not 0), so this dynamic update is not triggered.
+    // However, we store x_dropoff_init here and apply the logic during subject processing
+    // where cutoff_score is available.
+    let x_dropoff_init = x_drop_raw_score(X_DROP_UNGAPPED_BITS, &ungapped_params_for_xdrop, 1.0);
+    let x_dropoff_per_context: Vec<i32> = vec![x_dropoff_init; contexts.len()];
 
     let t_phase_read_subjects = Instant::now();
     if args.verbose {
@@ -1586,6 +1606,10 @@ pub fn run(args: TblastxArgs) -> Result<()> {
     // `query_length` here is the concatenated translated query buffer length
     // (frames share a boundary sentinel). In LOSAT this equals the end offset
     // of the last query context buffer.
+    // NCBI BLAST diag array sizing:
+    // diag_array_length = next_power_of_2(qlen + window_size)
+    // For tblastx, qlen = total concatenated query buffer (all 6 frames)
+    // Source: ncbi-blast/c++/src/algo/blast/core/blast_extend.c:52-61
     let query_length: i32 = contexts
         .last()
         .map(|c| c.frame_base + (c.aa_seq.len() as i32 - 1))
@@ -1618,6 +1642,17 @@ pub fn run(args: TblastxArgs) -> Result<()> {
             diag_offset: window,
         },
         |st, (s_idx, s_rec)| {
+            // NCBI: Creates ewp (diagonal table) ONCE per SUBJECT via BlastExtendWordNew
+            // (blast_engine.c:1002). Each subject sequence gets a fresh diagonal array.
+            // Reference: blast_extend.c:109-180 (BlastExtendWordNew) allocates with calloc,
+            // which zeros all entries. The diag_offset is initialized to window.
+            //
+            // Reset diagonal state for each subject to match NCBI behavior:
+            for d in st.diag_array.iter_mut() {
+                *d = DiagStruct::default();
+            }
+            st.diag_offset = window;
+
             let mut s_frames = generate_frames(s_rec.seq(), &db_code);
             if let Some(f) = only_sframe {
                 s_frames.retain(|x| x.frame == f);
@@ -1637,7 +1672,7 @@ pub fn run(args: TblastxArgs) -> Result<()> {
             // [C] DiagStruct *diag_array = diag->hit_level_array;
             let diag_array = &mut st.diag_array;
 
-            // [C] diag_offset = diag->offset;  (per-thread, reused across subjects)
+            // [C] diag_offset = diag->offset;  (reset to window per-subject)
             let mut diag_offset: i32 = st.diag_offset;
 
             // Precompute per-context cutoff scores using NCBI BLAST algorithm.
@@ -1740,10 +1775,10 @@ pub fn run(args: TblastxArgs) -> Result<()> {
                 cutoff_score_min = 0;
             }
 
-            // NCBI: BlastSaveInitHsp equivalent - store initial HSPs with absolute coordinates
-            // Reference: blast_extend.c:360-375 BlastSaveInitHsp
-            let mut init_hsps: Vec<InitHSP> = Vec::new();
-            
+            // NCBI: Each subject frame gets its own init_hitlist that is reset between frames.
+            // Reference: blast_engine.c:491 BlastInitHitListReset(init_hitlist)
+            // After each frame, init_hsps are converted and merged into combined_ungapped_hits.
+
             // Statistics for HSP saving analysis (long sequences only)
             let is_long_sequence = subject_len_nucl > 600_000;
             let mut stats_hsp_saved = 0usize;
@@ -1752,7 +1787,21 @@ pub fn run(args: TblastxArgs) -> Result<()> {
             let mut stats_hsp_filtered_by_hsp_test = 0usize;
             let mut stats_score_distribution: Vec<i32> = Vec::new();
 
+            // NCBI: Combined HSP list across all subject frames
+            // Reference: blast_engine.c:438 BlastHSPList* combined_hsp_list
+            let mut combined_ungapped_hits: Vec<UngappedHit> = Vec::new();
+
             for (s_f_idx, s_frame) in s_frames.iter().enumerate() {
+                // NCBI: BlastInitHitListReset(init_hitlist) - reset per-frame
+                // Reference: blast_engine.c:491
+                let mut init_hsps: Vec<InitHSP> = Vec::new();
+
+                // NCBI: Diagonal state is NOT reset between subject frames.
+                // NCBI shares ewp (diag_table) across all 6 subject frame iterations.
+                // Reference: blast_engine.c:805-855
+                // The per-subject reset (above, line ~1646) matches NCBI's Blast_ExtendWordNew calloc.
+                // Blast_ExtendWordExit at the end of this loop increments diag_offset.
+
                 let subject = &s_frame.aa_seq;
                 let s_aa_len = s_frame.aa_len;
                 if subject.len() < 5 {
@@ -1785,6 +1834,23 @@ pub fn run(args: TblastxArgs) -> Result<()> {
                             .base
                             .kmer_matches
                             .fetch_add(hits as usize, AtomicOrdering::Relaxed);
+
+                        // DEBUG: Check for duplicate offset pairs in scan output
+                        if is_long_sequence {
+                            let mut seen: HashSet<(i32, i32)> = HashSet::with_capacity(hits as usize);
+                            let mut duplicate_count = 0usize;
+                            for i in 0..hits as usize {
+                                let pair = unsafe { &*offset_pairs.as_ptr().add(i) };
+                                if !seen.insert((pair.q_off, pair.s_off)) {
+                                    duplicate_count += 1;
+                                }
+                            }
+                            if duplicate_count > 0 {
+                                eprintln!("[DEBUG SCAN_DUPES] s_f_idx={} scan_range=[{},{}] hits={} duplicates={} ({:.2}%)",
+                                    s_f_idx, prev_scan_left, scan_range[1], hits, duplicate_count,
+                                    (duplicate_count as f64 / hits as f64) * 100.0);
+                            }
+                        }
                     }
 
                     if hits == 0 && scan_range[1] == prev_scan_left {
@@ -1866,6 +1932,12 @@ pub fn run(args: TblastxArgs) -> Result<()> {
 
                             // [C] if (query_offset - diff < query_info->contexts[curr_context].query_offset)
                             if query_offset - diff < ctx.frame_base {
+                                if diag_enabled {
+                                    diagnostics
+                                        .base
+                                        .seeds_ctx_boundary_fail
+                                        .fetch_add(1, AtomicOrdering::Relaxed);
+                                }
                                 diag_entry.last_hit = subject_offset + diag_offset;
                                 continue;
                             }
@@ -1939,10 +2011,17 @@ pub fn run(args: TblastxArgs) -> Result<()> {
                                 }
                             }
 
-                            // [C] if (right_extend)
+                            // NCBI: Update diagonal state based on right_extend
+                            // Reference: aa_ungapped.c:596-606
+                            // if (right_extend) {
+                            //     diag_array[diag_coord].flag = 1;
+                            //     diag_array[diag_coord].last_hit = s_last_off - (wordsize - 1) + diag_offset;
+                            // } else {
+                            //     diag_array[diag_coord].last_hit = subject_offset + diag_offset;
+                            // }
                             if right_extend {
-                                // [C] diag_array[diag_coord].flag = 1;
-                                // [C] diag_array[diag_coord].last_hit = s_last_off - (wordsize - 1) + diag_offset;
+                                // "If an extension to the right happened, reset the last hit
+                                //  so that future hits to this diagonal must start over."
                                 diag_entry.flag = 1;
                                 diag_entry.last_hit =
                                     s_last_off - (wordsize - 1) + diag_offset;
@@ -1953,7 +2032,7 @@ pub fn run(args: TblastxArgs) -> Result<()> {
                                         .fetch_add(1, AtomicOrdering::Relaxed);
                                 }
                             } else {
-                                // [C] diag_array[diag_coord].last_hit = subject_offset + diag_offset;
+                                // "Otherwise, make the present hit into the previous hit for this diagonal"
                                 diag_entry.last_hit = subject_offset + diag_offset;
                             }
 
@@ -2058,40 +2137,48 @@ pub fn run(args: TblastxArgs) -> Result<()> {
                 if diag_offset >= i32::MAX / 4 {
                     diag_offset = window;
                     // s_BlastDiagClear(): clear all diagonal state when offset risks overflow.
+                    // NCBI sets last_hit = -window (blast_extend.c:103)
                     for d in diag_array.iter_mut() {
-                        *d = DiagStruct::default();
+                        *d = DiagStruct::clear(window);
                     }
                 } else {
                     diag_offset += s_aa_len as i32 + window;
                 }
-            }
 
-                // NCBI: BLAST_GetUngappedHSPList equivalent
-                // Reference: blast_gapalign.c:4719-4775
-                // Convert InitHSPs (with absolute coordinates) to UngappedHits (with context-relative coordinates)
-                let ungapped_hits = get_ungapped_hsp_list(
-                    init_hsps,
-                    contexts_ref,
-                    &s_frames,
-                );
-                
-                // NCBI: Blast_HSPListReevaluateUngapped equivalent
-                // Reference: blast_engine.c:1492-1497, blast_hits.c:2609-2737
-                // Perform batch reevaluation on all HSPs
-                let ungapped_hits = reevaluate_ungapped_hsp_list(
-                    ungapped_hits,
-                    contexts_ref,
-                    &s_frames,
-                    &cutoff_scores,
-                    &args,
-                    timing_enabled,
-                    &reeval_ns,
-                    &reeval_calls,
-                    is_long_sequence,
-                    &mut stats_hsp_filtered_by_reeval,
-                );
-                
-                if !ungapped_hits.is_empty() {
+                // NCBI: BLAST_GetUngappedHSPList equivalent - per-frame conversion
+                // Reference: blast_engine.c:561-562
+                // BLAST_GetUngappedHSPList(init_hitlist, query_info, subject,
+                //         hit_params->options, &hsp_list);
+                if !init_hsps.is_empty() {
+                    let frame_ungapped_hits = get_ungapped_hsp_list(
+                        init_hsps,
+                        contexts_ref,
+                        &s_frames,
+                    );
+
+                    // NCBI: Blast_HSPListsMerge - merge per-frame results
+                    // Reference: blast_engine.c:581-584
+                    combined_ungapped_hits.extend(frame_ungapped_hits);
+                }
+            } // End of subject frame loop
+
+            // NCBI: Blast_HSPListReevaluateUngapped equivalent
+            // Reference: blast_engine.c:1492-1497, blast_hits.c:2609-2737
+            // Perform batch reevaluation on all HSPs after merging all frames
+            let ungapped_hits = reevaluate_ungapped_hsp_list(
+                combined_ungapped_hits,
+                contexts_ref,
+                &s_frames,
+                &cutoff_scores,
+                &args,
+                timing_enabled,
+                &reeval_ns,
+                &reeval_calls,
+                is_long_sequence,
+                &mut stats_hsp_filtered_by_reeval,
+            );
+
+            if !ungapped_hits.is_empty() {
                     // DEBUG: Print HSP statistics for long sequences
                     if is_long_sequence {
                         eprintln!("[DEBUG HSP_STATS] After reevaluation: {} HSPs", ungapped_hits.len());
@@ -2240,16 +2327,11 @@ pub fn run(args: TblastxArgs) -> Result<()> {
                     //   /* If this is not a single piece or the start of a chain, then Skip it. */
                     //   if (H->linked_set == TRUE && H->start_of_chain == FALSE)
                     //       continue;
-                    // CRITICAL: This continue is NOT an output filter!
-                    // NCBI reference: TBLASTX_NCBI_PARITY_STATUS.md section 11.1
-                    // NCBI skips chain members only as "traversal starting points" in the array scan.
-                    // However, chain members are still included in the output list by following
-                    // the `link` pointer from the chain head (link_hsps.c:1047-1059).
-                    // Therefore, we MUST NOT filter chain members during output conversion.
-                    // All HSPs (including chain members) should be output.
-                    // NCBI reference: link_hsps.c:1047-1059 (chain members are connected via link pointer)
-                    // DO NOT filter chain members here - they are part of the output list
-                    
+                    // NOTE: This "continue" in NCBI is NOT a filter - NCBI then walks the link
+                    // pointer from each chain head to include all chain members (lines 1047-1059).
+                    // LOSAT's linking already produces a flat list of ALL HSPs (including chain
+                    // members) so we output everything without this skip logic.
+
                     // NCBI reference: E-value filtering is applied during output conversion
                     // The exact timing may differ, but the threshold check is standard
                     if h.e_value > evalue_threshold {

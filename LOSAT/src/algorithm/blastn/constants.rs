@@ -40,6 +40,15 @@ pub const MIN_UNGAPPED_SCORE_BLASTN: i32 = 50; // DEPRECATED: Use compute_blastn
 /// Maximum word size for direct address table (4^14 = 268M entries = ~6GB, too large)
 pub const MAX_DIRECT_LOOKUP_WORD_SIZE: usize = 13;
 
+// NCBI BLAST threshold constants for adaptive lookup width selection
+// Reference: blast_nalookup.c:130-184 (BlastChooseNaLookupTable)
+// approx_table_entries thresholds for word_size=11:
+// - < 12,000: use 8-bit lookup
+// - < 180,000: use 10-bit lookup
+// - >= 180,000: use 11-bit direct lookup
+pub const LUT_WIDTH_11_THRESHOLD_8: usize = 12_000;
+pub const LUT_WIDTH_11_THRESHOLD_10: usize = 180_000;
+
 // NCBI BLAST constants for greedy alignment
 // GREEDY_MAX_COST: The largest distance to be examined for an optimal alignment
 pub const GREEDY_MAX_COST: usize = 1000;

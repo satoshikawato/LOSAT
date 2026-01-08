@@ -902,7 +902,8 @@ pub fn apply_culling(
     
     // NCBI: Sort by score (s_BlastHSPCullingFinal: Blast_HSPListSortByScore)
     result.sort_by(|a, b| b.raw_score.cmp(&a.raw_score));
-    
+
     result
 }
+
 

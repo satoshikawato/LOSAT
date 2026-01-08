@@ -32,6 +32,7 @@ pub struct BaseDiagnosticCounters {
     pub seeds_second_hit_window: AtomicUsize, // Second seed within window (two-hit satisfied)
     pub seeds_second_hit_too_far: AtomicUsize, // Second seed beyond window (diff > window)
     pub seeds_second_hit_overlap: AtomicUsize, // Second seed overlapping (diff < wordsize)
+    pub seeds_ctx_boundary_fail: AtomicUsize, // Second seed failing context boundary check
     // Diagonal mask/suppression statistics
     pub mask_updates: AtomicUsize,         // Number of mask updates
     pub seeds_masked: AtomicUsize,         // Seeds suppressed by diagonal mask
@@ -70,6 +71,7 @@ impl Default for BaseDiagnosticCounters {
             seeds_second_hit_window: AtomicUsize::new(0),
             seeds_second_hit_too_far: AtomicUsize::new(0),
             seeds_second_hit_overlap: AtomicUsize::new(0),
+            seeds_ctx_boundary_fail: AtomicUsize::new(0),
             mask_updates: AtomicUsize::new(0),
             seeds_masked: AtomicUsize::new(0),
             self_comparisons: AtomicUsize::new(0),
@@ -202,6 +204,10 @@ impl ProteinDiagnosticCounters {
         eprintln!(
             "    Second seed (overlapping): {}",
             self.base.seeds_second_hit_overlap.load(AtomicOrdering::Relaxed)
+        );
+        eprintln!(
+            "    Ctx boundary failed:      {}",
+            self.base.seeds_ctx_boundary_fail.load(AtomicOrdering::Relaxed)
         );
         eprintln!(
             "  Seeds passed to extension:  {}",

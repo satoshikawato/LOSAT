@@ -1058,26 +1058,35 @@ fn link_hsp_group_ncbi(
     // NCBI line 576: lh_helper[0].maxsum1 = -10000;
     // NCBI memory pooling: reuse pool_lh_helpers buffer instead of allocating fresh
     // Resize to n+2 (group size + sentinels), clearing and reusing existing capacity
+    // NCBI uses calloc to allocate n+2 entries, all zero-initialized.
+    // We use resize to create n+2 default entries, then set the sentinels.
     pool_lh_helpers.clear();
-    pool_lh_helpers.reserve(n + 2);
+    pool_lh_helpers.resize(n + 2, LhHelper {
+        hsp_idx: SENTINEL_IDX,
+        q_off_trim: 0,
+        s_off_trim: 0,
+        sum: [0, 0],           // NCBI: calloc zero-initializes
+        next_larger: 0,
+        maxsum1: 0,            // Default; sentinels will override
+    });
     // Initialize sentinels (indices 0 and 1)
-    pool_lh_helpers.push(LhHelper {
+    pool_lh_helpers[0] = LhHelper {
         hsp_idx: SENTINEL_IDX,
         q_off_trim: 0,
         s_off_trim: 0,
         sum: [0, 0],           // NCBI: calloc zero-initializes
         next_larger: 0,
         maxsum1: -10000,       // NCBI line 576
-    });
-    pool_lh_helpers.push(LhHelper {
+    };
+    pool_lh_helpers[1] = LhHelper {
         hsp_idx: SENTINEL_IDX,
         q_off_trim: 0,
         s_off_trim: 0,
         sum: [0, 0],           // NCBI: calloc zero-initializes
         next_larger: 0,
         maxsum1: -10000,       // Will be reset to -10000 in each pass (line 1191)
-    });
-    // Remaining entries (n) will be populated during linking passes
+    };
+    // Remaining entries (2..n+2) will be populated during linking passes
     // Use pool_lh_helpers directly throughout the function (all lh_helpers references replaced)
 
     let mut remaining = n;

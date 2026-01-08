@@ -428,11 +428,19 @@ pub fn build_ncbi_lookup(
                 continue;
             }
 
-            // NCBI reference: blast_aalookup.c s_AddWordHitsCore
-            // Only adds entries when score >= threshold through the neighbor loop.
-            // When threshold==0, we add exact matches only (no neighbor expansion).
-            if threshold == 0 {
+            // NCBI reference: blast_aalookup.c s_AddWordHits lines 492-519
+            // Compute self-score of query word
+            let self_score = blosum62_score(w0 as u8, w0 as u8)
+                + blosum62_score(w1 as u8, w1 as u8)
+                + blosum62_score(w2 as u8, w2 as u8);
+
+            // NCBI: If threshold==0 OR self_score < threshold, add exact match explicitly
+            // because neighbor search won't find it (score would be self_score < threshold)
+            if threshold == 0 || self_score < threshold {
                 entry_counts[idx] += num_offsets;
+            }
+            // NCBI: If threshold==0, skip neighbor search entirely
+            if threshold == 0 {
                 continue;
             }
 
@@ -478,13 +486,23 @@ pub fn build_ncbi_lookup(
                 continue;
             }
 
-            // NCBI reference: blast_aalookup.c s_AddWordHitsCore
-            // Only adds entries when score >= threshold through the neighbor loop.
-            // When threshold==0, we add exact matches only (no neighbor expansion).
-            if threshold == 0 {
+            // NCBI reference: blast_aalookup.c s_AddWordHits lines 492-519
+            // Compute self-score of query word
+            let self_score = blosum62_score(w0 as u8, w0 as u8)
+                + blosum62_score(w1 as u8, w1 as u8)
+                + blosum62_score(w2 as u8, w2 as u8);
+
+            // NCBI: If threshold==0 OR self_score < threshold, add exact match explicitly
+            // because neighbor search won't find it (score would be self_score < threshold)
+            if threshold == 0 || self_score < threshold {
                 backbone[idx].extend_from_slice(offsets);
                 exact_added_count += offsets.len();
-                words_with_exact_only += 1;
+                if threshold == 0 {
+                    words_with_exact_only += 1;
+                }
+            }
+            // NCBI: If threshold==0, skip neighbor search entirely
+            if threshold == 0 {
                 continue;
             }
 

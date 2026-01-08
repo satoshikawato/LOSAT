@@ -162,12 +162,63 @@ Key metrics:
 - Neighbor entries: 10,969,813
 - Expansion factor: 12.72x
 
-## Next Investigation Steps
+## CRITICAL FINDING: Score Distribution Analysis (2026-01-08 Session 4)
 
-1. **Compare k-mer match counts** - 1.1B matches seems high; verify if NCBI has similar count
-2. **Single position trace** - Follow one specific hit through the entire pipeline
-3. **Check for duplicate offsets** - Verify no offset is indexed twice in lookup table
+**THE 2x EXCESS IS CONCENTRATED IN LOW-SCORE HITS**
+
+| Bit Score Range | NCBI | LOSAT | Ratio | Difference |
+|-----------------|------|-------|-------|------------|
+| **0-30** | 8,476 | 20,862 | **2.46x** | +12,386 |
+| 30-35 | 1,743 | 2,853 | 1.63x | +1,110 |
+| 35-40 | 1,107 | 1,210 | 1.09x | +103 |
+| 40-45 | 734 | 791 | 1.07x | +57 |
+| 45-50 | 474 | 487 | 1.02x | +13 |
+| 50-60 | 614 | 651 | 1.06x | +37 |
+| 60-80 | 644 | 763 | 1.18x | +119 |
+| 80-100 | 291 | 333 | 1.14x | +42 |
+| 100+ | 788 | 869 | 1.10x | +81 |
+| **TOTAL** | 14,871 | 28,819 | **1.94x** | +13,948 |
+
+**Key insight:** 88% of the excess hits (12,386/13,948) are in the 0-30 bit score range.
+
+### Coordinate Comparison
+
+| Category | Count |
+|----------|-------|
+| Exact matches (same coords) | 10,885 (73% of NCBI) |
+| NCBI only (missing in LOSAT) | 3,986 (27% of NCBI) |
+| LOSAT only (extra) | 17,934 (62% of LOSAT) |
+
+**Observation:** LOSAT has both missing hits AND extra hits. The extra hits dominate.
 
 ---
 
-*Last updated: 2026-01-08 (Session 3)*
+## VERIFIED: NOT Duplicate Generation
+
+- SIMD disabled (LOSAT_NO_SIMD=1): Same 28,819 hits
+- Offset pair uniqueness check: 0 duplicates in scan output
+- Scan function verified: No duplicate (q_off, s_off) pairs returned
+
+**Conclusion:** The issue is NOT in k-mer scanning or SIMD boundary handling.
+
+---
+
+## ROOT CAUSE HYPOTHESIS (Updated)
+
+The excess is in LOW-SCORE HSPs (0-30 bits), not high-score ones. This suggests:
+
+1. **Different HSP generation at the boundary** - LOSAT may be generating HSPs that NCBI discards early
+2. **Different extension termination** - LOSAT's x-drop may differ slightly
+3. **Different E-value/filtering for low-score HSPs** - Though E-values look similar
+4. **Different sum-statistics linking** - Chain formation may differ for low-score HSPs
+
+## Next Investigation Steps
+
+1. **Compare extension scores** - Same (q_start, s_start) should produce same raw score
+2. **Check for chain-related duplicates** - Low-score HSPs may be fragments of chains
+3. **Compare X-drop termination** - Different x-drop could produce different HSP lengths
+4. **Focus on 20-30 bit score range** - This is where the biggest ratio difference is
+
+---
+
+*Last updated: 2026-01-08 (Session 4)*

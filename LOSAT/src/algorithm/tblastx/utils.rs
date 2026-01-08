@@ -7,6 +7,7 @@ use anyhow::{Context, Result};
 use bio::io::fasta;
 use indicatif::{ProgressBar, ProgressStyle};
 use rayon::prelude::*;
+use std::collections::HashSet;
 use std::sync::atomic::{AtomicI32, AtomicU64, AtomicUsize, Ordering as AtomicOrdering};
 use std::sync::mpsc::channel;
 use std::sync::OnceLock;
@@ -857,8 +858,9 @@ fn s_blast_aa_scan_subject(
     let mut totalhits: i32 = 0;
 
     // Precompute CPU feature flags once per scan call.
+    // Use LOSAT_NO_SIMD=1 to force scalar-only processing for debugging
     #[cfg(target_arch = "x86_64")]
-    let has_avx2 = is_x86_feature_detected!("avx2");
+    let has_avx2 = is_x86_feature_detected!("avx2") && std::env::var("LOSAT_NO_SIMD").is_err();
     #[cfg(not(target_arch = "x86_64"))]
     let has_avx2 = false;
 
@@ -1819,6 +1821,23 @@ pub fn run(args: TblastxArgs) -> Result<()> {
                             .base
                             .kmer_matches
                             .fetch_add(hits as usize, AtomicOrdering::Relaxed);
+
+                        // DEBUG: Check for duplicate offset pairs in scan output
+                        if is_long_sequence {
+                            let mut seen: HashSet<(i32, i32)> = HashSet::with_capacity(hits as usize);
+                            let mut duplicate_count = 0usize;
+                            for i in 0..hits as usize {
+                                let pair = unsafe { &*offset_pairs.as_ptr().add(i) };
+                                if !seen.insert((pair.q_off, pair.s_off)) {
+                                    duplicate_count += 1;
+                                }
+                            }
+                            if duplicate_count > 0 {
+                                eprintln!("[DEBUG SCAN_DUPES] s_f_idx={} scan_range=[{},{}] hits={} duplicates={} ({:.2}%)",
+                                    s_f_idx, prev_scan_left, scan_range[1], hits, duplicate_count,
+                                    (duplicate_count as f64 / hits as f64) * 100.0);
+                            }
+                        }
                     }
 
                     if hits == 0 && scan_range[1] == prev_scan_left {
@@ -1979,8 +1998,10 @@ pub fn run(args: TblastxArgs) -> Result<()> {
                                 }
                             }
 
-                            // [C] if (right_extend)
-                            if right_extend {
+                            // [C] if (score >= cutoffs->cutoff_score)
+                            // NCBI sets flag=1 based on SCORE, not whether right extension happened
+                            // Reference: aa_ungapped.c:575-591
+                            if score >= cutoff {
                                 // [C] diag_array[diag_coord].flag = 1;
                                 // [C] diag_array[diag_coord].last_hit = s_last_off - (wordsize - 1) + diag_offset;
                                 diag_entry.flag = 1;

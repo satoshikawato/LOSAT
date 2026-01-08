@@ -1485,10 +1485,18 @@ pub fn run(args: TblastxArgs) -> Result<()> {
     // For tblastx, all contexts use kbp_ideal (BLOSUM62 ungapped Lambda = 0.3176),
     // so x_dropoff = ceil(7.0 * LN2 / 0.3176) = 16 for all contexts.
     // We maintain per-context structure for NCBI parity.
-    let x_dropoff_per_context: Vec<i32> = contexts
-        .iter()
-        .map(|_| x_drop_raw_score(X_DROP_UNGAPPED_BITS, &ungapped_params_for_xdrop, 1.0))
-        .collect();
+    //
+    // NCBI BLAST dynamic x_dropoff (blast_parameters.c:380-383):
+    //   if (curr_cutoffs->x_dropoff_init == 0)
+    //      curr_cutoffs->x_dropoff = new_cutoff;  // x_dropoff = cutoff_score
+    //   else
+    //      curr_cutoffs->x_dropoff = curr_cutoffs->x_dropoff_init;
+    //
+    // For TBLASTX, x_dropoff_init = 16 (not 0), so this dynamic update is not triggered.
+    // However, we store x_dropoff_init here and apply the logic during subject processing
+    // where cutoff_score is available.
+    let x_dropoff_init = x_drop_raw_score(X_DROP_UNGAPPED_BITS, &ungapped_params_for_xdrop, 1.0);
+    let x_dropoff_per_context: Vec<i32> = vec![x_dropoff_init; contexts.len()];
 
     let t_phase_read_subjects = Instant::now();
     if args.verbose {
@@ -2319,16 +2327,11 @@ pub fn run(args: TblastxArgs) -> Result<()> {
                     //   /* If this is not a single piece or the start of a chain, then Skip it. */
                     //   if (H->linked_set == TRUE && H->start_of_chain == FALSE)
                     //       continue;
-                    // CRITICAL: This continue is NOT an output filter!
-                    // NCBI reference: TBLASTX_NCBI_PARITY_STATUS.md section 11.1
-                    // NCBI skips chain members only as "traversal starting points" in the array scan.
-                    // However, chain members are still included in the output list by following
-                    // the `link` pointer from the chain head (link_hsps.c:1047-1059).
-                    // Therefore, we MUST NOT filter chain members during output conversion.
-                    // All HSPs (including chain members) should be output.
-                    // NCBI reference: link_hsps.c:1047-1059 (chain members are connected via link pointer)
-                    // DO NOT filter chain members here - they are part of the output list
-                    
+                    // NOTE: This "continue" in NCBI is NOT a filter - NCBI then walks the link
+                    // pointer from each chain head to include all chain members (lines 1047-1059).
+                    // LOSAT's linking already produces a flat list of ALL HSPs (including chain
+                    // members) so we output everything without this skip logic.
+
                     // NCBI reference: E-value filtering is applied during output conversion
                     // The exact timing may differ, but the threshold check is standard
                     if h.e_value > evalue_threshold {

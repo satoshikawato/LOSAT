@@ -1007,17 +1007,31 @@ fn extend_gapped_protein_one_direction(
 }
 
 /// Convert amino acid coordinates to DNA coordinates for a given frame
+///
+/// NCBI reference: blast_hits.c:1096-1102
+/// For positive frames:
+///   start = CODON_LENGTH*(segment->offset) + segment->frame - 1;
+///   end = CODON_LENGTH*segment->end + segment->frame - 2;
+/// For negative frames:
+///   start = seq_length - CODON_LENGTH*segment->offset + segment->frame;
+///   end = seq_length - CODON_LENGTH*segment->end + segment->frame + 1;
 pub fn convert_coords(aa_start: usize, aa_end: usize, frame: i8, dna_len: usize) -> (usize, usize) {
     let f_abs = frame.abs() as usize;
     let shift = f_abs - 1;
 
     if frame > 0 {
-        let start_bp = aa_start * 3 + shift + 1;
-        let end_bp = (aa_end) * 3 + shift;
+        // NCBI: start = 3*offset + frame - 1 = 3*offset + shift
+        // NCBI: end = 3*end + frame - 2 = 3*end + shift - 1
+        let start_bp = aa_start * 3 + shift;
+        let end_bp = aa_end * 3 + shift - 1;
         (start_bp, end_bp)
     } else {
-        let start_bp = dna_len - (aa_start * 3 + shift);
-        let end_bp_calc = dna_len - (aa_end * 3 + shift - 1);
+        // NCBI: start = len - 3*offset + frame = len - 3*offset - f_abs
+        //             = len - (3*offset + f_abs) = len - (3*offset + shift + 1)
+        // NCBI: end = len - 3*end + frame + 1 = len - 3*end - f_abs + 1
+        //           = len - (3*end + f_abs - 1) = len - (3*end + shift)
+        let start_bp = dna_len - (aa_start * 3 + shift + 1);
+        let end_bp_calc = dna_len - (aa_end * 3 + shift);
         (start_bp, end_bp_calc)
     }
 }

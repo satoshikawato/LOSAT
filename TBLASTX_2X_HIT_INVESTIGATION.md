@@ -366,4 +366,61 @@ The 2x hit count excess for long sequences remains unexplained despite:
 
 The issue must be in some subtle interaction that scales with sequence length, but the exact mechanism is not yet identified.
 
-*Last updated: 2026-01-08 (Session 6)*
+---
+
+## Session 7: Coordinate Conversion Fix (2026-01-08)
+
+### 5. Coordinate Conversion Off-by-One - FIXED
+
+**File:** `extension.rs:1018-1037`
+
+**Bug:** LOSAT's `convert_coords` function had an off-by-one error for both positive and negative frames.
+
+**NCBI reference (blast_hits.c:1096-1102):**
+```c
+// Positive frame
+start = CODON_LENGTH*(segment->offset) + segment->frame - 1;
+end = CODON_LENGTH*segment->end + segment->frame - 2;
+
+// Negative frame
+start = seq_length - CODON_LENGTH*segment->offset + segment->frame;
+end = seq_length - CODON_LENGTH*segment->end + segment->frame + 1;
+```
+
+**Old LOSAT (incorrect):**
+```rust
+if frame > 0 {
+    let start_bp = aa_start * 3 + shift + 1;  // Wrong: +1 extra
+    let end_bp = aa_end * 3 + shift;          // Wrong: missing -1
+} else {
+    let start_bp = dna_len - (aa_start * 3 + shift);      // Wrong
+    let end_bp_calc = dna_len - (aa_end * 3 + shift - 1); // Wrong
+}
+```
+
+**New LOSAT (matches NCBI):**
+```rust
+if frame > 0 {
+    // NCBI: start = 3*offset + frame - 1 = 3*offset + shift
+    // NCBI: end = 3*end + frame - 2 = 3*end + shift - 1
+    let start_bp = aa_start * 3 + shift;
+    let end_bp = aa_end * 3 + shift - 1;
+} else {
+    // NCBI: start = len - 3*offset + frame = len - (3*offset + f_abs)
+    // NCBI: end = len - 3*end + frame + 1 = len - (3*end + f_abs - 1)
+    let start_bp = dna_len - (aa_start * 3 + shift + 1);
+    let end_bp_calc = dna_len - (aa_end * 3 + shift);
+}
+```
+
+**Impact:** This fix aligns OUTPUT coordinates with NCBI. It does NOT affect hit generation or scoring - the 2x hit count issue persists.
+
+**Test result after fix:** Still 29,766 vs 14,877 = 2.0x
+
+### Implication of Coordinate Fix
+
+The previous comparison of "identical coordinates" between LOSAT and NCBI was comparing DIFFERENT alignments because LOSAT's coordinates were off by 1. The observed "~7 bits higher score at same coordinates" may have been an artifact of comparing different AA positions.
+
+With coordinates now aligned, a fresh score comparison at truly identical coordinates is needed to determine if there's actually a scoring difference.
+
+*Last updated: 2026-01-08 (Session 7)*

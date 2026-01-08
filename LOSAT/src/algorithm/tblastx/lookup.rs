@@ -428,16 +428,11 @@ pub fn build_ncbi_lookup(
                 continue;
             }
 
-            let self_score = blosum62_score(w0 as u8, w0 as u8)
-                + blosum62_score(w1 as u8, w1 as u8)
-                + blosum62_score(w2 as u8, w2 as u8);
-            
-            // NCBI: if threshold==0 or self_score < threshold, add exact matches
-            if threshold == 0 || self_score < threshold {
-                entry_counts[idx] += num_offsets;
-            }
-            
+            // NCBI reference: blast_aalookup.c s_AddWordHitsCore
+            // Only adds entries when score >= threshold through the neighbor loop.
+            // When threshold==0, we add exact matches only (no neighbor expansion).
             if threshold == 0 {
+                entry_counts[idx] += num_offsets;
                 continue;
             }
 
@@ -483,18 +478,13 @@ pub fn build_ncbi_lookup(
                 continue;
             }
 
-            let self_score = blosum62_score(w0 as u8, w0 as u8)
-                + blosum62_score(w1 as u8, w1 as u8)
-                + blosum62_score(w2 as u8, w2 as u8);
-            
-            // NCBI: if threshold==0 or self_score < threshold, add exact matches
-            if threshold == 0 || self_score < threshold {
+            // NCBI reference: blast_aalookup.c s_AddWordHitsCore
+            // Only adds entries when score >= threshold through the neighbor loop.
+            // When threshold==0, we add exact matches only (no neighbor expansion).
+            if threshold == 0 {
                 backbone[idx].extend_from_slice(offsets);
                 exact_added_count += offsets.len();
                 words_with_exact_only += 1;
-            }
-            
-            if threshold == 0 {
                 continue;
             }
 

@@ -182,12 +182,28 @@ pub fn pack_diag_key(q_idx: u32, diag: isize) -> u64 {
 }
 
 /// Check if a k-mer starting at position overlaps with any masked interval
+/// Uses binary search for O(log n) performance instead of O(n) linear scan.
+/// IMPORTANT: Intervals must be sorted by start position for binary search to work correctly.
 #[inline]
 pub fn is_kmer_masked(intervals: &[MaskedInterval], start: usize, kmer_len: usize) -> bool {
+    if intervals.is_empty() {
+        return false;
+    }
+
     let end = start + kmer_len;
-    intervals.iter().any(|interval| {
-        start < interval.end && end > interval.start
-    })
+
+    // Binary search to find the first interval whose end > start
+    // (i.e., the first interval that could potentially overlap)
+    let idx = intervals.partition_point(|interval| interval.end <= start);
+
+    // Check if this interval actually overlaps
+    // An interval overlaps if: interval.start < end AND interval.end > start
+    // We already know interval.end > start (from binary search), so just check start
+    if idx < intervals.len() && intervals[idx].start < end {
+        return true;
+    }
+
+    false
 }
 
 /// Lookup table for ASCII to 2-bit encoding (0xFF = invalid/ambiguous)

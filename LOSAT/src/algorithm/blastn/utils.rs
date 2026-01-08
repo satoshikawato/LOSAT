@@ -4,13 +4,13 @@ use rayon::prelude::*;
 use rustc_hash::FxHashMap;
 use std::cmp::Ordering;
 use std::sync::mpsc::channel;
-use crate::common::{write_output, Hit};
+use crate::common::{write_output_ncbi_order, Hit};
 use crate::stats::{lookup_nucl_params, KarlinParams};
 use super::args::BlastnArgs;
 use super::alignment::{extend_gapped_heuristic, extend_final_traceback};
 use super::extension::{extend_hit_ungapped, type_of_word};
 use super::constants::TWO_HIT_WINDOW;
-use super::coordination::{configure_task, read_sequences, prepare_sequence_data, build_lookup_tables};
+use super::coordination::{configure_task, finalize_task_config, read_sequences, prepare_sequence_data, build_lookup_tables};
 use super::lookup::{reverse_complement, pack_diag_key};
 // SIMD comparison functions removed - now using type_of_word instead
 use super::ncbi_cutoffs::{compute_blastn_cutoff_score, GAP_TRIGGER_BIT_SCORE_NUCL};
@@ -230,17 +230,23 @@ pub fn run(args: BlastnArgs) -> Result<()> {
         .build_global()
         .context("Failed to build thread pool")?;
 
-    // Configure task-specific parameters
-    let config = configure_task(&args);
-    
-    if args.verbose {
-        eprintln!("[INFO] Scan stride optimization: scan_step={} (word_size={})", config.scan_step, config.effective_word_size);
-    }
+    // Configure task-specific parameters (initial configuration)
+    let mut config = configure_task(&args);
 
     // Read sequences
     let (queries, query_ids, subjects) = read_sequences(&args)?;
     if queries.is_empty() || subjects.is_empty() {
         return Ok(());
+    }
+
+    // Finalize configuration with query-dependent parameters (adaptive lookup table selection)
+    // NCBI reference: blast_nalookup.c (BlastChooseNaLookupTable)
+    let total_query_length: usize = queries.iter().map(|r| r.seq().len()).sum();
+    finalize_task_config(&mut config, total_query_length);
+
+    if args.verbose {
+        eprintln!("[INFO] Adaptive lookup: approx_entries={}, lut_word_length={}, two_stage={}, scan_step={}",
+                  total_query_length, config.lut_word_length, config.use_two_stage, config.scan_step);
     }
 
     // Prepare sequence data (including DUST masking)
@@ -356,7 +362,7 @@ pub fn run(args: BlastnArgs) -> Result<()> {
         }
         let write_start = std::time::Instant::now();
 
-        write_output(&filtered_hits, out_path.as_ref())?;
+        write_output_ncbi_order(filtered_hits, out_path.as_ref())?;
 
         if verbose {
             eprintln!(
@@ -493,6 +499,23 @@ pub fn run(args: BlastnArgs) -> Result<()> {
             // Generate reverse complement for minus strand search
             let s_seq_rc = reverse_complement(s_seq);
 
+            // PERFORMANCE OPTIMIZATION: Pre-compute cutoff scores per query
+            // This avoids redundant compute_blastn_cutoff_score calls in the inner loop
+            // (cutoff only depends on query_len and subject_len, not on seed position)
+            let subject_len = s_len as i64;
+            let cutoff_scores: Vec<i32> = queries.iter().map(|q_record| {
+                let query_len = q_record.seq().len() as i64 * 2; // Both strands for blastn
+                compute_blastn_cutoff_score(
+                    query_len,
+                    subject_len,
+                    evalue_threshold,
+                    GAP_TRIGGER_BIT_SCORE_NUCL,
+                    &params_for_closure,
+                    &params_for_closure,
+                    1.0,
+                )
+            }).collect();
+
             // Search both strands: plus (forward) and minus (reverse complement)
             // is_minus_strand: false = plus strand, true = minus strand
             for is_minus_strand in [false, true] {
@@ -598,36 +621,23 @@ pub fn run(args: BlastnArgs) -> Result<()> {
                         }
                         
                         dbg_total_s_positions += 1;
-                        
+
                         // Lookup using lut_word_length k-mer
                         let matches_slice = two_stage.get_hits(current_lut_kmer);
                         
                         // For each match, check if word_length match exists
                         for &(q_idx, q_pos) in matches_slice {
                             dbg_seeds_found += 1;
-                            
+
                             // Check if word_length match exists starting at these positions
-                            // Need to verify that subject[kmer_start..kmer_start+word_length] 
+                            // Need to verify that subject[kmer_start..kmer_start+word_length]
                             // matches query[q_pos..q_pos+word_length]
                             let q_record = &queries[q_idx as usize];
                             let q_seq = q_record.seq();
                             let q_pos_usize = q_pos as usize;
-                            
-                            // Calculate cutoff_score for this query-subject pair
-                            // NCBI reference: blast_parameters.c:368-374
-                            // For blastn in gapped mode: cutoff_score = MIN(gap_trigger * scale_factor, cutoff_score_max)
-                            // Query length includes both strands for blastn (query_len * 2)
-                            let query_len = q_seq.len() as i64 * 2; // Both strands for blastn
-                            let subject_len = s_len as i64;
-                            let cutoff_score = compute_blastn_cutoff_score(
-                                query_len,
-                                subject_len,
-                                evalue_threshold,
-                                GAP_TRIGGER_BIT_SCORE_NUCL,
-                                &params_for_closure, // ungapped params (same as gapped for blastn)
-                                &params_for_closure, // gapped params (same as ungapped for blastn)
-                                1.0, // scale_factor (typically 1.0 for standard scoring)
-                            );
+
+                            // Use pre-computed cutoff score (computed once per query-subject pair)
+                            let cutoff_score = cutoff_scores[q_idx as usize];
                             
                             // NCBI reference: na_ungapped.c:1081-1140
                             // CRITICAL: In two-stage lookup, seed finding phase ONLY finds lut_word_length matches.
@@ -1340,24 +1350,11 @@ pub fn run(args: BlastnArgs) -> Result<()> {
 
                         for &(q_idx, q_pos) in matches_slice {
                             dbg_seeds_found += 1;
-                            
-                            // Calculate cutoff_score for this query-subject pair
-                            // NCBI reference: blast_parameters.c:368-374
-                            // For blastn in gapped mode: cutoff_score = MIN(gap_trigger * scale_factor, cutoff_score_max)
-                            // Query length includes both strands for blastn (query_len * 2)
+
+                            // Use pre-computed cutoff score (computed once per query-subject pair)
+                            let cutoff_score = cutoff_scores[q_idx as usize];
                             let q_record = &queries[q_idx as usize];
-                            let query_len = q_record.seq().len() as i64 * 2; // Both strands for blastn
-                            let subject_len = s_len as i64;
-                            let cutoff_score = compute_blastn_cutoff_score(
-                                query_len,
-                                subject_len,
-                                evalue_threshold,
-                                GAP_TRIGGER_BIT_SCORE_NUCL,
-                                &params_for_closure, // ungapped params (same as gapped for blastn)
-                                &params_for_closure, // gapped params (same as ungapped for blastn)
-                                1.0, // scale_factor (typically 1.0 for standard scoring)
-                            );
-                            
+
                         let diag = kmer_start as isize - q_pos as isize;
 
                         // Check if this seed is in the debug window

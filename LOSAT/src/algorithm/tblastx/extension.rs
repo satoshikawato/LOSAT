@@ -505,6 +505,10 @@ pub fn extend_hit_two_hit(
     q_right_off: usize, // Position of second hit (R) in query
     x_drop: i32,
 ) -> (usize, usize, usize, usize, i32, bool, usize) {
+    // DEBUG: Print sequence segment for tracing
+    static DEBUG_PRINTED: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+    let debug_ext = std::env::var("LOSAT_DEBUG_EXTENSION").is_ok();
+
     let k_size = 3;
 
     // First, find the best scoring position within the word at R
@@ -566,6 +570,28 @@ pub fn extend_hit_two_hit(
     let q_end = q_right_off + right_disp;
     let s_start = s_right_off - left_disp;
     let s_end = s_right_off + right_disp;
+
+    // DEBUG: Print alignment details for first few high-scoring extensions
+    if debug_ext && max_score_total >= 100 && !DEBUG_PRINTED.swap(true, std::sync::atomic::Ordering::Relaxed) {
+        eprintln!("[DEBUG_EXT] max_score_from_left={} max_score_total={}", max_score, max_score_total);
+        eprintln!("[DEBUG_EXT] q_start={} q_end={} s_start={} s_end={} score={}",
+            q_start, q_end, s_start, s_end, max_score_total);
+        eprintln!("[DEBUG_EXT] left_disp={} right_disp={} x_drop={}", left_disp, right_disp, x_drop);
+        // Print position-by-position scores
+        let align_len = q_end - q_start;
+        eprintln!("[DEBUG_EXT] alignment_len={}", align_len);
+        let mut total = 0i32;
+        for i in 0..align_len.min(100) {
+            let q_char = q_seq[q_start + i];
+            let s_char = s_seq[s_start + i];
+            let sc = get_score(q_char, s_char);
+            total += sc;
+            if i < 10 || i >= align_len - 5 {
+                eprintln!("[DEBUG_EXT] pos={:2} q={:2} s={:2} score={:3} cumul={:4}", i, q_char, s_char, sc, total);
+            }
+        }
+        eprintln!("[DEBUG_EXT] manual_total={} reported_score={}", total, max_score_total);
+    }
 
     (q_start, q_end, s_start, s_end, max_score_total, right_extended, s_last_off)
 }

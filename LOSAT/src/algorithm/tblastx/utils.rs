@@ -53,8 +53,18 @@ struct DiagStruct {
     flag: u8,
 }
 impl Default for DiagStruct {
+    // NCBI: calloc zeros memory for initial allocation
     fn default() -> Self {
         Self { last_hit: 0, flag: 0 }
+    }
+}
+impl DiagStruct {
+    // NCBI s_BlastDiagClear (blast_extend.c:101-103):
+    //   diag_struct_array[i].flag = 0;
+    //   diag_struct_array[i].last_hit = -diag->window;
+    #[inline]
+    fn clear(window: i32) -> Self {
+        Self { last_hit: -window, flag: 0 }
     }
 }
 
@@ -1586,6 +1596,10 @@ pub fn run(args: TblastxArgs) -> Result<()> {
     // `query_length` here is the concatenated translated query buffer length
     // (frames share a boundary sentinel). In LOSAT this equals the end offset
     // of the last query context buffer.
+    // NCBI BLAST diag array sizing:
+    // diag_array_length = next_power_of_2(qlen + window_size)
+    // For tblastx, qlen = total concatenated query buffer (all 6 frames)
+    // Source: ncbi-blast/c++/src/algo/blast/core/blast_extend.c:52-61
     let query_length: i32 = contexts
         .last()
         .map(|c| c.frame_base + (c.aa_seq.len() as i32 - 1))
@@ -1618,6 +1632,20 @@ pub fn run(args: TblastxArgs) -> Result<()> {
             diag_offset: window,
         },
         |st, (s_idx, s_rec)| {
+            // NCBI: Creates ewp (diagonal table) ONCE per query via BlastExtendWordNew
+            // (blast_engine.c:1002) and reuses it across ALL subjects.
+            // The diagonal state persists - NO per-subject reset in NCBI.
+            // Reference: blast_extend.c:109-180 (BlastExtendWordNew)
+            //
+            // COMMENTED OUT per-subject reset to match NCBI behavior:
+            // for d in st.diag_array.iter_mut() {
+            //     d.last_hit = 0;
+            //     d.flag = 0;
+            // }
+            // st.diag_offset = window;
+
+            // Use existing diagonal state from WorkerState (initialized once per worker)
+
             let mut s_frames = generate_frames(s_rec.seq(), &db_code);
             if let Some(f) = only_sframe {
                 s_frames.retain(|x| x.frame == f);
@@ -1753,6 +1781,12 @@ pub fn run(args: TblastxArgs) -> Result<()> {
             let mut stats_score_distribution: Vec<i32> = Vec::new();
 
             for (s_f_idx, s_frame) in s_frames.iter().enumerate() {
+                // NCBI: Diagonal state is NOT reset between subject frames.
+                // NCBI shares ewp (diag_table) across all 6 subject frame iterations.
+                // Reference: blast_engine.c:805-855
+                // The per-subject reset (above, line ~1625) matches NCBI's Blast_ExtendWordNew calloc.
+                // Blast_ExtendWordExit at the end of this loop increments diag_offset.
+
                 let subject = &s_frame.aa_seq;
                 let s_aa_len = s_frame.aa_len;
                 if subject.len() < 5 {
@@ -1866,6 +1900,12 @@ pub fn run(args: TblastxArgs) -> Result<()> {
 
                             // [C] if (query_offset - diff < query_info->contexts[curr_context].query_offset)
                             if query_offset - diff < ctx.frame_base {
+                                if diag_enabled {
+                                    diagnostics
+                                        .base
+                                        .seeds_ctx_boundary_fail
+                                        .fetch_add(1, AtomicOrdering::Relaxed);
+                                }
                                 diag_entry.last_hit = subject_offset + diag_offset;
                                 continue;
                             }
@@ -2058,8 +2098,9 @@ pub fn run(args: TblastxArgs) -> Result<()> {
                 if diag_offset >= i32::MAX / 4 {
                     diag_offset = window;
                     // s_BlastDiagClear(): clear all diagonal state when offset risks overflow.
+                    // NCBI sets last_hit = -window (blast_extend.c:103)
                     for d in diag_array.iter_mut() {
-                        *d = DiagStruct::default();
+                        *d = DiagStruct::clear(window);
                     }
                 } else {
                     diag_offset += s_aa_len as i32 + window;

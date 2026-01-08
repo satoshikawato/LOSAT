@@ -1,5 +1,8 @@
-bash: line 111: ../target/release/LOSAT: No such file or directory
+Reading query & subject...
+Applying DUST filter (level=20, window=64, linker=1)...
+DUST masked 24781 bases (8.26%) across 1 sequences
+Building lookup (Task: blastn, Word: 11, TwoStage: true, LUTWord: 8, Direct: true, DUST: true)...
 
-real	0m0.002s
-user	0m0.000s
-sys	0m0.000s
+real	0m2.704s
+user	0m2.603s
+sys	0m0.010s

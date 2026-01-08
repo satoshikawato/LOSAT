@@ -107,17 +107,18 @@ pub fn extend_gapped_heuristic(
         left_gap_letters,
         left_dp_cells,
     ) = if use_dp {
-        // DP-based extension for blastn task - still needs prefix copying
-        let q_prefix: Vec<u8> = q_seq[..qs].iter().rev().copied().collect();
-        let s_prefix: Vec<u8> = s_seq[..ss].iter().rev().copied().collect();
-        extend_gapped_one_direction(
-            &q_prefix,
-            &s_prefix,
+        // DP-based extension for blastn task - use reverse flag to avoid O(n) prefix copying
+        extend_gapped_one_direction_ex(
+            q_seq,
+            s_seq,
+            qs,  // len1 = prefix length (characters before seed)
+            ss,  // len2 = prefix length (characters before seed)
             reward,
             penalty,
             gap_open,
             gap_extend,
             x_drop,
+            true,  // reverse = true for left extension
         )
     } else {
         // Greedy extension for megablast task - use reverse flag to avoid copying
@@ -483,6 +484,261 @@ pub fn extend_gapped_one_direction(
         }
 
         // Ensure we have a sentinel
+        if b_size <= n && b_size < alloc_size {
+            score_array[b_size].best = NEG_INF;
+            score_array[b_size].best_gap = NEG_INF;
+            b_size += 1;
+        }
+    }
+
+    if best_score <= 0 {
+        return (0, 0, 0, 0, 0, 0, 0, dp_cells);
+    }
+
+    (
+        best_i,
+        best_j,
+        best_score,
+        best_stats.matches as usize,
+        best_stats.mismatches as usize,
+        best_stats.gap_opens as usize,
+        best_stats.gap_letters as usize,
+        dp_cells,
+    )
+}
+
+/// Extended version of extend_gapped_one_direction that supports reverse access.
+/// When `reverse` is true, sequences are accessed from the end (for left extension),
+/// avoiding the O(n) copy overhead of reversing the sequence.
+///
+/// Parameters:
+/// - len1, len2: The actual lengths to use (can be less than q_seq.len(), s_seq.len())
+/// - reverse: If true, access sequences in reverse order
+pub fn extend_gapped_one_direction_ex(
+    q_seq: &[u8],
+    s_seq: &[u8],
+    len1: usize,
+    len2: usize,
+    reward: i32,
+    penalty: i32,
+    gap_open: i32,
+    gap_extend: i32,
+    x_drop: i32,
+    reverse: bool,
+) -> (usize, usize, i32, usize, usize, usize, usize, usize) {
+    // NCBI BLAST: gap penalties are specified as positive values (cost), but used as negative in calculations
+    let gap_open = -gap_open;
+    let gap_extend = -gap_extend;
+
+    const NEG_INF: i32 = i32::MIN / 2;
+    const MAX_WINDOW_SIZE: usize = 50000;
+
+    let m = len1;
+    let n = len2;
+
+    if m == 0 || n == 0 {
+        return (0, 0, 0, 0, 0, 0, 0, 0);
+    }
+
+    // Helper to get sequence character with optional reverse access
+    #[inline(always)]
+    fn get_q(q_seq: &[u8], i: usize, len1: usize, reverse: bool) -> u8 {
+        if reverse {
+            q_seq[len1 - i]
+        } else {
+            q_seq[i - 1]
+        }
+    }
+
+    #[inline(always)]
+    fn get_s(s_seq: &[u8], j: usize, len2: usize, reverse: bool) -> u8 {
+        if reverse {
+            s_seq[len2 - 1 - j]
+        } else {
+            s_seq[j]
+        }
+    }
+
+    let gap_extend_abs = gap_extend.abs().max(1);
+    let initial_window = (x_drop / gap_extend_abs + 3) as usize;
+    let mut alloc_size = initial_window.max(100).min(MAX_WINDOW_SIZE);
+
+    #[derive(Clone, Default)]
+    struct DpCell {
+        best: i32,
+        best_gap: i32,
+        stats: AlnStats,
+        gap_stats: AlnStats,
+    }
+
+    let mut score_array: Vec<DpCell> = vec![
+        DpCell {
+            best: NEG_INF,
+            best_gap: NEG_INF,
+            stats: AlnStats::default(),
+            gap_stats: AlnStats::default()
+        };
+        alloc_size
+    ];
+
+    let gap_open_extend = gap_open + gap_extend;
+    score_array[0].best = 0;
+    score_array[0].best_gap = gap_open_extend;
+
+    let mut score = gap_open_extend;
+    let mut b_size = 1usize;
+    for j in 1..=n.min(alloc_size - 1) {
+        if score < -x_drop {
+            break;
+        }
+        score_array[j].best = score;
+        score_array[j].best_gap = score + gap_open_extend;
+        score_array[j].stats = AlnStats {
+            matches: 0,
+            mismatches: 0,
+            gap_opens: 1,
+            gap_letters: j as u32,
+        };
+        score += gap_extend;
+        b_size = j + 1;
+    }
+
+    let mut best_score = 0;
+    let mut best_i = 0;
+    let mut best_j = 0;
+    let mut best_stats = AlnStats::default();
+    let mut first_b_index = 0usize;
+    let mut dp_cells = 0usize;
+
+    for i in 1..=m {
+        let qc = get_q(q_seq, i, len1, reverse);
+
+        let mut score_val = NEG_INF;
+        let mut score_gap_row = NEG_INF;
+        let mut score_gap_row_stats = AlnStats::default();
+        let mut score_stats = AlnStats::default();
+        let mut last_b_index = first_b_index;
+
+        for j in first_b_index..b_size {
+            if j >= n {
+                break;
+            }
+            let sc = get_s(s_seq, j, len2, reverse);
+            dp_cells += 1;
+
+            let mut score_gap_col = score_array[j].best_gap;
+            let score_gap_col_stats = score_array[j].gap_stats;
+
+            let is_match = qc == sc;
+            let match_score = if is_match { reward } else { penalty };
+            let next_score = if score_array[j].best > NEG_INF {
+                score_array[j].best + match_score
+            } else {
+                NEG_INF
+            };
+            let mut next_stats = score_array[j].stats;
+            if is_match {
+                next_stats.matches += 1;
+            } else {
+                next_stats.mismatches += 1;
+            }
+
+            if score_val < score_gap_col {
+                score_val = score_gap_col;
+                score_stats = score_gap_col_stats;
+            }
+            if score_val < score_gap_row {
+                score_val = score_gap_row;
+                score_stats = score_gap_row_stats;
+            }
+
+            if best_score - score_val > x_drop {
+                if j == first_b_index {
+                    first_b_index += 1;
+                } else {
+                    score_array[j].best = NEG_INF;
+                }
+            } else {
+                last_b_index = j;
+
+                if score_val > best_score {
+                    best_score = score_val;
+                    best_i = i;
+                    best_j = j + 1;
+                    best_stats = score_stats;
+                }
+
+                score_gap_row += gap_extend;
+                let open_gap_row = score_val + gap_open_extend;
+                if open_gap_row > score_gap_row {
+                    score_gap_row = open_gap_row;
+                    score_gap_row_stats = score_stats;
+                    score_gap_row_stats.gap_opens += 1;
+                    score_gap_row_stats.gap_letters += 1;
+                } else {
+                    score_gap_row_stats.gap_letters += 1;
+                }
+
+                score_gap_col += gap_extend;
+                let open_gap_col = score_val + gap_open_extend;
+                if open_gap_col > score_gap_col {
+                    score_array[j].best_gap = open_gap_col;
+                    score_array[j].gap_stats = score_stats;
+                    score_array[j].gap_stats.gap_opens += 1;
+                    score_array[j].gap_stats.gap_letters += 1;
+                } else {
+                    score_array[j].best_gap = score_gap_col;
+                    score_array[j].gap_stats.gap_letters += 1;
+                }
+
+                score_array[j].best = score_val;
+                score_array[j].stats = score_stats;
+            }
+
+            score_val = next_score;
+            score_stats = next_stats;
+        }
+
+        if first_b_index >= b_size {
+            break;
+        }
+
+        if last_b_index + initial_window + 3 >= alloc_size && alloc_size < MAX_WINDOW_SIZE {
+            let new_alloc = (last_b_index + initial_window + 100)
+                .max(alloc_size * 2)
+                .min(MAX_WINDOW_SIZE);
+            score_array.resize(
+                new_alloc,
+                DpCell {
+                    best: NEG_INF,
+                    best_gap: NEG_INF,
+                    stats: AlnStats::default(),
+                    gap_stats: AlnStats::default(),
+                },
+            );
+            alloc_size = new_alloc;
+        }
+
+        if last_b_index < b_size.saturating_sub(1) {
+            b_size = last_b_index + 1;
+        } else {
+            while score_gap_row >= best_score - x_drop
+                && b_size <= n
+                && b_size < alloc_size
+                && b_size < MAX_WINDOW_SIZE
+            {
+                score_array[b_size].best = score_gap_row;
+                score_array[b_size].stats = score_gap_row_stats;
+                score_array[b_size].best_gap = score_gap_row + gap_open_extend;
+                score_array[b_size].gap_stats = score_gap_row_stats;
+                score_array[b_size].gap_stats.gap_opens += 1;
+                score_array[b_size].gap_stats.gap_letters += 1;
+                score_gap_row += gap_extend;
+                score_gap_row_stats.gap_letters += 1;
+                b_size += 1;
+            }
+        }
+
         if b_size <= n && b_size < alloc_size {
             score_array[b_size].best = NEG_INF;
             score_array[b_size].best_gap = NEG_INF;

@@ -4,42 +4,98 @@
 
 LOSAT produces approximately twice as many alignment hits as NCBI BLAST for long sequences (~600kb).
 
-| Metric | LOSAT (before) | LOSAT (after fix) | NCBI | Ratio |
-|--------|----------------|-------------------|------|-------|
-| Hit count | 29,766 | 28,819 | 14,877 | 1.94x |
-| Test case | AP027131 vs AP027133 (gencode 4) | | | |
-| Sequence lengths | 671kb vs 615kb | | | |
+| Metric | LOSAT | NCBI | Ratio |
+|--------|-------|------|-------|
+| Hit count (long seq) | 29,756 | 14,877 | **2.00x** |
+| Hit count (short seq) | 23,766 | 23,715 | **1.002x** |
+| Long test case | AP027131 vs AP027133 (gencode 4, 671kb vs 615kb) | | |
+| Short test case | MjeNMV vs MelaMJNV (gencode 1, ~125kb) | | |
 
-**Key observation**: Short sequences have near-parity (ratio ~1.006x). The issue scales with sequence length.
+**Key observation**: Short sequences have near-parity (~1.002x). The issue scales with sequence length.
 
 ---
 
-## BUGS FOUND AND FIXED
+## BUGS FOUND AND FIXED (2026-01-08 Session 5)
 
-### 1. Neighbor Word Expansion - Extra Entries for Low-Scoring Words (2026-01-08)
+### 1. Neighbor Word Expansion - Now Matches NCBI Exactly
 
-**File:** `lookup.rs:431-438, 481-489`
+**File:** `lookup.rs:431-445, 489-507`
 
-**Bug:** LOSAT was adding exact match entries to lookup table when `self_score < threshold`. NCBI does NOT do this - it only adds entries through the neighbor loop when `score >= threshold`.
+**Issue:** Previous "fix" was WRONG. NCBI blast_aalookup.c s_AddWordHits (lines 504-519) DOES add explicit entries when `self_score < threshold`. This is correct because neighbor search won't find exact matches for low-scoring words.
 
-**Impact:** 126,185 extra lookup entries were added, generating ~1M extra k-mer matches.
+**NCBI logic:**
+1. If threshold==0 OR self_score < threshold: Add explicit entry for query word
+2. If threshold==0: Return (skip neighbor search)
+3. Otherwise: Do neighbor search for all s where score(w,s) >= threshold
 
-**Fix:** Removed the incorrect `self_score < threshold` condition. Now only adds entries for `threshold == 0` (exact-only matching mode).
-
-**Result:** Hits reduced from 29,766 to 28,819 (reduction of 947 hits).
-
+**Current LOSAT (now matches NCBI):**
 ```rust
-// BEFORE (WRONG):
-if threshold == 0 || self_score < threshold {
-    entry_counts[idx] += num_offsets;  // Added 126k extra entries!
-}
+// Compute self-score of query word
+let self_score = blosum62_score(w0, w0) + blosum62_score(w1, w1) + blosum62_score(w2, w2);
 
-// AFTER (CORRECT - matches NCBI blast_aalookup.c s_AddWordHitsCore):
-if threshold == 0 {
+// NCBI: If threshold==0 OR self_score < threshold, add exact match explicitly
+if threshold == 0 || self_score < threshold {
     entry_counts[idx] += num_offsets;
+}
+// NCBI: If threshold==0, skip neighbor search entirely
+if threshold == 0 {
     continue;
 }
+// Neighbor search
 ```
+
+### 2. Flag Update Condition - Now Matches NCBI Exactly
+
+**File:** `utils.rs:2001-2019`
+
+**Bug:** LOSAT was setting `flag=1` based on `right_extend` (whether left extension reached first hit), but NCBI sets it based on `score >= cutoff_score`.
+
+**Impact:** Affects diagonal suppression behavior for subsequent hits on the same diagonal.
+
+**NCBI reference (aa_ungapped.c:575-591):**
+```c
+if (score >= cutoffs->cutoff_score) {
+    diag_array[diag_coord].flag = 1;
+    diag_array[diag_coord].last_hit = s_last_off - (wordsize - 1) + diag_offset;
+} else {
+    diag_array[diag_coord].last_hit = subject_offset + diag_offset;
+}
+```
+
+**Current LOSAT (now matches NCBI):**
+```rust
+if score >= cutoff {
+    diag_entry.flag = 1;
+    diag_entry.last_hit = s_last_off - (wordsize - 1) + diag_offset;
+} else {
+    diag_entry.last_hit = subject_offset + diag_offset;
+}
+```
+
+---
+
+## REMAINING MYSTERY (As of 2026-01-08 Session 5)
+
+**Short sequence test (MjeNMV vs MelaMJNV):** LOSAT 23,766 vs NCBI 23,715 = **1.002x** (near parity)
+
+**Long sequence test (AP027131 vs AP027133):** LOSAT 29,756 vs NCBI 14,877 = **2.00x** (double)
+
+The issue is clearly **LENGTH-DEPENDENT**. With fixes applied, short sequences have near-parity.
+
+### Key Observations
+1. Short sequences: Near-parity (~1.002x)
+2. Long sequences: 2x excess
+3. Excess concentrated in low-score HSPs (0-30 bits)
+4. Both neighbor expansion and flag update now match NCBI exactly
+5. SIMD vs scalar produces identical results
+6. No duplicate offset pairs in scan output
+
+### What's Still Different?
+The remaining difference must scale with sequence length. Possibilities:
+1. Diagonal array state management over many frames
+2. Integer precision issues in long sequences
+3. Some NCBI-specific optimization not yet identified
+4. Different handling of frame boundaries or sentinel bytes
 
 ---
 

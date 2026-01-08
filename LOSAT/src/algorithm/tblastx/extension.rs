@@ -424,10 +424,11 @@ pub fn extend_hit_ungapped(
     let mut q_best_left_off = q_pos;
     let mut q_right_off = q_pos;
 
+    // NCBI BLAST assumes caller provides valid coordinates within bounds.
+    // The lookup table and offset generation guarantee valid positions.
+    // Reference: aa_ungapped.c does NOT have bounds checks in word scanning loop.
     for i in 0..k_size {
-        if q_pos + i >= q_seq.len() || s_pos + i >= s_seq.len() {
-            break;
-        }
+        // SAFETY: Lookup table guarantees q_pos and s_pos have at least k_size valid positions
         let q_char = unsafe { *q_seq.get_unchecked(q_pos + i) };
         let s_char = unsafe { *s_seq.get_unchecked(s_pos + i) };
         // NCBI BLAST does NOT break on stop codons in word scanning
@@ -512,20 +513,21 @@ pub fn extend_hit_two_hit(
     let k_size = 3;
 
     // First, find the best scoring position within the word at R
+    // NCBI BLAST assumes caller provides valid coordinates within bounds.
+    // The lookup table and offset generation guarantee valid positions.
+    // Reference: aa_ungapped.c does NOT have bounds checks in word scanning loop.
     let mut score = 0i32;
-    let mut left_score = 0i32;
+    let mut seed_score = 0i32;
     let mut right_d = 0usize;
 
     for i in 0..k_size {
-        if q_right_off + i >= q_seq.len() || s_right_off + i >= s_seq.len() {
-            break;
-        }
+        // SAFETY: Lookup table guarantees q_right_off and s_right_off have at least k_size valid positions
         let q_char = unsafe { *q_seq.get_unchecked(q_right_off + i) };
         let s_char = unsafe { *s_seq.get_unchecked(s_right_off + i) };
         score += get_score(q_char, s_char);
 
-        if score > left_score {
-            left_score = score;
+        if score > seed_score {
+            seed_score = score;
             right_d = i + 1; // Position is one beyond the end of the word
         }
     }
@@ -537,7 +539,7 @@ pub fn extend_hit_two_hit(
     // Note: NCBI BLAST does NOT explicitly check for stop codons in s_BlastAaExtendLeft.
     // Stop codons have very negative scores in BLOSUM62 (-4 to -5), so X-drop handles them.
     // Reference: ncbi-blast/c++/src/algo/blast/core/aa_ungapped.c:886-921
-    let (max_score, left_disp) =
+    let (left_score, left_disp) =
         extend_left_ungapped(q_seq, s_seq, q_right_off, s_right_off, 0, x_drop);
 
     // Check if left extension reached the first hit
@@ -548,7 +550,7 @@ pub fn extend_hit_two_hit(
 
     // Only extend to the right if left extension reached the first hit (NCBI BLAST behavior)
     let mut right_disp = 0usize;
-    let mut max_score_total = max_score;
+    let mut right_score = 0i32;
     let mut right_extended = false;
     let mut s_last_off = s_right_off; // Default to current position if no right extension
 
@@ -557,14 +559,19 @@ pub fn extend_hit_two_hit(
         // regardless of how many characters are actually extended.
         // Reference: aa_ungapped.c:1140
         right_extended = true;
-        
+
+        // NCBI BLAST extends right starting from left_score as initial score
         let (new_max_score, new_right_disp, j) =
-            extend_right_ungapped(q_seq, s_seq, q_right_off, s_right_off, max_score, x_drop);
-        max_score_total = new_max_score;
+            extend_right_ungapped(q_seq, s_seq, q_right_off, s_right_off, left_score, x_drop);
+        right_score = new_max_score;
         right_disp = new_right_disp;
         // s_last_off is the rightmost subject position scanned (NCBI BLAST style)
         s_last_off = s_right_off + j;
     }
+
+    // NCBI BLAST returns MAX(left_score, right_score)
+    // Reference: aa_ungapped.c:1157
+    let max_score_total = left_score.max(right_score);
 
     let q_start = q_right_off - left_disp;
     let q_end = q_right_off + right_disp;
@@ -573,7 +580,7 @@ pub fn extend_hit_two_hit(
 
     // DEBUG: Print alignment details for first few high-scoring extensions
     if debug_ext && max_score_total >= 100 && !DEBUG_PRINTED.swap(true, std::sync::atomic::Ordering::Relaxed) {
-        eprintln!("[DEBUG_EXT] max_score_from_left={} max_score_total={}", max_score, max_score_total);
+        eprintln!("[DEBUG_EXT] left_score={} right_score={} max_score_total={}", left_score, right_score, max_score_total);
         eprintln!("[DEBUG_EXT] q_start={} q_end={} s_start={} s_end={} score={}",
             q_start, q_end, s_start, s_end, max_score_total);
         eprintln!("[DEBUG_EXT] left_disp={} right_disp={} x_drop={}", left_disp, right_disp, x_drop);

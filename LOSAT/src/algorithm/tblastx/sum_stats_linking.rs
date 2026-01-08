@@ -768,11 +768,52 @@ pub fn apply_sum_stats_even_gap_linking(
     indexed_results.sort_by_key(|(idx, _)| *idx);
     
     // Flatten results while maintaining order
-    let results: Vec<UngappedHit> = indexed_results
+    let mut results: Vec<UngappedHit> = indexed_results
         .into_iter()
         .flat_map(|(_, hits)| hits)
         .collect();
-    
+
+    // ========================================================================
+    // NCBI Parity: Two final sorts for translated queries (link_hsps.c:990-1000)
+    // ========================================================================
+    // NCBI reference (verbatim):
+    // ```c
+    // if (kTranslatedQuery) {
+    //     qsort(link_hsp_array, num, sizeof(BlastHSP*), s_RevCompareHSPsTransl);
+    //     qsort(link_hsp_array, num, sizeof(BlastHSP*), s_FwdCompareHSPsTransl);
+    // }
+    // ```
+    //
+    // Sort 1: s_RevCompareHSPsTransl - Reverse sort by query context group and subject frame
+    // NCBI comparator (link_hsps.c:274-291):
+    //   context comparison: context/(NUM_FRAMES/2) = context/3 for query strand group
+    //   subject frame comparison: SIGN(subject.frame)
+    //   Both use descending order (h1 < h2 returns 1)
+    results.sort_by(|a, b| {
+        // Query context group (context/3 in NCBI)
+        let a_ctx_group = a.ctx_idx / 3;
+        let b_ctx_group = b.ctx_idx / 3;
+        // Subject strand sign
+        let a_s_sign = a.s_frame.signum();
+        let b_s_sign = b.s_frame.signum();
+
+        // NCBI s_RevCompareHSPsTransl: descending by context group, then by subject frame
+        b_ctx_group.cmp(&a_ctx_group)
+            .then(b_s_sign.cmp(&a_s_sign))
+    });
+
+    // Sort 2: s_FwdCompareHSPsTransl - Forward stable sort by query context group
+    // NCBI comparator (link_hsps.c:248-272):
+    //   context comparison: ascending by context/(NUM_FRAMES/2)
+    // This effectively groups HSPs by query strand while preserving order within groups
+    results.sort_by(|a, b| {
+        let a_ctx_group = a.ctx_idx / 3;
+        let b_ctx_group = b.ctx_idx / 3;
+
+        // NCBI s_FwdCompareHSPsTransl: ascending by context group
+        a_ctx_group.cmp(&b_ctx_group)
+    });
+
     results
 }
 

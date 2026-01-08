@@ -46,7 +46,9 @@
       "Bash(awk:*)",
       "Bash(LOSAT_DIAGNOSTICS=1 LOSAT_NO_SIMD=1 ./target/release/LOSAT:*)",
       "Bash(LOSAT_USE_NEIGHBOR_MAP=1 ./target/release/LOSAT:*)",
-      "Bash(cargo test:*)"
+      "Bash(cargo test:*)",
+      "Bash(tree:*)",
+      "Bash(find:*)"
     ]
   }
 }

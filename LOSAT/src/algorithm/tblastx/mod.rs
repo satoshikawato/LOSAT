@@ -15,9 +15,15 @@ pub mod reevaluate;
 pub mod diagnostics;
 pub mod ncbi_cutoffs;
 pub mod hsp_culling;
-pub mod utils;
+pub mod tracing;
+pub mod filtering;
+mod scan;
+pub mod blast_extend;
+pub mod blast_gapalign;
+pub mod blast_aascan;
+pub mod blast_engine;
 
 pub use args::TblastxArgs;
-pub use utils::run;
+pub use blast_engine::run;
 
 

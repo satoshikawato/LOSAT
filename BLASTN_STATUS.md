@@ -1,6 +1,6 @@
 # LOSAT BLASTN Implementation Status
 
-**Last Updated**: 2026-01-09
+**Last Updated**: 2026-01-10
 **Branch**: fix2
 
 ## Overview
@@ -53,15 +53,34 @@ BEFORE: 2-657100 (length: 657099)
 AFTER:  1-657101 (length: 657101) ✓
 ```
 
-**Root Cause**: Three issues in gapped extension (gapped.rs):
-1. Band contraction too aggressive: `b_size = last_b_index + 1` → `b_size = last_b_index + 2`
-2. Missing final score comparison after inner loop
-3. Incorrect s_consumed indexing: `b_offset` → `b_offset + 1`
+**Root Cause**: Issues in gapped extension (gapped.rs) - original analysis was incorrect.
 
 **NCBI Reference**: `blast_gapalign.c:933-952` (band contraction)
 
 **Files Modified**:
-- `src/algorithm/blastn/alignment/gapped.rs` (lines 435-453, 500-505, 715-742, 778-783)
+- `src/algorithm/blastn/alignment/gapped.rs`
+
+### 7. Alignment Length Off-by-Two Fix (Session 4) - FIXED
+**Problem**: LOSAT produced 21-base alignments while NCBI produced 19-base alignments
+```
+NCBI:  180 hits at length 19 (100% identity)
+LOSAT: 186 hits at length 21 (90.476% identity = 19/21 matches)
+```
+
+**Root Cause**: In LOSAT's DP loop, `score_val` at loop index `b_index=k` contains the score from the PREVIOUS iteration (`next_score` at `b_index=k-1`), which represents position `k-1`, not `k`. When we set `b_offset=k`, it's 1 higher than the actual consumed position.
+
+**Fix**: Three changes to match NCBI behavior:
+1. Removed post-loop score comparison (didn't exist in NCBI, was over-extending alignments)
+2. Changed band contraction from `last_b_index + 2` back to `last_b_index + 1` (matches NCBI)
+3. Changed `s_consumed = b_offset` (not `b_offset + 1`) to account for the offset shift
+
+**Result**: Alignment lengths now match NCBI exactly (19 bases with 100% identity)
+```
+AFTER:  8,542 hits with correct 19-base alignments (69.2% coverage)
+```
+
+**Files Modified**:
+- `src/algorithm/blastn/alignment/gapped.rs` (s_consumed calculation, band contraction, removed post-loop comparison)
 
 ### 5. Cutoff Score Calculation Fix (Session 3) - FIXED
 **Problem**: Using same Karlin params for ungapped and gapped calculations
@@ -83,17 +102,21 @@ AFTER:  1-657101 (length: 657101) ✓
 ## Known Issues
 
 ### Issue 1: Missing Hits in Self-Comparison
-**Symptom**: NZ_CP006932 self-comparison shows only 70% of NCBI hits (8,609 vs 12,340)
+**Symptom**: NZ_CP006932 self-comparison shows only 69% of NCBI hits (8,542 vs 12,340)
+
+**Status**: Alignment lengths are now correct (19 bases matching NCBI). Missing ~3,800 hits.
 
 **Possible Causes**:
-1. Differences in seed finding logic
-2. Extension algorithm differences
+1. Differences in seed finding logic (most likely)
+2. Different X-drop termination behavior
 3. Scoring calculation differences
 
 **Priority**: High
 
 ### Issue 2: Extra Hits in Some Cases
 **Symptom**: Some datasets show 105-115% of NCBI hits
+
+**Status**: May be partially resolved by alignment length fix (needs re-testing)
 
 **Possible Causes**:
 1. Missing HSP filtering step in NCBI that LOSAT doesn't implement
@@ -107,12 +130,12 @@ AFTER:  1-657101 (length: 657101) ✓
 |---------|-----------|-------|------|----------|--------|
 | EDL933.Sakai | megablast | 5,634 | 5,718 | 98.5% | ✓ Excellent |
 | Sakai.MG1655 | megablast | 6,434 | 6,476 | 99.3% | ✓ Excellent |
-| NZ_CP006932 self | blastn | 8,609 | 12,340 | 69.7% | ✗ Investigate |
+| NZ_CP006932 self | blastn | 8,542 | 12,340 | 69.2% | ✗ Missing hits (lengths correct) |
 | MjeNMV.MelaMJNV | blastn | 2,588 | 2,668 | 97.0% | ✓ Good |
 | SiNMV.ChdeNMV | blastn | 4,192 | 4,367 | 95.9% | ✓ Good |
-| MelaMJNV.PemoMJNVA | blastn | 3,088 | 2,729 | 113.1% | ⚠ Extra hits |
-| PemoMJNVA.PeseMJNV | blastn | 3,094 | 2,940 | 105.2% | ⚠ Extra hits |
-| PeseMJNV.PemoMJNVB | blastn | 13,454 | 11,668 | 115.3% | ⚠ Extra hits |
+| MelaMJNV.PemoMJNVA | blastn | 3,088 | 2,729 | 113.1% | ⚠ Extra hits (needs retest) |
+| PemoMJNVA.PeseMJNV | blastn | 3,094 | 2,940 | 105.2% | ⚠ Extra hits (needs retest) |
+| PeseMJNV.PemoMJNVB | blastn | 13,454 | 11,668 | 115.3% | ⚠ Extra hits (needs retest) |
 
 ## Key Files
 

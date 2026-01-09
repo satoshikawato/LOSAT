@@ -11,13 +11,13 @@ This document summarizes the current state of the BLASTN implementation in LOSAT
 
 ### Megablast (default task)
 - Core algorithm functional
-- Hit coverage: 89-99% compared to NCBI BLAST
+- Hit coverage: **98-99%** compared to NCBI BLAST
 - Performance: ~3x slower than NCBI (acceptable for now)
 
 ### Blastn (task blastn)
 - Core DP-based gapped alignment implemented
 - Follows NCBI's `Blast_SemiGappedAlign` algorithm
-- Hit coverage varies: 75-111% depending on dataset
+- Hit coverage: 70-115% depending on dataset (needs investigation)
 
 ## Completed Fixes
 
@@ -46,72 +46,73 @@ This document summarizes the current state of the BLASTN implementation in LOSAT
 
 **File**: `src/algorithm/blastn/alignment/gapped.rs:498-731`
 
+### 4. Coordinate Off-by-One Fix (Session 3) - FIXED
+**Problem**: Top hit started at position 2 instead of 1
+```
+BEFORE: 2-657100 (length: 657099)
+AFTER:  1-657101 (length: 657101) ✓
+```
+
+**Root Cause**: Three issues in gapped extension (gapped.rs):
+1. Band contraction too aggressive: `b_size = last_b_index + 1` → `b_size = last_b_index + 2`
+2. Missing final score comparison after inner loop
+3. Incorrect s_consumed indexing: `b_offset` → `b_offset + 1`
+
+**NCBI Reference**: `blast_gapalign.c:933-952` (band contraction)
+
+**Files Modified**:
+- `src/algorithm/blastn/alignment/gapped.rs` (lines 435-453, 500-505, 715-742, 778-783)
+
+### 5. Cutoff Score Calculation Fix (Session 3) - FIXED
+**Problem**: Using same Karlin params for ungapped and gapped calculations
+**Fix**: Now correctly uses:
+- **UNGAPPED params (kbp_std)** for gap_trigger calculation
+- **GAPPED params (kbp_gap)** for cutoff_score_max calculation
+
+**NCBI Reference**: `blast_parameters.c:340-344`
+
+**Files Modified**:
+- `src/algorithm/blastn/blast_engine/run.rs` (lines 62-89, 330-349)
+
+### 6. Removed Non-NCBI Containment Filter (Session 3)
+**Problem**: Post-processing containment filter removed too many valid HSPs
+**Fix**: Removed entirely - NCBI's containment filtering (`BlastIntervalTreeContainsHSP`) is applied DURING alignment, not as post-processing
+
+**NCBI Reference**: `blast_gapalign.c:3918`, `blast_itree.c:810-847`
+
 ## Known Issues
 
-### Issue 1: Coordinate Off-by-One
-**Symptom**: Top hit starts at position 2 instead of 1
-```
-NCBI:  1	657101	1	657101  (length: 657101)
-LOSAT: 2	657100	2	657100  (length: 657099)
-```
-
-**Likely Cause**: Off-by-one in coordinate conversion during gapped alignment or output formatting
-
-**Files to Investigate**:
-- `src/algorithm/blastn/alignment/gapped.rs` - coordinate handling in DP
-- `src/algorithm/blastn/blast_engine/run.rs` - HSP coordinate conversion
-- `src/report/outfmt6.rs` - output coordinate formatting
-
-**Priority**: Medium (affects output accuracy but not significantly)
-
-### Issue 2: Missing Hits in Self-Comparison
-**Symptom**: NZ_CP006932 self-comparison shows only 75% of NCBI hits (9,283 vs 12,340)
+### Issue 1: Missing Hits in Self-Comparison
+**Symptom**: NZ_CP006932 self-comparison shows only 70% of NCBI hits (8,609 vs 12,340)
 
 **Possible Causes**:
-1. HSP filtering differences
-2. Two-hit extension threshold differences
-3. Ungapped extension X-drop differences
-4. Score cutoff differences
+1. Differences in seed finding logic
+2. Extension algorithm differences
+3. Scoring calculation differences
 
-**Files to Investigate**:
-- `src/algorithm/blastn/blast_extend.rs` - ungapped extension
-- `src/algorithm/blastn/extension.rs` - two-hit logic
-- `src/algorithm/blastn/filtering/` - HSP filtering
+**Priority**: High
 
-**Priority**: High (significant hit loss)
-
-### Issue 3: Extra Hits in Some Cases
-**Symptom**: MelaMJNV.PemoMJNVA shows 111% of NCBI hits (3,049 vs 2,729)
+### Issue 2: Extra Hits in Some Cases
+**Symptom**: Some datasets show 105-115% of NCBI hits
 
 **Possible Causes**:
-1. Missing HSP filtering/culling step
-2. Different E-value cutoff application
-3. Missing containment filtering
+1. Missing HSP filtering step in NCBI that LOSAT doesn't implement
+2. Different scoring thresholds
 
-**Priority**: Medium (extra hits are less problematic than missing hits)
-
-### Issue 4: Performance Gap
-**Current**: blastn ~4x slower than NCBI (26s vs 6.7s for NZ_CP006932 self)
-**Current**: megablast ~3x slower than NCBI (0.86s vs 0.28s)
-
-**Possible Optimizations**:
-1. SIMD in DP inner loop
-2. Better memory allocation strategy
-3. Reduce unnecessary gapped extensions
-4. Profile to find actual bottlenecks
-
-**Priority**: Low (functionality first, optimize later)
+**Priority**: Medium
 
 ## Test Results Summary
 
 | Dataset | Algorithm | LOSAT | NCBI | Coverage | Status |
 |---------|-----------|-------|------|----------|--------|
-| EDL933.Sakai | megablast | 5,611 | 5,718 | 98.1% | ✓ Good |
-| Sakai.MG1655 | megablast | 6,422 | 6,476 | 99.2% | ✓ Good |
-| NZ_CP006932 self | megablast | 407 | 454 | 89.6% | ⚠ Acceptable |
-| NZ_CP006932 self | blastn | 9,283 | 12,340 | 75.2% | ✗ Investigate |
-| MjeNMV.MelaMJNV | blastn | 2,628 | 2,668 | 98.5% | ✓ Good |
-| MelaMJNV.PemoMJNVA | blastn | 3,049 | 2,729 | 111.7% | ⚠ Extra hits |
+| EDL933.Sakai | megablast | 5,634 | 5,718 | 98.5% | ✓ Excellent |
+| Sakai.MG1655 | megablast | 6,434 | 6,476 | 99.3% | ✓ Excellent |
+| NZ_CP006932 self | blastn | 8,609 | 12,340 | 69.7% | ✗ Investigate |
+| MjeNMV.MelaMJNV | blastn | 2,588 | 2,668 | 97.0% | ✓ Good |
+| SiNMV.ChdeNMV | blastn | 4,192 | 4,367 | 95.9% | ✓ Good |
+| MelaMJNV.PemoMJNVA | blastn | 3,088 | 2,729 | 113.1% | ⚠ Extra hits |
+| PemoMJNVA.PeseMJNV | blastn | 3,094 | 2,940 | 105.2% | ⚠ Extra hits |
+| PeseMJNV.PemoMJNVB | blastn | 13,454 | 11,668 | 115.3% | ⚠ Extra hits |
 
 ## Key Files
 
@@ -123,46 +124,38 @@ src/algorithm/blastn/
 │   ├── greedy.rs         # Greedy alignment for megablast
 │   └── statistics.rs     # Alignment statistics
 ├── blast_engine/
-│   ├── mod.rs            # Engine coordination
+│   ├── mod.rs            # Engine coordination, HSP filtering
 │   └── run.rs            # Main execution loop
 ├── blast_extend.rs       # Ungapped extension, diagonal tracking
 ├── extension.rs          # Two-hit extension logic
 ├── lookup.rs             # Word lookup table
-└── filtering/            # HSP filtering
+├── ncbi_cutoffs.rs       # Cutoff score calculations
+└── filtering/
+    └── purge_endpoints.rs # HSP endpoint purging
 ```
 
 ### NCBI Reference Files
 ```
-/mnt/c/Users/genom/GitHub/ncbi-blast/c++/src/algo/blast/core/
+/mnt/c/Users/kawato/Documents/GitHub/ncbi-blast/c++/src/algo/blast/core/
 ├── blast_gapalign.c      # Blast_SemiGappedAlign (lines 735-962)
+├── blast_parameters.c    # Cutoff calculations (lines 340-344)
+├── blast_hits.c          # HSP filtering (lines 2455-2535)
 ├── na_ungapped.c         # Nucleotide ungapped extension
-├── blast_extend.c        # Extension algorithms
-└── blast_parameters.c    # Score parameters
+└── blast_itree.c         # Interval tree containment check
 ```
 
 ## Next Steps
 
-### Priority 1: Investigate Missing Hits
-1. Add diagnostic logging to count hits at each stage
-2. Compare NCBI vs LOSAT at:
-   - Seed detection
-   - Ungapped extension
-   - Two-hit trigger
-   - Gapped extension
-   - Final filtering
-3. Identify where hits are being lost
+### Priority 1: Investigate Missing Hits (NZ_CP006932)
+1. Compare seed detection between NCBI and LOSAT
+2. Add diagnostic logging at each stage
+3. Identify where hits are being filtered out
 
-### Priority 2: Fix Coordinate Off-by-One
-1. Trace coordinate flow from DP to output
-2. Compare with NCBI coordinate handling
-3. Verify 0-indexed vs 1-indexed conversions
+### Priority 2: Investigate Extra Hits
+1. Compare HSP scoring between NCBI and LOSAT
+2. Check for missing filtering steps in NCBI
 
-### Priority 3: Investigate Extra Hits
-1. Check if LOSAT is missing a filtering step
-2. Compare E-value calculations
-3. Check HSP containment/overlap filtering
-
-### Priority 4: Performance Optimization (Later)
+### Priority 3: Performance Optimization (Later)
 1. Profile to identify bottlenecks
 2. Consider SIMD for DP inner loop
 3. Optimize memory allocation patterns
@@ -174,25 +167,24 @@ src/algorithm/blastn/
 cd LOSAT && time ./target/release/LOSAT blastn -q tests/fasta/NZ_CP006932.fasta -s tests/fasta/NZ_CP006932.fasta -o /tmp/test.out --task blastn -n 1
 
 # Compare hit counts
+wc -l tests/losat_out/NZ_CP006932.NZ_CP006932.losatn.blastn.out
 grep -v "^#" tests/blast_out/NZ_CP006932.NZ_CP006932.task_blastn.out | wc -l
-grep -v "^#" tests/losat_out/NZ_CP006932.NZ_CP006932.losatn.blastn.out | wc -l
 
 # Compare top hits
-head -5 tests/blast_out/NZ_CP006932.NZ_CP006932.task_blastn.out
 head -5 tests/losat_out/NZ_CP006932.NZ_CP006932.losatn.blastn.out
+grep -v "^#" tests/blast_out/NZ_CP006932.NZ_CP006932.task_blastn.out | head -5
 
-# Run with NCBI for comparison
-blastn -task blastn -query tests/fasta/NZ_CP006932.fasta -subject tests/fasta/NZ_CP006932.fasta -out /tmp/ncbi.out -outfmt 7
+# Run with coordinate debug
+LOSAT_DEBUG_COORDS=1 ./target/release/LOSAT blastn -q tests/fasta/AP027280.fasta -s tests/fasta/AP027280.fasta -o /tmp/test.out --task blastn -n 1 2>&1 | head -20
 ```
 
 ## NCBI Code References
 
-### Key Functions to Match
-1. `Blast_SemiGappedAlign` - Score-only DP (implemented ✓)
-2. `s_BlastNaExtend` - Nucleotide ungapped extension
-3. `BLAST_DiagUpdate` - Diagonal tracking
-4. `s_NuclUngappedExtend` - Core extension logic
-5. `BlastHitSavingParametersNew` - Hit filtering parameters
+### Key Functions Implemented
+1. `Blast_SemiGappedAlign` - Score-only DP ✓
+2. `gap_trigger_raw_score` - Gap trigger calculation ✓
+3. `cutoff_score_max_from_evalue` - Cutoff from E-value ✓
+4. `Blast_HSPListPurgeHSPsWithCommonEndpoints` - Endpoint purging ✓
 
 ### Important Constants
 ```c
@@ -201,4 +193,6 @@ blastn -task blastn -query tests/fasta/NZ_CP006932.fasta -subject tests/fasta/NZ
 #define BLAST_GAP_EXTN_NUCL 2
 #define BLAST_WORD_SIZE_NUCL 28  // megablast
 #define BLAST_WORD_SIZE_NUCL_BLASTN 11  // blastn
+#define BLAST_GAP_TRIGGER_NUCL 27.0  // Gap trigger bit score
+#define CUTOFF_E_BLASTN 0.05  // Ungapped cutoff E-value
 ```

@@ -61,7 +61,8 @@
       "Bash(LOSAT_SKIP_PURGE=1 LOSAT_SKIP_DEDUP=1 ./target/release/LOSAT:*)",
       "Bash(LOSAT_SKIP_DEDUP=1 ./target/release/LOSAT blastn:*)",
       "Bash(../target/release/LOSAT blastn:*)",
-      "Bash(LOSAT_SKIP_CONTAINMENT=1 ./target/release/LOSAT blastn:*)"
+      "Bash(LOSAT_SKIP_CONTAINMENT=1 ./target/release/LOSAT blastn:*)",
+      "Bash(xargs basename:*)"
     ]
   }
 }

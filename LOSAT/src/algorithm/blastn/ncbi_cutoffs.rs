@@ -347,18 +347,21 @@ pub fn compute_blastn_cutoff_score(
     gapped_params: &KarlinParams,
     scale_factor: f64,
 ) -> i32 {
+    // Debug mode: LOSAT_DEBUG_CUTOFFS=1 to show detailed calculation
+    let debug_cutoffs = std::env::var("LOSAT_DEBUG_CUTOFFS").is_ok();
+
     // Step 1: Compute gap_trigger using UNGAPPED params
     let gap_trigger = gap_trigger_raw_score(gap_trigger_bits, ungapped_params);
-    
+
     // Step 2: Compute eff_searchsp with length adjustment using GAPPED params
     // NCBI reference: blast_setup.c:836-843
     // eff_searchsp = (subject_len - length_adj) * (query_len - length_adj)
-    let (_length_adj, eff_searchsp) = compute_eff_lengths_subject_mode_blastn(
+    let (length_adj, eff_searchsp) = compute_eff_lengths_subject_mode_blastn(
         query_len,
         subject_len,
         gapped_params,
     );
-    
+
     // Step 3: Compute cutoff_score_max using GAPPED params
     // NCBI reference: blast_parameters.c:943
     // BLAST_Cutoffs(&new_cutoff, &evalue, kbp, searchsp, FALSE, 0);
@@ -367,11 +370,20 @@ pub fn compute_blastn_cutoff_score(
         eff_searchsp,
         gapped_params,
     );
-    
+
     // Step 4: Return MIN(gap_trigger * scale_factor, cutoff_score_max)
     // NCBI reference: blast_parameters.c:368-373
     // For blastn in gapped mode: new_cutoff = gap_trigger, then MIN with cutoff_score_max
-    cutoff_score_for_ungapped_extension(gap_trigger, cutoff_score_max, scale_factor)
+    let final_cutoff = cutoff_score_for_ungapped_extension(gap_trigger, cutoff_score_max, scale_factor);
+
+    if debug_cutoffs {
+        eprintln!(
+            "[CUTOFF] q_len={}, s_len={}, len_adj={}, eff_searchsp={}, gap_trigger={}, cutoff_score_max={}, final={}",
+            query_len, subject_len, length_adj, eff_searchsp, gap_trigger, cutoff_score_max, final_cutoff
+        );
+    }
+
+    final_cutoff
 }
 
 #[cfg(test)]

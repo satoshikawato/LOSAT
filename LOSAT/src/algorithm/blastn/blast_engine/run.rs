@@ -201,6 +201,8 @@ pub fn run(args: BlastnArgs) -> Result<()> {
 
     // Debug mode: set BLEMIR_DEBUG=1 to enable, BLEMIR_DEBUG_WINDOW="q_start-q_end,s_start-s_end" to focus on a region
     let debug_mode = std::env::var("BLEMIR_DEBUG").is_ok();
+    // BLASTN-specific debug mode: set LOSAT_DEBUG_BLASTN=1 to enable detailed hit loss diagnostics
+    let blastn_debug = std::env::var("LOSAT_DEBUG_BLASTN").is_ok();
     let debug_window: Option<(usize, usize, usize, usize)> =
         std::env::var("BLEMIR_DEBUG_WINDOW").ok().and_then(|s| {
             let parts: Vec<&str> = s.split(',').collect();
@@ -347,6 +349,16 @@ pub fn run(args: BlastnArgs) -> Result<()> {
                     1.0,
                 )
             }).collect();
+
+            // BLASTN debug: Log cutoff scores for this query-subject pair
+            if blastn_debug {
+                eprintln!(
+                    "[BLASTN_DEBUG] Subject {} (len={}): cutoff_scores={:?}, params_ungapped=(lambda={:.4}, K={:.4}), params_gapped=(lambda={:.4}, K={:.4})",
+                    s_id, s_len, cutoff_scores,
+                    params_ungapped_for_closure.lambda, params_ungapped_for_closure.k,
+                    params_gapped_for_closure.lambda, params_gapped_for_closure.k
+                );
+            }
 
             // Search both strands: plus (forward) and minus (reverse complement)
             // is_minus_strand: false = plus strand, true = minus strand
@@ -1677,11 +1689,23 @@ pub fn run(args: BlastnArgs) -> Result<()> {
             } // end of strand loop
 
             // Print debug summary for this subject
-            if debug_mode {
+            if debug_mode || blastn_debug {
+                // Get the cutoff_score for the first query (typically only one query in blastn)
+                let cutoff_score_0 = cutoff_scores.first().copied().unwrap_or(0);
                 eprintln!(
-                    "[DEBUG] Subject {}: positions={}, seeds_found={}, ungapped_low={}, two_hit_failed={}, gapped_attempted={}, window_seeds={}, hits={}",
-                    s_id, dbg_total_s_positions, dbg_seeds_found, dbg_ungapped_low, dbg_two_hit_failed, dbg_gapped_attempted, dbg_window_seeds, local_hits.len()
+                    "[DEBUG] Subject {}: positions={}, seeds_found={}, ungapped_low={}, two_hit_failed={}, gapped_attempted={}, hits={}, cutoff_score={}",
+                    s_id, dbg_total_s_positions, dbg_seeds_found, dbg_ungapped_low, dbg_two_hit_failed, dbg_gapped_attempted, local_hits.len(), cutoff_score_0
                 );
+                // Show percentage of seeds rejected at each stage
+                if dbg_seeds_found > 0 {
+                    let ungapped_low_pct = (dbg_ungapped_low as f64 / dbg_seeds_found as f64) * 100.0;
+                    let two_hit_pct = (dbg_two_hit_failed as f64 / dbg_seeds_found as f64) * 100.0;
+                    let gapped_pct = (dbg_gapped_attempted as f64 / dbg_seeds_found as f64) * 100.0;
+                    eprintln!(
+                        "[DEBUG] Hit loss breakdown: ungapped_low={:.1}%, two_hit_failed={:.1}%, gapped_attempted={:.1}%",
+                        ungapped_low_pct, two_hit_pct, gapped_pct
+                    );
+                }
             }
 
             // Suppress unused variable warnings when not in debug mode

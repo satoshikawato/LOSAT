@@ -432,6 +432,17 @@ pub fn extend_gapped_one_direction(
             score_val = next_score;
         }
 
+        // CRITICAL FIX: After the inner loop, score_val holds the score at the last processed cell
+        // (computed as next_score in the final iteration). This score was never compared to best_score
+        // because the comparison happens BEFORE updating score_val. For perfect diagonal matches,
+        // this causes the last cell's score to be lost.
+        // Fix: Compare the final score_val against best_score after the loop.
+        if score_val > best_score {
+            best_score = score_val;
+            a_offset = a_index;
+            b_offset = last_b_index;
+        }
+
         // NCBI reference: blast_gapalign.c:918-919
         // if (first_b_index == b_size) break;
         if first_b_index >= b_size {
@@ -446,9 +457,11 @@ pub fn extend_gapped_one_direction(
         }
 
         // NCBI reference: blast_gapalign.c:933-952
+        // CRITICAL: Use +2 (not +1) to leave room for the diagonal to advance
+        // Without this, the last diagonal cell gets cut off in perfect matches
         if last_b_index < b_size.saturating_sub(1) {
-            // Shrink window
-            b_size = last_b_index + 1;
+            // Shrink window, but leave room for next diagonal (+2 instead of +1)
+            b_size = last_b_index + 2;
         } else {
             // NCBI reference: blast_gapalign.c:946-951
             // Extend window with gaps
@@ -486,8 +499,10 @@ pub fn extend_gapped_one_direction(
 
     // NCBI reference: blast_gapalign.c:893-896
     // a_offset and b_offset represent the position where best score was found.
+    // a_offset is 1-indexed (a_index goes 1 to m), so a_offset directly gives consumed count.
+    // b_offset is 0-indexed (b_index goes 0 to n-1), so consumed = b_offset + 1.
     let q_consumed = a_offset;
-    let s_consumed = b_offset;
+    let s_consumed = b_offset + 1;
 
     // Estimate matches/mismatches/gaps from score
     // For a gapless alignment: score = matches * reward + mismatches * penalty
@@ -699,6 +714,17 @@ pub fn extend_gapped_one_direction_ex(
             score_val = next_score;
         }
 
+        // CRITICAL FIX: After the inner loop, score_val holds the score at the last processed cell
+        // (computed as next_score in the final iteration). This score was never compared to best_score
+        // because the comparison happens BEFORE updating score_val. For perfect diagonal matches,
+        // this causes the last cell's score to be lost.
+        // Fix: Compare the final score_val against best_score after the loop.
+        if score_val > best_score {
+            best_score = score_val;
+            a_offset = a_index;
+            b_offset = last_b_index;
+        }
+
         // NCBI reference: blast_gapalign.c:918-919
         if first_b_index >= b_size {
             break;
@@ -711,8 +737,11 @@ pub fn extend_gapped_one_direction_ex(
         }
 
         // NCBI reference: blast_gapalign.c:933-952
+        // CRITICAL: Use +2 (not +1) to leave room for the diagonal to advance
+        // Without this, the last diagonal cell gets cut off in perfect matches
         if last_b_index < b_size.saturating_sub(1) {
-            b_size = last_b_index + 1;
+            // Shrink window, but leave room for next diagonal (+2 instead of +1)
+            b_size = last_b_index + 2;
         } else {
             // NCBI reference: blast_gapalign.c:946-951
             while score_gap_row >= best_score - x_dropoff && b_size <= n && b_size < dp_mem_alloc {
@@ -739,15 +768,19 @@ pub fn extend_gapped_one_direction_ex(
     // Compute statistics from the alignment positions
     // For score-only mode, we estimate stats from score and positions
 
-    // Debug: check offset values for reverse extension
+    // Debug: check offset values for extension
     if std::env::var("LOSAT_DEBUG_COORDS").is_ok() {
-        eprintln!("[EXT_REV] m={}, n={}, a_offset={}, b_offset={}, best_score={}, reverse={}", m, n, a_offset, b_offset, best_score, reverse);
+        eprintln!("[EXT_{}] m={}, n={}, a_offset={}, b_offset={}, best_score={}, expected_perfect_score={}",
+            if reverse { "REV" } else { "FWD" },
+            m, n, a_offset, b_offset, best_score, (m.min(n) * reward as usize) as i32);
     }
 
     // NCBI reference: blast_gapalign.c:893-896
     // a_offset and b_offset represent the position where best score was found.
+    // a_offset is 1-indexed (a_index goes 1 to m), so a_offset directly gives consumed count.
+    // b_offset is 0-indexed (b_index goes 0 to n-1), so consumed = b_offset + 1.
     let q_consumed = a_offset;
-    let s_consumed = b_offset;
+    let s_consumed = b_offset + 1;
 
     // Estimate matches/mismatches/gaps from score
     let alignment_len = q_consumed.max(s_consumed);

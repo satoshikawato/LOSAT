@@ -60,14 +60,33 @@ pub fn run(args: BlastnArgs) -> Result<()> {
     let seq_data = prepare_sequence_data(&args, queries, query_ids, subjects);
 
     // Get Karlin-Altschul parameters
+    // CRITICAL: NCBI uses DIFFERENT params for ungapped and gapped calculations!
+    // - Ungapped params (kbp_std): Used for gap_trigger calculation
+    // - Gapped params (kbp_gap): Used for cutoff_score_max and length adjustment
+    // Reference: blast_parameters.c:343-344 uses kbp_std for gap_trigger
     use crate::config::NuclScoringSpec;
-    let scoring_spec = NuclScoringSpec {
+
+    // Gapped params (for length adjustment and cutoff_score_max)
+    let scoring_spec_gapped = NuclScoringSpec {
         reward: config.reward,
         penalty: config.penalty,
         gap_open: config.gap_open,
         gap_extend: config.gap_extend,
     };
-    let params = lookup_nucl_params(&scoring_spec);
+    let params_gapped = lookup_nucl_params(&scoring_spec_gapped);
+
+    // Ungapped params (for gap_trigger calculation)
+    // NCBI uses gap_open=0, gap_extend=0 to get ungapped params
+    let scoring_spec_ungapped = NuclScoringSpec {
+        reward: config.reward,
+        penalty: config.penalty,
+        gap_open: 0,
+        gap_extend: 0,
+    };
+    let params_ungapped = lookup_nucl_params(&scoring_spec_ungapped);
+
+    // Use gapped params for E-value calculations (same as before)
+    let params = params_gapped.clone();
 
     // Build lookup tables
     let (lookup_tables, scan_step) = build_lookup_tables(
@@ -239,7 +258,9 @@ pub fn run(args: BlastnArgs) -> Result<()> {
     let scan_range = config.scan_range; // For off-diagonal hit detection
     let db_len_total = seq_data.db_len_total;
     let db_num_seqs = seq_data.db_num_seqs;
-    let params_for_closure = params.clone();
+    let params_for_closure = params.clone();  // Gapped params for E-value
+    let params_ungapped_for_closure = params_ungapped.clone();  // Ungapped params for gap_trigger
+    let params_gapped_for_closure = params_gapped.clone();  // Gapped params for cutoff_score_max
     let evalue_threshold = args.evalue;
 
     seq_data.subjects
@@ -309,6 +330,10 @@ pub fn run(args: BlastnArgs) -> Result<()> {
             // PERFORMANCE OPTIMIZATION: Pre-compute cutoff scores per query
             // This avoids redundant compute_blastn_cutoff_score calls in the inner loop
             // (cutoff only depends on query_len and subject_len, not on seed position)
+            //
+            // NCBI reference: blast_parameters.c:340-344
+            // NCBI uses UNGAPPED params (kbp_std) for gap_trigger calculation
+            // and GAPPED params (kbp_gap) for cutoff_score_max calculation
             let subject_len = s_len as i64;
             let cutoff_scores: Vec<i32> = queries.iter().map(|q_record| {
                 let query_len = q_record.seq().len() as i64 * 2; // Both strands for blastn
@@ -317,8 +342,8 @@ pub fn run(args: BlastnArgs) -> Result<()> {
                     subject_len,
                     evalue_threshold,
                     GAP_TRIGGER_BIT_SCORE_NUCL,
-                    &params_for_closure,
-                    &params_for_closure,
+                    &params_ungapped_for_closure,  // UNGAPPED for gap_trigger (NCBI: kbp_std)
+                    &params_gapped_for_closure,    // GAPPED for cutoff_score_max (NCBI: kbp_gap)
                     1.0,
                 )
             }).collect();
@@ -1088,6 +1113,15 @@ pub fn run(args: BlastnArgs) -> Result<()> {
                                     (final_ss + 1, final_se)
                                 };
 
+                                // Debug coordinate output
+                                if std::env::var("LOSAT_DEBUG_COORDS").is_ok() {
+                                    eprintln!(
+                                        "[OUTPUT] internal: q=[{}, {}), s=[{}, {}) -> output: q=[{}, {}], s=[{}, {}], minus={}",
+                                        final_qs, final_qe, final_ss, final_se,
+                                        final_qs + 1, final_qe, hit_s_start, hit_s_end, is_minus_strand
+                                    );
+                                }
+
                                 local_hits.push(Hit {
                                     query_id: q_id.clone(),
                                     subject_id: s_id.clone(),
@@ -1588,6 +1622,15 @@ pub fn run(args: BlastnArgs) -> Result<()> {
                         } else {
                             (final_ss + 1, final_se)
                         };
+
+                        // Debug coordinate output
+                        if std::env::var("LOSAT_DEBUG_COORDS").is_ok() {
+                            eprintln!(
+                                "[OUTPUT] internal: q=[{}, {}), s=[{}, {}) -> output: q=[{}, {}], s=[{}, {}], minus={}",
+                                final_qs, final_qe, final_ss, final_se,
+                                final_qs + 1, final_qe, hit_s_start, hit_s_end, is_minus_strand
+                            );
+                        }
 
                         local_hits.push(Hit {
                             query_id: q_id.clone(),

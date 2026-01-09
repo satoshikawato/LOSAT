@@ -82,12 +82,7 @@ pub fn filter_hsps(
     // NCBI reference: blast_hits.c:2455-2535 Blast_HSPListPurgeHSPsWithCommonEndpoints
     // Called from blast_engine.c:545 and blast_traceback.c:668
     let before_purge = result_hits.len();
-    // TEMP: Skip endpoint purge to debug hit count
-    let result_hits = if std::env::var("LOSAT_SKIP_PURGE").is_ok() {
-        result_hits
-    } else {
-        purge_hsps_with_common_endpoints(result_hits)
-    };
+    let result_hits = purge_hsps_with_common_endpoints(result_hits);
     if verbose && before_purge != result_hits.len() {
         eprintln!("[INFO]   Endpoint purge: {} -> {} hits", before_purge, result_hits.len());
     }

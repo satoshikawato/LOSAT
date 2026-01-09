@@ -161,10 +161,34 @@ pub fn extend_gapped_heuristic(
     let total_dp_cells = left_dp_cells + right_dp_cells;
 
     // Calculate final positions
+    // NCBI reference: blast_gapalign.c:4614-4615, 4646-4647
+    // NCBI uses the formula:
+    //   Left:  gap_align->query_start = q_start - private_q_length + 1;
+    //   Right: gap_align->query_stop = q_start + private_q_length + 1;
+    //
+    // The +1 compensates for the DP recording pattern where the best score
+    // is recorded at index k but corresponds to position k-1 (for subject).
+    // NCBI's a_offset is 1-indexed, b_offset is 0-indexed.
+    //
+    // In LOSAT's structure, seed is handled separately (not included in extensions),
+    // so we need to adjust the formula:
+    //   - left_q_consumed and left_s_consumed are raw offsets from extend_gapped_one_direction_ex
+    //   - right_q_consumed and right_s_consumed are raw offsets from extend_gapped_one_direction
+    //
+    // For subject (b_offset is 0-indexed), we need +1 to match query (a_offset is 1-indexed).
+    // The overall +1 in NCBI's formula for 1-indexed output is handled by the caller.
     let final_q_start = qs - left_q_consumed;
     let final_q_end = qs + len + right_q_consumed;
     let final_s_start = ss - left_s_consumed;
     let final_s_end = ss + len + right_s_consumed;
+
+    // Debug output for coordinate tracking
+    if std::env::var("LOSAT_DEBUG_COORDS").is_ok() {
+        eprintln!("[COORDS] seed: qs={}, ss={}, len={}", qs, ss, len);
+        eprintln!("[COORDS] left: q_consumed={}, s_consumed={}", left_q_consumed, left_s_consumed);
+        eprintln!("[COORDS] right: q_consumed={}, s_consumed={}", right_q_consumed, right_s_consumed);
+        eprintln!("[COORDS] final: q={}-{}, s={}-{}", final_q_start, final_q_end, final_s_start, final_s_end);
+    }
 
     (
         final_q_start,
@@ -317,6 +341,11 @@ pub fn extend_gapped_one_direction(
     // NCBI reference: blast_gapalign.c:835-959
     // Main DP loop - for each query position (row)
     for a_index in 1..=m {
+        // Debug: track last few rows
+        if std::env::var("LOSAT_DEBUG_COORDS").is_ok() && m > 1000 && a_index >= m.saturating_sub(2) {
+            eprintln!("[DP_ROW] a_index={}/{}, first_b={}, b_size={}", a_index, m, first_b_index, b_size);
+        }
+
         // NCBI reference: blast_gapalign.c:839-843
         // matrix_row = matrix[ A[ a_index ] ];
         let qc = q_seq[a_index - 1];
@@ -449,6 +478,14 @@ pub fn extend_gapped_one_direction(
     // Compute statistics from the alignment positions
     // For score-only mode, we estimate stats from score and positions
     // This matches NCBI's approach where stats are computed in traceback
+
+    // Debug: check offset values
+    if std::env::var("LOSAT_DEBUG_COORDS").is_ok() {
+        eprintln!("[EXT_FWD] m={}, n={}, a_offset={}, b_offset={}, best_score={}", m, n, a_offset, b_offset, best_score);
+    }
+
+    // NCBI reference: blast_gapalign.c:893-896
+    // a_offset and b_offset represent the position where best score was found.
     let q_consumed = a_offset;
     let s_consumed = b_offset;
 
@@ -488,6 +525,10 @@ pub fn extend_gapped_one_direction(
 /// When `reverse` is true, sequences are accessed from the end (for left extension),
 /// avoiding the O(n) copy overhead of reversing the sequence.
 ///
+/// This is a faithful transpilation of NCBI BLAST's Blast_SemiGappedAlign (score-only mode)
+/// with reverse access support for left extension.
+/// Reference: ncbi-blast/c++/src/algo/blast/core/blast_gapalign.c:735-962
+///
 /// Parameters:
 /// - len1, len2: The actual lengths to use (can be less than q_seq.len(), s_seq.len())
 /// - reverse: If true, access sequences in reverse order
@@ -503,18 +544,31 @@ pub fn extend_gapped_one_direction_ex(
     x_drop: i32,
     reverse: bool,
 ) -> (usize, usize, i32, usize, usize, usize, usize, usize) {
-    // NCBI BLAST: gap penalties are specified as positive values (cost), but used as negative in calculations
-    let gap_open = -gap_open;
-    let gap_extend = -gap_extend;
+    // NCBI reference: blast_gapalign.c:780-782
+    // gap_open_extend = gap_open + gap_extend;
+    let gap_open_extend = gap_open + gap_extend;
 
-    const NEG_INF: i32 = i32::MIN / 2;
-    // NCBI BLAST dynamically reallocates memory as needed without a fixed upper limit
-    // Reference: blast_gapalign.c - NCBI expands the window as needed
-    const MAX_WINDOW_SIZE: usize = 1_000_000;
+    // NCBI reference: blast_gapalign.c:783-786
+    // if (x_dropoff < gap_open_extend) x_dropoff = gap_open_extend;
+    let mut x_dropoff = x_drop;
+    if x_dropoff < gap_open_extend {
+        x_dropoff = gap_open_extend;
+    }
+
+    // NCBI reference: blast_gapalign.c:746-749
+    // struct BlastGapDP { Int4 best; Int4 best_gap; };
+    #[derive(Clone, Copy)]
+    struct BlastGapDP {
+        best: i32,
+        best_gap: i32,
+    }
+
+    const MININT: i32 = i32::MIN / 2;
 
     let m = len1;
     let n = len2;
 
+    // NCBI reference: blast_gapalign.c:788-789
     if m == 0 || n == 0 {
         return (0, 0, 0, 0, 0, 0, 0, 0);
     }
@@ -538,205 +592,185 @@ pub fn extend_gapped_one_direction_ex(
         }
     }
 
-    let gap_extend_abs = gap_extend.abs().max(1);
-    let initial_window = (x_drop / gap_extend_abs + 3) as usize;
-    let mut alloc_size = initial_window.max(100).min(MAX_WINDOW_SIZE);
+    // NCBI reference: blast_gapalign.c:797-800
+    let num_extra_cells = if gap_extend > 0 {
+        (x_dropoff / gap_extend + 3) as usize
+    } else {
+        n + 3
+    };
 
-    #[derive(Clone, Default)]
-    struct DpCell {
-        best: i32,
-        best_gap: i32,
-        stats: AlnStats,
-        gap_stats: AlnStats,
-    }
-
-    let mut score_array: Vec<DpCell> = vec![
-        DpCell {
-            best: NEG_INF,
-            best_gap: NEG_INF,
-            stats: AlnStats::default(),
-            gap_stats: AlnStats::default()
-        };
-        alloc_size
+    // NCBI reference: blast_gapalign.c:802-808
+    let mut dp_mem_alloc = num_extra_cells.max(1000);
+    let mut score_array: Vec<BlastGapDP> = vec![
+        BlastGapDP { best: MININT, best_gap: MININT };
+        dp_mem_alloc
     ];
 
-    let gap_open_extend = gap_open + gap_extend;
+    // NCBI reference: blast_gapalign.c:811-822
+    let mut score = -(gap_open_extend as i32);
     score_array[0].best = 0;
-    score_array[0].best_gap = gap_open_extend;
+    score_array[0].best_gap = -(gap_open_extend as i32);
 
-    let mut score = gap_open_extend;
+    // NCBI reference: blast_gapalign.c:815-822
     let mut b_size = 1usize;
-    for j in 1..=n.min(alloc_size - 1) {
-        if score < -x_drop {
+    for i in 1..=n.min(dp_mem_alloc - 1) {
+        if score < -x_dropoff {
             break;
         }
-        score_array[j].best = score;
-        score_array[j].best_gap = score + gap_open_extend;
-        score_array[j].stats = AlnStats {
-            matches: 0,
-            mismatches: 0,
-            gap_opens: 1,
-            gap_letters: j as u32,
-        };
-        score += gap_extend;
-        b_size = j + 1;
+        score_array[i].best = score;
+        score_array[i].best_gap = score - (gap_open_extend as i32);
+        score -= gap_extend as i32;
+        b_size = i + 1;
     }
 
-    let mut best_score = 0;
-    let mut best_i = 0;
-    let mut best_j = 0;
-    let mut best_stats = AlnStats::default();
+    // NCBI reference: blast_gapalign.c:827-829
+    let mut best_score = 0i32;
+    let mut a_offset = 0usize;
+    let mut b_offset = 0usize;
     let mut first_b_index = 0usize;
     let mut dp_cells = 0usize;
 
-    for i in 1..=m {
-        let qc = get_q(q_seq, i, len1, reverse);
+    // NCBI reference: blast_gapalign.c:835-959
+    for a_index in 1..=m {
+        // NCBI reference: blast_gapalign.c:839-843
+        let qc = get_q(q_seq, a_index, len1, reverse);
 
-        let mut score_val = NEG_INF;
-        let mut score_gap_row = NEG_INF;
-        let mut score_gap_row_stats = AlnStats::default();
-        let mut score_stats = AlnStats::default();
+        // NCBI reference: blast_gapalign.c:857-860
+        let mut score_val = MININT;
+        let mut score_gap_row = MININT;
         let mut last_b_index = first_b_index;
 
-        for j in first_b_index..b_size {
-            if j >= n {
+        // NCBI reference: blast_gapalign.c:862-912
+        for b_index in first_b_index..b_size {
+            if b_index >= n {
                 break;
             }
-            let sc = get_s(s_seq, j, len2, reverse);
             dp_cells += 1;
 
-            let mut score_gap_col = score_array[j].best_gap;
-            let score_gap_col_stats = score_array[j].gap_stats;
-
-            let is_match = qc == sc;
-            let match_score = if is_match { reward } else { penalty };
-            let next_score = if score_array[j].best > NEG_INF {
-                score_array[j].best + match_score
+            // NCBI reference: blast_gapalign.c:864-866
+            let sc = get_s(s_seq, b_index, len2, reverse);
+            let score_gap_col = score_array[b_index].best_gap;
+            let match_score = if qc == sc { reward } else { penalty };
+            let next_score = if score_array[b_index].best > MININT {
+                score_array[b_index].best + match_score
             } else {
-                NEG_INF
+                MININT
             };
-            let mut next_stats = score_array[j].stats;
-            if is_match {
-                next_stats.matches += 1;
-            } else {
-                next_stats.mismatches += 1;
-            }
 
+            // NCBI reference: blast_gapalign.c:868-872
             if score_val < score_gap_col {
                 score_val = score_gap_col;
-                score_stats = score_gap_col_stats;
             }
             if score_val < score_gap_row {
                 score_val = score_gap_row;
-                score_stats = score_gap_row_stats;
             }
 
-            if best_score - score_val > x_drop {
-                if j == first_b_index {
+            // NCBI reference: blast_gapalign.c:874-890
+            if best_score - score_val > x_dropoff {
+                if b_index == first_b_index {
                     first_b_index += 1;
                 } else {
-                    score_array[j].best = NEG_INF;
+                    score_array[b_index].best = MININT;
                 }
             } else {
-                last_b_index = j;
+                // NCBI reference: blast_gapalign.c:892-908
+                last_b_index = b_index;
 
                 if score_val > best_score {
                     best_score = score_val;
-                    best_i = i;
-                    best_j = j + 1;
-                    best_stats = score_stats;
+                    a_offset = a_index;
+                    b_offset = b_index;
                 }
 
-                score_gap_row += gap_extend;
-                let open_gap_row = score_val + gap_open_extend;
-                if open_gap_row > score_gap_row {
-                    score_gap_row = open_gap_row;
-                    score_gap_row_stats = score_stats;
-                    score_gap_row_stats.gap_opens += 1;
-                    score_gap_row_stats.gap_letters += 1;
-                } else {
-                    score_gap_row_stats.gap_letters += 1;
-                }
+                // NCBI reference: blast_gapalign.c:903-907
+                score_gap_row -= gap_extend as i32;
+                let score_gap_col_ext = score_gap_col - (gap_extend as i32);
+                let open_gap_col = score_val - (gap_open_extend as i32);
+                score_array[b_index].best_gap = open_gap_col.max(score_gap_col_ext);
 
-                score_gap_col += gap_extend;
-                let open_gap_col = score_val + gap_open_extend;
-                if open_gap_col > score_gap_col {
-                    score_array[j].best_gap = open_gap_col;
-                    score_array[j].gap_stats = score_stats;
-                    score_array[j].gap_stats.gap_opens += 1;
-                    score_array[j].gap_stats.gap_letters += 1;
-                } else {
-                    score_array[j].best_gap = score_gap_col;
-                    score_array[j].gap_stats.gap_letters += 1;
-                }
+                let open_gap_row = score_val - (gap_open_extend as i32);
+                score_gap_row = open_gap_row.max(score_gap_row);
 
-                score_array[j].best = score_val;
-                score_array[j].stats = score_stats;
+                // NCBI reference: blast_gapalign.c:908
+                score_array[b_index].best = score_val;
             }
 
+            // NCBI reference: blast_gapalign.c:911
             score_val = next_score;
-            score_stats = next_stats;
         }
 
+        // NCBI reference: blast_gapalign.c:918-919
         if first_b_index >= b_size {
             break;
         }
 
-        if last_b_index + initial_window + 3 >= alloc_size && alloc_size < MAX_WINDOW_SIZE {
-            let new_alloc = (last_b_index + initial_window + 100)
-                .max(alloc_size * 2)
-                .min(MAX_WINDOW_SIZE);
-            score_array.resize(
-                new_alloc,
-                DpCell {
-                    best: NEG_INF,
-                    best_gap: NEG_INF,
-                    stats: AlnStats::default(),
-                    gap_stats: AlnStats::default(),
-                },
-            );
-            alloc_size = new_alloc;
+        // NCBI reference: blast_gapalign.c:923-931
+        if last_b_index + num_extra_cells + 3 >= dp_mem_alloc {
+            dp_mem_alloc = (last_b_index + num_extra_cells + 100).max(dp_mem_alloc * 2);
+            score_array.resize(dp_mem_alloc, BlastGapDP { best: MININT, best_gap: MININT });
         }
 
+        // NCBI reference: blast_gapalign.c:933-952
         if last_b_index < b_size.saturating_sub(1) {
             b_size = last_b_index + 1;
         } else {
-            while score_gap_row >= best_score - x_drop
-                && b_size <= n
-                && b_size < alloc_size
-                && b_size < MAX_WINDOW_SIZE
-            {
+            // NCBI reference: blast_gapalign.c:946-951
+            while score_gap_row >= best_score - x_dropoff && b_size <= n && b_size < dp_mem_alloc {
                 score_array[b_size].best = score_gap_row;
-                score_array[b_size].stats = score_gap_row_stats;
-                score_array[b_size].best_gap = score_gap_row + gap_open_extend;
-                score_array[b_size].gap_stats = score_gap_row_stats;
-                score_array[b_size].gap_stats.gap_opens += 1;
-                score_array[b_size].gap_stats.gap_letters += 1;
-                score_gap_row += gap_extend;
-                score_gap_row_stats.gap_letters += 1;
+                score_array[b_size].best_gap = score_gap_row - (gap_open_extend as i32);
+                score_gap_row -= gap_extend as i32;
                 b_size += 1;
             }
         }
 
-        if b_size <= n && b_size < alloc_size {
-            score_array[b_size].best = NEG_INF;
-            score_array[b_size].best_gap = NEG_INF;
+        // NCBI reference: blast_gapalign.c:954-958
+        if b_size <= n && b_size < dp_mem_alloc {
+            score_array[b_size].best = MININT;
+            score_array[b_size].best_gap = MININT;
             b_size += 1;
         }
     }
 
+    // NCBI reference: blast_gapalign.c:961
     if best_score <= 0 {
         return (0, 0, 0, 0, 0, 0, 0, dp_cells);
     }
 
+    // Compute statistics from the alignment positions
+    // For score-only mode, we estimate stats from score and positions
+
+    // Debug: check offset values for reverse extension
+    if std::env::var("LOSAT_DEBUG_COORDS").is_ok() {
+        eprintln!("[EXT_REV] m={}, n={}, a_offset={}, b_offset={}, best_score={}, reverse={}", m, n, a_offset, b_offset, best_score, reverse);
+    }
+
+    // NCBI reference: blast_gapalign.c:893-896
+    // a_offset and b_offset represent the position where best score was found.
+    let q_consumed = a_offset;
+    let s_consumed = b_offset;
+
+    // Estimate matches/mismatches/gaps from score
+    let alignment_len = q_consumed.max(s_consumed);
+    let gap_letters = (q_consumed as i32 - s_consumed as i32).unsigned_abs() as usize;
+    let gap_opens = if gap_letters > 0 { 1 } else { 0 };
+
+    let non_gap_len = alignment_len.saturating_sub(gap_letters);
+    let matches = if non_gap_len > 0 && reward > 0 {
+        let estimated = (best_score + (non_gap_len as i32) * (-penalty)) / (reward - penalty);
+        estimated.max(0) as usize
+    } else {
+        non_gap_len
+    };
+    let mismatches = non_gap_len.saturating_sub(matches);
+
     (
-        best_i,
-        best_j,
+        q_consumed,
+        s_consumed,
         best_score,
-        best_stats.matches as usize,
-        best_stats.mismatches as usize,
-        best_stats.gap_opens as usize,
-        best_stats.gap_letters as usize,
+        matches,
+        mismatches,
+        gap_opens,
+        gap_letters,
         dp_cells,
     )
 }
@@ -792,18 +826,24 @@ pub fn extend_final_traceback(
     // This is equivalent to calling extend_gapped_heuristic with x_drop_final
     // but starting from a known good position within the alignment
 
-    extend_gapped_heuristic(
-        q_seq,
-        s_seq,
-        seed_q_pos,
-        seed_s_pos,
-        1, // Use a minimal seed length - the extension will find the true boundaries
-        reward,
-        penalty,
-        gap_open,
-        gap_extend,
-        x_drop_final,
-        use_dp,
-    )
+    let (final_qs, final_qe, final_ss, final_se, score, matches, mismatches, gaps, gap_letters, dp_cells) =
+        extend_gapped_heuristic(
+            q_seq,
+            s_seq,
+            seed_q_pos,
+            seed_s_pos,
+            1, // Use a minimal seed length - the extension will find the true boundaries
+            reward,
+            penalty,
+            gap_open,
+            gap_extend,
+            x_drop_final,
+            use_dp,
+        );
+
+    // NCBI reference: blast_gapalign.c:2969-3055 BLAST_GappedAlignmentWithTraceback
+    // NCBI simply returns the final traceback coordinates without comparing to preliminary
+    // The final traceback with larger x_drop should always produce better or equal results
+    (final_qs, final_qe, final_ss, final_se, score, matches, mismatches, gaps, gap_letters, dp_cells)
 }
 

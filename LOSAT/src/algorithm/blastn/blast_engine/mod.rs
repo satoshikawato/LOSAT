@@ -72,26 +72,22 @@ pub fn filter_hsps(
             .then_with(|| b.q_end.cmp(&a.q_end))        // q_end DESC
     });
 
-    // Remove duplicate HSPs with identical coordinates and scores
-    // This handles cases where multiple seeds lead to the same gapped alignment
-    // NCBI reference: blast_hits.c - HSPs with identical coordinates are considered duplicates
-    use rustc_hash::FxHashSet;
-    let mut seen: FxHashSet<(usize, usize, usize, usize, i32)> = FxHashSet::default();
-    let before_dedup = result_hits.len();
-    result_hits.retain(|h| {
-        let key = (h.q_start, h.q_end, h.s_start, h.s_end, h.raw_score);
-        seen.insert(key)
-    });
-
-    if verbose && before_dedup != result_hits.len() {
-        eprintln!("[INFO]   Deduplication: {} -> {} hits", before_dedup, result_hits.len());
-    }
+    // NOTE: NCBI does NOT have explicit dedup for identical coords+score.
+    // NCBI only uses Blast_HSPListPurgeHSPsWithCommonEndpoints which handles
+    // HSPs with common start OR end points (not both). Any exact duplicates
+    // are handled by the endpoint purge below.
+    // Reference: blast_hits.c:2455-2535
 
     // NCBI BLAST: Purge HSPs with common start or end positions
     // NCBI reference: blast_hits.c:2455-2535 Blast_HSPListPurgeHSPsWithCommonEndpoints
     // Called from blast_engine.c:545 and blast_traceback.c:668
     let before_purge = result_hits.len();
-    let result_hits = purge_hsps_with_common_endpoints(result_hits);
+    // TEMP: Skip endpoint purge to debug hit count
+    let result_hits = if std::env::var("LOSAT_SKIP_PURGE").is_ok() {
+        result_hits
+    } else {
+        purge_hsps_with_common_endpoints(result_hits)
+    };
     if verbose && before_purge != result_hits.len() {
         eprintln!("[INFO]   Endpoint purge: {} -> {} hits", before_purge, result_hits.len());
     }

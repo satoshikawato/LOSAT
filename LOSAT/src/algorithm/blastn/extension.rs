@@ -73,7 +73,9 @@ pub fn extend_hit_ungapped(
         if current_score_r >= max_score_total {
             max_score_total = current_score_r;
             best_j = j;
-        } else if current_score_r <= 0 || (max_score_total - current_score_r) > x_drop_val {
+        } else if (max_score_total - current_score_r) > x_drop_val {
+            // NCBI BLAST uses only X-drop termination, NOT score <= 0 check
+            // Reference: na_ungapped.c:220-233
             break;
         }
         j += 1;

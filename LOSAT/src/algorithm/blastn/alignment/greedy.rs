@@ -156,14 +156,19 @@ pub fn greedy_align_one_direction_ex(
         }
         
         // Double max_dist and retry (NCBI BLAST's approach)
-        // NCBI BLAST continues until convergence without an explicit upper limit
+        // NCBI reference: blast_gapalign.c:2820-2825
+        // /* double the max distance */
+        // new_dist = gap_align->greedy_align_mem->max_dist * 2;
+        // NCBI BLAST has NO upper limit - it continues until convergence or memory failure
         max_dist *= 2;
-        
-        // Safety limit to prevent infinite loops on extremely divergent sequences
-        // This is a practical limit that should never be reached for reasonable sequences
-        // NCBI BLAST typically converges well before this limit
-        if max_dist > 100000 {
-            // Return best result found so far
+
+        // NCBI BLAST has no explicit upper limit on max_dist
+        // The algorithm will naturally converge for any finite alignment
+        // Memory allocation failure would be the only practical limit (handled elsewhere)
+        // For safety against pathological cases, we allow a very high limit that should
+        // never be reached for any reasonable biological sequence comparison
+        if max_dist > 100_000_000 {
+            // Return best result found so far (this should never happen in practice)
             return result;
         }
     }

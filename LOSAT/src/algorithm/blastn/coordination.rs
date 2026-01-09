@@ -120,6 +120,10 @@ pub fn configure_task(args: &BlastnArgs) -> TaskConfig {
         _ => MIN_UNGAPPED_SCORE_BLASTN,
     };
     
+    // NCBI BLAST algorithm selection:
+    // - megablast: eGreedyScoreOnly (greedy alignment)
+    // - blastn: eDynProgScoreOnly (dynamic programming)
+    // Reference: ncbi-blast/c++/src/algo/blast/api/blast_nucl_options.cpp:182, 192
     let use_dp = match args.task.as_str() {
         "megablast" => false,
         _ => true,

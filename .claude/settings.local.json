@@ -49,7 +49,13 @@
       "Bash(cargo test:*)",
       "Bash(tree:*)",
       "Bash(find:*)",
-      "Bash(cargo clippy:*)"
+      "Bash(cargo clippy:*)",
+      "Bash(xargs du:*)",
+      "Bash(sort:*)",
+      "Bash(cd:*)",
+      "Bash(time ../target/release/LOSAT blastn:*)",
+      "Bash(LOSAT_TIMING=1 time ./target/release/LOSAT blastn:*)",
+      "Bash(time blastn:*)"
     ]
   }
 }

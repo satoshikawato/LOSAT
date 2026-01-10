@@ -522,6 +522,7 @@ mod tests {
             q_idx: 0,
             s_idx: 0,
             raw_score: 200,
+            gap_info: None,
         }
     }
 

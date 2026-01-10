@@ -6,10 +6,74 @@ use std::io::{self, BufWriter, Write};
 use std::path::PathBuf;
 
 use crate::report::{
-    OutputFormat, OutputConfig, ReportContext, 
-    format_hit, write_outfmt7, 
+    OutputFormat, OutputConfig, ReportContext,
+    format_hit, write_outfmt7,
     PairwiseConfig, write_pairwise_simple,
 };
+
+// =============================================================================
+// Gap Edit Script for traceback trimming
+// Reference: ncbi-blast/c++/src/algo/blast/core/blast_hits.c
+// =============================================================================
+
+/// Gap edit operation type for traceback
+/// Reference: blast_hits.c eGapAlignOpType
+///
+/// ```c
+/// // NCBI GapEditScript structure (gapinfo.h)
+/// typedef enum {
+///     eGapAlignSub = 0,  // Substitution (match or mismatch)
+///     eGapAlignDel = 1,  // Deletion from query (gap in query)
+///     eGapAlignIns = 2   // Insertion to query (gap in subject)
+/// } EGapAlignOpType;
+///
+/// typedef struct GapEditScript {
+///     Uint1 *op_type;  // Array of operation types
+///     Int4 *num;       // Array of counts for each operation
+///     Int4 size;       // Number of operations
+/// } GapEditScript;
+/// ```
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum GapEditOp {
+    /// Substitution (match or mismatch): consumes `num` query and `num` subject positions
+    /// Reference: blast_hits.c:2404-2407
+    /// ```c
+    /// if (esp->op_type[index] == eGapAlignSub) {
+    ///    qid++;
+    ///    sid++;
+    /// ```
+    Sub(u32),
+    /// Deletion: gap in query, consumes `num` subject positions only
+    /// Reference: blast_hits.c:2408-2410
+    /// ```c
+    /// } else if (esp->op_type[index] == eGapAlignDel) {
+    ///    sid+=esp->num[index];
+    /// ```
+    Del(u32),
+    /// Insertion: gap in subject, consumes `num` query positions only
+    /// Reference: blast_hits.c:2411-2413
+    /// ```c
+    /// } else if (esp->op_type[index] == eGapAlignIns) {
+    ///    qid+=esp->num[index];
+    /// ```
+    Ins(u32),
+}
+
+impl GapEditOp {
+    /// Get the count for this operation
+    #[inline]
+    pub fn num(&self) -> u32 {
+        match self {
+            GapEditOp::Sub(n) | GapEditOp::Del(n) | GapEditOp::Ins(n) => *n,
+        }
+    }
+
+    /// Check if this is a substitution operation
+    #[inline]
+    pub fn is_sub(&self) -> bool {
+        matches!(self, GapEditOp::Sub(_))
+    }
+}
 
 #[derive(Debug, Clone)]
 pub struct Hit {
@@ -32,6 +96,13 @@ pub struct Hit {
     pub s_idx: u32,
     /// Raw alignment score - NCBI ScoreCompareHSPs uses raw score, not bit score
     pub raw_score: i32,
+    /// Edit script for traceback trimming (NCBI: gap_info in BlastHSP)
+    /// Reference: blast_hits.c BlastHSP.gap_info (GapEditScript*)
+    ///
+    /// This is used by Blast_HSPListPurgeHSPsWithCommonEndpoints to trim
+    /// overlapping HSPs instead of deleting them entirely.
+    /// Reference: blast_hits.c:2490-2492, 2516-2518
+    pub gap_info: Option<Vec<GapEditOp>>,
 }
 
 // =============================================================================

@@ -1087,6 +1087,7 @@ pub fn run(args: TblastxArgs) -> Result<()> {
                         q_idx: ctx.q_idx,
                         s_idx: h.s_idx,
                         raw_score: h.raw_score,
+                        gap_info: None,
                     };
                     trace_final_hit_if_match("output_hit", &out_hit);
                     final_hits.push(out_hit);

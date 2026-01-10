@@ -170,6 +170,7 @@ mod tests {
             q_idx: 0,
             s_idx: 0,
             raw_score: score,
+            gap_info: None,
         }
     }
 

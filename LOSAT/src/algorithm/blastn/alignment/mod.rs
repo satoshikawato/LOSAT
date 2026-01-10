@@ -22,6 +22,8 @@ pub use gapped::{
     extend_gapped_heuristic,
     extend_gapped_one_direction,
     extend_final_traceback,
+    extend_gapped_heuristic_with_traceback,
+    extend_gapped_one_direction_with_traceback,
     AlnStats,
 };
 pub use utilities::gdb3;

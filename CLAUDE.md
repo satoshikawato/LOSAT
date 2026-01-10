@@ -2,6 +2,65 @@
 
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
+---
+
+## MANDATORY COMPLIANCE REQUIREMENTS
+
+**These rules are ABSOLUTE and MUST be followed without exception. There is NO room for interpretation.**
+
+### 1. NCBI BLAST is the ONLY Source of Truth
+- The NCBI C/C++ implementation is the **sole authoritative reference**
+- **DO NOT ASSUME OR GUESS** - always refer to actual NCBI source code
+- If you cannot find the corresponding NCBI code, the feature **MUST NOT exist**
+- **Faithfully transpile NCBI BLAST** - algorithms must be exact ports, not reinterpretations
+
+### 2. Bit-Perfect Output Parity is Required
+- Output must match NCBI BLAST+ **exactly** (1ビットの狂いもなく一致)
+- Never simplify algorithms for "readability" if it affects output
+- Never use different floating-point precision than NCBI
+- Every nuanced difference must be identified and fixed
+
+### 3. NCBI Code Comments are MANDATORY
+- **Every code modification MUST include the corresponding NCBI C/C++ code as comments**
+- Include file path and line numbers
+- **If you cannot add NCBI reference comments, the code MUST NOT be written**
+- If the corresponding NCBI code cannot be found, the feature **does not exist and must be eliminated**
+
+```rust
+// NCBI reference: blast_parameters.c:219-221
+// Int4 x_dropoff = (Int4)(sbp->scale_factor * ceil(word_options->x_dropoff * NCBIMATH_LN2 / kbp->Lambda));
+let x_dropoff = (scale_factor * (x_drop_bits * NCBIMATH_LN2 / ungapped_params.lambda).ceil()) as i32;
+```
+
+### 4. No Unauthorized Features - IMMEDIATE ELIMINATION
+- **NEVER introduce features/functionalities that do not exist in the NCBI codebase**
+- If a feature is found that has no NCBI equivalent, **DELETE IT IMMEDIATELY**
+- No "improvements" or "optimizations" that change behavior
+- No creative additions - only faithful transpilation
+
+### 5. Exhaustive Difference Resolution
+- Identify **ALL nuanced differences** between LOSAT and NCBI BLAST
+- **Exhaustively add/fix/delete every single one of them**
+- Verify bit-perfect matching after every change
+- Leave no discrepancy unaddressed
+
+### 6. No Assumptions or Guessing
+- **DO NOT ASSUME** when writing code
+- **DO NOT GUESS** behavior or implementation details
+- **REFER TO THE NCBI CODE** and transpile faithfully
+- When in doubt, read the NCBI source - never speculate
+
+### 7. Correct Timing, Order, and Context (Common Mistake)
+- Algorithms must be called at the **exact same timing and order** as NCBI
+- Input/output data (context) must match NCBI **exactly**
+- **Wrong timing or order = wrong output** even if the algorithm itself is correct
+- Verify: When is the function called? In what order? What data does it receive? What does it return?
+- Trace the call hierarchy in NCBI to understand the correct placement and sequence
+
+### Violation of these rules is unacceptable. Non-compliance will result in incorrect output.
+
+---
+
 ## Build Commands
 
 ```bash
@@ -163,16 +222,16 @@ LOSAT/src/
 
 ## Core Principle: NCBI Parity
 
-- **NCBI C/C++ implementation is the ONLY source of truth**
-- Output must match NCBI BLAST+ **bit-perfectly**
-- Never simplify algorithms for "readability" if it affects output
-- When porting NCBI code, include verbatim C/C++ code as comments:
+**See [MANDATORY COMPLIANCE REQUIREMENTS](#mandatory-compliance-requirements) at the top of this document.**
 
-```rust
-// NCBI reference: blast_parameters.c:219-221
-// Int4 x_dropoff = (Int4)(sbp->scale_factor * ceil(word_options->x_dropoff * NCBIMATH_LN2 / kbp->Lambda));
-let x_dropoff = (scale_factor * (x_drop_bits * NCBIMATH_LN2 / ungapped_params.lambda).ceil()) as i32;
-```
+Summary:
+1. **NCBI C/C++ is the ONLY truth** - Faithfully transpile, no reinterpretations
+2. **Bit-perfect output** - 1ビットの狂いもなく一致
+3. **NCBI comments required** - No NCBI reference = code must not exist
+4. **No unauthorized features** - If not in NCBI, DELETE IMMEDIATELY
+5. **Fix ALL differences** - Exhaustively add/fix/delete every discrepancy
+6. **No assumptions** - DO NOT ASSUME, DO NOT GUESS, REFER TO NCBI CODE
+7. **Correct timing, order, and context** - Same call timing, order, and input/output as NCBI
 
 ## NCBI Reference Location
 
@@ -288,12 +347,18 @@ LOSAT_STARTUP_TRACE=1                       # Trace startup
 - Match NCBI function names when porting: `s_BlastAaExtendTwoHit` -> `extend_hit_two_hit`
 - Keep NCBI terminology in comments: "query_offset", "subject_offset", "context", "frame"
 
-## Common Pitfalls
+## Common Pitfalls (VIOLATIONS)
 
-1. Don't simplify NCBI logic for readability if it changes output
-2. Don't use different floating-point precision than NCBI
-3. Don't skip edge cases (empty sequences, boundary conditions)
-4. Always verify bit-perfect output matching after changes
+**Any of these will break NCBI parity:**
+
+1. **Simplifying NCBI logic** - Never change logic for "readability"
+2. **Different floating-point precision** - Use exact same precision as NCBI
+3. **Skipping edge cases** - Handle all boundary conditions exactly as NCBI
+4. **Missing verification** - Always verify bit-perfect output after changes
+5. **Assuming behavior** - Always read NCBI source, never guess
+6. **Adding features** - Never add anything not in NCBI
+7. **Missing NCBI comments** - Every change must cite NCBI source code
+8. **Wrong timing, order, or context** - Algorithm called at wrong time, in wrong order, or with wrong input/output (COMMON MISTAKE)
 
 ## Known Issues
 

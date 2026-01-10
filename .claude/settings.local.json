@@ -67,7 +67,10 @@
       "Bash(BLEMIR_DEBUG=1 time ./target/release/LOSAT:*)",
       "Bash(# Check the alignment length distribution in NCBI output grep -v \"\"^#\"\" /mnt/c/Users/kawato/Documents/GitHub/LOSAT/LOSAT/tests/blast_out/NZ_CP006932.NZ_CP006932.task_blastn.out)",
       "Bash(# First check if the test files exist ls -la tests/fasta/PeseMJNV.fasta tests/fasta/PemoMJNVB.fasta || echo \"\"Files not found, checking alternatives...\"\" ls tests/fasta/*.fasta)",
-      "Bash(# Check NCBI output for this dataset grep -v \"\"^#\"\" tests/blast_out/PeseMJNV.PemoMJNVB.task_blastn.out)"
+      "Bash(# Check NCBI output for this dataset grep -v \"\"^#\"\" tests/blast_out/PeseMJNV.PemoMJNVB.task_blastn.out)",
+      "Bash(LOSAT_DEBUG_BLASTN=1 ./target/release/LOSAT:*)",
+      "Bash(cargo clean:*)",
+      "Bash(LOSAT_DEBUG_BLASTN=1 timeout 120 ./target/release/LOSAT blastn:*)"
     ]
   }
 }

@@ -10,7 +10,7 @@ use anyhow::Result;
 use bio::io::fasta;
 use crate::utils::dust::{DustMasker, MaskedInterval};
 use super::args::BlastnArgs;
-use super::constants::{MIN_UNGAPPED_SCORE_MEGABLAST, MIN_UNGAPPED_SCORE_BLASTN, MAX_DIRECT_LOOKUP_WORD_SIZE, X_DROP_GAPPED_NUCL, X_DROP_GAPPED_GREEDY, X_DROP_GAPPED_FINAL, SCAN_RANGE_BLASTN, SCAN_RANGE_MEGABLAST, LUT_WIDTH_11_THRESHOLD_8, LUT_WIDTH_11_THRESHOLD_10};
+use super::constants::{MIN_UNGAPPED_SCORE_MEGABLAST, MIN_UNGAPPED_SCORE_BLASTN, MAX_DIRECT_LOOKUP_WORD_SIZE, X_DROP_GAPPED_NUCL, X_DROP_GAPPED_GREEDY, X_DROP_GAPPED_FINAL, SCAN_RANGE_BLASTN, SCAN_RANGE_MEGABLAST, LUT_WIDTH_11_THRESHOLD_8, LUT_WIDTH_11_THRESHOLD_10, MIN_DIAG_SEPARATION_BLASTN, MIN_DIAG_SEPARATION_MEGABLAST};
 use super::lookup::{build_lookup, build_pv_direct_lookup, build_two_stage_lookup, TwoStageLookup, PvDirectLookup, KmerLookup};
 
 /// Task-specific configuration for BLASTN
@@ -29,6 +29,7 @@ pub struct TaskConfig {
     pub x_drop_gapped: i32, // Task-specific gapped X-dropoff (blastn: 30, megablast: 25)
     pub x_drop_final: i32, // Final traceback X-dropoff (100 for all nucleotide tasks)
     pub scan_range: usize, // Scan range for off-diagonal hit detection (blastn: 4, megablast: 0)
+    pub min_diag_separation: i32, // NCBI reference: blast_nucl_options.cpp:239,259 (blastn: 50, megablast: 6)
 }
 
 /// Lookup tables for seed finding
@@ -152,7 +153,15 @@ pub fn configure_task(args: &BlastnArgs) -> TaskConfig {
         "megablast" => SCAN_RANGE_MEGABLAST, // 0
         _ => SCAN_RANGE_BLASTN, // 4
     };
-    
+
+    // NCBI reference: blast_nucl_options.cpp:239, 259
+    // Minimum diagonal separation for HSP containment checking
+    // Used in MB_HSP_CLOSE macro (blast_gapalign_priv.h:123-124)
+    let min_diag_separation = match args.task.as_str() {
+        "megablast" => MIN_DIAG_SEPARATION_MEGABLAST, // 6
+        _ => MIN_DIAG_SEPARATION_BLASTN, // 50
+    };
+
     let use_direct_lookup = effective_word_size <= MAX_DIRECT_LOOKUP_WORD_SIZE;
     let use_two_stage = effective_word_size >= 11;
     let lut_word_length = if use_two_stage {
@@ -166,7 +175,7 @@ pub fn configure_task(args: &BlastnArgs) -> TaskConfig {
     } else {
         effective_word_size.min(MAX_DIRECT_LOOKUP_WORD_SIZE)
     };
-    
+
     TaskConfig {
         effective_word_size,
         reward,
@@ -182,6 +191,7 @@ pub fn configure_task(args: &BlastnArgs) -> TaskConfig {
         x_drop_gapped,
         x_drop_final,
         scan_range,
+        min_diag_separation,
     }
 }
 

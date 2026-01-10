@@ -60,3 +60,11 @@ pub const INVALID_OFFSET: i32 = -2;
 /// Large value for invalid diagonal bounds
 pub const INVALID_DIAG: i32 = 100_000_000;
 
+/// Minimum diagonal separation for HSP containment checking
+/// NCBI reference: blast_nucl_options.cpp:239 (SetHitSavingOptionsDefaults)
+/// NCBI reference: blast_nucl_options.cpp:259 (SetMBHitSavingOptionsDefaults)
+/// Used in MB_HSP_CLOSE macro (blast_gapalign_priv.h:123-124)
+/// Two HSPs are considered "close" if |diag1 - diag2| < min_diag_separation
+pub const MIN_DIAG_SEPARATION_BLASTN: i32 = 50;
+pub const MIN_DIAG_SEPARATION_MEGABLAST: i32 = 6;
+

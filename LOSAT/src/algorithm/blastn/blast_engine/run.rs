@@ -21,102 +21,42 @@ use super::super::coordination::{configure_task, finalize_task_config, read_sequ
 use super::super::lookup::{reverse_complement, pack_diag_key};
 use super::super::ncbi_cutoffs::{compute_blastn_cutoff_score, GAP_TRIGGER_BIT_SCORE_NUCL};
 use super::super::blast_extend::DiagStruct;
+use super::super::interval_tree::{BlastIntervalTree, TreeHsp, IndexMethod};
+use super::super::filtering::{
+    purge_hsps_with_common_endpoints,
+    purge_hsps_with_common_endpoints_ex,
+    reevaluate_hsp_with_ambiguities_gapped,
+};
 
 // Import from this module (blast_engine)
 use super::{filter_hsps, calculate_evalue};
 
-/// Check if a new HSP is contained within an existing HSP on the SAME DIAGONAL.
-///
-/// NCBI reference: blast_itree.c:809-847 s_HSPIsContained
-///
-/// NCBI uses an interval tree for containment checking. The tree structure
-/// naturally limits comparisons to geometrically nearby HSPs (based on query
-/// coordinate overlap). Since LOSAT uses a flat list instead of an interval tree,
-/// we add a same-diagonal requirement as a proxy for geometric locality.
-///
-/// Without the diagonal requirement, a large HSP covering q=1-657101 would
-/// incorrectly filter out small HSPs at distant positions (e.g., q=50000-50100)
-/// even though they are on different diagonals and represent distinct alignments.
-///
-/// Checks:
-/// 1. Same diagonal (proxy for NCBI's interval tree geometric locality)
-/// 2. Same subject strand (SIGN(subject.frame) ==)
-/// 3. new_score <= existing_score
-/// 4. Both endpoints contained (CONTAINED_IN_HSP macro)
-#[inline]
-fn is_hsp_contained(
-    new_score: i32,
-    new_q_start: usize,
-    new_q_end: usize,
-    new_s_start: usize,
-    new_s_end: usize,
-    existing_score: i32,
-    existing_q_start: usize,
-    existing_q_end: usize,
-    existing_s_start: usize,
-    existing_s_end: usize,
-) -> bool {
-    // Check same subject strand first (cheap check)
-    // NCBI reference: blast_itree.c:822-823
-    // NCBI: SIGN(in_hsp->subject.frame) == SIGN(tree_hsp->subject.frame)
-    let new_is_minus = new_s_start > new_s_end;
-    let existing_is_minus = existing_s_start > existing_s_end;
-    if new_is_minus != existing_is_minus {
-        return false;
-    }
-
-    // Compute diagonal (proxy for NCBI interval tree geometric locality)
-    // Two HSPs on different diagonals are geometrically distinct alignments
-    // and should not be filtered by containment check.
-    // Diagonal = query_pos - subject_pos (for plus strand)
-    // For minus strand, use canonical subject coordinate
-    let (new_ss_canon, ex_ss_canon) = if new_is_minus {
-        // Minus strand: use the smaller coordinate as canonical start
-        (new_s_start.min(new_s_end), existing_s_start.min(existing_s_end))
-    } else {
-        (new_s_start, existing_s_start)
-    };
-    let new_diag = new_q_start as i64 - new_ss_canon as i64;
-    let existing_diag = existing_q_start as i64 - ex_ss_canon as i64;
-
-    // Same-diagonal requirement: proxy for NCBI's interval tree locality
-    // Without this, flat list iteration filters too aggressively
-    if new_diag != existing_diag {
-        return false;
-    }
-
-    // NCBI reference: blast_itree.c:822
-    // in_hsp->score <= tree_hsp->score
-    if new_score > existing_score {
-        return false;
-    }
-
-    // Normalize coordinates for containment check
-    // NCBI uses canonical coordinates: subject.offset < subject.end
-    let (new_qs, new_qe) = (new_q_start.min(new_q_end), new_q_start.max(new_q_end));
-    let (new_ss, new_se) = (new_s_start.min(new_s_end), new_s_start.max(new_s_end));
-    let (ex_qs, ex_qe) = (existing_q_start.min(existing_q_end), existing_q_start.max(existing_q_end));
-    let (ex_ss, ex_se) = (existing_s_start.min(existing_s_end), existing_s_start.max(existing_s_end));
-
-    // NCBI reference: blast_itree.c:824-831, blast_hits_priv.h:68
-    // CONTAINED_IN_HSP(a,b,c,d,e,f) = ((a <= c && b >= c) && (d <= f && e >= f))
-    // Check that BOTH endpoints of new HSP are contained within existing HSP
-    // Start point: (new_qs, new_ss) must be within existing HSP's bounding box
-    let start_contained = ex_qs <= new_qs && ex_qe >= new_qs && ex_ss <= new_ss && ex_se >= new_ss;
-    // End point: (new_qe, new_se) must be within existing HSP's bounding box
-    let end_contained = ex_qs <= new_qe && ex_qe >= new_qe && ex_ss <= new_se && ex_se >= new_se;
-
-    start_contained && end_contained
+/// Structure to hold ungapped hit data for batch processing
+/// NCBI reference: blast_gapalign.c - init_hsp_array is sorted by score descending
+/// before gapped extension
+#[derive(Clone)]
+struct UngappedHit {
+    q_idx: u32,
+    // Ungapped extension results (0-based coordinates)
+    qs: usize,        // query start
+    qe: usize,        // query end (exclusive)
+    ss: usize,        // subject start in search_seq coordinates
+    se: usize,        // subject end in search_seq coordinates
+    score: i32,       // ungapped score
+    is_minus_strand: bool,
+    // Original sequence data for gapped extension
+    q_seq_idx: usize, // index into queries array
 }
 
-/// Structure to track HSP for containment checking
+/// Internal 0-based coordinates for Phase 2 interval tree processing
+/// NCBI reference: blast_traceback.c:679-692 - Phase 2 uses internal coordinates
 #[derive(Clone)]
-struct HspTracker {
-    q_start: usize,
-    q_end: usize,
-    s_start: usize,
-    s_end: usize,
-    score: i32,
+struct InternalHitData {
+    q_offset_0: usize,  // 0-based query start
+    q_end_0: usize,     // 0-based query end
+    s_offset_0: usize,  // 0-based subject start (canonical, always < s_end_0)
+    s_end_0: usize,     // 0-based subject end (canonical, always > s_offset_0)
+    is_minus_strand: bool,
 }
 
 pub fn run(args: BlastnArgs) -> Result<()> {
@@ -394,6 +334,7 @@ pub fn run(args: BlastnArgs) -> Result<()> {
     let x_drop_gapped = config.x_drop_gapped;
     let x_drop_final = config.x_drop_final;  // Final traceback X-drop (100)
     let scan_range = config.scan_range; // For off-diagonal hit detection
+    let min_diag_separation = config.min_diag_separation; // For MB_HSP_CLOSE containment check
     let db_len_total = seq_data.db_len_total;
     let db_num_seqs = seq_data.db_num_seqs;
     let params_for_closure = params.clone();  // Gapped params for E-value
@@ -407,7 +348,9 @@ pub fn run(args: BlastnArgs) -> Result<()> {
         .for_each_with(tx, |tx, (_s_idx, s_record)| {
             let queries = queries_ref;
             let query_ids = query_ids_ref;
-            let mut local_hits: Vec<Hit> = Vec::new();
+            // NCBI reference: blast_traceback.c:679-692
+            // Use hits_with_internal to preserve 0-based coordinates for Phase 2
+            let mut hits_with_internal: Vec<(Hit, InternalHitData)> = Vec::new();
             let mut local_sequences: Vec<(String, String, Vec<u8>, Vec<u8>)> = Vec::new();
             let mut seen_pairs: std::collections::HashSet<(String, String)> =
                 std::collections::HashSet::new();
@@ -496,9 +439,21 @@ pub fn run(args: BlastnArgs) -> Result<()> {
                 );
             }
 
-            // NCBI reference: blast_gapalign.c:3918 BlastIntervalTreeContainsHSP
-            // Track HSPs for same-diagonal containment checking
-            let mut hsp_tracker: Vec<HspTracker> = Vec::new();
+            // NCBI reference: blast_gapalign.c:3826-3831 Blast_IntervalTreeInit
+            // Initialize interval tree for HSP containment checking
+            // Tree is indexed by query offsets (primary) and subject offsets (midpoint subtrees)
+            let max_query_len = queries.iter().map(|q| q.seq().len()).max().unwrap_or(1);
+            let mut interval_tree = BlastIntervalTree::new(
+                0,                           // q_min
+                (max_query_len + 1) as i32,  // q_max
+                0,                           // s_min
+                (s_len + 1) as i32,          // s_max
+            );
+
+            // NCBI architecture: Collect all ungapped hits first, then process in score-descending order
+            // NCBI reference: blast_gapalign.c:3824 - ASSERT(Blast_InitHitListIsSortedByScore(init_hitlist))
+            // This is critical for correct containment checking: high-score HSPs must be processed first
+            let mut ungapped_hits: Vec<UngappedHit> = Vec::new();
 
             // Search both strands: plus (forward) and minus (reverse complement)
             // is_minus_strand: false = plus strand, true = minus strand
@@ -1113,224 +1068,39 @@ pub fn run(args: BlastnArgs) -> Result<()> {
                             dbg_gapped_attempted += 1;
 
                             if in_window && debug_mode {
-                                eprintln!("[DEBUG WINDOW] Seed at q={}, s={} -> GAPPED EXTENSION (ungapped_score={}, seed_len={})", q_pos_usize, kmer_start, ungapped_score, qe - qs);
+                                eprintln!("[DEBUG WINDOW] Seed at q={}, s={} -> COLLECT UNGAPPED (score={}, len={})", q_pos_usize, kmer_start, ungapped_score, qe - qs);
                             }
 
-                            // Gapped extension with task-specific X-drop
-                            // NCBI BLAST: blastn uses 30 (non-greedy), megablast uses 25 (greedy)
-                            // Reference: ncbi-blast/c++/include/algo/blast/core/blast_options.h:122-148
-                            // Reference: ncbi-blast/c++/src/algo/blast/core/blast_gapalign.c: gap_align->gap_x_dropoff = ext_params->gap_x_dropoff;
-                            let (
-                                final_qs,
-                                final_qe,
-                                final_ss,
-                                final_se,
-                                score,
-                                matches,
-                                mismatches,
-                                gaps,
-                                gap_letters,
-                                dp_cells,
-                            ) = extend_gapped_heuristic(
-                                q_record.seq(),
-                                search_seq,
+                            // NCBI architecture: Collect ungapped hit for batch processing
+                            // NCBI reference: blast_gapalign.c:3824 - init_hsp_array is sorted by score DESCENDING
+                            // Gapped extension will be done later in score order with containment check
+                            ungapped_hits.push(UngappedHit {
+                                q_idx,
                                 qs,
+                                qe,
                                 ss,
-                                qe - qs,
-                                reward,
-                                penalty,
-                                gap_open,
-                                gap_extend,
-                                x_drop_gapped, // Task-specific: blastn=30, megablast=25
-                                use_dp, // Use DP for blastn task, greedy for megablast
-                            );
-
-                            // NCBI BLAST: Final traceback extension with larger X-drop (100)
-                            // Reference: blast_traceback.c - BLAST_GappedAlignmentWithTraceback
-                            // Uses gap_x_dropoff_final (100) instead of preliminary gap_x_dropoff (25-30)
-                            // This allows alignments to extend further through low-scoring regions
-                            //
-                            // Now using traceback-capturing version to populate gap_info for endpoint purging
-                            // NCBI reference: blast_gapalign.c:364-733 (ALIGN_EX with traceback)
-                            let (
-                                final_qs,
-                                final_qe,
-                                final_ss,
-                                final_se,
-                                score,
-                                matches,
-                                mismatches,
-                                gaps,
-                                gap_letters,
-                                edit_ops,
-                            ) = extend_gapped_heuristic_with_traceback(
-                                q_record.seq(),
-                                search_seq,
-                                qs,
-                                ss,
-                                qe - qs,
-                                reward,
-                                penalty,
-                                gap_open,
-                                gap_extend,
-                                x_drop_final, // Final traceback: 100 for all nucleotide tasks
-                            );
-                            let dp_cells = 0usize; // Not tracked in traceback version
-
-                            // Calculate alignment length
-                            let aln_len = matches + mismatches + gap_letters;
-
-                            // Debug: show gapped extension results for window seeds
-                            if in_window && debug_mode {
-                                let identity = if aln_len > 0 { 100.0 * matches as f64 / aln_len as f64 } else { 0.0 };
-                                eprintln!(
-                                    "[DEBUG WINDOW] Gapped result: q={}-{}, s={}-{}, score={}, len={}, identity={:.1}%, gaps={}, dp_cells={}",
-                                    final_qs, final_qe, final_ss, final_se, score, aln_len, identity, gap_letters, dp_cells
-                                );
-                            }
-
-                            // Suppress unused variable warning when not in debug mode
-                            let _ = dp_cells;
-
-                            // NCBI BLAST does NOT update mask_array/mask_hash
-                            // NCBI reference: na_ungapped.c:768-771
-                            // NCBI only updates: hit_level_array[real_diag].last_hit = s_end_pos;
-                            // This update happens below (line 1214) using hit_level_array
-                            // The mask_array/mask_hash update above was LOSAT-specific and caused excessive filtering
-                            // REMOVED to match NCBI BLAST behavior
+                                se: ungapped_se,
+                                score: ungapped_score,
+                                is_minus_strand,
+                                q_seq_idx: q_idx as usize,
+                            });
 
                             // NCBI reference: na_ungapped.c:768-771
-                            // Update hit_level_array and hit_len_array after successful extension
-                            // hit_level_array[real_diag].last_hit = s_end_pos;
-                            // hit_level_array[real_diag].flag = hit_ready;
-                            // diag_table->hit_len_array[real_diag] = (hit_ready) ? 0 : s_end_pos - s_off_pos;
-                            // NCBI: s_end_pos = ungapped_data->length + ungapped_data->s_start + diag_table->offset;
-                            // CRITICAL: Use UNGAPPED extension end (ungapped_s_end_pos), NOT gapped extension end
-                            // This matches NCBI exactly: na_ungapped.c:757-758, 768
-                            hit_ready = true; // Extension was successful
+                            // Update hit_level_array after collecting ungapped hit
+                            hit_ready = true;
                             if use_array_indexing && diag_idx < diag_array_size {
                                 hit_level_array[diag_idx].last_hit = ungapped_s_end_pos;
-                                hit_level_array[diag_idx].flag = 1; // hit_ready = true
-                                hit_len_array[diag_idx] = 0; // hit_ready, so set to 0
+                                hit_level_array[diag_idx].flag = 1;
+                                hit_len_array[diag_idx] = 0;
                             } else if !use_array_indexing {
                                 let diag_key = pack_diag_key(q_idx, diag);
                                 hit_level_hash.insert(diag_key, DiagStruct {
                                     last_hit: ungapped_s_end_pos,
-                                    flag: 1, // hit_ready = true
+                                    flag: 1,
                                 });
-                                hit_len_hash.insert(diag_key, 0); // hit_ready, so set to 0
+                                hit_len_hash.insert(diag_key, 0);
                             }
-
-                            let (bit_score, eval) = calculate_evalue(
-                                score,
-                                q_record.seq().len(),
-                                db_len_total,
-                                db_num_seqs,
-                                &params_for_closure,
-                            );
-
-                            if eval <= evalue_threshold {
-                                // Identity is matches / alignment_length, capped at 100%
-                                let identity = if aln_len > 0 {
-                                    ((matches as f64 / aln_len as f64) * 100.0).min(100.0)
-                                } else {
-                                    0.0
-                                };
-
-                                let q_id = query_ids[q_idx as usize].clone();
-
-                                // Store sequence data for overlap filtering
-                                let pair_key = (q_id.clone(), s_id.clone());
-                                if !seen_pairs.contains(&pair_key) {
-                                    seen_pairs.insert(pair_key);
-                                    local_sequences.push((
-                                        q_id.clone(),
-                                        s_id.clone(),
-                                        q_record.seq().to_vec(),
-                                        s_seq.to_vec(),
-                                    ));
-                                }
-
-                                // Convert coordinates for minus strand hits
-                                // For minus strand: positions in reverse complement need to be converted
-                                // back to original subject coordinates, with s_start > s_end to indicate minus strand
-                                let (hit_s_start, hit_s_end) = if is_minus_strand {
-                                    // Convert from reverse complement coordinates to original coordinates
-                                    // In reverse complement: position 0 corresponds to original position s_len-1
-                                    // final_ss and final_se are 0-based positions in the reverse complement
-                                    // We need to convert them to 1-based positions in the original sequence
-                                    // with s_start > s_end to indicate minus strand
-                                    let orig_s_start = s_len - final_ss; // 1-based, larger value
-                                    let orig_s_end = s_len - final_se + 1; // 1-based, smaller value
-                                    (orig_s_start, orig_s_end)
-                                } else {
-                                    (final_ss + 1, final_se)
-                                };
-
-                                // Debug coordinate output
-                                if std::env::var("LOSAT_DEBUG_COORDS").is_ok() {
-                                    eprintln!(
-                                        "[OUTPUT] internal: q=[{}, {}), s=[{}, {}) -> output: q=[{}, {}], s=[{}, {}], minus={}",
-                                        final_qs, final_qe, final_ss, final_se,
-                                        final_qs + 1, final_qe, hit_s_start, hit_s_end, is_minus_strand
-                                    );
-                                }
-
-                                // NCBI reference: blast_traceback.c
-                                // Store edit script for endpoint purging (trim vs delete)
-                                let gap_info = if edit_ops.is_empty() {
-                                    None
-                                } else {
-                                    Some(edit_ops.clone())
-                                };
-
-                                // NCBI reference: blast_gapalign.c:3918 BlastIntervalTreeContainsHSP
-                                // Check if new HSP is contained in existing HSP on SAME diagonal
-                                let is_contained = hsp_tracker.iter().any(|existing| {
-                                    is_hsp_contained(
-                                        score,
-                                        final_qs + 1,
-                                        final_qe,
-                                        hit_s_start,
-                                        hit_s_end,
-                                        existing.score,
-                                        existing.q_start,
-                                        existing.q_end,
-                                        existing.s_start,
-                                        existing.s_end,
-                                    )
-                                });
-
-                                if !is_contained {
-                                    local_hits.push(Hit {
-                                        query_id: q_id.clone(),
-                                        subject_id: s_id.clone(),
-                                        identity,
-                                        length: aln_len,
-                                        mismatch: mismatches,
-                                        gapopen: gaps,
-                                        q_start: final_qs + 1,
-                                        q_end: final_qe,
-                                        s_start: hit_s_start,
-                                        s_end: hit_s_end,
-                                        e_value: eval,
-                                        bit_score,
-                                        q_idx: 0,
-                                        s_idx: 0,
-                                        raw_score: score,
-                                        gap_info,
-                                    });
-
-                                    // Add to tracker for same-diagonal containment checks
-                                    hsp_tracker.push(HspTracker {
-                                        q_start: final_qs + 1,
-                                        q_end: final_qe,
-                                        s_start: hit_s_start,
-                                        s_end: hit_s_end,
-                                        score,
-                                    });
-                                }
-                            } // end of if eval <= args.evalue
+                            // Gapped extension deferred to batch processing phase
                         } // end of for matches_slice in two-stage lookup
                     } // end of s_pos loop for two-stage lookup
                 }
@@ -1690,247 +1460,324 @@ pub fn run(args: BlastnArgs) -> Result<()> {
                         dbg_gapped_attempted += 1;
 
                         if in_window && debug_mode {
-                            eprintln!("[DEBUG WINDOW] Seed at q={}, s={} -> GAPPED EXTENSION (ungapped_score={}, seed_len={})", q_pos, kmer_start, ungapped_score, qe - qs);
+                            eprintln!("[DEBUG WINDOW] Seed at q={}, s={} -> COLLECT UNGAPPED (score={}, len={})", q_pos, kmer_start, ungapped_score, qe - qs);
                         }
 
-                        // Gapped extension with task-specific X-drop
-                        // NCBI BLAST: blastn uses 30 (non-greedy), megablast uses 25 (greedy)
-                        // Reference: ncbi-blast/c++/include/algo/blast/core/blast_options.h:122-148
-                        // Reference: ncbi-blast/c++/src/algo/blast/core/blast_gapalign.c: gap_align->gap_x_dropoff = ext_params->gap_x_dropoff;
-                        let (
-                            final_qs,
-                            final_qe,
-                            final_ss,
-                            final_se,
-                            score,
-                            matches,
-                            mismatches,
-                            gaps,
-                            gap_letters,
-                            dp_cells,
-                        ) = extend_gapped_heuristic(
-                            q_record.seq(),
-                            search_seq,
+                        // NCBI architecture: Collect ungapped hit for batch processing
+                        // NCBI reference: blast_gapalign.c:3824 - init_hsp_array is sorted by score DESCENDING
+                        ungapped_hits.push(UngappedHit {
+                            q_idx,
                             qs,
+                            qe,
                             ss,
-                            qe - qs,
-                            reward,
-                            penalty,
-                            gap_open,
-                            gap_extend,
-                            x_drop_gapped, // Task-specific: blastn=30, megablast=25
-                            use_dp, // Use DP for blastn task, greedy for megablast
-                        );
-
-                        // NCBI BLAST: Final traceback extension with larger X-drop (100)
-                        // Reference: blast_traceback.c - BLAST_GappedAlignmentWithTraceback
-                        //
-                        // Now using traceback-capturing version to populate gap_info for endpoint purging
-                        // NCBI reference: blast_gapalign.c:364-733 (ALIGN_EX with traceback)
-                        let (
-                            final_qs,
-                            final_qe,
-                            final_ss,
-                            final_se,
-                            score,
-                            matches,
-                            mismatches,
-                            gaps,
-                            gap_letters,
-                            edit_ops,
-                        ) = extend_gapped_heuristic_with_traceback(
-                            q_record.seq(),
-                            search_seq,
-                            qs,
-                            ss,
-                            qe - qs,
-                            reward,
-                            penalty,
-                            gap_open,
-                            gap_extend,
-                            x_drop_final, // Final traceback: 100 for all nucleotide tasks
-                        );
-                        let dp_cells = 0usize; // Not tracked in traceback version
-
-                        // Debug: show gapped extension results for window seeds
-                        if in_window && debug_mode {
-                            let aln_len = matches + mismatches + gap_letters;
-                            eprintln!("[DEBUG WINDOW] Gapped extension result: q={}-{}, s={}-{}, score={}, len={}", final_qs, final_qe, final_ss, final_se, score, aln_len);
-                        }
-
-                        // Calculate statistics
-                        let aln_len = matches + mismatches + gap_letters;
-                        let identity = if aln_len > 0 {
-                            (matches as f64) / (aln_len as f64)
-                        } else {
-                            0.0
-                        };
-
-                        // Calculate e-value and bit score using Karlin-Altschul statistics
-                        let (bit_score, eval) = calculate_evalue(
-                            score,
-                            q_record.seq().len(),
-                            db_len_total,
-                            db_num_seqs,
-                            &params_for_closure,
-                        );
-
-                        // Skip if e-value is too high
-                        if eval > evalue_threshold {
-                            continue;
-                        }
-
-                        // Calculate alignment length and identity
-                        let aln_len = matches + mismatches + gap_letters;
-                        let identity = if aln_len > 0 {
-                            ((matches as f64 / aln_len as f64) * 100.0).min(100.0)
-                        } else {
-                            0.0
-                        };
-
-                        // Store sequence data for post-processing (only for pairs we haven't seen)
-                        let q_id = &query_ids[q_idx as usize];
-                        if !seen_pairs.contains(&(q_id.clone(), s_id.clone())) {
-                            seen_pairs.insert((q_id.clone(), s_id.clone()));
-                            local_sequences.push((
-                                q_id.clone(),
-                                s_id.clone(),
-                                q_record.seq().to_vec(),
-                                s_seq.to_vec(),
-                            ));
-                        }
-
-                        // Convert coordinates for minus strand hits
-                        // For minus strand: positions in reverse complement need to be converted
-                        // back to original subject coordinates, with s_start > s_end to indicate minus strand
-                        let (hit_s_start, hit_s_end) = if is_minus_strand {
-                            // Convert from reverse complement coordinates to original coordinates
-                            // In reverse complement: position 0 corresponds to original position s_len-1
-                            // final_ss and final_se are 0-based positions in the reverse complement
-                            // We need to convert them to 1-based positions in the original sequence
-                            // with s_start > s_end to indicate minus strand
-                            let orig_s_start = s_len - final_ss; // 1-based, larger value
-                            let orig_s_end = s_len - final_se + 1; // 1-based, smaller value
-                            (orig_s_start, orig_s_end)
-                        } else {
-                            (final_ss + 1, final_se)
-                        };
-
-                        // Debug coordinate output
-                        if std::env::var("LOSAT_DEBUG_COORDS").is_ok() {
-                            eprintln!(
-                                "[OUTPUT] internal: q=[{}, {}), s=[{}, {}) -> output: q=[{}, {}], s=[{}, {}], minus={}",
-                                final_qs, final_qe, final_ss, final_se,
-                                final_qs + 1, final_qe, hit_s_start, hit_s_end, is_minus_strand
-                            );
-                        }
-
-                        // NCBI reference: blast_traceback.c
-                        // Store edit script for endpoint purging (trim vs delete)
-                        let gap_info = if edit_ops.is_empty() {
-                            None
-                        } else {
-                            Some(edit_ops.clone())
-                        };
-
-                        // NCBI reference: blast_gapalign.c:3918 BlastIntervalTreeContainsHSP
-                        // Check if new HSP is contained in existing HSP on SAME diagonal
-                        let is_contained = hsp_tracker.iter().any(|existing| {
-                            is_hsp_contained(
-                                score,
-                                final_qs + 1,
-                                final_qe,
-                                hit_s_start,
-                                hit_s_end,
-                                existing.score,
-                                existing.q_start,
-                                existing.q_end,
-                                existing.s_start,
-                                existing.s_end,
-                            )
+                            se: ungapped_se,
+                            score: ungapped_score,
+                            is_minus_strand,
+                            q_seq_idx: q_idx as usize,
                         });
 
-                        if !is_contained {
-                            local_hits.push(Hit {
-                                query_id: q_id.clone(),
-                                subject_id: s_id.clone(),
-                                identity,
-                                length: aln_len,
-                                mismatch: mismatches,
-                                gapopen: gaps,
-                                q_start: final_qs + 1,
-                                q_end: final_qe,
-                                s_start: hit_s_start,
-                                s_end: hit_s_end,
-                                e_value: eval,
-                                bit_score,
-                                q_idx: 0,
-                                s_idx: 0,
-                                raw_score: score,
-                                gap_info,
-                            });
-
-                            // Add to tracker for same-diagonal containment checks
-                            hsp_tracker.push(HspTracker {
-                                q_start: final_qs + 1,
-                                q_end: final_qe,
-                                s_start: hit_s_start,
-                                s_end: hit_s_end,
-                                score,
-                            });
-                        }
-
                         // NCBI reference: na_ungapped.c:768-771
-                        // Update hit_level_array and hit_len_array after successful extension
-                        // hit_level_array[real_diag].last_hit = s_end_pos;
-                        // hit_level_array[real_diag].flag = hit_ready;
-                        // diag_table->hit_len_array[real_diag] = (hit_ready) ? 0 : s_end_pos - s_off_pos;
-                        // NCBI: s_end_pos = ungapped_data->length + ungapped_data->s_start + diag_table->offset;
-                        // CRITICAL: Use UNGAPPED extension end (ungapped_s_end_pos), NOT gapped extension end
-                        // This matches NCBI exactly: na_ungapped.c:757-758, 768
-                        hit_ready = true; // Extension was successful
+                        // Update hit_level_array after collecting ungapped hit
+                        hit_ready = true;
                         if use_array_indexing && diag_idx < diag_array_size {
                             hit_level_array[diag_idx].last_hit = ungapped_s_end_pos;
-                            hit_level_array[diag_idx].flag = 1; // hit_ready = true
-                            hit_len_array[diag_idx] = 0; // hit_ready, so set to 0
+                            hit_level_array[diag_idx].flag = 1;
+                            hit_len_array[diag_idx] = 0;
                         } else if !use_array_indexing {
                             let diag_key = pack_diag_key(q_idx, diag);
                             hit_level_hash.insert(diag_key, DiagStruct {
                                 last_hit: ungapped_s_end_pos,
-                                flag: 1, // hit_ready = true
+                                flag: 1,
                             });
-                            hit_len_hash.insert(diag_key, 0); // hit_ready, so set to 0
+                            hit_len_hash.insert(diag_key, 0);
                         }
                     }
                     } // end of s_pos loop for original lookup
                 } // end of if/else for two-stage vs original lookup
             } // end of strand loop
 
-            // Print debug summary for this subject
+            // ============================================================
+            // NCBI ARCHITECTURE: Batch process ungapped hits in score order
+            // ============================================================
+            // NCBI reference: blast_gapalign.c:3824 - ASSERT(Blast_InitHitListIsSortedByScore(init_hitlist))
+            // NCBI processes init_hsp_array sorted by score DESCENDING
+            // High-score HSPs are processed first, their GAPPED HSPs added to interval tree
+            // Lower-score HSPs are then checked for containment against these GAPPED HSPs
+
+            // Sort by score DESCENDING (highest first)
+            ungapped_hits.sort_by(|a, b| b.score.cmp(&a.score));
+
+            // Debug counters for containment analysis
+            let mut dbg_containment_skipped = 0usize;
+            let total_ungapped = ungapped_hits.len();
+
+            // Process each ungapped hit in score order
+            for uh in &ungapped_hits {
+                // Get query sequence for this hit
+                let q_record = &queries[uh.q_seq_idx];
+                let q_seq = q_record.seq();
+
+                // Get subject sequence (forward or reverse complement)
+                let search_seq: &[u8] = if uh.is_minus_strand {
+                    &s_seq_rc
+                } else {
+                    s_seq
+                };
+
+                // NCBI reference: blast_gapalign.c:3908-3915
+                // Create tmp_hsp from ungapped data for containment checking
+                // NCBI uses 0-based coordinates internally for the tree
+                let subject_frame_sign = if uh.is_minus_strand { -1i32 } else { 1i32 };
+                let ungapped_tree_hsp = TreeHsp {
+                    query_offset: uh.qs as i32,
+                    query_end: uh.qe as i32,
+                    subject_offset: uh.ss as i32,
+                    subject_end: uh.se as i32,
+                    score: uh.score,
+                    query_context_offset: 0, // Single query context in LOSAT
+                    subject_frame_sign,
+                };
+
+                // NCBI reference: blast_gapalign.c:3918 BlastIntervalTreeContainsHSP
+                // Check if UNGAPPED HSP is contained in existing GAPPED HSPs
+                let is_contained = interval_tree.contains_hsp(&ungapped_tree_hsp, 0, min_diag_separation);
+
+                if is_contained {
+                    // NCBI: Skip gapped extension if ungapped HSP is contained
+                    dbg_containment_skipped += 1;
+                    continue;
+                }
+
+                // Gapped extension with traceback
+                let (
+                    final_qs,
+                    final_qe,
+                    final_ss,
+                    final_se,
+                    score,
+                    matches,
+                    mismatches,
+                    gaps,
+                    gap_letters,
+                    edit_ops,
+                ) = extend_gapped_heuristic_with_traceback(
+                    q_seq,
+                    search_seq,
+                    uh.qs,
+                    uh.ss,
+                    uh.qe - uh.qs,
+                    reward,
+                    penalty,
+                    gap_open,
+                    gap_extend,
+                    x_drop_final,
+                );
+
+                // Calculate statistics
+                let aln_len = matches + mismatches + gap_letters;
+
+                // Calculate e-value
+                let (bit_score, eval) = calculate_evalue(
+                    score,
+                    q_seq.len(),
+                    db_len_total,
+                    db_num_seqs,
+                    &params_for_closure,
+                );
+
+                if eval > evalue_threshold {
+                    continue;
+                }
+
+                let identity = if aln_len > 0 {
+                    ((matches as f64 / aln_len as f64) * 100.0).min(100.0)
+                } else {
+                    0.0
+                };
+
+                let q_id = query_ids[uh.q_idx as usize].clone();
+
+                // Store sequence data
+                let pair_key = (q_id.clone(), s_id.clone());
+                if !seen_pairs.contains(&pair_key) {
+                    seen_pairs.insert(pair_key);
+                    local_sequences.push((
+                        q_id.clone(),
+                        s_id.clone(),
+                        q_seq.to_vec(),
+                        s_seq.to_vec(),
+                    ));
+                }
+
+                // Convert coordinates for minus strand
+                let (hit_s_start, hit_s_end) = if uh.is_minus_strand {
+                    let orig_s_start = s_len - final_ss;
+                    let orig_s_end = s_len - final_se + 1;
+                    (orig_s_start, orig_s_end)
+                } else {
+                    (final_ss + 1, final_se)
+                };
+
+                let gap_info = if edit_ops.is_empty() {
+                    None
+                } else {
+                    Some(edit_ops.clone())
+                };
+
+                // NCBI reference: blast_traceback.c:679-692
+                // Store internal 0-based coordinates for Phase 2 interval tree processing
+                let internal = InternalHitData {
+                    q_offset_0: final_qs,
+                    q_end_0: final_qe,
+                    s_offset_0: final_ss,  // Always canonical (0-based, search_seq coords)
+                    s_end_0: final_se,     // Always canonical (0-based, search_seq coords)
+                    is_minus_strand: uh.is_minus_strand,
+                };
+
+                // Add hit with internal coordinates to results
+                hits_with_internal.push((Hit {
+                    query_id: q_id.clone(),
+                    subject_id: s_id.clone(),
+                    identity,
+                    length: aln_len,
+                    mismatch: mismatches,
+                    gapopen: gaps,
+                    q_start: final_qs + 1,
+                    q_end: final_qe,
+                    s_start: hit_s_start,
+                    s_end: hit_s_end,
+                    e_value: eval,
+                    bit_score,
+                    q_idx: uh.q_idx,  // Store query index for re-evaluation
+                    s_idx: 0,
+                    raw_score: score,
+                    gap_info,
+                }, internal));
+
+                // NCBI reference: blast_gapalign.c:4087-4088 BlastIntervalTreeAddHSP
+                // Add GAPPED HSP to interval tree for future containment checks
+                // NCBI uses 0-based coordinates internally for the tree
+                let gapped_tree_hsp = TreeHsp {
+                    query_offset: final_qs as i32,
+                    query_end: final_qe as i32,
+                    subject_offset: final_ss as i32,
+                    subject_end: final_se as i32,
+                    score,
+                    query_context_offset: 0,
+                    subject_frame_sign: if uh.is_minus_strand { -1 } else { 1 },
+                };
+                // NCBI reference: blast_gapalign.c uses eQueryAndSubject for BLASTN
+                interval_tree.add_hsp(gapped_tree_hsp, 0, IndexMethod::QueryAndSubject);
+            }
+
+            // Print debug summary for this subject (before post-processing)
+            let hits_before_phase2 = hits_with_internal.len();
             if debug_mode || blastn_debug {
                 // Get the cutoff_score for the first query (typically only one query in blastn)
                 let cutoff_score_0 = cutoff_scores.first().copied().unwrap_or(0);
                 eprintln!(
                     "[DEBUG] Subject {}: positions={}, seeds_found={}, ungapped_low={}, two_hit_failed={}, gapped_attempted={}, hits={}, cutoff_score={}",
-                    s_id, dbg_total_s_positions, dbg_seeds_found, dbg_ungapped_low, dbg_two_hit_failed, dbg_gapped_attempted, local_hits.len(), cutoff_score_0
+                    s_id, dbg_total_s_positions, dbg_seeds_found, dbg_ungapped_low, dbg_two_hit_failed, dbg_gapped_attempted, hits_before_phase2, cutoff_score_0
                 );
-                // Show percentage of seeds rejected at each stage
-                if dbg_seeds_found > 0 {
-                    let ungapped_low_pct = (dbg_ungapped_low as f64 / dbg_seeds_found as f64) * 100.0;
-                    let two_hit_pct = (dbg_two_hit_failed as f64 / dbg_seeds_found as f64) * 100.0;
-                    let gapped_pct = (dbg_gapped_attempted as f64 / dbg_seeds_found as f64) * 100.0;
-                    eprintln!(
-                        "[DEBUG] Hit loss breakdown: ungapped_low={:.1}%, two_hit_failed={:.1}%, gapped_attempted={:.1}%",
-                        ungapped_low_pct, two_hit_pct, gapped_pct
-                    );
-                }
+                // Show containment statistics
+                eprintln!(
+                    "[DEBUG] Interval tree: ungapped_collected={}, containment_skipped={}, gapped_added={}, tree_nodes={}",
+                    total_ungapped, dbg_containment_skipped, interval_tree.node_count(), hits_before_phase2
+                );
             }
 
             // Suppress unused variable warnings when not in debug mode
-            let _ = (dbg_total_s_positions, dbg_ambiguous_skipped, dbg_no_lookup_match, dbg_seeds_found, dbg_ungapped_low, dbg_two_hit_failed, dbg_gapped_attempted, dbg_window_seeds);
+            let _ = (dbg_total_s_positions, dbg_ambiguous_skipped, dbg_no_lookup_match, dbg_seeds_found, dbg_ungapped_low, dbg_two_hit_failed, dbg_gapped_attempted, dbg_window_seeds, total_ungapped, dbg_containment_skipped);
 
-            if !local_hits.is_empty() {
-                tx.send(Some((local_hits, local_sequences))).unwrap();
+            // =================================================================
+            // NCBI POST-GAPPED PROCESSING
+            // Reference: blast_traceback.c:633-692
+            // =================================================================
+
+            // Step 1: Extract hits and internal coordinates
+            let (local_hits, internals): (Vec<Hit>, Vec<InternalHitData>) =
+                hits_with_internal.into_iter().unzip();
+
+            // Step 2: Endpoint purging pass 1 (trim, purge=false)
+            // NCBI reference: blast_traceback.c:637-638
+            // Blast_HSPListPurgeHSPsWithCommonEndpoints(program_number, hsp_list, FALSE);
+            let (mut local_hits, extra_start) = purge_hsps_with_common_endpoints_ex(local_hits, false);
+
+            // Step 3: Re-evaluate trimmed HSPs
+            // NCBI reference: blast_traceback.c:647-665
+            // The remaining part of the hsp may be extended further
+            for hit in local_hits.iter_mut().skip(extra_start) {
+                // Get sequences for re-evaluation
+                let q_seq = queries[hit.q_idx as usize].seq();
+                let cutoff = cutoff_scores.get(hit.q_idx as usize).copied().unwrap_or(0);
+
+                let delete = reevaluate_hsp_with_ambiguities_gapped(
+                    hit, q_seq, s_seq, reward, penalty, gap_open, gap_extend, cutoff
+                );
+                if delete {
+                    hit.raw_score = i32::MIN; // Mark for removal
+                }
+            }
+            local_hits.retain(|h| h.raw_score != i32::MIN);
+
+            // Step 4: Endpoint purging pass 2 (delete, purge=true) - BLASTN only
+            // NCBI reference: blast_traceback.c:667-668
+            // if(program_number == eBlastTypeBlastn) {
+            //     Blast_HSPListPurgeHSPsWithCommonEndpoints(program_number, hsp_list, TRUE);
+            // }
+            let mut local_hits = purge_hsps_with_common_endpoints(local_hits);
+
+            // Step 5: Re-sort by gapped score
+            // NCBI reference: blast_traceback.c:672
+            // Blast_HSPListSortByScore(hsp_list);
+            local_hits.sort_by(|a, b| b.raw_score.cmp(&a.raw_score));
+
+            // Step 6: Phase 2 - Tree reset and second containment pass
+            // NCBI reference: blast_traceback.c:678
+            // Blast_IntervalTreeReset(tree);
+            interval_tree.reset();
+
+            // NCBI reference: blast_traceback.c:679-692
+            // Remove any HSPs that are contained within other HSPs.
+            // Since the list is sorted by score already, any HSP
+            // contained by a previous HSP is guaranteed to have a
+            // lower score, and may be purged.
+            let mut final_hits = Vec::with_capacity(local_hits.len());
+            for hit in local_hits {
+                // Reconstruct TreeHsp from hit (convert 1-based back to 0-based)
+                // NCBI uses canonical coordinates: subject.offset < subject.end always
+                let tree_hsp = TreeHsp {
+                    query_offset: (hit.q_start.saturating_sub(1)) as i32,
+                    query_end: hit.q_end as i32,
+                    subject_offset: (hit.s_start.min(hit.s_end).saturating_sub(1)) as i32,
+                    subject_end: hit.s_start.max(hit.s_end) as i32,
+                    score: hit.raw_score,
+                    query_context_offset: 0,
+                    subject_frame_sign: if hit.s_start > hit.s_end { -1 } else { 1 },
+                };
+
+                // NCBI reference: blast_traceback.c:682-688
+                if !interval_tree.contains_hsp(&tree_hsp, 0, min_diag_separation) {
+                    interval_tree.add_hsp(tree_hsp, 0, IndexMethod::QueryAndSubject);
+                    final_hits.push(hit);
+                }
+                // else: HSP is contained within another, skip (implicit delete)
+            }
+
+            // Phase 2 debug output
+            if debug_mode || blastn_debug {
+                let phase2_removed = hits_before_phase2 - final_hits.len();
+                eprintln!(
+                    "[DEBUG] Phase 2: before={}, after={}, removed={}",
+                    hits_before_phase2, final_hits.len(), phase2_removed
+                );
+            }
+
+            // Suppress unused warning
+            let _ = internals;
+
+            if !final_hits.is_empty() {
+                tx.send(Some((final_hits, local_sequences))).unwrap();
             }
             bar.inc(1);
         });

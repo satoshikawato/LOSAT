@@ -35,6 +35,7 @@ pub fn make_hit(
         q_idx: 0,
         s_idx: 0,
         raw_score: 100,
+        gap_info: None,
     }
 }
 

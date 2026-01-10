@@ -101,14 +101,33 @@ fn purge_hsps_for_subject(mut hits: Vec<Hit>) -> Vec<Hit> {
     // This means hits with same (context, q.offset, s.offset) but different frames
     // are interleaved by score. The purge loop exits when frame differs,
     // preventing purge of same-frame hits that are separated by different-frame hits.
+    // NCBI reference: blast_hits.c:2268-2320 (s_QueryOffsetCompareHSPs)
+    // Sort by: context, query.offset, subject.offset, score DESC, query.end DESC, subject.end DESC
+    //
+    // if (h1->context < h2->context) return -1;
+    // if (h1->context > h2->context) return 1;
+    // if (h1->query.offset < h2->query.offset) return -1;
+    // if (h1->query.offset > h2->query.offset) return 1;
+    // if (h1->subject.offset < h2->subject.offset) return -1;
+    // if (h1->subject.offset > h2->subject.offset) return 1;
+    // // Tie-breakers:
+    // if (h1->score < h2->score) return 1;   // score DESC
+    // if (h1->score > h2->score) return -1;
+    // if (h1->query.end < h2->query.end) return 1;   // query.end DESC
+    // if (h1->query.end > h2->query.end) return -1;
+    // if (h1->subject.end < h2->subject.end) return 1;   // subject.end DESC
+    // if (h1->subject.end > h2->subject.end) return -1;
+    // return 0;
     hits.sort_by(|a, b| {
-        // NCBI sorts by context (query_id for us), then offsets, then score
         // NO STRAND/FRAME in sort key - this is critical for NCBI parity!
         a.query_id.cmp(&b.query_id)
             .then_with(|| a.q_start.cmp(&b.q_start))
             // NCBI uses subject.offset which is CANONICAL (min)
             .then_with(|| s_offset(a).cmp(&s_offset(b)))
             .then_with(|| b.raw_score.cmp(&a.raw_score)) // score DESC
+            // NCBI tie-breakers (blast_hits.c:2310-2318)
+            .then_with(|| b.q_end.cmp(&a.q_end)) // query.end DESC
+            .then_with(|| s_end_canon(b).cmp(&s_end_canon(a))) // subject.end DESC
     });
 
     // Remove consecutive HSPs with same (context, query.offset, subject.offset, subject.frame)
@@ -134,8 +153,23 @@ fn purge_hsps_for_subject(mut hits: Vec<Hit>) -> Vec<Hit> {
     }
 
     // Pass 2: Remove HSPs with common END positions
-    // NCBI reference: blast_hits.c:2504 - s_QueryEndCompareHSPs
-    // Sort by: (context, query.end, subject.end, score DESC)
+    // NCBI reference: blast_hits.c:2332-2386 (s_QueryEndCompareHSPs)
+    // Sort by: context, query.end, subject.end, score DESC, query.offset DESC, subject.offset DESC
+    //
+    // if (h1->context < h2->context) return -1;
+    // if (h1->context > h2->context) return 1;
+    // if (h1->query.end < h2->query.end) return -1;
+    // if (h1->query.end > h2->query.end) return 1;
+    // if (h1->subject.end < h2->subject.end) return -1;
+    // if (h1->subject.end > h2->subject.end) return 1;
+    // // Tie-breakers:
+    // if (h1->score < h2->score) return 1;   // score DESC
+    // if (h1->score > h2->score) return -1;
+    // if (h1->query.offset < h2->query.offset) return 1;   // query.offset DESC
+    // if (h1->query.offset > h2->query.offset) return -1;
+    // if (h1->subject.offset < h2->subject.offset) return 1;   // subject.offset DESC
+    // if (h1->subject.offset > h2->subject.offset) return -1;
+    // return 0;
     // CRITICAL: NCBI does NOT include subject.frame in sort key (same as pass 1)
     hits.sort_by(|a, b| {
         // NO STRAND/FRAME in sort key - matches NCBI behavior
@@ -144,6 +178,9 @@ fn purge_hsps_for_subject(mut hits: Vec<Hit>) -> Vec<Hit> {
             // NCBI uses subject.end which is CANONICAL (max)
             .then_with(|| s_end_canon(a).cmp(&s_end_canon(b)))
             .then_with(|| b.raw_score.cmp(&a.raw_score)) // score DESC
+            // NCBI tie-breakers (blast_hits.c:2376-2384)
+            .then_with(|| b.q_start.cmp(&a.q_start)) // query.offset DESC
+            .then_with(|| s_offset(b).cmp(&s_offset(a))) // subject.offset DESC
     });
 
     // Remove consecutive HSPs with same (context, query.end, subject.end, subject.frame)

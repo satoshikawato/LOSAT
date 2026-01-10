@@ -115,19 +115,35 @@ AFTER:  8,542 hits with correct 19-base alignments (69.2% coverage)
 - Debug output shows 13,602 hits before endpoint purge → 8,843 after
 - Endpoint purging removes 35% of raw hits due to duplicate endpoints
 
-**Fix Applied (2026-01-10)**:
+**Fixes Applied (2026-01-10)**:
 - Fixed endpoint purge to match NCBI's `Blast_HSPListPurgeHSPsWithCommonEndpoints`:
   1. Added per-subject grouping (NCBI's BlastHSPList is per-subject)
   2. Added query_id to criteria (emulates NCBI's context)
   3. Changed to canonical coordinates (subject.offset = min, subject.end = max)
   4. Removed strand from sort key (matches NCBI's s_QueryOffsetCompareHSPs)
+  5. Added tie-breaker fields to match NCBI exactly (blast_hits.c:2310-2318, 2376-2384):
+     - Pass 1: Added q_end DESC, s_end DESC tie-breakers
+     - Pass 2: Added q_start DESC, s_offset DESC tie-breakers
 - Improvement: 8,489 → 8,843 hits (4% improvement)
+- Note: Tie-breaker addition didn't change hit count (same 8,843) but ensures NCBI parity
+
+**NCBI Traceback Trimming Discovery**:
+NCBI's blastn has a sophisticated 2-pass endpoint purge in blast_traceback.c:
+1. First pass (line 638) with `purge=FALSE`: Instead of deleting duplicates, NCBI TRIMS them
+   - Uses `s_CutOffGapEditScript()` to extract non-overlapping fragments
+   - Requires traceback (GapEditScript) information
+2. Re-evaluate trimmed fragments (lines 647-665): `Blast_HSPReevaluateWithAmbiguitiesGapped()`
+3. Second pass (line 668) with `purge=TRUE`: Final cleanup of remaining duplicates
+
+LOSAT only implements the `purge=TRUE` behavior (delete duplicates entirely).
+Implementing the trimming would require traceback infrastructure not currently available.
 
 **Remaining Gap Analysis**:
 - LOSAT generates 13,602 raw hits, NCBI has 12,340 final hits
 - LOSAT purges 35% (4,759 hits) due to duplicate endpoints
-- Root cause: LOSAT may be generating more seeds/extensions with same endpoints
+- Root cause: LOSAT generates more HSPs with same endpoints (before purge)
 - Potential sources: seed finding, diagonal tracking, extension overlap
+- The trimming feature above may also contribute to NCBI retaining more HSPs
 
 **Files Modified**:
 - `src/algorithm/blastn/filtering/purge_endpoints.rs`

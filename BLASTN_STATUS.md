@@ -102,25 +102,56 @@ AFTER:  8,542 hits with correct 19-base alignments (69.2% coverage)
 ## Known Issues
 
 ### Issue 1: Missing Hits in Self-Comparison
-**Symptom**: NZ_CP006932 self-comparison shows only 69% of NCBI hits (8,542 vs 12,340)
+**Symptom**: NZ_CP006932 self-comparison shows 72% of NCBI hits (8,843 vs 12,340)
 
-**Status**: Alignment lengths are now correct (19 bases matching NCBI). Missing ~3,800 hits.
+**Status**: Partially fixed - endpoint purging improved from 8,489 to 8,843 hits.
 
-**Possible Causes**:
-1. Differences in seed finding logic (most likely)
-2. Different X-drop termination behavior
-3. Scoring calculation differences
+**Investigation (2026-01-10)**:
+- Tested lut_word_length=11 (scan_step=1) but hit count remained at ~8,500
+- Alignment length distribution analysis shows missing hits are in 30-99 bp range:
+  - NCBI 30-49: 4,245 | LOSAT: 2,570 (-1,675)
+  - NCBI 50-99: 3,146 | LOSAT: 1,454 (-1,692)
+  - Short alignments (<30) are similar between NCBI and LOSAT
+- Debug output shows 13,602 hits before endpoint purge → 8,843 after
+- Endpoint purging removes 35% of raw hits due to duplicate endpoints
 
-**Priority**: High
+**Fix Applied (2026-01-10)**:
+- Fixed endpoint purge to match NCBI's `Blast_HSPListPurgeHSPsWithCommonEndpoints`:
+  1. Added per-subject grouping (NCBI's BlastHSPList is per-subject)
+  2. Added query_id to criteria (emulates NCBI's context)
+  3. Changed to canonical coordinates (subject.offset = min, subject.end = max)
+  4. Removed strand from sort key (matches NCBI's s_QueryOffsetCompareHSPs)
+- Improvement: 8,489 → 8,843 hits (4% improvement)
+
+**Remaining Gap Analysis**:
+- LOSAT generates 13,602 raw hits, NCBI has 12,340 final hits
+- LOSAT purges 35% (4,759 hits) due to duplicate endpoints
+- Root cause: LOSAT may be generating more seeds/extensions with same endpoints
+- Potential sources: seed finding, diagonal tracking, extension overlap
+
+**Files Modified**:
+- `src/algorithm/blastn/filtering/purge_endpoints.rs`
+
+**Priority**: Medium (remaining gap likely in seed/extension phase)
 
 ### Issue 2: Extra Hits in Some Cases
-**Symptom**: Some datasets show 105-115% of NCBI hits
+**Symptom**: Some datasets show 105-116% of NCBI hits
 
-**Status**: May be partially resolved by alignment length fix (needs re-testing)
+**Status**: Subject Best Hit filtering is NOT enabled by default in NCBI.
 
-**Possible Causes**:
-1. Missing HSP filtering step in NCBI that LOSAT doesn't implement
-2. Different scoring thresholds
+**Investigation (2026-01-10)**:
+- Implemented subject_best_hit filter (blast_hits.c:2537-2606)
+- Discovered it's OPTIONAL in NCBI - only applied when `-subject_besthit` is specified
+- Filter is available but disabled by default to match NCBI behavior
+- Extra hits distribution (PeseMJNV.PemoMJNVB):
+  - NCBI <30: 3,046 | LOSAT: 4,016 (+970)
+  - NCBI 30-49: 4,638 | LOSAT: 5,455 (+817)
+- Extra hits are predominantly short alignments
+
+**Root Cause**: Different seed finding or extension behavior, possibly:
+1. More seeds found due to different diagonal tracking
+2. Different X-drop termination
+3. Different cutoff score calculations
 
 **Priority**: Medium
 
@@ -130,12 +161,12 @@ AFTER:  8,542 hits with correct 19-base alignments (69.2% coverage)
 |---------|-----------|-------|------|----------|--------|
 | EDL933.Sakai | megablast | 5,634 | 5,718 | 98.5% | ✓ Excellent |
 | Sakai.MG1655 | megablast | 6,434 | 6,476 | 99.3% | ✓ Excellent |
-| NZ_CP006932 self | blastn | 8,542 | 12,340 | 69.2% | ✗ Missing hits (lengths correct) |
+| NZ_CP006932 self | blastn | 8,843 | 12,340 | 71.7% | ⚠ Partially fixed, see Issue 1 |
 | MjeNMV.MelaMJNV | blastn | 2,588 | 2,668 | 97.0% | ✓ Good |
 | SiNMV.ChdeNMV | blastn | 4,192 | 4,367 | 95.9% | ✓ Good |
-| MelaMJNV.PemoMJNVA | blastn | 3,088 | 2,729 | 113.1% | ⚠ Extra hits (needs retest) |
-| PemoMJNVA.PeseMJNV | blastn | 3,094 | 2,940 | 105.2% | ⚠ Extra hits (needs retest) |
-| PeseMJNV.PemoMJNVB | blastn | 13,454 | 11,668 | 115.3% | ⚠ Extra hits (needs retest) |
+| MelaMJNV.PemoMJNVA | blastn | 3,088 | 2,729 | 113.1% | ⚠ Extra short hits |
+| PemoMJNVA.PeseMJNV | blastn | 3,094 | 2,940 | 105.2% | ⚠ Extra short hits |
+| PeseMJNV.PemoMJNVB | blastn | 13,612 | 11,668 | 116.6% | ⚠ Extra short hits |
 
 ## Key Files
 
@@ -170,13 +201,20 @@ src/algorithm/blastn/
 ## Next Steps
 
 ### Priority 1: Investigate Missing Hits (NZ_CP006932)
-1. Compare seed detection between NCBI and LOSAT
-2. Add diagnostic logging at each stage
-3. Identify where hits are being filtered out
+**Investigation complete**: Scan_step is not the issue. Missing hits are 30-99 bp alignments.
+
+Next actions:
+1. Compare gapped extension output between NCBI and LOSAT for same seeds
+2. Check if endpoint purging is removing valid HSPs (13,520 → 8,489 seems aggressive)
+3. Investigate why LOSAT produces fewer medium-length alignments
 
 ### Priority 2: Investigate Extra Hits
-1. Compare HSP scoring between NCBI and LOSAT
-2. Check for missing filtering steps in NCBI
+**Investigation complete**: Subject Best Hit filtering is optional in NCBI.
+
+Next actions:
+1. Add `-subject_besthit` CLI option to enable optional filtering
+2. Compare X-drop termination thresholds
+3. Compare cutoff score calculations for short alignments
 
 ### Priority 3: Performance Optimization (Later)
 1. Profile to identify bottlenecks

@@ -96,6 +96,16 @@ pub fn run(args: BlastnArgs) -> Result<()> {
         &seq_data.query_masks,
     );
 
+    // Build query lengths map for subject_best_hit filtering
+    let query_lengths: FxHashMap<String, usize> = seq_data
+        .queries
+        .iter()
+        .map(|r| {
+            let id = r.id().split_whitespace().next().unwrap_or("unknown").to_string();
+            (id, r.seq().len())
+        })
+        .collect();
+
     if args.verbose {
         eprintln!("Searching...");
     }
@@ -112,6 +122,7 @@ pub fn run(args: BlastnArgs) -> Result<()> {
     let (tx, rx) = channel::<Option<(Vec<Hit>, Vec<(String, String, Vec<u8>, Vec<u8>)>)>>();
     let out_path = args.out.clone();
     let params_clone = params.clone();
+    let query_lengths_clone = query_lengths.clone();
 
     // Keep a sender for the main thread to send the completion signal
     let tx_main = tx.clone();
@@ -177,6 +188,7 @@ pub fn run(args: BlastnArgs) -> Result<()> {
             &params_clone,
             config.use_dp,
             verbose,
+            &query_lengths_clone,
         );
 
         if verbose {

@@ -22,7 +22,7 @@ pub use run::run;
 use rustc_hash::FxHashMap;
 use crate::common::Hit;
 use crate::stats::KarlinParams;
-use super::filtering::purge_hsps_with_common_endpoints;
+use super::filtering::{purge_hsps_with_common_endpoints, subject_best_hit};
 
 // Re-export for backward compatibility
 pub use crate::algorithm::common::evalue::calculate_evalue_database_search as calculate_evalue;
@@ -42,6 +42,7 @@ pub fn filter_hsps(
     _params: &KarlinParams,
     _use_dp: bool,
     verbose: bool,
+    query_lengths: &FxHashMap<String, usize>,  // Query ID -> length mapping
 ) -> Vec<Hit> {
     if hits.is_empty() {
         return hits;
@@ -87,11 +88,18 @@ pub fn filter_hsps(
         eprintln!("[INFO]   Endpoint purge: {} -> {} hits", before_purge, result_hits.len());
     }
 
-    // NCBI blastn does NOT apply culling by default (culling_limit = 0)
-    // Culling is only applied when -culling_limit is explicitly set
-    // Reference: blast_options.c:1496 - culling_limit defaults to 0
-    // For NCBI parity, we skip the domination filtering entirely and return sorted hits
+    // NCBI BLAST: Subject Best Hit filtering (OPTIONAL - not applied by default)
+    // Reference: blast_hits.c:2537-2606 Blast_HSPListSubjectBestHit
+    // Called from blast_engine.c:586-591 ONLY when subject_besthit_opts is set
+    // (i.e., when user specifies -subject_besthit on command line)
+    //
+    // NOTE: Subject best hit filtering is disabled by default to match NCBI behavior.
+    // The subject_best_hit() function is available but not called here.
+    // To enable, add a command-line option and call subject_best_hit() when enabled.
+    let _ = query_lengths; // Silence unused variable warning
+    let _ = subject_best_hit; // Silence unused import warning
     let final_hits: Vec<Hit> = result_hits;
+
     let filter_time = filter_start.elapsed();
 
     if verbose {

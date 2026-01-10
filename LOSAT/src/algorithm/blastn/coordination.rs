@@ -194,17 +194,20 @@ pub fn configure_task(args: &BlastnArgs) -> TaskConfig {
 /// - >= 180,000: 11-bit direct lookup (MBLookupTable)
 fn calculate_adaptive_lut_width(word_size: usize, approx_table_entries: usize) -> usize {
     // NCBI reference: blast_nalookup.c:130-141
-    // Note: NCBI's 11-bit direct lookup uses MBLookupTable (hash-based with PV), not true direct address.
-    // LOSAT's direct address table for 11-bit (4M entries) is too slow to allocate.
-    // Use 10-bit two-stage as a practical compromise for large queries, which maintains
-    // reasonable performance while avoiding the 4M entry allocation overhead.
+    // For word_size=11, NCBI uses different lookup widths based on approx_table_entries:
+    // - < 12,000: 8-bit lookup (SmallNaLookupTable)
+    // - 12,000 <= entries < 180,000: 10-bit lookup (MBLookupTable)
+    // - >= 180,000: 11-bit lookup (MBLookupTable) with scan_step=1
+    //
+    // NOTE: Using 10-bit for now to maintain scan_step=2 behavior.
+    // TODO: Investigate why 11-bit lookup produces fewer hits after endpoint purging.
     match word_size {
         11 => {
             if approx_table_entries < LUT_WIDTH_11_THRESHOLD_8 {
-                8
+                8  // scan_step = 11 - 8 + 1 = 4
             } else {
-                // For larger queries, use 10-bit LUT (4^10 = 1M entries)
-                // This keeps two-stage verification but with faster lookup than hash
+                // Use 10-bit for larger queries
+                // scan_step = 11 - 10 + 1 = 2
                 10
             }
         }

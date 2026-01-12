@@ -17,7 +17,7 @@ echo "Starting LOSAT commands..."
 echo "Starting AP027280 self..."
 (time $LOSAT_BIN tblastx -q ./fasta/AP027280.fasta -s ./fasta/AP027280.fasta -o ./losat_out/AP027280.AP027280.tlosatx.n1.out --query-gencode 1 --db-gencode 1 -n 1)&>./losat_out/AP027280.AP027280.tlosatx.n1.log 
 (time $LOSAT_BIN tblastx -q ./fasta/AP027280.fasta -s ./fasta/AP027280.fasta -o ./losat_out/AP027280.AP027280.tlosatx.n8.out --query-gencode 1 --db-gencode 1 -n 8 )&>./losat_out/AP027280.AP027280.tlosatx.n8.log 
-
+<<COMMENTOUT
 # MjeNMV vs MelaMJNV
 echo "Starting MjeNMV vs MelaMJNV (LOSAT)..."
 (time $LOSAT_BIN tblastx -q ./fasta/MjeNMV.fasta -s ./fasta/MelaMJNV.fasta -o ./losat_out/MjeNMV.MelaMJNV.tlosatx.n8.out --query-gencode 1 --db-gencode 1 -n 8 ) &> ./losat_out/MjeNMV.MelaMJNV.tlosatx.n8.log 
@@ -74,7 +74,7 @@ echo "Starting AP027131 vs AP027133..."
 echo "Starting AP027133 vs AP027132..."
 # AP027133 vs AP027132
 (time $LOSAT_BIN tblastx -q ./fasta/AP027133.fasta -s ./fasta/AP027132.fasta -o ./losat_out/AP027133.AP027132.tlosatx.n8.out --query-gencode 4 --db-gencode 4 -n 8 )&>./losat_out/AP027133.AP027132.tlosatx.n8.log 
-
+COMMENTOUT
 
 
 

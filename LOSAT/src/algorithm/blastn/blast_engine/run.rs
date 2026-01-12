@@ -14,7 +14,13 @@ use crate::stats::lookup_nucl_params;
 
 // Import from parent blastn module (super::super:: because we're in blast_engine/)
 use super::super::args::BlastnArgs;
-use super::super::alignment::{extend_gapped_heuristic, extend_final_traceback, extend_gapped_heuristic_with_traceback};
+use super::super::alignment::{
+    blast_get_offsets_for_gapped_alignment,
+    blast_get_start_for_gapped_alignment_nucl,
+    extend_gapped_heuristic,
+    extend_final_traceback,
+    extend_gapped_heuristic_with_traceback,
+};
 use super::super::extension::{extend_hit_ungapped, type_of_word};
 use crate::utils::dust::MaskedInterval;
 use super::super::constants::TWO_HIT_WINDOW;
@@ -1547,8 +1553,9 @@ pub fn run(args: BlastnArgs) -> Result<()> {
 
             // Process each ungapped hit in score order
             for (idx, uh) in ungapped_hits.iter().enumerate() {
-                if idx % 100 == 0 {
-                    eprintln!("[PROGRESS] Gapped extension: {}/{}", idx, total_ungapped);
+                // NCBI reference: blast_gapalign.c:3886-4090 (no per-HSP logging)
+                if verbose && idx % 100 == 0 {
+                    eprintln!("[INFO] Gapped extension: {}/{}", idx, total_ungapped);
                 }
                 // Get query sequence for this hit
                 let q_record = &queries[uh.q_seq_idx];
@@ -1585,7 +1592,37 @@ pub fn run(args: BlastnArgs) -> Result<()> {
                     continue;
                 }
 
+                // Select gapped-start seed within the ungapped HSP.
+                // NCBI reference: blast_traceback.c:436-457 (seed selection)
+                // NCBI reference: blast_gapalign.c:3248-3305 (BlastGetOffsetsForGappedAlignment)
+                // NCBI reference: blast_gapalign.c:3323-3389 (BlastGetStartForGappedAlignmentNucl)
+                let (seed_qs, seed_ss) = match blast_get_offsets_for_gapped_alignment(
+                    q_seq,
+                    search_seq,
+                    uh.qs,
+                    uh.qe,
+                    uh.ss,
+                    uh.se,
+                    reward,
+                    penalty,
+                ) {
+                    Some((q_start, s_start)) => blast_get_start_for_gapped_alignment_nucl(
+                        q_seq,
+                        search_seq,
+                        uh.qs,
+                        uh.qe,
+                        uh.ss,
+                        uh.se,
+                        q_start,
+                        s_start,
+                    ),
+                    None => {
+                        continue;
+                    }
+                };
+
                 // Gapped extension with traceback
+                // NCBI reference: blast_gapalign.c:2778-2831 BLAST_GappedAlignmentWithTraceback
                 dbg_gapped_calls += 1;
                 let (
                     final_qs,
@@ -1601,9 +1638,9 @@ pub fn run(args: BlastnArgs) -> Result<()> {
                 ) = extend_gapped_heuristic_with_traceback(
                     q_seq,
                     search_seq,
-                    uh.qs,
-                    uh.ss,
-                    uh.qe - uh.qs,
+                    seed_qs,
+                    seed_ss,
+                    1,
                     reward,
                     penalty,
                     gap_open,
@@ -1710,8 +1747,15 @@ pub fn run(args: BlastnArgs) -> Result<()> {
 
             // DEBUG: Log gapped extension stats
             let gapped_elapsed = gapped_start_time.elapsed();
-            eprintln!("[PERF] Gapped extension took {:?}: calls={}, skipped={}, total_ungapped={}",
-                gapped_elapsed, dbg_gapped_calls, dbg_containment_skipped, total_ungapped);
+            if verbose {
+                eprintln!(
+                    "[INFO] Gapped extension took {:?}: calls={}, skipped={}, total_ungapped={}",
+                    gapped_elapsed,
+                    dbg_gapped_calls,
+                    dbg_containment_skipped,
+                    total_ungapped
+                );
+            }
 
             // Print debug summary for this subject (before post-processing)
             let hits_before_phase2 = hits_with_internal.len();

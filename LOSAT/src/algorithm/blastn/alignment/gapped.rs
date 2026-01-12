@@ -15,6 +15,205 @@ pub struct AlnStats {
     gap_letters: u32, // Total gap characters (for alignment length calculation)
 }
 
+// NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_gapalign_priv.h:120
+const HSP_MAX_WINDOW: usize = 11;
+
+/// Select a gapped-start seed within an HSP using a sliding window score.
+///
+/// NCBI reference: blast_gapalign.c:3248-3305 BlastGetOffsetsForGappedAlignment
+pub fn blast_get_offsets_for_gapped_alignment(
+    q_seq: &[u8],
+    s_seq: &[u8],
+    q_start: usize,
+    q_end: usize,
+    s_start: usize,
+    s_end: usize,
+    reward: i32,
+    penalty: i32,
+) -> Option<(usize, usize)> {
+    // NCBI reference: blast_gapalign.c:3254-3257
+    let q_length = q_end.saturating_sub(q_start);
+    let s_length = s_end.saturating_sub(s_start);
+
+    if q_length == 0 || s_length == 0 {
+        return None;
+    }
+
+    if q_end > q_seq.len() || s_end > s_seq.len() {
+        return None;
+    }
+
+    // NCBI reference: blast_gapalign.c:3259-3263
+    if q_length <= HSP_MAX_WINDOW {
+        let mid = q_start + q_length / 2;
+        return Some((mid, s_start + q_length / 2));
+    }
+
+    // NCBI reference: blast_gapalign.c:3265-3278
+    let mut score: i32 = 0;
+    let mut q_idx = q_start;
+    let mut s_idx = s_start;
+    for _ in 0..HSP_MAX_WINDOW {
+        score += if q_seq[q_idx] == s_seq[s_idx] { reward } else { penalty };
+        q_idx += 1;
+        s_idx += 1;
+    }
+
+    let mut max_score = score;
+    let mut max_offset = q_start + HSP_MAX_WINDOW - 1;
+
+    // NCBI reference: blast_gapalign.c:3278
+    let hsp_end = q_start + q_length.min(s_length);
+
+    // NCBI reference: blast_gapalign.c:3279-3292
+    let mut index = q_start + HSP_MAX_WINDOW;
+    while index < hsp_end {
+        let q_leave = q_seq[q_idx - HSP_MAX_WINDOW];
+        let s_leave = s_seq[s_idx - HSP_MAX_WINDOW];
+        score -= if q_leave == s_leave { reward } else { penalty };
+
+        let q_enter = q_seq[q_idx];
+        let s_enter = s_seq[s_idx];
+        score += if q_enter == s_enter { reward } else { penalty };
+
+        if score > max_score {
+            max_score = score;
+            max_offset = index;
+        }
+
+        q_idx += 1;
+        s_idx += 1;
+        index += 1;
+    }
+
+    // NCBI reference: blast_gapalign.c:3294-3299
+    if max_score > 0 {
+        let q_retval = max_offset;
+        let s_retval = (max_offset - q_start) + s_start;
+        return Some((q_retval, s_retval));
+    }
+
+    // NCBI reference: blast_gapalign.c:3300-3317
+    score = 0;
+    q_idx = q_end - HSP_MAX_WINDOW;
+    s_idx = s_end - HSP_MAX_WINDOW;
+    for _ in (q_end - HSP_MAX_WINDOW)..q_end {
+        score += if q_seq[q_idx] == s_seq[s_idx] { reward } else { penalty };
+        q_idx += 1;
+        s_idx += 1;
+    }
+
+    if score > 0 {
+        let q_retval = q_end - HSP_MAX_WINDOW / 2;
+        let s_retval = s_end - HSP_MAX_WINDOW / 2;
+        return Some((q_retval, s_retval));
+    }
+
+    None
+}
+
+/// Refine a gapped-start seed for nucleotide alignments based on identity runs.
+///
+/// NCBI reference: blast_gapalign.c:3323-3389 BlastGetStartForGappedAlignmentNucl
+pub fn blast_get_start_for_gapped_alignment_nucl(
+    q_seq: &[u8],
+    s_seq: &[u8],
+    q_offset: usize,
+    q_end: usize,
+    s_offset: usize,
+    s_end: usize,
+    q_gapped_start: usize,
+    s_gapped_start: usize,
+) -> (usize, usize) {
+    // NCBI reference: blast_gapalign.c:3326-3332
+    let mut hsp_max_ident_run: i32 = 10;
+    let offset = (s_gapped_start - s_offset).min(q_gapped_start - q_offset);
+
+    // NCBI reference: blast_gapalign.c:3334-3349
+    let mut score: i32 = -1;
+    let mut q_idx = q_gapped_start;
+    let mut s_idx = s_gapped_start;
+    let q_len_limit = q_end;
+
+    while q_idx < q_len_limit && q_idx < q_seq.len() && s_idx < s_seq.len() && q_seq[q_idx] == s_seq[s_idx] {
+        score += 1;
+        if score > hsp_max_ident_run {
+            return (q_gapped_start, s_gapped_start);
+        }
+        q_idx += 1;
+        s_idx += 1;
+    }
+
+    q_idx = q_gapped_start;
+    s_idx = s_gapped_start;
+    while q_idx > 0 && s_idx > 0 && q_seq[q_idx - 1] == s_seq[s_idx - 1] {
+        score += 1;
+        if score > hsp_max_ident_run {
+            return (q_gapped_start, s_gapped_start);
+        }
+        q_idx -= 1;
+        s_idx -= 1;
+    }
+
+    // NCBI reference: blast_gapalign.c:3350
+    hsp_max_ident_run = (hsp_max_ident_run * 3) / 2;
+
+    // NCBI reference: blast_gapalign.c:3352-3357
+    let q_start = q_gapped_start - offset;
+    let s_start = s_gapped_start - offset;
+    let q_len = (s_end - s_start).min(q_end - q_start);
+
+    if q_start + q_len > q_seq.len() || s_start + q_len > s_seq.len() {
+        return (q_gapped_start, s_gapped_start);
+    }
+
+    // NCBI reference: blast_gapalign.c:3357-3389
+    let mut max_score: i32 = 0;
+    let mut max_offset = q_start;
+    score = 0;
+    let mut match_run = false;
+    let mut prev_match = false;
+
+    q_idx = q_start;
+    s_idx = s_start;
+    let mut index = q_start;
+    let end = q_start + q_len;
+    while index < end {
+        match_run = q_seq[q_idx] == s_seq[s_idx];
+        if match_run != prev_match {
+            prev_match = match_run;
+            if match_run {
+                score = 1;
+            } else if score > max_score {
+                max_score = score;
+                max_offset = index - (score as usize / 2);
+            }
+        } else if match_run {
+            score += 1;
+            if score > hsp_max_ident_run {
+                let max_offset = index - (hsp_max_ident_run as usize / 2);
+                let s_new = max_offset + s_start - q_start;
+                return (max_offset, s_new);
+            }
+        }
+        q_idx += 1;
+        s_idx += 1;
+        index += 1;
+    }
+
+    if match_run && score > max_score {
+        max_score = score;
+        max_offset = (q_start + q_len) - (score as usize / 2);
+    }
+
+    if max_score > 0 {
+        let s_new = max_offset + s_start - q_start;
+        return (max_offset, s_new);
+    }
+
+    (q_gapped_start, s_gapped_start)
+}
+
 pub fn extend_gapped_heuristic(
     q_seq: &[u8],
     s_seq: &[u8],

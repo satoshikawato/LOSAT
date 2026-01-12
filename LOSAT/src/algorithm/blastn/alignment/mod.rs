@@ -18,7 +18,11 @@ pub use greedy::{
     greedy_align_one_direction,
     greedy_align_one_direction_ex,
 };
+// NCBI reference: blast_gapalign.c:3248-3305 (BlastGetOffsetsForGappedAlignment)
+// NCBI reference: blast_gapalign.c:3323-3389 (BlastGetStartForGappedAlignmentNucl)
 pub use gapped::{
+    blast_get_offsets_for_gapped_alignment,
+    blast_get_start_for_gapped_alignment_nucl,
     extend_gapped_heuristic,
     extend_gapped_one_direction,
     extend_final_traceback,
@@ -28,5 +32,3 @@ pub use gapped::{
 };
 pub use utilities::gdb3;
 pub use statistics::align_region;
-
-

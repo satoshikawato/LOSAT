@@ -20,6 +20,9 @@ use super::super::alignment::{
     extend_gapped_heuristic,
     extend_final_traceback,
     extend_gapped_heuristic_with_traceback,
+    // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_gapalign.c:2762-2936 (BLAST_GreedyGappedAlignment)
+    greedy_gapped_alignment_score_only,
+    greedy_gapped_alignment_with_traceback,
 };
 use super::super::extension::{extend_hit_ungapped, type_of_word};
 use crate::utils::dust::MaskedInterval;
@@ -855,15 +858,15 @@ pub fn run(args: BlastnArgs) -> Result<()> {
                                 // word_type = s_TypeOfWord(query, subject, &q_off, &s_off,
                                 //                          query_mask, query_info, s_range,
                                 //                          word_length, lut_word_length, lut, TRUE, &extended);
-                                // PERFORMANCE: Pass empty mask since masking was already done during lookup building
-                                // NCBI: When locations is NULL, s_IsSeedMasked always returns FALSE
-                                let empty_mask: &[MaskedInterval] = &[];
+                                // NCBI reference: ncbi-blast/c++/src/algo/blast/core/na_ungapped.c:674-680
+                                // s_TypeOfWord uses query_mask to skip masked seeds
+                                let query_mask = &query_masks_ref[q_idx as usize];
                                 let (wt, ext) = type_of_word(
                                     q_seq,
                                     search_seq,
                                     q_off,
                                     s_off,
-                                    empty_mask,
+                                    query_mask,
                                     word_length,
                                     lut_word_length,
                                     true, // check_double = TRUE
@@ -1022,15 +1025,14 @@ pub fn run(args: BlastnArgs) -> Result<()> {
                                 //     s_end_pos += extended;
                                 // }
                                 // In NCBI, check_masks is TRUE by default (only FALSE when lut->stride is true)
-                                // PERFORMANCE: Pass empty mask since masking was already done during lookup building
-                                // NCBI: When locations is NULL, s_IsSeedMasked always returns FALSE
-                                let empty_mask: &[MaskedInterval] = &[];
+                                // NCBI reference: ncbi-blast/c++/src/algo/blast/core/na_ungapped.c:718-725
+                                let query_mask = &query_masks_ref[q_idx as usize];
                                 let (wt, ext) = type_of_word(
                                     q_seq,
                                     search_seq,
                                     q_off,
                                     s_off,
-                                    empty_mask,
+                                    query_mask,
                                     word_length,
                                     lut_word_length,
                                     false, // check_double = FALSE (not in two-hit block)
@@ -1280,14 +1282,14 @@ pub fn run(args: BlastnArgs) -> Result<()> {
                             //                          query_mask, query_info, s_range,
                             //                          word_length, lut_word_length, lut, TRUE, &extended);
                             // For non-two-stage lookup, word_length == lut_word_length, so type_of_word returns (1, 0)
-                            // PERFORMANCE: Pass empty mask since masking was already done during lookup building
-                            let empty_mask: &[MaskedInterval] = &[];
+                            // NCBI reference: ncbi-blast/c++/src/algo/blast/core/na_ungapped.c:674-680
+                            let query_mask = &query_masks_ref[q_idx as usize];
                             let (wt, ext) = type_of_word(
                                 q_record.seq(),
                                 search_seq,
                                 q_off,
                                 s_off,
-                                empty_mask,
+                                query_mask,
                                 safe_k, // word_length
                                 safe_k, // lut_word_length (same for non-two-stage)
                                 true, // check_double = TRUE
@@ -1427,14 +1429,14 @@ pub fn run(args: BlastnArgs) -> Result<()> {
                             //     s_end_pos += extended;
                             // }
                             // In NCBI, check_masks is TRUE by default (only FALSE when lut->stride is true)
-                            // PERFORMANCE: Pass empty mask since masking was already done during lookup building
-                            let empty_mask: &[MaskedInterval] = &[];
+                            // NCBI reference: ncbi-blast/c++/src/algo/blast/core/na_ungapped.c:718-725
+                            let query_mask = &query_masks_ref[q_idx as usize];
                             let (wt, ext) = type_of_word(
                                 q_record.seq(),
                                 search_seq,
                                 q_off,
                                 s_off,
-                                empty_mask,
+                                query_mask,
                                 safe_k, // word_length
                                 safe_k, // lut_word_length (same for non-two-stage)
                                 false, // check_double = FALSE (not in two-hit block)
@@ -1593,37 +1595,110 @@ pub fn run(args: BlastnArgs) -> Result<()> {
                 }
 
                 // Select gapped-start seed within the ungapped HSP.
-                // NCBI reference: blast_traceback.c:436-457 (seed selection)
-                // NCBI reference: blast_gapalign.c:3248-3305 (BlastGetOffsetsForGappedAlignment)
-                // NCBI reference: blast_gapalign.c:3323-3389 (BlastGetStartForGappedAlignmentNucl)
-                let (seed_qs, seed_ss) = match blast_get_offsets_for_gapped_alignment(
-                    q_seq,
-                    search_seq,
-                    uh.qs,
-                    uh.qe,
-                    uh.ss,
-                    uh.se,
-                    reward,
-                    penalty,
-                ) {
-                    Some((q_start, s_start)) => blast_get_start_for_gapped_alignment_nucl(
+                // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_gapalign.c:3248-3389
+                // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_gapalign.c:4012-4031
+                let cutoff_score = cutoff_scores[uh.q_idx as usize];
+                let (
+                    prelim_qs,
+                    prelim_qe,
+                    prelim_ss,
+                    prelim_se,
+                    prelim_score,
+                    final_seed_qs,
+                    final_seed_ss,
+                ) = if use_dp {
+                    // DP seed selection (blastn)
+                    let (seed_qs, seed_ss) = match blast_get_offsets_for_gapped_alignment(
                         q_seq,
                         search_seq,
                         uh.qs,
                         uh.qe,
                         uh.ss,
                         uh.se,
-                        q_start,
-                        s_start,
-                    ),
-                    None => {
-                        continue;
-                    }
+                        reward,
+                        penalty,
+                    ) {
+                        Some((q_start, s_start)) => blast_get_start_for_gapped_alignment_nucl(
+                            q_seq,
+                            search_seq,
+                            uh.qs,
+                            uh.qe,
+                            uh.ss,
+                            uh.se,
+                            q_start,
+                            s_start,
+                        ),
+                        None => {
+                            continue;
+                        }
+                    };
+
+                    // Preliminary DP gapped extension (score-only)
+                    // NCBI reference: ncbi-blast/c++/src/algo/blast/api/blast_nucl_options.cpp:176-183
+                    let (p_qs, p_qe, p_ss, p_se, p_score, _, _, _, _, _) = extend_gapped_heuristic(
+                        q_seq,
+                        search_seq,
+                        seed_qs,
+                        seed_ss,
+                        1,
+                        reward,
+                        penalty,
+                        gap_open,
+                        gap_extend,
+                        x_drop_gapped,
+                        true,
+                    );
+                    (p_qs, p_qe, p_ss, p_se, p_score, seed_qs, seed_ss)
+                } else {
+                    // Greedy seed selection (megablast)
+                    // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_gapalign.c:4012-4017
+                    let ungapped_len = uh.qe.saturating_sub(uh.qs);
+                    let seed_qs = uh.qs + ungapped_len / 2;
+                    let seed_ss = uh.ss + ungapped_len / 2;
+
+                    let prelim = match greedy_gapped_alignment_score_only(
+                        q_seq,
+                        search_seq,
+                        seed_qs,
+                        seed_ss,
+                        reward,
+                        penalty,
+                        gap_open,
+                        gap_extend,
+                        x_drop_gapped,
+                    ) {
+                        Some(value) => value,
+                        None => {
+                            continue;
+                        }
+                    };
+
+                    let (p_qs, p_qe, p_ss, p_se, p_score, seed_qs, seed_ss) = prelim;
+                    (p_qs, p_qe, p_ss, p_se, p_score, seed_qs, seed_ss)
                 };
 
-                // Gapped extension with traceback
-                // NCBI reference: blast_gapalign.c:2778-2831 BLAST_GappedAlignmentWithTraceback
                 dbg_gapped_calls += 1;
+                // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_gapalign.c:4058-4091
+                if prelim_score < cutoff_score {
+                    continue;
+                }
+
+                // Add preliminary GAPPED HSP to interval tree for containment checks
+                // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_gapalign.c:4058-4089
+                let gapped_tree_hsp = TreeHsp {
+                    query_offset: prelim_qs as i32,
+                    query_end: prelim_qe as i32,
+                    subject_offset: prelim_ss as i32,
+                    subject_end: prelim_se as i32,
+                    score: prelim_score,
+                    query_context_offset: 0,
+                    subject_frame_sign: if uh.is_minus_strand { -1 } else { 1 },
+                };
+                interval_tree.add_hsp(gapped_tree_hsp, 0, IndexMethod::QueryAndSubject);
+
+                // Final gapped extension with traceback
+                // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_traceback.c:503-512
+                // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_traceback.c:1422-1431
                 let (
                     final_qs,
                     final_qe,
@@ -1635,18 +1710,37 @@ pub fn run(args: BlastnArgs) -> Result<()> {
                     gaps,
                     gap_letters,
                     edit_ops,
-                ) = extend_gapped_heuristic_with_traceback(
-                    q_seq,
-                    search_seq,
-                    seed_qs,
-                    seed_ss,
-                    1,
-                    reward,
-                    penalty,
-                    gap_open,
-                    gap_extend,
-                    x_drop_final,
-                );
+                ) = if use_dp {
+                    extend_gapped_heuristic_with_traceback(
+                        q_seq,
+                        search_seq,
+                        final_seed_qs,
+                        final_seed_ss,
+                        1,
+                        reward,
+                        penalty,
+                        gap_open,
+                        gap_extend,
+                        x_drop_final,
+                    )
+                } else {
+                    match greedy_gapped_alignment_with_traceback(
+                        q_seq,
+                        search_seq,
+                        final_seed_qs,
+                        final_seed_ss,
+                        reward,
+                        penalty,
+                        gap_open,
+                        gap_extend,
+                        x_drop_final,
+                    ) {
+                        Some(value) => value,
+                        None => {
+                            continue;
+                        }
+                    }
+                };
 
                 // Calculate statistics
                 let aln_len = matches + mismatches + gap_letters;
@@ -1729,20 +1823,6 @@ pub fn run(args: BlastnArgs) -> Result<()> {
                     gap_info,
                 }, internal));
 
-                // NCBI reference: blast_gapalign.c:4087-4088 BlastIntervalTreeAddHSP
-                // Add GAPPED HSP to interval tree for future containment checks
-                // NCBI uses 0-based coordinates internally for the tree
-                let gapped_tree_hsp = TreeHsp {
-                    query_offset: final_qs as i32,
-                    query_end: final_qe as i32,
-                    subject_offset: final_ss as i32,
-                    subject_end: final_se as i32,
-                    score,
-                    query_context_offset: 0,
-                    subject_frame_sign: if uh.is_minus_strand { -1 } else { 1 },
-                };
-                // NCBI reference: blast_gapalign.c uses eQueryAndSubject for BLASTN
-                interval_tree.add_hsp(gapped_tree_hsp, 0, IndexMethod::QueryAndSubject);
             }
 
             // DEBUG: Log gapped extension stats

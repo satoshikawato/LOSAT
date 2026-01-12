@@ -2,17 +2,13 @@ Reading query & subject...
 Applying DUST filter (level=20, window=64, linker=1)...
 DUST masked 24781 bases (8.26%) across 1 sequences
 Building lookup (Task: blastn, Word: 11, TwoStage: true, LUTWord: 10, Direct: true, DUST: true)...
-[PERF] Subject scan took 26.0337ms: left_ext=60347, right_ext=48516, ungapped=23761, seeds=65971, valid_pos=161968
-[PERF] Subject scan took 24.4022ms: left_ext=59488, right_ext=45493, ungapped=26728, seeds=133674, valid_pos=323936
-[PROGRESS] Gapped extension: 0/958
-[PROGRESS] Gapped extension: 100/958
-[PROGRESS] Gapped extension: 200/958
-[PROGRESS] Gapped extension: 300/958
+[PERF] Subject scan took 24.6983ms: left_ext=60347, right_ext=48516, ungapped=23593, seeds=65971, valid_pos=161968
+[PERF] Subject scan took 23.8584ms: left_ext=59488, right_ext=45493, ungapped=26591, seeds=133674, valid_pos=323936
 
-thread 'main' (19163) has overflowed its stack
+thread 'main' (4086) has overflowed its stack
 fatal runtime error: stack overflow, aborting
-./run_comparison.sh: line 108: 19163 Aborted                 $LOSAT_BIN blastn -q ./fasta/LC738869.fasta -s ./fasta/AP027202.fasta -o ./losat_out/PmeNMV.MjPMNV.losatn.blastn.out --task blastn -n 1
+./run_comparison.sh: line 106:  4086 Aborted                 $LOSAT_BIN blastn -q ./fasta/LC738869.fasta -s ./fasta/AP027202.fasta -o ./losat_out/PmeNMV.MjPMNV.losatn.blastn.out --task blastn -n 1
 
-real	0m6.498s
-user	0m6.430s
-sys	0m0.000s
+real	0m7.068s
+user	0m6.983s
+sys	0m0.040s

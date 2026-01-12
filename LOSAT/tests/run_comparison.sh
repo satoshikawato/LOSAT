@@ -74,8 +74,8 @@ echo "Starting AP027131 vs AP027133..."
 echo "Starting AP027133 vs AP027132..."
 # AP027133 vs AP027132
 (time $LOSAT_BIN tblastx -q ./fasta/AP027133.fasta -s ./fasta/AP027132.fasta -o ./losat_out/AP027133.AP027132.tlosatx.n8.out --query-gencode 4 --db-gencode 4 -n 8 )&>./losat_out/AP027133.AP027132.tlosatx.n8.log 
-COMMENTOUT
 
+COMMENTOUT
 
 
 # --- LOSATN Commands (Default / Megablast behavior) ---
@@ -91,10 +91,8 @@ COMMENTOUT
 
 
 # --- LOSATN Commands (Task: blastn) ---
-
 # NZ_CP006932 self (Task: blastn)
 (time $LOSAT_BIN blastn -q ./fasta/NZ_CP006932.fasta -s ./fasta/NZ_CP006932.fasta -o ./losat_out/NZ_CP006932.NZ_CP006932.losatn.blastn.out --task blastn -n 1 )&>./losat_out/NZ_CP006932.NZ_CP006932.losatn.blastn.log
-
 # PesePMNV vs MjPMNV
 (time $LOSAT_BIN blastn -q ./fasta/AP027152.fasta -s ./fasta/AP027202.fasta -o ./losat_out/PesePMNV.MjPMNV.losatn.blastn.out --task blastn -n 1 )&>./losat_out/PesePMNV.MjPMNV.losatn.blastn.log
 

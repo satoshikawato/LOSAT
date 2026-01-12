@@ -25,6 +25,8 @@
 //! - NCBI BLAST's edit script traceback could be added for exact statistics if needed
 
 use std::cell::RefCell;
+
+use crate::common::GapEditOp;
 use super::super::constants::{GREEDY_MAX_COST, GREEDY_MAX_COST_FRACTION, INVALID_OFFSET, INVALID_DIAG};
 use super::super::sequence_compare::{find_first_mismatch_ex, find_first_mismatch};
 use super::utilities::gdb3;
@@ -91,6 +93,122 @@ pub struct GreedyOffset {
     insert_off: i32,  // Best offset for a path ending in an insertion (gap in seq2)
     match_off: i32,   // Best offset for a path ending in a match/mismatch
     delete_off: i32,  // Best offset for a path ending in a deletion (gap in seq1)
+}
+
+// NCBI reference: ncbi-blast/c++/include/algo/blast/core/blast_util.h:358-364 (FENCE_SENTRY)
+const FENCE_SENTRY: u8 = 201;
+
+/// Greedy seed descriptor for locating the best start point.
+/// NCBI reference: ncbi-blast/c++/include/algo/blast/core/greedy_align.h:102-106 (SGreedySeed)
+#[derive(Clone, Copy, Default)]
+struct GreedySeed {
+    start_q: i32,
+    start_s: i32,
+    match_length: i32,
+}
+
+/// Edit script operation types used by greedy traceback.
+/// NCBI reference: ncbi-blast/c++/include/algo/blast/core/gapinfo.h:44-54 (EGapAlignOpType)
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum GapAlignOpType {
+    Del,     // eGapAlignDel
+    Sub,     // eGapAlignSub
+    Ins,     // eGapAlignIns
+    Invalid, // eGapAlignInvalid
+}
+
+impl GapAlignOpType {
+    #[inline]
+    fn to_gap_edit_op(self, num: i32) -> GapEditOp {
+        // NCBI reference: ncbi-blast/c++/include/algo/blast/core/gapinfo.h:44-54
+        match self {
+            GapAlignOpType::Sub => GapEditOp::Sub(num as u32),
+            GapAlignOpType::Del => GapEditOp::Del(num as u32),
+            GapAlignOpType::Ins => GapEditOp::Ins(num as u32),
+            GapAlignOpType::Invalid => GapEditOp::Sub(num as u32),
+        }
+    }
+}
+
+/// Preliminary edit operation for greedy traceback.
+/// NCBI reference: ncbi-blast/c++/include/algo/blast/core/gapinfo.h:63-68 (GapPrelimEditScript)
+#[derive(Clone, Copy, Debug)]
+struct GapPrelimEditOp {
+    op_type: GapAlignOpType,
+    num: i32,
+}
+
+/// Preliminary edit block for greedy traceback.
+/// NCBI reference: ncbi-blast/c++/include/algo/blast/core/gapinfo.h:70-78 (GapPrelimEditBlock)
+struct GapPrelimEditBlock {
+    edit_ops: Vec<GapPrelimEditOp>,
+    num_ops: usize,
+    last_op: GapAlignOpType,
+}
+
+impl GapPrelimEditBlock {
+    /// NCBI reference: ncbi-blast/c++/src/algo/blast/core/gapinfo.c:187-198 (GapPrelimEditBlockNew)
+    fn new() -> Self {
+        Self {
+            edit_ops: Vec::with_capacity(100),
+            num_ops: 0,
+            last_op: GapAlignOpType::Invalid,
+        }
+    }
+
+    /// NCBI reference: ncbi-blast/c++/src/algo/blast/core/gapinfo.c:212-218 (GapPrelimEditBlockReset)
+    fn reset(&mut self) {
+        self.num_ops = 0;
+        self.last_op = GapAlignOpType::Invalid;
+        self.edit_ops.clear();
+    }
+
+    /// NCBI reference: ncbi-blast/c++/src/algo/blast/core/gapinfo.c:174-185 (GapPrelimEditBlockAdd)
+    fn add(&mut self, op_type: GapAlignOpType, num_ops: i32) {
+        if num_ops == 0 {
+            return;
+        }
+
+        if self.last_op == op_type && self.num_ops > 0 {
+            let idx = self.num_ops - 1;
+            self.edit_ops[idx].num += num_ops;
+            return;
+        }
+
+        self.last_op = op_type;
+        self.edit_ops.push(GapPrelimEditOp {
+            op_type,
+            num: num_ops,
+        });
+        self.num_ops += 1;
+    }
+
+    /// NCBI reference: ncbi-blast/c++/src/algo/blast/core/gapinfo.c:221-231 (GapPrelimEditBlockAppend)
+    #[allow(dead_code)]
+    fn append(&mut self, other: &GapPrelimEditBlock) {
+        for op in &other.edit_ops {
+            self.add(op.op_type, op.num);
+        }
+    }
+}
+
+/// Greedy edit script container.
+/// NCBI reference: ncbi-blast/c++/include/algo/blast/core/gapinfo.h:56-61 (GapEditScript)
+struct GapEditScript {
+    op_type: Vec<GapAlignOpType>,
+    num: Vec<i32>,
+    size: usize,
+}
+
+impl GapEditScript {
+    /// NCBI reference: ncbi-blast/c++/include/algo/blast/core/gapinfo.h:88-90 (GapEditScriptNew)
+    fn new(size: usize) -> Self {
+        Self {
+            op_type: vec![GapAlignOpType::Invalid; size],
+            num: vec![0; size],
+            size,
+        }
+    }
 }
 
 /// Signal that a diagonal/offset is invalid
@@ -1073,4 +1191,1577 @@ pub fn affine_greedy_align_one_direction_with_max_dist(
         (best_seq1_len, best_seq2_len, score, matches, estimated_mismatches, estimated_gap_opens, gap_letters),
         converged,
     )
+}
+
+// =============================================================================
+// NCBI Greedy Gapped Alignment with Traceback (BLAST_GreedyGappedAlignment)
+// =============================================================================
+
+/// Convert preliminary greedy edit blocks to a gap edit script.
+/// NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_gapalign.c:2471-2536
+fn prelim_edit_block_to_gap_edit_script(
+    rev_prelim_tback: &GapPrelimEditBlock,
+    fwd_prelim_tback: &GapPrelimEditBlock,
+) -> Option<GapEditScript> {
+    let mut merge_ops = false;
+
+    if rev_prelim_tback.num_ops > 0 && fwd_prelim_tback.num_ops > 0 {
+        let rev_last = rev_prelim_tback.edit_ops[rev_prelim_tback.num_ops - 1].op_type;
+        let fwd_last = fwd_prelim_tback.edit_ops[fwd_prelim_tback.num_ops - 1].op_type;
+        if rev_last == fwd_last {
+            merge_ops = true;
+        }
+    }
+
+    let mut size = rev_prelim_tback.num_ops + fwd_prelim_tback.num_ops;
+    if merge_ops {
+        size = size.saturating_sub(1);
+    }
+
+    let mut esp = GapEditScript::new(size);
+    let mut index = 0usize;
+
+    for op in &rev_prelim_tback.edit_ops {
+        if index >= esp.size {
+            break;
+        }
+        esp.op_type[index] = op.op_type;
+        esp.num[index] = op.num;
+        index += 1;
+    }
+
+    if fwd_prelim_tback.num_ops == 0 {
+        return Some(esp);
+    }
+
+    if merge_ops && index > 0 {
+        esp.num[index - 1] += fwd_prelim_tback.edit_ops[fwd_prelim_tback.num_ops - 1].num;
+    }
+
+    let mut i: isize = if merge_ops {
+        fwd_prelim_tback.num_ops as isize - 2
+    } else {
+        fwd_prelim_tback.num_ops as isize - 1
+    };
+
+    while i >= 0 {
+        let op = fwd_prelim_tback.edit_ops[i as usize];
+        if index >= esp.size {
+            break;
+        }
+        esp.op_type[index] = op.op_type;
+        esp.num[index] = op.num;
+        index += 1;
+        i -= 1;
+    }
+
+    Some(esp)
+}
+
+/// Update edit script around a substitution run.
+/// NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_gapalign.c:2572-2632
+fn update_edit_script(esp: &mut GapEditScript, pos: isize, bf: i32, af: i32) {
+    if bf > 0 {
+        let mut op = pos;
+        let mut qd = bf;
+        let mut sd = bf;
+        loop {
+            op -= 1;
+            if op < 0 {
+                return;
+            }
+            let idx = op as usize;
+            match esp.op_type[idx] {
+                GapAlignOpType::Sub => {
+                    qd -= esp.num[idx];
+                    sd -= esp.num[idx];
+                }
+                GapAlignOpType::Ins => {
+                    qd -= esp.num[idx];
+                }
+                GapAlignOpType::Del => {
+                    sd -= esp.num[idx];
+                }
+                GapAlignOpType::Invalid => {}
+            }
+            if qd <= 0 && sd <= 0 {
+                break;
+            }
+        }
+
+        let idx = op as usize;
+        esp.num[idx] = -qd.max(sd);
+        esp.op_type[idx] = GapAlignOpType::Sub;
+
+        let mut op_idx = op + 1;
+        while op_idx < pos - 1 {
+            esp.num[op_idx as usize] = 0;
+            op_idx += 1;
+        }
+
+        let pos_idx = pos as usize;
+        if pos_idx < esp.num.len() {
+            esp.num[pos_idx] += bf;
+        }
+
+        qd -= sd;
+        let before_idx = (pos - 1) as usize;
+        if before_idx < esp.op_type.len() {
+            esp.op_type[before_idx] = if qd > 0 { GapAlignOpType::Del } else { GapAlignOpType::Ins };
+            esp.num[before_idx] = if qd > 0 { qd } else { -qd };
+        }
+    }
+
+    if af > 0 {
+        let mut op = pos;
+        let mut qd = af;
+        let mut sd = af;
+        loop {
+            op += 1;
+            if op >= esp.size as isize {
+                return;
+            }
+            let idx = op as usize;
+            match esp.op_type[idx] {
+                GapAlignOpType::Sub => {
+                    qd -= esp.num[idx];
+                    sd -= esp.num[idx];
+                }
+                GapAlignOpType::Ins => {
+                    qd -= esp.num[idx];
+                }
+                GapAlignOpType::Del => {
+                    sd -= esp.num[idx];
+                }
+                GapAlignOpType::Invalid => {}
+            }
+            if qd <= 0 && sd <= 0 {
+                break;
+            }
+        }
+
+        let idx = op as usize;
+        esp.num[idx] = -qd.max(sd);
+        esp.op_type[idx] = GapAlignOpType::Sub;
+
+        let mut op_idx = op - 1;
+        while op_idx > pos + 1 {
+            esp.num[op_idx as usize] = 0;
+            op_idx -= 1;
+        }
+
+        let pos_idx = pos as usize;
+        if pos_idx < esp.num.len() {
+            esp.num[pos_idx] += af;
+        }
+
+        qd -= sd;
+        let after_idx = (pos + 1) as usize;
+        if after_idx < esp.op_type.len() {
+            esp.op_type[after_idx] = if qd > 0 { GapAlignOpType::Del } else { GapAlignOpType::Ins };
+            esp.num[after_idx] = if qd > 0 { qd } else { -qd };
+        }
+    }
+}
+
+/// Rebuild edit script after updates.
+/// NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_gapalign.c:2634-2667
+fn rebuild_edit_script(esp: &mut GapEditScript) {
+    let mut j: isize = -1;
+    for i in 0..esp.size {
+        if esp.num[i] == 0 {
+            continue;
+        }
+        if j >= 0 && esp.op_type[i] == esp.op_type[j as usize] {
+            esp.num[j as usize] += esp.num[i];
+        } else if j == -1
+            || esp.op_type[i] == GapAlignOpType::Sub
+            || esp.op_type[j as usize] == GapAlignOpType::Sub
+        {
+            j += 1;
+            let j_idx = j as usize;
+            esp.op_type[j_idx] = esp.op_type[i];
+            esp.num[j_idx] = esp.num[i];
+        } else {
+            let j_idx = j as usize;
+            let d = esp.num[j_idx] - esp.num[i];
+            if d > 0 {
+                esp.num[j_idx - 1] += esp.num[i];
+                esp.num[j_idx] = d;
+            } else if d < 0 {
+                if j == 0 && i as isize - j > 0 {
+                    esp.op_type[j_idx] = GapAlignOpType::Sub;
+                    j += 1;
+                } else {
+                    esp.num[j_idx - 1] += esp.num[j_idx];
+                }
+                let j_idx = j as usize;
+                esp.num[j_idx] = -d;
+                esp.op_type[j_idx] = esp.op_type[i];
+            } else {
+                esp.num[j_idx - 1] += esp.num[j_idx];
+                j -= 1;
+            }
+        }
+    }
+    esp.size = (j + 1) as usize;
+}
+
+/// Reduce small gaps in greedy edit script.
+/// NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_gapalign.c:2669-2758
+fn reduce_gaps(esp: &mut GapEditScript, q: &[u8], s: &[u8]) {
+    let mut q_idx: usize = 0;
+    let mut s_idx: usize = 0;
+
+    for i in 0..esp.size {
+        if esp.num[i] == 0 {
+            continue;
+        }
+
+        match esp.op_type[i] {
+            GapAlignOpType::Sub => {
+                if esp.num[i] >= 12 {
+                    let mut nm1: i32 = 1;
+                    if i > 0 {
+                        while (nm1 as usize) <= q_idx
+                            && (nm1 as usize) <= s_idx
+                            && q[q_idx - nm1 as usize] == s[s_idx - nm1 as usize]
+                        {
+                            nm1 += 1;
+                        }
+                    }
+
+                    q_idx += esp.num[i] as usize;
+                    s_idx += esp.num[i] as usize;
+
+                    let mut nm2: i32 = 0;
+                    if i < esp.size - 1 {
+                        while q_idx + 1 < q.len()
+                            && s_idx + 1 < s.len()
+                            && q[q_idx] == s[s_idx]
+                        {
+                            nm2 += 1;
+                            q_idx += 1;
+                            s_idx += 1;
+                        }
+                    }
+
+                    if nm1 > 1 || nm2 > 0 {
+                        update_edit_script(esp, i as isize, nm1 - 1, nm2);
+                    }
+
+                    if q_idx > 0 {
+                        q_idx -= 1;
+                    }
+                    if s_idx > 0 {
+                        s_idx -= 1;
+                    }
+                } else {
+                    q_idx += esp.num[i] as usize;
+                    s_idx += esp.num[i] as usize;
+                }
+            }
+            GapAlignOpType::Ins => {
+                q_idx += esp.num[i] as usize;
+            }
+            GapAlignOpType::Del => {
+                s_idx += esp.num[i] as usize;
+            }
+            GapAlignOpType::Invalid => {}
+        }
+    }
+
+    rebuild_edit_script(esp);
+
+    let mut q_pos: isize = 0;
+    let mut s_pos: isize = 0;
+    let q_len = q.len() as isize;
+    let s_len = s.len() as isize;
+
+    for i in 0..esp.size {
+        if esp.op_type[i] == GapAlignOpType::Sub {
+            q_pos += esp.num[i] as isize;
+            s_pos += esp.num[i] as isize;
+            continue;
+        }
+
+        if i > 1 && esp.op_type[i] != esp.op_type[i - 2] && esp.num[i - 2] > 0 {
+            let mut d = esp.num[i] + esp.num[i - 1] + esp.num[i - 2];
+            if d == 3 {
+                esp.num[i - 2] = 0;
+                esp.num[i - 1] = 2;
+                esp.num[i] = 0;
+                if esp.op_type[i] == GapAlignOpType::Ins {
+                    q_pos += 1;
+                } else {
+                    s_pos += 1;
+                }
+            } else if d < 12 {
+                let mut nm1 = 0;
+                let mut nm2 = 0;
+                d = esp.num[i].min(esp.num[i - 2]);
+
+                q_pos -= esp.num[i - 1] as isize;
+                s_pos -= esp.num[i - 1] as isize;
+                let mut q1 = q_pos;
+                let mut s1 = s_pos;
+
+                if esp.op_type[i] == GapAlignOpType::Ins {
+                    s_pos -= d as isize;
+                } else {
+                    q_pos -= d as isize;
+                }
+
+                for _ in 0..esp.num[i - 1] {
+                    if q1 >= 0 && s1 >= 0 && q1 < q_len && s1 < s_len {
+                        if q[q1 as usize] == s[s1 as usize] {
+                            nm1 += 1;
+                        }
+                    }
+                    if q_pos >= 0 && s_pos >= 0 && q_pos < q_len && s_pos < s_len {
+                        if q[q_pos as usize] == s[s_pos as usize] {
+                            nm2 += 1;
+                        }
+                    }
+                    q1 += 1;
+                    s1 += 1;
+                    q_pos += 1;
+                    s_pos += 1;
+                }
+
+                for _ in 0..d {
+                    if q_pos >= 0 && s_pos >= 0 && q_pos < q_len && s_pos < s_len {
+                        if q[q_pos as usize] == s[s_pos as usize] {
+                            nm2 += 1;
+                        }
+                    }
+                    q_pos += 1;
+                    s_pos += 1;
+                }
+
+                if nm2 >= nm1 - d {
+                    esp.num[i - 2] -= d;
+                    esp.num[i - 1] += d;
+                    esp.num[i] -= d;
+                } else {
+                    q_pos = q1;
+                    s_pos = s1;
+                }
+            }
+        }
+
+        if esp.op_type[i] == GapAlignOpType::Ins {
+            q_pos += esp.num[i] as isize;
+        } else {
+            s_pos += esp.num[i] as isize;
+        }
+    }
+
+    rebuild_edit_script(esp);
+}
+
+/// Unpack a base from NCBI2NA packed byte.
+/// NCBI reference: ncbi-blast/c++/src/algo/blast/core/greedy_align.c:365-369 (NCBI2NA_UNPACK_BASE usage)
+#[inline]
+fn ncbi2na_unpack_base(byte: u8, pos: u8) -> u8 {
+    (byte >> (pos * 2)) & 0x03
+}
+
+/// Find first mismatch with fence detection.
+/// NCBI reference: ncbi-blast/c++/src/algo/blast/core/greedy_align.c:297-375 (s_FindFirstMismatch)
+fn find_first_mismatch_greedy(
+    seq1: &[u8],
+    seq2: &[u8],
+    len1: i32,
+    len2: i32,
+    seq1_index: i32,
+    seq2_index: i32,
+    reverse: bool,
+    rem: u8,
+    fence_hit: &mut bool,
+) -> i32 {
+    let mut seq1_index = seq1_index;
+    let mut seq2_index = seq2_index;
+    let tmp = seq1_index;
+
+    if reverse {
+        if rem == 4 {
+            while seq1_index < len1
+                && seq2_index < len2
+                && seq1[(len1 - 1 - seq1_index) as usize] < 4
+                && seq1[(len1 - 1 - seq1_index) as usize]
+                    == seq2[(len2 - 1 - seq2_index) as usize]
+            {
+                seq1_index += 1;
+                seq2_index += 1;
+            }
+            if seq2_index < len2 && seq2[(len2 - 1 - seq2_index) as usize] == FENCE_SENTRY {
+                *fence_hit = true;
+            }
+        } else {
+            while seq1_index < len1
+                && seq2_index < len2
+                && seq1[(len1 - 1 - seq1_index) as usize] == ncbi2na_unpack_base(
+                    seq2[((len2 - 1 - seq2_index + rem as i32) / 4) as usize],
+                    (3 - (len2 - 1 - seq2_index + rem as i32) % 4) as u8,
+                )
+            {
+                seq1_index += 1;
+                seq2_index += 1;
+            }
+        }
+    } else {
+        if rem == 4 {
+            while seq1_index < len1
+                && seq2_index < len2
+                && seq1[seq1_index as usize] < 4
+                && seq1[seq1_index as usize] == seq2[seq2_index as usize]
+            {
+                seq1_index += 1;
+                seq2_index += 1;
+            }
+            if seq2_index < len2 && seq2[seq2_index as usize] == FENCE_SENTRY {
+                *fence_hit = true;
+            }
+        } else {
+            while seq1_index < len1
+                && seq2_index < len2
+                && seq1[seq1_index as usize]
+                    == ncbi2na_unpack_base(
+                        seq2[((seq2_index + rem as i32) / 4) as usize],
+                        (3 - (seq2_index + rem as i32) % 4) as u8,
+                    )
+            {
+                seq1_index += 1;
+                seq2_index += 1;
+            }
+        }
+    }
+
+    seq1_index - tmp
+}
+
+/// Affine traceback helper from match state.
+/// NCBI reference: ncbi-blast/c++/src/algo/blast/core/greedy_align.c:148-178
+fn get_next_affine_tback_from_match(
+    last_seq2_off: &[Vec<GreedyOffset>],
+    diag_lower: &[i32],
+    diag_upper: &[i32],
+    diag_offset: i32,
+    d: &mut i32,
+    diag: i32,
+    op_cost: i32,
+    seq2_index: &mut i32,
+) -> GapAlignOpType {
+    let mut new_seq2_index;
+
+    let idx = (*d) - op_cost;
+    let dl_idx = idx + diag_offset;
+    if idx >= 0 && dl_idx >= 0 && (dl_idx as usize) < diag_lower.len() {
+        if diag >= diag_lower[dl_idx as usize] && diag <= diag_upper[dl_idx as usize] {
+            new_seq2_index = last_seq2_off[idx as usize][diag as usize].match_off;
+            if new_seq2_index
+                >= last_seq2_off[*d as usize][diag as usize]
+                    .insert_off
+                    .max(last_seq2_off[*d as usize][diag as usize].delete_off)
+            {
+                *d -= op_cost;
+                *seq2_index = new_seq2_index;
+                return GapAlignOpType::Sub;
+            }
+        }
+    }
+
+    if last_seq2_off[*d as usize][diag as usize].insert_off
+        > last_seq2_off[*d as usize][diag as usize].delete_off
+    {
+        *seq2_index = last_seq2_off[*d as usize][diag as usize].insert_off;
+        GapAlignOpType::Ins
+    } else {
+        *seq2_index = last_seq2_off[*d as usize][diag as usize].delete_off;
+        GapAlignOpType::Del
+    }
+}
+
+/// Affine traceback helper from insertion/deletion state.
+/// NCBI reference: ncbi-blast/c++/src/algo/blast/core/greedy_align.c:199-258
+fn get_next_affine_tback_from_indel(
+    last_seq2_off: &[Vec<GreedyOffset>],
+    diag_lower: &[i32],
+    diag_upper: &[i32],
+    diag_offset: i32,
+    d: &mut i32,
+    diag: i32,
+    gap_open: i32,
+    gap_extend: i32,
+    state: GapAlignOpType,
+) -> GapAlignOpType {
+    let gap_open_extend = gap_open + gap_extend;
+    let new_diag = if state == GapAlignOpType::Ins { diag - 1 } else { diag + 1 };
+
+    let last_d = (*d) - gap_extend;
+    let mut new_seq2_index = INVALID_OFFSET;
+    let dl_idx = last_d + diag_offset;
+    if last_d >= 0 && dl_idx >= 0 && (dl_idx as usize) < diag_lower.len() {
+        if new_diag >= diag_lower[dl_idx as usize] && new_diag <= diag_upper[dl_idx as usize] {
+            new_seq2_index = if state == GapAlignOpType::Ins {
+                last_seq2_off[last_d as usize][new_diag as usize].insert_off
+            } else {
+                last_seq2_off[last_d as usize][new_diag as usize].delete_off
+            };
+        }
+    }
+
+    let last_d = (*d) - gap_open_extend;
+    let dl_idx = last_d + diag_offset;
+    if last_d >= 0 && dl_idx >= 0 && (dl_idx as usize) < diag_lower.len() {
+        if new_diag >= diag_lower[dl_idx as usize]
+            && new_diag <= diag_upper[dl_idx as usize]
+            && new_seq2_index < last_seq2_off[last_d as usize][new_diag as usize].match_off
+        {
+            *d -= gap_open_extend;
+            return GapAlignOpType::Sub;
+        }
+    }
+
+    *d -= gap_extend;
+    state
+}
+
+/// Non-affine traceback helper.
+/// NCBI reference: ncbi-blast/c++/src/algo/blast/core/greedy_align.c:260-294
+fn get_next_non_affine_tback(
+    last_seq2_off: &[Vec<i32>],
+    d: i32,
+    diag: i32,
+    seq2_index: &mut i32,
+) -> i32 {
+    if last_seq2_off[(d - 1) as usize][(diag - 1) as usize]
+        > last_seq2_off[(d - 1) as usize][diag as usize]
+            .max(last_seq2_off[(d - 1) as usize][(diag + 1) as usize])
+    {
+        *seq2_index = last_seq2_off[(d - 1) as usize][(diag - 1) as usize];
+        return diag - 1;
+    }
+    if last_seq2_off[(d - 1) as usize][diag as usize]
+        > last_seq2_off[(d - 1) as usize][(diag + 1) as usize]
+    {
+        *seq2_index = last_seq2_off[(d - 1) as usize][diag as usize];
+        return diag;
+    }
+    *seq2_index = last_seq2_off[(d - 1) as usize][(diag + 1) as usize];
+    diag + 1
+}
+
+/// Non-affine greedy alignment with optional traceback.
+/// NCBI reference: ncbi-blast/c++/src/algo/blast/core/greedy_align.c:379-751 (BLAST_GreedyAlign)
+fn blast_greedy_align(
+    seq1: &[u8],
+    len1: i32,
+    seq2: &[u8],
+    len2: i32,
+    reverse: bool,
+    xdrop_threshold: i32,
+    match_cost: i32,
+    mismatch_cost: i32,
+    seq1_align_len: &mut i32,
+    seq2_align_len: &mut i32,
+    max_dist: i32,
+    mut edit_block: Option<&mut GapPrelimEditBlock>,
+    rem: u8,
+    fence_hit: &mut bool,
+    seed: &mut GreedySeed,
+) -> i32 {
+    let mut seq1_index: i32;
+    let mut seq2_index: i32;
+    let mut index: i32;
+    let mut d: i32;
+    let mut k: i32;
+    let mut diag_lower: i32;
+    let mut diag_upper: i32;
+    let diag_origin: i32 = max_dist + 2;
+    let mut best_dist: i32 = 0;
+    let mut best_diag: i32 = 0;
+    let mut longest_match_run: i32;
+    let mut end1_reached = false;
+    let mut end2_reached = false;
+
+    let array_size = (2 * diag_origin + 4) as usize;
+    let store_traceback = edit_block.is_some();
+    let rows = if store_traceback { (max_dist + 2) as usize } else { 2 };
+    let mut last_seq2_off: Vec<Vec<i32>> = vec![vec![INVALID_OFFSET; array_size]; rows];
+
+    let xdrop_offset =
+        (xdrop_threshold + match_cost / 2) / (match_cost + mismatch_cost) + 1;
+    let max_score_len = (max_dist as usize) + (xdrop_offset as usize) + 2;
+    let mut max_score_base = vec![0; max_score_len];
+    let max_score_offset = xdrop_offset as usize;
+
+    index = find_first_mismatch_greedy(
+        seq1,
+        seq2,
+        len1,
+        len2,
+        0,
+        0,
+        reverse,
+        rem,
+        fence_hit,
+    );
+
+    *seq1_align_len = index;
+    *seq2_align_len = index;
+    seq1_index = index;
+
+    seed.start_q = 0;
+    seed.start_s = 0;
+    longest_match_run = index;
+    seed.match_length = longest_match_run;
+
+    if index == len1 || index == len2 {
+        if let Some(block) = edit_block.as_mut() {
+            block.add(GapAlignOpType::Sub, index);
+        }
+        return 0;
+    }
+
+    last_seq2_off[0][diag_origin as usize] = seq1_index;
+    max_score_base[max_score_offset] = seq1_index * match_cost;
+    diag_lower = diag_origin - 1;
+    diag_upper = diag_origin + 1;
+
+    let mut converged = false;
+    for d_val in 1..=max_dist {
+        d = d_val;
+        let mut curr_score: i32;
+        let mut curr_extent: i32 = 0;
+        let mut curr_seq2_index: i32 = 0;
+        let mut curr_diag: i32 = 0;
+        let tmp_diag_lower = diag_lower;
+        let tmp_diag_upper = diag_upper;
+
+        let prev_row_idx = if store_traceback {
+            (d - 1) as usize
+        } else {
+            ((d - 1) & 1) as usize
+        };
+        let row_idx = if store_traceback {
+            d as usize
+        } else {
+            (d & 1) as usize
+        };
+
+        if (diag_lower - 1) >= 0 {
+            last_seq2_off[prev_row_idx][(diag_lower - 1) as usize] = INVALID_OFFSET;
+        }
+        if diag_lower >= 0 {
+            last_seq2_off[prev_row_idx][diag_lower as usize] = INVALID_OFFSET;
+        }
+        if diag_upper >= 0 && (diag_upper as usize) < array_size {
+            last_seq2_off[prev_row_idx][diag_upper as usize] = INVALID_OFFSET;
+        }
+        if (diag_upper + 1) >= 0 && ((diag_upper + 1) as usize) < array_size {
+            last_seq2_off[prev_row_idx][(diag_upper + 1) as usize] = INVALID_OFFSET;
+        }
+
+        let xdrop_score = {
+            let raw = max_score_base[d as usize]
+                + (match_cost + mismatch_cost) * d
+                - xdrop_threshold;
+            ((raw as f64) / (match_cost as f64 / 2.0)).ceil() as i32
+        };
+
+        for k_val in tmp_diag_lower..=tmp_diag_upper {
+            k = k_val;
+            let prev_row = &last_seq2_off[prev_row_idx];
+            seq2_index = prev_row[(k + 1) as usize].max(prev_row[k as usize]) + 1;
+            seq2_index = seq2_index.max(prev_row[(k - 1) as usize]);
+            seq1_index = seq2_index + k - diag_origin;
+
+            if seq2_index < 0 || seq1_index + seq2_index < xdrop_score {
+                if k == diag_lower {
+                    diag_lower += 1;
+                } else if (k as usize) < array_size {
+                    last_seq2_off[row_idx][k as usize] = INVALID_OFFSET;
+                }
+                continue;
+            }
+
+            diag_upper = k;
+
+            index = find_first_mismatch_greedy(
+                seq1,
+                seq2,
+                len1,
+                len2,
+                seq1_index,
+                seq2_index,
+                reverse,
+                rem,
+                fence_hit,
+            );
+            if *fence_hit {
+                return 0;
+            }
+
+            if index > longest_match_run {
+                seed.start_q = seq1_index;
+                seed.start_s = seq2_index;
+                longest_match_run = index;
+                seed.match_length = longest_match_run;
+            }
+            seq1_index += index;
+            seq2_index += index;
+
+            last_seq2_off[row_idx][k as usize] = seq2_index;
+
+            if seq1_index + seq2_index > curr_extent {
+                curr_extent = seq1_index + seq2_index;
+                curr_seq2_index = seq2_index;
+                curr_diag = k;
+            }
+
+            if seq2_index == len2 {
+                diag_lower = k + 1;
+                end2_reached = true;
+            }
+            if seq1_index == len1 {
+                diag_upper = k - 1;
+                end1_reached = true;
+            }
+        }
+
+        curr_score =
+            curr_extent * (match_cost / 2) - d * (match_cost + mismatch_cost);
+        let prev_max = max_score_base[(d as usize - 1) + max_score_offset];
+        if curr_score >= prev_max {
+            max_score_base[(d as usize) + max_score_offset] = curr_score;
+            best_dist = d;
+            best_diag = curr_diag;
+            *seq2_align_len = curr_seq2_index;
+            *seq1_align_len = curr_seq2_index + best_diag - diag_origin;
+        } else {
+            max_score_base[(d as usize) + max_score_offset] = prev_max;
+        }
+
+        if diag_lower > diag_upper {
+            converged = true;
+            break;
+        }
+
+        if !end2_reached {
+            diag_lower -= 1;
+        }
+        if !end1_reached {
+            diag_upper += 1;
+        }
+    }
+
+    if !converged {
+        return -1;
+    }
+
+    if edit_block.is_none() {
+        return best_dist;
+    }
+
+    d = best_dist;
+    seq2_index = *seq2_align_len;
+    if *fence_hit {
+        return best_dist;
+    }
+
+    while d > 0 {
+        let mut new_seq2_index: i32 = 0;
+        let new_diag =
+            get_next_non_affine_tback(&last_seq2_off, d, best_diag, &mut new_seq2_index);
+
+        if new_diag == best_diag {
+            if seq2_index - new_seq2_index > 0 {
+                edit_block
+                    .as_mut()
+                    .unwrap()
+                    .add(GapAlignOpType::Sub, seq2_index - new_seq2_index);
+            }
+        } else if new_diag < best_diag {
+            if seq2_index - new_seq2_index > 0 {
+                edit_block
+                    .as_mut()
+                    .unwrap()
+                    .add(GapAlignOpType::Sub, seq2_index - new_seq2_index);
+            }
+            edit_block.as_mut().unwrap().add(GapAlignOpType::Ins, 1);
+        } else {
+            if seq2_index - new_seq2_index - 1 > 0 {
+                edit_block
+                    .as_mut()
+                    .unwrap()
+                    .add(GapAlignOpType::Sub, seq2_index - new_seq2_index - 1);
+            }
+            edit_block.as_mut().unwrap().add(GapAlignOpType::Del, 1);
+        }
+
+        d -= 1;
+        best_diag = new_diag;
+        seq2_index = new_seq2_index;
+    }
+
+    edit_block
+        .as_mut()
+        .unwrap()
+        .add(GapAlignOpType::Sub, last_seq2_off[0][diag_origin as usize]);
+
+    best_dist
+}
+
+/// Affine greedy alignment with optional traceback.
+/// NCBI reference: ncbi-blast/c++/src/algo/blast/core/greedy_align.c:755-1249 (BLAST_AffineGreedyAlign)
+fn blast_affine_greedy_align(
+    seq1: &[u8],
+    len1: i32,
+    seq2: &[u8],
+    len2: i32,
+    reverse: bool,
+    mut xdrop_threshold: i32,
+    mut match_score: i32,
+    mut mismatch_score: i32,
+    mut in_gap_open: i32,
+    mut in_gap_extend: i32,
+    seq1_align_len: &mut i32,
+    seq2_align_len: &mut i32,
+    max_dist: i32,
+    mut edit_block: Option<&mut GapPrelimEditBlock>,
+    rem: u8,
+    fence_hit: &mut bool,
+    seed: &mut GreedySeed,
+) -> i32 {
+    let mut seq1_index: i32;
+    let mut seq2_index: i32;
+    let mut index: i32;
+    let mut d: i32;
+    let mut k: i32;
+    let mut longest_match_run: i32;
+
+    if match_score % 2 == 1 {
+        match_score *= 2;
+        mismatch_score *= 2;
+        xdrop_threshold *= 2;
+        in_gap_open *= 2;
+        in_gap_extend *= 2;
+    }
+
+    if in_gap_open == 0 && in_gap_extend == 0 {
+        return blast_greedy_align(
+            seq1,
+            len1,
+            seq2,
+            len2,
+            reverse,
+            xdrop_threshold,
+            match_score,
+            mismatch_score,
+            seq1_align_len,
+            seq2_align_len,
+            max_dist,
+            edit_block,
+            rem,
+            fence_hit,
+            seed,
+        );
+    }
+
+    let match_score_half = match_score / 2;
+    let mut op_cost = match_score + mismatch_score;
+    let mut gap_open = in_gap_open;
+    let mut gap_extend = in_gap_extend + match_score_half;
+    let score_common_factor = gdb3(&mut op_cost, &mut gap_open, &mut gap_extend);
+    let gap_open_extend = gap_open + gap_extend;
+    let max_penalty = op_cost.max(gap_open_extend);
+
+    let scaled_max_dist = max_dist * gap_extend;
+    let diag_origin = max_dist + 2;
+    let array_size = (2 * diag_origin + 4) as usize;
+
+    let xdrop_offset = (xdrop_threshold + match_score_half) / score_common_factor + 1;
+    let max_score_len = (scaled_max_dist as usize) + (xdrop_offset as usize) + 2;
+    let mut max_score_base = vec![0; max_score_len];
+    let max_score_offset = xdrop_offset as usize;
+
+    let diag_len = (scaled_max_dist + max_penalty + 2) as usize;
+    let mut diag_lower = vec![INVALID_DIAG; diag_len];
+    let mut diag_upper = vec![-INVALID_DIAG; diag_len];
+    let diag_offset = max_penalty;
+
+    index = find_first_mismatch_greedy(
+        seq1,
+        seq2,
+        len1,
+        len2,
+        0,
+        0,
+        reverse,
+        rem,
+        fence_hit,
+    );
+    if *fence_hit {
+        return -1;
+    }
+
+    *seq1_align_len = index;
+    *seq2_align_len = index;
+    seq1_index = index;
+
+    seed.start_q = 0;
+    seed.start_s = 0;
+    longest_match_run = index;
+    seed.match_length = longest_match_run;
+
+    if index == len1 || index == len2 {
+        if let Some(block) = edit_block.as_mut() {
+            block.add(GapAlignOpType::Sub, index);
+        }
+        return index * match_score;
+    }
+
+    let num_rows = (scaled_max_dist + max_penalty + 2) as usize;
+    let mut last_seq2_off: Vec<Vec<GreedyOffset>> = vec![
+        vec![
+            GreedyOffset {
+                insert_off: INVALID_OFFSET,
+                match_off: INVALID_OFFSET,
+                delete_off: INVALID_OFFSET,
+            };
+            array_size
+        ];
+        num_rows
+    ];
+
+    let diag0_idx = (0 + diag_offset) as usize;
+    diag_lower[diag0_idx] = diag_origin;
+    diag_upper[diag0_idx] = diag_origin;
+
+    last_seq2_off[0][diag_origin as usize].match_off = seq1_index;
+    last_seq2_off[0][diag_origin as usize].insert_off = INVALID_OFFSET;
+    last_seq2_off[0][diag_origin as usize].delete_off = INVALID_OFFSET;
+    max_score_base[max_score_offset] = seq1_index * match_score;
+
+    let mut best_dist: i32 = 0;
+    let mut best_diag: i32 = diag_origin;
+    let mut curr_diag_lower: i32 = diag_origin - 1;
+    let mut curr_diag_upper: i32 = diag_origin + 1;
+    let mut end1_diag: i32 = 0;
+    let mut end2_diag: i32 = 0;
+    let mut num_nonempty_dist: i32 = 1;
+    d = 1;
+    let mut converged = false;
+
+    while d <= scaled_max_dist {
+        let xdrop_raw = max_score_base[d as usize]
+            + score_common_factor * d
+            - xdrop_threshold;
+        let mut xdrop_score =
+            ((xdrop_raw as f64) / (match_score_half as f64)).ceil() as i32;
+        if xdrop_score < 0 {
+            xdrop_score = 0;
+        }
+
+        let mut curr_extent: i32 = 0;
+        let mut curr_seq2_index: i32 = 0;
+        let mut curr_diag: i32 = 0;
+        let tmp_diag_lower = curr_diag_lower;
+        let tmp_diag_upper = curr_diag_upper;
+
+        for k_val in tmp_diag_lower..=tmp_diag_upper {
+            k = k_val;
+
+            let mut seq2_index_del = INVALID_OFFSET;
+            let d_open = d - gap_open_extend;
+            let idx_open = d_open + diag_offset;
+            if d_open >= 0 && idx_open >= 0 && (idx_open as usize) < diag_lower.len() {
+                if k + 1 >= diag_lower[idx_open as usize]
+                    && k + 1 <= diag_upper[idx_open as usize]
+                {
+                    seq2_index_del =
+                        last_seq2_off[d_open as usize][(k + 1) as usize].match_off;
+                }
+            }
+
+            let d_ext = d - gap_extend;
+            let idx_ext = d_ext + diag_offset;
+            if d_ext >= 0 && idx_ext >= 0 && (idx_ext as usize) < diag_lower.len() {
+                if k + 1 >= diag_lower[idx_ext as usize]
+                    && k + 1 <= diag_upper[idx_ext as usize]
+                {
+                    let ext_off =
+                        last_seq2_off[d_ext as usize][(k + 1) as usize].delete_off;
+                    if ext_off > seq2_index_del {
+                        seq2_index_del = ext_off;
+                    }
+                }
+            }
+
+            if seq2_index_del == INVALID_OFFSET {
+                last_seq2_off[d as usize][k as usize].delete_off = INVALID_OFFSET;
+            } else {
+                last_seq2_off[d as usize][k as usize].delete_off = seq2_index_del + 1;
+            }
+
+            let mut seq2_index_ins = INVALID_OFFSET;
+            if d_open >= 0 && idx_open >= 0 && (idx_open as usize) < diag_lower.len() {
+                if k - 1 >= diag_lower[idx_open as usize]
+                    && k - 1 <= diag_upper[idx_open as usize]
+                {
+                    seq2_index_ins =
+                        last_seq2_off[d_open as usize][(k - 1) as usize].match_off;
+                }
+            }
+            if d_ext >= 0 && idx_ext >= 0 && (idx_ext as usize) < diag_lower.len() {
+                if k - 1 >= diag_lower[idx_ext as usize]
+                    && k - 1 <= diag_upper[idx_ext as usize]
+                {
+                    let ext_off =
+                        last_seq2_off[d_ext as usize][(k - 1) as usize].insert_off;
+                    if ext_off > seq2_index_ins {
+                        seq2_index_ins = ext_off;
+                    }
+                }
+            }
+            if seq2_index_ins == INVALID_OFFSET {
+                last_seq2_off[d as usize][k as usize].insert_off = INVALID_OFFSET;
+            } else {
+                last_seq2_off[d as usize][k as usize].insert_off = seq2_index_ins;
+            }
+
+            seq2_index = last_seq2_off[d as usize][k as usize]
+                .insert_off
+                .max(last_seq2_off[d as usize][k as usize].delete_off);
+
+            let d_match = d - op_cost;
+            let idx_match = d_match + diag_offset;
+            if d_match >= 0 && idx_match >= 0 && (idx_match as usize) < diag_lower.len() {
+                if k >= diag_lower[idx_match as usize]
+                    && k <= diag_upper[idx_match as usize]
+                {
+                    seq2_index =
+                        seq2_index.max(last_seq2_off[d_match as usize][k as usize].match_off + 1);
+                }
+            }
+
+            seq1_index = seq2_index + k - diag_origin;
+
+            if seq2_index < 0 || seq1_index + seq2_index < xdrop_score {
+                if k == curr_diag_lower {
+                    curr_diag_lower += 1;
+                } else {
+                    last_seq2_off[d as usize][k as usize].match_off = INVALID_OFFSET;
+                }
+                continue;
+            }
+            curr_diag_upper = k;
+
+            index = find_first_mismatch_greedy(
+                seq1,
+                seq2,
+                len1,
+                len2,
+                seq1_index,
+                seq2_index,
+                reverse,
+                rem,
+                fence_hit,
+            );
+            if *fence_hit {
+                return -1;
+            }
+
+            if index > longest_match_run {
+                seed.start_q = seq1_index;
+                seed.start_s = seq2_index;
+                longest_match_run = index;
+                seed.match_length = longest_match_run;
+            }
+            seq1_index += index;
+            seq2_index += index;
+
+            last_seq2_off[d as usize][k as usize].match_off = seq2_index;
+
+            if seq1_index + seq2_index > curr_extent {
+                curr_extent = seq1_index + seq2_index;
+                curr_seq2_index = seq2_index;
+                curr_diag = k;
+            }
+
+            if seq1_index == len1 {
+                curr_diag_upper = k;
+                end1_diag = k - 1;
+            }
+            if seq2_index == len2 {
+                curr_diag_lower = k;
+                end2_diag = k + 1;
+            }
+        }
+
+        let curr_score = curr_extent * match_score_half - d * score_common_factor;
+        let prev_max = max_score_base[(d as usize - 1) + max_score_offset];
+        if curr_score > prev_max {
+            max_score_base[(d as usize) + max_score_offset] = curr_score;
+            best_dist = d;
+            best_diag = curr_diag;
+            *seq2_align_len = curr_seq2_index;
+            *seq1_align_len = curr_seq2_index + best_diag - diag_origin;
+        } else {
+            max_score_base[(d as usize) + max_score_offset] = prev_max;
+        }
+
+        let diag_idx = (d + diag_offset) as usize;
+        if curr_diag_lower <= curr_diag_upper {
+            num_nonempty_dist += 1;
+            diag_lower[diag_idx] = curr_diag_lower;
+            diag_upper[diag_idx] = curr_diag_upper;
+        } else {
+            diag_lower[diag_idx] = INVALID_DIAG;
+            diag_upper[diag_idx] = -INVALID_DIAG;
+        }
+
+        if d > max_penalty {
+            let old_idx = (d - max_penalty + diag_offset) as usize;
+            if diag_lower[old_idx] <= diag_upper[old_idx] {
+                num_nonempty_dist -= 1;
+            }
+        }
+
+        if num_nonempty_dist == 0 {
+            converged = true;
+            break;
+        }
+
+        d += 1;
+
+        let idx_goe = d - gap_open_extend + diag_offset;
+        let idx_ge = d - gap_extend + diag_offset;
+        let idx_op = d - op_cost + diag_offset;
+
+        let mut lower = diag_lower[idx_goe as usize].min(diag_lower[idx_ge as usize]) - 1;
+        lower = lower.min(diag_lower[idx_op as usize]);
+        if end2_diag > 0 {
+            lower = lower.max(end2_diag);
+        }
+        curr_diag_lower = lower;
+
+        let mut upper = diag_upper[idx_goe as usize].max(diag_upper[idx_ge as usize]) + 1;
+        upper = upper.max(diag_upper[idx_op as usize]);
+        if end1_diag > 0 {
+            upper = upper.min(end1_diag);
+        }
+        curr_diag_upper = upper;
+    }
+
+    if !converged {
+        return -1;
+    }
+
+    if let Some(block) = edit_block.as_mut() {
+        d = best_dist;
+        seq2_index = *seq2_align_len;
+        let mut state = GapAlignOpType::Sub;
+
+        while d > 0 {
+            if state == GapAlignOpType::Sub {
+                let mut new_seq2_index = 0;
+                state = get_next_affine_tback_from_match(
+                    &last_seq2_off,
+                    &diag_lower,
+                    &diag_upper,
+                    diag_offset,
+                    &mut d,
+                    best_diag,
+                    op_cost,
+                    &mut new_seq2_index,
+                );
+                block.add(GapAlignOpType::Sub, seq2_index - new_seq2_index);
+                seq2_index = new_seq2_index;
+            } else if state == GapAlignOpType::Ins {
+                block.add(GapAlignOpType::Ins, 1);
+                state = get_next_affine_tback_from_indel(
+                    &last_seq2_off,
+                    &diag_lower,
+                    &diag_upper,
+                    diag_offset,
+                    &mut d,
+                    best_diag,
+                    gap_open,
+                    gap_extend,
+                    GapAlignOpType::Ins,
+                );
+                best_diag -= 1;
+            } else {
+                block.add(GapAlignOpType::Del, 1);
+                state = get_next_affine_tback_from_indel(
+                    &last_seq2_off,
+                    &diag_lower,
+                    &diag_upper,
+                    diag_offset,
+                    &mut d,
+                    best_diag,
+                    gap_open,
+                    gap_extend,
+                    GapAlignOpType::Del,
+                );
+                best_diag += 1;
+                seq2_index -= 1;
+            }
+        }
+
+        block.add(
+            GapAlignOpType::Sub,
+            last_seq2_off[0][diag_origin as usize].match_off,
+        );
+    }
+
+    max_score_base[(best_dist as usize) + max_score_offset]
+}
+
+/// Compute alignment stats from a gap edit script.
+/// NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_hits.c:745-818 (identity counting)
+/// NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_hits.c:1055-1074 (gap counts)
+fn stats_from_edit_ops(
+    q_seq: &[u8],
+    s_seq: &[u8],
+    q_start: usize,
+    s_start: usize,
+    edit_ops: &[GapEditOp],
+) -> (usize, usize, usize, usize) {
+    let mut matches = 0usize;
+    let mut mismatches = 0usize;
+    let mut gap_opens = 0usize;
+    let mut gap_letters = 0usize;
+
+    let mut qi = q_start;
+    let mut si = s_start;
+
+    for op in edit_ops {
+        match *op {
+            GapEditOp::Sub(n) => {
+                for _ in 0..n {
+                    if qi < q_seq.len() && si < s_seq.len() {
+                        if q_seq[qi] == s_seq[si] {
+                            matches += 1;
+                        } else {
+                            mismatches += 1;
+                        }
+                    }
+                    qi += 1;
+                    si += 1;
+                }
+            }
+            GapEditOp::Del(n) => {
+                gap_opens += 1;
+                gap_letters += n as usize;
+                si += n as usize;
+            }
+            GapEditOp::Ins(n) => {
+                gap_opens += 1;
+                gap_letters += n as usize;
+                qi += n as usize;
+            }
+        }
+    }
+
+    (matches, mismatches, gap_opens, gap_letters)
+}
+
+/// Core greedy gapped alignment result (internal).
+/// NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_gapalign.c:2539-2569 (s_BlastGreedyGapAlignStructFill)
+struct GreedyGappedCore {
+    q_start: i32,
+    q_end: i32,
+    s_start: i32,
+    s_end: i32,
+    q_seed_start: i32,
+    s_seed_start: i32,
+    score: i32,
+    edit_script: Option<GapEditScript>,
+}
+
+/// Greedy gapped alignment core (with or without traceback).
+/// NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_gapalign.c:2762-2936 (BLAST_GreedyGappedAlignment)
+fn greedy_gapped_alignment_internal(
+    query: &[u8],
+    subject: &[u8],
+    q_off: usize,
+    s_off: usize,
+    reward: i32,
+    penalty: i32,
+    gap_open: i32,
+    gap_extend: i32,
+    x_drop: i32,
+    do_traceback: bool,
+) -> Option<GreedyGappedCore> {
+    let q_avail = query.len().saturating_sub(q_off) as i32;
+    let s_avail = subject.len().saturating_sub(s_off) as i32;
+    let rem: u8 = 4; // uncompressed subject
+
+    let mut max_len = q_avail.max(s_avail);
+    if max_len <= 0 {
+        return None;
+    }
+
+    // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_gapalign.c:325-330
+    let mut max_dist =
+        (GREEDY_MAX_COST as i32).min(max_len / GREEDY_MAX_COST_FRACTION as i32 + 1);
+
+    let mut q_ext_r = 0;
+    let mut s_ext_r = 0;
+    let mut q_ext_l = 0;
+    let mut s_ext_l = 0;
+
+    let mut fwd_prelim_tback = if do_traceback {
+        Some(GapPrelimEditBlock::new())
+    } else {
+        None
+    };
+    let mut rev_prelim_tback = if do_traceback {
+        Some(GapPrelimEditBlock::new())
+    } else {
+        None
+    };
+
+    let mut fwd_start_point = GreedySeed::default();
+    let mut rev_start_point = GreedySeed::default();
+
+    let mut fence_hit = false;
+    let mut score: i32;
+
+    loop {
+        score = blast_affine_greedy_align(
+            &query[q_off..],
+            q_avail,
+            &subject[s_off..],
+            s_avail,
+            false,
+            x_drop,
+            reward,
+            -penalty,
+            gap_open,
+            gap_extend,
+            &mut q_ext_r,
+            &mut s_ext_r,
+            max_dist,
+            fwd_prelim_tback.as_mut(),
+            rem,
+            &mut fence_hit,
+            &mut fwd_start_point,
+        );
+        if fence_hit {
+            return None;
+        }
+        if score >= 0 {
+            break;
+        }
+        max_dist *= 2;
+    }
+
+    loop {
+        let score_left = blast_affine_greedy_align(
+            query,
+            q_off as i32,
+            subject,
+            s_off as i32,
+            true,
+            x_drop,
+            reward,
+            -penalty,
+            gap_open,
+            gap_extend,
+            &mut q_ext_l,
+            &mut s_ext_l,
+            max_dist,
+            rev_prelim_tback.as_mut(),
+            rem,
+            &mut fence_hit,
+            &mut rev_start_point,
+        );
+        if fence_hit {
+            return None;
+        }
+        if score_left >= 0 {
+            score += score_left;
+            break;
+        }
+        max_dist *= 2;
+    }
+
+    if gap_open == 0 && gap_extend == 0 {
+        score = (q_ext_r + s_ext_r + q_ext_l + s_ext_l) * reward / 2
+            - score * (reward - penalty);
+    } else if reward % 2 == 1 {
+        score /= 2;
+    }
+
+    let mut q_seed_start = q_off as i32;
+    let mut s_seed_start = s_off as i32;
+    let mut edit_script = None;
+
+    if do_traceback {
+        let rev = rev_prelim_tback.as_ref().unwrap();
+        let fwd = fwd_prelim_tback.as_ref().unwrap();
+        if let Some(mut esp) = prelim_edit_block_to_gap_edit_script(rev, fwd) {
+            let q_start = q_off as i32 - q_ext_l;
+            let s_start = s_off as i32 - s_ext_l;
+            let q_end = q_off as i32 + q_ext_r;
+            let s_end = s_off as i32 + s_ext_r;
+
+            let q_slice = &query[q_start as usize..q_end as usize];
+            let s_slice = &subject[s_start as usize..s_end as usize];
+            reduce_gaps(&mut esp, q_slice, s_slice);
+            edit_script = Some(esp);
+        }
+    } else {
+        let q_box_l = q_off as i32 - q_ext_l;
+        let s_box_l = s_off as i32 - s_ext_l;
+        let q_box_r = q_off as i32 + q_ext_r;
+        let s_box_r = s_off as i32 + s_ext_r;
+        let mut q_seed_start_l = q_off as i32 - rev_start_point.start_q;
+        let mut s_seed_start_l = s_off as i32 - rev_start_point.start_s;
+        let mut q_seed_start_r = q_off as i32 + fwd_start_point.start_q;
+        let mut s_seed_start_r = s_off as i32 + fwd_start_point.start_s;
+        let mut valid_seed_len_l = 0;
+        let mut valid_seed_len_r = 0;
+
+        if q_seed_start_r < q_box_r && s_seed_start_r < s_box_r {
+            valid_seed_len_r = (q_box_r - q_seed_start_r)
+                .min(s_box_r - s_seed_start_r)
+                .min(fwd_start_point.match_length)
+                / 2;
+        } else {
+            q_seed_start_r = q_off as i32;
+            s_seed_start_r = s_off as i32;
+        }
+
+        if q_seed_start_l > q_box_l && s_seed_start_l > s_box_l {
+            valid_seed_len_l = (q_seed_start_l - q_box_l)
+                .min(s_seed_start_l - s_box_l)
+                .min(rev_start_point.match_length)
+                / 2;
+        } else {
+            q_seed_start_l = q_off as i32;
+            s_seed_start_l = s_off as i32;
+        }
+
+        if valid_seed_len_r > valid_seed_len_l {
+            q_seed_start = q_seed_start_r + valid_seed_len_r;
+            s_seed_start = s_seed_start_r + valid_seed_len_r;
+        } else {
+            q_seed_start = q_seed_start_l - valid_seed_len_l;
+            s_seed_start = s_seed_start_l - valid_seed_len_l;
+        }
+    }
+
+    Some(GreedyGappedCore {
+        q_start: q_off as i32 - q_ext_l,
+        q_end: q_off as i32 + q_ext_r,
+        s_start: s_off as i32 - s_ext_l,
+        s_end: s_off as i32 + s_ext_r,
+        q_seed_start,
+        s_seed_start,
+        score,
+        edit_script,
+    })
+}
+
+/// Greedy gapped alignment score-only (preliminary).
+/// NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_gapalign.c:2762-2936
+pub fn greedy_gapped_alignment_score_only(
+    query: &[u8],
+    subject: &[u8],
+    q_off: usize,
+    s_off: usize,
+    reward: i32,
+    penalty: i32,
+    gap_open: i32,
+    gap_extend: i32,
+    x_drop: i32,
+) -> Option<(usize, usize, usize, usize, i32, usize, usize)> {
+    let core = greedy_gapped_alignment_internal(
+        query,
+        subject,
+        q_off,
+        s_off,
+        reward,
+        penalty,
+        gap_open,
+        gap_extend,
+        x_drop,
+        false,
+    )?;
+
+    if core.q_start < 0 || core.s_start < 0 {
+        return None;
+    }
+
+    Some((
+        core.q_start as usize,
+        core.q_end as usize,
+        core.s_start as usize,
+        core.s_end as usize,
+        core.score,
+        core.q_seed_start as usize,
+        core.s_seed_start as usize,
+    ))
+}
+
+/// Greedy gapped alignment with traceback.
+/// NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_gapalign.c:2762-2936
+pub fn greedy_gapped_alignment_with_traceback(
+    query: &[u8],
+    subject: &[u8],
+    q_off: usize,
+    s_off: usize,
+    reward: i32,
+    penalty: i32,
+    gap_open: i32,
+    gap_extend: i32,
+    x_drop: i32,
+) -> Option<(usize, usize, usize, usize, i32, usize, usize, usize, usize, Vec<GapEditOp>)> {
+    let core = greedy_gapped_alignment_internal(
+        query,
+        subject,
+        q_off,
+        s_off,
+        reward,
+        penalty,
+        gap_open,
+        gap_extend,
+        x_drop,
+        true,
+    )?;
+
+    let edit_script = core.edit_script?;
+    let mut edit_ops: Vec<GapEditOp> = Vec::with_capacity(edit_script.size);
+    for i in 0..edit_script.size {
+        let op = edit_script.op_type[i];
+        let num = edit_script.num[i];
+        edit_ops.push(op.to_gap_edit_op(num));
+    }
+
+    let (matches, mismatches, gap_opens, gap_letters) = stats_from_edit_ops(
+        query,
+        subject,
+        core.q_start as usize,
+        core.s_start as usize,
+        &edit_ops,
+    );
+
+    Some((
+        core.q_start as usize,
+        core.q_end as usize,
+        core.s_start as usize,
+        core.s_end as usize,
+        core.score,
+        matches,
+        mismatches,
+        gap_opens,
+        gap_letters,
+        edit_ops,
+    ))
 }

@@ -17,6 +17,9 @@ pub use greedy::{
     GreedyOffset,
     greedy_align_one_direction,
     greedy_align_one_direction_ex,
+    // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_gapalign.c:2762-2936 (BLAST_GreedyGappedAlignment)
+    greedy_gapped_alignment_score_only,
+    greedy_gapped_alignment_with_traceback,
 };
 // NCBI reference: blast_gapalign.c:3248-3305 (BlastGetOffsetsForGappedAlignment)
 // NCBI reference: blast_gapalign.c:3323-3389 (BlastGetStartForGappedAlignmentNucl)

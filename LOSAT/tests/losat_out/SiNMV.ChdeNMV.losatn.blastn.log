@@ -2,43 +2,13 @@ Reading query & subject...
 Applying DUST filter (level=20, window=64, linker=1)...
 DUST masked 11021 bases (4.11%) across 1 sequences
 Building lookup (Task: blastn, Word: 11, TwoStage: true, LUTWord: 10, Direct: true, DUST: true)...
-[PERF] Subject scan took 25.5471ms: left_ext=79589, right_ext=58834, ungapped=40991, seeds=261606, valid_pos=142544
-[PERF] Subject scan took 26.882ms: left_ext=74460, right_ext=55909, ungapped=36673, seeds=416914, valid_pos=285088
-[PROGRESS] Gapped extension: 0/12871
-[PROGRESS] Gapped extension: 100/12871
-[PROGRESS] Gapped extension: 200/12871
-[PROGRESS] Gapped extension: 300/12871
-[PROGRESS] Gapped extension: 400/12871
-[PROGRESS] Gapped extension: 500/12871
-[PROGRESS] Gapped extension: 600/12871
-[PROGRESS] Gapped extension: 700/12871
-[PROGRESS] Gapped extension: 800/12871
-[PROGRESS] Gapped extension: 900/12871
-[PROGRESS] Gapped extension: 1000/12871
-[PROGRESS] Gapped extension: 1100/12871
-[PROGRESS] Gapped extension: 1200/12871
-[PROGRESS] Gapped extension: 1300/12871
-[PROGRESS] Gapped extension: 1400/12871
-[PROGRESS] Gapped extension: 1500/12871
-[PROGRESS] Gapped extension: 1600/12871
-[PROGRESS] Gapped extension: 1700/12871
-[PROGRESS] Gapped extension: 1800/12871
-[PROGRESS] Gapped extension: 1900/12871
-[PROGRESS] Gapped extension: 2000/12871
-[PROGRESS] Gapped extension: 2100/12871
-[PROGRESS] Gapped extension: 2200/12871
-[PROGRESS] Gapped extension: 2300/12871
-[PROGRESS] Gapped extension: 2400/12871
-[PROGRESS] Gapped extension: 2500/12871
-[PROGRESS] Gapped extension: 2600/12871
-[PROGRESS] Gapped extension: 2700/12871
-[PROGRESS] Gapped extension: 2800/12871
-[PROGRESS] Gapped extension: 2900/12871
+[PERF] Subject scan took 26.5636ms: left_ext=79591, right_ext=58834, ungapped=40915, seeds=261606, valid_pos=142544
+[PERF] Subject scan took 24.686ms: left_ext=74460, right_ext=55909, ungapped=36596, seeds=416914, valid_pos=285088
 
-thread 'main' (19150) has overflowed its stack
+thread 'main' (3982) has overflowed its stack
 fatal runtime error: stack overflow, aborting
-./run_comparison.sh: line 105: 19150 Aborted                 $LOSAT_BIN blastn -q ./fasta/LC738884.fasta -s ./fasta/AP027155.fasta -o ./losat_out/SiNMV.ChdeNMV.losatn.blastn.out --task blastn -n 1
+./run_comparison.sh: line 103:  3982 Aborted                 $LOSAT_BIN blastn -q ./fasta/LC738884.fasta -s ./fasta/AP027155.fasta -o ./losat_out/SiNMV.ChdeNMV.losatn.blastn.out --task blastn -n 1
 
-real	0m6.781s
-user	0m6.650s
-sys	0m0.010s
+real	0m7.899s
+user	0m7.832s
+sys	0m0.020s

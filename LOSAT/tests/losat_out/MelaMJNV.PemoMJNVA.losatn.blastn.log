@@ -2,34 +2,13 @@ Reading query & subject...
 Applying DUST filter (level=20, window=64, linker=1)...
 DUST masked 26275 bases (9.15%) across 1 sequences
 Building lookup (Task: blastn, Word: 11, TwoStage: true, LUTWord: 10, Direct: true, DUST: true)...
-[PERF] Subject scan took 29.8438ms: left_ext=106439, right_ext=78718, ungapped=54917, seeds=126527, valid_pos=147068
-[PERF] Subject scan took 29.0832ms: left_ext=103869, right_ext=77042, ungapped=53236, seeds=248053, valid_pos=294136
-[PROGRESS] Gapped extension: 0/8981
-[PROGRESS] Gapped extension: 100/8981
-[PROGRESS] Gapped extension: 200/8981
-[PROGRESS] Gapped extension: 300/8981
-[PROGRESS] Gapped extension: 400/8981
-[PROGRESS] Gapped extension: 500/8981
-[PROGRESS] Gapped extension: 600/8981
-[PROGRESS] Gapped extension: 700/8981
-[PROGRESS] Gapped extension: 800/8981
-[PROGRESS] Gapped extension: 900/8981
-[PROGRESS] Gapped extension: 1000/8981
-[PROGRESS] Gapped extension: 1100/8981
-[PROGRESS] Gapped extension: 1200/8981
-[PROGRESS] Gapped extension: 1300/8981
-[PROGRESS] Gapped extension: 1400/8981
-[PROGRESS] Gapped extension: 1500/8981
-[PROGRESS] Gapped extension: 1600/8981
-[PROGRESS] Gapped extension: 1700/8981
-[PROGRESS] Gapped extension: 1800/8981
-[PROGRESS] Gapped extension: 1900/8981
-[PROGRESS] Gapped extension: 2000/8981
+[PERF] Subject scan took 35.6903ms: left_ext=106440, right_ext=78719, ungapped=54706, seeds=126527, valid_pos=147068
+[PERF] Subject scan took 31.9513ms: left_ext=103870, right_ext=77042, ungapped=53060, seeds=248053, valid_pos=294136
 
-thread 'main' (19135) has overflowed its stack
+thread 'main' (3956) has overflowed its stack
 fatal runtime error: stack overflow, aborting
-./run_comparison.sh: line 102: 19135 Aborted                 $LOSAT_BIN blastn -q ./fasta/LC738874.fasta -s ./fasta/LC738870.fasta -o ./losat_out/MelaMJNV.PemoMJNVA.losatn.blastn.out --task blastn -n 1
+./run_comparison.sh: line 100:  3956 Aborted                 $LOSAT_BIN blastn -q ./fasta/LC738874.fasta -s ./fasta/LC738870.fasta -o ./losat_out/MelaMJNV.PemoMJNVA.losatn.blastn.out --task blastn -n 1
 
-real	0m6.635s
-user	0m6.517s
-sys	0m0.020s
+real	0m6.322s
+user	0m6.277s
+sys	0m0.000s

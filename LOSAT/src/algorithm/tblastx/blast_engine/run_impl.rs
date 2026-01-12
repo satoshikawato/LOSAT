@@ -47,18 +47,40 @@ pub fn run(args: TblastxArgs) -> Result<()> {
     // NCBI BLAST computes x_dropoff per-context using kbp[context]->Lambda:
     //   p->cutoffs[context].x_dropoff_init =
     //       (Int4)(sbp->scale_factor * ceil(word_options->x_dropoff * NCBIMATH_LN2 / kbp->Lambda));
-    // Reference: blast_parameters.c:219-221
+    // Reference: ncbi-blast/c++/src/algo/blast/core/blast_parameters.c:219-221
     //
-    // For tblastx, NCBI uses kbp_ideal->Lambda for all contexts (blast_stat.c:2796-2797):
+    // For translated queries, NCBI computes kbp_std per context and applies check_ideal:
     //   if (check_ideal && kbp->Lambda >= sbp->kbp_ideal->Lambda)
     //      Blast_KarlinBlkCopy(kbp, sbp->kbp_ideal);
-    // So all contexts get the same x_dropoff, but we maintain per-context structure for parity.
+    // Reference: ncbi-blast/c++/src/algo/blast/core/blast_stat.c:2778-2797
+    // We still maintain per-context structure for parity.
     //
     // x_dropoff_per_context is populated after build_ncbi_lookup() creates the contexts.
     let ungapped_params_for_xdrop = lookup_protein_params_ungapped(ScoringMatrix::Blosum62);
 
     let diag_enabled = diagnostics_enabled();
     let diagnostics = std::sync::Arc::new(DiagnosticCounters::default());
+
+    // Debug: optional scan output dump around a specific subject offset.
+    // The offset_pairs correspond to s_BlastAaScanSubject copy loop.
+    // Reference: ncbi-blast/c++/src/algo/blast/core/blast_aascan.c:99-115
+    let scan_debug_center = std::env::var("LOSAT_DEBUG_SCAN_SOFF")
+        .ok()
+        .and_then(|v| v.parse::<i32>().ok());
+    let scan_debug_window = std::env::var("LOSAT_DEBUG_SCAN_WINDOW")
+        .ok()
+        .and_then(|v| v.parse::<i32>().ok())
+        .unwrap_or(0);
+    let scan_debug_range = scan_debug_center.map(|center| (center - scan_debug_window, center + scan_debug_window));
+    if let Some((lo, hi)) = scan_debug_range {
+        eprintln!(
+            "[DEBUG SCAN_OFF] enabled s_off_range=[{},{}] (center={} window={})",
+            lo,
+            hi,
+            scan_debug_center.unwrap_or(0),
+            scan_debug_window
+        );
+    }
 
     rayon::ThreadPoolBuilder::new()
         .num_threads(num_threads)
@@ -148,35 +170,38 @@ pub fn run(args: TblastxArgs) -> Result<()> {
     }
     // Note: karlin_params argument is now unused - computed per context in build_ncbi_lookup()
     // We still pass it for x_dropoff calculation (which uses ideal params for all contexts in tblastx)
+    // NCBI lookup build always precomputes neighbors (no lazy mode).
+    // Reference: ncbi-blast/c++/src/algo/blast/core/blast_aalookup.c:446-543
     let (lookup, contexts) = build_ncbi_lookup(
         &query_frames,
         args.threshold,
         args.include_stop_seeds,
         args.ncbi_stop_stop_score,
-        false, // lazy_neighbors disabled - use neighbor_map mode instead
         &ungapped_params_for_xdrop, // Used for x_dropoff calculation only
     );
     t_build_lookup = t_phase_build_lookup.elapsed();
 
     // NCBI BLAST: word_params->cutoffs[context].x_dropoff_init
     // Compute per-context x_dropoff using kbp[context]->Lambda.
-    // Reference: blast_parameters.c:219-221
+    // Reference: ncbi-blast/c++/src/algo/blast/core/blast_parameters.c:219-221
     //
-    // For tblastx, all contexts use kbp_ideal (BLOSUM62 ungapped Lambda = 0.3176),
-    // so x_dropoff = ceil(7.0 * LN2 / 0.3176) = 16 for all contexts.
-    // We maintain per-context structure for NCBI parity.
+    // For translated queries, NCBI computes kbp_std per context and applies check_ideal:
+    //   if (check_ideal && kbp->Lambda >= kbp_ideal->Lambda) Blast_KarlinBlkCopy(kbp, kbp_ideal);
+    // Reference: ncbi-blast/c++/src/algo/blast/core/blast_stat.c:2778-2797
     //
-    // NCBI BLAST dynamic x_dropoff (blast_parameters.c:380-383):
+    // NCBI BLAST dynamic x_dropoff (ncbi-blast/c++/src/algo/blast/core/blast_parameters.c:380-383):
     //   if (curr_cutoffs->x_dropoff_init == 0)
     //      curr_cutoffs->x_dropoff = new_cutoff;  // x_dropoff = cutoff_score
     //   else
     //      curr_cutoffs->x_dropoff = curr_cutoffs->x_dropoff_init;
     //
-    // For TBLASTX, x_dropoff_init = 16 (not 0), so this dynamic update is not triggered.
+    // For TBLASTX, x_dropoff_init is non-zero, so this dynamic update is not triggered.
     // However, we store x_dropoff_init here and apply the logic during subject processing
     // where cutoff_score is available.
-    let x_dropoff_init = x_drop_raw_score(X_DROP_UNGAPPED_BITS, &ungapped_params_for_xdrop, 1.0);
-    let x_dropoff_per_context: Vec<i32> = vec![x_dropoff_init; contexts.len()];
+    let x_dropoff_per_context: Vec<i32> = contexts
+        .iter()
+        .map(|ctx| x_drop_raw_score(X_DROP_UNGAPPED_BITS, &ctx.karlin_params, 1.0))
+        .collect();
 
     let t_phase_read_subjects = Instant::now();
     if args.verbose {
@@ -198,7 +223,7 @@ pub fn run(args: TblastxArgs) -> Result<()> {
     //   blast_hits.c line 1833: kbp = (gapped_calculation ? sbp->kbp_gap : sbp->kbp);
     //   blast_hits.c line 1918: same pattern in Blast_HSPListGetBitScores
     //
-    // NCBI reference (blast_setup.c:768):
+    // NCBI reference (ncbi-blast/c++/src/algo/blast/core/blast_setup.c:768):
     //   kbp_ptr = (scoring_options->gapped_calculation ? sbp->kbp_gap_std : sbp->kbp);
     // For tblastx, gapped_calculation = FALSE, so kbp_ptr = sbp->kbp (ungapped params)
     // Therefore, ALL calculations (eff_searchsp, cutoff, bit score, E-value) use UNGAPPED params
@@ -218,7 +243,7 @@ pub fn run(args: TblastxArgs) -> Result<()> {
     let params = ungapped_params.clone();
 
     // Compute NCBI-style average query length for linking cutoffs
-    // Reference: blast_parameters.c:CalculateLinkHSPCutoffs (lines 1023-1026)
+    // Reference: ncbi-blast/c++/src/algo/blast/core/blast_parameters.c:998-1082
     // NCBI uses average over ALL contexts including zero-length (frame restriction via strand)
     let query_nucl_lengths: Vec<usize> = queries_raw.iter().map(|r| r.seq().len()).collect();
     let avg_query_length = compute_avg_query_length_ncbi(&query_nucl_lengths);
@@ -283,22 +308,33 @@ pub fn run(args: TblastxArgs) -> Result<()> {
     //   diag_table->diag_mask = diag_array_length-1;
     // Source: ncbi-blast/c++/src/algo/blast/core/blast_extend.c:52-61
     //
-    // `query_length` here is the concatenated translated query buffer length
-    // (frames share a boundary sentinel). In LOSAT this equals the end offset
-    // of the last query context buffer.
+    // `query_length` here must match BLAST_SequenceBlk->length, computed as
+    // last_context.query_offset + last_context.query_length (excludes the final trailing NULLB).
+    // References: ncbi-blast/c++/src/algo/blast/core/blast_query_info.c:311-315, 378-381
     // NCBI BLAST diag array sizing:
     // diag_array_length = next_power_of_2(qlen + window_size)
     // For tblastx, qlen = total concatenated query buffer (all 6 frames)
     // Source: ncbi-blast/c++/src/algo/blast/core/blast_extend.c:52-61
     let query_length: i32 = contexts
         .last()
-        .map(|c| c.frame_base + (c.aa_seq.len() as i32 - 1))
+        .map(|c| c.frame_base + c.aa_len as i32)
         .unwrap_or(0);
     let mut diag_array_size: i32 = 1;
     while diag_array_size < (query_length + window) {
         diag_array_size <<= 1;
     }
     let diag_mask: i32 = diag_array_size - 1;
+    if trace_hsp_target().is_some() {
+        // NCBI: diag_array_length = next_power_of_2(qlen + window_size).
+        // Reference: ncbi-blast/c++/src/algo/blast/core/blast_extend.c:52-61
+        eprintln!(
+            "[TRACE_HSP] diag_table query_length={} window={} diag_array_size={} diag_mask={}",
+            query_length,
+            window,
+            diag_array_size,
+            diag_mask
+        );
+    }
 
     // [C] array_size for offset_pairs
     // NCBI: GetOffsetArraySize() = OFFSET_ARRAY_SIZE (4096) + lookup->longest_chain
@@ -309,7 +345,6 @@ pub fn run(args: TblastxArgs) -> Result<()> {
     let lookup_ref = &lookup;
     let contexts_ref = &contexts;
     let query_ids_ref = &query_ids;
-    let ungapped_params_ref = &ungapped_params;
     let _gapped_params_ref = &gapped_params;  // Unused - tblastx uses ungapped params
 
     subjects_raw.par_iter().enumerate().for_each_init(
@@ -356,7 +391,7 @@ pub fn run(args: TblastxArgs) -> Result<()> {
             let mut diag_offset: i32 = st.diag_offset;
 
             // Precompute per-context cutoff scores using NCBI BLAST algorithm.
-            // Reference: blast_parameters.c BlastInitialWordParametersUpdate
+            // Reference: ncbi-blast/c++/src/algo/blast/core/blast_parameters.c:280-419
             //
             // NCBI cutoff calculation for tblastx ungapped path:
             // 1. gap_trigger from ungapped params (kbp_std)
@@ -368,39 +403,44 @@ pub fn run(args: TblastxArgs) -> Result<()> {
             let subject_len_nucl = s_len as i64;
             let mut cutoff_scores: Vec<Vec<i32>> = vec![vec![0; s_frames.len()]; contexts_ref.len()];
             // NCBI word_params->cutoff_score_min = min of cutoffs across all contexts
-            // Reference: blast_parameters.c BlastInitialWordParametersUpdate line 401-403
+            // Reference: ncbi-blast/c++/src/algo/blast/core/blast_parameters.c:401-403
             let mut cutoff_score_min = i32::MAX;
             
             // =======================================================================
             // NCBI Parity: Pre-compute length_adjustment and eff_searchsp per context
             // =======================================================================
             // NCBI stores these in query_info->contexts[ctx].length_adjustment and
-            // query_info->contexts[ctx].eff_searchsp via BLAST_CalcEffLengths (blast_setup.c:700-850).
+            // query_info->contexts[ctx].eff_searchsp via BLAST_CalcEffLengths
+            // (ncbi-blast/c++/src/algo/blast/core/blast_setup.c:700-850).
             // We precompute them here and pass to sum_stats_linking for NCBI parity.
-            // Reference: blast_setup.c:846-847
+            // Reference: ncbi-blast/c++/src/algo/blast/core/blast_setup.c:846-847
             //   query_info->contexts[index].eff_searchsp = effective_search_space;
             //   query_info->contexts[index].length_adjustment = length_adjustment;
             let mut length_adj_per_context: Vec<i64> = Vec::with_capacity(contexts_ref.len());
             let mut eff_searchsp_per_context: Vec<i64> = Vec::with_capacity(contexts_ref.len());
             
-            // Precompute gap_trigger once (same for all contexts with same params)
-            // Reference: blast_parameters.c:343-344
-            let gap_trigger = gap_trigger_raw_score(GAP_TRIGGER_BIT_SCORE, ungapped_params_ref);
-            
             for (ctx_idx, ctx) in contexts_ref.iter().enumerate() {
+                // NCBI: per-context kbp_std[context] is used throughout cutoff/length calcs.
+                // Reference: ncbi-blast/c++/src/algo/blast/core/blast_stat.c:2778-2797
+                let ctx_params = &ctx.karlin_params;
+
                 // NCBI: query_length = query_info->contexts[context].query_length
                 let query_len_aa = ctx.aa_len as i64;
-                
+
+                // NCBI: gap_trigger uses kbp_std[context]->Lambda/logK.
+                // Reference: ncbi-blast/c++/src/algo/blast/core/blast_parameters.c:340-345
+                let gap_trigger = gap_trigger_raw_score(GAP_TRIGGER_BIT_SCORE, ctx_params);
+
                 // =======================================================================
                 // NCBI Parity: Use compute_eff_lengths_subject_mode_tblastx to get BOTH
                 // length_adjustment and eff_searchsp from a single source of truth.
                 // This mirrors BLAST_CalcEffLengths which computes and stores both values.
-                // Reference: blast_setup.c:821-847
+                // Reference: ncbi-blast/c++/src/algo/blast/core/blast_setup.c:821-847
                 // =======================================================================
                 let eff_lengths = compute_eff_lengths_subject_mode_tblastx(
                     query_len_aa,
                     subject_len_nucl,
-                    ungapped_params_ref,  // tblastx uses ungapped params (kbp_gap is NULL)
+                    ctx_params,  // tblastx uses per-context ungapped params (kbp_gap is NULL)
                 );
                 let eff_searchsp = eff_lengths.eff_searchsp;
                 length_adj_per_context.push(eff_lengths.length_adjustment);
@@ -408,23 +448,23 @@ pub fn run(args: TblastxArgs) -> Result<()> {
                 
                 // Step 1: Compute cutoff_score_max from BlastHitSavingParametersNew
                 // This uses the effective search space WITH length adjustment
-                // Reference: blast_parameters.c:942-946
+                // Reference: ncbi-blast/c++/src/algo/blast/core/blast_parameters.c:942-946
                 let cutoff_score_max = cutoff_score_max_for_tblastx(
                     eff_searchsp,
                     evalue_threshold,  // User's E-value (typically 10.0)
-                    ungapped_params_ref,
+                    ctx_params,
                 );
                 
                 // Step 2: Compute per-subject cutoff using BlastInitialWordParametersUpdate
                 // This uses CUTOFF_E_TBLASTX=1e-300 and a simple searchsp formula
-                // Reference: blast_parameters.c:348-374
+                // Reference: ncbi-blast/c++/src/algo/blast/core/blast_parameters.c:348-374
                 let cutoff = cutoff_score_for_update_tblastx(
                     query_len_aa,
                     subject_len_nucl,  // NUCLEOTIDE length, NOT divided by 3!
                     gap_trigger,
                     cutoff_score_max,
                     BLAST_GAP_DECAY_RATE,  // 0.5
-                    ungapped_params_ref,
+                    ctx_params,
                     1.0,  // scale_factor (standard BLOSUM62)
                 );
                 
@@ -482,15 +522,39 @@ pub fn run(args: TblastxArgs) -> Result<()> {
                 // The per-subject reset (above, line ~1646) matches NCBI's Blast_ExtendWordNew calloc.
                 // Blast_ExtendWordExit at the end of this loop increments diag_offset.
 
-                let subject = &s_frame.aa_seq;
+                let subject_full = &s_frame.aa_seq;
+                // NCBI subject->sequence points past the leading NULLB sentinel, so offsets
+                // are 0-based from the first residue; see blast_engine.c:811-812 and
+                // blast_util.c:112-116.
+                let subject = &subject_full[1..subject_full.len() - 1];
                 let s_aa_len = s_frame.aa_len;
-                if subject.len() < 5 {
+                if subject.len() < wordsize as usize {
+                    // NCBI still advances the diagonal table offset even when no hits can be found.
+                    // References: ncbi-blast/c++/src/algo/blast/core/aa_ungapped.c:445-446,
+                    // ncbi-blast/c++/src/algo/blast/core/blast_extend.c:167-173
+                    if diag_offset >= i32::MAX / 4 {
+                        diag_offset = window;
+                        // s_BlastDiagClear(): clear all diagonal state when offset risks overflow.
+                        // NCBI sets last_hit = -window (blast_extend.c:101-103).
+                        // Reference: ncbi-blast/c++/src/algo/blast/core/blast_extend.c:101-103
+                        for d in diag_array.iter_mut() {
+                            *d = DiagStruct::clear(window);
+                        }
+                    } else {
+                        diag_offset += s_aa_len as i32 + window;
+                    }
                     continue;
                 }
 
+                // NCBI subject seq_ranges are used by s_DetermineScanningOffsets (masksubj.inl).
+                // With no subject masking, the range is [0, subject->length].
+                // References: ncbi-blast/c++/src/algo/blast/core/aa_ungapped.c:509-511,
+                // ncbi-blast/c++/src/algo/blast/core/masksubj.inl:43-58
+                let seq_ranges: [(i32, i32); 1] = [(0, s_aa_len as i32)];
+                // [C] scan_range[0] = 0;
                 // [C] scan_range[1] = subject->seq_ranges[0].left;
                 // [C] scan_range[2] = subject->seq_ranges[0].right - wordsize;
-                let mut scan_range: [i32; 3] = [0, 1, (subject.len() - 4) as i32];
+                let mut scan_range: [i32; 3] = [0, seq_ranges[0].0, seq_ranges[0].1 - wordsize];
 
                 // [C] while (scan_range[1] <= scan_range[2])
                 while scan_range[1] <= scan_range[2] {
@@ -500,6 +564,7 @@ pub fn run(args: TblastxArgs) -> Result<()> {
                     let hits = s_blast_aa_scan_subject(
                         lookup_ref,
                         subject,
+                        &seq_ranges,
                         offset_pairs,
                         offset_array_size,
                         &mut scan_range,
@@ -517,7 +582,9 @@ pub fn run(args: TblastxArgs) -> Result<()> {
 
                         // DEBUG: Check for duplicate offset pairs in scan output
                         if is_long_sequence {
-                            let mut seen: HashSet<(i32, i32)> = HashSet::with_capacity(hits as usize);
+                            // NCBI BlastOffsetPair uses Uint4 offsets.
+                            // Reference: ncbi-blast/c++/include/algo/blast/core/blast_def.h:141-150
+                            let mut seen: HashSet<(u32, u32)> = HashSet::with_capacity(hits as usize);
                             let mut duplicate_count = 0usize;
                             for i in 0..hits as usize {
                                 let pair = unsafe { &*offset_pairs.as_ptr().add(i) };
@@ -550,16 +617,43 @@ pub fn run(args: TblastxArgs) -> Result<()> {
                         let query_offset = pair.q_off;
                         let subject_offset = pair.s_off;
 
+                        // Debug: dump scan output around a target subject offset.
+                        // The scan output is produced by s_BlastAaScanSubject.
+                        // Reference: ncbi-blast/c++/src/algo/blast/core/blast_aascan.c:83-123
+                        if let Some((lo, hi)) = scan_debug_range {
+                            // NCBI offsets are Uint4; cast for debug range comparison only.
+                            // Reference: ncbi-blast/c++/include/algo/blast/core/blast_def.h:141-150
+                            let subject_offset_i32 = subject_offset as i32;
+                            if subject_offset_i32 >= lo && subject_offset_i32 <= hi {
+                                eprintln!(
+                                    "[DEBUG SCAN_OFF] s_f_idx={} s_off={} q_off={} scan_range=[{},{}] diag_offset={}",
+                                    s_f_idx,
+                                    subject_offset,
+                                    query_offset,
+                                    prev_scan_left,
+                                    scan_range[1],
+                                    diag_offset
+                                );
+                            }
+                        }
+
                         // [C] diag_coord = (query_offset - subject_offset) & diag_mask;
-                        let diag_coord = ((query_offset - subject_offset) & diag_mask) as usize;
+                        // NCBI uses Uint4 for offsets; apply unsigned wrapping.
+                        // References: ncbi-blast/c++/include/algo/blast/core/blast_def.h:141-150
+                        //             ncbi-blast/c++/src/algo/blast/core/aa_ungapped.c:534
+                        let diag_coord =
+                            (query_offset.wrapping_sub(subject_offset) & (diag_mask as u32)) as usize;
                         
                         // SAFETY: diag_coord is masked by diag_mask, which is < diag_array.len()
                         let diag_entry = unsafe { &mut *diag_ptr.add(diag_coord) };
 
                         // [C] if (diag_array[diag_coord].flag)
-                        if diag_entry.flag != 0 {
+                        // Reference: ncbi-blast/c++/src/algo/blast/core/aa_ungapped.c:536-553
+                        if diag_entry.flag() != 0 {
                             // [C] if ((Int4)(subject_offset + diag_offset) < diag_array[diag_coord].last_hit)
-                            if subject_offset + diag_offset < diag_entry.last_hit {
+                            let subject_plus_offset =
+                                subject_offset.wrapping_add(diag_offset as u32);
+                            if subject_plus_offset < diag_entry.last_hit() as u32 {
                                 if diag_enabled {
                                     diagnostics
                                         .base
@@ -570,17 +664,28 @@ pub fn run(args: TblastxArgs) -> Result<()> {
                             }
                             // [C] diag_array[diag_coord].last_hit = subject_offset + diag_offset;
                             // [C] diag_array[diag_coord].flag = 0;
-                            diag_entry.last_hit = subject_offset + diag_offset;
-                            diag_entry.flag = 0;
+                            diag_entry.set_last_hit(subject_plus_offset as i32);
+                            diag_entry.set_flag(0);
+                            // Track flag reset (hit after previous extension zone)
+                            if diag_enabled {
+                                diagnostics
+                                    .base
+                                    .seeds_flag_reset
+                                    .fetch_add(1, AtomicOrdering::Relaxed);
+                            }
                         }
                         // [C] else
                         else {
                             // [C] last_hit = diag_array[diag_coord].last_hit - diag_offset;
-                            let last_hit = diag_entry.last_hit - diag_offset;
+                            let last_hit = diag_entry.last_hit() - diag_offset;
                             // [C] diff = subject_offset - last_hit;
-                            let diff = subject_offset - last_hit;
+                            // NCBI uses Uint4 for subject_offset; compute with unsigned wrap.
+                            // References: ncbi-blast/c++/include/algo/blast/core/blast_def.h:141-150
+                            //             ncbi-blast/c++/src/algo/blast/core/aa_ungapped.c:559-560
+                            let diff = subject_offset.wrapping_sub(last_hit as u32) as i32;
 
                             // [C] if (diff >= window)
+                            // Reference: ncbi-blast/c++/src/algo/blast/core/aa_ungapped.c:562-569
                             if diff >= window {
                                 if diag_enabled {
                                     diagnostics
@@ -588,11 +693,14 @@ pub fn run(args: TblastxArgs) -> Result<()> {
                                         .seeds_second_hit_too_far
                                         .fetch_add(1, AtomicOrdering::Relaxed);
                                 }
-                                diag_entry.last_hit = subject_offset + diag_offset;
+                                diag_entry.set_last_hit(
+                                    subject_offset.wrapping_add(diag_offset as u32) as i32,
+                                );
                                 continue;
                             }
 
                             // [C] if (diff < wordsize)
+                            // Reference: ncbi-blast/c++/src/algo/blast/core/aa_ungapped.c:573-580
                             if diff < wordsize {
                                 if diag_enabled {
                                     diagnostics
@@ -604,21 +712,32 @@ pub fn run(args: TblastxArgs) -> Result<()> {
                             }
 
                             // [C] curr_context = BSearchContextInfo(query_offset, query_info);
-                            let ctx_idx = lookup_ref.get_context_idx(query_offset);
+                            // NCBI passes Uint4 query_offset into BSearchContextInfo (Int4).
+                            // References: ncbi-blast/c++/include/algo/blast/core/blast_def.h:141-150
+                            //             ncbi-blast/c++/src/algo/blast/core/aa_ungapped.c:590
+                            let ctx_idx = lookup_ref.get_context_idx(query_offset as i32);
                             let ctx = unsafe { contexts_ref.get_unchecked(ctx_idx) };
-                            let q_raw = (query_offset - ctx.frame_base) as usize;
-                            // NCBI uses masked sequence for extension (same as neighbor-map mode)
-                            let query = &ctx.aa_seq;
+                            let q_raw =
+                                query_offset.wrapping_sub(ctx.frame_base as u32) as usize;
+                            // NCBI uses masked sequence for extension; query->sequence is
+                            // sequence_start + 1, so offsets are 0-based in that buffer.
+                            // Reference: blast_query_info.c:311-315, blast_util.c:112-116.
+                            let query_full = &ctx.aa_seq;
+                            let query = &query_full[1..query_full.len() - 1];
 
                             // [C] if (query_offset - diff < query_info->contexts[curr_context].query_offset)
-                            if query_offset - diff < ctx.frame_base {
+                            // Reference: ncbi-blast/c++/src/algo/blast/core/aa_ungapped.c:592-606
+                            let q_minus_diff = query_offset.wrapping_sub(diff as u32);
+                            if q_minus_diff < ctx.frame_base as u32 {
                                 if diag_enabled {
                                     diagnostics
                                         .base
                                         .seeds_ctx_boundary_fail
                                         .fetch_add(1, AtomicOrdering::Relaxed);
                                 }
-                                diag_entry.last_hit = subject_offset + diag_offset;
+                                diag_entry.set_last_hit(
+                                    subject_offset.wrapping_add(diag_offset as u32) as i32,
+                                );
                                 continue;
                             }
 
@@ -692,7 +811,7 @@ pub fn run(args: TblastxArgs) -> Result<()> {
                             }
 
                             // NCBI: Update diagonal state based on right_extend
-                            // Reference: aa_ungapped.c:596-606
+                            // Reference: ncbi-blast/c++/src/algo/blast/core/aa_ungapped.c:636-648
                             // if (right_extend) {
                             //     diag_array[diag_coord].flag = 1;
                             //     diag_array[diag_coord].last_hit = s_last_off - (wordsize - 1) + diag_offset;
@@ -702,9 +821,10 @@ pub fn run(args: TblastxArgs) -> Result<()> {
                             if right_extend {
                                 // "If an extension to the right happened, reset the last hit
                                 //  so that future hits to this diagonal must start over."
-                                diag_entry.flag = 1;
-                                diag_entry.last_hit =
-                                    s_last_off - (wordsize - 1) + diag_offset;
+                                diag_entry.set_flag(1);
+                                diag_entry.set_last_hit(
+                                    s_last_off - (wordsize - 1) + diag_offset,
+                                );
                                 if diag_enabled {
                                     diagnostics
                                         .base
@@ -713,7 +833,9 @@ pub fn run(args: TblastxArgs) -> Result<()> {
                                 }
                             } else {
                                 // "Otherwise, make the present hit into the previous hit for this diagonal"
-                                diag_entry.last_hit = subject_offset + diag_offset;
+                                diag_entry.set_last_hit(
+                                    subject_offset.wrapping_add(diag_offset as u32) as i32,
+                                );
                             }
 
                             // [C] if (score >= cutoffs->cutoff_score)
@@ -736,10 +858,12 @@ pub fn run(args: TblastxArgs) -> Result<()> {
                                 // Extra debug for a traced HSP: print seed/extension inputs and cutoffs.
                                 if let Some(target) = trace_hsp_target() {
                                     // Compute outfmt coords for this candidate init-hsp (same logic as trace_init_hsp_if_match).
-                                    let q_aa_start = (hsp_q_u as usize).saturating_sub(1);
-                                    let q_aa_end = (hsp_qe_u as usize).saturating_sub(1);
-                                    let s_aa_start = (hsp_s_u as usize).saturating_sub(1);
-                                    let s_aa_end = (_hsp_se_u as usize).saturating_sub(1);
+                                    // NCBI offsets are 0-based in query/subject->sequence buffers.
+                                    // Reference: blast_gapalign.c:4756-4768, blast_aascan.c:110-113.
+                                    let q_aa_start = hsp_q_u as usize;
+                                    let q_aa_end = hsp_qe_u as usize;
+                                    let s_aa_start = hsp_s_u as usize;
+                                    let s_aa_end = _hsp_se_u as usize;
                                     let (q_start_dna, q_end_dna) =
                                         convert_coords(q_aa_start, q_aa_end, ctx.frame, ctx.orig_len);
                                     let (s_start_dna, s_end_dna) =
@@ -763,16 +887,35 @@ pub fn run(args: TblastxArgs) -> Result<()> {
                                             right_extend,
                                             s_last_off,
                                         );
+                                        // NCBI two-hit gating checks (diff/window/wordsize/context).
+                                        // Reference: ncbi-blast/c++/src/algo/blast/core/aa_ungapped.c:531-606
+                                        // NCBI uses Uint4 offsets; apply unsigned wrap here as well.
+                                        // Reference: ncbi-blast/c++/include/algo/blast/core/blast_def.h:141-150
+                                        let q_minus_diff = query_offset.wrapping_sub(diff as u32);
+                                        eprintln!(
+                                            "[TRACE_HSP] two_hit_pass diff={} window={} wordsize={} diff>=window={} diff<wordsize={} q_minus_diff={} ctx_frame_base={} q_minus_diff<base={} diag_offset={} diag_mask={} diag_array_size={}",
+                                            diff,
+                                            window,
+                                            wordsize,
+                                            diff >= window,
+                                            diff < wordsize,
+                                            q_minus_diff,
+                                            ctx.frame_base,
+                                            q_minus_diff < ctx.frame_base as u32,
+                                            diag_offset,
+                                            diag_mask,
+                                            diag_array_size
+                                        );
                                     }
                                 }
                                 // NCBI: BlastSaveInitHsp equivalent
                                 // Reference: blast_extend.c:360-375 BlastSaveInitHsp
                                 // Store HSP with absolute coordinates (before coordinate conversion)
                                 //
-                                // hsp_q is frame-relative coordinate (with sentinel, array index)
-                                // frame_base is concatenated buffer start position (with sentinel, array index)
-                                // Calculate absolute coordinate in concatenated buffer
-                                // NCBI: ungapped_data->q_start = q_start (absolute, sentinel included)
+                                // hsp_q is frame-relative coordinate in query->sequence (0-based),
+                                // frame_base is the context query_offset in the concatenated buffer.
+                                // NCBI: ungapped_data->q_start is absolute query offset.
+                                // Reference: blast_gapalign.c:4756-4768, blast_query_info.c:311-315.
                                 let hsp_q_absolute = ctx.frame_base + (hsp_q as i32);
                                 let hsp_qe_absolute = ctx.frame_base + ((hsp_q + hsp_len) as i32);
                                 
@@ -902,11 +1045,14 @@ pub fn run(args: TblastxArgs) -> Result<()> {
                     base += f.aa_seq.len() as i32 - 1;
                 }
 
-                // NCBI parity: s_BlastFindSmallestLambda selects Karlin params with smallest lambda
-                // Reference: blast_parameters.c:92-112, 1012-1013
-                // For tblastx, all contexts use kbp_ideal (same lambda), so this is equivalent
-                // to using ungapped_params directly. We maintain this structure for parity.
-                let context_params: Vec<KarlinParams> = contexts_ref.iter().map(|_| params.clone()).collect();
+                // NCBI parity: s_BlastFindSmallestLambda selects smallest lambda across contexts.
+                // Reference: ncbi-blast/c++/src/algo/blast/core/blast_parameters.c:92-112
+                // Per-context kbp_std is computed from query composition (with check_ideal).
+                // Reference: ncbi-blast/c++/src/algo/blast/core/blast_stat.c:2778-2797
+                let context_params: Vec<KarlinParams> = contexts_ref
+                    .iter()
+                    .map(|ctx| ctx.karlin_params)
+                    .collect();
                 let linking_params_for_cutoff = find_smallest_lambda_params(&context_params)
                     .unwrap_or_else(|| params.clone());
 
@@ -1042,14 +1188,19 @@ pub fn run(args: TblastxArgs) -> Result<()> {
                     //   const Uint1* query_nomask = query_blk->sequence_nomask +
                     //       query_info->contexts[context].query_offset;
                     let len = h.q_aa_end.saturating_sub(h.q_aa_start);
-                    let q0 = h.q_aa_start + 1; // +1 for sentinel
-                    let s0 = h.s_aa_start + 1; // +1 for sentinel
-                    let q_seq_nomask: &[u8] = ctx.aa_seq_nomask.as_deref().unwrap_or(&ctx.aa_seq);
+                    // NCBI uses query_nomask = query_blk->sequence_nomask + query_offset,
+                    // with sequence_nomask pointing past the leading NULLB.
+                    // Reference: blast_filter.c:1381-1382, blast_util.c:112-116.
+                    let q0 = h.q_aa_start;
+                    let s0 = h.s_aa_start;
+                    let q_seq_nomask_full: &[u8] = ctx.aa_seq_nomask.as_deref().unwrap_or(&ctx.aa_seq);
+                    let q_seq_nomask = &q_seq_nomask_full[1..q_seq_nomask_full.len() - 1];
+                    let s_seq = &s_frame.aa_seq[1..s_frame.aa_seq.len() - 1];
                     // Use SIMD-optimized identity calculation (already implemented in reevaluate.rs)
                     let t_identity = if timing_enabled { Some(Instant::now()) } else { None };
                     let matches = get_num_identities_and_positives_ungapped(
                         q_seq_nomask,
-                        &s_frame.aa_seq,
+                        s_seq,
                         q0,
                         s0,
                         len,

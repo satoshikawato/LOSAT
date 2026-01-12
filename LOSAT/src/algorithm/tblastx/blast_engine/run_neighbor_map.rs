@@ -31,9 +31,11 @@ pub(crate) fn run_with_neighbor_map(args: TblastxArgs) -> Result<()> {
     // NCBI BLAST computes x_dropoff per-context using kbp[context]->Lambda:
     //   p->cutoffs[context].x_dropoff_init =
     //       (Int4)(sbp->scale_factor * ceil(word_options->x_dropoff * NCBIMATH_LN2 / kbp->Lambda));
-    // Reference: blast_parameters.c:219-221
+    // Reference: ncbi-blast/c++/src/algo/blast/core/blast_parameters.c:219-221
     //
-    // For tblastx, NCBI uses kbp_ideal->Lambda for all contexts (blast_stat.c:2796-2797).
+    // For translated queries, NCBI computes kbp_std per context and applies check_ideal:
+    //   if (check_ideal && kbp->Lambda >= kbp_ideal->Lambda) Blast_KarlinBlkCopy(kbp, kbp_ideal);
+    // Reference: ncbi-blast/c++/src/algo/blast/core/blast_stat.c:2778-2797
     // x_dropoff_per_context is populated per-subject after counting total_contexts.
     let ungapped_params_for_xdrop = lookup_protein_params_ungapped(ScoringMatrix::Blosum62);
 
@@ -115,7 +117,8 @@ pub(crate) fn run_with_neighbor_map(args: TblastxArgs) -> Result<()> {
     //   blast_hits.c line 1918: same pattern in Blast_HSPListGetBitScores
     //
     // For cutoff score search space calculation, NCBI uses gapped params:
-    //   blast_parameters.c uses kbp_gap for eff_searchsp in cutoff calculation
+    //   blast_parameters.c selects kbp_gap if available, else kbp for tblastx.
+    // Reference: ncbi-blast/c++/src/algo/blast/core/blast_parameters.c:860-865
     //
     // BLOSUM62 ungapped: lambda=0.3176, K=0.134
     // BLOSUM62 gapped:   lambda=0.267,  K=0.041
@@ -131,7 +134,7 @@ pub(crate) fn run_with_neighbor_map(args: TblastxArgs) -> Result<()> {
     // Use UNGAPPED params for bit score and E-value (NCBI parity for tblastx)
     let params = ungapped_params.clone();
     
-    // NCBI reference (blast_setup.c:768):
+    // NCBI reference (ncbi-blast/c++/src/algo/blast/core/blast_setup.c:768):
     //   kbp_ptr = (scoring_options->gapped_calculation ? sbp->kbp_gap_std : sbp->kbp);
     // For tblastx, gapped_calculation = FALSE, so kbp_ptr = sbp->kbp (ungapped params)
     // Therefore, ALL calculations (eff_searchsp, cutoff, bit score, E-value) use UNGAPPED params
@@ -150,7 +153,7 @@ pub(crate) fn run_with_neighbor_map(args: TblastxArgs) -> Result<()> {
     let identity_calls = AtomicU64::new(0);
 
     // Compute NCBI-style average query length for linking cutoffs
-    // Reference: blast_parameters.c:CalculateLinkHSPCutoffs (lines 1023-1026)
+    // Reference: ncbi-blast/c++/src/algo/blast/core/blast_parameters.c:998-1082
     let query_nucl_lengths: Vec<usize> = queries_raw.iter().map(|r| r.seq().len()).collect();
     let avg_query_length = compute_avg_query_length_ncbi(&query_nucl_lengths);
 
@@ -182,7 +185,6 @@ pub(crate) fn run_with_neighbor_map(args: TblastxArgs) -> Result<()> {
     let query_lookup_ref = &neighbor_lookup.query_lookup;
     let query_contexts_ref = &neighbor_lookup.contexts;
     let params_ref = &params;
-    let ungapped_params_ref = &ungapped_params;
     let _gapped_params_ref = &gapped_params;  // Unused - tblastx uses ungapped params
 
     // Collect UngappedHit for sum_stats_linking
@@ -201,7 +203,7 @@ pub(crate) fn run_with_neighbor_map(args: TblastxArgs) -> Result<()> {
         let s_frames = generate_frames(s_rec.seq(), &db_code);
         
         // Precompute per-context cutoff scores using NCBI BLAST algorithm.
-        // Reference: blast_parameters.c BlastInitialWordParametersUpdate
+        // Reference: ncbi-blast/c++/src/algo/blast/core/blast_parameters.c:280-419
         //
         // NCBI cutoff calculation for tblastx ungapped path:
         // 1. gap_trigger from ungapped params (kbp_std)
@@ -218,9 +220,10 @@ pub(crate) fn run_with_neighbor_map(args: TblastxArgs) -> Result<()> {
         // NCBI Parity: Pre-compute length_adjustment and eff_searchsp per context
         // =======================================================================
         // NCBI stores these in query_info->contexts[ctx].length_adjustment and
-        // query_info->contexts[ctx].eff_searchsp via BLAST_CalcEffLengths (blast_setup.c:700-850).
+        // query_info->contexts[ctx].eff_searchsp via BLAST_CalcEffLengths
+        // (ncbi-blast/c++/src/algo/blast/core/blast_setup.c:700-850).
         // We precompute them here and pass to sum_stats_linking for NCBI parity.
-        // Reference: blast_setup.c:846-847
+        // Reference: ncbi-blast/c++/src/algo/blast/core/blast_setup.c:846-847
         //   query_info->contexts[index].eff_searchsp = effective_search_space;
         //   query_info->contexts[index].length_adjustment = length_adjustment;
         let mut length_adj_per_context: Vec<i64> = Vec::with_capacity(total_contexts);
@@ -228,35 +231,38 @@ pub(crate) fn run_with_neighbor_map(args: TblastxArgs) -> Result<()> {
         
         // NCBI BLAST: word_params->cutoffs[context].x_dropoff_init
         // Compute per-context x_dropoff using kbp[context]->Lambda.
-        // Reference: blast_parameters.c:219-221
-        //
-        // For tblastx, all contexts use kbp_ideal (BLOSUM62 ungapped Lambda = 0.3176),
-        // so x_dropoff = ceil(7.0 * LN2 / 0.3176) = 16 for all contexts.
-        // We maintain per-context structure for NCBI parity.
-        let x_dropoff_per_context: Vec<i32> = (0..total_contexts)
-            .map(|_| x_drop_raw_score(X_DROP_UNGAPPED_BITS, &ungapped_params_for_xdrop, 1.0))
+        // NCBI uses kbp_std[context]->Lambda for x_dropoff_init per context.
+        // Reference: ncbi-blast/c++/src/algo/blast/core/blast_parameters.c:219-221
+        let x_dropoff_per_context: Vec<i32> = neighbor_lookup
+            .contexts
+            .iter()
+            .map(|ctx| x_drop_raw_score(X_DROP_UNGAPPED_BITS, &ctx.karlin_params, 1.0))
             .collect();
-        
-        // Precompute gap_trigger once (same for all contexts with same params)
-        // Reference: blast_parameters.c:343-344
-        let gap_trigger = gap_trigger_raw_score(GAP_TRIGGER_BIT_SCORE, ungapped_params_ref);
         
         let mut ctx_idx = 0;
         for q_frames in query_frames.iter() {
             for q_frame in q_frames.iter() {
+                // NCBI: per-context kbp_std[context] is used throughout cutoff/length calcs.
+                // Reference: ncbi-blast/c++/src/algo/blast/core/blast_stat.c:2778-2797
+                let ctx_params = &neighbor_lookup.contexts[ctx_idx].karlin_params;
+
                 // NCBI: query_length = query_info->contexts[context].query_length
                 let query_len_aa = q_frame.aa_len as i64;
+
+                // NCBI: gap_trigger uses kbp_std[context]->Lambda/logK.
+                // Reference: ncbi-blast/c++/src/algo/blast/core/blast_parameters.c:340-345
+                let gap_trigger = gap_trigger_raw_score(GAP_TRIGGER_BIT_SCORE, ctx_params);
                 
                 // =======================================================================
                 // NCBI Parity: Use compute_eff_lengths_subject_mode_tblastx to get BOTH
                 // length_adjustment and eff_searchsp from a single source of truth.
                 // This mirrors BLAST_CalcEffLengths which computes and stores both values.
-                // Reference: blast_setup.c:821-847
+                // Reference: ncbi-blast/c++/src/algo/blast/core/blast_setup.c:821-847
                 // =======================================================================
                 let eff_lengths = compute_eff_lengths_subject_mode_tblastx(
                     query_len_aa,
                     subject_len_nucl,
-                    ungapped_params_ref,  // tblastx uses ungapped params (kbp_gap is NULL)
+                    ctx_params,  // tblastx uses per-context ungapped params (kbp_gap is NULL)
                 );
                 let eff_searchsp = eff_lengths.eff_searchsp;
                 length_adj_per_context.push(eff_lengths.length_adjustment);
@@ -264,23 +270,23 @@ pub(crate) fn run_with_neighbor_map(args: TblastxArgs) -> Result<()> {
                 
                 // Step 1: Compute cutoff_score_max from BlastHitSavingParametersNew
                 // This uses the effective search space WITH length adjustment
-                // Reference: blast_parameters.c:942-946
+                // Reference: ncbi-blast/c++/src/algo/blast/core/blast_parameters.c:942-946
                 let cutoff_score_max = cutoff_score_max_for_tblastx(
                     eff_searchsp,
                     evalue_threshold,  // User's E-value (typically 10.0)
-                    ungapped_params_ref,
+                    ctx_params,
                 );
                 
                 // Step 2: Compute per-subject cutoff using BlastInitialWordParametersUpdate
                 // This uses CUTOFF_E_TBLASTX=1e-300 and a simple searchsp formula
-                // Reference: blast_parameters.c:348-374
+                // Reference: ncbi-blast/c++/src/algo/blast/core/blast_parameters.c:348-374
                 let cutoff = cutoff_score_for_update_tblastx(
                     query_len_aa,
                     subject_len_nucl,  // NUCLEOTIDE length, NOT divided by 3!
                     gap_trigger,
                     cutoff_score_max,
                     BLAST_GAP_DECAY_RATE,  // 0.5
-                    ungapped_params_ref,
+                    ctx_params,
                     1.0,  // scale_factor (standard BLOSUM62)
                 );
                 
@@ -301,8 +307,12 @@ pub(crate) fn run_with_neighbor_map(args: TblastxArgs) -> Result<()> {
             .par_iter()
             .enumerate()
             .flat_map(|(s_f_idx, s_frame)| {
-                let s_aa = &s_frame.aa_seq;
-                if s_aa.len() < 5 {
+                let s_aa_full = &s_frame.aa_seq;
+                // NCBI subject->sequence points past the leading NULLB sentinel, so offsets
+                // are 0-based from the first residue; see blast_engine.c:811-812 and
+                // blast_util.c:112-116.
+                let s_aa = &s_aa_full[1..s_aa_full.len() - 1];
+                if s_aa.len() < wordsize as usize {
                     bar.inc(1);
                     return Vec::new();
                 }
@@ -314,8 +324,10 @@ pub(crate) fn run_with_neighbor_map(args: TblastxArgs) -> Result<()> {
                 
                 // Count total query contexts for Vec-based diagonal tracking
                 let total_q_contexts: usize = query_frames_ref.iter().map(|f| f.len()).sum();
+                // NCBI query/subject lengths exclude sentinels.
+                // Reference: blast_query_info.c:311-315, blast_engine.c:811-812.
                 let max_q_aa_len = query_frames_ref.iter()
-                    .flat_map(|frames| frames.iter().map(|f| f.aa_seq.len()))
+                    .flat_map(|frames| frames.iter().map(|f| f.aa_len))
                     .max()
                     .unwrap_or(1);
                 
@@ -336,7 +348,8 @@ pub(crate) fn run_with_neighbor_map(args: TblastxArgs) -> Result<()> {
                 let mut diag_array: Vec<Vec<DiagStruct>> = vec![vec![DiagStruct::default(); diag_array_len]; total_q_contexts];
                 
                 // NCBI aa_ungapped.c:502-610 - main scan loop
-                for s_pos in 1..=(s_aa_len.saturating_sub(4)) {
+                // Reference: ncbi-blast/c++/src/algo/blast/core/aa_ungapped.c:509-519.
+                for s_pos in 0..=s_aa_len.saturating_sub(wordsize as usize) {
                     let c0 = unsafe { *s_aa.get_unchecked(s_pos) } as usize;
                     let c1 = unsafe { *s_aa.get_unchecked(s_pos + 1) } as usize;
                     let c2 = unsafe { *s_aa.get_unchecked(s_pos + 2) } as usize;
@@ -354,7 +367,7 @@ pub(crate) fn run_with_neighbor_map(args: TblastxArgs) -> Result<()> {
                     }
                     
                     // subject_offset in NCBI terms (0-based position in subject AA sequence)
-                    let subject_offset: i32 = (s_pos - 1) as i32;
+                    let subject_offset: i32 = s_pos as i32;
                     
                     // For each neighbor query k-mer, get query positions
                     for &neighbor_kmer in neighbor_kmers {
@@ -376,17 +389,18 @@ pub(crate) fn run_with_neighbor_map(args: TblastxArgs) -> Result<()> {
                             let diag_entry = &mut diag_array[ctx_flat][diag_coord];
                             
                             // NCBI aa_ungapped.c:519-531 - flag==1 block
+                            // Reference: ncbi-blast/c++/src/algo/blast/core/aa_ungapped.c:536-553
                             // "If the reset bit is set, an extension just happened."
-                            if diag_entry.flag != 0 {
+                            if diag_entry.flag() != 0 {
                                 // "If we've already extended past this hit, skip it."
-                                if subject_offset + diag_offset < diag_entry.last_hit {
+                                if subject_offset + diag_offset < diag_entry.last_hit() {
                                     continue;
                                 }
                                 // "Otherwise, start a new hit." - reset flag and last_hit, then FALL THROUGH
                                 // NCBI: After reset, control falls through to the else block (flag==0) below
                                 // to continue with extension logic. DO NOT continue here!
-                                diag_entry.last_hit = subject_offset + diag_offset;
-                                diag_entry.flag = 0;
+                                diag_entry.set_last_hit(subject_offset + diag_offset);
+                                diag_entry.set_flag(0);
                                 // NO continue here - fall through to extension logic below
                             }
                             
@@ -394,40 +408,47 @@ pub(crate) fn run_with_neighbor_map(args: TblastxArgs) -> Result<()> {
                             // "If the reset bit is cleared, try to start an extension."
                             
                             // NCBI: last_hit = diag_array[diag_coord].last_hit - diag_offset
-                            let last_hit = diag_entry.last_hit - diag_offset;
+                            // Reference: ncbi-blast/c++/src/algo/blast/core/aa_ungapped.c:558-560
+                            let last_hit = diag_entry.last_hit() - diag_offset;
                             // NCBI: diff = subject_offset - last_hit
                             let diff = subject_offset - last_hit;
                             
                             // NCBI aa_ungapped.c:538-544: "if (diff >= window)"
+                            // Reference: ncbi-blast/c++/src/algo/blast/core/aa_ungapped.c:562-569
                             if diff >= window {
                                 // "We are beyond the window for this diagonal; start a new hit"
-                                diag_entry.last_hit = subject_offset + diag_offset;
+                                diag_entry.set_last_hit(subject_offset + diag_offset);
                                 continue;
                             }
                             
                             // NCBI aa_ungapped.c:549-551: "if (diff < wordsize)"
+                            // Reference: ncbi-blast/c++/src/algo/blast/core/aa_ungapped.c:573-580
                             if diff < wordsize {
                                 // "If the difference is less than the wordsize (i.e. last hit and this hit overlap), give up"
                                 continue;
                             }
                             
                             // NCBI aa_ungapped.c:560-573: Check if last hit is in current query context
+                            // Reference: ncbi-blast/c++/src/algo/blast/core/aa_ungapped.c:592-606
                             // "if (query_offset - diff < query_info->contexts[curr_context].query_offset)"
                             // In neighbor-map mode, each (q_idx, q_f_idx) is its own context with frame_base=0
                             // So we check: query_offset - diff < 0
                             if query_offset - diff < 0 {
                                 // "there was no last hit for this diagonal; start a new hit"
-                                diag_entry.last_hit = subject_offset + diag_offset;
+                                diag_entry.set_last_hit(subject_offset + diag_offset);
                                 continue;
                             }
                             
                             // PASSED all two-hit checks - now extend
                             let q_frame = &query_frames_ref[q_idx as usize][q_f_idx as usize];
-                            let q_aa = &q_frame.aa_seq;
+                            // NCBI query->sequence points past the leading NULLB sentinel, so
+                            // query offsets are 0-based into that buffer.
+                            // Reference: blast_query_info.c:311-315, blast_util.c:112-116.
+                            let q_aa_full = &q_frame.aa_seq;
+                            let q_aa = &q_aa_full[1..q_aa_full.len() - 1];
                             
-                            // Convert to raw positions (+1 for sentinel)
-                            let q_raw = (query_offset + 1) as usize;
-                            let s_raw = (subject_offset + 1) as usize;
+                            let q_raw = query_offset as usize;
+                            let s_raw = subject_offset as usize;
                             
                             if q_raw + 2 >= q_aa.len() || s_raw + 2 >= s_aa.len() {
                                 continue;
@@ -441,9 +462,7 @@ pub(crate) fn run_with_neighbor_map(args: TblastxArgs) -> Result<()> {
                             // s_left_off = last_hit + wordsize (end of first hit word)
                             // s_right_off = subject_offset (second hit start)
                             // q_right_off = query_offset (second hit start)
-                            // last_hit = subject_offset which is 0-indexed, so add +1 for array index
-                            // (consistent with s_raw and q_raw which also have +1)
-                            let s_left_off = (last_hit + wordsize + 1) as usize;
+                            let s_left_off = (last_hit + wordsize) as usize;
                             let (hsp_q, hsp_qe, hsp_s, _hsp_se, score, right_extend, s_last_off) =
                                 extend_hit_two_hit(
                                     q_aa,
@@ -457,14 +476,17 @@ pub(crate) fn run_with_neighbor_map(args: TblastxArgs) -> Result<()> {
                             let hsp_len = hsp_qe.saturating_sub(hsp_q);
                             
                             // NCBI aa_ungapped.c:596-606: Update diag_array after extension
+                            // Reference: ncbi-blast/c++/src/algo/blast/core/aa_ungapped.c:636-648
                             if right_extend {
                                 // "If an extension to the right happened, reset the last hit so that
                                 //  future hits to this diagonal must start over."
-                                diag_entry.flag = 1;
-                                diag_entry.last_hit = (s_last_off as i32) - (wordsize - 1) + diag_offset;
+                                diag_entry.set_flag(1);
+                                diag_entry.set_last_hit(
+                                    (s_last_off as i32) - (wordsize - 1) + diag_offset,
+                                );
                             } else {
                                 // "Otherwise, make the present hit into the previous hit for this diagonal"
-                                diag_entry.last_hit = subject_offset + diag_offset;
+                                diag_entry.set_last_hit(subject_offset + diag_offset);
                             }
                             
                             // NCBI aa_ungapped.c:588-591: Check score threshold
@@ -479,12 +501,12 @@ pub(crate) fn run_with_neighbor_map(args: TblastxArgs) -> Result<()> {
                             // Reference: blast_extend.c:360-375 BlastSaveInitHsp
                             // Store HSP with absolute coordinates (before coordinate conversion)
                             //
-                            // In neighbor-map mode, each query frame is independent with frame_base=0
-                            // hsp_q is frame-relative coordinate (with sentinel)
-                            // Calculate absolute coordinate in concatenated buffer
+                            // In neighbor-map mode, each query frame is independent with frame_base=0.
+                            // hsp_q is frame-relative coordinate in query->sequence (0-based).
+                            // Reference: blast_gapalign.c:4756-4768, blast_query_info.c:311-315.
                             let frame_base = 0i32;  // Each query frame is independent in neighbor-map mode
-                            let hsp_q_absolute = frame_base + (hsp_q as i32) - 1;  // -1 for sentinel
-                            let hsp_qe_absolute = frame_base + ((hsp_q + hsp_len) as i32) - 1;  // -1 for sentinel
+                            let hsp_q_absolute = frame_base + (hsp_q as i32);
+                            let hsp_qe_absolute = frame_base + ((hsp_q + hsp_len) as i32);
                             
                             init_hsps.push(InitHSP {
                                 q_start_absolute: hsp_q_absolute,
@@ -512,21 +534,14 @@ pub(crate) fn run_with_neighbor_map(args: TblastxArgs) -> Result<()> {
                 //
                 // In neighbor-map mode, each query frame is independent with frame_base=0
                 // Create temporary contexts for get_ungapped_hsp_list
-                let mut temp_contexts = Vec::new();
-                for (q_idx, frames) in query_frames_ref.iter().enumerate() {
-                    for (f_idx, frame) in frames.iter().enumerate() {
-                        temp_contexts.push(QueryContext {
-                            q_idx: q_idx as u32,
-                            f_idx: f_idx as u8,
-                            frame: frame.frame,
-                            aa_seq: frame.aa_seq.clone(),
-                            aa_seq_nomask: frame.aa_seq_nomask.clone(),
-                            aa_len: frame.aa_len,
-                            orig_len: frame.orig_len,
-                            frame_base: 0,  // Each query frame is independent
-                            karlin_params: ungapped_params_ref.clone(),
-                        });
-                    }
+                // NCBI uses per-context kbp_std computed from query composition.
+                // Reference: ncbi-blast/c++/src/algo/blast/core/blast_stat.c:2778-2797
+                let mut temp_contexts: Vec<QueryContext> = Vec::with_capacity(query_contexts_ref.len());
+                for ctx in query_contexts_ref.iter() {
+                    let mut ctx_copy = ctx.clone();
+                    // Neighbor-map mode treats each query frame independently.
+                    ctx_copy.frame_base = 0;
+                    temp_contexts.push(ctx_copy);
                 }
                 // NCBI: BLAST_GetUngappedHSPList equivalent
                 // Convert InitHSPs (with absolute coordinates) to UngappedHits (with context-relative coordinates)
@@ -579,7 +594,7 @@ pub(crate) fn run_with_neighbor_map(args: TblastxArgs) -> Result<()> {
     // not on the entire all_ungapped collection which mixes multiple subjects.
 
     // Apply sum-stats linking per subject (NCBI CalculateLinkHSPCutoffs is subject-specific)
-    // Reference: blast_parameters.c:CalculateLinkHSPCutoffs
+            // Reference: ncbi-blast/c++/src/algo/blast/core/blast_parameters.c:998-1082
     // Step 1: Group hits by s_idx
     let mut hits_by_subject: rustc_hash::FxHashMap<u32, Vec<UngappedHit>> = rustc_hash::FxHashMap::default();
     for hit in all_ungapped {
@@ -597,52 +612,57 @@ pub(crate) fn run_with_neighbor_map(args: TblastxArgs) -> Result<()> {
             // NCBI Parity: Pre-compute length_adjustment and eff_searchsp per context
             // =======================================================================
             // NCBI stores these in query_info->contexts[ctx].length_adjustment and
-            // query_info->contexts[ctx].eff_searchsp via BLAST_CalcEffLengths (blast_setup.c:700-850).
+            // query_info->contexts[ctx].eff_searchsp via BLAST_CalcEffLengths
+            // (ncbi-blast/c++/src/algo/blast/core/blast_setup.c:700-850).
             // We precompute them here for each subject and pass to sum_stats_linking.
-            let total_contexts: usize = query_frames_ref.iter().map(|f| f.len()).sum();
+            let total_contexts: usize = query_contexts_ref.len();
             let mut length_adj_per_context: Vec<i64> = Vec::with_capacity(total_contexts);
             let mut eff_searchsp_per_context: Vec<i64> = Vec::with_capacity(total_contexts);
             
             // Compute cutoff_score_min as minimum across all query contexts
             // using the NCBI BlastInitialWordParametersUpdate logic
-            // Reference: blast_parameters.c:348-374, 401-403
-            let gap_trigger = gap_trigger_raw_score(GAP_TRIGGER_BIT_SCORE, ungapped_params_ref);
+            // Reference: ncbi-blast/c++/src/algo/blast/core/blast_parameters.c:348-374, 401-403
             let mut cutoff_score_min = i32::MAX;
-            for frames in query_frames_ref.iter() {
-                for frame in frames.iter() {
-                    let query_len_aa = frame.aa_len as i64;
-                    
-                    // NCBI Parity: Use compute_eff_lengths_subject_mode_tblastx to get BOTH
-                    // length_adjustment and eff_searchsp from a single source of truth.
-                    // Reference: blast_setup.c:821-847
-                    let eff_lengths = compute_eff_lengths_subject_mode_tblastx(
-                        query_len_aa,
-                        subject_len_nucl,
-                        ungapped_params_ref,  // tblastx uses ungapped params (kbp_gap is NULL)
-                    );
-                    let eff_searchsp = eff_lengths.eff_searchsp;
-                    length_adj_per_context.push(eff_lengths.length_adjustment);
-                    eff_searchsp_per_context.push(eff_searchsp);
-                    
-                    // Step 1: cutoff_score_max from BlastHitSavingParametersNew
-                    let cutoff_score_max = cutoff_score_max_for_tblastx(
-                        eff_searchsp,
-                        evalue_threshold,
-                        ungapped_params_ref,
-                    );
-                    
-                    // Step 2: Per-subject cutoff from BlastInitialWordParametersUpdate
-                    let cutoff = cutoff_score_for_update_tblastx(
-                        query_len_aa,
-                        subject_len_nucl,
-                        gap_trigger,
-                        cutoff_score_max,
-                        BLAST_GAP_DECAY_RATE,
-                        ungapped_params_ref,
-                        1.0,
-                    );
-                    cutoff_score_min = cutoff_score_min.min(cutoff);
-                }
+            for ctx in query_contexts_ref.iter() {
+                // NCBI: per-context kbp_std[context] is used throughout cutoff/length calcs.
+                // Reference: ncbi-blast/c++/src/algo/blast/core/blast_stat.c:2778-2797
+                let ctx_params = &ctx.karlin_params;
+                let query_len_aa = ctx.aa_len as i64;
+
+                // NCBI: gap_trigger uses kbp_std[context]->Lambda/logK.
+                // Reference: ncbi-blast/c++/src/algo/blast/core/blast_parameters.c:340-345
+                let gap_trigger = gap_trigger_raw_score(GAP_TRIGGER_BIT_SCORE, ctx_params);
+
+                // NCBI Parity: Use compute_eff_lengths_subject_mode_tblastx to get BOTH
+                // length_adjustment and eff_searchsp from a single source of truth.
+                // Reference: ncbi-blast/c++/src/algo/blast/core/blast_setup.c:821-847
+                let eff_lengths = compute_eff_lengths_subject_mode_tblastx(
+                    query_len_aa,
+                    subject_len_nucl,
+                    ctx_params,  // tblastx uses per-context ungapped params (kbp_gap is NULL)
+                );
+                let eff_searchsp = eff_lengths.eff_searchsp;
+                length_adj_per_context.push(eff_lengths.length_adjustment);
+                eff_searchsp_per_context.push(eff_searchsp);
+
+                // Step 1: cutoff_score_max from BlastHitSavingParametersNew
+                let cutoff_score_max = cutoff_score_max_for_tblastx(
+                    eff_searchsp,
+                    evalue_threshold,
+                    ctx_params,
+                );
+
+                // Step 2: Per-subject cutoff from BlastInitialWordParametersUpdate
+                let cutoff = cutoff_score_for_update_tblastx(
+                    query_len_aa,
+                    subject_len_nucl,
+                    gap_trigger,
+                    cutoff_score_max,
+                    BLAST_GAP_DECAY_RATE,
+                    ctx_params,
+                    1.0,
+                );
+                cutoff_score_min = cutoff_score_min.min(cutoff);
             }
             if cutoff_score_min == i32::MAX {
                 cutoff_score_min = 0;
@@ -680,11 +700,14 @@ pub(crate) fn run_with_neighbor_map(args: TblastxArgs) -> Result<()> {
                 }
             }
 
-            // NCBI parity: s_BlastFindSmallestLambda selects Karlin params with smallest lambda
-            // Reference: blast_parameters.c:92-112, 1012-1013
-            // For tblastx, all contexts use kbp_ideal (same lambda), so this is equivalent
-            // to using params_ref directly. We maintain this structure for parity.
-            let context_params: Vec<KarlinParams> = query_contexts_ref.iter().map(|_| params_ref.clone()).collect();
+            // NCBI parity: s_BlastFindSmallestLambda selects smallest lambda across contexts.
+            // Reference: ncbi-blast/c++/src/algo/blast/core/blast_parameters.c:92-112
+            // Per-context kbp_std is computed from query composition (with check_ideal).
+            // Reference: ncbi-blast/c++/src/algo/blast/core/blast_stat.c:2778-2797
+            let context_params: Vec<KarlinParams> = query_contexts_ref
+                .iter()
+                .map(|ctx| ctx.karlin_params)
+                .collect();
             let linking_params_for_cutoff = find_smallest_lambda_params(&context_params)
                 .unwrap_or_else(|| params_ref.clone());
 
@@ -776,17 +799,20 @@ pub(crate) fn run_with_neighbor_map(args: TblastxArgs) -> Result<()> {
         // `ctx_idx` is the global query context index (NCBI `hsp->context` equivalent).
         // Use the pre-built `QueryContext` buffer to access the (possibly unmasked) query AA sequence.
         let q_ctx = &query_contexts_ref[h.ctx_idx];
-        let q_aa = q_ctx.aa_seq_nomask.as_deref().unwrap_or(&q_ctx.aa_seq);
+        // NCBI uses query_nomask = sequence_nomask + query_offset (0-based).
+        // Reference: blast_filter.c:1381-1382, blast_util.c:112-116.
+        let q_aa_full = q_ctx.aa_seq_nomask.as_deref().unwrap_or(&q_ctx.aa_seq);
+        let q_aa = &q_aa_full[1..q_aa_full.len() - 1];
         
         // Get subject frame from cache (no redundant translation)
         let s_frame_obj = &subject_frames_cache[h.s_idx as usize][h.s_f_idx];
-        let s_aa = &s_frame_obj.aa_seq;
+        let s_aa_full = &s_frame_obj.aa_seq;
+        let s_aa = &s_aa_full[1..s_aa_full.len() - 1];
         
         let len = h.q_aa_end.saturating_sub(h.q_aa_start);
         
-        // Calculate identity using raw positions (+1 for sentinel)
-        let q0 = h.q_aa_start + 1;
-        let s0 = h.s_aa_start + 1;
+        let q0 = h.q_aa_start;
+        let s0 = h.s_aa_start;
         // Use SIMD-optimized identity calculation (already implemented in reevaluate.rs)
         let t_identity = if timing_enabled { Some(Instant::now()) } else { None };
         let matches = get_num_identities_and_positives_ungapped(

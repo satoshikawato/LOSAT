@@ -178,16 +178,16 @@ pub(crate) fn reevaluate_ungapped_hsp_list(
         let cutoff = cutoff_scores[hit.ctx_idx][hit.s_f_idx];
 
         // NCBI: query_start = query_blk->sequence + query_info->contexts[context].query_offset;
-        // In LOSAT, ctx.aa_seq is the frame sequence (with sentinel at index 0)
-        // query_start is the start of the context sequence (sentinel included)
-        let query = &ctx.aa_seq;
-        let subject = &s_frame.aa_seq;
+        // query->sequence points past the leading NULLB sentinel.
+        // Reference: blast_query_info.c:311-315, blast_util.c:112-116.
+        let query_full = &ctx.aa_seq;
+        let query = &query_full[1..query_full.len() - 1];
+        let subject_full = &s_frame.aa_seq;
+        let subject = &subject_full[1..subject_full.len() - 1];
 
-        // NCBI: query = query_start + hsp->query.offset
-        // hsp->query.offset is context-relative coordinate (sentinel included)
-        // In LOSAT, q_aa_start is sentinel-exclusive, so we add 1 to get sentinel-inclusive
-        let qs = (hit.q_aa_start + 1) as usize;  // +1 for sentinel
-        let ss = (hit.s_aa_start + 1) as usize;  // +1 for sentinel
+        // NCBI: query = query_start + hsp->query.offset (0-based offsets)
+        let qs = hit.q_aa_start;
+        let ss = hit.s_aa_start;
         let len_u = hit.q_aa_end.saturating_sub(hit.q_aa_start);
 
         if len_u == 0 {
@@ -226,7 +226,10 @@ pub(crate) fn reevaluate_ungapped_hsp_list(
 
         // NCBI: Blast_HSPGetNumIdentitiesAndPositives and Blast_HSPTest
         // Reference: blast_hits.c:2708-2720
-        let query_nomask = ctx.aa_seq_nomask.as_ref().unwrap_or(&ctx.aa_seq);
+        // NCBI uses sequence_nomask that is also offset past the leading NULLB.
+        // Reference: blast_filter.c:1381-1382, blast_util.c:112-116.
+        let query_nomask_full = ctx.aa_seq_nomask.as_ref().unwrap_or(&ctx.aa_seq);
+        let query_nomask = &query_nomask_full[1..query_nomask_full.len() - 1];
         let num_ident = if let Some((num_ident, _align_length)) =
             get_num_identities_and_positives_ungapped(
                 query_nomask,
@@ -247,17 +250,13 @@ pub(crate) fn reevaluate_ungapped_hsp_list(
             continue;
         }
 
-        // Update hit with reevaluated coordinates and score
-        // Convert from sentinel-inclusive to sentinel-exclusive for reporting
+        // Update hit with reevaluated coordinates and score (0-based offsets)
         let new_qe = new_qs + new_len;
         let new_se = new_ss + new_len;
-        let (qs_l, qe_l) = (new_qs.saturating_sub(1), new_qe.saturating_sub(1));
-        let (ss_l, se_l) = (new_ss.saturating_sub(1), new_se.saturating_sub(1));
-
-        hit.q_aa_start = qs_l;
-        hit.q_aa_end = qe_l;
-        hit.s_aa_start = ss_l;
-        hit.s_aa_end = se_l;
+        hit.q_aa_start = new_qs;
+        hit.q_aa_end = new_qe;
+        hit.s_aa_start = new_ss;
+        hit.s_aa_end = new_se;
         hit.raw_score = new_score;
         hit.num_ident = num_ident;
 

@@ -7,7 +7,19 @@
 //!   - check_ideal logic: use kbp_ideal if computed Lambda >= ideal Lambda
 
 use crate::stats::KarlinParams;
-use crate::utils::matrix::{blosum62_score, BLASTAA_SIZE};
+use crate::utils::matrix::{blosum62_score, ncbistdaa, BLASTAA_SIZE};
+
+// NCBI reference: ncbi-blast/c++/include/algo/blast/core/blast_stat.h:121-122
+const BLAST_SCORE_MIN: i32 = i16::MIN as i32;
+const BLAST_SCORE_MAX: i32 = i16::MAX as i32;
+
+// NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_stat.c:56-72
+const BLAST_SCORE_RANGE_MAX: i32 = BLAST_SCORE_MAX - BLAST_SCORE_MIN;
+const BLAST_KARLIN_K_SUMLIMIT_DEFAULT: f64 = 0.0001;
+const BLAST_KARLIN_LAMBDA_ACCURACY_DEFAULT: f64 = 1.0e-5;
+const BLAST_KARLIN_LAMBDA_ITER_DEFAULT: i32 = 17;
+const BLAST_KARLIN_LAMBDA0_DEFAULT: f64 = 0.5;
+const BLAST_KARLIN_K_ITER_MAX: i32 = 100;
 
 /// Standard amino acid frequencies (Robinson probabilities)
 /// Reference: ncbi-blast/c++/src/algo/blast/core/blast_stat.c:1818
@@ -98,6 +110,11 @@ pub fn compute_aa_composition(seq: &[u8], length: usize) -> [f64; BLASTAA_SIZE] 
         }
     }
     
+    // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_stat.c:1984-2014
+    // Ambiguous residues (proteins) are zeroed via Blast_ResCompStr; for BLASTAA
+    // this is just 'X' per blast_setup.c:382-385 (BLAST_ScoreSetAmbigRes).
+    comp[ncbistdaa::X as usize] = 0;
+
     // Normalize to frequencies (NCBI Blast_ResFreqResComp)
     let sum: u64 = comp.iter().sum();
     let mut freq = [0.0; BLASTAA_SIZE];
@@ -237,141 +254,238 @@ pub fn compute_score_freq_profile(
     }
     
     // Find observed min/max and compute average
-    // Reference: blast_stat.c:2183-2205
+    // Reference: ncbi-blast/c++/src/algo/blast/core/blast_stat.c:2183-2205
     let mut score_sum = 0.0;
-    let mut obs_min = score_max;
-    let mut obs_max = score_min;
-    
+    let mut obs_min = BLAST_SCORE_MIN;
+    let mut obs_max = BLAST_SCORE_MIN;
+
     for score in score_min..=score_max {
         let prob = sfp.get_prob(score);
         if prob > 0.0 {
             score_sum += prob;
-            obs_max = obs_max.max(score);
-            if obs_min == score_max {
+            obs_max = score;
+            if obs_min == BLAST_SCORE_MIN {
                 obs_min = score;
             }
         }
     }
-    
-    sfp.obs_min = if obs_min <= obs_max { obs_min } else { 0 };
-    sfp.obs_max = if obs_min <= obs_max { obs_max } else { 0 };
-    
-    // Compute average score
+
+    sfp.obs_min = obs_min;
+    sfp.obs_max = obs_max;
+
+    // Compute average score (also normalize probabilities)
     let mut score_avg = 0.0;
     if score_sum > 0.0001 || score_sum < -0.0001 {
-        for score in score_min..=score_max {
-            let prob = sfp.get_prob(score);
-            if prob > 0.0 {
-                score_avg += (score as f64) * prob;
-            }
+        for score in obs_min..=obs_max {
+            let prob = sfp.get_prob(score) / score_sum;
+            sfp.set_prob(score, prob);
+            score_avg += (score as f64) * prob;
         }
-        score_avg /= score_sum;
     }
-    
+
     sfp.score_avg = score_avg;
     
     sfp
 }
 
-/// Greatest common divisor
-fn gcd(a: i32, b: i32) -> i32 {
-    let mut a = a.abs();
-    let mut b = b.abs();
+/// NCBI reference: ncbi-blast/c++/src/algo/blast/core/ncbi_math.c:405-418
+fn blast_gcd(mut a: i32, mut b: i32) -> i32 {
+    let mut c: i32;
+
+    b = b.abs();
+    if b > a {
+        c = a;
+        a = b;
+        b = c;
+    }
+
     while b != 0 {
-        let t = b;
-        b = a % b;
-        a = t;
+        c = a % b;
+        a = b;
+        b = c;
     }
     a
 }
 
+/// NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_stat.c:2099-2109
+fn blast_score_chk(lo: i32, hi: i32) -> Result<(), String> {
+    if lo >= 0 || hi <= 0 || lo < BLAST_SCORE_MIN || hi > BLAST_SCORE_MAX {
+        return Err("Invalid score range".to_string());
+    }
+    if hi - lo > BLAST_SCORE_RANGE_MAX {
+        return Err("Score range exceeds BLAST_SCORE_RANGE_MAX".to_string());
+    }
+    Ok(())
+}
+
+/// NCBI reference: ncbi-blast/c++/src/algo/blast/core/ncbi_math.c:33-55
+fn blast_expm1(x: f64) -> f64 {
+    let absx = x.abs();
+    if absx > 0.33 {
+        return x.exp() - 1.0;
+    }
+    if absx < 1.0e-16 {
+        return x;
+    }
+    x * (1.0
+        + x * (1.0 / 2.0
+            + x * (1.0 / 6.0
+                + x * (1.0 / 24.0
+                    + x * (1.0 / 120.0
+                        + x * (1.0 / 720.0
+                            + x * (1.0 / 5040.0
+                                + x * (1.0 / 40320.0
+                                    + x * (1.0 / 362880.0
+                                        + x * (1.0 / 3628800.0
+                                            + x * (1.0 / 39916800.0
+                                                + x * (1.0 / 479001600.0
+                                                    + x / 6227020800.0))))))))))))
+}
+
+/// NCBI reference: ncbi-blast/c++/src/algo/blast/core/ncbi_math.c:444-470
+fn blast_powi(mut x: f64, mut n: i32) -> f64 {
+    if n == 0 {
+        return 1.0;
+    }
+    if x == 0.0 {
+        if n < 0 {
+            return f64::INFINITY;
+        }
+        return 0.0;
+    }
+    if n < 0 {
+        x = 1.0 / x;
+        n = -n;
+    }
+    let mut y = 1.0;
+    while n > 0 {
+        if (n & 1) != 0 {
+            y *= x;
+        }
+        n /= 2;
+        x *= x;
+    }
+    y
+}
+
+/// NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_stat.c:2491-2563
+fn nlm_karlin_lambda_nr(
+    sfp: &ScoreFreqProfile,
+    d: i32,
+    low: i32,
+    high: i32,
+    lambda0: f64,
+    tolx: f64,
+    itmax: i32,
+    max_newton: i32,
+) -> Result<f64, String> {
+    if d <= 0 {
+        return Err("GCD must be positive".to_string());
+    }
+
+    let x0 = (-lambda0).exp();
+    let mut x = if x0 > 0.0 && x0 < 1.0 { x0 } else { 0.5 };
+    let mut a = 0.0;
+    let mut b = 1.0;
+    let mut f = 4.0;
+    let mut is_newton = false;
+
+    let mut k = 0;
+    while k < itmax {
+        let mut g = 0.0;
+        let fold = f;
+        let was_newton = is_newton;
+        is_newton = false;
+
+        // Horner's rule for evaluating polynomial and derivative
+        f = sfp.get_prob(low);
+        let mut i = low + d;
+        while i < 0 {
+            g = x * g + f;
+            f = f * x + sfp.get_prob(i);
+            i += d;
+        }
+        g = x * g + f;
+        f = f * x + sfp.get_prob(0) - 1.0;
+        i = d;
+        while i <= high {
+            g = x * g + f;
+            f = f * x + sfp.get_prob(i);
+            i += d;
+        }
+
+        if f > 0.0 {
+            a = x;
+        } else if f < 0.0 {
+            b = x;
+        } else {
+            break;
+        }
+        if b - a < 2.0 * a * (1.0 - b) * tolx {
+            x = (a + b) / 2.0;
+            break;
+        }
+
+        if k >= max_newton
+            || (was_newton && f.abs() > 0.9 * fold.abs())
+            || g >= 0.0
+        {
+            x = (a + b) / 2.0;
+        } else {
+            let p = -f / g;
+            let y = x + p;
+            if y <= a || y >= b {
+                x = (a + b) / 2.0;
+            } else {
+                is_newton = true;
+                x = y;
+                if p.abs() < tolx * x * (1.0 - x) {
+                    break;
+                }
+            }
+        }
+
+        k += 1;
+    }
+
+    Ok(-x.ln() / d as f64)
+}
+
 /// Compute Lambda using Newton-Raphson method
-/// Reference: NCBI Blast_KarlinLambdaNR (blast_stat.c:2567-2593)
-/// Uses NlmKarlinLambdaNR internally
+/// Reference: NCBI Blast_KarlinLambdaNR (blast_stat.c:2567-2598)
+/// Uses NlmKarlinLambdaNR internally (blast_stat.c:2491-2563)
 fn compute_lambda_nr(sfp: &ScoreFreqProfile, initial_guess: f64) -> Result<f64, String> {
-    const LAMBDA_ACCURACY: f64 = 1e-5;
-    const LAMBDA_ITER_MAX: i32 = 17;
-    
     let low = sfp.obs_min();
     let high = sfp.obs_max();
     
     if sfp.score_avg() >= 0.0 {
         return Err("Expected score must be negative".to_string());
     }
-    
-    if low >= high {
-        return Err("Invalid score range".to_string());
-    }
-    
-    let sprob = sfp.sprob();
-    let score_min = sfp.score_min;
-    
+
+    blast_score_chk(low, high)?;
+
     // Find greatest common divisor of all scores with non-zero probability
-    let mut d = (-low).abs();
-    for i in 1..=(high - low) {
-        let score = low + i;
-        let idx = (score - score_min) as usize;
-        if idx < sprob.len() && sprob[idx] > 0.0 {
-            d = gcd(d, i);
-            if d == 1 {
-                break;
-            }
-        }
-    }
-    
-    // Newton-Raphson iteration
-    // Simplified: use direct iteration (full implementation would use NlmKarlinLambdaNR)
-    let mut lambda = initial_guess;
-    
-    for _iter in 0..LAMBDA_ITER_MAX {
-        let mut sum = 0.0;
-        let mut sum_deriv = 0.0;
-        
-        for score in low..=high {
-            let idx = (score - score_min) as usize;
-            if idx < sprob.len() {
-                let prob = sprob[idx];
-                if prob > 0.0 {
-                    let exp_term = (lambda * score as f64).exp();
-                    sum += prob * exp_term;
-                    sum_deriv += prob * exp_term * (score as f64);
-                }
-            }
-        }
-        
-        if sum_deriv.abs() < 1e-10 {
+    let mut d = -low;
+    let range = high - low;
+    for i in 1..=range {
+        if d <= 1 {
             break;
         }
-        
-        let f = sum - 1.0;
-        let f_prime = sum_deriv;
-        let lambda_new = lambda - f / f_prime;
-        
-        if (lambda_new - lambda).abs() < LAMBDA_ACCURACY {
-            lambda = lambda_new;
-            break;
-        }
-        
-        lambda = lambda_new;
-    }
-    
-    // Verify: sum should be close to 1.0
-    let mut sum = 0.0;
-    for score in low..=high {
-        let idx = (score - score_min) as usize;
-        if idx < sprob.len() {
-            let prob = sprob[idx];
-            if prob > 0.0 {
-                sum += prob * (lambda * score as f64).exp();
-            }
+        if sfp.get_prob(low + i) != 0.0 {
+            d = blast_gcd(d, i);
         }
     }
-    
-    if (sum - 1.0).abs() > LAMBDA_ACCURACY {
-        return Err(format!("Lambda convergence failed: sum={}", sum));
-    }
-    
-    Ok(lambda)
+
+    nlm_karlin_lambda_nr(
+        sfp,
+        d,
+        low,
+        high,
+        initial_guess,
+        BLAST_KARLIN_LAMBDA_ACCURACY_DEFAULT,
+        20,
+        20 + BLAST_KARLIN_LAMBDA_ITER_DEFAULT,
+    )
 }
 
 /// Compute H from Lambda
@@ -383,24 +497,17 @@ fn compute_h_from_lambda(sfp: &ScoreFreqProfile, lambda: f64) -> Result<f64, Str
     
     let low = sfp.obs_min();
     let high = sfp.obs_max();
-    
-    if low >= high {
-        return Err("Invalid score range".to_string());
-    }
-    
-    let sprob = sfp.sprob();
-    let score_min = sfp.score_min;
+
+    blast_score_chk(low, high)?;
+
     let etonlam = (-lambda).exp();
-    
-    let mut sum = (low as f64) * sprob[(low - score_min) as usize];
+
+    let mut sum = (low as f64) * sfp.get_prob(low);
     for score in (low + 1)..=high {
-        let idx = (score - score_min) as usize;
-        if idx < sprob.len() {
-            sum = (score as f64) * sprob[idx] + etonlam * sum;
-        }
+        sum = (score as f64) * sfp.get_prob(score) + etonlam * sum;
     }
     
-    let scale = etonlam.powi(high);
+    let scale = blast_powi(etonlam, high);
     let h = if scale > 0.0 {
         lambda * sum / scale
     } else {
@@ -412,32 +519,134 @@ fn compute_h_from_lambda(sfp: &ScoreFreqProfile, lambda: f64) -> Result<f64, Str
 }
 
 /// Compute K from Lambda and H
-/// Reference: NCBI BlastKarlinLHtoK (blast_stat.c:2247-2565)
-/// 
-/// Note: This is a simplified implementation. The full NCBI implementation uses
-/// complex dynamic programming to compute alignment score probabilities.
-/// However, for tblastx with check_ideal logic, computed parameters are often
-/// replaced with ideal parameters, so the simplified approximation is sufficient.
+/// Reference: NCBI BlastKarlinLHtoK (blast_stat.c:2247-2418)
 fn compute_k_from_lambda_h(sfp: &ScoreFreqProfile, lambda: f64, h: f64) -> Result<f64, String> {
-    let low = sfp.obs_min();
-    let high = sfp.obs_max();
-    
-    if low >= 0 || high <= 0 {
-        return Err("Scores must span negative and positive values".to_string());
+    if lambda <= 0.0 || h <= 0.0 {
+        return Err("Lambda and H must be positive".to_string());
     }
-    
-    // Simplified K calculation using H and lambda relationship
-    // Full NCBI implementation uses complex dynamic programming (see blast_stat.c:2247-2565)
-    // For parity with check_ideal logic, this approximation is sufficient:
-    // - Most queries will use ideal params (check_ideal replaces computed with ideal)
-    // - For queries with computed params, this approximation provides reasonable values
-    let k = h / lambda;
-    
-    // Ensure K is positive
+
+    if sfp.score_avg() >= 0.0 {
+        return Err("Expected score must be negative".to_string());
+    }
+
+    let mut low = sfp.obs_min();
+    let mut high = sfp.obs_max();
+    blast_score_chk(low, high)?;
+
+    let mut range = high - low;
+    let mut prob_array_start_low = Vec::with_capacity((range + 1) as usize);
+    for i in 0..=range {
+        prob_array_start_low.push(sfp.get_prob(low + i));
+    }
+
+    let mut divisor = -low;
+    for i in 1..=range {
+        if divisor <= 1 {
+            break;
+        }
+        if prob_array_start_low[i as usize] != 0.0 {
+            divisor = blast_gcd(divisor, i);
+        }
+    }
+
+    high /= divisor;
+    low /= divisor;
+    let lambda = lambda * divisor as f64;
+    range = high - low;
+
+    let mut first_term_closed_form = h / lambda;
+    let exp_minus_lambda = (-lambda).exp();
+
+    if low == -1 && high == 1 {
+        let low_prob = sfp.get_prob(low * divisor);
+        let high_prob = sfp.get_prob(high * divisor);
+        let diff = low_prob - high_prob;
+        let k = diff * diff / low_prob;
+        return Ok(k);
+    }
+
+    if low == -1 || high == 1 {
+        if high != 1 {
+            let score_avg = sfp.score_avg() / divisor as f64;
+            first_term_closed_form = (score_avg * score_avg) / first_term_closed_form;
+        }
+        return Ok(first_term_closed_form * (1.0 - exp_minus_lambda));
+    }
+
+    let sumlimit = BLAST_KARLIN_K_SUMLIMIT_DEFAULT;
+    let iterlimit = BLAST_KARLIN_K_ITER_MAX;
+    let array_len = (iterlimit as usize) * (range as usize) + 1;
+    let mut alignment_score_probabilities = vec![0.0; array_len];
+    let mut outer_sum = 0.0;
+    let mut low_alignment_score = 0;
+    let mut high_alignment_score = 0;
+    let mut inner_sum = 1.0;
+    let mut oldsum = 1.0;
+    let mut oldsum2 = 1.0;
+    alignment_score_probabilities[0] = 1.0;
+
+    let mut iter_counter = 0;
+    while iter_counter < iterlimit && inner_sum > sumlimit {
+        let mut first = range;
+        let mut last = range;
+        low_alignment_score += low;
+        high_alignment_score += high;
+
+        let mut ptr_p_idx = (high_alignment_score - low_alignment_score) as isize;
+        while ptr_p_idx >= 0 {
+            let mut ptr1_idx = ptr_p_idx - first as isize;
+            let ptr1e_idx = ptr_p_idx - last as isize;
+            let mut ptr2_idx = first as isize;
+
+            inner_sum = 0.0;
+            while ptr1_idx >= ptr1e_idx {
+                inner_sum += alignment_score_probabilities[ptr1_idx as usize]
+                    * prob_array_start_low[ptr2_idx as usize];
+                ptr1_idx -= 1;
+                ptr2_idx += 1;
+            }
+            if first > 0 {
+                first -= 1;
+            }
+            if ptr_p_idx <= range as isize {
+                last -= 1;
+            }
+            alignment_score_probabilities[ptr_p_idx as usize] = inner_sum;
+            ptr_p_idx -= 1;
+        }
+
+        let mut ptr_p_idx = 0isize;
+        inner_sum = alignment_score_probabilities[ptr_p_idx as usize];
+        let mut i = low_alignment_score + 1;
+        while i < 0 {
+            ptr_p_idx += 1;
+            inner_sum = alignment_score_probabilities[ptr_p_idx as usize]
+                + inner_sum * exp_minus_lambda;
+            i += 1;
+        }
+        inner_sum *= exp_minus_lambda;
+
+        while i <= high_alignment_score {
+            ptr_p_idx += 1;
+            inner_sum += alignment_score_probabilities[ptr_p_idx as usize];
+            i += 1;
+        }
+
+        oldsum2 = oldsum;
+        oldsum = inner_sum;
+
+        iter_counter += 1;
+        inner_sum /= iter_counter as f64;
+        outer_sum += inner_sum;
+    }
+
+    let k = -(-2.0 * outer_sum).exp()
+        / (first_term_closed_form * blast_expm1(-lambda));
+
     if k <= 0.0 {
         return Err("Computed K is non-positive".to_string());
     }
-    
+
     Ok(k)
 }
 
@@ -452,10 +661,8 @@ fn compute_k_from_lambda_h(sfp: &ScoreFreqProfile, lambda: f64, h: f64) -> Resul
 pub fn compute_karlin_params_ungapped(
     sfp: &ScoreFreqProfile,
 ) -> Result<KarlinParams, String> {
-    const LAMBDA0_DEFAULT: f64 = 0.5;
-    
     // Calculate Lambda
-    let lambda = compute_lambda_nr(sfp, LAMBDA0_DEFAULT)?;
+    let lambda = compute_lambda_nr(sfp, BLAST_KARLIN_LAMBDA0_DEFAULT)?;
     
     // Calculate H
     let h = compute_h_from_lambda(sfp, lambda)?;
@@ -569,4 +776,3 @@ mod tests {
         assert_eq!(result.lambda, computed_low.lambda);
     }
 }
-

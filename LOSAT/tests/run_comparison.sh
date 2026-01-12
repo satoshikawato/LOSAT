@@ -12,7 +12,7 @@ LOSAT_BIN="../target/release/LOSAT"
 # Part 1: LOSAT Execution
 # ==========================================
 echo "Starting LOSAT commands..."
-<<COMMENTOUT
+
 # --- TLOSATX Commands (Genetic Code: 1) ---
 echo "Starting AP027280 self..."
 (time $LOSAT_BIN tblastx -q ./fasta/AP027280.fasta -s ./fasta/AP027280.fasta -o ./losat_out/AP027280.AP027280.tlosatx.n1.out --query-gencode 1 --db-gencode 1 -n 1)&>./losat_out/AP027280.AP027280.tlosatx.n1.log 
@@ -74,7 +74,7 @@ echo "Starting AP027131 vs AP027133..."
 echo "Starting AP027133 vs AP027132..."
 # AP027133 vs AP027132
 (time $LOSAT_BIN tblastx -q ./fasta/AP027133.fasta -s ./fasta/AP027132.fasta -o ./losat_out/AP027133.AP027132.tlosatx.n8.out --query-gencode 4 --db-gencode 4 -n 8 )&>./losat_out/AP027133.AP027132.tlosatx.n8.log 
-COMMENTOUT
+
 
 
 

@@ -70,7 +70,14 @@
       "Bash(# Check NCBI output for this dataset grep -v \"\"^#\"\" tests/blast_out/PeseMJNV.PemoMJNVB.task_blastn.out)",
       "Bash(LOSAT_DEBUG_BLASTN=1 ./target/release/LOSAT:*)",
       "Bash(cargo clean:*)",
-      "Bash(LOSAT_DEBUG_BLASTN=1 timeout 120 ./target/release/LOSAT blastn:*)"
+      "Bash(LOSAT_DEBUG_BLASTN=1 timeout 120 ./target/release/LOSAT blastn:*)",
+      "Bash(gcc:*)",
+      "Bash(BLEMIR_DEBUG=1 timeout 30s ./target/release/LOSAT blastn:*)",
+      "Read(//mnt/**)",
+      "Bash(../../target/release/LOSAT tblastx:*)",
+      "Bash(../../target/release/LOSAT:*)",
+      "Bash(seqtk seq:*)",
+      "Read(//mnt/c/Users/kawato/Documents/GitHub/LOSAT/LOSAT/**)"
     ]
   }
 }

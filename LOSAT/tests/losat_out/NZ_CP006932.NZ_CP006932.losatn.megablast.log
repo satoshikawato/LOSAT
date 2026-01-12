@@ -2,7 +2,11 @@ Reading query & subject...
 Applying DUST filter (level=20, window=64, linker=1)...
 DUST masked 190350 bases (28.97%) across 1 sequences
 Building lookup (Task: megablast, Word: 28, TwoStage: true, LUTWord: 8, Direct: false, DUST: true)...
+[PERF] Subject scan took 48.5126ms: left_ext=2865138, right_ext=2853750, ungapped=1653, seeds=1899996, valid_pos=31291
+[PERF] Subject scan took 46.5195ms: left_ext=2829052, right_ext=2831156, ungapped=49, seeds=3771238, valid_pos=62582
+[PROGRESS] Gapped extension: 0/1702
+./run_comparison.sh: line 84: 17617 Killed                  $LOSAT_BIN blastn -q ./fasta/NZ_CP006932.fasta -s ./fasta/NZ_CP006932.fasta -o ./losat_out/NZ_CP006932.NZ_CP006932.losatn.megablast.out -n 1
 
-real	0m1.139s
-user	0m1.080s
-sys	0m0.010s
+real	2m40.579s
+user	2m2.907s
+sys	0m17.446s

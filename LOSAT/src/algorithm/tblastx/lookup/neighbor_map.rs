@@ -14,11 +14,9 @@ use super::super::translation::QueryFrame;
 use super::{
     QueryContext, LOOKUP_WORD_LENGTH, LOOKUP_ALPHABET_SIZE,
     ilog2, compute_backbone_size, compute_mask, encode_kmer_3, pv_test, pv_set,
+    PV_ARRAY_BTS,
 };
 use super::backbone::build_direct_lookup;
-
-// Presence Vector bucket bits
-const PV_BUCKET_BITS: usize = 64;
 
 /// Pre-computed neighbor map: for each k-mer, list of k-mers that are neighbors (score >= threshold)
 /// This is the key optimization: compute once, use during every scan.
@@ -175,7 +173,7 @@ impl NeighborMap {
     /// Pre-compute all neighbor relationships, but only keep those where
     /// the query k-mer actually exists in the query lookup table.
     /// This dramatically reduces the number of neighbors to check during scan.
-    pub fn new_filtered(threshold: i32, query_pv: &[u64]) -> Self {
+    pub fn new_filtered(threshold: i32, query_pv: &[u32]) -> Self {
         let diag_enabled = diagnostics_enabled();
         let alphabet_size = LOOKUP_ALPHABET_SIZE;
         let charsize = ilog2(alphabet_size) + 1;
@@ -268,7 +266,7 @@ pub struct NeighborLookup {
     /// Exact query k-mer positions: query_lookup[kmer] = [(q_idx, f_idx, aa_pos), ...]
     pub query_lookup: Vec<Vec<(u32, u8, u32)>>,
     /// Presence vector for query k-mers
-    pub query_pv: Vec<u64>,
+    pub query_pv: Vec<u32>,
     /// Pre-computed neighbor map
     pub neighbor_map: NeighborMap,
     /// Frame bases for context lookup
@@ -287,8 +285,10 @@ impl NeighborLookup {
         let query_lookup = build_direct_lookup(queries);
 
         // Build presence vector
-        let pv_size = (query_lookup.len() + PV_BUCKET_BITS - 1) / PV_BUCKET_BITS;
-        let mut query_pv = vec![0u64; pv_size];
+        // NCBI PV array sizing: (backbone_size >> PV_ARRAY_BTS) + 1
+        // Reference: ncbi-blast/c++/src/algo/blast/core/blast_aalookup.c:327-329
+        let pv_size = (query_lookup.len() >> PV_ARRAY_BTS) + 1;
+        let mut query_pv = vec![0u32; pv_size];
         for (idx, entries) in query_lookup.iter().enumerate() {
             if !entries.is_empty() {
                 pv_set(&mut query_pv, idx);

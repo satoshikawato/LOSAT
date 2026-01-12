@@ -46,31 +46,45 @@ pub fn get_score(a: u8, b: u8) -> i32 {
 
 /// Convert amino acid coordinates to nucleotide coordinates.
 ///
-/// NCBI reference (link_hsps.c:1247-1262):
+/// NCBI reference (blast_hits.c:1093-1106) + output adjustment (tabular.cpp:1037-1058):
+/// The C core produces 0-indexed coordinates, then C++ output layer adds +1.
+/// We combine both steps here for 1-indexed output.
+///
 /// For positive frames:
-///   start = CODON_LENGTH*(segment->offset) + segment->frame - 1;
-///   end = CODON_LENGTH*segment->end + segment->frame - 2;
+///   NCBI core: start = CODON_LENGTH*(segment->offset) + segment->frame - 1
+///   NCBI core: end = CODON_LENGTH*segment->end + segment->frame - 2
+///   Output +1: start = 3*offset + frame - 1 + 1 = 3*offset + shift + 1
+///   Output +1: end = 3*end + frame - 2 + 1 = 3*end + shift
+///
 /// For negative frames:
-///   start = seq_length - CODON_LENGTH*segment->offset + segment->frame;
-///   end = seq_length - CODON_LENGTH*segment->end + segment->frame + 1;
+///   NCBI core: start = seq_length - CODON_LENGTH*segment->offset + segment->frame
+///   NCBI core: end = seq_length - CODON_LENGTH*segment->end + segment->frame + 1
+///   Output +1: start = len - (3*offset + shift + 1) + 1 = len - 3*offset - shift
+///   Output +1: end = len - (3*end + shift) + 1
 pub fn convert_coords(aa_start: usize, aa_end: usize, frame: i8, dna_len: usize) -> (usize, usize) {
     let f_abs = frame.abs() as usize;
     let shift = f_abs - 1;
 
     if frame > 0 {
-        // NCBI: start = 3*offset + frame - 1 = 3*offset + shift
-        // NCBI: end = 3*end + frame - 2 = 3*end + shift - 1
-        let start_bp = aa_start * 3 + shift;
-        let end_bp = aa_end * 3 + shift - 1;
+        // NCBI core: start = 3*offset + frame - 1
+        // NCBI output (tabular.cpp:1040): +1 for 1-indexed
+        // Combined: start = 3*offset + shift + 1
+        let start_bp = aa_start * 3 + shift + 1;
+        // NCBI core: end = 3*end + frame - 2
+        // NCBI output (tabular.cpp:1041): +1 for 1-indexed
+        // Combined: end = 3*end + shift - 1 + 1 = 3*end + shift
+        let end_bp = aa_end * 3 + shift;
         (start_bp, end_bp)
     } else {
-        // NCBI: start = len - 3*offset + frame = len - 3*offset - f_abs
-        //             = len - (3*offset + f_abs) = len - (3*offset + shift + 1)
-        // NCBI: end = len - 3*end + frame + 1 = len - 3*end - f_abs + 1
-        //           = len - (3*end + f_abs - 1) = len - (3*end + shift)
-        let start_bp = dna_len - (aa_start * 3 + shift + 1);
-        let end_bp_calc = dna_len - (aa_end * 3 + shift);
-        (start_bp, end_bp_calc)
+        // NCBI core: start = len - 3*offset + frame
+        // NCBI output (tabular.cpp:1055): +1 for 1-indexed
+        // Combined: start = len - (3*offset + shift + 1) + 1 = len - 3*offset - shift
+        let start_bp = dna_len - aa_start * 3 - shift;
+        // NCBI core: end = len - 3*end + frame + 1
+        // NCBI output (tabular.cpp:1054): +1 for 1-indexed
+        // Combined: end = len - (3*end + shift) + 1
+        let end_bp = dna_len - aa_end * 3 - shift + 1;
+        (start_bp, end_bp)
     }
 }
 

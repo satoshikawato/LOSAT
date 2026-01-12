@@ -220,6 +220,11 @@ LOSAT/src/
 └── format/                        # Output formatting utilities
 ```
 
+### Entry Point
+- **CLI**: `src/main.rs` - Uses clap subcommands, dispatches to `blastn::run()` or `tblastx::run()`
+- **TBLASTX engine**: `src/algorithm/tblastx/blast_engine/run_impl.rs`
+- **BLASTN engine**: `src/algorithm/blastn/blast_engine/run.rs`
+
 ## Core Principle: NCBI Parity
 
 **See [MANDATORY COMPLIANCE REQUIREMENTS](#mandatory-compliance-requirements) at the top of this document.**
@@ -235,12 +240,13 @@ Summary:
 
 ## NCBI Reference Location
 
-- **NCBI BLAST source**: `/mnt/c/Users/kawato/Documents/GitHub/ncbi-blast/` or `/mnt/c/Users/genom/GitHub/ncbi-blast/`
+- **NCBI BLAST source**: Machine-dependent path (e.g., `~/GitHub/ncbi-blast/` or similar)
 - Key files:
   - `c++/src/algo/blast/core/aa_ungapped.c` - Extension logic
   - `c++/src/algo/blast/core/na_ungapped.c` - Nucleotide extension
   - `c++/src/algo/blast/core/link_hsps.c` - Sum-statistics linking
   - `c++/src/algo/blast/core/blast_parameters.c` - Cutoff calculations
+  - `c++/src/algo/blast/core/blast_query_info.c` - Context management
   - `c++/src/algo/blast/core/blast_stat.c` - Karlin parameters
   - `c++/src/algo/blast/core/greedy_align.c` - Greedy alignment
 
@@ -313,6 +319,13 @@ cutoff = MIN(BLAST_Cutoffs, gap_trigger, cutoff_score_max)
 - tblastx always uses `scale_factor = 1.0`
 - Only RPS-BLAST uses `scale_factor > 1.0`
 
+### DiagStruct Initialization
+- **NCBI**: `last_hit = -window` (initialized to -40)
+- **LOSAT**: `last_hit = 0`
+- Both result in `diff >= window` on first hit (record only, no extension)
+- This difference does NOT affect output
+- Reference: `blast_extend.c:103`
+
 ## Debug Environment Variables
 
 ```bash
@@ -363,4 +376,23 @@ LOSAT_STARTUP_TRACE=1                       # Trace startup
 ## Known Issues
 
 1. **Long sequences (600kb+)**: Excessive hits (2x NCBI count) - under investigation
+   - **Status**: Exhaustive investigation completed (Session 12, 2026-01-11). Root cause still unknown.
+   - **Verified CORRECT (not the cause)**:
+     - DiagStruct initialization, two-hit state machine, extension algorithm
+     - Seed generation, lookup table construction, frame iteration
+     - Cutoff calculation, context boundary check, E-value calculation
+     - Scan resumption, diagonal overflow, diag_offset increment
+     - All two-hit detection logic matches NCBI `aa_ungapped.c:518-606` exactly
+   - **Evidence**: 2x excess is in NUMBER OF EXTENSIONS triggered (31.8M vs ~16M expected)
+   - **Score distribution**: 73% of excess hits are in 22-30 bit score range
+   - **Hypothesis**: Some hidden NCBI optimization or subtle scale-dependent behavior not yet identified
+   - See: [TBLASTX_2X_HIT_INVESTIGATION.md](TBLASTX_2X_HIT_INVESTIGATION.md) and [FIX_2X_HITS_PLAN.md](FIX_2X_HITS_PLAN.md)
+
 2. **Chain formation differences**: E-value mismatches with short HSPs in some edge cases
+
+## Recently Fixed
+
+1. **Coordinate output off-by-one** (Session 11, 2026-01-11): All TBLASTX output coordinates were -1 compared to NCBI
+   - **Root Cause**: NCBI's C++ output layer adds +1 for 1-indexed output; LOSAT was missing this
+   - **Fix**: Modified `convert_coords()` in `extension/mod.rs` to incorporate +1 adjustment
+   - **Verified**: Coordinates now match NCBI exactly

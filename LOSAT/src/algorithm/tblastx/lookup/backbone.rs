@@ -13,14 +13,11 @@ use super::super::diagnostics::diagnostics_enabled;
 use super::super::translation::QueryFrame;
 use super::{
     QueryContext, LOOKUP_WORD_LENGTH, LOOKUP_ALPHABET_SIZE,
-    PV_ARRAY_BTS, PV_ARRAY_MASK, ilog2, compute_backbone_size, compute_mask,
+    PV_ARRAY_BTS, ilog2, compute_backbone_size, compute_mask,
     encode_kmer_3, pv_set, compute_unmasked_intervals,
 };
 
 pub const AA_HITS_PER_CELL: usize = 3;
-
-// Presence Vector bucket bits
-const PV_BUCKET_BITS: usize = 64;
 
 /// NCBI AaLookupBackboneCell - EXACT port
 #[repr(C)]
@@ -40,7 +37,9 @@ impl Default for BackboneCell {
 pub struct BlastAaLookupTable {
     pub backbone: Vec<BackboneCell>,
     pub overflow: Vec<i32>,
-    pub pv: Vec<u64>,
+    // Presence vector: PV_ARRAY_TYPE = Uint4
+    // Reference: ncbi-blast/c++/include/algo/blast/core/blast_lookup.h:41-44
+    pub pv: Vec<u32>,
     pub frame_bases: Vec<i32>,
     pub num_contexts: usize,
     pub word_length: i32,
@@ -48,8 +47,8 @@ pub struct BlastAaLookupTable {
     pub charsize: i32,
     pub mask: i32,
     pub longest_chain: i32,
-    // Lazy neighbor generation support
-    pub lazy_neighbors: bool,
+    // NCBI BlastAaLookupTable has no lazy-neighbor flag; only NCBI fields are stored.
+    // Reference: ncbi-blast/c++/include/algo/blast/core/blast_aalookup.h:95-140
     pub threshold: i32,
     pub row_max: Vec<i32>,
 }
@@ -91,15 +90,13 @@ impl BlastAaLookupTable {
 ///
 /// Reference: blast_aalookup.c BlastAaLookupIndexQuery + BlastAaLookupFinalize
 ///
-/// If `lazy_neighbors` is true, only exact matches are stored in the lookup table.
-/// Neighbor matching is performed dynamically during scan, which drastically reduces
-/// lookup table size but requires neighbor computation at scan time.
+/// Neighbor words are always precomputed in the lookup table (no lazy mode).
+/// Reference: ncbi-blast/c++/src/algo/blast/core/blast_aalookup.c:446-543
 pub fn build_ncbi_lookup(
     queries: &[Vec<QueryFrame>],
     threshold: i32,
     _include_stop_seeds: bool, // Ignored - NCBI always uses full 28-char alphabet
     _ncbi_stop_stop_score: bool, // Ignored - always use NCBI BLOSUM62 (*-* = +1)
-    lazy_neighbors: bool,
     _karlin_params: &crate::stats::KarlinParams, // Unused - computed per context, kept for API compatibility
 ) -> (BlastAaLookupTable, Vec<QueryContext>) {
     let diag_enabled = diagnostics_enabled();
@@ -198,28 +195,71 @@ pub fn build_ncbi_lookup(
             let seq = &frame.aa_seq;
 
             if seq.len() >= 5 && frame.aa_len >= word_length {
+                // NCBI uses query->sequence (past leading NULLB) for lookup indexing.
+                // Reference: ncbi-blast/c++/src/algo/blast/core/blast_lookup.c:105-114
+                let seq_ptr = &seq[1..seq.len() - 1];
+                // NCBI invalid_mask = 0xff << charsize (Uint1 truncation).
+                // Reference: ncbi-blast/c++/src/algo/blast/core/blast_lookup.c:89-120
+                let invalid_mask: u8 = 0xffu8 << (charsize as u32);
+
                 let unmasked = compute_unmasked_intervals(&frame.seg_masks, frame.aa_len);
                 let total_aa_positions = frame.aa_len.saturating_sub(word_length - 1);
-                let unmasked_positions: usize = unmasked.iter()
+                let unmasked_positions: usize = unmasked
+                    .iter()
                     .map(|(s, e)| e.saturating_sub(word_length - 1).saturating_sub(*s))
                     .sum();
                 skipped_seg_mask += total_aa_positions.saturating_sub(unmasked_positions);
 
                 for (start, end) in unmasked {
-                    for aa_pos in start..end.saturating_sub(word_length - 1) {
-                        let raw_pos = aa_pos + 1;
-                        let c0 = seq[raw_pos] as usize;
-                        let c1 = seq[raw_pos + 1] as usize;
-                        let c2 = seq[raw_pos + 2] as usize;
+                    let from = start as i32;
+                    let to = end.saturating_sub(1) as i32;
+                    // NCBI: if (word_length > to - from + 1) continue;
+                    // Reference: ncbi-blast/c++/src/algo/blast/core/blast_lookup.c:96-100
+                    if word_length as i32 > to - from + 1 {
+                        continue;
+                    }
 
-                        // NCBI accepts all valid NCBISTDAA residues (0-27)
-                        if c0 >= alphabet_size || c1 >= alphabet_size || c2 >= alphabet_size {
-                            skipped_invalid_residue += 1;
-                            continue;
+                    // NCBI: word_target = seq + lut_word_length;
+                    // Reference: ncbi-blast/c++/src/algo/blast/core/blast_lookup.c:102-106
+                    let mut offset = from;
+                    let mut word_target = from + word_length as i32;
+
+                    while offset <= to {
+                        if offset >= word_target {
+                            let word_start = (offset - word_length as i32) as usize;
+                            let idx = encode_kmer_3(
+                                seq_ptr[word_start] as usize,
+                                seq_ptr[word_start + 1] as usize,
+                                seq_ptr[word_start + 2] as usize,
+                                charsize,
+                            ) & mask;
+                            // NCBI stores offsets relative to query->sequence (past leading NULLB),
+                            // i.e., 0-based residue offsets within the frame.
+                            // Reference: ncbi-blast/c++/src/algo/blast/core/blast_lookup.c:111-114
+                            exact_offsets[idx].push(frame_base + word_start as i32);
+                            total_exact_positions += 1;
                         }
 
-                        let idx = encode_kmer_3(c0, c1, c2, charsize) & mask;
-                        exact_offsets[idx].push(frame_base + raw_pos as i32);
+                        // NCBI: if (*seq & invalid_mask) word_target = seq + lut_word_length + 1;
+                        // Reference: ncbi-blast/c++/src/algo/blast/core/blast_lookup.c:117-120
+                        if (seq_ptr[offset as usize] & invalid_mask) != 0 {
+                            word_target = offset + word_length as i32 + 1;
+                            skipped_invalid_residue += 1;
+                        }
+                        offset += 1;
+                    }
+
+                    // NCBI: handle the last word without loading *seq.
+                    // Reference: ncbi-blast/c++/src/algo/blast/core/blast_lookup.c:123-128
+                    if offset >= word_target {
+                        let word_start = (offset - word_length as i32) as usize;
+                        let idx = encode_kmer_3(
+                            seq_ptr[word_start] as usize,
+                            seq_ptr[word_start + 1] as usize,
+                            seq_ptr[word_start + 2] as usize,
+                            charsize,
+                        ) & mask;
+                        exact_offsets[idx].push(frame_base + word_start as i32);
                         total_exact_positions += 1;
                     }
                 }
@@ -240,7 +280,8 @@ pub fn build_ncbi_lookup(
         eprintln!("Skipped (SEG mask): {}", skipped_seg_mask);
     }
 
-    // Phase 1b: Add neighboring words (or just exact matches for lazy mode)
+    // Phase 1b: Add neighboring words (NCBI precomputed neighbors).
+    // Reference: ncbi-blast/c++/src/algo/blast/core/blast_aalookup.c:446-543
     let residue_mask: usize = (1usize << charsize) - 1;
 
     // Diagnostics for neighbor generation
@@ -252,27 +293,9 @@ pub fn build_ncbi_lookup(
     let mut max_neighbor_word_idx = 0usize;
     let mut neighbor_words_generated = 0usize;
 
-    let thin_backbone: Vec<Vec<i32>> = if lazy_neighbors {
-        // LAZY MODE: Only store exact matches, neighbors computed at scan time
-        if diag_enabled {
-            eprintln!("\n=== Phase 1b: LAZY NEIGHBOR MODE ===");
-            eprintln!("Neighbors will be computed dynamically during scan");
-        }
-
-        let mut backbone: Vec<Vec<i32>> = vec![Vec::new(); backbone_size];
-
-        for idx in 0..backbone_size {
-            let offsets = &exact_offsets[idx];
-            if !offsets.is_empty() {
-                backbone[idx] = offsets.clone();
-                exact_added_count += offsets.len();
-                words_with_exact_only += 1;
-            }
-        }
-
-        backbone
-    } else {
+    let thin_backbone: Vec<Vec<i32>> = {
         // STANDARD MODE: Pre-compute all neighbors at build time
+        // Reference: ncbi-blast/c++/src/algo/blast/core/blast_aalookup.c:446-543
         // Pass 1: Count entries for each target k-mer
         let mut entry_counts: Vec<u32> = vec![0; backbone_size];
 
@@ -290,7 +313,7 @@ pub fn build_ncbi_lookup(
                 continue;
             }
 
-            // NCBI reference: blast_aalookup.c s_AddWordHits lines 492-519
+            // NCBI reference: blast_aalookup.c:492-519
             // Compute self-score of query word
             let self_score = blosum62_score(w0 as u8, w0 as u8)
                 + blosum62_score(w1 as u8, w1 as u8)
@@ -307,6 +330,7 @@ pub fn build_ncbi_lookup(
             }
 
             // Count neighbor contributions
+            // Reference: ncbi-blast/c++/src/algo/blast/core/blast_aalookup.c:535-605
             let rm12 = row_max[w1] + row_max[w2];
             let rm2 = row_max[w2];
             for s0 in 0..alphabet_size {
@@ -330,7 +354,8 @@ pub fn build_ncbi_lookup(
         }
 
         // Pass 2: Pre-allocate with exact capacity
-        let mut backbone: Vec<Vec<i32>> = entry_counts.iter()
+        let mut backbone: Vec<Vec<i32>> = entry_counts
+            .iter()
             .map(|&count| Vec::with_capacity(count as usize))
             .collect();
 
@@ -348,7 +373,7 @@ pub fn build_ncbi_lookup(
                 continue;
             }
 
-            // NCBI reference: blast_aalookup.c s_AddWordHits lines 492-519
+            // NCBI reference: blast_aalookup.c:492-519
             // Compute self-score of query word
             let self_score = blosum62_score(w0 as u8, w0 as u8)
                 + blosum62_score(w1 as u8, w1 as u8)
@@ -369,6 +394,7 @@ pub fn build_ncbi_lookup(
             }
 
             // Add neighbors - use extend_from_slice for batch addition
+            // Reference: ncbi-blast/c++/src/algo/blast/core/blast_aalookup.c:535-605
             let mut local_neighbor_count = 0usize;
             let rm12 = row_max[w1] + row_max[w2];
             let rm2 = row_max[w2];
@@ -443,8 +469,10 @@ pub fn build_ncbi_lookup(
 
     // Phase 2: Finalize
     let mut backbone: Vec<BackboneCell> = vec![BackboneCell::default(); backbone_size];
-    let pv_size = (backbone_size + PV_BUCKET_BITS - 1) / PV_BUCKET_BITS;
-    let mut pv: Vec<u64> = vec![0u64; pv_size];
+    // NCBI allocates pv as: (backbone_size >> PV_ARRAY_BTS) + 1.
+    // Reference: ncbi-blast/c++/src/algo/blast/core/blast_aalookup.c:327-329
+    let pv_size = (backbone_size >> PV_ARRAY_BTS) + 1;
+    let mut pv: Vec<u32> = vec![0u32; pv_size];
 
     // Pre-finalize diagnostics: analyze high-frequency k-mers (guarded)
     if diag_enabled {
@@ -581,7 +609,6 @@ pub fn build_ncbi_lookup(
             charsize: charsize as i32,
             mask: mask as i32,
             longest_chain,
-            lazy_neighbors,
             threshold,
             row_max,
         },
@@ -607,19 +634,50 @@ pub fn build_direct_lookup(
                 continue;
             }
 
+            let seq_ptr = &frame.aa_seq[1..frame.aa_seq.len() - 1];
+            // NCBI invalid_mask = 0xff << charsize (Uint1).
+            // Reference: ncbi-blast/c++/src/algo/blast/core/blast_lookup.c:89-120
+            let invalid_mask: u8 = 0xffu8 << (charsize as u32);
             let unmasked = compute_unmasked_intervals(&frame.seg_masks, frame.aa_len);
             for (start, end) in unmasked {
-                for aa_pos in start..end.saturating_sub(2) {
-                    let raw_pos = aa_pos + 1;
-                    let c0 = frame.aa_seq[raw_pos] as usize;
-                    let c1 = frame.aa_seq[raw_pos + 1] as usize;
-                    let c2 = frame.aa_seq[raw_pos + 2] as usize;
-                    if c0 >= alphabet_size || c1 >= alphabet_size || c2 >= alphabet_size {
-                        continue;
-                    }
+                let from = start as i32;
+                let to = end.saturating_sub(1) as i32;
+                // NCBI: if (word_length > to - from + 1) continue;
+                // Reference: ncbi-blast/c++/src/algo/blast/core/blast_lookup.c:96-100
+                if word_length as i32 > to - from + 1 {
+                    continue;
+                }
+                let mut offset = from;
+                let mut word_target = from + word_length as i32;
 
-                    let idx = encode_kmer_3(c0, c1, c2, charsize) & mask;
-                    table[idx].push((q_idx as u32, f_idx as u8, aa_pos as u32));
+                while offset <= to {
+                    if offset >= word_target {
+                        let word_start = (offset - word_length as i32) as usize;
+                        let idx = encode_kmer_3(
+                            seq_ptr[word_start] as usize,
+                            seq_ptr[word_start + 1] as usize,
+                            seq_ptr[word_start + 2] as usize,
+                            charsize,
+                        ) & mask;
+                        table[idx].push((q_idx as u32, f_idx as u8, word_start as u32));
+                    }
+                    if (seq_ptr[offset as usize] & invalid_mask) != 0 {
+                        // NCBI: word_target = seq + lut_word_length + 1
+                        // Reference: ncbi-blast/c++/src/algo/blast/core/blast_lookup.c:117-120
+                        word_target = offset + word_length as i32 + 1;
+                    }
+                    offset += 1;
+                }
+
+                if offset >= word_target {
+                    let word_start = (offset - word_length as i32) as usize;
+                    let idx = encode_kmer_3(
+                        seq_ptr[word_start] as usize,
+                        seq_ptr[word_start + 1] as usize,
+                        seq_ptr[word_start + 2] as usize,
+                        charsize,
+                    ) & mask;
+                    table[idx].push((q_idx as u32, f_idx as u8, word_start as u32));
                 }
             }
         }

@@ -16,6 +16,7 @@ use crate::stats::lookup_nucl_params;
 use super::super::args::BlastnArgs;
 use super::super::alignment::{extend_gapped_heuristic, extend_final_traceback, extend_gapped_heuristic_with_traceback};
 use super::super::extension::{extend_hit_ungapped, type_of_word};
+use crate::utils::dust::MaskedInterval;
 use super::super::constants::TWO_HIT_WINDOW;
 use super::super::coordination::{configure_task, finalize_task_config, read_sequences, prepare_sequence_data, build_lookup_tables};
 use super::super::lookup::{reverse_complement, pack_diag_key};
@@ -25,7 +26,8 @@ use super::super::interval_tree::{BlastIntervalTree, TreeHsp, IndexMethod};
 use super::super::filtering::{
     purge_hsps_with_common_endpoints,
     purge_hsps_with_common_endpoints_ex,
-    reevaluate_hsp_with_ambiguities_gapped,
+    reevaluate_hsp_with_ambiguities_gapped_ex,
+    ReevalParams,
 };
 
 // Import from this module (blast_engine)
@@ -469,9 +471,9 @@ pub fn run(args: BlastnArgs) -> Result<()> {
                 // This eliminates millions of HashMap lookups and provides O(1) array access
                 // Diagonal range: from -s_len (query before subject) to +s_len (query after subject)
                 // We use an offset to map negative diagonals to positive array indices
-                // However, for very large subject sequences, array initialization overhead can be significant,
-                // so we only use array indexing for smaller sequences (< 1M bases)
-                const MAX_ARRAY_DIAG_SIZE: usize = 2_000_000; // ~1M diagonals max (for ~500KB subject)
+                // For very large subject sequences (>6MB), fall back to HashMap
+                // NCBI reference: blast_extend.c uses array-based diagonal tracking
+                const MAX_ARRAY_DIAG_SIZE: usize = 12_000_000; // ~6M diagonals max (for ~6MB subject)
                 let use_array_indexing = queries.len() == 1 && (s_len * 2 + 1) <= MAX_ARRAY_DIAG_SIZE;
                 let diag_offset = if use_array_indexing {
                     s_len as isize // Offset to make all diagonals non-negative
@@ -530,6 +532,12 @@ pub fn run(args: BlastnArgs) -> Result<()> {
                     let mut current_lut_kmer: u64 = 0;
                     let mut valid_bases: usize = 0;
 
+                    // DEBUG: Count loop iterations
+                    let mut dbg_left_ext_iters = 0usize;
+                    let mut dbg_right_ext_iters = 0usize;
+                    let mut dbg_ungapped_ext_calls = 0usize;
+                    let dbg_start_time = std::time::Instant::now();
+
                     // Scan through the subject sequence with rolling lut_word_length k-mer
                     for s_pos in 0..s_len {
                         let base = search_seq[s_pos];
@@ -561,8 +569,16 @@ pub fn run(args: BlastnArgs) -> Result<()> {
 
                         dbg_total_s_positions += 1;
 
+                        // DEBUG: Track processing time
+                        let _dbg_start = std::time::Instant::now();
+
                         // Lookup using lut_word_length k-mer
                         let matches_slice = two_stage.get_hits(current_lut_kmer);
+
+                        // DEBUG: Log max matches
+                        if matches_slice.len() > 1000 {
+                            eprintln!("[WARN] Large matches_slice: len={} for kmer at position {}", matches_slice.len(), kmer_start);
+                        }
 
                         // For each match, check if word_length match exists
                         for &(q_idx, q_pos) in matches_slice {
@@ -697,16 +713,16 @@ pub fn run(args: BlastnArgs) -> Result<()> {
                                 //         break;
                                 // }
                                 // CRITICAL: NCBI only limits by MIN(ext_to, s_offset) - NO query bounds check
-                                // NCBI doesn't check query bounds (undefined behavior if out of bounds)
-                                // For Rust safety, we use unsafe indexing but trust sequences are long enough
-                                // (lookup table only finds matches within valid ranges, so sequences should be long enough)
-                                let max_ext_left = ext_to.min(kmer_start);
+                                // But LOSAT must also limit by q_pos to prevent underflow
+                                // NCBI assumes sequences are long enough, but we need explicit bounds
+                                let max_ext_left = ext_to.min(kmer_start).min(q_pos_usize);
 
                                 // NCBI BLAST: Loop condition is ext_left < MIN(ext_to, s_offset)
                                 // NO explicit boundary check inside loop (NCBI doesn't have it)
                                 // SAFETY: We've limited by subject bounds. For query, we trust sequences are long enough
                                 // (NCBI doesn't check query bounds either - it's undefined behavior if out of bounds)
                                 while ext_left < max_ext_left {
+                                    dbg_left_ext_iters += 1;
                                     // NCBI BLAST: s_off--; q--;
                                     // Reference: na_ungapped.c:1107-1108
                                     q_left -= 1;
@@ -756,7 +772,6 @@ pub fn run(args: BlastnArgs) -> Result<()> {
                                     // NCBI BLAST: s_off = s_offset + lut_word_length;
                                     // NCBI BLAST: if (s_off + ext_to - ext_left > s_range) continue;
                                     // Reference: na_ungapped.c:1122-1124
-                                    // CRITICAL: NCBI only checks subject bounds, NOT query bounds
                                     let s_off = kmer_start + lut_word_length;
                                     if s_off + (ext_to - ext_left) > s_len {
                                         // Not enough room in subject, skip this seed (NCBI behavior)
@@ -765,6 +780,11 @@ pub fn run(args: BlastnArgs) -> Result<()> {
 
                                     let mut ext_right = 0;
                                     let q_off = q_pos_usize + lut_word_length;
+                                    // LOSAT-specific: Also check query bounds (NCBI doesn't, causing UB)
+                                    if q_off + (ext_to - ext_left) > q_seq.len() {
+                                        // Not enough room in query, skip this seed
+                                        continue;
+                                    }
                                     let mut q_right = q_off;
                                     let mut s_right = s_off;
 
@@ -775,6 +795,7 @@ pub fn run(args: BlastnArgs) -> Result<()> {
                                     // For Rust safety, we use unsafe indexing but trust sequences are long enough
                                     // (lookup table only finds matches within valid ranges, so sequences should be long enough)
                                     while ext_right < (ext_to - ext_left) {
+                                        dbg_right_ext_iters += 1;
                                         // NCBI BLAST: if (base mismatch) break;
                                         // Reference: na_ungapped.c:1129-1131
                                         // SAFETY: We've checked subject bounds above. For query, we trust sequences are long enough
@@ -828,13 +849,15 @@ pub fn run(args: BlastnArgs) -> Result<()> {
                                 // word_type = s_TypeOfWord(query, subject, &q_off, &s_off,
                                 //                          query_mask, query_info, s_range,
                                 //                          word_length, lut_word_length, lut, TRUE, &extended);
-                                let query_mask = &query_masks_ref[q_idx as usize];
+                                // PERFORMANCE: Pass empty mask since masking was already done during lookup building
+                                // NCBI: When locations is NULL, s_IsSeedMasked always returns FALSE
+                                let empty_mask: &[MaskedInterval] = &[];
                                 let (wt, ext) = type_of_word(
                                     q_seq,
                                     search_seq,
                                     q_off,
                                     s_off,
-                                    query_mask,
+                                    empty_mask,
                                     word_length,
                                     lut_word_length,
                                     true, // check_double = TRUE
@@ -993,14 +1016,15 @@ pub fn run(args: BlastnArgs) -> Result<()> {
                                 //     s_end_pos += extended;
                                 // }
                                 // In NCBI, check_masks is TRUE by default (only FALSE when lut->stride is true)
-                                // For LOSAT, we always check masks (equivalent to check_masks = TRUE)
-                                let query_mask = &query_masks_ref[q_idx as usize];
+                                // PERFORMANCE: Pass empty mask since masking was already done during lookup building
+                                // NCBI: When locations is NULL, s_IsSeedMasked always returns FALSE
+                                let empty_mask: &[MaskedInterval] = &[];
                                 let (wt, ext) = type_of_word(
                                     q_seq,
                                     search_seq,
                                     q_off,
                                     s_off,
-                                    query_mask,
+                                    empty_mask,
                                     word_length,
                                     lut_word_length,
                                     false, // check_double = FALSE (not in two-hit block)
@@ -1019,6 +1043,7 @@ pub fn run(args: BlastnArgs) -> Result<()> {
                             // Now do ungapped extension from the adjusted position
                             // NCBI BLAST: s_BlastnExtendInitialHit calls ungapped extension after word_length verification
                             // Use q_off and s_off (adjusted by type_of_word if called)
+                            dbg_ungapped_ext_calls += 1;
                             let (qs, qe, ss, ungapped_se, ungapped_score) = extend_hit_ungapped(
                                 q_seq,
                                 search_seq,
@@ -1103,6 +1128,12 @@ pub fn run(args: BlastnArgs) -> Result<()> {
                             // Gapped extension deferred to batch processing phase
                         } // end of for matches_slice in two-stage lookup
                     } // end of s_pos loop for two-stage lookup
+
+                    // DEBUG: Log stats for this subject
+                    let elapsed = dbg_start_time.elapsed();
+                    eprintln!("[PERF] Subject scan took {:?}: left_ext={}, right_ext={}, ungapped={}, seeds={}, valid_pos={}",
+                        elapsed, dbg_left_ext_iters, dbg_right_ext_iters, dbg_ungapped_ext_calls,
+                        dbg_seeds_found, dbg_total_s_positions);
                 }
                 if two_stage_lookup_ref.is_none() {
                     // Original lookup method (for non-two-stage lookup)
@@ -1243,13 +1274,14 @@ pub fn run(args: BlastnArgs) -> Result<()> {
                             //                          query_mask, query_info, s_range,
                             //                          word_length, lut_word_length, lut, TRUE, &extended);
                             // For non-two-stage lookup, word_length == lut_word_length, so type_of_word returns (1, 0)
-                            let query_mask = &query_masks_ref[q_idx as usize];
+                            // PERFORMANCE: Pass empty mask since masking was already done during lookup building
+                            let empty_mask: &[MaskedInterval] = &[];
                             let (wt, ext) = type_of_word(
                                 q_record.seq(),
                                 search_seq,
                                 q_off,
                                 s_off,
-                                query_mask,
+                                empty_mask,
                                 safe_k, // word_length
                                 safe_k, // lut_word_length (same for non-two-stage)
                                 true, // check_double = TRUE
@@ -1389,14 +1421,14 @@ pub fn run(args: BlastnArgs) -> Result<()> {
                             //     s_end_pos += extended;
                             // }
                             // In NCBI, check_masks is TRUE by default (only FALSE when lut->stride is true)
-                            // For LOSAT, we always check masks (equivalent to check_masks = TRUE)
-                            let query_mask = &query_masks_ref[q_idx as usize];
+                            // PERFORMANCE: Pass empty mask since masking was already done during lookup building
+                            let empty_mask: &[MaskedInterval] = &[];
                             let (wt, ext) = type_of_word(
                                 q_record.seq(),
                                 search_seq,
                                 q_off,
                                 s_off,
-                                query_mask,
+                                empty_mask,
                                 safe_k, // word_length
                                 safe_k, // lut_word_length (same for non-two-stage)
                                 false, // check_double = FALSE (not in two-hit block)
@@ -1510,9 +1542,14 @@ pub fn run(args: BlastnArgs) -> Result<()> {
             // Debug counters for containment analysis
             let mut dbg_containment_skipped = 0usize;
             let total_ungapped = ungapped_hits.len();
+            let gapped_start_time = std::time::Instant::now();
+            let mut dbg_gapped_calls = 0usize;
 
             // Process each ungapped hit in score order
-            for uh in &ungapped_hits {
+            for (idx, uh) in ungapped_hits.iter().enumerate() {
+                if idx % 100 == 0 {
+                    eprintln!("[PROGRESS] Gapped extension: {}/{}", idx, total_ungapped);
+                }
                 // Get query sequence for this hit
                 let q_record = &queries[uh.q_seq_idx];
                 let q_seq = q_record.seq();
@@ -1549,6 +1586,7 @@ pub fn run(args: BlastnArgs) -> Result<()> {
                 }
 
                 // Gapped extension with traceback
+                dbg_gapped_calls += 1;
                 let (
                     final_qs,
                     final_qe,
@@ -1670,6 +1708,11 @@ pub fn run(args: BlastnArgs) -> Result<()> {
                 interval_tree.add_hsp(gapped_tree_hsp, 0, IndexMethod::QueryAndSubject);
             }
 
+            // DEBUG: Log gapped extension stats
+            let gapped_elapsed = gapped_start_time.elapsed();
+            eprintln!("[PERF] Gapped extension took {:?}: calls={}, skipped={}, total_ungapped={}",
+                gapped_elapsed, dbg_gapped_calls, dbg_containment_skipped, total_ungapped);
+
             // Print debug summary for this subject (before post-processing)
             let hits_before_phase2 = hits_with_internal.len();
             if debug_mode || blastn_debug {
@@ -1701,24 +1744,39 @@ pub fn run(args: BlastnArgs) -> Result<()> {
             // Step 2: Endpoint purging pass 1 (trim, purge=false)
             // NCBI reference: blast_traceback.c:637-638
             // Blast_HSPListPurgeHSPsWithCommonEndpoints(program_number, hsp_list, FALSE);
+            let hits_step1 = local_hits.len();
             let (mut local_hits, extra_start) = purge_hsps_with_common_endpoints_ex(local_hits, false);
+            let hits_step2 = local_hits.len();
 
             // Step 3: Re-evaluate trimmed HSPs
             // NCBI reference: blast_traceback.c:647-665
             // The remaining part of the hsp may be extended further
+
+            // Create ReevalParams for E-value/bit_score recalculation
+            // NCBI reference: blast_traceback.c:234-250 Blast_HSPListGetEvalues, Blast_HSPListGetBitScores
+            let reeval_params = ReevalParams {
+                lambda: params_for_closure.lambda,
+                k: params_for_closure.k,
+                eff_searchsp: (db_len_total as i64) * (queries[0].seq().len() as i64), // Approximate
+                db_len: db_len_total,
+                db_num_seqs,
+            };
+
             for hit in local_hits.iter_mut().skip(extra_start) {
                 // Get sequences for re-evaluation
                 let q_seq = queries[hit.q_idx as usize].seq();
                 let cutoff = cutoff_scores.get(hit.q_idx as usize).copied().unwrap_or(0);
 
-                let delete = reevaluate_hsp_with_ambiguities_gapped(
-                    hit, q_seq, s_seq, reward, penalty, gap_open, gap_extend, cutoff
+                let delete = reevaluate_hsp_with_ambiguities_gapped_ex(
+                    hit, q_seq, s_seq, reward, penalty, gap_open, gap_extend, cutoff,
+                    Some(&reeval_params)
                 );
                 if delete {
                     hit.raw_score = i32::MIN; // Mark for removal
                 }
             }
             local_hits.retain(|h| h.raw_score != i32::MIN);
+            let hits_step3 = local_hits.len();
 
             // Step 4: Endpoint purging pass 2 (delete, purge=true) - BLASTN only
             // NCBI reference: blast_traceback.c:667-668
@@ -1726,6 +1784,7 @@ pub fn run(args: BlastnArgs) -> Result<()> {
             //     Blast_HSPListPurgeHSPsWithCommonEndpoints(program_number, hsp_list, TRUE);
             // }
             let mut local_hits = purge_hsps_with_common_endpoints(local_hits);
+            let hits_step4 = local_hits.len();
 
             // Step 5: Re-sort by gapped score
             // NCBI reference: blast_traceback.c:672
@@ -1766,10 +1825,14 @@ pub fn run(args: BlastnArgs) -> Result<()> {
 
             // Phase 2 debug output
             if debug_mode || blastn_debug {
-                let phase2_removed = hits_before_phase2 - final_hits.len();
+                let phase2_tree_removed = hits_step4 - final_hits.len();
                 eprintln!(
-                    "[DEBUG] Phase 2: before={}, after={}, removed={}",
-                    hits_before_phase2, final_hits.len(), phase2_removed
+                    "[DEBUG] Phase 2 breakdown: step1(extract)={}, step2(purge1)={} (-{}), step3(reeval)={} (-{}), step4(purge2)={} (-{}), step6(tree)={} (-{})",
+                    hits_step1,
+                    hits_step2, hits_step1 - hits_step2,
+                    hits_step3, hits_step2 - hits_step3,
+                    hits_step4, hits_step3 - hits_step4,
+                    final_hits.len(), phase2_tree_removed
                 );
             }
 

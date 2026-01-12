@@ -36,6 +36,7 @@ pub struct BaseDiagnosticCounters {
     // Diagonal mask/suppression statistics
     pub mask_updates: AtomicUsize,         // Number of mask updates
     pub seeds_masked: AtomicUsize,         // Seeds suppressed by diagonal mask
+    pub seeds_flag_reset: AtomicUsize,     // Seeds where flag=1 was reset (hit after extension zone)
     // Self-comparison detection
     pub self_comparisons: AtomicUsize,     // Number of query-subject pairs that are self-comparisons
     // Ungapped extension stage
@@ -74,6 +75,7 @@ impl Default for BaseDiagnosticCounters {
             seeds_ctx_boundary_fail: AtomicUsize::new(0),
             mask_updates: AtomicUsize::new(0),
             seeds_masked: AtomicUsize::new(0),
+            seeds_flag_reset: AtomicUsize::new(0),
             self_comparisons: AtomicUsize::new(0),
             ungapped_extensions: AtomicUsize::new(0),
             ungapped_one_hit_extensions: AtomicUsize::new(0),
@@ -183,6 +185,10 @@ impl ProteinDiagnosticCounters {
         eprintln!(
             "  Seeds suppressed (mask):    {}",
             self.base.seeds_masked.load(AtomicOrdering::Relaxed)
+        );
+        eprintln!(
+            "  Seeds flag reset (post-ext): {}",
+            self.base.seeds_flag_reset.load(AtomicOrdering::Relaxed)
         );
         eprintln!(
             "  Seeds filtered (two-hit):   {}",

@@ -360,6 +360,8 @@ fn purge_hsps_for_subject_ex(mut hits: Vec<Hit>, purge: bool) -> (Vec<Hit>, usiz
     let initial_count = hits.len();
     let mut start_purged = 0usize;
     let mut end_purged = 0usize;
+    let mut start_trimmed = 0usize;
+    let mut end_trimmed = 0usize;
 
     // Track trimmed HSPs that need re-evaluation (when purge=false)
     let mut trimmed_hits: Vec<Hit> = Vec::new();
@@ -414,14 +416,18 @@ fn purge_hsps_for_subject_ex(mut hits: Vec<Hit>, purge: bool) -> (Vec<Hit>, usiz
             if !purge && removed_hit.q_end > hits[i].q_end {
                 // NCBI: s_CutOffGapEditScript(hsp, hsp_array[i]->query.end, hsp_array[i]->subject.end, TRUE)
                 // Trim the beginning, keep the end portion
+                // NCBI reference: blast_hits.c:2480-2498
+                // CRITICAL: NCBI's s_CutOffGapEditScript is a VOID function - it always moves
+                // the HSP to the end for re-evaluation, even if trimming doesn't change anything.
+                // LOSAT must match this behavior: always move to end when condition is met.
                 let q_cut = hits[i].q_end;
                 let s_cut = s_end_canon(&hits[i]);
-                if cut_off_gap_edit_script(&mut removed_hit, q_cut, s_cut, true) {
-                    // Trimming succeeded - move to end for re-evaluation
-                    trimmed_hits.push(removed_hit);
-                }
+                let _ = cut_off_gap_edit_script(&mut removed_hit, q_cut, s_cut, true);
+                // Always move to end for re-evaluation (matches NCBI void function behavior)
+                trimmed_hits.push(removed_hit);
+                start_trimmed += 1;
             }
-            // else: purge=true or cannot trim, just delete (already removed)
+            // else: purge=true or hsp doesn't extend beyond, just delete (already removed)
 
             start_purged += 1;
             // Don't increment i - check next element at same position
@@ -467,14 +473,16 @@ fn purge_hsps_for_subject_ex(mut hits: Vec<Hit>, purge: bool) -> (Vec<Hit>, usiz
             if !purge && removed_hit.q_start < hits[i].q_start {
                 // NCBI: s_CutOffGapEditScript(hsp, hsp_array[i]->query.offset, hsp_array[i]->subject.offset, FALSE)
                 // Trim the end, keep the start portion
+                // NCBI reference: blast_hits.c:2516-2524
+                // CRITICAL: NCBI's s_CutOffGapEditScript is a VOID function - always move to end
                 let q_cut = hits[i].q_start;
                 let s_cut = s_offset(&hits[i]);
-                if cut_off_gap_edit_script(&mut removed_hit, q_cut, s_cut, false) {
-                    // Trimming succeeded - move to end for re-evaluation
-                    trimmed_hits.push(removed_hit);
-                }
+                let _ = cut_off_gap_edit_script(&mut removed_hit, q_cut, s_cut, false);
+                // Always move to end for re-evaluation (matches NCBI void function behavior)
+                trimmed_hits.push(removed_hit);
+                end_trimmed += 1;
             }
-            // else: purge=true or cannot trim, just delete
+            // else: purge=true or hsp doesn't start before, just delete
 
             end_purged += 1;
             // Don't increment i - check next element at same position
@@ -492,7 +500,15 @@ fn purge_hsps_for_subject_ex(mut hits: Vec<Hit>, purge: bool) -> (Vec<Hit>, usiz
     // hsp_array[hsp_count] = hsp;  // Move to end
     hits.extend(trimmed_hits);
 
-    let _ = (initial_count, start_purged, end_purged); // Silence unused warnings
+    // Debug output for purge statistics
+    if std::env::var("LOSAT_DEBUG_BLASTN").is_ok() {
+        eprintln!(
+            "[DEBUG_PURGE] initial={}, start_purged={} (trimmed={}), end_purged={} (trimmed={}), final={}",
+            initial_count, start_purged, start_trimmed, end_purged, end_trimmed, hits.len()
+        );
+    }
+
+    let _ = (initial_count, start_purged, end_purged, start_trimmed, end_trimmed); // Silence unused warnings
 
     (hits, extra_start)
 }
@@ -501,6 +517,16 @@ fn purge_hsps_for_subject_ex(mut hits: Vec<Hit>, purge: bool) -> (Vec<Hit>, usiz
 // HSP Re-evaluation with Ambiguities
 // Reference: blast_hits.c:479-647 Blast_HSPReevaluateWithAmbiguitiesGapped
 // =============================================================================
+
+/// Parameters needed for E-value and bit score recalculation after re-evaluation.
+/// NCBI reference: blast_traceback.c:234-250 s_HSPListPostTracebackUpdate
+pub struct ReevalParams {
+    pub lambda: f64,
+    pub k: f64,
+    pub eff_searchsp: i64,
+    pub db_len: usize,
+    pub db_num_seqs: usize,
+}
 
 /// Re-evaluate a gapped HSP after trimming, finding the best-scoring sub-alignment.
 ///
@@ -553,6 +579,7 @@ fn purge_hsps_for_subject_ex(mut hits: Vec<Hit>, purge: bool) -> (Vec<Hit>, usiz
 /// * `gap_open` - Gap open penalty (positive)
 /// * `gap_extend` - Gap extend penalty (positive)
 /// * `cutoff_score` - Minimum score to keep HSP
+/// * `reeval_params` - Optional parameters for E-value/bit score recalculation
 ///
 /// # Returns
 /// * `true` if HSP should be DELETED (score < cutoff or no valid region found)
@@ -566,6 +593,24 @@ pub fn reevaluate_hsp_with_ambiguities_gapped(
     gap_open: i32,
     gap_extend: i32,
     cutoff_score: i32,
+) -> bool {
+    reevaluate_hsp_with_ambiguities_gapped_ex(
+        hit, q_seq, s_seq, reward, penalty, gap_open, gap_extend, cutoff_score, None
+    )
+}
+
+/// Extended version with optional Karlin parameters for E-value recalculation.
+/// NCBI reference: blast_traceback.c:234-250 Blast_HSPListGetEvalues, Blast_HSPListGetBitScores
+pub fn reevaluate_hsp_with_ambiguities_gapped_ex(
+    hit: &mut Hit,
+    q_seq: &[u8],
+    s_seq: &[u8],
+    reward: i32,
+    penalty: i32,
+    gap_open: i32,
+    gap_extend: i32,
+    cutoff_score: i32,
+    reeval_params: Option<&ReevalParams>,
 ) -> bool {
     // NCBI reference: blast_hits.c:539-540
     // esp = hsp->gap_info;
@@ -779,19 +824,55 @@ pub fn reevaluate_hsp_with_ambiguities_gapped(
     let s_len = best_s_end.saturating_sub(best_s_start);
     hit.length = q_len.max(s_len);
 
-    // Recalculate identity (simplified - could be more accurate with full edit script)
-    // This is an approximation; NCBI recalculates using Blast_HSPGetNumIdentitiesAndPositives
+    // Recalculate identity, mismatch, and gapopen from coordinates
+    // NCBI reference: blast_hits.c:745-790 s_Blast_HSPGetNumIdentitiesAndPositives
     if hit.length > 0 {
-        // Estimate from score and penalties
+        // Estimate statistics from score and penalties
         let gap_letters = (q_len as i32 - s_len as i32).unsigned_abs() as usize;
         let non_gap_len = hit.length.saturating_sub(gap_letters);
-        let matches_est = if reward > 0 && non_gap_len > 0 {
-            let est = (score + (non_gap_len as i32) * (-penalty)) / (reward - penalty);
-            est.max(0) as usize
+
+        // Estimate matches from score: score = matches * reward + mismatches * penalty
+        // mismatches = non_gap_len - matches
+        // score = matches * reward + (non_gap_len - matches) * penalty
+        // score = matches * (reward - penalty) + non_gap_len * penalty
+        // matches = (score - non_gap_len * penalty) / (reward - penalty)
+        let matches_est = if reward > 0 && non_gap_len > 0 && reward != penalty {
+            let est = (score - (non_gap_len as i32) * penalty) / (reward - penalty);
+            est.max(0).min(non_gap_len as i32) as usize
         } else {
             non_gap_len
         };
+
+        let mismatches_est = non_gap_len.saturating_sub(matches_est);
+
         hit.identity = (matches_est as f64 / hit.length as f64) * 100.0;
+        hit.mismatch = mismatches_est;
+
+        // Estimate gap openings from gap_letters (rough estimate, at least 1 per direction if gaps exist)
+        if gap_letters > 0 {
+            // Rough estimate: 1 gap opening per gap region (very approximate)
+            hit.gapopen = 1;
+        } else {
+            hit.gapopen = 0;
+        }
+    }
+
+    // Recalculate bit_score and e_value if Karlin parameters are provided
+    // NCBI reference: blast_traceback.c:234-250 Blast_HSPListGetEvalues, Blast_HSPListGetBitScores
+    if let Some(params) = reeval_params {
+        const LN2: f64 = 0.69314718055994530941723212145818;
+
+        // Bit score calculation
+        // NCBI reference: blast_stat.c BLAST_KarlinStoE_simple
+        let log_k = params.k.ln();
+        hit.bit_score = ((params.lambda * (score as f64)) - log_k) / LN2;
+
+        // E-value calculation
+        // NCBI reference: blast_stat.c BLAST_KarlinStoE_simple
+        // E = K * searchsp * exp(-lambda * score)
+        if params.eff_searchsp > 0 {
+            hit.e_value = params.k * (params.eff_searchsp as f64) * (-params.lambda * (score as f64)).exp();
+        }
     }
 
     false // Keep HSP

@@ -42,9 +42,10 @@ pub const fn get_mask() -> usize {
     (1usize << (LOOKUP_WORD_LENGTH * get_charsize())) - 1
 }
 
-// Presence Vector - NCBI style
-pub(crate) const PV_ARRAY_BTS: usize = 6;
-pub(crate) const PV_ARRAY_MASK: usize = 63;
+// Presence Vector - NCBI style (PV_ARRAY_TYPE = Uint4, 32-bit).
+// Reference: ncbi-blast/c++/include/algo/blast/core/blast_lookup.h:41-44
+pub(crate) const PV_ARRAY_BTS: usize = 5;
+pub(crate) const PV_ARRAY_MASK: usize = 31;
 
 #[inline(always)]
 pub(crate) fn ilog2(mut x: usize) -> usize {
@@ -96,13 +97,19 @@ pub fn encode_aa_kmer(seq: &[u8], pos: usize) -> Option<usize> {
 
 /// Test if a k-mer index is set in the presence vector
 #[inline(always)]
-pub fn pv_test(pv: &[u64], index: usize) -> bool {
-    (pv[index >> PV_ARRAY_BTS] >> (index & PV_ARRAY_MASK)) & 1 != 0
+pub fn pv_test(pv: &[u32], index: usize) -> bool {
+    // NCBI PV_TEST macro:
+    // lookup[(index) >> PV_ARRAY_BTS] & (1U << (index & PV_ARRAY_MASK))
+    // Reference: ncbi-blast/c++/include/algo/blast/core/blast_lookup.h:55-57
+    (pv[index >> PV_ARRAY_BTS] & (1u32 << (index & PV_ARRAY_MASK))) != 0
 }
 
 #[inline(always)]
-pub(crate) fn pv_set(pv: &mut [u64], index: usize) {
-    pv[index >> PV_ARRAY_BTS] |= 1u64 << (index & PV_ARRAY_MASK);
+pub(crate) fn pv_set(pv: &mut [u32], index: usize) {
+    // NCBI PV_SET macro:
+    // lookup[(index) >> PV_ARRAY_BTS] |= (1U << (index & PV_ARRAY_MASK))
+    // Reference: ncbi-blast/c++/include/algo/blast/core/blast_lookup.h:49-50
+    pv[index >> PV_ARRAY_BTS] |= 1u32 << (index & PV_ARRAY_MASK);
 }
 
 /// Encode a k-mer from three amino acid indices (0-27 each).

@@ -577,9 +577,10 @@ fn build_blastna_matrix(reward: i32, penalty: i32) -> [i32; BLASTNA_SIZE * BLAST
         }
     }
 
-    // NCBI reference: blast_stat.c:1120-1122 (gap sentinel row)
+    // NCBI reference: blast_stat.c:1122-1127 (gap sentinel row/column)
     for index1 in 0..BLASTNA_SIZE {
         matrix[(BLASTNA_SIZE - 1) * BLASTNA_SIZE + index1] = i32::MIN / 2;
+        matrix[index1 * BLASTNA_SIZE + (BLASTNA_SIZE - 1)] = i32::MIN / 2;
     }
 
     matrix

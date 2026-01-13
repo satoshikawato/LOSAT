@@ -384,6 +384,48 @@ pub fn encode_iupac_to_ncbi2na(seq: &[u8]) -> Vec<u8> {
         .collect()
 }
 
+/// Encode an ASCII sequence to packed ncbi2na (4 bases per byte, remainder count in last byte).
+/// NCBI reference: ncbi-blast/c++/src/algo/blast/api/blast_setup_cxx.cpp:1154-1187 (CompressNcbi2na)
+pub fn encode_iupac_to_ncbi2na_packed(seq: &[u8]) -> Vec<u8> {
+    if seq.is_empty() {
+        return Vec::new();
+    }
+
+    let packed_len = seq.len() / COMPRESSION_RATIO + 1;
+    let mut packed = vec![0u8; packed_len];
+
+    let mut i = 0usize;
+    let mut byte_idx = 0usize;
+
+    while i + COMPRESSION_RATIO <= seq.len() {
+        let a = (encode_iupac_base_to_blastna(seq[i]) & 0x03) << 6;
+        let b = (encode_iupac_base_to_blastna(seq[i + 1]) & 0x03) << 4;
+        let c = (encode_iupac_base_to_blastna(seq[i + 2]) & 0x03) << 2;
+        let d = (encode_iupac_base_to_blastna(seq[i + 3]) & 0x03) << 0;
+        packed[byte_idx] = a | b | c | d;
+        byte_idx += 1;
+        i += COMPRESSION_RATIO;
+    }
+
+    let mut last_byte = 0u8;
+    while i < seq.len() {
+        let bit_shift = match i % COMPRESSION_RATIO {
+            0 => 6,
+            1 => 4,
+            2 => 2,
+            _ => 0,
+        };
+        let code = encode_iupac_base_to_blastna(seq[i]) & 0x03;
+        last_byte |= code << bit_shift;
+        i += 1;
+    }
+
+    last_byte |= (seq.len() % COMPRESSION_RATIO) as u8;
+    packed[byte_idx] = last_byte;
+
+    packed
+}
+
 /// Decode a 2-bit code to ASCII nucleotide
 #[inline]
 pub fn decode_base(code: u8) -> u8 {

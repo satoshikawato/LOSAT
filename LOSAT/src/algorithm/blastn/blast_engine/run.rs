@@ -11,16 +11,20 @@ use std::sync::mpsc::channel;
 
 use crate::common::{write_output_ncbi_order, Hit};
 use crate::stats::lookup_nucl_params;
-use crate::core::blast_encoding::{encode_iupac_to_blastna, encode_iupac_to_ncbi2na};
+use crate::core::blast_encoding::{
+    encode_iupac_to_blastna,
+    encode_iupac_to_ncbi2na,
+    encode_iupac_to_ncbi2na_packed,
+};
 
 // Import from parent blastn module (super::super:: because we're in blast_engine/)
 use super::super::args::BlastnArgs;
 use super::super::alignment::{
+    build_blastna_matrix,
     blast_get_offsets_for_gapped_alignment,
     blast_get_start_for_gapped_alignment_nucl,
     // NCBI reference: ncbi-blast/c++/include/algo/blast/core/blast_gapalign.h:69-80 (BlastGapAlignStruct)
     extend_gapped_heuristic_with_scratch,
-    extend_final_traceback,
     // NCBI reference: ncbi-blast/c++/include/algo/blast/core/blast_gapalign.h:69-80 (BlastGapAlignStruct)
     extend_gapped_heuristic_with_traceback_with_scratch,
     // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_gapalign.c:2762-2936 (BLAST_GreedyGappedAlignment)
@@ -301,6 +305,9 @@ pub fn run(args: BlastnArgs) -> Result<()> {
     let params_gapped_for_closure = params_gapped.clone();  // Gapped params for cutoff_score_max
     let evalue_threshold = args.evalue;
 
+    // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_stat.c:1052-1127 (BlastScoreBlkNuclMatrixCreate)
+    let score_matrix = build_blastna_matrix(reward, penalty);
+
     // NCBI reference: ncbi-blast/c++/include/algo/blast/core/blast_stat.h:866-869 (query blastna, subject ncbi2na)
     // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_encoding.c:85-93 (IUPACNA_TO_BLASTNA)
     let encoded_queries_blastna: Vec<Vec<u8>> = queries_ref
@@ -379,12 +386,21 @@ pub fn run(args: BlastnArgs) -> Result<()> {
             let s_seq_rc = reverse_complement(s_seq);
 
             // NCBI reference: ncbi-blast/c++/include/algo/blast/core/blast_stat.h:866-869 (query blastna, subject ncbi2na)
-            // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_util.c:476-489 (BlastCompressBlastnaSequence old_seq[i] & 3)
-            // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_traceback.c:503-507 (greedy traceback uses uncompressed subject)
+            // NCBI reference: ncbi-blast/c++/src/algo/blast/api/blast_setup_cxx.cpp:828-850 (subject blastna + ncbi2na)
+            // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_gapalign.c:2949-3016 (packed subject for score-only DP)
+            // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_traceback.c:503-507 (traceback uses uncompressed subject)
             // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_util.c:806-833 (GetReverseNuclSequence uses ncbi4na/blastna)
             // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_encoding.c:85-93 (IUPACNA_TO_BLASTNA)
             let s_seq_blastna = encode_iupac_to_blastna(s_seq);
             let s_seq_rc_blastna = encode_iupac_to_blastna(&s_seq_rc);
+            let (s_seq_packed, s_seq_rc_packed) = if use_dp {
+                (
+                    Some(encode_iupac_to_ncbi2na_packed(s_seq)),
+                    Some(encode_iupac_to_ncbi2na_packed(&s_seq_rc)),
+                )
+            } else {
+                (None, None)
+            };
             let (s_seq_ncbi2na, s_seq_rc_ncbi2na) = if use_dp {
                 (None, None)
             } else {
@@ -1538,31 +1554,31 @@ pub fn run(args: BlastnArgs) -> Result<()> {
                 let q_record = &queries[uh.q_seq_idx];
                 let q_seq = q_record.seq();
 
-                // Get subject sequence (forward or reverse complement)
-                let search_seq: &[u8] = if uh.is_minus_strand {
-                    &s_seq_rc
+                let q_seq_blastna = encoded_queries_blastna[uh.q_seq_idx].as_slice();
+                let s_seq_blastna = if uh.is_minus_strand {
+                    s_seq_rc_blastna.as_slice()
                 } else {
-                    s_seq
+                    s_seq_blastna.as_slice()
                 };
+                let subject_len = s_seq_blastna.len();
 
-                // NCBI reference: ncbi-blast/c++/include/algo/blast/core/blast_stat.h:866-869 (query blastna, subject ncbi2na)
-                // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_traceback.c:503-507 (greedy traceback uses uncompressed subject)
-                let (q_seq_greedy, s_seq_greedy_score, s_seq_greedy_trace) = if use_dp {
-                    (q_seq, search_seq, search_seq)
+                // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_gapalign.c:2949-3016 (blastn packed subject for score-only)
+                // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_gapalign.c:2762-2936 (greedy uses ncbi2na subject)
+                // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_traceback.c:503-507 (traceback uses uncompressed subject)
+                let (s_seq_score, s_seq_trace) = if use_dp {
+                    let s_seq_score = if uh.is_minus_strand {
+                        s_seq_rc_packed.as_ref().unwrap().as_slice()
+                    } else {
+                        s_seq_packed.as_ref().unwrap().as_slice()
+                    };
+                    (s_seq_score, s_seq_blastna)
                 } else {
-                    let encoded_queries = &encoded_queries_blastna;
-                    let q_seq_blastna = encoded_queries[uh.q_seq_idx].as_slice();
                     let s_seq_score = if uh.is_minus_strand {
                         s_seq_rc_ncbi2na.as_ref().unwrap().as_slice()
                     } else {
                         s_seq_ncbi2na.as_ref().unwrap().as_slice()
                     };
-                    let s_seq_trace = if uh.is_minus_strand {
-                        s_seq_rc_blastna.as_slice()
-                    } else {
-                        s_seq_blastna.as_slice()
-                    };
-                    (q_seq_blastna, s_seq_score, s_seq_trace)
+                    (s_seq_score, s_seq_blastna)
                 };
 
                 // NCBI reference: blast_gapalign.c:3908-3915
@@ -1604,18 +1620,17 @@ pub fn run(args: BlastnArgs) -> Result<()> {
                 ) = if use_dp {
                     // DP seed selection (blastn)
                     let (seed_qs, seed_ss) = match blast_get_offsets_for_gapped_alignment(
-                        q_seq,
-                        search_seq,
+                        q_seq_blastna,
+                        s_seq_blastna,
                         uh.qs,
                         uh.qe,
                         uh.ss,
                         uh.se,
-                        reward,
-                        penalty,
+                        &score_matrix,
                     ) {
                         Some((q_start, s_start)) => blast_get_start_for_gapped_alignment_nucl(
-                            q_seq,
-                            search_seq,
+                            q_seq_blastna,
+                            s_seq_blastna,
                             uh.qs,
                             uh.qe,
                             uh.ss,
@@ -1628,19 +1643,24 @@ pub fn run(args: BlastnArgs) -> Result<()> {
                         }
                     };
 
+                    // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_gapalign.c:2959-2963 (x_dropoff limited by ungapped score)
+                    let x_drop_score_only = x_drop_gapped.min(uh.score);
+
                     // Preliminary DP gapped extension (score-only)
                     // NCBI reference: ncbi-blast/c++/src/algo/blast/api/blast_nucl_options.cpp:176-183
                     let (p_qs, p_qe, p_ss, p_se, p_score, _, _, _, _, _) = extend_gapped_heuristic_with_scratch(
-                        q_seq,
-                        search_seq,
+                        q_seq_blastna,
+                        s_seq_score,
+                        subject_len,
                         seed_qs,
                         seed_ss,
                         1,
                         reward,
                         penalty,
+                        &score_matrix,
                         gap_open,
                         gap_extend,
-                        x_drop_gapped,
+                        x_drop_score_only,
                         gap_scratch,
                         true,
                     );
@@ -1653,8 +1673,8 @@ pub fn run(args: BlastnArgs) -> Result<()> {
                     let seed_ss = uh.ss + ungapped_len / 2;
 
                     let prelim = match greedy_gapped_alignment_score_only(
-                        q_seq_greedy,
-                        s_seq_greedy_score,
+                        q_seq_blastna,
+                        s_seq_score,
                         seed_qs,
                         seed_ss,
                         reward,
@@ -1708,13 +1728,14 @@ pub fn run(args: BlastnArgs) -> Result<()> {
                     edit_ops,
                 ) = if use_dp {
                     extend_gapped_heuristic_with_traceback_with_scratch(
-                        q_seq,
-                        search_seq,
+                        q_seq_blastna,
+                        s_seq_trace,
                         final_seed_qs,
                         final_seed_ss,
                         1,
                         reward,
                         penalty,
+                        &score_matrix,
                         gap_open,
                         gap_extend,
                         x_drop_final,
@@ -1722,8 +1743,8 @@ pub fn run(args: BlastnArgs) -> Result<()> {
                     )
                 } else {
                     match greedy_gapped_alignment_with_traceback(
-                        q_seq_greedy,
-                        s_seq_greedy_trace,
+                        q_seq_blastna,
+                        s_seq_trace,
                         final_seed_qs,
                         final_seed_ss,
                         reward,

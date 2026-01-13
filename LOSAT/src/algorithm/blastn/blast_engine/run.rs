@@ -45,7 +45,7 @@ use super::super::filtering::{
 };
 
 // Import from this module (blast_engine)
-use super::{filter_hsps, calculate_evalue};
+use super::calculate_evalue;
 
 /// Structure to hold ungapped hit data for batch processing
 /// NCBI reference: blast_gapalign.c - init_hsp_array is sorted by score descending
@@ -146,43 +146,8 @@ pub fn run(args: BlastnArgs) -> Result<()> {
         &seq_data.query_masks,
     );
 
-    // Build query lengths map for subject_best_hit filtering
-    let query_lengths: FxHashMap<String, usize> = seq_data
-        .queries
-        .iter()
-        .map(|r| {
-            let id = r.id().split_whitespace().next().unwrap_or("unknown").to_string();
-            (id, r.seq().len())
-        })
-        .collect();
-
-    // NCBI reference: blast_traceback.c:654 - hit_params->cutoff_score_min
-    // Pre-compute cutoff scores per query for HSP re-evaluation phase
-    // Use average subject length as representative value
-    let avg_subject_len = if seq_data.db_num_seqs > 0 {
-        (seq_data.db_len_total / seq_data.db_num_seqs) as i64
-    } else {
-        1000 // Fallback value
-    };
-    let evalue_threshold = args.evalue;
-    let cutoff_scores_map: FxHashMap<String, i32> = seq_data
-        .queries
-        .iter()
-        .map(|r| {
-            let id = r.id().split_whitespace().next().unwrap_or("unknown").to_string();
-            let query_len = r.seq().len() as i64 * 2; // Both strands for blastn
-            let cutoff = compute_blastn_cutoff_score(
-                query_len,
-                avg_subject_len,
-                evalue_threshold,
-                GAP_TRIGGER_BIT_SCORE_NUCL,
-                &params_ungapped,  // UNGAPPED for gap_trigger (NCBI: kbp_std)
-                &params,           // GAPPED for cutoff_score_max (NCBI: kbp_gap)
-                1.0,
-            );
-            (id, cutoff)
-        })
-        .collect();
+    // NCBI reference: blast_traceback.c:654 (cutoff_score_min computed per subject)
+    // Cutoff scores are computed per subject in the main loop; no global map needed.
 
     if args.verbose {
         eprintln!("Searching...");
@@ -195,13 +160,10 @@ pub fn run(args: BlastnArgs) -> Result<()> {
             .unwrap(),
     );
 
-    // Channel for sending hits and sequence data
+    // Channel for sending hits
     // Use Option to signal completion: None means "all subjects processed"
-    let (tx, rx) = channel::<Option<(Vec<Hit>, Vec<(String, String, Vec<u8>, Vec<u8>)>)>>();
+    let (tx, rx) = channel::<Option<Vec<Hit>>>();
     let out_path = args.out.clone();
-    let params_clone = params.clone();
-    let query_lengths_clone = query_lengths.clone();
-    let cutoff_scores_clone = cutoff_scores_map.clone();
 
     // Keep a sender for the main thread to send the completion signal
     let tx_main = tx.clone();
@@ -212,13 +174,11 @@ pub fn run(args: BlastnArgs) -> Result<()> {
             eprintln!("[INFO] Writer thread started, waiting for hits...");
         }
         let mut all_hits = Vec::new();
-        let mut all_sequences: FxHashMap<(String, String), (Vec<u8>, Vec<u8>)> =
-            FxHashMap::default();
         let mut messages_received = 0usize;
 
         while let Ok(msg) = rx.recv() {
             match msg {
-                Some((hits, seq_data)) => {
+                Some(hits) => {
                     messages_received += 1;
                     if verbose && (messages_received == 1 || messages_received % 100 == 0) {
                         eprintln!(
@@ -228,9 +188,6 @@ pub fn run(args: BlastnArgs) -> Result<()> {
                         );
                     }
                     all_hits.extend(hits);
-                    for (q_id, s_id, q_seq, s_seq) in seq_data {
-                        all_sequences.entry((q_id, s_id)).or_insert((q_seq, s_seq));
-                    }
                 }
                 None => {
                     // Completion signal received
@@ -253,23 +210,9 @@ pub fn run(args: BlastnArgs) -> Result<()> {
         }
         let chain_start = std::time::Instant::now();
 
-        // Filter HSPs to remove redundant overlapping hits
-        // Always outputs individual HSPs (NCBI BLAST behavior - no chaining/clustering)
-        let filtered_hits = filter_hsps(
-            all_hits,
-            &all_sequences,
-            config.reward,
-            config.penalty,
-            config.gap_open,
-            config.gap_extend,
-            seq_data.db_len_total,
-            seq_data.db_num_seqs,
-            &params_clone,
-            config.use_dp,
-            verbose,
-            &query_lengths_clone,
-            &cutoff_scores_clone,  // NCBI: hit_params->cutoff_score_min
-        );
+        // NCBI reference: blast_traceback.c:633-692 (post-gapped processing is per-subject)
+        // Per-subject traceback already applies purge/reevaluation; skip duplicate global pass.
+        let filtered_hits = all_hits;
 
         if verbose {
             eprintln!(
@@ -360,16 +303,10 @@ pub fn run(args: BlastnArgs) -> Result<()> {
 
     // NCBI reference: ncbi-blast/c++/include/algo/blast/core/blast_stat.h:866-869 (query blastna, subject ncbi2na)
     // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_encoding.c:85-93 (IUPACNA_TO_BLASTNA)
-    let encoded_queries_blastna: Option<Vec<Vec<u8>>> = if use_dp {
-        None
-    } else {
-        Some(
-            queries_ref
-                .iter()
-                .map(|q_record| encode_iupac_to_blastna(q_record.seq()))
-                .collect(),
-        )
-    };
+    let encoded_queries_blastna: Vec<Vec<u8>> = queries_ref
+        .iter()
+        .map(|q_record| encode_iupac_to_blastna(q_record.seq()))
+        .collect();
 
     seq_data.subjects
         .par_iter()
@@ -387,9 +324,6 @@ pub fn run(args: BlastnArgs) -> Result<()> {
             // NCBI reference: blast_traceback.c:679-692
             // Use hits_with_internal to preserve 0-based coordinates for Phase 2
             let mut hits_with_internal: Vec<(Hit, InternalHitData)> = Vec::new();
-            let mut local_sequences: Vec<(String, String, Vec<u8>, Vec<u8>)> = Vec::new();
-            let mut seen_pairs: std::collections::HashSet<(String, String)> =
-                std::collections::HashSet::new();
 
             let s_seq = s_record.seq();
             let s_len = s_seq.len();
@@ -448,14 +382,15 @@ pub fn run(args: BlastnArgs) -> Result<()> {
             // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_util.c:476-489 (BlastCompressBlastnaSequence old_seq[i] & 3)
             // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_traceback.c:503-507 (greedy traceback uses uncompressed subject)
             // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_util.c:806-833 (GetReverseNuclSequence uses ncbi4na/blastna)
-            let (s_seq_ncbi2na, s_seq_rc_ncbi2na, s_seq_blastna, s_seq_rc_blastna) = if use_dp {
-                (None, None, None, None)
+            // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_encoding.c:85-93 (IUPACNA_TO_BLASTNA)
+            let s_seq_blastna = encode_iupac_to_blastna(s_seq);
+            let s_seq_rc_blastna = encode_iupac_to_blastna(&s_seq_rc);
+            let (s_seq_ncbi2na, s_seq_rc_ncbi2na) = if use_dp {
+                (None, None)
             } else {
                 (
                     Some(encode_iupac_to_ncbi2na(s_seq)),
                     Some(encode_iupac_to_ncbi2na(&s_seq_rc)),
-                    Some(encode_iupac_to_blastna(s_seq)),
-                    Some(encode_iupac_to_blastna(&s_seq_rc)),
                 )
             };
 
@@ -1615,7 +1550,7 @@ pub fn run(args: BlastnArgs) -> Result<()> {
                 let (q_seq_greedy, s_seq_greedy_score, s_seq_greedy_trace) = if use_dp {
                     (q_seq, search_seq, search_seq)
                 } else {
-                    let encoded_queries = encoded_queries_blastna.as_ref().unwrap();
+                    let encoded_queries = &encoded_queries_blastna;
                     let q_seq_blastna = encoded_queries[uh.q_seq_idx].as_slice();
                     let s_seq_score = if uh.is_minus_strand {
                         s_seq_rc_ncbi2na.as_ref().unwrap().as_slice()
@@ -1623,9 +1558,9 @@ pub fn run(args: BlastnArgs) -> Result<()> {
                         s_seq_ncbi2na.as_ref().unwrap().as_slice()
                     };
                     let s_seq_trace = if uh.is_minus_strand {
-                        s_seq_rc_blastna.as_ref().unwrap().as_slice()
+                        s_seq_rc_blastna.as_slice()
                     } else {
-                        s_seq_blastna.as_ref().unwrap().as_slice()
+                        s_seq_blastna.as_slice()
                     };
                     (q_seq_blastna, s_seq_score, s_seq_trace)
                 };
@@ -1828,18 +1763,6 @@ pub fn run(args: BlastnArgs) -> Result<()> {
 
                 let q_id = query_ids[uh.q_idx as usize].clone();
 
-                // Store sequence data
-                let pair_key = (q_id.clone(), s_id.clone());
-                if !seen_pairs.contains(&pair_key) {
-                    seen_pairs.insert(pair_key);
-                    local_sequences.push((
-                        q_id.clone(),
-                        s_id.clone(),
-                        q_seq.to_vec(),
-                        s_seq.to_vec(),
-                    ));
-                }
-
                 // Convert coordinates for minus strand
                 let (hit_s_start, hit_s_end) = if uh.is_minus_strand {
                     let orig_s_start = s_len - final_ss;
@@ -1849,10 +1772,11 @@ pub fn run(args: BlastnArgs) -> Result<()> {
                     (final_ss + 1, final_se)
                 };
 
+                // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_gapalign.c:2567 (gap_align->edit_script stored in HSP)
                 let gap_info = if edit_ops.is_empty() {
                     None
                 } else {
-                    Some(edit_ops.clone())
+                    Some(edit_ops)
                 };
 
                 // NCBI reference: blast_traceback.c:679-692
@@ -1953,9 +1877,23 @@ pub fn run(args: BlastnArgs) -> Result<()> {
                 let q_seq = queries[hit.q_idx as usize].seq();
                 let cutoff = cutoff_scores.get(hit.q_idx as usize).copied().unwrap_or(0);
 
+                // NCBI reference: blast_traceback.c:653-665 (reevaluate with blastna sequences)
+                let q_seq_blastna = encoded_queries_blastna[hit.q_idx as usize].as_slice();
+                let s_seq_eval = if hit.s_start > hit.s_end {
+                    s_seq_rc_blastna.as_slice()
+                } else {
+                    s_seq_blastna.as_slice()
+                };
                 let delete = reevaluate_hsp_with_ambiguities_gapped_ex(
-                    hit, q_seq, s_seq, reward, penalty, gap_open, gap_extend, cutoff,
-                    Some(&reeval_params)
+                    hit,
+                    q_seq_blastna,
+                    s_seq_eval,
+                    reward,
+                    penalty,
+                    gap_open,
+                    gap_extend,
+                    cutoff,
+                    Some(&reeval_params),
                 );
                 if delete {
                     hit.raw_score = i32::MIN; // Mark for removal
@@ -2026,7 +1964,8 @@ pub fn run(args: BlastnArgs) -> Result<()> {
             let _ = internals;
 
             if !final_hits.is_empty() {
-                tx.send(Some((final_hits, local_sequences))).unwrap();
+                // NCBI reference: blast_traceback.c:633-692 (post-gapped processing is per-subject)
+                tx.send(Some(final_hits)).unwrap();
             }
             bar.inc(1);
         });

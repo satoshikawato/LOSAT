@@ -1409,12 +1409,22 @@ fn rebuild_edit_script(esp: &mut GapEditScript) {
 
 /// Reduce small gaps in greedy edit script.
 /// NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_gapalign.c:2669-2758
-fn reduce_gaps(esp: &mut GapEditScript, q: &[u8], s: &[u8]) {
-    // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_gapalign.c:2669-2758 (q1/s1 pointer arithmetic)
+fn reduce_gaps(
+    esp: &mut GapEditScript,
+    q: &[u8],
+    s: &[u8],
+    q_start: usize,
+    q_end: usize,
+    s_start: usize,
+    s_end: usize,
+) {
+    // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_gapalign.c:2669-2758 (q/s pointers with qf/sf end pointers)
     let mut q_idx: isize = 0;
     let mut s_idx: isize = 0;
-    let q_len = q.len() as isize;
-    let s_len = s.len() as isize;
+    let q_start = q_start as isize;
+    let s_start = s_start as isize;
+    let q_len = q_end as isize - q_start;
+    let s_len = s_end as isize - s_start;
 
     for i in 0..esp.size {
         if esp.num[i] == 0 {
@@ -1428,8 +1438,8 @@ fn reduce_gaps(esp: &mut GapEditScript, q: &[u8], s: &[u8]) {
                     if i > 0 {
                         while (q_idx - nm1 as isize) >= 0
                             && (s_idx - nm1 as isize) >= 0
-                            && q[(q_idx - nm1 as isize) as usize]
-                                == s[(s_idx - nm1 as isize) as usize]
+                            && q[(q_start + q_idx - nm1 as isize) as usize]
+                                == s[(s_start + s_idx - nm1 as isize) as usize]
                         {
                             nm1 += 1;
                         }
@@ -1442,7 +1452,7 @@ fn reduce_gaps(esp: &mut GapEditScript, q: &[u8], s: &[u8]) {
                     if i < esp.size - 1 {
                         while q_idx + 1 < q_len
                             && s_idx + 1 < s_len
-                            && q[q_idx as usize] == s[s_idx as usize]
+                            && q[(q_start + q_idx) as usize] == s[(s_start + s_idx) as usize]
                         {
                             nm2 += 1;
                             q_idx += 1;
@@ -1475,8 +1485,8 @@ fn reduce_gaps(esp: &mut GapEditScript, q: &[u8], s: &[u8]) {
 
     let mut q_pos: isize = 0;
     let mut s_pos: isize = 0;
-    let q_len = q.len() as isize;
-    let s_len = s.len() as isize;
+    let q_len = q_end as isize - q_start;
+    let s_len = s_end as isize - s_start;
 
     for i in 0..esp.size {
         if esp.op_type[i] == GapAlignOpType::Sub {
@@ -1514,12 +1524,12 @@ fn reduce_gaps(esp: &mut GapEditScript, q: &[u8], s: &[u8]) {
 
                 for _ in 0..esp.num[i - 1] {
                     if q1 >= 0 && s1 >= 0 && q1 < q_len && s1 < s_len {
-                        if q[q1 as usize] == s[s1 as usize] {
+                        if q[(q_start + q1) as usize] == s[(s_start + s1) as usize] {
                             nm1 += 1;
                         }
                     }
                     if q_pos >= 0 && s_pos >= 0 && q_pos < q_len && s_pos < s_len {
-                        if q[q_pos as usize] == s[s_pos as usize] {
+                        if q[(q_start + q_pos) as usize] == s[(s_start + s_pos) as usize] {
                             nm2 += 1;
                         }
                     }
@@ -1531,7 +1541,7 @@ fn reduce_gaps(esp: &mut GapEditScript, q: &[u8], s: &[u8]) {
 
                 for _ in 0..d {
                     if q_pos >= 0 && s_pos >= 0 && q_pos < q_len && s_pos < s_len {
-                        if q[q_pos as usize] == s[s_pos as usize] {
+                        if q[(q_start + q_pos) as usize] == s[(s_start + s_pos) as usize] {
                             nm2 += 1;
                         }
                     }
@@ -2611,9 +2621,16 @@ fn greedy_gapped_alignment_internal(
             let q_end = q_off as i32 + q_ext_r;
             let s_end = s_off as i32 + s_ext_r;
 
-            let q_slice = &query[q_start as usize..q_end as usize];
-            let s_slice = &subject[s_start as usize..s_end as usize];
-            reduce_gaps(&mut esp, q_slice, s_slice);
+            // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_gapalign.c:2881 (s_ReduceGaps query+q_off-q_ext_l, subject+s_off-s_ext_l)
+            reduce_gaps(
+                &mut esp,
+                query,
+                subject,
+                q_start as usize,
+                q_end as usize,
+                s_start as usize,
+                s_end as usize,
+            );
             edit_script = Some(esp);
         }
     } else {

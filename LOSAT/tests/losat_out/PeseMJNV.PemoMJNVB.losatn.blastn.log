@@ -2,13 +2,9 @@ Reading query & subject...
 Applying DUST filter (level=20, window=64, linker=1)...
 DUST masked 15828 bases (5.42%) across 1 sequences
 Building lookup (Task: blastn, Word: 11, TwoStage: true, LUTWord: 10, Direct: true, DUST: true)...
-[PERF] Subject scan took 42.8141ms: left_ext=144096, right_ext=104477, ungapped=77822, seeds=193847, valid_pos=180240
-[PERF] Subject scan took 38.3602ms: left_ext=136432, right_ext=99892, ungapped=71698, seeds=359254, valid_pos=360480
+[PERF] Subject scan took 43.6346ms: left_ext=144096, right_ext=104477, ungapped=77822, seeds=193847, valid_pos=180240
+[PERF] Subject scan took 40.2008ms: left_ext=136432, right_ext=99892, ungapped=71698, seeds=359254, valid_pos=360480
 
-thread 'main' (4168) has overflowed its stack
-fatal runtime error: stack overflow, aborting
-./run_comparison.sh: line 112:  4168 Aborted                 $LOSAT_BIN blastn -q ./fasta/LC738873.fasta -s ./fasta/LC738871.fasta -o ./losat_out/PeseMJNV.PemoMJNVB.losatn.blastn.out --task blastn -n 1
-
-real	0m7.781s
-user	0m7.722s
+real	0m6.211s
+user	0m6.142s
 sys	0m0.010s

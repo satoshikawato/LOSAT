@@ -1410,8 +1410,11 @@ fn rebuild_edit_script(esp: &mut GapEditScript) {
 /// Reduce small gaps in greedy edit script.
 /// NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_gapalign.c:2669-2758
 fn reduce_gaps(esp: &mut GapEditScript, q: &[u8], s: &[u8]) {
-    let mut q_idx: usize = 0;
-    let mut s_idx: usize = 0;
+    // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_gapalign.c:2669-2758 (q1/s1 pointer arithmetic)
+    let mut q_idx: isize = 0;
+    let mut s_idx: isize = 0;
+    let q_len = q.len() as isize;
+    let s_len = s.len() as isize;
 
     for i in 0..esp.size {
         if esp.num[i] == 0 {
@@ -1423,22 +1426,23 @@ fn reduce_gaps(esp: &mut GapEditScript, q: &[u8], s: &[u8]) {
                 if esp.num[i] >= 12 {
                     let mut nm1: i32 = 1;
                     if i > 0 {
-                        while (nm1 as usize) <= q_idx
-                            && (nm1 as usize) <= s_idx
-                            && q[q_idx - nm1 as usize] == s[s_idx - nm1 as usize]
+                        while (q_idx - nm1 as isize) >= 0
+                            && (s_idx - nm1 as isize) >= 0
+                            && q[(q_idx - nm1 as isize) as usize]
+                                == s[(s_idx - nm1 as isize) as usize]
                         {
                             nm1 += 1;
                         }
                     }
 
-                    q_idx += esp.num[i] as usize;
-                    s_idx += esp.num[i] as usize;
+                    q_idx += esp.num[i] as isize;
+                    s_idx += esp.num[i] as isize;
 
                     let mut nm2: i32 = 0;
                     if i < esp.size - 1 {
-                        while q_idx + 1 < q.len()
-                            && s_idx + 1 < s.len()
-                            && q[q_idx] == s[s_idx]
+                        while q_idx + 1 < q_len
+                            && s_idx + 1 < s_len
+                            && q[q_idx as usize] == s[s_idx as usize]
                         {
                             nm2 += 1;
                             q_idx += 1;
@@ -1450,22 +1454,18 @@ fn reduce_gaps(esp: &mut GapEditScript, q: &[u8], s: &[u8]) {
                         update_edit_script(esp, i as isize, nm1 - 1, nm2);
                     }
 
-                    if q_idx > 0 {
-                        q_idx -= 1;
-                    }
-                    if s_idx > 0 {
-                        s_idx -= 1;
-                    }
+                    q_idx -= 1;
+                    s_idx -= 1;
                 } else {
-                    q_idx += esp.num[i] as usize;
-                    s_idx += esp.num[i] as usize;
+                    q_idx += esp.num[i] as isize;
+                    s_idx += esp.num[i] as isize;
                 }
             }
             GapAlignOpType::Ins => {
-                q_idx += esp.num[i] as usize;
+                q_idx += esp.num[i] as isize;
             }
             GapAlignOpType::Del => {
-                s_idx += esp.num[i] as usize;
+                s_idx += esp.num[i] as isize;
             }
             GapAlignOpType::Invalid => {}
         }

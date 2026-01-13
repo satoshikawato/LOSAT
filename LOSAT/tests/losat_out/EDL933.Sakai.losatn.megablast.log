@@ -2,9 +2,14 @@ Reading query & subject...
 Applying DUST filter (level=20, window=64, linker=1)...
 DUST masked 2737 bases (0.05%) across 1 sequences
 Building lookup (Task: megablast, Word: 28, TwoStage: true, LUTWord: 8, Direct: false, DUST: true)...
-[PERF] Subject scan took 1.709805s: left_ext=47157364, right_ext=47133063, ungapped=3800, seeds=34394248, valid_pos=261837
-[PERF] Subject scan took 1.7529034s: left_ext=46990150, right_ext=46951827, ungapped=3465, seeds=68452754, valid_pos=523674
+[PERF] Subject scan took 1.8092618s: left_ext=47157364, right_ext=47133063, ungapped=3800, seeds=34394248, valid_pos=261837
+[PERF] Subject scan took 1.7066235s: left_ext=46990150, right_ext=46951827, ungapped=3465, seeds=68452754, valid_pos=523674
 
-real	0m3.912s
-user	0m3.723s
-sys	0m0.050s
+thread 'main' (32765) panicked at src/algorithm/blastn/alignment/greedy.rs:1428:32:
+index out of bounds: the len is 7665 but the index is 7676
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+./run_comparison.sh: line 22: 32765 Aborted                 $LOSAT_BIN blastn -q ./fasta/EDL933.fna -s ./fasta/Sakai.fna -o ./losat_out/EDL933.Sakai.losatn.megablast.out -n 1
+
+real	0m12.007s
+user	0m6.362s
+sys	0m5.453s

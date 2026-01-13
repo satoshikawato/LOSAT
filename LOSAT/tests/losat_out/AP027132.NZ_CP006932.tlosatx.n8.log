@@ -117,12 +117,12 @@
 [DEBUG LINKING_CUTOFF] cutoff_small_gap_raw=41, cutoff_big_gap_raw=45
 [DEBUG LINKING_CUTOFF] scale_factor=1, final_cutoff_small=41, final_cutoff_big=45
 [DEBUG LINKING_CUTOFF] gap_prob=0.5, ignore_small_gaps=false
-[DEBUG LINKING_FILTER] subject_len_nucl=657101, group_size=119136
-[DEBUG LINKING_FILTER] INDEX 0 (small gap): cutoff=41, filtered=0, passed=0, total=0, filter_rate=0.00%
-[DEBUG LINKING_FILTER] INDEX 1 (large gap): cutoff=45, filtered=79037, passed=3165120, total=3244157, filter_rate=2.44%
 [DEBUG LINKING_FILTER] subject_len_nucl=657101, group_size=121529
 [DEBUG LINKING_FILTER] INDEX 0 (small gap): cutoff=41, filtered=0, passed=0, total=0, filter_rate=0.00%
 [DEBUG LINKING_FILTER] INDEX 1 (large gap): cutoff=45, filtered=81001, passed=3164850, total=3245851, filter_rate=2.50%
+[DEBUG LINKING_FILTER] subject_len_nucl=657101, group_size=119136
+[DEBUG LINKING_FILTER] INDEX 0 (small gap): cutoff=41, filtered=0, passed=0, total=0, filter_rate=0.00%
+[DEBUG LINKING_FILTER] INDEX 1 (large gap): cutoff=45, filtered=79037, passed=3165120, total=3244157, filter_rate=2.44%
 [DEBUG LINKING_FILTER] subject_len_nucl=657101, group_size=128731
 [DEBUG LINKING_FILTER] INDEX 0 (small gap): cutoff=41, filtered=0, passed=0, total=0, filter_rate=0.00%
 [DEBUG LINKING_FILTER] INDEX 1 (large gap): cutoff=45, filtered=78521, passed=15705606, total=15784127, filter_rate=0.50%
@@ -137,6 +137,6 @@
 [DEBUG OUTPUT_FILTER] Expected after E-value filter: 99631 (all HSPs - E-value filtered)
 [DEBUG OUTPUT_FILTER] Final hits after filtering: 99631
 
-real	13m50.115s
-user	35m2.971s
-sys	0m0.150s
+real	14m34.261s
+user	37m43.395s
+sys	0m0.100s

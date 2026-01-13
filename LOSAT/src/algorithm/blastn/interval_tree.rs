@@ -533,7 +533,7 @@ impl BlastIntervalTree {
         let new_index = self.alloc_leaf_node(hsp.clone(), query_start);
 
         // Start the insertion loop
-        self.add_hsp_internal(new_index, region_start, region_end, &hsp, query_start, false, index_method);
+        self.add_hsp_internal(new_index, region_start, region_end, &hsp, false, index_method);
     }
 
     /// Legacy add_hsp without index_method (defaults to QueryAndSubject)
@@ -550,7 +550,6 @@ impl BlastIntervalTree {
         region_start: i32,
         region_end: i32,
         hsp: &TreeHsp,
-        query_start: i32,
         mut index_subject_range: bool,
         index_method: IndexMethod,
     ) {
@@ -587,19 +586,17 @@ impl BlastIntervalTree {
 
                 // NCBI reference: blast_itree.c:703-793
                 // Two leaves in same subtree - need to split
-                self.split_and_insert(
+                // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_itree.c:703-746
+                // NCBI continues the insertion loop after splitting; avoid recursion to match.
+                let mid_index = self.split_and_insert(
                     root_index,
-                    new_index,
                     leftptr as usize,
                     IntervalDirection::Left,
                     index_subject_range,
                     index_method,
-                    current_region_start,
-                    current_region_end,
-                    hsp,
-                    query_start,
                 );
-                return;
+                root_index = mid_index;
+                continue;
             }
             // NCBI reference: blast_itree.c:635-657
             else if current_region_start > middle {
@@ -622,19 +619,17 @@ impl BlastIntervalTree {
 
                 // NCBI reference: blast_itree.c:703-793
                 // Two leaves in same subtree - need to split
-                self.split_and_insert(
+                // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_itree.c:703-746
+                // NCBI continues the insertion loop after splitting; avoid recursion to match.
+                let mid_index = self.split_and_insert(
                     root_index,
-                    new_index,
                     rightptr as usize,
                     IntervalDirection::Right,
                     index_subject_range,
                     index_method,
-                    current_region_start,
-                    current_region_end,
-                    hsp,
-                    query_start,
                 );
-                return;
+                root_index = mid_index;
+                continue;
             }
             // NCBI reference: blast_itree.c:659-701
             else {
@@ -670,23 +665,17 @@ impl BlastIntervalTree {
     }
 
     /// Handle the case where two leaves collide in the same subtree.
-    /// This creates a new internal node, reattaches the old leaf, then continues
-    /// the insertion loop for the new leaf.
+    /// This creates a new internal node and reattaches the old leaf.
     ///
     /// NCBI reference: blast_itree.c:703-793
     fn split_and_insert(
         &mut self,
         parent_root_index: usize,
-        new_leaf_index: usize,
         old_leaf_index: usize,
         which_half: IntervalDirection,
         index_subject_range: bool,
         index_method: IndexMethod,
-        region_start: i32,
-        region_end: i32,
-        hsp: &TreeHsp,
-        query_start: i32,
-    ) {
+    ) -> usize {
         // NCBI reference: blast_itree.c:709-712
         // Allocate new internal node
         let mid_index = self.alloc_internal_node(parent_root_index, which_half);
@@ -759,16 +748,9 @@ impl BlastIntervalTree {
             }
         }
 
-        // Now continue inserting the new leaf starting from the new internal node
-        self.add_hsp_internal(
-            new_leaf_index,
-            region_start,
-            region_end,
-            hsp,
-            query_start,
-            index_subject_range,
-            index_method,
-        );
+        // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_itree.c:746
+        // Return the new internal node so the caller can continue the loop.
+        mid_index
     }
 
     /// Check if the tree contains an HSP that envelops the input HSP

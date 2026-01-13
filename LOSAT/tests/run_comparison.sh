@@ -13,11 +13,54 @@ LOSAT_BIN="../target/release/LOSAT"
 # ==========================================
 echo "Starting LOSAT commands..."
 
+# --- LOSATN Commands (Default / Megablast behavior) ---
+
+# NZ_CP006932 self (Default/Megablast)
+(time $LOSAT_BIN blastn -q ./fasta/NZ_CP006932.fasta -s ./fasta/NZ_CP006932.fasta -o ./losat_out/NZ_CP006932.NZ_CP006932.losatn.megablast.out -n 1 )&>./losat_out/NZ_CP006932.NZ_CP006932.losatn.megablast.log
+
+# EDL933 vs Sakai
+(time $LOSAT_BIN blastn -q ./fasta/EDL933.fna -s ./fasta/Sakai.fna -o ./losat_out/EDL933.Sakai.losatn.megablast.out -n 1 )&>./losat_out/EDL933.Sakai.losatn.megablast.log
+
+# Sakai vs MG1655
+(time $LOSAT_BIN blastn -q ./fasta/Sakai.fna -s ./fasta/MG1655.fna -o ./losat_out/Sakai.MG1655.losatn.megablast.out -n 1 )&>./losat_out/Sakai.MG1655.losatn.megablast.log
+
+
+# --- LOSATN Commands (Task: blastn) ---
+# NZ_CP006932 self (Task: blastn)
+(time $LOSAT_BIN blastn -q ./fasta/NZ_CP006932.fasta -s ./fasta/NZ_CP006932.fasta -o ./losat_out/NZ_CP006932.NZ_CP006932.losatn.blastn.out --task blastn -n 1 )&>./losat_out/NZ_CP006932.NZ_CP006932.losatn.blastn.log
+# PesePMNV vs MjPMNV
+(time $LOSAT_BIN blastn -q ./fasta/AP027152.fasta -s ./fasta/AP027202.fasta -o ./losat_out/PesePMNV.MjPMNV.losatn.blastn.out --task blastn -n 1 )&>./losat_out/PesePMNV.MjPMNV.losatn.blastn.log
+
+# MelaMJNV vs PemoMJNVA
+(time $LOSAT_BIN blastn -q ./fasta/LC738874.fasta -s ./fasta/LC738870.fasta -o ./losat_out/MelaMJNV.PemoMJNVA.losatn.blastn.out --task blastn -n 1 )&>./losat_out/MelaMJNV.PemoMJNVA.losatn.blastn.log
+
+# SiNMV vs ChdeNMV
+(time $LOSAT_BIN blastn -q ./fasta/LC738884.fasta -s ./fasta/AP027155.fasta -o ./losat_out/SiNMV.ChdeNMV.losatn.blastn.out --task blastn -n 1 )&>./losat_out/SiNMV.ChdeNMV.losatn.blastn.log
+
+# PmeNMV vs MjPMNV
+(time $LOSAT_BIN blastn -q ./fasta/LC738869.fasta -s ./fasta/AP027202.fasta -o ./losat_out/PmeNMV.MjPMNV.losatn.blastn.out --task blastn -n 1 )&>./losat_out/PmeNMV.MjPMNV.losatn.blastn.log
+
+# PmeNMV vs PesePMNV
+(time $LOSAT_BIN blastn -q ./fasta/LC738869.fasta -s ./fasta/AP027152.fasta -o ./losat_out/PmeNMV.PesePMNV.losatn.blastn.out --task blastn -n 1 )&>./losat_out/PmeNMV.PesePMNV.losatn.blastn.log
+
+# PeseMJNV vs PemoMJNVB
+(time $LOSAT_BIN blastn -q ./fasta/LC738873.fasta -s ./fasta/LC738871.fasta -o ./losat_out/PeseMJNV.PemoMJNVB.losatn.blastn.out --task blastn -n 1 )&>./losat_out/PeseMJNV.PemoMJNVB.losatn.blastn.log
+
+# PemoMJNVA vs PeseMJNV
+(time $LOSAT_BIN blastn -q ./fasta/LC738870.fasta -s ./fasta/LC738873.fasta -o ./losat_out/PemoMJNVA.PeseMJNV.losatn.blastn.out --task blastn -n 1 )&>./losat_out/PemoMJNVA.PeseMJNV.losatn.blastn.log
+
+# MjeNMV vs MelaMJNV
+(time $LOSAT_BIN blastn -q ./fasta/LC738868.fasta -s ./fasta/LC738874.fasta -o ./losat_out/MjeNMV.MelaMJNV.losatn.blastn.out --task blastn -n 1 )&>./losat_out/MjeNMV.MelaMJNV.losatn.blastn.log
+
+# MjPMNV vs MlPMNV
+(time $LOSAT_BIN blastn -q ./fasta/AP027202.fasta -s ./fasta/LC738875.fasta -o ./losat_out/MjPMNV.MlPMNV.losatn.blastn.out --task blastn -n 1 )&>./losat_out/MjPMNV.MlPMNV.losatn.blastn.log
+
+
 # --- TLOSATX Commands (Genetic Code: 1) ---
 echo "Starting AP027280 self..."
 (time $LOSAT_BIN tblastx -q ./fasta/AP027280.fasta -s ./fasta/AP027280.fasta -o ./losat_out/AP027280.AP027280.tlosatx.n1.out --query-gencode 1 --db-gencode 1 -n 1)&>./losat_out/AP027280.AP027280.tlosatx.n1.log 
 (time $LOSAT_BIN tblastx -q ./fasta/AP027280.fasta -s ./fasta/AP027280.fasta -o ./losat_out/AP027280.AP027280.tlosatx.n8.out --query-gencode 1 --db-gencode 1 -n 8 )&>./losat_out/AP027280.AP027280.tlosatx.n8.log 
-<<COMMENTOUT
+
 # MjeNMV vs MelaMJNV
 echo "Starting MjeNMV vs MelaMJNV (LOSAT)..."
 (time $LOSAT_BIN tblastx -q ./fasta/MjeNMV.fasta -s ./fasta/MelaMJNV.fasta -o ./losat_out/MjeNMV.MelaMJNV.tlosatx.n8.out --query-gencode 1 --db-gencode 1 -n 8 ) &> ./losat_out/MjeNMV.MelaMJNV.tlosatx.n8.log 
@@ -75,50 +118,9 @@ echo "Starting AP027133 vs AP027132..."
 # AP027133 vs AP027132
 (time $LOSAT_BIN tblastx -q ./fasta/AP027133.fasta -s ./fasta/AP027132.fasta -o ./losat_out/AP027133.AP027132.tlosatx.n8.out --query-gencode 4 --db-gencode 4 -n 8 )&>./losat_out/AP027133.AP027132.tlosatx.n8.log 
 
-COMMENTOUT
 
 
-# --- LOSATN Commands (Default / Megablast behavior) ---
 
-# NZ_CP006932 self (Default/Megablast)
-(time $LOSAT_BIN blastn -q ./fasta/NZ_CP006932.fasta -s ./fasta/NZ_CP006932.fasta -o ./losat_out/NZ_CP006932.NZ_CP006932.losatn.megablast.out -n 1 )&>./losat_out/NZ_CP006932.NZ_CP006932.losatn.megablast.log
-
-# EDL933 vs Sakai
-(time $LOSAT_BIN blastn -q ./fasta/EDL933.fna -s ./fasta/Sakai.fna -o ./losat_out/EDL933.Sakai.losatn.megablast.out -n 1 )&>./losat_out/EDL933.Sakai.losatn.megablast.log
-
-# Sakai vs MG1655
-(time $LOSAT_BIN blastn -q ./fasta/Sakai.fna -s ./fasta/MG1655.fna -o ./losat_out/Sakai.MG1655.losatn.megablast.out -n 1 )&>./losat_out/Sakai.MG1655.losatn.megablast.log
-
-
-# --- LOSATN Commands (Task: blastn) ---
-# NZ_CP006932 self (Task: blastn)
-(time $LOSAT_BIN blastn -q ./fasta/NZ_CP006932.fasta -s ./fasta/NZ_CP006932.fasta -o ./losat_out/NZ_CP006932.NZ_CP006932.losatn.blastn.out --task blastn -n 1 )&>./losat_out/NZ_CP006932.NZ_CP006932.losatn.blastn.log
-# PesePMNV vs MjPMNV
-(time $LOSAT_BIN blastn -q ./fasta/AP027152.fasta -s ./fasta/AP027202.fasta -o ./losat_out/PesePMNV.MjPMNV.losatn.blastn.out --task blastn -n 1 )&>./losat_out/PesePMNV.MjPMNV.losatn.blastn.log
-
-# MelaMJNV vs PemoMJNVA
-(time $LOSAT_BIN blastn -q ./fasta/LC738874.fasta -s ./fasta/LC738870.fasta -o ./losat_out/MelaMJNV.PemoMJNVA.losatn.blastn.out --task blastn -n 1 )&>./losat_out/MelaMJNV.PemoMJNVA.losatn.blastn.log
-
-# SiNMV vs ChdeNMV
-(time $LOSAT_BIN blastn -q ./fasta/LC738884.fasta -s ./fasta/AP027155.fasta -o ./losat_out/SiNMV.ChdeNMV.losatn.blastn.out --task blastn -n 1 )&>./losat_out/SiNMV.ChdeNMV.losatn.blastn.log
-
-# PmeNMV vs MjPMNV
-(time $LOSAT_BIN blastn -q ./fasta/LC738869.fasta -s ./fasta/AP027202.fasta -o ./losat_out/PmeNMV.MjPMNV.losatn.blastn.out --task blastn -n 1 )&>./losat_out/PmeNMV.MjPMNV.losatn.blastn.log
-
-# PmeNMV vs PesePMNV
-(time $LOSAT_BIN blastn -q ./fasta/LC738869.fasta -s ./fasta/AP027152.fasta -o ./losat_out/PmeNMV.PesePMNV.losatn.blastn.out --task blastn -n 1 )&>./losat_out/PmeNMV.PesePMNV.losatn.blastn.log
-
-# PeseMJNV vs PemoMJNVB
-(time $LOSAT_BIN blastn -q ./fasta/LC738873.fasta -s ./fasta/LC738871.fasta -o ./losat_out/PeseMJNV.PemoMJNVB.losatn.blastn.out --task blastn -n 1 )&>./losat_out/PeseMJNV.PemoMJNVB.losatn.blastn.log
-
-# PemoMJNVA vs PeseMJNV
-(time $LOSAT_BIN blastn -q ./fasta/LC738870.fasta -s ./fasta/LC738873.fasta -o ./losat_out/PemoMJNVA.PeseMJNV.losatn.blastn.out --task blastn -n 1 )&>./losat_out/PemoMJNVA.PeseMJNV.losatn.blastn.log
-
-# MjeNMV vs MelaMJNV
-(time $LOSAT_BIN blastn -q ./fasta/LC738868.fasta -s ./fasta/LC738874.fasta -o ./losat_out/MjeNMV.MelaMJNV.losatn.blastn.out --task blastn -n 1 )&>./losat_out/MjeNMV.MelaMJNV.losatn.blastn.log
-
-# MjPMNV vs MlPMNV
-(time $LOSAT_BIN blastn -q ./fasta/AP027202.fasta -s ./fasta/LC738875.fasta -o ./losat_out/MjPMNV.MlPMNV.losatn.blastn.out --task blastn -n 1 )&>./losat_out/MjPMNV.MlPMNV.losatn.blastn.log
 
 echo "Finished LOSAT commands!"
 

@@ -6,6 +6,304 @@
 //!
 //! Reference: NCBI BLAST source code (blast_stat.c)
 
+// NCBI reference: ncbi-blast/c++/include/algo/blast/core/ncbi_math.h:152-163
+const LOGDERIV_ORDER_MAX: usize = 4;
+const POLYGAMMA_ORDER_MAX: usize = LOGDERIV_ORDER_MAX;
+const NCBIMATH_PI: f64 = 3.1415926535897932384626433832795;
+const NCBIMATH_LN2: f64 = 0.69314718055994530941723212145818;
+const NCBIMATH_LNPI: f64 = 1.1447298858494001741434273513531;
+
+// NCBI reference: ncbi-blast/c++/src/algo/blast/core/ncbi_math.c:60-62
+const DBL_EPSILON: f64 = 2.2204460492503131e-16;
+
+// NCBI reference: ncbi-blast/c++/src/algo/blast/core/ncbi_math.c:140-151
+const DEFAULT_GAMMA_COEF: [f64; 11] = [
+    4.694580336184385e+04,
+    -1.560605207784446e+05,
+    2.065049568014106e+05,
+    -1.388934775095388e+05,
+    5.031796415085709e+04,
+    -9.601592329182778e+03,
+    8.785855930895250e+02,
+    -3.155153906098611e+01,
+    2.908143421162229e-01,
+    -2.319827630494973e-04,
+    1.251639670050933e-10,
+];
+
+// NCBI reference: ncbi-blast/c++/src/algo/blast/core/ncbi_math.c:296-309
+const PRECOMPUTED_FACTORIAL: [f64; 35] = [
+    1.0, 1.0, 2.0, 6.0, 24.0, 120.0, 720.0, 5040.0, 40320.0, 362880.0,
+    3628800.0, 39916800.0, 479001600.0, 6227020800.0, 87178291200.0,
+    1307674368000.0, 20922789888000.0, 355687428096000.0,
+    6402373705728000.0, 121645100408832000.0, 2432902008176640000.0,
+    51090942171709440000.0, 1124000727777607680000.0,
+    25852016738884976640000.0, 620448401733239439360000.0,
+    15511210043330985984000000.0, 403291461126605635584000000.0,
+    10888869450418352160768000000.0, 304888344611713860501504000000.0,
+    8841761993739701954543616000000.0, 265252859812191058636308480000000.0,
+    8222838654177922817725562880000000.0, 263130836933693530167218012160000000.0,
+    8683317618811886495518194401280000000.0, 295232799039604140847618609643520000000.0,
+];
+
+// NCBI reference: ncbi-blast/c++/src/algo/blast/core/ncbi_math.c:33-55
+fn blast_expm1(x: f64) -> f64 {
+    let absx = x.abs();
+    if absx > 0.33 {
+        return x.exp() - 1.0;
+    }
+    if absx < 1.0e-16 {
+        return x;
+    }
+    x * (1.0
+        + x * (1.0 / 2.0
+            + x * (1.0 / 6.0
+                + x * (1.0 / 24.0
+                    + x * (1.0 / 120.0
+                        + x * (1.0 / 720.0
+                            + x * (1.0 / 5040.0
+                                + x * (1.0 / 40320.0
+                                    + x * (1.0 / 362880.0
+                                        + x * (1.0 / 3628800.0
+                                            + x * (1.0 / 39916800.0
+                                                + x * (1.0 / 479001600.0
+                                                    + x / 6227020800.0))))))))))))
+}
+
+// NCBI reference: ncbi-blast/c++/src/algo/blast/core/ncbi_math.c:64-83
+fn blast_log1p(x: f64) -> f64 {
+    if x.abs() >= 0.2 {
+        return (x + 1.0).ln();
+    }
+    let mut sum = 0.0;
+    let mut y = x;
+    let mut i = 0;
+    while i < 500 {
+        i += 1;
+        sum += y / (i as f64);
+        if y.abs() < DBL_EPSILON {
+            break;
+        }
+        y *= x;
+        i += 1;
+        sum -= y / (i as f64);
+        if y < DBL_EPSILON {
+            break;
+        }
+        y *= x;
+    }
+    sum
+}
+
+// NCBI reference: ncbi-blast/c++/src/algo/blast/core/ncbi_math.c:444-470
+fn blast_powi(mut x: f64, mut n: i32) -> f64 {
+    if n == 0 {
+        return 1.0;
+    }
+    if x == 0.0 {
+        if n < 0 {
+            return f64::INFINITY;
+        }
+        return 0.0;
+    }
+    if n < 0 {
+        x = 1.0 / x;
+        n = -n;
+    }
+    let mut y = 1.0;
+    while n > 0 {
+        if (n & 1) != 0 {
+            y *= x;
+        }
+        n /= 2;
+        x *= x;
+    }
+    y
+}
+
+// NCBI reference: ncbi-blast/c++/src/algo/blast/core/ncbi_math.c:94-137
+fn s_log_derivative(order: i32, u: &[f64]) -> f64 {
+    if order < 0 || order as usize > LOGDERIV_ORDER_MAX {
+        return f64::INFINITY;
+    }
+    if order > 0 && u[0] == 0.0 {
+        return f64::INFINITY;
+    }
+
+    let mut y = [0.0; LOGDERIV_ORDER_MAX + 1];
+    for i in 1..=order as usize {
+        y[i] = u[i] / u[0];
+    }
+
+    match order {
+        0 => {
+            if u[0] > 0.0 {
+                u[0].ln()
+            } else {
+                f64::INFINITY
+            }
+        }
+        1 => y[1],
+        2 => y[2] - y[1] * y[1],
+        3 => y[3] - 3.0 * y[2] * y[1] + 2.0 * y[1] * y[1] * y[1],
+        4 => {
+            let tmp = y[1] * y[1];
+            let mut value = y[4] - 4.0 * y[3] * y[1] - 3.0 * y[2] * y[2] + 12.0 * y[2] * tmp;
+            value -= 6.0 * tmp * tmp;
+            value
+        }
+        _ => f64::INFINITY,
+    }
+}
+
+// NCBI reference: ncbi-blast/c++/src/algo/blast/core/ncbi_math.c:161-221
+fn s_general_ln_gamma(x: f64, order: i32) -> f64 {
+    let xx = x - 1.0;
+    let xgamma_dim = DEFAULT_GAMMA_COEF.len() as f64;
+    let tx = xx + xgamma_dim;
+    let mut y = [0.0; POLYGAMMA_ORDER_MAX + 1];
+
+    for i in 0..=order {
+        let mut tmp = tx;
+        let mut idx = DEFAULT_GAMMA_COEF.len();
+        let mut value;
+        if i == 0 {
+            idx -= 1;
+            value = DEFAULT_GAMMA_COEF[idx] / tmp;
+            while idx > 0 {
+                idx -= 1;
+                tmp -= 1.0;
+                value += DEFAULT_GAMMA_COEF[idx] / tmp;
+            }
+        } else {
+            idx -= 1;
+            value = DEFAULT_GAMMA_COEF[idx] / blast_powi(tmp, i + 1);
+            while idx > 0 {
+                idx -= 1;
+                tmp -= 1.0;
+                value += DEFAULT_GAMMA_COEF[idx] / blast_powi(tmp, i + 1);
+            }
+            let tmp_factorial = blast_factorial(i);
+            value *= if i % 2 == 0 { tmp_factorial } else { -tmp_factorial };
+        }
+        y[i as usize] = value;
+    }
+    y[0] += 1.0;
+
+    let mut value = s_log_derivative(order, &y);
+    let mut tmp = tx + 0.5;
+    match order {
+        0 => {
+            value += (NCBIMATH_LNPI + NCBIMATH_LN2) / 2.0 + (xx + 0.5) * tmp.ln() - tmp;
+        }
+        1 => {
+            value += tmp.ln() - xgamma_dim / tmp;
+        }
+        2 => {
+            value += (tmp + xgamma_dim) / (tmp * tmp);
+        }
+        3 => {
+            value -= (1.0 + 2.0 * xgamma_dim / tmp) / (tmp * tmp);
+        }
+        4 => {
+            value += 2.0 * (1.0 + 3.0 * xgamma_dim / tmp) / (tmp * tmp * tmp);
+        }
+        _ => {
+            tmp = blast_factorial(order - 2)
+                * blast_powi(tmp, 1 - order)
+                * (1.0 + (order as f64 - 1.0) * xgamma_dim / tmp);
+            if order % 2 == 0 {
+                value += tmp;
+            } else {
+                value -= tmp;
+            }
+        }
+    }
+    value
+}
+
+// NCBI reference: ncbi-blast/c++/src/algo/blast/core/ncbi_math.c:235-284
+fn s_poly_gamma(x: f64, order: i32) -> f64 {
+    if order < 0 || order as usize > POLYGAMMA_ORDER_MAX {
+        return f64::INFINITY;
+    }
+
+    if x >= 1.0 {
+        return s_general_ln_gamma(x, order);
+    }
+
+    if x < 0.0 {
+        let mut value = s_general_ln_gamma(1.0 - x, order);
+        if (order - 1) % 2 != 0 {
+            value = -value;
+        }
+        if order == 0 {
+            let mut sx = (NCBIMATH_PI * x).sin().abs();
+            if (x < -0.1 && ((x.ceil() == x) || sx < 2.0 * DBL_EPSILON)) || sx == 0.0 {
+                return f64::INFINITY;
+            }
+            value += NCBIMATH_LNPI - sx.ln();
+        } else {
+            let mut y = [0.0; POLYGAMMA_ORDER_MAX + 1];
+            let mut tmp = 1.0;
+            let mut angle = x * NCBIMATH_PI;
+            y[0] = angle.sin();
+            for k in 1..=order as usize {
+                tmp *= NCBIMATH_PI;
+                angle += NCBIMATH_PI / 2.0;
+                y[k] = tmp * angle.sin();
+            }
+            value -= s_log_derivative(order, &y);
+        }
+        value
+    } else {
+        let mut value = s_general_ln_gamma(1.0 + x, order);
+        if order == 0 {
+            if x == 0.0 {
+                return f64::INFINITY;
+            }
+            value -= x.ln();
+        } else {
+            let tmp = blast_factorial(order - 1) * blast_powi(x, -order);
+            value += if order % 2 == 0 { tmp } else { -tmp };
+        }
+        value
+    }
+}
+
+// NCBI reference: ncbi-blast/c++/src/algo/blast/core/ncbi_math.c:292-295
+fn s_ln_gamma(x: f64) -> f64 {
+    s_poly_gamma(x, 0)
+}
+
+// NCBI reference: ncbi-blast/c++/src/algo/blast/core/ncbi_math.c:312-321
+fn blast_factorial(n: i32) -> f64 {
+    if n < 0 {
+        return 0.0;
+    }
+    if (n as usize) < PRECOMPUTED_FACTORIAL.len() {
+        return PRECOMPUTED_FACTORIAL[n as usize];
+    }
+    (s_ln_gamma(n as f64 + 1.0)).exp()
+}
+
+// NCBI reference: ncbi-blast/c++/src/algo/blast/core/ncbi_math.c:323-329
+fn blast_ln_gamma_int(n: i32) -> f64 {
+    if n > 1 && (n as usize) < PRECOMPUTED_FACTORIAL.len() {
+        return PRECOMPUTED_FACTORIAL[(n - 1) as usize].ln();
+    }
+    s_ln_gamma(n as f64)
+}
+
+// NCBI reference: ncbi-blast/c++/src/algo/blast/core/ncbi_math.c:473-480
+fn blast_ln_factorial(x: f64) -> f64 {
+    if x <= 0.0 {
+        0.0
+    } else {
+        s_ln_gamma(x + 1.0)
+    }
+}
+
 /// Gap decay divisor for weighting E-values when multiple alignments are considered.
 ///
 /// From NCBI BLAST: "The decayrate parameter is a value in the interval (0,1).
@@ -16,26 +314,15 @@ pub fn gap_decay_divisor(decay_rate: f64, num_segments: usize) -> f64 {
     if num_segments == 0 {
         return 1.0;
     }
-    (1.0 - decay_rate) * decay_rate.powi((num_segments - 1) as i32)
+    // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_stat.c:4081
+    (1.0 - decay_rate) * blast_powi(decay_rate, (num_segments - 1) as i32)
 }
 
-/// Natural log of factorial using Stirling's approximation for large n.
+/// Natural log of factorial.
 ///
-/// For small n (< 10), uses direct calculation.
-/// For large n, uses Stirling's approximation: ln(n!) ≈ n*ln(n) - n + 0.5*ln(2*pi*n)
+/// NCBI reference: ncbi-blast/c++/src/algo/blast/core/ncbi_math.c:473-480
 pub fn ln_factorial(n: f64) -> f64 {
-    if n <= 1.0 {
-        return 0.0;
-    }
-
-    // In our usage, n is almost always an integer (e.g. number of HSPs),
-    // so prefer an exact log-factorial for stability and NCBI-compatibility.
-    if (n.fract()).abs() < f64::EPSILON && n <= (i32::MAX as f64) {
-        return ln_factorial_int(n as i32);
-    }
-
-    // Fallback: Stirling's approximation for non-integers/large values.
-    n * n.ln() - n + 0.5 * (2.0 * std::f64::consts::PI * n).ln()
+    blast_ln_factorial(n)
 }
 
 /// Natural log of gamma function for positive integers.
@@ -45,11 +332,8 @@ pub fn ln_gamma_int(n: i32) -> f64 {
     if n <= 0 {
         return f64::INFINITY;
     }
-    if n == 1 || n == 2 {
-        return 0.0;
-    }
-    // Exact for integers: ln(Gamma(n)) = ln((n-1)!)
-    ln_factorial_int(n - 1)
+    // NCBI reference: ncbi-blast/c++/src/algo/blast/core/ncbi_math.c:323-329
+    blast_ln_gamma_int(n)
 }
 
 /// Convert P-value to E-value.
@@ -63,7 +347,7 @@ pub fn p_to_e(p: f64) -> f64 {
         return i32::MAX as f64;
     }
     // NCBI: -BLAST_Log1p(-p)
-    -(-p).ln_1p()
+    -blast_log1p(-p)
 }
 
 /// Convert E-value to P-value.
@@ -74,43 +358,14 @@ pub fn e_to_p(e: f64) -> f64 {
         return 0.0;
     }
     // NCBI: -BLAST_Expm1(-e)
-    -(-e).exp_m1()
+    -blast_expm1(-e)
 }
 
 /// Exact ln(n!) for integers (n >= 0).
 ///
-/// This is used heavily in sum-statistics and we want it to be stable and
-/// as close as possible to NCBI's `BLAST_LnFactorial` when called with integer n.
-///
-/// NCBI reference: ncbi_math.c:473-480
-/// ```c
-/// double BLAST_LnFactorial (double x) {
-///     if( x <= 0.0)
-///         return 0.0;
-///     else
-///         return s_LnGamma(x + 1.0);  // s_LnGamma uses lgamma from C standard library
-/// }
-/// ```
-///
-/// Note: NCBI uses lgamma(n+1) for all n, but direct calculation is exact for integers
-/// and matches NCBI's precision for typical HSP chain sizes (2-10 HSPs, rarely up to 400+).
-/// For very large n (400+), direct calculation may have accumulated error, but tests
-/// show it remains within acceptable bounds for E-value calculation.
-///
+/// NCBI reference: ncbi-blast/c++/src/algo/blast/core/ncbi_math.c:473-480
 fn ln_factorial_int(n: i32) -> f64 {
-    if n <= 1 {
-        return 0.0;
-    }
-    
-    // Direct sum calculation: exact for integers and matches NCBI's precision
-    // for typical use cases. NCBI uses lgamma(n+1) which is more numerically
-    // stable for very large n, but direct calculation is sufficient for our
-    // use case (HSP chain sizes typically 2-10, rarely up to 400+).
-    let mut sum = 0.0;
-    for i in 2..=n {
-        sum += (i as f64).ln();
-    }
-    sum
+    blast_ln_factorial(n as f64)
 }
 
 /// Lookup tables for s_BlastSumP interpolation (from NCBI BLAST).
@@ -152,7 +407,7 @@ fn blast_sum_p_calc(r: i32, s: f64) -> f64 {
             return (-s).exp();
         }
         // -BLAST_Expm1(-exp(-s))
-        return -(-(-s).exp()).exp_m1();
+        return -blast_expm1(-(-s).exp());
     }
     if r < 1 {
         return 0.0;
@@ -255,7 +510,7 @@ fn blast_sum_p_calc(r: i32, s: f64) -> f64 {
 fn blast_sum_p(r: i32, s: f64) -> f64 {
     // Faithful port of NCBI BLAST's s_BlastSumP.
     if r == 1 {
-        return -(-(-s).exp()).exp_m1();
+      return -blast_expm1(-(-s).exp());
     }
 
     if r <= 4 {

@@ -9,6 +9,7 @@ pub mod ncbi_cutoffs;
 pub mod filtering;
 pub mod blast_extend;
 pub mod blast_engine;
+pub mod interval_tree;
 
 pub use args::BlastnArgs;
 pub use blast_engine::run;

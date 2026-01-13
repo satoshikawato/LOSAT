@@ -107,12 +107,14 @@ fn test_extend_hit_ungapped_at_sequence_start() {
 
 #[test]
 fn test_extend_hit_ungapped_at_sequence_end() {
-    let q_seq = [0u8, 1u8, 2u8];
-    let s_seq = [0u8, 1u8, 2u8];
+    // NCBI one-hit extension scans a full 3-aa seed without bounds checks.
+    // Start position must allow a full word (aa_ungapped.c:846-921).
+    let q_seq = [0u8, 1u8, 2u8, 3u8];
+    let s_seq = [0u8, 1u8, 2u8, 3u8];
     
-    // Start at last position
-    let last_pos = q_seq.len() - 1;
-    let (q_start, q_end, s_start, s_end, score, _s_last_off) = 
+    // Start at the last valid word position (covers the sequence end).
+    let last_pos = q_seq.len() - 3;
+    let (q_start, q_end, s_start, s_end, score, _s_last_off) =
         extend_hit_ungapped(&q_seq, &s_seq, last_pos, last_pos, 0, X_DROP_UNGAPPED);
     
     // Should extend leftward only (can't extend right beyond end)
@@ -194,13 +196,15 @@ fn test_extend_hit_two_hit_no_connection() {
 
 #[test]
 fn test_extend_hit_two_hit_at_boundaries() {
-    let q_seq = [0u8, 1u8, 2u8];
-    let s_seq = [0u8, 1u8, 2u8];
+    // NCBI two-hit extension assumes the seed word is fully in-bounds; it does
+    // not bounds-check the word scan loop (aa_ungapped.c:1089-1158).
+    let q_seq = [0u8, 1u8, 2u8, 3u8];
+    let s_seq = [0u8, 1u8, 2u8, 3u8];
     
     // Two hits at sequence boundaries
     let s_left_off = 0;
-    let s_right_off = 2;
-    let q_right_off = 2;
+    let s_right_off = 1; // last valid start for k_size=3
+    let q_right_off = 1;
     
     let x_drop = X_DROP_UNGAPPED;
     let (q_start, q_end, s_start, s_end, score, _right_extended, _s_last_off) = 

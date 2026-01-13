@@ -33,7 +33,7 @@ alwaysApply: true
 **The Golden Rule:**
 The NCBI C/C++ implementation is the **GROUND TRUTH**. Prioritize correctness and speed over code aesthetics. If major structural changes are needed to achieve parity, **DO IT.**
 
-NCBI BLASTのコードベース:/mnt/c/Users/kawato/Documents/ncbi-blast/
+NCBI BLASTのコードベース:/mnt/c/Users/kawato/Documents/GitHub/ncbi-blast/
 
 # LOSAT Project Cursor Rules
 

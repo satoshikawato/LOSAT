@@ -21,81 +21,81 @@ comparisons = [
     # --- TBLASTX ---
     {
         "name": "NZ_CP006932_Self", "mode": "TBLASTX", 
-        "losat_log": "NZ_CP006932.NZ_CP006932.tlosatx.n1.log", 
+        "losat_log": "NZ_CP006932.NZ_CP006932.tlosatx.n8.log", 
         "blast_log": "NZ_CP006932.NZ_CP006932.tblastx.n1.log"
     },
     {
         "name": "AP027132_vs_NZ", "mode": "TBLASTX", 
-        "losat_log": "AP027132.NZ_CP006932.tlosatx.n1.log", 
+        "losat_log": "AP027132.NZ_CP006932.tlosatx.n8.log", 
         "blast_log": "AP027132.NZ_CP006932.tblastx.n1.log"
     },
     {
         "name": "AP027078_vs_AP027131", "mode": "TBLASTX", 
-        "losat_log": "AP027078.AP027131.tlosatx.n1.log", 
+        "losat_log": "AP027078.AP027131.tlosatx.n8.log", 
         "blast_log": "AP027078.AP027131.tblastx.n1.log"
     },
     {
         "name": "AP027131_vs_AP027133", "mode": "TBLASTX", 
-        "losat_log": "AP027131.AP027133.tlosatx.n1.log", 
+        "losat_log": "AP027131.AP027133.tlosatx.n8.log", 
         "blast_log": "AP027131.AP027133.tblastx.n1.log"
     },
     {
         "name": "AP027133_vs_AP027132", "mode": "TBLASTX", 
-        "losat_log": "AP027133.AP027132.tlosatx.n1.log", 
+        "losat_log": "AP027133.AP027132.tlosatx.n8.log", 
         "blast_log": "AP027133.AP027132.tblastx.n1.log"
     },
     {
         "name": "AP027280_Self", "mode": "TBLASTX", 
-        "losat_log": "AP027280.AP027280.tlosatx.n1.log", 
+        "losat_log": "AP027280.AP027280.tlosatx.n8.log", 
         "blast_log": "AP027280.AP027280.tblastx.n1.log"
     },
          {
         "name": "MjeNMV_vs_MelaMJNV", "mode": "TBLASTX", 
-        "losat_log": "MjeNMV.MelaMJNV.tlosatx.n1.log", 
+        "losat_log": "MjeNMV.MelaMJNV.tlosatx.n8.log", 
         "blast_log": "MjeNMV.MelaMJNV.tblastx.n1.log"
     },
     {
         "name": "MelaMJNV_vs_PemoMJNVA", "mode": "TBLASTX", 
-        "losat_log": "MelaMJNV.PemoMJNVA.tlosatx.n1.log", 
+        "losat_log": "MelaMJNV.PemoMJNVA.tlosatx.n8.log", 
         "blast_log": "MelaMJNV.PemoMJNVA.tblastx.n1.log"
     },
     {
         "name": "PemoMJNVA_vs_PeseMJNV", "mode": "TBLASTX", 
-        "losat_log": "PemoMJNVA.PeseMJNV.tlosatx.n1.log", 
+        "losat_log": "PemoMJNVA.PeseMJNV.tlosatx.n8.log", 
         "blast_log": "PemoMJNVA.PeseMJNV.tblastx.n1.log"
     },
     {
         "name": "PeseMJNV_vs_PemoMJNVB", "mode": "TBLASTX", 
-        "losat_log": "PeseMJNV.PemoMJNVB.tlosatx.n1.log", 
+        "losat_log": "PeseMJNV.PemoMJNVB.tlosatx.n8.log", 
         "blast_log": "PeseMJNV.PemoMJNVB.tblastx.n1.log"
     },
     {
         "name": "PemoMJNVB_vs_LvMJNV", "mode": "TBLASTX", 
-        "losat_log": "PemoMJNVB.LvMJNV.tlosatx.n1.log", 
+        "losat_log": "PemoMJNVB.LvMJNV.tlosatx.n8.log", 
         "blast_log": "PemoMJNVB.LvMJNV.tblastx.n1.log"
     },
     {
         "name": "LvMJNV_vs_TrcuMJNV", "mode": "TBLASTX", 
-        "losat_log": "LvMJNV.TrcuMJNV.tlosatx.n1.log", 
+        "losat_log": "LvMJNV.TrcuMJNV.tlosatx.n8.log", 
         "blast_log": "LvMJNV.TrcuMJNV.tblastx.n1.log"
     },
     {   "name": "TrcuMJNV_vs_MellatMJNV", "mode": "TBLASTX",
-        "losat_log": "TrcuMJNV.MellatMJNV.tlosatx.n1.log", 
+        "losat_log": "TrcuMJNV.MellatMJNV.tlosatx.n8.log", 
         "blast_log": "TrcuMJNV.MellatMJNV.tblastx.n1.log"
     },
     {
         "name": "MellatMJNV_vs_MeenMJNV", "mode": "TBLASTX",
-        "losat_log": "MellatMJNV.MeenMJNV.tlosatx.n1.log", 
+        "losat_log": "MellatMJNV.MeenMJNV.tlosatx.n8.log", 
         "blast_log": "MellatMJNV.MeenMJNV.tblastx.n1.log"
     },
     {
         "name": "MeenMJNV_vs_MejoMJNV", "mode": "TBLASTX",
-        "losat_log": "MeenMJNV.MejoMJNV.tlosatx.n1.log", 
+        "losat_log": "MeenMJNV.MejoMJNV.tlosatx.n8.log", 
         "blast_log": "MeenMJNV.MejoMJNV.tblastx.n1.log"
     },
     {
         "name": "AvCLPV_vs_PsCLPV", "mode": "TBLASTX",
-        "losat_log": "AvCLPV.PsCLPV.tlosatx.n1.log", 
+        "losat_log": "AvCLPV.PsCLPV.tlosatx.n8.log", 
         "blast_log": "AvCLPV.PsCLPV.tblastx.n1.log"
     },  
     # --- BLASTN (Default / Megablast) ---

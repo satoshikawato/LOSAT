@@ -1,0 +1,14 @@
+Reading query & subject...
+Applying DUST filter (level=20, window=64, linker=1)...
+DUST masked 11021 bases (4.11%) across 1 sequences
+Building lookup (Task: blastn, Word: 11, TwoStage: true, LUTWord: 10, Direct: true, DUST: true)...
+[BLASTN_DEBUG] Subject AP027155.1 (len=285096): cutoff_scores=[31], params_ungapped=(lambda=0.5500, K=0.2100), params_gapped=(lambda=0.6250, K=0.4100)
+[PERF] Subject scan took 36.6003ms: left_ext=79591, right_ext=58834, ungapped=40915, seeds=261606, valid_pos=142544
+[PERF] Subject scan took 31.1381ms: left_ext=74460, right_ext=55909, ungapped=36596, seeds=416914, valid_pos=285088
+[DEBUG] Subject AP027155.1: positions=285088, seeds_found=416914, ungapped_low=64657, two_hit_failed=0, gapped_attempted=12854, hits=6490, cutoff_score=31
+[DEBUG] Interval tree: ungapped_collected=12854, containment_skipped=4961, gapped_added=21934, tree_nodes=6490
+[DEBUG_PURGE] initial=6490, start_purged=1846 (trimmed=123), end_purged=196 (trimmed=111), final=4682
+[DEBUG_PURGE] initial=4638, start_purged=14 (trimmed=0), end_purged=5 (trimmed=0), final=4619
+[DEBUG] Phase 2 breakdown: step1(extract)=6490, step2(purge1)=4682 (-1808), step3(reeval)=4638 (-44), step4(purge2)=4619 (-19), step6(tree)=4556 (-63)
+[DEBUG_PURGE] initial=4556, start_purged=0 (trimmed=0), end_purged=0 (trimmed=0), final=4556
+[DEBUG_PURGE] initial=4556, start_purged=0 (trimmed=0), end_purged=0 (trimmed=0), final=4556

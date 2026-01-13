@@ -19,13 +19,17 @@ use super::tracing::{trace_hsp_target, trace_match_target, trace_ungapped_hit_if
 /// Coordinates are stored as absolute positions in the concatenated buffer.
 #[derive(Clone, Copy)]
 pub struct InitHSP {
-    /// Query absolute coordinate (in concatenated buffer, with sentinel)
+    /// Query absolute coordinate (concatenated buffer, 0-based)
+    /// Reference: blast_query_info.c:311-315, blast_util.c:112-116.
     pub q_start_absolute: i32,
-    /// Query end absolute coordinate (in concatenated buffer, with sentinel)
+    /// Query end absolute coordinate (concatenated buffer, 0-based)
+    /// Reference: blast_query_info.c:311-315, blast_util.c:112-116.
     pub q_end_absolute: i32,
-    /// Subject coordinate (frame-relative, with sentinel)
+    /// Subject coordinate (frame-relative, 0-based)
+    /// Reference: blast_aascan.c:110-113.
     pub s_start: i32,
-    /// Subject end coordinate (frame-relative, with sentinel)
+    /// Subject end coordinate (frame-relative, 0-based)
+    /// Reference: blast_aascan.c:110-113.
     pub s_end: i32,
     /// Raw score from extension
     pub score: i32,
@@ -58,18 +62,19 @@ pub fn trace_init_hsp_if_match(stage: &str, init: &InitHSP, contexts: &[QueryCon
     };
 
     let ctx = &contexts[init.ctx_idx];
-    // Convert absolute query coords to context-relative (sentinel-inclusive) first.
+    // Convert absolute query coords to context-relative (0-based).
+    // Reference: blast_gapalign.c:4756-4768, blast_query_info.c:311-315.
     let q_start_rel = adjust_initial_hsp_offsets(init.q_start_absolute, ctx.frame_base);
     let q_end_rel = adjust_initial_hsp_offsets(init.q_end_absolute, ctx.frame_base);
     if q_start_rel < 0 || q_end_rel < 0 || init.s_start < 0 || init.s_end < 0 {
         return;
     }
 
-    // Convert to logical AA coords (sentinel-exclusive, half-open).
-    let q_aa_start = (q_start_rel as usize).saturating_sub(1);
-    let q_aa_end = (q_end_rel as usize).saturating_sub(1);
-    let s_aa_start = (init.s_start as usize).saturating_sub(1);
-    let s_aa_end = (init.s_end as usize).saturating_sub(1);
+    // Convert to logical AA coords (0-based, half-open).
+    let q_aa_start = q_start_rel as usize;
+    let q_aa_end = q_end_rel as usize;
+    let s_aa_start = init.s_start as usize;
+    let s_aa_end = init.s_end as usize;
 
     let (q_start, q_end) = convert_coords(q_aa_start, q_aa_end, init.q_frame, init.q_orig_len);
     let (s_start, s_end) = convert_coords(s_aa_start, s_aa_end, init.s_frame, init.s_orig_len);
@@ -171,11 +176,10 @@ pub fn get_ungapped_hsp_list(
         let q_end_relative = adjust_initial_hsp_offsets(init_hsp.q_end_absolute, ctx.frame_base);
 
         // NCBI: Blast_HSPInit (blast_hits.c:150-189)
-        // query.offset = ungapped_data->q_start (context-relative, sentinel included)
+        // query.offset = ungapped_data->q_start (context-relative, 0-based)
         // query.end = ungapped_data->length + ungapped_data->q_start
         //
-        // In LOSAT, q_start_relative is context-relative coordinate (sentinel included).
-        // We store it as array index into ctx.aa_seq (which has sentinel at index 0).
+        // In LOSAT, q_start_relative is context-relative coordinate (0-based).
         let qs = q_start_relative as usize;
         let qe = q_end_relative as usize;
         let ss = init_hsp.s_start as usize;
@@ -186,10 +190,10 @@ pub fn get_ungapped_hsp_list(
             continue;
         }
 
-        // Convert to logical coords (subtract sentinel for reporting)
-        // NCBI stores offsets as sentinel-inclusive, but reports as sentinel-exclusive
-        let (qs_l, qe_l) = (qs.saturating_sub(1), qe.saturating_sub(1));
-        let (ss_l, se_l) = (ss.saturating_sub(1), se.saturating_sub(1));
+        // Offsets are already 0-based in query/subject->sequence buffers.
+        // Reference: blast_gapalign.c:4756-4768, blast_aascan.c:110-113.
+        let (qs_l, qe_l) = (qs, qe);
+        let (ss_l, se_l) = (ss, se);
 
         // Create UngappedHit with context-relative coordinates (before reevaluation)
         // NCBI: Blast_HSPInit creates HSP with original extension score

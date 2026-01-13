@@ -155,10 +155,11 @@ unsafe fn gather_scores8_reevaluate_avx2(
 /// }
 /// ```
 ///
-/// Inputs are **raw offsets into the sentinel-wrapped AA sequences**:
-/// - `query_raw` and `subject_raw` include sentinel bytes at index 0 and last
-/// - `q_off_raw` / `s_off_raw` point at the first aligned residue (not sentinel)
+/// Inputs are offsets into query/subject->sequence buffers (0-based, past NULLB):
+/// - `query_raw` / `subject_raw` start at the first residue (sequence_start + 1)
+/// - `q_off_raw` / `s_off_raw` are 0-based offsets from those starts
 /// - `hsp_len` is the ungapped alignment length in residues
+/// Reference: blast_util.c:112-116, blast_hits.c:675-733.
 ///
 /// Returns updated (q_off_raw, s_off_raw, hsp_len, score) if kept, else `None`.
 #[inline]
@@ -658,5 +659,4 @@ pub fn hsp_test(
     // NCBI: return (identity_check || length_check)
     identity_check || length_check
 }
-
 

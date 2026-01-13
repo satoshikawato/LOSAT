@@ -73,19 +73,31 @@ pub fn extend_hit_ungapped(
         if current_score_r >= max_score_total {
             max_score_total = current_score_r;
             best_j = j;
-        } else if current_score_r <= 0 || (max_score_total - current_score_r) > x_drop_val {
+        } else if (max_score_total - current_score_r) > x_drop_val {
+            // NCBI BLAST uses only X-drop termination, NOT score <= 0 check
+            // Reference: na_ungapped.c:220-233
             break;
         }
         j += 1;
     }
 
-    (
+    let result = (
         q_pos - best_i,
         q_pos + best_j + 1,
         s_pos - best_i,
         s_pos + best_j + 1,
         max_score_total,
-    )
+    );
+
+    // Debug coordinate tracking
+    if std::env::var("LOSAT_DEBUG_COORDS").is_ok() {
+        eprintln!(
+            "[UNGAPPED] q_pos={}, s_pos={}, best_i={}, best_j={} -> q=[{}, {}), s=[{}, {}), score={}",
+            q_pos, s_pos, best_i, best_j, result.0, result.1, result.2, result.3, result.4
+        );
+    }
+
+    result
 }
 
 /// Determine word type for two-stage lookup

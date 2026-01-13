@@ -259,6 +259,7 @@ impl HspChain {
             q_idx: 0,
             s_idx: 0,
             raw_score: (self.total_score * 2.0) as i32,
+            gap_info: None,
         }
     }
 }
@@ -325,6 +326,7 @@ mod tests {
             q_idx: 0,
             s_idx: 0,
             raw_score: (bit_score * 2.0) as i32,
+            gap_info: None,
         }
     }
 

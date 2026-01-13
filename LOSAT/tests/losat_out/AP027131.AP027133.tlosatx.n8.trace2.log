@@ -1,0 +1,1035 @@
+[TRACE_HSP] diag_table query_length=1324217 window=40 diag_array_size=2097152 diag_mask=2097151
+[DEBUG CUTOFF_CALC] eff_searchsp=44573947800
+[DEBUG CUTOFF_CALC] evalue=10, e_clamped=10
+[DEBUG CUTOFF_CALC] K=0.134, Lambda=0.3176
+[DEBUG CUTOFF_CALC] K*searchsp=5.972909e9, K*searchsp/E=5.972909e8
+[DEBUG CUTOFF_CALC] log(K*searchsp/E)=2.020791e1, score_before_ceil=6.362694e1
+[DEBUG CUTOFF_CALC] final_score=64 (ceil)
+[DEBUG CUTOFF_UPDATE] query_len_aa=220702, subject_len_nucl=606194
+[DEBUG CUTOFF_UPDATE] searchsp=133788228188 (MIN(220702, 606194) * 606194)
+[DEBUG CUTOFF_CALC] eff_searchsp=133788228188
+[DEBUG CUTOFF_CALC] evalue=0.0000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000005, e_clamped=0.000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000001
+[DEBUG CUTOFF_CALC] K=0.134, Lambda=0.3176
+[DEBUG CUTOFF_CALC] K*searchsp=1.792762e10, K*searchsp/E=1.792762e307
+[DEBUG CUTOFF_CALC] log(K*searchsp/E)=7.074774e2, score_before_ceil=2.227574e3
+[DEBUG CUTOFF_CALC] final_score=2228 (ceil)
+[DEBUG CUTOFF_UPDATE] update_cutoff=2228 (from CUTOFF_E_TBLASTX=1e-300, searchsp=133788228188, gap_decay=0.5)
+[DEBUG CUTOFF_UPDATE] gap_trigger=41, cutoff_score_max=64
+[DEBUG CUTOFF_UPDATE] final_cutoff=41 (MIN(update_cutoff=41, gap_trigger=41, cutoff_score_max=64))
+[DEBUG CUTOFF_CALC] eff_searchsp=44573947800
+[DEBUG CUTOFF_CALC] evalue=10, e_clamped=10
+[DEBUG CUTOFF_CALC] K=0.134, Lambda=0.3176
+[DEBUG CUTOFF_CALC] K*searchsp=5.972909e9, K*searchsp/E=5.972909e8
+[DEBUG CUTOFF_CALC] log(K*searchsp/E)=2.020791e1, score_before_ceil=6.362694e1
+[DEBUG CUTOFF_CALC] final_score=64 (ceil)
+[DEBUG CUTOFF_UPDATE] query_len_aa=220702, subject_len_nucl=606194
+[DEBUG CUTOFF_UPDATE] searchsp=133788228188 (MIN(220702, 606194) * 606194)
+[DEBUG CUTOFF_CALC] eff_searchsp=133788228188
+[DEBUG CUTOFF_CALC] evalue=0.0000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000005, e_clamped=0.000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000001
+[DEBUG CUTOFF_CALC] K=0.134, Lambda=0.3176
+[DEBUG CUTOFF_CALC] K*searchsp=1.792762e10, K*searchsp/E=1.792762e307
+[DEBUG CUTOFF_CALC] log(K*searchsp/E)=7.074774e2, score_before_ceil=2.227574e3
+[DEBUG CUTOFF_CALC] final_score=2228 (ceil)
+[DEBUG CUTOFF_UPDATE] update_cutoff=2228 (from CUTOFF_E_TBLASTX=1e-300, searchsp=133788228188, gap_decay=0.5)
+[DEBUG CUTOFF_UPDATE] gap_trigger=41, cutoff_score_max=64
+[DEBUG CUTOFF_UPDATE] final_cutoff=41 (MIN(update_cutoff=41, gap_trigger=41, cutoff_score_max=64))
+[DEBUG CUTOFF_CALC] eff_searchsp=44573947800
+[DEBUG CUTOFF_CALC] evalue=10, e_clamped=10
+[DEBUG CUTOFF_CALC] K=0.134, Lambda=0.3176
+[DEBUG CUTOFF_CALC] K*searchsp=5.972909e9, K*searchsp/E=5.972909e8
+[DEBUG CUTOFF_CALC] log(K*searchsp/E)=2.020791e1, score_before_ceil=6.362694e1
+[DEBUG CUTOFF_CALC] final_score=64 (ceil)
+[DEBUG CUTOFF_UPDATE] query_len_aa=220702, subject_len_nucl=606194
+[DEBUG CUTOFF_UPDATE] searchsp=133788228188 (MIN(220702, 606194) * 606194)
+[DEBUG CUTOFF_CALC] eff_searchsp=133788228188
+[DEBUG CUTOFF_CALC] evalue=0.0000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000005, e_clamped=0.000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000001
+[DEBUG CUTOFF_CALC] K=0.134, Lambda=0.3176
+[DEBUG CUTOFF_CALC] K*searchsp=1.792762e10, K*searchsp/E=1.792762e307
+[DEBUG CUTOFF_CALC] log(K*searchsp/E)=7.074774e2, score_before_ceil=2.227574e3
+[DEBUG CUTOFF_CALC] final_score=2228 (ceil)
+[DEBUG CUTOFF_UPDATE] update_cutoff=2228 (from CUTOFF_E_TBLASTX=1e-300, searchsp=133788228188, gap_decay=0.5)
+[DEBUG CUTOFF_UPDATE] gap_trigger=41, cutoff_score_max=64
+[DEBUG CUTOFF_UPDATE] final_cutoff=41 (MIN(update_cutoff=41, gap_trigger=41, cutoff_score_max=64))
+[DEBUG CUTOFF_CALC] eff_searchsp=44573947800
+[DEBUG CUTOFF_CALC] evalue=10, e_clamped=10
+[DEBUG CUTOFF_CALC] K=0.134, Lambda=0.3176
+[DEBUG CUTOFF_CALC] K*searchsp=5.972909e9, K*searchsp/E=5.972909e8
+[DEBUG CUTOFF_CALC] log(K*searchsp/E)=2.020791e1, score_before_ceil=6.362694e1
+[DEBUG CUTOFF_CALC] final_score=64 (ceil)
+[DEBUG CUTOFF_UPDATE] query_len_aa=220702, subject_len_nucl=606194
+[DEBUG CUTOFF_UPDATE] searchsp=133788228188 (MIN(220702, 606194) * 606194)
+[DEBUG CUTOFF_CALC] eff_searchsp=133788228188
+[DEBUG CUTOFF_CALC] evalue=0.0000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000005, e_clamped=0.000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000001
+[DEBUG CUTOFF_CALC] K=0.134, Lambda=0.3176
+[DEBUG CUTOFF_CALC] K*searchsp=1.792762e10, K*searchsp/E=1.792762e307
+[DEBUG CUTOFF_CALC] log(K*searchsp/E)=7.074774e2, score_before_ceil=2.227574e3
+[DEBUG CUTOFF_CALC] final_score=2228 (ceil)
+[DEBUG CUTOFF_UPDATE] update_cutoff=2228 (from CUTOFF_E_TBLASTX=1e-300, searchsp=133788228188, gap_decay=0.5)
+[DEBUG CUTOFF_UPDATE] gap_trigger=41, cutoff_score_max=64
+[DEBUG CUTOFF_UPDATE] final_cutoff=41 (MIN(update_cutoff=41, gap_trigger=41, cutoff_score_max=64))
+[DEBUG CUTOFF_CALC] eff_searchsp=44573947800
+[DEBUG CUTOFF_CALC] evalue=10, e_clamped=10
+[DEBUG CUTOFF_CALC] K=0.134, Lambda=0.3176
+[DEBUG CUTOFF_CALC] K*searchsp=5.972909e9, K*searchsp/E=5.972909e8
+[DEBUG CUTOFF_CALC] log(K*searchsp/E)=2.020791e1, score_before_ceil=6.362694e1
+[DEBUG CUTOFF_CALC] final_score=64 (ceil)
+[DEBUG CUTOFF_UPDATE] query_len_aa=220702, subject_len_nucl=606194
+[DEBUG CUTOFF_UPDATE] searchsp=133788228188 (MIN(220702, 606194) * 606194)
+[DEBUG CUTOFF_CALC] eff_searchsp=133788228188
+[DEBUG CUTOFF_CALC] evalue=0.0000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000005, e_clamped=0.000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000001
+[DEBUG CUTOFF_CALC] K=0.134, Lambda=0.3176
+[DEBUG CUTOFF_CALC] K*searchsp=1.792762e10, K*searchsp/E=1.792762e307
+[DEBUG CUTOFF_CALC] log(K*searchsp/E)=7.074774e2, score_before_ceil=2.227574e3
+[DEBUG CUTOFF_CALC] final_score=2228 (ceil)
+[DEBUG CUTOFF_UPDATE] update_cutoff=2228 (from CUTOFF_E_TBLASTX=1e-300, searchsp=133788228188, gap_decay=0.5)
+[DEBUG CUTOFF_UPDATE] gap_trigger=41, cutoff_score_max=64
+[DEBUG CUTOFF_UPDATE] final_cutoff=41 (MIN(update_cutoff=41, gap_trigger=41, cutoff_score_max=64))
+[DEBUG CUTOFF_CALC] eff_searchsp=44573947800
+[DEBUG CUTOFF_CALC] evalue=10, e_clamped=10
+[DEBUG CUTOFF_CALC] K=0.134, Lambda=0.3176
+[DEBUG CUTOFF_CALC] K*searchsp=5.972909e9, K*searchsp/E=5.972909e8
+[DEBUG CUTOFF_CALC] log(K*searchsp/E)=2.020791e1, score_before_ceil=6.362694e1
+[DEBUG CUTOFF_CALC] final_score=64 (ceil)
+[DEBUG CUTOFF_UPDATE] query_len_aa=220702, subject_len_nucl=606194
+[DEBUG CUTOFF_UPDATE] searchsp=133788228188 (MIN(220702, 606194) * 606194)
+[DEBUG CUTOFF_CALC] eff_searchsp=133788228188
+[DEBUG CUTOFF_CALC] evalue=0.0000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000005, e_clamped=0.000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000001
+[DEBUG CUTOFF_CALC] K=0.134, Lambda=0.3176
+[DEBUG CUTOFF_CALC] K*searchsp=1.792762e10, K*searchsp/E=1.792762e307
+[DEBUG CUTOFF_CALC] log(K*searchsp/E)=7.074774e2, score_before_ceil=2.227574e3
+[DEBUG CUTOFF_CALC] final_score=2228 (ceil)
+[DEBUG CUTOFF_UPDATE] update_cutoff=2228 (from CUTOFF_E_TBLASTX=1e-300, searchsp=133788228188, gap_decay=0.5)
+[DEBUG CUTOFF_UPDATE] gap_trigger=41, cutoff_score_max=64
+[DEBUG CUTOFF_UPDATE] final_cutoff=41 (MIN(update_cutoff=41, gap_trigger=41, cutoff_score_max=64))
+[TRACE_HSP] seed/extend ctx_idx=2 s_f_idx=0 q_frame=3 s_frame=1 score=152 cutoff=41 x_dropoff=16 last_hit=185710 subject_offset=185726 diff=16 q_raw=210395 query_offset=651801 diag_coord=466075 right_extend=true s_last_off=185790
+[TRACE_HSP] two_hit_pass diff=16 window=40 wordsize=3 diff>=window=false diff<wordsize=false q_minus_diff=651785 ctx_frame_base=441406 q_minus_diff<base=false diag_offset=40 diag_mask=2097151 diag_array_size=2097152
+[TRACE_HSP] stage=init_hsp_saved raw_score=152 ctx_idx=2 s_f_idx=0 q_frame=3 s_frame=1 q=631110-631352 s=557101-557343
+[TRACE_HSP] stage=after_get_ungapped_hsp_list raw_score=152 e=inf ctx_idx=2 s_f_idx=0 q_frame=3 s_frame=1 linked_set=false start_of_chain=false q=631110-631352 s=557101-557343
+[TRACE_HSP] stage=after_reevaluate raw_score=152 e=inf ctx_idx=2 s_f_idx=0 q_frame=3 s_frame=1 linked_set=false start_of_chain=false q=631110-631352 s=557101-557343
+[DEBUG HSP_STATS] After reevaluation: 338859 HSPs
+[DEBUG HSP_STATS] Saved by cutoff: 338859
+[DEBUG HSP_STATS] Filtered by cutoff: 31524554
+[DEBUG HSP_STATS] Filtered by reeval: 0
+[DEBUG HSP_STATS] Score range: 41 - 3520 (avg: 46.48)
+[DEBUG LINKING_CUTOFF] avg_query_length=220702, subject_len_nucl=606194
+[DEBUG LINKING_CUTOFF] query_length_after_adj=220646, subject_length_after_adj=202008
+[DEBUG LINKING_CUTOFF] expected_length=56
+[DEBUG LINKING_CUTOFF] search_sp=44572257168, window_sq=2500, 8*window_sq=20000
+[DEBUG LINKING_CUTOFF] search_sp > 8*window_sq: true
+[DEBUG LINKING_CUTOFF] y_variable=7.428379e-5
+[DEBUG LINKING_CUTOFF] x_variable_before_div=8.277491e5
+[DEBUG LINKING_CUTOFF] x_variable_after_div=1.655498e6
+[DEBUG LINKING_CUTOFF] x_small=3.714190e-1
+[DEBUG LINKING_CUTOFF] cutoff_small_gap_raw=41, cutoff_big_gap_raw=46
+[DEBUG LINKING_CUTOFF] scale_factor=1, final_cutoff_small=41, final_cutoff_big=46
+[DEBUG LINKING_CUTOFF] gap_prob=0.5, ignore_small_gaps=false
+[TRACE_LINKING] target_in_group idx=3368 raw_score=152 q_frame=3 s_frame=1 q=631110-631352 s=557101-557343 q_aa=210369-210450 s_aa=185700-185781 q_trim=210374..210445 s_trim=185705..185776 cutoff_small=41 cutoff_big=46
+[DEBUG_CHAINING] INDEX 0 (small gap) linking for target HSP:
+  h_qe: 210445, h_se: 185776, h_qe_gap: 210495, h_se_gap: 185826
+  [SKIP] j_lh_idx=3369, qo=210376, so=119523, conditions: qo<=210445? true so<=185776? true qo>210495? false so>185826? false
+  [SKIP] j_lh_idx=3368, qo=210377, so=81113, conditions: qo<=210445? true so<=185776? true qo>210495? false so>185826? false
+  [SKIP] j_lh_idx=3367, qo=210377, so=82682, conditions: qo<=210445? true so<=185776? true qo>210495? false so>185826? false
+  [SKIP] j_lh_idx=3366, qo=210377, so=3159, conditions: qo<=210445? true so<=185776? true qo>210495? false so>185826? false
+  [SKIP] j_lh_idx=3365, qo=210380, so=66772, conditions: qo<=210445? true so<=185776? true qo>210495? false so>185826? false
+  [SKIP] j_lh_idx=3364, qo=210380, so=133493, conditions: qo<=210445? true so<=185776? true qo>210495? false so>185826? false
+  [SKIP] j_lh_idx=3363, qo=210381, so=19740, conditions: qo<=210445? true so<=185776? true qo>210495? false so>185826? false
+  [SKIP] j_lh_idx=3362, qo=210380, so=198147, conditions: qo<=210445? true so<=185776? false qo>210495? false so>185826? true
+  [SKIP] j_lh_idx=3361, qo=210380, so=61542, conditions: qo<=210445? true so<=185776? true qo>210495? false so>185826? false
+  [SKIP] j_lh_idx=3360, qo=210382, so=86818, conditions: qo<=210445? true so<=185776? true qo>210495? false so>185826? false
+  [SKIP] j_lh_idx=3359, qo=210381, so=9033, conditions: qo<=210445? true so<=185776? true qo>210495? false so>185826? false
+  [SKIP] j_lh_idx=3358, qo=210382, so=29634, conditions: qo<=210445? true so<=185776? true qo>210495? false so>185826? false
+  [SKIP] j_lh_idx=3357, qo=210382, so=80456, conditions: qo<=210445? true so<=185776? true qo>210495? false so>185826? false
+  [SKIP] j_lh_idx=3356, qo=210384, so=4486, conditions: qo<=210445? true so<=185776? true qo>210495? false so>185826? false
+  [SKIP] j_lh_idx=3355, qo=210383, so=75167, conditions: qo<=210445? true so<=185776? true qo>210495? false so>185826? false
+  [SKIP] j_lh_idx=3354, qo=210385, so=44493, conditions: qo<=210445? true so<=185776? true qo>210495? false so>185826? false
+  [SKIP] j_lh_idx=3353, qo=210386, so=63197, conditions: qo<=210445? true so<=185776? true qo>210495? false so>185826? false
+  [SKIP] j_lh_idx=3352, qo=210387, so=92649, conditions: qo<=210445? true so<=185776? true qo>210495? false so>185826? false
+  [SKIP] j_lh_idx=3351, qo=210400, so=137188, conditions: qo<=210445? true so<=185776? true qo>210495? false so>185826? false
+  [SKIP] j_lh_idx=3350, qo=210402, so=65344, conditions: qo<=210445? true so<=185776? true qo>210495? false so>185826? false
+  [SKIP] j_lh_idx=3349, qo=210412, so=133093, conditions: qo<=210445? true so<=185776? true qo>210495? false so>185826? false
+  [SKIP] j_lh_idx=3348, qo=210416, so=179665, conditions: qo<=210445? true so<=185776? true qo>210495? false so>185826? false
+  [SKIP] j_lh_idx=3347, qo=210423, so=28380, conditions: qo<=210445? true so<=185776? true qo>210495? false so>185826? false
+  [SKIP] j_lh_idx=3346, qo=210424, so=39155, conditions: qo<=210445? true so<=185776? true qo>210495? false so>185826? false
+  [SKIP] j_lh_idx=3345, qo=210461, so=61536, conditions: qo<=210445? false so<=185776? true qo>210495? false so>185826? false
+  [SKIP] j_lh_idx=3344, qo=210489, so=143014, conditions: qo<=210445? false so<=185776? true qo>210495? false so>185826? false
+  [BREAK] j_lh_idx=3343, qo=210501 > h_qe_gap+TRIM_SIZE=210500
+[DEBUG_CHAINING] INDEX 0 update: new_sum=111, num=1, link=999999
+[DEBUG_CHAINING] INDEX 1 (large gap) linking for target HSP:
+  h_qe: 210445, h_se: 185776, prev_link: 999999
+  [SKIP] current_idx=3369, sum=-4 <= h_sum=0, jump to next_larger=3368
+  [SKIP] current_idx=3369, conditions: b0=true (sum<=0), b1=true (qo<=210445), b2=true (so<=185776)
+  [SKIP] current_idx=3368, sum=-2 <= h_sum=0, jump to next_larger=3367
+  [SKIP] current_idx=3368, conditions: b0=true (sum<=0), b1=true (qo<=210445), b2=true (so<=185776)
+  [SKIP] current_idx=3367, conditions: b0=false (sum<=0), b1=true (qo<=210445), b2=true (so<=185776)
+  [SKIP] current_idx=3366, sum=-3 <= h_sum=0, jump to next_larger=3365
+  [SKIP] current_idx=3366, conditions: b0=true (sum<=0), b1=true (qo<=210445), b2=true (so<=185776)
+  [SKIP] current_idx=3365, conditions: b0=false (sum<=0), b1=true (qo<=210445), b2=true (so<=185776)
+  [SKIP] current_idx=3364, sum=-2 <= h_sum=0, jump to next_larger=3363
+  [SKIP] current_idx=3364, conditions: b0=true (sum<=0), b1=true (qo<=210445), b2=true (so<=185776)
+  [SKIP] current_idx=3363, conditions: b0=false (sum<=0), b1=true (qo<=210445), b2=true (so<=185776)
+  [SKIP] current_idx=3362, sum=-3 <= h_sum=0, jump to next_larger=3359
+  [SKIP] current_idx=3362, conditions: b0=true (sum<=0), b1=true (qo<=210445), b2=false (so<=185776)
+  [SKIP] current_idx=3359, conditions: b0=false (sum<=0), b1=true (qo<=210445), b2=true (so<=185776)
+  [SKIP] current_idx=3358, sum=-4 <= h_sum=0, jump to next_larger=3357
+  [SKIP] current_idx=3358, conditions: b0=true (sum<=0), b1=true (qo<=210445), b2=true (so<=185776)
+  [SKIP] current_idx=3357, sum=-1 <= h_sum=0, jump to next_larger=3346
+  [SKIP] current_idx=3357, conditions: b0=true (sum<=0), b1=true (qo<=210445), b2=true (so<=185776)
+  [SKIP] current_idx=3346, conditions: b0=false (sum<=0), b1=true (qo<=210445), b2=true (so<=185776)
+  [SKIP] current_idx=3345, sum=-5 <= h_sum=0, jump to next_larger=3344
+  [SKIP] current_idx=3345, conditions: b0=true (sum<=0), b1=false (qo<=210445), b2=true (so<=185776)
+  [SKIP] current_idx=3344, conditions: b0=false (sum<=0), b1=false (qo<=210445), b2=true (so<=185776)
+  [SKIP] current_idx=3343, conditions: b0=false (sum<=0), b1=false (qo<=210445), b2=true (so<=185776)
+  [SKIP] current_idx=3342, sum=-5 <= h_sum=0, jump to next_larger=3341
+  [SKIP] current_idx=3342, conditions: b0=true (sum<=0), b1=false (qo<=210445), b2=true (so<=185776)
+  [SKIP] current_idx=3341, sum=-1 <= h_sum=0, jump to next_larger=3339
+  [SKIP] current_idx=3341, conditions: b0=true (sum<=0), b1=false (qo<=210445), b2=true (so<=185776)
+  [SKIP] current_idx=3339, conditions: b0=false (sum<=0), b1=false (qo<=210445), b2=true (so<=185776)
+  [SKIP] current_idx=3338, sum=-4 <= h_sum=0, jump to next_larger=3337
+  [SKIP] current_idx=3338, conditions: b0=true (sum<=0), b1=false (qo<=210445), b2=true (so<=185776)
+  [SKIP] current_idx=3337, sum=-3 <= h_sum=0, jump to next_larger=3333
+  [SKIP] current_idx=3337, conditions: b0=true (sum<=0), b1=false (qo<=210445), b2=true (so<=185776)
+  [SKIP] current_idx=3333, conditions: b0=false (sum<=0), b1=false (qo<=210445), b2=true (so<=185776)
+  [SKIP] current_idx=3332, conditions: b0=false (sum<=0), b1=false (qo<=210445), b2=true (so<=185776)
+  [SKIP] current_idx=3331, sum=-1 <= h_sum=0, jump to next_larger=3328
+  [SKIP] current_idx=3331, conditions: b0=true (sum<=0), b1=false (qo<=210445), b2=true (so<=185776)
+  [SKIP] current_idx=3328, conditions: b0=false (sum<=0), b1=false (qo<=210445), b2=true (so<=185776)
+  [SKIP] current_idx=3327, sum=-5 <= h_sum=0, jump to next_larger=3326
+  [SKIP] current_idx=3327, conditions: b0=true (sum<=0), b1=false (qo<=210445), b2=true (so<=185776)
+  [SKIP] current_idx=3326, sum=-4 <= h_sum=0, jump to next_larger=3323
+  [SKIP] current_idx=3326, conditions: b0=true (sum<=0), b1=false (qo<=210445), b2=true (so<=185776)
+  [SKIP] current_idx=3323, sum=-2 <= h_sum=0, jump to next_larger=3320
+  [SKIP] current_idx=3323, conditions: b0=true (sum<=0), b1=false (qo<=210445), b2=true (so<=185776)
+  [SKIP] current_idx=3320, conditions: b0=false (sum<=0), b1=false (qo<=210445), b2=true (so<=185776)
+  [SKIP] current_idx=3319, conditions: b0=false (sum<=0), b1=false (qo<=210445), b2=true (so<=185776)
+  [SKIP] current_idx=3318, sum=-5 <= h_sum=0, jump to next_larger=3316
+  [SKIP] current_idx=3318, conditions: b0=true (sum<=0), b1=false (qo<=210445), b2=true (so<=185776)
+  [SKIP] current_idx=3316, sum=-3 <= h_sum=0, jump to next_larger=3314
+  [SKIP] current_idx=3316, conditions: b0=true (sum<=0), b1=false (qo<=210445), b2=true (so<=185776)
+  [SKIP] current_idx=3314, sum=-1 <= h_sum=0, jump to next_larger=3312
+  [SKIP] current_idx=3314, conditions: b0=true (sum<=0), b1=false (qo<=210445), b2=true (so<=185776)
+  [SKIP] current_idx=3312, conditions: b0=false (sum<=0), b1=false (qo<=210445), b2=true (so<=185776)
+  [SKIP] current_idx=3311, sum=-1 <= h_sum=0, jump to next_larger=3309
+  [SKIP] current_idx=3311, conditions: b0=true (sum<=0), b1=false (qo<=210445), b2=true (so<=185776)
+  [SKIP] current_idx=3309, conditions: b0=false (sum<=0), b1=false (qo<=210445), b2=true (so<=185776)
+  [SKIP] current_idx=3308, sum=0 <= h_sum=0, jump to next_larger=3305
+  [SKIP] current_idx=3308, conditions: b0=true (sum<=0), b1=false (qo<=210445), b2=true (so<=185776)
+  [SKIP] current_idx=3305, conditions: b0=false (sum<=0), b1=false (qo<=210445), b2=true (so<=185776)
+  [SKIP] current_idx=3304, sum=-4 <= h_sum=0, jump to next_larger=3303
+  [SKIP] current_idx=3304, conditions: b0=true (sum<=0), b1=false (qo<=210445), b2=true (so<=185776)
+  [SKIP] current_idx=3303, conditions: b0=false (sum<=0), b1=false (qo<=210445), b2=true (so<=185776)
+  [SKIP] current_idx=3302, conditions: b0=false (sum<=0), b1=false (qo<=210445), b2=true (so<=185776)
+  [SKIP] current_idx=3301, conditions: b0=false (sum<=0), b1=false (qo<=210445), b2=true (so<=185776)
+  [SKIP] current_idx=3300, sum=-3 <= h_sum=0, jump to next_larger=3298
+  [SKIP] current_idx=3300, conditions: b0=true (sum<=0), b1=false (qo<=210445), b2=true (so<=185776)
+  [SKIP] current_idx=3298, sum=0 <= h_sum=0, jump to next_larger=3296
+  [SKIP] current_idx=3298, conditions: b0=true (sum<=0), b1=false (qo<=210445), b2=true (so<=185776)
+  [SKIP] current_idx=3296, conditions: b0=false (sum<=0), b1=false (qo<=210445), b2=true (so<=185776)
+  [SKIP] current_idx=3295, sum=-4 <= h_sum=0, jump to next_larger=3293
+  [SKIP] current_idx=3295, conditions: b0=true (sum<=0), b1=false (qo<=210445), b2=true (so<=185776)
+  [SKIP] current_idx=3293, sum=0 <= h_sum=0, jump to next_larger=3275
+  [SKIP] current_idx=3293, conditions: b0=true (sum<=0), b1=false (qo<=210445), b2=true (so<=185776)
+  [SKIP] current_idx=3275, conditions: b0=false (sum<=0), b1=false (qo<=210445), b2=true (so<=185776)
+  [SKIP] current_idx=3274, sum=-1 <= h_sum=0, jump to next_larger=3260
+  [SKIP] current_idx=3274, conditions: b0=true (sum<=0), b1=false (qo<=210445), b2=true (so<=185776)
+  [SKIP] current_idx=3260, conditions: b0=false (sum<=0), b1=false (qo<=210445), b2=true (so<=185776)
+  [SKIP] current_idx=3259, conditions: b0=false (sum<=0), b1=false (qo<=210445), b2=true (so<=185776)
+  [SKIP] current_idx=3258, conditions: b0=false (sum<=0), b1=false (qo<=210445), b2=true (so<=185776)
+  [SKIP] current_idx=3257, sum=-2 <= h_sum=0, jump to next_larger=3254
+  [SKIP] current_idx=3257, conditions: b0=true (sum<=0), b1=false (qo<=210445), b2=true (so<=185776)
+  [SKIP] current_idx=3254, conditions: b0=false (sum<=0), b1=false (qo<=210445), b2=true (so<=185776)
+  [SKIP] current_idx=3253, sum=-4 <= h_sum=0, jump to next_larger=3252
+  [SKIP] current_idx=3253, conditions: b0=true (sum<=0), b1=false (qo<=210445), b2=true (so<=185776)
+  [SKIP] current_idx=3252, sum=-2 <= h_sum=0, jump to next_larger=3250
+  [SKIP] current_idx=3252, conditions: b0=true (sum<=0), b1=false (qo<=210445), b2=true (so<=185776)
+  [SKIP] current_idx=3250, conditions: b0=false (sum<=0), b1=false (qo<=210445), b2=true (so<=185776)
+  [SKIP] current_idx=3249, conditions: b0=false (sum<=0), b1=false (qo<=210445), b2=true (so<=185776)
+  [SKIP] current_idx=3248, sum=-1 <= h_sum=0, jump to next_larger=3243
+  [SKIP] current_idx=3248, conditions: b0=true (sum<=0), b1=false (qo<=210445), b2=true (so<=185776)
+  [SKIP] current_idx=3243, sum=0 <= h_sum=0, jump to next_larger=3239
+  [SKIP] current_idx=3243, conditions: b0=true (sum<=0), b1=false (qo<=210445), b2=true (so<=185776)
+  [SKIP] current_idx=3239, conditions: b0=false (sum<=0), b1=false (qo<=210445), b2=true (so<=185776)
+  [SKIP] current_idx=3238, sum=-2 <= h_sum=0, jump to next_larger=3234
+  [SKIP] current_idx=3238, conditions: b0=true (sum<=0), b1=false (qo<=210445), b2=true (so<=185776)
+  [SKIP] current_idx=3234, conditions: b0=false (sum<=0), b1=false (qo<=210445), b2=true (so<=185776)
+  [SKIP] current_idx=3233, sum=-5 <= h_sum=0, jump to next_larger=3232
+  [SKIP] current_idx=3233, conditions: b0=true (sum<=0), b1=false (qo<=210445), b2=true (so<=185776)
+  [SKIP] current_idx=3232, sum=-1 <= h_sum=0, jump to next_larger=3226
+  [SKIP] current_idx=3232, conditions: b0=true (sum<=0), b1=false (qo<=210445), b2=true (so<=185776)
+  [SKIP] current_idx=3226, conditions: b0=false (sum<=0), b1=false (qo<=210445), b2=true (so<=185776)
+  [SKIP] current_idx=3225, sum=0 <= h_sum=0, jump to next_larger=3219
+  [SKIP] current_idx=3225, conditions: b0=true (sum<=0), b1=false (qo<=210445), b2=true (so<=185776)
+  [SKIP] current_idx=3219, conditions: b0=false (sum<=0), b1=false (qo<=210445), b2=true (so<=185776)
+  [SKIP] current_idx=3218, sum=-1 <= h_sum=0, jump to next_larger=3217
+  [SKIP] current_idx=3218, conditions: b0=true (sum<=0), b1=false (qo<=210445), b2=true (so<=185776)
+  [SKIP] current_idx=3217, conditions: b0=false (sum<=0), b1=false (qo<=210445), b2=true (so<=185776)
+  [SKIP] current_idx=3216, sum=-3 <= h_sum=0, jump to next_larger=3215
+  [SKIP] current_idx=3216, conditions: b0=true (sum<=0), b1=false (qo<=210445), b2=true (so<=185776)
+  [SKIP] current_idx=3215, conditions: b0=false (sum<=0), b1=false (qo<=210445), b2=true (so<=185776)
+  [SKIP] current_idx=3214, conditions: b0=false (sum<=0), b1=false (qo<=210445), b2=true (so<=185776)
+  [SKIP] current_idx=3213, sum=-4 <= h_sum=0, jump to next_larger=3212
+  [SKIP] current_idx=3213, conditions: b0=true (sum<=0), b1=false (qo<=210445), b2=true (so<=185776)
+  [LINK] current_idx=3212, j=3210, sum=3563 > h_sum=0, linking to HSP 3210
+    Linked HSP: q_aa=210728-210745, s_aa=189512-189529, score=49, num=29
+  [SKIP] current_idx=3211, sum=-5 <= h_sum=3563, jump to next_larger=3210
+  [SKIP] current_idx=3211, conditions: b0=true (sum<=3563), b1=false (qo<=210445), b2=true (so<=185776)
+  [SKIP] current_idx=3210, sum=-4 <= h_sum=3563, jump to next_larger=3208
+  [SKIP] current_idx=3210, conditions: b0=true (sum<=3563), b1=false (qo<=210445), b2=true (so<=185776)
+  [SKIP] current_idx=3208, sum=-2 <= h_sum=3563, jump to next_larger=3207
+  [SKIP] current_idx=3208, conditions: b0=true (sum<=3563), b1=false (qo<=210445), b2=true (so<=185776)
+  [SKIP] current_idx=3207, conditions: b0=false (sum<=3563), b1=false (qo<=210445), b2=true (so<=185776)
+  [SKIP] current_idx=3206, sum=461 <= h_sum=3563, jump to next_larger=3205
+  [SKIP] current_idx=3206, conditions: b0=true (sum<=3563), b1=false (qo<=210445), b2=false (so<=185776)
+  [SKIP] current_idx=3205, conditions: b0=false (sum<=3563), b1=false (qo<=210445), b2=true (so<=185776)
+  [SKIP] current_idx=3204, sum=-2 <= h_sum=3563, jump to next_larger=3203
+  [SKIP] current_idx=3204, conditions: b0=true (sum<=3563), b1=false (qo<=210445), b2=true (so<=185776)
+  [SKIP] current_idx=3203, conditions: b0=false (sum<=3563), b1=false (qo<=210445), b2=true (so<=185776)
+  [SKIP] current_idx=3202, conditions: b0=false (sum<=3563), b1=false (qo<=210445), b2=true (so<=185776)
+  [SKIP] current_idx=3201, sum=-4 <= h_sum=3563, jump to next_larger=3199
+  [SKIP] current_idx=3201, conditions: b0=true (sum<=3563), b1=false (qo<=210445), b2=true (so<=185776)
+  [SKIP] current_idx=3199, sum=-2 <= h_sum=3563, jump to next_larger=3198
+  [SKIP] current_idx=3199, conditions: b0=true (sum<=3563), b1=false (qo<=210445), b2=true (so<=185776)
+  [SKIP] current_idx=3198, conditions: b0=false (sum<=3563), b1=false (qo<=210445), b2=true (so<=185776)
+  [SKIP] current_idx=3197, sum=-3 <= h_sum=3563, jump to next_larger=3196
+  [SKIP] current_idx=3197, conditions: b0=true (sum<=3563), b1=false (qo<=210445), b2=true (so<=185776)
+  [SKIP] current_idx=3196, conditions: b0=false (sum<=3563), b1=false (qo<=210445), b2=true (so<=185776)
+  [SKIP] current_idx=3195, sum=-3 <= h_sum=3563, jump to next_larger=3193
+  [SKIP] current_idx=3195, conditions: b0=true (sum<=3563), b1=false (qo<=210445), b2=true (so<=185776)
+  [SKIP] current_idx=3193, sum=-2 <= h_sum=3563, jump to next_larger=3192
+  [SKIP] current_idx=3193, conditions: b0=true (sum<=3563), b1=false (qo<=210445), b2=true (so<=185776)
+  [SKIP] current_idx=3192, conditions: b0=false (sum<=3563), b1=false (qo<=210445), b2=true (so<=185776)
+  [SKIP] current_idx=3191, sum=-4 <= h_sum=3563, jump to next_larger=3187
+  [SKIP] current_idx=3191, conditions: b0=true (sum<=3563), b1=false (qo<=210445), b2=true (so<=185776)
+  [SKIP] current_idx=3187, conditions: b0=false (sum<=3563), b1=false (qo<=210445), b2=true (so<=185776)
+  [SKIP] current_idx=3186, sum=-5 <= h_sum=3563, jump to next_larger=3185
+  [SKIP] current_idx=3186, conditions: b0=true (sum<=3563), b1=false (qo<=210445), b2=true (so<=185776)
+  [SKIP] current_idx=3185, sum=-3 <= h_sum=3563, jump to next_larger=3184
+  [SKIP] current_idx=3185, conditions: b0=true (sum<=3563), b1=false (qo<=210445), b2=true (so<=185776)
+  [SKIP] current_idx=3184, conditions: b0=false (sum<=3563), b1=false (qo<=210445), b2=true (so<=185776)
+  [SKIP] current_idx=3183, conditions: b0=false (sum<=3563), b1=false (qo<=210445), b2=true (so<=185776)
+  [SKIP] current_idx=3182, sum=-1 <= h_sum=3563, jump to next_larger=3181
+  [SKIP] current_idx=3182, conditions: b0=true (sum<=3563), b1=false (qo<=210445), b2=true (so<=185776)
+  [SKIP] current_idx=3181, conditions: b0=false (sum<=3563), b1=false (qo<=210445), b2=true (so<=185776)
+  [SKIP] current_idx=3180, conditions: b0=false (sum<=3563), b1=false (qo<=210445), b2=true (so<=185776)
+  [SKIP] current_idx=3179, sum=-5 <= h_sum=3563, jump to next_larger=3178
+  [SKIP] current_idx=3179, conditions: b0=true (sum<=3563), b1=false (qo<=210445), b2=true (so<=185776)
+  [SKIP] current_idx=3178, conditions: b0=false (sum<=3563), b1=false (qo<=210445), b2=true (so<=185776)
+  [SKIP] current_idx=3177, sum=-2 <= h_sum=3563, jump to next_larger=3176
+  [SKIP] current_idx=3177, conditions: b0=true (sum<=3563), b1=false (qo<=210445), b2=true (so<=185776)
+  [SKIP] current_idx=3176, conditions: b0=false (sum<=3563), b1=false (qo<=210445), b2=true (so<=185776)
+  [SKIP] current_idx=3175, sum=-5 <= h_sum=3563, jump to next_larger=3174
+  [SKIP] current_idx=3175, conditions: b0=true (sum<=3563), b1=false (qo<=210445), b2=true (so<=185776)
+  [SKIP] current_idx=3174, sum=-1 <= h_sum=3563, jump to next_larger=3169
+  [SKIP] current_idx=3174, conditions: b0=true (sum<=3563), b1=false (qo<=210445), b2=true (so<=185776)
+  [SKIP] current_idx=3169, conditions: b0=false (sum<=3563), b1=false (qo<=210445), b2=true (so<=185776)
+  [SKIP] current_idx=3168, conditions: b0=false (sum<=3563), b1=false (qo<=210445), b2=true (so<=185776)
+  [SKIP] current_idx=3167, sum=-5 <= h_sum=3563, jump to next_larger=3166
+  [SKIP] current_idx=3167, conditions: b0=true (sum<=3563), b1=false (qo<=210445), b2=true (so<=185776)
+  [SKIP] current_idx=3166, conditions: b0=false (sum<=3563), b1=false (qo<=210445), b2=true (so<=185776)
+  [SKIP] current_idx=3165, sum=-5 <= h_sum=3563, jump to next_larger=3164
+  [SKIP] current_idx=3165, conditions: b0=true (sum<=3563), b1=false (qo<=210445), b2=true (so<=185776)
+  [SKIP] current_idx=3164, sum=-3 <= h_sum=3563, jump to next_larger=3163
+  [SKIP] current_idx=3164, conditions: b0=true (sum<=3563), b1=false (qo<=210445), b2=false (so<=185776)
+  [SKIP] current_idx=3163, conditions: b0=false (sum<=3563), b1=false (qo<=210445), b2=true (so<=185776)
+  [SKIP] current_idx=3162, sum=-5 <= h_sum=3563, jump to next_larger=3161
+  [SKIP] current_idx=3162, conditions: b0=true (sum<=3563), b1=false (qo<=210445), b2=true (so<=185776)
+  [SKIP] current_idx=3161, sum=-3 <= h_sum=3563, jump to next_larger=3160
+  [SKIP] current_idx=3161, conditions: b0=true (sum<=3563), b1=false (qo<=210445), b2=true (so<=185776)
+  [SKIP] current_idx=3160, conditions: b0=false (sum<=3563), b1=false (qo<=210445), b2=true (so<=185776)
+  [SKIP] current_idx=3159, conditions: b0=false (sum<=3563), b1=false (qo<=210445), b2=true (so<=185776)
+  [SKIP] current_idx=3158, sum=-4 <= h_sum=3563, jump to next_larger=3157
+  [SKIP] current_idx=3158, conditions: b0=true (sum<=3563), b1=false (qo<=210445), b2=true (so<=185776)
+  [SKIP] current_idx=3157, conditions: b0=false (sum<=3563), b1=false (qo<=210445), b2=true (so<=185776)
+  [LINK] current_idx=3156, j=3154, sum=3564 > h_sum=3563, linking to HSP 3154
+    Linked HSP: q_aa=210800-210843, s_aa=189497-189540, score=50, num=29
+  [SKIP] current_idx=3155, conditions: b0=false (sum<=3564), b1=false (qo<=210445), b2=true (so<=185776)
+  [SKIP] current_idx=3154, sum=-5 <= h_sum=3564, jump to next_larger=3153
+  [SKIP] current_idx=3154, conditions: b0=true (sum<=3564), b1=false (qo<=210445), b2=true (so<=185776)
+  [SKIP] current_idx=3153, sum=-2 <= h_sum=3564, jump to next_larger=3151
+  [SKIP] current_idx=3153, conditions: b0=true (sum<=3564), b1=false (qo<=210445), b2=true (so<=185776)
+  [SKIP] current_idx=3151, conditions: b0=false (sum<=3564), b1=false (qo<=210445), b2=true (so<=185776)
+  [SKIP] current_idx=3150, sum=0 <= h_sum=3564, jump to next_larger=3146
+  [SKIP] current_idx=3150, conditions: b0=true (sum<=3564), b1=false (qo<=210445), b2=true (so<=185776)
+  [SKIP] current_idx=3146, conditions: b0=false (sum<=3564), b1=false (qo<=210445), b2=true (so<=185776)
+  [SKIP] current_idx=3145, conditions: b0=false (sum<=3564), b1=false (qo<=210445), b2=true (so<=185776)
+  [SKIP] current_idx=3144, conditions: b0=false (sum<=3564), b1=false (qo<=210445), b2=true (so<=185776)
+  [SKIP] current_idx=3143, sum=-4 <= h_sum=3564, jump to next_larger=3142
+  [SKIP] current_idx=3143, conditions: b0=true (sum<=3564), b1=false (qo<=210445), b2=true (so<=185776)
+  [SKIP] current_idx=3142, sum=-3 <= h_sum=3564, jump to next_larger=3141
+  [SKIP] current_idx=3142, conditions: b0=true (sum<=3564), b1=false (qo<=210445), b2=true (so<=185776)
+  [SKIP] current_idx=3141, sum=0 <= h_sum=3564, jump to next_larger=3140
+  [SKIP] current_idx=3141, conditions: b0=true (sum<=3564), b1=false (qo<=210445), b2=true (so<=185776)
+  [SKIP] current_idx=3140, conditions: b0=false (sum<=3564), b1=false (qo<=210445), b2=true (so<=185776)
+  [SKIP] current_idx=3139, sum=-3 <= h_sum=3564, jump to next_larger=3138
+  [SKIP] current_idx=3139, conditions: b0=true (sum<=3564), b1=false (qo<=210445), b2=true (so<=185776)
+  [SKIP] current_idx=3138, sum=-2 <= h_sum=3564, jump to next_larger=3124
+  [SKIP] current_idx=3138, conditions: b0=true (sum<=3564), b1=false (qo<=210445), b2=true (so<=185776)
+  [SKIP] current_idx=3124, conditions: b0=false (sum<=3564), b1=false (qo<=210445), b2=true (so<=185776)
+  [SKIP] current_idx=3123, sum=-3 <= h_sum=3564, jump to next_larger=3120
+  [SKIP] current_idx=3123, conditions: b0=true (sum<=3564), b1=false (qo<=210445), b2=true (so<=185776)
+  [SKIP] current_idx=3120, conditions: b0=false (sum<=3564), b1=false (qo<=210445), b2=true (so<=185776)
+  [SKIP] current_idx=3119, sum=-2 <= h_sum=3564, jump to next_larger=3117
+  [SKIP] current_idx=3119, conditions: b0=true (sum<=3564), b1=false (qo<=210445), b2=true (so<=185776)
+  [SKIP] current_idx=3117, conditions: b0=false (sum<=3564), b1=false (qo<=210445), b2=true (so<=185776)
+  [SKIP] current_idx=3116, sum=0 <= h_sum=3564, jump to next_larger=3115
+  [SKIP] current_idx=3116, conditions: b0=true (sum<=3564), b1=false (qo<=210445), b2=true (so<=185776)
+  [SKIP] current_idx=3115, conditions: b0=false (sum<=3564), b1=false (qo<=210445), b2=true (so<=185776)
+  [SKIP] current_idx=3114, conditions: b0=false (sum<=3564), b1=false (qo<=210445), b2=true (so<=185776)
+  [SKIP] current_idx=3113, sum=-1 <= h_sum=3564, jump to next_larger=3107
+  [SKIP] current_idx=3113, conditions: b0=true (sum<=3564), b1=false (qo<=210445), b2=true (so<=185776)
+  [SKIP] current_idx=3107, sum=0 <= h_sum=3564, jump to next_larger=3101
+  [SKIP] current_idx=3107, conditions: b0=true (sum<=3564), b1=false (qo<=210445), b2=true (so<=185776)
+  [SKIP] current_idx=3101, conditions: b0=false (sum<=3564), b1=false (qo<=210445), b2=true (so<=185776)
+  [SKIP] current_idx=3100, sum=-5 <= h_sum=3564, jump to next_larger=3099
+  [SKIP] current_idx=3100, conditions: b0=true (sum<=3564), b1=false (qo<=210445), b2=true (so<=185776)
+  [SKIP] current_idx=3099, sum=-4 <= h_sum=3564, jump to next_larger=3098
+  [SKIP] current_idx=3099, conditions: b0=true (sum<=3564), b1=false (qo<=210445), b2=true (so<=185776)
+  [SKIP] current_idx=3098, conditions: b0=false (sum<=3564), b1=false (qo<=210445), b2=true (so<=185776)
+  [SKIP] current_idx=3097, conditions: b0=false (sum<=3564), b1=false (qo<=210445), b2=true (so<=185776)
+  [SKIP] current_idx=3096, sum=-5 <= h_sum=3564, jump to next_larger=3094
+  [SKIP] current_idx=3096, conditions: b0=true (sum<=3564), b1=false (qo<=210445), b2=true (so<=185776)
+  [SKIP] current_idx=3094, sum=-1 <= h_sum=3564, jump to next_larger=3092
+  [SKIP] current_idx=3094, conditions: b0=true (sum<=3564), b1=false (qo<=210445), b2=true (so<=185776)
+  [SKIP] current_idx=3092, sum=0 <= h_sum=3564, jump to next_larger=3089
+  [SKIP] current_idx=3092, conditions: b0=true (sum<=3564), b1=false (qo<=210445), b2=false (so<=185776)
+  [SKIP] current_idx=3089, conditions: b0=false (sum<=3564), b1=false (qo<=210445), b2=true (so<=185776)
+  [SKIP] current_idx=3088, sum=-5 <= h_sum=3564, jump to next_larger=3087
+  [SKIP] current_idx=3088, conditions: b0=true (sum<=3564), b1=false (qo<=210445), b2=true (so<=185776)
+  [SKIP] current_idx=3087, sum=0 <= h_sum=3564, jump to next_larger=3086
+  [SKIP] current_idx=3087, conditions: b0=true (sum<=3564), b1=false (qo<=210445), b2=true (so<=185776)
+  [SKIP] current_idx=3086, conditions: b0=false (sum<=3564), b1=false (qo<=210445), b2=true (so<=185776)
+  [SKIP] current_idx=3085, sum=-5 <= h_sum=3564, jump to next_larger=3084
+  [SKIP] current_idx=3085, conditions: b0=true (sum<=3564), b1=false (qo<=210445), b2=true (so<=185776)
+  [SKIP] current_idx=3084, sum=-3 <= h_sum=3564, jump to next_larger=3082
+  [SKIP] current_idx=3084, conditions: b0=true (sum<=3564), b1=false (qo<=210445), b2=true (so<=185776)
+  [SKIP] current_idx=3082, conditions: b0=false (sum<=3564), b1=false (qo<=210445), b2=true (so<=185776)
+  [SKIP] current_idx=3081, conditions: b0=false (sum<=3564), b1=false (qo<=210445), b2=true (so<=185776)
+  [SKIP] current_idx=3080, sum=-5 <= h_sum=3564, jump to next_larger=3079
+  [SKIP] current_idx=3080, conditions: b0=true (sum<=3564), b1=false (qo<=210445), b2=true (so<=185776)
+  [SKIP] current_idx=3079, sum=1176 <= h_sum=3564, jump to next_larger=3078
+  [SKIP] current_idx=3079, conditions: b0=true (sum<=3564), b1=false (qo<=210445), b2=false (so<=185776)
+  [SKIP] current_idx=3078, conditions: b0=false (sum<=3564), b1=false (qo<=210445), b2=true (so<=185776)
+  [SKIP] current_idx=3077, sum=-3 <= h_sum=3564, jump to next_larger=3076
+  [SKIP] current_idx=3077, conditions: b0=true (sum<=3564), b1=false (qo<=210445), b2=true (so<=185776)
+  [SKIP] current_idx=3076, sum=-1 <= h_sum=3564, jump to next_larger=3072
+  [SKIP] current_idx=3076, conditions: b0=true (sum<=3564), b1=false (qo<=210445), b2=true (so<=185776)
+  [SKIP] current_idx=3072, conditions: b0=false (sum<=3564), b1=false (qo<=210445), b2=true (so<=185776)
+  [SKIP] current_idx=3071, sum=-5 <= h_sum=3564, jump to next_larger=3070
+  [SKIP] current_idx=3071, conditions: b0=true (sum<=3564), b1=false (qo<=210445), b2=true (so<=185776)
+  [SKIP] current_idx=3070, sum=-4 <= h_sum=3564, jump to next_larger=3069
+  [SKIP] current_idx=3070, conditions: b0=true (sum<=3564), b1=false (qo<=210445), b2=true (so<=185776)
+  [SKIP] current_idx=3069, sum=-3 <= h_sum=3564, jump to next_larger=3066
+  [SKIP] current_idx=3069, conditions: b0=true (sum<=3564), b1=false (qo<=210445), b2=false (so<=185776)
+  [SKIP] current_idx=3066, conditions: b0=false (sum<=3564), b1=false (qo<=210445), b2=true (so<=185776)
+  [SKIP] current_idx=3065, sum=-4 <= h_sum=3564, jump to next_larger=3063
+  [SKIP] current_idx=3065, conditions: b0=true (sum<=3564), b1=false (qo<=210445), b2=true (so<=185776)
+  [SKIP] current_idx=3063, conditions: b0=false (sum<=3564), b1=false (qo<=210445), b2=true (so<=185776)
+  [SKIP] current_idx=3062, sum=-4 <= h_sum=3564, jump to next_larger=3060
+  [SKIP] current_idx=3062, conditions: b0=true (sum<=3564), b1=false (qo<=210445), b2=true (so<=185776)
+  [SKIP] current_idx=3060, sum=475 <= h_sum=3564, jump to next_larger=3056
+  [SKIP] current_idx=3060, conditions: b0=true (sum<=3564), b1=false (qo<=210445), b2=false (so<=185776)
+  [SKIP] current_idx=3056, conditions: b0=false (sum<=3564), b1=false (qo<=210445), b2=true (so<=185776)
+  [SKIP] current_idx=3055, conditions: b0=false (sum<=3564), b1=false (qo<=210445), b2=true (so<=185776)
+  [SKIP] current_idx=3054, conditions: b0=false (sum<=3564), b1=false (qo<=210445), b2=true (so<=185776)
+  [SKIP] current_idx=3053, sum=-3 <= h_sum=3564, jump to next_larger=3045
+  [SKIP] current_idx=3053, conditions: b0=true (sum<=3564), b1=false (qo<=210445), b2=true (so<=185776)
+  [SKIP] current_idx=3045, sum=-2 <= h_sum=3564, jump to next_larger=3042
+  [SKIP] current_idx=3045, conditions: b0=true (sum<=3564), b1=false (qo<=210445), b2=true (so<=185776)
+  [SKIP] current_idx=3042, conditions: b0=false (sum<=3564), b1=false (qo<=210445), b2=true (so<=185776)
+  [SKIP] current_idx=3041, sum=-5 <= h_sum=3564, jump to next_larger=3040
+  [SKIP] current_idx=3041, conditions: b0=true (sum<=3564), b1=false (qo<=210445), b2=true (so<=185776)
+  [SKIP] current_idx=3040, sum=-3 <= h_sum=3564, jump to next_larger=3039
+  [SKIP] current_idx=3040, conditions: b0=true (sum<=3564), b1=false (qo<=210445), b2=true (so<=185776)
+  [SKIP] current_idx=3039, sum=2775 <= h_sum=3564, jump to next_larger=3024
+  [SKIP] current_idx=3039, conditions: b0=true (sum<=3564), b1=false (qo<=210445), b2=false (so<=185776)
+  [SKIP] current_idx=3024, conditions: b0=false (sum<=3564), b1=false (qo<=210445), b2=true (so<=185776)
+  [SKIP] current_idx=3023, sum=-5 <= h_sum=3564, jump to next_larger=3021
+  [SKIP] current_idx=3023, conditions: b0=true (sum<=3564), b1=false (qo<=210445), b2=true (so<=185776)
+  [SKIP] current_idx=3021, conditions: b0=false (sum<=3564), b1=false (qo<=210445), b2=true (so<=185776)
+  [SKIP] current_idx=3020, sum=-3 <= h_sum=3564, jump to next_larger=3019
+  [SKIP] current_idx=3020, conditions: b0=true (sum<=3564), b1=false (qo<=210445), b2=false (so<=185776)
+  [SKIP] current_idx=3019, sum=0 <= h_sum=3564, jump to next_larger=3003
+  [SKIP] current_idx=3019, conditions: b0=true (sum<=3564), b1=false (qo<=210445), b2=false (so<=185776)
+  [LINK] current_idx=3003, j=3001, sum=3889 > h_sum=3564, linking to HSP 3001
+    Linked HSP: q_aa=211257-211282, s_aa=186523-186548, score=49, num=37
+  [SKIP] current_idx=3002, sum=-3 <= h_sum=3889, jump to next_larger=3001
+  [SKIP] current_idx=3002, conditions: b0=true (sum<=3889), b1=false (qo<=210445), b2=true (so<=185776)
+  [LINK] current_idx=3001, j=2999, sum=3914 > h_sum=3889, linking to HSP 2999
+    Linked HSP: q_aa=211260-211349, s_aa=188074-188163, score=114, num=36
+  [SKIP] current_idx=3000, sum=-3 <= h_sum=3914, jump to next_larger=2999
+  [SKIP] current_idx=3000, conditions: b0=true (sum<=3914), b1=false (qo<=210445), b2=true (so<=185776)
+  [SKIP] current_idx=2999, sum=-2 <= h_sum=3914, jump to next_larger=2997
+  [SKIP] current_idx=2999, conditions: b0=true (sum<=3914), b1=false (qo<=210445), b2=true (so<=185776)
+  [SKIP] current_idx=2997, sum=0 <= h_sum=3914, jump to next_larger=2996
+  [SKIP] current_idx=2997, conditions: b0=true (sum<=3914), b1=false (qo<=210445), b2=true (so<=185776)
+  [SKIP] current_idx=2996, sum=3851 <= h_sum=3914, jump to next_larger=2994
+  [SKIP] current_idx=2996, conditions: b0=true (sum<=3914), b1=false (qo<=210445), b2=true (so<=185776)
+  [SKIP] current_idx=2994, sum=3859 <= h_sum=3914, jump to next_larger=2986
+  [SKIP] current_idx=2994, conditions: b0=true (sum<=3914), b1=false (qo<=210445), b2=true (so<=185776)
+  [SKIP] current_idx=2986, sum=3886 <= h_sum=3914, jump to next_larger=0
+  [SKIP] current_idx=2986, conditions: b0=true (sum<=3914), b1=false (qo<=210445), b2=false (so<=185776)
+[DEBUG_CHAINING] INDEX 1 update: new_sum=4020, num=37, link=2999
+[DEBUG_CHAINING] INDEX 1: new best_sum=4020, best=3368
+[DEBUG_CHAINING] INDEX 0 (small gap) linking for target HSP:
+  h_qe: 210445, h_se: 185776, h_qe_gap: 210495, h_se_gap: 185826
+  [SKIP] j_lh_idx=3369, qo=210376, so=119523, conditions: qo<=210445? true so<=185776? true qo>210495? false so>185826? false
+  [SKIP] j_lh_idx=3368, qo=210377, so=81113, conditions: qo<=210445? true so<=185776? true qo>210495? false so>185826? false
+  [SKIP] j_lh_idx=3367, qo=210377, so=82682, conditions: qo<=210445? true so<=185776? true qo>210495? false so>185826? false
+  [SKIP] j_lh_idx=3366, qo=210377, so=3159, conditions: qo<=210445? true so<=185776? true qo>210495? false so>185826? false
+  [SKIP] j_lh_idx=3365, qo=210380, so=66772, conditions: qo<=210445? true so<=185776? true qo>210495? false so>185826? false
+  [SKIP] j_lh_idx=3364, qo=210380, so=133493, conditions: qo<=210445? true so<=185776? true qo>210495? false so>185826? false
+  [SKIP] j_lh_idx=3363, qo=210381, so=19740, conditions: qo<=210445? true so<=185776? true qo>210495? false so>185826? false
+  [SKIP] j_lh_idx=3362, qo=210380, so=198147, conditions: qo<=210445? true so<=185776? false qo>210495? false so>185826? true
+  [SKIP] j_lh_idx=3361, qo=210380, so=61542, conditions: qo<=210445? true so<=185776? true qo>210495? false so>185826? false
+  [SKIP] j_lh_idx=3360, qo=210382, so=86818, conditions: qo<=210445? true so<=185776? true qo>210495? false so>185826? false
+  [SKIP] j_lh_idx=3359, qo=210381, so=9033, conditions: qo<=210445? true so<=185776? true qo>210495? false so>185826? false
+  [SKIP] j_lh_idx=3358, qo=210382, so=29634, conditions: qo<=210445? true so<=185776? true qo>210495? false so>185826? false
+  [SKIP] j_lh_idx=3357, qo=210382, so=80456, conditions: qo<=210445? true so<=185776? true qo>210495? false so>185826? false
+  [SKIP] j_lh_idx=3356, qo=210384, so=4486, conditions: qo<=210445? true so<=185776? true qo>210495? false so>185826? false
+  [SKIP] j_lh_idx=3355, qo=210383, so=75167, conditions: qo<=210445? true so<=185776? true qo>210495? false so>185826? false
+  [SKIP] j_lh_idx=3354, qo=210385, so=44493, conditions: qo<=210445? true so<=185776? true qo>210495? false so>185826? false
+  [SKIP] j_lh_idx=3353, qo=210386, so=63197, conditions: qo<=210445? true so<=185776? true qo>210495? false so>185826? false
+  [SKIP] j_lh_idx=3352, qo=210387, so=92649, conditions: qo<=210445? true so<=185776? true qo>210495? false so>185826? false
+  [SKIP] j_lh_idx=3351, qo=210400, so=137188, conditions: qo<=210445? true so<=185776? true qo>210495? false so>185826? false
+  [SKIP] j_lh_idx=3350, qo=210402, so=65344, conditions: qo<=210445? true so<=185776? true qo>210495? false so>185826? false
+  [SKIP] j_lh_idx=3349, qo=210412, so=133093, conditions: qo<=210445? true so<=185776? true qo>210495? false so>185826? false
+  [SKIP] j_lh_idx=3348, qo=210416, so=179665, conditions: qo<=210445? true so<=185776? true qo>210495? false so>185826? false
+  [SKIP] j_lh_idx=3347, qo=210423, so=28380, conditions: qo<=210445? true so<=185776? true qo>210495? false so>185826? false
+  [SKIP] j_lh_idx=3346, qo=210424, so=39155, conditions: qo<=210445? true so<=185776? true qo>210495? false so>185826? false
+  [SKIP] j_lh_idx=3345, qo=210461, so=61536, conditions: qo<=210445? false so<=185776? true qo>210495? false so>185826? false
+  [SKIP] j_lh_idx=3344, qo=210489, so=143014, conditions: qo<=210445? false so<=185776? true qo>210495? false so>185826? false
+  [BREAK] j_lh_idx=3343, qo=210501 > h_qe_gap+TRIM_SIZE=210500
+[DEBUG_CHAINING] INDEX 0 update: new_sum=111, num=1, link=999999
+[DEBUG_CHAINING] INDEX 1 update: new_sum=4020, num=37, link=2999
+[DEBUG_CHAINING] INDEX 1: new best_sum=4020, best=3368
+[DEBUG_CHAINING] INDEX 0 (small gap) linking for target HSP:
+  h_qe: 210445, h_se: 185776, h_qe_gap: 210495, h_se_gap: 185826
+  [SKIP] j_lh_idx=3369, qo=210376, so=119523, conditions: qo<=210445? true so<=185776? true qo>210495? false so>185826? false
+  [SKIP] j_lh_idx=3368, qo=210377, so=81113, conditions: qo<=210445? true so<=185776? true qo>210495? false so>185826? false
+  [SKIP] j_lh_idx=3367, qo=210377, so=82682, conditions: qo<=210445? true so<=185776? true qo>210495? false so>185826? false
+  [SKIP] j_lh_idx=3366, qo=210377, so=3159, conditions: qo<=210445? true so<=185776? true qo>210495? false so>185826? false
+  [SKIP] j_lh_idx=3365, qo=210380, so=66772, conditions: qo<=210445? true so<=185776? true qo>210495? false so>185826? false
+  [SKIP] j_lh_idx=3364, qo=210380, so=133493, conditions: qo<=210445? true so<=185776? true qo>210495? false so>185826? false
+  [SKIP] j_lh_idx=3363, qo=210381, so=19740, conditions: qo<=210445? true so<=185776? true qo>210495? false so>185826? false
+  [SKIP] j_lh_idx=3362, qo=210380, so=198147, conditions: qo<=210445? true so<=185776? false qo>210495? false so>185826? true
+  [SKIP] j_lh_idx=3361, qo=210380, so=61542, conditions: qo<=210445? true so<=185776? true qo>210495? false so>185826? false
+  [SKIP] j_lh_idx=3360, qo=210382, so=86818, conditions: qo<=210445? true so<=185776? true qo>210495? false so>185826? false
+  [SKIP] j_lh_idx=3359, qo=210381, so=9033, conditions: qo<=210445? true so<=185776? true qo>210495? false so>185826? false
+  [SKIP] j_lh_idx=3358, qo=210382, so=29634, conditions: qo<=210445? true so<=185776? true qo>210495? false so>185826? false
+  [SKIP] j_lh_idx=3357, qo=210382, so=80456, conditions: qo<=210445? true so<=185776? true qo>210495? false so>185826? false
+  [SKIP] j_lh_idx=3356, qo=210384, so=4486, conditions: qo<=210445? true so<=185776? true qo>210495? false so>185826? false
+  [SKIP] j_lh_idx=3355, qo=210383, so=75167, conditions: qo<=210445? true so<=185776? true qo>210495? false so>185826? false
+  [SKIP] j_lh_idx=3354, qo=210385, so=44493, conditions: qo<=210445? true so<=185776? true qo>210495? false so>185826? false
+  [SKIP] j_lh_idx=3353, qo=210386, so=63197, conditions: qo<=210445? true so<=185776? true qo>210495? false so>185826? false
+  [SKIP] j_lh_idx=3352, qo=210387, so=92649, conditions: qo<=210445? true so<=185776? true qo>210495? false so>185826? false
+  [SKIP] j_lh_idx=3351, qo=210400, so=137188, conditions: qo<=210445? true so<=185776? true qo>210495? false so>185826? false
+  [SKIP] j_lh_idx=3350, qo=210402, so=65344, conditions: qo<=210445? true so<=185776? true qo>210495? false so>185826? false
+  [SKIP] j_lh_idx=3349, qo=210412, so=133093, conditions: qo<=210445? true so<=185776? true qo>210495? false so>185826? false
+  [SKIP] j_lh_idx=3348, qo=210416, so=179665, conditions: qo<=210445? true so<=185776? true qo>210495? false so>185826? false
+  [SKIP] j_lh_idx=3347, qo=210423, so=28380, conditions: qo<=210445? true so<=185776? true qo>210495? false so>185826? false
+  [SKIP] j_lh_idx=3346, qo=210424, so=39155, conditions: qo<=210445? true so<=185776? true qo>210495? false so>185826? false
+  [SKIP] j_lh_idx=3345, qo=210461, so=61536, conditions: qo<=210445? false so<=185776? true qo>210495? false so>185826? false
+  [SKIP] j_lh_idx=3344, qo=210489, so=143014, conditions: qo<=210445? false so<=185776? true qo>210495? false so>185826? false
+  [BREAK] j_lh_idx=3343, qo=210501 > h_qe_gap+TRIM_SIZE=210500
+[DEBUG_CHAINING] INDEX 0 update: new_sum=111, num=1, link=999999
+[DEBUG_CHAINING] INDEX 1 update: new_sum=4020, num=37, link=2999
+[DEBUG_CHAINING] INDEX 1: new best_sum=4020, best=3368
+[DEBUG_CHAINING] INDEX 0 (small gap) linking for target HSP:
+  h_qe: 210445, h_se: 185776, h_qe_gap: 210495, h_se_gap: 185826
+  [SKIP] j_lh_idx=3369, qo=210376, so=119523, conditions: qo<=210445? true so<=185776? true qo>210495? false so>185826? false
+  [SKIP] j_lh_idx=3368, qo=210377, so=81113, conditions: qo<=210445? true so<=185776? true qo>210495? false so>185826? false
+  [SKIP] j_lh_idx=3367, qo=210377, so=82682, conditions: qo<=210445? true so<=185776? true qo>210495? false so>185826? false
+  [SKIP] j_lh_idx=3366, qo=210377, so=3159, conditions: qo<=210445? true so<=185776? true qo>210495? false so>185826? false
+  [SKIP] j_lh_idx=3365, qo=210380, so=66772, conditions: qo<=210445? true so<=185776? true qo>210495? false so>185826? false
+  [SKIP] j_lh_idx=3364, qo=210380, so=133493, conditions: qo<=210445? true so<=185776? true qo>210495? false so>185826? false
+  [SKIP] j_lh_idx=3363, qo=210381, so=19740, conditions: qo<=210445? true so<=185776? true qo>210495? false so>185826? false
+  [SKIP] j_lh_idx=3362, qo=210380, so=198147, conditions: qo<=210445? true so<=185776? false qo>210495? false so>185826? true
+  [SKIP] j_lh_idx=3361, qo=210380, so=61542, conditions: qo<=210445? true so<=185776? true qo>210495? false so>185826? false
+  [SKIP] j_lh_idx=3360, qo=210382, so=86818, conditions: qo<=210445? true so<=185776? true qo>210495? false so>185826? false
+  [SKIP] j_lh_idx=3359, qo=210381, so=9033, conditions: qo<=210445? true so<=185776? true qo>210495? false so>185826? false
+  [SKIP] j_lh_idx=3358, qo=210382, so=29634, conditions: qo<=210445? true so<=185776? true qo>210495? false so>185826? false
+  [SKIP] j_lh_idx=3357, qo=210382, so=80456, conditions: qo<=210445? true so<=185776? true qo>210495? false so>185826? false
+  [SKIP] j_lh_idx=3356, qo=210384, so=4486, conditions: qo<=210445? true so<=185776? true qo>210495? false so>185826? false
+  [SKIP] j_lh_idx=3355, qo=210383, so=75167, conditions: qo<=210445? true so<=185776? true qo>210495? false so>185826? false
+  [SKIP] j_lh_idx=3354, qo=210385, so=44493, conditions: qo<=210445? true so<=185776? true qo>210495? false so>185826? false
+  [SKIP] j_lh_idx=3353, qo=210386, so=63197, conditions: qo<=210445? true so<=185776? true qo>210495? false so>185826? false
+  [SKIP] j_lh_idx=3352, qo=210387, so=92649, conditions: qo<=210445? true so<=185776? true qo>210495? false so>185826? false
+  [SKIP] j_lh_idx=3351, qo=210400, so=137188, conditions: qo<=210445? true so<=185776? true qo>210495? false so>185826? false
+  [SKIP] j_lh_idx=3350, qo=210402, so=65344, conditions: qo<=210445? true so<=185776? true qo>210495? false so>185826? false
+  [SKIP] j_lh_idx=3349, qo=210412, so=133093, conditions: qo<=210445? true so<=185776? true qo>210495? false so>185826? false
+  [SKIP] j_lh_idx=3348, qo=210416, so=179665, conditions: qo<=210445? true so<=185776? true qo>210495? false so>185826? false
+  [SKIP] j_lh_idx=3347, qo=210423, so=28380, conditions: qo<=210445? true so<=185776? true qo>210495? false so>185826? false
+  [SKIP] j_lh_idx=3346, qo=210424, so=39155, conditions: qo<=210445? true so<=185776? true qo>210495? false so>185826? false
+  [SKIP] j_lh_idx=3345, qo=210461, so=61536, conditions: qo<=210445? false so<=185776? true qo>210495? false so>185826? false
+  [SKIP] j_lh_idx=3344, qo=210489, so=143014, conditions: qo<=210445? false so<=185776? true qo>210495? false so>185826? false
+  [BREAK] j_lh_idx=3343, qo=210501 > h_qe_gap+TRIM_SIZE=210500
+[DEBUG_CHAINING] INDEX 0 update: new_sum=111, num=1, link=999999
+[DEBUG_CHAINING] INDEX 1 update: new_sum=4020, num=37, link=2999
+[DEBUG_CHAINING] INDEX 1: new best_sum=4020, best=3368
+[DEBUG_CHAINING] INDEX 0 (small gap) linking for target HSP:
+  h_qe: 210445, h_se: 185776, h_qe_gap: 210495, h_se_gap: 185826
+  [SKIP] j_lh_idx=3369, qo=210376, so=119523, conditions: qo<=210445? true so<=185776? true qo>210495? false so>185826? false
+  [SKIP] j_lh_idx=3368, qo=210377, so=81113, conditions: qo<=210445? true so<=185776? true qo>210495? false so>185826? false
+  [SKIP] j_lh_idx=3367, qo=210377, so=82682, conditions: qo<=210445? true so<=185776? true qo>210495? false so>185826? false
+  [SKIP] j_lh_idx=3366, qo=210377, so=3159, conditions: qo<=210445? true so<=185776? true qo>210495? false so>185826? false
+  [SKIP] j_lh_idx=3365, qo=210380, so=66772, conditions: qo<=210445? true so<=185776? true qo>210495? false so>185826? false
+  [SKIP] j_lh_idx=3364, qo=210380, so=133493, conditions: qo<=210445? true so<=185776? true qo>210495? false so>185826? false
+  [SKIP] j_lh_idx=3363, qo=210381, so=19740, conditions: qo<=210445? true so<=185776? true qo>210495? false so>185826? false
+  [SKIP] j_lh_idx=3362, qo=210380, so=198147, conditions: qo<=210445? true so<=185776? false qo>210495? false so>185826? true
+  [SKIP] j_lh_idx=3361, qo=210380, so=61542, conditions: qo<=210445? true so<=185776? true qo>210495? false so>185826? false
+  [SKIP] j_lh_idx=3360, qo=210382, so=86818, conditions: qo<=210445? true so<=185776? true qo>210495? false so>185826? false
+  [SKIP] j_lh_idx=3359, qo=210381, so=9033, conditions: qo<=210445? true so<=185776? true qo>210495? false so>185826? false
+  [SKIP] j_lh_idx=3358, qo=210382, so=29634, conditions: qo<=210445? true so<=185776? true qo>210495? false so>185826? false
+  [SKIP] j_lh_idx=3357, qo=210382, so=80456, conditions: qo<=210445? true so<=185776? true qo>210495? false so>185826? false
+  [SKIP] j_lh_idx=3356, qo=210384, so=4486, conditions: qo<=210445? true so<=185776? true qo>210495? false so>185826? false
+  [SKIP] j_lh_idx=3355, qo=210383, so=75167, conditions: qo<=210445? true so<=185776? true qo>210495? false so>185826? false
+  [SKIP] j_lh_idx=3354, qo=210385, so=44493, conditions: qo<=210445? true so<=185776? true qo>210495? false so>185826? false
+  [SKIP] j_lh_idx=3353, qo=210386, so=63197, conditions: qo<=210445? true so<=185776? true qo>210495? false so>185826? false
+  [SKIP] j_lh_idx=3352, qo=210387, so=92649, conditions: qo<=210445? true so<=185776? true qo>210495? false so>185826? false
+  [SKIP] j_lh_idx=3351, qo=210400, so=137188, conditions: qo<=210445? true so<=185776? true qo>210495? false so>185826? false
+  [SKIP] j_lh_idx=3350, qo=210402, so=65344, conditions: qo<=210445? true so<=185776? true qo>210495? false so>185826? false
+  [SKIP] j_lh_idx=3349, qo=210412, so=133093, conditions: qo<=210445? true so<=185776? true qo>210495? false so>185826? false
+  [SKIP] j_lh_idx=3348, qo=210416, so=179665, conditions: qo<=210445? true so<=185776? true qo>210495? false so>185826? false
+  [SKIP] j_lh_idx=3347, qo=210423, so=28380, conditions: qo<=210445? true so<=185776? true qo>210495? false so>185826? false
+  [SKIP] j_lh_idx=3346, qo=210424, so=39155, conditions: qo<=210445? true so<=185776? true qo>210495? false so>185826? false
+  [SKIP] j_lh_idx=3345, qo=210461, so=61536, conditions: qo<=210445? false so<=185776? true qo>210495? false so>185826? false
+  [SKIP] j_lh_idx=3344, qo=210489, so=143014, conditions: qo<=210445? false so<=185776? true qo>210495? false so>185826? false
+  [BREAK] j_lh_idx=3343, qo=210501 > h_qe_gap+TRIM_SIZE=210500
+[DEBUG_CHAINING] INDEX 0 update: new_sum=111, num=1, link=999999
+[DEBUG_CHAINING] INDEX 1 update: new_sum=4020, num=37, link=2999
+[DEBUG_CHAINING] INDEX 1: new best_sum=4020, best=3368
+[DEBUG_CHAINING] Target HSP is in chain! ordering=1, evalue=0.00e0, is_first=false
+  Chain head: best_i=88105, chain length: 408
+[TRACE_LINKING] target_chain head_idx=88105 chain_len=408 linked_set=true ordering=1 evalue=0.000e0
+   idx=88105 raw_score=81 q=425-502 s=434-511 q_aa=141-167 s_aa=144-170 start_of_chain=true next=88088
+   idx=88088 raw_score=208 q=518-688 s=536-706 q_aa=172-229 s_aa=178-235 start_of_chain=false next=88067
+   idx=88067 raw_score=161 q=686-835 s=698-847 q_aa=228-278 s_aa=232-282 start_of_chain=false next=88049
+   idx=88049 raw_score=293 q=836-1129 s=839-1132 q_aa=278-376 s_aa=279-377 start_of_chain=false next=87953
+   idx=87953 raw_score=166 q=1169-1456 s=1166-1453 q_aa=389-485 s_aa=388-484 start_of_chain=false next=87929
+   idx=87929 raw_score=134 q=1674-1841 s=1709-1876 q_aa=557-613 s_aa=569-625 start_of_chain=false next=87906
+   idx=87906 raw_score=93 q=1845-2009 s=1883-2047 q_aa=614-669 s_aa=627-682 start_of_chain=false next=87858
+   idx=87858 raw_score=442 q=2001-2657 s=2042-2698 q_aa=666-885 s_aa=680-899 start_of_chain=false next=87669
+   idx=87669 raw_score=47 q=3940-4041 s=4891-4992 q_aa=1313-1347 s_aa=1630-1664 start_of_chain=false next=87390
+   idx=87390 raw_score=52 q=6085-6198 s=10099-10212 q_aa=2028-2066 s_aa=3366-3404 start_of_chain=false next=87371
+   idx=87371 raw_score=76 q=6296-6406 s=10310-10420 q_aa=2098-2135 s_aa=3436-3473 start_of_chain=false next=87365
+   idx=87365 raw_score=152 q=6452-6598 s=10466-10612 q_aa=2150-2199 s_aa=3488-3537 start_of_chain=false next=87342
+   idx=87342 raw_score=156 q=6659-6847 s=10673-10861 q_aa=2219-2282 s_aa=3557-3620 start_of_chain=false next=87326
+   idx=87326 raw_score=823 q=6969-7727 s=10890-11648 q_aa=2322-2575 s_aa=3629-3882 start_of_chain=false next=87133
+   idx=87133 raw_score=103 q=7803-7910 s=11730-11837 q_aa=2600-2636 s_aa=3909-3945 start_of_chain=false next=86954
+   idx=86954 raw_score=103 q=9269-9388 s=11871-11990 q_aa=3089-3129 s_aa=3956-3996 start_of_chain=false next=86947
+   idx=86947 raw_score=232 q=9410-9661 s=12015-12266 q_aa=3136-3220 s_aa=4004-4088 start_of_chain=false next=86858
+   idx=86858 raw_score=143 q=10730-10879 s=12499-12648 q_aa=3576-3626 s_aa=4166-4216 start_of_chain=false next=86821
+   idx=86821 raw_score=226 q=10889-11125 s=12661-12897 q_aa=3629-3708 s_aa=4220-4299 start_of_chain=false next=86782
+   idx=86782 raw_score=79 q=11411-11542 s=13192-13323 q_aa=3803-3847 s_aa=4397-4441 start_of_chain=false next=86753
+   idx=86753 raw_score=138 q=11753-11998 s=13600-13845 q_aa=3917-3999 s_aa=4533-4615 start_of_chain=false next=86718
+   idx=86718 raw_score=48 q=12016-12048 s=13866-13898 q_aa=4005-4016 s_aa=4621-4632 start_of_chain=false next=86551
+   idx=86551 raw_score=522 q=12787-13248 s=14534-14995 q_aa=4262-4416 s_aa=4844-4998 start_of_chain=false next=86503
+   idx=86503 raw_score=1053 q=13288-14058 s=15032-15802 q_aa=4429-4686 s_aa=5010-5267 start_of_chain=false next=86314
+   idx=86314 raw_score=207 q=14098-14304 s=15839-16045 q_aa=4699-4768 s_aa=5279-5348 start_of_chain=false next=86299
+   idx=86299 raw_score=89 q=14479-14652 s=16227-16400 q_aa=4826-4884 s_aa=5408-5466 start_of_chain=false next=86157
+   idx=86157 raw_score=50 q=14809-14895 s=16509-16595 q_aa=4936-4965 s_aa=5502-5531 start_of_chain=false next=86036
+   idx=86036 raw_score=54 q=15226-15285 s=17121-17180 q_aa=5075-5095 s_aa=5706-5726 start_of_chain=false next=85978
+   idx=85978 raw_score=157 q=15292-15531 s=17184-17423 q_aa=5097-5177 s_aa=5727-5807 start_of_chain=false next=85920
+   idx=85920 raw_score=49 q=15753-15920 s=17630-17797 q_aa=5250-5306 s_aa=5876-5932 start_of_chain=false next=85875
+   idx=85875 raw_score=224 q=16048-16470 s=17928-18350 q_aa=5349-5490 s_aa=5975-6116 start_of_chain=false next=85649
+   idx=85649 raw_score=75 q=16876-16992 s=18771-18887 q_aa=5625-5664 s_aa=6256-6295 start_of_chain=false next=85548
+   idx=85548 raw_score=275 q=17548-18015 s=19395-19862 q_aa=5849-6005 s_aa=6464-6620 start_of_chain=false next=85499
+   idx=85499 raw_score=64 q=18305-18454 s=19922-20071 q_aa=6101-6151 s_aa=6640-6690 start_of_chain=false next=85485
+   idx=85485 raw_score=704 q=18506-19132 s=20135-20761 q_aa=6168-6377 s_aa=6711-6920 start_of_chain=false next=85389
+   idx=85389 raw_score=155 q=19359-19562 s=21057-21260 q_aa=6452-6520 s_aa=7018-7086 start_of_chain=false next=85345
+   idx=85345 raw_score=55 q=19547-19642 s=21245-21340 q_aa=6515-6547 s_aa=7081-7113 start_of_chain=false next=85343
+   idx=85343 raw_score=1219 q=19620-20675 s=21318-22373 q_aa=6539-6891 s_aa=7105-7457 start_of_chain=false next=85094
+   idx=85094 raw_score=146 q=20838-21074 s=22546-22782 q_aa=6945-7024 s_aa=7515-7594 start_of_chain=false next=85051
+   idx=85051 raw_score=289 q=21640-21966 s=23473-23799 q_aa=7213-7322 s_aa=7824-7933 start_of_chain=false next=85017
+   idx=85017 raw_score=100 q=22034-22150 s=23880-23996 q_aa=7344-7383 s_aa=7959-7998 start_of_chain=false next=84944
+   idx=84944 raw_score=134 q=22130-22282 s=23997-24149 q_aa=7376-7427 s_aa=7998-8049 start_of_chain=false next=84890
+   idx=84890 raw_score=52 q=22259-22324 s=24129-24194 q_aa=7419-7441 s_aa=8042-8064 start_of_chain=false next=84869
+   idx=84869 raw_score=262 q=22522-22731 s=24434-24643 q_aa=7507-7577 s_aa=8144-8214 start_of_chain=false next=84831
+   idx=84831 raw_score=111 q=22964-23101 s=24880-25017 q_aa=7654-7700 s_aa=8293-8339 start_of_chain=false next=84804
+   idx=84804 raw_score=77 q=23150-23350 s=25057-25257 q_aa=7716-7783 s_aa=8352-8419 start_of_chain=false next=84762
+   idx=84762 raw_score=281 q=23501-23983 s=25423-25905 q_aa=7833-7994 s_aa=8474-8635 start_of_chain=false next=84694
+   idx=84694 raw_score=98 q=24005-24148 s=25930-26073 q_aa=8001-8049 s_aa=8643-8691 start_of_chain=false next=84674
+   idx=84674 raw_score=154 q=24185-24388 s=26101-26304 q_aa=8061-8129 s_aa=8700-8768 start_of_chain=false next=84629
+   idx=84629 raw_score=241 q=24389-24682 s=26308-26601 q_aa=8129-8227 s_aa=8769-8867 start_of_chain=false next=84575
+   idx=84575 raw_score=57 q=24817-24924 s=26794-26901 q_aa=8272-8308 s_aa=8931-8967 start_of_chain=false next=84490
+   idx=84490 raw_score=565 q=25093-25707 s=27067-27681 q_aa=8364-8569 s_aa=9022-9227 start_of_chain=false next=84427
+   idx=84427 raw_score=123 q=25758-25898 s=27735-27875 q_aa=8585-8632 s_aa=9244-9291 start_of_chain=false next=84421
+   idx=84421 raw_score=131 q=25924-26022 s=27910-28008 q_aa=8641-8674 s_aa=9303-9336 start_of_chain=false next=84418
+   idx=84418 raw_score=175 q=26039-26272 s=28893-29126 q_aa=8679-8757 s_aa=9630-9708 start_of_chain=false next=84366
+   idx=84366 raw_score=72 q=26483-26593 s=29334-29444 q_aa=8827-8864 s_aa=9777-9814 start_of_chain=false next=84355
+   idx=84355 raw_score=255 q=26607-26987 s=29464-29844 q_aa=8868-8995 s_aa=9821-9948 start_of_chain=false next=84285
+   idx=84285 raw_score=76 q=26973-27065 s=29833-29925 q_aa=8990-9021 s_aa=9944-9975 start_of_chain=false next=84217
+   idx=84217 raw_score=559 q=27087-27716 s=29950-30579 q_aa=9028-9238 s_aa=9983-10193 start_of_chain=false next=84145
+   idx=84145 raw_score=213 q=27747-27998 s=30604-30855 q_aa=9248-9332 s_aa=10201-10285 start_of_chain=false next=84091
+   idx=84091 raw_score=140 q=27999-28196 s=30871-31068 q_aa=9332-9398 s_aa=10290-10356 start_of_chain=false next=84027
+   idx=84027 raw_score=60 q=28272-28355 s=31138-31221 q_aa=9423-9451 s_aa=10379-10407 start_of_chain=false next=83992
+   idx=83992 raw_score=197 q=28368-28565 s=31232-31429 q_aa=9455-9521 s_aa=10410-10476 start_of_chain=false next=83951
+   idx=83951 raw_score=134 q=28584-28730 s=31445-31591 q_aa=9527-9576 s_aa=10481-10530 start_of_chain=false next=83931
+   idx=83931 raw_score=77 q=28983-29063 s=31752-31832 q_aa=9660-9687 s_aa=10583-10610 start_of_chain=false next=83924
+   idx=83924 raw_score=85 q=29210-29263 s=31965-32018 q_aa=9736-9754 s_aa=10654-10672 start_of_chain=false next=83916
+   idx=83916 raw_score=47 q=29336-29374 s=32082-32120 q_aa=9778-9791 s_aa=10693-10706 start_of_chain=false next=83906
+   idx=83906 raw_score=277 q=29870-30355 s=32631-33116 q_aa=9956-10118 s_aa=10876-11038 start_of_chain=false next=83768
+   idx=83768 raw_score=85 q=30611-30757 s=33378-33524 q_aa=10203-10252 s_aa=11125-11174 start_of_chain=false next=83719
+   idx=83719 raw_score=55 q=31042-31110 s=33821-33889 q_aa=10347-10370 s_aa=11273-11296 start_of_chain=false next=83700
+   idx=83700 raw_score=487 q=31099-31611 s=33881-34393 q_aa=10366-10537 s_aa=11293-11464 start_of_chain=false next=83632
+   idx=83632 raw_score=403 q=31615-32025 s=34393-34803 q_aa=10538-10675 s_aa=11464-11601 start_of_chain=false next=83561
+   idx=83561 raw_score=87 q=32163-32306 s=34944-35087 q_aa=10720-10768 s_aa=11647-11695 start_of_chain=false next=83518
+   idx=83518 raw_score=71 q=32345-32461 s=35134-35250 q_aa=10781-10820 s_aa=11711-11750 start_of_chain=false next=83480
+   idx=83480 raw_score=66 q=32471-32620 s=35269-35418 q_aa=10823-10873 s_aa=11756-11806 start_of_chain=false next=83457
+   idx=83457 raw_score=438 q=32729-33304 s=35527-36102 q_aa=10909-11101 s_aa=11842-12034 start_of_chain=false next=83215
+   idx=83215 raw_score=285 q=33584-33877 s=36370-36663 q_aa=11194-11292 s_aa=12123-12221 start_of_chain=false next=83107
+   idx=83107 raw_score=56 q=33971-34003 s=36784-36816 q_aa=11323-11334 s_aa=12261-12272 start_of_chain=false next=83105
+   idx=83105 raw_score=66 q=34008-34055 s=36822-36869 q_aa=11335-11351 s_aa=12273-12289 start_of_chain=false next=83000
+   idx=83000 raw_score=55 q=34486-34608 s=37256-37378 q_aa=11495-11536 s_aa=12418-12459 start_of_chain=false next=82984
+   idx=82984 raw_score=91 q=34666-34857 s=37439-37630 q_aa=11555-11619 s_aa=12479-12543 start_of_chain=false next=82952
+   idx=82952 raw_score=167 q=34984-35460 s=37793-38269 q_aa=11661-11820 s_aa=12597-12756 start_of_chain=false next=82506
+   idx=82506 raw_score=52 q=38439-38534 s=38847-38942 q_aa=12812-12844 s_aa=12948-12980 start_of_chain=false next=82421
+   idx=82421 raw_score=57 q=38973-39098 s=48952-49077 q_aa=12990-13032 s_aa=16317-16359 start_of_chain=false next=82147
+   idx=82147 raw_score=50 q=40552-40626 s=50211-50285 q_aa=13517-13542 s_aa=16736-16761 start_of_chain=false next=82057
+   idx=82057 raw_score=69 q=40978-41094 s=52448-52564 q_aa=13659-13698 s_aa=17482-17521 start_of_chain=false next=81934
+   idx=81934 raw_score=47 q=43234-43326 s=56935-57027 q_aa=14411-14442 s_aa=18978-19009 start_of_chain=false next=81838
+   idx=81838 raw_score=48 q=44304-44375 s=74936-75007 q_aa=14767-14791 s_aa=24978-25002 start_of_chain=false next=81720
+   idx=81720 raw_score=49 q=44898-44993 s=80442-80537 q_aa=14965-14997 s_aa=26813-26845 start_of_chain=false next=81361
+   idx=81361 raw_score=50 q=47309-47350 s=80515-80556 q_aa=15769-15783 s_aa=26838-26852 start_of_chain=false next=81294
+   idx=81294 raw_score=53 q=47682-47735 s=81259-81312 q_aa=15893-15911 s_aa=27086-27104 start_of_chain=false next=81212
+   idx=81212 raw_score=54 q=48197-48307 s=84709-84819 q_aa=16065-16102 s_aa=28236-28273 start_of_chain=false next=81020
+   idx=81020 raw_score=48 q=49095-49136 s=86353-86394 q_aa=16364-16378 s_aa=28784-28798 start_of_chain=false next=80982
+   idx=80982 raw_score=47 q=49514-49549 s=92348-92383 q_aa=16504-16516 s_aa=30782-30794 start_of_chain=false next=80951
+   idx=80951 raw_score=47 q=49999-50052 s=95036-95089 q_aa=16666-16684 s_aa=31678-31696 start_of_chain=false next=80917
+   idx=80917 raw_score=51 q=50156-50212 s=112734-112790 q_aa=16718-16737 s_aa=37577-37596 start_of_chain=false next=80865
+   idx=80865 raw_score=178 q=50453-50770 s=118465-118782 q_aa=16817-16923 s_aa=39488-39594 start_of_chain=false next=80806
+   idx=80806 raw_score=1323 q=50995-52140 s=119045-120190 q_aa=16998-17380 s_aa=39681-40063 start_of_chain=false next=80674
+   idx=80674 raw_score=394 q=52220-52639 s=120218-120637 q_aa=17406-17546 s_aa=40072-40212 start_of_chain=false next=80632
+   idx=80632 raw_score=62 q=52783-52830 s=120778-120825 q_aa=17594-17610 s_aa=40259-40275 start_of_chain=false next=80583
+   idx=80583 raw_score=80 q=53145-53270 s=123966-124091 q_aa=17714-17756 s_aa=41321-41363 start_of_chain=false next=80501
+   idx=80501 raw_score=361 q=53380-53811 s=124274-124705 q_aa=17793-17937 s_aa=41424-41568 start_of_chain=false next=80315
+   idx=80315 raw_score=138 q=53848-53964 s=124742-124858 q_aa=17949-17988 s_aa=41580-41619 start_of_chain=false next=80248
+   idx=80248 raw_score=316 q=54122-54478 s=125059-125415 q_aa=18040-18159 s_aa=41686-41805 start_of_chain=false next=80041
+   idx=80041 raw_score=350 q=54577-55044 s=125463-125930 q_aa=18192-18348 s_aa=41820-41976 start_of_chain=false next=79969
+   idx=79969 raw_score=80 q=55436-55558 s=126319-126441 q_aa=18478-18519 s_aa=42106-42147 start_of_chain=false next=79963
+   idx=79963 raw_score=1414 q=55647-56684 s=126536-127573 q_aa=18548-18894 s_aa=42178-42524 start_of_chain=false next=79620
+   idx=79620 raw_score=184 q=56733-56918 s=127622-127807 q_aa=18910-18972 s_aa=42540-42602 start_of_chain=false next=79594
+   idx=79594 raw_score=227 q=57080-57364 s=128021-128305 q_aa=19026-19121 s_aa=42673-42768 start_of_chain=false next=79521
+   idx=79521 raw_score=70 q=57494-57601 s=128462-128569 q_aa=19164-19200 s_aa=42820-42856 start_of_chain=false next=79512
+   idx=79512 raw_score=293 q=57602-57901 s=128567-128866 q_aa=19200-19300 s_aa=42855-42955 start_of_chain=false next=79476
+   idx=79476 raw_score=92 q=58013-58102 s=128897-128986 q_aa=19337-19367 s_aa=42965-42995 start_of_chain=false next=79474
+   idx=79474 raw_score=236 q=58103-58297 s=128990-129184 q_aa=19367-19432 s_aa=42996-43061 start_of_chain=false next=79458
+   idx=79458 raw_score=151 q=58301-58429 s=129185-129313 q_aa=19433-19476 s_aa=43061-43104 start_of_chain=false next=79383
+   idx=79383 raw_score=1282 q=58484-59368 s=129368-130252 q_aa=19494-19789 s_aa=43122-43417 start_of_chain=false next=79265
+   idx=79265 raw_score=124 q=59547-59669 s=130297-130419 q_aa=19848-19889 s_aa=43432-43473 start_of_chain=false next=79243
+   idx=79243 raw_score=57 q=59736-59873 s=130486-130623 q_aa=19911-19957 s_aa=43495-43541 start_of_chain=false next=79224
+   idx=79224 raw_score=61 q=60012-60125 s=136809-136922 q_aa=20003-20041 s_aa=45602-45640 start_of_chain=false next=79184
+   idx=79184 raw_score=2096 q=60366-62264 s=137196-139094 q_aa=20121-20754 s_aa=45731-46364 start_of_chain=false next=78790
+   idx=78790 raw_score=244 q=62280-62507 s=139113-139340 q_aa=20759-20835 s_aa=46370-46446 start_of_chain=false next=78762
+   idx=78762 raw_score=66 q=62765-62866 s=139449-139550 q_aa=20921-20955 s_aa=46482-46516 start_of_chain=false next=78746
+   idx=78746 raw_score=280 q=62867-63121 s=139548-139802 q_aa=20955-21040 s_aa=46515-46600 start_of_chain=false next=78677
+   idx=78677 raw_score=179 q=63158-63325 s=141555-141722 q_aa=21052-21108 s_aa=47184-47240 start_of_chain=false next=78595
+   idx=78595 raw_score=247 q=63395-63589 s=141834-142028 q_aa=21131-21196 s_aa=47277-47342 start_of_chain=false next=78441
+   idx=78441 raw_score=168 q=63641-63898 s=142071-142328 q_aa=21213-21299 s_aa=47356-47442 start_of_chain=false next=78429
+   idx=78429 raw_score=100 q=63911-64051 s=142338-142478 q_aa=21303-21350 s_aa=47445-47492 start_of_chain=false next=78190
+   idx=78190 raw_score=48 q=66455-66529 s=142874-142948 q_aa=22151-22176 s_aa=47624-47649 start_of_chain=false next=77938
+   idx=77938 raw_score=62 q=68612-68695 s=145994-146077 q_aa=22870-22898 s_aa=48664-48692 start_of_chain=false next=71272
+   idx=71272 raw_score=59 q=110008-110112 s=146955-147059 q_aa=36669-36704 s_aa=48984-49019 start_of_chain=false next=71215
+   idx=71215 raw_score=57 q=110359-110472 s=147327-147440 q_aa=36786-36824 s_aa=49108-49146 start_of_chain=false next=66563
+   idx=66563 raw_score=53 q=138705-138755 s=147489-147539 q_aa=46234-46251 s_aa=49162-49179 start_of_chain=false next=66356
+   idx=66356 raw_score=58 q=140248-140304 s=147549-147605 q_aa=46749-46768 s_aa=49182-49201 start_of_chain=false next=65953
+   idx=65953 raw_score=1086 q=143276-144340 s=147666-148730 q_aa=47758-48113 s_aa=49221-49576 start_of_chain=false next=65644
+   idx=65644 raw_score=233 q=144350-144586 s=148752-148988 q_aa=48116-48195 s_aa=49583-49662 start_of_chain=false next=65471
+   idx=65471 raw_score=332 q=145020-145286 s=149110-149376 q_aa=48339-48428 s_aa=49703-49792 start_of_chain=false next=65412
+   idx=65412 raw_score=139 q=145324-145464 s=149375-149515 q_aa=48441-48488 s_aa=49791-49838 start_of_chain=false next=65396
+   idx=65396 raw_score=103 q=145495-145587 s=149537-149629 q_aa=48498-48529 s_aa=49845-49876 start_of_chain=false next=65372
+   idx=65372 raw_score=93 q=145609-145725 s=149651-149767 q_aa=48536-48575 s_aa=49883-49922 start_of_chain=false next=65344
+   idx=65344 raw_score=94 q=145744-145830 s=149789-149875 q_aa=48581-48610 s_aa=49929-49958 start_of_chain=false next=65322
+   idx=65322 raw_score=147 q=145840-145968 s=149899-150027 q_aa=48613-48656 s_aa=49966-50009 start_of_chain=false next=65316
+   idx=65316 raw_score=153 q=145978-146100 s=150043-150165 q_aa=48659-48700 s_aa=50014-50055 start_of_chain=false next=65286
+   idx=65286 raw_score=362 q=146149-146496 s=150217-150564 q_aa=48716-48832 s_aa=50072-50188 start_of_chain=false next=65220
+   idx=65220 raw_score=383 q=146498-146842 s=150594-150938 q_aa=48832-48947 s_aa=50197-50312 start_of_chain=false next=65104
+   idx=65104 raw_score=48 q=147392-147538 s=153782-153928 q_aa=49130-49179 s_aa=51260-51309 start_of_chain=false next=64899
+   idx=64899 raw_score=63 q=148214-148282 s=156263-156331 q_aa=49404-49427 s_aa=52087-52110 start_of_chain=false next=64434
+   idx=64434 raw_score=53 q=151281-151397 s=160971-161087 q_aa=50426-50465 s_aa=53656-53695 start_of_chain=false next=64405
+   idx=64405 raw_score=52 q=151454-151498 s=162512-162556 q_aa=50484-50499 s_aa=54170-54185 start_of_chain=false next=64235
+   idx=64235 raw_score=52 q=152004-152087 s=164038-164121 q_aa=50667-50695 s_aa=54679-54707 start_of_chain=false next=63973
+   idx=63973 raw_score=52 q=156020-156136 s=172626-172742 q_aa=52006-52045 s_aa=57541-57580 start_of_chain=false next=63891
+   idx=63891 raw_score=56 q=156549-156719 s=173590-173760 q_aa=52182-52239 s_aa=57863-57920 start_of_chain=false next=63586
+   idx=63586 raw_score=51 q=158290-158334 s=175954-175998 q_aa=52763-52778 s_aa=58651-58666 start_of_chain=false next=63459
+   idx=63459 raw_score=212 q=159231-159542 s=179760-180071 q_aa=53076-53180 s_aa=59919-60023 start_of_chain=false next=63416
+   idx=63416 raw_score=680 q=159687-160334 s=180218-180865 q_aa=53228-53444 s_aa=60072-60288 start_of_chain=false next=63255
+   idx=63255 raw_score=407 q=161214-161639 s=180987-181412 q_aa=53737-53879 s_aa=60328-60470 start_of_chain=false next=63186
+   idx=63186 raw_score=357 q=161631-162053 s=181413-181835 q_aa=53876-54017 s_aa=60470-60611 start_of_chain=false next=63128
+   idx=63128 raw_score=53 q=162218-162319 s=182003-182104 q_aa=54072-54106 s_aa=60667-60701 start_of_chain=false next=63099
+   idx=63099 raw_score=155 q=162503-162658 s=182285-182440 q_aa=54167-54219 s_aa=60761-60813 start_of_chain=false next=63070
+   idx=63070 raw_score=65 q=162793-162909 s=182578-182694 q_aa=54264-54303 s_aa=60859-60898 start_of_chain=false next=63038
+   idx=63038 raw_score=118 q=162896-163075 s=182681-182860 q_aa=54298-54358 s_aa=60893-60953 start_of_chain=false next=63021
+   idx=63021 raw_score=93 q=163100-163210 s=182891-183001 q_aa=54366-54403 s_aa=60963-61000 start_of_chain=false next=62989
+   idx=62989 raw_score=341 q=163227-163613 s=183061-183447 q_aa=54408-54537 s_aa=61020-61149 start_of_chain=false next=62914
+   idx=62914 raw_score=83 q=163644-163778 s=183481-183615 q_aa=54547-54592 s_aa=61160-61205 start_of_chain=false next=62863
+   idx=62863 raw_score=720 q=163783-164499 s=183761-184477 q_aa=54594-54833 s_aa=61253-61492 start_of_chain=false next=58940
+   idx=58940 raw_score=47 q=191897-191977 s=184591-184671 q_aa=63965-63992 s_aa=61530-61557 start_of_chain=false next=58263
+   idx=58263 raw_score=50 q=196219-196263 s=184849-184893 q_aa=65406-65421 s_aa=61616-61631 start_of_chain=false next=56198
+   idx=56198 raw_score=49 q=209826-209897 s=185201-185272 q_aa=69941-69965 s_aa=61733-61757 start_of_chain=false next=53559
+   idx=53559 raw_score=54 q=224619-224663 s=185587-185631 q_aa=74872-74887 s_aa=61862-61877 start_of_chain=false next=53173
+   idx=53173 raw_score=48 q=226739-226834 s=186113-186208 q_aa=75579-75611 s_aa=62037-62069 start_of_chain=false next=52854
+   idx=52854 raw_score=186 q=228675-228974 s=187048-187347 q_aa=76224-76324 s_aa=62349-62449 start_of_chain=false next=52793
+   idx=52793 raw_score=337 q=228975-229403 s=187354-187782 q_aa=76324-76467 s_aa=62451-62594 start_of_chain=false next=52743
+   idx=52743 raw_score=103 q=229469-229624 s=187863-188018 q_aa=76489-76541 s_aa=62620-62672 start_of_chain=false next=52657
+   idx=52657 raw_score=383 q=230439-230789 s=188479-188829 q_aa=76812-76929 s_aa=62826-62943 start_of_chain=false next=52577
+   idx=52577 raw_score=385 q=230793-231152 s=188836-189195 q_aa=76930-77050 s_aa=62945-63065 start_of_chain=false next=52479
+   idx=52479 raw_score=242 q=231279-231572 s=189354-189647 q_aa=77092-77190 s_aa=63117-63215 start_of_chain=false next=52465
+   idx=52465 raw_score=96 q=231618-231728 s=189690-189800 q_aa=77205-77242 s_aa=63229-63266 start_of_chain=false next=52280
+   idx=52280 raw_score=62 q=232251-232325 s=190374-190448 q_aa=77416-77441 s_aa=63457-63482 start_of_chain=false next=52270
+   idx=52270 raw_score=100 q=232368-232484 s=190494-190610 q_aa=77455-77494 s_aa=63497-63536 start_of_chain=false next=52253
+   idx=52253 raw_score=122 q=232527-232727 s=190647-190847 q_aa=77508-77575 s_aa=63548-63615 start_of_chain=false next=52221
+   idx=52221 raw_score=128 q=233022-233168 s=191097-191243 q_aa=77673-77722 s_aa=63698-63747 start_of_chain=false next=51769
+   idx=51769 raw_score=53 q=234803-234922 s=199475-199594 q_aa=78267-78307 s_aa=66491-66531 start_of_chain=false next=51578
+   idx=51578 raw_score=51 q=236617-236682 s=217433-217498 q_aa=78872-78894 s_aa=72477-72499 start_of_chain=false next=50923
+   idx=50923 raw_score=47 q=241790-241870 s=217884-217964 q_aa=80596-80623 s_aa=72627-72654 start_of_chain=false next=50603
+   idx=50603 raw_score=62 q=244744-244842 s=218293-218391 q_aa=81581-81614 s_aa=72764-72797 start_of_chain=false next=50445
+   idx=50445 raw_score=51 q=245869-245961 s=219164-219256 q_aa=81956-81987 s_aa=73054-73085 start_of_chain=false next=50396
+   idx=50396 raw_score=57 q=246161-246286 s=230960-231085 q_aa=82053-82095 s_aa=76986-77028 start_of_chain=false next=50082
+   idx=50082 raw_score=47 q=248463-248546 s=231848-231931 q_aa=82820-82848 s_aa=77282-77310 start_of_chain=false next=50015
+   idx=50015 raw_score=53 q=249298-249426 s=238523-238651 q_aa=83099-83142 s_aa=79507-79550 start_of_chain=false next=49978
+   idx=49978 raw_score=49 q=249713-249748 s=240735-240770 q_aa=83237-83249 s_aa=80244-80256 start_of_chain=false next=49664
+   idx=49664 raw_score=60 q=253159-253197 s=244141-244179 q_aa=84386-84399 s_aa=81380-81393 start_of_chain=false next=49583
+   idx=49583 raw_score=58 q=254749-254814 s=246208-246273 q_aa=84916-84938 s_aa=82069-82091 start_of_chain=false next=49538
+   idx=49538 raw_score=48 q=255106-255147 s=253325-253366 q_aa=85035-85049 s_aa=84441-84455 start_of_chain=false next=49438
+   idx=49438 raw_score=57 q=255786-255905 s=256797-256916 q_aa=85261-85301 s_aa=85598-85638 start_of_chain=false next=48713
+   idx=48713 raw_score=49 q=263277-263348 s=264893-264964 q_aa=87758-87782 s_aa=88297-88321 start_of_chain=false next=48609
+   idx=48609 raw_score=47 q=264171-264227 s=266711-266767 q_aa=88056-88075 s_aa=88903-88922 start_of_chain=false next=48214
+   idx=48214 raw_score=62 q=267804-267920 s=267365-267481 q_aa=89267-89306 s_aa=89121-89160 start_of_chain=false next=48038
+   idx=48038 raw_score=294 q=269056-269322 s=284303-284569 q_aa=89685-89774 s_aa=94767-94856 start_of_chain=false next=47954
+   idx=47954 raw_score=172 q=269380-269538 s=284627-284785 q_aa=89793-89846 s_aa=94875-94928 start_of_chain=false next=47906
+   idx=47906 raw_score=226 q=269551-269778 s=284789-285016 q_aa=89850-89926 s_aa=94929-95005 start_of_chain=false next=47848
+   idx=47848 raw_score=139 q=269810-269974 s=285180-285344 q_aa=89936-89991 s_aa=95059-95114 start_of_chain=false next=47799
+   idx=47799 raw_score=168 q=270048-270239 s=285418-285609 q_aa=90015-90079 s_aa=95139-95203 start_of_chain=false next=47784
+   idx=47784 raw_score=555 q=270300-270872 s=285670-286242 q_aa=90099-90290 s_aa=95223-95414 start_of_chain=false next=47562
+   idx=47562 raw_score=158 q=270927-271118 s=286297-286488 q_aa=90308-90372 s_aa=95432-95496 start_of_chain=false next=47516
+   idx=47516 raw_score=93 q=271499-271678 s=286854-287033 q_aa=90499-90559 s_aa=95617-95677 start_of_chain=false next=47464
+   idx=47464 raw_score=129 q=272054-272173 s=287409-287528 q_aa=90684-90724 s_aa=95802-95842 start_of_chain=false next=47386
+   idx=47386 raw_score=122 q=272216-272419 s=287571-287774 q_aa=90738-90806 s_aa=95856-95924 start_of_chain=false next=47267
+   idx=47267 raw_score=48 q=272859-272924 s=304929-304994 q_aa=90952-90974 s_aa=101642-101664 start_of_chain=false next=47087
+   idx=47087 raw_score=48 q=274148-274189 s=313489-313530 q_aa=91382-91396 s_aa=104496-104510 start_of_chain=false next=47033
+   idx=47033 raw_score=82 q=274353-274421 s=314655-314723 q_aa=91450-91473 s_aa=104884-104907 start_of_chain=false next=46920
+   idx=46920 raw_score=51 q=275055-275117 s=320879-320941 q_aa=91684-91705 s_aa=106959-106980 start_of_chain=false next=46526
+   idx=46526 raw_score=71 q=278807-278938 s=335566-335697 q_aa=92935-92979 s_aa=111855-111899 start_of_chain=false next=46230
+   idx=46230 raw_score=49 q=280483-280524 s=337989-338030 q_aa=93494-93508 s_aa=112662-112676 start_of_chain=false next=43890
+   idx=43890 raw_score=50 q=296631-296738 s=340245-340352 q_aa=98876-98912 s_aa=113414-113450 start_of_chain=false next=43217
+   idx=43217 raw_score=54 q=303143-303190 s=341327-341374 q_aa=101047-101063 s_aa=113775-113791 start_of_chain=false next=42824
+   idx=42824 raw_score=116 q=306656-306826 s=342274-342444 q_aa=102218-102275 s_aa=114091-114148 start_of_chain=false next=42802
+   idx=42802 raw_score=50 q=306989-307081 s=342610-342702 q_aa=102329-102360 s_aa=114203-114234 start_of_chain=false next=42801
+   idx=42801 raw_score=77 q=307124-307291 s=342745-342912 q_aa=102374-102430 s_aa=114248-114304 start_of_chain=false next=42605
+   idx=42605 raw_score=53 q=309006-309113 s=343457-343564 q_aa=103001-103037 s_aa=114485-114521 start_of_chain=false next=42574
+   idx=42574 raw_score=221 q=309229-309465 s=343672-343908 q_aa=103076-103155 s_aa=114557-114636 start_of_chain=false next=42497
+   idx=42497 raw_score=435 q=309586-309882 s=344029-344325 q_aa=103195-103294 s_aa=114676-114775 start_of_chain=false next=42372
+   idx=42372 raw_score=83 q=309985-310074 s=344428-344517 q_aa=103328-103358 s_aa=114809-114839 start_of_chain=false next=42278
+   idx=42278 raw_score=149 q=311289-311555 s=346013-346279 q_aa=103762-103851 s_aa=115337-115426 start_of_chain=false next=42200
+   idx=42200 raw_score=146 q=311985-312164 s=346700-346879 q_aa=103994-104054 s_aa=115566-115626 start_of_chain=false next=42148
+   idx=42148 raw_score=119 q=312238-312465 s=346984-347211 q_aa=104079-104155 s_aa=115661-115737 start_of_chain=false next=42098
+   idx=42098 raw_score=55 q=312582-312650 s=347334-347402 q_aa=104193-104216 s_aa=115777-115800 start_of_chain=false next=42067
+   idx=42067 raw_score=96 q=312672-312788 s=347430-347546 q_aa=104223-104262 s_aa=115809-115848 start_of_chain=false next=42056
+   idx=42056 raw_score=196 q=312925-313113 s=347680-347868 q_aa=104308-104371 s_aa=115893-115956 start_of_chain=false next=42026
+   idx=42026 raw_score=54 q=313104-313151 s=347862-347909 q_aa=104367-104383 s_aa=115953-115969 start_of_chain=false next=42005
+   idx=42005 raw_score=207 q=313531-313815 s=348022-348306 q_aa=104510-104605 s_aa=116007-116102 start_of_chain=false next=41704
+   idx=41704 raw_score=49 q=316910-316963 s=349433-349486 q_aa=105636-105654 s_aa=116477-116495 start_of_chain=false next=41538
+   idx=41538 raw_score=49 q=317872-317988 s=349715-349831 q_aa=105957-105996 s_aa=116571-116610 start_of_chain=false next=40995
+   idx=40995 raw_score=47 q=320426-320491 s=351594-351659 q_aa=106808-106830 s_aa=117197-117219 start_of_chain=false next=37675
+   idx=37675 raw_score=49 q=347810-347884 s=351637-351711 q_aa=115936-115961 s_aa=117212-117237 start_of_chain=false next=36039
+   idx=36039 raw_score=49 q=361345-361380 s=352663-352698 q_aa=120448-120460 s_aa=117554-117566 start_of_chain=false next=35040
+   idx=35040 raw_score=49 q=369606-369671 s=352733-352798 q_aa=123201-123223 s_aa=117577-117599 start_of_chain=false next=31526
+   idx=31526 raw_score=48 q=393659-393697 s=353038-353076 q_aa=131219-131232 s_aa=117679-117692 start_of_chain=false next=31400
+   idx=31400 raw_score=62 q=394941-395012 s=353529-353600 q_aa=131646-131670 s_aa=117842-117866 start_of_chain=false next=30609
+   idx=30609 raw_score=49 q=400643-400705 s=355409-355471 q_aa=133547-133568 s_aa=118469-118490 start_of_chain=false next=30073
+   idx=30073 raw_score=53 q=404700-404756 s=355656-355712 q_aa=134899-134918 s_aa=118551-118570 start_of_chain=false next=29287
+   idx=29287 raw_score=52 q=409638-409712 s=355719-355793 q_aa=136545-136570 s_aa=118572-118597 start_of_chain=false next=29078
+   idx=29078 raw_score=58 q=413000-413068 s=359983-360051 q_aa=137666-137689 s_aa=119994-120017 start_of_chain=false next=26939
+   idx=26939 raw_score=52 q=427989-428078 s=360420-360509 q_aa=142662-142692 s_aa=120139-120169 start_of_chain=false next=19774
+   idx=19774 raw_score=61 q=487629-487754 s=362119-362244 q_aa=162542-162584 s_aa=120706-120748 start_of_chain=false next=19766
+   idx=19766 raw_score=87 q=487909-487995 s=362399-362485 q_aa=162636-162665 s_aa=120799-120828 start_of_chain=false next=19760
+   idx=19760 raw_score=153 q=488035-488244 s=362525-362734 q_aa=162678-162748 s_aa=120841-120911 start_of_chain=false next=19710
+   idx=19710 raw_score=86 q=488742-488909 s=363244-363411 q_aa=162913-162969 s_aa=121081-121137 start_of_chain=false next=19644
+   idx=19644 raw_score=85 q=488958-489050 s=363460-363552 q_aa=162985-163016 s_aa=121153-121184 start_of_chain=false next=19628
+   idx=19628 raw_score=90 q=489153-489332 s=363655-363834 q_aa=163050-163110 s_aa=121218-121278 start_of_chain=false next=19597
+   idx=19597 raw_score=133 q=489408-489614 s=363900-364106 q_aa=163135-163204 s_aa=121299-121368 start_of_chain=false next=19568
+   idx=19568 raw_score=157 q=489655-489825 s=364147-364317 q_aa=163218-163275 s_aa=121382-121439 start_of_chain=false next=19539
+   idx=19539 raw_score=609 q=489889-490638 s=364381-365130 q_aa=163296-163546 s_aa=121460-121710 start_of_chain=false next=19384
+   idx=19384 raw_score=332 q=490786-491184 s=365278-365676 q_aa=163595-163728 s_aa=121759-121892 start_of_chain=false next=19358
+   idx=19358 raw_score=91 q=491242-491337 s=365734-365829 q_aa=163747-163779 s_aa=121911-121943 start_of_chain=false next=19349
+   idx=19349 raw_score=233 q=491416-491676 s=365908-366168 q_aa=163805-163892 s_aa=121969-122056 start_of_chain=false next=19306
+   idx=19306 raw_score=89 q=491843-491929 s=366348-366434 q_aa=163947-163976 s_aa=122115-122144 start_of_chain=false next=19293
+   idx=19293 raw_score=56 q=492035-492085 s=366555-366605 q_aa=164011-164028 s_aa=122184-122201 start_of_chain=false next=19285
+   idx=19285 raw_score=70 q=492131-492187 s=366651-366707 q_aa=164043-164062 s_aa=122216-122235 start_of_chain=false next=19271
+   idx=19271 raw_score=98 q=492263-492361 s=366783-366881 q_aa=164087-164120 s_aa=122260-122293 start_of_chain=false next=19255
+   idx=19255 raw_score=61 q=492575-492697 s=367095-367217 q_aa=164191-164232 s_aa=122364-122405 start_of_chain=false next=19248
+   idx=19248 raw_score=173 q=492740-492925 s=367257-367442 q_aa=164246-164308 s_aa=122418-122480 start_of_chain=false next=19151
+   idx=19151 raw_score=187 q=493004-493228 s=367521-367745 q_aa=164334-164409 s_aa=122506-122581 start_of_chain=false next=19122
+   idx=19122 raw_score=198 q=493269-493493 s=367790-368014 q_aa=164422-164497 s_aa=122596-122671 start_of_chain=false next=19095
+   idx=19095 raw_score=47 q=493566-493610 s=368087-368131 q_aa=164521-164536 s_aa=122695-122710 start_of_chain=false next=19090
+   idx=19090 raw_score=80 q=493812-493913 s=368336-368437 q_aa=164603-164637 s_aa=122778-122812 start_of_chain=false next=19079
+   idx=19079 raw_score=148 q=494229-494390 s=368765-368926 q_aa=164742-164796 s_aa=122921-122975 start_of_chain=false next=19056
+   idx=19056 raw_score=120 q=494398-494481 s=368934-369017 q_aa=164799-164827 s_aa=122977-123005 start_of_chain=false next=19052
+   idx=19052 raw_score=586 q=494506-495162 s=369055-369711 q_aa=164835-165054 s_aa=123018-123237 start_of_chain=false next=18960
+   idx=18960 raw_score=58 q=495417-495503 s=369966-370052 q_aa=165138-165167 s_aa=123321-123350 start_of_chain=false next=18945
+   idx=18945 raw_score=162 q=495675-495923 s=370224-370472 q_aa=165224-165307 s_aa=123407-123490 start_of_chain=false next=18929
+   idx=18929 raw_score=547 q=495981-496658 s=370530-371207 q_aa=165326-165552 s_aa=123509-123735 start_of_chain=false next=18802
+   idx=18802 raw_score=62 q=496692-496775 s=371237-371320 q_aa=165563-165591 s_aa=123745-123773 start_of_chain=false next=18783
+   idx=18783 raw_score=138 q=496773-496892 s=371315-371434 q_aa=165590-165630 s_aa=123771-123811 start_of_chain=false next=18765
+   idx=18765 raw_score=476 q=496896-497357 s=371435-371896 q_aa=165631-165785 s_aa=123811-123965 start_of_chain=false next=18685
+   idx=18685 raw_score=49 q=497431-497463 s=371927-371959 q_aa=165810-165821 s_aa=123975-123986 start_of_chain=false next=18682
+   idx=18682 raw_score=912 q=497477-498436 s=371973-372932 q_aa=165825-166145 s_aa=123990-124310 start_of_chain=false next=18561
+   idx=18561 raw_score=200 q=498521-498691 s=373017-373187 q_aa=166173-166230 s_aa=124338-124395 start_of_chain=false next=18533
+   idx=18533 raw_score=104 q=498683-498754 s=373182-373253 q_aa=166227-166251 s_aa=124393-124417 start_of_chain=false next=18194
+   idx=18194 raw_score=52 q=501111-501212 s=378424-378525 q_aa=167036-167070 s_aa=126141-126175 start_of_chain=false next=17343
+   idx=17343 raw_score=70 q=508163-508348 s=378614-378799 q_aa=169387-169449 s_aa=126204-126266 start_of_chain=false next=17188
+   idx=17188 raw_score=59 q=509299-509355 s=380176-380232 q_aa=169766-169785 s_aa=126725-126744 start_of_chain=false next=16608
+   idx=16608 raw_score=56 q=515217-515285 s=381049-381117 q_aa=171738-171761 s_aa=127016-127039 start_of_chain=false next=14314
+   idx=14314 raw_score=49 q=534830-534919 s=381579-381668 q_aa=178276-178306 s_aa=127192-127222 start_of_chain=false next=13859
+   idx=13859 raw_score=49 q=538832-538915 s=382908-382991 q_aa=179610-179638 s_aa=127635-127663 start_of_chain=false next=13679
+   idx=13679 raw_score=71 q=540475-540561 s=383295-383381 q_aa=180158-180187 s_aa=127764-127793 start_of_chain=false next=13586
+   idx=13586 raw_score=155 q=540995-541270 s=383830-384105 q_aa=180331-180423 s_aa=127943-128035 start_of_chain=false next=13410
+   idx=13410 raw_score=47 q=542398-542442 s=385487-385531 q_aa=180799-180814 s_aa=128495-128510 start_of_chain=false next=12629
+   idx=12629 raw_score=50 q=548680-548796 s=388076-388192 q_aa=182893-182932 s_aa=129358-129397 start_of_chain=false next=11151
+   idx=11151 raw_score=51 q=561385-561462 s=388556-388633 q_aa=187128-187154 s_aa=129518-129544 start_of_chain=false next=10920
+   idx=10920 raw_score=49 q=562456-562521 s=388829-388894 q_aa=187485-187507 s_aa=129609-129631 start_of_chain=false next=10747
+   idx=10747 raw_score=47 q=564204-564290 s=388885-388971 q_aa=188067-188096 s_aa=129628-129657 start_of_chain=false next=10322
+   idx=10322 raw_score=49 q=568351-568419 s=389390-389458 q_aa=189450-189473 s_aa=129796-129819 start_of_chain=false next=9967
+   idx=9967 raw_score=48 q=570533-570601 s=389936-390004 q_aa=190177-190200 s_aa=129978-130001 start_of_chain=false next=8636
+   idx=8636 raw_score=51 q=581354-581416 s=390484-390546 q_aa=193784-193805 s_aa=130161-130182 start_of_chain=false next=8402
+   idx=8402 raw_score=51 q=582824-582907 s=390985-391068 q_aa=194274-194302 s_aa=130328-130356 start_of_chain=false next=8389
+   idx=8389 raw_score=53 q=582894-582980 s=392410-392496 q_aa=194297-194326 s_aa=130803-130832 start_of_chain=false next=8022
+   idx=8022 raw_score=64 q=586148-586300 s=400296-400448 q_aa=195382-195433 s_aa=133431-133482 start_of_chain=false next=7985
+   idx=7985 raw_score=259 q=586281-586613 s=400429-400761 q_aa=195426-195537 s_aa=133476-133587 start_of_chain=false next=7947
+   idx=7947 raw_score=368 q=586739-587131 s=400850-401242 q_aa=195579-195710 s_aa=133616-133747 start_of_chain=false next=7874
+   idx=7874 raw_score=177 q=587395-587670 s=401527-401802 q_aa=195798-195890 s_aa=133842-133934 start_of_chain=false next=7821
+   idx=7821 raw_score=244 q=587718-588071 s=401860-402213 q_aa=195905-196023 s_aa=133953-134071 start_of_chain=false next=7754
+   idx=7754 raw_score=73 q=588174-588266 s=402316-402408 q_aa=196057-196088 s_aa=134105-134136 start_of_chain=false next=7744
+   idx=7744 raw_score=172 q=588282-588482 s=402420-402620 q_aa=196093-196160 s_aa=134139-134206 start_of_chain=false next=7696
+   idx=7696 raw_score=63 q=588605-588685 s=402743-402823 q_aa=196201-196228 s_aa=134247-134274 start_of_chain=false next=7679
+   idx=7679 raw_score=158 q=588681-588875 s=402828-403022 q_aa=196226-196291 s_aa=134275-134340 start_of_chain=false next=7627
+   idx=7627 raw_score=388 q=588956-589378 s=403108-403530 q_aa=196318-196459 s_aa=134369-134510 start_of_chain=false next=7530
+   idx=7530 raw_score=137 q=589551-589748 s=403692-403889 q_aa=196516-196582 s_aa=134563-134629 start_of_chain=false next=7517
+   idx=7517 raw_score=143 q=589784-589930 s=403925-404071 q_aa=196594-196643 s_aa=134641-134690 start_of_chain=false next=7496
+   idx=7496 raw_score=227 q=589926-590171 s=404067-404312 q_aa=196641-196723 s_aa=134688-134770 start_of_chain=false next=7467
+   idx=7467 raw_score=153 q=590180-590413 s=404323-404556 q_aa=196726-196804 s_aa=134774-134852 start_of_chain=false next=7357
+   idx=7357 raw_score=327 q=590892-591242 s=404843-405193 q_aa=196963-197080 s_aa=134947-135064 start_of_chain=false next=7300
+   idx=7300 raw_score=142 q=591409-591609 s=405391-405591 q_aa=197136-197203 s_aa=135130-135197 start_of_chain=false next=7259
+   idx=7259 raw_score=81 q=591754-591927 s=405742-405915 q_aa=197251-197309 s_aa=135247-135305 start_of_chain=false next=7208
+   idx=7208 raw_score=172 q=592041-592388 s=406058-406405 q_aa=197346-197462 s_aa=135352-135468 start_of_chain=false next=7122
+   idx=7122 raw_score=191 q=592404-592562 s=406424-406582 q_aa=197467-197520 s_aa=135474-135527 start_of_chain=false next=7067
+   idx=7067 raw_score=112 q=592697-592843 s=406724-406870 q_aa=197565-197614 s_aa=135574-135623 start_of_chain=false next=7046
+   idx=7046 raw_score=54 q=593002-593130 s=407029-407157 q_aa=197667-197710 s_aa=135676-135719 start_of_chain=false next=7031
+   idx=7031 raw_score=196 q=593243-593530 s=407267-407554 q_aa=197747-197843 s_aa=135755-135851 start_of_chain=false next=6975
+   idx=6975 raw_score=85 q=593616-593708 s=407644-407736 q_aa=197871-197902 s_aa=135881-135912 start_of_chain=false next=6906
+   idx=6906 raw_score=78 q=593778-593858 s=407806-407886 q_aa=197925-197952 s_aa=135935-135962 start_of_chain=false next=6861
+   idx=6861 raw_score=106 q=594077-594208 s=408116-408247 q_aa=198025-198069 s_aa=136038-136082 start_of_chain=false next=6852
+   idx=6852 raw_score=292 q=594281-594565 s=408320-408604 q_aa=198093-198188 s_aa=136106-136201 start_of_chain=false next=6828
+   idx=6828 raw_score=85 q=594633-594812 s=408703-408882 q_aa=198210-198270 s_aa=136234-136294 start_of_chain=false next=6789
+   idx=6789 raw_score=626 q=594882-595502 s=408949-409569 q_aa=198293-198500 s_aa=136316-136523 start_of_chain=false next=6674
+   idx=6674 raw_score=279 q=595538-595825 s=409580-409867 q_aa=198512-198608 s_aa=136526-136622 start_of_chain=false next=6084
+   idx=6084 raw_score=48 q=600187-600213 s=417640-417666 q_aa=200062-200071 s_aa=139213-139222 start_of_chain=false next=6063
+   idx=6063 raw_score=57 q=600483-600656 s=418529-418702 q_aa=200160-200218 s_aa=139509-139567 start_of_chain=false next=6016
+   idx=6016 raw_score=58 q=600939-601055 s=427230-427346 q_aa=200312-200351 s_aa=142409-142448 start_of_chain=false next=5892
+   idx=5892 raw_score=71 q=602160-602261 s=433992-434093 q_aa=200719-200753 s_aa=144663-144697 start_of_chain=false next=5872
+   idx=5872 raw_score=63 q=602403-602528 s=434361-434486 q_aa=200800-200842 s_aa=144786-144828 start_of_chain=false next=5860
+   idx=5860 raw_score=49 q=603029-603076 s=438282-438329 q_aa=201009-201025 s_aa=146093-146109 start_of_chain=false next=5328
+   idx=5328 raw_score=128 q=610387-610593 s=439869-440075 q_aa=203462-203531 s_aa=146622-146691 start_of_chain=false next=5279
+   idx=5279 raw_score=100 q=610986-611174 s=440464-440652 q_aa=203661-203724 s_aa=146821-146884 start_of_chain=false next=5208
+   idx=5208 raw_score=117 q=611699-611839 s=441153-441293 q_aa=203899-203946 s_aa=147050-147097 start_of_chain=false next=5195
+   idx=5195 raw_score=50 q=611879-612034 s=441339-441494 q_aa=203959-204011 s_aa=147112-147164 start_of_chain=false next=5159
+   idx=5159 raw_score=63 q=612122-612202 s=441582-441662 q_aa=204040-204067 s_aa=147193-147220 start_of_chain=false next=5149
+   idx=5149 raw_score=115 q=612392-612583 s=441852-442043 q_aa=204130-204194 s_aa=147283-147347 start_of_chain=false next=5136
+   idx=5136 raw_score=122 q=612901-613011 s=442380-442490 q_aa=204300-204337 s_aa=147459-147496 start_of_chain=false next=5125
+   idx=5125 raw_score=163 q=613078-613275 s=442557-442754 q_aa=204359-204425 s_aa=147518-147584 start_of_chain=false next=5108
+   idx=5108 raw_score=155 q=613321-613497 s=442800-442976 q_aa=204440-204499 s_aa=147599-147658 start_of_chain=false next=5098
+   idx=5098 raw_score=47 q=613548-613595 s=443027-443074 q_aa=204515-204531 s_aa=147675-147691 start_of_chain=false next=5054
+   idx=5054 raw_score=306 q=613961-614362 s=529118-529519 q_aa=204653-204787 s_aa=176372-176506 start_of_chain=false next=4989
+   idx=4989 raw_score=83 q=614420-614602 s=529577-529759 q_aa=204806-204867 s_aa=176525-176586 start_of_chain=false next=4964
+   idx=4964 raw_score=64 q=614753-614803 s=529931-529981 q_aa=204917-204934 s_aa=176643-176660 start_of_chain=false next=4951
+   idx=4951 raw_score=96 q=614843-614926 s=530021-530104 q_aa=204947-204975 s_aa=176673-176701 start_of_chain=false next=4910
+   idx=4910 raw_score=165 q=615914-616186 s=531091-531363 q_aa=205304-205395 s_aa=177030-177121 start_of_chain=false next=4859
+   idx=4859 raw_score=83 q=616203-616352 s=531389-531538 q_aa=205400-205450 s_aa=177129-177179 start_of_chain=false next=4823
+   idx=4823 raw_score=60 q=616847-616948 s=532012-532113 q_aa=205615-205649 s_aa=177337-177371 start_of_chain=false next=4791
+   idx=4791 raw_score=66 q=617015-617065 s=532180-532230 q_aa=205671-205688 s_aa=177393-177410 start_of_chain=false next=4760
+   idx=4760 raw_score=226 q=617138-617359 s=532303-532524 q_aa=205712-205786 s_aa=177434-177508 start_of_chain=false next=4734
+   idx=4734 raw_score=129 q=617444-617659 s=532606-532821 q_aa=205814-205886 s_aa=177535-177607 start_of_chain=false next=4723
+   idx=4723 raw_score=139 q=617726-617854 s=532888-533016 q_aa=205908-205951 s_aa=177629-177672 start_of_chain=false next=4561
+   idx=4561 raw_score=137 q=619548-619799 s=545420-545671 q_aa=206515-206599 s_aa=181806-181890 start_of_chain=false next=4543
+   idx=4543 raw_score=173 q=620211-620417 s=546077-546283 q_aa=206736-206805 s_aa=182025-182094 start_of_chain=false next=4517
+   idx=4517 raw_score=147 q=620474-620620 s=546340-546486 q_aa=206824-206873 s_aa=182113-182162 start_of_chain=false next=4099
+   idx=4099 raw_score=50 q=626045-626110 s=549821-549886 q_aa=208681-208703 s_aa=183273-183295 start_of_chain=false next=3931
+   idx=3931 raw_score=47 q=626787-626825 s=550815-550853 q_aa=208928-208941 s_aa=183604-183617 start_of_chain=false next=3922
+   idx=3922 raw_score=47 q=626877-626942 s=553039-553104 q_aa=208958-208980 s_aa=184346-184368 start_of_chain=false next=3631
+   idx=3631 raw_score=142 q=629219-629308 s=555009-555098 q_aa=209739-209769 s_aa=185002-185032 start_of_chain=false next=3614
+   idx=3614 raw_score=122 q=629309-629386 s=555104-555181 q_aa=209769-209795 s_aa=185034-185060 start_of_chain=false next=3606
+   idx=3606 raw_score=147 q=629388-629468 s=555182-555262 q_aa=209795-209822 s_aa=185060-185087 start_of_chain=false next=3591
+   idx=3591 raw_score=136 q=629479-629574 s=555267-555362 q_aa=209826-209858 s_aa=185088-185120 start_of_chain=false next=3581
+   idx=3581 raw_score=148 q=629597-629674 s=555370-555447 q_aa=209865-209891 s_aa=185123-185149 start_of_chain=false next=3570
+   idx=3570 raw_score=120 q=629698-629787 s=555453-555542 q_aa=209899-209929 s_aa=185150-185180 start_of_chain=false next=3558
+   idx=3558 raw_score=100 q=629776-629853 s=555536-555613 q_aa=209925-209951 s_aa=185178-185204 start_of_chain=false next=3553
+   idx=3553 raw_score=150 q=629842-629931 s=555604-555693 q_aa=209947-209977 s_aa=185201-185231 start_of_chain=false next=3543
+   idx=3543 raw_score=111 q=629961-630044 s=555694-555777 q_aa=209986-210014 s_aa=185231-185259 start_of_chain=false next=3531
+   idx=3531 raw_score=152 q=630042-630131 s=555792-555881 q_aa=210013-210043 s_aa=185263-185293 start_of_chain=false next=3518
+   idx=3518 raw_score=93 q=630130-630186 s=555881-555937 q_aa=210043-210062 s_aa=185293-185312 start_of_chain=false next=3508
+   idx=3508 raw_score=146 q=630221-630295 s=555960-556034 q_aa=210073-210098 s_aa=185319-185344 start_of_chain=false next=3501
+   idx=3501 raw_score=147 q=630293-630397 s=556034-556138 q_aa=210097-210132 s_aa=185344-185379 start_of_chain=false next=3488
+   idx=3488 raw_score=145 q=630381-630470 s=556120-556209 q_aa=210126-210156 s_aa=185373-185403 start_of_chain=false next=3466
+   idx=3466 raw_score=324 q=630723-631112 s=556702-557091 q_aa=210240-210370 s_aa=185567-185697 start_of_chain=false next=3368
+  *idx=3368 raw_score=152 q=631110-631352 s=557101-557343 q_aa=210369-210450 s_aa=185700-185781 start_of_chain=false next=2999
+   idx=2999 raw_score=114 q=633782-634048 s=564225-564491 q_aa=211260-211349 s_aa=188074-188163 start_of_chain=false next=2939
+   idx=2939 raw_score=116 q=634238-634480 s=564687-564929 q_aa=211412-211493 s_aa=188228-188309 start_of_chain=false next=2895
+   idx=2895 raw_score=48 q=634579-634647 s=565037-565105 q_aa=211526-211549 s_aa=188345-188368 start_of_chain=false next=2855
+   idx=2855 raw_score=81 q=635150-635272 s=565627-565749 q_aa=211716-211757 s_aa=188542-188583 start_of_chain=false next=2844
+   idx=2844 raw_score=50 q=635278-635409 s=565755-565886 q_aa=211759-211803 s_aa=188584-188628 start_of_chain=false next=2789
+   idx=2789 raw_score=105 q=635637-635735 s=567771-567869 q_aa=211878-211911 s_aa=189256-189289 start_of_chain=false next=2776
+   idx=2776 raw_score=110 q=635760-635900 s=567891-568031 q_aa=211919-211966 s_aa=189296-189343 start_of_chain=false next=2754
+   idx=2754 raw_score=98 q=636203-636319 s=568331-568447 q_aa=212067-212106 s_aa=189443-189482 start_of_chain=false next=2724
+   idx=2724 raw_score=226 q=636737-637000 s=568837-569100 q_aa=212245-212333 s_aa=189612-189700 start_of_chain=false next=2681
+   idx=2681 raw_score=120 q=637202-637378 s=569311-569487 q_aa=212400-212459 s_aa=189770-189829 start_of_chain=false next=2672
+   idx=2672 raw_score=145 q=637391-637657 s=569497-569763 q_aa=212463-212552 s_aa=189832-189921 start_of_chain=false next=2636
+   idx=2636 raw_score=126 q=637757-637897 s=569849-569989 q_aa=212585-212632 s_aa=189949-189996 start_of_chain=false next=2606
+   idx=2606 raw_score=112 q=637965-638183 s=570057-570275 q_aa=212654-212727 s_aa=190018-190091 start_of_chain=false next=2570
+   idx=2570 raw_score=65 q=638264-638305 s=570371-570412 q_aa=212754-212768 s_aa=190123-190137 start_of_chain=false next=2560
+   idx=2560 raw_score=113 q=638433-638552 s=570480-570599 q_aa=212810-212850 s_aa=190159-190199 start_of_chain=false next=2525
+   idx=2525 raw_score=247 q=638631-639014 s=570678-571061 q_aa=212876-213004 s_aa=190225-190353 start_of_chain=false next=2444
+   idx=2444 raw_score=252 q=639039-639248 s=571518-571727 q_aa=213012-213082 s_aa=190505-190575 start_of_chain=false next=2386
+   idx=2386 raw_score=66 q=639282-639350 s=571761-571829 q_aa=213093-213116 s_aa=190586-190609 start_of_chain=false next=2078
+   idx=2078 raw_score=146 q=642030-642206 s=572680-572856 q_aa=214009-214068 s_aa=190893-190952 start_of_chain=false next=2037
+   idx=2037 raw_score=83 q=642487-642591 s=573146-573250 q_aa=214162-214197 s_aa=191048-191083 start_of_chain=false next=1979
+   idx=1979 raw_score=553 q=642669-643391 s=573328-574050 q_aa=214222-214463 s_aa=191109-191350 start_of_chain=false next=1807
+   idx=1807 raw_score=227 q=643548-643769 s=574210-574431 q_aa=214515-214589 s_aa=191403-191477 start_of_chain=false next=1685
+   idx=1685 raw_score=47 q=645124-645240 s=575602-575718 q_aa=215041-215080 s_aa=191867-191906 start_of_chain=false next=1651
+   idx=1651 raw_score=171 q=645288-645599 s=575763-576074 q_aa=215095-215199 s_aa=191920-192024 start_of_chain=false next=1294
+   idx=1294 raw_score=485 q=648541-648948 s=578045-578452 q_aa=216180-216316 s_aa=192681-192817 start_of_chain=false next=1200
+   idx=1200 raw_score=161 q=648928-649113 s=578435-578620 q_aa=216309-216371 s_aa=192811-192873 start_of_chain=false next=1185
+   idx=1185 raw_score=607 q=649126-649653 s=578636-579163 q_aa=216375-216551 s_aa=192878-193054 start_of_chain=false next=656
+   idx=656 raw_score=61 q=656050-656193 s=581416-581559 q_aa=218683-218731 s_aa=193805-193853 start_of_chain=false next=535
+   idx=535 raw_score=47 q=657112-657168 s=582383-582439 q_aa=219037-219056 s_aa=194127-194146 start_of_chain=false next=437
+   idx=437 raw_score=61 q=658172-658273 s=592274-592375 q_aa=219390-219424 s_aa=197424-197458 start_of_chain=false next=304
+   idx=304 raw_score=287 q=658912-659259 s=602440-602787 q_aa=219637-219753 s_aa=200813-200929 start_of_chain=false next=288
+   idx=288 raw_score=55 q=659305-659355 s=602833-602883 q_aa=219768-219785 s_aa=200944-200961 start_of_chain=false next=279
+   idx=279 raw_score=135 q=659440-659577 s=602968-603105 q_aa=219813-219859 s_aa=200989-201035 start_of_chain=false next=130
+   idx=130 raw_score=123 q=661075-661401 s=605080-605406 q_aa=220358-220467 s_aa=201693-201802 start_of_chain=false next=27
+   idx=27 raw_score=48 q=661605-661643 s=605607-605645 q_aa=220534-220547 s_aa=201868-201881 start_of_chain=false next=3
+   idx=3 raw_score=79 q=661827-661892 s=605832-605897 q_aa=220608-220630 s_aa=201943-201965 start_of_chain=false next=END
+[DEBUG LINKING_FILTER] subject_len_nucl=606194, group_size=80948
+[DEBUG LINKING_FILTER] INDEX 0 (small gap): cutoff=41, filtered=0, passed=0, total=0, filter_rate=0.00%
+[DEBUG LINKING_FILTER] INDEX 1 (large gap): cutoff=46, filtered=61050, passed=1275626, total=1336676, filter_rate=4.57%
+[DEBUG LINKING_FILTER] subject_len_nucl=606194, group_size=84566
+[DEBUG LINKING_FILTER] INDEX 0 (small gap): cutoff=41, filtered=0, passed=0, total=0, filter_rate=0.00%
+[DEBUG LINKING_FILTER] INDEX 1 (large gap): cutoff=46, filtered=63516, passed=1257266, total=1320782, filter_rate=4.81%
+[DEBUG LINKING_FILTER] subject_len_nucl=606194, group_size=88150
+[DEBUG LINKING_FILTER] INDEX 0 (small gap): cutoff=41, filtered=0, passed=0, total=0, filter_rate=0.00%
+[DEBUG LINKING_FILTER] INDEX 1 (large gap): cutoff=46, filtered=66045, passed=1399593, total=1465638, filter_rate=4.51%
+[DEBUG LINKING_FILTER] subject_len_nucl=606194, group_size=85195
+[DEBUG LINKING_FILTER] INDEX 0 (small gap): cutoff=41, filtered=0, passed=0, total=0, filter_rate=0.00%
+[DEBUG LINKING_FILTER] INDEX 1 (large gap): cutoff=46, filtered=64187, passed=1344390, total=1408577, filter_rate=4.56%
+[TRACE_HSP] stage=after_linking raw_score=152 e=0 ctx_idx=2 s_f_idx=0 q_frame=3 s_frame=1 linked_set=true start_of_chain=false q=631110-631352 s=557101-557343
+[TRACE_HSP] stage=output_hit raw_score=152 bit=72.5 e=0 q=631110-631352 s=557101-557343
+[DEBUG OUTPUT_FILTER] Total linked HSPs: 338859
+[DEBUG OUTPUT_FILTER] Single HSPs (linked_set=false): 308219
+[DEBUG OUTPUT_FILTER] Chain heads (linked_set=true, start_of_chain=true): 2061
+[DEBUG OUTPUT_FILTER] Chain members (linked_set=true, start_of_chain=false): 28579 (included in output)
+[DEBUG OUTPUT_FILTER] Filtered by E-value (threshold=10): 309093
+[DEBUG OUTPUT_FILTER] Expected after E-value filter: 29766 (all HSPs - E-value filtered)
+[DEBUG OUTPUT_FILTER] Final hits after filtering: 29766
+
+real	2m26.815s
+user	8m1.465s
+sys	0m0.140s

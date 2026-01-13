@@ -269,7 +269,7 @@ fn test_build_ncbi_lookup_indexes_low_self_score_exact_word() {
 
     let queries = vec![frames];
     let karlin = KarlinParams::default();
-    let (lookup, _ctx) = build_ncbi_lookup(&queries, 13, true, true, false, &karlin);
+    let (lookup, _ctx) = build_ncbi_lookup(&queries, 13, true, true, &karlin);
 
     // NCBISTDAA: A=1, so AAA index = (1<<10)|(1<<5)|1 = 1057.
     let aaa_idx: usize =
@@ -296,7 +296,7 @@ fn test_build_ncbi_lookup_longest_chain_tracks_max_cell() {
 
     let queries = vec![frames];
     let karlin = KarlinParams::default();
-    let (lookup, _ctx) = build_ncbi_lookup(&queries, 13, true, true, false, &karlin);
+    let (lookup, _ctx) = build_ncbi_lookup(&queries, 13, true, true, &karlin);
 
     // AAA index in NCBISTDAA (A=1) is 1057.
     let aaa_idx: usize =
@@ -354,7 +354,7 @@ fn test_get_context_idx_matches_ncbi() {
     let frames2 = generate_frames(dna_seq2, &code);
     
     let queries = vec![frames1, frames2];
-    let (lookup, contexts) = build_ncbi_lookup(&queries, 13, true, true, false, &karlin);
+    let (lookup, contexts) = build_ncbi_lookup(&queries, 13, true, true, &karlin);
     
     // Verify frame_bases structure
     assert_eq!(lookup.frame_bases.len(), contexts.len());
@@ -426,7 +426,7 @@ fn test_get_context_idx_edge_cases() {
     assert_eq!(frames.len(), 1);
     
     let queries = vec![frames];
-    let (lookup, contexts) = build_ncbi_lookup(&queries, 13, true, true, false, &karlin);
+    let (lookup, contexts) = build_ncbi_lookup(&queries, 13, true, true, &karlin);
     
     // With single context, all offsets should return 0
     assert_eq!(lookup.get_context_idx(0), 0);
@@ -452,7 +452,7 @@ fn test_get_context_idx_multiple_queries() {
     let frames2 = generate_frames(dna_seq2, &code);
     
     let queries = vec![frames1, frames2];
-    let (lookup, contexts) = build_ncbi_lookup(&queries, 13, true, true, false, &karlin);
+    let (lookup, contexts) = build_ncbi_lookup(&queries, 13, true, true, &karlin);
     
     // Should have 12 contexts (6 frames × 2 queries)
     assert_eq!(contexts.len(), 12);

@@ -10,7 +10,7 @@ use anyhow::Result;
 use bio::io::fasta;
 use crate::utils::dust::{DustMasker, MaskedInterval};
 use super::args::BlastnArgs;
-use super::constants::{MIN_UNGAPPED_SCORE_MEGABLAST, MIN_UNGAPPED_SCORE_BLASTN, MAX_DIRECT_LOOKUP_WORD_SIZE, X_DROP_GAPPED_NUCL, X_DROP_GAPPED_GREEDY, X_DROP_GAPPED_FINAL, SCAN_RANGE_BLASTN, SCAN_RANGE_MEGABLAST, LUT_WIDTH_11_THRESHOLD_8, LUT_WIDTH_11_THRESHOLD_10};
+use super::constants::{MIN_UNGAPPED_SCORE_MEGABLAST, MIN_UNGAPPED_SCORE_BLASTN, MAX_DIRECT_LOOKUP_WORD_SIZE, X_DROP_GAPPED_NUCL, X_DROP_GAPPED_GREEDY, X_DROP_GAPPED_FINAL, SCAN_RANGE_BLASTN, SCAN_RANGE_MEGABLAST, LUT_WIDTH_11_THRESHOLD_8, LUT_WIDTH_11_THRESHOLD_10, MIN_DIAG_SEPARATION_BLASTN, MIN_DIAG_SEPARATION_MEGABLAST};
 use super::lookup::{build_lookup, build_pv_direct_lookup, build_two_stage_lookup, TwoStageLookup, PvDirectLookup, KmerLookup};
 
 /// Task-specific configuration for BLASTN
@@ -29,6 +29,7 @@ pub struct TaskConfig {
     pub x_drop_gapped: i32, // Task-specific gapped X-dropoff (blastn: 30, megablast: 25)
     pub x_drop_final: i32, // Final traceback X-dropoff (100 for all nucleotide tasks)
     pub scan_range: usize, // Scan range for off-diagonal hit detection (blastn: 4, megablast: 0)
+    pub min_diag_separation: i32, // NCBI reference: blast_nucl_options.cpp:239,259 (blastn: 50, megablast: 6)
 }
 
 /// Lookup tables for seed finding
@@ -120,6 +121,10 @@ pub fn configure_task(args: &BlastnArgs) -> TaskConfig {
         _ => MIN_UNGAPPED_SCORE_BLASTN,
     };
     
+    // NCBI BLAST algorithm selection:
+    // - megablast: eGreedyScoreOnly (greedy alignment)
+    // - blastn: eDynProgScoreOnly (dynamic programming)
+    // Reference: ncbi-blast/c++/src/algo/blast/api/blast_nucl_options.cpp:182, 192
     let use_dp = match args.task.as_str() {
         "megablast" => false,
         _ => true,
@@ -148,7 +153,15 @@ pub fn configure_task(args: &BlastnArgs) -> TaskConfig {
         "megablast" => SCAN_RANGE_MEGABLAST, // 0
         _ => SCAN_RANGE_BLASTN, // 4
     };
-    
+
+    // NCBI reference: blast_nucl_options.cpp:239, 259
+    // Minimum diagonal separation for HSP containment checking
+    // Used in MB_HSP_CLOSE macro (blast_gapalign_priv.h:123-124)
+    let min_diag_separation = match args.task.as_str() {
+        "megablast" => MIN_DIAG_SEPARATION_MEGABLAST, // 6
+        _ => MIN_DIAG_SEPARATION_BLASTN, // 50
+    };
+
     let use_direct_lookup = effective_word_size <= MAX_DIRECT_LOOKUP_WORD_SIZE;
     let use_two_stage = effective_word_size >= 11;
     let lut_word_length = if use_two_stage {
@@ -162,7 +175,7 @@ pub fn configure_task(args: &BlastnArgs) -> TaskConfig {
     } else {
         effective_word_size.min(MAX_DIRECT_LOOKUP_WORD_SIZE)
     };
-    
+
     TaskConfig {
         effective_word_size,
         reward,
@@ -178,6 +191,7 @@ pub fn configure_task(args: &BlastnArgs) -> TaskConfig {
         x_drop_gapped,
         x_drop_final,
         scan_range,
+        min_diag_separation,
     }
 }
 
@@ -190,17 +204,20 @@ pub fn configure_task(args: &BlastnArgs) -> TaskConfig {
 /// - >= 180,000: 11-bit direct lookup (MBLookupTable)
 fn calculate_adaptive_lut_width(word_size: usize, approx_table_entries: usize) -> usize {
     // NCBI reference: blast_nalookup.c:130-141
-    // Note: NCBI's 11-bit direct lookup uses MBLookupTable (hash-based with PV), not true direct address.
-    // LOSAT's direct address table for 11-bit (4M entries) is too slow to allocate.
-    // Use 10-bit two-stage as a practical compromise for large queries, which maintains
-    // reasonable performance while avoiding the 4M entry allocation overhead.
+    // For word_size=11, NCBI uses different lookup widths based on approx_table_entries:
+    // - < 12,000: 8-bit lookup (SmallNaLookupTable)
+    // - 12,000 <= entries < 180,000: 10-bit lookup (MBLookupTable)
+    // - >= 180,000: 11-bit lookup (MBLookupTable) with scan_step=1
+    //
+    // NOTE: Using 10-bit for now to maintain scan_step=2 behavior.
+    // TODO: Investigate why 11-bit lookup produces fewer hits after endpoint purging.
     match word_size {
         11 => {
             if approx_table_entries < LUT_WIDTH_11_THRESHOLD_8 {
-                8
+                8  // scan_step = 11 - 8 + 1 = 4
             } else {
-                // For larger queries, use 10-bit LUT (4^10 = 1M entries)
-                // This keeps two-stage verification but with faster lookup than hash
+                // Use 10-bit for larger queries
+                // scan_step = 11 - 10 + 1 = 2
                 10
             }
         }

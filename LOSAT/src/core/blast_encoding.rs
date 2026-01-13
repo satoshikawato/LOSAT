@@ -42,6 +42,18 @@ const ENCODE_TABLE: [u8; 256] = {
     table
 };
 
+// NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_encoding.c:85-93 (IUPACNA_TO_BLASTNA)
+const IUPACNA_TO_BLASTNA: [u8; 128] = [
+    15, 15, 15, 15, 15, 15, 15, 15, 15, 15, 15, 15, 15, 15, 15, 15,
+    15, 15, 15, 15, 15, 15, 15, 15, 15, 15, 15, 15, 15, 15, 15, 15,
+    15, 15, 15, 15, 15, 15, 15, 15, 15, 15, 15, 15, 15, 15, 15, 15,
+    15, 15, 15, 15, 15, 15, 15, 15, 15, 15, 15, 15, 15, 15, 15, 15,
+    15,  0, 10,  1, 11, 15, 15,  2, 12, 15, 15,  7, 15,  6, 14, 15,
+    15, 15,  4,  9,  3, 15, 13,  8, 15,  5, 15, 15, 15, 15, 15, 15,
+    15, 15, 15, 15, 15, 15, 15, 15, 15, 15, 15, 15, 15, 15, 15, 15,
+    15, 15, 15, 15, 15, 15, 15, 15, 15, 15, 15, 15, 15, 15, 15, 15,
+];
+
 /// Lookup table for decoding 2-bit codes to ASCII nucleotides
 const DECODE_TABLE: [u8; 4] = [b'A', b'C', b'G', b'T'];
 
@@ -343,6 +355,33 @@ pub fn encode_base(base: u8) -> Option<u8> {
     } else {
         Some(code)
     }
+}
+
+/// Encode a single ASCII nucleotide to BLASTNA (IUPAC) code.
+/// NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_encoding.c:85-93 (IUPACNA_TO_BLASTNA)
+#[inline]
+fn encode_iupac_base_to_blastna(base: u8) -> u8 {
+    let upper = base.to_ascii_uppercase();
+    let idx = upper as usize;
+    if idx < IUPACNA_TO_BLASTNA.len() {
+        IUPACNA_TO_BLASTNA[idx]
+    } else {
+        15
+    }
+}
+
+/// Encode an ASCII sequence to BLASTNA (IUPAC) codes (one base per byte).
+/// NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_encoding.c:85-93 (IUPACNA_TO_BLASTNA)
+pub fn encode_iupac_to_blastna(seq: &[u8]) -> Vec<u8> {
+    seq.iter().map(|&base| encode_iupac_base_to_blastna(base)).collect()
+}
+
+/// Encode an ASCII sequence to ncbi2na 2-bit codes (one base per byte).
+/// NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_util.c:476-489 (BlastCompressBlastnaSequence old_seq[i] & 3)
+pub fn encode_iupac_to_ncbi2na(seq: &[u8]) -> Vec<u8> {
+    seq.iter()
+        .map(|&base| encode_iupac_base_to_blastna(base) & 0x03)
+        .collect()
 }
 
 /// Decode a 2-bit code to ASCII nucleotide

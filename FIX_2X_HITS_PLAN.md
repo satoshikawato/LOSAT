@@ -4,6 +4,151 @@
 
 LOSAT produces ~2x more hits than NCBI BLAST for long sequences (600kb+), while short sequences (125kb) have near-parity (1.002x). 88% of the excess is in low-score HSPs (0-30 bits).
 
+---
+
+## Bug Status Update (2026-01-11 - Session 12)
+
+### BUG 1: Two-Hit Extension Score - **FIXED**
+- **Location**: `extension/two_hit.rs:170`
+- **Fix**: Now correctly returns `left_score.max(right_score)`
+- **Verified**: Matches NCBI `aa_ungapped.c:1157`
+
+### BUG 2: Missing Final Output Sorts - **FIXED**
+- **Location**: `sum_stats_linking/linking.rs:419-441`
+- **Fix**: Both `s_RevCompareHSPsTransl` and `s_FwdCompareHSPsTransl` sorts implemented
+- **Verified**: Matches NCBI `link_hsps.c:990-1000`
+
+### BUG 3: Extra Boundary Checks - **NEEDS REVIEW**
+- These may be intentional safety checks
+- NCBI assumes caller provides valid coordinates
+
+### **BUG 4: Off-by-One Coordinate Output - FIXED (Session 11, 2026-01-11)**
+- **Location**: `extension/mod.rs:convert_coords` (lines 47-89)
+- **Issue**: LOSAT produced 0-indexed coordinates; NCBI outputs 1-indexed
+- **Root Cause**: NCBI's C core produces 0-indexed coordinates, then C++ output layer (tabular.cpp:1037-1058) adds +1
+- **Fix**: Modified `convert_coords()` to incorporate +1 adjustment directly into the formula
+- **Verified**: Coordinates now match NCBI exactly (e.g., 491844 vs 491844)
+
+### Functions Correctly Absent for TBLASTX
+
+The following NCBI functions are NOT missing - they are correctly NOT called for ungapped TBLASTX:
+- `Blast_HSPListPurgeHSPsWithCommonEndpoints()` - gapped path only (`blast_engine.c:542`)
+- HSP capacity limiting - returns `INT4_MAX` for ungapped (`BlastHspNumMax(FALSE, ...)`)
+- Subject chunking - only for sequences > 5M bases (`MAX_DBSEQ_LEN=5000000`)
+
+---
+
+## Session 12 Update (2026-01-11): Exhaustive Verification
+
+### VERIFIED CORRECT (Not the Root Cause)
+
+| Component | Status | Evidence |
+|-----------|--------|----------|
+| DiagStruct initialization | ✅ Correct | `last_hit=0, diag_offset=window` gives equivalent NCBI behavior |
+| Two-hit state machine | ✅ Correct | Matches `aa_ungapped.c:518-606` exactly |
+| Extension algorithm | ✅ Correct | Returns `MAX(left_score, right_score)` |
+| Seed generation | ✅ Correct | K-mer encoding, neighbor expansion match NCBI |
+| Lookup table construction | ✅ Correct | Self-score threshold handling matches NCBI |
+| Frame iteration order | ✅ Correct | (1,2,3,-1,-2,-3) matches NCBI |
+| Cutoff score calculation | ✅ Correct | Three-stage capping matches NCBI |
+| Context boundary check | ✅ Correct | `query_offset - diff < ctx.frame_base` present |
+| E-value calculation | ✅ Correct | Uses proper sum-statistics linking (not simple alignment-length) |
+| Final output sorts | ✅ Correct | Both qsorts implemented in `linking.rs` |
+| Coordinate conversion | ✅ Fixed | Now 1-indexed matching NCBI |
+| Scan resumption | ✅ Correct | Buffer fill handling matches `blast_aascan.c` |
+| Diagonal overflow handling | ✅ Correct | INT4_MAX/4 check and s_BlastDiagClear match NCBI |
+| diag_offset increment | ✅ Correct | `s_aa_len + window` per frame |
+| OffsetPair types | ✅ Correct | i32 vs Uint4 gives same bit pattern for diag_coord |
+
+### Updated Pipeline Diagnostics (Session 12)
+
+**Short sequence (MjeNMV vs MelaMJNV, ~125kb):**
+```
+K-mer matches:              217,220,794
+Seeds passed to extension:    4,532,151 (2.09%)
+Total extensions:             4,532,151
+Two-hit extensions:           1,657,440
+Ungapped-only hits:              68,616
+E-value passed:                  23,766
+NCBI expected:                   23,715
+Ratio: 1.002x ✓
+```
+
+**Long sequence (AP027131 vs AP027133, ~600kb):**
+```
+K-mer matches:            1,200,397,107
+Seeds passed to extension:   31,863,413 (2.65%)
+Total extensions:            31,863,413
+Two-hit extensions:          11,437,992
+Ungapped-only hits:             338,859
+E-value passed:                  29,766
+NCBI expected:                   14,877
+Ratio: 2.00x ✗
+```
+
+### Score Distribution Analysis
+
+| Bit Score Range | Long Seq Hits | % of Total | Short Seq Hits | % of Total |
+|-----------------|---------------|------------|----------------|------------|
+| 22-30 bits      | 21,708        | 73%        | 8,823          | 37%        |
+| 30+ bits        | 8,058         | 27%        | 14,943         | 63%        |
+
+**Key Observation**: The long sequence has disproportionately more low-score (22-30 bit) hits. If NCBI has 14,877 total hits and most high-score hits match, the 2x excess is almost entirely in the low-score range.
+
+### E-value Calculation Verified Correct
+
+The E-value calculation flow was verified:
+1. **Initial HSP creation**: E-value = INFINITY (correct - NCBI doesn't assign E-values during extension)
+2. **HSP reevaluation**: Updates score/coords, NOT E-value (correct)
+3. **Sum-statistics linking** (`linking.rs:1432`): Assigns E-values using `small_gap_sum_e()` and `large_gap_sum_e()`
+4. **E-value formula**: Matches NCBI `link_hsps.c:s_SumHSPEvalue()` exactly
+
+### ROOT CAUSE STILL UNKNOWN
+
+Despite exhaustive verification, the exact cause of 2x more extensions remains unidentified.
+
+**What we know:**
+- The 2x excess originates at the extension triggering stage (seeds passed: 31.8M vs estimated ~16M)
+- All verified two-hit detection logic matches NCBI exactly
+- E-value calculation is correct (downstream of the issue)
+- The issue only manifests for long sequences (>400kb?)
+
+**Remaining hypotheses:**
+1. Subtle interaction between diagonal array size and sequence length
+2. Hidden NCBI optimization not yet discovered
+3. Difference in memory reallocation limiting (unlikely for single-subject)
+4. Some edge case in per-frame diagonal state sharing
+
+### ROOT CAUSE UPDATE (Session 10)
+
+**Key Findings from Diagnostic Analysis:**
+
+1. **Coordinate Bug Confirmed**: All LOSAT coordinates are -1 from NCBI (output issue only)
+
+2. **Excess Hit Distribution**:
+   - After +1 coordinate adjustment: 11,233 coordinates match (up from 24)
+   - LOSAT-only excess: 18,533 hits
+   - 87% of excess is in 22-30 bit score range
+
+3. **Pipeline Statistics** (Long sequence):
+   - K-mer matches: 1,200,397,107
+   - Seeds passed to extension: 31,863,413 (2.65%)
+   - HSPs saved (≥cutoff): 338,859 (2x expected)
+   - Final output: 29,766
+
+4. **Length-Dependent Behavior**:
+   - Short sequences (~125kb): 1.002x ratio (near parity)
+   - Long sequences (~600kb): 2.00x ratio (excess)
+
+**The 2x excess comes from LOSAT saving ~2x more HSPs at the extension/saving stage, not filtering.**
+
+Possible causes:
+- Different extension termination
+- Different chain member handling
+- E-value calculation differences at scale
+
+---
+
 ## CRITICAL BUGS FOUND (Thorough Code Comparison)
 
 ### BUG 1: Two-Hit Extension Returns Wrong Score (HIGH PRIORITY)

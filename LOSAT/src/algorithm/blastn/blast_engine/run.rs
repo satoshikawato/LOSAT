@@ -103,7 +103,20 @@ pub fn run(args: BlastnArgs) -> Result<()> {
     // Finalize configuration with query-dependent parameters (adaptive lookup table selection)
     // NCBI reference: blast_nalookup.c (BlastChooseNaLookupTable)
     let total_query_length: usize = queries.iter().map(|r| r.seq().len()).sum();
-    finalize_task_config(&mut config, total_query_length);
+    let max_query_length: usize = queries.iter().map(|r| r.seq().len()).max().unwrap_or(0);
+    let discontig_template = args.task == "dc-megablast";
+    // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_nalookup.c:46-47
+    // ```c
+    // BlastChooseNaLookupTable(const LookupTableOptions* lookup_options,
+    //                          Int4 approx_table_entries, Int4 max_q_off,
+    //                          Int4 *lut_width)
+    // ```
+    finalize_task_config(
+        &mut config,
+        total_query_length,
+        max_query_length,
+        discontig_template,
+    );
 
     if args.verbose {
         eprintln!("[INFO] Adaptive lookup: approx_entries={}, lut_word_length={}, two_stage={}, scan_step={}",
@@ -1742,6 +1755,17 @@ pub fn run(args: BlastnArgs) -> Result<()> {
                         gap_scratch,
                     )
                 } else {
+                    // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_gapalign.c:309-311
+                    // ```c
+                    // gap_align->gap_x_dropoff = ext_params->gap_x_dropoff;
+                    // ```
+                    // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_gapalign.c:2796-2802
+                    // ```c
+                    // X = gap_align->gap_x_dropoff;
+                    // if (do_traceback) {
+                    //    ...
+                    // }
+                    // ```
                     match greedy_gapped_alignment_with_traceback(
                         q_seq_blastna,
                         s_seq_trace,
@@ -1751,7 +1775,7 @@ pub fn run(args: BlastnArgs) -> Result<()> {
                         penalty,
                         gap_open,
                         gap_extend,
-                        x_drop_final,
+                        x_drop_gapped,
                     ) {
                         Some(value) => value,
                         None => {

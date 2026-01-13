@@ -336,10 +336,28 @@ pub fn blast_get_start_for_gapped_alignment_nucl(
 
     q_idx = q_gapped_start;
     s_idx = s_gapped_start;
-    while q_idx > 0 && s_idx > 0 && q_seq[q_idx - 1] == s_seq[s_idx - 1] {
+    // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_gapalign.c:3344-3348
+    // ```c
+    // q = query + q_start;
+    // s = subject + s_start;
+    // while ((q-query >= 0) && (*q-- == *s--)) {
+    //    score++;
+    //    if (score > hspMaxIdentRun) return;
+    // }
+    // ```
+    loop {
+        if q_idx >= q_seq.len() || s_idx >= s_seq.len() {
+            break;
+        }
+        if q_seq[q_idx] != s_seq[s_idx] {
+            break;
+        }
         score += 1;
         if score > hsp_max_ident_run {
             return (q_gapped_start, s_gapped_start);
+        }
+        if q_idx == 0 || s_idx == 0 {
+            break;
         }
         q_idx -= 1;
         s_idx -= 1;

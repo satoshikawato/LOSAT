@@ -13,6 +13,13 @@ use super::args::BlastnArgs;
 use super::constants::{MIN_UNGAPPED_SCORE_MEGABLAST, MIN_UNGAPPED_SCORE_BLASTN, MAX_DIRECT_LOOKUP_WORD_SIZE, X_DROP_GAPPED_NUCL, X_DROP_GAPPED_GREEDY, X_DROP_GAPPED_FINAL, SCAN_RANGE_BLASTN, SCAN_RANGE_MEGABLAST, LUT_WIDTH_11_THRESHOLD_8, LUT_WIDTH_11_THRESHOLD_10, MIN_DIAG_SEPARATION_BLASTN, MIN_DIAG_SEPARATION_MEGABLAST};
 use super::lookup::{build_lookup, build_pv_direct_lookup, build_two_stage_lookup, TwoStageLookup, PvDirectLookup, KmerLookup};
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum LookupTableKind {
+    Small,
+    Mb,
+    Na,
+}
+
 /// Task-specific configuration for BLASTN
 pub struct TaskConfig {
     pub effective_word_size: usize,
@@ -162,19 +169,16 @@ pub fn configure_task(args: &BlastnArgs) -> TaskConfig {
         _ => MIN_DIAG_SEPARATION_BLASTN, // 50
     };
 
+    // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_nalookup.c:45-185
+    // ```c
+    // lut_type = BlastChooseNaLookupTable(lookup_options,
+    //                                     approx_table_entries,
+    //                                     max_q_off,
+    //                                     &lut_width);
+    // ```
+    let use_two_stage = false;
     let use_direct_lookup = effective_word_size <= MAX_DIRECT_LOOKUP_WORD_SIZE;
-    let use_two_stage = effective_word_size >= 11;
-    let lut_word_length = if use_two_stage {
-        if effective_word_size >= 16 {
-            8
-        } else if effective_word_size == 11 {
-            8
-        } else {
-            8
-        }
-    } else {
-        effective_word_size.min(MAX_DIRECT_LOOKUP_WORD_SIZE)
-    };
+    let lut_word_length = effective_word_size;
 
     TaskConfig {
         effective_word_size,
@@ -195,60 +199,192 @@ pub fn configure_task(args: &BlastnArgs) -> TaskConfig {
     }
 }
 
-/// Calculate adaptive lookup table width based on query size
-/// NCBI reference: blast_nalookup.c:46-184 (BlastChooseNaLookupTable)
+/// Choose lookup table kind and LUT width using NCBI's BlastChooseNaLookupTable logic.
 ///
-/// For word_size=11, NCBI uses different lookup widths based on approx_table_entries:
-/// - < 12,000: 8-bit lookup (SmallNaLookupTable)
-/// - < 180,000: 10-bit lookup (MBLookupTable)
-/// - >= 180,000: 11-bit direct lookup (MBLookupTable)
-fn calculate_adaptive_lut_width(word_size: usize, approx_table_entries: usize) -> usize {
-    // NCBI reference: blast_nalookup.c:130-141
-    // For word_size=11, NCBI uses different lookup widths based on approx_table_entries:
-    // - < 12,000: 8-bit lookup (SmallNaLookupTable)
-    // - 12,000 <= entries < 180,000: 10-bit lookup (MBLookupTable)
-    // - >= 180,000: 11-bit lookup (MBLookupTable) with scan_step=1
-    //
-    // NOTE: Using 10-bit for now to maintain scan_step=2 behavior.
-    // TODO: Investigate why 11-bit lookup produces fewer hits after endpoint purging.
-    match word_size {
-        11 => {
-            if approx_table_entries < LUT_WIDTH_11_THRESHOLD_8 {
-                8  // scan_step = 11 - 8 + 1 = 4
+/// NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_nalookup.c:45-185
+/// ```c
+/// if (lookup_options->mb_template_length > 0) {
+///    *lut_width = lookup_options->word_size;
+///    return eMBLookupTable;
+/// }
+/// switch(lookup_options->word_size) {
+/// case 4: case 5: case 6:
+///    lut_type = eSmallNaLookupTable;
+///    *lut_width = lookup_options->word_size;
+///    break;
+/// case 7:
+///    lut_type = eSmallNaLookupTable;
+///    if (approx_table_entries < 250) *lut_width = 6;
+///    else *lut_width = 7;
+///    break;
+/// case 8:
+///    lut_type = eSmallNaLookupTable;
+///    if (approx_table_entries < 8500) *lut_width = 7;
+///    else *lut_width = 8;
+///    break;
+/// case 9:
+///    if (approx_table_entries < 1250) { *lut_width = 7; lut_type = eSmallNaLookupTable; }
+///    else if (approx_table_entries < 21000) { *lut_width = 8; lut_type = eSmallNaLookupTable; }
+///    else { *lut_width = 9; lut_type = eMBLookupTable; }
+///    break;
+/// case 10:
+///    if (approx_table_entries < 1250) { *lut_width = 7; lut_type = eSmallNaLookupTable; }
+///    else if (approx_table_entries < 8500) { *lut_width = 8; lut_type = eSmallNaLookupTable; }
+///    else if (approx_table_entries < 18000) { *lut_width = 9; lut_type = eMBLookupTable; }
+///    else { *lut_width = 10; lut_type = eMBLookupTable; }
+///    break;
+/// case 11:
+///    if (approx_table_entries < 12000) { *lut_width = 8; lut_type = eSmallNaLookupTable; }
+///    else if (approx_table_entries < 180000) { *lut_width = 10; lut_type = eMBLookupTable; }
+///    else { *lut_width = 11; lut_type = eMBLookupTable; }
+///    break;
+/// case 12:
+///    if (approx_table_entries < 8500) { *lut_width = 8; lut_type = eSmallNaLookupTable; }
+///    else if (approx_table_entries < 18000) { *lut_width = 9; lut_type = eMBLookupTable; }
+///    else if (approx_table_entries < 60000) { *lut_width = 10; lut_type = eMBLookupTable; }
+///    else if (approx_table_entries < 900000) { *lut_width = 11; lut_type = eMBLookupTable; }
+///    else { *lut_width = 12; lut_type = eMBLookupTable; }
+///    break;
+/// default:
+///    if (approx_table_entries < 8500) { *lut_width = 8; lut_type = eSmallNaLookupTable; }
+///    else if (approx_table_entries < 300000) { *lut_width = 11; lut_type = eMBLookupTable; }
+///    else { *lut_width = 12; lut_type = eMBLookupTable; }
+///    break;
+/// }
+/// if (lut_type == eSmallNaLookupTable &&
+///     (approx_table_entries >= 32767 || max_q_off >= 32768)) {
+///    lut_type = eNaLookupTable;
+/// }
+/// ```
+fn choose_na_lookup_table(
+    word_size: usize,
+    approx_table_entries: usize,
+    max_q_off: usize,
+    discontig_template: bool,
+) -> (LookupTableKind, usize) {
+    debug_assert!(word_size >= 4);
+
+    if discontig_template {
+        return (LookupTableKind::Mb, word_size);
+    }
+
+    let (mut lut_kind, mut lut_width) = match word_size {
+        4 | 5 | 6 => (LookupTableKind::Small, word_size),
+        7 => {
+            if approx_table_entries < 250 {
+                (LookupTableKind::Small, 6)
             } else {
-                // Use 10-bit for larger queries
-                // scan_step = 11 - 10 + 1 = 2
-                10
+                (LookupTableKind::Small, 7)
             }
         }
-        // For other word sizes, use conservative 8-mer lookup
-        // This maintains existing behavior for megablast (word_size >= 16)
-        _ => 8
+        8 => {
+            if approx_table_entries < 8_500 {
+                (LookupTableKind::Small, 7)
+            } else {
+                (LookupTableKind::Small, 8)
+            }
+        }
+        9 => {
+            if approx_table_entries < 1_250 {
+                (LookupTableKind::Small, 7)
+            } else if approx_table_entries < 21_000 {
+                (LookupTableKind::Small, 8)
+            } else {
+                (LookupTableKind::Mb, 9)
+            }
+        }
+        10 => {
+            if approx_table_entries < 1_250 {
+                (LookupTableKind::Small, 7)
+            } else if approx_table_entries < 8_500 {
+                (LookupTableKind::Small, 8)
+            } else if approx_table_entries < 18_000 {
+                (LookupTableKind::Mb, 9)
+            } else {
+                (LookupTableKind::Mb, 10)
+            }
+        }
+        11 => {
+            if approx_table_entries < LUT_WIDTH_11_THRESHOLD_8 {
+                (LookupTableKind::Small, 8)
+            } else if approx_table_entries < LUT_WIDTH_11_THRESHOLD_10 {
+                (LookupTableKind::Mb, 10)
+            } else {
+                (LookupTableKind::Mb, 11)
+            }
+        }
+        12 => {
+            if approx_table_entries < 8_500 {
+                (LookupTableKind::Small, 8)
+            } else if approx_table_entries < 18_000 {
+                (LookupTableKind::Mb, 9)
+            } else if approx_table_entries < 60_000 {
+                (LookupTableKind::Mb, 10)
+            } else if approx_table_entries < 900_000 {
+                (LookupTableKind::Mb, 11)
+            } else {
+                (LookupTableKind::Mb, 12)
+            }
+        }
+        _ => {
+            if approx_table_entries < 8_500 {
+                (LookupTableKind::Small, 8)
+            } else if approx_table_entries < 300_000 {
+                (LookupTableKind::Mb, 11)
+            } else {
+                (LookupTableKind::Mb, 12)
+            }
+        }
+    };
+
+    if lut_kind == LookupTableKind::Small
+        && (approx_table_entries >= 32_767 || max_q_off >= 32_768)
+    {
+        lut_kind = LookupTableKind::Na;
     }
+
+    (lut_kind, lut_width)
 }
 
-/// Finalize task configuration with query-dependent parameters
-/// Must be called after queries are loaded to enable adaptive lookup table selection
+/// Finalize task configuration with query-dependent parameters.
+/// Must be called after queries are loaded to enable adaptive lookup table selection.
 ///
 /// NCBI reference: blast_nalookup.c (BlastChooseNaLookupTable)
-/// - Adjusts lut_word_length based on total query length (approx_table_entries)
-/// - When lut_word_length == word_length, switches to direct lookup (no two-stage overhead)
-pub fn finalize_task_config(config: &mut TaskConfig, total_query_length: usize) {
-    // Only apply adaptive selection for two-stage lookup mode
-    if config.use_two_stage {
-        // Calculate adaptive lut_word_length based on query size
-        // approx_table_entries is essentially total query length
-        let adaptive_lut_width = calculate_adaptive_lut_width(
-            config.effective_word_size,
-            total_query_length,
-        );
+/// - Uses total query length (approx_table_entries) and max query offset
+/// - Handles discontiguous template forcing MB lookup
+pub fn finalize_task_config(
+    config: &mut TaskConfig,
+    total_query_length: usize,
+    max_query_length: usize,
+    discontig_template: bool,
+) {
+    let max_q_off = max_query_length.saturating_sub(1);
+    // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_nalookup.c:45-185
+    // ```c
+    // lut_type = BlastChooseNaLookupTable(lookup_options,
+    //                                     approx_table_entries,
+    //                                     max_q_off,
+    //                                     &lut_width);
+    // ```
+    let (lut_kind, lut_width) = choose_na_lookup_table(
+        config.effective_word_size,
+        total_query_length,
+        max_q_off,
+        discontig_template,
+    );
 
-        config.lut_word_length = adaptive_lut_width;
+    config.lut_word_length = lut_width;
+    config.use_two_stage =
+        lut_kind == LookupTableKind::Mb || config.lut_word_length < config.effective_word_size;
+    config.use_direct_lookup =
+        !config.use_two_stage && config.lut_word_length <= MAX_DIRECT_LOOKUP_WORD_SIZE;
 
-        // Recalculate scan_step based on two-stage configuration
-        // scan_step = word_length - lut_word_length + 1
-        config.scan_step = (config.effective_word_size - config.lut_word_length + 1).max(1);
-    }
+    // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_nalookup.c:397,1334
+    // ```c
+    // lookup->scan_step = lookup->word_length - lookup->lut_word_length + 1;
+    // mb_lt->scan_step = mb_lt->word_length - mb_lt->lut_word_length + 1;
+    // ```
+    config.scan_step = (config.effective_word_size - config.lut_word_length + 1).max(1);
 }
 
 /// Read query and subject sequences

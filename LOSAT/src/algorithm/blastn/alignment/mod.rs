@@ -24,13 +24,13 @@ pub use greedy::{
 // NCBI reference: blast_gapalign.c:3248-3305 (BlastGetOffsetsForGappedAlignment)
 // NCBI reference: blast_gapalign.c:3323-3389 (BlastGetStartForGappedAlignmentNucl)
 pub use gapped::{
+    build_blastna_matrix,
     blast_get_offsets_for_gapped_alignment,
     blast_get_start_for_gapped_alignment_nucl,
     extend_gapped_heuristic,
     // NCBI reference: ncbi-blast/c++/include/algo/blast/core/blast_gapalign.h:69-80 (BlastGapAlignStruct)
     extend_gapped_heuristic_with_scratch,
     extend_gapped_one_direction,
-    extend_final_traceback,
     extend_gapped_heuristic_with_traceback,
     // NCBI reference: ncbi-blast/c++/include/algo/blast/core/blast_gapalign.h:69-80 (BlastGapAlignStruct)
     extend_gapped_heuristic_with_traceback_with_scratch,

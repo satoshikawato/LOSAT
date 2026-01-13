@@ -4,6 +4,24 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ---
 
+## Session Resume (latest)
+
+Summary:
+- Updated BLASTN gapped DP to match NCBI packed score-only path: added `blast_align_packed_nucl_with_scratch` in `LOSAT/src/algorithm/blastn/alignment/gapped.rs` (NCBI `s_BlastAlignPackedNucl`/`s_BlastDynProgNtGappedAlignment`), wired into `extend_gapped_heuristic(_with_scratch)`; DP now uses packed subject, BLASTNA query, and limits `x_drop` by ungapped score.
+- Added BLASTNA scoring matrix builder in `LOSAT/src/algorithm/blastn/alignment/gapped.rs` and updated gapped seed selection and DP scoring to use matrix values; exported `build_blastna_matrix` in `LOSAT/src/algorithm/blastn/alignment/mod.rs`.
+- Added `encode_iupac_to_ncbi2na_packed` in `LOSAT/src/core/blast_encoding.rs` (NCBI `CompressNcbi2na` behavior).
+- Updated `LOSAT/src/algorithm/blastn/blast_engine/run.rs` to use BLASTNA query for DP/greedy, packed ncbi2na for DP score-only, ncbi2na (2-bit per base) for greedy score-only, and BLASTNA for traceback; removed `extend_final_traceback` usage.
+- Fixed BLASTNA matrix sentinel column in `LOSAT/src/algorithm/blastn/filtering/purge_endpoints.rs`.
+- Removed non-NCBI `extend_final_traceback` from `LOSAT/src/algorithm/blastn/alignment/gapped.rs` and export list.
+
+Pending / next steps:
+- Re-run build/tests; last `cargo check` failed due to an environment error (`Invalid cross-device link` writing target). Consider setting `CARGO_TARGET_DIR` inside repo or rerun in a same-filesystem location.
+- Verify BLASTN parity: run comparison scripts (`LOSAT/tests/run_comparison.sh`) and inspect remaining length/identity deltas.
+- If discrepancies remain, focus on BLASTN DP packed alignment boundary logic and packed subject indexing (new `query_offset`/`subject_byte_offset` path).
+
+Notes:
+- `extend_gapped_heuristic(_with_scratch)` signature now includes `s_len` and `score_matrix`; `extend_gapped_heuristic_with_traceback(_with_scratch)` also takes `score_matrix`; `blast_get_offsets_for_gapped_alignment` now requires `score_matrix`.
+
 ## MANDATORY COMPLIANCE REQUIREMENTS
 
 **These rules are ABSOLUTE and MUST be followed without exception. There is NO room for interpretation.**
@@ -166,35 +184,44 @@ LOSAT/src/
 │   │   │   ├── backbone.rs        # Core lookup table
 │   │   │   └── neighbor_map.rs    # Pre-computed neighbor relationships
 │   │   ├── scan/                  # Sequence scanning
-│   │   │   ├── offset_pairs.rs    # Offset pair generation
-│   │   │   └── simd_helpers.rs    # AVX2/SSE2 SIMD optimizations
+│   │   │   └── offset_pairs.rs    # Offset pair generation
 │   │   ├── sum_stats_linking/     # HSP chaining and E-value
 │   │   │   ├── linking.rs         # Sum-statistics linking algorithm
 │   │   │   ├── cutoffs.rs         # Cutoff calculations
 │   │   │   └── params.rs          # Linking parameters
 │   │   ├── filtering/             # HSP filtering
 │   │   │   └── purge_endpoints.rs # Endpoint-based filtering
-│   │   ├── constants.rs           # TBLASTX-specific constants
-│   │   ├── ncbi_cutoffs.rs        # NCBI cutoff score calculations
-│   │   ├── hsp_culling.rs         # Interval tree HSP culling
+│   │   ├── args.rs                # CLI argument definitions
+│   │   ├── blast_aascan.rs        # Amino acid scanning
+│   │   ├── blast_extend.rs        # Extension primitives
+│   │   ├── blast_gapalign.rs      # Gapped alignment for AA
 │   │   ├── chaining.rs            # HSP chaining logic
-│   │   ├── translation.rs         # 6-frame translation
-│   │   └── tracing.rs             # Debug tracing infrastructure
+│   │   ├── constants.rs           # TBLASTX-specific constants
+│   │   ├── diagnostics.rs         # Debug diagnostics
+│   │   ├── hsp_culling.rs         # Interval tree HSP culling
+│   │   ├── ncbi_cutoffs.rs        # NCBI cutoff score calculations
+│   │   ├── reevaluate.rs          # HSP re-evaluation logic
+│   │   ├── tracing.rs             # Debug tracing infrastructure
+│   │   └── translation.rs         # 6-frame translation
 │   ├── blastn/                    # BLASTN implementation
 │   │   ├── blast_engine/          # Main execution
 │   │   │   └── run.rs             # blastn/megablast run logic
 │   │   ├── alignment/             # Gapped alignment
 │   │   │   ├── gapped.rs          # Semi-global gapped alignment
 │   │   │   ├── greedy.rs          # Greedy alignment (megablast)
-│   │   │   └── statistics.rs      # Alignment statistics
+│   │   │   ├── statistics.rs      # Alignment statistics
+│   │   │   └── utilities.rs       # Alignment utility functions
 │   │   ├── filtering/             # HSP filtering
 │   │   │   ├── purge_endpoints.rs # Endpoint filtering
 │   │   │   └── subject_best_hit.rs # Subject-best-hit filtering
+│   │   ├── args.rs                # CLI argument definitions
 │   │   ├── constants.rs           # BLASTN-specific constants
-│   │   ├── ncbi_cutoffs.rs        # NCBI cutoff calculations
-│   │   ├── lookup.rs              # Nucleotide lookup table
+│   │   ├── coordination.rs        # Multi-threading coordination
 │   │   ├── extension.rs           # Ungapped extension
-│   │   └── coordination.rs        # Multi-threading coordination
+│   │   ├── interval_tree.rs       # Interval tree for HSP management
+│   │   ├── lookup.rs              # Nucleotide lookup table
+│   │   ├── ncbi_cutoffs.rs        # NCBI cutoff calculations
+│   │   └── sequence_compare.rs    # Sequence comparison utilities
 │   └── common/                    # Shared algorithm utilities
 │       ├── chaining.rs            # Shared chaining logic
 │       ├── diagnostics.rs         # Debug diagnostics
@@ -203,21 +230,60 @@ LOSAT/src/
 │   ├── blast_stat/                # Karlin-Altschul statistics
 │   │   ├── karlin_params.rs       # Karlin parameter lookup
 │   │   ├── length_adjustment.rs   # Effective length calculation
+│   │   ├── lookup_tables.rs       # Precomputed lookup tables
+│   │   ├── score_calc.rs          # Score calculations
 │   │   ├── search_space.rs        # Search space computation
-│   │   └── sum_statistics.rs      # Sum statistics
+│   │   ├── sum_statistics.rs      # Sum statistics
+│   │   └── composition.rs         # Sequence composition analysis
+│   ├── blast_encoding.rs          # Sequence encoding (NCBI format)
 │   ├── blast_filter.rs            # Low-complexity filtering
 │   ├── blast_seg.rs               # SEG algorithm
-│   ├── blast_encoding.rs          # Sequence encoding
 │   ├── blast_util.rs              # Utility functions
 │   └── gencode_singleton.rs       # Genetic code tables
 ├── stats/                         # Statistical calculations
-├── sequence/                      # 2-bit packed nucleotide sequences
-├── utils/                         # BLOSUM62 matrix, genetic codes, SEG masking
-├── report/                        # Output formatting (outfmt0, outfmt6, outfmt7)
-├── post/                          # Post-processing (chain, filter)
+│   ├── karlin.rs                  # Karlin-Altschul parameters
+│   ├── karlin_calc.rs             # Karlin parameter calculations
+│   ├── length_adjustment.rs       # Effective length adjustment
+│   ├── search_space.rs            # Search space calculations
+│   ├── sum_statistics.rs          # Sum statistics implementation
+│   └── tables.rs                  # Precomputed statistical tables
+├── align/                         # General alignment utilities
+│   ├── result.rs                  # Alignment result structures
+│   ├── sw_banded.rs               # Banded Smith-Waterman
+│   └── traceback.rs               # Alignment traceback
+├── utils/                         # Utility modules
+│   ├── dust.rs                    # DUST low-complexity filter
+│   ├── genetic_code.rs            # Genetic code definitions
+│   ├── matrix.rs                  # BLOSUM62 scoring matrix
+│   └── seg.rs                     # SEG masking algorithm
+├── sequence/                      # Sequence handling
+│   └── packed_nucleotide.rs       # 2-bit packed nucleotide sequences
+├── seed/                          # Seed/word finding
+│   ├── aa_word_finder.rs          # Amino acid word finder
+│   └── na_word_finder.rs          # Nucleotide word finder
+├── report/                        # Output formatting
+│   ├── outfmt6.rs                 # Tabular output (outfmt 6/7)
+│   └── pairwise.rs                # Pairwise output (outfmt 0)
+├── post/                          # Post-processing
+│   ├── chain.rs                   # HSP chaining
+│   └── filter.rs                  # Result filtering
+├── config/                        # Configuration
+│   └── compat.rs                  # NCBI compatibility settings
 ├── blastinput/                    # CLI argument parsing
+│   ├── blast_args.rs              # Common argument definitions
+│   ├── blastn_args.rs             # BLASTN-specific arguments
+│   └── tblastx_args.rs            # TBLASTX-specific arguments
 ├── api/                           # API interfaces
-└── format/                        # Output formatting utilities
+│   ├── blast_nucl_options.rs      # Nucleotide BLAST options
+│   ├── blast_options_handle.rs    # Options handle
+│   ├── blast_results.rs           # Result structures
+│   ├── local_blast.rs             # Local BLAST execution
+│   └── tblastx_options.rs         # TBLASTX options
+├── format/                        # Output formatting utilities
+│   └── blast_format.rs            # BLAST format helpers
+├── common.rs                      # Common types and utilities
+├── lib.rs                         # Library entry point
+└── main.rs                        # CLI entry point
 ```
 
 ### Entry Point
@@ -375,6 +441,8 @@ LOSAT_STARTUP_TRACE=1                       # Trace startup
 
 ## Known Issues
 
+### TBLASTX
+
 1. **Long sequences (600kb+)**: Excessive hits (2x NCBI count) - under investigation
    - **Status**: Exhaustive investigation completed (Session 12, 2026-01-11). Root cause still unknown.
    - **Verified CORRECT (not the cause)**:
@@ -390,9 +458,26 @@ LOSAT_STARTUP_TRACE=1                       # Trace startup
 
 2. **Chain formation differences**: E-value mismatches with short HSPs in some edge cases
 
+### BLASTN
+
+3. **BLASTN hit coverage gap**: ~90% coverage on some datasets
+   - **Status**: Megablast 98-99%, blastn task ~90%
+   - **Details**: See [BLASTN_STATUS.md](BLASTN_STATUS.md)
+   - **Next steps**: Investigate coordinate off-by-one in `Blast_SemiGappedAlign`, potentially implement full interval tree
+
 ## Recently Fixed
 
-1. **Coordinate output off-by-one** (Session 11, 2026-01-11): All TBLASTX output coordinates were -1 compared to NCBI
+1. **Megablast greedy traceback crash** (Session 4, 2026-01-13): Panic in `reduce_gaps` due to index out of bounds
+   - **Root Cause**: `reduce_gaps` was not using signed indices (`isize`) to mirror NCBI pointer arithmetic
+   - **Fix**: Modified `reduce_gaps` in `greedy.rs` to index into full query/subject buffers using `q_start/q_end` and `s_start/s_end`
+   - **Reference**: `blast_gapalign.c:2669-2758` (`s_ReduceGaps`)
+   - **Verified**: Megablast completes successfully on large datasets
+
+2. **Interval tree stack overflow** (Session 4, 2026-01-13): Recursive HSP insertion caused stack overflow
+   - **Fix**: Removed recursion in `interval_tree.rs`
+   - **Reference**: `blast_itree.c:703-746`
+
+3. **Coordinate output off-by-one** (Session 11, 2026-01-11): All TBLASTX output coordinates were -1 compared to NCBI
    - **Root Cause**: NCBI's C++ output layer adds +1 for 1-indexed output; LOSAT was missing this
    - **Fix**: Modified `convert_coords()` in `extension/mod.rs` to incorporate +1 adjustment
    - **Verified**: Coordinates now match NCBI exactly

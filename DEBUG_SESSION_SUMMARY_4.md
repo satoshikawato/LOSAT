@@ -6,7 +6,10 @@
 ## Current Repro
 - Command: `LOSAT/target/release/LOSAT blastn -q ./fasta/EDL933.fna -s ./fasta/Sakai.fna -o ./losat_out/EDL933.Sakai.losatn.megablast.out -n 1`
 - Log: `LOSAT/tests/losat_out/EDL933.Sakai.losatn.megablast.debug.log`
-- Failure: panic at `LOSAT/src/algorithm/blastn/alignment/greedy.rs:1431` (index out of bounds, len 7665, index 7676). Resolved: command now completes after `reduce_gaps` offset fix.
+- Prior failure: panic at `LOSAT/src/algorithm/blastn/alignment/greedy.rs:1431` (index out of bounds, len 7665, index 7676). Resolved: command now completes after `reduce_gaps` offset fix.
+
+## Latest Result
+- User reran the release megablast command from `LOSAT/tests`; it completed successfully (no panic; progress 1/1).
 
 ## Code Changes (this session)
 - `LOSAT/src/algorithm/blastn/alignment/greedy.rs`
@@ -42,3 +45,4 @@
 1. Fix BLASTN coordinate off-by-one in `LOSAT/src/algorithm/blastn/alignment/gapped.rs` by matching NCBI `blast_gapalign.c:735-962` (`Blast_SemiGappedAlign`), especially `extend_gapped_one_direction_ex`.
 2. Remove non-NCBI `filter_contained_hsps` and cleanup exports/imports (`LOSAT/src/algorithm/blastn/filtering/purge_endpoints.rs`, `LOSAT/src/algorithm/blastn/filtering/mod.rs`, `LOSAT/src/algorithm/blastn/blast_engine/mod.rs`).
 3. Re-run parity comparisons (EDL933 vs Sakai megablast; NZ_CP006932 self blastn) and use `LOSAT_DEBUG_COORDS`/`LOSAT_DEBUG_BLASTN` to localize remaining missing hits.
+4. Investigate TBLASTX 2x hit inflation on long sequences (gencode=4) by matching `Blast_HSPListReevaluateUngapped` and extension boundary/termination logic.

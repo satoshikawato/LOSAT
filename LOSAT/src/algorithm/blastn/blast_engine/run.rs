@@ -18,12 +18,16 @@ use super::super::args::BlastnArgs;
 use super::super::alignment::{
     blast_get_offsets_for_gapped_alignment,
     blast_get_start_for_gapped_alignment_nucl,
-    extend_gapped_heuristic,
+    // NCBI reference: ncbi-blast/c++/include/algo/blast/core/blast_gapalign.h:69-80 (BlastGapAlignStruct)
+    extend_gapped_heuristic_with_scratch,
     extend_final_traceback,
-    extend_gapped_heuristic_with_traceback,
+    // NCBI reference: ncbi-blast/c++/include/algo/blast/core/blast_gapalign.h:69-80 (BlastGapAlignStruct)
+    extend_gapped_heuristic_with_traceback_with_scratch,
     // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_gapalign.c:2762-2936 (BLAST_GreedyGappedAlignment)
     greedy_gapped_alignment_score_only,
     greedy_gapped_alignment_with_traceback,
+    // NCBI reference: ncbi-blast/c++/include/algo/blast/core/blast_gapalign.h:69-80 (BlastGapAlignStruct)
+    GapAlignScratch,
 };
 use super::super::extension::{extend_hit_ungapped, type_of_word};
 use crate::utils::dust::MaskedInterval;
@@ -370,7 +374,14 @@ pub fn run(args: BlastnArgs) -> Result<()> {
     seq_data.subjects
         .par_iter()
         .enumerate()
-        .for_each_with(tx, |tx, (_s_idx, s_record)| {
+        .for_each_init(
+            || {
+                // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_gapalign.c:313-319 (BLAST_GapAlignStructNew)
+                // NCBI reference: ncbi-blast/c++/include/algo/blast/core/blast_gapalign.h:69-80 (BlastGapAlignStruct per thread)
+                (tx.clone(), GapAlignScratch::new())
+            },
+            |state, (_s_idx, s_record)| {
+            let (tx, gap_scratch) = state;
             let queries = queries_ref;
             let query_ids = query_ids_ref;
             // NCBI reference: blast_traceback.c:679-692
@@ -1684,7 +1695,7 @@ pub fn run(args: BlastnArgs) -> Result<()> {
 
                     // Preliminary DP gapped extension (score-only)
                     // NCBI reference: ncbi-blast/c++/src/algo/blast/api/blast_nucl_options.cpp:176-183
-                    let (p_qs, p_qe, p_ss, p_se, p_score, _, _, _, _, _) = extend_gapped_heuristic(
+                    let (p_qs, p_qe, p_ss, p_se, p_score, _, _, _, _, _) = extend_gapped_heuristic_with_scratch(
                         q_seq,
                         search_seq,
                         seed_qs,
@@ -1695,6 +1706,7 @@ pub fn run(args: BlastnArgs) -> Result<()> {
                         gap_open,
                         gap_extend,
                         x_drop_gapped,
+                        gap_scratch,
                         true,
                     );
                     (p_qs, p_qe, p_ss, p_se, p_score, seed_qs, seed_ss)
@@ -1760,7 +1772,7 @@ pub fn run(args: BlastnArgs) -> Result<()> {
                     gap_letters,
                     edit_ops,
                 ) = if use_dp {
-                    extend_gapped_heuristic_with_traceback(
+                    extend_gapped_heuristic_with_traceback_with_scratch(
                         q_seq,
                         search_seq,
                         final_seed_qs,
@@ -1771,6 +1783,7 @@ pub fn run(args: BlastnArgs) -> Result<()> {
                         gap_open,
                         gap_extend,
                         x_drop_final,
+                        gap_scratch,
                     )
                 } else {
                     match greedy_gapped_alignment_with_traceback(

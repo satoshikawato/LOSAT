@@ -22,7 +22,9 @@ pub use run::run;
 use rustc_hash::FxHashMap;
 use crate::common::Hit;
 use crate::stats::KarlinParams;
+use crate::core::blast_encoding::encode_iupac_to_blastna;
 use super::filtering::{purge_hsps_with_common_endpoints, purge_hsps_with_common_endpoints_ex, reevaluate_hsp_with_ambiguities_gapped, subject_best_hit};
+use super::lookup::reverse_complement;
 
 // Re-export for backward compatibility
 pub use crate::algorithm::common::evalue::calculate_evalue_database_search as calculate_evalue;
@@ -119,6 +121,10 @@ pub fn filter_hsps(
     //     ...
     // }
     let mut deleted_count = 0;
+    // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_encoding.c:85-93 (IUPACNA_TO_BLASTNA)
+    // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_util.c:806-833 (GetReverseNuclSequence)
+    let mut encoded_cache: FxHashMap<(String, String), (Vec<u8>, Vec<u8>, Vec<u8>)> =
+        FxHashMap::default();
     for i in extra_start..result_hits.len() {
         let hit = &mut result_hits[i];
 
@@ -132,11 +138,23 @@ pub fn filter_hsps(
         // Get sequences for re-evaluation
         let key = (hit.query_id.clone(), hit.subject_id.clone());
         if let Some((q_seq, s_seq)) = sequences.get(&key) {
-            // NCBI reference: blast_hits.c:479-647 Blast_HSPReevaluateWithAmbiguitiesGapped
+            let (q_blastna, s_blastna, s_rc_blastna) =
+                encoded_cache.entry(key.clone()).or_insert_with(|| {
+                    let q_blastna = encode_iupac_to_blastna(q_seq);
+                    let s_blastna = encode_iupac_to_blastna(s_seq);
+                    let s_rc_blastna = encode_iupac_to_blastna(&reverse_complement(s_seq));
+                    (q_blastna, s_blastna, s_rc_blastna)
+                });
+            // NCBI reference: blast_traceback.c:653-665 (reevaluate with blastna sequences)
+            let s_eval = if hit.s_start > hit.s_end {
+                s_rc_blastna.as_slice()
+            } else {
+                s_blastna.as_slice()
+            };
             let delete = reevaluate_hsp_with_ambiguities_gapped(
                 hit,
-                q_seq,
-                s_seq,
+                q_blastna.as_slice(),
+                s_eval,
                 reward,
                 penalty,
                 gap_open,

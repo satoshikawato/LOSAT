@@ -518,6 +518,125 @@ fn purge_hsps_for_subject_ex(mut hits: Vec<Hit>, purge: bool) -> (Vec<Hit>, usiz
 // Reference: blast_hits.c:479-647 Blast_HSPReevaluateWithAmbiguitiesGapped
 // =============================================================================
 
+/// BLASTNA alphabet size.
+/// NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_stat.c:1060-1068 (BLASTNA_SIZE usage)
+const BLASTNA_SIZE: usize = 16;
+
+/// Map BLASTNA codes to NCBI4NA bitmasks (degeneracy).
+/// NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_encoding.c:56-74 (BLASTNA_TO_NCBI4NA)
+const BLASTNA_TO_NCBI4NA: [u8; BLASTNA_SIZE] = [
+    1, 2, 4, 8, 5, 10, 3, 12, 9, 6, 14, 13, 11, 7, 15, 0,
+];
+
+/// Round to nearest integer (half away from zero).
+/// NCBI reference: ncbi-blast/c++/src/algo/blast/core/ncbi_math.c:437-441 (BLAST_Nint)
+#[inline]
+fn blast_nint(x: f64) -> i32 {
+    if x >= 0.0 {
+        (x + 0.5) as i32
+    } else {
+        (x - 0.5) as i32
+    }
+}
+
+/// Build the BLASTNA scoring matrix from reward/penalty.
+/// NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_stat.c:1052-1122 (BlastScoreBlkNuclMatrixCreate)
+fn build_blastna_matrix(reward: i32, penalty: i32) -> [i32; BLASTNA_SIZE * BLASTNA_SIZE] {
+    let mut matrix = [0i32; BLASTNA_SIZE * BLASTNA_SIZE];
+    let mut degeneracy = [0i32; BLASTNA_SIZE];
+
+    // NCBI reference: blast_stat.c:1076-1086
+    for index1 in 0..4 {
+        degeneracy[index1] = 1;
+    }
+    for index1 in 4..BLASTNA_SIZE {
+        let mut degen = 0;
+        for index2 in 0..4 {
+            if (BLASTNA_TO_NCBI4NA[index1] & BLASTNA_TO_NCBI4NA[index2]) != 0 {
+                degen += 1;
+            }
+        }
+        degeneracy[index1] = degen;
+    }
+
+    // NCBI reference: blast_stat.c:1088-1119
+    for index1 in 0..BLASTNA_SIZE {
+        for index2 in index1..BLASTNA_SIZE {
+            let idx = index1 * BLASTNA_SIZE + index2;
+            let val = if (BLASTNA_TO_NCBI4NA[index1] & BLASTNA_TO_NCBI4NA[index2]) != 0 {
+                let degen = degeneracy[index2];
+                let raw = ((degen - 1) * penalty + reward) as f64 / (degen as f64);
+                blast_nint(raw)
+            } else {
+                penalty
+            };
+            matrix[idx] = val;
+            if index1 != index2 {
+                matrix[index2 * BLASTNA_SIZE + index1] = val;
+            }
+        }
+    }
+
+    // NCBI reference: blast_stat.c:1120-1122 (gap sentinel row)
+    for index1 in 0..BLASTNA_SIZE {
+        matrix[(BLASTNA_SIZE - 1) * BLASTNA_SIZE + index1] = i32::MIN / 2;
+    }
+
+    matrix
+}
+
+/// Compute alignment stats from a gap edit script.
+/// NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_hits.c:745-818 (identity counting)
+/// NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_hits.c:1055-1074 (gap counts)
+fn stats_from_edit_ops(
+    q_seq: &[u8],
+    s_seq: &[u8],
+    q_start: usize,
+    s_start: usize,
+    edit_ops: &[GapEditOp],
+) -> (usize, usize, usize, usize, usize) {
+    let mut matches = 0usize;
+    let mut mismatches = 0usize;
+    let mut gap_opens = 0usize;
+    let mut gap_letters = 0usize;
+    let mut align_length = 0usize;
+
+    let mut qi = q_start;
+    let mut si = s_start;
+
+    for op in edit_ops {
+        let num = op.num() as usize;
+        align_length += num;
+        match *op {
+            GapEditOp::Sub(_) => {
+                for _ in 0..num {
+                    if qi < q_seq.len() && si < s_seq.len() {
+                        if q_seq[qi] == s_seq[si] {
+                            matches += 1;
+                        } else {
+                            mismatches += 1;
+                        }
+                    }
+                    qi += 1;
+                    si += 1;
+                }
+            }
+            GapEditOp::Del(_) => {
+                gap_opens += 1;
+                gap_letters += num;
+                si += num;
+            }
+            GapEditOp::Ins(_) => {
+                gap_opens += 1;
+                gap_letters += num;
+                qi += num;
+            }
+        }
+    }
+
+    (matches, mismatches, gap_opens, gap_letters, align_length)
+}
+
 /// Parameters needed for E-value and bit score recalculation after re-evaluation.
 /// NCBI reference: blast_traceback.c:234-250 s_HSPListPostTracebackUpdate
 pub struct ReevalParams {
@@ -533,8 +652,7 @@ pub struct ReevalParams {
 /// NCBI reference: blast_hits.c:479-647 Blast_HSPReevaluateWithAmbiguitiesGapped
 ///
 /// This function walks through the edit script to find the best-scoring
-/// sub-alignment. It handles ambiguous bases (N's) which score 0 and can
-/// create low-scoring regions within an alignment.
+/// sub-alignment, using the BLASTNA scoring matrix for ambiguous bases.
 ///
 /// ```c
 /// // NCBI Blast_HSPReevaluateWithAmbiguitiesGapped (blast_hits.c:479-647)
@@ -572,8 +690,8 @@ pub struct ReevalParams {
 ///
 /// # Parameters
 /// * `hit` - The HSP to re-evaluate (modified in place if best region found)
-/// * `q_seq` - Query sequence (full, 0-indexed)
-/// * `s_seq` - Subject sequence (full, 0-indexed)
+/// * `q_seq` - Query sequence in BLASTNA encoding (full, 0-indexed)
+/// * `s_seq` - Subject sequence in BLASTNA encoding (full, 0-indexed, aligned orientation)
 /// * `reward` - Match reward (positive)
 /// * `penalty` - Mismatch penalty (negative)
 /// * `gap_open` - Gap open penalty (positive)
@@ -615,246 +733,229 @@ pub fn reevaluate_hsp_with_ambiguities_gapped_ex(
     // NCBI reference: blast_hits.c:539-540
     // esp = hsp->gap_info;
     // if (!esp) return TRUE;
-    let gap_info = match &hit.gap_info {
-        Some(info) if !info.is_empty() => info,
+    let mut gap_ops = match &hit.gap_info {
+        Some(info) if !info.is_empty() => info.clone(),
         _ => return true, // No gap_info = delete HSP
     };
-
-    // Get starting positions (0-indexed internal coordinates)
-    // NCBI uses 0-indexed offsets for sequence access
-    let q_offset = hit.q_start.saturating_sub(1); // Convert 1-based to 0-based
-    let s_offset = hit.s_start.min(hit.s_end).saturating_sub(1); // Canonical, 0-based
 
     let is_minus = hit.s_start > hit.s_end;
 
     // NCBI reference: blast_hits.c:528-535
     // query = q + hsp->query.offset;
     // subject = s + hsp->subject.offset;
-    // score = 0; sum = 0;
-    // best_q_start = best_q_end = current_q_start = query;
-    // best_s_start = best_s_end = current_s_start = subject;
+    let q_offset = hit.q_start.saturating_sub(1);
+    let s_offset = if is_minus {
+        // NCBI reference: blast_util.c:806-833 (reverse complement coordinates)
+        s_seq.len().saturating_sub(hit.s_start)
+    } else {
+        hit.s_start.saturating_sub(1)
+    };
+
+    // NCBI reference: blast_hits.c:508-526 (factor and gap penalties)
+    let mut factor = 1;
+    let (gap_open_eval, gap_extend_eval) = if gap_open == 0 && gap_extend == 0 {
+        if reward % 2 == 1 {
+            factor = 2;
+        }
+        (0, (reward - 2 * penalty) * factor / 2)
+    } else {
+        (gap_open, gap_extend)
+    };
+
+    let matrix = build_blastna_matrix(reward, penalty);
 
     let mut score: i32 = 0;
     let mut sum: i32 = 0;
 
-    // Track positions in sequences (0-indexed offsets from start of HSP)
     let mut query_pos = q_offset;
     let mut subject_pos = s_offset;
 
-    // Best scoring region (as sequence positions)
     let mut best_q_start = query_pos;
     let mut best_q_end = query_pos;
     let mut best_s_start = subject_pos;
     let mut best_s_end = subject_pos;
 
-    // Current scoring region start
     let mut current_q_start = query_pos;
     let mut current_s_start = subject_pos;
 
-    // NCBI reference: blast_hits.c:541-610
-    // for (index=0; index<esp->size; index++)
-    for op in gap_info.iter() {
-        let num = op.num() as usize;
+    let mut best_start_esp_index = 0usize;
+    let mut best_end_esp_index = 0usize;
+    let mut current_start_esp_index = 0usize;
+    let mut best_end_esp_num: i32 = -1;
 
-        match op {
-            GapEditOp::Sub(_) => {
-                // NCBI reference: blast_hits.c:547-551
-                // if (esp->op_type[index] == eGapAlignSub) {
-                //     sum += factor*matrix[*query & kResidueMask][*subject];
-                //     query++; subject++; op_index++;
-                // }
-                for _ in 0..num {
+    // NCBI reference: blast_hits.c:541-610
+    for index in 0..gap_ops.len() {
+        let mut op_index = 0usize;
+        while op_index < gap_ops[index].num() as usize {
+            match gap_ops[index] {
+                GapEditOp::Sub(_) => {
                     if query_pos < q_seq.len() && subject_pos < s_seq.len() {
-                        // NCBI uses scoring matrix; we use simple match/mismatch
-                        let match_score = if q_seq[query_pos] == s_seq[subject_pos] {
-                            reward
-                        } else {
-                            penalty
-                        };
-                        sum += match_score;
+                        let q_code = (q_seq[query_pos] & 0x0f) as usize;
+                        let s_code = (s_seq[subject_pos] & 0x0f) as usize;
+                        sum += factor * matrix[q_code * BLASTNA_SIZE + s_code];
                     }
                     query_pos += 1;
                     subject_pos += 1;
-
-                    // NCBI reference: blast_hits.c:562-593
-                    // Check if sum dropped below 0 (reset region)
-                    if sum < 0 {
-                        // NCBI reference: blast_hits.c:574-578
-                        // current_q_start = query;
-                        // current_s_start = subject;
-                        current_q_start = query_pos;
-                        current_s_start = subject_pos;
-
-                        // NCBI reference: blast_hits.c:584-588
-                        // if (score < cutoff_score) {
-                        //     best_q_start = query;
-                        //     best_s_start = subject;
-                        //     score = 0;
-                        // }
-                        if score < cutoff_score {
-                            best_q_start = query_pos;
-                            best_s_start = subject_pos;
-                            score = 0;
-                        }
-                        sum = 0;
-                    } else if sum > score {
-                        // NCBI reference: blast_hits.c:595-604
-                        // Remember this as best scoring region
-                        score = sum;
-                        best_q_start = current_q_start;
-                        best_s_start = current_s_start;
-                        best_q_end = query_pos;
-                        best_s_end = subject_pos;
-                    }
+                    op_index += 1;
+                }
+                GapEditOp::Del(n) => {
+                    sum -= gap_open_eval + gap_extend_eval * (n as i32);
+                    subject_pos += n as usize;
+                    op_index += n as usize;
+                }
+                GapEditOp::Ins(n) => {
+                    sum -= gap_open_eval + gap_extend_eval * (n as i32);
+                    query_pos += n as usize;
+                    op_index += n as usize;
                 }
             }
-            GapEditOp::Del(n) => {
-                // NCBI reference: blast_hits.c:552-555
-                // } else if (esp->op_type[index] == eGapAlignDel) {
-                //     sum -= gap_open + gap_extend * esp->num[index];
-                //     subject += esp->num[index];
-                // }
-                sum -= gap_open + gap_extend * (*n as i32);
-                subject_pos += *n as usize;
 
-                // Check for region reset
-                if sum < 0 {
-                    current_q_start = query_pos;
-                    current_s_start = subject_pos;
-                    if score < cutoff_score {
-                        best_q_start = query_pos;
-                        best_s_start = subject_pos;
-                        score = 0;
+            if sum < 0 {
+                // NCBI reference: blast_hits.c:563-585
+                if op_index < gap_ops[index].num() as usize {
+                    if let GapEditOp::Sub(n) = gap_ops[index] {
+                        gap_ops[index] = GapEditOp::Sub((n as usize - op_index) as u32);
                     }
-                    sum = 0;
-                } else if sum > score {
-                    score = sum;
-                    best_q_start = current_q_start;
-                    best_s_start = current_s_start;
-                    best_q_end = query_pos;
-                    best_s_end = subject_pos;
+                    current_start_esp_index = index;
+                    op_index = 0;
+                } else {
+                    current_start_esp_index = index + 1;
                 }
-            }
-            GapEditOp::Ins(n) => {
-                // NCBI reference: blast_hits.c:556-559
-                // } else if (esp->op_type[index] == eGapAlignIns) {
-                //     sum -= gap_open + gap_extend * esp->num[index];
-                //     query += esp->num[index];
-                // }
-                sum -= gap_open + gap_extend * (*n as i32);
-                query_pos += *n as usize;
+                sum = 0;
+                current_q_start = query_pos;
+                current_s_start = subject_pos;
 
-                // Check for region reset
-                if sum < 0 {
-                    current_q_start = query_pos;
-                    current_s_start = subject_pos;
-                    if score < cutoff_score {
-                        best_q_start = query_pos;
-                        best_s_start = subject_pos;
-                        score = 0;
-                    }
-                    sum = 0;
-                } else if sum > score {
-                    score = sum;
-                    best_q_start = current_q_start;
-                    best_s_start = current_s_start;
-                    best_q_end = query_pos;
-                    best_s_end = subject_pos;
+                if score < cutoff_score {
+                    best_q_start = query_pos;
+                    best_s_start = subject_pos;
+                    score = 0;
+                    best_start_esp_index = current_start_esp_index;
+                    best_end_esp_index = current_start_esp_index;
                 }
+            } else if sum > score {
+                // NCBI reference: blast_hits.c:595-604
+                score = sum;
+                best_q_start = current_q_start;
+                best_s_start = current_s_start;
+                best_q_end = query_pos;
+                best_s_end = subject_pos;
+                best_start_esp_index = current_start_esp_index;
+                best_end_esp_index = index;
+                best_end_esp_num = op_index as i32;
             }
         }
     }
 
-    // NCBI reference: blast_hits.c:614-638
-    // Post-processing: try to extend further through exact matches
-    // This is optional and primarily helps with ambiguous bases at boundaries
-    if best_q_start < best_q_end && best_s_start < best_s_end {
-        // Extend left through exact matches
-        while best_q_start > 0 && best_s_start > 0 {
-            let qi = best_q_start - 1;
-            let si = best_s_start - 1;
-            if qi < q_seq.len() && si < s_seq.len() && q_seq[qi] == s_seq[si] && q_seq[qi] < 4 {
-                best_q_start -= 1;
-                best_s_start -= 1;
-                score += reward;
+    // NCBI reference: blast_hits.c:612-616
+    score /= factor;
+
+    // NCBI reference: blast_hits.c:617-638
+    if best_start_esp_index < gap_ops.len() && best_end_esp_index < gap_ops.len() {
+        debug_assert!(matches!(gap_ops[best_start_esp_index], GapEditOp::Sub(_)));
+        debug_assert!(matches!(gap_ops[best_end_esp_index], GapEditOp::Sub(_)));
+
+        let mut qp = best_q_start;
+        let mut sp = best_s_start;
+        let mut ext = 0usize;
+        while qp > 0 && sp > 0 {
+            let q_prev = qp - 1;
+            let s_prev = sp - 1;
+            if q_seq[q_prev] == s_seq[s_prev] && q_seq[q_prev] < 4 {
+                qp -= 1;
+                sp -= 1;
+                ext += 1;
             } else {
                 break;
             }
         }
+        if ext > 0 {
+            best_q_start -= ext;
+            best_s_start -= ext;
+            if let GapEditOp::Sub(n) = gap_ops[best_start_esp_index] {
+                gap_ops[best_start_esp_index] = GapEditOp::Sub(n + ext as u32);
+            }
+            if best_end_esp_index == best_start_esp_index {
+                best_end_esp_num += ext as i32;
+            }
+            score += (ext as i32) * reward;
+        }
 
-        // Extend right through exact matches
-        while best_q_end < q_seq.len() && best_s_end < s_seq.len() {
-            if q_seq[best_q_end] == s_seq[best_s_end] && q_seq[best_q_end] < 4 {
-                score += reward;
-                best_q_end += 1;
-                best_s_end += 1;
+        let mut qp = best_q_end;
+        let mut sp = best_s_end;
+        let mut ext = 0usize;
+        while qp < q_seq.len() && sp < s_seq.len() && q_seq[qp] < 4 {
+            if q_seq[qp] == s_seq[sp] {
+                qp += 1;
+                sp += 1;
+                ext += 1;
             } else {
                 break;
             }
+        }
+        if ext > 0 {
+            best_q_end += ext;
+            best_s_end += ext;
+            if let GapEditOp::Sub(n) = gap_ops[best_end_esp_index] {
+                gap_ops[best_end_esp_index] = GapEditOp::Sub(n + ext as u32);
+            }
+            best_end_esp_num += ext as i32;
+            score += (ext as i32) * reward;
         }
     }
 
     // NCBI reference: blast_hits.c:641-646
-    // return s_UpdateReevaluatedHSP(hsp, TRUE, cutoff_score, score, ...);
-    // Returns TRUE if HSP should be deleted
-
-    // Check if score passes cutoff
-    if score < cutoff_score {
-        return true; // Delete HSP
+    if score < cutoff_score || best_end_esp_num < 0 {
+        return true;
     }
 
-    // Update HSP coordinates with best region (convert back to 1-based)
+    // NCBI reference: blast_hits.c:414-470 s_UpdateReevaluatedHSP
+    hit.raw_score = score;
     hit.q_start = best_q_start + 1;
     hit.q_end = best_q_end;
 
     if is_minus {
-        // For minus strand: s_start > s_end
-        hit.s_start = best_s_end; // larger value
-        hit.s_end = best_s_start + 1; // smaller value
+        let s_len = s_seq.len();
+        hit.s_start = s_len.saturating_sub(best_s_start);
+        hit.s_end = s_len.saturating_sub(best_s_end).saturating_add(1);
     } else {
         hit.s_start = best_s_start + 1;
         hit.s_end = best_s_end;
     }
 
-    // Update score
-    hit.raw_score = score;
+    let mut new_gap_info = if best_end_esp_index != gap_ops.len().saturating_sub(1)
+        || best_start_esp_index > 0
+    {
+        gap_ops[best_start_esp_index..=best_end_esp_index].to_vec()
+    } else {
+        gap_ops
+    };
 
-    // Update alignment length
-    let q_len = best_q_end.saturating_sub(best_q_start);
-    let s_len = best_s_end.saturating_sub(best_s_start);
-    hit.length = q_len.max(s_len);
-
-    // Recalculate identity, mismatch, and gapopen from coordinates
-    // NCBI reference: blast_hits.c:745-790 s_Blast_HSPGetNumIdentitiesAndPositives
-    if hit.length > 0 {
-        // Estimate statistics from score and penalties
-        let gap_letters = (q_len as i32 - s_len as i32).unsigned_abs() as usize;
-        let non_gap_len = hit.length.saturating_sub(gap_letters);
-
-        // Estimate matches from score: score = matches * reward + mismatches * penalty
-        // mismatches = non_gap_len - matches
-        // score = matches * reward + (non_gap_len - matches) * penalty
-        // score = matches * (reward - penalty) + non_gap_len * penalty
-        // matches = (score - non_gap_len * penalty) / (reward - penalty)
-        let matches_est = if reward > 0 && non_gap_len > 0 && reward != penalty {
-            let est = (score - (non_gap_len as i32) * penalty) / (reward - penalty);
-            est.max(0).min(non_gap_len as i32) as usize
-        } else {
-            non_gap_len
+    if let Some(last) = new_gap_info.last_mut() {
+        let end_num = best_end_esp_num as u32;
+        *last = match *last {
+            GapEditOp::Sub(_) => GapEditOp::Sub(end_num),
+            GapEditOp::Del(_) => GapEditOp::Del(end_num),
+            GapEditOp::Ins(_) => GapEditOp::Ins(end_num),
         };
+    }
 
-        let mismatches_est = non_gap_len.saturating_sub(matches_est);
+    hit.gap_info = if new_gap_info.is_empty() {
+        None
+    } else {
+        Some(new_gap_info)
+    };
 
-        hit.identity = (matches_est as f64 / hit.length as f64) * 100.0;
-        hit.mismatch = mismatches_est;
-
-        // Estimate gap openings from gap_letters (rough estimate, at least 1 per direction if gaps exist)
-        if gap_letters > 0 {
-            // Rough estimate: 1 gap opening per gap region (very approximate)
-            hit.gapopen = 1;
+    if let Some(ref ops) = hit.gap_info {
+        let (matches, mismatches, gap_opens, _gap_letters, align_length) =
+            stats_from_edit_ops(q_seq, s_seq, best_q_start, best_s_start, ops);
+        hit.length = align_length;
+        hit.mismatch = mismatches;
+        hit.gapopen = gap_opens;
+        hit.identity = if align_length > 0 {
+            (matches as f64 / align_length as f64) * 100.0
         } else {
-            hit.gapopen = 0;
-        }
+            0.0
+        };
     }
 
     // Recalculate bit_score and e_value if Karlin parameters are provided
@@ -871,10 +972,11 @@ pub fn reevaluate_hsp_with_ambiguities_gapped_ex(
         // NCBI reference: blast_stat.c BLAST_KarlinStoE_simple
         // E = K * searchsp * exp(-lambda * score)
         if params.eff_searchsp > 0 {
-            hit.e_value = params.k * (params.eff_searchsp as f64) * (-params.lambda * (score as f64)).exp();
+            hit.e_value =
+                params.k * (params.eff_searchsp as f64) * (-params.lambda * (score as f64)).exp();
         }
     }
 
-    false // Keep HSP
+    false
 }
 

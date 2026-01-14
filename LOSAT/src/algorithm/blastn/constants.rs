@@ -19,11 +19,16 @@ pub const TWO_HIT_WINDOW: usize = 0; // NCBI BLAST default (one-hit mode)
 
 /// Scan range for off-diagonal hit detection
 /// NCBI reference: na_ungapped.c:658: Int4 Delta = MIN(word_params->options->scan_range, window_size - word_length);
-/// Default values:
-/// - blastn: 4 (enables off-diagonal search in two-hit mode)
-/// - megablast: 0 (off-diagonal search disabled)
-/// Reference: blast_options.h:63 (BLAST_SCAN_RANGE_NUCL = 0, but runtime value differs by task)
-pub const SCAN_RANGE_BLASTN: usize = 4;
+/// NCBI reference: ncbi-blast/c++/include/algo/blast/core/blast_options.h:63
+/// ```c
+/// #define BLAST_SCAN_RANGE_NUCL 0   /**< default scan range (blastn) */
+/// ```
+/// NCBI reference: ncbi-blast/c++/src/algo/blast/api/blast_nucl_options.cpp:165-168
+/// ```c
+/// SetWindowSize(BLAST_WINDOW_SIZE_NUCL);
+/// SetOffDiagonalRange(BLAST_SCAN_RANGE_NUCL);
+/// ```
+pub const SCAN_RANGE_BLASTN: usize = 0;
 pub const SCAN_RANGE_MEGABLAST: usize = 0;
 
 // Minimum ungapped score thresholds for triggering gapped extension

@@ -154,11 +154,14 @@ pub fn configure_task(args: &BlastnArgs) -> TaskConfig {
     
     let scan_step = calculate_initial_scan_step(effective_word_size, args.scan_step);
     
-    // NCBI reference: na_ungapped.c:658: Int4 Delta = MIN(word_params->options->scan_range, window_size - word_length);
-    // scan_range: 4 for blastn (enables off-diagonal search), 0 for megablast (disabled)
+    // NCBI reference: ncbi-blast/c++/src/algo/blast/api/blast_nucl_options.cpp:163-168
+    // ```c
+    // SetWindowSize(BLAST_WINDOW_SIZE_NUCL);
+    // SetOffDiagonalRange(BLAST_SCAN_RANGE_NUCL);
+    // ```
     let scan_range = match args.task.as_str() {
         "megablast" => SCAN_RANGE_MEGABLAST, // 0
-        _ => SCAN_RANGE_BLASTN, // 4
+        _ => SCAN_RANGE_BLASTN, // 0
     };
 
     // NCBI reference: blast_nucl_options.cpp:239, 259

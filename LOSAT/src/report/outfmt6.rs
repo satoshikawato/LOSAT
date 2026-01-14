@@ -519,6 +519,15 @@ mod tests {
             s_end: 100,
             e_value: 1e-50,
             bit_score: 185.5,
+            // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_hits.c:1122-1132
+            // ```c
+            // if (hsp->query.frame != hsp->subject.frame) {
+            //    *q_end = query_length - hsp->query.offset;
+            //    *q_start = *q_end - hsp->query.end + hsp->query.offset + 1;
+            // }
+            // ```
+            query_frame: 1,
+            query_length: 0,
             q_idx: 0,
             s_idx: 0,
             raw_score: 200,

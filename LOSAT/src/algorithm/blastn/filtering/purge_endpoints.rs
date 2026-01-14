@@ -17,6 +17,43 @@
 use crate::common::{GapEditOp, Hit};
 use rustc_hash::FxHashMap;
 
+// NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_hits.c:1122-1132
+// ```c
+// if (hsp->query.frame != hsp->subject.frame) {
+//    *q_end = query_length - hsp->query.offset;
+//    *q_start = *q_end - hsp->query.end + hsp->query.offset + 1;
+//    *s_end = hsp->subject.offset + 1;
+//    *s_start = hsp->subject.end;
+// } else {
+//    *q_start = hsp->query.offset + 1;
+//    *q_end = hsp->query.end;
+//    *s_start = hsp->subject.offset + 1;
+//    *s_end = hsp->subject.end;
+// }
+// ```
+fn adjust_blastn_offsets(
+    query_offset: usize,
+    query_end: usize,
+    subject_offset: usize,
+    subject_end: usize,
+    query_length: usize,
+    query_frame: i32,
+) -> (usize, usize, usize, usize) {
+    if query_frame < 0 {
+        let q_end = query_length.saturating_sub(query_offset);
+        let q_start = query_length.saturating_sub(query_end).saturating_add(1);
+        let s_end = subject_offset + 1;
+        let s_start = subject_end;
+        (q_start, q_end, s_start, s_end)
+    } else {
+        let q_start = query_offset + 1;
+        let q_end = query_end;
+        let s_start = subject_offset + 1;
+        let s_end = subject_end;
+        (q_start, q_end, s_start, s_end)
+    }
+}
+
 // =============================================================================
 // Traceback Trimming Functions
 // Reference: blast_hits.c:2392-2452 s_CutOffGapEditScript
@@ -67,8 +104,8 @@ use rustc_hash::FxHashMap;
 ///
 /// # Arguments
 /// * `hit` - HSP to modify in place
-/// * `q_cut` - Query cut position (absolute, 1-based)
-/// * `s_cut` - Subject cut position (absolute, 1-based canonical = min of s_start/s_end)
+/// * `q_cut` - Query cut position (absolute, 0-based internal offset)
+/// * `s_cut` - Subject cut position (absolute, 0-based internal offset)
 /// * `cut_begin` - If true, keep end portion; if false, keep start portion
 ///
 /// # Returns
@@ -81,14 +118,27 @@ pub fn cut_off_gap_edit_script(hit: &mut Hit, q_cut: usize, s_cut: usize, cut_be
         _ => return false, // No gap_info, cannot trim
     };
 
-    // Get canonical offsets (NCBI uses subject.offset < subject.end)
-    let q_offset = hit.q_start;
-    let s_offset = hit.s_start.min(hit.s_end);
+    // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_hits.c:1122-1132
+    // Convert output coordinates back to internal offsets for trimming.
+    let (mut q_offset_0, mut q_end_0) = if hit.query_length > 0 && hit.query_frame < 0 {
+        (
+            hit.query_length.saturating_sub(hit.q_end),
+            hit.query_length
+                .saturating_sub(hit.q_start)
+                .saturating_add(1),
+        )
+    } else {
+        (hit.q_start.saturating_sub(1), hit.q_end)
+    };
+    let (mut s_offset_0, mut s_end_0) = (
+        hit.s_start.min(hit.s_end).saturating_sub(1),
+        hit.s_start.max(hit.s_end),
+    );
 
     // Convert absolute cut positions to relative (within HSP)
     // NCBI: q_cut -= hsp->query.offset; s_cut -= hsp->subject.offset;
-    let q_cut_rel = q_cut.saturating_sub(q_offset);
-    let s_cut_rel = s_cut.saturating_sub(s_offset);
+    let q_cut_rel = q_cut.saturating_sub(q_offset_0);
+    let s_cut_rel = s_cut.saturating_sub(s_offset_0);
 
     // Walk through edit script to find cut point
     // NCBI tracks: qid (query consumed), sid (subject consumed), opid (ops within current run)
@@ -185,14 +235,8 @@ pub fn cut_off_gap_edit_script(hit: &mut Hit, q_cut: usize, s_cut: usize, cut_be
 
         // Update HSP coordinates
         // NCBI: hsp->query.offset += qid; hsp->subject.offset += sid;
-        hit.q_start = q_offset + qid;
-        // For subject, we need to handle strand correctly
-        if hit.s_start <= hit.s_end {
-            hit.s_start = s_offset + sid;
-        } else {
-            // Minus strand: s_start > s_end, so we update s_end (the lower coordinate)
-            hit.s_end = s_offset + sid;
-        }
+        q_offset_0 = q_offset_0.saturating_add(qid);
+        s_offset_0 = s_offset_0.saturating_add(sid);
     } else {
         // Keep START portion, update ends
         // NCBI reference: blast_hits.c:2442-2450
@@ -227,15 +271,22 @@ pub fn cut_off_gap_edit_script(hit: &mut Hit, q_cut: usize, s_cut: usize, cut_be
         // Update HSP coordinates
         // NCBI: hsp->query.end = hsp->query.offset + qid;
         // hsp->subject.end = hsp->subject.offset + sid;
-        hit.q_end = q_offset + qid;
-        // For subject, we need to handle strand correctly
-        if hit.s_start <= hit.s_end {
-            hit.s_end = s_offset + sid;
-        } else {
-            // Minus strand: s_start > s_end, so we update s_start (the higher coordinate)
-            hit.s_start = s_offset + sid;
-        }
+        q_end_0 = q_offset_0.saturating_add(qid);
+        s_end_0 = s_offset_0.saturating_add(sid);
     }
+
+    let (q_start, q_end, s_start, s_end) = adjust_blastn_offsets(
+        q_offset_0,
+        q_end_0,
+        s_offset_0,
+        s_end_0,
+        hit.query_length,
+        hit.query_frame,
+    );
+    hit.q_start = q_start;
+    hit.q_end = q_end;
+    hit.s_start = s_start;
+    hit.s_end = s_end;
 
     // Update gap_info
     hit.gap_info = if new_gap_info.is_empty() {
@@ -289,9 +340,9 @@ pub fn cut_off_gap_edit_script(hit: &mut Hit, q_cut: usize, s_cut: usize, cut_be
 /// ```
 ///
 /// For blastn:
-/// - context = query_id + query strand (we use query_id as first group key)
-/// - subject.frame = subject strand (+1 or -1), encoded by s_start > s_end
-/// IMPORTANT: Use ACTUAL s_start/s_end, NOT canonical (min/max).
+/// - context = query index + strand (q_idx * 2 + {0,1})
+/// - subject.frame is always +1 (blastn subject only), so strand is encoded by context.
+/// IMPORTANT: Use internal offsets (query.offset/subject.offset), not output coordinates.
 ///
 /// # Returns
 /// Returns the index of the first trimmed HSP (for re-evaluation in purge=false mode).
@@ -366,14 +417,31 @@ fn purge_hsps_for_subject_ex(mut hits: Vec<Hit>, purge: bool) -> (Vec<Hit>, usiz
     // Track trimmed HSPs that need re-evaluation (when purge=false)
     let mut trimmed_hits: Vec<Hit> = Vec::new();
 
-    // Helper to determine strand: minus if s_start > s_end
-    // NCBI reference: For blastn, subject.frame encodes strand direction
-    let is_minus_strand = |h: &Hit| h.s_start > h.s_end;
-
+    // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_hits.c:1122-1132
+    // ```c
+    // if (hsp->query.frame != hsp->subject.frame) {
+    //    *q_end = query_length - hsp->query.offset;
+    //    *q_start = *q_end - hsp->query.end + hsp->query.offset + 1;
+    // }
+    // ```
+    let q_offsets = |h: &Hit| {
+        if h.query_length > 0 && h.query_frame < 0 {
+            (
+                h.query_length.saturating_sub(h.q_end),
+                h.query_length
+                    .saturating_sub(h.q_start)
+                    .saturating_add(1),
+            )
+        } else {
+            (h.q_start.saturating_sub(1), h.q_end)
+        }
+    };
+    let context = |h: &Hit| -> u32 {
+        h.q_idx * 2 + if h.query_frame < 0 { 1 } else { 0 }
+    };
     // NCBI uses CANONICAL coordinates: subject.offset < subject.end always
     // ASSERT(hsp->subject.offset < hsp->subject.end) at blast_engine.c:1312
-    // We need to use min/max for comparison to match NCBI behavior
-    let s_offset = |h: &Hit| h.s_start.min(h.s_end);  // NCBI subject.offset
+    let s_offset = |h: &Hit| h.s_start.min(h.s_end).saturating_sub(1);  // NCBI subject.offset
     let s_end_canon = |h: &Hit| h.s_start.max(h.s_end);  // NCBI subject.end
 
     // Pass 1: Remove HSPs with common START positions
@@ -381,12 +449,15 @@ fn purge_hsps_for_subject_ex(mut hits: Vec<Hit>, purge: bool) -> (Vec<Hit>, usiz
     // Sort order: context ASC, query.offset ASC, subject.offset ASC,
     //             score DESC, query.end ASC, subject.end ASC
     hits.sort_by(|a, b| {
-        a.query_id.cmp(&b.query_id)                       // context ASC
-            .then_with(|| a.q_start.cmp(&b.q_start))      // query.offset ASC
-            .then_with(|| s_offset(a).cmp(&s_offset(b)))  // subject.offset ASC
-            .then_with(|| b.raw_score.cmp(&a.raw_score))  // score DESC
-            .then_with(|| a.q_end.cmp(&b.q_end))          // query.end ASC (FIXED: was DESC)
-            .then_with(|| s_end_canon(a).cmp(&s_end_canon(b))) // subject.end ASC (FIXED: was DESC)
+        let (a_q_offset, a_q_end) = q_offsets(a);
+        let (b_q_offset, b_q_end) = q_offsets(b);
+        context(a)
+            .cmp(&context(b)) // context ASC
+            .then_with(|| a_q_offset.cmp(&b_q_offset)) // query.offset ASC
+            .then_with(|| s_offset(a).cmp(&s_offset(b))) // subject.offset ASC
+            .then_with(|| b.raw_score.cmp(&a.raw_score)) // score DESC
+            .then_with(|| a_q_end.cmp(&b_q_end)) // query.end ASC
+            .then_with(|| s_end_canon(a).cmp(&s_end_canon(b))) // subject.end ASC
     });
 
     // NCBI reference: blast_hits.c:2480-2500
@@ -403,24 +474,25 @@ fn purge_hsps_for_subject_ex(mut hits: Vec<Hit>, purge: bool) -> (Vec<Hit>, usiz
             continue;
         }
 
-        let same_query = hits[i].query_id == hits[j].query_id;
-        let same_strand = is_minus_strand(&hits[i]) == is_minus_strand(&hits[j]);
-        let same_q_start = hits[i].q_start == hits[j].q_start;
+        let (i_q_offset, i_q_end) = q_offsets(&hits[i]);
+        let (j_q_offset, j_q_end) = q_offsets(&hits[j]);
+        let same_context = context(&hits[i]) == context(&hits[j]);
+        let same_q_start = i_q_offset == j_q_offset;
         let same_s_offset = s_offset(&hits[i]) == s_offset(&hits[j]);
 
-        if same_query && same_strand && same_q_start && same_s_offset {
+        if same_context && same_q_start && same_s_offset {
             // Found duplicate - either trim or delete
             // NCBI: hsp = hsp_array[i+j] is the lower-scoring one to remove/trim
             let mut removed_hit = hits.remove(j);
 
-            if !purge && removed_hit.q_end > hits[i].q_end {
+            if !purge && j_q_end > i_q_end {
                 // NCBI: s_CutOffGapEditScript(hsp, hsp_array[i]->query.end, hsp_array[i]->subject.end, TRUE)
                 // Trim the beginning, keep the end portion
                 // NCBI reference: blast_hits.c:2480-2498
                 // CRITICAL: NCBI's s_CutOffGapEditScript is a VOID function - it always moves
                 // the HSP to the end for re-evaluation, even if trimming doesn't change anything.
                 // LOSAT must match this behavior: always move to end when condition is met.
-                let q_cut = hits[i].q_end;
+                let q_cut = i_q_end;
                 let s_cut = s_end_canon(&hits[i]);
                 let _ = cut_off_gap_edit_script(&mut removed_hit, q_cut, s_cut, true);
                 // Always move to end for re-evaluation (matches NCBI void function behavior)
@@ -439,11 +511,14 @@ fn purge_hsps_for_subject_ex(mut hits: Vec<Hit>, purge: bool) -> (Vec<Hit>, usiz
     // Pass 2: Remove HSPs with common END positions
     // NCBI reference: blast_hits.c:2504-2526
     hits.sort_by(|a, b| {
-        a.query_id.cmp(&b.query_id)
-            .then_with(|| a.q_end.cmp(&b.q_end))
+        let (a_q_offset, a_q_end) = q_offsets(a);
+        let (b_q_offset, b_q_end) = q_offsets(b);
+        context(a)
+            .cmp(&context(b))
+            .then_with(|| a_q_end.cmp(&b_q_end))
             .then_with(|| s_end_canon(a).cmp(&s_end_canon(b)))
             .then_with(|| b.raw_score.cmp(&a.raw_score)) // score DESC
-            .then_with(|| b.q_start.cmp(&a.q_start)) // query.offset DESC
+            .then_with(|| b_q_offset.cmp(&a_q_offset)) // query.offset DESC
             .then_with(|| s_offset(b).cmp(&s_offset(a))) // subject.offset DESC
     });
 
@@ -461,21 +536,22 @@ fn purge_hsps_for_subject_ex(mut hits: Vec<Hit>, purge: bool) -> (Vec<Hit>, usiz
             continue;
         }
 
-        let same_query = hits[i].query_id == hits[j].query_id;
-        let same_strand = is_minus_strand(&hits[i]) == is_minus_strand(&hits[j]);
-        let same_q_end = hits[i].q_end == hits[j].q_end;
+        let (i_q_offset, i_q_end) = q_offsets(&hits[i]);
+        let (j_q_offset, j_q_end) = q_offsets(&hits[j]);
+        let same_context = context(&hits[i]) == context(&hits[j]);
+        let same_q_end = i_q_end == j_q_end;
         let same_s_end = s_end_canon(&hits[i]) == s_end_canon(&hits[j]);
 
-        if same_query && same_strand && same_q_end && same_s_end {
+        if same_context && same_q_end && same_s_end {
             // Found duplicate - either trim or delete
             let mut removed_hit = hits.remove(j);
 
-            if !purge && removed_hit.q_start < hits[i].q_start {
+            if !purge && j_q_offset < i_q_offset {
                 // NCBI: s_CutOffGapEditScript(hsp, hsp_array[i]->query.offset, hsp_array[i]->subject.offset, FALSE)
                 // Trim the end, keep the start portion
                 // NCBI reference: blast_hits.c:2516-2524
                 // CRITICAL: NCBI's s_CutOffGapEditScript is a VOID function - always move to end
-                let q_cut = hits[i].q_start;
+                let q_cut = i_q_offset;
                 let s_cut = s_offset(&hits[i]);
                 let _ = cut_off_gap_edit_script(&mut removed_hit, q_cut, s_cut, false);
                 // Always move to end for re-evaluation (matches NCBI void function behavior)
@@ -739,18 +815,17 @@ pub fn reevaluate_hsp_with_ambiguities_gapped_ex(
         _ => return true, // No gap_info = delete HSP
     };
 
-    let is_minus = hit.s_start > hit.s_end;
+    let query_is_minus = hit.query_frame < 0;
 
     // NCBI reference: blast_hits.c:528-535
     // query = q + hsp->query.offset;
     // subject = s + hsp->subject.offset;
-    let q_offset = hit.q_start.saturating_sub(1);
-    let s_offset = if is_minus {
-        // NCBI reference: blast_util.c:806-833 (reverse complement coordinates)
-        s_seq.len().saturating_sub(hit.s_start)
+    let q_offset = if hit.query_length > 0 && query_is_minus {
+        hit.query_length.saturating_sub(hit.q_end)
     } else {
-        hit.s_start.saturating_sub(1)
+        hit.q_start.saturating_sub(1)
     };
+    let s_offset = hit.s_start.min(hit.s_end).saturating_sub(1);
 
     // NCBI reference: blast_hits.c:508-526 (factor and gap penalties)
     let mut factor = 1;
@@ -911,17 +986,18 @@ pub fn reevaluate_hsp_with_ambiguities_gapped_ex(
 
     // NCBI reference: blast_hits.c:414-470 s_UpdateReevaluatedHSP
     hit.raw_score = score;
-    hit.q_start = best_q_start + 1;
-    hit.q_end = best_q_end;
-
-    if is_minus {
-        let s_len = s_seq.len();
-        hit.s_start = s_len.saturating_sub(best_s_start);
-        hit.s_end = s_len.saturating_sub(best_s_end).saturating_add(1);
-    } else {
-        hit.s_start = best_s_start + 1;
-        hit.s_end = best_s_end;
-    }
+    let (q_start, q_end, s_start, s_end) = adjust_blastn_offsets(
+        best_q_start,
+        best_q_end,
+        best_s_start,
+        best_s_end,
+        hit.query_length,
+        hit.query_frame,
+    );
+    hit.q_start = q_start;
+    hit.q_end = q_end;
+    hit.s_start = s_start;
+    hit.s_end = s_end;
 
     let mut new_gap_info = if best_end_esp_index != gap_ops.len().saturating_sub(1)
         || best_start_esp_index > 0

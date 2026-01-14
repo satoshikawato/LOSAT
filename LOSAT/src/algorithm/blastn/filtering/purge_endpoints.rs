@@ -714,6 +714,119 @@ fn stats_from_edit_ops(
     (matches, mismatches, gap_opens, gap_letters, align_length)
 }
 
+/// Test if an HSP should be deleted based on percent identity and minimum hit length.
+///
+/// NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_hits.c:993-1001 (s_HSPTest)
+/// ```c
+/// return ((hsp->num_ident * 100.0 <
+///         align_length * hit_options->percent_identity) ||
+///         align_length < hit_options->min_hit_length) ;
+/// ```
+pub fn hsp_test(
+    num_ident: usize,
+    align_length: usize,
+    percent_identity: f64,
+    min_hit_length: usize,
+) -> bool {
+    let identity_check = if percent_identity > 0.0 {
+        (num_ident as f64 * 100.0) < (align_length as f64 * percent_identity)
+    } else {
+        false
+    };
+
+    let length_check = if min_hit_length > 0 {
+        align_length < min_hit_length
+    } else {
+        false
+    };
+
+    identity_check || length_check
+}
+
+/// Update identity/length stats and apply Blast_HSPTestIdentityAndLength filtering.
+///
+/// NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_traceback.c:656-663
+/// ```c
+/// delete_hsp = Blast_HSPReevaluateWithAmbiguitiesGapped(...);
+/// if (!delete_hsp)
+///     delete_hsp = Blast_HSPTestIdentityAndLength(program_number, hsp,
+///                                                 query_nomask, subject,
+///                                                 score_options, hit_options);
+/// ```
+/// NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_hits.c:745-818
+/// ```c
+/// for (index=0; index<esp->size; index++) {
+///     align_length += esp->num[index];
+///     if (esp->op_type[index] == eGapAlignSub) {
+///         if (*q == *s) num_ident++;
+///         ...
+///     }
+/// }
+/// ```
+pub fn blast_hsp_test_identity_and_length(
+    hit: &mut Hit,
+    q_seq: &[u8],
+    s_seq: &[u8],
+    percent_identity: f64,
+    min_hit_length: usize,
+) -> bool {
+    // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_hits.c:758-765
+    // ```c
+    // q_off = hsp->query.offset;
+    // s_off = hsp->subject.offset;
+    // q = (Uint1*) &query[q_off];
+    // s = (Uint1*) &subject[s_off];
+    // ```
+    let query_is_minus = hit.query_frame < 0;
+    let q_offset = if hit.query_length > 0 && query_is_minus {
+        hit.query_length.saturating_sub(hit.q_end)
+    } else {
+        hit.q_start.saturating_sub(1)
+    };
+    let s_offset = hit.s_start.min(hit.s_end).saturating_sub(1);
+
+    let (matches, mismatches, gap_opens, _gap_letters, align_length) =
+        if let Some(ref ops) = hit.gap_info {
+            stats_from_edit_ops(q_seq, s_seq, q_offset, s_offset, ops)
+        } else {
+            // Ungapped fallback (N.B. not expected for BLASTN reevaluation path).
+            let align_length = if query_is_minus {
+                hit.q_start
+                    .saturating_sub(hit.q_end)
+                    .saturating_add(1)
+            } else {
+                hit.q_end
+                    .saturating_sub(hit.q_start)
+                    .saturating_add(1)
+            };
+            let mut matches = 0usize;
+            let mut mismatches = 0usize;
+            for i in 0..align_length {
+                let qi = q_offset.saturating_add(i);
+                let si = s_offset.saturating_add(i);
+                if qi < q_seq.len() && si < s_seq.len() {
+                    if q_seq[qi] == s_seq[si] {
+                        matches += 1;
+                    } else {
+                        mismatches += 1;
+                    }
+                }
+            }
+            (matches, mismatches, 0usize, 0usize, align_length)
+        };
+
+    hit.length = align_length;
+    hit.mismatch = mismatches;
+    hit.gapopen = gap_opens;
+    hit.identity = if align_length > 0 {
+        (matches as f64 / align_length as f64) * 100.0
+    } else {
+        0.0
+    };
+
+    hsp_test(matches, align_length, percent_identity, min_hit_length)
+}
+
 /// Parameters needed for E-value and bit score recalculation after re-evaluation.
 /// NCBI reference: blast_traceback.c:234-250 s_HSPListPostTracebackUpdate
 pub struct ReevalParams {
@@ -789,9 +902,21 @@ pub fn reevaluate_hsp_with_ambiguities_gapped(
     gap_extend: i32,
     cutoff_score: i32,
 ) -> bool {
-    reevaluate_hsp_with_ambiguities_gapped_ex(
+    let delete = reevaluate_hsp_with_ambiguities_gapped_ex(
         hit, q_seq, s_seq, reward, penalty, gap_open, gap_extend, cutoff_score, None
-    )
+    );
+    if delete {
+        return true;
+    }
+    // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_traceback.c:656-663
+    // ```c
+    // delete_hsp = Blast_HSPReevaluateWithAmbiguitiesGapped(...);
+    // if (!delete_hsp)
+    //     delete_hsp = Blast_HSPTestIdentityAndLength(program_number, hsp,
+    //                                                 query_nomask, subject,
+    //                                                 score_options, hit_options);
+    // ```
+    blast_hsp_test_identity_and_length(hit, q_seq, s_seq, 0.0, 0)
 }
 
 /// Extended version with optional Karlin parameters for E-value recalculation.
@@ -979,8 +1104,15 @@ pub fn reevaluate_hsp_with_ambiguities_gapped_ex(
         }
     }
 
-    // NCBI reference: blast_hits.c:641-646
-    if score < cutoff_score || best_end_esp_num < 0 {
+    // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_hits.c:640-646
+    // ```c
+    // return s_UpdateReevaluatedHSP(hsp, TRUE, cutoff_score,
+    //                               score, q, s, best_q_start,
+    //                               best_q_end, best_s_start, best_s_end,
+    //                               best_start_esp_index, best_end_esp_index,
+    //                               best_end_esp_num);
+    // ```
+    if score < cutoff_score {
         return true;
     }
 
@@ -1021,19 +1153,6 @@ pub fn reevaluate_hsp_with_ambiguities_gapped_ex(
     } else {
         Some(new_gap_info)
     };
-
-    if let Some(ref ops) = hit.gap_info {
-        let (matches, mismatches, gap_opens, _gap_letters, align_length) =
-            stats_from_edit_ops(q_seq, s_seq, best_q_start, best_s_start, ops);
-        hit.length = align_length;
-        hit.mismatch = mismatches;
-        hit.gapopen = gap_opens;
-        hit.identity = if align_length > 0 {
-            (matches as f64 / align_length as f64) * 100.0
-        } else {
-            0.0
-        };
-    }
 
     // Recalculate bit_score and e_value if Karlin parameters are provided
     // NCBI reference: blast_traceback.c:234-250 Blast_HSPListGetEvalues, Blast_HSPListGetBitScores

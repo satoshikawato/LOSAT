@@ -49,6 +49,8 @@ use super::super::ncbi_cutoffs::{compute_blastn_cutoff_score, GAP_TRIGGER_BIT_SC
 use super::super::blast_extend::DiagStruct;
 use super::super::interval_tree::{BlastIntervalTree, TreeHsp, IndexMethod};
 use super::super::filtering::{
+    blast_hsp_test_identity_and_length,
+    hsp_test,
     purge_hsps_with_common_endpoints,
     purge_hsps_with_common_endpoints_ex,
     reevaluate_hsp_with_ambiguities_gapped_ex,
@@ -64,6 +66,58 @@ use super::calculate_evalue;
 // #define NCBIMATH_LN2 0.69314718055994530941723212145818
 // ```
 const NCBIMATH_LN2: f64 = 0.69314718055994530941723212145818;
+
+// NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_gapalign.c:4155-4160
+// ```c
+// #define MAX_SUBJECT_OFFSET 90000
+// #define MAX_TOTAL_GAPS 3000
+// ```
+const MAX_SUBJECT_OFFSET: i32 = 90000;
+const MAX_TOTAL_GAPS: i32 = 3000;
+
+// NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_gapalign.c:4163-4191
+// ```c
+// if (subject_length < MAX_SUBJECT_OFFSET) {
+//    *start_shift = 0;
+//    return;
+// }
+// ...
+// if (s_offset <= max_extension_left) {
+//    *start_shift = 0;
+// } else {
+//    *start_shift = s_offset - max_extension_left;
+//    *subject_offset_ptr = max_extension_left;
+// }
+// *subject_length_ptr =
+//    MIN(subject_length, s_offset + max_extension_right) - *start_shift;
+// ```
+#[inline]
+fn adjust_subject_range(
+    subject_offset: &mut i32,
+    subject_length: &mut i32,
+    query_offset: i32,
+    query_length: i32,
+) -> i32 {
+    let mut start_shift: i32 = 0;
+    if *subject_length < MAX_SUBJECT_OFFSET {
+        return start_shift;
+    }
+
+    let s_offset = *subject_offset;
+    let max_extension_left = query_offset + MAX_TOTAL_GAPS;
+    let max_extension_right = query_length - query_offset + MAX_TOTAL_GAPS;
+
+    if s_offset <= max_extension_left {
+        start_shift = 0;
+    } else {
+        start_shift = s_offset - max_extension_left;
+        *subject_offset = max_extension_left;
+    }
+
+    let adjusted_end = std::cmp::min(*subject_length, s_offset + max_extension_right);
+    *subject_length = adjusted_end - start_shift;
+    start_shift
+}
 
 // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_hits.c:1122-1132
 // ```c
@@ -870,6 +924,14 @@ pub fn run(args: BlastnArgs) -> Result<()> {
     let params_gapped_for_closure = params_gapped.clone();  // Gapped params for cutoff_score_max
     let evalue_threshold = args.evalue;
     let subject_besthit = args.subject_besthit;
+    // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_hits.c:993-1001 (s_HSPTest)
+    // ```c
+    // return ((hsp->num_ident * 100.0 <
+    //         align_length * hit_options->percent_identity) ||
+    //         align_length < hit_options->min_hit_length) ;
+    // ```
+    let percent_identity = args.percent_identity;
+    let min_hit_length = args.min_hit_length;
 
     // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_stat.c:1052-1127 (BlastScoreBlkNuclMatrixCreate)
     let score_matrix = build_blastna_matrix(reward, penalty);
@@ -1007,7 +1069,22 @@ pub fn run(args: BlastnArgs) -> Result<()> {
             // and GAPPED params (kbp_gap) for cutoff_score_max calculation
             let subject_len = s_len as i64;
             let cutoff_scores: Vec<i32> = queries.iter().map(|q_record| {
-                let query_len = q_record.seq().len() as i64 * 2; // Both strands for blastn
+                // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_setup.c:821-843
+                // ```c
+                // BLAST_ComputeLengthAdjustment(..., query_length, db_length, ...);
+                // effective_search_space = effective_db_length *
+                //                         (query_length - length_adjustment);
+                // ```
+                // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_parameters.c:348-369
+                // ```c
+                // if (!gapped_calculation || sbp->matrix_only_scoring) {
+                //     Int4 query_length = query_info->contexts[context].query_length;
+                //     if (program_number == eBlastTypeBlastn) query_length *= 2;
+                // } else {
+                //     new_cutoff = gap_trigger;
+                // }
+                // ```
+                let query_len = q_record.seq().len() as i64;
                 compute_blastn_cutoff_score(
                     query_len,
                     subject_len,
@@ -2288,8 +2365,7 @@ pub fn run(args: BlastnArgs) -> Result<()> {
                 }
 
                 // Select gapped-start seed within the ungapped HSP.
-                // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_gapalign.c:3248-3389
-                // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_gapalign.c:4012-4031
+                // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_gapalign.c:4012-4046
                 let cutoff_score = cutoff_scores[uh.query_idx as usize];
                 let (
                     prelim_qs,
@@ -2301,29 +2377,20 @@ pub fn run(args: BlastnArgs) -> Result<()> {
                     final_seed_ss,
                 ) = if use_dp {
                     // DP seed selection (blastn)
-                    let (seed_qs, seed_ss) = match blast_get_offsets_for_gapped_alignment(
-                        q_seq_blastna,
-                        s_seq_blastna.as_slice(),
-                        uh.qs,
-                        uh.qe,
-                        uh.ss,
-                        uh.se,
-                        &score_matrix,
-                    ) {
-                        Some((q_start, s_start)) => blast_get_start_for_gapped_alignment_nucl(
-                            q_seq_blastna,
-                            s_seq_blastna.as_slice(),
-                            uh.qs,
-                            uh.qe,
-                            uh.ss,
-                            uh.se,
-                            q_start,
-                            s_start,
-                        ),
-                        None => {
-                            continue;
-                        }
-                    };
+                    // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_gapalign.c:4033-4045
+                    // ```c
+                    // if (s_end >= (Int4)init_hsp->offsets.qs_offsets.s_off + 8) {
+                    //    init_hsp->offsets.qs_offsets.s_off += 3;
+                    //    init_hsp->offsets.qs_offsets.q_off += 3;
+                    // }
+                    // status = s_BlastDynProgNtGappedAlignment(...);
+                    // ```
+                    let mut seed_qs = uh.qs;
+                    let mut seed_ss = uh.ss;
+                    if uh.se >= uh.ss.saturating_add(8) {
+                        seed_qs = seed_qs.saturating_add(3);
+                        seed_ss = seed_ss.saturating_add(3);
+                    }
 
                     // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_gapalign.c:2959-2963 (x_dropoff limited by ungapped score)
                     let x_drop_score_only = x_drop_gapped.min(uh.score);
@@ -2398,21 +2465,99 @@ pub fn run(args: BlastnArgs) -> Result<()> {
                     IndexMethod::QueryAndSubject,
                 );
 
-                // Final gapped extension with traceback
-                // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_traceback.c:503-512
-                // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_traceback.c:1422-1431
-                // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_gapalign.c:2959-2963
+                // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_traceback.c:436-458
                 // ```c
-                // if(init_hsp->ungapped_data->score < x_dropoff) {
-                //     x_dropoff = init_hsp->ungapped_data->score;
+                // if (!kIsOutOfFrame && hsp->query.gapped_start == 0 &&
+                //                       hsp->subject.gapped_start == 0) {
+                //    Boolean retval =
+                //       BlastGetOffsetsForGappedAlignment(query, subject, sbp,
+                //           hsp, &q_start, &s_start);
+                //    if (!retval) { continue; }
+                //    hsp->query.gapped_start = q_start;
+                //    hsp->subject.gapped_start = s_start;
+                // } else {
+                //    BlastGetStartForGappedAlignmentNucl(query, subject, hsp);
+                //    q_start = hsp->query.gapped_start;
+                //    s_start = hsp->subject.gapped_start;
                 // }
                 // ```
-                let x_drop_trace = x_drop_final.min(uh.score);
+                let mut trace_q_start = final_seed_qs;
+                let mut trace_s_start = final_seed_ss;
+                if trace_q_start == 0 && trace_s_start == 0 {
+                    let (q_start, s_start) = match blast_get_offsets_for_gapped_alignment(
+                        q_seq_blastna,
+                        s_seq_trace,
+                        uh.qs,
+                        uh.qe,
+                        uh.ss,
+                        uh.se,
+                        &score_matrix,
+                    ) {
+                        Some(value) => value,
+                        None => {
+                            continue;
+                        }
+                    };
+                    trace_q_start = q_start;
+                    trace_s_start = s_start;
+                } else {
+                    let (q_start, s_start) = blast_get_start_for_gapped_alignment_nucl(
+                        q_seq_blastna,
+                        s_seq_trace,
+                        uh.qs,
+                        uh.qe,
+                        uh.ss,
+                        uh.se,
+                        trace_q_start,
+                        trace_s_start,
+                    );
+                    trace_q_start = q_start;
+                    trace_s_start = s_start;
+                }
+
+                // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_traceback.c:463-473
+                // ```c
+                // adjusted_s_length = subject_length;
+                // adjusted_subject = subject;
+                // AdjustSubjectRange(&s_start, &adjusted_s_length, q_start,
+                //                    query_length, &start_shift);
+                // adjusted_subject = subject + start_shift;
+                // hsp->subject.gapped_start = s_start;
+                // ```
+                let mut start_shift: usize = 0;
+                let mut adjusted_subject = s_seq_trace;
+                let mut adjusted_s_len = s_seq_trace.len();
+                let mut trace_s_start_adj = trace_s_start;
+                let mut s_start_i32 = trace_s_start as i32;
+                let mut s_len_i32 = adjusted_s_len as i32;
+                let start_shift_i32 = adjust_subject_range(
+                    &mut s_start_i32,
+                    &mut s_len_i32,
+                    trace_q_start as i32,
+                    q_seq_blastna.len() as i32,
+                );
+                start_shift = start_shift_i32 as usize;
+                adjusted_s_len = s_len_i32 as usize;
+                trace_s_start_adj = s_start_i32 as usize;
+                adjusted_subject = &s_seq_trace[start_shift..start_shift + adjusted_s_len];
+
+                // Final gapped extension with traceback
+                // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_traceback.c:1422-1431
+                // ```c
+                // array->tld[i]->gap_align->gap_x_dropoff =
+                //     array->tld[i]->ext_params->gap_x_dropoff_final;
+                // ```
+                // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_traceback.c:503-512
+                // ```c
+                // BLAST_GreedyGappedAlignment(..., gap_align, ...);
+                // BLAST_GappedAlignmentWithTraceback(..., gap_align, ...);
+                // ```
+                let x_drop_trace = x_drop_final;
                 let (
                     final_qs,
                     final_qe,
-                    final_ss,
-                    final_se,
+                    mut final_ss,
+                    mut final_se,
                     score,
                     matches,
                     mismatches,
@@ -2422,9 +2567,9 @@ pub fn run(args: BlastnArgs) -> Result<()> {
                 ) = if use_dp {
                     extend_gapped_heuristic_with_traceback_with_scratch(
                         q_seq_blastna,
-                        s_seq_trace,
-                        final_seed_qs,
-                        final_seed_ss,
+                        adjusted_subject,
+                        trace_q_start,
+                        trace_s_start_adj,
                         1,
                         reward,
                         penalty,
@@ -2448,14 +2593,14 @@ pub fn run(args: BlastnArgs) -> Result<()> {
                     // ```
                     match greedy_gapped_alignment_with_traceback(
                         q_seq_blastna,
-                        s_seq_trace,
-                        final_seed_qs,
-                        final_seed_ss,
+                        adjusted_subject,
+                        trace_q_start,
+                        trace_s_start_adj,
                         reward,
                         penalty,
                         gap_open,
                         gap_extend,
-                        x_drop_gapped,
+                        x_drop_trace,
                     ) {
                         Some(value) => value,
                         None => {
@@ -2464,8 +2609,34 @@ pub fn run(args: BlastnArgs) -> Result<()> {
                     }
                 };
 
+                // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_traceback.c:598-600
+                // ```c
+                // Blast_HSPAdjustSubjectOffset(hsp, start_shift);
+                // ```
+                if start_shift != 0 {
+                    final_ss = final_ss.saturating_add(start_shift);
+                    final_se = final_se.saturating_add(start_shift);
+                }
+
                 // Calculate statistics
                 let aln_len = matches + mismatches + gap_letters;
+
+                // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_traceback.c:585-596
+                // ```c
+                // if (!delete_hsp && !kGreedyTraceback) {
+                //     Int4 align_length = 0;
+                //     Blast_HSPGetNumIdentitiesAndPositives(query_nomask,
+                //                                          adjusted_subject,
+                //                                          hsp,
+                //                                          score_options,
+                //                                          &align_length,
+                //                                          sbp);
+                //     delete_hsp = Blast_HSPTest(hsp, hit_options, align_length);
+                // }
+                // ```
+                if use_dp && hsp_test(matches, aln_len, percent_identity, min_hit_length) {
+                    continue;
+                }
 
                 // Calculate e-value
                 let (bit_score, eval) = calculate_evalue(
@@ -2634,7 +2805,26 @@ pub fn run(args: BlastnArgs) -> Result<()> {
                     cutoff,
                     Some(&reeval_params),
                 );
+                // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_traceback.c:656-663
+                // ```c
+                // delete_hsp = Blast_HSPReevaluateWithAmbiguitiesGapped(...);
+                // if (!delete_hsp)
+                //     delete_hsp = Blast_HSPTestIdentityAndLength(program_number, hsp,
+                //                                                 query_nomask, subject,
+                //                                                 score_options, hit_options);
+                // ```
                 if delete {
+                    hit.raw_score = i32::MIN; // Mark for removal
+                    continue;
+                }
+
+                if blast_hsp_test_identity_and_length(
+                    hit,
+                    q_seq_blastna,
+                    s_seq_eval,
+                    percent_identity,
+                    min_hit_length,
+                ) {
                     hit.raw_score = i32::MIN; // Mark for removal
                 }
             }

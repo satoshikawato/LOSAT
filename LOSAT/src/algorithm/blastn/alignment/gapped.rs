@@ -101,6 +101,12 @@ struct BlastGapDP {
 // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_gapalign.c:857-860 (MININT initialization)
 const GAP_MININT: i32 = i32::MIN / 2;
 
+// NCBI reference: ncbi-blast/c++/include/algo/blast/core/blast_util.h:358-364
+// ```c
+// #define FENCE_SENTRY 201
+// ```
+const FENCE_SENTRY: u8 = 201;
+
 /// Scratch memory mirroring NCBI's BlastGapAlignStruct.
 /// NCBI reference: ncbi-blast/c++/include/algo/blast/core/blast_gapalign.h:69-80
 pub struct GapAlignScratch {
@@ -902,11 +908,11 @@ fn extend_gapped_one_direction_with_scratch(
             let row = (qc as usize) * BLASTNA_SIZE;
             // NCBI reference: blast_gapalign.c:864-866 (matrix_row lookup)
             let match_score = score_matrix[row + (sc as usize)];
-            let next_score = if score_array[b_index].best > GAP_MININT {
-                score_array[b_index].best + match_score
-            } else {
-                GAP_MININT
-            };
+            // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_gapalign.c:866
+            // ```c
+            // next_score = score_array[b_index].best + matrix_row[*b_ptr];
+            // ```
+            let next_score = score_array[b_index].best + match_score;
 
             // NCBI reference: blast_gapalign.c:868-872
             // if (score < score_gap_col) score = score_gap_col;
@@ -1160,11 +1166,11 @@ fn blast_align_packed_nucl_with_scratch(
                 0usize
             };
             let score_gap_col = score_array[b_index].best_gap;
-            let next_score = if score_array[b_index].best > GAP_MININT {
-                score_array[b_index].best + score_matrix[row + q_code]
-            } else {
-                GAP_MININT
-            };
+            // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_gapalign.c:3150
+            // ```c
+            // next_score = score_array[b_index].best + matrix_row[*b_ptr];
+            // ```
+            let next_score = score_array[b_index].best + score_matrix[row + q_code];
 
             if score_val < score_gap_col {
                 score_val = score_gap_col;
@@ -1388,11 +1394,11 @@ fn extend_gapped_one_direction_ex_with_scratch(
             let row = (qc as usize) * BLASTNA_SIZE;
             // NCBI reference: blast_gapalign.c:864-866 (matrix_row lookup)
             let match_score = score_matrix[row + (sc as usize)];
-            let next_score = if score_array[b_index].best > GAP_MININT {
-                score_array[b_index].best + match_score
-            } else {
-                GAP_MININT
-            };
+            // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_gapalign.c:866
+            // ```c
+            // next_score = score_array[b_index].best + matrix_row[*b_ptr];
+            // ```
+            let next_score = score_array[b_index].best + match_score;
 
             // NCBI reference: blast_gapalign.c:868-872
             if score_val < score_gap_col {
@@ -1733,6 +1739,11 @@ fn extend_gapped_one_direction_with_traceback_with_scratch(
     let mut a_offset = 0usize;
     let mut b_offset = 0usize;
     let mut first_b_index = 0usize;
+    // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_gapalign.c:373-379
+    // ```c
+    // ALIGN_EX(..., Boolean * fence_hit)
+    // ```
+    let mut fence_hit = false;
 
     // NCBI reference: blast_gapalign.c:500-676
     // Main DP loop
@@ -1778,15 +1789,26 @@ fn extend_gapped_one_direction_with_traceback_with_scratch(
             // NCBI reference: blast_gapalign.c:563-578 (b_size can reach N+1; no b_index < N guard).
             // NCBI reference: blast_util.c:826 (NULLB sentinel at sequence ends).
             let sc = if b_index < n { s_seq[b_index] } else { 0 };
+            // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_gapalign.c:569-575
+            // ```c
+            // if (matrix_index == FENCE_SENTRY) {
+            //     if (fence_hit) { *fence_hit = 1; }
+            //     break;
+            // }
+            // ```
+            if sc == FENCE_SENTRY {
+                fence_hit = true;
+                break;
+            }
             let score_gap_col = score_array[b_index].best_gap;
             let row = (qc as usize) * BLASTNA_SIZE;
             // NCBI reference: blast_gapalign.c:563-567 (matrix_row lookup)
             let match_score = score_matrix[row + (sc as usize)];
-            let next_score = if score_array[b_index].best > GAP_MININT {
-                score_array[b_index].best + match_score
-            } else {
-                GAP_MININT
-            };
+            // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_gapalign.c:578-579
+            // ```c
+            // next_score = score_array[b_index].best + matrix_row[*b_ptr];
+            // ```
+            let next_score = score_array[b_index].best + match_score;
 
             // NCBI reference: blast_gapalign.c:588-599
             // Determine script based on which path gives best score
@@ -1863,7 +1885,11 @@ fn extend_gapped_one_direction_with_traceback_with_scratch(
         }
 
         // NCBI reference: blast_gapalign.c:638-639
-        if first_b_index >= b_size {
+        // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_gapalign.c:638-639
+        // ```c
+        // if (first_b_index == b_size || (fence_hit && *fence_hit)) break;
+        // ```
+        if first_b_index >= b_size || fence_hit {
             break;
         }
 
@@ -1904,6 +1930,14 @@ fn extend_gapped_one_direction_with_traceback_with_scratch(
 
     // NCBI reference: blast_gapalign.c:678-727
     // Traceback: walk from best position back to origin
+    // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_gapalign.c:686-688
+    // ```c
+    // if (fence_hit && *fence_hit) goto done;
+    // ```
+    if fence_hit {
+        return (0, 0, 0, 0, 0, 0, 0, Vec::new());
+    }
+
     if best_score <= 0 {
         return (0, 0, 0, 0, 0, 0, 0, Vec::new());
     }
@@ -2186,6 +2220,11 @@ fn extend_gapped_one_direction_with_traceback_ex_with_scratch(
     let mut a_offset = 0usize;
     let mut b_offset = 0usize;
     let mut first_b_index = 0usize;
+    // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_gapalign.c:373-379
+    // ```c
+    // ALIGN_EX(..., Boolean * fence_hit)
+    // ```
+    let mut fence_hit = false;
 
     for a_index in 1..=m {
         if a_index >= edit_script_num_rows {
@@ -2216,14 +2255,25 @@ fn extend_gapped_one_direction_with_traceback_ex_with_scratch(
 
         for b_index in first_b_index..b_size {
             let sc = get_s(s_seq, b_index, len2, reverse);
+            // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_gapalign.c:569-575
+            // ```c
+            // if (matrix_index == FENCE_SENTRY) {
+            //     if (fence_hit) { *fence_hit = 1; }
+            //     break;
+            // }
+            // ```
+            if sc == FENCE_SENTRY {
+                fence_hit = true;
+                break;
+            }
             let score_gap_col = score_array[b_index].best_gap;
             let row = (qc as usize) * BLASTNA_SIZE;
             let match_score = score_matrix[row + (sc as usize)];
-            let next_score = if score_array[b_index].best > GAP_MININT {
-                score_array[b_index].best + match_score
-            } else {
-                GAP_MININT
-            };
+            // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_gapalign.c:578-579
+            // ```c
+            // next_score = score_array[b_index].best + matrix_row[*b_ptr];
+            // ```
+            let next_score = score_array[b_index].best + match_score;
 
             let mut script = SCRIPT_SUB;
             let mut script_col = SCRIPT_EXTEND_GAP_B;
@@ -2281,7 +2331,11 @@ fn extend_gapped_one_direction_with_traceback_ex_with_scratch(
             }
         }
 
-        if first_b_index >= b_size {
+        // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_gapalign.c:638-639
+        // ```c
+        // if (first_b_index == b_size || (fence_hit && *fence_hit)) break;
+        // ```
+        if first_b_index >= b_size || fence_hit {
             break;
         }
 
@@ -2309,6 +2363,14 @@ fn extend_gapped_one_direction_with_traceback_ex_with_scratch(
             score_array[b_size].best_gap = GAP_MININT;
             b_size += 1;
         }
+    }
+
+    // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_gapalign.c:686-688
+    // ```c
+    // if (fence_hit && *fence_hit) goto done;
+    // ```
+    if fence_hit {
+        return (0, 0, 0, 0, 0, 0, 0, Vec::new());
     }
 
     if best_score <= 0 {

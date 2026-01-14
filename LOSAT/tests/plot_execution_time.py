@@ -101,17 +101,17 @@ comparisons = [
     # --- BLASTN (Default / Megablast) ---
     {
         "name": "NZ_CP006932_Self", "mode": "Megablast", 
-        "losat_log": "NZ_CP006932.NZ_CP006932.losatn.log", 
+        "losat_log": "NZ_CP006932.NZ_CP006932.losatn.megablast.log", 
         "blast_log": "NZ_CP006932.NZ_CP006932.blastn.log"
     },
     {
         "name": "EDL933_vs_Sakai", "mode": "Megablast", 
-        "losat_log": "EDL933.Sakai.blastn.megablast.log", 
+        "losat_log": "EDL933.Sakai.losatn.megablast.log", 
         "blast_log": "EDL933.Sakai.blastn.megablast.log"
     },
     {
         "name": "Sakai_vs_MG1655", "mode": "Megablast", 
-        "losat_log": "Sakai.MG1655.blastn.megablast.log", 
+        "losat_log": "Sakai.MG1655.losatn.megablast.log", 
         "blast_log": "Sakai.MG1655.blastn.megablast.log"
     },
 

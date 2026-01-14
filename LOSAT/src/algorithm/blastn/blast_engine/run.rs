@@ -10,11 +10,13 @@ use rustc_hash::FxHashMap;
 use std::sync::mpsc::channel;
 
 use crate::common::{score_compare_hsps, write_output_ncbi_order, Hit};
+use crate::stats::length_adjustment::compute_length_adjustment_ncbi;
 use crate::stats::lookup_nucl_params;
 use crate::core::blast_encoding::{
     encode_iupac_to_blastna,
     encode_iupac_to_ncbi2na,
     encode_iupac_to_ncbi2na_packed,
+    COMPRESSION_RATIO,
 };
 
 // Import from parent blastn module (super::super:: because we're in blast_engine/)
@@ -50,6 +52,7 @@ use super::super::filtering::{
     purge_hsps_with_common_endpoints,
     purge_hsps_with_common_endpoints_ex,
     reevaluate_hsp_with_ambiguities_gapped_ex,
+    subject_best_hit,
     ReevalParams,
 };
 
@@ -96,6 +99,167 @@ fn adjust_blastn_offsets(
         let s_start = subject_offset + 1;
         let s_end = subject_end;
         (q_start, q_end, s_start, s_end)
+    }
+}
+
+// NCBI reference: ncbi-blast/c++/include/algo/blast/core/blast_util.h:51-55
+// ```c
+// #define NCBI2NA_UNPACK_BASE(x, N) (((x)>>(2*(N))) & NCBI2NA_MASK)
+// ```
+#[inline(always)]
+fn packed_base_at(packed: &[u8], pos: usize) -> u8 {
+    let byte = packed[pos / COMPRESSION_RATIO];
+    let shift = 2 * (3 - (pos % COMPRESSION_RATIO));
+    (byte >> shift) & 0x03
+}
+
+#[inline]
+fn packed_kmer_at(packed: &[u8], start: usize, k: usize) -> u64 {
+    let mut kmer = 0u64;
+    for i in 0..k {
+        let code = packed_base_at(packed, start + i) as u64;
+        kmer = (kmer << 2) | code;
+    }
+    kmer
+}
+
+// NCBI reference: ncbi-blast/c++/src/algo/blast/core/na_ungapped.c:1647-1662
+// ```c
+// scan_range[1] = 0;  /* start pos of scan */
+// scan_range[2] = subject->length - lut_word_length; /* end pos */
+// if (subject->mask_type != eNoSubjMasking) {
+//     scan_range[1] = subject->seq_ranges[0].left + word_length - lut_word_length;
+//     scan_range[2] = subject->seq_ranges[0].right - lut_word_length;
+// }
+// ```
+fn scan_subject_kmers_range<F>(
+    packed: &[u8],
+    subject_len: usize,
+    lut_word_length: usize,
+    scan_step: usize,
+    start: usize,
+    end: usize,
+    on_kmer: &mut F,
+) where
+    F: FnMut(usize, u64),
+{
+    if subject_len < lut_word_length || lut_word_length == 0 {
+        return;
+    }
+    if start > end || start + lut_word_length > subject_len {
+        return;
+    }
+    // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_nascan.c:165-176
+    // ```c
+    // ASSERT(lookup->scan_step > 0);
+    // ```
+    debug_assert!(scan_step > 0);
+
+    let mask = (1u64 << (2 * lut_word_length)) - 1;
+    let mut pos = start;
+    let mut next_emit = start;
+    let mut kmer = packed_kmer_at(packed, start, lut_word_length);
+
+    loop {
+        if pos == next_emit {
+            on_kmer(pos, kmer);
+            next_emit = next_emit.saturating_add(scan_step);
+        }
+
+        if pos == end {
+            break;
+        }
+
+        let next_base = packed_base_at(packed, pos + lut_word_length);
+        kmer = ((kmer << 2) | next_base as u64) & mask;
+        pos += 1;
+    }
+}
+
+// NCBI reference: ncbi-blast/c++/src/algo/blast/core/masksubj.inl:43-58
+// ```c
+// while (range[1] > range[2]) {
+//     range[0]++;
+//     if (range[0] >= (Int4)subject->num_seq_ranges) return FALSE;
+//     range[1] = subject->seq_ranges[range[0]].left + word_length - lut_word_length;
+//     range[2] = subject->seq_ranges[range[0]].right - lut_word_length;
+// }
+// return TRUE;
+// ```
+#[inline(always)]
+fn determine_scanning_offsets(
+    seq_ranges: &[(i32, i32)],
+    word_length: i32,
+    lut_word_length: i32,
+    range: &mut [i32; 3],
+) -> bool {
+    while range[1] > range[2] {
+        range[0] += 1;
+        if range[0] >= seq_ranges.len() as i32 {
+            return false;
+        }
+        let (left, right) = seq_ranges[range[0] as usize];
+        range[1] = left + word_length - lut_word_length;
+        range[2] = right - lut_word_length;
+    }
+    true
+}
+
+// NCBI reference: ncbi-blast/c++/src/algo/blast/core/na_ungapped.c:1647-1674
+// ```c
+// scan_range[0] = 0;  /* subject seq mask index */
+// scan_range[1] = 0;  /* start pos of scan */
+// scan_range[2] = subject->length - lut_word_length;
+// while (s_DetermineScanningOffsets(subject, word_length, lut_word_length, scan_range)) {
+//     hitsfound = scansub(..., &scan_range[1]);
+// }
+// ```
+fn scan_subject_kmers_with_ranges<F>(
+    packed: &[u8],
+    subject_len: usize,
+    word_length: usize,
+    lut_word_length: usize,
+    scan_step: usize,
+    seq_ranges: &[(i32, i32)],
+    subject_masked: bool,
+    mut on_kmer: F,
+) where
+    F: FnMut(usize, u64),
+{
+    if seq_ranges.is_empty() {
+        return;
+    }
+
+    let mut scan_range = [0i32, 0i32, 0i32];
+    if subject_masked {
+        let (left, right) = seq_ranges[0];
+        scan_range[1] = left + word_length as i32 - lut_word_length as i32;
+        scan_range[2] = right - lut_word_length as i32;
+    } else {
+        scan_range[1] = 0;
+        scan_range[2] = subject_len as i32 - lut_word_length as i32;
+    }
+
+    while determine_scanning_offsets(
+        seq_ranges,
+        word_length as i32,
+        lut_word_length as i32,
+        &mut scan_range,
+    ) {
+        let start = scan_range[1];
+        let end = scan_range[2];
+        if start >= 0 && end >= 0 {
+            scan_subject_kmers_range(
+                packed,
+                subject_len,
+                lut_word_length,
+                scan_step,
+                start as usize,
+                end as usize,
+                &mut on_kmer,
+            );
+        }
+        scan_range[1] = scan_range[2] + 1;
     }
 }
 
@@ -182,6 +346,27 @@ pub fn run(args: BlastnArgs) -> Result<()> {
 
     // Configure task-specific parameters (initial configuration)
     let mut config = configure_task(&args);
+
+    // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_options.c:1415-1426
+    // ```c
+    // if (options->db_filter && options->word_size < 16) {
+    //    Blast_MessageWrite(blast_msg, eBlastSevError, kBlastMessageNoContext,
+    //       "The limit_lookup option can only be used with word size >= 16");
+    //    return BLASTERR_OPTION_VALUE_INVALID;
+    // }
+    // ```
+    if args.limit_lookup && config.effective_word_size < 16 {
+        anyhow::bail!("The limit_lookup option can only be used with word size >= 16");
+    }
+    // NCBI reference: ncbi-blast/c++/src/algo/blast/blastinput/blast_args.cpp:1495-1501
+    // ```c
+    // arg_desc.AddDefaultKey(kArgMaxDbWordCount, ...);
+    // arg_desc.SetConstraint(kArgMaxDbWordCount,
+    //                        new CArgAllowValuesBetween(2, 255, true));
+    // ```
+    if args.limit_lookup && args.max_db_word_count < 2 {
+        anyhow::bail!("The max_db_word_count option must be >= 2");
+    }
 
     // Read sequences
     let (queries, query_ids, subjects) = read_sequences(&args)?;
@@ -289,6 +474,7 @@ pub fn run(args: BlastnArgs) -> Result<()> {
         query_context_masks.push(minus_masks);
         query_concat_offset += q_len * 2 + 1;
     }
+    let query_concat_length = query_concat_offset;
 
     // Get Karlin-Altschul parameters
     // CRITICAL: NCBI uses DIFFERENT params for ungapped and gapped calculations!
@@ -319,12 +505,47 @@ pub fn run(args: BlastnArgs) -> Result<()> {
     // Use gapped params for E-value calculations (same as before)
     let params = params_gapped.clone();
 
+    // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_setup.c:821-846
+    // ```c
+    // BLAST_ComputeLengthAdjustment(..., query_length, db_length, db_num_seqs, &length_adjustment);
+    // effective_db_length = db_length - ((Int8)db_num_seqs * length_adjustment);
+    // if (effective_db_length <= 0) effective_db_length = 1;
+    // effective_search_space = effective_db_length * (query_length - length_adjustment);
+    // query_info->contexts[index].eff_searchsp = effective_search_space;
+    // ```
+    let db_len_total_i64 = seq_data.db_len_total as i64;
+    let db_num_seqs_i64 = seq_data.db_num_seqs as i64;
+    let query_eff_searchsp: Vec<i64> = query_contexts
+        .iter()
+        .map(|ctx| {
+            let query_len = ctx.seq.len() as i64;
+            let result = compute_length_adjustment_ncbi(
+                query_len,
+                db_len_total_i64,
+                db_num_seqs_i64,
+                &params_gapped,
+            );
+            let length_adjustment = result.length_adjustment;
+            let effective_db_length =
+                (db_len_total_i64 - db_num_seqs_i64 * length_adjustment).max(1);
+            let effective_query_length = (query_len - length_adjustment).max(1);
+            effective_db_length * effective_query_length
+        })
+        .collect();
+
     // Build lookup tables
+    // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_nalookup.c:1270-1306
+    // ```c
+    // pv_size = (Int4)(mb_lt->hashsize >> PV_ARRAY_BTS);
+    // mb_lt->pv_array_bts = ilog2(mb_lt->hashsize / pv_size);
+    // ```
     let (lookup_tables, scan_step) = build_lookup_tables(
         &config,
         &args,
         &query_context_records,
         &query_context_masks,
+        &seq_data.subjects,
+        query_concat_length,
     );
 
     // NCBI reference: blast_traceback.c:654 (cutoff_score_min computed per subject)
@@ -353,7 +574,10 @@ pub fn run(args: BlastnArgs) -> Result<()> {
     // m_NumDescriptions = hitlist_size;
     // m_NumAlignments = hitlist_size;
     // ```
-    let hitlist_size = args.hitlist_size.min(args.max_target_seqs);
+    let hitlist_size = match args.max_target_seqs {
+        Some(max_target_seqs) if max_target_seqs > 0 => max_target_seqs,
+        _ => args.hitlist_size,
+    };
     let max_hsps_per_subject = args.max_hsps_per_subject;
 
     // Keep a sender for the main thread to send the completion signal
@@ -580,6 +804,7 @@ pub fn run(args: BlastnArgs) -> Result<()> {
     let query_ids_ref = &seq_data.query_ids;
     let query_contexts_ref = &query_contexts;
     let query_base_offsets_ref = &query_base_offsets;
+    let query_eff_searchsp_ref = &query_eff_searchsp;
 
     // Capture config values for use in closure
     let effective_word_size = config.effective_word_size;
@@ -600,6 +825,7 @@ pub fn run(args: BlastnArgs) -> Result<()> {
     let params_ungapped_for_closure = params_ungapped.clone();  // Ungapped params for gap_trigger
     let params_gapped_for_closure = params_gapped.clone();  // Gapped params for cutoff_score_max
     let evalue_threshold = args.evalue;
+    let subject_besthit = args.subject_besthit;
 
     // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_stat.c:1052-1127 (BlastScoreBlkNuclMatrixCreate)
     let score_matrix = build_blastna_matrix(reward, penalty);
@@ -649,6 +875,7 @@ pub fn run(args: BlastnArgs) -> Result<()> {
             let query_contexts = query_contexts_ref;
             let query_ids = query_ids_ref;
             let query_base_offsets = query_base_offsets_ref;
+            let query_eff_searchsp = query_eff_searchsp_ref;
             // NCBI reference: blast_traceback.c:679-692
             // Use hits_with_internal to preserve 0-based coordinates for Phase 2
             let mut hits_with_internal: Vec<(Hit, InternalHitData)> = Vec::new();
@@ -661,6 +888,21 @@ pub fn run(args: BlastnArgs) -> Result<()> {
                 .next()
                 .unwrap_or("unknown")
                 .to_string();
+
+            // NCBI reference: ncbi-blast/c++/src/algo/blast/core/na_ungapped.c:1647-1662
+            // ```c
+            // scan_range[0] = 0;  /* subject seq mask index */
+            // scan_range[1] = 0;  /* start pos of scan */
+            // scan_range[2] = subject->length - lut_word_length;
+            // if (subject->mask_type != eNoSubjMasking) {
+            //     scan_range[1] = subject->seq_ranges[0].left + word_length - lut_word_length;
+            //     scan_range[2] = subject->seq_ranges[0].right - lut_word_length;
+            // }
+            // ```
+            let subject_seq_ranges = vec![(0i32, s_len.saturating_sub(1) as i32)];
+            let subject_masked = subject_seq_ranges.len() != 1
+                || subject_seq_ranges[0].0 != 0
+                || subject_seq_ranges[0].1 != s_len.saturating_sub(1) as i32;
 
             if s_len < effective_word_size {
                 return;
@@ -678,30 +920,12 @@ pub fn run(args: BlastnArgs) -> Result<()> {
 
             let safe_k = effective_word_size.min(31);
 
-            // PERFORMANCE OPTIMIZATION: Rolling k-mer scanner with O(1) sliding window
-            // Instead of packing the entire sequence first (which adds O(n) overhead),
-            // we compute k-mers on-the-fly using a rolling window approach.
-            // This achieves O(1) per-position k-mer extraction without allocation overhead.
-            //
-            // Encoding: A=0, C=1, G=2, T=3 (same as NCBI BLAST's ncbi2na)
-            // The mask ensures we only keep the rightmost 2*k bits.
-            let kmer_mask: u64 = (1u64 << (2 * safe_k)) - 1;
-
-            // Lookup table for ASCII to 2-bit encoding (0xFF = invalid/ambiguous)
-            const ENCODE_LUT: [u8; 256] = {
-                let mut lut = [0xFFu8; 256];
-                lut[b'A' as usize] = 0;
-                lut[b'a' as usize] = 0;
-                lut[b'C' as usize] = 1;
-                lut[b'c' as usize] = 1;
-                lut[b'G' as usize] = 2;
-                lut[b'g' as usize] = 2;
-                lut[b'T' as usize] = 3;
-                lut[b't' as usize] = 3;
-                lut[b'U' as usize] = 3;
-                lut[b'u' as usize] = 3;
-                lut
-            };
+            // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_nascan.c:147-259
+            // ```c
+            // /* Scan the compressed subject sequence */
+            // index = s[0] << 16 | s[1] << 8 | s[2];
+            // index = (index >> shift) & mask;
+            // ```
 
             // NCBI reference: ncbi-blast/c++/include/algo/blast/core/blast_stat.h:866-869 (query blastna, subject ncbi2na)
             // NCBI reference: ncbi-blast/c++/src/algo/blast/api/blast_setup_cxx.cpp:828-850 (subject blastna + ncbi2na)
@@ -777,11 +1001,9 @@ pub fn run(args: BlastnArgs) -> Result<()> {
             //                               0, subject->length+1);
             // ```
             // query->length is the concatenated length for both strands (2*len + 1).
-            let max_query_len = queries.iter().map(|q| q.seq().len()).max().unwrap_or(1);
-            let max_query_len_concat = max_query_len * 2 + 1;
             let mut interval_tree = BlastIntervalTree::new(
                 0,                           // q_min
-                (max_query_len_concat + 1) as i32,  // q_max
+                (query_concat_length + 1) as i32,  // q_max
                 0,                           // s_min
                 (s_len + 1) as i32,          // s_max
             );
@@ -863,11 +1085,6 @@ pub fn run(args: BlastnArgs) -> Result<()> {
                     // For two-stage lookup, use lut_word_length (8) for scanning
                     let lut_word_length = two_stage.lut_word_length();
                     let word_length = two_stage.word_length();
-                    let lut_kmer_mask: u64 = (1u64 << (2 * lut_word_length)) - 1;
-
-                    // Rolling k-mer state for lut_word_length
-                    let mut current_lut_kmer: u64 = 0;
-                    let mut valid_bases: usize = 0;
 
                     // DEBUG: Count loop iterations
                     let mut dbg_left_ext_iters = 0usize;
@@ -875,42 +1092,22 @@ pub fn run(args: BlastnArgs) -> Result<()> {
                     let mut dbg_ungapped_ext_calls = 0usize;
                     let dbg_start_time = std::time::Instant::now();
 
-                    // Scan through the subject sequence with rolling lut_word_length k-mer
-                    for s_pos in 0..s_len {
-                        let base = search_seq[s_pos];
-                        let code = ENCODE_LUT[base as usize];
+                    scan_subject_kmers_with_ranges(
+                        search_seq_packed,
+                        s_len,
+                        word_length,
+                        lut_word_length,
+                        scan_step,
+                        &subject_seq_ranges,
+                        subject_masked,
+                        |kmer_start, current_lut_kmer| {
+                            dbg_total_s_positions += 1;
 
-                        if code == 0xFF {
-                            // Ambiguous base - reset the rolling window
-                            valid_bases = 0;
-                            current_lut_kmer = 0;
-                            continue;
-                        }
+                            // DEBUG: Track processing time
+                            let _dbg_start = std::time::Instant::now();
 
-                        // Shift in the new base
-                        current_lut_kmer = ((current_lut_kmer << 2) | (code as u64)) & lut_kmer_mask;
-                        valid_bases += 1;
-
-                        // Only process if we have a complete lut_word_length k-mer
-                        if valid_bases < lut_word_length {
-                            continue;
-                        }
-
-                        // Calculate the starting position of this k-mer
-                        let kmer_start = s_pos + 1 - lut_word_length;
-
-                        // SCAN STRIDE OPTIMIZATION: Skip positions based on scan_step
-                        if kmer_start % scan_step != 0 {
-                            continue;
-                        }
-
-                        dbg_total_s_positions += 1;
-
-                        // DEBUG: Track processing time
-                        let _dbg_start = std::time::Instant::now();
-
-                        // Lookup using lut_word_length k-mer
-                        let matches_slice = two_stage.get_hits(current_lut_kmer);
+                            // Lookup using lut_word_length k-mer
+                            let matches_slice = two_stage.get_hits(current_lut_kmer);
 
                         // DEBUG: Log max matches
                         if matches_slice.len() > 1000 {
@@ -918,8 +1115,8 @@ pub fn run(args: BlastnArgs) -> Result<()> {
                         }
 
                         // For each match, check if word_length match exists
-                        for &(q_idx, q_pos) in matches_slice {
-                            dbg_seeds_found += 1;
+                            for &(q_idx, q_pos) in matches_slice {
+                                dbg_seeds_found += 1;
 
                             // Check if word_length match exists starting at these positions
                             // Need to verify that subject[kmer_start..kmer_start+word_length]
@@ -1523,8 +1720,9 @@ pub fn run(args: BlastnArgs) -> Result<()> {
                                 hit_len_hash.insert(diag_key, 0);
                             }
                             // Gapped extension deferred to batch processing phase
-                        } // end of for matches_slice in two-stage lookup
-                    } // end of s_pos loop for two-stage lookup
+                            } // end of for matches_slice in two-stage lookup
+                        },
+                    );
 
                     // DEBUG: Log stats for this subject
                     let elapsed = dbg_start_time.elapsed();
@@ -1534,44 +1732,16 @@ pub fn run(args: BlastnArgs) -> Result<()> {
                 }
                 if two_stage_lookup_ref.is_none() {
                     // Original lookup method (for non-two-stage lookup)
-                    // Rolling k-mer state
-                    let mut current_kmer: u64 = 0;
-                    let mut valid_bases: usize = 0; // Count of consecutive valid bases in current window
-
-                    // Scan through the subject sequence with rolling k-mer
-                    for s_pos in 0..s_len {
-                        let base = search_seq[s_pos];
-                        let code = ENCODE_LUT[base as usize];
-
-                    if code == 0xFF {
-                        // Ambiguous base - reset the rolling window
-                        valid_bases = 0;
-                        current_kmer = 0;
-                        continue;
-                    }
-
-                    // Shift in the new base
-                    current_kmer = ((current_kmer << 2) | (code as u64)) & kmer_mask;
-                    valid_bases += 1;
-
-                    // Only process if we have a complete k-mer
-                    if valid_bases < safe_k {
-                        continue;
-                    }
-
-                    // Calculate the starting position of this k-mer
-                    let kmer_start = s_pos + 1 - safe_k;
-
-                    // SCAN STRIDE OPTIMIZATION: Skip positions based on scan_step
-                    // We continue updating the rolling k-mer at every position (for correctness),
-                    // but only perform the expensive lookup/extension work every scan_step positions.
-                    // This reduces k-mer lookups by ~scan_step times with minimal sensitivity loss
-                    // for large word sizes (megablast).
-                    if kmer_start % scan_step != 0 {
-                        continue;
-                    }
-
-                        dbg_total_s_positions += 1;
+                    scan_subject_kmers_with_ranges(
+                        search_seq_packed,
+                        s_len,
+                        safe_k,
+                        safe_k,
+                        scan_step,
+                        &subject_seq_ranges,
+                        subject_masked,
+                        |kmer_start, current_kmer| {
+                            dbg_total_s_positions += 1;
 
                         // Phase 2: Use PV-based direct lookup (O(1) with fast PV filtering) for word_size <= 13
                         // For word_size > 13, use hash-based lookup
@@ -1989,7 +2159,8 @@ pub fn run(args: BlastnArgs) -> Result<()> {
                             hit_len_hash.insert(diag_key, 0);
                         }
                     }
-                    } // end of s_pos loop for original lookup
+                },
+            );
                 } // end of if/else for two-stage vs original lookup
             } // end of strand loop
 
@@ -2370,20 +2541,28 @@ pub fn run(args: BlastnArgs) -> Result<()> {
             // NCBI reference: blast_traceback.c:647-665
             // The remaining part of the hsp may be extended further
 
-            // Create ReevalParams for E-value/bit_score recalculation
-            // NCBI reference: blast_traceback.c:234-250 Blast_HSPListGetEvalues, Blast_HSPListGetBitScores
-            let reeval_params = ReevalParams {
-                lambda: params_for_closure.lambda,
-                k: params_for_closure.k,
-                eff_searchsp: (db_len_total as i64) * (queries[0].seq().len() as i64), // Approximate
-                db_len: db_len_total,
-                db_num_seqs,
-            };
-
             for hit in local_hits.iter_mut().skip(extra_start) {
                 // Get sequences for re-evaluation
                 let cutoff = cutoff_scores.get(hit.q_idx as usize).copied().unwrap_or(0);
                 let context_idx = (hit.q_idx as usize) * 2 + if hit.query_frame < 0 { 1 } else { 0 };
+
+                // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_hits.c:1887-1891
+                // ```c
+                // hsp->evalue =
+                //   BLAST_KarlinStoE_simple(score, kbp[kbp_context],
+                //        query_info->contexts[hsp->context].eff_searchsp);
+                // ```
+                let eff_searchsp = query_eff_searchsp
+                    .get(context_idx)
+                    .copied()
+                    .unwrap_or(0);
+                let reeval_params = ReevalParams {
+                    lambda: params_for_closure.lambda,
+                    k: params_for_closure.k,
+                    eff_searchsp,
+                    db_len: db_len_total,
+                    db_num_seqs,
+                };
 
                 // NCBI reference: blast_traceback.c:653-665 (reevaluate with blastna sequences)
                 let q_seq_blastna = encoded_queries_blastna[context_idx].as_slice();
@@ -2478,6 +2657,29 @@ pub fn run(args: BlastnArgs) -> Result<()> {
                     final_hits.push(hit);
                 }
                 // else: HSP is contained within another, skip (implicit delete)
+            }
+
+            if subject_besthit && !final_hits.is_empty() {
+                // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_traceback.c:858-862
+                // ```c
+                // if ((hit_options->hsp_filt_opt != NULL) &&
+                //     (hit_options->hsp_filt_opt->subject_besthit_opts != NULL)) {
+                //    Blast_HSPListSubjectBestHit(program_number,
+                //        hit_options->hsp_filt_opt->subject_besthit_opts,
+                //        query_info, hsp_list);
+                // }
+                // ```
+                let mut grouped: FxHashMap<u32, Vec<Hit>> = FxHashMap::default();
+                for hit in final_hits.drain(..) {
+                    grouped.entry(hit.q_idx).or_default().push(hit);
+                }
+                let mut filtered = Vec::new();
+                for (q_idx, mut hits) in grouped {
+                    let query_len = queries[q_idx as usize].seq().len();
+                    subject_best_hit(&mut hits, query_len);
+                    filtered.extend(hits);
+                }
+                final_hits = filtered;
             }
 
             // Phase 2 debug output

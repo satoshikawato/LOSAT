@@ -27,7 +27,7 @@ fn test_default_values() {
     assert_eq!(args.word_size, 28);
     assert_eq!(args.num_threads, 0);
     assert_eq!(args.evalue, 10.0);
-    assert_eq!(args.max_target_seqs, 500);
+    assert_eq!(args.max_target_seqs, None);
     assert_eq!(args.reward, 1);
     assert_eq!(args.penalty, -2);
     assert_eq!(args.gap_open, 0);
@@ -67,7 +67,7 @@ fn test_custom_evalue() {
 #[test]
 fn test_custom_max_target_seqs() {
     let args = parse_args(&[ "-q", "query.fasta", "-s", "subject.fasta", "--max-target-seqs", "1000"]);
-    assert_eq!(args.max_target_seqs, 1000);
+    assert_eq!(args.max_target_seqs, Some(1000));
 }
 
 #[test]

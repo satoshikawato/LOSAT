@@ -33,7 +33,12 @@ use super::super::alignment::{
     // NCBI reference: ncbi-blast/c++/include/algo/blast/core/blast_gapalign.h:69-80 (BlastGapAlignStruct)
     GapAlignScratch,
 };
-use super::super::extension::{extend_hit_ungapped, type_of_word};
+use super::super::extension::{
+    build_nucl_score_table,
+    extend_hit_ungapped_approx_ncbi,
+    extend_hit_ungapped_exact_ncbi,
+    type_of_word,
+};
 use crate::utils::dust::MaskedInterval;
 use super::super::constants::TWO_HIT_WINDOW;
 use super::super::coordination::{configure_task, finalize_task_config, read_sequences, prepare_sequence_data, build_lookup_tables};
@@ -50,6 +55,12 @@ use super::super::filtering::{
 
 // Import from this module (blast_engine)
 use super::calculate_evalue;
+
+// NCBI reference: ncbi-blast/c++/include/algo/blast/core/ncbi_math.h:160-161
+// ```c
+// #define NCBIMATH_LN2 0.69314718055994530941723212145818
+// ```
+const NCBIMATH_LN2: f64 = 0.69314718055994530941723212145818;
 
 /// Structure to hold ungapped hit data for batch processing
 /// NCBI reference: blast_gapalign.c - init_hsp_array is sorted by score descending
@@ -321,6 +332,29 @@ pub fn run(args: BlastnArgs) -> Result<()> {
     // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_stat.c:1052-1127 (BlastScoreBlkNuclMatrixCreate)
     let score_matrix = build_blastna_matrix(reward, penalty);
 
+    // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_parameters.c:236-259
+    // ```c
+    // for (i = 0; i < 256; i++) {
+    //    Int4 score = 0;
+    //    if (i & 3) score += penalty; else score += reward;
+    //    if ((i >> 2) & 3) score += penalty; else score += reward;
+    //    if ((i >> 4) & 3) score += penalty; else score += reward;
+    //    if (i >> 6) score += penalty; else score += reward;
+    //    table[i] = score;
+    // }
+    // ```
+    let nucl_score_table = build_nucl_score_table(reward, penalty);
+
+    // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_parameters.c:218-221
+    // ```c
+    // p->cutoffs[context].x_dropoff_init =
+    //     (Int4)(sbp->scale_factor *
+    //            ceil(word_options->x_dropoff * NCBIMATH_LN2 / kbp->Lambda));
+    // ```
+    let x_dropoff_init = ((super::super::constants::X_DROP_UNGAPPED as f64 * NCBIMATH_LN2)
+        / params_ungapped_for_closure.lambda)
+        .ceil() as i32;
+
     // NCBI reference: ncbi-blast/c++/include/algo/blast/core/blast_stat.h:866-869 (query blastna, subject ncbi2na)
     // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_encoding.c:85-93 (IUPACNA_TO_BLASTNA)
     let encoded_queries_blastna: Vec<Vec<u8>> = queries_ref
@@ -406,14 +440,9 @@ pub fn run(args: BlastnArgs) -> Result<()> {
             // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_encoding.c:85-93 (IUPACNA_TO_BLASTNA)
             let s_seq_blastna = encode_iupac_to_blastna(s_seq);
             let s_seq_rc_blastna = encode_iupac_to_blastna(&s_seq_rc);
-            let (s_seq_packed, s_seq_rc_packed) = if use_dp {
-                (
-                    Some(encode_iupac_to_ncbi2na_packed(s_seq)),
-                    Some(encode_iupac_to_ncbi2na_packed(&s_seq_rc)),
-                )
-            } else {
-                (None, None)
-            };
+            // NCBI reference: ncbi-blast/c++/src/algo/blast/core/na_ungapped.c:148-349 (packed ncbi2na used for ungapped extension)
+            let s_seq_packed = encode_iupac_to_ncbi2na_packed(s_seq);
+            let s_seq_rc_packed = encode_iupac_to_ncbi2na_packed(&s_seq_rc);
             let (s_seq_ncbi2na, s_seq_rc_ncbi2na) = if use_dp {
                 (None, None)
             } else {
@@ -443,6 +472,25 @@ pub fn run(args: BlastnArgs) -> Result<()> {
                     1.0,
                 )
             }).collect();
+            // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_parameters.c:380-383
+            // ```c
+            // if (curr_cutoffs->x_dropoff_init == 0)
+            //    curr_cutoffs->x_dropoff = new_cutoff;
+            // else
+            //    curr_cutoffs->x_dropoff = curr_cutoffs->x_dropoff_init;
+            // ```
+            let x_dropoff_scores: Vec<i32> = cutoff_scores
+                .iter()
+                .map(|cutoff| if x_dropoff_init == 0 { *cutoff } else { x_dropoff_init })
+                .collect();
+            // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_parameters.c:408-412
+            // ```c
+            // curr_cutoffs->reduced_nucl_cutoff_score = (Int4)(0.8 * new_cutoff);
+            // ```
+            let reduced_cutoff_scores: Vec<i32> = cutoff_scores
+                .iter()
+                .map(|cutoff| (0.8 * (*cutoff as f64)) as i32)
+                .collect();
 
             // BLASTN debug: Log cutoff scores for this query-subject pair
             if blastn_debug {
@@ -478,6 +526,12 @@ pub fn run(args: BlastnArgs) -> Result<()> {
                     &s_seq_rc
                 } else {
                     s_seq
+                };
+                // NCBI reference: ncbi-blast/c++/src/algo/blast/core/na_ungapped.c:148-349 (packed subject used by ungapped extension)
+                let search_seq_packed: &[u8] = if is_minus_strand {
+                    &s_seq_rc_packed
+                } else {
+                    &s_seq_packed
                 };
 
                 // PERFORMANCE OPTIMIZATION: For single query, use direct array indexing instead of HashMap
@@ -601,7 +655,17 @@ pub fn run(args: BlastnArgs) -> Result<()> {
                             // Need to verify that subject[kmer_start..kmer_start+word_length]
                             // matches query[q_pos..q_pos+word_length]
                             let q_record = &queries[q_idx as usize];
+                            // NCBI reference: ncbi-blast/c++/src/algo/blast/core/na_ungapped.c:268-269
+                            // ```c
+                            // Uint1 *q_start = query->sequence;
+                            // ```
+                            let q_seq_blastna = encoded_queries_blastna[q_idx as usize].as_slice();
                             let q_seq = q_record.seq();
+                            // NCBI reference: ncbi-blast/c++/src/algo/blast/core/na_ungapped.c:268-269
+                            // ```c
+                            // Uint1 *q_start = query->sequence;
+                            // ```
+                            let q_seq_blastna = encoded_queries_blastna[q_idx as usize].as_slice();
                             let q_pos_usize = q_pos as usize;
 
                             // Use pre-computed cutoff score (computed once per query-subject pair)
@@ -847,8 +911,8 @@ pub fn run(args: BlastnArgs) -> Result<()> {
                             //     s_end_pos += extended;
                             // }
                             let two_hits = TWO_HIT_WINDOW > 0;
-                            let q_off = q_ext_start;
-                            let s_off = s_ext_start;
+                            let mut q_off = q_ext_start;
+                            let mut s_off = s_ext_start;
                             let mut s_end = s_ext_start + word_length;
                             let mut s_end_pos = s_end + diag_offset as usize;
                             let mut word_type = 1u8; // Default: single word (when word_length == lut_word_length)
@@ -858,14 +922,15 @@ pub fn run(args: BlastnArgs) -> Result<()> {
 
                             // NCBI: if (two_hits && (hit_saved || s_end_pos > last_hit + window_size)) {
                             if two_hits && (hit_saved || s_end_pos > last_hit + TWO_HIT_WINDOW) {
-                                // NCBI reference: na_ungapped.c:677-680
+                                // NCBI reference: ncbi-blast/c++/src/algo/blast/core/na_ungapped.c:674-680
+                                // ```c
                                 // word_type = s_TypeOfWord(query, subject, &q_off, &s_off,
                                 //                          query_mask, query_info, s_range,
                                 //                          word_length, lut_word_length, lut, TRUE, &extended);
-                                // NCBI reference: ncbi-blast/c++/src/algo/blast/core/na_ungapped.c:674-680
+                                // ```
                                 // s_TypeOfWord uses query_mask to skip masked seeds
                                 let query_mask = &query_masks_ref[q_idx as usize];
-                                let (wt, ext) = type_of_word(
+                                let (wt, ext, q_off_adj, s_off_adj) = type_of_word(
                                     q_seq,
                                     search_seq,
                                     q_off,
@@ -877,6 +942,14 @@ pub fn run(args: BlastnArgs) -> Result<()> {
                                 );
                                 word_type = wt;
                                 extended = ext;
+                                // NCBI reference: ncbi-blast/c++/src/algo/blast/core/na_ungapped.c:674-680
+                                // ```c
+                                // word_type = s_TypeOfWord(query, subject, &q_off, &s_off,
+                                //                          query_mask, query_info, s_range,
+                                //                          word_length, lut_word_length, lut, TRUE, &extended);
+                                // ```
+                                q_off = q_off_adj;
+                                s_off = s_off_adj;
 
                                 // NCBI: if (!word_type) return 0;
                                 if word_type == 0 {
@@ -1031,7 +1104,13 @@ pub fn run(args: BlastnArgs) -> Result<()> {
                                 // In NCBI, check_masks is TRUE by default (only FALSE when lut->stride is true)
                                 // NCBI reference: ncbi-blast/c++/src/algo/blast/core/na_ungapped.c:718-725
                                 let query_mask = &query_masks_ref[q_idx as usize];
-                                let (wt, ext) = type_of_word(
+                                // NCBI reference: ncbi-blast/c++/src/algo/blast/core/na_ungapped.c:718-725
+                                // ```c
+                                // if(!s_TypeOfWord(query, subject, &q_off, &s_off,
+                                //                 query_mask, query_info, s_range,
+                                //                 word_length, lut_word_length, lut, FALSE, &extended)) return 0;
+                                // ```
+                                let (wt, ext, q_off_adj, s_off_adj) = type_of_word(
                                     q_seq,
                                     search_seq,
                                     q_off,
@@ -1045,6 +1124,14 @@ pub fn run(args: BlastnArgs) -> Result<()> {
                                     // Non-word, skip this hit
                                     continue;
                                 }
+                                // NCBI reference: ncbi-blast/c++/src/algo/blast/core/na_ungapped.c:718-725
+                                // ```c
+                                // if(!s_TypeOfWord(query, subject, &q_off, &s_off,
+                                //                 query_mask, query_info, s_range,
+                                //                 word_length, lut_word_length, lut, FALSE, &extended)) return 0;
+                                // ```
+                                q_off = q_off_adj;
+                                s_off = s_off_adj;
                                 // NCBI: s_end += extended;
                                 // NCBI: s_end_pos += extended;
                                 s_end += ext;
@@ -1056,15 +1143,46 @@ pub fn run(args: BlastnArgs) -> Result<()> {
                             // NCBI BLAST: s_BlastnExtendInitialHit calls ungapped extension after word_length verification
                             // Use q_off and s_off (adjusted by type_of_word if called)
                             dbg_ungapped_ext_calls += 1;
-                            let (qs, qe, ss, ungapped_se, ungapped_score) = extend_hit_ungapped(
-                                q_seq,
-                                search_seq,
-                                q_off,
-                                s_off,
-                                reward,
-                                penalty,
-                                None, // Use default X-drop
-                            );
+                            // NCBI reference: ncbi-blast/c++/src/algo/blast/core/na_ungapped.c:740-749
+                            // ```c
+                            // if (word_params->matrix_only_scoring || word_length < 11)
+                            //    s_NuclUngappedExtendExact(..., -(cutoffs->x_dropoff), ...);
+                            // else
+                            //    s_NuclUngappedExtend(..., s_end, s_off, -(cutoffs->x_dropoff),
+                            //                         word_params->nucl_score_table,
+                            //                         cutoffs->reduced_nucl_cutoff_score);
+                            // ```
+                            let x_dropoff = x_dropoff_scores[q_idx as usize];
+                            let reduced_cutoff = reduced_cutoff_scores[q_idx as usize];
+                            let ungapped = if word_length < 11 {
+                                extend_hit_ungapped_exact_ncbi(
+                                    q_seq_blastna,
+                                    search_seq_packed,
+                                    q_off,
+                                    s_off,
+                                    s_len,
+                                    x_dropoff,
+                                    &score_matrix,
+                                )
+                            } else {
+                                extend_hit_ungapped_approx_ncbi(
+                                    q_seq_blastna,
+                                    search_seq_packed,
+                                    q_off,
+                                    s_off,
+                                    s_end,
+                                    s_len,
+                                    x_dropoff,
+                                    &nucl_score_table,
+                                    reduced_cutoff,
+                                    &score_matrix,
+                                )
+                            };
+                            let qs = ungapped.q_start;
+                            let qe = ungapped.q_start + ungapped.length;
+                            let ss = ungapped.s_start;
+                            let ungapped_se = ungapped.s_start + ungapped.length;
+                            let ungapped_score = ungapped.score;
 
                             // NCBI reference: na_ungapped.c:757-758
                             // s_end_pos = ungapped_data->length + ungapped_data->s_start + diag_table->offset;
@@ -1204,6 +1322,11 @@ pub fn run(args: BlastnArgs) -> Result<()> {
                             // Use pre-computed cutoff score (computed once per query-subject pair)
                             let cutoff_score = cutoff_scores[q_idx as usize];
                             let q_record = &queries[q_idx as usize];
+                            // NCBI reference: ncbi-blast/c++/src/algo/blast/core/na_ungapped.c:268-269
+                            // ```c
+                            // Uint1 *q_start = query->sequence;
+                            // ```
+                            let q_seq_blastna = encoded_queries_blastna[q_idx as usize].as_slice();
 
                         let diag = kmer_start as isize - q_pos as isize;
 
@@ -1270,8 +1393,8 @@ pub fn run(args: BlastnArgs) -> Result<()> {
                         //     s_end_pos += extended;
                         // }
                         let two_hits = TWO_HIT_WINDOW > 0;
-                        let q_off = q_pos as usize;
-                        let s_off = kmer_start;
+                        let mut q_off = q_pos as usize;
+                        let mut s_off = kmer_start;
                         let mut s_end = kmer_start + safe_k;
                         let mut s_end_pos = s_end + diag_offset as usize;
                         let mut word_type = 1u8; // Default: single word (when word_length == lut_word_length)
@@ -1288,7 +1411,13 @@ pub fn run(args: BlastnArgs) -> Result<()> {
                             // For non-two-stage lookup, word_length == lut_word_length, so type_of_word returns (1, 0)
                             // NCBI reference: ncbi-blast/c++/src/algo/blast/core/na_ungapped.c:674-680
                             let query_mask = &query_masks_ref[q_idx as usize];
-                            let (wt, ext) = type_of_word(
+                            // NCBI reference: ncbi-blast/c++/src/algo/blast/core/na_ungapped.c:674-680
+                            // ```c
+                            // word_type = s_TypeOfWord(query, subject, &q_off, &s_off,
+                            //                          query_mask, query_info, s_range,
+                            //                          word_length, lut_word_length, lut, TRUE, &extended);
+                            // ```
+                            let (wt, ext, q_off_adj, s_off_adj) = type_of_word(
                                 q_record.seq(),
                                 search_seq,
                                 q_off,
@@ -1300,6 +1429,14 @@ pub fn run(args: BlastnArgs) -> Result<()> {
                             );
                             word_type = wt;
                             extended = ext;
+                            // NCBI reference: ncbi-blast/c++/src/algo/blast/core/na_ungapped.c:674-680
+                            // ```c
+                            // word_type = s_TypeOfWord(query, subject, &q_off, &s_off,
+                            //                          query_mask, query_info, s_range,
+                            //                          word_length, lut_word_length, lut, TRUE, &extended);
+                            // ```
+                            q_off = q_off_adj;
+                            s_off = s_off_adj;
 
                             // NCBI: if (!word_type) return 0;
                             if word_type == 0 {
@@ -1435,7 +1572,13 @@ pub fn run(args: BlastnArgs) -> Result<()> {
                             // In NCBI, check_masks is TRUE by default (only FALSE when lut->stride is true)
                             // NCBI reference: ncbi-blast/c++/src/algo/blast/core/na_ungapped.c:718-725
                             let query_mask = &query_masks_ref[q_idx as usize];
-                            let (wt, ext) = type_of_word(
+                            // NCBI reference: ncbi-blast/c++/src/algo/blast/core/na_ungapped.c:718-725
+                            // ```c
+                            // if(!s_TypeOfWord(query, subject, &q_off, &s_off,
+                            //                 query_mask, query_info, s_range,
+                            //                 word_length, lut_word_length, lut, FALSE, &extended)) return 0;
+                            // ```
+                            let (wt, ext, q_off_adj, s_off_adj) = type_of_word(
                                 q_record.seq(),
                                 search_seq,
                                 q_off,
@@ -1449,6 +1592,14 @@ pub fn run(args: BlastnArgs) -> Result<()> {
                                 // Non-word, skip this hit
                                 continue;
                             }
+                            // NCBI reference: ncbi-blast/c++/src/algo/blast/core/na_ungapped.c:718-725
+                            // ```c
+                            // if(!s_TypeOfWord(query, subject, &q_off, &s_off,
+                            //                 query_mask, query_info, s_range,
+                            //                 word_length, lut_word_length, lut, FALSE, &extended)) return 0;
+                            // ```
+                            q_off = q_off_adj;
+                            s_off = s_off_adj;
                             // NCBI: s_end += extended;
                             // NCBI: s_end_pos += extended;
                             s_end += ext;
@@ -1458,15 +1609,46 @@ pub fn run(args: BlastnArgs) -> Result<()> {
 
                         // Now do ungapped extension from the adjusted position
                         // Use q_off and s_off (adjusted by type_of_word if called)
-                        let (qs, qe, ss, ungapped_se, ungapped_score) = extend_hit_ungapped(
-                            q_record.seq(),
-                            search_seq,
-                            q_off,
-                            s_off,
-                            reward,
-                            penalty,
-                            None, // Use default X-drop
-                        );
+                        // NCBI reference: ncbi-blast/c++/src/algo/blast/core/na_ungapped.c:740-749
+                        // ```c
+                        // if (word_params->matrix_only_scoring || word_length < 11)
+                        //    s_NuclUngappedExtendExact(..., -(cutoffs->x_dropoff), ...);
+                        // else
+                        //    s_NuclUngappedExtend(..., s_end, s_off, -(cutoffs->x_dropoff),
+                        //                         word_params->nucl_score_table,
+                        //                         cutoffs->reduced_nucl_cutoff_score);
+                        // ```
+                        let x_dropoff = x_dropoff_scores[q_idx as usize];
+                        let reduced_cutoff = reduced_cutoff_scores[q_idx as usize];
+                        let ungapped = if safe_k < 11 {
+                            extend_hit_ungapped_exact_ncbi(
+                                q_seq_blastna,
+                                search_seq_packed,
+                                q_off,
+                                s_off,
+                                s_len,
+                                x_dropoff,
+                                &score_matrix,
+                            )
+                        } else {
+                            extend_hit_ungapped_approx_ncbi(
+                                q_seq_blastna,
+                                search_seq_packed,
+                                q_off,
+                                s_off,
+                                s_end,
+                                s_len,
+                                x_dropoff,
+                                &nucl_score_table,
+                                reduced_cutoff,
+                                &score_matrix,
+                            )
+                        };
+                        let qs = ungapped.q_start;
+                        let qe = ungapped.q_start + ungapped.length;
+                        let ss = ungapped.s_start;
+                        let ungapped_se = ungapped.s_start + ungapped.length;
+                        let ungapped_score = ungapped.score;
 
                         // NCBI reference: na_ungapped.c:757-758
                         // s_end_pos = ungapped_data->length + ungapped_data->s_start + diag_table->offset;
@@ -1580,9 +1762,9 @@ pub fn run(args: BlastnArgs) -> Result<()> {
                 // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_traceback.c:503-507 (traceback uses uncompressed subject)
                 let (s_seq_score, s_seq_trace) = if use_dp {
                     let s_seq_score = if uh.is_minus_strand {
-                        s_seq_rc_packed.as_ref().unwrap().as_slice()
+                        s_seq_rc_packed.as_slice()
                     } else {
-                        s_seq_packed.as_ref().unwrap().as_slice()
+                        s_seq_packed.as_slice()
                     };
                     (s_seq_score, s_seq_blastna)
                 } else {

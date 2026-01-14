@@ -82,9 +82,9 @@ comparisons = [
         "losat": "./losat_out/AvCLPV.PsCLPV.tlosatx.n8.out"
     },
     # --- BLASTN / Megablast ---
-    {"name": "NZ_CP006932_Self(Mega)", "mode": "BLASTN (Megablast)", "ncbi": "./blast_out/NZ_CP006932.NZ_CP006932.blastn.out", "losat": "./losat_out/NZ_CP006932.NZ_CP006932.losatn.out"},
-    {"name": "EDL933_vs_Sakai", "mode": "BLASTN (Megablast)", "ncbi": "./blast_out/EDL933.Sakai.blastn.megablast.out", "losat": "./losat_out/EDL933.Sakai.blastn.megablast.out"},
-    {"name": "Sakai_vs_MG1655", "mode": "BLASTN (Megablast)", "ncbi": "./blast_out/Sakai.MG1655.blastn.megablast.out", "losat": "./losat_out/Sakai.MG1655.blastn.megablast.out"},
+    {"name": "NZ_CP006932_Self(Mega)", "mode": "BLASTN (Megablast)", "ncbi": "./blast_out/NZ_CP006932.NZ_CP006932.blastn.out", "losat": "./losat_out/NZ_CP006932.NZ_CP006932.losatn.megablast.out"},
+    {"name": "EDL933_vs_Sakai", "mode": "BLASTN (Megablast)", "ncbi": "./blast_out/EDL933.Sakai.blastn.megablast.out", "losat": "./losat_out/EDL933.Sakai.losatn.megablast.out"},
+    {"name": "Sakai_vs_MG1655", "mode": "BLASTN (Megablast)", "ncbi": "./blast_out/Sakai.MG1655.blastn.megablast.out", "losat": "./losat_out/Sakai.MG1655.losatn.megablast.out"},
 
     # --- BLASTN (Task: blastn) ---
     {"name": "NZ_CP006932_Self(Task)", "mode": "BLASTN (Task:blastn)", "ncbi": "./blast_out/NZ_CP006932.NZ_CP006932.task_blastn.out", "losat": "./losat_out/NZ_CP006932.NZ_CP006932.losatn.blastn.out"},

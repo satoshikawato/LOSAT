@@ -1235,6 +1235,15 @@ pub fn run(args: TblastxArgs) -> Result<()> {
                         s_end,
                         e_value: h.e_value,
                         bit_score: bit,
+                        // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_hits.c:1122-1132
+                        // ```c
+                        // if (hsp->query.frame != hsp->subject.frame) {
+                        //    *q_end = query_length - hsp->query.offset;
+                        //    *q_start = *q_end - hsp->query.end + hsp->query.offset + 1;
+                        // }
+                        // ```
+                        query_frame: ctx.frame as i32,
+                        query_length: 0,
                         q_idx: ctx.q_idx,
                         s_idx: h.s_idx,
                         raw_score: h.raw_score,

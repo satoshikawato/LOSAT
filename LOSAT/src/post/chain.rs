@@ -256,6 +256,15 @@ impl HspChain {
             s_end: self.s_end,
             e_value: self.min_evalue,
             bit_score: self.total_score,
+            // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_hits.c:1122-1132
+            // ```c
+            // if (hsp->query.frame != hsp->subject.frame) {
+            //    *q_end = query_length - hsp->query.offset;
+            //    *q_start = *q_end - hsp->query.end + hsp->query.offset + 1;
+            // }
+            // ```
+            query_frame: 1,
+            query_length: 0,
             q_idx: 0,
             s_idx: 0,
             raw_score: (self.total_score * 2.0) as i32,
@@ -323,6 +332,15 @@ mod tests {
             s_end,
             e_value: 1e-10,
             bit_score,
+            // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_hits.c:1122-1132
+            // ```c
+            // if (hsp->query.frame != hsp->subject.frame) {
+            //    *q_end = query_length - hsp->query.offset;
+            //    *q_start = *q_end - hsp->query.end + hsp->query.offset + 1;
+            // }
+            // ```
+            query_frame: 1,
+            query_length: 0,
             q_idx: 0,
             s_idx: 0,
             raw_score: (bit_score * 2.0) as i32,

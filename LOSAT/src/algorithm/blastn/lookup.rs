@@ -23,18 +23,57 @@ pub fn encode_kmer(seq: &[u8], start: usize, k: usize) -> Option<u64> {
     Some(encoded)
 }
 
-/// Generate the reverse complement of a DNA sequence.
-/// Used for searching the minus strand of subject sequences.
-/// Complement: A<->T, C<->G, ambiguous bases become N
+// NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_encoding.c:80-103
+// ```c
+// const char NCBI4NA_TO_IUPACNA[BLASTNA_SIZE] = {
+//     '-', 'A', 'C', 'M', 'G', 'R', 'S', 'V',
+//     'T', 'W', 'Y', 'H', 'K', 'D', 'B', 'N'
+// };
+// const Uint1 IUPACNA_TO_NCBI4NA[128]={ ... };
+// ```
+const NCBI4NA_TO_IUPACNA: [u8; 16] = [
+    b'-', b'A', b'C', b'M', b'G', b'R', b'S', b'V',
+    b'T', b'W', b'Y', b'H', b'K', b'D', b'B', b'N',
+];
+// NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_encoding.c:95-103
+// ```c
+// const Uint1 IUPACNA_TO_NCBI4NA[128]={ ... };
+// ```
+const IUPACNA_TO_NCBI4NA: [u8; 128] = [
+    0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+    0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+    0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+    0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+    0, 1, 14, 2, 13, 0, 0, 4, 11, 0, 0, 12, 0, 3, 15, 0,
+    0, 0, 5, 6, 8, 0, 7, 9, 0, 10, 0, 0, 0, 0, 0, 0,
+    0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+    0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+];
+// NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_util.c:812-819
+// ```c
+// Uint1 conversion_table[16] = {
+//   0,  8, 4, 12,
+//   2, 10, 6, 14,
+//   1,  9, 5, 13,
+//   3, 11, 7, 15
+// };
+// ```
+const NCBI4NA_REV_COMP: [u8; 16] = [
+    0, 8, 4, 12,
+    2, 10, 6, 14,
+    1, 9, 5, 13,
+    3, 11, 7, 15,
+];
+
+/// Generate the reverse complement of a DNA sequence in IUPACNA.
+/// Uses NCBI4NA bitmask mapping to preserve ambiguous base complements.
 pub fn reverse_complement(seq: &[u8]) -> Vec<u8> {
     seq.iter()
         .rev()
-        .map(|&b| match b {
-            b'A' | b'a' => b'T',
-            b'T' | b't' | b'U' | b'u' => b'A',
-            b'G' | b'g' => b'C',
-            b'C' | b'c' => b'G',
-            _ => b'N',
+        .map(|&b| {
+            let idx = if b < 128 { IUPACNA_TO_NCBI4NA[b as usize] } else { 0 };
+            let rc = NCBI4NA_REV_COMP[idx as usize];
+            NCBI4NA_TO_IUPACNA[rc as usize]
         })
         .collect()
 }

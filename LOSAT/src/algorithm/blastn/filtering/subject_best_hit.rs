@@ -34,9 +34,28 @@ pub fn subject_best_hit(hits: &mut Vec<Hit>, query_len: usize) {
         return;
     }
 
-    // Helper to determine strand: minus if s_start > s_end
-    // NCBI reference: For blastn, subject.frame encodes strand direction
-    let is_minus_strand = |h: &Hit| h.s_start > h.s_end;
+    // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_hits.c:1122-1132
+    // ```c
+    // if (hsp->query.frame != hsp->subject.frame) {
+    //    *q_end = query_length - hsp->query.offset;
+    //    *q_start = *q_end - hsp->query.end + hsp->query.offset + 1;
+    // }
+    // ```
+    let q_offsets = |h: &Hit| {
+        if h.query_length > 0 && h.query_frame < 0 {
+            (
+                h.query_length.saturating_sub(h.q_end),
+                h.query_length
+                    .saturating_sub(h.q_start)
+                    .saturating_add(1),
+            )
+        } else {
+            (h.q_start.saturating_sub(1), h.q_end)
+        }
+    };
+    let context = |h: &Hit| -> u32 {
+        h.q_idx * 2 + if h.query_frame < 0 { 1 } else { 0 }
+    };
 
     // Ensure sorted by score descending (should already be sorted by caller)
     hits.sort_by(|a, b| b.raw_score.cmp(&a.raw_score));
@@ -64,21 +83,23 @@ pub fn subject_best_hit(hits: &mut Vec<Hit>, query_len: usize) {
             continue;
         }
 
-        let hit_i_strand = is_minus_strand(&hits[i]);
-        let o = hits[i].q_start.saturating_sub(MAX_RANGE_DIFF);
-        let e = hits[i].q_end.saturating_add(MAX_RANGE_DIFF);
+        let hit_i_context = context(&hits[i]);
+        let (i_q_offset, i_q_end) = q_offsets(&hits[i]);
+        let o = i_q_offset.saturating_sub(MAX_RANGE_DIFF);
+        let e = i_q_end.saturating_add(MAX_RANGE_DIFF);
 
         for j in (i + 1)..hits.len() {
             if to_remove[j] {
                 continue;
             }
 
-            let hit_j_strand = is_minus_strand(&hits[j]);
+            let hit_j_context = context(&hits[j]);
+            let (j_q_offset, j_q_end) = q_offsets(&hits[j]);
 
             // Same context (strand) check
-            if hit_i_strand == hit_j_strand {
+            if hit_i_context == hit_j_context {
                 // Check if query range is within ±range_diff
-                if hits[j].q_start >= o && hits[j].q_end <= e {
+                if j_q_offset >= o && j_q_end <= e {
                     to_remove[j] = true;
                 }
             }
@@ -110,26 +131,32 @@ pub fn subject_best_hit(hits: &mut Vec<Hit>, query_len: usize) {
             continue;
         }
 
-        let hit_i_strand = is_minus_strand(&hits[i]);
-        let target_strand = !hit_i_strand; // Opposite strand
+        let hit_i_context = context(&hits[i]);
+        let target_context = if hits[i].query_frame > 0 {
+            hit_i_context + 1
+        } else {
+            hit_i_context.saturating_sub(1)
+        };
 
         // Flip coordinates for cross-strand comparison
         // NCBI: e = qlen - (query.offset - range_diff)
         // NCBI: o = qlen - (query.end + range_diff)
-        let flipped_o = query_len.saturating_sub(hits[i].q_end.saturating_add(MAX_RANGE_DIFF));
-        let flipped_e = query_len.saturating_sub(hits[i].q_start.saturating_sub(MAX_RANGE_DIFF));
+        let (i_q_offset, i_q_end) = q_offsets(&hits[i]);
+        let flipped_o = query_len.saturating_sub(i_q_end.saturating_add(MAX_RANGE_DIFF));
+        let flipped_e = query_len.saturating_sub(i_q_offset.saturating_sub(MAX_RANGE_DIFF));
 
         for j in (i + 1)..hits.len() {
             if to_remove[j] {
                 continue;
             }
 
-            let hit_j_strand = is_minus_strand(&hits[j]);
+            let hit_j_context = context(&hits[j]);
+            let (j_q_offset, j_q_end) = q_offsets(&hits[j]);
 
             // Target context (opposite strand) check
-            if hit_j_strand == target_strand {
+            if hit_j_context == target_context {
                 // Check if query range (in flipped coordinates) is within range
-                if hits[j].q_start >= flipped_o && hits[j].q_end <= flipped_e {
+                if j_q_offset >= flipped_o && j_q_end <= flipped_e {
                     to_remove[j] = true;
                 }
             }
@@ -153,7 +180,14 @@ pub fn subject_best_hit(hits: &mut Vec<Hit>, query_len: usize) {
 mod tests {
     use super::*;
 
-    fn make_hit(q_start: usize, q_end: usize, s_start: usize, s_end: usize, score: i32) -> Hit {
+    fn make_hit(
+        q_start: usize,
+        q_end: usize,
+        s_start: usize,
+        s_end: usize,
+        score: i32,
+        query_frame: i32,
+    ) -> Hit {
         Hit {
             query_id: "q1".to_string(),
             subject_id: "s1".to_string(),
@@ -167,6 +201,15 @@ mod tests {
             s_end,
             e_value: 0.0,
             bit_score: score as f64,
+            // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_hits.c:1122-1132
+            // ```c
+            // if (hsp->query.frame != hsp->subject.frame) {
+            //    *q_end = query_length - hsp->query.offset;
+            //    *q_start = *q_end - hsp->query.end + hsp->query.offset + 1;
+            // }
+            // ```
+            query_frame,
+            query_length: 1000,
             q_idx: 0,
             s_idx: 0,
             raw_score: score,
@@ -180,9 +223,9 @@ mod tests {
         // Hit at q_start=12, q_end=48, score=80 (should be filtered - within ±3 of first)
         // Hit at q_start=20, q_end=60, score=60 (should NOT be filtered - outside range)
         let mut hits = vec![
-            make_hit(10, 50, 10, 50, 100),  // Plus strand, best score
-            make_hit(12, 48, 12, 48, 80),   // Plus strand, within range - REMOVE
-            make_hit(20, 60, 20, 60, 60),   // Plus strand, outside range - KEEP
+            make_hit(10, 50, 10, 50, 100, 1),  // Plus strand, best score
+            make_hit(12, 48, 12, 48, 80, 1),   // Plus strand, within range - REMOVE
+            make_hit(20, 60, 20, 60, 60, 1),   // Plus strand, outside range - KEEP
         ];
 
         subject_best_hit(&mut hits, 1000);
@@ -197,8 +240,8 @@ mod tests {
         // Plus strand hit and minus strand hit with similar positions should NOT filter each other
         // in same-strand pass
         let mut hits = vec![
-            make_hit(10, 50, 10, 50, 100),  // Plus strand (s_start < s_end)
-            make_hit(12, 48, 48, 12, 80),   // Minus strand (s_start > s_end)
+            make_hit(10, 50, 10, 50, 100, 1),  // Plus strand
+            make_hit(12, 48, 48, 12, 80, -1),  // Minus strand
         ];
 
         subject_best_hit(&mut hits, 1000);

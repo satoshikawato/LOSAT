@@ -89,6 +89,17 @@ pub struct Hit {
     pub s_end: usize,
     pub e_value: f64,
     pub bit_score: f64,
+    // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_hits.c:1122-1132
+    // ```c
+    // if (hsp->query.frame != hsp->subject.frame) {
+    //    *q_end = query_length - hsp->query.offset;
+    //    *q_start = *q_end - hsp->query.end + hsp->query.offset + 1;
+    //    *s_end = hsp->subject.offset + 1;
+    //    *s_start = hsp->subject.end;
+    // }
+    // ```
+    pub query_frame: i32,
+    pub query_length: usize,
     // Fields for NCBI-style output ordering (not printed, used for sorting)
     /// Query index (input order) - NCBI uses query order for grouping
     pub q_idx: u32,
@@ -155,28 +166,53 @@ fn evalue_comp(evalue1: f64, evalue2: f64) -> Ordering {
 /// ```
 /// Order: score DESC → s_start ASC → s_end DESC → q_start ASC → q_end DESC
 pub fn score_compare_hsps(a: &Hit, b: &Hit) -> Ordering {
+    // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_hits.c:1122-1132
+    // ```c
+    // if (hsp->query.frame != hsp->subject.frame) {
+    //    *q_end = query_length - hsp->query.offset;
+    //    *q_start = *q_end - hsp->query.end + hsp->query.offset + 1;
+    // }
+    // ```
+    // Recover internal query offsets from output coordinates for blastn minus strand.
+    let query_offsets = |hit: &Hit| {
+        if hit.query_length > 0 && hit.query_frame < 0 {
+            let q_offset = hit.query_length.saturating_sub(hit.q_end);
+            let q_end = hit
+                .query_length
+                .saturating_sub(hit.q_start)
+                .saturating_add(1);
+            (q_offset, q_end)
+        } else {
+            (hit.q_start.saturating_sub(1), hit.q_end)
+        }
+    };
+    let (a_q_offset, a_q_end) = query_offsets(a);
+    let (b_q_offset, b_q_end) = query_offsets(b);
+    let (a_s_offset, a_s_end) = (a.s_start.min(a.s_end).saturating_sub(1), a.s_start.max(a.s_end));
+    let (b_s_offset, b_s_end) = (b.s_start.min(b.s_end).saturating_sub(1), b.s_start.max(b.s_end));
+
     // score DESC (BLAST_CMP(hsp2->score, hsp1->score))
     match b.raw_score.cmp(&a.raw_score) {
         Ordering::Equal => {}
         ord => return ord,
     }
     // s_start ASC (BLAST_CMP(hsp1->subject.offset, hsp2->subject.offset))
-    match a.s_start.cmp(&b.s_start) {
+    match a_s_offset.cmp(&b_s_offset) {
         Ordering::Equal => {}
         ord => return ord,
     }
     // s_end DESC (BLAST_CMP(hsp2->subject.end, hsp1->subject.end))
-    match b.s_end.cmp(&a.s_end) {
+    match b_s_end.cmp(&a_s_end) {
         Ordering::Equal => {}
         ord => return ord,
     }
     // q_start ASC (BLAST_CMP(hsp1->query.offset, hsp2->query.offset))
-    match a.q_start.cmp(&b.q_start) {
+    match a_q_offset.cmp(&b_q_offset) {
         Ordering::Equal => {}
         ord => return ord,
     }
     // q_end DESC (BLAST_CMP(hsp2->query.end, hsp1->query.end))
-    b.q_end.cmp(&a.q_end)
+    b_q_end.cmp(&a_q_end)
 }
 
 /// Subject group for NCBI-style output ordering.

@@ -65,6 +65,9 @@ authoritative, current guidance for agent behavior in LOSAT.
 - Megablast parity is higher; blastn task shows ~90% coverage on some datasets.
 - Suspect gapped DP boundary/coordinate handling (`Blast_SemiGappedAlign`,
   `extend_gapped_one_direction_ex`) in `blast_gapalign.c`.
+- Recent parity work aligned query-context offsets, output coordinate adjustment,
+  x-drop clamping, and hitlist pruning with NCBI; re-run comparisons before
+  digging deeper.
 
 ---
 
@@ -83,6 +86,23 @@ authoritative, current guidance for agent behavior in LOSAT.
   not during linking.
 - Cutoff score capping: `min(BLAST_Cutoffs, gap_trigger, cutoff_score_max)`;
   tblastx uses `scale_factor = 1.0`.
+
+---
+
+## Critical Parity Notes (BLASTN)
+
+- Query contexts: blastn uses plus and minus per query; context index is
+  `q_idx * 2 + strand`, and context offset advances by `query_len + 1`.
+- Total query length for interval tree and offsets is `2 * query_len + 1`.
+- Subject is plus-only for blastn (no reverse-complement subject).
+- Output coordinates must follow `Blast_HSPGetAdjustedOffsets` logic; when query
+  is minus, flip subject coords while keeping internal subject offsets canonical.
+- HSP pruning/comparisons use internal (contexted) offsets; adjust to output
+  coords after pruning.
+- Gapped DP x-drop uses `min(x_dropoff, ungapped_score)` for the trace cutoff.
+- Hitlist pruning follows NCBI: trim by `max_hsps_per_subject`, then apply
+  `min(hitlist_size, max_target_seqs)` with NCBI score/evalue ordering.
+- `SCAN_RANGE_BLASTN` is 0 (no scan range for blastn tasks).
 
 ---
 

@@ -11,7 +11,10 @@ use bio::io::fasta;
 use crate::utils::dust::{DustMasker, MaskedInterval};
 use super::args::BlastnArgs;
 use super::constants::{MIN_UNGAPPED_SCORE_MEGABLAST, MIN_UNGAPPED_SCORE_BLASTN, MAX_DIRECT_LOOKUP_WORD_SIZE, X_DROP_GAPPED_NUCL, X_DROP_GAPPED_GREEDY, X_DROP_GAPPED_FINAL, SCAN_RANGE_BLASTN, SCAN_RANGE_MEGABLAST, LUT_WIDTH_11_THRESHOLD_8, LUT_WIDTH_11_THRESHOLD_10, MIN_DIAG_SEPARATION_BLASTN, MIN_DIAG_SEPARATION_MEGABLAST};
-use super::lookup::{build_lookup, build_pv_direct_lookup, build_two_stage_lookup, TwoStageLookup, PvDirectLookup, KmerLookup};
+use super::lookup::{
+    build_db_word_counts, build_lookup, build_pv_direct_lookup, build_two_stage_lookup, KmerLookup,
+    PvDirectLookup, TwoStageLookup,
+};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum LookupTableKind {
@@ -450,26 +453,77 @@ pub fn build_lookup_tables(
     args: &BlastnArgs,
     queries: &[fasta::Record],
     query_masks: &[Vec<MaskedInterval>],
+    subjects: &[fasta::Record],
+    approx_table_entries: usize,
 ) -> (LookupTables, usize) {
     eprintln!(
         "Building lookup (Task: {}, Word: {}, TwoStage: {}, LUTWord: {}, Direct: {}, DUST: {})...",
         args.task, config.effective_word_size, config.use_two_stage, config.lut_word_length, config.use_direct_lookup, args.dust
     );
     
+    // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_nalookup.c:1312-1325
+    // ```c
+    // if (lookup_options->db_filter) {
+    //    counts = (Uint1*)calloc(mb_lt->hashsize / 2, sizeof(Uint1));
+    // }
+    // if (lookup_options->db_filter) {
+    //    s_FillPV(query, location, mb_lt, lookup_options);
+    //    s_ScanSubjectForWordCounts(seqsrc, mb_lt, counts,
+    //                               lookup_options->max_db_word_count);
+    // }
+    // ```
+    // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_nalookup.c:1270-1306
+    // ```c
+    // pv_size = (Int4)(mb_lt->hashsize >> PV_ARRAY_BTS);
+    // mb_lt->pv_array_bts = ilog2(mb_lt->hashsize / pv_size);
+    // ```
+    let db_word_counts = if args.limit_lookup {
+        Some(build_db_word_counts(
+            queries,
+            query_masks,
+            subjects,
+            config.lut_word_length,
+            args.max_db_word_count,
+            approx_table_entries,
+        ))
+    } else {
+        None
+    };
+    let db_word_counts_ref = db_word_counts.as_deref();
+
     let two_stage_lookup: Option<TwoStageLookup> = if config.use_two_stage {
-        Some(build_two_stage_lookup(queries, config.effective_word_size, config.lut_word_length, query_masks))
+        Some(build_two_stage_lookup(
+            queries,
+            config.effective_word_size,
+            config.lut_word_length,
+            query_masks,
+            db_word_counts_ref,
+            args.max_db_word_count,
+        ))
     } else {
         None
     };
     
     let pv_direct_lookup: Option<PvDirectLookup> = if !config.use_two_stage && config.use_direct_lookup {
-        Some(build_pv_direct_lookup(queries, config.effective_word_size, query_masks))
+        Some(build_pv_direct_lookup(
+            queries,
+            config.effective_word_size,
+            query_masks,
+            db_word_counts_ref,
+            args.max_db_word_count,
+        ))
     } else {
         None
     };
     
     let hash_lookup: Option<KmerLookup> = if !config.use_two_stage && !config.use_direct_lookup {
-        Some(build_lookup(queries, config.effective_word_size, query_masks))
+        Some(build_lookup(
+            queries,
+            config.effective_word_size,
+            query_masks,
+            db_word_counts_ref,
+            args.max_db_word_count,
+        ))
     } else {
         None
     };

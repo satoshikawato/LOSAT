@@ -1,5 +1,6 @@
 use bio::io::fasta;
 use rustc_hash::FxHashMap;
+use crate::core::blast_encoding::{encode_iupac_to_ncbi2na_packed, COMPRESSION_RATIO};
 use crate::utils::dust::MaskedInterval;
 use super::constants::MAX_DIRECT_LOOKUP_WORD_SIZE;
 
@@ -86,6 +87,85 @@ pub type KmerLookup = FxHashMap<u64, Vec<(u32, u32)>>;
 /// For word_size=13: 4^13 = 67,108,864 entries (~1.6GB)
 pub type DirectKmerLookup = Vec<Vec<(u32, u32)>>;
 
+// NCBI reference: ncbi-blast/c++/include/algo/blast/core/blast_util.h:51-55
+// ```c
+// #define NCBI2NA_UNPACK_BASE(x, N) (((x)>>(2*(N))) & NCBI2NA_MASK)
+// ```
+#[inline(always)]
+fn packed_base_at(packed: &[u8], pos: usize) -> u8 {
+    let byte = packed[pos / COMPRESSION_RATIO];
+    let shift = 2 * (3 - (pos % COMPRESSION_RATIO));
+    (byte >> shift) & 0x03
+}
+
+#[inline]
+fn packed_kmer_at(packed: &[u8], start: usize, k: usize) -> u64 {
+    let mut kmer = 0u64;
+    for i in 0..k {
+        let code = packed_base_at(packed, start + i) as u64;
+        kmer = (kmer << 2) | code;
+    }
+    kmer
+}
+
+/// Compute database word counts for lookup filtering (limit_lookup).
+///
+/// NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_nalookup.c:1122-1177
+/// ```c
+/// word = (w >> shift) & mask;
+/// if (!PV_TEST(pv, word, pv_array_bts)) continue;
+/// if ((counts[index] & 0xf) < max_word_count) counts[index]++;
+/// ```
+pub fn build_db_word_counts(
+    queries: &[fasta::Record],
+    query_masks: &[Vec<MaskedInterval>],
+    subjects: &[fasta::Record],
+    lut_word_length: usize,
+    max_word_count: u8,
+    approx_table_entries: usize,
+) -> Vec<u8> {
+    if lut_word_length == 0 {
+        return Vec::new();
+    }
+    // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_nalookup.c:1250-1254
+    // ```c
+    // mb_lt->hashsize = 1ULL << (BITS_PER_NUC * mb_lt->lut_word_length);
+    // ```
+    let hashsize = 1usize << (2 * lut_word_length);
+    let mut counts = vec![0u8; hashsize / 2];
+    let (pv, pv_array_bts) =
+        build_query_pv(queries, query_masks, lut_word_length, approx_table_entries);
+
+    for record in subjects {
+        let seq = record.seq();
+        if seq.len() < lut_word_length {
+            continue;
+        }
+        let packed = encode_iupac_to_ncbi2na_packed(seq);
+        let mask = (1u64 << (2 * lut_word_length)) - 1;
+
+        let mut pos = 0usize;
+        let end = seq.len() - lut_word_length;
+        let mut kmer = packed_kmer_at(&packed, 0, lut_word_length);
+
+        loop {
+            if pv_test_shift(&pv, kmer as usize, pv_array_bts) {
+                db_word_count_increment(&mut counts, kmer, max_word_count);
+            }
+
+            if pos == end {
+                break;
+            }
+
+            let next_base = packed_base_at(&packed, pos + lut_word_length);
+            kmer = ((kmer << 2) | next_base as u64) & mask;
+            pos += 1;
+        }
+    }
+
+    counts
+}
+
 // ============================================================================
 // Phase 2: Presence-Vector (PV) for fast k-mer filtering
 // ============================================================================
@@ -100,6 +180,13 @@ type PvArrayType = u32;
 
 /// Bits-to-shift from lookup index to PV array index (matches NCBI BLAST's PV_ARRAY_BTS)
 const PV_ARRAY_BTS: usize = 5;
+/// Bytes per PV array element (matches NCBI BLAST's PV_ARRAY_BYTES)
+/// NCBI reference: ncbi-blast/c++/include/algo/blast/core/blast_lookup.h:42-43
+/// ```c
+/// #define PV_ARRAY_BYTES 4
+/// #define PV_ARRAY_BTS 5
+/// ```
+const PV_ARRAY_BYTES: usize = 4;
 
 /// Mask for extracting bit position within a PV array element
 const PV_ARRAY_MASK: usize = (1 << PV_ARRAY_BTS) - 1; // 31
@@ -125,6 +212,219 @@ fn pv_set(pv: &mut [PvArrayType], index: usize) {
     let bit_pos = index & PV_ARRAY_MASK;
     if array_idx < pv.len() {
         pv[array_idx] |= 1u32 << bit_pos;
+    }
+}
+
+// NCBI reference: ncbi-blast/c++/include/algo/blast/core/blast_lookup.h:51-57
+// ```c
+// #define PV_SET(lookup, index, shift) \
+//     lookup[(index) >> (shift)] |= (PV_ARRAY_TYPE)1 << ((index) & PV_ARRAY_MASK)
+// #define PV_TEST(lookup, index, shift) \
+//     ( lookup[(index) >> (shift)] & ((PV_ARRAY_TYPE)1 << ((index) & PV_ARRAY_MASK)) )
+// ```
+#[inline(always)]
+fn pv_test_shift(pv: &[PvArrayType], index: usize, shift: usize) -> bool {
+    let array_idx = index >> shift;
+    let bit_pos = index & PV_ARRAY_MASK;
+    if array_idx < pv.len() {
+        (pv[array_idx] & (1u32 << bit_pos)) != 0
+    } else {
+        false
+    }
+}
+
+#[inline(always)]
+fn pv_set_shift(pv: &mut [PvArrayType], index: usize, shift: usize) {
+    let array_idx = index >> shift;
+    let bit_pos = index & PV_ARRAY_MASK;
+    if array_idx < pv.len() {
+        pv[array_idx] |= 1u32 << bit_pos;
+    }
+}
+
+// NCBI reference: ncbi-blast/c++/src/algo/blast/core/lookup_util.c:71-83
+// ```c
+// Int4 ilog2(Int8 x)
+// {
+//     Int4 lg = 0;
+//     if (x == 0) return 0;
+//     while ((x = x >> 1)) lg++;
+//     return lg;
+// }
+// ```
+#[inline]
+fn ilog2(mut x: usize) -> usize {
+    let mut lg = 0usize;
+    if x == 0 {
+        return 0;
+    }
+    while {
+        x >>= 1;
+        x != 0
+    } {
+        lg += 1;
+    }
+    lg
+}
+
+// NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_nalookup.c:1270-1306
+// ```c
+// if (mb_lt->lut_word_length <= 12) {
+//     if (mb_lt->hashsize <= 8 * kTargetPVSize)
+//         pv_size = (Int4)(mb_lt->hashsize >> PV_ARRAY_BTS);
+//     else
+//         pv_size = kTargetPVSize / PV_ARRAY_BYTES;
+// } else {
+//     pv_size = kTargetPVSize * 64 / PV_ARRAY_BYTES;
+// }
+// if(!lookup_options->db_filter &&
+//    (approx_table_entries <= kSmallQueryCutoff ||
+//     approx_table_entries >= kLargeQueryCutoff)) {
+//     pv_size = pv_size / 2;
+// }
+// mb_lt->pv_array_bts = ilog2(mb_lt->hashsize / pv_size);
+// ```
+fn compute_mb_pv_params(
+    hashsize: usize,
+    approx_table_entries: usize,
+    db_filter: bool,
+    lut_word_length: usize,
+) -> (usize, usize) {
+    const K_TARGET_PV_SIZE: usize = 131_072;
+    const K_SMALL_QUERY_CUTOFF: usize = 15_000;
+    const K_LARGE_QUERY_CUTOFF: usize = 800_000;
+
+    let mut pv_size = if lut_word_length <= 12 {
+        if hashsize <= 8 * K_TARGET_PV_SIZE {
+            hashsize >> PV_ARRAY_BTS
+        } else {
+            K_TARGET_PV_SIZE / PV_ARRAY_BYTES
+        }
+    } else {
+        K_TARGET_PV_SIZE * 64 / PV_ARRAY_BYTES
+    };
+
+    if !db_filter
+        && (approx_table_entries <= K_SMALL_QUERY_CUTOFF
+            || approx_table_entries >= K_LARGE_QUERY_CUTOFF)
+    {
+        pv_size = pv_size / 2;
+    }
+
+    if pv_size == 0 {
+        pv_size = 1;
+    }
+    let pv_array_bts = ilog2(hashsize / pv_size);
+    (pv_size, pv_array_bts)
+}
+
+// NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_nalookup.c:829-901
+// ```c
+// if ((val & BLAST2NA_MASK) != 0) { ecode = 0; pos = seq + kLutWordLength; continue; }
+// ecode = ((ecode << BITS_PER_NUC) & kLutMask) + val;
+// if (seq < pos) continue;
+// PV_SET(pv_array, ecode, pv_array_bts);
+// ```
+fn build_query_pv(
+    queries: &[fasta::Record],
+    query_masks: &[Vec<MaskedInterval>],
+    lut_word_length: usize,
+    approx_table_entries: usize,
+) -> (Vec<PvArrayType>, usize) {
+    if lut_word_length == 0 {
+        return (Vec::new(), PV_ARRAY_BTS);
+    }
+    // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_nalookup.c:1250-1254
+    // ```c
+    // mb_lt->hashsize = 1ULL << (BITS_PER_NUC * mb_lt->lut_word_length);
+    // ```
+    let hashsize = 1usize << (2 * lut_word_length);
+    let (pv_size, pv_array_bts) = compute_mb_pv_params(hashsize, approx_table_entries, true, lut_word_length);
+    let mut pv = vec![0u32; pv_size];
+
+    let kmer_mask: u64 = (1u64 << (2 * lut_word_length)) - 1;
+    for (q_idx, record) in queries.iter().enumerate() {
+        let seq = record.seq();
+        if seq.len() < lut_word_length {
+            continue;
+        }
+        let masks = query_masks.get(q_idx).map(|v| v.as_slice()).unwrap_or(&[]);
+        let mut current_kmer: u64 = 0;
+        let mut valid_bases: usize = 0;
+
+        for pos in 0..seq.len() {
+            let base = seq[pos];
+            let code = ENCODE_LUT[base as usize];
+            if code == 0xFF {
+                current_kmer = 0;
+                valid_bases = 0;
+                continue;
+            }
+
+            current_kmer = ((current_kmer << 2) | (code as u64)) & kmer_mask;
+            valid_bases += 1;
+
+            if valid_bases < lut_word_length {
+                continue;
+            }
+
+            let kmer_start = pos + 1 - lut_word_length;
+            if !masks.is_empty() && is_kmer_masked(masks, kmer_start, lut_word_length) {
+                continue;
+            }
+
+            pv_set_shift(&mut pv, current_kmer as usize, pv_array_bts);
+        }
+    }
+
+    (pv, pv_array_bts)
+}
+
+// NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_nalookup.c:1047-1059
+// ```c
+// if (!(ecode & 1)) {
+//     if ((counts[ecode / 2] >> 4) >= max_word_count) continue;
+// } else {
+//     if ((counts[ecode / 2] & 0xf) >= max_word_count) continue;
+// }
+// ```
+#[inline(always)]
+fn db_word_count_exceeds(counts: &[u8], word: u64, max_word_count: u8) -> bool {
+    let idx = word as usize;
+    let byte_idx = idx >> 1;
+    if byte_idx >= counts.len() {
+        return false;
+    }
+    let count = if (idx & 1) == 1 {
+        counts[byte_idx] & 0x0f
+    } else {
+        counts[byte_idx] >> 4
+    };
+    count >= max_word_count
+}
+
+// NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_nalookup.c:1166-1177
+// ```c
+// index = word / 2;
+// if (word & 1) {
+//     if ((counts[index] & 0xf) < max_word_count) counts[index]++;
+// } else {
+//     if ((counts[index] >> 4) < max_word_count) counts[index] += 1 << 4;
+// }
+// ```
+#[inline(always)]
+fn db_word_count_increment(counts: &mut [u8], word: u64, max_word_count: u8) {
+    let idx = word as usize;
+    let byte_idx = idx >> 1;
+    if byte_idx >= counts.len() {
+        return;
+    }
+    if (idx & 1) == 1 {
+        if (counts[byte_idx] & 0x0f) < max_word_count {
+            counts[byte_idx] = counts[byte_idx].wrapping_add(1);
+        }
+    } else if (counts[byte_idx] >> 4) < max_word_count {
+        counts[byte_idx] = counts[byte_idx].wrapping_add(1 << 4);
     }
 }
 
@@ -270,6 +570,8 @@ pub fn build_pv_direct_lookup(
     queries: &[fasta::Record],
     word_size: usize,
     query_masks: &[Vec<MaskedInterval>],
+    db_word_counts: Option<&[u8]>,
+    max_db_word_count: u8,
 ) -> PvDirectLookup {
     let safe_word_size = word_size.min(MAX_DIRECT_LOOKUP_WORD_SIZE);
     let table_size = 1usize << (2 * safe_word_size); // 4^word_size
@@ -360,6 +662,19 @@ pub fn build_pv_direct_lookup(
                 continue;
             }
 
+            // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_nalookup.c:1047-1059
+            // ```c
+            // if (kDbFilter) {
+            //    if ((counts[ecode / 2] >> 4) >= max_word_count) continue;
+            //    ...
+            // }
+            // ```
+            if let Some(counts) = db_word_counts {
+                if db_word_count_exceeds(counts, current_kmer, max_db_word_count) {
+                    continue;
+                }
+            }
+
             // NCBI reference: blast_lookup.c:BlastLookupAddWordHit (lines 33-77)
             // Adds ALL hits without any frequency limit - no query-side filtering
             // if (backbone[index] == NULL) { initialize new chain }
@@ -418,6 +733,8 @@ pub fn build_lookup(
     queries: &[fasta::Record],
     word_size: usize,
     query_masks: &[Vec<MaskedInterval>],
+    db_word_counts: Option<&[u8]>,
+    max_db_word_count: u8,
 ) -> KmerLookup {
     let mut lookup: FxHashMap<u64, Vec<(u32, u32)>> = FxHashMap::default();
     let safe_word_size = word_size.min(31);
@@ -462,6 +779,18 @@ pub fn build_lookup(
             // NCBI reference: blast_lookup.c:119-120
             // if (*seq & invalid_mask) word_target = seq + lut_word_length + 1;
             if let Some(kmer) = encode_kmer(seq, i, safe_word_size) {
+                // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_nalookup.c:1047-1059
+                // ```c
+                // if (kDbFilter) {
+                //    if ((counts[ecode / 2] >> 4) >= max_word_count) continue;
+                //    ...
+                // }
+                // ```
+                if let Some(counts) = db_word_counts {
+                    if db_word_count_exceeds(counts, kmer, max_db_word_count) {
+                        continue;
+                    }
+                }
                 // NCBI reference: blast_lookup.c:BlastLookupAddWordHit (lines 33-77)
                 // Adds ALL hits without any frequency limit - no query-side filtering
                 lookup
@@ -507,6 +836,8 @@ pub fn build_two_stage_lookup(
     word_length: usize,
     lut_word_length: usize,
     query_masks: &[Vec<MaskedInterval>],
+    db_word_counts: Option<&[u8]>,
+    max_db_word_count: u8,
 ) -> TwoStageLookup {
     let debug_mode = std::env::var("BLEMIR_DEBUG").is_ok();
     
@@ -519,7 +850,13 @@ pub fn build_two_stage_lookup(
 
     // Build the lookup table using lut_word_length
     // We index all positions where a full word_length match is possible
-    let pv_lookup = build_pv_direct_lookup(queries, lut_word_length, query_masks);
+    let pv_lookup = build_pv_direct_lookup(
+        queries,
+        lut_word_length,
+        query_masks,
+        db_word_counts,
+        max_db_word_count,
+    );
     
     // Note: The actual word_length matching is done during scanning,
     // where we check if the subject sequence has a word_length match

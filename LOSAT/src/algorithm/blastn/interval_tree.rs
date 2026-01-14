@@ -65,6 +65,16 @@ pub struct TreeHsp {
     pub subject_offset: i32,
     pub subject_end: i32,
     pub score: i32,
+    // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_itree.c:539-546
+    // if ( index_method == eQueryOnlyStrandIndifferent &&
+    //      query_info->contexts[hsp->context].frame == -1 ) {
+    //     region_end = query_start - hsp->query.offset;
+    //     region_start = query_start - hsp->query.end;
+    //     query_start = query_start -
+    //                   query_info->contexts[hsp->context].query_length - 1;
+    // }
+    pub query_frame: i32,
+    pub query_length: i32,
     /// Query strand offset (for context comparison)
     /// NCBI reference: blast_itree.c:819 - in_q_start != tree_q_start
     pub query_context_offset: i32,
@@ -331,34 +341,47 @@ impl BlastIntervalTree {
             // NCBI reference: blast_itree.c:343-366
             // First perform matching endpoint tests on all of the HSPs in the
             // midpoint list for the current node.
+            // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_itree.c:350-365
+            // tmp_index = root_node->midptr;
+            // list_node = root_node;
+            // next_node = tree->nodes + tmp_index;
+            // while (tmp_index != 0) {
+            //     ...
+            //     tmp_index = next_node->midptr;
+            //     if (best_hsp == next_node->hsp)
+            //         return TRUE;
+            //     else if (best_hsp == in_hsp)
+            //         list_node->midptr = tmp_index;
+            //     list_node = next_node;
+            //     next_node = tree->nodes + tmp_index;
+            // }
             let mut list_idx = root_idx;
             let mut tmp_index = self.nodes[root_idx].midptr;
 
             while tmp_index != 0 {
-                let tmp_node = &self.nodes[tmp_index as usize];
-                if let Some(ref tree_hsp) = tmp_node.hsp {
+                let (next_idx, result) = {
+                    let tmp_node = &self.nodes[tmp_index as usize];
+                    let tree_hsp = match tmp_node.hsp.as_ref() {
+                        Some(hsp) => hsp,
+                        None => break,
+                    };
                     let tree_q_start = tmp_node.leftptr; // leftptr stores query_context_offset for leaves
-
+                    let next_idx = tmp_node.midptr;
                     let result = Self::hsps_have_common_endpoint(
                         in_hsp, in_q_start, tree_hsp, tree_q_start, which_end);
+                    (next_idx, result)
+                };
 
-                    let next_idx = tmp_node.midptr;
-
-                    // NCBI reference: blast_itree.c:359-362
-                    match result {
-                        Some(EndpointResult::KeepTree) => return true,
-                        Some(EndpointResult::KeepInput) => {
-                            // Remove worse HSP from list: list_node->midptr = tmp_index
-                            self.nodes[list_idx].midptr = next_idx;
-                        }
-                        None => {
-                            list_idx = tmp_index as usize;
-                        }
+                match result {
+                    Some(EndpointResult::KeepTree) => return true,
+                    Some(EndpointResult::KeepInput) => {
+                        // Remove worse HSP from list: list_node->midptr = tmp_index
+                        self.nodes[list_idx].midptr = next_idx;
                     }
-                    tmp_index = next_idx;
-                } else {
-                    break;
+                    None => {}
                 }
+                list_idx = tmp_index as usize;
+                tmp_index = next_idx;
             }
 
             // NCBI reference: blast_itree.c:368-376
@@ -508,12 +531,29 @@ impl BlastIntervalTree {
         // Also add to flat list for linear containment check (debug/verification)
         self.hsps.push(hsp.clone());
 
-        // NCBI reference: blast_itree.c:537
-        let query_start = query_context_offset;
-
-        // NCBI reference: blast_itree.c:547-550
-        let region_start = query_start + hsp.query_offset;
-        let region_end = query_start + hsp.query_end;
+        // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_itree.c:537-550
+        // query_start = s_GetQueryStrandOffset(query_info, hsp->context);
+        // if ( index_method == eQueryOnlyStrandIndifferent &&
+        //      query_info->contexts[hsp->context].frame == -1 ) {
+        //     region_end = query_start - hsp->query.offset;
+        //     region_start = query_start - hsp->query.end;
+        //     query_start = query_start -
+        //                   query_info->contexts[hsp->context].query_length - 1;
+        // } else {
+        //     region_start = query_start + hsp->query.offset;
+        //     region_end = query_start + hsp->query.end;
+        // }
+        let mut query_start = query_context_offset;
+        let (region_start, region_end) = if index_method == IndexMethod::QueryOnlyStrandIndifferent
+            && hsp.query_frame < 0
+        {
+            let region_end = query_start - hsp.query_offset;
+            let region_start = query_start - hsp.query_end;
+            query_start = query_start - hsp.query_length - 1;
+            (region_start, region_end)
+        } else {
+            (query_start + hsp.query_offset, query_start + hsp.query_end)
+        };
 
         // NCBI reference: blast_itree.c:558-585
         // For eQueryAndSubject, check for common endpoints before adding
@@ -696,10 +736,30 @@ impl BlastIntervalTree {
             IntervalDirection::Neither => {}
         }
 
-        // NCBI reference: blast_itree.c:726-744
-        // Calculate old leaf's region
+        // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_itree.c:726-743
+        // if (index_subject_range) {
+        //     old_region_start = old_hsp->subject.offset;
+        //     old_region_end = old_hsp->subject.end;
+        // } else {
+        //     if ( index_method == eQueryOnlyStrandIndifferent &&
+        //          query_info->contexts[old_hsp->context].frame == -1 ) {
+        //         q_start = s_GetQueryStrandOffset(query_info, old_hsp->context);
+        //         old_region_end = q_start - old_hsp->query.offset;
+        //         old_region_start = q_start - old_hsp->query.end;
+        //     } else {
+        //         old_region_start = nodes[old_index].leftptr + old_hsp->query.offset;
+        //         old_region_end = nodes[old_index].leftptr + old_hsp->query.end;
+        //     }
+        // }
         let (old_region_start, old_region_end) = if index_subject_range {
             (old_hsp.subject_offset, old_hsp.subject_end)
+        } else if index_method == IndexMethod::QueryOnlyStrandIndifferent
+            && old_hsp.query_frame < 0
+        {
+            let q_start = old_hsp.query_context_offset;
+            let old_region_end = q_start - old_hsp.query_offset;
+            let old_region_start = q_start - old_hsp.query_end;
+            (old_region_start, old_region_end)
         } else {
             (old_q_start + old_hsp.query_offset, old_q_start + old_hsp.query_end)
         };
@@ -1093,6 +1153,8 @@ mod tests {
             subject_offset: 500,
             subject_end: 600,
             score: 100,
+            query_frame: 1,
+            query_length: 1000,
             query_context_offset: 0,
             subject_frame_sign: 1,
         };
@@ -1105,6 +1167,8 @@ mod tests {
             subject_offset: 520,
             subject_end: 580,
             score: 50,
+            query_frame: 1,
+            query_length: 1000,
             query_context_offset: 0,
             subject_frame_sign: 1,
         };
@@ -1123,6 +1187,8 @@ mod tests {
             subject_offset: 500,
             subject_end: 600,
             score: 100,
+            query_frame: 1,
+            query_length: 1000,
             query_context_offset: 0,
             subject_frame_sign: 1,
         };
@@ -1135,6 +1201,8 @@ mod tests {
             subject_offset: 520,
             subject_end: 580,
             score: 150, // Higher score
+            query_frame: 1,
+            query_length: 1000,
             query_context_offset: 0,
             subject_frame_sign: 1,
         };
@@ -1152,6 +1220,8 @@ mod tests {
             subject_offset: 500,
             subject_end: 600,
             score: 100,
+            query_frame: 1,
+            query_length: 1000,
             query_context_offset: 0,
             subject_frame_sign: 1, // Forward strand
         };
@@ -1164,6 +1234,8 @@ mod tests {
             subject_offset: 520,
             subject_end: 580,
             score: 50,
+            query_frame: 1,
+            query_length: 1000,
             query_context_offset: 0,
             subject_frame_sign: -1, // Reverse strand
         };

@@ -386,37 +386,62 @@ fn reverse_mask_intervals(masks: &[MaskedInterval], query_length: usize) -> Vec<
     out
 }
 
-// NCBI reference: ncbi-blast/c++/src/algo/blast/api/blast_setup_cxx.cpp:661-705
+// NCBI reference: ncbi-blast/c++/src/algo/blast/unit_tests/api/ntscan_unit_test.cpp:739-776
 // ```c
-// p.first = (slp->GetInt().GetFrom() > offset)? slp->GetInt().GetFrom() - offset : 0;
-// p.second = MIN(slp->GetInt().GetTo() - offset, length-1);
-// if (slp->GetInt().GetTo() >= offset && p.first < length) {
-//     output.push_back(p);
+// SSeqRange ranges2scan[] = { {0, 501}, {700, 1001} , {subject_bases, subject_bases}};
+// ...
+// if ( s_off >= (Uint4)ranges2scan[j].left &&
+//      s_off <  (Uint4)ranges2scan[j].right ) {
+//     hit_found = TRUE;
+// }
+// ```
+// NCBI reference: ncbi-blast/c++/src/algo/blast/core/na_ungapped.c:1647-1674
+// ```c
+// scan_range[1] = subject->seq_ranges[0].left + word_length - lut_word_length;
+// scan_range[2] = subject->seq_ranges[0].right - lut_word_length;
+// while (s_DetermineScanningOffsets(subject, word_length, lut_word_length, scan_range)) {
+//     hitsfound = scansub(..., &scan_range[1]);
 // }
 // ```
 fn build_subject_seq_ranges_from_masks(
     masks: &[MaskedInterval],
     subject_len: usize,
 ) -> Vec<(i32, i32)> {
-    if masks.is_empty() || subject_len == 0 {
+    if subject_len == 0 {
         return Vec::new();
     }
+    if masks.is_empty() {
+        return vec![(0, subject_len as i32)];
+    }
 
-    let offset = 0usize;
-    let length = subject_len;
-    let mut ranges: Vec<(i32, i32)> = Vec::new();
+    let mut sorted = masks.to_vec();
+    sorted.sort_by_key(|m| m.start);
 
-    for mask in masks {
-        if mask.end == 0 {
+    let mut merged: Vec<MaskedInterval> = Vec::new();
+    for mask in sorted {
+        let start = mask.start.min(subject_len);
+        let end = mask.end.min(subject_len);
+        if start >= end {
             continue;
         }
-        let from = mask.start;
-        let to = mask.end.saturating_sub(1);
-        let left = if from > offset { from - offset } else { 0 };
-        let right = std::cmp::min(to.saturating_sub(offset), length.saturating_sub(1));
-        if to >= offset && left < length {
-            ranges.push((left as i32, right as i32));
+        match merged.last_mut() {
+            Some(last) if start <= last.end => {
+                last.end = last.end.max(end);
+            }
+            _ => merged.push(MaskedInterval::new(start, end)),
         }
+    }
+
+    let mut ranges: Vec<(i32, i32)> = Vec::new();
+    let mut cursor = 0usize;
+    for mask in merged {
+        if mask.start > cursor {
+            ranges.push((cursor as i32, mask.start as i32));
+        }
+        cursor = cursor.max(mask.end);
+    }
+    if cursor < subject_len {
+        ranges.push((cursor as i32, subject_len as i32));
     }
 
     ranges
@@ -1017,9 +1042,9 @@ pub fn run(args: BlastnArgs) -> Result<()> {
                 .map(|m| m.as_slice())
                 .unwrap_or(&[]);
             let mut subject_seq_ranges = build_subject_seq_ranges_from_masks(subject_masks, s_len);
-            let subject_masked = !subject_seq_ranges.is_empty();
+            let subject_masked = !subject_masks.is_empty();
             if !subject_masked {
-                subject_seq_ranges = vec![(0i32, s_len.saturating_sub(1) as i32)];
+                subject_seq_ranges = vec![(0i32, s_len as i32)];
             }
 
             if s_len < effective_word_size {
@@ -2336,8 +2361,14 @@ pub fn run(args: BlastnArgs) -> Result<()> {
                     (s_seq_ncbi2na.as_ref().unwrap().as_slice(), s_seq_blastna.as_slice())
                 };
 
-                // NCBI reference: blast_gapalign.c:3908-3915
-                // Create tmp_hsp from ungapped data for containment checking
+                // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_gapalign.c:3908-3913
+                // ```c
+                // tmp_hsp.query.offset = q_start;
+                // tmp_hsp.query.end = q_end;
+                // tmp_hsp.query.frame = query_info->contexts[context].frame;
+                // tmp_hsp.subject.offset = s_start;
+                // tmp_hsp.subject.end = s_end;
+                // ```
                 // NCBI uses 0-based coordinates internally for the tree
                 let subject_frame_sign = 1i32;
                 let ungapped_tree_hsp = TreeHsp {
@@ -2346,6 +2377,8 @@ pub fn run(args: BlastnArgs) -> Result<()> {
                     subject_offset: uh.ss as i32,
                     subject_end: uh.se as i32,
                     score: uh.score,
+                    query_frame: uh.query_frame,
+                    query_length: ctx.seq.len() as i32,
                     query_context_offset: uh.query_context_offset,
                     subject_frame_sign,
                 };
@@ -2449,13 +2482,22 @@ pub fn run(args: BlastnArgs) -> Result<()> {
                 }
 
                 // Add preliminary GAPPED HSP to interval tree for containment checks
-                // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_gapalign.c:4058-4089
+                // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_gapalign.c:3908-3913
+                // ```c
+                // tmp_hsp.query.offset = q_start;
+                // tmp_hsp.query.end = q_end;
+                // tmp_hsp.query.frame = query_info->contexts[context].frame;
+                // tmp_hsp.subject.offset = s_start;
+                // tmp_hsp.subject.end = s_end;
+                // ```
                 let gapped_tree_hsp = TreeHsp {
                     query_offset: prelim_qs as i32,
                     query_end: prelim_qe as i32,
                     subject_offset: prelim_ss as i32,
                     subject_end: prelim_se as i32,
                     score: prelim_score,
+                    query_frame: uh.query_frame,
+                    query_length: ctx.seq.len() as i32,
                     query_context_offset: uh.query_context_offset,
                     subject_frame_sign: 1,
                 };
@@ -2886,6 +2928,14 @@ pub fn run(args: BlastnArgs) -> Result<()> {
                     base_offset as i32
                 };
                 // Reconstruct TreeHsp from hit (convert 1-based back to 0-based)
+                // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_gapalign.c:3908-3913
+                // ```c
+                // tmp_hsp.query.offset = q_start;
+                // tmp_hsp.query.end = q_end;
+                // tmp_hsp.query.frame = query_info->contexts[context].frame;
+                // tmp_hsp.subject.offset = s_start;
+                // tmp_hsp.subject.end = s_end;
+                // ```
                 // NCBI uses canonical coordinates: subject.offset < subject.end always
                 let tree_hsp = TreeHsp {
                     query_offset: q_offset_0 as i32,
@@ -2893,6 +2943,8 @@ pub fn run(args: BlastnArgs) -> Result<()> {
                     subject_offset: (hit.s_start.min(hit.s_end).saturating_sub(1)) as i32,
                     subject_end: hit.s_start.max(hit.s_end) as i32,
                     score: hit.raw_score,
+                    query_frame: hit.query_frame,
+                    query_length: hit.query_length as i32,
                     query_context_offset,
                     subject_frame_sign: 1,
                 };

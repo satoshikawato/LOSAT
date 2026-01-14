@@ -68,6 +68,13 @@ pub struct BlastnArgs {
     pub dust_window: usize,
     #[arg(long, default_value_t = 1)]
     pub dust_linker: usize,
+    // NCBI reference: ncbi-blast/c++/src/algo/blast/blastinput/blast_args.cpp:1939-1942
+    // ```c
+    // arg_desc.AddFlag(kArgUseLCaseMasking,
+    //      "Use lower case filtering in query and subject sequence(s)?", true);
+    // ```
+    #[arg(long = "lcase_masking", default_value_t = false)]
+    pub lcase_masking: bool,
     /// Apply subject best hit filtering (disabled by default).
     /// Reference: ncbi-blast/c++/src/algo/blast/blastinput/cmdline_flags.cpp:135
     #[arg(long = "subject_besthit", default_value_t = false)]

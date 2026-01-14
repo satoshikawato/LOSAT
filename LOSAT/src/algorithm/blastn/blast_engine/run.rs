@@ -332,6 +332,42 @@ fn reverse_mask_intervals(masks: &[MaskedInterval], query_length: usize) -> Vec<
     out
 }
 
+// NCBI reference: ncbi-blast/c++/src/algo/blast/api/blast_setup_cxx.cpp:661-705
+// ```c
+// p.first = (slp->GetInt().GetFrom() > offset)? slp->GetInt().GetFrom() - offset : 0;
+// p.second = MIN(slp->GetInt().GetTo() - offset, length-1);
+// if (slp->GetInt().GetTo() >= offset && p.first < length) {
+//     output.push_back(p);
+// }
+// ```
+fn build_subject_seq_ranges_from_masks(
+    masks: &[MaskedInterval],
+    subject_len: usize,
+) -> Vec<(i32, i32)> {
+    if masks.is_empty() || subject_len == 0 {
+        return Vec::new();
+    }
+
+    let offset = 0usize;
+    let length = subject_len;
+    let mut ranges: Vec<(i32, i32)> = Vec::new();
+
+    for mask in masks {
+        if mask.end == 0 {
+            continue;
+        }
+        let from = mask.start;
+        let to = mask.end.saturating_sub(1);
+        let left = if from > offset { from - offset } else { 0 };
+        let right = std::cmp::min(to.saturating_sub(offset), length.saturating_sub(1));
+        if to >= offset && left < length {
+            ranges.push((left as i32, right as i32));
+        }
+    }
+
+    ranges
+}
+
 pub fn run(args: BlastnArgs) -> Result<()> {
     let num_threads = if args.num_threads == 0 {
         num_cpus::get()
@@ -805,6 +841,14 @@ pub fn run(args: BlastnArgs) -> Result<()> {
     let query_contexts_ref = &query_contexts;
     let query_base_offsets_ref = &query_base_offsets;
     let query_eff_searchsp_ref = &query_eff_searchsp;
+    // NCBI reference: ncbi-blast/c++/src/algo/blast/api/blast_setup_cxx.cpp:812-826
+    // ```c
+    // if (subjects.GetMask(i).NotEmpty()) {
+    //     s_SeqLoc2MaskedSubjRanges(...);
+    //     BlastSeqBlkSetSeqRanges(..., eSoftSubjMasking);
+    // }
+    // ```
+    let subject_masks_ref = &seq_data.subject_masks;
 
     // Capture config values for use in closure
     let effective_word_size = config.effective_word_size;
@@ -899,10 +943,22 @@ pub fn run(args: BlastnArgs) -> Result<()> {
             //     scan_range[2] = subject->seq_ranges[0].right - lut_word_length;
             // }
             // ```
-            let subject_seq_ranges = vec![(0i32, s_len.saturating_sub(1) as i32)];
-            let subject_masked = subject_seq_ranges.len() != 1
-                || subject_seq_ranges[0].0 != 0
-                || subject_seq_ranges[0].1 != s_len.saturating_sub(1) as i32;
+            // NCBI reference: ncbi-blast/c++/src/algo/blast/api/blast_setup_cxx.cpp:812-826
+            // ```c
+            // if (subjects.GetMask(i).NotEmpty()) {
+            //     s_SeqLoc2MaskedSubjRanges(...);
+            //     BlastSeqBlkSetSeqRanges(..., eSoftSubjMasking);
+            // }
+            // ```
+            let subject_masks = subject_masks_ref
+                .get(s_idx)
+                .map(|m| m.as_slice())
+                .unwrap_or(&[]);
+            let mut subject_seq_ranges = build_subject_seq_ranges_from_masks(subject_masks, s_len);
+            let subject_masked = !subject_seq_ranges.is_empty();
+            if !subject_masked {
+                subject_seq_ranges = vec![(0i32, s_len.saturating_sub(1) as i32)];
+            }
 
             if s_len < effective_word_size {
                 return;
@@ -2717,4 +2773,27 @@ pub fn run(args: BlastnArgs) -> Result<()> {
 
     writer_handle.join().unwrap()?;
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    // NCBI reference: ncbi-blast/c++/src/algo/blast/api/blast_setup_cxx.cpp:689-706
+    // ```c
+    // p.first = (slp->GetInt().GetFrom() > offset)? slp->GetInt().GetFrom() - offset : 0;
+    // p.second = MIN(slp->GetInt().GetTo() - offset, length-1);
+    // if (slp->GetInt().GetTo() >= offset && p.first < length) {
+    //     output.push_back(p);
+    // }
+    // ```
+    #[test]
+    fn test_build_subject_seq_ranges_from_masks() {
+        let masks = vec![
+            MaskedInterval::new(2, 5),
+            MaskedInterval::new(8, 12),
+        ];
+        let ranges = build_subject_seq_ranges_from_masks(&masks, 10);
+        assert_eq!(ranges, vec![(2, 4), (8, 9)]);
+    }
 }

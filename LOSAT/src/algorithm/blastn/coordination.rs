@@ -55,6 +55,14 @@ pub struct SequenceData {
     pub query_ids: Vec<String>,
     pub subjects: Vec<fasta::Record>,
     pub query_masks: Vec<Vec<MaskedInterval>>,
+    // NCBI reference: ncbi-blast/c++/src/algo/blast/api/blast_setup_cxx.cpp:812-826
+    // ```c
+    // if (subjects.GetMask(i).NotEmpty()) {
+    //     s_SeqLoc2MaskedSubjRanges(...);
+    //     BlastSeqBlkSetSeqRanges(..., eSoftSubjMasking);
+    // }
+    // ```
+    pub subject_masks: Vec<Vec<MaskedInterval>>,
     pub db_len_total: usize,
     pub db_num_seqs: usize,
 }
@@ -415,6 +423,91 @@ pub fn read_sequences(args: &BlastnArgs) -> Result<(Vec<fasta::Record>, Vec<Stri
     Ok((queries, query_ids, subjects))
 }
 
+// NCBI reference: ncbi-blast/c++/src/objtools/readers/fasta.cpp:856-949
+// ```c
+// case 'a': case 'b': case 'c': case 'd': ...
+//     char_type = eCharType_MaskedNonGap;
+// ...
+// case eCharType_MaskedNonGap:
+//     m_SeqData[m_CurrentPos] = s_ASCII_MustBeLowerToUpper(c);
+//     OpenMask();
+// ```
+// NCBI reference: ncbi-blast/c++/src/objtools/readers/fasta.cpp:1079-1089
+// ```c
+// m_CurrentMask->SetPacked_int().AddInterval(... m_MaskRangeStart,
+//     GetCurrentPos(...) - 1, eNa_strand_plus);
+// ```
+fn collect_lowercase_masks(seq: &[u8]) -> Vec<MaskedInterval> {
+    let mut masks = Vec::new();
+    let mut current_start: Option<usize> = None;
+
+    for (idx, &base) in seq.iter().enumerate() {
+        let is_lower = base.is_ascii_lowercase();
+        match (current_start, is_lower) {
+            (None, true) => current_start = Some(idx),
+            (Some(start), false) => {
+                if start < idx {
+                    masks.push(MaskedInterval::new(start, idx));
+                }
+                current_start = None;
+            }
+            _ => {}
+        }
+    }
+
+    if let Some(start) = current_start {
+        if start < seq.len() {
+            masks.push(MaskedInterval::new(start, seq.len()));
+        }
+    }
+
+    masks
+}
+
+// NCBI reference: ncbi-blast/c++/src/algo/blast/blastinput/blast_args.cpp:2547-2556
+// ```c
+// const bool use_lcase_masks = args.Exist(kArgUseLCaseMasking) ? ... : kDfltArgUseLCaseMasking;
+// ReadSequencesToBlast(... use_lcase_masks, subjects, ...);
+// ```
+fn collect_lowercase_masks_for_records(
+    records: &[fasta::Record],
+) -> Vec<Vec<MaskedInterval>> {
+    records
+        .iter()
+        .map(|record| collect_lowercase_masks(record.seq()))
+        .collect()
+}
+
+// NCBI reference: ncbi-blast/c++/src/algo/blast/api/dust_filter.cpp:92-128
+// ```c
+// const int kTopFlags = CSeq_loc::fStrand_Ignore|CSeq_loc::fMerge_All|CSeq_loc::fSort;
+// if (orig_query_mask.NotEmpty()) {
+//     orig_query_mask->Add(*query_masks,  kTopFlags, 0);
+// } else {
+//     query_masks->Merge(kTopFlags, 0);
+// }
+// ```
+fn merge_mask_intervals(mut intervals: Vec<MaskedInterval>) -> Vec<MaskedInterval> {
+    if intervals.is_empty() {
+        return intervals;
+    }
+
+    intervals.sort_by_key(|interval| interval.start);
+    let mut merged: Vec<MaskedInterval> = Vec::with_capacity(intervals.len());
+    let mut current = intervals[0].clone();
+
+    for interval in intervals.into_iter().skip(1) {
+        if interval.start <= current.end {
+            current.end = current.end.max(interval.end);
+        } else {
+            merged.push(current);
+            current = interval;
+        }
+    }
+    merged.push(current);
+    merged
+}
+
 /// Apply DUST filter to query sequences
 pub fn apply_dust_masking(
     args: &BlastnArgs,
@@ -554,7 +647,39 @@ pub fn prepare_sequence_data(
     query_ids: Vec<String>,
     subjects: Vec<fasta::Record>,
 ) -> SequenceData {
-    let query_masks = apply_dust_masking(args, &queries);
+    let mut query_masks = apply_dust_masking(args, &queries);
+    // NCBI reference: ncbi-blast/c++/src/algo/blast/blastinput/blast_args.cpp:2547-2556
+    // ```c
+    // const bool use_lcase_masks = args.Exist(kArgUseLCaseMasking) ? ... : kDfltArgUseLCaseMasking;
+    // ReadSequencesToBlast(... use_lcase_masks, subjects, ...);
+    // ```
+    // NCBI reference: ncbi-blast/c++/src/algo/blast/api/dust_filter.cpp:92-128
+    // ```c
+    // orig_query_mask->Add(*query_masks,  kTopFlags, 0);
+    // query_masks->Merge(kTopFlags, 0);
+    // ```
+    if args.lcase_masking {
+        let lcase_masks = collect_lowercase_masks_for_records(&queries);
+        for (dust_masks, lcase) in query_masks.iter_mut().zip(lcase_masks) {
+            if !lcase.is_empty() {
+                dust_masks.extend(lcase);
+                let merged = merge_mask_intervals(std::mem::take(dust_masks));
+                *dust_masks = merged;
+            }
+        }
+    }
+    // NCBI reference: ncbi-blast/c++/src/algo/blast/api/blast_setup_cxx.cpp:812-826
+    // ```c
+    // if (subjects.GetMask(i).NotEmpty()) {
+    //     s_SeqLoc2MaskedSubjRanges(masks, &*range, length, masked_ranges);
+    //     BlastSeqBlkSetSeqRanges(..., eSoftSubjMasking);
+    // }
+    // ```
+    let subject_masks = if args.lcase_masking {
+        collect_lowercase_masks_for_records(&subjects)
+    } else {
+        vec![Vec::new(); subjects.len()]
+    };
     let db_len_total: usize = subjects.iter().map(|r| r.seq().len()).sum();
     let db_num_seqs: usize = subjects.len();
     
@@ -563,8 +688,49 @@ pub fn prepare_sequence_data(
         query_ids,
         subjects,
         query_masks,
+        subject_masks,
         db_len_total,
         db_num_seqs,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    // NCBI reference: ncbi-blast/c++/src/objtools/readers/fasta.cpp:867-949
+    // ```c
+    // case 'a': case 'b': case 'c': case 'd': ...
+    //     char_type = eCharType_MaskedNonGap;
+    // ...
+    // case eCharType_MaskedNonGap:
+    //     OpenMask();
+    // ```
+    #[test]
+    fn test_collect_lowercase_masks() {
+        let masks = collect_lowercase_masks(b"AAaaBBbC");
+        assert_eq!(
+            masks,
+            vec![MaskedInterval::new(2, 4), MaskedInterval::new(6, 7)]
+        );
+    }
+
+    // NCBI reference: ncbi-blast/c++/src/algo/blast/api/dust_filter.cpp:121-127
+    // ```c
+    // const int kTopFlags = ... | CSeq_loc::fMerge_All | ...;
+    // query_masks->Merge(kTopFlags, 0);
+    // ```
+    #[test]
+    fn test_merge_mask_intervals() {
+        let merged = merge_mask_intervals(vec![
+            MaskedInterval::new(0, 2),
+            MaskedInterval::new(2, 5),
+            MaskedInterval::new(6, 7),
+        ]);
+        assert_eq!(
+            merged,
+            vec![MaskedInterval::new(0, 5), MaskedInterval::new(6, 7)]
+        );
     }
 }
 

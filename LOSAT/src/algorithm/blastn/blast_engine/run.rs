@@ -2475,8 +2475,8 @@ pub fn run(args: BlastnArgs) -> Result<()> {
                     prelim_ss,
                     prelim_se,
                     prelim_score,
-                    final_seed_qs,
-                    final_seed_ss,
+                    _final_seed_qs,
+                    _final_seed_ss,
                 ) = if use_dp {
                     // DP seed selection (blastn)
                     // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_gapalign.c:4033-4045
@@ -2592,39 +2592,50 @@ pub fn run(args: BlastnArgs) -> Result<()> {
                 //    s_start = hsp->subject.gapped_start;
                 // }
                 // ```
-                let mut trace_q_start = final_seed_qs;
-                let mut trace_s_start = final_seed_ss;
-                if trace_q_start == 0 && trace_s_start == 0 {
-                    let (q_start, s_start) = match blast_get_offsets_for_gapped_alignment(
-                        q_seq_blastna,
-                        s_seq_trace,
-                        uh.qs,
-                        uh.qe,
-                        uh.ss,
-                        uh.se,
-                        &score_matrix,
-                    ) {
-                        Some(value) => value,
-                        None => {
-                            continue;
-                        }
-                    };
-                    trace_q_start = q_start;
-                    trace_s_start = s_start;
-                } else {
-                    let (q_start, s_start) = blast_get_start_for_gapped_alignment_nucl(
-                        q_seq_blastna,
-                        s_seq_trace,
-                        uh.qs,
-                        uh.qe,
-                        uh.ss,
-                        uh.se,
-                        trace_q_start,
-                        trace_s_start,
-                    );
-                    trace_q_start = q_start;
-                    trace_s_start = s_start;
-                }
+                // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_gapalign.c:3908-3913
+                // ```c
+                // tmp_hsp.query.offset = q_start;
+                // tmp_hsp.query.end = q_end;
+                // tmp_hsp.subject.offset = s_start;
+                // tmp_hsp.subject.end = s_end;
+                // ```
+                // Use preliminary gapped bounds (prelim_*) for gapped-start refinement.
+                // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_traceback.c:436-458
+                // ```c
+                // if (!kIsOutOfFrame && hsp->query.gapped_start == 0 &&
+                //                       hsp->subject.gapped_start == 0) {
+                //    Boolean retval =
+                //       BlastGetOffsetsForGappedAlignment(query, subject, sbp,
+                //           hsp, &q_start, &s_start);
+                //    if (!retval) { continue; }
+                //    hsp->query.gapped_start = q_start;
+                //    hsp->subject.gapped_start = s_start;
+                // } else {
+                //    BlastGetStartForGappedAlignmentNucl(query, subject, hsp);
+                //    q_start = hsp->query.gapped_start;
+                //    s_start = hsp->subject.gapped_start;
+                // }
+                // ```
+                // LOSAT does not persist gapped_start in prelim, so keep it at 0 and follow
+                // the BlastGetOffsetsForGappedAlignment path for blastn parity.
+                let mut trace_q_start = 0usize;
+                let mut trace_s_start = 0usize;
+                let (q_start, s_start) = match blast_get_offsets_for_gapped_alignment(
+                    q_seq_blastna,
+                    s_seq_trace,
+                    prelim_qs,
+                    prelim_qe,
+                    prelim_ss,
+                    prelim_se,
+                    &score_matrix,
+                ) {
+                    Some(value) => value,
+                    None => {
+                        continue;
+                    }
+                };
+                trace_q_start = q_start;
+                trace_s_start = s_start;
 
                 // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_traceback.c:463-473
                 // ```c
@@ -2872,7 +2883,18 @@ pub fn run(args: BlastnArgs) -> Result<()> {
             // NCBI reference: blast_traceback.c:637-638
             // Blast_HSPListPurgeHSPsWithCommonEndpoints(program_number, hsp_list, FALSE);
             let hits_step1 = local_hits.len();
-            let (mut local_hits, extra_start) = purge_hsps_with_common_endpoints_ex(local_hits, false);
+            let (mut local_hits, mut extra_start) = purge_hsps_with_common_endpoints_ex(local_hits, false);
+            // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_traceback.c:640-644
+            // ```c
+            // /* Low level greedy algorithm ignores ambiguities, so the score
+            //  * needs to be reevaluated. */
+            // if (kGreedyTraceback) {
+            //    extra_start = 0;
+            // }
+            // ```
+            if !use_dp {
+                extra_start = 0;
+            }
             let hits_step2 = local_hits.len();
 
             // Step 3: Re-evaluate trimmed HSPs

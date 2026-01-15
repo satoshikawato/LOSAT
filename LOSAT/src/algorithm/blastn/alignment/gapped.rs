@@ -1621,7 +1621,7 @@ fn stats_from_edit_ops(
 /// 2. After DP, reconstructs the traceback path from best position to origin
 /// 3. Returns the edit script as a Vec<GapEditOp> with run-length encoding
 ///
-/// Returns: (q_consumed, s_consumed, score, matches, mismatches, gap_opens, gap_letters, edit_ops)
+/// Returns: (q_consumed, s_consumed, score, matches, mismatches, gap_opens, gap_letters, edit_ops, fence_hit)
 pub fn extend_gapped_one_direction_with_traceback(
     q_seq: &[u8],
     s_seq: &[u8],
@@ -1631,7 +1631,7 @@ pub fn extend_gapped_one_direction_with_traceback(
     gap_open: i32,
     gap_extend: i32,
     x_drop: i32,
-) -> (usize, usize, i32, usize, usize, usize, usize, Vec<GapEditOp>) {
+) -> (usize, usize, i32, usize, usize, usize, usize, Vec<GapEditOp>, bool) {
     // NCBI reference: blast_gapalign.c:364-733 ALIGN_EX function
     // This is the traceback-capturing version (score_only = FALSE case)
     // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_gapalign.c:313-319 (BLAST_GapAlignStructNew)
@@ -1660,7 +1660,7 @@ fn extend_gapped_one_direction_with_traceback_with_scratch(
     gap_extend: i32,
     x_drop: i32,
     gap_scratch: &mut GapAlignScratch,
-) -> (usize, usize, i32, usize, usize, usize, usize, Vec<GapEditOp>) {
+) -> (usize, usize, i32, usize, usize, usize, usize, Vec<GapEditOp>, bool) {
     // NCBI reference: blast_gapalign.c:364-733 ALIGN_EX function
     // This is the traceback-capturing version (score_only = FALSE case)
 
@@ -1681,7 +1681,7 @@ fn extend_gapped_one_direction_with_traceback_with_scratch(
     // NCBI reference: blast_gapalign.c:431-432
     // if(N <= 0 || M <= 0) return 0;
     if m == 0 || n == 0 {
-        return (0, 0, 0, 0, 0, 0, 0, Vec::new());
+        return (0, 0, 0, 0, 0, 0, 0, Vec::new(), false);
     }
 
     // NCBI reference: blast_gapalign.c:457-460
@@ -1969,11 +1969,11 @@ fn extend_gapped_one_direction_with_traceback_with_scratch(
     // if (fence_hit && *fence_hit) goto done;
     // ```
     if fence_hit {
-        return (a_offset, b_offset, best_score, 0, 0, 0, 0, Vec::new());
+        return (a_offset, b_offset, best_score, 0, 0, 0, 0, Vec::new(), true);
     }
 
     if best_score <= 0 {
-        return (0, 0, 0, 0, 0, 0, 0, Vec::new());
+        return (0, 0, 0, 0, 0, 0, 0, Vec::new(), false);
     }
 
     // NCBI reference: blast_gapalign.c:682-684
@@ -2116,6 +2116,7 @@ fn extend_gapped_one_direction_with_traceback_with_scratch(
         gap_opens,
         gap_letters,
         edit_ops,
+        false,
     )
 }
 
@@ -2135,7 +2136,7 @@ pub fn extend_gapped_one_direction_with_traceback_ex(
     gap_extend: i32,
     x_drop: i32,
     reverse: bool,
-) -> (usize, usize, i32, usize, usize, usize, usize, Vec<GapEditOp>) {
+) -> (usize, usize, i32, usize, usize, usize, usize, Vec<GapEditOp>, bool) {
     // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_gapalign.c:313-319 (BLAST_GapAlignStructNew)
     // NCBI reference: ncbi-blast/c++/include/algo/blast/core/blast_gapalign.h:69-80 (BlastGapAlignStruct)
     let mut gap_scratch = GapAlignScratch::new();
@@ -2168,7 +2169,7 @@ fn extend_gapped_one_direction_with_traceback_ex_with_scratch(
     x_drop: i32,
     reverse: bool,
     gap_scratch: &mut GapAlignScratch,
-) -> (usize, usize, i32, usize, usize, usize, usize, Vec<GapEditOp>) {
+) -> (usize, usize, i32, usize, usize, usize, usize, Vec<GapEditOp>, bool) {
     // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_gapalign.c:364-733 (ALIGN_EX)
     if !reverse {
         // Forward extension - use subsequences
@@ -2190,8 +2191,10 @@ fn extend_gapped_one_direction_with_traceback_ex_with_scratch(
 
     let m = len1;
     let n = len2;
+    // NCBI reference: blast_gapalign.c:431-432
+    // if(N <= 0 || M <= 0) return 0;
     if m == 0 || n == 0 {
-        return (0, 0, 0, 0, 0, 0, 0, Vec::new());
+        return (0, 0, 0, 0, 0, 0, 0, Vec::new(), false);
     }
 
     #[inline(always)]
@@ -2445,11 +2448,11 @@ fn extend_gapped_one_direction_with_traceback_ex_with_scratch(
     // if (fence_hit && *fence_hit) goto done;
     // ```
     if fence_hit {
-        return (a_offset, b_offset, best_score, 0, 0, 0, 0, Vec::new());
+        return (a_offset, b_offset, best_score, 0, 0, 0, 0, Vec::new(), true);
     }
 
     if best_score <= 0 {
-        return (0, 0, 0, 0, 0, 0, 0, Vec::new());
+        return (0, 0, 0, 0, 0, 0, 0, Vec::new(), false);
     }
 
     let mut a_index = a_offset;
@@ -2564,6 +2567,7 @@ fn extend_gapped_one_direction_with_traceback_ex_with_scratch(
         gap_opens,
         gap_letters,
         edit_ops,
+        false,
     )
 }
 
@@ -2573,7 +2577,7 @@ fn extend_gapped_one_direction_with_traceback_ex_with_scratch(
 /// Reference: ncbi-blast/c++/src/algo/blast/core/blast_gapalign.c:2778-2831
 /// BLAST_GappedAlignmentWithTraceback
 ///
-/// Returns: (qs, qe, ss, se, score, matches, mismatches, gaps, gap_letters, edit_ops)
+/// Returns: (qs, qe, ss, se, score, matches, mismatches, gaps, gap_letters, edit_ops, fence_hit)
 pub fn extend_gapped_heuristic_with_traceback(
     q_seq: &[u8],
     s_seq: &[u8],
@@ -2586,7 +2590,7 @@ pub fn extend_gapped_heuristic_with_traceback(
     gap_open: i32,
     gap_extend: i32,
     x_drop: i32,
-) -> (usize, usize, usize, usize, i32, usize, usize, usize, usize, Vec<GapEditOp>) {
+) -> (usize, usize, usize, usize, i32, usize, usize, usize, usize, Vec<GapEditOp>, bool) {
     // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_gapalign.c:313-319 (BLAST_GapAlignStructNew)
     // NCBI reference: ncbi-blast/c++/include/algo/blast/core/blast_gapalign.h:69-80 (BlastGapAlignStruct)
     let mut gap_scratch = GapAlignScratch::new();
@@ -2620,15 +2624,15 @@ pub fn extend_gapped_heuristic_with_traceback_with_scratch(
     gap_extend: i32,
     x_drop: i32,
     gap_scratch: &mut GapAlignScratch,
-) -> (usize, usize, usize, usize, i32, usize, usize, usize, usize, Vec<GapEditOp>) {
+) -> (usize, usize, usize, usize, i32, usize, usize, usize, usize, Vec<GapEditOp>, bool) {
     // Bounds validation
     if qs >= q_seq.len() || ss >= s_seq.len() {
-        return (qs, qs, ss, ss, 0, 0, 0, 0, 0, Vec::new());
+        return (qs, qs, ss, ss, 0, 0, 0, 0, 0, Vec::new(), false);
     }
 
     let len = len.min(q_seq.len() - qs).min(s_seq.len() - ss);
     if len == 0 {
-        return (qs, qs, ss, ss, 0, 0, 0, 0, 0, Vec::new());
+        return (qs, qs, ss, ss, 0, 0, 0, 0, 0, Vec::new(), false);
     }
 
     // NCBI blastn uses a single gapped start point; left extension includes it.
@@ -2639,7 +2643,7 @@ pub fn extend_gapped_heuristic_with_traceback_with_scratch(
     let left_q_len = qs + seed_len;
     let left_s_len = ss + seed_len;
 
-    let (left_q_consumed, left_s_consumed, left_score, _left_matches, _left_mismatches, _left_gaps, _left_gap_letters, left_edit_ops) =
+    let (left_q_consumed, left_s_consumed, left_score, _left_matches, _left_mismatches, _left_gaps, _left_gap_letters, left_edit_ops, left_fence_hit) =
         if left_q_len > 0 && left_s_len > 0 {
             extend_gapped_one_direction_with_traceback_ex_with_scratch(
                 q_seq,
@@ -2656,8 +2660,16 @@ pub fn extend_gapped_heuristic_with_traceback_with_scratch(
                 gap_scratch,
             )
         } else {
-            (0, 0, 0, 0, 0, 0, 0, Vec::new())
+            (0, 0, 0, 0, 0, 0, 0, Vec::new(), false)
         };
+    // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_gapalign.c:4620-4623
+    // ```c
+    // if ((! (fence_hit && *fence_hit)) &&
+    //     (q_start < q_length) && (s_start < s_length)) {
+    // ```
+    if left_fence_hit {
+        return (qs, qs, ss, ss, 0, 0, 0, 0, 0, Vec::new(), true);
+    }
 
     // Right extension (forward direction, start excluded)
     let right_q_start = qs + seed_len;
@@ -2665,7 +2677,7 @@ pub fn extend_gapped_heuristic_with_traceback_with_scratch(
     let right_q_len = q_seq.len().saturating_sub(right_q_start);
     let right_s_len = s_seq.len().saturating_sub(right_s_start);
 
-    let (right_q_consumed, right_s_consumed, right_score, _right_matches, _right_mismatches, _right_gaps, _right_gap_letters, right_edit_ops) =
+    let (right_q_consumed, right_s_consumed, right_score, _right_matches, _right_mismatches, _right_gaps, _right_gap_letters, right_edit_ops, right_fence_hit) =
         if right_q_len > 0 && right_s_len > 0 {
             extend_gapped_one_direction_with_traceback_with_scratch(
                 &q_seq[right_q_start..],
@@ -2679,8 +2691,16 @@ pub fn extend_gapped_heuristic_with_traceback_with_scratch(
                 gap_scratch,
             )
         } else {
-            (0, 0, 0, 0, 0, 0, 0, Vec::new())
+            (0, 0, 0, 0, 0, 0, 0, Vec::new(), false)
         };
+    // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_gapalign.c:4642-4643
+    // ```c
+    // score_right =
+    //    ALIGN_EX(..., fence_hit);
+    // ```
+    if right_fence_hit {
+        return (qs, qs, ss, ss, 0, 0, 0, 0, 0, Vec::new(), true);
+    }
 
     // Combine coordinates (NCBI: start included on left, excluded on right)
     let mut final_qs = qs + seed_len - left_q_consumed;
@@ -2798,6 +2818,7 @@ pub fn extend_gapped_heuristic_with_traceback_with_scratch(
         total_gaps,
         total_gap_letters,
         combined_edit_ops,
+        false,
     )
 }
 

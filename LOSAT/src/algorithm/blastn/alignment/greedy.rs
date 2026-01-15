@@ -2506,14 +2506,14 @@ fn greedy_gapped_alignment_internal(
     gap_extend: i32,
     x_drop: i32,
     do_traceback: bool,
-) -> Option<GreedyGappedCore> {
+) -> (Option<GreedyGappedCore>, bool) {
     let q_avail = query.len().saturating_sub(q_off) as i32;
     let s_avail = subject.len().saturating_sub(s_off) as i32;
     let rem: u8 = 4; // uncompressed subject
 
     let mut max_len = q_avail.max(s_avail);
     if max_len <= 0 {
-        return None;
+        return (None, false);
     }
 
     // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_gapalign.c:325-330
@@ -2562,8 +2562,14 @@ fn greedy_gapped_alignment_internal(
             &mut fence_hit,
             &mut fwd_start_point,
         );
+        // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_gapalign.c:2812-2816
+        // ```c
+        // if (fence_hit && *fence_hit) {
+        //     return -1;
+        // }
+        // ```
         if fence_hit {
-            return None;
+            return (None, true);
         }
         if score >= 0 {
             break;
@@ -2591,8 +2597,14 @@ fn greedy_gapped_alignment_internal(
             &mut fence_hit,
             &mut rev_start_point,
         );
+        // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_gapalign.c:2844-2847
+        // ```c
+        // if (fence_hit && *fence_hit) {
+        //     return -1;
+        // }
+        // ```
         if fence_hit {
-            return None;
+            return (None, true);
         }
         if score_left >= 0 {
             score += score_left;
@@ -2674,7 +2686,7 @@ fn greedy_gapped_alignment_internal(
         }
     }
 
-    Some(GreedyGappedCore {
+    (Some(GreedyGappedCore {
         q_start: q_off as i32 - q_ext_l,
         q_end: q_off as i32 + q_ext_r,
         s_start: s_off as i32 - s_ext_l,
@@ -2683,7 +2695,7 @@ fn greedy_gapped_alignment_internal(
         s_seed_start,
         score,
         edit_script,
-    })
+    }), false)
 }
 
 /// Greedy gapped alignment score-only (preliminary).
@@ -2699,7 +2711,7 @@ pub fn greedy_gapped_alignment_score_only(
     gap_extend: i32,
     x_drop: i32,
 ) -> Option<(usize, usize, usize, usize, i32, usize, usize)> {
-    let core = greedy_gapped_alignment_internal(
+    let (core, fence_hit) = greedy_gapped_alignment_internal(
         query,
         subject,
         q_off,
@@ -2710,7 +2722,17 @@ pub fn greedy_gapped_alignment_score_only(
         gap_extend,
         x_drop,
         false,
-    )?;
+    );
+    // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_gapalign.c:2812-2816
+    // ```c
+    // if (fence_hit && *fence_hit) {
+    //     return -1;
+    // }
+    // ```
+    if fence_hit {
+        return None;
+    }
+    let core = core?;
 
     if core.q_start < 0 || core.s_start < 0 {
         return None;
@@ -2739,8 +2761,8 @@ pub fn greedy_gapped_alignment_with_traceback(
     gap_open: i32,
     gap_extend: i32,
     x_drop: i32,
-) -> Option<(usize, usize, usize, usize, i32, usize, usize, usize, usize, Vec<GapEditOp>)> {
-    let core = greedy_gapped_alignment_internal(
+) -> (Option<(usize, usize, usize, usize, i32, usize, usize, usize, usize, Vec<GapEditOp>)>, bool) {
+    let (core, fence_hit) = greedy_gapped_alignment_internal(
         query,
         subject,
         q_off,
@@ -2751,9 +2773,23 @@ pub fn greedy_gapped_alignment_with_traceback(
         gap_extend,
         x_drop,
         true,
-    )?;
+    );
+    // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_traceback.c:503-507
+    // ```c
+    // BLAST_GreedyGappedAlignment(..., gap_align, ...);
+    // ```
+    if fence_hit {
+        return (None, true);
+    }
+    let core = match core {
+        Some(value) => value,
+        None => return (None, false),
+    };
 
-    let edit_script = core.edit_script?;
+    let edit_script = match core.edit_script {
+        Some(edit_script) => edit_script,
+        None => return (None, false),
+    };
     let mut edit_ops: Vec<GapEditOp> = Vec::with_capacity(edit_script.size);
     for i in 0..edit_script.size {
         let op = edit_script.op_type[i];
@@ -2769,7 +2805,8 @@ pub fn greedy_gapped_alignment_with_traceback(
         &edit_ops,
     );
 
-    Some((
+    (
+        Some((
         core.q_start as usize,
         core.q_end as usize,
         core.s_start as usize,
@@ -2780,5 +2817,7 @@ pub fn greedy_gapped_alignment_with_traceback(
         gap_opens,
         gap_letters,
         edit_ops,
-    ))
+        )),
+        false,
+    )
 }

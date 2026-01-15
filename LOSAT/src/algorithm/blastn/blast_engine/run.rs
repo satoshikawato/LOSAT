@@ -2407,6 +2407,26 @@ pub fn run(args: BlastnArgs) -> Result<()> {
             let total_ungapped = ungapped_hits.len();
             let gapped_start_time = std::time::Instant::now();
             let mut dbg_gapped_calls = 0usize;
+            // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_traceback.c:307-310
+            // ```c
+            // if (fence_hit) {
+            //     orig_hsplist = BlastHSPListDup(hsp_list);
+            //     *fence_hit = FALSE;
+            // }
+            // ```
+            // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_traceback.c:516-520
+            // ```c
+            // fence_error = (fence_hit && *fence_hit);
+            // if (fence_error) { break; }
+            // ```
+            // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_traceback.c:701-709
+            // ```c
+            // if (fence_error) {
+            //     Blast_HSPListSwap(hsp_list, orig_hsplist);
+            //     Blast_HSPListFree(orig_hsplist);
+            // }
+            // ```
+            let mut fence_error = false;
 
             // Process each ungapped hit in score order
             for (idx, uh) in ungapped_hits.iter().enumerate() {
@@ -2475,8 +2495,8 @@ pub fn run(args: BlastnArgs) -> Result<()> {
                     prelim_ss,
                     prelim_se,
                     prelim_score,
-                    _final_seed_qs,
-                    _final_seed_ss,
+                    seed_qs,
+                    seed_ss,
                 ) = if use_dp {
                     // DP seed selection (blastn)
                     // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_gapalign.c:4033-4045
@@ -2592,50 +2612,42 @@ pub fn run(args: BlastnArgs) -> Result<()> {
                 //    s_start = hsp->subject.gapped_start;
                 // }
                 // ```
-                // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_gapalign.c:3908-3913
+                // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_gapalign.c:3323-3389
                 // ```c
-                // tmp_hsp.query.offset = q_start;
-                // tmp_hsp.query.end = q_end;
-                // tmp_hsp.subject.offset = s_start;
-                // tmp_hsp.subject.end = s_end;
+                // BlastGetStartForGappedAlignmentNucl(query, subject, hsp);
+                // q_start = hsp->query.gapped_start;
+                // s_start = hsp->subject.gapped_start;
                 // ```
-                // Use preliminary gapped bounds (prelim_*) for gapped-start refinement.
-                // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_traceback.c:436-458
-                // ```c
-                // if (!kIsOutOfFrame && hsp->query.gapped_start == 0 &&
-                //                       hsp->subject.gapped_start == 0) {
-                //    Boolean retval =
-                //       BlastGetOffsetsForGappedAlignment(query, subject, sbp,
-                //           hsp, &q_start, &s_start);
-                //    if (!retval) { continue; }
-                //    hsp->query.gapped_start = q_start;
-                //    hsp->subject.gapped_start = s_start;
-                // } else {
-                //    BlastGetStartForGappedAlignmentNucl(query, subject, hsp);
-                //    q_start = hsp->query.gapped_start;
-                //    s_start = hsp->subject.gapped_start;
-                // }
-                // ```
-                // LOSAT does not persist gapped_start in prelim, so keep it at 0 and follow
-                // the BlastGetOffsetsForGappedAlignment path for blastn parity.
-                let mut trace_q_start = 0usize;
-                let mut trace_s_start = 0usize;
-                let (q_start, s_start) = match blast_get_offsets_for_gapped_alignment(
-                    q_seq_blastna,
-                    s_seq_trace,
-                    prelim_qs,
-                    prelim_qe,
-                    prelim_ss,
-                    prelim_se,
-                    &score_matrix,
-                ) {
-                    Some(value) => value,
-                    None => {
-                        continue;
-                    }
+                // Use preliminary gapped bounds (prelim_*) with the seed offsets
+                // to match BlastGetStartForGappedAlignmentNucl vs. BlastGetOffsetsForGappedAlignment.
+                let (trace_q_start, trace_s_start) = if seed_qs == 0 && seed_ss == 0 {
+                    let (q_start, s_start) = match blast_get_offsets_for_gapped_alignment(
+                        q_seq_blastna,
+                        s_seq_trace,
+                        prelim_qs,
+                        prelim_qe,
+                        prelim_ss,
+                        prelim_se,
+                        &score_matrix,
+                    ) {
+                        Some(value) => value,
+                        None => {
+                            continue;
+                        }
+                    };
+                    (q_start, s_start)
+                } else {
+                    blast_get_start_for_gapped_alignment_nucl(
+                        q_seq_blastna,
+                        s_seq_trace,
+                        prelim_qs,
+                        prelim_qe,
+                        prelim_ss,
+                        prelim_se,
+                        seed_qs,
+                        seed_ss,
+                    )
                 };
-                trace_q_start = q_start;
-                trace_s_start = s_start;
 
                 // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_traceback.c:463-473
                 // ```c
@@ -2686,6 +2698,7 @@ pub fn run(args: BlastnArgs) -> Result<()> {
                     gaps,
                     gap_letters,
                     edit_ops,
+                    fence_hit,
                 ) = if use_dp {
                     extend_gapped_heuristic_with_traceback_with_scratch(
                         q_seq_blastna,
@@ -2713,7 +2726,7 @@ pub fn run(args: BlastnArgs) -> Result<()> {
                     //    ...
                     // }
                     // ```
-                    match greedy_gapped_alignment_with_traceback(
+                    let (value, fence_hit) = greedy_gapped_alignment_with_traceback(
                         q_seq_blastna,
                         adjusted_subject,
                         trace_q_start,
@@ -2723,13 +2736,27 @@ pub fn run(args: BlastnArgs) -> Result<()> {
                         gap_open,
                         gap_extend,
                         x_drop_trace,
-                    ) {
-                        Some(value) => value,
-                        None => {
-                            continue;
+                    );
+                    if fence_hit {
+                        (0, 0, 0, 0, 0, 0, 0, 0, 0, Vec::new(), true)
+                    } else {
+                        match value {
+                            Some(value) => (value.0, value.1, value.2, value.3, value.4, value.5, value.6, value.7, value.8, value.9, false),
+                            None => {
+                                continue;
+                            }
                         }
                     }
                 };
+                // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_traceback.c:516-520
+                // ```c
+                // fence_error = (fence_hit && *fence_hit);
+                // if (fence_error) { break; }
+                // ```
+                if fence_hit {
+                    fence_error = true;
+                    break;
+                }
 
                 // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_traceback.c:598-600
                 // ```c
@@ -2837,6 +2864,22 @@ pub fn run(args: BlastnArgs) -> Result<()> {
                     gap_info,
                 }, internal));
 
+            }
+
+            // If fence_hit was observed, roll back this subject to match NCBI's fence_error behavior.
+            // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_traceback.c:701-709
+            // ```c
+            // if (fence_error) {
+            //     Blast_HSPListSwap(hsp_list, orig_hsplist);
+            //     Blast_HSPListFree(orig_hsplist);
+            // }
+            // ```
+            if fence_error {
+                if debug_mode || blastn_debug {
+                    eprintln!("[DEBUG] Fence hit detected; dropping subject {}", s_id);
+                }
+                bar.inc(1);
+                return;
             }
 
             // DEBUG: Log gapped extension stats

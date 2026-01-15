@@ -1709,7 +1709,18 @@ fn extend_gapped_one_direction_with_traceback_with_scratch(
     // First edit script row for initial gap extension
     let row0 = gap_alloc_trace_row(trace_rows, trace_offsets, trace_rows_used, 0, 0);
     row0.reserve(num_extra_cells);
-    row0.push(0); // Position 0
+    // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_gapalign.c:476-489
+    // ```c
+    // score = -gap_open_extend;
+    // score_array[0].best = 0;
+    // score_array[0].best_gap = -gap_open_extend;
+    // for (i = 1; i <= N; i++) {
+    //     ...
+    //     edit_script_row[i] = SCRIPT_GAP_IN_A;
+    // }
+    // ```
+    // Keep a placeholder at index 0 so edit_script_row[i] aligns with NCBI's indexing.
+    row0.push(SCRIPT_GAP_IN_A);
 
     // NCBI reference: blast_gapalign.c:481-490
     // for (i = 1; i <= N; i++) {
@@ -1889,7 +1900,7 @@ fn extend_gapped_one_direction_with_traceback_with_scratch(
         // ```c
         // if (first_b_index == b_size || (fence_hit && *fence_hit)) break;
         // ```
-        if first_b_index >= b_size || fence_hit {
+        if first_b_index == b_size || fence_hit {
             break;
         }
 
@@ -1935,7 +1946,7 @@ fn extend_gapped_one_direction_with_traceback_with_scratch(
     // if (fence_hit && *fence_hit) goto done;
     // ```
     if fence_hit {
-        return (0, 0, 0, 0, 0, 0, 0, Vec::new());
+        return (a_offset, b_offset, best_score, 0, 0, 0, 0, Vec::new());
     }
 
     if best_score <= 0 {
@@ -2202,7 +2213,18 @@ fn extend_gapped_one_direction_with_traceback_ex_with_scratch(
 
     let row0 = gap_alloc_trace_row(trace_rows, trace_offsets, trace_rows_used, 0, 0);
     row0.reserve(num_extra_cells);
-    row0.push(0);
+    // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_gapalign.c:476-489
+    // ```c
+    // score = -gap_open_extend;
+    // score_array[0].best = 0;
+    // score_array[0].best_gap = -gap_open_extend;
+    // for (i = 1; i <= N; i++) {
+    //     ...
+    //     edit_script_row[i] = SCRIPT_GAP_IN_A;
+    // }
+    // ```
+    // Keep a placeholder at index 0 so edit_script_row[i] aligns with NCBI's indexing.
+    row0.push(SCRIPT_GAP_IN_A);
 
     let mut b_size = 1usize;
     for i in 1..=n.min(*dp_mem_alloc - 1) {
@@ -2335,7 +2357,7 @@ fn extend_gapped_one_direction_with_traceback_ex_with_scratch(
         // ```c
         // if (first_b_index == b_size || (fence_hit && *fence_hit)) break;
         // ```
-        if first_b_index >= b_size || fence_hit {
+        if first_b_index == b_size || fence_hit {
             break;
         }
 
@@ -2370,7 +2392,7 @@ fn extend_gapped_one_direction_with_traceback_ex_with_scratch(
     // if (fence_hit && *fence_hit) goto done;
     // ```
     if fence_hit {
-        return (0, 0, 0, 0, 0, 0, 0, Vec::new());
+        return (a_offset, b_offset, best_score, 0, 0, 0, 0, Vec::new());
     }
 
     if best_score <= 0 {
@@ -2439,8 +2461,12 @@ fn extend_gapped_one_direction_with_traceback_ex_with_scratch(
         }
     }
 
-    ops_reversed.reverse();
-
+    // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_gapalign.c:2494-2496
+    // ```c
+    // The fwd_prelim_tback script will get reversed here as the traceback started from the highest scoring point
+    // and worked backwards. The rev_prelim_tback script does NOT get reversed.  Since it was reversed when the
+    // traceback was produced it's already "forward"
+    // ```
     let mut edit_ops: Vec<GapEditOp> = Vec::with_capacity(ops_reversed.len());
     for (op_type, count) in ops_reversed {
         match op_type {
@@ -2450,9 +2476,6 @@ fn extend_gapped_one_direction_with_traceback_ex_with_scratch(
             _ => edit_ops.push(GapEditOp::Sub(count)),
         }
     }
-
-    // Reverse edit ops to match left-to-right order on the original sequences.
-    edit_ops.reverse();
 
     let q_sub = &q_seq[..len1.min(q_seq.len())];
     let s_sub = &s_seq[..len2.min(s_seq.len())];

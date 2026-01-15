@@ -155,9 +155,9 @@ pub fn cutoff_score_for_ungapped_extension(
 /// Calculate effective lengths for -subject mode (single subject as database).
 ///
 /// This computes BOTH length_adjustment and eff_searchsp in a single call,
-/// matching `BLAST_CalcEffLengths` from blast_setup.c:821-847.
+/// matching `BLAST_CalcEffLengths` from ncbi-blast/c++/src/algo/blast/core/blast_setup.c:821-847.
 ///
-/// NCBI reference (verbatim from blast_setup.c:836-843):
+/// NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_setup.c:836-843
 /// ```c
 /// Int8 effective_db_length = db_length - ((Int8)db_num_seqs * length_adjustment);
 /// if (effective_db_length <= 0)
@@ -166,7 +166,7 @@ pub fn cutoff_score_for_ungapped_extension(
 /// ```
 ///
 /// # Arguments
-/// * `query_len` - Query length (for both strands if applicable, already * 2)
+/// * `query_len` - Query length for a single context (do not double for gapped calculations)
 /// * `subject_len` - Subject length
 /// * `gapped_params` - GAPPED Karlin-Altschul parameters (kbp_gap)
 ///
@@ -312,7 +312,7 @@ pub fn compute_blastn_cutoff_score_ungapped(
 /// 3. Compute cutoff_score_max using GAPPED params and eff_searchsp
 /// 4. Return MIN(gap_trigger * scale_factor, cutoff_score_max)
 ///
-/// NCBI Reference (blast_parameters.c:368-374):
+/// NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_parameters.c:368-374
 /// For blastn in gapped mode (gapped_calculation = TRUE):
 /// ```c
 /// } else {
@@ -324,11 +324,23 @@ pub fn compute_blastn_cutoff_score_ungapped(
 /// curr_cutoffs->cutoff_score = new_cutoff;
 /// ```
 ///
-/// NCBI Reference (blast_parameters.c:926):
+/// NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_parameters.c:926
 /// searchsp = query_info->contexts[context].eff_searchsp;  // length adjustment included
 ///
+/// NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_parameters.c:348-369
+/// ```c
+/// if (!gapped_calculation || sbp->matrix_only_scoring) {
+///     Int4 query_length = query_info->contexts[context].query_length;
+///     if (program_number == eBlastTypeBlastn ||
+///         program_number == eBlastTypeMapping)
+///         query_length *= 2;
+/// } else {
+///     new_cutoff = gap_trigger;
+/// }
+/// ```
+///
 /// # Arguments
-/// * `query_len` - Query length (for both strands if applicable, already * 2)
+/// * `query_len` - Query length for a single context (do not double for gapped calculations)
 /// * `subject_len` - Subject length
 /// * `evalue_threshold` - E-value threshold (typically 10.0, for cutoff_score_max calculation)
 /// * `gap_trigger_bits` - Gap trigger in bits (typically 27.0)
@@ -354,7 +366,7 @@ pub fn compute_blastn_cutoff_score(
     let gap_trigger = gap_trigger_raw_score(gap_trigger_bits, ungapped_params);
 
     // Step 2: Compute eff_searchsp with length adjustment using GAPPED params
-    // NCBI reference: blast_setup.c:836-843
+    // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_setup.c:836-843
     // eff_searchsp = (subject_len - length_adj) * (query_len - length_adj)
     let (length_adj, eff_searchsp) = compute_eff_lengths_subject_mode_blastn(
         query_len,

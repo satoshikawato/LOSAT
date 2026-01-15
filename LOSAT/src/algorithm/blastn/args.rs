@@ -15,6 +15,30 @@ pub struct BlastnArgs {
     pub num_threads: usize,
     #[arg(long, default_value_t = 10.0)]
     pub evalue: f64,
+    /// Percent identity threshold for filtering HSPs (Blast_HSPTest).
+    ///
+    /// Default: 0.0 (disabled, matches NCBI BLAST default from calloc initialization).
+    ///
+    /// NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_hits.c:993-1001 (s_HSPTest)
+    /// ```c
+    /// return ((hsp->num_ident * 100.0 <
+    ///         align_length * hit_options->percent_identity) ||
+    ///         align_length < hit_options->min_hit_length) ;
+    /// ```
+    #[arg(long, default_value_t = 0.0)]
+    pub percent_identity: f64,
+    /// Minimum hit length for filtering HSPs (Blast_HSPTest).
+    ///
+    /// Default: 0 (disabled, matches NCBI BLAST default from calloc initialization).
+    ///
+    /// NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_hits.c:993-1001 (s_HSPTest)
+    /// ```c
+    /// return ((hsp->num_ident * 100.0 <
+    ///         align_length * hit_options->percent_identity) ||
+    ///         align_length < hit_options->min_hit_length) ;
+    /// ```
+    #[arg(long, default_value_t = 0)]
+    pub min_hit_length: usize,
     // NCBI reference: ncbi-blast/c++/src/algo/blast/blastinput/blast_args.cpp:2960-2968
     // ```c
     // if (args.Exist(kArgMaxTargetSequences) && args[kArgMaxTargetSequences]) {
@@ -68,6 +92,13 @@ pub struct BlastnArgs {
     pub dust_window: usize,
     #[arg(long, default_value_t = 1)]
     pub dust_linker: usize,
+    // NCBI reference: ncbi-blast/c++/src/algo/blast/blastinput/blast_args.cpp:1939-1942
+    // ```c
+    // arg_desc.AddFlag(kArgUseLCaseMasking,
+    //      "Use lower case filtering in query and subject sequence(s)?", true);
+    // ```
+    #[arg(long = "lcase_masking", default_value_t = false)]
+    pub lcase_masking: bool,
     /// Apply subject best hit filtering (disabled by default).
     /// Reference: ncbi-blast/c++/src/algo/blast/blastinput/cmdline_flags.cpp:135
     #[arg(long = "subject_besthit", default_value_t = false)]

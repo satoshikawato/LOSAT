@@ -147,7 +147,17 @@ fn gap_dp_reserve_initial(
 ) {
     // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_gapalign.c:797-808 (Blast_SemiGappedAlign dp_mem realloc)
     // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_gapalign.c:462-468 (ALIGN_EX dp_mem realloc)
-    if num_extra_cells + 3 >= *dp_mem_alloc {
+    // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_gapalign.c:797-805
+    // ```c
+    // if (num_extra_cells > gap_align->dp_mem_alloc) {
+    //     gap_align->dp_mem_alloc = MAX(num_extra_cells + 100,
+    //                                   2 * gap_align->dp_mem_alloc);
+    //     sfree(gap_align->dp_mem);
+    //     gap_align->dp_mem = (BlastGapDP *)malloc(gap_align->dp_mem_alloc *
+    //                                               sizeof(BlastGapDP));
+    // }
+    // ```
+    if num_extra_cells > *dp_mem_alloc {
         let new_alloc = (num_extra_cells + 100).max(*dp_mem_alloc * 2);
         *dp_mem_alloc = new_alloc;
         score_array.resize(new_alloc, BlastGapDP { best: GAP_MININT, best_gap: GAP_MININT });
@@ -1773,7 +1783,20 @@ fn extend_gapped_one_direction_with_traceback_with_scratch(
 
         // Create new row for this a_index
         let orig_b_index = first_b_index;
-        let row_capacity = b_size.saturating_sub(first_b_index) + num_extra_cells + 10;
+        // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_gapalign.c:511-519
+        // ```c
+        // if (gap_extend > 0)
+        //     state_struct = s_GapGetState(&gap_align->state_struct,
+        //                    b_size - first_b_index + num_extra_cells);
+        // else
+        //     state_struct = s_GapGetState(&gap_align->state_struct,
+        //                                 N + 3 - first_b_index);
+        // ```
+        let row_capacity = if gap_extend > 0 {
+            b_size.saturating_sub(first_b_index) + num_extra_cells
+        } else {
+            n.saturating_add(3).saturating_sub(first_b_index)
+        };
         let edit_script_row = gap_alloc_trace_row(
             trace_rows,
             trace_offsets,
@@ -2277,7 +2300,20 @@ fn extend_gapped_one_direction_with_traceback_ex_with_scratch(
         }
 
         let orig_b_index = first_b_index;
-        let row_capacity = b_size.saturating_sub(first_b_index) + num_extra_cells + 10;
+        // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_gapalign.c:511-519
+        // ```c
+        // if (gap_extend > 0)
+        //     state_struct = s_GapGetState(&gap_align->state_struct,
+        //                    b_size - first_b_index + num_extra_cells);
+        // else
+        //     state_struct = s_GapGetState(&gap_align->state_struct,
+        //                                 N + 3 - first_b_index);
+        // ```
+        let row_capacity = if gap_extend > 0 {
+            b_size.saturating_sub(first_b_index) + num_extra_cells
+        } else {
+            n.saturating_add(3).saturating_sub(first_b_index)
+        };
         let edit_script_row = gap_alloc_trace_row(
             trace_rows,
             trace_offsets,

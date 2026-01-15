@@ -103,6 +103,13 @@ authoritative, current guidance for agent behavior in LOSAT.
 - Hitlist pruning follows NCBI: trim by `max_hsps_per_subject`, then apply
   `min(hitlist_size, max_target_seqs)` with NCBI score/evalue ordering.
 - `SCAN_RANGE_BLASTN` is 0 (no scan range for blastn tasks).
+- Common-endpoint purge pass-1 uses `s_QueryOffsetCompareHSPs` tie-breaker
+  (query/subject end DESC on score ties) to keep longer HSPs.
+- Post-traceback filtering mirrors `blast_traceback.c`: re-sort by
+  `ScoreCompareHSPs`, then interval-tree containment purge
+  (`BlastIntervalTreeContainsHSP`).
+- Re-evaluation uses canonical (plus) subject sequence even when output
+  coordinates are on the minus strand.
 
 ---
 

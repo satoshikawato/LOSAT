@@ -2882,9 +2882,21 @@ pub fn run(args: BlastnArgs) -> Result<()> {
             let hits_step4 = local_hits.len();
 
             // Step 5: Re-sort by gapped score
-            // NCBI reference: blast_traceback.c:672
+            // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_traceback.c:671-672
+            // ```c
+            // /* Sort HSPs by score again, as the scores might have changed. */
             // Blast_HSPListSortByScore(hsp_list);
-            local_hits.sort_by(|a, b| b.raw_score.cmp(&a.raw_score));
+            // ```
+            // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_hits.c:1330-1353 (ScoreCompareHSPs)
+            // ```c
+            // if (0 == (result = BLAST_CMP(hsp2->score,          hsp1->score)) &&
+            //     0 == (result = BLAST_CMP(hsp1->subject.offset, hsp2->subject.offset)) &&
+            //     0 == (result = BLAST_CMP(hsp2->subject.end,    hsp1->subject.end)) &&
+            //     0 == (result = BLAST_CMP(hsp1->query  .offset, hsp2->query  .offset))) {
+            //     result = BLAST_CMP(hsp2->query.end, hsp1->query.end);
+            // }
+            // ```
+            local_hits.sort_by(score_compare_hsps);
 
             // Step 6: Phase 2 - Tree reset and second containment pass
             // NCBI reference: blast_traceback.c:678

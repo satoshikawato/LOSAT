@@ -11,13 +11,15 @@ Summary:
 - Added BLASTNA scoring matrix builder in `LOSAT/src/algorithm/blastn/alignment/gapped.rs` and updated gapped seed selection and DP scoring to use matrix values; exported `build_blastna_matrix` in `LOSAT/src/algorithm/blastn/alignment/mod.rs`.
 - Added `encode_iupac_to_ncbi2na_packed` in `LOSAT/src/core/blast_encoding.rs` (NCBI `CompressNcbi2na` behavior).
 - Updated `LOSAT/src/algorithm/blastn/blast_engine/run.rs` to use BLASTNA query for DP/greedy, packed ncbi2na for DP score-only, ncbi2na (2-bit per base) for greedy score-only, and BLASTNA for traceback; removed `extend_final_traceback` usage.
+- Fixed BLASTN common-endpoint purge pass-1 sort order to match NCBI `s_QueryOffsetCompareHSPs` tie-breaker (query/subject end DESC on score ties).
+- Updated legacy BLASTN `filter_hsps` to use canonical subject for re-evaluation and apply ScoreCompareHSPs resort + interval-tree containment purge (blast_traceback parity).
 - Fixed BLASTNA matrix sentinel column in `LOSAT/src/algorithm/blastn/filtering/purge_endpoints.rs`.
 - Removed non-NCBI `extend_final_traceback` from `LOSAT/src/algorithm/blastn/alignment/gapped.rs` and export list.
 
 Pending / next steps:
 - Re-run build/tests; last `cargo check` failed due to an environment error (`Invalid cross-device link` writing target). Consider setting `CARGO_TARGET_DIR` inside repo or rerun in a same-filesystem location.
 - Verify BLASTN parity: run comparison scripts (`LOSAT/tests/run_comparison.sh`) and inspect remaining length/identity deltas.
-- If discrepancies remain, focus on BLASTN DP packed alignment boundary logic and packed subject indexing (new `query_offset`/`subject_byte_offset` path).
+- If discrepancies remain, focus on BLASTN DP boundary/coordinate handling (`Blast_SemiGappedAlign`/`extend_gapped_one_direction_ex`) and packed subject indexing (new `query_offset`/`subject_byte_offset` path).
 
 Notes:
 - `extend_gapped_heuristic(_with_scratch)` signature now includes `s_len` and `score_matrix`; `extend_gapped_heuristic_with_traceback(_with_scratch)` also takes `score_matrix`; `blast_get_offsets_for_gapped_alignment` now requires `score_matrix`.

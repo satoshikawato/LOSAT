@@ -1975,16 +1975,33 @@ fn extend_gapped_one_direction_with_traceback_with_scratch(
     //     GapPrelimEditBlockAdd(edit_block, script, 1);
     // }
     // NCBI reference: blast_gapalign.c:689-726 (traceback uses edit_script rows/offsets)
-    let used_rows = *trace_rows_used;
     while a_index > 0 || b_index > 0 {
         // Get next script from edit_script[a_index]
-        let row_idx = if a_index < used_rows { a_index } else { used_rows.saturating_sub(1) };
-        let start_offset = trace_offsets.get(row_idx).copied().unwrap_or(0);
-        let b_rel = b_index.saturating_sub(start_offset);
-        let next_script = trace_rows
-            .get(row_idx)
-            .and_then(|row| row.get(b_rel).copied())
-            .unwrap_or(SCRIPT_SUB);
+        // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_gapalign.c:689-696
+        // ```c
+        // next_script =
+        //     edit_script[a_index][b_index - edit_start_offset[a_index]];
+        // ```
+        let row_idx = a_index;
+        let used_rows = *trace_rows_used;
+        assert!(
+            row_idx < used_rows,
+            "traceback row out of range: row_idx={} used_rows={}",
+            row_idx,
+            used_rows
+        );
+        let start_offset = trace_offsets[row_idx];
+        let b_rel = b_index
+            .checked_sub(start_offset)
+            .expect("traceback b_index precedes row start offset");
+        let row = &trace_rows[row_idx];
+        assert!(
+            b_rel < row.len(),
+            "traceback column out of range: b_rel={} row_len={}",
+            b_rel,
+            row.len()
+        );
+        let next_script = row[b_rel];
 
         // NCBI reference: blast_gapalign.c:698-714
         // Determine actual operation based on current script and extend flags
@@ -2404,15 +2421,32 @@ fn extend_gapped_one_direction_with_traceback_ex_with_scratch(
     let mut script = SCRIPT_SUB;
 
     let mut ops_reversed: Vec<(u8, u32)> = Vec::new();
-    let used_rows = *trace_rows_used;
     while a_index > 0 || b_index > 0 {
-        let row_idx = if a_index < used_rows { a_index } else { used_rows.saturating_sub(1) };
-        let start_offset = trace_offsets.get(row_idx).copied().unwrap_or(0);
-        let b_rel = b_index.saturating_sub(start_offset);
-        let next_script = trace_rows
-            .get(row_idx)
-            .and_then(|row| row.get(b_rel).copied())
-            .unwrap_or(SCRIPT_SUB);
+        // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_gapalign.c:689-696
+        // ```c
+        // next_script =
+        //     edit_script[a_index][b_index - edit_start_offset[a_index]];
+        // ```
+        let row_idx = a_index;
+        let used_rows = *trace_rows_used;
+        assert!(
+            row_idx < used_rows,
+            "traceback row out of range: row_idx={} used_rows={}",
+            row_idx,
+            used_rows
+        );
+        let start_offset = trace_offsets[row_idx];
+        let b_rel = b_index
+            .checked_sub(start_offset)
+            .expect("traceback b_index precedes row start offset");
+        let row = &trace_rows[row_idx];
+        assert!(
+            b_rel < row.len(),
+            "traceback column out of range: b_rel={} row_len={}",
+            b_rel,
+            row.len()
+        );
+        let next_script = row[b_rel];
 
         match script & SCRIPT_OP_MASK {
             x if x == SCRIPT_GAP_IN_A => {

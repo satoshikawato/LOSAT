@@ -445,9 +445,21 @@ fn purge_hsps_for_subject_ex(mut hits: Vec<Hit>, purge: bool) -> (Vec<Hit>, usiz
     let s_end_canon = |h: &Hit| h.s_start.max(h.s_end);  // NCBI subject.end
 
     // Pass 1: Remove HSPs with common START positions
-    // NCBI reference: blast_hits.c:2268-2291 s_QueryOffsetCompareHSPs
-    // Sort order: context ASC, query.offset ASC, subject.offset ASC,
-    //             score DESC, query.end ASC, subject.end ASC
+    // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_hits.c:2285-2318
+    // ```c
+    // if (h1->context < h2->context) return -1;
+    // if (h1->context > h2->context) return 1;
+    // if (h1->query.offset < h2->query.offset) return -1;
+    // if (h1->query.offset > h2->query.offset) return 1;
+    // if (h1->subject.offset < h2->subject.offset) return -1;
+    // if (h1->subject.offset > h2->subject.offset) return 1;
+    // if (h1->score < h2->score) return 1;
+    // if (h1->score > h2->score) return -1;
+    // if (h1->query.end < h2->query.end) return 1;
+    // if (h1->query.end > h2->query.end) return -1;
+    // if (h1->subject.end < h2->subject.end) return 1;
+    // if (h1->subject.end > h2->subject.end) return -1;
+    // ```
     hits.sort_by(|a, b| {
         let (a_q_offset, a_q_end) = q_offsets(a);
         let (b_q_offset, b_q_end) = q_offsets(b);
@@ -456,8 +468,8 @@ fn purge_hsps_for_subject_ex(mut hits: Vec<Hit>, purge: bool) -> (Vec<Hit>, usiz
             .then_with(|| a_q_offset.cmp(&b_q_offset)) // query.offset ASC
             .then_with(|| s_offset(a).cmp(&s_offset(b))) // subject.offset ASC
             .then_with(|| b.raw_score.cmp(&a.raw_score)) // score DESC
-            .then_with(|| a_q_end.cmp(&b_q_end)) // query.end ASC
-            .then_with(|| s_end_canon(a).cmp(&s_end_canon(b))) // subject.end ASC
+            .then_with(|| b_q_end.cmp(&a_q_end)) // query.end DESC
+            .then_with(|| s_end_canon(b).cmp(&s_end_canon(a))) // subject.end DESC
     });
 
     // NCBI reference: blast_hits.c:2480-2500
@@ -612,6 +624,58 @@ fn blast_nint(x: f64) -> i32 {
         (x + 0.5) as i32
     } else {
         (x - 0.5) as i32
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_hits.c:2285-2318
+    // ```c
+    // if (h1->query.offset < h2->query.offset) return -1;
+    // if (h1->query.offset > h2->query.offset) return 1;
+    // if (h1->subject.offset < h2->subject.offset) return -1;
+    // if (h1->subject.offset > h2->subject.offset) return 1;
+    // if (h1->score < h2->score) return 1;
+    // if (h1->score > h2->score) return -1;
+    // if (h1->query.end < h2->query.end) return 1;
+    // if (h1->query.end > h2->query.end) return -1;
+    // if (h1->subject.end < h2->subject.end) return 1;
+    // if (h1->subject.end > h2->subject.end) return -1;
+    // ```
+    #[test]
+    fn test_purge_common_start_keeps_longer_end_on_score_tie() {
+        fn make_hit(q_end: usize, s_end: usize) -> Hit {
+            Hit {
+                query_id: "q1".to_string(),
+                subject_id: "s1".to_string(),
+                identity: 100.0,
+                length: q_end,
+                mismatch: 0,
+                gapopen: 0,
+                q_start: 1,
+                q_end,
+                s_start: 1,
+                s_end,
+                e_value: 0.0,
+                bit_score: 0.0,
+                query_frame: 1,
+                query_length: 100,
+                q_idx: 0,
+                s_idx: 0,
+                raw_score: 100,
+                gap_info: None,
+            }
+        }
+
+        let short = make_hit(50, 50);
+        let long = make_hit(80, 80);
+
+        let (purged, _) = purge_hsps_with_common_endpoints_ex(vec![short, long], true);
+        assert_eq!(purged.len(), 1);
+        assert_eq!(purged[0].q_end, 80);
+        assert_eq!(purged[0].s_end, 80);
     }
 }
 

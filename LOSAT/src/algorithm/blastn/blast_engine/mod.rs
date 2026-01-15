@@ -20,11 +20,11 @@ mod run;
 pub use run::run;
 
 use rustc_hash::FxHashMap;
-use crate::common::Hit;
+use crate::common::{Hit, score_compare_hsps};
 use crate::stats::KarlinParams;
 use crate::core::blast_encoding::encode_iupac_to_blastna;
-use super::filtering::{purge_hsps_with_common_endpoints, purge_hsps_with_common_endpoints_ex, reevaluate_hsp_with_ambiguities_gapped, subject_best_hit};
-use super::lookup::reverse_complement;
+use super::filtering::{purge_hsps_with_common_endpoints_ex, reevaluate_hsp_with_ambiguities_gapped, subject_best_hit};
+use super::interval_tree::{BlastIntervalTree, IndexMethod, TreeHsp};
 
 // Re-export for backward compatibility
 pub use crate::algorithm::common::evalue::calculate_evalue_database_search as calculate_evalue;
@@ -37,6 +37,7 @@ pub use crate::algorithm::common::evalue::calculate_evalue_database_search as ca
 /// Phase 1: purge=FALSE - trim overlapping HSPs using edit scripts
 /// Phase 2: Re-evaluate trimmed HSPs with Blast_HSPReevaluateWithAmbiguitiesGapped
 /// Phase 3: purge=TRUE - delete remaining duplicates
+/// Phase 4: score re-sort and interval tree containment purge
 pub fn filter_hsps(
     hits: Vec<Hit>,
     sequences: &FxHashMap<(String, String), (Vec<u8>, Vec<u8>)>,
@@ -70,16 +71,16 @@ pub fn filter_hsps(
     let result_hits_count = result_hits.len();
 
     // Sort by raw_score (descending) to match NCBI BLAST's sorting order
-    // NCBI reference: blast_hits.c:ScoreCompareHSPs
-    // Order: score DESC → s_start ASC → s_end DESC → q_start ASC → q_end DESC
-    result_hits.sort_by(|a, b| {
-        b.raw_score
-            .cmp(&a.raw_score)
-            .then_with(|| a.s_start.cmp(&b.s_start))  // s_start ASC
-            .then_with(|| b.s_end.cmp(&a.s_end))       // s_end DESC
-            .then_with(|| a.q_start.cmp(&b.q_start))    // q_start ASC
-            .then_with(|| b.q_end.cmp(&a.q_end))        // q_end DESC
-    });
+    // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_hits.c:1330-1354
+    // ```c
+    // if (0 == (result = BLAST_CMP(hsp2->score,          hsp1->score)) &&
+    //     0 == (result = BLAST_CMP(hsp1->subject.offset, hsp2->subject.offset)) &&
+    //     0 == (result = BLAST_CMP(hsp2->subject.end,    hsp1->subject.end)) &&
+    //     0 == (result = BLAST_CMP(hsp1->query  .offset, hsp2->query  .offset))) {
+    //     result = BLAST_CMP(hsp2->query.end, hsp1->query.end);
+    // }
+    // ```
+    result_hits.sort_by(score_compare_hsps);
 
     // NOTE: NCBI does NOT have explicit dedup for identical coords+score.
     // NCBI only uses Blast_HSPListPurgeHSPsWithCommonEndpoints which handles
@@ -122,8 +123,14 @@ pub fn filter_hsps(
     // }
     let mut deleted_count = 0;
     // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_encoding.c:85-93 (IUPACNA_TO_BLASTNA)
-    // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_util.c:806-833 (GetReverseNuclSequence)
-    let mut encoded_cache: FxHashMap<(String, String), (Vec<u8>, Vec<u8>, Vec<u8>)> =
+    // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_traceback.c:651-659
+    // ```c
+    // query = query_blk->sequence + query_info->contexts[hsp->context].query_offset;
+    // delete_hsp = Blast_HSPReevaluateWithAmbiguitiesGapped(hsp, query,
+    //              query_length, subject, subject_length, hit_params,
+    //              score_params, sbp);
+    // ```
+    let mut encoded_cache: FxHashMap<(String, String), (Vec<u8>, Vec<u8>)> =
         FxHashMap::default();
     for i in extra_start..result_hits.len() {
         let hit = &mut result_hits[i];
@@ -138,23 +145,16 @@ pub fn filter_hsps(
         // Get sequences for re-evaluation
         let key = (hit.query_id.clone(), hit.subject_id.clone());
         if let Some((q_seq, s_seq)) = sequences.get(&key) {
-            let (q_blastna, s_blastna, s_rc_blastna) =
+            let (q_blastna, s_blastna) =
                 encoded_cache.entry(key.clone()).or_insert_with(|| {
                     let q_blastna = encode_iupac_to_blastna(q_seq);
                     let s_blastna = encode_iupac_to_blastna(s_seq);
-                    let s_rc_blastna = encode_iupac_to_blastna(&reverse_complement(s_seq));
-                    (q_blastna, s_blastna, s_rc_blastna)
+                    (q_blastna, s_blastna)
                 });
-            // NCBI reference: blast_traceback.c:653-665 (reevaluate with blastna sequences)
-            let s_eval = if hit.s_start > hit.s_end {
-                s_rc_blastna.as_slice()
-            } else {
-                s_blastna.as_slice()
-            };
             let delete = reevaluate_hsp_with_ambiguities_gapped(
                 hit,
                 q_blastna.as_slice(),
-                s_eval,
+                s_blastna.as_slice(),
                 reward,
                 penalty,
                 gap_open,
@@ -186,14 +186,104 @@ pub fn filter_hsps(
         eprintln!("[INFO]   Endpoint purge phase 3 (delete): {} -> {} hits", before_phase3, result_hits.len());
     }
 
-    // NOTE: NCBI's containment filtering (BlastIntervalTreeContainsHSP) is applied
-    // DURING extension, not as post-processing. The interval tree is built incrementally
-    // as HSPs are found, and each new HSP is checked against existing HSPs.
-    // This is different from post-processing containment which would be too aggressive
-    // (e.g., removing all hits on self-comparison except the full-length diagonal).
-    //
-    // TODO: Implement interval tree containment checking during gapped extension
-    // NCBI reference: blast_gapalign.c:3918, blast_itree.c:810-847
+    // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_traceback.c:671-688
+    // ```c
+    // Blast_HSPListSortByScore(hsp_list);
+    // Blast_IntervalTreeReset(tree);
+    // for (index = 0; index < hsp_list->hspcnt; index++) {
+    //     if (BlastIntervalTreeContainsHSP(tree, hsp, query_info,
+    //                                      hit_options->min_diag_separation)) {
+    //         hsp_array[index] = Blast_HSPFree(hsp);
+    //     } else {
+    //         BlastIntervalTreeAddHSP(hsp, tree, query_info, eQueryAndSubject);
+    //     }
+    // }
+    // ```
+    result_hits.sort_by(score_compare_hsps);
+    let mut final_hits: Vec<Hit> = Vec::with_capacity(result_hits.len());
+    let min_diag_separation: i32 = 0;
+    // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_options.c:1482-1495
+    // ```c
+    // if (min_diag_separation)
+    //     options->min_diag_separation = min_diag_separation;
+    // ```
+    let mut trees: FxHashMap<(String, String), BlastIntervalTree> = FxHashMap::default();
+    for hit in result_hits {
+        let key = (hit.query_id.clone(), hit.subject_id.clone());
+        let (q_seq, s_seq) = match sequences.get(&key) {
+            Some(value) => value,
+            None => {
+                final_hits.push(hit);
+                continue;
+            }
+        };
+        let query_len = query_lengths
+            .get(&hit.query_id)
+            .copied()
+            .unwrap_or_else(|| hit.query_length.max(q_seq.len()));
+        let subject_len = s_seq.len();
+        if query_len == 0 || subject_len == 0 {
+            final_hits.push(hit);
+            continue;
+        }
+        let tree = trees.entry(key.clone()).or_insert_with(|| {
+            // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_itree.c:537-550
+            // ```c
+            // query_start = s_GetQueryStrandOffset(query_info, hsp->context);
+            // region_start = query_start + hsp->query.offset;
+            // region_end = query_start + hsp->query.end;
+            // ```
+            BlastIntervalTree::new(
+                0,
+                (2 * query_len + 1) as i32,
+                0,
+                (subject_len + 1) as i32,
+            )
+        });
+        // NCBI reference: ncbi-blast/c++/src/algo/blast/unit_tests/api/ntscan_unit_test.cpp:166-174
+        // ```c
+        // query_info->contexts[0].query_offset = 0;
+        // query_info->contexts[1].query_offset = kStrandLength + 1;
+        // ```
+        let query_context_offset = if hit.query_frame < 0 {
+            (query_len + 1) as i32
+        } else {
+            0
+        };
+        // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_hits.c:1122-1132
+        // ```c
+        // if (hsp->query.frame != hsp->subject.frame) {
+        //    *q_end = query_length - hsp->query.offset;
+        //    *q_start = *q_end - hsp->query.end + hsp->query.offset + 1;
+        // }
+        // ```
+        let (q_offset_0, q_end_0) = if hit.query_frame < 0 {
+            (
+                query_len.saturating_sub(hit.q_end),
+                query_len
+                    .saturating_sub(hit.q_start)
+                    .saturating_add(1),
+            )
+        } else {
+            (hit.q_start.saturating_sub(1), hit.q_end)
+        };
+        let tree_hsp = TreeHsp {
+            query_offset: q_offset_0 as i32,
+            query_end: q_end_0 as i32,
+            subject_offset: hit.s_start.min(hit.s_end).saturating_sub(1) as i32,
+            subject_end: hit.s_start.max(hit.s_end) as i32,
+            score: hit.raw_score,
+            query_frame: hit.query_frame,
+            query_length: query_len as i32,
+            query_context_offset,
+            subject_frame_sign: 1,
+        };
+        if tree.contains_hsp(&tree_hsp, query_context_offset, min_diag_separation) {
+            continue;
+        }
+        tree.add_hsp(tree_hsp, query_context_offset, IndexMethod::QueryAndSubject);
+        final_hits.push(hit);
+    }
 
     // NCBI BLAST: Subject Best Hit filtering (OPTIONAL - not applied by default)
     // Reference: blast_hits.c:2537-2606 Blast_HSPListSubjectBestHit
@@ -204,7 +294,6 @@ pub fn filter_hsps(
     // The subject_best_hit() function is available but not called here.
     // To enable, add a command-line option and call subject_best_hit() when enabled.
     let _ = subject_best_hit; // Silence unused import warning
-    let final_hits: Vec<Hit> = result_hits;
 
     let filter_time = filter_start.elapsed();
 

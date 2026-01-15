@@ -2880,7 +2880,18 @@ pub fn run(args: BlastnArgs) -> Result<()> {
             // NCBI reference: blast_traceback.c:637-638
             // Blast_HSPListPurgeHSPsWithCommonEndpoints(program_number, hsp_list, FALSE);
             let hits_step1 = local_hits.len();
-            let (mut local_hits, extra_start) = purge_hsps_with_common_endpoints_ex(local_hits, false);
+            let (mut local_hits, mut extra_start) = purge_hsps_with_common_endpoints_ex(local_hits, false);
+            // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_traceback.c:640-644
+            // ```c
+            // /* Low level greedy algorithm ignores ambiguities, so the score
+            //  * needs to be reevaluated. */
+            // if (kGreedyTraceback) {
+            //    extra_start = 0;
+            // }
+            // ```
+            if !use_dp {
+                extra_start = 0;
+            }
             let hits_step2 = local_hits.len();
 
             // Step 3: Re-evaluate trimmed HSPs

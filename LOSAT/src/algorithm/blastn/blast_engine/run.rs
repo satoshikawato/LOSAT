@@ -2592,16 +2592,24 @@ pub fn run(args: BlastnArgs) -> Result<()> {
                 //    s_start = hsp->subject.gapped_start;
                 // }
                 // ```
+                // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_gapalign.c:3908-3913
+                // ```c
+                // tmp_hsp.query.offset = q_start;
+                // tmp_hsp.query.end = q_end;
+                // tmp_hsp.subject.offset = s_start;
+                // tmp_hsp.subject.end = s_end;
+                // ```
+                // Use preliminary gapped bounds (prelim_*) for gapped-start refinement.
                 let mut trace_q_start = final_seed_qs;
                 let mut trace_s_start = final_seed_ss;
                 if trace_q_start == 0 && trace_s_start == 0 {
                     let (q_start, s_start) = match blast_get_offsets_for_gapped_alignment(
                         q_seq_blastna,
                         s_seq_trace,
-                        uh.qs,
-                        uh.qe,
-                        uh.ss,
-                        uh.se,
+                        prelim_qs,
+                        prelim_qe,
+                        prelim_ss,
+                        prelim_se,
                         &score_matrix,
                     ) {
                         Some(value) => value,
@@ -2615,10 +2623,10 @@ pub fn run(args: BlastnArgs) -> Result<()> {
                     let (q_start, s_start) = blast_get_start_for_gapped_alignment_nucl(
                         q_seq_blastna,
                         s_seq_trace,
-                        uh.qs,
-                        uh.qe,
-                        uh.ss,
-                        uh.se,
+                        prelim_qs,
+                        prelim_qe,
+                        prelim_ss,
+                        prelim_se,
                         trace_q_start,
                         trace_s_start,
                     );

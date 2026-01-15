@@ -2590,12 +2590,12 @@ pub fn extend_gapped_heuristic_with_traceback_with_scratch(
         };
 
     // Combine coordinates (NCBI: start included on left, excluded on right)
-    let final_qs = qs + seed_len - left_q_consumed;
-    let final_qe = qs + seed_len + right_q_consumed;
-    let final_ss = ss + seed_len - left_s_consumed;
-    let final_se = ss + seed_len + right_s_consumed;
+    let mut final_qs = qs + seed_len - left_q_consumed;
+    let mut final_qe = qs + seed_len + right_q_consumed;
+    let mut final_ss = ss + seed_len - left_s_consumed;
+    let mut final_se = ss + seed_len + right_s_consumed;
 
-    let total_score = left_score + right_score;
+    let mut total_score = left_score + right_score;
 
     // Combine edit scripts: left_ops + right_ops (merge if needed)
     let mut combined_edit_ops: Vec<GapEditOp> = Vec::with_capacity(
@@ -2625,6 +2625,69 @@ pub fn extend_gapped_heuristic_with_traceback_with_scratch(
             }
         } else {
             combined_edit_ops.extend_from_slice(&right_edit_ops);
+        }
+    }
+
+    // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_gapalign.c:4683-4712
+    // ```c
+    // while (esp->size && esp->op_type[0] != eGapAlignSub) {
+    //     score_left += score_params->gap_open +
+    //                  esp->num[0] * score_params->gap_extend;
+    //     if (esp->op_type[0] == eGapAlignDel)
+    //         gap_align->subject_start += esp->num[0];
+    //     else
+    //         gap_align->query_start += esp->num[0];
+    //     ...
+    // }
+    // while (esp->size && esp->op_type[i-1] != eGapAlignSub) {
+    //     score_right += score_params->gap_open +
+    //                  esp->num[i-1] * score_params->gap_extend;
+    //     if (esp->op_type[i-1] == eGapAlignDel)
+    //         gap_align->subject_stop -= esp->num[i-1];
+    //     else
+    //         gap_align->query_stop -= esp->num[i-1];
+    //     ...
+    // }
+    // ```
+    if !combined_edit_ops.is_empty() {
+        let mut start_idx = 0usize;
+        while start_idx < combined_edit_ops.len() {
+            match combined_edit_ops[start_idx] {
+                GapEditOp::Sub(_) => break,
+                GapEditOp::Del(n) => {
+                    let n = n as usize;
+                    total_score += gap_open + gap_extend * (n as i32);
+                    final_ss = final_ss.saturating_add(n);
+                }
+                GapEditOp::Ins(n) => {
+                    let n = n as usize;
+                    total_score += gap_open + gap_extend * (n as i32);
+                    final_qs = final_qs.saturating_add(n);
+                }
+            }
+            start_idx += 1;
+        }
+
+        let mut end_idx = combined_edit_ops.len();
+        while end_idx > start_idx {
+            match combined_edit_ops[end_idx - 1] {
+                GapEditOp::Sub(_) => break,
+                GapEditOp::Del(n) => {
+                    let n = n as usize;
+                    total_score += gap_open + gap_extend * (n as i32);
+                    final_se = final_se.saturating_sub(n);
+                }
+                GapEditOp::Ins(n) => {
+                    let n = n as usize;
+                    total_score += gap_open + gap_extend * (n as i32);
+                    final_qe = final_qe.saturating_sub(n);
+                }
+            }
+            end_idx -= 1;
+        }
+
+        if start_idx > 0 || end_idx < combined_edit_ops.len() {
+            combined_edit_ops = combined_edit_ops[start_idx..end_idx].to_vec();
         }
     }
 

@@ -333,6 +333,15 @@ struct UngappedHit {
     query_idx: u32,
     query_frame: i32,
     query_context_offset: i32,
+    // NCBI reference: ncbi-blast/c++/include/algo/blast/core/blast_def.h:135-149
+    // ```c
+    // typedef union BlastOffsetPair {
+    //     struct { Uint4 q_off; Uint4 s_off; } qs_offsets;
+    // } BlastOffsetPair;
+    // ```
+    // Initial word hit offsets (seed) stored in init_hsp->offsets.qs_offsets.
+    seed_q_off: usize,
+    seed_s_off: usize,
     // Ungapped extension results (0-based coordinates)
     qs: usize,        // query start
     qe: usize,        // query end (exclusive)
@@ -1933,6 +1942,12 @@ pub fn run(args: BlastnArgs) -> Result<()> {
                                 query_idx: ctx.query_idx,
                                 query_frame: ctx.frame,
                                 query_context_offset: ctx.query_offset,
+                                // NCBI reference: ncbi-blast/c++/include/algo/blast/core/blast_def.h:135-149
+                                // ```c
+                                // struct { Uint4 q_off; Uint4 s_off; } qs_offsets;
+                                // ```
+                                seed_q_off: q_off,
+                                seed_s_off: s_off,
                                 qs,
                                 qe,
                                 ss,
@@ -2427,6 +2442,12 @@ pub fn run(args: BlastnArgs) -> Result<()> {
                             query_idx: ctx.query_idx,
                             query_frame: ctx.frame,
                             query_context_offset: ctx.query_offset,
+                            // NCBI reference: ncbi-blast/c++/include/algo/blast/core/blast_def.h:135-149
+                            // ```c
+                            // struct { Uint4 q_off; Uint4 s_off; } qs_offsets;
+                            // ```
+                            seed_q_off: q_off,
+                            seed_s_off: s_off,
                             qs,
                             qe,
                             ss,
@@ -2551,9 +2572,15 @@ pub fn run(args: BlastnArgs) -> Result<()> {
                     // }
                     // status = s_BlastDynProgNtGappedAlignment(...);
                     // ```
-                    let mut seed_qs = uh.qs;
-                    let mut seed_ss = uh.ss;
-                    if uh.se >= uh.ss.saturating_add(8) {
+                    // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_gapalign.c:4071-4076
+                    // ```c
+                    // status = Blast_HSPInit(...,
+                    //        init_hsp->offsets.qs_offsets.q_off,
+                    //        init_hsp->offsets.qs_offsets.s_off, ...);
+                    // ```
+                    let mut seed_qs = uh.seed_q_off;
+                    let mut seed_ss = uh.seed_s_off;
+                    if uh.se >= uh.seed_s_off.saturating_add(8) {
                         seed_qs = seed_qs.saturating_add(3);
                         seed_ss = seed_ss.saturating_add(3);
                     }

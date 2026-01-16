@@ -2710,34 +2710,58 @@ pub fn extend_gapped_heuristic_with_traceback_with_scratch(
 
     let mut total_score = left_score + right_score;
 
-    // Combine edit scripts: left_ops + right_ops (merge if needed)
+    // Combine edit scripts: left ops + reversed right ops (merge if needed)
+    // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_gapalign.c:2481-2534
+    // ```c
+    // /* The fwd_prelim_tback script will get reversed here ... */
+    // if (fwd_prelim_tback->num_ops > 0 && rev_prelim_tback->num_ops > 0 &&
+    //     fwd_prelim_tback->edit_ops[(fwd_prelim_tback->num_ops)-1].op_type ==
+    //       rev_prelim_tback->edit_ops[(rev_prelim_tback->num_ops)-1].op_type)
+    //   merge_ops = TRUE;
+    // ...
+    // for (i=0; i < rev_prelim_tback->num_ops; i++) { ... }
+    // if (merge_ops)
+    //     esp->num[index-1] += fwd_prelim_tback->edit_ops[(fwd_prelim_tback->num_ops)-1].num;
+    // if (merge_ops)
+    //     i = fwd_prelim_tback->num_ops - 2;
+    // else
+    //     i = fwd_prelim_tback->num_ops - 1;
+    // for (; i >= 0; i--) { ... }
+    // ```
     let mut combined_edit_ops: Vec<GapEditOp> = Vec::with_capacity(
         left_edit_ops.len() + right_edit_ops.len()
     );
-    combined_edit_ops.extend(left_edit_ops);
+    combined_edit_ops.extend_from_slice(&left_edit_ops);
 
     if !right_edit_ops.is_empty() {
-        if let Some(last) = combined_edit_ops.last_mut() {
-            // NCBI reference: ncbi-blast/c++/src/algo/blast/core/gapinfo.c:174-185 (GapPrelimEditBlockAdd merge)
-            let same_type = matches!(
-                (&*last, &right_edit_ops[0]),
+        let mut merge_ops = false;
+        if let (Some(left_last), Some(right_last)) =
+            (combined_edit_ops.last(), right_edit_ops.last())
+        {
+            merge_ops = matches!(
+                (left_last, right_last),
                 (GapEditOp::Sub(_), GapEditOp::Sub(_))
                     | (GapEditOp::Del(_), GapEditOp::Del(_))
                     | (GapEditOp::Ins(_), GapEditOp::Ins(_))
             );
-            if same_type {
-                let add = right_edit_ops[0].num();
+        }
+
+        if merge_ops {
+            if let (Some(last), Some(right_last)) =
+                (combined_edit_ops.last_mut(), right_edit_ops.last())
+            {
+                let add = right_last.num();
                 match last {
                     GapEditOp::Sub(n) | GapEditOp::Del(n) | GapEditOp::Ins(n) => {
                         *n += add;
                     }
                 }
-                combined_edit_ops.extend_from_slice(&right_edit_ops[1..]);
-            } else {
-                combined_edit_ops.extend_from_slice(&right_edit_ops);
             }
-        } else {
-            combined_edit_ops.extend_from_slice(&right_edit_ops);
+        }
+
+        let skip = if merge_ops { 1 } else { 0 };
+        for op in right_edit_ops.iter().rev().skip(skip) {
+            combined_edit_ops.push(*op);
         }
     }
 

@@ -2475,8 +2475,8 @@ pub fn run(args: BlastnArgs) -> Result<()> {
                     prelim_ss,
                     prelim_se,
                     prelim_score,
-                    _final_seed_qs,
-                    _final_seed_ss,
+                    seed_qs,
+                    seed_ss,
                 ) = if use_dp {
                     // DP seed selection (blastn)
                     // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_gapalign.c:4033-4045
@@ -2599,43 +2599,67 @@ pub fn run(args: BlastnArgs) -> Result<()> {
                 // tmp_hsp.subject.offset = s_start;
                 // tmp_hsp.subject.end = s_end;
                 // ```
-                // Use preliminary gapped bounds (prelim_*) for gapped-start refinement.
-                // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_traceback.c:436-458
+                // Use preliminary gapped bounds (prelim_*) and seed offsets to refine gapped-start.
+                // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_gapalign.c:4071-4076
+                // ```c
+                // status = Blast_HSPInit(gap_align->query_start,
+                //               gap_align->query_stop, gap_align->subject_start,
+                //               gap_align->subject_stop,
+                //               init_hsp->offsets.qs_offsets.q_off,
+                //               init_hsp->offsets.qs_offsets.s_off, context,
+                //               query_frame, subject->frame, gap_align->score,
+                //               &(gap_align->edit_script), &new_hsp);
+                // ```
+                let mut trace_q_start = seed_qs;
+                let mut trace_s_start = seed_ss;
+                // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_traceback.c:436-460
                 // ```c
                 // if (!kIsOutOfFrame && hsp->query.gapped_start == 0 &&
                 //                       hsp->subject.gapped_start == 0) {
                 //    Boolean retval =
                 //       BlastGetOffsetsForGappedAlignment(query, subject, sbp,
                 //           hsp, &q_start, &s_start);
-                //    if (!retval) { continue; }
+                //    if (!retval) { ... }
                 //    hsp->query.gapped_start = q_start;
                 //    hsp->subject.gapped_start = s_start;
                 // } else {
+                //    ...
                 //    BlastGetStartForGappedAlignmentNucl(query, subject, hsp);
                 //    q_start = hsp->query.gapped_start;
                 //    s_start = hsp->subject.gapped_start;
                 // }
                 // ```
-                // LOSAT does not persist gapped_start in prelim, so keep it at 0 and follow
-                // the BlastGetOffsetsForGappedAlignment path for blastn parity.
-                let mut trace_q_start = 0usize;
-                let mut trace_s_start = 0usize;
-                let (q_start, s_start) = match blast_get_offsets_for_gapped_alignment(
-                    q_seq_blastna,
-                    s_seq_trace,
-                    prelim_qs,
-                    prelim_qe,
-                    prelim_ss,
-                    prelim_se,
-                    &score_matrix,
-                ) {
-                    Some(value) => value,
-                    None => {
-                        continue;
-                    }
-                };
-                trace_q_start = q_start;
-                trace_s_start = s_start;
+                if trace_q_start == 0 && trace_s_start == 0 {
+                    let (q_start, s_start) = match blast_get_offsets_for_gapped_alignment(
+                        q_seq_blastna,
+                        s_seq_trace,
+                        prelim_qs,
+                        prelim_qe,
+                        prelim_ss,
+                        prelim_se,
+                        &score_matrix,
+                    ) {
+                        Some(value) => value,
+                        None => {
+                            continue;
+                        }
+                    };
+                    trace_q_start = q_start;
+                    trace_s_start = s_start;
+                } else {
+                    let (q_start, s_start) = blast_get_start_for_gapped_alignment_nucl(
+                        q_seq_blastna,
+                        s_seq_trace,
+                        prelim_qs,
+                        prelim_qe,
+                        prelim_ss,
+                        prelim_se,
+                        trace_q_start,
+                        trace_s_start,
+                    );
+                    trace_q_start = q_start;
+                    trace_s_start = s_start;
+                }
 
                 // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_traceback.c:463-473
                 // ```c

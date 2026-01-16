@@ -974,15 +974,24 @@ pub fn run(args: BlastnArgs) -> Result<()> {
     let penalty = config.penalty;
     let gap_open = config.gap_open;
     let gap_extend = config.gap_extend;
-    let x_drop_gapped = config.x_drop_gapped;
-    let x_drop_final = config.x_drop_final;  // Final traceback X-drop (100)
+    let params_for_closure = params.clone();  // Gapped params for E-value
+    let params_ungapped_for_closure = params_ungapped.clone();  // Ungapped params for gap_trigger
+    let params_gapped_for_closure = params_gapped.clone();  // Gapped params for cutoff_score_max
+    // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_parameters.c:454-468
+    // ```c
+    // double min_lambda = s_BlastFindSmallestLambda(sbp->kbp_gap, query_info, NULL);
+    // params->gap_x_dropoff = (Int4)(options->gap_x_dropoff*NCBIMATH_LN2 / min_lambda);
+    // params->gap_x_dropoff_final = (Int4)
+    //     MAX(options->gap_x_dropoff_final*NCBIMATH_LN2 / min_lambda, params->gap_x_dropoff);
+    // ```
+    let min_lambda = params_gapped_for_closure.lambda;
+    let x_drop_gapped = ((config.x_drop_gapped as f64 * NCBIMATH_LN2) / min_lambda) as i32;
+    let x_drop_final = ((config.x_drop_final as f64 * NCBIMATH_LN2) / min_lambda)
+        .max(x_drop_gapped as f64) as i32;
     let scan_range = config.scan_range; // For off-diagonal hit detection
     let min_diag_separation = config.min_diag_separation; // For MB_HSP_CLOSE containment check
     let db_len_total = seq_data.db_len_total;
     let db_num_seqs = seq_data.db_num_seqs;
-    let params_for_closure = params.clone();  // Gapped params for E-value
-    let params_ungapped_for_closure = params_ungapped.clone();  // Ungapped params for gap_trigger
-    let params_gapped_for_closure = params_gapped.clone();  // Gapped params for cutoff_score_max
     let evalue_threshold = args.evalue;
     let subject_besthit = args.subject_besthit;
     // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_hits.c:993-1001 (s_HSPTest)

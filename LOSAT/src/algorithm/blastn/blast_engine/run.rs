@@ -1588,6 +1588,34 @@ pub fn run(args: BlastnArgs) -> Result<()> {
                             let mut extended = 0usize;
                             let mut off_found = false;
                             let mut hit_ready = true;
+                            let query_mask = ctx.masks.as_slice();
+
+                            // NCBI reference: ncbi-blast/c++/src/algo/blast/core/na_ungapped.c:452-490
+                            // ```c
+                            // static NCBI_INLINE Boolean s_IsSeedMasked(...)
+                            // {
+                            //     ...
+                            //     return !(((T_Lookup_Callback)(lookup_wrap->lookup_callback))
+                            //                                      (lookup_wrap, index, q_pos));
+                            // }
+                            // ```
+                            // NCBI reference: ncbi-blast/c++/src/algo/blast/core/na_ungapped.c:103-135
+                            // ```c
+                            // for (i=0; i<num_hits; ++i) {
+                            //     if (lookup_pos[i] == q_pos) return TRUE;
+                            // }
+                            // return FALSE;
+                            // ```
+                            let mut is_seed_masked = |s_pos: usize, q_pos: usize| -> bool {
+                                if s_pos + lut_word_length > s_len {
+                                    return true;
+                                }
+                                let kmer = packed_kmer_at(search_seq_packed, s_pos, lut_word_length);
+                                let hits = two_stage.get_hits(kmer);
+                                !hits.iter().any(|&(hit_q_idx, hit_q_pos)| {
+                                    hit_q_idx == q_idx && hit_q_pos as usize == q_pos
+                                })
+                            };
 
                             // NCBI: if (two_hits && (hit_saved || s_end_pos > last_hit + window_size)) {
                             if two_hits && (hit_saved || s_end_pos > last_hit + TWO_HIT_WINDOW) {
@@ -1598,7 +1626,6 @@ pub fn run(args: BlastnArgs) -> Result<()> {
                                 //                          word_length, lut_word_length, lut, TRUE, &extended);
                                 // ```
                                 // s_TypeOfWord uses query_mask to skip masked seeds
-                                let query_mask = ctx.masks.as_slice();
                                 let (wt, ext, q_off_adj, s_off_adj) = type_of_word(
                                     q_seq,
                                     search_seq,
@@ -1608,6 +1635,7 @@ pub fn run(args: BlastnArgs) -> Result<()> {
                                     word_length,
                                     lut_word_length,
                                     true, // check_double = TRUE
+                                    &mut is_seed_masked,
                                 );
                                 word_type = wt;
                                 extended = ext;
@@ -1774,7 +1802,6 @@ pub fn run(args: BlastnArgs) -> Result<()> {
                                 // }
                                 // In NCBI, check_masks is TRUE by default (only FALSE when lut->stride is true)
                                 // NCBI reference: ncbi-blast/c++/src/algo/blast/core/na_ungapped.c:718-725
-                                let query_mask = ctx.masks.as_slice();
                                 // NCBI reference: ncbi-blast/c++/src/algo/blast/core/na_ungapped.c:718-725
                                 // ```c
                                 // if(!s_TypeOfWord(query, subject, &q_off, &s_off,
@@ -1790,6 +1817,7 @@ pub fn run(args: BlastnArgs) -> Result<()> {
                                     word_length,
                                     lut_word_length,
                                     false, // check_double = FALSE (not in two-hit block)
+                                    &mut is_seed_masked,
                                 );
                                 if wt == 0 {
                                     // Non-word, skip this hit
@@ -2063,6 +2091,42 @@ pub fn run(args: BlastnArgs) -> Result<()> {
                         let mut extended = 0usize;
                         let mut off_found = false;
                         let mut hit_ready = true;
+                        let query_mask = ctx.masks.as_slice();
+
+                        // NCBI reference: ncbi-blast/c++/src/algo/blast/core/na_ungapped.c:452-490
+                        // ```c
+                        // static NCBI_INLINE Boolean s_IsSeedMasked(...)
+                        // {
+                        //     ...
+                        //     return !(((T_Lookup_Callback)(lookup_wrap->lookup_callback))
+                        //                                      (lookup_wrap, index, q_pos));
+                        // }
+                        // ```
+                        // NCBI reference: ncbi-blast/c++/src/algo/blast/core/na_ungapped.c:103-135
+                        // ```c
+                        // for (i=0; i<num_hits; ++i) {
+                        //     if (lookup_pos[i] == q_pos) return TRUE;
+                        // }
+                        // return FALSE;
+                        // ```
+                        let mut is_seed_masked = |s_pos: usize, q_pos: usize| -> bool {
+                            if s_pos + safe_k > s_len {
+                                return true;
+                            }
+                            let kmer = packed_kmer_at(search_seq_packed, s_pos, safe_k);
+                            let hits: &[(u32, u32)] = if use_direct_lookup {
+                                pv_direct_lookup_ref
+                                    .map(|pv_dl| pv_dl.get_hits_checked(kmer))
+                                    .unwrap_or(&[])
+                            } else {
+                                hash_lookup_ref
+                                    .and_then(|hl| hl.get(&kmer).map(|v| v.as_slice()))
+                                    .unwrap_or(&[])
+                            };
+                            !hits.iter().any(|&(hit_q_idx, hit_q_pos)| {
+                                hit_q_idx == q_idx && hit_q_pos as usize == q_pos
+                            })
+                        };
 
                         // NCBI: if (two_hits && (hit_saved || s_end_pos > last_hit + window_size)) {
                         if two_hits && (hit_saved || s_end_pos > last_hit + TWO_HIT_WINDOW) {
@@ -2072,7 +2136,6 @@ pub fn run(args: BlastnArgs) -> Result<()> {
                             //                          word_length, lut_word_length, lut, TRUE, &extended);
                             // For non-two-stage lookup, word_length == lut_word_length, so type_of_word returns (1, 0)
                             // NCBI reference: ncbi-blast/c++/src/algo/blast/core/na_ungapped.c:674-680
-                            let query_mask = ctx.masks.as_slice();
                             // NCBI reference: ncbi-blast/c++/src/algo/blast/core/na_ungapped.c:674-680
                             // ```c
                             // word_type = s_TypeOfWord(query, subject, &q_off, &s_off,
@@ -2088,6 +2151,7 @@ pub fn run(args: BlastnArgs) -> Result<()> {
                                 safe_k, // word_length
                                 safe_k, // lut_word_length (same for non-two-stage)
                                 true, // check_double = TRUE
+                                &mut is_seed_masked,
                             );
                             word_type = wt;
                             extended = ext;
@@ -2238,7 +2302,6 @@ pub fn run(args: BlastnArgs) -> Result<()> {
                             // }
                             // In NCBI, check_masks is TRUE by default (only FALSE when lut->stride is true)
                             // NCBI reference: ncbi-blast/c++/src/algo/blast/core/na_ungapped.c:718-725
-                            let query_mask = ctx.masks.as_slice();
                             // NCBI reference: ncbi-blast/c++/src/algo/blast/core/na_ungapped.c:718-725
                             // ```c
                             // if(!s_TypeOfWord(query, subject, &q_off, &s_off,
@@ -2254,6 +2317,7 @@ pub fn run(args: BlastnArgs) -> Result<()> {
                                 safe_k, // word_length
                                 safe_k, // lut_word_length (same for non-two-stage)
                                 false, // check_double = FALSE (not in two-hit block)
+                                &mut is_seed_masked,
                             );
                             if wt == 0 {
                                 // Non-word, skip this hit

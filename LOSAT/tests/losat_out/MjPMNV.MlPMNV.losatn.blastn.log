@@ -2,8 +2,14 @@ Reading query & subject...
 Applying DUST filter (level=20, window=64, linker=1)...
 DUST masked 14192 bases (4.38%) across 1 sequences
 Building lookup (Task: blastn, Word: 11, TwoStage: true, LUTWord: 11, Direct: false, DUST: true)...
-[PERF] Subject scan took 85.689226ms: left_ext=0, right_ext=0, ungapped=210583, seeds=1663884, valid_pos=359637
+[BLASTN_DEBUG] Subject LC738875.1 (len=359647): cutoff_scores=[31], params_ungapped=(lambda=0.5500, K=0.2100), params_gapped=(lambda=0.6250, K=0.4100)
+[PERF] Subject scan took 73.790311ms: left_ext=0, right_ext=0, ungapped=210583, seeds=1663884, valid_pos=359637
+[DEBUG] Subject LC738875.1: positions=359637, seeds_found=1663884, ungapped_low=103894, two_hit_failed=0, gapped_attempted=106689, hits=70465, cutoff_score=31
+[DEBUG] Interval tree: ungapped_collected=106689, containment_skipped=32674, gapped_added=157830, tree_nodes=70465
+[DEBUG_PURGE] initial=70465, start_purged=13902 (trimmed=4538), end_purged=4918 (trimmed=3780), final=59963
+[DEBUG_PURGE] initial=59096, start_purged=719 (trimmed=0), end_purged=324 (trimmed=0), final=58053
+[DEBUG] Phase 2 breakdown: step1(extract)=70465, step2(purge1)=59963 (-10502), step3(reeval)=59096 (-867), step4(purge2)=58053 (-1043), step6(tree)=56596 (-1457)
 
-real	0m12.333s
-user	0m11.808s
-sys	0m0.039s
+real	0m11.788s
+user	0m11.217s
+sys	0m0.069s

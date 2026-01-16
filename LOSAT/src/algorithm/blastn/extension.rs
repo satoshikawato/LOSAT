@@ -443,10 +443,11 @@ pub fn extend_hit_ungapped(
 /// * `s_seq` - Subject sequence
 /// * `q_off` - Query offset (position of lut_word_length match start) - WILL BE MODIFIED if masked regions found
 /// * `s_off` - Subject offset (position of lut_word_length match start) - WILL BE MODIFIED if masked regions found
-/// * `query_mask` - Masked intervals for query sequence
+/// * `query_mask` - Masked intervals for query sequence (locations)
 /// * `word_length` - Full word length (e.g., 28 for megablast)
 /// * `lut_word_length` - Lookup table word length (e.g., 8)
 /// * `check_double` - Whether to check for double word (default: true)
+/// * `is_seed_masked` - Lookup-based seed check (s_IsSeedMasked)
 /// 
 /// # Returns
 /// `(word_type, extended, q_off, s_off)` where:
@@ -455,7 +456,7 @@ pub fn extend_hit_ungapped(
 /// - `q_off`, `s_off`: possibly adjusted offsets after masking checks
 /// 
 /// Note: reward and penalty parameters are NOT used (NCBI BLAST does not check actual matches)
-pub fn type_of_word(
+pub fn type_of_word<F>(
     q_seq: &[u8],
     s_seq: &[u8],
     q_off: usize,
@@ -464,7 +465,11 @@ pub fn type_of_word(
     word_length: usize,
     lut_word_length: usize,
     check_double: bool,
-) -> (u8, usize, usize, usize) {
+    is_seed_masked: &mut F,
+) -> (u8, usize, usize, usize)
+where
+    F: FnMut(usize, usize) -> bool,
+{
     // NCBI reference: na_ungapped.c:508-607
     // FAITHFUL TRANSPILE - DO NOT ASSUME
     
@@ -494,9 +499,18 @@ pub fn type_of_word(
     // Check masked regions and adjust q_off/s_off if needed
     let mut q_off_adjusted = q_off;
     let mut s_off_adjusted = s_off;
-    
-    if !query_mask.is_empty() {
-        use crate::algorithm::blastn::lookup::is_kmer_masked;
+    let has_query_masks = !query_mask.is_empty();
+
+    if has_query_masks {
+        // NCBI reference: ncbi-blast/c++/src/algo/blast/core/na_ungapped.c:452-490
+        // ```c
+        // static NCBI_INLINE Boolean s_IsSeedMasked(...)
+        // {
+        //     ...
+        //     return !(((T_Lookup_Callback)(lookup_wrap->lookup_callback))
+        //                                      (lookup_wrap, index, q_pos));
+        // }
+        // ```
         
         // NCBI reference: ncbi-blast/c++/src/algo/blast/core/na_ungapped.c:540-544
         // ```c
@@ -505,7 +519,7 @@ pub fn type_of_word(
         //                    lut_word_length,
         //                    q_end - lut_word_length)) return 0;
         // ```
-        if is_kmer_masked(query_mask, q_end - lut_word_length, lut_word_length) {
+        if is_seed_masked(s_end - lut_word_length, q_end - lut_word_length) {
             return (0, 0, q_off_adjusted, s_off_adjusted);
         }
         
@@ -518,7 +532,7 @@ pub fn type_of_word(
         // }
         // ```
         while q_off_adjusted < q_seq.len() && s_off_adjusted < s_seq.len() {
-            if !is_kmer_masked(query_mask, q_off_adjusted, lut_word_length) {
+            if !is_seed_masked(s_off_adjusted, q_off_adjusted) {
                 break;
             }
             q_off_adjusted += 1;
@@ -535,7 +549,7 @@ pub fn type_of_word(
     let ext_max = (q_range - q_end).min(s_range - s_end);
     
     // NCBI: if (ext_to || locations) {
-    if ext_to > 0 || !query_mask.is_empty() {
+    if ext_to > 0 || has_query_masks {
         // NCBI reference: ncbi-blast/c++/src/algo/blast/core/na_ungapped.c:559
         // ```c
         // if (ext_to > ext_max) return 0;
@@ -565,22 +579,19 @@ pub fn type_of_word(
         //                       s_pos, lut_word_length, q_pos)) return 0;
         // }
         // ```
-        if !query_mask.is_empty() {
-            use crate::algorithm::blastn::lookup::is_kmer_masked;
-            let mut s_pos = s_end - lut_word_length;
-            let mut q_pos = q_end - lut_word_length;
-            
-            // NCBI BLAST: Loop condition is s_pos > *s_off (no underflow check)
-            // We use saturating_sub to prevent underflow while maintaining NCBI behavior
-            while s_pos > s_off_adjusted {
-                if is_kmer_masked(query_mask, q_pos, lut_word_length) {
-                    return (0, 0, q_off_adjusted, s_off_adjusted);
-                }
-                // NCBI BLAST: s_pos -= lut_word_length (no bounds check)
-                // Use saturating_sub to prevent underflow while maintaining loop termination
-                s_pos = s_pos.saturating_sub(lut_word_length);
-                q_pos = q_pos.saturating_sub(lut_word_length);
+        let mut s_pos = s_end - lut_word_length;
+        let mut q_pos = q_end - lut_word_length;
+
+        // NCBI BLAST: Loop condition is s_pos > *s_off (no underflow check)
+        // We use saturating_sub to prevent underflow while maintaining NCBI behavior
+        while s_pos > s_off_adjusted {
+            if is_seed_masked(s_pos, q_pos) {
+                return (0, 0, q_off_adjusted, s_off_adjusted);
             }
+            // NCBI BLAST: s_pos -= lut_word_length (no bounds check)
+            // Use saturating_sub to prevent underflow while maintaining loop termination
+            s_pos = s_pos.saturating_sub(lut_word_length);
+            q_pos = q_pos.saturating_sub(lut_word_length);
         }
         
         // NCBI: (*extended) = ext_to;
@@ -606,10 +617,6 @@ pub fn type_of_word(
     //      s_pos += lut_word_length, q_pos += lut_word_length, (*extended) += lut_word_length) {
     //     if (s_IsSeedMasked(lookup_wrap, subject, s_pos, lut_word_length, q_pos)) break;
     // }
-    // NCBI BLAST: This loop runs regardless of locations (query_mask) status
-    // Reference: na_ungapped.c:584-592
-    // When locations is NULL, s_IsSeedMasked always returns FALSE, so the loop continues
-    use crate::algorithm::blastn::lookup::is_kmer_masked;
     let mut s_pos = s_end;
     let mut q_pos = q_end;
     
@@ -617,7 +624,7 @@ pub fn type_of_word(
     // If locations is NULL, s_IsSeedMasked returns FALSE, so loop continues to ext_max
     while extended + lut_word_length <= double_ext_max {
         // NCBI BLAST: s_IsSeedMasked returns FALSE if locations is NULL
-        if !query_mask.is_empty() && is_kmer_masked(query_mask, q_pos, lut_word_length) {
+        if is_seed_masked(s_pos, q_pos) {
             break;
         }
         extended += lut_word_length;
@@ -649,7 +656,7 @@ pub fn type_of_word(
         // if (s_IsSeedMasked(lookup_wrap, subject, s_pos,
         //                        lut_word_length, q_pos)) return 1;
         // ```
-        if !query_mask.is_empty() && is_kmer_masked(query_mask, q_pos, lut_word_length) {
+        if is_seed_masked(s_pos, q_pos) {
             return (1, extended, q_off_adjusted, s_off_adjusted);
         }
         extended += 1;

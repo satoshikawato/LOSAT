@@ -368,6 +368,55 @@ struct InternalHitData {
     query_context_offset: i32,
 }
 
+// NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_engine.c:488-491
+// ```c
+// hsp_list = Blast_HSPListFree(hsp_list);
+// BlastInitHitListReset(init_hitlist);
+// ```
+// NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_extend.c:84-105
+// ```c
+// n = diag->diag_array_length;
+// diag->offset = diag->window;
+// diag_struct_array = diag->hit_level_array;
+// for (i = 0; i < n; i++) {
+//     diag_struct_array[i].flag = 0;
+//     diag_struct_array[i].last_hit = -diag->window;
+//     if (diag->hit_len_array) diag->hit_len_array[i] = 0;
+// }
+// ```
+struct SubjectScratch {
+    hits_with_internal: Vec<(Hit, InternalHitData)>,
+    ungapped_hits: Vec<UngappedHit>,
+    cutoff_scores: Vec<i32>,
+    x_dropoff_scores: Vec<i32>,
+    reduced_cutoff_scores: Vec<i32>,
+    hit_level_array: Vec<DiagStruct>,
+    hit_len_array: Vec<usize>,
+    hit_level_hash: FxHashMap<u64, DiagStruct>,
+    hit_len_hash: FxHashMap<u64, usize>,
+}
+
+// NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_engine.c:488-491
+// ```c
+// hsp_list = Blast_HSPListFree(hsp_list);
+// BlastInitHitListReset(init_hitlist);
+// ```
+impl SubjectScratch {
+    fn new(query_count: usize) -> Self {
+        Self {
+            hits_with_internal: Vec::new(),
+            ungapped_hits: Vec::new(),
+            cutoff_scores: Vec::with_capacity(query_count),
+            x_dropoff_scores: Vec::with_capacity(query_count),
+            reduced_cutoff_scores: Vec::with_capacity(query_count),
+            hit_level_array: Vec::new(),
+            hit_len_array: Vec::new(),
+            hit_level_hash: FxHashMap::default(),
+            hit_len_hash: FxHashMap::default(),
+        }
+    }
+}
+
 #[derive(Clone)]
 struct QueryContext {
     query_idx: u32,

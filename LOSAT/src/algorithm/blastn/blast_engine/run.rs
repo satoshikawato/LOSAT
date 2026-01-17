@@ -456,6 +456,179 @@ fn build_subject_seq_ranges_from_masks(
     ranges
 }
 
+// NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_hits.c:2049-2067
+// ```c
+// Int2 Blast_TrimHSPListByMaxHsps(BlastHSPList* hsp_list,
+//                                const BlastHitSavingOptions* hit_options)
+// {
+//    if ((hsp_list == NULL) ||
+//        (hit_options->max_hsps_per_subject == 0) ||
+//        (hsp_list->hspcnt <= hit_options->max_hsps_per_subject))
+//       return 0;
+//    ...
+//    hsp_list->hspcnt = hsp_max;
+//    return 0;
+// }
+// ```
+// NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_traceback.c:877-892
+// ```c
+// for (query_index = 0; query_index < results->num_queries; ++query_index) {
+//    if (!(hit_list = results->hitlist_array[query_index])) continue;
+//    for (subject_index = hitlist_size;
+//         subject_index < hit_list->hsplist_count; ++subject_index) {
+//       hit_list->hsplist_array[subject_index] =
+//       Blast_HSPListFree(hit_list->hsplist_array[subject_index]);
+//    }
+//    hit_list->hsplist_count = MIN(hit_list->hsplist_count, hitlist_size);
+// }
+// ```
+fn post_process_hits_and_write(
+    all_hits: Vec<Hit>,
+    hitlist_size: usize,
+    max_hsps_per_subject: usize,
+    out_path: &Option<std::path::PathBuf>,
+    verbose: bool,
+) -> Result<()> {
+    if verbose {
+        eprintln!(
+            "[INFO] Received {} raw hits total, starting post-processing...",
+            all_hits.len()
+        );
+    }
+    let chain_start = std::time::Instant::now();
+
+    // NCBI reference: blast_traceback.c:633-692 (post-gapped processing is per-subject)
+    // Per-subject traceback already applies purge/reevaluation; skip duplicate global pass.
+    let mut filtered_hits = all_hits;
+
+    // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_hits.c:2049-2067
+    // ```c
+    // if ((hsp_list == NULL) ||
+    //     (hit_options->max_hsps_per_subject == 0) ||
+    //     (hsp_list->hspcnt <= hit_options->max_hsps_per_subject))
+    //    return 0;
+    // hsp_max = hit_options->max_hsps_per_subject;
+    // for (index = hsp_max; index < hsp_list->hspcnt; index++) {
+    //    hsp_array[index] = Blast_HSPFree(hsp_array[index]);
+    // }
+    // hsp_list->hspcnt = hsp_max;
+    // ```
+    if max_hsps_per_subject > 0 {
+        let mut grouped: FxHashMap<(u32, u32), Vec<Hit>> = FxHashMap::default();
+        for hit in filtered_hits.drain(..) {
+            grouped.entry((hit.q_idx, hit.s_idx)).or_default().push(hit);
+        }
+        let mut trimmed: Vec<Hit> = Vec::new();
+        for (_key, mut hsps) in grouped {
+            hsps.sort_by(score_compare_hsps);
+            if hsps.len() > max_hsps_per_subject {
+                hsps.truncate(max_hsps_per_subject);
+            }
+            trimmed.extend(hsps);
+        }
+        filtered_hits = trimmed;
+    }
+
+    // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_traceback.c:877-892
+    // ```c
+    // for (query_index = 0; query_index < results->num_queries; ++query_index) {
+    //    if (!(hit_list = results->hitlist_array[query_index])) continue;
+    //    for (subject_index = hitlist_size;
+    //         subject_index < hit_list->hsplist_count; ++subject_index) {
+    //       hit_list->hsplist_array[subject_index] =
+    //       Blast_HSPListFree(hit_list->hsplist_array[subject_index]);
+    //    }
+    //    hit_list->hsplist_count = MIN(hit_list->hsplist_count, hitlist_size);
+    // }
+    // ```
+    if hitlist_size > 0 {
+        let mut grouped: FxHashMap<(u32, u32), Vec<Hit>> = FxHashMap::default();
+        for hit in filtered_hits.drain(..) {
+            grouped.entry((hit.q_idx, hit.s_idx)).or_default().push(hit);
+        }
+        let mut by_query: FxHashMap<u32, Vec<(u32, f64, i32, Vec<Hit>)>> = FxHashMap::default();
+        for ((q_idx, s_idx), hsps) in grouped {
+            // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_hits.c:1390-1403
+            // ```c
+            // const double epsilon = 1.0e-180;
+            // if (evalue1 < epsilon && evalue2 < epsilon) { return 0; }
+            // if (evalue1 < evalue2) return -1;
+            // else if (evalue1 > evalue2) return 1;
+            // else return 0;
+            // ```
+            let best_evalue = hsps
+                .iter()
+                .map(|h| h.e_value)
+                .min_by(|a, b| {
+                    const EPSILON: f64 = 1.0e-180;
+                    if *a < EPSILON && *b < EPSILON {
+                        std::cmp::Ordering::Equal
+                    } else {
+                        a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal)
+                    }
+                })
+                .unwrap_or(f64::MAX);
+            let best_score = hsps.iter().map(|h| h.raw_score).max().unwrap_or(0);
+            by_query
+                .entry(q_idx)
+                .or_default()
+                .push((s_idx, best_evalue, best_score, hsps));
+        }
+        let mut pruned: Vec<Hit> = Vec::new();
+        for (_q_idx, mut groups) in by_query {
+            groups.sort_by(|a, b| {
+                // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_hits.c:3078-3095
+                // s_EvalueCompareHSPLists: best_evalue ASC, best_score DESC, oid DESC
+                let (a_s_idx, a_e, a_score, _) = a;
+                let (b_s_idx, b_e, b_score, _) = b;
+                let cmp = {
+                    const EPSILON: f64 = 1.0e-180;
+                    if *a_e < EPSILON && *b_e < EPSILON {
+                        std::cmp::Ordering::Equal
+                    } else {
+                        a_e.partial_cmp(b_e).unwrap_or(std::cmp::Ordering::Equal)
+                    }
+                };
+                if cmp != std::cmp::Ordering::Equal {
+                    return cmp;
+                }
+                if *a_score > *b_score {
+                    return std::cmp::Ordering::Less;
+                } else if *a_score < *b_score {
+                    return std::cmp::Ordering::Greater;
+                }
+                b_s_idx.cmp(a_s_idx)
+            });
+            if groups.len() > hitlist_size {
+                groups.truncate(hitlist_size);
+            }
+            for (_s_idx, _best_e, _best_score, hsps) in groups {
+                pruned.extend(hsps);
+            }
+        }
+        filtered_hits = pruned;
+    }
+
+    if verbose {
+        eprintln!(
+            "[INFO] Post-processing done in {:.2}s, {} hits after filtering, writing output...",
+            chain_start.elapsed().as_secs_f64(),
+            filtered_hits.len()
+        );
+    }
+    let write_start = std::time::Instant::now();
+
+    write_output_ncbi_order(filtered_hits, out_path.as_ref())?;
+
+    if verbose {
+        eprintln!(
+            "[INFO] Output written in {:.2}s",
+            write_start.elapsed().as_secs_f64()
+        );
+    }
+    Ok(())
+}
+
 pub fn run(args: BlastnArgs) -> Result<()> {
     let num_threads = if args.num_threads == 0 {
         num_cpus::get()
@@ -463,10 +636,39 @@ pub fn run(args: BlastnArgs) -> Result<()> {
         args.num_threads
     };
 
-    rayon::ThreadPoolBuilder::new()
-        .num_threads(num_threads)
-        .build_global()
-        .context("Failed to build thread pool")?;
+    // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_engine.c:478-536
+    // ```c
+    // while (TRUE) {
+    //     status = s_GetNextSubjectChunk(subject, &backup, kNucleotide,
+    //                                    dbseq_chunk_overlap);
+    //     if (status == SUBJECT_SPLIT_DONE) break;
+    //     if (status == SUBJECT_SPLIT_NO_RANGE) continue;
+    //     ...
+    //     if (aux_struct->WordFinder) {
+    //         aux_struct->WordFinder(...);
+    //         if (init_hitlist->total == 0) continue;
+    //     }
+    //     ...
+    // }
+    // ```
+    let use_parallel = num_threads > 1;
+
+    // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_engine.c:478-536
+    // ```c
+    // while (TRUE) {
+    //     status = s_GetNextSubjectChunk(subject, &backup, kNucleotide,
+    //                                    dbseq_chunk_overlap);
+    //     if (status == SUBJECT_SPLIT_DONE) break;
+    //     if (status == SUBJECT_SPLIT_NO_RANGE) continue;
+    //     ...
+    // }
+    // ```
+    if use_parallel {
+        rayon::ThreadPoolBuilder::new()
+            .num_threads(num_threads)
+            .build_global()
+            .context("Failed to build thread pool")?;
+    }
 
     // Configure task-specific parameters (initial configuration)
     let mut config = configure_task(&args);
@@ -711,10 +913,6 @@ pub fn run(args: BlastnArgs) -> Result<()> {
             .unwrap(),
     );
 
-    // Channel for sending hits
-    // Use Option to signal completion: None means "all subjects processed"
-    let (tx, rx) = channel::<Option<Vec<Hit>>>();
-    let out_path = args.out.clone();
     // NCBI reference: ncbi-blast/c++/src/algo/blast/blastinput/blast_args.cpp:2960-2968
     // ```c
     // if (args.Exist(kArgMaxTargetSequences) && args[kArgMaxTargetSequences]) {
@@ -729,187 +927,18 @@ pub fn run(args: BlastnArgs) -> Result<()> {
     };
     let max_hsps_per_subject = args.max_hsps_per_subject;
 
-    // Keep a sender for the main thread to send the completion signal
-    let tx_main = tx.clone();
-    let verbose = args.verbose;
-
-    let writer_handle = std::thread::spawn(move || -> Result<()> {
-        if verbose {
-            eprintln!("[INFO] Writer thread started, waiting for hits...");
-        }
-        let mut all_hits = Vec::new();
-        let mut messages_received = 0usize;
-
-        while let Ok(msg) = rx.recv() {
-            match msg {
-                Some(hits) => {
-                    messages_received += 1;
-                    if verbose && (messages_received == 1 || messages_received % 100 == 0) {
-                        eprintln!(
-                            "[INFO] Received message #{}, {} hits so far",
-                            messages_received,
-                            all_hits.len() + hits.len()
-                        );
-                    }
-                    all_hits.extend(hits);
-                }
-                None => {
-                    // Completion signal received
-                    if verbose {
-                        eprintln!(
-                            "[INFO] Completion signal received after {} messages",
-                            messages_received
-                        );
-                    }
-                    break;
-                }
-            }
-        }
-
-        if verbose {
-            eprintln!(
-                "[INFO] Received {} raw hits total, starting post-processing...",
-                all_hits.len()
-            );
-        }
-        let chain_start = std::time::Instant::now();
-
-        // NCBI reference: blast_traceback.c:633-692 (post-gapped processing is per-subject)
-        // Per-subject traceback already applies purge/reevaluation; skip duplicate global pass.
-        let mut filtered_hits = all_hits;
-
-        // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_hits.c:2049-2067
-        // ```c
-        // if ((hsp_list == NULL) ||
-        //     (hit_options->max_hsps_per_subject == 0) ||
-        //     (hsp_list->hspcnt <= hit_options->max_hsps_per_subject))
-        //    return 0;
-        // hsp_max = hit_options->max_hsps_per_subject;
-        // for (index = hsp_max; index < hsp_list->hspcnt; index++) {
-        //    hsp_array[index] = Blast_HSPFree(hsp_array[index]);
-        // }
-        // hsp_list->hspcnt = hsp_max;
-        // ```
-        if max_hsps_per_subject > 0 {
-            let mut grouped: FxHashMap<(u32, u32), Vec<Hit>> = FxHashMap::default();
-            for hit in filtered_hits.drain(..) {
-                grouped.entry((hit.q_idx, hit.s_idx)).or_default().push(hit);
-            }
-            let mut trimmed: Vec<Hit> = Vec::new();
-            for (_key, mut hsps) in grouped {
-                hsps.sort_by(score_compare_hsps);
-                if hsps.len() > max_hsps_per_subject {
-                    hsps.truncate(max_hsps_per_subject);
-                }
-                trimmed.extend(hsps);
-            }
-            filtered_hits = trimmed;
-        }
-
-        // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_traceback.c:877-892
-        // ```c
-        // for (query_index = 0; query_index < results->num_queries; ++query_index) {
-        //    if (!(hit_list = results->hitlist_array[query_index])) continue;
-        //    for (subject_index = hitlist_size;
-        //         subject_index < hit_list->hsplist_count; ++subject_index) {
-        //       hit_list->hsplist_array[subject_index] =
-        //       Blast_HSPListFree(hit_list->hsplist_array[subject_index]);
-        //    }
-        //    hit_list->hsplist_count = MIN(hit_list->hsplist_count, hitlist_size);
-        // }
-        // ```
-        if hitlist_size > 0 {
-            let mut grouped: FxHashMap<(u32, u32), Vec<Hit>> = FxHashMap::default();
-            for hit in filtered_hits.drain(..) {
-                grouped.entry((hit.q_idx, hit.s_idx)).or_default().push(hit);
-            }
-            let mut by_query: FxHashMap<u32, Vec<(u32, f64, i32, Vec<Hit>)>> = FxHashMap::default();
-            for ((q_idx, s_idx), hsps) in grouped {
-                // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_hits.c:1390-1403
-                // ```c
-                // const double epsilon = 1.0e-180;
-                // if (evalue1 < epsilon && evalue2 < epsilon) { return 0; }
-                // if (evalue1 < evalue2) return -1;
-                // else if (evalue1 > evalue2) return 1;
-                // else return 0;
-                // ```
-                let best_evalue = hsps
-                    .iter()
-                    .map(|h| h.e_value)
-                    .min_by(|a, b| {
-                        const EPSILON: f64 = 1.0e-180;
-                        if *a < EPSILON && *b < EPSILON {
-                            std::cmp::Ordering::Equal
-                        } else {
-                            a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal)
-                        }
-                    })
-                    .unwrap_or(f64::MAX);
-                let best_score = hsps.iter().map(|h| h.raw_score).max().unwrap_or(0);
-                by_query
-                    .entry(q_idx)
-                    .or_default()
-                    .push((s_idx, best_evalue, best_score, hsps));
-            }
-            let mut pruned: Vec<Hit> = Vec::new();
-            for (_q_idx, mut groups) in by_query {
-                groups.sort_by(|a, b| {
-                    // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_hits.c:3078-3095
-                    // s_EvalueCompareHSPLists: best_evalue ASC, best_score DESC, oid DESC
-                    let (a_s_idx, a_e, a_score, _) = a;
-                    let (b_s_idx, b_e, b_score, _) = b;
-                    let cmp = {
-                        const EPSILON: f64 = 1.0e-180;
-                        if *a_e < EPSILON && *b_e < EPSILON {
-                            std::cmp::Ordering::Equal
-                        } else {
-                            a_e.partial_cmp(b_e).unwrap_or(std::cmp::Ordering::Equal)
-                        }
-                    };
-                    if cmp != std::cmp::Ordering::Equal {
-                        return cmp;
-                    }
-                    if *a_score > *b_score {
-                        return std::cmp::Ordering::Less;
-                    } else if *a_score < *b_score {
-                        return std::cmp::Ordering::Greater;
-                    }
-                    b_s_idx.cmp(a_s_idx)
-                });
-                if groups.len() > hitlist_size {
-                    groups.truncate(hitlist_size);
-                }
-                for (_s_idx, _best_e, _best_score, hsps) in groups {
-                    pruned.extend(hsps);
-                }
-            }
-            filtered_hits = pruned;
-        }
-
-        if verbose {
-            eprintln!(
-                "[INFO] Post-processing done in {:.2}s, {} hits after filtering, writing output...",
-                chain_start.elapsed().as_secs_f64(),
-                filtered_hits.len()
-            );
-        }
-        let write_start = std::time::Instant::now();
-
-        write_output_ncbi_order(filtered_hits, out_path.as_ref())?;
-
-        if verbose {
-            eprintln!(
-                "[INFO] Output written in {:.2}s",
-                write_start.elapsed().as_secs_f64()
-            );
-        }
-        Ok(())
-    });
-
     // Debug mode: set BLEMIR_DEBUG=1 to enable, BLEMIR_DEBUG_WINDOW="q_start-q_end,s_start-s_end" to focus on a region
     let debug_mode = std::env::var("BLEMIR_DEBUG").is_ok();
     // BLASTN-specific debug mode: set LOSAT_DEBUG_BLASTN=1 to enable detailed hit loss diagnostics
     let blastn_debug = std::env::var("LOSAT_DEBUG_BLASTN").is_ok();
+    // NCBI reference: ncbi-blast/c++/src/algo/blast/blastinput/blast_args.cpp:3267-3282
+    // ```c
+    // arg_desc.AddFlag("verbose", "Produce verbose output (show BLAST options)",
+    //                  true);
+    // ...
+    // m_DebugOutput = static_cast<bool>(args["verbose"]);
+    // ```
+    let verbose = args.verbose;
     let debug_window: Option<(usize, usize, usize, usize)> =
         std::env::var("BLEMIR_DEBUG_WINDOW").ok().and_then(|s| {
             let parts: Vec<&str> = s.split(',').collect();
@@ -1036,17 +1065,25 @@ pub fn run(args: BlastnArgs) -> Result<()> {
         .map(|ctx| encode_iupac_to_blastna(ctx.seq.as_slice()))
         .collect();
 
-    seq_data.subjects
-        .par_iter()
-        .enumerate()
-        .for_each_init(
-            || {
-                // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_gapalign.c:313-319 (BLAST_GapAlignStructNew)
-                // NCBI reference: ncbi-blast/c++/include/algo/blast/core/blast_gapalign.h:69-80 (BlastGapAlignStruct per thread)
-                (tx.clone(), GapAlignScratch::new())
-            },
-            |state, (s_idx, s_record)| {
-            let (tx, gap_scratch) = state;
+    // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_engine.c:478-536
+    // ```c
+    // while (TRUE) {
+    //     status = s_GetNextSubjectChunk(subject, &backup, kNucleotide,
+    //                                    dbseq_chunk_overlap);
+    //     if (status == SUBJECT_SPLIT_DONE) break;
+    //     if (status == SUBJECT_SPLIT_NO_RANGE) continue;
+    //     ...
+    //     if (aux_struct->WordFinder) {
+    //         aux_struct->WordFinder(...);
+    //         if (init_hitlist->total == 0) continue;
+    //     }
+    //     ...
+    // }
+    // ```
+    let process_subject = |s_idx: usize,
+                           s_record: &bio::io::fasta::Record,
+                           gap_scratch: &mut GapAlignScratch,
+                           subject_hits: &mut Option<Vec<Hit>>| {
             let queries = queries_ref;
             let query_contexts = query_contexts_ref;
             let query_ids = query_ids_ref;
@@ -3268,22 +3305,129 @@ pub fn run(args: BlastnArgs) -> Result<()> {
 
             if !final_hits.is_empty() {
                 // NCBI reference: blast_traceback.c:633-692 (post-gapped processing is per-subject)
-                tx.send(Some(final_hits)).unwrap();
+                *subject_hits = Some(final_hits);
             }
             bar.inc(1);
+        };
+
+    if use_parallel {
+        // Channel for sending hits
+        // Use Option to signal completion: None means "all subjects processed"
+        let (tx, rx) = channel::<Option<Vec<Hit>>>();
+        let out_path = args.out.clone();
+        // Keep a sender for the main thread to send the completion signal
+        let tx_main = tx.clone();
+        let verbose = args.verbose;
+
+        let writer_handle = std::thread::spawn(move || -> Result<()> {
+            if verbose {
+                eprintln!("[INFO] Writer thread started, waiting for hits...");
+            }
+            let mut all_hits = Vec::new();
+            let mut messages_received = 0usize;
+
+            while let Ok(msg) = rx.recv() {
+                match msg {
+                    Some(hits) => {
+                        messages_received += 1;
+                        if verbose && (messages_received == 1 || messages_received % 100 == 0) {
+                            eprintln!(
+                                "[INFO] Received message #{}, {} hits so far",
+                                messages_received,
+                                all_hits.len() + hits.len()
+                            );
+                        }
+                        all_hits.extend(hits);
+                    }
+                    None => {
+                        // Completion signal received
+                        if verbose {
+                            eprintln!(
+                                "[INFO] Completion signal received after {} messages",
+                                messages_received
+                            );
+                        }
+                        break;
+                    }
+                }
+            }
+
+            post_process_hits_and_write(
+                all_hits,
+                hitlist_size,
+                max_hsps_per_subject,
+                &out_path,
+                verbose,
+            )
         });
 
-    bar.finish();
-    if args.verbose {
-        eprintln!("[INFO] Parallel processing complete, sending completion signal...");
+        seq_data.subjects
+            .par_iter()
+            .enumerate()
+            .for_each_init(
+                || {
+                    // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_gapalign.c:313-319 (BLAST_GapAlignStructNew)
+                    // NCBI reference: ncbi-blast/c++/include/algo/blast/core/blast_gapalign.h:69-80 (BlastGapAlignStruct per thread)
+                    (tx.clone(), GapAlignScratch::new())
+                },
+                |state, (s_idx, s_record)| {
+                    let (tx, gap_scratch) = state;
+                    let mut subject_hits: Option<Vec<Hit>> = None;
+                    process_subject(s_idx, s_record, gap_scratch, &mut subject_hits);
+                    if let Some(hits) = subject_hits {
+                        // NCBI reference: blast_traceback.c:633-692 (post-gapped processing is per-subject)
+                        tx.send(Some(hits)).unwrap();
+                    }
+                },
+            );
+
+        bar.finish();
+        if args.verbose {
+            eprintln!("[INFO] Parallel processing complete, sending completion signal...");
+        }
+
+        // Send completion signal to writer thread
+        // This ensures the writer thread exits even if sender-drop semantics are delayed
+        tx_main.send(None).unwrap();
+        drop(tx_main); // Explicitly drop to ensure channel closes
+
+        writer_handle.join().unwrap()?;
+        return Ok(());
     }
 
-    // Send completion signal to writer thread
-    // This ensures the writer thread exits even if sender-drop semantics are delayed
-    tx_main.send(None).unwrap();
-    drop(tx_main); // Explicitly drop to ensure channel closes
+    // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_engine.c:478-536
+    // ```c
+    // while (TRUE) {
+    //     status = s_GetNextSubjectChunk(subject, &backup, kNucleotide,
+    //                                    dbseq_chunk_overlap);
+    //     if (status == SUBJECT_SPLIT_DONE) break;
+    //     if (status == SUBJECT_SPLIT_NO_RANGE) continue;
+    //     ...
+    //     if (aux_struct->WordFinder) {
+    //         aux_struct->WordFinder(...);
+    //         if (init_hitlist->total == 0) continue;
+    //     }
+    //     ...
+    // }
+    // ```
+    let mut all_hits = Vec::new();
+    let mut gap_scratch = GapAlignScratch::new();
+    for (s_idx, s_record) in seq_data.subjects.iter().enumerate() {
+        let mut subject_hits: Option<Vec<Hit>> = None;
+        process_subject(s_idx, s_record, &mut gap_scratch, &mut subject_hits);
+        if let Some(hits) = subject_hits {
+            all_hits.extend(hits);
+        }
+    }
 
-    writer_handle.join().unwrap()?;
+    bar.finish();
+    post_process_hits_and_write(
+        all_hits,
+        hitlist_size,
+        max_hsps_per_subject,
+        &args.out,
+        args.verbose,
+    )?;
     Ok(())
 }
 

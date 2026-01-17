@@ -1313,16 +1313,44 @@ pub fn run(args: BlastnArgs) -> Result<()> {
                         |kmer_start, current_lut_kmer| {
                             dbg_total_s_positions += 1;
 
-                            // DEBUG: Track processing time
-                            let _dbg_start = std::time::Instant::now();
+                            // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_nascan.c:193-207
+                            // ```c
+                            // for (; s <= s_end; s += scan_step) {
+                            //     num_hits = s_BlastLookupGetNumHits(lookup, index);
+                            //     if (num_hits == 0)
+                            //         continue;
+                            //     s_BlastLookupRetrieve(lookup,
+                            //                           index,
+                            //                           offset_pairs + total_hits,
+                            //                           ...);
+                            //     total_hits += num_hits;
+                            // }
+                            // ```
+                            if debug_mode || blastn_debug {
+                                // DEBUG: Track processing time
+                                let _dbg_start = std::time::Instant::now();
+                            }
 
                             // Lookup using lut_word_length k-mer
                             let matches_slice = two_stage.get_hits(current_lut_kmer);
 
-                        // DEBUG: Log max matches
-                        if matches_slice.len() > 1000 {
-                            eprintln!("[WARN] Large matches_slice: len={} for kmer at position {}", matches_slice.len(), kmer_start);
-                        }
+                            // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_nascan.c:193-207
+                            // ```c
+                            // for (; s <= s_end; s += scan_step) {
+                            //     num_hits = s_BlastLookupGetNumHits(lookup, index);
+                            //     if (num_hits == 0)
+                            //         continue;
+                            //     s_BlastLookupRetrieve(lookup,
+                            //                           index,
+                            //                           offset_pairs + total_hits,
+                            //                           ...);
+                            //     total_hits += num_hits;
+                            // }
+                            // ```
+                            // DEBUG: Log max matches
+                            if (debug_mode || blastn_debug) && matches_slice.len() > 1000 {
+                                eprintln!("[WARN] Large matches_slice: len={} for kmer at position {}", matches_slice.len(), kmer_start);
+                            }
 
                         // For each match, check if word_length match exists
                             for &(q_idx, q_pos) in matches_slice {
@@ -1984,11 +2012,26 @@ pub fn run(args: BlastnArgs) -> Result<()> {
                         },
                     );
 
+                    // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_nascan.c:193-207
+                    // ```c
+                    // for (; s <= s_end; s += scan_step) {
+                    //     num_hits = s_BlastLookupGetNumHits(lookup, index);
+                    //     if (num_hits == 0)
+                    //         continue;
+                    //     s_BlastLookupRetrieve(lookup,
+                    //                           index,
+                    //                           offset_pairs + total_hits,
+                    //                           ...);
+                    //     total_hits += num_hits;
+                    // }
+                    // ```
                     // DEBUG: Log stats for this subject
-                    let elapsed = dbg_start_time.elapsed();
-                    eprintln!("[PERF] Subject scan took {:?}: left_ext={}, right_ext={}, ungapped={}, seeds={}, valid_pos={}",
-                        elapsed, dbg_left_ext_iters, dbg_right_ext_iters, dbg_ungapped_ext_calls,
-                        dbg_seeds_found, dbg_total_s_positions);
+                    if debug_mode || blastn_debug {
+                        let elapsed = dbg_start_time.elapsed();
+                        eprintln!("[PERF] Subject scan took {:?}: left_ext={}, right_ext={}, ungapped={}, seeds={}, valid_pos={}",
+                            elapsed, dbg_left_ext_iters, dbg_right_ext_iters, dbg_ungapped_ext_calls,
+                            dbg_seeds_found, dbg_total_s_positions);
+                    }
                 }
                 if two_stage_lookup_ref.is_none() {
                     // Original lookup method (for non-two-stage lookup)

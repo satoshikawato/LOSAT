@@ -7,7 +7,7 @@ use anyhow::{Context, Result};
 use indicatif::{ProgressBar, ProgressStyle};
 use rayon::prelude::*;
 use rustc_hash::FxHashMap;
-use std::sync::mpsc::channel;
+use std::sync::{mpsc::channel, Arc};
 
 use crate::common::{score_compare_hsps, write_output_ncbi_order, Hit};
 use crate::stats::length_adjustment::compute_length_adjustment_ncbi;
@@ -488,6 +488,8 @@ fn post_process_hits_and_write(
     max_hsps_per_subject: usize,
     out_path: &Option<std::path::PathBuf>,
     verbose: bool,
+    query_ids: &[String],
+    subject_ids: &[String],
 ) -> Result<()> {
     if verbose {
         eprintln!(
@@ -607,6 +609,27 @@ fn post_process_hits_and_write(
             }
         }
         filtered_hits = pruned;
+    }
+
+    // NCBI reference: ncbi-blast/c++/include/algo/blast/core/blast_hits.h:153-166
+    // ```c
+    // typedef struct BlastHSPList {
+    //    Int4 oid;/**< The ordinal id of the subject sequence this HSP list is for */
+    //    Int4 query_index; /**< Index of the query which this HSPList corresponds to. */
+    //    BlastHSP** hsp_array;
+    //    Int4 hspcnt;
+    //    ...
+    // } BlastHSPList;
+    // ```
+    for hit in filtered_hits.iter_mut() {
+        hit.query_id = query_ids
+            .get(hit.q_idx as usize)
+            .cloned()
+            .unwrap_or_else(|| "unknown".to_string());
+        hit.subject_id = subject_ids
+            .get(hit.s_idx as usize)
+            .cloned()
+            .unwrap_or_else(|| "unknown".to_string());
     }
 
     if verbose {
@@ -739,6 +762,32 @@ pub fn run(args: BlastnArgs) -> Result<()> {
 
     // Prepare sequence data (including DUST masking)
     let seq_data = prepare_sequence_data(&args, queries, query_ids, subjects);
+
+    // NCBI reference: ncbi-blast/c++/include/algo/blast/core/blast_hits.h:153-166
+    // ```c
+    // typedef struct BlastHSPList {
+    //    Int4 oid;/**< The ordinal id of the subject sequence this HSP list is for */
+    //    Int4 query_index; /**< Index of the query which this HSPList corresponds to. */
+    //    BlastHSP** hsp_array;
+    //    Int4 hspcnt;
+    //    ...
+    // } BlastHSPList;
+    // ```
+    let query_ids_arc = Arc::new(seq_data.query_ids.clone());
+    let subject_ids_arc = Arc::new(
+        seq_data
+            .subjects
+            .iter()
+            .map(|record| {
+                record
+                    .id()
+                    .split_whitespace()
+                    .next()
+                    .unwrap_or("unknown")
+                    .to_string()
+            })
+            .collect::<Vec<String>>(),
+    );
 
     // Build per-context query sequences (plus/minus) for blastn.
     // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_util.c:839-847
@@ -979,7 +1028,6 @@ pub fn run(args: BlastnArgs) -> Result<()> {
     let pv_direct_lookup_ref = lookup_tables.pv_direct_lookup.as_ref();
     let hash_lookup_ref = lookup_tables.hash_lookup.as_ref();
     let queries_ref = &seq_data.queries;
-    let query_ids_ref = &seq_data.query_ids;
     let query_contexts_ref = &query_contexts;
     let query_base_offsets_ref = &query_base_offsets;
     let query_eff_searchsp_ref = &query_eff_searchsp;
@@ -993,6 +1041,7 @@ pub fn run(args: BlastnArgs) -> Result<()> {
     // }
     // ```
     let subject_masks_ref = &seq_data.subject_masks;
+    let subject_ids_ref = Arc::clone(&subject_ids_arc);
 
     // Capture config values for use in closure
     let effective_word_size = config.effective_word_size;
@@ -1086,7 +1135,6 @@ pub fn run(args: BlastnArgs) -> Result<()> {
                            subject_hits: &mut Option<Vec<Hit>>| {
             let queries = queries_ref;
             let query_contexts = query_contexts_ref;
-            let query_ids = query_ids_ref;
             let query_base_offsets = query_base_offsets_ref;
             let query_eff_searchsp = query_eff_searchsp_ref;
             let diag_array_lengths = diag_array_lengths_ref;
@@ -1097,12 +1145,20 @@ pub fn run(args: BlastnArgs) -> Result<()> {
 
             let s_seq = s_record.seq();
             let s_len = s_seq.len();
-            let s_id = s_record
-                .id()
-                .split_whitespace()
-                .next()
-                .unwrap_or("unknown")
-                .to_string();
+            // NCBI reference: ncbi-blast/c++/include/algo/blast/core/blast_hits.h:153-166
+            // ```c
+            // typedef struct BlastHSPList {
+            //    Int4 oid;/**< The ordinal id of the subject sequence this HSP list is for */
+            //    Int4 query_index; /**< Index of the query which this HSPList corresponds to. */
+            //    BlastHSP** hsp_array;
+            //    Int4 hspcnt;
+            //    ...
+            // } BlastHSPList;
+            // ```
+            let s_id = subject_ids_ref
+                .get(s_idx)
+                .map(|id| id.as_str())
+                .unwrap_or("unknown");
 
             // NCBI reference: ncbi-blast/c++/src/algo/blast/core/na_ungapped.c:1647-1662
             // ```c
@@ -2984,7 +3040,6 @@ pub fn run(args: BlastnArgs) -> Result<()> {
                 };
 
                 let query_length = queries[uh.query_idx as usize].seq().len();
-                let q_id = query_ids[uh.query_idx as usize].clone();
                 let (hit_q_start, hit_q_end, hit_s_start, hit_s_end) = adjust_blastn_offsets(
                     final_qs,
                     final_qe,
@@ -3014,8 +3069,18 @@ pub fn run(args: BlastnArgs) -> Result<()> {
 
                 // Add hit with internal coordinates to results
                 hits_with_internal.push((Hit {
-                    query_id: q_id.clone(),
-                    subject_id: s_id.clone(),
+                    // NCBI reference: ncbi-blast/c++/include/algo/blast/core/blast_hits.h:153-166
+                    // ```c
+                    // typedef struct BlastHSPList {
+                    //    Int4 oid;/**< The ordinal id of the subject sequence this HSP list is for */
+                    //    Int4 query_index; /**< Index of the query which this HSPList corresponds to. */
+                    //    BlastHSP** hsp_array;
+                    //    Int4 hspcnt;
+                    //    ...
+                    // } BlastHSPList;
+                    // ```
+                    query_id: String::new(),
+                    subject_id: String::new(),
                     identity,
                     length: aln_len,
                     mismatch: mismatches,
@@ -3318,6 +3383,8 @@ pub fn run(args: BlastnArgs) -> Result<()> {
         // Keep a sender for the main thread to send the completion signal
         let tx_main = tx.clone();
         let verbose = args.verbose;
+        let query_ids_arc = Arc::clone(&query_ids_arc);
+        let subject_ids_arc = Arc::clone(&subject_ids_arc);
 
         let writer_handle = std::thread::spawn(move || -> Result<()> {
             if verbose {
@@ -3358,6 +3425,8 @@ pub fn run(args: BlastnArgs) -> Result<()> {
                 max_hsps_per_subject,
                 &out_path,
                 verbose,
+                query_ids_arc.as_ref(),
+                subject_ids_arc.as_ref(),
             )
         });
 
@@ -3427,6 +3496,8 @@ pub fn run(args: BlastnArgs) -> Result<()> {
         max_hsps_per_subject,
         &args.out,
         args.verbose,
+        query_ids_arc.as_ref(),
+        subject_ids_arc.as_ref(),
     )?;
     Ok(())
 }

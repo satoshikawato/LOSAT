@@ -312,7 +312,7 @@ pub fn cut_off_gap_edit_script(hit: &mut Hit, q_cut: usize, s_cut: usize, cut_be
 /// NCBI reference: blast_hits.c:2455-2535 Blast_HSPListPurgeHSPsWithCommonEndpoints
 ///
 /// CRITICAL: NCBI processes HSPs per-subject (BlastHSPList is per-subject).
-/// This function groups hits by subject_id before purging to match NCBI behavior.
+/// This function groups hits by subject index (oid) before purging to match NCBI behavior.
 ///
 /// # Parameters
 /// * `purge` - If true, delete HSPs entirely (current behavior).
@@ -353,21 +353,31 @@ pub fn purge_hsps_with_common_endpoints_ex(hits: Vec<Hit>, purge: bool) -> (Vec<
         return (hits, len);
     }
 
+    // NCBI reference: ncbi-blast/c++/include/algo/blast/core/blast_hits.h:153-166
+    // ```c
+    // typedef struct BlastHSPList {
+    //    Int4 oid;/**< The ordinal id of the subject sequence this HSP list is for */
+    //    Int4 query_index; /**< Index of the query which this HSPList corresponds to. */
+    //    BlastHSP** hsp_array;
+    //    Int4 hspcnt;
+    //    ...
+    // } BlastHSPList;
+    // ```
     // NCBI reference: blast_hits.c:2455-2535
     // Blast_HSPListPurgeHSPsWithCommonEndpoints operates on BlastHSPList which is per-subject.
-    // We must group hits by subject_id and process each group separately.
+    // We must group hits by subject oid (s_idx) and process each group separately.
 
-    // Group hits by subject_id
-    let mut subject_groups: FxHashMap<String, Vec<Hit>> = FxHashMap::default();
+    // Group hits by subject oid (s_idx)
+    let mut subject_groups: FxHashMap<u32, Vec<Hit>> = FxHashMap::default();
     for hit in hits {
-        subject_groups.entry(hit.subject_id.clone()).or_default().push(hit);
+        subject_groups.entry(hit.s_idx).or_default().push(hit);
     }
 
     // Process each subject group independently and collect results
     let mut result: Vec<Hit> = Vec::new();
     let mut total_extra_start = 0usize;
 
-    for (_subject_id, group_hits) in subject_groups {
+    for (_subject_idx, group_hits) in subject_groups {
         let (purged, extra_start) = purge_hsps_for_subject_ex(group_hits, purge);
         let offset = result.len();
         result.extend(purged);

@@ -23,6 +23,7 @@ use rustc_hash::FxHashMap;
 use crate::common::{Hit, score_compare_hsps};
 use crate::stats::KarlinParams;
 use crate::core::blast_encoding::encode_iupac_to_blastna;
+use super::alignment::build_blastna_matrix;
 use super::filtering::{purge_hsps_with_common_endpoints_ex, reevaluate_hsp_with_ambiguities_gapped, subject_best_hit};
 use super::interval_tree::{BlastIntervalTree, IndexMethod, TreeHsp};
 use std::sync::Arc;
@@ -74,6 +75,9 @@ pub fn filter_hsps(
     // Always output individual HSPs (NCBI BLAST behavior)
     // NCBI BLAST's blastn does not use chaining/clustering - all HSPs are saved individually
     let mut result_hits: Vec<Hit> = hits;
+
+    // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_stat.c:1052-1127 (BlastScoreBlkNuclMatrixCreate)
+    let score_matrix = build_blastna_matrix(reward, penalty);
 
     // NCBI blastn does NOT apply culling by default (culling_limit = 0)
     // Culling is only applied when -culling_limit is explicitly set
@@ -172,6 +176,7 @@ pub fn filter_hsps(
                 gap_open,
                 gap_extend,
                 cutoff_score,
+                &score_matrix,
             );
             if delete {
                 hit.raw_score = i32::MIN; // Mark for deletion

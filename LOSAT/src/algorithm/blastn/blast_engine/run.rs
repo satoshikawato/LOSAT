@@ -191,6 +191,7 @@ fn scan_subject_kmers_range<F>(
     subject_len: usize,
     lut_word_length: usize,
     scan_step: usize,
+    subject_masked: bool,
     start: usize,
     end: usize,
     on_kmer: &mut F,
@@ -210,10 +211,124 @@ fn scan_subject_kmers_range<F>(
     debug_assert!(scan_step > 0);
 
     let mask = (1u64 << (2 * lut_word_length)) - 1;
+    if lut_word_length <= 8 {
+        let packed_len = packed.len();
+        if packed_len == 0 {
+            return;
+        }
+        if lut_word_length > 5 {
+            // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_nascan.c:172-209
+            // ```c
+            // if (lut_word_length > 5) {
+            //     if (scan_step % COMPRESSION_RATIO == 0 &&
+            //         (subject->mask_type == eNoSubjMasking)) {
+            //         Uint1 *s_end = abs_start + scan_range[1] / COMPRESSION_RATIO;
+            //         Int4 shift = 2 * (8 - lut_word_length);
+            //         s = abs_start + scan_range[0] / COMPRESSION_RATIO;
+            //         scan_step = scan_step / COMPRESSION_RATIO;
+            //         for (; s <= s_end; s += scan_step) {
+            //             index = s[0] << 8 | s[1];
+            //             index = index >> shift;
+            //             ...
+            //         }
+            //     }
+            // }
+            // ```
+            if scan_step % COMPRESSION_RATIO == 0
+                && !subject_masked
+                && start % COMPRESSION_RATIO == 0
+                && packed_len >= 2
+            {
+                let shift = 2 * (8 - lut_word_length);
+                let step_bytes = scan_step / COMPRESSION_RATIO;
+                let mut byte_idx = start / COMPRESSION_RATIO;
+                let max_byte_idx = packed_len.saturating_sub(2);
+                let end_byte_idx = (end / COMPRESSION_RATIO).min(max_byte_idx);
+                while byte_idx <= end_byte_idx {
+                    let idx = ((packed[byte_idx] as u16) << 8) | packed[byte_idx + 1] as u16;
+                    let kmer = ((idx >> shift) as u64) & mask;
+                    on_kmer(byte_idx * COMPRESSION_RATIO, kmer);
+                    byte_idx += step_bytes;
+                }
+                let mut pos = byte_idx * COMPRESSION_RATIO;
+                while pos <= end {
+                    let kmer = packed_kmer_at(packed, pos, lut_word_length);
+                    on_kmer(pos, kmer);
+                    pos = pos.saturating_add(scan_step);
+                }
+                return;
+            }
+
+            // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_nascan.c:210-240
+            // ```c
+            // for (; scan_range[0] <= scan_range[1]; scan_range[0] += scan_step) {
+            //     Int4 shift = 2*(12 - (scan_range[0] % COMPRESSION_RATIO + lut_word_length));
+            //     s = abs_start + (scan_range[0] / COMPRESSION_RATIO);
+            //     index = s[0] << 16 | s[1] << 8 | s[2];
+            //     index = (index >> shift) & mask;
+            //     ...
+            // }
+            // ```
+            if packed_len >= 3 {
+                let max_byte_idx = packed_len.saturating_sub(3);
+                let max_fast_pos = max_byte_idx * COMPRESSION_RATIO + (COMPRESSION_RATIO - 1);
+                let fast_end = end.min(max_fast_pos);
+                let mut pos = start;
+                while pos <= fast_end {
+                    let byte_idx = pos / COMPRESSION_RATIO;
+                    let shift = 2 * (12 - ((pos % COMPRESSION_RATIO) + lut_word_length));
+                    let idx = ((packed[byte_idx] as u32) << 16)
+                        | ((packed[byte_idx + 1] as u32) << 8)
+                        | (packed[byte_idx + 2] as u32);
+                    let kmer = ((idx >> shift) as u64) & mask;
+                    on_kmer(pos, kmer);
+                    pos = pos.saturating_add(scan_step);
+                }
+                while pos <= end {
+                    let kmer = packed_kmer_at(packed, pos, lut_word_length);
+                    on_kmer(pos, kmer);
+                    pos = pos.saturating_add(scan_step);
+                }
+                return;
+            }
+        } else {
+            // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_nascan.c:245-260
+            // ```c
+            // for (; scan_range[0] <= scan_range[1]; scan_range[0] += scan_step) {
+            //     Int4 shift = 2*(8 - (scan_range[0] % COMPRESSION_RATIO + lut_word_length));
+            //     s = abs_start + (scan_range[0] / COMPRESSION_RATIO);
+            //     index = s[0] << 8 | s[1];
+            //     index = (index >> shift) & mask;
+            //     ...
+            // }
+            // ```
+            if packed_len >= 2 {
+                let max_byte_idx = packed_len.saturating_sub(2);
+                let max_fast_pos = max_byte_idx * COMPRESSION_RATIO + (COMPRESSION_RATIO - 1);
+                let fast_end = end.min(max_fast_pos);
+                let mut pos = start;
+                while pos <= fast_end {
+                    let byte_idx = pos / COMPRESSION_RATIO;
+                    let shift = 2 * (8 - ((pos % COMPRESSION_RATIO) + lut_word_length));
+                    let idx = ((packed[byte_idx] as u16) << 8) | packed[byte_idx + 1] as u16;
+                    let kmer = ((idx >> shift) as u64) & mask;
+                    on_kmer(pos, kmer);
+                    pos = pos.saturating_add(scan_step);
+                }
+                while pos <= end {
+                    let kmer = packed_kmer_at(packed, pos, lut_word_length);
+                    on_kmer(pos, kmer);
+                    pos = pos.saturating_add(scan_step);
+                }
+                return;
+            }
+        }
+    }
+
+    // Fallback: rolling k-mer over packed bases (used for larger word sizes).
     let mut pos = start;
     let mut next_emit = start;
     let mut kmer = packed_kmer_at(packed, start, lut_word_length);
-
     loop {
         if pos == next_emit {
             on_kmer(pos, kmer);
@@ -308,6 +423,7 @@ fn scan_subject_kmers_with_ranges<F>(
                 subject_len,
                 lut_word_length,
                 scan_step,
+                subject_masked,
                 start as usize,
                 end as usize,
                 &mut on_kmer,
@@ -3415,6 +3531,7 @@ pub fn run(args: BlastnArgs) -> Result<()> {
                     gap_open,
                     gap_extend,
                     cutoff,
+                    &score_matrix,
                     Some(&reeval_params),
                 );
                 // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_traceback.c:656-663

@@ -374,7 +374,16 @@ pub fn write_pairwise<W: Write>(
     let mut subject_order: Vec<&str> = Vec::new();
     
     for hit in hits {
-        let sid = hit.hit.subject_id.as_str();
+        // NCBI reference: ncbi-blast/c++/src/objtools/align_format/showalign.cpp:2278-2315
+        // ```c
+        // string CDisplaySeqalign::x_PrintDefLine(...)
+        // {
+        //     ...
+        //     out << ">";
+        //     ...
+        // }
+        // ```
+        let sid = hit.hit.subject_id.as_ref();
         if !subject_hits.contains_key(sid) {
             subject_order.push(sid);
         }
@@ -423,9 +432,20 @@ mod tests {
     use super::*;
 
     fn make_hit() -> Hit {
+        // NCBI reference: ncbi-blast/c++/include/algo/blast/core/blast_hits.h:153-166
+        // ```c
+        // typedef struct BlastHSPList {
+        //    Int4 oid;/**< The ordinal id of the subject sequence this HSP list is for */
+        //    Int4 query_index; /**< Index of the query which this HSPList corresponds to.
+        //                       Set to 0 if not applicable */
+        //    BlastHSP** hsp_array; /**< Array of pointers to individual HSPs */
+        //    Int4 hspcnt; /**< Number of HSPs saved */
+        //    ...
+        // } BlastHSPList;
+        // ```
         Hit {
-            query_id: "query1".to_string(),
-            subject_id: "subject1".to_string(),
+            query_id: "query1".into(),
+            subject_id: "subject1".into(),
             identity: 95.0,
             length: 100,
             mismatch: 5,

@@ -531,14 +531,25 @@ fn build_subject_seq_ranges_from_masks(
 //    hit_list->hsplist_count = MIN(hit_list->hsplist_count, hitlist_size);
 // }
 // ```
+// NCBI reference: ncbi-blast/c++/include/algo/blast/core/blast_hits.h:153-166
+// ```c
+// typedef struct BlastHSPList {
+//    Int4 oid;/**< The ordinal id of the subject sequence this HSP list is for */
+//    Int4 query_index; /**< Index of the query which this HSPList corresponds to.
+//                       Set to 0 if not applicable */
+//    BlastHSP** hsp_array; /**< Array of pointers to individual HSPs */
+//    Int4 hspcnt; /**< Number of HSPs saved */
+//    ...
+// } BlastHSPList;
+// ```
 fn post_process_hits_and_write(
     all_hits: Vec<Hit>,
     hitlist_size: usize,
     max_hsps_per_subject: usize,
     out_path: &Option<std::path::PathBuf>,
     verbose: bool,
-    query_ids: &[String],
-    subject_ids: &[String],
+    query_ids: &[Arc<str>],
+    subject_ids: &[Arc<str>],
 ) -> Result<()> {
     if verbose {
         eprintln!(
@@ -674,11 +685,11 @@ fn post_process_hits_and_write(
         hit.query_id = query_ids
             .get(hit.q_idx as usize)
             .cloned()
-            .unwrap_or_else(|| "unknown".to_string());
+            .unwrap_or_else(|| Arc::<str>::from("unknown"));
         hit.subject_id = subject_ids
             .get(hit.s_idx as usize)
             .cloned()
-            .unwrap_or_else(|| "unknown".to_string());
+            .unwrap_or_else(|| Arc::<str>::from("unknown"));
     }
 
     if verbose {
@@ -822,20 +833,27 @@ pub fn run(args: BlastnArgs) -> Result<()> {
     //    ...
     // } BlastHSPList;
     // ```
-    let query_ids_arc = Arc::new(seq_data.query_ids.clone());
+    let query_ids_arc = Arc::new(
+        seq_data
+            .query_ids
+            .iter()
+            .map(|id| Arc::<str>::from(id.as_str()))
+            .collect::<Vec<Arc<str>>>(),
+    );
     let subject_ids_arc = Arc::new(
         seq_data
             .subjects
             .iter()
             .map(|record| {
-                record
-                    .id()
-                    .split_whitespace()
-                    .next()
-                    .unwrap_or("unknown")
-                    .to_string()
+                Arc::<str>::from(
+                    record
+                        .id()
+                        .split_whitespace()
+                        .next()
+                        .unwrap_or("unknown"),
+                )
             })
-            .collect::<Vec<String>>(),
+            .collect::<Vec<Arc<str>>>(),
     );
 
     // Build per-context query sequences (plus/minus) for blastn.
@@ -1004,12 +1022,27 @@ pub fn run(args: BlastnArgs) -> Result<()> {
         eprintln!("Searching...");
     }
 
-    let bar = ProgressBar::new(seq_data.subjects.len() as u64);
-    bar.set_style(
-        ProgressStyle::default_bar()
-            .template("{spinner:.green} [{elapsed_precise}] [{bar:40.cyan/blue}] {pos}/{len}")
-            .unwrap(),
-    );
+    // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_engine.c:478-501
+    // ```c
+    // while (TRUE) {
+    //     status = s_GetNextSubjectChunk(subject, &backup, kNucleotide,
+    //                                    dbseq_chunk_overlap);
+    //     if (status == SUBJECT_SPLIT_DONE) break;
+    //     if (status == SUBJECT_SPLIT_NO_RANGE) continue;
+    //     ...
+    // }
+    // ```
+    let progress_bar = if use_parallel {
+        let bar = ProgressBar::new(seq_data.subjects.len() as u64);
+        bar.set_style(
+            ProgressStyle::default_bar()
+                .template("{spinner:.green} [{elapsed_precise}] [{bar:40.cyan/blue}] {pos}/{len}")
+                .unwrap(),
+        );
+        Some(bar)
+    } else {
+        None
+    };
 
     // NCBI reference: ncbi-blast/c++/src/algo/blast/blastinput/blast_args.cpp:2960-2968
     // ```c
@@ -1090,6 +1123,18 @@ pub fn run(args: BlastnArgs) -> Result<()> {
     // }
     // ```
     let subject_masks_ref = &seq_data.subject_masks;
+    // NCBI reference: ncbi-blast/c++/include/algo/blast/core/blast_hits.h:153-166
+    // ```c
+    // typedef struct BlastHSPList {
+    //    Int4 oid;/**< The ordinal id of the subject sequence this HSP list is for */
+    //    Int4 query_index; /**< Index of the query which this HSPList corresponds to.
+    //                       Set to 0 if not applicable */
+    //    BlastHSP** hsp_array; /**< Array of pointers to individual HSPs */
+    //    Int4 hspcnt; /**< Number of HSPs saved */
+    //    ...
+    // } BlastHSPList;
+    // ```
+    let query_ids_ref = Arc::clone(&query_ids_arc);
     let subject_ids_ref = Arc::clone(&subject_ids_arc);
 
     // Capture config values for use in closure
@@ -1181,6 +1226,7 @@ pub fn run(args: BlastnArgs) -> Result<()> {
     let process_subject = |s_idx: usize,
                            s_record: &bio::io::fasta::Record,
                            gap_scratch: &mut GapAlignScratch,
+                           subject_scratch: &mut SubjectScratch,
                            subject_hits: &mut Option<Vec<Hit>>| {
             let queries = queries_ref;
             let query_contexts = query_contexts_ref;
@@ -1188,9 +1234,15 @@ pub fn run(args: BlastnArgs) -> Result<()> {
             let query_eff_searchsp = query_eff_searchsp_ref;
             let diag_array_lengths = diag_array_lengths_ref;
             let diag_masks = diag_masks_ref;
+            // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_engine.c:488-491
+            // ```c
+            // hsp_list = Blast_HSPListFree(hsp_list);
+            // BlastInitHitListReset(init_hitlist);
+            // ```
             // NCBI reference: blast_traceback.c:679-692
             // Use hits_with_internal to preserve 0-based coordinates for Phase 2
-            let mut hits_with_internal: Vec<(Hit, InternalHitData)> = Vec::new();
+            let hits_with_internal = &mut subject_scratch.hits_with_internal;
+            hits_with_internal.clear();
 
             let s_seq = s_record.seq();
             let s_len = s_seq.len();
@@ -1206,7 +1258,7 @@ pub fn run(args: BlastnArgs) -> Result<()> {
             // ```
             let s_id = subject_ids_ref
                 .get(s_idx)
-                .map(|id| id.as_str())
+                .map(|id| id.as_ref())
                 .unwrap_or("unknown");
 
             // NCBI reference: ncbi-blast/c++/src/algo/blast/core/na_ungapped.c:1647-1662
@@ -1297,7 +1349,15 @@ pub fn run(args: BlastnArgs) -> Result<()> {
             // NCBI uses UNGAPPED params (kbp_std) for gap_trigger calculation
             // and GAPPED params (kbp_gap) for cutoff_score_max calculation
             let subject_len = s_len as i64;
-            let cutoff_scores: Vec<i32> = queries.iter().map(|q_record| {
+            // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_engine.c:488-491
+            // ```c
+            // hsp_list = Blast_HSPListFree(hsp_list);
+            // BlastInitHitListReset(init_hitlist);
+            // ```
+            let cutoff_scores = &mut subject_scratch.cutoff_scores;
+            cutoff_scores.clear();
+            cutoff_scores.reserve(queries.len());
+            for q_record in queries.iter() {
                 // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_setup.c:821-843
                 // ```c
                 // BLAST_ComputeLengthAdjustment(..., query_length, db_length, ...);
@@ -1314,7 +1374,7 @@ pub fn run(args: BlastnArgs) -> Result<()> {
                 // }
                 // ```
                 let query_len = q_record.seq().len() as i64;
-                compute_blastn_cutoff_score(
+                let cutoff = compute_blastn_cutoff_score(
                     query_len,
                     subject_len,
                     evalue_threshold,
@@ -1322,8 +1382,10 @@ pub fn run(args: BlastnArgs) -> Result<()> {
                     &params_ungapped_for_closure,  // UNGAPPED for gap_trigger (NCBI: kbp_std)
                     &params_gapped_for_closure,    // GAPPED for cutoff_score_max (NCBI: kbp_gap)
                     1.0,
-                )
-            }).collect();
+                );
+                cutoff_scores.push(cutoff);
+            }
+            let cutoff_scores: &[i32] = cutoff_scores;
             // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_parameters.c:380-383
             // ```c
             // if (curr_cutoffs->x_dropoff_init == 0)
@@ -1331,18 +1393,25 @@ pub fn run(args: BlastnArgs) -> Result<()> {
             // else
             //    curr_cutoffs->x_dropoff = curr_cutoffs->x_dropoff_init;
             // ```
-            let x_dropoff_scores: Vec<i32> = cutoff_scores
-                .iter()
-                .map(|cutoff| if x_dropoff_init == 0 { *cutoff } else { x_dropoff_init })
-                .collect();
+            let x_dropoff_scores = &mut subject_scratch.x_dropoff_scores;
+            x_dropoff_scores.clear();
+            x_dropoff_scores.reserve(cutoff_scores.len());
+            for cutoff in cutoff_scores.iter() {
+                let x_dropoff = if x_dropoff_init == 0 { *cutoff } else { x_dropoff_init };
+                x_dropoff_scores.push(x_dropoff);
+            }
+            let x_dropoff_scores: &[i32] = x_dropoff_scores;
             // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_parameters.c:408-412
             // ```c
             // curr_cutoffs->reduced_nucl_cutoff_score = (Int4)(0.8 * new_cutoff);
             // ```
-            let reduced_cutoff_scores: Vec<i32> = cutoff_scores
-                .iter()
-                .map(|cutoff| (0.8 * (*cutoff as f64)) as i32)
-                .collect();
+            let reduced_cutoff_scores = &mut subject_scratch.reduced_cutoff_scores;
+            reduced_cutoff_scores.clear();
+            reduced_cutoff_scores.reserve(cutoff_scores.len());
+            for cutoff in cutoff_scores.iter() {
+                reduced_cutoff_scores.push((0.8 * (*cutoff as f64)) as i32);
+            }
+            let reduced_cutoff_scores: &[i32] = reduced_cutoff_scores;
 
             // BLASTN debug: Log cutoff scores for this query-subject pair
             if blastn_debug {
@@ -1373,7 +1442,13 @@ pub fn run(args: BlastnArgs) -> Result<()> {
             // NCBI architecture: Collect all ungapped hits first, then process in score-descending order
             // NCBI reference: blast_gapalign.c:3824 - ASSERT(Blast_InitHitListIsSortedByScore(init_hitlist))
             // This is critical for correct containment checking: high-score HSPs must be processed first
-            let mut ungapped_hits: Vec<UngappedHit> = Vec::new();
+            // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_engine.c:488-491
+            // ```c
+            // hsp_list = Blast_HSPListFree(hsp_list);
+            // BlastInitHitListReset(init_hitlist);
+            // ```
+            let ungapped_hits = &mut subject_scratch.ungapped_hits;
+            ungapped_hits.clear();
 
             // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_engine.c:786-833
             // ```c
@@ -1417,35 +1492,39 @@ pub fn run(args: BlastnArgs) -> Result<()> {
                 // This mask_array/mask_hash was LOSAT-specific and caused excessive filtering
                 // REMOVED to match NCBI BLAST behavior
 
+                // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_extend.c:84-105
+                // ```c
+                // n = diag->diag_array_length;
+                // diag->offset = diag->window;
+                // diag_struct_array = diag->hit_level_array;
+                // for (i = 0; i < n; i++) {
+                //     diag_struct_array[i].flag = 0;
+                //     diag_struct_array[i].last_hit = -diag->window;
+                //     if (diag->hit_len_array) diag->hit_len_array[i] = 0;
+                // }
+                // ```
                 // NCBI reference: blast_extend.h:77-80, na_ungapped.c:660-666
                 // Two-hit tracking: DiagStruct array for tracking last_hit and flag per diagonal
                 // hit_level_array[diag] contains {last_hit, flag} (equivalent to NCBI's DiagStruct)
                 // hit_len_array[diag] contains hit length (0 = no hit, >0 = hit length)
                 // For single query: use Vec for O(1) access, otherwise use HashMap
-                let mut hit_level_array: Vec<DiagStruct> = if use_array_indexing {
-                    vec![DiagStruct::default(); diag_array_size]
+                let hit_level_array = &mut subject_scratch.hit_level_array;
+                let hit_len_array = &mut subject_scratch.hit_len_array;
+                let hit_level_hash = &mut subject_scratch.hit_level_hash;
+                let hit_len_hash = &mut subject_scratch.hit_len_hash;
+                if use_array_indexing {
+                    hit_level_array.resize(diag_array_size, DiagStruct::default());
+                    hit_level_array.fill(DiagStruct::default());
+                    hit_len_array.resize(diag_array_size, 0);
+                    hit_len_array.fill(0);
+                    hit_level_hash.clear();
+                    hit_len_hash.clear();
                 } else {
-                    Vec::new()
-                };
-                let mut hit_level_hash: FxHashMap<u64, DiagStruct> = if !use_array_indexing {
-                    FxHashMap::default()
-                } else {
-                    FxHashMap::default()
-                };
-
-                // NCBI reference: na_ungapped.c:696, 705: diag_table->hit_len_array[off_diag]
-                // Hit length array: stores the length of the last hit on each diagonal
-                // 0 = no hit, >0 = hit length
-                let mut hit_len_array: Vec<usize> = if use_array_indexing {
-                    vec![0; diag_array_size]
-                } else {
-                    Vec::new()
-                };
-                let mut hit_len_hash: FxHashMap<u64, usize> = if !use_array_indexing {
-                    FxHashMap::default()
-                } else {
-                    FxHashMap::default()
-                };
+                    hit_level_array.clear();
+                    hit_len_array.clear();
+                    hit_level_hash.clear();
+                    hit_len_hash.clear();
+                }
 
                 // TWO-STAGE LOOKUP: Use separate rolling k-mer for lut_word_length
                 if let Some(two_stage) = two_stage_lookup_ref {
@@ -3210,8 +3289,8 @@ pub fn run(args: BlastnArgs) -> Result<()> {
                     //    ...
                     // } BlastHSPList;
                     // ```
-                    query_id: String::new(),
-                    subject_id: String::new(),
+                    query_id: Arc::clone(&query_ids_ref[uh.query_idx as usize]),
+                    subject_id: Arc::clone(&subject_ids_ref[s_idx]),
                     identity,
                     length: aln_len,
                     mismatch: mismatches,
@@ -3277,7 +3356,7 @@ pub fn run(args: BlastnArgs) -> Result<()> {
 
             // Step 1: Extract hits and internal coordinates
             let (local_hits, internals): (Vec<Hit>, Vec<InternalHitData>) =
-                hits_with_internal.into_iter().unzip();
+                hits_with_internal.drain(..).unzip();
 
             // Step 2: Endpoint purging pass 1 (trim, purge=false)
             // NCBI reference: blast_traceback.c:637-638
@@ -3503,7 +3582,9 @@ pub fn run(args: BlastnArgs) -> Result<()> {
                 // NCBI reference: blast_traceback.c:633-692 (post-gapped processing is per-subject)
                 *subject_hits = Some(final_hits);
             }
-            bar.inc(1);
+            if let Some(bar) = progress_bar.as_ref() {
+                bar.inc(1);
+            }
         };
 
     if use_parallel {
@@ -3568,12 +3649,28 @@ pub fn run(args: BlastnArgs) -> Result<()> {
                 || {
                     // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_gapalign.c:313-319 (BLAST_GapAlignStructNew)
                     // NCBI reference: ncbi-blast/c++/include/algo/blast/core/blast_gapalign.h:69-80 (BlastGapAlignStruct per thread)
-                    (tx.clone(), GapAlignScratch::new())
+                    // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_engine.c:488-491
+                    // ```c
+                    // hsp_list = Blast_HSPListFree(hsp_list);
+                    // BlastInitHitListReset(init_hitlist);
+                    // ```
+                    // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_extend.c:84-105
+                    // ```c
+                    // n = diag->diag_array_length;
+                    // diag->offset = diag->window;
+                    // diag_struct_array = diag->hit_level_array;
+                    // for (i = 0; i < n; i++) {
+                    //     diag_struct_array[i].flag = 0;
+                    //     diag_struct_array[i].last_hit = -diag->window;
+                    //     if (diag->hit_len_array) diag->hit_len_array[i] = 0;
+                    // }
+                    // ```
+                    (tx.clone(), GapAlignScratch::new(), SubjectScratch::new(queries_ref.len()))
                 },
                 |state, (s_idx, s_record)| {
-                    let (tx, gap_scratch) = state;
+                    let (tx, gap_scratch, subject_scratch) = state;
                     let mut subject_hits: Option<Vec<Hit>> = None;
-                    process_subject(s_idx, s_record, gap_scratch, &mut subject_hits);
+                    process_subject(s_idx, s_record, gap_scratch, subject_scratch, &mut subject_hits);
                     if let Some(hits) = subject_hits {
                         // NCBI reference: blast_traceback.c:633-692 (post-gapped processing is per-subject)
                         tx.send(Some(hits)).unwrap();
@@ -3581,7 +3678,9 @@ pub fn run(args: BlastnArgs) -> Result<()> {
                 },
             );
 
-        bar.finish();
+        if let Some(bar) = progress_bar.as_ref() {
+            bar.finish();
+        }
         if args.verbose {
             eprintln!("[INFO] Parallel processing complete, sending completion signal...");
         }
@@ -3612,15 +3711,40 @@ pub fn run(args: BlastnArgs) -> Result<()> {
     // ```
     let mut all_hits = Vec::new();
     let mut gap_scratch = GapAlignScratch::new();
+    // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_engine.c:488-491
+    // ```c
+    // hsp_list = Blast_HSPListFree(hsp_list);
+    // BlastInitHitListReset(init_hitlist);
+    // ```
+    // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_extend.c:84-105
+    // ```c
+    // n = diag->diag_array_length;
+    // diag->offset = diag->window;
+    // diag_struct_array = diag->hit_level_array;
+    // for (i = 0; i < n; i++) {
+    //     diag_struct_array[i].flag = 0;
+    //     diag_struct_array[i].last_hit = -diag->window;
+    //     if (diag->hit_len_array) diag->hit_len_array[i] = 0;
+    // }
+    // ```
+    let mut subject_scratch = SubjectScratch::new(queries_ref.len());
     for (s_idx, s_record) in seq_data.subjects.iter().enumerate() {
         let mut subject_hits: Option<Vec<Hit>> = None;
-        process_subject(s_idx, s_record, &mut gap_scratch, &mut subject_hits);
+        process_subject(
+            s_idx,
+            s_record,
+            &mut gap_scratch,
+            &mut subject_scratch,
+            &mut subject_hits,
+        );
         if let Some(hits) = subject_hits {
             all_hits.extend(hits);
         }
     }
 
-    bar.finish();
+    if let Some(bar) = progress_bar.as_ref() {
+        bar.finish();
+    }
     post_process_hits_and_write(
         all_hits,
         hitlist_size,

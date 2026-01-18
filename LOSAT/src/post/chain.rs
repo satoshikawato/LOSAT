@@ -1,5 +1,6 @@
 use crate::common::Hit;
 use rustc_hash::FxHashMap;
+use std::sync::Arc;
 
 /// Configuration for HSP chaining
 #[derive(Debug, Clone, Copy)]
@@ -53,7 +54,18 @@ pub fn chain_and_filter_hsps(hits: Vec<Hit>, config: &ChainConfig) -> Vec<Hit> {
     }
 
     // Group hits by query-subject pair
-    let mut grouped: FxHashMap<(String, String), Vec<Hit>> = FxHashMap::default();
+    // NCBI reference: ncbi-blast/c++/include/algo/blast/core/blast_hits.h:153-166
+    // ```c
+    // typedef struct BlastHSPList {
+    //    Int4 oid;/**< The ordinal id of the subject sequence this HSP list is for */
+    //    Int4 query_index; /**< Index of the query which this HSPList corresponds to.
+    //                       Set to 0 if not applicable */
+    //    BlastHSP** hsp_array; /**< Array of pointers to individual HSPs */
+    //    Int4 hspcnt; /**< Number of HSPs saved */
+    //    ...
+    // } BlastHSPList;
+    // ```
+    let mut grouped: FxHashMap<(Arc<str>, Arc<str>), Vec<Hit>> = FxHashMap::default();
     for hit in hits {
         let key = (hit.query_id.clone(), hit.subject_id.clone());
         grouped.entry(key).or_default().push(hit);
@@ -182,8 +194,19 @@ fn calculate_overlap(start1: usize, end1: usize, start2: usize, end2: usize) -> 
 
 /// Internal representation of an HSP chain during merging
 struct HspChain {
-    query_id: String,
-    subject_id: String,
+    // NCBI reference: ncbi-blast/c++/include/algo/blast/core/blast_hits.h:153-166
+    // ```c
+    // typedef struct BlastHSPList {
+    //    Int4 oid;/**< The ordinal id of the subject sequence this HSP list is for */
+    //    Int4 query_index; /**< Index of the query which this HSPList corresponds to.
+    //                       Set to 0 if not applicable */
+    //    BlastHSP** hsp_array; /**< Array of pointers to individual HSPs */
+    //    Int4 hspcnt; /**< Number of HSPs saved */
+    //    ...
+    // } BlastHSPList;
+    // ```
+    query_id: Arc<str>,
+    subject_id: Arc<str>,
     q_start: usize,
     q_end: usize,
     s_start: usize,
@@ -319,9 +342,20 @@ mod tests {
     use super::*;
 
     fn make_hit(q_start: usize, q_end: usize, s_start: usize, s_end: usize, bit_score: f64) -> Hit {
+        // NCBI reference: ncbi-blast/c++/include/algo/blast/core/blast_hits.h:153-166
+        // ```c
+        // typedef struct BlastHSPList {
+        //    Int4 oid;/**< The ordinal id of the subject sequence this HSP list is for */
+        //    Int4 query_index; /**< Index of the query which this HSPList corresponds to.
+        //                       Set to 0 if not applicable */
+        //    BlastHSP** hsp_array; /**< Array of pointers to individual HSPs */
+        //    Int4 hspcnt; /**< Number of HSPs saved */
+        //    ...
+        // } BlastHSPList;
+        // ```
         Hit {
-            query_id: "q1".to_string(),
-            subject_id: "s1".to_string(),
+            query_id: "q1".into(),
+            subject_id: "s1".into(),
             identity: 90.0,
             length: q_end - q_start + 1,
             mismatch: 0,

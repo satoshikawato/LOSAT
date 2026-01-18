@@ -657,9 +657,20 @@ mod tests {
     #[test]
     fn test_purge_common_start_keeps_longer_end_on_score_tie() {
         fn make_hit(q_end: usize, s_end: usize) -> Hit {
+            // NCBI reference: ncbi-blast/c++/include/algo/blast/core/blast_hits.h:153-166
+            // ```c
+            // typedef struct BlastHSPList {
+            //    Int4 oid;/**< The ordinal id of the subject sequence this HSP list is for */
+            //    Int4 query_index; /**< Index of the query which this HSPList corresponds to.
+            //                       Set to 0 if not applicable */
+            //    BlastHSP** hsp_array; /**< Array of pointers to individual HSPs */
+            //    Int4 hspcnt; /**< Number of HSPs saved */
+            //    ...
+            // } BlastHSPList;
+            // ```
             Hit {
-                query_id: "q1".to_string(),
-                subject_id: "s1".to_string(),
+                query_id: "q1".into(),
+                subject_id: "s1".into(),
                 identity: 100.0,
                 length: q_end,
                 mismatch: 0,

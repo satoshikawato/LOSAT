@@ -4,6 +4,7 @@ use std::collections::HashMap;
 use std::fs::File;
 use std::io::{self, BufWriter, Write};
 use std::path::PathBuf;
+use std::sync::Arc;
 
 use crate::report::{
     OutputFormat, OutputConfig, ReportContext,
@@ -77,8 +78,19 @@ impl GapEditOp {
 
 #[derive(Debug, Clone)]
 pub struct Hit {
-    pub query_id: String, // インデックスではなくIDを持つように変更（並列処理後の出力順序制御のため）
-    pub subject_id: String,
+    // NCBI reference: ncbi-blast/c++/include/algo/blast/core/blast_hits.h:153-166
+    // ```c
+    // typedef struct BlastHSPList {
+    //    Int4 oid;/**< The ordinal id of the subject sequence this HSP list is for */
+    //    Int4 query_index; /**< Index of the query which this HSPList corresponds to.
+    //                       Set to 0 if not applicable */
+    //    BlastHSP** hsp_array; /**< Array of pointers to individual HSPs */
+    //    Int4 hspcnt; /**< Number of HSPs saved */
+    //    ...
+    // } BlastHSPList;
+    // ```
+    pub query_id: Arc<str>, // Shared ID storage to avoid per-hit String copies.
+    pub subject_id: Arc<str>,
     pub identity: f64,
     pub length: usize,
     pub mismatch: usize,

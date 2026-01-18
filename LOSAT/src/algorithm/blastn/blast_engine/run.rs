@@ -1240,7 +1240,22 @@ pub fn run(args: BlastnArgs) -> Result<()> {
                 return;
             }
 
-            // Debug counters for this subject
+            // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_nascan.c:193-207
+            // ```c
+            // for (; s <= s_end; s += scan_step) {
+            //     num_hits = s_BlastLookupGetNumHits(lookup, index);
+            //     if (num_hits == 0)
+            //         continue;
+            //     s_BlastLookupRetrieve(lookup,
+            //                           index,
+            //                           offset_pairs + total_hits,
+            //                           ...);
+            //     total_hits += num_hits;
+            // }
+            // ```
+            let debug_enabled = debug_mode || blastn_debug;
+
+            // Debug counters for this subject (only updated when debug_enabled)
             let mut dbg_total_s_positions = 0usize;
             let dbg_ambiguous_skipped = 0usize;
             let dbg_no_lookup_match = 0usize;
@@ -1442,7 +1457,24 @@ pub fn run(args: BlastnArgs) -> Result<()> {
                     let mut dbg_left_ext_iters = 0usize;
                     let mut dbg_right_ext_iters = 0usize;
                     let mut dbg_ungapped_ext_calls = 0usize;
-                    let dbg_start_time = std::time::Instant::now();
+                    // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_nascan.c:193-207
+                    // ```c
+                    // for (; s <= s_end; s += scan_step) {
+                    //     num_hits = s_BlastLookupGetNumHits(lookup, index);
+                    //     if (num_hits == 0)
+                    //         continue;
+                    //     s_BlastLookupRetrieve(lookup,
+                    //                           index,
+                    //                           offset_pairs + total_hits,
+                    //                           ...);
+                    //     total_hits += num_hits;
+                    // }
+                    // ```
+                    let dbg_start_time = if debug_enabled {
+                        Some(std::time::Instant::now())
+                    } else {
+                        None
+                    };
 
                     scan_subject_kmers_with_ranges(
                         search_seq_packed,
@@ -1453,7 +1485,22 @@ pub fn run(args: BlastnArgs) -> Result<()> {
                         &subject_seq_ranges,
                         subject_masked,
                         |kmer_start, current_lut_kmer| {
-                            dbg_total_s_positions += 1;
+                            // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_nascan.c:193-207
+                            // ```c
+                            // for (; s <= s_end; s += scan_step) {
+                            //     num_hits = s_BlastLookupGetNumHits(lookup, index);
+                            //     if (num_hits == 0)
+                            //         continue;
+                            //     s_BlastLookupRetrieve(lookup,
+                            //                           index,
+                            //                           offset_pairs + total_hits,
+                            //                           ...);
+                            //     total_hits += num_hits;
+                            // }
+                            // ```
+                            if debug_enabled {
+                                dbg_total_s_positions += 1;
+                            }
 
                             // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_nascan.c:193-207
                             // ```c
@@ -1496,7 +1543,9 @@ pub fn run(args: BlastnArgs) -> Result<()> {
 
                         // For each match, check if word_length match exists
                             for &(q_idx, q_pos) in matches_slice {
-                                dbg_seeds_found += 1;
+                                if debug_enabled {
+                                    dbg_seeds_found += 1;
+                                }
 
                             // Check if word_length match exists starting at these positions
                             // Need to verify that subject[kmer_start..kmer_start+word_length]
@@ -1563,7 +1612,7 @@ pub fn run(args: BlastnArgs) -> Result<()> {
                                 false
                             };
 
-                            if in_window {
+                            if debug_enabled && in_window {
                                 dbg_window_seeds += 1;
                             }
 
@@ -1656,7 +1705,9 @@ pub fn run(args: BlastnArgs) -> Result<()> {
                                 // SAFETY: We've limited by subject bounds. For query, we trust sequences are long enough
                                 // (NCBI doesn't check query bounds either - it's undefined behavior if out of bounds)
                                 while ext_left < max_ext_left {
-                                    dbg_left_ext_iters += 1;
+                                    if debug_enabled {
+                                        dbg_left_ext_iters += 1;
+                                    }
                                     // NCBI BLAST: s_off--; q--;
                                     // Reference: na_ungapped.c:1107-1108
                                     q_left -= 1;
@@ -1729,7 +1780,9 @@ pub fn run(args: BlastnArgs) -> Result<()> {
                                     // For Rust safety, we use unsafe indexing but trust sequences are long enough
                                     // (lookup table only finds matches within valid ranges, so sequences should be long enough)
                                     while ext_right < (ext_to - ext_left) {
-                                        dbg_right_ext_iters += 1;
+                                        if debug_enabled {
+                                            dbg_right_ext_iters += 1;
+                                        }
                                         // NCBI BLAST: if (base mismatch) break;
                                         // Reference: na_ungapped.c:1129-1131
                                         // SAFETY: We've checked subject bounds above. For query, we trust sequences are long enough
@@ -2029,7 +2082,6 @@ pub fn run(args: BlastnArgs) -> Result<()> {
                             // Now do ungapped extension from the adjusted position
                             // NCBI BLAST: s_BlastnExtendInitialHit calls ungapped extension after word_length verification
                             // Use q_off and s_off (adjusted by type_of_word if called)
-                            dbg_ungapped_ext_calls += 1;
                             // NCBI reference: ncbi-blast/c++/src/algo/blast/core/na_ungapped.c:740-749
                             // ```c
                             // if (word_params->matrix_only_scoring || word_length < 11)
@@ -2039,6 +2091,9 @@ pub fn run(args: BlastnArgs) -> Result<()> {
                             //                         word_params->nucl_score_table,
                             //                         cutoffs->reduced_nucl_cutoff_score);
                             // ```
+                            if debug_enabled {
+                                dbg_ungapped_ext_calls += 1;
+                            }
                             let x_dropoff = x_dropoff_scores[query_idx];
                             let reduced_cutoff = reduced_cutoff_scores[query_idx];
                             let ungapped = if word_length < 11 {
@@ -2083,7 +2138,9 @@ pub fn run(args: BlastnArgs) -> Result<()> {
                             // off_found is set by off-diagonal search (Step 3)
                             // NCBI: if (off_found || ungapped_data->score >= cutoffs->cutoff_score)
                             if !(off_found || ungapped_score >= cutoff_score) {
-                                dbg_ungapped_low += 1;
+                                if debug_enabled {
+                                    dbg_ungapped_low += 1;
+                                }
                                 if in_window && debug_mode {
                                     eprintln!("[DEBUG WINDOW] Seed at q={}, s={} SKIPPED: ungapped_score={} < {}", q_pos_usize, kmer_start, ungapped_score, min_ungapped_score);
                                 }
@@ -2107,7 +2164,9 @@ pub fn run(args: BlastnArgs) -> Result<()> {
                                 continue;
                             }
 
-                            dbg_gapped_attempted += 1;
+                            if debug_enabled {
+                                dbg_gapped_attempted += 1;
+                            }
 
                             if in_window && debug_mode {
                                 eprintln!("[DEBUG WINDOW] Seed at q={}, s={} -> COLLECT UNGAPPED (score={}, len={})", q_pos_usize, kmer_start, ungapped_score, qe - qs);
@@ -2169,10 +2228,12 @@ pub fn run(args: BlastnArgs) -> Result<()> {
                     // ```
                     // DEBUG: Log stats for this subject
                     if debug_mode || blastn_debug {
-                        let elapsed = dbg_start_time.elapsed();
-                        eprintln!("[PERF] Subject scan took {:?}: left_ext={}, right_ext={}, ungapped={}, seeds={}, valid_pos={}",
-                            elapsed, dbg_left_ext_iters, dbg_right_ext_iters, dbg_ungapped_ext_calls,
-                            dbg_seeds_found, dbg_total_s_positions);
+                        if let Some(dbg_start_time) = dbg_start_time {
+                            let elapsed = dbg_start_time.elapsed();
+                            eprintln!("[PERF] Subject scan took {:?}: left_ext={}, right_ext={}, ungapped={}, seeds={}, valid_pos={}",
+                                elapsed, dbg_left_ext_iters, dbg_right_ext_iters, dbg_ungapped_ext_calls,
+                                dbg_seeds_found, dbg_total_s_positions);
+                        }
                     }
                 }
                 if two_stage_lookup_ref.is_none() {
@@ -2186,7 +2247,22 @@ pub fn run(args: BlastnArgs) -> Result<()> {
                         &subject_seq_ranges,
                         subject_masked,
                         |kmer_start, current_kmer| {
-                            dbg_total_s_positions += 1;
+                            // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_nascan.c:193-207
+                            // ```c
+                            // for (; s <= s_end; s += scan_step) {
+                            //     num_hits = s_BlastLookupGetNumHits(lookup, index);
+                            //     if (num_hits == 0)
+                            //         continue;
+                            //     s_BlastLookupRetrieve(lookup,
+                            //                           index,
+                            //                           offset_pairs + total_hits,
+                            //                           ...);
+                            //     total_hits += num_hits;
+                            // }
+                            // ```
+                            if debug_enabled {
+                                dbg_total_s_positions += 1;
+                            }
 
                         // Phase 2: Use PV-based direct lookup (O(1) with fast PV filtering) for word_size <= 13
                         // For word_size > 13, use hash-based lookup
@@ -2199,7 +2275,9 @@ pub fn run(args: BlastnArgs) -> Result<()> {
                         };
 
                         for &(q_idx, q_pos) in matches_slice {
-                            dbg_seeds_found += 1;
+                            if debug_enabled {
+                                dbg_seeds_found += 1;
+                            }
 
                             let ctx = &query_contexts[q_idx as usize];
                             let query_idx = ctx.query_idx as usize;
@@ -2237,7 +2315,7 @@ pub fn run(args: BlastnArgs) -> Result<()> {
                             false
                         };
 
-                        if in_window {
+                        if debug_enabled && in_window {
                             dbg_window_seeds += 1;
                         }
 
@@ -2616,14 +2694,18 @@ pub fn run(args: BlastnArgs) -> Result<()> {
                                 });
                                 hit_len_hash.insert(diag_key, if hit_ready { 0 } else { s_end_pos - s_off_pos });
                             }
-                            dbg_ungapped_low += 1;
+                            if debug_enabled {
+                                dbg_ungapped_low += 1;
+                            }
                             if in_window && debug_mode {
                                 eprintln!("[DEBUG WINDOW] Seed at q={}, s={} SKIPPED: ungapped_score={} < {}", q_pos, kmer_start, ungapped_score, min_ungapped_score);
                             }
                             continue;
                         }
 
-                        dbg_gapped_attempted += 1;
+                        if debug_enabled {
+                            dbg_gapped_attempted += 1;
+                        }
 
                         if in_window && debug_mode {
                             eprintln!("[DEBUG WINDOW] Seed at q={}, s={} -> COLLECT UNGAPPED (score={}, len={})", q_pos, kmer_start, ungapped_score, qe - qs);

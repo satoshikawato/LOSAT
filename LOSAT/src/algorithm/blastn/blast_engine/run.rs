@@ -14,8 +14,6 @@ use crate::stats::length_adjustment::compute_length_adjustment_ncbi;
 use crate::stats::lookup_nucl_params;
 use crate::core::blast_encoding::{
     encode_iupac_to_blastna,
-    encode_iupac_to_ncbi2na,
-    encode_iupac_to_ncbi2na_packed,
     COMPRESSION_RATIO,
 };
 
@@ -936,7 +934,13 @@ pub fn run(args: BlastnArgs) -> Result<()> {
     }
 
     // Prepare sequence data (including DUST masking)
-    let seq_data = prepare_sequence_data(&args, queries, query_ids, subjects);
+    // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_engine.c:1401-1405
+    // ```c
+    // /* Encoding is set so there are no sentinel bytes, and protein/nucleotide
+    //   sequences are retieved in ncbistdaa/ncbi2na encodings respectively. */
+    // seq_arg.encoding = eBlastEncodingProtein;
+    // ```
+    let seq_data = prepare_sequence_data(&args, queries, query_ids, subjects, config.use_dp);
 
     // NCBI reference: ncbi-blast/c++/include/algo/blast/core/blast_hits.h:153-166
     // ```c
@@ -1238,6 +1242,14 @@ pub fn run(args: BlastnArgs) -> Result<()> {
     // }
     // ```
     let subject_masks_ref = &seq_data.subject_masks;
+    // NCBI reference: ncbi-blast/c++/src/algo/blast/api/blast_setup_cxx.cpp:836-847
+    // ```c
+    // BlastSeqBlkSetSequence(subj, sequence.data.release(), ...);
+    // ...
+    // BlastSeqBlkSetCompressedSequence(subj,
+    //                                  compressed_seq.data.release());
+    // ```
+    let subject_encodings_ref = &seq_data.subject_encodings;
     // NCBI reference: ncbi-blast/c++/include/algo/blast/core/blast_hits.h:153-166
     // ```c
     // typedef struct BlastHSPList {
@@ -1442,19 +1454,16 @@ pub fn run(args: BlastnArgs) -> Result<()> {
             // ```
 
             // NCBI reference: ncbi-blast/c++/include/algo/blast/core/blast_stat.h:866-869 (query blastna, subject ncbi2na)
-            // NCBI reference: ncbi-blast/c++/src/algo/blast/api/blast_setup_cxx.cpp:828-850 (subject blastna + ncbi2na)
+            // NCBI reference: ncbi-blast/c++/src/algo/blast/api/blast_setup_cxx.cpp:836-847 (subject blastna + ncbi2na)
             // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_gapalign.c:2949-3016 (packed subject for score-only DP)
             // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_traceback.c:503-507 (traceback uses uncompressed subject)
             // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_util.c:806-833 (GetReverseNuclSequence uses ncbi4na/blastna)
             // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_encoding.c:85-93 (IUPACNA_TO_BLASTNA)
-            let s_seq_blastna = encode_iupac_to_blastna(s_seq);
+            let subject_encoding = &subject_encodings_ref[s_idx];
+            let s_seq_blastna = subject_encoding.blastna.as_slice();
             // NCBI reference: ncbi-blast/c++/src/algo/blast/core/na_ungapped.c:148-349 (packed ncbi2na used for ungapped extension)
-            let s_seq_packed = encode_iupac_to_ncbi2na_packed(s_seq);
-            let s_seq_ncbi2na = if use_dp {
-                None
-            } else {
-                Some(encode_iupac_to_ncbi2na(s_seq))
-            };
+            let s_seq_packed = subject_encoding.ncbi2na_packed.as_slice();
+            let s_seq_ncbi2na = subject_encoding.ncbi2na.as_deref();
 
             // PERFORMANCE OPTIMIZATION: Pre-compute cutoff scores per query
             // This avoids redundant compute_blastn_cutoff_score calls in the inner loop
@@ -1576,7 +1585,7 @@ pub fn run(args: BlastnArgs) -> Result<()> {
             for _subject_strand in [false] {
                 let search_seq: &[u8] = s_seq;
                 // NCBI reference: ncbi-blast/c++/src/algo/blast/core/na_ungapped.c:148-349 (packed subject used by ungapped extension)
-                let search_seq_packed: &[u8] = &s_seq_packed;
+                let search_seq_packed: &[u8] = s_seq_packed;
 
                 // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_extend.c:52-64
                 // ```c
@@ -2980,9 +2989,9 @@ pub fn run(args: BlastnArgs) -> Result<()> {
                 // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_gapalign.c:2762-2936 (greedy uses ncbi2na subject)
                 // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_traceback.c:503-507 (traceback uses uncompressed subject)
                 let (s_seq_score, s_seq_trace) = if use_dp {
-                    (s_seq_packed.as_slice(), s_seq_blastna.as_slice())
+                    (s_seq_packed, s_seq_blastna)
                 } else {
-                    (s_seq_ncbi2na.as_ref().unwrap().as_slice(), s_seq_blastna.as_slice())
+                    (s_seq_ncbi2na.unwrap(), s_seq_blastna)
                 };
 
                 // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_gapalign.c:3908-3913
@@ -3520,7 +3529,7 @@ pub fn run(args: BlastnArgs) -> Result<()> {
 
                 // NCBI reference: blast_traceback.c:653-665 (reevaluate with blastna sequences)
                 let q_seq_blastna = encoded_queries_blastna[context_idx].as_slice();
-                let s_seq_eval = s_seq_blastna.as_slice();
+                let s_seq_eval = s_seq_blastna;
                 let delete = reevaluate_hsp_with_ambiguities_gapped_ex(
                     hit,
                     q_seq_blastna,

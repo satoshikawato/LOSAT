@@ -325,23 +325,22 @@ fn scan_subject_kmers_range<F>(
         }
     }
 
-    // Fallback: rolling k-mer over packed bases (used for larger word sizes).
+    // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_nascan.c:1598-1605
+    // ```c
+    // for (; scan_range[0] <= scan_range[1]; scan_range[0] += scan_step) {
+    //     Int4 shift = 2*(16 - (scan_range[0] % COMPRESSION_RATIO + lut_word_length));
+    //     s = abs_start + (scan_range[0] / COMPRESSION_RATIO);
+    //     index = s[0] << 24 | s[1] << 16 | s[2] << 8 | s[3];
+    //     index = (index >> shift) & mask;
+    //     MB_ACCESS_HITS();
+    // }
+    // ```
+    // Fallback: advance by scan_step and recompute the k-mer at each position.
     let mut pos = start;
-    let mut next_emit = start;
-    let mut kmer = packed_kmer_at(packed, start, lut_word_length);
-    loop {
-        if pos == next_emit {
-            on_kmer(pos, kmer);
-            next_emit = next_emit.saturating_add(scan_step);
-        }
-
-        if pos == end {
-            break;
-        }
-
-        let next_base = packed_base_at(packed, pos + lut_word_length);
-        kmer = ((kmer << 2) | next_base as u64) & mask;
-        pos += 1;
+    while pos <= end {
+        let kmer = packed_kmer_at(packed, pos, lut_word_length);
+        on_kmer(pos, kmer);
+        pos = pos.saturating_add(scan_step);
     }
 }
 

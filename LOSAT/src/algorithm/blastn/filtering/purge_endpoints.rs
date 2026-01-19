@@ -968,8 +968,8 @@ pub fn reevaluate_hsp_with_ambiguities_gapped_ex(
     // NCBI reference: blast_hits.c:539-540
     // esp = hsp->gap_info;
     // if (!esp) return TRUE;
-    let mut gap_ops = match &hit.gap_info {
-        Some(info) if !info.is_empty() => info.clone(),
+    let gap_ops = match hit.gap_info.as_mut() {
+        Some(info) if !info.is_empty() => info,
         _ => return true, // No gap_info = delete HSP
     };
 
@@ -1025,6 +1025,15 @@ pub fn reevaluate_hsp_with_ambiguities_gapped_ex(
     let mut best_end_esp_num: i32 = -1;
 
     // NCBI reference: blast_hits.c:541-610
+    // ```c
+    // if (op_index < esp->num[index]) {
+    //     esp->num[index] -= op_index;
+    //     current_start_esp_index = index;
+    //     op_index = 0;
+    // } else {
+    //     current_start_esp_index = index + 1;
+    // }
+    // ```
     for index in 0..gap_ops.len() {
         let mut op_index = 0usize;
         while op_index < gap_ops[index].num() as usize {
@@ -1170,16 +1179,32 @@ pub fn reevaluate_hsp_with_ambiguities_gapped_ex(
     hit.q_end = q_end;
     hit.s_start = s_start;
     hit.s_end = s_end;
-
-    let mut new_gap_info = if best_end_esp_index != gap_ops.len().saturating_sub(1)
-        || best_start_esp_index > 0
-    {
-        gap_ops[best_start_esp_index..=best_end_esp_index].to_vec()
-    } else {
-        gap_ops
-    };
-
-    if let Some(last) = new_gap_info.last_mut() {
+    // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_hits.c:460-470
+    // ```c
+    // if (best_end_esp_index != last_num || best_start_esp_index > 0) {
+    //     GapEditScript* esp_temp = GapEditScriptNew(...);
+    //     GapEditScriptPartialCopy(esp_temp, 0, hsp->gap_info, ...);
+    //     hsp->gap_info = GapEditScriptDelete(hsp->gap_info);
+    //     hsp->gap_info = esp_temp;
+    // }
+    // last_num = hsp->gap_info->size - 1;
+    // hsp->gap_info->num[last_num] = best_end_esp_num;
+    // ```
+    let mut new_gap_info: Option<Vec<GapEditOp>> = None;
+    if best_end_esp_index != gap_ops.len().saturating_sub(1) || best_start_esp_index > 0 {
+        let mut subset = gap_ops[best_start_esp_index..=best_end_esp_index].to_vec();
+        if let Some(last) = subset.last_mut() {
+            let end_num = best_end_esp_num as u32;
+            *last = match *last {
+                GapEditOp::Sub(_) => GapEditOp::Sub(end_num),
+                GapEditOp::Del(_) => GapEditOp::Del(end_num),
+                GapEditOp::Ins(_) => GapEditOp::Ins(end_num),
+            };
+        }
+        if !subset.is_empty() {
+            new_gap_info = Some(subset);
+        }
+    } else if let Some(last) = gap_ops.last_mut() {
         let end_num = best_end_esp_num as u32;
         *last = match *last {
             GapEditOp::Sub(_) => GapEditOp::Sub(end_num),
@@ -1188,11 +1213,9 @@ pub fn reevaluate_hsp_with_ambiguities_gapped_ex(
         };
     }
 
-    hit.gap_info = if new_gap_info.is_empty() {
-        None
-    } else {
-        Some(new_gap_info)
-    };
+    if let Some(new_gap_info) = new_gap_info {
+        hit.gap_info = Some(new_gap_info);
+    }
 
     // Recalculate bit_score and e_value if Karlin parameters are provided
     // NCBI reference: blast_traceback.c:234-250 Blast_HSPListGetEvalues, Blast_HSPListGetBitScores

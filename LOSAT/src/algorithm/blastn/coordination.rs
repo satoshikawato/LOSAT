@@ -574,6 +574,7 @@ pub fn build_lookup_tables(
     args: &BlastnArgs,
     queries: &[fasta::Record],
     query_masks: &[Vec<MaskedInterval>],
+    query_offsets: &[i32],
     subjects: &[fasta::Record],
     approx_table_entries: usize,
 ) -> (LookupTables, usize) {
@@ -612,14 +613,23 @@ pub fn build_lookup_tables(
     };
     let db_word_counts_ref = db_word_counts.as_deref();
 
+    // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_nalookup.c:1027-1034
+    // ```c
+    // /* Also add 1 to all indices, because lookup table indices count
+    //    from 1. */
+    // mb_lt->next_pos[index] = mb_lt->hashtable[ecode];
+    // mb_lt->hashtable[ecode] = index;
+    // ```
     let two_stage_lookup: Option<TwoStageLookup> = if config.use_two_stage {
         Some(build_two_stage_lookup(
             queries,
+            query_offsets,
             config.effective_word_size,
             config.lut_word_length,
             query_masks,
             db_word_counts_ref,
             args.max_db_word_count,
+            approx_table_entries,
         ))
     } else {
         None
@@ -628,10 +638,13 @@ pub fn build_lookup_tables(
     let pv_direct_lookup: Option<PvDirectLookup> = if !config.use_two_stage && config.use_direct_lookup {
         Some(build_pv_direct_lookup(
             queries,
+            query_offsets,
             config.effective_word_size,
             query_masks,
             db_word_counts_ref,
             args.max_db_word_count,
+            approx_table_entries,
+            false,
         ))
     } else {
         None
@@ -640,6 +653,7 @@ pub fn build_lookup_tables(
     let hash_lookup: Option<KmerLookup> = if !config.use_two_stage && !config.use_direct_lookup {
         Some(build_lookup(
             queries,
+            query_offsets,
             config.effective_word_size,
             query_masks,
             db_word_counts_ref,

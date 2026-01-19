@@ -14,6 +14,7 @@ pub mod statistics;
 // Re-export public APIs
 pub use greedy::{
     GreedyAlignMem,
+    GreedyAlignScratch,
     GreedyOffset,
     greedy_align_one_direction,
     greedy_align_one_direction_ex,

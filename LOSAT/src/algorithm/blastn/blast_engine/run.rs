@@ -30,6 +30,7 @@ use super::super::alignment::{
     // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_gapalign.c:2762-2936 (BLAST_GreedyGappedAlignment)
     greedy_gapped_alignment_score_only,
     greedy_gapped_alignment_with_traceback,
+    GreedyAlignScratch,
     // NCBI reference: ncbi-blast/c++/include/algo/blast/core/blast_gapalign.h:69-80 (BlastGapAlignStruct)
     GapAlignScratch,
 };
@@ -848,16 +849,6 @@ fn scan_subject_kmers_range_mb_10_3<F>(
         return;
     }
 
-    if start % COMPRESSION_RATIO != 0 {
-        let mut pos = start;
-        while pos <= end {
-            let kmer = packed_kmer_at(packed, pos, LUT_WORD_LENGTH);
-            on_kmer(pos, kmer);
-            pos = pos.saturating_add(scan_step);
-        }
-        return;
-    }
-
     let packed_len = packed.len();
     if packed_len < 5 {
         let mut pos = start;
@@ -870,30 +861,83 @@ fn scan_subject_kmers_range_mb_10_3<F>(
     }
 
     let mask = (1u64 << (2 * LUT_WORD_LENGTH)) - 1;
+    let packed_len_i32 = packed_len as i32;
     let mut pos = start;
-    let mut byte_idx = pos / COMPRESSION_RATIO;
+    let mut byte_idx = (pos / COMPRESSION_RATIO) as i32;
     let mut state = 0u8;
     let mut init_index: u32 = 0;
+    let mut use_fast = true;
+
+    match pos % COMPRESSION_RATIO {
+        1 => {
+            if byte_idx + 1 >= packed_len_i32 {
+                use_fast = false;
+            } else {
+                init_index = ((packed[byte_idx as usize] as u32) << 8)
+                    | (packed[(byte_idx + 1) as usize] as u32);
+                byte_idx -= 2;
+                state = 3;
+            }
+        }
+        2 => {
+            if byte_idx + 2 >= packed_len_i32 {
+                use_fast = false;
+            } else {
+                init_index = ((packed[byte_idx as usize] as u32) << 16)
+                    | ((packed[(byte_idx + 1) as usize] as u32) << 8)
+                    | (packed[(byte_idx + 2) as usize] as u32);
+                byte_idx -= 1;
+                state = 2;
+            }
+        }
+        3 => {
+            if byte_idx + 2 >= packed_len_i32 {
+                use_fast = false;
+            } else {
+                init_index = ((packed[byte_idx as usize] as u32) << 16)
+                    | ((packed[(byte_idx + 1) as usize] as u32) << 8)
+                    | (packed[(byte_idx + 2) as usize] as u32);
+                state = 1;
+            }
+        }
+        _ => {
+            state = 0;
+        }
+    }
+
+    if !use_fast {
+        let mut pos = start;
+        while pos <= end {
+            let kmer = packed_kmer_at(packed, pos, LUT_WORD_LENGTH);
+            on_kmer(pos, kmer);
+            pos = pos.saturating_add(scan_step);
+        }
+        return;
+    }
 
     while pos <= end {
         match state {
             0 => {
-                if byte_idx + 2 >= packed_len {
+                if byte_idx < 0 || byte_idx + 2 >= packed_len_i32 {
                     break;
                 }
-                init_index = ((packed[byte_idx] as u32) << 16)
-                    | ((packed[byte_idx + 1] as u32) << 8)
-                    | (packed[byte_idx + 2] as u32);
+                let idx0 = byte_idx as usize;
+                let idx1 = (byte_idx + 1) as usize;
+                let idx2 = (byte_idx + 2) as usize;
+                init_index = ((packed[idx0] as u32) << 16)
+                    | ((packed[idx1] as u32) << 8)
+                    | (packed[idx2] as u32);
                 let index = ((init_index >> 4) as u64) & mask;
                 on_kmer(pos, index);
                 pos = pos.saturating_add(scan_step);
                 state = 1;
             }
             1 => {
-                if byte_idx + 3 >= packed_len {
+                let idx3 = byte_idx + 3;
+                if idx3 < 0 || idx3 >= packed_len_i32 {
                     break;
                 }
-                init_index = (init_index << 8) | (packed[byte_idx + 3] as u32);
+                init_index = (init_index << 8) | (packed[idx3 as usize] as u32);
                 let index = ((init_index >> 6) as u64) & mask;
                 on_kmer(pos, index);
                 pos = pos.saturating_add(scan_step);
@@ -906,14 +950,15 @@ fn scan_subject_kmers_range_mb_10_3<F>(
                 state = 3;
             }
             _ => {
-                if byte_idx + 4 >= packed_len {
+                let idx4 = byte_idx + 4;
+                if idx4 < 0 || idx4 >= packed_len_i32 {
                     break;
                 }
-                init_index = (init_index << 8) | (packed[byte_idx + 4] as u32);
+                init_index = (init_index << 8) | (packed[idx4 as usize] as u32);
                 let index = ((init_index >> 2) as u64) & mask;
                 on_kmer(pos, index);
                 pos = pos.saturating_add(scan_step);
-                byte_idx = byte_idx.saturating_add(3);
+                byte_idx += 3;
                 state = 0;
             }
         }
@@ -1209,16 +1254,6 @@ fn scan_subject_kmers_range_mb_11_3mod4<F>(
         return;
     }
 
-    if start % COMPRESSION_RATIO != 0 {
-        let mut pos = start;
-        while pos <= end {
-            let kmer = packed_kmer_at(packed, pos, LUT_WORD_LENGTH);
-            on_kmer(pos, kmer);
-            pos = pos.saturating_add(scan_step);
-        }
-        return;
-    }
-
     let packed_len = packed.len();
     if packed_len < 5 {
         let mut pos = start;
@@ -1231,65 +1266,100 @@ fn scan_subject_kmers_range_mb_11_3mod4<F>(
     }
 
     let mask = (1u64 << (2 * LUT_WORD_LENGTH)) - 1;
+    let packed_len_i32 = packed_len as i32;
     let scan_step_byte = scan_step / COMPRESSION_RATIO;
     let mut pos = start;
-    let mut byte_idx = pos / COMPRESSION_RATIO;
+    let mut byte_idx = (pos / COMPRESSION_RATIO) as i32;
     let mut state = 0u8;
+
+    match pos % COMPRESSION_RATIO {
+        1 => {
+            byte_idx -= 2;
+            state = 3;
+        }
+        2 => {
+            byte_idx -= 1;
+            state = 2;
+        }
+        3 => {
+            state = 1;
+        }
+        _ => {
+            state = 0;
+        }
+    }
 
     while pos <= end {
         match state {
             0 => {
-                if byte_idx + 2 >= packed_len {
+                if byte_idx < 0 || byte_idx + 2 >= packed_len_i32 {
                     break;
                 }
-                let idx = ((packed[byte_idx] as u32) << 16)
-                    | ((packed[byte_idx + 1] as u32) << 8)
-                    | (packed[byte_idx + 2] as u32);
+                let idx0 = byte_idx as usize;
+                let idx1 = (byte_idx + 1) as usize;
+                let idx2 = (byte_idx + 2) as usize;
+                let idx = ((packed[idx0] as u32) << 16)
+                    | ((packed[idx1] as u32) << 8)
+                    | (packed[idx2] as u32);
                 let index = ((idx >> 2) as u64) & mask;
                 on_kmer(pos, index);
                 pos = pos.saturating_add(scan_step);
-                byte_idx = byte_idx.saturating_add(scan_step_byte);
+                byte_idx += scan_step_byte as i32;
                 state = 1;
             }
             1 => {
-                if byte_idx + 3 >= packed_len {
+                let idx3 = byte_idx + 3;
+                if idx3 < 0 || idx3 >= packed_len_i32 {
                     break;
                 }
-                let idx = ((packed[byte_idx] as u32) << 24)
-                    | ((packed[byte_idx + 1] as u32) << 16)
-                    | ((packed[byte_idx + 2] as u32) << 8)
-                    | (packed[byte_idx + 3] as u32);
+                let idx0 = byte_idx as usize;
+                let idx1 = (byte_idx + 1) as usize;
+                let idx2 = (byte_idx + 2) as usize;
+                let idx3u = idx3 as usize;
+                let idx = ((packed[idx0] as u32) << 24)
+                    | ((packed[idx1] as u32) << 16)
+                    | ((packed[idx2] as u32) << 8)
+                    | (packed[idx3u] as u32);
                 let index = ((idx >> 4) as u64) & mask;
                 on_kmer(pos, index);
                 pos = pos.saturating_add(scan_step);
-                byte_idx = byte_idx.saturating_add(scan_step_byte);
+                byte_idx += scan_step_byte as i32;
                 state = 2;
             }
             2 => {
-                if byte_idx + 4 >= packed_len {
+                let idx4 = byte_idx + 4;
+                if idx4 < 0 || idx4 >= packed_len_i32 {
                     break;
                 }
-                let idx = ((packed[byte_idx + 1] as u32) << 24)
-                    | ((packed[byte_idx + 2] as u32) << 16)
-                    | ((packed[byte_idx + 3] as u32) << 8)
-                    | (packed[byte_idx + 4] as u32);
+                let idx1 = (byte_idx + 1) as usize;
+                let idx2 = (byte_idx + 2) as usize;
+                let idx3 = (byte_idx + 3) as usize;
+                let idx4u = idx4 as usize;
+                let idx = ((packed[idx1] as u32) << 24)
+                    | ((packed[idx2] as u32) << 16)
+                    | ((packed[idx3] as u32) << 8)
+                    | (packed[idx4u] as u32);
                 let index = ((idx >> 6) as u64) & mask;
                 on_kmer(pos, index);
                 pos = pos.saturating_add(scan_step);
-                byte_idx = byte_idx.saturating_add(scan_step_byte);
+                byte_idx += scan_step_byte as i32;
                 state = 3;
             }
             _ => {
-                if byte_idx + 4 >= packed_len {
+                let idx4 = byte_idx + 4;
+                if idx4 < 0 || idx4 >= packed_len_i32 {
                     break;
                 }
-                let idx = ((packed[byte_idx + 2] as u32) << 16)
-                    | ((packed[byte_idx + 3] as u32) << 8)
-                    | (packed[byte_idx + 4] as u32);
+                let idx2 = (byte_idx + 2) as usize;
+                let idx3 = (byte_idx + 3) as usize;
+                let idx4u = idx4 as usize;
+                let idx = ((packed[idx2] as u32) << 16)
+                    | ((packed[idx3] as u32) << 8)
+                    | (packed[idx4u] as u32);
                 let index = (idx as u64) & mask;
                 on_kmer(pos, index);
                 pos = pos.saturating_add(scan_step);
-                byte_idx = byte_idx.saturating_add(scan_step_byte + 3);
+                byte_idx += (scan_step_byte + 3) as i32;
                 state = 0;
             }
         }
@@ -1894,6 +1964,12 @@ struct SubjectScratch {
     // ```
     prelim_hits: Vec<PrelimHit>,
     ungapped_hits: Vec<UngappedHit>,
+    // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_gapalign.c:356-357
+    // ```c
+    // gap_align->fwd_prelim_tback = GapPrelimEditBlockNew();
+    // gap_align->rev_prelim_tback = GapPrelimEditBlockNew();
+    // ```
+    greedy_align_scratch: GreedyAlignScratch,
     cutoff_scores: Vec<i32>,
     x_dropoff_scores: Vec<i32>,
     reduced_cutoff_scores: Vec<i32>,
@@ -1927,6 +2003,12 @@ impl SubjectScratch {
             // ```
             prelim_hits: Vec::new(),
             ungapped_hits: Vec::new(),
+            // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_gapalign.c:356-357
+            // ```c
+            // gap_align->fwd_prelim_tback = GapPrelimEditBlockNew();
+            // gap_align->rev_prelim_tback = GapPrelimEditBlockNew();
+            // ```
+            greedy_align_scratch: GreedyAlignScratch::new(),
             cutoff_scores: Vec::with_capacity(query_count),
             x_dropoff_scores: Vec::with_capacity(query_count),
             reduced_cutoff_scores: Vec::with_capacity(query_count),
@@ -1945,6 +2027,73 @@ struct QueryContext {
     query_offset: i32,
     seq: Vec<u8>,
     masks: Vec<MaskedInterval>,
+}
+
+struct QueryContextIndex {
+    offsets: Vec<usize>,
+    min_length: usize,
+    max_length: usize,
+}
+
+impl QueryContextIndex {
+    fn new(contexts: &[QueryContext]) -> Self {
+        let offsets: Vec<usize> = contexts
+            .iter()
+            .map(|ctx| ctx.query_offset.max(0) as usize)
+            .collect();
+        let min_length = contexts
+            .iter()
+            .map(|ctx| ctx.seq.len())
+            .filter(|&len| len > 0)
+            .min()
+            .unwrap_or(0);
+        let max_length = contexts.iter().map(|ctx| ctx.seq.len()).max().unwrap_or(0);
+        Self {
+            offsets,
+            min_length,
+            max_length,
+        }
+    }
+}
+
+// NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_query_info.c:219-238
+// ```c
+// Int4 BSearchContextInfo(Int4 n, const BlastQueryInfo * A)
+// {
+//     Int4 m=0, b=0, e=0, size=0;
+//     size = A->last_context+1;
+//     if (A->min_length > 0 && A->max_length > 0 && A->first_context == 0) {
+//         b = MIN(n / (A->max_length + 1), size - 1);
+//         e = MIN(n / (A->min_length + 1) + 1, size);
+//     } else { b = 0; e = size; }
+//     while (b < e - 1) {
+//         m = (b + e) / 2;
+//         if (A->contexts[m].query_offset > n) e = m;
+//         else b = m;
+//     }
+//     return b;
+// }
+// ```
+fn bsearch_context_info(n: usize, index: &QueryContextIndex) -> usize {
+    let size = index.offsets.len();
+    if size == 0 {
+        return 0;
+    }
+    let mut b = 0usize;
+    let mut e = size;
+    if index.min_length > 0 && index.max_length > 0 {
+        b = (n / (index.max_length + 1)).min(size - 1);
+        e = (n / (index.min_length + 1) + 1).min(size);
+    }
+    while b + 1 < e {
+        let m = (b + e) / 2;
+        if index.offsets[m] > n {
+            e = m;
+        } else {
+            b = m;
+        }
+    }
+    b
 }
 
 // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_filter.c:1173-1178
@@ -2444,6 +2593,16 @@ pub fn run(args: BlastnArgs) -> Result<()> {
         query_concat_offset += q_len * 2 + 1;
     }
     let query_concat_length = query_concat_offset;
+    // NCBI reference: ncbi-blast/c++/src/algo/blast/unit_tests/api/ntscan_unit_test.cpp:166-174
+    // ```c
+    // query_info->contexts[0].query_offset = 0;
+    // query_info->contexts[1].query_offset = kStrandLength + 1;
+    // ```
+    let query_context_offsets: Vec<i32> = query_contexts
+        .iter()
+        .map(|ctx| ctx.query_offset)
+        .collect();
+    let query_context_index = QueryContextIndex::new(&query_contexts);
 
     // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_extend.c:52-61
     // ```c
@@ -2538,6 +2697,7 @@ pub fn run(args: BlastnArgs) -> Result<()> {
         &args,
         &query_context_records,
         &query_context_masks,
+        &query_context_offsets,
         &seq_data.subjects,
         query_concat_length,
     );
@@ -2786,6 +2946,7 @@ pub fn run(args: BlastnArgs) -> Result<()> {
             // Greedy preliminary HSP list reset (mirrors init hitlist reset).
             let prelim_hits = &mut subject_scratch.prelim_hits;
             prelim_hits.clear();
+            let greedy_align_scratch = &mut subject_scratch.greedy_align_scratch;
 
             let s_seq = s_record.seq();
             let s_len = s_seq.len();
@@ -2879,7 +3040,6 @@ pub fn run(args: BlastnArgs) -> Result<()> {
             let s_seq_blastna = subject_encoding.blastna.as_slice();
             // NCBI reference: ncbi-blast/c++/src/algo/blast/core/na_ungapped.c:148-349 (packed ncbi2na used for ungapped extension)
             let s_seq_packed = subject_encoding.ncbi2na_packed.as_slice();
-            let s_seq_ncbi2na = subject_encoding.ncbi2na.as_deref();
 
             // PERFORMANCE OPTIMIZATION: Pre-compute cutoff scores per query
             // This avoids redundant compute_blastn_cutoff_score calls in the inner loop
@@ -3161,23 +3321,33 @@ pub fn run(args: BlastnArgs) -> Result<()> {
                             }
 
                         // For each match, check if word_length match exists
-                            for &(q_idx, q_pos) in matches_slice {
+                            for &q_off_1 in matches_slice {
                                 if debug_enabled {
                                     dbg_seeds_found += 1;
                                 }
-
-                            // Check if word_length match exists starting at these positions
-                            // Need to verify that subject[kmer_start..kmer_start+word_length]
-                            // matches query[q_pos..q_pos+word_length]
-                            let ctx = &query_contexts[q_idx as usize];
-                            let query_idx = ctx.query_idx as usize;
-                            // NCBI reference: ncbi-blast/c++/src/algo/blast/core/na_ungapped.c:268-269
-                            // ```c
-                            // Uint1 *q_start = query->sequence;
-                            // ```
-                            let q_seq = ctx.seq.as_slice();
-                            let q_seq_blastna = encoded_queries_blastna[q_idx as usize].as_slice();
-                            let q_pos_usize = q_pos as usize;
+                                if q_off_1 == 0 {
+                                    continue;
+                                }
+                                // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_nascan.c:1406-1412
+                                // ```c
+                                // offset_pairs[i].qs_offsets.q_off = q_off - 1;
+                                // ```
+                                let q_off0 = q_off_1 as usize - 1;
+                                // NCBI reference: ncbi-blast/c++/src/algo/blast/core/na_ungapped.c:730-733
+                                // ```c
+                                // Int4 context = BSearchContextInfo(q_off, query_info);
+                                // ```
+                                let context_idx = bsearch_context_info(q_off0, &query_context_index);
+                                let ctx = &query_contexts[context_idx];
+                                let q_idx = context_idx as u32;
+                                let query_idx = ctx.query_idx as usize;
+                                // NCBI reference: ncbi-blast/c++/src/algo/blast/core/na_ungapped.c:268-269
+                                // ```c
+                                // Uint1 *q_start = query->sequence;
+                                // ```
+                                let q_seq = ctx.seq.as_slice();
+                                let q_seq_blastna = encoded_queries_blastna[context_idx].as_slice();
+                                let q_pos_usize = q_off0 - ctx.query_offset as usize;
 
                             // Use pre-computed cutoff score (computed once per query-subject pair)
                             let cutoff_score = cutoff_scores[query_idx];
@@ -3482,9 +3652,15 @@ pub fn run(args: BlastnArgs) -> Result<()> {
                                     return true;
                                 }
                                 let hits = two_stage.get_hits(kmer);
-                                !hits.iter().any(|&(hit_q_idx, hit_q_pos)| {
-                                    hit_q_idx == q_idx && hit_q_pos as usize == q_pos
-                                })
+                                // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_nalookup.c:1027-1034
+                                // ```c
+                                // /* Also add 1 to all indices, because lookup table indices count
+                                //    from 1. */
+                                // mb_lt->next_pos[index] = mb_lt->hashtable[ecode];
+                                // mb_lt->hashtable[ecode] = index;
+                                // ```
+                                let q_off_1 = (ctx.query_offset as usize + q_pos + 1) as u32;
+                                !hits.iter().any(|&hit_q_off| hit_q_off == q_off_1)
                             };
 
                             // NCBI: if (two_hits && (hit_saved || s_end_pos > last_hit + window_size)) {
@@ -3895,7 +4071,7 @@ pub fn run(args: BlastnArgs) -> Result<()> {
 
                         // Phase 2: Use PV-based direct lookup (O(1) with fast PV filtering) for word_size <= 13
                         // For word_size > 13, use hash-based lookup
-                        let matches_slice: &[(u32, u32)] = if use_direct_lookup {
+                        let matches_slice: &[u32] = if use_direct_lookup {
                             // Use PV for fast filtering before accessing the lookup table
                             pv_direct_lookup_ref.map(|pv_dl| pv_dl.get_hits_checked(current_kmer)).unwrap_or(&[])
                         } else {
@@ -3903,19 +4079,34 @@ pub fn run(args: BlastnArgs) -> Result<()> {
                             hash_lookup_ref.and_then(|hl| hl.get(&current_kmer).map(|v| v.as_slice())).unwrap_or(&[])
                         };
 
-                        for &(q_idx, q_pos) in matches_slice {
+                        for &q_off_1 in matches_slice {
                             if debug_enabled {
                                 dbg_seeds_found += 1;
                             }
-
-                            let ctx = &query_contexts[q_idx as usize];
+                            if q_off_1 == 0 {
+                                continue;
+                            }
+                            // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_nascan.c:1406-1412
+                            // ```c
+                            // offset_pairs[i].qs_offsets.q_off = q_off - 1;
+                            // ```
+                            let q_off0 = q_off_1 as usize - 1;
+                            // NCBI reference: ncbi-blast/c++/src/algo/blast/core/na_ungapped.c:900-903
+                            // ```c
+                            // Int4 context = BSearchContextInfo(q_off, query_info);
+                            // ```
+                            let context_idx = bsearch_context_info(q_off0, &query_context_index);
+                            let ctx = &query_contexts[context_idx];
+                            let q_idx = context_idx as u32;
                             let query_idx = ctx.query_idx as usize;
+
                             // NCBI reference: ncbi-blast/c++/src/algo/blast/core/na_ungapped.c:268-269
                             // ```c
                             // Uint1 *q_start = query->sequence;
                             // ```
                             let q_seq = ctx.seq.as_slice();
-                            let q_seq_blastna = encoded_queries_blastna[q_idx as usize].as_slice();
+                            let q_seq_blastna = encoded_queries_blastna[context_idx].as_slice();
+                            let q_pos_usize = q_off0 - ctx.query_offset as usize;
 
                             // Use pre-computed cutoff score (computed once per query-subject pair)
                             let cutoff_score = cutoff_scores[query_idx];
@@ -3933,12 +4124,12 @@ pub fn run(args: BlastnArgs) -> Result<()> {
                                 diag_masks[query_idx] as isize,
                             )
                         };
-                        let diag = (kmer_start as isize + diag_array_length - q_pos as isize)
+                        let diag = (kmer_start as isize + diag_array_length - q_pos_usize as isize)
                             & diag_mask;
 
                         // Check if this seed is in the debug window
                         let in_window = if let Some((q_start, q_end, s_start, s_end)) = debug_window {
-                            (q_pos as usize) >= q_start && (q_pos as usize) <= q_end &&
+                            q_pos_usize >= q_start && q_pos_usize <= q_end &&
                             kmer_start >= s_start && kmer_start <= s_end
                         } else {
                             false
@@ -3999,7 +4190,7 @@ pub fn run(args: BlastnArgs) -> Result<()> {
                         //     s_end_pos += extended;
                         // }
                         let two_hits = TWO_HIT_WINDOW > 0;
-                        let mut q_off = q_pos as usize;
+                        let mut q_off = q_pos_usize;
                         let mut s_off = kmer_start;
                         let mut s_end = kmer_start + safe_k;
                         let mut s_end_pos = s_end + diag_offset as usize;
@@ -4039,7 +4230,7 @@ pub fn run(args: BlastnArgs) -> Result<()> {
                                 packed_kmer_at_seed_mask(search_seq_packed, s_pos, safe_k),
                                 safe_k,
                             );
-                            let hits: &[(u32, u32)] = if use_direct_lookup {
+                            let hits: &[u32] = if use_direct_lookup {
                                 pv_direct_lookup_ref
                                     .map(|pv_dl| pv_dl.get_hits_checked(kmer))
                                     .unwrap_or(&[])
@@ -4048,9 +4239,15 @@ pub fn run(args: BlastnArgs) -> Result<()> {
                                     .and_then(|hl| hl.get(&kmer).map(|v| v.as_slice()))
                                     .unwrap_or(&[])
                             };
-                            !hits.iter().any(|&(hit_q_idx, hit_q_pos)| {
-                                hit_q_idx == q_idx && hit_q_pos as usize == q_pos
-                            })
+                            // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_nalookup.c:1027-1034
+                            // ```c
+                            // /* Also add 1 to all indices, because lookup table indices count
+                            //    from 1. */
+                            // mb_lt->next_pos[index] = mb_lt->hashtable[ecode];
+                            // mb_lt->hashtable[ecode] = index;
+                            // ```
+                            let q_off_1 = (ctx.query_offset as usize + q_pos + 1) as u32;
+                            !hits.iter().any(|&hit_q_off| hit_q_off == q_off_1)
                         };
 
                         // NCBI: if (two_hits && (hit_saved || s_end_pos > last_hit + window_size)) {
@@ -4336,7 +4533,7 @@ pub fn run(args: BlastnArgs) -> Result<()> {
                                 dbg_ungapped_low += 1;
                             }
                             if in_window && debug_mode {
-                                eprintln!("[DEBUG WINDOW] Seed at q={}, s={} SKIPPED: ungapped_score={} < {}", q_pos, kmer_start, ungapped_score, min_ungapped_score);
+                                eprintln!("[DEBUG WINDOW] Seed at q={}, s={} SKIPPED: ungapped_score={} < {}", q_pos_usize, kmer_start, ungapped_score, min_ungapped_score);
                             }
                             continue;
                         }
@@ -4346,7 +4543,7 @@ pub fn run(args: BlastnArgs) -> Result<()> {
                         }
 
                         if in_window && debug_mode {
-                            eprintln!("[DEBUG WINDOW] Seed at q={}, s={} -> COLLECT UNGAPPED (score={}, len={})", q_pos, kmer_start, ungapped_score, qe - qs);
+                            eprintln!("[DEBUG WINDOW] Seed at q={}, s={} -> COLLECT UNGAPPED (score={}, len={})", q_pos_usize, kmer_start, ungapped_score, qe - qs);
                         }
 
                         // NCBI architecture: Collect ungapped hit for batch processing
@@ -4420,14 +4617,19 @@ pub fn run(args: BlastnArgs) -> Result<()> {
                 let q_seq_blastna = encoded_queries_blastna[uh.context_idx as usize].as_slice();
                 let subject_len = s_seq_blastna.len();
 
-                // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_gapalign.c:2949-3016 (blastn packed subject for score-only)
-                // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_gapalign.c:2762-2936 (greedy uses ncbi2na subject)
+                // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_gapalign.c:2762-2793
+                // ```c
+                // if (!compressed_subject) {
+                //    s = subject + s_off;
+                //    rem = 4;
+                // } else {
+                //    s = subject + s_off/4;
+                //    rem = s_off % 4;
+                // }
+                // ```
                 // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_traceback.c:503-507 (traceback uses uncompressed subject)
-                let (s_seq_score, s_seq_trace) = if use_dp {
-                    (s_seq_packed, s_seq_blastna)
-                } else {
-                    (s_seq_ncbi2na.unwrap(), s_seq_blastna)
-                };
+                let s_seq_score = s_seq_packed;
+                let s_seq_trace = s_seq_blastna;
 
                 // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_gapalign.c:3908-3913
                 // ```c
@@ -4531,6 +4733,7 @@ pub fn run(args: BlastnArgs) -> Result<()> {
                     let prelim = match greedy_gapped_alignment_score_only(
                         q_seq_blastna,
                         s_seq_score,
+                        subject_len,
                         seed_qs,
                         seed_ss,
                         reward,
@@ -4538,6 +4741,7 @@ pub fn run(args: BlastnArgs) -> Result<()> {
                         gap_open,
                         gap_extend,
                         x_drop_gapped,
+                        greedy_align_scratch,
                     ) {
                         Some(value) => value,
                         None => {
@@ -5063,6 +5267,7 @@ pub fn run(args: BlastnArgs) -> Result<()> {
                     ) = match greedy_gapped_alignment_with_traceback(
                         q_seq_blastna,
                         adjusted_subject,
+                        adjusted_subject.len(),
                         trace_q_start,
                         trace_s_start_adj,
                         reward,
@@ -5070,6 +5275,7 @@ pub fn run(args: BlastnArgs) -> Result<()> {
                         gap_open,
                         gap_extend,
                         x_drop_trace,
+                        greedy_align_scratch,
                     ) {
                         Some(value) => value,
                         None => {

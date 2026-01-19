@@ -175,6 +175,105 @@ fn packed_kmer_at(packed: &[u8], start: usize, k: usize) -> u64 {
     kmer
 }
 
+// NCBI reference: ncbi-blast/c++/src/algo/blast/core/na_ungapped.c:459-487
+// ```c
+// Uint1 *s  = subject->sequence + s_off / COMPRESSION_RATIO;
+// Int4 shift = 2* (16 - s_off % COMPRESSION_RATIO - lut_word_length);
+// Int4 index;
+// switch (shift) {
+// case  8:
+// case 10:
+// case 12:
+// case 14:
+//     index = (s[0] << 24 | s[1] << 16 | s[2] << 8) >> shift;
+// break;
+// case 16:
+// case 18:
+// case 20:
+// case 22:
+//     index = (s[0] << 24 | s[1] << 16 ) >> shift;
+// break;
+// case 24:
+//     index = s[0];
+// break;
+// default:
+//     index = (s[0] << 24 | s[1] << 16 | s[2] << 8 | s[3]) >> shift;
+// break;
+// }
+// ```
+#[inline(always)]
+fn packed_kmer_at_seed_mask(packed: &[u8], start: usize, lut_word_length: usize) -> u64 {
+    if lut_word_length == 0 {
+        return 0;
+    }
+
+    let shift = 2i32 * (16i32 - (start % COMPRESSION_RATIO) as i32 - lut_word_length as i32);
+    if shift < 0 || shift > 24 {
+        return packed_kmer_at(packed, start, lut_word_length);
+    }
+
+    let byte_idx = start / COMPRESSION_RATIO;
+    let shift_u = shift as u32;
+
+    match shift {
+        8 | 10 | 12 | 14 => {
+            if byte_idx + 3 <= packed.len() {
+                let s0 = packed[byte_idx] as u32;
+                let s1 = packed[byte_idx + 1] as u32;
+                let s2 = packed[byte_idx + 2] as u32;
+                (((s0 << 24) | (s1 << 16) | (s2 << 8)) >> shift_u) as u64
+            } else {
+                packed_kmer_at(packed, start, lut_word_length)
+            }
+        }
+        16 | 18 | 20 | 22 => {
+            if byte_idx + 2 <= packed.len() {
+                let s0 = packed[byte_idx] as u32;
+                let s1 = packed[byte_idx + 1] as u32;
+                (((s0 << 24) | (s1 << 16)) >> shift_u) as u64
+            } else {
+                packed_kmer_at(packed, start, lut_word_length)
+            }
+        }
+        24 => {
+            if byte_idx < packed.len() {
+                packed[byte_idx] as u64
+            } else {
+                packed_kmer_at(packed, start, lut_word_length)
+            }
+        }
+        _ => {
+            if byte_idx + 4 <= packed.len() {
+                let s0 = packed[byte_idx] as u32;
+                let s1 = packed[byte_idx + 1] as u32;
+                let s2 = packed[byte_idx + 2] as u32;
+                let s3 = packed[byte_idx + 3] as u32;
+                (((s0 << 24) | (s1 << 16) | (s2 << 8) | s3) >> shift_u) as u64
+            } else {
+                packed_kmer_at(packed, start, lut_word_length)
+            }
+        }
+    }
+}
+
+// NCBI reference: ncbi-blast/c++/src/algo/blast/core/na_ungapped.c:56-66
+// ```c
+// index &= (mb_lt->hashsize-1);
+// ```
+// NCBI reference: ncbi-blast/c++/src/algo/blast/core/na_ungapped.c:88-91
+// ```c
+// index = lookup->final_backbone[index & lookup->mask];
+// ```
+// NCBI reference: ncbi-blast/c++/src/algo/blast/core/na_ungapped.c:119-123
+// ```c
+// index &= (lookup->mask);
+// ```
+#[inline(always)]
+fn mask_lookup_index(index: u64, lut_word_length: usize) -> u64 {
+    let mask = (1u64 << (2 * lut_word_length)) - 1;
+    index & mask
+}
+
 // NCBI reference: ncbi-blast/c++/src/algo/blast/core/na_ungapped.c:1647-1662
 // ```c
 // scan_range[1] = 0;  /* start pos of scan */
@@ -2034,7 +2133,7 @@ pub fn run(args: BlastnArgs) -> Result<()> {
                             let mut hit_ready = true;
                             let query_mask = ctx.masks.as_slice();
 
-                            // NCBI reference: ncbi-blast/c++/src/algo/blast/core/na_ungapped.c:452-490
+                            // NCBI reference: ncbi-blast/c++/src/algo/blast/core/na_ungapped.c:459-489
                             // ```c
                             // static NCBI_INLINE Boolean s_IsSeedMasked(...)
                             // {
@@ -2043,18 +2142,28 @@ pub fn run(args: BlastnArgs) -> Result<()> {
                             //                                      (lookup_wrap, index, q_pos));
                             // }
                             // ```
-                            // NCBI reference: ncbi-blast/c++/src/algo/blast/core/na_ungapped.c:103-135
+                            // NCBI reference: ncbi-blast/c++/src/algo/blast/core/na_ungapped.c:59-66
                             // ```c
-                            // for (i=0; i<num_hits; ++i) {
-                            //     if (lookup_pos[i] == q_pos) return TRUE;
+                            // if (! PV_TEST(pv, index, mb_lt->pv_array_bts)) {
+                            //     return FALSE;
                             // }
-                            // return FALSE;
+                            // q_off = mb_lt->hashtable[index];
+                            // while (q_off) {
+                            //     if (q_off == q_pos) return TRUE;
+                            //     q_off = mb_lt->next_pos[q_off];
+                            // }
                             // ```
                             let mut is_seed_masked = |s_pos: usize, q_pos: usize| -> bool {
                                 if s_pos + lut_word_length > s_len {
                                     return true;
                                 }
-                                let kmer = packed_kmer_at(search_seq_packed, s_pos, lut_word_length);
+                                let kmer = mask_lookup_index(
+                                    packed_kmer_at_seed_mask(search_seq_packed, s_pos, lut_word_length),
+                                    lut_word_length,
+                                );
+                                if !two_stage.has_hits(kmer) {
+                                    return true;
+                                }
                                 let hits = two_stage.get_hits(kmer);
                                 !hits.iter().any(|&(hit_q_idx, hit_q_pos)| {
                                     hit_q_idx == q_idx && hit_q_pos as usize == q_pos
@@ -2583,7 +2692,7 @@ pub fn run(args: BlastnArgs) -> Result<()> {
                         let mut hit_ready = true;
                         let query_mask = ctx.masks.as_slice();
 
-                        // NCBI reference: ncbi-blast/c++/src/algo/blast/core/na_ungapped.c:452-490
+                        // NCBI reference: ncbi-blast/c++/src/algo/blast/core/na_ungapped.c:459-489
                         // ```c
                         // static NCBI_INLINE Boolean s_IsSeedMasked(...)
                         // {
@@ -2592,18 +2701,27 @@ pub fn run(args: BlastnArgs) -> Result<()> {
                         //                                      (lookup_wrap, index, q_pos));
                         // }
                         // ```
-                        // NCBI reference: ncbi-blast/c++/src/algo/blast/core/na_ungapped.c:103-135
+                        // NCBI reference: ncbi-blast/c++/src/algo/blast/core/na_ungapped.c:121-133
                         // ```c
+                        // if (! PV_TEST(pv, index, PV_ARRAY_BTS)) {
+                        //     return FALSE;
+                        // }
+                        // num_hits = lookup->thick_backbone[index].num_used;
+                        // lookup_pos = (num_hits <= NA_HITS_PER_CELL) ?
+                        //              lookup->thick_backbone[index].payload.entries :
+                        //              lookup->overflow + lookup->thick_backbone[index].payload.overflow_cursor;
                         // for (i=0; i<num_hits; ++i) {
                         //     if (lookup_pos[i] == q_pos) return TRUE;
                         // }
-                        // return FALSE;
                         // ```
                         let mut is_seed_masked = |s_pos: usize, q_pos: usize| -> bool {
                             if s_pos + safe_k > s_len {
                                 return true;
                             }
-                            let kmer = packed_kmer_at(search_seq_packed, s_pos, safe_k);
+                            let kmer = mask_lookup_index(
+                                packed_kmer_at_seed_mask(search_seq_packed, s_pos, safe_k),
+                                safe_k,
+                            );
                             let hits: &[(u32, u32)] = if use_direct_lookup {
                                 pv_direct_lookup_ref
                                     .map(|pv_dl| pv_dl.get_hits_checked(kmer))

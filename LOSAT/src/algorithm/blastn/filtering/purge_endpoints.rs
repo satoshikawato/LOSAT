@@ -312,7 +312,7 @@ pub fn cut_off_gap_edit_script(hit: &mut Hit, q_cut: usize, s_cut: usize, cut_be
 /// NCBI reference: blast_hits.c:2455-2535 Blast_HSPListPurgeHSPsWithCommonEndpoints
 ///
 /// CRITICAL: NCBI processes HSPs per-subject (BlastHSPList is per-subject).
-/// This function groups hits by subject_id before purging to match NCBI behavior.
+/// This function groups hits by subject index (oid) before purging to match NCBI behavior.
 ///
 /// # Parameters
 /// * `purge` - If true, delete HSPs entirely (current behavior).
@@ -353,21 +353,31 @@ pub fn purge_hsps_with_common_endpoints_ex(hits: Vec<Hit>, purge: bool) -> (Vec<
         return (hits, len);
     }
 
+    // NCBI reference: ncbi-blast/c++/include/algo/blast/core/blast_hits.h:153-166
+    // ```c
+    // typedef struct BlastHSPList {
+    //    Int4 oid;/**< The ordinal id of the subject sequence this HSP list is for */
+    //    Int4 query_index; /**< Index of the query which this HSPList corresponds to. */
+    //    BlastHSP** hsp_array;
+    //    Int4 hspcnt;
+    //    ...
+    // } BlastHSPList;
+    // ```
     // NCBI reference: blast_hits.c:2455-2535
     // Blast_HSPListPurgeHSPsWithCommonEndpoints operates on BlastHSPList which is per-subject.
-    // We must group hits by subject_id and process each group separately.
+    // We must group hits by subject oid (s_idx) and process each group separately.
 
-    // Group hits by subject_id
-    let mut subject_groups: FxHashMap<String, Vec<Hit>> = FxHashMap::default();
+    // Group hits by subject oid (s_idx)
+    let mut subject_groups: FxHashMap<u32, Vec<Hit>> = FxHashMap::default();
     for hit in hits {
-        subject_groups.entry(hit.subject_id.clone()).or_default().push(hit);
+        subject_groups.entry(hit.s_idx).or_default().push(hit);
     }
 
     // Process each subject group independently and collect results
     let mut result: Vec<Hit> = Vec::new();
     let mut total_extra_start = 0usize;
 
-    for (_subject_id, group_hits) in subject_groups {
+    for (_subject_idx, group_hits) in subject_groups {
         let (purged, extra_start) = purge_hsps_for_subject_ex(group_hits, purge);
         let offset = result.len();
         result.extend(purged);
@@ -610,23 +620,6 @@ fn purge_hsps_for_subject_ex(mut hits: Vec<Hit>, purge: bool) -> (Vec<Hit>, usiz
 /// NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_stat.c:1060-1068 (BLASTNA_SIZE usage)
 const BLASTNA_SIZE: usize = 16;
 
-/// Map BLASTNA codes to NCBI4NA bitmasks (degeneracy).
-/// NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_encoding.c:56-74 (BLASTNA_TO_NCBI4NA)
-const BLASTNA_TO_NCBI4NA: [u8; BLASTNA_SIZE] = [
-    1, 2, 4, 8, 5, 10, 3, 12, 9, 6, 14, 13, 11, 7, 15, 0,
-];
-
-/// Round to nearest integer (half away from zero).
-/// NCBI reference: ncbi-blast/c++/src/algo/blast/core/ncbi_math.c:437-441 (BLAST_Nint)
-#[inline]
-fn blast_nint(x: f64) -> i32 {
-    if x >= 0.0 {
-        (x + 0.5) as i32
-    } else {
-        (x - 0.5) as i32
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -647,9 +640,20 @@ mod tests {
     #[test]
     fn test_purge_common_start_keeps_longer_end_on_score_tie() {
         fn make_hit(q_end: usize, s_end: usize) -> Hit {
+            // NCBI reference: ncbi-blast/c++/include/algo/blast/core/blast_hits.h:153-166
+            // ```c
+            // typedef struct BlastHSPList {
+            //    Int4 oid;/**< The ordinal id of the subject sequence this HSP list is for */
+            //    Int4 query_index; /**< Index of the query which this HSPList corresponds to.
+            //                       Set to 0 if not applicable */
+            //    BlastHSP** hsp_array; /**< Array of pointers to individual HSPs */
+            //    Int4 hspcnt; /**< Number of HSPs saved */
+            //    ...
+            // } BlastHSPList;
+            // ```
             Hit {
-                query_id: "q1".to_string(),
-                subject_id: "s1".to_string(),
+                query_id: "q1".into(),
+                subject_id: "s1".into(),
                 identity: 100.0,
                 length: q_end,
                 mismatch: 0,
@@ -677,53 +681,6 @@ mod tests {
         assert_eq!(purged[0].q_end, 80);
         assert_eq!(purged[0].s_end, 80);
     }
-}
-
-/// Build the BLASTNA scoring matrix from reward/penalty.
-/// NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_stat.c:1052-1122 (BlastScoreBlkNuclMatrixCreate)
-fn build_blastna_matrix(reward: i32, penalty: i32) -> [i32; BLASTNA_SIZE * BLASTNA_SIZE] {
-    let mut matrix = [0i32; BLASTNA_SIZE * BLASTNA_SIZE];
-    let mut degeneracy = [0i32; BLASTNA_SIZE];
-
-    // NCBI reference: blast_stat.c:1076-1086
-    for index1 in 0..4 {
-        degeneracy[index1] = 1;
-    }
-    for index1 in 4..BLASTNA_SIZE {
-        let mut degen = 0;
-        for index2 in 0..4 {
-            if (BLASTNA_TO_NCBI4NA[index1] & BLASTNA_TO_NCBI4NA[index2]) != 0 {
-                degen += 1;
-            }
-        }
-        degeneracy[index1] = degen;
-    }
-
-    // NCBI reference: blast_stat.c:1088-1119
-    for index1 in 0..BLASTNA_SIZE {
-        for index2 in index1..BLASTNA_SIZE {
-            let idx = index1 * BLASTNA_SIZE + index2;
-            let val = if (BLASTNA_TO_NCBI4NA[index1] & BLASTNA_TO_NCBI4NA[index2]) != 0 {
-                let degen = degeneracy[index2];
-                let raw = ((degen - 1) * penalty + reward) as f64 / (degen as f64);
-                blast_nint(raw)
-            } else {
-                penalty
-            };
-            matrix[idx] = val;
-            if index1 != index2 {
-                matrix[index2 * BLASTNA_SIZE + index1] = val;
-            }
-        }
-    }
-
-    // NCBI reference: blast_stat.c:1122-1127 (gap sentinel row/column)
-    for index1 in 0..BLASTNA_SIZE {
-        matrix[(BLASTNA_SIZE - 1) * BLASTNA_SIZE + index1] = i32::MIN / 2;
-        matrix[index1 * BLASTNA_SIZE + (BLASTNA_SIZE - 1)] = i32::MIN / 2;
-    }
-
-    matrix
 }
 
 /// Compute alignment stats from a gap edit script.
@@ -951,6 +908,7 @@ pub struct ReevalParams {
 /// * `gap_open` - Gap open penalty (positive)
 /// * `gap_extend` - Gap extend penalty (positive)
 /// * `cutoff_score` - Minimum score to keep HSP
+/// * `score_matrix` - Prebuilt BLASTNA scoring matrix (sbp->matrix->data)
 /// * `reeval_params` - Optional parameters for E-value/bit score recalculation
 ///
 /// # Returns
@@ -965,9 +923,19 @@ pub fn reevaluate_hsp_with_ambiguities_gapped(
     gap_open: i32,
     gap_extend: i32,
     cutoff_score: i32,
+    score_matrix: &[i32; BLASTNA_SIZE * BLASTNA_SIZE],
 ) -> bool {
     let delete = reevaluate_hsp_with_ambiguities_gapped_ex(
-        hit, q_seq, s_seq, reward, penalty, gap_open, gap_extend, cutoff_score, None
+        hit,
+        q_seq,
+        s_seq,
+        reward,
+        penalty,
+        gap_open,
+        gap_extend,
+        cutoff_score,
+        score_matrix,
+        None,
     );
     if delete {
         return true;
@@ -994,13 +962,14 @@ pub fn reevaluate_hsp_with_ambiguities_gapped_ex(
     gap_open: i32,
     gap_extend: i32,
     cutoff_score: i32,
+    score_matrix: &[i32; BLASTNA_SIZE * BLASTNA_SIZE],
     reeval_params: Option<&ReevalParams>,
 ) -> bool {
     // NCBI reference: blast_hits.c:539-540
     // esp = hsp->gap_info;
     // if (!esp) return TRUE;
-    let mut gap_ops = match &hit.gap_info {
-        Some(info) if !info.is_empty() => info.clone(),
+    let gap_ops = match hit.gap_info.as_mut() {
+        Some(info) if !info.is_empty() => info,
         _ => return true, // No gap_info = delete HSP
     };
 
@@ -1027,7 +996,14 @@ pub fn reevaluate_hsp_with_ambiguities_gapped_ex(
         (gap_open, gap_extend)
     };
 
-    let matrix = build_blastna_matrix(reward, penalty);
+    // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_hits.c:507-514
+    // ```c
+    // const Uint1* query,* subject;
+    // Int4** matrix;
+    // ...
+    // matrix = sbp->matrix->data;
+    // ```
+    let matrix = score_matrix;
 
     let mut score: i32 = 0;
     let mut sum: i32 = 0;
@@ -1049,6 +1025,15 @@ pub fn reevaluate_hsp_with_ambiguities_gapped_ex(
     let mut best_end_esp_num: i32 = -1;
 
     // NCBI reference: blast_hits.c:541-610
+    // ```c
+    // if (op_index < esp->num[index]) {
+    //     esp->num[index] -= op_index;
+    //     current_start_esp_index = index;
+    //     op_index = 0;
+    // } else {
+    //     current_start_esp_index = index + 1;
+    // }
+    // ```
     for index in 0..gap_ops.len() {
         let mut op_index = 0usize;
         while op_index < gap_ops[index].num() as usize {
@@ -1194,16 +1179,32 @@ pub fn reevaluate_hsp_with_ambiguities_gapped_ex(
     hit.q_end = q_end;
     hit.s_start = s_start;
     hit.s_end = s_end;
-
-    let mut new_gap_info = if best_end_esp_index != gap_ops.len().saturating_sub(1)
-        || best_start_esp_index > 0
-    {
-        gap_ops[best_start_esp_index..=best_end_esp_index].to_vec()
-    } else {
-        gap_ops
-    };
-
-    if let Some(last) = new_gap_info.last_mut() {
+    // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_hits.c:460-470
+    // ```c
+    // if (best_end_esp_index != last_num || best_start_esp_index > 0) {
+    //     GapEditScript* esp_temp = GapEditScriptNew(...);
+    //     GapEditScriptPartialCopy(esp_temp, 0, hsp->gap_info, ...);
+    //     hsp->gap_info = GapEditScriptDelete(hsp->gap_info);
+    //     hsp->gap_info = esp_temp;
+    // }
+    // last_num = hsp->gap_info->size - 1;
+    // hsp->gap_info->num[last_num] = best_end_esp_num;
+    // ```
+    let mut new_gap_info: Option<Vec<GapEditOp>> = None;
+    if best_end_esp_index != gap_ops.len().saturating_sub(1) || best_start_esp_index > 0 {
+        let mut subset = gap_ops[best_start_esp_index..=best_end_esp_index].to_vec();
+        if let Some(last) = subset.last_mut() {
+            let end_num = best_end_esp_num as u32;
+            *last = match *last {
+                GapEditOp::Sub(_) => GapEditOp::Sub(end_num),
+                GapEditOp::Del(_) => GapEditOp::Del(end_num),
+                GapEditOp::Ins(_) => GapEditOp::Ins(end_num),
+            };
+        }
+        if !subset.is_empty() {
+            new_gap_info = Some(subset);
+        }
+    } else if let Some(last) = gap_ops.last_mut() {
         let end_num = best_end_esp_num as u32;
         *last = match *last {
             GapEditOp::Sub(_) => GapEditOp::Sub(end_num),
@@ -1212,11 +1213,9 @@ pub fn reevaluate_hsp_with_ambiguities_gapped_ex(
         };
     }
 
-    hit.gap_info = if new_gap_info.is_empty() {
-        None
-    } else {
-        Some(new_gap_info)
-    };
+    if let Some(new_gap_info) = new_gap_info {
+        hit.gap_info = Some(new_gap_info);
+    }
 
     // Recalculate bit_score and e_value if Karlin parameters are provided
     // NCBI reference: blast_traceback.c:234-250 Blast_HSPListGetEvalues, Blast_HSPListGetBitScores

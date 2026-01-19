@@ -3,6 +3,7 @@
 //! Reference: ncbi-blast/c++/src/algo/blast/core/blast_engine.c
 
 use super::*;
+use std::sync::Arc;
 
 pub fn run(args: TblastxArgs) -> Result<()> {
     // Use neighbor_map mode for faster scanning with pre-computed neighbor relationships
@@ -93,9 +94,20 @@ pub fn run(args: TblastxArgs) -> Result<()> {
     }
     let query_reader = fasta::Reader::from_file(&args.query)?;
     let queries_raw: Vec<fasta::Record> = query_reader.records().filter_map(|r| r.ok()).collect();
-    let query_ids: Vec<String> = queries_raw
+    // NCBI reference: ncbi-blast/c++/include/algo/blast/core/blast_hits.h:153-166
+    // ```c
+    // typedef struct BlastHSPList {
+    //    Int4 oid;/**< The ordinal id of the subject sequence this HSP list is for */
+    //    Int4 query_index; /**< Index of the query which this HSPList corresponds to.
+    //                       Set to 0 if not applicable */
+    //    BlastHSP** hsp_array; /**< Array of pointers to individual HSPs */
+    //    Int4 hspcnt; /**< Number of HSPs saved */
+    //    ...
+    // } BlastHSPList;
+    // ```
+    let query_ids: Vec<Arc<str>> = queries_raw
         .iter()
-        .map(|r| r.id().split_whitespace().next().unwrap_or("unknown").to_string())
+        .map(|r| Arc::<str>::from(r.id().split_whitespace().next().unwrap_or("unknown")))
         .collect();
     // NCBI tblastx low-complexity filtering uses SEG on translated protein sequences.
     // No nucleotide-level DUST masking is applied.
@@ -213,6 +225,22 @@ pub fn run(args: TblastxArgs) -> Result<()> {
         return Ok(());
     }
     t_read_subjects = t_phase_read_subjects.elapsed();
+
+    // NCBI reference: ncbi-blast/c++/include/algo/blast/core/blast_hits.h:153-166
+    // ```c
+    // typedef struct BlastHSPList {
+    //    Int4 oid;/**< The ordinal id of the subject sequence this HSP list is for */
+    //    Int4 query_index; /**< Index of the query which this HSPList corresponds to.
+    //                       Set to 0 if not applicable */
+    //    BlastHSP** hsp_array; /**< Array of pointers to individual HSPs */
+    //    Int4 hspcnt; /**< Number of HSPs saved */
+    //    ...
+    // } BlastHSPList;
+    // ```
+    let subject_ids: Vec<Arc<str>> = subjects_raw
+        .iter()
+        .map(|r| Arc::<str>::from(r.id().split_whitespace().next().unwrap_or("unknown")))
+        .collect();
 
     // NCBI BLAST Karlin params for TBLASTX (ungapped-only algorithm):
     // 
@@ -345,6 +373,7 @@ pub fn run(args: TblastxArgs) -> Result<()> {
     let lookup_ref = &lookup;
     let contexts_ref = &contexts;
     let query_ids_ref = &query_ids;
+    let subject_ids_ref = &subject_ids;
     let _gapped_params_ref = &gapped_params;  // Unused - tblastx uses ungapped params
 
     subjects_raw.par_iter().enumerate().for_each_init(
@@ -373,12 +402,18 @@ pub fn run(args: TblastxArgs) -> Result<()> {
                 s_frames.retain(|x| x.frame == f);
             }
 
-            let s_id = s_rec
-                .id()
-                .split_whitespace()
-                .next()
-                .unwrap_or("unknown")
-                .to_string();
+            // NCBI reference: ncbi-blast/c++/include/algo/blast/core/blast_hits.h:153-166
+            // ```c
+            // typedef struct BlastHSPList {
+            //    Int4 oid;/**< The ordinal id of the subject sequence this HSP list is for */
+            //    Int4 query_index; /**< Index of the query which this HSPList corresponds to.
+            //                       Set to 0 if not applicable */
+            //    BlastHSP** hsp_array; /**< Array of pointers to individual HSPs */
+            //    Int4 hspcnt; /**< Number of HSPs saved */
+            //    ...
+            // } BlastHSPList;
+            // ```
+            let s_id = Arc::clone(&subject_ids_ref[s_idx]);
             let s_len = s_rec.seq().len();
 
             // [C] BlastOffsetPair *offset_pairs

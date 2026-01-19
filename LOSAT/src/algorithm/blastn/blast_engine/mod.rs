@@ -23,8 +23,10 @@ use rustc_hash::FxHashMap;
 use crate::common::{Hit, score_compare_hsps};
 use crate::stats::KarlinParams;
 use crate::core::blast_encoding::encode_iupac_to_blastna;
+use super::alignment::build_blastna_matrix;
 use super::filtering::{purge_hsps_with_common_endpoints_ex, reevaluate_hsp_with_ambiguities_gapped, subject_best_hit};
 use super::interval_tree::{BlastIntervalTree, IndexMethod, TreeHsp};
+use std::sync::Arc;
 
 // Re-export for backward compatibility
 pub use crate::algorithm::common::evalue::calculate_evalue_database_search as calculate_evalue;
@@ -40,7 +42,18 @@ pub use crate::algorithm::common::evalue::calculate_evalue_database_search as ca
 /// Phase 4: score re-sort and interval tree containment purge
 pub fn filter_hsps(
     hits: Vec<Hit>,
-    sequences: &FxHashMap<(String, String), (Vec<u8>, Vec<u8>)>,
+    // NCBI reference: ncbi-blast/c++/include/algo/blast/core/blast_hits.h:153-166
+    // ```c
+    // typedef struct BlastHSPList {
+    //    Int4 oid;/**< The ordinal id of the subject sequence this HSP list is for */
+    //    Int4 query_index; /**< Index of the query which this HSPList corresponds to.
+    //                       Set to 0 if not applicable */
+    //    BlastHSP** hsp_array; /**< Array of pointers to individual HSPs */
+    //    Int4 hspcnt; /**< Number of HSPs saved */
+    //    ...
+    // } BlastHSPList;
+    // ```
+    sequences: &FxHashMap<(Arc<str>, Arc<str>), (Vec<u8>, Vec<u8>)>,
     reward: i32,
     penalty: i32,
     gap_open: i32,
@@ -50,8 +63,8 @@ pub fn filter_hsps(
     _params: &KarlinParams,
     _use_dp: bool,
     verbose: bool,
-    query_lengths: &FxHashMap<String, usize>,  // Query ID -> length mapping
-    cutoff_scores: &FxHashMap<String, i32>,    // Query ID -> cutoff score (NCBI: hit_params->cutoff_score_min)
+    query_lengths: &FxHashMap<Arc<str>, usize>,  // Query ID -> length mapping
+    cutoff_scores: &FxHashMap<Arc<str>, i32>,    // Query ID -> cutoff score (NCBI: hit_params->cutoff_score_min)
 ) -> Vec<Hit> {
     if hits.is_empty() {
         return hits;
@@ -62,6 +75,9 @@ pub fn filter_hsps(
     // Always output individual HSPs (NCBI BLAST behavior)
     // NCBI BLAST's blastn does not use chaining/clustering - all HSPs are saved individually
     let mut result_hits: Vec<Hit> = hits;
+
+    // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_stat.c:1052-1127 (BlastScoreBlkNuclMatrixCreate)
+    let score_matrix = build_blastna_matrix(reward, penalty);
 
     // NCBI blastn does NOT apply culling by default (culling_limit = 0)
     // Culling is only applied when -culling_limit is explicitly set
@@ -130,7 +146,7 @@ pub fn filter_hsps(
     //              query_length, subject, subject_length, hit_params,
     //              score_params, sbp);
     // ```
-    let mut encoded_cache: FxHashMap<(String, String), (Vec<u8>, Vec<u8>)> =
+    let mut encoded_cache: FxHashMap<(Arc<str>, Arc<str>), (Vec<u8>, Vec<u8>)> =
         FxHashMap::default();
     for i in extra_start..result_hits.len() {
         let hit = &mut result_hits[i];
@@ -160,6 +176,7 @@ pub fn filter_hsps(
                 gap_open,
                 gap_extend,
                 cutoff_score,
+                &score_matrix,
             );
             if delete {
                 hit.raw_score = i32::MIN; // Mark for deletion
@@ -207,7 +224,7 @@ pub fn filter_hsps(
     // if (min_diag_separation)
     //     options->min_diag_separation = min_diag_separation;
     // ```
-    let mut trees: FxHashMap<(String, String), BlastIntervalTree> = FxHashMap::default();
+    let mut trees: FxHashMap<(Arc<str>, Arc<str>), BlastIntervalTree> = FxHashMap::default();
     for hit in result_hits {
         let key = (hit.query_id.clone(), hit.subject_id.clone());
         let (q_seq, s_seq) = match sequences.get(&key) {

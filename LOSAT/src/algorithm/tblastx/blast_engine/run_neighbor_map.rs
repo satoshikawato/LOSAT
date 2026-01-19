@@ -3,6 +3,7 @@
 //! Reference: ncbi-blast/c++/src/algo/blast/core/blast_engine.c
 
 use super::*;
+use std::sync::Arc;
 
 /// Run TBLASTX with pre-computed neighbor map using subject-side indexing.
 /// This approach:
@@ -49,9 +50,20 @@ pub(crate) fn run_with_neighbor_map(args: TblastxArgs) -> Result<()> {
     }
     let query_reader = fasta::Reader::from_file(&args.query)?;
     let queries_raw: Vec<fasta::Record> = query_reader.records().filter_map(|r| r.ok()).collect();
-    let query_ids: Vec<String> = queries_raw
+    // NCBI reference: ncbi-blast/c++/include/algo/blast/core/blast_hits.h:153-166
+    // ```c
+    // typedef struct BlastHSPList {
+    //    Int4 oid;/**< The ordinal id of the subject sequence this HSP list is for */
+    //    Int4 query_index; /**< Index of the query which this HSPList corresponds to.
+    //                       Set to 0 if not applicable */
+    //    BlastHSP** hsp_array; /**< Array of pointers to individual HSPs */
+    //    Int4 hspcnt; /**< Number of HSPs saved */
+    //    ...
+    // } BlastHSPList;
+    // ```
+    let query_ids: Vec<Arc<str>> = queries_raw
         .iter()
-        .map(|r| r.id().split_whitespace().next().unwrap_or("unknown").to_string())
+        .map(|r| Arc::<str>::from(r.id().split_whitespace().next().unwrap_or("unknown")))
         .collect();
 
     let mut query_frames: Vec<Vec<QueryFrame>> = queries_raw
@@ -106,6 +118,22 @@ pub(crate) fn run_with_neighbor_map(args: TblastxArgs) -> Result<()> {
     if queries_raw.is_empty() || subjects_raw.is_empty() {
         return Ok(());
     }
+
+    // NCBI reference: ncbi-blast/c++/include/algo/blast/core/blast_hits.h:153-166
+    // ```c
+    // typedef struct BlastHSPList {
+    //    Int4 oid;/**< The ordinal id of the subject sequence this HSP list is for */
+    //    Int4 query_index; /**< Index of the query which this HSPList corresponds to.
+    //                       Set to 0 if not applicable */
+    //    BlastHSP** hsp_array; /**< Array of pointers to individual HSPs */
+    //    Int4 hspcnt; /**< Number of HSPs saved */
+    //    ...
+    // } BlastHSPList;
+    // ```
+    let subject_ids: Vec<Arc<str>> = subjects_raw
+        .iter()
+        .map(|r| Arc::<str>::from(r.id().split_whitespace().next().unwrap_or("unknown")))
+        .collect();
 
     // NCBI BLAST Karlin params for TBLASTX (ungapped-only algorithm):
     // 
@@ -181,6 +209,7 @@ pub(crate) fn run_with_neighbor_map(args: TblastxArgs) -> Result<()> {
     let evalue_threshold = args.evalue;
     let query_frames_ref = &query_frames;
     let query_ids_ref = &query_ids;
+    let subject_ids_ref = &subject_ids;
     let neighbor_map_ref = &neighbor_lookup.neighbor_map.map;
     let query_lookup_ref = &neighbor_lookup.query_lookup;
     let query_contexts_ref = &neighbor_lookup.contexts;
@@ -193,12 +222,7 @@ pub(crate) fn run_with_neighbor_map(args: TblastxArgs) -> Result<()> {
 
     // Process each subject
     for (s_idx, s_rec) in subjects_raw.iter().enumerate() {
-        let s_id = s_rec
-            .id()
-            .split_whitespace()
-            .next()
-            .unwrap_or("unknown")
-            .to_string();
+        let s_id = Arc::clone(&subject_ids_ref[s_idx]);
         let s_len = s_rec.seq().len();
         let s_frames = generate_frames(s_rec.seq(), &db_code);
         
@@ -790,11 +814,7 @@ pub(crate) fn run_with_neighbor_map(args: TblastxArgs) -> Result<()> {
         }
         
         let q_id = &query_ids_ref[h.q_idx as usize];
-        let s_id = subjects_raw[h.s_idx as usize]
-            .id()
-            .split_whitespace()
-            .next()
-            .unwrap_or("unknown");
+        let s_id = Arc::clone(&subject_ids_ref[h.s_idx as usize]);
         
         // `ctx_idx` is the global query context index (NCBI `hsp->context` equivalent).
         // Use the pre-built `QueryContext` buffer to access the (possibly unmasked) query AA sequence.
@@ -839,7 +859,7 @@ pub(crate) fn run_with_neighbor_map(args: TblastxArgs) -> Result<()> {
 
         let out_hit = Hit {
             query_id: q_id.clone(),
-            subject_id: s_id.to_string(),
+            subject_id: s_id.clone(),
             identity,
             length: len,
             mismatch: len.saturating_sub(matches),

@@ -1,4 +1,5 @@
 use crate::common::Hit;
+use std::sync::Arc;
 
 /// Filter hits by E-value threshold
 pub fn filter_by_evalue(hits: Vec<Hit>, max_evalue: f64) -> Vec<Hit> {
@@ -107,7 +108,18 @@ pub fn keep_top_n_per_pair(hits: Vec<Hit>, n: usize) -> Vec<Hit> {
     });
 
     // Count hits per query-subject pair
-    let mut counts: HashMap<(String, String), usize> = HashMap::new();
+    // NCBI reference: ncbi-blast/c++/include/algo/blast/core/blast_hits.h:153-166
+    // ```c
+    // typedef struct BlastHSPList {
+    //    Int4 oid;/**< The ordinal id of the subject sequence this HSP list is for */
+    //    Int4 query_index; /**< Index of the query which this HSPList corresponds to.
+    //                       Set to 0 if not applicable */
+    //    BlastHSP** hsp_array; /**< Array of pointers to individual HSPs */
+    //    Int4 hspcnt; /**< Number of HSPs saved */
+    //    ...
+    // } BlastHSPList;
+    // ```
+    let mut counts: HashMap<(Arc<str>, Arc<str>), usize> = HashMap::new();
     let mut kept_hits = Vec::new();
 
     for hit in sorted_hits {
@@ -227,9 +239,20 @@ mod tests {
     use super::*;
 
     fn make_hit(q_start: usize, q_end: usize, s_start: usize, s_end: usize, bit_score: f64) -> Hit {
+        // NCBI reference: ncbi-blast/c++/include/algo/blast/core/blast_hits.h:153-166
+        // ```c
+        // typedef struct BlastHSPList {
+        //    Int4 oid;/**< The ordinal id of the subject sequence this HSP list is for */
+        //    Int4 query_index; /**< Index of the query which this HSPList corresponds to.
+        //                       Set to 0 if not applicable */
+        //    BlastHSP** hsp_array; /**< Array of pointers to individual HSPs */
+        //    Int4 hspcnt; /**< Number of HSPs saved */
+        //    ...
+        // } BlastHSPList;
+        // ```
         Hit {
-            query_id: "q1".to_string(),
-            subject_id: "s1".to_string(),
+            query_id: "q1".into(),
+            subject_id: "s1".into(),
             identity: 90.0,
             length: q_end - q_start + 1,
             mismatch: 0,

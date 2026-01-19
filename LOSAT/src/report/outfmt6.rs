@@ -381,7 +381,21 @@ pub fn write_outfmt7_grouped<W: Write>(
     let mut query_order: Vec<&str> = Vec::new();
     
     for hit in hits {
-        let qid = hit.query_id.as_str();
+        // NCBI reference: ncbi-blast/c++/src/objtools/align_format/tabular.cpp:1264-1283
+        // ```c
+        // void CBlastTabularInfo::PrintHeader(...)
+        // {
+        //     x_PrintQueryAndDbNames(program_version, bioseq, dbname, rid, iteration, subj_bioseq);
+        //     if (align_set) {
+        //         int num_hits = align_set->Get().size();
+        //         if (num_hits != 0) {
+        //             PrintFieldNames(is_csv);
+        //         }
+        //         m_Ostream << "# " << num_hits << " hits found" << "\n";
+        //     }
+        // }
+        // ```
+        let qid = hit.query_id.as_ref();
         if !query_hits.contains_key(qid) {
             query_order.push(qid);
         }
@@ -506,9 +520,20 @@ mod tests {
     use super::*;
 
     fn make_hit() -> Hit {
+        // NCBI reference: ncbi-blast/c++/include/algo/blast/core/blast_hits.h:153-166
+        // ```c
+        // typedef struct BlastHSPList {
+        //    Int4 oid;/**< The ordinal id of the subject sequence this HSP list is for */
+        //    Int4 query_index; /**< Index of the query which this HSPList corresponds to.
+        //                       Set to 0 if not applicable */
+        //    BlastHSP** hsp_array; /**< Array of pointers to individual HSPs */
+        //    Int4 hspcnt; /**< Number of HSPs saved */
+        //    ...
+        // } BlastHSPList;
+        // ```
         Hit {
-            query_id: "query1".to_string(),
-            subject_id: "subject1".to_string(),
+            query_id: "query1".into(),
+            subject_id: "subject1".into(),
             identity: 95.123,
             length: 100,
             mismatch: 5,

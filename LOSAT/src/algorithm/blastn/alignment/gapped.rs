@@ -196,6 +196,13 @@ fn gap_alloc_trace_row<'a>(
     let row_index = *trace_rows_used;
     *trace_rows_used += 1;
 
+    // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_gapalign.c:75-77
+    // ```c
+    // Int4	chunksize = MAX(CHUNKSIZE, length + length/3);
+    // length += length/3;	/* Add on about 30% so the end will get reused. */
+    // ```
+    let row_capacity_slack = row_capacity.saturating_add(row_capacity / 3);
+
     if row_index < trace_offsets.len() {
         trace_offsets[row_index] = start_offset;
     } else {
@@ -205,12 +212,15 @@ fn gap_alloc_trace_row<'a>(
     if row_index < trace_rows.len() {
         let row = &mut trace_rows[row_index];
         row.clear();
+        if row.capacity() < row_capacity_slack {
+            row.reserve(row_capacity_slack.saturating_sub(row.capacity()));
+        }
         if row_capacity > 0 {
             row.resize(row_capacity, 0);
         }
         row
     } else {
-        let mut row: Vec<u8> = Vec::new();
+        let mut row: Vec<u8> = Vec::with_capacity(row_capacity_slack);
         if row_capacity > 0 {
             row.resize(row_capacity, 0);
         }

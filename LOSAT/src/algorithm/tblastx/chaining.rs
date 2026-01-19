@@ -8,6 +8,7 @@ use crate::stats::KarlinParams;
 use rustc_hash::FxHashMap;
 use std::cmp::Ordering;
 use std::sync::atomic::Ordering as AtomicOrdering;
+use std::sync::Arc;
 // Removed MAX_DIAG_DRIFT_AA and MAX_GAP_AA - clustering logic removed (not in NCBI)
 use super::diagnostics::DiagnosticCounters;
 
@@ -70,7 +71,18 @@ pub struct UngappedHit {
 }
 
 /// Sequence data for re-alignment during HSP chaining
-pub type SequenceKey = (String, String, i8, i8); // (query_id, subject_id, q_frame, s_frame)
+// NCBI reference: ncbi-blast/c++/include/algo/blast/core/blast_hits.h:153-166
+// ```c
+// typedef struct BlastHSPList {
+//    Int4 oid;/**< The ordinal id of the subject sequence this HSP list is for */
+//    Int4 query_index; /**< Index of the query which this HSPList corresponds to.
+//                       Set to 0 if not applicable */
+//    BlastHSP** hsp_array; /**< Array of pointers to individual HSPs */
+//    Int4 hspcnt; /**< Number of HSPs saved */
+//    ...
+// } BlastHSPList;
+// ```
+pub type SequenceKey = (Arc<str>, Arc<str>, i8, i8); // (query_id, subject_id, q_frame, s_frame)
 pub type SequenceData = (Vec<u8>, Vec<u8>); // (query_aa_seq, subject_aa_seq)
 
 /// NCBI BLAST-style HSP domination test.

@@ -256,6 +256,140 @@ fn packed_kmer_at_seed_mask(packed: &[u8], start: usize, lut_word_length: usize)
     }
 }
 
+// NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_nascan.c:1482-1623
+// ```c
+// if (scan_step % COMPRESSION_RATIO == 0 &&
+//     (subject->mask_type == eNoSubjMasking)) {
+//     Uint1 *s_end = abs_start + scan_range[1] / COMPRESSION_RATIO;
+//     Int4 shift = 2 * (12 - lut_word_length);
+//     s = abs_start + scan_range[0] / COMPRESSION_RATIO;
+//     scan_step = scan_step / COMPRESSION_RATIO;
+//     for ( ; s <= s_end; s += scan_step) {
+//         index = s[0] << 16 | s[1] << 8 | s[2];
+//         index = index >> shift;
+//         ...
+//     }
+// } else if (lut_word_length > 9) {
+//     for (; scan_range[0] <= scan_range[1]; scan_range[0] += scan_step) {
+//         Int4 shift = 2*(16 - (scan_range[0] % COMPRESSION_RATIO + lut_word_length));
+//         s = abs_start + (scan_range[0] / COMPRESSION_RATIO);
+//         index = s[0] << 24 | s[1] << 16 | s[2] << 8 | s[3];
+//         index = (index >> shift) & mask;
+//         MB_ACCESS_HITS();
+//     }
+// } else {
+//     for (; scan_range[0] <= scan_range[1]; scan_range[0] += scan_step) {
+//         Int4 shift = 2*(12 - (scan_range[0] % COMPRESSION_RATIO + lut_word_length));
+//         s = abs_start + (scan_range[0] / COMPRESSION_RATIO);
+//         index = s[0] << 16 | s[1] << 8 | s[2];
+//         index = (index >> shift) & mask;
+//         MB_ACCESS_HITS();
+//     }
+// }
+// ```
+fn scan_subject_kmers_range_mb_any<F>(
+    packed: &[u8],
+    subject_len: usize,
+    lut_word_length: usize,
+    scan_step: usize,
+    subject_masked: bool,
+    start: usize,
+    end: usize,
+    on_kmer: &mut F,
+) where
+    F: FnMut(usize, u64),
+{
+    if subject_len < lut_word_length || lut_word_length < 9 || lut_word_length > 12 {
+        return;
+    }
+
+    let packed_len = packed.len();
+    if packed_len == 0 {
+        return;
+    }
+
+    let mask = (1u64 << (2 * lut_word_length)) - 1;
+
+    if scan_step % COMPRESSION_RATIO == 0 && !subject_masked {
+        if packed_len >= 3 {
+            let shift = 2 * (12 - lut_word_length);
+            let step_bytes = scan_step / COMPRESSION_RATIO;
+            let mut byte_idx = start / COMPRESSION_RATIO;
+            let max_byte_idx = packed_len.saturating_sub(3);
+            let end_byte_idx = (end / COMPRESSION_RATIO).min(max_byte_idx);
+            while byte_idx <= end_byte_idx {
+                let idx = ((packed[byte_idx] as u32) << 16)
+                    | ((packed[byte_idx + 1] as u32) << 8)
+                    | (packed[byte_idx + 2] as u32);
+                let kmer = ((idx >> shift) as u64) & mask;
+                on_kmer(byte_idx * COMPRESSION_RATIO, kmer);
+                byte_idx = byte_idx.saturating_add(step_bytes);
+            }
+            let mut pos = byte_idx * COMPRESSION_RATIO;
+            while pos <= end {
+                let kmer = packed_kmer_at(packed, pos, lut_word_length);
+                on_kmer(pos, kmer);
+                pos = pos.saturating_add(scan_step);
+            }
+            return;
+        }
+    }
+
+    if lut_word_length > 9 {
+        if packed_len >= 4 {
+            let max_byte_idx = packed_len.saturating_sub(4);
+            let max_fast_pos = max_byte_idx * COMPRESSION_RATIO + (COMPRESSION_RATIO - 1);
+            let fast_end = end.min(max_fast_pos);
+            let mut pos = start;
+            while pos <= fast_end {
+                let byte_idx = pos / COMPRESSION_RATIO;
+                let shift = 2 * (16 - ((pos % COMPRESSION_RATIO) + lut_word_length));
+                let idx = ((packed[byte_idx] as u32) << 24)
+                    | ((packed[byte_idx + 1] as u32) << 16)
+                    | ((packed[byte_idx + 2] as u32) << 8)
+                    | (packed[byte_idx + 3] as u32);
+                let kmer = ((idx >> shift) as u64) & mask;
+                on_kmer(pos, kmer);
+                pos = pos.saturating_add(scan_step);
+            }
+            while pos <= end {
+                let kmer = packed_kmer_at(packed, pos, lut_word_length);
+                on_kmer(pos, kmer);
+                pos = pos.saturating_add(scan_step);
+            }
+            return;
+        }
+    } else if packed_len >= 3 {
+        let max_byte_idx = packed_len.saturating_sub(3);
+        let max_fast_pos = max_byte_idx * COMPRESSION_RATIO + (COMPRESSION_RATIO - 1);
+        let fast_end = end.min(max_fast_pos);
+        let mut pos = start;
+        while pos <= fast_end {
+            let byte_idx = pos / COMPRESSION_RATIO;
+            let shift = 2 * (12 - ((pos % COMPRESSION_RATIO) + lut_word_length));
+            let idx = ((packed[byte_idx] as u32) << 16)
+                | ((packed[byte_idx + 1] as u32) << 8)
+                | (packed[byte_idx + 2] as u32);
+            let kmer = ((idx >> shift) as u64) & mask;
+            on_kmer(pos, kmer);
+            pos = pos.saturating_add(scan_step);
+        }
+        while pos <= end {
+            let kmer = packed_kmer_at(packed, pos, lut_word_length);
+            on_kmer(pos, kmer);
+            pos = pos.saturating_add(scan_step);
+        }
+        return;
+    }
+
+    let mut pos = start;
+    while pos <= end {
+        let kmer = packed_kmer_at(packed, pos, lut_word_length);
+        on_kmer(pos, kmer);
+        pos = pos.saturating_add(scan_step);
+    }
+}
+
 // NCBI reference: ncbi-blast/c++/src/algo/blast/core/na_ungapped.c:56-66
 // ```c
 // index &= (mb_lt->hashsize-1);
@@ -307,8 +441,8 @@ fn scan_subject_kmers_range<F>(
     // ```
     debug_assert!(scan_step > 0);
 
-    let mask = (1u64 << (2 * lut_word_length)) - 1;
     if lut_word_length <= 8 {
+        let mask = (1u64 << (2 * lut_word_length)) - 1;
         let packed_len = packed.len();
         if packed_len == 0 {
             return;
@@ -420,6 +554,63 @@ fn scan_subject_kmers_range<F>(
                 return;
             }
         }
+    }
+
+    // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_nascan.c:2631-2677
+    // ```c
+    // switch (mb_lt->lut_word_length) {
+    // case 9:
+    //     if (scan_step == 1)
+    //         mb_lt->scansub_callback = (void *)s_MBScanSubject_9_1;
+    //     if (scan_step == 2)
+    //         mb_lt->scansub_callback = (void *)s_MBScanSubject_9_2;
+    //     else
+    //         mb_lt->scansub_callback = (void *)s_MBScanSubject_Any;
+    //     break;
+    // case 10:
+    //     if (scan_step == 1)
+    //         mb_lt->scansub_callback = (void *)s_MBScanSubject_10_1;
+    //     else if (scan_step == 2)
+    //         mb_lt->scansub_callback = (void *)s_MBScanSubject_10_2;
+    //     else if (scan_step == 3)
+    //         mb_lt->scansub_callback = (void *)s_MBScanSubject_10_3;
+    //     else
+    //         mb_lt->scansub_callback = (void *)s_MBScanSubject_Any;
+    //     break;
+    // case 11:
+    //     switch (scan_step % COMPRESSION_RATIO) {
+    //     case 0:
+    //         mb_lt->scansub_callback = (void *)s_MBScanSubject_Any;
+    //         break;
+    //     case 1:
+    //         mb_lt->scansub_callback = (void *)s_MBScanSubject_11_1Mod4;
+    //         break;
+    //     case 2:
+    //         mb_lt->scansub_callback = (void *)s_MBScanSubject_11_2Mod4;
+    //         break;
+    //     case 3:
+    //         mb_lt->scansub_callback = (void *)s_MBScanSubject_11_3Mod4;
+    //         break;
+    //     }
+    //     break;
+    // case 12:
+    // case 16:
+    //     mb_lt->scansub_callback = (void *)s_MBScanSubject_Any;
+    //     break;
+    // }
+    // ```
+    if lut_word_length >= 9 && lut_word_length <= 12 {
+        scan_subject_kmers_range_mb_any(
+            packed,
+            subject_len,
+            lut_word_length,
+            scan_step,
+            subject_masked,
+            start,
+            end,
+            on_kmer,
+        );
+        return;
     }
 
     // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_nascan.c:1598-1605

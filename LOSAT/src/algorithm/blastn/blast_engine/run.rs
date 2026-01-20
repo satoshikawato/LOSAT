@@ -335,6 +335,39 @@ fn adjust_subject_range(
     start_shift
 }
 
+// NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_extend.c:159-176
+// ```c
+// if (ewp->diag_table->offset >= INT4_MAX / 4) {
+//     ewp->diag_table->offset = ewp->diag_table->window;
+//     s_BlastDiagClear(ewp->diag_table);
+// } else {
+//     ewp->diag_table->offset += subject_length + ewp->diag_table->window;
+// }
+// ```
+#[inline]
+fn advance_diag_table_offset(
+    diag_table_offset: &mut i32,
+    diag_window: i32,
+    subject_len: usize,
+    use_array_indexing: bool,
+    hit_level_array: &mut Vec<DiagStruct>,
+    hit_len_array: &mut Vec<u8>,
+) {
+    if *diag_table_offset >= i32::MAX / 4 {
+        *diag_table_offset = diag_window;
+        if use_array_indexing {
+            let init_diag = DiagStruct {
+                last_hit: -diag_window,
+                flag: 0,
+            };
+            hit_level_array.fill(init_diag);
+            hit_len_array.fill(0);
+        }
+    } else {
+        *diag_table_offset = diag_table_offset.saturating_add(subject_len as i32 + diag_window);
+    }
+}
+
 // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_hits.c:1122-1132
 // ```c
 // if (hsp->query.frame != hsp->subject.frame) {
@@ -2425,6 +2458,16 @@ struct SubjectScratch {
     // Uint1* hit_len_array;
     // ```
     hit_len_hash: FxHashMap<u64, u8>,
+    // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_extend.c:159-176
+    // ```c
+    // if (ewp->diag_table->offset >= INT4_MAX / 4) {
+    //     ewp->diag_table->offset = ewp->diag_table->window;
+    //     s_BlastDiagClear(ewp->diag_table);
+    // } else {
+    //     ewp->diag_table->offset += subject_length + ewp->diag_table->window;
+    // }
+    // ```
+    diag_table_offset: i32,
 }
 
 // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_engine.c:488-491
@@ -2464,6 +2507,7 @@ impl SubjectScratch {
             hit_len_array: Vec::new(),
             hit_level_hash: FxHashMap::default(),
             hit_len_hash: FxHashMap::default(),
+            diag_table_offset: TWO_HIT_WINDOW as i32,
         }
     }
 }
@@ -3586,9 +3630,6 @@ pub fn run(args: BlastnArgs) -> Result<()> {
                 let s_len = chunk.length;
                 let subject_seq_ranges = chunk.seq_ranges.as_slice();
                 let subject_masked = chunk.masked;
-                if s_len < effective_word_size {
-                    return Vec::new();
-                }
 
                 let packed_offset = chunk.offset / COMPRESSION_RATIO;
                 let s_seq_blastna = &s_seq_blastna_full[chunk.offset..chunk.offset + chunk.length];
@@ -3663,6 +3704,25 @@ pub fn run(args: BlastnArgs) -> Result<()> {
                 let ungapped_hits = &mut subject_scratch.ungapped_hits;
                 ungapped_hits.clear();
 
+                // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_extend.c:52-64
+                // ```c
+                // diag_array_length = 1;
+                // while (diag_array_length < (qlen+window_size))
+                //     diag_array_length = diag_array_length << 1;
+                // diag_table->diag_array_length = diag_array_length;
+                // diag_table->diag_mask = diag_array_length-1;
+                // diag_table->offset = window_size;
+                // ```
+                const MAX_ARRAY_DIAG_SIZE: usize = 12_000_000;
+                let (diag_array_length_single, diag_mask_single) = if queries.len() == 1 {
+                    (diag_array_lengths[0], diag_masks[0] as isize)
+                } else {
+                    (0usize, 0isize)
+                };
+                let use_array_indexing =
+                    queries.len() == 1 && diag_array_length_single <= MAX_ARRAY_DIAG_SIZE;
+                let diag_window = TWO_HIT_WINDOW as i32;
+
                 // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_engine.c:786-833
                 // ```c
                 // first_context = 1;
@@ -3685,24 +3745,11 @@ pub fn run(args: BlastnArgs) -> Result<()> {
                     // NCBI reference: ncbi-blast/c++/src/algo/blast/core/na_ungapped.c:148-349 (packed subject used by ungapped extension)
                     let search_seq_packed: &[u8] = s_seq_packed;
 
-                    // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_extend.c:52-64
+                    // NCBI reference: ncbi-blast/c++/src/algo/blast/core/na_ungapped.c:656-662
                     // ```c
-                    // diag_array_length = 1;
-                    // while (diag_array_length < (qlen+window_size))
-                    //     diag_array_length = diag_array_length << 1;
-                    // diag_table->diag_array_length = diag_array_length;
-                    // diag_table->diag_mask = diag_array_length-1;
-                    // diag_table->offset = window_size;
+                    // s_off_pos = s_off + diag_table->offset;
                     // ```
-                    const MAX_ARRAY_DIAG_SIZE: usize = 12_000_000;
-                    let (diag_array_length_single, diag_mask_single) = if queries.len() == 1 {
-                        (diag_array_lengths[0], diag_masks[0] as isize)
-                    } else {
-                        (0usize, 0isize)
-                    };
-                    let use_array_indexing =
-                        queries.len() == 1 && diag_array_length_single <= MAX_ARRAY_DIAG_SIZE;
-                    let diag_offset = TWO_HIT_WINDOW as isize; // diag_table->offset
+                    let diag_offset = subject_scratch.diag_table_offset as isize;
                     let diag_array_size = if use_array_indexing {
                         diag_array_length_single
                     } else {
@@ -3734,11 +3781,19 @@ pub fn run(args: BlastnArgs) -> Result<()> {
                     let hit_len_array = &mut subject_scratch.hit_len_array;
                     let hit_level_hash = &mut subject_scratch.hit_level_hash;
                     let hit_len_hash = &mut subject_scratch.hit_len_hash;
+                    let init_diag = DiagStruct {
+                        last_hit: -diag_window,
+                        flag: 0,
+                    };
                     if use_array_indexing {
-                        hit_level_array.resize(diag_array_size, DiagStruct::default());
-                        hit_level_array.fill(DiagStruct::default());
-                        hit_len_array.resize(diag_array_size, 0);
-                        hit_len_array.fill(0);
+                        if hit_level_array.len() != diag_array_size {
+                            hit_level_array.resize(diag_array_size, init_diag);
+                            hit_level_array.fill(init_diag);
+                            hit_len_array.resize(diag_array_size, 0);
+                            hit_len_array.fill(0);
+                        } else {
+                            hit_len_array.resize(diag_array_size, 0);
+                        }
                         hit_level_hash.clear();
                         hit_len_hash.clear();
                     } else {
@@ -3746,6 +3801,27 @@ pub fn run(args: BlastnArgs) -> Result<()> {
                         hit_len_array.clear();
                         hit_level_hash.clear();
                         hit_len_hash.clear();
+                    }
+
+                    if s_len < effective_word_size {
+                        // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_extend.c:159-176
+                        // ```c
+                        // if (ewp->diag_table->offset >= INT4_MAX / 4) {
+                        //     ewp->diag_table->offset = ewp->diag_table->window;
+                        //     s_BlastDiagClear(ewp->diag_table);
+                        // } else {
+                        //     ewp->diag_table->offset += subject_length + ewp->diag_table->window;
+                        // }
+                        // ```
+                        advance_diag_table_offset(
+                            &mut subject_scratch.diag_table_offset,
+                            diag_window,
+                            s_len,
+                            use_array_indexing,
+                            hit_level_array,
+                            hit_len_array,
+                        );
+                        return Vec::new();
                     }
 
                     // TWO-STAGE LOOKUP: Use separate rolling k-mer for lut_word_length
@@ -3953,7 +4029,7 @@ pub fn run(args: BlastnArgs) -> Result<()> {
                                     (diag_entry.last_hit, diag_entry.flag != 0)
                                 } else if !use_array_indexing {
                                     let diag_key = pack_diag_key(q_idx, diag);
-                                    let diag_entry = hit_level_hash.get(&diag_key).copied().unwrap_or_default();
+                                    let diag_entry = hit_level_hash.get(&diag_key).copied().unwrap_or(init_diag);
                                     (diag_entry.last_hit, diag_entry.flag != 0)
                                 } else {
                                     (0, false)
@@ -4326,7 +4402,7 @@ pub fn run(args: BlastnArgs) -> Result<()> {
                                                 }
                                             } else {
                                                 let off_diag_key = pack_diag_key(q_idx, off_diag);
-                                                let off_entry = hit_level_hash.get(&off_diag_key).copied().unwrap_or_default();
+                                                let off_entry = hit_level_hash.get(&off_diag_key).copied().unwrap_or(init_diag);
                                                 let off_len = hit_len_hash.get(&off_diag_key).copied().unwrap_or(0);
                                                 (off_entry.last_hit, off_len)
                                             };
@@ -4361,7 +4437,7 @@ pub fn run(args: BlastnArgs) -> Result<()> {
                                                 }
                                             } else {
                                                 let off_diag_key = pack_diag_key(q_idx, off_diag);
-                                                let off_entry = hit_level_hash.get(&off_diag_key).copied().unwrap_or_default();
+                                                let off_entry = hit_level_hash.get(&off_diag_key).copied().unwrap_or(init_diag);
                                                 let off_len = hit_len_hash.get(&off_diag_key).copied().unwrap_or(0);
                                                 (off_entry.last_hit, off_len)
                                             };
@@ -4738,7 +4814,7 @@ pub fn run(args: BlastnArgs) -> Result<()> {
                                 (diag_entry.last_hit, diag_entry.flag != 0)
                             } else if !use_array_indexing {
                                 let diag_key = pack_diag_key(q_idx, diag);
-                                let diag_entry = hit_level_hash.get(&diag_key).copied().unwrap_or_default();
+                                let diag_entry = hit_level_hash.get(&diag_key).copied().unwrap_or(init_diag);
                                 (diag_entry.last_hit, diag_entry.flag != 0)
                             } else {
                                 (0, false)
@@ -4936,7 +5012,7 @@ pub fn run(args: BlastnArgs) -> Result<()> {
                                             }
                                         } else {
                                             let off_diag_key = pack_diag_key(q_idx, off_diag);
-                                            let off_entry = hit_level_hash.get(&off_diag_key).copied().unwrap_or_default();
+                                            let off_entry = hit_level_hash.get(&off_diag_key).copied().unwrap_or(init_diag);
                                             let off_len = hit_len_hash.get(&off_diag_key).copied().unwrap_or(0);
                                             (off_entry.last_hit, off_len)
                                         };
@@ -4971,7 +5047,7 @@ pub fn run(args: BlastnArgs) -> Result<()> {
                                             }
                                         } else {
                                             let off_diag_key = pack_diag_key(q_idx, off_diag);
-                                            let off_entry = hit_level_hash.get(&off_diag_key).copied().unwrap_or_default();
+                                            let off_entry = hit_level_hash.get(&off_diag_key).copied().unwrap_or(init_diag);
                                             let off_len = hit_len_hash.get(&off_diag_key).copied().unwrap_or(0);
                                             (off_entry.last_hit, off_len)
                                         };
@@ -5467,6 +5543,25 @@ pub fn run(args: BlastnArgs) -> Result<()> {
                     dbg_window_seeds,
                     total_ungapped,
                     dbg_containment_skipped,
+                );
+                // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_extend.c:159-176
+                // ```c
+                // if (ewp->diag_table->offset >= INT4_MAX / 4) {
+                //     ewp->diag_table->offset = ewp->diag_table->window;
+                //     s_BlastDiagClear(ewp->diag_table);
+                // } else {
+                //     ewp->diag_table->offset += subject_length + ewp->diag_table->window;
+                // }
+                // ```
+                let hit_level_array = &mut subject_scratch.hit_level_array;
+                let hit_len_array = &mut subject_scratch.hit_len_array;
+                advance_diag_table_offset(
+                    &mut subject_scratch.diag_table_offset,
+                    diag_window,
+                    s_len,
+                    use_array_indexing,
+                    hit_level_array,
+                    hit_len_array,
                 );
                 chunk_prelim_hits
             };

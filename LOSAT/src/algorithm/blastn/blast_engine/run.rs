@@ -4102,16 +4102,7 @@ pub fn run(args: BlastnArgs) -> Result<()> {
                                 let mut hit_ready = true;
                                 let query_mask = ctx.masks.as_slice();
 
-                                // NCBI reference: ncbi-blast/c++/src/algo/blast/core/na_ungapped.c:459-489
-                                // ```c
-                                // static NCBI_INLINE Boolean s_IsSeedMasked(...)
-                                // {
-                                //     ...
-                                //     return !(((T_Lookup_Callback)(lookup_wrap->lookup_callback))
-                                //                                      (lookup_wrap, index, q_pos));
-                                // }
-                                // ```
-                                // NCBI reference: ncbi-blast/c++/src/algo/blast/core/na_ungapped.c:59-66
+                                // NCBI reference: ncbi-blast/c++/src/algo/blast/core/na_ungapped.c:41-69 (s_MBLookup)
                                 // ```c
                                 // if (! PV_TEST(pv, index, mb_lt->pv_array_bts)) {
                                 //     return FALSE;
@@ -4130,10 +4121,10 @@ pub fn run(args: BlastnArgs) -> Result<()> {
                                         packed_kmer_at_seed_mask(search_seq_packed, s_pos, lut_word_length),
                                         lut_word_length,
                                     );
-                                    if !two_stage.has_hits(kmer) {
+                                    let hits = two_stage.get_hits(kmer);
+                                    if hits.is_empty() {
                                         return true;
                                     }
-                                    let hits = two_stage.get_hits(kmer);
                                     // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_nalookup.c:1027-1034
                                     // ```c
                                     // /* Also add 1 to all indices, because lookup table indices count

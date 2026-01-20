@@ -631,7 +631,7 @@ pub fn is_kmer_masked(intervals: &[MaskedInterval], start: usize, kmer_len: usiz
 //     ...
 // }
 // ```
-fn build_unmasked_ranges(seq_len: usize, masks: &[MaskedInterval]) -> Vec<(usize, usize)> {
+pub(crate) fn build_unmasked_ranges(seq_len: usize, masks: &[MaskedInterval]) -> Vec<(usize, usize)> {
     if seq_len == 0 {
         return Vec::new();
     }

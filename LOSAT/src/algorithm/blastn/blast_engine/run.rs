@@ -43,7 +43,7 @@ use super::super::extension::{
 use crate::utils::dust::MaskedInterval;
 use super::super::constants::TWO_HIT_WINDOW;
 use super::super::coordination::{configure_task, finalize_task_config, read_sequences, prepare_sequence_data, build_lookup_tables};
-use super::super::lookup::{reverse_complement, pack_diag_key};
+use super::super::lookup::{build_unmasked_ranges, pack_diag_key, reverse_complement};
 use super::super::ncbi_cutoffs::{compute_blastn_cutoff_score, GAP_TRIGGER_BIT_SCORE_NUCL};
 use super::super::blast_extend::DiagStruct;
 use super::super::interval_tree::{BlastIntervalTree, TreeHsp, IndexMethod};
@@ -2544,6 +2544,52 @@ fn bsearch_context_info(n: usize, index: &QueryContextIndex) -> usize {
     b
 }
 
+// NCBI reference: ncbi-blast/c++/src/algo/blast/core/lookup_util.c:190-203
+// ```c
+// Int4 num_entries = 0;
+// Int4 curr_max = 0;
+// ...
+// num_entries += loc->ssr->right - loc->ssr->left;
+// curr_max = MAX(curr_max, loc->ssr->right);
+// ...
+// *max_off = curr_max;
+// return num_entries;
+// ```
+// NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_nalookup.c:402-406
+// ```c
+// BlastLookupIndexQueryExactMatches(thin_backbone,
+//                                   lookup->word_length,
+//                                   BITS_PER_NUC,
+//                                   lookup->lut_word_length,
+//                                   query, locations);
+// ```
+fn compute_lookup_query_stats(
+    contexts: &[QueryContext],
+    context_masks: &[Vec<MaskedInterval>],
+) -> (usize, usize) {
+    debug_assert_eq!(contexts.len(), context_masks.len());
+    let mut approx_entries = 0usize;
+    let mut max_q_off = 0usize;
+
+    for (ctx, masks) in contexts.iter().zip(context_masks.iter()) {
+        let ranges = build_unmasked_ranges(ctx.seq.len(), masks);
+        let ctx_offset = ctx.query_offset.max(0) as usize;
+        for (start, end) in ranges {
+            if end <= start {
+                continue;
+            }
+            let right = end - 1;
+            approx_entries = approx_entries.saturating_add(right.saturating_sub(start));
+            let abs_right = ctx_offset.saturating_add(right);
+            if abs_right > max_q_off {
+                max_q_off = abs_right;
+            }
+        }
+    }
+
+    (approx_entries, max_q_off)
+}
+
 // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_filter.c:1173-1178
 // ```c
 // masks->ssr->left  = query_length - 1 - masks->ssr->right;
@@ -2901,43 +2947,6 @@ pub fn run(args: BlastnArgs) -> Result<()> {
         return Ok(());
     }
 
-    // Finalize configuration with query-dependent parameters (adaptive lookup table selection)
-    // NCBI reference: ncbi-blast/c++/src/algo/blast/unit_tests/api/ntscan_unit_test.cpp:166-174
-    // ```c
-    // const int kStrandLength = (query_blk->length - 1)/2;
-    // query_info->contexts[0].query_offset = 0;
-    // query_info->contexts[1].query_offset = kStrandLength + 1;
-    // ```
-    // For blastn both strands, lookup segments cover both contexts; approximate
-    // table entries and max_q_off must reflect concatenated query length.
-    let total_query_length: usize = queries
-        .iter()
-        .map(|r| r.seq().len() * 2 + 1)
-        .sum::<usize>();
-    let max_query_length: usize = queries
-        .iter()
-        .map(|r| r.seq().len() * 2 + 1)
-        .max()
-        .unwrap_or(1);
-    let discontig_template = args.task == "dc-megablast";
-    // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_nalookup.c:46-47
-    // ```c
-    // BlastChooseNaLookupTable(const LookupTableOptions* lookup_options,
-    //                          Int4 approx_table_entries, Int4 max_q_off,
-    //                          Int4 *lut_width)
-    // ```
-    finalize_task_config(
-        &mut config,
-        total_query_length,
-        max_query_length,
-        discontig_template,
-    );
-
-    if args.verbose {
-        eprintln!("[INFO] Adaptive lookup: approx_entries={}, lut_word_length={}, two_stage={}, scan_step={}",
-                  total_query_length, config.lut_word_length, config.use_two_stage, config.scan_step);
-    }
-
     // Prepare sequence data (including DUST masking)
     // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_engine.c:1401-1405
     // ```c
@@ -3052,6 +3061,35 @@ pub fn run(args: BlastnArgs) -> Result<()> {
         .collect();
     let query_context_index = QueryContextIndex::new(&query_contexts);
 
+    // Finalize configuration with query-dependent parameters (adaptive lookup table selection)
+    // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_nalookup.c:46-47
+    // ```c
+    // BlastChooseNaLookupTable(const LookupTableOptions* lookup_options,
+    //                          Int4 approx_table_entries, Int4 max_q_off,
+    //                          Int4 *lut_width)
+    // ```
+    let discontig_template = args.task == "dc-megablast";
+    let (approx_table_entries, max_q_off) =
+        compute_lookup_query_stats(&query_contexts, &query_context_masks);
+    let max_query_length = max_q_off.saturating_add(1).max(1);
+    finalize_task_config(
+        &mut config,
+        approx_table_entries,
+        max_query_length,
+        discontig_template,
+    );
+
+    if args.verbose {
+        eprintln!(
+            "[INFO] Adaptive lookup: approx_entries={}, max_q_off={}, lut_word_length={}, two_stage={}, scan_step={}",
+            approx_table_entries,
+            max_q_off,
+            config.lut_word_length,
+            config.use_two_stage,
+            config.scan_step
+        );
+    }
+
     // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_extend.c:52-61
     // ```c
     // diag_array_length = 1;
@@ -3147,7 +3185,7 @@ pub fn run(args: BlastnArgs) -> Result<()> {
         &query_context_masks,
         &query_context_offsets,
         &seq_data.subjects,
-        query_concat_length,
+        approx_table_entries,
     );
 
     // NCBI reference: blast_traceback.c:654 (cutoff_score_min computed per subject)

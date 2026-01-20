@@ -3545,7 +3545,6 @@ pub fn run(args: BlastnArgs) -> Result<()> {
                 prelim_hits.clear();
                 let greedy_align_scratch = &mut subject_scratch.greedy_align_scratch;
 
-                let s_seq = &s_seq_full[chunk.offset..chunk.offset + chunk.length];
                 let s_len = chunk.length;
                 let subject_seq_ranges = chunk.seq_ranges.as_slice();
                 let subject_masked = chunk.masked;
@@ -3635,7 +3634,16 @@ pub fn run(args: BlastnArgs) -> Result<()> {
                 // ```
                 // BLASTN scans subject plus strand only; query contexts cover both strands.
                 for _subject_strand in [false] {
-                    let search_seq: &[u8] = s_seq;
+                    // NCBI reference: ncbi-blast/c++/src/algo/blast/api/blast_setup_cxx.cpp:836-847
+                    // ```c
+                    // BlastSeqBlkSetSequence(subj, sequence.data.release(),
+                    //    ((sentinels == eSentinels) ? sequence.length - 2 :
+                    //     sequence.length));
+                    // ...
+                    // BlastSeqBlkSetCompressedSequence(subj,
+                    //                                  compressed_seq.data.release());
+                    // ```
+                    let search_seq: &[u8] = s_seq_blastna;
                     // NCBI reference: ncbi-blast/c++/src/algo/blast/core/na_ungapped.c:148-349 (packed subject used by ungapped extension)
                     let search_seq_packed: &[u8] = s_seq_packed;
 
@@ -3932,12 +3940,9 @@ pub fn run(args: BlastnArgs) -> Result<()> {
                                 // For two-stage lookup, verify word_length match BEFORE ungapped extension
                                 // This is done by left+right extension from the lut_word_length match position
                                 let (q_ext_start, s_ext_start) = if word_length > lut_word_length {
-                                    // NCBI BLAST: s_BlastnExtendInitialHit does left+right extension
-                                    // Reference: na_ungapped.c:1106-1120
-                                    let ext_to = word_length - lut_word_length;
-
-                                    // LEFT extension (backwards from lut_word_length start)
-                                    // NCBI BLAST: na_ungapped.c:1101-1114
+                                    // NCBI BLAST: s_BlastNaExtend left/right extension uses packed subject
+                                    // NCBI reference: ncbi-blast/c++/src/algo/blast/core/na_ungapped.c:1093-1136
+                                    // ```c
                                     // Int4 ext_left = 0;
                                     // Int4 s_off = s_offset;
                                     // Uint1 *q = query->sequence + q_offset;
@@ -3950,11 +3955,26 @@ pub fn run(args: BlastnArgs) -> Result<()> {
                                     //     if (((Uint1) (*s << (2 * (s_off % COMPRESSION_RATIO))) >> 6) != *q)
                                     //         break;
                                     // }
-                                    // CRITICAL: NCBI relies on MIN(ext_to, s_offset) limit, NO explicit boundary check
-                                    let mut ext_left = 0;
-                                    let mut q_left = q_pos_usize;
-                                    let mut s_left = kmer_start;
+                                    // if (ext_left < ext_to) {
+                                    //     Int4 ext_right = 0;
+                                    //     s_off = s_offset + lut_word_length;
+                                    //     if (s_off + ext_to - ext_left > s_range) continue;
+                                    //     q = query->sequence + q_offset + lut_word_length;
+                                    //     s = subject->sequence + s_off / COMPRESSION_RATIO;
+                                    //     for (; ext_right < ext_to - ext_left; ++ext_right) {
+                                    //         if (((Uint1) (*s << (2 * (s_off % COMPRESSION_RATIO))) >> 6) != *q)
+                                    //             break;
+                                    //         s_off++;
+                                    //         q++;
+                                    //         if (s_off % COMPRESSION_RATIO == 0)
+                                    //             s++;
+                                    //     }
+                                    //     if (ext_left + ext_right < ext_to) continue;
+                                    // }
+                                    let ext_to = word_length - lut_word_length;
 
+                                    // LEFT extension (backwards from lut_word_length start)
+                                    // CRITICAL: NCBI relies on MIN(ext_to, s_offset) limit, NO explicit boundary check
                                     // NCBI BLAST: MIN(ext_to, s_offset) - limit left extension by s_offset
                                     // s_offset (kmer_start) is the maximum number of positions we can extend left
                                     // NCBI reference: na_ungapped.c:1106-1114
@@ -3975,6 +3995,10 @@ pub fn run(args: BlastnArgs) -> Result<()> {
                                     // NO explicit boundary check inside loop (NCBI doesn't have it)
                                     // SAFETY: We've limited by subject bounds. For query, we trust sequences are long enough
                                     // (NCBI doesn't check query bounds either - it's undefined behavior if out of bounds)
+                                    let mut ext_left = 0usize;
+                                    let mut q_left = q_pos_usize;
+                                    let mut s_off = kmer_start;
+                                    let mut s_idx = s_off / COMPRESSION_RATIO;
                                     while ext_left < max_ext_left {
                                         if debug_enabled {
                                             dbg_left_ext_iters += 1;
@@ -3982,10 +4006,16 @@ pub fn run(args: BlastnArgs) -> Result<()> {
                                         // NCBI BLAST: s_off--; q--;
                                         // Reference: na_ungapped.c:1107-1108
                                         q_left -= 1;
-                                        s_left -= 1;
-                                        // NCBI BLAST: if (base mismatch) break;
-                                        // Reference: na_ungapped.c:1111-1114
-                                        if unsafe { *q_seq.get_unchecked(q_left) } != unsafe { *search_seq.get_unchecked(s_left) } {
+                                        s_off -= 1;
+                                        if s_off % COMPRESSION_RATIO == COMPRESSION_RATIO - 1 {
+                                            s_idx -= 1;
+                                        }
+                                        // SAFETY: s_idx tracks s_off / COMPRESSION_RATIO within bounds by max_ext_left.
+                                        let s_byte = unsafe { *search_seq_packed.get_unchecked(s_idx) };
+                                        let s_base = ((s_byte << (2 * (s_off % COMPRESSION_RATIO))) >> 6) as u8;
+                                        // SAFETY: q_left is bounded by max_ext_left and q_pos_usize.
+                                        let q_base = unsafe { *q_seq_blastna.get_unchecked(q_left) };
+                                        if s_base != q_base {
                                             break;
                                         }
                                         ext_left += 1;
@@ -4028,21 +4058,21 @@ pub fn run(args: BlastnArgs) -> Result<()> {
                                         // NCBI BLAST: s_off = s_offset + lut_word_length;
                                         // NCBI BLAST: if (s_off + ext_to - ext_left > s_range) continue;
                                         // Reference: na_ungapped.c:1122-1124
-                                        let s_off = kmer_start + lut_word_length;
+                                        let mut s_off = kmer_start + lut_word_length;
                                         if s_off + (ext_to - ext_left) > s_len {
                                             // Not enough room in subject, skip this seed (NCBI behavior)
                                             continue;
                                         }
 
-                                        let mut ext_right = 0;
+                                        let mut ext_right = 0usize;
                                         let q_off = q_pos_usize + lut_word_length;
                                         // LOSAT-specific: Also check query bounds (NCBI doesn't, causing UB)
-                                        if q_off + (ext_to - ext_left) > q_seq.len() {
+                                        if q_off + (ext_to - ext_left) > q_seq_blastna.len() {
                                             // Not enough room in query, skip this seed
                                             continue;
                                         }
                                         let mut q_right = q_off;
-                                        let mut s_right = s_off;
+                                        let mut s_idx = s_off / COMPRESSION_RATIO;
 
                                         // NCBI BLAST: for (; ext_right < ext_to - ext_left; ++ext_right)
                                         // Reference: na_ungapped.c:1128-1136
@@ -4056,14 +4086,20 @@ pub fn run(args: BlastnArgs) -> Result<()> {
                                             }
                                             // NCBI BLAST: if (base mismatch) break;
                                             // Reference: na_ungapped.c:1129-1131
-                                            // SAFETY: We've checked subject bounds above. For query, we trust sequences are long enough
-                                            // (NCBI doesn't check query bounds either - it's undefined behavior if out of bounds)
-                                            if unsafe { *q_seq.get_unchecked(q_right) } != unsafe { *search_seq.get_unchecked(s_right) } {
+                                            // SAFETY: s_idx tracks s_off / COMPRESSION_RATIO within bounds by s_len check above.
+                                            let s_byte = unsafe { *search_seq_packed.get_unchecked(s_idx) };
+                                            let s_base = ((s_byte << (2 * (s_off % COMPRESSION_RATIO))) >> 6) as u8;
+                                            // SAFETY: q_right is bounded by q_seq_blastna length check above.
+                                            let q_base = unsafe { *q_seq_blastna.get_unchecked(q_right) };
+                                            if s_base != q_base {
                                                 break;
                                             }
                                             ext_right += 1;
                                             q_right += 1;
-                                            s_right += 1;
+                                            s_off += 1;
+                                            if s_off % COMPRESSION_RATIO == 0 {
+                                                s_idx += 1;
+                                            }
                                         }
 
                                         // NCBI BLAST: if (ext_left + ext_right < ext_to) continue;

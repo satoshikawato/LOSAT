@@ -4,5 +4,5 @@ DUST masked 24781 bases (8.26%) across 1 sequences
 Building lookup (Task: blastn, Word: 11, TwoStage: true, LUTWord: 11, Direct: false, DUST: true)...
 
 real	0m0.942s
-user	0m0.774s
-sys	0m0.037s
+user	0m0.715s
+sys	0m0.010s

@@ -2945,7 +2945,7 @@ pub fn run(args: BlastnArgs) -> Result<()> {
     //   sequences are retieved in ncbistdaa/ncbi2na encodings respectively. */
     // seq_arg.encoding = eBlastEncodingProtein;
     // ```
-    let seq_data = prepare_sequence_data(&args, queries, query_ids, subjects, config.use_dp);
+    let seq_data = prepare_sequence_data(&args, queries, query_ids, subjects);
 
     // NCBI reference: ncbi-blast/c++/include/algo/blast/core/blast_hits.h:153-166
     // ```c

@@ -622,6 +622,43 @@ pub fn is_kmer_masked(intervals: &[MaskedInterval], start: usize, kmer_len: usiz
     false
 }
 
+// NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_lookup.c:91-132
+// ```c
+// for (loc = locations; loc; loc = loc->next) {
+//     Int4 from = loc->ssr->left;
+//     Int4 to = loc->ssr->right;
+//     if (word_length > to - from + 1) continue;
+//     ...
+// }
+// ```
+fn build_unmasked_ranges(seq_len: usize, masks: &[MaskedInterval]) -> Vec<(usize, usize)> {
+    if seq_len == 0 {
+        return Vec::new();
+    }
+    if masks.is_empty() {
+        return vec![(0, seq_len)];
+    }
+
+    let mut sorted = masks.to_vec();
+    sorted.sort_by_key(|m| m.start);
+    let mut ranges: Vec<(usize, usize)> = Vec::new();
+    let mut cursor = 0usize;
+    for mask in sorted {
+        let start = mask.start.min(seq_len);
+        let end = mask.end.min(seq_len);
+        if start > cursor {
+            ranges.push((cursor, start));
+        }
+        if end > cursor {
+            cursor = end;
+        }
+    }
+    if cursor < seq_len {
+        ranges.push((cursor, seq_len));
+    }
+    ranges
+}
+
 /// Lookup table for ASCII to 2-bit encoding (0xFF = invalid/ambiguous)
 /// Used for rolling k-mer extraction
 const ENCODE_LUT: [u8; 256] = {
@@ -647,6 +684,7 @@ pub fn build_pv_direct_lookup(
     queries: &[fasta::Record],
     query_offsets: &[i32],
     word_size: usize,
+    full_word_size: usize,
     query_masks: &[Vec<MaskedInterval>],
     db_word_counts: Option<&[u8]>,
     max_db_word_count: u8,
@@ -654,6 +692,7 @@ pub fn build_pv_direct_lookup(
     use_mb_pv: bool,
 ) -> PvDirectLookup {
     let safe_word_size = word_size.min(MAX_DIRECT_LOOKUP_WORD_SIZE);
+    let full_word_size = full_word_size.max(safe_word_size);
     let table_size = 1usize << (2 * safe_word_size); // 4^word_size
     // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_nalookup.c:1270-1306
     // ```c
@@ -725,7 +764,7 @@ pub fn build_pv_direct_lookup(
     // For each location, it iterates through positions and adds k-mers
     // Reference: blast_nalookup.c:402-406, 571-575 (calls BlastLookupIndexQueryExactMatches)
     //
-    // LOSAT processes entire sequence and filters masked regions (equivalent behavior)
+    // LOSAT mirrors this by iterating unmasked ranges derived from query masks.
     for (q_idx, record) in queries.iter().enumerate() {
         let seq = record.seq();
         // NCBI reference: blast_lookup.c:99-100
@@ -735,73 +774,68 @@ pub fn build_pv_direct_lookup(
         }
 
         let masks = query_masks.get(q_idx).map(|v| v.as_slice()).unwrap_or(&[]);
+        let ranges = build_unmasked_ranges(seq.len(), masks);
 
         // NCBI reference: blast_lookup.c:108-121
         // Rolling window approach: word_target points to position where complete k-mer can be formed
         // Ambiguous bases reset the window: if (*seq & invalid_mask) word_target = seq + lut_word_length + 1;
-        // Rolling k-mer state
-        let mut current_kmer: u64 = 0;
-        let mut valid_bases: usize = 0;
-
-        for pos in 0..seq.len() {
-            let base = seq[pos];
-            let code = ENCODE_LUT[base as usize];
-
-            // NCBI reference: blast_lookup.c:119-120
-            // if (*seq & invalid_mask) word_target = seq + lut_word_length + 1;
-            if code == 0xFF {
-                // Ambiguous base - reset the rolling window
-                valid_bases = 0;
-                current_kmer = 0;
-                ambiguous_skipped += 1;
-                continue;
-            }
-
-            // Shift in the new base
-            current_kmer = ((current_kmer << 2) | (code as u64)) & kmer_mask;
-            valid_bases += 1;
-
-            // NCBI reference: blast_lookup.c:110-115
-            // if (seq >= word_target) { BlastLookupAddWordHit(...); }
-            // Only process if we have a complete k-mer
-            if valid_bases < safe_word_size {
-                continue;
-            }
-
-            // Calculate the starting position of this k-mer
-            let kmer_start = pos + 1 - safe_word_size;
-            total_positions += 1;
-
-            // NCBI reference: blast_nalookup.c:402-406
-            // BlastLookupIndexQueryExactMatches processes only unmasked regions (locations)
-            // LOSAT processes entire sequence and filters masked regions (equivalent)
-            // Skip k-mers that overlap with DUST-masked regions
-            if !masks.is_empty() && is_kmer_masked(masks, kmer_start, safe_word_size) {
-                dust_skipped += 1;
-                continue;
-            }
-
-            // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_nalookup.c:1047-1059
+        for (range_start, range_end) in ranges {
+            // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_nalookup.c:1001-1034
             // ```c
-            // if (kDbFilter) {
-            //    if ((counts[ecode / 2] >> 4) >= max_word_count) continue;
-            //    ...
-            // }
+            // if (full_word_size > (loc->ssr->right - loc->ssr->left + 1))
+            //     continue;
             // ```
-            if let Some(counts_filter) = db_word_counts {
-                if db_word_count_exceeds(counts_filter, current_kmer, max_db_word_count) {
+            let range_len = range_end.saturating_sub(range_start);
+            if full_word_size > range_len {
+                continue;
+            }
+
+            let mut current_kmer: u64 = 0;
+            let mut valid_bases: usize = 0;
+
+            for pos in range_start..range_end {
+                let base = seq[pos];
+                let code = ENCODE_LUT[base as usize];
+
+                // NCBI reference: blast_lookup.c:119-120
+                // if (*seq & invalid_mask) word_target = seq + lut_word_length + 1;
+                if code == 0xFF {
+                    valid_bases = 0;
+                    current_kmer = 0;
+                    ambiguous_skipped += 1;
                     continue;
                 }
-            }
 
-            // NCBI reference: blast_lookup.c:BlastLookupAddWordHit (lines 33-77)
-            // Adds ALL hits without any frequency limit - no query-side filtering
-            // if (backbone[index] == NULL) { initialize new chain }
-            // else { use existing chain, realloc if full }
-            // chain[chain[1] + 2] = query_offset; chain[1]++;
-            let idx = current_kmer as usize;
-            if idx < table_size {
-                counts[idx] = counts[idx].saturating_add(1);
+                current_kmer = ((current_kmer << 2) | (code as u64)) & kmer_mask;
+                valid_bases += 1;
+                if valid_bases < safe_word_size {
+                    continue;
+                }
+
+                total_positions += 1;
+
+                // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_nalookup.c:1047-1059
+                // ```c
+                // if (kDbFilter) {
+                //    if ((counts[ecode / 2] >> 4) >= max_word_count) continue;
+                //    ...
+                // }
+                // ```
+                if let Some(counts_filter) = db_word_counts {
+                    if db_word_count_exceeds(counts_filter, current_kmer, max_db_word_count) {
+                        continue;
+                    }
+                }
+
+                // NCBI reference: blast_lookup.c:BlastLookupAddWordHit (lines 33-77)
+                // Adds ALL hits without any frequency limit - no query-side filtering
+                // if (backbone[index] == NULL) { initialize new chain }
+                // else { use existing chain, realloc if full }
+                // chain[chain[1] + 2] = query_offset; chain[1]++;
+                let idx = current_kmer as usize;
+                if idx < table_size {
+                    counts[idx] = counts[idx].saturating_add(1);
+                }
             }
         }
     }
@@ -849,49 +883,59 @@ pub fn build_pv_direct_lookup(
         }
 
         let masks = query_masks.get(q_idx).map(|v| v.as_slice()).unwrap_or(&[]);
+        let ranges = build_unmasked_ranges(seq.len(), masks);
         let query_offset = query_offsets[q_idx] as usize;
-        let mut current_kmer: u64 = 0;
-        let mut valid_bases: usize = 0;
 
-        for pos in 0..seq.len() {
-            let base = seq[pos];
-            let code = ENCODE_LUT[base as usize];
-            if code == 0xFF {
-                valid_bases = 0;
-                current_kmer = 0;
+        for (range_start, range_end) in ranges {
+            // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_nalookup.c:1001-1034
+            // ```c
+            // if (full_word_size > (loc->ssr->right - loc->ssr->left + 1))
+            //     continue;
+            // ```
+            let range_len = range_end.saturating_sub(range_start);
+            if full_word_size > range_len {
                 continue;
             }
 
-            current_kmer = ((current_kmer << 2) | (code as u64)) & kmer_mask;
-            valid_bases += 1;
-            if valid_bases < safe_word_size {
-                continue;
-            }
+            let mut current_kmer: u64 = 0;
+            let mut valid_bases: usize = 0;
 
-            let kmer_start = pos + 1 - safe_word_size;
-            if !masks.is_empty() && is_kmer_masked(masks, kmer_start, safe_word_size) {
-                continue;
-            }
-
-            if let Some(counts_filter) = db_word_counts {
-                if db_word_count_exceeds(counts_filter, current_kmer, max_db_word_count) {
+            for pos in range_start..range_end {
+                let base = seq[pos];
+                let code = ENCODE_LUT[base as usize];
+                if code == 0xFF {
+                    valid_bases = 0;
+                    current_kmer = 0;
                     continue;
                 }
-            }
 
-            let idx = current_kmer as usize;
-            if idx < table_size {
-                // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_nalookup.c:1027-1034
-                // ```c
-                // /* Also add 1 to all indices, because lookup table indices count
-                //    from 1. */
-                // mb_lt->next_pos[index] = mb_lt->hashtable[ecode];
-                // mb_lt->hashtable[ecode] = index;
-                // ```
-                let q_off_1 = (query_offset + kmer_start + 1) as u32;
-                let pos_idx = write_pos[idx] as usize;
-                hits[pos_idx] = q_off_1;
-                write_pos[idx] = write_pos[idx].saturating_add(1);
+                current_kmer = ((current_kmer << 2) | (code as u64)) & kmer_mask;
+                valid_bases += 1;
+                if valid_bases < safe_word_size {
+                    continue;
+                }
+
+                let kmer_start = pos + 1 - safe_word_size;
+                if let Some(counts_filter) = db_word_counts {
+                    if db_word_count_exceeds(counts_filter, current_kmer, max_db_word_count) {
+                        continue;
+                    }
+                }
+
+                let idx = current_kmer as usize;
+                if idx < table_size {
+                    // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_nalookup.c:1027-1034
+                    // ```c
+                    // /* Also add 1 to all indices, because lookup table indices count
+                    //    from 1. */
+                    // mb_lt->next_pos[index] = mb_lt->hashtable[ecode];
+                    // mb_lt->hashtable[ecode] = index;
+                    // ```
+                    let q_off_1 = (query_offset + kmer_start + 1) as u32;
+                    let pos_idx = write_pos[idx] as usize;
+                    hits[pos_idx] = q_off_1;
+                    write_pos[idx] = write_pos[idx].saturating_add(1);
+                }
             }
         }
     }
@@ -1071,6 +1115,7 @@ pub fn build_two_stage_lookup(
         queries,
         query_offsets,
         lut_word_length,
+        word_length,
         query_masks,
         db_word_counts,
         max_db_word_count,

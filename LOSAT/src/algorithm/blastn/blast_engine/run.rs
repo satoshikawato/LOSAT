@@ -2401,10 +2401,30 @@ struct SubjectScratch {
     cutoff_scores: Vec<i32>,
     x_dropoff_scores: Vec<i32>,
     reduced_cutoff_scores: Vec<i32>,
+    // NCBI reference: ncbi-blast/c++/include/algo/blast/core/blast_extend.h:77-81
+    // ```c
+    // typedef struct BLAST_DiagTable {
+    //    DiagStruct* hit_level_array;
+    //    Uint1* hit_len_array;
+    //    Int4 diag_array_length;
+    // } BLAST_DiagTable;
+    // ```
     hit_level_array: Vec<DiagStruct>,
-    hit_len_array: Vec<usize>,
+    hit_len_array: Vec<u8>,
+    // NCBI reference: ncbi-blast/c++/include/algo/blast/core/blast_extend.h:57-60
+    // ```c
+    // typedef struct DiagStruct {
+    //    signed int last_hit   : 31;
+    //    unsigned int flag      : 1;
+    // } DiagStruct;
+    // ```
     hit_level_hash: FxHashMap<u64, DiagStruct>,
-    hit_len_hash: FxHashMap<u64, usize>,
+    // NCBI reference: ncbi-blast/c++/include/algo/blast/core/blast_extend.h:78-80
+    // ```c
+    // DiagStruct* hit_level_array;
+    // Uint1* hit_len_array;
+    // ```
+    hit_len_hash: FxHashMap<u64, u8>,
 }
 
 // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_engine.c:488-491
@@ -3893,13 +3913,18 @@ pub fn run(args: BlastnArgs) -> Result<()> {
                                     (0, false)
                                 };
 
-                                // NCBI: s_off_pos = s_off + diag_table->offset;
+                                // NCBI reference: ncbi-blast/c++/src/algo/blast/core/na_ungapped.c:656-672
+                                // ```c
+                                // last_hit = hit_level_array[real_diag].last_hit;
+                                // s_off_pos = s_off + diag_table->offset;
+                                // if (s_off_pos < last_hit) return 0;
+                                // ```
                                 // In LOSAT, we use kmer_start directly (0-based), but need to add offset for comparison
                                 let s_off_pos = kmer_start + diag_offset as usize;
+                                let s_off_pos_i32 = s_off_pos as i32;
 
-                                // NCBI: if (s_off_pos < last_hit) return 0;
                                 // Hit within explored area should be rejected
-                                if s_off_pos < last_hit {
+                                if s_off_pos_i32 < last_hit {
                                     continue;
                                 }
 
@@ -4120,8 +4145,14 @@ pub fn run(args: BlastnArgs) -> Result<()> {
                                     !hits.iter().any(|&hit_q_off| hit_q_off == q_off_1)
                                 };
 
-                                // NCBI: if (two_hits && (hit_saved || s_end_pos > last_hit + window_size)) {
-                                if two_hits && (hit_saved || s_end_pos > last_hit + TWO_HIT_WINDOW) {
+                                // NCBI reference: ncbi-blast/c++/src/algo/blast/core/na_ungapped.c:674-676
+                                // ```c
+                                // if (two_hits && (hit_saved || s_end_pos > last_hit + window_size)) {
+                                //     word_type = s_TypeOfWord(...);
+                                // ```
+                                let s_end_pos_i32 = s_end_pos as i32;
+                                let window_end = last_hit + TWO_HIT_WINDOW as i32;
+                                if two_hits && (hit_saved || s_end_pos_i32 > window_end) {
                                     // NCBI reference: ncbi-blast/c++/src/algo/blast/core/na_ungapped.c:674-680
                                     // ```c
                                     // word_type = s_TypeOfWord(query, subject, &q_off, &s_off,
@@ -4406,22 +4437,35 @@ pub fn run(args: BlastnArgs) -> Result<()> {
                                     if in_window && debug_mode {
                                         eprintln!("[DEBUG WINDOW] Seed at q={}, s={} SKIPPED: ungapped_score={} < {}", q_pos_usize, s_pos, ungapped_score, min_ungapped_score);
                                     }
-                                    // NCBI reference: na_ungapped.c:768-771
-                                    // Update hit_level_array and hit_len_array even if extension is skipped
+                                    // NCBI reference: ncbi-blast/c++/src/algo/blast/core/na_ungapped.c:768-771
+                                    // ```c
                                     // hit_level_array[real_diag].last_hit = s_end_pos;
                                     // hit_level_array[real_diag].flag = hit_ready;
-                                    // diag_table->hit_len_array[real_diag] = (hit_ready) ? 0 : s_end_pos - s_off_pos;
+                                    // diag_table->hit_len_array[real_diag] =
+                                    //     (hit_ready) ? 0 : s_end_pos - s_off_pos;
+                                    // ```
                                     if use_array_indexing && diag_idx < diag_array_size {
-                                        hit_level_array[diag_idx].last_hit = s_end_pos;
+                                        hit_level_array[diag_idx].last_hit = s_end_pos as i32;
                                         hit_level_array[diag_idx].flag = if hit_ready { 1 } else { 0 };
-                                        hit_len_array[diag_idx] = if hit_ready { 0 } else { s_end_pos - s_off_pos };
+                                        hit_len_array[diag_idx] = if hit_ready {
+                                            0
+                                        } else {
+                                            (s_end_pos - s_off_pos) as u8
+                                        };
                                     } else if !use_array_indexing {
                                         let diag_key = pack_diag_key(q_idx, diag);
                                         hit_level_hash.insert(diag_key, DiagStruct {
-                                            last_hit: s_end_pos,
+                                            last_hit: s_end_pos as i32,
                                             flag: if hit_ready { 1 } else { 0 },
                                         });
-                                        hit_len_hash.insert(diag_key, if hit_ready { 0 } else { s_end_pos - s_off_pos });
+                                        hit_len_hash.insert(
+                                            diag_key,
+                                            if hit_ready {
+                                                0
+                                            } else {
+                                                (s_end_pos - s_off_pos) as u8
+                                            },
+                                        );
                                     }
                                     continue;
                                 }
@@ -4455,17 +4499,23 @@ pub fn run(args: BlastnArgs) -> Result<()> {
                                     score: ungapped_score,
                                 });
 
-                                // NCBI reference: na_ungapped.c:768-771
+                                // NCBI reference: ncbi-blast/c++/src/algo/blast/core/na_ungapped.c:768-771
+                                // ```c
+                                // hit_level_array[real_diag].last_hit = s_end_pos;
+                                // hit_level_array[real_diag].flag = hit_ready;
+                                // diag_table->hit_len_array[real_diag] =
+                                //     (hit_ready) ? 0 : s_end_pos - s_off_pos;
+                                // ```
                                 // Update hit_level_array after collecting ungapped hit
                                 hit_ready = true;
                                 if use_array_indexing && diag_idx < diag_array_size {
-                                    hit_level_array[diag_idx].last_hit = ungapped_s_end_pos;
+                                    hit_level_array[diag_idx].last_hit = ungapped_s_end_pos as i32;
                                     hit_level_array[diag_idx].flag = 1;
                                     hit_len_array[diag_idx] = 0;
                                 } else if !use_array_indexing {
                                     let diag_key = pack_diag_key(q_idx, diag);
                                     hit_level_hash.insert(diag_key, DiagStruct {
-                                        last_hit: ungapped_s_end_pos,
+                                        last_hit: ungapped_s_end_pos as i32,
                                         flag: 1,
                                     });
                                     hit_len_hash.insert(diag_key, 0);
@@ -4629,13 +4679,18 @@ pub fn run(args: BlastnArgs) -> Result<()> {
                                 (0, false)
                             };
 
-                            // NCBI: s_off_pos = s_off + diag_table->offset;
+                            // NCBI reference: ncbi-blast/c++/src/algo/blast/core/na_ungapped.c:656-672
+                            // ```c
+                            // last_hit = hit_level_array[real_diag].last_hit;
+                            // s_off_pos = s_off + diag_table->offset;
+                            // if (s_off_pos < last_hit) return 0;
+                            // ```
                             // In LOSAT, we use kmer_start directly (0-based), but need to add offset for comparison
                             let s_off_pos = kmer_start + diag_offset as usize;
+                            let s_off_pos_i32 = s_off_pos as i32;
 
-                            // NCBI: if (s_off_pos < last_hit) return 0;
                             // Hit within explored area should be rejected
-                            if s_off_pos < last_hit {
+                            if s_off_pos_i32 < last_hit {
                                 continue;
                             }
 
@@ -4708,8 +4763,14 @@ pub fn run(args: BlastnArgs) -> Result<()> {
                                 !hits.iter().any(|&hit_q_off| hit_q_off == q_off_1)
                             };
 
-                            // NCBI: if (two_hits && (hit_saved || s_end_pos > last_hit + window_size)) {
-                            if two_hits && (hit_saved || s_end_pos > last_hit + TWO_HIT_WINDOW) {
+                            // NCBI reference: ncbi-blast/c++/src/algo/blast/core/na_ungapped.c:674-676
+                            // ```c
+                            // if (two_hits && (hit_saved || s_end_pos > last_hit + window_size)) {
+                            //     word_type = s_TypeOfWord(...);
+                            // ```
+                            let s_end_pos_i32 = s_end_pos as i32;
+                            let window_end = last_hit + TWO_HIT_WINDOW as i32;
+                            if two_hits && (hit_saved || s_end_pos_i32 > window_end) {
                                 // NCBI reference: na_ungapped.c:677-680
                                 // word_type = s_TypeOfWord(query, subject, &q_off, &s_off,
                                 //                          query_mask, query_info, s_range,
@@ -4973,19 +5034,35 @@ pub fn run(args: BlastnArgs) -> Result<()> {
                             // off_found is set by off-diagonal search
                             // NCBI: if (off_found || ungapped_data->score >= cutoffs->cutoff_score)
                             if !(off_found || ungapped_score >= cutoff_score) {
-                                // NCBI reference: na_ungapped.c:768-771
-                                // Update hit_level_array and hit_len_array even if extension is skipped
+                                // NCBI reference: ncbi-blast/c++/src/algo/blast/core/na_ungapped.c:768-771
+                                // ```c
+                                // hit_level_array[real_diag].last_hit = s_end_pos;
+                                // hit_level_array[real_diag].flag = hit_ready;
+                                // diag_table->hit_len_array[real_diag] =
+                                //     (hit_ready) ? 0 : s_end_pos - s_off_pos;
+                                // ```
                                 if use_array_indexing && diag_idx < diag_array_size {
-                                    hit_level_array[diag_idx].last_hit = s_end_pos;
+                                    hit_level_array[diag_idx].last_hit = s_end_pos as i32;
                                     hit_level_array[diag_idx].flag = if hit_ready { 1 } else { 0 };
-                                    hit_len_array[diag_idx] = if hit_ready { 0 } else { s_end_pos - s_off_pos };
+                                    hit_len_array[diag_idx] = if hit_ready {
+                                        0
+                                    } else {
+                                        (s_end_pos - s_off_pos) as u8
+                                    };
                                 } else if !use_array_indexing {
                                     let diag_key = pack_diag_key(q_idx, diag);
                                     hit_level_hash.insert(diag_key, DiagStruct {
-                                        last_hit: s_end_pos,
+                                        last_hit: s_end_pos as i32,
                                         flag: if hit_ready { 1 } else { 0 },
                                     });
-                                    hit_len_hash.insert(diag_key, if hit_ready { 0 } else { s_end_pos - s_off_pos });
+                                    hit_len_hash.insert(
+                                        diag_key,
+                                        if hit_ready {
+                                            0
+                                        } else {
+                                            (s_end_pos - s_off_pos) as u8
+                                        },
+                                    );
                                 }
                                 if debug_enabled {
                                     dbg_ungapped_low += 1;
@@ -5024,17 +5101,23 @@ pub fn run(args: BlastnArgs) -> Result<()> {
                                 score: ungapped_score,
                             });
 
-                            // NCBI reference: na_ungapped.c:768-771
+                            // NCBI reference: ncbi-blast/c++/src/algo/blast/core/na_ungapped.c:768-771
+                            // ```c
+                            // hit_level_array[real_diag].last_hit = s_end_pos;
+                            // hit_level_array[real_diag].flag = hit_ready;
+                            // diag_table->hit_len_array[real_diag] =
+                            //     (hit_ready) ? 0 : s_end_pos - s_off_pos;
+                            // ```
                             // Update hit_level_array after collecting ungapped hit
                             hit_ready = true;
                             if use_array_indexing && diag_idx < diag_array_size {
-                                hit_level_array[diag_idx].last_hit = ungapped_s_end_pos;
+                                hit_level_array[diag_idx].last_hit = ungapped_s_end_pos as i32;
                                 hit_level_array[diag_idx].flag = 1;
                                 hit_len_array[diag_idx] = 0;
                             } else if !use_array_indexing {
                                 let diag_key = pack_diag_key(q_idx, diag);
                                 hit_level_hash.insert(diag_key, DiagStruct {
-                                    last_hit: ungapped_s_end_pos,
+                                    last_hit: ungapped_s_end_pos as i32,
                                     flag: 1,
                                 });
                                 hit_len_hash.insert(diag_key, 0);

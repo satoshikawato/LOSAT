@@ -127,7 +127,16 @@ impl IntervalNode {
 
 
 /// Interval tree for HSP containment checking
-/// NCBI reference: blast_itree.c:60-70 BlastIntervalTree
+/// NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_itree.h:73-80
+/// ```c
+/// typedef struct BlastIntervalTree {
+///     SIntervalNode *nodes;
+///     Int4 num_alloc;
+///     Int4 num_used;
+///     Int4 s_min;
+///     Int4 s_max;
+/// } BlastIntervalTree;
+/// ```
 pub struct BlastIntervalTree {
     /// Array of nodes (index 0 is root for query-indexed tree)
     nodes: Vec<IntervalNode>,
@@ -135,8 +144,6 @@ pub struct BlastIntervalTree {
     s_min: i32,
     /// Maximum subject offset
     s_max: i32,
-    /// Flat list of all HSPs for linear containment check (temporary for debugging)
-    hsps: Vec<TreeHsp>,
 }
 
 impl BlastIntervalTree {
@@ -153,7 +160,6 @@ impl BlastIntervalTree {
             nodes: Vec::with_capacity(64),
             s_min,
             s_max,
-            hsps: Vec::with_capacity(1024),
         };
 
         // Create root node for query range
@@ -173,7 +179,6 @@ impl BlastIntervalTree {
             self.nodes.clear();
             self.nodes.push(IntervalNode::new_internal(leftend, rightend));
         }
-        self.hsps.clear();
     }
 
     /// Allocate a new internal node
@@ -528,9 +533,6 @@ impl BlastIntervalTree {
     /// For eQueryAndSubject mode, it first checks for common endpoints and
     /// removes worse HSPs before adding.
     pub fn add_hsp(&mut self, hsp: TreeHsp, query_context_offset: i32, index_method: IndexMethod) {
-        // Also add to flat list for linear containment check (debug/verification)
-        self.hsps.push(hsp.clone());
-
         // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_itree.c:537-550
         // query_start = s_GetQueryStrandOffset(query_info, hsp->context);
         // if ( index_method == eQueryOnlyStrandIndifferent &&
@@ -879,31 +881,6 @@ impl BlastIntervalTree {
 
             node_idx = next_idx as usize;
         }
-    }
-
-    /// Debug: Check containment with linear search (for verification)
-    #[allow(dead_code)]
-    pub fn contains_hsp_linear(&self, hsp: &TreeHsp, query_context_offset: i32, min_diag_separation: i32) -> bool {
-        // Use linear search through all HSPs for correctness verification
-        for tree_hsp in &self.hsps {
-            if Self::is_hsp_contained(hsp, query_context_offset, tree_hsp, query_context_offset, min_diag_separation) {
-                return true;
-            }
-        }
-        false
-    }
-
-    /// Debug: Check containment with extra logging
-    #[allow(dead_code)]
-    pub fn contains_hsp_debug(&self, hsp: &TreeHsp, query_context_offset: i32, min_diag_separation: i32) -> (bool, usize) {
-        let mut checked = 0usize;
-        for tree_hsp in &self.hsps {
-            checked += 1;
-            if Self::is_hsp_contained(hsp, query_context_offset, tree_hsp, query_context_offset, min_diag_separation) {
-                return (true, checked);
-            }
-        }
-        (false, checked)
     }
 
     /// Internal recursive helper for containment check (legacy - kept for reference)

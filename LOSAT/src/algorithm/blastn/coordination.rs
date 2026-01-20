@@ -10,7 +10,6 @@ use anyhow::Result;
 use bio::io::fasta;
 use crate::core::blast_encoding::{
     encode_iupac_to_blastna,
-    encode_iupac_to_ncbi2na,
     encode_iupac_to_ncbi2na_packed,
 };
 use crate::utils::dust::{DustMasker, MaskedInterval};
@@ -64,9 +63,15 @@ pub struct LookupTables {
 //                                  compressed_seq.data.release());
 // ```
 pub struct SubjectEncoding {
+    // NCBI reference: ncbi-blast/c++/src/algo/blast/api/blast_setup_cxx.cpp:836-847
+    // ```c
+    // BlastSeqBlkSetSequence(subj, sequence.data.release(), ...);
+    // ...
+    // BlastSeqBlkSetCompressedSequence(subj,
+    //                                  compressed_seq.data.release());
+    // ```
     pub blastna: Vec<u8>,
     pub ncbi2na_packed: Vec<u8>,
-    pub ncbi2na: Option<Vec<u8>>,
 }
 
 /// Sequence data and metadata
@@ -640,6 +645,7 @@ pub fn build_lookup_tables(
             queries,
             query_offsets,
             config.effective_word_size,
+            config.effective_word_size,
             query_masks,
             db_word_counts_ref,
             args.max_db_word_count,
@@ -688,7 +694,6 @@ pub fn prepare_sequence_data(
     queries: Vec<fasta::Record>,
     query_ids: Vec<String>,
     subjects: Vec<fasta::Record>,
-    use_dp: bool,
 ) -> SequenceData {
     let mut query_masks = apply_dust_masking(args, &queries);
     // NCBI reference: ncbi-blast/c++/src/algo/blast/blastinput/blast_args.cpp:2547-2556
@@ -730,33 +735,15 @@ pub fn prepare_sequence_data(
     // BlastSeqBlkSetCompressedSequence(subj,
     //                                  compressed_seq.data.release());
     // ```
-    // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_gapalign.c:2762-2793
-    // ```c
-    // BLAST_GreedyGappedAlignment(..., Boolean compressed_subject, ...);
-    // if (!compressed_subject) {
-    //     s = subject + s_off;
-    //     rem = 4; /* Special value to indicate that sequence is already
-    //                uncompressed */
-    // } else {
-    //     s = subject + s_off/4;
-    //     rem = s_off % 4;
-    // }
-    // ```
     let subject_encodings: Vec<SubjectEncoding> = subjects
         .iter()
         .map(|record| {
             let seq = record.seq();
             let blastna = encode_iupac_to_blastna(seq);
             let ncbi2na_packed = encode_iupac_to_ncbi2na_packed(seq);
-            let ncbi2na = if use_dp {
-                None
-            } else {
-                Some(encode_iupac_to_ncbi2na(seq))
-            };
             SubjectEncoding {
                 blastna,
                 ncbi2na_packed,
-                ncbi2na,
             }
         })
         .collect();

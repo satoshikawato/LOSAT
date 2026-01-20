@@ -43,7 +43,7 @@ use super::super::extension::{
 use crate::utils::dust::MaskedInterval;
 use super::super::constants::TWO_HIT_WINDOW;
 use super::super::coordination::{configure_task, finalize_task_config, read_sequences, prepare_sequence_data, build_lookup_tables};
-use super::super::lookup::{build_unmasked_ranges, pack_diag_key, reverse_complement};
+use super::super::lookup::{build_unmasked_ranges, reverse_complement};
 use super::super::ncbi_cutoffs::{compute_blastn_cutoff_score, GAP_TRIGGER_BIT_SCORE_NUCL};
 use super::super::blast_extend::DiagStruct;
 use super::super::interval_tree::{BlastIntervalTree, TreeHsp, IndexMethod};
@@ -91,6 +91,16 @@ const DBSEQ_CHUNK_OVERLAP: usize = 100;
 // #define OVERLAP_DIAG_CLOSE 10
 // ```
 const OVERLAP_DIAG_CLOSE: i32 = 10;
+
+// NCBI reference: ncbi-blast/c++/include/algo/blast/core/blast_extend.h:50-54
+// ```c
+// /** Number of hash buckets in BLAST_DiagHash */
+// #define DIAGHASH_NUM_BUCKETS 512
+// /** Default hash chain length */
+// #define DIAGHASH_CHAIN_LENGTH 256
+// ```
+const DIAGHASH_NUM_BUCKETS: usize = 512;
+const DIAGHASH_CHAIN_LENGTH: usize = 256;
 
 // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_engine.c:123-143
 // ```c
@@ -360,12 +370,11 @@ fn advance_diag_table_offset(
     use_array_indexing: bool,
     hit_level_array: &mut Vec<DiagStruct>,
     hit_len_array: &mut Vec<u8>,
-    hit_level_hash: &mut FxHashMap<u64, DiagStruct>,
-    hit_len_hash: &mut FxHashMap<u64, u8>,
+    diag_hash: &mut DiagHashTable,
 ) {
-    if *diag_table_offset >= i32::MAX / 4 {
-        *diag_table_offset = diag_window;
-        if use_array_indexing {
+    if use_array_indexing {
+        if *diag_table_offset >= i32::MAX / 4 {
+            *diag_table_offset = diag_window;
             let init_diag = DiagStruct {
                 last_hit: -diag_window,
                 flag: 0,
@@ -373,11 +382,219 @@ fn advance_diag_table_offset(
             hit_level_array.fill(init_diag);
             hit_len_array.fill(0);
         } else {
-            hit_level_hash.clear();
-            hit_len_hash.clear();
+            *diag_table_offset = diag_table_offset.saturating_add(subject_len as i32 + diag_window);
         }
+    } else if diag_hash.offset >= i32::MAX / 4 {
+        // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_extend.c:174-179
+        // ```c
+        // ewp->hash_table->occupancy = 1;
+        // ewp->hash_table->offset = ewp->hash_table->window;
+        // memset(ewp->hash_table->backbone, 0,
+        //        ewp->hash_table->num_buckets * sizeof(Int4));
+        // ```
+        diag_hash.occupancy = 1;
+        diag_hash.offset = diag_hash.window;
+        diag_hash.backbone.fill(0);
     } else {
-        *diag_table_offset = diag_table_offset.saturating_add(subject_len as i32 + diag_window);
+        // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_extend.c:180-181
+        // ```c
+        // ewp->hash_table->offset += subject_length + ewp->hash_table->window;
+        // ```
+        diag_hash.offset = diag_hash
+            .offset
+            .saturating_add(subject_len as i32 + diag_hash.window);
+    }
+}
+
+// NCBI reference: ncbi-blast/c++/include/algo/blast/core/blast_extend.h:62-71
+// ```c
+// typedef struct DiagHashCell {
+//    Int4 diag;            /**< This hit's diagonal */
+//    signed int level      : 31; /**< This hit's offset in the subject sequence */
+//    unsigned int hit_saved : 1;  /**< Whether or not this hit has been saved */
+//    Int4  hit_len;        /**< The length of last hit */
+//    Uint4 next;           /**< Offset of next element in the chain */
+// }  DiagHashCell;
+// ```
+#[derive(Clone, Copy)]
+struct DiagHashCell {
+    diag: i32,
+    level: i32,
+    hit_saved: bool,
+    hit_len: i32,
+    next: u32,
+}
+
+impl Default for DiagHashCell {
+    fn default() -> Self {
+        Self {
+            diag: 0,
+            level: 0,
+            hit_saved: false,
+            hit_len: 0,
+            next: 0,
+        }
+    }
+}
+
+// NCBI reference: ncbi-blast/c++/include/algo/blast/core/blast_extend.h:97-105
+// ```c
+// typedef struct BLAST_DiagHash {
+//    Uint4 num_buckets;   /**< Number of buckets to be used for storing hit offsets */
+//    Uint4 occupancy;     /**< Number of occupied elements */
+//    Uint4 capacity;      /**< Total number of elements */
+//    Uint4 *backbone;     /**< Array of offsets to heads of chains. */
+//    DiagHashCell *chain; /**< Array of data cells. */
+//    Int4 offset;         /**< "offset" added to query and subject position so that "last_hit" doesn't have to be zeroed out every time. */
+//    Int4 window;         /**< The "window" size, within which two (or more) hits must be found in order to be extended. */
+// } BLAST_DiagHash;
+// ```
+struct DiagHashTable {
+    num_buckets: usize,
+    occupancy: u32,
+    capacity: u32,
+    backbone: Vec<u32>,
+    chain: Vec<DiagHashCell>,
+    offset: i32,
+    window: i32,
+}
+
+impl DiagHashTable {
+    // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_extend.c:122-134
+    // ```c
+    // ewp->hash_table->num_buckets = DIAGHASH_NUM_BUCKETS;
+    // ewp->hash_table->backbone =
+    //     calloc(ewp->hash_table->num_buckets, sizeof(Uint4));
+    // ewp->hash_table->capacity = DIAGHASH_CHAIN_LENGTH;
+    // ewp->hash_table->chain =
+    //     calloc(ewp->hash_table->capacity, sizeof(DiagHashCell));
+    // ewp->hash_table->occupancy = 1;
+    // ewp->hash_table->window = word_params->options->window_size;
+    // ewp->hash_table->offset = word_params->options->window_size;
+    // ```
+    fn new(window: i32) -> Self {
+        let capacity = DIAGHASH_CHAIN_LENGTH as u32;
+        Self {
+            num_buckets: DIAGHASH_NUM_BUCKETS,
+            occupancy: 1,
+            capacity,
+            backbone: vec![0; DIAGHASH_NUM_BUCKETS],
+            chain: vec![DiagHashCell::default(); capacity as usize],
+            offset: window,
+            window,
+        }
+    }
+
+    // NCBI reference: ncbi-blast/c++/src/algo/blast/core/na_ungapped.c:361-381
+    // ```c
+    // Uint4 bucket = ((Uint4) diag * 0x9E370001) % DIAGHASH_NUM_BUCKETS;
+    // Uint4 index = table->backbone[bucket];
+    // while (index) {
+    //     if (table->chain[index].diag == diag) {
+    //         *level = table->chain[index].level;
+    //         *hit_len = table->chain[index].hit_len;
+    //         *hit_saved = table->chain[index].hit_saved;
+    //         return 1;
+    //     }
+    //     index = table->chain[index].next;
+    // }
+    // return 0;
+    // ```
+    fn retrieve(&self, diag: i32) -> Option<(i32, i32, bool)> {
+        let bucket = ((diag as u32).wrapping_mul(0x9E370001) % DIAGHASH_NUM_BUCKETS as u32) as usize;
+        let mut index = self.backbone[bucket];
+        while index != 0 {
+            let cell = &self.chain[index as usize];
+            if cell.diag == diag {
+                return Some((cell.level, cell.hit_len, cell.hit_saved));
+            }
+            index = cell.next;
+        }
+        None
+    }
+
+    // NCBI reference: ncbi-blast/c++/src/algo/blast/core/na_ungapped.c:396-449
+    // ```c
+    // Uint4 bucket = ((Uint4) diag * 0x9E370001) % DIAGHASH_NUM_BUCKETS;
+    // Uint4 index = table->backbone[bucket];
+    // while (index) {
+    //     if (table->chain[index].diag == diag) {
+    //         table->chain[index].level = level;
+    //         table->chain[index].hit_len = len;
+    //         table->chain[index].hit_saved = hit_saved;
+    //         return 1;
+    //     } else {
+    //         if (s_off - table->chain[index].level > window_size) {
+    //             table->chain[index].diag = diag;
+    //             table->chain[index].level = level;
+    //             table->chain[index].hit_len = len;
+    //             table->chain[index].hit_saved = hit_saved;
+    //             return 1;
+    //         }
+    //     }
+    //     index = table->chain[index].next;
+    // }
+    // if (table->occupancy == table->capacity) {
+    //     table->capacity *= 2;
+    //     table->chain =
+    //         realloc(table->chain, table->capacity * sizeof(DiagHashCell));
+    //     if (table->chain == NULL)
+    //         return 0;
+    // }
+    // cell = table->chain + table->occupancy;
+    // cell->diag = diag;
+    // cell->level = level;
+    // cell->hit_len = len;
+    // cell->hit_saved = hit_saved;
+    // cell->next = table->backbone[bucket];
+    // table->backbone[bucket] = table->occupancy;
+    // table->occupancy++;
+    // return 1;
+    // ```
+    fn insert(
+        &mut self,
+        diag: i32,
+        level: i32,
+        hit_len: i32,
+        hit_saved: bool,
+        s_off: i32,
+        window_size: i32,
+    ) -> bool {
+        let bucket = ((diag as u32).wrapping_mul(0x9E370001) % DIAGHASH_NUM_BUCKETS as u32) as usize;
+        let mut index = self.backbone[bucket];
+        while index != 0 {
+            let cell = &mut self.chain[index as usize];
+            if cell.diag == diag {
+                cell.level = level;
+                cell.hit_len = hit_len;
+                cell.hit_saved = hit_saved;
+                return true;
+            }
+            if s_off - cell.level > window_size {
+                cell.diag = diag;
+                cell.level = level;
+                cell.hit_len = hit_len;
+                cell.hit_saved = hit_saved;
+                return true;
+            }
+            index = cell.next;
+        }
+
+        if self.occupancy == self.capacity {
+            self.capacity = self.capacity.saturating_mul(2);
+            self.chain.resize(self.capacity as usize, DiagHashCell::default());
+        }
+
+        let cell_index = self.occupancy;
+        let cell = &mut self.chain[cell_index as usize];
+        cell.diag = diag;
+        cell.level = level;
+        cell.hit_len = hit_len;
+        cell.hit_saved = hit_saved;
+        cell.next = self.backbone[bucket];
+        self.backbone[bucket] = cell_index;
+        self.occupancy = self.occupancy.saturating_add(1);
+        true
     }
 }
 
@@ -2457,20 +2674,19 @@ struct SubjectScratch {
     // ```
     hit_level_array: Vec<DiagStruct>,
     hit_len_array: Vec<u8>,
-    // NCBI reference: ncbi-blast/c++/include/algo/blast/core/blast_extend.h:57-60
+    // NCBI reference: ncbi-blast/c++/include/algo/blast/core/blast_extend.h:97-105
     // ```c
-    // typedef struct DiagStruct {
-    //    signed int last_hit   : 31;
-    //    unsigned int flag      : 1;
-    // } DiagStruct;
+    // typedef struct BLAST_DiagHash {
+    //    Uint4 num_buckets;
+    //    Uint4 occupancy;
+    //    Uint4 capacity;
+    //    Uint4 *backbone;
+    //    DiagHashCell *chain;
+    //    Int4 offset;
+    //    Int4 window;
+    // } BLAST_DiagHash;
     // ```
-    hit_level_hash: FxHashMap<u64, DiagStruct>,
-    // NCBI reference: ncbi-blast/c++/include/algo/blast/core/blast_extend.h:78-80
-    // ```c
-    // DiagStruct* hit_level_array;
-    // Uint1* hit_len_array;
-    // ```
-    hit_len_hash: FxHashMap<u64, u8>,
+    diag_hash: DiagHashTable,
     // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_extend.c:159-176
     // ```c
     // if (ewp->diag_table->offset >= INT4_MAX / 4) {
@@ -2518,8 +2734,7 @@ impl SubjectScratch {
             reduced_cutoff_scores: Vec::with_capacity(query_count),
             hit_level_array: Vec::new(),
             hit_len_array: Vec::new(),
-            hit_level_hash: FxHashMap::default(),
-            hit_len_hash: FxHashMap::default(),
+            diag_hash: DiagHashTable::new(TWO_HIT_WINDOW as i32),
             diag_table_offset: TWO_HIT_WINDOW as i32,
         }
     }
@@ -3781,7 +3996,11 @@ pub fn run(args: BlastnArgs) -> Result<()> {
                     // ```c
                     // s_off_pos = s_off + diag_table->offset;
                     // ```
-                    let diag_offset = subject_scratch.diag_table_offset as isize;
+                    let diag_offset = if use_array_indexing {
+                        subject_scratch.diag_table_offset as isize
+                    } else {
+                        subject_scratch.diag_hash.offset as isize
+                    };
                     let diag_array_size = if use_array_indexing {
                         diag_array_length_single
                     } else {
@@ -3811,8 +4030,7 @@ pub fn run(args: BlastnArgs) -> Result<()> {
                     // For single query: use Vec for O(1) access, otherwise use HashMap
                     let hit_level_array = &mut subject_scratch.hit_level_array;
                     let hit_len_array = &mut subject_scratch.hit_len_array;
-                    let hit_level_hash = &mut subject_scratch.hit_level_hash;
-                    let hit_len_hash = &mut subject_scratch.hit_len_hash;
+                    let diag_hash = &mut subject_scratch.diag_hash;
                     let init_diag = DiagStruct {
                         last_hit: -diag_window,
                         flag: 0,
@@ -3826,8 +4044,6 @@ pub fn run(args: BlastnArgs) -> Result<()> {
                         } else {
                             hit_len_array.resize(diag_array_size, 0);
                         }
-                        hit_level_hash.clear();
-                        hit_len_hash.clear();
                     } else {
                         // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_extend.c:159-182
                         // ```c
@@ -3862,8 +4078,7 @@ pub fn run(args: BlastnArgs) -> Result<()> {
                             use_array_indexing,
                             hit_level_array,
                             hit_len_array,
-                            hit_level_hash,
-                            hit_len_hash,
+                            diag_hash,
                         );
                         return Vec::new();
                     }
@@ -4027,13 +4242,19 @@ pub fn run(args: BlastnArgs) -> Result<()> {
                                 let (diag_array_length, diag_mask) = if use_array_indexing {
                                     (diag_array_length_single as isize, diag_mask_single)
                                 } else {
-                                    (
-                                        diag_array_lengths[query_idx] as isize,
-                                        diag_masks[query_idx] as isize,
-                                    )
+                                    (0isize, 0isize)
                                 };
-                                let diag = (kmer_start as isize + diag_array_length - q_pos_usize as isize)
-                                    & diag_mask;
+                                let diag = if use_array_indexing {
+                                    (kmer_start as isize + diag_array_length - q_pos_usize as isize)
+                                        & diag_mask
+                                } else {
+                                    // NCBI reference: ncbi-blast/c++/src/algo/blast/core/na_ungapped.c:828-829
+                                    // ```c
+                                    // diag = s_off - q_off;
+                                    // s_end = s_off + word_length;
+                                    // ```
+                                    kmer_start as isize - q_pos_usize as isize
+                                };
 
                                 // Check if this seed is in the debug window
                                 let s_pos = kmer_start + chunk.offset;
@@ -4072,9 +4293,15 @@ pub fn run(args: BlastnArgs) -> Result<()> {
                                     let diag_entry = &hit_level_array[diag_idx];
                                     (diag_entry.last_hit, diag_entry.flag != 0)
                                 } else if !use_array_indexing {
-                                    let diag_key = pack_diag_key(q_idx, diag);
-                                    let diag_entry = hit_level_hash.get(&diag_key).copied().unwrap_or(init_diag);
-                                    (diag_entry.last_hit, diag_entry.flag != 0)
+                                    // NCBI reference: ncbi-blast/c++/src/algo/blast/core/na_ungapped.c:833-836
+                                    // ```c
+                                    // rc = s_BlastDiagHashRetrieve(hash_table, diag, &last_hit, &s_l, &hit_saved);
+                                    // if(!rc)  last_hit = 0;
+                                    // ```
+                                    let (level, _hit_len, hit_saved) = diag_hash
+                                        .retrieve(diag as i32)
+                                        .unwrap_or((0, 0, false));
+                                    (level, hit_saved)
                                 } else {
                                     (0, false)
                                 };
@@ -4295,6 +4522,26 @@ pub fn run(args: BlastnArgs) -> Result<()> {
                                 let mut off_found = false;
                                 let mut hit_ready = true;
                                 let query_mask = ctx.masks.as_slice();
+                                let diag_hash_window = if !use_array_indexing {
+                                    // NCBI reference: ncbi-blast/c++/src/algo/blast/core/na_ungapped.c:825-826, 939-941
+                                    // ```c
+                                    // Delta = MIN(word_params->options->scan_range, window_size - word_length);
+                                    // if (Delta < 0) Delta = 0;
+                                    // s_BlastDiagHashInsert(hash_table, diag, s_end_pos,
+                                    //                       (hit_ready) ? 0 : s_end_pos - s_off_pos,
+                                    //                       hit_ready, s_off_pos, window_size + Delta + 1);
+                                    // ```
+                                    let window_size_i32 = TWO_HIT_WINDOW as i32;
+                                    let delta_calc = window_size_i32 - word_length as i32;
+                                    let delta_limit = if delta_calc < 0 {
+                                        0
+                                    } else {
+                                        (scan_range as i32).min(delta_calc)
+                                    };
+                                    window_size_i32 + delta_limit + 1
+                                } else {
+                                    0
+                                };
 
                                 // NCBI reference: ncbi-blast/c++/src/algo/blast/core/na_ungapped.c:41-69 (s_MBLookup)
                                 // ```c
@@ -4415,84 +4662,103 @@ pub fn run(args: BlastnArgs) -> Result<()> {
                                         let s_a = s_off_pos as isize + word_length as isize - window_size as isize;
                                         let s_b = s_end_pos as isize - 2 * word_length as isize;
 
-                                        // NCBI reference: ncbi-blast/c++/src/algo/blast/core/na_ungapped.c:688-694
-                                        // ```c
-                                        // orig_diag = real_diag + diag_table->diag_array_length;
-                                        // off_diag  = (orig_diag + delta) & diag_table->diag_mask;
-                                        // ```
-                                        let orig_diag = diag + diag_array_length;
-
-                                        // NCBI reference: na_ungapped.c:693
-                                        // for (delta = 1; delta <= Delta ; ++delta) {
-                                        for delta in 1..=delta_max {
-                                            // NCBI reference: na_ungapped.c:694-702
-                                            // Int4 off_diag  = (orig_diag + delta) & diag_table->diag_mask;
-                                            // Int4 off_s_end = hit_level_array[off_diag].last_hit;
-                                            // Int4 off_s_l   = diag_table->hit_len_array[off_diag];
-                                            // if ( off_s_l
-                                            //  && off_s_end - delta >= s_a
-                                            //  && off_s_end - off_s_l <= s_b) {
-                                            //     off_found = TRUE;
-                                            //     break;
-                                            // }
-                                            let off_diag = (orig_diag + delta) & diag_mask;
-                                            let (off_s_end, off_s_l) = if use_array_indexing {
-                                                let off_diag_idx = off_diag as usize;
-                                                if off_diag_idx < diag_array_size {
-                                                    let off_entry = &hit_level_array[off_diag_idx];
-                                                    (off_entry.last_hit, hit_len_array[off_diag_idx])
-                                                } else {
-                                                    (0, 0)
+                                        if use_array_indexing {
+                                            // NCBI reference: ncbi-blast/c++/src/algo/blast/core/na_ungapped.c:688-694
+                                            // ```c
+                                            // orig_diag = real_diag + diag_table->diag_array_length;
+                                            // off_diag  = (orig_diag + delta) & diag_table->diag_mask;
+                                            // ```
+                                            let orig_diag = diag + diag_array_length;
+                                            // NCBI reference: na_ungapped.c:693
+                                            // for (delta = 1; delta <= Delta ; ++delta) {
+                                            for delta in 1..=delta_max {
+                                                // NCBI reference: na_ungapped.c:694-702
+                                                // Int4 off_diag  = (orig_diag + delta) & diag_table->diag_mask;
+                                                // Int4 off_s_end = hit_level_array[off_diag].last_hit;
+                                                // Int4 off_s_l   = diag_table->hit_len_array[off_diag];
+                                                // if ( off_s_l
+                                                //  && off_s_end - delta >= s_a
+                                                //  && off_s_end - off_s_l <= s_b) {
+                                                //     off_found = TRUE;
+                                                //     break;
+                                                // }
+                                                let off_diag = (orig_diag + delta) & diag_mask;
+                                                let (off_s_end, off_s_l) = {
+                                                    let off_diag_idx = off_diag as usize;
+                                                    if off_diag_idx < diag_array_size {
+                                                        let off_entry = &hit_level_array[off_diag_idx];
+                                                        (off_entry.last_hit, hit_len_array[off_diag_idx])
+                                                    } else {
+                                                        (0, 0)
+                                                    }
+                                                };
+                                                // NCBI: off_s_end - delta >= s_a (signed comparison)
+                                                // Convert to signed for comparison to match NCBI behavior
+                                                if off_s_l > 0
+                                                    && (off_s_end as isize - delta) >= s_a
+                                                    && (off_s_end as isize - off_s_l as isize) <= s_b {
+                                                    off_found = true;
+                                                    break;
                                                 }
-                                            } else {
-                                                let off_diag_key = pack_diag_key(q_idx, off_diag);
-                                                let off_entry = hit_level_hash.get(&off_diag_key).copied().unwrap_or(init_diag);
-                                                let off_len = hit_len_hash.get(&off_diag_key).copied().unwrap_or(0);
-                                                (off_entry.last_hit, off_len)
-                                            };
 
-                                            // NCBI: off_s_end - delta >= s_a (signed comparison)
-                                            // Convert to signed for comparison to match NCBI behavior
-                                            if off_s_l > 0
-                                                && (off_s_end as isize - delta) >= s_a
-                                                && (off_s_end as isize - off_s_l as isize) <= s_b {
-                                                off_found = true;
-                                                break;
+                                                // NCBI reference: na_ungapped.c:703-711
+                                                // off_diag  = (orig_diag - delta) & diag_table->diag_mask;
+                                                // off_s_end = hit_level_array[off_diag].last_hit;
+                                                // off_s_l   = diag_table->hit_len_array[off_diag];
+                                                // if ( off_s_l
+                                                //  && off_s_end >= s_a
+                                                //  && off_s_end - off_s_l + delta <= s_b) {
+                                                //     off_found = TRUE;
+                                                //     break;
+                                                // }
+                                                let off_diag = (orig_diag - delta) & diag_mask;
+                                                let (off_s_end, off_s_l) = {
+                                                    let off_diag_idx = off_diag as usize;
+                                                    if off_diag_idx < diag_array_size {
+                                                        let off_entry = &hit_level_array[off_diag_idx];
+                                                        (off_entry.last_hit, hit_len_array[off_diag_idx])
+                                                    } else {
+                                                        (0, 0)
+                                                    }
+                                                };
+                                                // NCBI: off_s_end >= s_a (signed comparison)
+                                                // Convert to signed for comparison to match NCBI behavior
+                                                if off_s_l > 0
+                                                    && (off_s_end as isize) >= s_a
+                                                    && (off_s_end as isize - off_s_l as isize + delta) <= s_b {
+                                                    off_found = true;
+                                                    break;
+                                                }
                                             }
-
-                                            // NCBI reference: na_ungapped.c:703-711
-                                            // off_diag  = (orig_diag - delta) & diag_table->diag_mask;
-                                            // off_s_end = hit_level_array[off_diag].last_hit;
-                                            // off_s_l   = diag_table->hit_len_array[off_diag];
-                                            // if ( off_s_l
-                                            //  && off_s_end >= s_a
-                                            //  && off_s_end - off_s_l + delta <= s_b) {
-                                            //     off_found = TRUE;
-                                            //     break;
-                                            // }
-                                            let off_diag = (orig_diag - delta) & diag_mask;
-                                            let (off_s_end, off_s_l) = if use_array_indexing {
-                                                let off_diag_idx = off_diag as usize;
-                                                if off_diag_idx < diag_array_size {
-                                                    let off_entry = &hit_level_array[off_diag_idx];
-                                                    (off_entry.last_hit, hit_len_array[off_diag_idx])
-                                                } else {
-                                                    (0, 0)
+                                        } else {
+                                            let diag_i32 = diag as i32;
+                                            // NCBI reference: ncbi-blast/c++/src/algo/blast/core/na_ungapped.c:859-874
+                                            // ```c
+                                            // off_rc = s_BlastDiagHashRetrieve(hash_table, diag + delta,
+                                            //           &off_s_end, &off_s_l, &off_hit_saved);
+                                            // ...
+                                            // off_rc = s_BlastDiagHashRetrieve(hash_table, diag - delta,
+                                            //           &off_s_end, &off_s_l, &off_hit_saved);
+                                            // ```
+                                            for delta in 1..=delta_max {
+                                                if let Some((off_s_end, off_s_l, _)) =
+                                                    diag_hash.retrieve(diag_i32 + delta as i32) {
+                                                    if off_s_l > 0
+                                                        && (off_s_end as isize - delta) >= s_a
+                                                        && (off_s_end as isize - off_s_l as isize) <= s_b {
+                                                        off_found = true;
+                                                        break;
+                                                    }
                                                 }
-                                            } else {
-                                                let off_diag_key = pack_diag_key(q_idx, off_diag);
-                                                let off_entry = hit_level_hash.get(&off_diag_key).copied().unwrap_or(init_diag);
-                                                let off_len = hit_len_hash.get(&off_diag_key).copied().unwrap_or(0);
-                                                (off_entry.last_hit, off_len)
-                                            };
-
-                                            // NCBI: off_s_end >= s_a (signed comparison)
-                                            // Convert to signed for comparison to match NCBI behavior
-                                            if off_s_l > 0
-                                                && (off_s_end as isize) >= s_a
-                                                && (off_s_end as isize - off_s_l as isize + delta) <= s_b {
-                                                off_found = true;
-                                                break;
+                                                if let Some((off_s_end, off_s_l, _)) =
+                                                    diag_hash.retrieve(diag_i32 - delta as i32) {
+                                                    if off_s_l > 0
+                                                        && (off_s_end as isize) >= s_a
+                                                        && (off_s_end as isize - off_s_l as isize + delta) <= s_b {
+                                                        off_found = true;
+                                                        break;
+                                                    }
+                                                }
                                             }
                                         }
 
@@ -4557,6 +4823,45 @@ pub fn run(args: BlastnArgs) -> Result<()> {
                                     // hit_ready remains true (default) - extension will proceed
                                 }
 
+                                // NCBI reference: ncbi-blast/c++/src/algo/blast/core/na_ungapped.c:728-766
+                                // ```c
+                                // if (hit_ready) {
+                                //     if (word_params->ungapped_extension) {
+                                //         ...
+                                //     }
+                                // }
+                                // ```
+                                if !hit_ready {
+                                    // NCBI reference: ncbi-blast/c++/src/algo/blast/core/na_ungapped.c:768-771
+                                    // ```c
+                                    // hit_level_array[real_diag].last_hit = s_end_pos;
+                                    // hit_level_array[real_diag].flag = hit_ready;
+                                    // diag_table->hit_len_array[real_diag] =
+                                    //     (hit_ready) ? 0 : s_end_pos - s_off_pos;
+                                    // ```
+                                    // NCBI reference: ncbi-blast/c++/src/algo/blast/core/na_ungapped.c:939-941
+                                    // ```c
+                                    // s_BlastDiagHashInsert(hash_table, diag, s_end_pos,
+                                    //                       (hit_ready) ? 0 : s_end_pos - s_off_pos,
+                                    //                       hit_ready, s_off_pos, window_size + Delta + 1);
+                                    // ```
+                                    if use_array_indexing && diag_idx < diag_array_size {
+                                        hit_level_array[diag_idx].last_hit = s_end_pos as i32;
+                                        hit_level_array[diag_idx].flag = 0;
+                                        hit_len_array[diag_idx] = (s_end_pos - s_off_pos) as u8;
+                                    } else if !use_array_indexing {
+                                        diag_hash.insert(
+                                            diag as i32,
+                                            s_end_pos as i32,
+                                            (s_end_pos - s_off_pos) as i32,
+                                            false,
+                                            s_off_pos as i32,
+                                            diag_hash_window,
+                                        );
+                                    }
+                                    continue;
+                                }
+
                                 // Now do ungapped extension from the adjusted position
                                 // NCBI BLAST: s_BlastnExtendInitialHit calls ungapped extension after word_length verification
                                 // Use q_off and s_off (adjusted by type_of_word if called)
@@ -4616,6 +4921,15 @@ pub fn run(args: BlastnArgs) -> Result<()> {
                                 // off_found is set by off-diagonal search (Step 3)
                                 // NCBI: if (off_found || ungapped_data->score >= cutoffs->cutoff_score)
                                 if !(off_found || ungapped_score >= cutoff_score) {
+                                    // NCBI reference: ncbi-blast/c++/src/algo/blast/core/na_ungapped.c:752-760
+                                    // ```c
+                                    // if (off_found || ungapped_data->score >= cutoffs->cutoff_score) {
+                                    //     ...
+                                    // } else {
+                                    //     hit_ready = 0;
+                                    // }
+                                    // ```
+                                    hit_ready = false;
                                     if debug_enabled {
                                         dbg_ungapped_low += 1;
                                     }
@@ -4638,18 +4952,17 @@ pub fn run(args: BlastnArgs) -> Result<()> {
                                             (s_end_pos - s_off_pos) as u8
                                         };
                                     } else if !use_array_indexing {
-                                        let diag_key = pack_diag_key(q_idx, diag);
-                                        hit_level_hash.insert(diag_key, DiagStruct {
-                                            last_hit: s_end_pos as i32,
-                                            flag: if hit_ready { 1 } else { 0 },
-                                        });
-                                        hit_len_hash.insert(
-                                            diag_key,
+                                        diag_hash.insert(
+                                            diag as i32,
+                                            s_end_pos as i32,
                                             if hit_ready {
                                                 0
                                             } else {
-                                                (s_end_pos - s_off_pos) as u8
+                                                (s_end_pos - s_off_pos) as i32
                                             },
+                                            hit_ready,
+                                            s_off_pos as i32,
+                                            diag_hash_window,
                                         );
                                     }
                                     continue;
@@ -4698,12 +5011,14 @@ pub fn run(args: BlastnArgs) -> Result<()> {
                                     hit_level_array[diag_idx].flag = 1;
                                     hit_len_array[diag_idx] = 0;
                                 } else if !use_array_indexing {
-                                    let diag_key = pack_diag_key(q_idx, diag);
-                                    hit_level_hash.insert(diag_key, DiagStruct {
-                                        last_hit: ungapped_s_end_pos as i32,
-                                        flag: 1,
-                                    });
-                                    hit_len_hash.insert(diag_key, 0);
+                                    diag_hash.insert(
+                                        diag as i32,
+                                        ungapped_s_end_pos as i32,
+                                        0,
+                                        true,
+                                        s_off_pos as i32,
+                                        diag_hash_window,
+                                    );
                                 }
                                 // Gapped extension deferred to batch processing phase
                                 } // end of for matches_slice in two-stage lookup
@@ -4811,13 +5126,19 @@ pub fn run(args: BlastnArgs) -> Result<()> {
                             let (diag_array_length, diag_mask) = if use_array_indexing {
                                 (diag_array_length_single as isize, diag_mask_single)
                             } else {
-                                (
-                                    diag_array_lengths[query_idx] as isize,
-                                    diag_masks[query_idx] as isize,
-                                )
+                                (0isize, 0isize)
                             };
-                            let diag = (kmer_start as isize + diag_array_length - q_pos_usize as isize)
-                                & diag_mask;
+                            let diag = if use_array_indexing {
+                                (kmer_start as isize + diag_array_length - q_pos_usize as isize)
+                                    & diag_mask
+                            } else {
+                                // NCBI reference: ncbi-blast/c++/src/algo/blast/core/na_ungapped.c:828-829
+                                // ```c
+                                // diag = s_off - q_off;
+                                // s_end = s_off + word_length;
+                                // ```
+                                kmer_start as isize - q_pos_usize as isize
+                            };
 
                             // Check if this seed is in the debug window
                             let s_pos = kmer_start + chunk.offset;
@@ -4857,9 +5178,15 @@ pub fn run(args: BlastnArgs) -> Result<()> {
                                 let diag_entry = &hit_level_array[diag_idx];
                                 (diag_entry.last_hit, diag_entry.flag != 0)
                             } else if !use_array_indexing {
-                                let diag_key = pack_diag_key(q_idx, diag);
-                                let diag_entry = hit_level_hash.get(&diag_key).copied().unwrap_or(init_diag);
-                                (diag_entry.last_hit, diag_entry.flag != 0)
+                                // NCBI reference: ncbi-blast/c++/src/algo/blast/core/na_ungapped.c:833-836
+                                // ```c
+                                // rc = s_BlastDiagHashRetrieve(hash_table, diag, &last_hit, &s_l, &hit_saved);
+                                // if(!rc)  last_hit = 0;
+                                // ```
+                                let (level, _hit_len, hit_saved) = diag_hash
+                                    .retrieve(diag as i32)
+                                    .unwrap_or((0, 0, false));
+                                (level, hit_saved)
                             } else {
                                 (0, false)
                             };
@@ -4897,6 +5224,26 @@ pub fn run(args: BlastnArgs) -> Result<()> {
                             let mut off_found = false;
                             let mut hit_ready = true;
                             let query_mask = ctx.masks.as_slice();
+                            let diag_hash_window = if !use_array_indexing {
+                                // NCBI reference: ncbi-blast/c++/src/algo/blast/core/na_ungapped.c:825-826, 939-941
+                                // ```c
+                                // Delta = MIN(word_params->options->scan_range, window_size - word_length);
+                                // if (Delta < 0) Delta = 0;
+                                // s_BlastDiagHashInsert(hash_table, diag, s_end_pos,
+                                //                       (hit_ready) ? 0 : s_end_pos - s_off_pos,
+                                //                       hit_ready, s_off_pos, window_size + Delta + 1);
+                                // ```
+                                let window_size_i32 = TWO_HIT_WINDOW as i32;
+                                let delta_calc = window_size_i32 - safe_k as i32;
+                                let delta_limit = if delta_calc < 0 {
+                                    0
+                                } else {
+                                    (scan_range as i32).min(delta_calc)
+                                };
+                                window_size_i32 + delta_limit + 1
+                            } else {
+                                0
+                            };
 
                             // NCBI reference: ncbi-blast/c++/src/algo/blast/core/na_ungapped.c:459-489
                             // ```c
@@ -5022,87 +5369,99 @@ pub fn run(args: BlastnArgs) -> Result<()> {
                                     let s_a = s_off_pos as isize + safe_k as isize - window_size as isize;
                                     let s_b = s_end_pos as isize - 2 * safe_k as isize;
 
-                                    // NCBI reference: ncbi-blast/c++/src/algo/blast/core/na_ungapped.c:688-694
-                                    // ```c
-                                    // orig_diag = real_diag + diag_table->diag_array_length;
-                                    // off_diag  = (orig_diag + delta) & diag_table->diag_mask;
-                                    // ```
-                                    let orig_diag = diag + diag_array_length;
-
-                                    // NCBI reference: na_ungapped.c:859
-                                    // for (delta = 1; delta <= Delta; ++delta) {
-                                    for delta in 1..=delta_max {
-                                        // NCBI reference: na_ungapped.c:860-871
-                                        // Int4 off_s_end = 0;
-                                        // Int4 off_s_l = 0;
-                                        // Int4 off_hit_saved = 0;
-                                        // Int4 off_rc = s_BlastDiagHashRetrieve(hash_table, diag + delta,
-                                        //               &off_s_end, &off_s_l, &off_hit_saved);
-                                        // if ( off_rc
-                                        //   && off_s_l
-                                        //   && off_s_end - delta >= s_a
-                                        //   && off_s_end - off_s_l <= s_b) {
-                                        //      off_found = TRUE;
-                                        //      break;
-                                        // }
-                                        let off_diag = (orig_diag + delta) & diag_mask;
-                                        let (off_s_end, off_s_l) = if use_array_indexing {
-                                            let off_diag_idx = off_diag as usize;
-                                            if off_diag_idx < diag_array_size {
-                                                let off_entry = &hit_level_array[off_diag_idx];
-                                                (off_entry.last_hit, hit_len_array[off_diag_idx])
-                                            } else {
-                                                (0, 0)
+                                    if use_array_indexing {
+                                        // NCBI reference: ncbi-blast/c++/src/algo/blast/core/na_ungapped.c:688-694
+                                        // ```c
+                                        // orig_diag = real_diag + diag_table->diag_array_length;
+                                        // off_diag  = (orig_diag + delta) & diag_table->diag_mask;
+                                        // ```
+                                        let orig_diag = diag + diag_array_length;
+                                        // NCBI reference: na_ungapped.c:859
+                                        // for (delta = 1; delta <= Delta; ++delta) {
+                                        for delta in 1..=delta_max {
+                                            // NCBI reference: na_ungapped.c:860-871
+                                            // Int4 off_diag  = (orig_diag + delta) & diag_table->diag_mask;
+                                            // Int4 off_s_end = hit_level_array[off_diag].last_hit;
+                                            // Int4 off_s_l   = diag_table->hit_len_array[off_diag];
+                                            // if ( off_s_l
+                                            //  && off_s_end - delta >= s_a
+                                            //  && off_s_end - off_s_l <= s_b) {
+                                            //     off_found = TRUE;
+                                            //     break;
+                                            // }
+                                            let off_diag = (orig_diag + delta) & diag_mask;
+                                            let (off_s_end, off_s_l) = {
+                                                let off_diag_idx = off_diag as usize;
+                                                if off_diag_idx < diag_array_size {
+                                                    let off_entry = &hit_level_array[off_diag_idx];
+                                                    (off_entry.last_hit, hit_len_array[off_diag_idx])
+                                                } else {
+                                                    (0, 0)
+                                                }
+                                            };
+                                            if off_s_l > 0
+                                                && (off_s_end as isize - delta) >= s_a
+                                                && (off_s_end as isize - off_s_l as isize) <= s_b {
+                                                off_found = true;
+                                                break;
                                             }
-                                        } else {
-                                            let off_diag_key = pack_diag_key(q_idx, off_diag);
-                                            let off_entry = hit_level_hash.get(&off_diag_key).copied().unwrap_or(init_diag);
-                                            let off_len = hit_len_hash.get(&off_diag_key).copied().unwrap_or(0);
-                                            (off_entry.last_hit, off_len)
-                                        };
 
-                                        // NCBI: off_s_end - delta >= s_a (signed comparison)
-                                        // Convert to signed for comparison to match NCBI behavior
-                                        if off_s_l > 0
-                                            && (off_s_end as isize - delta) >= s_a
-                                            && (off_s_end as isize - off_s_l as isize) <= s_b {
-                                            off_found = true;
-                                            break;
+                                            // NCBI reference: na_ungapped.c:872-880
+                                            // off_diag  = (orig_diag - delta) & diag_table->diag_mask;
+                                            // off_s_end = hit_level_array[off_diag].last_hit;
+                                            // off_s_l   = diag_table->hit_len_array[off_diag];
+                                            // if ( off_s_l
+                                            //  && off_s_end >= s_a
+                                            //  && off_s_end - off_s_l + delta <= s_b) {
+                                            //     off_found = TRUE;
+                                            //     break;
+                                            // }
+                                            let off_diag = (orig_diag - delta) & diag_mask;
+                                            let (off_s_end, off_s_l) = {
+                                                let off_diag_idx = off_diag as usize;
+                                                if off_diag_idx < diag_array_size {
+                                                    let off_entry = &hit_level_array[off_diag_idx];
+                                                    (off_entry.last_hit, hit_len_array[off_diag_idx])
+                                                } else {
+                                                    (0, 0)
+                                                }
+                                            };
+                                            if off_s_l > 0
+                                                && (off_s_end as isize) >= s_a
+                                                && (off_s_end as isize - off_s_l as isize + delta) <= s_b {
+                                                off_found = true;
+                                                break;
+                                            }
                                         }
-
-                                        // NCBI reference: na_ungapped.c:872-880
+                                    } else {
+                                        let diag_i32 = diag as i32;
+                                        // NCBI reference: ncbi-blast/c++/src/algo/blast/core/na_ungapped.c:860-874
+                                        // ```c
+                                        // off_rc = s_BlastDiagHashRetrieve(hash_table, diag + delta,
+                                        //           &off_s_end, &off_s_l, &off_hit_saved);
+                                        // ...
                                         // off_rc = s_BlastDiagHashRetrieve(hash_table, diag - delta,
-                                        //               &off_s_end, &off_s_l, &off_hit_saved);
-                                        // if ( off_rc
-                                        //   && off_s_l
-                                        //   && off_s_end >= s_a
-                                        //   && off_s_end - off_s_l + delta <= s_b) {
-                                        //      off_found = TRUE;
-                                        //      break;
-                                        // }
-                                        let off_diag = (orig_diag - delta) & diag_mask;
-                                        let (off_s_end, off_s_l) = if use_array_indexing {
-                                            let off_diag_idx = off_diag as usize;
-                                            if off_diag_idx < diag_array_size {
-                                                let off_entry = &hit_level_array[off_diag_idx];
-                                                (off_entry.last_hit, hit_len_array[off_diag_idx])
-                                            } else {
-                                                (0, 0)
+                                        //           &off_s_end, &off_s_l, &off_hit_saved);
+                                        // ```
+                                        for delta in 1..=delta_max {
+                                            if let Some((off_s_end, off_s_l, _)) =
+                                                diag_hash.retrieve(diag_i32 + delta as i32) {
+                                                if off_s_l > 0
+                                                    && (off_s_end as isize - delta) >= s_a
+                                                    && (off_s_end as isize - off_s_l as isize) <= s_b {
+                                                    off_found = true;
+                                                    break;
+                                                }
                                             }
-                                        } else {
-                                            let off_diag_key = pack_diag_key(q_idx, off_diag);
-                                            let off_entry = hit_level_hash.get(&off_diag_key).copied().unwrap_or(init_diag);
-                                            let off_len = hit_len_hash.get(&off_diag_key).copied().unwrap_or(0);
-                                            (off_entry.last_hit, off_len)
-                                        };
-
-                                        // NCBI: off_s_end >= s_a (signed comparison)
-                                        // Convert to signed for comparison to match NCBI behavior
-                                        if off_s_l > 0
-                                            && (off_s_end as isize) >= s_a
-                                            && (off_s_end as isize - off_s_l as isize + delta) <= s_b {
-                                            off_found = true;
-                                            break;
+                                            if let Some((off_s_end, off_s_l, _)) =
+                                                diag_hash.retrieve(diag_i32 - delta as i32) {
+                                                if off_s_l > 0
+                                                    && (off_s_end as isize) >= s_a
+                                                    && (off_s_end as isize - off_s_l as isize + delta) <= s_b {
+                                                    off_found = true;
+                                                    break;
+                                                }
+                                            }
                                         }
                                     }
 
@@ -5164,6 +5523,45 @@ pub fn run(args: BlastnArgs) -> Result<()> {
                                 // hit_ready remains true (default) - extension will proceed
                             }
 
+                            // NCBI reference: ncbi-blast/c++/src/algo/blast/core/na_ungapped.c:728-766
+                            // ```c
+                            // if (hit_ready) {
+                            //     if (word_params->ungapped_extension) {
+                            //         ...
+                            //     }
+                            // }
+                            // ```
+                            if !hit_ready {
+                                // NCBI reference: ncbi-blast/c++/src/algo/blast/core/na_ungapped.c:768-771
+                                // ```c
+                                // hit_level_array[real_diag].last_hit = s_end_pos;
+                                // hit_level_array[real_diag].flag = hit_ready;
+                                // diag_table->hit_len_array[real_diag] =
+                                //     (hit_ready) ? 0 : s_end_pos - s_off_pos;
+                                // ```
+                                // NCBI reference: ncbi-blast/c++/src/algo/blast/core/na_ungapped.c:939-941
+                                // ```c
+                                // s_BlastDiagHashInsert(hash_table, diag, s_end_pos,
+                                //                       (hit_ready) ? 0 : s_end_pos - s_off_pos,
+                                //                       hit_ready, s_off_pos, window_size + Delta + 1);
+                                // ```
+                                if use_array_indexing && diag_idx < diag_array_size {
+                                    hit_level_array[diag_idx].last_hit = s_end_pos as i32;
+                                    hit_level_array[diag_idx].flag = 0;
+                                    hit_len_array[diag_idx] = (s_end_pos - s_off_pos) as u8;
+                                } else if !use_array_indexing {
+                                    diag_hash.insert(
+                                        diag as i32,
+                                        s_end_pos as i32,
+                                        (s_end_pos - s_off_pos) as i32,
+                                        false,
+                                        s_off_pos as i32,
+                                        diag_hash_window,
+                                    );
+                                }
+                                continue;
+                            }
+
                             // Now do ungapped extension from the adjusted position
                             // Use q_off and s_off (adjusted by type_of_word if called)
                             // NCBI reference: ncbi-blast/c++/src/algo/blast/core/na_ungapped.c:740-749
@@ -5219,6 +5617,15 @@ pub fn run(args: BlastnArgs) -> Result<()> {
                             // off_found is set by off-diagonal search
                             // NCBI: if (off_found || ungapped_data->score >= cutoffs->cutoff_score)
                             if !(off_found || ungapped_score >= cutoff_score) {
+                                // NCBI reference: ncbi-blast/c++/src/algo/blast/core/na_ungapped.c:752-760
+                                // ```c
+                                // if (off_found || ungapped_data->score >= cutoffs->cutoff_score) {
+                                //     ...
+                                // } else {
+                                //     hit_ready = 0;
+                                // }
+                                // ```
+                                hit_ready = false;
                                 // NCBI reference: ncbi-blast/c++/src/algo/blast/core/na_ungapped.c:768-771
                                 // ```c
                                 // hit_level_array[real_diag].last_hit = s_end_pos;
@@ -5235,18 +5642,23 @@ pub fn run(args: BlastnArgs) -> Result<()> {
                                         (s_end_pos - s_off_pos) as u8
                                     };
                                 } else if !use_array_indexing {
-                                    let diag_key = pack_diag_key(q_idx, diag);
-                                    hit_level_hash.insert(diag_key, DiagStruct {
-                                        last_hit: s_end_pos as i32,
-                                        flag: if hit_ready { 1 } else { 0 },
-                                    });
-                                    hit_len_hash.insert(
-                                        diag_key,
+                                    // NCBI reference: ncbi-blast/c++/src/algo/blast/core/na_ungapped.c:939-941
+                                    // ```c
+                                    // s_BlastDiagHashInsert(hash_table, diag, s_end_pos,
+                                    //                       (hit_ready) ? 0 : s_end_pos - s_off_pos,
+                                    //                       hit_ready, s_off_pos, window_size + Delta + 1);
+                                    // ```
+                                    diag_hash.insert(
+                                        diag as i32,
+                                        s_end_pos as i32,
                                         if hit_ready {
                                             0
                                         } else {
-                                            (s_end_pos - s_off_pos) as u8
+                                            (s_end_pos - s_off_pos) as i32
                                         },
+                                        hit_ready,
+                                        s_off_pos as i32,
+                                        diag_hash_window,
                                     );
                                 }
                                 if debug_enabled {
@@ -5300,12 +5712,20 @@ pub fn run(args: BlastnArgs) -> Result<()> {
                                 hit_level_array[diag_idx].flag = 1;
                                 hit_len_array[diag_idx] = 0;
                             } else if !use_array_indexing {
-                                let diag_key = pack_diag_key(q_idx, diag);
-                                hit_level_hash.insert(diag_key, DiagStruct {
-                                    last_hit: ungapped_s_end_pos as i32,
-                                    flag: 1,
-                                });
-                                hit_len_hash.insert(diag_key, 0);
+                                // NCBI reference: ncbi-blast/c++/src/algo/blast/core/na_ungapped.c:939-941
+                                // ```c
+                                // s_BlastDiagHashInsert(hash_table, diag, s_end_pos,
+                                //                       (hit_ready) ? 0 : s_end_pos - s_off_pos,
+                                //                       hit_ready, s_off_pos, window_size + Delta + 1);
+                                // ```
+                                diag_hash.insert(
+                                    diag as i32,
+                                    ungapped_s_end_pos as i32,
+                                    0,
+                                    true,
+                                    s_off_pos as i32,
+                                    diag_hash_window,
+                                );
                             }
                         }
                     },
@@ -5599,8 +6019,7 @@ pub fn run(args: BlastnArgs) -> Result<()> {
                 // ```
                 let hit_level_array = &mut subject_scratch.hit_level_array;
                 let hit_len_array = &mut subject_scratch.hit_len_array;
-                let hit_level_hash = &mut subject_scratch.hit_level_hash;
-                let hit_len_hash = &mut subject_scratch.hit_len_hash;
+                let diag_hash = &mut subject_scratch.diag_hash;
                 advance_diag_table_offset(
                     &mut subject_scratch.diag_table_offset,
                     diag_window,
@@ -5608,8 +6027,7 @@ pub fn run(args: BlastnArgs) -> Result<()> {
                     use_array_indexing,
                     hit_level_array,
                     hit_len_array,
-                    hit_level_hash,
-                    hit_len_hash,
+                    diag_hash,
                 );
                 chunk_prelim_hits
             };

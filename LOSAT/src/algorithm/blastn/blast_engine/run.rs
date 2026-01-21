@@ -2771,6 +2771,15 @@ struct QueryContextIndex {
     offsets: Vec<usize>,
     min_length: usize,
     max_length: usize,
+    // Direct mapping from query offset to context index for fast lookup.
+    // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_query_info.c:219-238 (BSearchContextInfo)
+    // ```c
+    // if (A->contexts[m].query_offset > n) e = m;
+    // else b = m;
+    // ...
+    // return b;
+    // ```
+    direct_map: Vec<u32>,
 }
 
 impl QueryContextIndex {
@@ -2786,11 +2795,46 @@ impl QueryContextIndex {
             .min()
             .unwrap_or(0);
         let max_length = contexts.iter().map(|ctx| ctx.seq.len()).max().unwrap_or(0);
+        // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_query_info.c:219-238 (BSearchContextInfo)
+        // ```c
+        // if (A->contexts[m].query_offset > n) e = m;
+        // else b = m;
+        // ...
+        // return b;
+        // ```
+        let total_len = contexts
+            .iter()
+            .map(|ctx| ctx.query_offset.max(0) as usize + ctx.seq.len())
+            .max()
+            .unwrap_or(0);
+        let mut direct_map = vec![0u32; total_len];
+        for (idx, ctx) in contexts.iter().enumerate() {
+            let start = ctx.query_offset.max(0) as usize;
+            let end = start.saturating_add(ctx.seq.len());
+            if start < end && end <= direct_map.len() {
+                direct_map[start..end].fill(idx as u32);
+            }
+        }
         Self {
             offsets,
             min_length,
             max_length,
+            direct_map,
         }
+    }
+
+    // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_query_info.c:219-238 (BSearchContextInfo)
+    // ```c
+    // if (A->contexts[m].query_offset > n) e = m;
+    // else b = m;
+    // ...
+    // return b;
+    // ```
+    fn context_for_offset(&self, n: usize) -> usize {
+        if n < self.direct_map.len() {
+            return self.direct_map[n] as usize;
+        }
+        bsearch_context_info(n, self)
     }
 }
 
@@ -4188,7 +4232,7 @@ pub fn run(args: BlastnArgs) -> Result<()> {
                                 // ```c
                                 // Int4 context = BSearchContextInfo(q_off, query_info);
                                 // ```
-                                let context_idx = bsearch_context_info(q_off0, &query_context_index);
+                                let context_idx = query_context_index.context_for_offset(q_off0);
                                 let ctx = &query_contexts[context_idx];
                                 let q_idx = context_idx as u32;
                                 let query_idx = ctx.query_idx as usize;
@@ -5187,7 +5231,7 @@ pub fn run(args: BlastnArgs) -> Result<()> {
                                 // ```c
                                 // Int4 context = BSearchContextInfo(q_off, query_info);
                                 // ```
-                                let context_idx = bsearch_context_info(q_off0, &query_context_index);
+                                let context_idx = query_context_index.context_for_offset(q_off0);
                                 let ctx = &query_contexts[context_idx];
                                 let q_idx = context_idx as u32;
                                 let query_idx = ctx.query_idx as usize;

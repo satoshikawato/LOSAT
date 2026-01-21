@@ -20,11 +20,12 @@ mod run;
 pub use run::run;
 
 use rustc_hash::FxHashMap;
-use crate::common::{Hit, score_compare_hsps};
+use crate::common::Hit;
 use crate::stats::KarlinParams;
 use crate::core::blast_encoding::encode_iupac_to_blastna;
 use super::alignment::build_blastna_matrix;
 use super::filtering::{purge_hsps_with_common_endpoints_ex, reevaluate_hsp_with_ambiguities_gapped, subject_best_hit};
+use super::hsp::{BlastnHsp, score_compare_hsps as score_compare_blastn_hsps};
 use super::interval_tree::{BlastIntervalTree, IndexMethod, TreeHsp};
 use std::sync::Arc;
 
@@ -74,7 +75,20 @@ pub fn filter_hsps(
 
     // Always output individual HSPs (NCBI BLAST behavior)
     // NCBI BLAST's blastn does not use chaining/clustering - all HSPs are saved individually
-    let mut result_hits: Vec<Hit> = hits;
+    // NCBI reference: ncbi-blast/c++/include/algo/blast/core/blast_hits.h:153-166
+    // ```c
+    // typedef struct BlastHSPList {
+    //    Int4 oid;/**< The ordinal id of the subject sequence this HSP list is for */
+    //    Int4 query_index; /**< Index of the query which this HSPList corresponds to. */
+    // } BlastHSPList;
+    // ```
+    let mut id_map: FxHashMap<(u32, u32), (Arc<str>, Arc<str>)> = FxHashMap::default();
+    for hit in &hits {
+        id_map
+            .entry((hit.q_idx, hit.s_idx))
+            .or_insert_with(|| (Arc::clone(&hit.query_id), Arc::clone(&hit.subject_id)));
+    }
+    let mut result_hits: Vec<BlastnHsp> = hits.into_iter().map(BlastnHsp::from_hit).collect();
 
     // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_stat.c:1052-1127 (BlastScoreBlkNuclMatrixCreate)
     let score_matrix = build_blastna_matrix(reward, penalty);
@@ -96,7 +110,7 @@ pub fn filter_hsps(
     //     result = BLAST_CMP(hsp2->query.end, hsp1->query.end);
     // }
     // ```
-    result_hits.sort_by(score_compare_hsps);
+    result_hits.sort_by(score_compare_blastn_hsps);
 
     // NOTE: NCBI does NOT have explicit dedup for identical coords+score.
     // NCBI only uses Blast_HSPListPurgeHSPsWithCommonEndpoints which handles
@@ -148,18 +162,31 @@ pub fn filter_hsps(
     // ```
     let mut encoded_cache: FxHashMap<(Arc<str>, Arc<str>), (Vec<u8>, Vec<u8>)> =
         FxHashMap::default();
+    // NCBI reference: ncbi-blast/c++/include/algo/blast/core/blast_hits.h:153-166
+    // ```c
+    // typedef struct BlastHSPList {
+    //    Int4 oid;/**< The ordinal id of the subject sequence this HSP list is for */
+    //    Int4 query_index; /**< Index of the query which this HSPList corresponds to. */
+    // } BlastHSPList;
+    // ```
+    let get_ids = |hit: &BlastnHsp, map: &FxHashMap<(u32, u32), (Arc<str>, Arc<str>)>| {
+        map.get(&(hit.q_idx, hit.s_idx))
+            .cloned()
+            .unwrap_or_else(|| (Arc::<str>::from("unknown"), Arc::<str>::from("unknown")))
+    };
     for i in extra_start..result_hits.len() {
         let hit = &mut result_hits[i];
 
         // Get cutoff score for this query
         // NCBI reference: blast_traceback.c:654 - uses hit_params->cutoff_score_min
         // The cutoff_score is pre-computed in run() using compute_blastn_cutoff_score()
-        let cutoff_score = cutoff_scores.get(&hit.query_id)
+        let (query_id, subject_id) = get_ids(hit, &id_map);
+        let cutoff_score = cutoff_scores.get(&query_id)
             .copied()
             .unwrap_or(22);
 
         // Get sequences for re-evaluation
-        let key = (hit.query_id.clone(), hit.subject_id.clone());
+        let key = (Arc::clone(&query_id), Arc::clone(&subject_id));
         if let Some((q_seq, s_seq)) = sequences.get(&key) {
             let (q_blastna, s_blastna) =
                 encoded_cache.entry(key.clone()).or_insert_with(|| {
@@ -216,8 +243,8 @@ pub fn filter_hsps(
     //     }
     // }
     // ```
-    result_hits.sort_by(score_compare_hsps);
-    let mut final_hits: Vec<Hit> = Vec::with_capacity(result_hits.len());
+    result_hits.sort_by(score_compare_blastn_hsps);
+    let mut final_hits: Vec<BlastnHsp> = Vec::with_capacity(result_hits.len());
     let min_diag_separation: i32 = 0;
     // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_options.c:1482-1495
     // ```c
@@ -226,7 +253,8 @@ pub fn filter_hsps(
     // ```
     let mut trees: FxHashMap<(Arc<str>, Arc<str>), BlastIntervalTree> = FxHashMap::default();
     for hit in result_hits {
-        let key = (hit.query_id.clone(), hit.subject_id.clone());
+        let (query_id, subject_id) = get_ids(&hit, &id_map);
+        let key = (Arc::clone(&query_id), Arc::clone(&subject_id));
         let (q_seq, s_seq) = match sequences.get(&key) {
             Some(value) => value,
             None => {
@@ -235,7 +263,7 @@ pub fn filter_hsps(
             }
         };
         let query_len = query_lengths
-            .get(&hit.query_id)
+            .get(&query_id)
             .copied()
             .unwrap_or_else(|| hit.query_length.max(q_seq.len()));
         let subject_len = s_seq.len();
@@ -328,5 +356,39 @@ pub fn filter_hsps(
         );
     }
 
-    final_hits
+    // NCBI reference: ncbi-blast/c++/include/algo/blast/core/blast_hits.h:125-148
+    // ```c
+    // typedef struct BlastHSP {
+    //    Int4 score;
+    //    double evalue;
+    //    BlastSeg query;
+    //    BlastSeg subject;
+    //    Int4 context;
+    // } BlastHSP;
+    // ```
+    let mut output_hits: Vec<Hit> = Vec::with_capacity(final_hits.len());
+    for hit in final_hits {
+        let (query_id, subject_id) = get_ids(&hit, &id_map);
+        output_hits.push(Hit {
+            query_id,
+            subject_id,
+            identity: hit.identity,
+            length: hit.length,
+            mismatch: hit.mismatch,
+            gapopen: hit.gapopen,
+            q_start: hit.q_start,
+            q_end: hit.q_end,
+            s_start: hit.s_start,
+            s_end: hit.s_end,
+            e_value: hit.e_value,
+            bit_score: hit.bit_score,
+            query_frame: hit.query_frame,
+            query_length: hit.query_length,
+            q_idx: hit.q_idx,
+            s_idx: hit.s_idx,
+            raw_score: hit.raw_score,
+            gap_info: hit.gap_info,
+        });
+    }
+    output_hits
 }

@@ -267,6 +267,57 @@ pub fn format_hit(hit: &Hit, config: &OutputConfig) -> String {
     )
 }
 
+/// Write a single hit as outfmt 6 line without building an intermediate String.
+// NCBI reference: ncbi-blast/c++/src/objtools/align_format/tabular.cpp:1100-1108
+// ```c
+// void CBlastTabularInfo::Print()
+// {
+//     ITERATE(list<ETabularField>, iter, m_FieldsToShow) {
+//         if (iter != m_FieldsToShow.begin())
+//             m_Ostream << m_FieldDelimiter;
+//         x_PrintField(*iter);
+//     }
+//     m_Ostream << "\n";
+// }
+// ```
+pub fn write_hit_fields<W: Write>(
+    writer: &mut W,
+    query_id: &str,
+    subject_id: &str,
+    identity: f64,
+    length: usize,
+    mismatch: usize,
+    gapopen: usize,
+    q_start: usize,
+    q_end: usize,
+    s_start: usize,
+    s_end: usize,
+    e_value: f64,
+    bit_score: f64,
+    config: &OutputConfig,
+) -> io::Result<()> {
+    let delim = config.delimiter;
+    let bit_score_fmt = if config.ncbi_evalue_format {
+        format_bitscore_ncbi(bit_score)
+    } else {
+        format!("{:.prec$}", bit_score, prec = config.bit_score_decimals)
+    };
+    let evalue_fmt = format_evalue(e_value, config.ncbi_evalue_format);
+
+    write!(writer, "{}{}{}", query_id, delim, subject_id)?;
+    write!(writer, "{}{:.prec$}", delim, identity, prec = config.identity_decimals)?;
+    write!(writer, "{}{}", delim, length)?;
+    write!(writer, "{}{}", delim, mismatch)?;
+    write!(writer, "{}{}", delim, gapopen)?;
+    write!(writer, "{}{}", delim, q_start)?;
+    write!(writer, "{}{}", delim, q_end)?;
+    write!(writer, "{}{}", delim, s_start)?;
+    write!(writer, "{}{}", delim, s_end)?;
+    write!(writer, "{}{}", delim, evalue_fmt)?;
+    write!(writer, "{}{}", delim, bit_score_fmt)?;
+    writeln!(writer)
+}
+
 /// Write hits to a writer in outfmt 6 format
 pub fn write_outfmt6<W: Write>(
     hits: &[Hit],

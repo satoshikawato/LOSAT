@@ -1,7 +1,11 @@
 use std::cmp::Ordering;
+use std::fs::File;
+use std::io::{self, BufWriter, Write};
+use std::path::PathBuf;
 use std::sync::Arc;
 
 use crate::common::{GapEditOp, Hit};
+use crate::report::{write_hit_fields, OutputConfig};
 
 #[derive(Debug, Clone)]
 // NCBI reference: ncbi-blast/c++/include/algo/blast/core/blast_hits.h:125-148
@@ -335,4 +339,92 @@ pub fn prune_hitlists_by_size(lists: &mut Vec<BlastnHspList>, hitlist_size: usiz
         return;
     }
     lists.truncate(hitlist_size);
+}
+
+/// Write BLASTN output in NCBI HSP list order without regrouping.
+///
+/// NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_hits.c:1330-1353
+/// ```c
+/// int ScoreCompareHSPs(const void* h1, const void* h2) {
+///    if (0 == (result = BLAST_CMP(hsp2->score,          hsp1->score)) &&
+///        0 == (result = BLAST_CMP(hsp1->subject.offset, hsp2->subject.offset)) &&
+///        0 == (result = BLAST_CMP(hsp2->subject.end,    hsp1->subject.end)) &&
+///        0 == (result = BLAST_CMP(hsp1->query  .offset, hsp2->query  .offset))) {
+///        result = BLAST_CMP(hsp2->query.end, hsp1->query.end);
+///    }
+/// }
+/// ```
+/// NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_hits.c:3071-3106
+/// ```c
+/// static int s_EvalueCompareHSPLists(const void* v1, const void* v2) {
+///    if ((retval = s_EvalueComp(h1->best_evalue, h2->best_evalue)) != 0)
+///       return retval;
+///    if (h1->hsp_array[0]->score > h2->hsp_array[0]->score) return -1;
+///    if (h1->hsp_array[0]->score < h2->hsp_array[0]->score) return 1;
+///    return BLAST_CMP(h2->oid, h1->oid);
+/// }
+/// ```
+pub fn write_output_blastn_hitlists(
+    hit_lists: &[Option<BlastnHitList>],
+    out_path: Option<&PathBuf>,
+    query_ids: &[Arc<str>],
+    subject_ids: &[Arc<str>],
+) -> io::Result<()> {
+    let stdout = io::stdout();
+    let mut writer: Box<dyn Write> = if let Some(path) = out_path {
+        Box::new(BufWriter::new(File::create(path)?))
+    } else {
+        Box::new(BufWriter::new(stdout.lock()))
+    };
+
+    let config = OutputConfig::ncbi_compat();
+
+    for hit_list_opt in hit_lists.iter() {
+        let hit_list = match hit_list_opt {
+            Some(value) => value,
+            None => continue,
+        };
+        for hsp_list in &hit_list.hsplist_array {
+            for hsp in &hsp_list.hsps {
+                let query_id = query_ids
+                    .get(hsp.q_idx as usize)
+                    .map(|id| id.as_ref())
+                    .unwrap_or("unknown");
+                let subject_id = subject_ids
+                    .get(hsp.s_idx as usize)
+                    .map(|id| id.as_ref())
+                    .unwrap_or("unknown");
+                // NCBI reference: ncbi-blast/c++/src/objtools/align_format/tabular.cpp:1100-1108
+                // ```c
+                // void CBlastTabularInfo::Print()
+                // {
+                //     ITERATE(list<ETabularField>, iter, m_FieldsToShow) {
+                //         if (iter != m_FieldsToShow.begin())
+                //             m_Ostream << m_FieldDelimiter;
+                //         x_PrintField(*iter);
+                //     }
+                //     m_Ostream << "\n";
+                // }
+                // ```
+                write_hit_fields(
+                    &mut writer,
+                    query_id,
+                    subject_id,
+                    hsp.identity,
+                    hsp.length,
+                    hsp.mismatch,
+                    hsp.gapopen,
+                    hsp.q_start,
+                    hsp.q_end,
+                    hsp.s_start,
+                    hsp.s_end,
+                    hsp.e_value,
+                    hsp.bit_score,
+                    &config,
+                )?;
+            }
+        }
+    }
+
+    Ok(())
 }

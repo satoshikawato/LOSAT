@@ -304,7 +304,14 @@ impl DustMasker {
 
 /// Triplet window tracker for DUST algorithm
 /// Uses VecDeque to match NCBI BLAST's deque with push_front/pop_back semantics
-struct TripletWindow {
+// NCBI reference: ncbi-blast/c++/src/algo/dustmask/symdust.cpp:40-45
+// ```c
+// CSymDustMasker::triplets::triplets(
+//     size_type window, Uint1 low_k,
+//     perfect_list_type & perfect_list, thres_table_type & thresholds )
+//     : ... P( perfect_list ), thresholds_( thresholds ) ...
+// ```
+struct TripletWindow<'a> {
     triplet_list: VecDeque<u8>,
     start: usize,
     stop: usize,
@@ -316,11 +323,11 @@ struct TripletWindow {
     r_w: u32,  // running sum for whole window
     r_v: u32,  // running sum for suffix
     num_diff: u32,
-    thresholds: Vec<u32>,
+    thresholds: &'a [u32],
 }
 
-impl TripletWindow {
-    fn new(window: usize, low_k: u8, thresholds: &[u32]) -> Self {
+impl<'a> TripletWindow<'a> {
+    fn new(window: usize, low_k: u8, thresholds: &'a [u32]) -> Self {
         Self {
             triplet_list: VecDeque::with_capacity(window),
             start: 0,
@@ -333,7 +340,7 @@ impl TripletWindow {
             r_w: 0,
             r_v: 0,
             num_diff: 0,
-            thresholds: thresholds.to_vec(),
+            thresholds,
         }
     }
 
@@ -489,18 +496,19 @@ impl TripletWindow {
                 if max_perfect_score == 0 || score as usize * max_len >= max_perfect_score as usize * count {
                     max_perfect_score = score;
                     max_len = count;
-                    // Insert at perfect_idx position
+                    // NCBI reference: ncbi-blast/c++/src/algo/dustmask/symdust.cpp:156-163
+                    // ```c
+                    // if( max_perfect_score == 0 || score*max_len >= max_perfect_score*count ) {
+                    //     max_perfect_score = score;
+                    //     max_len = count;
+                    //     perfect_iter = P.insert(
+                    //             perfect_iter, perfect( pos, stop_ + 1,
+                    //             max_perfect_score, count ) );
+                    // }
+                    // ```
                     let interval = PerfectInterval::new(pos, self.stop + 1, max_perfect_score, count);
                     if perfect_idx < perfect_list.len() {
-                        // Insert in middle - need to rebuild
-                        let mut new_list: VecDeque<PerfectInterval> = VecDeque::new();
-                        for (i, p) in perfect_list.iter().enumerate() {
-                            if i == perfect_idx {
-                                new_list.push_back(interval.clone());
-                            }
-                            new_list.push_back(p.clone());
-                        }
-                        *perfect_list = new_list;
+                        perfect_list.insert(perfect_idx, interval);
                     } else {
                         perfect_list.push_back(interval);
                     }

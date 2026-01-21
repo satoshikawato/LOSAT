@@ -4341,21 +4341,6 @@ pub fn run(args: BlastnArgs) -> Result<()> {
                                     (0, false)
                                 };
 
-                                // NCBI reference: ncbi-blast/c++/src/algo/blast/core/na_ungapped.c:656-672
-                                // ```c
-                                // last_hit = hit_level_array[real_diag].last_hit;
-                                // s_off_pos = s_off + diag_table->offset;
-                                // if (s_off_pos < last_hit) return 0;
-                                // ```
-                                // In LOSAT, we use kmer_start directly (0-based), but need to add offset for comparison
-                                let s_off_pos = kmer_start + diag_offset as usize;
-                                let s_off_pos_i32 = s_off_pos as i32;
-
-                                // Hit within explored area should be rejected
-                                if s_off_pos_i32 < last_hit {
-                                    continue;
-                                }
-
                                 // NCBI reference: na_ungapped.c:1081-1140
                                 // For two-stage lookup, verify word_length match BEFORE ungapped extension
                                 // This is done by left+right extension from the lut_word_length match position
@@ -4536,6 +4521,22 @@ pub fn run(args: BlastnArgs) -> Result<()> {
                                     // word_length == lut_word_length, no extension needed
                                     (q_pos_usize, s_pos)
                                 };
+
+                                // NCBI reference: ncbi-blast/c++/src/algo/blast/core/na_ungapped.c:656-672
+                                // ```c
+                                // last_hit = hit_level_array[real_diag].last_hit;
+                                // s_off_pos = s_off + diag_table->offset;
+                                // if (s_off_pos < last_hit) return 0;
+                                // ```
+                                // NCBI calls s_Blastn* after left/right word-length verification, so s_off is
+                                // already adjusted by ext_left (s_BlastNaExtendDirect).
+                                let s_off_pos = s_ext_start + diag_offset as usize;
+                                let s_off_pos_i32 = s_off_pos as i32;
+
+                                // Hit within explored area should be rejected
+                                if s_off_pos_i32 < last_hit {
+                                    continue;
+                                }
 
                                 // NCBI reference: na_ungapped.c:674-683
                                 // After word_length verification, call type_of_word for two-hit mode

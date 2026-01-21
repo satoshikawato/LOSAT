@@ -670,11 +670,18 @@ pub(crate) fn build_unmasked_ranges(seq_len: usize, masks: &[MaskedInterval]) ->
         return vec![(0, seq_len)];
     }
 
-    let mut sorted = masks.to_vec();
-    sorted.sort_by_key(|m| m.start);
+    // NCBI reference: ncbi-blast/c++/src/algo/blast/api/dust_filter.cpp:121-126
+    // ```c
+    // const int kTopFlags = CSeq_loc::fStrand_Ignore|CSeq_loc::fMerge_All|CSeq_loc::fSort;
+    // ...
+    // query_masks->Merge(kTopFlags, 0);
+    // ```
+    // Dust/lowercase masks are merged and sorted before lookup building.
+    debug_assert!(masks.windows(2).all(|w| w[0].start <= w[1].start));
+
     let mut ranges: Vec<(usize, usize)> = Vec::new();
     let mut cursor = 0usize;
-    for mask in sorted {
+    for mask in masks {
         let start = mask.start.min(seq_len);
         let end = mask.end.min(seq_len);
         if start > cursor {

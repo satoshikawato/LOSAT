@@ -129,9 +129,20 @@ pub fn extend_hit_ungapped_exact_ncbi(
         }
         q_idx -= 1;
 
-        let ch = s_seq_packed[s_idx as usize];
+        // NCBI reference: ncbi-blast/c++/src/algo/blast/core/na_ungapped.c:188-199
+        // ```c
+        // ch = *s;
+        // if ((sum += matrix[*--q][NCBI2NA_UNPACK_BASE(ch, base)]) > 0) {
+        //     q_beg = q;
+        //     score += sum;
+        //     sum = 0;
+        // }
+        // ```
+        // SAFETY: q_idx and s_idx are kept within bounds by the loop guards
+        // and mirror NCBI's pointer arithmetic on query/subject buffers.
+        let ch = unsafe { *s_seq_packed.get_unchecked(s_idx as usize) };
         let s_base = ncbi2na_unpack_base(ch, base as u8) as usize;
-        let q_code = q_seq[q_idx as usize] as usize;
+        let q_code = unsafe { *q_seq.get_unchecked(q_idx as usize) } as usize;
         sum += matrix[q_code * BLASTNA_SIZE + s_base];
         if sum > 0 {
             q_beg = q_idx;
@@ -170,9 +181,20 @@ pub fn extend_hit_ungapped_exact_ncbi(
         if q_idx as usize >= q_len {
             break;
         }
-        let ch = s_seq_packed[s_idx as usize];
+        // NCBI reference: ncbi-blast/c++/src/algo/blast/core/na_ungapped.c:217-229
+        // ```c
+        // ch = *s;
+        // if ((sum += matrix[*q++][NCBI2NA_UNPACK_BASE(ch, base)]) > 0) {
+        //     q_end = q;
+        //     score += sum;
+        //     ...
+        // }
+        // ```
+        // SAFETY: q_idx and s_idx stay within bounds under the same
+        // conditions as the NCBI pointer-based loop.
+        let ch = unsafe { *s_seq_packed.get_unchecked(s_idx as usize) };
         let s_base = ncbi2na_unpack_base(ch, base as u8) as usize;
-        let q_code = q_seq[q_idx as usize] as usize;
+        let q_code = unsafe { *q_seq.get_unchecked(q_idx as usize) } as usize;
         q_idx += 1;
 
         sum += matrix[q_code * BLASTNA_SIZE + s_base];
@@ -256,11 +278,19 @@ pub fn extend_hit_ungapped_approx_ncbi(
         if q_idx < 4 || s_idx == 0 {
             break;
         }
-        let s_byte = s_seq_packed[(s_idx - 1) as usize];
-        let q_byte = (q_seq[(q_idx - 4) as usize] << 6)
-            | (q_seq[(q_idx - 3) as usize] << 4)
-            | (q_seq[(q_idx - 2) as usize] << 2)
-            | q_seq[(q_idx - 1) as usize];
+        // NCBI reference: ncbi-blast/c++/src/algo/blast/core/na_ungapped.c:292-304
+        // ```c
+        // Uint1 s_byte = s[-1];
+        // Uint1 q_byte = (q[-4] << 6) | (q[-3] << 4) | (q[-2] << 2) | q[-1];
+        // ```
+        // SAFETY: q_idx >= 4 and s_idx > 0 are enforced by the loop guard.
+        let s_byte = unsafe { *s_seq_packed.get_unchecked((s_idx - 1) as usize) };
+        let q_byte = unsafe {
+            (*q_seq.get_unchecked((q_idx - 4) as usize) << 6)
+                | (*q_seq.get_unchecked((q_idx - 3) as usize) << 4)
+                | (*q_seq.get_unchecked((q_idx - 2) as usize) << 2)
+                | *q_seq.get_unchecked((q_idx - 1) as usize)
+        };
         sum += score_table[(q_byte ^ s_byte) as usize];
         if sum > 0 {
             new_q = q_idx - 4;
@@ -285,11 +315,20 @@ pub fn extend_hit_ungapped_approx_ncbi(
     new_q = q_idx;
 
     for _ in 0..right_len {
-        let s_byte = s_seq_packed[s_idx as usize];
-        let q_byte = (q_seq[q_idx as usize] << 6)
-            | (q_seq[(q_idx + 1) as usize] << 4)
-            | (q_seq[(q_idx + 2) as usize] << 2)
-            | q_seq[(q_idx + 3) as usize];
+        // NCBI reference: ncbi-blast/c++/src/algo/blast/core/na_ungapped.c:322-334
+        // ```c
+        // Uint1 s_byte = s[0];
+        // Uint1 q_byte = (q[0] << 6) | (q[1] << 4) | (q[2] << 2) | q[3];
+        // ```
+        // SAFETY: q_idx + 3 and s_idx stay within bounds by the loop length
+        // derived from query/subject lengths (NCBI uses the same limits).
+        let s_byte = unsafe { *s_seq_packed.get_unchecked(s_idx as usize) };
+        let q_byte = unsafe {
+            (*q_seq.get_unchecked(q_idx as usize) << 6)
+                | (*q_seq.get_unchecked((q_idx + 1) as usize) << 4)
+                | (*q_seq.get_unchecked((q_idx + 2) as usize) << 2)
+                | *q_seq.get_unchecked((q_idx + 3) as usize)
+        };
         sum += score_table[(q_byte ^ s_byte) as usize];
         if sum > 0 {
             new_q = q_idx + 3;

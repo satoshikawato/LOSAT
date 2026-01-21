@@ -42,7 +42,18 @@ const ENCODE_TABLE: [u8; 256] = {
     table
 };
 
-// NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_encoding.c:85-93 (IUPACNA_TO_BLASTNA)
+// NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_encoding.c:85-93
+// ```c
+// const Uint1 IUPACNA_TO_BLASTNA[128]={
+// 15,15,15,15,15,15,15,15,15,15,15,15,15,15,15,15,
+// 15,15,15,15,15,15,15,15,15,15,15,15,15,15,15,15,
+// 15,15,15,15,15,15,15,15,15,15,15,15,15,15,15,15,
+// 15,15,15,15,15,15,15,15,15,15,15,15,15,15,15,15,
+// 15, 0,10, 1,11,15,15, 2,12,15,15, 7,15, 6,14,15,
+// 15,15, 4, 9, 3,15,13, 8,15, 5,15,15,15,15,15,15,
+// 15,15,15,15,15,15,15,15,15,15,15,15,15,15,15,15,
+// 15,15,15,15,15,15,15,15,15,15,15,15,15,15,15,15};
+// ```
 const IUPACNA_TO_BLASTNA: [u8; 128] = [
     15, 15, 15, 15, 15, 15, 15, 15, 15, 15, 15, 15, 15, 15, 15, 15,
     15, 15, 15, 15, 15, 15, 15, 15, 15, 15, 15, 15, 15, 15, 15, 15,
@@ -53,6 +64,33 @@ const IUPACNA_TO_BLASTNA: [u8; 128] = [
     15, 15, 15, 15, 15, 15, 15, 15, 15, 15, 15, 15, 15, 15, 15, 15,
     15, 15, 15, 15, 15, 15, 15, 15, 15, 15, 15, 15, 15, 15, 15, 15,
 ];
+
+// NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_encoding.c:85-93
+// ```c
+// const Uint1 IUPACNA_TO_BLASTNA[128]={
+// 15,15,15,15,15,15,15,15,15,15,15,15,15,15,15,15,
+// 15,15,15,15,15,15,15,15,15,15,15,15,15,15,15,15,
+// 15,15,15,15,15,15,15,15,15,15,15,15,15,15,15,15,
+// 15,15,15,15,15,15,15,15,15,15,15,15,15,15,15,15,
+// 15, 0,10, 1,11,15,15, 2,12,15,15, 7,15, 6,14,15,
+// 15,15, 4, 9, 3,15,13, 8,15, 5,15,15,15,15,15,15,
+// 15,15,15,15,15,15,15,15,15,15,15,15,15,15,15,15,
+// 15,15,15,15,15,15,15,15,15,15,15,15,15,15,15,15};
+// ```
+const IUPACNA_TO_BLASTNA_FULL: [u8; 256] = {
+    let mut table = [15u8; 256];
+    let mut i = 0usize;
+    while i < 128 {
+        table[i] = IUPACNA_TO_BLASTNA[i];
+        i += 1;
+    }
+    let mut c = b'a';
+    while c <= b'z' {
+        table[c as usize] = table[(c - 32) as usize];
+        c += 1;
+    }
+    table
+};
 
 /// Lookup table for decoding 2-bit codes to ASCII nucleotides
 const DECODE_TABLE: [u8; 4] = [b'A', b'C', b'G', b'T'];
@@ -358,34 +396,67 @@ pub fn encode_base(base: u8) -> Option<u8> {
 }
 
 /// Encode a single ASCII nucleotide to BLASTNA (IUPAC) code.
-/// NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_encoding.c:85-93 (IUPACNA_TO_BLASTNA)
+/// NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_encoding.c:85-93
+/// ```c
+/// const Uint1 IUPACNA_TO_BLASTNA[128]={
+/// 15,15,15,15,15,15,15,15,15,15,15,15,15,15,15,15,
+/// 15,15,15,15,15,15,15,15,15,15,15,15,15,15,15,15,
+/// 15,15,15,15,15,15,15,15,15,15,15,15,15,15,15,15,
+/// 15,15,15,15,15,15,15,15,15,15,15,15,15,15,15,15,
+/// 15, 0,10, 1,11,15,15, 2,12,15,15, 7,15, 6,14,15,
+/// 15,15, 4, 9, 3,15,13, 8,15, 5,15,15,15,15,15,15,
+/// 15,15,15,15,15,15,15,15,15,15,15,15,15,15,15,15,
+/// 15,15,15,15,15,15,15,15,15,15,15,15,15,15,15,15};
+/// ```
 #[inline]
 fn encode_iupac_base_to_blastna(base: u8) -> u8 {
-    let upper = base.to_ascii_uppercase();
-    let idx = upper as usize;
-    if idx < IUPACNA_TO_BLASTNA.len() {
-        IUPACNA_TO_BLASTNA[idx]
-    } else {
-        15
-    }
+    IUPACNA_TO_BLASTNA_FULL[base as usize]
 }
 
 /// Encode an ASCII sequence to BLASTNA (IUPAC) codes (one base per byte).
-/// NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_encoding.c:85-93 (IUPACNA_TO_BLASTNA)
+/// NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_encoding.c:85-93
+/// ```c
+/// const Uint1 IUPACNA_TO_BLASTNA[128]={
+/// 15,15,15,15,15,15,15,15,15,15,15,15,15,15,15,15,
+/// 15,15,15,15,15,15,15,15,15,15,15,15,15,15,15,15,
+/// 15,15,15,15,15,15,15,15,15,15,15,15,15,15,15,15,
+/// 15,15,15,15,15,15,15,15,15,15,15,15,15,15,15,15,
+/// 15, 0,10, 1,11,15,15, 2,12,15,15, 7,15, 6,14,15,
+/// 15,15, 4, 9, 3,15,13, 8,15, 5,15,15,15,15,15,15,
+/// 15,15,15,15,15,15,15,15,15,15,15,15,15,15,15,15,
+/// 15,15,15,15,15,15,15,15,15,15,15,15,15,15,15,15};
+/// ```
 pub fn encode_iupac_to_blastna(seq: &[u8]) -> Vec<u8> {
-    seq.iter().map(|&base| encode_iupac_base_to_blastna(base)).collect()
+    let mut out = Vec::with_capacity(seq.len());
+    for &base in seq {
+        out.push(IUPACNA_TO_BLASTNA_FULL[base as usize]);
+    }
+    out
 }
 
 /// Encode an ASCII sequence to ncbi2na 2-bit codes (one base per byte).
-/// NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_util.c:476-489 (BlastCompressBlastnaSequence old_seq[i] & 3)
+/// NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_util.c:476-489
+/// ```c
+/// new_seq[i] = (Uint1)(old_seq[i] & 3);
+/// ```
 pub fn encode_iupac_to_ncbi2na(seq: &[u8]) -> Vec<u8> {
-    seq.iter()
-        .map(|&base| encode_iupac_base_to_blastna(base) & 0x03)
-        .collect()
+    let mut out = Vec::with_capacity(seq.len());
+    for &base in seq {
+        out.push(IUPACNA_TO_BLASTNA_FULL[base as usize] & 0x03);
+    }
+    out
 }
 
 /// Encode an ASCII sequence to packed ncbi2na (4 bases per byte, remainder count in last byte).
-/// NCBI reference: ncbi-blast/c++/src/algo/blast/api/blast_setup_cxx.cpp:1154-1187 (CompressNcbi2na)
+/// NCBI reference: ncbi-blast/c++/src/algo/blast/api/blast_setup_cxx.cpp:1154-1187
+/// ```c
+/// for (i=0; i<length; i += 4) {
+///     Uint1 encoded = (Uint1)(seq[i] & 3) << 6;
+///     ...
+///     packed[j++] = encoded;
+/// }
+/// packed[j] |= (Uint1)(length % 4);
+/// ```
 pub fn encode_iupac_to_ncbi2na_packed(seq: &[u8]) -> Vec<u8> {
     if seq.is_empty() {
         return Vec::new();
@@ -398,10 +469,10 @@ pub fn encode_iupac_to_ncbi2na_packed(seq: &[u8]) -> Vec<u8> {
     let mut byte_idx = 0usize;
 
     while i + COMPRESSION_RATIO <= seq.len() {
-        let a = (encode_iupac_base_to_blastna(seq[i]) & 0x03) << 6;
-        let b = (encode_iupac_base_to_blastna(seq[i + 1]) & 0x03) << 4;
-        let c = (encode_iupac_base_to_blastna(seq[i + 2]) & 0x03) << 2;
-        let d = (encode_iupac_base_to_blastna(seq[i + 3]) & 0x03) << 0;
+        let a = (IUPACNA_TO_BLASTNA_FULL[seq[i] as usize] & 0x03) << 6;
+        let b = (IUPACNA_TO_BLASTNA_FULL[seq[i + 1] as usize] & 0x03) << 4;
+        let c = (IUPACNA_TO_BLASTNA_FULL[seq[i + 2] as usize] & 0x03) << 2;
+        let d = (IUPACNA_TO_BLASTNA_FULL[seq[i + 3] as usize] & 0x03) << 0;
         packed[byte_idx] = a | b | c | d;
         byte_idx += 1;
         i += COMPRESSION_RATIO;
@@ -415,7 +486,7 @@ pub fn encode_iupac_to_ncbi2na_packed(seq: &[u8]) -> Vec<u8> {
             2 => 2,
             _ => 0,
         };
-        let code = encode_iupac_base_to_blastna(seq[i]) & 0x03;
+        let code = IUPACNA_TO_BLASTNA_FULL[seq[i] as usize] & 0x03;
         last_byte |= code << bit_shift;
         i += 1;
     }

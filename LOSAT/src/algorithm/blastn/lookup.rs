@@ -483,6 +483,15 @@ pub struct PvDirectLookup {
     pv: Vec<PvArrayType>,
     /// Log2 compression factor for the PV array (pv_array_bts)
     pv_array_bts: usize,
+    // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_nalookup.c:1088-1108
+    // ```c
+    // longest_chain = 2;
+    // for (index = 0; index < mb_lt->hashsize / kCompressionFactor; index++)
+    //     longest_chain = MAX(longest_chain, helper_array[index]);
+    // mb_lt->longest_chain = longest_chain;
+    // ```
+    /// Longest chain length for any lookup bucket (used to size offset buffers).
+    longest_chain: usize,
     /// Word size used for this lookup table
     #[allow(dead_code)]
     word_size: usize,
@@ -531,6 +540,12 @@ impl PvDirectLookup {
         } else {
             &[]
         }
+    }
+
+    /// Get the maximum number of hits for any lookup bucket.
+    #[inline(always)]
+    pub fn longest_chain(&self) -> usize {
+        self.longest_chain
     }
 }
 
@@ -589,6 +604,22 @@ impl TwoStageLookup {
     pub fn scan_step(&self) -> usize {
         (self.word_length as isize - self.lut_word_length as isize + 1).max(1) as usize
     }
+
+    /// Get the longest chain length for sizing offset buffers.
+    // NCBI reference: ncbi-blast/c++/src/algo/blast/core/lookup_wrap.c:255-288
+    // ```c
+    // switch (lookup->lut_type) {
+    // case eMBLookupTable:
+    //     offset_array_size = OFFSET_ARRAY_SIZE +
+    //         ((BlastMBLookupTable*)lookup->lut)->longest_chain;
+    //     break;
+    // ...
+    // }
+    // ```
+    #[inline(always)]
+    pub fn longest_chain(&self) -> usize {
+        self.pv_lookup.longest_chain()
+    }
 }
 
 /// Pack (q_idx, diag) into a single u64 key for faster HashMap operations
@@ -639,11 +670,18 @@ pub(crate) fn build_unmasked_ranges(seq_len: usize, masks: &[MaskedInterval]) ->
         return vec![(0, seq_len)];
     }
 
-    let mut sorted = masks.to_vec();
-    sorted.sort_by_key(|m| m.start);
+    // NCBI reference: ncbi-blast/c++/src/algo/blast/api/dust_filter.cpp:121-126
+    // ```c
+    // const int kTopFlags = CSeq_loc::fStrand_Ignore|CSeq_loc::fMerge_All|CSeq_loc::fSort;
+    // ...
+    // query_masks->Merge(kTopFlags, 0);
+    // ```
+    // Dust/lowercase masks are merged and sorted before lookup building.
+    debug_assert!(masks.windows(2).all(|w| w[0].start <= w[1].start));
+
     let mut ranges: Vec<(usize, usize)> = Vec::new();
     let mut cursor = 0usize;
-    for mask in sorted {
+    for mask in masks {
         let start = mask.start.min(seq_len);
         let end = mask.end.min(seq_len);
         if start > cursor {
@@ -858,6 +896,20 @@ pub fn build_pv_direct_lookup(
     //     q_off = lookup->next_pos[q_off];
     // }
     // ```
+    // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_nalookup.c:1088-1108
+    // ```c
+    // longest_chain = 2;
+    // for (index = 0; index < mb_lt->hashsize / kCompressionFactor; index++)
+    //     longest_chain = MAX(longest_chain, helper_array[index]);
+    // mb_lt->longest_chain = longest_chain;
+    // ```
+    let longest_chain = counts
+        .iter()
+        .copied()
+        .max()
+        .unwrap_or(0)
+        .max(2) as usize;
+
     let mut offsets: Vec<u32> = vec![0; table_size + 1];
     let mut total_hits: u32 = 0;
     for idx in 0..table_size {
@@ -976,6 +1028,7 @@ pub fn build_pv_direct_lookup(
         lookup: DirectKmerLookup { offsets, hits },
         pv,
         pv_array_bts,
+        longest_chain,
         word_size: safe_word_size,
     }
 }

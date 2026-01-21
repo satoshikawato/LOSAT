@@ -128,7 +128,7 @@ impl Default for ReportContext {
 /// Reference: ncbi-blast/c++/src/objtools/align_format/tabular.cpp:1328-1338
 pub fn format_evalue(e_value: f64, ncbi_compat: bool) -> String {
     if ncbi_compat {
-        format_evalue_ncbi(e_value)
+        format_evalue_ncbi_tabular(e_value)
     } else {
         // LOSAT default formatting
         if e_value == 0.0 {
@@ -141,13 +141,9 @@ pub fn format_evalue(e_value: f64, ncbi_compat: bool) -> String {
     }
 }
 
-/// Format E-value exactly as NCBI BLAST does
+/// Format E-value exactly as NCBI BLAST does (base GetScoreString logic).
 ///
-/// This implements the exact formatting logic from:
-/// 1. align_format_util.cpp:GetScoreString() - base formatting
-/// 2. tabular.cpp:SetScores() - override for tabular output in [1e-180, 0.0009)
-///
-/// NCBI GetScoreString() (align_format_util.cpp:965-984):
+/// NCBI reference: ncbi-blast/c++/src/objtools/align_format/align_format_util.cpp:965-983
 /// ```c
 /// if (evalue < 1.0e-180) {
 ///     snprintf(evalue_buf, sizeof(evalue_buf), "0.0");
@@ -165,26 +161,16 @@ pub fn format_evalue(e_value: f64, ncbi_compat: bool) -> String {
 ///     snprintf(evalue_buf, sizeof(evalue_buf), "%2.0lf", evalue);
 /// }
 /// ```
-///
-/// tabular.cpp:SetScores() override (tabular.cpp:1335-1337):
-/// ```c
-/// if ((evalue >= 1.0e-180) && (evalue < 0.0009)){
-///     m_Evalue = NStr::DoubleToString(evalue, 2, NStr::fDoubleScientific);
-/// }
-/// ```
 pub fn format_evalue_ncbi(e_value: f64) -> String {
     if e_value == 0.0 || e_value < 1.0e-180 {
         // NCBI: snprintf(evalue_buf, sizeof(evalue_buf), "0.0");
         "0.0".to_string()
     } else if e_value < 1.0e-99 {
         // NCBI: "%2.0le" -> e.g., "1e-100"
-        // But tabular.cpp overrides for [1e-180, 0.0009) to use %.2e
-        // For < 1e-99, use "%2.0le" style (no decimal in mantissa)
         format!("{:.0e}", e_value)
     } else if e_value < 0.0009 {
-        // tabular.cpp overrides: NStr::DoubleToString(evalue, 2, fDoubleScientific)
-        // -> "%.2e" format, e.g., "1.23e-50"
-        format!("{:.2e}", e_value)
+        // NCBI: "%3.0le" -> e.g., "1e-50"
+        format!("{:.0e}", e_value)
     } else if e_value < 0.1 {
         // NCBI: "%4.3lf" -> e.g., "0.005"
         format!("{:.3}", e_value)
@@ -197,6 +183,25 @@ pub fn format_evalue_ncbi(e_value: f64) -> String {
     } else {
         // NCBI: "%2.0lf" -> e.g., "100"
         format!("{:.0}", e_value)
+    }
+}
+
+/// Format E-value exactly as NCBI BLAST does for tabular output.
+///
+/// NCBI reference: ncbi-blast/c++/src/objtools/align_format/tabular.cpp:1332-1337
+/// ```c
+/// CAlignFormatUtil::GetScoreString(evalue, bit_score, 0, score, m_Evalue, ...);
+/// if ((evalue >= 1.0e-180) && (evalue < 0.0009)){
+///     m_Evalue = NStr::DoubleToString(evalue, 2, NStr::fDoubleScientific);
+/// }
+/// ```
+pub fn format_evalue_ncbi_tabular(e_value: f64) -> String {
+    if e_value == 0.0 || e_value < 1.0e-180 {
+        "0.0".to_string()
+    } else if e_value < 0.0009 {
+        format!("{:.2e}", e_value)
+    } else {
+        format_evalue_ncbi(e_value)
     }
 }
 
@@ -223,6 +228,87 @@ pub fn format_bitscore_ncbi(bit_score: f64) -> String {
     } else {
         // NCBI: "%4.1lf" -> one decimal place
         format!("{:.1}", bit_score)
+    }
+}
+
+/// Write E-value exactly as NCBI BLAST does (base GetScoreString logic).
+///
+/// NCBI reference: ncbi-blast/c++/src/objtools/align_format/align_format_util.cpp:965-983
+/// ```c
+/// if (evalue < 1.0e-180) {
+///     snprintf(evalue_buf, sizeof(evalue_buf), "0.0");
+/// } else if (evalue < 1.0e-99) {
+///     snprintf(evalue_buf, sizeof(evalue_buf), "%2.0le", evalue);
+/// } else if (evalue < 0.0009) {
+///     snprintf(evalue_buf, sizeof(evalue_buf), "%3.0le", evalue);
+/// } else if (evalue < 0.1) {
+///     snprintf(evalue_buf, sizeof(evalue_buf), "%4.3lf", evalue);
+/// } else if (evalue < 1.0) {
+///     snprintf(evalue_buf, sizeof(evalue_buf), "%3.2lf", evalue);
+/// } else if (evalue < 10.0) {
+///     snprintf(evalue_buf, sizeof(evalue_buf), "%2.1lf", evalue);
+/// } else {
+///     snprintf(evalue_buf, sizeof(evalue_buf), "%2.0lf", evalue);
+/// }
+/// ```
+fn write_evalue_ncbi_base<W: Write>(writer: &mut W, e_value: f64) -> io::Result<()> {
+    if e_value == 0.0 || e_value < 1.0e-180 {
+        write!(writer, "0.0")
+    } else if e_value < 1.0e-99 {
+        write!(writer, "{:.0e}", e_value)
+    } else if e_value < 0.0009 {
+        write!(writer, "{:.0e}", e_value)
+    } else if e_value < 0.1 {
+        write!(writer, "{:.3}", e_value)
+    } else if e_value < 1.0 {
+        write!(writer, "{:.2}", e_value)
+    } else if e_value < 10.0 {
+        write!(writer, "{:.1}", e_value)
+    } else {
+        write!(writer, "{:.0}", e_value)
+    }
+}
+
+/// Write E-value exactly as NCBI BLAST does for tabular output.
+///
+/// NCBI reference: ncbi-blast/c++/src/objtools/align_format/tabular.cpp:1332-1337
+/// ```c
+/// CAlignFormatUtil::GetScoreString(evalue, bit_score, 0, score, m_Evalue, ...);
+/// if ((evalue >= 1.0e-180) && (evalue < 0.0009)){
+///     m_Evalue = NStr::DoubleToString(evalue, 2, NStr::fDoubleScientific);
+/// }
+/// ```
+fn write_evalue_ncbi_tabular<W: Write>(writer: &mut W, e_value: f64) -> io::Result<()> {
+    if e_value == 0.0 || e_value < 1.0e-180 {
+        write!(writer, "0.0")
+    } else if e_value < 0.0009 {
+        write!(writer, "{:.2e}", e_value)
+    } else {
+        write_evalue_ncbi_base(writer, e_value)
+    }
+}
+
+/// Write bit score exactly as NCBI BLAST does.
+///
+/// NCBI reference: ncbi-blast/c++/src/objtools/align_format/align_format_util.cpp:986-993
+/// ```c
+/// if (bit_score > 99999){
+///     snprintf(bit_score_buf, sizeof(bit_score_buf), "%5.3le", bit_score);
+/// } else if (bit_score > 99.9){
+///     snprintf(bit_score_buf, sizeof(bit_score_buf), "%3.0ld",
+///         (long)bit_score);
+/// } else {
+///     snprintf(bit_score_buf, sizeof(bit_score_buf), kBitScoreFormat.c_str(),
+///         bit_score);
+/// }
+/// ```
+fn write_bitscore_ncbi<W: Write>(writer: &mut W, bit_score: f64) -> io::Result<()> {
+    if bit_score > 99999.0 {
+        write!(writer, "{:.3e}", bit_score)
+    } else if bit_score > 99.9 {
+        write!(writer, "{:.0}", bit_score)
+    } else {
+        write!(writer, "{:.1}", bit_score)
     }
 }
 
@@ -267,6 +353,64 @@ pub fn format_hit(hit: &Hit, config: &OutputConfig) -> String {
     )
 }
 
+/// Write a single hit as outfmt 6 line without building an intermediate String.
+// NCBI reference: ncbi-blast/c++/src/objtools/align_format/tabular.cpp:1100-1108
+// ```c
+// void CBlastTabularInfo::Print()
+// {
+//     ITERATE(list<ETabularField>, iter, m_FieldsToShow) {
+//         if (iter != m_FieldsToShow.begin())
+//             m_Ostream << m_FieldDelimiter;
+//         x_PrintField(*iter);
+//     }
+//     m_Ostream << "\n";
+// }
+// ```
+pub fn write_hit_fields<W: Write>(
+    writer: &mut W,
+    query_id: &str,
+    subject_id: &str,
+    identity: f64,
+    length: usize,
+    mismatch: usize,
+    gapopen: usize,
+    q_start: usize,
+    q_end: usize,
+    s_start: usize,
+    s_end: usize,
+    e_value: f64,
+    bit_score: f64,
+    config: &OutputConfig,
+) -> io::Result<()> {
+    let delim = config.delimiter;
+    write!(writer, "{}{}{}", query_id, delim, subject_id)?;
+    write!(writer, "{}{:.prec$}", delim, identity, prec = config.identity_decimals)?;
+    write!(writer, "{}{}", delim, length)?;
+    write!(writer, "{}{}", delim, mismatch)?;
+    write!(writer, "{}{}", delim, gapopen)?;
+    write!(writer, "{}{}", delim, q_start)?;
+    write!(writer, "{}{}", delim, q_end)?;
+    write!(writer, "{}{}", delim, s_start)?;
+    write!(writer, "{}{}", delim, s_end)?;
+    write!(writer, "{}", delim)?;
+    if config.ncbi_evalue_format {
+        write_evalue_ncbi_tabular(writer, e_value)?;
+    } else if e_value == 0.0 {
+        write!(writer, "0.0")?;
+    } else if e_value < 0.001 {
+        write!(writer, "{:.2e}", e_value)?;
+    } else {
+        write!(writer, "{:.6}", e_value)?;
+    }
+    write!(writer, "{}", delim)?;
+    if config.ncbi_evalue_format {
+        write_bitscore_ncbi(writer, bit_score)?;
+    } else {
+        write!(writer, "{:.prec$}", bit_score, prec = config.bit_score_decimals)?;
+    }
+    writeln!(writer)
+}
+
 /// Write hits to a writer in outfmt 6 format
 pub fn write_outfmt6<W: Write>(
     hits: &[Hit],
@@ -283,9 +427,35 @@ pub fn write_outfmt6<W: Write>(
         )?;
     }
 
-    // Write each hit
+    // NCBI reference: ncbi-blast/c++/src/objtools/align_format/tabular.cpp:1100-1108
+    // ```c
+    // void CBlastTabularInfo::Print()
+    // {
+    //     ITERATE(list<ETabularField>, iter, m_FieldsToShow) {
+    //         if (iter != m_FieldsToShow.begin())
+    //             m_Ostream << m_FieldDelimiter;
+    //         x_PrintField(*iter);
+    //     }
+    //     m_Ostream << "\n";
+    // }
+    // ```
     for hit in hits {
-        writeln!(writer, "{}", format_hit(hit, config))?;
+        write_hit_fields(
+            writer,
+            hit.query_id.as_ref(),
+            hit.subject_id.as_ref(),
+            hit.identity,
+            hit.length,
+            hit.mismatch,
+            hit.gapopen,
+            hit.q_start,
+            hit.q_end,
+            hit.s_start,
+            hit.s_end,
+            hit.e_value,
+            hit.bit_score,
+            config,
+        )?;
     }
 
     Ok(())
@@ -356,9 +526,35 @@ pub fn write_outfmt7<W: Write>(
     // Write header comments
     write_outfmt7_header(writer, context, hits.len())?;
     
-    // Write each hit (same format as outfmt 6)
+    // NCBI reference: ncbi-blast/c++/src/objtools/align_format/tabular.cpp:1100-1108
+    // ```c
+    // void CBlastTabularInfo::Print()
+    // {
+    //     ITERATE(list<ETabularField>, iter, m_FieldsToShow) {
+    //         if (iter != m_FieldsToShow.begin())
+    //             m_Ostream << m_FieldDelimiter;
+    //         x_PrintField(*iter);
+    //     }
+    //     m_Ostream << "\n";
+    // }
+    // ```
     for hit in hits {
-        writeln!(writer, "{}", format_hit(hit, config))?;
+        write_hit_fields(
+            writer,
+            hit.query_id.as_ref(),
+            hit.subject_id.as_ref(),
+            hit.identity,
+            hit.length,
+            hit.mismatch,
+            hit.gapopen,
+            hit.q_start,
+            hit.q_end,
+            hit.s_start,
+            hit.s_end,
+            hit.e_value,
+            hit.bit_score,
+            config,
+        )?;
     }
     
     Ok(())
@@ -412,8 +608,35 @@ pub fn write_outfmt7_grouped<W: Write>(
         let qhits = query_hits.get(query_id).unwrap();
         write_outfmt7_header(writer, &query_context, qhits.len())?;
         
+        // NCBI reference: ncbi-blast/c++/src/objtools/align_format/tabular.cpp:1100-1108
+        // ```c
+        // void CBlastTabularInfo::Print()
+        // {
+        //     ITERATE(list<ETabularField>, iter, m_FieldsToShow) {
+        //         if (iter != m_FieldsToShow.begin())
+        //             m_Ostream << m_FieldDelimiter;
+        //         x_PrintField(*iter);
+        //     }
+        //     m_Ostream << "\n";
+        // }
+        // ```
         for hit in qhits {
-            writeln!(writer, "{}", format_hit(hit, config))?;
+            write_hit_fields(
+                writer,
+                hit.query_id.as_ref(),
+                hit.subject_id.as_ref(),
+                hit.identity,
+                hit.length,
+                hit.mismatch,
+                hit.gapopen,
+                hit.q_start,
+                hit.q_end,
+                hit.s_start,
+                hit.s_end,
+                hit.e_value,
+                hit.bit_score,
+                config,
+            )?;
         }
     }
     
@@ -568,56 +791,70 @@ mod tests {
     #[test]
     fn test_format_evalue_ncbi_zero() {
         // Values at or below 0.0 should return "0.0"
-        assert_eq!(format_evalue_ncbi(0.0), "0.0");
+        assert_eq!(format_evalue_ncbi_tabular(0.0), "0.0");
     }
 
     #[test]
     fn test_format_evalue_ncbi_very_small() {
         // < 1e-180: "0.0"
-        assert_eq!(format_evalue_ncbi(1e-200), "0.0");
-        assert_eq!(format_evalue_ncbi(1e-181), "0.0");
+        assert_eq!(format_evalue_ncbi_tabular(1e-200), "0.0");
+        assert_eq!(format_evalue_ncbi_tabular(1e-181), "0.0");
     }
 
     #[test]
     fn test_format_evalue_ncbi_small_scientific() {
-        // < 1e-99: "%2.0le" style (no decimal in mantissa)
-        assert_eq!(format_evalue_ncbi(1e-100), "1e-100");
-        assert_eq!(format_evalue_ncbi(1e-150), "1e-150");
-        // Note: Rust may format 5e-100 differently
+        // [1e-180, 0.0009): tabular override uses "%.2e"
+        assert_eq!(format_evalue_ncbi_tabular(1e-100), "1.00e-100");
+        assert_eq!(format_evalue_ncbi_tabular(1e-150), "1.00e-150");
     }
 
     #[test]
     fn test_format_evalue_ncbi_medium_scientific() {
-        // [1e-99, 0.0009): "%.2e" format (tabular.cpp override)
-        assert_eq!(format_evalue_ncbi(1e-50), "1.00e-50");
-        assert_eq!(format_evalue_ncbi(1.23e-20), "1.23e-20");
-        assert_eq!(format_evalue_ncbi(5e-5), "5.00e-5");
+        // [1e-180, 0.0009): "%.2e" format (tabular.cpp override)
+        assert_eq!(format_evalue_ncbi_tabular(1e-50), "1.00e-50");
+        assert_eq!(format_evalue_ncbi_tabular(1.23e-20), "1.23e-20");
+        assert_eq!(format_evalue_ncbi_tabular(5e-5), "5.00e-5");
     }
 
     #[test]
     fn test_format_evalue_ncbi_decimal() {
         // [0.0009, 0.1): "%4.3lf" - 3 decimal places
-        assert_eq!(format_evalue_ncbi(0.001), "0.001");
-        assert_eq!(format_evalue_ncbi(0.005), "0.005");
-        assert_eq!(format_evalue_ncbi(0.099), "0.099");
+        assert_eq!(format_evalue_ncbi_tabular(0.001), "0.001");
+        assert_eq!(format_evalue_ncbi_tabular(0.005), "0.005");
+        assert_eq!(format_evalue_ncbi_tabular(0.099), "0.099");
         
         // [0.1, 1.0): "%3.2lf" - 2 decimal places
-        assert_eq!(format_evalue_ncbi(0.1), "0.10");
-        assert_eq!(format_evalue_ncbi(0.5), "0.50");
-        assert_eq!(format_evalue_ncbi(0.99), "0.99");
+        assert_eq!(format_evalue_ncbi_tabular(0.1), "0.10");
+        assert_eq!(format_evalue_ncbi_tabular(0.5), "0.50");
+        assert_eq!(format_evalue_ncbi_tabular(0.99), "0.99");
         
         // [1.0, 10.0): "%2.1lf" - 1 decimal place
-        assert_eq!(format_evalue_ncbi(1.0), "1.0");
-        assert_eq!(format_evalue_ncbi(5.5), "5.5");
-        assert_eq!(format_evalue_ncbi(9.9), "9.9");
+        assert_eq!(format_evalue_ncbi_tabular(1.0), "1.0");
+        assert_eq!(format_evalue_ncbi_tabular(5.5), "5.5");
+        assert_eq!(format_evalue_ncbi_tabular(9.9), "9.9");
     }
 
     #[test]
     fn test_format_evalue_ncbi_integer() {
         // >= 10.0: "%2.0lf" - no decimal
-        assert_eq!(format_evalue_ncbi(10.0), "10");
-        assert_eq!(format_evalue_ncbi(100.0), "100");
-        assert_eq!(format_evalue_ncbi(1000.0), "1000");
+        assert_eq!(format_evalue_ncbi_tabular(10.0), "10");
+        assert_eq!(format_evalue_ncbi_tabular(100.0), "100");
+        assert_eq!(format_evalue_ncbi_tabular(1000.0), "1000");
+    }
+
+    // NCBI reference: ncbi-blast/c++/src/objtools/align_format/align_format_util.cpp:965-975
+    // ```c
+    // if (evalue < 1.0e-99) {
+    //     snprintf(evalue_buf, sizeof(evalue_buf), "%2.0le", evalue);
+    // } else if (evalue < 0.0009) {
+    //     snprintf(evalue_buf, sizeof(evalue_buf), "%3.0le", evalue);
+    // }
+    // ```
+    #[test]
+    fn test_format_evalue_ncbi_base_scientific() {
+        // Base GetScoreString formatting uses no decimals for < 0.0009
+        assert_eq!(format_evalue_ncbi(1e-100), "1e-100");
+        assert_eq!(format_evalue_ncbi(1e-50), "1e-50");
     }
 
     // ==========================================================================
@@ -657,7 +894,7 @@ mod tests {
     fn test_format_evalue_compat() {
         // Test the wrapper function with ncbi_compat flag
         assert_eq!(format_evalue(0.0, true), "0.0");
-        assert_eq!(format_evalue(1e-100, true), "1e-100");
+        assert_eq!(format_evalue(1e-100, true), "1.00e-100");
         assert_eq!(format_evalue(1e-50, true), "1.00e-50");
         assert_eq!(format_evalue(0.5, true), "0.50");
         assert_eq!(format_evalue(5.5, true), "5.5");

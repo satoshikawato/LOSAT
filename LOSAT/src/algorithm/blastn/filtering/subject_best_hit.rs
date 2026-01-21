@@ -6,7 +6,7 @@
 //! This filter removes HSPs in overlapping query ranges after the best scoring HSP.
 //! For BLASTN, it also performs cross-strand filtering.
 
-use crate::common::Hit;
+use super::super::hsp::BlastnHsp;
 
 /// Default range difference for subject best hit filtering
 /// NCBI reference: blast_options.h:1211-1212
@@ -29,7 +29,7 @@ const MAX_RANGE_DIFF: usize = 3;
 /// Arguments:
 /// - `hits`: Vector of HSPs, already sorted by score descending
 /// - `query_len`: Length of the query sequence (for cross-strand coordinate flipping)
-pub fn subject_best_hit(hits: &mut Vec<Hit>, query_len: usize) {
+pub fn subject_best_hit(hits: &mut Vec<BlastnHsp>, query_len: usize) {
     if hits.len() <= 1 {
         return;
     }
@@ -41,7 +41,7 @@ pub fn subject_best_hit(hits: &mut Vec<Hit>, query_len: usize) {
     //    *q_start = *q_end - hsp->query.end + hsp->query.offset + 1;
     // }
     // ```
-    let q_offsets = |h: &Hit| {
+    let q_offsets = |h: &BlastnHsp| {
         if h.query_length > 0 && h.query_frame < 0 {
             (
                 h.query_length.saturating_sub(h.q_end),
@@ -53,7 +53,7 @@ pub fn subject_best_hit(hits: &mut Vec<Hit>, query_len: usize) {
             (h.q_start.saturating_sub(1), h.q_end)
         }
     };
-    let context = |h: &Hit| -> u32 {
+    let context = |h: &BlastnHsp| -> u32 {
         h.q_idx * 2 + if h.query_frame < 0 { 1 } else { 0 }
     };
 
@@ -187,21 +187,18 @@ mod tests {
         s_end: usize,
         score: i32,
         query_frame: i32,
-    ) -> Hit {
-        // NCBI reference: ncbi-blast/c++/include/algo/blast/core/blast_hits.h:153-166
+    ) -> BlastnHsp {
+        // NCBI reference: ncbi-blast/c++/include/algo/blast/core/blast_hits.h:125-148
         // ```c
-        // typedef struct BlastHSPList {
-        //    Int4 oid;/**< The ordinal id of the subject sequence this HSP list is for */
-        //    Int4 query_index; /**< Index of the query which this HSPList corresponds to.
-        //                       Set to 0 if not applicable */
-        //    BlastHSP** hsp_array; /**< Array of pointers to individual HSPs */
-        //    Int4 hspcnt; /**< Number of HSPs saved */
-        //    ...
-        // } BlastHSPList;
+        // typedef struct BlastHSP {
+        //    Int4 score;
+        //    double evalue;
+        //    BlastSeg query;
+        //    BlastSeg subject;
+        //    Int4 context;
+        // } BlastHSP;
         // ```
-        Hit {
-            query_id: "q1".into(),
-            subject_id: "s1".into(),
+        BlastnHsp {
             identity: 100.0,
             length: q_end - q_start + 1,
             mismatch: 0,

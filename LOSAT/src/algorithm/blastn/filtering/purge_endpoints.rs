@@ -14,7 +14,8 @@
 //!
 //! Reference: blast_traceback.c:637-669
 
-use crate::common::{GapEditOp, Hit};
+use crate::common::GapEditOp;
+use super::super::hsp::BlastnHsp;
 use rustc_hash::FxHashMap;
 
 // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_hits.c:1122-1132
@@ -111,7 +112,7 @@ fn adjust_blastn_offsets(
 /// # Returns
 /// * `true` if trimming was successful
 /// * `false` if no gap_info or cut point not found
-pub fn cut_off_gap_edit_script(hit: &mut Hit, q_cut: usize, s_cut: usize, cut_begin: bool) -> bool {
+pub fn cut_off_gap_edit_script(hit: &mut BlastnHsp, q_cut: usize, s_cut: usize, cut_begin: bool) -> bool {
     // NCBI reference: blast_hits.c:2392-2452
     let gap_info = match &hit.gap_info {
         Some(info) if !info.is_empty() => info.clone(),
@@ -347,7 +348,7 @@ pub fn cut_off_gap_edit_script(hit: &mut Hit, q_cut: usize, s_cut: usize, cut_be
 /// # Returns
 /// Returns the index of the first trimmed HSP (for re-evaluation in purge=false mode).
 /// In purge=true mode, this is always equal to the final hit count.
-pub fn purge_hsps_with_common_endpoints_ex(hits: Vec<Hit>, purge: bool) -> (Vec<Hit>, usize) {
+pub fn purge_hsps_with_common_endpoints_ex(hits: Vec<BlastnHsp>, purge: bool) -> (Vec<BlastnHsp>, usize) {
     let len = hits.len();
     if len <= 1 {
         return (hits, len);
@@ -368,13 +369,13 @@ pub fn purge_hsps_with_common_endpoints_ex(hits: Vec<Hit>, purge: bool) -> (Vec<
     // We must group hits by subject oid (s_idx) and process each group separately.
 
     // Group hits by subject oid (s_idx)
-    let mut subject_groups: FxHashMap<u32, Vec<Hit>> = FxHashMap::default();
+    let mut subject_groups: FxHashMap<u32, Vec<BlastnHsp>> = FxHashMap::default();
     for hit in hits {
         subject_groups.entry(hit.s_idx).or_default().push(hit);
     }
 
     // Process each subject group independently and collect results
-    let mut result: Vec<Hit> = Vec::new();
+    let mut result: Vec<BlastnHsp> = Vec::new();
     let mut total_extra_start = 0usize;
 
     for (_subject_idx, group_hits) in subject_groups {
@@ -397,7 +398,7 @@ pub fn purge_hsps_with_common_endpoints_ex(hits: Vec<Hit>, purge: bool) -> (Vec<
 }
 
 /// Backward-compatible wrapper that always uses purge=true mode.
-pub fn purge_hsps_with_common_endpoints(hits: Vec<Hit>) -> Vec<Hit> {
+pub fn purge_hsps_with_common_endpoints(hits: Vec<BlastnHsp>) -> Vec<BlastnHsp> {
     let (result, _) = purge_hsps_with_common_endpoints_ex(hits, true);
     result
 }
@@ -412,7 +413,7 @@ pub fn purge_hsps_with_common_endpoints(hits: Vec<Hit>) -> Vec<Hit> {
 ///
 /// # Returns
 /// Tuple of (result hits, index of first trimmed HSP for re-evaluation)
-fn purge_hsps_for_subject_ex(mut hits: Vec<Hit>, purge: bool) -> (Vec<Hit>, usize) {
+fn purge_hsps_for_subject_ex(mut hits: Vec<BlastnHsp>, purge: bool) -> (Vec<BlastnHsp>, usize) {
     let len = hits.len();
     if len <= 1 {
         return (hits, len);
@@ -425,7 +426,7 @@ fn purge_hsps_for_subject_ex(mut hits: Vec<Hit>, purge: bool) -> (Vec<Hit>, usiz
     let mut end_trimmed = 0usize;
 
     // Track trimmed HSPs that need re-evaluation (when purge=false)
-    let mut trimmed_hits: Vec<Hit> = Vec::new();
+    let mut trimmed_hits: Vec<BlastnHsp> = Vec::new();
 
     // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_hits.c:1122-1132
     // ```c
@@ -434,7 +435,7 @@ fn purge_hsps_for_subject_ex(mut hits: Vec<Hit>, purge: bool) -> (Vec<Hit>, usiz
     //    *q_start = *q_end - hsp->query.end + hsp->query.offset + 1;
     // }
     // ```
-    let q_offsets = |h: &Hit| {
+    let q_offsets = |h: &BlastnHsp| {
         if h.query_length > 0 && h.query_frame < 0 {
             (
                 h.query_length.saturating_sub(h.q_end),
@@ -446,13 +447,13 @@ fn purge_hsps_for_subject_ex(mut hits: Vec<Hit>, purge: bool) -> (Vec<Hit>, usiz
             (h.q_start.saturating_sub(1), h.q_end)
         }
     };
-    let context = |h: &Hit| -> u32 {
+    let context = |h: &BlastnHsp| -> u32 {
         h.q_idx * 2 + if h.query_frame < 0 { 1 } else { 0 }
     };
     // NCBI uses CANONICAL coordinates: subject.offset < subject.end always
     // ASSERT(hsp->subject.offset < hsp->subject.end) at blast_engine.c:1312
-    let s_offset = |h: &Hit| h.s_start.min(h.s_end).saturating_sub(1);  // NCBI subject.offset
-    let s_end_canon = |h: &Hit| h.s_start.max(h.s_end);  // NCBI subject.end
+    let s_offset = |h: &BlastnHsp| h.s_start.min(h.s_end).saturating_sub(1);  // NCBI subject.offset
+    let s_end_canon = |h: &BlastnHsp| h.s_start.max(h.s_end);  // NCBI subject.end
 
     // Pass 1: Remove HSPs with common START positions
     // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_hits.c:2285-2318
@@ -639,21 +640,18 @@ mod tests {
     // ```
     #[test]
     fn test_purge_common_start_keeps_longer_end_on_score_tie() {
-        fn make_hit(q_end: usize, s_end: usize) -> Hit {
-            // NCBI reference: ncbi-blast/c++/include/algo/blast/core/blast_hits.h:153-166
+        fn make_hit(q_end: usize, s_end: usize) -> BlastnHsp {
+            // NCBI reference: ncbi-blast/c++/include/algo/blast/core/blast_hits.h:125-148
             // ```c
-            // typedef struct BlastHSPList {
-            //    Int4 oid;/**< The ordinal id of the subject sequence this HSP list is for */
-            //    Int4 query_index; /**< Index of the query which this HSPList corresponds to.
-            //                       Set to 0 if not applicable */
-            //    BlastHSP** hsp_array; /**< Array of pointers to individual HSPs */
-            //    Int4 hspcnt; /**< Number of HSPs saved */
-            //    ...
-            // } BlastHSPList;
+            // typedef struct BlastHSP {
+            //    Int4 score;
+            //    double evalue;
+            //    BlastSeg query;
+            //    BlastSeg subject;
+            //    Int4 context;
+            // } BlastHSP;
             // ```
-            Hit {
-                query_id: "q1".into(),
-                subject_id: "s1".into(),
+            BlastnHsp {
                 identity: 100.0,
                 length: q_end,
                 mismatch: 0,
@@ -785,7 +783,7 @@ pub fn hsp_test(
 /// }
 /// ```
 pub fn blast_hsp_test_identity_and_length(
-    hit: &mut Hit,
+    hit: &mut BlastnHsp,
     q_seq: &[u8],
     s_seq: &[u8],
     percent_identity: f64,
@@ -915,7 +913,7 @@ pub struct ReevalParams {
 /// * `true` if HSP should be DELETED (score < cutoff or no valid region found)
 /// * `false` if HSP is OK (score >= cutoff, hit is updated in place)
 pub fn reevaluate_hsp_with_ambiguities_gapped(
-    hit: &mut Hit,
+    hit: &mut BlastnHsp,
     q_seq: &[u8],
     s_seq: &[u8],
     reward: i32,
@@ -954,7 +952,7 @@ pub fn reevaluate_hsp_with_ambiguities_gapped(
 /// Extended version with optional Karlin parameters for E-value recalculation.
 /// NCBI reference: blast_traceback.c:234-250 Blast_HSPListGetEvalues, Blast_HSPListGetBitScores
 pub fn reevaluate_hsp_with_ambiguities_gapped_ex(
-    hit: &mut Hit,
+    hit: &mut BlastnHsp,
     q_seq: &[u8],
     s_seq: &[u8],
     reward: i32,

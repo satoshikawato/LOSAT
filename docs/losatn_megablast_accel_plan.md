@@ -98,6 +98,11 @@ Source: `docs/blastn_performance_investigation.md`
 ## Implementation Plan (Parity-First, Single-Thread)
 The order below aims to maximize impact while preserving NCBI parity.
 
+## Status (Current)
+- Phase 0: Completed (timing instrumentation in `LOSAT/src/algorithm/blastn/blast_engine/run.rs`).
+- Phase 1: Completed (NCBI-style hitlist update/heap, prelim hitlist sizing, per-subject hitlists, post-traceback filter/sort/prune order; unit tests added in `LOSAT/src/algorithm/blastn/hsp.rs`).
+- Phases 2-6: Pending.
+
 ### Phase 0: Baseline and Instrumentation (No Behavior Change)
 Goal: measure and attribute runtime without affecting output.
 - Add timing hooks guarded by `LOSAT_TIMING=1` and only when output is unchanged.
@@ -125,6 +130,12 @@ Goal: reduce per-hit allocation and prune early, matching NCBI.
 NCBI parity checkpoints:
 - `blast_hits.h` and `blast_hits.c` for data structures and trim logic.
 - `blast_traceback.c` for pruning order and comparator behavior.
+
+### New Findings (Phase 1)
+- `GetPrelimHitlistSize` expands preliminary hitlist size for gapped searches and honors `ADAPTIVE_CBS`; this impacts prune order and must be mirrored exactly.
+- `Blast_HitListUpdate` heapifies by e-value after sorting each `BlastHSPList` by e-value; using score order here changes pruning decisions.
+- `Blast_HSPListSubjectBestHit` assumes the list is already score-sorted and does not sort internally; calling it after any re-ordering changes results.
+- `Blast_TrimHSPListByMaxHsps` only truncates and does not recompute `best_evalue`; NCBI keeps the prior value through post-filter sorting.
 
 ### Phase 2: Offset-Pair Buffer Reuse
 Goal: reduce allocator overhead in the hot scan loop.

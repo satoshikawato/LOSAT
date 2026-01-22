@@ -101,7 +101,8 @@ The order below aims to maximize impact while preserving NCBI parity.
 ## Status (Current)
 - Phase 0: Completed (timing instrumentation in `LOSAT/src/algorithm/blastn/blast_engine/run.rs`).
 - Phase 1: Completed (NCBI-style hitlist update/heap, prelim hitlist sizing, per-subject hitlists, post-traceback filter/sort/prune order; unit tests added in `LOSAT/src/algorithm/blastn/hsp.rs`).
-- Phases 2-6: Pending.
+- Phase 2: Completed (offset_pairs preallocated per thread using `GetOffsetArraySize`, reused across chunks).
+- Phases 3-6: Pending.
 
 ### Phase 0: Baseline and Instrumentation (No Behavior Change)
 Goal: measure and attribute runtime without affecting output.
@@ -144,6 +145,9 @@ Goal: reduce allocator overhead in the hot scan loop.
 
 NCBI parity checkpoints:
 - `lookup_wrap.c` for size calculation and buffer lifetime expectations.
+
+### New Findings (Phase 2)
+- `GetOffsetArraySize` sizing can be computed once from the chosen lookup table and reused for all subjects/chunks; this mirrors NCBI's aux-struct allocation model and removes per-chunk reserve calls.
 
 ### Phase 3: Scan Dispatch Simplification
 Goal: avoid per-call dynamic dispatch in scan loop.

@@ -102,7 +102,8 @@ The order below aims to maximize impact while preserving NCBI parity.
 - Phase 0: Completed (timing instrumentation in `LOSAT/src/algorithm/blastn/blast_engine/run.rs`).
 - Phase 1: Completed (NCBI-style hitlist update/heap, prelim hitlist sizing, per-subject hitlists, post-traceback filter/sort/prune order; unit tests added in `LOSAT/src/algorithm/blastn/hsp.rs`).
 - Phase 2: Completed (offset_pairs preallocated per thread using `GetOffsetArraySize`, reused across chunks).
-- Phases 3-6: Pending.
+- Phase 3: Completed (preselected megablast scan routine per subject chunk to avoid per-call dispatch in scan loop).
+- Phases 4-6: Pending.
 
 ### Phase 0: Baseline and Instrumentation (No Behavior Change)
 Goal: measure and attribute runtime without affecting output.
@@ -156,6 +157,9 @@ Goal: avoid per-call dynamic dispatch in scan loop.
 
 NCBI parity checkpoints:
 - `blast_nascan.c` scan selection logic and edge cases.
+
+### New Findings (Phase 3)
+- Scan routine selection can be cached once per subject chunk; masked subjects fall back to the generic scan path (mirrors `BlastChooseNucleotideScanSubjectAny` behavior).
 
 ### Phase 4: Diagonal Table Clearing Optimization
 Goal: avoid full clears on large tables.

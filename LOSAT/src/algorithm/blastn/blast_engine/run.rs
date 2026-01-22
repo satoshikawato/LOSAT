@@ -1877,6 +1877,157 @@ fn scan_subject_kmers_range_mb_11_3mod4<F>(
     }
 }
 
+// NCBI reference: ncbi-blast/c++/src/algo/blast/core/na_ungapped.c:1635-1676
+// ```c
+// scansub = (TNaScanSubjectFunction)lookup->scansub_callback;
+// ...
+// while(s_DetermineScanningOffsets(subject, word_length, lut_word_length, scan_range)) {
+//     hitsfound = scansub(lookup_wrap, subject, offset_pairs, max_hits, &scan_range[1]);
+//     ...
+// }
+// ```
+#[derive(Clone, Copy)]
+enum MbScanSubjectKind {
+    Any,
+    Scan9_1,
+    Scan9_2,
+    Scan10_1,
+    Scan10_2,
+    Scan10_3,
+    Scan11_1Mod4,
+    Scan11_2Mod4,
+    Scan11_3Mod4,
+}
+
+// NCBI reference: ncbi-blast/c++/src/algo/blast/core/na_ungapped.c:1673-1676
+// ```c
+// while(s_DetermineScanningOffsets(subject, word_length, lut_word_length, scan_range)) {
+//     hitsfound = scansub(lookup_wrap, subject, offset_pairs, max_hits, &scan_range[1]);
+// }
+// ```
+#[inline(always)]
+fn scan_subject_kmers_range_mb<F>(
+    kind: MbScanSubjectKind,
+    packed: &[u8],
+    subject_len: usize,
+    lut_word_length: usize,
+    scan_step: usize,
+    subject_masked: bool,
+    start: usize,
+    end: usize,
+    on_kmer: &mut F,
+) where
+    F: FnMut(usize, u64),
+{
+    match kind {
+        MbScanSubjectKind::Any => scan_subject_kmers_range_mb_any(
+            packed,
+            subject_len,
+            lut_word_length,
+            scan_step,
+            subject_masked,
+            start,
+            end,
+            on_kmer,
+        ),
+        MbScanSubjectKind::Scan9_1 => {
+            scan_subject_kmers_range_mb_9_1(packed, subject_len, scan_step, start, end, on_kmer);
+        }
+        MbScanSubjectKind::Scan9_2 => {
+            scan_subject_kmers_range_mb_9_2(packed, subject_len, scan_step, start, end, on_kmer);
+        }
+        MbScanSubjectKind::Scan10_1 => {
+            scan_subject_kmers_range_mb_10_1(packed, subject_len, scan_step, start, end, on_kmer);
+        }
+        MbScanSubjectKind::Scan10_2 => {
+            scan_subject_kmers_range_mb_10_2(packed, subject_len, scan_step, start, end, on_kmer);
+        }
+        MbScanSubjectKind::Scan10_3 => {
+            scan_subject_kmers_range_mb_10_3(packed, subject_len, scan_step, start, end, on_kmer);
+        }
+        MbScanSubjectKind::Scan11_1Mod4 => {
+            scan_subject_kmers_range_mb_11_1mod4(
+                packed,
+                subject_len,
+                scan_step,
+                start,
+                end,
+                on_kmer,
+            );
+        }
+        MbScanSubjectKind::Scan11_2Mod4 => {
+            scan_subject_kmers_range_mb_11_2mod4(
+                packed,
+                subject_len,
+                scan_step,
+                start,
+                end,
+                on_kmer,
+            );
+        }
+        MbScanSubjectKind::Scan11_3Mod4 => {
+            scan_subject_kmers_range_mb_11_3mod4(
+                packed,
+                subject_len,
+                scan_step,
+                start,
+                end,
+                on_kmer,
+            );
+        }
+    }
+}
+
+// NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_nascan.c:2602-2677
+// ```c
+// static void s_MBChooseScanSubject(LookupTableWrap *lookup_wrap)
+// {
+//     ...
+//     switch (mb_lt->lut_word_length) {
+//     case 9:  ...
+//     case 10: ...
+//     case 11: ...
+//     case 12:
+//     case 16:
+//         mb_lt->scansub_callback = (void *)s_MBScanSubject_Any;
+//         break;
+//     }
+// }
+// ```
+#[inline(always)]
+fn choose_mb_scan_subject_kind(lut_word_length: usize, scan_step: usize) -> MbScanSubjectKind {
+    match lut_word_length {
+        9 => {
+            if scan_step == 1 {
+                MbScanSubjectKind::Scan9_1
+            } else if scan_step == 2 {
+                MbScanSubjectKind::Scan9_2
+            } else {
+                MbScanSubjectKind::Any
+            }
+        }
+        10 => {
+            if scan_step == 1 {
+                MbScanSubjectKind::Scan10_1
+            } else if scan_step == 2 {
+                MbScanSubjectKind::Scan10_2
+            } else if scan_step == 3 {
+                MbScanSubjectKind::Scan10_3
+            } else {
+                MbScanSubjectKind::Any
+            }
+        }
+        11 => match scan_step % COMPRESSION_RATIO {
+            0 => MbScanSubjectKind::Any,
+            1 => MbScanSubjectKind::Scan11_1Mod4,
+            2 => MbScanSubjectKind::Scan11_2Mod4,
+            _ => MbScanSubjectKind::Scan11_3Mod4,
+        },
+        12 => MbScanSubjectKind::Any,
+        _ => MbScanSubjectKind::Any,
+    }
+}
+
 // NCBI reference: ncbi-blast/c++/src/algo/blast/core/na_ungapped.c:56-66
 // ```c
 // index &= (mb_lt->hashsize-1);
@@ -1895,15 +2046,6 @@ fn mask_lookup_index(index: u64, lut_word_length: usize) -> u64 {
     index & mask
 }
 
-// NCBI reference: ncbi-blast/c++/src/algo/blast/core/na_ungapped.c:1647-1662
-// ```c
-// scan_range[1] = 0;  /* start pos of scan */
-// scan_range[2] = subject->length - lut_word_length; /* end pos */
-// if (subject->mask_type != eNoSubjMasking) {
-//     scan_range[1] = subject->seq_ranges[0].left + word_length - lut_word_length;
-//     scan_range[2] = subject->seq_ranges[0].right - lut_word_length;
-// }
-// ```
 fn scan_subject_kmers_range<F>(
     packed: &[u8],
     subject_len: usize,
@@ -2043,199 +2185,6 @@ fn scan_subject_kmers_range<F>(
         }
     }
 
-    // NCBI reference: ncbi-blast/c++/src/algo/blast/core/na_ungapped.c:1651-1667
-    // ```c
-    // if (subject->mask_type != eNoSubjMasking) {
-    //     scansub = (TNaScanSubjectFunction)
-    //           BlastChooseNucleotideScanSubjectAny(lookup_wrap);
-    //     ...
-    //     scan_range[1] = subject->seq_ranges[0].left + word_length - lut_word_length;
-    //     scan_range[2] = subject->seq_ranges[0].right - lut_word_length;
-    // }
-    // ```
-    // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_nascan.c:2631-2677
-    // ```c
-    // switch (mb_lt->lut_word_length) {
-    // case 9:
-    //     if (scan_step == 1)
-    //         mb_lt->scansub_callback = (void *)s_MBScanSubject_9_1;
-    //     if (scan_step == 2)
-    //         mb_lt->scansub_callback = (void *)s_MBScanSubject_9_2;
-    //     else
-    //         mb_lt->scansub_callback = (void *)s_MBScanSubject_Any;
-    //     break;
-    // case 10:
-    //     if (scan_step == 1)
-    //         mb_lt->scansub_callback = (void *)s_MBScanSubject_10_1;
-    //     else if (scan_step == 2)
-    //         mb_lt->scansub_callback = (void *)s_MBScanSubject_10_2;
-    //     else if (scan_step == 3)
-    //         mb_lt->scansub_callback = (void *)s_MBScanSubject_10_3;
-    //     else
-    //         mb_lt->scansub_callback = (void *)s_MBScanSubject_Any;
-    //     break;
-    // case 11:
-    //     switch (scan_step % COMPRESSION_RATIO) {
-    //     case 0:
-    //         mb_lt->scansub_callback = (void *)s_MBScanSubject_Any;
-    //         break;
-    //     case 1:
-    //         mb_lt->scansub_callback = (void *)s_MBScanSubject_11_1Mod4;
-    //         break;
-    //     case 2:
-    //         mb_lt->scansub_callback = (void *)s_MBScanSubject_11_2Mod4;
-    //         break;
-    //     case 3:
-    //         mb_lt->scansub_callback = (void *)s_MBScanSubject_11_3Mod4;
-    //         break;
-    //     }
-    //     break;
-    // case 12:
-    // case 16:
-    //     mb_lt->scansub_callback = (void *)s_MBScanSubject_Any;
-    //     break;
-    // }
-    // ```
-    if lut_word_length >= 9 && lut_word_length <= 12 {
-        if subject_masked || start % COMPRESSION_RATIO != 0 {
-            scan_subject_kmers_range_mb_any(
-                packed,
-                subject_len,
-                lut_word_length,
-                scan_step,
-                subject_masked,
-                start,
-                end,
-                on_kmer,
-            );
-            return;
-        }
-
-        match lut_word_length {
-            9 => {
-                if scan_step == 1 {
-                    scan_subject_kmers_range_mb_9_1(
-                        packed,
-                        subject_len,
-                        scan_step,
-                        start,
-                        end,
-                        on_kmer,
-                    );
-                } else if scan_step == 2 {
-                    scan_subject_kmers_range_mb_9_2(
-                        packed,
-                        subject_len,
-                        scan_step,
-                        start,
-                        end,
-                        on_kmer,
-                    );
-                } else {
-                    scan_subject_kmers_range_mb_any(
-                        packed,
-                        subject_len,
-                        lut_word_length,
-                        scan_step,
-                        subject_masked,
-                        start,
-                        end,
-                        on_kmer,
-                    );
-                }
-            }
-            10 => {
-                if scan_step == 1 {
-                    scan_subject_kmers_range_mb_10_1(
-                        packed,
-                        subject_len,
-                        scan_step,
-                        start,
-                        end,
-                        on_kmer,
-                    );
-                } else if scan_step == 2 {
-                    scan_subject_kmers_range_mb_10_2(
-                        packed,
-                        subject_len,
-                        scan_step,
-                        start,
-                        end,
-                        on_kmer,
-                    );
-                } else if scan_step == 3 {
-                    scan_subject_kmers_range_mb_10_3(
-                        packed,
-                        subject_len,
-                        scan_step,
-                        start,
-                        end,
-                        on_kmer,
-                    );
-                } else {
-                    scan_subject_kmers_range_mb_any(
-                        packed,
-                        subject_len,
-                        lut_word_length,
-                        scan_step,
-                        subject_masked,
-                        start,
-                        end,
-                        on_kmer,
-                    );
-                }
-            }
-            11 => match scan_step % COMPRESSION_RATIO {
-                0 => scan_subject_kmers_range_mb_any(
-                    packed,
-                    subject_len,
-                    lut_word_length,
-                    scan_step,
-                    subject_masked,
-                    start,
-                    end,
-                    on_kmer,
-                ),
-                1 => scan_subject_kmers_range_mb_11_1mod4(
-                    packed,
-                    subject_len,
-                    scan_step,
-                    start,
-                    end,
-                    on_kmer,
-                ),
-                2 => scan_subject_kmers_range_mb_11_2mod4(
-                    packed,
-                    subject_len,
-                    scan_step,
-                    start,
-                    end,
-                    on_kmer,
-                ),
-                _ => scan_subject_kmers_range_mb_11_3mod4(
-                    packed,
-                    subject_len,
-                    scan_step,
-                    start,
-                    end,
-                    on_kmer,
-                ),
-            },
-            12 => scan_subject_kmers_range_mb_any(
-                packed,
-                subject_len,
-                lut_word_length,
-                scan_step,
-                subject_masked,
-                start,
-                end,
-                on_kmer,
-            ),
-            _ => {}
-        }
-        return;
-    }
-
     // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_nascan.c:1598-1605
     // ```c
     // for (; scan_range[0] <= scan_range[1]; scan_range[0] += scan_step) {
@@ -2319,6 +2268,26 @@ fn scan_subject_kmers_with_ranges<F>(
         scan_range[2] = subject_len as i32 - lut_word_length as i32;
     }
 
+    // NCBI reference: ncbi-blast/c++/src/algo/blast/core/na_ungapped.c:1651-1667
+    // ```c
+    // if (subject->mask_type != eNoSubjMasking) {
+    //     scansub = (TNaScanSubjectFunction)
+    //           BlastChooseNucleotideScanSubjectAny(lookup_wrap);
+    //     ...
+    //     scan_range[1] = subject->seq_ranges[0].left + word_length - lut_word_length;
+    //     scan_range[2] = subject->seq_ranges[0].right - lut_word_length;
+    // }
+    // ```
+    let mb_scan_kind = if (9..=12).contains(&lut_word_length) {
+        Some(if subject_masked {
+            MbScanSubjectKind::Any
+        } else {
+            choose_mb_scan_subject_kind(lut_word_length, scan_step)
+        })
+    } else {
+        None
+    };
+
     while determine_scanning_offsets(
         seq_ranges,
         word_length as i32,
@@ -2328,16 +2297,30 @@ fn scan_subject_kmers_with_ranges<F>(
         let start = scan_range[1];
         let end = scan_range[2];
         if start >= 0 && end >= 0 {
-            scan_subject_kmers_range(
-                packed,
-                subject_len,
-                lut_word_length,
-                scan_step,
-                subject_masked,
-                start as usize,
-                end as usize,
-                &mut on_kmer,
-            );
+            if let Some(kind) = mb_scan_kind {
+                scan_subject_kmers_range_mb(
+                    kind,
+                    packed,
+                    subject_len,
+                    lut_word_length,
+                    scan_step,
+                    subject_masked,
+                    start as usize,
+                    end as usize,
+                    &mut on_kmer,
+                );
+            } else {
+                scan_subject_kmers_range(
+                    packed,
+                    subject_len,
+                    lut_word_length,
+                    scan_step,
+                    subject_masked,
+                    start as usize,
+                    end as usize,
+                    &mut on_kmer,
+                );
+            }
         }
         scan_range[1] = scan_range[2] + 1;
     }

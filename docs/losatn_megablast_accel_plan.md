@@ -90,9 +90,9 @@ Source: `docs/blastn_performance_investigation.md`
 - NCBI reference: `align_format_util.cpp` (formatting helpers)
 
 6) Subject encoding strategy
-- Issue: LOSAT encodes all subjects up-front.
+- Issue: LOSAT previously encoded all subjects up-front; single-thread runs now stream subjects.
 - NCBI: streams subject chunks on demand.
-- LOSAT file: `LOSAT/src/algorithm/blastn/coordination.rs`
+- LOSAT files: `LOSAT/src/algorithm/blastn/blast_engine/run.rs`, `LOSAT/src/algorithm/blastn/coordination.rs`
 - NCBI reference: `blast_engine.c`
 
 ## Implementation Plan (Parity-First, Single-Thread)
@@ -105,7 +105,7 @@ The order below aims to maximize impact while preserving NCBI parity.
 - Phase 3: Completed (preselected megablast scan routine per subject chunk to avoid per-call dispatch in scan loop).
 - Phase 4: Pending.
 - Phase 5: Completed (direct buffered outfmt6 writes in `LOSAT/src/common.rs`, NCBI-style scientific formatting + tests in `LOSAT/src/report/outfmt6.rs`).
-- Phase 6: In Progress (on-demand subject encoding in engine; chunk-level packing TBD).
+- Phase 6: Completed (subject metadata scan + streamed single-thread subjects; limit_lookup/parallel still preload).
 
 ### Phase 0: Baseline and Instrumentation (No Behavior Change)
 Goal: measure and attribute runtime without affecting output.
@@ -192,9 +192,10 @@ NCBI parity checkpoints:
 - `blast_engine.c` subject chunk lifecycle, boundary conditions.
 
 ### New Findings (Phase 6)
-- On-demand subject encoding now happens inside `LOSAT/src/algorithm/blastn/blast_engine/run.rs`; the precomputed `subject_encodings` storage was removed from `LOSAT/src/algorithm/blastn/coordination.rs`.
-- No parity issues observed from the move, but this is still full-subject encoding (not per chunk) and `read_sequences` still loads all subjects into memory, so true streaming remains pending.
-- `docs/blastn_performance_investigation.md` still references `subject_encodings` and should be updated when Phase 6 is fully complete.
+- Subject sequences now stream from FASTA in single-thread runs, with per-subject encoding inside `LOSAT/src/algorithm/blastn/blast_engine/run.rs`.
+- Subject metadata (IDs, db length/count) is scanned in `LOSAT/src/algorithm/blastn/coordination.rs`; limit_lookup/parallel paths still preload subjects.
+- `docs/blastn_performance_investigation.md` updated to remove `subject_encodings` references.
+- Recheck: no remaining `subject_encodings` usage; single-thread streaming now does a metadata pass plus a processing pass over the FASTA.
 
 ## Acceptance Criteria
 Performance:

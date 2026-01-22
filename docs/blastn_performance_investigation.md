@@ -47,11 +47,11 @@
 - Impact: significant overhead when output is large (megablast tends to be output-heavy).
 
 ### 6) Subject encoding and chunk handling are more eager
-- LOSAT pre-encodes all subjects into `blastna` and `ncbi2na_packed` vectors up front.
-  - LOSAT: `LOSAT/src/algorithm/blastn/coordination.rs:738-749`.
+- LOSAT now streams subject records in single-thread runs and encodes per subject in `run.rs`; limit_lookup/parallel still preload subjects.
+  - LOSAT: `LOSAT/src/algorithm/blastn/blast_engine/run.rs`, `LOSAT/src/algorithm/blastn/coordination.rs`.
 - NCBI streams subject chunks via `s_GetNextSubjectChunk` and processes incrementally.
   - NCBI: `blast_engine.c:478-500`.
-- Impact: upfront memory bandwidth and allocation cost (especially for large subjects or many sequences).
+- Impact: reduced upfront memory bandwidth and allocation cost; remaining eager behavior is limited to limit_lookup/parallel paths.
 
 ### 7) Parallel path has aggregation overhead
 - LOSAT's parallel path sends `Vec<Hit>` through a channel to a writer thread which concatenates all hits.
@@ -102,8 +102,7 @@
 - Align with NCBI's incremental subject chunking (`s_GetNextSubjectChunk`).
   - NCBI: `blast_engine.c:478-500`.
 - Expected benefit: lower upfront encoding cost and peak memory.
-- LOSAT targets:
-  - `LOSAT/src/algorithm/blastn/coordination.rs` (`subject_encodings`).
+- Status: completed for single-thread via streamed subjects + per-subject encoding in `LOSAT/src/algorithm/blastn/blast_engine/run.rs`.
 
 ### G) Remove per-hit `String` assembly in outfmt6
 - Write directly to the output buffer with numeric formatting and without intermediate strings.

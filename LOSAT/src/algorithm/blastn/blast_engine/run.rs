@@ -41,7 +41,16 @@ use super::super::extension::{
 };
 use crate::utils::dust::MaskedInterval;
 use super::super::constants::TWO_HIT_WINDOW;
-use super::super::coordination::{configure_task, finalize_task_config, read_sequences, prepare_sequence_data, build_lookup_tables};
+use super::super::coordination::{
+    build_lookup_tables,
+    collect_lowercase_masks,
+    configure_task,
+    finalize_task_config,
+    prepare_sequence_data,
+    read_queries,
+    scan_subjects_metadata,
+    subject_metadata_from_records,
+};
 use super::super::lookup::{build_unmasked_ranges, reverse_complement};
 use super::super::ncbi_cutoffs::{compute_blastn_cutoff_score, GAP_TRIGGER_BIT_SCORE_NUCL};
 use super::super::blast_extend::DiagStruct;
@@ -3555,8 +3564,44 @@ pub fn run(args: BlastnArgs) -> Result<()> {
     }
 
     // Read sequences
-    let (queries, query_ids, subjects) = read_sequences(&args)?;
-    if queries.is_empty() || subjects.is_empty() {
+    let (queries, query_ids) = read_queries(&args)?;
+    if queries.is_empty() {
+        return Ok(());
+    }
+    // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_nalookup.c:1312-1325
+    // ```c
+    // if (lookup_options->db_filter) {
+    //    s_FillPV(query, location, mb_lt, lookup_options);
+    //    s_ScanSubjectForWordCounts(seqsrc, mb_lt, counts,
+    //                               lookup_options->max_db_word_count);
+    // }
+    // ```
+    let load_subjects = use_parallel || args.limit_lookup;
+    // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_engine.c:1401-1427
+    // ```c
+    // memset((void*) &seq_arg, 0, sizeof(seq_arg));
+    // seq_arg.encoding = eBlastEncodingProtein;
+    // db_length = BlastSeqSrcGetTotLen(seq_src);
+    // itr = BlastSeqSrcIteratorNewEx(MAX(BlastSeqSrcGetNumSeqs(seq_src)/100,1));
+    // while ( (seq_arg.oid = BlastSeqSrcIteratorNext(seq_src, itr))
+    //        != BLAST_SEQSRC_EOF) {
+    //     if (BlastSeqSrcGetSequence(seq_src, &seq_arg) < 0) {
+    //         continue;
+    //     }
+    // }
+    // ```
+    let subject_records: Option<Vec<bio::io::fasta::Record>> = if load_subjects {
+        let subject_reader = bio::io::fasta::Reader::from_file(&args.subject)?;
+        Some(subject_reader.records().filter_map(|r| r.ok()).collect())
+    } else {
+        None
+    };
+    let subject_metadata = if let Some(subjects) = subject_records.as_ref() {
+        subject_metadata_from_records(subjects)
+    } else {
+        scan_subjects_metadata(&args)?
+    };
+    if subject_metadata.db_num_seqs == 0 {
         return Ok(());
     }
 
@@ -3567,7 +3612,7 @@ pub fn run(args: BlastnArgs) -> Result<()> {
     //   sequences are retieved in ncbistdaa/ncbi2na encodings respectively. */
     // seq_arg.encoding = eBlastEncodingProtein;
     // ```
-    let seq_data = prepare_sequence_data(&args, queries, query_ids, subjects);
+    let seq_data = prepare_sequence_data(&args, queries, query_ids, subject_metadata);
 
     // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_hits.c:2589-2593
     // ```c
@@ -3603,17 +3648,9 @@ pub fn run(args: BlastnArgs) -> Result<()> {
     );
     let subject_ids_arc = Arc::new(
         seq_data
-            .subjects
+            .subject_ids
             .iter()
-            .map(|record| {
-                Arc::<str>::from(
-                    record
-                        .id()
-                        .split_whitespace()
-                        .next()
-                        .unwrap_or("unknown"),
-                )
-            })
+            .map(|id| Arc::<str>::from(id.as_str()))
             .collect::<Vec<Arc<str>>>(),
     );
 
@@ -3806,13 +3843,23 @@ pub fn run(args: BlastnArgs) -> Result<()> {
     // pv_size = (Int4)(mb_lt->hashsize >> PV_ARRAY_BTS);
     // mb_lt->pv_array_bts = ilog2(mb_lt->hashsize / pv_size);
     // ```
+    // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_nalookup.c:1312-1325
+    // ```c
+    // if (lookup_options->db_filter) {
+    //    s_FillPV(query, location, mb_lt, lookup_options);
+    //    s_ScanSubjectForWordCounts(seqsrc, mb_lt, counts,
+    //                               lookup_options->max_db_word_count);
+    // }
+    // ```
+    let subjects_for_lookup: &[bio::io::fasta::Record] =
+        subject_records.as_deref().unwrap_or(&[]);
     let (lookup_tables, scan_step) = build_lookup_tables(
         &config,
         &args,
         &query_context_records,
         &query_context_masks,
         &query_context_offsets,
-        &seq_data.subjects,
+        subjects_for_lookup,
         approx_table_entries,
     );
 
@@ -3866,8 +3913,14 @@ pub fn run(args: BlastnArgs) -> Result<()> {
     } else {
         None
     };
+    // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_engine.c:1407-1409
+    // ```c
+    // db_length = BlastSeqSrcGetTotLen(seq_src);
+    // itr = BlastSeqSrcIteratorNewEx(MAX(BlastSeqSrcGetNumSeqs(seq_src)/100,1));
+    // ```
+    let subject_count = seq_data.db_num_seqs as u64;
     let progress_bar = if use_parallel {
-        let bar = ProgressBar::new(seq_data.subjects.len() as u64);
+        let bar = ProgressBar::new(subject_count);
         bar.set_style(
             ProgressStyle::default_bar()
                 .template("{spinner:.green} [{elapsed_precise}] [{bar:40.cyan/blue}] {pos}/{len}")
@@ -3964,14 +4017,6 @@ pub fn run(args: BlastnArgs) -> Result<()> {
     let query_eff_searchsp_ref = &query_eff_searchsp;
     let diag_array_lengths_ref = &diag_array_lengths;
     let diag_masks_ref = &diag_masks;
-    // NCBI reference: ncbi-blast/c++/src/algo/blast/api/blast_setup_cxx.cpp:812-826
-    // ```c
-    // if (subjects.GetMask(i).NotEmpty()) {
-    //     s_SeqLoc2MaskedSubjRanges(...);
-    //     BlastSeqBlkSetSeqRanges(..., eSoftSubjMasking);
-    // }
-    // ```
-    let subject_masks_ref = &seq_data.subject_masks;
     // NCBI reference: ncbi-blast/c++/include/algo/blast/core/blast_hits.h:153-166
     // ```c
     // typedef struct BlastHSPList {
@@ -3984,6 +4029,14 @@ pub fn run(args: BlastnArgs) -> Result<()> {
     // } BlastHSPList;
     // ```
     let subject_ids_ref = Arc::clone(&subject_ids_arc);
+    // NCBI reference: ncbi-blast/c++/src/algo/blast/blastinput/blast_args.cpp:2547-2556
+    // ```c
+    // const bool use_lcase_masks = args.Exist(kArgUseLCaseMasking)
+    //     ? bool(args[kArgUseLCaseMasking])
+    //     : kDfltArgUseLCaseMasking;
+    // m_Scope = ReadSequencesToBlast(... use_lcase_masks, subjects, ...);
+    // ```
+    let lcase_masking = args.lcase_masking;
 
     // Capture config values for use in closure
     let effective_word_size = config.effective_word_size;
@@ -4133,6 +4186,25 @@ pub fn run(args: BlastnArgs) -> Result<()> {
             //     scan_range[2] = subject->seq_ranges[0].right - lut_word_length;
             // }
             // ```
+            // NCBI reference: ncbi-blast/c++/src/objtools/readers/fasta.cpp:856-874
+            // ```c
+            // case 'a': case 'b': case 'c': case 'd':
+            // case 'g': case 'h':
+            // ...
+            //     char_type = eCharType_MaskedNonGap;
+            //     break;
+            // ```
+            // NCBI reference: ncbi-blast/c++/src/objtools/readers/fasta.cpp:1079-1089
+            // ```c
+            // void CFastaReader::x_OpenMask(void)
+            // {
+            //     m_MaskRangeStart = GetCurrentPos(ePosWithGapsAndSegs);
+            // }
+            // void CFastaReader::x_CloseMask(void)
+            // {
+            //     m_CurrentMask->SetPacked_int().AddInterval(...);
+            // }
+            // ```
             // NCBI reference: ncbi-blast/c++/src/algo/blast/api/blast_setup_cxx.cpp:812-826
             // ```c
             // if (subjects.GetMask(i).NotEmpty()) {
@@ -4140,13 +4212,14 @@ pub fn run(args: BlastnArgs) -> Result<()> {
             //     BlastSeqBlkSetSeqRanges(..., eSoftSubjMasking);
             // }
             // ```
-            let subject_masks = subject_masks_ref
-                .get(s_idx)
-                .map(|m| m.as_slice())
-                .unwrap_or(&[]);
+            let subject_masks = if lcase_masking {
+                collect_lowercase_masks(s_seq_full)
+            } else {
+                Vec::new()
+            };
             let subject_masked = !subject_masks.is_empty();
             let soft_ranges = if subject_masked {
-                build_subject_seq_ranges_from_masks(subject_masks, s_len_full)
+                build_subject_seq_ranges_from_masks(subject_masks.as_slice(), s_len_full)
             } else {
                 vec![(0i32, s_len_full as i32)]
             };
@@ -7358,7 +7431,20 @@ pub fn run(args: BlastnArgs) -> Result<()> {
             )
         });
 
-        seq_data.subjects
+        // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_engine.c:1409-1427
+        // ```c
+        // itr = BlastSeqSrcIteratorNewEx(MAX(BlastSeqSrcGetNumSeqs(seq_src)/100,1));
+        // while ( (seq_arg.oid = BlastSeqSrcIteratorNext(seq_src, itr))
+        //        != BLAST_SEQSRC_EOF) {
+        //     if (BlastSeqSrcGetSequence(seq_src, &seq_arg) < 0) {
+        //         continue;
+        //     }
+        // }
+        // ```
+        let subject_records_ref = subject_records
+            .as_ref()
+            .expect("subject records must be loaded for parallel search");
+        subject_records_ref
             .par_iter()
             .enumerate()
             .for_each_init(
@@ -7519,17 +7605,44 @@ pub fn run(args: BlastnArgs) -> Result<()> {
     //   (BlastOffsetPair*) malloc(offset_array_size * sizeof(BlastOffsetPair));
     // ```
     let mut subject_scratch = SubjectScratch::new(queries_ref.len(), offset_array_size);
-    for (s_idx, s_record) in seq_data.subjects.iter().enumerate() {
-        let mut subject_hits: Option<Vec<BlastnHsp>> = None;
-        process_subject(
-            s_idx,
-            s_record,
-            &mut gap_scratch,
-            &mut subject_scratch,
-            &mut subject_hits,
-        );
-        if let Some(hits) = subject_hits {
-            update_hitlists_with_subject_hits(&mut hit_lists, hits, prelim_hitlist_size);
+    // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_engine.c:1409-1427
+    // ```c
+    // itr = BlastSeqSrcIteratorNewEx(MAX(BlastSeqSrcGetNumSeqs(seq_src)/100,1));
+    // while ( (seq_arg.oid = BlastSeqSrcIteratorNext(seq_src, itr))
+    //        != BLAST_SEQSRC_EOF) {
+    //     if (BlastSeqSrcGetSequence(seq_src, &seq_arg) < 0) {
+    //         continue;
+    //     }
+    // }
+    // ```
+    if let Some(subjects) = subject_records.as_ref() {
+        for (s_idx, s_record) in subjects.iter().enumerate() {
+            let mut subject_hits: Option<Vec<BlastnHsp>> = None;
+            process_subject(
+                s_idx,
+                s_record,
+                &mut gap_scratch,
+                &mut subject_scratch,
+                &mut subject_hits,
+            );
+            if let Some(hits) = subject_hits {
+                update_hitlists_with_subject_hits(&mut hit_lists, hits, prelim_hitlist_size);
+            }
+        }
+    } else {
+        let subject_reader = bio::io::fasta::Reader::from_file(&args.subject)?;
+        for (s_idx, s_record) in subject_reader.records().filter_map(|r| r.ok()).enumerate() {
+            let mut subject_hits: Option<Vec<BlastnHsp>> = None;
+            process_subject(
+                s_idx,
+                &s_record,
+                &mut gap_scratch,
+                &mut subject_scratch,
+                &mut subject_hits,
+            );
+            if let Some(hits) = subject_hits {
+                update_hitlists_with_subject_hits(&mut hit_lists, hits, prelim_hitlist_size);
+            }
         }
     }
 

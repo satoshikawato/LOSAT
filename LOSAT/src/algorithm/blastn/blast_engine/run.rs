@@ -393,7 +393,9 @@ fn advance_diag_table_offset(
                 flag: 0,
             };
             hit_level_array.fill(init_diag);
-            hit_len_array.fill(0);
+            if !hit_len_array.is_empty() {
+                hit_len_array.fill(0);
+            }
         } else {
             *diag_table_offset = diag_table_offset.saturating_add(subject_len as i32 + diag_window);
         }
@@ -4446,18 +4448,34 @@ pub fn run(args: BlastnArgs) -> Result<()> {
                     let hit_level_array = &mut subject_scratch.hit_level_array;
                     let hit_len_array = &mut subject_scratch.hit_len_array;
                     let diag_hash = &mut subject_scratch.diag_hash;
-                    let init_diag = DiagStruct {
-                        last_hit: -diag_window,
-                        flag: 0,
-                    };
                     if use_array_indexing {
+                        // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_extend.c:145-149
+                        // ```c
+                        // diag_table->hit_level_array = (DiagStruct *)
+                        //     calloc(diag_table->diag_array_length, sizeof(DiagStruct));
+                        // if (word_params->options->window_size) {
+                        //     diag_table->hit_len_array = (Uint1 *)
+                        //          calloc(diag_table->diag_array_length, sizeof(Uint1));
+                        // }
+                        // ```
                         if hit_level_array.len() != diag_array_size {
-                            hit_level_array.resize(diag_array_size, init_diag);
-                            hit_level_array.fill(init_diag);
-                            hit_len_array.resize(diag_array_size, 0);
-                            hit_len_array.fill(0);
-                        } else {
-                            hit_len_array.resize(diag_array_size, 0);
+                            let had_entries = !hit_level_array.is_empty();
+                            let diag_default = DiagStruct::default();
+                            hit_level_array.resize(diag_array_size, diag_default);
+                            if had_entries {
+                                hit_level_array.fill(diag_default);
+                            }
+                        }
+                        if TWO_HIT_WINDOW > 0 {
+                            if hit_len_array.len() != diag_array_size {
+                                let had_entries = !hit_len_array.is_empty();
+                                hit_len_array.resize(diag_array_size, 0);
+                                if had_entries {
+                                    hit_len_array.fill(0);
+                                }
+                            }
+                        } else if !hit_len_array.is_empty() {
+                            hit_len_array.clear();
                         }
                     } else {
                         // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_extend.c:159-182
@@ -5209,12 +5227,14 @@ pub fn run(args: BlastnArgs) -> Result<()> {
                                 // }
                                 // ```
                                 if !hit_ready {
-                                    // NCBI reference: ncbi-blast/c++/src/algo/blast/core/na_ungapped.c:768-771
+                                    // NCBI reference: ncbi-blast/c++/src/algo/blast/core/na_ungapped.c:768-772
                                     // ```c
                                     // hit_level_array[real_diag].last_hit = s_end_pos;
                                     // hit_level_array[real_diag].flag = hit_ready;
-                                    // diag_table->hit_len_array[real_diag] =
-                                    //     (hit_ready) ? 0 : s_end_pos - s_off_pos;
+                                    // if (two_hits) {
+                                    //     diag_table->hit_len_array[real_diag] =
+                                    //         (hit_ready) ? 0 : s_end_pos - s_off_pos;
+                                    // }
                                     // ```
                                     // NCBI reference: ncbi-blast/c++/src/algo/blast/core/na_ungapped.c:939-941
                                     // ```c
@@ -5225,7 +5245,9 @@ pub fn run(args: BlastnArgs) -> Result<()> {
                                     if use_array_indexing && diag_idx < diag_array_size {
                                         hit_level_array[diag_idx].last_hit = s_end_pos as i32;
                                         hit_level_array[diag_idx].flag = 0;
-                                        hit_len_array[diag_idx] = (s_end_pos - s_off_pos) as u8;
+                                        if two_hits {
+                                            hit_len_array[diag_idx] = (s_end_pos - s_off_pos) as u8;
+                                        }
                                     } else if !use_array_indexing {
                                         diag_hash.insert(
                                             diag as i32,
@@ -5335,21 +5357,25 @@ pub fn run(args: BlastnArgs) -> Result<()> {
                                     if in_window && debug_mode {
                                         eprintln!("[DEBUG WINDOW] Seed at q={}, s={} SKIPPED: ungapped_score={} < {}", q_pos_usize, s_pos, ungapped_score, min_ungapped_score);
                                     }
-                                    // NCBI reference: ncbi-blast/c++/src/algo/blast/core/na_ungapped.c:768-771
+                                    // NCBI reference: ncbi-blast/c++/src/algo/blast/core/na_ungapped.c:768-772
                                     // ```c
                                     // hit_level_array[real_diag].last_hit = s_end_pos;
                                     // hit_level_array[real_diag].flag = hit_ready;
-                                    // diag_table->hit_len_array[real_diag] =
-                                    //     (hit_ready) ? 0 : s_end_pos - s_off_pos;
+                                    // if (two_hits) {
+                                    //     diag_table->hit_len_array[real_diag] =
+                                    //         (hit_ready) ? 0 : s_end_pos - s_off_pos;
+                                    // }
                                     // ```
                                     if use_array_indexing && diag_idx < diag_array_size {
                                         hit_level_array[diag_idx].last_hit = s_end_pos as i32;
                                         hit_level_array[diag_idx].flag = if hit_ready { 1 } else { 0 };
-                                        hit_len_array[diag_idx] = if hit_ready {
-                                            0
-                                        } else {
-                                            (s_end_pos - s_off_pos) as u8
-                                        };
+                                        if two_hits {
+                                            hit_len_array[diag_idx] = if hit_ready {
+                                                0
+                                            } else {
+                                                (s_end_pos - s_off_pos) as u8
+                                            };
+                                        }
                                     } else if !use_array_indexing {
                                         diag_hash.insert(
                                             diag as i32,
@@ -5396,19 +5422,23 @@ pub fn run(args: BlastnArgs) -> Result<()> {
                                     score: ungapped_score,
                                 });
 
-                                // NCBI reference: ncbi-blast/c++/src/algo/blast/core/na_ungapped.c:768-771
+                                // NCBI reference: ncbi-blast/c++/src/algo/blast/core/na_ungapped.c:768-772
                                 // ```c
                                 // hit_level_array[real_diag].last_hit = s_end_pos;
                                 // hit_level_array[real_diag].flag = hit_ready;
-                                // diag_table->hit_len_array[real_diag] =
-                                //     (hit_ready) ? 0 : s_end_pos - s_off_pos;
+                                // if (two_hits) {
+                                //     diag_table->hit_len_array[real_diag] =
+                                //         (hit_ready) ? 0 : s_end_pos - s_off_pos;
+                                // }
                                 // ```
                                 // Update hit_level_array after collecting ungapped hit
                                 hit_ready = true;
                                 if use_array_indexing && diag_idx < diag_array_size {
                                     hit_level_array[diag_idx].last_hit = ungapped_s_end_pos as i32;
                                     hit_level_array[diag_idx].flag = 1;
-                                    hit_len_array[diag_idx] = 0;
+                                    if two_hits {
+                                        hit_len_array[diag_idx] = 0;
+                                    }
                                 } else if !use_array_indexing {
                                     diag_hash.insert(
                                         diag as i32,
@@ -6095,12 +6125,14 @@ pub fn run(args: BlastnArgs) -> Result<()> {
                             // }
                             // ```
                             if !hit_ready {
-                                // NCBI reference: ncbi-blast/c++/src/algo/blast/core/na_ungapped.c:768-771
+                                // NCBI reference: ncbi-blast/c++/src/algo/blast/core/na_ungapped.c:768-772
                                 // ```c
                                 // hit_level_array[real_diag].last_hit = s_end_pos;
                                 // hit_level_array[real_diag].flag = hit_ready;
-                                // diag_table->hit_len_array[real_diag] =
-                                //     (hit_ready) ? 0 : s_end_pos - s_off_pos;
+                                // if (two_hits) {
+                                //     diag_table->hit_len_array[real_diag] =
+                                //         (hit_ready) ? 0 : s_end_pos - s_off_pos;
+                                // }
                                 // ```
                                 // NCBI reference: ncbi-blast/c++/src/algo/blast/core/na_ungapped.c:939-941
                                 // ```c
@@ -6111,7 +6143,9 @@ pub fn run(args: BlastnArgs) -> Result<()> {
                                 if use_array_indexing && diag_idx < diag_array_size {
                                     hit_level_array[diag_idx].last_hit = s_end_pos as i32;
                                     hit_level_array[diag_idx].flag = 0;
-                                    hit_len_array[diag_idx] = (s_end_pos - s_off_pos) as u8;
+                                    if two_hits {
+                                        hit_len_array[diag_idx] = (s_end_pos - s_off_pos) as u8;
+                                    }
                                 } else if !use_array_indexing {
                                     diag_hash.insert(
                                         diag as i32,
@@ -6208,21 +6242,25 @@ pub fn run(args: BlastnArgs) -> Result<()> {
                                 // }
                                 // ```
                                 hit_ready = false;
-                                // NCBI reference: ncbi-blast/c++/src/algo/blast/core/na_ungapped.c:768-771
+                                // NCBI reference: ncbi-blast/c++/src/algo/blast/core/na_ungapped.c:768-772
                                 // ```c
                                 // hit_level_array[real_diag].last_hit = s_end_pos;
                                 // hit_level_array[real_diag].flag = hit_ready;
-                                // diag_table->hit_len_array[real_diag] =
-                                //     (hit_ready) ? 0 : s_end_pos - s_off_pos;
+                                // if (two_hits) {
+                                //     diag_table->hit_len_array[real_diag] =
+                                //         (hit_ready) ? 0 : s_end_pos - s_off_pos;
+                                // }
                                 // ```
                                 if use_array_indexing && diag_idx < diag_array_size {
                                     hit_level_array[diag_idx].last_hit = s_end_pos as i32;
                                     hit_level_array[diag_idx].flag = if hit_ready { 1 } else { 0 };
-                                    hit_len_array[diag_idx] = if hit_ready {
-                                        0
-                                    } else {
-                                        (s_end_pos - s_off_pos) as u8
-                                    };
+                                    if two_hits {
+                                        hit_len_array[diag_idx] = if hit_ready {
+                                            0
+                                        } else {
+                                            (s_end_pos - s_off_pos) as u8
+                                        };
+                                    }
                                 } else if !use_array_indexing {
                                     // NCBI reference: ncbi-blast/c++/src/algo/blast/core/na_ungapped.c:939-941
                                     // ```c
@@ -6280,19 +6318,23 @@ pub fn run(args: BlastnArgs) -> Result<()> {
                                 score: ungapped_score,
                             });
 
-                            // NCBI reference: ncbi-blast/c++/src/algo/blast/core/na_ungapped.c:768-771
+                            // NCBI reference: ncbi-blast/c++/src/algo/blast/core/na_ungapped.c:768-772
                             // ```c
                             // hit_level_array[real_diag].last_hit = s_end_pos;
                             // hit_level_array[real_diag].flag = hit_ready;
-                            // diag_table->hit_len_array[real_diag] =
-                            //     (hit_ready) ? 0 : s_end_pos - s_off_pos;
+                            // if (two_hits) {
+                            //     diag_table->hit_len_array[real_diag] =
+                            //         (hit_ready) ? 0 : s_end_pos - s_off_pos;
+                            // }
                             // ```
                             // Update hit_level_array after collecting ungapped hit
                             hit_ready = true;
                             if use_array_indexing && diag_idx < diag_array_size {
                                 hit_level_array[diag_idx].last_hit = ungapped_s_end_pos as i32;
                                 hit_level_array[diag_idx].flag = 1;
-                                hit_len_array[diag_idx] = 0;
+                                if two_hits {
+                                    hit_len_array[diag_idx] = 0;
+                                }
                             } else if !use_array_indexing {
                                 // NCBI reference: ncbi-blast/c++/src/algo/blast/core/na_ungapped.c:939-941
                                 // ```c

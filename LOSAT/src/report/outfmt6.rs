@@ -141,6 +141,84 @@ pub fn format_evalue(e_value: f64, ncbi_compat: bool) -> String {
     }
 }
 
+/// Format scientific notation with NCBI-style exponent padding.
+///
+/// NCBI reference: ncbi-blast/c++/src/objtools/align_format/align_format_util.cpp:965-988
+/// ```c
+/// if (evalue < 1.0e-99) {
+///     snprintf(evalue_buf, sizeof(evalue_buf), "%2.0le", evalue);
+/// } else if (evalue < 0.0009) {
+///     snprintf(evalue_buf, sizeof(evalue_buf), "%3.0le", evalue);
+/// }
+/// if (bit_score > 99999){
+///     snprintf(bit_score_buf, sizeof(bit_score_buf), "%5.3le", bit_score);
+/// }
+/// ```
+/// NCBI reference: ncbi-blast/c++/src/corelib/ncbistr.cpp:2389-2402
+/// ```c
+/// switch (flags & fDoubleGeneral) {
+///     case fDoubleScientific:
+///         format = "%.*e";
+///         break;
+/// }
+/// n = ::snprintf(buffer, kMaxDoubleStringSize, format, (int)precision, value);
+/// ```
+fn format_scientific_ncbi(value: f64, precision: usize) -> String {
+    let mut raw = format!("{:.*e}", precision, value);
+    let exp_pos = match raw.find('e').or_else(|| raw.find('E')) {
+        Some(pos) => pos,
+        None => return raw,
+    };
+
+    // Force lowercase exponent marker to match NCBI output.
+    if raw.as_bytes()[exp_pos] == b'E' {
+        raw.replace_range(exp_pos..=exp_pos, "e");
+    }
+
+    let exp_start = exp_pos + 1;
+    if exp_start >= raw.len() {
+        return raw;
+    }
+
+    let has_sign = matches!(raw.as_bytes()[exp_start], b'+' | b'-');
+    let mut digits_start = exp_start;
+    if !has_sign {
+        raw.insert(exp_start, '+');
+        digits_start = exp_start + 1;
+    } else {
+        digits_start = exp_start + 1;
+    }
+
+    let digits_len = raw.len().saturating_sub(digits_start);
+    if digits_len < 2 {
+        raw.insert(digits_start, '0');
+    }
+
+    raw
+}
+
+/// Write scientific notation with NCBI-style exponent padding.
+///
+/// NCBI reference: ncbi-blast/c++/src/objtools/align_format/align_format_util.cpp:965-988
+/// ```c
+/// if (evalue < 1.0e-99) {
+///     snprintf(evalue_buf, sizeof(evalue_buf), "%2.0le", evalue);
+/// } else if (evalue < 0.0009) {
+///     snprintf(evalue_buf, sizeof(evalue_buf), "%3.0le", evalue);
+/// }
+/// if (bit_score > 99999){
+///     snprintf(bit_score_buf, sizeof(bit_score_buf), "%5.3le", bit_score);
+/// }
+/// ```
+fn write_scientific_ncbi<W: Write>(
+    writer: &mut W,
+    value: f64,
+    precision: usize,
+) -> io::Result<()> {
+    let formatted = format_scientific_ncbi(value, precision);
+    writer.write_all(formatted.as_bytes())
+}
+
 /// Format E-value exactly as NCBI BLAST does (base GetScoreString logic).
 ///
 /// NCBI reference: ncbi-blast/c++/src/objtools/align_format/align_format_util.cpp:965-983
@@ -167,10 +245,10 @@ pub fn format_evalue_ncbi(e_value: f64) -> String {
         "0.0".to_string()
     } else if e_value < 1.0e-99 {
         // NCBI: "%2.0le" -> e.g., "1e-100"
-        format!("{:.0e}", e_value)
+        format_scientific_ncbi(e_value, 0)
     } else if e_value < 0.0009 {
         // NCBI: "%3.0le" -> e.g., "1e-50"
-        format!("{:.0e}", e_value)
+        format_scientific_ncbi(e_value, 0)
     } else if e_value < 0.1 {
         // NCBI: "%4.3lf" -> e.g., "0.005"
         format!("{:.3}", e_value)
@@ -199,7 +277,7 @@ pub fn format_evalue_ncbi_tabular(e_value: f64) -> String {
     if e_value == 0.0 || e_value < 1.0e-180 {
         "0.0".to_string()
     } else if e_value < 0.0009 {
-        format!("{:.2e}", e_value)
+        format_scientific_ncbi(e_value, 2)
     } else {
         format_evalue_ncbi(e_value)
     }
@@ -221,7 +299,7 @@ pub fn format_evalue_ncbi_tabular(e_value: f64) -> String {
 pub fn format_bitscore_ncbi(bit_score: f64) -> String {
     if bit_score > 99999.0 {
         // NCBI: "%5.3le" -> scientific notation
-        format!("{:.3e}", bit_score)
+        format_scientific_ncbi(bit_score, 3)
     } else if bit_score > 99.9 {
         // NCBI: "%3.0ld" -> integer (no decimal)
         format!("{:.0}", bit_score)
@@ -255,9 +333,9 @@ fn write_evalue_ncbi_base<W: Write>(writer: &mut W, e_value: f64) -> io::Result<
     if e_value == 0.0 || e_value < 1.0e-180 {
         write!(writer, "0.0")
     } else if e_value < 1.0e-99 {
-        write!(writer, "{:.0e}", e_value)
+        write_scientific_ncbi(writer, e_value, 0)
     } else if e_value < 0.0009 {
-        write!(writer, "{:.0e}", e_value)
+        write_scientific_ncbi(writer, e_value, 0)
     } else if e_value < 0.1 {
         write!(writer, "{:.3}", e_value)
     } else if e_value < 1.0 {
@@ -282,7 +360,7 @@ fn write_evalue_ncbi_tabular<W: Write>(writer: &mut W, e_value: f64) -> io::Resu
     if e_value == 0.0 || e_value < 1.0e-180 {
         write!(writer, "0.0")
     } else if e_value < 0.0009 {
-        write!(writer, "{:.2e}", e_value)
+        write_scientific_ncbi(writer, e_value, 2)
     } else {
         write_evalue_ncbi_base(writer, e_value)
     }
@@ -304,7 +382,7 @@ fn write_evalue_ncbi_tabular<W: Write>(writer: &mut W, e_value: f64) -> io::Resu
 /// ```
 fn write_bitscore_ncbi<W: Write>(writer: &mut W, bit_score: f64) -> io::Result<()> {
     if bit_score > 99999.0 {
-        write!(writer, "{:.3e}", bit_score)
+        write_scientific_ncbi(writer, bit_score, 3)
     } else if bit_score > 99.9 {
         write!(writer, "{:.0}", bit_score)
     } else {
@@ -785,7 +863,22 @@ mod tests {
 
     // ==========================================================================
     // E-value formatting tests (NCBI parity)
-    // Reference: align_format_util.cpp:GetScoreString() + tabular.cpp:SetScores()
+    // NCBI reference: ncbi-blast/c++/src/objtools/align_format/align_format_util.cpp:965-988
+    // ```c
+    // if (evalue < 1.0e-99) {
+    //     snprintf(evalue_buf, sizeof(evalue_buf), "%2.0le", evalue);
+    // } else if (evalue < 0.0009) {
+    //     snprintf(evalue_buf, sizeof(evalue_buf), "%3.0le", evalue);
+    // }
+    // ```
+    // NCBI reference: ncbi-blast/c++/src/objtools/align_format/tabular.cpp:1328-1337
+    // ```c
+    // CAlignFormatUtil::GetScoreString(evalue, bit_score, 0, score, m_Evalue, ...);
+    // if ((evalue >= 1.0e-180) && (evalue < 0.0009)){
+    //     m_Evalue = NStr::DoubleToString(evalue, 2, NStr::fDoubleScientific);
+    // }
+    // ```
+    // ==========================================================================
     // ==========================================================================
     
     #[test]
@@ -813,7 +906,7 @@ mod tests {
         // [1e-180, 0.0009): "%.2e" format (tabular.cpp override)
         assert_eq!(format_evalue_ncbi_tabular(1e-50), "1.00e-50");
         assert_eq!(format_evalue_ncbi_tabular(1.23e-20), "1.23e-20");
-        assert_eq!(format_evalue_ncbi_tabular(5e-5), "5.00e-5");
+        assert_eq!(format_evalue_ncbi_tabular(5e-5), "5.00e-05");
     }
 
     #[test]
@@ -859,7 +952,18 @@ mod tests {
 
     // ==========================================================================
     // Bit score formatting tests (NCBI parity)
-    // Reference: align_format_util.cpp:GetScoreString()
+    // NCBI reference: ncbi-blast/c++/src/objtools/align_format/align_format_util.cpp:986-993
+    // ```c
+    // if (bit_score > 99999){
+    //     snprintf(bit_score_buf, sizeof(bit_score_buf), "%5.3le", bit_score);
+    // } else if (bit_score > 99.9){
+    //     snprintf(bit_score_buf, sizeof(bit_score_buf), "%3.0ld",
+    //         (long)bit_score);
+    // } else {
+    //     snprintf(bit_score_buf, sizeof(bit_score_buf), kBitScoreFormat.c_str(),
+    //         bit_score);
+    // }
+    // ```
     // ==========================================================================
 
     #[test]
@@ -882,8 +986,46 @@ mod tests {
     #[test]
     fn test_format_bitscore_ncbi_large() {
         // > 99999: "%5.3le" - scientific notation
-        assert_eq!(format_bitscore_ncbi(100000.0), "1.000e5");
-        assert_eq!(format_bitscore_ncbi(123456.789), "1.235e5");
+        assert_eq!(format_bitscore_ncbi(100000.0), "1.000e+05");
+        assert_eq!(format_bitscore_ncbi(123456.789), "1.235e+05");
+    }
+
+    // NCBI reference: ncbi-blast/c++/src/objtools/align_format/align_format_util.cpp:965-988
+    // ```c
+    // if (evalue < 1.0e-99) {
+    //     snprintf(evalue_buf, sizeof(evalue_buf), "%2.0le", evalue);
+    // } else if (evalue < 0.0009) {
+    //     snprintf(evalue_buf, sizeof(evalue_buf), "%3.0le", evalue);
+    // }
+    // if (bit_score > 99999){
+    //     snprintf(bit_score_buf, sizeof(bit_score_buf), "%5.3le", bit_score);
+    // }
+    // ```
+    #[test]
+    fn test_fixture_exponent_padding() {
+        let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("tests/blast_out/EDL933.Sakai.blastn.megablast.out");
+        let data = std::fs::read_to_string(&path).expect("read EDL933/Sakai fixture");
+
+        let mut has_pos = false;
+        let mut has_neg = false;
+        for line in data.lines() {
+            if line.starts_with('#') || line.is_empty() {
+                continue;
+            }
+            if line.contains("e+05") {
+                has_pos = true;
+            }
+            if line.contains("e-05") {
+                has_neg = true;
+            }
+            if has_pos && has_neg {
+                break;
+            }
+        }
+
+        assert!(has_pos, "expected e+NN exponent in fixture output");
+        assert!(has_neg, "expected e-NN exponent in fixture output");
     }
 
     // ==========================================================================

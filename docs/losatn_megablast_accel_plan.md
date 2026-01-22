@@ -103,7 +103,9 @@ The order below aims to maximize impact while preserving NCBI parity.
 - Phase 1: Completed (NCBI-style hitlist update/heap, prelim hitlist sizing, per-subject hitlists, post-traceback filter/sort/prune order; unit tests added in `LOSAT/src/algorithm/blastn/hsp.rs`).
 - Phase 2: Completed (offset_pairs preallocated per thread using `GetOffsetArraySize`, reused across chunks).
 - Phase 3: Completed (preselected megablast scan routine per subject chunk to avoid per-call dispatch in scan loop).
-- Phases 4-6: Pending.
+- Phase 4: Pending.
+- Phase 5: Completed (direct buffered outfmt6 writes in `LOSAT/src/common.rs`, NCBI-style scientific formatting + tests in `LOSAT/src/report/outfmt6.rs`).
+- Phase 6: Pending.
 
 ### Phase 0: Baseline and Instrumentation (No Behavior Change)
 Goal: measure and attribute runtime without affecting output.
@@ -176,6 +178,10 @@ Goal: reduce per-hit formatting cost.
 
 NCBI parity checkpoints:
 - `align_format_util.cpp` and `outfmt` routines for numeric formatting.
+
+### New Findings (Phase 5)
+- NCBI scientific notation uses sign + zero-padded exponents via `snprintf("%.*e")` and `NStr::DoubleToString(..., fDoubleScientific)`; Rust's default `e` formatter omits padding and `+`.
+- Fixture output (`EDL933.Sakai.blastn.megablast.out`) includes `e+05` and `e-05`, so tests must assert the padded exponent format.
 
 ### Phase 6: Subject Encoding Streaming (Optional, Larger Refactor)
 Goal: reduce upfront encoding overhead for large subjects.

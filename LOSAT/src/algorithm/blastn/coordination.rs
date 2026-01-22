@@ -8,10 +8,6 @@
 
 use anyhow::Result;
 use bio::io::fasta;
-use crate::core::blast_encoding::{
-    encode_iupac_to_blastna,
-    encode_iupac_to_ncbi2na_packed,
-};
 use crate::utils::dust::{DustMasker, MaskedInterval};
 use super::args::BlastnArgs;
 use super::constants::{MIN_UNGAPPED_SCORE_MEGABLAST, MIN_UNGAPPED_SCORE_BLASTN, MAX_DIRECT_LOOKUP_WORD_SIZE, X_DROP_GAPPED_NUCL, X_DROP_GAPPED_GREEDY, X_DROP_GAPPED_FINAL, SCAN_RANGE_BLASTN, SCAN_RANGE_MEGABLAST, LUT_WIDTH_11_THRESHOLD_8, LUT_WIDTH_11_THRESHOLD_10, MIN_DIAG_SEPARATION_BLASTN, MIN_DIAG_SEPARATION_MEGABLAST};
@@ -53,27 +49,6 @@ pub struct LookupTables {
     pub hash_lookup: Option<KmerLookup>,
 }
 
-// NCBI reference: ncbi-blast/c++/src/algo/blast/api/blast_setup_cxx.cpp:836-847
-// ```c
-// BlastSeqBlkSetSequence(subj, sequence.data.release(),
-//    ((sentinels == eSentinels) ? sequence.length - 2 :
-//     sequence.length));
-// ...
-// BlastSeqBlkSetCompressedSequence(subj,
-//                                  compressed_seq.data.release());
-// ```
-pub struct SubjectEncoding {
-    // NCBI reference: ncbi-blast/c++/src/algo/blast/api/blast_setup_cxx.cpp:836-847
-    // ```c
-    // BlastSeqBlkSetSequence(subj, sequence.data.release(), ...);
-    // ...
-    // BlastSeqBlkSetCompressedSequence(subj,
-    //                                  compressed_seq.data.release());
-    // ```
-    pub blastna: Vec<u8>,
-    pub ncbi2na_packed: Vec<u8>,
-}
-
 /// Sequence data and metadata
 pub struct SequenceData {
     pub queries: Vec<fasta::Record>,
@@ -88,14 +63,6 @@ pub struct SequenceData {
     // }
     // ```
     pub subject_masks: Vec<Vec<MaskedInterval>>,
-    // NCBI reference: ncbi-blast/c++/src/algo/blast/api/blast_setup_cxx.cpp:836-847
-    // ```c
-    // BlastSeqBlkSetSequence(subj, sequence.data.release(), ...);
-    // ...
-    // BlastSeqBlkSetCompressedSequence(subj,
-    //                                  compressed_seq.data.release());
-    // ```
-    pub subject_encodings: Vec<SubjectEncoding>,
     pub db_len_total: usize,
     pub db_num_seqs: usize,
 }
@@ -728,25 +695,6 @@ pub fn prepare_sequence_data(
     } else {
         vec![Vec::new(); subjects.len()]
     };
-    // NCBI reference: ncbi-blast/c++/src/algo/blast/api/blast_setup_cxx.cpp:836-847
-    // ```c
-    // BlastSeqBlkSetSequence(subj, sequence.data.release(), ...);
-    // ...
-    // BlastSeqBlkSetCompressedSequence(subj,
-    //                                  compressed_seq.data.release());
-    // ```
-    let subject_encodings: Vec<SubjectEncoding> = subjects
-        .iter()
-        .map(|record| {
-            let seq = record.seq();
-            let blastna = encode_iupac_to_blastna(seq);
-            let ncbi2na_packed = encode_iupac_to_ncbi2na_packed(seq);
-            SubjectEncoding {
-                blastna,
-                ncbi2na_packed,
-            }
-        })
-        .collect();
     let db_len_total: usize = subjects.iter().map(|r| r.seq().len()).sum();
     let db_num_seqs: usize = subjects.len();
     
@@ -756,7 +704,6 @@ pub fn prepare_sequence_data(
         subjects,
         query_masks,
         subject_masks,
-        subject_encodings,
         db_len_total,
         db_num_seqs,
     }

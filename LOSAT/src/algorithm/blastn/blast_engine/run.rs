@@ -12,6 +12,7 @@ use crate::stats::length_adjustment::compute_length_adjustment_ncbi;
 use crate::stats::lookup_nucl_params;
 use crate::core::blast_encoding::{
     encode_iupac_to_blastna,
+    encode_iupac_to_ncbi2na_packed,
     COMPRESSION_RATIO,
 };
 
@@ -3971,14 +3972,6 @@ pub fn run(args: BlastnArgs) -> Result<()> {
     // }
     // ```
     let subject_masks_ref = &seq_data.subject_masks;
-    // NCBI reference: ncbi-blast/c++/src/algo/blast/api/blast_setup_cxx.cpp:836-847
-    // ```c
-    // BlastSeqBlkSetSequence(subj, sequence.data.release(), ...);
-    // ...
-    // BlastSeqBlkSetCompressedSequence(subj,
-    //                                  compressed_seq.data.release());
-    // ```
-    let subject_encodings_ref = &seq_data.subject_encodings;
     // NCBI reference: ncbi-blast/c++/include/algo/blast/core/blast_hits.h:153-166
     // ```c
     // typedef struct BlastHSPList {
@@ -4165,10 +4158,14 @@ pub fn run(args: BlastnArgs) -> Result<()> {
             // NCBI reference: ncbi-blast/c++/src/algo/blast/api/blast_setup_cxx.cpp:836-847
             // ```c
             // BlastSeqBlkSetSequence(subj, sequence.data.release(), ...);
+            // ...
+            // BlastSeqBlkSetCompressedSequence(subj,
+            //                                  compressed_seq.data.release());
             // ```
-            let subject_encoding = &subject_encodings_ref[s_idx];
-            let s_seq_blastna_full = subject_encoding.blastna.as_slice();
-            let s_seq_packed_full = subject_encoding.ncbi2na_packed.as_slice();
+            let s_seq_blastna_full_vec = encode_iupac_to_blastna(s_seq_full);
+            let s_seq_packed_full_vec = encode_iupac_to_ncbi2na_packed(s_seq_full);
+            let s_seq_blastna_full = s_seq_blastna_full_vec.as_slice();
+            let s_seq_packed_full = s_seq_packed_full_vec.as_slice();
 
             let dbseq_chunk_overlap = DBSEQ_CHUNK_OVERLAP;
             let mut split_state = SubjectSplitState::new(s_len_full, soft_ranges);

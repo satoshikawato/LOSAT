@@ -105,7 +105,7 @@ The order below aims to maximize impact while preserving NCBI parity.
 - Phase 3: Completed (preselected megablast scan routine per subject chunk to avoid per-call dispatch in scan loop).
 - Phase 4: Pending.
 - Phase 5: Completed (direct buffered outfmt6 writes in `LOSAT/src/common.rs`, NCBI-style scientific formatting + tests in `LOSAT/src/report/outfmt6.rs`).
-- Phase 6: Pending.
+- Phase 6: In Progress (on-demand subject encoding in engine; chunk-level packing TBD).
 
 ### Phase 0: Baseline and Instrumentation (No Behavior Change)
 Goal: measure and attribute runtime without affecting output.
@@ -190,6 +190,11 @@ Goal: reduce upfront encoding overhead for large subjects.
 
 NCBI parity checkpoints:
 - `blast_engine.c` subject chunk lifecycle, boundary conditions.
+
+### New Findings (Phase 6)
+- On-demand subject encoding now happens inside `LOSAT/src/algorithm/blastn/blast_engine/run.rs`; the precomputed `subject_encodings` storage was removed from `LOSAT/src/algorithm/blastn/coordination.rs`.
+- No parity issues observed from the move, but this is still full-subject encoding (not per chunk) and `read_sequences` still loads all subjects into memory, so true streaming remains pending.
+- `docs/blastn_performance_investigation.md` still references `subject_encodings` and should be updated when Phase 6 is fully complete.
 
 ## Acceptance Criteria
 Performance:

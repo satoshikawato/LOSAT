@@ -6,7 +6,6 @@
 use anyhow::{Context, Result};
 use indicatif::{ProgressBar, ProgressStyle};
 use rayon::prelude::*;
-use rustc_hash::FxHashMap;
 use std::sync::{mpsc::channel, Arc};
 
 use crate::stats::length_adjustment::compute_length_adjustment_ncbi;
@@ -56,14 +55,12 @@ use super::super::filtering::{
     ReevalParams,
 };
 use super::super::hsp::{
+    get_prelim_hitlist_size,
     BlastnHitList,
     BlastnHsp,
     BlastnHspList,
-    compare_hsp_lists as compare_blastn_hsp_lists,
-    prune_hitlists_by_size,
     score_compare_hsps as score_compare_blastn_hsps,
     trim_by_max_hsps,
-    update_best_evalue,
     write_output_blastn_hitlists,
 };
 
@@ -3145,55 +3142,84 @@ impl BlastnTiming {
     }
 }
 
+// NCBI reference: ncbi-blast/c++/src/algo/blast/core/hspfilter_collector.c:121-161
+// ```c
+// if (!(tmp_hsp_list = hsp_list_array[query_index])) {
+//    hsp_list_array[query_index] = tmp_hsp_list =
+//       Blast_HSPListNew(params->hsp_num_max);
+//    tmp_hsp_list->oid = hsp_list->oid;
+// }
+// Blast_HSPListSaveHSP(tmp_hsp_list, hsp);
+// ...
+// if (!results->hitlist_array[index]) {
+//    results->hitlist_array[index] =
+//       Blast_HitListNew(params->prelim_hitlist_size);
+// }
+// Blast_HitListUpdate(results->hitlist_array[index],
+//                     hsp_list_array[index]);
+// ```
+fn update_hitlists_with_subject_hits(
+    hit_lists: &mut [Option<BlastnHitList>],
+    hits: Vec<BlastnHsp>,
+    prelim_hitlist_size: usize,
+) {
+    if hits.is_empty() {
+        return;
+    }
+
+    let mut per_query: Vec<Vec<BlastnHsp>> = vec![Vec::new(); hit_lists.len()];
+    for hit in hits {
+        let q_idx = hit.q_idx as usize;
+        if q_idx < per_query.len() {
+            per_query[q_idx].push(hit);
+        }
+    }
+
+    for (q_idx, mut hsps) in per_query.into_iter().enumerate() {
+        if hsps.is_empty() {
+            continue;
+        }
+        // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_engine.c:555
+        // ```c
+        // Blast_HSPListSortByScore(hsp_list);
+        // ```
+        // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_hits.c:1374-1382
+        // ```c
+        // void Blast_HSPListSortByScore(BlastHSPList* hsp_list)
+        // {
+        //     if (hsp_list->hspcnt > 1) {
+        //         qsort(hsp_list->hsp_array, hsp_list->hspcnt,
+        //               sizeof(BlastHSP*), ScoreCompareHSPs);
+        //     }
+        // }
+        // ```
+        hsps.sort_by(score_compare_blastn_hsps);
+
+        let oid = hsps[0].s_idx;
+        let hsp_list = BlastnHspList {
+            oid,
+            query_index: q_idx as u32,
+            hsps,
+            best_evalue: i32::MAX as f64,
+        };
+
+        let hit_list = hit_lists[q_idx].get_or_insert_with(|| BlastnHitList::new(prelim_hitlist_size));
+        hit_list.update(hsp_list);
+    }
+}
+
 fn post_process_hits_and_write(
-    all_hits: Vec<BlastnHsp>,
+    mut hit_lists: Vec<Option<BlastnHitList>>,
     hitlist_size: usize,
     max_hsps_per_subject: usize,
+    subject_besthit: bool,
+    query_lengths: &[usize],
     out_path: &Option<std::path::PathBuf>,
     verbose: bool,
     query_ids: &[Arc<str>],
     subject_ids: &[Arc<str>],
     timing: Option<&BlastnTiming>,
 ) -> Result<()> {
-    if verbose {
-        eprintln!(
-            "[INFO] Received {} raw hits total, starting post-processing...",
-            all_hits.len()
-        );
-    }
-    let chain_start = std::time::Instant::now();
-
-    // NCBI reference: blast_traceback.c:633-692 (post-gapped processing is per-subject)
-    // Per-subject traceback already applies purge/reevaluation; skip duplicate global pass.
-    // NCBI reference: ncbi-blast/c++/include/algo/blast/core/blast_hits.h:153-187
-    // ```c
-    // typedef struct BlastHSPList {
-    //    Int4 oid;
-    //    Int4 query_index;
-    //    BlastHSP** hsp_array;
-    //    Int4 hspcnt;
-    //    double best_evalue;
-    // } BlastHSPList;
-    // typedef struct BlastHitList {
-    //    Int4 hsplist_count;
-    //    BlastHSPList** hsplist_array;
-    // } BlastHitList;
-    // typedef struct BlastHSPResults {
-    //    Int4 num_queries;
-    //    BlastHitList** hitlist_array;
-    // } BlastHSPResults;
-    // ```
-    let subject_count = subject_ids.len();
-    let mut per_query: Vec<Vec<Vec<BlastnHsp>>> =
-        vec![vec![Vec::new(); subject_count]; query_ids.len()];
-    for hsp in all_hits {
-        let q_idx = hsp.q_idx as usize;
-        let s_idx = hsp.s_idx as usize;
-        if q_idx < per_query.len() && s_idx < subject_count {
-            per_query[q_idx][s_idx].push(hsp);
-        }
-    }
-
     // NCBI reference: ncbi-blast/c++/include/algo/blast/core/blast_hits.h:183-187
     // ```c
     // typedef struct BlastHSPResults {
@@ -3201,75 +3227,79 @@ fn post_process_hits_and_write(
     //    BlastHitList** hitlist_array;
     // } BlastHSPResults;
     // ```
-    let mut hit_lists: Vec<Option<BlastnHitList>> = Vec::with_capacity(query_ids.len());
-    hit_lists.resize_with(query_ids.len(), || None);
-    for (q_idx, subject_lists) in per_query.into_iter().enumerate() {
-        // NCBI reference: ncbi-blast/c++/include/algo/blast/core/blast_hits.h:153-166
-        // ```c
-        // typedef struct BlastHSPList {
-        //    Int4 oid;
-        //    Int4 query_index;
-        //    BlastHSP** hsp_array;
-        //    Int4 hspcnt;
-        // } BlastHSPList;
-        // ```
-        let mut hsplist_array: Vec<BlastnHspList> = Vec::new();
-        for (s_idx, mut hsps) in subject_lists.into_iter().enumerate() {
-            if hsps.is_empty() {
-                continue;
-            }
-            // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_hits.c:1330-1353
-            // ```c
-            // int ScoreCompareHSPs(const void* h1, const void* h2) { ... }
-            // ```
-            hsps.sort_by(score_compare_blastn_hsps);
+    if verbose {
+        let total_hits: usize = hit_lists
+            .iter()
+            .filter_map(|list| list.as_ref())
+            .map(|list| list.hsplist_array.iter().map(|l| l.hsps.len()).sum::<usize>())
+            .sum();
+        eprintln!(
+            "[INFO] Received {} raw hits total, starting post-processing...",
+            total_hits
+        );
+    }
+    let chain_start = std::time::Instant::now();
 
-            let mut hsp_list = BlastnHspList {
-                oid: s_idx as u32,
-                query_index: q_idx as u32,
-                hsps,
-                best_evalue: f64::MAX,
-            };
-
-            // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_hits.c:2049-2067
-            // ```c
-            // Int2 Blast_TrimHSPListByMaxHsps(...)
-            // ```
+    // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_traceback.c:836-867
+    // ```c
+    // for (subject_index = 0; subject_index < hit_list->hsplist_count; ++subject_index) {
+    //     BlastHSPList * hsp_list = hit_list->hsplist_array[subject_index];
+    //     if (hit_options->max_hsps_per_subject) {
+    //         Blast_TrimHSPListByMaxHsps(hsp_list, hit_options);
+    //     }
+    //     if ((hit_options->hsp_filt_opt != NULL) &&
+    //         (hit_options->hsp_filt_opt->subject_besthit_opts != NULL)) {
+    //         Blast_HSPListSubjectBestHit(program_number,
+    //             hit_options->hsp_filt_opt->subject_besthit_opts,
+    //             query_info, hsp_list);
+    //     }
+    // }
+    // ```
+    for (q_idx, hit_list_opt) in hit_lists.iter_mut().enumerate() {
+        let hit_list = match hit_list_opt {
+            Some(value) => value,
+            None => continue,
+        };
+        for hsp_list in &mut hit_list.hsplist_array {
             if max_hsps_per_subject > 0 {
-                trim_by_max_hsps(&mut hsp_list, max_hsps_per_subject);
+                trim_by_max_hsps(hsp_list, max_hsps_per_subject);
             }
-
-            // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_hits.c:1739-1748
-            // ```c
-            // static double s_BlastGetBestEvalue(const BlastHSPList* hsp_list)
-            // ```
-            update_best_evalue(&mut hsp_list);
-
-            hsplist_array.push(hsp_list);
+            if subject_besthit {
+                let query_len = query_lengths
+                    .get(q_idx)
+                    .copied()
+                    .unwrap_or_default();
+                subject_best_hit(&mut hsp_list.hsps, query_len);
+            }
         }
-
-        if !hsplist_array.is_empty() {
-            // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_hits.c:3071-3106
-            // ```c
-            // static int s_EvalueCompareHSPLists(const void* v1, const void* v2) { ... }
-            // ```
-            hsplist_array.sort_by(compare_blastn_hsp_lists);
-
-            // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_traceback.c:877-892
-            // ```c
-            // static void s_BlastPruneExtraHits(BlastHSPResults* results, Int4 hitlist_size)
-            // ```
-            prune_hitlists_by_size(&mut hsplist_array, hitlist_size);
-
-            // NCBI reference: ncbi-blast/c++/include/algo/blast/core/blast_hits.h:168-180
-            // ```c
-            // typedef struct BlastHitList {
-            //    Int4 hsplist_count;
-            //    BlastHSPList** hsplist_array;
-            // } BlastHitList;
-            // ```
-            hit_lists[q_idx] = Some(BlastnHitList { hsplist_array });
-        }
+        // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_hits.c:3383-3400
+        // ```c
+        // Int2 Blast_HSPResultsSortByEvalue(BlastHSPResults* results)
+        // {
+        //    for (index = 0; index < results->num_queries; ++index) {
+        //       hit_list = results->hitlist_array[index];
+        //       if (hit_list != NULL && hit_list->hsplist_count > 1) {
+        //          qsort(hit_list->hsplist_array, hit_list->hsplist_count,
+        //                sizeof(BlastHSPList*), s_EvalueCompareHSPLists);
+        //       }
+        //       s_BlastHitListPurge(hit_list);
+        //    }
+        // }
+        // ```
+        hit_list.sort_by_evalue();
+        // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_traceback.c:877-892
+        // ```c
+        // static void s_BlastPruneExtraHits(BlastHSPResults* results, Int4 hitlist_size)
+        // {
+        //    for (subject_index = hitlist_size;
+        //         subject_index < hit_list->hsplist_count; ++subject_index) {
+        //       hit_list->hsplist_array[subject_index] =
+        //       Blast_HSPListFree(hit_list->hsplist_array[subject_index]);
+        //    }
+        //    hit_list->hsplist_count = MIN(hit_list->hsplist_count, hitlist_size);
+        // }
+        // ```
+        hit_list.prune_by_size(hitlist_size);
     }
 
     let total_hits: usize = hit_lists
@@ -3305,7 +3335,7 @@ fn post_process_hits_and_write(
     }
     let write_start = std::time::Instant::now();
 
-    // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_hits.c:3071-3106
+    // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_hits.c:3077-3106
     // ```c
     // static int s_EvalueCompareHSPLists(const void* v1, const void* v2) { ... }
     // ```
@@ -3454,6 +3484,21 @@ pub fn run(args: BlastnArgs) -> Result<()> {
     // seq_arg.encoding = eBlastEncodingProtein;
     // ```
     let seq_data = prepare_sequence_data(&args, queries, query_ids, subjects);
+
+    // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_hits.c:2589-2593
+    // ```c
+    // curr_context = hsp_array[i]->context;
+    // qlen = query_info->contexts[curr_context].query_length;
+    // target_context = (hsp_array[i]->query.frame > 0) ?
+    //                  curr_context + 1 : curr_context - 1;
+    // ```
+    let query_lengths = Arc::new(
+        seq_data
+            .queries
+            .iter()
+            .map(|record| record.seq().len())
+            .collect::<Vec<usize>>(),
+    );
 
     // NCBI reference: ncbi-blast/c++/include/algo/blast/core/blast_hits.h:153-166
     // ```c
@@ -3734,6 +3779,21 @@ pub fn run(args: BlastnArgs) -> Result<()> {
         _ => args.hitlist_size,
     };
     let max_hsps_per_subject = args.max_hsps_per_subject;
+    // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_hits.c:43-70 (GetPrelimHitlistSize)
+    // ```c
+    // Int4
+    // GetPrelimHitlistSize(Int4 hitlist_size, Int4 compositionBasedStats,
+    //                      Boolean gapped_calculation)
+    // {
+    //     ...
+    //     else if (gapped_calculation) {
+    //          prelim_hitlist_size = MIN(MAX(2 * prelim_hitlist_size, 10),
+    //                                   prelim_hitlist_size + 50);
+    //     }
+    //     return prelim_hitlist_size;
+    // }
+    // ```
+    let prelim_hitlist_size = get_prelim_hitlist_size(hitlist_size, false, true);
 
     // Debug mode: set BLEMIR_DEBUG=1 to enable, BLEMIR_DEBUG_WINDOW="q_start-q_end,s_start-s_end" to focus on a region
     let debug_mode = std::env::var("BLEMIR_DEBUG").is_ok();
@@ -7022,29 +7082,6 @@ pub fn run(args: BlastnArgs) -> Result<()> {
                 // else: HSP is contained within another, skip (implicit delete)
             }
 
-            if subject_besthit && !final_hits.is_empty() {
-                // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_traceback.c:858-862
-                // ```c
-                // if ((hit_options->hsp_filt_opt != NULL) &&
-                //     (hit_options->hsp_filt_opt->subject_besthit_opts != NULL)) {
-                //    Blast_HSPListSubjectBestHit(program_number,
-                //        hit_options->hsp_filt_opt->subject_besthit_opts,
-                //        query_info, hsp_list);
-                // }
-                // ```
-                let mut grouped: FxHashMap<u32, Vec<BlastnHsp>> = FxHashMap::default();
-                for hit in final_hits.drain(..) {
-                    grouped.entry(hit.q_idx).or_default().push(hit);
-                }
-                let mut filtered = Vec::new();
-                for (q_idx, mut hits) in grouped {
-                    let query_len = queries[q_idx as usize].seq().len();
-                    subject_best_hit(&mut hits, query_len);
-                    filtered.extend(hits);
-                }
-                final_hits = filtered;
-            }
-
             // Phase 2 debug output
             if debug_mode || blastn_debug {
                 let phase2_tree_removed = hits_step4 - final_hits.len();
@@ -7100,6 +7137,9 @@ pub fn run(args: BlastnArgs) -> Result<()> {
         let verbose = args.verbose;
         let query_ids_arc = Arc::clone(&query_ids_arc);
         let subject_ids_arc = Arc::clone(&subject_ids_arc);
+        let query_lengths_arc = Arc::clone(&query_lengths);
+        let prelim_hitlist_size = prelim_hitlist_size;
+        let subject_besthit = subject_besthit;
         // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_engine.c:1674-1783
         // ```c
         // BLAST_PreliminarySearchEngine(program_number, query, query_info,
@@ -7119,21 +7159,28 @@ pub fn run(args: BlastnArgs) -> Result<()> {
             if verbose {
                 eprintln!("[INFO] Writer thread started, waiting for hits...");
             }
-            let mut all_hits = Vec::new();
+            let mut hit_lists: Vec<Option<BlastnHitList>> = Vec::with_capacity(query_ids_arc.len());
+            hit_lists.resize_with(query_ids_arc.len(), || None);
+            let mut total_hits = 0usize;
             let mut messages_received = 0usize;
 
             while let Ok(msg) = rx.recv() {
                 match msg {
                     Some(hits) => {
                         messages_received += 1;
+                        total_hits += hits.len();
                         if verbose && (messages_received == 1 || messages_received % 100 == 0) {
                             eprintln!(
                                 "[INFO] Received message #{}, {} hits so far",
                                 messages_received,
-                                all_hits.len() + hits.len()
+                                total_hits
                             );
                         }
-                        all_hits.extend(hits);
+                        update_hitlists_with_subject_hits(
+                            &mut hit_lists,
+                            hits,
+                            prelim_hitlist_size,
+                        );
                     }
                     None => {
                         // Completion signal received
@@ -7149,9 +7196,11 @@ pub fn run(args: BlastnArgs) -> Result<()> {
             }
 
             post_process_hits_and_write(
-                all_hits,
+                hit_lists,
                 hitlist_size,
                 max_hsps_per_subject,
+                subject_besthit,
+                query_lengths_arc.as_ref(),
                 &out_path,
                 verbose,
                 query_ids_arc.as_ref(),
@@ -7283,7 +7332,8 @@ pub fn run(args: BlastnArgs) -> Result<()> {
     //     ...
     // }
     // ```
-    let mut all_hits = Vec::new();
+    let mut hit_lists: Vec<Option<BlastnHitList>> = Vec::with_capacity(queries_ref.len());
+    hit_lists.resize_with(queries_ref.len(), || None);
     let mut gap_scratch = GapAlignScratch::new();
     // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_engine.c:488-491
     // ```c
@@ -7312,7 +7362,7 @@ pub fn run(args: BlastnArgs) -> Result<()> {
             &mut subject_hits,
         );
         if let Some(hits) = subject_hits {
-            all_hits.extend(hits);
+            update_hitlists_with_subject_hits(&mut hit_lists, hits, prelim_hitlist_size);
         }
     }
 
@@ -7320,9 +7370,11 @@ pub fn run(args: BlastnArgs) -> Result<()> {
         bar.finish();
     }
     post_process_hits_and_write(
-        all_hits,
+        hit_lists,
         hitlist_size,
         max_hsps_per_subject,
+        subject_besthit,
+        query_lengths.as_ref(),
         &args.out,
         args.verbose,
         query_ids_arc.as_ref(),

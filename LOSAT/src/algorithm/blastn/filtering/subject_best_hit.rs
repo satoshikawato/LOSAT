@@ -57,10 +57,14 @@ pub fn subject_best_hit(hits: &mut Vec<BlastnHsp>, query_len: usize) {
         h.q_idx * 2 + if h.query_frame < 0 { 1 } else { 0 }
     };
 
-    // Ensure sorted by score descending (should already be sorted by caller)
-    hits.sort_by(|a, b| b.raw_score.cmp(&a.raw_score));
-
     // Mark HSPs for removal
+    // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_hits.c:2560-2566
+    // ```c
+    // // The hsp list is sorted by score
+    // for(i=0; i < hsp_list->hspcnt -1; i++) {
+    //     ...
+    // }
+    // ```
     let mut to_remove = vec![false; hits.len()];
 
     // Pass 1: Same-strand filtering

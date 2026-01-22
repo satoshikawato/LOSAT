@@ -2759,7 +2759,7 @@ struct SubjectScratch {
 // BlastInitHitListReset(init_hitlist);
 // ```
 impl SubjectScratch {
-    fn new(query_count: usize) -> Self {
+    fn new(query_count: usize, offset_array_size: usize) -> Self {
         Self {
             hits_with_internal: Vec::new(),
             // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_gapalign.c:4012-4076
@@ -2790,6 +2790,13 @@ impl SubjectScratch {
             hit_len_array: Vec::new(),
             diag_hash: DiagHashTable::new(TWO_HIT_WINDOW as i32),
             diag_table_offset: TWO_HIT_WINDOW as i32,
+            // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_engine.c:991-1041
+            // ```c
+            // Int4 offset_array_size = GetOffsetArraySize(lookup_wrap);
+            // ...
+            // aux_struct->offset_pairs =
+            //   (BlastOffsetPair*) malloc(offset_array_size * sizeof(BlastOffsetPair));
+            // ```
             // NCBI reference: ncbi-blast/c++/src/algo/blast/core/lookup_wrap.c:255-288
             // ```c
             // Int4 GetOffsetArraySize(LookupTableWrap* lookup)
@@ -2800,7 +2807,7 @@ impl SubjectScratch {
             //    ...
             // }
             // ```
-            offset_pairs: Vec::new(),
+            offset_pairs: Vec::with_capacity(offset_array_size),
         }
     }
 }
@@ -3732,6 +3739,34 @@ pub fn run(args: BlastnArgs) -> Result<()> {
         approx_table_entries,
     );
 
+    // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_engine.c:991-1041
+    // ```c
+    // Int4 offset_array_size = GetOffsetArraySize(lookup_wrap);
+    // ...
+    // aux_struct->offset_pairs =
+    //   (BlastOffsetPair*) malloc(offset_array_size * sizeof(BlastOffsetPair));
+    // ```
+    // NCBI reference: ncbi-blast/c++/src/algo/blast/core/lookup_wrap.c:255-288
+    // ```c
+    // switch (lookup->lut_type) {
+    // case eMBLookupTable:
+    //    offset_array_size = OFFSET_ARRAY_SIZE +
+    //       ((BlastMBLookupTable*)lookup->lut)->longest_chain;
+    //    break;
+    // ...
+    // default:
+    //    offset_array_size = OFFSET_ARRAY_SIZE;
+    //    break;
+    // }
+    // ```
+    let offset_array_size = if let Some(two_stage) = lookup_tables.two_stage_lookup.as_ref() {
+        OFFSET_ARRAY_SIZE + two_stage.longest_chain()
+    } else if let Some(pv_direct) = lookup_tables.pv_direct_lookup.as_ref() {
+        OFFSET_ARRAY_SIZE + pv_direct.longest_chain()
+    } else {
+        OFFSET_ARRAY_SIZE
+    };
+
     // NCBI reference: blast_traceback.c:654 (cutoff_score_min computed per subject)
     // Cutoff scores are computed per subject in the main loop; no global map needed.
 
@@ -4466,17 +4501,8 @@ pub fn run(args: BlastnArgs) -> Result<()> {
                         // if (hitsfound == 0) continue;
                         // hits_extended += extend(offset_pairs, hitsfound, ...);
                         // ```
-                        // NCBI reference: ncbi-blast/c++/src/algo/blast/core/lookup_wrap.c:255-288
-                        // ```c
-                        // offset_array_size = OFFSET_ARRAY_SIZE +
-                        //     ((BlastMBLookupTable*)lookup->lut)->longest_chain;
-                        // ```
-                        let offset_array_size = OFFSET_ARRAY_SIZE + two_stage.longest_chain();
                         let offset_pairs = &mut subject_scratch.offset_pairs;
                         offset_pairs.clear();
-                        if offset_pairs.capacity() < offset_array_size {
-                            offset_pairs.reserve(offset_array_size - offset_pairs.capacity());
-                        }
 
                         // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_engine.c:451-497
                         // ```c
@@ -6563,7 +6589,17 @@ pub fn run(args: BlastnArgs) -> Result<()> {
                 let mut chunk_results: Vec<(usize, usize, Vec<PrelimHit>)> = subject_chunks
                     .par_iter()
                     .map_init(
-                        || (GapAlignScratch::new(), SubjectScratch::new(queries_ref.len())),
+                        || (
+                            GapAlignScratch::new(),
+                            // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_engine.c:991-1041
+                            // ```c
+                            // Int4 offset_array_size = GetOffsetArraySize(lookup_wrap);
+                            // ...
+                            // aux_struct->offset_pairs =
+                            //   (BlastOffsetPair*) malloc(offset_array_size * sizeof(BlastOffsetPair));
+                            // ```
+                            SubjectScratch::new(queries_ref.len(), offset_array_size),
+                        ),
                         |state, chunk| {
                             let (gap_scratch, subject_scratch) = state;
                             let hits = collect_prelim_hits_for_chunk(chunk, gap_scratch, subject_scratch);
@@ -7232,7 +7268,18 @@ pub fn run(args: BlastnArgs) -> Result<()> {
                     //     if (diag->hit_len_array) diag->hit_len_array[i] = 0;
                     // }
                     // ```
-                    (tx.clone(), GapAlignScratch::new(), SubjectScratch::new(queries_ref.len()))
+                    (
+                        tx.clone(),
+                        GapAlignScratch::new(),
+                        // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_engine.c:991-1041
+                        // ```c
+                        // Int4 offset_array_size = GetOffsetArraySize(lookup_wrap);
+                        // ...
+                        // aux_struct->offset_pairs =
+                        //   (BlastOffsetPair*) malloc(offset_array_size * sizeof(BlastOffsetPair));
+                        // ```
+                        SubjectScratch::new(queries_ref.len(), offset_array_size),
+                    )
                 },
                 |state, (s_idx, s_record)| {
                     let (tx, gap_scratch, subject_scratch) = state;
@@ -7351,7 +7398,14 @@ pub fn run(args: BlastnArgs) -> Result<()> {
     //     if (diag->hit_len_array) diag->hit_len_array[i] = 0;
     // }
     // ```
-    let mut subject_scratch = SubjectScratch::new(queries_ref.len());
+    // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_engine.c:991-1041
+    // ```c
+    // Int4 offset_array_size = GetOffsetArraySize(lookup_wrap);
+    // ...
+    // aux_struct->offset_pairs =
+    //   (BlastOffsetPair*) malloc(offset_array_size * sizeof(BlastOffsetPair));
+    // ```
+    let mut subject_scratch = SubjectScratch::new(queries_ref.len(), offset_array_size);
     for (s_idx, s_record) in seq_data.subjects.iter().enumerate() {
         let mut subject_hits: Option<Vec<BlastnHsp>> = None;
         process_subject(

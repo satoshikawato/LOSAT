@@ -1899,85 +1899,6 @@ enum MbScanSubjectKind {
     Scan11_3Mod4,
 }
 
-// NCBI reference: ncbi-blast/c++/src/algo/blast/core/na_ungapped.c:1673-1676
-// ```c
-// while(s_DetermineScanningOffsets(subject, word_length, lut_word_length, scan_range)) {
-//     hitsfound = scansub(lookup_wrap, subject, offset_pairs, max_hits, &scan_range[1]);
-// }
-// ```
-#[inline(always)]
-fn scan_subject_kmers_range_mb<F>(
-    kind: MbScanSubjectKind,
-    packed: &[u8],
-    subject_len: usize,
-    lut_word_length: usize,
-    scan_step: usize,
-    subject_masked: bool,
-    start: usize,
-    end: usize,
-    on_kmer: &mut F,
-) where
-    F: FnMut(usize, u64),
-{
-    match kind {
-        MbScanSubjectKind::Any => scan_subject_kmers_range_mb_any(
-            packed,
-            subject_len,
-            lut_word_length,
-            scan_step,
-            subject_masked,
-            start,
-            end,
-            on_kmer,
-        ),
-        MbScanSubjectKind::Scan9_1 => {
-            scan_subject_kmers_range_mb_9_1(packed, subject_len, scan_step, start, end, on_kmer);
-        }
-        MbScanSubjectKind::Scan9_2 => {
-            scan_subject_kmers_range_mb_9_2(packed, subject_len, scan_step, start, end, on_kmer);
-        }
-        MbScanSubjectKind::Scan10_1 => {
-            scan_subject_kmers_range_mb_10_1(packed, subject_len, scan_step, start, end, on_kmer);
-        }
-        MbScanSubjectKind::Scan10_2 => {
-            scan_subject_kmers_range_mb_10_2(packed, subject_len, scan_step, start, end, on_kmer);
-        }
-        MbScanSubjectKind::Scan10_3 => {
-            scan_subject_kmers_range_mb_10_3(packed, subject_len, scan_step, start, end, on_kmer);
-        }
-        MbScanSubjectKind::Scan11_1Mod4 => {
-            scan_subject_kmers_range_mb_11_1mod4(
-                packed,
-                subject_len,
-                scan_step,
-                start,
-                end,
-                on_kmer,
-            );
-        }
-        MbScanSubjectKind::Scan11_2Mod4 => {
-            scan_subject_kmers_range_mb_11_2mod4(
-                packed,
-                subject_len,
-                scan_step,
-                start,
-                end,
-                on_kmer,
-            );
-        }
-        MbScanSubjectKind::Scan11_3Mod4 => {
-            scan_subject_kmers_range_mb_11_3mod4(
-                packed,
-                subject_len,
-                scan_step,
-                start,
-                end,
-                on_kmer,
-            );
-        }
-    }
-}
-
 // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_nascan.c:2602-2677
 // ```c
 // static void s_MBChooseScanSubject(LookupTableWrap *lookup_wrap)
@@ -2233,6 +2154,37 @@ fn determine_scanning_offsets(
     true
 }
 
+// NCBI reference: ncbi-blast/c++/src/algo/blast/core/na_ungapped.c:1673-1676
+// ```c
+// while(s_DetermineScanningOffsets(subject, word_length, lut_word_length, scan_range)) {
+//     hitsfound = scansub(lookup_wrap, subject, offset_pairs, max_hits, &scan_range[1]);
+// }
+// ```
+#[inline(always)]
+fn scan_subject_kmers_with_offsets<G>(
+    seq_ranges: &[(i32, i32)],
+    word_length: usize,
+    lut_word_length: usize,
+    mut scan_range: [i32; 3],
+    mut scan_fn: G,
+) where
+    G: FnMut(usize, usize),
+{
+    while determine_scanning_offsets(
+        seq_ranges,
+        word_length as i32,
+        lut_word_length as i32,
+        &mut scan_range,
+    ) {
+        let start = scan_range[1];
+        let end = scan_range[2];
+        if start >= 0 && end >= 0 {
+            scan_fn(start as usize, end as usize);
+        }
+        scan_range[1] = scan_range[2] + 1;
+    }
+}
+
 // NCBI reference: ncbi-blast/c++/src/algo/blast/core/na_ungapped.c:1647-1674
 // ```c
 // scan_range[0] = 0;  /* subject seq mask index */
@@ -2288,41 +2240,180 @@ fn scan_subject_kmers_with_ranges<F>(
         None
     };
 
-    while determine_scanning_offsets(
-        seq_ranges,
-        word_length as i32,
-        lut_word_length as i32,
-        &mut scan_range,
-    ) {
-        let start = scan_range[1];
-        let end = scan_range[2];
-        if start >= 0 && end >= 0 {
-            if let Some(kind) = mb_scan_kind {
-                scan_subject_kmers_range_mb(
-                    kind,
+    // NCBI reference: ncbi-blast/c++/src/algo/blast/core/na_ungapped.c:1635-1676
+    // ```c
+    // scansub = (TNaScanSubjectFunction)lookup->scansub_callback;
+    // ...
+    // while(s_DetermineScanningOffsets(subject, word_length, lut_word_length, scan_range)) {
+    //     hitsfound = scansub(lookup_wrap, subject, offset_pairs, max_hits, &scan_range[1]);
+    //     ...
+    // }
+    // ```
+    match mb_scan_kind {
+        Some(MbScanSubjectKind::Any) => scan_subject_kmers_with_offsets(
+            seq_ranges,
+            word_length,
+            lut_word_length,
+            scan_range,
+            |start, end| {
+                scan_subject_kmers_range_mb_any(
                     packed,
                     subject_len,
                     lut_word_length,
                     scan_step,
                     subject_masked,
-                    start as usize,
-                    end as usize,
+                    start,
+                    end,
                     &mut on_kmer,
                 );
-            } else {
+            },
+        ),
+        Some(MbScanSubjectKind::Scan9_1) => scan_subject_kmers_with_offsets(
+            seq_ranges,
+            word_length,
+            lut_word_length,
+            scan_range,
+            |start, end| {
+                scan_subject_kmers_range_mb_9_1(
+                    packed,
+                    subject_len,
+                    scan_step,
+                    start,
+                    end,
+                    &mut on_kmer,
+                );
+            },
+        ),
+        Some(MbScanSubjectKind::Scan9_2) => scan_subject_kmers_with_offsets(
+            seq_ranges,
+            word_length,
+            lut_word_length,
+            scan_range,
+            |start, end| {
+                scan_subject_kmers_range_mb_9_2(
+                    packed,
+                    subject_len,
+                    scan_step,
+                    start,
+                    end,
+                    &mut on_kmer,
+                );
+            },
+        ),
+        Some(MbScanSubjectKind::Scan10_1) => scan_subject_kmers_with_offsets(
+            seq_ranges,
+            word_length,
+            lut_word_length,
+            scan_range,
+            |start, end| {
+                scan_subject_kmers_range_mb_10_1(
+                    packed,
+                    subject_len,
+                    scan_step,
+                    start,
+                    end,
+                    &mut on_kmer,
+                );
+            },
+        ),
+        Some(MbScanSubjectKind::Scan10_2) => scan_subject_kmers_with_offsets(
+            seq_ranges,
+            word_length,
+            lut_word_length,
+            scan_range,
+            |start, end| {
+                scan_subject_kmers_range_mb_10_2(
+                    packed,
+                    subject_len,
+                    scan_step,
+                    start,
+                    end,
+                    &mut on_kmer,
+                );
+            },
+        ),
+        Some(MbScanSubjectKind::Scan10_3) => scan_subject_kmers_with_offsets(
+            seq_ranges,
+            word_length,
+            lut_word_length,
+            scan_range,
+            |start, end| {
+                scan_subject_kmers_range_mb_10_3(
+                    packed,
+                    subject_len,
+                    scan_step,
+                    start,
+                    end,
+                    &mut on_kmer,
+                );
+            },
+        ),
+        Some(MbScanSubjectKind::Scan11_1Mod4) => scan_subject_kmers_with_offsets(
+            seq_ranges,
+            word_length,
+            lut_word_length,
+            scan_range,
+            |start, end| {
+                scan_subject_kmers_range_mb_11_1mod4(
+                    packed,
+                    subject_len,
+                    scan_step,
+                    start,
+                    end,
+                    &mut on_kmer,
+                );
+            },
+        ),
+        Some(MbScanSubjectKind::Scan11_2Mod4) => scan_subject_kmers_with_offsets(
+            seq_ranges,
+            word_length,
+            lut_word_length,
+            scan_range,
+            |start, end| {
+                scan_subject_kmers_range_mb_11_2mod4(
+                    packed,
+                    subject_len,
+                    scan_step,
+                    start,
+                    end,
+                    &mut on_kmer,
+                );
+            },
+        ),
+        Some(MbScanSubjectKind::Scan11_3Mod4) => scan_subject_kmers_with_offsets(
+            seq_ranges,
+            word_length,
+            lut_word_length,
+            scan_range,
+            |start, end| {
+                scan_subject_kmers_range_mb_11_3mod4(
+                    packed,
+                    subject_len,
+                    scan_step,
+                    start,
+                    end,
+                    &mut on_kmer,
+                );
+            },
+        ),
+        None => scan_subject_kmers_with_offsets(
+            seq_ranges,
+            word_length,
+            lut_word_length,
+            scan_range,
+            |start, end| {
                 scan_subject_kmers_range(
                     packed,
                     subject_len,
                     lut_word_length,
                     scan_step,
                     subject_masked,
-                    start as usize,
-                    end as usize,
+                    start,
+                    end,
                     &mut on_kmer,
                 );
-            }
-        }
-        scan_range[1] = scan_range[2] + 1;
+            },
+        ),
     }
 }
 

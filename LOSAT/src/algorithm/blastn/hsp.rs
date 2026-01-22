@@ -62,12 +62,25 @@ pub struct BlastnHspList {
 // NCBI reference: ncbi-blast/c++/include/algo/blast/core/blast_hits.h:168-180
 // ```c
 // typedef struct BlastHitList {
-//    Int4 hsplist_count;
-//    BlastHSPList** hsplist_array;
+//    Int4 hsplist_count; /**< Filled size of the HSP lists array */
+//    Int4 hsplist_max; /**< Maximal allowed size of the HSP lists array */
+//    double worst_evalue; /**< Highest of the best e-values among the HSP lists */
+//    Int4 low_score; /**< The lowest of the best scores among the HSP lists */
+//    Boolean heapified; /**< Is this hit list already heapified? */
+//    BlastHSPList** hsplist_array; /**< Array of HSP lists for individual database hits */
+//    Int4 hsplist_current; /**< Number of allocated HSP list arrays. */
+//    Int4 num_hits; /**< Number of similar hits for the query (for mapping) */
 // } BlastHitList;
 // ```
 pub struct BlastnHitList {
+    pub hsplist_count: usize,
+    pub hsplist_max: usize,
+    pub worst_evalue: f64,
+    pub low_score: i32,
+    pub heapified: bool,
     pub hsplist_array: Vec<BlastnHspList>,
+    pub hsplist_current: usize,
+    pub num_hits: usize,
 }
 
 impl BlastnHsp {
@@ -164,6 +177,66 @@ impl BlastnHsp {
     }
 }
 
+// NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_hits.c:43-70 (GetPrelimHitlistSize)
+// ```c
+// Int4
+// GetPrelimHitlistSize(Int4 hitlist_size, Int4 compositionBasedStats, Boolean gapped_calculation)
+// {
+//     Int4 prelim_hitlist_size = hitlist_size;
+//     char * ADAPTIVE_CBS_ENV = getenv("ADAPTIVE_CBS");
+//     if (compositionBasedStats) {
+//         if(ADAPTIVE_CBS_ENV != NULL) {
+//             if(hitlist_size < 1000) {
+//                 prelim_hitlist_size = MAX(prelim_hitlist_size + 1000, 1500);
+//             }
+//             else {
+//                 prelim_hitlist_size = prelim_hitlist_size*2 + 50;
+//             }
+//         }
+//         else {
+//             if(hitlist_size <= 500) {
+//                 prelim_hitlist_size = 1050;
+//             }
+//             else {
+//                 prelim_hitlist_size = prelim_hitlist_size*2 + 50;
+//             }
+//         }
+//     }
+//     else if (gapped_calculation) {
+//          prelim_hitlist_size = MIN(MAX(2 * prelim_hitlist_size, 10),
+//                                   prelim_hitlist_size + 50);
+//     }
+//     return prelim_hitlist_size;
+// }
+// ```
+pub fn get_prelim_hitlist_size(
+    hitlist_size: usize,
+    composition_based_stats: bool,
+    gapped_calculation: bool,
+) -> usize {
+    let mut prelim_hitlist_size = hitlist_size;
+    let adaptive_cbs = std::env::var_os("ADAPTIVE_CBS").is_some();
+    if composition_based_stats {
+        if adaptive_cbs {
+            if hitlist_size < 1000 {
+                prelim_hitlist_size = std::cmp::max(prelim_hitlist_size + 1000, 1500);
+            } else {
+                prelim_hitlist_size = prelim_hitlist_size.saturating_mul(2).saturating_add(50);
+            }
+        } else if hitlist_size <= 500 {
+            prelim_hitlist_size = 1050;
+        } else {
+            prelim_hitlist_size = prelim_hitlist_size.saturating_mul(2).saturating_add(50);
+        }
+    } else if gapped_calculation {
+        prelim_hitlist_size = std::cmp::min(
+            std::cmp::max(prelim_hitlist_size.saturating_mul(2), 10),
+            prelim_hitlist_size.saturating_add(50),
+        );
+    }
+    prelim_hitlist_size
+}
+
 // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_hits.c:1389-1403
 // ```c
 // static int s_EvalueComp(double evalue1, double evalue2)
@@ -243,6 +316,63 @@ pub fn score_compare_hsps(a: &BlastnHsp, b: &BlastnHsp) -> Ordering {
     b_q_end.cmp(&a_q_end)
 }
 
+// NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_hits.c:1414-1435
+// ```c
+// static int
+// s_EvalueCompareHSPs(const void* v1, const void* v2)
+// {
+//    BlastHSP* h1,* h2;
+//    int retval = 0;
+//    ...
+//    if ((retval = s_EvalueComp(h1->evalue, h2->evalue)) != 0)
+//       return retval;
+//    return ScoreCompareHSPs(v1, v2);
+// }
+// ```
+pub fn evalue_compare_hsps(a: &BlastnHsp, b: &BlastnHsp) -> Ordering {
+    let cmp = evalue_comp(a.e_value, b.e_value);
+    if cmp == Ordering::Equal {
+        score_compare_hsps(a, b)
+    } else {
+        cmp
+    }
+}
+
+// NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_hits.c:1437-1455
+// ```c
+// void Blast_HSPListSortByEvalue(BlastHSPList* hsp_list)
+// {
+//     if (hsp_list->hspcnt > 1) {
+//         Int4 index;
+//         BlastHSP** hsp_array = hsp_list->hsp_array;
+//         for (index = 0; index < hsp_list->hspcnt - 1; ++index) {
+//             if (s_EvalueCompareHSPs(&hsp_array[index],
+//                                     &hsp_array[index+1]) > 0) {
+//                 break;
+//             }
+//         }
+//         if (index < hsp_list->hspcnt - 1) {
+//             qsort(hsp_list->hsp_array, hsp_list->hspcnt,
+//                   sizeof(BlastHSP*), s_EvalueCompareHSPs);
+//         }
+//     }
+// }
+// ```
+pub fn sort_hsplist_by_evalue(list: &mut BlastnHspList) {
+    if list.hsps.len() > 1 {
+        let mut index = 0usize;
+        while index < list.hsps.len() - 1 {
+            if evalue_compare_hsps(&list.hsps[index], &list.hsps[index + 1]) == Ordering::Greater {
+                break;
+            }
+            index += 1;
+        }
+        if index < list.hsps.len() - 1 {
+            list.hsps.sort_by(evalue_compare_hsps);
+        }
+    }
+}
+
 // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_hits.c:1739-1748
 // ```c
 // static double s_BlastGetBestEvalue(const BlastHSPList* hsp_list)
@@ -254,11 +384,7 @@ pub fn score_compare_hsps(a: &BlastnHsp, b: &BlastnHsp) -> Ordering {
 // }
 // ```
 pub fn update_best_evalue(list: &mut BlastnHspList) {
-    if list.hsps.is_empty() {
-        list.best_evalue = f64::MAX;
-        return;
-    }
-    let mut best = f64::MAX;
+    let mut best = i32::MAX as f64;
     for hsp in &list.hsps {
         if hsp.e_value < best {
             best = hsp.e_value;
@@ -286,7 +412,7 @@ pub fn trim_by_max_hsps(list: &mut BlastnHspList, max_hsps_per_subject: usize) {
     list.hsps.truncate(max_hsps_per_subject);
 }
 
-// NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_hits.c:3071-3106
+// NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_hits.c:3077-3106
 // ```c
 // static int s_EvalueCompareHSPLists(const void* v1, const void* v2)
 // {
@@ -322,23 +448,315 @@ pub fn compare_hsp_lists(a: &BlastnHspList, b: &BlastnHspList) -> Ordering {
     b.oid.cmp(&a.oid)
 }
 
-// NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_traceback.c:877-892
+// NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_hits.c:1627-1650
 // ```c
-// static void s_BlastPruneExtraHits(BlastHSPResults* results, Int4 hitlist_size)
+// static void
+// s_Heapify (char* base0, char* base, char* lim, char* last,
+//            size_t width, int (*compar )(const void*, const void* ))
 // {
-//    for (subject_index = hitlist_size;
-//         subject_index < hit_list->hsplist_count; ++subject_index) {
-//       hit_list->hsplist_array[subject_index] =
-//       Blast_HSPListFree(hit_list->hsplist_array[subject_index]);
+//    ...
+//    left_son = base0 + 2*(base-base0) + width;
+//    while (base <= lim) {
+//       ...
+//       large_son = (*compar)(left_son, left_son+width) >= 0 ?
+//          left_son : left_son+width;
+//       if ((*compar)(base, large_son) < 0) {
+//          ...
+//       } else
+//          break;
 //    }
-//    hit_list->hsplist_count = MIN(hit_list->hsplist_count, hitlist_size);
 // }
 // ```
-pub fn prune_hitlists_by_size(lists: &mut Vec<BlastnHspList>, hitlist_size: usize) {
-    if hitlist_size == 0 || lists.len() <= hitlist_size {
+fn heapify_hsplist_array(lists: &mut [BlastnHspList], start: usize, end: usize) {
+    let mut root = start;
+    loop {
+        let left = root.saturating_mul(2).saturating_add(1);
+        if left > end {
+            break;
+        }
+        let mut large = left;
+        let right = left + 1;
+        if right <= end && compare_hsp_lists(&lists[left], &lists[right]) == Ordering::Less {
+            large = right;
+        }
+        if compare_hsp_lists(&lists[root], &lists[large]) == Ordering::Less {
+            lists.swap(root, large);
+            root = large;
+        } else {
+            break;
+        }
+    }
+}
+
+// NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_hits.c:1659-1676
+// ```c
+// static void
+// s_CreateHeap (void* b, size_t nel, size_t width,
+//    int (*compar )(const void*, const void* ))
+// {
+//    if (nel < 2)
+//       return;
+//    ...
+//    i = nel/2;
+//    for (base = &base0[(i - 1)*width]; i > 0; base = base - width) {
+//       s_Heapify(base0, base, lim, basef, width, compar);
+//       i--;
+//    }
+// }
+// ```
+fn create_hsplist_heap(lists: &mut [BlastnHspList]) {
+    let nel = lists.len();
+    if nel < 2 {
         return;
     }
-    lists.truncate(hitlist_size);
+    let mut i = nel / 2;
+    while i > 0 {
+        i -= 1;
+        heapify_hsplist_array(lists, i, nel - 1);
+    }
+}
+
+impl BlastnHitList {
+    // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_hits.c:3125-3133
+    // ```c
+    // BlastHitList* Blast_HitListNew(Int4 hitlist_size)
+    // {
+    //    BlastHitList* new_hitlist = (BlastHitList*) calloc(1, sizeof(BlastHitList));
+    //    new_hitlist->hsplist_max = hitlist_size;
+    //    new_hitlist->low_score = INT4_MAX;
+    //    new_hitlist->hsplist_count = 0;
+    //    new_hitlist->hsplist_current = 0;
+    //    return new_hitlist;
+    // }
+    // ```
+    pub fn new(hitlist_size: usize) -> Self {
+        Self {
+            hsplist_count: 0,
+            hsplist_max: hitlist_size,
+            worst_evalue: 0.0,
+            low_score: i32::MAX,
+            heapified: false,
+            hsplist_array: Vec::new(),
+            hsplist_current: 0,
+            num_hits: 0,
+        }
+    }
+
+    // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_hits.c:3219-3240
+    // ```c
+    // static Int2 s_Blast_HitListGrowHSPListArray(BlastHitList* hit_list)
+    // {
+    //     const int kStartValue = 100;
+    //     if (hit_list->hsplist_current >= hit_list->hsplist_max)
+    //        return 1;
+    //     if (hit_list->hsplist_current <= 0)
+    //        hit_list->hsplist_current = kStartValue;
+    //     else
+    //        hit_list->hsplist_current =
+    //           MIN(2*hit_list->hsplist_current, hit_list->hsplist_max);
+    //     hit_list->hsplist_array =
+    //        (BlastHSPList**) realloc(hit_list->hsplist_array,
+    //                                 hit_list->hsplist_current*sizeof(BlastHSPList*));
+    //     if (hit_list->hsplist_array == NULL)
+    //        return BLASTERR_MEMORY;
+    //     return 0;
+    // }
+    // ```
+    fn grow_hsplist_array(&mut self) -> bool {
+        const K_START_VALUE: usize = 100;
+        if self.hsplist_current >= self.hsplist_max {
+            return false;
+        }
+        if self.hsplist_current == 0 {
+            self.hsplist_current = K_START_VALUE.min(self.hsplist_max);
+        } else {
+            let next = self.hsplist_current.saturating_mul(2);
+            self.hsplist_current = next.min(self.hsplist_max);
+        }
+        if self.hsplist_array.capacity() < self.hsplist_current {
+            self.hsplist_array
+                .reserve(self.hsplist_current - self.hsplist_array.capacity());
+        }
+        true
+    }
+
+    // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_hits.c:3196-3209
+    // ```c
+    // static void
+    // s_BlastHitListInsertHSPListInHeap(BlastHitList* hit_list,
+    //                                  BlastHSPList* hsp_list)
+    // {
+    //       Blast_HSPListFree(hit_list->hsplist_array[0]);
+    //       hit_list->hsplist_array[0] = hsp_list;
+    //       if (hit_list->hsplist_count >= 2) {
+    //          s_Heapify((char*)hit_list->hsplist_array, (char*)hit_list->hsplist_array,
+    //                  (char*)&hit_list->hsplist_array[hit_list->hsplist_count/2 - 1],
+    //                  (char*)&hit_list->hsplist_array[hit_list->hsplist_count-1],
+    //                  sizeof(BlastHSPList*), s_EvalueCompareHSPLists);
+    //       }
+    //       hit_list->worst_evalue = hit_list->hsplist_array[0]->best_evalue;
+    //       hit_list->low_score = hit_list->hsplist_array[0]->hsp_array[0]->score;
+    // }
+    // ```
+    fn insert_hsplist_in_heap(&mut self, hsp_list: BlastnHspList) {
+        if self.hsplist_array.is_empty() {
+            self.hsplist_array.push(hsp_list);
+            self.hsplist_count = 1;
+        } else {
+            self.hsplist_array[0] = hsp_list;
+        }
+        if self.hsplist_count >= 2 {
+            heapify_hsplist_array(&mut self.hsplist_array, 0, self.hsplist_count - 1);
+        }
+        if let Some(root) = self.hsplist_array.first() {
+            self.worst_evalue = root.best_evalue;
+            if let Some(score) = root.hsps.first().map(|h| h.raw_score) {
+                self.low_score = score;
+            }
+        }
+    }
+
+    // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_hits.c:3243-3297
+    // ```c
+    // Int2 Blast_HitListUpdate(BlastHitList* hit_list, BlastHSPList* hsp_list)
+    // {
+    //    hsp_list->best_evalue = s_BlastGetBestEvalue(hsp_list);
+    //    if (hit_list->hsplist_count < hit_list->hsplist_max) {
+    //       if (hit_list->hsplist_current == hit_list->hsplist_count)
+    //       {
+    //          Int2 status = s_Blast_HitListGrowHSPListArray(hit_list);
+    //          if (status)
+    //            return status;
+    //       }
+    //       hit_list->hsplist_array[hit_list->hsplist_count++] = hsp_list;
+    //       hit_list->worst_evalue =
+    //          MAX(hsp_list->best_evalue, hit_list->worst_evalue);
+    //       hit_list->low_score =
+    //          MIN(hsp_list->hsp_array[0]->score, hit_list->low_score);
+    //    } else {
+    //       if (!hit_list->heapified) {
+    //           for (index =0; index < hit_list->hsplist_count; index++) {
+    //               Blast_HSPListSortByEvalue(hit_list->hsplist_array[index]);
+    //               hit_list->hsplist_array[index]->best_evalue =
+    //                   s_BlastGetBestEvalue(hit_list->hsplist_array[index]);
+    //           }
+    //           s_CreateHeap(hit_list->hsplist_array, hit_list->hsplist_count,
+    //                        sizeof(BlastHSPList*), s_EvalueCompareHSPLists);
+    //           hit_list->heapified = TRUE;
+    //       }
+    //       Blast_HSPListSortByEvalue(hsp_list);
+    //       hsp_list->best_evalue = s_BlastGetBestEvalue(hsp_list);
+    //       evalue_order = s_EvalueCompareHSPLists(&(hit_list->hsplist_array[0]), &hsp_list);
+    //       if (evalue_order < 0) {
+    //          Blast_HSPListFree(hsp_list);
+    //       } else {
+    //          s_BlastHitListInsertHSPListInHeap(hit_list, hsp_list);
+    //       }
+    //    }
+    //    return 0;
+    // }
+    // ```
+    pub fn update(&mut self, mut hsp_list: BlastnHspList) {
+        update_best_evalue(&mut hsp_list);
+
+        if self.hsplist_count < self.hsplist_max {
+            if self.hsplist_current == self.hsplist_count && !self.grow_hsplist_array() {
+                return;
+            }
+            self.hsplist_array.push(hsp_list);
+            self.hsplist_count += 1;
+            self.worst_evalue = self.worst_evalue.max(self.hsplist_array.last().unwrap().best_evalue);
+            if let Some(score) = self.hsplist_array.last().unwrap().hsps.first().map(|h| h.raw_score) {
+                self.low_score = self.low_score.min(score);
+            }
+        } else {
+            if !self.heapified {
+                for list in &mut self.hsplist_array {
+                    sort_hsplist_by_evalue(list);
+                    update_best_evalue(list);
+                }
+                create_hsplist_heap(&mut self.hsplist_array);
+                self.heapified = true;
+            }
+
+            sort_hsplist_by_evalue(&mut hsp_list);
+            update_best_evalue(&mut hsp_list);
+            let evalue_order = compare_hsp_lists(&self.hsplist_array[0], &hsp_list);
+            if evalue_order == Ordering::Less {
+                return;
+            }
+            self.insert_hsplist_in_heap(hsp_list);
+        }
+    }
+
+    // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_hits.c:3172-3187
+    // ```c
+    // static void s_BlastHitListPurge(BlastHitList* hit_list)
+    // {
+    //    if (!hit_list) return;
+    //    hsplist_count = hit_list->hsplist_count;
+    //    for (index = 0; index < hsplist_count &&
+    //            hit_list->hsplist_array[index]->hspcnt > 0; ++index);
+    //    hit_list->hsplist_count = index;
+    //    for ( ; index < hsplist_count; ++index) {
+    //       Blast_HSPListFree(hit_list->hsplist_array[index]);
+    //    }
+    // }
+    // ```
+    fn purge(&mut self) {
+        let mut index = 0usize;
+        while index < self.hsplist_count {
+            if self.hsplist_array[index].hsps.is_empty() {
+                break;
+            }
+            index += 1;
+        }
+        self.hsplist_count = index;
+        self.hsplist_array.truncate(index);
+    }
+
+    // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_hits.c:3331-3337
+    // ```c
+    // Int2 Blast_HitListSortByEvalue(BlastHitList* hit_list)
+    // {
+    //    if (hit_list && hit_list->hsplist_count > 1) {
+    //       qsort(hit_list->hsplist_array, hit_list->hsplist_count,
+    //             sizeof(BlastHSPList*), s_EvalueCompareHSPLists);
+    //    }
+    //    s_BlastHitListPurge(hit_list);
+    //    return 0;
+    // }
+    // ```
+    pub fn sort_by_evalue(&mut self) {
+        if self.hsplist_count > 1 {
+            self.hsplist_array.sort_by(compare_hsp_lists);
+        }
+        self.purge();
+    }
+
+    // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_traceback.c:877-892
+    // ```c
+    // static void s_BlastPruneExtraHits(BlastHSPResults* results, Int4 hitlist_size)
+    // {
+    //    for (subject_index = hitlist_size;
+    //         subject_index < hit_list->hsplist_count; ++subject_index) {
+    //       hit_list->hsplist_array[subject_index] =
+    //       Blast_HSPListFree(hit_list->hsplist_array[subject_index]);
+    //    }
+    //    hit_list->hsplist_count = MIN(hit_list->hsplist_count, hitlist_size);
+    // }
+    // ```
+    pub fn prune_by_size(&mut self, hitlist_size: usize) {
+        if hitlist_size == 0 {
+            self.hsplist_array.clear();
+            self.hsplist_count = 0;
+            return;
+        }
+        if self.hsplist_count > hitlist_size {
+            self.hsplist_array.truncate(hitlist_size);
+            self.hsplist_count = hitlist_size;
+        }
+    }
 }
 
 /// Write BLASTN output in NCBI HSP list order without regrouping.
@@ -354,7 +772,7 @@ pub fn prune_hitlists_by_size(lists: &mut Vec<BlastnHspList>, hitlist_size: usiz
 ///    }
 /// }
 /// ```
-/// NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_hits.c:3071-3106
+/// NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_hits.c:3077-3106
 /// ```c
 /// static int s_EvalueCompareHSPLists(const void* v1, const void* v2) {
 ///    if ((retval = s_EvalueComp(h1->best_evalue, h2->best_evalue)) != 0)
@@ -427,4 +845,99 @@ pub fn write_output_blastn_hitlists(
     }
 
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    // NCBI reference: ncbi-blast/c++/include/algo/blast/core/blast_hits.h:125-148
+    // ```c
+    // typedef struct BlastHSP {
+    //    Int4 score;
+    //    double evalue;
+    //    BlastSeg query;
+    //    BlastSeg subject;
+    //    Int4 context;
+    // } BlastHSP;
+    // ```
+    fn make_hsp(e_value: f64, raw_score: i32, s_idx: u32) -> BlastnHsp {
+        BlastnHsp {
+            identity: 0.0,
+            length: 0,
+            mismatch: 0,
+            gapopen: 0,
+            q_start: 1,
+            q_end: 1,
+            s_start: 1,
+            s_end: 1,
+            e_value,
+            bit_score: 0.0,
+            query_frame: 1,
+            query_length: 1,
+            q_idx: 0,
+            s_idx,
+            raw_score,
+            gap_info: None,
+        }
+    }
+
+    #[test]
+    fn test_prelim_hitlist_size_gapped() {
+        // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_hits.c:43-70
+        // ```c
+        // else if (gapped_calculation) {
+        //      prelim_hitlist_size = MIN(MAX(2 * prelim_hitlist_size, 10),
+        //                               prelim_hitlist_size + 50);
+        // }
+        // ```
+        assert_eq!(get_prelim_hitlist_size(1, false, true), 10);
+        assert_eq!(get_prelim_hitlist_size(30, false, true), 60);
+        assert_eq!(get_prelim_hitlist_size(1000, false, true), 1050);
+    }
+
+    #[test]
+    fn test_hitlist_update_keeps_best() {
+        // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_hits.c:3243-3297
+        // ```c
+        // if (hit_list->hsplist_count < hit_list->hsplist_max) { ... }
+        // else {
+        //    if (!hit_list->heapified) { ... }
+        //    evalue_order = s_EvalueCompareHSPLists(&(hit_list->hsplist_array[0]), &hsp_list);
+        //    if (evalue_order < 0) { Blast_HSPListFree(hsp_list); }
+        //    else { s_BlastHitListInsertHSPListInHeap(hit_list, hsp_list); }
+        // }
+        // ```
+        let mut hit_list = BlastnHitList::new(1);
+
+        let hsp_list_a = BlastnHspList {
+            oid: 10,
+            query_index: 0,
+            hsps: vec![make_hsp(5.0, 50, 10)],
+            best_evalue: i32::MAX as f64,
+        };
+        hit_list.update(hsp_list_a);
+        assert_eq!(hit_list.hsplist_count, 1);
+        assert_eq!(hit_list.hsplist_array[0].oid, 10);
+
+        let hsp_list_b = BlastnHspList {
+            oid: 20,
+            query_index: 0,
+            hsps: vec![make_hsp(1.0, 80, 20)],
+            best_evalue: i32::MAX as f64,
+        };
+        hit_list.update(hsp_list_b);
+        assert_eq!(hit_list.hsplist_count, 1);
+        assert_eq!(hit_list.hsplist_array[0].oid, 20);
+
+        let hsp_list_c = BlastnHspList {
+            oid: 30,
+            query_index: 0,
+            hsps: vec![make_hsp(10.0, 40, 30)],
+            best_evalue: i32::MAX as f64,
+        };
+        hit_list.update(hsp_list_c);
+        assert_eq!(hit_list.hsplist_count, 1);
+        assert_eq!(hit_list.hsplist_array[0].oid, 20);
+    }
 }

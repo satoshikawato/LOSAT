@@ -8,7 +8,7 @@ use std::sync::Arc;
 
 use crate::report::{
     OutputFormat, OutputConfig, ReportContext,
-    format_hit, write_outfmt7,
+    write_hit_fields, write_outfmt7,
     PairwiseConfig, write_pairwise_simple,
 };
 
@@ -348,8 +348,35 @@ pub fn write_output_with_format(
         }
         OutputFormat::Tabular => {
             // outfmt 6: Tabular output
+            // NCBI reference: ncbi-blast/c++/src/objtools/align_format/tabular.cpp:1100-1108
+            // ```c
+            // void CBlastTabularInfo::Print()
+            // {
+            //     ITERATE(list<ETabularField>, iter, m_FieldsToShow) {
+            //         if (iter != m_FieldsToShow.begin())
+            //             m_Ostream << m_FieldDelimiter;
+            //         x_PrintField(*iter);
+            //     }
+            //     m_Ostream << "\n";
+            // }
+            // ```
             for hit in hits {
-                writeln!(writer, "{}", format_hit(hit, &config))?;
+                write_hit_fields(
+                    &mut writer,
+                    hit.query_id.as_ref(),
+                    hit.subject_id.as_ref(),
+                    hit.identity,
+                    hit.length,
+                    hit.mismatch,
+                    hit.gapopen,
+                    hit.q_start,
+                    hit.q_end,
+                    hit.s_start,
+                    hit.s_end,
+                    hit.e_value,
+                    hit.bit_score,
+                    &config,
+                )?;
             }
         }
         OutputFormat::TabularWithComments => {
@@ -482,7 +509,34 @@ pub fn write_output_ncbi_order_with_format(
                 // outfmt 6: Tabular output with NCBI formatting
                 for group in subject_groups {
                     for hit in group.hits {
-                        writeln!(writer, "{}", format_hit(&hit, &config))?;
+                        // NCBI reference: ncbi-blast/c++/src/objtools/align_format/tabular.cpp:1100-1108
+                        // ```c
+                        // void CBlastTabularInfo::Print()
+                        // {
+                        //     ITERATE(list<ETabularField>, iter, m_FieldsToShow) {
+                        //         if (iter != m_FieldsToShow.begin())
+                        //             m_Ostream << m_FieldDelimiter;
+                        //         x_PrintField(*iter);
+                        //     }
+                        //     m_Ostream << "\n";
+                        // }
+                        // ```
+                        write_hit_fields(
+                            &mut writer,
+                            hit.query_id.as_ref(),
+                            hit.subject_id.as_ref(),
+                            hit.identity,
+                            hit.length,
+                            hit.mismatch,
+                            hit.gapopen,
+                            hit.q_start,
+                            hit.q_end,
+                            hit.s_start,
+                            hit.s_end,
+                            hit.e_value,
+                            hit.bit_score,
+                            &config,
+                        )?;
                     }
                 }
             }

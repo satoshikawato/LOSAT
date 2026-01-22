@@ -8,10 +8,6 @@
 
 use anyhow::Result;
 use bio::io::fasta;
-use crate::core::blast_encoding::{
-    encode_iupac_to_blastna,
-    encode_iupac_to_ncbi2na_packed,
-};
 use crate::utils::dust::{DustMasker, MaskedInterval};
 use super::args::BlastnArgs;
 use super::constants::{MIN_UNGAPPED_SCORE_MEGABLAST, MIN_UNGAPPED_SCORE_BLASTN, MAX_DIRECT_LOOKUP_WORD_SIZE, X_DROP_GAPPED_NUCL, X_DROP_GAPPED_GREEDY, X_DROP_GAPPED_FINAL, SCAN_RANGE_BLASTN, SCAN_RANGE_MEGABLAST, LUT_WIDTH_11_THRESHOLD_8, LUT_WIDTH_11_THRESHOLD_10, MIN_DIAG_SEPARATION_BLASTN, MIN_DIAG_SEPARATION_MEGABLAST};
@@ -53,51 +49,39 @@ pub struct LookupTables {
     pub hash_lookup: Option<KmerLookup>,
 }
 
-// NCBI reference: ncbi-blast/c++/src/algo/blast/api/blast_setup_cxx.cpp:836-847
-// ```c
-// BlastSeqBlkSetSequence(subj, sequence.data.release(),
-//    ((sentinels == eSentinels) ? sequence.length - 2 :
-//     sequence.length));
-// ...
-// BlastSeqBlkSetCompressedSequence(subj,
-//                                  compressed_seq.data.release());
-// ```
-pub struct SubjectEncoding {
-    // NCBI reference: ncbi-blast/c++/src/algo/blast/api/blast_setup_cxx.cpp:836-847
+/// Subject metadata needed for search setup.
+pub struct SubjectMetadata {
+    // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_engine.c:1407-1409
     // ```c
-    // BlastSeqBlkSetSequence(subj, sequence.data.release(), ...);
-    // ...
-    // BlastSeqBlkSetCompressedSequence(subj,
-    //                                  compressed_seq.data.release());
+    // db_length = BlastSeqSrcGetTotLen(seq_src);
+    // itr = BlastSeqSrcIteratorNewEx(MAX(BlastSeqSrcGetNumSeqs(seq_src)/100,1));
     // ```
-    pub blastna: Vec<u8>,
-    pub ncbi2na_packed: Vec<u8>,
+    pub db_len_total: usize,
+    pub db_num_seqs: usize,
+    // NCBI reference: ncbi-blast/c++/include/algo/blast/core/blast_hits.h:153-155
+    // ```c
+    // Int4 oid;/**< The ordinal id of the subject sequence this HSP list is for */
+    // ```
+    pub subject_ids: Vec<String>,
 }
 
 /// Sequence data and metadata
 pub struct SequenceData {
     pub queries: Vec<fasta::Record>,
     pub query_ids: Vec<String>,
-    pub subjects: Vec<fasta::Record>,
     pub query_masks: Vec<Vec<MaskedInterval>>,
-    // NCBI reference: ncbi-blast/c++/src/algo/blast/api/blast_setup_cxx.cpp:812-826
+    // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_engine.c:1407-1409
     // ```c
-    // if (subjects.GetMask(i).NotEmpty()) {
-    //     s_SeqLoc2MaskedSubjRanges(...);
-    //     BlastSeqBlkSetSeqRanges(..., eSoftSubjMasking);
-    // }
+    // db_length = BlastSeqSrcGetTotLen(seq_src);
+    // itr = BlastSeqSrcIteratorNewEx(MAX(BlastSeqSrcGetNumSeqs(seq_src)/100,1));
     // ```
-    pub subject_masks: Vec<Vec<MaskedInterval>>,
-    // NCBI reference: ncbi-blast/c++/src/algo/blast/api/blast_setup_cxx.cpp:836-847
-    // ```c
-    // BlastSeqBlkSetSequence(subj, sequence.data.release(), ...);
-    // ...
-    // BlastSeqBlkSetCompressedSequence(subj,
-    //                                  compressed_seq.data.release());
-    // ```
-    pub subject_encodings: Vec<SubjectEncoding>,
     pub db_len_total: usize,
     pub db_num_seqs: usize,
+    // NCBI reference: ncbi-blast/c++/include/algo/blast/core/blast_hits.h:153-155
+    // ```c
+    // Int4 oid;/**< The ordinal id of the subject sequence this HSP list is for */
+    // ```
+    pub subject_ids: Vec<String>,
 }
 
 /// Determine effective word size based on task
@@ -434,6 +418,40 @@ pub fn finalize_task_config(
     config.scan_step = (config.effective_word_size - config.lut_word_length + 1).max(1);
 }
 
+// NCBI reference: ncbi-blast/c++/src/algo/blast/blastinput/blast_input_aux.cpp:221-246
+// ```c
+// ReadSequencesToBlast(CNcbiIstream& in,
+//                      bool read_proteins,
+//                      const TSeqRange& range,
+//                      bool parse_deflines,
+//                      bool use_lcase_masking,
+//                      CRef<CBlastQueryVector>& sequences,
+//                      bool gaps_to_Ns)
+// {
+//     ...
+//     sequences = input->GetAllSeqs(*scope);
+//     return scope;
+// }
+// ```
+/// Read query sequences
+pub fn read_queries(args: &BlastnArgs) -> Result<(Vec<fasta::Record>, Vec<String>)> {
+    eprintln!("Reading query & subject...");
+    let query_reader = fasta::Reader::from_file(&args.query)?;
+    let queries: Vec<fasta::Record> = query_reader.records().filter_map(|r| r.ok()).collect();
+    let query_ids: Vec<String> = queries
+        .iter()
+        .map(|r| {
+            r.id()
+                .split_whitespace()
+                .next()
+                .unwrap_or("unknown")
+                .to_string()
+        })
+        .collect();
+
+    Ok((queries, query_ids))
+}
+
 /// Read query and subject sequences
 pub fn read_sequences(args: &BlastnArgs) -> Result<(Vec<fasta::Record>, Vec<String>, Vec<fasta::Record>)> {
     eprintln!("Reading query & subject...");
@@ -449,28 +467,98 @@ pub fn read_sequences(args: &BlastnArgs) -> Result<(Vec<fasta::Record>, Vec<Stri
                 .to_string()
         })
         .collect();
-    
+
     let subject_reader = fasta::Reader::from_file(&args.subject)?;
     let subjects: Vec<fasta::Record> = subject_reader.records().filter_map(|r| r.ok()).collect();
-    
+
     Ok((queries, query_ids, subjects))
 }
 
-// NCBI reference: ncbi-blast/c++/src/objtools/readers/fasta.cpp:856-949
+// NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_engine.c:1407-1413
 // ```c
-// case 'a': case 'b': case 'c': case 'd': ...
-//     char_type = eCharType_MaskedNonGap;
+// db_length = BlastSeqSrcGetTotLen(seq_src);
+// itr = BlastSeqSrcIteratorNewEx(MAX(BlastSeqSrcGetNumSeqs(seq_src)/100,1));
+// while ( (seq_arg.oid = BlastSeqSrcIteratorNext(seq_src, itr))
+//        != BLAST_SEQSRC_EOF) {
+// ```
+pub fn subject_metadata_from_records(records: &[fasta::Record]) -> SubjectMetadata {
+    let mut subject_ids = Vec::with_capacity(records.len());
+    let mut db_len_total: usize = 0;
+    for record in records {
+        subject_ids.push(
+            record
+                .id()
+                .split_whitespace()
+                .next()
+                .unwrap_or("unknown")
+                .to_string(),
+        );
+        db_len_total += record.seq().len();
+    }
+    SubjectMetadata {
+        db_len_total,
+        db_num_seqs: records.len(),
+        subject_ids,
+    }
+}
+
+// NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_engine.c:1407-1427
+// ```c
+// db_length = BlastSeqSrcGetTotLen(seq_src);
+// itr = BlastSeqSrcIteratorNewEx(MAX(BlastSeqSrcGetNumSeqs(seq_src)/100,1));
+// while ( (seq_arg.oid = BlastSeqSrcIteratorNext(seq_src, itr))
+//        != BLAST_SEQSRC_EOF) {
+//     if (BlastSeqSrcGetSequence(seq_src, &seq_arg) < 0) {
+//         continue;
+//     }
+// }
+// ```
+pub fn scan_subjects_metadata(args: &BlastnArgs) -> Result<SubjectMetadata> {
+    let subject_reader = fasta::Reader::from_file(&args.subject)?;
+    let mut subject_ids: Vec<String> = Vec::new();
+    let mut db_len_total: usize = 0;
+    let mut db_num_seqs: usize = 0;
+
+    for record in subject_reader.records().filter_map(|r| r.ok()) {
+        subject_ids.push(
+            record
+                .id()
+                .split_whitespace()
+                .next()
+                .unwrap_or("unknown")
+                .to_string(),
+        );
+        db_len_total += record.seq().len();
+        db_num_seqs += 1;
+    }
+
+    Ok(SubjectMetadata {
+        db_len_total,
+        db_num_seqs,
+        subject_ids,
+    })
+}
+
+// NCBI reference: ncbi-blast/c++/src/objtools/readers/fasta.cpp:856-874
+// ```c
+// case 'a': case 'b': case 'c': case 'd':
+// case 'g': case 'h':
 // ...
-// case eCharType_MaskedNonGap:
-//     m_SeqData[m_CurrentPos] = s_ASCII_MustBeLowerToUpper(c);
-//     OpenMask();
+//     char_type = eCharType_MaskedNonGap;
+//     break;
 // ```
 // NCBI reference: ncbi-blast/c++/src/objtools/readers/fasta.cpp:1079-1089
 // ```c
-// m_CurrentMask->SetPacked_int().AddInterval(... m_MaskRangeStart,
-//     GetCurrentPos(...) - 1, eNa_strand_plus);
+// void CFastaReader::x_OpenMask(void)
+// {
+//     m_MaskRangeStart = GetCurrentPos(ePosWithGapsAndSegs);
+// }
+// void CFastaReader::x_CloseMask(void)
+// {
+//     m_CurrentMask->SetPacked_int().AddInterval(...);
+// }
 // ```
-fn collect_lowercase_masks(seq: &[u8]) -> Vec<MaskedInterval> {
+pub fn collect_lowercase_masks(seq: &[u8]) -> Vec<MaskedInterval> {
     let mut masks = Vec::new();
     let mut current_start: Option<usize> = None;
 
@@ -693,7 +781,7 @@ pub fn prepare_sequence_data(
     args: &BlastnArgs,
     queries: Vec<fasta::Record>,
     query_ids: Vec<String>,
-    subjects: Vec<fasta::Record>,
+    subject_metadata: SubjectMetadata,
 ) -> SequenceData {
     let mut query_masks = apply_dust_masking(args, &queries);
     // NCBI reference: ncbi-blast/c++/src/algo/blast/blastinput/blast_args.cpp:2547-2556
@@ -716,49 +804,26 @@ pub fn prepare_sequence_data(
             }
         }
     }
-    // NCBI reference: ncbi-blast/c++/src/algo/blast/api/blast_setup_cxx.cpp:812-826
+    // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_engine.c:1407-1409
     // ```c
-    // if (subjects.GetMask(i).NotEmpty()) {
-    //     s_SeqLoc2MaskedSubjRanges(masks, &*range, length, masked_ranges);
-    //     BlastSeqBlkSetSeqRanges(..., eSoftSubjMasking);
-    // }
+    // db_length = BlastSeqSrcGetTotLen(seq_src);
+    // itr = BlastSeqSrcIteratorNewEx(MAX(BlastSeqSrcGetNumSeqs(seq_src)/100,1));
     // ```
-    let subject_masks = if args.lcase_masking {
-        collect_lowercase_masks_for_records(&subjects)
-    } else {
-        vec![Vec::new(); subjects.len()]
-    };
-    // NCBI reference: ncbi-blast/c++/src/algo/blast/api/blast_setup_cxx.cpp:836-847
+    let db_len_total = subject_metadata.db_len_total;
+    let db_num_seqs = subject_metadata.db_num_seqs;
+    // NCBI reference: ncbi-blast/c++/include/algo/blast/core/blast_hits.h:153-155
     // ```c
-    // BlastSeqBlkSetSequence(subj, sequence.data.release(), ...);
-    // ...
-    // BlastSeqBlkSetCompressedSequence(subj,
-    //                                  compressed_seq.data.release());
+    // Int4 oid;/**< The ordinal id of the subject sequence this HSP list is for */
     // ```
-    let subject_encodings: Vec<SubjectEncoding> = subjects
-        .iter()
-        .map(|record| {
-            let seq = record.seq();
-            let blastna = encode_iupac_to_blastna(seq);
-            let ncbi2na_packed = encode_iupac_to_ncbi2na_packed(seq);
-            SubjectEncoding {
-                blastna,
-                ncbi2na_packed,
-            }
-        })
-        .collect();
-    let db_len_total: usize = subjects.iter().map(|r| r.seq().len()).sum();
-    let db_num_seqs: usize = subjects.len();
+    let subject_ids = subject_metadata.subject_ids;
     
     SequenceData {
         queries,
         query_ids,
-        subjects,
         query_masks,
-        subject_masks,
-        subject_encodings,
         db_len_total,
         db_num_seqs,
+        subject_ids,
     }
 }
 

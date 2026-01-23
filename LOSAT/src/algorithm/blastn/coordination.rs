@@ -714,11 +714,17 @@ pub fn build_lookup_tables(
         //                               compressed_seq.data.release());
         // }
         // ```
+        // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_nalookup.c:865-868
+        // ```c
+        // if (full_word_size > (loc->ssr->right - loc->ssr->left + 1))
+        //     continue;
+        // ```
         Some(build_db_word_counts(
             queries_blastna,
             query_masks,
             subjects,
             config.lut_word_length,
+            config.effective_word_size,
             args.max_db_word_count,
             approx_table_entries,
             subjects_packed,

@@ -31,15 +31,9 @@
 - LOSAT refs: `LOSAT/src/algorithm/blastn/coordination.rs:561`, `LOSAT/src/algorithm/blastn/blast_engine/run.rs:4307`.
 - NCBI refs: `/mnt/c/Users/genom/GitHub/ncbi-blast/c++/src/objtools/readers/fasta.cpp:856`, `/mnt/c/Users/genom/GitHub/ncbi-blast/c++/src/objtools/readers/fasta.cpp:1079`.
 
-### 4) limit_lookup PV scan checks masks per k-mer vs unmasked-range iteration
-- `build_query_pv` scans the full query and calls `is_kmer_masked` for each k-mer.
-- NCBI `s_FillPV` iterates `BlastSeqLoc` (unmasked regions) and avoids per-k-mer mask checks.
-- Impact: extra mask lookups per k-mer when `limit_lookup` is enabled.
-- LOSAT refs: `LOSAT/src/algorithm/blastn/lookup.rs:477`, `LOSAT/src/algorithm/blastn/lookup.rs:747`.
-- NCBI refs: `/mnt/c/Users/genom/GitHub/ncbi-blast/c++/src/algo/blast/core/blast_nalookup.c:829`, `/mnt/c/Users/genom/GitHub/ncbi-blast/c++/src/algo/blast/core/blast_nalookup.c:858`.
-
 ## Recently addressed (no longer discrepancies)
 - Query lookup build now uses pre-encoded BLASTNA buffers (no ASCII->2-bit conversion in lookup builders); LOSAT refs: `LOSAT/src/algorithm/blastn/blast_engine/run.rs:3923`, `LOSAT/src/algorithm/blastn/lookup.rs:23`, `LOSAT/src/algorithm/blastn/lookup.rs:953`; NCBI refs: `/mnt/c/Users/genom/GitHub/ncbi-blast/c++/src/algo/blast/api/blast_setup_cxx.cpp:498-604`, `/mnt/c/Users/genom/GitHub/ncbi-blast/c++/src/algo/blast/core/blast_lookup.c:90-120`, `/mnt/c/Users/genom/GitHub/ncbi-blast/c++/src/algo/blast/core/blast_nalookup.c:878-893`.
+- limit_lookup PV fill now iterates unmasked ranges (no per-k-mer mask checks); LOSAT refs: `LOSAT/src/algorithm/blastn/lookup.rs:249`, `LOSAT/src/algorithm/blastn/lookup.rs:505`, `LOSAT/src/algorithm/blastn/coordination.rs:722`; NCBI refs: `/mnt/c/Users/genom/GitHub/ncbi-blast/c++/src/algo/blast/core/blast_nalookup.c:856-889`.
 - Masked chunk `seq_ranges` now build into per-thread scratch for both sequential and parallel paths (no per-chunk Vec allocations); LOSAT refs: `LOSAT/src/algorithm/blastn/blast_engine/run.rs:180`, `LOSAT/src/algorithm/blastn/blast_engine/run.rs:4568`, `LOSAT/src/algorithm/blastn/blast_engine/run.rs:2900`; NCBI refs: `/mnt/c/Users/genom/GitHub/ncbi-blast/c++/src/algo/blast/core/blast_engine.c:184-198`, `/mnt/c/Users/genom/GitHub/ncbi-blast/c++/src/algo/blast/core/blast_engine.c:298-307`.
 - HashMap lookup replaced with array-backed `NaLookupTable` (thick_backbone + overflow + PV), and offset buffer sizing now includes `longest_chain`; LOSAT refs: `LOSAT/src/algorithm/blastn/lookup.rs:119`, `LOSAT/src/algorithm/blastn/lookup.rs:1160`, `LOSAT/src/algorithm/blastn/blast_engine/run.rs:3982`; NCBI refs: `/mnt/c/Users/genom/GitHub/ncbi-blast/c++/include/algo/blast/core/blast_nalookup.h:109`, `/mnt/c/Users/genom/GitHub/ncbi-blast/c++/src/algo/blast/core/blast_nalookup.c:442`, `/mnt/c/Users/genom/GitHub/ncbi-blast/c++/src/algo/blast/core/blast_nascan.c:41`, `/mnt/c/Users/genom/GitHub/ncbi-blast/c++/src/algo/blast/core/lookup_wrap.c:255`.
 - Offset-pair buffers now use fixed-length arrays with an index (no `push`/`drain` in scan loop); LOSAT refs: `LOSAT/src/algorithm/blastn/blast_engine/run.rs:3030`, `LOSAT/src/algorithm/blastn/blast_engine/run.rs:5850`; NCBI refs: `/mnt/c/Users/genom/GitHub/ncbi-blast/c++/src/algo/blast/core/blast_engine.c:991-1041`, `/mnt/c/Users/genom/GitHub/ncbi-blast/c++/src/algo/blast/core/blast_nascan.c:1482-1534`.
@@ -52,5 +46,5 @@
 - Recheck after the NaLookup swap: no additional missing steps found in the non-direct lookup construction beyond the remaining items.
 - Recheck after fixed offset-pair buffers: no remaining `Vec<OffsetPair>` push/drain usage in the blastn scan path.
 - Recheck after scan callback preselection: scan kind selection now happens once per subject scan, mirroring `s_MBChooseScanSubject`/`BlastChooseNucleotideScanSubjectAny`.
-- Recheck: query lookup now uses pre-encoded BLASTNA; items 1-4 remain open; no other discrepancies found.
+- Recheck: query lookup now uses pre-encoded BLASTNA; items 1-3 remain open; no other discrepancies found.
 - If you want, I can attach a timing profile plan to validate which items dominate your workload.

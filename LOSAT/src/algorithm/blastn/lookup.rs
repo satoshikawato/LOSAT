@@ -251,6 +251,7 @@ pub fn build_db_word_counts(
     query_masks: &[Vec<MaskedInterval>],
     subjects: &[fasta::Record],
     lut_word_length: usize,
+    full_word_size: usize,
     max_word_count: u8,
     approx_table_entries: usize,
     subjects_packed: Option<&[Vec<u8>]>,
@@ -264,8 +265,18 @@ pub fn build_db_word_counts(
     // ```
     let hashsize = 1usize << (2 * lut_word_length);
     let mut counts = vec![0u8; hashsize / 2];
-    let (pv, pv_array_bts) =
-        build_query_pv(queries_blastna, query_masks, lut_word_length, approx_table_entries);
+    // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_nalookup.c:865-868
+    // ```c
+    // if (full_word_size > (loc->ssr->right - loc->ssr->left + 1))
+    //     continue;
+    // ```
+    let (pv, pv_array_bts) = build_query_pv(
+        queries_blastna,
+        query_masks,
+        lut_word_length,
+        full_word_size,
+        approx_table_entries,
+    );
 
     // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_nalookup.c:1122-1177
     // ```c
@@ -495,6 +506,7 @@ fn build_query_pv(
     queries_blastna: &[Vec<u8>],
     query_masks: &[Vec<MaskedInterval>],
     lut_word_length: usize,
+    full_word_size: usize,
     approx_table_entries: usize,
 ) -> (Vec<PvArrayType>, usize) {
     if lut_word_length == 0 {
@@ -515,38 +527,50 @@ fn build_query_pv(
             continue;
         }
         let masks = query_masks.get(q_idx).map(|v| v.as_slice()).unwrap_or(&[]);
-        let mut current_kmer: u64 = 0;
-        let mut valid_bases: usize = 0;
+        let ranges = build_unmasked_ranges(seq.len(), masks);
 
-        for pos in 0..seq.len() {
-            let base = seq[pos];
-            // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_nalookup.c:878-885
-            // ```c
-            // if ((val & BLAST2NA_MASK) != 0) {
-            //     ecode = 0;
-            //     pos = seq + kLutWordLength;
-            //     continue;
-            // }
-            // ```
-            if (base & BLAST2NA_MASK) != 0 {
-                current_kmer = 0;
-                valid_bases = 0;
+        // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_nalookup.c:856-889
+        // ```c
+        // for (loc = location; loc; loc = loc->next) {
+        //     if (full_word_size > (loc->ssr->right - loc->ssr->left + 1))
+        //         continue;
+        //     ...
+        //     if ((val & BLAST2NA_MASK) != 0) {
+        //         ecode = 0;
+        //         pos = seq + kLutWordLength;
+        //         continue;
+        //     }
+        //     ecode = ((ecode << BITS_PER_NUC) & kLutMask) + val;
+        //     if (seq < pos) continue;
+        //     PV_SET(pv_array, ecode, pv_array_bts);
+        // }
+        // ```
+        for (range_start, range_end) in ranges {
+            let range_len = range_end.saturating_sub(range_start);
+            if full_word_size > range_len {
                 continue;
             }
 
-            current_kmer = ((current_kmer << 2) | (base as u64)) & kmer_mask;
-            valid_bases += 1;
+            let mut current_kmer: u64 = 0;
+            let mut valid_bases: usize = 0;
 
-            if valid_bases < lut_word_length {
-                continue;
+            for pos in range_start..range_end {
+                let base = seq[pos];
+                if (base & BLAST2NA_MASK) != 0 {
+                    current_kmer = 0;
+                    valid_bases = 0;
+                    continue;
+                }
+
+                current_kmer = ((current_kmer << 2) | (base as u64)) & kmer_mask;
+                valid_bases += 1;
+
+                if valid_bases < lut_word_length {
+                    continue;
+                }
+
+                pv_set_shift(&mut pv, current_kmer as usize, pv_array_bts);
             }
-
-            let kmer_start = pos + 1 - lut_word_length;
-            if !masks.is_empty() && is_kmer_masked(masks, kmer_start, lut_word_length) {
-                continue;
-            }
-
-            pv_set_shift(&mut pv, current_kmer as usize, pv_array_bts);
         }
     }
 

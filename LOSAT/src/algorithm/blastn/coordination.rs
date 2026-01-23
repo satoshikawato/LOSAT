@@ -671,7 +671,7 @@ pub fn apply_dust_masking(
 pub fn build_lookup_tables(
     config: &TaskConfig,
     args: &BlastnArgs,
-    queries: &[fasta::Record],
+    queries_blastna: &[Vec<u8>],
     query_masks: &[Vec<MaskedInterval>],
     query_offsets: &[i32],
     subjects: &[fasta::Record],
@@ -715,7 +715,7 @@ pub fn build_lookup_tables(
         // }
         // ```
         Some(build_db_word_counts(
-            queries,
+            queries_blastna,
             query_masks,
             subjects,
             config.lut_word_length,
@@ -737,7 +737,7 @@ pub fn build_lookup_tables(
     // ```
     let two_stage_lookup: Option<TwoStageLookup> = if config.use_two_stage {
         Some(build_two_stage_lookup(
-            queries,
+            queries_blastna,
             query_offsets,
             config.effective_word_size,
             config.lut_word_length,
@@ -752,7 +752,7 @@ pub fn build_lookup_tables(
     
     let pv_direct_lookup: Option<PvDirectLookup> = if !config.use_two_stage && config.use_direct_lookup {
         Some(build_pv_direct_lookup(
-            queries,
+            queries_blastna,
             query_offsets,
             config.effective_word_size,
             config.effective_word_size,
@@ -777,7 +777,7 @@ pub fn build_lookup_tables(
     // ```
     let na_lookup: Option<NaLookupTable> = if !config.use_two_stage && !config.use_direct_lookup {
         Some(build_na_lookup(
-            queries,
+            queries_blastna,
             query_offsets,
             config.effective_word_size,
             config.lut_word_length,

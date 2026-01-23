@@ -7,14 +7,7 @@
 
 ## Findings (Remaining)
 
-### 1) Query k-mer extraction uses ASCII-to-2-bit conversions in hot loops
-- LOSAT encodes query k-mers from ASCII per position (`encode_kmer` / `ENCODE_LUT`) during lookup construction.
-- NCBI uses pre-encoded `BLAST_SequenceBlk` data (`query->sequence`) set during setup.
-- Impact: extra per-base branching/conversion vs pointer walking on pre-encoded bytes.
-- LOSAT refs: `LOSAT/src/algorithm/blastn/lookup.rs:7`, `LOSAT/src/algorithm/blastn/lookup.rs:814`, `LOSAT/src/algorithm/blastn/lookup.rs:1224`.
-- NCBI refs: `/mnt/c/Users/genom/GitHub/ncbi-blast/c++/src/algo/blast/api/blast_setup_cxx.cpp:836`, `/mnt/c/Users/genom/GitHub/ncbi-blast/c++/src/algo/blast/core/blast_lookup.c:79`.
-
-### 2) Subject sequences are loaded/encoded on the fly vs SeqDB pre-encoded sequences
+### 1) Subject sequences are loaded/encoded on the fly vs SeqDB pre-encoded sequences
 - LOSAT preloads subject FASTA records for `use_parallel` or `limit_lookup`, then encodes each subject into BLASTNA + packed ncbi2na in `process_subject`.
 - NCBI streams subjects from `SeqSrc` and stores pre-encoded sequences in `BLAST_SequenceBlk` via SeqDB.
 - Impact: extra I/O pass and per-subject encoding overhead, especially for large DBs.
@@ -23,7 +16,7 @@
 - LOSAT refs: `LOSAT/src/algorithm/blastn/blast_engine/run.rs:3658`, `LOSAT/src/algorithm/blastn/blast_engine/run.rs:4342`, `LOSAT/src/algorithm/blastn/coordination.rs:522`, `LOSAT/src/core/blast_encoding.rs:429`.
 - NCBI refs: `/mnt/c/Users/genom/GitHub/ncbi-blast/c++/src/algo/blast/core/blast_engine.c:1407`, `/mnt/c/Users/genom/GitHub/ncbi-blast/c++/src/algo/blast/api/blast_setup_cxx.cpp:836`, `/mnt/c/Users/genom/GitHub/ncbi-blast/c++/src/algo/blast/api/blast_setup_cxx.cpp:1154`, `/mnt/c/Users/genom/GitHub/ncbi-blast/c++/src/algo/blast/core/blast_encoding.c:85`.
 
-### 3) Subject chunks are materialized and merged vs streaming loop
+### 2) Subject chunks are materialized and merged vs streaming loop
 - Update: non-parallel path now streams chunks from `SubjectSplitState` and merges per chunk, matching the NCBI loop.
 - Remaining: parallel path still materializes `Vec<SubjectChunk>` and collects/sorts per-chunk results before merge for deterministic order.
 - Impact: allocation/merge overhead now only in parallel runs; sequential path avoids pre-materialization.
@@ -31,14 +24,14 @@
 - LOSAT refs: `LOSAT/src/algorithm/blastn/blast_engine/run.rs:4373`, `LOSAT/src/algorithm/blastn/blast_engine/run.rs:6944`, `LOSAT/src/algorithm/blastn/blast_engine/run.rs:7008`.
 - NCBI refs: `/mnt/c/Users/genom/GitHub/ncbi-blast/c++/src/algo/blast/core/blast_engine.c:478`.
 
-### 4) Lowercase masking is a separate pass vs inline parsing
+### 3) Lowercase masking is a separate pass vs inline parsing
 - LOSAT scans sequences to find lowercase masks after reading (`collect_lowercase_masks`), for queries and subjects.
 - NCBI's `CFastaReader` tracks masks inline during parsing (`x_OpenMask` / `x_CloseMask`).
 - Impact: extra full-sequence scan and mask Vec allocation.
 - LOSAT refs: `LOSAT/src/algorithm/blastn/coordination.rs:561`, `LOSAT/src/algorithm/blastn/blast_engine/run.rs:4307`.
 - NCBI refs: `/mnt/c/Users/genom/GitHub/ncbi-blast/c++/src/objtools/readers/fasta.cpp:856`, `/mnt/c/Users/genom/GitHub/ncbi-blast/c++/src/objtools/readers/fasta.cpp:1079`.
 
-### 5) limit_lookup PV scan checks masks per k-mer vs unmasked-range iteration
+### 4) limit_lookup PV scan checks masks per k-mer vs unmasked-range iteration
 - `build_query_pv` scans the full query and calls `is_kmer_masked` for each k-mer.
 - NCBI `s_FillPV` iterates `BlastSeqLoc` (unmasked regions) and avoids per-k-mer mask checks.
 - Impact: extra mask lookups per k-mer when `limit_lookup` is enabled.
@@ -46,6 +39,7 @@
 - NCBI refs: `/mnt/c/Users/genom/GitHub/ncbi-blast/c++/src/algo/blast/core/blast_nalookup.c:829`, `/mnt/c/Users/genom/GitHub/ncbi-blast/c++/src/algo/blast/core/blast_nalookup.c:858`.
 
 ## Recently addressed (no longer discrepancies)
+- Query lookup build now uses pre-encoded BLASTNA buffers (no ASCII->2-bit conversion in lookup builders); LOSAT refs: `LOSAT/src/algorithm/blastn/blast_engine/run.rs:3923`, `LOSAT/src/algorithm/blastn/lookup.rs:23`, `LOSAT/src/algorithm/blastn/lookup.rs:953`; NCBI refs: `/mnt/c/Users/genom/GitHub/ncbi-blast/c++/src/algo/blast/api/blast_setup_cxx.cpp:498-604`, `/mnt/c/Users/genom/GitHub/ncbi-blast/c++/src/algo/blast/core/blast_lookup.c:90-120`, `/mnt/c/Users/genom/GitHub/ncbi-blast/c++/src/algo/blast/core/blast_nalookup.c:878-893`.
 - Masked chunk `seq_ranges` now build into per-thread scratch for both sequential and parallel paths (no per-chunk Vec allocations); LOSAT refs: `LOSAT/src/algorithm/blastn/blast_engine/run.rs:180`, `LOSAT/src/algorithm/blastn/blast_engine/run.rs:4568`, `LOSAT/src/algorithm/blastn/blast_engine/run.rs:2900`; NCBI refs: `/mnt/c/Users/genom/GitHub/ncbi-blast/c++/src/algo/blast/core/blast_engine.c:184-198`, `/mnt/c/Users/genom/GitHub/ncbi-blast/c++/src/algo/blast/core/blast_engine.c:298-307`.
 - HashMap lookup replaced with array-backed `NaLookupTable` (thick_backbone + overflow + PV), and offset buffer sizing now includes `longest_chain`; LOSAT refs: `LOSAT/src/algorithm/blastn/lookup.rs:119`, `LOSAT/src/algorithm/blastn/lookup.rs:1160`, `LOSAT/src/algorithm/blastn/blast_engine/run.rs:3982`; NCBI refs: `/mnt/c/Users/genom/GitHub/ncbi-blast/c++/include/algo/blast/core/blast_nalookup.h:109`, `/mnt/c/Users/genom/GitHub/ncbi-blast/c++/src/algo/blast/core/blast_nalookup.c:442`, `/mnt/c/Users/genom/GitHub/ncbi-blast/c++/src/algo/blast/core/blast_nascan.c:41`, `/mnt/c/Users/genom/GitHub/ncbi-blast/c++/src/algo/blast/core/lookup_wrap.c:255`.
 - Offset-pair buffers now use fixed-length arrays with an index (no `push`/`drain` in scan loop); LOSAT refs: `LOSAT/src/algorithm/blastn/blast_engine/run.rs:3030`, `LOSAT/src/algorithm/blastn/blast_engine/run.rs:5850`; NCBI refs: `/mnt/c/Users/genom/GitHub/ncbi-blast/c++/src/algo/blast/core/blast_engine.c:991-1041`, `/mnt/c/Users/genom/GitHub/ncbi-blast/c++/src/algo/blast/core/blast_nascan.c:1482-1534`.
@@ -58,5 +52,5 @@
 - Recheck after the NaLookup swap: no additional missing steps found in the non-direct lookup construction beyond the remaining items.
 - Recheck after fixed offset-pair buffers: no remaining `Vec<OffsetPair>` push/drain usage in the blastn scan path.
 - Recheck after scan callback preselection: scan kind selection now happens once per subject scan, mirroring `s_MBChooseScanSubject`/`BlastChooseNucleotideScanSubjectAny`.
-- Recheck: items 1-4 remain open; item 5 added from current code scan; no other discrepancies found.
+- Recheck: query lookup now uses pre-encoded BLASTNA; items 1-4 remain open; no other discrepancies found.
 - If you want, I can attach a timing profile plan to validate which items dominate your workload.

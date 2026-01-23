@@ -3862,7 +3862,6 @@ pub fn run(args: BlastnArgs) -> Result<()> {
     // query_info->contexts[1].query_offset = kStrandLength + 1;
     // ```
     let mut query_contexts: Vec<QueryContext> = Vec::new();
-    let mut query_context_records: Vec<bio::io::fasta::Record> = Vec::new();
     let mut query_context_masks: Vec<Vec<MaskedInterval>> = Vec::new();
     let mut query_base_offsets: Vec<usize> = Vec::new();
     // NCBI reference: ncbi-blast/c++/src/algo/blast/unit_tests/api/ntscan_unit_test.cpp:166-174
@@ -3896,16 +3895,6 @@ pub fn run(args: BlastnArgs) -> Result<()> {
             masks: minus_masks.clone(),
         });
 
-        query_context_records.push(bio::io::fasta::Record::with_attrs(
-            q_record.id(),
-            q_record.desc(),
-            seq,
-        ));
-        query_context_records.push(bio::io::fasta::Record::with_attrs(
-            q_record.id(),
-            q_record.desc(),
-            rc_seq.as_slice(),
-        ));
         query_context_masks.push(plus_masks);
         query_context_masks.push(minus_masks);
         query_concat_offset += q_len * 2 + 1;
@@ -3921,6 +3910,20 @@ pub fn run(args: BlastnArgs) -> Result<()> {
         .map(|ctx| ctx.query_offset)
         .collect();
     let query_context_index = QueryContextIndex::new(&query_contexts);
+
+    // NCBI reference: ncbi-blast/c++/src/algo/blast/api/blast_setup_cxx.cpp:498-604
+    // ```c
+    // EBlastEncoding encoding = GetQueryEncoding(prog);
+    // ...
+    // sequence = queries.GetBlastSequence(index, encoding, strand, eSentinels);
+    // ...
+    // memcpy(&buf.get()[offset], sequence.data.get(),
+    //        sequence.length);
+    // ```
+    let encoded_queries_blastna: Vec<Vec<u8>> = query_contexts
+        .iter()
+        .map(|ctx| encode_iupac_to_blastna(ctx.seq.as_slice()))
+        .collect();
 
     // Finalize configuration with query-dependent parameters (adaptive lookup table selection)
     // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_nalookup.c:46-47
@@ -4052,7 +4055,7 @@ pub fn run(args: BlastnArgs) -> Result<()> {
     let (lookup_tables, scan_step) = build_lookup_tables(
         &config,
         &args,
-        &query_context_records,
+        &encoded_queries_blastna,
         &query_context_masks,
         &query_context_offsets,
         subjects_for_lookup,
@@ -4310,13 +4313,6 @@ pub fn run(args: BlastnArgs) -> Result<()> {
     let x_dropoff_init = ((super::super::constants::X_DROP_UNGAPPED as f64 * NCBIMATH_LN2)
         / params_ungapped_for_closure.lambda)
         .ceil() as i32;
-
-    // NCBI reference: ncbi-blast/c++/include/algo/blast/core/blast_stat.h:866-869 (query blastna, subject ncbi2na)
-    // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_encoding.c:85-93 (IUPACNA_TO_BLASTNA)
-    let encoded_queries_blastna: Vec<Vec<u8>> = query_contexts_ref
-        .iter()
-        .map(|ctx| encode_iupac_to_blastna(ctx.seq.as_slice()))
-        .collect();
 
     // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_engine.c:478-536
     // ```c

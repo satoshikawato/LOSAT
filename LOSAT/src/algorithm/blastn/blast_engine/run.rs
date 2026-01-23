@@ -305,7 +305,7 @@ impl SubjectSplitState {
         // ```
         let seq_ranges = if no_chunking {
             if subject_masked {
-                SeqRanges::Owned(self.soft_ranges.clone())
+                SeqRanges::Owned(std::mem::take(&mut self.soft_ranges))
             } else {
                 SeqRanges::Inline {
                     range: (0, length as i32),

@@ -2062,6 +2062,61 @@ fn choose_mb_scan_subject_kind(lut_word_length: usize, scan_step: usize) -> MbSc
     }
 }
 
+// NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_nascan.c:2602-2677
+// ```c
+// static void s_MBChooseScanSubject(LookupTableWrap *lookup_wrap)
+// {
+//     ...
+//     switch (mb_lt->lut_word_length) {
+//     case 9:
+//         if (scan_step == 1)
+//             mb_lt->scansub_callback = (void *)s_MBScanSubject_9_1;
+//         if (scan_step == 2)
+//             mb_lt->scansub_callback = (void *)s_MBScanSubject_9_2;
+//         else
+//             mb_lt->scansub_callback = (void *)s_MBScanSubject_Any;
+//         break;
+//     ...
+//     }
+// }
+// ```
+// NCBI reference: ncbi-blast/c++/src/algo/blast/core/na_ungapped.c:1651-1667
+// ```c
+// if (subject->mask_type != eNoSubjMasking) {
+//     ...
+//     scansub = (TNaScanSubjectFunction)
+//           BlastChooseNucleotideScanSubjectAny(lookup_wrap);
+//     ...
+//     scan_range[1] = subject->seq_ranges[0].left + word_length - lut_word_length;
+//     scan_range[2] = subject->seq_ranges[0].right - lut_word_length;
+// }
+// ```
+// NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_nascan.c:2994-3006
+// ```c
+// void * BlastChooseNucleotideScanSubjectAny(LookupTableWrap *lookup_wrap)
+// {
+//     ...
+//     return (void *)s_MBScanSubject_Any;
+// }
+// ```
+#[inline(always)]
+fn select_mb_scan_kind(
+    lut_word_length: usize,
+    scan_step: usize,
+    subject_masked: bool,
+) -> Option<MbScanSubjectKind> {
+    let base = if (9..=12).contains(&lut_word_length) {
+        Some(choose_mb_scan_subject_kind(lut_word_length, scan_step))
+    } else {
+        None
+    };
+    if subject_masked {
+        base.map(|_| MbScanSubjectKind::Any)
+    } else {
+        base
+    }
+}
+
 // NCBI reference: ncbi-blast/c++/src/algo/blast/core/na_ungapped.c:56-66
 // ```c
 // index &= (mb_lt->hashsize-1);
@@ -2315,6 +2370,7 @@ fn scan_subject_kmers_with_ranges<F>(
     scan_step: usize,
     seq_ranges: &[(i32, i32)],
     subject_masked: bool,
+    mb_scan_kind: Option<MbScanSubjectKind>,
     mut on_kmer: F,
 ) where
     F: FnMut(usize, u64),
@@ -2332,26 +2388,6 @@ fn scan_subject_kmers_with_ranges<F>(
         scan_range[1] = 0;
         scan_range[2] = subject_len as i32 - lut_word_length as i32;
     }
-
-    // NCBI reference: ncbi-blast/c++/src/algo/blast/core/na_ungapped.c:1651-1667
-    // ```c
-    // if (subject->mask_type != eNoSubjMasking) {
-    //     scansub = (TNaScanSubjectFunction)
-    //           BlastChooseNucleotideScanSubjectAny(lookup_wrap);
-    //     ...
-    //     scan_range[1] = subject->seq_ranges[0].left + word_length - lut_word_length;
-    //     scan_range[2] = subject->seq_ranges[0].right - lut_word_length;
-    // }
-    // ```
-    let mb_scan_kind = if (9..=12).contains(&lut_word_length) {
-        Some(if subject_masked {
-            MbScanSubjectKind::Any
-        } else {
-            choose_mb_scan_subject_kind(lut_word_length, scan_step)
-        })
-    } else {
-        None
-    };
 
     // NCBI reference: ncbi-blast/c++/src/algo/blast/core/na_ungapped.c:1635-1676
     // ```c
@@ -5774,6 +5810,8 @@ pub fn run(args: BlastnArgs) -> Result<()> {
                             *offset_pairs_len = 0;
                         };
 
+                        let mb_scan_kind =
+                            select_mb_scan_kind(lut_word_length, scan_step, subject_masked);
                         scan_subject_kmers_with_ranges(
                             search_seq_packed,
                             s_len,
@@ -5782,6 +5820,7 @@ pub fn run(args: BlastnArgs) -> Result<()> {
                             scan_step,
                             &subject_seq_ranges,
                             subject_masked,
+                            mb_scan_kind,
                             |kmer_start, current_lut_kmer| {
                                 // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_nascan.c:193-207
                                 // ```c
@@ -5980,6 +6019,7 @@ pub fn run(args: BlastnArgs) -> Result<()> {
                             None
                         };
                         let mut scan_pause_ns: u64 = 0;
+                        let mb_scan_kind = select_mb_scan_kind(safe_k, scan_step, subject_masked);
                         scan_subject_kmers_with_ranges(
                             search_seq_packed,
                             s_len,
@@ -5988,6 +6028,7 @@ pub fn run(args: BlastnArgs) -> Result<()> {
                             scan_step,
                             &subject_seq_ranges,
                             subject_masked,
+                            mb_scan_kind,
                             |kmer_start, current_kmer| {
                                 // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_nascan.c:193-207
                                 // ```c

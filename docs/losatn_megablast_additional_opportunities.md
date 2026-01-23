@@ -24,16 +24,15 @@ Status legend: [x] done, [ ] pending.
   (`BlastHSPList` stores `oid` and `query_index`, not strings).
 - Implementation: carry only indices in `Hit`/`BlastnHsp`; resolve IDs at output time.
 
-### 2) [ ] Replace string-keyed caches with index-keyed structures in re-evaluation
-- Observation: `filter_hsps` uses `FxHashMap<(Arc<str>, Arc<str>)>` for
-  sequences and encoded caches, plus an `id_map` keyed by indices.
+### 2) [x] Index-keyed re-evaluation caches and pass pre-encoded sequences
+- Status: done. `filter_hsps` now consumes pre-encoded BLASTNA sequences and
+  uses `(q_idx, s_idx)`-keyed caches; no `Arc<str>`-keyed maps or encode cache.
 - LOSAT refs: `LOSAT/src/algorithm/blastn/blast_engine/mod.rs:43`,
-  `LOSAT/src/algorithm/blastn/blast_engine/mod.rs:163`.
-- NCBI refs: `/mnt/c/Users/genom/GitHub/ncbi-blast/c++/src/algo/blast/core/blast_traceback.c:651`,
-  `/mnt/c/Users/genom/GitHub/ncbi-blast/c++/src/algo/blast/core/blast_traceback.c:657`
-  (uses direct pointers from `query_blk`/`subject` for re-evaluation).
-- Plan idea: pass pre-encoded sequences into `filter_hsps`, and use
-  `(q_idx, s_idx)` indexing (Vec or small array) instead of hashing strings.
+  `LOSAT/src/algorithm/blastn/blast_engine/mod.rs:151`,
+  `LOSAT/src/algorithm/blastn/blast_engine/mod.rs:279`.
+- NCBI refs: `/mnt/c/Users/genom/GitHub/ncbi-blast/c++/src/algo/blast/core/blast_traceback.c:651-659`,
+  `/mnt/c/Users/genom/GitHub/ncbi-blast/c++/include/algo/blast/core/blast_hits.h:153-166`
+  (uses direct query/subject pointers and index-based HSPList metadata).
 
 ### 3) [ ] Avoid per-chunk allocation in prelim-hit processing
 - Observation: `prelim_hits.drain(..).collect()` allocates a new Vec per chunk.
@@ -76,7 +75,7 @@ Status legend: [x] done, [ ] pending.
 
 ## Proposed Plan (Suggested Order)
 1) [x] Index-only hit identifiers (largest memory/alloc win, matches NCBI layout).
-2) [ ] Index-keyed re-evaluation caches and pass pre-encoded sequences.
+2) [x] Index-keyed re-evaluation caches and pass pre-encoded sequences.
 3) [ ] Reuse prelim-hit scratch Vecs to avoid per-chunk allocations.
 4) [ ] Reduce subject chunk range allocations for unmasked subjects.
 5) [ ] Buffered output for outfmt0/7 (only if output-heavy workloads).

@@ -125,7 +125,7 @@ const OVERLAP_DIAG_CLOSE: i32 = 10;
 const DIAGHASH_NUM_BUCKETS: usize = 512;
 const DIAGHASH_CHAIN_LENGTH: usize = 256;
 
-// NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_engine.c:123-143
+// NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_engine.c:122-143
 // ```c
 // typedef struct SubjectSplitStruct {
 //    Uint1* sequence;
@@ -171,15 +171,66 @@ struct SubjectSplitState {
 #[derive(Clone)]
 enum SeqRanges {
     Inline { range: (i32, i32) },
-    Owned(Vec<(i32, i32)>),
+    SoftRangesFull,
+    SoftRangesSlice { start_idx: usize, count: usize },
 }
 
 impl SeqRanges {
     #[inline]
-    fn as_slice(&self) -> &[(i32, i32)] {
+    fn as_slice<'a>(
+        &'a self,
+        soft_ranges: &'a [(i32, i32)],
+        scratch: &'a mut Vec<(i32, i32)>,
+        chunk_offset: i32,
+        chunk_length: i32,
+    ) -> &'a [(i32, i32)] {
         match self {
             SeqRanges::Inline { range } => std::slice::from_ref(range),
-            SeqRanges::Owned(ranges) => ranges.as_slice(),
+            SeqRanges::SoftRangesFull => soft_ranges,
+            SeqRanges::SoftRangesSlice { start_idx, count } => {
+                // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_engine.c:184-198
+                // ```c
+                // if (backup->allocated >= num_seq_ranges) return;
+                // if (backup->allocated) {
+                //     sfree(subject->seq_ranges);
+                // }
+                // backup->allocated = num_seq_ranges;
+                // subject->seq_ranges = (SSeqRange *) calloc(backup->allocated,
+                //                                sizeof(SSeqRange));
+                // ```
+                // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_engine.c:298-307
+                // ```c
+                // for (i=0; i<len; i++) {
+                //     subject->seq_ranges[i].left = backup->soft_ranges[i+start].left - backup->offset;
+                //     subject->seq_ranges[i].right = backup->soft_ranges[i+start].right - backup->offset;
+                // }
+                // if (subject->seq_ranges[0].left < 0)
+                //     subject->seq_ranges[0].left = 0;
+                // if (subject->seq_ranges[len-1].right > subject->length)
+                //     subject->seq_ranges[len-1].right = subject->length;
+                // ```
+                let start = *start_idx;
+                let count = *count;
+                scratch.clear();
+                if scratch.capacity() < count {
+                    scratch.reserve(count.saturating_sub(scratch.capacity()));
+                }
+                let end_idx = start.saturating_add(count);
+                for &(left, right) in soft_ranges[start..end_idx].iter() {
+                    scratch.push((left - chunk_offset, right - chunk_offset));
+                }
+                if let Some(first) = scratch.first_mut() {
+                    if first.0 < 0 {
+                        first.0 = 0;
+                    }
+                }
+                if let Some(last) = scratch.last_mut() {
+                    if last.1 > chunk_length {
+                        last.1 = chunk_length;
+                    }
+                }
+                scratch.as_slice()
+            }
         }
     }
 }
@@ -305,7 +356,7 @@ impl SubjectSplitState {
         // ```
         let seq_ranges = if no_chunking {
             if subject_masked {
-                SeqRanges::Owned(std::mem::take(&mut self.soft_ranges))
+                SeqRanges::SoftRangesFull
             } else {
                 SeqRanges::Inline {
                     range: (0, length as i32),
@@ -317,6 +368,18 @@ impl SubjectSplitState {
             }
         } else {
             debug_assert_eq!(residual, 0);
+            // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_engine.c:279-291
+            // ```c
+            // start = backup->offset;
+            // len = start + subject->length;
+            // i = backup->sm_index;
+            // while (backup->soft_ranges[i].right < start) ++i;
+            // start = i;
+            // while (i < backup->num_soft_ranges
+            //     && backup->soft_ranges[i].left < len) ++i;
+            // len = i - start;
+            // backup->sm_index = i - 1;
+            // ```
             let start = offset;
             let end = offset + length as i32;
             let mut i = self.sm_index;
@@ -332,23 +395,7 @@ impl SubjectSplitState {
             if count == 0 {
                 return SubjectChunkStatus::NoRange;
             }
-            let mut ranges = Vec::with_capacity(count);
-            for j in 0..count {
-                let left = self.soft_ranges[start_idx + j].0 - offset;
-                let right = self.soft_ranges[start_idx + j].1 - offset;
-                ranges.push((left, right));
-            }
-            if let Some(first) = ranges.first_mut() {
-                if first.0 < 0 {
-                    first.0 = 0;
-                }
-            }
-            if let Some(last) = ranges.last_mut() {
-                if last.1 > length as i32 {
-                    last.1 = length as i32;
-                }
-            }
-            SeqRanges::Owned(ranges)
+            SeqRanges::SoftRangesSlice { start_idx, count }
         };
 
         // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_engine.c:580-584
@@ -2850,6 +2897,17 @@ struct SubjectScratch {
     cutoff_scores: Vec<i32>,
     x_dropoff_scores: Vec<i32>,
     reduced_cutoff_scores: Vec<i32>,
+    // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_engine.c:184-198
+    // ```c
+    // if (backup->allocated >= num_seq_ranges) return;
+    // if (backup->allocated) {
+    //     sfree(subject->seq_ranges);
+    // }
+    // backup->allocated = num_seq_ranges;
+    // subject->seq_ranges = (SSeqRange *) calloc(backup->allocated,
+    //                                sizeof(SSeqRange));
+    // ```
+    seq_ranges_scratch: Vec<(i32, i32)>,
     // NCBI reference: ncbi-blast/c++/include/algo/blast/core/blast_extend.h:77-81
     // ```c
     // typedef struct BLAST_DiagTable {
@@ -2937,6 +2995,17 @@ impl SubjectScratch {
             cutoff_scores: Vec::with_capacity(query_count),
             x_dropoff_scores: Vec::with_capacity(query_count),
             reduced_cutoff_scores: Vec::with_capacity(query_count),
+            // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_engine.c:184-198
+            // ```c
+            // if (backup->allocated >= num_seq_ranges) return;
+            // if (backup->allocated) {
+            //     sfree(subject->seq_ranges);
+            // }
+            // backup->allocated = num_seq_ranges;
+            // subject->seq_ranges = (SSeqRange *) calloc(backup->allocated,
+            //                                sizeof(SSeqRange));
+            // ```
+            seq_ranges_scratch: Vec::new(),
             hit_level_array: Vec::new(),
             hit_len_array: Vec::new(),
             diag_hash: DiagHashTable::new(TWO_HIT_WINDOW as i32),
@@ -4485,6 +4554,7 @@ pub fn run(args: BlastnArgs) -> Result<()> {
             // ```
             let reuse_prelim_hits = !(use_parallel && subject_chunks.len() > 1);
             let collect_prelim_hits_for_chunk = |chunk: &SubjectChunk,
+                                                 soft_ranges: &[(i32, i32)],
                                                  gap_scratch: &mut GapAlignScratch,
                                                  subject_scratch: &mut SubjectScratch|
                                                  -> Vec<PrelimHit> {
@@ -4495,7 +4565,26 @@ pub fn run(args: BlastnArgs) -> Result<()> {
                 let greedy_align_scratch = &mut subject_scratch.greedy_align_scratch;
 
                 let s_len = chunk.length;
-                let subject_seq_ranges = chunk.seq_ranges.as_slice();
+                // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_engine.c:264-307
+                // ```c
+                // if (backup->offset == 0 && residual == 0 && backup->next == backup->full_range.right) {
+                //     subject->seq_ranges = backup->soft_ranges;
+                //     subject->num_seq_ranges = backup->num_soft_ranges;
+                //     return SUBJECT_SPLIT_OK;
+                // }
+                // ...
+                // for (i=0; i<len; i++) {
+                //     subject->seq_ranges[i].left = backup->soft_ranges[i+start].left - backup->offset;
+                //     subject->seq_ranges[i].right = backup->soft_ranges[i+start].right - backup->offset;
+                // }
+                // ```
+                let seq_ranges_scratch = &mut subject_scratch.seq_ranges_scratch;
+                let subject_seq_ranges = chunk.seq_ranges.as_slice(
+                    soft_ranges,
+                    seq_ranges_scratch,
+                    chunk.offset as i32,
+                    s_len as i32,
+                );
                 let subject_masked = chunk.masked;
 
                 let packed_offset = chunk.offset / COMPRESSION_RATIO;
@@ -6941,6 +7030,13 @@ pub fn run(args: BlastnArgs) -> Result<()> {
 
             let mut combined_prelim_hits: Vec<PrelimHit> = Vec::new();
             if use_parallel {
+                // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_engine.c:264-268
+                // ```c
+                // subject->seq_ranges = backup->soft_ranges;
+                // subject->num_seq_ranges = backup->num_soft_ranges;
+                // return SUBJECT_SPLIT_OK;
+                // ```
+                let soft_ranges = split_state.soft_ranges.as_slice();
                 if subject_chunks.len() > 1 {
                     let mut chunk_results: Vec<(usize, usize, Vec<PrelimHit>)> = subject_chunks
                         .par_iter()
@@ -6958,7 +7054,12 @@ pub fn run(args: BlastnArgs) -> Result<()> {
                             ),
                             |state, chunk| {
                                 let (gap_scratch, subject_scratch) = state;
-                                let hits = collect_prelim_hits_for_chunk(chunk, gap_scratch, subject_scratch);
+                                let hits = collect_prelim_hits_for_chunk(
+                                    chunk,
+                                    soft_ranges,
+                                    gap_scratch,
+                                    subject_scratch,
+                                );
                                 (chunk.offset, chunk.overlap, hits)
                             },
                         )
@@ -6975,7 +7076,12 @@ pub fn run(args: BlastnArgs) -> Result<()> {
                     }
                 } else {
                     for chunk in subject_chunks.iter() {
-                        let hits = collect_prelim_hits_for_chunk(chunk, gap_scratch, subject_scratch);
+                        let hits = collect_prelim_hits_for_chunk(
+                            chunk,
+                            soft_ranges,
+                            gap_scratch,
+                            subject_scratch,
+                        );
                         let hits = merge_prelim_hits_subject_split(
                             &mut combined_prelim_hits,
                             hits,
@@ -7009,8 +7115,19 @@ pub fn run(args: BlastnArgs) -> Result<()> {
                         SubjectChunkStatus::Done => break,
                         SubjectChunkStatus::NoRange => continue,
                         SubjectChunkStatus::Ok(chunk) => {
-                            let hits =
-                                collect_prelim_hits_for_chunk(&chunk, gap_scratch, subject_scratch);
+                            // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_engine.c:264-268
+                            // ```c
+                            // subject->seq_ranges = backup->soft_ranges;
+                            // subject->num_seq_ranges = backup->num_soft_ranges;
+                            // return SUBJECT_SPLIT_OK;
+                            // ```
+                            let soft_ranges = split_state.soft_ranges.as_slice();
+                            let hits = collect_prelim_hits_for_chunk(
+                                &chunk,
+                                soft_ranges,
+                                gap_scratch,
+                                subject_scratch,
+                            );
                             let hits = merge_prelim_hits_subject_split(
                                 &mut combined_prelim_hits,
                                 hits,

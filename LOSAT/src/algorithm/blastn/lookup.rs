@@ -1,5 +1,4 @@
 use bio::io::fasta;
-use rustc_hash::FxHashMap;
 use crate::core::blast_encoding::{encode_iupac_to_ncbi2na_packed, COMPRESSION_RATIO};
 use crate::utils::dust::MaskedInterval;
 use super::constants::MAX_DIRECT_LOOKUP_WORD_SIZE;
@@ -79,14 +78,96 @@ pub fn reverse_complement(seq: &[u8]) -> Vec<u8> {
         .collect()
 }
 
-// NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_nalookup.c:1040-1046
+// NCBI reference: ncbi-blast/c++/include/algo/blast/core/blast_nalookup.h:109-156
 // ```c
-// /* Also add 1 to all indices, because lookup table indices count
-//    from 1. */
-// mb_lt->next_pos[index] = mb_lt->hashtable[ecode];
-// mb_lt->hashtable[ecode] = index;
+// #define NA_HITS_PER_CELL 3
+// typedef struct NaLookupBackboneCell { ... } NaLookupBackboneCell;
+// typedef struct BlastNaLookupTable { ... } BlastNaLookupTable;
 // ```
-pub type KmerLookup = FxHashMap<u64, Vec<u32>>;
+const NA_HITS_PER_CELL: usize = 3;
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+union NaLookupPayload {
+    entries: [u32; NA_HITS_PER_CELL],
+    overflow_cursor: u32,
+}
+
+impl Default for NaLookupPayload {
+    fn default() -> Self {
+        NaLookupPayload { overflow_cursor: 0 }
+    }
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct NaLookupBackboneCell {
+    num_used: u32,
+    payload: NaLookupPayload,
+}
+
+impl Default for NaLookupBackboneCell {
+    fn default() -> Self {
+        NaLookupBackboneCell {
+            num_used: 0,
+            payload: NaLookupPayload::default(),
+        }
+    }
+}
+
+/// Compact array-backed lookup table for blastn (NCBI BlastNaLookupTable).
+pub struct NaLookupTable {
+    backbone: Vec<NaLookupBackboneCell>,
+    overflow: Vec<u32>,
+    pv: Vec<PvArrayType>,
+    longest_chain: usize,
+    word_length: usize,
+    lut_word_length: usize,
+}
+
+impl NaLookupTable {
+    // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_nascan.c:41-79
+    // ```c
+    // if (PV_TEST(pv, index, PV_ARRAY_BTS))
+    //     return lookup->thick_backbone[index].num_used;
+    // ...
+    // if (num_hits <= NA_HITS_PER_CELL)
+    //     lookup_pos = lookup->thick_backbone[index].payload.entries;
+    // else
+    //     lookup_pos = lookup->overflow + lookup->thick_backbone[index].payload.overflow_cursor;
+    // ```
+    #[inline(always)]
+    pub fn get_hits_checked(&self, idx: u64) -> &[u32] {
+        let idx = idx as usize;
+        if idx >= self.backbone.len() {
+            return &[];
+        }
+        if !pv_test(&self.pv, idx) {
+            return &[];
+        }
+        let cell = &self.backbone[idx];
+        let num_hits = cell.num_used as usize;
+        if num_hits == 0 {
+            return &[];
+        }
+        unsafe {
+            // SAFETY: The payload field is accessed according to num_used,
+            // matching the NCBI union layout (entries for small chains,
+            // overflow_cursor for larger chains).
+            if num_hits <= NA_HITS_PER_CELL {
+                &cell.payload.entries[..num_hits]
+            } else {
+                let start = cell.payload.overflow_cursor as usize;
+                &self.overflow[start..start + num_hits]
+            }
+        }
+    }
+
+    #[inline(always)]
+    pub fn longest_chain(&self) -> usize {
+        self.longest_chain
+    }
+}
 
 // NCBI reference: ncbi-blast/c++/include/algo/blast/core/blast_nalookup.h:251-258
 // ```c
@@ -1064,59 +1145,98 @@ pub fn build_pv_direct_lookup(
     }
 }
 
-pub fn build_lookup(
+/// Build standard NCBI BlastNaLookupTable (array-backed with PV + overflow).
+///
+/// NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_nalookup.c:548-583
+/// ```c
+/// lookup->word_length = opt->word_size;
+/// lookup->lut_word_length = lut_width;
+/// lookup->backbone_size = 1 << (BITS_PER_NUC * lookup->lut_word_length);
+/// lookup->mask = lookup->backbone_size - 1;
+/// lookup->scan_step = lookup->word_length - lookup->lut_word_length + 1;
+/// BlastLookupIndexQueryExactMatches(...);
+/// s_BlastNaLookupFinalize(thin_backbone, lookup);
+/// ```
+pub fn build_na_lookup(
     queries: &[fasta::Record],
     query_offsets: &[i32],
-    word_size: usize,
+    word_length: usize,
+    lut_word_length: usize,
     query_masks: &[Vec<MaskedInterval>],
     db_word_counts: Option<&[u8]>,
     max_db_word_count: u8,
-) -> KmerLookup {
-    let mut lookup: KmerLookup = FxHashMap::default();
-    let safe_word_size = word_size.min(31);
+) -> NaLookupTable {
+    debug_assert_eq!(queries.len(), query_offsets.len());
+    debug_assert!(word_length >= lut_word_length);
+
+    let table_size = 1usize << (2 * lut_word_length);
     let debug_mode = std::env::var("BLEMIR_DEBUG").is_ok();
 
+    if debug_mode {
+        let backbone_bytes = table_size * std::mem::size_of::<NaLookupBackboneCell>();
+        let pv_bytes = ((table_size >> PV_ARRAY_BTS) + 1) * PV_ARRAY_BYTES;
+        eprintln!(
+            "[DEBUG] build_na_lookup: word_length={}, lut_word_length={}, table_size={} ({:.1}MB backbone), pv_size={} ({:.1}KB)",
+            word_length,
+            lut_word_length,
+            table_size,
+            backbone_bytes as f64 / 1_000_000.0,
+            (table_size >> PV_ARRAY_BTS) + 1,
+            pv_bytes as f64 / 1_000.0
+        );
+    }
+
+    let mut counts: Vec<u32> = vec![0; table_size];
     let mut total_positions = 0usize;
     let mut ambiguous_skipped = 0usize;
     let mut dust_skipped = 0usize;
 
-    debug_assert_eq!(queries.len(), query_offsets.len());
+    let kmer_mask: u64 = (1u64 << (2 * lut_word_length)) - 1;
 
     // NCBI reference: blast_lookup.c:BlastLookupIndexQueryExactMatches (lines 79-132)
     // NCBI processes only unmasked regions (locations parameter)
-    // Reference: blast_nalookup.c:402-406, 571-575 (calls BlastLookupIndexQueryExactMatches)
-    //
-    // LOSAT processes entire sequence and filters masked regions (equivalent behavior)
+    // Reference: blast_nalookup.c:571-575 (calls BlastLookupIndexQueryExactMatches)
     for (q_idx, record) in queries.iter().enumerate() {
         let seq = record.seq();
-        // NCBI reference: blast_lookup.c:99-100
-        // if (word_length > to - from + 1) continue;
-        if seq.len() < safe_word_size {
+        if seq.len() < lut_word_length {
             continue;
         }
 
         let masks = query_masks.get(q_idx).map(|v| v.as_slice()).unwrap_or(&[]);
+        let ranges = build_unmasked_ranges(seq.len(), masks);
 
-        // NCBI reference: blast_lookup.c:108-121
-        // for (offset = from; offset <= to; offset++, seq++) {
-        //     if (seq >= word_target) { BlastLookupAddWordHit(...); }
-        //     if (*seq & invalid_mask) word_target = seq + lut_word_length + 1;
-        // }
-        for i in 0..=(seq.len() - safe_word_size) {
-            total_positions += 1;
-            
-            // NCBI reference: blast_nalookup.c:402-406
-            // BlastLookupIndexQueryExactMatches processes only unmasked regions (locations)
-            // LOSAT processes entire sequence and filters masked regions (equivalent)
-            // Skip k-mers that overlap with DUST-masked regions
-            if !masks.is_empty() && is_kmer_masked(masks, i, safe_word_size) {
-                dust_skipped += 1;
+        for (range_start, range_end) in ranges {
+            // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_nalookup.c:1001-1022
+            // ```c
+            // if (full_word_size > (loc->ssr->right - loc->ssr->left + 1))
+            //     continue;
+            // ```
+            let range_len = range_end.saturating_sub(range_start);
+            if word_length > range_len {
                 continue;
             }
-            
-            // NCBI reference: blast_lookup.c:119-120
-            // if (*seq & invalid_mask) word_target = seq + lut_word_length + 1;
-            if let Some(kmer) = encode_kmer(seq, i, safe_word_size) {
+
+            let mut current_kmer: u64 = 0;
+            let mut valid_bases: usize = 0;
+
+            for pos in range_start..range_end {
+                let base = seq[pos];
+                let code = ENCODE_LUT[base as usize];
+                if code == 0xFF {
+                    valid_bases = 0;
+                    current_kmer = 0;
+                    ambiguous_skipped += 1;
+                    continue;
+                }
+
+                current_kmer = ((current_kmer << 2) | (code as u64)) & kmer_mask;
+                valid_bases += 1;
+                if valid_bases < lut_word_length {
+                    continue;
+                }
+
+                total_positions += 1;
+
                 // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_nalookup.c:1047-1059
                 // ```c
                 // if (kDbFilter) {
@@ -1124,50 +1244,142 @@ pub fn build_lookup(
                 //    ...
                 // }
                 // ```
-                if let Some(counts) = db_word_counts {
-                    if db_word_count_exceeds(counts, kmer, max_db_word_count) {
+                if let Some(counts_filter) = db_word_counts {
+                    if db_word_count_exceeds(counts_filter, current_kmer, max_db_word_count) {
                         continue;
                     }
                 }
-                // NCBI reference: blast_lookup.c:BlastLookupAddWordHit (lines 33-77)
-                // Adds ALL hits without any frequency limit - no query-side filtering
-                // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_nalookup.c:1027-1034
-                // ```c
-                // /* Also add 1 to all indices, because lookup table indices count
-                //    from 1. */
-                // mb_lt->next_pos[index] = mb_lt->hashtable[ecode];
-                // mb_lt->hashtable[ecode] = index;
-                // ```
-                let q_off_1 = (query_offsets[q_idx] as usize + i + 1) as u32;
-                lookup.entry(kmer).or_default().push(q_off_1);
-            } else {
-                ambiguous_skipped += 1;
+
+                let idx = current_kmer as usize;
+                counts[idx] = counts[idx].saturating_add(1);
+            }
+        }
+    }
+
+    // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_nalookup.c:456-533
+    // ```c
+    // lookup->thick_backbone = (NaLookupBackboneCell *)calloc(...);
+    // pv = lookup->pv = (PV_ARRAY_TYPE *)calloc(...);
+    // if (num_hits > NA_HITS_PER_CELL) overflow_cells_needed += num_hits;
+    // ...
+    // PV_SET(pv, i, PV_ARRAY_BTS);
+    // if (num_hits <= NA_HITS_PER_CELL) { ... entries ... }
+    // else { ... overflow ... }
+    // ```
+    let mut backbone: Vec<NaLookupBackboneCell> = vec![NaLookupBackboneCell::default(); table_size];
+    let mut pv: Vec<PvArrayType> = vec![0; (table_size >> PV_ARRAY_BTS) + 1];
+    let mut overflow_size = 0usize;
+    let mut longest_chain = 0usize;
+    let mut non_empty_buckets = 0usize;
+
+    for idx in 0..table_size {
+        let num_hits = counts[idx] as usize;
+        if num_hits == 0 {
+            continue;
+        }
+        non_empty_buckets += 1;
+        longest_chain = longest_chain.max(num_hits);
+        backbone[idx].num_used = num_hits as u32;
+        pv_set(&mut pv, idx);
+        if num_hits > NA_HITS_PER_CELL {
+            unsafe {
+                // SAFETY: Storing overflow_cursor is valid for chains larger
+                // than NA_HITS_PER_CELL, matching NCBI union usage.
+                backbone[idx].payload.overflow_cursor = overflow_size as u32;
+            }
+            overflow_size += num_hits;
+        }
+    }
+
+    let mut overflow: Vec<u32> = vec![0u32; overflow_size];
+    let mut write_pos: Vec<u32> = vec![0; table_size];
+
+    // NCBI reference: blast_lookup.c:BlastLookupAddWordHit (lines 33-77)
+    // Adds ALL hits without any frequency limit - no query-side filtering
+    for (q_idx, record) in queries.iter().enumerate() {
+        let seq = record.seq();
+        if seq.len() < lut_word_length {
+            continue;
+        }
+
+        let masks = query_masks.get(q_idx).map(|v| v.as_slice()).unwrap_or(&[]);
+        let ranges = build_unmasked_ranges(seq.len(), masks);
+        let query_offset = query_offsets[q_idx] as usize;
+
+        for (range_start, range_end) in ranges {
+            let range_len = range_end.saturating_sub(range_start);
+            if word_length > range_len {
+                continue;
+            }
+
+            let mut current_kmer: u64 = 0;
+            let mut valid_bases: usize = 0;
+
+            for pos in range_start..range_end {
+                let base = seq[pos];
+                let code = ENCODE_LUT[base as usize];
+                if code == 0xFF {
+                    valid_bases = 0;
+                    current_kmer = 0;
+                    continue;
+                }
+
+                current_kmer = ((current_kmer << 2) | (code as u64)) & kmer_mask;
+                valid_bases += 1;
+                if valid_bases < lut_word_length {
+                    continue;
+                }
+
+                let kmer_start = pos + 1 - lut_word_length;
+                if let Some(counts_filter) = db_word_counts {
+                    if db_word_count_exceeds(counts_filter, current_kmer, max_db_word_count) {
+                        continue;
+                    }
+                }
+
+                let idx = current_kmer as usize;
+                let pos_idx = write_pos[idx] as usize;
+                let q_off_1 = (query_offset + kmer_start + 1) as u32;
+                if counts[idx] as usize > NA_HITS_PER_CELL {
+                    unsafe {
+                        // SAFETY: overflow_cursor is initialized for large chains.
+                        let start = backbone[idx].payload.overflow_cursor as usize;
+                        overflow[start + pos_idx] = q_off_1;
+                    }
+                } else {
+                    unsafe {
+                        // SAFETY: entries is valid for chains with <= NA_HITS_PER_CELL hits.
+                        backbone[idx].payload.entries[pos_idx] = q_off_1;
+                    }
+                }
+                write_pos[idx] = write_pos[idx].saturating_add(1);
             }
         }
     }
 
     if debug_mode {
+        let overflow_bytes = overflow.len() * std::mem::size_of::<u32>();
         eprintln!(
-            "[DEBUG] build_lookup: total_positions={}, ambiguous_skipped={} ({:.1}%), dust_skipped={} ({:.1}%), unique_kmers={}",
+            "[DEBUG] build_na_lookup: total_positions={}, ambiguous_skipped={} ({:.1}%), dust_skipped={} ({:.1}%), non_empty_buckets={}, overflow_bytes={:.1}MB, longest_chain={}",
             total_positions,
             ambiguous_skipped,
             100.0 * ambiguous_skipped as f64 / total_positions.max(1) as f64,
             dust_skipped,
             100.0 * dust_skipped as f64 / total_positions.max(1) as f64,
-            lookup.len()
+            non_empty_buckets,
+            overflow_bytes as f64 / 1_000_000.0,
+            longest_chain
         );
     }
 
-    // NCBI reference: blast_lookup.c:BlastLookupAddWordHit (lines 33-77)
-    // NCBI BLAST does NOT filter over-represented k-mers in the query
-    // All k-mers are added to the lookup table regardless of frequency
-    // Database word count filtering (kDbFilter) exists but is different:
-    // it filters based on database counts, not query counts
-    // Reference: blast_nalookup.c:1047-1060 (database word count filtering)
-    //
-    // REMOVED: Over-represented k-mer filtering (MAX_HITS_PER_KMER) - does not exist in NCBI BLAST
-
-    lookup
+    NaLookupTable {
+        backbone,
+        overflow,
+        pv,
+        longest_chain,
+        word_length,
+        lut_word_length,
+    }
 }
 
 /// Build two-stage lookup table (like NCBI BLAST)
@@ -1384,5 +1596,3 @@ pub fn build_direct_lookup(
 
     DirectKmerLookup { offsets, hits }
 }
-
-

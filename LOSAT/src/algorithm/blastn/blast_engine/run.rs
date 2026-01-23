@@ -3969,6 +3969,10 @@ pub fn run(args: BlastnArgs) -> Result<()> {
     //    offset_array_size = OFFSET_ARRAY_SIZE +
     //       ((BlastMBLookupTable*)lookup->lut)->longest_chain;
     //    break;
+    // case eNaLookupTable:
+    //    offset_array_size = OFFSET_ARRAY_SIZE +
+    //       ((BlastNaLookupTable*)lookup->lut)->longest_chain;
+    //    break;
     // ...
     // default:
     //    offset_array_size = OFFSET_ARRAY_SIZE;
@@ -3979,6 +3983,8 @@ pub fn run(args: BlastnArgs) -> Result<()> {
         OFFSET_ARRAY_SIZE + two_stage.longest_chain()
     } else if let Some(pv_direct) = lookup_tables.pv_direct_lookup.as_ref() {
         OFFSET_ARRAY_SIZE + pv_direct.longest_chain()
+    } else if let Some(na_lookup) = lookup_tables.na_lookup.as_ref() {
+        OFFSET_ARRAY_SIZE + na_lookup.longest_chain()
     } else {
         OFFSET_ARRAY_SIZE
     };
@@ -4102,7 +4108,13 @@ pub fn run(args: BlastnArgs) -> Result<()> {
     // Pass lookup tables and queries for use in the closure
     let two_stage_lookup_ref = lookup_tables.two_stage_lookup.as_ref();
     let pv_direct_lookup_ref = lookup_tables.pv_direct_lookup.as_ref();
-    let hash_lookup_ref = lookup_tables.hash_lookup.as_ref();
+    // NCBI reference: ncbi-blast/c++/include/algo/blast/core/blast_nalookup.h:131-156
+    // ```c
+    // typedef struct BlastNaLookupTable {
+    //     ...
+    // } BlastNaLookupTable;
+    // ```
+    let na_lookup_ref = lookup_tables.na_lookup.as_ref();
     let queries_ref = &seq_data.queries;
     let query_contexts_ref = &query_contexts;
     let query_base_offsets_ref = &query_base_offsets;
@@ -5863,14 +5875,24 @@ pub fn run(args: BlastnArgs) -> Result<()> {
                                     dbg_total_s_positions += 1;
                                 }
 
+                            // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_nascan.c:41-79
+                            // ```c
+                            // num_hits = s_BlastLookupGetNumHits(lookup, index);
+                            // if (num_hits == 0)
+                            //     continue;
+                            // s_BlastLookupRetrieve(lookup,
+                            //                       index,
+                            //                       offset_pairs + total_hits,
+                            //                       s_off);
+                            // ```
                             // Phase 2: Use PV-based direct lookup (O(1) with fast PV filtering) for word_size <= 13
-                            // For word_size > 13, use hash-based lookup
+                            // For word_size > 13, use NCBI NaLookupTable array-backed lookup
                             let matches_slice: &[u32] = if use_direct_lookup {
                                 // Use PV for fast filtering before accessing the lookup table
                                 pv_direct_lookup_ref.map(|pv_dl| pv_dl.get_hits_checked(current_kmer)).unwrap_or(&[])
                             } else {
-                                // Use hash-based lookup for larger word sizes
-                                hash_lookup_ref.and_then(|hl| hl.get(&current_kmer).map(|v| v.as_slice())).unwrap_or(&[])
+                                // Use NaLookupTable for larger word sizes
+                                na_lookup_ref.map(|na_lt| na_lt.get_hits_checked(current_kmer)).unwrap_or(&[])
                             };
 
                             for &q_off_1 in matches_slice {
@@ -6067,8 +6089,8 @@ pub fn run(args: BlastnArgs) -> Result<()> {
                                         .map(|pv_dl| pv_dl.get_hits_checked(kmer))
                                         .unwrap_or(&[])
                                 } else {
-                                    hash_lookup_ref
-                                        .and_then(|hl| hl.get(&kmer).map(|v| v.as_slice()))
+                                    na_lookup_ref
+                                        .map(|na_lt| na_lt.get_hits_checked(kmer))
                                         .unwrap_or(&[])
                                 };
                                 // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_nalookup.c:1027-1034

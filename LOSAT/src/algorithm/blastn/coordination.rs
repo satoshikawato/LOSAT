@@ -12,8 +12,8 @@ use crate::utils::dust::{DustMasker, MaskedInterval};
 use super::args::BlastnArgs;
 use super::constants::{MIN_UNGAPPED_SCORE_MEGABLAST, MIN_UNGAPPED_SCORE_BLASTN, MAX_DIRECT_LOOKUP_WORD_SIZE, X_DROP_GAPPED_NUCL, X_DROP_GAPPED_GREEDY, X_DROP_GAPPED_FINAL, SCAN_RANGE_BLASTN, SCAN_RANGE_MEGABLAST, LUT_WIDTH_11_THRESHOLD_8, LUT_WIDTH_11_THRESHOLD_10, MIN_DIAG_SEPARATION_BLASTN, MIN_DIAG_SEPARATION_MEGABLAST};
 use super::lookup::{
-    build_db_word_counts, build_lookup, build_pv_direct_lookup, build_two_stage_lookup, KmerLookup,
-    PvDirectLookup, TwoStageLookup,
+    build_db_word_counts, build_na_lookup, build_pv_direct_lookup, build_two_stage_lookup,
+    NaLookupTable, PvDirectLookup, TwoStageLookup,
 };
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -46,7 +46,13 @@ pub struct TaskConfig {
 pub struct LookupTables {
     pub two_stage_lookup: Option<TwoStageLookup>,
     pub pv_direct_lookup: Option<PvDirectLookup>,
-    pub hash_lookup: Option<KmerLookup>,
+    // NCBI reference: ncbi-blast/c++/include/algo/blast/core/blast_nalookup.h:131-156
+    // ```c
+    // typedef struct BlastNaLookupTable {
+    //     ...
+    // } BlastNaLookupTable;
+    // ```
+    pub na_lookup: Option<NaLookupTable>,
 }
 
 /// Subject metadata needed for search setup.
@@ -760,11 +766,21 @@ pub fn build_lookup_tables(
         None
     };
     
-    let hash_lookup: Option<KmerLookup> = if !config.use_two_stage && !config.use_direct_lookup {
-        Some(build_lookup(
+    // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_nalookup.c:548-583
+    // ```c
+    // Int4 BlastNaLookupTableNew(BLAST_SequenceBlk* query,
+    //                            BlastSeqLoc* locations,
+    //                            BlastNaLookupTable * *lut,
+    //                            const LookupTableOptions * opt,
+    //                            const QuerySetUpOptions* query_options,
+    //                            Int4 lut_width)
+    // ```
+    let na_lookup: Option<NaLookupTable> = if !config.use_two_stage && !config.use_direct_lookup {
+        Some(build_na_lookup(
             queries,
             query_offsets,
             config.effective_word_size,
+            config.lut_word_length,
             query_masks,
             db_word_counts_ref,
             args.max_db_word_count,
@@ -786,7 +802,7 @@ pub fn build_lookup_tables(
         LookupTables {
             two_stage_lookup,
             pv_direct_lookup,
-            hash_lookup,
+            na_lookup,
         },
         scan_step,
     )
@@ -882,4 +898,3 @@ mod tests {
         );
     }
 }
-

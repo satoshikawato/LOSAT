@@ -208,8 +208,6 @@ pub(crate) fn run_with_neighbor_map(args: TblastxArgs) -> Result<()> {
 
     let evalue_threshold = args.evalue;
     let query_frames_ref = &query_frames;
-    let query_ids_ref = &query_ids;
-    let subject_ids_ref = &subject_ids;
     let neighbor_map_ref = &neighbor_lookup.neighbor_map.map;
     let query_lookup_ref = &neighbor_lookup.query_lookup;
     let query_contexts_ref = &neighbor_lookup.contexts;
@@ -222,7 +220,6 @@ pub(crate) fn run_with_neighbor_map(args: TblastxArgs) -> Result<()> {
 
     // Process each subject
     for (s_idx, s_rec) in subjects_raw.iter().enumerate() {
-        let s_id = Arc::clone(&subject_ids_ref[s_idx]);
         let s_len = s_rec.seq().len();
         let s_frames = generate_frames(s_rec.seq(), &db_code);
         
@@ -813,9 +810,6 @@ pub(crate) fn run_with_neighbor_map(args: TblastxArgs) -> Result<()> {
             continue;
         }
         
-        let q_id = &query_ids_ref[h.q_idx as usize];
-        let s_id = Arc::clone(&subject_ids_ref[h.s_idx as usize]);
-        
         // `ctx_idx` is the global query context index (NCBI `hsp->context` equivalent).
         // Use the pre-built `QueryContext` buffer to access the (possibly unmasked) query AA sequence.
         let q_ctx = &query_contexts_ref[h.ctx_idx];
@@ -857,9 +851,15 @@ pub(crate) fn run_with_neighbor_map(args: TblastxArgs) -> Result<()> {
         let (q_start, q_end) = convert_coords(h.q_aa_start, h.q_aa_end, h.q_frame, h.q_orig_len);
         let (s_start, s_end) = convert_coords(h.s_aa_start, h.s_aa_end, h.s_frame, h.s_orig_len);
 
+        // NCBI reference: ncbi-blast/c++/include/algo/blast/core/blast_hits.h:153-166
+        // ```c
+        // typedef struct BlastHSPList {
+        //    Int4 oid;/**< The ordinal id of the subject sequence this HSP list is for */
+        //    Int4 query_index; /**< Index of the query which this HSPList corresponds to.
+        //                       Set to 0 if not applicable */
+        // } BlastHSPList;
+        // ```
         let out_hit = Hit {
-            query_id: q_id.clone(),
-            subject_id: s_id.clone(),
             identity,
             length: len,
             mismatch: len.saturating_sub(matches),
@@ -918,6 +918,6 @@ pub(crate) fn run_with_neighbor_map(args: TblastxArgs) -> Result<()> {
     
     // NCBI-style output ordering: query (input order) → subject (best_evalue/score/oid) → HSP (score/coords)
     // Reference: BLAST_LinkHsps() + s_EvalueCompareHSPLists() + ScoreCompareHSPs()
-    write_output_ncbi_order(final_hits, args.out.as_ref())?;
+    write_output_ncbi_order(final_hits, args.out.as_ref(), &query_ids, &subject_ids)?;
     Ok(())
 }

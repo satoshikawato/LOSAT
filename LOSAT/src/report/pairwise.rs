@@ -7,6 +7,7 @@
 use crate::common::Hit;
 use super::outfmt6::{format_evalue_ncbi, format_bitscore_ncbi, ReportContext};
 use std::io::{self, Write};
+use std::sync::Arc;
 
 // =============================================================================
 // NCBI Pairwise Output Format (outfmt 0)
@@ -344,8 +345,28 @@ pub fn write_pairwise<W: Write>(
     hits: &[PairwiseHit],
     writer: &mut W,
     config: &PairwiseConfig,
+    query_ids: &[Arc<str>],
+    subject_ids: &[Arc<str>],
     context: &ReportContext,
 ) -> io::Result<()> {
+    // NCBI reference: ncbi-blast/c++/src/objtools/align_format/showalign.cpp:1408-1469
+    // ```c
+    // string CDisplaySeqalign::x_DisplayRowData(SAlnRowInfo *alnRoInfo)
+    // {
+    //     ...
+    //     CNcbiOstrstream out;
+    //     ...
+    // }
+    //
+    // void CDisplaySeqalign::x_DisplayRowData(SAlnRowInfo *alnRoInfo, CNcbiOstream& out)
+    // {
+    //     ...
+    //     out << rowdata;
+    // }
+    // ```
+    let mut buffered = io::BufWriter::new(writer);
+    let writer = &mut buffered;
+
     // Write program header
     let version = context.version.as_deref().unwrap_or("0.1.0");
     writeln!(writer, "{} {}", context.program.to_uppercase(), version)?;
@@ -365,13 +386,14 @@ pub fn write_pairwise<W: Write>(
     
     if hits.is_empty() {
         writeln!(writer, " ***** No hits found *****")?;
+        writer.flush()?;
         return Ok(());
     }
     
     // Group hits by subject
     use std::collections::HashMap;
-    let mut subject_hits: HashMap<&str, Vec<&PairwiseHit>> = HashMap::new();
-    let mut subject_order: Vec<&str> = Vec::new();
+    let mut subject_hits: HashMap<u32, Vec<&PairwiseHit>> = HashMap::new();
+    let mut subject_order: Vec<u32> = Vec::new();
     
     for hit in hits {
         // NCBI reference: ncbi-blast/c++/src/objtools/align_format/showalign.cpp:2278-2315
@@ -383,16 +405,36 @@ pub fn write_pairwise<W: Write>(
         //     ...
         // }
         // ```
-        let sid = hit.hit.subject_id.as_ref();
-        if !subject_hits.contains_key(sid) {
-            subject_order.push(sid);
+        // NCBI reference: ncbi-blast/c++/include/algo/blast/core/blast_hits.h:153-166
+        // ```c
+        // typedef struct BlastHSPList {
+        //    Int4 oid;/**< The ordinal id of the subject sequence this HSP list is for */
+        //    Int4 query_index; /**< Index of the query which this HSPList corresponds to.
+        //                       Set to 0 if not applicable */
+        // } BlastHSPList;
+        // ```
+        let s_idx = hit.hit.s_idx;
+        if !subject_hits.contains_key(&s_idx) {
+            subject_order.push(s_idx);
         }
-        subject_hits.entry(sid).or_default().push(hit);
+        subject_hits.entry(s_idx).or_default().push(hit);
     }
     
     // Write each subject's hits
-    for subject_id in subject_order {
-        let shits = subject_hits.get(subject_id).unwrap();
+    for s_idx in subject_order {
+        // NCBI reference: ncbi-blast/c++/include/algo/blast/core/blast_hits.h:153-166
+        // ```c
+        // typedef struct BlastHSPList {
+        //    Int4 oid;/**< The ordinal id of the subject sequence this HSP list is for */
+        //    Int4 query_index; /**< Index of the query which this HSPList corresponds to.
+        //                       Set to 0 if not applicable */
+        // } BlastHSPList;
+        // ```
+        let subject_id = subject_ids
+            .get(s_idx as usize)
+            .map(|id| id.as_ref())
+            .unwrap_or("unknown");
+        let shits = subject_hits.get(&s_idx).unwrap();
         let first_hit = shits.first().unwrap();
         
         // Subject header
@@ -410,7 +452,7 @@ pub fn write_pairwise<W: Write>(
         }
     }
     
-    Ok(())
+    writer.flush()
 }
 
 /// Write hits in pairwise format (simplified version for Hit without sequences)
@@ -421,10 +463,19 @@ pub fn write_pairwise_simple<W: Write>(
     hits: &[Hit],
     writer: &mut W,
     config: &PairwiseConfig,
+    query_ids: &[Arc<str>],
+    subject_ids: &[Arc<str>],
     context: &ReportContext,
 ) -> io::Result<()> {
     let pairwise_hits: Vec<PairwiseHit> = hits.iter().cloned().map(PairwiseHit::from).collect();
-    write_pairwise(&pairwise_hits, writer, config, context)
+    write_pairwise(
+        &pairwise_hits,
+        writer,
+        config,
+        query_ids,
+        subject_ids,
+        context,
+    )
 }
 
 #[cfg(test)]
@@ -444,8 +495,6 @@ mod tests {
         // } BlastHSPList;
         // ```
         Hit {
-            query_id: "query1".into(),
-            subject_id: "subject1".into(),
             identity: 95.0,
             length: 100,
             mismatch: 5,
@@ -506,9 +555,27 @@ mod tests {
             subject_name: Some("test_db".to_string()),
             version: Some("0.1.0".to_string()),
         };
+        // NCBI reference: ncbi-blast/c++/include/algo/blast/core/blast_hits.h:153-166
+        // ```c
+        // typedef struct BlastHSPList {
+        //    Int4 oid;/**< The ordinal id of the subject sequence this HSP list is for */
+        //    Int4 query_index; /**< Index of the query which this HSPList corresponds to.
+        //                       Set to 0 if not applicable */
+        // } BlastHSPList;
+        // ```
+        let query_ids = vec![Arc::<str>::from("query1")];
+        let subject_ids = vec![Arc::<str>::from("subject1")];
         
         let mut output = Vec::new();
-        write_pairwise_simple(&hits, &mut output, &config, &context).unwrap();
+        write_pairwise_simple(
+            &hits,
+            &mut output,
+            &config,
+            &query_ids,
+            &subject_ids,
+            &context,
+        )
+        .unwrap();
         let output_str = String::from_utf8(output).unwrap();
         
         assert!(output_str.contains("TBLASTX"));

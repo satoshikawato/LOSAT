@@ -312,6 +312,16 @@ pub fn run(args: TblastxArgs) -> Result<()> {
     let (tx, rx) = channel::<Vec<Hit>>();
     let out_path = args.out.clone();
     let evalue_threshold = args.evalue;
+    // NCBI reference: ncbi-blast/c++/include/algo/blast/core/blast_hits.h:153-166
+    // ```c
+    // typedef struct BlastHSPList {
+    //    Int4 oid;/**< The ordinal id of the subject sequence this HSP list is for */
+    //    Int4 query_index; /**< Index of the query which this HSPList corresponds to.
+    //                       Set to 0 if not applicable */
+    // } BlastHSPList;
+    // ```
+    let query_ids_out = query_ids.clone();
+    let subject_ids_out = subject_ids.clone();
 
     let writer = std::thread::spawn(move || -> Result<()> {
         let mut all: Vec<Hit> = Vec::new();
@@ -321,7 +331,7 @@ pub fn run(args: TblastxArgs) -> Result<()> {
         all.retain(|h| h.e_value <= evalue_threshold);
         // NCBI-style output ordering: query (input order) → subject (best_evalue/score/oid) → HSP (score/coords)
         // Reference: BLAST_LinkHsps() + s_EvalueCompareHSPLists() + ScoreCompareHSPs()
-        write_output_ncbi_order(all, out_path.as_ref())?;
+        write_output_ncbi_order(all, out_path.as_ref(), &query_ids_out, &subject_ids_out)?;
         Ok(())
     });
 
@@ -372,8 +382,6 @@ pub fn run(args: TblastxArgs) -> Result<()> {
 
     let lookup_ref = &lookup;
     let contexts_ref = &contexts;
-    let query_ids_ref = &query_ids;
-    let subject_ids_ref = &subject_ids;
     let _gapped_params_ref = &gapped_params;  // Unused - tblastx uses ungapped params
 
     subjects_raw.par_iter().enumerate().for_each_init(
@@ -402,18 +410,6 @@ pub fn run(args: TblastxArgs) -> Result<()> {
                 s_frames.retain(|x| x.frame == f);
             }
 
-            // NCBI reference: ncbi-blast/c++/include/algo/blast/core/blast_hits.h:153-166
-            // ```c
-            // typedef struct BlastHSPList {
-            //    Int4 oid;/**< The ordinal id of the subject sequence this HSP list is for */
-            //    Int4 query_index; /**< Index of the query which this HSPList corresponds to.
-            //                       Set to 0 if not applicable */
-            //    BlastHSP** hsp_array; /**< Array of pointers to individual HSPs */
-            //    Int4 hspcnt; /**< Number of HSPs saved */
-            //    ...
-            // } BlastHSPList;
-            // ```
-            let s_id = Arc::clone(&subject_ids_ref[s_idx]);
             let s_len = s_rec.seq().len();
 
             // [C] BlastOffsetPair *offset_pairs
@@ -1257,9 +1253,15 @@ pub fn run(args: TblastxArgs) -> Result<()> {
                     let (s_start, s_end) =
                         convert_coords(h.s_aa_start, h.s_aa_end, s_frame.frame, s_len);
 
+                    // NCBI reference: ncbi-blast/c++/include/algo/blast/core/blast_hits.h:153-166
+                    // ```c
+                    // typedef struct BlastHSPList {
+                    //    Int4 oid;/**< The ordinal id of the subject sequence this HSP list is for */
+                    //    Int4 query_index; /**< Index of the query which this HSPList corresponds to.
+                    //                       Set to 0 if not applicable */
+                    // } BlastHSPList;
+                    // ```
                     let out_hit = Hit {
-                        query_id: query_ids_ref[ctx.q_idx as usize].clone(),
-                        subject_id: s_id.clone(),
                         identity,
                         length: len,
                         mismatch,

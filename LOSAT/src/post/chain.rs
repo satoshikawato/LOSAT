@@ -1,6 +1,5 @@
 use crate::common::Hit;
 use rustc_hash::FxHashMap;
-use std::sync::Arc;
 
 /// Configuration for HSP chaining
 #[derive(Debug, Clone, Copy)]
@@ -65,15 +64,23 @@ pub fn chain_and_filter_hsps(hits: Vec<Hit>, config: &ChainConfig) -> Vec<Hit> {
     //    ...
     // } BlastHSPList;
     // ```
-    let mut grouped: FxHashMap<(Arc<str>, Arc<str>), Vec<Hit>> = FxHashMap::default();
+    let mut grouped: FxHashMap<(u32, u32), Vec<Hit>> = FxHashMap::default();
     for hit in hits {
-        let key = (hit.query_id.clone(), hit.subject_id.clone());
+        // NCBI reference: ncbi-blast/c++/include/algo/blast/core/blast_hits.h:153-166
+        // ```c
+        // typedef struct BlastHSPList {
+        //    Int4 oid;/**< The ordinal id of the subject sequence this HSP list is for */
+        //    Int4 query_index; /**< Index of the query which this HSPList corresponds to.
+        //                       Set to 0 if not applicable */
+        // } BlastHSPList;
+        // ```
+        let key = (hit.q_idx, hit.s_idx);
         grouped.entry(key).or_default().push(hit);
     }
 
     let mut result = Vec::new();
 
-    for ((_query_id, _subject_id), mut pair_hits) in grouped {
+    for ((_q_idx, _s_idx), mut pair_hits) in grouped {
         // Sort by query start position
         pair_hits.sort_by_key(|h| h.q_start);
 
@@ -153,7 +160,15 @@ fn filter_overlapping_hsps(hits: Vec<Hit>, overlap_threshold: f64) -> Vec<Hit> {
     for hit in sorted {
         let dominated = kept.iter().any(|kept_hit| {
             // Must be same query-subject pair
-            if hit.query_id != kept_hit.query_id || hit.subject_id != kept_hit.subject_id {
+            // NCBI reference: ncbi-blast/c++/include/algo/blast/core/blast_hits.h:153-166
+            // ```c
+            // typedef struct BlastHSPList {
+            //    Int4 oid;/**< The ordinal id of the subject sequence this HSP list is for */
+            //    Int4 query_index; /**< Index of the query which this HSPList corresponds to.
+            //                       Set to 0 if not applicable */
+            // } BlastHSPList;
+            // ```
+            if hit.q_idx != kept_hit.q_idx || hit.s_idx != kept_hit.s_idx {
                 return false;
             }
 
@@ -205,8 +220,8 @@ struct HspChain {
     //    ...
     // } BlastHSPList;
     // ```
-    query_id: Arc<str>,
-    subject_id: Arc<str>,
+    q_idx: u32,
+    s_idx: u32,
     q_start: usize,
     q_end: usize,
     s_start: usize,
@@ -224,8 +239,8 @@ impl HspChain {
     fn from_hit(hit: &Hit) -> Self {
         let diagonal = hit.q_start as isize - hit.s_start as isize;
         Self {
-            query_id: hit.query_id.clone(),
-            subject_id: hit.subject_id.clone(),
+            q_idx: hit.q_idx,
+            s_idx: hit.s_idx,
             q_start: hit.q_start,
             q_end: hit.q_end,
             s_start: hit.s_start,
@@ -267,8 +282,6 @@ impl HspChain {
         };
 
         Hit {
-            query_id: self.query_id,
-            subject_id: self.subject_id,
             identity,
             length,
             mismatch: self.total_mismatches,
@@ -288,8 +301,8 @@ impl HspChain {
             // ```
             query_frame: 1,
             query_length: 0,
-            q_idx: 0,
-            s_idx: 0,
+            q_idx: self.q_idx,
+            s_idx: self.s_idx,
             raw_score: (self.total_score * 2.0) as i32,
             gap_info: None,
         }
@@ -354,8 +367,6 @@ mod tests {
         // } BlastHSPList;
         // ```
         Hit {
-            query_id: "q1".into(),
-            subject_id: "s1".into(),
             identity: 90.0,
             length: q_end - q_start + 1,
             mismatch: 0,

@@ -1,5 +1,4 @@
 use crate::common::Hit;
-use std::sync::Arc;
 
 /// Filter hits by E-value threshold
 pub fn filter_by_evalue(hits: Vec<Hit>, max_evalue: f64) -> Vec<Hit> {
@@ -51,7 +50,15 @@ pub fn filter_overlapping(hits: Vec<Hit>, overlap_threshold: f64) -> Vec<Hit> {
     for hit in sorted_hits {
         let dominated = kept_hits.iter().any(|kept| {
             // Check if same query-subject pair
-            if hit.query_id != kept.query_id || hit.subject_id != kept.subject_id {
+            // NCBI reference: ncbi-blast/c++/include/algo/blast/core/blast_hits.h:153-166
+            // ```c
+            // typedef struct BlastHSPList {
+            //    Int4 oid;/**< The ordinal id of the subject sequence this HSP list is for */
+            //    Int4 query_index; /**< Index of the query which this HSPList corresponds to.
+            //                       Set to 0 if not applicable */
+            // } BlastHSPList;
+            // ```
+            if hit.q_idx != kept.q_idx || hit.s_idx != kept.s_idx {
                 return false;
             }
 
@@ -119,11 +126,11 @@ pub fn keep_top_n_per_pair(hits: Vec<Hit>, n: usize) -> Vec<Hit> {
     //    ...
     // } BlastHSPList;
     // ```
-    let mut counts: HashMap<(Arc<str>, Arc<str>), usize> = HashMap::new();
+    let mut counts: HashMap<(u32, u32), usize> = HashMap::new();
     let mut kept_hits = Vec::new();
 
     for hit in sorted_hits {
-        let key = (hit.query_id.clone(), hit.subject_id.clone());
+        let key = (hit.q_idx, hit.s_idx);
         let count = counts.entry(key).or_insert(0);
 
         if *count < n {
@@ -251,8 +258,6 @@ mod tests {
         // } BlastHSPList;
         // ```
         Hit {
-            query_id: "q1".into(),
-            subject_id: "s1".into(),
             identity: 90.0,
             length: q_end - q_start + 1,
             mismatch: 0,

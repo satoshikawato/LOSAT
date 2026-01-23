@@ -99,8 +99,6 @@ impl BlastnHsp {
     // ```
     pub fn from_hit(hit: Hit) -> Self {
         let Hit {
-            query_id: _,
-            subject_id: _,
             identity,
             length,
             mismatch,
@@ -145,18 +143,8 @@ impl BlastnHsp {
     //    Int4 query_index; /**< Index of the query which this HSPList corresponds to. */
     // } BlastHSPList;
     // ```
-    pub fn into_hit(self, query_ids: &[Arc<str>], subject_ids: &[Arc<str>]) -> Hit {
-        let query_id = query_ids
-            .get(self.q_idx as usize)
-            .cloned()
-            .unwrap_or_else(|| Arc::<str>::from("unknown"));
-        let subject_id = subject_ids
-            .get(self.s_idx as usize)
-            .cloned()
-            .unwrap_or_else(|| Arc::<str>::from("unknown"));
+    pub fn into_hit(self) -> Hit {
         Hit {
-            query_id,
-            subject_id,
             identity: self.identity,
             length: self.length,
             mismatch: self.mismatch,

@@ -22,12 +22,10 @@ pub use run::run;
 use rustc_hash::FxHashMap;
 use crate::common::Hit;
 use crate::stats::KarlinParams;
-use crate::core::blast_encoding::encode_iupac_to_blastna;
 use super::alignment::build_blastna_matrix;
 use super::filtering::{purge_hsps_with_common_endpoints_ex, reevaluate_hsp_with_ambiguities_gapped, subject_best_hit};
 use super::hsp::{BlastnHsp, score_compare_hsps as score_compare_blastn_hsps};
 use super::interval_tree::{BlastIntervalTree, IndexMethod, TreeHsp};
-use std::sync::Arc;
 
 // Re-export for backward compatibility
 pub use crate::algorithm::common::evalue::calculate_evalue_database_search as calculate_evalue;
@@ -43,18 +41,17 @@ pub use crate::algorithm::common::evalue::calculate_evalue_database_search as ca
 /// Phase 4: score re-sort and interval tree containment purge
 pub fn filter_hsps(
     hits: Vec<Hit>,
-    // NCBI reference: ncbi-blast/c++/include/algo/blast/core/blast_hits.h:153-166
+    // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_traceback.c:651-659
     // ```c
-    // typedef struct BlastHSPList {
-    //    Int4 oid;/**< The ordinal id of the subject sequence this HSP list is for */
-    //    Int4 query_index; /**< Index of the query which this HSPList corresponds to.
-    //                       Set to 0 if not applicable */
-    //    BlastHSP** hsp_array; /**< Array of pointers to individual HSPs */
-    //    Int4 hspcnt; /**< Number of HSPs saved */
-    //    ...
-    // } BlastHSPList;
+    // query = query_blk->sequence +
+    //     query_info->contexts[hsp->context].query_offset;
+    // query_length = query_info->contexts[hsp->context].query_length;
+    // delete_hsp = Blast_HSPReevaluateWithAmbiguitiesGapped(hsp, query,
+    //              query_length, subject, subject_length, hit_params,
+    //              score_params, sbp);
     // ```
-    sequences: &FxHashMap<(Arc<str>, Arc<str>), (Vec<u8>, Vec<u8>)>,
+    encoded_queries_blastna: &[Vec<u8>],
+    encoded_subjects_blastna: &[Vec<u8>],
     reward: i32,
     penalty: i32,
     gap_open: i32,
@@ -64,8 +61,8 @@ pub fn filter_hsps(
     _params: &KarlinParams,
     _use_dp: bool,
     verbose: bool,
-    query_lengths: &FxHashMap<Arc<str>, usize>,  // Query ID -> length mapping
-    cutoff_scores: &FxHashMap<Arc<str>, i32>,    // Query ID -> cutoff score (NCBI: hit_params->cutoff_score_min)
+    query_lengths: &[usize], // Query index -> length mapping
+    cutoff_scores: &[i32],   // Query index -> cutoff score (NCBI: hit_params->cutoff_score_min)
 ) -> Vec<Hit> {
     if hits.is_empty() {
         return hits;
@@ -82,12 +79,6 @@ pub fn filter_hsps(
     //    Int4 query_index; /**< Index of the query which this HSPList corresponds to. */
     // } BlastHSPList;
     // ```
-    let mut id_map: FxHashMap<(u32, u32), (Arc<str>, Arc<str>)> = FxHashMap::default();
-    for hit in &hits {
-        id_map
-            .entry((hit.q_idx, hit.s_idx))
-            .or_insert_with(|| (Arc::clone(&hit.query_id), Arc::clone(&hit.subject_id)));
-    }
     let mut result_hits: Vec<BlastnHsp> = hits.into_iter().map(BlastnHsp::from_hit).collect();
 
     // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_stat.c:1052-1127 (BlastScoreBlkNuclMatrixCreate)
@@ -152,63 +143,49 @@ pub fn filter_hsps(
     //     ...
     // }
     let mut deleted_count = 0;
-    // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_encoding.c:85-93 (IUPACNA_TO_BLASTNA)
-    // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_traceback.c:651-659
-    // ```c
-    // query = query_blk->sequence + query_info->contexts[hsp->context].query_offset;
-    // delete_hsp = Blast_HSPReevaluateWithAmbiguitiesGapped(hsp, query,
-    //              query_length, subject, subject_length, hit_params,
-    //              score_params, sbp);
-    // ```
-    let mut encoded_cache: FxHashMap<(Arc<str>, Arc<str>), (Vec<u8>, Vec<u8>)> =
-        FxHashMap::default();
-    // NCBI reference: ncbi-blast/c++/include/algo/blast/core/blast_hits.h:153-166
-    // ```c
-    // typedef struct BlastHSPList {
-    //    Int4 oid;/**< The ordinal id of the subject sequence this HSP list is for */
-    //    Int4 query_index; /**< Index of the query which this HSPList corresponds to. */
-    // } BlastHSPList;
-    // ```
-    let get_ids = |hit: &BlastnHsp, map: &FxHashMap<(u32, u32), (Arc<str>, Arc<str>)>| {
-        map.get(&(hit.q_idx, hit.s_idx))
-            .cloned()
-            .unwrap_or_else(|| (Arc::<str>::from("unknown"), Arc::<str>::from("unknown")))
-    };
     for i in extra_start..result_hits.len() {
         let hit = &mut result_hits[i];
 
         // Get cutoff score for this query
         // NCBI reference: blast_traceback.c:654 - uses hit_params->cutoff_score_min
         // The cutoff_score is pre-computed in run() using compute_blastn_cutoff_score()
-        let (query_id, subject_id) = get_ids(hit, &id_map);
-        let cutoff_score = cutoff_scores.get(&query_id)
-            .copied()
-            .unwrap_or(22);
+        let q_idx = hit.q_idx as usize;
+        let s_idx = hit.s_idx as usize;
+        let cutoff_score = cutoff_scores.get(q_idx).copied().unwrap_or(22);
 
         // Get sequences for re-evaluation
-        let key = (Arc::clone(&query_id), Arc::clone(&subject_id));
-        if let Some((q_seq, s_seq)) = sequences.get(&key) {
-            let (q_blastna, s_blastna) =
-                encoded_cache.entry(key.clone()).or_insert_with(|| {
-                    let q_blastna = encode_iupac_to_blastna(q_seq);
-                    let s_blastna = encode_iupac_to_blastna(s_seq);
-                    (q_blastna, s_blastna)
-                });
-            let delete = reevaluate_hsp_with_ambiguities_gapped(
-                hit,
-                q_blastna.as_slice(),
-                s_blastna.as_slice(),
-                reward,
-                penalty,
-                gap_open,
-                gap_extend,
-                cutoff_score,
-                &score_matrix,
-            );
-            if delete {
-                hit.raw_score = i32::MIN; // Mark for deletion
-                deleted_count += 1;
-            }
+        // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_traceback.c:651-659
+        // ```c
+        // query = query_blk->sequence +
+        //     query_info->contexts[hsp->context].query_offset;
+        // query_length = query_info->contexts[hsp->context].query_length;
+        // delete_hsp = Blast_HSPReevaluateWithAmbiguitiesGapped(hsp, query,
+        //              query_length, subject, subject_length, hit_params,
+        //              score_params, sbp);
+        // ```
+        let context_idx = q_idx * 2 + if hit.query_frame < 0 { 1 } else { 0 };
+        let q_blastna = match encoded_queries_blastna.get(context_idx) {
+            Some(seq) => seq.as_slice(),
+            None => continue,
+        };
+        let s_blastna = match encoded_subjects_blastna.get(s_idx) {
+            Some(seq) => seq.as_slice(),
+            None => continue,
+        };
+        let delete = reevaluate_hsp_with_ambiguities_gapped(
+            hit,
+            q_blastna,
+            s_blastna,
+            reward,
+            penalty,
+            gap_open,
+            gap_extend,
+            cutoff_score,
+            &score_matrix,
+        );
+        if delete {
+            hit.raw_score = i32::MIN; // Mark for deletion
+            deleted_count += 1;
         }
     }
 
@@ -251,19 +228,40 @@ pub fn filter_hsps(
     // if (min_diag_separation)
     //     options->min_diag_separation = min_diag_separation;
     // ```
-    let mut trees: FxHashMap<(Arc<str>, Arc<str>), BlastIntervalTree> = FxHashMap::default();
+    // NCBI reference: ncbi-blast/c++/include/algo/blast/core/blast_hits.h:153-166
+    // ```c
+    // typedef struct BlastHSPList {
+    //    Int4 oid;/**< The ordinal id of the subject sequence this HSP list is for */
+    //    Int4 query_index; /**< Index of the query which this HSPList corresponds to. */
+    // } BlastHSPList;
+    // ```
+    let mut trees: FxHashMap<(u32, u32), BlastIntervalTree> = FxHashMap::default();
     for hit in result_hits {
-        let (query_id, subject_id) = get_ids(&hit, &id_map);
-        let key = (Arc::clone(&query_id), Arc::clone(&subject_id));
-        let (q_seq, s_seq) = match sequences.get(&key) {
-            Some(value) => value,
+        let q_idx = hit.q_idx as usize;
+        let s_idx = hit.s_idx as usize;
+        // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_traceback.c:651-655
+        // ```c
+        // query = query_blk->sequence +
+        //     query_info->contexts[hsp->context].query_offset;
+        // query_length = query_info->contexts[hsp->context].query_length;
+        // ```
+        let context_idx = q_idx * 2 + if hit.query_frame < 0 { 1 } else { 0 };
+        let q_seq = match encoded_queries_blastna.get(context_idx) {
+            Some(seq) => seq,
+            None => {
+                final_hits.push(hit);
+                continue;
+            }
+        };
+        let s_seq = match encoded_subjects_blastna.get(s_idx) {
+            Some(seq) => seq,
             None => {
                 final_hits.push(hit);
                 continue;
             }
         };
         let query_len = query_lengths
-            .get(&query_id)
+            .get(q_idx)
             .copied()
             .unwrap_or_else(|| hit.query_length.max(q_seq.len()));
         let subject_len = s_seq.len();
@@ -271,7 +269,8 @@ pub fn filter_hsps(
             final_hits.push(hit);
             continue;
         }
-        let tree = trees.entry(key.clone()).or_insert_with(|| {
+        let key = (hit.q_idx, hit.s_idx);
+        let tree = trees.entry(key).or_insert_with(|| {
             // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_itree.c:537-550
             // ```c
             // query_start = s_GetQueryStrandOffset(query_info, hsp->context);
@@ -368,10 +367,7 @@ pub fn filter_hsps(
     // ```
     let mut output_hits: Vec<Hit> = Vec::with_capacity(final_hits.len());
     for hit in final_hits {
-        let (query_id, subject_id) = get_ids(&hit, &id_map);
         output_hits.push(Hit {
-            query_id,
-            subject_id,
             identity: hit.identity,
             length: hit.length,
             mismatch: hit.mismatch,

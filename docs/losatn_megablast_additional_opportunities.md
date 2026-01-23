@@ -34,23 +34,29 @@ Status legend: [x] done, [ ] pending.
   `/mnt/c/Users/genom/GitHub/ncbi-blast/c++/include/algo/blast/core/blast_hits.h:153-166`
   (uses direct query/subject pointers and index-based HSPList metadata).
 
-### 3) [ ] Avoid per-chunk allocation in prelim-hit processing
+### 3) [x] Avoid per-chunk allocation in prelim-hit processing
+- Status: done. Reuse scratch Vecs in the single-thread path and return them for reuse.
 - Observation: `prelim_hits.drain(..).collect()` allocates a new Vec per chunk.
-- LOSAT refs: `LOSAT/src/algorithm/blastn/blast_engine/run.rs:6724`.
+- LOSAT refs: `LOSAT/src/algorithm/blastn/blast_engine/run.rs:6750`.
 - NCBI refs: `/mnt/c/Users/genom/GitHub/ncbi-blast/c++/src/algo/blast/core/blast_engine.c:491`
   (`BlastInitHitListReset` resets in place).
-- Plan idea: reuse a scratch Vec by swapping/taking, preserving capacity.
 
-### 4) [ ] Reduce subject chunk range allocations
-- Observation: each `SubjectChunk` owns `seq_ranges: Vec<(i32, i32)>`; ranges are
-  rebuilt for every chunk even when unmasked.
+### 4) [ ] Reduce subject chunk range allocations for unmasked subjects
+- Observation: each `SubjectChunk` owns `seq_ranges: Vec<(i32, i32)>`; in the
+  unmasked path this is always a single range, but we still allocate per chunk
+  (`vec![(residual, length)]` or `soft_ranges.clone()` when no chunking).
 - LOSAT refs: `LOSAT/src/algorithm/blastn/blast_engine/run.rs:157`,
   `LOSAT/src/algorithm/blastn/blast_engine/run.rs:4244`.
 - NCBI refs: `/mnt/c/Users/genom/GitHub/ncbi-blast/c++/src/algo/blast/core/blast_engine.c:150`,
   `/mnt/c/Users/genom/GitHub/ncbi-blast/c++/src/algo/blast/core/blast_engine.c:154`
   (`s_BackupSubject` keeps existing ranges).
-- Plan idea: reuse shared ranges for unmasked subjects and avoid per-chunk Vecs
-  (e.g., borrow slices or use a small fixed-size buffer for the common case).
+- NCBI behavior: `s_GetNextSubjectChunk` reuses a single `SSeqRange` buffer for
+  unmasked chunking (`s_AllocateSeqRange` + `backup->allocated`), and points
+  `subject->seq_ranges` at `backup->soft_ranges` when no chunking.
+- Plan idea: keep per-chunk seq_ranges as either a borrowed slice (no chunking)
+  or an inline single range (chunked/unmasked), and only allocate a Vec for the
+  masked + chunked path (e.g., an enum `SeqRanges` or a fixed-size buffer like
+  `SmallVec<[ (i32, i32); 1 ]>`).
 
 ### 5) [ ] Buffered output for outfmt 0/7 (if output-heavy)
 - Observation: outfmt6 is optimized, but pairwise/outfmt7 still use many
@@ -76,7 +82,7 @@ Status legend: [x] done, [ ] pending.
 ## Proposed Plan (Suggested Order)
 1) [x] Index-only hit identifiers (largest memory/alloc win, matches NCBI layout).
 2) [x] Index-keyed re-evaluation caches and pass pre-encoded sequences.
-3) [ ] Reuse prelim-hit scratch Vecs to avoid per-chunk allocations.
+3) [x] Reuse prelim-hit scratch Vecs to avoid per-chunk allocations.
 4) [ ] Reduce subject chunk range allocations for unmasked subjects.
 5) [ ] Buffered output for outfmt0/7 (only if output-heavy workloads).
 6) [ ] Optional packed subject reuse for limit_lookup/preload mode.

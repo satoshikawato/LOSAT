@@ -2679,13 +2679,13 @@ fn merge_prelim_hits_subject_split(
     split_offset: usize,
     chunk_overlap_size: usize,
     allow_gap: bool,
-) {
+) -> Vec<PrelimHit> {
     if incoming.is_empty() {
-        return;
+        return incoming;
     }
     if combined.is_empty() {
-        *combined = incoming;
-        return;
+        combined.extend(incoming.drain(..));
+        return incoming;
     }
 
     let mut combined_overlap = Vec::new();
@@ -2723,14 +2723,25 @@ fn merge_prelim_hits_subject_split(
         }
     }
 
-    incoming = incoming
-        .into_iter()
-        .enumerate()
-        .filter_map(|(idx, hsp)| if deleted[idx] { None } else { Some(hsp) })
-        .collect();
+    // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_hits.c:3000-3001
+    // ```c
+    // /* Purge the nulled out HSPs from the new HSP list */
+    // Blast_HSPListPurgeNullHSPs(hsp_list);
+    // ```
+    let mut delete_idx = 0usize;
+    incoming.retain(|_| {
+        let keep = !deleted[delete_idx];
+        delete_idx += 1;
+        keep
+    });
 
-    combined.extend(incoming);
+    // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_hits.c:3029
+    // ```c
+    // s_BlastHSPListsCombineByScore(hsp_list, combined_hsp_list, new_hspcnt);
+    // ```
+    combined.extend(incoming.drain(..));
     combined.sort_by(score_compare_prelim_hits);
+    incoming
 }
 
 // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_engine.c:488-491
@@ -4336,6 +4347,14 @@ pub fn run(args: BlastnArgs) -> Result<()> {
                 );
             }
 
+            // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_engine.c:488-491
+            // ```c
+            // /* Delete if not done in last loop iteration to prevent memory leak. */
+            // hsp_list = Blast_HSPListFree(hsp_list);
+            //
+            // BlastInitHitListReset(init_hitlist);
+            // ```
+            let reuse_prelim_hits = !(use_parallel && subject_chunks.len() > 1);
             let collect_prelim_hits_for_chunk = |chunk: &SubjectChunk,
                                                  gap_scratch: &mut GapAlignScratch,
                                                  subject_scratch: &mut SubjectScratch|
@@ -6721,7 +6740,18 @@ pub fn run(args: BlastnArgs) -> Result<()> {
                 }
 
 
-                let mut chunk_prelim_hits: Vec<PrelimHit> = prelim_hits.drain(..).collect();
+                // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_engine.c:488-491
+                // ```c
+                // /* Delete if not done in last loop iteration to prevent memory leak. */
+                // hsp_list = Blast_HSPListFree(hsp_list);
+                //
+                // BlastInitHitListReset(init_hitlist);
+                // ```
+                let mut chunk_prelim_hits: Vec<PrelimHit> = if reuse_prelim_hits {
+                    std::mem::take(prelim_hits)
+                } else {
+                    prelim_hits.drain(..).collect()
+                };
                 if !chunk_prelim_hits.is_empty() {
                     // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_hits.c:2455-2535
                     // Blast_HSPListPurgeHSPsWithCommonEndpoints(program_number, hsp_list, TRUE);
@@ -6795,12 +6825,32 @@ pub fn run(args: BlastnArgs) -> Result<()> {
                     .collect();
                 chunk_results.sort_by_key(|(offset, _, _)| *offset);
                 for (offset, overlap, hits) in chunk_results {
-                    merge_prelim_hits_subject_split(&mut combined_prelim_hits, hits, offset, overlap, true);
+                    let _ = merge_prelim_hits_subject_split(
+                        &mut combined_prelim_hits,
+                        hits,
+                        offset,
+                        overlap,
+                        true,
+                    );
                 }
             } else {
                 for chunk in subject_chunks.iter() {
                     let hits = collect_prelim_hits_for_chunk(chunk, gap_scratch, subject_scratch);
-                    merge_prelim_hits_subject_split(&mut combined_prelim_hits, hits, chunk.offset, chunk.overlap, true);
+                    let hits = merge_prelim_hits_subject_split(
+                        &mut combined_prelim_hits,
+                        hits,
+                        chunk.offset,
+                        chunk.overlap,
+                        true,
+                    );
+                    // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_engine.c:488-491
+                    // ```c
+                    // /* Delete if not done in last loop iteration to prevent memory leak. */
+                    // hsp_list = Blast_HSPListFree(hsp_list);
+                    //
+                    // BlastInitHitListReset(init_hitlist);
+                    // ```
+                    subject_scratch.prelim_hits = hits;
                 }
             }
 

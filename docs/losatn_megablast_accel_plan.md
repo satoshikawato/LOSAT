@@ -103,7 +103,7 @@ The order below aims to maximize impact while preserving NCBI parity.
 - Phase 1: Completed (NCBI-style hitlist update/heap, prelim hitlist sizing, per-subject hitlists, post-traceback filter/sort/prune order; unit tests added in `LOSAT/src/algorithm/blastn/hsp.rs`).
 - Phase 2: Completed (offset_pairs preallocated per thread using `GetOffsetArraySize`, reused across chunks).
 - Phase 3: Completed (preselected megablast scan routine per subject chunk to avoid per-call dispatch in scan loop).
-- Phase 4: Pending.
+- Phase 4: Completed (NCBI-style offset-based diagonal table clearing).
 - Phase 5: Completed (direct buffered outfmt6 writes in `LOSAT/src/common.rs`, NCBI-style scientific formatting + tests in `LOSAT/src/report/outfmt6.rs`).
 - Phase 6: Completed (subject metadata scan + streamed single-thread subjects; limit_lookup/parallel still preload).
 
@@ -170,6 +170,10 @@ Goal: avoid full clears on large tables.
 
 NCBI parity checkpoints:
 - `blast_extend.c` diagonal table layout and clearing method.
+
+### New Findings (Phase 4)
+- Offset-based clearing is implemented in `advance_diag_table_offset` and invoked per subject chunk, including the short-subject early return path (`LOSAT/src/algorithm/blastn/blast_engine/run.rs:389`, `LOSAT/src/algorithm/blastn/blast_engine/run.rs:4577`, `LOSAT/src/algorithm/blastn/blast_engine/run.rs:6761`).
+- Diagonal arrays are reset via `hit_level_array.fill` and `hit_len_array.fill` on overflow clear and reuse (`LOSAT/src/algorithm/blastn/blast_engine/run.rs:401`, `LOSAT/src/algorithm/blastn/blast_engine/run.rs:4522`).
 
 ### Phase 5: Output Formatting (If Output-Heavy)
 Goal: reduce per-hit formatting cost.

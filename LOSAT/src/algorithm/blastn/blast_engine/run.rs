@@ -4471,29 +4471,6 @@ pub fn run(args: BlastnArgs) -> Result<()> {
 
             let dbseq_chunk_overlap = DBSEQ_CHUNK_OVERLAP;
             let mut split_state = SubjectSplitState::new(s_len_full, soft_ranges);
-            let mut subject_chunks: Vec<SubjectChunk> = Vec::new();
-            if use_parallel {
-                // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_engine.c:478-536
-                // ```c
-                // while (TRUE) {
-                //     status = s_GetNextSubjectChunk(subject, &backup, kNucleotide,
-                //                                    dbseq_chunk_overlap);
-                //     if (status == SUBJECT_SPLIT_DONE) break;
-                //     if (status == SUBJECT_SPLIT_NO_RANGE) continue;
-                //     ...
-                // }
-                // ```
-                loop {
-                    match split_state.next_chunk(subject_masked, dbseq_chunk_overlap) {
-                        SubjectChunkStatus::Done => break,
-                        SubjectChunkStatus::NoRange => continue,
-                        SubjectChunkStatus::Ok(chunk) => subject_chunks.push(chunk),
-                    }
-                }
-                if subject_chunks.is_empty() {
-                    return;
-                }
-            }
 
             // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_parameters.c:336-377
             // ```c
@@ -4584,11 +4561,11 @@ pub fn run(args: BlastnArgs) -> Result<()> {
             //
             // BlastInitHitListReset(init_hitlist);
             // ```
-            let reuse_prelim_hits = !(use_parallel && subject_chunks.len() > 1);
             let collect_prelim_hits_for_chunk = |chunk: &SubjectChunk,
                                                  soft_ranges: &[(i32, i32)],
                                                  gap_scratch: &mut GapAlignScratch,
-                                                 subject_scratch: &mut SubjectScratch|
+                                                 subject_scratch: &mut SubjectScratch,
+                                                 reuse_prelim_hits: bool|
                                                  -> Vec<PrelimHit> {
                 let hits_with_internal = &mut subject_scratch.hits_with_internal;
                 hits_with_internal.clear();
@@ -7097,57 +7074,47 @@ pub fn run(args: BlastnArgs) -> Result<()> {
 
             let mut combined_prelim_hits: Vec<PrelimHit> = Vec::new();
             if use_parallel {
-                // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_engine.c:264-268
+                // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_engine.c:478-536
                 // ```c
-                // subject->seq_ranges = backup->soft_ranges;
-                // subject->num_seq_ranges = backup->num_soft_ranges;
-                // return SUBJECT_SPLIT_OK;
+                // while (TRUE) {
+                //     status = s_GetNextSubjectChunk(subject, &backup, kNucleotide,
+                //                                    dbseq_chunk_overlap);
+                //     if (status == SUBJECT_SPLIT_DONE) break;
+                //     if (status == SUBJECT_SPLIT_NO_RANGE) continue;
+                //     ...
+                // }
                 // ```
-                let soft_ranges = split_state.soft_ranges.as_slice();
-                if subject_chunks.len() > 1 {
-                    let mut chunk_results: Vec<(usize, usize, Vec<PrelimHit>)> = subject_chunks
-                        .par_iter()
-                        .map_init(
-                            || (
-                                GapAlignScratch::new(),
-                                // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_engine.c:991-1041
-                                // ```c
-                                // Int4 offset_array_size = GetOffsetArraySize(lookup_wrap);
-                                // ...
-                                // aux_struct->offset_pairs =
-                                //   (BlastOffsetPair*) malloc(offset_array_size * sizeof(BlastOffsetPair));
-                                // ```
-                                SubjectScratch::new(queries_ref.len(), offset_array_size),
-                            ),
-                            |state, chunk| {
-                                let (gap_scratch, subject_scratch) = state;
-                                let hits = collect_prelim_hits_for_chunk(
-                                    chunk,
-                                    soft_ranges,
-                                    gap_scratch,
-                                    subject_scratch,
-                                );
-                                (chunk.offset, chunk.overlap, hits)
-                            },
-                        )
-                        .collect();
-                    chunk_results.sort_by_key(|(offset, _, _)| *offset);
-                    for (offset, overlap, hits) in chunk_results {
-                        let _ = merge_prelim_hits_subject_split(
-                            &mut combined_prelim_hits,
-                            hits,
-                            offset,
-                            overlap,
-                            true,
-                        );
+                let max_in_flight = num_threads.max(1) * 2;
+                let mut chunk_batch: Vec<SubjectChunk> = Vec::with_capacity(max_in_flight);
+                let mut done = false;
+                loop {
+                    chunk_batch.clear();
+                    while chunk_batch.len() < max_in_flight && !done {
+                        match split_state.next_chunk(subject_masked, dbseq_chunk_overlap) {
+                            SubjectChunkStatus::Done => done = true,
+                            SubjectChunkStatus::NoRange => continue,
+                            SubjectChunkStatus::Ok(chunk) => chunk_batch.push(chunk),
+                        }
                     }
-                } else {
-                    for chunk in subject_chunks.iter() {
+                    if chunk_batch.is_empty() {
+                        break;
+                    }
+
+                    // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_engine.c:264-268
+                    // ```c
+                    // subject->seq_ranges = backup->soft_ranges;
+                    // subject->num_seq_ranges = backup->num_soft_ranges;
+                    // return SUBJECT_SPLIT_OK;
+                    // ```
+                    let soft_ranges = split_state.soft_ranges.as_slice();
+                    if chunk_batch.len() == 1 {
+                        let chunk = &chunk_batch[0];
                         let hits = collect_prelim_hits_for_chunk(
                             chunk,
                             soft_ranges,
                             gap_scratch,
                             subject_scratch,
+                            true,
                         );
                         let hits = merge_prelim_hits_subject_split(
                             &mut combined_prelim_hits,
@@ -7164,6 +7131,49 @@ pub fn run(args: BlastnArgs) -> Result<()> {
                         // BlastInitHitListReset(init_hitlist);
                         // ```
                         subject_scratch.prelim_hits = hits;
+                    } else {
+                        let mut chunk_results: Vec<(usize, usize, Vec<PrelimHit>)> =
+                            Vec::with_capacity(chunk_batch.len());
+                        chunk_batch
+                            .par_iter()
+                            .map_init(
+                                || (
+                                    GapAlignScratch::new(),
+                                    // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_engine.c:991-1041
+                                    // ```c
+                                    // Int4 offset_array_size = GetOffsetArraySize(lookup_wrap);
+                                    // ...
+                                    // aux_struct->offset_pairs =
+                                    //   (BlastOffsetPair*) malloc(offset_array_size * sizeof(BlastOffsetPair));
+                                    // ```
+                                    SubjectScratch::new(queries_ref.len(), offset_array_size),
+                                ),
+                                |state, chunk| {
+                                    let (gap_scratch, subject_scratch) = state;
+                                    let hits = collect_prelim_hits_for_chunk(
+                                        chunk,
+                                        soft_ranges,
+                                        gap_scratch,
+                                        subject_scratch,
+                                        false,
+                                    );
+                                    (chunk.offset, chunk.overlap, hits)
+                                },
+                            )
+                            .collect_into_vec(&mut chunk_results);
+                        for (offset, overlap, hits) in chunk_results {
+                            let _ = merge_prelim_hits_subject_split(
+                                &mut combined_prelim_hits,
+                                hits,
+                                offset,
+                                overlap,
+                                true,
+                            );
+                        }
+                    }
+
+                    if done {
+                        break;
                     }
                 }
             } else {
@@ -7194,6 +7204,7 @@ pub fn run(args: BlastnArgs) -> Result<()> {
                                 soft_ranges,
                                 gap_scratch,
                                 subject_scratch,
+                                true,
                             );
                             let hits = merge_prelim_hits_subject_split(
                                 &mut combined_prelim_hits,

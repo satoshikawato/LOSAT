@@ -41,4 +41,5 @@
 - Recheck after scan callback preselection: scan kind selection now happens once per subject scan, mirroring `s_MBChooseScanSubject`/`BlastChooseNucleotideScanSubjectAny`.
 - Recheck after parallel chunk streaming: merge order still follows `s_GetNextSubjectChunk` offsets; no additional discrepancies found.
 - Recheck: query lookup now uses pre-encoded BLASTNA; items 1-2 remain open; no other discrepancies found.
+- Recheck: limit_lookup PV generation uses unmasked ranges in `build_query_pv` (no per-k-mer mask checks), matching `s_FillPV`; no additional discrepancies found.
 - If you want, I can attach a timing profile plan to validate which items dominate your workload.

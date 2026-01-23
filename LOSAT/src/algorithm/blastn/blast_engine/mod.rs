@@ -64,6 +64,8 @@ pub fn filter_hsps(
     _params: &KarlinParams,
     _use_dp: bool,
     verbose: bool,
+    query_ids: &[Arc<str>],
+    subject_ids: &[Arc<str>],
     query_lengths: &FxHashMap<Arc<str>, usize>,  // Query ID -> length mapping
     cutoff_scores: &FxHashMap<Arc<str>, i32>,    // Query ID -> cutoff score (NCBI: hit_params->cutoff_score_min)
 ) -> Vec<Hit> {
@@ -86,7 +88,25 @@ pub fn filter_hsps(
     for hit in &hits {
         id_map
             .entry((hit.q_idx, hit.s_idx))
-            .or_insert_with(|| (Arc::clone(&hit.query_id), Arc::clone(&hit.subject_id)));
+            .or_insert_with(|| {
+                // NCBI reference: ncbi-blast/c++/include/algo/blast/core/blast_hits.h:153-166
+                // ```c
+                // typedef struct BlastHSPList {
+                //    Int4 oid;/**< The ordinal id of the subject sequence this HSP list is for */
+                //    Int4 query_index; /**< Index of the query which this HSPList corresponds to.
+                //                       Set to 0 if not applicable */
+                // } BlastHSPList;
+                // ```
+                let query_id = query_ids
+                    .get(hit.q_idx as usize)
+                    .cloned()
+                    .unwrap_or_else(|| Arc::<str>::from("unknown"));
+                let subject_id = subject_ids
+                    .get(hit.s_idx as usize)
+                    .cloned()
+                    .unwrap_or_else(|| Arc::<str>::from("unknown"));
+                (query_id, subject_id)
+            });
     }
     let mut result_hits: Vec<BlastnHsp> = hits.into_iter().map(BlastnHsp::from_hit).collect();
 
@@ -368,10 +388,7 @@ pub fn filter_hsps(
     // ```
     let mut output_hits: Vec<Hit> = Vec::with_capacity(final_hits.len());
     for hit in final_hits {
-        let (query_id, subject_id) = get_ids(&hit, &id_map);
         output_hits.push(Hit {
-            query_id,
-            subject_id,
             identity: hit.identity,
             length: hit.length,
             mismatch: hit.mismatch,

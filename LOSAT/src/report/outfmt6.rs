@@ -1,5 +1,6 @@
 use crate::common::Hit;
 use std::io::{self, Write};
+use std::sync::Arc;
 
 // =============================================================================
 // NCBI Output Format Types
@@ -391,7 +392,12 @@ fn write_bitscore_ncbi<W: Write>(writer: &mut W, bit_score: f64) -> io::Result<(
 }
 
 /// Format a single hit as outfmt 6 line
-pub fn format_hit(hit: &Hit, config: &OutputConfig) -> String {
+pub fn format_hit(
+    hit: &Hit,
+    query_ids: &[Arc<str>],
+    subject_ids: &[Arc<str>],
+    config: &OutputConfig,
+) -> String {
     let delim = config.delimiter;
     let identity_fmt = format!("{:.prec$}", hit.identity, prec = config.identity_decimals);
     
@@ -403,11 +409,21 @@ pub fn format_hit(hit: &Hit, config: &OutputConfig) -> String {
     };
     let evalue_fmt = format_evalue(hit.e_value, config.ncbi_evalue_format);
 
+    // NCBI reference: ncbi-blast/c++/include/algo/blast/core/blast_hits.h:153-166
+    // ```c
+    // typedef struct BlastHSPList {
+    //    Int4 oid;/**< The ordinal id of the subject sequence this HSP list is for */
+    //    Int4 query_index; /**< Index of the query which this HSPList corresponds to.
+    //                       Set to 0 if not applicable */
+    // } BlastHSPList;
+    // ```
+    let (query_id, subject_id) = hit.resolve_ids(query_ids, subject_ids);
+
     format!(
         "{}{}{}{}{}{}{}{}{}{}{}{}{}{}{}{}{}{}{}{}{}{}{}",
-        hit.query_id,
+        query_id,
         delim,
-        hit.subject_id,
+        subject_id,
         delim,
         identity_fmt,
         delim,
@@ -494,6 +510,8 @@ pub fn write_outfmt6<W: Write>(
     hits: &[Hit],
     writer: &mut W,
     config: &OutputConfig,
+    query_ids: &[Arc<str>],
+    subject_ids: &[Arc<str>],
 ) -> io::Result<()> {
     // Write header if configured
     if config.include_header {
@@ -518,10 +536,19 @@ pub fn write_outfmt6<W: Write>(
     // }
     // ```
     for hit in hits {
+        // NCBI reference: ncbi-blast/c++/include/algo/blast/core/blast_hits.h:153-166
+        // ```c
+        // typedef struct BlastHSPList {
+        //    Int4 oid;/**< The ordinal id of the subject sequence this HSP list is for */
+        //    Int4 query_index; /**< Index of the query which this HSPList corresponds to.
+        //                       Set to 0 if not applicable */
+        // } BlastHSPList;
+        // ```
+        let (query_id, subject_id) = hit.resolve_ids(query_ids, subject_ids);
         write_hit_fields(
             writer,
-            hit.query_id.as_ref(),
-            hit.subject_id.as_ref(),
+            query_id,
+            subject_id,
             hit.identity,
             hit.length,
             hit.mismatch,
@@ -599,6 +626,8 @@ pub fn write_outfmt7<W: Write>(
     hits: &[Hit],
     writer: &mut W,
     config: &OutputConfig,
+    query_ids: &[Arc<str>],
+    subject_ids: &[Arc<str>],
     context: &ReportContext,
 ) -> io::Result<()> {
     // Write header comments
@@ -617,10 +646,19 @@ pub fn write_outfmt7<W: Write>(
     // }
     // ```
     for hit in hits {
+        // NCBI reference: ncbi-blast/c++/include/algo/blast/core/blast_hits.h:153-166
+        // ```c
+        // typedef struct BlastHSPList {
+        //    Int4 oid;/**< The ordinal id of the subject sequence this HSP list is for */
+        //    Int4 query_index; /**< Index of the query which this HSPList corresponds to.
+        //                       Set to 0 if not applicable */
+        // } BlastHSPList;
+        // ```
+        let (query_id, subject_id) = hit.resolve_ids(query_ids, subject_ids);
         write_hit_fields(
             writer,
-            hit.query_id.as_ref(),
-            hit.subject_id.as_ref(),
+            query_id,
+            subject_id,
             hit.identity,
             hit.length,
             hit.mismatch,
@@ -646,13 +684,15 @@ pub fn write_outfmt7_grouped<W: Write>(
     hits: &[Hit],
     writer: &mut W,
     config: &OutputConfig,
+    query_ids: &[Arc<str>],
+    subject_ids: &[Arc<str>],
     context: &ReportContext,
 ) -> io::Result<()> {
     use std::collections::HashMap;
     
     // Group hits by query
-    let mut query_hits: HashMap<&str, Vec<&Hit>> = HashMap::new();
-    let mut query_order: Vec<&str> = Vec::new();
+    let mut query_hits: HashMap<u32, Vec<&Hit>> = HashMap::new();
+    let mut query_order: Vec<u32> = Vec::new();
     
     for hit in hits {
         // NCBI reference: ncbi-blast/c++/src/objtools/align_format/tabular.cpp:1264-1283
@@ -669,21 +709,41 @@ pub fn write_outfmt7_grouped<W: Write>(
         //     }
         // }
         // ```
-        let qid = hit.query_id.as_ref();
-        if !query_hits.contains_key(qid) {
-            query_order.push(qid);
+        // NCBI reference: ncbi-blast/c++/include/algo/blast/core/blast_hits.h:153-166
+        // ```c
+        // typedef struct BlastHSPList {
+        //    Int4 oid;/**< The ordinal id of the subject sequence this HSP list is for */
+        //    Int4 query_index; /**< Index of the query which this HSPList corresponds to.
+        //                       Set to 0 if not applicable */
+        // } BlastHSPList;
+        // ```
+        let q_idx = hit.q_idx;
+        if !query_hits.contains_key(&q_idx) {
+            query_order.push(q_idx);
         }
-        query_hits.entry(qid).or_default().push(hit);
+        query_hits.entry(q_idx).or_default().push(hit);
     }
     
     // Write each query's header and hits
-    for query_id in query_order {
+    for q_idx in query_order {
+        // NCBI reference: ncbi-blast/c++/include/algo/blast/core/blast_hits.h:153-166
+        // ```c
+        // typedef struct BlastHSPList {
+        //    Int4 oid;/**< The ordinal id of the subject sequence this HSP list is for */
+        //    Int4 query_index; /**< Index of the query which this HSPList corresponds to.
+        //                       Set to 0 if not applicable */
+        // } BlastHSPList;
+        // ```
+        let query_id = query_ids
+            .get(q_idx as usize)
+            .map(|id| id.as_ref())
+            .unwrap_or("unknown");
         let query_context = ReportContext {
             query_name: Some(query_id.to_string()),
             ..context.clone()
         };
         
-        let qhits = query_hits.get(query_id).unwrap();
+        let qhits = query_hits.get(&q_idx).unwrap();
         write_outfmt7_header(writer, &query_context, qhits.len())?;
         
         // NCBI reference: ncbi-blast/c++/src/objtools/align_format/tabular.cpp:1100-1108
@@ -699,10 +759,19 @@ pub fn write_outfmt7_grouped<W: Write>(
         // }
         // ```
         for hit in qhits {
+            // NCBI reference: ncbi-blast/c++/include/algo/blast/core/blast_hits.h:153-166
+            // ```c
+            // typedef struct BlastHSPList {
+            //    Int4 oid;/**< The ordinal id of the subject sequence this HSP list is for */
+            //    Int4 query_index; /**< Index of the query which this HSPList corresponds to.
+            //                       Set to 0 if not applicable */
+            // } BlastHSPList;
+            // ```
+            let (query_id, subject_id) = hit.resolve_ids(query_ids, subject_ids);
             write_hit_fields(
                 writer,
-                hit.query_id.as_ref(),
-                hit.subject_id.as_ref(),
+                query_id,
+                subject_id,
                 hit.identity,
                 hit.length,
                 hit.mismatch,
@@ -722,17 +791,28 @@ pub fn write_outfmt7_grouped<W: Write>(
 }
 
 /// Write hits to a file in outfmt 6 format
-pub fn write_to_file(hits: &[Hit], path: &str, config: &OutputConfig) -> io::Result<()> {
+pub fn write_to_file(
+    hits: &[Hit],
+    path: &str,
+    config: &OutputConfig,
+    query_ids: &[Arc<str>],
+    subject_ids: &[Arc<str>],
+) -> io::Result<()> {
     let file = std::fs::File::create(path)?;
     let mut writer = std::io::BufWriter::new(file);
-    write_outfmt6(hits, &mut writer, config)
+    write_outfmt6(hits, &mut writer, config, query_ids, subject_ids)
 }
 
 /// Write hits to stdout in outfmt 6 format
-pub fn write_to_stdout(hits: &[Hit], config: &OutputConfig) -> io::Result<()> {
+pub fn write_to_stdout(
+    hits: &[Hit],
+    config: &OutputConfig,
+    query_ids: &[Arc<str>],
+    subject_ids: &[Arc<str>],
+) -> io::Result<()> {
     let stdout = io::stdout();
     let mut writer = stdout.lock();
-    write_outfmt6(hits, &mut writer, config)
+    write_outfmt6(hits, &mut writer, config, query_ids, subject_ids)
 }
 
 /// Generate a summary report of the search results
@@ -771,9 +851,17 @@ pub fn generate_summary(hits: &[Hit], context: &ReportContext) -> String {
         summary.push_str(&format!("# Best E-value: {:.2e}\n", min_evalue));
 
         // Unique query-subject pairs
+        // NCBI reference: ncbi-blast/c++/include/algo/blast/core/blast_hits.h:153-166
+        // ```c
+        // typedef struct BlastHSPList {
+        //    Int4 oid;/**< The ordinal id of the subject sequence this HSP list is for */
+        //    Int4 query_index; /**< Index of the query which this HSPList corresponds to.
+        //                       Set to 0 if not applicable */
+        // } BlastHSPList;
+        // ```
         let mut pairs = std::collections::HashSet::new();
         for hit in hits {
-            pairs.insert((&hit.query_id, &hit.subject_id));
+            pairs.insert((hit.q_idx, hit.s_idx));
         }
         summary.push_str(&format!("# Unique query-subject pairs: {}\n", pairs.len()));
     }
@@ -833,8 +921,6 @@ mod tests {
         // } BlastHSPList;
         // ```
         Hit {
-            query_id: "query1".into(),
-            subject_id: "subject1".into(),
             identity: 95.123,
             length: 100,
             mismatch: 5,
@@ -1046,8 +1132,18 @@ mod tests {
     #[test]
     fn test_format_hit() {
         let hit = make_hit();
+        // NCBI reference: ncbi-blast/c++/include/algo/blast/core/blast_hits.h:153-166
+        // ```c
+        // typedef struct BlastHSPList {
+        //    Int4 oid;/**< The ordinal id of the subject sequence this HSP list is for */
+        //    Int4 query_index; /**< Index of the query which this HSPList corresponds to.
+        //                       Set to 0 if not applicable */
+        // } BlastHSPList;
+        // ```
+        let query_ids = vec![Arc::<str>::from("query1")];
+        let subject_ids = vec![Arc::<str>::from("subject1")];
         let config = OutputConfig::default();
-        let line = format_hit(&hit, &config);
+        let line = format_hit(&hit, &query_ids, &subject_ids, &config);
 
         assert!(line.contains("query1"));
         assert!(line.contains("subject1"));
@@ -1058,8 +1154,18 @@ mod tests {
     #[test]
     fn test_format_hit_ncbi_compat() {
         let hit = make_hit();
+        // NCBI reference: ncbi-blast/c++/include/algo/blast/core/blast_hits.h:153-166
+        // ```c
+        // typedef struct BlastHSPList {
+        //    Int4 oid;/**< The ordinal id of the subject sequence this HSP list is for */
+        //    Int4 query_index; /**< Index of the query which this HSPList corresponds to.
+        //                       Set to 0 if not applicable */
+        // } BlastHSPList;
+        // ```
+        let query_ids = vec![Arc::<str>::from("query1")];
+        let subject_ids = vec![Arc::<str>::from("subject1")];
         let config = OutputConfig::ncbi_compat();
-        let line = format_hit(&hit, &config);
+        let line = format_hit(&hit, &query_ids, &subject_ids, &config);
 
         assert!(line.contains("query1"));
         assert!(line.contains("subject1"));
@@ -1074,9 +1180,19 @@ mod tests {
     fn test_write_with_header() {
         let hits = vec![make_hit()];
         let config = OutputConfig::with_header();
+        // NCBI reference: ncbi-blast/c++/include/algo/blast/core/blast_hits.h:153-166
+        // ```c
+        // typedef struct BlastHSPList {
+        //    Int4 oid;/**< The ordinal id of the subject sequence this HSP list is for */
+        //    Int4 query_index; /**< Index of the query which this HSPList corresponds to.
+        //                       Set to 0 if not applicable */
+        // } BlastHSPList;
+        // ```
+        let query_ids = vec![Arc::<str>::from("query1")];
+        let subject_ids = vec![Arc::<str>::from("subject1")];
 
         let mut output = Vec::new();
-        write_outfmt6(&hits, &mut output, &config).unwrap();
+        write_outfmt6(&hits, &mut output, &config, &query_ids, &subject_ids).unwrap();
 
         let output_str = String::from_utf8(output).unwrap();
         assert!(output_str.starts_with("qseqid"));

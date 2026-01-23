@@ -5,9 +5,17 @@ use LOSAT::common::Hit;
 use LOSAT::stats::KarlinParams;
 use rustc_hash::FxHashMap;
 
+// NCBI reference: ncbi-blast/c++/include/algo/blast/core/blast_hits.h:153-166
+// ```c
+// typedef struct BlastHSPList {
+//    Int4 oid;/**< The ordinal id of the subject sequence this HSP list is for */
+//    Int4 query_index; /**< Index of the query which this HSPList corresponds to.
+//                       Set to 0 if not applicable */
+// } BlastHSPList;
+// ```
 fn create_test_hit(
-    query_id: &str,
-    subject_id: &str,
+    q_idx: u32,
+    s_idx: u32,
     q_start: usize,
     q_end: usize,
     s_start: usize,
@@ -16,8 +24,6 @@ fn create_test_hit(
     e_value: f64,
 ) -> Hit {
     Hit {
-        query_id: query_id.to_string(),
-        subject_id: subject_id.to_string(),
         identity: 90.0,
         length: (q_end - q_start).max(s_end - s_start),
         mismatch: 0,
@@ -28,11 +34,23 @@ fn create_test_hit(
         s_end,
         e_value,
         bit_score,
-        q_idx: 0,
-        s_idx: 0,
+        q_idx,
+        s_idx,
         raw_score: ((bit_score * 0.693 + (-0.041_f64).ln()) / 0.267) as i32,
         gap_info: None,
     }
+}
+
+// NCBI reference: ncbi-blast/c++/include/algo/blast/core/blast_hits.h:153-166
+// ```c
+// typedef struct BlastHSPList {
+//    Int4 oid;/**< The ordinal id of the subject sequence this HSP list is for */
+//    Int4 query_index; /**< Index of the query which this HSPList corresponds to.
+//                       Set to 0 if not applicable */
+// } BlastHSPList;
+// ```
+fn empty_sequences() -> FxHashMap<(u32, u32, i8, i8), (Vec<u8>, Vec<u8>)> {
+    FxHashMap::default()
 }
 
 fn create_extended_hit(
@@ -69,7 +87,7 @@ fn create_extended_hit(
 #[test]
 fn test_chain_and_filter_hsps_protein_empty() {
     let hits: Vec<ExtendedHit> = Vec::new();
-    let sequences: FxHashMap<(String, String, i8, i8), (Vec<u8>, Vec<u8>)> = FxHashMap::default();
+    let sequences = empty_sequences();
     let params = KarlinParams {
         lambda: 0.267,
         k: 0.041,
@@ -92,7 +110,7 @@ fn test_chain_and_filter_hsps_protein_empty() {
 
 #[test]
 fn test_chain_and_filter_hsps_protein_single_hit() {
-    let hit = create_test_hit("query1", "subject1", 10, 20, 30, 40, 50.0, 1e-10);
+    let hit = create_test_hit(0, 0, 10, 20, 30, 40, 50.0, 1e-10);
     let ext_hit = create_extended_hit(
         hit,
         1,  // q_frame
@@ -107,7 +125,7 @@ fn test_chain_and_filter_hsps_protein_single_hit() {
     );
     
     let hits = vec![ext_hit];
-    let sequences: FxHashMap<(String, String, i8, i8), (Vec<u8>, Vec<u8>)> = FxHashMap::default();
+    let sequences = empty_sequences();
     let params = KarlinParams {
         lambda: 0.267,
         k: 0.041,
@@ -126,14 +144,14 @@ fn test_chain_and_filter_hsps_protein_single_hit() {
     );
     
     assert_eq!(result.len(), 1);
-    assert_eq!(result[0].query_id, "query1");
-    assert_eq!(result[0].subject_id, "subject1");
+    assert_eq!(result[0].q_idx, 0);
+    assert_eq!(result[0].s_idx, 0);
 }
 
 #[test]
 fn test_chain_and_filter_hsps_protein_multiple_hits_same_frame() {
-    let hit1 = create_test_hit("query1", "subject1", 10, 20, 30, 40, 50.0, 1e-10);
-    let hit2 = create_test_hit("query1", "subject1", 25, 35, 45, 55, 45.0, 1e-9);
+    let hit1 = create_test_hit(0, 0, 10, 20, 30, 40, 50.0, 1e-10);
+    let hit2 = create_test_hit(0, 0, 25, 35, 45, 55, 45.0, 1e-9);
     
     let ext_hit1 = create_extended_hit(
         hit1,
@@ -151,7 +169,7 @@ fn test_chain_and_filter_hsps_protein_multiple_hits_same_frame() {
     );
     
     let hits = vec![ext_hit1, ext_hit2];
-    let sequences: FxHashMap<(String, String, i8, i8), (Vec<u8>, Vec<u8>)> = FxHashMap::default();
+    let sequences = empty_sequences();
     let params = KarlinParams {
         lambda: 0.267,
         k: 0.041,
@@ -175,8 +193,8 @@ fn test_chain_and_filter_hsps_protein_multiple_hits_same_frame() {
 
 #[test]
 fn test_chain_and_filter_hsps_protein_different_frames() {
-    let hit1 = create_test_hit("query1", "subject1", 10, 20, 30, 40, 50.0, 1e-10);
-    let hit2 = create_test_hit("query1", "subject1", 25, 35, 45, 55, 45.0, 1e-9);
+    let hit1 = create_test_hit(0, 0, 10, 20, 30, 40, 50.0, 1e-10);
+    let hit2 = create_test_hit(0, 0, 25, 35, 45, 55, 45.0, 1e-9);
     
     let ext_hit1 = create_extended_hit(
         hit1,
@@ -194,7 +212,7 @@ fn test_chain_and_filter_hsps_protein_different_frames() {
     );
     
     let hits = vec![ext_hit1, ext_hit2];
-    let sequences: FxHashMap<(String, String, i8, i8), (Vec<u8>, Vec<u8>)> = FxHashMap::default();
+    let sequences = empty_sequences();
     let params = KarlinParams {
         lambda: 0.267,
         k: 0.041,
@@ -219,8 +237,8 @@ fn test_chain_and_filter_hsps_protein_different_frames() {
 
 #[test]
 fn test_chain_and_filter_hsps_protein_evalue_filtering() {
-    let hit1 = create_test_hit("query1", "subject1", 10, 20, 30, 40, 50.0, 1e-10);
-    let hit2 = create_test_hit("query1", "subject1", 25, 35, 45, 55, 45.0, 1e-2); // High e-value
+    let hit1 = create_test_hit(0, 0, 10, 20, 30, 40, 50.0, 1e-10);
+    let hit2 = create_test_hit(0, 0, 25, 35, 45, 55, 45.0, 1e-2); // High e-value
     
     let ext_hit1 = create_extended_hit(
         hit1,
@@ -238,7 +256,7 @@ fn test_chain_and_filter_hsps_protein_evalue_filtering() {
     );
     
     let hits = vec![ext_hit1, ext_hit2];
-    let sequences: FxHashMap<(String, String, i8, i8), (Vec<u8>, Vec<u8>)> = FxHashMap::default();
+    let sequences = empty_sequences();
     let params = KarlinParams {
         lambda: 0.267,
         k: 0.041,
@@ -264,8 +282,8 @@ fn test_chain_and_filter_hsps_protein_evalue_filtering() {
 
 #[test]
 fn test_chain_and_filter_hsps_protein_different_queries() {
-    let hit1 = create_test_hit("query1", "subject1", 10, 20, 30, 40, 50.0, 1e-10);
-    let hit2 = create_test_hit("query2", "subject1", 25, 35, 45, 55, 45.0, 1e-9);
+    let hit1 = create_test_hit(0, 0, 10, 20, 30, 40, 50.0, 1e-10);
+    let hit2 = create_test_hit(1, 0, 25, 35, 45, 55, 45.0, 1e-9);
     
     let ext_hit1 = create_extended_hit(
         hit1,
@@ -283,7 +301,7 @@ fn test_chain_and_filter_hsps_protein_different_queries() {
     );
     
     let hits = vec![ext_hit1, ext_hit2];
-    let sequences: FxHashMap<(String, String, i8, i8), (Vec<u8>, Vec<u8>)> = FxHashMap::default();
+    let sequences = empty_sequences();
     let params = KarlinParams {
         lambda: 0.267,
         k: 0.041,
@@ -307,8 +325,8 @@ fn test_chain_and_filter_hsps_protein_different_queries() {
 
 #[test]
 fn test_chain_and_filter_hsps_protein_different_subjects() {
-    let hit1 = create_test_hit("query1", "subject1", 10, 20, 30, 40, 50.0, 1e-10);
-    let hit2 = create_test_hit("query1", "subject2", 25, 35, 45, 55, 45.0, 1e-9);
+    let hit1 = create_test_hit(0, 0, 10, 20, 30, 40, 50.0, 1e-10);
+    let hit2 = create_test_hit(0, 1, 25, 35, 45, 55, 45.0, 1e-9);
     
     let ext_hit1 = create_extended_hit(
         hit1,
@@ -326,7 +344,7 @@ fn test_chain_and_filter_hsps_protein_different_subjects() {
     );
     
     let hits = vec![ext_hit1, ext_hit2];
-    let sequences: FxHashMap<(String, String, i8, i8), (Vec<u8>, Vec<u8>)> = FxHashMap::default();
+    let sequences = empty_sequences();
     let params = KarlinParams {
         lambda: 0.267,
         k: 0.041,
@@ -350,9 +368,9 @@ fn test_chain_and_filter_hsps_protein_different_subjects() {
 
 #[test]
 fn test_chain_and_filter_hsps_protein_sorting_by_bit_score() {
-    let hit1 = create_test_hit("query1", "subject1", 10, 20, 30, 40, 30.0, 1e-10);
-    let hit2 = create_test_hit("query1", "subject1", 25, 35, 45, 55, 50.0, 1e-9);
-    let hit3 = create_test_hit("query1", "subject1", 40, 50, 60, 70, 40.0, 1e-8);
+    let hit1 = create_test_hit(0, 0, 10, 20, 30, 40, 30.0, 1e-10);
+    let hit2 = create_test_hit(0, 0, 25, 35, 45, 55, 50.0, 1e-9);
+    let hit3 = create_test_hit(0, 0, 40, 50, 60, 70, 40.0, 1e-8);
     
     let ext_hit1 = create_extended_hit(
         hit1,
@@ -377,7 +395,7 @@ fn test_chain_and_filter_hsps_protein_sorting_by_bit_score() {
     );
     
     let hits = vec![ext_hit1, ext_hit2, ext_hit3];
-    let sequences: FxHashMap<(String, String, i8, i8), (Vec<u8>, Vec<u8>)> = FxHashMap::default();
+    let sequences = empty_sequences();
     let params = KarlinParams {
         lambda: 0.267,
         k: 0.041,
@@ -404,8 +422,8 @@ fn test_chain_and_filter_hsps_protein_sorting_by_bit_score() {
 
 #[test]
 fn test_chain_and_filter_hsps_protein_gapped_vs_ungapped() {
-    let hit1 = create_test_hit("query1", "subject1", 10, 20, 30, 40, 50.0, 1e-10);
-    let hit2 = create_test_hit("query1", "subject1", 25, 35, 45, 55, 45.0, 1e-9);
+    let hit1 = create_test_hit(0, 0, 10, 20, 30, 40, 50.0, 1e-10);
+    let hit2 = create_test_hit(0, 0, 25, 35, 45, 55, 45.0, 1e-9);
     
     let ext_hit1 = create_extended_hit(
         hit1,
@@ -423,7 +441,7 @@ fn test_chain_and_filter_hsps_protein_gapped_vs_ungapped() {
     );
     
     let hits = vec![ext_hit1, ext_hit2];
-    let sequences: FxHashMap<(String, String, i8, i8), (Vec<u8>, Vec<u8>)> = FxHashMap::default();
+    let sequences = empty_sequences();
     let params = KarlinParams {
         lambda: 0.267,
         k: 0.041,

@@ -54,7 +54,15 @@ pub fn filter_overlapping_hsps(hits: Vec<Hit>, overlap_threshold: f64) -> Vec<Hi
     for hit in sorted {
         let dominated = kept.iter().any(|kept_hit| {
             // Must be same query-subject pair
-            if hit.query_id != kept_hit.query_id || hit.subject_id != kept_hit.subject_id {
+            // NCBI reference: ncbi-blast/c++/include/algo/blast/core/blast_hits.h:153-166
+            // ```c
+            // typedef struct BlastHSPList {
+            //    Int4 oid;/**< The ordinal id of the subject sequence this HSP list is for */
+            //    Int4 query_index; /**< Index of the query which this HSPList corresponds to.
+            //                       Set to 0 if not applicable */
+            // } BlastHSPList;
+            // ```
+            if hit.q_idx != kept_hit.q_idx || hit.s_idx != kept_hit.s_idx {
                 return false;
             }
 

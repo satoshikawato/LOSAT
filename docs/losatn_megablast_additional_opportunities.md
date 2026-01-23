@@ -11,17 +11,20 @@ existing acceleration plan, and outline a parity-safe implementation order.
 
 ## Findings (Additional Opportunities)
 
-### 1) Index-only hit identifiers (remove per-hit Arc clones)
-- Observation: `Hit` stores `Arc<str>` for `query_id` and `subject_id`, cloned
-  into each hit and re-cloned in `BlastnHsp::into_hit`.
-- LOSAT refs: `LOSAT/src/common.rs:92`, `LOSAT/src/algorithm/blastn/hsp.rs:130`,
-  `LOSAT/src/algorithm/blastn/blast_engine/mod.rs:43`.
+Status legend: [x] done, [ ] pending.
+
+### 1) [x] Index-only hit identifiers (remove per-hit Arc clones)
+- Status: done. `Hit` now carries `q_idx`/`s_idx` only; IDs are resolved at output time.
+- Observation (pre-fix): `Hit` stored `Arc<str>` for `query_id`/`subject_id`,
+  cloned into each hit and re-cloned in `BlastnHsp::into_hit`.
+- LOSAT refs: `LOSAT/src/common.rs:80`, `LOSAT/src/common.rs:138`,
+  `LOSAT/src/algorithm/blastn/hsp.rs:146`, `LOSAT/src/report/outfmt6.rs:395`.
 - NCBI refs: `/mnt/c/Users/genom/GitHub/ncbi-blast/c++/include/algo/blast/core/blast_hits.h:154`,
   `/mnt/c/Users/genom/GitHub/ncbi-blast/c++/include/algo/blast/core/blast_hits.h:155`
   (`BlastHSPList` stores `oid` and `query_index`, not strings).
-- Plan idea: carry only indices in `Hit`/`BlastnHsp`; resolve IDs at output time.
+- Implementation: carry only indices in `Hit`/`BlastnHsp`; resolve IDs at output time.
 
-### 2) Replace string-keyed caches with index-keyed structures in re-evaluation
+### 2) [ ] Replace string-keyed caches with index-keyed structures in re-evaluation
 - Observation: `filter_hsps` uses `FxHashMap<(Arc<str>, Arc<str>)>` for
   sequences and encoded caches, plus an `id_map` keyed by indices.
 - LOSAT refs: `LOSAT/src/algorithm/blastn/blast_engine/mod.rs:43`,
@@ -32,14 +35,14 @@ existing acceleration plan, and outline a parity-safe implementation order.
 - Plan idea: pass pre-encoded sequences into `filter_hsps`, and use
   `(q_idx, s_idx)` indexing (Vec or small array) instead of hashing strings.
 
-### 3) Avoid per-chunk allocation in prelim-hit processing
+### 3) [ ] Avoid per-chunk allocation in prelim-hit processing
 - Observation: `prelim_hits.drain(..).collect()` allocates a new Vec per chunk.
 - LOSAT refs: `LOSAT/src/algorithm/blastn/blast_engine/run.rs:6724`.
 - NCBI refs: `/mnt/c/Users/genom/GitHub/ncbi-blast/c++/src/algo/blast/core/blast_engine.c:491`
   (`BlastInitHitListReset` resets in place).
 - Plan idea: reuse a scratch Vec by swapping/taking, preserving capacity.
 
-### 4) Reduce subject chunk range allocations
+### 4) [ ] Reduce subject chunk range allocations
 - Observation: each `SubjectChunk` owns `seq_ranges: Vec<(i32, i32)>`; ranges are
   rebuilt for every chunk even when unmasked.
 - LOSAT refs: `LOSAT/src/algorithm/blastn/blast_engine/run.rs:157`,
@@ -50,7 +53,7 @@ existing acceleration plan, and outline a parity-safe implementation order.
 - Plan idea: reuse shared ranges for unmasked subjects and avoid per-chunk Vecs
   (e.g., borrow slices or use a small fixed-size buffer for the common case).
 
-### 5) Buffered output for outfmt 0/7 (if output-heavy)
+### 5) [ ] Buffered output for outfmt 0/7 (if output-heavy)
 - Observation: outfmt6 is optimized, but pairwise/outfmt7 still use many
   `format!`/`writeln!` calls and temporary strings.
 - LOSAT refs: `LOSAT/src/report/pairwise.rs`, `LOSAT/src/report/outfmt6.rs:597`.
@@ -59,7 +62,7 @@ existing acceleration plan, and outline a parity-safe implementation order.
   (buffered formatting to stream).
 - Plan idea: add a buffered write path similar to outfmt6 for outfmt0/7.
 
-### 6) Reuse packed subject encoding when limit_lookup preloads subjects
+### 6) [ ] Reuse packed subject encoding when limit_lookup preloads subjects
 - Observation: `build_db_word_counts` encodes subjects; the main scan encodes
   again when `load_subjects` is true.
 - LOSAT refs: `LOSAT/src/algorithm/blastn/lookup.rs:156`,
@@ -72,12 +75,12 @@ existing acceleration plan, and outline a parity-safe implementation order.
   share across the word-count scan and main scan.
 
 ## Proposed Plan (Suggested Order)
-1) Index-only hit identifiers (largest memory/alloc win, matches NCBI layout).
-2) Index-keyed re-evaluation caches and pass pre-encoded sequences.
-3) Reuse prelim-hit scratch Vecs to avoid per-chunk allocations.
-4) Reduce subject chunk range allocations for unmasked subjects.
-5) Buffered output for outfmt0/7 (only if output-heavy workloads).
-6) Optional packed subject reuse for limit_lookup/preload mode.
+1) [x] Index-only hit identifiers (largest memory/alloc win, matches NCBI layout).
+2) [ ] Index-keyed re-evaluation caches and pass pre-encoded sequences.
+3) [ ] Reuse prelim-hit scratch Vecs to avoid per-chunk allocations.
+4) [ ] Reduce subject chunk range allocations for unmasked subjects.
+5) [ ] Buffered output for outfmt0/7 (only if output-heavy workloads).
+6) [ ] Optional packed subject reuse for limit_lookup/preload mode.
 
 ## Notes / Guardrails
 - Every code change must include NCBI reference comments with file path and

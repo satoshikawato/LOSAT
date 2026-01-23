@@ -10,9 +10,17 @@ use LOSAT::common::Hit;
 use LOSAT::stats::tables::KarlinParams;
 
 /// Create a test Hit with default values
+// NCBI reference: ncbi-blast/c++/include/algo/blast/core/blast_hits.h:153-166
+// ```c
+// typedef struct BlastHSPList {
+//    Int4 oid;/**< The ordinal id of the subject sequence this HSP list is for */
+//    Int4 query_index; /**< Index of the query which this HSPList corresponds to.
+//                       Set to 0 if not applicable */
+// } BlastHSPList;
+// ```
 pub fn make_hit(
-    query_id: &str,
-    subject_id: &str,
+    q_idx: u32,
+    s_idx: u32,
     q_start: usize,
     q_end: usize,
     s_start: usize,
@@ -20,8 +28,6 @@ pub fn make_hit(
     bit_score: f64,
 ) -> Hit {
     Hit {
-        query_id: query_id.to_string(),
-        subject_id: subject_id.to_string(),
         identity: 90.0,
         length: q_end - q_start + 1,
         mismatch: 0,
@@ -32,8 +38,8 @@ pub fn make_hit(
         s_end,
         e_value: 1e-10,
         bit_score,
-        q_idx: 0,
-        s_idx: 0,
+        q_idx,
+        s_idx,
         raw_score: 100,
         gap_info: None,
     }

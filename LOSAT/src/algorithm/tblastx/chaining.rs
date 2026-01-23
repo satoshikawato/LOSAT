@@ -8,7 +8,6 @@ use crate::stats::KarlinParams;
 use rustc_hash::FxHashMap;
 use std::cmp::Ordering;
 use std::sync::atomic::Ordering as AtomicOrdering;
-use std::sync::Arc;
 // Removed MAX_DIAG_DRIFT_AA and MAX_GAP_AA - clustering logic removed (not in NCBI)
 use super::diagnostics::DiagnosticCounters;
 
@@ -82,7 +81,7 @@ pub struct UngappedHit {
 //    ...
 // } BlastHSPList;
 // ```
-pub type SequenceKey = (Arc<str>, Arc<str>, i8, i8); // (query_id, subject_id, q_frame, s_frame)
+pub type SequenceKey = (u32, u32, i8, i8); // (q_idx, s_idx, q_frame, s_frame)
 pub type SequenceData = (Vec<u8>, Vec<u8>); // (query_aa_seq, subject_aa_seq)
 
 /// NCBI BLAST-style HSP domination test.
@@ -104,7 +103,15 @@ fn hsp_dominates(p: &ExtendedHit, y: &ExtendedHit) -> bool {
     }
 
     // Must be same query-subject pair
-    if p.hit.query_id != y.hit.query_id || p.hit.subject_id != y.hit.subject_id {
+    // NCBI reference: ncbi-blast/c++/include/algo/blast/core/blast_hits.h:153-166
+    // ```c
+    // typedef struct BlastHSPList {
+    //    Int4 oid;/**< The ordinal id of the subject sequence this HSP list is for */
+    //    Int4 query_index; /**< Index of the query which this HSPList corresponds to.
+    //                       Set to 0 if not applicable */
+    // } BlastHSPList;
+    // ```
+    if p.hit.q_idx != y.hit.q_idx || p.hit.s_idx != y.hit.s_idx {
         return false;
     }
 
@@ -176,8 +183,8 @@ pub fn chain_and_filter_hsps_protein(
     let mut groups: FxHashMap<SequenceKey, Vec<ExtendedHit>> = FxHashMap::default();
     for hit in hits.drain(..) {
         let key = (
-            hit.hit.query_id.clone(),
-            hit.hit.subject_id.clone(),
+            hit.hit.q_idx,
+            hit.hit.s_idx,
             hit.q_frame,
             hit.s_frame,
         );

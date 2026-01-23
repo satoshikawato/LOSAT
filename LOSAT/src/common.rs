@@ -89,8 +89,6 @@ pub struct Hit {
     //    ...
     // } BlastHSPList;
     // ```
-    pub query_id: Arc<str>, // Shared ID storage to avoid per-hit String copies.
-    pub subject_id: Arc<str>,
     pub identity: f64,
     pub length: usize,
     pub mismatch: usize,
@@ -113,6 +111,15 @@ pub struct Hit {
     pub query_frame: i32,
     pub query_length: usize,
     // Fields for NCBI-style output ordering (not printed, used for sorting)
+    // NCBI reference: ncbi-blast/c++/include/algo/blast/core/blast_hits.h:153-166
+    // ```c
+    // typedef struct BlastHSPList {
+    //    Int4 oid;/**< The ordinal id of the subject sequence this HSP list is for */
+    //    Int4 query_index; /**< Index of the query which this HSPList corresponds to.
+    //                       Set to 0 if not applicable */
+    //    ...
+    // } BlastHSPList;
+    // ```
     /// Query index (input order) - NCBI uses query order for grouping
     pub q_idx: u32,
     /// Subject index (oid) - NCBI uses oid for tie-breaking in s_EvalueCompareHSPLists
@@ -126,6 +133,33 @@ pub struct Hit {
     /// overlapping HSPs instead of deleting them entirely.
     /// Reference: blast_hits.c:2490-2492, 2516-2518
     pub gap_info: Option<Vec<GapEditOp>>,
+}
+
+impl Hit {
+    // NCBI reference: ncbi-blast/c++/include/algo/blast/core/blast_hits.h:153-166
+    // ```c
+    // typedef struct BlastHSPList {
+    //    Int4 oid;/**< The ordinal id of the subject sequence this HSP list is for */
+    //    Int4 query_index; /**< Index of the query which this HSPList corresponds to.
+    //                       Set to 0 if not applicable */
+    // } BlastHSPList;
+    // ```
+    #[inline]
+    pub fn resolve_ids<'a>(
+        &self,
+        query_ids: &'a [Arc<str>],
+        subject_ids: &'a [Arc<str>],
+    ) -> (&'a str, &'a str) {
+        let query_id = query_ids
+            .get(self.q_idx as usize)
+            .map(|id| id.as_ref())
+            .unwrap_or("unknown");
+        let subject_id = subject_ids
+            .get(self.s_idx as usize)
+            .map(|id| id.as_ref())
+            .unwrap_or("unknown");
+        (query_id, subject_id)
+    }
 }
 
 // =============================================================================
@@ -282,7 +316,12 @@ fn compare_subject_groups(a: &SubjectGroup, b: &SubjectGroup) -> Ordering {
     b.s_idx.cmp(&a.s_idx)
 }
 
-pub fn write_output(hits: &[Hit], out_path: Option<&PathBuf>) -> Result<()> {
+pub fn write_output(
+    hits: &[Hit],
+    out_path: Option<&PathBuf>,
+    query_ids: &[Arc<str>],
+    subject_ids: &[Arc<str>],
+) -> Result<()> {
     let stdout = io::stdout();
     let mut writer: Box<dyn Write> = if let Some(path) = out_path {
         Box::new(BufWriter::new(File::create(path)?))
@@ -291,11 +330,20 @@ pub fn write_output(hits: &[Hit], out_path: Option<&PathBuf>) -> Result<()> {
     };
 
     for hit in hits {
+        // NCBI reference: ncbi-blast/c++/include/algo/blast/core/blast_hits.h:153-166
+        // ```c
+        // typedef struct BlastHSPList {
+        //    Int4 oid;/**< The ordinal id of the subject sequence this HSP list is for */
+        //    Int4 query_index; /**< Index of the query which this HSPList corresponds to.
+        //                       Set to 0 if not applicable */
+        // } BlastHSPList;
+        // ```
+        let (query_id, subject_id) = hit.resolve_ids(query_ids, subject_ids);
         writeln!(
             writer,
             "{}\t{}\t{:.3}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{:.1e}\t{:.1}",
-            hit.query_id,
-            hit.subject_id,
+            query_id,
+            subject_id,
             hit.identity,
             hit.length,
             hit.mismatch,
@@ -325,6 +373,8 @@ pub fn write_output_with_format(
     hits: &[Hit],
     out_path: Option<&PathBuf>,
     outfmt: OutputFormat,
+    query_ids: &[Arc<str>],
+    subject_ids: &[Arc<str>],
     context: &ReportContext,
 ) -> Result<()> {
     let stdout = io::stdout();
@@ -344,7 +394,7 @@ pub fn write_output_with_format(
                 program: context.program.clone(),
                 ..Default::default()
             };
-            write_pairwise_simple(hits, &mut writer, &pairwise_config, context)?;
+            write_pairwise_simple(hits, &mut writer, &pairwise_config, query_ids, subject_ids, context)?;
         }
         OutputFormat::Tabular => {
             // outfmt 6: Tabular output
@@ -361,10 +411,19 @@ pub fn write_output_with_format(
             // }
             // ```
             for hit in hits {
+                // NCBI reference: ncbi-blast/c++/include/algo/blast/core/blast_hits.h:153-166
+                // ```c
+                // typedef struct BlastHSPList {
+                //    Int4 oid;/**< The ordinal id of the subject sequence this HSP list is for */
+                //    Int4 query_index; /**< Index of the query which this HSPList corresponds to.
+                //                       Set to 0 if not applicable */
+                // } BlastHSPList;
+                // ```
+                let (query_id, subject_id) = hit.resolve_ids(query_ids, subject_ids);
                 write_hit_fields(
                     &mut writer,
-                    hit.query_id.as_ref(),
-                    hit.subject_id.as_ref(),
+                    query_id,
+                    subject_id,
                     hit.identity,
                     hit.length,
                     hit.mismatch,
@@ -381,7 +440,7 @@ pub fn write_output_with_format(
         }
         OutputFormat::TabularWithComments => {
             // outfmt 7: Tabular with comment lines
-            write_outfmt7(hits, &mut writer, &config, context)?;
+            write_outfmt7(hits, &mut writer, &config, query_ids, subject_ids, context)?;
         }
     }
     
@@ -397,8 +456,20 @@ pub fn write_output_with_format(
 /// - BLAST_LinkHsps() calls Blast_HSPListSortByScore() after linking
 /// - BlastHitList sorts subjects by s_EvalueCompareHSPLists
 /// - Final output iterates query → subject → HSP
-pub fn write_output_ncbi_order(hits: Vec<Hit>, out_path: Option<&PathBuf>) -> Result<()> {
-    write_output_ncbi_order_with_format(hits, out_path, OutputFormat::Tabular, &ReportContext::default())
+pub fn write_output_ncbi_order(
+    hits: Vec<Hit>,
+    out_path: Option<&PathBuf>,
+    query_ids: &[Arc<str>],
+    subject_ids: &[Arc<str>],
+) -> Result<()> {
+    write_output_ncbi_order_with_format(
+        hits,
+        out_path,
+        OutputFormat::Tabular,
+        query_ids,
+        subject_ids,
+        &ReportContext::default(),
+    )
 }
 
 /// Write output with NCBI-style ordering and format selection
@@ -411,6 +482,8 @@ pub fn write_output_ncbi_order_with_format(
     mut hits: Vec<Hit>,
     out_path: Option<&PathBuf>,
     outfmt: OutputFormat,
+    query_ids: &[Arc<str>],
+    subject_ids: &[Arc<str>],
     context: &ReportContext,
 ) -> Result<()> {
     let stdout = io::stdout();
@@ -521,10 +594,19 @@ pub fn write_output_ncbi_order_with_format(
                         //     m_Ostream << "\n";
                         // }
                         // ```
+                        // NCBI reference: ncbi-blast/c++/include/algo/blast/core/blast_hits.h:153-166
+                        // ```c
+                        // typedef struct BlastHSPList {
+                        //    Int4 oid;/**< The ordinal id of the subject sequence this HSP list is for */
+                        //    Int4 query_index; /**< Index of the query which this HSPList corresponds to.
+                        //                       Set to 0 if not applicable */
+                        // } BlastHSPList;
+                        // ```
+                        let (query_id, subject_id) = hit.resolve_ids(query_ids, subject_ids);
                         write_hit_fields(
                             &mut writer,
-                            hit.query_id.as_ref(),
-                            hit.subject_id.as_ref(),
+                            query_id,
+                            subject_id,
                             hit.identity,
                             hit.length,
                             hit.mismatch,
@@ -556,10 +638,24 @@ pub fn write_output_ncbi_order_with_format(
                 program: context.program.clone(),
                 ..Default::default()
             };
-            write_pairwise_simple(&all_sorted_hits, &mut writer, &pairwise_config, context)?;
+            write_pairwise_simple(
+                &all_sorted_hits,
+                &mut writer,
+                &pairwise_config,
+                query_ids,
+                subject_ids,
+                context,
+            )?;
         }
         OutputFormat::TabularWithComments => {
-            write_outfmt7(&all_sorted_hits, &mut writer, &config, context)?;
+            write_outfmt7(
+                &all_sorted_hits,
+                &mut writer,
+                &config,
+                query_ids,
+                subject_ids,
+                context,
+            )?;
         }
         OutputFormat::Tabular => {
             // Already written above

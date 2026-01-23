@@ -4,6 +4,19 @@ use LOSAT::algorithm::common::chaining::{calculate_overlap, can_chain_hsps, filt
 use LOSAT::common::Hit;
 use super::super::helpers::make_hit;
 
+// NCBI reference: ncbi-blast/c++/include/algo/blast/core/blast_hits.h:153-166
+// ```c
+// typedef struct BlastHSPList {
+//    Int4 oid;/**< The ordinal id of the subject sequence this HSP list is for */
+//    Int4 query_index; /**< Index of the query which this HSPList corresponds to.
+//                       Set to 0 if not applicable */
+// } BlastHSPList;
+// ```
+const Q1_IDX: u32 = 0;
+const Q2_IDX: u32 = 1;
+const S1_IDX: u32 = 0;
+const S2_IDX: u32 = 1;
+
 #[test]
 fn test_calculate_overlap_no_overlap() {
     // No overlap case
@@ -48,7 +61,7 @@ fn test_filter_overlapping_hsps_empty() {
 
 #[test]
 fn test_filter_overlapping_hsps_single_hit() {
-    let hits = vec![make_hit("q1", "s1", 1, 100, 1, 100, 100.0)];
+    let hits = vec![make_hit(Q1_IDX, S1_IDX, 1, 100, 1, 100, 100.0)];
     let filtered = filter_overlapping_hsps(hits, 0.5);
     assert_eq!(filtered.len(), 1);
 }
@@ -56,8 +69,8 @@ fn test_filter_overlapping_hsps_single_hit() {
 #[test]
 fn test_filter_overlapping_hsps_no_overlap() {
     let hits = vec![
-        make_hit("q1", "s1", 1, 100, 1, 100, 100.0),
-        make_hit("q1", "s1", 200, 300, 200, 300, 90.0),
+        make_hit(Q1_IDX, S1_IDX, 1, 100, 1, 100, 100.0),
+        make_hit(Q1_IDX, S1_IDX, 200, 300, 200, 300, 90.0),
     ];
     let filtered = filter_overlapping_hsps(hits, 0.5);
     assert_eq!(filtered.len(), 2); // Both should be kept
@@ -66,8 +79,8 @@ fn test_filter_overlapping_hsps_no_overlap() {
 #[test]
 fn test_filter_overlapping_hsps_high_overlap() {
     let hits = vec![
-        make_hit("q1", "s1", 1, 100, 1, 100, 100.0), // Higher score
-        make_hit("q1", "s1", 10, 90, 10, 90, 80.0),  // Overlaps significantly
+        make_hit(Q1_IDX, S1_IDX, 1, 100, 1, 100, 100.0), // Higher score
+        make_hit(Q1_IDX, S1_IDX, 10, 90, 10, 90, 80.0),  // Overlaps significantly
     ];
     let filtered = filter_overlapping_hsps(hits, 0.5);
     assert_eq!(filtered.len(), 1); // Lower scoring hit should be filtered
@@ -77,8 +90,8 @@ fn test_filter_overlapping_hsps_high_overlap() {
 #[test]
 fn test_filter_overlapping_hsps_low_overlap() {
     let hits = vec![
-        make_hit("q1", "s1", 1, 100, 1, 100, 100.0),
-        make_hit("q1", "s1", 80, 120, 80, 120, 90.0), // Overlap: (80, 100) = 21 positions
+        make_hit(Q1_IDX, S1_IDX, 1, 100, 1, 100, 100.0),
+        make_hit(Q1_IDX, S1_IDX, 80, 120, 80, 120, 90.0), // Overlap: (80, 100) = 21 positions
     ];
     let filtered = filter_overlapping_hsps(hits, 0.5);
     // Overlap is 21/41 = 0.512 > 0.5, so lower-scoring hit should be filtered
@@ -89,8 +102,8 @@ fn test_filter_overlapping_hsps_low_overlap() {
 #[test]
 fn test_filter_overlapping_hsps_different_subjects() {
     let hits = vec![
-        make_hit("q1", "s1", 1, 100, 1, 100, 100.0),
-        make_hit("q1", "s2", 1, 100, 1, 100, 90.0), // Different subject
+        make_hit(Q1_IDX, S1_IDX, 1, 100, 1, 100, 100.0),
+        make_hit(Q1_IDX, S2_IDX, 1, 100, 1, 100, 90.0), // Different subject
     ];
     let filtered = filter_overlapping_hsps(hits, 0.5);
     // Different subjects should not filter each other
@@ -100,8 +113,8 @@ fn test_filter_overlapping_hsps_different_subjects() {
 #[test]
 fn test_filter_overlapping_hsps_different_queries() {
     let hits = vec![
-        make_hit("q1", "s1", 1, 100, 1, 100, 100.0),
-        make_hit("q2", "s1", 1, 100, 1, 100, 90.0), // Different query
+        make_hit(Q1_IDX, S1_IDX, 1, 100, 1, 100, 100.0),
+        make_hit(Q2_IDX, S1_IDX, 1, 100, 1, 100, 90.0), // Different query
     ];
     let filtered = filter_overlapping_hsps(hits, 0.5);
     // Different queries should not filter each other
@@ -111,8 +124,8 @@ fn test_filter_overlapping_hsps_different_queries() {
 #[test]
 fn test_filter_overlapping_hsps_sorted_by_score() {
     let hits = vec![
-        make_hit("q1", "s1", 1, 100, 1, 100, 50.0),  // Lower score
-        make_hit("q1", "s1", 10, 90, 10, 90, 100.0), // Higher score, overlaps
+        make_hit(Q1_IDX, S1_IDX, 1, 100, 1, 100, 50.0),  // Lower score
+        make_hit(Q1_IDX, S1_IDX, 10, 90, 10, 90, 100.0), // Higher score, overlaps
     ];
     let filtered = filter_overlapping_hsps(hits, 0.5);
     // Should keep higher scoring hit
@@ -123,8 +136,8 @@ fn test_filter_overlapping_hsps_sorted_by_score() {
 #[test]
 fn test_filter_overlapping_hsps_zero_threshold() {
     let hits = vec![
-        make_hit("q1", "s1", 1, 100, 1, 100, 100.0),
-        make_hit("q1", "s1", 10, 90, 10, 90, 80.0),
+        make_hit(Q1_IDX, S1_IDX, 1, 100, 1, 100, 100.0),
+        make_hit(Q1_IDX, S1_IDX, 10, 90, 10, 90, 80.0),
     ];
     let filtered = filter_overlapping_hsps(hits, 0.0);
     // Zero threshold should return all hits

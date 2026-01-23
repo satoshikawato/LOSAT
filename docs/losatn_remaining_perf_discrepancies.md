@@ -18,14 +18,17 @@
 - LOSAT preloads subject FASTA records for `use_parallel` or `limit_lookup`, then encodes each subject into BLASTNA + packed ncbi2na in `process_subject`.
 - NCBI streams subjects from `SeqSrc` and stores pre-encoded sequences in `BLAST_SequenceBlk` via SeqDB.
 - Impact: extra I/O pass and per-subject encoding overhead, especially for large DBs.
-- LOSAT refs: `LOSAT/src/algorithm/blastn/blast_engine/run.rs:3658`, `LOSAT/src/algorithm/blastn/blast_engine/run.rs:4330`.
-- NCBI refs: `/mnt/c/Users/genom/GitHub/ncbi-blast/c++/src/algo/blast/core/blast_engine.c:1407`, `/mnt/c/Users/genom/GitHub/ncbi-blast/c++/src/algo/blast/api/blast_setup_cxx.cpp:836`.
+- Recheck: encoding uses `IUPACNA_TO_BLASTNA` + `& 3` packing with remainder in the last byte; behavior matches NCBI, so this is a pure performance gap.
+- Status: open — closing the gap requires SeqDB/BLAST DB ingestion or a persistent pre-encoded cache; the streaming path still does a full metadata scan before processing.
+- LOSAT refs: `LOSAT/src/algorithm/blastn/blast_engine/run.rs:3658`, `LOSAT/src/algorithm/blastn/blast_engine/run.rs:4342`, `LOSAT/src/algorithm/blastn/coordination.rs:522`, `LOSAT/src/core/blast_encoding.rs:429`.
+- NCBI refs: `/mnt/c/Users/genom/GitHub/ncbi-blast/c++/src/algo/blast/core/blast_engine.c:1407`, `/mnt/c/Users/genom/GitHub/ncbi-blast/c++/src/algo/blast/api/blast_setup_cxx.cpp:836`, `/mnt/c/Users/genom/GitHub/ncbi-blast/c++/src/algo/blast/api/blast_setup_cxx.cpp:1154`, `/mnt/c/Users/genom/GitHub/ncbi-blast/c++/src/algo/blast/core/blast_encoding.c:85`.
 
 ### 3) Subject chunks are materialized and merged vs streaming loop
-- LOSAT collects all chunks into `Vec<SubjectChunk>` before processing, and the parallel path collects per-chunk results into a vector then sorts/merges.
-- NCBI processes chunks in a streaming `s_GetNextSubjectChunk` loop without pre-materializing all chunks.
-- Impact: extra allocations and per-subject sort/merge overhead.
-- LOSAT refs: `LOSAT/src/algorithm/blastn/blast_engine/run.rs:4360`, `LOSAT/src/algorithm/blastn/blast_engine/run.rs:6909`.
+- Update: non-parallel path now streams chunks from `SubjectSplitState` and merges per chunk, matching the NCBI loop.
+- Remaining: parallel path still materializes `Vec<SubjectChunk>` and collects/sorts per-chunk results before merge for deterministic order.
+- Impact: allocation/merge overhead now only in parallel runs; sequential path avoids pre-materialization.
+- Recheck: `SubjectSplitState::next_chunk` offset/residual/overlap logic matches `s_GetNextSubjectChunk`; no missing offset adjustments found.
+- LOSAT refs: `LOSAT/src/algorithm/blastn/blast_engine/run.rs:4373`, `LOSAT/src/algorithm/blastn/blast_engine/run.rs:6944`, `LOSAT/src/algorithm/blastn/blast_engine/run.rs:7008`.
 - NCBI refs: `/mnt/c/Users/genom/GitHub/ncbi-blast/c++/src/algo/blast/core/blast_engine.c:478`.
 
 ### 4) Masked chunk `seq_ranges` allocate per chunk vs reuse

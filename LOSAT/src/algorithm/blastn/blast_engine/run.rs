@@ -4371,15 +4371,27 @@ pub fn run(args: BlastnArgs) -> Result<()> {
             let dbseq_chunk_overlap = DBSEQ_CHUNK_OVERLAP;
             let mut split_state = SubjectSplitState::new(s_len_full, soft_ranges);
             let mut subject_chunks: Vec<SubjectChunk> = Vec::new();
-            loop {
-                match split_state.next_chunk(subject_masked, dbseq_chunk_overlap) {
-                    SubjectChunkStatus::Done => break,
-                    SubjectChunkStatus::NoRange => continue,
-                    SubjectChunkStatus::Ok(chunk) => subject_chunks.push(chunk),
+            if use_parallel {
+                // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_engine.c:478-536
+                // ```c
+                // while (TRUE) {
+                //     status = s_GetNextSubjectChunk(subject, &backup, kNucleotide,
+                //                                    dbseq_chunk_overlap);
+                //     if (status == SUBJECT_SPLIT_DONE) break;
+                //     if (status == SUBJECT_SPLIT_NO_RANGE) continue;
+                //     ...
+                // }
+                // ```
+                loop {
+                    match split_state.next_chunk(subject_masked, dbseq_chunk_overlap) {
+                        SubjectChunkStatus::Done => break,
+                        SubjectChunkStatus::NoRange => continue,
+                        SubjectChunkStatus::Ok(chunk) => subject_chunks.push(chunk),
+                    }
                 }
-            }
-            if subject_chunks.is_empty() {
-                return;
+                if subject_chunks.is_empty() {
+                    return;
+                }
             }
 
             // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_parameters.c:336-377
@@ -6928,56 +6940,94 @@ pub fn run(args: BlastnArgs) -> Result<()> {
             };
 
             let mut combined_prelim_hits: Vec<PrelimHit> = Vec::new();
-            if use_parallel && subject_chunks.len() > 1 {
-                let mut chunk_results: Vec<(usize, usize, Vec<PrelimHit>)> = subject_chunks
-                    .par_iter()
-                    .map_init(
-                        || (
-                            GapAlignScratch::new(),
-                            // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_engine.c:991-1041
-                            // ```c
-                            // Int4 offset_array_size = GetOffsetArraySize(lookup_wrap);
-                            // ...
-                            // aux_struct->offset_pairs =
-                            //   (BlastOffsetPair*) malloc(offset_array_size * sizeof(BlastOffsetPair));
-                            // ```
-                            SubjectScratch::new(queries_ref.len(), offset_array_size),
-                        ),
-                        |state, chunk| {
-                            let (gap_scratch, subject_scratch) = state;
-                            let hits = collect_prelim_hits_for_chunk(chunk, gap_scratch, subject_scratch);
-                            (chunk.offset, chunk.overlap, hits)
-                        },
-                    )
-                    .collect();
-                chunk_results.sort_by_key(|(offset, _, _)| *offset);
-                for (offset, overlap, hits) in chunk_results {
-                    let _ = merge_prelim_hits_subject_split(
-                        &mut combined_prelim_hits,
-                        hits,
-                        offset,
-                        overlap,
-                        true,
-                    );
+            if use_parallel {
+                if subject_chunks.len() > 1 {
+                    let mut chunk_results: Vec<(usize, usize, Vec<PrelimHit>)> = subject_chunks
+                        .par_iter()
+                        .map_init(
+                            || (
+                                GapAlignScratch::new(),
+                                // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_engine.c:991-1041
+                                // ```c
+                                // Int4 offset_array_size = GetOffsetArraySize(lookup_wrap);
+                                // ...
+                                // aux_struct->offset_pairs =
+                                //   (BlastOffsetPair*) malloc(offset_array_size * sizeof(BlastOffsetPair));
+                                // ```
+                                SubjectScratch::new(queries_ref.len(), offset_array_size),
+                            ),
+                            |state, chunk| {
+                                let (gap_scratch, subject_scratch) = state;
+                                let hits = collect_prelim_hits_for_chunk(chunk, gap_scratch, subject_scratch);
+                                (chunk.offset, chunk.overlap, hits)
+                            },
+                        )
+                        .collect();
+                    chunk_results.sort_by_key(|(offset, _, _)| *offset);
+                    for (offset, overlap, hits) in chunk_results {
+                        let _ = merge_prelim_hits_subject_split(
+                            &mut combined_prelim_hits,
+                            hits,
+                            offset,
+                            overlap,
+                            true,
+                        );
+                    }
+                } else {
+                    for chunk in subject_chunks.iter() {
+                        let hits = collect_prelim_hits_for_chunk(chunk, gap_scratch, subject_scratch);
+                        let hits = merge_prelim_hits_subject_split(
+                            &mut combined_prelim_hits,
+                            hits,
+                            chunk.offset,
+                            chunk.overlap,
+                            true,
+                        );
+                        // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_engine.c:488-491
+                        // ```c
+                        // /* Delete if not done in last loop iteration to prevent memory leak. */
+                        // hsp_list = Blast_HSPListFree(hsp_list);
+                        //
+                        // BlastInitHitListReset(init_hitlist);
+                        // ```
+                        subject_scratch.prelim_hits = hits;
+                    }
                 }
             } else {
-                for chunk in subject_chunks.iter() {
-                    let hits = collect_prelim_hits_for_chunk(chunk, gap_scratch, subject_scratch);
-                    let hits = merge_prelim_hits_subject_split(
-                        &mut combined_prelim_hits,
-                        hits,
-                        chunk.offset,
-                        chunk.overlap,
-                        true,
-                    );
-                    // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_engine.c:488-491
-                    // ```c
-                    // /* Delete if not done in last loop iteration to prevent memory leak. */
-                    // hsp_list = Blast_HSPListFree(hsp_list);
-                    //
-                    // BlastInitHitListReset(init_hitlist);
-                    // ```
-                    subject_scratch.prelim_hits = hits;
+                // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_engine.c:478-536
+                // ```c
+                // while (TRUE) {
+                //     status = s_GetNextSubjectChunk(subject, &backup, kNucleotide,
+                //                                    dbseq_chunk_overlap);
+                //     if (status == SUBJECT_SPLIT_DONE) break;
+                //     if (status == SUBJECT_SPLIT_NO_RANGE) continue;
+                //     ...
+                // }
+                // ```
+                loop {
+                    match split_state.next_chunk(subject_masked, dbseq_chunk_overlap) {
+                        SubjectChunkStatus::Done => break,
+                        SubjectChunkStatus::NoRange => continue,
+                        SubjectChunkStatus::Ok(chunk) => {
+                            let hits =
+                                collect_prelim_hits_for_chunk(&chunk, gap_scratch, subject_scratch);
+                            let hits = merge_prelim_hits_subject_split(
+                                &mut combined_prelim_hits,
+                                hits,
+                                chunk.offset,
+                                chunk.overlap,
+                                true,
+                            );
+                            // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_engine.c:488-491
+                            // ```c
+                            // /* Delete if not done in last loop iteration to prevent memory leak. */
+                            // hsp_list = Blast_HSPListFree(hsp_list);
+                            //
+                            // BlastInitHitListReset(init_hitlist);
+                            // ```
+                            subject_scratch.prelim_hits = hits;
+                        }
+                    }
                 }
             }
 

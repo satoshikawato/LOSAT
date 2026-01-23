@@ -125,7 +125,7 @@ const OVERLAP_DIAG_CLOSE: i32 = 10;
 const DIAGHASH_NUM_BUCKETS: usize = 512;
 const DIAGHASH_CHAIN_LENGTH: usize = 256;
 
-// NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_engine.c:123-143
+// NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_engine.c:122-143
 // ```c
 // typedef struct SubjectSplitStruct {
 //    Uint1* sequence;
@@ -171,15 +171,66 @@ struct SubjectSplitState {
 #[derive(Clone)]
 enum SeqRanges {
     Inline { range: (i32, i32) },
-    Owned(Vec<(i32, i32)>),
+    SoftRangesFull,
+    SoftRangesSlice { start_idx: usize, count: usize },
 }
 
 impl SeqRanges {
     #[inline]
-    fn as_slice(&self) -> &[(i32, i32)] {
+    fn as_slice<'a>(
+        &'a self,
+        soft_ranges: &'a [(i32, i32)],
+        scratch: &'a mut Vec<(i32, i32)>,
+        chunk_offset: i32,
+        chunk_length: i32,
+    ) -> &'a [(i32, i32)] {
         match self {
             SeqRanges::Inline { range } => std::slice::from_ref(range),
-            SeqRanges::Owned(ranges) => ranges.as_slice(),
+            SeqRanges::SoftRangesFull => soft_ranges,
+            SeqRanges::SoftRangesSlice { start_idx, count } => {
+                // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_engine.c:184-198
+                // ```c
+                // if (backup->allocated >= num_seq_ranges) return;
+                // if (backup->allocated) {
+                //     sfree(subject->seq_ranges);
+                // }
+                // backup->allocated = num_seq_ranges;
+                // subject->seq_ranges = (SSeqRange *) calloc(backup->allocated,
+                //                                sizeof(SSeqRange));
+                // ```
+                // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_engine.c:298-307
+                // ```c
+                // for (i=0; i<len; i++) {
+                //     subject->seq_ranges[i].left = backup->soft_ranges[i+start].left - backup->offset;
+                //     subject->seq_ranges[i].right = backup->soft_ranges[i+start].right - backup->offset;
+                // }
+                // if (subject->seq_ranges[0].left < 0)
+                //     subject->seq_ranges[0].left = 0;
+                // if (subject->seq_ranges[len-1].right > subject->length)
+                //     subject->seq_ranges[len-1].right = subject->length;
+                // ```
+                let start = *start_idx;
+                let count = *count;
+                scratch.clear();
+                if scratch.capacity() < count {
+                    scratch.reserve(count.saturating_sub(scratch.capacity()));
+                }
+                let end_idx = start.saturating_add(count);
+                for &(left, right) in soft_ranges[start..end_idx].iter() {
+                    scratch.push((left - chunk_offset, right - chunk_offset));
+                }
+                if let Some(first) = scratch.first_mut() {
+                    if first.0 < 0 {
+                        first.0 = 0;
+                    }
+                }
+                if let Some(last) = scratch.last_mut() {
+                    if last.1 > chunk_length {
+                        last.1 = chunk_length;
+                    }
+                }
+                scratch.as_slice()
+            }
         }
     }
 }
@@ -305,7 +356,7 @@ impl SubjectSplitState {
         // ```
         let seq_ranges = if no_chunking {
             if subject_masked {
-                SeqRanges::Owned(std::mem::take(&mut self.soft_ranges))
+                SeqRanges::SoftRangesFull
             } else {
                 SeqRanges::Inline {
                     range: (0, length as i32),
@@ -317,6 +368,18 @@ impl SubjectSplitState {
             }
         } else {
             debug_assert_eq!(residual, 0);
+            // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_engine.c:279-291
+            // ```c
+            // start = backup->offset;
+            // len = start + subject->length;
+            // i = backup->sm_index;
+            // while (backup->soft_ranges[i].right < start) ++i;
+            // start = i;
+            // while (i < backup->num_soft_ranges
+            //     && backup->soft_ranges[i].left < len) ++i;
+            // len = i - start;
+            // backup->sm_index = i - 1;
+            // ```
             let start = offset;
             let end = offset + length as i32;
             let mut i = self.sm_index;
@@ -332,23 +395,7 @@ impl SubjectSplitState {
             if count == 0 {
                 return SubjectChunkStatus::NoRange;
             }
-            let mut ranges = Vec::with_capacity(count);
-            for j in 0..count {
-                let left = self.soft_ranges[start_idx + j].0 - offset;
-                let right = self.soft_ranges[start_idx + j].1 - offset;
-                ranges.push((left, right));
-            }
-            if let Some(first) = ranges.first_mut() {
-                if first.0 < 0 {
-                    first.0 = 0;
-                }
-            }
-            if let Some(last) = ranges.last_mut() {
-                if last.1 > length as i32 {
-                    last.1 = length as i32;
-                }
-            }
-            SeqRanges::Owned(ranges)
+            SeqRanges::SoftRangesSlice { start_idx, count }
         };
 
         // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_engine.c:580-584
@@ -2015,6 +2062,61 @@ fn choose_mb_scan_subject_kind(lut_word_length: usize, scan_step: usize) -> MbSc
     }
 }
 
+// NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_nascan.c:2602-2677
+// ```c
+// static void s_MBChooseScanSubject(LookupTableWrap *lookup_wrap)
+// {
+//     ...
+//     switch (mb_lt->lut_word_length) {
+//     case 9:
+//         if (scan_step == 1)
+//             mb_lt->scansub_callback = (void *)s_MBScanSubject_9_1;
+//         if (scan_step == 2)
+//             mb_lt->scansub_callback = (void *)s_MBScanSubject_9_2;
+//         else
+//             mb_lt->scansub_callback = (void *)s_MBScanSubject_Any;
+//         break;
+//     ...
+//     }
+// }
+// ```
+// NCBI reference: ncbi-blast/c++/src/algo/blast/core/na_ungapped.c:1651-1667
+// ```c
+// if (subject->mask_type != eNoSubjMasking) {
+//     ...
+//     scansub = (TNaScanSubjectFunction)
+//           BlastChooseNucleotideScanSubjectAny(lookup_wrap);
+//     ...
+//     scan_range[1] = subject->seq_ranges[0].left + word_length - lut_word_length;
+//     scan_range[2] = subject->seq_ranges[0].right - lut_word_length;
+// }
+// ```
+// NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_nascan.c:2994-3006
+// ```c
+// void * BlastChooseNucleotideScanSubjectAny(LookupTableWrap *lookup_wrap)
+// {
+//     ...
+//     return (void *)s_MBScanSubject_Any;
+// }
+// ```
+#[inline(always)]
+fn select_mb_scan_kind(
+    lut_word_length: usize,
+    scan_step: usize,
+    subject_masked: bool,
+) -> Option<MbScanSubjectKind> {
+    let base = if (9..=12).contains(&lut_word_length) {
+        Some(choose_mb_scan_subject_kind(lut_word_length, scan_step))
+    } else {
+        None
+    };
+    if subject_masked {
+        base.map(|_| MbScanSubjectKind::Any)
+    } else {
+        base
+    }
+}
+
 // NCBI reference: ncbi-blast/c++/src/algo/blast/core/na_ungapped.c:56-66
 // ```c
 // index &= (mb_lt->hashsize-1);
@@ -2268,6 +2370,7 @@ fn scan_subject_kmers_with_ranges<F>(
     scan_step: usize,
     seq_ranges: &[(i32, i32)],
     subject_masked: bool,
+    mb_scan_kind: Option<MbScanSubjectKind>,
     mut on_kmer: F,
 ) where
     F: FnMut(usize, u64),
@@ -2285,26 +2388,6 @@ fn scan_subject_kmers_with_ranges<F>(
         scan_range[1] = 0;
         scan_range[2] = subject_len as i32 - lut_word_length as i32;
     }
-
-    // NCBI reference: ncbi-blast/c++/src/algo/blast/core/na_ungapped.c:1651-1667
-    // ```c
-    // if (subject->mask_type != eNoSubjMasking) {
-    //     scansub = (TNaScanSubjectFunction)
-    //           BlastChooseNucleotideScanSubjectAny(lookup_wrap);
-    //     ...
-    //     scan_range[1] = subject->seq_ranges[0].left + word_length - lut_word_length;
-    //     scan_range[2] = subject->seq_ranges[0].right - lut_word_length;
-    // }
-    // ```
-    let mb_scan_kind = if (9..=12).contains(&lut_word_length) {
-        Some(if subject_masked {
-            MbScanSubjectKind::Any
-        } else {
-            choose_mb_scan_subject_kind(lut_word_length, scan_step)
-        })
-    } else {
-        None
-    };
 
     // NCBI reference: ncbi-blast/c++/src/algo/blast/core/na_ungapped.c:1635-1676
     // ```c
@@ -2850,6 +2933,17 @@ struct SubjectScratch {
     cutoff_scores: Vec<i32>,
     x_dropoff_scores: Vec<i32>,
     reduced_cutoff_scores: Vec<i32>,
+    // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_engine.c:184-198
+    // ```c
+    // if (backup->allocated >= num_seq_ranges) return;
+    // if (backup->allocated) {
+    //     sfree(subject->seq_ranges);
+    // }
+    // backup->allocated = num_seq_ranges;
+    // subject->seq_ranges = (SSeqRange *) calloc(backup->allocated,
+    //                                sizeof(SSeqRange));
+    // ```
+    seq_ranges_scratch: Vec<(i32, i32)>,
     // NCBI reference: ncbi-blast/c++/include/algo/blast/core/blast_extend.h:77-81
     // ```c
     // typedef struct BLAST_DiagTable {
@@ -2937,6 +3031,17 @@ impl SubjectScratch {
             cutoff_scores: Vec::with_capacity(query_count),
             x_dropoff_scores: Vec::with_capacity(query_count),
             reduced_cutoff_scores: Vec::with_capacity(query_count),
+            // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_engine.c:184-198
+            // ```c
+            // if (backup->allocated >= num_seq_ranges) return;
+            // if (backup->allocated) {
+            //     sfree(subject->seq_ranges);
+            // }
+            // backup->allocated = num_seq_ranges;
+            // subject->seq_ranges = (SSeqRange *) calloc(backup->allocated,
+            //                                sizeof(SSeqRange));
+            // ```
+            seq_ranges_scratch: Vec::new(),
             hit_level_array: Vec::new(),
             hit_len_array: Vec::new(),
             diag_hash: DiagHashTable::new(TWO_HIT_WINDOW as i32),
@@ -2958,7 +3063,7 @@ impl SubjectScratch {
             //    ...
             // }
             // ```
-            offset_pairs: Vec::with_capacity(offset_array_size),
+            offset_pairs: vec![OffsetPair { q_off: 0, s_off: 0 }; offset_array_size],
         }
     }
 }
@@ -3757,7 +3862,6 @@ pub fn run(args: BlastnArgs) -> Result<()> {
     // query_info->contexts[1].query_offset = kStrandLength + 1;
     // ```
     let mut query_contexts: Vec<QueryContext> = Vec::new();
-    let mut query_context_records: Vec<bio::io::fasta::Record> = Vec::new();
     let mut query_context_masks: Vec<Vec<MaskedInterval>> = Vec::new();
     let mut query_base_offsets: Vec<usize> = Vec::new();
     // NCBI reference: ncbi-blast/c++/src/algo/blast/unit_tests/api/ntscan_unit_test.cpp:166-174
@@ -3791,16 +3895,6 @@ pub fn run(args: BlastnArgs) -> Result<()> {
             masks: minus_masks.clone(),
         });
 
-        query_context_records.push(bio::io::fasta::Record::with_attrs(
-            q_record.id(),
-            q_record.desc(),
-            seq,
-        ));
-        query_context_records.push(bio::io::fasta::Record::with_attrs(
-            q_record.id(),
-            q_record.desc(),
-            rc_seq.as_slice(),
-        ));
         query_context_masks.push(plus_masks);
         query_context_masks.push(minus_masks);
         query_concat_offset += q_len * 2 + 1;
@@ -3816,6 +3910,20 @@ pub fn run(args: BlastnArgs) -> Result<()> {
         .map(|ctx| ctx.query_offset)
         .collect();
     let query_context_index = QueryContextIndex::new(&query_contexts);
+
+    // NCBI reference: ncbi-blast/c++/src/algo/blast/api/blast_setup_cxx.cpp:498-604
+    // ```c
+    // EBlastEncoding encoding = GetQueryEncoding(prog);
+    // ...
+    // sequence = queries.GetBlastSequence(index, encoding, strand, eSentinels);
+    // ...
+    // memcpy(&buf.get()[offset], sequence.data.get(),
+    //        sequence.length);
+    // ```
+    let encoded_queries_blastna: Vec<Vec<u8>> = query_contexts
+        .iter()
+        .map(|ctx| encode_iupac_to_blastna(ctx.seq.as_slice()))
+        .collect();
 
     // Finalize configuration with query-dependent parameters (adaptive lookup table selection)
     // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_nalookup.c:46-47
@@ -3947,7 +4055,7 @@ pub fn run(args: BlastnArgs) -> Result<()> {
     let (lookup_tables, scan_step) = build_lookup_tables(
         &config,
         &args,
-        &query_context_records,
+        &encoded_queries_blastna,
         &query_context_masks,
         &query_context_offsets,
         subjects_for_lookup,
@@ -4206,13 +4314,6 @@ pub fn run(args: BlastnArgs) -> Result<()> {
         / params_ungapped_for_closure.lambda)
         .ceil() as i32;
 
-    // NCBI reference: ncbi-blast/c++/include/algo/blast/core/blast_stat.h:866-869 (query blastna, subject ncbi2na)
-    // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_encoding.c:85-93 (IUPACNA_TO_BLASTNA)
-    let encoded_queries_blastna: Vec<Vec<u8>> = query_contexts_ref
-        .iter()
-        .map(|ctx| encode_iupac_to_blastna(ctx.seq.as_slice()))
-        .collect();
-
     // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_engine.c:478-536
     // ```c
     // while (TRUE) {
@@ -4370,29 +4471,6 @@ pub fn run(args: BlastnArgs) -> Result<()> {
 
             let dbseq_chunk_overlap = DBSEQ_CHUNK_OVERLAP;
             let mut split_state = SubjectSplitState::new(s_len_full, soft_ranges);
-            let mut subject_chunks: Vec<SubjectChunk> = Vec::new();
-            if use_parallel {
-                // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_engine.c:478-536
-                // ```c
-                // while (TRUE) {
-                //     status = s_GetNextSubjectChunk(subject, &backup, kNucleotide,
-                //                                    dbseq_chunk_overlap);
-                //     if (status == SUBJECT_SPLIT_DONE) break;
-                //     if (status == SUBJECT_SPLIT_NO_RANGE) continue;
-                //     ...
-                // }
-                // ```
-                loop {
-                    match split_state.next_chunk(subject_masked, dbseq_chunk_overlap) {
-                        SubjectChunkStatus::Done => break,
-                        SubjectChunkStatus::NoRange => continue,
-                        SubjectChunkStatus::Ok(chunk) => subject_chunks.push(chunk),
-                    }
-                }
-                if subject_chunks.is_empty() {
-                    return;
-                }
-            }
 
             // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_parameters.c:336-377
             // ```c
@@ -4483,10 +4561,11 @@ pub fn run(args: BlastnArgs) -> Result<()> {
             //
             // BlastInitHitListReset(init_hitlist);
             // ```
-            let reuse_prelim_hits = !(use_parallel && subject_chunks.len() > 1);
             let collect_prelim_hits_for_chunk = |chunk: &SubjectChunk,
+                                                 soft_ranges: &[(i32, i32)],
                                                  gap_scratch: &mut GapAlignScratch,
-                                                 subject_scratch: &mut SubjectScratch|
+                                                 subject_scratch: &mut SubjectScratch,
+                                                 reuse_prelim_hits: bool|
                                                  -> Vec<PrelimHit> {
                 let hits_with_internal = &mut subject_scratch.hits_with_internal;
                 hits_with_internal.clear();
@@ -4495,7 +4574,26 @@ pub fn run(args: BlastnArgs) -> Result<()> {
                 let greedy_align_scratch = &mut subject_scratch.greedy_align_scratch;
 
                 let s_len = chunk.length;
-                let subject_seq_ranges = chunk.seq_ranges.as_slice();
+                // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_engine.c:264-307
+                // ```c
+                // if (backup->offset == 0 && residual == 0 && backup->next == backup->full_range.right) {
+                //     subject->seq_ranges = backup->soft_ranges;
+                //     subject->num_seq_ranges = backup->num_soft_ranges;
+                //     return SUBJECT_SPLIT_OK;
+                // }
+                // ...
+                // for (i=0; i<len; i++) {
+                //     subject->seq_ranges[i].left = backup->soft_ranges[i+start].left - backup->offset;
+                //     subject->seq_ranges[i].right = backup->soft_ranges[i+start].right - backup->offset;
+                // }
+                // ```
+                let seq_ranges_scratch = &mut subject_scratch.seq_ranges_scratch;
+                let subject_seq_ranges = chunk.seq_ranges.as_slice(
+                    soft_ranges,
+                    seq_ranges_scratch,
+                    chunk.offset as i32,
+                    s_len as i32,
+                );
                 let subject_masked = chunk.masked;
 
                 let packed_offset = chunk.offset / COMPRESSION_RATIO;
@@ -4811,8 +4909,18 @@ pub fn run(args: BlastnArgs) -> Result<()> {
                         // if (hitsfound == 0) continue;
                         // hits_extended += extend(offset_pairs, hitsfound, ...);
                         // ```
-                        let offset_pairs = &mut subject_scratch.offset_pairs;
-                        offset_pairs.clear();
+                        // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_nascan.c:1482-1534
+                        // ```c
+                        // Int4 total_hits = 0;
+                        // ...
+                        // if (total_hits >= max_hits)
+                        //     break;
+                        // ...
+                        // total_hits += s_BlastMBLookupRetrieve(mb_lt,
+                        //     index, offset_pairs + total_hits, s_off);
+                        // ```
+                        let offset_pairs = subject_scratch.offset_pairs.as_mut_slice();
+                        let mut offset_pairs_len = 0usize;
 
                         // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_engine.c:451-497
                         // ```c
@@ -4822,10 +4930,13 @@ pub fn run(args: BlastnArgs) -> Result<()> {
                         // if (hitsfound == 0) continue;
                         // hits_extended += extend(offset_pairs, hitsfound, ...);
                         // ```
-                        let mut process_offset_pairs = |offset_pairs: &mut Vec<OffsetPair>,
+                        let mut process_offset_pairs = |offset_pairs: &[OffsetPair],
+                                                        offset_pairs_len: &mut usize,
                                                         scan_pause_ns: &mut u64,
                                                         track_scan_pause: bool| {
-                            for pair in offset_pairs.drain(..) {
+                            let hitsfound = *offset_pairs_len;
+                            for idx in 0..hitsfound {
+                                let pair = offset_pairs[idx];
                                 let q_off0 = pair.q_off;
                                 let kmer_start = pair.s_off;
                                 // NCBI reference: ncbi-blast/c++/src/algo/blast/core/na_ungapped.c:730-733
@@ -5669,8 +5780,11 @@ pub fn run(args: BlastnArgs) -> Result<()> {
                                 }
                                 // Gapped extension deferred to batch processing phase
                             }
+                            *offset_pairs_len = 0;
                         };
 
+                        let mb_scan_kind =
+                            select_mb_scan_kind(lut_word_length, scan_step, subject_masked);
                         scan_subject_kmers_with_ranges(
                             search_seq_packed,
                             s_len,
@@ -5679,6 +5793,7 @@ pub fn run(args: BlastnArgs) -> Result<()> {
                             scan_step,
                             &subject_seq_ranges,
                             subject_masked,
+                            mb_scan_kind,
                             |kmer_start, current_lut_kmer| {
                                 // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_nascan.c:193-207
                                 // ```c
@@ -5744,8 +5859,13 @@ pub fn run(args: BlastnArgs) -> Result<()> {
                                 // total_hits += s_BlastMBLookupRetrieve(mb_lt,
                                 //     index, offset_pairs + total_hits, s_off);
                                 // ```
-                                if offset_pairs.len() >= OFFSET_ARRAY_SIZE {
-                                    process_offset_pairs(offset_pairs, &mut scan_pause_ns, true);
+                                if offset_pairs_len >= OFFSET_ARRAY_SIZE {
+                                    process_offset_pairs(
+                                        offset_pairs,
+                                        &mut offset_pairs_len,
+                                        &mut scan_pause_ns,
+                                        true,
+                                    );
                                 }
 
                                 // For each match, add to the offset_pairs buffer.
@@ -5761,10 +5881,11 @@ pub fn run(args: BlastnArgs) -> Result<()> {
                                     // offset_pairs[i].qs_offsets.q_off   = q_off - 1;
                                     // offset_pairs[i++].qs_offsets.s_off = s_off;
                                     // ```
-                                    offset_pairs.push(OffsetPair {
+                                    offset_pairs[offset_pairs_len] = OffsetPair {
                                         q_off: q_off_1 as usize - 1,
                                         s_off: kmer_start,
-                                    });
+                                    };
+                                    offset_pairs_len += 1;
                                 } // end of for matches_slice in two-stage lookup
 
                                 // NCBI reference: ncbi-blast/c++/src/algo/blast/core/lookup_wrap.c:255-288
@@ -5772,8 +5893,13 @@ pub fn run(args: BlastnArgs) -> Result<()> {
                                 // offset_array_size = OFFSET_ARRAY_SIZE +
                                 //     ((BlastMBLookupTable*)lookup->lut)->longest_chain;
                                 // ```
-                                if offset_pairs.len() >= offset_array_size {
-                                    process_offset_pairs(offset_pairs, &mut scan_pause_ns, true);
+                                if offset_pairs_len >= offset_array_size {
+                                    process_offset_pairs(
+                                        offset_pairs,
+                                        &mut offset_pairs_len,
+                                        &mut scan_pause_ns,
+                                        true,
+                                    );
                                 }
                             },
                         );
@@ -5813,8 +5939,13 @@ pub fn run(args: BlastnArgs) -> Result<()> {
                         // if (hitsfound == 0) continue;
                         // hits_extended += extend(offset_pairs, hitsfound, ...);
                         // ```
-                        if !offset_pairs.is_empty() {
-                            process_offset_pairs(offset_pairs, &mut scan_pause_ns, false);
+                        if offset_pairs_len > 0 {
+                            process_offset_pairs(
+                                offset_pairs,
+                                &mut offset_pairs_len,
+                                &mut scan_pause_ns,
+                                false,
+                            );
                         }
 
                         // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_nascan.c:193-207
@@ -5861,6 +5992,7 @@ pub fn run(args: BlastnArgs) -> Result<()> {
                             None
                         };
                         let mut scan_pause_ns: u64 = 0;
+                        let mb_scan_kind = select_mb_scan_kind(safe_k, scan_step, subject_masked);
                         scan_subject_kmers_with_ranges(
                             search_seq_packed,
                             s_len,
@@ -5869,6 +6001,7 @@ pub fn run(args: BlastnArgs) -> Result<()> {
                             scan_step,
                             &subject_seq_ranges,
                             subject_masked,
+                            mb_scan_kind,
                             |kmer_start, current_kmer| {
                                 // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_nascan.c:193-207
                                 // ```c
@@ -6941,41 +7074,48 @@ pub fn run(args: BlastnArgs) -> Result<()> {
 
             let mut combined_prelim_hits: Vec<PrelimHit> = Vec::new();
             if use_parallel {
-                if subject_chunks.len() > 1 {
-                    let mut chunk_results: Vec<(usize, usize, Vec<PrelimHit>)> = subject_chunks
-                        .par_iter()
-                        .map_init(
-                            || (
-                                GapAlignScratch::new(),
-                                // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_engine.c:991-1041
-                                // ```c
-                                // Int4 offset_array_size = GetOffsetArraySize(lookup_wrap);
-                                // ...
-                                // aux_struct->offset_pairs =
-                                //   (BlastOffsetPair*) malloc(offset_array_size * sizeof(BlastOffsetPair));
-                                // ```
-                                SubjectScratch::new(queries_ref.len(), offset_array_size),
-                            ),
-                            |state, chunk| {
-                                let (gap_scratch, subject_scratch) = state;
-                                let hits = collect_prelim_hits_for_chunk(chunk, gap_scratch, subject_scratch);
-                                (chunk.offset, chunk.overlap, hits)
-                            },
-                        )
-                        .collect();
-                    chunk_results.sort_by_key(|(offset, _, _)| *offset);
-                    for (offset, overlap, hits) in chunk_results {
-                        let _ = merge_prelim_hits_subject_split(
-                            &mut combined_prelim_hits,
-                            hits,
-                            offset,
-                            overlap,
+                // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_engine.c:478-536
+                // ```c
+                // while (TRUE) {
+                //     status = s_GetNextSubjectChunk(subject, &backup, kNucleotide,
+                //                                    dbseq_chunk_overlap);
+                //     if (status == SUBJECT_SPLIT_DONE) break;
+                //     if (status == SUBJECT_SPLIT_NO_RANGE) continue;
+                //     ...
+                // }
+                // ```
+                let max_in_flight = num_threads.max(1) * 2;
+                let mut chunk_batch: Vec<SubjectChunk> = Vec::with_capacity(max_in_flight);
+                let mut done = false;
+                loop {
+                    chunk_batch.clear();
+                    while chunk_batch.len() < max_in_flight && !done {
+                        match split_state.next_chunk(subject_masked, dbseq_chunk_overlap) {
+                            SubjectChunkStatus::Done => done = true,
+                            SubjectChunkStatus::NoRange => continue,
+                            SubjectChunkStatus::Ok(chunk) => chunk_batch.push(chunk),
+                        }
+                    }
+                    if chunk_batch.is_empty() {
+                        break;
+                    }
+
+                    // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_engine.c:264-268
+                    // ```c
+                    // subject->seq_ranges = backup->soft_ranges;
+                    // subject->num_seq_ranges = backup->num_soft_ranges;
+                    // return SUBJECT_SPLIT_OK;
+                    // ```
+                    let soft_ranges = split_state.soft_ranges.as_slice();
+                    if chunk_batch.len() == 1 {
+                        let chunk = &chunk_batch[0];
+                        let hits = collect_prelim_hits_for_chunk(
+                            chunk,
+                            soft_ranges,
+                            gap_scratch,
+                            subject_scratch,
                             true,
                         );
-                    }
-                } else {
-                    for chunk in subject_chunks.iter() {
-                        let hits = collect_prelim_hits_for_chunk(chunk, gap_scratch, subject_scratch);
                         let hits = merge_prelim_hits_subject_split(
                             &mut combined_prelim_hits,
                             hits,
@@ -6991,6 +7131,49 @@ pub fn run(args: BlastnArgs) -> Result<()> {
                         // BlastInitHitListReset(init_hitlist);
                         // ```
                         subject_scratch.prelim_hits = hits;
+                    } else {
+                        let mut chunk_results: Vec<(usize, usize, Vec<PrelimHit>)> =
+                            Vec::with_capacity(chunk_batch.len());
+                        chunk_batch
+                            .par_iter()
+                            .map_init(
+                                || (
+                                    GapAlignScratch::new(),
+                                    // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_engine.c:991-1041
+                                    // ```c
+                                    // Int4 offset_array_size = GetOffsetArraySize(lookup_wrap);
+                                    // ...
+                                    // aux_struct->offset_pairs =
+                                    //   (BlastOffsetPair*) malloc(offset_array_size * sizeof(BlastOffsetPair));
+                                    // ```
+                                    SubjectScratch::new(queries_ref.len(), offset_array_size),
+                                ),
+                                |state, chunk| {
+                                    let (gap_scratch, subject_scratch) = state;
+                                    let hits = collect_prelim_hits_for_chunk(
+                                        chunk,
+                                        soft_ranges,
+                                        gap_scratch,
+                                        subject_scratch,
+                                        false,
+                                    );
+                                    (chunk.offset, chunk.overlap, hits)
+                                },
+                            )
+                            .collect_into_vec(&mut chunk_results);
+                        for (offset, overlap, hits) in chunk_results {
+                            let _ = merge_prelim_hits_subject_split(
+                                &mut combined_prelim_hits,
+                                hits,
+                                offset,
+                                overlap,
+                                true,
+                            );
+                        }
+                    }
+
+                    if done {
+                        break;
                     }
                 }
             } else {
@@ -7009,8 +7192,20 @@ pub fn run(args: BlastnArgs) -> Result<()> {
                         SubjectChunkStatus::Done => break,
                         SubjectChunkStatus::NoRange => continue,
                         SubjectChunkStatus::Ok(chunk) => {
-                            let hits =
-                                collect_prelim_hits_for_chunk(&chunk, gap_scratch, subject_scratch);
+                            // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_engine.c:264-268
+                            // ```c
+                            // subject->seq_ranges = backup->soft_ranges;
+                            // subject->num_seq_ranges = backup->num_soft_ranges;
+                            // return SUBJECT_SPLIT_OK;
+                            // ```
+                            let soft_ranges = split_state.soft_ranges.as_slice();
+                            let hits = collect_prelim_hits_for_chunk(
+                                &chunk,
+                                soft_ranges,
+                                gap_scratch,
+                                subject_scratch,
+                                true,
+                            );
                             let hits = merge_prelim_hits_subject_split(
                                 &mut combined_prelim_hits,
                                 hits,

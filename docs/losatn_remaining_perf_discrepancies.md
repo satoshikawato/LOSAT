@@ -38,6 +38,13 @@
 - LOSAT refs: `LOSAT/src/algorithm/blastn/coordination.rs:561`, `LOSAT/src/algorithm/blastn/blast_engine/run.rs:4307`.
 - NCBI refs: `/mnt/c/Users/genom/GitHub/ncbi-blast/c++/src/objtools/readers/fasta.cpp:856`, `/mnt/c/Users/genom/GitHub/ncbi-blast/c++/src/objtools/readers/fasta.cpp:1079`.
 
+### 5) limit_lookup PV scan checks masks per k-mer vs unmasked-range iteration
+- `build_query_pv` scans the full query and calls `is_kmer_masked` for each k-mer.
+- NCBI `s_FillPV` iterates `BlastSeqLoc` (unmasked regions) and avoids per-k-mer mask checks.
+- Impact: extra mask lookups per k-mer when `limit_lookup` is enabled.
+- LOSAT refs: `LOSAT/src/algorithm/blastn/lookup.rs:477`, `LOSAT/src/algorithm/blastn/lookup.rs:747`.
+- NCBI refs: `/mnt/c/Users/genom/GitHub/ncbi-blast/c++/src/algo/blast/core/blast_nalookup.c:829`, `/mnt/c/Users/genom/GitHub/ncbi-blast/c++/src/algo/blast/core/blast_nalookup.c:858`.
+
 ## Recently addressed (no longer discrepancies)
 - Masked chunk `seq_ranges` now build into per-thread scratch for both sequential and parallel paths (no per-chunk Vec allocations); LOSAT refs: `LOSAT/src/algorithm/blastn/blast_engine/run.rs:180`, `LOSAT/src/algorithm/blastn/blast_engine/run.rs:4568`, `LOSAT/src/algorithm/blastn/blast_engine/run.rs:2900`; NCBI refs: `/mnt/c/Users/genom/GitHub/ncbi-blast/c++/src/algo/blast/core/blast_engine.c:184-198`, `/mnt/c/Users/genom/GitHub/ncbi-blast/c++/src/algo/blast/core/blast_engine.c:298-307`.
 - HashMap lookup replaced with array-backed `NaLookupTable` (thick_backbone + overflow + PV), and offset buffer sizing now includes `longest_chain`; LOSAT refs: `LOSAT/src/algorithm/blastn/lookup.rs:119`, `LOSAT/src/algorithm/blastn/lookup.rs:1160`, `LOSAT/src/algorithm/blastn/blast_engine/run.rs:3982`; NCBI refs: `/mnt/c/Users/genom/GitHub/ncbi-blast/c++/include/algo/blast/core/blast_nalookup.h:109`, `/mnt/c/Users/genom/GitHub/ncbi-blast/c++/src/algo/blast/core/blast_nalookup.c:442`, `/mnt/c/Users/genom/GitHub/ncbi-blast/c++/src/algo/blast/core/blast_nascan.c:41`, `/mnt/c/Users/genom/GitHub/ncbi-blast/c++/src/algo/blast/core/lookup_wrap.c:255`.
@@ -51,4 +58,5 @@
 - Recheck after the NaLookup swap: no additional missing steps found in the non-direct lookup construction beyond the remaining items.
 - Recheck after fixed offset-pair buffers: no remaining `Vec<OffsetPair>` push/drain usage in the blastn scan path.
 - Recheck after scan callback preselection: scan kind selection now happens once per subject scan, mirroring `s_MBChooseScanSubject`/`BlastChooseNucleotideScanSubjectAny`.
+- Recheck: items 1-4 remain open; item 5 added from current code scan; no other discrepancies found.
 - If you want, I can attach a timing profile plan to validate which items dominate your workload.

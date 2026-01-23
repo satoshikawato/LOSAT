@@ -153,12 +153,43 @@ struct SubjectSplitState {
     next: i32,
 }
 
+// NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_engine.c:264-276
+// ```c
+// if (backup->offset == 0 && residual == 0 && backup->next == backup->full_range.right) {
+//     subject->seq_ranges = backup->soft_ranges;
+//     subject->num_seq_ranges = backup->num_soft_ranges;
+//     return SUBJECT_SPLIT_OK;
+// }
+// /* if soft masking is off */
+// if (subject->mask_type != eSoftSubjMasking) {
+//     s_AllocateSeqRange(subject, backup, 1);
+//     subject->seq_ranges[0].left = residual;
+//     subject->seq_ranges[0].right = subject->length;
+//     return SUBJECT_SPLIT_OK;
+// }
+// ```
+#[derive(Clone)]
+enum SeqRanges {
+    Inline { range: (i32, i32) },
+    Owned(Vec<(i32, i32)>),
+}
+
+impl SeqRanges {
+    #[inline]
+    fn as_slice(&self) -> &[(i32, i32)] {
+        match self {
+            SeqRanges::Inline { range } => std::slice::from_ref(range),
+            SeqRanges::Owned(ranges) => ranges.as_slice(),
+        }
+    }
+}
+
 #[derive(Clone)]
 struct SubjectChunk {
     offset: usize,
     length: usize,
     residual: usize,
-    seq_ranges: Vec<(i32, i32)>,
+    seq_ranges: SeqRanges,
     masked: bool,
     overlap: usize,
 }
@@ -257,10 +288,33 @@ impl SubjectSplitState {
 
         let no_chunking =
             offset == 0 && residual == 0 && self.next == self.full_right;
+        // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_engine.c:264-276
+        // ```c
+        // if (backup->offset == 0 && residual == 0 && backup->next == backup->full_range.right) {
+        //     subject->seq_ranges = backup->soft_ranges;
+        //     subject->num_seq_ranges = backup->num_soft_ranges;
+        //     return SUBJECT_SPLIT_OK;
+        // }
+        // /* if soft masking is off */
+        // if (subject->mask_type != eSoftSubjMasking) {
+        //     s_AllocateSeqRange(subject, backup, 1);
+        //     subject->seq_ranges[0].left = residual;
+        //     subject->seq_ranges[0].right = subject->length;
+        //     return SUBJECT_SPLIT_OK;
+        // }
+        // ```
         let seq_ranges = if no_chunking {
-            self.soft_ranges.clone()
+            if subject_masked {
+                SeqRanges::Owned(self.soft_ranges.clone())
+            } else {
+                SeqRanges::Inline {
+                    range: (0, length as i32),
+                }
+            }
         } else if !subject_masked {
-            vec![(residual as i32, length as i32)]
+            SeqRanges::Inline {
+                range: (residual as i32, length as i32),
+            }
         } else {
             debug_assert_eq!(residual, 0);
             let start = offset;
@@ -294,7 +348,7 @@ impl SubjectSplitState {
                     last.1 = length as i32;
                 }
             }
-            ranges
+            SeqRanges::Owned(ranges)
         };
 
         // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_engine.c:580-584
@@ -3616,6 +3670,32 @@ pub fn run(args: BlastnArgs) -> Result<()> {
         return Ok(());
     }
 
+    // NCBI reference: ncbi-blast/c++/src/algo/blast/api/blast_setup_cxx.cpp:836-847
+    // ```c
+    // if (subj_is_na) {
+    //     BlastSeqBlkSetSequence(subj, sequence.data.release(),
+    //        ((sentinels == eSentinels) ? sequence.length - 2 :
+    //         sequence.length));
+    //     ...
+    //     SBlastSequence compressed_seq =
+    //         subjects.GetBlastSequence(i, eBlastEncodingNcbi2na,
+    //                                   eNa_strand_plus, eNoSentinels);
+    //     BlastSeqBlkSetCompressedSequence(subj,
+    //                               compressed_seq.data.release());
+    // }
+    // ```
+    let subject_packed_cache: Option<Vec<Vec<u8>>> = if args.limit_lookup {
+        subject_records.as_ref().map(|subjects| {
+            subjects
+                .iter()
+                .map(|record| encode_iupac_to_ncbi2na_packed(record.seq()))
+                .collect()
+        })
+    } else {
+        None
+    };
+    let subject_packed_cache_ref = subject_packed_cache.as_deref();
+
     // Prepare sequence data (including DUST masking)
     // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_engine.c:1401-1405
     // ```c
@@ -3871,6 +3951,7 @@ pub fn run(args: BlastnArgs) -> Result<()> {
         &query_context_masks,
         &query_context_offsets,
         subjects_for_lookup,
+        subject_packed_cache_ref,
         approx_table_entries,
     );
 
@@ -4247,9 +4328,33 @@ pub fn run(args: BlastnArgs) -> Result<()> {
             //                                  compressed_seq.data.release());
             // ```
             let s_seq_blastna_full_vec = encode_iupac_to_blastna(s_seq_full);
-            let s_seq_packed_full_vec = encode_iupac_to_ncbi2na_packed(s_seq_full);
             let s_seq_blastna_full = s_seq_blastna_full_vec.as_slice();
-            let s_seq_packed_full = s_seq_packed_full_vec.as_slice();
+            // NCBI reference: ncbi-blast/c++/src/algo/blast/api/blast_setup_cxx.cpp:836-847
+            // ```c
+            // if (subj_is_na) {
+            //     BlastSeqBlkSetSequence(subj, sequence.data.release(),
+            //        ((sentinels == eSentinels) ? sequence.length - 2 :
+            //         sequence.length));
+            //     ...
+            //     SBlastSequence compressed_seq =
+            //         subjects.GetBlastSequence(i, eBlastEncodingNcbi2na,
+            //                                   eNa_strand_plus, eNoSentinels);
+            //     BlastSeqBlkSetCompressedSequence(subj,
+            //                               compressed_seq.data.release());
+            // }
+            // ```
+            let mut s_seq_packed_full_vec: Option<Vec<u8>> = None;
+            let s_seq_packed_full = if let Some(packed_cache) = subject_packed_cache_ref {
+                if let Some(packed) = packed_cache.get(s_idx) {
+                    packed.as_slice()
+                } else {
+                    s_seq_packed_full_vec = Some(encode_iupac_to_ncbi2na_packed(s_seq_full));
+                    s_seq_packed_full_vec.as_ref().unwrap().as_slice()
+                }
+            } else {
+                s_seq_packed_full_vec = Some(encode_iupac_to_ncbi2na_packed(s_seq_full));
+                s_seq_packed_full_vec.as_ref().unwrap().as_slice()
+            };
 
             let dbseq_chunk_overlap = DBSEQ_CHUNK_OVERLAP;
             let mut split_state = SubjectSplitState::new(s_len_full, soft_ranges);

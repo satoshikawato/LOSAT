@@ -349,6 +349,24 @@ pub fn write_pairwise<W: Write>(
     subject_ids: &[Arc<str>],
     context: &ReportContext,
 ) -> io::Result<()> {
+    // NCBI reference: ncbi-blast/c++/src/objtools/align_format/showalign.cpp:1408-1469
+    // ```c
+    // string CDisplaySeqalign::x_DisplayRowData(SAlnRowInfo *alnRoInfo)
+    // {
+    //     ...
+    //     CNcbiOstrstream out;
+    //     ...
+    // }
+    //
+    // void CDisplaySeqalign::x_DisplayRowData(SAlnRowInfo *alnRoInfo, CNcbiOstream& out)
+    // {
+    //     ...
+    //     out << rowdata;
+    // }
+    // ```
+    let mut buffered = io::BufWriter::new(writer);
+    let writer = &mut buffered;
+
     // Write program header
     let version = context.version.as_deref().unwrap_or("0.1.0");
     writeln!(writer, "{} {}", context.program.to_uppercase(), version)?;
@@ -368,6 +386,7 @@ pub fn write_pairwise<W: Write>(
     
     if hits.is_empty() {
         writeln!(writer, " ***** No hits found *****")?;
+        writer.flush()?;
         return Ok(());
     }
     
@@ -433,7 +452,7 @@ pub fn write_pairwise<W: Write>(
         }
     }
     
-    Ok(())
+    writer.flush()
 }
 
 /// Write hits in pairwise format (simplified version for Hit without sequences)

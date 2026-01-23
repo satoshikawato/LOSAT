@@ -630,6 +630,21 @@ pub fn write_outfmt7<W: Write>(
     subject_ids: &[Arc<str>],
     context: &ReportContext,
 ) -> io::Result<()> {
+    // NCBI reference: ncbi-blast/c++/src/objtools/align_format/tabular.cpp:1100-1108
+    // ```c
+    // void CBlastTabularInfo::Print()
+    // {
+    //     ITERATE(list<ETabularField>, iter, m_FieldsToShow) {
+    //         if (iter != m_FieldsToShow.begin())
+    //             m_Ostream << m_FieldDelimiter;
+    //         x_PrintField(*iter);
+    //     }
+    //     m_Ostream << "\n";
+    // }
+    // ```
+    let mut buffered = io::BufWriter::new(writer);
+    let writer = &mut buffered;
+
     // Write header comments
     write_outfmt7_header(writer, context, hits.len())?;
     
@@ -673,7 +688,7 @@ pub fn write_outfmt7<W: Write>(
         )?;
     }
     
-    Ok(())
+    writer.flush()
 }
 
 /// Write hits grouped by query in outfmt 7 format
@@ -689,6 +704,21 @@ pub fn write_outfmt7_grouped<W: Write>(
     context: &ReportContext,
 ) -> io::Result<()> {
     use std::collections::HashMap;
+
+    // NCBI reference: ncbi-blast/c++/src/objtools/align_format/tabular.cpp:1100-1108
+    // ```c
+    // void CBlastTabularInfo::Print()
+    // {
+    //     ITERATE(list<ETabularField>, iter, m_FieldsToShow) {
+    //         if (iter != m_FieldsToShow.begin())
+    //             m_Ostream << m_FieldDelimiter;
+    //         x_PrintField(*iter);
+    //     }
+    //     m_Ostream << "\n";
+    // }
+    // ```
+    let mut buffered = io::BufWriter::new(writer);
+    let writer = &mut buffered;
     
     // Group hits by query
     let mut query_hits: HashMap<u32, Vec<&Hit>> = HashMap::new();
@@ -787,7 +817,7 @@ pub fn write_outfmt7_grouped<W: Write>(
         }
     }
     
-    Ok(())
+    writer.flush()
 }
 
 /// Write hits to a file in outfmt 6 format

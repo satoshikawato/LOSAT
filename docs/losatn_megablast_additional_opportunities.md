@@ -41,10 +41,12 @@ Status legend: [x] done, [ ] pending.
 - NCBI refs: `/mnt/c/Users/genom/GitHub/ncbi-blast/c++/src/algo/blast/core/blast_engine.c:491`
   (`BlastInitHitListReset` resets in place).
 
-### 4) [ ] Reduce subject chunk range allocations for unmasked subjects
-- Observation: each `SubjectChunk` owns `seq_ranges: Vec<(i32, i32)>`; in the
-  unmasked path this is always a single range, but we still allocate per chunk
-  (`vec![(residual, length)]` or `soft_ranges.clone()` when no chunking).
+### 4) [x] Reduce subject chunk range allocations for unmasked subjects
+- Status: done. Inline single-range storage for unmasked chunks and no-chunking
+  path; only masked+chunked subjects allocate Vec ranges.
+- Observation (pre-fix): each `SubjectChunk` owned `seq_ranges: Vec<(i32, i32)>`;
+  in the unmasked path this is always a single range, but we still allocated per
+  chunk (`vec![(residual, length)]` or `soft_ranges.clone()` when no chunking).
 - LOSAT refs: `LOSAT/src/algorithm/blastn/blast_engine/run.rs:157`,
   `LOSAT/src/algorithm/blastn/blast_engine/run.rs:4244`.
 - NCBI refs: `/mnt/c/Users/genom/GitHub/ncbi-blast/c++/src/algo/blast/core/blast_engine.c:150`,

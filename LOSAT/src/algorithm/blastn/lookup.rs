@@ -160,6 +160,7 @@ pub fn build_db_word_counts(
     lut_word_length: usize,
     max_word_count: u8,
     approx_table_entries: usize,
+    subjects_packed: Option<&[Vec<u8>]>,
 ) -> Vec<u8> {
     if lut_word_length == 0 {
         return Vec::new();
@@ -173,17 +174,17 @@ pub fn build_db_word_counts(
     let (pv, pv_array_bts) =
         build_query_pv(queries, query_masks, lut_word_length, approx_table_entries);
 
-    for record in subjects {
-        let seq = record.seq();
-        if seq.len() < lut_word_length {
-            continue;
-        }
-        let packed = encode_iupac_to_ncbi2na_packed(seq);
+    // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_nalookup.c:1122-1177
+    // ```c
+    // word = (w >> shift) & mask;
+    // if (!PV_TEST(pv, word, pv_array_bts)) continue;
+    // if ((counts[index] & 0xf) < max_word_count) counts[index]++;
+    // ```
+    let mut scan_subject = |seq_len: usize, packed: &[u8]| {
         let mask = (1u64 << (2 * lut_word_length)) - 1;
-
         let mut pos = 0usize;
-        let end = seq.len() - lut_word_length;
-        let mut kmer = packed_kmer_at(&packed, 0, lut_word_length);
+        let end = seq_len - lut_word_length;
+        let mut kmer = packed_kmer_at(packed, 0, lut_word_length);
 
         loop {
             if pv_test_shift(&pv, kmer as usize, pv_array_bts) {
@@ -194,10 +195,40 @@ pub fn build_db_word_counts(
                 break;
             }
 
-            let next_base = packed_base_at(&packed, pos + lut_word_length);
+            let next_base = packed_base_at(packed, pos + lut_word_length);
             kmer = ((kmer << 2) | next_base as u64) & mask;
             pos += 1;
         }
+    };
+
+    for (subject_idx, record) in subjects.iter().enumerate() {
+        let seq = record.seq();
+        if seq.len() < lut_word_length {
+            continue;
+        }
+        // NCBI reference: ncbi-blast/c++/src/algo/blast/api/blast_setup_cxx.cpp:836-847
+        // ```c
+        // if (subj_is_na) {
+        //     BlastSeqBlkSetSequence(subj, sequence.data.release(),
+        //        ((sentinels == eSentinels) ? sequence.length - 2 :
+        //         sequence.length));
+        //     ...
+        //     SBlastSequence compressed_seq =
+        //         subjects.GetBlastSequence(i, eBlastEncodingNcbi2na,
+        //                                   eNa_strand_plus, eNoSentinels);
+        //     BlastSeqBlkSetCompressedSequence(subj,
+        //                               compressed_seq.data.release());
+        // }
+        // ```
+        if let Some(packed_cache) = subjects_packed {
+            if let Some(packed) = packed_cache.get(subject_idx) {
+                scan_subject(seq.len(), packed.as_slice());
+                continue;
+            }
+        }
+
+        let packed = encode_iupac_to_ncbi2na_packed(seq);
+        scan_subject(seq.len(), &packed);
     }
 
     counts

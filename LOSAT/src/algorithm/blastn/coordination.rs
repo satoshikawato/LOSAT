@@ -669,6 +669,7 @@ pub fn build_lookup_tables(
     query_masks: &[Vec<MaskedInterval>],
     query_offsets: &[i32],
     subjects: &[fasta::Record],
+    subjects_packed: Option<&[Vec<u8>]>,
     approx_table_entries: usize,
 ) -> (LookupTables, usize) {
     eprintln!(
@@ -693,6 +694,20 @@ pub fn build_lookup_tables(
     // mb_lt->pv_array_bts = ilog2(mb_lt->hashsize / pv_size);
     // ```
     let db_word_counts = if args.limit_lookup {
+        // NCBI reference: ncbi-blast/c++/src/algo/blast/api/blast_setup_cxx.cpp:836-847
+        // ```c
+        // if (subj_is_na) {
+        //     BlastSeqBlkSetSequence(subj, sequence.data.release(),
+        //        ((sentinels == eSentinels) ? sequence.length - 2 :
+        //         sequence.length));
+        //     ...
+        //     SBlastSequence compressed_seq =
+        //         subjects.GetBlastSequence(i, eBlastEncodingNcbi2na,
+        //                                   eNa_strand_plus, eNoSentinels);
+        //     BlastSeqBlkSetCompressedSequence(subj,
+        //                               compressed_seq.data.release());
+        // }
+        // ```
         Some(build_db_word_counts(
             queries,
             query_masks,
@@ -700,6 +715,7 @@ pub fn build_lookup_tables(
             config.lut_word_length,
             args.max_db_word_count,
             approx_table_entries,
+            subjects_packed,
         ))
     } else {
         None

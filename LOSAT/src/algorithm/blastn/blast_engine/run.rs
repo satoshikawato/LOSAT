@@ -3027,7 +3027,7 @@ impl SubjectScratch {
             //    ...
             // }
             // ```
-            offset_pairs: Vec::with_capacity(offset_array_size),
+            offset_pairs: vec![OffsetPair { q_off: 0, s_off: 0 }; offset_array_size],
         }
     }
 }
@@ -4900,8 +4900,18 @@ pub fn run(args: BlastnArgs) -> Result<()> {
                         // if (hitsfound == 0) continue;
                         // hits_extended += extend(offset_pairs, hitsfound, ...);
                         // ```
-                        let offset_pairs = &mut subject_scratch.offset_pairs;
-                        offset_pairs.clear();
+                        // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_nascan.c:1482-1534
+                        // ```c
+                        // Int4 total_hits = 0;
+                        // ...
+                        // if (total_hits >= max_hits)
+                        //     break;
+                        // ...
+                        // total_hits += s_BlastMBLookupRetrieve(mb_lt,
+                        //     index, offset_pairs + total_hits, s_off);
+                        // ```
+                        let offset_pairs = subject_scratch.offset_pairs.as_mut_slice();
+                        let mut offset_pairs_len = 0usize;
 
                         // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_engine.c:451-497
                         // ```c
@@ -4911,10 +4921,13 @@ pub fn run(args: BlastnArgs) -> Result<()> {
                         // if (hitsfound == 0) continue;
                         // hits_extended += extend(offset_pairs, hitsfound, ...);
                         // ```
-                        let mut process_offset_pairs = |offset_pairs: &mut Vec<OffsetPair>,
+                        let mut process_offset_pairs = |offset_pairs: &[OffsetPair],
+                                                        offset_pairs_len: &mut usize,
                                                         scan_pause_ns: &mut u64,
                                                         track_scan_pause: bool| {
-                            for pair in offset_pairs.drain(..) {
+                            let hitsfound = *offset_pairs_len;
+                            for idx in 0..hitsfound {
+                                let pair = offset_pairs[idx];
                                 let q_off0 = pair.q_off;
                                 let kmer_start = pair.s_off;
                                 // NCBI reference: ncbi-blast/c++/src/algo/blast/core/na_ungapped.c:730-733
@@ -5758,6 +5771,7 @@ pub fn run(args: BlastnArgs) -> Result<()> {
                                 }
                                 // Gapped extension deferred to batch processing phase
                             }
+                            *offset_pairs_len = 0;
                         };
 
                         scan_subject_kmers_with_ranges(
@@ -5833,8 +5847,13 @@ pub fn run(args: BlastnArgs) -> Result<()> {
                                 // total_hits += s_BlastMBLookupRetrieve(mb_lt,
                                 //     index, offset_pairs + total_hits, s_off);
                                 // ```
-                                if offset_pairs.len() >= OFFSET_ARRAY_SIZE {
-                                    process_offset_pairs(offset_pairs, &mut scan_pause_ns, true);
+                                if offset_pairs_len >= OFFSET_ARRAY_SIZE {
+                                    process_offset_pairs(
+                                        offset_pairs,
+                                        &mut offset_pairs_len,
+                                        &mut scan_pause_ns,
+                                        true,
+                                    );
                                 }
 
                                 // For each match, add to the offset_pairs buffer.
@@ -5850,10 +5869,11 @@ pub fn run(args: BlastnArgs) -> Result<()> {
                                     // offset_pairs[i].qs_offsets.q_off   = q_off - 1;
                                     // offset_pairs[i++].qs_offsets.s_off = s_off;
                                     // ```
-                                    offset_pairs.push(OffsetPair {
+                                    offset_pairs[offset_pairs_len] = OffsetPair {
                                         q_off: q_off_1 as usize - 1,
                                         s_off: kmer_start,
-                                    });
+                                    };
+                                    offset_pairs_len += 1;
                                 } // end of for matches_slice in two-stage lookup
 
                                 // NCBI reference: ncbi-blast/c++/src/algo/blast/core/lookup_wrap.c:255-288
@@ -5861,8 +5881,13 @@ pub fn run(args: BlastnArgs) -> Result<()> {
                                 // offset_array_size = OFFSET_ARRAY_SIZE +
                                 //     ((BlastMBLookupTable*)lookup->lut)->longest_chain;
                                 // ```
-                                if offset_pairs.len() >= offset_array_size {
-                                    process_offset_pairs(offset_pairs, &mut scan_pause_ns, true);
+                                if offset_pairs_len >= offset_array_size {
+                                    process_offset_pairs(
+                                        offset_pairs,
+                                        &mut offset_pairs_len,
+                                        &mut scan_pause_ns,
+                                        true,
+                                    );
                                 }
                             },
                         );
@@ -5902,8 +5927,13 @@ pub fn run(args: BlastnArgs) -> Result<()> {
                         // if (hitsfound == 0) continue;
                         // hits_extended += extend(offset_pairs, hitsfound, ...);
                         // ```
-                        if !offset_pairs.is_empty() {
-                            process_offset_pairs(offset_pairs, &mut scan_pause_ns, false);
+                        if offset_pairs_len > 0 {
+                            process_offset_pairs(
+                                offset_pairs,
+                                &mut offset_pairs_len,
+                                &mut scan_pause_ns,
+                                false,
+                            );
                         }
 
                         // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_nascan.c:193-207

@@ -38,14 +38,7 @@
 - LOSAT refs: `LOSAT/src/algorithm/blastn/coordination.rs:561`, `LOSAT/src/algorithm/blastn/blast_engine/run.rs:4307`.
 - NCBI refs: `/mnt/c/Users/genom/GitHub/ncbi-blast/c++/src/objtools/readers/fasta.cpp:856`, `/mnt/c/Users/genom/GitHub/ncbi-blast/c++/src/objtools/readers/fasta.cpp:1079`.
 
-### 5) Offset-pair buffers are Vec-based vs fixed arrays
-- LOSAT uses `Vec<OffsetPair>` with `push`, `clear`, and `drain` inside the scan loop.
-- NCBI writes directly into a pre-allocated `BlastOffsetPair*` array and advances an index.
-- Impact: bounds checks, dynamic vector bookkeeping, and `drain` overhead in hot scan loops.
-- LOSAT refs: `LOSAT/src/algorithm/blastn/blast_engine/run.rs:4790`, `LOSAT/src/algorithm/blastn/blast_engine/run.rs:5723`.
-- NCBI refs: `/mnt/c/Users/genom/GitHub/ncbi-blast/c++/src/algo/blast/core/blast_nascan.c:2694`.
-
-### 6) Scan dispatch chosen per range vs pre-selected scan callback
+### 5) Scan dispatch chosen per range vs pre-selected scan callback
 - LOSAT recomputes `mb_scan_kind` and matches on it per scan-range invocation.
 - NCBI selects the scan routine once via `s_MBChooseScanSubject` and calls through the stored function pointer.
 - Impact: additional branching/closure overhead in the inner scan loop.
@@ -55,10 +48,12 @@
 ## Recently addressed (no longer discrepancies)
 - Masked chunk `seq_ranges` now build into per-thread scratch for both sequential and parallel paths (no per-chunk Vec allocations); LOSAT refs: `LOSAT/src/algorithm/blastn/blast_engine/run.rs:180`, `LOSAT/src/algorithm/blastn/blast_engine/run.rs:4568`, `LOSAT/src/algorithm/blastn/blast_engine/run.rs:2900`; NCBI refs: `/mnt/c/Users/genom/GitHub/ncbi-blast/c++/src/algo/blast/core/blast_engine.c:184-198`, `/mnt/c/Users/genom/GitHub/ncbi-blast/c++/src/algo/blast/core/blast_engine.c:298-307`.
 - HashMap lookup replaced with array-backed `NaLookupTable` (thick_backbone + overflow + PV), and offset buffer sizing now includes `longest_chain`; LOSAT refs: `LOSAT/src/algorithm/blastn/lookup.rs:119`, `LOSAT/src/algorithm/blastn/lookup.rs:1160`, `LOSAT/src/algorithm/blastn/blast_engine/run.rs:3982`; NCBI refs: `/mnt/c/Users/genom/GitHub/ncbi-blast/c++/include/algo/blast/core/blast_nalookup.h:109`, `/mnt/c/Users/genom/GitHub/ncbi-blast/c++/src/algo/blast/core/blast_nalookup.c:442`, `/mnt/c/Users/genom/GitHub/ncbi-blast/c++/src/algo/blast/core/blast_nascan.c:41`, `/mnt/c/Users/genom/GitHub/ncbi-blast/c++/src/algo/blast/core/lookup_wrap.c:255`.
+- Offset-pair buffers now use fixed-length arrays with an index (no `push`/`drain` in scan loop); LOSAT refs: `LOSAT/src/algorithm/blastn/blast_engine/run.rs:3030`, `LOSAT/src/algorithm/blastn/blast_engine/run.rs:5850`; NCBI refs: `/mnt/c/Users/genom/GitHub/ncbi-blast/c++/src/algo/blast/core/blast_engine.c:991-1041`, `/mnt/c/Users/genom/GitHub/ncbi-blast/c++/src/algo/blast/core/blast_nascan.c:1482-1534`.
 - Buffered output for outfmt0/7 (`LOSAT/src/report/pairwise.rs`, `LOSAT/src/report/outfmt6.rs`).
 - Reuse packed subject encoding when `limit_lookup` preloads subjects (`LOSAT/src/algorithm/blastn/lookup.rs`, `LOSAT/src/algorithm/blastn/blast_engine/run.rs`).
 
 ## Notes
 - Items above focus on performance differences; parity behavior should remain unchanged if aligned to NCBI.
 - Recheck after the NaLookup swap: no additional missing steps found in the non-direct lookup construction beyond the remaining items.
+- Recheck after fixed offset-pair buffers: no remaining `Vec<OffsetPair>` push/drain usage in the blastn scan path.
 - If you want, I can attach a timing profile plan to validate which items dominate your workload.

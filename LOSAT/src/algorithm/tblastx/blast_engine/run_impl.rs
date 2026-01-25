@@ -18,11 +18,56 @@ pub fn run(args: TblastxArgs) -> Result<()> {
     let mut t_build_lookup = Duration::ZERO;
     let mut t_read_subjects = Duration::ZERO;
 
-    let num_threads = if args.num_threads == 0 {
-        num_cpus::get()
-    } else {
-        args.num_threads
+    // NCBI reference: ncbi-blast/c++/include/algo/blast/blastinput/blast_args.hpp:1290-1296
+    // ```c
+    // CMTArgs(...)
+    // {
+    // #ifdef NCBI_NO_THREADS
+    //     m_NumThreads = CThreadable::kMinNumThreads;
+    //     m_MTMode = eNotSupported;
+    // #endif
+    // }
+    // ```
+    // NCBI reference: ncbi-blast/c++/src/algo/blast/blastinput/blast_args.cpp:3205-3222
+    // ```c
+    // const int kMaxValue = static_cast<int>(CSystemInfo::GetCpuCount());
+    // ...
+    // int num_threads = args[kArgNumThreads].AsInteger();
+    // if (num_threads > kMaxValue) {
+    //     m_NumThreads = kMaxValue;
+    // } else {
+    //     m_NumThreads = num_threads;
+    // }
+    // ```
+    let num_threads = {
+        #[cfg(target_arch = "wasm32")]
+        {
+            1
+        }
+        #[cfg(not(target_arch = "wasm32"))]
+        {
+            #[cfg(feature = "parallel")]
+            {
+                if args.num_threads == 0 {
+                    num_cpus::get()
+                } else {
+                    args.num_threads
+                }
+            }
+            #[cfg(not(feature = "parallel"))]
+            {
+                1
+            }
+        }
     };
+    // NCBI reference: ncbi-blast/c++/src/algo/blast/api/prelim_stage.cpp:82-88
+    // ```c
+    // if (num_threads > 1) {
+    //     SetNumberOfThreads(num_threads);
+    // }
+    // ```
+    #[cfg(all(feature = "parallel", not(target_arch = "wasm32")))]
+    let use_parallel = num_threads > 1;
     let query_code = GeneticCode::from_id(args.query_gencode);
     let db_code = GeneticCode::from_id(args.db_gencode);
     let only_qframe = args.only_qframe;
@@ -83,10 +128,19 @@ pub fn run(args: TblastxArgs) -> Result<()> {
         );
     }
 
-    rayon::ThreadPoolBuilder::new()
-        .num_threads(num_threads)
-        .build_global()
-        .context("Failed to build thread pool")?;
+    // NCBI reference: ncbi-blast/c++/src/algo/blast/api/prelim_stage.cpp:82-88
+    // ```c
+    // if (num_threads > 1) {
+    //     SetNumberOfThreads(num_threads);
+    // }
+    // ```
+    #[cfg(all(feature = "parallel", not(target_arch = "wasm32")))]
+    if use_parallel {
+        rayon::ThreadPoolBuilder::new()
+            .num_threads(num_threads)
+            .build_global()
+            .context("Failed to build thread pool")?;
+    }
 
     let t_phase_read_queries = Instant::now();
     if args.verbose {
@@ -312,28 +366,42 @@ pub fn run(args: TblastxArgs) -> Result<()> {
     let (tx, rx) = channel::<Vec<Hit>>();
     let out_path = args.out.clone();
     let evalue_threshold = args.evalue;
-    // NCBI reference: ncbi-blast/c++/include/algo/blast/core/blast_hits.h:153-166
-    // ```c
-    // typedef struct BlastHSPList {
-    //    Int4 oid;/**< The ordinal id of the subject sequence this HSP list is for */
-    //    Int4 query_index; /**< Index of the query which this HSPList corresponds to.
-    //                       Set to 0 if not applicable */
-    // } BlastHSPList;
-    // ```
-    let query_ids_out = query_ids.clone();
-    let subject_ids_out = subject_ids.clone();
+    let mut rx_opt = Some(rx);
 
-    let writer = std::thread::spawn(move || -> Result<()> {
-        let mut all: Vec<Hit> = Vec::new();
-        while let Ok(h) = rx.recv() {
-            all.extend(h);
-        }
-        all.retain(|h| h.e_value <= evalue_threshold);
-        // NCBI-style output ordering: query (input order) → subject (best_evalue/score/oid) → HSP (score/coords)
-        // Reference: BLAST_LinkHsps() + s_EvalueCompareHSPLists() + ScoreCompareHSPs()
-        write_output_ncbi_order(all, out_path.as_ref(), &query_ids_out, &subject_ids_out)?;
-        Ok(())
-    });
+    // NCBI reference: ncbi-blast/c++/src/algo/blast/api/prelim_stage.cpp:82-88
+    // ```c
+    // if (num_threads > 1) {
+    //     SetNumberOfThreads(num_threads);
+    // }
+    // ```
+    #[cfg(all(feature = "parallel", not(target_arch = "wasm32")))]
+    let writer = if use_parallel {
+        // NCBI reference: ncbi-blast/c++/include/algo/blast/core/blast_hits.h:153-166
+        // ```c
+        // typedef struct BlastHSPList {
+        //    Int4 oid;/**< The ordinal id of the subject sequence this HSP list is for */
+        //    Int4 query_index; /**< Index of the query which this HSPList corresponds to.
+        //                       Set to 0 if not applicable */
+        // } BlastHSPList;
+        // ```
+        let query_ids_out = query_ids.clone();
+        let subject_ids_out = subject_ids.clone();
+        let out_path = out_path.clone();
+        let rx = rx_opt.take().expect("rx must be available for writer");
+        Some(std::thread::spawn(move || -> Result<()> {
+            let mut all: Vec<Hit> = Vec::new();
+            while let Ok(h) = rx.recv() {
+                all.extend(h);
+            }
+            all.retain(|h| h.e_value <= evalue_threshold);
+            // NCBI-style output ordering: query (input order) → subject (best_evalue/score/oid) → HSP (score/coords)
+            // Reference: BLAST_LinkHsps() + s_EvalueCompareHSPLists() + ScoreCompareHSPs()
+            write_output_ncbi_order(all, out_path.as_ref(), &query_ids_out, &subject_ids_out)?;
+            Ok(())
+        }))
+    } else {
+        None
+    };
 
     // Diagonal array sizing MUST match NCBI's `s_BlastDiagTableNew`:
     // it depends only on (query_length + window_size), not on subject length.
@@ -384,16 +452,26 @@ pub fn run(args: TblastxArgs) -> Result<()> {
     let contexts_ref = &contexts;
     let _gapped_params_ref = &gapped_params;  // Unused - tblastx uses ungapped params
 
-    subjects_raw.par_iter().enumerate().for_each_init(
-        || WorkerState {
-            tx: tx.clone(),
-            offset_pairs: vec![OffsetPair::default(); offset_array_size as usize],
-            diag_array: vec![DiagStruct::default(); diag_array_size as usize],
-            // NCBI: diag_table->offset = window_size;
-            // Source: ncbi-blast/c++/src/algo/blast/core/blast_extend.c:63
-            diag_offset: window,
-        },
-        |st, (s_idx, s_rec)| {
+    // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_engine.c:1411-1475
+    // ```c
+    // while ( (seq_arg.oid = BlastSeqSrcIteratorNext(seq_src, itr))
+    //        != BLAST_SEQSRC_EOF) {
+    //    ...
+    //    status = s_BlastSearchEngineCore(...);
+    // }
+    // ```
+    fn for_each_subjects<FInit, FBody>(subjects: &[fasta::Record], init: FInit, mut body: FBody)
+    where
+        FInit: FnOnce() -> WorkerState,
+        FBody: FnMut(&mut WorkerState, (usize, &fasta::Record)),
+    {
+        let mut state = init();
+        for (s_idx, s_rec) in subjects.iter().enumerate() {
+            body(&mut state, (s_idx, s_rec));
+        }
+    }
+
+    let process_subject = |st: &mut WorkerState, (s_idx, s_rec): (usize, &fasta::Record)| {
             // NCBI: Creates ewp (diagonal table) ONCE per SUBJECT via BlastExtendWordNew
             // (blast_engine.c:1002). Each subject sequence gets a fresh diagonal array.
             // Reference: blast_extend.c:109-180 (BlastExtendWordNew) allocates with calloc,
@@ -1315,16 +1393,96 @@ pub fn run(args: TblastxArgs) -> Result<()> {
                     st.tx.send(final_hits).unwrap();
                 }
             }
+            // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_engine.c:1411-1475
+            // ```c
+            // while ( (seq_arg.oid = BlastSeqSrcIteratorNext(seq_src, itr))
+            //        != BLAST_SEQSRC_EOF) {
+            //    ...
+            //    status = s_BlastSearchEngineCore(...);
+            // }
+            // ```
             bar.inc(1);
             st.diag_offset = diag_offset;
+        };
+
+    // NCBI reference: ncbi-blast/c++/src/algo/blast/api/prelim_stage.cpp:82-88
+    // ```c
+    // if (num_threads > 1) {
+    //     SetNumberOfThreads(num_threads);
+    // }
+    // ```
+    #[cfg(all(feature = "parallel", not(target_arch = "wasm32")))]
+    if use_parallel {
+        subjects_raw.par_iter().enumerate().for_each_init(
+            || WorkerState {
+                tx: tx.clone(),
+                offset_pairs: vec![OffsetPair::default(); offset_array_size as usize],
+                diag_array: vec![DiagStruct::default(); diag_array_size as usize],
+                // NCBI: diag_table->offset = window_size;
+                // Source: ncbi-blast/c++/src/algo/blast/core/blast_extend.c:63
+                diag_offset: window,
+            },
+            &process_subject,
+        );
+    } else {
+        for_each_subjects(
+            &subjects_raw,
+            || WorkerState {
+                tx: tx.clone(),
+                offset_pairs: vec![OffsetPair::default(); offset_array_size as usize],
+                diag_array: vec![DiagStruct::default(); diag_array_size as usize],
+                // NCBI: diag_table->offset = window_size;
+                // Source: ncbi-blast/c++/src/algo/blast/core/blast_extend.c:63
+                diag_offset: window,
+            },
+            &process_subject,
+        );
+    }
+
+    #[cfg(any(not(feature = "parallel"), target_arch = "wasm32"))]
+    for_each_subjects(
+        &subjects_raw,
+        || WorkerState {
+            tx: tx.clone(),
+            offset_pairs: vec![OffsetPair::default(); offset_array_size as usize],
+            diag_array: vec![DiagStruct::default(); diag_array_size as usize],
+            // NCBI: diag_table->offset = window_size;
+            // Source: ncbi-blast/c++/src/algo/blast/core/blast_extend.c:63
+            diag_offset: window,
         },
+        &process_subject,
     );
 
     // Close channel so the writer can exit.
     drop(tx);
 
     bar.finish();
-    writer.join().unwrap()?;
+    #[cfg(all(feature = "parallel", not(target_arch = "wasm32")))]
+    if let Some(writer) = writer {
+        writer.join().unwrap()?;
+    }
+    if let Some(rx) = rx_opt.take() {
+        let mut all: Vec<Hit> = Vec::new();
+        for h in rx {
+            all.extend(h);
+        }
+        all.retain(|h| h.e_value <= evalue_threshold);
+        // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_hits.c:1700-1704
+        // ```c
+        // s_Heapify((char*)hsp_array, (char*)hsp_array,
+        //          (char*)&hsp_array[hsp_list->hspcnt/2 - 1],
+        //          (char*)&hsp_array[hsp_list->hspcnt-1],
+        //          sizeof(BlastHSP*), ScoreCompareHSPs);
+        // ```
+        // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_hits.c:3202-3205
+        // ```c
+        // s_Heapify((char*)hit_list->hsplist_array, (char*)hit_list->hsplist_array,
+        //          (char*)&hit_list->hsplist_array[hit_list->hsplist_count/2 - 1],
+        //          (char*)&hit_list->hsplist_array[hit_list->hsplist_count-1],
+        //          sizeof(BlastHSPList*), s_EvalueCompareHSPLists);
+        // ```
+        write_output_ncbi_order(all, out_path.as_ref(), &query_ids, &subject_ids)?;
+    }
     if diag_enabled {
         print_diagnostics_summary(&diagnostics);
     }

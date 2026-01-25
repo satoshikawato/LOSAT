@@ -16,11 +16,56 @@ use std::sync::Arc;
 pub(crate) fn run_with_neighbor_map(args: TblastxArgs) -> Result<()> {
     use crate::algorithm::tblastx::lookup::LOOKUP_ALPHABET_SIZE;
 
-    let num_threads = if args.num_threads == 0 {
-        num_cpus::get()
-    } else {
-        args.num_threads
+    // NCBI reference: ncbi-blast/c++/include/algo/blast/blastinput/blast_args.hpp:1290-1296
+    // ```c
+    // CMTArgs(...)
+    // {
+    // #ifdef NCBI_NO_THREADS
+    //     m_NumThreads = CThreadable::kMinNumThreads;
+    //     m_MTMode = eNotSupported;
+    // #endif
+    // }
+    // ```
+    // NCBI reference: ncbi-blast/c++/src/algo/blast/blastinput/blast_args.cpp:3205-3222
+    // ```c
+    // const int kMaxValue = static_cast<int>(CSystemInfo::GetCpuCount());
+    // ...
+    // int num_threads = args[kArgNumThreads].AsInteger();
+    // if (num_threads > kMaxValue) {
+    //     m_NumThreads = kMaxValue;
+    // } else {
+    //     m_NumThreads = num_threads;
+    // }
+    // ```
+    let num_threads = {
+        #[cfg(target_arch = "wasm32")]
+        {
+            1
+        }
+        #[cfg(not(target_arch = "wasm32"))]
+        {
+            #[cfg(feature = "parallel")]
+            {
+                if args.num_threads == 0 {
+                    num_cpus::get()
+                } else {
+                    args.num_threads
+                }
+            }
+            #[cfg(not(feature = "parallel"))]
+            {
+                1
+            }
+        }
     };
+    // NCBI reference: ncbi-blast/c++/src/algo/blast/api/prelim_stage.cpp:82-88
+    // ```c
+    // if (num_threads > 1) {
+    //     SetNumberOfThreads(num_threads);
+    // }
+    // ```
+    #[cfg(all(feature = "parallel", not(target_arch = "wasm32")))]
+    let use_parallel = num_threads > 1;
     let query_code = GeneticCode::from_id(args.query_gencode);
     let db_code = GeneticCode::from_id(args.db_gencode);
     // NCBI: window = diag->window
@@ -40,10 +85,19 @@ pub(crate) fn run_with_neighbor_map(args: TblastxArgs) -> Result<()> {
     // x_dropoff_per_context is populated per-subject after counting total_contexts.
     let ungapped_params_for_xdrop = lookup_protein_params_ungapped(ScoringMatrix::Blosum62);
 
-    rayon::ThreadPoolBuilder::new()
-        .num_threads(num_threads)
-        .build_global()
-        .context("Failed to build thread pool")?;
+    // NCBI reference: ncbi-blast/c++/src/algo/blast/api/prelim_stage.cpp:82-88
+    // ```c
+    // if (num_threads > 1) {
+    //     SetNumberOfThreads(num_threads);
+    // }
+    // ```
+    #[cfg(all(feature = "parallel", not(target_arch = "wasm32")))]
+    if use_parallel {
+        rayon::ThreadPoolBuilder::new()
+            .num_threads(num_threads)
+            .build_global()
+            .context("Failed to build thread pool")?;
+    }
 
     if args.verbose {
         eprintln!("Reading queries (neighbor map mode)...");
@@ -323,11 +377,14 @@ pub(crate) fn run_with_neighbor_map(args: TblastxArgs) -> Result<()> {
         let length_adj_per_context_ref = &length_adj_per_context;
         let eff_searchsp_per_context_ref = &eff_searchsp_per_context;
 
-        // Process each subject frame in parallel
-        let frame_hits: Vec<UngappedHit> = s_frames
-            .par_iter()
-            .enumerate()
-            .flat_map(|(s_f_idx, s_frame)| {
+        // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_engine.c:804-842
+        // ```c
+        // for (context=first_context; context<=last_context; context++) {
+        //     ...
+        //     status = s_BlastSearchEngineOneContext(...);
+        // }
+        // ```
+        let scan_frame = |(s_f_idx, s_frame): (usize, &QueryFrame)| -> Vec<UngappedHit> {
                 let s_aa_full = &s_frame.aa_seq;
                 // NCBI subject->sequence points past the leading NULLB sentinel, so offsets
                 // are 0-based from the first residue; see blast_engine.c:811-812 and
@@ -591,8 +648,22 @@ pub(crate) fn run_with_neighbor_map(args: TblastxArgs) -> Result<()> {
 
                 bar.inc(1);
                 local_hits
-            })
-            .collect();
+        };
+
+        let frame_hits: Vec<UngappedHit> = {
+            #[cfg(all(feature = "parallel", not(target_arch = "wasm32")))]
+            {
+                if use_parallel {
+                    s_frames.par_iter().enumerate().flat_map(&scan_frame).collect()
+                } else {
+                    s_frames.iter().enumerate().flat_map(&scan_frame).collect()
+                }
+            }
+            #[cfg(any(not(feature = "parallel"), target_arch = "wasm32"))]
+            {
+                s_frames.iter().enumerate().flat_map(&scan_frame).collect()
+            }
+        };
 
         // Add to global collection
         all_ungapped.lock().unwrap().extend(frame_hits);
@@ -623,9 +694,16 @@ pub(crate) fn run_with_neighbor_map(args: TblastxArgs) -> Result<()> {
     }
     
     // Step 2: Apply linking per subject with proper cutoffs
-    let linked_hits: Vec<UngappedHit> = hits_by_subject
-        .into_par_iter()
-        .flat_map(|(s_idx, subject_hits)| {
+    // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_engine.c:1448-1455
+    // ```c
+    // if (hit_params->link_hsp_params && !kNucleotide &&
+    //     !gapped_calculation) {
+    //     CalculateLinkHSPCutoffs(program_number, query_info, sbp,
+    //         hit_params->link_hsp_params, word_params, db_length,
+    //         seq_arg.seq->length);
+    // }
+    // ```
+    let link_subject = |(s_idx, subject_hits): (u32, Vec<UngappedHit>)| -> Vec<UngappedHit> {
             // Get subject length for this subject
             let subject_len_nucl = subjects_raw[s_idx as usize].seq().len() as i64;
             
@@ -751,8 +829,31 @@ pub(crate) fn run_with_neighbor_map(args: TblastxArgs) -> Result<()> {
                 linking_calls.fetch_add(1, AtomicOrdering::Relaxed);
             }
             linked
-        })
-        .collect();
+    };
+
+    let linked_hits: Vec<UngappedHit> = {
+        #[cfg(all(feature = "parallel", not(target_arch = "wasm32")))]
+        {
+            if use_parallel {
+                hits_by_subject
+                    .into_par_iter()
+                    .flat_map(&link_subject)
+                    .collect()
+            } else {
+                hits_by_subject
+                    .into_iter()
+                    .flat_map(&link_subject)
+                    .collect()
+            }
+        }
+        #[cfg(any(not(feature = "parallel"), target_arch = "wasm32"))]
+        {
+            hits_by_subject
+                .into_iter()
+                .flat_map(&link_subject)
+                .collect()
+        }
+    };
 
     if trace_hsp_target().is_some() {
         for h in &linked_hits {

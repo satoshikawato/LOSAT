@@ -29,6 +29,17 @@ pub(crate) use run_neighbor_map::run_with_neighbor_map;
 pub(crate) use anyhow::{Context, Result};
 pub(crate) use bio::io::fasta;
 pub(crate) use indicatif::{ProgressBar, ProgressStyle};
+// NCBI reference: ncbi-blast/c++/include/algo/blast/blastinput/blast_args.hpp:1290-1296
+// ```c
+// CMTArgs(...)
+// {
+// #ifdef NCBI_NO_THREADS
+//     m_NumThreads = CThreadable::kMinNumThreads;
+//     m_MTMode = eNotSupported;
+// #endif
+// }
+// ```
+#[cfg(feature = "parallel")]
 pub(crate) use rayon::prelude::*;
 pub(crate) use std::collections::HashSet;
 pub(crate) use std::sync::atomic::{AtomicI32, AtomicU64, AtomicUsize, Ordering as AtomicOrdering};

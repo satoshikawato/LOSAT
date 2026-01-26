@@ -5,6 +5,17 @@
 
 use anyhow::{Context, Result};
 use indicatif::{ProgressBar, ProgressStyle};
+// NCBI reference: ncbi-blast/c++/include/algo/blast/blastinput/blast_args.hpp:1290-1296
+// ```c
+// CMTArgs(...)
+// {
+// #ifdef NCBI_NO_THREADS
+//     m_NumThreads = CThreadable::kMinNumThreads;
+//     m_MTMode = eNotSupported;
+// #endif
+// }
+// ```
+#[cfg(feature = "parallel")]
 use rayon::prelude::*;
 use std::sync::{mpsc::channel, Arc};
 
@@ -3636,10 +3647,47 @@ fn post_process_hits_and_write(
 }
 
 pub fn run(args: BlastnArgs) -> Result<()> {
-    let num_threads = if args.num_threads == 0 {
-        num_cpus::get()
-    } else {
-        args.num_threads
+    // NCBI reference: ncbi-blast/c++/include/algo/blast/blastinput/blast_args.hpp:1290-1296
+    // ```c
+    // CMTArgs(...)
+    // {
+    // #ifdef NCBI_NO_THREADS
+    //     m_NumThreads = CThreadable::kMinNumThreads;
+    //     m_MTMode = eNotSupported;
+    // #endif
+    // }
+    // ```
+    // NCBI reference: ncbi-blast/c++/src/algo/blast/blastinput/blast_args.cpp:3205-3222
+    // ```c
+    // const int kMaxValue = static_cast<int>(CSystemInfo::GetCpuCount());
+    // ...
+    // int num_threads = args[kArgNumThreads].AsInteger();
+    // if (num_threads > kMaxValue) {
+    //     m_NumThreads = kMaxValue;
+    // } else {
+    //     m_NumThreads = num_threads;
+    // }
+    // ```
+    let num_threads = {
+        #[cfg(target_arch = "wasm32")]
+        {
+            1
+        }
+        #[cfg(not(target_arch = "wasm32"))]
+        {
+            #[cfg(feature = "parallel")]
+            {
+                if args.num_threads == 0 {
+                    num_cpus::get()
+                } else {
+                    args.num_threads
+                }
+            }
+            #[cfg(not(feature = "parallel"))]
+            {
+                1
+            }
+        }
     };
 
     // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_engine.c:493-555
@@ -3690,7 +3738,16 @@ pub fn run(args: BlastnArgs) -> Result<()> {
     //     ...
     // }
     // ```
+    // NCBI reference: ncbi-blast/c++/src/algo/blast/api/prelim_stage.cpp:82-88
+    // ```c
+    // if (num_threads > 1) {
+    //     SetNumberOfThreads(num_threads);
+    // }
+    // ```
+    #[cfg(all(feature = "parallel", not(target_arch = "wasm32")))]
     let use_parallel = num_threads > 1;
+    #[cfg(any(not(feature = "parallel"), target_arch = "wasm32"))]
+    let use_parallel = false;
 
     // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_engine.c:478-536
     // ```c
@@ -3702,11 +3759,26 @@ pub fn run(args: BlastnArgs) -> Result<()> {
     //     ...
     // }
     // ```
+    // NCBI reference: ncbi-blast/c++/src/algo/blast/api/prelim_stage.cpp:82-88
+    // ```c
+    // if (num_threads > 1) {
+    //     SetNumberOfThreads(num_threads);
+    // }
+    // ```
+    // NCBI reference: ncbi-blast/c++/src/algo/blast/api/prelim_stage.cpp:82-88
+    // ```c
+    // if (num_threads > 1) {
+    //     SetNumberOfThreads(num_threads);
+    // }
+    // ```
     if use_parallel {
-        rayon::ThreadPoolBuilder::new()
-            .num_threads(num_threads)
-            .build_global()
-            .context("Failed to build thread pool")?;
+        #[cfg(all(feature = "parallel", not(target_arch = "wasm32")))]
+        {
+            rayon::ThreadPoolBuilder::new()
+                .num_threads(num_threads)
+                .build_global()
+                .context("Failed to build thread pool")?;
+        }
     }
 
     // Configure task-specific parameters (initial configuration)
@@ -7073,7 +7145,15 @@ pub fn run(args: BlastnArgs) -> Result<()> {
             };
 
             let mut combined_prelim_hits: Vec<PrelimHit> = Vec::new();
+            // NCBI reference: ncbi-blast/c++/src/algo/blast/api/prelim_stage.cpp:82-88
+            // ```c
+            // if (num_threads > 1) {
+            //     SetNumberOfThreads(num_threads);
+            // }
+            // ```
             if use_parallel {
+                #[cfg(all(feature = "parallel", not(target_arch = "wasm32")))]
+                {
                 // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_engine.c:478-536
                 // ```c
                 // while (TRUE) {
@@ -7175,6 +7255,11 @@ pub fn run(args: BlastnArgs) -> Result<()> {
                     if done {
                         break;
                     }
+                }
+                }
+                #[cfg(any(not(feature = "parallel"), target_arch = "wasm32"))]
+                {
+                    unreachable!("use_parallel is false when parallel threads are disabled");
                 }
             } else {
                 // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_engine.c:478-536
@@ -7772,6 +7857,8 @@ pub fn run(args: BlastnArgs) -> Result<()> {
         };
 
     if use_parallel {
+        #[cfg(all(feature = "parallel", not(target_arch = "wasm32")))]
+        {
         // Channel for sending hits
         // Use Option to signal completion: None means "all subjects processed"
         let (tx, rx) = channel::<Option<Vec<BlastnHsp>>>();
@@ -7983,6 +8070,11 @@ pub fn run(args: BlastnArgs) -> Result<()> {
             }
         }
         return Ok(());
+        }
+        #[cfg(any(not(feature = "parallel"), target_arch = "wasm32"))]
+        {
+            unreachable!("use_parallel is false when parallel threads are disabled");
+        }
     }
 
     // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_engine.c:478-536

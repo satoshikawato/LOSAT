@@ -122,19 +122,12 @@ cd LOSAT && cargo fmt
 -t, --threshold <THRESHOLD>        Neighbor threshold (default: 13)
 -w, --word-size <WORD_SIZE>        Word size (default: 3)
 -n, --num-threads <N>              Number of threads (0 = auto)
--v, --verbose                      Verbose logging to stderr
 --query-gencode <N>                Genetic code for query (default: 1)
 --db-gencode <N>                   Genetic code for subject (default: 1)
 --outfmt <FORMAT>                  Output format (0=pairwise, 6=tabular, 7=tabular+headers)
 --seg [true|false]                 SEG low-complexity masking (default: true)
 --window-size <N>                  Two-hit window size (default: 40, 0=one-hit mode)
---neighbor-map                     Use pre-computed neighbor map (faster scanning)
---ncbi-compat                      Use NCBI-compatible parameters
 --culling-limit <N>                HSP culling limit (default: 0=disabled)
---percent-identity <N>             Minimum percent identity filter
---min-hit-length <N>               Minimum alignment length filter
---only-qframe <1|2|3|-1|-2|-3>     Restrict to single query frame
---only-sframe <1|2|3|-1|-2|-3>     Restrict to single subject frame
 ```
 
 ### BLASTN Options
@@ -177,14 +170,12 @@ LOSAT/src/
 │   ├── tblastx/                   # TBLASTX implementation (primary focus)
 │   │   ├── blast_engine/          # Main execution orchestration
 │   │   │   ├── run_impl.rs        # Standard run() implementation
-│   │   │   └── run_neighbor_map.rs # Optimized neighbor-map mode
 │   │   ├── extension/             # Hit extension
 │   │   │   ├── two_hit.rs         # Two-hit extension logic
 │   │   │   ├── ungapped.rs        # Ungapped extension
 │   │   │   └── gapped.rs          # Gapped extension
 │   │   ├── lookup/                # Lookup table management
 │   │   │   ├── backbone.rs        # Core lookup table
-│   │   │   └── neighbor_map.rs    # Pre-computed neighbor relationships
 │   │   ├── scan/                  # Sequence scanning
 │   │   │   └── offset_pairs.rs    # Offset pair generation
 │   │   ├── sum_stats_linking/     # HSP chaining and E-value

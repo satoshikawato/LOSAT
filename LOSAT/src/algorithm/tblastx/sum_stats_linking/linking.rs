@@ -9,6 +9,17 @@ use crate::stats::sum_statistics::{
 use crate::stats::KarlinParams;
 use std::sync::OnceLock;
 use std::cell::RefCell;
+// NCBI reference: ncbi-blast/c++/include/algo/blast/blastinput/blast_args.hpp:1290-1296
+// ```c
+// CMTArgs(...)
+// {
+// #ifdef NCBI_NO_THREADS
+//     m_NumThreads = CThreadable::kMinNumThreads;
+//     m_MTMode = eNotSupported;
+// #endif
+// }
+// ```
+#[cfg(feature = "parallel")]
 use rayon::prelude::*;
 
 use crate::algorithm::tblastx::chaining::UngappedHit;
@@ -326,79 +337,97 @@ pub fn apply_sum_stats_even_gap_linking(
         frame_groups.push(current_group);
     }
 
-    // Step 3: Process each frame group IN PARALLEL (with order preservation)
-    // NCBI reference: link_hsps.c:553-983
-    // NCBI processes frame groups sequentially:
-    //   for (frame_index=0; frame_index<num_query_frames; frame_index++)
-    //   {
-    //       hp_start->next = hp_frame_start[frame_index];
-    //       number_of_hsps = hp_frame_number[frame_index];
-    //       // Each iteration uses: hp_frame_start[frame_index], hp_frame_number[frame_index]
-    //       // Local variables: hp_start, lh_helper, max, best (no shared state)
-    //       // Process group independently
-    //   }
+    // Step 3: Process each frame group (parallel when enabled, sequential otherwise).
+    // NCBI reference: ncbi-blast/c++/src/algo/blast/core/link_hsps.c:553-558
+    // ```c
+    // for (frame_index=0; frame_index<num_query_frames; frame_index++)
+    // {
+    //    hp_start->next = hp_frame_start[frame_index];
+    //    number_of_hsps = hp_frame_number[frame_index];
+    // }
+    // ```
     // NCBI processes groups in frame_index order (0, 1, 2, ...), which matches
     // the order of frame_groups in LOSAT (created from sorted HSP list).
     //
-    // LOSAT parallelizes this loop for performance while maintaining output equivalence.
-    // Each frame group is processed independently with no shared mutable state.
-    // To preserve NCBI order, we:
-    //   1. Use enumerate() to track group index
-    //   2. Process groups in parallel with map()
-    //   3. Sort results by group index
-    //   4. Flatten to final Vec<UngappedHit>
-    //
     // NCBI memory pooling: link_hsps.c:452-454 allocates lh_helper once with
     // MAX(1024, hspcnt+5) and reuses it across all frame groups.
-    // We use thread-local pools to maintain parallelism while reusing buffers.
     let initial_lh_size = (total_hits + 5).max(1024);  // NCBI: MAX(1024, hspcnt+5)
 
-    // Use thread_local! macro for thread-local storage (rayon doesn't have ThreadLocal)
-    thread_local! {
-        static POOLS: RefCell<Option<BufferPools>> = RefCell::new(None);
-    }
+    #[cfg(feature = "parallel")]
+    let mut results: Vec<UngappedHit> = {
+        // Use thread_local! macro for thread-local storage (rayon doesn't have ThreadLocal)
+        thread_local! {
+            static POOLS: RefCell<Option<BufferPools>> = RefCell::new(None);
+        }
 
-    let mut indexed_results: Vec<(usize, Vec<UngappedHit>)> = frame_groups
-        .into_par_iter()
-        .enumerate()
-        .map(|(group_idx, group_hits)| {
-            POOLS.with(|pools| {
-                let mut pools_opt = pools.borrow_mut();
-                let pool = pools_opt.get_or_insert_with(|| {
-                    BufferPools {
-                        lh_helpers: Vec::with_capacity(initial_lh_size),
-                        hsp_links: Vec::with_capacity(total_hits),
-                    }
-                });
-                let processed = link_hsp_group_ncbi(
-                    group_hits,
-                    params,
-                    &cutoffs,
-                    linking_params.gap_decay_rate,
-                    diag_enabled,
-                    linking_params.subject_len_nucl,
-                    query_contexts,
-                    subject_frame_bases,
-                    length_adj_per_context,
-                    eff_searchsp_per_context,
-                    &log_k_by_ctx,
-                    &mut pool.lh_helpers,
-                    &mut pool.hsp_links,
-                );
-                (group_idx, processed)
+        let mut indexed_results: Vec<(usize, Vec<UngappedHit>)> = frame_groups
+            .into_par_iter()
+            .enumerate()
+            .map(|(group_idx, group_hits)| {
+                POOLS.with(|pools| {
+                    let mut pools_opt = pools.borrow_mut();
+                    let pool = pools_opt.get_or_insert_with(|| {
+                        BufferPools {
+                            lh_helpers: Vec::with_capacity(initial_lh_size),
+                            hsp_links: Vec::with_capacity(total_hits),
+                        }
+                    });
+                    let processed = link_hsp_group_ncbi(
+                        group_hits,
+                        params,
+                        &cutoffs,
+                        linking_params.gap_decay_rate,
+                        diag_enabled,
+                        linking_params.subject_len_nucl,
+                        query_contexts,
+                        subject_frame_bases,
+                        length_adj_per_context,
+                        eff_searchsp_per_context,
+                        &log_k_by_ctx,
+                        &mut pool.lh_helpers,
+                        &mut pool.hsp_links,
+                    );
+                    (group_idx, processed)
+                })
             })
-        })
-        .collect();
+            .collect();
 
-    // Sort by group index to preserve NCBI processing order
-    // NCBI: for (frame_index=0; frame_index<num_query_frames; frame_index++)
-    indexed_results.sort_by_key(|(idx, _)| *idx);
+        // Sort by group index to preserve NCBI processing order
+        indexed_results.sort_by_key(|(idx, _)| *idx);
 
-    // Flatten results while maintaining order
-    let mut results: Vec<UngappedHit> = indexed_results
-        .into_iter()
-        .flat_map(|(_, hits)| hits)
-        .collect();
+        indexed_results
+            .into_iter()
+            .flat_map(|(_, hits)| hits)
+            .collect()
+    };
+
+    #[cfg(not(feature = "parallel"))]
+    let mut results: Vec<UngappedHit> = {
+        let mut pools = BufferPools {
+            lh_helpers: Vec::with_capacity(initial_lh_size),
+            hsp_links: Vec::with_capacity(total_hits),
+        };
+        let mut ordered: Vec<UngappedHit> = Vec::new();
+        for group_hits in frame_groups.into_iter() {
+            let processed = link_hsp_group_ncbi(
+                group_hits,
+                params,
+                &cutoffs,
+                linking_params.gap_decay_rate,
+                diag_enabled,
+                linking_params.subject_len_nucl,
+                query_contexts,
+                subject_frame_bases,
+                length_adj_per_context,
+                eff_searchsp_per_context,
+                &log_k_by_ctx,
+                &mut pools.lh_helpers,
+                &mut pools.hsp_links,
+            );
+            ordered.extend(processed);
+        }
+        ordered
+    };
 
     // ========================================================================
     // NCBI Parity: Two final sorts for translated queries (link_hsps.c:990-1000)

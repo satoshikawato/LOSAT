@@ -55,7 +55,7 @@ echo "Starting LOSAT commands..."
 # MjPMNV vs MlPMNV
 (time $LOSAT_BIN blastn -q ./fasta/AP027202.fasta -s ./fasta/LC738875.fasta -o ./losat_out/MjPMNV.MlPMNV.losatn.blastn.out --task blastn -n 1 )&>./losat_out/MjPMNV.MlPMNV.losatn.blastn.log
 
-<<COMMENTOUT
+
 
 # --- TLOSATX Commands (Genetic Code: 1) ---
 echo "Starting AP027280 self..."
@@ -101,7 +101,7 @@ echo "Starting MeenMJNV vs MejoMJNV (LOSAT)..."
 # AvCLPV vs PsCLPV
 echo "Starting AvCLPV vs PsCLPV (LOSAT)..."
 (time $LOSAT_BIN tblastx -q ./fasta/AvCLPV.fasta -s ./fasta/PsCLPV.fasta -o ./losat_out/AvCLPV.PsCLPV.tlosatx.n8.out --query-gencode 1 --db-gencode 1 -n 8 )&>./losat_out/AvCLPV.PsCLPV.tlosatx.n8.log 
-
+<<COMMENTOUT
 # --- TLOSATX Commands (Genetic Code: 4) ---
 echo "Starting NZ_CP006932 self..."
 # NZ_CP006932 self

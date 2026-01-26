@@ -6,17 +6,14 @@
 //! # Module Structure
 //!
 //! - `backbone` - Backbone lookup table (BackboneCell, BlastAaLookupTable, build_ncbi_lookup)
-//! - `neighbor_map` - Neighbor word map for neighbor_map mode
 
 mod backbone;
-mod neighbor_map;
 
 // Re-export public types and functions
 pub use backbone::{
     BackboneCell, BlastAaLookupTable, build_ncbi_lookup, build_direct_lookup,
     AA_HITS_PER_CELL,
 };
-pub use neighbor_map::{NeighborMap, NeighborLookup};
 
 use crate::utils::matrix::BLASTAA_SIZE;
 use crate::stats::KarlinParams;
@@ -28,6 +25,14 @@ use crate::stats::KarlinParams;
 /// - `blast_aalookup.c`: `BlastAaLookupTableNew`
 ///
 /// NCBI uses BLASTAA_SIZE = 28 for all amino acid lookup operations.
+// NCBI reference (NCBISTDAA alphabet includes stop codon):
+// ncbi-blast/c++/src/algo/blast/core/blast_encoding.c:115-118
+// ```c
+// const char NCBISTDAA_TO_AMINOACID[BLASTAA_SIZE] = {
+// '-','A','B','C','D','E','F','G','H','I','K','L','M',
+// 'N','P','Q','R','S','T','V','W','X','Y','Z','U','*',
+// 'O', 'J'};
+// ```
 pub const LOOKUP_WORD_LENGTH: usize = 3;
 pub const LOOKUP_ALPHABET_SIZE: usize = BLASTAA_SIZE; // 28 (NCBI standard)
 

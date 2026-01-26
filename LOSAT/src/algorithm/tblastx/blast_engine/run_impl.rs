@@ -6,11 +6,6 @@ use super::*;
 use std::sync::Arc;
 
 pub fn run(args: TblastxArgs) -> Result<()> {
-    // Use neighbor_map mode for faster scanning with pre-computed neighbor relationships
-    if args.neighbor_map {
-        return run_with_neighbor_map(args);
-    }
-    
     // Optional timing breakdown (disabled by default to preserve output/parity logs)
     let timing_enabled = std::env::var_os("LOSAT_TIMING").is_some();
     let t_total = Instant::now();
@@ -70,20 +65,6 @@ pub fn run(args: TblastxArgs) -> Result<()> {
     let use_parallel = num_threads > 1;
     let query_code = GeneticCode::from_id(args.query_gencode);
     let db_code = GeneticCode::from_id(args.db_gencode);
-    let only_qframe = args.only_qframe;
-    let only_sframe = args.only_sframe;
-
-    let valid_frame = |f: i8| matches!(f, 1 | 2 | 3 | -1 | -2 | -3);
-    if let Some(f) = only_qframe {
-        if !valid_frame(f) {
-            anyhow::bail!("Invalid --only-qframe");
-        }
-    }
-    if let Some(f) = only_sframe {
-        if !valid_frame(f) {
-            anyhow::bail!("Invalid --only-sframe");
-        }
-    }
 
     // [C] window = diag->window;
     let window = args.window_size as i32;
@@ -143,9 +124,6 @@ pub fn run(args: TblastxArgs) -> Result<()> {
     }
 
     let t_phase_read_queries = Instant::now();
-    if args.verbose {
-        eprintln!("Reading queries...");
-    }
     let query_reader = fasta::Reader::from_file(&args.query)?;
     let queries_raw: Vec<fasta::Record> = query_reader.records().filter_map(|r| r.ok()).collect();
     // NCBI reference: ncbi-blast/c++/include/algo/blast/core/blast_hits.h:153-166
@@ -178,15 +156,22 @@ pub fn run(args: TblastxArgs) -> Result<()> {
     //   }
     // Source: ncbi-blast/c++/src/algo/blast/core/blast_filter.c:572-580
 
+    // NCBI reference (translate all 6 frames for tblastx queries):
+    // ncbi-blast/c++/src/algo/blast/core/blast_util.c:1076-1101
+    // ```c
+    // frame_offsets = (Uint4*) malloc((NUM_FRAMES+1)*sizeof(Uint4));
+    // frame_offsets[0] = 0;
+    // for (context = 0; context < NUM_FRAMES; ++context) {
+    //    frame = BLAST_ContextToFrame(eBlastTypeBlastx, context);
+    //    length = BLAST_GetTranslation(nucl_seq, nucl_seq_rev,
+    //       nucl_length, frame, translation_buffer+offset, genetic_code);
+    //    offset += length + 1;
+    //    frame_offsets[context+1] = offset;
+    // }
+    // ```
     let mut query_frames: Vec<Vec<QueryFrame>> = queries_raw
         .iter()
-        .map(|r| {
-            let mut frames = generate_frames(r.seq(), &query_code);
-            if let Some(f) = only_qframe {
-                frames.retain(|x| x.frame == f);
-            }
-            frames
-        })
+        .map(|r| generate_frames(r.seq(), &query_code))
         .collect();
 
     if args.seg {
@@ -231,18 +216,20 @@ pub fn run(args: TblastxArgs) -> Result<()> {
     t_read_queries = t_phase_read_queries.elapsed();
 
     let t_phase_build_lookup = Instant::now();
-    if args.verbose {
-        eprintln!("Building lookup table...");
-    }
     // Note: karlin_params argument is now unused - computed per context in build_ncbi_lookup()
     // We still pass it for x_dropoff calculation (which uses ideal params for all contexts in tblastx)
     // NCBI lookup build always precomputes neighbors (no lazy mode).
     // Reference: ncbi-blast/c++/src/algo/blast/core/blast_aalookup.c:446-543
+    // NCBI reference (exact match indexing before neighbor expansion):
+    // ncbi-blast/c++/src/algo/blast/core/blast_aalookup.c:454-456
+    // ```c
+    // BlastLookupIndexQueryExactMatches(exact_backbone, lookup->word_length,
+    //                                   lookup->charsize, lookup->word_length,
+    //                                   query, location);
+    // ```
     let (lookup, contexts) = build_ncbi_lookup(
         &query_frames,
         args.threshold,
-        args.include_stop_seeds,
-        args.ncbi_stop_stop_score,
         &ungapped_params_for_xdrop, // Used for x_dropoff calculation only
     );
     t_build_lookup = t_phase_build_lookup.elapsed();
@@ -270,9 +257,6 @@ pub fn run(args: TblastxArgs) -> Result<()> {
         .collect();
 
     let t_phase_read_subjects = Instant::now();
-    if args.verbose {
-        eprintln!("Reading subjects...");
-    }
     let subject_reader = fasta::Reader::from_file(&args.subject)?;
     let subjects_raw: Vec<fasta::Record> = subject_reader.records().filter_map(|r| r.ok()).collect();
     if queries_raw.is_empty() || subjects_raw.is_empty() {
@@ -330,15 +314,6 @@ pub fn run(args: TblastxArgs) -> Result<()> {
     let query_nucl_lengths: Vec<usize> = queries_raw.iter().map(|r| r.seq().len()).collect();
     let avg_query_length = compute_avg_query_length_ncbi(&query_nucl_lengths);
 
-    if args.verbose {
-        eprintln!(
-            "Searching {} queries vs {} subjects... (avg_query_length={})",
-            queries_raw.len(),
-            subjects_raw.len(),
-            avg_query_length
-        );
-    }
-
     let t_search_start = Instant::now();
     let scan_ns = AtomicU64::new(0);
     let scan_calls = AtomicU64::new(0);
@@ -351,17 +326,17 @@ pub fn run(args: TblastxArgs) -> Result<()> {
     let identity_ns = AtomicU64::new(0);
     let identity_calls = AtomicU64::new(0);
 
-    let bar = if args.verbose {
-        let bar = ProgressBar::new(subjects_raw.len() as u64);
-        bar.set_style(
-            ProgressStyle::default_bar()
-                .template("{spinner:.green} [{elapsed_precise}] [{bar:40.cyan/blue}] {pos}/{len}")
-                .unwrap(),
-        );
-        bar
-    } else {
-        ProgressBar::hidden()
-    };
+    // NCBI verbose CLI flag is only present under _BLAST_DEBUG builds.
+    // ncbi-blast/c++/src/algo/blast/blastinput/blast_args.cpp:3265-3273
+    // ```c
+    // #if _BLAST_DEBUG
+    // arg_desc.AddFlag("verbose", "Produce verbose output (show BLAST options)",
+    //                  true);
+    // arg_desc.AddFlag("remote_verbose",
+    //                  "Produce verbose output for remote searches", true);
+    // #endif /* _BLAST_DEBUG */
+    // ```
+    let bar = ProgressBar::hidden();
 
     let (tx, rx) = channel::<Vec<Hit>>();
     let out_path = args.out.clone();
@@ -483,10 +458,17 @@ pub fn run(args: TblastxArgs) -> Result<()> {
             }
             st.diag_offset = window;
 
-            let mut s_frames = generate_frames(s_rec.seq(), &db_code);
-            if let Some(f) = only_sframe {
-                s_frames.retain(|x| x.frame == f);
-            }
+            // NCBI reference (translate all frames for subject sequences):
+            // ncbi-blast/c++/src/algo/blast/core/blast_util.c:1296-1308
+            // ```c
+            // for (context = 0; context < num_frames; ++context) {
+            //    int frame = BLAST_ContextToFrame(eBlastTypeBlastx, context);
+            //    retval->translations[context] = (Uint1*) malloc(...);
+            //    BLAST_GetTranslation(subject_blk->sequence_start, nucl_seq_rev,
+            //       subject_blk->length, frame, retval->translations[context], gen_code_string);
+            // }
+            // ```
+            let s_frames = generate_frames(s_rec.seq(), &db_code);
 
             let s_len = s_rec.seq().len();
 
@@ -1102,7 +1084,6 @@ pub fn run(args: TblastxArgs) -> Result<()> {
                 contexts_ref,
                 &s_frames,
                 &cutoff_scores,
-                &args,
                 timing_enabled,
                 &reeval_ns,
                 &reeval_calls,

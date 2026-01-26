@@ -2,7 +2,7 @@
 //!
 //! Reference: ncbi-blast/c++/src/algo/blast/core/blast_engine.c:438-1497
 //!
-//! This module contains the main `run()` and `run_with_neighbor_map()` functions
+//! This module contains the main `run()` function
 //! that coordinate the TBLASTX search process:
 //! - Query and subject sequence reading
 //! - Lookup table construction
@@ -13,22 +13,29 @@
 //! # Module Structure
 //!
 //! - `mod.rs` - Shared structures and helpers (WorkerState, atomic ops, reevaluation)
-//! - `run.rs` - Main run() function for backbone mode
-//! - `run_neighbor_map.rs` - run_with_neighbor_map() for neighbor map mode
+//! - `run_impl.rs` - Main run() function for backbone mode
 
+// NCBI reference (main search loop):
+// ncbi-blast/c++/src/algo/blast/core/blast_engine.c:1411-1427
+// ```c
+// /* iterate over all subject sequences */
+// while ( (seq_arg.oid = BlastSeqSrcIteratorNext(seq_src, itr))
+//        != BLAST_SEQSRC_EOF) {
+//    ...
+//    if (BlastSeqSrcGetSequence(seq_src, &seq_arg) < 0) {
+//        continue;
+//    }
+// }
+// ```
 mod run_impl;
-mod run_neighbor_map;
 
 // Re-export the main run function
 pub use run_impl::run;
 
-// Re-export from run_neighbor_map for internal use
-pub(crate) use run_neighbor_map::run_with_neighbor_map;
-
 // Imports used by submodules
 pub(crate) use anyhow::{Context, Result};
 pub(crate) use bio::io::fasta;
-pub(crate) use indicatif::{ProgressBar, ProgressStyle};
+pub(crate) use indicatif::ProgressBar;
 // NCBI reference: ncbi-blast/c++/include/algo/blast/blastinput/blast_args.hpp:1290-1296
 // ```c
 // CMTArgs(...)
@@ -63,7 +70,7 @@ pub(crate) use super::diagnostics::{
     diagnostics_enabled, print_summary as print_diagnostics_summary, DiagnosticCounters,
 };
 pub(crate) use super::extension::{convert_coords, extend_hit_two_hit};
-pub(crate) use super::lookup::{build_ncbi_lookup, encode_kmer, NeighborLookup, QueryContext};
+pub(crate) use super::lookup::{build_ncbi_lookup, encode_kmer, QueryContext};
 pub(crate) use super::reevaluate::{
     get_num_identities_and_positives_ungapped, hsp_test,
     reevaluate_ungapped_hit_ncbi_translated,
@@ -174,7 +181,6 @@ pub(crate) fn reevaluate_ungapped_hsp_list(
     contexts: &[QueryContext],
     s_frames: &[QueryFrame],
     cutoff_scores: &[Vec<i32>],
-    args: &TblastxArgs,
     timing_enabled: bool,
     reeval_ns: &AtomicU64,
     reeval_calls: &AtomicU64,
@@ -255,8 +261,20 @@ pub(crate) fn reevaluate_ungapped_hsp_list(
         };
 
         // NCBI: Blast_HSPTest (blast_hits.c:2719)
-        let percent_identity = args.percent_identity;
-        let min_hit_length = args.min_hit_length;
+        // NCBI reference (defaults are zero via calloc in BlastHitSavingOptionsNew):
+        // ncbi-blast/c++/src/algo/blast/core/blast_options.c:1444-1449
+        // ```c
+        // *options = (BlastHitSavingOptions*) calloc(1, sizeof(BlastHitSavingOptions));
+        // ```
+        // NCBI reference (Blast_HSPTest uses percent_identity/min_hit_length):
+        // ncbi-blast/c++/src/algo/blast/core/blast_hits.c:993-999
+        // ```c
+        // return ((hsp->num_ident * 100.0 <
+        //         align_length * hit_options->percent_identity) ||
+        //         align_length < hit_options->min_hit_length) ;
+        // ```
+        let percent_identity = 0.0;
+        let min_hit_length = 0usize;
         if hsp_test(num_ident, new_len, percent_identity, min_hit_length) {
             continue;
         }

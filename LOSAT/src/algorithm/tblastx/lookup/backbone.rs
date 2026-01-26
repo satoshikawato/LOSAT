@@ -92,11 +92,19 @@ impl BlastAaLookupTable {
 ///
 /// Neighbor words are always precomputed in the lookup table (no lazy mode).
 /// Reference: ncbi-blast/c++/src/algo/blast/core/blast_aalookup.c:446-543
+///
+/// NCBI reference (fixed alphabet and neighbor precomputation):
+/// ncbi-blast/c++/src/algo/blast/core/blast_aalookup.c:436-456
+/// ```c
+/// ASSERT(lookup->alphabet_size <= BLASTAA_SIZE);
+/// ...
+/// BlastLookupIndexQueryExactMatches(exact_backbone, lookup->word_length,
+///                                   lookup->charsize, lookup->word_length,
+///                                   query, location);
+/// ```
 pub fn build_ncbi_lookup(
     queries: &[Vec<QueryFrame>],
     threshold: i32,
-    _include_stop_seeds: bool, // Ignored - NCBI always uses full 28-char alphabet
-    _ncbi_stop_stop_score: bool, // Ignored - always use NCBI BLOSUM62 (*-* = +1)
     _karlin_params: &crate::stats::KarlinParams, // Unused - computed per context, kept for API compatibility
 ) -> (BlastAaLookupTable, Vec<QueryContext>) {
     let diag_enabled = diagnostics_enabled();

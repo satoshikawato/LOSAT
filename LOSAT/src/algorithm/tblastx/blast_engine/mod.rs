@@ -180,7 +180,7 @@ pub(crate) fn reevaluate_ungapped_hsp_list(
     ungapped_hits: Vec<UngappedHit>,
     contexts: &[QueryContext],
     s_frames: &[QueryFrame],
-    cutoff_scores: &[Vec<i32>],
+    cutoff_scores: &[i32],
     timing_enabled: bool,
     reeval_ns: &AtomicU64,
     reeval_calls: &AtomicU64,
@@ -192,7 +192,11 @@ pub(crate) fn reevaluate_ungapped_hsp_list(
     for mut hit in ungapped_hits {
         let ctx = &contexts[hit.ctx_idx];
         let s_frame = &s_frames[hit.s_f_idx];
-        let cutoff = cutoff_scores[hit.ctx_idx][hit.s_f_idx];
+        // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_hits.c:686-688
+        // ```c
+        // Int4 cutoff_score = word_params->cutoffs[hsp->context].cutoff_score;
+        // ```
+        let cutoff = cutoff_scores[hit.ctx_idx];
 
         // NCBI: query_start = query_blk->sequence + query_info->contexts[context].query_offset;
         // query->sequence points past the leading NULLB sentinel.

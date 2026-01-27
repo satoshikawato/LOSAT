@@ -226,9 +226,26 @@ fn reevaluate_ungapped_hit_ncbi_translated_scalar(
     let mut best_end: usize = 0;
     let mut current_start: usize = 0;
 
+    // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_hits.c:692-705
+    // ```c
+    // query = query_start + hsp->query.offset;
+    // subject = subject_start + hsp->subject.offset;
+    // for (index = 0; index < hsp_length; ++index) {
+    //    sum += matrix[*query & kResidueMask][*subject];
+    //    query++;
+    //    subject++;
+    //    if (sum < 0) {
+    //       ...
+    //    }
+    // }
+    // ```
+    //
+    // Safety: bounds were checked above, so q_ptr/s_ptr are valid for hsp_len bytes.
+    let q_ptr = unsafe { query_raw.as_ptr().add(q_off_raw) };
+    let s_ptr = unsafe { subject_raw.as_ptr().add(s_off_raw) };
     for idx in 0..hsp_len {
-        let q = query_raw[q_off_raw + idx];
-        let s = subject_raw[s_off_raw + idx];
+        let q = unsafe { *q_ptr.add(idx) };
+        let s = unsafe { *s_ptr.add(idx) };
         // NCBI: matrix[*query & 0xff][*subject]
         sum += blosum62_score(q, s);
 

@@ -492,7 +492,14 @@ pub fn run(args: TblastxArgs) -> Result<()> {
             //
             // For -subject mode, subject_len_nucl is used (not per-frame AA length).
             let subject_len_nucl = s_len as i64;
-            let mut cutoff_scores: Vec<Vec<i32>> = vec![vec![0; s_frames.len()]; contexts_ref.len()];
+            // NCBI: cutoff scores are stored per query context (no subject-frame dimension).
+            // Reference: ncbi-blast/c++/src/algo/blast/core/blast_parameters.c:320-324
+            // ```c
+            // BlastUngappedCutoffs *curr_cutoffs = parameters->cutoffs + context;
+            // ...
+            // curr_cutoffs->cutoff_score = new_cutoff;
+            // ```
+            let mut cutoff_scores: Vec<i32> = vec![0; contexts_ref.len()];
             // NCBI word_params->cutoff_score_min = min of cutoffs across all contexts
             // Reference: ncbi-blast/c++/src/algo/blast/core/blast_parameters.c:401-403
             let mut cutoff_score_min = i32::MAX;
@@ -576,10 +583,8 @@ pub fn run(args: TblastxArgs) -> Result<()> {
                 // Track minimum cutoff for linking
                 cutoff_score_min = cutoff_score_min.min(cutoff);
                 
-                // All subject frames use the same cutoff (NCBI behavior)
-                for sf_idx in 0..s_frames.len() {
-                    cutoff_scores[ctx_idx][sf_idx] = cutoff;
-                }
+                // All subject frames use the same cutoff (NCBI: per-context cutoffs only).
+                cutoff_scores[ctx_idx] = cutoff;
             }
             // If no contexts, use 0 as fallback
             if cutoff_score_min == i32::MAX {
@@ -844,7 +849,11 @@ pub fn run(args: TblastxArgs) -> Result<()> {
                             }
 
                             // [C] cutoffs = word_params->cutoffs + curr_context;
-                            let cutoff = unsafe { *cutoff_scores.get_unchecked(ctx_idx).get_unchecked(s_f_idx) };
+                            // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_hits.c:686-688
+                            // ```c
+                            // Int4 cutoff_score = word_params->cutoffs[hsp->context].cutoff_score;
+                            // ```
+                            let cutoff = unsafe { *cutoff_scores.get_unchecked(ctx_idx) };
                             // [C] cutoffs->x_dropoff (per-context x_dropoff)
                             // Reference: aa_ungapped.c:579
                             let x_dropoff = unsafe { *x_dropoff_per_context.get_unchecked(ctx_idx) };

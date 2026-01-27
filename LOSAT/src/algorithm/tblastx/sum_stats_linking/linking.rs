@@ -552,16 +552,23 @@ fn link_hsp_group_ncbi(
         )
     }
 
-    // Sort by reverse position using frame-relative coordinates (NCBI parity).
-    // NCBI uses qsort (unstable), so we use sort_unstable_by for parity.
-    group_hits.sort_unstable_by(|a, b| {
-        let (aqo, aqe, aso, ase) = frame_relative_coords(a);
-        let (bqo, bqe, bso, bse) = frame_relative_coords(b);
-        bqo.cmp(&aqo)
-            .then(bqe.cmp(&aqe))
-            .then(bso.cmp(&aso))
-            .then(bse.cmp(&ase))
-    });
+    // NCBI reference: ncbi-blast/c++/src/algo/blast/core/link_hsps.c:483-559
+    // ```c
+    // /* Sort by (reverse) position. */
+    // qsort(link_hsp_array, total_number_of_hsps, sizeof(LinkHSPStruct*),
+    //       s_RevCompareHSPsTbx);
+    // ...
+    // for (index=0; index<number_of_hsps; index++) {
+    //     H = link_hsp_array[index];
+    //     ...
+    // }
+    // for (frame_index=0; frame_index<num_query_frames; frame_index++) {
+    //     hp_start->next = hp_frame_start[frame_index];
+    //     ...
+    // }
+    // ```
+    // NCBI does not re-sort within each frame group; it preserves the initial
+    // qsort order. Therefore we must not reorder `group_hits` here.
 
     // NCBI uses the first HSP in this frame/strand group to select the query context
     // used for effective length/search-space in sum-statistics.

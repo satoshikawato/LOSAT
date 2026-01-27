@@ -162,6 +162,106 @@ unsafe fn extend_left_ungapped_avx2(
     (max_score, left_disp)
 }
 
+// NCBI BLAST reference (c++/src/algo/blast/core/aa_ungapped.c:886-921):
+//   n = MIN(s_off, q_off);
+//   best_i = n + 1;
+//   s = subject->sequence + s_off - n;
+//   q = query->sequence + q_off - n;
+//   for (i = n; i >= 0; i--) {
+//       score += matrix[q[i]][s[i]];
+//       if (score > maxscore) {
+//           maxscore = score;
+//           best_i = i;
+//       }
+//       if ((maxscore - score) >= dropoff)
+//           break;
+//   }
+//   *length = n - best_i + 1;
+//   return maxscore;
+#[cfg(all(target_arch = "wasm32", target_feature = "simd128"))]
+#[target_feature(enable = "simd128")]
+unsafe fn extend_left_ungapped_simd128(
+    q_seq: &[u8],
+    s_seq: &[u8],
+    q_off: usize,
+    s_off: usize,
+    initial_score: i32,
+    x_drop: i32,
+) -> (i32, usize) {
+    use std::arch::wasm32::*;
+
+    let table = ungapped_score_table_32();
+    let max_left = q_off.min(s_off);
+
+    let mut score = initial_score;
+    let mut max_score = initial_score;
+    let mut left_disp = 0usize;
+    let mut i = 0usize;
+
+    while i + 16 <= max_left {
+        let q_ptr = q_seq.as_ptr().add(q_off - i - 16);
+        let s_ptr = s_seq.as_ptr().add(s_off - i - 16);
+        // Safety: q_ptr/s_ptr are in-bounds by loop condition.
+        let qv = v128_load(q_ptr as *const v128);
+        let sv = v128_load(s_ptr as *const v128);
+        let mut pos = i;
+        macro_rules! step_lane_rev {
+            ($lane:expr, $qv:ident, $sv:ident, $pos:ident) => {{
+                let q = i8x16_extract_lane::<$lane>($qv) as u8;
+                let s = i8x16_extract_lane::<$lane>($sv) as u8;
+                score += table[(q as usize) * 32 + (s as usize)];
+                let ext_len = $pos + 1;
+                if score > max_score {
+                    max_score = score;
+                    left_disp = ext_len;
+                }
+                if (max_score - score) >= x_drop {
+                    return (max_score, left_disp);
+                }
+                $pos += 1;
+            }};
+        }
+        // Apply near..far: lane 15 is nearest, lane 0 is farthest.
+        step_lane_rev!(15, qv, sv, pos);
+        step_lane_rev!(14, qv, sv, pos);
+        step_lane_rev!(13, qv, sv, pos);
+        step_lane_rev!(12, qv, sv, pos);
+        step_lane_rev!(11, qv, sv, pos);
+        step_lane_rev!(10, qv, sv, pos);
+        step_lane_rev!(9, qv, sv, pos);
+        step_lane_rev!(8, qv, sv, pos);
+        step_lane_rev!(7, qv, sv, pos);
+        step_lane_rev!(6, qv, sv, pos);
+        step_lane_rev!(5, qv, sv, pos);
+        step_lane_rev!(4, qv, sv, pos);
+        step_lane_rev!(3, qv, sv, pos);
+        step_lane_rev!(2, qv, sv, pos);
+        step_lane_rev!(1, qv, sv, pos);
+        step_lane_rev!(0, qv, sv, pos);
+        i += 16;
+    }
+
+    while i < max_left {
+        let q_char = *q_seq.get_unchecked(q_off - 1 - i);
+        let s_char = *s_seq.get_unchecked(s_off - 1 - i);
+
+        score += get_score(q_char, s_char);
+        let ext_len = i + 1;
+
+        if score > max_score {
+            max_score = score;
+            left_disp = ext_len;
+        }
+
+        if (max_score - score) >= x_drop {
+            break;
+        }
+        i += 1;
+    }
+
+    (max_score, left_disp)
+}
+
 #[inline(always)]
 fn extend_left_ungapped(
     q_seq: &[u8],
@@ -177,6 +277,27 @@ fn extend_left_ungapped(
             unsafe {
                 return extend_left_ungapped_avx2(q_seq, s_seq, q_off, s_off, initial_score, x_drop);
             }
+        }
+    }
+    #[cfg(all(target_arch = "wasm32", target_feature = "simd128"))]
+    {
+        // NCBI reference: ncbi-blast/c++/src/algo/blast/core/aa_ungapped.c:886-921
+        // ```c
+        // for (i = n; i >= 0; i--) {
+        //    score += matrix[q[i]][s[i]];
+        //    if (score > maxscore) { ... }
+        //    if ((maxscore - score) >= dropoff) break;
+        // }
+        // ```
+        unsafe {
+            return extend_left_ungapped_simd128(
+                q_seq,
+                s_seq,
+                q_off,
+                s_off,
+                initial_score,
+                x_drop,
+            );
         }
     }
     extend_left_ungapped_scalar(q_seq, s_seq, q_off, s_off, initial_score, x_drop)
@@ -338,6 +459,102 @@ unsafe fn extend_right_ungapped_avx2(
     (max_score, right_disp, j)
 }
 
+// NCBI BLAST reference (c++/src/algo/blast/core/aa_ungapped.c:846-866):
+//   for (i = 0; i < n; i++) {
+//       score += matrix[q[i]][s[i]];
+//       if (score > maxscore) {
+//           maxscore = score;
+//           best_i = i;
+//       }
+//       if (score <= 0 || (maxscore - score) >= dropoff)
+//           break;
+//   }
+//   *length = best_i + 1;
+//   *s_last_off = s_off + i;
+#[cfg(all(target_arch = "wasm32", target_feature = "simd128"))]
+#[target_feature(enable = "simd128")]
+unsafe fn extend_right_ungapped_simd128(
+    q_seq: &[u8],
+    s_seq: &[u8],
+    q_start: usize,
+    s_start: usize,
+    initial_score: i32,
+    x_drop: i32,
+) -> (i32, usize, usize) {
+    use std::arch::wasm32::*;
+
+    let table = ungapped_score_table_32();
+    let q_limit = q_seq.len();
+    let s_limit = s_seq.len();
+    let n = (q_limit - q_start).min(s_limit - s_start);
+
+    let mut score = initial_score;
+    let mut max_score = initial_score;
+    let mut right_disp = 0usize;
+    let mut j = 0usize;
+
+    while j + 16 <= n {
+        let base = j;
+        let q_ptr = q_seq.as_ptr().add(q_start + base);
+        let s_ptr = s_seq.as_ptr().add(s_start + base);
+        // Safety: q_ptr/s_ptr are in-bounds by loop condition.
+        let qv = v128_load(q_ptr as *const v128);
+        let sv = v128_load(s_ptr as *const v128);
+        let mut pos = base;
+        macro_rules! step_lane {
+            ($lane:expr, $qv:ident, $sv:ident, $pos:ident) => {{
+                let q = i8x16_extract_lane::<$lane>($qv) as u8;
+                let s = i8x16_extract_lane::<$lane>($sv) as u8;
+                score += table[(q as usize) * 32 + (s as usize)];
+                if score > max_score {
+                    max_score = score;
+                    right_disp = $pos + 1;
+                }
+                if score <= 0 || (max_score - score) >= x_drop {
+                    return (max_score, right_disp, $pos);
+                }
+                $pos += 1;
+            }};
+        }
+        step_lane!(0, qv, sv, pos);
+        step_lane!(1, qv, sv, pos);
+        step_lane!(2, qv, sv, pos);
+        step_lane!(3, qv, sv, pos);
+        step_lane!(4, qv, sv, pos);
+        step_lane!(5, qv, sv, pos);
+        step_lane!(6, qv, sv, pos);
+        step_lane!(7, qv, sv, pos);
+        step_lane!(8, qv, sv, pos);
+        step_lane!(9, qv, sv, pos);
+        step_lane!(10, qv, sv, pos);
+        step_lane!(11, qv, sv, pos);
+        step_lane!(12, qv, sv, pos);
+        step_lane!(13, qv, sv, pos);
+        step_lane!(14, qv, sv, pos);
+        step_lane!(15, qv, sv, pos);
+        j += 16;
+    }
+
+    while j < n {
+        let q_char = *q_seq.get_unchecked(q_start + j);
+        let s_char = *s_seq.get_unchecked(s_start + j);
+
+        score += get_score(q_char, s_char);
+
+        if score > max_score {
+            max_score = score;
+            right_disp = j + 1;
+        }
+
+        if score <= 0 || (max_score - score) >= x_drop {
+            break;
+        }
+        j += 1;
+    }
+
+    (max_score, right_disp, j)
+}
+
 #[inline(always)]
 fn extend_right_ungapped(
     q_seq: &[u8],
@@ -353,6 +570,27 @@ fn extend_right_ungapped(
             unsafe {
                 return extend_right_ungapped_avx2(q_seq, s_seq, q_start, s_start, initial_score, x_drop);
             }
+        }
+    }
+    #[cfg(all(target_arch = "wasm32", target_feature = "simd128"))]
+    {
+        // NCBI reference: ncbi-blast/c++/src/algo/blast/core/aa_ungapped.c:846-866
+        // ```c
+        // for (i = 0; i < n; i++) {
+        //    score += matrix[q[i]][s[i]];
+        //    if (score > maxscore) { ... }
+        //    if (score <= 0 || (maxscore - score) >= dropoff) break;
+        // }
+        // ```
+        unsafe {
+            return extend_right_ungapped_simd128(
+                q_seq,
+                s_seq,
+                q_start,
+                s_start,
+                initial_score,
+                x_drop,
+            );
         }
     }
     extend_right_ungapped_scalar(q_seq, s_seq, q_start, s_start, initial_score, x_drop)

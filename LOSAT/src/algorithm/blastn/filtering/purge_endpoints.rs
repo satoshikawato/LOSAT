@@ -1006,6 +1006,29 @@ pub fn reevaluate_hsp_with_ambiguities_gapped_ex(
     let mut score: i32 = 0;
     let mut sum: i32 = 0;
 
+    // NCBI uses raw pointers without bounds checks (blast_hits.c:528-559).
+    // Pre-validate the alignment span so we can safely use unchecked loads.
+    let mut q_pos_check = q_offset;
+    let mut s_pos_check = s_offset;
+    for op in gap_ops.iter() {
+        match *op {
+            GapEditOp::Sub(n) => {
+                let n = n as usize;
+                q_pos_check = q_pos_check.saturating_add(n);
+                s_pos_check = s_pos_check.saturating_add(n);
+            }
+            GapEditOp::Del(n) => {
+                s_pos_check = s_pos_check.saturating_add(n as usize);
+            }
+            GapEditOp::Ins(n) => {
+                q_pos_check = q_pos_check.saturating_add(n as usize);
+            }
+        }
+    }
+    let bounds_safe = q_pos_check <= q_seq.len() && s_pos_check <= s_seq.len();
+    let q_ptr = q_seq.as_ptr();
+    let s_ptr = s_seq.as_ptr();
+
     let mut query_pos = q_offset;
     let mut subject_pos = s_offset;
 
@@ -1022,6 +1045,73 @@ pub fn reevaluate_hsp_with_ambiguities_gapped_ex(
     let mut current_start_esp_index = 0usize;
     let mut best_end_esp_num: i32 = -1;
 
+    // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_hits.c:562-608
+    // ```c
+    // if (sum < 0) {
+    //     if (op_index < esp->num[index]) {
+    //         esp->num[index] -= op_index;
+    //         current_start_esp_index = index;
+    //         op_index = 0;
+    //     } else {
+    //         current_start_esp_index = index + 1;
+    //     }
+    //     sum = 0;
+    //     current_q_start = query;
+    //     current_s_start = subject;
+    //     if (score < cutoff_score) {
+    //         best_q_start = query;
+    //         best_s_start = subject;
+    //         score = 0;
+    //         best_start_esp_index = current_start_esp_index;
+    //         best_end_esp_index = current_start_esp_index;
+    //     }
+    // } else if (sum > score) {
+    //     score = sum;
+    //     best_q_start = current_q_start;
+    //     best_s_start = current_s_start;
+    //     best_q_end = query;
+    //     best_s_end = subject;
+    //     best_start_esp_index = current_start_esp_index;
+    //     best_end_esp_index = index;
+    //     best_end_esp_num = op_index;
+    // }
+    // ```
+    macro_rules! update_after_op {
+        ($index:ident, $op_index:ident) => {{
+            if sum < 0 {
+                if $op_index < gap_ops[$index].num() as usize {
+                    if let GapEditOp::Sub(n) = gap_ops[$index] {
+                        gap_ops[$index] = GapEditOp::Sub((n as usize - $op_index) as u32);
+                    }
+                    current_start_esp_index = $index;
+                    $op_index = 0;
+                } else {
+                    current_start_esp_index = $index + 1;
+                }
+                sum = 0;
+                current_q_start = query_pos;
+                current_s_start = subject_pos;
+
+                if score < cutoff_score {
+                    best_q_start = query_pos;
+                    best_s_start = subject_pos;
+                    score = 0;
+                    best_start_esp_index = current_start_esp_index;
+                    best_end_esp_index = current_start_esp_index;
+                }
+            } else if sum > score {
+                score = sum;
+                best_q_start = current_q_start;
+                best_s_start = current_s_start;
+                best_q_end = query_pos;
+                best_s_end = subject_pos;
+                best_start_esp_index = current_start_esp_index;
+                best_end_esp_index = $index;
+                best_end_esp_num = $op_index as i32;
+            }
+        }};
+    }
+
     // NCBI reference: blast_hits.c:541-610
     // ```c
     // if (op_index < esp->num[index]) {
@@ -1037,7 +1127,73 @@ pub fn reevaluate_hsp_with_ambiguities_gapped_ex(
         while op_index < gap_ops[index].num() as usize {
             match gap_ops[index] {
                 GapEditOp::Sub(_) => {
-                    if query_pos < q_seq.len() && subject_pos < s_seq.len() {
+                    // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_hits.c:547-551
+                    // ```c
+                    // sum += factor*matrix[*query & kResidueMask][*subject];
+                    // query++;
+                    // subject++;
+                    // op_index++;
+                    // ```
+                    #[cfg(all(target_arch = "wasm32", target_feature = "simd128"))]
+                    {
+                        use std::arch::wasm32::*;
+                        let remaining = gap_ops[index].num() as usize - op_index;
+                        if remaining >= 16
+                            && query_pos + 16 <= q_seq.len()
+                            && subject_pos + 16 <= s_seq.len()
+                        {
+                            // Safety: bounds are checked above; v128_load reads 16 bytes.
+                            let (qv, sv) = unsafe {
+                                (
+                                    v128_load(q_seq.as_ptr().add(query_pos) as *const v128),
+                                    v128_load(s_seq.as_ptr().add(subject_pos) as *const v128),
+                                )
+                            };
+                            macro_rules! step_lane {
+                                ($lane:expr, $qv:ident, $sv:ident) => {{
+                                    let q = i8x16_extract_lane::<$lane>($qv) as u8;
+                                    let s = i8x16_extract_lane::<$lane>($sv) as u8;
+                                    let q_code = (q & 0x0f) as usize;
+                                    let s_code = (s & 0x0f) as usize;
+                                    // NCBI kResidueMask = 0x0f -> indices 0..15
+                                    // Reference: ncbi-blast/c++/src/algo/blast/core/blast_hits.c:510-511
+                                    let score = unsafe {
+                                        *matrix.get_unchecked(q_code * BLASTNA_SIZE + s_code)
+                                    };
+                                    sum += factor * score;
+                                    query_pos += 1;
+                                    subject_pos += 1;
+                                    op_index += 1;
+                                    update_after_op!(index, op_index);
+                                }};
+                            }
+                            step_lane!(0, qv, sv);
+                            step_lane!(1, qv, sv);
+                            step_lane!(2, qv, sv);
+                            step_lane!(3, qv, sv);
+                            step_lane!(4, qv, sv);
+                            step_lane!(5, qv, sv);
+                            step_lane!(6, qv, sv);
+                            step_lane!(7, qv, sv);
+                            step_lane!(8, qv, sv);
+                            step_lane!(9, qv, sv);
+                            step_lane!(10, qv, sv);
+                            step_lane!(11, qv, sv);
+                            step_lane!(12, qv, sv);
+                            step_lane!(13, qv, sv);
+                            step_lane!(14, qv, sv);
+                            step_lane!(15, qv, sv);
+                            continue;
+                        }
+                    }
+                    if bounds_safe {
+                        // Safety: bounds were validated above and kResidueMask keeps indices in range.
+                        let q_code = unsafe { *q_ptr.add(query_pos) & 0x0f } as usize;
+                        let s_code = unsafe { *s_ptr.add(subject_pos) & 0x0f } as usize;
+                        let score =
+                            unsafe { *matrix.get_unchecked(q_code * BLASTNA_SIZE + s_code) };
+                        sum += factor * score;
+                    } else if query_pos < q_seq.len() && subject_pos < s_seq.len() {
                         let q_code = (q_seq[query_pos] & 0x0f) as usize;
                         let s_code = (s_seq[subject_pos] & 0x0f) as usize;
                         sum += factor * matrix[q_code * BLASTNA_SIZE + s_code];
@@ -1058,39 +1214,7 @@ pub fn reevaluate_hsp_with_ambiguities_gapped_ex(
                 }
             }
 
-            if sum < 0 {
-                // NCBI reference: blast_hits.c:563-585
-                if op_index < gap_ops[index].num() as usize {
-                    if let GapEditOp::Sub(n) = gap_ops[index] {
-                        gap_ops[index] = GapEditOp::Sub((n as usize - op_index) as u32);
-                    }
-                    current_start_esp_index = index;
-                    op_index = 0;
-                } else {
-                    current_start_esp_index = index + 1;
-                }
-                sum = 0;
-                current_q_start = query_pos;
-                current_s_start = subject_pos;
-
-                if score < cutoff_score {
-                    best_q_start = query_pos;
-                    best_s_start = subject_pos;
-                    score = 0;
-                    best_start_esp_index = current_start_esp_index;
-                    best_end_esp_index = current_start_esp_index;
-                }
-            } else if sum > score {
-                // NCBI reference: blast_hits.c:595-604
-                score = sum;
-                best_q_start = current_q_start;
-                best_s_start = current_s_start;
-                best_q_end = query_pos;
-                best_s_end = subject_pos;
-                best_start_esp_index = current_start_esp_index;
-                best_end_esp_index = index;
-                best_end_esp_num = op_index as i32;
-            }
+            update_after_op!(index, op_index);
         }
     }
 

@@ -338,10 +338,29 @@ pub fn run(args: TblastxArgs) -> Result<()> {
     // ```
     let bar = ProgressBar::hidden();
 
-    let (tx, rx) = channel::<Vec<Hit>>();
+    // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_engine.c:1411-1475
+    // ```c
+    // while ( (seq_arg.oid = BlastSeqSrcIteratorNext(seq_src, itr))
+    //        != BLAST_SEQSRC_EOF) {
+    //    ...
+    //    status = s_BlastSearchEngineCore(..., &hsp_list, ...);
+    // }
+    // ```
+    // Single-threaded NCBI runs the subject loop in-process, so we can
+    // accumulate hits directly without an mpsc queue.
+    #[cfg(all(feature = "parallel", not(target_arch = "wasm32")))]
+    let use_channel = use_parallel;
+    #[cfg(any(not(feature = "parallel"), target_arch = "wasm32"))]
+    let use_channel = false;
+
+    let (tx_opt, mut rx_opt) = if use_channel {
+        let (tx, rx) = channel::<Vec<Hit>>();
+        (Some(tx), Some(rx))
+    } else {
+        (None, None)
+    };
     let out_path = args.out.clone();
     let evalue_threshold = args.evalue;
-    let mut rx_opt = Some(rx);
 
     // NCBI reference: ncbi-blast/c++/src/algo/blast/api/prelim_stage.cpp:82-88
     // ```c
@@ -350,7 +369,7 @@ pub fn run(args: TblastxArgs) -> Result<()> {
     // }
     // ```
     #[cfg(all(feature = "parallel", not(target_arch = "wasm32")))]
-    let writer = if use_parallel {
+    let writer = if use_channel {
         // NCBI reference: ncbi-blast/c++/include/algo/blast/core/blast_hits.h:153-166
         // ```c
         // typedef struct BlastHSPList {
@@ -435,7 +454,19 @@ pub fn run(args: TblastxArgs) -> Result<()> {
     //    status = s_BlastSearchEngineCore(...);
     // }
     // ```
-    fn for_each_subjects<FInit, FBody>(subjects: &[fasta::Record], init: FInit, mut body: FBody)
+    // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_engine.c:1411-1475
+    // ```c
+    // while ( (seq_arg.oid = BlastSeqSrcIteratorNext(seq_src, itr))
+    //        != BLAST_SEQSRC_EOF) {
+    //    ...
+    //    status = s_BlastSearchEngineCore(...);
+    // }
+    // ```
+    fn for_each_subjects<FInit, FBody>(
+        subjects: &[fasta::Record],
+        init: FInit,
+        mut body: FBody,
+    ) -> WorkerState
     where
         FInit: FnOnce() -> WorkerState,
         FBody: FnMut(&mut WorkerState, (usize, &fasta::Record)),
@@ -444,6 +475,7 @@ pub fn run(args: TblastxArgs) -> Result<()> {
         for (s_idx, s_rec) in subjects.iter().enumerate() {
             body(&mut state, (s_idx, s_rec));
         }
+        state
     }
 
     let process_subject = |st: &mut WorkerState, (s_idx, s_rec): (usize, &fasta::Record)| {
@@ -492,7 +524,14 @@ pub fn run(args: TblastxArgs) -> Result<()> {
             //
             // For -subject mode, subject_len_nucl is used (not per-frame AA length).
             let subject_len_nucl = s_len as i64;
-            let mut cutoff_scores: Vec<Vec<i32>> = vec![vec![0; s_frames.len()]; contexts_ref.len()];
+            // NCBI: cutoff scores are stored per query context (no subject-frame dimension).
+            // Reference: ncbi-blast/c++/src/algo/blast/core/blast_parameters.c:320-324
+            // ```c
+            // BlastUngappedCutoffs *curr_cutoffs = parameters->cutoffs + context;
+            // ...
+            // curr_cutoffs->cutoff_score = new_cutoff;
+            // ```
+            let mut cutoff_scores: Vec<i32> = vec![0; contexts_ref.len()];
             // NCBI word_params->cutoff_score_min = min of cutoffs across all contexts
             // Reference: ncbi-blast/c++/src/algo/blast/core/blast_parameters.c:401-403
             let mut cutoff_score_min = i32::MAX;
@@ -576,10 +615,8 @@ pub fn run(args: TblastxArgs) -> Result<()> {
                 // Track minimum cutoff for linking
                 cutoff_score_min = cutoff_score_min.min(cutoff);
                 
-                // All subject frames use the same cutoff (NCBI behavior)
-                for sf_idx in 0..s_frames.len() {
-                    cutoff_scores[ctx_idx][sf_idx] = cutoff;
-                }
+                // All subject frames use the same cutoff (NCBI: per-context cutoffs only).
+                cutoff_scores[ctx_idx] = cutoff;
             }
             // If no contexts, use 0 as fallback
             if cutoff_score_min == i32::MAX {
@@ -844,7 +881,11 @@ pub fn run(args: TblastxArgs) -> Result<()> {
                             }
 
                             // [C] cutoffs = word_params->cutoffs + curr_context;
-                            let cutoff = unsafe { *cutoff_scores.get_unchecked(ctx_idx).get_unchecked(s_f_idx) };
+                            // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_hits.c:686-688
+                            // ```c
+                            // Int4 cutoff_score = word_params->cutoffs[hsp->context].cutoff_score;
+                            // ```
+                            let cutoff = unsafe { *cutoff_scores.get_unchecked(ctx_idx) };
                             // [C] cutoffs->x_dropoff (per-context x_dropoff)
                             // Reference: aa_ungapped.c:579
                             let x_dropoff = unsafe { *x_dropoff_per_context.get_unchecked(ctx_idx) };
@@ -1371,7 +1412,19 @@ pub fn run(args: TblastxArgs) -> Result<()> {
                             .output_from_ungapped
                             .fetch_add(final_hits.len(), AtomicOrdering::Relaxed);
                     }
-                    st.tx.send(final_hits).unwrap();
+                    // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_engine.c:1411-1497
+                    // ```c
+                    // while (...) {
+                    //    ...
+                    //    status = s_BlastSearchEngineCore(..., &hsp_list, ...);
+                    // }
+                    // ```
+                    // Single-threaded path accumulates hits directly, parallel path uses a channel.
+                    if let Some(tx) = &st.tx {
+                        tx.send(final_hits).unwrap();
+                    } else {
+                        st.hits.extend(final_hits);
+                    }
                 }
             }
             // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_engine.c:1411-1475
@@ -1392,11 +1445,29 @@ pub fn run(args: TblastxArgs) -> Result<()> {
     //     SetNumberOfThreads(num_threads);
     // }
     // ```
+    // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_engine.c:1411-1475
+    // ```c
+    // while ( (seq_arg.oid = BlastSeqSrcIteratorNext(seq_src, itr))
+    //        != BLAST_SEQSRC_EOF) {
+    //    ...
+    //    status = s_BlastSearchEngineCore(...);
+    // }
+    // ```
+    let mut single_state: Option<WorkerState> = None;
+
     #[cfg(all(feature = "parallel", not(target_arch = "wasm32")))]
     if use_parallel {
         subjects_raw.par_iter().enumerate().for_each_init(
             || WorkerState {
-                tx: tx.clone(),
+                // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_engine.c:1411-1475
+                // ```c
+                // while (...) {
+                //    ...
+                //    status = s_BlastSearchEngineCore(..., &hsp_list, ...);
+                // }
+                // ```
+                tx: tx_opt.clone(),
+                hits: Vec::new(),
                 offset_pairs: vec![OffsetPair::default(); offset_array_size as usize],
                 diag_array: vec![DiagStruct::default(); diag_array_size as usize],
                 // NCBI: diag_table->offset = window_size;
@@ -1406,10 +1477,18 @@ pub fn run(args: TblastxArgs) -> Result<()> {
             &process_subject,
         );
     } else {
-        for_each_subjects(
+        single_state = Some(for_each_subjects(
             &subjects_raw,
             || WorkerState {
-                tx: tx.clone(),
+                // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_engine.c:1411-1475
+                // ```c
+                // while (...) {
+                //    ...
+                //    status = s_BlastSearchEngineCore(..., &hsp_list, ...);
+                // }
+                // ```
+                tx: tx_opt.clone(),
+                hits: Vec::new(),
                 offset_pairs: vec![OffsetPair::default(); offset_array_size as usize],
                 diag_array: vec![DiagStruct::default(); diag_array_size as usize],
                 // NCBI: diag_table->offset = window_size;
@@ -1417,14 +1496,23 @@ pub fn run(args: TblastxArgs) -> Result<()> {
                 diag_offset: window,
             },
             &process_subject,
-        );
+        ));
     }
 
     #[cfg(any(not(feature = "parallel"), target_arch = "wasm32"))]
-    for_each_subjects(
+    {
+    single_state = Some(for_each_subjects(
         &subjects_raw,
         || WorkerState {
-            tx: tx.clone(),
+            // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_engine.c:1411-1475
+            // ```c
+            // while (...) {
+            //    ...
+            //    status = s_BlastSearchEngineCore(..., &hsp_list, ...);
+            // }
+            // ```
+            tx: tx_opt.clone(),
+            hits: Vec::new(),
             offset_pairs: vec![OffsetPair::default(); offset_array_size as usize],
             diag_array: vec![DiagStruct::default(); diag_array_size as usize],
             // NCBI: diag_table->offset = window_size;
@@ -1432,10 +1520,13 @@ pub fn run(args: TblastxArgs) -> Result<()> {
             diag_offset: window,
         },
         &process_subject,
-    );
+    ));
+    }
 
     // Close channel so the writer can exit.
-    drop(tx);
+    if let Some(tx) = tx_opt {
+        drop(tx);
+    }
 
     bar.finish();
     #[cfg(all(feature = "parallel", not(target_arch = "wasm32")))]
@@ -1447,6 +1538,31 @@ pub fn run(args: TblastxArgs) -> Result<()> {
         for h in rx {
             all.extend(h);
         }
+        all.retain(|h| h.e_value <= evalue_threshold);
+        // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_hits.c:1700-1704
+        // ```c
+        // s_Heapify((char*)hsp_array, (char*)hsp_array,
+        //          (char*)&hsp_array[hsp_list->hspcnt/2 - 1],
+        //          (char*)&hsp_array[hsp_list->hspcnt-1],
+        //          sizeof(BlastHSP*), ScoreCompareHSPs);
+        // ```
+        // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_hits.c:3202-3205
+        // ```c
+        // s_Heapify((char*)hit_list->hsplist_array, (char*)hit_list->hsplist_array,
+        //          (char*)&hit_list->hsplist_array[hit_list->hsplist_count/2 - 1],
+        //          (char*)&hit_list->hsplist_array[hit_list->hsplist_count-1],
+        //          sizeof(BlastHSPList*), s_EvalueCompareHSPLists);
+        // ```
+        write_output_ncbi_order(all, out_path.as_ref(), &query_ids, &subject_ids)?;
+    } else if let Some(state) = single_state {
+        // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_engine.c:1411-1497
+        // ```c
+        // while (...) {
+        //    ...
+        //    status = s_BlastSearchEngineCore(..., &hsp_list, ...);
+        // }
+        // ```
+        let mut all = state.hits;
         all.retain(|h| h.e_value <= evalue_threshold);
         // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_hits.c:1700-1704
         // ```c

@@ -103,7 +103,16 @@ pub(crate) use super::blast_aascan::s_blast_aa_scan_subject;
 // ---------------------------------------------------------------------------
 
 pub(crate) struct WorkerState {
-    pub tx: std::sync::mpsc::Sender<Vec<Hit>>,
+    // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_engine.c:1411-1475
+    // ```c
+    // while ( (seq_arg.oid = BlastSeqSrcIteratorNext(seq_src, itr))
+    //        != BLAST_SEQSRC_EOF) {
+    //    ...
+    //    status = s_BlastSearchEngineCore(..., &hsp_list, ...);
+    // }
+    // ```
+    pub tx: Option<std::sync::mpsc::Sender<Vec<Hit>>>,
+    pub hits: Vec<Hit>,
     pub offset_pairs: Vec<OffsetPair>,
     pub diag_array: Vec<DiagStruct>,
     pub diag_offset: i32,

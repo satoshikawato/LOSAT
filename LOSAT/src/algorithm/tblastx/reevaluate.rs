@@ -196,6 +196,27 @@ pub fn reevaluate_ungapped_hit_ncbi_translated(
             }
         }
     }
+    // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_hits.c:692-701
+    // ```c
+    // for (index = 0; index < hsp_length; ++index) {
+    //    sum += matrix[*query & kResidueMask][*subject];
+    // }
+    // ```
+    #[cfg(all(target_arch = "wasm32", target_feature = "simd128"))]
+    {
+        if hsp_len >= 32 {
+            unsafe {
+                return reevaluate_ungapped_hit_ncbi_translated_wasm_simd128(
+                    query_raw,
+                    subject_raw,
+                    q_off_raw,
+                    s_off_raw,
+                    hsp_len,
+                    cutoff_score,
+                );
+            }
+        }
+    }
 
     reevaluate_ungapped_hit_ncbi_translated_scalar(
         query_raw,
@@ -271,6 +292,130 @@ fn reevaluate_ungapped_hit_ncbi_translated_scalar(
 
     // NCBI s_UpdateReevaluatedHSPUngapped:
     // delete if score < cutoff_score
+    if score < cutoff_score {
+        return None;
+    }
+
+    let new_len = best_end.saturating_sub(best_start);
+    if new_len == 0 {
+        return None;
+    }
+
+    let new_q_off = q_off_raw + best_start;
+    let new_s_off = s_off_raw + best_start;
+    Some((new_q_off, new_s_off, new_len, score))
+}
+
+/// WASM SIMD128-optimized reevaluation.
+///
+/// Uses v128 loads to fetch 16 residues at a time, then applies the
+/// **same scalar control flow** as NCBI for each position to preserve parity.
+///
+/// NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_hits.c:692-701
+/// ```c
+/// for (index = 0; index < hsp_length; ++index) {
+///    sum += matrix[*query & kResidueMask][*subject];
+/// }
+/// ```
+#[cfg(all(target_arch = "wasm32", target_feature = "simd128"))]
+#[target_feature(enable = "simd128")]
+unsafe fn reevaluate_ungapped_hit_ncbi_translated_wasm_simd128(
+    query_raw: &[u8],
+    subject_raw: &[u8],
+    q_off_raw: usize,
+    s_off_raw: usize,
+    hsp_len: usize,
+    cutoff_score: i32,
+) -> Option<(usize, usize, usize, i32)> {
+    use std::arch::wasm32::*;
+
+    if hsp_len == 0 {
+        return None;
+    }
+    // Bounds safety: NCBI assumes offsets/length are valid.
+    if q_off_raw + hsp_len > query_raw.len() || s_off_raw + hsp_len > subject_raw.len() {
+        return None;
+    }
+
+    let table = reevaluate_score_table_32();
+
+    let mut score: i32 = 0;
+    let mut sum: i32 = 0;
+
+    let mut best_start: usize = 0;
+    let mut best_end: usize = 0;
+    let mut current_start: usize = 0;
+
+    let q_ptr = query_raw.as_ptr().add(q_off_raw);
+    let s_ptr = subject_raw.as_ptr().add(s_off_raw);
+
+    macro_rules! step_lane {
+        ($lane:expr, $qv:ident, $sv:ident, $pos:ident) => {{
+            let q = i8x16_extract_lane::<$lane>($qv) as u8;
+            let s = i8x16_extract_lane::<$lane>($sv) as u8;
+            sum += table[(q as usize) * 32 + (s as usize)];
+
+            if sum < 0 {
+                sum = 0;
+                current_start = $pos + 1;
+                if score < cutoff_score {
+                    best_start = $pos + 1;
+                    best_end = $pos + 1;
+                    score = 0;
+                }
+            } else if sum > score {
+                score = sum;
+                best_end = $pos + 1;
+                best_start = current_start;
+            }
+            $pos += 1;
+        }};
+    }
+
+    let mut idx = 0usize;
+    while idx + 16 <= hsp_len {
+        let qv = v128_load(q_ptr.add(idx) as *const v128);
+        let sv = v128_load(s_ptr.add(idx) as *const v128);
+        let mut pos = idx;
+        step_lane!(0, qv, sv, pos);
+        step_lane!(1, qv, sv, pos);
+        step_lane!(2, qv, sv, pos);
+        step_lane!(3, qv, sv, pos);
+        step_lane!(4, qv, sv, pos);
+        step_lane!(5, qv, sv, pos);
+        step_lane!(6, qv, sv, pos);
+        step_lane!(7, qv, sv, pos);
+        step_lane!(8, qv, sv, pos);
+        step_lane!(9, qv, sv, pos);
+        step_lane!(10, qv, sv, pos);
+        step_lane!(11, qv, sv, pos);
+        step_lane!(12, qv, sv, pos);
+        step_lane!(13, qv, sv, pos);
+        step_lane!(14, qv, sv, pos);
+        step_lane!(15, qv, sv, pos);
+        idx += 16;
+    }
+
+    while idx < hsp_len {
+        let q = *q_ptr.add(idx);
+        let s = *s_ptr.add(idx);
+        sum += table[(q as usize) * 32 + (s as usize)];
+        if sum < 0 {
+            sum = 0;
+            current_start = idx + 1;
+            if score < cutoff_score {
+                best_start = idx + 1;
+                best_end = idx + 1;
+                score = 0;
+            }
+        } else if sum > score {
+            score = sum;
+            best_end = idx + 1;
+            best_start = current_start;
+        }
+        idx += 1;
+    }
+
     if score < cutoff_score {
         return None;
     }

@@ -70,9 +70,7 @@ pub fn default_protein_params() -> KarlinParams {
 /// Generate a simple nucleotide sequence for testing
 pub fn make_nucleotide_sequence(length: usize) -> Vec<u8> {
     let bases = b"ACGT";
-    (0..length)
-        .map(|i| bases[i % bases.len()])
-        .collect()
+    (0..length).map(|i| bases[i % bases.len()]).collect()
 }
 
 /// Generate a simple protein sequence for testing
@@ -114,4 +112,3 @@ pub fn assert_bit_score_close(actual: f64, expected: f64, epsilon: f64) {
 
 /// NCBI BLAST reference data and comparison utilities
 pub mod ncbi_reference;
-

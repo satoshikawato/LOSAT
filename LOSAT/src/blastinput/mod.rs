@@ -9,8 +9,10 @@
 //!
 //! - `blast_args` - Common argument handling
 //! - `blastn_args` - BLASTN-specific arguments
+//! - `blastp_args` - BLASTP-specific arguments
 //! - `tblastx_args` - TBLASTX-specific arguments
 
 pub mod blast_args;
 pub mod blastn_args;
+pub mod blastp_args;
 pub mod tblastx_args;

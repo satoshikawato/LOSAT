@@ -1,6 +1,6 @@
 use super::constants::X_DROP_UNGAPPED;
-use crate::utils::dust::MaskedInterval;
 use crate::core::blast_encoding::COMPRESSION_RATIO;
+use crate::utils::dust::MaskedInterval;
 
 /// BLASTNA alphabet size.
 /// NCBI reference: ncbi-blast/c++/include/algo/blast/core/blast_encoding.h:91-92
@@ -43,10 +43,26 @@ pub fn build_nucl_score_table(reward: i32, penalty: i32) -> [i32; 256] {
     let mut table = [0i32; 256];
     for i in 0..256 {
         let mut score = 0;
-        if (i & 3) != 0 { score += penalty; } else { score += reward; }
-        if ((i >> 2) & 3) != 0 { score += penalty; } else { score += reward; }
-        if ((i >> 4) & 3) != 0 { score += penalty; } else { score += reward; }
-        if (i >> 6) != 0 { score += penalty; } else { score += reward; }
+        if (i & 3) != 0 {
+            score += penalty;
+        } else {
+            score += reward;
+        }
+        if ((i >> 2) & 3) != 0 {
+            score += penalty;
+        } else {
+            score += reward;
+        }
+        if ((i >> 4) & 3) != 0 {
+            score += penalty;
+        } else {
+            score += reward;
+        }
+        if (i >> 6) != 0 {
+            score += penalty;
+        } else {
+            score += reward;
+        }
         table[i] = score;
     }
     table
@@ -86,8 +102,8 @@ fn ncbi2na_unpack_base(byte: u8, n: u8) -> u8 {
 /// }
 /// ```
 pub fn extend_hit_ungapped_exact_ncbi(
-    q_seq: &[u8],             // BLASTNA (1 byte/base)
-    s_seq_packed: &[u8],      // ncbi2na packed (4 bases/byte)
+    q_seq: &[u8],        // BLASTNA (1 byte/base)
+    s_seq_packed: &[u8], // ncbi2na packed (4 bases/byte)
     q_off: usize,
     s_off: usize,
     subject_len: usize,
@@ -247,8 +263,8 @@ pub fn extend_hit_ungapped_exact_ncbi(
 /// }
 /// ```
 pub fn extend_hit_ungapped_approx_ncbi(
-    q_seq: &[u8],             // BLASTNA (1 byte/base)
-    s_seq_packed: &[u8],      // ncbi2na packed (4 bases/byte)
+    q_seq: &[u8],        // BLASTNA (1 byte/base)
+    s_seq_packed: &[u8], // ncbi2na packed (4 bases/byte)
     q_off: usize,
     s_off: usize,
     s_match_end: usize,
@@ -371,7 +387,7 @@ pub fn extend_hit_ungapped_approx_ncbi(
 }
 
 /// Extend an ungapped hit in both directions using X-drop termination.
-/// 
+///
 /// # Index Semantics
 /// - Left extension starts at i=0 (the seed position itself), extending leftward
 /// - Right extension starts at j=1 (position after seed), avoiding double-counting
@@ -470,13 +486,13 @@ pub fn extend_hit_ungapped(
 }
 
 /// Determine word type for two-stage lookup
-/// 
+///
 /// NCBI reference: na_ungapped.c:508-607 (s_TypeOfWord function)
-/// 
+///
 /// This is a FAITHFUL TRANSPILE of NCBI BLAST's s_TypeOfWord function.
 /// It does NOT perform actual sequence extension - only calculates ext_to
 /// and checks masked regions.
-/// 
+///
 /// # Arguments
 /// * `q_seq` - Query sequence
 /// * `s_seq` - Subject sequence
@@ -487,13 +503,13 @@ pub fn extend_hit_ungapped(
 /// * `lut_word_length` - Lookup table word length (e.g., 8)
 /// * `check_double` - Whether to check for double word (default: true)
 /// * `is_seed_masked` - Lookup-based seed check (s_IsSeedMasked)
-/// 
+///
 /// # Returns
 /// `(word_type, extended, q_off, s_off)` where:
 /// - `word_type`: 0 = non-word, 1 = single word, 2 = double word
 /// - `extended`: Number of bases extended (set to ext_to, NOT actual sequence checking)
 /// - `q_off`, `s_off`: possibly adjusted offsets after masking checks
-/// 
+///
 /// Note: reward and penalty parameters are NOT used (NCBI BLAST does not check actual matches)
 pub fn type_of_word<F>(
     q_seq: &[u8],
@@ -511,10 +527,10 @@ where
 {
     // NCBI reference: na_ungapped.c:508-607
     // FAITHFUL TRANSPILE - DO NOT ASSUME
-    
+
     // NCBI: *extended = 0;
     let mut extended = 0;
-    
+
     // NCBI reference: ncbi-blast/c++/src/algo/blast/core/na_ungapped.c:531
     // ```c
     // if (word_length == lut_word_length) return 1;
@@ -522,18 +538,18 @@ where
     if word_length == lut_word_length {
         return (1, 0, q_off, s_off);
     }
-    
+
     // NCBI: Int4 q_end = *q_off + word_length;
     // NCBI: Int4 s_end = *s_off + word_length;
     let mut q_end = q_off + word_length;
     let mut s_end = s_off + word_length;
-    
+
     // NCBI: context = BSearchContextInfo(q_end, query_info);
     // NCBI: q_range = query_info->contexts[context].query_offset + query_info->contexts[context].query_length;
     // For blastn, we typically have a single context, so q_range = q_seq.len()
     let q_range = q_seq.len();
     let s_range = s_seq.len();
-    
+
     // NCBI: if (locations) { ... }
     // Check masked regions and adjust q_off/s_off if needed
     let mut q_off_adjusted = q_off;
@@ -550,7 +566,7 @@ where
         //                                      (lookup_wrap, index, q_pos));
         // }
         // ```
-        
+
         // NCBI reference: ncbi-blast/c++/src/algo/blast/core/na_ungapped.c:540-544
         // ```c
         // if (s_IsSeedMasked(lookup_wrap, subject,
@@ -561,7 +577,7 @@ where
         if is_seed_masked(s_end - lut_word_length, q_end - lut_word_length) {
             return (0, 0, q_off_adjusted, s_off_adjusted);
         }
-        
+
         // NCBI: search for valid left end and reposition q_off
         // NCBI reference: ncbi-blast/c++/src/algo/blast/core/na_ungapped.c:546-549
         // ```c
@@ -578,7 +594,7 @@ where
             s_off_adjusted += 1;
         }
     }
-    
+
     // NCBI reference: ncbi-blast/c++/src/algo/blast/core/na_ungapped.c:553-554
     // ```c
     // ext_to = word_length - (q_end - (*q_off));
@@ -586,7 +602,7 @@ where
     // ```
     let ext_to = word_length - (q_end - q_off_adjusted);
     let ext_max = (q_range - q_end).min(s_range - s_end);
-    
+
     // NCBI: if (ext_to || locations) {
     if ext_to > 0 || has_query_masks {
         // NCBI reference: ncbi-blast/c++/src/algo/blast/core/na_ungapped.c:559
@@ -596,14 +612,14 @@ where
         if ext_to > ext_max {
             return (0, 0, q_off_adjusted, s_off_adjusted);
         }
-        
+
         // NCBI: q_end += ext_to;
         // NCBI: s_end += ext_to;
         q_end += ext_to;
         s_end += ext_to;
-        
+
         // NCBI: for (s_pos = s_end - lut_word_length, q_pos = q_end - lut_word_length;
-        //      s_pos > *s_off; 
+        //      s_pos > *s_off;
         //      s_pos -= lut_word_length, q_pos -= lut_word_length) {
         //     if (s_IsSeedMasked(lookup_wrap, subject, s_pos, lut_word_length, q_pos)) return 0;
         // }
@@ -632,11 +648,11 @@ where
             s_pos = s_pos.saturating_sub(lut_word_length);
             q_pos = q_pos.saturating_sub(lut_word_length);
         }
-        
+
         // NCBI: (*extended) = ext_to;
         extended = ext_to;
     }
-    
+
     // NCBI reference: ncbi-blast/c++/src/algo/blast/core/na_ungapped.c:575-576
     // ```c
     // if (!check_double) return 1;
@@ -644,21 +660,21 @@ where
     if !check_double {
         return (1, extended, q_off_adjusted, s_off_adjusted);
     }
-    
+
     // NCBI: ext_to += word_length;
     let double_ext_to = ext_to + word_length;
     // NCBI: ext_max = MIN(ext_max, ext_to);
     let double_ext_max = ext_max.min(double_ext_to);
-    
+
     // NCBI: try seed by seed
-    // for (s_pos = s_end, q_pos = q_end; 
-    //      *extended + lut_word_length <= ext_max; 
+    // for (s_pos = s_end, q_pos = q_end;
+    //      *extended + lut_word_length <= ext_max;
     //      s_pos += lut_word_length, q_pos += lut_word_length, (*extended) += lut_word_length) {
     //     if (s_IsSeedMasked(lookup_wrap, subject, s_pos, lut_word_length, q_pos)) break;
     // }
     let mut s_pos = s_end;
     let mut q_pos = q_end;
-    
+
     // NCBI BLAST: Loop runs regardless of locations status
     // If locations is NULL, s_IsSeedMasked returns FALSE, so loop continues to ext_max
     while extended + lut_word_length <= double_ext_max {
@@ -670,7 +686,7 @@ where
         s_pos += lut_word_length;
         q_pos += lut_word_length;
     }
-    
+
     // NCBI: try base by base
     // s_pos -= (lut_word_length - 1);
     // q_pos -= (lut_word_length - 1);
@@ -680,7 +696,7 @@ where
     // Use saturating_sub to prevent underflow while maintaining NCBI behavior
     s_pos = s_pos.saturating_sub(lut_word_length - 1);
     q_pos = q_pos.saturating_sub(lut_word_length - 1);
-    
+
     // NCBI: while (*extended < ext_max) {
     //     if (s_IsSeedMasked(lookup_wrap, subject, s_pos, lut_word_length, q_pos)) return 1;
     //     (*extended)++;
@@ -702,7 +718,7 @@ where
         s_pos += 1;
         q_pos += 1;
     }
-    
+
     // NCBI reference: ncbi-blast/c++/src/algo/blast/core/na_ungapped.c:605
     // ```c
     // return ((ext_max == ext_to) ? 2 : 1);

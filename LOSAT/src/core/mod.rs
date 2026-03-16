@@ -44,23 +44,31 @@
 pub mod blast_stat;
 
 // Utilities
-pub mod blast_util;
 pub mod blast_encoding;
+pub mod blast_util;
 pub mod gencode_singleton;
 
 // Filtering/Masking
 pub mod blast_filter;
-mod blast_seg_lnfact;  // Internal - ln(n!) lookup table for SEG
 pub mod blast_seg;
+mod blast_seg_lnfact; // Internal - ln(n!) lookup table for SEG
+
+// NCBI reference: ncbi-blast/c++/include/algo/blast/composition_adjustment/redo_alignment.h:49-190
+// ```c
+// typedef struct BlastCompo_Alignment { ... } BlastCompo_Alignment;
+// typedef struct BlastCompo_GappingParams { ... } BlastCompo_GappingParams;
+// typedef struct BlastCompo_SequenceRange { ... } BlastCompo_SequenceRange;
+// ```
+pub mod composition_adjustment;
 
 // Lookup Tables
-pub mod blast_lookup;
 pub mod blast_aalookup;
+pub mod blast_lookup;
 pub mod blast_nalookup;
 
 // Extension
-pub mod blast_extend;
 pub mod aa_ungapped;
+pub mod blast_extend;
 pub mod na_ungapped;
 
 // Scanning
@@ -72,12 +80,12 @@ pub mod greedy_align;
 
 // HSP Management
 pub mod blast_hits;
-pub mod link_hsps;
 pub mod hspfilter_culling;
+pub mod link_hsps;
 
 // Parameters and Options
-pub mod blast_parameters;
 pub mod blast_options;
+pub mod blast_parameters;
 
 // Engine
 pub mod blast_engine;

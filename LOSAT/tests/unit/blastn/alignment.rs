@@ -8,9 +8,9 @@ fn test_gdb3_no_reduction() {
     let mut a = 3;
     let mut b = 5;
     let mut c = 7;
-    
+
     let g = gdb3(&mut a, &mut b, &mut c);
-    
+
     assert_eq!(g, 1);
     assert_eq!(a, 3);
     assert_eq!(b, 5);
@@ -23,9 +23,9 @@ fn test_gdb3_with_reduction() {
     let mut a = 6;
     let mut b = 9;
     let mut c = 12;
-    
+
     let g = gdb3(&mut a, &mut b, &mut c);
-    
+
     assert_eq!(g, 3);
     assert_eq!(a, 2);
     assert_eq!(b, 3);
@@ -38,9 +38,9 @@ fn test_gdb3_zero_b() {
     let mut a = 8;
     let mut b = 0;
     let mut c = 12;
-    
+
     let g = gdb3(&mut a, &mut b, &mut c);
-    
+
     assert_eq!(g, 4);
     assert_eq!(a, 2);
     assert_eq!(b, 0);
@@ -53,9 +53,9 @@ fn test_gdb3_all_zero() {
     let mut a = 0;
     let mut b = 0;
     let mut c = 0;
-    
+
     let g = gdb3(&mut a, &mut b, &mut c);
-    
+
     // GCD of zeros is typically 0 or undefined
     // The function should handle this without panicking
     assert!(g >= 0);
@@ -67,9 +67,9 @@ fn test_gdb3_negative_numbers() {
     let mut a = -6;
     let mut b = 9;
     let mut c = -12;
-    
+
     let g = gdb3(&mut a, &mut b, &mut c);
-    
+
     assert_eq!(g, 3);
     // After reduction, signs may be preserved or normalized
     // The exact behavior depends on implementation
@@ -81,9 +81,9 @@ fn test_gdb3_large_numbers() {
     let mut a = 100;
     let mut b = 150;
     let mut c = 200;
-    
+
     let g = gdb3(&mut a, &mut b, &mut c);
-    
+
     assert_eq!(g, 50);
     assert_eq!(a, 2);
     assert_eq!(b, 3);
@@ -96,13 +96,11 @@ fn test_gdb3_prime_numbers() {
     let mut a = 17;
     let mut b = 19;
     let mut c = 23;
-    
+
     let g = gdb3(&mut a, &mut b, &mut c);
-    
+
     assert_eq!(g, 1);
     assert_eq!(a, 17);
     assert_eq!(b, 19);
     assert_eq!(c, 23);
 }
-
-

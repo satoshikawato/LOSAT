@@ -67,8 +67,10 @@ pub fn filter_overlapping_hsps(hits: Vec<Hit>, overlap_threshold: f64) -> Vec<Hi
             }
 
             // Calculate overlap fractions
-            let q_overlap = calculate_overlap(hit.q_start, hit.q_end, kept_hit.q_start, kept_hit.q_end);
-            let s_overlap = calculate_overlap(hit.s_start, hit.s_end, kept_hit.s_start, kept_hit.s_end);
+            let q_overlap =
+                calculate_overlap(hit.q_start, hit.q_end, kept_hit.q_start, kept_hit.q_end);
+            let s_overlap =
+                calculate_overlap(hit.s_start, hit.s_end, kept_hit.s_start, kept_hit.s_end);
 
             let hit_q_len = (hit.q_end - hit.q_start + 1) as f64;
             let hit_s_len = (hit.s_end - hit.s_start + 1) as f64;
@@ -136,4 +138,3 @@ pub fn can_chain_hsps(
 
     q_ok && s_ok
 }
-

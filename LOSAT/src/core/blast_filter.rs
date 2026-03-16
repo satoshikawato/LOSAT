@@ -34,9 +34,21 @@ impl DustParams {
     pub fn new(level: u32, window: usize, linker: usize) -> Self {
         // Validate and clamp parameters to NCBI BLAST ranges
         let level = if level >= 2 && level <= 64 { level } else { 20 };
-        let window = if window >= 8 && window <= 64 { window } else { 64 };
-        let linker = if linker >= 1 && linker <= 32 { linker } else { 1 };
-        Self { level, window, linker }
+        let window = if window >= 8 && window <= 64 {
+            window
+        } else {
+            64
+        };
+        let linker = if linker >= 1 && linker <= 32 {
+            linker
+        } else {
+            1
+        };
+        Self {
+            level,
+            window,
+            linker,
+        }
     }
 }
 
@@ -70,7 +82,12 @@ struct PerfectInterval {
 
 impl PerfectInterval {
     fn new(start: usize, end: usize, score: u32, len: usize) -> Self {
-        Self { start, end, score, len }
+        Self {
+            start,
+            end,
+            score,
+            len,
+        }
     }
 }
 
@@ -174,11 +191,7 @@ impl DustMasker {
             let mut perfect_list: VecDeque<PerfectInterval> = VecDeque::new();
 
             // Create triplet window tracker
-            let mut window = TripletWindow::new(
-                self.window,
-                self.low_k,
-                &self.thresholds,
-            );
+            let mut window = TripletWindow::new(self.window, self.low_k, &self.thresholds);
 
             // Initialize first triplet
             let b1 = seq[current_start];
@@ -199,7 +212,12 @@ impl DustMasker {
 
             while !done && pos < stop {
                 // Save masked regions from previous window position
-                self.save_masked_regions(&mut result, window.start(), current_start, &mut perfect_list);
+                self.save_masked_regions(
+                    &mut result,
+                    window.start(),
+                    current_start,
+                    &mut perfect_list,
+                );
 
                 // Shift window by adding new triplet
                 let new_triplet = match Self::shift_triplet(current_triplet, seq[pos]) {
@@ -223,7 +241,12 @@ impl DustMasker {
                 } else {
                     // Window contains only one triplet value - fast path
                     while pos < stop {
-                        self.save_masked_regions(&mut result, window.start(), current_start, &mut perfect_list);
+                        self.save_masked_regions(
+                            &mut result,
+                            window.start(),
+                            current_start,
+                            &mut perfect_list,
+                        );
 
                         let new_triplet = match Self::shift_triplet(current_triplet, seq[pos]) {
                             Some(t) => t,
@@ -311,11 +334,11 @@ struct TripletWindow {
     stop: usize,
     max_size: usize,
     low_k: u8,
-    l: usize,  // suffix start position (L in NCBI code)
-    c_w: [u8; 64],  // triplet counts for whole window
-    c_v: [u8; 64],  // triplet counts for suffix
-    r_w: u32,  // running sum for whole window
-    r_v: u32,  // running sum for suffix
+    l: usize,      // suffix start position (L in NCBI code)
+    c_w: [u8; 64], // triplet counts for whole window
+    c_v: [u8; 64], // triplet counts for suffix
+    r_w: u32,      // running sum for whole window
+    r_v: u32,      // running sum for suffix
     num_diff: u32,
     thresholds: Vec<u32>,
 }
@@ -328,7 +351,7 @@ impl TripletWindow {
             stop: 0,
             max_size: window - 2,
             low_k,
-            l: 0,  // suffix start position
+            l: 0, // suffix start position
             c_w: [0; 64],
             c_v: [0; 64],
             r_w: 0,
@@ -468,7 +491,7 @@ impl TripletWindow {
         // it = triplet_list_.begin() + count (starts at suffix_len index)
         let mut pos = self.l.saturating_sub(1);
         let mut perfect_idx = 0usize;
-        let mut count = suffix_len;  // This is the candidate interval length variable
+        let mut count = suffix_len; // This is the candidate interval length variable
 
         // Iterate from suffix_len to end of triplet_list
         for idx in suffix_len..self.triplet_list.len() {
@@ -480,18 +503,23 @@ impl TripletWindow {
             if cnt > 0 && count < self.thresholds.len() && score * 10 > self.thresholds[count] {
                 while perfect_idx < perfect_list.len() && pos <= perfect_list[perfect_idx].start {
                     let p = &perfect_list[perfect_idx];
-                    if max_perfect_score == 0 || max_len * p.score as usize > max_perfect_score as usize * p.len {
+                    if max_perfect_score == 0
+                        || max_len * p.score as usize > max_perfect_score as usize * p.len
+                    {
                         max_perfect_score = p.score;
                         max_len = p.len;
                     }
                     perfect_idx += 1;
                 }
 
-                if max_perfect_score == 0 || score as usize * max_len >= max_perfect_score as usize * count {
+                if max_perfect_score == 0
+                    || score as usize * max_len >= max_perfect_score as usize * count
+                {
                     max_perfect_score = score;
                     max_len = count;
                     // Insert at perfect_idx position
-                    let interval = PerfectInterval::new(pos, self.stop + 1, max_perfect_score, count);
+                    let interval =
+                        PerfectInterval::new(pos, self.stop + 1, max_perfect_score, count);
                     if perfect_idx < perfect_list.len() {
                         // Insert in middle - need to rebuild
                         let mut new_list: VecDeque<PerfectInterval> = VecDeque::new();
@@ -611,7 +639,10 @@ mod tests {
 
         // Complex sequence should have few or no masked regions
         let total_masked: usize = intervals.iter().map(|i| i.end - i.start).sum();
-        assert!(total_masked < seq.len() / 2, "Complex sequence should not be heavily masked");
+        assert!(
+            total_masked < seq.len() / 2,
+            "Complex sequence should not be heavily masked"
+        );
     }
 
     #[test]
@@ -626,10 +657,7 @@ mod tests {
 
     #[test]
     fn test_is_kmer_masked() {
-        let intervals = vec![
-            MaskedInterval::new(10, 20),
-            MaskedInterval::new(30, 40),
-        ];
+        let intervals = vec![MaskedInterval::new(10, 20), MaskedInterval::new(30, 40)];
 
         // K-mer completely before masked region
         assert!(!is_kmer_masked(&intervals, 0, 5));

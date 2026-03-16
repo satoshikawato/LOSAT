@@ -399,16 +399,19 @@ mod tests {
         // Create a neighborhood index with threshold 13 (NCBI TBLASTX default)
         let index = NeighborhoodIndex::new(13);
         let stats = index.stats();
-        
+
         // Should have non-empty k-mers
         assert!(stats.non_empty_kmers > 0);
-        
+
         // A-A-A has self-score 4+4+4=12, which is below threshold 13
         // So it won't have itself as a neighbor
         // Instead, test with W-W-W which has self-score 11+11+11=33
         // W=17 in NCBI order: ARNDCQEGHILKMFPSTWYVBJZX*
         let www_idx = 17 * 576 + 17 * 24 + 17;
         let neighbors = index.get_neighbors(www_idx);
-        assert!(!neighbors.is_empty(), "W-W-W (score 33) should have neighbors with threshold 13");
+        assert!(
+            !neighbors.is_empty(),
+            "W-W-W (score 33) should have neighbors with threshold 13"
+        );
     }
 }

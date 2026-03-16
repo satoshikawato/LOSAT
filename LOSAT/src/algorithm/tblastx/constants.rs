@@ -6,12 +6,12 @@
 /// NCBI BLAST standard value = 7 bits
 /// Reference: ncbi-blast/c++/include/algo/blast/core/blast_options.h
 /// #define BLAST_UNGAPPED_X_DROPOFF_PROT 7
-/// 
+///
 /// IMPORTANT: NCBI converts this to raw score at runtime:
 ///   x_dropoff_raw = x_dropoff_bits * ln(2) / lambda
 /// For BLOSUM62 ungapped (lambda ≈ 0.3176):
 ///   x_dropoff_raw = 7 * 0.693 / 0.3176 ≈ 15
-/// 
+///
 /// We use the raw score value directly to match NCBI behavior.
 pub const X_DROP_UNGAPPED_BITS: f64 = 7.0;
 
@@ -76,19 +76,19 @@ pub const CUTOFF_E_TBLASTX: f64 = 1e-300;
 pub const GAP_TRIGGER_BIT_SCORE: f64 = 22.0;
 
 /// Sentinel byte for sequence boundaries (NCBI BLAST style)
-/// 
+///
 /// NCBI BLAST uses NULLB (0) as a sentinel at the beginning and end of translated
 /// sequences, and between frames. When extension reaches a sentinel, the matrix
 /// returns a very negative score (defscore = -4 for unknown residues), causing
 /// X-drop termination.
-/// 
+///
 /// Reference: ncbi-blast/c++/src/algo/blast/core/blast_encoding.c:120
 ///   const Uint1 kProtSentinel = NULLB;
 /// Reference: ncbi-blast/c++/include/algo/blast/core/ncbi_std.h:181
 ///   #define NULLB '\0'
 /// Reference: ncbi-blast/c++/src/util/tables/sm_blosum62.c:95
 ///   defscore = -4 (for characters not in the matrix)
-/// 
+///
 /// LOSAT uses the same value (0) as NCBI for full parity.
 /// The extension functions and blosum62_score() check for this value and apply
 /// the defscore penalty (-4).
@@ -99,4 +99,3 @@ pub const SENTINEL_BYTE: u8 = 0;
 /// Reference: ncbi-blast/c++/src/util/tables/sm_blosum62.c:95
 /// We must match this exactly for correct extension behavior.
 pub const SENTINEL_PENALTY: i32 = -4;
-

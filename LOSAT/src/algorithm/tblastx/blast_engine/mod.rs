@@ -62,28 +62,27 @@ pub(crate) use crate::utils::seg::SegMasker;
 pub(crate) use super::args::TblastxArgs;
 pub(crate) use super::chaining::UngappedHit;
 pub(crate) use super::constants::{GAP_TRIGGER_BIT_SCORE, X_DROP_UNGAPPED_BITS};
-pub(crate) use super::ncbi_cutoffs::{
-    compute_eff_lengths_subject_mode_tblastx, cutoff_score_for_update_tblastx,
-    cutoff_score_max_for_tblastx, gap_trigger_raw_score, x_drop_raw_score, BLAST_GAP_DECAY_RATE,
-};
 pub(crate) use super::diagnostics::{
     diagnostics_enabled, print_summary as print_diagnostics_summary, DiagnosticCounters,
 };
 pub(crate) use super::extension::{convert_coords, extend_hit_two_hit};
+pub(crate) use super::hsp_culling;
 pub(crate) use super::lookup::{build_ncbi_lookup, encode_kmer, QueryContext};
+pub(crate) use super::ncbi_cutoffs::{
+    compute_eff_lengths_subject_mode_tblastx, cutoff_score_for_update_tblastx,
+    cutoff_score_max_for_tblastx, gap_trigger_raw_score, x_drop_raw_score, BLAST_GAP_DECAY_RATE,
+};
 pub(crate) use super::reevaluate::{
-    get_num_identities_and_positives_ungapped, hsp_test,
-    reevaluate_ungapped_hit_ncbi_translated,
+    get_num_identities_and_positives_ungapped, hsp_test, reevaluate_ungapped_hit_ncbi_translated,
 };
 pub(crate) use super::sum_stats_linking::{
-    apply_sum_stats_even_gap_linking, compute_avg_query_length_ncbi,
-    find_smallest_lambda_params, LinkingParams,
+    apply_sum_stats_even_gap_linking, compute_avg_query_length_ncbi, find_smallest_lambda_params,
+    LinkingParams,
 };
-pub(crate) use super::hsp_culling;
-pub(crate) use super::translation::{generate_frames, QueryFrame};
 pub(crate) use super::tracing::{
     trace_final_hit_if_match, trace_hsp_target, trace_match_target, trace_ungapped_hit_if_match,
 };
+pub(crate) use super::translation::{generate_frames, QueryFrame};
 pub(crate) use crate::stats::karlin::bit_score as calc_bit_score;
 
 // Import OffsetPair from scan submodule
@@ -230,7 +229,11 @@ pub(crate) fn reevaluate_ungapped_hsp_list(
         //   Int4 cutoff_score = word_params->cutoffs[hsp->context].cutoff_score;
         //   return s_UpdateReevaluatedHSPUngapped(hsp, cutoff_score, score, ...);
         // If score < cutoff_score, the HSP is deleted (s_UpdateReevaluatedHSPUngapped returns FALSE)
-        let t0 = if timing_enabled { Some(std::time::Instant::now()) } else { None };
+        let t0 = if timing_enabled {
+            Some(std::time::Instant::now())
+        } else {
+            None
+        };
         let (new_qs, new_ss, new_len, new_score) = if let Some(result) =
             reevaluate_ungapped_hit_ncbi_translated(query, subject, qs, ss, len_u, cutoff)
         {

@@ -18,23 +18,23 @@
 //!    correctness. End-to-end NCBI BLAST compatibility is verified in integration
 //!    tests (tests/run_comparison.sh).
 
-use LOSAT::algorithm::common::evalue::{
-    calculate_evalue_alignment_length, calculate_evalue_database_search,
-};
-use LOSAT::stats::search_space::SearchSpace;
 use super::super::helpers::ncbi_reference::{
     compare_bit_score_with_ncbi, compare_evalue_with_ncbi, get_ncbi_blastn_evalue_cases,
     get_ncbi_tblastx_evalue_cases, verify_effective_search_space,
 };
+use LOSAT::algorithm::common::evalue::{
+    calculate_evalue_alignment_length, calculate_evalue_database_search,
+};
+use LOSAT::stats::search_space::SearchSpace;
 
 #[test]
 #[ignore] // Ignore until reference data is populated
 fn test_evalue_against_ncbi_blastn_with_effective_space() {
     // This test verifies both e-value calculation AND effective search space
     // to catch length adjustment bugs
-    
+
     let test_cases = get_ncbi_blastn_evalue_cases();
-    
+
     for case in test_cases {
         // Calculate e-value using LOSAT
         let (bit_score, e_value) = calculate_evalue_database_search(
@@ -44,7 +44,7 @@ fn test_evalue_against_ncbi_blastn_with_effective_space() {
             case.db_num_seqs,
             &case.params,
         );
-        
+
         // **Critical**: Verify effective search space calculation
         // This catches the most common bug: incorrect length adjustment
         let search_space = SearchSpace::for_database_search(
@@ -54,7 +54,7 @@ fn test_evalue_against_ncbi_blastn_with_effective_space() {
             &case.params,
             true, // use_length_adjustment
         );
-        
+
         // Verify effective search space with small tolerance (0.1%)
         // LOSAT's implementation is a direct port of NCBI BLAST's code,
         // so we expect very close agreement (within floating-point precision)
@@ -66,9 +66,12 @@ fn test_evalue_against_ncbi_blastn_with_effective_space() {
             case.expected_length_adjustment,
             0.001, // 0.1% tolerance (very strict, since implementation should match exactly)
         ) {
-            panic!("Effective search space mismatch for {}: {}", case.test_name, msg);
+            panic!(
+                "Effective search space mismatch for {}: {}",
+                case.test_name, msg
+            );
         }
-        
+
         // Compare bit scores
         if case.expected_bit_score > 0.0 {
             assert!(
@@ -79,7 +82,7 @@ fn test_evalue_against_ncbi_blastn_with_effective_space() {
                 case.expected_bit_score
             );
         }
-        
+
         // Compare e-values
         if case.expected_evalue > 0.0 {
             assert!(
@@ -100,16 +103,16 @@ fn test_evalue_against_ncbi_tblastx_with_effective_space() {
     // This test verifies TBLASTX e-value calculations
     // **Important**: Reference data should be from NCBI BLAST runs with
     // -comp_based_stats 0 to avoid composition-based corrections
-    
+
     let test_cases = get_ncbi_tblastx_evalue_cases();
-    
+
     for case in test_cases {
         let (bit_score, e_value) = calculate_evalue_alignment_length(
             case.score,
             case.aln_len, // Used as alignment length
             &case.params,
         );
-        
+
         // Compare with NCBI BLAST expected values
         if case.expected_bit_score > 0.0 {
             assert!(
@@ -120,7 +123,7 @@ fn test_evalue_against_ncbi_tblastx_with_effective_space() {
                 case.expected_bit_score
             );
         }
-        
+
         if case.expected_evalue > 0.0 {
             assert!(
                 compare_evalue_with_ncbi(e_value, case.expected_evalue, case.tolerance),
@@ -142,7 +145,7 @@ fn test_effective_search_space_variation() {
     // **Important**: We test the *direction* of change and *sign* of values,
     // not exact values, because NCBI BLAST's effective length calculation
     // is extremely complex and may differ slightly in implementation.
-    
+
     let params = LOSAT::stats::tables::KarlinParams {
         lambda: 1.28,
         k: 0.46,
@@ -150,29 +153,29 @@ fn test_effective_search_space_variation() {
         alpha: 1.5,
         beta: -2.0,
     };
-    
+
     // Test with different sequence lengths
     let test_lengths = vec![
-        (100, 1000, 1),   // Short sequences
-        (1000, 10000, 5), // Medium sequences
+        (100, 1000, 1),      // Short sequences
+        (1000, 10000, 5),    // Medium sequences
         (10000, 100000, 10), // Long sequences
     ];
-    
+
     for (q_len, db_len, db_num_seqs) in test_lengths {
         let ss1 = SearchSpace::for_database_search(q_len, db_len, db_num_seqs, &params, false);
         let ss2 = SearchSpace::for_database_search(q_len, db_len, db_num_seqs, &params, true);
-        
+
         // With length adjustment, effective space should be smaller
         assert!(
             ss2.effective_space < ss1.effective_space,
             "Length adjustment should reduce effective search space"
         );
-        
+
         // But still positive
         assert!(ss2.effective_space > 0.0);
         assert!(ss2.effective_query_len > 0.0);
         assert!(ss2.effective_db_len > 0.0);
-        
+
         // Length adjustment should be reasonable (not larger than sequence length)
         assert!(ss2.length_adjustment >= 0);
         assert!(ss2.length_adjustment < q_len.min(db_len) as i64);
@@ -187,7 +190,7 @@ fn test_evalue_with_fixed_alignment() {
     // **Important**: This test uses hardcoded alignment coordinates to avoid
     // X-drop butterfly effects where slight differences in alignment termination
     // cause score differences.
-    
+
     let params = LOSAT::stats::tables::KarlinParams {
         lambda: 1.28,
         k: 0.46,
@@ -195,40 +198,30 @@ fn test_evalue_with_fixed_alignment() {
         alpha: 1.5,
         beta: -2.0,
     };
-    
+
     // Fixed alignment: q_start=100, q_end=200, s_start=100, s_end=200
     // This represents a perfect 100bp match
     let fixed_alignment_length = 100;
     let fixed_raw_score = 100; // reward=1, perfect match
-    
+
     let q_len = 1000;
     let db_len = 10000;
     let db_num_seqs = 5;
-    
+
     // Calculate e-value for this fixed alignment
-    let (bit_score, e_value) = calculate_evalue_database_search(
-        fixed_raw_score,
-        q_len,
-        db_len,
-        db_num_seqs,
-        &params,
-    );
-    
+    let (bit_score, e_value) =
+        calculate_evalue_database_search(fixed_raw_score, q_len, db_len, db_num_seqs, &params);
+
     // Verify that calculations are consistent (same inputs = same outputs)
-    let (bit_score2, e_value2) = calculate_evalue_database_search(
-        fixed_raw_score,
-        q_len,
-        db_len,
-        db_num_seqs,
-        &params,
-    );
-    
+    let (bit_score2, e_value2) =
+        calculate_evalue_database_search(fixed_raw_score, q_len, db_len, db_num_seqs, &params);
+
     assert_eq!(bit_score, bit_score2);
     assert_eq!(e_value, e_value2);
-    
+
     // Verify that bit score is positive for positive raw score
     assert!(bit_score > 0.0);
-    
+
     // Verify that e-value is positive
     assert!(e_value > 0.0);
 }
@@ -237,7 +230,7 @@ fn test_evalue_with_fixed_alignment() {
 fn test_parameter_set_independence() {
     // Test that different parameter sets produce different but consistent results
     // This catches bugs where parameters are hardcoded or incorrectly looked up
-    
+
     let params1 = LOSAT::stats::tables::KarlinParams {
         lambda: 1.28, // Megablast
         k: 0.46,
@@ -245,7 +238,7 @@ fn test_parameter_set_independence() {
         alpha: 1.5,
         beta: -2.0,
     };
-    
+
     let params2 = LOSAT::stats::tables::KarlinParams {
         lambda: 0.267, // BLOSUM62
         k: 0.041,
@@ -253,17 +246,23 @@ fn test_parameter_set_independence() {
         alpha: 1.9,
         beta: -30.0,
     };
-    
+
     let score = 100;
     let q_len = 1000;
     let db_len = 10000;
     let db_num_seqs = 5;
-    
+
     let (bs1, ev1) = calculate_evalue_database_search(score, q_len, db_len, db_num_seqs, &params1);
     let (bs2, ev2) = calculate_evalue_database_search(score, q_len, db_len, db_num_seqs, &params2);
-    
+
     // Different parameters should produce different results
     // (This is a sanity check that parameters are actually being used)
-    assert_ne!(bs1, bs2, "Different parameters should produce different bit scores");
-    assert_ne!(ev1, ev2, "Different parameters should produce different e-values");
+    assert_ne!(
+        bs1, bs2,
+        "Different parameters should produce different bit scores"
+    );
+    assert_ne!(
+        ev1, ev2,
+        "Different parameters should produce different e-values"
+    );
 }

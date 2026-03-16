@@ -125,7 +125,6 @@ impl IntervalNode {
     }
 }
 
-
 /// Interval tree for HSP containment checking
 /// NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_itree.h:73-80
 /// ```c
@@ -177,7 +176,8 @@ impl BlastIntervalTree {
             let leftend = self.nodes[0].leftend;
             let rightend = self.nodes[0].rightend;
             self.nodes.clear();
-            self.nodes.push(IntervalNode::new_internal(leftend, rightend));
+            self.nodes
+                .push(IntervalNode::new_internal(leftend, rightend));
         }
     }
 
@@ -205,8 +205,10 @@ impl BlastIntervalTree {
         // }
         let (leftend, rightend) = match which_half {
             IntervalDirection::Left => (parent.leftend, midpt),
-            IntervalDirection::Right => (midpt + 1, parent.rightend),  // +1 is CRITICAL
-            IntervalDirection::Neither => panic!("Neither direction not valid for child allocation"),
+            IntervalDirection::Right => (midpt + 1, parent.rightend), // +1 is CRITICAL
+            IntervalDirection::Neither => {
+                panic!("Neither direction not valid for child allocation")
+            }
         };
 
         let node = IntervalNode::new_internal(leftend, rightend);
@@ -261,16 +263,15 @@ impl BlastIntervalTree {
                 //     match = in_hsp->query.offset == tree_hsp->query.offset &&
                 //             in_hsp->subject.offset == tree_hsp->subject.offset;
                 // }
-                in_hsp.query_offset == tree_hsp.query_offset &&
-                in_hsp.subject_offset == tree_hsp.subject_offset
+                in_hsp.query_offset == tree_hsp.query_offset
+                    && in_hsp.subject_offset == tree_hsp.subject_offset
             }
             IntervalDirection::Right => {
                 // else {
                 //     match = in_hsp->query.end == tree_hsp->query.end &&
                 //             in_hsp->subject.end == tree_hsp->subject.end;
                 // }
-                in_hsp.query_end == tree_hsp.query_end &&
-                in_hsp.subject_end == tree_hsp.subject_end
+                in_hsp.query_end == tree_hsp.query_end && in_hsp.subject_end == tree_hsp.subject_end
             }
             IntervalDirection::Neither => false,
         };
@@ -373,7 +374,12 @@ impl BlastIntervalTree {
                     let tree_q_start = tmp_node.leftptr; // leftptr stores query_context_offset for leaves
                     let next_idx = tmp_node.midptr;
                     let result = Self::hsps_have_common_endpoint(
-                        in_hsp, in_q_start, tree_hsp, tree_q_start, which_end);
+                        in_hsp,
+                        in_q_start,
+                        tree_hsp,
+                        tree_q_start,
+                        which_end,
+                    );
                     (next_idx, result)
                 };
 
@@ -416,7 +422,12 @@ impl BlastIntervalTree {
                 let tree_q_start = next_node.leftptr;
 
                 let result = Self::hsps_have_common_endpoint(
-                    in_hsp, in_q_start, tree_hsp, tree_q_start, which_end);
+                    in_hsp,
+                    in_q_start,
+                    tree_hsp,
+                    tree_q_start,
+                    which_end,
+                );
 
                 match result {
                     Some(EndpointResult::KeepTree) => return true,
@@ -471,7 +482,11 @@ impl BlastIntervalTree {
             let midptr = self.nodes[root_idx].midptr;
             if midptr != 0 {
                 if self.midpoint_tree_has_hsp_endpoint(
-                    midptr as usize, in_hsp, in_q_start, which_end) {
+                    midptr as usize,
+                    in_hsp,
+                    in_q_start,
+                    which_end,
+                ) {
                     return true;
                 }
             }
@@ -502,7 +517,12 @@ impl BlastIntervalTree {
                 let tree_q_start = next_node.leftptr;
 
                 let result = Self::hsps_have_common_endpoint(
-                    in_hsp, in_q_start, tree_hsp, tree_q_start, which_end);
+                    in_hsp,
+                    in_q_start,
+                    tree_hsp,
+                    tree_q_start,
+                    which_end,
+                );
 
                 match result {
                     Some(EndpointResult::KeepTree) => return true,
@@ -546,27 +566,26 @@ impl BlastIntervalTree {
         //     region_end = query_start + hsp->query.end;
         // }
         let mut query_start = query_context_offset;
-        let (region_start, region_end) = if index_method == IndexMethod::QueryOnlyStrandIndifferent
-            && hsp.query_frame < 0
-        {
-            let region_end = query_start - hsp.query_offset;
-            let region_start = query_start - hsp.query_end;
-            query_start = query_start - hsp.query_length - 1;
-            (region_start, region_end)
-        } else {
-            (query_start + hsp.query_offset, query_start + hsp.query_end)
-        };
+        let (region_start, region_end) =
+            if index_method == IndexMethod::QueryOnlyStrandIndifferent && hsp.query_frame < 0 {
+                let region_end = query_start - hsp.query_offset;
+                let region_start = query_start - hsp.query_end;
+                query_start = query_start - hsp.query_length - 1;
+                (region_start, region_end)
+            } else {
+                (query_start + hsp.query_offset, query_start + hsp.query_end)
+            };
 
         // NCBI reference: blast_itree.c:558-585
         // For eQueryAndSubject, check for common endpoints before adding
         if index_method == IndexMethod::QueryAndSubject {
             // Check left endpoint
             if self.interval_tree_has_hsp_endpoint(&hsp, query_start, IntervalDirection::Left) {
-                return;  // Better HSP with same endpoint already exists
+                return; // Better HSP with same endpoint already exists
             }
             // Check right endpoint
             if self.interval_tree_has_hsp_endpoint(&hsp, query_start, IntervalDirection::Right) {
-                return;  // Better HSP with same endpoint already exists
+                return; // Better HSP with same endpoint already exists
             }
         }
 
@@ -575,7 +594,14 @@ impl BlastIntervalTree {
         let new_index = self.alloc_leaf_node(hsp.clone(), query_start);
 
         // Start the insertion loop
-        self.add_hsp_internal(new_index, region_start, region_end, &hsp, false, index_method);
+        self.add_hsp_internal(
+            new_index,
+            region_start,
+            region_end,
+            &hsp,
+            false,
+            index_method,
+        );
     }
 
     /// Legacy add_hsp without index_method (defaults to QueryAndSubject)
@@ -676,8 +702,10 @@ impl BlastIntervalTree {
             // NCBI reference: blast_itree.c:659-701
             else {
                 // The new interval crosses the center of the node
-                if index_subject_range || index_method == IndexMethod::QueryOnly ||
-                   index_method == IndexMethod::QueryOnlyStrandIndifferent {
+                if index_subject_range
+                    || index_method == IndexMethod::QueryOnly
+                    || index_method == IndexMethod::QueryOnlyStrandIndifferent
+                {
                     // NCBI reference: blast_itree.c:668-675
                     // If indexing subject offsets already, or only indexing query,
                     // prepend the new node to the list of "midpoint" nodes
@@ -724,7 +752,7 @@ impl BlastIntervalTree {
 
         // Get the old HSP data before we modify anything
         let old_hsp = self.nodes[old_leaf_index].hsp.clone().unwrap();
-        let old_q_start = self.nodes[old_leaf_index].leftptr;  // leftptr stores query_start for leaves
+        let old_q_start = self.nodes[old_leaf_index].leftptr; // leftptr stores query_start for leaves
 
         // NCBI reference: blast_itree.c:717-720
         // Attach the new internal node to parent
@@ -755,15 +783,17 @@ impl BlastIntervalTree {
         // }
         let (old_region_start, old_region_end) = if index_subject_range {
             (old_hsp.subject_offset, old_hsp.subject_end)
-        } else if index_method == IndexMethod::QueryOnlyStrandIndifferent
-            && old_hsp.query_frame < 0
+        } else if index_method == IndexMethod::QueryOnlyStrandIndifferent && old_hsp.query_frame < 0
         {
             let q_start = old_hsp.query_context_offset;
             let old_region_end = q_start - old_hsp.query_offset;
             let old_region_start = q_start - old_hsp.query_end;
             (old_region_start, old_region_end)
         } else {
-            (old_q_start + old_hsp.query_offset, old_q_start + old_hsp.query_end)
+            (
+                old_q_start + old_hsp.query_offset,
+                old_q_start + old_hsp.query_end,
+            )
         };
 
         // NCBI reference: blast_itree.c:747-748
@@ -782,8 +812,10 @@ impl BlastIntervalTree {
             self.nodes[mid_index].rightptr = old_leaf_index as i32;
         } else {
             // Old leaf straddles both subtrees of new node
-            if index_subject_range || index_method == IndexMethod::QueryOnly ||
-               index_method == IndexMethod::QueryOnlyStrandIndifferent {
+            if index_subject_range
+                || index_method == IndexMethod::QueryOnly
+                || index_method == IndexMethod::QueryOnlyStrandIndifferent
+            {
                 // NCBI reference: blast_itree.c:771
                 self.nodes[mid_index].midptr = old_leaf_index as i32;
             } else {
@@ -819,7 +851,12 @@ impl BlastIntervalTree {
     /// NCBI reference: blast_itree.c:930-995 BlastIntervalTreeContainsHSP
     ///
     /// Uses proper interval tree traversal for O(log n) containment checks.
-    pub fn contains_hsp(&self, hsp: &TreeHsp, query_context_offset: i32, min_diag_separation: i32) -> bool {
+    pub fn contains_hsp(
+        &self,
+        hsp: &TreeHsp,
+        query_context_offset: i32,
+        min_diag_separation: i32,
+    ) -> bool {
         // NCBI reference: blast_itree.c:942
         if self.nodes.is_empty() {
             return false;
@@ -843,7 +880,7 @@ impl BlastIntervalTree {
                     hsp,
                     query_start,
                     node.hsp.as_ref().unwrap(),
-                    node.leftptr,  // leftptr stores query_context_offset for leaves
+                    node.leftptr, // leftptr stores query_context_offset for leaves
                     min_diag_separation,
                 );
             }

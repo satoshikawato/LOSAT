@@ -234,7 +234,12 @@ mod tests {
 
         purge_hsps_with_common_endpoints(&mut hits);
 
-        assert_eq!(hits.len(), 3, "Expected 3 surviving HSPs, got {}", hits.len());
+        assert_eq!(
+            hits.len(),
+            3,
+            "Expected 3 surviving HSPs, got {}",
+            hits.len()
+        );
 
         let surviving_indices = [4, 0, 6];
         for &orig_idx in &surviving_indices {
@@ -268,7 +273,11 @@ mod tests {
 
         purge_hsps_with_common_endpoints(&mut hits);
 
-        assert_eq!(hits.len(), 2, "HSPs with different s_frame should both survive");
+        assert_eq!(
+            hits.len(),
+            2,
+            "HSPs with different s_frame should both survive"
+        );
     }
 
     /// Test that context (ctx_idx) is used in duplicate detection.
@@ -281,7 +290,11 @@ mod tests {
 
         purge_hsps_with_common_endpoints(&mut hits);
 
-        assert_eq!(hits.len(), 2, "HSPs with different context should both survive");
+        assert_eq!(
+            hits.len(),
+            2,
+            "HSPs with different context should both survive"
+        );
     }
 
     /// Regression test documenting why mixed-subject purge is WRONG.
@@ -333,7 +346,10 @@ mod tests {
         purge_hsps_with_common_endpoints(&mut subject0_hits);
         purge_hsps_with_common_endpoints(&mut subject1_hits);
         let correct_count = subject0_hits.len() + subject1_hits.len();
-        assert_eq!(correct_count, 2, "Per-subject purge should preserve both HSPs");
+        assert_eq!(
+            correct_count, 2,
+            "Per-subject purge should preserve both HSPs"
+        );
 
         let mut mixed_hits = vec![hit1, hit2];
         purge_hsps_with_common_endpoints(&mut mixed_hits);

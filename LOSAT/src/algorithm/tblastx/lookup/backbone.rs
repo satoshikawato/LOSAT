@@ -2,20 +2,19 @@
 //!
 //! Reference: ncbi-blast/c++/src/algo/blast/core/blast_aalookup.c
 
-use crate::utils::matrix::blosum62_score;
-use crate::stats::lookup_protein_params_ungapped;
-use crate::config::ScoringMatrix;
-use crate::stats::karlin_calc::{
-    compute_aa_composition, compute_std_aa_composition, compute_score_freq_profile,
-    compute_karlin_params_ungapped, apply_check_ideal,
-};
 use super::super::diagnostics::diagnostics_enabled;
 use super::super::translation::QueryFrame;
 use super::{
-    QueryContext, LOOKUP_WORD_LENGTH, LOOKUP_ALPHABET_SIZE,
-    PV_ARRAY_BTS, ilog2, compute_backbone_size, compute_mask,
-    encode_kmer_3, pv_set, compute_unmasked_intervals,
+    compute_backbone_size, compute_mask, compute_unmasked_intervals, encode_kmer_3, ilog2, pv_set,
+    QueryContext, LOOKUP_ALPHABET_SIZE, LOOKUP_WORD_LENGTH, PV_ARRAY_BTS,
 };
+use crate::config::ScoringMatrix;
+use crate::stats::karlin_calc::{
+    apply_check_ideal, compute_aa_composition, compute_karlin_params_ungapped,
+    compute_score_freq_profile, compute_std_aa_composition,
+};
+use crate::stats::lookup_protein_params_ungapped;
+use crate::utils::matrix::blosum62_score;
 
 pub const AA_HITS_PER_CELL: usize = 3;
 
@@ -29,7 +28,10 @@ pub struct BackboneCell {
 
 impl Default for BackboneCell {
     fn default() -> Self {
-        Self { num_used: 0, entries: [0; AA_HITS_PER_CELL] }
+        Self {
+            num_used: 0,
+            entries: [0; AA_HITS_PER_CELL],
+        }
     }
 }
 
@@ -110,7 +112,7 @@ pub fn build_ncbi_lookup(
     let diag_enabled = diagnostics_enabled();
     let word_length = LOOKUP_WORD_LENGTH;
     let alphabet_size = LOOKUP_ALPHABET_SIZE; // 28
-    let charsize = ilog2(alphabet_size) + 1;   // 5
+    let charsize = ilog2(alphabet_size) + 1; // 5
     let mask = compute_mask(word_length, charsize);
     let backbone_size = compute_backbone_size(word_length, alphabet_size, charsize);
 
@@ -143,11 +145,10 @@ pub fn build_ncbi_lookup(
             let sfp = compute_score_freq_profile(&ctx_comp, &std_comp, score_min, score_max);
 
             // 3. Compute Karlin parameters
-            let computed_params = compute_karlin_params_ungapped(&sfp)
-                .unwrap_or_else(|_| {
-                    // Fallback to ideal if computation fails
-                    ideal_params
-                });
+            let computed_params = compute_karlin_params_ungapped(&sfp).unwrap_or_else(|_| {
+                // Fallback to ideal if computation fails
+                ideal_params
+            });
 
             // 4. Apply check_ideal logic (tblastx uses check_ideal = TRUE)
             // Reference: NCBI blast_stat.c:2796-2797
@@ -452,12 +453,21 @@ pub fn build_ncbi_lookup(
     if diag_enabled {
         eprintln!("\n=== Phase 1b: Neighbor Generation Diagnostics ===");
         eprintln!("Threshold: {}", threshold);
-        eprintln!("Exact entries added (self_score < threshold): {}", exact_added_count);
+        eprintln!(
+            "Exact entries added (self_score < threshold): {}",
+            exact_added_count
+        );
         eprintln!("Neighbor entries added: {}", neighbor_added_count);
-        eprintln!("Neighbor words generated (unique): {}", neighbor_words_generated);
+        eprintln!(
+            "Neighbor words generated (unique): {}",
+            neighbor_words_generated
+        );
         eprintln!("Words with exact-only additions: {}", words_with_exact_only);
         eprintln!("Words with neighbor generation: {}", words_with_neighbors);
-        eprintln!("Max neighbors generated for single word: {}", max_neighbors_for_single_word);
+        eprintln!(
+            "Max neighbors generated for single word: {}",
+            max_neighbors_for_single_word
+        );
         if max_neighbors_for_single_word > 0 {
             let w0 = (max_neighbor_word_idx >> (2 * charsize)) & residue_mask;
             let w1 = (max_neighbor_word_idx >> charsize) & residue_mask;
@@ -472,7 +482,10 @@ pub fn build_ncbi_lookup(
         } else {
             0.0
         };
-        eprintln!("Expansion factor (total_entries / exact_positions): {:.2}x", expansion_factor);
+        eprintln!(
+            "Expansion factor (total_entries / exact_positions): {:.2}x",
+            expansion_factor
+        );
     }
 
     // Phase 2: Finalize
@@ -513,7 +526,18 @@ pub fn build_ncbi_lookup(
         }
 
         // Distribution histogram
-        let hist_buckets = [1, 10, 100, 500, 1000, 5000, 10000, 50000, 100000, usize::MAX];
+        let hist_buckets = [
+            1,
+            10,
+            100,
+            500,
+            1000,
+            5000,
+            10000,
+            50000,
+            100000,
+            usize::MAX,
+        ];
         let mut hist: Vec<usize> = vec![0; hist_buckets.len()];
         let mut hist_entries: Vec<usize> = vec![0; hist_buckets.len()];
         for &(count, _) in &count_idx_pairs {
@@ -534,7 +558,10 @@ pub fn build_ncbi_lookup(
                 } else {
                     format!("{}-{}", prev + 1, bucket)
                 };
-                eprintln!("  {}: {} cells, {} entries", label, hist[i], hist_entries[i]);
+                eprintln!(
+                    "  {}: {} cells, {} entries",
+                    label, hist[i], hist_entries[i]
+                );
             }
             prev = bucket;
         }
@@ -625,9 +652,7 @@ pub fn build_ncbi_lookup(
 }
 
 /// Build a simple direct (exact) 3-mer lookup table for tests and diagnostics.
-pub fn build_direct_lookup(
-    queries: &[Vec<QueryFrame>],
-) -> Vec<Vec<(u32, u8, u32)>> {
+pub fn build_direct_lookup(queries: &[Vec<QueryFrame>]) -> Vec<Vec<(u32, u8, u32)>> {
     let word_length = LOOKUP_WORD_LENGTH;
     let alphabet_size = LOOKUP_ALPHABET_SIZE;
     let charsize = ilog2(alphabet_size) + 1;

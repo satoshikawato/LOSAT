@@ -1,20 +1,25 @@
 //! Coordination module for BLASTN pipeline setup
-//! 
+//!
 //! This module handles:
 //! - Task-specific parameter configuration (word size, scoring, etc.)
 //! - Sequence reading and preprocessing
 //! - DUST masking
 //! - Lookup table building
 
-use anyhow::Result;
-use bio::io::fasta;
-use crate::utils::dust::{DustMasker, MaskedInterval};
 use super::args::BlastnArgs;
-use super::constants::{MIN_UNGAPPED_SCORE_MEGABLAST, MIN_UNGAPPED_SCORE_BLASTN, MAX_DIRECT_LOOKUP_WORD_SIZE, X_DROP_GAPPED_NUCL, X_DROP_GAPPED_GREEDY, X_DROP_GAPPED_FINAL, SCAN_RANGE_BLASTN, SCAN_RANGE_MEGABLAST, LUT_WIDTH_11_THRESHOLD_8, LUT_WIDTH_11_THRESHOLD_10, MIN_DIAG_SEPARATION_BLASTN, MIN_DIAG_SEPARATION_MEGABLAST};
+use super::constants::{
+    LUT_WIDTH_11_THRESHOLD_10, LUT_WIDTH_11_THRESHOLD_8, MAX_DIRECT_LOOKUP_WORD_SIZE,
+    MIN_DIAG_SEPARATION_BLASTN, MIN_DIAG_SEPARATION_MEGABLAST, MIN_UNGAPPED_SCORE_BLASTN,
+    MIN_UNGAPPED_SCORE_MEGABLAST, SCAN_RANGE_BLASTN, SCAN_RANGE_MEGABLAST, X_DROP_GAPPED_FINAL,
+    X_DROP_GAPPED_GREEDY, X_DROP_GAPPED_NUCL,
+};
 use super::lookup::{
     build_db_word_counts, build_na_lookup, build_pv_direct_lookup, build_two_stage_lookup,
     NaLookupTable, PvDirectLookup, TwoStageLookup,
 };
+use crate::utils::dust::{DustMasker, MaskedInterval};
+use anyhow::Result;
+use bio::io::fasta;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum LookupTableKind {
@@ -37,8 +42,8 @@ pub struct TaskConfig {
     pub use_two_stage: bool,
     pub lut_word_length: usize,
     pub x_drop_gapped: i32, // Task-specific gapped X-dropoff (blastn: 30, megablast: 25)
-    pub x_drop_final: i32, // Final traceback X-dropoff (100 for all nucleotide tasks)
-    pub scan_range: usize, // Scan range for off-diagonal hit detection (blastn: 4, megablast: 0)
+    pub x_drop_final: i32,  // Final traceback X-dropoff (100 for all nucleotide tasks)
+    pub scan_range: usize,  // Scan range for off-diagonal hit detection (blastn: 4, megablast: 0)
     pub min_diag_separation: i32, // NCBI reference: blast_nucl_options.cpp:239,259 (blastn: 50, megablast: 6)
 }
 
@@ -112,7 +117,11 @@ pub fn determine_scoring_params(args: &BlastnArgs) -> (i32, i32, i32, i32) {
             let r = if args.reward == 1 { 1 } else { args.reward };
             let p = if args.penalty == -2 { -2 } else { args.penalty };
             let go = if args.gap_open == 0 { 0 } else { args.gap_open };
-            let ge = if args.gap_extend == 0 { 0 } else { args.gap_extend };
+            let ge = if args.gap_extend == 0 {
+                0
+            } else {
+                args.gap_extend
+            };
             (r, p, go, ge)
         }
         "blastn" | "dc-megablast" => {
@@ -121,7 +130,11 @@ pub fn determine_scoring_params(args: &BlastnArgs) -> (i32, i32, i32, i32) {
             // NCBI BLAST: gap penalties are specified as positive values (cost)
             // Reference: ncbi-blast/c++/include/algo/blast/core/blast_options.h:84-96
             let go = if args.gap_open == 0 { 5 } else { args.gap_open };
-            let ge = if args.gap_extend == 0 { 2 } else { args.gap_extend };
+            let ge = if args.gap_extend == 0 {
+                2
+            } else {
+                args.gap_extend
+            };
             (r, p, go, ge)
         }
         "blastn-short" => {
@@ -130,7 +143,11 @@ pub fn determine_scoring_params(args: &BlastnArgs) -> (i32, i32, i32, i32) {
             // NCBI BLAST: gap penalties are specified as positive values (cost)
             // Reference: ncbi-blast/c++/include/algo/blast/core/blast_options.h:84-96
             let go = if args.gap_open == 0 { 5 } else { args.gap_open };
-            let ge = if args.gap_extend == 0 { 2 } else { args.gap_extend };
+            let ge = if args.gap_extend == 0 {
+                2
+            } else {
+                args.gap_extend
+            };
             (r, p, go, ge)
         }
         _ => (args.reward, args.penalty, args.gap_open, args.gap_extend),
@@ -156,12 +173,12 @@ pub fn calculate_initial_scan_step(effective_word_size: usize, user_scan_step: u
 pub fn configure_task(args: &BlastnArgs) -> TaskConfig {
     let effective_word_size = determine_effective_word_size(args);
     let (reward, penalty, gap_open, gap_extend) = determine_scoring_params(args);
-    
+
     let min_ungapped_score = match args.task.as_str() {
         "megablast" => MIN_UNGAPPED_SCORE_MEGABLAST,
         _ => MIN_UNGAPPED_SCORE_BLASTN,
     };
-    
+
     // NCBI BLAST algorithm selection:
     // - megablast: eGreedyScoreOnly (greedy alignment)
     // - blastn: eDynProgScoreOnly (dynamic programming)
@@ -170,14 +187,14 @@ pub fn configure_task(args: &BlastnArgs) -> TaskConfig {
         "megablast" => false,
         _ => true,
     };
-    
+
     // NCBI BLAST: Task-specific gapped X-dropoff
     // Reference: ncbi-blast/c++/include/algo/blast/core/blast_options.h:122-148
     // blastn (non-greedy): 30, megablast (greedy): 25
     // Reference: ncbi-blast/c++/src/algo/blast/api/blast_nucl_options.cpp:177-194
     let x_drop_gapped = match args.task.as_str() {
         "megablast" => X_DROP_GAPPED_GREEDY, // 25
-        _ => X_DROP_GAPPED_NUCL, // 30
+        _ => X_DROP_GAPPED_NUCL,             // 30
     };
 
     // NCBI BLAST: Final traceback X-dropoff (100 for all nucleotide tasks)
@@ -185,9 +202,9 @@ pub fn configure_task(args: &BlastnArgs) -> TaskConfig {
     // BLAST_GAP_X_DROPOFF_FINAL_NUCL = 100
     // Used in traceback phase to extend alignments further than preliminary extension
     let x_drop_final = X_DROP_GAPPED_FINAL; // 100
-    
+
     let scan_step = calculate_initial_scan_step(effective_word_size, args.scan_step);
-    
+
     // NCBI reference: ncbi-blast/c++/src/algo/blast/api/blast_nucl_options.cpp:163-168
     // ```c
     // SetWindowSize(BLAST_WINDOW_SIZE_NUCL);
@@ -195,7 +212,7 @@ pub fn configure_task(args: &BlastnArgs) -> TaskConfig {
     // ```
     let scan_range = match args.task.as_str() {
         "megablast" => SCAN_RANGE_MEGABLAST, // 0
-        _ => SCAN_RANGE_BLASTN, // 0
+        _ => SCAN_RANGE_BLASTN,              // 0
     };
 
     // NCBI reference: blast_nucl_options.cpp:239, 259
@@ -203,7 +220,7 @@ pub fn configure_task(args: &BlastnArgs) -> TaskConfig {
     // Used in MB_HSP_CLOSE macro (blast_gapalign_priv.h:123-124)
     let min_diag_separation = match args.task.as_str() {
         "megablast" => MIN_DIAG_SEPARATION_MEGABLAST, // 6
-        _ => MIN_DIAG_SEPARATION_BLASTN, // 50
+        _ => MIN_DIAG_SEPARATION_BLASTN,              // 50
     };
 
     // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_nalookup.c:45-185
@@ -374,8 +391,7 @@ fn choose_na_lookup_table(
         }
     };
 
-    if lut_kind == LookupTableKind::Small
-        && (approx_table_entries >= 32_767 || max_q_off >= 32_768)
+    if lut_kind == LookupTableKind::Small && (approx_table_entries >= 32_767 || max_q_off >= 32_768)
     {
         lut_kind = LookupTableKind::Na;
     }
@@ -459,7 +475,9 @@ pub fn read_queries(args: &BlastnArgs) -> Result<(Vec<fasta::Record>, Vec<String
 }
 
 /// Read query and subject sequences
-pub fn read_sequences(args: &BlastnArgs) -> Result<(Vec<fasta::Record>, Vec<String>, Vec<fasta::Record>)> {
+pub fn read_sequences(
+    args: &BlastnArgs,
+) -> Result<(Vec<fasta::Record>, Vec<String>, Vec<fasta::Record>)> {
     eprintln!("Reading query & subject...");
     let query_reader = fasta::Reader::from_file(&args.query)?;
     let queries: Vec<fasta::Record> = query_reader.records().filter_map(|r| r.ok()).collect();
@@ -596,9 +614,7 @@ pub fn collect_lowercase_masks(seq: &[u8]) -> Vec<MaskedInterval> {
 // const bool use_lcase_masks = args.Exist(kArgUseLCaseMasking) ? ... : kDfltArgUseLCaseMasking;
 // ReadSequencesToBlast(... use_lcase_masks, subjects, ...);
 // ```
-fn collect_lowercase_masks_for_records(
-    records: &[fasta::Record],
-) -> Vec<Vec<MaskedInterval>> {
+fn collect_lowercase_masks_for_records(records: &[fasta::Record]) -> Vec<Vec<MaskedInterval>> {
     records
         .iter()
         .map(|record| collect_lowercase_masks(record.seq()))
@@ -650,8 +666,11 @@ pub fn apply_dust_masking(
             .iter()
             .map(|record| masker.mask_sequence(record.seq()))
             .collect();
-        
-        let total_masked: usize = masks.iter().map(|m| m.iter().map(|i| i.end - i.start).sum::<usize>()).sum();
+
+        let total_masked: usize = masks
+            .iter()
+            .map(|m| m.iter().map(|i| i.end - i.start).sum::<usize>())
+            .sum();
         let total_bases: usize = queries.iter().map(|r| r.seq().len()).sum();
         if total_bases > 0 {
             eprintln!(
@@ -680,9 +699,14 @@ pub fn build_lookup_tables(
 ) -> (LookupTables, usize) {
     eprintln!(
         "Building lookup (Task: {}, Word: {}, TwoStage: {}, LUTWord: {}, Direct: {}, DUST: {})...",
-        args.task, config.effective_word_size, config.use_two_stage, config.lut_word_length, config.use_direct_lookup, args.dust
+        args.task,
+        config.effective_word_size,
+        config.use_two_stage,
+        config.lut_word_length,
+        config.use_direct_lookup,
+        args.dust
     );
-    
+
     // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_nalookup.c:1312-1325
     // ```c
     // if (lookup_options->db_filter) {
@@ -755,23 +779,24 @@ pub fn build_lookup_tables(
     } else {
         None
     };
-    
-    let pv_direct_lookup: Option<PvDirectLookup> = if !config.use_two_stage && config.use_direct_lookup {
-        Some(build_pv_direct_lookup(
-            queries_blastna,
-            query_offsets,
-            config.effective_word_size,
-            config.effective_word_size,
-            query_masks,
-            db_word_counts_ref,
-            args.max_db_word_count,
-            approx_table_entries,
-            false,
-        ))
-    } else {
-        None
-    };
-    
+
+    let pv_direct_lookup: Option<PvDirectLookup> =
+        if !config.use_two_stage && config.use_direct_lookup {
+            Some(build_pv_direct_lookup(
+                queries_blastna,
+                query_offsets,
+                config.effective_word_size,
+                config.effective_word_size,
+                query_masks,
+                db_word_counts_ref,
+                args.max_db_word_count,
+                approx_table_entries,
+                false,
+            ))
+        } else {
+            None
+        };
+
     // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_nalookup.c:548-583
     // ```c
     // Int4 BlastNaLookupTableNew(BLAST_SequenceBlk* query,
@@ -794,16 +819,18 @@ pub fn build_lookup_tables(
     } else {
         None
     };
-    
+
     // Use scan_step from config - if user specified a value > 0, use it; otherwise use the configured default
     // For two-stage lookup, the default was already calculated in configure_task
     let scan_step = config.scan_step;
-    
+
     if args.verbose && config.use_two_stage {
-        eprintln!("[INFO] Using two-stage lookup: lut_word_length={}, word_length={}, scan_step={}", 
-                  config.lut_word_length, config.effective_word_size, scan_step);
+        eprintln!(
+            "[INFO] Using two-stage lookup: lut_word_length={}, word_length={}, scan_step={}",
+            config.lut_word_length, config.effective_word_size, scan_step
+        );
     }
-    
+
     (
         LookupTables {
             two_stage_lookup,
@@ -854,7 +881,7 @@ pub fn prepare_sequence_data(
     // Int4 oid;/**< The ordinal id of the subject sequence this HSP list is for */
     // ```
     let subject_ids = subject_metadata.subject_ids;
-    
+
     SequenceData {
         queries,
         query_ids,

@@ -28,7 +28,7 @@ impl OutputFormat {
     /// Returns the format and any custom field specifications
     pub fn parse(s: &str) -> Result<(Self, Option<String>), String> {
         let s = s.trim();
-        
+
         // Check if there are custom field specifications
         let (fmt_str, fields) = if let Some(idx) = s.find(char::is_whitespace) {
             let (f, rest) = s.split_at(idx);
@@ -36,14 +36,19 @@ impl OutputFormat {
         } else {
             (s, None)
         };
-        
+
         let format = match fmt_str {
             "0" => OutputFormat::Pairwise,
             "6" => OutputFormat::Tabular,
             "7" => OutputFormat::TabularWithComments,
-            _ => return Err(format!("Unsupported output format: {}. Supported: 0, 6, 7", fmt_str)),
+            _ => {
+                return Err(format!(
+                    "Unsupported output format: {}. Supported: 0, 6, 7",
+                    fmt_str
+                ))
+            }
         };
-        
+
         Ok((format, fields))
     }
 }
@@ -101,8 +106,16 @@ impl OutputConfig {
 pub struct ReportContext {
     /// Query file name or description
     pub query_name: Option<String>,
+    /// Query sequence length for pairwise formatting
+    pub query_length: Option<usize>,
     /// Subject/database file name or description
     pub subject_name: Option<String>,
+    /// Fully formatted database label for pairwise formatting
+    pub database_name: Option<String>,
+    /// Number of sequences in the subject set
+    pub database_num_sequences: Option<usize>,
+    /// Total residue/letter count in the subject set
+    pub database_total_letters: Option<usize>,
     /// Program name (blastn, tblastx, etc.)
     pub program: String,
     /// Version string
@@ -113,7 +126,11 @@ impl Default for ReportContext {
     fn default() -> Self {
         Self {
             query_name: None,
+            query_length: None,
             subject_name: None,
+            database_name: None,
+            database_num_sequences: None,
+            database_total_letters: None,
             program: "blast".to_string(),
             version: None,
         }
@@ -211,11 +228,7 @@ fn format_scientific_ncbi(value: f64, precision: usize) -> String {
 ///     snprintf(bit_score_buf, sizeof(bit_score_buf), "%5.3le", bit_score);
 /// }
 /// ```
-fn write_scientific_ncbi<W: Write>(
-    writer: &mut W,
-    value: f64,
-    precision: usize,
-) -> io::Result<()> {
+fn write_scientific_ncbi<W: Write>(writer: &mut W, value: f64, precision: usize) -> io::Result<()> {
     let formatted = format_scientific_ncbi(value, precision);
     writer.write_all(formatted.as_bytes())
 }
@@ -302,8 +315,8 @@ pub fn format_bitscore_ncbi(bit_score: f64) -> String {
         // NCBI: "%5.3le" -> scientific notation
         format_scientific_ncbi(bit_score, 3)
     } else if bit_score > 99.9 {
-        // NCBI: "%3.0ld" -> integer (no decimal)
-        format!("{:.0}", bit_score)
+        // NCBI: "%3.0ld" with `(long)bit_score` truncates toward zero before formatting.
+        (bit_score as i64).to_string()
     } else {
         // NCBI: "%4.1lf" -> one decimal place
         format!("{:.1}", bit_score)
@@ -385,7 +398,7 @@ fn write_bitscore_ncbi<W: Write>(writer: &mut W, bit_score: f64) -> io::Result<(
     if bit_score > 99999.0 {
         write_scientific_ncbi(writer, bit_score, 3)
     } else if bit_score > 99.9 {
-        write!(writer, "{:.0}", bit_score)
+        write!(writer, "{}", bit_score as i64)
     } else {
         write!(writer, "{:.1}", bit_score)
     }
@@ -400,7 +413,7 @@ pub fn format_hit(
 ) -> String {
     let delim = config.delimiter;
     let identity_fmt = format!("{:.prec$}", hit.identity, prec = config.identity_decimals);
-    
+
     // Use NCBI-compatible formatting when enabled
     let bit_score_fmt = if config.ncbi_evalue_format {
         format_bitscore_ncbi(hit.bit_score)
@@ -478,7 +491,13 @@ pub fn write_hit_fields<W: Write>(
 ) -> io::Result<()> {
     let delim = config.delimiter;
     write!(writer, "{}{}{}", query_id, delim, subject_id)?;
-    write!(writer, "{}{:.prec$}", delim, identity, prec = config.identity_decimals)?;
+    write!(
+        writer,
+        "{}{:.prec$}",
+        delim,
+        identity,
+        prec = config.identity_decimals
+    )?;
     write!(writer, "{}{}", delim, length)?;
     write!(writer, "{}{}", delim, mismatch)?;
     write!(writer, "{}{}", delim, gapopen)?;
@@ -500,7 +519,12 @@ pub fn write_hit_fields<W: Write>(
     if config.ncbi_evalue_format {
         write_bitscore_ncbi(writer, bit_score)?;
     } else {
-        write!(writer, "{:.prec$}", bit_score, prec = config.bit_score_decimals)?;
+        write!(
+            writer,
+            "{:.prec$}",
+            bit_score,
+            prec = config.bit_score_decimals
+        )?;
     }
     writeln!(writer)
 }
@@ -589,20 +613,25 @@ pub fn write_outfmt7_header<W: Write>(
     // Program version line
     // NCBI: "# TBLASTX 2.17.0+"
     let version_str = context.version.as_deref().unwrap_or("0.1.0");
-    writeln!(writer, "# {} {}", context.program.to_uppercase(), version_str)?;
-    
+    writeln!(
+        writer,
+        "# {} {}",
+        context.program.to_uppercase(),
+        version_str
+    )?;
+
     // Query line
     // NCBI: "# Query: query_name"
     if let Some(ref query) = context.query_name {
         writeln!(writer, "# Query: {}", query)?;
     }
-    
+
     // Database line
     // NCBI: "# Database: database_name"
     if let Some(ref db) = context.subject_name {
         writeln!(writer, "# Database: {}", db)?;
     }
-    
+
     // Fields line (only if there are hits)
     // NCBI: "# Fields: qaccver, saccver, pident, ..."
     if num_hits > 0 {
@@ -611,11 +640,11 @@ pub fn write_outfmt7_header<W: Write>(
             "# Fields: qaccver, saccver, pident, length, mismatch, gapopen, qstart, qend, sstart, send, evalue, bitscore"
         )?;
     }
-    
+
     // Hits count line
     // NCBI: "# X hits found"
     writeln!(writer, "# {} hits found", num_hits)?;
-    
+
     Ok(())
 }
 
@@ -647,7 +676,7 @@ pub fn write_outfmt7<W: Write>(
 
     // Write header comments
     write_outfmt7_header(writer, context, hits.len())?;
-    
+
     // NCBI reference: ncbi-blast/c++/src/objtools/align_format/tabular.cpp:1100-1108
     // ```c
     // void CBlastTabularInfo::Print()
@@ -687,12 +716,12 @@ pub fn write_outfmt7<W: Write>(
             config,
         )?;
     }
-    
+
     writer.flush()
 }
 
 /// Write hits grouped by query in outfmt 7 format
-/// 
+///
 /// Each query gets its own header block followed by its hits.
 /// This matches NCBI's output where headers are repeated per query.
 pub fn write_outfmt7_grouped<W: Write>(
@@ -719,11 +748,11 @@ pub fn write_outfmt7_grouped<W: Write>(
     // ```
     let mut buffered = io::BufWriter::new(writer);
     let writer = &mut buffered;
-    
+
     // Group hits by query
     let mut query_hits: HashMap<u32, Vec<&Hit>> = HashMap::new();
     let mut query_order: Vec<u32> = Vec::new();
-    
+
     for hit in hits {
         // NCBI reference: ncbi-blast/c++/src/objtools/align_format/tabular.cpp:1264-1283
         // ```c
@@ -753,7 +782,7 @@ pub fn write_outfmt7_grouped<W: Write>(
         }
         query_hits.entry(q_idx).or_default().push(hit);
     }
-    
+
     // Write each query's header and hits
     for q_idx in query_order {
         // NCBI reference: ncbi-blast/c++/include/algo/blast/core/blast_hits.h:153-166
@@ -772,10 +801,10 @@ pub fn write_outfmt7_grouped<W: Write>(
             query_name: Some(query_id.to_string()),
             ..context.clone()
         };
-        
+
         let qhits = query_hits.get(&q_idx).unwrap();
         write_outfmt7_header(writer, &query_context, qhits.len())?;
-        
+
         // NCBI reference: ncbi-blast/c++/src/objtools/align_format/tabular.cpp:1100-1108
         // ```c
         // void CBlastTabularInfo::Print()
@@ -816,7 +845,7 @@ pub fn write_outfmt7_grouped<W: Write>(
             )?;
         }
     }
-    
+
     writer.flush()
 }
 
@@ -961,6 +990,7 @@ mod tests {
             s_end: 100,
             e_value: 1e-50,
             bit_score: 185.5,
+            num_ident: 95,
             // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_hits.c:1122-1132
             // ```c
             // if (hsp->query.frame != hsp->subject.frame) {
@@ -974,6 +1004,7 @@ mod tests {
             s_idx: 0,
             raw_score: 200,
             gap_info: None,
+            num_positives: 95,
         }
     }
 
@@ -996,7 +1027,7 @@ mod tests {
     // ```
     // ==========================================================================
     // ==========================================================================
-    
+
     #[test]
     fn test_format_evalue_ncbi_zero() {
         // Values at or below 0.0 should return "0.0"
@@ -1031,12 +1062,12 @@ mod tests {
         assert_eq!(format_evalue_ncbi_tabular(0.001), "0.001");
         assert_eq!(format_evalue_ncbi_tabular(0.005), "0.005");
         assert_eq!(format_evalue_ncbi_tabular(0.099), "0.099");
-        
+
         // [0.1, 1.0): "%3.2lf" - 2 decimal places
         assert_eq!(format_evalue_ncbi_tabular(0.1), "0.10");
         assert_eq!(format_evalue_ncbi_tabular(0.5), "0.50");
         assert_eq!(format_evalue_ncbi_tabular(0.99), "0.99");
-        
+
         // [1.0, 10.0): "%2.1lf" - 1 decimal place
         assert_eq!(format_evalue_ncbi_tabular(1.0), "1.0");
         assert_eq!(format_evalue_ncbi_tabular(5.5), "5.5");
@@ -1094,7 +1125,8 @@ mod tests {
     fn test_format_bitscore_ncbi_medium() {
         // > 99.9 and <= 99999: "%3.0ld" - integer (no decimal)
         assert_eq!(format_bitscore_ncbi(100.0), "100");
-        assert_eq!(format_bitscore_ncbi(185.5), "186"); // Rounds
+        assert_eq!(format_bitscore_ncbi(185.5), "185");
+        assert_eq!(format_bitscore_ncbi(598.9), "598");
         assert_eq!(format_bitscore_ncbi(692.0), "692");
         assert_eq!(format_bitscore_ncbi(99999.0), "99999");
     }
@@ -1200,8 +1232,8 @@ mod tests {
         assert!(line.contains("query1"));
         assert!(line.contains("subject1"));
         assert!(line.contains("95.123"));
-        // Bit score 185.5 > 99.9 should be formatted as integer "186"
-        assert!(line.contains("186"));
+        // Bit score 185.5 > 99.9 should be truncated via `(long)bit_score`.
+        assert!(line.contains("185"));
         // E-value 1e-50 should be "1.00e-50"
         assert!(line.contains("1.00e-50"));
     }
@@ -1249,15 +1281,24 @@ mod tests {
 
     #[test]
     fn test_output_format_parse() {
-        assert_eq!(OutputFormat::parse("0").unwrap(), (OutputFormat::Pairwise, None));
-        assert_eq!(OutputFormat::parse("6").unwrap(), (OutputFormat::Tabular, None));
-        assert_eq!(OutputFormat::parse("7").unwrap(), (OutputFormat::TabularWithComments, None));
-        
+        assert_eq!(
+            OutputFormat::parse("0").unwrap(),
+            (OutputFormat::Pairwise, None)
+        );
+        assert_eq!(
+            OutputFormat::parse("6").unwrap(),
+            (OutputFormat::Tabular, None)
+        );
+        assert_eq!(
+            OutputFormat::parse("7").unwrap(),
+            (OutputFormat::TabularWithComments, None)
+        );
+
         // With custom fields
         let (fmt, fields) = OutputFormat::parse("6 qaccver saccver").unwrap();
         assert_eq!(fmt, OutputFormat::Tabular);
         assert_eq!(fields, Some("qaccver saccver".to_string()));
-        
+
         // Invalid format
         assert!(OutputFormat::parse("99").is_err());
     }

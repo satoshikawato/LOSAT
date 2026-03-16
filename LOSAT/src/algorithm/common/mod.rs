@@ -6,8 +6,6 @@
 //! - E-value calculation functions
 //! - HSP chaining and filtering logic
 
+pub mod chaining;
 pub mod diagnostics;
 pub mod evalue;
-pub mod chaining;
-
-

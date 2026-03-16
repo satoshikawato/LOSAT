@@ -14,8 +14,8 @@
 //!
 //! Reference: blast_traceback.c:637-669
 
-use crate::common::GapEditOp;
 use super::super::hsp::BlastnHsp;
+use crate::common::GapEditOp;
 use rustc_hash::FxHashMap;
 
 // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_hits.c:1122-1132
@@ -112,7 +112,12 @@ fn adjust_blastn_offsets(
 /// # Returns
 /// * `true` if trimming was successful
 /// * `false` if no gap_info or cut point not found
-pub fn cut_off_gap_edit_script(hit: &mut BlastnHsp, q_cut: usize, s_cut: usize, cut_begin: bool) -> bool {
+pub fn cut_off_gap_edit_script(
+    hit: &mut BlastnHsp,
+    q_cut: usize,
+    s_cut: usize,
+    cut_begin: bool,
+) -> bool {
     // NCBI reference: blast_hits.c:2392-2452
     let gap_info = match &hit.gap_info {
         Some(info) if !info.is_empty() => info.clone(),
@@ -348,7 +353,10 @@ pub fn cut_off_gap_edit_script(hit: &mut BlastnHsp, q_cut: usize, s_cut: usize, 
 /// # Returns
 /// Returns the index of the first trimmed HSP (for re-evaluation in purge=false mode).
 /// In purge=true mode, this is always equal to the final hit count.
-pub fn purge_hsps_with_common_endpoints_ex(hits: Vec<BlastnHsp>, purge: bool) -> (Vec<BlastnHsp>, usize) {
+pub fn purge_hsps_with_common_endpoints_ex(
+    hits: Vec<BlastnHsp>,
+    purge: bool,
+) -> (Vec<BlastnHsp>, usize) {
     let len = hits.len();
     if len <= 1 {
         return (hits, len);
@@ -439,21 +447,17 @@ fn purge_hsps_for_subject_ex(mut hits: Vec<BlastnHsp>, purge: bool) -> (Vec<Blas
         if h.query_length > 0 && h.query_frame < 0 {
             (
                 h.query_length.saturating_sub(h.q_end),
-                h.query_length
-                    .saturating_sub(h.q_start)
-                    .saturating_add(1),
+                h.query_length.saturating_sub(h.q_start).saturating_add(1),
             )
         } else {
             (h.q_start.saturating_sub(1), h.q_end)
         }
     };
-    let context = |h: &BlastnHsp| -> u32 {
-        h.q_idx * 2 + if h.query_frame < 0 { 1 } else { 0 }
-    };
+    let context = |h: &BlastnHsp| -> u32 { h.q_idx * 2 + if h.query_frame < 0 { 1 } else { 0 } };
     // NCBI uses CANONICAL coordinates: subject.offset < subject.end always
     // ASSERT(hsp->subject.offset < hsp->subject.end) at blast_engine.c:1312
-    let s_offset = |h: &BlastnHsp| h.s_start.min(h.s_end).saturating_sub(1);  // NCBI subject.offset
-    let s_end_canon = |h: &BlastnHsp| h.s_start.max(h.s_end);  // NCBI subject.end
+    let s_offset = |h: &BlastnHsp| h.s_start.min(h.s_end).saturating_sub(1); // NCBI subject.offset
+    let s_end_canon = |h: &BlastnHsp| h.s_start.max(h.s_end); // NCBI subject.end
 
     // Pass 1: Remove HSPs with common START positions
     // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_hits.c:2285-2318
@@ -607,7 +611,13 @@ fn purge_hsps_for_subject_ex(mut hits: Vec<BlastnHsp>, purge: bool) -> (Vec<Blas
         );
     }
 
-    let _ = (initial_count, start_purged, end_purged, start_trimmed, end_trimmed); // Silence unused warnings
+    let _ = (
+        initial_count,
+        start_purged,
+        end_purged,
+        start_trimmed,
+        end_trimmed,
+    ); // Silence unused warnings
 
     (hits, extra_start)
 }
@@ -662,12 +672,14 @@ mod tests {
                 s_end,
                 e_value: 0.0,
                 bit_score: 0.0,
+                num_ident: q_end,
                 query_frame: 1,
                 query_length: 100,
                 q_idx: 0,
                 s_idx: 0,
                 raw_score: 100,
                 gap_info: None,
+                num_positives: q_end,
             }
         }
 
@@ -810,13 +822,9 @@ pub fn blast_hsp_test_identity_and_length(
         } else {
             // Ungapped fallback (N.B. not expected for BLASTN reevaluation path).
             let align_length = if query_is_minus {
-                hit.q_start
-                    .saturating_sub(hit.q_end)
-                    .saturating_add(1)
+                hit.q_start.saturating_sub(hit.q_end).saturating_add(1)
             } else {
-                hit.q_end
-                    .saturating_sub(hit.q_start)
-                    .saturating_add(1)
+                hit.q_end.saturating_sub(hit.q_start).saturating_add(1)
             };
             let mut matches = 0usize;
             let mut mismatches = 0usize;
@@ -837,6 +845,19 @@ pub fn blast_hsp_test_identity_and_length(
     hit.length = align_length;
     hit.mismatch = mismatches;
     hit.gapopen = gap_opens;
+    // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_hits.c:746-824
+    // ```c
+    // s_Blast_HSPGetNumIdentitiesAndPositives(..., Int4* num_ident_ptr, ...,
+    //                                         Int4* num_pos_ptr)
+    // {
+    //    ...
+    //    *num_ident_ptr = num_ident;
+    //    ...
+    //    *num_pos_ptr = num_pos + num_ident;
+    // }
+    // ```
+    hit.num_ident = matches;
+    hit.num_positives = matches;
     hit.identity = if align_length > 0 {
         (matches as f64 / align_length as f64) * 100.0
     } else {
@@ -1360,4 +1381,3 @@ pub fn reevaluate_hsp_with_ambiguities_gapped_ex(
 
     false
 }
-

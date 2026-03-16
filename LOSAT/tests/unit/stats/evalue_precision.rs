@@ -215,7 +215,6 @@ fn test_small_gap_sum_e_large_chain() {
 /// Simulates the accumulation of xsum across multiple HSPs
 #[test]
 fn test_xsum_accumulation_precision() {
-
     let lambda: f64 = 0.267;
     let k: f64 = 0.041;
     let log_k = k.ln();
@@ -281,4 +280,3 @@ fn test_evalue_edge_cases() {
     assert!(result3 > 0.0 && result3.is_finite());
     assert!(result3 > result1, "Smaller xsum should give larger E-value");
 }
-

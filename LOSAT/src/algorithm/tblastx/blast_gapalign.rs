@@ -8,8 +8,9 @@
 use super::chaining::UngappedHit;
 use super::extension::convert_coords;
 use super::lookup::QueryContext;
-use super::translation::QueryFrame;
 use super::tracing::{trace_hsp_target, trace_match_target, trace_ungapped_hit_if_match};
+use super::translation::QueryFrame;
+use std::cmp::Ordering;
 
 /// NCBI BlastInitHSP equivalent - stores initial HSP with absolute coordinates
 ///
@@ -172,7 +173,8 @@ pub fn get_ungapped_hsp_list(
         // Convert absolute coordinates to context-relative coordinates
         // NCBI: init_hsp->ungapped_data->q_start -= query_start;
         // where query_start = query_info->contexts[context].query_offset
-        let q_start_relative = adjust_initial_hsp_offsets(init_hsp.q_start_absolute, ctx.frame_base);
+        let q_start_relative =
+            adjust_initial_hsp_offsets(init_hsp.q_start_absolute, ctx.frame_base);
         let q_end_relative = adjust_initial_hsp_offsets(init_hsp.q_end_absolute, ctx.frame_base);
 
         // NCBI: Blast_HSPInit (blast_hits.c:150-189)
@@ -221,9 +223,128 @@ pub fn get_ungapped_hsp_list(
         ungapped_hits.push(uh);
     }
 
-    // NCBI: Sort the HSP array by score
-    // Reference: blast_gapalign.c:4772
-    ungapped_hits.sort_by(|a, b| b.raw_score.cmp(&a.raw_score));
+    // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_extend.c:280-299
+    // ```c
+    // if (0 == (result = BLAST_CMP(h2->ungapped_data->score,
+    //                              h1->ungapped_data->score)) &&
+    //     0 == (result = BLAST_CMP(h1->ungapped_data->s_start,
+    //                              h2->ungapped_data->s_start)) &&
+    //     0 == (result = BLAST_CMP(h2->ungapped_data->length,
+    //                              h1->ungapped_data->length)) &&
+    //     0 == (result = BLAST_CMP(h1->ungapped_data->q_start,
+    //                              h2->ungapped_data->q_start))) {
+    //     result = BLAST_CMP(h2->ungapped_data->length,
+    //                        h1->ungapped_data->length);
+    // }
+    // ```
+    ungapped_hits.sort_by(score_compare_ungapped_hits_ncbi);
 
     ungapped_hits
+}
+
+// NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_extend.c:280-299
+// ```c
+// static int LIBCALLBACK
+// score_compare_match(const void* v1, const void* v2)
+// {
+//     ...
+// }
+// ```
+fn score_compare_ungapped_hits_ncbi(a: &UngappedHit, b: &UngappedHit) -> Ordering {
+    let a_len = a.q_aa_end.saturating_sub(a.q_aa_start);
+    let b_len = b.q_aa_end.saturating_sub(b.q_aa_start);
+    b.raw_score
+        .cmp(&a.raw_score)
+        .then_with(|| a.s_aa_start.cmp(&b.s_aa_start))
+        .then_with(|| b_len.cmp(&a_len))
+        .then_with(|| a.q_aa_start.cmp(&b.q_aa_start))
+        .then_with(|| b_len.cmp(&a_len))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::stats::KarlinParams;
+
+    fn make_context() -> QueryContext {
+        QueryContext {
+            q_idx: 0,
+            f_idx: 0,
+            frame: 1,
+            aa_seq: vec![0, 1, 1, 1, 1, 1, 0],
+            aa_seq_nomask: None,
+            aa_len: 5,
+            orig_len: 15,
+            frame_base: 0,
+            karlin_params: KarlinParams::default(),
+        }
+    }
+
+    fn make_subject_frame() -> QueryFrame {
+        QueryFrame {
+            frame: 1,
+            aa_seq: vec![0, 1, 1, 1, 1, 1, 0],
+            aa_seq_nomask: None,
+            aa_len: 5,
+            orig_len: 15,
+            seg_masks: Vec::new(),
+        }
+    }
+
+    fn make_init_hsp(
+        q_start: i32,
+        q_end: i32,
+        s_start: i32,
+        s_end: i32,
+        score: i32,
+    ) -> InitHSP {
+        InitHSP {
+            q_start_absolute: q_start,
+            q_end_absolute: q_end,
+            s_start,
+            s_end,
+            score,
+            ctx_idx: 0,
+            s_f_idx: 0,
+            q_idx: 0,
+            s_idx: 0,
+            q_frame: 1,
+            s_frame: 1,
+            q_orig_len: 15,
+            s_orig_len: 15,
+        }
+    }
+
+    #[test]
+    fn test_get_ungapped_hsp_list_sorts_like_ncbi_score_compare_match() {
+        let contexts = vec![make_context()];
+        let subject_frames = vec![make_subject_frame()];
+        let hits = get_ungapped_hsp_list(
+            vec![
+                make_init_hsp(4, 10, 30, 36, 100),
+                make_init_hsp(2, 10, 20, 28, 100),
+                make_init_hsp(1, 8, 20, 27, 100),
+                make_init_hsp(3, 11, 20, 28, 120),
+            ],
+            &contexts,
+            &subject_frames,
+        );
+
+        let ordered: Vec<(i32, usize, usize, usize)> = hits
+            .iter()
+            .map(|hit| {
+                (
+                    hit.raw_score,
+                    hit.s_aa_start,
+                    hit.q_aa_end.saturating_sub(hit.q_aa_start),
+                    hit.q_aa_start,
+                )
+            })
+            .collect();
+
+        assert_eq!(
+            ordered,
+            vec![(120, 20, 8, 3), (100, 20, 8, 2), (100, 20, 7, 1), (100, 30, 6, 4)]
+        );
+    }
 }

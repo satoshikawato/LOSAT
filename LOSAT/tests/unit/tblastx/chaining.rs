@@ -1,9 +1,9 @@
 //! Unit tests for tblastx/chaining.rs
 
+use rustc_hash::FxHashMap;
 use LOSAT::algorithm::tblastx::chaining::{chain_and_filter_hsps_protein, ExtendedHit};
 use LOSAT::common::Hit;
 use LOSAT::stats::KarlinParams;
-use rustc_hash::FxHashMap;
 
 // NCBI reference: ncbi-blast/c++/include/algo/blast/core/blast_hits.h:153-166
 // ```c
@@ -95,16 +95,9 @@ fn test_chain_and_filter_hsps_protein_empty() {
         alpha: 1.9,
         beta: -30.0,
     };
-    
-    let result = chain_and_filter_hsps_protein(
-        hits,
-        &sequences,
-        1000,
-        &params,
-        1e-5,
-        None,
-    );
-    
+
+    let result = chain_and_filter_hsps_protein(hits, &sequences, 1000, &params, 1e-5, None);
+
     assert!(result.is_empty());
 }
 
@@ -112,18 +105,17 @@ fn test_chain_and_filter_hsps_protein_empty() {
 fn test_chain_and_filter_hsps_protein_single_hit() {
     let hit = create_test_hit(0, 0, 10, 20, 30, 40, 50.0, 1e-10);
     let ext_hit = create_extended_hit(
-        hit,
-        1,  // q_frame
-        1,  // s_frame
-        3,  // q_aa_start
-        6,  // q_aa_end
-        10, // s_aa_start
-        13, // s_aa_end
-        100, // q_orig_len
-        200, // s_orig_len
+        hit, 1,     // q_frame
+        1,     // s_frame
+        3,     // q_aa_start
+        6,     // q_aa_end
+        10,    // s_aa_start
+        13,    // s_aa_end
+        100,   // q_orig_len
+        200,   // s_orig_len
         false, // from_gapped
     );
-    
+
     let hits = vec![ext_hit];
     let sequences = empty_sequences();
     let params = KarlinParams {
@@ -133,16 +125,9 @@ fn test_chain_and_filter_hsps_protein_single_hit() {
         alpha: 1.9,
         beta: -30.0,
     };
-    
-    let result = chain_and_filter_hsps_protein(
-        hits,
-        &sequences,
-        1000,
-        &params,
-        1e-5,
-        None,
-    );
-    
+
+    let result = chain_and_filter_hsps_protein(hits, &sequences, 1000, &params, 1e-5, None);
+
     assert_eq!(result.len(), 1);
     assert_eq!(result[0].q_idx, 0);
     assert_eq!(result[0].s_idx, 0);
@@ -152,22 +137,16 @@ fn test_chain_and_filter_hsps_protein_single_hit() {
 fn test_chain_and_filter_hsps_protein_multiple_hits_same_frame() {
     let hit1 = create_test_hit(0, 0, 10, 20, 30, 40, 50.0, 1e-10);
     let hit2 = create_test_hit(0, 0, 25, 35, 45, 55, 45.0, 1e-9);
-    
+
     let ext_hit1 = create_extended_hit(
-        hit1,
-        1, 1, // Same frames
-        3, 6, 10, 13,
-        100, 200,
-        false,
+        hit1, 1, 1, // Same frames
+        3, 6, 10, 13, 100, 200, false,
     );
     let ext_hit2 = create_extended_hit(
-        hit2,
-        1, 1, // Same frames
-        8, 11, 15, 18,
-        100, 200,
-        false,
+        hit2, 1, 1, // Same frames
+        8, 11, 15, 18, 100, 200, false,
     );
-    
+
     let hits = vec![ext_hit1, ext_hit2];
     let sequences = empty_sequences();
     let params = KarlinParams {
@@ -177,16 +156,9 @@ fn test_chain_and_filter_hsps_protein_multiple_hits_same_frame() {
         alpha: 1.9,
         beta: -30.0,
     };
-    
-    let result = chain_and_filter_hsps_protein(
-        hits,
-        &sequences,
-        1000,
-        &params,
-        1e-5,
-        None,
-    );
-    
+
+    let result = chain_and_filter_hsps_protein(hits, &sequences, 1000, &params, 1e-5, None);
+
     // Both hits should be kept (clustering may group them, but both should pass e-value filter)
     assert!(result.len() >= 1);
 }
@@ -195,22 +167,16 @@ fn test_chain_and_filter_hsps_protein_multiple_hits_same_frame() {
 fn test_chain_and_filter_hsps_protein_different_frames() {
     let hit1 = create_test_hit(0, 0, 10, 20, 30, 40, 50.0, 1e-10);
     let hit2 = create_test_hit(0, 0, 25, 35, 45, 55, 45.0, 1e-9);
-    
+
     let ext_hit1 = create_extended_hit(
-        hit1,
-        1, 1, // Frame 1
-        3, 6, 10, 13,
-        100, 200,
-        false,
+        hit1, 1, 1, // Frame 1
+        3, 6, 10, 13, 100, 200, false,
     );
     let ext_hit2 = create_extended_hit(
-        hit2,
-        2, 2, // Different frame
-        8, 11, 15, 18,
-        100, 200,
-        false,
+        hit2, 2, 2, // Different frame
+        8, 11, 15, 18, 100, 200, false,
     );
-    
+
     let hits = vec![ext_hit1, ext_hit2];
     let sequences = empty_sequences();
     let params = KarlinParams {
@@ -220,16 +186,9 @@ fn test_chain_and_filter_hsps_protein_different_frames() {
         alpha: 1.9,
         beta: -30.0,
     };
-    
-    let result = chain_and_filter_hsps_protein(
-        hits,
-        &sequences,
-        1000,
-        &params,
-        1e-5,
-        None,
-    );
-    
+
+    let result = chain_and_filter_hsps_protein(hits, &sequences, 1000, &params, 1e-5, None);
+
     // Hits from different frames should be in separate groups
     // Both should be kept since they're in different frame combinations
     assert!(result.len() >= 1);
@@ -239,22 +198,10 @@ fn test_chain_and_filter_hsps_protein_different_frames() {
 fn test_chain_and_filter_hsps_protein_evalue_filtering() {
     let hit1 = create_test_hit(0, 0, 10, 20, 30, 40, 50.0, 1e-10);
     let hit2 = create_test_hit(0, 0, 25, 35, 45, 55, 45.0, 1e-2); // High e-value
-    
-    let ext_hit1 = create_extended_hit(
-        hit1,
-        1, 1,
-        3, 6, 10, 13,
-        100, 200,
-        false,
-    );
-    let ext_hit2 = create_extended_hit(
-        hit2,
-        1, 1,
-        8, 11, 15, 18,
-        100, 200,
-        false,
-    );
-    
+
+    let ext_hit1 = create_extended_hit(hit1, 1, 1, 3, 6, 10, 13, 100, 200, false);
+    let ext_hit2 = create_extended_hit(hit2, 1, 1, 8, 11, 15, 18, 100, 200, false);
+
     let hits = vec![ext_hit1, ext_hit2];
     let sequences = empty_sequences();
     let params = KarlinParams {
@@ -264,17 +211,13 @@ fn test_chain_and_filter_hsps_protein_evalue_filtering() {
         alpha: 1.9,
         beta: -30.0,
     };
-    
+
     // Use strict e-value threshold
     let result = chain_and_filter_hsps_protein(
-        hits,
-        &sequences,
-        1000,
-        &params,
-        1e-5, // Only hit1 should pass
+        hits, &sequences, 1000, &params, 1e-5, // Only hit1 should pass
         None,
     );
-    
+
     // Only hit1 should pass the e-value filter
     assert_eq!(result.len(), 1);
     assert_eq!(result[0].e_value, 1e-10);
@@ -284,22 +227,10 @@ fn test_chain_and_filter_hsps_protein_evalue_filtering() {
 fn test_chain_and_filter_hsps_protein_different_queries() {
     let hit1 = create_test_hit(0, 0, 10, 20, 30, 40, 50.0, 1e-10);
     let hit2 = create_test_hit(1, 0, 25, 35, 45, 55, 45.0, 1e-9);
-    
-    let ext_hit1 = create_extended_hit(
-        hit1,
-        1, 1,
-        3, 6, 10, 13,
-        100, 200,
-        false,
-    );
-    let ext_hit2 = create_extended_hit(
-        hit2,
-        1, 1,
-        8, 11, 15, 18,
-        100, 200,
-        false,
-    );
-    
+
+    let ext_hit1 = create_extended_hit(hit1, 1, 1, 3, 6, 10, 13, 100, 200, false);
+    let ext_hit2 = create_extended_hit(hit2, 1, 1, 8, 11, 15, 18, 100, 200, false);
+
     let hits = vec![ext_hit1, ext_hit2];
     let sequences = empty_sequences();
     let params = KarlinParams {
@@ -309,16 +240,9 @@ fn test_chain_and_filter_hsps_protein_different_queries() {
         alpha: 1.9,
         beta: -30.0,
     };
-    
-    let result = chain_and_filter_hsps_protein(
-        hits,
-        &sequences,
-        1000,
-        &params,
-        1e-5,
-        None,
-    );
-    
+
+    let result = chain_and_filter_hsps_protein(hits, &sequences, 1000, &params, 1e-5, None);
+
     // Both hits should be kept (different queries)
     assert_eq!(result.len(), 2);
 }
@@ -327,22 +251,10 @@ fn test_chain_and_filter_hsps_protein_different_queries() {
 fn test_chain_and_filter_hsps_protein_different_subjects() {
     let hit1 = create_test_hit(0, 0, 10, 20, 30, 40, 50.0, 1e-10);
     let hit2 = create_test_hit(0, 1, 25, 35, 45, 55, 45.0, 1e-9);
-    
-    let ext_hit1 = create_extended_hit(
-        hit1,
-        1, 1,
-        3, 6, 10, 13,
-        100, 200,
-        false,
-    );
-    let ext_hit2 = create_extended_hit(
-        hit2,
-        1, 1,
-        8, 11, 15, 18,
-        100, 200,
-        false,
-    );
-    
+
+    let ext_hit1 = create_extended_hit(hit1, 1, 1, 3, 6, 10, 13, 100, 200, false);
+    let ext_hit2 = create_extended_hit(hit2, 1, 1, 8, 11, 15, 18, 100, 200, false);
+
     let hits = vec![ext_hit1, ext_hit2];
     let sequences = empty_sequences();
     let params = KarlinParams {
@@ -352,16 +264,9 @@ fn test_chain_and_filter_hsps_protein_different_subjects() {
         alpha: 1.9,
         beta: -30.0,
     };
-    
-    let result = chain_and_filter_hsps_protein(
-        hits,
-        &sequences,
-        1000,
-        &params,
-        1e-5,
-        None,
-    );
-    
+
+    let result = chain_and_filter_hsps_protein(hits, &sequences, 1000, &params, 1e-5, None);
+
     // Both hits should be kept (different subjects)
     assert_eq!(result.len(), 2);
 }
@@ -371,29 +276,11 @@ fn test_chain_and_filter_hsps_protein_sorting_by_bit_score() {
     let hit1 = create_test_hit(0, 0, 10, 20, 30, 40, 30.0, 1e-10);
     let hit2 = create_test_hit(0, 0, 25, 35, 45, 55, 50.0, 1e-9);
     let hit3 = create_test_hit(0, 0, 40, 50, 60, 70, 40.0, 1e-8);
-    
-    let ext_hit1 = create_extended_hit(
-        hit1,
-        1, 1,
-        3, 6, 10, 13,
-        100, 200,
-        false,
-    );
-    let ext_hit2 = create_extended_hit(
-        hit2,
-        1, 1,
-        8, 11, 15, 18,
-        100, 200,
-        false,
-    );
-    let ext_hit3 = create_extended_hit(
-        hit3,
-        1, 1,
-        13, 16, 20, 23,
-        100, 200,
-        false,
-    );
-    
+
+    let ext_hit1 = create_extended_hit(hit1, 1, 1, 3, 6, 10, 13, 100, 200, false);
+    let ext_hit2 = create_extended_hit(hit2, 1, 1, 8, 11, 15, 18, 100, 200, false);
+    let ext_hit3 = create_extended_hit(hit3, 1, 1, 13, 16, 20, 23, 100, 200, false);
+
     let hits = vec![ext_hit1, ext_hit2, ext_hit3];
     let sequences = empty_sequences();
     let params = KarlinParams {
@@ -403,20 +290,13 @@ fn test_chain_and_filter_hsps_protein_sorting_by_bit_score() {
         alpha: 1.9,
         beta: -30.0,
     };
-    
-    let result = chain_and_filter_hsps_protein(
-        hits,
-        &sequences,
-        1000,
-        &params,
-        1e-5,
-        None,
-    );
-    
+
+    let result = chain_and_filter_hsps_protein(hits, &sequences, 1000, &params, 1e-5, None);
+
     // Results should be sorted by bit score (descending)
     assert!(result.len() >= 1);
     for i in 1..result.len() {
-        assert!(result[i-1].bit_score >= result[i].bit_score);
+        assert!(result[i - 1].bit_score >= result[i].bit_score);
     }
 }
 
@@ -424,22 +304,14 @@ fn test_chain_and_filter_hsps_protein_sorting_by_bit_score() {
 fn test_chain_and_filter_hsps_protein_gapped_vs_ungapped() {
     let hit1 = create_test_hit(0, 0, 10, 20, 30, 40, 50.0, 1e-10);
     let hit2 = create_test_hit(0, 0, 25, 35, 45, 55, 45.0, 1e-9);
-    
+
     let ext_hit1 = create_extended_hit(
-        hit1,
-        1, 1,
-        3, 6, 10, 13,
-        100, 200,
-        false, // from_gapped = false
+        hit1, 1, 1, 3, 6, 10, 13, 100, 200, false, // from_gapped = false
     );
     let ext_hit2 = create_extended_hit(
-        hit2,
-        1, 1,
-        8, 11, 15, 18,
-        100, 200,
-        true, // from_gapped = true
+        hit2, 1, 1, 8, 11, 15, 18, 100, 200, true, // from_gapped = true
     );
-    
+
     let hits = vec![ext_hit1, ext_hit2];
     let sequences = empty_sequences();
     let params = KarlinParams {
@@ -449,18 +321,9 @@ fn test_chain_and_filter_hsps_protein_gapped_vs_ungapped() {
         alpha: 1.9,
         beta: -30.0,
     };
-    
-    let result = chain_and_filter_hsps_protein(
-        hits,
-        &sequences,
-        1000,
-        &params,
-        1e-5,
-        None,
-    );
-    
+
+    let result = chain_and_filter_hsps_protein(hits, &sequences, 1000, &params, 1e-5, None);
+
     // Both hits should be kept regardless of gapped/ungapped source
     assert!(result.len() >= 1);
 }
-
-

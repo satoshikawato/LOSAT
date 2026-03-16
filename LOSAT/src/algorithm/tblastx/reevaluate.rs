@@ -60,7 +60,7 @@ fn reevaluate_score_table_32() -> &'static [i32; 32 * 32] {
 }
 
 /// Gather 8 BLOSUM62 scores using AVX2.
-/// 
+///
 /// Loads 8 bytes from query and subject sequences, computes indices
 /// (q<<5)|s, and gathers scores from the 32x32 table.
 #[cfg(target_arch = "x86_64")]
@@ -661,7 +661,7 @@ pub fn get_num_identities_and_positives_ungapped(
     let num_ident = unsafe {
         let q_ptr = query_nomask.as_ptr().add(q_off);
         let s_ptr = subject.as_ptr().add(s_off);
-        
+
         #[cfg(target_arch = "x86_64")]
         {
             if is_x86_feature_detected!("avx2") {
@@ -694,16 +694,16 @@ unsafe fn count_identities_avx2(q_ptr: *const u8, s_ptr: *const u8, len: usize) 
     while i + 32 <= len {
         let q_vec = _mm256_loadu_si256(q_ptr.add(i) as *const __m256i);
         let s_vec = _mm256_loadu_si256(s_ptr.add(i) as *const __m256i);
-        
+
         // Compare bytes: 0xFF where equal, 0x00 where different
         let cmp = _mm256_cmpeq_epi8(q_vec, s_vec);
-        
+
         // Get bitmask: each bit represents one byte comparison result
         let mask = _mm256_movemask_epi8(cmp) as u32;
-        
+
         // Count set bits (number of equal bytes)
         count += mask.count_ones() as usize;
-        
+
         i += 32;
     }
 
@@ -711,10 +711,10 @@ unsafe fn count_identities_avx2(q_ptr: *const u8, s_ptr: *const u8, len: usize) 
     while i + 16 <= len {
         let q_vec = _mm_loadu_si128(q_ptr.add(i) as *const __m128i);
         let s_vec = _mm_loadu_si128(s_ptr.add(i) as *const __m128i);
-        
+
         let cmp = _mm_cmpeq_epi8(q_vec, s_vec);
         let mask = _mm_movemask_epi8(cmp) as u16;
-        
+
         count += mask.count_ones() as usize;
         i += 16;
     }
@@ -743,10 +743,10 @@ unsafe fn count_identities_sse2(q_ptr: *const u8, s_ptr: *const u8, len: usize) 
     while i + 16 <= len {
         let q_vec = _mm_loadu_si128(q_ptr.add(i) as *const __m128i);
         let s_vec = _mm_loadu_si128(s_ptr.add(i) as *const __m128i);
-        
+
         let cmp = _mm_cmpeq_epi8(q_vec, s_vec);
         let mask = _mm_movemask_epi8(cmp) as u16;
-        
+
         count += mask.count_ones() as usize;
         i += 16;
     }
@@ -821,4 +821,3 @@ pub fn hsp_test(
     // NCBI: return (identity_check || length_check)
     identity_check || length_check
 }
-

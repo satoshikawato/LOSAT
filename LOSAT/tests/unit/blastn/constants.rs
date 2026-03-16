@@ -28,10 +28,10 @@ fn test_min_ungapped_score_thresholds() {
     // Thresholds should be positive and reasonable
     assert!(MIN_UNGAPPED_SCORE_MEGABLAST > 0);
     assert!(MIN_UNGAPPED_SCORE_BLASTN > 0);
-    
+
     // blastn threshold should be higher (more filtering needed for smaller word size)
     assert!(MIN_UNGAPPED_SCORE_BLASTN >= MIN_UNGAPPED_SCORE_MEGABLAST);
-    
+
     assert_eq!(MIN_UNGAPPED_SCORE_MEGABLAST, 20);
     assert_eq!(MIN_UNGAPPED_SCORE_BLASTN, 50);
 }
@@ -49,7 +49,7 @@ fn test_greedy_alignment_constants() {
     // GREEDY_MAX_COST should be positive
     assert!(GREEDY_MAX_COST > 0);
     assert_eq!(GREEDY_MAX_COST, 1000);
-    
+
     // GREEDY_MAX_COST_FRACTION should be positive
     assert!(GREEDY_MAX_COST_FRACTION > 0);
     assert_eq!(GREEDY_MAX_COST_FRACTION, 2);
@@ -68,5 +68,3 @@ fn test_invalid_diag() {
     assert!(INVALID_DIAG > 0);
     assert_eq!(INVALID_DIAG, 100_000_000);
 }
-
-

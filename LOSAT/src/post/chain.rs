@@ -292,6 +292,7 @@ impl HspChain {
             s_end: self.s_end,
             e_value: self.min_evalue,
             bit_score: self.total_score,
+            num_ident: self.total_matches,
             // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_hits.c:1122-1132
             // ```c
             // if (hsp->query.frame != hsp->subject.frame) {
@@ -305,6 +306,7 @@ impl HspChain {
             s_idx: self.s_idx,
             raw_score: (self.total_score * 2.0) as i32,
             gap_info: None,
+            num_positives: self.total_matches,
         }
     }
 }
@@ -377,6 +379,7 @@ mod tests {
             s_end,
             e_value: 1e-10,
             bit_score,
+            num_ident: q_end - q_start + 1,
             // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_hits.c:1122-1132
             // ```c
             // if (hsp->query.frame != hsp->subject.frame) {
@@ -390,6 +393,7 @@ mod tests {
             s_idx: 0,
             raw_score: (bit_score * 2.0) as i32,
             gap_info: None,
+            num_positives: q_end - q_start + 1,
         }
     }
 

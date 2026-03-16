@@ -3,8 +3,8 @@
 //! This module provides functions for calculating alignment statistics
 //! and performing full region alignments (for cluster-then-extend chaining).
 
-use crate::stats::KarlinParams;
 use crate::algorithm::common::evalue::calculate_evalue_database_search;
+use crate::stats::KarlinParams;
 
 fn calculate_evalue(
     score: i32,

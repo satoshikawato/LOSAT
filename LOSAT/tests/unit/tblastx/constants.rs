@@ -52,7 +52,7 @@ fn test_chaining_constants() {
     // Chaining constants should be reasonable for amino acid coordinates
     assert!(MAX_GAP_AA > 0);
     assert_eq!(MAX_GAP_AA, 333);
-    
+
     assert!(MAX_DIAG_DRIFT_AA > 0);
     assert_eq!(MAX_DIAG_DRIFT_AA, 33);
 }

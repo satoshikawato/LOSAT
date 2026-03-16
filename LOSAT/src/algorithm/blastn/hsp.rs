@@ -32,12 +32,32 @@ pub struct BlastnHsp {
     pub s_end: usize,
     pub e_value: f64,
     pub bit_score: f64,
+    // NCBI reference: ncbi-blast/c++/include/algo/blast/core/blast_hits.h:125-143
+    // ```c
+    // typedef struct BlastHSP {
+    //    Int4 score;
+    //    Int4 num_ident;
+    //    double bit_score;
+    //    double evalue;
+    //    ...
+    //    Int4 num_positives;
+    // } BlastHSP;
+    // ```
+    pub num_ident: usize,
     pub query_frame: i32,
     pub query_length: usize,
     pub q_idx: u32,
     pub s_idx: u32,
     pub raw_score: i32,
     pub gap_info: Option<Vec<GapEditOp>>,
+    // NCBI reference: ncbi-blast/c++/include/algo/blast/core/blast_hits.h:125-143
+    // ```c
+    // typedef struct BlastHSP {
+    //    ...
+    //    Int4 num_positives;
+    // } BlastHSP;
+    // ```
+    pub num_positives: usize,
 }
 
 #[derive(Debug)]
@@ -109,12 +129,14 @@ impl BlastnHsp {
             s_end,
             e_value,
             bit_score,
+            num_ident,
             query_frame,
             query_length,
             q_idx,
             s_idx,
             raw_score,
             gap_info,
+            num_positives,
         } = hit;
         Self {
             identity,
@@ -127,12 +149,14 @@ impl BlastnHsp {
             s_end,
             e_value,
             bit_score,
+            num_ident,
             query_frame,
             query_length,
             q_idx,
             s_idx,
             raw_score,
             gap_info,
+            num_positives,
         }
     }
 
@@ -155,12 +179,14 @@ impl BlastnHsp {
             s_end: self.s_end,
             e_value: self.e_value,
             bit_score: self.bit_score,
+            num_ident: self.num_ident,
             query_frame: self.query_frame,
             query_length: self.query_length,
             q_idx: self.q_idx,
             s_idx: self.s_idx,
             raw_score: self.raw_score,
             gap_info: self.gap_info,
+            num_positives: self.num_positives,
         }
     }
 }
@@ -271,10 +297,7 @@ pub fn score_compare_hsps(a: &BlastnHsp, b: &BlastnHsp) -> Ordering {
     let query_offsets = |h: &BlastnHsp| {
         if h.query_length > 0 && h.query_frame < 0 {
             let q_offset = h.query_length.saturating_sub(h.q_end);
-            let q_end = h
-                .query_length
-                .saturating_sub(h.q_start)
-                .saturating_add(1);
+            let q_end = h.query_length.saturating_sub(h.q_start).saturating_add(1);
             (q_offset, q_end)
         } else {
             (h.q_start.saturating_sub(1), h.q_end)
@@ -282,8 +305,14 @@ pub fn score_compare_hsps(a: &BlastnHsp, b: &BlastnHsp) -> Ordering {
     };
     let (a_q_offset, a_q_end) = query_offsets(a);
     let (b_q_offset, b_q_end) = query_offsets(b);
-    let (a_s_offset, a_s_end) = (a.s_start.min(a.s_end).saturating_sub(1), a.s_start.max(a.s_end));
-    let (b_s_offset, b_s_end) = (b.s_start.min(b.s_end).saturating_sub(1), b.s_start.max(b.s_end));
+    let (a_s_offset, a_s_end) = (
+        a.s_start.min(a.s_end).saturating_sub(1),
+        a.s_start.max(a.s_end),
+    );
+    let (b_s_offset, b_s_end) = (
+        b.s_start.min(b.s_end).saturating_sub(1),
+        b.s_start.max(b.s_end),
+    );
 
     match b.raw_score.cmp(&a.raw_score) {
         Ordering::Equal => {}
@@ -653,8 +682,17 @@ impl BlastnHitList {
             }
             self.hsplist_array.push(hsp_list);
             self.hsplist_count += 1;
-            self.worst_evalue = self.worst_evalue.max(self.hsplist_array.last().unwrap().best_evalue);
-            if let Some(score) = self.hsplist_array.last().unwrap().hsps.first().map(|h| h.raw_score) {
+            self.worst_evalue = self
+                .worst_evalue
+                .max(self.hsplist_array.last().unwrap().best_evalue);
+            if let Some(score) = self
+                .hsplist_array
+                .last()
+                .unwrap()
+                .hsps
+                .first()
+                .map(|h| h.raw_score)
+            {
                 self.low_score = self.low_score.min(score);
             }
         } else {
@@ -861,12 +899,14 @@ mod tests {
             s_end: 1,
             e_value,
             bit_score: 0.0,
+            num_ident: 0,
             query_frame: 1,
             query_length: 1,
             q_idx: 0,
             s_idx,
             raw_score,
             gap_info: None,
+            num_positives: 0,
         }
     }
 

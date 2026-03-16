@@ -85,17 +85,18 @@ fn s_lnfact(n: usize) -> f64 {
 #[inline]
 fn seg_alpha_index_ncbistdaa(letter: u8) -> Option<usize> {
     match letter {
-        1 => Some(0),              // A
+        1 => Some(0),                          // A
         3..=20 => Some((letter - 2) as usize), // C..W => 1..18
-        22 => Some(19),            // Y
-        _ => None,                 // bogus: -, B, X, Z, U, *, O, J, etc.
+        22 => Some(19),                        // Y
+        _ => None,                             // bogus: -, B, X, Z, U, *, O, J, etc.
     }
 }
 
 /// State vector: sorted amino acid counts (descending order, non-zero only)
 /// Reference: blast_seg.c uses this for entropy calculation
 fn compute_state_vector(counts: &[u32; 20]) -> Vec<i32> {
-    let mut sv: Vec<i32> = counts.iter()
+    let mut sv: Vec<i32> = counts
+        .iter()
         .filter(|&&c| c > 0)
         .map(|&c| c as i32)
         .collect();
@@ -197,7 +198,11 @@ fn get_prob(sv: &[i32], window_length: i32) -> f64 {
 
     let ans1 = ln_ass(sv, alphasize);
     // NCBI: guard ans2 computation with ans1 > -100000 and sv[0] != INT4_MIN
-    let ans2 = if ans1 > -100000.0 { ln_perm(sv, window_length) } else { 0.0 };
+    let ans2 = if ans1 > -100000.0 {
+        ln_perm(sv, window_length)
+    } else {
+        0.0
+    };
 
     ans1 + ans2 - totseq
 }
@@ -206,7 +211,12 @@ fn get_prob(sv: &[i32], window_length: i32) -> f64 {
 /// Reference: ncbi-blast/c++/src/algo/blast/core/blast_seg.c:1592-1624 (s_Entropy)
 fn entropy_ncbi_from_counts(counts: &[u32; 20]) -> f64 {
     // Build state vector (sorted counts, terminating at 0)
-    let mut sv: Vec<i32> = counts.iter().copied().filter(|&c| c > 0).map(|c| c as i32).collect();
+    let mut sv: Vec<i32> = counts
+        .iter()
+        .copied()
+        .filter(|&c| c > 0)
+        .map(|c| c as i32)
+        .collect();
     sv.sort_by(|a, b| b.cmp(a));
 
     let total: i32 = sv.iter().sum();
@@ -283,7 +293,13 @@ impl SegParams {
     }
 
     /// Create with all parameters including maxbogus and maxtrim
-    pub fn with_all(window: usize, locut: f64, hicut: f64, maxbogus: usize, maxtrim: usize) -> Self {
+    pub fn with_all(
+        window: usize,
+        locut: f64,
+        hicut: f64,
+        maxbogus: usize,
+        maxtrim: usize,
+    ) -> Self {
         let mut params = Self::new(window, locut, hicut);
         params.maxbogus = maxbogus.min(window);
         params.maxtrim = maxtrim;
@@ -681,13 +697,21 @@ mod tests {
         // NCBISTDAA: A=1 (not 0, which is '-')
         let low_complex = vec![1u8; 12]; // All alanine (NCBISTDAA code 1)
         let (entropy_low, _) = masker.calculate_entropy(&low_complex);
-        assert!(entropy_low < 1.0, "Low complexity should have low entropy: got {}", entropy_low);
+        assert!(
+            entropy_low < 1.0,
+            "Low complexity should have low entropy: got {}",
+            entropy_low
+        );
 
         // High complexity: all different amino acids
         // Use valid NCBISTDAA codes: 1=A, 3-20=C..W, 22=Y
         let high_complex: Vec<u8> = [1, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13].to_vec();
         let (entropy_high, _) = masker.calculate_entropy(&high_complex);
-        assert!(entropy_high > 2.0, "High complexity should have high entropy: got {}", entropy_high);
+        assert!(
+            entropy_high > 2.0,
+            "High complexity should have high entropy: got {}",
+            entropy_high
+        );
     }
 
     #[test]
@@ -699,7 +723,10 @@ mod tests {
         let seq: Vec<u8> = vec![1u8; 100]; // All alanine (NCBISTDAA code 1)
         let intervals = masker.mask_sequence(&seq);
 
-        assert!(!intervals.is_empty(), "Poly-alanine sequence should be masked");
+        assert!(
+            !intervals.is_empty(),
+            "Poly-alanine sequence should be masked"
+        );
         if !intervals.is_empty() {
             assert!(intervals[0].start < intervals[0].end);
         }
@@ -726,6 +753,9 @@ mod tests {
 
         // Complex sequence should have few or no masked regions
         let total_masked: usize = intervals.iter().map(|i| i.end - i.start).sum();
-        assert!(total_masked < seq.len() / 2, "Complex sequence should not be heavily masked");
+        assert!(
+            total_masked < seq.len() / 2,
+            "Complex sequence should not be heavily masked"
+        );
     }
 }

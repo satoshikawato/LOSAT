@@ -45,17 +45,13 @@ pub fn subject_best_hit(hits: &mut Vec<BlastnHsp>, query_len: usize) {
         if h.query_length > 0 && h.query_frame < 0 {
             (
                 h.query_length.saturating_sub(h.q_end),
-                h.query_length
-                    .saturating_sub(h.q_start)
-                    .saturating_add(1),
+                h.query_length.saturating_sub(h.q_start).saturating_add(1),
             )
         } else {
             (h.q_start.saturating_sub(1), h.q_end)
         }
     };
-    let context = |h: &BlastnHsp| -> u32 {
-        h.q_idx * 2 + if h.query_frame < 0 { 1 } else { 0 }
-    };
+    let context = |h: &BlastnHsp| -> u32 { h.q_idx * 2 + if h.query_frame < 0 { 1 } else { 0 } };
 
     // Mark HSPs for removal
     // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_hits.c:2560-2566
@@ -213,6 +209,7 @@ mod tests {
             s_end,
             e_value: 0.0,
             bit_score: score as f64,
+            num_ident: q_end - q_start + 1,
             // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_hits.c:1122-1132
             // ```c
             // if (hsp->query.frame != hsp->subject.frame) {
@@ -226,6 +223,7 @@ mod tests {
             s_idx: 0,
             raw_score: score,
             gap_info: None,
+            num_positives: q_end - q_start + 1,
         }
     }
 
@@ -235,9 +233,9 @@ mod tests {
         // Hit at q_start=12, q_end=48, score=80 (should be filtered - within ±3 of first)
         // Hit at q_start=20, q_end=60, score=60 (should NOT be filtered - outside range)
         let mut hits = vec![
-            make_hit(10, 50, 10, 50, 100, 1),  // Plus strand, best score
-            make_hit(12, 48, 12, 48, 80, 1),   // Plus strand, within range - REMOVE
-            make_hit(20, 60, 20, 60, 60, 1),   // Plus strand, outside range - KEEP
+            make_hit(10, 50, 10, 50, 100, 1), // Plus strand, best score
+            make_hit(12, 48, 12, 48, 80, 1),  // Plus strand, within range - REMOVE
+            make_hit(20, 60, 20, 60, 60, 1),  // Plus strand, outside range - KEEP
         ];
 
         subject_best_hit(&mut hits, 1000);
@@ -252,8 +250,8 @@ mod tests {
         // Plus strand hit and minus strand hit with similar positions should NOT filter each other
         // in same-strand pass
         let mut hits = vec![
-            make_hit(10, 50, 10, 50, 100, 1),  // Plus strand
-            make_hit(12, 48, 48, 12, 80, -1),  // Minus strand
+            make_hit(10, 50, 10, 50, 100, 1), // Plus strand
+            make_hit(12, 48, 48, 12, 80, -1), // Minus strand
         ];
 
         subject_best_hit(&mut hits, 1000);

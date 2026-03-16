@@ -112,5 +112,3 @@ pub struct TblastxArgs {
     #[arg(long, default_value_t = 0)]
     pub culling_limit: u32,
 }
-
-

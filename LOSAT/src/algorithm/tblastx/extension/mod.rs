@@ -12,19 +12,19 @@
 //! - `two_hit` - Two-hit extension algorithm (NCBI style)
 //! - `gapped` - Gapped extension with affine gap penalties
 
-mod ungapped;
-mod two_hit;
 mod gapped;
+mod two_hit;
+mod ungapped;
 
 // Re-export public functions
-pub use ungapped::extend_hit_ungapped;
-pub use two_hit::extend_hit_two_hit;
 pub use gapped::extend_gapped_protein;
+pub use two_hit::extend_hit_two_hit;
+pub use ungapped::extend_hit_ungapped;
 
-use crate::stats::KarlinParams;
-use crate::algorithm::common::evalue::calculate_evalue_alignment_length;
-use crate::utils::matrix::blosum62_score;
 use super::constants::{SENTINEL_BYTE, SENTINEL_PENALTY};
+use crate::algorithm::common::evalue::calculate_evalue_alignment_length;
+use crate::stats::KarlinParams;
+use crate::utils::matrix::blosum62_score;
 
 /// Get the substitution matrix score for two amino acids in NCBISTDAA encoding.
 ///

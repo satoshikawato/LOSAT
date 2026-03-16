@@ -13,4 +13,3 @@ use super::constants::MIN_UNGAPPED_SCORE;
 pub fn print_summary(counters: &DiagnosticCounters) {
     counters.print_summary(MIN_UNGAPPED_SCORE);
 }
-

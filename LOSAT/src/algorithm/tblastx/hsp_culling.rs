@@ -1,7 +1,7 @@
 //! NCBI BLAST HSP Culling Implementation
-//! 
+//!
 //! Reference: ncbi-blast/c++/src/algo/blast/core/hspfilter_culling.c
-//! 
+//!
 //! This module implements the interval tree-based HSP culling algorithm that removes
 //! dominated HSPs based on score/length tradeoff. The implementation is based upon
 //! the algorithm described in:
@@ -15,7 +15,7 @@ use super::chaining::UngappedHit;
 use super::lookup::QueryContext;
 
 /// Linked list of HSPs used to store hsps in culling tree.
-/// 
+///
 /// NCBI reference: hspfilter_culling.c:52-60
 /// ```c
 /// typedef struct LinkedHSP {
@@ -30,16 +30,16 @@ use super::lookup::QueryContext;
 /// ```
 struct LinkedHSP {
     hsp: UngappedHit,
-    cid: usize,      // context id for hsp
-    sid: u32,        // subject index (OID)
-    begin: i32,      // query offset in plus strand
-    end: i32,        // query end in plus strand
-    merit: i32,      // how many other hsps in the tree dominates me?
+    cid: usize, // context id for hsp
+    sid: u32,   // subject index (OID)
+    begin: i32, // query offset in plus strand
+    end: i32,   // query end in plus strand
+    merit: i32, // how many other hsps in the tree dominates me?
     next: Option<Box<LinkedHSP>>,
 }
 
 /// Definition of a Culling tree node
-/// 
+///
 /// NCBI reference: hspfilter_culling.c:201-207
 /// ```c
 /// typedef struct CTreeNode {
@@ -51,15 +51,15 @@ struct LinkedHSP {
 /// } CTreeNode;
 /// ```
 struct CTreeNode {
-    begin: i32,              // left endpoint
-    end: i32,                // right endpoint
+    begin: i32, // left endpoint
+    end: i32,   // right endpoint
     left: Option<Box<CTreeNode>>,
     right: Option<Box<CTreeNode>>,
-    hsplist: Option<Box<LinkedHSP>>,  // hsps belong to this node, start with low merits
+    hsplist: Option<Box<LinkedHSP>>, // hsps belong to this node, start with low merits
 }
 
 /// Return true if p dominates y
-/// 
+///
 /// NCBI reference: hspfilter_culling.c:79-120
 /// ```c
 /// static Boolean s_DominateTest(LinkedHSP *p, LinkedHSP *y) {
@@ -125,7 +125,7 @@ fn dominate_test(p: &LinkedHSP, y: &LinkedHSP) -> bool {
     // The main criterion: 2 * (%diff in score) + 1 * (%diff in length)
     // Formula: d = 4*s1*l1 + 2*s1*l2 - 2*s2*l1 - 4*s2*l2
     let d = 4 * s1 * l1 + 2 * s1 * l2 - 2 * s2 * l1 - 4 * s2 * l2;
-    
+
     // If identical, use oid as tie breaker
     if ((s1 == s2) && (b1 == b2) && (l1 == l2)) || (d == 0) {
         if s1 != s2 {
@@ -150,7 +150,7 @@ fn dominate_test(p: &LinkedHSP, y: &LinkedHSP) -> bool {
 }
 
 /// Check how many hsps in list dominates y, and update merit of y accordingly
-/// 
+///
 /// NCBI reference: hspfilter_culling.c:123-133
 /// ```c
 /// static Boolean s_FullPass(LinkedHSP *list, LinkedHSP *y) {
@@ -180,7 +180,7 @@ fn full_pass(list: &Option<Box<LinkedHSP>>, y: &mut LinkedHSP) -> bool {
 }
 
 /// Update merit for hsps in list; also returns the number of hsps in list
-/// 
+///
 /// NCBI reference: hspfilter_culling.c:136-163
 /// ```c
 /// static Int4 s_ProcessHSPList(LinkedHSP **list, LinkedHSP *y) {
@@ -212,28 +212,28 @@ fn full_pass(list: &Option<Box<LinkedHSP>>, y: &mut LinkedHSP) -> bool {
 ///     return num;
 /// }
 /// ```
-/// 
+///
 /// FAITHFUL PORT: Matches NCBI's in-place list manipulation algorithm exactly.
 /// Uses a cursor-based approach to track previous node (q) while traversing.
 fn process_hsp_list(list: &mut Option<Box<LinkedHSP>>, y: &LinkedHSP) -> usize {
     // NCBI: Int4 num = 0; LinkedHSP *p = *list, *q, *r; q = p;
     let mut num = 0;
     let mut p = list.take();
-    
+
     // Build new list in-place, matching NCBI's pointer manipulation
     // We use a Vec to collect nodes, then rebuild maintaining order
     let mut nodes: Vec<Box<LinkedHSP>> = Vec::new();
-    
+
     // NCBI: while (p) {
     while let Some(mut r) = p {
         num += 1;
         // NCBI: r = p; p = p->next;
         p = r.next.take();
-        
+
         // NCBI: if (r != y && s_DominateTest(y, r))
         // Check if y dominates r (r != y is handled by domination test returning false for same node)
         let r_dominated = dominate_test(y, &r);
-        
+
         if r_dominated {
             // NCBI: (r->merit)--;
             r.merit -= 1;
@@ -250,20 +250,20 @@ fn process_hsp_list(list: &mut Option<Box<LinkedHSP>>, y: &LinkedHSP) -> usize {
             nodes.push(r);
         }
     }
-    
+
     // Rebuild list maintaining original order
     let mut new_list: Option<Box<LinkedHSP>> = None;
     for mut node in nodes.into_iter().rev() {
         node.next = new_list;
         new_list = Some(node);
     }
-    
+
     *list = new_list;
     num
 }
 
 /// Add an hsp to the front of hsp list
-/// 
+///
 /// NCBI reference: hspfilter_culling.c:193-197
 /// ```c
 /// static void s_AddHSPtoList(LinkedHSP **list, LinkedHSP *y) {
@@ -279,7 +279,7 @@ fn add_hsp_to_list(list: &mut Option<Box<LinkedHSP>>, y: Box<LinkedHSP>) {
 }
 
 /// Allocate and return a new node for use
-/// 
+///
 /// NCBI reference: hspfilter_culling.c:228-247
 fn ctree_node_new(parent: Option<&CTreeNode>, dir: bool) -> CTreeNode {
     let mut node = CTreeNode {
@@ -289,7 +289,7 @@ fn ctree_node_new(parent: Option<&CTreeNode>, dir: bool) -> CTreeNode {
         right: None,
         hsplist: None,
     };
-    
+
     if let Some(p) = parent {
         let midpt = (p.begin + p.end) / 2;
         if dir {
@@ -302,12 +302,12 @@ fn ctree_node_new(parent: Option<&CTreeNode>, dir: bool) -> CTreeNode {
             node.end = p.end;
         }
     }
-    
+
     node
 }
 
 /// Fork children from a node
-/// 
+///
 /// NCBI reference: hspfilter_culling.c:258-299
 /// ```c
 /// static void s_ForkChildren(CTreeNode * node) {
@@ -353,7 +353,7 @@ fn ctree_node_new(parent: Option<&CTreeNode>, dir: bool) -> CTreeNode {
 ///    }
 /// }
 /// ```
-/// 
+///
 /// FAITHFUL PORT: Matches NCBI's in-place list manipulation exactly.
 fn fork_children(node: &mut CTreeNode) {
     let midpt = (node.begin + node.end) / 2;
@@ -361,12 +361,12 @@ fn fork_children(node: &mut CTreeNode) {
     let mut parent_list: Vec<Box<LinkedHSP>> = Vec::new();
     let mut child_left_list: Vec<Box<LinkedHSP>> = Vec::new();
     let mut child_right_list: Vec<Box<LinkedHSP>> = Vec::new();
-    
+
     // NCBI: while(p) {
     while let Some(mut r) = p {
         // NCBI: r = p; p = p->next;
         p = r.next.take();
-        
+
         // NCBI: Determine which child (if any) this HSP belongs to
         if r.end < midpt {
             // NCBI: child = node->left;
@@ -385,7 +385,7 @@ fn fork_children(node: &mut CTreeNode) {
             parent_list.push(r);
         }
     }
-    
+
     // Rebuild parent list
     let mut new_parent_list: Option<Box<LinkedHSP>> = None;
     for mut node_hsp in parent_list.into_iter().rev() {
@@ -393,14 +393,14 @@ fn fork_children(node: &mut CTreeNode) {
         new_parent_list = Some(node_hsp);
     }
     node.hsplist = new_parent_list;
-    
+
     // Rebuild left child list
     if let Some(ref mut left) = node.left {
         for mut hsp in child_left_list.into_iter().rev() {
             add_hsp_to_list(&mut left.hsplist, hsp);
         }
     }
-    
+
     // Rebuild right child list
     if let Some(ref mut right) = node.right {
         for mut hsp in child_right_list.into_iter().rev() {
@@ -410,22 +410,22 @@ fn fork_children(node: &mut CTreeNode) {
 }
 
 /// Recursively search and update merit hsps in culling tree due to addition of hsp x
-/// 
+///
 /// NCBI reference: hspfilter_culling.c:334-370
 fn process_ctree(node: &mut Option<Box<CTreeNode>>, x: &LinkedHSP) {
     if node.is_none() {
         return;
     }
-    
+
     let node_ref = node.as_mut().unwrap();
-    
+
     // First test if x includes the full range covered by node
     if x.begin <= node_ref.begin && x.end >= node_ref.end {
         // Mark down entire subtree
         mark_down_ctree(node);
         return;
     }
-    
+
     // If node reaches the leaves
     if node_ref.left.is_none() && node_ref.right.is_none() {
         if process_hsp_list(&mut node_ref.hsplist, x) == 0 {
@@ -433,7 +433,7 @@ fn process_ctree(node: &mut Option<Box<CTreeNode>>, x: &LinkedHSP) {
         }
         return;
     }
-    
+
     // Recursive case
     let midpt = (node_ref.begin + node_ref.end) / 2;
     if x.end < midpt {
@@ -453,7 +453,7 @@ fn process_ctree(node: &mut Option<Box<CTreeNode>>, x: &LinkedHSP) {
 }
 
 /// Recursively decrease the merit of all hsps within a subtree
-/// 
+///
 /// NCBI reference: hspfilter_culling.c:319-330
 /// ```c
 /// static void s_MarkDownCTree(CTreeNode ** node) {
@@ -473,21 +473,21 @@ fn mark_down_ctree(node: &mut Option<Box<CTreeNode>>) {
     if node.is_none() {
         return;
     }
-    
+
     let node_ref = node.as_mut().unwrap();
     mark_down_ctree(&mut node_ref.left);
     mark_down_ctree(&mut node_ref.right);
-    
+
     // Decrease merit for all HSPs in this node's list
     let num_remaining = mark_down_hsp_list(&mut node_ref.hsplist);
-    
+
     if num_remaining == 0 && node_ref.left.is_none() && node_ref.right.is_none() {
         *node = None;
     }
 }
 
 /// Decrease merit for all hsps in list; also returns the number of hsps in list
-/// 
+///
 /// NCBI reference: hspfilter_culling.c:166-189
 /// ```c
 /// static Int4 s_MarkDownHSPList(LinkedHSP **list) {
@@ -515,21 +515,21 @@ fn mark_down_ctree(node: &mut Option<Box<CTreeNode>>) {
 ///     return num;
 /// }
 /// ```
-/// 
+///
 /// FAITHFUL PORT: Matches NCBI's in-place list manipulation algorithm exactly.
 fn mark_down_hsp_list(list: &mut Option<Box<LinkedHSP>>) -> usize {
     // NCBI: Int4 num = 0; LinkedHSP *p = *list, *q, *r; q = p;
     let mut num = 0;
     let mut p = list.take();
     let mut nodes: Vec<Box<LinkedHSP>> = Vec::new();
-    
+
     // NCBI: while (p) {
     while let Some(mut r) = p {
         num += 1;
         // NCBI: r = p; p = p->next; (r->merit)--;
         p = r.next.take();
         r.merit -= 1;
-        
+
         if r.merit <= 0 {
             // NCBI: Remove r from list (s_HSPFree(r))
             // Don't add to nodes - r is dropped here
@@ -539,20 +539,20 @@ fn mark_down_hsp_list(list: &mut Option<Box<LinkedHSP>>) -> usize {
             nodes.push(r);
         }
     }
-    
+
     // Rebuild list maintaining original order
     let mut new_list: Option<Box<LinkedHSP>> = None;
     for mut node in nodes.into_iter().rev() {
         node.next = new_list;
         new_list = Some(node);
     }
-    
+
     *list = new_list;
     num
 }
 
 /// Allocate a tree
-/// 
+///
 /// NCBI reference: hspfilter_culling.c:376-381
 /// ```c
 /// static CTreeNode * s_CTreeNew(Int4 qlen) {
@@ -570,7 +570,7 @@ fn ctree_new(qlen: i32) -> CTreeNode {
 }
 
 /// Recursively rip off hsps into a link list
-/// 
+///
 /// NCBI reference: hspfilter_culling.c:396-423
 /// ```c
 /// static LinkedHSP * s_RipHSPOffCTree(CTreeNode *tree) {
@@ -604,10 +604,10 @@ fn ctree_new(qlen: i32) -> CTreeNode {
 /// ```
 fn rip_hsp_off_ctree(tree: Option<Box<CTreeNode>>) -> Option<Box<LinkedHSP>> {
     let mut tree = tree?;
-    
+
     let mut q = tree.hsplist.take();
     tree.hsplist = None;
-    
+
     // Grab left child
     let left_list = rip_hsp_off_ctree(tree.left.take());
     if q.is_none() {
@@ -619,7 +619,7 @@ fn rip_hsp_off_ctree(tree: Option<Box<CTreeNode>>) -> Option<Box<LinkedHSP>> {
         }
         p.next = left_list;
     }
-    
+
     // Grab right child
     let right_list = rip_hsp_off_ctree(tree.right.take());
     if q.is_none() {
@@ -631,33 +631,33 @@ fn rip_hsp_off_ctree(tree: Option<Box<CTreeNode>>) -> Option<Box<LinkedHSP>> {
         }
         p.next = right_list;
     }
-    
+
     q
 }
 
 /// A full traverse to determine the merit of A, in addition, insert A to the proper place if A is valid,
 /// or return FALSE if A's merit decreases to zero
-/// 
+///
 /// NCBI reference: hspfilter_culling.c:430-470
-const K_NUM_HSP_TO_FORK: i32 = 20;  // number of HSP to trigger forking children
+const K_NUM_HSP_TO_FORK: i32 = 20; // number of HSP to trigger forking children
 
 fn save_hsp(tree: &mut CTreeNode, a: &mut LinkedHSP) -> bool {
     let mut current: *mut CTreeNode = tree;
     let mut last_node: *mut CTreeNode = std::ptr::null_mut();
-    
+
     // Descend the tree
     unsafe {
         loop {
             let node = &mut *current;
-            
+
             // Check merit against current node's list
             if !full_pass(&node.hsplist, a) {
                 return false;
             }
-            
+
             let midpt = (node.begin + node.end) / 2;
-            last_node = current;  // record the last valid position
-            
+            last_node = current; // record the last valid position
+
             if a.end < midpt {
                 if let Some(ref mut left) = node.left {
                     current = left.as_mut();
@@ -676,7 +676,7 @@ fn save_hsp(tree: &mut CTreeNode, a: &mut LinkedHSP) -> bool {
                 break;
             }
         }
-        
+
         // If we get here, A is valid. Copy and insert A at node
         let node = &mut *last_node;
         let x = Box::new(LinkedHSP {
@@ -689,7 +689,7 @@ fn save_hsp(tree: &mut CTreeNode, a: &mut LinkedHSP) -> bool {
             next: None,
         });
         add_hsp_to_list(&mut node.hsplist, x);
-        
+
         // Create a reference to the newly added HSP for domination checks
         // We need to clone the key fields since we can't keep a reference
         let x_for_dom = LinkedHSP {
@@ -701,7 +701,7 @@ fn save_hsp(tree: &mut CTreeNode, a: &mut LinkedHSP) -> bool {
             merit: a.merit,
             next: None,
         };
-        
+
         // If this is the leaf, calculate update hsp number
         if node.left.is_none() && node.right.is_none() {
             // Check for domination
@@ -712,7 +712,7 @@ fn save_hsp(tree: &mut CTreeNode, a: &mut LinkedHSP) -> bool {
             }
             return true;
         }
-        
+
         // Check domination
         process_hsp_list(&mut node.hsplist, &x_for_dom);
         process_ctree(&mut node.left, &x_for_dom);
@@ -722,13 +722,13 @@ fn save_hsp(tree: &mut CTreeNode, a: &mut LinkedHSP) -> bool {
 }
 
 /// Apply NCBI HSP culling to a list of UngappedHits
-/// 
+///
 /// This is the main entry point for culling. It implements the logic from
 /// `s_BlastHSPCullingRun` (hspfilter_culling.c:602-644).
-/// 
+///
 /// NCBI reference: hspfilter_culling.c:602-644
 /// ```c
-/// static int 
+/// static int
 /// s_BlastHSPCullingRun(void* data, BlastHSPList* hsp_list)
 /// {
 ///    Int4 i, qlen;
@@ -769,18 +769,18 @@ fn save_hsp(tree: &mut CTreeNode, a: &mut LinkedHSP) -> bool {
 ///    /* now all good hits have moved to tree, we can remove hsp_list */
 ///    Blast_HSPListFree(hsp_list);
 ///         
-///    return 0; 
+///    return 0;
 /// }
 /// ```
 /// Apply NCBI HSP culling to a list of UngappedHits
-/// 
+///
 /// This is the main entry point for culling. It implements the logic from
 /// `s_BlastHSPCullingRun` (hspfilter_culling.c:602-644) and extraction from
 /// `s_BlastHSPCullingFinal` (hspfilter_culling.c:500-593).
-/// 
+///
 /// NCBI reference: hspfilter_culling.c:602-644
 /// ```c
-/// static int 
+/// static int
 /// s_BlastHSPCullingRun(void* data, BlastHSPList* hsp_list)
 /// {
 ///    Int4 i, qlen;
@@ -821,10 +821,10 @@ fn save_hsp(tree: &mut CTreeNode, a: &mut LinkedHSP) -> bool {
 ///    /* now all good hits have moved to tree, we can remove hsp_list */
 ///    Blast_HSPListFree(hsp_list);
 ///         
-///    return 0; 
+///    return 0;
 /// }
 /// ```
-/// 
+///
 /// For tblastx: isBlastn = FALSE, so we use A.cid = A.hsp->context directly,
 /// and coordinates are already in plus strand (A.begin = query.offset, A.end = query.end).
 pub fn apply_culling(
@@ -835,27 +835,26 @@ pub fn apply_culling(
     if culling_limit == 0 || hits.is_empty() {
         return hits;
     }
-    
+
     // NCBI: Group hits by context (cid)
     // For tblastx: cid = ctx_idx (no NUM_STRANDS adjustment needed)
-    let mut hits_by_context: std::collections::HashMap<usize, Vec<UngappedHit>> = 
+    let mut hits_by_context: std::collections::HashMap<usize, Vec<UngappedHit>> =
         std::collections::HashMap::new();
     for hit in hits {
         hits_by_context.entry(hit.ctx_idx).or_default().push(hit);
     }
-    
-    let mut trees: std::collections::HashMap<usize, CTreeNode> = 
-        std::collections::HashMap::new();
-    
+
+    let mut trees: std::collections::HashMap<usize, CTreeNode> = std::collections::HashMap::new();
+
     // NCBI: Process each context separately (s_BlastHSPCullingRun loop)
     for (cid, context_hits) in hits_by_context {
         let ctx = &contexts[cid];
         // NCBI: qlen = cull_data->query_info->contexts[A.hsp->context].query_length;
         let qlen = ctx.orig_len as i32;
-        
+
         // NCBI: if (! c_tree[A.cid]) { c_tree[A.cid] = s_CTreeNew(qlen); }
         let tree = trees.entry(cid).or_insert_with(|| ctree_new(qlen));
-        
+
         // NCBI: for (i=0; i<hsp_list->hspcnt; ++i) {
         for hit in context_hits {
             // NCBI: wrap the hsp with a LinkedHSP structure
@@ -863,23 +862,23 @@ pub fn apply_culling(
             //   A.cid = A.hsp->context (no adjustment)
             //   A.begin = A.hsp->query.offset
             //   A.end = A.hsp->query.end
-            // 
+            //
             // LOSAT: q_aa_start/q_aa_end are already in plus strand coordinates
             let begin = hit.q_aa_start as i32;
             let end = hit.q_aa_end as i32;
-            
+
             let mut linked_hsp = LinkedHSP {
                 hsp: hit,
                 cid,
-                sid: 0,  // Will be set below
+                sid: 0, // Will be set below
                 begin,
                 end,
-                merit: culling_limit as i32,  // NCBI: A.merit = params->culling_max;
+                merit: culling_limit as i32, // NCBI: A.merit = params->culling_max;
                 next: None,
             };
             // NCBI: A.sid = hsp_list->oid;
             linked_hsp.sid = linked_hsp.hsp.s_idx;
-            
+
             // NCBI: if(s_SaveHSP(c_tree[A.cid], &A)) { hsp_list->hsp_array[i] = NULL; }
             // If save_hsp returns true, HSP was saved (not culled)
             if !save_hsp(tree, &mut linked_hsp) {
@@ -887,7 +886,7 @@ pub fn apply_culling(
             }
         }
     }
-    
+
     // NCBI: Extract all saved HSPs from trees (s_BlastHSPCullingFinal: s_RipHSPOffCTree)
     let mut result: Vec<UngappedHit> = Vec::new();
     for (_cid, tree) in trees {
@@ -899,11 +898,9 @@ pub fn apply_culling(
             result.push(node.hsp);
         }
     }
-    
+
     // NCBI: Sort by score (s_BlastHSPCullingFinal: Blast_HSPListSortByScore)
     result.sort_by(|a, b| b.raw_score.cmp(&a.raw_score));
 
     result
 }
-
-

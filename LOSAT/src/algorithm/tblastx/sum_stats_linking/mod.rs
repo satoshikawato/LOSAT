@@ -16,18 +16,14 @@
 //! - `cutoffs` - NCBI cutoff calculation (calculate_link_hsp_cutoffs_ncbi)
 //! - `linking` - Main linking algorithm (apply_sum_stats_even_gap_linking)
 
-mod params;
 mod cutoffs;
 mod linking;
+mod params;
 
 // Re-export parameter types and functions
 pub use params::{
-    LinkHspCutoffs,
-    LinkingParams,
-    BLAST_GAP_DECAY_RATE,
-    find_smallest_lambda,
-    find_smallest_lambda_params,
-    compute_avg_query_length_ncbi,
+    compute_avg_query_length_ncbi, find_smallest_lambda, find_smallest_lambda_params,
+    LinkHspCutoffs, LinkingParams, BLAST_GAP_DECAY_RATE,
 };
 
 // Re-export cutoff calculation

@@ -30,5 +30,3 @@ pub fn gdb3(a: &mut i32, b: &mut i32, c: &mut i32) -> i32 {
     }
     g
 }
-
-

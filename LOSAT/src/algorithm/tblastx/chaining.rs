@@ -176,18 +176,15 @@ pub fn chain_and_filter_hsps_protein(
     // Record HSPs before chaining
     let hsps_before = hits.len();
     if let Some(diag) = diagnostics {
-        diag.base.hsps_before_chain.store(hsps_before, AtomicOrdering::Relaxed);
+        diag.base
+            .hsps_before_chain
+            .store(hsps_before, AtomicOrdering::Relaxed);
     }
 
     // Group hits by query-subject pair AND frame combination
     let mut groups: FxHashMap<SequenceKey, Vec<ExtendedHit>> = FxHashMap::default();
     for hit in hits.drain(..) {
-        let key = (
-            hit.hit.q_idx,
-            hit.hit.s_idx,
-            hit.q_frame,
-            hit.s_frame,
-        );
+        let key = (hit.hit.q_idx, hit.hit.s_idx, hit.q_frame, hit.s_frame);
         groups.entry(key).or_default().push(hit);
     }
 
@@ -214,12 +211,15 @@ pub fn chain_and_filter_hsps_protein(
 
     // Record HSPs after chaining (before domination filter)
     if let Some(diag) = diagnostics {
-        diag.base.hsps_after_chain.store(result_hits.len(), AtomicOrdering::Relaxed);
+        diag.base
+            .hsps_after_chain
+            .store(result_hits.len(), AtomicOrdering::Relaxed);
     }
 
     // Sort by bit score (highest first) for domination filtering
     result_hits.sort_by(|a, b| {
-        b.hit.bit_score
+        b.hit
+            .bit_score
             .partial_cmp(&a.hit.bit_score)
             .unwrap_or(Ordering::Equal)
     });
@@ -231,7 +231,9 @@ pub fn chain_and_filter_hsps_protein(
 
     // Record culled HSPs (always 0 since culling is disabled)
     if let Some(diag) = diagnostics {
-        diag.base.hsps_culled_dominated.store(0, AtomicOrdering::Relaxed);
+        diag.base
+            .hsps_culled_dominated
+            .store(0, AtomicOrdering::Relaxed);
     }
 
     // Count output sources and convert to Hit
@@ -251,11 +253,14 @@ pub fn chain_and_filter_hsps_protein(
 
     // Record output source counts and final hits
     if let Some(diag) = diagnostics {
-        diag.output_from_ungapped.store(output_from_ungapped, AtomicOrdering::Relaxed);
-        diag.output_from_gapped.store(output_from_gapped, AtomicOrdering::Relaxed);
-        diag.base.hsps_after_overlap_filter.store(final_hits.len(), AtomicOrdering::Relaxed);
+        diag.output_from_ungapped
+            .store(output_from_ungapped, AtomicOrdering::Relaxed);
+        diag.output_from_gapped
+            .store(output_from_gapped, AtomicOrdering::Relaxed);
+        diag.base
+            .hsps_after_overlap_filter
+            .store(final_hits.len(), AtomicOrdering::Relaxed);
     }
 
     final_hits
 }
-

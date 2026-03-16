@@ -19,37 +19,34 @@
 //! - `composition` - Karlin parameter calculation from composition
 //! - `lookup_tables` - Parameter lookup tables
 
-pub mod karlin_params;
-pub mod search_space;
-pub mod score_calc;
-pub mod length_adjustment;
-pub mod sum_statistics;
 pub mod composition;
+pub mod karlin_params;
+pub mod length_adjustment;
 pub mod lookup_tables;
+pub mod score_calc;
+pub mod search_space;
+pub mod sum_statistics;
 
 // Re-export main types and functions for convenience
-pub use karlin_params::KarlinParams;
-pub use search_space::{SearchSpace, compute_tblastx_search_space};
-pub use score_calc::{
-    bit_score, evalue, calculate_statistics,
-    raw_score_from_evalue, raw_score_from_evalue_with_decay,
-    raw_score_from_bit_score, evalue_from_raw_score, simple_evalue,
-};
-pub use length_adjustment::{
-    LengthAdjustmentResult,
-    compute_length_adjustment_ncbi, compute_length_adjustment_simple,
-};
-pub use sum_statistics::{
-    gap_decay_divisor, ln_factorial, ln_gamma_int, p_to_e, e_to_p,
-    small_gap_sum_e, uneven_gap_sum_e, large_gap_sum_e, normalize_score,
-    defaults,
-};
 pub use composition::{
-    compute_aa_composition, compute_std_aa_composition,
-    ScoreFreqProfile, compute_score_freq_profile,
-    compute_karlin_params_ungapped, apply_check_ideal,
+    apply_check_ideal, compute_aa_composition, compute_blosum62_ideal_karlin_params,
+    compute_karlin_params_ungapped, compute_score_freq_profile, compute_std_aa_composition,
+    ScoreFreqProfile,
+};
+pub use karlin_params::KarlinParams;
+pub use length_adjustment::{
+    compute_length_adjustment_ncbi, compute_length_adjustment_simple, LengthAdjustmentResult,
 };
 pub use lookup_tables::{
-    lookup_nucl_params, lookup_protein_params,
-    requires_even_scores, lookup_protein_params_ungapped, lookup_protein_params_gapped,
+    lookup_nucl_params, lookup_protein_params, lookup_protein_params_gapped,
+    lookup_protein_params_ungapped, requires_even_scores,
+};
+pub use score_calc::{
+    bit_score, calculate_statistics, evalue, evalue_from_raw_score, raw_score_from_bit_score,
+    raw_score_from_evalue, raw_score_from_evalue_with_decay, simple_evalue,
+};
+pub use search_space::{compute_tblastx_search_space, SearchSpace};
+pub use sum_statistics::{
+    defaults, e_to_p, gap_decay_divisor, large_gap_sum_e, ln_factorial, ln_gamma_int,
+    normalize_score, p_to_e, small_gap_sum_e, uneven_gap_sum_e,
 };

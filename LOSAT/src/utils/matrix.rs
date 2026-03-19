@@ -15,6 +15,13 @@ pub const BLASTAA_SIZE: usize = 28;
 pub const PROTEIN_MATRIX_SIZE: usize = 25;
 pub const BLOSUM62_SIZE: usize = PROTEIN_MATRIX_SIZE;
 
+// NCBI reference: ncbi-blast/c++/include/algo/blast/core/blast_stat.h:121-122
+// ```c
+// #define BLAST_SCORE_MIN INT2_MIN
+// #define BLAST_SCORE_MAX INT2_MAX
+// ```
+pub const BLAST_SCORE_MIN: i32 = i16::MIN as i32;
+
 /// NCBISTDAA encoding (0-27).
 ///
 /// NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_encoding.c:115-121
@@ -83,7 +90,19 @@ pub mod blosum62_order {
     pub const STOP: u8 = 24;
 }
 
-/// Convert NCBISTDAA index (0-27) to standard matrix index (0-24).
+/// Convert NCBISTDAA index (0-27) to the packed 25x25 matrix index used by
+/// NCBI's standard protein score matrices.
+///
+/// NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_stat.c:1566-1592
+/// ```c
+/// if (i == AMINOACID_TO_NCBISTDAA['U'] || i == AMINOACID_TO_NCBISTDAA['O'] ||
+///     i == AMINOACID_TO_NCBISTDAA['-'] || ...)
+///     continue;
+/// ...
+/// matrix[u_index][i] = matrix[c_index][i];
+/// ...
+/// matrix[o_index][i] = matrix[x_index][i];
+/// ```
 #[inline(always)]
 pub fn ncbistdaa_to_blosum62(ncbi: u8) -> u8 {
     const TABLE: [u8; 28] = [
@@ -91,7 +110,11 @@ pub fn ncbistdaa_to_blosum62(ncbi: u8) -> u8 {
         24, 23, 21,
     ];
     if ncbi < 28 {
-        TABLE[ncbi as usize]
+        match ncbi {
+            ncbistdaa::U => blosum62_order::C,
+            ncbistdaa::O => blosum62_order::X,
+            _ => TABLE[ncbi as usize],
+        }
     } else {
         23
     }
@@ -511,10 +534,23 @@ pub fn protein_defscore(matrix: ScoringMatrix) -> i32 {
 
 #[inline(always)]
 pub fn protein_score(matrix: ScoringMatrix, aa1_ncbi: u8, aa2_ncbi: u8) -> i32 {
-    let matrix_data = standard_protein_matrix(matrix);
-    if aa1_ncbi == 0 || aa2_ncbi == 0 {
-        return matrix_data.defscore;
+    // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_stat.c:1559-1579
+    // ```c
+    // for (i = 0; i < sbp->alphabet_size; i++) {
+    //     for (j = 0; j < sbp->alphabet_size; j++) {
+    //         matrix[i][j] = BLAST_SCORE_MIN;
+    //     }
+    // }
+    // ...
+    // if (i == AMINOACID_TO_NCBISTDAA['-'] ||
+    //     j == AMINOACID_TO_NCBISTDAA['-']) {
+    //     continue;
+    // }
+    // ```
+    if aa1_ncbi == ncbistdaa::GAP || aa2_ncbi == ncbistdaa::GAP {
+        return BLAST_SCORE_MIN;
     }
+    let matrix_data = standard_protein_matrix(matrix);
     let b1 = ncbistdaa_to_blosum62(aa1_ncbi) as usize;
     let b2 = ncbistdaa_to_blosum62(aa2_ncbi) as usize;
     matrix_data.scores[b1 * PROTEIN_MATRIX_SIZE + b2] as i32
@@ -562,6 +598,8 @@ mod tests {
         assert_eq!(ncbistdaa_to_blosum62(1), 0);
         assert_eq!(ncbistdaa_to_blosum62(25), 24);
         assert_eq!(ncbistdaa_to_blosum62(21), 23);
+        assert_eq!(ncbistdaa_to_blosum62(ncbistdaa::U), blosum62_order::C);
+        assert_eq!(ncbistdaa_to_blosum62(ncbistdaa::O), blosum62_order::X);
     }
 
     #[test]
@@ -601,9 +639,30 @@ mod tests {
     }
 
     #[test]
-    fn test_sentinel_uses_matrix_specific_defscore() {
-        assert_eq!(protein_score(ScoringMatrix::Blosum45, 0, ncbistdaa::A), -5);
-        assert_eq!(protein_score(ScoringMatrix::Pam30, ncbistdaa::A, 0), -17);
-        assert_eq!(protein_score(ScoringMatrix::Blosum62, 0, 0), -4);
+    fn test_sentinel_uses_blast_score_min() {
+        assert_eq!(
+            protein_score(ScoringMatrix::Blosum45, ncbistdaa::GAP, ncbistdaa::A),
+            BLAST_SCORE_MIN
+        );
+        assert_eq!(
+            protein_score(ScoringMatrix::Pam30, ncbistdaa::A, ncbistdaa::GAP),
+            BLAST_SCORE_MIN
+        );
+        assert_eq!(
+            protein_score(ScoringMatrix::Blosum62, ncbistdaa::GAP, ncbistdaa::GAP),
+            BLAST_SCORE_MIN
+        );
+    }
+
+    #[test]
+    fn test_u_and_o_follow_ncbi_matrix_aliases() {
+        assert_eq!(
+            protein_score(ScoringMatrix::Blosum62, ncbistdaa::U, ncbistdaa::A),
+            protein_score(ScoringMatrix::Blosum62, ncbistdaa::C, ncbistdaa::A)
+        );
+        assert_eq!(
+            protein_score(ScoringMatrix::Blosum62, ncbistdaa::O, ncbistdaa::W),
+            protein_score(ScoringMatrix::Blosum62, ncbistdaa::X, ncbistdaa::W)
+        );
     }
 }

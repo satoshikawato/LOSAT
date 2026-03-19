@@ -14,10 +14,15 @@ pub const BLASTAA_SIZE: usize = 28;
 /// Size of BLOSUM62 matrix (25x25)
 pub const BLOSUM62_SIZE: usize = 25;
 
-/// Default score for unknown/sentinel residues (NCBI BLOSUM62 defscore)
+/// Default score for unknown packed-matrix residues.
 /// Reference: ncbi-blast/c++/src/util/tables/sm_blosum62.c:95
 ///   const SNCBIPackedScoreMatrix NCBISM_Blosum62 = { ..., -4 };
 pub const DEFSCORE: i32 = -4;
+
+/// NCBI blast core keeps the `'-'`/NULLB row and column at BLAST_SCORE_MIN.
+/// Reference: ncbi-blast/c++/include/algo/blast/core/blast_stat.h:121-122
+///   #define BLAST_SCORE_MIN INT2_MIN
+pub const BLAST_SCORE_MIN: i32 = i16::MIN as i32;
 
 /// NCBISTDAA encoding (0-27)
 /// Reference: blast_encoding.c NCBISTDAA_TO_AMINOACID
@@ -84,9 +89,18 @@ pub mod blosum62_order {
     pub const STOP: u8 = 24;
 }
 
-/// Convert NCBISTDAA index (0-27) to BLOSUM62 matrix index (0-24)
-/// Invalid/gap characters map to X (23)
-/// Reference: NCBI uses this conversion internally for scoring
+/// Convert NCBISTDAA index (0-27) to the packed 25x25 BLOSUM62 index.
+///
+/// NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_stat.c:1566-1592
+/// ```c
+/// if (i == AMINOACID_TO_NCBISTDAA['U'] || i == AMINOACID_TO_NCBISTDAA['O'] ||
+///     i == AMINOACID_TO_NCBISTDAA['-'] || ...)
+///     continue;
+/// ...
+/// matrix[u_index][i] = matrix[c_index][i];
+/// ...
+/// matrix[o_index][i] = matrix[x_index][i];
+/// ```
 #[inline(always)]
 pub fn ncbistdaa_to_blosum62(ncbi: u8) -> u8 {
     const TABLE: [u8; 28] = [
@@ -114,13 +128,17 @@ pub fn ncbistdaa_to_blosum62(ncbi: u8) -> u8 {
         23, // 21: X -> 23
         18, // 22: Y -> 18
         22, // 23: Z -> 22
-        23, // 24: U (selenocysteine) -> X
+        23, // 24: U handled below to match C scores
         24, // 25: '*' (stop) -> 24
-        23, // 26: O (pyrrolysine) -> X
+        23, // 26: O handled below to match X scores
         21, // 27: J -> 21
     ];
     if ncbi < 28 {
-        TABLE[ncbi as usize]
+        match ncbi {
+            ncbistdaa::U => blosum62_order::C,
+            ncbistdaa::O => blosum62_order::X,
+            _ => TABLE[ncbi as usize],
+        }
     } else {
         23 // Unknown -> X
     }
@@ -188,17 +206,16 @@ pub static BLOSUM62: [i8; BLOSUM62_SIZE * BLOSUM62_SIZE] = [
 /// Get BLOSUM62 score for two amino acids in NCBISTDAA encoding
 /// Handles the conversion from NCBISTDAA (28) to BLOSUM62 order (25) internally
 ///
-/// NCBI FSM (Full Score Matrix) behavior:
-/// - Index 0 (gap/sentinel) returns defscore (-4)
-/// - This ensures proper X-drop termination at sequence boundaries
+/// NCBI blast core scoring behavior:
+/// - the `'-'`/NULLB row and column stay at `BLAST_SCORE_MIN`
+/// - `U` reuses `C` scores
+/// - `O` reuses `X` scores
 ///
-/// Reference: ncbi-blast/c++/src/util/tables/raw_scoremat.c:91
-///   fsm->s[0][i] = psm->defscore;
+/// Reference: ncbi-blast/c++/src/algo/blast/core/blast_stat.c:1559-1592
 #[inline(always)]
 pub fn blosum62_score(aa1_ncbi: u8, aa2_ncbi: u8) -> i32 {
-    // NCBI FSM: index 0 (gap/sentinel) returns defscore
-    if aa1_ncbi == 0 || aa2_ncbi == 0 {
-        return DEFSCORE;
+    if aa1_ncbi == ncbistdaa::GAP || aa2_ncbi == ncbistdaa::GAP {
+        return BLAST_SCORE_MIN;
     }
     let b1 = ncbistdaa_to_blosum62(aa1_ncbi) as usize;
     let b2 = ncbistdaa_to_blosum62(aa2_ncbi) as usize;
@@ -244,6 +261,8 @@ mod tests {
         assert_eq!(ncbistdaa_to_blosum62(25), 24);
         // X in NCBISTDAA (21) -> X in BLOSUM62 (23)
         assert_eq!(ncbistdaa_to_blosum62(21), 23);
+        assert_eq!(ncbistdaa_to_blosum62(ncbistdaa::U), blosum62_order::C);
+        assert_eq!(ncbistdaa_to_blosum62(ncbistdaa::O), blosum62_order::X);
     }
 
     #[test]
@@ -257,19 +276,23 @@ mod tests {
     }
 
     #[test]
-    fn test_sentinel_defscore() {
-        // NCBI FSM behavior: index 0 (gap/sentinel) returns defscore (-4)
-        // Reference: ncbi-blast/c++/src/util/tables/raw_scoremat.c:91
-        //   fsm->s[0][i] = psm->defscore;
+    fn test_sentinel_uses_blast_score_min() {
+        assert_eq!(blosum62_score(0, ncbistdaa::A), BLAST_SCORE_MIN);
+        assert_eq!(blosum62_score(ncbistdaa::A, 0), BLAST_SCORE_MIN);
+        assert_eq!(blosum62_score(0, 0), BLAST_SCORE_MIN);
+        assert_eq!(blosum62_score(0, ncbistdaa::STOP), BLAST_SCORE_MIN);
+        assert_eq!(blosum62_score(0, ncbistdaa::X), BLAST_SCORE_MIN);
+    }
 
-        // Sentinel (0) with any AA should return defscore
-        assert_eq!(blosum62_score(0, ncbistdaa::A), DEFSCORE);
-        assert_eq!(blosum62_score(ncbistdaa::A, 0), DEFSCORE);
-        assert_eq!(blosum62_score(0, 0), DEFSCORE);
-        assert_eq!(blosum62_score(0, ncbistdaa::STOP), DEFSCORE);
-        assert_eq!(blosum62_score(0, ncbistdaa::X), DEFSCORE);
-
-        // Verify defscore value matches NCBI
-        assert_eq!(DEFSCORE, -4);
+    #[test]
+    fn test_u_and_o_follow_ncbi_matrix_aliases() {
+        assert_eq!(
+            blosum62_score(ncbistdaa::U, ncbistdaa::A),
+            blosum62_score(ncbistdaa::C, ncbistdaa::A)
+        );
+        assert_eq!(
+            blosum62_score(ncbistdaa::O, ncbistdaa::W),
+            blosum62_score(ncbistdaa::X, ncbistdaa::W)
+        );
     }
 }

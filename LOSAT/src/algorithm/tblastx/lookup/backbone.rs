@@ -44,6 +44,22 @@ pub struct BlastAaLookupTable {
     pub pv: Vec<u32>,
     pub frame_bases: Vec<i32>,
     pub num_contexts: usize,
+    // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_query_info.c:246-250
+    // ```c
+    // Uint4 QueryInfo_GetSeqBufLen(const BlastQueryInfo* qinfo)
+    // {
+    //     BlastContextInfo * cinfo = & qinfo->contexts[qinfo->last_context];
+    //     return cinfo->query_offset + cinfo->query_length + (cinfo->query_length ? 2 : 1);
+    // }
+    // ```
+    //
+    // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_util.c:112-127
+    // ```c
+    // (*seq_blk)->sequence_start = (Uint1 *) buffer;
+    // (*seq_blk)->sequence = (*seq_blk)->sequence_start+1;
+    // (*seq_blk)->length = length;
+    // ```
+    pub query_length: i32,
     pub word_length: i32,
     pub alphabet_size: i32,
     pub charsize: i32,
@@ -645,6 +661,8 @@ pub fn build_ncbi_lookup(
         contexts,
         skipped_seg_mask: _,
     } = prepared;
+    let query_length = i32::try_from(concat_query.len())
+        .expect("NCBI BLAST concatenated query length must fit in Int4");
 
     // Row max for BLOSUM62 over the lookup alphabet.
     // For NCBISTDAA residues, we compute max score against any other residue.
@@ -978,6 +996,7 @@ pub fn build_ncbi_lookup(
             pv,
             frame_bases,
             num_contexts: contexts.len(),
+            query_length,
             word_length: word_length as i32,
             alphabet_size: alphabet_size as i32,
             charsize: charsize as i32,
@@ -1262,6 +1281,35 @@ mod tests {
 
         assert_eq!(prepared.lookup_locations, vec![(0, 1), (4, 5), (7, 9)]);
         assert_eq!(prepared.skipped_seg_mask, 4);
+    }
+
+    // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_query_info.c:246-250
+    // ```c
+    // return cinfo->query_offset + cinfo->query_length + (cinfo->query_length ? 2 : 1);
+    // ```
+    //
+    // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_util.c:112-127
+    // ```c
+    // (*seq_blk)->sequence = (*seq_blk)->sequence_start+1;
+    // (*seq_blk)->length = length;
+    // ```
+    #[test]
+    fn test_build_ncbi_lookup_query_length_matches_ncbi_sequence_length() {
+        let lookup = build_lookup_for_test(
+            vec![
+                vec![make_query_frame(
+                    vec![ncbistdaa::A, ncbistdaa::A, ncbistdaa::A],
+                    Vec::new(),
+                )],
+                vec![make_query_frame(
+                    vec![ncbistdaa::C, ncbistdaa::C, ncbistdaa::C],
+                    Vec::new(),
+                )],
+            ],
+            0,
+        );
+
+        assert_eq!(lookup.query_length, 8);
     }
 
     // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_lookup.c:102-128

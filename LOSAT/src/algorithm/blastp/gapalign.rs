@@ -671,9 +671,71 @@ fn stats_from_edit_ops_protein(
     (num_ident, num_positives, mismatches, gap_opens, gap_letters)
 }
 
+// NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_gapalign.c:839-849
+// ```c
+// if(reverse_sequence)
+//     matrix_row = matrix[ A[ M - a_index ] ];
+// else
+//     matrix_row = matrix[ A[ a_index ] ];
+// ```
+#[inline]
+fn blastp_query_residue(
+    query: &[u8],
+    query_base: usize,
+    query_length: usize,
+    a_index: usize,
+    reverse_sequence: bool,
+) -> u8 {
+    let absolute_index = if reverse_sequence {
+        query_base + query_length - a_index
+    } else {
+        query_base + a_index
+    };
+    query[absolute_index]
+}
+
+// NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_gapalign.c:852-866
+// ```c
+// if(reverse_sequence)
+//     b_ptr = &B[N - first_b_index];
+// else
+//     b_ptr = &B[first_b_index];
+// ...
+// b_ptr += b_increment;
+// next_score = score_array[b_index].best + matrix_row[*b_ptr];
+// ```
+//
+// NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_util.c:155-161
+// ```c
+// seq_blk->sequence_start = (Uint1*) sequence;
+// seq_blk->sequence = (Uint1*) sequence + 1;
+// seq_blk->length = seqlen;
+// ```
+#[inline]
+fn blastp_subject_residue(
+    subject: &[u8],
+    subject_base: usize,
+    subject_length: usize,
+    b_index: usize,
+    reverse_sequence: bool,
+) -> u8 {
+    let absolute_index = if reverse_sequence {
+        subject_base as isize + subject_length as isize - b_index as isize - 1
+    } else {
+        subject_base as isize + b_index as isize + 1
+    };
+    if absolute_index < 0 {
+        0
+    } else {
+        subject.get(absolute_index as usize).copied().unwrap_or(0)
+    }
+}
+
 fn align_ex_protein_score_only(
-    q_seq: &[u8],
-    s_seq: &[u8],
+    query: &[u8],
+    query_base: usize,
+    subject: &[u8],
+    subject_base: usize,
     len1: usize,
     len2: usize,
     score_matrix: BlastpScoreMatrix<'_>,
@@ -745,29 +807,14 @@ fn align_ex_protein_score_only(
     let mut b_offset = 0usize;
     let mut first_b_index = 0usize;
 
-    let get_q = |index: usize| -> u8 {
-        if reverse {
-            q_seq[len1 - index]
-        } else {
-            q_seq[index]
-        }
-    };
-    let get_s = |index: usize| -> u8 {
-        if reverse {
-            s_seq[len2 - 1 - index]
-        } else {
-            s_seq[index + 1]
-        }
-    };
-
     for a_index in 1..=len1 {
-        let qc = get_q(a_index);
+        let qc = blastp_query_residue(query, query_base, len1, a_index, reverse);
         let mut score_val = GAP_MININT;
         let mut score_gap_row = GAP_MININT;
         let mut last_b_index = first_b_index;
 
         for b_index in first_b_index..b_size {
-            let sc = if b_index < len2 { get_s(b_index) } else { 0 };
+            let sc = blastp_subject_residue(subject, subject_base, len2, b_index, reverse);
             let score_gap_col = scratch.dp_mem[b_index].best_gap;
             let next_score = scratch.dp_mem[b_index].best + score_matrix.score(qc, sc);
 
@@ -850,8 +897,10 @@ fn align_ex_protein_score_only(
 // }
 // ```
 fn restricted_gapped_align_protein(
-    q_seq: &[u8],
-    s_seq: &[u8],
+    query: &[u8],
+    query_base: usize,
+    subject: &[u8],
+    subject_base: usize,
     len1: usize,
     len2: usize,
     score_matrix: BlastpScoreMatrix<'_>,
@@ -900,45 +949,15 @@ fn restricted_gapped_align_protein(
     let mut first_b_index = 0usize;
     let mut b_gap = 0usize;
 
-    // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_gapalign.c:807-818
-    // ```c
-    // if(reverse_sequence)
-    //     matrix_row = matrix[ A[ M - a_index ] ];
-    // else
-    //     matrix_row = matrix[ A[ a_index ] ];
-    // ```
-    //
-    // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_gapalign.c:820-823
-    // ```c
-    // if(reverse_sequence)
-    //     b_ptr = &B[N - first_b_index];
-    // else
-    //     b_ptr = &B[first_b_index];
-    // ```
-    let get_q = |index: usize| -> u8 {
-        if reverse {
-            q_seq[len1 - index]
-        } else {
-            q_seq[index]
-        }
-    };
-    let get_s = |index: usize| -> u8 {
-        if reverse {
-            s_seq[len2 - 1 - index]
-        } else {
-            s_seq[index + 1]
-        }
-    };
-
     for a_index in 1..=len1 {
-        let matrix_row_char = get_q(a_index);
+        let matrix_row_char = blastp_query_residue(query, query_base, len1, a_index, reverse);
         let mut score_val = GAP_MININT;
         let mut score_gap_row = GAP_MININT;
         let mut last_b_index = first_b_index;
 
         if a_index % RESTRICT_SIZE != 0 {
             for b_index in first_b_index..b_size {
-                let sc = if b_index < len2 { get_s(b_index) } else { 0 };
+                let sc = blastp_subject_residue(subject, subject_base, len2, b_index, reverse);
                 let next_score = dp_mem[b_index].best + score_matrix.score(matrix_row_char, sc);
 
                 if b_index != b_gap {
@@ -986,7 +1005,7 @@ fn restricted_gapped_align_protein(
             score_gap_row = score_val;
         } else {
             for b_index in first_b_index..b_size {
-                let sc = if b_index < len2 { get_s(b_index) } else { 0 };
+                let sc = blastp_subject_residue(subject, subject_base, len2, b_index, reverse);
                 let next_score = dp_mem[b_index].best + score_matrix.score(matrix_row_char, sc);
 
                 if b_index != b_gap {
@@ -1606,7 +1625,7 @@ pub(crate) fn blastp_score_only_gapped_alignment(
     // ```
     let q_length = q_start + 1;
     let s_length = s_start + 1;
-    let (adjusted_s_length, adjusted_subject_length, start_shift) =
+    let (subject_offset, subject_length, subject_shift) =
         adjust_subject_range(s_length, subject.len(), q_length, query.len());
     // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_gapalign.c:4257-4258
     // ```c
@@ -1614,12 +1633,10 @@ pub(crate) fn blastp_score_only_gapped_alignment(
     //                    &subject_shift);
     // ```
     assert!(
-        start_shift < subject.len() && adjusted_subject_length > 0,
+        subject_shift < subject.len() && subject_length > 0,
         "NCBI BLAST requires AdjustSubjectRange to yield a non-empty subject window"
     );
-    let adjusted_subject = &subject[start_shift..start_shift + adjusted_subject_length];
     let mut scratch = GapAlignScratch::new();
-    let adjusted_s_start = adjusted_s_length - 1;
 
     // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_gapalign.c:4266-4278
     // ```c
@@ -1632,9 +1649,11 @@ pub(crate) fn blastp_score_only_gapped_alignment(
     let (private_q_start, private_s_start, score_left) = match mode {
         BlastpGappedAlignmentMode::Exact => align_ex_protein_score_only(
             query,
-            adjusted_subject,
+            0,
+            subject,
+            subject_shift,
             q_length,
-            adjusted_s_length,
+            subject_offset,
             BlastpScoreMatrix::Standard(matrix),
             gap_open,
             gap_extend,
@@ -1644,9 +1663,11 @@ pub(crate) fn blastp_score_only_gapped_alignment(
         ),
         BlastpGappedAlignmentMode::Restricted => restricted_gapped_align_protein(
             query,
-            adjusted_subject,
+            0,
+            subject,
+            subject_shift,
             q_length,
-            adjusted_s_length,
+            subject_offset,
             BlastpScoreMatrix::Standard(matrix),
             gap_open,
             gap_extend,
@@ -1663,7 +1684,7 @@ pub(crate) fn blastp_score_only_gapped_alignment(
     // gap_align->query_start = q_length - private_q_start;
     // gap_align->subject_start = s_length - private_s_start + subject_shift;
     // ```
-    let subject_hit_start = i32::try_from(adjusted_s_length - private_s_start + start_shift)
+    let subject_hit_start = i32::try_from(subject_offset - private_s_start + subject_shift)
         .expect("NCBI BLAST preliminary subject start must fit in Int4");
 
     // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_gapalign.c:4300-4313
@@ -1675,13 +1696,15 @@ pub(crate) fn blastp_score_only_gapped_alignment(
     // gap_align->subject_stop += init_hsp->offsets.qs_offsets.s_off + 1;
     // ```
     let (query_hit_stop, subject_hit_stop, score_right) =
-        if q_length < query.len() && adjusted_s_length < adjusted_subject.len() {
+        if q_length < query.len() && subject_offset < subject_length {
             let (private_q_stop, private_s_stop, score_right) = match mode {
                 BlastpGappedAlignmentMode::Exact => align_ex_protein_score_only(
-                    &query[q_start..],
-                    &adjusted_subject[adjusted_s_start..],
+                    query,
+                    q_start,
+                    subject,
+                    s_start,
                     query.len() - q_length,
-                    adjusted_subject.len() - adjusted_s_length,
+                    subject_length - subject_offset,
                     BlastpScoreMatrix::Standard(matrix),
                     gap_open,
                     gap_extend,
@@ -1690,10 +1713,12 @@ pub(crate) fn blastp_score_only_gapped_alignment(
                     &mut scratch,
                 ),
                 BlastpGappedAlignmentMode::Restricted => restricted_gapped_align_protein(
-                    &query[q_start..],
-                    &adjusted_subject[adjusted_s_start..],
+                    query,
+                    q_start,
+                    subject,
+                    s_start,
                     query.len() - q_length,
-                    adjusted_subject.len() - adjusted_s_length,
+                    subject_length - subject_offset,
                     BlastpScoreMatrix::Standard(matrix),
                     gap_open,
                     gap_extend,
@@ -1706,7 +1731,7 @@ pub(crate) fn blastp_score_only_gapped_alignment(
             (
                 i32::try_from(q_start + private_q_stop + 1)
                     .expect("NCBI BLAST preliminary query stop must fit in Int4"),
-                i32::try_from(adjusted_s_length + private_s_stop + start_shift)
+                i32::try_from(s_start + private_s_stop + 1)
                     .expect("NCBI BLAST preliminary subject stop must fit in Int4"),
                 score_right,
             )
@@ -2200,6 +2225,36 @@ mod tests {
         assert_eq!(shift, 0);
     }
 
+    // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_gapalign.c:4176-4190
+    // ```c
+    // s_offset = *subject_offset_ptr;
+    // max_extension_left = query_offset + MAX_TOTAL_GAPS;
+    // ...
+    // *start_shift = s_offset - max_extension_left;
+    // *subject_offset_ptr = max_extension_left;
+    // *subject_length_ptr =
+    //    MIN(subject_length, s_offset + max_extension_right) - *start_shift;
+    // ```
+    #[test]
+    fn test_adjust_subject_range_shifts_long_subject_ncbi_style() {
+        let subject_offset = 7_000usize;
+        let subject_length = 100_000usize;
+        let query_offset = 5usize;
+        let query_length = 8usize;
+        let (adjusted_offset, adjusted_length, start_shift) =
+            adjust_subject_range(subject_offset, subject_length, query_offset, query_length);
+
+        assert_eq!(adjusted_offset, query_offset + MAX_TOTAL_GAPS);
+        assert_eq!(
+            start_shift,
+            subject_offset - (query_offset + MAX_TOTAL_GAPS)
+        );
+        assert_eq!(
+            adjusted_length,
+            subject_length.min(subject_offset + 3_003) - start_shift
+        );
+    }
+
     // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_gapalign.c:2488-2533
     // ```c
     // /* The fwd_prelim_tback script will get reversed here ... */
@@ -2496,6 +2551,76 @@ mod tests {
         assert_eq!(result.query_stop, 2);
         assert_eq!(result.subject_start, 2);
         assert_eq!(result.subject_stop, 2);
+    }
+
+    // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_gapalign.c:4257-4291
+    // ```c
+    // AdjustSubjectRange(&s_length, &subject_length, q_length, query_length,
+    //                    &subject_shift);
+    // ...
+    // score_left = Blast_SemiGappedAlign(query, subject+subject_shift,
+    //                                    q_length, s_length, ...);
+    // gap_align->query_start = q_length - private_q_start;
+    // gap_align->subject_start = s_length - private_s_start + subject_shift;
+    // ```
+    #[test]
+    fn test_score_only_alignment_exact_preserves_original_subject_coordinates_with_shift() {
+        let query = vec![1u8; 8];
+        let subject = vec![1u8; 100_000];
+        let q_start = 5usize;
+        let s_start = 7_000usize;
+
+        let result = blastp_score_only_gapped_alignment(
+            &query,
+            &subject,
+            q_start,
+            s_start,
+            ScoringMatrix::Blosum62,
+            11,
+            1,
+            25,
+            BlastpGappedAlignmentMode::Exact,
+        );
+
+        assert_eq!(result.query_start, 0);
+        assert_eq!(result.query_stop, 8);
+        assert_eq!(result.subject_start, 6_995);
+        assert_eq!(result.subject_stop, 7_003);
+        assert!(result.score > 0);
+    }
+
+    // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_gapalign.c:4273-4291
+    // ```c
+    // if (restricted_alignment) {
+    //    score_left = s_RestrictedGappedAlign(query, subject+subject_shift,
+    //                                         q_length, s_length, ...);
+    // }
+    // gap_align->subject_start = s_length - private_s_start + subject_shift;
+    // ```
+    #[test]
+    fn test_score_only_alignment_restricted_preserves_original_subject_coordinates_with_shift() {
+        let query = vec![1u8; 8];
+        let subject = vec![1u8; 100_000];
+        let q_start = 5usize;
+        let s_start = 7_000usize;
+
+        let result = blastp_score_only_gapped_alignment(
+            &query,
+            &subject,
+            q_start,
+            s_start,
+            ScoringMatrix::Blosum62,
+            11,
+            1,
+            25,
+            BlastpGappedAlignmentMode::Restricted,
+        );
+
+        assert_eq!(result.query_start, 0);
+        assert_eq!(result.query_stop, 8);
+        assert_eq!(result.subject_start, 6_995);
+        assert_eq!(result.subject_stop, 7_003);
+        assert!(result.score > 0);
     }
 
     // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_gapalign.c:4708-4711

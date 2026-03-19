@@ -8,6 +8,18 @@
 use super::lookup::{BlastAaLookupTable, AA_HITS_PER_CELL, PV_ARRAY_BTS, PV_ARRAY_MASK};
 use super::scan::OffsetPair;
 
+// NCBI reference: ncbi-blast/c++/include/algo/blast/core/blast_def.h:141-150
+// ```c
+// typedef union BlastOffsetPair {
+//     struct {
+//         Uint4 q_off;
+//         Uint4 s_off;
+//     } qs_offsets;
+//     ...
+// } BlastOffsetPair;
+// ```
+pub(crate) use super::scan::OffsetPair as BlastOffsetPair;
+
 /// NCBI s_DetermineScanningOffsets - advance scan range across subject seq_ranges.
 /// Reference: ncbi-blast/c++/src/algo/blast/core/masksubj.inl:43-58
 #[inline(always)]

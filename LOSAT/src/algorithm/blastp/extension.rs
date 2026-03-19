@@ -16,6 +16,53 @@ fn residue_score(
     protein_score(matrix, query[q_off as usize], subject[s_off as usize])
 }
 
+// NCBI reference: ncbi-blast/c++/include/algo/blast/core/blast_extend.h:142-154
+// ```c
+// typedef struct BlastUngappedData {
+//    Int4 q_start;
+//    Int4 s_start;
+//    Int4 length;
+//    Int4 score;
+// } BlastUngappedData;
+// ```
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) struct BlastpUngappedData {
+    pub(crate) q_start: i32,
+    pub(crate) s_start: i32,
+    pub(crate) length: i32,
+    pub(crate) score: i32,
+}
+
+// NCBI reference: ncbi-blast/c++/src/algo/blast/core/aa_ungapped.c:1078-1127
+// ```c
+// *hsp_q = q_left_off - left_disp;
+// *hsp_s = s_left_off - left_disp;
+// *hsp_len = left_disp + right_disp + init_hit_width;
+// return total_score;
+// ```
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) struct BlastpOneHitUngappedResult {
+    pub(crate) ungapped_data: BlastpUngappedData,
+    pub(crate) s_last_off: i32,
+}
+
+// NCBI reference: ncbi-blast/c++/src/algo/blast/core/aa_ungapped.c:1129-1177
+// ```c
+// *right_extend = FALSE;
+// *s_last_off = s_right_off;
+// ...
+// *hsp_q = q_right_off - left_d;
+// *hsp_s = s_right_off - left_d;
+// *hsp_len = left_d + right_d;
+// return MAX(left_score, right_score);
+// ```
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) struct BlastpTwoHitUngappedResult {
+    pub(crate) ungapped_data: BlastpUngappedData,
+    pub(crate) right_extend: bool,
+    pub(crate) s_last_off: i32,
+}
+
 // NCBI reference: ncbi-blast/c++/src/algo/blast/core/aa_ungapped.c:804-835
 // ```c
 // static Int4 s_BlastAaExtendRight(Int4 ** matrix,
@@ -167,7 +214,7 @@ pub fn extend_one_hit(
     s_off: usize,
     dropoff: i32,
     word_size: usize,
-) -> Option<(usize, usize, usize, usize, i32, usize)> {
+) -> Option<BlastpOneHitUngappedResult> {
     if q_off + word_size > query.len() || s_off + word_size > subject.len() {
         return None;
     }
@@ -220,19 +267,15 @@ pub fn extend_one_hit(
         left_score,
     );
 
-    let q_start = (q_left_off - left_disp) as usize;
-    let q_end = (q_start as i32 + left_disp + right_disp + init_hit_width) as usize;
-    let s_start = (s_left_off - left_disp) as usize;
-    let s_end = (s_start as i32 + left_disp + right_disp + init_hit_width) as usize;
-
-    Some((
-        q_start,
-        q_end,
-        s_start,
-        s_end,
-        total_score,
-        s_last_off as usize,
-    ))
+    Some(BlastpOneHitUngappedResult {
+        ungapped_data: BlastpUngappedData {
+            q_start: q_left_off - left_disp,
+            s_start: s_left_off - left_disp,
+            length: left_disp + right_disp + init_hit_width,
+            score: total_score,
+        },
+        s_last_off,
+    })
 }
 
 // NCBI reference: ncbi-blast/c++/src/algo/blast/core/aa_ungapped.c:1129-1177
@@ -270,7 +313,7 @@ pub fn extend_two_hit(
     q_right_off: usize,
     dropoff: i32,
     word_size: usize,
-) -> Option<(usize, usize, usize, usize, i32, bool, usize)> {
+) -> Option<BlastpTwoHitUngappedResult> {
     if q_right_off + word_size > query.len() || s_right_off + word_size > subject.len() {
         return None;
     }
@@ -323,19 +366,135 @@ pub fn extend_two_hit(
         );
     }
 
-    let q_start = (q_right_off - left_d) as usize;
-    let q_end = (q_right_off + right_d) as usize;
-    let s_start = (s_right_off - left_d) as usize;
-    let s_end = (s_right_off + right_d) as usize;
-    let best_score = left_score.max(right_score);
-
-    Some((
-        q_start,
-        q_end,
-        s_start,
-        s_end,
-        best_score,
+    Some(BlastpTwoHitUngappedResult {
+        ungapped_data: BlastpUngappedData {
+            q_start: q_right_off - left_d,
+            s_start: s_right_off - left_d,
+            length: left_d + right_d,
+            score: left_score.max(right_score),
+        },
         right_extend,
-        s_last_off as usize,
-    ))
+        s_last_off,
+    })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::utils::matrix::ncbistdaa;
+
+    // NCBI reference: ncbi-blast/c++/src/algo/blast/core/aa_ungapped.c:1078-1127
+    // ```c
+    // *hsp_q = q_left_off - left_disp;
+    // *hsp_s = s_left_off - left_disp;
+    // *hsp_len = left_disp + right_disp + init_hit_width;
+    // return total_score;
+    // ```
+    #[test]
+    fn test_extend_one_hit_returns_ncbi_blast_ungapped_data_payload() {
+        let query = vec![
+            ncbistdaa::A,
+            ncbistdaa::A,
+            ncbistdaa::A,
+            ncbistdaa::A,
+            ncbistdaa::A,
+        ];
+        let subject = query.clone();
+
+        let result = extend_one_hit(ScoringMatrix::Blosum62, &query, &subject, 1, 1, 7, 3)
+            .expect("one-hit ungapped extension");
+
+        assert_eq!(result.ungapped_data.q_start, 0);
+        assert_eq!(result.ungapped_data.s_start, 0);
+        assert_eq!(result.ungapped_data.length, 5);
+        assert_eq!(
+            result.ungapped_data.score,
+            5 * protein_score(ScoringMatrix::Blosum62, ncbistdaa::A, ncbistdaa::A)
+        );
+        assert_eq!(result.s_last_off, 5);
+    }
+
+    // NCBI reference: ncbi-blast/c++/src/algo/blast/core/aa_ungapped.c:1129-1177
+    // ```c
+    // *right_extend = FALSE;
+    // *s_last_off = s_right_off;
+    // ...
+    // if (left_d >= (s_right_off - s_left_off)) {
+    //     *right_extend = TRUE;
+    //     ...
+    // }
+    // ```
+    #[test]
+    fn test_extend_two_hit_returns_ncbi_payload_when_left_reaches_first_hit() {
+        let query = vec![
+            ncbistdaa::A,
+            ncbistdaa::A,
+            ncbistdaa::A,
+            ncbistdaa::A,
+            ncbistdaa::A,
+            ncbistdaa::A,
+        ];
+        let subject = query.clone();
+
+        let result = extend_two_hit(ScoringMatrix::Blosum62, &query, &subject, 0, 3, 3, 7, 3)
+            .expect("two-hit ungapped extension");
+
+        assert!(result.right_extend);
+        assert_eq!(result.ungapped_data.q_start, 0);
+        assert_eq!(result.ungapped_data.s_start, 0);
+        assert_eq!(result.ungapped_data.length, 6);
+        assert_eq!(
+            result.ungapped_data.score,
+            6 * protein_score(ScoringMatrix::Blosum62, ncbistdaa::A, ncbistdaa::A)
+        );
+        assert_eq!(result.s_last_off, 6);
+    }
+
+    // NCBI reference: ncbi-blast/c++/src/algo/blast/core/aa_ungapped.c:1129-1177
+    // ```c
+    // /* Extend to the right only if left extension reached the first hit. */
+    // if (left_d >= (s_right_off - s_left_off)) {
+    //     *right_extend = TRUE;
+    //     ...
+    // }
+    // *hsp_len = left_d + right_d;
+    // ```
+    #[test]
+    fn test_extend_two_hit_returns_ncbi_payload_when_left_stops_before_first_hit() {
+        let query = vec![
+            ncbistdaa::A,
+            ncbistdaa::A,
+            ncbistdaa::A,
+            ncbistdaa::D,
+            ncbistdaa::D,
+            ncbistdaa::D,
+            ncbistdaa::C,
+            ncbistdaa::C,
+            ncbistdaa::C,
+        ];
+        let subject = vec![
+            ncbistdaa::A,
+            ncbistdaa::A,
+            ncbistdaa::A,
+            ncbistdaa::W,
+            ncbistdaa::W,
+            ncbistdaa::W,
+            ncbistdaa::C,
+            ncbistdaa::C,
+            ncbistdaa::C,
+        ];
+
+        let result = extend_two_hit(ScoringMatrix::Blosum62, &query, &subject, 0, 6, 6, 2, 3)
+            .expect("two-hit ungapped extension");
+
+        assert!(!result.right_extend);
+        assert_eq!(result.ungapped_data.q_start, 6);
+        assert_eq!(result.ungapped_data.s_start, 6);
+        assert_eq!(result.ungapped_data.length, 3);
+        assert_eq!(
+            result.ungapped_data.score,
+            3 * protein_score(ScoringMatrix::Blosum62, ncbistdaa::C, ncbistdaa::C)
+        );
+        assert_eq!(result.s_last_off, 9);
+    }
 }

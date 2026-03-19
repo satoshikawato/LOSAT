@@ -67,7 +67,7 @@ pub(crate) use super::diagnostics::{
 };
 pub(crate) use super::extension::{convert_coords, extend_hit_two_hit};
 pub(crate) use super::hsp_culling;
-pub(crate) use super::lookup::{build_ncbi_lookup, encode_kmer, QueryContext};
+pub(crate) use super::lookup::{build_ncbi_lookup, QueryContext};
 pub(crate) use super::ncbi_cutoffs::{
     compute_eff_lengths_subject_mode_tblastx, cutoff_score_for_update_tblastx,
     cutoff_score_max_for_tblastx, gap_trigger_raw_score, x_drop_raw_score, BLAST_GAP_DECAY_RATE,

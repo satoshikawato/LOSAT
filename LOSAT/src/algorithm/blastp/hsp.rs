@@ -554,10 +554,7 @@ pub(crate) fn evalue_compare_hsps(a: &BlastpHsp, b: &BlastpHsp) -> Ordering {
 // qsort(hsp_list->hsp_array, hsp_list->hspcnt, sizeof(BlastHSP*),
 //       s_EvalueCompareHSPs);
 // ```
-unsafe extern "C" fn evalue_compare_hsps_qsort(
-    left: *const c_void,
-    right: *const c_void,
-) -> i32 {
+unsafe extern "C" fn evalue_compare_hsps_qsort(left: *const c_void, right: *const c_void) -> i32 {
     let left = unsafe { &*(left as *const BlastpHsp) };
     let right = unsafe { &*(right as *const BlastpHsp) };
     ncbi_qsort_ordering(evalue_compare_hsps(left, right))
@@ -734,10 +731,7 @@ fn compare_hsp_lists(a: &BlastpHspList, b: &BlastpHspList) -> Ordering {
 //    ...
 // }
 // ```
-unsafe extern "C" fn compare_hsp_lists_qsort(
-    left: *const c_void,
-    right: *const c_void,
-) -> i32 {
+unsafe extern "C" fn compare_hsp_lists_qsort(left: *const c_void, right: *const c_void) -> i32 {
     let left = unsafe { &*(left as *const BlastpHspList) };
     let right = unsafe { &*(right as *const BlastpHspList) };
     ncbi_qsort_ordering(compare_hsp_lists(left, right))
@@ -1462,7 +1456,11 @@ fn purge_hits_for_subject_ex(mut hits: Vec<Hit>, purge: bool) -> (Vec<Hit>, usiz
         let right = unsafe { &*(right as *const Hit) };
         let ordering = (left.q_idx, left.query_frame)
             .cmp(&(right.q_idx, right.query_frame))
-            .then_with(|| left.q_start.saturating_sub(1).cmp(&right.q_start.saturating_sub(1)))
+            .then_with(|| {
+                left.q_start
+                    .saturating_sub(1)
+                    .cmp(&right.q_start.saturating_sub(1))
+            })
             .then_with(|| {
                 left.s_start
                     .min(left.s_end)
@@ -1471,7 +1469,12 @@ fn purge_hits_for_subject_ex(mut hits: Vec<Hit>, purge: bool) -> (Vec<Hit>, usiz
             })
             .then_with(|| right.raw_score.cmp(&left.raw_score))
             .then_with(|| right.q_end.cmp(&left.q_end))
-            .then_with(|| right.s_start.max(right.s_end).cmp(&left.s_start.max(left.s_end)));
+            .then_with(|| {
+                right
+                    .s_start
+                    .max(right.s_end)
+                    .cmp(&left.s_start.max(left.s_end))
+            });
         ncbi_qsort_ordering(ordering)
     }
 
@@ -1524,9 +1527,18 @@ fn purge_hits_for_subject_ex(mut hits: Vec<Hit>, purge: bool) -> (Vec<Hit>, usiz
         let ordering = (left.q_idx, left.query_frame)
             .cmp(&(right.q_idx, right.query_frame))
             .then_with(|| left.q_end.cmp(&right.q_end))
-            .then_with(|| left.s_start.max(left.s_end).cmp(&right.s_start.max(right.s_end)))
+            .then_with(|| {
+                left.s_start
+                    .max(left.s_end)
+                    .cmp(&right.s_start.max(right.s_end))
+            })
             .then_with(|| right.raw_score.cmp(&left.raw_score))
-            .then_with(|| right.q_start.saturating_sub(1).cmp(&left.q_start.saturating_sub(1)))
+            .then_with(|| {
+                right
+                    .q_start
+                    .saturating_sub(1)
+                    .cmp(&left.q_start.saturating_sub(1))
+            })
             .then_with(|| {
                 right
                     .s_start

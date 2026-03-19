@@ -1354,10 +1354,7 @@ mod tests {
         let mut intervals = masker.mask_sequence(&seq);
         intervals.sort_by_key(|interval| interval.start);
 
-        assert_eq!(
-            intervals,
-            vec![MaskedInterval::new(137, 156),]
-        );
+        assert_eq!(intervals, vec![MaskedInterval::new(137, 156),]);
     }
 
     // NCBI reference: /home/kawato/micromamba/bin/segmasker

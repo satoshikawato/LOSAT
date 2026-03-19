@@ -977,8 +977,7 @@ fn restricted_gapped_align_protein(
                         }
 
                         score_gap_col -= gap_extend;
-                        dp_mem[b_index].best_gap =
-                            (score_val - gap_open_extend).max(score_gap_col);
+                        dp_mem[b_index].best_gap = (score_val - gap_open_extend).max(score_gap_col);
                         dp_mem[b_index].best = score_val;
                     }
                 }
@@ -1038,8 +1037,7 @@ fn restricted_gapped_align_protein(
 
                         score_gap_row -= gap_extend;
                         score_gap_col -= gap_extend;
-                        dp_mem[b_index].best_gap =
-                            (score_val - gap_open_extend).max(score_gap_col);
+                        dp_mem[b_index].best_gap = (score_val - gap_open_extend).max(score_gap_col);
                         score_gap_row = (score_val - gap_open_extend).max(score_gap_row);
                         dp_mem[b_index].best = score_val;
                     }
@@ -1771,15 +1769,7 @@ pub(crate) fn traceback_preliminary_blastp_hsp(
     let s_start = usize::try_from(preliminary_hsp.gapped_subject_start)
         .expect("NCBI BLAST traceback requires non-negative preliminary gapped subject start");
     let aligned = blast_gapped_alignment_with_traceback(
-        query,
-        subject,
-        q_start,
-        s_start,
-        matrix,
-        None,
-        gap_open,
-        gap_extend,
-        x_drop,
+        query, subject, q_start, s_start, matrix, None, gap_open, gap_extend, x_drop,
     )
     .expect("NCBI BLAST traceback helper must produce a gapped alignment");
 

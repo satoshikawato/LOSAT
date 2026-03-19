@@ -951,15 +951,18 @@ pub(crate) fn postprocess_preliminary_hits(
         &mut callbacks,
     )?;
     drop(callbacks);
-    let query_index =
-        usize::try_from(preliminary_hits[0].query_context).expect("blastp query context is non-negative");
+    let query_index = usize::try_from(preliminary_hits[0].query_context)
+        .expect("blastp query context is non-negative");
     let kept_hits = distinct_alignments
         .alignments_by_query
         .get(query_index)
         .map(|alignments| hits_from_distinct_alignments(alignments, &preliminary_hits[0]))
         .unwrap_or_default();
-    let mut hsp_list =
-        hsplist_from_redone_hits(&kept_hits, matching_seq.index as u32, preliminary_hits[0].q_idx);
+    let mut hsp_list = hsplist_from_redone_hits(
+        &kept_hits,
+        matching_seq.index as u32,
+        preliminary_hits[0].q_idx,
+    );
 
     if hsp_list.hsps.len() > 1 {
         reap_contained_hits(&mut hsp_list);

@@ -101,6 +101,41 @@ echo "Starting MeenMJNV vs MejoMJNV (LOSAT)..."
 # AvCLPV vs PsCLPV
 echo "Starting AvCLPV vs PsCLPV (LOSAT)..."
 (time $LOSAT_BIN tblastx -q ./fasta/AvCLPV.fasta -s ./fasta/PsCLPV.fasta -o ./losat_out/AvCLPV.PsCLPV.tlosatx.n8.out --query-gencode 1 --db-gencode 1 -n 8 )&>./losat_out/AvCLPV.PsCLPV.tlosatx.n8.log 
+
+# --- LOSATP Commands ---
+echo "Starting WSSV vs PajaWSV (LOSATP)..."
+(time $LOSAT_BIN blastp -q ./fasta/WSSV.faa -s ./fasta/PajaWSV.faa -o ./losat_out/WSSV.PajaWSV.losatp.out -n 1 )&>./losat_out/WSSV.PajaWSV.losatp.log 
+echo "Starting WSSV vs SicyWSV (LOSATP)..."
+(time $LOSAT_BIN blastp -q ./fasta/WSSV.faa -s ./fasta/SicyWSV.faa -o ./losat_out/WSSV.SicyWSV.losatp.out -n 1 )&>./losat_out/WSSV.SicyWSV.losatp.log 
+echo "Starting WSSV vs CoBV (LOSATP)..."
+(time $LOSAT_BIN blastp -q ./fasta/WSSV.faa -s ./fasta/CoBV.faa -o ./losat_out/WSSV.CoBV.losatp.out -n 1 )&>./losat_out/WSSV.CoBV.losatp.log 
+echo "Starting PajaWSV vs SicyWSV (LOSATP)..."
+(time $LOSAT_BIN blastp -q ./fasta/PajaWSV.faa -s ./fasta/SicyWSV.faa -o ./losat_out/PajaWSV.SicyWSV.losatp.out -n 1 )&>./losat_out/PajaWSV.SicyWSV.losatp.log 
+echo "Starting PajaWSV vs CoBV (LOSATP)..."
+(time $LOSAT_BIN blastp -q ./fasta/PajaWSV.faa -s ./fasta/CoBV.faa -o ./losat_out/PajaWSV.CoBV.losatp.out -n 1 )&>./losat_out/PajaWSV.CoBV.losatp.log 
+echo "Starting SicyWSV vs CoBV (LOSATP)..."
+(time $LOSAT_BIN blastp -q ./fasta/SicyWSV.faa -s ./fasta/CoBV.faa -o ./losat_out/SicyWSV.CoBV.losatp.out -n 1 )&>./losat_out/SicyWSV.CoBV.losatp.log 
+echo "Starting AP027078 vs AP027131 (LOSATP)..."
+(time $LOSAT_BIN blastp -q ./fasta/AP027078.faa -s ./fasta/AP027131.faa -o ./losat_out/AP027078.AP027131.losatp.out -n 1 )&>./losat_out/AP027078.AP027131.losatp.log 
+echo "Starting AP027078 vs AP027132 (LOSATP)..."
+(time $LOSAT_BIN blastp -q ./fasta/AP027078.faa -s ./fasta/AP027132.faa -o ./losat_out/AP027078.AP027132.losatp.out -n 1 )&>./losat_out/AP027078.AP027132.losatp.log 
+echo "Starting AP027078 vs AP027133 (LOSATP)..."
+(time $LOSAT_BIN blastp -q ./fasta/AP027078.faa -s ./fasta/AP027133.faa -o ./losat_out/AP027078.AP027133.losatp.out -n 1 )&>./losat_out/AP027078.AP027133.losatp.log 
+echo "Starting AP027078 vs NZ_CP006932 (LOSATP)..."
+(time $LOSAT_BIN blastp -q ./fasta/AP027078.faa -s ./fasta/NZ_CP006932.faa -o ./losat_out/AP027078.NZ_CP006932.losatp.out -n 1 )&>./losat_out/AP027078.NZ_CP006932.losatp.log 
+echo "Starting AP027131 vs AP027132 (LOSATP)..."
+(time $LOSAT_BIN blastp -q ./fasta/AP027131.faa -s ./fasta/AP027132.faa -o ./losat_out/AP027131.AP027132.losatp.out -n 1 )&>./losat_out/AP027131.AP027132.losatp.log 
+echo "Starting AP027131 vs AP027133 (LOSATP)..."
+(time $LOSAT_BIN blastp -q ./fasta/AP027131.faa -s ./fasta/AP027133.faa -o ./losat_out/AP027131.AP027133.losatp.out -n 1 )&>./losat_out/AP027131.AP027133.losatp.log 
+echo "Starting AP027131 vs NZ_CP006932 (LOSATP)..."
+(time $LOSAT_BIN blastp -q ./fasta/AP027131.faa -s ./fasta/NZ_CP006932.faa -o ./losat_out/AP027131.NZ_CP006932.losatp.out -n 1 )&>./losat_out/AP027131.NZ_CP006932.losatp.log 
+echo "Starting AP027132 vs AP027133 (LOSATP)..."
+(time $LOSAT_BIN blastp -q ./fasta/AP027132.faa -s ./fasta/AP027133.faa -o ./losat_out/AP027132.AP027133.losatp.out -n 1 )&>./losat_out/AP027132.AP027133.losatp.log 
+echo "Starting AP027132 vs NZ_CP006932 (LOSATP)..."
+(time $LOSAT_BIN blastp -q ./fasta/AP027132.faa -s ./fasta/NZ_CP006932.faa -o ./losat_out/AP027132.NZ_CP006932.losatp.out -n 1 )&>./losat_out/AP027132.NZ_CP006932.losatp.log 
+echo "Starting AP027133 vs NZ_CP006932 (LOSATP)..."
+(time $LOSAT_BIN blastp -q ./fasta/AP027133.faa -s ./fasta/NZ_CP006932.faa -o ./losat_out/AP027133.NZ_CP006932.losatp.out -n 1 )&>./losat_out/AP027133.NZ_CP006932.losatp.log 
+
 <<COMMENTOUT
 # --- TLOSATX Commands (Genetic Code: 4) ---
 echo "Starting NZ_CP006932 self..."

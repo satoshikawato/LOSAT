@@ -1705,6 +1705,8 @@ mod tests {
             q_aa_end,
             s_aa_start,
             s_aa_end,
+            q_seed_off: q_aa_start,
+            s_seed_off: s_aa_start,
             q_orig_len: 1000,
             s_orig_len: 1000,
             raw_score: id, // Use raw_score as ID for verification

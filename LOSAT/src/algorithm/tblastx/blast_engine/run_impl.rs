@@ -1080,6 +1080,14 @@ pub fn run(args: TblastxArgs) -> Result<()> {
                                 q_end_absolute: hsp_qe_absolute,
                                 s_start: hsp_s,
                                 s_end: hsp_s + hsp_len,
+                                // NCBI reference: ncbi-blast/c++/src/algo/blast/core/aa_ungapped.c:589-592
+                                // ```c
+                                // BlastSaveInitHsp(ungapped_hsps, hsp_q, hsp_s,
+                                //                  query_offset, subject_offset, hsp_len,
+                                //                  score);
+                                // ```
+                                q_seed_absolute: query_offset as i32,
+                                s_seed: subject_offset as i32,
                                 score,
                                 ctx_idx,
                                 s_f_idx,

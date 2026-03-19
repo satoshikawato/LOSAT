@@ -4,8 +4,29 @@
 
 use std::cmp::Ordering;
 use std::collections::HashMap;
+use std::ffi::c_void;
 
 use crate::common::{GapEditOp, Hit};
+
+// NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_hits.c:1366-1377
+// ```c
+// qsort(hsp_list->hsp_array, hsp_list->hspcnt, sizeof(BlastHSP*),
+//       ScoreCompareHSPs);
+// ```
+//
+// NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_hits.c:3335-3337
+// ```c
+// qsort(hit_list->hsplist_array, hit_list->hsplist_count,
+//       sizeof(BlastHSPList*), s_EvalueCompareHSPLists);
+// ```
+unsafe extern "C" {
+    fn qsort(
+        base: *mut c_void,
+        nmemb: usize,
+        size: usize,
+        compar: Option<unsafe extern "C" fn(*const c_void, *const c_void) -> i32>,
+    );
+}
 
 // NCBI reference: ncbi-blast/c++/include/algo/blast/core/blast_hits.h:125-148
 // ```c
@@ -146,7 +167,7 @@ impl BlastpHsp {
 //    double best_evalue;
 // } BlastHSPList;
 // ```
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 #[allow(dead_code)]
 pub(crate) struct BlastpHspList {
     pub oid: u32,
@@ -180,6 +201,81 @@ pub(crate) struct BlastpHitList {
     pub hsplist_current: usize,
     pub num_hits: usize,
 }
+
+// NCBI reference: ncbi-blast/c++/src/algo/blast/composition_adjustment/compo_heap.c:67-76
+// ```c
+// typedef struct BlastCompo_HeapRecord {
+//     double        bestEvalue;
+//     int           bestScore;
+//     int           subject_index;
+//     void *        theseAlignments;
+// } BlastCompo_HeapRecord;
+// ```
+#[derive(Debug, Clone)]
+pub(crate) struct BlastCompoHeapRecord {
+    pub best_evalue: f64,
+    pub best_score: i32,
+    pub subject_index: u32,
+    // NCBI reference: ncbi-blast/c++/src/algo/blast/composition_adjustment/compo_heap.c:67-76
+    // ```c
+    // void * theseAlignments;
+    // ```
+    //
+    // Rust stores the typed `BlastpHspList` directly instead of a raw
+    // `void*`, preserving the same ownership and comparison behavior.
+    pub hsplist: Option<BlastpHspList>,
+}
+
+impl Default for BlastCompoHeapRecord {
+    fn default() -> Self {
+        Self {
+            best_evalue: 0.0,
+            best_score: 0,
+            subject_index: 0,
+            hsplist: None,
+        }
+    }
+}
+
+// NCBI reference: ncbi-blast/c++/include/algo/blast/composition_adjustment/compo_heap.h:79-95
+// ```c
+// typedef struct BlastCompo_Heap {
+//     int n;
+//     int capacity;
+//     int heapThreshold;
+//     double ecutoff;
+//     double worstEvalue;
+//     struct BlastCompo_HeapRecord *array;
+//     struct BlastCompo_HeapRecord *heapArray;
+// } BlastCompo_Heap;
+// ```
+#[derive(Debug, Clone)]
+pub(crate) struct BlastCompoHeap {
+    pub n: usize,
+    pub capacity: usize,
+    pub heap_threshold: usize,
+    pub ecutoff: f64,
+    pub worst_evalue: f64,
+    pub array: Option<Vec<BlastCompoHeapRecord>>,
+    pub heap_array: Option<Vec<BlastCompoHeapRecord>>,
+}
+
+// NCBI reference: ncbi-blast/c++/src/algo/blast/composition_adjustment/compo_heap.c:50-57
+// ```c
+// #define HEAP_INITIAL_CAPACITY 100
+// #define HEAP_RESIZE_FACTOR 1.5
+// #define HEAP_MIN_RESIZE 100
+// ```
+const COMPO_HEAP_INITIAL_CAPACITY: usize = 100;
+const COMPO_HEAP_MIN_RESIZE: usize = 100;
+const COMPO_HEAP_RESIZE_FACTOR: f64 = 1.5;
+
+// NCBI reference: ncbi-blast/c++/src/algo/blast/composition_adjustment/redo_alignment.c:53-54
+// ```c
+// /** by what factor might initially reported E-value exceed true E-value */
+// #define EVALUE_STRETCH 5
+// ```
+const COMPO_HEAP_EVALUE_STRETCH: f64 = 5.0;
 
 // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_hits.c:43-70
 // ```c
@@ -238,6 +334,91 @@ fn evalue_comp(evalue1: f64, evalue2: f64) -> Ordering {
         Ordering::Greater
     } else {
         Ordering::Equal
+    }
+}
+
+// NCBI reference: ncbi-blast/c++/src/algo/blast/composition_adjustment/compo_heap.c:81-93
+// ```c
+// static int
+// s_CompoHeapRecordCompare(BlastCompo_HeapRecord * place1,
+//                          BlastCompo_HeapRecord * place2)
+// {
+//     int result;
+//     if (0 == (result = CMP(place1->bestEvalue, place2->bestEvalue)) &&
+//         0 == (result = CMP(place2->bestScore, place1->bestScore))) {
+//         result = CMP(place2->subject_index, place1->subject_index);
+//     }
+//     return result > 0;
+// }
+// ```
+fn compo_heap_record_compare(place1: &BlastCompoHeapRecord, place2: &BlastCompoHeapRecord) -> bool {
+    let mut result = if place1.best_evalue > place2.best_evalue {
+        1
+    } else if place1.best_evalue < place2.best_evalue {
+        -1
+    } else {
+        0
+    };
+    if result == 0 {
+        result = match place2.best_score.cmp(&place1.best_score) {
+            Ordering::Less => -1,
+            Ordering::Equal => 0,
+            Ordering::Greater => 1,
+        };
+    }
+    if result == 0 {
+        result = match place2.subject_index.cmp(&place1.subject_index) {
+            Ordering::Less => -1,
+            Ordering::Equal => 0,
+            Ordering::Greater => 1,
+        };
+    }
+    result > 0
+}
+
+// NCBI reference: ncbi-blast/c++/src/algo/blast/composition_adjustment/compo_heap.c:154-186
+// ```c
+// static void
+// s_CompoHeapifyDown(BlastCompo_HeapRecord * heapArray, int top, int n)
+// {
+//     ...
+// }
+// ```
+fn compo_heapify_down(heap_array: &mut [BlastCompoHeapRecord], top: usize, n: usize) {
+    let mut largest = top;
+    loop {
+        let i = largest;
+        let left = 2 * i;
+        let right = 2 * i + 1;
+        largest = if left <= n && compo_heap_record_compare(&heap_array[left], &heap_array[i]) {
+            left
+        } else {
+            i
+        };
+        if right <= n && compo_heap_record_compare(&heap_array[right], &heap_array[largest]) {
+            largest = right;
+        }
+        if largest == i {
+            break;
+        }
+        heap_array.swap(i, largest);
+    }
+}
+
+// NCBI reference: ncbi-blast/c++/src/algo/blast/composition_adjustment/compo_heap.c:197-214
+// ```c
+// static void
+// s_CompoHeapifyUp(BlastCompo_HeapRecord * heapArray, int i)
+// {
+//     ...
+// }
+// ```
+fn compo_heapify_up(heap_array: &mut [BlastCompoHeapRecord], mut i: usize) {
+    let mut parent = i / 2;
+    while parent >= 1 && compo_heap_record_compare(&heap_array[i], &heap_array[parent]) {
+        heap_array.swap(i, parent);
+        i = parent;
+        parent /= 2;
     }
 }
 
@@ -323,6 +504,31 @@ pub(crate) fn score_compare_hsps(a: &BlastpHsp, b: &BlastpHsp) -> Ordering {
     b_q_end.cmp(&a_q_end)
 }
 
+// NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_hits.c:1330-1353
+// ```c
+// int ScoreCompareHSPs(const void* h1, const void* h2) {
+//    ...
+// }
+// ```
+fn ncbi_qsort_ordering(ordering: Ordering) -> i32 {
+    match ordering {
+        Ordering::Less => -1,
+        Ordering::Equal => 0,
+        Ordering::Greater => 1,
+    }
+}
+
+// NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_hits.c:1366-1377
+// ```c
+// qsort(hsp_list->hsp_array, hsp_list->hspcnt, sizeof(BlastHSP*),
+//       ScoreCompareHSPs);
+// ```
+unsafe extern "C" fn score_compare_hsps_qsort(left: *const c_void, right: *const c_void) -> i32 {
+    let left = unsafe { &*(left as *const BlastpHsp) };
+    let right = unsafe { &*(right as *const BlastpHsp) };
+    ncbi_qsort_ordering(score_compare_hsps(left, right))
+}
+
 // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_hits.c:1414-1435
 // ```c
 // static int
@@ -343,6 +549,63 @@ pub(crate) fn evalue_compare_hsps(a: &BlastpHsp, b: &BlastpHsp) -> Ordering {
     }
 }
 
+// NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_hits.c:1444-1454
+// ```c
+// qsort(hsp_list->hsp_array, hsp_list->hspcnt, sizeof(BlastHSP*),
+//       s_EvalueCompareHSPs);
+// ```
+unsafe extern "C" fn evalue_compare_hsps_qsort(
+    left: *const c_void,
+    right: *const c_void,
+) -> i32 {
+    let left = unsafe { &*(left as *const BlastpHsp) };
+    let right = unsafe { &*(right as *const BlastpHsp) };
+    ncbi_qsort_ordering(evalue_compare_hsps(left, right))
+}
+
+// NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_hits.c:1355-1381
+// ```c
+// Boolean Blast_HSPListIsSortedByScore(const BlastHSPList* hsp_list)
+// {
+//     ...
+//     if (ScoreCompareHSPs(&hsp_list->hsp_array[index],
+//                          &hsp_list->hsp_array[index+1]) > 0) {
+//         return FALSE;
+//     }
+// }
+//
+// void Blast_HSPListSortByScore(BlastHSPList* hsp_list)
+// {
+//     if (!Blast_HSPListIsSortedByScore(hsp_list)) {
+//         qsort(hsp_list->hsp_array, hsp_list->hspcnt, sizeof(BlastHSP*),
+//               ScoreCompareHSPs);
+//     }
+// }
+// ```
+pub(crate) fn sort_hsplist_by_score(list: &mut BlastpHspList) {
+    if list.hsps.len() <= 1 {
+        return;
+    }
+
+    let mut index = 0usize;
+    while index < list.hsps.len() - 1 {
+        if score_compare_hsps(&list.hsps[index], &list.hsps[index + 1]) == Ordering::Greater {
+            break;
+        }
+        index += 1;
+    }
+    if index < list.hsps.len() - 1 {
+        unsafe {
+            qsort(
+                list.hsps.as_mut_ptr().cast::<c_void>(),
+                list.hsps.len(),
+                std::mem::size_of::<BlastpHsp>(),
+                Some(score_compare_hsps_qsort),
+            );
+        }
+    }
+}
+
 // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_hits.c:1437-1455
 // ```c
 // void Blast_HSPListSortByEvalue(BlastHSPList* hsp_list)
@@ -360,7 +623,14 @@ fn sort_hsplist_by_evalue(list: &mut BlastpHspList) {
             index += 1;
         }
         if index < list.hsps.len() - 1 {
-            list.hsps.sort_by(evalue_compare_hsps);
+            unsafe {
+                qsort(
+                    list.hsps.as_mut_ptr().cast::<c_void>(),
+                    list.hsps.len(),
+                    std::mem::size_of::<BlastpHsp>(),
+                    Some(evalue_compare_hsps_qsort),
+                );
+            }
         }
     }
 }
@@ -457,6 +727,22 @@ fn compare_hsp_lists(a: &BlastpHspList, b: &BlastpHspList) -> Ordering {
     b.oid.cmp(&a.oid)
 }
 
+// NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_hits.c:3078-3106
+// ```c
+// static int s_EvalueCompareHSPLists(const void* v1, const void* v2)
+// {
+//    ...
+// }
+// ```
+unsafe extern "C" fn compare_hsp_lists_qsort(
+    left: *const c_void,
+    right: *const c_void,
+) -> i32 {
+    let left = unsafe { &*(left as *const BlastpHspList) };
+    let right = unsafe { &*(right as *const BlastpHspList) };
+    ncbi_qsort_ordering(compare_hsp_lists(left, right))
+}
+
 // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_hits.c:1627-1676
 // ```c
 // static void s_Heapify(...);
@@ -496,6 +782,290 @@ fn create_hsplist_heap(lists: &mut [BlastpHspList]) {
     while i > 0 {
         i -= 1;
         heapify_hsplist_array(lists, i, nel - 1);
+    }
+}
+
+impl BlastCompoHeap {
+    // NCBI reference: ncbi-blast/c++/src/algo/blast/composition_adjustment/compo_heap.c:361-375
+    // ```c
+    // int
+    // BlastCompo_HeapInitialize(BlastCompo_Heap * self, int heapThreshold,
+    //                           double ecutoff)
+    // {
+    //     self->n             = 0;
+    //     self->heapThreshold = heapThreshold;
+    //     self->ecutoff       = ecutoff;
+    //     self->heapArray     = NULL;
+    //     self->capacity      = MIN(HEAP_INITIAL_CAPACITY, heapThreshold);
+    //     self->worstEvalue   = 0;
+    //     self->array = calloc(self->capacity + 1, sizeof(BlastCompo_HeapRecord));
+    // }
+    // ```
+    pub(crate) fn new(heap_threshold: usize, ecutoff: f64) -> Self {
+        let capacity = COMPO_HEAP_INITIAL_CAPACITY.min(heap_threshold);
+        let mut array = Vec::with_capacity(capacity.saturating_add(1));
+        array.push(BlastCompoHeapRecord::default());
+        Self {
+            n: 0,
+            capacity,
+            heap_threshold,
+            ecutoff,
+            worst_evalue: 0.0,
+            array: Some(array),
+            heap_array: None,
+        }
+    }
+
+    // NCBI reference: ncbi-blast/c++/src/algo/blast/composition_adjustment/compo_heap.c:221-238
+    // ```c
+    // static void
+    // s_ConvertToHeap(BlastCompo_Heap * self)
+    // {
+    //     ...
+    // }
+    // ```
+    fn convert_to_heap(&mut self) {
+        let Some(mut heap_array) = self.array.take() else {
+            return;
+        };
+        while heap_array.len() <= self.n {
+            heap_array.push(BlastCompoHeapRecord::default());
+        }
+        if self.n >= 2 {
+            for i in (1..=self.n / 2).rev() {
+                compo_heapify_down(&mut heap_array, i, self.n);
+            }
+        }
+        self.heap_array = Some(heap_array);
+    }
+
+    // NCBI reference: ncbi-blast/c++/src/algo/blast/composition_adjustment/compo_heap.c:257-284
+    // ```c
+    // int
+    // BlastCompo_HeapWouldInsert(BlastCompo_Heap * self,
+    //                            double eValue,
+    //                            int score,
+    //                            int subject_index)
+    // {
+    //     ...
+    // }
+    // ```
+    pub(crate) fn would_insert(&mut self, evalue: f64, score: i32, subject_index: u32) -> bool {
+        if self.n < self.heap_threshold || evalue <= self.ecutoff || evalue < self.worst_evalue {
+            return true;
+        }
+        if self.heap_array.is_none() {
+            self.convert_to_heap();
+        }
+        let mut record = BlastCompoHeapRecord::default();
+        record.best_evalue = evalue;
+        record.best_score = score;
+        record.subject_index = subject_index;
+        let heap_array = self
+            .heap_array
+            .as_ref()
+            .expect("compo heap converted before root comparison");
+        compo_heap_record_compare(&heap_array[1], &record)
+    }
+
+    // NCBI reference: ncbi-blast/c++/src/algo/blast/composition_adjustment/compo_heap.c:294-352
+    // ```c
+    // int
+    // BlastCompo_HeapInsert(BlastCompo_Heap * self,
+    //                       void * alignments,
+    //                       double eValue,
+    //                       int score,
+    //                       int subject_index,
+    //                       void ** discardedAlignments)
+    // {
+    //     ...
+    // }
+    // ```
+    pub(crate) fn insert(
+        &mut self,
+        hsplist: BlastpHspList,
+        evalue: f64,
+        score: i32,
+        subject_index: u32,
+    ) {
+        if self.array.is_some() && self.n >= self.heap_threshold {
+            self.convert_to_heap();
+        }
+        if let Some(array) = self.array.as_mut() {
+            self.n += 1;
+            while array.len() <= self.n {
+                array.push(BlastCompoHeapRecord::default());
+            }
+            array[self.n] = BlastCompoHeapRecord {
+                best_evalue: evalue,
+                best_score: score,
+                subject_index,
+                hsplist: Some(hsplist),
+            };
+            if self.worst_evalue < evalue {
+                self.worst_evalue = evalue;
+            }
+            return;
+        }
+
+        let heap_array = self
+            .heap_array
+            .as_mut()
+            .expect("compo heap storage exists when inserting");
+        if self.n < self.heap_threshold
+            || (evalue <= self.ecutoff && self.worst_evalue <= self.ecutoff)
+        {
+            self.n += 1;
+            while heap_array.len() <= self.n {
+                heap_array.push(BlastCompoHeapRecord::default());
+            }
+            heap_array[self.n] = BlastCompoHeapRecord {
+                best_evalue: evalue,
+                best_score: score,
+                subject_index,
+                hsplist: Some(hsplist),
+            };
+            compo_heapify_up(heap_array, self.n);
+        } else {
+            let candidate = BlastCompoHeapRecord {
+                best_evalue: evalue,
+                best_score: score,
+                subject_index,
+                hsplist: Some(hsplist),
+            };
+            if compo_heap_record_compare(&heap_array[1], &candidate) {
+                heap_array[1] = candidate;
+            }
+            compo_heapify_down(heap_array, 1, self.n);
+        }
+        self.worst_evalue = heap_array[1].best_evalue;
+    }
+
+    // NCBI reference: ncbi-blast/c++/src/algo/blast/composition_adjustment/compo_heap.c:356-359
+    // ```c
+    // int
+    // BlastCompo_HeapFilledToCutoff(const BlastCompo_Heap * self)
+    // {
+    //     return self->n >= self->heapThreshold &&
+    //         self->worstEvalue <= self->ecutoff;
+    // }
+    // ```
+    pub(crate) fn filled_to_cutoff(&self) -> bool {
+        self.n >= self.heap_threshold && self.worst_evalue <= self.ecutoff
+    }
+
+    // NCBI reference: ncbi-blast/c++/src/algo/blast/composition_adjustment/compo_heap.c:391-414
+    // ```c
+    // void *
+    // BlastCompo_HeapPop(BlastCompo_Heap * self)
+    // {
+    //     ...
+    // }
+    // ```
+    pub(crate) fn pop(&mut self) -> Option<BlastpHspList> {
+        if self.heap_array.is_none() {
+            self.convert_to_heap();
+        }
+        let heap_array = self
+            .heap_array
+            .as_mut()
+            .expect("compo heap storage exists when popping");
+        if self.n == 0 {
+            return None;
+        }
+        let results = heap_array[1].hsplist.take();
+        let last = std::mem::take(&mut heap_array[self.n]);
+        self.n -= 1;
+        if self.n > 0 {
+            heap_array[1] = last;
+            compo_heapify_down(heap_array, 1, self.n);
+            self.worst_evalue = heap_array[1].best_evalue;
+        } else {
+            self.worst_evalue = 0.0;
+        }
+        results
+    }
+}
+
+// NCBI reference: ncbi-blast/c++/src/algo/blast/composition_adjustment/redo_alignment.c:1561-1576
+// ```c
+// int
+// BlastCompo_EarlyTermination(double evalue,
+//                             BlastCompo_Heap significantMatches[],
+//                             int numQueries)
+// {
+//     ...
+// }
+// ```
+pub(crate) fn blast_compo_early_termination(
+    evalue: f64,
+    significant_matches: &[BlastCompoHeap],
+) -> bool {
+    for heap in significant_matches {
+        if heap.filled_to_cutoff() {
+            let ecutoff = heap.ecutoff;
+            if evalue <= COMPO_HEAP_EVALUE_STRETCH * ecutoff {
+                return false;
+            }
+        } else {
+            return false;
+        }
+    }
+    true
+}
+
+// NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_kappa.c:2494-2514
+// ```c
+// static void
+// s_FillResultsFromCompoHeaps(BlastHSPResults * results,
+//                             BlastCompo_Heap heaps[],
+//                             Int4 hitlist_size)
+// {
+//     ...
+// }
+// ```
+pub(crate) fn fill_results_from_compo_heaps(
+    hitlist_size: usize,
+    heaps: &mut [BlastCompoHeap],
+) -> Vec<Option<BlastpHitList>> {
+    let mut hit_lists: Vec<Option<BlastpHitList>> = heaps
+        .iter()
+        .map(|_| Some(BlastpHitList::new(hitlist_size)))
+        .collect();
+    for (query_index, heap) in heaps.iter_mut().enumerate() {
+        let hit_list = hit_lists[query_index]
+            .as_mut()
+            .expect("hit list initialized for each query");
+        while let Some(hsp_list) = heap.pop() {
+            hit_list.update(hsp_list);
+        }
+    }
+    reverse_hit_list_order(&mut hit_lists);
+    hit_lists
+}
+
+// NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_hits.c:3420-3438
+// ```c
+// Int2 Blast_HSPResultsReverseOrder(BlastHSPResults* results)
+// {
+//    for (index = 0; index < results->num_queries; ++index) {
+//       hit_list = results->hitlist_array[index];
+//       if (hit_list && hit_list->hsplist_count > 1) {
+//          for (index1 = 0; index1 < hit_list->hsplist_count/2; ++index1) {
+//             ...
+//          }
+//       }
+//    }
+// }
+// ```
+fn reverse_hit_list_order(hit_lists: &mut [Option<BlastpHitList>]) {
+    for hit_list_opt in hit_lists {
+        let Some(hit_list) = hit_list_opt.as_mut() else {
+            continue;
+        };
+        if hit_list.hsplist_count > 1 {
+            hit_list.hsplist_array[..hit_list.hsplist_count].reverse();
+        }
     }
 }
 
@@ -648,7 +1218,14 @@ impl BlastpHitList {
     // ```
     pub(crate) fn sort_by_evalue(&mut self) {
         if self.hsplist_count > 1 {
-            self.hsplist_array.sort_by(compare_hsp_lists);
+            unsafe {
+                qsort(
+                    self.hsplist_array.as_mut_ptr().cast::<c_void>(),
+                    self.hsplist_count,
+                    std::mem::size_of::<BlastpHspList>(),
+                    Some(compare_hsp_lists_qsort),
+                );
+            }
         }
         self.purge();
     }
@@ -873,15 +1450,39 @@ fn purge_hits_for_subject_ex(mut hits: Vec<Hit>, purge: bool) -> (Vec<Hit>, usiz
 
     let mut trimmed_hits = Vec::new();
 
-    hits.sort_by(|a, b| {
-        context(a)
-            .cmp(&context(b))
-            .then_with(|| q_offset(a).cmp(&q_offset(b)))
-            .then_with(|| s_offset(a).cmp(&s_offset(b)))
-            .then_with(|| b.raw_score.cmp(&a.raw_score))
-            .then_with(|| q_end(b).cmp(&q_end(a)))
-            .then_with(|| s_end(b).cmp(&s_end(a)))
-    });
+    // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_hits.c:2478
+    // ```c
+    // qsort(hsp_array, hsp_count, sizeof(BlastHSP*), s_QueryOffsetCompareHSPs);
+    // ```
+    unsafe extern "C" fn hit_query_offset_compare_qsort(
+        left: *const c_void,
+        right: *const c_void,
+    ) -> i32 {
+        let left = unsafe { &*(left as *const Hit) };
+        let right = unsafe { &*(right as *const Hit) };
+        let ordering = (left.q_idx, left.query_frame)
+            .cmp(&(right.q_idx, right.query_frame))
+            .then_with(|| left.q_start.saturating_sub(1).cmp(&right.q_start.saturating_sub(1)))
+            .then_with(|| {
+                left.s_start
+                    .min(left.s_end)
+                    .saturating_sub(1)
+                    .cmp(&right.s_start.min(right.s_end).saturating_sub(1))
+            })
+            .then_with(|| right.raw_score.cmp(&left.raw_score))
+            .then_with(|| right.q_end.cmp(&left.q_end))
+            .then_with(|| right.s_start.max(right.s_end).cmp(&left.s_start.max(left.s_end)));
+        ncbi_qsort_ordering(ordering)
+    }
+
+    unsafe {
+        qsort(
+            hits.as_mut_ptr().cast::<c_void>(),
+            hits.len(),
+            std::mem::size_of::<Hit>(),
+            Some(hit_query_offset_compare_qsort),
+        );
+    }
 
     let mut i = 0usize;
     while i < hits.len() {
@@ -910,15 +1511,40 @@ fn purge_hits_for_subject_ex(mut hits: Vec<Hit>, purge: bool) -> (Vec<Hit>, usiz
         }
     }
 
-    hits.sort_by(|a, b| {
-        context(a)
-            .cmp(&context(b))
-            .then_with(|| q_end(a).cmp(&q_end(b)))
-            .then_with(|| s_end(a).cmp(&s_end(b)))
-            .then_with(|| b.raw_score.cmp(&a.raw_score))
-            .then_with(|| q_offset(b).cmp(&q_offset(a)))
-            .then_with(|| s_offset(b).cmp(&s_offset(a)))
-    });
+    // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_hits.c:2504
+    // ```c
+    // qsort(hsp_array, hsp_count, sizeof(BlastHSP*), s_QueryEndCompareHSPs);
+    // ```
+    unsafe extern "C" fn hit_query_end_compare_qsort(
+        left: *const c_void,
+        right: *const c_void,
+    ) -> i32 {
+        let left = unsafe { &*(left as *const Hit) };
+        let right = unsafe { &*(right as *const Hit) };
+        let ordering = (left.q_idx, left.query_frame)
+            .cmp(&(right.q_idx, right.query_frame))
+            .then_with(|| left.q_end.cmp(&right.q_end))
+            .then_with(|| left.s_start.max(left.s_end).cmp(&right.s_start.max(right.s_end)))
+            .then_with(|| right.raw_score.cmp(&left.raw_score))
+            .then_with(|| right.q_start.saturating_sub(1).cmp(&left.q_start.saturating_sub(1)))
+            .then_with(|| {
+                right
+                    .s_start
+                    .min(right.s_end)
+                    .saturating_sub(1)
+                    .cmp(&left.s_start.min(left.s_end).saturating_sub(1))
+            });
+        ncbi_qsort_ordering(ordering)
+    }
+
+    unsafe {
+        qsort(
+            hits.as_mut_ptr().cast::<c_void>(),
+            hits.len(),
+            std::mem::size_of::<Hit>(),
+            Some(hit_query_end_compare_qsort),
+        );
+    }
 
     let mut i = 0usize;
     while i < hits.len() {
@@ -1125,5 +1751,98 @@ mod tests {
 
         assert_eq!(hit_list.hsplist_count, 1);
         assert_eq!(hit_list.hsplist_array[0].oid, 2);
+    }
+
+    // NCBI reference: ncbi-blast/c++/src/algo/blast/composition_adjustment/compo_heap.c:257-284
+    // ```c
+    // BlastCompo_HeapWouldInsert(...);
+    // ```
+    #[test]
+    fn test_compo_heap_would_insert_uses_ncbi_score_and_subject_tie_breakers() {
+        let mut heap = BlastCompoHeap::new(1, 1e-50);
+        let mut first = BlastpHspList {
+            oid: 1,
+            query_index: 0,
+            hsps: vec![BlastpHsp::from_hit(make_hit(50, 1, 10, 1, 10))],
+            best_evalue: 1e-20,
+        };
+        first.hsps[0].e_value = 1e-20;
+        heap.insert(first, 1e-20, 50, 1);
+
+        assert!(heap.would_insert(1e-20, 50, 2));
+        assert!(!heap.would_insert(1e-20, 50, 0));
+    }
+
+    // NCBI reference: ncbi-blast/c++/src/algo/blast/composition_adjustment/compo_heap.c:391-414
+    // ```c
+    // void * BlastCompo_HeapPop(BlastCompo_Heap * self)
+    // {
+    //     ...
+    // }
+    // ```
+    #[test]
+    fn test_compo_heap_pop_returns_worst_record_first() {
+        let mut heap = BlastCompoHeap::new(2, 1e-50);
+
+        let mut better = BlastpHspList {
+            oid: 7,
+            query_index: 0,
+            hsps: vec![BlastpHsp::from_hit(make_hit(70, 1, 10, 1, 10))],
+            best_evalue: 1e-20,
+        };
+        let mut worse = BlastpHspList {
+            oid: 3,
+            query_index: 0,
+            hsps: vec![BlastpHsp::from_hit(make_hit(60, 1, 10, 2, 11))],
+            best_evalue: 1e-10,
+        };
+        better.hsps[0].e_value = 1e-20;
+        worse.hsps[0].e_value = 1e-10;
+
+        heap.insert(better, 1e-20, 70, 7);
+        heap.insert(worse, 1e-10, 60, 3);
+
+        let first = heap.pop().expect("worst record present");
+        let second = heap.pop().expect("best record present");
+
+        assert_eq!(first.oid, 3);
+        assert_eq!(second.oid, 7);
+    }
+
+    // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_kappa.c:2494-2514
+    // ```c
+    // while (NULL != (hsp_list = BlastCompo_HeapPop(heap))) {
+    //     Blast_HitListUpdate(hitlist, hsp_list);
+    // }
+    // ```
+    #[test]
+    fn test_fill_results_from_compo_heaps_builds_hitlist_via_hitlist_update() {
+        let mut heaps = vec![BlastCompoHeap::new(2, 1e-50)];
+
+        let mut first = BlastpHspList {
+            oid: 1,
+            query_index: 0,
+            hsps: vec![BlastpHsp::from_hit(make_hit(50, 1, 10, 1, 10))],
+            best_evalue: 1e-10,
+        };
+        let mut second = BlastpHspList {
+            oid: 2,
+            query_index: 0,
+            hsps: vec![BlastpHsp::from_hit(make_hit(60, 1, 10, 2, 11))],
+            best_evalue: 1e-20,
+        };
+        first.hsps[0].e_value = 1e-10;
+        second.hsps[0].e_value = 1e-20;
+
+        heaps[0].insert(first, 1e-10, 50, 1);
+        heaps[0].insert(second, 1e-20, 60, 2);
+
+        let mut hit_lists = fill_results_from_compo_heaps(2, &mut heaps);
+        let hit_list = hit_lists[0].as_mut().expect("query hit list initialized");
+        hit_list.sort_by_evalue();
+
+        assert_eq!(hit_list.hsplist_count, 2);
+        assert_eq!(hit_list.hsplist_array[0].oid, 2);
+        assert_eq!(hit_list.hsplist_array[1].oid, 1);
     }
 }

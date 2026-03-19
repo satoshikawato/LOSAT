@@ -51,6 +51,14 @@ pub struct UngappedHit {
     pub q_aa_end: usize,
     pub s_aa_start: usize,
     pub s_aa_end: usize,
+    /// NCBI `BlastHSP::query.gapped_start` copied from
+    /// `init_hsp->offsets.qs_offsets.q_off`.
+    /// Reference: blast_gapalign.c:4756-4768, blast_extend.c:351-370.
+    pub q_seed_off: usize,
+    /// NCBI `BlastHSP::subject.gapped_start` copied from
+    /// `init_hsp->offsets.qs_offsets.s_off`.
+    /// Reference: blast_gapalign.c:4756-4768, blast_extend.c:351-370.
+    pub s_seed_off: usize,
     pub q_orig_len: usize,
     pub s_orig_len: usize,
     pub raw_score: i32,

@@ -784,5 +784,4 @@ mod tests {
         let result = apply_check_ideal(computed_low, ideal);
         assert_eq!(result.lambda, computed_low.lambda);
     }
-
 }

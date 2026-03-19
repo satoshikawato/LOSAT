@@ -1077,7 +1077,7 @@ impl BlastIntervalTree {
         // 3. CONTAINED_IN_HSP for start endpoint
         // 4. CONTAINED_IN_HSP for end endpoint
         if in_hsp.score <= tree_hsp.score
-            && in_hsp.subject_frame_sign == tree_hsp.subject_frame_sign
+            && in_hsp.subject_frame_sign.signum() == tree_hsp.subject_frame_sign.signum()
             && Self::contained_in_hsp(
                 tree_hsp.query_offset,
                 tree_hsp.query_end,
@@ -1155,6 +1155,27 @@ impl BlastIntervalTree {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn make_tree_hsp(
+        query_offset: i32,
+        query_end: i32,
+        subject_offset: i32,
+        subject_end: i32,
+        score: i32,
+        subject_frame_sign: i32,
+    ) -> TreeHsp {
+        TreeHsp {
+            query_offset,
+            query_end,
+            subject_offset,
+            subject_end,
+            score,
+            query_frame: 1,
+            query_length: 1000,
+            query_context_offset: 0,
+            subject_frame_sign,
+        }
+    }
 
     #[test]
     fn test_interval_tree_basic() {
@@ -1264,5 +1285,44 @@ mod tests {
 
         // Different diagonals - should not be close
         assert!(!BlastIntervalTree::mb_hsp_close(100, 200, 150, 300, 50));
+    }
+
+    // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_itree.c:269-301
+    // ```c
+    // if (in_hsp->score > tree_hsp->score)
+    //     return in_hsp;
+    // ...
+    // /* for equal scores, pick the shorter HSP */
+    // in_q_length = in_hsp->query.end - in_hsp->query.offset;
+    // ```
+    #[test]
+    fn test_interval_tree_common_endpoint_prefers_shorter_equal_score_hsp() {
+        let mut tree = BlastIntervalTree::new(0, 1000, 0, 2000);
+        let longer_hsp = make_tree_hsp(100, 200, 500, 600, 100, 1);
+        let shorter_hsp = make_tree_hsp(100, 180, 500, 580, 100, 1);
+        let long_only_candidate = make_tree_hsp(181, 190, 581, 590, 50, 1);
+
+        tree.add_hsp(longer_hsp, 0, IndexMethod::QueryAndSubject);
+        tree.add_hsp(shorter_hsp, 0, IndexMethod::QueryAndSubject);
+
+        assert!(!tree.contains_hsp(&long_only_candidate, 0, 0));
+    }
+
+    // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_itree.c:819-823
+    // ```c
+    // if (in_q_start != tree_q_start)
+    //     return FALSE;
+    // ...
+    // SIGN(in_hsp->subject.frame) == SIGN(tree_hsp->subject.frame)
+    // ```
+    #[test]
+    fn test_interval_tree_containment_uses_subject_frame_sign() {
+        let mut tree = BlastIntervalTree::new(0, 1000, 0, 2000);
+        let tree_hsp = make_tree_hsp(100, 200, 500, 600, 100, 3);
+        let contained_hsp = make_tree_hsp(120, 180, 520, 580, 50, 1);
+
+        tree.add_hsp(tree_hsp, 0, IndexMethod::QueryAndSubject);
+
+        assert!(tree.contains_hsp(&contained_hsp, 0, 0));
     }
 }

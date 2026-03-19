@@ -380,6 +380,7 @@ pub struct BlastRedoAlignCallbacks<'a> {
                 Option<&[u64]>,
                 &BlastCompoAlignment,
                 bool,
+                bool,
                 &BlastRedoAlignParams,
             ) -> Result<BlastRedoRangeResult>
             + 'a,
@@ -459,37 +460,58 @@ fn get_hash(data: &[u8], word_size: usize) -> u64 {
     hash
 }
 
-// NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_kappa.c:1110-1121
+// NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_kappa.c:2235-2272
 // ```c
-// static Uint8 s_GetHash(const Uint1* data, int word_size)
+// static int
+// s_CreateWordArray(const Uint1* seq_data, Int4 seq_len, Uint8** words)
+// {
+//     ...
+//     query_hashes = (Uint8*)calloc((seq_len - word_size + 1),
+//                                   sizeof(Uint8));
+//     query_hashes[0] = s_GetHash(&seq_data[0], word_size);
+//     for (i = 1; i < seq_len - word_size; i++) {
+//         query_hashes[i] = query_hashes[i - 1];
+//         query_hashes[i] <<= 5;
+//         query_hashes[i] &= mask;
+//         query_hashes[i] += (Uint8)seq_data[i + word_size - 1];
+//     }
+// }
 // ```
 pub fn build_query_word_hashes(query_seq: &[u8]) -> Vec<u64> {
-    let mut hashes = vec![0u64; query_seq.len()];
     if query_seq.len() < NEAR_IDENTICAL_WORD_SIZE {
-        return hashes;
+        return Vec::new();
     }
 
-    for pos in 0..=query_seq.len() - NEAR_IDENTICAL_WORD_SIZE {
-        hashes[pos] = get_hash(&query_seq[pos..], NEAR_IDENTICAL_WORD_SIZE);
+    let mut hashes = vec![0u64; query_seq.len() - NEAR_IDENTICAL_WORD_SIZE + 1];
+    hashes[0] = get_hash(query_seq, NEAR_IDENTICAL_WORD_SIZE);
+    for pos in 1..(query_seq.len() - NEAR_IDENTICAL_WORD_SIZE) {
+        hashes[pos] = hashes[pos - 1];
+        hashes[pos] <<= 5;
+        hashes[pos] &= NEAR_IDENTICAL_HASH_MASK;
+        hashes[pos] += u64::from(query_seq[pos + NEAR_IDENTICAL_WORD_SIZE - 1]);
     }
     hashes
 }
 
-// NCBI reference: ncbi-blast/c++/include/algo/blast/composition_adjustment/redo_alignment.h:71-78
+// NCBI reference: ncbi-blast/c++/src/algo/blast/composition_adjustment/redo_alignment.c:103-118
 // ```c
-// BlastCompo_Alignment *
 // BlastCompo_AlignmentNew(int score,
-//                         EMatrixAdjustRule whichRule,
-//                         int queryIndex, int queryStart, int queryEnd,
+//                         EMatrixAdjustRule matrix_adjust_rule,
+//                         int queryStart, int queryEnd, int queryIndex,
 //                         int matchStart, int matchEnd, int frame,
-//                         void * context);
+//                         void * context)
+// {
+//     ...
+//     align->queryIndex = queryIndex;
+//     align->queryStart = queryStart;
+// }
 // ```
 pub fn blast_compo_alignment_new(
     score: i32,
     which_rule: EMatrixAdjustRule,
-    query_index: i32,
     query_start: i32,
     query_end: i32,
+    query_index: i32,
     match_start: i32,
     match_end: i32,
     frame: i32,
@@ -603,6 +625,11 @@ fn vec_to_list(mut values: Vec<BlastCompoAlignment>) -> Option<Box<BlastCompoAli
 // ```
 pub fn distinct_alignments_sort(plist: &mut Option<Box<BlastCompoAlignment>>) {
     let mut values = list_to_vec(plist.take());
+    // NCBI reference: ncbi-blast/c++/src/algo/blast/composition_adjustment/redo_alignment.c:220-280
+    // ```c
+    // /* Sort a list of Blast_Compo_Alignment objects, using s_AlignmentCmp
+    //  * comparison function.  The mergesort sorting algorithm is used. */
+    // ```
     values.sort_by(blast_compo_alignment_cmp);
     *plist = vec_to_list(values);
 }
@@ -638,9 +665,9 @@ fn alignment_copy(align: &BlastCompoAlignment) -> Box<BlastCompoAlignment> {
     blast_compo_alignment_new(
         align.score,
         align.matrix_adjust_rule,
-        align.query_index,
         align.query_start,
         align.query_end,
+        align.query_index,
         align.match_start,
         align.match_end,
         align.frame,
@@ -970,10 +997,21 @@ fn windows_from_protein_aligns(
         // }
         // ```
         alignments_rev(&mut window.align);
+
+        // NCBI reference: ncbi-blast/c++/src/algo/blast/composition_adjustment/redo_alignment.c:821-833
+        // ```c
+        // /* shrink to fit */
+        // ...
+        // qsort(windows, *nWindows, sizeof(s_WindowInfo*),
+        //       s_SubjectCompareWindows);
+        // ```
+        //
+        // Protein-path windows stop at `s_AlignmentsRev`; NCBI does not call
+        // `s_DistinctAlignmentsSort` here.
         packed.push(window);
     }
 
-    packed.sort_by(subject_compare_windows);
+    packed.sort_unstable_by(subject_compare_windows);
     Ok(packed)
 }
 
@@ -1203,8 +1241,32 @@ fn find_num_identical(
     subject_seq: &[u8],
     max_shift: usize,
 ) -> usize {
+    // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_kappa.c:1160-1164
+    // ```c
+    // if (!query_seq || !query_hashes || !subject_seq
+    //     || query_len < word_size || subject_len < word_size) {
+    //     return 0;
+    // }
+    // ```
+    //
+    // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_kappa.c:1166-1188
+    // ```c
+    // for (s_pos = 0; s_pos < subject_len - word_size; s_pos++) {
+    //     ...
+    //     for (q_pos = query_from; q_pos < query_len - word_size; q_pos++) {
+    //         if (query_hashes[q_pos] == hash) {
+    //             break;
+    //         }
+    //     }
+    // }
+    // ```
+    //
+    // `s_FindNumIdentical` indexes `query_hashes` only up to
+    // `query_len - word_size - 1`, so a query slice of length `L` needs
+    // exactly `L - word_size` usable hashes here.
+    let required_query_hashes = query_seq.len().saturating_sub(NEAR_IDENTICAL_WORD_SIZE);
     if query_seq.len() < NEAR_IDENTICAL_WORD_SIZE
-        || query_hashes.len() < NEAR_IDENTICAL_WORD_SIZE
+        || query_hashes.len() < required_query_hashes
         || subject_seq.len() < NEAR_IDENTICAL_WORD_SIZE
     {
         return 0;
@@ -1334,16 +1396,32 @@ pub fn test_near_identical(
         return (num_identical as f64) / (align_len as f64) > MIN_FRACTION_NEAR_IDENTICAL;
     }
 
-    let Some(query_words) = query_words else {
-        return false;
+    // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_kappa.c:1322-1333
+    // ```c
+    // num_identical += s_FindNumIdentical(queryData->data + qStart + query_right_len,
+    //                         query_words + qStart + query_right_len,
+    //                         query_len - query_left_len - query_right_len,
+    //                         seqData->data + sStart + subject_right_len,
+    //                         subject_len - subject_left_len - subject_right_len,
+    //                         max_shift);
+    // fraction_identical = (double)num_identical / (double)align_len;
+    // ```
+    //
+    // If the remaining middle slice is shorter than the 8-mer word size,
+    // `s_FindNumIdentical` returns 0 and NCBI still evaluates the final
+    // identity fraction. Do not convert a missing or exhausted hash slice
+    // into an immediate `false`.
+    let query_words = query_words.unwrap_or(&[]);
+    let query_word_start = q_start + query_right_len;
+    let query_word_slice = if query_word_start <= query_words.len() {
+        &query_words[query_word_start..]
+    } else {
+        &[]
     };
-    if q_start + query_right_len >= query_words.len() {
-        return false;
-    }
 
     num_identical += find_num_identical(
         &query_seq[query_right_len..query_seq.len() - query_left_len],
-        &query_words[q_start + query_right_len..],
+        query_word_slice,
         &subject_seq[subject_right_len..subject_seq.len() - subject_left_len],
         NEAR_IDENTICAL_MAX_SHIFT,
     );
@@ -1461,6 +1539,23 @@ pub fn blast_redo_one_match(
             };
 
             if hsp_index == 0 || (subject_maybe_biased && near_identical != old_near_identical) {
+                // NCBI reference: ncbi-blast/c++/src/algo/blast/composition_adjustment/redo_alignment.c:1188-1208
+                // ```c
+                // status = callbacks->get_range(
+                //         matchingSeq,
+                //         &window->subject_range,
+                //         &subject,
+                //         &query_info[query_index].seq,
+                //         &window->query_range,
+                //         &query,
+                //         query_info[query_index].words,
+                //         window->align,
+                //         nearIdenticalStatus,
+                //         compo_adjust_mode,
+                //         FALSE,
+                //         &subject_maybe_biased
+                // );
+                // ```
                 let next_range = (callbacks.get_range)(
                     matching_seq,
                     &window.subject_range,
@@ -1469,6 +1564,7 @@ pub fn blast_redo_one_match(
                     query_info.words.as_deref(),
                     window_align_head,
                     near_identical,
+                    subject_maybe_biased,
                     params,
                 )?;
                 subject_maybe_biased = next_range.subject_maybe_biased;
@@ -1611,9 +1707,9 @@ mod tests {
         blast_compo_alignment_new(
             score,
             EMatrixAdjustRule::DontAdjustMatrix,
-            0,
             q_start,
             q_end,
+            0,
             s_start,
             s_end,
             0,
@@ -1675,7 +1771,7 @@ mod tests {
     }
 
     #[test]
-    fn test_windows_from_protein_aligns_preserves_input_order_within_query() {
+    fn test_windows_from_protein_aligns_preserves_incoming_order_after_reverse_only() {
         let mut aligns = Some(make_align(10, 0, 10, 0, 10, 0));
         if let Some(node) = aligns.as_mut() {
             node.next = Some(make_align(20, 5, 15, 20, 30, 1));
@@ -1812,6 +1908,7 @@ mod tests {
                  _query_words,
                  _align,
                  _should_test_identical,
+                 _subject_maybe_biased,
                  _params| {
                     Ok(BlastRedoRangeResult {
                         query: orig_query.slice_range(query_range),
@@ -1838,9 +1935,9 @@ mod tests {
                     Ok(Some(blast_compo_alignment_new(
                         incoming_align.score,
                         matrix_adjust_rule,
-                        incoming_align.query_index,
                         incoming_align.query_start,
                         incoming_align.query_end,
+                        incoming_align.query_index,
                         incoming_align.match_start,
                         incoming_align.match_end,
                         incoming_align.frame,
@@ -1913,10 +2010,37 @@ mod tests {
 
     #[test]
     fn test_build_query_word_hashes_matches_ncbi_shift_hash() {
-        let query = [1u8, 2, 3, 4, 5, 6, 7, 8, 9];
+        let query = [1u8, 2, 3, 4, 5, 6, 7, 8, 9, 10];
         let hashes = build_query_word_hashes(&query);
+        assert_eq!(hashes.len(), query.len() - NEAR_IDENTICAL_WORD_SIZE + 1);
         assert_eq!(hashes[0], get_hash(&query, NEAR_IDENTICAL_WORD_SIZE));
         assert_eq!(hashes[1], get_hash(&query[1..], NEAR_IDENTICAL_WORD_SIZE));
+        assert_eq!(hashes[2], 0);
+    }
+
+    #[test]
+    fn test_find_num_identical_accepts_short_hash_slice_for_9aa_window() {
+        // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_kappa.c:1160-1188
+        // ```c
+        // if (!query_seq || !query_hashes || !subject_seq
+        //     || query_len < word_size || subject_len < word_size) {
+        //     return 0;
+        // }
+        // for (q_pos = query_from; q_pos < query_len - word_size; q_pos++) {
+        //     if (query_hashes[q_pos] == hash) {
+        //         break;
+        //     }
+        // }
+        // ```
+        //
+        // A 9-aa slice has only two stored 8-mer hashes; NCBI still scans it.
+        let query = [1u8, 3, 4, 5, 6, 7, 8, 9, 10];
+        let hashes = build_query_word_hashes(&query);
+        assert_eq!(hashes.len(), 2);
+        assert_eq!(
+            find_num_identical(&query, &hashes, &query, NEAR_IDENTICAL_MAX_SHIFT),
+            query.len()
+        );
     }
 
     #[test]
@@ -1950,5 +2074,35 @@ mod tests {
             Some(&words),
             &align,
         ));
+    }
+
+    #[test]
+    fn test_test_near_identical_keeps_fraction_check_when_middle_slice_has_no_words() {
+        // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_kappa.c:1314-1333
+        // ```c
+        // if (query_left_len + query_right_len >= query_len
+        //     || subject_left_len + subject_right_len >= subject_len) {
+        //     ...
+        // }
+        // num_identical += s_FindNumIdentical(...);
+        // fraction_identical = (double)num_identical / (double)align_len;
+        // ```
+        //
+        // A short unresolved middle slice still flows to the final fraction
+        // check; NCBI does not return FALSE just because there are no 8-mer
+        // hashes left to inspect.
+        let mut query_residues = vec![1u8; 48];
+        query_residues.extend_from_slice(&[3, 4, 5, 6]);
+        query_residues.extend_from_slice(&vec![1u8; 48]);
+
+        let mut subject_residues = vec![1u8; 48];
+        subject_residues.extend_from_slice(&[7, 8, 9, 10]);
+        subject_residues.extend_from_slice(&vec![1u8; 48]);
+
+        let query = BlastCompoSequenceData::from_ncbistdaa(&query_residues);
+        let subject = BlastCompoSequenceData::from_ncbistdaa(&subject_residues);
+        let align = make_align(96, 0, 100, 0, 100, 0);
+
+        assert!(test_near_identical(&subject, 0, &query, 0, None, &align));
     }
 }

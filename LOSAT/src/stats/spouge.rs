@@ -166,6 +166,66 @@ pub fn blast_spouge_stoe(
     area * k * (-lambda * y).exp() * db_scale_factor
 }
 
+// NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_stat.c:5236-5263
+// ```c
+// BLAST_SpougeEtoS(double e0,
+//                  Blast_KarlinBlk* kbp,
+//                  Blast_GumbelBlk* gbp,
+//                  Int4 m, Int4 n)
+// {
+//     Int4 a=0, b, c;
+//     double e;
+//     double db_scale_factor = (gbp->db_length) ?
+//             (double)gbp->db_length : 1.0;
+//
+//     b = MAX((int)(log(db_scale_factor/e0) / kbp->Lambda), 2);
+//     e = BLAST_SpougeStoE(b, kbp, gbp, m, n);
+//     ...
+// }
+// ```
+pub fn blast_spouge_etos(
+    evalue: f64,
+    kbp: &KarlinParams,
+    gbp: &BlastGumbelBlk,
+    query_length: i32,
+    subject_length: i32,
+) -> i32 {
+    let mut a = 0i32;
+    let db_scale_factor = if gbp.db_length != 0 {
+        gbp.db_length as f64
+    } else {
+        1.0
+    };
+    let e0 = evalue.max(f64::MIN_POSITIVE);
+    let mut b = ((db_scale_factor / e0).ln() / kbp.lambda) as i32;
+    if b < 2 {
+        b = 2;
+    }
+
+    let mut e = blast_spouge_stoe(b, kbp, gbp, query_length, subject_length);
+    if e > e0 {
+        while e > e0 {
+            a = b;
+            b *= 2;
+            e = blast_spouge_stoe(b, kbp, gbp, query_length, subject_length);
+        }
+    } else {
+        a = 0;
+    }
+
+    while b - a > 1 {
+        let c = (a + b) / 2;
+        e = blast_spouge_stoe(c, kbp, gbp, query_length, subject_length);
+        if e > e0 {
+            a = c;
+        } else {
+            b = c;
+        }
+    }
+
+    a
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

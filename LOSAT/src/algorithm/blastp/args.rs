@@ -654,6 +654,15 @@ impl BlastpArgs {
         let window_size = self
             .window_size
             .unwrap_or_else(|| suggested_window_size(matrix));
+        // NCBI reference: /mnt/c/Users/genom/GitHub/ncbi-blast/c++/src/algo/blast/api/blast_advprot_options.cpp:64-67
+        // ```c
+        // void
+        // CBlastAdvancedProteinOptionsHandle::SetQueryOptionDefaults()
+        // {
+        //     CBlastProteinOptionsHandle::SetQueryOptionDefaults();
+        //     SetSegFiltering(false); // disable SEG filtering because of eCompositionMatrixAdjust mode
+        // }
+        // ```
         let seg = self.seg.clone().unwrap_or(BlastpSegSpec::No);
 
         Ok(ResolvedBlastpArgs {

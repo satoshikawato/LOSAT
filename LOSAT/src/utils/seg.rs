@@ -869,22 +869,71 @@ impl SegMasker {
 
         seg_seq(self, seq, 0, &mut segs_inclusive);
 
-        // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_seg.c:2300-2319
+        // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_filter.c:1142-1154
+        // ```c
+        // sparamsp = SegParametersNewAa();
+        // sparamsp->overlaps = TRUE;
+        // status = SeqBufferSeg(sequence, length, offset, sparamsp,
+        //                       seqloc_retval);
+        // ```
+        //
+        // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_seg.c:2125-2149
         // ```c
         // if (sparamsp->overlaps)
         //    s_MergeSegs(seqwin, segs);
+        // ```
+        merge_segs_inclusive(seq.len(), &mut segs_inclusive);
+
+        // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_seg.c:2300-2319
+        // ```c
         // s_SegsToBlastSeqLoc(segs, offset, seg_locs);
         // ```
-        //
-        // Default SEG parameters leave `overlaps == FALSE`, so LOSAT preserves
-        // the original unmerged segments and only mirrors the final list-order
-        // reversal from `s_SegsToBlastSeqLoc`.
         segs_inclusive.reverse();
 
         segs_inclusive
             .into_iter()
             .map(|(b, e)| MaskedInterval::new(b, e.saturating_add(1)))
             .collect()
+    }
+}
+
+// NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_seg.c:2125-2149
+// ```c
+// s_MergeSegs(SSequence* seq, SSeg* segs)
+// {
+//    ...
+//    while (nextseg!=NULL) {
+//       if (seg->begin - nextseg->end - 1 < hilenmin) {
+//          if (seg->end < nextseg->end) seg->end = nextseg->end;
+//          if (seg->begin > nextseg->begin) seg->begin = nextseg->begin;
+//          seg->next = nextseg->next;
+//       } else {
+//          seg = nextseg;
+//       }
+//       nextseg = seg->next;
+//    }
+//    ...
+// }
+// ```
+fn merge_segs_inclusive(seq_len: usize, segs_inclusive: &mut Vec<(usize, usize)>) {
+    if segs_inclusive.is_empty() {
+        return;
+    }
+
+    let max_end = seq_len.saturating_sub(1);
+    segs_inclusive[0].1 = segs_inclusive[0].1.min(max_end);
+
+    let mut index = 0usize;
+    while index + 1 < segs_inclusive.len() {
+        let (seg_begin, seg_end) = segs_inclusive[index];
+        let (next_begin, next_end) = segs_inclusive[index + 1];
+        if seg_begin <= next_end {
+            segs_inclusive[index].0 = seg_begin.min(next_begin);
+            segs_inclusive[index].1 = seg_end.max(next_end);
+            segs_inclusive.remove(index + 1);
+        } else {
+            index += 1;
+        }
     }
 }
 
@@ -1120,10 +1169,7 @@ mod tests {
 
         assert_eq!(
             intervals,
-            vec![
-                MaskedInterval::new(319, 335),
-                MaskedInterval::new(920, 931),
-            ]
+            vec![MaskedInterval::new(319, 335), MaskedInterval::new(920, 931),]
         );
     }
 
@@ -1203,6 +1249,57 @@ mod tests {
 
     // NCBI reference: /home/kawato/micromamba/bin/segmasker
     // Command:
+    // `segmasker -in /tmp/bdv02435_query.faa -outfmt interval`
+    //
+    // `segmasker` interval output is `0-based closed`; Rust stores merged
+    // `MaskedInterval` values as `0-based half-open`.
+    #[test]
+    fn test_mask_sequence_matches_ncbi_segmasker_bdv02435_1_query_defaults() {
+        let fasta = include_str!(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/tests/fasta/AP027131.faa"
+        ));
+        let seq = fasta_sequence_by_id(fasta, "BDV02435.1");
+        let masker = SegMasker::with_params(&SegParams::new(12, 2.2, 2.5));
+
+        let mut intervals = masker.mask_sequence(&seq);
+        intervals.sort_by_key(|interval| interval.start);
+
+        assert_eq!(
+            intervals,
+            vec![
+                MaskedInterval::new(3, 26),
+                MaskedInterval::new(263, 278),
+                MaskedInterval::new(348, 362),
+                MaskedInterval::new(427, 443),
+                MaskedInterval::new(452, 466),
+                MaskedInterval::new(521, 542),
+                MaskedInterval::new(623, 640),
+                MaskedInterval::new(697, 708),
+                MaskedInterval::new(732, 760),
+                MaskedInterval::new(1021, 1036),
+                MaskedInterval::new(1214, 1227),
+                MaskedInterval::new(1273, 1295),
+                MaskedInterval::new(1418, 1431),
+                MaskedInterval::new(1477, 1499),
+                MaskedInterval::new(2489, 2509),
+                MaskedInterval::new(2593, 2613),
+                MaskedInterval::new(2697, 2717),
+                MaskedInterval::new(3814, 3841),
+                MaskedInterval::new(4087, 4107),
+                MaskedInterval::new(4124, 4139),
+                MaskedInterval::new(4142, 4157),
+                MaskedInterval::new(4204, 4224),
+                MaskedInterval::new(4241, 4256),
+                MaskedInterval::new(4347, 4365),
+                MaskedInterval::new(4516, 4533),
+                MaskedInterval::new(4568, 4578),
+            ]
+        );
+    }
+
+    // NCBI reference: /home/kawato/micromamba/bin/segmasker
+    // Command:
     // `segmasker -in /tmp/BDT63134.faa -outfmt interval`
     //
     // `segmasker` interval output is `0-based closed`; Rust stores merged
@@ -1237,5 +1334,107 @@ mod tests {
                 MaskedInterval::new(382, 402),
             ]
         );
+    }
+
+    // NCBI reference: /home/kawato/micromamba/bin/segmasker
+    // Command:
+    // `segmasker -in /tmp/ap_subjects.faa -outfmt interval -window 10 -locut 1.8 -hicut 2.1`
+    //
+    // `segmasker` interval output is `0-based closed`; Rust stores merged
+    // `MaskedInterval` values as `0-based half-open`.
+    #[test]
+    fn test_mask_sequence_matches_ncbi_segmasker_wp_025208654_1() {
+        let fasta = include_str!(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/tests/fasta/NZ_CP006932.faa"
+        ));
+        let seq = fasta_sequence_by_id(fasta, "WP_025208654.1");
+        let masker = SegMasker::with_params(&SegParams::new(10, 1.8, 2.1));
+
+        let mut intervals = masker.mask_sequence(&seq);
+        intervals.sort_by_key(|interval| interval.start);
+
+        assert_eq!(
+            intervals,
+            vec![MaskedInterval::new(137, 156),]
+        );
+    }
+
+    // NCBI reference: /home/kawato/micromamba/bin/segmasker
+    // Command:
+    // `segmasker -in /tmp/ap_subjects.faa -outfmt interval -window 10 -locut 1.8 -hicut 2.1`
+    //
+    // `segmasker` interval output is `0-based closed`; Rust stores merged
+    // `MaskedInterval` values as `0-based half-open`.
+    #[test]
+    fn test_mask_sequence_matches_ncbi_segmasker_wp_025208655_1() {
+        let fasta = include_str!(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/tests/fasta/NZ_CP006932.faa"
+        ));
+        let seq = fasta_sequence_by_id(fasta, "WP_025208655.1");
+        let masker = SegMasker::with_params(&SegParams::new(10, 1.8, 2.1));
+
+        let mut intervals = masker.mask_sequence(&seq);
+        intervals.sort_by_key(|interval| interval.start);
+
+        assert_eq!(
+            intervals,
+            vec![
+                MaskedInterval::new(148, 167),
+                MaskedInterval::new(1270, 1280),
+            ]
+        );
+    }
+
+    // NCBI reference: /home/kawato/micromamba/bin/segmasker
+    // Command:
+    // `segmasker -in /tmp/ap_targets.faa -outfmt interval -window 10 -locut 1.8 -hicut 2.1`
+    //
+    // `segmasker` interval output is `0-based closed`; Rust stores merged
+    // `MaskedInterval` values as `0-based half-open`.
+    #[test]
+    fn test_mask_sequence_matches_ncbi_segmasker_bdv02435_1() {
+        let fasta = include_str!(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/tests/fasta/AP027131.faa"
+        ));
+        let seq = fasta_sequence_by_id(fasta, "BDV02435.1");
+        let masker = SegMasker::with_params(&SegParams::new(10, 1.8, 2.1));
+
+        let mut intervals = masker.mask_sequence(&seq);
+        intervals.sort_by_key(|interval| interval.start);
+
+        assert_eq!(
+            intervals,
+            vec![
+                MaskedInterval::new(8, 19),
+                MaskedInterval::new(174, 183),
+                MaskedInterval::new(629, 640),
+                MaskedInterval::new(697, 708),
+                MaskedInterval::new(908, 918),
+                MaskedInterval::new(1273, 1287),
+                MaskedInterval::new(1477, 1491),
+                MaskedInterval::new(1946, 1956),
+                MaskedInterval::new(4091, 4105),
+                MaskedInterval::new(4208, 4222),
+                MaskedInterval::new(4241, 4256),
+                MaskedInterval::new(4347, 4365),
+                MaskedInterval::new(4568, 4578),
+            ]
+        );
+    }
+
+    // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_seg.c:2125-2149
+    // ```c
+    // if (seg->begin - nextseg->end - 1 < hilenmin) {
+    //     ...
+    // }
+    // ```
+    #[test]
+    fn test_merge_segs_inclusive_matches_ncbi_overlap_merge() {
+        let mut segs = vec![(20, 30), (10, 25), (0, 5)];
+        merge_segs_inclusive(64, &mut segs);
+        assert_eq!(segs, vec![(10, 30), (0, 5)]);
     }
 }

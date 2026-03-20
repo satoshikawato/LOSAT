@@ -661,8 +661,38 @@ pub fn build_ncbi_lookup(
         contexts,
         skipped_seg_mask: _,
     } = prepared;
-    let query_length = i32::try_from(concat_query.len())
-        .expect("NCBI BLAST concatenated query length must fit in Int4");
+    // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_query_info.c:246-250
+    // ```c
+    // Uint4 QueryInfo_GetSeqBufLen(const BlastQueryInfo* qinfo)
+    // {
+    //     BlastContextInfo * cinfo = & qinfo->contexts[qinfo->last_context];
+    //     return cinfo->query_offset + cinfo->query_length + (cinfo->query_length ? 2 : 1);
+    // }
+    // ```
+    //
+    // NCBI reference: ncbi-blast/c++/src/algo/blast/api/blast_setup_cxx.cpp:500-501,654
+    // ```c
+    // int buflen = QueryInfo_GetSeqBufLen(qinfo);
+    // TAutoUint1Ptr buf((Uint1*) calloc(buflen+1, sizeof(Uint1)));
+    // ...
+    // BlastSeqBlkSetSequence(*seqblk, buf.release(), buflen - 2);
+    // ```
+    //
+    // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_util.c:147-160
+    // ```c
+    // seq_blk->sequence = (Uint1*) sequence + 1;
+    // seq_blk->length = seqlen;
+    // ```
+    //
+    // `concat_query` keeps the trailing NULLB so the scan/extension code can
+    // read sentinel bytes just like NCBI's allocated buffer. However
+    // `BLAST_SequenceBlk->length` excludes the final trailing NULLB, so
+    // `lookup.query_length` must stop at the last real residue of the last
+    // context, not at `concat_query.len()`.
+    let query_length = contexts
+        .last()
+        .map(|ctx| ctx.frame_base + ctx.aa_len as i32)
+        .unwrap_or(0);
 
     // Row max for BLOSUM62 over the lookup alphabet.
     // For NCBISTDAA residues, we compute max score against any other residue.
@@ -1309,7 +1339,7 @@ mod tests {
             0,
         );
 
-        assert_eq!(lookup.query_length, 8);
+        assert_eq!(lookup.query_length, 7);
     }
 
     // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_lookup.c:102-128

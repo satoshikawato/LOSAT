@@ -166,6 +166,82 @@ comparisons = [
         "losat_log": "MjPMNV.MlPMNV.losatn.blastn.log", 
         "blast_log": "MjPMNV.MlPMNV.blastn.log"
     },
+    # --- BLASTP ---
+    {
+        "name": "WSSV.PajaWSV", "mode": "BLASTP",
+        "losat_log": "WSSV.PajaWSV.losatp.log",
+        "blast_log": "WSSV.PajaWSV.BLASTP.log"
+    },
+    {
+        "name": "WSSV.SicyWSV", "mode": "BLASTP",
+        "losat_log": "WSSV.SicyWSV.losatp.log",
+        "blast_log": "WSSV.SicyWSV.BLASTP.log"
+    },
+    {
+        "name": "WSSV.CoBV", "mode": "BLASTP",
+        "losat_log": "WSSV.CoBV.losatp.log",
+        "blast_log": "WSSV.CoBV.BLASTP.log"
+    },
+    {
+        "name": "PajaWSV.SicyWSV", "mode": "BLASTP",
+        "losat_log": "PajaWSV.SicyWSV.losatp.log",
+        "blast_log": "PajaWSV.SicyWSV.BLASTP.log"
+    },
+    {
+        "name": "PajaWSV.CoBV", "mode": "BLASTP",
+        "losat_log": "PajaWSV.CoBV.losatp.log",
+        "blast_log": "PajaWSV.CoBV.BLASTP.log"
+    },
+    {
+        "name": "SicyWSV.CoBV", "mode": "BLASTP",
+        "losat_log": "SicyWSV.CoBV.losatp.log",
+        "blast_log": "SicyWSV.CoBV.BLASTP.log"
+    },
+    {
+        "name": "AP027078.AP027131", "mode": "BLASTP",
+        "losat_log": "AP027078.AP027131.losatp.log",
+        "blast_log": "AP027078.AP027131.BLASTP.log"
+    },
+    {
+        "name": "AP027078.AP027132", "mode": "BLASTP",
+        "losat_log": "AP027078.AP027132.losatp.log",
+        "blast_log": "AP027078.AP027132.BLASTP.log"
+    },
+    {
+        "name": "AP027078.AP027133", "mode": "BLASTP",
+        "losat_log": "AP027078.AP027133.losatp.log",
+        "blast_log": "AP027078.AP027133.BLASTP.log"
+    },
+    {
+        "name": "AP027078.NZ_CP006932", "mode": "BLASTP",
+        "losat_log": "AP027078.NZ_CP006932.losatp.log",
+        "blast_log": "AP027078.NZ_CP006932.BLASTP.log"
+    },
+    {
+        "name": "AP027131.AP027132", "mode": "BLASTP",
+        "losat_log": "AP027131.AP027132.losatp.log",
+        "blast_log": "AP027131.AP027132.BLASTP.log"
+    },
+    {
+        "name": "AP027131.AP027133", "mode": "BLASTP",
+        "losat_log": "AP027131.AP027133.losatp.log",
+        "blast_log": "AP027131.AP027133.BLASTP.log"
+    },
+    {
+        "name": "AP027131.NZ_CP006932", "mode": "BLASTP",
+        "losat_log": "AP027131.NZ_CP006932.losatp.log",
+        "blast_log": "AP027131.NZ_CP006932.BLASTP.log"
+    },
+    {
+        "name": "AP027132.AP027133", "mode": "BLASTP",
+        "losat_log": "AP027132.AP027133.losatp.log",
+        "blast_log": "AP027132.AP027133.BLASTP.log"
+    },
+    {
+        "name": "AP027132.NZ_CP006932", "mode": "BLASTP",
+        "losat_log": "AP027132.NZ_CP006932.losatp.log",
+        "blast_log": "AP027132.NZ_CP006932.BLASTP.log"
+    },
 ]
 
 def parse_time(filepath):
@@ -241,6 +317,7 @@ def main():
     CUSTOM_PALETTE = {"LOSAT": "#dd8452", "BLAST+": "#4c72b0"}
 
     # Graph settings
+    mode_order = ["TBLASTX", "Megablast", "BLASTN", "BLASTP"]
     g = sns.catplot(
         data=df, kind="bar",
         y="Task", x="Time (s)", hue="Tool", col="Mode",
@@ -248,7 +325,8 @@ def main():
         sharex=False, sharey=False,
         palette=CUSTOM_PALETTE, # Apply the custom palette
         errorbar=None,
-        col_wrap=3
+        col_wrap=4,
+        col_order=[mode for mode in mode_order if mode in df["Mode"].unique()]
     )
     
     g.despine(left=True)

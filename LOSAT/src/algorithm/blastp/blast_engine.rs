@@ -3949,6 +3949,14 @@ mod tests {
     // return cinfo->query_offset + cinfo->query_length + (cinfo->query_length ? 2 : 1);
     // ```
     //
+    // NCBI reference: ncbi-blast/c++/src/algo/blast/api/blast_setup_cxx.cpp:500-501,654
+    // ```c
+    // int buflen = QueryInfo_GetSeqBufLen(qinfo);
+    // TAutoUint1Ptr buf((Uint1*) calloc(buflen+1, sizeof(Uint1)));
+    // ...
+    // BlastSeqBlkSetSequence(*seqblk, buf.release(), buflen - 2);
+    // ```
+    //
     // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_extend.c:52-61
     // ```c
     // while (diag_array_length < (qlen+window_size))
@@ -3972,10 +3980,10 @@ mod tests {
         let (lookup, _) = build_ncbi_lookup(&queries, 0, &ungapped);
         let (diag_array_size, diag_mask) = compute_diag_table_shape(lookup.query_length, 1);
 
-        assert_eq!(lookup.query_length, 8);
-        assert_eq!(diag_array_size, 16);
-        assert_eq!(diag_mask, 15);
-        assert_eq!(lookup.query_length + 1, 9);
+        assert_eq!(lookup.query_length, 7);
+        assert_eq!(diag_array_size, 8);
+        assert_eq!(diag_mask, 7);
+        assert_eq!(lookup.query_length + 1, 8);
     }
 
     // NCBI reference: /mnt/c/Users/genom/GitHub/ncbi-blast/c++/src/objtools/align_format/format_flags.cpp:39-45

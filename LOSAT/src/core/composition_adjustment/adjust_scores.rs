@@ -9,7 +9,6 @@
 use anyhow::{bail, Result};
 
 use crate::config::ScoringMatrix;
-use crate::core::blast_stat::composition::compute_karlin_params_from_score_probs;
 use crate::utils::matrix::{protein_score_direct, BLASTAA_SIZE};
 
 use super::redo_alignment::{BlastCompoAdjustMode, EMatrixAdjustRule};
@@ -1225,7 +1224,7 @@ pub struct BlastMatrixInfo {
 // } Blast_CompositionWorkspace;
 // ```
 #[derive(Debug, Clone)]
-struct BlastCompositionWorkspace {
+pub(crate) struct BlastCompositionWorkspace {
     mat_b: [[f64; COMPO_NUM_TRUE_AA]; COMPO_NUM_TRUE_AA],
     mat_final: [[f64; COMPO_NUM_TRUE_AA]; COMPO_NUM_TRUE_AA],
     first_standard_freq: [f64; COMPO_NUM_TRUE_AA],
@@ -1247,7 +1246,7 @@ impl BlastCompositionWorkspace {
     //     }
     // }
     // ```
-    fn new_blosum62() -> Self {
+    pub(crate) fn new_blosum62() -> Self {
         Self {
             mat_b: BLOSUM62_JOINT_PROBS,
             mat_final: [[0.0; COMPO_NUM_TRUE_AA]; COMPO_NUM_TRUE_AA],
@@ -2448,8 +2447,8 @@ fn composition_matrix_adjust(
     subject_prob_std: &[f64; COMPO_LARGEST_ALPHABET],
     pseudocounts: i32,
     specified_re: f64,
+    workspace: &mut BlastCompositionWorkspace,
 ) -> Result<Option<AdjustedProteinMatrix>> {
-    let mut workspace = BlastCompositionWorkspace::new_blosum62();
     let mut row_probs = [0.0; COMPO_NUM_TRUE_AA];
     let mut col_probs = [0.0; COMPO_NUM_TRUE_AA];
     gather_letter_probs(&mut row_probs, query_prob_std);
@@ -2556,7 +2555,7 @@ pub fn blast_overall_p_value(p_comp: f64, p_alignment: f64) -> f64 {
 // ```c
 // int Blast_AdjustScores(...);
 // ```
-pub fn blast_adjust_scores(
+pub(crate) fn blast_adjust_scores(
     matrix_info: &BlastMatrixInfo,
     query_composition: &BlastAminoAcidComposition,
     query_length: i32,
@@ -2564,6 +2563,8 @@ pub fn blast_adjust_scores(
     subject_length: i32,
     composition_adjust_mode: BlastCompoAdjustMode,
     composition_test_index: i32,
+    workspace: &mut BlastCompositionWorkspace,
+    calc_lambda: fn(&[f64], i32, i32, f64) -> Result<f64>,
 ) -> Result<Option<BlastAdjustScoresResult>> {
     // NCBI reference: ncbi-blast/c++/src/algo/blast/composition_adjustment/composition_adjustment.c:1433-1439
     // ```c
@@ -2615,6 +2616,7 @@ pub fn blast_adjust_scores(
             &subject_composition.prob,
             20,
             K_FIXED_RE_BLOSUM62,
+            workspace,
         )? {
             // NCBI reference: ncbi-blast/c++/src/algo/blast/composition_adjustment/composition_adjustment.c:1509-1517
             // ```c
@@ -2637,6 +2639,7 @@ pub fn blast_adjust_scores(
         &query_composition.prob,
         &subject_composition.prob,
         composition_test_index > 0,
+        calc_lambda,
     );
     let adjusted_matrix = build_scaled_square_matrix(
         matrix_info,
@@ -2653,33 +2656,64 @@ pub fn blast_adjust_scores(
     }))
 }
 
+// NCBI reference: ncbi-blast/c++/src/algo/blast/composition_adjustment/composition_adjustment.c:1444-1481
+// ```c
+// if (compositionTestIndex > 0) {
+//     ...
+//     Blast_CalcLambdaFullPrecision(&lambdaForPair, &iter_count, scores, ...);
+//     if (iter_count >= kLambdaIterationLimit) {
+//         lambdaForPair = COMPO_MIN_LAMBDA;
+//     }
+//     *pvalueForThisPair = Blast_CompositionPvalue(lambdaForPair);
+// }
+// ```
 fn compute_pair_composition_pvalue(
     permuted_query_probs: &[f64; COMPO_NUM_TRUE_AA],
     permuted_match_probs: &[f64; COMPO_NUM_TRUE_AA],
 ) -> Result<f64> {
-    let (score_probs, obs_min, obs_max) =
-        get_true_score_probs(permuted_query_probs, permuted_match_probs);
-    let params =
-        compute_karlin_params_from_score_probs(&score_probs, obs_min, obs_max, COMPO_MIN_LAMBDA)
-            .map_err(anyhow::Error::msg)?;
-    Ok(blast_composition_pvalue(params.lambda))
+    let mut scores = dense_matrix_new(COMPO_NUM_TRUE_AA, COMPO_NUM_TRUE_AA);
+    for (i, row) in scores.iter_mut().enumerate().take(COMPO_NUM_TRUE_AA) {
+        for (j, value) in row.iter_mut().enumerate().take(COMPO_NUM_TRUE_AA) {
+            *value = protein_score_direct(ScoringMatrix::Blosum62, i, j) as f64;
+        }
+    }
+    let (mut lambda_for_pair, iter_count) = calc_lambda_full_precision_from_scores(
+        &scores,
+        COMPO_NUM_TRUE_AA,
+        permuted_query_probs,
+        permuted_match_probs,
+    );
+    if iter_count >= K_LAMBDA_ITERATION_LIMIT {
+        lambda_for_pair = COMPO_MIN_LAMBDA;
+    }
+    Ok(blast_composition_pvalue(lambda_for_pair))
 }
 
+// NCBI reference: ncbi-blast/c++/src/algo/blast/composition_adjustment/composition_adjustment.c:1105-1155
+// ```c
+// int
+// Blast_CompositionBasedStats(...,
+//                             double (*calc_lambda)(double*,int,int,double),
+//                             int pValueAdjustment)
+// {
+//     ...
+//     correctUngappedLambda =
+//         calc_lambda(scoreArray, obs_min, obs_max, ss->ungappedLambda);
+//     *LambdaRatio = correctUngappedLambda / ss->ungappedLambda;
+//     ...
+// }
+// ```
 fn compute_lambda_ratio(
     matrix_info: &BlastMatrixInfo,
     query_prob: &[f64; COMPO_LARGEST_ALPHABET],
     subject_prob: &[f64; COMPO_LARGEST_ALPHABET],
     pvalue_adjustment: bool,
+    calc_lambda: fn(&[f64], i32, i32, f64) -> Result<f64>,
 ) -> f64 {
     let (score_probs, obs_min, obs_max) =
         get_matrix_score_probs(&matrix_info.start_matrix, query_prob, subject_prob);
-    let ratio = match compute_karlin_params_from_score_probs(
-        &score_probs,
-        obs_min,
-        obs_max,
-        matrix_info.ungapped_lambda,
-    ) {
-        Ok(params) => params.lambda / matrix_info.ungapped_lambda,
+    let ratio = match calc_lambda(&score_probs, obs_min, obs_max, matrix_info.ungapped_lambda) {
+        Ok(lambda) => lambda / matrix_info.ungapped_lambda,
         Err(_) => -1.0,
     };
 
@@ -2688,30 +2722,6 @@ fn compute_lambda_ratio(
         lambda_ratio = lambda_ratio.min(1.0);
     }
     lambda_ratio.max(LAMBDA_RATIO_LOWER_BOUND)
-}
-
-fn get_true_score_probs(
-    query_prob: &[f64; COMPO_NUM_TRUE_AA],
-    subject_prob: &[f64; COMPO_NUM_TRUE_AA],
-) -> (Vec<f64>, i32, i32) {
-    let mut obs_min = i32::MAX;
-    let mut obs_max = i32::MIN;
-    for row in 0..COMPO_NUM_TRUE_AA {
-        for col in 0..COMPO_NUM_TRUE_AA {
-            let score = protein_score_direct(ScoringMatrix::Blosum62, row, col);
-            obs_min = obs_min.min(score);
-            obs_max = obs_max.max(score);
-        }
-    }
-
-    let mut score_prob = vec![0.0; (obs_max - obs_min + 1) as usize];
-    for row in 0..COMPO_NUM_TRUE_AA {
-        for col in 0..COMPO_NUM_TRUE_AA {
-            let score = protein_score_direct(ScoringMatrix::Blosum62, row, col);
-            score_prob[(score - obs_min) as usize] += query_prob[row] * subject_prob[col];
-        }
-    }
-    (score_prob, obs_min, obs_max)
 }
 
 fn build_scaled_square_matrix(
@@ -2870,6 +2880,7 @@ fn blast_choose_matrix_adjust_rule(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::core::blast_stat::composition::compute_lambda_from_score_probs;
 
     #[test]
     fn test_read_aa_composition_ignores_x_and_merges_u_into_c() {
@@ -2912,6 +2923,7 @@ mod tests {
         let matrix_info = build_matrix_info(ScoringMatrix::Blosum62, 0.3176).unwrap();
         let query = read_aa_composition(&[1u8, 1, 1, 4, 4, 4, 17, 17]);
         let subject = read_aa_composition(&[1u8, 4, 17, 1, 4, 17, 1, 4]);
+        let mut workspace = BlastCompositionWorkspace::new_blosum62();
         let adjusted = blast_adjust_scores(
             &matrix_info,
             &query,
@@ -2920,6 +2932,8 @@ mod tests {
             8,
             BlastCompoAdjustMode::CompositionMatrixAdjust,
             0,
+            &mut workspace,
+            compute_lambda_from_score_probs,
         )
         .unwrap()
         .expect("adjusted matrix result");
@@ -2939,6 +2953,7 @@ mod tests {
         let matrix_info = build_matrix_info(ScoringMatrix::Blosum62, 0.3176).unwrap();
         let zero = read_aa_composition(&[21u8, 21, 21]);
         let subject = read_aa_composition(&[1u8, 4, 17]);
+        let mut workspace = BlastCompositionWorkspace::new_blosum62();
         let adjusted = blast_adjust_scores(
             &matrix_info,
             &zero,
@@ -2947,6 +2962,8 @@ mod tests {
             3,
             BlastCompoAdjustMode::CompositionMatrixAdjust,
             0,
+            &mut workspace,
+            compute_lambda_from_score_probs,
         )
         .unwrap();
         assert!(adjusted.is_none());

@@ -1,4 +1,9 @@
+error: unexpected argument '6' found
 
-real	0m1.289s
-user	0m1.203s
-sys	0m0.021s
+Usage: LOSAT blastp [OPTIONS] --query <QUERY> --subject <SUBJECT>
+
+For more information, try '--help'.
+
+real	0m0.061s
+user	0m0.003s
+sys	0m0.000s

@@ -1147,6 +1147,44 @@ mod tests {
 
     // NCBI reference: /home/kawato/micromamba/bin/segmasker
     // Command:
+    // `segmasker -in /tmp/BDT63510.faa -outfmt interval -window 10 -locut 1.8 -hicut 2.1`
+    //
+    // `segmasker` interval output is `0-based closed`; Rust stores merged
+    // `MaskedInterval` values as `0-based half-open`.
+    //
+    // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_kappa.c:1415-1438
+    // ```c
+    // #define BLASTP_MASK_INSTRUCTIONS "S 10 1.8 2.1"
+    // static int
+    // s_DoSegSequenceData(BlastCompo_SequenceData * seqData,
+    //                     EBlastProgramType program,
+    //                     Boolean * pSequenceIsBiased)
+    // ```
+    #[test]
+    fn test_mask_sequence_matches_ncbi_segmasker_bdt63510() {
+        let fasta = include_str!(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/tests/fasta/PajaWSV.faa"
+        ));
+        let seq = fasta_sequence_by_id(fasta, "BDT63510.1");
+        let masker = SegMasker::with_params(&SegParams::new(10, 1.8, 2.1));
+
+        let mut intervals = masker.mask_sequence(&seq);
+        intervals.sort_by_key(|interval| interval.start);
+
+        assert_eq!(
+            intervals,
+            vec![
+                MaskedInterval::new(207, 228),
+                MaskedInterval::new(257, 266),
+                MaskedInterval::new(591, 610),
+                MaskedInterval::new(789, 797),
+            ]
+        );
+    }
+
+    // NCBI reference: /home/kawato/micromamba/bin/segmasker
+    // Command:
     // `segmasker -in - -outfmt interval < tests/fasta/WSSV.faa`
     //
     // `segmasker` interval output is `0-based closed`; Rust stores merged

@@ -232,6 +232,7 @@ pub fn run(args: TblastxArgs) -> Result<()> {
         &query_frames,
         args.threshold,
         &ungapped_params_for_xdrop, // Used for x_dropoff calculation only
+        true,
     );
     t_build_lookup = t_phase_build_lookup.elapsed();
 

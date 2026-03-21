@@ -424,6 +424,7 @@ mod tests {
             aa_len: 5,
             orig_len: 15,
             frame_base: 0,
+            is_valid: true,
             karlin_params: KarlinParams::default(),
         }
     }
@@ -515,6 +516,7 @@ mod tests {
                 aa_len: 5,
                 orig_len: 15,
                 frame_base: 0,
+                is_valid: true,
                 karlin_params: KarlinParams::default(),
             },
             QueryContext {
@@ -526,6 +528,7 @@ mod tests {
                 aa_len: 5,
                 orig_len: 15,
                 frame_base: 100,
+                is_valid: true,
                 karlin_params: KarlinParams::default(),
             },
         ];
@@ -592,6 +595,7 @@ mod tests {
             aa_len: 5,
             orig_len: 15,
             frame_base: 10,
+            is_valid: true,
             karlin_params: KarlinParams::default(),
         }];
         let subject_frames = vec![make_subject_frame()];

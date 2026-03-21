@@ -220,7 +220,13 @@ mod tests {
     fn make_poly_a_lookup() -> BlastAaLookupTable {
         let ungapped = lookup_protein_params_ungapped(ScoringMatrix::Blosum62);
         let queries = vec![vec![make_poly_a_query_frame()]];
-        let (lookup, _) = build_ncbi_lookup(&queries, 0, &ungapped);
+        // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_stat.c:2746-2748
+        // ```c
+        // Boolean check_ideal =
+        //    (program == eBlastTypeBlastx || program == eBlastTypeTblastx ||
+        //     program == eBlastTypeRpsTblastn);
+        // ```
+        let (lookup, _) = build_ncbi_lookup(&queries, 0, &ungapped, true);
         lookup
     }
 

@@ -23,6 +23,18 @@ fn create_test_hit(
     bit_score: f64,
     e_value: f64,
 ) -> Hit {
+    // NCBI reference: ncbi-blast/c++/include/algo/blast/core/blast_hits.h:125-143
+    // ```c
+    // typedef struct BlastHSP {
+    //    Int4 score;
+    //    Int4 num_ident;
+    //    BlastSeg query;
+    //    BlastSeg subject;
+    //    Int4 context;
+    //    ...
+    //    Int4 num_positives;
+    // } BlastHSP;
+    // ```
     Hit {
         identity: 90.0,
         length: (q_end - q_start).max(s_end - s_start),
@@ -34,10 +46,14 @@ fn create_test_hit(
         s_end,
         e_value,
         bit_score,
+        num_ident: q_end - q_start,
+        query_frame: 1,
+        query_length: q_end + 1,
         q_idx,
         s_idx,
         raw_score: ((bit_score * 0.693 + (-0.041_f64).ln()) / 0.267) as i32,
         gap_info: None,
+        num_positives: q_end - q_start,
     }
 }
 

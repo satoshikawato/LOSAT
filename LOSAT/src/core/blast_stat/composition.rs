@@ -5,7 +5,18 @@
 use super::karlin_params::KarlinParams;
 use crate::utils::matrix::{blosum62_score, ncbistdaa, BLASTAA_SIZE};
 
-/// Standard amino acid frequencies (Robinson probabilities)
+/// Standard amino acid frequencies (Robinson probabilities).
+///
+/// NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_stat.c:1794-1816
+/// ```c
+/// static BLAST_LetterProb Robinson_prob[] = {
+///       { 'A', 78.05 },
+///       { 'C', 19.25 },
+///       { 'D', 53.64 },
+///       ...
+///       { 'Y', 32.16 }
+///    };
+/// ```
 const STD_AA_FREQS: [f64; 20] = [
     78.05, 19.25, 53.64, 62.95, 38.56, 73.77, 21.99, 51.42, 57.44, 90.19, 22.43, 44.87, 52.03,
     42.64, 51.29, 71.20, 58.41, 64.41, 13.30, 32.16,
@@ -59,6 +70,27 @@ pub fn compute_aa_composition(seq: &[u8], length: usize) -> [f64; BLASTAA_SIZE] 
             comp[residue] += 1;
         }
     }
+
+    // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_stat.c:1984-2014
+    // ```c
+    // for (lp = str, lpmax = lp+length; lp < lpmax; lp++)
+    // {
+    //    ++rcp->comp[(int)(*lp & mask)];
+    // }
+    // ...
+    // for (index=0; index<sbp->ambig_occupy; index++)
+    // {
+    //    rcp->comp[sbp->ambiguous_res[index]] = 0;
+    // }
+    // ```
+    //
+    // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_setup.c:382-385
+    // ```c
+    // sbp->read_in_matrix = TRUE;
+    // BLAST_ScoreSetAmbigRes(sbp, 'X');
+    // sbp->name = BLAST_StrToUpper(scoring_options->matrix);
+    // ```
+    comp[ncbistdaa::X as usize] = 0;
 
     let sum: u64 = comp.iter().sum();
     let mut freq = [0.0; BLASTAA_SIZE];
@@ -459,5 +491,47 @@ pub fn apply_check_ideal(computed: KarlinParams, ideal: KarlinParams) -> KarlinP
         ideal
     } else {
         computed
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_compute_aa_composition_excludes_x_from_denominator() {
+        // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_setup.c:382-385
+        // ```c
+        // sbp->read_in_matrix = TRUE;
+        // BLAST_ScoreSetAmbigRes(sbp, 'X');
+        // ```
+        let seq = b"\x00\x01\x15\x03\x00";
+        let comp = compute_aa_composition(seq, 3);
+
+        assert!((comp[ncbistdaa::A as usize] - 0.5).abs() < 1.0e-12);
+        assert!((comp[ncbistdaa::C as usize] - 0.5).abs() < 1.0e-12);
+        assert_eq!(comp[ncbistdaa::X as usize], 0.0);
+    }
+
+    #[test]
+    fn test_compute_std_aa_composition_matches_robinson_order() {
+        // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_stat.c:1794-1816
+        // ```c
+        // static BLAST_LetterProb Robinson_prob[] = {
+        //       { 'A', 78.05 },
+        //       { 'C', 19.25 },
+        //       ...
+        //       { 'R', 51.29 },
+        //       ...
+        // };
+        // ```
+        let comp = compute_std_aa_composition();
+        let robinson_sum: f64 = STD_AA_FREQS.iter().sum();
+
+        assert!((comp.iter().sum::<f64>() - 1.0).abs() < 1.0e-12);
+        assert!((comp[ncbistdaa::A as usize] - 78.05 / robinson_sum).abs() < 1.0e-12);
+        assert!((comp[ncbistdaa::C as usize] - 19.25 / robinson_sum).abs() < 1.0e-12);
+        assert!((comp[ncbistdaa::R as usize] - 51.29 / robinson_sum).abs() < 1.0e-12);
+        assert_eq!(comp[ncbistdaa::X as usize], 0.0);
     }
 }

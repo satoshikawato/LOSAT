@@ -27,6 +27,18 @@ pub fn make_hit(
     s_end: usize,
     bit_score: f64,
 ) -> Hit {
+    // NCBI reference: ncbi-blast/c++/include/algo/blast/core/blast_hits.h:125-143
+    // ```c
+    // typedef struct BlastHSP {
+    //    Int4 score;
+    //    Int4 num_ident;
+    //    BlastSeg query;
+    //    BlastSeg subject;
+    //    Int4 context;
+    //    ...
+    //    Int4 num_positives;
+    // } BlastHSP;
+    // ```
     Hit {
         identity: 90.0,
         length: q_end - q_start + 1,
@@ -38,10 +50,14 @@ pub fn make_hit(
         s_end,
         e_value: 1e-10,
         bit_score,
+        num_ident: q_end - q_start + 1,
+        query_frame: 1,
+        query_length: q_end + 1,
         q_idx,
         s_idx,
         raw_score: 100,
         gap_info: None,
+        num_positives: q_end - q_start + 1,
     }
 }
 

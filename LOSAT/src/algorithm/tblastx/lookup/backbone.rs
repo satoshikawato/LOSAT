@@ -281,6 +281,7 @@ fn prepare_lookup_query(
     ideal_params: KarlinParams,
     std_comp: &[f64; LOOKUP_ALPHABET_SIZE],
     word_length: usize,
+    check_ideal: bool,
 ) -> PreparedLookupQuery {
     let mut prepared = PreparedLookupQuery {
         concat_query: Vec::new(),
@@ -309,8 +310,34 @@ fn prepare_lookup_query(
             let score_min = -4;
             let score_max = 11;
             let sfp = compute_score_freq_profile(&ctx_comp, std_comp, score_min, score_max);
-            let computed_params = compute_karlin_params_ungapped(&sfp).unwrap_or(ideal_params);
-            let final_params = apply_check_ideal(computed_params, ideal_params);
+            // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_stat.c:2778-2803
+            // ```c
+            // loop_status = Blast_KarlinBlkUngappedCalc(kbp, sbp->sfp[context]);
+            // if (loop_status) {
+            //     contexts[context].is_valid = FALSE;
+            //     sbp->sfp[context] = Blast_ScoreFreqFree(sbp->sfp[context]);
+            //     sbp->kbp_std[context] = Blast_KarlinBlkFree(sbp->kbp_std[context]);
+            //     continue;
+            // }
+            // if (check_ideal && kbp->Lambda >= sbp->kbp_ideal->Lambda)
+            //     Blast_KarlinBlkCopy(kbp, sbp->kbp_ideal);
+            // ```
+            let (is_valid, final_params) = match compute_karlin_params_ungapped(&sfp) {
+                Ok(computed_params) => {
+                    let final_params = if check_ideal {
+                        apply_check_ideal(computed_params, ideal_params)
+                    } else {
+                        computed_params
+                    };
+                    (true, final_params)
+                }
+                Err(_) => {
+                    // NCBI leaves no valid per-context Karlin block behind on failure.
+                    // Rust stores a placeholder and requires later stages to honor
+                    // `is_valid`, matching `query_info->contexts[context].is_valid`.
+                    (false, KarlinParams::default())
+                }
+            };
 
             prepared.contexts.push(QueryContext {
                 q_idx: q_idx as u32,
@@ -321,6 +348,7 @@ fn prepare_lookup_query(
                 aa_len: frame.aa_len,
                 orig_len: frame.orig_len,
                 frame_base: query_offset,
+                is_valid,
                 karlin_params: final_params,
             });
 
@@ -635,6 +663,7 @@ pub fn build_ncbi_lookup(
     queries: &[Vec<QueryFrame>],
     threshold: i32,
     _karlin_params: &crate::stats::KarlinParams, // Unused - computed per context, kept for API compatibility
+    check_ideal: bool,
 ) -> (BlastAaLookupTable, Vec<QueryContext>) {
     let diag_enabled = diagnostics_enabled();
     let word_length = LOOKUP_WORD_LENGTH;
@@ -652,7 +681,7 @@ pub fn build_ncbi_lookup(
     let std_comp = compute_std_aa_composition();
 
     let mut build_stats = LookupBuildStats::default();
-    let prepared = prepare_lookup_query(queries, ideal_params, &std_comp, word_length);
+    let prepared = prepare_lookup_query(queries, ideal_params, &std_comp, word_length, check_ideal);
     build_stats.skipped_seg_mask = prepared.skipped_seg_mask;
     let PreparedLookupQuery {
         concat_query,
@@ -1158,14 +1187,14 @@ mod tests {
 
     fn build_lookup_for_test(queries: Vec<Vec<QueryFrame>>, threshold: i32) -> BlastAaLookupTable {
         let ungapped = lookup_protein_params_ungapped(ScoringMatrix::Blosum62);
-        let (lookup, _) = build_ncbi_lookup(&queries, threshold, &ungapped);
+        let (lookup, _) = build_ncbi_lookup(&queries, threshold, &ungapped, true);
         lookup
     }
 
     fn prepare_lookup_for_test(queries: Vec<Vec<QueryFrame>>) -> PreparedLookupQuery {
         let ideal_params = lookup_protein_params_ungapped(ScoringMatrix::Blosum62);
         let std_comp = compute_std_aa_composition();
-        prepare_lookup_query(&queries, ideal_params, &std_comp, LOOKUP_WORD_LENGTH)
+        prepare_lookup_query(&queries, ideal_params, &std_comp, LOOKUP_WORD_LENGTH, true)
     }
 
     fn debruijn(alphabet_size: usize, order: usize) -> Vec<u8> {
@@ -1311,6 +1340,27 @@ mod tests {
 
         assert_eq!(prepared.lookup_locations, vec![(0, 1), (4, 5), (7, 9)]);
         assert_eq!(prepared.skipped_seg_mask, 4);
+    }
+
+    // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_stat.c:2778-2789
+    // ```c
+    // loop_status = Blast_KarlinBlkUngappedCalc(kbp, sbp->sfp[context]);
+    // if (loop_status) {
+    //     contexts[context].is_valid = FALSE;
+    //     sbp->sfp[context] = Blast_ScoreFreqFree(sbp->sfp[context]);
+    //     sbp->kbp_std[context] = Blast_KarlinBlkFree(sbp->kbp_std[context]);
+    //     continue;
+    // }
+    // ```
+    #[test]
+    fn test_prepare_lookup_query_marks_failed_ungapped_ka_context_invalid() {
+        let prepared = prepare_lookup_for_test(vec![vec![make_query_frame(
+            vec![ncbistdaa::X, ncbistdaa::X, ncbistdaa::X],
+            Vec::new(),
+        )]]);
+
+        assert_eq!(prepared.contexts.len(), 1);
+        assert!(!prepared.contexts[0].is_valid);
     }
 
     // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_query_info.c:246-250

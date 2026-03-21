@@ -148,6 +148,16 @@ pub struct QueryContext {
     pub aa_len: usize,
     pub orig_len: usize,
     pub frame_base: i32,
+    // NCBI reference: ncbi-blast/c++/include/algo/blast/core/blast_query_info.h:60-69
+    // ```c
+    // typedef struct BlastContextInfo {
+    //     Int4 query_offset;
+    //     Int4 query_length;
+    //     ...
+    //     Boolean is_valid; /**< Determine if this context is valid or not. */
+    // } BlastContextInfo;
+    // ```
+    pub is_valid: bool,
     /// NCBI: kbp[context] - Karlin parameters for this context
     /// Reference: link_hsps.c line 750-752, 866-867
     pub karlin_params: KarlinParams,

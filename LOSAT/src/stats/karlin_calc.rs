@@ -21,31 +21,21 @@ const BLAST_KARLIN_LAMBDA_ITER_DEFAULT: i32 = 17;
 const BLAST_KARLIN_LAMBDA0_DEFAULT: f64 = 0.5;
 const BLAST_KARLIN_K_ITER_MAX: i32 = 100;
 
-/// Standard amino acid frequencies (Robinson probabilities)
-/// Reference: ncbi-blast/c++/src/algo/blast/core/blast_stat.c:1818
-///   STD_AMINO_ACID_FREQS Robinson_prob
-/// These are the standard frequencies used for database composition
+/// Standard amino acid frequencies (Robinson probabilities).
+///
+/// NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_stat.c:1794-1816
+/// ```c
+/// static BLAST_LetterProb Robinson_prob[] = {
+///       { 'A', 78.05 },
+///       { 'C', 19.25 },
+///       { 'D', 53.64 },
+///       ...
+///       { 'Y', 32.16 }
+///    };
+/// ```
 const STD_AA_FREQS: [f64; 20] = [
-    0.07805, // A
-    0.01926, // R
-    0.05364, // N
-    0.06295, // D
-    0.01487, // C
-    0.03374, // Q
-    0.06661, // E
-    0.07129, // G
-    0.02105, // H
-    0.05142, // I
-    0.05744, // L
-    0.05068, // K
-    0.01471, // M
-    0.03965, // F
-    0.04728, // P
-    0.06141, // S
-    0.05506, // T
-    0.01330, // W
-    0.03216, // Y
-    0.06891, // V
+    78.05, 19.25, 53.64, 62.95, 38.56, 73.77, 21.99, 51.42, 57.44, 90.19, 22.43, 44.87, 52.03,
+    42.64, 51.29, 71.20, 58.41, 64.41, 13.30, 32.16,
 ];
 
 // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_stat.c:1863-1879
@@ -61,25 +51,25 @@ const STD_AA_FREQS: [f64; 20] = [
 // ```
 const STD_AA_NCBISTDAA: [u8; 20] = [
     ncbistdaa::A,
-    ncbistdaa::R,
-    ncbistdaa::N,
-    ncbistdaa::D,
     ncbistdaa::C,
-    ncbistdaa::Q,
+    ncbistdaa::D,
     ncbistdaa::E,
+    ncbistdaa::F,
     ncbistdaa::G,
     ncbistdaa::H,
     ncbistdaa::I,
-    ncbistdaa::L,
     ncbistdaa::K,
+    ncbistdaa::L,
     ncbistdaa::M,
-    ncbistdaa::F,
+    ncbistdaa::N,
     ncbistdaa::P,
+    ncbistdaa::Q,
+    ncbistdaa::R,
     ncbistdaa::S,
     ncbistdaa::T,
+    ncbistdaa::V,
     ncbistdaa::W,
     ncbistdaa::Y,
-    ncbistdaa::V,
 ];
 
 /// Compute amino acid composition from sequence
@@ -110,8 +100,24 @@ pub fn compute_aa_composition(seq: &[u8], length: usize) -> [f64; BLASTAA_SIZE] 
     }
 
     // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_stat.c:1984-2014
-    // Ambiguous residues (proteins) are zeroed via Blast_ResCompStr; for BLASTAA
-    // this is just 'X' per blast_setup.c:382-385 (BLAST_ScoreSetAmbigRes).
+    // ```c
+    // for (lp = str, lpmax = lp+length; lp < lpmax; lp++)
+    // {
+    //    ++rcp->comp[(int)(*lp & mask)];
+    // }
+    // ...
+    // for (index=0; index<sbp->ambig_occupy; index++)
+    // {
+    //    rcp->comp[sbp->ambiguous_res[index]] = 0;
+    // }
+    // ```
+    //
+    // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_setup.c:382-385
+    // ```c
+    // sbp->read_in_matrix = TRUE;
+    // BLAST_ScoreSetAmbigRes(sbp, 'X');
+    // sbp->name = BLAST_StrToUpper(scoring_options->matrix);
+    // ```
     comp[ncbistdaa::X as usize] = 0;
 
     // Normalize to frequencies (NCBI Blast_ResFreqResComp)
@@ -707,6 +713,13 @@ mod tests {
 
     #[test]
     fn test_compute_aa_composition() {
+        // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_stat.c:2009-2012
+        // ```c
+        // for (index=0; index<sbp->ambig_occupy; index++)
+        // {
+        //    rcp->comp[sbp->ambiguous_res[index]] = 0;
+        // }
+        // ```
         // Test sequence: "ACDEFGHIKLMNPQRSTVWY" (20 standard AAs in NCBISTDAA encoding)
         // NCBISTDAA: A=1, C=3, D=4, E=5, F=6, G=7, H=8, I=9, K=10, L=11, M=12, N=13, P=14, Q=15, R=16, S=17, T=18, V=19, W=20, Y=22
         // Sequence with sentinels: [0, 1, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 22, 0]
@@ -736,10 +749,40 @@ mod tests {
     }
 
     #[test]
+    fn test_compute_aa_composition_excludes_x_from_denominator() {
+        // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_setup.c:382-385
+        // ```c
+        // sbp->read_in_matrix = TRUE;
+        // BLAST_ScoreSetAmbigRes(sbp, 'X');
+        // ```
+        let seq = b"\x00\x01\x15\x03\x00";
+        let comp = compute_aa_composition(seq, 3);
+
+        assert!((comp[ncbistdaa::A as usize] - 0.5).abs() < 1.0e-12);
+        assert!((comp[ncbistdaa::C as usize] - 0.5).abs() < 1.0e-12);
+        assert_eq!(comp[ncbistdaa::X as usize], 0.0);
+    }
+
+    #[test]
     fn test_compute_std_aa_composition() {
+        // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_stat.c:1794-1816
+        // ```c
+        // static BLAST_LetterProb Robinson_prob[] = {
+        //       { 'A', 78.05 },
+        //       { 'C', 19.25 },
+        //       ...
+        //       { 'R', 51.29 },
+        //       ...
+        // };
+        // ```
         let comp = compute_std_aa_composition();
         let sum: f64 = comp.iter().sum();
         assert!((sum - 1.0).abs() < 1.0e-12);
+        let robinson_sum: f64 = STD_AA_FREQS.iter().sum();
+        assert!((comp[ncbistdaa::A as usize] - 78.05 / robinson_sum).abs() < 1.0e-12);
+        assert!((comp[ncbistdaa::C as usize] - 19.25 / robinson_sum).abs() < 1.0e-12);
+        assert!((comp[ncbistdaa::R as usize] - 51.29 / robinson_sum).abs() < 1.0e-12);
+        assert_eq!(comp[ncbistdaa::X as usize], 0.0);
     }
 
     #[test]

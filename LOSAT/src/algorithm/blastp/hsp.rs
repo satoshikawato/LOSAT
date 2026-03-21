@@ -3,7 +3,6 @@
 //! Reference: ncbi-blast/c++/src/algo/blast/core/blast_hits.c
 
 use std::cmp::Ordering;
-use std::collections::HashMap;
 use std::ffi::c_void;
 
 use crate::common::{GapEditOp, Hit};
@@ -51,10 +50,14 @@ pub(crate) struct BlastpHsp {
     pub q_end: usize,
     pub s_start: usize,
     pub s_end: usize,
+    pub gapped_q_start: i32,
+    pub gapped_s_start: i32,
     pub e_value: f64,
     pub bit_score: f64,
     pub num_ident: usize,
+    pub query_context: i32,
     pub query_frame: i32,
+    pub subject_frame: i32,
     pub query_length: usize,
     pub q_idx: u32,
     pub s_idx: u32,
@@ -107,10 +110,16 @@ impl BlastpHsp {
             q_end,
             s_start,
             s_end,
+            gapped_q_start: i32::try_from(q_start.saturating_sub(1))
+                .expect("NCBI BLAST HSP query.gapped_start must fit in Int4"),
+            gapped_s_start: i32::try_from(s_start.saturating_sub(1))
+                .expect("NCBI BLAST HSP subject.gapped_start must fit in Int4"),
             e_value,
             bit_score,
             num_ident,
+            query_context: i32::try_from(q_idx).expect("NCBI BLAST HSP context must fit in Int4"),
             query_frame,
+            subject_frame: 0,
             query_length,
             q_idx,
             s_idx,
@@ -1264,7 +1273,13 @@ pub(crate) fn purge_hits_with_common_endpoints(hits: Vec<Hit>) -> Vec<Hit> {
 // Int4
 // Blast_HSPListPurgeHSPsWithCommonEndpoints(..., Boolean purge)
 // {
+//    hsp_array = hsp_list->hsp_array;
+//    hsp_count = hsp_list->hspcnt;
+//    qsort(hsp_array, hsp_count, sizeof(BlastHSP*), s_QueryOffsetCompareHSPs);
 //    ...
+//    qsort(hsp_array, hsp_count, sizeof(BlastHSP*), s_QueryEndCompareHSPs);
+//    ...
+//    return hsp_count;
 // }
 // ```
 #[allow(dead_code)]
@@ -1272,30 +1287,7 @@ pub(crate) fn purge_hits_with_common_endpoints_ex(
     hits: Vec<Hit>,
     purge: bool,
 ) -> (Vec<Hit>, usize) {
-    let len = hits.len();
-    if len <= 1 {
-        return (hits, len);
-    }
-
-    let mut subject_groups: HashMap<u32, Vec<Hit>> = HashMap::new();
-    for hit in hits {
-        subject_groups.entry(hit.s_idx).or_default().push(hit);
-    }
-
-    let mut result = Vec::new();
-    let mut total_extra_start = 0usize;
-    for (_subject_idx, group_hits) in subject_groups {
-        let (purged, extra_start) = purge_hits_for_subject_ex(group_hits, purge);
-        let offset = result.len();
-        result.extend(purged);
-        if extra_start > 0 {
-            total_extra_start = offset + extra_start;
-        }
-    }
-    if total_extra_start == 0 {
-        total_extra_start = result.len();
-    }
-    (result, total_extra_start)
+    purge_hits_for_subject_ex(hits, purge)
 }
 
 // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_hits.c:2392-2452
@@ -1651,6 +1643,27 @@ mod tests {
         let purged = purge_hits_with_common_endpoints(vec![short, long]);
         assert_eq!(purged.len(), 1);
         assert_eq!(purged[0].q_end, 80);
+    }
+
+    // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_hits.c:2475-2534
+    // ```c
+    // hsp_array = hsp_list->hsp_array;
+    // hsp_count = hsp_list->hspcnt;
+    // qsort(hsp_array, hsp_count, sizeof(BlastHSP*), s_QueryOffsetCompareHSPs);
+    // ...
+    // qsort(hsp_array, hsp_count, sizeof(BlastHSP*), s_QueryEndCompareHSPs);
+    // ```
+    #[test]
+    fn test_purge_hits_with_common_endpoints_ex_keeps_single_hsp_list_order_without_regrouping() {
+        let left = make_hit(110, 5, 40, 50, 85);
+        let right = make_hit(100, 1, 30, 10, 39);
+
+        let (purged, extra_start) = purge_hits_with_common_endpoints_ex(vec![left, right], false);
+
+        assert_eq!(purged.len(), 2);
+        assert_eq!(extra_start, 2);
+        assert_eq!(purged[0].raw_score, 100);
+        assert_eq!(purged[1].raw_score, 110);
     }
 
     #[test]

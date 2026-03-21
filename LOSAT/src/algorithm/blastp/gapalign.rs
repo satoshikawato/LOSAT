@@ -36,6 +36,11 @@ const SCRIPT_EXTEND_GAP_B: u8 = 0x40;
 // #define MININT INT4_MIN/2
 // ```
 const GAP_MININT: i32 = i32::MIN / 2;
+// NCBI reference: ncbi-blast/c++/include/algo/blast/core/blast_util.h:364
+// ```c
+// #define FENCE_SENTRY 201
+// ```
+const FENCE_SENTRY: u8 = 201;
 // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_gapalign.c:339-360
 // ```c
 // #define MAX_SUBJECT_OFFSET 90000
@@ -1116,6 +1121,7 @@ fn align_ex_protein(
     x_drop: i32,
     reverse: bool,
     scratch: &mut GapAlignScratch,
+    fence_hit: &mut bool,
 ) -> (usize, usize, i32, Vec<GapEditOp>) {
     if len1 == 0 || len2 == 0 {
         return (0, 0, 0, Vec::new());
@@ -1238,6 +1244,20 @@ fn align_ex_protein(
         for b_index in first_b_index..b_size {
             let sc = if b_index < len2 { get_s(b_index) } else { 0 };
             let score_gap_col = scratch.dp_mem[b_index].best_gap;
+            // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_gapalign.c:571-573
+            // ```c
+            // matrix_index = *b_ptr;
+            // if (matrix_index == FENCE_SENTRY) {
+            //     if (fence_hit) {
+            //         *fence_hit = 1;
+            //     }
+            //     break;
+            // }
+            // ```
+            if sc == FENCE_SENTRY {
+                *fence_hit = true;
+                break;
+            }
             let next_score = scratch.dp_mem[b_index].best + score_matrix.score(qc, sc);
 
             let mut script = SCRIPT_SUB;
@@ -1290,7 +1310,12 @@ fn align_ex_protein(
             }
         }
 
-        if first_b_index == b_size {
+        // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_gapalign.c:638-639
+        // ```c
+        // if (first_b_index == b_size || (fence_hit && *fence_hit))
+        //     break;
+        // ```
+        if first_b_index == b_size || *fence_hit {
             break;
         }
 
@@ -1352,6 +1377,15 @@ fn align_ex_protein(
     let mut b_index = b_offset;
     let mut script = SCRIPT_SUB;
     let mut ops_reversed: Vec<(u8, u32)> = Vec::new();
+
+    // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_gapalign.c:686-687
+    // ```c
+    // if (fence_hit && *fence_hit)
+    //     goto done;
+    // ```
+    if *fence_hit {
+        return (a_offset, b_offset, best_score, Vec::new());
+    }
 
     while a_index > 0 || b_index > 0 {
         let row_idx = a_index;
@@ -1461,6 +1495,7 @@ pub(crate) fn blast_gapped_alignment_with_traceback(
     });
 
     let mut scratch = GapAlignScratch::new();
+    let mut fence_hit = false;
 
     // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_gapalign.c:4599-4611
     // ```c
@@ -1481,6 +1516,7 @@ pub(crate) fn blast_gapped_alignment_with_traceback(
         x_drop,
         true,
         &mut scratch,
+        &mut fence_hit,
     );
     let mut query_start = q_start + 1 - left_q;
     let mut subject_start = s_start + 1 - left_s;
@@ -1506,7 +1542,7 @@ pub(crate) fn blast_gapped_alignment_with_traceback(
     // }
     // ```
     let (mut query_stop, mut subject_stop, mut score_right, right_edit_ops) =
-        if q_start < query.len() && s_start < subject.len() {
+        if !fence_hit && q_start < query.len() && s_start < subject.len() {
             let (right_q, right_s, score_right, right_edit_ops) = align_ex_protein(
                 &query[q_start..],
                 &subject[s_start..],
@@ -1518,6 +1554,7 @@ pub(crate) fn blast_gapped_alignment_with_traceback(
                 x_drop,
                 false,
                 &mut scratch,
+                &mut fence_hit,
             );
             (
                 q_start + right_q + 1,
@@ -1927,6 +1964,12 @@ pub(crate) fn reevaluate_blastp_hit_with_traceback(
     gap_extend: i32,
     cutoff_score: i32,
 ) -> bool {
+    // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_hits.c:509-510
+    // ```c
+    // Int2 factor = 1;
+    // const Uint1 kResidueMask = 0x0f;
+    // ```
+    const BLAST_HITS_RESIDUE_MASK: u8 = 0x0f;
     // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_options.c:787-804
     // ```c
     // if (!Blast_ProgramIsNucleotide(program_number)) {/*protein-protein options.*/
@@ -1983,7 +2026,17 @@ pub(crate) fn reevaluate_blastp_hit_with_traceback(
                     if query_pos >= query.len() || subject_pos >= subject.len() {
                         return true;
                     }
-                    sum += protein_score(matrix, query[query_pos], subject[subject_pos]);
+                    // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_hits.c:547-549
+                    // ```c
+                    // if (esp->op_type[index] == eGapAlignSub) {
+                    //     sum += factor*matrix[*query & kResidueMask][*subject];
+                    // }
+                    // ```
+                    sum += protein_score(
+                        matrix,
+                        query[query_pos] & BLAST_HITS_RESIDUE_MASK,
+                        subject[subject_pos],
+                    );
                     query_pos += 1;
                     subject_pos += 1;
                     op_index += 1;
@@ -2503,6 +2556,52 @@ mod tests {
         assert_eq!(hit.gap_info, Some(vec![GapEditOp::Sub(2)]));
     }
 
+    // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_hits.c:547-549
+    // ```c
+    // if (esp->op_type[index] == eGapAlignSub) {
+    //     sum += factor*matrix[*query & kResidueMask][*subject];
+    // }
+    // ```
+    #[test]
+    fn test_reevaluate_blastp_hit_masks_query_residue_with_ncbi_k_residue_mask() {
+        use crate::utils::matrix::ncbistdaa;
+
+        let matrix = ScoringMatrix::Blosum62;
+        let query = [ncbistdaa::S];
+        let subject = [ncbistdaa::S];
+        let mut hit = Hit {
+            identity: 0.0,
+            length: 1,
+            mismatch: 0,
+            gapopen: 0,
+            q_start: 1,
+            q_end: 1,
+            s_start: 1,
+            s_end: 1,
+            e_value: 0.0,
+            bit_score: 0.0,
+            num_ident: 0,
+            query_frame: 0,
+            query_length: 1,
+            q_idx: 0,
+            s_idx: 0,
+            raw_score: 0,
+            gap_info: Some(vec![GapEditOp::Sub(1)]),
+            num_positives: 0,
+        };
+
+        let delete = reevaluate_blastp_hit_with_traceback(
+            &mut hit, &query, &query, &subject, matrix, 11, 1, -10,
+        );
+
+        assert!(!delete);
+        assert_eq!(
+            hit.raw_score,
+            protein_score(matrix, ncbistdaa::S & 0x0f, ncbistdaa::S)
+        );
+        assert_eq!(hit.num_ident, 1);
+    }
+
     #[test]
     fn test_traceback_keeps_seed_when_start_is_last_residue() {
         let query = [1u8, 2, 3];
@@ -2685,5 +2784,239 @@ mod tests {
         );
 
         assert_eq!(aligned.score, rescored);
+    }
+
+    // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_kappa.c:1902-1945
+    // ```c
+    // q_start = hsp->query.gapped_start - query_range->begin;
+    // s_start = hsp->subject.gapped_start - subject_range->begin;
+    // status = BLAST_GappedAlignmentWithTraceback(..., q_start, s_start, ...);
+    // ```
+    //
+    // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_gapalign.c:4549-4715
+    // ```c
+    // Int2 BLAST_GappedAlignmentWithTraceback(...);
+    // ```
+    #[test]
+    #[ignore = "diagnostic start scan for the residual WSSV/PajaWSV CBS=2 traceback diff"]
+    fn test_debug_traceback_start_scan_wssv_488_vs_bdt63510() {
+        fn push_aligned_op(edit_script: &mut Vec<GapEditOp>, op: GapEditOp) {
+            match (edit_script.last_mut(), op) {
+                (Some(GapEditOp::Sub(lhs)), GapEditOp::Sub(rhs))
+                | (Some(GapEditOp::Del(lhs)), GapEditOp::Del(rhs))
+                | (Some(GapEditOp::Ins(lhs)), GapEditOp::Ins(rhs)) => *lhs += rhs,
+                (_, op) => edit_script.push(op),
+            }
+        }
+
+        // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_hits.c:523-550
+        // ```c
+        // if (esp->op_type[index] == eGapAlignSub) {
+        //     sum += factor*matrix[*query & kResidueMask][*subject];
+        // } else if (esp->op_type[index] == eGapAlignDel) {
+        //     sum -= gap_open + gap_extend * esp->num[index];
+        // } else if (esp->op_type[index] == eGapAlignIns) {
+        //     sum -= gap_open + gap_extend * esp->num[index];
+        // }
+        // ```
+        fn edit_script_from_aligned_strings(
+            query_aln: &str,
+            subject_aln: &str,
+        ) -> Vec<GapEditOp> {
+            let mut edit_script = Vec::new();
+            for (q, s) in query_aln.bytes().zip(subject_aln.bytes()) {
+                match (q == b'-', s == b'-') {
+                    (false, false) => push_aligned_op(&mut edit_script, GapEditOp::Sub(1)),
+                    (true, false) => push_aligned_op(&mut edit_script, GapEditOp::Del(1)),
+                    (false, true) => push_aligned_op(&mut edit_script, GapEditOp::Ins(1)),
+                    (true, true) => unreachable!("pairwise alignment cannot gap both rows"),
+                }
+            }
+            edit_script
+        }
+
+        let query_fasta = fs::read_to_string("tests/fasta/WSSV.faa").expect("query fasta");
+        let subject_fasta = fs::read_to_string("tests/fasta/PajaWSV.faa").expect("subject fasta");
+        let query = fasta_sequence_by_id(&query_fasta, "YP_009220488.1");
+        let subject = mask_subject_sequence(&fasta_sequence_by_id(&subject_fasta, "BDT63510.1"));
+
+        let matrix_info = build_matrix_info(ScoringMatrix::Blosum62, 0.3176 / 32.0).unwrap();
+        let query_composition = read_aa_composition(&query);
+        let subject_composition = read_aa_composition(&subject);
+        let adjusted = blast_adjust_scores(
+            &matrix_info,
+            &query_composition,
+            query.len() as i32,
+            &subject_composition,
+            subject.len() as i32,
+            BlastCompoAdjustMode::CompositionMatrixAdjust,
+            0,
+        )
+        .unwrap()
+        .expect("adjusted matrix");
+
+        let pairwise =
+            fs::read_to_string("tests/blast_out/blastp_pairwise/WSSV.PajaWSV.blastp.out")
+                .expect("pairwise reference");
+        let mut in_target_query = false;
+        let mut in_target_subject = false;
+        let mut query_aln = String::new();
+        let mut subject_aln = String::new();
+        for line in pairwise.lines() {
+            if line.starts_with("Query= ") {
+                in_target_query = line.contains("YP_009220488.1");
+                in_target_subject = false;
+                continue;
+            }
+            if !in_target_query {
+                continue;
+            }
+            if line.starts_with("> ") {
+                in_target_subject = line.contains("BDT63510.1");
+                continue;
+            }
+            if !in_target_subject {
+                continue;
+            }
+            if line.starts_with("Query") {
+                query_aln.push_str(
+                    line.split_whitespace()
+                        .nth(2)
+                        .expect("pairwise query aligned chunk"),
+                );
+            } else if line.starts_with("Sbjct") {
+                subject_aln.push_str(
+                    line.split_whitespace()
+                        .nth(2)
+                        .expect("pairwise subject aligned chunk"),
+                );
+            } else if !query_aln.is_empty() && line.starts_with("Lambda") {
+                break;
+            }
+        }
+
+        let ncbi_edit_script = edit_script_from_aligned_strings(&query_aln, &subject_aln);
+        let ncbi_alignment_score = score_edit_script_local_alignment(
+            &query,
+            &subject,
+            78,
+            0,
+            &ncbi_edit_script,
+            BlastpScoreMatrix::Adjusted(&adjusted.adjusted_matrix),
+            11 * 32,
+            32,
+        );
+        println!("ncbi_alignment_score={ncbi_alignment_score}");
+
+        let mut best = None;
+        for s_start in 0..665usize {
+            let q_start = s_start + 78;
+            if q_start >= query.len() || s_start >= subject.len() {
+                continue;
+            }
+            let Some(aligned) = blast_gapped_alignment_with_traceback(
+                &query,
+                &subject,
+                q_start,
+                s_start,
+                ScoringMatrix::Blosum62,
+                Some(&adjusted.adjusted_matrix),
+                11 * 32,
+                32,
+                100_000,
+            ) else {
+                continue;
+            };
+            if best
+                .as_ref()
+                .is_none_or(|(score, _, _, _, _, _, _)| aligned.score > *score)
+            {
+                best = Some((
+                    aligned.score,
+                    q_start,
+                    s_start,
+                    aligned.query_start,
+                    aligned.query_stop,
+                    aligned.subject_start,
+                    aligned.subject_stop,
+                ));
+            }
+            if aligned.score == 1532 {
+                println!(
+                    "score=1532 q_start={} s_start={} q={}..{} s={}..{}",
+                    q_start,
+                    s_start,
+                    aligned.query_start,
+                    aligned.query_stop,
+                    aligned.subject_start,
+                    aligned.subject_stop
+                );
+            }
+        }
+
+        println!("best={best:?}");
+        panic!("debug scan complete");
+    }
+
+    // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_gapalign.c:571-573
+    // ```c
+    // matrix_index = *b_ptr;
+    // if (matrix_index == FENCE_SENTRY) {
+    //     if (fence_hit) {
+    //         *fence_hit = 1;
+    //     }
+    //     break;
+    // }
+    // ```
+    #[test]
+    fn test_align_ex_protein_sets_fence_hit_on_ncbi_fence_sentry() {
+        let query = [1u8, 1, 1, 1];
+        let subject = [1u8, FENCE_SENTRY, 1, 1];
+        let mut scratch = GapAlignScratch::new();
+        let mut fence_hit = false;
+
+        let (_a_offset, _b_offset, score, edit_ops) = align_ex_protein(
+            &query,
+            &subject,
+            3,
+            3,
+            BlastpScoreMatrix::Standard(ScoringMatrix::Blosum62),
+            11,
+            1,
+            18,
+            false,
+            &mut scratch,
+            &mut fence_hit,
+        );
+
+        assert!(fence_hit);
+        assert_eq!(score, 0);
+        assert!(edit_ops.is_empty());
+    }
+
+    // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_gapalign.c:4620-4624
+    // ```c
+    // if ((! (fence_hit && *fence_hit)) &&
+    //     (q_start < q_length) &&
+    //     (s_start < s_length)) {
+    // ```
+    #[test]
+    fn test_blast_gapped_alignment_with_traceback_skips_right_extension_after_left_fence_hit() {
+        let query = [1u8, 1, 1, 1];
+        let subject = [1u8, 1, FENCE_SENTRY, 1];
+
+        let result = blast_gapped_alignment_with_traceback(
+            &query,
+            &subject,
+            2,
+            2,
+            ScoringMatrix::Blosum62,
+            None,
+            11,
+            1,
+            18,
+        );
+
+        assert!(result.is_none());
     }
 }

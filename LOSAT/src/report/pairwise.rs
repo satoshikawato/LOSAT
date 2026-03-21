@@ -7,6 +7,7 @@
 use super::outfmt6::{format_bitscore_ncbi, format_evalue_ncbi, ReportContext};
 use crate::common::Hit;
 use crate::config::ScoringMatrix;
+use crate::stats::{BlastGumbelBlk, KarlinParams};
 use crate::utils::matrix::{aa_char_to_ncbistdaa, protein_score};
 use std::io::{self, Write};
 use std::sync::Arc;
@@ -87,6 +88,60 @@ impl From<Hit> for PairwiseHit {
             subject_title: None,
         }
     }
+}
+
+/// NCBI BLASTP pairwise per-query ancillary data.
+///
+/// NCBI reference: /mnt/c/Users/genom/GitHub/ncbi-blast/c++/src/algo/blast/api/blast_results.cpp:72-115
+/// ```c
+/// CBlastAncillaryData::CBlastAncillaryData(EBlastProgramType program_type,
+///                     int query_number,
+///                     const BlastScoreBlk *sbp,
+///                     const BlastQueryInfo *query_info)
+/// {
+///     ...
+///     m_SearchSpace = ctx->eff_searchsp;
+///     ...
+///     s_InitializeKarlinBlk(sbp->kbp_std[ctx_index], &m_UngappedKarlinBlk);
+/// }
+/// ```
+#[derive(Debug, Clone)]
+pub struct BlastpPairwiseQuery {
+    pub query_name: String,
+    pub query_length: usize,
+    pub ungapped_karlin: KarlinParams,
+    pub effective_search_space: i64,
+}
+
+/// NCBI BLASTP pairwise run-level footer/header data.
+///
+/// NCBI reference: /mnt/c/Users/genom/GitHub/ncbi-blast/c++/src/algo/blast/format/blast_format.cpp:2248-2285
+/// ```c
+/// if ( !m_IsBl2Seq || m_IsDbScan) {
+///     CBlastFormatUtil::PrintDbReport(m_DbInfo, kFormatLineLength,
+///                                     m_Outfile, false);
+/// }
+/// ...
+/// m_Outfile << "\n\nMatrix: " << options.GetMatrixName() << "\n";
+/// ...
+/// m_Outfile << "Neighboring words threshold: "
+///           << options.GetWordThreshold() << "\n";
+/// m_Outfile << "Window for multiple hits: "
+///           << options.GetWindowSize() << "\n";
+/// ```
+#[derive(Debug, Clone)]
+pub struct BlastpPairwiseReport {
+    pub version: String,
+    pub database_name: String,
+    pub database_num_sequences: usize,
+    pub database_total_letters: usize,
+    pub matrix_name: String,
+    pub gap_open: i32,
+    pub gap_extend: i32,
+    pub word_threshold: i32,
+    pub window_size: i32,
+    pub gapped_karlin: KarlinParams,
+    pub gumbel: BlastGumbelBlk,
 }
 
 // =============================================================================
@@ -285,9 +340,26 @@ fn write_alignment_with_sequences<W: Write>(
     let q_chars: Vec<char> = query_seq.chars().collect();
     let s_chars: Vec<char> = subject_seq.chars().collect();
 
-    // Calculate position width for formatting
-    let max_pos = hit.q_end.max(hit.s_end);
-    let pos_width = format!("{}", max_pos).len().max(4);
+    // NCBI reference: /mnt/c/Users/genom/GitHub/ncbi-blast/c++/src/objtools/align_format/showalign.cpp:96-98
+    // ```c
+    // static const int k_IdStartMargin = 2;
+    // static const int k_SeqStopMargin = 2;
+    // static const int k_StartSequenceMargin = 2;
+    // ```
+    //
+    // NCBI reference: /mnt/c/Users/genom/GitHub/ncbi-blast/c++/src/objtools/align_format/showalign.cpp:1600-1625
+    // ```c
+    // CAlignFormatUtil::AddSpace(out, alnRoInfo->maxIdLen-alnRoInfo->seqidArray[row].size()
+    //                            + k_IdStartMargin);
+    // out << start;
+    // CAlignFormatUtil::AddSpace(out, alnRoInfo->maxStartLen-startLen + k_StartSequenceMargin);
+    // ...
+    // CAlignFormatUtil::AddSpace(out, k_SeqStopMargin);
+    // out << end;
+    // ```
+    let max_pos = hit.q_start.max(hit.q_end).max(hit.s_start).max(hit.s_end);
+    let max_start_len = format!("{max_pos}").len();
+    let max_id_len = "Query".len().max("Sbjct".len());
 
     let mut q_pos = hit.q_start;
     let mut s_pos = hit.s_start;
@@ -320,34 +392,24 @@ fn write_alignment_with_sequences<W: Write>(
         let q_end_pos = q_pos + q_non_gap.saturating_sub(1);
         let s_end_pos = s_pos + s_non_gap.saturating_sub(1);
 
-        // Query line
-        writeln!(
-            writer,
-            "Query  {:>width$}  {}  {}",
-            q_pos,
-            chunk_q,
-            q_end_pos,
-            width = pos_width
-        )?;
+        write!(writer, "Query")?;
+        write_spaces(writer, max_id_len - "Query".len() + 2)?;
+        write!(writer, "{}", q_pos)?;
+        write_spaces(writer, max_start_len - digit_count(q_pos) + 2)?;
+        write!(writer, "{}", chunk_q)?;
+        write_spaces(writer, 2)?;
+        writeln!(writer, "{}", q_end_pos)?;
 
-        // Middle line (identity markers)
-        writeln!(
-            writer,
-            "       {:>width$}  {}",
-            "",
-            middle,
-            width = pos_width
-        )?;
+        write_spaces(writer, max_id_len + 2 + max_start_len + 2)?;
+        writeln!(writer, "{}", middle)?;
 
-        // Subject line
-        writeln!(
-            writer,
-            "Sbjct  {:>width$}  {}  {}",
-            s_pos,
-            chunk_s,
-            s_end_pos,
-            width = pos_width
-        )?;
+        write!(writer, "Sbjct")?;
+        write_spaces(writer, max_id_len - "Sbjct".len() + 2)?;
+        write!(writer, "{}", s_pos)?;
+        write_spaces(writer, max_start_len - digit_count(s_pos) + 2)?;
+        write!(writer, "{}", chunk_s)?;
+        write_spaces(writer, 2)?;
+        writeln!(writer, "{}", s_end_pos)?;
 
         writeln!(writer)?;
 
@@ -466,6 +528,427 @@ fn write_subject_summary_table<W: Write>(
     }
     writeln!(writer)?;
     Ok(())
+}
+
+#[inline]
+fn digit_count(value: usize) -> usize {
+    value.to_string().len()
+}
+
+#[inline]
+fn write_spaces<W: Write>(writer: &mut W, count: usize) -> io::Result<()> {
+    for _ in 0..count {
+        writer.write_all(b" ")?;
+    }
+    Ok(())
+}
+
+#[inline]
+fn format_count_with_commas(value: i64) -> String {
+    let digits = value.to_string();
+    let mut formatted = String::with_capacity(digits.len() + digits.len() / 3);
+    let len = digits.len();
+    for (index, ch) in digits.chars().enumerate() {
+        if index > 0 && (len - index) % 3 == 0 {
+            formatted.push(',');
+        }
+        formatted.push(ch);
+    }
+    formatted
+}
+
+#[inline]
+fn ensure_trailing_period(text: &str) -> String {
+    if text.ends_with('.') {
+        text.to_string()
+    } else {
+        format!("{text}.")
+    }
+}
+
+// NCBI reference: /mnt/c/Users/genom/GitHub/ncbi-blast/c++/src/objtools/align_format/align_format_util.cpp:581-613
+// ```c
+// if (gapped) {
+//     out << "Gapped" << "\n";
+// }
+// out << "Lambda      K        H";
+// if (gbp) {
+//     if (gapped) {
+//         out << "        a         alpha    sigma";
+//     } else {
+//         out << "        a         alpha";
+//     }
+// }
+// ...
+// sprintf(buffer, "%#8.3g ", lambda);
+// ```
+fn format_ncbi_ka_value(value: f64) -> String {
+    if value == 0.0 {
+        return "0.00".to_string();
+    }
+
+    let abs = value.abs();
+    let exponent = abs.log10().floor() as i32;
+    if exponent <= -5 || exponent >= 3 {
+        return format!("{value:.2e}");
+    }
+
+    let decimals = usize::try_from((2 - exponent).max(0)).unwrap_or(0);
+    let mut formatted = format!("{value:.prec$}", prec = decimals);
+    if !formatted.contains('.') {
+        formatted.push('.');
+    }
+    formatted
+}
+
+#[inline]
+fn write_ncbi_ka_field<W: Write>(writer: &mut W, value: f64) -> io::Result<()> {
+    write!(writer, "{:>8} ", format_ncbi_ka_value(value))
+}
+
+// NCBI reference: /mnt/c/Users/genom/GitHub/ncbi-blast/c++/src/algo/blast/format/blastfmtutil.cpp:73-111
+// ```c
+// if (m_Program == "psiblast" || m_Program == "blastp") {
+//     CBlastFormatUtil::BlastPrintReference(..., CReference::eCompBasedStats, ...);
+// }
+// ```
+//
+// NCBI reference: /mnt/c/Users/genom/GitHub/ncbi-blast/c++/src/algo/blast/api/version.cpp:46-69
+// ```c
+// "Stephen F. Altschul, Thomas L. Madden, Alejandro A. Schaffer, ..."
+// "Alejandro A. Schaffer, L. Aravind, Thomas L. Madden, ..."
+// ```
+fn write_blastp_pairwise_intro<W: Write>(writer: &mut W, version: &str) -> io::Result<()> {
+    writeln!(writer, "BLASTP {}", version)?;
+    writeln!(writer)?;
+    writeln!(writer)?;
+    writeln!(
+        writer,
+        "Reference: Stephen F. Altschul, Thomas L. Madden, Alejandro A."
+    )?;
+    writeln!(
+        writer,
+        "Schaffer, Jinghui Zhang, Zheng Zhang, Webb Miller, and David J."
+    )?;
+    writeln!(
+        writer,
+        "Lipman (1997), \"Gapped BLAST and PSI-BLAST: a new generation of"
+    )?;
+    writeln!(
+        writer,
+        "protein database search programs\", Nucleic Acids Res. 25:3389-3402."
+    )?;
+    writeln!(writer)?;
+    writeln!(writer)?;
+    writeln!(
+        writer,
+        "Reference for composition-based statistics: Alejandro A. Schaffer,"
+    )?;
+    writeln!(
+        writer,
+        "L. Aravind, Thomas L. Madden, Sergei Shavirin, John L. Spouge, Yuri"
+    )?;
+    writeln!(
+        writer,
+        "I. Wolf, Eugene V. Koonin, and Stephen F. Altschul (2001),"
+    )?;
+    writeln!(
+        writer,
+        "\"Improving the accuracy of PSI-BLAST protein database searches with"
+    )?;
+    writeln!(
+        writer,
+        "composition-based statistics and other refinements\", Nucleic Acids"
+    )?;
+    writeln!(writer, "Res. 29:2994-3005.")?;
+    writeln!(writer)?;
+    writeln!(writer)?;
+    writeln!(writer)?;
+    Ok(())
+}
+
+// NCBI reference: /mnt/c/Users/genom/GitHub/ncbi-blast/c++/src/algo/blast/format/blastfmtutil.cpp:125-138
+// ```c
+// string dbString = (html) ? "<b>Database:</b> " : "Database: ";
+// str << dbString << definition_line << endl;
+// ...
+// out << "           " << NStr::IntToString(nNumSeqs,NStr::fWithCommas)
+//     << " sequences; " << NStr::UInt8ToString(nTotalLength,NStr::fWithCommas)
+//     << " total letters" << endl;
+// ```
+fn write_blastp_database_header<W: Write>(
+    writer: &mut W,
+    database_name: &str,
+    database_num_sequences: usize,
+    database_total_letters: usize,
+) -> io::Result<()> {
+    writeln!(writer, "Database: {}", ensure_trailing_period(database_name))?;
+    writeln!(
+        writer,
+        "           {} sequences; {} total letters",
+        format_count_with_commas(i64::try_from(database_num_sequences).unwrap_or(0)),
+        format_count_with_commas(i64::try_from(database_total_letters).unwrap_or(0))
+    )?;
+    writeln!(writer)?;
+    writeln!(writer)?;
+    writeln!(writer)?;
+    Ok(())
+}
+
+// NCBI reference: /mnt/c/Users/genom/GitHub/ncbi-blast/c++/src/objtools/align_format/align_format_util.cpp:712-746
+// ```c
+// out << label << "= ";
+// ...
+// out << "\nLength=";
+// out << cbs.GetInst().GetLength() <<"\n";
+// ```
+fn write_blastp_query_header<W: Write>(
+    writer: &mut W,
+    query_name: &str,
+    query_length: usize,
+) -> io::Result<()> {
+    writeln!(writer, "Query= {}", query_name)?;
+    writeln!(writer)?;
+    writeln!(writer, "Length={}", query_length)?;
+    writeln!(writer)?;
+    Ok(())
+}
+
+// NCBI reference: /mnt/c/Users/genom/GitHub/ncbi-blast/c++/src/algo/blast/format/blast_format.cpp:1510-1514
+// ```c
+// m_Outfile << "\n\n"
+//           << "***** " << CBlastFormatUtil::kNoHitsFound << " *****" << "\n"
+//           << "\n\n";
+// ```
+fn write_no_hits_found<W: Write>(writer: &mut W) -> io::Result<()> {
+    writeln!(writer)?;
+    writeln!(writer, "***** No hits found *****")?;
+    writeln!(writer)?;
+    writeln!(writer)?;
+    Ok(())
+}
+
+// NCBI reference: /mnt/c/Users/genom/GitHub/ncbi-blast/c++/src/algo/blast/format/blast_format.cpp:445-477
+// ```c
+// m_Outfile << NcbiEndl;
+// if (kbp_ungap) {
+//     CBlastFormatUtil::PrintKAParameters(..., false, gbp);
+// }
+// ...
+// if (kbp_gap) {
+//     CBlastFormatUtil::PrintKAParameters(..., true, gbp);
+// }
+// m_Outfile << "\n";
+// m_Outfile << "Effective search space used: "
+//           << summary.GetSearchSpace() << "\n";
+// ```
+fn write_blastp_query_footer<W: Write>(
+    writer: &mut W,
+    ungapped_karlin: KarlinParams,
+    gapped_karlin: KarlinParams,
+    gumbel: BlastGumbelBlk,
+    effective_search_space: i64,
+) -> io::Result<()> {
+    writeln!(writer)?;
+    writeln!(writer, "Lambda      K        H        a         alpha")?;
+    write_ncbi_ka_field(writer, ungapped_karlin.lambda)?;
+    write_ncbi_ka_field(writer, ungapped_karlin.k)?;
+    write_ncbi_ka_field(writer, ungapped_karlin.h)?;
+    write_ncbi_ka_field(writer, gumbel.a_un)?;
+    write_ncbi_ka_field(writer, gumbel.alpha_un)?;
+    writeln!(writer)?;
+    writeln!(writer)?;
+    writeln!(writer, "Gapped")?;
+    writeln!(writer, "Lambda      K        H        a         alpha    sigma")?;
+    write_ncbi_ka_field(writer, gapped_karlin.lambda)?;
+    write_ncbi_ka_field(writer, gapped_karlin.k)?;
+    write_ncbi_ka_field(writer, gapped_karlin.h)?;
+    write_ncbi_ka_field(writer, gumbel.a)?;
+    write_ncbi_ka_field(writer, gumbel.alpha)?;
+    write_ncbi_ka_field(writer, gumbel.sigma)?;
+    writeln!(writer)?;
+    writeln!(writer)?;
+    writeln!(
+        writer,
+        "Effective search space used: {}",
+        effective_search_space
+    )?;
+    writeln!(writer)?;
+    writeln!(writer)?;
+    Ok(())
+}
+
+// NCBI reference: /mnt/c/Users/genom/GitHub/ncbi-blast/c++/src/objtools/align_format/align_format_util.cpp:503-579
+// ```c
+// out << "  Database: ";
+// ...
+// out << "  Number of letters in database: ";
+// out << NStr::Int8ToString(dbinfo->total_length, NStr::fWithCommas) << "\n";
+// out << "  Number of sequences in database:  ";
+// out << NStr::IntToString(dbinfo->number_seqs, NStr::fWithCommas) << "\n";
+// ```
+//
+// NCBI reference: /mnt/c/Users/genom/GitHub/ncbi-blast/c++/src/algo/blast/format/blast_format.cpp:2258-2285
+// ```c
+// m_Outfile << "\n\nMatrix: " << options.GetMatrixName() << "\n";
+// ...
+// m_Outfile << "Gap Penalties: Existence: "
+//         << options.GetGapOpeningCost() << ", Extension: "
+//         << gap_extension << "\n";
+// ...
+// m_Outfile << "Neighboring words threshold: "
+//         << options.GetWordThreshold() << "\n";
+// m_Outfile << "Window for multiple hits: "
+//         << options.GetWindowSize() << "\n";
+// ```
+fn write_blastp_final_footer<W: Write>(
+    writer: &mut W,
+    report: &BlastpPairwiseReport,
+) -> io::Result<()> {
+    writeln!(
+        writer,
+        "  Database: {}",
+        ensure_trailing_period(&report.database_name)
+    )?;
+    writeln!(writer, "    Posted date:  Unknown")?;
+    writeln!(
+        writer,
+        "  Number of letters in database: {}",
+        format_count_with_commas(i64::try_from(report.database_total_letters).unwrap_or(0))
+    )?;
+    writeln!(
+        writer,
+        "  Number of sequences in database:  {}",
+        format_count_with_commas(i64::try_from(report.database_num_sequences).unwrap_or(0))
+    )?;
+    writeln!(writer)?;
+    writeln!(writer)?;
+    writeln!(writer)?;
+    writeln!(writer, "Matrix: {}", report.matrix_name)?;
+    writeln!(
+        writer,
+        "Gap Penalties: Existence: {}, Extension: {}",
+        report.gap_open, report.gap_extend
+    )?;
+    if report.word_threshold != 0 {
+        writeln!(
+            writer,
+            "Neighboring words threshold: {}",
+            report.word_threshold
+        )?;
+    }
+    if report.window_size != 0 {
+        writeln!(writer, "Window for multiple hits: {}", report.window_size)?;
+    }
+    Ok(())
+}
+
+// NCBI reference: /mnt/c/Users/genom/GitHub/ncbi-blast/c++/src/algo/blast/format/blast_format.cpp:372-424
+// ```c
+// CBlastFormatUtil::BlastPrintVersionInfo(m_Program, m_IsHTML, m_Outfile);
+// ...
+// CBlastFormatUtil::BlastPrintReference(...);
+// ...
+// CBlastFormatUtil::BlastPrintReference(..., CReference::eCompBasedStats, ...);
+// ```
+//
+// NCBI reference: /mnt/c/Users/genom/GitHub/ncbi-blast/c++/src/algo/blast/format/blast_format.cpp:1520-1589
+// ```c
+// if ( (!m_IsBl2Seq || m_IsDbScan) && !(m_DisableKAStats || kIsGlobal) ) {
+//     x_DisplayDeflines(aln_set, itr_num, prev_seqids);
+// }
+// ...
+// display.DisplaySeqalign(m_Outfile);
+// x_PrintOneQueryFooter(*results.GetAncillaryData());
+// ```
+pub fn write_blastp_pairwise_report<W: Write>(
+    hits: &[PairwiseHit],
+    writer: &mut W,
+    config: &PairwiseConfig,
+    queries: &[BlastpPairwiseQuery],
+    subject_ids: &[Arc<str>],
+    report: &BlastpPairwiseReport,
+) -> io::Result<()> {
+    let mut buffered = io::BufWriter::new(writer);
+    let writer = &mut buffered;
+
+    write_blastp_pairwise_intro(writer, &report.version)?;
+    write_blastp_database_header(
+        writer,
+        &report.database_name,
+        report.database_num_sequences,
+        report.database_total_letters,
+    )?;
+
+    let mut hits_by_query: Vec<Vec<&PairwiseHit>> = vec![Vec::new(); queries.len()];
+    for hit in hits {
+        if let Some(bucket) = hits_by_query.get_mut(hit.hit.q_idx as usize) {
+            bucket.push(hit);
+        }
+    }
+
+    for (q_idx, query) in queries.iter().enumerate() {
+        write_blastp_query_header(writer, &query.query_name, query.query_length)?;
+        let query_hits = &hits_by_query[q_idx];
+        if query_hits.is_empty() {
+            write_no_hits_found(writer)?;
+            write_blastp_query_footer(
+                writer,
+                query.ungapped_karlin,
+                report.gapped_karlin,
+                report.gumbel,
+                query.effective_search_space,
+            )?;
+            continue;
+        }
+
+        use std::collections::HashMap;
+        let mut subject_hits: HashMap<u32, Vec<&PairwiseHit>> = HashMap::new();
+        let mut subject_order: Vec<u32> = Vec::new();
+        for hit in query_hits {
+            let s_idx = hit.hit.s_idx;
+            if !subject_hits.contains_key(&s_idx) {
+                subject_order.push(s_idx);
+            }
+            subject_hits.entry(s_idx).or_default().push(*hit);
+        }
+
+        write_subject_summary_table(writer, &subject_order, &subject_hits, subject_ids)?;
+
+        for s_idx in subject_order {
+            let subject_id = subject_ids
+                .get(s_idx as usize)
+                .map(|id| id.as_ref())
+                .unwrap_or("unknown");
+            let shits = subject_hits
+                .get(&s_idx)
+                .expect("subject order must reference existing grouped hits");
+            let first_hit = shits
+                .first()
+                .expect("subject group must contain at least one HSP");
+            write_subject_header(
+                writer,
+                subject_id,
+                first_hit.subject_title.as_deref(),
+                first_hit.subject_length,
+            )?;
+            for hit in shits {
+                write_hsp_info(writer, hit, config)?;
+                write_alignment(writer, hit, config)?;
+            }
+        }
+
+        write_blastp_query_footer(
+            writer,
+            query.ungapped_karlin,
+            report.gapped_karlin,
+            report.gumbel,
+            query.effective_search_space,
+        )?;
+    }
+
+    write_blastp_final_footer(writer, report)?;
+    writer.flush()
 }
 
 // =============================================================================

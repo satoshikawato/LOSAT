@@ -682,7 +682,11 @@ fn write_blastp_database_header<W: Write>(
     database_num_sequences: usize,
     database_total_letters: usize,
 ) -> io::Result<()> {
-    writeln!(writer, "Database: {}", ensure_trailing_period(database_name))?;
+    writeln!(
+        writer,
+        "Database: {}",
+        ensure_trailing_period(database_name)
+    )?;
     writeln!(
         writer,
         "           {} sequences; {} total letters",
@@ -759,7 +763,10 @@ fn write_blastp_query_footer<W: Write>(
     writeln!(writer)?;
     writeln!(writer)?;
     writeln!(writer, "Gapped")?;
-    writeln!(writer, "Lambda      K        H        a         alpha    sigma")?;
+    writeln!(
+        writer,
+        "Lambda      K        H        a         alpha    sigma"
+    )?;
     write_ncbi_ka_field(writer, gapped_karlin.lambda)?;
     write_ncbi_ka_field(writer, gapped_karlin.k)?;
     write_ncbi_ka_field(writer, gapped_karlin.h)?;

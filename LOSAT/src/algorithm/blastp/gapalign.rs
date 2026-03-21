@@ -1240,6 +1240,21 @@ fn align_ex_protein(
         let mut score_val = GAP_MININT;
         let mut score_gap_row = GAP_MININT;
         let mut last_b_index = first_b_index;
+        // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_gapalign.c:560-569
+        // ```c
+        // for (b_index = first_b_index; b_index < b_size; b_index++) {
+        //     ...
+        //     if (matrix_index == FENCE_SENTRY) {
+        //         ...
+        //         break;
+        //     }
+        // }
+        // ```
+        //
+        // Track the C loop variable `b_index` after the inner loop finishes.
+        // `ALIGN_EX` uses that exact post-loop value in
+        // `MAX(b_index, b_size) - orig_b_index + 1`.
+        let mut row_end_b_index = b_size;
 
         for b_index in first_b_index..b_size {
             let sc = if b_index < len2 { get_s(b_index) } else { 0 };
@@ -1255,6 +1270,7 @@ fn align_ex_protein(
             // }
             // ```
             if sc == FENCE_SENTRY {
+                row_end_b_index = b_index;
                 *fence_hit = true;
                 break;
             }
@@ -1325,7 +1341,6 @@ fn align_ex_protein(
             last_b_index,
             num_extra_cells,
         );
-        let old_b_size = b_size;
         if last_b_index < b_size.saturating_sub(1) {
             b_size = last_b_index + 1;
         } else {
@@ -1356,7 +1371,7 @@ fn align_ex_protein(
         // The C code only exposes the traceback cells written for this row.
         // Keep the Rust row length to the same written span so zero-filled
         // tail capacity cannot be read back as `SCRIPT_GAP_IN_A`.
-        let used_cells = old_b_size
+        let used_cells = row_end_b_index
             .max(b_size)
             .saturating_sub(orig_b_index)
             .saturating_add(1);
@@ -2221,8 +2236,9 @@ pub(crate) fn reevaluate_blastp_hit_with_traceback(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::core::blast_stat::composition::compute_lambda_from_score_probs;
     use crate::core::composition_adjustment::adjust_scores::{
-        blast_adjust_scores, build_matrix_info, read_aa_composition,
+        blast_adjust_scores, build_matrix_info, read_aa_composition, BlastCompositionWorkspace,
     };
     use crate::core::composition_adjustment::redo_alignment::BlastCompoAdjustMode;
     use crate::utils::matrix::{aa_char_to_ncbistdaa, ncbistdaa};
@@ -2748,6 +2764,7 @@ mod tests {
         let matrix_info = build_matrix_info(ScoringMatrix::Blosum62, 0.3176 / 32.0).unwrap();
         let query_composition = read_aa_composition(&query);
         let subject_composition = read_aa_composition(&subject);
+        let mut composition_workspace = BlastCompositionWorkspace::new_blosum62();
         let adjusted = blast_adjust_scores(
             &matrix_info,
             &query_composition,
@@ -2756,6 +2773,8 @@ mod tests {
             subject.len() as i32,
             BlastCompoAdjustMode::CompositionMatrixAdjust,
             0,
+            &mut composition_workspace,
+            compute_lambda_from_score_probs,
         )
         .unwrap()
         .expect("adjusted matrix");
@@ -2819,10 +2838,7 @@ mod tests {
         //     sum -= gap_open + gap_extend * esp->num[index];
         // }
         // ```
-        fn edit_script_from_aligned_strings(
-            query_aln: &str,
-            subject_aln: &str,
-        ) -> Vec<GapEditOp> {
+        fn edit_script_from_aligned_strings(query_aln: &str, subject_aln: &str) -> Vec<GapEditOp> {
             let mut edit_script = Vec::new();
             for (q, s) in query_aln.bytes().zip(subject_aln.bytes()) {
                 match (q == b'-', s == b'-') {
@@ -2843,6 +2859,7 @@ mod tests {
         let matrix_info = build_matrix_info(ScoringMatrix::Blosum62, 0.3176 / 32.0).unwrap();
         let query_composition = read_aa_composition(&query);
         let subject_composition = read_aa_composition(&subject);
+        let mut composition_workspace = BlastCompositionWorkspace::new_blosum62();
         let adjusted = blast_adjust_scores(
             &matrix_info,
             &query_composition,
@@ -2851,6 +2868,8 @@ mod tests {
             subject.len() as i32,
             BlastCompoAdjustMode::CompositionMatrixAdjust,
             0,
+            &mut composition_workspace,
+            compute_lambda_from_score_probs,
         )
         .unwrap()
         .expect("adjusted matrix");

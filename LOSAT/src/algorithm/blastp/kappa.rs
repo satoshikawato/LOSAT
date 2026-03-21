@@ -5,13 +5,16 @@
 //! Reference: ncbi-blast/c++/src/algo/blast/composition_adjustment/redo_alignment.c
 
 use anyhow::Result;
+use std::ffi::c_void;
+use std::ptr::NonNull;
 
-use crate::common::Hit;
+use crate::common::{GapEditOp, Hit};
 use crate::config::ScoringMatrix;
 use crate::core::blast_seg::{SegMasker, SegParams};
 use crate::core::blast_stat::{e_to_p, p_to_e};
+use crate::core::blast_stat::composition::compute_lambda_from_score_probs;
 use crate::core::composition_adjustment::adjust_scores::{
-    blast_overall_p_value, read_aa_composition, AdjustedProteinMatrix,
+    blast_overall_p_value, read_aa_composition, AdjustedProteinMatrix, BlastCompositionWorkspace,
 };
 use crate::core::composition_adjustment::redo_alignment::{
     blast_compo_alignment_new, blast_redo_one_match, build_query_word_hashes, test_near_identical,
@@ -22,7 +25,6 @@ use crate::core::composition_adjustment::redo_alignment::{
 use crate::stats::{blast_spouge_stoe, BlastGumbelBlk, KarlinParams};
 use crate::utils::matrix::{ncbistdaa, protein_score};
 
-use super::alignment::build_alignment_view_with_matrix;
 use super::gapalign::{blast_gapped_alignment_with_traceback, BlastpPreliminaryHsp};
 use super::hsp::{
     reap_hsplist_by_evalue, sort_hsplist_by_score, update_best_evalue, BlastpHsp, BlastpHspList,
@@ -40,9 +42,47 @@ pub(crate) use crate::core::composition_adjustment::redo_alignment::BlastRedoAli
 // }
 // ```
 pub(crate) struct BlastpPostprocessResult {
-    pub hits: Vec<Hit>,
+    pub hsp_list: Option<BlastpHspList>,
     pub best_score: i32,
     pub best_evalue: f64,
+}
+
+#[derive(Debug, Clone)]
+// NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_kappa.c:2308-2336
+// ```c
+// static BlastCompo_QueryInfo *
+// s_GetQueryInfo(Uint1 * query_data, const BlastQueryInfo * blast_query_info, Boolean skip)
+// {
+//     ...
+//     query_info->eff_search_space = (double) query_context->eff_searchsp;
+//     query_info->origin = query_context->query_offset;
+//     query_info->seq.data = &query_data[query_info->origin];
+//     query_info->seq.length = query_context->query_length;
+//     ...
+// }
+// ```
+//
+// NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_kappa.c:432-435
+// ```c
+// s_AdjustEvaluesForComposition(...,
+//                               &queryInfo->contexts[context_index],
+//                               ...);
+// ```
+pub(crate) struct BlastpKappaQueryWorkspace {
+    pub redo_query_info: BlastCompoQueryInfo,
+    pub query_length: i32,
+    pub length_adjustment: i32,
+}
+
+// NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_kappa.c:1910-1916
+// ```c
+// BlastKappa_GappingParamsContext * context = gapping_params->context;
+// BlastGapAlignStruct* gapAlign = context->gap_align;
+// BlastHSP * hsp = in_align->context;
+// ```
+struct BlastpRedoAlignmentContext<'a> {
+    preliminary_hits: &'a [BlastpPreliminaryHsp],
+    matrix: ScoringMatrix,
 }
 
 // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_kappa.c:1000-1004
@@ -139,8 +179,6 @@ fn redo_preliminary_blastp_hit(
     gap_open: i32,
     gap_extend: i32,
     x_drop: i32,
-    _params: &KarlinParams,
-    _effective_space: f64,
 ) -> Option<RedoneBlastpHit> {
     let q_start = preliminary_hsp.gapped_query_start - query_range.begin;
     let s_start = preliminary_hsp.gapped_subject_start - subject_range.begin;
@@ -237,6 +275,153 @@ fn redo_preliminary_blastp_hit(
         subject_end: subject_end as i32,
     })
 }
+
+// NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_kappa.c:1910-1916
+// ```c
+// BlastKappa_GappingParamsContext * context = gapping_params->context;
+// BlastHSP * hsp = in_align->context;
+// ```
+fn blastp_redo_alignment_context<'a>(
+    params: &'a BlastRedoAlignParams,
+) -> &'a BlastpRedoAlignmentContext<'a> {
+    let context = params
+        .gapping_params
+        .context
+        .get()
+        .expect("NCBI blast_kappa.c stores redo callback context in gapping_params->context");
+    // Safety: `postprocess_preliminary_hits` stores a pointer to a
+    // `BlastpRedoAlignmentContext` in `gapping_params.context` for the full
+    // duration of the `blast_redo_one_match` call that reaches this callback.
+    unsafe { &*context.cast::<BlastpRedoAlignmentContext<'a>>().as_ptr() }
+}
+
+// NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_kappa.c:2389-2394
+// ```c
+// static const Blast_RedoAlignCallbacks
+// redo_align_callbacks = {
+//     s_CalcLambda, s_SequenceGetRange, s_RedoOneAlignment,
+//     s_NewAlignmentUsingXdrop, s_FreeEditScript
+// };
+// ```
+fn blastp_get_range_callback<'seq>(
+    matching_seq: &BlastCompoMatchingSequence<'seq>,
+    subject_range: &BlastCompoSequenceRange,
+    orig_query: &BlastCompoSequenceData,
+    query_range: &BlastCompoSequenceRange,
+    query_words: Option<&[u64]>,
+    align: &BlastCompoAlignment,
+    should_test_identical: bool,
+    subject_maybe_biased: bool,
+    params: &BlastRedoAlignParams,
+) -> Result<BlastRedoRangeResult> {
+    Ok(build_subject_range_data(
+        matching_seq,
+        subject_range,
+        orig_query,
+        query_range,
+        query_words,
+        align,
+        should_test_identical,
+        subject_maybe_biased,
+        params,
+    ))
+}
+
+// NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_kappa.c:1896-1945
+// ```c
+// static BlastCompo_Alignment *
+// s_RedoOneAlignment(..., BlastCompo_GappingParams * gapping_params)
+// {
+//     BlastKappa_GappingParamsContext * context = gapping_params->context;
+//     BlastHSP * hsp = in_align->context;
+//     ...
+// }
+// ```
+fn blastp_redo_one_alignment_callback(
+    incoming_align: &BlastCompoAlignment,
+    matrix_adjust_rule: EMatrixAdjustRule,
+    adjusted_matrix: Option<&AdjustedProteinMatrix>,
+    query_data: &BlastCompoSequenceData,
+    query_range: &BlastCompoSequenceRange,
+    _ccat_query_length: i32,
+    subject_data: &BlastCompoSequenceData,
+    subject_range: &BlastCompoSequenceRange,
+    _full_subject_length: i32,
+    params: &BlastRedoAlignParams,
+) -> Result<Option<Box<BlastCompoAlignment>>> {
+    let Some(BlastCompoAlignmentContext::PreliminaryHspIndex(prelim_index)) =
+        incoming_align.context.as_ref()
+    else {
+        return Ok(None);
+    };
+    let redo_context = blastp_redo_alignment_context(params);
+    let preliminary_hsp = &redo_context.preliminary_hits[*prelim_index];
+    let Some(redone_hit) = redo_preliminary_blastp_hit(
+        preliminary_hsp,
+        query_data,
+        query_range,
+        subject_data,
+        subject_range,
+        redo_context.matrix,
+        adjusted_matrix,
+        params.gapping_params.gap_open,
+        params.gapping_params.gap_extend,
+        params.gapping_params.x_dropoff,
+    ) else {
+        return Ok(None);
+    };
+    Ok(Some(blast_compo_alignment_new(
+        redone_hit.hit.raw_score,
+        matrix_adjust_rule,
+        redone_hit.query_start,
+        redone_hit.query_end,
+        query_range.context,
+        redone_hit.subject_start,
+        redone_hit.subject_end,
+        subject_range.context,
+        redone_hit
+            .hit
+            .gap_info
+            .clone()
+            .map(BlastCompoAlignmentContext::EditScript),
+    )))
+}
+
+// NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_kappa.c:2389-2394
+// ```c
+// static const Blast_RedoAlignCallbacks
+// redo_align_callbacks = {
+//     s_CalcLambda, s_SequenceGetRange, s_RedoOneAlignment,
+//     s_NewAlignmentUsingXdrop, s_FreeEditScript
+// };
+// ```
+//
+// NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_kappa.c:551-570
+// ```c
+// static double
+// s_CalcLambda(double probs[], int min_score, int max_score, double lambda0)
+// {
+//     ...
+//     return Blast_KarlinLambdaNR(&freq, lambda0);
+// }
+// ```
+fn blastp_calc_lambda(
+    probs: &[f64],
+    min_score: i32,
+    max_score: i32,
+    lambda0: f64,
+) -> Result<f64> {
+    compute_lambda_from_score_probs(probs, min_score, max_score, lambda0)
+        .map_err(anyhow::Error::msg)
+}
+
+const BLASTP_REDO_ALIGN_CALLBACKS: BlastRedoAlignCallbacks = BlastRedoAlignCallbacks {
+    calc_lambda: Some(blastp_calc_lambda),
+    get_range: blastp_get_range_callback,
+    redo_one_alignment: blastp_redo_one_alignment_callback,
+    new_xdrop_align: None,
+    free_align_traceback: None,
+};
 
 // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_kappa.c:305-354
 // ```c
@@ -379,21 +564,11 @@ fn build_query_range_data(
     orig_query: &BlastCompoSequenceData,
     query_range: &BlastCompoSequenceRange,
 ) -> BlastCompoSequenceData {
-    let begin = usize::try_from(query_range.begin)
-        .expect("NCBI blast_kappa.c requires non-negative query_range.begin");
-    let end = usize::try_from(query_range.end)
-        .expect("NCBI blast_kappa.c requires non-negative query_range.end");
-    let mut query = orig_query.data()[begin..end].to_vec();
-    for residue in &mut query {
-        if *residue == ncbistdaa::U {
-            *residue = ncbistdaa::C;
-        }
-    }
-    BlastCompoSequenceData::from_ncbistdaa(&query)
+    BlastCompoSequenceData::copy_query_range_with_selenocysteine_fix(orig_query, query_range)
 }
 
 fn build_subject_range_data(
-    matching_seq: &BlastCompoMatchingSequence,
+    matching_seq: &BlastCompoMatchingSequence<'_>,
     subject_range: &BlastCompoSequenceRange,
     orig_query: &BlastCompoSequenceData,
     query_range: &BlastCompoSequenceRange,
@@ -403,16 +578,6 @@ fn build_subject_range_data(
     subject_maybe_biased_in: bool,
     params: &BlastRedoAlignParams,
 ) -> BlastRedoRangeResult {
-    // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_kappa.c:1638-1643
-    // ```c
-    // seqData->data    = &seqData->data[range->begin - 1];
-    // *seqData->data++ = '\0';
-    // seqData->length  = range->end - range->begin;
-    // ```
-    let begin = usize::try_from(subject_range.begin)
-        .expect("NCBI blast_kappa.c requires non-negative subject_range.begin");
-    let end = usize::try_from(subject_range.end)
-        .expect("NCBI blast_kappa.c requires non-negative subject_range.end");
     // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_kappa.c:1677-1709
     // ```c
     // origData = query->data + q_range->begin;
@@ -422,7 +587,7 @@ fn build_subject_range_data(
     // return s_SequenceGetProteinRange(..., queryData, ...);
     // ```
     let query = build_query_range_data(orig_query, query_range);
-    let mut subject = BlastCompoSequenceData::from_ncbistdaa(&matching_seq.data);
+    let mut subject = BlastCompoSequenceData::from_ncbistdaa(matching_seq.data);
     let mut subject_maybe_biased = subject_maybe_biased_in;
 
     // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_kappa.c:1626-1636
@@ -462,7 +627,7 @@ fn build_subject_range_data(
     // *seqData->data++ = '\0';
     // seqData->length  = range->end - range->begin;
     // ```
-    subject = BlastCompoSequenceData::from_ncbistdaa(&subject.data()[begin..end]);
+    subject.fit_protein_range_in_place(subject_range);
 
     BlastRedoRangeResult {
         query,
@@ -596,27 +761,38 @@ fn scaled_karlin_params(params: &KarlinParams, score_divisor: f64) -> KarlinPara
     }
 }
 
-// NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_kappa.c:147-158
+// NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_kappa.c:2308-2336
 // ```c
-// int query_length =      query_context->query_length;
-// int length_adjustment = query_context->length_adjustment;
-// double query_eff   = MAX((query_length - length_adjustment), 1);
-// double dblen_eff = (double) query_context->eff_searchsp / query_eff;
+// static BlastCompo_QueryInfo *
+// s_GetQueryInfo(Uint1 * query_data, const BlastQueryInfo * blast_query_info, Boolean skip)
+// {
+//     ...
+//     query_info->eff_search_space = (double) query_context->eff_searchsp;
+//     query_info->origin = query_context->query_offset;
+//     query_info->seq.data = &query_data[query_info->origin];
+//     query_info->seq.length = query_context->query_length;
+//     ...
+//     s_CreateWordArray(query_info->seq.data, query_info->seq.length,
+//                       &query_info->words);
+// }
 // ```
-fn build_query_info(
+pub(crate) fn build_query_workspace(
     query: &[u8],
     query_length: i32,
     length_adjustment: i32,
     effective_space: f64,
-) -> BlastCompoQueryInfo {
-    BlastCompoQueryInfo {
+) -> BlastpKappaQueryWorkspace {
+    let redo_query_info = BlastCompoQueryInfo {
         origin: 0,
         seq: BlastCompoSequenceData::from_ncbistdaa(query),
         composition: read_aa_composition(query),
+        eff_search_space: effective_space,
+        words: Some(build_query_word_hashes(query)),
+    };
+    BlastpKappaQueryWorkspace {
+        redo_query_info,
         query_length,
         length_adjustment,
-        eff_search_space: effective_space,
-        words: None,
     }
 }
 
@@ -644,46 +820,108 @@ fn build_query_info(
 fn recompute_num_identities(
     query_nomask: &[u8],
     subject: &[u8],
-    hits: &mut [Hit],
+    hsps: &mut [BlastpHsp],
     matrix: ScoringMatrix,
 ) {
-    for hit in hits {
-        if let Some(view) = build_alignment_view_with_matrix(query_nomask, subject, hit, matrix) {
-            hit.length = view.alignment_len;
-            hit.num_ident = view.num_ident;
-            hit.num_positives = view.num_positives;
-            hit.gapopen = view.gap_opens;
-            hit.mismatch = view
-                .alignment_len
-                .saturating_sub(view.num_ident + view.gap_letters);
-            hit.identity = if view.alignment_len > 0 {
-                (view.num_ident as f64 * 100.0) / (view.alignment_len as f64)
+    for hsp in hsps {
+        let Some(q_offset) = hsp.q_start.checked_sub(1) else {
+            continue;
+        };
+        let Some(s_offset) = hsp.s_start.min(hsp.s_end).checked_sub(1) else {
+            continue;
+        };
+
+        let mut q_index = q_offset;
+        let mut s_index = s_offset;
+        let mut num_ident = 0usize;
+        let mut num_positives = 0usize;
+        let mut gap_letters = 0usize;
+        let mut gap_opens = 0usize;
+        let mut alignment_len = 0usize;
+        let mut valid = true;
+
+        if let Some(gap_info) = hsp.gap_info.as_ref() {
+            for op in gap_info {
+                match *op {
+                    GapEditOp::Sub(n) => {
+                        for _ in 0..n as usize {
+                            let (Some(&q), Some(&s)) =
+                                (query_nomask.get(q_index), subject.get(s_index))
+                            else {
+                                valid = false;
+                                break;
+                            };
+                            if q == s {
+                                num_ident += 1;
+                                num_positives += 1;
+                            } else if protein_score(matrix, q, s) > 0 {
+                                num_positives += 1;
+                            }
+                            q_index += 1;
+                            s_index += 1;
+                            alignment_len += 1;
+                        }
+                    }
+                    GapEditOp::Del(n) => {
+                        gap_opens += 1;
+                        for _ in 0..n as usize {
+                            if subject.get(s_index).is_none() {
+                                valid = false;
+                                break;
+                            }
+                            s_index += 1;
+                            gap_letters += 1;
+                            alignment_len += 1;
+                        }
+                    }
+                    GapEditOp::Ins(n) => {
+                        gap_opens += 1;
+                        for _ in 0..n as usize {
+                            if query_nomask.get(q_index).is_none() {
+                                valid = false;
+                                break;
+                            }
+                            q_index += 1;
+                            gap_letters += 1;
+                            alignment_len += 1;
+                        }
+                    }
+                }
+                if !valid {
+                    break;
+                }
+            }
+
+            if !valid {
+                continue;
+            }
+
+            hsp.length = alignment_len;
+            hsp.num_ident = num_ident;
+            hsp.num_positives = num_positives;
+            hsp.gapopen = gap_opens;
+            hsp.mismatch = alignment_len.saturating_sub(num_ident + gap_letters);
+            hsp.identity = if alignment_len > 0 {
+                (num_ident as f64 * 100.0) / (alignment_len as f64)
             } else {
                 0.0
             };
             continue;
         }
 
-        if hit.gap_info.is_some() || hit.q_start == 0 || hit.s_start == 0 {
+        let q_end = hsp.q_end;
+        let s_start = hsp.s_start.min(hsp.s_end) - 1;
+        let s_end = hsp.s_start.max(hsp.s_end);
+        if q_end < q_offset || s_end < s_start {
             continue;
         }
-
-        let q_start = hit.q_start - 1;
-        let q_end = hit.q_end;
-        let s_start = hit.s_start.min(hit.s_end) - 1;
-        let s_end = hit.s_start.max(hit.s_end);
-        if q_end < q_start || s_end < s_start {
-            continue;
-        }
-        let q_span = q_end.saturating_sub(q_start);
+        let q_span = q_end.saturating_sub(q_offset);
         let s_span = s_end.saturating_sub(s_start);
         if q_span != s_span || q_end > query_nomask.len() || s_end > subject.len() {
             continue;
         }
 
-        let mut num_ident = 0usize;
-        let mut num_positives = 0usize;
-        for (&q, &s) in query_nomask[q_start..q_end]
+        for (&q, &s) in query_nomask[q_offset..q_end]
             .iter()
             .zip(subject[s_start..s_end].iter())
         {
@@ -694,14 +932,13 @@ fn recompute_num_identities(
                 num_positives += 1;
             }
         }
-        let align_len = q_span;
-        hit.length = align_len;
-        hit.num_ident = num_ident;
-        hit.num_positives = num_positives;
-        hit.mismatch = align_len.saturating_sub(num_ident);
-        hit.gapopen = 0;
-        hit.identity = if align_len > 0 {
-            (num_ident as f64 * 100.0) / (align_len as f64)
+        hsp.length = q_span;
+        hsp.num_ident = num_ident;
+        hsp.num_positives = num_positives;
+        hsp.mismatch = q_span.saturating_sub(num_ident);
+        hsp.gapopen = 0;
+        hsp.identity = if q_span > 0 {
+            (num_ident as f64 * 100.0) / (q_span as f64)
         } else {
             0.0
         };
@@ -726,7 +963,7 @@ fn recompute_num_identities(
 fn adjust_evalues_for_composition(
     hsp_list: &mut BlastpHspList,
     comp_p_value: f64,
-    query_info: &BlastCompoQueryInfo,
+    query_workspace: &BlastpKappaQueryWorkspace,
     subject_length: i32,
     lambda_ratio: f64,
 ) {
@@ -739,9 +976,10 @@ fn adjust_evalues_for_composition(
     // (void) subject_id;
     // ```
     let _ = lambda_ratio;
-    let query_eff = (query_info.query_length - query_info.length_adjustment).max(1) as f64;
-    let subject_eff = (subject_length - query_info.length_adjustment).max(1) as f64;
-    let dblen_eff = query_info.eff_search_space / query_eff;
+    let query_eff =
+        (query_workspace.query_length - query_workspace.length_adjustment).max(1) as f64;
+    let subject_eff = (subject_length - query_workspace.length_adjustment).max(1) as f64;
+    let dblen_eff = query_workspace.redo_query_info.eff_search_space / query_eff;
     if !(dblen_eff.is_finite() && dblen_eff > 0.0) {
         return;
     }
@@ -777,7 +1015,7 @@ fn evaluate_and_purge(
     hsp_list: &mut BlastpHspList,
     params: &KarlinParams,
     gumbel_params: &BlastGumbelBlk,
-    query_info: &BlastCompoQueryInfo,
+    query_workspace: &BlastpKappaQueryWorkspace,
     subject_length: i32,
     expect_value: f64,
     pvalue_for_this_pair: Option<f64>,
@@ -806,7 +1044,7 @@ fn evaluate_and_purge(
             hsp.raw_score,
             &eval_params,
             gumbel_params,
-            query_info.query_length,
+            query_workspace.query_length,
             subject_length,
         );
     }
@@ -815,7 +1053,7 @@ fn evaluate_and_purge(
         adjust_evalues_for_composition(
             hsp_list,
             comp_p_value,
-            query_info,
+            query_workspace,
             subject_length,
             lambda_ratio.unwrap_or(1.0),
         );
@@ -852,21 +1090,19 @@ fn evaluate_and_purge(
 // ```
 pub(crate) fn postprocess_preliminary_hits(
     preliminary_hits: Vec<BlastpPreliminaryHsp>,
-    query: &[u8],
+    query_workspace: &BlastpKappaQueryWorkspace,
+    composition_workspace: &mut BlastCompositionWorkspace,
     query_nomask: &[u8],
     subject: &[u8],
     matrix: ScoringMatrix,
     karlin_params: &KarlinParams,
     gumbel_params: &BlastGumbelBlk,
-    query_length: i32,
-    length_adjustment: i32,
-    effective_space: f64,
     redo_align_params: &BlastRedoAlignParams,
     expect_value: f64,
 ) -> Result<BlastpPostprocessResult> {
     if preliminary_hits.is_empty() {
         return Ok(BlastpPostprocessResult {
-            hits: Vec::new(),
+            hsp_list: None,
             best_score: 0,
             best_evalue: f64::MAX,
         });
@@ -874,15 +1110,6 @@ pub(crate) fn postprocess_preliminary_hits(
 
     let incoming_aligns =
         build_incoming_alignment_list(&preliminary_hits, redo_align_params.score_divisor);
-    let mut query_info = build_query_info(query, query_length, length_adjustment, effective_space);
-    // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_kappa.c:2321-2331
-    // ```c
-    // query_info->words = NULL;
-    // s_CreateWordArray(query_info->seq.data, query_info->seq.length,
-    //                   &query_info->words);
-    // ```
-    let query_words = build_query_word_hashes(query);
-    query_info.words = (!query_words.is_empty()).then_some(query_words);
     let matching_seq = BlastCompoMatchingSequence::new(preliminary_hits[0].s_idx as i32, subject);
     // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_kappa.c:2117-2133
     // ```c
@@ -892,97 +1119,20 @@ pub(crate) fn postprocess_preliminary_hits(
     // }
     // ```
     let redo_karlin_params = scaled_karlin_params(karlin_params, redo_align_params.score_divisor);
-
-    let mut callbacks = BlastRedoAlignCallbacks {
-        calc_lambda: None,
-        get_range: Box::new(
-            |matching_seq,
-             subject_range,
-             orig_query,
-             query_range,
-             query_words,
-             align,
-             should_test_identical,
-             subject_maybe_biased,
-             redo_params| {
-                let range_result = build_subject_range_data(
-                    matching_seq,
-                    subject_range,
-                    orig_query,
-                    query_range,
-                    query_words,
-                    align,
-                    should_test_identical,
-                    subject_maybe_biased,
-                    redo_params,
-                );
-                Ok(range_result)
-            },
-        ),
-        redo_one_alignment: Box::new(
-            |incoming_align,
-             matrix_adjust_rule,
-             adjusted_matrix,
-             query_data,
-             query_range,
-             _ccat_query_length,
-             subject_data,
-             subject_range,
-             _full_subject_length,
-             redo_params| {
-                let Some(BlastCompoAlignmentContext::PreliminaryHspIndex(prelim_index)) =
-                    incoming_align.context.as_ref()
-                else {
-                    return Ok(None);
-                };
-                let preliminary_hsp = &preliminary_hits[*prelim_index];
-                let Some(redone_hit) = redo_preliminary_blastp_hit(
-                    preliminary_hsp,
-                    query_data,
-                    query_range,
-                    subject_data,
-                    subject_range,
-                    matrix,
-                    adjusted_matrix,
-                    redo_params.gapping_params.gap_open,
-                    redo_params.gapping_params.gap_extend,
-                    redo_params.gapping_params.x_dropoff,
-                    &redo_karlin_params,
-                    effective_space,
-                ) else {
-                    return Ok(None);
-                };
-                // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_kappa.c:1902-1945
-                // ```c
-                // status = BLAST_GappedAlignmentWithTraceback(...);
-                // return s_NewAlignmentFromGapAlign(gap_align, ...);
-                // ```
-                Ok(Some(blast_compo_alignment_new(
-                    redone_hit.hit.raw_score,
-                    matrix_adjust_rule,
-                    redone_hit.query_start,
-                    redone_hit.query_end,
-                    query_range.context,
-                    redone_hit.subject_start,
-                    redone_hit.subject_end,
-                    subject_range.context,
-                    redone_hit
-                        .hit
-                        .gap_info
-                        .clone()
-                        .map(BlastCompoAlignmentContext::EditScript),
-                )))
-            },
-        ),
-        new_xdrop_align: None,
-        free_align_traceback: None,
+    let redo_context = BlastpRedoAlignmentContext {
+        preliminary_hits: &preliminary_hits,
+        matrix,
     };
-
+    let previous_redo_context = redo_align_params
+        .gapping_params
+        .context
+        .replace(Some(NonNull::from(&redo_context).cast::<c_void>()));
     let distinct_alignments = blast_redo_one_match(
         &incoming_aligns,
         redo_align_params,
         &matching_seq,
-        &query_info,
+        &query_workspace.redo_query_info,
+        composition_workspace,
         // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_kappa.c:2120-2128
         // ```c
         // if (sbp->kbp_gap[i] != NULL) {
@@ -990,10 +1140,14 @@ pub(crate) fn postprocess_preliminary_hits(
         //     kbp->Lambda /= scale_factor;
         // }
         // ```
-        karlin_params.lambda / redo_align_params.score_divisor,
-        &mut callbacks,
-    )?;
-    drop(callbacks);
+        redo_karlin_params.lambda,
+        &BLASTP_REDO_ALIGN_CALLBACKS,
+    );
+    redo_align_params
+        .gapping_params
+        .context
+        .set(previous_redo_context);
+    let distinct_alignments = distinct_alignments?;
     let query_index = usize::try_from(preliminary_hits[0].query_context)
         .expect("blastp query context is non-negative");
     let kept_hits = distinct_alignments
@@ -1016,26 +1170,31 @@ pub(crate) fn postprocess_preliminary_hits(
         &mut hsp_list,
         karlin_params,
         gumbel_params,
-        &query_info,
+        query_workspace,
         matching_seq.length,
         expect_value,
         pvalue_for_this_pair,
         lambda_ratio,
         redo_align_params.score_divisor,
     );
-    if best_evalue <= expect_value && !hsp_list.hsps.is_empty() {
-        normalize_scores(
-            &mut hsp_list,
-            redo_karlin_params.lambda,
-            redo_align_params.log_k,
-            redo_align_params.score_divisor,
-        );
-        let mut raw_hits: Vec<Hit> = hsp_list.hsps.drain(..).map(BlastpHsp::into_hit).collect();
-        recompute_num_identities(query_nomask, subject, &mut raw_hits, matrix);
-        hsp_list.hsps = raw_hits.into_iter().map(BlastpHsp::from_hit).collect();
+    if best_evalue > expect_value || hsp_list.hsps.is_empty() {
+        return Ok(BlastpPostprocessResult {
+            hsp_list: None,
+            best_score,
+            best_evalue,
+        });
     }
+
+    normalize_scores(
+        &mut hsp_list,
+        redo_karlin_params.lambda,
+        redo_align_params.log_k,
+        redo_align_params.score_divisor,
+    );
+    recompute_num_identities(query_nomask, subject, &mut hsp_list.hsps, matrix);
+
     Ok(BlastpPostprocessResult {
-        hits: hsp_list.hsps.into_iter().map(BlastpHsp::into_hit).collect(),
+        hsp_list: Some(hsp_list),
         best_score,
         best_evalue,
     })
@@ -1064,7 +1223,7 @@ mod tests {
                     gap_extend: 1,
                     decline_align: 0,
                     x_dropoff: 50,
-                    context: None,
+                    context: std::cell::Cell::new(None),
                 },
             compo_adjust_mode:
                 crate::core::composition_adjustment::redo_alignment::BlastCompoAdjustMode::CompositionMatrixAdjust,
@@ -1263,15 +1422,7 @@ mod tests {
 
     #[test]
     fn test_adjust_evalues_for_composition_matches_ncbi_sequence_scaling() {
-        let query_info = BlastCompoQueryInfo {
-            origin: 0,
-            seq: BlastCompoSequenceData::from_ncbistdaa(&vec![1u8; 100]),
-            composition: read_aa_composition(&vec![1u8; 100]),
-            query_length: 100,
-            length_adjustment: 10,
-            eff_search_space: 9000.0,
-            words: None,
-        };
+        let query_workspace = build_query_workspace(&vec![1u8; 100], 100, 10, 9000.0);
         let mut hsp_list = BlastpHspList {
             oid: 0,
             query_index: 0,
@@ -1280,11 +1431,12 @@ mod tests {
         };
         hsp_list.hsps[0].e_value = 2.5;
 
-        adjust_evalues_for_composition(&mut hsp_list, 0.25, &query_info, 40, 1.0);
+        adjust_evalues_for_composition(&mut hsp_list, 0.25, &query_workspace, 40, 1.0);
 
         let query_eff = 90.0;
         let subject_eff = 30.0;
-        let db_to_sequence_scale = subject_eff / (query_info.eff_search_space / query_eff);
+        let db_to_sequence_scale =
+            subject_eff / (query_workspace.redo_query_info.eff_search_space / query_eff);
         let expected = p_to_e(blast_overall_p_value(
             0.25,
             e_to_p(2.5 * db_to_sequence_scale),
@@ -1352,13 +1504,13 @@ mod tests {
             hsps: vec![BlastpHsp::from_hit(make_hit(1062, 1, 10, 1, 10))],
             best_evalue: f64::MAX,
         };
-        let query_info = build_query_info(&vec![1u8; 100], 100, 0, 100000.0);
+        let query_workspace = build_query_workspace(&vec![1u8; 100], 100, 0, 100000.0);
 
         let (_best_score, best_evalue) = evaluate_and_purge(
             &mut hsp_list,
             &params,
             &gumbel,
-            &query_info,
+            &query_workspace,
             200,
             10.0,
             None,
@@ -1401,13 +1553,13 @@ mod tests {
             hsps: vec![BlastpHsp::from_hit(make_hit(1062, 1, 10, 1, 10))],
             best_evalue: f64::MAX,
         };
-        let query_info = build_query_info(&vec![1u8; 100], 100, 0, 100000.0);
+        let query_workspace = build_query_workspace(&vec![1u8; 100], 100, 0, 100000.0);
 
         let (_best_score, best_evalue) = evaluate_and_purge(
             &mut hsp_list,
             &params,
             &gumbel,
-            &query_info,
+            &query_workspace,
             200,
             10.0,
             None,
@@ -1458,14 +1610,6 @@ mod tests {
             q_idx: 0,
             s_idx: 0,
         };
-        let params = KarlinParams {
-            lambda: 0.267,
-            k: 0.041,
-            h: 0.14,
-            alpha: 1.9,
-            beta: -30.0,
-        };
-
         let redone = redo_preliminary_blastp_hit(
             &preliminary_hsp,
             &query_data,
@@ -1477,8 +1621,6 @@ mod tests {
             11,
             1,
             50,
-            &params,
-            100.0,
         )
         .expect("traceback should produce a hit");
 
@@ -1766,29 +1908,29 @@ mod tests {
 
     #[test]
     fn test_recompute_num_identities_ungapped() {
-        let mut hits = vec![make_hit(20, 1, 4, 1, 4)];
+        let mut hsps = vec![BlastpHsp::from_hit(make_hit(20, 1, 4, 1, 4))];
         recompute_num_identities(
             &[1u8, 2, 3, 4],
             &[1u8, 2, 5, 4],
-            &mut hits,
+            &mut hsps,
             ScoringMatrix::Blosum62,
         );
-        assert_eq!(hits[0].num_ident, 3);
-        assert_eq!(hits[0].length, 4);
-        assert_eq!(hits[0].mismatch, 1);
+        assert_eq!(hsps[0].num_ident, 3);
+        assert_eq!(hsps[0].length, 4);
+        assert_eq!(hsps[0].mismatch, 1);
     }
 
     #[test]
     fn test_recompute_num_identities_uses_query_nomask() {
-        let mut hits = vec![make_hit(20, 1, 4, 1, 4)];
+        let mut hsps = vec![BlastpHsp::from_hit(make_hit(20, 1, 4, 1, 4))];
         recompute_num_identities(
             &[1u8, 2, 3, 4],
             &[1u8, 2, 3, 4],
-            &mut hits,
+            &mut hsps,
             ScoringMatrix::Blosum62,
         );
-        assert_eq!(hits[0].num_ident, 4);
-        assert_eq!(hits[0].num_positives, 4);
+        assert_eq!(hsps[0].num_ident, 4);
+        assert_eq!(hsps[0].num_positives, 4);
     }
 
     // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_kappa.c:248-259

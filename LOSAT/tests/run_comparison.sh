@@ -303,4 +303,40 @@ echo "Starting AvCLPV vs PsCLPV (BLAST)..."
 COMMENTOUT
 
 wait
+
+
+# --- BLASTP Commands ---
+echo "Starting WSSV vs PajaWSV (BLASTP)..."
+(time  blastp -query ./fasta/WSSV.faa -subject ./fasta/PajaWSV.faa -out ./blast_out/WSSV.PajaWSV.BLASTP.out -num_threads 1 -outfmt 6 )&>./blast_out/WSSV.PajaWSV.BLASTP.log
+echo "Starting WSSV vs SicyWSV (BLASTP)..."
+(time  blastp -query ./fasta/WSSV.faa -subject ./fasta/SicyWSV.faa -out ./blast_out/WSSV.SicyWSV.BLASTP.out -num_threads 1 -outfmt 6 )&>./blast_out/WSSV.SicyWSV.BLASTP.log
+echo "Starting WSSV vs CoBV (BLASTP)..."
+(time  blastp -query ./fasta/WSSV.faa -subject ./fasta/CoBV.faa -out ./blast_out/WSSV.CoBV.BLASTP.out -num_threads 1 -outfmt 6 )&>./blast_out/WSSV.CoBV.BLASTP.log
+echo "Starting PajaWSV vs SicyWSV (BLASTP)..."
+(time  blastp -query ./fasta/PajaWSV.faa -subject ./fasta/SicyWSV.faa -out ./blast_out/PajaWSV.SicyWSV.BLASTP.out -num_threads 1 -outfmt 6 )&>./blast_out/PajaWSV.SicyWSV.BLASTP.log
+echo "Starting PajaWSV vs CoBV (BLASTP)..."
+(time  blastp -query ./fasta/PajaWSV.faa -subject ./fasta/CoBV.faa -out ./blast_out/PajaWSV.CoBV.BLASTP.out -num_threads 1 -outfmt 6 )&>./blast_out/PajaWSV.CoBV.BLASTP.log
+echo "Starting SicyWSV vs CoBV (BLASTP)..."
+(time  blastp -query ./fasta/SicyWSV.faa -subject ./fasta/CoBV.faa -out ./blast_out/SicyWSV.CoBV.BLASTP.out -num_threads 1 -outfmt 6 )&>./blast_out/SicyWSV.CoBV.BLASTP.log
+echo "Starting AP027078 vs AP027131 (BLASTP)..."
+(time  blastp -query ./fasta/AP027078.faa -subject ./fasta/AP027131.faa -out ./blast_out/AP027078.AP027131.BLASTP.out -num_threads 1 -outfmt 6 )&>./blast_out/AP027078.AP027131.BLASTP.log
+echo "Starting AP027078 vs AP027132 (BLASTP)..."
+(time  blastp -query ./fasta/AP027078.faa -subject ./fasta/AP027132.faa -out ./blast_out/AP027078.AP027132.BLASTP.out -num_threads 1 -outfmt 6 )&>./blast_out/AP027078.AP027132.BLASTP.log
+echo "Starting AP027078 vs AP027133 (BLASTP)..."
+(time  blastp -query ./fasta/AP027078.faa -subject ./fasta/AP027133.faa -out ./blast_out/AP027078.AP027133.BLASTP.out -num_threads 1 -outfmt 6 )&>./blast_out/AP027078.AP027133.BLASTP.log
+echo "Starting AP027078 vs NZ_CP006932 (BLASTP)..."
+(time  blastp -query ./fasta/AP027078.faa -subject ./fasta/NZ_CP006932.faa -out ./blast_out/AP027078.NZ_CP006932.BLASTP.out -num_threads 1 -outfmt 6 )&>./blast_out/AP027078.NZ_CP006932.BLASTP.log
+echo "Starting AP027131 vs AP027132 (BLASTP)..."
+(time  blastp -query ./fasta/AP027131.faa -subject ./fasta/AP027132.faa -out ./blast_out/AP027131.AP027132.BLASTP.out -num_threads 1 -outfmt 6 )&>./blast_out/AP027131.AP027132.BLASTP.log
+echo "Starting AP027131 vs AP027133 (BLASTP)..."
+(time  blastp -query ./fasta/AP027131.faa -subject ./fasta/AP027133.faa -out ./blast_out/AP027131.AP027133.BLASTP.out -num_threads 1 -outfmt 6 )&>./blast_out/AP027131.AP027133.BLASTP.log
+echo "Starting AP027131 vs NZ_CP006932 (BLASTP)..."
+(time  blastp -query ./fasta/AP027131.faa -subject ./fasta/NZ_CP006932.faa -out ./blast_out/AP027131.NZ_CP006932.BLASTP.out -num_threads 1 -outfmt 6 )&>./blast_out/AP027131.NZ_CP006932.BLASTP.log
+echo "Starting AP027132 vs AP027133 (BLASTP)..."
+(time  blastp -query ./fasta/AP027132.faa -subject ./fasta/AP027133.faa -out ./blast_out/AP027132.AP027133.BLASTP.out -num_threads 1 -outfmt 6 )&>./blast_out/AP027132.AP027133.BLASTP.log
+echo "Starting AP027132 vs NZ_CP006932 (BLASTP)..."
+(time  blastp -query ./fasta/AP027132.faa -subject ./fasta/NZ_CP006932.faa -out ./blast_out/AP027132.NZ_CP006932.BLASTP.out -num_threads 1 -outfmt 6 )&>./blast_out/AP027132.NZ_CP006932.BLASTP.log
+echo "Starting AP027133 vs NZ_CP006932 (BLASTP)..."
+(time  blastp -query ./fasta/AP027133.faa -subject ./fasta/NZ_CP006932.faa -out ./blast_out/AP027133.NZ_CP006932.BLASTP.out -num_threads 1 -outfmt 6 )&>./blast_out/AP027133.NZ_CP006932.BLASTP.log
+
 echo "All done."

@@ -2,8 +2,8 @@
 //!
 //! Reference: ncbi-blast/c++/src/algo/blast/core/aa_ungapped.c
 
-use std::sync::OnceLock;
 use super::get_score;
+use std::sync::OnceLock;
 
 // ---------------------------------------------------------------------------
 // Ungapped extension SIMD helpers (strict NCBI parity)
@@ -275,7 +275,14 @@ fn extend_left_ungapped(
     {
         if is_x86_feature_detected!("avx2") {
             unsafe {
-                return extend_left_ungapped_avx2(q_seq, s_seq, q_off, s_off, initial_score, x_drop);
+                return extend_left_ungapped_avx2(
+                    q_seq,
+                    s_seq,
+                    q_off,
+                    s_off,
+                    initial_score,
+                    x_drop,
+                );
             }
         }
     }
@@ -290,14 +297,7 @@ fn extend_left_ungapped(
         // }
         // ```
         unsafe {
-            return extend_left_ungapped_simd128(
-                q_seq,
-                s_seq,
-                q_off,
-                s_off,
-                initial_score,
-                x_drop,
-            );
+            return extend_left_ungapped_simd128(q_seq, s_seq, q_off, s_off, initial_score, x_drop);
         }
     }
     extend_left_ungapped_scalar(q_seq, s_seq, q_off, s_off, initial_score, x_drop)
@@ -568,7 +568,14 @@ fn extend_right_ungapped(
     {
         if is_x86_feature_detected!("avx2") {
             unsafe {
-                return extend_right_ungapped_avx2(q_seq, s_seq, q_start, s_start, initial_score, x_drop);
+                return extend_right_ungapped_avx2(
+                    q_seq,
+                    s_seq,
+                    q_start,
+                    s_start,
+                    initial_score,
+                    x_drop,
+                );
             }
         }
     }

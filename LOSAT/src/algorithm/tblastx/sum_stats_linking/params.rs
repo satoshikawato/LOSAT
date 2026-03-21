@@ -61,7 +61,11 @@ pub fn find_smallest_lambda_params(params_list: &[KarlinParams]) -> Option<Karli
     params_list
         .iter()
         .filter(|p| p.lambda > 0.0)
-        .min_by(|a, b| a.lambda.partial_cmp(&b.lambda).unwrap_or(std::cmp::Ordering::Equal))
+        .min_by(|a, b| {
+            a.lambda
+                .partial_cmp(&b.lambda)
+                .unwrap_or(std::cmp::Ordering::Equal)
+        })
         .cloned()
 }
 

@@ -101,6 +101,41 @@ echo "Starting MeenMJNV vs MejoMJNV (LOSAT)..."
 # AvCLPV vs PsCLPV
 echo "Starting AvCLPV vs PsCLPV (LOSAT)..."
 (time $LOSAT_BIN tblastx -q ./fasta/AvCLPV.fasta -s ./fasta/PsCLPV.fasta -o ./losat_out/AvCLPV.PsCLPV.tlosatx.n8.out --query-gencode 1 --db-gencode 1 -n 8 )&>./losat_out/AvCLPV.PsCLPV.tlosatx.n8.log 
+
+# --- LOSATP Commands ---
+run_losatp_case() {
+    local query="$1"
+    local subject="$2"
+    local stem="$3"
+
+    echo "Starting ${stem} (LOSATP)..."
+    (time $LOSAT_BIN blastp -q "./fasta/${query}" -s "./fasta/${subject}" -o "./losat_out/${stem}.losatp.out" -n 1 --outfmt 6 )&>"./losat_out/${stem}.losatp.log"
+}
+
+LOSATP_CASES=(
+    "WSSV.faa:PajaWSV.faa:WSSV.PajaWSV"
+    "WSSV.faa:SicyWSV.faa:WSSV.SicyWSV"
+    "WSSV.faa:CoBV.faa:WSSV.CoBV"
+    "PajaWSV.faa:SicyWSV.faa:PajaWSV.SicyWSV"
+    "PajaWSV.faa:CoBV.faa:PajaWSV.CoBV"
+    "SicyWSV.faa:CoBV.faa:SicyWSV.CoBV"
+    "AP027078.faa:AP027131.faa:AP027078.AP027131"
+    "AP027078.faa:AP027132.faa:AP027078.AP027132"
+    "AP027078.faa:AP027133.faa:AP027078.AP027133"
+    "AP027078.faa:NZ_CP006932.faa:AP027078.NZ_CP006932"
+    "AP027131.faa:AP027132.faa:AP027131.AP027132"
+    "AP027131.faa:AP027133.faa:AP027131.AP027133"
+    "AP027131.faa:NZ_CP006932.faa:AP027131.NZ_CP006932"
+    "AP027132.faa:AP027133.faa:AP027132.AP027133"
+    "AP027132.faa:NZ_CP006932.faa:AP027132.NZ_CP006932"
+    "AP027133.faa:NZ_CP006932.faa:AP027133.NZ_CP006932"
+)
+
+for losatp_case in "${LOSATP_CASES[@]}"; do
+    IFS=":" read -r query subject stem <<<"$losatp_case"
+    run_losatp_case "$query" "$subject" "$stem"
+done
+
 <<COMMENTOUT
 # --- TLOSATX Commands (Genetic Code: 4) ---
 echo "Starting NZ_CP006932 self..."

@@ -463,11 +463,11 @@ mod tests {
     fn test_extract_kmer() {
         let seq = b"ACGTACGT";
         let packed = PackedSequence::new(seq).unwrap();
-        
+
         // ACGT = 0b00011011 = 27
         let kmer = packed.extract_kmer(0, 4).unwrap();
         assert_eq!(kmer, 0b00011011);
-        
+
         // CGTA = 0b01101100 = 108
         let kmer = packed.extract_kmer(1, 4).unwrap();
         assert_eq!(kmer, 0b01101100);
@@ -477,11 +477,11 @@ mod tests {
     fn test_extract_kmer_with_ambiguous() {
         let seq = b"ACNGT";
         let packed = PackedSequence::new(seq).unwrap();
-        
+
         // K-mer containing N should return None
         assert!(packed.extract_kmer(0, 4).is_none());
         assert!(packed.extract_kmer(1, 4).is_none());
-        
+
         // K-mer not containing N should work
         assert!(packed.extract_kmer(3, 2).is_some());
     }
@@ -498,10 +498,10 @@ mod tests {
     fn test_kmer_iterator() {
         let seq = b"ACGTACGT";
         let packed = PackedSequence::new(seq).unwrap();
-        
+
         let kmers: Vec<(usize, u64)> = packed.iter_kmers(4).collect();
         assert_eq!(kmers.len(), 5); // 8 - 4 + 1 = 5 k-mers
-        
+
         // Verify first and last k-mers
         assert_eq!(kmers[0], (0, 0b00011011)); // ACGT
         assert_eq!(kmers[4], (4, 0b00011011)); // ACGT
@@ -511,9 +511,9 @@ mod tests {
     fn test_kmer_iterator_with_ambiguous() {
         let seq = b"ACNGTACGT";
         let packed = PackedSequence::new(seq).unwrap();
-        
+
         let kmers: Vec<(usize, u64)> = packed.iter_kmers(4).collect();
-        
+
         // Should skip k-mers containing N
         // Valid k-mers start at positions 3, 4, 5
         assert!(kmers.iter().all(|(pos, _)| *pos >= 3));
@@ -522,10 +522,10 @@ mod tests {
     #[test]
     fn test_encode_kmer_from_ascii() {
         let seq = b"ACGTACGT";
-        
+
         let kmer = encode_kmer_from_ascii(seq, 0, 4).unwrap();
         assert_eq!(kmer, 0b00011011); // ACGT
-        
+
         let kmer = encode_kmer_from_ascii(seq, 1, 4).unwrap();
         assert_eq!(kmer, 0b01101100); // CGTA
     }
@@ -543,7 +543,7 @@ mod tests {
         // NCBI BLAST packs: base0 at bits 6-7, base1 at bits 4-5, etc.
         let seq = b"ACGT";
         let packed = PackedSequence::new(seq).unwrap();
-        
+
         // A=0, C=1, G=2, T=3
         // Expected byte: (0 << 6) | (1 << 4) | (2 << 2) | 3 = 0b00011011 = 27
         assert_eq!(packed.data()[0], 0b00011011);
@@ -554,10 +554,10 @@ mod tests {
         // Test sequence that doesn't fill the last byte completely
         let seq = b"ACGTA"; // 5 bases = 1 full byte + 1 partial byte
         let packed = PackedSequence::new(seq).unwrap();
-        
+
         assert_eq!(packed.len(), 5);
         assert_eq!(packed.data().len(), 2);
-        
+
         // Verify all bases can be extracted correctly
         assert_eq!(packed.get_base(0), 0); // A
         assert_eq!(packed.get_base(1), 1); // C

@@ -121,5 +121,3 @@ pub fn calculate_evalue_ncbi_style(
 pub fn bit_score(score: i32, params: &KarlinParams) -> f64 {
     calc_bit_score(score, params)
 }
-
-

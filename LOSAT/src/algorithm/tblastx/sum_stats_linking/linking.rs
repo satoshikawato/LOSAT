@@ -3,12 +3,12 @@
 //! Reference: ncbi-blast/c++/src/algo/blast/core/link_hsps.c
 
 use crate::stats::sum_statistics::{
-    gap_decay_divisor, small_gap_sum_e, large_gap_sum_e, normalize_score,
     defaults::{GAP_SIZE, OVERLAP_SIZE},
+    gap_decay_divisor, large_gap_sum_e, normalize_score, small_gap_sum_e,
 };
 use crate::stats::KarlinParams;
-use std::sync::OnceLock;
 use std::cell::RefCell;
+use std::sync::OnceLock;
 // NCBI reference: ncbi-blast/c++/include/algo/blast/blastinput/blast_args.hpp:1290-1296
 // ```c
 // CMTArgs(...)
@@ -27,8 +27,8 @@ use crate::algorithm::tblastx::diagnostics::diagnostics_enabled;
 use crate::algorithm::tblastx::extension::convert_coords;
 use crate::algorithm::tblastx::lookup::QueryContext;
 
-use super::params::LinkingParams;
 use super::cutoffs::calculate_link_hsp_cutoffs_ncbi;
+use super::params::LinkingParams;
 
 // ---------------------------------------------------------------------------
 // Constants
@@ -96,7 +96,13 @@ fn trace_hsp_target() -> Option<TraceHspTarget> {
 }
 
 #[inline(always)]
-fn trace_match_target(target: TraceHspTarget, q_start: usize, q_end: usize, s_start: usize, s_end: usize) -> bool {
+fn trace_match_target(
+    target: TraceHspTarget,
+    q_start: usize,
+    q_end: usize,
+    s_start: usize,
+    s_end: usize,
+) -> bool {
     q_start as i32 == target.q_start
         && q_end as i32 == target.q_end
         && s_start as i32 == target.s_start
@@ -134,7 +140,7 @@ fn blast_nint(x: f64) -> i32 {
 /// This is the "hot" data used in the inner loop
 #[derive(Clone)]
 struct LhHelper {
-    hsp_idx: usize,     // Original HSP index (NCBI: ptr field)
+    hsp_idx: usize, // Original HSP index (NCBI: ptr field)
     q_off_trim: i32,
     s_off_trim: i32,
     sum: [i32; 2],      // sum for both indices (small gap, large gap)
@@ -147,28 +153,28 @@ struct LhHelper {
 #[derive(Clone)]
 struct HspLink {
     score: i32,
-    ctx_idx: usize,          // NCBI: H->hsp->context - for kbp[context] lookup
+    ctx_idx: usize, // NCBI: H->hsp->context - for kbp[context] lookup
     q_off_trim: i32,
     s_off_trim: i32,
     q_end_trim: i32,
     s_end_trim: i32,
-    sum: [i32; 2],           // sum for both indices
-    xsum: [f64; 2],          // normalized sum for both indices
+    sum: [i32; 2],  // sum for both indices
+    xsum: [f64; 2], // normalized sum for both indices
     // NCBI parity: precompute the per-HSP normalized score contribution once.
     // This avoids recomputing (and re-ln'ing K) inside hot loops.
     xscore: f64,
-    num: [i16; 2],           // number of HSPs in chain for both indices
+    num: [i16; 2], // number of HSPs in chain for both indices
     // Best previous HSP to link with for both indices (NCBI: LinkHSPStruct* or NULL).
     // We store an index into `hsp_links`, using SENTINEL_IDX as the NULL marker.
     link: [usize; 2],
-    changed: bool,           // Has link been changed? (NCBI: hsp_link.changed)
-    linked_to: i32,          // How many HSPs link TO this one (NCBI: linked_to)
-    start_of_chain: bool,    // Is this HSP the start of a chain? (for output filtering)
-    linked_set: bool,        // Is this HSP part of a multi-HSP chain? (NCBI: linked_set)
+    changed: bool,        // Has link been changed? (NCBI: hsp_link.changed)
+    linked_to: i32,       // How many HSPs link TO this one (NCBI: linked_to)
+    start_of_chain: bool, // Is this HSP the start of a chain? (for output filtering)
+    linked_set: bool,     // Is this HSP part of a multi-HSP chain? (NCBI: linked_set)
     // Intrusive linked list for active HSPs (NCBI uses hp_start->next linked list)
     // SENTINEL_IDX indicates end of list or not in list
-    next_active: usize,      // Next active HSP in list
-    prev_active: usize,      // Previous active HSP in list
+    next_active: usize, // Next active HSP in list
+    prev_active: usize, // Previous active HSP in list
 }
 
 /// Thread-local buffer pools for memory reuse across frame groups
@@ -277,7 +283,8 @@ pub fn apply_sum_stats_even_gap_linking(
     // Sort key: (q_idx, s_idx, context/3, SIGN(s_frame), q_off desc, q_end desc, s_off desc, s_end desc)
     hits.sort_unstable_by(|a, b| {
         // Primary: q_idx, s_idx (for multi-query/subject)
-        a.q_idx.cmp(&b.q_idx)
+        a.q_idx
+            .cmp(&b.q_idx)
             .then(a.s_idx.cmp(&b.s_idx))
             // NCBI line 343-349: context/(NUM_FRAMES/2) = context/3 for query strand
             .then_with(|| {
@@ -307,7 +314,7 @@ pub fn apply_sum_stats_even_gap_linking(
 
     // Step 2: Detect frame boundaries in sorted list (NCBI lines 514-534)
     // Split into groups where (context/3, SIGN(s_frame)) changes
-    let total_hits = hits.len();  // Save for pool sizing (NCBI: hsp_list->hspcnt)
+    let total_hits = hits.len(); // Save for pool sizing (NCBI: hsp_list->hspcnt)
     let mut frame_groups: Vec<Vec<UngappedHit>> = Vec::new();
     let mut current_group: Vec<UngappedHit> = Vec::new();
 
@@ -351,7 +358,7 @@ pub fn apply_sum_stats_even_gap_linking(
     //
     // NCBI memory pooling: link_hsps.c:452-454 allocates lh_helper once with
     // MAX(1024, hspcnt+5) and reuses it across all frame groups.
-    let initial_lh_size = (total_hits + 5).max(1024);  // NCBI: MAX(1024, hspcnt+5)
+    let initial_lh_size = (total_hits + 5).max(1024); // NCBI: MAX(1024, hspcnt+5)
 
     #[cfg(feature = "parallel")]
     let mut results: Vec<UngappedHit> = {
@@ -366,11 +373,9 @@ pub fn apply_sum_stats_even_gap_linking(
             .map(|(group_idx, group_hits)| {
                 POOLS.with(|pools| {
                     let mut pools_opt = pools.borrow_mut();
-                    let pool = pools_opt.get_or_insert_with(|| {
-                        BufferPools {
-                            lh_helpers: Vec::with_capacity(initial_lh_size),
-                            hsp_links: Vec::with_capacity(total_hits),
-                        }
+                    let pool = pools_opt.get_or_insert_with(|| BufferPools {
+                        lh_helpers: Vec::with_capacity(initial_lh_size),
+                        hsp_links: Vec::with_capacity(total_hits),
                     });
                     let processed = link_hsp_group_ncbi(
                         group_hits,
@@ -454,8 +459,7 @@ pub fn apply_sum_stats_even_gap_linking(
         let b_s_sign = b.s_frame.signum();
 
         // NCBI s_RevCompareHSPsTransl: descending by context group, then by subject frame
-        b_ctx_group.cmp(&a_ctx_group)
-            .then(b_s_sign.cmp(&a_s_sign))
+        b_ctx_group.cmp(&a_ctx_group).then(b_s_sign.cmp(&a_s_sign))
     });
 
     // Sort 2: s_FwdCompareHSPsTransl - Forward stable sort by query context group
@@ -509,9 +513,9 @@ fn link_hsp_group_ncbi(
     _subject_frame_bases: &[i32], // Kept for API compatibility; no longer used after frame-relative coord fix
     length_adj_per_context: &[i64],
     eff_searchsp_per_context: &[i64],
-    log_k_by_ctx: &[f64],  // Pre-computed log(K) per context
-    pool_lh_helpers: &mut Vec<LhHelper>,  // Thread-local pool for lh_helper reuse
-    pool_hsp_links: &mut Vec<HspLink>,     // Thread-local pool for hsp_link reuse
+    log_k_by_ctx: &[f64],                // Pre-computed log(K) per context
+    pool_lh_helpers: &mut Vec<LhHelper>, // Thread-local pool for lh_helper reuse
+    pool_hsp_links: &mut Vec<HspLink>,   // Thread-local pool for hsp_link reuse
 ) -> Vec<UngappedHit> {
     if group_hits.is_empty() {
         return group_hits;
@@ -610,7 +614,7 @@ fn link_hsp_group_ncbi(
     // }
     // subject_length = MAX(subject_length - length_adjustment, 1);
     // ```
-    let length_adj_for_subject = length_adjustment / 3;  // integer division
+    let length_adj_for_subject = length_adjustment / 3; // integer division
     let eff_subject_len = (subject_len_aa - length_adj_for_subject).max(1) as f64;
 
     // Use pre-computed cutoffs from NCBI algorithm
@@ -632,25 +636,35 @@ fn link_hsp_group_ncbi(
         eprintln!("[DEBUG] link_hsp_group_ncbi first group:");
         eprintln!(
             "  query_context={}, q_aa_len={}, subject_len_nucl={}, subject_aa_len={}",
-            query_context,
-            query_len_aa,
-            subject_len_nucl,
-            subject_len_aa
+            query_context, query_len_aa, subject_len_nucl, subject_len_aa
         );
-        eprintln!("  length_adjustment={} (pre-computed), length_adj_for_subject={}",
-            length_adjustment, length_adj_for_subject);
-        eprintln!("  eff_query_len={:.2}, eff_subject_len={:.2} (local)",
-            eff_query_len, eff_subject_len);
-        eprintln!("  eff_search_space={} (pre-computed, Int8)",
-            eff_search_space);
-        eprintln!("  lambda={}, k={}, logK={:.4}", params.lambda, params.k, params.k.ln());
+        eprintln!(
+            "  length_adjustment={} (pre-computed), length_adj_for_subject={}",
+            length_adjustment, length_adj_for_subject
+        );
+        eprintln!(
+            "  eff_query_len={:.2}, eff_subject_len={:.2} (local)",
+            eff_query_len, eff_subject_len
+        );
+        eprintln!(
+            "  eff_search_space={} (pre-computed, Int8)",
+            eff_search_space
+        );
+        eprintln!(
+            "  lambda={}, k={}, logK={:.4}",
+            params.lambda,
+            params.k,
+            params.k.ln()
+        );
     }
 
     // Debug: print cutoffs for first group
     static DEBUG_CUTOFFS: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
     if diag_enabled && !DEBUG_CUTOFFS.swap(true, std::sync::atomic::Ordering::Relaxed) {
-        eprintln!("[DEBUG] Linking cutoffs: small_gap={}, big_gap={}, ignore_small_gaps={}, gap_prob={}",
-            cutoff_small, cutoff_big, ignore_small_gaps, gap_prob);
+        eprintln!(
+            "[DEBUG] Linking cutoffs: small_gap={}, big_gap={}, ignore_small_gaps={}, gap_prob={}",
+            cutoff_small, cutoff_big, ignore_small_gaps, gap_prob
+        );
     }
 
     // NOTE: We already sorted group_hits above using NCBI's reverse comparator semantics.
@@ -771,30 +785,33 @@ fn link_hsp_group_ncbi(
     // NCBI uses calloc to allocate n+2 entries, all zero-initialized.
     // We use resize to create n+2 default entries, then set the sentinels.
     pool_lh_helpers.clear();
-    pool_lh_helpers.resize(n + 2, LhHelper {
-        hsp_idx: SENTINEL_IDX,
-        q_off_trim: 0,
-        s_off_trim: 0,
-        sum: [0, 0],           // NCBI: calloc zero-initializes
-        next_larger: 0,
-        maxsum1: 0,            // Default; sentinels will override
-    });
+    pool_lh_helpers.resize(
+        n + 2,
+        LhHelper {
+            hsp_idx: SENTINEL_IDX,
+            q_off_trim: 0,
+            s_off_trim: 0,
+            sum: [0, 0], // NCBI: calloc zero-initializes
+            next_larger: 0,
+            maxsum1: 0, // Default; sentinels will override
+        },
+    );
     // Initialize sentinels (indices 0 and 1)
     pool_lh_helpers[0] = LhHelper {
         hsp_idx: SENTINEL_IDX,
         q_off_trim: 0,
         s_off_trim: 0,
-        sum: [0, 0],           // NCBI: calloc zero-initializes
+        sum: [0, 0], // NCBI: calloc zero-initializes
         next_larger: 0,
-        maxsum1: -10000,       // NCBI line 576
+        maxsum1: -10000, // NCBI line 576
     };
     pool_lh_helpers[1] = LhHelper {
         hsp_idx: SENTINEL_IDX,
         q_off_trim: 0,
         s_off_trim: 0,
-        sum: [0, 0],           // NCBI: calloc zero-initializes
+        sum: [0, 0], // NCBI: calloc zero-initializes
         next_larger: 0,
-        maxsum1: -10000,       // Will be reset to -10000 in each pass (line 1191)
+        maxsum1: -10000, // Will be reset to -10000 in each pass (line 1191)
     };
     // Remaining entries (2..n+2) will be populated during linking passes
     // Use pool_lh_helpers directly throughout the function (all lh_helpers references replaced)
@@ -948,7 +965,10 @@ fn link_hsp_group_ncbi(
                 pool_lh_helpers[lh_len].hsp_idx = hsp_idx;
                 pool_lh_helpers[lh_len].q_off_trim = pool_hsp_links[hsp_idx].q_off_trim;
                 pool_lh_helpers[lh_len].s_off_trim = pool_hsp_links[hsp_idx].s_off_trim;
-                pool_lh_helpers[lh_len].sum = [pool_hsp_links[hsp_idx].sum[0], pool_hsp_links[hsp_idx].sum[1]];
+                pool_lh_helpers[lh_len].sum = [
+                    pool_hsp_links[hsp_idx].sum[0],
+                    pool_hsp_links[hsp_idx].sum[1],
+                ];
 
                 // NCBI lines 669-671: update maxsum1
                 running_max = running_max.max(pool_hsp_links[hsp_idx].sum[1]);
@@ -988,7 +1008,11 @@ fn link_hsp_group_ncbi(
                     let mut h_link: usize = SENTINEL_IDX;
 
                     // NCBI line 702: if (H->hsp->score > cutoff[index])
-                    let is_target_hsp = if debug_chaining { target_hsp_idx == Some(i) } else { false };
+                    let is_target_hsp = if debug_chaining {
+                        target_hsp_idx == Some(i)
+                    } else {
+                        false
+                    };
                     let i_score = pool_hsp_links[i].score;
                     if i_score > cutoff_small {
                         let h_qe = pool_hsp_links[i].q_end_trim;
@@ -997,8 +1021,13 @@ fn link_hsp_group_ncbi(
                         let h_se_gap = h_se + WINDOW_SIZE;
 
                         if is_target_hsp {
-                            eprintln!("[DEBUG_CHAINING] INDEX 0 (small gap) linking for target HSP:");
-                            eprintln!("  h_qe: {}, h_se: {}, h_qe_gap: {}, h_se_gap: {}", h_qe, h_se, h_qe_gap, h_se_gap);
+                            eprintln!(
+                                "[DEBUG_CHAINING] INDEX 0 (small gap) linking for target HSP:"
+                            );
+                            eprintln!(
+                                "  h_qe: {}, h_se: {}, h_qe_gap: {}, h_se_gap: {}",
+                                h_qe, h_se, h_qe_gap, h_se_gap
+                            );
                         }
 
                         // Inner loop: NCBI lines 706-742
@@ -1011,8 +1040,12 @@ fn link_hsp_group_ncbi(
                             // NCBI line 717
                             if qo > h_qe_gap + TRIM_SIZE {
                                 if is_target_hsp {
-                                    eprintln!("  [BREAK] j_lh_idx={}, qo={} > h_qe_gap+TRIM_SIZE={}",
-                                        j_lh_idx, qo, h_qe_gap + TRIM_SIZE);
+                                    eprintln!(
+                                        "  [BREAK] j_lh_idx={}, qo={} > h_qe_gap+TRIM_SIZE={}",
+                                        j_lh_idx,
+                                        qo,
+                                        h_qe_gap + TRIM_SIZE
+                                    );
                                 }
                                 break;
                             }
@@ -1033,10 +1066,15 @@ fn link_hsp_group_ncbi(
                                 if is_target_hsp {
                                     eprintln!("  [LINK] j_lh_idx={}, j={}, sum={} > h_sum={}, linking to HSP {}",
                                         j_lh_idx, j, sum, h_sum, j);
-                                    eprintln!("    Linked HSP: q_aa={}-{}, s_aa={}-{}, score={}, num={}",
-                                        group_hits[j].q_aa_start, group_hits[j].q_aa_end,
-                                        group_hits[j].s_aa_start, group_hits[j].s_aa_end,
-                                        pool_hsp_links[j].score, pool_hsp_links[j].num[0]);
+                                    eprintln!(
+                                        "    Linked HSP: q_aa={}-{}, s_aa={}-{}, score={}, num={}",
+                                        group_hits[j].q_aa_start,
+                                        group_hits[j].q_aa_end,
+                                        group_hits[j].s_aa_start,
+                                        group_hits[j].s_aa_end,
+                                        pool_hsp_links[j].score,
+                                        pool_hsp_links[j].num[0]
+                                    );
                                 }
                                 h_num = pool_hsp_links[j].num[0];
                                 h_sum = pool_hsp_links[j].sum[0];
@@ -1056,8 +1094,16 @@ fn link_hsp_group_ncbi(
 
                     // is_target_hsp is already defined at line 1085, reuse it here
                     if is_target_hsp {
-                        eprintln!("[DEBUG_CHAINING] INDEX 0 update: new_sum={}, num={}, link={}",
-                            new_sum, h_num + 1, if h_link != SENTINEL_IDX { h_link } else { 999999 });
+                        eprintln!(
+                            "[DEBUG_CHAINING] INDEX 0 update: new_sum={}, num={}, link={}",
+                            new_sum,
+                            h_num + 1,
+                            if h_link != SENTINEL_IDX {
+                                h_link
+                            } else {
+                                999999
+                            }
+                        );
                     }
 
                     // NCBI lines 755-758: Update sum, num, link, lh_helper
@@ -1071,7 +1117,10 @@ fn link_hsp_group_ncbi(
                         best_sum[0] = new_sum;
                         best[0] = Some(i);
                         if is_target_hsp {
-                            eprintln!("[DEBUG_CHAINING] INDEX 0: new best_sum={}, best={}", new_sum, i);
+                            eprintln!(
+                                "[DEBUG_CHAINING] INDEX 0: new best_sum={}, best={}",
+                                new_sum, i
+                            );
                         }
                     }
                     // NCBI line 764: H->hsp_link.xsum[index] = new_xsum; (after best update)
@@ -1100,7 +1149,11 @@ fn link_hsp_group_ncbi(
                 let prev_link = pool_hsp_links[i].link[1];
 
                 // Define is_target_hsp at loop start for use in all blocks
-                let is_target_hsp = if debug_chaining { target_hsp_idx == Some(i) } else { false };
+                let is_target_hsp = if debug_chaining {
+                    target_hsp_idx == Some(i)
+                } else {
+                    false
+                };
 
                 // NCBI `link_hsps.c` lines 781-795:
                 //   H->hsp_link.changed=1;
@@ -1113,8 +1166,7 @@ fn link_hsp_group_ncbi(
                 // When an HSP is processed, both linked_to=-1000 and hsp_link.changed=1 are set,
                 // so changed==0 is sufficient to determine the HSP hasn't been processed.
                 let can_skip_ncbi = !first_pass
-                    && (prev_link == SENTINEL_IDX
-                        || !pool_hsp_links[prev_link].changed);
+                    && (prev_link == SENTINEL_IDX || !pool_hsp_links[prev_link].changed);
 
                 if can_skip_ncbi {
                     if prev_link != SENTINEL_IDX {
@@ -1136,9 +1188,19 @@ fn link_hsp_group_ncbi(
                         let h_qe = pool_hsp_links[i].q_end_trim;
                         let h_se = pool_hsp_links[i].s_end_trim;
                         if is_target_hsp {
-                            eprintln!("[DEBUG_CHAINING] INDEX 1 (large gap) linking for target HSP:");
-                            eprintln!("  h_qe: {}, h_se: {}, prev_link: {}", h_qe, h_se,
-                                if prev_link != SENTINEL_IDX { prev_link } else { 999999 });
+                            eprintln!(
+                                "[DEBUG_CHAINING] INDEX 1 (large gap) linking for target HSP:"
+                            );
+                            eprintln!(
+                                "  h_qe: {}, h_se: {}, prev_link: {}",
+                                h_qe,
+                                h_se,
+                                if prev_link != SENTINEL_IDX {
+                                    prev_link
+                                } else {
+                                    999999
+                                }
+                            );
                         }
 
                         // NCBI `link_hsps.c` lines 812-823 (note the hardcoded `if(1)`):
@@ -1152,7 +1214,10 @@ fn link_hsp_group_ncbi(
                         //
                         // This sets the initial best score to slightly less than the previous
                         // best's real value so ties preserve original ordering.
-                        if !first_pass && prev_link != SENTINEL_IDX && pool_hsp_links[prev_link].linked_to >= 0 {
+                        if !first_pass
+                            && prev_link != SENTINEL_IDX
+                            && pool_hsp_links[prev_link].linked_to >= 0
+                        {
                             h_sum = pool_hsp_links[prev_link].sum[1] - 1;
                             if is_target_hsp {
                                 eprintln!("  Initial h_sum from prev_link: {}", h_sum);
@@ -1193,10 +1258,15 @@ fn link_hsp_group_ncbi(
                                 if is_target_hsp {
                                     eprintln!("  [LINK] current_idx={}, j={}, sum={} > h_sum={}, linking to HSP {}",
                                         current_idx, j, sum, h_sum, j);
-                                    eprintln!("    Linked HSP: q_aa={}-{}, s_aa={}-{}, score={}, num={}",
-                                        group_hits[j].q_aa_start, group_hits[j].q_aa_end,
-                                        group_hits[j].s_aa_start, group_hits[j].s_aa_end,
-                                        pool_hsp_links[j].score, pool_hsp_links[j].num[1]);
+                                    eprintln!(
+                                        "    Linked HSP: q_aa={}-{}, s_aa={}-{}, score={}, num={}",
+                                        group_hits[j].q_aa_start,
+                                        group_hits[j].q_aa_end,
+                                        group_hits[j].s_aa_start,
+                                        group_hits[j].s_aa_end,
+                                        pool_hsp_links[j].score,
+                                        pool_hsp_links[j].num[1]
+                                    );
                                 }
                                 h_num = pool_hsp_links[j].num[1];
                                 h_sum = pool_hsp_links[j].sum[1];
@@ -1220,8 +1290,16 @@ fn link_hsp_group_ncbi(
 
                 // is_target_hsp is already defined at line 1218, reuse it here
                 if is_target_hsp {
-                    eprintln!("[DEBUG_CHAINING] INDEX 1 update: new_sum={}, num={}, link={}",
-                        new_sum, h_num + 1, if h_link != SENTINEL_IDX { h_link } else { 999999 });
+                    eprintln!(
+                        "[DEBUG_CHAINING] INDEX 1 update: new_sum={}, num={}, link={}",
+                        new_sum,
+                        h_num + 1,
+                        if h_link != SENTINEL_IDX {
+                            h_link
+                        } else {
+                            999999
+                        }
+                    );
                 }
 
                 // NCBI lines 870-873: Update sum, num, link, lh_helper
@@ -1232,7 +1310,8 @@ fn link_hsp_group_ncbi(
 
                 // NCBI line 874: lh_helper[H_index].maxsum1 = MAX(lh_helper[H_index-1].maxsum1, new_sum);
                 // Note: maxsum1 is unused (NCBI line 850 is if(0)) but we compute it for strict parity
-                pool_lh_helpers[h_lh_idx].maxsum1 = pool_lh_helpers[h_lh_idx - 1].maxsum1.max(new_sum);
+                pool_lh_helpers[h_lh_idx].maxsum1 =
+                    pool_lh_helpers[h_lh_idx - 1].maxsum1.max(new_sum);
 
                 // Update next_larger for this entry (NCBI lines 876-884)
                 //
@@ -1259,7 +1338,10 @@ fn link_hsp_group_ncbi(
                     best_sum[1] = new_sum;
                     best[1] = Some(i);
                     if is_target_hsp {
-                        eprintln!("[DEBUG_CHAINING] INDEX 1: new best_sum={}, best={}", new_sum, i);
+                        eprintln!(
+                            "[DEBUG_CHAINING] INDEX 1: new best_sum={}, best={}",
+                            new_sum, i
+                        );
                     }
                 }
                 // NCBI line 892: H->hsp_link.xsum[index] = new_xsum; (after best update)
@@ -1288,10 +1370,15 @@ fn link_hsp_group_ncbi(
                 let num = pool_hsp_links[bi].num[0] as usize;
                 let xsum = pool_hsp_links[bi].xsum[0];
                 let divisor = gap_decay_divisor(gap_decay_rate, num);
-                prob[0] = small_gap_sum_e(WINDOW_SIZE, num as i16, xsum,
+                prob[0] = small_gap_sum_e(
+                    WINDOW_SIZE,
+                    num as i16,
+                    xsum,
                     eff_query_len as i32,
                     eff_subject_len as i32,
-                    eff_search_space as i64, divisor);
+                    eff_search_space as i64,
+                    divisor,
+                );
                 // NCBI `link_hsps.c` lines 918-922:
                 //   if( num > 1 ) {
                 //     if( gap_prob == 0 || (prob /= gap_prob) > INT4_MAX ) prob = INT4_MAX;
@@ -1310,10 +1397,14 @@ fn link_hsp_group_ncbi(
                 let num = pool_hsp_links[bi].num[1] as usize;
                 let xsum = pool_hsp_links[bi].xsum[1];
                 let divisor = gap_decay_divisor(gap_decay_rate, num);
-                prob[1] = large_gap_sum_e(num as i16, xsum,
+                prob[1] = large_gap_sum_e(
+                    num as i16,
+                    xsum,
                     eff_query_len as i32,
                     eff_subject_len as i32,
-                    eff_search_space as i64, divisor);
+                    eff_search_space as i64,
+                    divisor,
+                );
                 if num > 1 {
                     let denom = 1.0 - gap_prob;
                     if denom == 0.0 || (prob[1] / denom) > int4_max {
@@ -1332,10 +1423,14 @@ fn link_hsp_group_ncbi(
                 let num = pool_hsp_links[bi].num[1] as usize;
                 let xsum = pool_hsp_links[bi].xsum[1];
                 let divisor = gap_decay_divisor(gap_decay_rate, num);
-                prob[1] = large_gap_sum_e(num as i16, xsum,
+                prob[1] = large_gap_sum_e(
+                    num as i16,
+                    xsum,
                     eff_query_len as i32,
                     eff_subject_len as i32,
-                    eff_search_space as i64, divisor);
+                    eff_search_space as i64,
+                    divisor,
+                );
                 if num > 1 {
                     let denom = 1.0 - gap_prob;
                     if denom == 0.0 || (prob[1] / denom) > int4_max {
@@ -1348,7 +1443,11 @@ fn link_hsp_group_ncbi(
         }
 
         // NCBI line 940: Select best ordering method
-        let ordering = if !ignore_small_gaps && prob[0] <= prob[1] { 0 } else { 1 };
+        let ordering = if !ignore_small_gaps && prob[0] <= prob[1] {
+            0
+        } else {
+            1
+        };
         // NCBI never has "best==NULL" here as long as `number_of_hsps > 0`:
         // the DP loops always assign `best[index]` while scanning the list.
         let best_i = if let Some(i) = best[ordering] {
@@ -1416,7 +1515,10 @@ fn link_hsp_group_ncbi(
             if debug_chaining && target_hsp_idx == Some(cur) {
                 eprintln!("[DEBUG_CHAINING] Target HSP is in chain! ordering={}, evalue={:.2e}, is_first={}",
                     ordering, evalue, is_first);
-                eprintln!("  Chain head: best_i={}, chain length: {}", best_i, pool_hsp_links[best_i].num[ordering]);
+                eprintln!(
+                    "  Chain head: best_i={}, chain length: {}",
+                    best_i, pool_hsp_links[best_i].num[ordering]
+                );
             }
             // Avoid heap allocation in normal runs: chain_members is only used for debug output.
             if debug_chaining {
@@ -1512,7 +1614,11 @@ fn link_hsp_group_ncbi(
                 } else {
                     next.to_string()
                 };
-                let mark = if target_hsp_idx == Some(idx) { "*" } else { " " };
+                let mark = if target_hsp_idx == Some(idx) {
+                    "*"
+                } else {
+                    " "
+                };
                 eprintln!(
                     "  {}idx={} raw_score={} q={}-{} s={}-{} q_aa={}-{} s_aa={}-{} start_of_chain={} next={}",
                     mark,
@@ -1549,10 +1655,18 @@ fn link_hsp_group_ncbi(
     // a bug in the linking logic, not a valid case for E-value calculation.
 
     // Output filtering statistics for long sequences
-    if is_long_sequence && (stats_index0_filtered > 0 || stats_index0_passed > 0 || stats_index1_filtered > 0 || stats_index1_passed > 0) {
+    if is_long_sequence
+        && (stats_index0_filtered > 0
+            || stats_index0_passed > 0
+            || stats_index1_filtered > 0
+            || stats_index1_passed > 0)
+    {
         let total_index0 = stats_index0_filtered + stats_index0_passed;
         let total_index1 = stats_index1_filtered + stats_index1_passed;
-        eprintln!("[DEBUG LINKING_FILTER] subject_len_nucl={}, group_size={}", subject_len_nucl, n);
+        eprintln!(
+            "[DEBUG LINKING_FILTER] subject_len_nucl={}, group_size={}",
+            subject_len_nucl, n
+        );
         eprintln!("[DEBUG LINKING_FILTER] INDEX 0 (small gap): cutoff={}, filtered={}, passed={}, total={}, filter_rate={:.2}%",
             cutoff_small, stats_index0_filtered, stats_index0_passed, total_index0,
             if total_index0 > 0 { (stats_index0_filtered as f64 / total_index0 as f64) * 100.0 } else { 0.0 });
@@ -1573,7 +1687,13 @@ mod tests {
     use super::*;
 
     /// Helper to create a mock UngappedHit with specified coordinates
-    fn mock_hit(q_aa_start: usize, q_aa_end: usize, s_aa_start: usize, s_aa_end: usize, id: i32) -> UngappedHit {
+    fn mock_hit(
+        q_aa_start: usize,
+        q_aa_end: usize,
+        s_aa_start: usize,
+        s_aa_end: usize,
+        id: i32,
+    ) -> UngappedHit {
         UngappedHit {
             q_idx: 0,
             s_idx: 0,
@@ -1585,6 +1705,8 @@ mod tests {
             q_aa_end,
             s_aa_start,
             s_aa_end,
+            q_seed_off: q_aa_start,
+            s_seed_off: s_aa_start,
             q_orig_len: 1000,
             s_orig_len: 1000,
             raw_score: id, // Use raw_score as ID for verification
@@ -1625,10 +1747,10 @@ mod tests {
         // 3. q_off=100, q_end=140, s_off=200, s_end=250 (ID=3) - same q_off, smaller q_end
         // 4. q_off=50,  q_end=100, s_off=300, s_end=350 (ID=4) - smallest q_off
         let mut hits = vec![
-            mock_hit(50, 100, 300, 350, 4),   // Should be 4th (smallest q_off)
-            mock_hit(100, 140, 200, 250, 3),  // Should be 3rd (smaller q_end)
-            mock_hit(100, 150, 200, 250, 1),  // Should be 1st (largest all)
-            mock_hit(100, 150, 150, 200, 2),  // Should be 2nd (smaller s_off)
+            mock_hit(50, 100, 300, 350, 4),  // Should be 4th (smallest q_off)
+            mock_hit(100, 140, 200, 250, 3), // Should be 3rd (smaller q_end)
+            mock_hit(100, 150, 200, 250, 1), // Should be 1st (largest all)
+            mock_hit(100, 150, 150, 200, 2), // Should be 2nd (smaller s_off)
         ];
 
         // NCBI parity: Use frame-relative coordinates (not concatenated absolute)
@@ -1698,7 +1820,11 @@ mod tests {
         // Sort should be stable - original order preserved for equal elements
         let sorted_ids: Vec<i32> = hits.iter().map(|h| h.raw_score).collect();
         // Rust's sort_by is stable, so [1, 2] should remain [1, 2]
-        assert_eq!(sorted_ids, vec![1, 2], "Stable sort should preserve order for equal elements");
+        assert_eq!(
+            sorted_ids,
+            vec![1, 2],
+            "Stable sort should preserve order for equal elements"
+        );
     }
 
     /// Verify NCBI comparison semantics: all fields use DESCENDING order
@@ -1718,8 +1844,8 @@ mod tests {
         // Test: same query coords, different subject offsets
         // NCBI descending: larger s_off should come first
         let mut hits = vec![
-            mock_hit(100, 150, 50, 100, 1),   // s_off=50 (smaller)
-            mock_hit(100, 150, 200, 250, 2),  // s_off=200 (larger)
+            mock_hit(100, 150, 50, 100, 1),  // s_off=50 (smaller)
+            mock_hit(100, 150, 200, 250, 2), // s_off=200 (larger)
         ];
 
         // NCBI parity: Use frame-relative coordinates (not concatenated absolute)
@@ -1738,7 +1864,7 @@ mod tests {
             let (bqo, bqe, bso, bse) = frame_relative_coords(b);
             bqo.cmp(&aqo)
                 .then(bqe.cmp(&aqe))
-                .then(bso.cmp(&aso))  // LOSAT: b.cmp(&a) = DESCENDING
+                .then(bso.cmp(&aso)) // LOSAT: b.cmp(&a) = DESCENDING
                 .then(bse.cmp(&ase))
         });
 
@@ -1746,7 +1872,8 @@ mod tests {
 
         // DESCENDING: larger s_off (ID=2) should come first
         assert_eq!(
-            sorted_ids, vec![2, 1],
+            sorted_ids,
+            vec![2, 1],
             "Subject offset should be sorted DESCENDING (larger first). Got: {:?}",
             sorted_ids
         );

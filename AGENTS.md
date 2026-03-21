@@ -12,38 +12,53 @@ authoritative, current guidance for agent behavior in LOSAT.
    - Do not assume or guess behavior; always refer to the NCBI source code.
    - If the corresponding NCBI code cannot be found, the feature must not exist.
 
-2. Bit-perfect output parity is required.
+2. NCBI BLAST is reference-only, never an implementation dependency.
+   - NCBI BLAST+ binaries, libraries, FFI bindings, and subprocess calls may be
+     used only for source inspection, comparison tests, diff analysis, and
+     validation-oracle runs.
+   - Do not invoke `blastp`, `blastn`, `tblastx`, or any other NCBI executable
+     from LOSAT runtime code, build scripts, feature code paths, or fallback
+     paths.
+   - Do not delegate unsupported, unported, or partially ported behavior to
+     NCBI BLAST. If LOSAT does not implement a feature in Rust yet, it must
+     fail fast with an explicit unsupported/unimplemented error and remain on
+     the Rust porting backlog.
+   - Do not link against, embed, or otherwise depend on NCBI BLAST code as a
+     runtime implementation component. Reference the source; do not ship the
+     behavior by calling out to NCBI.
+
+3. Bit-perfect output parity is required.
    - Output must match NCBI BLAST+ exactly.
    - Do not simplify algorithms if it changes output.
    - Use the same floating-point precision as NCBI.
 
-3. NCBI code comments are mandatory for modifications.
+4. NCBI code comments are mandatory for modifications.
    - Every code change must include NCBI C/C++ reference comments with file path
      and line numbers.
    - Include the relevant NCBI snippet immediately above the Rust code.
    - If you cannot add the NCBI reference comments, do not write the code.
 
-4. No unauthorized features.
+5. No unauthorized features.
    - Never introduce functionality that does not exist in NCBI.
    - If a feature lacks an NCBI equivalent, delete it immediately.
 
-5. Exhaustive difference resolution.
+6. Exhaustive difference resolution.
    - Identify and fix every discrepancy between LOSAT and NCBI BLAST.
    - Patch every offender in one sweep, then fix compile issues.
 
-6. No assumptions or guessing.
+7. No assumptions or guessing.
    - Read the NCBI source; never speculate.
 
-7. Correct timing, order, and context.
+8. Correct timing, order, and context.
    - Call algorithms at the exact same timing and order as NCBI.
    - Input/output data must match NCBI exactly.
 
-8. Algorithmic fidelity over aesthetics.
+9. Algorithmic fidelity over aesthetics.
    - Do not refactor for readability if it changes logic.
    - Rust-specific deviations are allowed only to satisfy the memory model or
      performance while preserving behavior and Big O complexity.
 
-9. Testing discipline.
+10. Testing discipline.
    - Do not run "maybe helpful" tests while known NCBI divergences remain.
    - Run tests only when requested or after completing a parity sweep.
 
@@ -145,6 +160,10 @@ cd LOSAT && cargo fmt
   `ncbi-blast/c++/src/algo/blast/unit_tests/`.
 - Integration tests must compare output with NCBI BLAST+ and verify hit counts,
   bit scores, E-values, and coordinates.
+- NCBI BLAST+ execution is allowed only as a comparison oracle during testing
+  and diagnostics; it must not be part of LOSAT's feature implementation,
+  runtime execution, build pipeline, fallback handling, or unsupported-feature
+  path.
 - Hit-count deltas are a diagnostic only; if tracked, use <0.2% as a trend
   threshold, but acceptance still requires bit-perfect parity.
 
@@ -254,3 +273,5 @@ This file consolidates their requirements; if there is a conflict, follow this f
 
 LOSAT is a Rust reimplementation of NCBI BLAST targeting bit-perfect parity.
 Primary focus: TBLASTX and BLASTN. The Rust crate root is `LOSAT/`.
+Non-default `blastp` work remains a Rust porting task; incomplete areas must
+not be filled by delegating to external NCBI BLAST executables or libraries.

@@ -2,8 +2,8 @@
 //!
 //! Reference: ncbi-blast/c++/src/algo/blast/core/blast_parameters.c
 
-use crate::stats::KarlinParams;
 use crate::stats::sum_statistics::defaults::{GAP_SIZE, OVERLAP_SIZE};
+use crate::stats::KarlinParams;
 
 use super::params::{LinkHspCutoffs, BLAST_GAP_DECAY_RATE};
 
@@ -139,9 +139,8 @@ pub fn calculate_link_hsp_cutoffs_ncbi(
     let db_length = db_length / 3; // Also scale db_length for tblastx
 
     // NCBI: expected_length = (Int4)BLAST_Nint(log(kbp->K*q*s)/(kbp->H));
-    let expected_length = blast_nint(
-        (params.k * (query_length as f64) * (subject_length as f64)).ln() / params.h
-    );
+    let expected_length =
+        blast_nint((params.k * (query_length as f64) * (subject_length as f64)).ln() / params.h);
 
     // NCBI: query_length = query_length - expected_length;
     query_length -= expected_length;
@@ -159,8 +158,8 @@ pub fn calculate_link_hsp_cutoffs_ncbi(
         ((db_length as f64) / (subject_length as f64)).ln() * params.k / gap_decay_rate
     } else {
         // Subject mode (db_length == 0 or single sequence)
-        (((subject_length + expected_length) as f64) / (subject_length as f64)).ln()
-            * params.k / gap_decay_rate
+        (((subject_length + expected_length) as f64) / (subject_length as f64)).ln() * params.k
+            / gap_decay_rate
     };
 
     // NCBI: search_sp = ((Int8) query_length)* ((Int8) subject_length);
@@ -211,20 +210,52 @@ pub fn calculate_link_hsp_cutoffs_ncbi(
 
     // Debug output for long sequences (600kb+)
     if subject_len_nucl > 600_000 {
-        eprintln!("[DEBUG LINKING_CUTOFF] avg_query_length={}, subject_len_nucl={}", avg_query_length, subject_len_nucl);
-        eprintln!("[DEBUG LINKING_CUTOFF] query_length_after_adj={}, subject_length_after_adj={}", query_length, subject_length);
+        eprintln!(
+            "[DEBUG LINKING_CUTOFF] avg_query_length={}, subject_len_nucl={}",
+            avg_query_length, subject_len_nucl
+        );
+        eprintln!(
+            "[DEBUG LINKING_CUTOFF] query_length_after_adj={}, subject_length_after_adj={}",
+            query_length, subject_length
+        );
         eprintln!("[DEBUG LINKING_CUTOFF] expected_length={}", expected_length);
-        eprintln!("[DEBUG LINKING_CUTOFF] search_sp={}, window_sq={}, 8*window_sq={}", search_sp, window_sq, 8 * window_sq);
-        eprintln!("[DEBUG LINKING_CUTOFF] search_sp > 8*window_sq: {}", search_sp > 8 * window_sq);
+        eprintln!(
+            "[DEBUG LINKING_CUTOFF] search_sp={}, window_sq={}, 8*window_sq={}",
+            search_sp,
+            window_sq,
+            8 * window_sq
+        );
+        eprintln!(
+            "[DEBUG LINKING_CUTOFF] search_sp > 8*window_sq: {}",
+            search_sp > 8 * window_sq
+        );
         eprintln!("[DEBUG LINKING_CUTOFF] y_variable={:.6e}", y_variable);
-        eprintln!("[DEBUG LINKING_CUTOFF] x_variable_before_div={:.6e}", 0.25 * y_variable * (search_sp as f64));
+        eprintln!(
+            "[DEBUG LINKING_CUTOFF] x_variable_before_div={:.6e}",
+            0.25 * y_variable * (search_sp as f64)
+        );
         if search_sp > 8 * window_sq {
-            eprintln!("[DEBUG LINKING_CUTOFF] x_variable_after_div={:.6e}", x_variable);
-            eprintln!("[DEBUG LINKING_CUTOFF] x_small={:.6e}", y_variable * (window_sq as f64) / (gap_prob + K_EPSILON));
+            eprintln!(
+                "[DEBUG LINKING_CUTOFF] x_variable_after_div={:.6e}",
+                x_variable
+            );
+            eprintln!(
+                "[DEBUG LINKING_CUTOFF] x_small={:.6e}",
+                y_variable * (window_sq as f64) / (gap_prob + K_EPSILON)
+            );
         }
-        eprintln!("[DEBUG LINKING_CUTOFF] cutoff_small_gap_raw={}, cutoff_big_gap_raw={}", cutoff_small_gap, cutoff_big_gap);
-        eprintln!("[DEBUG LINKING_CUTOFF] scale_factor={}, final_cutoff_small={}, final_cutoff_big={}", scale_factor, final_cutoff_small, final_cutoff_big);
-        eprintln!("[DEBUG LINKING_CUTOFF] gap_prob={}, ignore_small_gaps={}", gap_prob, ignore_small_gaps);
+        eprintln!(
+            "[DEBUG LINKING_CUTOFF] cutoff_small_gap_raw={}, cutoff_big_gap_raw={}",
+            cutoff_small_gap, cutoff_big_gap
+        );
+        eprintln!(
+            "[DEBUG LINKING_CUTOFF] scale_factor={}, final_cutoff_small={}, final_cutoff_big={}",
+            scale_factor, final_cutoff_small, final_cutoff_big
+        );
+        eprintln!(
+            "[DEBUG LINKING_CUTOFF] gap_prob={}, ignore_small_gaps={}",
+            gap_prob, ignore_small_gaps
+        );
     }
 
     LinkHspCutoffs {

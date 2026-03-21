@@ -17,12 +17,34 @@ struct ParamEntry {
 }
 
 impl ParamEntry {
-    const fn new(gap_open: i32, gap_extend: i32, lambda: f64, k: f64, h: f64, alpha: f64, beta: f64) -> Self {
-        Self { gap_open, gap_extend, lambda, k, h, alpha, beta }
+    const fn new(
+        gap_open: i32,
+        gap_extend: i32,
+        lambda: f64,
+        k: f64,
+        h: f64,
+        alpha: f64,
+        beta: f64,
+    ) -> Self {
+        Self {
+            gap_open,
+            gap_extend,
+            lambda,
+            k,
+            h,
+            alpha,
+            beta,
+        }
     }
 
     fn to_karlin_params(&self) -> KarlinParams {
-        KarlinParams { lambda: self.lambda, k: self.k, h: self.h, alpha: self.alpha, beta: self.beta }
+        KarlinParams {
+            lambda: self.lambda,
+            k: self.k,
+            h: self.h,
+            alpha: self.alpha,
+            beta: self.beta,
+        }
     }
 }
 
@@ -267,7 +289,13 @@ pub fn lookup_nucl_params(spec: &NuclScoringSpec) -> KarlinParams {
         (3, 2) => BLASTN_3_2,
         (5, 4) => BLASTN_5_4,
         _ => {
-            return KarlinParams { lambda: 1.28, k: 0.46, h: 0.85, alpha: 1.5, beta: -2.0 };
+            return KarlinParams {
+                lambda: 1.28,
+                k: 0.46,
+                h: 0.85,
+                alpha: 1.5,
+                beta: -2.0,
+            };
         }
     };
 
@@ -315,7 +343,13 @@ pub fn lookup_protein_params(spec: &ProteinScoringSpec) -> KarlinParams {
         return table[0].to_karlin_params();
     }
 
-    KarlinParams { lambda: 0.267, k: 0.041, h: 0.14, alpha: 1.9, beta: -30.0 }
+    KarlinParams {
+        lambda: 0.267,
+        k: 0.041,
+        h: 0.14,
+        alpha: 1.9,
+        beta: -30.0,
+    }
 }
 
 /// Check if scores need to be rounded down for even-score-only matrices.
@@ -347,7 +381,13 @@ pub fn lookup_protein_params_ungapped(matrix: ScoringMatrix) -> KarlinParams {
         return table[0].to_karlin_params();
     }
 
-    KarlinParams { lambda: 0.3176, k: 0.134, h: 0.4012, alpha: 0.7916, beta: -3.2 }
+    KarlinParams {
+        lambda: 0.3176,
+        k: 0.134,
+        h: 0.4012,
+        alpha: 0.7916,
+        beta: -3.2,
+    }
 }
 
 /// Look up GAPPED Karlin-Altschul parameters for protein scoring scheme.
@@ -375,7 +415,13 @@ pub fn lookup_protein_params_gapped(matrix: ScoringMatrix) -> KarlinParams {
         }
     }
 
-    KarlinParams { lambda: 0.267, k: 0.041, h: 0.14, alpha: 1.9, beta: -30.0 }
+    KarlinParams {
+        lambda: 0.267,
+        k: 0.041,
+        h: 0.14,
+        alpha: 1.9,
+        beta: -30.0,
+    }
 }
 
 #[cfg(test)]
@@ -384,7 +430,12 @@ mod tests {
 
     #[test]
     fn test_lookup_nucl_params_megablast() {
-        let spec = NuclScoringSpec { reward: 1, penalty: -2, gap_open: 0, gap_extend: 0 };
+        let spec = NuclScoringSpec {
+            reward: 1,
+            penalty: -2,
+            gap_open: 0,
+            gap_extend: 0,
+        };
         let params = lookup_nucl_params(&spec);
         assert!((params.lambda - 1.28).abs() < 0.0001);
         assert!((params.k - 0.46).abs() < 0.0001);
@@ -392,7 +443,11 @@ mod tests {
 
     #[test]
     fn test_lookup_protein_params_blosum62() {
-        let spec = ProteinScoringSpec { matrix: ScoringMatrix::Blosum62, gap_open: 11, gap_extend: 1 };
+        let spec = ProteinScoringSpec {
+            matrix: ScoringMatrix::Blosum62,
+            gap_open: 11,
+            gap_extend: 1,
+        };
         let params = lookup_protein_params(&spec);
         assert!((params.lambda - 0.267).abs() < 0.01);
     }

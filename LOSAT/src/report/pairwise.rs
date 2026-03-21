@@ -4,8 +4,10 @@
 //!
 //! Reference: ncbi-blast/c++/src/objtools/align_format/showalign.cpp
 
+use super::outfmt6::{format_bitscore_ncbi, format_evalue_ncbi, ReportContext};
 use crate::common::Hit;
-use super::outfmt6::{format_evalue_ncbi, format_bitscore_ncbi, ReportContext};
+use crate::config::ScoringMatrix;
+use crate::utils::matrix::{aa_char_to_ncbistdaa, protein_score};
 use std::io::{self, Write};
 use std::sync::Arc;
 
@@ -27,6 +29,8 @@ pub struct PairwiseConfig {
     pub show_frame: bool,
     /// Program type for proper formatting
     pub program: String,
+    /// Protein scoring matrix for positives/midline rendering.
+    pub protein_matrix: ScoringMatrix,
 }
 
 impl Default for PairwiseConfig {
@@ -36,12 +40,13 @@ impl Default for PairwiseConfig {
             show_gi: false,
             show_frame: true,
             program: "tblastx".to_string(),
+            protein_matrix: ScoringMatrix::Blosum62,
         }
     }
 }
 
 /// Extended hit information for pairwise display
-/// 
+///
 /// For full pairwise output, we need the actual aligned sequences.
 /// This struct extends Hit with optional sequence data.
 #[derive(Debug, Clone)]
@@ -68,14 +73,16 @@ pub struct PairwiseHit {
 
 impl From<Hit> for PairwiseHit {
     fn from(hit: Hit) -> Self {
+        let positives = hit.num_positives;
+        let gaps = hit.gap_letters();
         Self {
             hit,
             query_seq: None,
             subject_seq: None,
             query_frame: None,
             subject_frame: None,
-            positives: None,
-            gaps: None,
+            positives: Some(positives),
+            gaps: Some(gaps),
             subject_length: None,
             subject_title: None,
         }
@@ -89,7 +96,7 @@ impl From<Hit> for PairwiseHit {
 /// Write database/subject information header
 ///
 /// Reference: ncbi-blast/c++/src/objtools/align_format/showalign.cpp
-/// 
+///
 /// Format:
 /// ```text
 /// >subject_id subject_description
@@ -103,16 +110,16 @@ pub fn write_subject_header<W: Write>(
 ) -> io::Result<()> {
     // Subject defline
     if let Some(title) = subject_title {
-        writeln!(writer, ">{} {}", subject_id, title)?;
+        writeln!(writer, "> {} {}", subject_id, title)?;
     } else {
-        writeln!(writer, ">{}", subject_id)?;
+        writeln!(writer, "> {}", subject_id)?;
     }
-    
+
     // Length line
     if let Some(len) = subject_length {
         writeln!(writer, "Length={}", len)?;
     }
-    
+
     writeln!(writer)?;
     Ok(())
 }
@@ -133,64 +140,96 @@ pub fn write_hsp_info<W: Write>(
     config: &PairwiseConfig,
 ) -> io::Result<()> {
     let h = &hit.hit;
-    
+
     // Score line
     // NCBI: " Score = XXX bits (YYY),  Expect = Z.Ze-NN"
     let bit_score_str = format_bitscore_ncbi(h.bit_score);
     let evalue_str = format_evalue_ncbi(h.e_value);
-    writeln!(
-        writer,
-        " Score = {} bits ({}),  Expect = {}",
-        bit_score_str, h.raw_score, evalue_str
-    )?;
-    
+    if config.program == "blastp" {
+        // NCBI reference: ncbi-blast/c++/src/objtools/align_format/showalign.cpp:3578-3604
+        // ```c
+        // out << " Score = " << bit_score
+        //     << " bits (" << score << "),  Expect = " << evalue;
+        // ...
+        // out << ", Method: Compositional matrix adjust.";
+        // ```
+        writeln!(
+            writer,
+            " Score = {} bits ({}),  Expect = {}, Method: Compositional matrix adjust.",
+            bit_score_str, h.raw_score, evalue_str
+        )?;
+    } else {
+        writeln!(
+            writer,
+            " Score = {} bits ({}),  Expect = {}",
+            bit_score_str, h.raw_score, evalue_str
+        )?;
+    }
+
     // Identity/Positives/Gaps line
     let align_len = h.length;
-    let num_ident = ((h.identity / 100.0) * align_len as f64).round() as usize;
-    let ident_pct = h.identity;
-    
-    let positives = hit.positives.unwrap_or(num_ident);
+    let num_ident = h.num_ident;
+    let ident_pct = if align_len > 0 {
+        (num_ident as f64 / align_len as f64) * 100.0
+    } else {
+        0.0
+    };
+
+    let positives = hit.positives.unwrap_or(h.num_positives.max(num_ident));
     let pos_pct = if align_len > 0 {
         (positives as f64 / align_len as f64) * 100.0
     } else {
         0.0
     };
-    
-    let gaps = hit.gaps.unwrap_or(0);
+
+    let gaps = hit.gaps.unwrap_or_else(|| h.gap_letters());
     let gap_pct = if align_len > 0 {
         (gaps as f64 / align_len as f64) * 100.0
     } else {
         0.0
     };
-    
+
     // For protein/translated: show Identities, Positives, Gaps
     // For nucleotide: show Identities, Gaps (no Positives)
     if config.program.contains("blast") && !config.program.contains("blastn") {
         writeln!(
             writer,
             " Identities = {}/{} ({:.0}%), Positives = {}/{} ({:.0}%), Gaps = {}/{} ({:.0}%)",
-            num_ident, align_len, ident_pct,
-            positives, align_len, pos_pct,
-            gaps, align_len, gap_pct
+            num_ident,
+            align_len,
+            ident_pct,
+            positives,
+            align_len,
+            pos_pct,
+            gaps,
+            align_len,
+            gap_pct
         )?;
     } else {
         writeln!(
             writer,
             " Identities = {}/{} ({:.0}%), Gaps = {}/{} ({:.0}%)",
-            num_ident, align_len, ident_pct,
-            gaps, align_len, gap_pct
+            num_ident, align_len, ident_pct, gaps, align_len, gap_pct
         )?;
     }
-    
+
     // Frame line (for translated searches)
     if config.show_frame {
         if let (Some(qf), Some(sf)) = (hit.query_frame, hit.subject_frame) {
-            let qf_str = if qf > 0 { format!("+{}", qf) } else { format!("{}", qf) };
-            let sf_str = if sf > 0 { format!("+{}", sf) } else { format!("{}", sf) };
+            let qf_str = if qf > 0 {
+                format!("+{}", qf)
+            } else {
+                format!("{}", qf)
+            };
+            let sf_str = if sf > 0 {
+                format!("+{}", sf)
+            } else {
+                format!("{}", sf)
+            };
             writeln!(writer, " Frame = {}/{}", qf_str, sf_str)?;
         }
     }
-    
+
     writeln!(writer)?;
     Ok(())
 }
@@ -211,17 +250,25 @@ pub fn write_alignment<W: Write>(
     config: &PairwiseConfig,
 ) -> io::Result<()> {
     let h = &hit.hit;
-    
+
     // If we have actual sequences, display them
     if let (Some(ref qseq), Some(ref sseq)) = (&hit.query_seq, &hit.subject_seq) {
         write_alignment_with_sequences(writer, h, qseq, sseq, config)?;
     } else {
         // No sequences available - show placeholder
-        writeln!(writer, "Query  {}  [... {} aa ...]  {}", h.q_start, h.length, h.q_end)?;
+        writeln!(
+            writer,
+            "Query  {}  [... {} aa ...]  {}",
+            h.q_start, h.length, h.q_end
+        )?;
         writeln!(writer)?;
-        writeln!(writer, "Sbjct  {}  [... {} aa ...]  {}", h.s_start, h.length, h.s_end)?;
+        writeln!(
+            writer,
+            "Sbjct  {}  [... {} aa ...]  {}",
+            h.s_start, h.length, h.s_end
+        )?;
     }
-    
+
     writeln!(writer)?;
     Ok(())
 }
@@ -237,101 +284,188 @@ fn write_alignment_with_sequences<W: Write>(
     let line_len = config.line_length;
     let q_chars: Vec<char> = query_seq.chars().collect();
     let s_chars: Vec<char> = subject_seq.chars().collect();
-    
+
     // Calculate position width for formatting
     let max_pos = hit.q_end.max(hit.s_end);
     let pos_width = format!("{}", max_pos).len().max(4);
-    
+
     let mut q_pos = hit.q_start;
     let mut s_pos = hit.s_start;
     let mut offset = 0;
-    
+
     while offset < q_chars.len() {
         let end = (offset + line_len).min(q_chars.len());
         let chunk_q: String = q_chars[offset..end].iter().collect();
         let chunk_s: String = s_chars[offset..end].iter().collect();
-        
+
         // Build middle line (identity markers)
         let middle: String = q_chars[offset..end]
             .iter()
             .zip(s_chars[offset..end].iter())
             .map(|(q, s)| {
                 if q == s {
-                    *q  // Identity: show the character
-                } else if is_positive_match(*q, *s) {
-                    '+'  // Positive: show +
+                    *q // Identity: show the character
+                } else if is_positive_match(*q, *s, config.protein_matrix) {
+                    '+' // Positive: show +
                 } else {
-                    ' '  // Mismatch: show space
+                    ' ' // Mismatch: show space
                 }
             })
             .collect();
-        
+
         // Count non-gap characters in this chunk
         let q_non_gap = chunk_q.chars().filter(|&c| c != '-').count();
         let s_non_gap = chunk_s.chars().filter(|&c| c != '-').count();
-        
+
         let q_end_pos = q_pos + q_non_gap.saturating_sub(1);
         let s_end_pos = s_pos + s_non_gap.saturating_sub(1);
-        
+
         // Query line
         writeln!(
             writer,
             "Query  {:>width$}  {}  {}",
-            q_pos, chunk_q, q_end_pos,
+            q_pos,
+            chunk_q,
+            q_end_pos,
             width = pos_width
         )?;
-        
+
         // Middle line (identity markers)
         writeln!(
             writer,
             "       {:>width$}  {}",
-            "", middle,
+            "",
+            middle,
             width = pos_width
         )?;
-        
+
         // Subject line
         writeln!(
             writer,
             "Sbjct  {:>width$}  {}  {}",
-            s_pos, chunk_s, s_end_pos,
+            s_pos,
+            chunk_s,
+            s_end_pos,
             width = pos_width
         )?;
-        
+
         writeln!(writer)?;
-        
+
         q_pos = q_end_pos + 1;
         s_pos = s_end_pos + 1;
         offset = end;
     }
-    
+
     Ok(())
 }
 
 /// Check if two amino acids are a positive match (similar)
-/// 
-/// This is a simplified check - a full implementation would use the BLOSUM62 matrix
-fn is_positive_match(a: char, b: char) -> bool {
+///
+/// NCBI reference: ncbi-blast/c++/src/objtools/align_format/showalign.cpp:2122-2149
+/// ```c
+/// if(sequence_standard[i]==sequence[i]){
+///     match ++;
+/// } else {
+///     if ((m_AlignType&eProt)
+///         && m_Matrix[(int)sequence_standard[i]][(int)sequence[i]] > 0){
+///         positive ++;
+///         if(m_AlignOption & eShowMiddleLine){
+///             middle_line[i] = '+';
+///         }
+///     }
+/// }
+/// ```
+fn is_positive_match(a: char, b: char, matrix: ScoringMatrix) -> bool {
     if a == b {
         return true;
     }
-    
-    // Simplified positive match groups based on BLOSUM62
-    let groups = [
-        "ILMV",      // Hydrophobic
-        "FYW",       // Aromatic
-        "KRH",       // Basic (positive)
-        "DE",        // Acidic (negative)
-        "STNQ",      // Polar
-        "AG",        // Small
-    ];
-    
-    for group in &groups {
-        if group.contains(a) && group.contains(b) {
-            return true;
+
+    let a_ncbi = aa_char_to_ncbistdaa(a as u8);
+    let b_ncbi = aa_char_to_ncbistdaa(b as u8);
+    protein_score(matrix, a_ncbi, b_ncbi) > 0
+}
+
+// NCBI reference: ncbi-blast/c++/src/algo/blast/format/blast_format.cpp:790-803
+// ```c
+// if (m_IsDbScan)
+//     dbname = string("User specified sequence set (Input: ") + m_SubjectTag + string(")");
+// else
+//     dbname = m_DbName;
+// ```
+fn write_database_header<W: Write>(writer: &mut W, context: &ReportContext) -> io::Result<()> {
+    if let Some(ref dbname) = context.database_name {
+        writeln!(writer, "Database: {}", dbname)?;
+        if let (Some(num_sequences), Some(total_letters)) = (
+            context.database_num_sequences,
+            context.database_total_letters,
+        ) {
+            writeln!(
+                writer,
+                "           {} sequences; {} total letters",
+                num_sequences, total_letters
+            )?;
         }
+        writeln!(writer)?;
+    } else if let Some(ref db) = context.subject_name {
+        writeln!(writer, "Database: {}", db)?;
+        writeln!(writer)?;
     }
-    
-    false
+    Ok(())
+}
+
+// NCBI reference: ncbi-blast/c++/src/objtools/align_format/showdefline.cpp:69-79
+// ```c
+// static const char*  kHeader = "Sequences producing significant alignments:";
+// static const char*  kBits = "(Bits)";
+// static const char*  kValue = "Value";
+// ```
+fn write_subject_summary_table<W: Write>(
+    writer: &mut W,
+    subject_order: &[u32],
+    subject_hits: &std::collections::HashMap<u32, Vec<&PairwiseHit>>,
+    subject_ids: &[Arc<str>],
+) -> io::Result<()> {
+    writeln!(
+        writer,
+        "                                                                      Score     E"
+    )?;
+    writeln!(
+        writer,
+        "Sequences producing significant alignments:                          (Bits)  Value"
+    )?;
+    writeln!(writer)?;
+
+    for s_idx in subject_order {
+        let Some(shits) = subject_hits.get(s_idx) else {
+            continue;
+        };
+        let Some(best_hit) = shits.first() else {
+            continue;
+        };
+        let subject_id = subject_ids
+            .get(*s_idx as usize)
+            .map(|id| id.as_ref())
+            .unwrap_or("unknown");
+        let mut label = subject_id.to_string();
+        if let Some(title) = best_hit.subject_title.as_deref() {
+            label.push(' ');
+            label.push_str(title);
+        }
+        if label.len() > 66 {
+            label.truncate(63);
+            label.push_str("...");
+        }
+
+        writeln!(
+            writer,
+            "{:<66} {:>5}  {:<7}",
+            label,
+            format_bitscore_ncbi(best_hit.hit.bit_score),
+            format_evalue_ncbi(best_hit.hit.e_value)
+        )?;
+    }
+    writeln!(writer)?;
+    Ok(())
 }
 
 // =============================================================================
@@ -371,30 +505,36 @@ pub fn write_pairwise<W: Write>(
     let version = context.version.as_deref().unwrap_or("0.1.0");
     writeln!(writer, "{} {}", context.program.to_uppercase(), version)?;
     writeln!(writer)?;
-    
+
+    // NCBI reference: ncbi-blast/c++/src/algo/blast/format/blast_format.cpp:790-803
+    // ```c
+    // dbname = string("User specified sequence set (Input: ") + m_SubjectTag + string(")");
+    // ...
+    // tabinfo.PrintHeader(..., dbname, ...);
+    // ```
+    write_database_header(writer, context)?;
+
     // Write query info
     if let Some(ref query) = context.query_name {
         writeln!(writer, "Query= {}", query)?;
         writeln!(writer)?;
-    }
-    
-    // Write database info
-    if let Some(ref db) = context.subject_name {
-        writeln!(writer, "Database: {}", db)?;
+        if let Some(query_length) = context.query_length {
+            writeln!(writer, "Length={}", query_length)?;
+        }
         writeln!(writer)?;
     }
-    
+
     if hits.is_empty() {
         writeln!(writer, " ***** No hits found *****")?;
         writer.flush()?;
         return Ok(());
     }
-    
+
     // Group hits by subject
     use std::collections::HashMap;
     let mut subject_hits: HashMap<u32, Vec<&PairwiseHit>> = HashMap::new();
     let mut subject_order: Vec<u32> = Vec::new();
-    
+
     for hit in hits {
         // NCBI reference: ncbi-blast/c++/src/objtools/align_format/showalign.cpp:2278-2315
         // ```c
@@ -419,7 +559,15 @@ pub fn write_pairwise<W: Write>(
         }
         subject_hits.entry(s_idx).or_default().push(hit);
     }
-    
+
+    // NCBI reference: ncbi-blast/c++/src/objtools/align_format/showdefline.cpp:69-79
+    // ```c
+    // static const char*  kHeader = "Sequences producing significant alignments:";
+    // static const char*  kBits = "(Bits)";
+    // static const char*  kValue = "Value";
+    // ```
+    write_subject_summary_table(writer, &subject_order, &subject_hits, subject_ids)?;
+
     // Write each subject's hits
     for s_idx in subject_order {
         // NCBI reference: ncbi-blast/c++/include/algo/blast/core/blast_hits.h:153-166
@@ -436,7 +584,7 @@ pub fn write_pairwise<W: Write>(
             .unwrap_or("unknown");
         let shits = subject_hits.get(&s_idx).unwrap();
         let first_hit = shits.first().unwrap();
-        
+
         // Subject header
         write_subject_header(
             writer,
@@ -444,14 +592,14 @@ pub fn write_pairwise<W: Write>(
             first_hit.subject_title.as_deref(),
             first_hit.subject_length,
         )?;
-        
+
         // Each HSP
         for hit in shits {
             write_hsp_info(writer, hit, config)?;
             write_alignment(writer, hit, config)?;
         }
     }
-    
+
     writer.flush()
 }
 
@@ -505,6 +653,7 @@ mod tests {
             s_end: 100,
             e_value: 1e-50,
             bit_score: 185.5,
+            num_ident: 95,
             // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_hits.c:1122-1132
             // ```c
             // if (hsp->query.frame != hsp->subject.frame) {
@@ -518,6 +667,7 @@ mod tests {
             s_idx: 0,
             raw_score: 200,
             gap_info: None,
+            num_positives: 95,
         }
     }
 
@@ -526,7 +676,7 @@ mod tests {
         let mut output = Vec::new();
         write_subject_header(&mut output, "seq1", Some("Test sequence"), Some(500)).unwrap();
         let output_str = String::from_utf8(output).unwrap();
-        
+
         assert!(output_str.contains(">seq1 Test sequence"));
         assert!(output_str.contains("Length=500"));
     }
@@ -535,11 +685,11 @@ mod tests {
     fn test_write_hsp_info() {
         let hit = PairwiseHit::from(make_hit());
         let config = PairwiseConfig::default();
-        
+
         let mut output = Vec::new();
         write_hsp_info(&mut output, &hit, &config).unwrap();
         let output_str = String::from_utf8(output).unwrap();
-        
+
         assert!(output_str.contains("Score ="));
         assert!(output_str.contains("Expect ="));
         assert!(output_str.contains("Identities ="));
@@ -552,7 +702,11 @@ mod tests {
         let context = ReportContext {
             program: "tblastx".to_string(),
             query_name: Some("test_query".to_string()),
+            query_length: Some(100),
             subject_name: Some("test_db".to_string()),
+            database_name: Some("test_db".to_string()),
+            database_num_sequences: Some(1),
+            database_total_letters: Some(100),
             version: Some("0.1.0".to_string()),
         };
         // NCBI reference: ncbi-blast/c++/include/algo/blast/core/blast_hits.h:153-166
@@ -565,7 +719,7 @@ mod tests {
         // ```
         let query_ids = vec![Arc::<str>::from("query1")];
         let subject_ids = vec![Arc::<str>::from("subject1")];
-        
+
         let mut output = Vec::new();
         write_pairwise_simple(
             &hits,
@@ -577,10 +731,9 @@ mod tests {
         )
         .unwrap();
         let output_str = String::from_utf8(output).unwrap();
-        
+
         assert!(output_str.contains("TBLASTX"));
         assert!(output_str.contains("Query= test_query"));
         assert!(output_str.contains(">subject1"));
     }
 }
-

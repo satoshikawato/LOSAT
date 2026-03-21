@@ -27,9 +27,8 @@ const BLASTNA_SIZE: usize = 16;
 
 /// Map BLASTNA codes to NCBI4NA bitmasks (degeneracy).
 /// NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_encoding.c:56-74
-const BLASTNA_TO_NCBI4NA: [u8; BLASTNA_SIZE] = [
-    1, 2, 4, 8, 5, 10, 3, 12, 9, 6, 14, 13, 11, 7, 15, 0,
-];
+const BLASTNA_TO_NCBI4NA: [u8; BLASTNA_SIZE] =
+    [1, 2, 4, 8, 5, 10, 3, 12, 9, 6, 14, 13, 11, 7, 15, 0];
 
 type BlastnaMatrix = [i32; BLASTNA_SIZE * BLASTNA_SIZE];
 
@@ -122,7 +121,10 @@ impl GapAlignScratch {
         // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_gapalign.c:313-319 (BLAST_GapAlignStructNew)
         let dp_mem_alloc = 1000;
         let dp_mem = vec![
-            BlastGapDP { best: GAP_MININT, best_gap: GAP_MININT };
+            BlastGapDP {
+                best: GAP_MININT,
+                best_gap: GAP_MININT
+            };
             dp_mem_alloc
         ];
 
@@ -160,7 +162,13 @@ fn gap_dp_reserve_initial(
     if num_extra_cells > *dp_mem_alloc {
         let new_alloc = (num_extra_cells + 100).max(*dp_mem_alloc * 2);
         *dp_mem_alloc = new_alloc;
-        score_array.resize(new_alloc, BlastGapDP { best: GAP_MININT, best_gap: GAP_MININT });
+        score_array.resize(
+            new_alloc,
+            BlastGapDP {
+                best: GAP_MININT,
+                best_gap: GAP_MININT,
+            },
+        );
     }
 }
 
@@ -175,7 +183,13 @@ fn gap_dp_reserve_band(
     if last_b_index + num_extra_cells + 3 >= *dp_mem_alloc {
         let new_alloc = (last_b_index + num_extra_cells + 100).max(*dp_mem_alloc * 2);
         *dp_mem_alloc = new_alloc;
-        score_array.resize(new_alloc, BlastGapDP { best: GAP_MININT, best_gap: GAP_MININT });
+        score_array.resize(
+            new_alloc,
+            BlastGapDP {
+                best: GAP_MININT,
+                best_gap: GAP_MININT,
+            },
+        );
     }
 }
 
@@ -351,7 +365,11 @@ pub fn blast_get_start_for_gapped_alignment_nucl(
     let mut s_idx = s_gapped_start;
     let q_len_limit = q_end;
 
-    while q_idx < q_len_limit && q_idx < q_seq.len() && s_idx < s_seq.len() && q_seq[q_idx] == s_seq[s_idx] {
+    while q_idx < q_len_limit
+        && q_idx < q_seq.len()
+        && s_idx < s_seq.len()
+        && q_seq[q_idx] == s_seq[s_idx]
+    {
         score += 1;
         if score > hsp_max_ident_run {
             return (q_gapped_start, s_gapped_start);
@@ -678,16 +696,8 @@ pub fn extend_gapped_heuristic_with_scratch(
         left_gaps,
         left_gap_letters,
     ) = greedy_align_one_direction_ex(
-        q_seq,
-        s_seq,
-        left_q_len,
-        left_s_len,
-        reward,
-        penalty,
-        gap_open,
-        gap_extend,
-        x_drop,
-        true,  // reverse = true for left extension
+        q_seq, s_seq, left_q_len, left_s_len, reward, penalty, gap_open, gap_extend, x_drop,
+        true, // reverse = true for left extension
     );
 
     let mut seed_score = 0;
@@ -900,8 +910,12 @@ fn extend_gapped_one_direction_with_scratch(
     // Main DP loop - for each query position (row)
     for a_index in 1..=m {
         // Debug: track last few rows
-        if std::env::var("LOSAT_DEBUG_COORDS").is_ok() && m > 1000 && a_index >= m.saturating_sub(2) {
-            eprintln!("[DP_ROW] a_index={}/{}, first_b={}, b_size={}", a_index, m, first_b_index, b_size);
+        if std::env::var("LOSAT_DEBUG_COORDS").is_ok() && m > 1000 && a_index >= m.saturating_sub(2)
+        {
+            eprintln!(
+                "[DP_ROW] a_index={}/{}, first_b={}, b_size={}",
+                a_index, m, first_b_index, b_size
+            );
         }
 
         // NCBI reference: blast_gapalign.c:839-843
@@ -1034,7 +1048,10 @@ fn extend_gapped_one_direction_with_scratch(
 
     // Debug: check offset values
     if std::env::var("LOSAT_DEBUG_COORDS").is_ok() {
-        eprintln!("[EXT_FWD] m={}, n={}, a_offset={}, b_offset={}, best_score={}", m, n, a_offset, b_offset, best_score);
+        eprintln!(
+            "[EXT_FWD] m={}, n={}, a_offset={}, b_offset={}, best_score={}",
+            m, n, a_offset, b_offset, best_score
+        );
     }
 
     // NCBI reference: blast_gapalign.c:893-896
@@ -1565,9 +1582,9 @@ fn extend_gapped_one_direction_ex_with_scratch(
 ///     SCRIPT_EXTEND_GAP_B  = 0x40              // Continue a gap in B
 /// };
 /// ```
-const SCRIPT_SUB: u8 = 3;           // eGapAlignSub
-const SCRIPT_GAP_IN_A: u8 = 0;      // eGapAlignDel (gap in query)
-const SCRIPT_GAP_IN_B: u8 = 6;      // eGapAlignIns (gap in subject)
+const SCRIPT_SUB: u8 = 3; // eGapAlignSub
+const SCRIPT_GAP_IN_A: u8 = 0; // eGapAlignDel (gap in query)
+const SCRIPT_GAP_IN_B: u8 = 6; // eGapAlignIns (gap in subject)
 const SCRIPT_OP_MASK: u8 = 0x07;
 const SCRIPT_EXTEND_GAP_A: u8 = 0x10;
 const SCRIPT_EXTEND_GAP_B: u8 = 0x40;
@@ -1641,7 +1658,16 @@ pub fn extend_gapped_one_direction_with_traceback(
     gap_open: i32,
     gap_extend: i32,
     x_drop: i32,
-) -> (usize, usize, i32, usize, usize, usize, usize, Vec<GapEditOp>) {
+) -> (
+    usize,
+    usize,
+    i32,
+    usize,
+    usize,
+    usize,
+    usize,
+    Vec<GapEditOp>,
+) {
     // NCBI reference: blast_gapalign.c:364-733 ALIGN_EX function
     // This is the traceback-capturing version (score_only = FALSE case)
     // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_gapalign.c:313-319 (BLAST_GapAlignStructNew)
@@ -1670,7 +1696,16 @@ fn extend_gapped_one_direction_with_traceback_with_scratch(
     gap_extend: i32,
     x_drop: i32,
     gap_scratch: &mut GapAlignScratch,
-) -> (usize, usize, i32, usize, usize, usize, usize, Vec<GapEditOp>) {
+) -> (
+    usize,
+    usize,
+    i32,
+    usize,
+    usize,
+    usize,
+    usize,
+    Vec<GapEditOp>,
+) {
     // NCBI reference: blast_gapalign.c:364-733 ALIGN_EX function
     // This is the traceback-capturing version (score_only = FALSE case)
 
@@ -1905,14 +1940,14 @@ fn extend_gapped_one_direction_with_traceback_with_scratch(
                     score_array[b_index].best_gap = open_gap_col;
                 } else {
                     score_array[b_index].best_gap = score_gap_col_ext;
-                    script += script_col;  // Mark as extending existing gap
+                    script += script_col; // Mark as extending existing gap
                 }
 
                 let open_gap_row = score_val - (gap_open_extend as i32);
                 if score_gap_row < open_gap_row {
                     score_gap_row = open_gap_row;
                 } else {
-                    script += script_row;  // Mark as extending existing gap
+                    script += script_row; // Mark as extending existing gap
                 }
 
                 score_array[b_index].best = score_val;
@@ -2106,7 +2141,7 @@ fn extend_gapped_one_direction_with_traceback_with_scratch(
             x if x == SCRIPT_SUB => edit_ops.push(GapEditOp::Sub(count)),
             x if x == SCRIPT_GAP_IN_A => edit_ops.push(GapEditOp::Del(count)), // Gap in query = Del
             x if x == SCRIPT_GAP_IN_B => edit_ops.push(GapEditOp::Ins(count)), // Gap in subject = Ins
-            _ => edit_ops.push(GapEditOp::Sub(count)), // Default to Sub
+            _ => edit_ops.push(GapEditOp::Sub(count)),                         // Default to Sub
         }
     }
 
@@ -2145,7 +2180,16 @@ pub fn extend_gapped_one_direction_with_traceback_ex(
     gap_extend: i32,
     x_drop: i32,
     reverse: bool,
-) -> (usize, usize, i32, usize, usize, usize, usize, Vec<GapEditOp>) {
+) -> (
+    usize,
+    usize,
+    i32,
+    usize,
+    usize,
+    usize,
+    usize,
+    Vec<GapEditOp>,
+) {
     // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_gapalign.c:313-319 (BLAST_GapAlignStructNew)
     // NCBI reference: ncbi-blast/c++/include/algo/blast/core/blast_gapalign.h:69-80 (BlastGapAlignStruct)
     let mut gap_scratch = GapAlignScratch::new();
@@ -2178,7 +2222,16 @@ fn extend_gapped_one_direction_with_traceback_ex_with_scratch(
     x_drop: i32,
     reverse: bool,
     gap_scratch: &mut GapAlignScratch,
-) -> (usize, usize, i32, usize, usize, usize, usize, Vec<GapEditOp>) {
+) -> (
+    usize,
+    usize,
+    i32,
+    usize,
+    usize,
+    usize,
+    usize,
+    Vec<GapEditOp>,
+) {
     // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_gapalign.c:364-733 (ALIGN_EX)
     if !reverse {
         // Forward extension - use subsequences
@@ -2596,7 +2649,18 @@ pub fn extend_gapped_heuristic_with_traceback(
     gap_open: i32,
     gap_extend: i32,
     x_drop: i32,
-) -> (usize, usize, usize, usize, i32, usize, usize, usize, usize, Vec<GapEditOp>) {
+) -> (
+    usize,
+    usize,
+    usize,
+    usize,
+    i32,
+    usize,
+    usize,
+    usize,
+    usize,
+    Vec<GapEditOp>,
+) {
     // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_gapalign.c:313-319 (BLAST_GapAlignStructNew)
     // NCBI reference: ncbi-blast/c++/include/algo/blast/core/blast_gapalign.h:69-80 (BlastGapAlignStruct)
     let mut gap_scratch = GapAlignScratch::new();
@@ -2630,7 +2694,18 @@ pub fn extend_gapped_heuristic_with_traceback_with_scratch(
     gap_extend: i32,
     x_drop: i32,
     gap_scratch: &mut GapAlignScratch,
-) -> (usize, usize, usize, usize, i32, usize, usize, usize, usize, Vec<GapEditOp>) {
+) -> (
+    usize,
+    usize,
+    usize,
+    usize,
+    i32,
+    usize,
+    usize,
+    usize,
+    usize,
+    Vec<GapEditOp>,
+) {
     // Bounds validation
     if qs >= q_seq.len() || ss >= s_seq.len() {
         return (qs, qs, ss, ss, 0, 0, 0, 0, 0, Vec::new());
@@ -2649,25 +2724,33 @@ pub fn extend_gapped_heuristic_with_traceback_with_scratch(
     let left_q_len = qs + seed_len;
     let left_s_len = ss + seed_len;
 
-    let (left_q_consumed, left_s_consumed, left_score, _left_matches, _left_mismatches, _left_gaps, _left_gap_letters, left_edit_ops) =
-        if left_q_len > 0 && left_s_len > 0 {
-            extend_gapped_one_direction_with_traceback_ex_with_scratch(
-                q_seq,
-                s_seq,
-                left_q_len,
-                left_s_len,
-                reward,
-                penalty,
-                score_matrix,
-                gap_open,
-                gap_extend,
-                x_drop,
-                true, // reverse for left extension
-                gap_scratch,
-            )
-        } else {
-            (0, 0, 0, 0, 0, 0, 0, Vec::new())
-        };
+    let (
+        left_q_consumed,
+        left_s_consumed,
+        left_score,
+        _left_matches,
+        _left_mismatches,
+        _left_gaps,
+        _left_gap_letters,
+        left_edit_ops,
+    ) = if left_q_len > 0 && left_s_len > 0 {
+        extend_gapped_one_direction_with_traceback_ex_with_scratch(
+            q_seq,
+            s_seq,
+            left_q_len,
+            left_s_len,
+            reward,
+            penalty,
+            score_matrix,
+            gap_open,
+            gap_extend,
+            x_drop,
+            true, // reverse for left extension
+            gap_scratch,
+        )
+    } else {
+        (0, 0, 0, 0, 0, 0, 0, Vec::new())
+    };
 
     // Right extension (forward direction, start excluded)
     let right_q_start = qs + seed_len;
@@ -2675,22 +2758,30 @@ pub fn extend_gapped_heuristic_with_traceback_with_scratch(
     let right_q_len = q_seq.len().saturating_sub(right_q_start);
     let right_s_len = s_seq.len().saturating_sub(right_s_start);
 
-    let (right_q_consumed, right_s_consumed, right_score, _right_matches, _right_mismatches, _right_gaps, _right_gap_letters, right_edit_ops) =
-        if right_q_len > 0 && right_s_len > 0 {
-            extend_gapped_one_direction_with_traceback_with_scratch(
-                &q_seq[right_q_start..],
-                &s_seq[right_s_start..],
-                reward,
-                penalty,
-                score_matrix,
-                gap_open,
-                gap_extend,
-                x_drop,
-                gap_scratch,
-            )
-        } else {
-            (0, 0, 0, 0, 0, 0, 0, Vec::new())
-        };
+    let (
+        right_q_consumed,
+        right_s_consumed,
+        right_score,
+        _right_matches,
+        _right_mismatches,
+        _right_gaps,
+        _right_gap_letters,
+        right_edit_ops,
+    ) = if right_q_len > 0 && right_s_len > 0 {
+        extend_gapped_one_direction_with_traceback_with_scratch(
+            &q_seq[right_q_start..],
+            &s_seq[right_s_start..],
+            reward,
+            penalty,
+            score_matrix,
+            gap_open,
+            gap_extend,
+            x_drop,
+            gap_scratch,
+        )
+    } else {
+        (0, 0, 0, 0, 0, 0, 0, Vec::new())
+    };
 
     // Combine coordinates (NCBI: start included on left, excluded on right)
     let mut final_qs = qs + seed_len - left_q_consumed;
@@ -2701,9 +2792,8 @@ pub fn extend_gapped_heuristic_with_traceback_with_scratch(
     let mut total_score = left_score + right_score;
 
     // Combine edit scripts: left_ops + right_ops (merge if needed)
-    let mut combined_edit_ops: Vec<GapEditOp> = Vec::with_capacity(
-        left_edit_ops.len() + right_edit_ops.len()
-    );
+    let mut combined_edit_ops: Vec<GapEditOp> =
+        Vec::with_capacity(left_edit_ops.len() + right_edit_ops.len());
     combined_edit_ops.extend(left_edit_ops);
 
     if !right_edit_ops.is_empty() {
@@ -2810,4 +2900,3 @@ pub fn extend_gapped_heuristic_with_traceback_with_scratch(
         combined_edit_ops,
     )
 }
-

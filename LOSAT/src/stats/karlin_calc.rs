@@ -48,39 +48,38 @@ const STD_AA_FREQS: [f64; 20] = [
     0.06891, // V
 ];
 
-/// NCBISTDAA to standard amino acid mapping (for standard composition)
-/// Standard composition uses 20 standard amino acids (A-R-N-D-C-Q-E-G-H-I-L-K-M-F-P-S-T-W-Y-V)
-/// NCBISTDAA: 0='-', 1=A, 2=B, 3=C, 4=D, 5=E, 6=F, 7=G, 8=H, 9=I, 10=K, 11=L, 12=M, 13=N, 14=P, 15=Q, 16=R, 17=S, 18=T, 19=V, 20=W, 21=X, 22=Y, 23=Z, 24=U, 25='*', 26=O, 27=J
-/// Standard AA order: A(0), R(1), N(2), D(3), C(4), Q(5), E(6), G(7), H(8), I(9), L(10), K(11), M(12), F(13), P(14), S(15), T(16), W(17), Y(18), V(19)
-const NCBISTDAA_TO_STD_AA: [usize; 28] = [
-    20, // 0: '-' -> invalid
-    0,  // 1: A -> 0
-    2,  // 2: B (N or D) -> use N (2)
-    4,  // 3: C -> 4
-    3,  // 4: D -> 3
-    6,  // 5: E -> 6
-    13, // 6: F -> 13
-    7,  // 7: G -> 7
-    8,  // 8: H -> 8
-    9,  // 9: I -> 9
-    11, // 10: K -> 11
-    10, // 11: L -> 10
-    12, // 12: M -> 12
-    2,  // 13: N -> 2
-    14, // 14: P -> 14
-    5,  // 15: Q -> 5
-    1,  // 16: R -> 1
-    15, // 17: S -> 15
-    16, // 18: T -> 16
-    19, // 19: V -> 19
-    17, // 20: W -> 17
-    20, // 21: X (unknown) -> invalid
-    18, // 22: Y -> 18
-    5,  // 23: Z (E or Q) -> use Q (5)
-    20, // 24: U -> invalid
-    20, // 25: '*' -> invalid
-    20, // 26: O -> invalid
-    10, // 27: J (L or I) -> use L (10)
+// NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_stat.c:1863-1879
+// ```c
+// for (index=0; index<(int)DIM(STD_AMINO_ACID_FREQS); index++)
+// {
+//    if (alphabet_code == BLASTAA_SEQ_CODE)
+//    {
+//       residues[index] =
+//          AMINOACID_TO_NCBISTDAA[toupper((unsigned char) STD_AMINO_ACID_FREQS[index].ch)];
+//    }
+// }
+// ```
+const STD_AA_NCBISTDAA: [u8; 20] = [
+    ncbistdaa::A,
+    ncbistdaa::R,
+    ncbistdaa::N,
+    ncbistdaa::D,
+    ncbistdaa::C,
+    ncbistdaa::Q,
+    ncbistdaa::E,
+    ncbistdaa::G,
+    ncbistdaa::H,
+    ncbistdaa::I,
+    ncbistdaa::L,
+    ncbistdaa::K,
+    ncbistdaa::M,
+    ncbistdaa::F,
+    ncbistdaa::P,
+    ncbistdaa::S,
+    ncbistdaa::T,
+    ncbistdaa::W,
+    ncbistdaa::Y,
+    ncbistdaa::V,
 ];
 
 /// Compute amino acid composition from sequence
@@ -96,20 +95,20 @@ const NCBISTDAA_TO_STD_AA: [usize; 28] = [
 /// Array of 28 frequencies (one per NCBISTDAA residue)
 pub fn compute_aa_composition(seq: &[u8], length: usize) -> [f64; BLASTAA_SIZE] {
     let mut comp: [u64; BLASTAA_SIZE] = [0; BLASTAA_SIZE];
-    
+
     // Count residues (NCBI BlastResCompStr)
     // Skip sentinels (first and last byte)
     let start = 1;
     let end = seq.len().saturating_sub(1);
     let actual_len = end.saturating_sub(start).min(length);
-    
+
     for i in start..end.min(start + actual_len) {
         let residue = seq[i] as usize;
         if residue < BLASTAA_SIZE {
             comp[residue] += 1;
         }
     }
-    
+
     // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_stat.c:1984-2014
     // Ambiguous residues (proteins) are zeroed via Blast_ResCompStr; for BLASTAA
     // this is just 'X' per blast_setup.c:382-385 (BLAST_ScoreSetAmbigRes).
@@ -118,13 +117,13 @@ pub fn compute_aa_composition(seq: &[u8], length: usize) -> [f64; BLASTAA_SIZE] 
     // Normalize to frequencies (NCBI Blast_ResFreqResComp)
     let sum: u64 = comp.iter().sum();
     let mut freq = [0.0; BLASTAA_SIZE];
-    
+
     if sum > 0 {
         for i in 0..BLASTAA_SIZE {
             freq[i] = comp[i] as f64 / sum as f64;
         }
     }
-    
+
     freq
 }
 
@@ -133,22 +132,30 @@ pub fn compute_aa_composition(seq: &[u8], length: usize) -> [f64; BLASTAA_SIZE] 
 /// Uses Robinson standard frequencies
 pub fn compute_std_aa_composition() -> [f64; BLASTAA_SIZE] {
     let mut freq = [0.0; BLASTAA_SIZE];
-    
-    // Map standard frequencies to NCBISTDAA positions
-    for (ncbi_idx, &std_idx) in NCBISTDAA_TO_STD_AA.iter().enumerate() {
-        if std_idx < 20 {
-            freq[ncbi_idx] = STD_AA_FREQS[std_idx];
-        }
+
+    // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_stat.c:1887-1901
+    // ```c
+    // retval = Blast_GetStdAlphabet(sbp->alphabet_code, residues, DIM(STD_AMINO_ACID_FREQS));
+    // for (index=0; index<DIM(STD_AMINO_ACID_FREQS); index++)
+    // {
+    //    rfp->prob[residues[index]] = STD_AMINO_ACID_FREQS[index].p;
+    // }
+    // ```
+    for (index, &residue) in STD_AA_NCBISTDAA.iter().enumerate() {
+        freq[residue as usize] = STD_AA_FREQS[index];
     }
-    
-    // Normalize (should already be normalized, but ensure)
+
+    // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_stat.c:1909-1910
+    // ```c
+    // Blast_ResFreqNormalize(sbp, rfp, 1.0);
+    // ```
     let sum: f64 = freq.iter().sum();
     if sum > 0.0 {
         for f in freq.iter_mut() {
             *f /= sum;
         }
     }
-    
+
     freq
 }
 
@@ -173,7 +180,7 @@ impl ScoreFreqProfile {
     pub fn new(score_min: i32, score_max: i32) -> Self {
         let range = (score_max - score_min + 1) as usize;
         let mut sprob = vec![0.0; range];
-        
+
         Self {
             sprob,
             obs_min: 0,
@@ -182,7 +189,7 @@ impl ScoreFreqProfile {
             score_min,
         }
     }
-    
+
     pub fn get_prob(&self, score: i32) -> f64 {
         let idx = (score - self.score_min) as usize;
         if idx < self.sprob.len() {
@@ -191,26 +198,26 @@ impl ScoreFreqProfile {
             0.0
         }
     }
-    
+
     pub fn set_prob(&mut self, score: i32, prob: f64) {
         let idx = (score - self.score_min) as usize;
         if idx < self.sprob.len() {
             self.sprob[idx] = prob;
         }
     }
-    
+
     pub fn obs_min(&self) -> i32 {
         self.obs_min
     }
-    
+
     pub fn obs_max(&self) -> i32 {
         self.obs_max
     }
-    
+
     pub fn score_avg(&self) -> f64 {
         self.score_avg
     }
-    
+
     pub fn sprob(&self) -> &[f64] {
         &self.sprob
     }
@@ -234,12 +241,12 @@ pub fn compute_score_freq_profile(
     score_max: i32,
 ) -> ScoreFreqProfile {
     let mut sfp = ScoreFreqProfile::new(score_min, score_max);
-    
+
     // Initialize all probabilities to zero
     for score in score_min..=score_max {
         sfp.set_prob(score, 0.0);
     }
-    
+
     // Compute score probabilities: P(score) = sum_{i,j: matrix[i][j]=score} comp1[i] * comp2[j]
     // Reference: blast_stat.c:2171-2181
     for i in 0..BLASTAA_SIZE {
@@ -252,7 +259,7 @@ pub fn compute_score_freq_profile(
             }
         }
     }
-    
+
     // Find observed min/max and compute average
     // Reference: ncbi-blast/c++/src/algo/blast/core/blast_stat.c:2183-2205
     let mut score_sum = 0.0;
@@ -284,7 +291,7 @@ pub fn compute_score_freq_profile(
     }
 
     sfp.score_avg = score_avg;
-    
+
     sfp
 }
 
@@ -426,10 +433,7 @@ fn nlm_karlin_lambda_nr(
             break;
         }
 
-        if k >= max_newton
-            || (was_newton && f.abs() > 0.9 * fold.abs())
-            || g >= 0.0
-        {
+        if k >= max_newton || (was_newton && f.abs() > 0.9 * fold.abs()) || g >= 0.0 {
             x = (a + b) / 2.0;
         } else {
             let p = -f / g;
@@ -457,7 +461,7 @@ fn nlm_karlin_lambda_nr(
 fn compute_lambda_nr(sfp: &ScoreFreqProfile, initial_guess: f64) -> Result<f64, String> {
     let low = sfp.obs_min();
     let high = sfp.obs_max();
-    
+
     if sfp.score_avg() >= 0.0 {
         return Err("Expected score must be negative".to_string());
     }
@@ -494,7 +498,7 @@ fn compute_h_from_lambda(sfp: &ScoreFreqProfile, lambda: f64) -> Result<f64, Str
     if lambda < 0.0 {
         return Err("Lambda must be non-negative".to_string());
     }
-    
+
     let low = sfp.obs_min();
     let high = sfp.obs_max();
 
@@ -506,7 +510,7 @@ fn compute_h_from_lambda(sfp: &ScoreFreqProfile, lambda: f64) -> Result<f64, Str
     for score in (low + 1)..=high {
         sum = (score as f64) * sfp.get_prob(score) + etonlam * sum;
     }
-    
+
     let scale = blast_powi(etonlam, high);
     let h = if scale > 0.0 {
         lambda * sum / scale
@@ -514,7 +518,7 @@ fn compute_h_from_lambda(sfp: &ScoreFreqProfile, lambda: f64) -> Result<f64, Str
         // Underflow: use log form
         lambda * (lambda * high as f64 + sum.ln()).exp()
     };
-    
+
     Ok(h)
 }
 
@@ -620,8 +624,8 @@ fn compute_k_from_lambda_h(sfp: &ScoreFreqProfile, lambda: f64, h: f64) -> Resul
         let mut i = low_alignment_score + 1;
         while i < 0 {
             ptr_p_idx += 1;
-            inner_sum = alignment_score_probabilities[ptr_p_idx as usize]
-                + inner_sum * exp_minus_lambda;
+            inner_sum =
+                alignment_score_probabilities[ptr_p_idx as usize] + inner_sum * exp_minus_lambda;
             i += 1;
         }
         inner_sum *= exp_minus_lambda;
@@ -640,8 +644,7 @@ fn compute_k_from_lambda_h(sfp: &ScoreFreqProfile, lambda: f64, h: f64) -> Resul
         outer_sum += inner_sum;
     }
 
-    let k = -(-2.0 * outer_sum).exp()
-        / (first_term_closed_form * blast_expm1(-lambda));
+    let k = -(-2.0 * outer_sum).exp() / (first_term_closed_form * blast_expm1(-lambda));
 
     if k <= 0.0 {
         return Err("Computed K is non-positive".to_string());
@@ -658,18 +661,16 @@ fn compute_k_from_lambda_h(sfp: &ScoreFreqProfile, lambda: f64, h: f64) -> Resul
 ///
 /// # Returns
 /// Karlin parameters (Lambda, K, H) or error
-pub fn compute_karlin_params_ungapped(
-    sfp: &ScoreFreqProfile,
-) -> Result<KarlinParams, String> {
+pub fn compute_karlin_params_ungapped(sfp: &ScoreFreqProfile) -> Result<KarlinParams, String> {
     // Calculate Lambda
     let lambda = compute_lambda_nr(sfp, BLAST_KARLIN_LAMBDA0_DEFAULT)?;
-    
+
     // Calculate H
     let h = compute_h_from_lambda(sfp, lambda)?;
-    
+
     // Calculate K
     let k = compute_k_from_lambda_h(sfp, lambda, h)?;
-    
+
     // Alpha and beta are not computed for ungapped (use defaults or lookup)
     // For ungapped, these are typically not used in E-value calculation
     Ok(KarlinParams {
@@ -677,7 +678,7 @@ pub fn compute_karlin_params_ungapped(
         k,
         h,
         alpha: 0.7916, // BLOSUM62 ungapped default
-        beta: -3.2,     // BLOSUM62 ungapped default
+        beta: -3.2,    // BLOSUM62 ungapped default
     })
 }
 
@@ -703,7 +704,7 @@ pub fn apply_check_ideal(computed: KarlinParams, ideal: KarlinParams) -> KarlinP
 #[cfg(test)]
 mod tests {
     use super::*;
-    
+
     #[test]
     fn test_compute_aa_composition() {
         // Test sequence: "ACDEFGHIKLMNPQRSTVWY" (20 standard AAs in NCBISTDAA encoding)
@@ -711,38 +712,46 @@ mod tests {
         // Sequence with sentinels: [0, 1, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 22, 0]
         let seq = b"\x00\x01\x03\x04\x05\x06\x07\x08\x09\x0a\x0b\x0c\x0d\x0e\x0f\x10\x11\x12\x13\x14\x16\x00";
         let comp = compute_aa_composition(seq, 20);
-        
+
         // Each AA should appear once, so frequency = 1/20 = 0.05
         let expected_freq = 1.0 / 20.0;
         // Check standard AAs (skip B=2, X=21, Z=23, U=24, *=25, O=26, J=27)
-        let standard_aas = [1, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 22];
+        let standard_aas = [
+            1, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 22,
+        ];
         for &i in &standard_aas {
-            assert!((comp[i] - expected_freq).abs() < 0.01, "AA {} frequency: expected {}, got {}", i, expected_freq, comp[i]);
+            assert!(
+                (comp[i] - expected_freq).abs() < 0.01,
+                "AA {} frequency: expected {}, got {}",
+                i,
+                expected_freq,
+                comp[i]
+            );
         }
-        
+
         // Non-standard AAs should have frequency 0
         assert!(comp[2] < 0.01, "B should not appear");
         assert!(comp[21] < 0.01, "X should not appear");
         assert!(comp[23] < 0.01, "Z should not appear");
     }
-    
+
     #[test]
     fn test_compute_std_aa_composition() {
         let comp = compute_std_aa_composition();
         let sum: f64 = comp.iter().sum();
-        assert!((sum - 1.0).abs() < 0.01, "Standard composition should sum to 1.0");
+        assert!((sum - 1.0).abs() < 1.0e-12);
     }
-    
+
     #[test]
     fn test_compute_score_freq_profile() {
         let comp1 = compute_std_aa_composition();
         let comp2 = compute_std_aa_composition();
         let sfp = compute_score_freq_profile(&comp1, &comp2, -4, 11);
-        
+
         assert!(sfp.obs_min() <= sfp.obs_max());
         assert!(sfp.score_avg() < 0.0, "Average score should be negative");
     }
-    
+
     #[test]
     fn test_apply_check_ideal() {
         let ideal = KarlinParams {
@@ -752,7 +761,7 @@ mod tests {
             alpha: 0.7916,
             beta: -3.2,
         };
-        
+
         // Computed Lambda >= ideal Lambda -> use ideal
         let computed_high = KarlinParams {
             lambda: 0.35,
@@ -763,7 +772,7 @@ mod tests {
         };
         let result = apply_check_ideal(computed_high, ideal);
         assert_eq!(result.lambda, ideal.lambda);
-        
+
         // Computed Lambda < ideal Lambda -> use computed
         let computed_low = KarlinParams {
             lambda: 0.25,

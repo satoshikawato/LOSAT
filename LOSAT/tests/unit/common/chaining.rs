@@ -1,8 +1,10 @@
 //! Unit tests for common/chaining.rs
 
-use LOSAT::algorithm::common::chaining::{calculate_overlap, can_chain_hsps, filter_overlapping_hsps};
-use LOSAT::common::Hit;
 use super::super::helpers::make_hit;
+use LOSAT::algorithm::common::chaining::{
+    calculate_overlap, can_chain_hsps, filter_overlapping_hsps,
+};
+use LOSAT::common::Hit;
 
 // NCBI reference: ncbi-blast/c++/include/algo/blast/core/blast_hits.h:153-166
 // ```c
@@ -124,7 +126,7 @@ fn test_filter_overlapping_hsps_different_queries() {
 #[test]
 fn test_filter_overlapping_hsps_sorted_by_score() {
     let hits = vec![
-        make_hit(Q1_IDX, S1_IDX, 1, 100, 1, 100, 50.0),  // Lower score
+        make_hit(Q1_IDX, S1_IDX, 1, 100, 1, 100, 50.0), // Lower score
         make_hit(Q1_IDX, S1_IDX, 10, 90, 10, 90, 100.0), // Higher score, overlaps
     ];
     let filtered = filter_overlapping_hsps(hits, 0.5);
@@ -159,9 +161,16 @@ fn test_can_chain_hsps_close_hsps() {
     let max_diag_drift = 5;
 
     assert!(can_chain_hsps(
-        q_start1, q_end1, s_start1, s_end1,
-        q_start2, q_end2, s_start2, s_end2,
-        max_gap, max_diag_drift
+        q_start1,
+        q_end1,
+        s_start1,
+        s_end1,
+        q_start2,
+        q_end2,
+        s_start2,
+        s_end2,
+        max_gap,
+        max_diag_drift
     ));
 }
 
@@ -180,9 +189,16 @@ fn test_can_chain_hsps_too_far() {
     let max_diag_drift = 5;
 
     assert!(!can_chain_hsps(
-        q_start1, q_end1, s_start1, s_end1,
-        q_start2, q_end2, s_start2, s_end2,
-        max_gap, max_diag_drift
+        q_start1,
+        q_end1,
+        s_start1,
+        s_end1,
+        q_start2,
+        q_end2,
+        s_start2,
+        s_end2,
+        max_gap,
+        max_diag_drift
     ));
 }
 
@@ -201,9 +217,16 @@ fn test_can_chain_hsps_large_diagonal_drift() {
     let max_diag_drift = 5;
 
     assert!(!can_chain_hsps(
-        q_start1, q_end1, s_start1, s_end1,
-        q_start2, q_end2, s_start2, s_end2,
-        max_gap, max_diag_drift
+        q_start1,
+        q_end1,
+        s_start1,
+        s_end1,
+        q_start2,
+        q_end2,
+        s_start2,
+        s_end2,
+        max_gap,
+        max_diag_drift
     ));
 }
 
@@ -223,9 +246,16 @@ fn test_can_chain_hsps_small_overlap() {
 
     // Small overlap should be allowed
     assert!(can_chain_hsps(
-        q_start1, q_end1, s_start1, s_end1,
-        q_start2, q_end2, s_start2, s_end2,
-        max_gap, max_diag_drift
+        q_start1,
+        q_end1,
+        s_start1,
+        s_end1,
+        q_start2,
+        q_end2,
+        s_start2,
+        s_end2,
+        max_gap,
+        max_diag_drift
     ));
 }
 
@@ -245,9 +275,15 @@ fn test_can_chain_hsps_large_overlap() {
 
     // Large overlap should not be allowed
     assert!(!can_chain_hsps(
-        q_start1, q_end1, s_start1, s_end1,
-        q_start2, q_end2, s_start2, s_end2,
-        max_gap, max_diag_drift
+        q_start1,
+        q_end1,
+        s_start1,
+        s_end1,
+        q_start2,
+        q_end2,
+        s_start2,
+        s_end2,
+        max_gap,
+        max_diag_drift
     ));
 }
-

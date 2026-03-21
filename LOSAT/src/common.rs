@@ -7,9 +7,8 @@ use std::path::PathBuf;
 use std::sync::Arc;
 
 use crate::report::{
-    OutputFormat, OutputConfig, ReportContext,
-    write_hit_fields, write_outfmt7,
-    PairwiseConfig, write_pairwise_simple,
+    write_hit_fields, write_outfmt7, write_pairwise_simple, OutputConfig, OutputFormat,
+    PairwiseConfig, ReportContext,
 };
 
 // =============================================================================
@@ -99,6 +98,22 @@ pub struct Hit {
     pub s_end: usize,
     pub e_value: f64,
     pub bit_score: f64,
+    // NCBI reference: ncbi-blast/c++/include/algo/blast/core/blast_hits.h:125-143
+    // ```c
+    // typedef struct BlastHSP {
+    //    Int4 score;           /**< This HSP's raw score */
+    //    Int4 num_ident;       /**< Number of identical base pairs in this HSP */
+    //    double bit_score;     /**< Bit score, calculated from score */
+    //    double evalue;        /**< This HSP's e-value */
+    //    BlastSeg query;       /**< Query sequence info. */
+    //    BlastSeg subject;     /**< Subject sequence info. */
+    //    Int4     context;     /**< Context number of query */
+    //    GapEditScript* gap_info;/**< ALL gapped alignment is here */
+    //    ...
+    //    Int4 num_positives;
+    // } BlastHSP;
+    // ```
+    pub num_ident: usize,
     // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_hits.c:1122-1132
     // ```c
     // if (hsp->query.frame != hsp->subject.frame) {
@@ -133,6 +148,16 @@ pub struct Hit {
     /// overlapping HSPs instead of deleting them entirely.
     /// Reference: blast_hits.c:2490-2492, 2516-2518
     pub gap_info: Option<Vec<GapEditOp>>,
+    // NCBI reference: ncbi-blast/c++/include/algo/blast/core/blast_hits.h:125-143
+    // ```c
+    // typedef struct BlastHSP {
+    //    ...
+    //    Int4 num_positives;
+    //
+    //    BlastHSPMappingInfo* map_info;
+    // } BlastHSP;
+    // ```
+    pub num_positives: usize,
 }
 
 impl Hit {
@@ -159,6 +184,27 @@ impl Hit {
             .map(|id| id.as_ref())
             .unwrap_or("unknown");
         (query_id, subject_id)
+    }
+
+    // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_hits.c:746-824
+    // ```c
+    // s_Blast_HSPGetNumIdentitiesAndPositives(..., Int4* num_ident_ptr, ...,
+    //                                         Int4* num_pos_ptr)
+    // {
+    //    ...
+    //    if (align_length_ptr) {
+    //        *align_length_ptr = align_length;
+    //    }
+    //    *num_ident_ptr = num_ident;
+    //
+    //    if(NULL != matrix)
+    //        *num_pos_ptr = num_pos + num_ident;
+    // }
+    // ```
+    #[inline]
+    pub fn gap_letters(&self) -> usize {
+        self.length
+            .saturating_sub(self.num_ident.saturating_add(self.mismatch))
     }
 }
 
@@ -234,8 +280,14 @@ pub fn score_compare_hsps(a: &Hit, b: &Hit) -> Ordering {
     };
     let (a_q_offset, a_q_end) = query_offsets(a);
     let (b_q_offset, b_q_end) = query_offsets(b);
-    let (a_s_offset, a_s_end) = (a.s_start.min(a.s_end).saturating_sub(1), a.s_start.max(a.s_end));
-    let (b_s_offset, b_s_end) = (b.s_start.min(b.s_end).saturating_sub(1), b.s_start.max(b.s_end));
+    let (a_s_offset, a_s_end) = (
+        a.s_start.min(a.s_end).saturating_sub(1),
+        a.s_start.max(a.s_end),
+    );
+    let (b_s_offset, b_s_end) = (
+        b.s_start.min(b.s_end).saturating_sub(1),
+        b.s_start.max(b.s_end),
+    );
 
     // score DESC (BLAST_CMP(hsp2->score, hsp1->score))
     match b.raw_score.cmp(&a.raw_score) {
@@ -383,10 +435,10 @@ pub fn write_output_with_format(
     } else {
         Box::new(BufWriter::new(stdout.lock()))
     };
-    
+
     // NCBI-compatible output config
     let config = OutputConfig::ncbi_compat();
-    
+
     match outfmt {
         OutputFormat::Pairwise => {
             // outfmt 0: Pairwise alignment view
@@ -394,7 +446,14 @@ pub fn write_output_with_format(
                 program: context.program.clone(),
                 ..Default::default()
             };
-            write_pairwise_simple(hits, &mut writer, &pairwise_config, query_ids, subject_ids, context)?;
+            write_pairwise_simple(
+                hits,
+                &mut writer,
+                &pairwise_config,
+                query_ids,
+                subject_ids,
+                context,
+            )?;
         }
         OutputFormat::Tabular => {
             // outfmt 6: Tabular output
@@ -443,7 +502,7 @@ pub fn write_output_with_format(
             write_outfmt7(hits, &mut writer, &config, query_ids, subject_ids, context)?;
         }
     }
-    
+
     Ok(())
 }
 

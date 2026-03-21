@@ -9,9 +9,9 @@
 
 use std::sync::OnceLock;
 
-use crate::common::Hit;
 use super::chaining::UngappedHit;
 use super::extension::convert_coords;
+use crate::common::Hit;
 
 // ---------------------------------------------------------------------------
 // HSP tracing (opt-in via env var)
@@ -112,14 +112,7 @@ pub fn trace_final_hit_if_match(stage: &str, h: &Hit) {
     if trace_match_target(target, h.q_start, h.q_end, h.s_start, h.s_end) {
         eprintln!(
             "[TRACE_HSP] stage={} raw_score={} bit={:.1} e={} q={}-{} s={}-{}",
-            stage,
-            h.raw_score,
-            h.bit_score,
-            h.e_value,
-            h.q_start,
-            h.q_end,
-            h.s_start,
-            h.s_end
+            stage, h.raw_score, h.bit_score, h.e_value, h.q_start, h.q_end, h.s_start, h.s_end
         );
     }
 }

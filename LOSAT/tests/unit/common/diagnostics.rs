@@ -1,11 +1,11 @@
 //! Unit tests for common/diagnostics.rs
 
+use std::env;
+use std::sync::atomic::Ordering;
 use LOSAT::algorithm::common::diagnostics::{
     diagnostics_enabled, BaseDiagnosticCounters, NucleotideDiagnosticCounters,
     ProteinDiagnosticCounters,
 };
-use std::sync::atomic::Ordering;
-use std::env;
 
 #[test]
 fn test_diagnostics_enabled() {
@@ -50,7 +50,10 @@ fn test_base_diagnostic_counters_initialization() {
     assert_eq!(counters.ungapped_low_score.load(Ordering::Relaxed), 0);
     assert_eq!(counters.hsps_before_chain.load(Ordering::Relaxed), 0);
     assert_eq!(counters.hsps_after_chain.load(Ordering::Relaxed), 0);
-    assert_eq!(counters.hsps_after_overlap_filter.load(Ordering::Relaxed), 0);
+    assert_eq!(
+        counters.hsps_after_overlap_filter.load(Ordering::Relaxed),
+        0
+    );
     assert_eq!(counters.clusters_single.load(Ordering::Relaxed), 0);
     assert_eq!(counters.clusters_merged.load(Ordering::Relaxed), 0);
     assert_eq!(counters.hsps_in_merged_clusters.load(Ordering::Relaxed), 0);
@@ -69,7 +72,9 @@ fn test_base_diagnostic_counters_atomic_operations() {
     assert_eq!(counters.seeds_passed.load(Ordering::Relaxed), 3);
 
     // Test multiple increments
-    counters.ungapped_extensions.fetch_add(10, Ordering::Relaxed);
+    counters
+        .ungapped_extensions
+        .fetch_add(10, Ordering::Relaxed);
     counters.ungapped_extensions.fetch_add(5, Ordering::Relaxed);
     assert_eq!(counters.ungapped_extensions.load(Ordering::Relaxed), 15);
 }
@@ -155,5 +160,3 @@ fn test_diagnostic_output_formatting_nucleotide() {
     // The print_summary function should not panic
     counters.print_summary(20);
 }
-
-

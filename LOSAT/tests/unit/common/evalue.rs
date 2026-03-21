@@ -1,10 +1,12 @@
 //! Unit tests for common/evalue.rs
 
+use super::super::helpers::{
+    assert_bit_score_close, assert_evalue_close, default_nucl_params, default_protein_params,
+};
 use LOSAT::algorithm::common::evalue::{
     bit_score, calculate_evalue_alignment_length, calculate_evalue_database_search,
 };
 use LOSAT::stats::tables::KarlinParams;
-use super::super::helpers::{assert_bit_score_close, assert_evalue_close, default_nucl_params, default_protein_params};
 
 #[test]
 fn test_bit_score_calculation() {
@@ -60,7 +62,8 @@ fn test_evalue_database_search() {
     let db_len = 10000;
     let db_num_seqs = 5;
 
-    let (bit_score, e_value) = calculate_evalue_database_search(score, q_len, db_len, db_num_seqs, &params);
+    let (bit_score, e_value) =
+        calculate_evalue_database_search(score, q_len, db_len, db_num_seqs, &params);
 
     // Bit score should be positive
     assert!(bit_score > 0.0);
@@ -80,7 +83,8 @@ fn test_evalue_database_search_large_database() {
     let db_len = 1_000_000;
     let db_num_seqs = 100;
 
-    let (bit_score, e_value) = calculate_evalue_database_search(score, q_len, db_len, db_num_seqs, &params);
+    let (bit_score, e_value) =
+        calculate_evalue_database_search(score, q_len, db_len, db_num_seqs, &params);
 
     // E-value should increase with larger database
     assert!(e_value > 0.0);
@@ -171,4 +175,3 @@ fn test_evalue_monotonicity() {
     assert!(ev1 > ev2);
     assert!(ev2 > ev3);
 }
-

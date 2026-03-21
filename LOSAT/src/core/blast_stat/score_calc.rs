@@ -38,7 +38,11 @@ pub fn calculate_statistics(
 /// Calculate raw score from E-value (inverse calculation)
 ///
 /// Formula: S = (ln(K) + ln(m*n) - ln(E)) / lambda
-pub fn raw_score_from_evalue(e_value: f64, params: &KarlinParams, search_space: &SearchSpace) -> i32 {
+pub fn raw_score_from_evalue(
+    e_value: f64,
+    params: &KarlinParams,
+    search_space: &SearchSpace,
+) -> i32 {
     if e_value <= 0.0 {
         return i32::MAX;
     }
@@ -68,7 +72,8 @@ pub fn raw_score_from_evalue_with_decay(
     };
 
     let adjusted_e = adjusted_e.max(K_SMALL_FLOAT);
-    let score = (params.k.ln() + search_space.effective_space.ln() - adjusted_e.ln()) / params.lambda;
+    let score =
+        (params.k.ln() + search_space.effective_space.ln() - adjusted_e.ln()) / params.lambda;
     score.ceil() as i32
 }
 
@@ -92,7 +97,12 @@ pub fn evalue_from_raw_score(raw_score: i32, params: &KarlinParams, search_space
 }
 
 /// Simple E-value calculation without length adjustment (BLEMIR default)
-pub fn simple_evalue(raw_score: i32, q_len: usize, db_len: usize, params: &KarlinParams) -> (f64, f64) {
+pub fn simple_evalue(
+    raw_score: i32,
+    q_len: usize,
+    db_len: usize,
+    params: &KarlinParams,
+) -> (f64, f64) {
     let search_space = (q_len as f64) * (db_len as f64);
     let bs = bit_score(raw_score, params);
     let ev = search_space * 2.0_f64.powf(-bs);

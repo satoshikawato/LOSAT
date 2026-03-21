@@ -19,13 +19,15 @@ mod run;
 // Re-export the main run function
 pub use run::run;
 
-use rustc_hash::FxHashMap;
+use super::alignment::build_blastna_matrix;
+use super::filtering::{
+    purge_hsps_with_common_endpoints_ex, reevaluate_hsp_with_ambiguities_gapped, subject_best_hit,
+};
+use super::hsp::{score_compare_hsps as score_compare_blastn_hsps, BlastnHsp};
+use super::interval_tree::{BlastIntervalTree, IndexMethod, TreeHsp};
 use crate::common::Hit;
 use crate::stats::KarlinParams;
-use super::alignment::build_blastna_matrix;
-use super::filtering::{purge_hsps_with_common_endpoints_ex, reevaluate_hsp_with_ambiguities_gapped, subject_best_hit};
-use super::hsp::{BlastnHsp, score_compare_hsps as score_compare_blastn_hsps};
-use super::interval_tree::{BlastIntervalTree, IndexMethod, TreeHsp};
+use rustc_hash::FxHashMap;
 
 // Re-export for backward compatibility
 pub use crate::algorithm::common::evalue::calculate_evalue_database_search as calculate_evalue;
@@ -130,8 +132,12 @@ pub fn filter_hsps(
     // NCBI reference: blast_traceback.c:638
     let (mut result_hits, extra_start) = purge_hsps_with_common_endpoints_ex(result_hits, false);
     if verbose {
-        eprintln!("[INFO]   Endpoint purge phase 1 (trim): {} -> {} hits, extra_start={}",
-                  before_purge, result_hits.len(), extra_start);
+        eprintln!(
+            "[INFO]   Endpoint purge phase 1 (trim): {} -> {} hits, extra_start={}",
+            before_purge,
+            result_hits.len(),
+            extra_start
+        );
     }
 
     // Phase 2: Re-evaluate trimmed HSPs
@@ -193,7 +199,10 @@ pub fn filter_hsps(
     // NCBI reference: blast_traceback.c:666
     result_hits.retain(|h| h.raw_score != i32::MIN);
     if verbose && deleted_count > 0 {
-        eprintln!("[INFO]   Re-evaluation deleted {} trimmed HSPs", deleted_count);
+        eprintln!(
+            "[INFO]   Re-evaluation deleted {} trimmed HSPs",
+            deleted_count
+        );
     }
 
     // Phase 3: purge=TRUE for BLASTN
@@ -204,7 +213,11 @@ pub fn filter_hsps(
     let before_phase3 = result_hits.len();
     let (mut result_hits, _) = purge_hsps_with_common_endpoints_ex(result_hits, true);
     if verbose && before_phase3 != result_hits.len() {
-        eprintln!("[INFO]   Endpoint purge phase 3 (delete): {} -> {} hits", before_phase3, result_hits.len());
+        eprintln!(
+            "[INFO]   Endpoint purge phase 3 (delete): {} -> {} hits",
+            before_phase3,
+            result_hits.len()
+        );
     }
 
     // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_traceback.c:671-688
@@ -277,12 +290,7 @@ pub fn filter_hsps(
             // region_start = query_start + hsp->query.offset;
             // region_end = query_start + hsp->query.end;
             // ```
-            BlastIntervalTree::new(
-                0,
-                (2 * query_len + 1) as i32,
-                0,
-                (subject_len + 1) as i32,
-            )
+            BlastIntervalTree::new(0, (2 * query_len + 1) as i32, 0, (subject_len + 1) as i32)
         });
         // NCBI reference: ncbi-blast/c++/src/algo/blast/unit_tests/api/ntscan_unit_test.cpp:166-174
         // ```c
@@ -304,9 +312,7 @@ pub fn filter_hsps(
         let (q_offset_0, q_end_0) = if hit.query_frame < 0 {
             (
                 query_len.saturating_sub(hit.q_end),
-                query_len
-                    .saturating_sub(hit.q_start)
-                    .saturating_add(1),
+                query_len.saturating_sub(hit.q_start).saturating_add(1),
             )
         } else {
             (hit.q_start.saturating_sub(1), hit.q_end)
@@ -378,12 +384,14 @@ pub fn filter_hsps(
             s_end: hit.s_end,
             e_value: hit.e_value,
             bit_score: hit.bit_score,
+            num_ident: hit.num_ident,
             query_frame: hit.query_frame,
             query_length: hit.query_length,
             q_idx: hit.q_idx,
             s_idx: hit.s_idx,
             raw_score: hit.raw_score,
             gap_info: hit.gap_info,
+            num_positives: hit.num_positives,
         });
     }
     output_hits

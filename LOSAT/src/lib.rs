@@ -11,7 +11,7 @@ pub mod seed;
 pub mod stats;
 
 // New NCBI-style modules (matching NCBI BLAST structure)
-pub mod core;
 pub mod api;
 pub mod blastinput;
+pub mod core;
 pub mod format;

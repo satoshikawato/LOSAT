@@ -22,7 +22,7 @@
 use LOSAT::stats::tables::KarlinParams;
 
 /// Reference e-value test case with full context
-/// 
+///
 /// This structure includes all necessary information to verify that LOSAT's
 /// e-value calculation matches NCBI BLAST, including effective search space
 /// to catch length adjustment issues.
@@ -33,36 +33,36 @@ pub struct NcbiEvalueTestCase {
     pub db_len: usize,
     pub db_num_seqs: usize,
     pub aln_len: usize, // For TBLASTX (amino acid length)
-    
+
     // Karlin-Altschul parameters (from scoring scheme)
     pub params: KarlinParams,
-    
+
     // Expected outputs from NCBI BLAST
     pub expected_bit_score: f64,
     pub expected_evalue: f64,
-    
+
     // **Critical**: Expected effective search space from NCBI BLAST
     // This is the key to catching length adjustment bugs
     pub expected_effective_space: Option<f64>,
     pub expected_length_adjustment: Option<i64>,
-    
+
     // Test metadata
     pub tolerance: f64,
     pub test_name: String, // For debugging
 }
 
 /// Verify effective search space calculation
-/// 
+///
 /// This is the most important check to catch length adjustment bugs.
 /// NCBI BLAST reports effective search space in output headers (sometimes).
 /// If available, we compare LOSAT's calculation with NCBI's reported value.
-/// 
+///
 /// **Implementation Status**:
 /// LOSAT's `compute_length_adjustment_ncbi` is a faithful port of NCBI BLAST's
 /// `BLAST_ComputeLengthAdjustment` function. The implementation should match
 /// NCBI BLAST exactly, but we use a small tolerance (0.1%) to account for
 /// floating-point precision differences between C and Rust.
-/// 
+///
 /// **Note**: If tests show larger differences (>1%), this indicates a bug
 /// in the port that needs to be fixed, not a fundamental limitation.
 pub fn verify_effective_search_space(
@@ -82,7 +82,7 @@ pub fn verify_effective_search_space(
             ));
         }
     }
-    
+
     // Length adjustment can vary slightly due to implementation differences
     // Use a more lenient tolerance (allow up to 10 units difference)
     if let Some(expected_adj) = expected_length_adj {
@@ -101,12 +101,12 @@ pub fn verify_effective_search_space(
             ));
         }
     }
-    
+
     Ok(())
 }
 
 /// Reference e-value test cases for nucleotide alignments (BLASTN)
-/// 
+///
 /// **Testing Strategy:**
 /// - Include multiple parameter sets (megablast, blastn task)
 /// - Include various sequence lengths (short, medium, long)
@@ -129,8 +129,8 @@ pub fn get_ncbi_blastn_evalue_cases() -> Vec<NcbiEvalueTestCase> {
                 alpha: 1.5,
                 beta: -2.0,
             },
-            expected_bit_score: 0.0, // Will be calculated
-            expected_evalue: 0.0,   // Will be calculated
+            expected_bit_score: 0.0,        // Will be calculated
+            expected_evalue: 0.0,           // Will be calculated
             expected_effective_space: None, // Extract from NCBI BLAST header if available
             expected_length_adjustment: None,
             tolerance: 0.1,
@@ -145,7 +145,7 @@ pub fn get_ncbi_blastn_evalue_cases() -> Vec<NcbiEvalueTestCase> {
 }
 
 /// Reference e-value test cases for protein alignments (TBLASTX)
-/// 
+///
 /// **Testing Strategy:**
 /// - Test with -comp_based_stats 0 to avoid composition-based corrections
 /// - Include various alignment lengths
@@ -189,7 +189,7 @@ pub fn compare_evalue_with_ncbi(actual: f64, expected: f64, tolerance: f64) -> b
         // NCBI BLAST reports 0.0 for e-values < 1e-180
         return actual < 1e-180;
     }
-    
+
     let relative_diff = (actual - expected).abs() / expected;
     relative_diff <= tolerance
 }
@@ -202,10 +202,10 @@ pub fn compare_bit_score_with_ncbi(actual: f64, expected: f64, tolerance: f64) -
 }
 
 /// Extract effective search space from NCBI BLAST output header
-/// 
+///
 /// NCBI BLAST sometimes reports effective search space in output headers.
 /// This function attempts to parse it.
-/// 
+///
 /// Example header line:
 /// # Effective search space used: 1234567890
 pub fn extract_effective_search_space_from_header(header_lines: &[String]) -> Option<f64> {
@@ -223,12 +223,12 @@ pub fn extract_effective_search_space_from_header(header_lines: &[String]) -> Op
 }
 
 /// Load reference data from NCBI BLAST output files
-/// 
+///
 /// This function parses actual NCBI BLAST output and extracts:
 /// - E-values and bit scores from hit lines
 /// - Effective search space from headers (if available)
 /// - Query/database lengths from headers
-/// 
+///
 /// **Important**: Run NCBI BLAST with -comp_based_stats 0 for protein searches
 /// to get pure statistical values without composition-based corrections.
 pub fn load_ncbi_reference_data(_file_path: &str) -> Result<Vec<NcbiEvalueTestCase>, String> {

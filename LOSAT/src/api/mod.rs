@@ -13,8 +13,8 @@
 //! - `blast_results` - Result structures (Hit, HSP)
 //! - `blast_options_handle` - Options handling and validation
 
-pub mod local_blast;
 pub mod blast_nucl_options;
-pub mod tblastx_options;
-pub mod blast_results;
 pub mod blast_options_handle;
+pub mod blast_results;
+pub mod local_blast;
+pub mod tblastx_options;

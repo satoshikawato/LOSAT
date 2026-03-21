@@ -2,8 +2,8 @@
 //!
 //! Reference: ncbi-blast/c++/src/algo/blast/core/blast_gapalign.c
 
-use super::get_score;
 use super::super::constants::{GAP_EXTEND, GAP_OPEN};
+use super::get_score;
 use crate::utils::matrix::ncbistdaa;
 
 /// Alignment statistics propagated alongside DP scores for traceback-based calculation

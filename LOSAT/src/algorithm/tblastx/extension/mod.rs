@@ -12,35 +12,44 @@
 //! - `two_hit` - Two-hit extension algorithm (NCBI style)
 //! - `gapped` - Gapped extension with affine gap penalties
 
-mod ungapped;
-mod two_hit;
 mod gapped;
+mod two_hit;
+mod ungapped;
 
 // Re-export public functions
-pub use ungapped::extend_hit_ungapped;
-pub use two_hit::extend_hit_two_hit;
 pub use gapped::extend_gapped_protein;
+pub use two_hit::extend_hit_two_hit;
+pub use ungapped::extend_hit_ungapped;
 
-use crate::stats::KarlinParams;
 use crate::algorithm::common::evalue::calculate_evalue_alignment_length;
+use crate::stats::KarlinParams;
 use crate::utils::matrix::blosum62_score;
-use super::constants::{SENTINEL_BYTE, SENTINEL_PENALTY};
 
 /// Get the substitution matrix score for two amino acids in NCBISTDAA encoding.
 ///
-/// If either character is a sentinel byte (SENTINEL_BYTE = 0, NCBI NULLB), returns
-/// SENTINEL_PENALTY (-4) to trigger X-drop termination at sequence boundaries.
+/// NCBI aa_ungapped uses the blast core 28x28 score matrix directly; NULLB is
+/// not special-cased in the extension loops.
 ///
-/// Reference: ncbi-blast/c++/src/algo/blast/core/blast_encoding.c:120
-///   const Uint1 kProtSentinel = NULLB;
-/// Reference: ncbi-blast/c++/include/algo/blast/core/ncbi_std.h:181
-///   #define NULLB '\0'
+/// NCBI reference: ncbi-blast/c++/src/algo/blast/core/aa_ungapped.c:847-849
+/// ```c
+/// for (i = 0; i < n; i++) {
+///     score += matrix[q[i]][s[i]];
+/// ```
+///
+/// NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_stat.c:1559-1579
+/// ```c
+/// for (i = 0; i < sbp->alphabet_size; i++) {
+///     for (j = 0; j < sbp->alphabet_size; j++) {
+///         matrix[i][j] = BLAST_SCORE_MIN;
+///     }
+/// }
+/// ...
+/// if (i == AMINOACID_TO_NCBISTDAA['-'] || j == AMINOACID_TO_NCBISTDAA['-']) {
+///     continue;
+/// }
+/// ```
 #[inline(always)]
 pub fn get_score(a: u8, b: u8) -> i32 {
-    // Check for sentinel bytes (NCBI BLAST style sequence boundary markers)
-    if a == SENTINEL_BYTE || b == SENTINEL_BYTE {
-        return SENTINEL_PENALTY;
-    }
     blosum62_score(a, b)
 }
 

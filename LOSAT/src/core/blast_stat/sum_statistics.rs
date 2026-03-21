@@ -309,8 +309,8 @@ pub fn small_gap_sum_e(
         let num = num_hsps as i32;
 
         let mut adjusted_xsum = xsum;
-        adjusted_xsum -= pair_search_space.ln()
-            + 2.0 * ((num - 1) as f64) * (starting_points as f64).ln();
+        adjusted_xsum -=
+            pair_search_space.ln() + 2.0 * ((num - 1) as f64) * (starting_points as f64).ln();
         adjusted_xsum -= ln_factorial_int(num);
 
         let sum_p = blast_sum_p(num, adjusted_xsum);

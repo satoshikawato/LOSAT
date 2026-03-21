@@ -3,7 +3,7 @@
 //! Reference: ncbi-blast/c++/src/algo/blast/core/aa_ungapped.c
 
 use super::get_score;
-use super::ungapped::{extend_hit_ungapped};
+use super::ungapped::extend_hit_ungapped;
 
 // Import the internal extension functions from ungapped module
 // These are used for left/right extension
@@ -427,11 +427,22 @@ pub fn extend_hit_two_hit(
     let s_end = s_right_off + right_disp;
 
     // DEBUG: Print alignment details for first few high-scoring extensions
-    if debug_ext && max_score_total >= 100 && !DEBUG_PRINTED.swap(true, std::sync::atomic::Ordering::Relaxed) {
-        eprintln!("[DEBUG_EXT] left_score={} right_score={} max_score_total={}", left_score, right_score, max_score_total);
-        eprintln!("[DEBUG_EXT] q_start={} q_end={} s_start={} s_end={} score={}",
-            q_start, q_end, s_start, s_end, max_score_total);
-        eprintln!("[DEBUG_EXT] left_disp={} right_disp={} x_drop={}", left_disp, right_disp, x_drop);
+    if debug_ext
+        && max_score_total >= 100
+        && !DEBUG_PRINTED.swap(true, std::sync::atomic::Ordering::Relaxed)
+    {
+        eprintln!(
+            "[DEBUG_EXT] left_score={} right_score={} max_score_total={}",
+            left_score, right_score, max_score_total
+        );
+        eprintln!(
+            "[DEBUG_EXT] q_start={} q_end={} s_start={} s_end={} score={}",
+            q_start, q_end, s_start, s_end, max_score_total
+        );
+        eprintln!(
+            "[DEBUG_EXT] left_disp={} right_disp={} x_drop={}",
+            left_disp, right_disp, x_drop
+        );
         // Print position-by-position scores
         let align_len = q_end - q_start;
         eprintln!("[DEBUG_EXT] alignment_len={}", align_len);
@@ -442,11 +453,25 @@ pub fn extend_hit_two_hit(
             let sc = get_score(q_char, s_char);
             total += sc;
             if i < 10 || i >= align_len - 5 {
-                eprintln!("[DEBUG_EXT] pos={:2} q={:2} s={:2} score={:3} cumul={:4}", i, q_char, s_char, sc, total);
+                eprintln!(
+                    "[DEBUG_EXT] pos={:2} q={:2} s={:2} score={:3} cumul={:4}",
+                    i, q_char, s_char, sc, total
+                );
             }
         }
-        eprintln!("[DEBUG_EXT] manual_total={} reported_score={}", total, max_score_total);
+        eprintln!(
+            "[DEBUG_EXT] manual_total={} reported_score={}",
+            total, max_score_total
+        );
     }
 
-    (q_start, q_end, s_start, s_end, max_score_total, right_extended, s_last_off)
+    (
+        q_start,
+        q_end,
+        s_start,
+        s_end,
+        max_score_total,
+        right_extended,
+        s_last_off,
+    )
 }

@@ -1,7 +1,7 @@
-use bio::io::fasta;
+use super::constants::MAX_DIRECT_LOOKUP_WORD_SIZE;
 use crate::core::blast_encoding::{encode_iupac_to_ncbi2na_packed, COMPRESSION_RATIO};
 use crate::utils::dust::MaskedInterval;
-use super::constants::MAX_DIRECT_LOOKUP_WORD_SIZE;
+use bio::io::fasta;
 
 // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_nalookup.c:37-43
 // ```c
@@ -44,22 +44,18 @@ pub fn encode_kmer(seq: &[u8], start: usize, k: usize) -> Option<u64> {
 // const Uint1 IUPACNA_TO_NCBI4NA[128]={ ... };
 // ```
 const NCBI4NA_TO_IUPACNA: [u8; 16] = [
-    b'-', b'A', b'C', b'M', b'G', b'R', b'S', b'V',
-    b'T', b'W', b'Y', b'H', b'K', b'D', b'B', b'N',
+    b'-', b'A', b'C', b'M', b'G', b'R', b'S', b'V', b'T', b'W', b'Y', b'H', b'K', b'D', b'B', b'N',
 ];
 // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_encoding.c:95-103
 // ```c
 // const Uint1 IUPACNA_TO_NCBI4NA[128]={ ... };
 // ```
 const IUPACNA_TO_NCBI4NA: [u8; 128] = [
-    0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-    0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-    0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-    0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-    0, 1, 14, 2, 13, 0, 0, 4, 11, 0, 0, 12, 0, 3, 15, 0,
-    0, 0, 5, 6, 8, 0, 7, 9, 0, 10, 0, 0, 0, 0, 0, 0,
-    0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-    0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+    0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+    0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+    0, 1, 14, 2, 13, 0, 0, 4, 11, 0, 0, 12, 0, 3, 15, 0, 0, 0, 5, 6, 8, 0, 7, 9, 0, 10, 0, 0, 0, 0,
+    0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+    0, 0,
 ];
 // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_util.c:812-819
 // ```c
@@ -70,12 +66,7 @@ const IUPACNA_TO_NCBI4NA: [u8; 128] = [
 //   3, 11, 7, 15
 // };
 // ```
-const NCBI4NA_REV_COMP: [u8; 16] = [
-    0, 8, 4, 12,
-    2, 10, 6, 14,
-    1, 9, 5, 13,
-    3, 11, 7, 15,
-];
+const NCBI4NA_REV_COMP: [u8; 16] = [0, 8, 4, 12, 2, 10, 6, 14, 1, 9, 5, 13, 3, 11, 7, 15];
 
 /// Generate the reverse complement of a DNA sequence in IUPACNA.
 /// Uses NCBI4NA bitmask mapping to preserve ambiguous base complements.
@@ -83,7 +74,11 @@ pub fn reverse_complement(seq: &[u8]) -> Vec<u8> {
     seq.iter()
         .rev()
         .map(|&b| {
-            let idx = if b < 128 { IUPACNA_TO_NCBI4NA[b as usize] } else { 0 };
+            let idx = if b < 128 {
+                IUPACNA_TO_NCBI4NA[b as usize]
+            } else {
+                0
+            };
             let rc = NCBI4NA_REV_COMP[idx as usize];
             NCBI4NA_TO_IUPACNA[rc as usize]
         })
@@ -517,7 +512,8 @@ fn build_query_pv(
     // mb_lt->hashsize = 1ULL << (BITS_PER_NUC * mb_lt->lut_word_length);
     // ```
     let hashsize = 1usize << (2 * lut_word_length);
-    let (pv_size, pv_array_bts) = compute_mb_pv_params(hashsize, approx_table_entries, true, lut_word_length);
+    let (pv_size, pv_array_bts) =
+        compute_mb_pv_params(hashsize, approx_table_entries, true, lut_word_length);
     let mut pv = vec![0u32; pv_size];
 
     let kmer_mask: u64 = (1u64 << (2 * lut_word_length)) - 1;
@@ -822,7 +818,10 @@ pub fn is_kmer_masked(intervals: &[MaskedInterval], start: usize, kmer_len: usiz
 //     ...
 // }
 // ```
-pub(crate) fn build_unmasked_ranges(seq_len: usize, masks: &[MaskedInterval]) -> Vec<(usize, usize)> {
+pub(crate) fn build_unmasked_ranges(
+    seq_len: usize,
+    masks: &[MaskedInterval],
+) -> Vec<(usize, usize)> {
     if seq_len == 0 {
         return Vec::new();
     }
@@ -875,23 +874,23 @@ pub fn build_pv_direct_lookup(
     let safe_word_size = word_size.min(MAX_DIRECT_LOOKUP_WORD_SIZE);
     let full_word_size = full_word_size.max(safe_word_size);
     let table_size = 1usize << (2 * safe_word_size); // 4^word_size
-    // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_nalookup.c:1270-1306
-    // ```c
-    // if (mb_lt->lut_word_length <= 12) {
-    //     if (mb_lt->hashsize <= 8 * kTargetPVSize)
-    //         pv_size = (Int4)(mb_lt->hashsize >> PV_ARRAY_BTS);
-    //     else
-    //         pv_size = kTargetPVSize / PV_ARRAY_BYTES;
-    // } else {
-    //     pv_size = kTargetPVSize * 64 / PV_ARRAY_BYTES;
-    // }
-    // if(!lookup_options->db_filter &&
-    //    (approx_table_entries <= kSmallQueryCutoff ||
-    //     approx_table_entries >= kLargeQueryCutoff)) {
-    //     pv_size = pv_size / 2;
-    // }
-    // mb_lt->pv_array_bts = ilog2(mb_lt->hashsize / pv_size);
-    // ```
+                                                     // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_nalookup.c:1270-1306
+                                                     // ```c
+                                                     // if (mb_lt->lut_word_length <= 12) {
+                                                     //     if (mb_lt->hashsize <= 8 * kTargetPVSize)
+                                                     //         pv_size = (Int4)(mb_lt->hashsize >> PV_ARRAY_BTS);
+                                                     //     else
+                                                     //         pv_size = kTargetPVSize / PV_ARRAY_BYTES;
+                                                     // } else {
+                                                     //     pv_size = kTargetPVSize * 64 / PV_ARRAY_BYTES;
+                                                     // }
+                                                     // if(!lookup_options->db_filter &&
+                                                     //    (approx_table_entries <= kSmallQueryCutoff ||
+                                                     //     approx_table_entries >= kLargeQueryCutoff)) {
+                                                     //     pv_size = pv_size / 2;
+                                                     // }
+                                                     // mb_lt->pv_array_bts = ilog2(mb_lt->hashsize / pv_size);
+                                                     // ```
     let (pv_size, pv_array_bts) = if use_mb_pv {
         compute_mb_pv_params(
             table_size,
@@ -1048,12 +1047,7 @@ pub fn build_pv_direct_lookup(
     //     longest_chain = MAX(longest_chain, helper_array[index]);
     // mb_lt->longest_chain = longest_chain;
     // ```
-    let longest_chain = counts
-        .iter()
-        .copied()
-        .max()
-        .unwrap_or(0)
-        .max(2) as usize;
+    let longest_chain = counts.iter().copied().max().unwrap_or(0).max(2) as usize;
 
     let mut offsets: Vec<u32> = vec![0; table_size + 1];
     let mut total_hits: u32 = 0;
@@ -1442,7 +1436,7 @@ pub fn build_two_stage_lookup(
     approx_table_entries: usize,
 ) -> TwoStageLookup {
     let debug_mode = std::env::var("BLEMIR_DEBUG").is_ok();
-    
+
     if debug_mode {
         eprintln!(
             "[DEBUG] build_two_stage_lookup: word_length={}, lut_word_length={}",
@@ -1463,11 +1457,11 @@ pub fn build_two_stage_lookup(
         approx_table_entries,
         true,
     );
-    
+
     // Note: The actual word_length matching is done during scanning,
     // where we check if the subject sequence has a word_length match
     // starting at the position indicated by the lut_word_length lookup
-    
+
     TwoStageLookup {
         pv_lookup,
         lut_word_length,
@@ -1613,10 +1607,7 @@ pub fn build_direct_lookup(
     }
 
     if debug_mode {
-        let non_empty = offsets
-            .windows(2)
-            .filter(|w| w[0] != w[1])
-            .count();
+        let non_empty = offsets.windows(2).filter(|w| w[0] != w[1]).count();
         let hits_bytes = hits.len() * std::mem::size_of::<u32>();
         eprintln!(
             "[DEBUG] build_direct_lookup: total_positions={}, ambiguous_skipped={} ({:.1}%), dust_skipped={} ({:.1}%), non_empty_buckets={}, hits_bytes={:.1}MB",

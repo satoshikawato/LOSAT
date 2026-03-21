@@ -437,6 +437,32 @@ pub fn lookup_protein_params(spec: &ProteinScoringSpec) -> KarlinParams {
     }
 }
 
+// NCBI reference: /mnt/c/Users/genom/GitHub/ncbi-blast/c++/src/algo/blast/core/blast_options.c:908-936
+// ```c
+// if ((status=Blast_KarlinBlkGappedLoadFromTables(NULL, options->gap_open,
+//       options->gap_extend, options->matrix, std_matrix_only)) != 0)
+// {
+//     ...
+//     return BLASTERR_OPTION_VALUE_INVALID;
+// }
+// ```
+pub fn protein_scoring_supported(spec: &ProteinScoringSpec) -> bool {
+    let table: &[ParamEntry] = match spec.matrix {
+        ScoringMatrix::Blosum45 => BLOSUM45,
+        ScoringMatrix::Blosum50 => BLOSUM50,
+        ScoringMatrix::Blosum62 => BLOSUM62,
+        ScoringMatrix::Blosum80 => BLOSUM80,
+        ScoringMatrix::Blosum90 => BLOSUM90,
+        ScoringMatrix::Pam30 => PAM30,
+        ScoringMatrix::Pam70 => PAM70,
+        ScoringMatrix::Pam250 => PAM250,
+    };
+
+    table
+        .iter()
+        .any(|entry| entry.gap_open == spec.gap_open && entry.gap_extend == spec.gap_extend)
+}
+
 /// Check if scores need to be rounded down for even-score-only matrices.
 ///
 /// For certain reward/penalty combinations, NCBI BLAST requires that odd scores
@@ -559,11 +585,31 @@ mod tests {
             gap_extend: 0,
         };
         let params = lookup_nucl_params(&spec);
-        assert!((params.lambda - 1.28).abs() < 0.0001, "lambda mismatch: expected 1.28, got {}", params.lambda);
-        assert!((params.k - 0.46).abs() < 0.0001, "k mismatch: expected 0.46, got {}", params.k);
-        assert!((params.h - 0.85).abs() < 0.0001, "h mismatch: expected 0.85, got {}", params.h);
-        assert!((params.alpha - 1.5).abs() < 0.0001, "alpha mismatch: expected 1.5, got {}", params.alpha);
-        assert!((params.beta - (-2.0)).abs() < 0.0001, "beta mismatch: expected -2.0, got {}", params.beta);
+        assert!(
+            (params.lambda - 1.28).abs() < 0.0001,
+            "lambda mismatch: expected 1.28, got {}",
+            params.lambda
+        );
+        assert!(
+            (params.k - 0.46).abs() < 0.0001,
+            "k mismatch: expected 0.46, got {}",
+            params.k
+        );
+        assert!(
+            (params.h - 0.85).abs() < 0.0001,
+            "h mismatch: expected 0.85, got {}",
+            params.h
+        );
+        assert!(
+            (params.alpha - 1.5).abs() < 0.0001,
+            "alpha mismatch: expected 1.5, got {}",
+            params.alpha
+        );
+        assert!(
+            (params.beta - (-2.0)).abs() < 0.0001,
+            "beta mismatch: expected -2.0, got {}",
+            params.beta
+        );
     }
 
     #[test]
@@ -577,11 +623,31 @@ mod tests {
             gap_extend: 2,
         };
         let params = lookup_nucl_params(&spec);
-        assert!((params.lambda - 0.625).abs() < 0.0001, "lambda mismatch: expected 0.625, got {}", params.lambda);
-        assert!((params.k - 0.41).abs() < 0.0001, "k mismatch: expected 0.41, got {}", params.k);
-        assert!((params.h - 0.78).abs() < 0.0001, "h mismatch: expected 0.78, got {}", params.h);
-        assert!((params.alpha - 0.8).abs() < 0.0001, "alpha mismatch: expected 0.8, got {}", params.alpha);
-        assert!((params.beta - (-2.0)).abs() < 0.0001, "beta mismatch: expected -2.0, got {}", params.beta);
+        assert!(
+            (params.lambda - 0.625).abs() < 0.0001,
+            "lambda mismatch: expected 0.625, got {}",
+            params.lambda
+        );
+        assert!(
+            (params.k - 0.41).abs() < 0.0001,
+            "k mismatch: expected 0.41, got {}",
+            params.k
+        );
+        assert!(
+            (params.h - 0.78).abs() < 0.0001,
+            "h mismatch: expected 0.78, got {}",
+            params.h
+        );
+        assert!(
+            (params.alpha - 0.8).abs() < 0.0001,
+            "alpha mismatch: expected 0.8, got {}",
+            params.alpha
+        );
+        assert!(
+            (params.beta - (-2.0)).abs() < 0.0001,
+            "beta mismatch: expected -2.0, got {}",
+            params.beta
+        );
     }
 
     #[test]
@@ -595,11 +661,31 @@ mod tests {
             gap_extend: 0,
         };
         let params = lookup_nucl_params(&spec);
-        assert!((params.lambda - 0.55).abs() < 0.0001, "lambda mismatch: expected 0.55, got {}", params.lambda);
-        assert!((params.k - 0.21).abs() < 0.0001, "k mismatch: expected 0.21, got {}", params.k);
-        assert!((params.h - 0.46).abs() < 0.0001, "h mismatch: expected 0.46, got {}", params.h);
-        assert!((params.alpha - 1.2).abs() < 0.0001, "alpha mismatch: expected 1.2, got {}", params.alpha);
-        assert!((params.beta - (-5.0)).abs() < 0.0001, "beta mismatch: expected -5.0, got {}", params.beta);
+        assert!(
+            (params.lambda - 0.55).abs() < 0.0001,
+            "lambda mismatch: expected 0.55, got {}",
+            params.lambda
+        );
+        assert!(
+            (params.k - 0.21).abs() < 0.0001,
+            "k mismatch: expected 0.21, got {}",
+            params.k
+        );
+        assert!(
+            (params.h - 0.46).abs() < 0.0001,
+            "h mismatch: expected 0.46, got {}",
+            params.h
+        );
+        assert!(
+            (params.alpha - 1.2).abs() < 0.0001,
+            "alpha mismatch: expected 1.2, got {}",
+            params.alpha
+        );
+        assert!(
+            (params.beta - (-5.0)).abs() < 0.0001,
+            "beta mismatch: expected -5.0, got {}",
+            params.beta
+        );
     }
 
     #[test]
@@ -613,8 +699,16 @@ mod tests {
         };
         let params = lookup_nucl_params(&spec);
         // Should return default (reward=1, penalty=-2 ungapped)
-        assert!((params.lambda - 1.28).abs() < 0.0001, "lambda mismatch: expected 1.28, got {}", params.lambda);
-        assert!((params.k - 0.46).abs() < 0.0001, "k mismatch: expected 0.46, got {}", params.k);
+        assert!(
+            (params.lambda - 1.28).abs() < 0.0001,
+            "lambda mismatch: expected 1.28, got {}",
+            params.lambda
+        );
+        assert!(
+            (params.k - 0.46).abs() < 0.0001,
+            "k mismatch: expected 0.46, got {}",
+            params.k
+        );
     }
 
     #[test]
@@ -623,13 +717,21 @@ mod tests {
         let spec = NuclScoringSpec {
             reward: 2,
             penalty: -3,
-            gap_open: 99,  // Not in table
-            gap_extend: 99,  // Not in table
+            gap_open: 99,   // Not in table
+            gap_extend: 99, // Not in table
         };
         let params = lookup_nucl_params(&spec);
         // Should return first entry (ungapped: gap_open=0, gap_extend=0)
-        assert!((params.lambda - 0.55).abs() < 0.0001, "lambda mismatch: expected 0.55, got {}", params.lambda);
-        assert!((params.k - 0.21).abs() < 0.0001, "k mismatch: expected 0.21, got {}", params.k);
+        assert!(
+            (params.lambda - 0.55).abs() < 0.0001,
+            "lambda mismatch: expected 0.55, got {}",
+            params.lambda
+        );
+        assert!(
+            (params.k - 0.21).abs() < 0.0001,
+            "k mismatch: expected 0.21, got {}",
+            params.k
+        );
     }
 
     #[test]

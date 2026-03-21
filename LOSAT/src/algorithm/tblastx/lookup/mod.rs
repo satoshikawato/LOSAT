@@ -11,12 +11,11 @@ mod backbone;
 
 // Re-export public types and functions
 pub use backbone::{
-    BackboneCell, BlastAaLookupTable, build_ncbi_lookup, build_direct_lookup,
-    AA_HITS_PER_CELL,
+    build_direct_lookup, build_ncbi_lookup, BackboneCell, BlastAaLookupTable, AA_HITS_PER_CELL,
 };
 
-use crate::utils::matrix::BLASTAA_SIZE;
 use crate::stats::KarlinParams;
+use crate::utils::matrix::BLASTAA_SIZE;
 
 /// NCBI BLAST parameters for protein lookup indexing.
 ///
@@ -63,7 +62,11 @@ pub(crate) fn ilog2(mut x: usize) -> usize {
 }
 
 #[inline(always)]
-pub(crate) fn compute_backbone_size(word_length: usize, alphabet_size: usize, charsize: usize) -> usize {
+pub(crate) fn compute_backbone_size(
+    word_length: usize,
+    alphabet_size: usize,
+    charsize: usize,
+) -> usize {
     // NCBI: for (i=0;i<word_length;i++) backbone_size |= (alphabet_size-1) << (i*charsize);
     //       backbone_size++;
     let mut backbone_size: usize = 0;
@@ -151,7 +154,10 @@ pub struct QueryContext {
 }
 
 /// Compute unmasked intervals from SEG mask ranges
-pub(crate) fn compute_unmasked_intervals(seg_masks: &[(usize, usize)], aa_len: usize) -> Vec<(usize, usize)> {
+pub(crate) fn compute_unmasked_intervals(
+    seg_masks: &[(usize, usize)],
+    aa_len: usize,
+) -> Vec<(usize, usize)> {
     if seg_masks.is_empty() {
         return vec![(0, aa_len)];
     }

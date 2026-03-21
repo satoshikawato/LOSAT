@@ -126,4 +126,3 @@ pub struct BlastnArgs {
     #[arg(long, default_value = "6")]
     pub outfmt: String,
 }
-

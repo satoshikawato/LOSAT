@@ -12,10 +12,10 @@ pub const X_DROP_GAPPED_FINAL: i32 = 100; // BLAST_GAP_X_DROPOFF_FINAL_NUCL for 
 /// When window_size > 0, two-hit requirement is enforced
 /// NCBI reference: na_ungapped.c:656: Boolean two_hits = (window_size > 0);
 pub const TWO_HIT_WINDOW: usize = 0; // NCBI BLAST default (one-hit mode)
-// REMOVED: MAX_HITS_PER_KMER - Over-represented k-mer filtering does not exist in NCBI BLAST
-// NCBI reference: blast_lookup.c:BlastLookupAddWordHit (lines 33-77)
-// NCBI BLAST adds all k-mers to lookup table regardless of frequency
-// Database word count filtering (kDbFilter) exists but filters based on database counts, not query counts
+                                     // REMOVED: MAX_HITS_PER_KMER - Over-represented k-mer filtering does not exist in NCBI BLAST
+                                     // NCBI reference: blast_lookup.c:BlastLookupAddWordHit (lines 33-77)
+                                     // NCBI BLAST adds all k-mers to lookup table regardless of frequency
+                                     // Database word count filtering (kDbFilter) exists but filters based on database counts, not query counts
 
 /// Scan range for off-diagonal hit detection
 /// NCBI reference: na_ungapped.c:658: Int4 Delta = MIN(word_params->options->scan_range, window_size - word_length);
@@ -72,4 +72,3 @@ pub const INVALID_DIAG: i32 = 100_000_000;
 /// Two HSPs are considered "close" if |diag1 - diag2| < min_diag_separation
 pub const MIN_DIAG_SEPARATION_BLASTN: i32 = 50;
 pub const MIN_DIAG_SEPARATION_MEGABLAST: i32 = 6;
-

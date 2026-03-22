@@ -1,8 +1,4 @@
-Reading query & subject...
-Applying DUST filter (level=20, window=64, linker=1)...
-DUST masked 14192 bases (4.38%) across 1 sequences
-Building lookup (Task: blastn, Word: 11, TwoStage: true, LUTWord: 11, Direct: false, DUST: true)...
 
-real	0m11.016s
-user	0m9.024s
-sys	0m0.032s
+real	0m11.046s
+user	0m9.367s
+sys	0m0.042s

@@ -124,22 +124,18 @@ pub fn cut_off_gap_edit_script(
         _ => return false, // No gap_info, cannot trim
     };
 
-    // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_hits.c:1122-1132
-    // Convert output coordinates back to internal offsets for trimming.
-    let (mut q_offset_0, mut q_end_0) = if hit.query_length > 0 && hit.query_frame < 0 {
-        (
-            hit.query_length.saturating_sub(hit.q_end),
-            hit.query_length
-                .saturating_sub(hit.q_start)
-                .saturating_add(1),
-        )
-    } else {
-        (hit.q_start.saturating_sub(1), hit.q_end)
-    };
-    let (mut s_offset_0, mut s_end_0) = (
-        hit.s_start.min(hit.s_end).saturating_sub(1),
-        hit.s_start.max(hit.s_end),
-    );
+    // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_hits.c:2398-2401
+    // ```c
+    // GapEditScript *esp = hsp->gap_info;
+    // q_cut -= hsp->query.offset;
+    // s_cut -= hsp->subject.offset;
+    // ```
+    // Endpoint trimming operates on canonical internal offsets already stored
+    // in the HSP. Do not reconstruct them from output coordinates.
+    let mut q_offset_0 = hit.internal_q_offset_0;
+    let mut q_end_0 = hit.internal_q_end_0;
+    let mut s_offset_0 = hit.internal_s_offset_0;
+    let mut s_end_0 = hit.internal_s_end_0;
 
     // Convert absolute cut positions to relative (within HSP)
     // NCBI: q_cut -= hsp->query.offset; s_cut -= hsp->subject.offset;
@@ -289,6 +285,18 @@ pub fn cut_off_gap_edit_script(
         hit.query_length,
         hit.query_frame,
     );
+    // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_hits.c:2436-2444
+    // ```c
+    // hsp->query.offset += qid;
+    // hsp->subject.offset += sid;
+    // ...
+    // hsp->query.end = hsp->query.offset + qid;
+    // hsp->subject.end = hsp->subject.offset + sid;
+    // ```
+    hit.internal_q_offset_0 = q_offset_0;
+    hit.internal_q_end_0 = q_end_0;
+    hit.internal_s_offset_0 = s_offset_0;
+    hit.internal_s_end_0 = s_end_0;
     hit.q_start = q_start;
     hit.q_end = q_end;
     hit.s_start = s_start;
@@ -443,21 +451,18 @@ fn purge_hsps_for_subject_ex(mut hits: Vec<BlastnHsp>, purge: bool) -> (Vec<Blas
     //    *q_start = *q_end - hsp->query.end + hsp->query.offset + 1;
     // }
     // ```
-    let q_offsets = |h: &BlastnHsp| {
-        if h.query_length > 0 && h.query_frame < 0 {
-            (
-                h.query_length.saturating_sub(h.q_end),
-                h.query_length.saturating_sub(h.q_start).saturating_add(1),
-            )
-        } else {
-            (h.q_start.saturating_sub(1), h.q_end)
-        }
-    };
+    // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_hits.c:2482-2487
+    // ```c
+    // hsp_array[i]->query.offset == hsp_array[i+j]->query.offset &&
+    // hsp_array[i]->subject.offset == hsp_array[i+j]->subject.offset
+    // ```
+    // Endpoint purge compares canonical internal offsets/endpoints directly.
+    let q_offsets = |h: &BlastnHsp| (h.internal_q_offset_0, h.internal_q_end_0);
     let context = |h: &BlastnHsp| -> u32 { h.q_idx * 2 + if h.query_frame < 0 { 1 } else { 0 } };
     // NCBI uses CANONICAL coordinates: subject.offset < subject.end always
     // ASSERT(hsp->subject.offset < hsp->subject.end) at blast_engine.c:1312
-    let s_offset = |h: &BlastnHsp| h.s_start.min(h.s_end).saturating_sub(1); // NCBI subject.offset
-    let s_end_canon = |h: &BlastnHsp| h.s_start.max(h.s_end); // NCBI subject.end
+    let s_offset = |h: &BlastnHsp| h.internal_s_offset_0; // NCBI subject.offset
+    let s_end_canon = |h: &BlastnHsp| h.internal_s_end_0; // NCBI subject.end
 
     // Pass 1: Remove HSPs with common START positions
     // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_hits.c:2285-2318
@@ -678,6 +683,11 @@ mod tests {
                 q_idx: 0,
                 s_idx: 0,
                 raw_score: 100,
+                internal_q_offset_0: 0,
+                internal_q_end_0: q_end,
+                internal_s_offset_0: 0,
+                internal_s_end_0: s_end,
+                internal_query_context_offset: 0,
                 gap_info: None,
                 num_positives: q_end,
             }
@@ -808,24 +818,23 @@ pub fn blast_hsp_test_identity_and_length(
     // q = (Uint1*) &query[q_off];
     // s = (Uint1*) &subject[s_off];
     // ```
-    let query_is_minus = hit.query_frame < 0;
-    let q_offset = if hit.query_length > 0 && query_is_minus {
-        hit.query_length.saturating_sub(hit.q_end)
-    } else {
-        hit.q_start.saturating_sub(1)
-    };
-    let s_offset = hit.s_start.min(hit.s_end).saturating_sub(1);
+    // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_traceback.c:678-692
+    // ```c
+    // Since the list is sorted by score already, any HSP
+    // contained by a previous HSP is guaranteed to have a
+    // lower score, and may be purged.
+    // ```
+    // BLASTN re-evaluation and identity counting operate on canonical internal
+    // offsets; output coordinates are adjusted only after pruning.
+    let q_offset = hit.internal_q_offset_0;
+    let s_offset = hit.internal_s_offset_0;
 
     let (matches, mismatches, gap_opens, _gap_letters, align_length) =
         if let Some(ref ops) = hit.gap_info {
             stats_from_edit_ops(q_seq, s_seq, q_offset, s_offset, ops)
         } else {
             // Ungapped fallback (N.B. not expected for BLASTN reevaluation path).
-            let align_length = if query_is_minus {
-                hit.q_start.saturating_sub(hit.q_end).saturating_add(1)
-            } else {
-                hit.q_end.saturating_sub(hit.q_start).saturating_add(1)
-            };
+            let align_length = hit.internal_q_end_0.saturating_sub(hit.internal_q_offset_0);
             let mut matches = 0usize;
             let mut mismatches = 0usize;
             for i in 0..align_length {
@@ -992,17 +1001,11 @@ pub fn reevaluate_hsp_with_ambiguities_gapped_ex(
         _ => return true, // No gap_info = delete HSP
     };
 
-    let query_is_minus = hit.query_frame < 0;
-
     // NCBI reference: blast_hits.c:528-535
     // query = q + hsp->query.offset;
     // subject = s + hsp->subject.offset;
-    let q_offset = if hit.query_length > 0 && query_is_minus {
-        hit.query_length.saturating_sub(hit.q_end)
-    } else {
-        hit.q_start.saturating_sub(1)
-    };
-    let s_offset = hit.s_start.min(hit.s_end).saturating_sub(1);
+    let q_offset = hit.internal_q_offset_0;
+    let s_offset = hit.internal_s_offset_0;
 
     // NCBI reference: blast_hits.c:508-526 (factor and gap penalties)
     let mut factor = 1;
@@ -1310,6 +1313,17 @@ pub fn reevaluate_hsp_with_ambiguities_gapped_ex(
 
     // NCBI reference: blast_hits.c:414-470 s_UpdateReevaluatedHSP
     hit.raw_score = score;
+    // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_hits.c:452-455
+    // ```c
+    // hsp->query.offset = (Int4)(best_q_start - query_start);
+    // hsp->query.end = (Int4)(hsp->query.offset + best_q_end - best_q_start);
+    // hsp->subject.offset = (Int4)(best_s_start - subject_start);
+    // hsp->subject.end = (Int4)(hsp->subject.offset + best_s_end - best_s_start);
+    // ```
+    hit.internal_q_offset_0 = best_q_start;
+    hit.internal_q_end_0 = best_q_start.saturating_add(best_q_end.saturating_sub(best_q_start));
+    hit.internal_s_offset_0 = best_s_start;
+    hit.internal_s_end_0 = best_s_start.saturating_add(best_s_end.saturating_sub(best_s_start));
     let (q_start, q_end, s_start, s_end) = adjust_blastn_offsets(
         best_q_start,
         best_q_end,

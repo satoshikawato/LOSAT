@@ -457,7 +457,18 @@ pub fn finalize_task_config(
 // ```
 /// Read query sequences
 pub fn read_queries(args: &BlastnArgs) -> Result<(Vec<fasta::Record>, Vec<String>)> {
-    eprintln!("Reading query & subject...");
+    // NCBI reference: ncbi-blast/c++/src/algo/blast/api/blast_setup_cxx.cpp:486-651
+    // ```c
+    // void
+    // SetupQueries_OMF(IBlastQuerySource& queries,
+    //                  BlastQueryInfo* qinfo,
+    //                  BLAST_SequenceBlk** seqblk,
+    //                  EBlastProgramType prog,
+    //                  ...)
+    // ```
+    if args.verbose {
+        eprintln!("Reading query & subject...");
+    }
     let query_reader = fasta::Reader::from_file(&args.query)?;
     let queries: Vec<fasta::Record> = query_reader.records().filter_map(|r| r.ok()).collect();
     let query_ids: Vec<String> = queries
@@ -478,7 +489,14 @@ pub fn read_queries(args: &BlastnArgs) -> Result<(Vec<fasta::Record>, Vec<String
 pub fn read_sequences(
     args: &BlastnArgs,
 ) -> Result<(Vec<fasta::Record>, Vec<String>, Vec<fasta::Record>)> {
-    eprintln!("Reading query & subject...");
+    // NCBI reference: ncbi-blast/c++/src/algo/blast/api/blast_setup_cxx.cpp:486-860
+    // ```c
+    // SetupQueries_OMF(...);
+    // SetupSubjects_OMF(...);
+    // ```
+    if args.verbose {
+        eprintln!("Reading query & subject...");
+    }
     let query_reader = fasta::Reader::from_file(&args.query)?;
     let queries: Vec<fasta::Record> = query_reader.records().filter_map(|r| r.ok()).collect();
     let query_ids: Vec<String> = queries
@@ -657,10 +675,17 @@ pub fn apply_dust_masking(
     queries: &[fasta::Record],
 ) -> Vec<Vec<MaskedInterval>> {
     if args.dust {
-        eprintln!(
-            "Applying DUST filter (level={}, window={}, linker={})...",
-            args.dust_level, args.dust_window, args.dust_linker
-        );
+        // NCBI reference: ncbi-blast/c++/src/algo/blast/api/dust_filter.cpp:92-128
+        // ```c
+        // orig_query_mask->Add(*query_masks,  kTopFlags, 0);
+        // query_masks->Merge(kTopFlags, 0);
+        // ```
+        if args.verbose {
+            eprintln!(
+                "Applying DUST filter (level={}, window={}, linker={})...",
+                args.dust_level, args.dust_window, args.dust_linker
+            );
+        }
         let masker = DustMasker::new(args.dust_level, args.dust_window, args.dust_linker);
         let masks: Vec<Vec<MaskedInterval>> = queries
             .iter()
@@ -672,7 +697,7 @@ pub fn apply_dust_masking(
             .map(|m| m.iter().map(|i| i.end - i.start).sum::<usize>())
             .sum();
         let total_bases: usize = queries.iter().map(|r| r.seq().len()).sum();
-        if total_bases > 0 {
+        if args.verbose && total_bases > 0 {
             eprintln!(
                 "DUST masked {} bases ({:.2}%) across {} sequences",
                 total_masked,
@@ -697,15 +722,22 @@ pub fn build_lookup_tables(
     subjects_packed: Option<&[Vec<u8>]>,
     approx_table_entries: usize,
 ) -> (LookupTables, usize) {
-    eprintln!(
-        "Building lookup (Task: {}, Word: {}, TwoStage: {}, LUTWord: {}, Direct: {}, DUST: {})...",
-        args.task,
-        config.effective_word_size,
-        config.use_two_stage,
-        config.lut_word_length,
-        config.use_direct_lookup,
-        args.dust
-    );
+    // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_nalookup.c:1231-1344
+    // ```c
+    // Int4 BlastMBLookupTableNew(...);
+    // Int4 BlastNaLookupTableNew(...);
+    // ```
+    if args.verbose {
+        eprintln!(
+            "Building lookup (Task: {}, Word: {}, TwoStage: {}, LUTWord: {}, Direct: {}, DUST: {})...",
+            args.task,
+            config.effective_word_size,
+            config.use_two_stage,
+            config.lut_word_length,
+            config.use_direct_lookup,
+            args.dust
+        );
+    }
 
     // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_nalookup.c:1312-1325
     // ```c

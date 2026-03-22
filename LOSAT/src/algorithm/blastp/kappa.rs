@@ -11,8 +11,8 @@ use std::ptr::NonNull;
 use crate::common::{GapEditOp, Hit};
 use crate::config::ScoringMatrix;
 use crate::core::blast_seg::{SegMasker, SegParams};
-use crate::core::blast_stat::{e_to_p, p_to_e};
 use crate::core::blast_stat::composition::compute_lambda_from_score_probs;
+use crate::core::blast_stat::{e_to_p, p_to_e};
 use crate::core::composition_adjustment::adjust_scores::{
     blast_overall_p_value, read_aa_composition, AdjustedProteinMatrix, BlastCompositionWorkspace,
 };
@@ -405,12 +405,7 @@ fn blastp_redo_one_alignment_callback(
 //     return Blast_KarlinLambdaNR(&freq, lambda0);
 // }
 // ```
-fn blastp_calc_lambda(
-    probs: &[f64],
-    min_score: i32,
-    max_score: i32,
-    lambda0: f64,
-) -> Result<f64> {
+fn blastp_calc_lambda(probs: &[f64], min_score: i32, max_score: i32, lambda0: f64) -> Result<f64> {
     compute_lambda_from_score_probs(probs, min_score, max_score, lambda0)
         .map_err(anyhow::Error::msg)
 }
@@ -1132,7 +1127,6 @@ pub(crate) fn postprocess_preliminary_hits(
         redo_align_params,
         &matching_seq,
         &query_workspace.redo_query_info,
-        composition_workspace,
         // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_kappa.c:2120-2128
         // ```c
         // if (sbp->kbp_gap[i] != NULL) {

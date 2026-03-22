@@ -710,37 +710,118 @@ impl PvDirectLookup {
 /// - word_length: Used for extension triggering (e.g., 28 for megablast)
 /// This allows O(1) direct array access even for large word_length values
 pub struct TwoStageLookup {
-    /// Lookup table using lut_word_length
-    pv_lookup: PvDirectLookup,
+    /// Megablast lookup table using NCBI hashtable/next_pos chains.
+    mb_lookup: MbLookupTable,
     /// Lookup word length (for indexing)
     lut_word_length: usize,
     /// Extension word length (for triggering extension)
     word_length: usize,
 }
 
+// NCBI reference: ncbi-blast/c++/include/algo/blast/core/blast_nalookup.h:238-269
+// ```c
+// typedef struct BlastMBLookupTable {
+//     Int4 word_length;
+//     Int4 lut_word_length;
+//     Int8 hashsize;
+//     ...
+//     Int4* hashtable;
+//     Int4* next_pos;
+//     PV_ARRAY_TYPE *pv_array;
+//     Int4 pv_array_bts;
+//     Int4 longest_chain;
+// } BlastMBLookupTable;
+// ```
+struct MbLookupTable {
+    hashtable: Vec<u32>,
+    next_pos: Vec<u32>,
+    pv_array: Vec<PvArrayType>,
+    pv_array_bts: usize,
+    longest_chain: usize,
+}
+
+impl MbLookupTable {
+    // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_nascan.c:1386-1395
+    // ```c
+    // if (PV_TEST(pv, index, pv_array_bts))
+    //     return 1;
+    // else
+    //     return 0;
+    // ```
+    #[inline(always)]
+    fn has_hits(&self, index: u64) -> bool {
+        pv_test_shift(&self.pv_array, index as usize, self.pv_array_bts)
+    }
+
+    // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_nascan.c:1406-1418
+    // ```c
+    // Int4 q_off = lookup->hashtable[index];
+    //
+    // while (q_off) {
+    //     offset_pairs[i].qs_offsets.q_off   = q_off - 1;
+    //     offset_pairs[i++].qs_offsets.s_off = s_off;
+    //     q_off = lookup->next_pos[q_off];
+    // }
+    // ```
+    #[inline(always)]
+    fn for_each_hit(&self, index: u64, mut callback: impl FnMut(u32)) {
+        if !self.has_hits(index) {
+            return;
+        }
+        let mut q_off = self.hashtable[index as usize];
+        while q_off != 0 {
+            callback(q_off);
+            q_off = self.next_pos[q_off as usize];
+        }
+    }
+
+    #[inline(always)]
+    fn contains_hit(&self, index: u64, q_off_1: u32) -> bool {
+        let mut found = false;
+        self.for_each_hit(index, |hit_q_off| {
+            if hit_q_off == q_off_1 {
+                found = true;
+            }
+        });
+        found
+    }
+
+    #[inline(always)]
+    fn count_hits(&self, index: u64) -> usize {
+        let mut count = 0usize;
+        self.for_each_hit(index, |_| {
+            count += 1;
+        });
+        count
+    }
+
+    #[inline(always)]
+    fn longest_chain(&self) -> usize {
+        self.longest_chain
+    }
+}
+
 impl TwoStageLookup {
     /// Check if a lut_word_length k-mer has any hits (O(1))
     #[inline(always)]
     pub fn has_hits(&self, lut_kmer: u64) -> bool {
-        self.pv_lookup.has_hits(lut_kmer)
+        self.mb_lookup.has_hits(lut_kmer)
     }
 
-    /// Get hits for a lut_word_length k-mer
+    /// Visit hits for a lut_word_length k-mer.
     #[inline(always)]
-    pub fn get_hits(&self, lut_kmer: u64) -> &[u32] {
-        // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_nascan.c:1374-1418
-        // ```c
-        // if (PV_TEST(pv, index, pv_array_bts))
-        //     return 1;
-        // ...
-        // Int4 q_off = lookup->hashtable[index];
-        // while (q_off) {
-        //     offset_pairs[i].qs_offsets.q_off   = q_off - 1;
-        //     offset_pairs[i++].qs_offsets.s_off = s_off;
-        //     q_off = lookup->next_pos[q_off];
-        // }
-        // ```
-        self.pv_lookup.get_hits_checked(lut_kmer)
+    pub fn for_each_hit(&self, lut_kmer: u64, callback: impl FnMut(u32)) {
+        self.mb_lookup.for_each_hit(lut_kmer, callback)
+    }
+
+    #[inline(always)]
+    pub fn contains_hit(&self, lut_kmer: u64, q_off_1: u32) -> bool {
+        self.mb_lookup.contains_hit(lut_kmer, q_off_1)
+    }
+
+    #[inline(always)]
+    pub fn count_hits(&self, lut_kmer: u64) -> usize {
+        self.mb_lookup.count_hits(lut_kmer)
     }
 
     /// Get lookup word length
@@ -774,7 +855,7 @@ impl TwoStageLookup {
     // ```
     #[inline(always)]
     pub fn longest_chain(&self) -> usize {
-        self.pv_lookup.longest_chain()
+        self.mb_lookup.longest_chain()
     }
 }
 
@@ -1425,6 +1506,155 @@ pub fn build_na_lookup(
 /// - lut_word_length: Used for indexing (typically 8 for megablast)
 /// - word_length: Used for extension triggering (typically 28 for megablast)
 /// This allows O(1) direct array access even for large word_length values
+fn build_mb_lookup(
+    queries_blastna: &[Vec<u8>],
+    query_offsets: &[i32],
+    word_length: usize,
+    lut_word_length: usize,
+    query_masks: &[Vec<MaskedInterval>],
+    db_word_counts: Option<&[u8]>,
+    max_db_word_count: u8,
+    approx_table_entries: usize,
+) -> MbLookupTable {
+    debug_assert_eq!(queries_blastna.len(), query_offsets.len());
+
+    let table_size = 1usize << (2 * lut_word_length);
+    let (pv_size, pv_array_bts) = compute_mb_pv_params(
+        table_size,
+        approx_table_entries,
+        db_word_counts.is_some(),
+        lut_word_length,
+    );
+    let mut hashtable = vec![0u32; table_size];
+    let max_query_offset = queries_blastna
+        .iter()
+        .zip(query_offsets.iter())
+        .map(|(seq, &query_offset)| query_offset.max(0) as usize + seq.len())
+        .max()
+        .unwrap_or(0);
+    let mut next_pos = vec![0u32; max_query_offset + 1];
+    let mut pv_array = vec![0u32; pv_size];
+    let debug_mode = std::env::var("BLEMIR_DEBUG").is_ok();
+    let kmer_mask: u64 = (1u64 << (2 * lut_word_length)) - 1;
+    const K_COMPRESSION_FACTOR: usize = 2048;
+    let mut helper_array =
+        vec![0u32; ((table_size + K_COMPRESSION_FACTOR - 1) / K_COMPRESSION_FACTOR).max(1)];
+    let mut total_positions = 0usize;
+    let mut ambiguous_skipped = 0usize;
+
+    // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_nalookup.c:979-1108
+    // ```c
+    // mb_lt->next_pos = (Int4 *)calloc(query->length + 1, sizeof(Int4));
+    // ...
+    // for (loc = location; loc; loc = loc->next) {
+    //     if (full_word_size > (loc->ssr->right - loc->ssr->left + 1))
+    //         continue;
+    //     ...
+    //     if ((val & BLAST2NA_MASK) != 0) {
+    //         ecode = 0;
+    //         pos = seq + kLutWordLength;
+    //         continue;
+    //     }
+    //     ecode = ((ecode << BITS_PER_NUC) & kLutMask) + val;
+    //     if (seq < pos)
+    //         continue;
+    //     ...
+    //     if (mb_lt->hashtable[ecode] == 0) {
+    //         PV_SET(pv_array, ecode, pv_array_bts);
+    //     } else {
+    //         helper_array[ecode/kCompressionFactor]++;
+    //     }
+    //     mb_lt->next_pos[index] = mb_lt->hashtable[ecode];
+    //     mb_lt->hashtable[ecode] = index;
+    // }
+    // longest_chain = 2;
+    // for (index = 0; index < mb_lt->hashsize / kCompressionFactor; index++)
+    //     longest_chain = MAX(longest_chain, helper_array[index]);
+    // ```
+    for (q_idx, seq_blastna) in queries_blastna.iter().enumerate() {
+        let seq = seq_blastna.as_slice();
+        if seq.len() < lut_word_length {
+            continue;
+        }
+
+        let masks = query_masks.get(q_idx).map(|v| v.as_slice()).unwrap_or(&[]);
+        let ranges = build_unmasked_ranges(seq.len(), masks);
+        let query_offset = query_offsets[q_idx].max(0) as usize;
+
+        for (range_start, range_end) in ranges {
+            let range_len = range_end.saturating_sub(range_start);
+            if word_length > range_len {
+                continue;
+            }
+
+            let mut current_kmer: u64 = 0;
+            let mut valid_bases = 0usize;
+
+            for pos in range_start..range_end {
+                let base = seq[pos];
+                if (base & BLAST2NA_MASK) != 0 {
+                    current_kmer = 0;
+                    valid_bases = 0;
+                    ambiguous_skipped += 1;
+                    continue;
+                }
+
+                current_kmer = ((current_kmer << 2) | base as u64) & kmer_mask;
+                valid_bases += 1;
+                if valid_bases < lut_word_length {
+                    continue;
+                }
+
+                total_positions += 1;
+
+                if let Some(counts_filter) = db_word_counts {
+                    if db_word_count_exceeds(counts_filter, current_kmer, max_db_word_count) {
+                        continue;
+                    }
+                }
+
+                let bucket = current_kmer as usize;
+                let q_off_1 = (query_offset + (pos + 1 - lut_word_length) + 1) as u32;
+                if hashtable[bucket] == 0 {
+                    pv_set_shift(&mut pv_array, bucket, pv_array_bts);
+                } else {
+                    helper_array[bucket / K_COMPRESSION_FACTOR] =
+                        helper_array[bucket / K_COMPRESSION_FACTOR].saturating_add(1);
+                }
+                next_pos[q_off_1 as usize] = hashtable[bucket];
+                hashtable[bucket] = q_off_1;
+            }
+        }
+    }
+
+    let mut longest_chain = 2usize;
+    for &value in &helper_array {
+        longest_chain = longest_chain.max(value as usize);
+    }
+
+    if debug_mode {
+        let hashtable_bytes = hashtable.len() * std::mem::size_of::<u32>();
+        let next_pos_bytes = next_pos.len() * std::mem::size_of::<u32>();
+        eprintln!(
+            "[DEBUG] build_mb_lookup: lut_word_length={}, total_positions={}, ambiguous_skipped={}, hashtable={:.1}MB, next_pos={:.1}MB, longest_chain={}",
+            lut_word_length,
+            total_positions,
+            ambiguous_skipped,
+            hashtable_bytes as f64 / 1_000_000.0,
+            next_pos_bytes as f64 / 1_000_000.0,
+            longest_chain,
+        );
+    }
+
+    MbLookupTable {
+        hashtable,
+        next_pos,
+        pv_array,
+        pv_array_bts,
+        longest_chain,
+    }
+}
+
 pub fn build_two_stage_lookup(
     queries_blastna: &[Vec<u8>],
     query_offsets: &[i32],
@@ -1444,26 +1674,19 @@ pub fn build_two_stage_lookup(
         );
     }
 
-    // Build the lookup table using lut_word_length
-    // We index all positions where a full word_length match is possible
-    let pv_lookup = build_pv_direct_lookup(
+    let mb_lookup = build_mb_lookup(
         queries_blastna,
         query_offsets,
-        lut_word_length,
         word_length,
+        lut_word_length,
         query_masks,
         db_word_counts,
         max_db_word_count,
         approx_table_entries,
-        true,
     );
 
-    // Note: The actual word_length matching is done during scanning,
-    // where we check if the subject sequence has a word_length match
-    // starting at the position indicated by the lut_word_length lookup
-
     TwoStageLookup {
-        pv_lookup,
+        mb_lookup,
         lut_word_length,
         word_length,
     }

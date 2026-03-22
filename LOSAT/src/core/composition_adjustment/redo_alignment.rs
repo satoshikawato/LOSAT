@@ -11,12 +11,19 @@ use std::ffi::c_void;
 use std::ptr::NonNull;
 
 use crate::common::GapEditOp;
+use crate::core::blast_stat::composition::compute_lambda_from_score_probs;
 use crate::utils::matrix::BLASTAA_SIZE;
 
 use super::adjust_scores::{
     blast_adjust_scores, read_aa_composition, AdjustedProteinMatrix, BlastAminoAcidComposition,
-    BlastMatrixInfo,
+    BlastCompositionWorkspace, BlastMatrixInfo,
 };
+
+#[inline]
+fn redo_calc_lambda(probs: &[f64], min_score: i32, max_score: i32, lambda0: f64) -> Result<f64> {
+    compute_lambda_from_score_probs(probs, min_score, max_score, lambda0)
+        .map_err(|err| anyhow::anyhow!(err))
+}
 
 // NCBI reference: ncbi-blast/c++/src/algo/blast/composition_adjustment/redo_alignment.c:41-46
 // ```c
@@ -1678,6 +1685,7 @@ pub fn blast_redo_one_match<'seq>(
     let mut lambda_ratio = None;
     let mut matrix_adjust_rule = EMatrixAdjustRule::DontAdjustMatrix;
     let mut adjusted_matrix = None;
+    let mut composition_workspace = BlastCompositionWorkspace::new_blosum62();
 
     for window in windows {
         let query_index = usize::try_from(window.query_range.context).unwrap_or_default();
@@ -1790,6 +1798,8 @@ pub fn blast_redo_one_match<'seq>(
                             range.subject.length,
                             params.compo_adjust_mode,
                             params.composition_test_index,
+                            &mut composition_workspace,
+                            redo_calc_lambda,
                         )?;
                         if let Some(adjusted) = adjusted {
                             matrix_adjust_rule = adjusted.matrix_adjust_rule;

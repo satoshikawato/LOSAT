@@ -34,23 +34,14 @@ pub fn subject_best_hit(hits: &mut Vec<BlastnHsp>, query_len: usize) {
         return;
     }
 
-    // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_hits.c:1122-1132
+    // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_hits.c:2563-2566
     // ```c
-    // if (hsp->query.frame != hsp->subject.frame) {
-    //    *q_end = query_length - hsp->query.offset;
-    //    *q_start = *q_end - hsp->query.end + hsp->query.offset + 1;
-    // }
+    // o = hsp_array[i]->query.offset - range_diff;
+    // e = hsp_array[i]->query.end + range_diff;
     // ```
-    let q_offsets = |h: &BlastnHsp| {
-        if h.query_length > 0 && h.query_frame < 0 {
-            (
-                h.query_length.saturating_sub(h.q_end),
-                h.query_length.saturating_sub(h.q_start).saturating_add(1),
-            )
-        } else {
-            (h.q_start.saturating_sub(1), h.q_end)
-        }
-    };
+    // Subject-best-hit filtering uses internal query.offset/query.end, not
+    // output coordinates.
+    let q_offsets = |h: &BlastnHsp| (h.internal_q_offset_0, h.internal_q_end_0);
     let context = |h: &BlastnHsp| -> u32 { h.q_idx * 2 + if h.query_frame < 0 { 1 } else { 0 } };
 
     // Mark HSPs for removal
@@ -222,6 +213,19 @@ mod tests {
             q_idx: 0,
             s_idx: 0,
             raw_score: score,
+            internal_q_offset_0: if query_frame < 0 {
+                1000usize.saturating_sub(q_end)
+            } else {
+                q_start.saturating_sub(1)
+            },
+            internal_q_end_0: if query_frame < 0 {
+                1000usize.saturating_sub(q_start).saturating_add(1)
+            } else {
+                q_end
+            },
+            internal_s_offset_0: s_start.min(s_end).saturating_sub(1),
+            internal_s_end_0: s_start.max(s_end),
+            internal_query_context_offset: 0,
             gap_info: None,
             num_positives: q_end - q_start + 1,
         }

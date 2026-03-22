@@ -494,11 +494,11 @@ pub fn extend_hit_ungapped(
 /// and checks masked regions.
 ///
 /// # Arguments
-/// * `q_seq` - Query sequence
-/// * `s_seq` - Subject sequence
 /// * `q_off` - Query offset (position of lut_word_length match start) - WILL BE MODIFIED if masked regions found
 /// * `s_off` - Subject offset (position of lut_word_length match start) - WILL BE MODIFIED if masked regions found
 /// * `query_mask` - Masked intervals for query sequence (locations)
+/// * `q_range` - Exclusive end offset of the current query context
+/// * `s_range` - Exclusive end offset of the current subject scan range
 /// * `word_length` - Full word length (e.g., 28 for megablast)
 /// * `lut_word_length` - Lookup table word length (e.g., 8)
 /// * `check_double` - Whether to check for double word (default: true)
@@ -512,11 +512,11 @@ pub fn extend_hit_ungapped(
 ///
 /// Note: reward and penalty parameters are NOT used (NCBI BLAST does not check actual matches)
 pub fn type_of_word<F>(
-    q_seq: &[u8],
-    s_seq: &[u8],
     q_off: usize,
     s_off: usize,
     query_mask: &[MaskedInterval],
+    q_range: usize,
+    s_range: usize,
     word_length: usize,
     lut_word_length: usize,
     check_double: bool,
@@ -543,12 +543,6 @@ where
     // NCBI: Int4 s_end = *s_off + word_length;
     let mut q_end = q_off + word_length;
     let mut s_end = s_off + word_length;
-
-    // NCBI: context = BSearchContextInfo(q_end, query_info);
-    // NCBI: q_range = query_info->contexts[context].query_offset + query_info->contexts[context].query_length;
-    // For blastn, we typically have a single context, so q_range = q_seq.len()
-    let q_range = q_seq.len();
-    let s_range = s_seq.len();
 
     // NCBI: if (locations) { ... }
     // Check masked regions and adjust q_off/s_off if needed
@@ -586,12 +580,24 @@ where
         //                         *s_off, lut_word_length, *q_off)) break;
         // }
         // ```
-        while q_off_adjusted < q_seq.len() && s_off_adjusted < s_seq.len() {
+        while q_off_adjusted < q_range && s_off_adjusted < s_range {
             if !is_seed_masked(s_off_adjusted, q_off_adjusted) {
                 break;
             }
             q_off_adjusted += 1;
             s_off_adjusted += 1;
+        }
+        // NCBI reference: ncbi-blast/c++/src/algo/blast/core/na_ungapped.c:546-549
+        // ```c
+        // for (; TRUE; ++(*s_off), ++(*q_off)) {
+        //     if (!s_IsSeedMasked(lookup_wrap, subject,
+        //                         *s_off, lut_word_length, *q_off)) break;
+        // }
+        // ```
+        // Rust must stop if the absolute context/subject boundary is reached
+        // before finding an unmasked seed.
+        if q_off_adjusted >= q_range || s_off_adjusted >= s_range {
+            return (0, 0, q_off_adjusted, s_off_adjusted);
         }
     }
 

@@ -49,6 +49,11 @@ pub struct BlastnHsp {
     pub q_idx: u32,
     pub s_idx: u32,
     pub raw_score: i32,
+    pub internal_q_offset_0: usize,
+    pub internal_q_end_0: usize,
+    pub internal_s_offset_0: usize,
+    pub internal_s_end_0: usize,
+    pub internal_query_context_offset: i32,
     pub gap_info: Option<Vec<GapEditOp>>,
     // NCBI reference: ncbi-blast/c++/include/algo/blast/core/blast_hits.h:125-143
     // ```c
@@ -155,6 +160,19 @@ impl BlastnHsp {
             q_idx,
             s_idx,
             raw_score,
+            internal_q_offset_0: if query_length > 0 && query_frame < 0 {
+                query_length.saturating_sub(q_end)
+            } else {
+                q_start.saturating_sub(1)
+            },
+            internal_q_end_0: if query_length > 0 && query_frame < 0 {
+                query_length.saturating_sub(q_start).saturating_add(1)
+            } else {
+                q_end
+            },
+            internal_s_offset_0: s_start.min(s_end).saturating_sub(1),
+            internal_s_end_0: s_start.max(s_end),
+            internal_query_context_offset: 0,
             gap_info,
             num_positives,
         }
@@ -294,25 +312,21 @@ pub fn evalue_comp(evalue1: f64, evalue2: f64) -> Ordering {
 // }
 // ```
 pub fn score_compare_hsps(a: &BlastnHsp, b: &BlastnHsp) -> Ordering {
-    let query_offsets = |h: &BlastnHsp| {
-        if h.query_length > 0 && h.query_frame < 0 {
-            let q_offset = h.query_length.saturating_sub(h.q_end);
-            let q_end = h.query_length.saturating_sub(h.q_start).saturating_add(1);
-            (q_offset, q_end)
-        } else {
-            (h.q_start.saturating_sub(1), h.q_end)
-        }
-    };
+    // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_hits.c:1330-1353
+    // ```c
+    // if (0 == (result = BLAST_CMP(hsp2->score,          hsp1->score)) &&
+    //     0 == (result = BLAST_CMP(hsp1->subject.offset, hsp2->subject.offset)) &&
+    //     0 == (result = BLAST_CMP(hsp2->subject.end,    hsp1->subject.end)) &&
+    //     0 == (result = BLAST_CMP(hsp1->query  .offset, hsp2->query  .offset))) {
+    //     result = BLAST_CMP(hsp2->query.end, hsp1->query.end);
+    // }
+    // ```
+    // ScoreCompareHSPs compares canonical internal offsets/endpoints directly.
+    let query_offsets = |h: &BlastnHsp| (h.internal_q_offset_0, h.internal_q_end_0);
     let (a_q_offset, a_q_end) = query_offsets(a);
     let (b_q_offset, b_q_end) = query_offsets(b);
-    let (a_s_offset, a_s_end) = (
-        a.s_start.min(a.s_end).saturating_sub(1),
-        a.s_start.max(a.s_end),
-    );
-    let (b_s_offset, b_s_end) = (
-        b.s_start.min(b.s_end).saturating_sub(1),
-        b.s_start.max(b.s_end),
-    );
+    let (a_s_offset, a_s_end) = (a.internal_s_offset_0, a.internal_s_end_0);
+    let (b_s_offset, b_s_end) = (b.internal_s_offset_0, b.internal_s_end_0);
 
     match b.raw_score.cmp(&a.raw_score) {
         Ordering::Equal => {}
@@ -905,6 +919,11 @@ mod tests {
             q_idx: 0,
             s_idx,
             raw_score,
+            internal_q_offset_0: 0,
+            internal_q_end_0: 1,
+            internal_s_offset_0: 0,
+            internal_s_end_0: 1,
+            internal_query_context_offset: 0,
             gap_info: None,
             num_positives: 0,
         }

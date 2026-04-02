@@ -3,29 +3,8 @@
 //! Reference: ncbi-blast/c++/src/algo/blast/core/blast_hits.c
 
 use std::cmp::Ordering;
-use std::ffi::c_void;
 
 use crate::common::{GapEditOp, Hit};
-
-// NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_hits.c:1366-1377
-// ```c
-// qsort(hsp_list->hsp_array, hsp_list->hspcnt, sizeof(BlastHSP*),
-//       ScoreCompareHSPs);
-// ```
-//
-// NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_hits.c:3335-3337
-// ```c
-// qsort(hit_list->hsplist_array, hit_list->hsplist_count,
-//       sizeof(BlastHSPList*), s_EvalueCompareHSPLists);
-// ```
-unsafe extern "C" {
-    fn qsort(
-        base: *mut c_void,
-        nmemb: usize,
-        size: usize,
-        compar: Option<unsafe extern "C" fn(*const c_void, *const c_void) -> i32>,
-    );
-}
 
 // NCBI reference: ncbi-blast/c++/include/algo/blast/core/blast_hits.h:125-148
 // ```c
@@ -513,31 +492,6 @@ pub(crate) fn score_compare_hsps(a: &BlastpHsp, b: &BlastpHsp) -> Ordering {
     b_q_end.cmp(&a_q_end)
 }
 
-// NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_hits.c:1330-1353
-// ```c
-// int ScoreCompareHSPs(const void* h1, const void* h2) {
-//    ...
-// }
-// ```
-fn ncbi_qsort_ordering(ordering: Ordering) -> i32 {
-    match ordering {
-        Ordering::Less => -1,
-        Ordering::Equal => 0,
-        Ordering::Greater => 1,
-    }
-}
-
-// NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_hits.c:1366-1377
-// ```c
-// qsort(hsp_list->hsp_array, hsp_list->hspcnt, sizeof(BlastHSP*),
-//       ScoreCompareHSPs);
-// ```
-unsafe extern "C" fn score_compare_hsps_qsort(left: *const c_void, right: *const c_void) -> i32 {
-    let left = unsafe { &*(left as *const BlastpHsp) };
-    let right = unsafe { &*(right as *const BlastpHsp) };
-    ncbi_qsort_ordering(score_compare_hsps(left, right))
-}
-
 // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_hits.c:1414-1435
 // ```c
 // static int
@@ -556,17 +510,6 @@ pub(crate) fn evalue_compare_hsps(a: &BlastpHsp, b: &BlastpHsp) -> Ordering {
     } else {
         cmp
     }
-}
-
-// NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_hits.c:1444-1454
-// ```c
-// qsort(hsp_list->hsp_array, hsp_list->hspcnt, sizeof(BlastHSP*),
-//       s_EvalueCompareHSPs);
-// ```
-unsafe extern "C" fn evalue_compare_hsps_qsort(left: *const c_void, right: *const c_void) -> i32 {
-    let left = unsafe { &*(left as *const BlastpHsp) };
-    let right = unsafe { &*(right as *const BlastpHsp) };
-    ncbi_qsort_ordering(evalue_compare_hsps(left, right))
 }
 
 // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_hits.c:1355-1381
@@ -601,14 +544,7 @@ pub(crate) fn sort_hsplist_by_score(list: &mut BlastpHspList) {
         index += 1;
     }
     if index < list.hsps.len() - 1 {
-        unsafe {
-            qsort(
-                list.hsps.as_mut_ptr().cast::<c_void>(),
-                list.hsps.len(),
-                std::mem::size_of::<BlastpHsp>(),
-                Some(score_compare_hsps_qsort),
-            );
-        }
+        list.hsps.sort_unstable_by(score_compare_hsps);
     }
 }
 
@@ -629,14 +565,7 @@ fn sort_hsplist_by_evalue(list: &mut BlastpHspList) {
             index += 1;
         }
         if index < list.hsps.len() - 1 {
-            unsafe {
-                qsort(
-                    list.hsps.as_mut_ptr().cast::<c_void>(),
-                    list.hsps.len(),
-                    std::mem::size_of::<BlastpHsp>(),
-                    Some(evalue_compare_hsps_qsort),
-                );
-            }
+            list.hsps.sort_unstable_by(evalue_compare_hsps);
         }
     }
 }
@@ -731,19 +660,6 @@ fn compare_hsp_lists(a: &BlastpHspList, b: &BlastpHspList) -> Ordering {
         ord => return ord,
     }
     b.oid.cmp(&a.oid)
-}
-
-// NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_hits.c:3078-3106
-// ```c
-// static int s_EvalueCompareHSPLists(const void* v1, const void* v2)
-// {
-//    ...
-// }
-// ```
-unsafe extern "C" fn compare_hsp_lists_qsort(left: *const c_void, right: *const c_void) -> i32 {
-    let left = unsafe { &*(left as *const BlastpHspList) };
-    let right = unsafe { &*(right as *const BlastpHspList) };
-    ncbi_qsort_ordering(compare_hsp_lists(left, right))
 }
 
 // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_hits.c:1627-1676
@@ -1221,14 +1137,7 @@ impl BlastpHitList {
     // ```
     pub(crate) fn sort_by_evalue(&mut self) {
         if self.hsplist_count > 1 {
-            unsafe {
-                qsort(
-                    self.hsplist_array.as_mut_ptr().cast::<c_void>(),
-                    self.hsplist_count,
-                    std::mem::size_of::<BlastpHspList>(),
-                    Some(compare_hsp_lists_qsort),
-                );
-            }
+            self.hsplist_array[..self.hsplist_count].sort_unstable_by(compare_hsp_lists);
         }
         self.purge();
     }
@@ -1415,6 +1324,70 @@ fn cut_off_gap_edit_script(hit: &mut Hit, q_cut: usize, s_cut: usize, cut_begin:
     true
 }
 
+// NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_hits.c:2268-2315
+// ```c
+// static int
+// s_QueryOffsetCompareHSPs(const void* v1, const void* v2)
+// {
+//    ...
+//    if (h1->query.offset < h2->query.offset) return -1;
+//    if (h1->subject.offset < h2->subject.offset) return -1;
+//    if (h1->score < h2->score) return 1;
+//    if (h1->query.end < h2->query.end) return 1;
+//    if (h1->subject.end < h2->subject.end) return 1;
+// }
+// ```
+fn hit_query_offset_compare(a: &Hit, b: &Hit) -> Ordering {
+    (a.q_idx, a.query_frame)
+        .cmp(&(b.q_idx, b.query_frame))
+        .then_with(|| {
+            a.q_start
+                .saturating_sub(1)
+                .cmp(&b.q_start.saturating_sub(1))
+        })
+        .then_with(|| {
+            a.s_start
+                .min(a.s_end)
+                .saturating_sub(1)
+                .cmp(&b.s_start.min(b.s_end).saturating_sub(1))
+        })
+        .then_with(|| b.raw_score.cmp(&a.raw_score))
+        .then_with(|| b.q_end.cmp(&a.q_end))
+        .then_with(|| b.s_start.max(b.s_end).cmp(&a.s_start.max(a.s_end)))
+}
+
+// NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_hits.c:2333-2379
+// ```c
+// static int
+// s_QueryEndCompareHSPs(const void* v1, const void* v2)
+// {
+//    ...
+//    if (h1->query.end < h2->query.end) return -1;
+//    if (h1->subject.end < h2->subject.end) return -1;
+//    if (h1->score < h2->score) return 1;
+//    if (h1->query.offset < h2->query.offset) return 1;
+//    if (h1->subject.offset < h2->subject.offset) return 1;
+// }
+// ```
+fn hit_query_end_compare(a: &Hit, b: &Hit) -> Ordering {
+    (a.q_idx, a.query_frame)
+        .cmp(&(b.q_idx, b.query_frame))
+        .then_with(|| a.q_end.cmp(&b.q_end))
+        .then_with(|| a.s_start.max(a.s_end).cmp(&b.s_start.max(b.s_end)))
+        .then_with(|| b.raw_score.cmp(&a.raw_score))
+        .then_with(|| {
+            b.q_start
+                .saturating_sub(1)
+                .cmp(&a.q_start.saturating_sub(1))
+        })
+        .then_with(|| {
+            b.s_start
+                .min(b.s_end)
+                .saturating_sub(1)
+                .cmp(&a.s_start.min(a.s_end).saturating_sub(1))
+        })
+}
+
 // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_hits.c:2455-2535
 // ```c
 // Int4 Blast_HSPListPurgeHSPsWithCommonEndpoints(..., Boolean purge)
@@ -1440,44 +1413,7 @@ fn purge_hits_for_subject_ex(mut hits: Vec<Hit>, purge: bool) -> (Vec<Hit>, usiz
     // ```c
     // qsort(hsp_array, hsp_count, sizeof(BlastHSP*), s_QueryOffsetCompareHSPs);
     // ```
-    unsafe extern "C" fn hit_query_offset_compare_qsort(
-        left: *const c_void,
-        right: *const c_void,
-    ) -> i32 {
-        let left = unsafe { &*(left as *const Hit) };
-        let right = unsafe { &*(right as *const Hit) };
-        let ordering = (left.q_idx, left.query_frame)
-            .cmp(&(right.q_idx, right.query_frame))
-            .then_with(|| {
-                left.q_start
-                    .saturating_sub(1)
-                    .cmp(&right.q_start.saturating_sub(1))
-            })
-            .then_with(|| {
-                left.s_start
-                    .min(left.s_end)
-                    .saturating_sub(1)
-                    .cmp(&right.s_start.min(right.s_end).saturating_sub(1))
-            })
-            .then_with(|| right.raw_score.cmp(&left.raw_score))
-            .then_with(|| right.q_end.cmp(&left.q_end))
-            .then_with(|| {
-                right
-                    .s_start
-                    .max(right.s_end)
-                    .cmp(&left.s_start.max(left.s_end))
-            });
-        ncbi_qsort_ordering(ordering)
-    }
-
-    unsafe {
-        qsort(
-            hits.as_mut_ptr().cast::<c_void>(),
-            hits.len(),
-            std::mem::size_of::<Hit>(),
-            Some(hit_query_offset_compare_qsort),
-        );
-    }
+    hits.sort_unstable_by(hit_query_offset_compare);
 
     let mut i = 0usize;
     while i < hits.len() {
@@ -1510,45 +1446,7 @@ fn purge_hits_for_subject_ex(mut hits: Vec<Hit>, purge: bool) -> (Vec<Hit>, usiz
     // ```c
     // qsort(hsp_array, hsp_count, sizeof(BlastHSP*), s_QueryEndCompareHSPs);
     // ```
-    unsafe extern "C" fn hit_query_end_compare_qsort(
-        left: *const c_void,
-        right: *const c_void,
-    ) -> i32 {
-        let left = unsafe { &*(left as *const Hit) };
-        let right = unsafe { &*(right as *const Hit) };
-        let ordering = (left.q_idx, left.query_frame)
-            .cmp(&(right.q_idx, right.query_frame))
-            .then_with(|| left.q_end.cmp(&right.q_end))
-            .then_with(|| {
-                left.s_start
-                    .max(left.s_end)
-                    .cmp(&right.s_start.max(right.s_end))
-            })
-            .then_with(|| right.raw_score.cmp(&left.raw_score))
-            .then_with(|| {
-                right
-                    .q_start
-                    .saturating_sub(1)
-                    .cmp(&left.q_start.saturating_sub(1))
-            })
-            .then_with(|| {
-                right
-                    .s_start
-                    .min(right.s_end)
-                    .saturating_sub(1)
-                    .cmp(&left.s_start.min(left.s_end).saturating_sub(1))
-            });
-        ncbi_qsort_ordering(ordering)
-    }
-
-    unsafe {
-        qsort(
-            hits.as_mut_ptr().cast::<c_void>(),
-            hits.len(),
-            std::mem::size_of::<Hit>(),
-            Some(hit_query_end_compare_qsort),
-        );
-    }
+    hits.sort_unstable_by(hit_query_end_compare);
 
     let mut i = 0usize;
     while i < hits.len() {
@@ -1629,11 +1527,107 @@ mod tests {
         }
     }
 
+    fn make_blastp_hsp(
+        score: i32,
+        q_start: usize,
+        q_end: usize,
+        s_start: usize,
+        s_end: usize,
+    ) -> BlastpHsp {
+        BlastpHsp::from_hit(make_hit(score, q_start, q_end, s_start, s_end))
+    }
+
     #[test]
     fn test_score_compare_hits_prefers_higher_score_then_offsets() {
         let left = make_hit(100, 10, 30, 20, 40);
         let right = make_hit(90, 5, 25, 10, 30);
         assert_eq!(score_compare_hits(&left, &right), Ordering::Less);
+    }
+
+    // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_hits.c:1355-1377
+    // ```c
+    // if (!Blast_HSPListIsSortedByScore(hsp_list)) {
+    //     qsort(hsp_list->hsp_array, hsp_list->hspcnt, sizeof(BlastHSP*),
+    //           ScoreCompareHSPs);
+    // }
+    // ```
+    #[test]
+    fn test_sort_hsplist_by_score_matches_ncbi_tie_breakers() {
+        let mut list = BlastpHspList {
+            oid: 0,
+            query_index: 0,
+            hsps: vec![
+                make_blastp_hsp(100, 20, 40, 30, 50),
+                make_blastp_hsp(120, 15, 35, 20, 40),
+                make_blastp_hsp(100, 10, 25, 20, 35),
+                make_blastp_hsp(100, 20, 30, 20, 30),
+            ],
+            best_evalue: 0.0,
+        };
+
+        sort_hsplist_by_score(&mut list);
+
+        let ordered: Vec<(i32, usize, usize, usize, usize)> = list
+            .hsps
+            .iter()
+            .map(|hsp| {
+                (
+                    hsp.raw_score,
+                    hsp.s_start,
+                    hsp.s_end,
+                    hsp.q_start,
+                    hsp.q_end,
+                )
+            })
+            .collect();
+        assert_eq!(
+            ordered,
+            vec![
+                (120, 20, 40, 15, 35),
+                (100, 20, 35, 10, 25),
+                (100, 20, 30, 20, 30),
+                (100, 30, 50, 20, 40),
+            ]
+        );
+    }
+
+    // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_hits.c:1414-1455
+    // ```c
+    // if ((retval = s_EvalueComp(h1->evalue, h2->evalue)) != 0)
+    //    return retval;
+    // return ScoreCompareHSPs(v1, v2);
+    // ```
+    #[test]
+    fn test_sort_hsplist_by_evalue_uses_score_compare_as_tie_breaker() {
+        let mut list = BlastpHspList {
+            oid: 0,
+            query_index: 0,
+            hsps: vec![
+                make_blastp_hsp(90, 20, 40, 30, 50),
+                make_blastp_hsp(110, 15, 35, 20, 40),
+                make_blastp_hsp(110, 10, 25, 20, 35),
+            ],
+            best_evalue: 0.0,
+        };
+        list.hsps[0].e_value = 1e-20;
+        list.hsps[1].e_value = 1e-40;
+        list.hsps[2].e_value = 1e-40;
+
+        sort_hsplist_by_evalue(&mut list);
+
+        let ordered: Vec<(f64, i32, usize, usize)> = list
+            .hsps
+            .iter()
+            .map(|hsp| (hsp.e_value, hsp.raw_score, hsp.s_start, hsp.q_start))
+            .collect();
+        assert_eq!(
+            ordered,
+            vec![
+                (1e-40, 110, 20, 10),
+                (1e-40, 110, 20, 15),
+                (1e-20, 90, 30, 20),
+            ]
+        );
     }
 
     #[test]

@@ -1,4 +1,5 @@
 use crate::config::{ProteinScoringSpec, ScoringMatrix};
+use libm::erfc;
 
 use super::tables::KarlinParams;
 
@@ -33,11 +34,6 @@ pub struct BlastGumbelBlk {
     pub beta: f64,
     pub tau: f64,
     pub db_length: i64,
-}
-
-#[link(name = "m")]
-unsafe extern "C" {
-    fn erfc(x: f64) -> f64;
 }
 
 // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_stat.c:3696-3742
@@ -97,12 +93,16 @@ pub fn lookup_protein_gumbel_params(
     }
 }
 
+// NCBI reference: ncbi-blast/c++/src/algo/blast/core/ncbi_erf.c:407-410
+// ```c
+// double NCBI_ErfC(double x)
+// {
+//     return erfc(x);
+// }
+// ```
 #[inline]
 fn erfc_ncbi(x: f64) -> f64 {
-    // SAFETY: `erfc` is a pure libm function with no aliasing or lifetime
-    // requirements. The input is a plain finite or infinite `f64`, which
-    // matches the C ABI expected by NCBI's `ErfC` path.
-    unsafe { erfc(x) }
+    erfc(x)
 }
 
 // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_stat.c:5176-5231
@@ -272,5 +272,92 @@ mod tests {
 
         let evalue = blast_spouge_stoe(1062, &kbp, &gbp, 100, 200);
         assert!((evalue - 1.5863473416482987).abs() < 1e-12);
+    }
+
+    // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_stat.c:5176-5231
+    // ```c
+    // P_m_F = ErfC(-m_F / sqrt(2.0)) / 2.0;
+    // ...
+    // e_value = area * k_ * exp(-lambda_ * y_) * db_scale_factor;
+    // ```
+    #[test]
+    fn test_blast_spouge_stoe_matches_ncbi_formula_for_representative_tail_inputs() {
+        let gbp = BlastGumbelBlk {
+            lambda: 0.267,
+            c: 0.669720,
+            g: 12.0,
+            a: 1.9,
+            alpha: 42.602800,
+            sigma: 43.636200,
+            a_un: 0.7916,
+            alpha_un: 4.964660,
+            b: 2.0 * 12.0 * (0.7916 - 1.9),
+            beta: 2.0 * 12.0 * (4.964660 - 42.602800),
+            tau: 2.0 * 12.0 * (4.964660 - 43.636200),
+            db_length: 5000,
+        };
+
+        let moderate_kbp = KarlinParams {
+            lambda: 0.267 / 16.0,
+            k: 0.082,
+            h: 0.14,
+            alpha: 1.9,
+            beta: -30.0,
+        };
+        let moderate = blast_spouge_stoe(128, &moderate_kbp, &gbp, 64, 96);
+        assert!((moderate - 4250.4559852614275).abs() < 1e-9);
+
+        let long_tail_kbp = KarlinParams {
+            lambda: 0.267 / 64.0,
+            k: 0.021,
+            h: 0.14,
+            alpha: 1.9,
+            beta: -30.0,
+        };
+        let long_tail = blast_spouge_stoe(2048, &long_tail_kbp, &gbp, 250, 400);
+        assert!((long_tail - 4.058690669998566).abs() < 1e-12);
+    }
+
+    // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_stat.c:5236-5263
+    // ```c
+    // b = MAX((int)(log(db_scale_factor/e0) / kbp->Lambda), 2);
+    // e = BLAST_SpougeStoE(b, kbp, gbp, m, n);
+    // ...
+    // return a;
+    // ```
+    #[test]
+    fn test_blast_spouge_etos_matches_ncbi_formula_for_representative_evalues() {
+        let gbp = BlastGumbelBlk {
+            lambda: 0.267,
+            c: 0.669720,
+            g: 12.0,
+            a: 1.9,
+            alpha: 42.602800,
+            sigma: 43.636200,
+            a_un: 0.7916,
+            alpha_un: 4.964660,
+            b: 2.0 * 12.0 * (0.7916 - 1.9),
+            beta: 2.0 * 12.0 * (4.964660 - 42.602800),
+            tau: 2.0 * 12.0 * (4.964660 - 43.636200),
+            db_length: 5000,
+        };
+
+        let default_kbp = KarlinParams {
+            lambda: 0.267 / 32.0,
+            k: 0.041,
+            h: 0.14,
+            alpha: 1.9,
+            beta: -30.0,
+        };
+        assert_eq!(blast_spouge_etos(1e-6, &default_kbp, &gbp, 100, 200), 2537);
+
+        let tight_kbp = KarlinParams {
+            lambda: 0.267 / 16.0,
+            k: 0.082,
+            h: 0.14,
+            alpha: 1.9,
+            beta: -30.0,
+        };
+        assert_eq!(blast_spouge_etos(1e-30, &tight_kbp, &gbp, 64, 96), 3749);
     }
 }

@@ -5359,11 +5359,10 @@ pub fn run(args: BlastnArgs) -> Result<()> {
                                             >> 6)
                                             as u8;
                                         // SAFETY: q_left is bounded by the outer-sentinel query buffer.
-                                        let q_base =
-                                            unsafe {
-                                                *encoded_query_concat_blastna_with_sentinels
-                                                    .get_unchecked(q_left)
-                                            };
+                                        let q_base = unsafe {
+                                            *encoded_query_concat_blastna_with_sentinels
+                                                .get_unchecked(q_left)
+                                        };
                                         if s_base != q_base {
                                             break;
                                         }
@@ -5436,11 +5435,10 @@ pub fn run(args: BlastnArgs) -> Result<()> {
                                                 >> 6)
                                                 as u8;
                                             // SAFETY: q_right is bounded by the outer-sentinel query buffer.
-                                            let q_base =
-                                                unsafe {
-                                                    *encoded_query_concat_blastna_with_sentinels
-                                                        .get_unchecked(q_right)
-                                                };
+                                            let q_base = unsafe {
+                                                *encoded_query_concat_blastna_with_sentinels
+                                                    .get_unchecked(q_right)
+                                            };
                                             if s_base != q_base {
                                                 break;
                                             }

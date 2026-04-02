@@ -11,21 +11,6 @@ use super::lookup::QueryContext;
 use super::tracing::{trace_hsp_target, trace_match_target, trace_ungapped_hit_if_match};
 use super::translation::QueryFrame;
 use std::cmp::Ordering;
-use std::ffi::c_void;
-
-// NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_hits.c:1366-1377
-// ```c
-// qsort(hsp_list->hsp_array, hsp_list->hspcnt, sizeof(BlastHSP*),
-//       ScoreCompareHSPs);
-// ```
-unsafe extern "C" {
-    fn qsort(
-        base: *mut c_void,
-        nmemb: usize,
-        size: usize,
-        compar: Option<unsafe extern "C" fn(*const c_void, *const c_void) -> i32>,
-    );
-}
 
 /// NCBI BlastInitHSP equivalent - stores initial HSP with absolute coordinates
 ///
@@ -340,31 +325,6 @@ fn score_compare_ungapped_hits_ncbi(a: &UngappedHit, b: &UngappedHit) -> Orderin
         .then_with(|| b.q_aa_end.cmp(&a.q_aa_end))
 }
 
-#[inline]
-fn ncbi_qsort_ordering(ordering: Ordering) -> i32 {
-    match ordering {
-        Ordering::Less => -1,
-        Ordering::Equal => 0,
-        Ordering::Greater => 1,
-    }
-}
-
-// NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_hits.c:1330-1377
-// ```c
-// if (!Blast_HSPListIsSortedByScore(hsp_list)) {
-//     qsort(hsp_list->hsp_array, hsp_list->hspcnt, sizeof(BlastHSP*),
-//           ScoreCompareHSPs);
-// }
-// ```
-unsafe extern "C" fn score_compare_ungapped_hits_qsort(
-    left: *const c_void,
-    right: *const c_void,
-) -> i32 {
-    let left = unsafe { &*(left as *const UngappedHit) };
-    let right = unsafe { &*(right as *const UngappedHit) };
-    ncbi_qsort_ordering(score_compare_ungapped_hits_ncbi(left, right))
-}
-
 // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_hits.c:1366-1377
 // ```c
 // qsort(hsp_list->hsp_array, hsp_list->hspcnt, sizeof(BlastHSP*),
@@ -374,15 +334,7 @@ fn ncbi_qsort_ungapped_hits_by_score(hits: &mut [UngappedHit]) {
     if hits.len() <= 1 {
         return;
     }
-    debug_assert!(!std::mem::needs_drop::<UngappedHit>());
-    unsafe {
-        qsort(
-            hits.as_mut_ptr().cast::<c_void>(),
-            hits.len(),
-            std::mem::size_of::<UngappedHit>(),
-            Some(score_compare_ungapped_hits_qsort),
-        );
-    }
+    hits.sort_unstable_by(score_compare_ungapped_hits_ncbi);
 }
 
 // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_hits.c:1355-1369

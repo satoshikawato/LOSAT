@@ -2134,7 +2134,11 @@ fn blast_greedy_align(
     // NCBI preallocates two full-width rows of `2 * max_dist + 6` cells.
     let base_row_len = (2 * max_dist + 6) as usize;
     let store_traceback = edit_block.is_some();
-    let rows = if store_traceback { (max_dist + 2) as usize } else { 2 };
+    let rows = if store_traceback {
+        (max_dist + 2) as usize
+    } else {
+        2
+    };
     let mut last_seq2_off = vec![NonAffineGreedyRow::default(); rows];
     last_seq2_off[0] = NonAffineGreedyRow::new(0, base_row_len);
     last_seq2_off[1] = NonAffineGreedyRow::new(0, base_row_len);
@@ -2295,10 +2299,8 @@ fn blast_greedy_align(
         // }
         // ```
         if store_traceback {
-            last_seq2_off[(d + 1) as usize] = NonAffineGreedyRow::new(
-                diag_lower - 2,
-                (diag_upper - diag_lower + 7) as usize,
-            );
+            last_seq2_off[(d + 1) as usize] =
+                NonAffineGreedyRow::new(diag_lower - 2, (diag_upper - diag_lower + 7) as usize);
         }
     }
 

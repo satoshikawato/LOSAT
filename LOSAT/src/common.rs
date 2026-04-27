@@ -531,6 +531,36 @@ pub fn write_output_ncbi_order(
     )
 }
 
+/// Write default tabular output with NCBI-style ordering to an existing writer.
+///
+/// NCBI reference: ncbi-blast/c++/src/objtools/align_format/tabular.cpp:1100-1108
+/// ```c
+/// void CBlastTabularInfo::Print()
+/// {
+///     ITERATE(list<ETabularField>, iter, m_FieldsToShow) {
+///         if (iter != m_FieldsToShow.begin())
+///             m_Ostream << m_FieldDelimiter;
+///         x_PrintField(*iter);
+///     }
+///     m_Ostream << "\n";
+/// }
+/// ```
+pub fn write_output_ncbi_order_to_writer<W: Write>(
+    hits: Vec<Hit>,
+    writer: &mut W,
+    query_ids: &[Arc<str>],
+    subject_ids: &[Arc<str>],
+) -> Result<()> {
+    write_output_ncbi_order_with_format_to_writer(
+        hits,
+        writer,
+        OutputFormat::Tabular,
+        query_ids,
+        subject_ids,
+        &ReportContext::default(),
+    )
+}
+
 /// Write output with NCBI-style ordering and format selection
 ///
 /// Supports:
@@ -538,7 +568,7 @@ pub fn write_output_ncbi_order(
 /// - outfmt 6: Tabular output (default)
 /// - outfmt 7: Tabular with comment lines
 pub fn write_output_ncbi_order_with_format(
-    mut hits: Vec<Hit>,
+    hits: Vec<Hit>,
     out_path: Option<&PathBuf>,
     outfmt: OutputFormat,
     query_ids: &[Arc<str>],
@@ -552,10 +582,44 @@ pub fn write_output_ncbi_order_with_format(
         Box::new(BufWriter::new(stdout.lock()))
     };
 
+    write_output_ncbi_order_with_format_to_writer(
+        hits,
+        &mut writer,
+        outfmt,
+        query_ids,
+        subject_ids,
+        context,
+    )
+}
+
+/// Write output with NCBI-style ordering to an existing writer.
+///
+/// NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_hits.c:3383-3400
+/// ```c
+/// Int2 Blast_HSPResultsSortByEvalue(BlastHSPResults* results)
+/// {
+///    for (index = 0; index < results->num_queries; ++index) {
+///       hit_list = results->hitlist_array[index];
+///       if (hit_list != NULL && hit_list->hsplist_count > 1) {
+///          qsort(hit_list->hsplist_array, hit_list->hsplist_count,
+///                sizeof(BlastHSPList*), s_EvalueCompareHSPLists);
+///       }
+///       s_BlastHitListPurge(hit_list);
+///    }
+/// }
+/// ```
+pub fn write_output_ncbi_order_with_format_to_writer<W: Write>(
+    mut hits: Vec<Hit>,
+    writer: &mut W,
+    outfmt: OutputFormat,
+    query_ids: &[Arc<str>],
+    subject_ids: &[Arc<str>],
+    context: &ReportContext,
+) -> Result<()> {
     if hits.is_empty() {
         // For outfmt 7, still write header even with no hits
         if outfmt == OutputFormat::TabularWithComments {
-            crate::report::write_outfmt7_header(&mut writer, context, 0)?;
+            crate::report::write_outfmt7_header(writer, context, 0)?;
         } else if outfmt == OutputFormat::Pairwise {
             writeln!(writer, " ***** No hits found *****")?;
         }
@@ -663,7 +727,7 @@ pub fn write_output_ncbi_order_with_format(
                         // ```
                         let (query_id, subject_id) = hit.resolve_ids(query_ids, subject_ids);
                         write_hit_fields(
-                            &mut writer,
+                            writer,
                             query_id,
                             subject_id,
                             hit.identity,
@@ -699,7 +763,7 @@ pub fn write_output_ncbi_order_with_format(
             };
             write_pairwise_simple(
                 &all_sorted_hits,
-                &mut writer,
+                writer,
                 &pairwise_config,
                 query_ids,
                 subject_ids,
@@ -709,7 +773,7 @@ pub fn write_output_ncbi_order_with_format(
         OutputFormat::TabularWithComments => {
             write_outfmt7(
                 &all_sorted_hits,
-                &mut writer,
+                writer,
                 &config,
                 query_ids,
                 subject_ids,

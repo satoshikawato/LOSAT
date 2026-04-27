@@ -19,7 +19,7 @@ use std::sync::OnceLock;
 // #endif
 // }
 // ```
-#[cfg(feature = "parallel")]
+#[cfg(all(feature = "parallel", not(target_arch = "wasm32")))]
 use rayon::prelude::*;
 
 use crate::algorithm::tblastx::chaining::UngappedHit;
@@ -360,7 +360,7 @@ pub fn apply_sum_stats_even_gap_linking(
     // MAX(1024, hspcnt+5) and reuses it across all frame groups.
     let initial_lh_size = (total_hits + 5).max(1024); // NCBI: MAX(1024, hspcnt+5)
 
-    #[cfg(feature = "parallel")]
+    #[cfg(all(feature = "parallel", not(target_arch = "wasm32")))]
     let mut results: Vec<UngappedHit> = {
         // Use thread_local! macro for thread-local storage (rayon doesn't have ThreadLocal)
         thread_local! {
@@ -406,7 +406,7 @@ pub fn apply_sum_stats_even_gap_linking(
             .collect()
     };
 
-    #[cfg(not(feature = "parallel"))]
+    #[cfg(any(not(feature = "parallel"), target_arch = "wasm32"))]
     let mut results: Vec<UngappedHit> = {
         let mut pools = BufferPools {
             lh_helpers: Vec::with_capacity(initial_lh_size),

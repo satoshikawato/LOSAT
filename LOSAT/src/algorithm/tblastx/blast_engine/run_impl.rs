@@ -5,7 +5,61 @@
 use super::*;
 use std::sync::Arc;
 
+struct TblastxInMemoryRun<'a> {
+    queries: Vec<fasta::Record>,
+    subjects: Vec<fasta::Record>,
+    output: &'a mut Vec<u8>,
+}
+
+#[cfg(target_arch = "wasm32")]
+fn fasta_records_from_bytes(bytes: &[u8]) -> Vec<fasta::Record> {
+    // NCBI reference: ncbi-blast/c++/src/algo/blast/api/blast_setup_cxx.cpp:486-651
+    // ```c
+    // void
+    // SetupQueries_OMF(IBlastQuerySource& queries,
+    //                  BlastQueryInfo* qinfo,
+    //                  BLAST_SequenceBlk** seqblk,
+    //                  EBlastProgramType prog,
+    //                  ...)
+    // ```
+    fasta::Reader::new(bytes)
+        .records()
+        .filter_map(|record| record.ok())
+        .collect()
+}
+
+#[cfg(target_arch = "wasm32")]
+pub fn run_web_pair(args: TblastxArgs, query_fasta: &str, subject_fasta: &str) -> Result<Vec<u8>> {
+    // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_engine.c:1407-1427
+    // ```c
+    // db_length = BlastSeqSrcGetTotLen(seq_src);
+    // itr = BlastSeqSrcIteratorNewEx(MAX(BlastSeqSrcGetNumSeqs(seq_src)/100,1));
+    // while ( (seq_arg.oid = BlastSeqSrcIteratorNext(seq_src, itr))
+    //        != BLAST_SEQSRC_EOF) {
+    //     if (BlastSeqSrcGetSequence(seq_src, &seq_arg) < 0) {
+    //         continue;
+    //     }
+    // }
+    // ```
+    let queries = fasta_records_from_bytes(query_fasta.as_bytes());
+    let subjects = fasta_records_from_bytes(subject_fasta.as_bytes());
+    let mut output = Vec::new();
+    run_internal(
+        args,
+        Some(TblastxInMemoryRun {
+            queries,
+            subjects,
+            output: &mut output,
+        }),
+    )?;
+    Ok(output)
+}
+
 pub fn run(args: TblastxArgs) -> Result<()> {
+    run_internal(args, None)
+}
+
+fn run_internal(args: TblastxArgs, mut in_memory: Option<TblastxInMemoryRun<'_>>) -> Result<()> {
     // Optional timing breakdown (disabled by default to preserve output/parity logs)
     let timing_enabled = std::env::var_os("LOSAT_TIMING").is_some();
     let t_total = Instant::now();
@@ -125,8 +179,20 @@ pub fn run(args: TblastxArgs) -> Result<()> {
     }
 
     let t_phase_read_queries = Instant::now();
-    let query_reader = fasta::Reader::from_file(&args.query)?;
-    let queries_raw: Vec<fasta::Record> = query_reader.records().filter_map(|r| r.ok()).collect();
+    // NCBI reference: ncbi-blast/c++/src/algo/blast/api/blast_setup_cxx.cpp:486-651
+    // ```c
+    // SetupQueries_OMF(IBlastQuerySource& queries,
+    //                  BlastQueryInfo* qinfo,
+    //                  BLAST_SequenceBlk** seqblk,
+    //                  EBlastProgramType prog,
+    //                  ...)
+    // ```
+    let queries_raw: Vec<fasta::Record> = if let Some(input) = in_memory.as_mut() {
+        std::mem::take(&mut input.queries)
+    } else {
+        let query_reader = fasta::Reader::from_file(&args.query)?;
+        query_reader.records().filter_map(|r| r.ok()).collect()
+    };
     // NCBI reference: ncbi-blast/c++/include/algo/blast/core/blast_hits.h:153-166
     // ```c
     // typedef struct BlastHSPList {
@@ -259,9 +325,23 @@ pub fn run(args: TblastxArgs) -> Result<()> {
         .collect();
 
     let t_phase_read_subjects = Instant::now();
-    let subject_reader = fasta::Reader::from_file(&args.subject)?;
-    let subjects_raw: Vec<fasta::Record> =
-        subject_reader.records().filter_map(|r| r.ok()).collect();
+    // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_engine.c:1407-1427
+    // ```c
+    // db_length = BlastSeqSrcGetTotLen(seq_src);
+    // itr = BlastSeqSrcIteratorNewEx(MAX(BlastSeqSrcGetNumSeqs(seq_src)/100,1));
+    // while ( (seq_arg.oid = BlastSeqSrcIteratorNext(seq_src, itr))
+    //        != BLAST_SEQSRC_EOF) {
+    //     if (BlastSeqSrcGetSequence(seq_src, &seq_arg) < 0) {
+    //         continue;
+    //     }
+    // }
+    // ```
+    let subjects_raw: Vec<fasta::Record> = if let Some(input) = in_memory.as_mut() {
+        std::mem::take(&mut input.subjects)
+    } else {
+        let subject_reader = fasta::Reader::from_file(&args.subject)?;
+        subject_reader.records().filter_map(|r| r.ok()).collect()
+    };
     if queries_raw.is_empty() || subjects_raw.is_empty() {
         return Ok(());
     }
@@ -1640,7 +1720,11 @@ pub fn run(args: TblastxArgs) -> Result<()> {
         //          (char*)&hit_list->hsplist_array[hit_list->hsplist_count-1],
         //          sizeof(BlastHSPList*), s_EvalueCompareHSPLists);
         // ```
-        write_output_ncbi_order(all, out_path.as_ref(), &query_ids, &subject_ids)?;
+        if let Some(input) = in_memory.as_mut() {
+            write_output_ncbi_order_to_writer(all, input.output, &query_ids, &subject_ids)?;
+        } else {
+            write_output_ncbi_order(all, out_path.as_ref(), &query_ids, &subject_ids)?;
+        }
     }
     if diag_enabled {
         print_diagnostics_summary(&diagnostics);

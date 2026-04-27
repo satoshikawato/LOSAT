@@ -18,6 +18,8 @@ mod run;
 
 // Re-export the main run function
 pub use run::run;
+#[cfg(target_arch = "wasm32")]
+pub use run::run_web_pair;
 
 use super::alignment::build_blastna_matrix;
 use super::filtering::{

@@ -15,7 +15,7 @@ use indicatif::{ProgressBar, ProgressStyle};
 // #endif
 // }
 // ```
-#[cfg(feature = "parallel")]
+#[cfg(all(feature = "parallel", not(target_arch = "wasm32")))]
 use rayon::prelude::*;
 use std::sync::{mpsc::channel, Arc};
 
@@ -59,7 +59,8 @@ use super::super::filtering::{
 };
 use super::super::hsp::{
     get_prelim_hitlist_size, score_compare_hsps as score_compare_blastn_hsps, trim_by_max_hsps,
-    write_output_blastn_hitlists, BlastnHitList, BlastnHsp, BlastnHspList,
+    write_output_blastn_hitlists, write_output_blastn_hitlists_to_writer, BlastnHitList, BlastnHsp,
+    BlastnHspList,
 };
 use super::super::interval_tree::{BlastIntervalTree, IndexMethod, TreeHsp};
 use super::super::lookup::{build_unmasked_ranges, reverse_complement};
@@ -82,6 +83,26 @@ const NCBIMATH_LN2: f64 = 0.69314718055994530941723212145818;
 // ```
 const MAX_SUBJECT_OFFSET: i32 = 90000;
 const MAX_TOTAL_GAPS: i32 = 3000;
+
+// NCBI reference: ncbi-blast/c++/src/algo/blast/format/blast_format.cpp:770-782
+// ```c
+// // tabular formatting just prints each alignment in turn
+// if (m_FormatType == CFormattingArgs::eTabular ||
+//     m_FormatType == CFormattingArgs::eTabularWithComments ||
+//     m_FormatType == CFormattingArgs::eCommaSeparatedValues ||
+//     m_FormatType == CFormattingArgs::eCommaSeparatedValuesWithHeader) {
+//   CBlastTabularInfo tabinfo(m_Outfile, m_CustomOutputFormatSpec, kDelim);
+// ```
+enum BlastnOutputTarget<'a> {
+    Path(&'a Option<std::path::PathBuf>),
+    Writer(&'a mut Vec<u8>),
+}
+
+struct BlastnInMemoryRun<'a> {
+    queries: Vec<bio::io::fasta::Record>,
+    subjects: Vec<bio::io::fasta::Record>,
+    output: &'a mut Vec<u8>,
+}
 
 // NCBI reference: ncbi-blast/c++/include/algo/blast/core/blast_gapalign.h:54
 // ```c
@@ -3585,7 +3606,7 @@ fn post_process_hits_and_write(
     max_hsps_per_subject: usize,
     subject_besthit: bool,
     query_lengths: &[usize],
-    out_path: &Option<std::path::PathBuf>,
+    output_target: BlastnOutputTarget<'_>,
     verbose: bool,
     query_ids: &[Arc<str>],
     subject_ids: &[Arc<str>],
@@ -3719,7 +3740,14 @@ fn post_process_hits_and_write(
     // ```c
     // static int s_EvalueCompareHSPLists(const void* v1, const void* v2) { ... }
     // ```
-    write_output_blastn_hitlists(&hit_lists, out_path.as_ref(), query_ids, subject_ids)?;
+    match output_target {
+        BlastnOutputTarget::Path(out_path) => {
+            write_output_blastn_hitlists(&hit_lists, out_path.as_ref(), query_ids, subject_ids)?;
+        }
+        BlastnOutputTarget::Writer(writer) => {
+            write_output_blastn_hitlists_to_writer(&hit_lists, writer, query_ids, subject_ids)?;
+        }
+    }
 
     // NCBI reference: ncbi-blast/c++/src/algo/blast/format/blast_format.cpp:770-782
     // ```c
@@ -3754,7 +3782,54 @@ fn post_process_hits_and_write(
     Ok(())
 }
 
+#[cfg(target_arch = "wasm32")]
+fn fasta_records_from_bytes(bytes: &[u8]) -> Vec<bio::io::fasta::Record> {
+    // NCBI reference: ncbi-blast/c++/src/algo/blast/api/blast_setup_cxx.cpp:486-651
+    // ```c
+    // void
+    // SetupQueries_OMF(IBlastQuerySource& queries,
+    //                  BlastQueryInfo* qinfo,
+    //                  BLAST_SequenceBlk** seqblk,
+    //                  EBlastProgramType prog,
+    //                  ...)
+    // ```
+    bio::io::fasta::Reader::new(bytes)
+        .records()
+        .filter_map(|record| record.ok())
+        .collect()
+}
+
+#[cfg(target_arch = "wasm32")]
+pub fn run_web_pair(args: BlastnArgs, query_fasta: &str, subject_fasta: &str) -> Result<Vec<u8>> {
+    // NCBI reference: ncbi-blast/c++/src/algo/blast/api/blast_setup_cxx.cpp:836-847
+    // ```c
+    // BlastSeqBlkSetSequence(subj, sequence.data.release(),
+    //    ((sentinels == eSentinels) ? sequence.length - 2 :
+    //     sequence.length));
+    // ...
+    // SBlastSequence compressed_seq =
+    //     subjects.GetBlastSequence(i, eBlastEncodingNcbi2na,
+    //                               eNa_strand_plus, eNoSentinels);
+    // ```
+    let queries = fasta_records_from_bytes(query_fasta.as_bytes());
+    let subjects = fasta_records_from_bytes(subject_fasta.as_bytes());
+    let mut output = Vec::new();
+    run_internal(
+        args,
+        Some(BlastnInMemoryRun {
+            queries,
+            subjects,
+            output: &mut output,
+        }),
+    )?;
+    Ok(output)
+}
+
 pub fn run(args: BlastnArgs) -> Result<()> {
+    run_internal(args, None)
+}
+
+fn run_internal(args: BlastnArgs, mut in_memory: Option<BlastnInMemoryRun<'_>>) -> Result<()> {
     // NCBI reference: ncbi-blast/c++/include/algo/blast/blastinput/blast_args.hpp:1290-1296
     // ```c
     // CMTArgs(...)
@@ -3914,7 +3989,31 @@ pub fn run(args: BlastnArgs) -> Result<()> {
     }
 
     // Read sequences
-    let (queries, query_ids) = read_queries(&args)?;
+    // NCBI reference: ncbi-blast/c++/src/algo/blast/api/blast_setup_cxx.cpp:486-651
+    // ```c
+    // SetupQueries_OMF(IBlastQuerySource& queries,
+    //                  BlastQueryInfo* qinfo,
+    //                  BLAST_SequenceBlk** seqblk,
+    //                  EBlastProgramType prog,
+    //                  ...)
+    // ```
+    let (queries, query_ids) = if let Some(input) = in_memory.as_mut() {
+        let queries = std::mem::take(&mut input.queries);
+        let query_ids = queries
+            .iter()
+            .map(|record| {
+                record
+                    .id()
+                    .split_whitespace()
+                    .next()
+                    .unwrap_or("unknown")
+                    .to_string()
+            })
+            .collect();
+        (queries, query_ids)
+    } else {
+        read_queries(&args)?
+    };
     if queries.is_empty() {
         return Ok(());
     }
@@ -3953,12 +4052,15 @@ pub fn run(args: BlastnArgs) -> Result<()> {
     //     }
     // }
     // ```
-    let subject_records: Option<Vec<bio::io::fasta::Record>> = if load_subjects {
-        let subject_reader = bio::io::fasta::Reader::from_file(&args.subject)?;
-        Some(subject_reader.records().filter_map(|r| r.ok()).collect())
-    } else {
-        None
-    };
+    let subject_records: Option<Vec<bio::io::fasta::Record>> =
+        if let Some(input) = in_memory.as_mut() {
+            Some(std::mem::take(&mut input.subjects))
+        } else if load_subjects {
+            let subject_reader = bio::io::fasta::Reader::from_file(&args.subject)?;
+            Some(subject_reader.records().filter_map(|r| r.ok()).collect())
+        } else {
+            None
+        };
     let subject_metadata = if let Some(subjects) = subject_records.as_ref() {
         subject_metadata_from_records(subjects)
     } else {
@@ -8166,7 +8268,7 @@ pub fn run(args: BlastnArgs) -> Result<()> {
                     max_hsps_per_subject,
                     subject_besthit,
                     query_lengths_arc.as_ref(),
-                    &out_path,
+                    BlastnOutputTarget::Path(&out_path),
                     verbose,
                     query_ids_arc.as_ref(),
                     subject_ids_arc.as_ref(),
@@ -8420,7 +8522,11 @@ pub fn run(args: BlastnArgs) -> Result<()> {
         max_hsps_per_subject,
         subject_besthit,
         query_lengths.as_ref(),
-        &args.out,
+        if let Some(input) = in_memory.as_mut() {
+            BlastnOutputTarget::Writer(input.output)
+        } else {
+            BlastnOutputTarget::Path(&args.out)
+        },
         args.verbose,
         query_ids_arc.as_ref(),
         subject_ids_arc.as_ref(),

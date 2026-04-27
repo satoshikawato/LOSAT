@@ -203,10 +203,6 @@ fn parse_tblastx_args(
     Ok(args)
 }
 
-fn remove_file_if_present(path: &str) {
-    let _ = std::fs::remove_file(path);
-}
-
 fn run_pair(
     program: &str,
     query_fasta: &str,
@@ -214,47 +210,43 @@ fn run_pair(
     outfmt: &str,
     extra_args: &str,
 ) -> Result<Vec<u8>, String> {
-    let query_path = PathBuf::from(".losat_web_query.fa");
-    let subject_path = PathBuf::from(".losat_web_subject.fa");
-    let out_path = PathBuf::from(".losat_web_out.txt");
-
-    remove_file_if_present(query_path.to_string_lossy().as_ref());
-    remove_file_if_present(subject_path.to_string_lossy().as_ref());
-    remove_file_if_present(out_path.to_string_lossy().as_ref());
-
-    std::fs::write(&query_path, query_fasta)
-        .map_err(|err| format!("failed to write query FASTA: {err}"))?;
-    std::fs::write(&subject_path, subject_fasta)
-        .map_err(|err| format!("failed to write subject FASTA: {err}"))?;
-
     let mut extra = parse_extra_args(extra_args);
     extra.push("--outfmt");
     extra.push(outfmt);
 
+    // NCBI reference: ncbi-blast/c++/src/algo/blast/api/blast_setup_cxx.cpp:486-651
+    // ```c
+    // SetupQueries_OMF(IBlastQuerySource& queries,
+    //                  BlastQueryInfo* qinfo,
+    //                  BLAST_SequenceBlk** seqblk,
+    //                  EBlastProgramType prog,
+    //                  ...)
+    // ```
     match program {
-        "blastn" => blastn::run(parse_blastn_args(
-            &extra,
-            query_path.clone(),
-            subject_path.clone(),
-            out_path.clone(),
-        )?)
-        .map_err(|err| err.to_string())?,
-        "tblastx" => tblastx::run(parse_tblastx_args(
-            &extra,
-            query_path.clone(),
-            subject_path.clone(),
-            out_path.clone(),
-        )?)
-        .map_err(|err| err.to_string())?,
+        "blastn" => blastn::run_web_pair(
+            parse_blastn_args(
+                &extra,
+                std::path::PathBuf::new(),
+                std::path::PathBuf::new(),
+                std::path::PathBuf::new(),
+            )?,
+            query_fasta,
+            subject_fasta,
+        )
+        .map_err(|err: anyhow::Error| err.to_string()),
+        "tblastx" => tblastx::run_web_pair(
+            parse_tblastx_args(
+                &extra,
+                std::path::PathBuf::new(),
+                std::path::PathBuf::new(),
+                std::path::PathBuf::new(),
+            )?,
+            query_fasta,
+            subject_fasta,
+        )
+        .map_err(|err: anyhow::Error| err.to_string()),
         other => return Err(format!("unsupported LOSAT program: {other}")),
     }
-
-    let output =
-        std::fs::read(&out_path).map_err(|err| format!("failed to read LOSAT output: {err}"))?;
-    remove_file_if_present(query_path.to_string_lossy().as_ref());
-    remove_file_if_present(subject_path.to_string_lossy().as_ref());
-    remove_file_if_present(out_path.to_string_lossy().as_ref());
-    Ok(output)
 }
 
 #[no_mangle]

@@ -835,6 +835,29 @@ pub fn write_output_blastn_hitlists(
         Box::new(BufWriter::new(stdout.lock()))
     };
 
+    write_output_blastn_hitlists_to_writer(hit_lists, &mut writer, query_ids, subject_ids)
+}
+
+/// Write BLASTN hit lists to an existing writer.
+///
+/// NCBI reference: ncbi-blast/c++/src/objtools/align_format/tabular.cpp:1100-1108
+/// ```c
+/// void CBlastTabularInfo::Print()
+/// {
+///     ITERATE(list<ETabularField>, iter, m_FieldsToShow) {
+///         if (iter != m_FieldsToShow.begin())
+///             m_Ostream << m_FieldDelimiter;
+///         x_PrintField(*iter);
+///     }
+///     m_Ostream << "\n";
+/// }
+/// ```
+pub fn write_output_blastn_hitlists_to_writer<W: Write>(
+    hit_lists: &[Option<BlastnHitList>],
+    writer: &mut W,
+    query_ids: &[Arc<str>],
+    subject_ids: &[Arc<str>],
+) -> io::Result<()> {
     let config = OutputConfig::ncbi_compat();
 
     for hit_list_opt in hit_lists.iter() {
@@ -865,7 +888,7 @@ pub fn write_output_blastn_hitlists(
                 // }
                 // ```
                 write_hit_fields(
-                    &mut writer,
+                    writer,
                     query_id,
                     subject_id,
                     hsp.identity,

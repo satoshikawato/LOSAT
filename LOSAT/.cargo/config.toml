@@ -1,2 +1,24 @@
+# NCBI reference: ncbi-blast/c++/include/algo/blast/blastinput/blast_args.hpp:1290-1296
+# ```c
+# CMTArgs(...)
+# {
+# #ifdef NCBI_NO_THREADS
+#     m_NumThreads = CThreadable::kMinNumThreads;
+#     m_MTMode = eNotSupported;
+# #endif
+# }
+# ```
 [build]
 target-dir = "target"
+
+[alias]
+build-web = "build --release --lib --target wasm32-wasip1 --no-default-features"
+
+# The Rust code only enters its wasm SIMD routines behind
+# `cfg(all(target_arch = "wasm32", target_feature = "simd128"))`; this enables
+# those existing parity-preserving integer paths for browser/WASI builds.
+[target.wasm32-wasip1]
+rustflags = ["-C", "target-feature=+simd128"]
+
+[target.wasm32-unknown-unknown]
+rustflags = ["-C", "target-feature=+simd128"]

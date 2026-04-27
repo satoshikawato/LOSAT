@@ -29,3 +29,5 @@ pub mod hsp;
 
 pub use args::BlastnArgs;
 pub use blast_engine::run;
+#[cfg(target_arch = "wasm32")]
+pub use blast_engine::run_web_pair;

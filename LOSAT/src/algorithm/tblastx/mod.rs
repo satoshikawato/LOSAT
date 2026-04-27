@@ -25,3 +25,5 @@ pub mod translation;
 
 pub use args::TblastxArgs;
 pub use blast_engine::run;
+#[cfg(target_arch = "wasm32")]
+pub use blast_engine::run_web_pair;

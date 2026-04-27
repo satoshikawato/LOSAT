@@ -31,6 +31,8 @@ mod run_impl;
 
 // Re-export the main run function
 pub use run_impl::run;
+#[cfg(target_arch = "wasm32")]
+pub use run_impl::run_web_pair;
 
 // Imports used by submodules
 pub(crate) use anyhow::{Context, Result};
@@ -46,14 +48,14 @@ pub(crate) use indicatif::ProgressBar;
 // #endif
 // }
 // ```
-#[cfg(feature = "parallel")]
+#[cfg(all(feature = "parallel", not(target_arch = "wasm32")))]
 pub(crate) use rayon::prelude::*;
 pub(crate) use std::collections::HashSet;
 pub(crate) use std::sync::atomic::{AtomicI32, AtomicU64, AtomicUsize, Ordering as AtomicOrdering};
 pub(crate) use std::sync::mpsc::channel;
 pub(crate) use std::time::{Duration, Instant};
 
-pub(crate) use crate::common::{write_output_ncbi_order, Hit};
+pub(crate) use crate::common::{write_output_ncbi_order, write_output_ncbi_order_to_writer, Hit};
 pub(crate) use crate::config::ScoringMatrix;
 pub(crate) use crate::stats::{lookup_protein_params_ungapped, KarlinParams};
 pub(crate) use crate::utils::genetic_code::GeneticCode;

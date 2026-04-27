@@ -15,3 +15,6 @@ pub mod api;
 pub mod blastinput;
 pub mod core;
 pub mod format;
+
+#[cfg(target_arch = "wasm32")]
+pub mod web_api;

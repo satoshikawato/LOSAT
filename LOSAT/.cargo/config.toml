@@ -13,6 +13,7 @@ target-dir = "target"
 
 [alias]
 build-web = "build --release --lib --target wasm32-wasip1 --no-default-features"
+build-web-unknown = "build --release --lib --target wasm32-unknown-unknown --no-default-features"
 
 # The Rust code only enters its wasm SIMD routines behind
 # `cfg(all(target_arch = "wasm32", target_feature = "simd128"))`; this enables

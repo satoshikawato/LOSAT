@@ -189,6 +189,78 @@ pub static BLOSUM62: [i8; BLOSUM62_SIZE * BLOSUM62_SIZE] = [
     -4, -4, -4, -4, -4, -4, -4, -4, -4, -4, -4, -4, -4, -4, -4, -4, -4, -4, -4, 1,
 ];
 
+// NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_encoding.c:110-121
+// ```c
+// const char NCBISTDAA_TO_AMINOACID[BLASTAA_SIZE] = {
+// '-','A','B','C','D','E','F','G','H','I','K','L','M',
+// 'N','P','Q','R','S','T','V','W','X','Y','Z','U','*',
+// 'O', 'J'};
+// ```
+//
+// NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_stat.c:1559-1592
+// ```c
+// matrix[i][j] = BLAST_SCORE_MIN;
+// ...
+// matrix[u_index][i] = matrix[c_index][i];
+// matrix[o_index][i] = matrix[x_index][i];
+// ```
+//
+// NCBI reference: ncbi-blast/c++/src/util/tables/sm_blosum62.c:34-92
+// ```c
+// static const TNCBIScore s_Blosum62PSM[25 * 25] = {
+//     /*       A,  R,  N,  D,  C,  Q,  E,  G,  H,  I,  L,  K,  M,
+//              F,  P,  S,  T,  W,  Y,  V,  B,  J,  Z,  X,  *        */
+// ```
+const NCBISTDAA_TO_BLOSUM62_DIRECT: [usize; BLASTAA_SIZE] = [
+    blosum62_order::X as usize,
+    blosum62_order::A as usize,
+    blosum62_order::B as usize,
+    blosum62_order::C as usize,
+    blosum62_order::D as usize,
+    blosum62_order::E as usize,
+    blosum62_order::F as usize,
+    blosum62_order::G as usize,
+    blosum62_order::H as usize,
+    blosum62_order::I as usize,
+    blosum62_order::K as usize,
+    blosum62_order::L as usize,
+    blosum62_order::M as usize,
+    blosum62_order::N as usize,
+    blosum62_order::P as usize,
+    blosum62_order::Q as usize,
+    blosum62_order::R as usize,
+    blosum62_order::S as usize,
+    blosum62_order::T as usize,
+    blosum62_order::V as usize,
+    blosum62_order::W as usize,
+    blosum62_order::X as usize,
+    blosum62_order::Y as usize,
+    blosum62_order::Z as usize,
+    blosum62_order::C as usize,
+    blosum62_order::STOP as usize,
+    blosum62_order::X as usize,
+    blosum62_order::J as usize,
+];
+
+#[inline(always)]
+fn ncbistdaa_to_blosum62_direct_index(ncbi: u8) -> usize {
+    if ncbi < BLASTAA_SIZE as u8 {
+        NCBISTDAA_TO_BLOSUM62_DIRECT[ncbi as usize]
+    } else {
+        blosum62_order::X as usize
+    }
+}
+
+#[inline(always)]
+pub fn blosum62_score_ncbistdaa_direct(aa1_ncbi: u8, aa2_ncbi: u8) -> i32 {
+    if aa1_ncbi == ncbistdaa::GAP || aa2_ncbi == ncbistdaa::GAP {
+        return BLAST_SCORE_MIN;
+    }
+    let b1 = ncbistdaa_to_blosum62_direct_index(aa1_ncbi);
+    let b2 = ncbistdaa_to_blosum62_direct_index(aa2_ncbi);
+    BLOSUM62[b1 * PROTEIN_MATRIX_SIZE + b2] as i32
+}
+
 const BLOSUM45_TEXT: &str = r#"
 /*A*/    5, -2, -1, -2, -1, -1, -1,  0, -2, -1, -1, -1, -1, -2, -1,  1,  0, -2, -2,  0, -1, -1, -1, -1, -5,
 /*R*/   -2,  7,  0, -1, -3,  1,  0, -2,  0, -3, -2,  3, -1, -2, -2, -1, -1, -2, -1, -2, -1, -3,  1, -1, -5,
@@ -563,7 +635,7 @@ pub fn protein_score_direct(matrix: ScoringMatrix, b1: usize, b2: usize) -> i32 
 
 #[inline(always)]
 pub fn blosum62_score(aa1_ncbi: u8, aa2_ncbi: u8) -> i32 {
-    protein_score(ScoringMatrix::Blosum62, aa1_ncbi, aa2_ncbi)
+    blosum62_score_ncbistdaa_direct(aa1_ncbi, aa2_ncbi)
 }
 
 #[inline(always)]
@@ -607,6 +679,26 @@ mod tests {
         assert_eq!(blosum62_score(ncbistdaa::A, ncbistdaa::A), 4);
         assert_eq!(blosum62_score(ncbistdaa::STOP, ncbistdaa::STOP), 1);
         assert_eq!(blosum62_score(ncbistdaa::X, ncbistdaa::X), -1);
+    }
+
+    // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_stat.c:1559-1592
+    // ```c
+    // matrix[i][j] = BLAST_SCORE_MIN;
+    // ...
+    // matrix[u_index][i] = matrix[c_index][i];
+    // matrix[o_index][i] = matrix[x_index][i];
+    // ```
+    #[test]
+    fn test_blosum62_ncbistdaa_direct_matches_generic_for_blastaa_alphabet() {
+        for q in 0..BLASTAA_SIZE as u8 {
+            for s in 0..BLASTAA_SIZE as u8 {
+                assert_eq!(
+                    blosum62_score_ncbistdaa_direct(q, s),
+                    protein_score(ScoringMatrix::Blosum62, q, s),
+                    "direct BLOSUM62 score mismatch for NCBISTDAA {q}/{s}"
+                );
+            }
+        }
     }
 
     #[test]

@@ -4,9 +4,25 @@
 
 use crate::common::{GapEditOp, Hit};
 use crate::config::ScoringMatrix;
-use crate::utils::matrix::protein_score;
+use crate::utils::matrix::{blosum62_score_ncbistdaa_direct, protein_score};
 
 use super::encoding::ncbistdaa_to_ascii;
+
+#[inline(always)]
+fn blastp_standard_score(matrix: ScoringMatrix, query_residue: u8, subject_residue: u8) -> i32 {
+    // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_hits.c:745-818
+    // ```c
+    // if (*q == *s)
+    //    num_ident++;
+    // else if (matrix[*q][*s] > 0)
+    //    num_pos ++;
+    // ```
+    if matrix == ScoringMatrix::Blosum62 {
+        blosum62_score_ncbistdaa_direct(query_residue, subject_residue)
+    } else {
+        protein_score(matrix, query_residue, subject_residue)
+    }
+}
 
 // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_hits.c:746-824
 // ```c
@@ -106,7 +122,7 @@ pub fn build_alignment_view_with_matrix(
                     if q == s {
                         num_ident += 1;
                         num_positives += 1;
-                    } else if protein_score(matrix, q, s) > 0 {
+                    } else if blastp_standard_score(matrix, q, s) > 0 {
                         num_positives += 1;
                     }
                     q_index += 1;

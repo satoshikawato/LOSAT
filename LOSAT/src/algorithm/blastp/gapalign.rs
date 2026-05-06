@@ -8,7 +8,7 @@ use crate::config::ScoringMatrix;
 use crate::core::composition_adjustment::adjust_scores::AdjustedProteinMatrix;
 use crate::stats::karlin::{bit_score as calc_bit_score, evalue_from_raw_score};
 use crate::stats::KarlinParams;
-use crate::utils::matrix::protein_score;
+use crate::utils::matrix::{blosum62_score_ncbistdaa_direct, protein_score};
 
 use super::alignment::build_alignment_view_with_matrix;
 
@@ -79,6 +79,19 @@ enum BlastpScoreMatrix<'a> {
     Adjusted(&'a AdjustedProteinMatrix),
 }
 
+#[inline(always)]
+fn blastp_standard_score(matrix: ScoringMatrix, query_residue: u8, subject_residue: u8) -> i32 {
+    // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_gapalign.c:737-957
+    // ```c
+    // next_score = score_array[b_index].best + matrix_row[*b_ptr];
+    // ```
+    if matrix == ScoringMatrix::Blosum62 {
+        blosum62_score_ncbistdaa_direct(query_residue, subject_residue)
+    } else {
+        protein_score(matrix, query_residue, subject_residue)
+    }
+}
+
 impl BlastpScoreMatrix<'_> {
     #[inline]
     fn score(self, query_residue: u8, subject_residue: u8) -> i32 {
@@ -94,7 +107,7 @@ impl BlastpScoreMatrix<'_> {
         // score += sbp->matrix->data[*query_var][*subject_var];
         // ```
         match self {
-            Self::Standard(matrix) => protein_score(matrix, query_residue, subject_residue),
+            Self::Standard(matrix) => blastp_standard_score(matrix, query_residue, subject_residue),
             Self::Adjusted(matrix) => matrix.score(query_residue, subject_residue),
         }
     }
@@ -206,7 +219,7 @@ struct BlastGapDp {
 //    Int4* edit_start_offset;
 // } BlastGapAlignStruct;
 // ```
-struct GapAlignScratch {
+pub(crate) struct GapAlignScratch {
     dp_mem: Vec<BlastGapDp>,
     dp_mem_alloc: usize,
     trace_rows: Vec<Vec<u8>>,
@@ -221,7 +234,7 @@ impl GapAlignScratch {
     // gap_align->dp_mem = (BlastGapDP *) calloc(gap_align->dp_mem_alloc,
     //                                           sizeof(BlastGapDP));
     // ```
-    fn new() -> Self {
+    pub(crate) fn new() -> Self {
         let dp_mem_alloc = 1000usize;
         Self {
             dp_mem: vec![
@@ -299,7 +312,7 @@ pub(crate) struct BlastpPreliminaryHsp {
 //    gap_align->score = score_right+score_left;
 // }
 // ```
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) struct BlastpScoreOnlyGappedAlignment {
     pub query_start: i32,
     pub query_stop: i32,
@@ -450,7 +463,7 @@ pub(crate) fn blastp_get_start_for_gapped_alignment(
 
     let mut score = 0i32;
     for offset in 0..HSP_MAX_WINDOW {
-        score += protein_score(matrix, query[q_start + offset], subject[s_start + offset]);
+        score += blastp_standard_score(matrix, query[q_start + offset], subject[s_start + offset]);
     }
     let mut max_score = score;
     let mut max_offset = q_start + HSP_MAX_WINDOW - 1;
@@ -458,12 +471,12 @@ pub(crate) fn blastp_get_start_for_gapped_alignment(
 
     for index in (q_start + HSP_MAX_WINDOW)..hsp_end {
         let subject_index = s_start + (index - q_start);
-        score -= protein_score(
+        score -= blastp_standard_score(
             matrix,
             query[index - HSP_MAX_WINDOW],
             subject[subject_index - HSP_MAX_WINDOW],
         );
-        score += protein_score(matrix, query[index], subject[subject_index]);
+        score += blastp_standard_score(matrix, query[index], subject[subject_index]);
         if score > max_score {
             max_score = score;
             max_offset = index;
@@ -652,7 +665,7 @@ fn stats_from_edit_ops_protein(
                         num_positives += 1;
                     } else {
                         mismatches += 1;
-                        if protein_score(matrix, q, s) > 0 {
+                        if blastp_standard_score(matrix, q, s) > 0 {
                             num_positives += 1;
                         }
                     }
@@ -1645,7 +1658,7 @@ pub(crate) fn blast_gapped_alignment_with_traceback(
 //    gap_align->score = score_right+score_left;
 // }
 // ```
-pub(crate) fn blastp_score_only_gapped_alignment(
+pub(crate) fn blastp_score_only_gapped_alignment_with_scratch(
     query: &[u8],
     subject: &[u8],
     q_start: usize,
@@ -1655,6 +1668,7 @@ pub(crate) fn blastp_score_only_gapped_alignment(
     gap_extend: i32,
     x_drop: i32,
     mode: BlastpGappedAlignmentMode,
+    scratch: &mut GapAlignScratch,
 ) -> BlastpScoreOnlyGappedAlignment {
     // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_gapalign.c:4251-4258
     // ```c
@@ -1688,8 +1702,6 @@ pub(crate) fn blastp_score_only_gapped_alignment(
         subject_shift < subject.len() && subject_length > 0,
         "NCBI BLAST requires AdjustSubjectRange to yield a non-empty subject window"
     );
-    let mut scratch = GapAlignScratch::new();
-
     // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_gapalign.c:4266-4278
     // ```c
     // score_left = s_RestrictedGappedAlign(query, subject+subject_shift,
@@ -1711,7 +1723,7 @@ pub(crate) fn blastp_score_only_gapped_alignment(
             gap_extend,
             x_drop,
             true,
-            &mut scratch,
+            scratch,
         ),
         BlastpGappedAlignmentMode::Restricted => restricted_gapped_align_protein(
             query,
@@ -1762,7 +1774,7 @@ pub(crate) fn blastp_score_only_gapped_alignment(
                     gap_extend,
                     x_drop,
                     false,
-                    &mut scratch,
+                    scratch,
                 ),
                 BlastpGappedAlignmentMode::Restricted => restricted_gapped_align_protein(
                     query,
@@ -1811,6 +1823,37 @@ pub(crate) fn blastp_score_only_gapped_alignment(
         subject_stop: subject_hit_stop,
         score: score_left + score_right,
     }
+}
+
+// NCBI reference: ncbi-blast/c++/include/algo/blast/core/blast_gapalign.h:69-80
+// ```c
+// BlastGapDP* dp_mem; /**< scratch structures for dynamic programming */
+// Int4 dp_mem_alloc;  /**< current number of structures allocated */
+// ```
+pub(crate) fn blastp_score_only_gapped_alignment(
+    query: &[u8],
+    subject: &[u8],
+    q_start: usize,
+    s_start: usize,
+    matrix: ScoringMatrix,
+    gap_open: i32,
+    gap_extend: i32,
+    x_drop: i32,
+    mode: BlastpGappedAlignmentMode,
+) -> BlastpScoreOnlyGappedAlignment {
+    let mut scratch = GapAlignScratch::new();
+    blastp_score_only_gapped_alignment_with_scratch(
+        query,
+        subject,
+        q_start,
+        s_start,
+        matrix,
+        gap_open,
+        gap_extend,
+        x_drop,
+        mode,
+        &mut scratch,
+    )
 }
 
 // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_kappa.c:1935-1948
@@ -2047,7 +2090,7 @@ pub(crate) fn reevaluate_blastp_hit_with_traceback(
                     //     sum += factor*matrix[*query & kResidueMask][*subject];
                     // }
                     // ```
-                    sum += protein_score(
+                    sum += blastp_standard_score(
                         matrix,
                         query[query_pos] & BLAST_HITS_RESIDUE_MASK,
                         subject[subject_pos],
@@ -2736,6 +2779,76 @@ mod tests {
         assert_eq!(result.subject_start, 6_995);
         assert_eq!(result.subject_stop, 7_003);
         assert!(result.score > 0);
+    }
+
+    // NCBI reference: ncbi-blast/c++/include/algo/blast/core/blast_gapalign.h:69-80
+    // ```c
+    // BlastGapDP* dp_mem; /**< scratch structures for dynamic programming */
+    // Int4 dp_mem_alloc;  /**< current number of structures allocated */
+    // ```
+    //
+    // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_gapalign.c:797-808
+    // ```c
+    // if (num_extra_cells > gap_align->dp_mem_alloc) {
+    //     gap_align->dp_mem_alloc = MAX(num_extra_cells + 100,
+    //                                   2 * gap_align->dp_mem_alloc);
+    // }
+    // ```
+    #[test]
+    fn test_score_only_alignment_reused_scratch_matches_fresh_scratch() {
+        let query = [
+            ncbistdaa::A,
+            ncbistdaa::C,
+            ncbistdaa::D,
+            ncbistdaa::E,
+            ncbistdaa::F,
+            ncbistdaa::G,
+            ncbistdaa::H,
+            ncbistdaa::I,
+        ];
+        let subject = [
+            ncbistdaa::A,
+            ncbistdaa::C,
+            ncbistdaa::X,
+            ncbistdaa::E,
+            ncbistdaa::F,
+            ncbistdaa::G,
+            ncbistdaa::K,
+            ncbistdaa::I,
+        ];
+        let cases = [
+            (2usize, 2usize, BlastpGappedAlignmentMode::Exact),
+            (5usize, 5usize, BlastpGappedAlignmentMode::Exact),
+            (5usize, 5usize, BlastpGappedAlignmentMode::Restricted),
+        ];
+        let mut scratch = GapAlignScratch::new();
+
+        for (q_start, s_start, mode) in cases {
+            let fresh = blastp_score_only_gapped_alignment(
+                &query,
+                &subject,
+                q_start,
+                s_start,
+                ScoringMatrix::Blosum62,
+                11,
+                1,
+                25,
+                mode,
+            );
+            let reused = blastp_score_only_gapped_alignment_with_scratch(
+                &query,
+                &subject,
+                q_start,
+                s_start,
+                ScoringMatrix::Blosum62,
+                11,
+                1,
+                25,
+                mode,
+                &mut scratch,
+            );
+            assert_eq!(reused, fresh);
+        }
     }
 
     // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_gapalign.c:4708-4711

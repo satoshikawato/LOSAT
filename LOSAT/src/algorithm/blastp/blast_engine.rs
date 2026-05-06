@@ -39,8 +39,7 @@ use crate::stats::{
     blast_spouge_etos, blast_spouge_stoe, lookup_protein_gumbel_params, lookup_protein_params,
     lookup_protein_params_ungapped, protein_scoring_supported, BlastGumbelBlk, KarlinParams,
 };
-use crate::utils::matrix::protein_score;
-use crate::utils::matrix::BLASTAA_SIZE;
+use crate::utils::matrix::{blosum62_score_ncbistdaa_direct, protein_score, BLASTAA_SIZE};
 
 use super::alignment::build_alignment_view_with_matrix;
 use super::args::{BlastpArgs, BlastpCompositionMode, ResolvedBlastpArgs};
@@ -50,8 +49,8 @@ use super::encoding::{
 };
 use super::extension::{extend_one_hit, extend_two_hit, BlastpUngappedData};
 use super::gapalign::{
-    blastp_get_start_for_gapped_alignment, blastp_score_only_gapped_alignment,
-    BlastpGappedAlignmentMode, BlastpPreliminaryHsp,
+    blastp_get_start_for_gapped_alignment, blastp_score_only_gapped_alignment_with_scratch,
+    BlastpGappedAlignmentMode, BlastpPreliminaryHsp, GapAlignScratch,
 };
 use super::hsp::{
     blast_compo_early_termination, collect_hits_from_hit_lists, fill_results_from_compo_heaps,
@@ -170,6 +169,19 @@ const BLASTP_NEAR_IDENTICAL_BITS_PER_POSITION: f64 = 1.74;
 // #define PSI_INCLUSION_ETHRESH 0.002 /**< Inclusion threshold for PSI BLAST */
 // ```
 const PSI_INCLUSION_ETHRESH: f64 = 0.002;
+
+#[inline(always)]
+fn blastp_standard_score(matrix: ScoringMatrix, query_residue: u8, subject_residue: u8) -> i32 {
+    // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_gapalign.c:3409-3438
+    // ```c
+    // score += sbp->matrix->data[*query_var][*subject_var];
+    // ```
+    if matrix == ScoringMatrix::Blosum62 {
+        blosum62_score_ncbistdaa_direct(query_residue, subject_residue)
+    } else {
+        protein_score(matrix, query_residue, subject_residue)
+    }
+}
 
 // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_parameters.c:457-463
 // ```c
@@ -1237,9 +1249,20 @@ fn blastp_tabular_field_text(
     }
 }
 
-fn open_output_writer(out_path: Option<&PathBuf>) -> Result<Box<dyn Write>> {
+// NCBI reference: /mnt/c/Users/genom/GitHub/ncbi-blast/c++/src/algo/blast/format/blast_format.cpp:68-93
+// ```c
+// CBlastFormat::CBlastFormat(..., CNcbiOstream& outfile, ...)
+//     : m_FormatType(format_type), ..., m_Outfile(outfile),
+//       m_NumSummary(num_summary), ...
+// ```
+fn open_output_writer<'a>(
+    out_path: Option<&PathBuf>,
+    in_memory_output: Option<&'a mut Vec<u8>>,
+) -> Result<Box<dyn Write + 'a>> {
     let stdout = std::io::stdout();
-    Ok(if let Some(path) = out_path {
+    Ok(if let Some(output) = in_memory_output {
+        Box::new(BufWriter::new(output))
+    } else if let Some(path) = out_path {
         Box::new(BufWriter::new(File::create(path)?))
     } else {
         Box::new(BufWriter::new(stdout))
@@ -1262,15 +1285,13 @@ fn write_blastp_tabular_output(
     hits: &[PairwiseHit],
     fields: &[BlastpTabularField],
     outfmt: OutputFormat,
-    out_path: Option<&PathBuf>,
+    writer: &mut impl Write,
     query_ids: &[Arc<str>],
     subject_ids: &[Arc<str>],
     context: &ReportContext,
 ) -> Result<()> {
-    let mut writer = open_output_writer(out_path)?;
-
     if outfmt == OutputFormat::TabularWithComments {
-        write_blastp_outfmt7_header(&mut writer, context, fields, hits.len())?;
+        write_blastp_outfmt7_header(writer, context, fields, hits.len())?;
     }
 
     for hit in hits {
@@ -1320,7 +1341,7 @@ fn count_identities_and_positives(
         if q == s {
             identities += 1;
             positives += 1;
-        } else if protein_score(matrix, q, s) > 0 {
+        } else if blastp_standard_score(matrix, q, s) > 0 {
             positives += 1;
         }
     }
@@ -2163,6 +2184,7 @@ fn extend_preliminary_blastp_hit(
     gap_extend: i32,
     x_dropoff: i32,
     mode: BlastpGappedAlignmentMode,
+    scratch: &mut GapAlignScratch,
 ) -> BlastpPreliminaryHsp {
     let query_raw = &query_sequence[..ctx.aa_len];
     let subject_raw = &subject_sequence[..subject_sequence.len() - 1];
@@ -2242,7 +2264,7 @@ fn extend_preliminary_blastp_hit(
     //     ...
     // }
     // ```
-    let aligned = blastp_score_only_gapped_alignment(
+    let aligned = blastp_score_only_gapped_alignment_with_scratch(
         query_raw,
         subject_raw,
         usize::try_from(gapped_q_start)
@@ -2254,6 +2276,7 @@ fn extend_preliminary_blastp_hit(
         gap_extend,
         x_dropoff,
         mode,
+        scratch,
     );
 
     BlastpPreliminaryHsp {
@@ -2274,19 +2297,121 @@ fn extend_preliminary_blastp_hit(
     }
 }
 
+// NCBI reference: /mnt/c/Users/genom/GitHub/ncbi-blast/c++/src/algo/blast/api/blast_setup_cxx.cpp:606-617
+// ```c
+// sequence = queries.GetBlastSequence(index, encoding,
+//                                     eNa_strand_unknown,
+//                                     eSentinels,
+//                                     &warnings);
+// int offset = qinfo->contexts[ctx_index].query_offset;
+// memcpy(&buf.get()[offset], sequence.data.get(), sequence.length);
+// ```
+//
+// NCBI reference: /mnt/c/Users/genom/GitHub/ncbi-blast/c++/src/algo/blast/core/blast_engine.c:1407-1427
+// ```c
+// db_length = BlastSeqSrcGetTotLen(seq_src);
+// itr = BlastSeqSrcIteratorNewEx(MAX(BlastSeqSrcGetNumSeqs(seq_src)/100,1));
+// while ((seq_arg.oid = BlastSeqSrcIteratorNext(seq_src, itr)) != BLAST_SEQSRC_EOF) {
+//     if (BlastSeqSrcGetSequence(seq_src, &seq_arg) < 0) {
+//         continue;
+//     }
+// }
+// ```
+#[cfg(target_arch = "wasm32")]
+fn fasta_records_from_bytes(bytes: &[u8]) -> Result<Vec<fasta::Record>> {
+    // NCBI reference: /mnt/c/Users/genom/GitHub/ncbi-blast/c++/src/algo/blast/api/blast_setup_cxx.cpp:486-651
+    // ```c
+    // void
+    // SetupQueries_OMF(IBlastQuerySource& queries,
+    //                  BlastQueryInfo* qinfo,
+    //                  BLAST_SequenceBlk** seqblk,
+    //                  EBlastProgramType prog,
+    //                  ...)
+    // ```
+    fasta::Reader::new(bytes)
+        .records()
+        .collect::<std::result::Result<Vec<_>, _>>()
+        .map_err(anyhow::Error::from)
+}
+
+#[cfg(target_arch = "wasm32")]
+pub fn run_web_pair(args: BlastpArgs, query_fasta: &str, subject_fasta: &str) -> Result<Vec<u8>> {
+    // NCBI reference: /mnt/c/Users/genom/GitHub/ncbi-blast/c++/src/algo/blast/api/blast_setup_cxx.cpp:606-617
+    // ```c
+    // sequence = queries.GetBlastSequence(index, encoding,
+    //                                     eNa_strand_unknown,
+    //                                     eSentinels,
+    //                                     &warnings);
+    // memcpy(&buf.get()[offset], sequence.data.get(), sequence.length);
+    // ```
+    //
+    // NCBI reference: /mnt/c/Users/genom/GitHub/ncbi-blast/c++/src/algo/blast/core/blast_engine.c:1407-1427
+    // ```c
+    // db_length = BlastSeqSrcGetTotLen(seq_src);
+    // while ((seq_arg.oid = BlastSeqSrcIteratorNext(seq_src, itr)) != BLAST_SEQSRC_EOF) {
+    //     if (BlastSeqSrcGetSequence(seq_src, &seq_arg) < 0) {
+    //         continue;
+    //     }
+    // }
+    // ```
+    let queries = fasta_records_from_bytes(query_fasta.as_bytes())
+        .context("failed to parse web query FASTA")?;
+    let subjects = fasta_records_from_bytes(subject_fasta.as_bytes())
+        .context("failed to parse web subject FASTA")?;
+    run_web_pair_records(args, &queries, &subjects, "", "")
+}
+
+#[cfg(target_arch = "wasm32")]
+pub fn run_web_pair_records(
+    args: BlastpArgs,
+    query_records: &[fasta::Record],
+    subject_records: &[fasta::Record],
+    query_label: &str,
+    subject_label: &str,
+) -> Result<Vec<u8>> {
+    // NCBI reference: /mnt/c/Users/genom/GitHub/ncbi-blast/c++/src/algo/blast/api/blast_setup_cxx.cpp:486-651
+    // ```c
+    // SetupQueries_OMF(IBlastQuerySource& queries,
+    //                  BlastQueryInfo* qinfo,
+    //                  BLAST_SequenceBlk** seqblk,
+    //                  EBlastProgramType prog,
+    //                  ...)
+    // ```
+    //
+    // NCBI reference: /mnt/c/Users/genom/GitHub/ncbi-blast/c++/src/algo/blast/core/blast_engine.c:1407-1427
+    // ```c
+    // db_length = BlastSeqSrcGetTotLen(seq_src);
+    // while ((seq_arg.oid = BlastSeqSrcIteratorNext(seq_src, itr)) != BLAST_SEQSRC_EOF) {
+    //     if (BlastSeqSrcGetSequence(seq_src, &seq_arg) < 0) {
+    //         continue;
+    //     }
+    // }
+    // ```
+    let mut output = Vec::new();
+    run_internal_with_records(
+        args,
+        query_records,
+        subject_records,
+        query_label,
+        subject_label,
+        Some(&mut output),
+    )?;
+    Ok(output)
+}
+
 pub fn run(args: BlastpArgs) -> Result<()> {
     let args = args.resolve()?;
     validate_requested_blastp_support(&args)?;
 
-    let (outfmt, custom_fields) = OutputFormat::parse(&args.outfmt).map_err(anyhow::Error::msg)?;
-    if outfmt == OutputFormat::Pairwise && custom_fields.is_some() {
-        bail!("blastp outfmt 0 does not accept custom field lists");
-    }
-    let custom_fields = custom_fields
-        .as_deref()
-        .map(parse_blastp_tabular_fields)
-        .transpose()?;
-
+    // NCBI reference: /mnt/c/Users/genom/GitHub/ncbi-blast/c++/src/algo/blast/api/blast_setup_cxx.cpp:518-543
+    // ```c
+    // for(TSeqPos index = 0; index < queries.Size(); index++) {
+    //     if (const CSeq_id* id = queries.GetSeqId(index)) {
+    //         const string kTitle = queries.GetTitle(index);
+    //         messages[index].SetQueryId(query_id);
+    //     }
+    // }
+    // ```
     let query_records: Vec<fasta::Record> = fasta::Reader::from_file(&args.query)
         .with_context(|| format!("failed to open query FASTA {}", args.query.display()))?
         .records()
@@ -2298,6 +2423,74 @@ pub fn run(args: BlastpArgs) -> Result<()> {
         .records()
         .collect::<std::result::Result<Vec<_>, _>>()
         .with_context(|| format!("failed to read subject FASTA {}", args.subject.display()))?;
+
+    run_resolved_with_records(args, &query_records, &subject_records, "", "", None)
+}
+
+// NCBI reference: /mnt/c/Users/genom/GitHub/ncbi-blast/c++/src/algo/blast/core/blast_engine.c:1348-1361
+// ```c
+// BlastCoreAuxStruct* aux_struct = NULL;
+// BlastHSPList* hsp_list = NULL;
+// BlastSeqSrcGetSeqArg seq_arg;
+// Int2 status = 0;
+// Int8 db_length = 0;
+// ...
+// BlastSeqSrcIterator* itr;
+// ```
+#[cfg(target_arch = "wasm32")]
+fn run_internal_with_records(
+    args: BlastpArgs,
+    query_records: &[fasta::Record],
+    subject_records: &[fasta::Record],
+    query_label: &str,
+    subject_label: &str,
+    in_memory_output: Option<&mut Vec<u8>>,
+) -> Result<()> {
+    let args = args.resolve()?;
+    validate_requested_blastp_support(&args)?;
+    run_resolved_with_records(
+        args,
+        query_records,
+        subject_records,
+        query_label,
+        subject_label,
+        in_memory_output,
+    )
+}
+
+// NCBI reference: /mnt/c/Users/genom/GitHub/ncbi-blast/c++/src/algo/blast/api/blast_setup_cxx.cpp:606-617
+// ```c
+// sequence = queries.GetBlastSequence(index, encoding,
+//                                     eNa_strand_unknown,
+//                                     eSentinels,
+//                                     &warnings);
+// memcpy(&buf.get()[offset], sequence.data.get(), sequence.length);
+// ```
+//
+// NCBI reference: /mnt/c/Users/genom/GitHub/ncbi-blast/c++/src/algo/blast/core/blast_engine.c:1407-1427
+// ```c
+// while ((seq_arg.oid = BlastSeqSrcIteratorNext(seq_src, itr)) != BLAST_SEQSRC_EOF) {
+//     if (BlastSeqSrcGetSequence(seq_src, &seq_arg) < 0) {
+//         continue;
+//     }
+// }
+// ```
+fn run_resolved_with_records(
+    args: ResolvedBlastpArgs,
+    query_records: &[fasta::Record],
+    subject_records: &[fasta::Record],
+    _query_label: &str,
+    subject_label: &str,
+    mut in_memory_output: Option<&mut Vec<u8>>,
+) -> Result<()> {
+    let (outfmt, custom_fields) = OutputFormat::parse(&args.outfmt).map_err(anyhow::Error::msg)?;
+    if outfmt == OutputFormat::Pairwise && custom_fields.is_some() {
+        bail!("blastp outfmt 0 does not accept custom field lists");
+    }
+    let custom_fields = custom_fields
+        .as_deref()
+        .map(parse_blastp_tabular_fields)
+        .transpose()?;
 
     let query_ids: Vec<Arc<str>> = query_records.iter().map(fasta_id).collect();
     let query_headers: Vec<String> = query_records.iter().map(fasta_defline).collect();
@@ -2867,6 +3060,17 @@ pub fn run(args: BlastpArgs) -> Result<()> {
         // ```
         let mut redo_index: Option<usize> = None;
         let mut redo_query: Option<usize> = None;
+        // NCBI reference: ncbi-blast/c++/include/algo/blast/core/blast_gapalign.h:69-80
+        // ```c
+        // BlastGapDP* dp_mem; /**< scratch structures for dynamic programming */
+        // Int4 dp_mem_alloc;  /**< current number of structures allocated */
+        // ```
+        //
+        // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_gapalign.c:4209-4319
+        // ```c
+        // s_BlastProtGappedAlignment(..., BlastGapAlignStruct* gap_align, ...)
+        // ```
+        let mut preliminary_gap_scratch = GapAlignScratch::new();
         let mut hit_index = 0usize;
         while hit_index < init_hsps.len() {
             let mut init_hsp = init_hsps[hit_index];
@@ -2951,6 +3155,7 @@ pub fn run(args: BlastpArgs) -> Result<()> {
                 args.scoring.gap_extend,
                 x_drop_gapped,
                 mode,
+                &mut preliminary_gap_scratch,
             );
             if should_retry_exact_preliminary_gapped_alignment(
                 restricted_alignment,
@@ -3285,13 +3490,22 @@ pub fn run(args: BlastpArgs) -> Result<()> {
 
     let final_hits = collect_hits_from_hit_lists(&hit_lists);
     let query_header = query_headers.first().cloned();
+    let subject_name_label = if subject_label.is_empty() {
+        path_label(&args.subject)
+    } else {
+        subject_label.to_string()
+    };
+    let subject_input_label = if subject_label.is_empty() {
+        args.subject.display().to_string()
+    } else {
+        subject_label.to_string()
+    };
     let context = ReportContext {
         query_name: query_header,
         query_length: query_lengths.first().copied(),
-        subject_name: Some(path_label(&args.subject)),
+        subject_name: Some(subject_name_label.clone()),
         database_name: Some(format!(
-            "User specified sequence set (Input: {})",
-            args.subject.display()
+            "User specified sequence set (Input: {subject_input_label})"
         )),
         database_num_sequences: Some(subject_records.len()),
         database_total_letters: Some(total_db_len),
@@ -3331,7 +3545,16 @@ pub fn run(args: BlastpArgs) -> Result<()> {
 
     match outfmt {
         OutputFormat::Pairwise => {
-            let mut writer = open_output_writer(args.out.as_ref())?;
+            // NCBI reference: /mnt/c/Users/genom/GitHub/ncbi-blast/c++/src/algo/blast/format/blast_format.cpp:68-93
+            // ```c
+            // CBlastFormat::CBlastFormat(..., CNcbiOstream& outfile, ...)
+            //     : m_FormatType(format_type), ..., m_Outfile(outfile),
+            //       m_NumSummary(num_summary), ...
+            // ```
+            let mut writer = open_output_writer(
+                args.out.as_ref(),
+                in_memory_output.as_mut().map(|output| &mut **output),
+            )?;
             let pairwise_config = PairwiseConfig {
                 line_length: 60,
                 show_gi: false,
@@ -3360,8 +3583,7 @@ pub fn run(args: BlastpArgs) -> Result<()> {
             let pairwise_report = BlastpPairwiseReport {
                 version: NCBI_BLASTP_VERSION.to_string(),
                 database_name: format!(
-                    "User specified sequence set (Input: {})",
-                    args.subject.display()
+                    "User specified sequence set (Input: {subject_input_label})"
                 ),
                 database_num_sequences: subject_records.len(),
                 database_total_letters: total_db_len,
@@ -3386,13 +3608,25 @@ pub fn run(args: BlastpArgs) -> Result<()> {
         }
         OutputFormat::Tabular | OutputFormat::TabularWithComments => {
             let fields = tabular_fields.expect("tabular fields prepared for blastp tabular output");
+            // NCBI reference: /mnt/c/Users/genom/GitHub/ncbi-blast/c++/src/objtools/align_format/tabular.cpp:1100-1108
+            // ```c
+            // ITERATE(list<ETabularField>, iter, m_FieldsToShow) {
+            //     if (iter != m_FieldsToShow.begin())
+            //         m_Ostream << m_FieldDelimiter;
+            //     x_PrintField(*iter);
+            // }
+            // ```
+            let mut writer = open_output_writer(
+                args.out.as_ref(),
+                in_memory_output.as_mut().map(|output| &mut **output),
+            )?;
             write_blastp_tabular_output(
                 pairwise_hits
                     .as_ref()
                     .expect("pairwise hits prepared for blastp tabular outfmt"),
                 fields,
                 outfmt,
-                args.out.as_ref(),
+                &mut writer,
                 &query_ids,
                 &subject_ids,
                 &context,

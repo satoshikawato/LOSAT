@@ -23,7 +23,7 @@ use crate::core::composition_adjustment::redo_alignment::{
     BlastRedoRangeResult, EMatrixAdjustRule,
 };
 use crate::stats::{blast_spouge_stoe, BlastGumbelBlk, KarlinParams};
-use crate::utils::matrix::{ncbistdaa, protein_score};
+use crate::utils::matrix::{blosum62_score_ncbistdaa_direct, ncbistdaa, protein_score};
 
 use super::gapalign::{blast_gapped_alignment_with_traceback, BlastpPreliminaryHsp};
 use super::hsp::{
@@ -31,6 +31,22 @@ use super::hsp::{
 };
 
 pub(crate) use crate::core::composition_adjustment::redo_alignment::BlastRedoAlignParams;
+
+#[inline(always)]
+fn blastp_standard_score(matrix: ScoringMatrix, query_residue: u8, subject_residue: u8) -> i32 {
+    // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_hits.c:745-818
+    // ```c
+    // if (*q == *s)
+    //    num_ident++;
+    // else if (matrix[*q][*s] > 0)
+    //    num_pos ++;
+    // ```
+    if matrix == ScoringMatrix::Blosum62 {
+        blosum62_score_ncbistdaa_direct(query_residue, subject_residue)
+    } else {
+        protein_score(matrix, query_residue, subject_residue)
+    }
+}
 
 #[derive(Debug)]
 // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_kappa.c:3675-3716
@@ -849,7 +865,7 @@ fn recompute_num_identities(
                             if q == s {
                                 num_ident += 1;
                                 num_positives += 1;
-                            } else if protein_score(matrix, q, s) > 0 {
+                            } else if blastp_standard_score(matrix, q, s) > 0 {
                                 num_positives += 1;
                             }
                             q_index += 1;
@@ -923,7 +939,7 @@ fn recompute_num_identities(
             if q == s {
                 num_ident += 1;
                 num_positives += 1;
-            } else if protein_score(matrix, q, s) > 0 {
+            } else if blastp_standard_score(matrix, q, s) > 0 {
                 num_positives += 1;
             }
         }

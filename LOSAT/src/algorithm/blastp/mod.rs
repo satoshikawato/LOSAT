@@ -21,3 +21,15 @@ mod kappa;
 
 pub use args::BlastpArgs;
 pub use blast_engine::run;
+// NCBI reference: /mnt/c/Users/genom/GitHub/ncbi-blast/c++/src/algo/blast/api/blast_setup_cxx.cpp:486-651
+// ```c
+// SetupQueries_OMF(IBlastQuerySource& queries,
+//                  BlastQueryInfo* qinfo,
+//                  BLAST_SequenceBlk** seqblk,
+//                  EBlastProgramType prog,
+//                  ...)
+// ```
+#[cfg(target_arch = "wasm32")]
+pub use blast_engine::run_web_pair;
+#[cfg(target_arch = "wasm32")]
+pub use blast_engine::run_web_pair_records;

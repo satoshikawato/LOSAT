@@ -3,7 +3,7 @@
 //! Reference: ncbi-blast/c++/src/algo/blast/core/aa_ungapped.c
 
 use crate::config::ScoringMatrix;
-use crate::utils::matrix::protein_score;
+use crate::utils::matrix::{blosum62_score_ncbistdaa_direct, protein_score};
 
 #[inline(always)]
 fn residue_score(
@@ -13,7 +13,17 @@ fn residue_score(
     q_off: i32,
     s_off: i32,
 ) -> i32 {
-    protein_score(matrix, query[q_off as usize], subject[s_off as usize])
+    // NCBI reference: ncbi-blast/c++/src/algo/blast/core/aa_ungapped.c:804-883
+    // ```c
+    // score += matrix[q[i]][s[i]];
+    // ```
+    let query_residue = query[q_off as usize];
+    let subject_residue = subject[s_off as usize];
+    if matrix == ScoringMatrix::Blosum62 {
+        blosum62_score_ncbistdaa_direct(query_residue, subject_residue)
+    } else {
+        protein_score(matrix, query_residue, subject_residue)
+    }
 }
 
 // NCBI reference: ncbi-blast/c++/include/algo/blast/core/blast_extend.h:142-154

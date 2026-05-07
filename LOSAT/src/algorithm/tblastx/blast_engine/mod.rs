@@ -94,7 +94,10 @@ pub(crate) use super::scan::OffsetPair;
 pub(crate) use super::blast_extend::DiagStruct;
 
 // Import InitHSP and related functions from blast_gapalign module (NCBI blast_gapalign.c equivalent)
-pub(crate) use super::blast_gapalign::{get_ungapped_hsp_list, trace_init_hsp_if_match, InitHSP};
+pub(crate) use super::blast_gapalign::{
+    get_ungapped_hsp_list, ncbi_qsort_ungapped_hits_by_score, trace_init_hsp_if_match,
+    ungapped_hits_is_sorted_by_score_ncbi, InitHSP,
+};
 
 // Import subject scanning functions from blast_aascan module (NCBI blast_aascan.c equivalent)
 pub(crate) use super::blast_aascan::s_blast_aa_scan_subject;
@@ -311,9 +314,23 @@ pub(crate) fn reevaluate_ungapped_hsp_list(
         kept_hits.push(hit);
     }
 
-    // NCBI: Sort the HSP array by score (scores may have changed!)
-    // Reference: blast_hits.c:2734
-    kept_hits.sort_by(|a, b| b.raw_score.cmp(&a.raw_score));
+    // NCBI reference: /mnt/c/Users/genom/GitHub/ncbi-blast/c++/src/algo/blast/core/blast_hits.c:2733-2734
+    // ```c
+    // /* Sort the HSP array by score (scores may have changed!) */
+    // Blast_HSPListSortByScore(hsp_list);
+    // ```
+    // NCBI reference: /mnt/c/Users/genom/GitHub/ncbi-blast/c++/src/algo/blast/core/blast_hits.c:1347-1353
+    // ```c
+    // if (0 == (result = BLAST_CMP(hsp2->score,          hsp1->score)) &&
+    //     0 == (result = BLAST_CMP(hsp1->subject.offset, hsp2->subject.offset)) &&
+    //     0 == (result = BLAST_CMP(hsp2->subject.end,    hsp1->subject.end)) &&
+    //     0 == (result = BLAST_CMP(hsp1->query  .offset, hsp2->query  .offset))) {
+    //     result = BLAST_CMP(hsp2->query.end, hsp1->query.end);
+    // }
+    // ```
+    if !ungapped_hits_is_sorted_by_score_ncbi(&kept_hits) {
+        ncbi_qsort_ungapped_hits_by_score(&mut kept_hits);
+    }
 
     kept_hits
 }

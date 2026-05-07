@@ -207,6 +207,14 @@ mod tests {
             ordering_method: 0,
             linked_set: false,
             start_of_chain: false,
+            // NCBI reference: /mnt/c/Users/genom/GitHub/ncbi-blast/c++/src/algo/blast/core/link_hsps.c:63-65
+            // ```c
+            // typedef struct BlastHSPLink {
+            //    struct LinkHSPStruct* link[eOrderingMethods]; /**< Best
+            //                                                choice of HSP to link with */
+            // ```
+            link_id: 0,
+            chain_next_link_id: None,
         }
     }
 
@@ -323,6 +331,14 @@ mod tests {
             ordering_method: 0,
             linked_set: false,
             start_of_chain: false,
+            // NCBI reference: /mnt/c/Users/genom/GitHub/ncbi-blast/c++/src/algo/blast/core/link_hsps.c:63-65
+            // ```c
+            // typedef struct BlastHSPLink {
+            //    struct LinkHSPStruct* link[eOrderingMethods]; /**< Best
+            //                                                choice of HSP to link with */
+            // ```
+            link_id: 0,
+            chain_next_link_id: None,
         };
         let hit2 = UngappedHit {
             q_idx: 0,
@@ -345,6 +361,14 @@ mod tests {
             ordering_method: 0,
             linked_set: false,
             start_of_chain: false,
+            // NCBI reference: /mnt/c/Users/genom/GitHub/ncbi-blast/c++/src/algo/blast/core/link_hsps.c:63-65
+            // ```c
+            // typedef struct BlastHSPLink {
+            //    struct LinkHSPStruct* link[eOrderingMethods]; /**< Best
+            //                                                choice of HSP to link with */
+            // ```
+            link_id: 0,
+            chain_next_link_id: None,
         };
 
         let mut subject0_hits = vec![hit1.clone()];

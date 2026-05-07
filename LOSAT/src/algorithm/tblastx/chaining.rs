@@ -75,6 +75,24 @@ pub struct UngappedHit {
     /// NCBI: H->start_of_chain - TRUE if this HSP is the head of a chain
     /// Reference: link_hsps.c line 955
     pub start_of_chain: bool,
+    // NCBI reference: /mnt/c/Users/genom/GitHub/ncbi-blast/c++/src/algo/blast/core/link_hsps.c:63-65
+    // ```c
+    // typedef struct BlastHSPLink {
+    //    struct LinkHSPStruct* link[eOrderingMethods]; /**< Best
+    //                                                choice of HSP to link with */
+    // ```
+    /// Stable wrapper id used to preserve `hsp_link.link[ordering_method]`
+    /// across the final translated-query qsort/replay phase.
+    pub link_id: usize,
+    // NCBI reference: /mnt/c/Users/genom/GitHub/ncbi-blast/c++/src/algo/blast/core/link_hsps.c:1022-1028
+    // ```c
+    // /* If the HSP has no "link" connect the "next", otherwise follow the "link"
+    //    chain down, connecting them with "next" and "prev". */
+    // ordering_method = H->ordering_method;
+    // if (H->hsp_link.link[ordering_method] == NULL)
+    // ```
+    /// Stable id of the next HSP in the selected chain, if any.
+    pub chain_next_link_id: Option<usize>,
 }
 
 /// Sequence data for re-alignment during HSP chaining

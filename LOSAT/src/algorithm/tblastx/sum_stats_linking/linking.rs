@@ -8,6 +8,7 @@ use crate::stats::sum_statistics::{
 };
 use crate::stats::KarlinParams;
 use std::cell::RefCell;
+use std::cmp::Ordering;
 use std::sync::OnceLock;
 // NCBI reference: ncbi-blast/c++/include/algo/blast/blastinput/blast_args.hpp:1290-1296
 // ```c
@@ -132,6 +133,75 @@ fn blast_nint(x: f64) -> i32 {
     rounded as i32
 }
 
+// NCBI reference: /mnt/c/Users/genom/GitHub/ncbi-blast/c++/src/algo/blast/core/link_hsps.c:343-349
+// ```c
+// context1 = h1->context/(NUM_FRAMES / 2);
+// context2 = h2->context/(NUM_FRAMES / 2);
+// if (context1 < context2)
+//    return -1;
+// else if (context1 > context2)
+//    return 1;
+// ```
+#[inline]
+fn translated_context_group(hit: &UngappedHit) -> usize {
+    hit.ctx_idx / 3
+}
+
+// NCBI reference: /mnt/c/Users/genom/GitHub/ncbi-blast/c++/src/algo/blast/core/link_hsps.c:331-375
+// ```c
+// static int s_RevCompareHSPsTbx(const void *v1, const void *v2)
+// {
+//    context1 = h1->context/(NUM_FRAMES / 2);
+//    context2 = h2->context/(NUM_FRAMES / 2);
+//    ...
+//    if (SIGN(h1->subject.frame) != SIGN(h2->subject.frame)) { ... }
+//    if (h1->query.offset < h2->query.offset) return  1;
+//    if (h1->query.offset > h2->query.offset) return -1;
+// ```
+fn rev_compare_hsps_tbx(a: &UngappedHit, b: &UngappedHit) -> Ordering {
+    translated_context_group(a)
+        .cmp(&translated_context_group(b))
+        .then_with(|| a.s_frame.signum().cmp(&b.s_frame.signum()))
+        .then_with(|| b.q_aa_start.cmp(&a.q_aa_start))
+        .then_with(|| b.q_aa_end.cmp(&a.q_aa_end))
+        .then_with(|| b.s_aa_start.cmp(&a.s_aa_start))
+        .then_with(|| b.s_aa_end.cmp(&a.s_aa_end))
+}
+
+// NCBI reference: /mnt/c/Users/genom/GitHub/ncbi-blast/c++/src/algo/blast/core/link_hsps.c:234-263
+// ```c
+// static int s_RevCompareHSPsTransl(const void *v1, const void *v2)
+// {
+//    context1 = h1->context/(NUM_FRAMES / 2);
+//    context2 = h2->context/(NUM_FRAMES / 2);
+//    if (h1->query.offset < h2->query.offset) return  1;
+//    if (h1->query.offset > h2->query.offset) return -1;
+//    if (h1->subject.offset < h2->subject.offset) return 1;
+// ```
+fn rev_compare_hsps_transl(a: &UngappedHit, b: &UngappedHit) -> Ordering {
+    translated_context_group(a)
+        .cmp(&translated_context_group(b))
+        .then_with(|| b.q_aa_start.cmp(&a.q_aa_start))
+        .then_with(|| b.s_aa_start.cmp(&a.s_aa_start))
+}
+
+// NCBI reference: /mnt/c/Users/genom/GitHub/ncbi-blast/c++/src/algo/blast/core/link_hsps.c:157-186
+// ```c
+// static int s_FwdCompareHSPsTransl(const void* v1, const void* v2)
+// {
+//    context1 = h1->context/(NUM_FRAMES / 2);
+//    context2 = h2->context/(NUM_FRAMES / 2);
+//    if (h1->query.offset < h2->query.offset) return -1;
+//    if (h1->query.offset > h2->query.offset) return 1;
+//    if (h1->subject.offset < h2->subject.offset) return -1;
+// ```
+fn fwd_compare_hsps_transl(a: &UngappedHit, b: &UngappedHit) -> Ordering {
+    translated_context_group(a)
+        .cmp(&translated_context_group(b))
+        .then_with(|| a.q_aa_start.cmp(&b.q_aa_start))
+        .then_with(|| a.s_aa_start.cmp(&b.s_aa_start))
+}
+
 // ---------------------------------------------------------------------------
 // Core structures
 // ---------------------------------------------------------------------------
@@ -226,6 +296,19 @@ pub fn apply_sum_stats_even_gap_linking(
         return hits;
     }
 
+    // NCBI reference: /mnt/c/Users/genom/GitHub/ncbi-blast/c++/src/algo/blast/core/link_hsps.c:476-480
+    // ```c
+    // link_hsp_array =
+    //    (LinkHSPStruct**) malloc(total_number_of_hsps*sizeof(LinkHSPStruct*));
+    // for (index = 0; index < total_number_of_hsps; ++index) {
+    //    link_hsp_array[index] = (LinkHSPStruct*) calloc(1, sizeof(LinkHSPStruct));
+    //    link_hsp_array[index]->hsp = hsp_array[index];
+    // ```
+    for (link_id, hit) in hits.iter_mut().enumerate() {
+        hit.link_id = link_id;
+        hit.chain_next_link_id = None;
+    }
+
     let diag_enabled = diagnostics_enabled();
 
     // Calculate cutoffs once for this subject using NCBI algorithm
@@ -278,60 +361,37 @@ pub fn apply_sum_stats_even_gap_linking(
         .map(|ctx| ctx.karlin_params.k.ln())
         .collect();
 
-    // Step 1: Sort ALL HSPs using s_RevCompareHSPsTbx order
-    // NCBI: qsort(link_hsp_array, ..., s_RevCompareHSPsTbx)
-    // Sort key: (q_idx, s_idx, context/3, SIGN(s_frame), q_off desc, q_end desc, s_off desc, s_end desc)
-    hits.sort_unstable_by(|a, b| {
-        // Primary: q_idx, s_idx (for multi-query/subject)
-        a.q_idx
-            .cmp(&b.q_idx)
-            .then(a.s_idx.cmp(&b.s_idx))
-            // NCBI line 343-349: context/(NUM_FRAMES/2) = context/3 for query strand
-            .then_with(|| {
-                let a_qstrand = if a.q_frame > 0 { 0 } else { 1 };
-                let b_qstrand = if b.q_frame > 0 { 0 } else { 1 };
-                a_qstrand.cmp(&b_qstrand)
-            })
-            // NCBI line 351-357: SIGN(subject.frame)
-            // In NCBI qsort: return 1 means h1 comes AFTER h2
-            // if h1->subject.frame > h2->subject.frame: return 1 (h1 after h2)
-            // This means negative frames come FIRST, then positive frames.
-            // In Rust sort_by: Greater means a comes AFTER b
-            // So we want: if a.frame > b.frame, return Greater (a after b)
-            .then_with(|| {
-                let a_ssign = a.s_frame.signum();
-                let b_ssign = b.s_frame.signum();
-                // NCBI: if h1->subject.frame > h2->subject.frame return 1
-                // Rust equivalent: a_ssign.cmp(&b_ssign) gives ascending order
-                a_ssign.cmp(&b_ssign)
-            })
-            // NCBI lines 359-374: all descending
-            .then(b.q_aa_start.cmp(&a.q_aa_start))
-            .then(b.q_aa_end.cmp(&a.q_aa_end))
-            .then(b.s_aa_start.cmp(&a.s_aa_start))
-            .then(b.s_aa_end.cmp(&a.s_aa_end))
-    });
+    // NCBI reference: /mnt/c/Users/genom/GitHub/ncbi-blast/c++/src/algo/blast/core/link_hsps.c:483-486
+    // ```c
+    // /* Sort by (reverse) position. */
+    // if (kTranslatedQuery) {
+    //    qsort(link_hsp_array,total_number_of_hsps,sizeof(LinkHSPStruct*),
+    //          s_RevCompareHSPsTbx);
+    // ```
+    hits.sort_unstable_by(rev_compare_hsps_tbx);
 
-    // Step 2: Detect frame boundaries in sorted list (NCBI lines 514-534)
-    // Split into groups where (context/3, SIGN(s_frame)) changes
+    // NCBI reference: /mnt/c/Users/genom/GitHub/ncbi-blast/c++/src/algo/blast/core/link_hsps.c:510-531
+    // ```c
+    // Int4 strand_factor = (kTranslatedQuery ? 3 : 1);
+    // ...
+    // if (H->prev != NULL &&
+    //     ((H->hsp->context/strand_factor) !=
+    //      (H->prev->hsp->context/strand_factor) ||
+    //      (SIGN(H->hsp->subject.frame) != SIGN(H->prev->hsp->subject.frame))))
+    // ```
     let total_hits = hits.len(); // Save for pool sizing (NCBI: hsp_list->hspcnt)
     let mut frame_groups: Vec<Vec<UngappedHit>> = Vec::new();
     let mut current_group: Vec<UngappedHit> = Vec::new();
 
     for hit in hits {
-        let q_strand = if hit.q_frame > 0 { 1i8 } else { -1i8 };
+        let ctx_group = translated_context_group(&hit);
         let s_sign = hit.s_frame.signum();
 
         if let Some(prev) = current_group.last() {
-            let prev_q_strand = if prev.q_frame > 0 { 1i8 } else { -1i8 };
+            let prev_ctx_group = translated_context_group(prev);
             let prev_s_sign = prev.s_frame.signum();
 
-            // NCBI line 522-525: frame boundary detection
-            if prev.q_idx != hit.q_idx
-                || prev.s_idx != hit.s_idx
-                || prev_q_strand != q_strand
-                || prev_s_sign != s_sign
-            {
+            if prev_ctx_group != ctx_group || prev_s_sign != s_sign {
                 // Frame switch - start new group
                 if !current_group.is_empty() {
                     frame_groups.push(std::mem::take(&mut current_group));
@@ -434,47 +494,91 @@ pub fn apply_sum_stats_even_gap_linking(
         ordered
     };
 
-    // ========================================================================
-    // NCBI Parity: Two final sorts for translated queries (link_hsps.c:990-1000)
-    // ========================================================================
-    // NCBI reference (verbatim):
+    // NCBI reference: /mnt/c/Users/genom/GitHub/ncbi-blast/c++/src/algo/blast/core/link_hsps.c:990-994
     // ```c
     // if (kTranslatedQuery) {
-    //     qsort(link_hsp_array, num, sizeof(BlastHSP*), s_RevCompareHSPsTransl);
-    //     qsort(link_hsp_array, num, sizeof(BlastHSP*), s_FwdCompareHSPsTransl);
-    // }
+    //    qsort(link_hsp_array,total_number_of_hsps,sizeof(LinkHSPStruct*),
+    //          s_RevCompareHSPsTransl);
+    //    qsort(link_hsp_array, total_number_of_hsps,sizeof(LinkHSPStruct*),
+    //          s_FwdCompareHSPsTransl);
     // ```
-    //
-    // Sort 1: s_RevCompareHSPsTransl - Reverse sort by query context group and subject frame
-    // NCBI comparator (link_hsps.c:274-291):
-    //   context comparison: context/(NUM_FRAMES/2) = context/3 for query strand group
-    //   subject frame comparison: SIGN(subject.frame)
-    //   Both use descending order (h1 < h2 returns 1)
-    results.sort_by(|a, b| {
-        // Query context group (context/3 in NCBI)
-        let a_ctx_group = a.ctx_idx / 3;
-        let b_ctx_group = b.ctx_idx / 3;
-        // Subject strand sign
-        let a_s_sign = a.s_frame.signum();
-        let b_s_sign = b.s_frame.signum();
+    results.sort_unstable_by(rev_compare_hsps_transl);
+    results.sort_unstable_by(fwd_compare_hsps_transl);
 
-        // NCBI s_RevCompareHSPsTransl: descending by context group, then by subject frame
-        b_ctx_group.cmp(&a_ctx_group).then(b_s_sign.cmp(&a_s_sign))
-    });
+    replay_ncbi_output_list(results)
+}
 
-    // Sort 2: s_FwdCompareHSPsTransl - Forward stable sort by query context group
-    // NCBI comparator (link_hsps.c:248-272):
-    //   context comparison: ascending by context/(NUM_FRAMES/2)
-    // This effectively groups HSPs by query strand while preserving order within groups
-    results.sort_by(|a, b| {
-        let a_ctx_group = a.ctx_idx / 3;
-        let b_ctx_group = b.ctx_idx / 3;
+// NCBI reference: /mnt/c/Users/genom/GitHub/ncbi-blast/c++/src/algo/blast/core/link_hsps.c:1012-1028
+// ```c
+// /* hook up the HSP's. */
+// first_hsp = NULL;
+// for (index=0, last_hsp=NULL;index<total_number_of_hsps; index++)
+// {
+//    H = link_hsp_array[index];
+//    /* If this is not a single piece or the start of a chain, then Skip it. */
+//    if (H->linked_set == TRUE && H->start_of_chain == FALSE)
+//       continue;
+//    ordering_method = H->ordering_method;
+//    if (H->hsp_link.link[ordering_method] == NULL)
+// ```
+// NCBI reference: /mnt/c/Users/genom/GitHub/ncbi-blast/c++/src/algo/blast/core/link_hsps.c:1044-1059
+// ```c
+// /* The first one has the number of links correct. */
+// num_links = H->hsp_link.num[ordering_method];
+// link = H->hsp_link.link[ordering_method];
+// while (link)
+// {
+//    H->next = (LinkHSPStruct*) link;
+//    H = H->next;
+//    if (H != NULL)
+//       link = H->hsp_link.link[ordering_method];
+// ```
+fn replay_ncbi_output_list(sorted_hits: Vec<UngappedHit>) -> Vec<UngappedHit> {
+    if sorted_hits.len() <= 1 {
+        return sorted_hits;
+    }
 
-        // NCBI s_FwdCompareHSPsTransl: ascending by context group
-        a_ctx_group.cmp(&b_ctx_group)
-    });
+    let max_link_id = sorted_hits.iter().map(|h| h.link_id).max().unwrap_or(0);
+    let mut id_to_index = vec![SENTINEL_IDX; max_link_id + 1];
+    for (index, hit) in sorted_hits.iter().enumerate() {
+        if hit.link_id < id_to_index.len() {
+            id_to_index[hit.link_id] = index;
+        }
+    }
 
-    results
+    let mut replayed_indices = Vec::with_capacity(sorted_hits.len());
+    for index in 0..sorted_hits.len() {
+        let hit = &sorted_hits[index];
+        if hit.linked_set && !hit.start_of_chain {
+            continue;
+        }
+
+        let mut current = index;
+        let mut hops = 0usize;
+        loop {
+            replayed_indices.push(current);
+            let Some(next_id) = sorted_hits[current].chain_next_link_id else {
+                break;
+            };
+            if next_id >= id_to_index.len() {
+                break;
+            }
+            let next_index = id_to_index[next_id];
+            if next_index == SENTINEL_IDX {
+                break;
+            }
+            current = next_index;
+            hops += 1;
+            if hops > sorted_hits.len() {
+                break;
+            }
+        }
+    }
+
+    replayed_indices
+        .into_iter()
+        .map(|index| sorted_hits[index].clone())
+        .collect()
 }
 
 // ---------------------------------------------------------------------------
@@ -1573,6 +1677,28 @@ fn link_hsp_group_ncbi(
             // NCBI line 972: H->linked_set = linked_set
             group_hits[cur].linked_set = linked_set;
 
+            let next = pool_hsp_links[cur].link[ordering];
+            // NCBI reference: /mnt/c/Users/genom/GitHub/ncbi-blast/c++/src/algo/blast/core/link_hsps.c:1027-1028
+            // ```c
+            // ordering_method = H->ordering_method;
+            // if (H->hsp_link.link[ordering_method] == NULL)
+            // ```
+            // NCBI reference: /mnt/c/Users/genom/GitHub/ncbi-blast/c++/src/algo/blast/core/link_hsps.c:1046-1056
+            // ```c
+            // link = H->hsp_link.link[ordering_method];
+            // while (link)
+            // {
+            //    H->next = (LinkHSPStruct*) link;
+            //    H = H->next;
+            //    if (H != NULL)
+            //       link = H->hsp_link.link[ordering_method];
+            // ```
+            group_hits[cur].chain_next_link_id = if next == SENTINEL_IDX {
+                None
+            } else {
+                Some(group_hits[next].link_id)
+            };
+
             if is_first {
                 // Chain head: start_of_chain already set to true above (NCBI line 955)
                 // This matches NCBI: best[ordering_method]->start_of_chain = TRUE (before loop)
@@ -1586,7 +1712,6 @@ fn link_hsp_group_ncbi(
             }
             remaining -= 1;
 
-            let next = pool_hsp_links[cur].link[ordering];
             if next == SENTINEL_IDX {
                 break;
             }
@@ -1715,7 +1840,53 @@ mod tests {
             ordering_method: 0,
             linked_set: false,
             start_of_chain: false,
+            // NCBI reference: /mnt/c/Users/genom/GitHub/ncbi-blast/c++/src/algo/blast/core/link_hsps.c:63-65
+            // ```c
+            // typedef struct BlastHSPLink {
+            //    struct LinkHSPStruct* link[eOrderingMethods]; /**< Best
+            //                                                choice of HSP to link with */
+            // ```
+            link_id: 0,
+            chain_next_link_id: None,
         }
+    }
+
+    #[test]
+    fn test_replay_ncbi_output_list_inserts_chain_members_after_head() {
+        // NCBI reference: /mnt/c/Users/genom/GitHub/ncbi-blast/c++/src/algo/blast/core/link_hsps.c:1018-1020
+        // ```c
+        // /* If this is not a single piece or the start of a chain, then Skip it. */
+        // if (H->linked_set == TRUE && H->start_of_chain == FALSE)
+        //    continue;
+        // ```
+        // NCBI reference: /mnt/c/Users/genom/GitHub/ncbi-blast/c++/src/algo/blast/core/link_hsps.c:1046-1056
+        // ```c
+        // link = H->hsp_link.link[ordering_method];
+        // while (link)
+        // {
+        //    H->next = (LinkHSPStruct*) link;
+        //    H = H->next;
+        //    if (H != NULL)
+        //       link = H->hsp_link.link[ordering_method];
+        // ```
+        let mut member = mock_hit(1, 10, 1, 10, 10);
+        member.link_id = 0;
+        member.linked_set = true;
+        member.start_of_chain = false;
+
+        let mut head = mock_hit(20, 30, 20, 30, 20);
+        head.link_id = 1;
+        head.linked_set = true;
+        head.start_of_chain = true;
+        head.chain_next_link_id = Some(member.link_id);
+
+        let mut single = mock_hit(40, 50, 40, 50, 30);
+        single.link_id = 2;
+        single.start_of_chain = true;
+
+        let replayed = replay_ncbi_output_list(vec![member, head, single]);
+        let replayed_ids: Vec<usize> = replayed.iter().map(|hit| hit.link_id).collect();
+        assert_eq!(replayed_ids, vec![1, 0, 2]);
     }
 
     /// Verify LOSAT's HSP sort order matches NCBI's s_RevCompareHSPsTbx

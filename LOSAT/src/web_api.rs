@@ -144,6 +144,28 @@ fn parse_extra_args(raw: &str) -> Vec<&str> {
     raw.split('\0').filter(|value| !value.is_empty()).collect()
 }
 
+// NCBI reference: /mnt/c/Users/genom/GitHub/ncbi-blast/c++/src/algo/blast/blastinput/cmdline_flags.cpp:46-94
+// ```c
+// const string kArgOutputFormat("outfmt");
+// const string kDfltArgOutputFormat("0");
+// ```
+//
+// NCBI reference: /mnt/c/Users/genom/GitHub/ncbi-blast/c++/src/objtools/align_format/tabular.cpp:1100-1108
+// ```c
+// ITERATE(list<ETabularField>, iter, m_FieldsToShow) {
+//     if (iter != m_FieldsToShow.begin())
+//         m_Ostream << m_FieldDelimiter;
+//     x_PrintField(*iter);
+// }
+// ```
+fn web_outfmt_or_default(outfmt: &str) -> &str {
+    if outfmt.trim().is_empty() {
+        "6"
+    } else {
+        outfmt
+    }
+}
+
 fn next_arg<'a>(args: &'a [&str], index: &mut usize, flag: &str) -> Result<&'a str, String> {
     *index += 1;
     args.get(*index)
@@ -434,7 +456,7 @@ fn parse_blastp_args(
         comp_based_stats: None,
         seg: None,
         use_sw_tback: false,
-        outfmt: "0".to_string(),
+        outfmt: "6".to_string(),
     };
 
     let mut index = 0;
@@ -635,6 +657,7 @@ fn run_pair(
     extra_args: &str,
 ) -> Result<Vec<u8>, String> {
     let mut extra = parse_extra_args(extra_args);
+    let outfmt = web_outfmt_or_default(outfmt);
     extra.push("--outfmt");
     extra.push(outfmt);
 
@@ -702,6 +725,7 @@ fn run_pair_handles(
     extra_args: &str,
 ) -> Result<Vec<u8>, String> {
     let mut extra = parse_extra_args(extra_args);
+    let outfmt = web_outfmt_or_default(outfmt);
     extra.push("--outfmt");
     extra.push(outfmt);
 

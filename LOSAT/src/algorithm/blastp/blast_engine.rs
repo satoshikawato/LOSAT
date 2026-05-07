@@ -4,6 +4,8 @@
 
 use anyhow::{bail, Context, Result};
 use bio::io::fasta;
+#[cfg(all(feature = "parallel", not(target_arch = "wasm32")))]
+use rayon::prelude::*;
 use std::fs::File;
 use std::io::{BufWriter, Write};
 use std::path::{Path, PathBuf};
@@ -98,6 +100,94 @@ impl InitHSP {
     #[inline]
     fn subject_end(self) -> i32 {
         self.ungapped_data.s_start + self.ungapped_data.length
+    }
+}
+
+// NCBI reference: /mnt/c/Users/genom/GitHub/ncbi-blast/c++/src/algo/blast/core/blast_engine.c:1409-1498
+// ```c
+// while ( (seq_arg.oid = BlastSeqSrcIteratorNext(seq_src, itr))
+//        != BLAST_SEQSRC_EOF) {
+//    status = s_BlastSearchEngineCore(..., &hsp_list, ...);
+//    BlastHSPStreamWrite(hsp_stream, &hsp_list);
+// }
+// ```
+//
+// NCBI reference: /mnt/c/Users/genom/GitHub/ncbi-blast/c++/src/algo/blast/core/blast_engine.c:1633-1688
+// ```c
+// aux_arg->hsp_list = NULL;
+// aux_arg->gap_align = BLAST_GapAlignStructNew(...);
+// aux_arg->hsp_stream = BlastHSPStreamNew(...);
+// ```
+struct BlastpSubjectResult {
+    subject_index: usize,
+    query_hsp_lists: Vec<(usize, BlastpHspList)>,
+}
+
+// NCBI reference: /mnt/c/Users/genom/GitHub/ncbi-blast/c++/src/algo/blast/core/blast_engine.c:991-1041
+// ```c
+// aux_struct->offset_pairs =
+//     (BlastOffsetPair*) malloc(offset_array_size * sizeof(BlastOffsetPair));
+// ```
+//
+// NCBI reference: /mnt/c/Users/genom/GitHub/ncbi-blast/c++/src/algo/blast/core/blast_extend.c:109-144
+// ```c
+// diag_table->hit_level_array = (DiagStruct *)
+//     calloc(diag_table->diag_array_length, sizeof(DiagStruct));
+// diag_table->offset = window_size;
+// ```
+struct BlastpSubjectScratch {
+    offset_pairs: Vec<OffsetPair>,
+    diag_array: Vec<DiagStruct>,
+    diag_offset: i32,
+}
+
+impl BlastpSubjectScratch {
+    fn new(offset_array_size: i32, diag_array_size: i32, window: i32) -> Self {
+        Self {
+            offset_pairs: vec![
+                OffsetPair::default();
+                usize::try_from(offset_array_size)
+                    .expect("NCBI BLAST offset pair array size must fit in usize")
+            ],
+            diag_array: vec![
+                DiagStruct::default();
+                usize::try_from(diag_array_size)
+                    .expect("NCBI BLAST diagonal array size must fit in usize")
+            ],
+            diag_offset: window,
+        }
+    }
+
+    // NCBI reference: /mnt/c/Users/genom/GitHub/ncbi-blast/c++/src/algo/blast/core/blast_extend.c:109-144
+    // ```c
+    // diag_table->hit_level_array = (DiagStruct *)
+    //     calloc(diag_table->diag_array_length, sizeof(DiagStruct));
+    // diag_table->offset = window_size;
+    // ```
+    #[cfg(all(feature = "parallel", not(target_arch = "wasm32")))]
+    fn prepare_independent_subject(&mut self, diag_offset: i32) {
+        self.diag_offset = diag_offset;
+        self.diag_array.fill(DiagStruct::default());
+    }
+
+    // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_extend.c:152-169
+    // ```c
+    // if (ewp->diag_table->offset >= INT4_MAX / 4) {
+    //     ewp->diag_table->offset = ewp->diag_table->window;
+    //     s_BlastDiagClear(ewp->diag_table);
+    // } else {
+    //     ewp->diag_table->offset += subject_length + ewp->diag_table->window;
+    // }
+    // ```
+    fn finish_subject(&mut self, subject_length: usize, window: i32) {
+        if self.diag_offset >= i32::MAX / 4 {
+            self.diag_offset = window;
+            for diag in &mut self.diag_array {
+                *diag = DiagStruct::clear(window);
+            }
+        } else {
+            self.diag_offset += subject_length as i32 + window;
+        }
     }
 }
 
@@ -362,6 +452,82 @@ fn build_redone_match_heaps(num_queries: usize, hitlist_size: usize) -> Vec<Blas
     (0..num_queries)
         .map(|_| BlastCompoHeap::new(hitlist_size, PSI_INCLUSION_ETHRESH))
         .collect()
+}
+
+// NCBI reference: ncbi-blast/c++/include/algo/blast/blastinput/blast_args.hpp:1290-1296
+// ```c
+// CMTArgs(...)
+// {
+// #ifdef NCBI_NO_THREADS
+//     m_NumThreads = CThreadable::kMinNumThreads;
+//     m_MTMode = eNotSupported;
+// #endif
+// }
+// ```
+//
+// NCBI reference: ncbi-blast/c++/src/algo/blast/blastinput/blast_args.cpp:3205-3222
+// ```c
+// const int kMaxValue = static_cast<int>(CSystemInfo::GetCpuCount());
+// int num_threads = args[kArgNumThreads].AsInteger();
+// if (num_threads > kMaxValue) {
+//     m_NumThreads = kMaxValue;
+// } else {
+//     m_NumThreads = num_threads;
+// }
+// ```
+#[cfg(all(feature = "parallel", not(target_arch = "wasm32")))]
+fn blastp_effective_num_threads(requested: usize) -> usize {
+    let cpu_count = num_cpus::get().max(1);
+    if requested == 0 {
+        cpu_count
+    } else {
+        requested.min(cpu_count)
+    }
+}
+
+// NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_extend.c:152-169
+// ```c
+// if (ewp->diag_table->offset >= INT4_MAX / 4) {
+//     ewp->diag_table->offset = ewp->diag_table->window;
+//     s_BlastDiagClear(ewp->diag_table);
+// } else {
+//     ewp->diag_table->offset += subject_length + ewp->diag_table->window;
+// }
+// ```
+#[cfg(all(feature = "parallel", not(target_arch = "wasm32")))]
+fn blastp_subject_diag_offsets(subjects: &[EncodedProtein], window: i32) -> Vec<i32> {
+    let mut offsets = Vec::with_capacity(subjects.len());
+    let mut diag_offset = window;
+    for subject in subjects {
+        offsets.push(diag_offset);
+        if diag_offset >= i32::MAX / 4 {
+            diag_offset = window;
+        } else {
+            diag_offset += subject.aa_len as i32 + window;
+        }
+    }
+    offsets
+}
+
+// NCBI reference: ncbi-blast/c++/src/algo/blast/core/hspfilter_collector.c:139-159
+// ```c
+// if (!results->hitlist_array[0]) {
+//     results->hitlist_array[0] =
+//         Blast_HitListNew(params->prelim_hitlist_size);
+// }
+// Blast_HitListUpdate(results->hitlist_array[0], hsp_list);
+// ```
+fn update_blastp_preliminary_hit_lists(
+    preliminary_hit_lists: &mut [Option<BlastpHitList>],
+    subject_result: BlastpSubjectResult,
+    prelim_hitlist_size: usize,
+) {
+    let _subject_index = subject_result.subject_index;
+    for (q_idx, provisional_hsp_list) in subject_result.query_hsp_lists {
+        let provisional_hit_list = preliminary_hit_lists[q_idx]
+            .get_or_insert_with(|| BlastpHitList::new(prelim_hitlist_size));
+        provisional_hit_list.update(provisional_hsp_list);
+    }
 }
 
 // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_util.c:1098-1101
@@ -2671,7 +2837,6 @@ fn run_resolved_with_records(
     let window = args.window_size as i32;
     let word_size = args.word_size as i32;
     let offset_array_size = blastp_offset_array_size(&lookup);
-    let mut offset_pairs = vec![OffsetPair::default(); offset_array_size as usize];
     let (diag_array_size, diag_mask) = compute_diag_table_shape(lookup.query_length, window);
     // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_traceback.c:369-372
     // ```c
@@ -2680,22 +2845,17 @@ fn run_resolved_with_records(
     //                               subject_blk->length / CODON_LENGTH) + 1);
     // ```
     let total_query_span = lookup.query_length + 1;
-    // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_extend.c:109-144
-    // ```c
-    // ewp->diag_table = diag_table = s_BlastDiagTableNew(query_length, ...);
-    // diag_table->hit_level_array = (DiagStruct *)
-    //     calloc(diag_table->diag_array_length, sizeof(DiagStruct));
-    // ```
-    //
-    // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_extend.c:45-60
-    // ```c
-    // diag_table->offset = window_size;
-    // diag_table->window = window_size;
-    // ```
-    let mut diag_array = vec![DiagStruct::default(); diag_array_size as usize];
-    let mut diag_offset = window;
 
-    for (s_idx, subject) in subjects.iter().enumerate() {
+    // NCBI reference: /mnt/c/Users/genom/GitHub/ncbi-blast/c++/src/algo/blast/core/blast_engine.c:1409-1498
+    // ```c
+    // while ( (seq_arg.oid = BlastSeqSrcIteratorNext(seq_src, itr))
+    //        != BLAST_SEQSRC_EOF) {
+    //    status = s_BlastSearchEngineCore(..., &hsp_list, ...);
+    //    BlastHSPStreamWrite(hsp_stream, &hsp_list);
+    // }
+    // ```
+    let process_subject = |scratch: &mut BlastpSubjectScratch, s_idx: usize| {
+        let subject = &subjects[s_idx];
         // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_util.c:112-121
         // ```c
         // (*seq_blk)->sequence_start = (Uint1 *) buffer;
@@ -2734,13 +2894,13 @@ fn run_resolved_with_records(
             BlastIntervalTree::new(0, total_query_span, 0, subject.aa_len as i32 + 1);
 
         let mut init_hsps: Vec<InitHSP> = Vec::new();
-        let subject_diag_offset = diag_offset;
+        let subject_diag_offset = scratch.diag_offset;
 
         blastp_for_each_offset_pair(
             &lookup,
             subject_sequence,
             subject.aa_len,
-            &mut offset_pairs,
+            &mut scratch.offset_pairs,
             if args.window_size == 0 {
                 BlastpOffsetPairScanMode::OneHit
             } else {
@@ -2759,7 +2919,7 @@ fn run_resolved_with_records(
                     //     (diag_array[diag_coord].last_hit - diag_offset);
                     // ```
                     let diag_coord = blastp_diag_coord(subject_offset - query_offset, diag_mask);
-                    let diag_entry = &mut diag_array[diag_coord];
+                    let diag_entry = &mut scratch.diag_array[diag_coord];
                     // NCBI reference: ncbi-blast/c++/src/algo/blast/core/aa_ungapped.c:713-775
                     // ```c
                     // diff = subject_offset -
@@ -2835,7 +2995,7 @@ fn run_resolved_with_records(
                 // diag_coord = (query_offset - subject_offset) & diag_mask;
                 // ```
                 let diag_coord = blastp_diag_coord(query_offset - subject_offset, diag_mask);
-                let diag_entry = &mut diag_array[diag_coord];
+                let diag_entry = &mut scratch.diag_array[diag_coord];
                 // NCBI reference: ncbi-blast/c++/src/algo/blast/core/aa_ungapped.c:488-574
                 // ```c
                 // if (diag_array[diag_coord].flag) {
@@ -2979,14 +3139,7 @@ fn run_resolved_with_records(
         //     ewp->diag_table->offset += subject_length + ewp->diag_table->window;
         // }
         // ```
-        if diag_offset >= i32::MAX / 4 {
-            diag_offset = window;
-            for diag in &mut diag_array {
-                *diag = DiagStruct::clear(window);
-            }
-        } else {
-            diag_offset += subject.aa_len as i32 + window;
-        }
+        scratch.finish_subject(subject.aa_len, window);
         // NCBI reference: ncbi-blast/c++/src/algo/blast/core/aa_ungapped.c:228-234
         // ```c
         // Blast_InitHitListSortByScore(init_hitlist);
@@ -3204,6 +3357,10 @@ fn run_resolved_with_records(
         let prepared_preliminary_hits = prepare_preliminary_hits_for_kappa(preliminary_hsp_list);
         let preliminary_hits_by_query =
             split_preliminary_hits_by_query(prepared_preliminary_hits, &contexts, query_ids.len());
+        let mut subject_result = BlastpSubjectResult {
+            subject_index: s_idx,
+            query_hsp_lists: Vec::new(),
+        };
         for (q_idx, preliminary_hits) in preliminary_hits_by_query.into_iter().enumerate() {
             if preliminary_hits.is_empty() {
                 continue;
@@ -3239,17 +3396,73 @@ fn run_resolved_with_records(
             if provisional_hsp_list.hsps.is_empty() {
                 continue;
             }
-            // NCBI reference: ncbi-blast/c++/src/algo/blast/core/hspfilter_collector.c:139-159
+            subject_result
+                .query_hsp_lists
+                .push((q_idx, provisional_hsp_list));
+        }
+        subject_result
+    };
+
+    // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_engine.c:1409-1498
+    // ```c
+    // while ( (seq_arg.oid = BlastSeqSrcIteratorNext(seq_src, itr))
+    //        != BLAST_SEQSRC_EOF) {
+    //    status = s_BlastSearchEngineCore(..., &hsp_list, ...);
+    //    BlastHSPStreamWrite(hsp_stream, &hsp_list);
+    // }
+    // ```
+    #[cfg(all(feature = "parallel", not(target_arch = "wasm32")))]
+    let num_threads = blastp_effective_num_threads(args.num_threads);
+    #[cfg(all(feature = "parallel", not(target_arch = "wasm32")))]
+    let use_parallel = num_threads > 1 && subjects.len() > 1;
+    #[cfg(any(not(feature = "parallel"), target_arch = "wasm32"))]
+    let use_parallel = false;
+
+    if use_parallel {
+        #[cfg(all(feature = "parallel", not(target_arch = "wasm32")))]
+        {
+            // NCBI reference: /mnt/c/Users/genom/GitHub/ncbi-blast/c++/src/algo/blast/core/blast_engine.c:1633-1688
             // ```c
-            // if (!results->hitlist_array[0]) {
-            //     results->hitlist_array[0] =
-            //         Blast_HitListNew(params->prelim_hitlist_size);
-            // }
-            // Blast_HitListUpdate(results->hitlist_array[0], hsp_list);
+            // aux_arg->gap_align = BLAST_GapAlignStructNew(...);
+            // aux_arg->hsp_stream = BlastHSPStreamNew(...);
+            // status = Blast_RunPreliminarySearchWithInterrupt_MT(...);
             // ```
-            let provisional_hit_list = preliminary_hit_lists[q_idx]
-                .get_or_insert_with(|| BlastpHitList::new(prelim_hitlist_size));
-            provisional_hit_list.update(provisional_hsp_list);
+            let subject_diag_offsets = blastp_subject_diag_offsets(&subjects, window);
+            let pool = rayon::ThreadPoolBuilder::new()
+                .num_threads(num_threads)
+                .build()
+                .context("failed to build BLASTP thread pool")?;
+            let mut subject_results: Vec<BlastpSubjectResult> = pool.install(|| {
+                subjects
+                    .par_iter()
+                    .enumerate()
+                    .map_init(
+                        || BlastpSubjectScratch::new(offset_array_size, diag_array_size, window),
+                        |scratch, (s_idx, _subject)| {
+                            scratch.prepare_independent_subject(subject_diag_offsets[s_idx]);
+                            process_subject(scratch, s_idx)
+                        },
+                    )
+                    .collect()
+            });
+            subject_results.sort_by_key(|result| result.subject_index);
+            for subject_result in subject_results {
+                update_blastp_preliminary_hit_lists(
+                    &mut preliminary_hit_lists,
+                    subject_result,
+                    prelim_hitlist_size,
+                );
+            }
+        }
+    } else {
+        let mut scratch = BlastpSubjectScratch::new(offset_array_size, diag_array_size, window);
+        for s_idx in 0..subjects.len() {
+            let subject_result = process_subject(&mut scratch, s_idx);
+            update_blastp_preliminary_hit_lists(
+                &mut preliminary_hit_lists,
+                subject_result,
+                prelim_hitlist_size,
+            );
         }
     }
 

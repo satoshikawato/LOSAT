@@ -8231,6 +8231,17 @@ fn run_internal(args: BlastnArgs, mut in_memory: Option<BlastnInMemoryRun<'_>>) 
                 hit_lists.resize_with(query_ids_arc.len(), || None);
                 let mut total_hits = 0usize;
                 let mut messages_received = 0usize;
+                // NCBI reference: /mnt/c/Users/genom/GitHub/ncbi-blast/c++/src/algo/blast/core/blast_engine.c:1409-1427
+                // ```c
+                // itr = BlastSeqSrcIteratorNewEx(MAX(BlastSeqSrcGetNumSeqs(seq_src)/100,1));
+                // while ( (seq_arg.oid = BlastSeqSrcIteratorNext(seq_src, itr))
+                //        != BLAST_SEQSRC_EOF) {
+                //    if (BlastSeqSrcGetSequence(seq_src, &seq_arg) < 0) {
+                //        continue;
+                //    }
+                // }
+                // ```
+                let mut subject_hit_batches: Vec<Vec<BlastnHsp>> = Vec::new();
 
                 while let Ok(msg) = rx.recv() {
                     match msg {
@@ -8243,11 +8254,7 @@ fn run_internal(args: BlastnArgs, mut in_memory: Option<BlastnInMemoryRun<'_>>) 
                                     messages_received, total_hits
                                 );
                             }
-                            update_hitlists_with_subject_hits(
-                                &mut hit_lists,
-                                hits,
-                                prelim_hitlist_size,
-                            );
+                            subject_hit_batches.push(hits);
                         }
                         None => {
                             // Completion signal received
@@ -8260,6 +8267,29 @@ fn run_internal(args: BlastnArgs, mut in_memory: Option<BlastnInMemoryRun<'_>>) 
                             break;
                         }
                     }
+                }
+
+                // NCBI reference: /mnt/c/Users/genom/GitHub/ncbi-blast/c++/src/algo/blast/core/blast_engine.c:1411-1427
+                // ```c
+                // while ( (seq_arg.oid = BlastSeqSrcIteratorNext(seq_src, itr))
+                //        != BLAST_SEQSRC_EOF) {
+                //    ...
+                //    status = s_BlastSearchEngineCore(..., &hsp_list, ...);
+                // }
+                // ```
+                // NCBI reference: /mnt/c/Users/genom/GitHub/ncbi-blast/c++/src/algo/blast/core/hspfilter_collector.c:155-161
+                // ```c
+                // if (!results->hitlist_array[index]) {
+                //    results->hitlist_array[index] =
+                //       Blast_HitListNew(params->prelim_hitlist_size);
+                // }
+                // Blast_HitListUpdate(results->hitlist_array[index],
+                //                     hsp_list_array[index]);
+                // ```
+                subject_hit_batches
+                    .sort_by_key(|hits| hits.first().map(|hit| hit.s_idx).unwrap_or(u32::MAX));
+                for hits in subject_hit_batches {
+                    update_hitlists_with_subject_hits(&mut hit_lists, hits, prelim_hitlist_size);
                 }
 
                 post_process_hits_and_write(

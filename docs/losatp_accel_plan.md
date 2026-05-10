@@ -82,7 +82,8 @@ Phases 0-4 under the parity gate requested for this acceleration work.
 - Worktree state before this pass already included Phase 0/1 scaffolding,
   BLOSUM62 direct score helpers, and compressed lookup construction files.
   This pass extended Phase 2 scratch reuse, Phase 3 gapped-score dispatch,
-  and Phase 3 ungapped-extension BLOSUM62 dispatch.
+  Phase 3 ungapped-extension BLOSUM62 dispatch, and scanner-side lookup row
+  scoring.
 - Pre-change baseline from the current dirty worktree:
   - `cargo build`: passed.
   - `blastp` outfmt 6 vs NCBI references: 9 total diff lines across 4 cases:
@@ -128,6 +129,18 @@ Phases 0-4 under the parity gate requested for this acceleration work.
   - `cargo test --test compressed_lookup`: 4 passed.
   - Runtime `blastp-fast` remains unsupported until compressed scan integration
     and full NCBI comparison cases are complete.
+- Additional Phase 4 compressed scan primitive pass:
+  - Added the NCBI `s_BlastCompressedAaScanSubject`-shaped scanner primitive
+    for compressed lookup tables, including reciprocal-multiply rolling index,
+    PV test, backbone/overflow hit copy order, bad-character skip handling, and
+    small-buffer resume without splitting one subject offset's hits.
+  - Kept the `blastp-fast` and `word_size > 4` runtime guard in place; this is
+    still construction/scan scaffolding only until the preliminary BLASTP path
+    is wired and comparison-gated.
+  - `rustfmt src/algorithm/tblastx/lookup/compressed.rs`: passed.
+  - `cargo test --lib compressed_scan_subject`: 2 passed.
+  - `cargo test --test compressed_lookup`: 4 passed.
+  - `cargo build`: passed with pre-existing warnings.
 - Additional Phase 3 BLOSUM62 dispatch pass:
   - Routed Kappa redo identity/positive recounting through BLOSUM62-specialized
     helper instantiations while preserving NCBI `blast_hits.c` comparison order.
@@ -153,6 +166,46 @@ Phases 0-4 under the parity gate requested for this acceleration work.
     (`git diff --no-index` aggregate stayed 67 lines).
   - `run_blastp_threads_comparison.sh`: serial/threaded mismatches 0;
     threaded/NCBI mismatches unchanged at 4 cases.
+- Additional Phase 3 scanner-side lookup scoring pass:
+  - Added a direct NCBISTDAA BLOSUM62 row accessor and routed lookup neighbor
+    generation through row-based score reads, matching NCBI
+    `blast_aalookup.c` `row = info->matrix[query_word[current_pos]]` timing.
+  - Reused the same direct row accessor for BLOSUM62 word self-score and
+    `row_max` construction without changing neighbor recursion order,
+    threshold comparisons, or query-offset append order.
+  - `cargo test --lib test_blosum62_ncbistdaa_score_row_matches_direct_scores`:
+    passed.
+  - `cargo test --lib test_build_ncbi_lookup_multiple_queries_do_not_cross_shared_boundary_sentinel`:
+    passed.
+  - `cargo test --lib test_build_ncbi_lookup_representative_neighbor_counts_match_bruteforce`:
+    passed.
+  - `cargo build`: passed with pre-existing warnings.
+  - Windows `LOSAT.exe` PowerShell outfmt 6 sweep vs NCBI references:
+    unchanged at 4 mismatch cases (`AP027078.AP027131`,
+    `AP027131.AP027133`, `AP027132.AP027133`, `AP027133.NZ_CP006932`).
+  - Windows `LOSAT.exe` PowerShell serial/threaded sweep:
+    serial-vs-`-num_threads 8` mismatches 0; threaded-vs-NCBI unchanged at
+    the same 4 mismatch cases.
+- Additional Phase 4 runtime compressed scan wiring pass:
+  - Wired BLASTP preliminary subject scanning through a lookup dispatch that
+    selects NCBI-shaped standard amino-acid scan or compressed amino-acid scan
+    from the resolved lookup type.
+  - Built compressed lookup tables from the same NCBI query/location preparation
+    used by the standard lookup path, with word-size-specific lookup segments.
+  - Narrowed the runtime guard to allow NCBI compressed `word_size=5`
+    (`blastp-fast`) while keeping compressed `word_size=6/7` unsupported until
+    comparison cases exist.
+  - `rustfmt src/algorithm/blastp/blast_engine.rs src/algorithm/tblastx/lookup/backbone.rs src/algorithm/tblastx/lookup/mod.rs`:
+    passed.
+  - `cargo test --lib blastp_for_each_offset_pair`: 4 passed.
+  - `cargo test --lib validate_requested_blastp_support`: 4 passed.
+  - `cargo test --lib build_restricted_align_array`: 2 passed.
+  - `cargo test --test compressed_lookup`: 4 passed.
+  - `cargo build`: passed with pre-existing warnings.
+  - Smoke-ran `LOSAT.exe blastp -task blastp-fast` on WSSV/PajaWSV and wrote
+    outfmt 6 output under `.codex_tmp/blastp_fast/`.
+  - Full `blastp-fast` NCBI oracle comparison is still pending because no
+    `blastp` executable was available on PATH in this Windows environment.
 
 ## Phase 0: Benchmark and Timing Harness
 
@@ -312,10 +365,14 @@ Current result:
 - Added BLOSUM62-specialized instantiations for BLASTP alignment-view
   identity/positive recounting, matching NCBI `blast_hits.c` comparison order
   while removing the Rust-side matrix branch from that recount loop.
-- Parity gate held: outfmt 6 NCBI diff count remained 9 total lines, and
-  serial/threaded mismatches remained 0.
-- Remaining Phase 3 candidates include scanner-side score paths and release
-  timing measurements.
+- Added a direct NCBISTDAA BLOSUM62 row accessor for lookup neighbor generation,
+  matching NCBI `blast_aalookup.c` row pointer use while removing repeated
+  Rust-side score helper dispatch in the neighbor recursion and word self-score
+  loops.
+- Parity gate held: outfmt 6 NCBI differences remained at the recorded 4
+  mismatch cases, and serial/threaded mismatches remained 0.
+- Remaining Phase 3 candidates include release timing measurements and broader
+  BLASTP comparison sweeps after the next parity pass.
 - Release-build timing comparisons are still needed before declaring a measured
   speedup.
 
@@ -353,13 +410,16 @@ Acceptance:
 Current result:
 
 - Construction primitives exist for compressed alphabet, backbone cells,
-  overflow cells, compressed index computation, neighbor traversal, and PV
-  finalization.
+  overflow cells, compressed index computation, neighbor traversal, PV
+  finalization, and compressed subject scan emission.
 - `cargo test --test compressed_lookup` passes 4 construction-focused tests.
-- Compressed subject scan integration is not complete.
-- `blastp-fast` and `word_size > 4` runtime paths remain intentionally
-  unsupported; do not narrow the guard until compressed scan and full comparison
-  cases are complete.
+- `cargo test --lib compressed_scan_subject` passes 2 scanner-focused tests for
+  NCBI subject-major emission and small-buffer resume behavior.
+- Compressed subject scan integration is wired into BLASTP for the NCBI
+  `word_size=5` path used by `blastp-fast`; `word_size=6/7` remain unsupported
+  until dedicated NCBI comparison cases exist.
+- `blastp-fast` is runtime-enabled but not yet parity-certified. Full NCBI
+  oracle comparison remains required before marking Phase 4 complete.
 
 ## Phase 5: Kappa / Composition Redo Profiling
 
@@ -416,9 +476,10 @@ because the acceptance check was parity preservation, not final release timing.
 1. Phase 0 timing instrumentation. Done for BLASTP.
 2. Phase 1 multi-thread parity harness. Done for outfmt 6.
 3. Phase 2 scratch reuse. Partially done; continue allocation profiling.
-4. Phase 3 BLOSUM62 hot-loop specialization. Partially done; gapped alignment
-   and ungapped extension dispatch are parity-gated. Continue scanner-side hot
-   score paths, Kappa redo scoring paths, and release timing.
-5. Phase 4 compressed lookup / `blastp-fast` port. Construction tests pass;
-   compressed scan and runtime support remain.
+4. Phase 3 BLOSUM62 hot-loop specialization. Partially done; gapped alignment,
+   ungapped extension, Kappa/alignment recounting, and lookup row scoring are
+   parity-gated. Continue release timing and broader comparison sweeps.
+5. Phase 4 compressed lookup / `blastp-fast` port. Construction and scan tests
+   pass; `word_size=5` runtime wiring is in place, with NCBI oracle comparison
+   and `word_size=6/7` support still pending.
 6. Phase 5 CBS redo work only if profiling justifies it. Not started.

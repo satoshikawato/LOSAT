@@ -303,6 +303,26 @@ pub fn blosum62_score_ncbistdaa_direct(aa1_ncbi: u8, aa2_ncbi: u8) -> i32 {
     BLOSUM62[b1 * PROTEIN_MATRIX_SIZE + b2] as i32
 }
 
+#[inline(always)]
+pub fn blosum62_ncbistdaa_score_row(row_ncbi: usize) -> &'static [i32] {
+    // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_aalookup.c:562-563
+    // ```c
+    // score -= info->row_max[query_word[current_pos]];
+    // row = info->matrix[query_word[current_pos]];
+    // ```
+    //
+    // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_stat.c:1559-1592
+    // ```c
+    // matrix[i][j] = BLAST_SCORE_MIN;
+    // ...
+    // matrix[u_index][i] = matrix[c_index][i];
+    // matrix[o_index][i] = matrix[x_index][i];
+    // ```
+    debug_assert!(row_ncbi < BLASTAA_SIZE);
+    let start = row_ncbi * BLASTAA_SIZE;
+    &BLOSUM62_NCBISTDAA_DIRECT_SCORES[start..start + BLASTAA_SIZE]
+}
+
 const BLOSUM45_TEXT: &str = r#"
 /*A*/    5, -2, -1, -2, -1, -1, -1,  0, -2, -1, -1, -1, -1, -2, -1,  1,  0, -2, -2,  0, -1, -1, -1, -1, -5,
 /*R*/   -2,  7,  0, -1, -3,  1,  0, -2,  0, -3, -2,  3, -1, -2, -2, -1, -1, -2, -1, -2, -1, -3,  1, -1, -5,
@@ -739,6 +759,21 @@ mod tests {
                     protein_score(ScoringMatrix::Blosum62, q, s),
                     "direct BLOSUM62 score mismatch for NCBISTDAA {q}/{s}"
                 );
+            }
+        }
+    }
+
+    #[test]
+    fn test_blosum62_ncbistdaa_score_row_matches_direct_scores() {
+        // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_aalookup.c:562-563
+        // ```c
+        // score -= info->row_max[query_word[current_pos]];
+        // row = info->matrix[query_word[current_pos]];
+        // ```
+        for q in 0..BLASTAA_SIZE as u8 {
+            let row = blosum62_ncbistdaa_score_row(q as usize);
+            for s in 0..BLASTAA_SIZE as u8 {
+                assert_eq!(row[s as usize], blosum62_score_ncbistdaa_direct(q, s));
             }
         }
     }

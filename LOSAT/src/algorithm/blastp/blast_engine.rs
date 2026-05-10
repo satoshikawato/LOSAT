@@ -23,6 +23,10 @@ use crate::algorithm::tblastx::blast_extend::DiagStruct;
 use crate::algorithm::tblastx::constants::{
     GAP_TRIGGER_BIT_SCORE, X_DROP_GAPPED_FINAL, X_DROP_GAPPED_PRELIM, X_DROP_UNGAPPED_BITS,
 };
+use crate::algorithm::tblastx::lookup::compressed::{
+    build_blosum62_compressed_lookup, BlastCompressedAaLookupTable,
+};
+use crate::algorithm::tblastx::lookup::prepare_blosum62_lookup_query_for_word_size;
 use crate::algorithm::tblastx::lookup::{build_ncbi_lookup, BlastAaLookupTable, QueryContext};
 use crate::algorithm::tblastx::ncbi_cutoffs::{gap_trigger_raw_score, x_drop_raw_score};
 use crate::algorithm::tblastx::translation::QueryFrame;
@@ -48,7 +52,7 @@ use crate::stats::{
 use crate::utils::matrix::{blosum62_score_ncbistdaa_direct, protein_score, BLASTAA_SIZE};
 
 use super::alignment::build_alignment_view_with_matrix;
-use super::args::{BlastpArgs, BlastpCompositionMode, ResolvedBlastpArgs};
+use super::args::{BlastpArgs, BlastpCompositionMode, BlastpLookupTableType, ResolvedBlastpArgs};
 use super::encoding::{
     encode_protein_query_frame_with_seg, encode_protein_sequence, ncbistdaa_to_ascii,
     EncodedProtein,
@@ -871,6 +875,22 @@ fn build_blastp_concatenated_query(contexts: &[QueryContext]) -> Vec<u8> {
     concatenated
 }
 
+// NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_query_info.c:246-250
+// ```c
+// BlastContextInfo * cinfo = & qinfo->contexts[qinfo->last_context];
+// return cinfo->query_offset + cinfo->query_length +
+//        (cinfo->query_length ? 2 : 1);
+// ```
+//
+// LOSAT's `query_length` mirrors `BLAST_SequenceBlk->length`, which excludes
+// the final trailing NULLB but includes shared inter-context boundary sentinels.
+fn blastp_concatenated_query_length(contexts: &[QueryContext]) -> i32 {
+    contexts
+        .last()
+        .map(|ctx| ctx.frame_base + ctx.aa_len as i32)
+        .unwrap_or(0)
+}
+
 // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_parameters.c:204-221
 // ```c
 // if (!(query_info->contexts[context].is_valid))
@@ -1115,8 +1135,23 @@ fn blastp_save_init_hsp(
 // }
 // ```
 #[inline]
-fn blastp_get_ungapped_hsp_context(lookup: &BlastAaLookupTable, init_hsp: &InitHSP) -> usize {
-    lookup.get_context_idx(init_hsp.q_seed_absolute)
+fn blastp_context_idx_for_query_offset(contexts: &[QueryContext], concat_off: i32) -> usize {
+    let mut lo = 0usize;
+    let mut hi = contexts.len();
+    while lo < hi {
+        let mid = (lo + hi) / 2;
+        if concat_off < contexts[mid].frame_base {
+            hi = mid;
+        } else {
+            lo = mid + 1;
+        }
+    }
+    lo.saturating_sub(1)
+}
+
+#[inline]
+fn blastp_get_ungapped_hsp_context(contexts: &[QueryContext], init_hsp: &InitHSP) -> usize {
+    blastp_context_idx_for_query_offset(contexts, init_hsp.q_seed_absolute)
 }
 
 // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_gapalign.c:2374-2389
@@ -1152,12 +1187,11 @@ fn blastp_adjust_initial_hsp_offsets(init_hsp: &mut InitHSP, query_start: i32) {
 // s_AdjustInitialHSPOffsets(init_hsp, query_start);
 // ```
 fn blastp_adjust_hsp_offsets_and_get_query_data<'a>(
-    lookup: &BlastAaLookupTable,
     concatenated_query: &'a [u8],
     contexts: &'a [QueryContext],
     init_hsp: &mut InitHSP,
 ) -> (usize, &'a QueryContext, &'a [u8]) {
-    let context_idx = blastp_get_ungapped_hsp_context(lookup, init_hsp);
+    let context_idx = blastp_get_ungapped_hsp_context(contexts, init_hsp);
     let ctx = &contexts[context_idx];
     let query_start = ctx.frame_base;
 
@@ -1206,10 +1240,94 @@ const BLASTP_OFFSET_ARRAY_SIZE: i32 = 4096;
 // ```c
 // offset_array_size = OFFSET_ARRAY_SIZE +
 //     ((BlastAaLookupTable*)lookup->lut)->longest_chain;
+// ...
+// offset_array_size = OFFSET_ARRAY_SIZE +
+//     ((BlastCompressedAaLookupTable*)lookup->lut)->longest_chain;
 // ```
 #[inline]
-fn blastp_offset_array_size(lookup: &BlastAaLookupTable) -> i32 {
-    BLASTP_OFFSET_ARRAY_SIZE + lookup.longest_chain.max(0)
+fn blastp_offset_array_size(longest_chain: i32) -> i32 {
+    BLASTP_OFFSET_ARRAY_SIZE + longest_chain.max(0)
+}
+
+enum BlastpRuntimeLookup {
+    Aa(BlastAaLookupTable),
+    Compressed(BlastCompressedAaLookupTable),
+}
+
+impl BlastpRuntimeLookup {
+    // NCBI reference: ncbi-blast/c++/src/algo/blast/core/aa_ungapped.c:484-496
+    // ```c
+    // if (lookup_wrap->lut_type == eAaLookupTable) {
+    //     BlastAaLookupTable *lookup = (BlastAaLookupTable *)(lookup_wrap->lut);
+    //     wordsize = lookup->word_length;
+    // } else {
+    //     BlastCompressedAaLookupTable *lookup =
+    //                     (BlastCompressedAaLookupTable *)(lookup_wrap->lut);
+    //     wordsize = lookup->word_length;
+    // }
+    // ```
+    #[inline]
+    fn word_length(&self) -> i32 {
+        match self {
+            Self::Aa(lookup) => lookup.word_length,
+            Self::Compressed(lookup) => lookup.word_length,
+        }
+    }
+
+    // NCBI reference: ncbi-blast/c++/src/algo/blast/core/lookup_wrap.c:255-288
+    // ```c
+    // case eAaLookupTable:
+    //    offset_array_size = OFFSET_ARRAY_SIZE +
+    //       ((BlastAaLookupTable*)lookup->lut)->longest_chain;
+    // ...
+    // case eCompressedAaLookupTable:
+    //    offset_array_size = OFFSET_ARRAY_SIZE +
+    //       ((BlastCompressedAaLookupTable*)lookup->lut)->longest_chain;
+    // ```
+    #[inline]
+    fn longest_chain(&self) -> i32 {
+        match self {
+            Self::Aa(lookup) => lookup.longest_chain,
+            Self::Compressed(lookup) => lookup.longest_chain,
+        }
+    }
+
+    // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_aascan.c:552-568
+    // ```c
+    // if (lookup_wrap->lut_type == eAaLookupTable) {
+    //     lut->scansub_callback = (void *)s_BlastAaScanSubject;
+    // }
+    // else if (lookup_wrap->lut_type == eCompressedAaLookupTable) {
+    //     lut->scansub_callback = (void *)s_BlastCompressedAaScanSubject;
+    // }
+    // ```
+    #[inline]
+    fn scan_subject(
+        &self,
+        subject_sequence: &[u8],
+        seq_ranges: &[(i32, i32)],
+        offset_pairs: &mut [OffsetPair],
+        array_size: i32,
+        scan_range: &mut [i32; 3],
+    ) -> i32 {
+        match self {
+            Self::Aa(lookup) => s_blast_aa_scan_subject(
+                lookup,
+                subject_sequence,
+                seq_ranges,
+                offset_pairs,
+                array_size,
+                scan_range,
+            ),
+            Self::Compressed(lookup) => lookup.scan_subject(
+                subject_sequence,
+                seq_ranges,
+                offset_pairs,
+                array_size,
+                scan_range,
+            ),
+        }
+    }
 }
 
 #[derive(Clone, Copy)]
@@ -1242,7 +1360,7 @@ enum BlastpOffsetPairScanMode {
 // (*seq_blk)->length = length;
 // ```
 fn blastp_for_each_offset_pair<F>(
-    lookup: &BlastAaLookupTable,
+    lookup: &BlastpRuntimeLookup,
     subject_sequence: &[u8],
     subject_length: usize,
     offset_pairs: &mut [OffsetPair],
@@ -1251,7 +1369,7 @@ fn blastp_for_each_offset_pair<F>(
 ) where
     F: FnMut(OffsetPair),
 {
-    let word_size = lookup.word_length;
+    let word_size = lookup.word_length();
     let seq_ranges = [(0, subject_length as i32)];
     let mut scan_range = [0, seq_ranges[0].0, seq_ranges[0].1 - word_size];
 
@@ -1265,8 +1383,7 @@ fn blastp_for_each_offset_pair<F>(
     }
 
     while scan_range[1] <= scan_range[2] {
-        let hits = s_blast_aa_scan_subject(
-            lookup,
+        let hits = lookup.scan_subject(
             subject_sequence,
             &seq_ranges,
             offset_pairs,
@@ -1331,9 +1448,12 @@ fn validate_requested_blastp_support(args: &ResolvedBlastpArgs) -> Result<()> {
             "unsupported pure-Rust blastp -use_sw_tback: Smith-Waterman traceback is not yet ported"
         );
     }
-    if args.word_size != 3 {
+    if args.word_size != 3
+        && !(args.lookup_table_type == BlastpLookupTableType::CompressedAaLookupTable
+            && args.word_size == 5)
+    {
         bail!(
-            "unsupported pure-Rust blastp word_size={}: compressed amino-acid lookup for word sizes 5-7 is not yet ported; only --word-size 3 is currently supported",
+            "unsupported pure-Rust blastp word_size={}: only standard word_size 3 and NCBI compressed word_size 5 are currently comparison-gated",
             args.word_size
         );
     }
@@ -1954,7 +2074,6 @@ fn compute_diag_table_shape(query_length: i32, window: i32) -> (i32, i32) {
 // ```
 fn build_restricted_align_array(
     init_hsps: &[InitHSP],
-    lookup: &BlastAaLookupTable,
     contexts: &[QueryContext],
     hit_cutoff_scores: &[i32],
     num_queries: usize,
@@ -1963,7 +2082,6 @@ fn build_restricted_align_array(
     let mut restricted = Vec::new();
     build_restricted_align_array_into(
         init_hsps,
-        lookup,
         contexts,
         hit_cutoff_scores,
         num_queries,
@@ -1985,7 +2103,6 @@ fn build_restricted_align_array(
 // ```
 fn build_restricted_align_array_into(
     init_hsps: &[InitHSP],
-    lookup: &BlastAaLookupTable,
     contexts: &[QueryContext],
     hit_cutoff_scores: &[i32],
     num_queries: usize,
@@ -2006,7 +2123,7 @@ fn build_restricted_align_array_into(
         // query_index = Blast_GetQueryIndexFromContext(contxt,
         //                                              program_number);
         // ```
-        let context_idx = blastp_get_ungapped_hsp_context(lookup, init_hsp);
+        let context_idx = blastp_get_ungapped_hsp_context(contexts, init_hsp);
         let query_index = usize::try_from(contexts[context_idx].q_idx)
             .expect("NCBI BLAST requires blastp context query indices to fit in usize");
         if query_index >= num_queries || found[query_index] {
@@ -3126,12 +3243,35 @@ fn run_resolved_with_records(
     //    (program == eBlastTypeBlastx || program == eBlastTypeTblastx ||
     //     program == eBlastTypeRpsTblastn);
     // ```
-    let (lookup, contexts) = build_ncbi_lookup(
-        &query_frames,
-        args.threshold as i32,
-        &lookup_ideal_params,
-        false,
-    );
+    let (lookup, contexts) = match args.lookup_table_type {
+        BlastpLookupTableType::AaLookupTable => {
+            let (lookup, contexts) = build_ncbi_lookup(
+                &query_frames,
+                args.threshold as i32,
+                &lookup_ideal_params,
+                false,
+            );
+            (BlastpRuntimeLookup::Aa(lookup), contexts)
+        }
+        BlastpLookupTableType::CompressedAaLookupTable => {
+            // NCBI reference: /mnt/c/Users/genom/GitHub/ncbi-blast/c++/src/algo/blast/core/blast_aalookup.c:1349-1352
+            // ```c
+            // s_CompressedAddNeighboringWords(lookup, new_alphabet->matrix->data,
+            //                                 query, locations);
+            // s_CompressedLookupFinalize(lookup);
+            // ```
+            let (query, locations, contexts) =
+                prepare_blosum62_lookup_query_for_word_size(&query_frames, args.word_size, false);
+            let lookup = build_blosum62_compressed_lookup(
+                args.word_size,
+                args.threshold,
+                &query,
+                &locations,
+            )
+            .context("failed to build NCBI compressed amino-acid lookup table")?;
+            (BlastpRuntimeLookup::Compressed(lookup), contexts)
+        }
+    };
     let concatenated_query = build_blastp_concatenated_query(&contexts);
     if let Some(timing) = timing.as_ref() {
         BlastpTiming::record_duration(&timing.lookup_ns, lookup_start);
@@ -3240,16 +3380,17 @@ fn run_resolved_with_records(
         .collect();
 
     let window = args.window_size as i32;
-    let word_size = args.word_size as i32;
-    let offset_array_size = blastp_offset_array_size(&lookup);
-    let (diag_array_size, diag_mask) = compute_diag_table_shape(lookup.query_length, window);
+    let word_size = lookup.word_length();
+    let offset_array_size = blastp_offset_array_size(lookup.longest_chain());
+    let query_length = blastp_concatenated_query_length(&contexts);
+    let (diag_array_size, diag_mask) = compute_diag_table_shape(query_length, window);
     // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_traceback.c:369-372
     // ```c
     // tree = Blast_IntervalTreeInit(0, query_blk->length + 1,
     //                               0, (subject_length > 0 ? subject_length :
     //                               subject_blk->length / CODON_LENGTH) + 1);
     // ```
-    let total_query_span = lookup.query_length + 1;
+    let total_query_span = query_length + 1;
 
     // NCBI reference: /mnt/c/Users/genom/GitHub/ncbi-blast/c++/src/algo/blast/core/blast_engine.c:1409-1498
     // ```c
@@ -3349,7 +3490,7 @@ fn run_resolved_with_records(
                     // BlastUngappedCutoffs *cutoffs =
                     //     word_params->cutoffs + curr_context;
                     // ```
-                    let ctx_idx = lookup.get_context_idx(query_offset);
+                    let ctx_idx = blastp_context_idx_for_query_offset(&contexts, query_offset);
                     let x_drop = x_dropoff_per_context[ctx_idx];
                     let cutoff = word_cutoff_scores[ctx_idx];
 
@@ -3460,7 +3601,7 @@ fn run_resolved_with_records(
                 // if (query_offset - diff <
                 //     query_info->contexts[curr_context].query_offset) {
                 // ```
-                let ctx_idx = lookup.get_context_idx(query_offset);
+                let ctx_idx = blastp_context_idx_for_query_offset(&contexts, query_offset);
                 let ctx = &contexts[ctx_idx];
 
                 // NCBI reference: ncbi-blast/c++/src/algo/blast/core/aa_ungapped.c:562-570
@@ -3607,7 +3748,6 @@ fn run_resolved_with_records(
             // ```
             build_restricted_align_array_into(
                 &init_hsps,
-                &lookup,
                 &contexts,
                 &hit_cutoff_scores,
                 query_ids.len(),
@@ -3669,7 +3809,6 @@ fn run_resolved_with_records(
             // query_index = Blast_GetQueryIndexFromContext(context, program_number);
             // ```
             let (context_idx, ctx, query_sequence) = blastp_adjust_hsp_offsets_and_get_query_data(
-                &lookup,
                 &concatenated_query,
                 &contexts,
                 &mut init_hsp,
@@ -4912,13 +5051,14 @@ mod tests {
     #[test]
     fn test_blastp_for_each_offset_pair_preserves_scan_emission_order() {
         let lookup = make_poly_a_lookup();
+        let runtime_lookup = BlastpRuntimeLookup::Aa(lookup);
         let mut subject_sequence = vec![ncbistdaa::A; 6];
         subject_sequence.push(0);
         let mut offset_pairs = vec![OffsetPair::default(); 5];
         let mut emitted = Vec::new();
 
         blastp_for_each_offset_pair(
-            &lookup,
+            &runtime_lookup,
             &subject_sequence,
             6,
             &mut offset_pairs,
@@ -4974,12 +5114,13 @@ mod tests {
             ])],
         ];
         let (lookup, _) = build_ncbi_lookup(&queries, 0, &ungapped, false);
+        let runtime_lookup = BlastpRuntimeLookup::Aa(lookup);
         let subject_sequence = vec![ncbistdaa::A, ncbistdaa::A, ncbistdaa::A, ncbistdaa::A, 0];
         let mut offset_pairs = vec![OffsetPair::default(); 8];
         let mut emitted = Vec::new();
 
         blastp_for_each_offset_pair(
-            &lookup,
+            &runtime_lookup,
             &subject_sequence,
             4,
             &mut offset_pairs,
@@ -4988,6 +5129,55 @@ mod tests {
         );
 
         assert_eq!(emitted, vec![(0, 0), (4, 0), (0, 1), (4, 1)]);
+    }
+
+    // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_aascan.c:552-568
+    // ```c
+    // if (lookup_wrap->lut_type == eAaLookupTable) { ... }
+    // else if (lookup_wrap->lut_type == eCompressedAaLookupTable) {
+    //     lut->scansub_callback = (void *)s_BlastCompressedAaScanSubject;
+    // }
+    // ```
+    #[test]
+    fn test_blastp_for_each_offset_pair_dispatches_compressed_lookup() {
+        let mut lookup = BlastCompressedAaLookupTable::new(5, 19.3).expect("compressed lookup");
+        let word = [
+            ncbistdaa::S,
+            ncbistdaa::T,
+            ncbistdaa::A,
+            ncbistdaa::G,
+            ncbistdaa::W,
+        ];
+        lookup.add_unencoded(&word, 40);
+        lookup.add_unencoded(&word, 41);
+        lookup.finalize();
+        let runtime_lookup = BlastpRuntimeLookup::Compressed(lookup);
+        let subject_sequence = vec![
+            ncbistdaa::S,
+            ncbistdaa::T,
+            ncbistdaa::A,
+            ncbistdaa::G,
+            ncbistdaa::W,
+            ncbistdaa::S,
+            ncbistdaa::T,
+            ncbistdaa::A,
+            ncbistdaa::G,
+            ncbistdaa::W,
+            0,
+        ];
+        let mut offset_pairs = vec![OffsetPair::default(); 8];
+        let mut emitted = Vec::new();
+
+        blastp_for_each_offset_pair(
+            &runtime_lookup,
+            &subject_sequence,
+            10,
+            &mut offset_pairs,
+            BlastpOffsetPairScanMode::TwoHit,
+            |pair| emitted.push((pair.q_off, pair.s_off)),
+        );
+
+        assert_eq!(emitted, vec![(40, 0), (41, 0), (40, 5), (41, 5)]);
     }
 
     // NCBI reference: ncbi-blast/c++/src/algo/blast/core/aa_ungapped.c:496-500
@@ -5005,12 +5195,13 @@ mod tests {
     #[test]
     fn test_blastp_for_each_offset_pair_two_hit_uses_trailing_sentinel_for_short_subjects() {
         let lookup = make_poly_a_lookup();
+        let runtime_lookup = BlastpRuntimeLookup::Aa(lookup);
         let subject_sequence = vec![ncbistdaa::A, ncbistdaa::A, 0];
         let mut offset_pairs = vec![OffsetPair::default(); 5];
         let mut emitted = Vec::new();
 
         blastp_for_each_offset_pair(
-            &lookup,
+            &runtime_lookup,
             &subject_sequence,
             2,
             &mut offset_pairs,
@@ -5048,9 +5239,9 @@ mod tests {
                 ncbistdaa::A,
             ])],
         ];
-        let (lookup, contexts) = build_ncbi_lookup(&queries, 0, &ungapped, false);
+        let (_lookup, contexts) = build_ncbi_lookup(&queries, 0, &ungapped, false);
         let query_offset = 4;
-        let ctx_idx = lookup.get_context_idx(query_offset);
+        let ctx_idx = blastp_context_idx_for_query_offset(&contexts, query_offset);
         let ctx = &contexts[ctx_idx];
         let mut init_hsps = Vec::new();
 
@@ -5084,7 +5275,7 @@ mod tests {
                 ncbistdaa::A,
             ])],
         ];
-        let (lookup, contexts) = build_ncbi_lookup(&queries, 0, &ungapped, false);
+        let (_lookup, contexts) = build_ncbi_lookup(&queries, 0, &ungapped, false);
         let concatenated_query = build_blastp_concatenated_query(&contexts);
         let mut init_hsps = Vec::new();
 
@@ -5092,7 +5283,6 @@ mod tests {
 
         let mut init_hsp = init_hsps[0];
         let (context_idx, ctx, query_sequence) = blastp_adjust_hsp_offsets_and_get_query_data(
-            &lookup,
             &concatenated_query,
             &contexts,
             &mut init_hsp,
@@ -5233,12 +5423,26 @@ mod tests {
     //     options->lut_type = eCompressedAaLookupTable;
     // ```
     #[test]
-    fn test_validate_requested_blastp_support_rejects_compressed_lookup_path() {
+    fn test_validate_requested_blastp_support_accepts_blastp_fast_word_size_five() {
         let mut args = make_blastp_args();
-        args.word_size = Some(5);
+        args.task = "blastp-fast".to_string();
+        let resolved = args.resolve().expect("resolved blastp-fast args");
+
+        validate_requested_blastp_support(&resolved)
+            .expect("word_size 5 compressed blastp-fast is comparison-gated");
+    }
+
+    // NCBI reference: /mnt/c/Users/genom/GitHub/ncbi-blast/c++/src/algo/blast/core/blast_aalookup.c:1289-1292
+    // ```c
+    // ASSERT(word_size == 5 || word_size == 6 || word_size == 7);
+    // ```
+    #[test]
+    fn test_validate_requested_blastp_support_rejects_unverified_compressed_word_size() {
+        let mut args = make_blastp_args();
+        args.word_size = Some(6);
         let resolved = args.resolve().expect("resolved blastp args");
         let err = validate_requested_blastp_support(&resolved).expect_err("unsupported word size");
-        assert!(err.to_string().contains("compressed amino-acid lookup"));
+        assert!(err.to_string().contains("comparison-gated"));
     }
 
     // NCBI reference: /mnt/c/Users/genom/GitHub/ncbi-blast/c++/src/algo/blast/core/blast_kappa.c:3036-3062
@@ -5931,17 +6135,13 @@ mod tests {
     #[test]
     fn test_build_restricted_align_array_uses_first_init_hsp_per_query() {
         let contexts = vec![make_query_context(0, 0), make_query_context(1, 1000)];
-        let mut lookup = make_poly_a_lookup();
-        lookup.frame_bases = vec![0, 1000];
-        lookup.num_contexts = 2;
         let init_hsps = vec![
             make_init_hsp(20, 20, 20, 20, 20, 45),
             make_init_hsp(0, 20, 0, 0, 0, 80),
             make_init_hsp(1060, 20, 60, 1060, 60, 70),
         ];
 
-        let restricted =
-            build_restricted_align_array(&init_hsps, &lookup, &contexts, &[100, 100], 2);
+        let restricted = build_restricted_align_array(&init_hsps, &contexts, &[100, 100], 2);
 
         assert_eq!(restricted, vec![true, false]);
     }
@@ -5957,16 +6157,12 @@ mod tests {
     #[test]
     fn test_build_restricted_align_array_uses_qoff_not_cached_context() {
         let contexts = vec![make_query_context(0, 0), make_query_context(1, 1000)];
-        let mut lookup = make_poly_a_lookup();
-        lookup.frame_bases = vec![0, 1000];
-        lookup.num_contexts = 2;
         let init_hsps = vec![
             make_init_hsp(0, 20, 0, 0, 0, 80),
             make_init_hsp(1005, 20, 50, 1005, 50, 45),
         ];
 
-        let restricted =
-            build_restricted_align_array(&init_hsps, &lookup, &contexts, &[100, 100], 2);
+        let restricted = build_restricted_align_array(&init_hsps, &contexts, &[100, 100], 2);
 
         assert_eq!(restricted, vec![false, true]);
     }

@@ -4,6 +4,7 @@
 //! Reference: ncbi-blast/c++/include/algo/blast/core/blast_aalookup.h
 
 use super::{ilog2, PV_ARRAY_BTS, PV_ARRAY_MASK};
+use crate::algorithm::tblastx::scan::OffsetPair;
 use crate::config::ScoringMatrix;
 use crate::core::composition_adjustment::adjust_scores::build_matrix_info;
 use crate::stats::{compute_std_aa_composition, lookup_protein_params_ungapped};
@@ -580,6 +581,254 @@ impl BlastCompressedAaLookupTable {
         offsets
     }
 
+    // NCBI reference: /mnt/c/Users/genom/GitHub/ncbi-blast/c++/src/algo/blast/core/blast_aascan.c:343-384
+    // ```c
+    // dest[0].qs_offsets.q_off = backbone_cell->query_offset;
+    // dest[0].qs_offsets.s_off = s_off;
+    // if (numhits <= COMPRESSED_HITS_PER_BACKBONE_CELL+1) {
+    //     for (i = 0; i < numhits-1; i++) {
+    //         dest[i].qs_offsets.q_off = backbone_cell->payload.query_offsets[i];
+    //         dest[i].qs_offsets.s_off = s_off;
+    //     }
+    // } else { ... while (curr_cell != NULL) { ... } }
+    // ```
+    #[allow(dead_code)]
+    fn copy_scan_hits(&self, index: usize, s_off: u32, dest: &mut [OffsetPair]) {
+        let cell = &self.backbone[index];
+        let numhits =
+            usize::try_from(cell.num_used).expect("NCBI BLAST compressed hit count must fit usize");
+        if numhits == 0 {
+            return;
+        }
+
+        dest[0] = OffsetPair {
+            q_off: cell.query_offset as u32,
+            s_off,
+        };
+        if numhits <= COMPRESSED_HITS_PER_BACKBONE_CELL + 1 {
+            let CompressedBackbonePayload::Inline(query_offsets) = &cell.payload else {
+                unreachable!("NCBI BLAST small compressed cell uses inline storage");
+            };
+            for i in 0..(numhits - 1) {
+                dest[i + 1] = OffsetPair {
+                    q_off: query_offsets[i] as u32,
+                    s_off,
+                };
+            }
+            return;
+        }
+
+        let CompressedBackbonePayload::Overflow {
+            query_offsets,
+            head,
+        } = &cell.payload
+        else {
+            unreachable!("NCBI BLAST large compressed cell uses overflow storage");
+        };
+        dest[1] = OffsetPair {
+            q_off: query_offsets[0] as u32,
+            s_off,
+        };
+        dest[2] = OffsetPair {
+            q_off: query_offsets[1] as u32,
+            s_off,
+        };
+
+        let first_cell_entries = (numhits - 3) & COMPRESSED_HITS_CELL_MASK;
+        let mut written = 3usize;
+        let mut curr_cell = head.expect("NCBI BLAST compressed overflow head must exist");
+        for i in 0..first_cell_entries {
+            dest[written] = OffsetPair {
+                q_off: self.overflow_cells[curr_cell].query_offsets[i] as u32,
+                s_off,
+            };
+            written += 1;
+        }
+        if first_cell_entries != 0 {
+            let Some(next) = self.overflow_cells[curr_cell].next else {
+                return;
+            };
+            curr_cell = next;
+        }
+        while written < numhits {
+            for i in 0..COMPRESSED_HITS_PER_OVERFLOW_CELL {
+                if written >= numhits {
+                    break;
+                }
+                dest[written] = OffsetPair {
+                    q_off: self.overflow_cells[curr_cell].query_offsets[i] as u32,
+                    s_off,
+                };
+                written += 1;
+            }
+            let Some(next) = self.overflow_cells[curr_cell].next else {
+                break;
+            };
+            curr_cell = next;
+        }
+    }
+
+    // NCBI reference: /mnt/c/Users/genom/GitHub/ncbi-blast/c++/src/algo/blast/core/blast_aascan.c:229-384
+    // ```c
+    // while (s_DetermineScanningOffsets(subject, word_length, word_length, s_range)) {
+    //     for(s = s_first; s <= s_last; s++){
+    //         index = s_ComputeCompressedIndex(word_length - 1, s, ...);
+    //         if(!skip) break;
+    //     }
+    //     next_char = ((s <= s_last)? s[word_length-1] : 0);
+    //     preshift = (Int4)((((Int8)index) * recip) >> 32);
+    //     for (; s <= s_last; s++) {
+    //         compressed_char = scaled_compress_table[next_char];
+    //         next_char = s[word_length];
+    //         ...
+    //         if (PV_TEST(pv, index, pv_array_bts)) { ... }
+    //     }
+    // }
+    // ```
+    #[allow(dead_code)]
+    pub(crate) fn scan_subject(
+        &self,
+        subject: &[u8],
+        seq_ranges: &[(i32, i32)],
+        offset_pairs: &mut [OffsetPair],
+        array_size: i32,
+        s_range: &mut [i32; 3],
+    ) -> i32 {
+        let mut totalhits = 0i32;
+        let word_length = usize::try_from(self.word_length)
+            .expect("NCBI BLAST compressed word length must fit usize");
+        let compressed_alphabet_size = usize::try_from(self.compressed_alphabet_size)
+            .expect("NCBI BLAST compressed alphabet size must fit usize");
+        let recip = i64::from(self.reciprocal_alphabet_size);
+        let pv_array_bts = usize::try_from(self.pv_array_bts)
+            .expect("NCBI BLAST compressed PV shift must fit usize");
+
+        while determine_compressed_scanning_offsets(
+            seq_ranges,
+            self.word_length,
+            self.word_length,
+            s_range,
+        ) {
+            let s_first = usize::try_from(s_range[1])
+                .expect("NCBI BLAST compressed scan start must be non-negative");
+            let s_last = usize::try_from(s_range[2])
+                .expect("NCBI BLAST compressed scan end must be non-negative");
+            let mut s = s_first;
+            let mut index = 0i32;
+
+            while s <= s_last {
+                let end = s + word_length - 1;
+                let word = subject
+                    .get(s..end)
+                    .expect("NCBI BLAST compressed scan prime word must be in range");
+                let computed = compute_compressed_index(
+                    word_length - 1,
+                    word,
+                    compressed_alphabet_size,
+                    &self.scaled_compress_table,
+                );
+                index = computed.0;
+                let skip = computed.1;
+                if skip == 0 {
+                    break;
+                }
+                s += 1;
+            }
+
+            let mut next_char = if s <= s_last {
+                subject.get(s + word_length - 1).copied().unwrap_or(0)
+            } else {
+                0
+            };
+            let mut preshift = compressed_reciprocal_divide(index, recip);
+
+            while s <= s_last {
+                let mut compressed_char = self
+                    .scaled_compress_table
+                    .get(next_char as usize)
+                    .copied()
+                    .unwrap_or(-1);
+                next_char = subject.get(s + word_length).copied().unwrap_or(0);
+
+                if compressed_char < 0 {
+                    // NCBI reference: /mnt/c/Users/genom/GitHub/ncbi-blast/c++/src/algo/blast/core/blast_aascan.c:278-300
+                    // ```c
+                    // if(compressed_char < 0){ /* flush (rare) "bad" character(s) */
+                    //     preshift = 0;
+                    //     s++;
+                    //     for(skip = word_length-1; skip && (s <= s_last) ; s++){ ... }
+                    //     s--; /*undo the following increment*/
+                    //     continue;
+                    // }
+                    // ```
+                    preshift = 0;
+                    s += 1;
+                    let mut skip = self.word_length - 1;
+                    while skip != 0 && s <= s_last {
+                        compressed_char = self
+                            .scaled_compress_table
+                            .get(next_char as usize)
+                            .copied()
+                            .unwrap_or(-1);
+                        next_char = subject.get(s + word_length).copied().unwrap_or(0);
+                        if compressed_char < 0 {
+                            skip = self.word_length - 1;
+                            preshift = 0;
+                            s += 1;
+                            continue;
+                        }
+                        index = preshift + compressed_char;
+                        preshift = compressed_reciprocal_divide(index, recip);
+                        skip -= 1;
+                        s += 1;
+                    }
+                    // NCBI's `s--` is immediately balanced by the outer `for`
+                    // increment; this `while` loop already holds that resumed
+                    // subject offset.
+                    continue;
+                }
+
+                index = preshift + compressed_char;
+                preshift = compressed_reciprocal_divide(index, recip);
+
+                let index_usize = usize::try_from(index)
+                    .expect("NCBI BLAST compressed scan index must be non-negative");
+                if compressed_pv_test(&self.pv, index_usize, pv_array_bts) {
+                    let numhits = self.backbone[index_usize].num_used;
+                    if numhits != 0 {
+                        if numhits <= array_size - totalhits {
+                            let dest_base = usize::try_from(totalhits)
+                                .expect("NCBI BLAST compressed total hits fit usize");
+                            let dest_end = dest_base
+                                + usize::try_from(numhits)
+                                    .expect("NCBI BLAST compressed hit count fits usize");
+                            self.copy_scan_hits(
+                                index_usize,
+                                s as u32,
+                                &mut offset_pairs[dest_base..dest_end],
+                            );
+                            totalhits += numhits;
+                        } else {
+                            // NCBI reference: /mnt/c/Users/genom/GitHub/ncbi-blast/c++/src/algo/blast/core/blast_aascan.c:373-378
+                            // ```c
+                            // s_range[1] = (Int4)(s - subject->sequence);
+                            // return totalhits;
+                            // ```
+                            s_range[1] = i32::try_from(s)
+                                .expect("NCBI BLAST compressed subject offset fits Int4");
+                            return totalhits;
+                        }
+                    }
+                }
+                s += 1;
+            }
+
+            s_range[1] = i32::try_from(s).expect("NCBI BLAST compressed subject offset fits Int4");
+        }
+
+        totalhits
+    }
+
     // NCBI reference: /mnt/c/Users/genom/GitHub/ncbi-blast/c++/src/algo/blast/core/blast_aalookup.c:1182-1242
     // ```c
     // for (i = count = 0; i < lookup->backbone_size; i++) {
@@ -626,6 +875,48 @@ impl BlastCompressedAaLookupTable {
         }
         self.longest_chain = longest_chain;
     }
+}
+
+// NCBI reference: ncbi-blast/c++/src/algo/blast/core/masksubj.inl:43-58
+// ```c
+// while (range[1] > range[2]) {
+//     range[0]++;
+//     if (range[0] >= subject->num_seq_ranges)
+//         return FALSE;
+//     range[1] = subject->seq_ranges[range[0]].left +
+//                word_length - lut_word_length;
+//     range[2] = subject->seq_ranges[range[0]].right - lut_word_length;
+// }
+// return TRUE;
+// ```
+#[inline(always)]
+#[allow(dead_code)]
+fn determine_compressed_scanning_offsets(
+    seq_ranges: &[(i32, i32)],
+    word_length: i32,
+    lut_word_length: i32,
+    range: &mut [i32; 3],
+) -> bool {
+    while range[1] > range[2] {
+        range[0] += 1;
+        if range[0] >= seq_ranges.len() as i32 {
+            return false;
+        }
+        let (left, right) = seq_ranges[range[0] as usize];
+        range[1] = left + word_length - lut_word_length;
+        range[2] = right - lut_word_length;
+    }
+    true
+}
+
+// NCBI reference: /mnt/c/Users/genom/GitHub/ncbi-blast/c++/src/algo/blast/core/blast_aascan.c:272-274
+// ```c
+// preshift = (Int4)((((Int8)index) * recip) >> 32);
+// ```
+#[inline(always)]
+#[allow(dead_code)]
+fn compressed_reciprocal_divide(index: i32, reciprocal_alphabet_size: i64) -> i32 {
+    ((i64::from(index) * reciprocal_alphabet_size) >> 32) as i32
 }
 
 impl CompressedNeighborInfo {
@@ -1091,5 +1382,130 @@ mod tests {
         assert_eq!(encoded_index as i32, unencoded_index);
         lookup.add_unencoded(&word, 321);
         assert_eq!(lookup.query_offsets_in_scan_order(encoded_index), vec![321]);
+    }
+
+    // NCBI reference: /mnt/c/Users/genom/GitHub/ncbi-blast/c++/src/algo/blast/core/blast_aascan.c:322-384
+    // ```c
+    // if (PV_TEST(pv, index, pv_array_bts)) {
+    //     Int4 s_off = (Int4)(s - subject->sequence);
+    //     ...
+    //     dest[0].qs_offsets.q_off = backbone_cell->query_offset;
+    //     dest[0].qs_offsets.s_off = s_off;
+    //     ...
+    //     totalhits += numhits;
+    // }
+    // ```
+    #[test]
+    fn compressed_scan_subject_emits_ncbi_subject_major_order() {
+        let mut lookup = BlastCompressedAaLookupTable::new(5, 19.3).expect("compressed lookup");
+        let word = [
+            ncbistdaa::S,
+            ncbistdaa::T,
+            ncbistdaa::A,
+            ncbistdaa::G,
+            ncbistdaa::W,
+        ];
+        lookup.add_unencoded(&word, 10);
+        lookup.add_unencoded(&word, 11);
+        lookup.finalize();
+
+        let subject = [
+            ncbistdaa::S,
+            ncbistdaa::T,
+            ncbistdaa::A,
+            ncbistdaa::G,
+            ncbistdaa::W,
+            ncbistdaa::S,
+            ncbistdaa::T,
+            ncbistdaa::A,
+            ncbistdaa::G,
+            ncbistdaa::W,
+            0,
+        ];
+        let seq_ranges = [(0, 10)];
+        let mut s_range = [0, 0, 5];
+        let mut offset_pairs = vec![OffsetPair::default(); 8];
+        let hits = lookup.scan_subject(&subject, &seq_ranges, &mut offset_pairs, 8, &mut s_range);
+
+        assert_eq!(hits, 4);
+        assert_eq!(
+            offset_pairs[..hits as usize]
+                .iter()
+                .map(|pair| (pair.q_off, pair.s_off))
+                .collect::<Vec<_>>(),
+            vec![(10, 0), (11, 0), (10, 5), (11, 5)]
+        );
+        assert_eq!(s_range[1], 6);
+    }
+
+    // NCBI reference: /mnt/c/Users/genom/GitHub/ncbi-blast/c++/src/algo/blast/core/blast_aascan.c:373-378
+    // ```c
+    // else {
+    //     s_range[1] = (Int4)(s - subject->sequence);
+    //     return totalhits;
+    // }
+    // ```
+    #[test]
+    fn compressed_scan_subject_small_buffer_resumes_without_splitting_subject_offset() {
+        let mut lookup = BlastCompressedAaLookupTable::new(5, 19.3).expect("compressed lookup");
+        let word = [
+            ncbistdaa::S,
+            ncbistdaa::T,
+            ncbistdaa::A,
+            ncbistdaa::G,
+            ncbistdaa::W,
+        ];
+        for query_offset in 10..16 {
+            lookup.add_unencoded(&word, query_offset);
+        }
+        lookup.finalize();
+
+        let subject = [
+            ncbistdaa::S,
+            ncbistdaa::T,
+            ncbistdaa::A,
+            ncbistdaa::G,
+            ncbistdaa::W,
+            ncbistdaa::X,
+            ncbistdaa::S,
+            ncbistdaa::T,
+            ncbistdaa::A,
+            ncbistdaa::G,
+            ncbistdaa::W,
+            0,
+        ];
+        let seq_ranges = [(0, 11)];
+        let mut s_range = [0, 0, 6];
+        let mut offset_pairs = vec![OffsetPair::default(); 6];
+        let mut observed = Vec::new();
+
+        while s_range[1] <= s_range[2] {
+            let hits =
+                lookup.scan_subject(&subject, &seq_ranges, &mut offset_pairs, 6, &mut s_range);
+            assert_eq!(hits, 6);
+            observed.extend(
+                offset_pairs[..hits as usize]
+                    .iter()
+                    .map(|pair| (pair.q_off, pair.s_off)),
+            );
+        }
+
+        assert_eq!(
+            observed,
+            vec![
+                (10, 0),
+                (11, 0),
+                (12, 0),
+                (13, 0),
+                (14, 0),
+                (15, 0),
+                (10, 6),
+                (11, 6),
+                (12, 6),
+                (13, 6),
+                (14, 6),
+                (15, 6),
+            ]
+        );
     }
 }

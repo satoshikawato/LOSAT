@@ -14,7 +14,7 @@ use crate::stats::karlin_calc::{
     compute_score_freq_profile, compute_std_aa_composition,
 };
 use crate::stats::{lookup_protein_params_ungapped, KarlinParams};
-use crate::utils::matrix::blosum62_score;
+use crate::utils::matrix::blosum62_ncbistdaa_score_row;
 
 pub const AA_HITS_PER_CELL: usize = 3;
 
@@ -359,6 +359,34 @@ fn prepare_lookup_query(
     prepared
 }
 
+// NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_setup.c:621-636
+// ```c
+// if (lookup_segments) {
+//     BLAST_ComplementMaskLocations(program_number, query_info,
+//                                   filter_maskloc, lookup_segments);
+// }
+// ```
+//
+// NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_aalookup.c:1349-1351
+// ```c
+// s_CompressedAddNeighboringWords(lookup, new_alphabet->matrix->data,
+//                                 query, locations);
+// ```
+pub(crate) fn prepare_blosum62_lookup_query_for_word_size(
+    queries: &[Vec<QueryFrame>],
+    word_length: usize,
+    check_ideal: bool,
+) -> (Vec<u8>, Vec<(i32, i32)>, Vec<QueryContext>) {
+    let ideal_params = lookup_protein_params_ungapped(ScoringMatrix::Blosum62);
+    let std_comp = compute_std_aa_composition();
+    let prepared = prepare_lookup_query(queries, ideal_params, &std_comp, word_length, check_ideal);
+    (
+        prepared.concat_query,
+        prepared.lookup_locations,
+        prepared.contexts,
+    )
+}
+
 #[inline(always)]
 fn lookup_chain_num_used(chain: &[i32]) -> usize {
     usize::try_from(chain[1]).expect("NCBI BLAST lookup chain hit count must fit in usize")
@@ -530,10 +558,16 @@ fn blast_lookup_index_query_exact_matches(
 fn blast_aa_add_word_hits_core(info: &mut NeighborInfo<'_>, score: i32, current_pos: usize) {
     let query_residue = info.query_word[current_pos] as usize;
     let score = score - info.row_max[query_residue];
+    let row = blosum62_ncbistdaa_score_row(query_residue);
 
     if current_pos == info.wordsize - 1 {
         for residue in 0..info.alphabet_size {
-            let residue_score = blosum62_score(query_residue as u8, residue as u8);
+            // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_aalookup.c:580-582
+            // ```c
+            // for (i = 0; i < alphabet_size; i++) {
+            //     if (score + row[i] >= threshold) {
+            // ```
+            let residue_score = row[residue];
             if score + residue_score >= info.threshold {
                 info.subject_word[current_pos] = residue as u8;
                 for &query_offset in lookup_chain_entries(info.offset_list) {
@@ -553,7 +587,14 @@ fn blast_aa_add_word_hits_core(info: &mut NeighborInfo<'_>, score: i32, current_
     }
 
     for residue in 0..info.alphabet_size {
-        let residue_score = blosum62_score(query_residue as u8, residue as u8);
+        // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_aalookup.c:600-603
+        // ```c
+        // for (i = 0; i < alphabet_size; i++) {
+        //     if (score + row[i] >= threshold) {
+        //         subject_word[current_pos] = i;
+        //         s_AddWordHitsCore(info, score + row[i], current_pos + 1);
+        // ```
+        let residue_score = row[residue];
         if score + residue_score >= info.threshold {
             info.subject_word[current_pos] = residue as u8;
             blast_aa_add_word_hits_core(info, score + residue_score, current_pos + 1);
@@ -594,9 +635,17 @@ fn blast_aa_add_word_hits(
 ) -> (usize, usize, usize) {
     let query_offset = usize::try_from(offset_list[2]).expect("NCBI BLAST query offset must fit");
     let query_word = &query[query_offset..];
-    let mut self_score = blosum62_score(query_word[0], query_word[0]);
+    let query_residue = query_word[0] as usize;
+    // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_aalookup.c:492-496
+    // ```c
+    // score = matrix[w[0]][w[0]];
+    // for (i = 1; i < lookup->word_length; i++)
+    //     score += matrix[w[i]][w[i]];
+    // ```
+    let mut self_score = blosum62_ncbistdaa_score_row(query_residue)[query_residue];
     for residue in query_word.iter().take(word_length).skip(1) {
-        self_score += blosum62_score(*residue, *residue);
+        let residue = *residue as usize;
+        self_score += blosum62_ncbistdaa_score_row(residue)[residue];
     }
 
     let mut exact_added_count = 0usize;
@@ -727,10 +776,13 @@ pub fn build_ncbi_lookup(
     // For NCBISTDAA residues, we compute max score against any other residue.
     let row_max: Vec<i32> = (0..alphabet_size)
         .map(|i| {
-            (0..alphabet_size)
-                .map(|j| blosum62_score(i as u8, j as u8))
-                .max()
-                .unwrap_or(-4)
+            let row = blosum62_ncbistdaa_score_row(i);
+            // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_aalookup.c:562-563
+            // ```c
+            // score -= info->row_max[query_word[current_pos]];
+            // row = info->matrix[query_word[current_pos]];
+            // ```
+            (0..alphabet_size).map(|j| row[j]).max().unwrap_or(-4)
         })
         .collect();
 
@@ -1141,7 +1193,7 @@ mod tests {
     use super::*;
     use crate::config::ScoringMatrix;
     use crate::stats::lookup_protein_params_ungapped;
-    use crate::utils::matrix::{ncbistdaa, BLASTAA_SIZE};
+    use crate::utils::matrix::{blosum62_score, ncbistdaa, BLASTAA_SIZE};
 
     // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_lookup.c:87-129
     // ```c

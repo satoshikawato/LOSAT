@@ -57,7 +57,9 @@ use super::encoding::{
     encode_protein_query_frame_with_seg, encode_protein_sequence, ncbistdaa_to_ascii,
     EncodedProtein,
 };
-use super::extension::{extend_one_hit, extend_two_hit, BlastpUngappedData};
+#[cfg(test)]
+use super::extension::{extend_one_hit, extend_two_hit};
+use super::extension::{extend_one_hit_blosum62, extend_two_hit_blosum62, BlastpUngappedData};
 use super::gapalign::{
     blastp_get_start_for_gapped_alignment, blastp_score_only_gapped_alignment_with_scratch,
     BlastpGappedAlignmentMode, BlastpPreliminaryHsp, GapAlignScratch,
@@ -1254,6 +1256,18 @@ fn blastp_context_idx_for_query_offset_with_bounds(
     if size == 0 {
         return 0;
     }
+    // NCBI reference: /mnt/c/Users/genom/GitHub/ncbi-blast/c++/src/algo/blast/core/blast_query_info.c:219-235
+    // ```c
+    // size = A->last_context+1;
+    // ...
+    // while (b < e - 1) {
+    //     ...
+    // }
+    // return b;
+    // ```
+    if size == 1 {
+        return 0;
+    }
 
     let mut lo = 0usize;
     let mut hi = size;
@@ -1528,13 +1542,20 @@ fn blastp_for_each_offset_pair<F>(
         scan_range[2] = scan_range[1];
     }
 
+    // NCBI reference: ncbi-blast/c++/src/algo/blast/core/aa_ungapped.c:492-505,763-769
+    // ```c
+    // while (scan_range[1] <= scan_range[2]) {
+    //     hits = scansub(lookup_wrap, subject, offset_pairs, array_size, scan_range);
+    // ```
+    let array_size =
+        i32::try_from(offset_pairs.len()).expect("NCBI BLAST offset pair array size must fit Int4");
+
     while scan_range[1] <= scan_range[2] {
         let hits = lookup.scan_subject(
             subject_sequence,
             &seq_ranges,
             offset_pairs,
-            i32::try_from(offset_pairs.len())
-                .expect("NCBI BLAST offset pair array size must fit in Int4"),
+            array_size,
             &mut scan_range,
         );
 
@@ -3720,8 +3741,14 @@ fn run_resolved_with_records(
                     let x_drop = x_dropoff_per_context[ctx_idx];
                     let cutoff = word_cutoff_scores[ctx_idx];
 
-                    let Some(ungapped_hit) = extend_one_hit(
-                        args.scoring.matrix,
+                    // NCBI reference: ncbi-blast/c++/src/algo/blast/core/aa_ungapped.c:1040-1044
+                    // ```c
+                    // if (use_pssm)
+                    //     sum += matrix[q_off + i][s[s_off + i]];
+                    // else
+                    //     sum += matrix[q[q_off + i]][s[s_off + i]];
+                    // ```
+                    let Some(ungapped_hit) = extend_one_hit_blosum62(
                         &concatenated_query,
                         subject_raw,
                         usize::try_from(query_offset)
@@ -3851,8 +3878,14 @@ fn run_resolved_with_records(
                 let x_drop = x_dropoff_per_context[ctx_idx];
                 let cutoff = word_cutoff_scores[ctx_idx];
 
-                let Some(ungapped_hit) = extend_two_hit(
-                    args.scoring.matrix,
+                // NCBI reference: ncbi-blast/c++/src/algo/blast/core/aa_ungapped.c:1112-1116
+                // ```c
+                // if (use_pssm)
+                //     score += matrix[q_right_off + i][s[s_right_off + i]];
+                // else
+                //     score += matrix[q[q_right_off + i]][s[s_right_off + i]];
+                // ```
+                let Some(ungapped_hit) = extend_two_hit_blosum62(
                     &concatenated_query,
                     subject_raw,
                     usize::try_from(last_hit + word_size)

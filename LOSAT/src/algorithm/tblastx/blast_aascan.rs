@@ -76,22 +76,27 @@ pub fn s_blast_aa_scan_subject(
 ) -> i32 {
     let mut totalhits: i32 = 0;
 
-    // NCBI subject masking support (masksubj.inl). This walks subject->seq_ranges.
-    // Reference: ncbi-blast/c++/src/algo/blast/core/masksubj.inl:43-58
+    // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_aascan.c:64-72
+    // ```c
+    // pv = lookup->pv;
+    // bbc = (AaLookupBackboneCell *) lookup->thick_backbone;
+    // ovfl = (Int4 *) lookup->overflow;
+    // word_length = lookup->word_length;
+    // ```
+    let word_length = lookup.word_length as usize;
     let word_length_i32 = lookup.word_length as i32;
     let lut_word_length_i32 = lookup.word_length as i32;
+    let charsize = lookup.charsize as usize;
+    let mask = lookup.mask as usize;
+    let pv = lookup.pv.as_ptr();
+    let backbone = lookup.backbone.as_ptr();
+    let overflow = lookup.overflow.as_ptr();
+
+    // NCBI subject masking support (masksubj.inl). This walks subject->seq_ranges.
+    // Reference: ncbi-blast/c++/src/algo/blast/core/masksubj.inl:43-58
     while determine_scanning_offsets(seq_ranges, word_length_i32, lut_word_length_i32, s_range) {
         let s_first = s_range[1] as usize;
         let s_last = s_range[2] as usize;
-
-        let word_length = lookup.word_length as usize;
-        let charsize = lookup.charsize as usize;
-        let mask = lookup.mask as usize;
-
-        // Cache pointers for hot loop - matches NCBI pointer-based iteration
-        let pv = lookup.pv.as_ptr();
-        let backbone = lookup.backbone.as_ptr();
-        let overflow = lookup.overflow.as_ptr();
 
         // [C] index = ComputeTableIndex(word_length - 1, lookup->charsize, s_first);
         // Reference: ncbi-blast/c++/src/algo/blast/core/blast_aascan.c:79-81

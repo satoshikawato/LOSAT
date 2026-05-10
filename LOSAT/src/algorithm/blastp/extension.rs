@@ -216,6 +216,7 @@ fn extend_left<const BLOSUM62: bool>(
 //     return total_score;
 // }
 // ```
+#[allow(dead_code)]
 pub fn extend_one_hit(
     matrix: ScoringMatrix,
     query: &[u8],
@@ -237,6 +238,33 @@ pub fn extend_one_hit(
     } else {
         extend_one_hit_impl::<false>(matrix, query, subject, q_off, s_off, dropoff, word_size)
     }
+}
+
+// NCBI reference: ncbi-blast/c++/src/algo/blast/core/aa_ungapped.c:1040-1044
+// ```c
+// if (use_pssm)
+//     sum += matrix[q_off + i][s[s_off + i]];
+// else
+//     sum += matrix[q[q_off + i]][s[s_off + i]];
+// ```
+#[inline]
+pub(crate) fn extend_one_hit_blosum62(
+    query: &[u8],
+    subject: &[u8],
+    q_off: usize,
+    s_off: usize,
+    dropoff: i32,
+    word_size: usize,
+) -> Option<BlastpOneHitUngappedResult> {
+    extend_one_hit_impl::<true>(
+        ScoringMatrix::Blosum62,
+        query,
+        subject,
+        q_off,
+        s_off,
+        dropoff,
+        word_size,
+    )
 }
 
 // NCBI reference: ncbi-blast/c++/src/algo/blast/core/aa_ungapped.c:1020-1083
@@ -348,6 +376,7 @@ fn extend_one_hit_impl<const BLOSUM62: bool>(
 //     return MAX(left_score, right_score);
 // }
 // ```
+#[allow(dead_code)]
 pub fn extend_two_hit(
     matrix: ScoringMatrix,
     query: &[u8],
@@ -388,6 +417,35 @@ pub fn extend_two_hit(
             word_size,
         )
     }
+}
+
+// NCBI reference: ncbi-blast/c++/src/algo/blast/core/aa_ungapped.c:1112-1116
+// ```c
+// if (use_pssm)
+//     score += matrix[q_right_off + i][s[s_right_off + i]];
+// else
+//     score += matrix[q[q_right_off + i]][s[s_right_off + i]];
+// ```
+#[inline]
+pub(crate) fn extend_two_hit_blosum62(
+    query: &[u8],
+    subject: &[u8],
+    s_left_off: usize,
+    s_right_off: usize,
+    q_right_off: usize,
+    dropoff: i32,
+    word_size: usize,
+) -> Option<BlastpTwoHitUngappedResult> {
+    extend_two_hit_impl::<true>(
+        ScoringMatrix::Blosum62,
+        query,
+        subject,
+        s_left_off,
+        s_right_off,
+        q_right_off,
+        dropoff,
+        word_size,
+    )
 }
 
 // NCBI reference: ncbi-blast/c++/src/algo/blast/core/aa_ungapped.c:1089-1155

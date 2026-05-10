@@ -2175,6 +2175,16 @@ pub(crate) fn blastp_score_only_gapped_alignment_with_scratch(
         subject_shift < subject.len() && subject_length > 0,
         "NCBI BLAST requires AdjustSubjectRange to yield a non-empty subject window"
     );
+    // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_gapalign.c:4209-4319
+    // ```c
+    // s_BlastProtGappedAlignment(..., const BlastScoringParameters* score_params,
+    //                            BlastGapAlignStruct* gap_align, ...)
+    // {
+    //     score_left = Blast_SemiGappedAlign(..., score_params, ...);
+    //     score_right = Blast_SemiGappedAlign(..., score_params, ...);
+    // }
+    // ```
+    let score_matrix = BlastpScoreMatrix::standard(matrix);
     // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_gapalign.c:4266-4278
     // ```c
     // score_left = s_RestrictedGappedAlign(query, subject+subject_shift,
@@ -2191,7 +2201,7 @@ pub(crate) fn blastp_score_only_gapped_alignment_with_scratch(
             subject_shift,
             q_length,
             subject_offset,
-            BlastpScoreMatrix::standard(matrix),
+            score_matrix,
             gap_open,
             gap_extend,
             x_drop,
@@ -2205,7 +2215,7 @@ pub(crate) fn blastp_score_only_gapped_alignment_with_scratch(
             subject_shift,
             q_length,
             subject_offset,
-            BlastpScoreMatrix::standard(matrix),
+            score_matrix,
             gap_open,
             gap_extend,
             x_drop,
@@ -2242,7 +2252,7 @@ pub(crate) fn blastp_score_only_gapped_alignment_with_scratch(
                     s_start,
                     query.len() - q_length,
                     subject_length - subject_offset,
-                    BlastpScoreMatrix::standard(matrix),
+                    score_matrix,
                     gap_open,
                     gap_extend,
                     x_drop,
@@ -2256,7 +2266,7 @@ pub(crate) fn blastp_score_only_gapped_alignment_with_scratch(
                     s_start,
                     query.len() - q_length,
                     subject_length - subject_offset,
-                    BlastpScoreMatrix::standard(matrix),
+                    score_matrix,
                     gap_open,
                     gap_extend,
                     x_drop,

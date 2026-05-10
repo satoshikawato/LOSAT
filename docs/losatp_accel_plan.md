@@ -81,7 +81,8 @@ Phases 0-4 under the parity gate requested for this acceleration work.
 
 - Worktree state before this pass already included Phase 0/1 scaffolding,
   BLOSUM62 direct score helpers, and compressed lookup construction files.
-  This pass extended Phase 2 scratch reuse and Phase 3 gapped-score dispatch.
+  This pass extended Phase 2 scratch reuse, Phase 3 gapped-score dispatch,
+  and Phase 3 ungapped-extension BLOSUM62 dispatch.
 - Pre-change baseline from the current dirty worktree:
   - `cargo build`: passed.
   - `blastp` outfmt 6 vs NCBI references: 9 total diff lines across 4 cases:
@@ -96,6 +97,17 @@ Phases 0-4 under the parity gate requested for this acceleration work.
     threaded/NCBI mismatches unchanged at 4 cases.
 - After Phase 3 gapped BLOSUM62 dispatch:
   - `cargo build`: passed.
+  - `blastp` outfmt 6 vs NCBI references: unchanged at 9 total diff lines.
+  - `run_blastp_threads_comparison.sh`: serial/threaded mismatches 0;
+    threaded/NCBI mismatches unchanged at 4 cases.
+- After Phase 3 ungapped-extension BLOSUM62 dispatch:
+  - Routed BLASTP one-hit/two-hit ungapped extension through BLOSUM62-specialized
+    helper instantiations while preserving NCBI `aa_ungapped.c` loop order,
+    x-drop checks, and scoring update timing.
+  - `rustfmt src/algorithm/blastp/extension.rs`: passed.
+  - `cargo test --lib test_extend`: 6 passed.
+  - `cargo build`: passed.
+  - `cargo build --release`: passed.
   - `blastp` outfmt 6 vs NCBI references: unchanged at 9 total diff lines.
   - `run_blastp_threads_comparison.sh`: serial/threaded mismatches 0;
     threaded/NCBI mismatches unchanged at 4 cases.
@@ -116,6 +128,31 @@ Phases 0-4 under the parity gate requested for this acceleration work.
   - `cargo test --test compressed_lookup`: 4 passed.
   - Runtime `blastp-fast` remains unsupported until compressed scan integration
     and full NCBI comparison cases are complete.
+- Additional Phase 3 BLOSUM62 dispatch pass:
+  - Routed Kappa redo identity/positive recounting through BLOSUM62-specialized
+    helper instantiations while preserving NCBI `blast_hits.c` comparison order.
+  - Routed preliminary gapped-start window scoring through a BLOSUM62-specialized
+    helper while preserving NCBI `blast_gapalign.c` rolling-window order.
+  - `cargo test --lib kappa`: 20 passed.
+  - `cargo test --lib gapalign`: 21 passed, 1 ignored diagnostic.
+  - `cargo build`: passed after each step.
+  - `blastp` outfmt 6 vs NCBI references: unchanged at 4 mismatch cases
+    (`git diff --no-index` aggregate stayed 67 lines in this pass's metric).
+  - `run_blastp_threads_comparison.sh`: serial/threaded mismatches 0;
+    threaded/NCBI mismatches unchanged at 4 cases after each step.
+- Additional Phase 3 final-alignment recount pass:
+  - Routed BLASTP alignment-view identity/positive recounting through
+    BLOSUM62-specialized helper instantiations while preserving NCBI
+    `blast_hits.c` match/positive comparison order.
+  - Corrected the local alignment-view gapped unit test to use NCBISTDAA residue
+    constants and NCBI `eGapAlignDel` gap-in-query semantics.
+  - `rustfmt src/algorithm/blastp/alignment.rs`: passed.
+  - `cargo test --lib alignment`: 26 passed.
+  - `cargo build`: passed.
+  - `blastp` outfmt 6 vs NCBI references: unchanged at 4 mismatch cases
+    (`git diff --no-index` aggregate stayed 67 lines).
+  - `run_blastp_threads_comparison.sh`: serial/threaded mismatches 0;
+    threaded/NCBI mismatches unchanged at 4 cases.
 
 ## Phase 0: Benchmark and Timing Harness
 
@@ -226,8 +263,8 @@ Current result:
   - preliminary `GapAlignScratch`
 - `BlastIntervalTree` storage is reused per subject by resetting the same
   query/subject bounds that NCBI passes to `Blast_IntervalTreeInit`.
-- Parity gate held: outfmt 6 NCBI diff count remained 9 total lines, and
-  serial/threaded mismatches remained 0.
+- Parity gate held: outfmt 6 NCBI differences did not increase from the
+  recorded baseline, and serial/threaded mismatches remained 0.
 - Further allocation profiling is still needed before declaring Phase 2 fully
   complete.
 
@@ -264,10 +301,21 @@ Current result:
 - Added a dedicated `BlastpScoreMatrix::Blosum62` dispatch path for gapped
   alignment so the default BLOSUM62/11/1 path avoids repeated generic matrix
   dispatch in hot DP loops.
+- Added BLOSUM62-specialized instantiations for BLASTP one-hit/two-hit
+  ungapped extension helpers in `extension.rs`, matching NCBI
+  `aa_ungapped.c` matrix-access timing while removing the Rust-side matrix
+  branch from the inner residue loop.
+- Added BLOSUM62-specialized instantiations for Kappa redo identity/positive
+  recounting and preliminary gapped-start window scoring, matching NCBI
+  `blast_hits.c` and `blast_gapalign.c` matrix-access timing while removing
+  Rust-side matrix branches from those inner residue loops.
+- Added BLOSUM62-specialized instantiations for BLASTP alignment-view
+  identity/positive recounting, matching NCBI `blast_hits.c` comparison order
+  while removing the Rust-side matrix branch from that recount loop.
 - Parity gate held: outfmt 6 NCBI diff count remained 9 total lines, and
   serial/threaded mismatches remained 0.
-- Remaining Phase 3 candidates include ungapped extension scan helpers and any
-  Kappa redo scoring paths not already routed through direct BLOSUM62 helpers.
+- Remaining Phase 3 candidates include scanner-side score paths and release
+  timing measurements.
 - Release-build timing comparisons are still needed before declaring a measured
   speedup.
 
@@ -368,8 +416,9 @@ because the acceptance check was parity preservation, not final release timing.
 1. Phase 0 timing instrumentation. Done for BLASTP.
 2. Phase 1 multi-thread parity harness. Done for outfmt 6.
 3. Phase 2 scratch reuse. Partially done; continue allocation profiling.
-4. Phase 3 BLOSUM62 hot-loop specialization. Partially done; continue remaining
-   hot score paths and release timing.
+4. Phase 3 BLOSUM62 hot-loop specialization. Partially done; gapped alignment
+   and ungapped extension dispatch are parity-gated. Continue scanner-side hot
+   score paths, Kappa redo scoring paths, and release timing.
 5. Phase 4 compressed lookup / `blastp-fast` port. Construction tests pass;
    compressed scan and runtime support remain.
 6. Phase 5 CBS redo work only if profiling justifies it. Not started.

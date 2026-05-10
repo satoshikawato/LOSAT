@@ -33,7 +33,11 @@ use super::hsp::{
 pub(crate) use crate::core::composition_adjustment::redo_alignment::BlastRedoAlignParams;
 
 #[inline(always)]
-fn blastp_standard_score(matrix: ScoringMatrix, query_residue: u8, subject_residue: u8) -> i32 {
+fn blastp_positive_score<const BLOSUM62: bool>(
+    matrix: ScoringMatrix,
+    query_residue: u8,
+    subject_residue: u8,
+) -> bool {
     // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_hits.c:745-818
     // ```c
     // if (*q == *s)
@@ -41,10 +45,10 @@ fn blastp_standard_score(matrix: ScoringMatrix, query_residue: u8, subject_resid
     // else if (matrix[*q][*s] > 0)
     //    num_pos ++;
     // ```
-    if matrix == ScoringMatrix::Blosum62 {
-        blosum62_score_ncbistdaa_direct(query_residue, subject_residue)
+    if BLOSUM62 {
+        blosum62_score_ncbistdaa_direct(query_residue, subject_residue) > 0
     } else {
-        protein_score(matrix, query_residue, subject_residue)
+        protein_score(matrix, query_residue, subject_residue) > 0
     }
 }
 
@@ -834,6 +838,37 @@ fn recompute_num_identities(
     hsps: &mut [BlastpHsp],
     matrix: ScoringMatrix,
 ) {
+    // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_hits.c:745-818
+    // ```c
+    // if (*q == *s)
+    //    num_ident++;
+    // else if (matrix[*q][*s] > 0)
+    //    num_pos ++;
+    // ```
+    if matrix == ScoringMatrix::Blosum62 {
+        recompute_num_identities_impl::<true>(query_nomask, subject, hsps, matrix);
+    } else {
+        recompute_num_identities_impl::<false>(query_nomask, subject, hsps, matrix);
+    }
+}
+
+// NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_hits.c:746-824
+// ```c
+// static Int2
+// s_Blast_HSPGetNumIdentitiesAndPositives(const Uint1* query, const Uint1* subject,
+//                                         const BlastHSP* hsp, Int4* num_ident_ptr,
+//                                         Int4* align_length_ptr, const BlastScoreBlk* sbp,
+//                                         Int4* num_pos_ptr)
+// {
+//     ...
+// }
+// ```
+fn recompute_num_identities_impl<const BLOSUM62: bool>(
+    query_nomask: &[u8],
+    subject: &[u8],
+    hsps: &mut [BlastpHsp],
+    matrix: ScoringMatrix,
+) {
     for hsp in hsps {
         let Some(q_offset) = hsp.q_start.checked_sub(1) else {
             continue;
@@ -865,7 +900,7 @@ fn recompute_num_identities(
                             if q == s {
                                 num_ident += 1;
                                 num_positives += 1;
-                            } else if blastp_standard_score(matrix, q, s) > 0 {
+                            } else if blastp_positive_score::<BLOSUM62>(matrix, q, s) {
                                 num_positives += 1;
                             }
                             q_index += 1;
@@ -939,7 +974,7 @@ fn recompute_num_identities(
             if q == s {
                 num_ident += 1;
                 num_positives += 1;
-            } else if blastp_standard_score(matrix, q, s) > 0 {
+            } else if blastp_positive_score::<BLOSUM62>(matrix, q, s) {
                 num_positives += 1;
             }
         }

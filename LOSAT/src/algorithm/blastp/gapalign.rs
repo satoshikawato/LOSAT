@@ -97,6 +97,36 @@ fn blastp_standard_score(matrix: ScoringMatrix, query_residue: u8, subject_resid
     }
 }
 
+#[inline(always)]
+fn blastp_standard_score_impl<const BLOSUM62: bool>(
+    matrix: ScoringMatrix,
+    query_residue: u8,
+    subject_residue: u8,
+) -> i32 {
+    // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_hits.c:547-549
+    // ```c
+    // if (esp->op_type[index] == eGapAlignSub) {
+    //     sum += factor*matrix[*query & kResidueMask][*subject];
+    // }
+    // ```
+    //
+    // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_hits.c:779-790
+    // ```c
+    // if (*q == *s) {
+    //    num_ident++;
+    // }
+    // else if (NULL != matrix) {
+    //    if (matrix[*q][*s] > 0)
+    //       num_pos ++;
+    // }
+    // ```
+    if BLOSUM62 {
+        blosum62_score_ncbistdaa_direct(query_residue, subject_residue)
+    } else {
+        protein_score(matrix, query_residue, subject_residue)
+    }
+}
+
 impl BlastpScoreMatrix<'_> {
     // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_gapalign.c:737-957
     // ```c
@@ -350,6 +380,25 @@ pub(crate) enum BlastpGappedAlignmentMode {
     Restricted,
 }
 
+#[inline(always)]
+fn blastp_gapped_start_score<const BLOSUM62: bool>(
+    matrix: ScoringMatrix,
+    query_residue: u8,
+    subject_residue: u8,
+) -> i32 {
+    // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_gapalign.c:3410-3426
+    // ```c
+    // score += sbp->matrix->data[*query_var][*subject_var];
+    // ...
+    // score += sbp->matrix->data[*query_var][*subject_var];
+    // ```
+    if BLOSUM62 {
+        blosum62_score_ncbistdaa_direct(query_residue, subject_residue)
+    } else {
+        protein_score(matrix, query_residue, subject_residue)
+    }
+}
+
 // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_gapalign.c:797-808
 // ```c
 // if (num_extra_cells > gap_align->dp_mem_alloc) {
@@ -475,6 +524,42 @@ pub(crate) fn blastp_get_start_for_gapped_alignment(
     s_length: usize,
     matrix: ScoringMatrix,
 ) -> usize {
+    // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_gapalign.c:3410-3438
+    // ```c
+    // if (q_length <= HSP_MAX_WINDOW) {
+    //     max_offset = q_start + q_length/2;
+    //     return max_offset;
+    // }
+    // ...
+    // score += sbp->matrix->data[*query_var][*subject_var];
+    // ```
+    if matrix == ScoringMatrix::Blosum62 {
+        blastp_get_start_for_gapped_alignment_impl::<true>(
+            query, subject, q_start, q_length, s_start, s_length, matrix,
+        )
+    } else {
+        blastp_get_start_for_gapped_alignment_impl::<false>(
+            query, subject, q_start, q_length, s_start, s_length, matrix,
+        )
+    }
+}
+
+// NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_gapalign.c:3410-3438
+// ```c
+// if (q_length <= HSP_MAX_WINDOW) {
+//     max_offset = q_start + q_length/2;
+//     return max_offset;
+// }
+// ```
+fn blastp_get_start_for_gapped_alignment_impl<const BLOSUM62: bool>(
+    query: &[u8],
+    subject: &[u8],
+    q_start: usize,
+    q_length: usize,
+    s_start: usize,
+    s_length: usize,
+    matrix: ScoringMatrix,
+) -> usize {
     const HSP_MAX_WINDOW: usize = 11;
     if q_length <= HSP_MAX_WINDOW {
         return q_start + q_length / 2;
@@ -482,7 +567,11 @@ pub(crate) fn blastp_get_start_for_gapped_alignment(
 
     let mut score = 0i32;
     for offset in 0..HSP_MAX_WINDOW {
-        score += blastp_standard_score(matrix, query[q_start + offset], subject[s_start + offset]);
+        score += blastp_gapped_start_score::<BLOSUM62>(
+            matrix,
+            query[q_start + offset],
+            subject[s_start + offset],
+        );
     }
     let mut max_score = score;
     let mut max_offset = q_start + HSP_MAX_WINDOW - 1;
@@ -490,12 +579,13 @@ pub(crate) fn blastp_get_start_for_gapped_alignment(
 
     for index in (q_start + HSP_MAX_WINDOW)..hsp_end {
         let subject_index = s_start + (index - q_start);
-        score -= blastp_standard_score(
+        score -= blastp_gapped_start_score::<BLOSUM62>(
             matrix,
             query[index - HSP_MAX_WINDOW],
             subject[subject_index - HSP_MAX_WINDOW],
         );
-        score += blastp_standard_score(matrix, query[index], subject[subject_index]);
+        score +=
+            blastp_gapped_start_score::<BLOSUM62>(matrix, query[index], subject[subject_index]);
         if score > max_score {
             max_score = score;
             max_offset = index;
@@ -664,6 +754,45 @@ fn stats_from_edit_ops_protein(
     edit_ops: &[GapEditOp],
     matrix: ScoringMatrix,
 ) -> (usize, usize, usize, usize, usize) {
+    // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_hits.c:779-790
+    // ```c
+    // if (*q == *s) {
+    //    num_ident++;
+    // }
+    // else if (NULL != matrix) {
+    //    if (matrix[*q][*s] > 0)
+    //       num_pos ++;
+    // }
+    // ```
+    if matrix == ScoringMatrix::Blosum62 {
+        stats_from_edit_ops_protein_impl::<true>(q_seq, s_seq, q_start, s_start, edit_ops, matrix)
+    } else {
+        stats_from_edit_ops_protein_impl::<false>(q_seq, s_seq, q_start, s_start, edit_ops, matrix)
+    }
+}
+
+// NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_hits.c:767-811
+// ```c
+// for (index=0; index<esp->size; index++)
+// {
+//    align_length += esp->num[index];
+//    switch (esp->op_type[index]) {
+//    case eGapAlignSub:
+//       for (i=0; i<esp->num[index]; i++) {
+//          if (*q == *s) { num_ident++; }
+//          else if (NULL != matrix) { if (matrix[*q][*s] > 0) num_pos ++; }
+//          q++;
+//          s++;
+//       }
+// ```
+fn stats_from_edit_ops_protein_impl<const BLOSUM62: bool>(
+    q_seq: &[u8],
+    s_seq: &[u8],
+    q_start: usize,
+    s_start: usize,
+    edit_ops: &[GapEditOp],
+    matrix: ScoringMatrix,
+) -> (usize, usize, usize, usize, usize) {
     let mut num_ident = 0usize;
     let mut num_positives = 0usize;
     let mut mismatches = 0usize;
@@ -684,7 +813,7 @@ fn stats_from_edit_ops_protein(
                         num_positives += 1;
                     } else {
                         mismatches += 1;
-                        if blastp_standard_score(matrix, q, s) > 0 {
+                        if blastp_standard_score_impl::<BLOSUM62>(matrix, q, s) > 0 {
                             num_positives += 1;
                         }
                     }
@@ -2041,6 +2170,59 @@ pub(crate) fn reevaluate_blastp_hit_with_traceback(
     gap_extend: i32,
     cutoff_score: i32,
 ) -> bool {
+    // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_hits.c:547-549
+    // ```c
+    // if (esp->op_type[index] == eGapAlignSub) {
+    //     sum += factor*matrix[*query & kResidueMask][*subject];
+    // }
+    // ```
+    if matrix == ScoringMatrix::Blosum62 {
+        reevaluate_blastp_hit_with_traceback_impl::<true>(
+            hit,
+            query,
+            query_nomask,
+            subject,
+            matrix,
+            gap_open,
+            gap_extend,
+            cutoff_score,
+        )
+    } else {
+        reevaluate_blastp_hit_with_traceback_impl::<false>(
+            hit,
+            query,
+            query_nomask,
+            subject,
+            matrix,
+            gap_open,
+            gap_extend,
+            cutoff_score,
+        )
+    }
+}
+
+// NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_hits.c:523-550
+// ```c
+// score = 0;
+// sum = 0;
+// ...
+// if (esp->op_type[index] == eGapAlignSub) {
+//     sum += factor*matrix[*query & kResidueMask][*subject];
+//     query++;
+//     subject++;
+//     op_index++;
+// }
+// ```
+fn reevaluate_blastp_hit_with_traceback_impl<const BLOSUM62: bool>(
+    hit: &mut Hit,
+    query: &[u8],
+    query_nomask: &[u8],
+    subject: &[u8],
+    matrix: ScoringMatrix,
+    gap_open: i32,
+    gap_extend: i32,
+    cutoff_score: i32,
+) -> bool {
     // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_hits.c:509-510
     // ```c
     // Int2 factor = 1;
@@ -2109,7 +2291,7 @@ pub(crate) fn reevaluate_blastp_hit_with_traceback(
                     //     sum += factor*matrix[*query & kResidueMask][*subject];
                     // }
                     // ```
-                    sum += blastp_standard_score(
+                    sum += blastp_standard_score_impl::<BLOSUM62>(
                         matrix,
                         query[query_pos] & BLAST_HITS_RESIDUE_MASK,
                         subject[subject_pos],

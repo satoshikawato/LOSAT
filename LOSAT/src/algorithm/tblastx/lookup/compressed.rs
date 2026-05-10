@@ -199,8 +199,7 @@ impl BlastCompressedAaLookupTable {
     fn compressed_list_get_new_cell(&mut self) -> usize {
         let cell_index = self.overflow_cells.len();
         assert!(
-            cell_index
-                < COMPRESSED_OVERFLOW_CELLS_IN_BANK * COMPRESSED_OVERFLOW_MAX_BANKS,
+            cell_index < COMPRESSED_OVERFLOW_CELLS_IN_BANK * COMPRESSED_OVERFLOW_MAX_BANKS,
             "NCBI BLAST compressed overflow bank capacity exceeded"
         );
         self.overflow_cells.push(CompressedOverflowCell::default());
@@ -486,7 +485,12 @@ impl BlastCompressedAaLookupTable {
     //     }
     // }
     // ```
-    pub fn add_neighboring_words(&mut self, matrix: &[Vec<i32>], query: &[u8], locations: &[(i32, i32)]) {
+    pub fn add_neighboring_words(
+        &mut self,
+        matrix: &[Vec<i32>],
+        query: &[u8],
+        locations: &[(i32, i32)],
+    ) {
         let info = CompressedNeighborInfo::new(matrix, self.compressed_alphabet_size as usize);
         let word_size = self.word_length;
         for &(left, right) in locations {
@@ -880,8 +884,7 @@ pub fn build_blosum62_compressed_lookup(
     locations: &[(i32, i32)],
 ) -> Option<BlastCompressedAaLookupTable> {
     let mut lookup = BlastCompressedAaLookupTable::new(word_size, threshold)?;
-    let matrix =
-        build_blosum62_compressed_score_matrix(lookup.compressed_alphabet_size as usize)?;
+    let matrix = build_blosum62_compressed_score_matrix(lookup.compressed_alphabet_size as usize)?;
     lookup.add_neighboring_words(&matrix, query, locations);
     lookup.finalize();
     Some(lookup)

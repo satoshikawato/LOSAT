@@ -1642,7 +1642,15 @@ mod tests {
 
     #[test]
     fn test_subject_seg_masks_when_enabled_and_not_near_identical() {
-        let matching_seq = BlastCompoMatchingSequence::new(0, &vec![1u8; 80]);
+        // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_kappa.c:2939-2955
+        // ```c
+        // while (allMatches) {
+        //     matchingSeq = allMatches->matchingSeq;
+        //     allMatches = allMatches->next;
+        // }
+        // ```
+        let matching_residues = vec![1u8; 80];
+        let matching_seq = BlastCompoMatchingSequence::new(0, &matching_residues);
         let subject_range = BlastCompoSequenceRange {
             begin: 0,
             end: 80,

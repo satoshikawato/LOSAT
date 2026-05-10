@@ -181,6 +181,24 @@ impl BlastIntervalTree {
         }
     }
 
+    /// Reset the tree bounds for reuse.
+    ///
+    /// NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_itree.c:146-170
+    /// ```c
+    /// Blast_IntervalTreeInit(Int4 q_start, Int4 q_end,
+    ///                        Int4 s_start, Int4 s_end)
+    /// ...
+    /// tree->s_min = s_start;
+    /// tree->s_max = s_end;
+    /// s_IntervalRootNodeInit(tree, q_start, q_end, &retval);
+    /// ```
+    pub fn reset_with_bounds(&mut self, q_min: i32, q_max: i32, s_min: i32, s_max: i32) {
+        self.s_min = s_min;
+        self.s_max = s_max;
+        self.nodes.clear();
+        self.nodes.push(IntervalNode::new_internal(q_min, q_max));
+    }
+
     /// Allocate a new internal node
     /// NCBI reference: blast_itree.c:57-112 s_IntervalNodeInit
     ///

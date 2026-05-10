@@ -75,6 +75,11 @@ const RESTRICT_SIZE: usize = 10;
 // ```
 #[derive(Clone, Copy)]
 enum BlastpScoreMatrix<'a> {
+    // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_gapalign.c:737-957
+    // ```c
+    // next_score = score_array[b_index].best + matrix_row[*b_ptr];
+    // ```
+    Blosum62,
     Standard(ScoringMatrix),
     Adjusted(&'a AdjustedProteinMatrix),
 }
@@ -93,6 +98,19 @@ fn blastp_standard_score(matrix: ScoringMatrix, query_residue: u8, subject_resid
 }
 
 impl BlastpScoreMatrix<'_> {
+    // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_gapalign.c:737-957
+    // ```c
+    // next_score = score_array[b_index].best + matrix_row[*b_ptr];
+    // ```
+    #[inline]
+    fn standard(matrix: ScoringMatrix) -> Self {
+        if matrix == ScoringMatrix::Blosum62 {
+            Self::Blosum62
+        } else {
+            Self::Standard(matrix)
+        }
+    }
+
     #[inline]
     fn score(self, query_residue: u8, subject_residue: u8) -> i32 {
         // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_gapalign.c:830-831
@@ -107,6 +125,7 @@ impl BlastpScoreMatrix<'_> {
         // score += sbp->matrix->data[*query_var][*subject_var];
         // ```
         match self {
+            Self::Blosum62 => blosum62_score_ncbistdaa_direct(query_residue, subject_residue),
             Self::Standard(matrix) => blastp_standard_score(matrix, query_residue, subject_residue),
             Self::Adjusted(matrix) => matrix.score(query_residue, subject_residue),
         }
@@ -1518,7 +1537,7 @@ pub(crate) fn blast_gapped_alignment_with_traceback(
         return None;
     }
 
-    let score_matrix = adjusted_matrix.map_or(BlastpScoreMatrix::Standard(matrix), |matrix| {
+    let score_matrix = adjusted_matrix.map_or(BlastpScoreMatrix::standard(matrix), |matrix| {
         BlastpScoreMatrix::Adjusted(matrix)
     });
 
@@ -1718,7 +1737,7 @@ pub(crate) fn blastp_score_only_gapped_alignment_with_scratch(
             subject_shift,
             q_length,
             subject_offset,
-            BlastpScoreMatrix::Standard(matrix),
+            BlastpScoreMatrix::standard(matrix),
             gap_open,
             gap_extend,
             x_drop,
@@ -1732,7 +1751,7 @@ pub(crate) fn blastp_score_only_gapped_alignment_with_scratch(
             subject_shift,
             q_length,
             subject_offset,
-            BlastpScoreMatrix::Standard(matrix),
+            BlastpScoreMatrix::standard(matrix),
             gap_open,
             gap_extend,
             x_drop,
@@ -1769,7 +1788,7 @@ pub(crate) fn blastp_score_only_gapped_alignment_with_scratch(
                     s_start,
                     query.len() - q_length,
                     subject_length - subject_offset,
-                    BlastpScoreMatrix::Standard(matrix),
+                    BlastpScoreMatrix::standard(matrix),
                     gap_open,
                     gap_extend,
                     x_drop,
@@ -1783,7 +1802,7 @@ pub(crate) fn blastp_score_only_gapped_alignment_with_scratch(
                     s_start,
                     query.len() - q_length,
                     subject_length - subject_offset,
-                    BlastpScoreMatrix::Standard(matrix),
+                    BlastpScoreMatrix::standard(matrix),
                     gap_open,
                     gap_extend,
                     x_drop,
@@ -2287,6 +2306,23 @@ mod tests {
     use crate::utils::matrix::{aa_char_to_ncbistdaa, ncbistdaa};
     use crate::utils::seg::{SegMasker, SegParams};
     use std::fs;
+
+    // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_kappa.c:551-572
+    // ```c
+    // s_CalcLambda(double probs[], int min_score, int max_score, double lambda0)
+    // {
+    //     return Blast_KarlinLambdaNR(&freq, lambda0);
+    // }
+    // ```
+    fn test_compute_lambda_from_score_probs(
+        score_probs: &[f64],
+        min_score: i32,
+        max_score: i32,
+        lambda0: f64,
+    ) -> anyhow::Result<f64> {
+        compute_lambda_from_score_probs(score_probs, min_score, max_score, lambda0)
+            .map_err(anyhow::Error::msg)
+    }
 
     fn fasta_sequence_by_id(contents: &str, wanted_id: &str) -> Vec<u8> {
         let mut current_id = None::<&str>;
@@ -2887,7 +2923,7 @@ mod tests {
             BlastCompoAdjustMode::CompositionMatrixAdjust,
             0,
             &mut composition_workspace,
-            compute_lambda_from_score_probs,
+            test_compute_lambda_from_score_probs,
         )
         .unwrap()
         .expect("adjusted matrix");
@@ -2982,7 +3018,7 @@ mod tests {
             BlastCompoAdjustMode::CompositionMatrixAdjust,
             0,
             &mut composition_workspace,
-            compute_lambda_from_score_probs,
+            test_compute_lambda_from_score_probs,
         )
         .unwrap()
         .expect("adjusted matrix");

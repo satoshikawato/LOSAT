@@ -2037,7 +2037,15 @@ mod tests {
             eff_search_space: 1.0,
             words: None,
         };
-        let matching_seq = BlastCompoMatchingSequence::new(0, &vec![1u8; 100]);
+        // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_kappa.c:2939-2955
+        // ```c
+        // while (allMatches) {
+        //     matchingSeq = allMatches->matchingSeq;
+        //     allMatches = allMatches->next;
+        // }
+        // ```
+        let matching_residues = vec![1u8; 100];
+        let matching_seq = BlastCompoMatchingSequence::new(0, &matching_residues);
         let params = BlastRedoAlignParams {
             matrix_info: crate::core::composition_adjustment::adjust_scores::build_matrix_info(
                 crate::config::ScoringMatrix::Blosum62,

@@ -9,7 +9,11 @@ use rayon::prelude::*;
 use std::fs::File;
 use std::io::{BufWriter, Write};
 use std::path::{Path, PathBuf};
-use std::sync::Arc;
+use std::sync::{
+    atomic::{AtomicU64, Ordering as AtomicOrdering},
+    Arc,
+};
+use std::time::Instant;
 
 use crate::algorithm::blastn::interval_tree::{BlastIntervalTree, IndexMethod, TreeHsp};
 use crate::algorithm::tblastx::blast_aascan::{
@@ -139,10 +143,244 @@ struct BlastpSubjectScratch {
     offset_pairs: Vec<OffsetPair>,
     diag_array: Vec<DiagStruct>,
     diag_offset: i32,
+    // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_extend.c:253-267
+    // ```c
+    // BlastInitHitList* BLAST_InitHitListNew(void)
+    // {
+    //     BlastInitHitList* init_hitlist = calloc(1, sizeof(BlastInitHitList));
+    //     init_hitlist->allocated = INIT_HSP_ALLOC_NUM;
+    //     init_hitlist->init_hsp_array =
+    //         malloc(init_hitlist->allocated * sizeof(BlastInitHSP));
+    // }
+    // ```
+    init_hsps: Vec<InitHSP>,
+    // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_gapalign.c:3524-3527
+    // ```c
+    // Int4 i = 0, k;
+    // BlastInitHSPNode* nodes = gap_align->chaining->nodes;
+    // ```
+    chaining_nodes: Vec<BlastpInitHspNode>,
+    // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_gapalign.c:3628-3633
+    // ```c
+    // if (nodes[k].best_score - gap_score + ... < ...) {
+    //     nodes[k].init_hsp->ungapped_data = NULL;
+    // }
+    // ```
+    chaining_keep: Vec<bool>,
+    // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_gapalign.c:3971-4008
+    // ```c
+    // BlastHSPList* new_hsp_list = Blast_HSPListNew(kHspNumMax);
+    // ...
+    // Blast_HSPListFree(hsp_list);
+    // hsp_list = new_hsp_list;
+    // ```
+    preliminary_hsp_list: Vec<BlastpPreliminaryHsp>,
+    // NCBI reference: ncbi-blast/c++/src/algo/blast/core/hspfilter_collector.c:117-149
+    // ```c
+    // query_index = Blast_GetQueryIndexFromContext(hsp->context, program);
+    // ...
+    // Blast_HSPListSaveHSP(tmp_hsp_list, hsp);
+    // ```
+    preliminary_hits_by_query: Vec<Vec<BlastpPreliminaryHsp>>,
+    // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_gapalign.c:3748-3786
+    // ```c
+    // found[query_index] = TRUE;
+    // restricted_align_array[query_index] =
+    //     init_hsp->ungapped_data->score < reduced_cutoff;
+    // ```
+    restricted_align_found: Vec<bool>,
+    restricted_align_array: Vec<bool>,
+    // NCBI reference: ncbi-blast/c++/include/algo/blast/core/blast_gapalign.h:69-80
+    // ```c
+    // BlastGapDP* dp_mem; /**< scratch structures for dynamic programming */
+    // Int4 dp_mem_alloc;  /**< current number of structures allocated */
+    // ```
+    preliminary_gap_scratch: GapAlignScratch,
+    // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_gapalign.c:3830-3831
+    // ```c
+    // tree = Blast_IntervalTreeInit(0, query->length+1,
+    //                               0, subject->length+1);
+    // ```
+    preliminary_interval_tree: BlastIntervalTree,
+}
+
+// NCBI reference: /mnt/c/Users/genom/GitHub/ncbi-blast/c++/src/algo/blast/core/blast_engine.c:1633-1681
+// ```c
+// BLAST_GapAlignSetUp(..., &score_params, &ext_params,
+//                     &hit_params, &eff_len_params, &gap_align);
+// BLAST_PreliminarySearchEngine(program, query, query_info,
+//                               seq_src, gap_align, score_params,
+//                               lookup_wrap, word_options, ext_params,
+//                               hit_params, eff_len_params, ...);
+// ```
+//
+// NCBI reference: /mnt/c/Users/genom/GitHub/ncbi-blast/c++/src/algo/blast/core/blast_engine.c:1409-1554
+// ```c
+// while ((seq_arg.oid = BlastSeqSrcIteratorNext(seq_src, itr)) != BLAST_SEQSRC_EOF) {
+//     status = s_BlastSearchEngineCore(..., &hsp_list, ...);
+//     status = BlastHSPStreamWrite(hsp_stream, &hsp_list);
+// }
+// ```
+struct BlastpTiming {
+    query_encoding_ns: AtomicU64,
+    subject_encoding_ns: AtomicU64,
+    lookup_ns: AtomicU64,
+    scan_ungapped_ns: AtomicU64,
+    scan_ungapped_calls: AtomicU64,
+    preliminary_gapped_ns: AtomicU64,
+    preliminary_gapped_calls: AtomicU64,
+    prelim_merge_sort_ns: AtomicU64,
+    prelim_merge_sort_calls: AtomicU64,
+    kappa_redo_ns: AtomicU64,
+    kappa_redo_calls: AtomicU64,
+    final_traceback_ns: AtomicU64,
+    final_traceback_calls: AtomicU64,
+    output_format_ns: AtomicU64,
+    output_format_calls: AtomicU64,
+}
+
+impl BlastpTiming {
+    fn new() -> Self {
+        Self {
+            query_encoding_ns: AtomicU64::new(0),
+            subject_encoding_ns: AtomicU64::new(0),
+            lookup_ns: AtomicU64::new(0),
+            scan_ungapped_ns: AtomicU64::new(0),
+            scan_ungapped_calls: AtomicU64::new(0),
+            preliminary_gapped_ns: AtomicU64::new(0),
+            preliminary_gapped_calls: AtomicU64::new(0),
+            prelim_merge_sort_ns: AtomicU64::new(0),
+            prelim_merge_sort_calls: AtomicU64::new(0),
+            kappa_redo_ns: AtomicU64::new(0),
+            kappa_redo_calls: AtomicU64::new(0),
+            final_traceback_ns: AtomicU64::new(0),
+            final_traceback_calls: AtomicU64::new(0),
+            output_format_ns: AtomicU64::new(0),
+            output_format_calls: AtomicU64::new(0),
+        }
+    }
+
+    #[inline]
+    fn record_duration(counter: &AtomicU64, start: Option<Instant>) {
+        if let Some(start) = start {
+            let elapsed_ns = start.elapsed().as_nanos().min(u64::MAX as u128) as u64;
+            counter.fetch_add(elapsed_ns, AtomicOrdering::Relaxed);
+        }
+    }
+
+    #[inline]
+    fn record_call(counter: &AtomicU64, calls: &AtomicU64, start: Option<Instant>) {
+        Self::record_duration(counter, start);
+        calls.fetch_add(1, AtomicOrdering::Relaxed);
+    }
+
+    #[inline]
+    fn seconds(counter: &AtomicU64) -> f64 {
+        counter.load(AtomicOrdering::Relaxed) as f64 / 1e9
+    }
+
+    #[inline]
+    fn calls(counter: &AtomicU64) -> u64 {
+        counter.load(AtomicOrdering::Relaxed)
+    }
+}
+
+// NCBI reference: /mnt/c/Users/genom/GitHub/ncbi-blast/c++/src/algo/blast/core/blast_engine.c:1470-1475
+// ```c
+// status = s_BlastSearchEngineCore(program_number, query, query_info,
+//                                  seq_arg.seq, lookup_wrap, gap_align,
+//                                  score_params, word_params, ext_params,
+//                                  hit_params, db_options, diagnostics,
+//                                  aux_struct, &hsp_list, ...);
+// ```
+#[inline]
+fn blastp_timing_start(enabled: bool) -> Option<Instant> {
+    if enabled {
+        Some(Instant::now())
+    } else {
+        None
+    }
+}
+
+// NCBI reference: /mnt/c/Users/genom/GitHub/ncbi-blast/c++/src/algo/blast/core/blast_engine.c:1674-1681
+// ```c
+// status = BLAST_PreliminarySearchEngine(program, query, query_info,
+//                                       seq_src, gap_align, score_params,
+//                                       lookup_wrap, word_options,
+//                                       ext_params, hit_params, eff_len_params,
+//                                       psi_options, db_options, hsp_stream, ...);
+// ```
+#[inline]
+fn blastp_timing_env_enabled() -> bool {
+    #[cfg(target_arch = "wasm32")]
+    {
+        false
+    }
+    #[cfg(not(target_arch = "wasm32"))]
+    {
+        std::env::var_os("LOSAT_TIMING").is_some()
+    }
+}
+
+// NCBI reference: /mnt/c/Users/genom/GitHub/ncbi-blast/c++/src/algo/blast/core/blast_engine.c:1633-1705
+// ```c
+// BLAST_GapAlignSetUp(...);
+// BLAST_PreliminarySearchEngine(...);
+// Blast_DiagnosticsUpdate(diagnostics, local_diagnostics);
+// ```
+fn print_blastp_timing(timing: &BlastpTiming, total_start: Option<Instant>) {
+    eprintln!(
+        "[TIMING] blastp_query_encoding_seg: {:.3}s",
+        BlastpTiming::seconds(&timing.query_encoding_ns)
+    );
+    eprintln!(
+        "[TIMING] blastp_subject_encoding: {:.3}s",
+        BlastpTiming::seconds(&timing.subject_encoding_ns)
+    );
+    eprintln!(
+        "[TIMING] blastp_build_lookup: {:.3}s",
+        BlastpTiming::seconds(&timing.lookup_ns)
+    );
+    eprintln!(
+        "[TIMING] blastp_scan_ungapped: {:.3}s (calls={})",
+        BlastpTiming::seconds(&timing.scan_ungapped_ns),
+        BlastpTiming::calls(&timing.scan_ungapped_calls)
+    );
+    eprintln!(
+        "[TIMING] blastp_prelim_gapped: {:.3}s (calls={})",
+        BlastpTiming::seconds(&timing.preliminary_gapped_ns),
+        BlastpTiming::calls(&timing.preliminary_gapped_calls)
+    );
+    eprintln!(
+        "[TIMING] blastp_prelim_merge_sort: {:.3}s (calls={})",
+        BlastpTiming::seconds(&timing.prelim_merge_sort_ns),
+        BlastpTiming::calls(&timing.prelim_merge_sort_calls)
+    );
+    eprintln!(
+        "[TIMING] blastp_kappa_redo: {:.3}s (calls={})",
+        BlastpTiming::seconds(&timing.kappa_redo_ns),
+        BlastpTiming::calls(&timing.kappa_redo_calls)
+    );
+    eprintln!(
+        "[TIMING] blastp_final_traceback_stats: {:.3}s (calls={})",
+        BlastpTiming::seconds(&timing.final_traceback_ns),
+        BlastpTiming::calls(&timing.final_traceback_calls)
+    );
+    eprintln!(
+        "[TIMING] blastp_output_format: {:.3}s (calls={})",
+        BlastpTiming::seconds(&timing.output_format_ns),
+        BlastpTiming::calls(&timing.output_format_calls)
+    );
+    if let Some(total_start) = total_start {
+        eprintln!(
+            "[TIMING] blastp_total: {:.3}s",
+            total_start.elapsed().as_secs_f64()
+        );
+    }
 }
 
 impl BlastpSubjectScratch {
-    fn new(offset_array_size: i32, diag_array_size: i32, window: i32) -> Self {
+    fn new(offset_array_size: i32, diag_array_size: i32, window: i32, query_span: i32) -> Self {
         Self {
             offset_pairs: vec![
                 OffsetPair::default();
@@ -155,6 +393,34 @@ impl BlastpSubjectScratch {
                     .expect("NCBI BLAST diagonal array size must fit in usize")
             ],
             diag_offset: window,
+            // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_extend.c:253-267
+            // ```c
+            // init_hitlist->init_hsp_array =
+            //     malloc(init_hitlist->allocated * sizeof(BlastInitHSP));
+            // ```
+            init_hsps: Vec::new(),
+            // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_gapalign.c:3524-3527
+            // ```c
+            // BlastInitHSPNode* nodes = gap_align->chaining->nodes;
+            // ```
+            chaining_nodes: Vec::new(),
+            chaining_keep: Vec::new(),
+            // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_gapalign.c:3971-3975
+            // ```c
+            // BlastHSPList* new_hsp_list = Blast_HSPListNew(kHspNumMax);
+            // Blast_IntervalTreeReset(tree);
+            // ```
+            preliminary_hsp_list: Vec::new(),
+            preliminary_hits_by_query: Vec::new(),
+            restricted_align_found: Vec::new(),
+            restricted_align_array: Vec::new(),
+            preliminary_gap_scratch: GapAlignScratch::new(),
+            // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_gapalign.c:3830-3831
+            // ```c
+            // tree = Blast_IntervalTreeInit(0, query->length+1,
+            //                               0, subject->length+1);
+            // ```
+            preliminary_interval_tree: BlastIntervalTree::new(0, query_span, 0, 1),
         }
     }
 
@@ -168,6 +434,32 @@ impl BlastpSubjectScratch {
     fn prepare_independent_subject(&mut self, diag_offset: i32) {
         self.diag_offset = diag_offset;
         self.diag_array.fill(DiagStruct::default());
+        // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_extend.c:229-235
+        // ```c
+        // for (index = 0; index < init_hitlist->total; ++index)
+        //     sfree(init_hitlist->init_hsp_array[index].ungapped_data);
+        // init_hitlist->total = 0;
+        // ```
+        self.init_hsps.clear();
+        // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_gapalign.c:3524-3578
+        // ```c
+        // BlastInitHSPNode* nodes = gap_align->chaining->nodes;
+        // nodes[num_nodes].init_hsp = &init_array[i];
+        // ```
+        self.chaining_nodes.clear();
+        self.chaining_keep.clear();
+        // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_gapalign.c:3971-3975
+        // ```c
+        // BlastHSPList* new_hsp_list = Blast_HSPListNew(kHspNumMax);
+        // Blast_IntervalTreeReset(tree);
+        // ```
+        self.preliminary_hsp_list.clear();
+        for query_hits in &mut self.preliminary_hits_by_query {
+            query_hits.clear();
+        }
+        self.restricted_align_found.clear();
+        self.restricted_align_array.clear();
+        self.preliminary_interval_tree.reset();
     }
 
     // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_extend.c:152-169
@@ -1667,8 +1959,43 @@ fn build_restricted_align_array(
     hit_cutoff_scores: &[i32],
     num_queries: usize,
 ) -> Vec<bool> {
-    let mut found = vec![false; num_queries];
-    let mut restricted = vec![false; num_queries];
+    let mut found = Vec::new();
+    let mut restricted = Vec::new();
+    build_restricted_align_array_into(
+        init_hsps,
+        lookup,
+        contexts,
+        hit_cutoff_scores,
+        num_queries,
+        &mut found,
+        &mut restricted,
+    );
+    restricted
+}
+
+// NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_gapalign.c:3748-3786
+// ```c
+// found[query_index] = TRUE;
+// if (init_hsp->ungapped_data && init_hsp->ungapped_data->score <
+//     (Int4)(kRestrictedMult * hit_params->cutoffs[contxt].cutoff_score)) {
+//     restricted_align_array[query_index] = TRUE;
+// } else {
+//     restricted_align_array[query_index] = FALSE;
+// }
+// ```
+fn build_restricted_align_array_into(
+    init_hsps: &[InitHSP],
+    lookup: &BlastAaLookupTable,
+    contexts: &[QueryContext],
+    hit_cutoff_scores: &[i32],
+    num_queries: usize,
+    found: &mut Vec<bool>,
+    restricted: &mut Vec<bool>,
+) {
+    found.clear();
+    found.resize(num_queries, false);
+    restricted.clear();
+    restricted.resize(num_queries, false);
     for init_hsp in init_hsps {
         // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_gapalign.c:3753-3765
         // ```c
@@ -1689,7 +2016,6 @@ fn build_restricted_align_array(
         restricted[query_index] = init_hsp.ungapped_data.score
             < (BLASTP_RESTRICTED_MULT * hit_cutoff_scores[context_idx] as f64) as i32;
     }
-    restricted
 }
 
 #[derive(Clone, Copy, Debug, Default)]
@@ -1851,6 +2177,8 @@ fn chain_blastp_init_hsps(
     hit_cutoff_scores: &[i32],
     gap_open: i32,
     gap_extend: i32,
+    keep: &mut Vec<bool>,
+    nodes: &mut Vec<BlastpInitHspNode>,
 ) -> Vec<InitHSP> {
     if init_hsps.len() <= 1 {
         return init_hsps;
@@ -1859,7 +2187,13 @@ fn chain_blastp_init_hsps(
     let gap_score = gap_open + gap_extend;
     ncbi_qsort_init_hsps_by_query_offset_score(&mut init_hsps);
 
-    let mut keep = vec![true; init_hsps.len()];
+    // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_gapalign.c:3524-3527
+    // ```c
+    // Int4 i = 0, k;
+    // BlastInitHSPNode* nodes = gap_align->chaining->nodes;
+    // ```
+    keep.clear();
+    keep.resize(init_hsps.len(), true);
     let mut i = 0usize;
     let mut context_idx = 0usize;
     while i < init_hsps.len() {
@@ -1893,13 +2227,18 @@ fn chain_blastp_init_hsps(
         }
         let end = i;
 
-        let mut nodes: Vec<BlastpInitHspNode> = (start..end)
-            .map(|init_index| BlastpInitHspNode {
-                init_index,
-                best_score: init_hsps[init_index].ungapped_data.score,
-                next_index: None,
-            })
-            .collect();
+        // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_gapalign.c:3551-3578
+        // ```c
+        // nodes[num_nodes].init_hsp = &init_array[i];
+        // nodes[num_nodes].best_score = init_array[i].ungapped_data->score;
+        // num_nodes++;
+        // ```
+        nodes.clear();
+        nodes.extend((start..end).map(|init_index| BlastpInitHspNode {
+            init_index,
+            best_score: init_hsps[init_index].ungapped_data.score,
+            next_index: None,
+        }));
 
         for k in (0..nodes.len()).rev() {
             let self_score = nodes[k].best_score;
@@ -1925,7 +2264,7 @@ fn chain_blastp_init_hsps(
             }
         }
 
-        for node in nodes {
+        for node in nodes.iter() {
             if node.best_score - gap_score + word_cutoff_scores[context_idx] - 1
                 < hit_cutoff_scores[context_idx]
             {
@@ -1938,7 +2277,7 @@ fn chain_blastp_init_hsps(
     // ```c
     // Blast_InitHitListSortByScore(init_hitlist);
     // ```
-    compact_chained_init_hsps_ncbi(&mut init_hsps, &mut keep);
+    compact_chained_init_hsps_ncbi(&mut init_hsps, keep);
     ncbi_qsort_init_hsps_by_score(&mut init_hsps);
     init_hsps
 }
@@ -2175,11 +2514,22 @@ fn purge_preliminary_hits_with_common_endpoints(
 fn prepare_preliminary_hits_for_kappa(
     mut hits: Vec<BlastpPreliminaryHsp>,
 ) -> Vec<BlastpPreliminaryHsp> {
-    hits = purge_preliminary_hits_with_common_endpoints(hits);
-    if !preliminary_hits_is_sorted_by_score_ncbi(&hits) {
-        ncbi_qsort_preliminary_hits(&mut hits, preliminary_score_compare);
-    }
+    prepare_preliminary_hits_for_kappa_in_place(&mut hits);
     hits
+}
+
+// NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_engine.c:540-555
+// ```c
+// Blast_HSPListPurgeHSPsWithCommonEndpoints(program_number, hsp_list, TRUE);
+// ...
+// Blast_HSPListSortByScore(hsp_list);
+// ```
+fn prepare_preliminary_hits_for_kappa_in_place(hits: &mut Vec<BlastpPreliminaryHsp>) {
+    let purged = purge_preliminary_hits_with_common_endpoints(std::mem::take(hits));
+    *hits = purged;
+    if !preliminary_hits_is_sorted_by_score_ncbi(hits) {
+        ncbi_qsort_preliminary_hits(hits, preliminary_score_compare);
+    }
 }
 
 // NCBI reference: ncbi-blast/c++/src/algo/blast/core/hspfilter_collector.c:117-149
@@ -2194,14 +2544,41 @@ fn split_preliminary_hits_by_query(
     num_queries: usize,
 ) -> Vec<Vec<BlastpPreliminaryHsp>> {
     let mut hits_by_query = vec![Vec::new(); num_queries];
-    for preliminary_hsp in preliminary_hits {
+    let mut preliminary_hits = preliminary_hits;
+    split_preliminary_hits_by_query_into(
+        &mut preliminary_hits,
+        contexts,
+        num_queries,
+        &mut hits_by_query,
+    );
+    hits_by_query
+}
+
+// NCBI reference: ncbi-blast/c++/src/algo/blast/core/hspfilter_collector.c:117-149
+// ```c
+// query_index = Blast_GetQueryIndexFromContext(hsp->context, program);
+// ...
+// Blast_HSPListSaveHSP(tmp_hsp_list, hsp);
+// ```
+fn split_preliminary_hits_by_query_into(
+    preliminary_hits: &mut Vec<BlastpPreliminaryHsp>,
+    contexts: &[QueryContext],
+    num_queries: usize,
+    hits_by_query: &mut Vec<Vec<BlastpPreliminaryHsp>>,
+) {
+    if hits_by_query.len() < num_queries {
+        hits_by_query.resize_with(num_queries, Vec::new);
+    }
+    for query_hits in hits_by_query.iter_mut() {
+        query_hits.clear();
+    }
+    for preliminary_hsp in preliminary_hits.drain(..) {
         let query_index =
             blastp_query_index_from_preliminary_context(contexts, preliminary_hsp.query_context);
         if query_index < num_queries {
             hits_by_query[query_index].push(preliminary_hsp);
         }
     }
-    hits_by_query
 }
 
 // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_gapalign.c:3975-3997
@@ -2649,6 +3026,21 @@ fn run_resolved_with_records(
     subject_label: &str,
     mut in_memory_output: Option<&mut Vec<u8>>,
 ) -> Result<()> {
+    // NCBI reference: /mnt/c/Users/genom/GitHub/ncbi-blast/c++/src/algo/blast/core/blast_engine.c:1633-1681
+    // ```c
+    // BLAST_GapAlignSetUp(...);
+    // BLAST_PreliminarySearchEngine(program, query, query_info,
+    //                               seq_src, gap_align, score_params,
+    //                               lookup_wrap, word_options, ext_params, ...);
+    // ```
+    let timing_enabled = blastp_timing_env_enabled();
+    let t_total = blastp_timing_start(timing_enabled);
+    let timing = if timing_enabled {
+        Some(Arc::new(BlastpTiming::new()))
+    } else {
+        None
+    };
+
     let (outfmt, custom_fields) = OutputFormat::parse(&args.outfmt).map_err(anyhow::Error::msg)?;
     if outfmt == OutputFormat::Pairwise && custom_fields.is_some() {
         bail!("blastp outfmt 0 does not accept custom field lists");
@@ -2670,6 +3062,7 @@ fn run_resolved_with_records(
         .map(|record| record.desc().map(str::to_string))
         .collect();
 
+    let query_encoding_start = blastp_timing_start(timing_enabled);
     let seg_params = args.seg.params();
     let query_frames: Vec<Vec<QueryFrame>> = query_records
         .iter()
@@ -2680,11 +3073,20 @@ fn run_resolved_with_records(
             )]
         })
         .collect();
+    if let Some(timing) = timing.as_ref() {
+        BlastpTiming::record_duration(&timing.query_encoding_ns, query_encoding_start);
+    }
+
+    let subject_encoding_start = blastp_timing_start(timing_enabled);
     let subjects: Vec<EncodedProtein> = subject_records
         .iter()
         .map(|record| encode_protein_sequence(record.seq()))
         .collect();
+    if let Some(timing) = timing.as_ref() {
+        BlastpTiming::record_duration(&timing.subject_encoding_ns, subject_encoding_start);
+    }
 
+    let lookup_start = blastp_timing_start(timing_enabled);
     let lookup_ideal_params = lookup_protein_params_ungapped(args.scoring.matrix);
     // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_stat.c:2833-2852
     // ```c
@@ -2731,6 +3133,9 @@ fn run_resolved_with_records(
         false,
     );
     let concatenated_query = build_blastp_concatenated_query(&contexts);
+    if let Some(timing) = timing.as_ref() {
+        BlastpTiming::record_duration(&timing.lookup_ns, lookup_start);
+    }
 
     // NCBI reference: /mnt/c/Users/genom/GitHub/ncbi-blast/c++/src/algo/blast/core/blast_setup.c:766-769
     // ```c
@@ -2885,17 +3290,16 @@ fn run_resolved_with_records(
         // curr_cutoffs->cutoff_score = MIN(gap_trigger,
         //                                  hit_params->cutoffs[context].cutoff_score_max);
         // ```
-        // NCBI reference: /mnt/c/Users/genom/GitHub/ncbi-blast/c++/src/algo/blast/core/blast_gapalign.c:3826-3837
+        // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_extend.c:253-267
         // ```c
-        // tree = Blast_IntervalTreeInit(0, query->length+1,
-        //                               0, subject->length+1);
+        // init_hitlist->init_hsp_array =
+        //     malloc(init_hitlist->allocated * sizeof(BlastInitHSP));
         // ```
-        let mut interval_tree =
-            BlastIntervalTree::new(0, total_query_span, 0, subject.aa_len as i32 + 1);
-
-        let mut init_hsps: Vec<InitHSP> = Vec::new();
+        let mut init_hsps = std::mem::take(&mut scratch.init_hsps);
+        init_hsps.clear();
         let subject_diag_offset = scratch.diag_offset;
 
+        let scan_ungapped_start = blastp_timing_start(timing_enabled);
         blastp_for_each_offset_pair(
             &lookup,
             subject_sequence,
@@ -3140,6 +3544,20 @@ fn run_resolved_with_records(
         // }
         // ```
         scratch.finish_subject(subject.aa_len, window);
+        // NCBI reference: /mnt/c/Users/genom/GitHub/ncbi-blast/c++/src/algo/blast/core/blast_gapalign.c:3826-3837
+        // ```c
+        // tree = Blast_IntervalTreeInit(0, query->length+1,
+        //                               0, subject->length+1);
+        // ```
+        let interval_tree = &mut scratch.preliminary_interval_tree;
+        interval_tree.reset_with_bounds(0, total_query_span, 0, subject.aa_len as i32 + 1);
+        if let Some(timing) = timing.as_ref() {
+            BlastpTiming::record_call(
+                &timing.scan_ungapped_ns,
+                &timing.scan_ungapped_calls,
+                scan_ungapped_start,
+            );
+        }
         // NCBI reference: ncbi-blast/c++/src/algo/blast/core/aa_ungapped.c:228-234
         // ```c
         // Blast_InitHitListSortByScore(init_hitlist);
@@ -3161,11 +3579,22 @@ fn run_resolved_with_records(
                 &hit_cutoff_scores,
                 args.scoring.gap_open,
                 args.scoring.gap_extend,
+                &mut scratch.chaining_keep,
+                &mut scratch.chaining_nodes,
             )
         } else {
             init_hsps
         };
-        let mut restricted_align_array = if blastp_restricted_align_enabled(args.evalue) {
+        // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_gapalign.c:3735-3789
+        // ```c
+        // restricted_align_array = calloc(...);
+        // for (i = 0;i < init_hitlist->total;i++) {
+        //     init_hsp = &init_hitlist->init_hsp_array[i];
+        //     ...
+        // }
+        // ```
+        let mut restricted_align_array = std::mem::take(&mut scratch.restricted_align_array);
+        if blastp_restricted_align_enabled(args.evalue) {
             // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_gapalign.c:3735-3789
             // ```c
             // if (hit_params->restricted_align && !score_params->options->is_ooframe) {
@@ -3176,16 +3605,19 @@ fn run_resolved_with_records(
             //     }
             // }
             // ```
-            build_restricted_align_array(
+            build_restricted_align_array_into(
                 &init_hsps,
                 &lookup,
                 &contexts,
                 &hit_cutoff_scores,
                 query_ids.len(),
-            )
+                &mut scratch.restricted_align_found,
+                &mut restricted_align_array,
+            );
         } else {
-            vec![false; query_ids.len()]
-        };
+            restricted_align_array.clear();
+            restricted_align_array.resize(query_ids.len(), false);
+        }
         // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_gapalign.c:3971-4008
         // ```c
         // BlastHSPList* new_hsp_list = Blast_HSPListNew(kHspNumMax);
@@ -3197,7 +3629,8 @@ fn run_resolved_with_records(
         // Keep the accepted preliminary HSPs in one ordered list for the
         // current subject so exact-retry rebuilds preserve NCBI's HSPList
         // order instead of HashMap iteration order.
-        let mut preliminary_hsp_list: Vec<BlastpPreliminaryHsp> = Vec::new();
+        let mut preliminary_hsp_list = std::mem::take(&mut scratch.preliminary_hsp_list);
+        preliminary_hsp_list.clear();
         // NCBI reference: /mnt/c/Users/genom/GitHub/ncbi-blast/c++/src/algo/blast/core/blast_engine.c:1481-1497
         // ```c
         // if (!gapped_calculation) {
@@ -3223,7 +3656,7 @@ fn run_resolved_with_records(
         // ```c
         // s_BlastProtGappedAlignment(..., BlastGapAlignStruct* gap_align, ...)
         // ```
-        let mut preliminary_gap_scratch = GapAlignScratch::new();
+        let preliminary_gapped_start = blastp_timing_start(timing_enabled);
         let mut hit_index = 0usize;
         while hit_index < init_hsps.len() {
             let mut init_hsp = init_hsps[hit_index];
@@ -3308,7 +3741,7 @@ fn run_resolved_with_records(
                 args.scoring.gap_extend,
                 x_drop_gapped,
                 mode,
-                &mut preliminary_gap_scratch,
+                &mut scratch.preliminary_gap_scratch,
             );
             if should_retry_exact_preliminary_gapped_alignment(
                 restricted_alignment,
@@ -3325,7 +3758,7 @@ fn run_resolved_with_records(
                     &contexts,
                 );
                 rebuild_preliminary_interval_tree_from_list(
-                    &mut interval_tree,
+                    interval_tree,
                     &preliminary_hsp_list,
                     &contexts,
                 );
@@ -3353,21 +3786,45 @@ fn run_resolved_with_records(
             preliminary_hsp_list.push(preliminary_hsp);
             hit_index += 1;
         }
+        if let Some(timing) = timing.as_ref() {
+            BlastpTiming::record_call(
+                &timing.preliminary_gapped_ns,
+                &timing.preliminary_gapped_calls,
+                preliminary_gapped_start,
+            );
+        }
+        scratch.init_hsps = init_hsps;
+        scratch.init_hsps.clear();
 
-        let prepared_preliminary_hits = prepare_preliminary_hits_for_kappa(preliminary_hsp_list);
-        let preliminary_hits_by_query =
-            split_preliminary_hits_by_query(prepared_preliminary_hits, &contexts, query_ids.len());
+        // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_engine.c:540-555
+        // ```c
+        // Blast_HSPListPurgeHSPsWithCommonEndpoints(program_number, hsp_list, TRUE);
+        // ...
+        // Blast_HSPListSortByScore(hsp_list);
+        // ```
+        prepare_preliminary_hits_for_kappa_in_place(&mut preliminary_hsp_list);
+        let mut preliminary_hits_by_query = std::mem::take(&mut scratch.preliminary_hits_by_query);
+        split_preliminary_hits_by_query_into(
+            &mut preliminary_hsp_list,
+            &contexts,
+            query_ids.len(),
+            &mut preliminary_hits_by_query,
+        );
         let mut subject_result = BlastpSubjectResult {
             subject_index: s_idx,
             query_hsp_lists: Vec::new(),
         };
-        for (q_idx, preliminary_hits) in preliminary_hits_by_query.into_iter().enumerate() {
+        for (q_idx, preliminary_hits) in preliminary_hits_by_query
+            .iter_mut()
+            .take(query_ids.len())
+            .enumerate()
+        {
             if preliminary_hits.is_empty() {
                 continue;
             }
             let ctx = &contexts[q_idx as usize];
             let mut provisional_hsp_list = build_preliminary_hsp_list_for_hitlist(
-                &preliminary_hits,
+                preliminary_hits.as_slice(),
                 s_idx as u32,
                 q_idx as u32,
                 ctx.aa_len,
@@ -3394,12 +3851,18 @@ fn run_resolved_with_records(
             // ```
             reap_hsplist_by_evalue(&mut provisional_hsp_list, prelim_evalue);
             if provisional_hsp_list.hsps.is_empty() {
+                preliminary_hits.clear();
                 continue;
             }
             subject_result
                 .query_hsp_lists
                 .push((q_idx, provisional_hsp_list));
+            preliminary_hits.clear();
         }
+        scratch.restricted_align_array = restricted_align_array;
+        scratch.restricted_align_array.clear();
+        scratch.preliminary_hsp_list = preliminary_hsp_list;
+        scratch.preliminary_hits_by_query = preliminary_hits_by_query;
         subject_result
     };
 
@@ -3437,7 +3900,14 @@ fn run_resolved_with_records(
                     .par_iter()
                     .enumerate()
                     .map_init(
-                        || BlastpSubjectScratch::new(offset_array_size, diag_array_size, window),
+                        || {
+                            BlastpSubjectScratch::new(
+                                offset_array_size,
+                                diag_array_size,
+                                window,
+                                total_query_span,
+                            )
+                        },
                         |scratch, (s_idx, _subject)| {
                             scratch.prepare_independent_subject(subject_diag_offsets[s_idx]);
                             process_subject(scratch, s_idx)
@@ -3445,6 +3915,7 @@ fn run_resolved_with_records(
                     )
                     .collect()
             });
+            let merge_sort_start = blastp_timing_start(timing_enabled);
             subject_results.sort_by_key(|result| result.subject_index);
             for subject_result in subject_results {
                 update_blastp_preliminary_hit_lists(
@@ -3453,23 +3924,47 @@ fn run_resolved_with_records(
                     prelim_hitlist_size,
                 );
             }
+            if let Some(timing) = timing.as_ref() {
+                BlastpTiming::record_call(
+                    &timing.prelim_merge_sort_ns,
+                    &timing.prelim_merge_sort_calls,
+                    merge_sort_start,
+                );
+            }
         }
     } else {
-        let mut scratch = BlastpSubjectScratch::new(offset_array_size, diag_array_size, window);
+        let mut scratch =
+            BlastpSubjectScratch::new(offset_array_size, diag_array_size, window, total_query_span);
         for s_idx in 0..subjects.len() {
             let subject_result = process_subject(&mut scratch, s_idx);
+            let merge_sort_start = blastp_timing_start(timing_enabled);
             update_blastp_preliminary_hit_lists(
                 &mut preliminary_hit_lists,
                 subject_result,
                 prelim_hitlist_size,
             );
+            if let Some(timing) = timing.as_ref() {
+                BlastpTiming::record_call(
+                    &timing.prelim_merge_sort_ns,
+                    &timing.prelim_merge_sort_calls,
+                    merge_sort_start,
+                );
+            }
         }
     }
 
+    let merge_sort_start = blastp_timing_start(timing_enabled);
     for hit_list_opt in &mut preliminary_hit_lists {
         if let Some(hit_list) = hit_list_opt.as_mut() {
             hit_list.sort_by_evalue();
         }
+    }
+    if let Some(timing) = timing.as_ref() {
+        BlastpTiming::record_call(
+            &timing.prelim_merge_sort_ns,
+            &timing.prelim_merge_sort_calls,
+            merge_sort_start,
+        );
     }
 
     // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_kappa.c:3329-3334
@@ -3482,6 +3977,7 @@ fn run_resolved_with_records(
     //     );
     // }
     // ```
+    let kappa_redo_start = blastp_timing_start(timing_enabled);
     let mut composition_workspace = BlastCompositionWorkspace::new_blosum62();
 
     for q_idx in 0..query_ids.len() {
@@ -3676,6 +4172,15 @@ fn run_resolved_with_records(
     }
 
     let mut hit_lists = fill_results_from_compo_heaps(args.max_target_seqs, &mut redone_matches);
+    if let Some(timing) = timing.as_ref() {
+        BlastpTiming::record_call(
+            &timing.kappa_redo_ns,
+            &timing.kappa_redo_calls,
+            kappa_redo_start,
+        );
+    }
+
+    let final_traceback_start = blastp_timing_start(timing_enabled);
     for hit_list_opt in &mut hit_lists {
         if let Some(hit_list) = hit_list_opt.as_mut() {
             hit_list.sort_by_evalue();
@@ -3756,7 +4261,21 @@ fn run_resolved_with_records(
         None
     };
 
-    match outfmt {
+    if let Some(timing) = timing.as_ref() {
+        BlastpTiming::record_call(
+            &timing.final_traceback_ns,
+            &timing.final_traceback_calls,
+            final_traceback_start,
+        );
+    }
+
+    // NCBI reference: /mnt/c/Users/genom/GitHub/ncbi-blast/c++/src/algo/blast/core/blast_engine.c:1553-1554
+    // ```c
+    // /* Save the results. */
+    // status = BlastHSPStreamWrite(hsp_stream, &hsp_list);
+    // ```
+    let output_format_start = blastp_timing_start(timing_enabled);
+    let output_result: Result<()> = match outfmt {
         OutputFormat::Pairwise => {
             // NCBI reference: /mnt/c/Users/genom/GitHub/ncbi-blast/c++/src/algo/blast/format/blast_format.cpp:68-93
             // ```c
@@ -3818,6 +4337,7 @@ fn run_resolved_with_records(
                 &subject_ids,
                 &pairwise_report,
             )?;
+            Ok(())
         }
         OutputFormat::Tabular | OutputFormat::TabularWithComments => {
             let fields = tabular_fields.expect("tabular fields prepared for blastp tabular output");
@@ -3844,7 +4364,20 @@ fn run_resolved_with_records(
                 &subject_ids,
                 &context,
             )?;
+            Ok(())
         }
+    };
+    if let Some(timing) = timing.as_ref() {
+        BlastpTiming::record_call(
+            &timing.output_format_ns,
+            &timing.output_format_calls,
+            output_format_start,
+        );
+    }
+    output_result?;
+
+    if let Some(timing) = timing.as_ref() {
+        print_blastp_timing(timing, t_total);
     }
 
     Ok(())
@@ -5211,6 +5744,19 @@ mod tests {
             is_valid: false,
             ..make_query_context(0, 0)
         };
+        // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_stat.c:3577-3622
+        // ```c
+        // Blast_KarlinBlkGappedLoadFromTables(kbp, gap_open,
+        //                                    gap_extend, matrix_name, error_return);
+        // ```
+        let scoring = crate::config::ProteinScoringSpec {
+            matrix: ScoringMatrix::Blosum62,
+            gap_open: 11,
+            gap_extend: 1,
+        };
+        let gapped = lookup_protein_params(&scoring);
+        let gumbel = lookup_protein_gumbel_params(&scoring, 10_000)
+            .expect("supported blastp gumbel parameters");
 
         assert_eq!(blastp_x_dropoff_init_for_context(&invalid), 0);
         assert_eq!(
@@ -5218,9 +5764,9 @@ mod tests {
                 &invalid,
                 10.0,
                 100,
-                BlastpCompositionMode::CompositionBasedScoreAdjustment,
-                &lookup_protein_params_ungapped(ScoringMatrix::Blosum62),
-                &gapped_search_params_blosum62_11_1(),
+                BlastpCompositionMode::CompositionMatrixAdjust,
+                &gapped,
+                &gumbel,
             ),
             i32::MAX
         );
@@ -5245,8 +5791,19 @@ mod tests {
             make_init_hsp(0, 10, 0, 0, 0, 50),
             make_init_hsp(100, 10, 100, 100, 100, 60),
         ];
+        let mut keep = Vec::new();
+        let mut nodes = Vec::new();
 
-        let chained = chain_blastp_init_hsps(init_hsps, &contexts, &[100], &[1], 11, 1);
+        let chained = chain_blastp_init_hsps(
+            init_hsps,
+            &contexts,
+            &[100],
+            &[1],
+            11,
+            1,
+            &mut keep,
+            &mut nodes,
+        );
 
         assert_eq!(chained.len(), 2);
         assert_eq!(chained[0].ungapped_data.score, 60);

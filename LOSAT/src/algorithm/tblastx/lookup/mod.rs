@@ -6,8 +6,15 @@
 //! # Module Structure
 //!
 //! - `backbone` - Backbone lookup table (BackboneCell, BlastAaLookupTable, build_ncbi_lookup)
+//! - `compressed` - compressed amino-acid lookup primitives for `blastp-fast`
 
 mod backbone;
+// NCBI reference: ncbi-blast/c++/include/algo/blast/core/blast_aalookup.h:186-267
+// ```c
+// /* ------------ compressed alphabet protein blast defines ---------------*/
+// typedef struct BlastCompressedAaLookupTable { ... } BlastCompressedAaLookupTable;
+// ```
+pub mod compressed;
 
 // Re-export public types and functions
 pub use backbone::{

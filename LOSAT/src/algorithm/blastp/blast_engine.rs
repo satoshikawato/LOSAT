@@ -1134,24 +1134,138 @@ fn blastp_save_init_hsp(
 //     return BSearchContextInfo(init_hsp->offsets.qs_offsets.q_off, query_info);
 // }
 // ```
+//
+// NCBI reference: /mnt/c/Users/genom/GitHub/ncbi-blast/c++/include/algo/blast/core/blast_query_info.h:85-88
+// ```c
+// Uint4 max_length;    /**< Length of the longest among the concatenated
+//                         queries */
+// Uint4 min_length;    /**< Length of the shortest among the concatenated
+//                         queries */
+// ```
+#[derive(Clone, Copy, Debug, Default)]
+struct BlastpContextLookupBounds {
+    min_length: i32,
+    max_length: i32,
+}
+
+// NCBI reference: /mnt/c/Users/genom/GitHub/ncbi-blast/c++/src/algo/blast/api/blast_setup_cxx.cpp:178-181
+// ```c
+// Uint4 max_length = 0;
+// Uint4 min_length = INT4_MAX;
+// for(TSeqPos j = 0; j < queries.Size(); j++) {
+// ```
+//
+// NCBI reference: /mnt/c/Users/genom/GitHub/ncbi-blast/c++/src/algo/blast/api/blast_setup_cxx.cpp:227-228
+// ```c
+// max_length = MAX(max_length, length);
+// min_length = MIN(min_length, length);
+// ```
+#[inline]
+fn blastp_context_lookup_bounds(contexts: &[QueryContext]) -> BlastpContextLookupBounds {
+    let mut min_length = i32::MAX;
+    let mut max_length = 0i32;
+    for ctx in contexts {
+        let length =
+            i32::try_from(ctx.aa_len).expect("NCBI BLAST protein query length must fit Int4");
+        min_length = min_length.min(length);
+        max_length = max_length.max(length);
+    }
+    if min_length == i32::MAX {
+        min_length = 0;
+    }
+    BlastpContextLookupBounds {
+        min_length,
+        max_length,
+    }
+}
+
+// NCBI reference: /mnt/c/Users/genom/GitHub/ncbi-blast/c++/src/algo/blast/core/blast_query_info.c:219-235
+// ```c
+// Int4 BSearchContextInfo(Int4 n, const BlastQueryInfo * A)
+// {
+//     size = A->last_context+1;
+//     if (A->min_length > 0 && A->max_length > 0 && A->first_context == 0) {
+//         b = MIN(n / (A->max_length + 1), size - 1);
+//         e = MIN(n / (A->min_length + 1) + 1, size);
+//     }
+//     while (b < e - 1) { ... }
+//     return b;
+// }
+// ```
+#[cfg(test)]
 #[inline]
 fn blastp_context_idx_for_query_offset(contexts: &[QueryContext], concat_off: i32) -> usize {
+    blastp_context_idx_for_query_offset_with_bounds(
+        contexts,
+        blastp_context_lookup_bounds(contexts),
+        concat_off,
+    )
+}
+
+// NCBI reference: /mnt/c/Users/genom/GitHub/ncbi-blast/c++/src/algo/blast/core/blast_query_info.c:225-234
+// ```c
+// if (A->min_length > 0 && A->max_length > 0 && A->first_context == 0) {
+//     b = MIN(n / (A->max_length + 1), size - 1);
+//     e = MIN(n / (A->min_length + 1) + 1, size);
+// }
+// while (b < e - 1) {
+//     m = (b + e) / 2;
+//     if (A->contexts[m].query_offset > n) e = m;
+//     else b = m;
+// }
+// ```
+#[inline]
+fn blastp_context_idx_for_query_offset_with_bounds(
+    contexts: &[QueryContext],
+    bounds: BlastpContextLookupBounds,
+    concat_off: i32,
+) -> usize {
+    let size = contexts.len();
+    if size == 0 {
+        return 0;
+    }
+
     let mut lo = 0usize;
-    let mut hi = contexts.len();
-    while lo < hi {
+    let mut hi = size;
+    if bounds.min_length > 0 && bounds.max_length > 0 {
+        let n = usize::try_from(concat_off)
+            .expect("NCBI BLAST query offset for context lookup must be non-negative");
+        let max_length =
+            usize::try_from(bounds.max_length).expect("NCBI BLAST max query length must fit usize");
+        let min_length =
+            usize::try_from(bounds.min_length).expect("NCBI BLAST min query length must fit usize");
+        lo = (n / (max_length + 1)).min(size - 1);
+        hi = (n / (min_length + 1) + 1).min(size);
+    }
+
+    while lo < hi.saturating_sub(1) {
         let mid = (lo + hi) / 2;
         if concat_off < contexts[mid].frame_base {
             hi = mid;
         } else {
-            lo = mid + 1;
+            lo = mid;
         }
     }
-    lo.saturating_sub(1)
+    lo
+}
+
+#[cfg(test)]
+#[inline]
+fn blastp_get_ungapped_hsp_context(contexts: &[QueryContext], init_hsp: &InitHSP) -> usize {
+    blastp_get_ungapped_hsp_context_with_bounds(
+        contexts,
+        blastp_context_lookup_bounds(contexts),
+        init_hsp,
+    )
 }
 
 #[inline]
-fn blastp_get_ungapped_hsp_context(contexts: &[QueryContext], init_hsp: &InitHSP) -> usize {
-    blastp_context_idx_for_query_offset(contexts, init_hsp.q_seed_absolute)
+fn blastp_get_ungapped_hsp_context_with_bounds(
+    contexts: &[QueryContext],
+    bounds: BlastpContextLookupBounds,
+    init_hsp: &InitHSP,
+) -> usize {
+    blastp_context_idx_for_query_offset_with_bounds(contexts, bounds, init_hsp.q_seed_absolute)
 }
 
 // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_gapalign.c:2374-2389
@@ -1189,9 +1303,11 @@ fn blastp_adjust_initial_hsp_offsets(init_hsp: &mut InitHSP, query_start: i32) {
 fn blastp_adjust_hsp_offsets_and_get_query_data<'a>(
     concatenated_query: &'a [u8],
     contexts: &'a [QueryContext],
+    context_lookup_bounds: BlastpContextLookupBounds,
     init_hsp: &mut InitHSP,
 ) -> (usize, &'a QueryContext, &'a [u8]) {
-    let context_idx = blastp_get_ungapped_hsp_context(contexts, init_hsp);
+    let context_idx =
+        blastp_get_ungapped_hsp_context_with_bounds(contexts, context_lookup_bounds, init_hsp);
     let ctx = &contexts[context_idx];
     let query_start = ctx.frame_base;
 
@@ -2083,6 +2199,7 @@ fn build_restricted_align_array(
     build_restricted_align_array_into(
         init_hsps,
         contexts,
+        blastp_context_lookup_bounds(contexts),
         hit_cutoff_scores,
         num_queries,
         &mut found,
@@ -2104,6 +2221,7 @@ fn build_restricted_align_array(
 fn build_restricted_align_array_into(
     init_hsps: &[InitHSP],
     contexts: &[QueryContext],
+    context_lookup_bounds: BlastpContextLookupBounds,
     hit_cutoff_scores: &[i32],
     num_queries: usize,
     found: &mut Vec<bool>,
@@ -2123,7 +2241,8 @@ fn build_restricted_align_array_into(
         // query_index = Blast_GetQueryIndexFromContext(contxt,
         //                                              program_number);
         // ```
-        let context_idx = blastp_get_ungapped_hsp_context(contexts, init_hsp);
+        let context_idx =
+            blastp_get_ungapped_hsp_context_with_bounds(contexts, context_lookup_bounds, init_hsp);
         let query_index = usize::try_from(contexts[context_idx].q_idx)
             .expect("NCBI BLAST requires blastp context query indices to fit in usize");
         if query_index >= num_queries || found[query_index] {
@@ -2548,6 +2667,83 @@ fn preliminary_hits_is_sorted_by_score_ncbi(hits: &[BlastpPreliminaryHsp]) -> bo
     true
 }
 
+// NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_hits.c:2478-2502
+// ```c
+// qsort(hsp_array, hsp_count, sizeof(BlastHSP*), s_QueryOffsetCompareHSPs);
+// while (i+j < hsp_count &&
+//        hsp_array[i]->context == hsp_array[i+j]->context &&
+//        hsp_array[i]->query.offset == hsp_array[i+j]->query.offset &&
+//        hsp_array[i]->subject.offset == hsp_array[i+j]->subject.offset &&
+//        hsp_array[i]->subject.frame == hsp_array[i+j]->subject.frame) {
+//     hsp_count--;
+//     hsp = Blast_HSPFree(hsp);
+//     for (k=i+j; k<hsp_count; k++) hsp_array[k] = hsp_array[k+1];
+// }
+// ```
+#[inline]
+fn preliminary_hits_share_query_offset_endpoint(
+    first: &BlastpPreliminaryHsp,
+    candidate: &BlastpPreliminaryHsp,
+) -> bool {
+    first.query_context == candidate.query_context
+        && first.query_start == candidate.query_start
+        && first.subject_start == candidate.subject_start
+        && first.subject_frame == candidate.subject_frame
+}
+
+// NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_hits.c:2504-2527
+// ```c
+// qsort(hsp_array, hsp_count, sizeof(BlastHSP*), s_QueryEndCompareHSPs);
+// while (i+j < hsp_count &&
+//        hsp_array[i]->context == hsp_array[i+j]->context &&
+//        hsp_array[i]->query.end == hsp_array[i+j]->query.end &&
+//        hsp_array[i]->subject.end == hsp_array[i+j]->subject.end &&
+//        hsp_array[i]->subject.frame == hsp_array[i+j]->subject.frame) {
+//     hsp_count--;
+//     hsp = Blast_HSPFree(hsp);
+//     for (k=i+j; k<hsp_count; k++) hsp_array[k] = hsp_array[k+1];
+// }
+// ```
+#[inline]
+fn preliminary_hits_share_query_end_endpoint(
+    first: &BlastpPreliminaryHsp,
+    candidate: &BlastpPreliminaryHsp,
+) -> bool {
+    first.query_context == candidate.query_context
+        && first.query_end == candidate.query_end
+        && first.subject_end == candidate.subject_end
+        && first.subject_frame == candidate.subject_frame
+}
+
+// NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_hits.c:2493-2500,2519-2525
+// ```c
+// hsp = Blast_HSPFree(hsp);
+// for (k=i+j; k<hsp_count; k++) {
+//     hsp_array[k] = hsp_array[k+1];
+// }
+// hsp_array[hsp_count] = hsp;
+// ```
+fn purge_sorted_preliminary_endpoint_duplicates(
+    hits: &mut Vec<BlastpPreliminaryHsp>,
+    same_endpoint: fn(&BlastpPreliminaryHsp, &BlastpPreliminaryHsp) -> bool,
+) {
+    if hits.len() <= 1 {
+        return;
+    }
+
+    let mut write_index = 1usize;
+    for read_index in 1..hits.len() {
+        if same_endpoint(&hits[write_index - 1], &hits[read_index]) {
+            continue;
+        }
+        if write_index != read_index {
+            hits.swap(write_index, read_index);
+        }
+        write_index += 1;
+    }
+    hits.truncate(write_index);
+}
+
 // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_gapalign.c:3870-3878
 // ```c
 // query_index = Blast_GetQueryIndexFromContext(context, program_number);
@@ -2582,34 +2778,16 @@ fn purge_preliminary_hits_with_common_endpoints(
     }
 
     ncbi_qsort_preliminary_hits(&mut hits, preliminary_query_offset_compare);
-    let mut i = 0usize;
-    while i < hits.len() {
-        let mut j = 1usize;
-        while i + j < hits.len()
-            && hits[i].query_context == hits[i + j].query_context
-            && hits[i].query_start == hits[i + j].query_start
-            && hits[i].subject_start == hits[i + j].subject_start
-            && hits[i].subject_frame == hits[i + j].subject_frame
-        {
-            hits.remove(i + j);
-        }
-        i += j;
-    }
+    purge_sorted_preliminary_endpoint_duplicates(
+        &mut hits,
+        preliminary_hits_share_query_offset_endpoint,
+    );
 
     ncbi_qsort_preliminary_hits(&mut hits, preliminary_query_end_compare);
-    let mut i = 0usize;
-    while i < hits.len() {
-        let mut j = 1usize;
-        while i + j < hits.len()
-            && hits[i].query_context == hits[i + j].query_context
-            && hits[i].query_end == hits[i + j].query_end
-            && hits[i].subject_end == hits[i + j].subject_end
-            && hits[i].subject_frame == hits[i + j].subject_frame
-        {
-            hits.remove(i + j);
-        }
-        i += j;
-    }
+    purge_sorted_preliminary_endpoint_duplicates(
+        &mut hits,
+        preliminary_hits_share_query_end_endpoint,
+    );
 
     hits
 }
@@ -3272,6 +3450,7 @@ fn run_resolved_with_records(
             (BlastpRuntimeLookup::Compressed(lookup), contexts)
         }
     };
+    let context_lookup_bounds = blastp_context_lookup_bounds(&contexts);
     let concatenated_query = build_blastp_concatenated_query(&contexts);
     if let Some(timing) = timing.as_ref() {
         BlastpTiming::record_duration(&timing.lookup_ns, lookup_start);
@@ -3490,7 +3669,11 @@ fn run_resolved_with_records(
                     // BlastUngappedCutoffs *cutoffs =
                     //     word_params->cutoffs + curr_context;
                     // ```
-                    let ctx_idx = blastp_context_idx_for_query_offset(&contexts, query_offset);
+                    let ctx_idx = blastp_context_idx_for_query_offset_with_bounds(
+                        &contexts,
+                        context_lookup_bounds,
+                        query_offset,
+                    );
                     let x_drop = x_dropoff_per_context[ctx_idx];
                     let cutoff = word_cutoff_scores[ctx_idx];
 
@@ -3601,7 +3784,11 @@ fn run_resolved_with_records(
                 // if (query_offset - diff <
                 //     query_info->contexts[curr_context].query_offset) {
                 // ```
-                let ctx_idx = blastp_context_idx_for_query_offset(&contexts, query_offset);
+                let ctx_idx = blastp_context_idx_for_query_offset_with_bounds(
+                    &contexts,
+                    context_lookup_bounds,
+                    query_offset,
+                );
                 let ctx = &contexts[ctx_idx];
 
                 // NCBI reference: ncbi-blast/c++/src/algo/blast/core/aa_ungapped.c:562-570
@@ -3749,6 +3936,7 @@ fn run_resolved_with_records(
             build_restricted_align_array_into(
                 &init_hsps,
                 &contexts,
+                context_lookup_bounds,
                 &hit_cutoff_scores,
                 query_ids.len(),
                 &mut scratch.restricted_align_found,
@@ -3811,6 +3999,7 @@ fn run_resolved_with_records(
             let (context_idx, ctx, query_sequence) = blastp_adjust_hsp_offsets_and_get_query_data(
                 &concatenated_query,
                 &contexts,
+                context_lookup_bounds,
                 &mut init_hsp,
             );
             let query_index = usize::try_from(ctx.q_idx)
@@ -5285,6 +5474,7 @@ mod tests {
         let (context_idx, ctx, query_sequence) = blastp_adjust_hsp_offsets_and_get_query_data(
             &concatenated_query,
             &contexts,
+            blastp_context_lookup_bounds(&contexts),
             &mut init_hsp,
         );
 

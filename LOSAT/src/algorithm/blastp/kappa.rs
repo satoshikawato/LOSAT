@@ -5,6 +5,7 @@
 //! Reference: ncbi-blast/c++/src/algo/blast/composition_adjustment/redo_alignment.c
 
 use anyhow::Result;
+use std::cell::RefCell;
 use std::ffi::c_void;
 use std::ptr::NonNull;
 
@@ -25,7 +26,9 @@ use crate::core::composition_adjustment::redo_alignment::{
 use crate::stats::{blast_spouge_stoe, BlastGumbelBlk, KarlinParams};
 use crate::utils::matrix::{blosum62_score_ncbistdaa_direct, ncbistdaa, protein_score};
 
-use super::gapalign::{blast_gapped_alignment_with_traceback, BlastpPreliminaryHsp};
+use super::gapalign::{
+    blast_gapped_alignment_with_traceback_with_scratch, BlastpPreliminaryHsp, GapAlignScratch,
+};
 use super::hsp::{
     reap_hsplist_by_evalue, sort_hsplist_by_score, update_best_evalue, BlastpHsp, BlastpHspList,
 };
@@ -103,6 +106,12 @@ pub(crate) struct BlastpKappaQueryWorkspace {
 struct BlastpRedoAlignmentContext<'a> {
     preliminary_hits: &'a [BlastpPreliminaryHsp],
     matrix: ScoringMatrix,
+    // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_kappa.c:1719-1720
+    // ```c
+    // BlastGapAlignStruct * gap_align;  /**< additional parameters for a
+    //                                      gapped alignment */
+    // ```
+    gap_scratch: RefCell<GapAlignScratch>,
 }
 
 // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_kappa.c:1000-1004
@@ -199,6 +208,7 @@ fn redo_preliminary_blastp_hit(
     gap_open: i32,
     gap_extend: i32,
     x_drop: i32,
+    gap_scratch: &mut GapAlignScratch,
 ) -> Option<RedoneBlastpHit> {
     let q_start = preliminary_hsp.gapped_query_start - query_range.begin;
     let s_start = preliminary_hsp.gapped_subject_start - subject_range.begin;
@@ -206,7 +216,13 @@ fn redo_preliminary_blastp_hit(
         return None;
     }
 
-    let aligned = blast_gapped_alignment_with_traceback(
+    // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_kappa.c:1914-1944
+    // ```c
+    // BlastGapAlignStruct* gapAlign = context->gap_align;
+    // gapAlign->gap_x_dropoff = gapping_params->x_dropoff;
+    // status = BLAST_GappedAlignmentWithTraceback(..., gapAlign, ...);
+    // ```
+    let aligned = blast_gapped_alignment_with_traceback_with_scratch(
         query_data.data(),
         subject_data.data(),
         q_start as usize,
@@ -216,6 +232,7 @@ fn redo_preliminary_blastp_hit(
         gap_open,
         gap_extend,
         x_drop,
+        gap_scratch,
     )?;
 
     let alignment_len = aligned
@@ -387,6 +404,7 @@ fn blastp_redo_one_alignment_callback(
         params.gapping_params.gap_open,
         params.gapping_params.gap_extend,
         params.gapping_params.x_dropoff,
+        &mut redo_context.gap_scratch.borrow_mut(),
     ) else {
         return Ok(None);
     };
@@ -1168,6 +1186,12 @@ pub(crate) fn postprocess_preliminary_hits(
     let redo_context = BlastpRedoAlignmentContext {
         preliminary_hits: &preliminary_hits,
         matrix,
+        // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_kappa.c:1719-1720
+        // ```c
+        // BlastGapAlignStruct * gap_align;  /**< additional parameters for a
+        //                                      gapped alignment */
+        // ```
+        gap_scratch: RefCell::new(GapAlignScratch::new()),
     };
     let previous_redo_context = redo_align_params
         .gapping_params
@@ -1655,6 +1679,7 @@ mod tests {
             q_idx: 0,
             s_idx: 0,
         };
+        let mut gap_scratch = GapAlignScratch::new();
         let redone = redo_preliminary_blastp_hit(
             &preliminary_hsp,
             &query_data,
@@ -1666,6 +1691,7 @@ mod tests {
             11,
             1,
             50,
+            &mut gap_scratch,
         )
         .expect("traceback should produce a hit");
 

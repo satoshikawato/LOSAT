@@ -160,6 +160,32 @@ impl BlastpScoreMatrix<'_> {
             Self::Adjusted(matrix) => matrix.score(query_residue, subject_residue),
         }
     }
+
+    // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_gapalign.c:543-578
+    // ```c
+    // matrix_row = matrix[ A[ a_index ] ];
+    // ...
+    // next_score = score_array[b_index].best + matrix_row[ *b_ptr ];
+    // ```
+    #[inline(always)]
+    fn is_blosum62(self) -> bool {
+        matches!(self, Self::Blosum62)
+    }
+
+    // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_gapalign.c:841-866
+    // ```c
+    // matrix_row = matrix[ A[ a_index ] ];
+    // ...
+    // next_score = score_array[b_index].best + matrix_row[ *b_ptr ];
+    // ```
+    #[inline(always)]
+    fn score_hot_path<const BLOSUM62: bool>(self, query_residue: u8, subject_residue: u8) -> i32 {
+        if BLOSUM62 {
+            blosum62_score_ncbistdaa_direct(query_residue, subject_residue)
+        } else {
+            self.score(query_residue, subject_residue)
+        }
+    }
 }
 
 // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_hits.c:523-550
@@ -845,14 +871,13 @@ fn stats_from_edit_ops_protein_impl<const BLOSUM62: bool>(
 //     matrix_row = matrix[ A[ a_index ] ];
 // ```
 #[inline]
-fn blastp_query_residue(
+fn blastp_query_residue<const REVERSE: bool>(
     query: &[u8],
     query_base: usize,
     query_length: usize,
     a_index: usize,
-    reverse_sequence: bool,
 ) -> u8 {
-    let absolute_index = if reverse_sequence {
+    let absolute_index = if REVERSE {
         query_base + query_length - a_index
     } else {
         query_base + a_index
@@ -878,14 +903,13 @@ fn blastp_query_residue(
 // seq_blk->length = seqlen;
 // ```
 #[inline]
-fn blastp_subject_residue(
+fn blastp_subject_residue<const REVERSE: bool>(
     subject: &[u8],
     subject_base: usize,
     subject_length: usize,
     b_index: usize,
-    reverse_sequence: bool,
 ) -> u8 {
-    let absolute_index = if reverse_sequence {
+    let absolute_index = if REVERSE {
         subject_base as isize + subject_length as isize - b_index as isize - 1
     } else {
         subject_base as isize + b_index as isize + 1
@@ -909,6 +933,93 @@ fn align_ex_protein_score_only(
     gap_extend: i32,
     x_drop: i32,
     reverse: bool,
+    scratch: &mut GapAlignScratch,
+) -> (usize, usize, i32) {
+    // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_gapalign.c:841-866
+    // ```c
+    // if(reverse_sequence)
+    //     matrix_row = matrix[ A[ M - a_index ] ];
+    // else
+    //     matrix_row = matrix[ A[ a_index ] ];
+    // ...
+    // next_score = score_array[b_index].best + matrix_row[ *b_ptr ];
+    // ```
+    match (score_matrix.is_blosum62(), reverse) {
+        (true, true) => align_ex_protein_score_only_impl::<true, true>(
+            query,
+            query_base,
+            subject,
+            subject_base,
+            len1,
+            len2,
+            score_matrix,
+            gap_open,
+            gap_extend,
+            x_drop,
+            scratch,
+        ),
+        (true, false) => align_ex_protein_score_only_impl::<true, false>(
+            query,
+            query_base,
+            subject,
+            subject_base,
+            len1,
+            len2,
+            score_matrix,
+            gap_open,
+            gap_extend,
+            x_drop,
+            scratch,
+        ),
+        (false, true) => align_ex_protein_score_only_impl::<false, true>(
+            query,
+            query_base,
+            subject,
+            subject_base,
+            len1,
+            len2,
+            score_matrix,
+            gap_open,
+            gap_extend,
+            x_drop,
+            scratch,
+        ),
+        (false, false) => align_ex_protein_score_only_impl::<false, false>(
+            query,
+            query_base,
+            subject,
+            subject_base,
+            len1,
+            len2,
+            score_matrix,
+            gap_open,
+            gap_extend,
+            x_drop,
+            scratch,
+        ),
+    }
+}
+
+// NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_gapalign.c:841-866
+// ```c
+// if(reverse_sequence)
+//     matrix_row = matrix[ A[ M - a_index ] ];
+// else
+//     matrix_row = matrix[ A[ a_index ] ];
+// ...
+// next_score = score_array[b_index].best + matrix_row[ *b_ptr ];
+// ```
+fn align_ex_protein_score_only_impl<const BLOSUM62: bool, const REVERSE: bool>(
+    query: &[u8],
+    query_base: usize,
+    subject: &[u8],
+    subject_base: usize,
+    len1: usize,
+    len2: usize,
+    score_matrix: BlastpScoreMatrix<'_>,
+    gap_open: i32,
+    gap_extend: i32,
+    x_drop: i32,
     scratch: &mut GapAlignScratch,
 ) -> (usize, usize, i32) {
     if len1 == 0 || len2 == 0 {
@@ -974,15 +1085,16 @@ fn align_ex_protein_score_only(
     let mut first_b_index = 0usize;
 
     for a_index in 1..=len1 {
-        let qc = blastp_query_residue(query, query_base, len1, a_index, reverse);
+        let qc = blastp_query_residue::<REVERSE>(query, query_base, len1, a_index);
         let mut score_val = GAP_MININT;
         let mut score_gap_row = GAP_MININT;
         let mut last_b_index = first_b_index;
 
         for b_index in first_b_index..b_size {
-            let sc = blastp_subject_residue(subject, subject_base, len2, b_index, reverse);
+            let sc = blastp_subject_residue::<REVERSE>(subject, subject_base, len2, b_index);
             let score_gap_col = scratch.dp_mem[b_index].best_gap;
-            let next_score = scratch.dp_mem[b_index].best + score_matrix.score(qc, sc);
+            let next_score =
+                scratch.dp_mem[b_index].best + score_matrix.score_hot_path::<BLOSUM62>(qc, sc);
 
             if score_val < score_gap_col {
                 score_val = score_gap_col;
@@ -1077,6 +1189,98 @@ fn restricted_gapped_align_protein(
     dp_mem: &mut Vec<BlastGapDp>,
     dp_mem_alloc: &mut usize,
 ) -> (usize, usize, i32) {
+    // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_gapalign.c:1080-1115
+    // ```c
+    // if(reverse_sequence)
+    //     matrix_row = matrix[ A[ M - a_index ] ];
+    // else
+    //     matrix_row = matrix[ A[ a_index ] ];
+    // ...
+    // next_score = score_array[b_index].best + matrix_row[ *b_ptr ];
+    // ```
+    match (score_matrix.is_blosum62(), reverse) {
+        (true, true) => restricted_gapped_align_protein_impl::<true, true>(
+            query,
+            query_base,
+            subject,
+            subject_base,
+            len1,
+            len2,
+            score_matrix,
+            gap_open,
+            gap_extend,
+            x_drop,
+            dp_mem,
+            dp_mem_alloc,
+        ),
+        (true, false) => restricted_gapped_align_protein_impl::<true, false>(
+            query,
+            query_base,
+            subject,
+            subject_base,
+            len1,
+            len2,
+            score_matrix,
+            gap_open,
+            gap_extend,
+            x_drop,
+            dp_mem,
+            dp_mem_alloc,
+        ),
+        (false, true) => restricted_gapped_align_protein_impl::<false, true>(
+            query,
+            query_base,
+            subject,
+            subject_base,
+            len1,
+            len2,
+            score_matrix,
+            gap_open,
+            gap_extend,
+            x_drop,
+            dp_mem,
+            dp_mem_alloc,
+        ),
+        (false, false) => restricted_gapped_align_protein_impl::<false, false>(
+            query,
+            query_base,
+            subject,
+            subject_base,
+            len1,
+            len2,
+            score_matrix,
+            gap_open,
+            gap_extend,
+            x_drop,
+            dp_mem,
+            dp_mem_alloc,
+        ),
+    }
+}
+
+// NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_gapalign.c:1080-1180
+// ```c
+// if(reverse_sequence)
+//     matrix_row = matrix[ A[ M - a_index ] ];
+// else
+//     matrix_row = matrix[ A[ a_index ] ];
+// ...
+// next_score = score_array[b_index].best + matrix_row[ *b_ptr ];
+// ```
+fn restricted_gapped_align_protein_impl<const BLOSUM62: bool, const REVERSE: bool>(
+    query: &[u8],
+    query_base: usize,
+    subject: &[u8],
+    subject_base: usize,
+    len1: usize,
+    len2: usize,
+    score_matrix: BlastpScoreMatrix<'_>,
+    gap_open: i32,
+    gap_extend: i32,
+    x_drop: i32,
+    dp_mem: &mut Vec<BlastGapDp>,
+    dp_mem_alloc: &mut usize,
+) -> (usize, usize, i32) {
     if len1 == 0 || len2 == 0 {
         return (0, 0, 0);
     }
@@ -1116,15 +1320,16 @@ fn restricted_gapped_align_protein(
     let mut b_gap = 0usize;
 
     for a_index in 1..=len1 {
-        let matrix_row_char = blastp_query_residue(query, query_base, len1, a_index, reverse);
+        let matrix_row_char = blastp_query_residue::<REVERSE>(query, query_base, len1, a_index);
         let mut score_val = GAP_MININT;
         let mut score_gap_row = GAP_MININT;
         let mut last_b_index = first_b_index;
 
         if a_index % RESTRICT_SIZE != 0 {
             for b_index in first_b_index..b_size {
-                let sc = blastp_subject_residue(subject, subject_base, len2, b_index, reverse);
-                let next_score = dp_mem[b_index].best + score_matrix.score(matrix_row_char, sc);
+                let sc = blastp_subject_residue::<REVERSE>(subject, subject_base, len2, b_index);
+                let next_score = dp_mem[b_index].best
+                    + score_matrix.score_hot_path::<BLOSUM62>(matrix_row_char, sc);
 
                 if b_index != b_gap {
                     if best_score - score_val > x_dropoff {
@@ -1171,8 +1376,9 @@ fn restricted_gapped_align_protein(
             score_gap_row = score_val;
         } else {
             for b_index in first_b_index..b_size {
-                let sc = blastp_subject_residue(subject, subject_base, len2, b_index, reverse);
-                let next_score = dp_mem[b_index].best + score_matrix.score(matrix_row_char, sc);
+                let sc = blastp_subject_residue::<REVERSE>(subject, subject_base, len2, b_index);
+                let next_score = dp_mem[b_index].best
+                    + score_matrix.score_hot_path::<BLOSUM62>(matrix_row_char, sc);
 
                 if b_index != b_gap {
                     if score_val < score_gap_row {
@@ -1284,6 +1490,88 @@ fn align_ex_protein(
     scratch: &mut GapAlignScratch,
     fence_hit: &mut bool,
 ) -> (usize, usize, i32, Vec<GapEditOp>) {
+    // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_gapalign.c:543-578
+    // ```c
+    // if(reverse_sequence)
+    //     matrix_row = matrix[ A[ M - a_index ] ];
+    // else
+    //     matrix_row = matrix[ A[ a_index ] ];
+    // ...
+    // next_score = score_array[b_index].best + matrix_row[ *b_ptr ];
+    // ```
+    match (score_matrix.is_blosum62(), reverse) {
+        (true, true) => align_ex_protein_impl::<true, true>(
+            q_seq,
+            s_seq,
+            len1,
+            len2,
+            score_matrix,
+            gap_open,
+            gap_extend,
+            x_drop,
+            scratch,
+            fence_hit,
+        ),
+        (true, false) => align_ex_protein_impl::<true, false>(
+            q_seq,
+            s_seq,
+            len1,
+            len2,
+            score_matrix,
+            gap_open,
+            gap_extend,
+            x_drop,
+            scratch,
+            fence_hit,
+        ),
+        (false, true) => align_ex_protein_impl::<false, true>(
+            q_seq,
+            s_seq,
+            len1,
+            len2,
+            score_matrix,
+            gap_open,
+            gap_extend,
+            x_drop,
+            scratch,
+            fence_hit,
+        ),
+        (false, false) => align_ex_protein_impl::<false, false>(
+            q_seq,
+            s_seq,
+            len1,
+            len2,
+            score_matrix,
+            gap_open,
+            gap_extend,
+            x_drop,
+            scratch,
+            fence_hit,
+        ),
+    }
+}
+
+// NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_gapalign.c:543-578
+// ```c
+// if(reverse_sequence)
+//     matrix_row = matrix[ A[ M - a_index ] ];
+// else
+//     matrix_row = matrix[ A[ a_index ] ];
+// ...
+// next_score = score_array[b_index].best + matrix_row[ *b_ptr ];
+// ```
+fn align_ex_protein_impl<const BLOSUM62: bool, const REVERSE: bool>(
+    q_seq: &[u8],
+    s_seq: &[u8],
+    len1: usize,
+    len2: usize,
+    score_matrix: BlastpScoreMatrix<'_>,
+    gap_open: i32,
+    gap_extend: i32,
+    x_drop: i32,
+    scratch: &mut GapAlignScratch,
+    fence_hit: &mut bool,
+) -> (usize, usize, i32, Vec<GapEditOp>) {
     if len1 == 0 || len2 == 0 {
         return (0, 0, 0, Vec::new());
     }
@@ -1338,36 +1626,6 @@ fn align_ex_protein(
     let mut b_offset = 0usize;
     let mut first_b_index = 0usize;
 
-    // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_gapalign.c:471-482
-    // ```c
-    // if(reverse_sequence)
-    //     matrix_row = matrix[ A[ M - a_index ] ];
-    // else
-    //     matrix_row = matrix[ A[ a_index ] ];
-    // ```
-    //
-    // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_gapalign.c:484-487
-    // ```c
-    // if(reverse_sequence)
-    //     b_ptr = &B[N - first_b_index];
-    // else
-    //     b_ptr = &B[first_b_index];
-    // ```
-    let get_q = |index: usize| -> u8 {
-        if reverse {
-            q_seq[len1 - index]
-        } else {
-            q_seq[index]
-        }
-    };
-    let get_s = |index: usize| -> u8 {
-        if reverse {
-            s_seq[len2 - 1 - index]
-        } else {
-            s_seq[index + 1]
-        }
-    };
-
     for a_index in 1..=len1 {
         if a_index >= edit_script_num_rows {
             edit_script_num_rows *= 2;
@@ -1396,7 +1654,7 @@ fn align_ex_protein(
             row_capacity,
             orig_b_index,
         );
-        let qc = get_q(a_index);
+        let qc = blastp_query_residue::<REVERSE>(q_seq, 0, len1, a_index);
 
         let mut score_val = GAP_MININT;
         let mut score_gap_row = GAP_MININT;
@@ -1418,7 +1676,11 @@ fn align_ex_protein(
         let mut row_end_b_index = b_size;
 
         for b_index in first_b_index..b_size {
-            let sc = if b_index < len2 { get_s(b_index) } else { 0 };
+            let sc = if b_index < len2 {
+                blastp_subject_residue::<REVERSE>(s_seq, 0, len2, b_index)
+            } else {
+                0
+            };
             let score_gap_col = scratch.dp_mem[b_index].best_gap;
             // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_gapalign.c:571-573
             // ```c
@@ -1435,7 +1697,8 @@ fn align_ex_protein(
                 *fence_hit = true;
                 break;
             }
-            let next_score = scratch.dp_mem[b_index].best + score_matrix.score(qc, sc);
+            let next_score =
+                scratch.dp_mem[b_index].best + score_matrix.score_hot_path::<BLOSUM62>(qc, sc);
 
             let mut script = SCRIPT_SUB;
             if score_val < score_gap_col {
@@ -1666,11 +1929,53 @@ pub(crate) fn blast_gapped_alignment_with_traceback(
         return None;
     }
 
+    // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_kappa.c:1914-1944
+    // ```c
+    // BlastGapAlignStruct* gapAlign = context->gap_align;
+    // ...
+    // BLAST_GappedAlignmentWithTraceback(..., gapAlign, ...);
+    // ```
+    let mut scratch = GapAlignScratch::new();
+    blast_gapped_alignment_with_traceback_with_scratch(
+        query,
+        subject,
+        q_start,
+        s_start,
+        matrix,
+        adjusted_matrix,
+        gap_open,
+        gap_extend,
+        x_drop,
+        &mut scratch,
+    )
+}
+
+// NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_kappa.c:1914-1944
+// ```c
+// BlastGapAlignStruct* gapAlign = context->gap_align;
+// gapAlign->gap_x_dropoff = gapping_params->x_dropoff;
+// status = BLAST_GappedAlignmentWithTraceback(..., gapAlign, ...);
+// ```
+pub(crate) fn blast_gapped_alignment_with_traceback_with_scratch(
+    query: &[u8],
+    subject: &[u8],
+    q_start: usize,
+    s_start: usize,
+    matrix: ScoringMatrix,
+    adjusted_matrix: Option<&AdjustedProteinMatrix>,
+    gap_open: i32,
+    gap_extend: i32,
+    x_drop: i32,
+    scratch: &mut GapAlignScratch,
+) -> Option<BlastpGapAlignResult> {
+    if q_start >= query.len() || s_start >= subject.len() {
+        return None;
+    }
+
     let score_matrix = adjusted_matrix.map_or(BlastpScoreMatrix::standard(matrix), |matrix| {
         BlastpScoreMatrix::Adjusted(matrix)
     });
 
-    let mut scratch = GapAlignScratch::new();
     let mut fence_hit = false;
 
     // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_gapalign.c:4599-4611
@@ -1691,7 +1996,7 @@ pub(crate) fn blast_gapped_alignment_with_traceback(
         gap_extend,
         x_drop,
         true,
-        &mut scratch,
+        scratch,
         &mut fence_hit,
     );
     let mut query_start = q_start + 1 - left_q;
@@ -1729,7 +2034,7 @@ pub(crate) fn blast_gapped_alignment_with_traceback(
                 gap_extend,
                 x_drop,
                 false,
-                &mut scratch,
+                scratch,
                 &mut fence_hit,
             );
             (

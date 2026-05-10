@@ -131,6 +131,32 @@ struct BlastpSubjectResult {
     query_hsp_lists: Vec<(usize, BlastpHspList)>,
 }
 
+impl BlastpSubjectResult {
+    // NCBI reference: /mnt/c/Users/genom/GitHub/ncbi-blast/c++/src/algo/blast/core/blast_engine.c:1553-1554
+    // ```c
+    // /* Save the results. */
+    // status = BlastHSPStreamWrite(hsp_stream, &hsp_list);
+    // ```
+    fn new(subject_index: usize) -> Self {
+        Self {
+            subject_index,
+            query_hsp_lists: Vec::new(),
+        }
+    }
+
+    // NCBI reference: /mnt/c/Users/genom/GitHub/ncbi-blast/c++/src/algo/blast/core/blast_engine.c:1409-1554
+    // ```c
+    // while ((seq_arg.oid = BlastSeqSrcIteratorNext(seq_src, itr)) != BLAST_SEQSRC_EOF) {
+    //     status = s_BlastSearchEngineCore(..., &hsp_list, ...);
+    //     status = BlastHSPStreamWrite(hsp_stream, &hsp_list);
+    // }
+    // ```
+    fn reset(&mut self, subject_index: usize) {
+        self.subject_index = subject_index;
+        self.query_hsp_lists.clear();
+    }
+}
+
 // NCBI reference: /mnt/c/Users/genom/GitHub/ncbi-blast/c++/src/algo/blast/core/blast_engine.c:991-1041
 // ```c
 // aux_struct->offset_pairs =
@@ -815,11 +841,15 @@ fn blastp_subject_diag_offsets(subjects: &[EncodedProtein], window: i32) -> Vec<
 // ```
 fn update_blastp_preliminary_hit_lists(
     preliminary_hit_lists: &mut [Option<BlastpHitList>],
-    subject_result: BlastpSubjectResult,
+    subject_result: &mut BlastpSubjectResult,
     prelim_hitlist_size: usize,
 ) {
     let _subject_index = subject_result.subject_index;
-    for (q_idx, provisional_hsp_list) in subject_result.query_hsp_lists {
+    // NCBI reference: ncbi-blast/c++/src/algo/blast/core/hspfilter_collector.c:139-159
+    // ```c
+    // Blast_HitListUpdate(results->hitlist_array[0], hsp_list);
+    // ```
+    for (q_idx, provisional_hsp_list) in subject_result.query_hsp_lists.drain(..) {
         let provisional_hit_list = preliminary_hit_lists[q_idx]
             .get_or_insert_with(|| BlastpHitList::new(prelim_hitlist_size));
         provisional_hit_list.update(provisional_hsp_list);
@@ -2074,16 +2104,19 @@ fn query_nomask_sequence(ctx: &QueryContext) -> &[u8] {
     &query_nomask_full[1..query_nomask_full.len() - 1]
 }
 
+// NCBI reference: /mnt/c/Users/genom/GitHub/ncbi-blast/c++/src/algo/blast/core/blast_engine.c:1554
+// ```c
+// status = BlastHSPStreamWrite(hsp_stream, &hsp_list);
+// ```
 fn build_pairwise_hits(
-    hits: &[Hit],
+    hits: Vec<Hit>,
     query_contexts: &[QueryContext],
     subjects: &[EncodedProtein],
     subject_titles: &[Option<String>],
     matrix: ScoringMatrix,
     render_alignment: bool,
 ) -> Vec<PairwiseHit> {
-    hits.iter()
-        .cloned()
+    hits.into_iter()
         .map(|hit| {
             let q_idx = hit.q_idx as usize;
             let s_idx = hit.s_idx as usize;
@@ -3579,7 +3612,17 @@ fn run_resolved_with_records(
     //    BlastHSPStreamWrite(hsp_stream, &hsp_list);
     // }
     // ```
-    let process_subject = |scratch: &mut BlastpSubjectScratch, s_idx: usize| {
+    let process_subject = |scratch: &mut BlastpSubjectScratch,
+                           s_idx: usize,
+                           subject_result: &mut BlastpSubjectResult| {
+        // NCBI reference: /mnt/c/Users/genom/GitHub/ncbi-blast/c++/src/algo/blast/core/blast_engine.c:1409-1554
+        // ```c
+        // while ((seq_arg.oid = BlastSeqSrcIteratorNext(seq_src, itr)) != BLAST_SEQSRC_EOF) {
+        //     status = s_BlastSearchEngineCore(..., &hsp_list, ...);
+        //     status = BlastHSPStreamWrite(hsp_stream, &hsp_list);
+        // }
+        // ```
+        subject_result.reset(s_idx);
         let subject = &subjects[s_idx];
         // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_util.c:112-121
         // ```c
@@ -4138,10 +4181,6 @@ fn run_resolved_with_records(
             query_ids.len(),
             &mut preliminary_hits_by_query,
         );
-        let mut subject_result = BlastpSubjectResult {
-            subject_index: s_idx,
-            query_hsp_lists: Vec::new(),
-        };
         for (q_idx, preliminary_hits) in preliminary_hits_by_query
             .iter_mut()
             .take(query_ids.len())
@@ -4191,7 +4230,6 @@ fn run_resolved_with_records(
         scratch.restricted_align_array.clear();
         scratch.preliminary_hsp_list = preliminary_hsp_list;
         scratch.preliminary_hits_by_query = preliminary_hits_by_query;
-        subject_result
     };
 
     // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_engine.c:1409-1498
@@ -4238,17 +4276,19 @@ fn run_resolved_with_records(
                         },
                         |scratch, (s_idx, _subject)| {
                             scratch.prepare_independent_subject(subject_diag_offsets[s_idx]);
-                            process_subject(scratch, s_idx)
+                            let mut subject_result = BlastpSubjectResult::new(s_idx);
+                            process_subject(scratch, s_idx, &mut subject_result);
+                            subject_result
                         },
                     )
                     .collect()
             });
             let merge_sort_start = blastp_timing_start(timing_enabled);
             subject_results.sort_by_key(|result| result.subject_index);
-            for subject_result in subject_results {
+            for mut subject_result in subject_results {
                 update_blastp_preliminary_hit_lists(
                     &mut preliminary_hit_lists,
-                    subject_result,
+                    &mut subject_result,
                     prelim_hitlist_size,
                 );
             }
@@ -4263,12 +4303,13 @@ fn run_resolved_with_records(
     } else {
         let mut scratch =
             BlastpSubjectScratch::new(offset_array_size, diag_array_size, window, total_query_span);
+        let mut subject_result = BlastpSubjectResult::new(0);
         for s_idx in 0..subjects.len() {
-            let subject_result = process_subject(&mut scratch, s_idx);
+            process_subject(&mut scratch, s_idx, &mut subject_result);
             let merge_sort_start = blastp_timing_start(timing_enabled);
             update_blastp_preliminary_hit_lists(
                 &mut preliminary_hit_lists,
-                subject_result,
+                &mut subject_result,
                 prelim_hitlist_size,
             );
             if let Some(timing) = timing.as_ref() {
@@ -4307,6 +4348,32 @@ fn run_resolved_with_records(
     // ```
     let kappa_redo_start = blastp_timing_start(timing_enabled);
     let mut composition_workspace = BlastCompositionWorkspace::new_blosum62();
+    // NCBI reference: /mnt/c/Users/genom/GitHub/ncbi-blast/c++/src/algo/blast/core/blast_kappa.c:3656-3667
+    // ```c
+    // s_HSPListFromDistinctAlignments(hsp_list,
+    //         &alignments[context_index],
+    //         matchingSeq.index,
+    //         queryInfo, qframe);
+    // BlastCompo_AlignmentsFree(&incoming_aligns, NULL);
+    // ```
+    let mut kappa_preliminary_hits = Vec::new();
+    // NCBI reference: /mnt/c/Users/genom/GitHub/ncbi-blast/c++/src/algo/blast/core/blast_kappa.c:3017-3019
+    // ```c
+    // /* keeps track of gapped alignment params */
+    // BlastGapAlignStruct* gapAlign = NULL;
+    // ```
+    //
+    // NCBI reference: /mnt/c/Users/genom/GitHub/ncbi-blast/c++/src/algo/blast/core/blast_kappa.c:1934-1942
+    // ```c
+    // status =
+    //     BLAST_GappedAlignmentWithTraceback(..., gapAlign,
+    //                                        context->scoringParams,
+    //                                        q_start, s_start,
+    //                                        query_data->length,
+    //                                        subject_data->length,
+    //                                        &fence_hit);
+    // ```
+    let mut kappa_gap_scratch = GapAlignScratch::new();
 
     for q_idx in 0..query_ids.len() {
         let local_scaling_factor =
@@ -4452,12 +4519,21 @@ fn run_resolved_with_records(
             .take(preliminary_hit_list.hsplist_count)
         {
             let s_idx = local_match.oid;
-            let preliminary_hits: Vec<BlastpPreliminaryHsp> = local_match
-                .hsps
-                .iter()
-                .map(preliminary_hit_from_local_match_hsp)
-                .collect();
-            if preliminary_hits.is_empty() {
+            // NCBI reference: /mnt/c/Users/genom/GitHub/ncbi-blast/c++/src/algo/blast/core/blast_kappa.c:3612-3619
+            // ```c
+            // localMatch->hsp_array,  /* i */
+            // localMatch->hspcnt,     /* i */
+            // ...
+            // *pStatusCode = s_ResultHspToDistinctAlign(...);
+            // ```
+            kappa_preliminary_hits.clear();
+            kappa_preliminary_hits.extend(
+                local_match
+                    .hsps
+                    .iter()
+                    .map(preliminary_hit_from_local_match_hsp),
+            );
+            if kappa_preliminary_hits.is_empty() {
                 continue;
             }
 
@@ -4476,7 +4552,7 @@ fn run_resolved_with_records(
             }
 
             let postprocessed = postprocess_preliminary_hits(
-                preliminary_hits,
+                &kappa_preliminary_hits,
                 &query_workspace,
                 &mut composition_workspace,
                 query_nomask,
@@ -4486,6 +4562,7 @@ fn run_resolved_with_records(
                 &gapped_gumbel,
                 &redo_align_params,
                 args.evalue,
+                &mut kappa_gap_scratch,
             )?;
             let best_score = postprocessed.best_score;
             let best_evalue = postprocessed.best_evalue;
@@ -4534,6 +4611,10 @@ fn run_resolved_with_records(
         }
     }
 
+    // NCBI reference: /mnt/c/Users/genom/GitHub/ncbi-blast/c++/src/algo/blast/core/blast_engine.c:1554
+    // ```c
+    // status = BlastHSPStreamWrite(hsp_stream, &hsp_list);
+    // ```
     let final_hits = collect_hits_from_hit_lists(&hit_lists);
     let query_header = query_headers.first().cloned();
     let subject_name_label = if subject_label.is_empty() {
@@ -4578,7 +4659,7 @@ fn run_resolved_with_records(
         OutputFormat::Pairwise | OutputFormat::Tabular | OutputFormat::TabularWithComments
     ) {
         Some(build_pairwise_hits(
-            &final_hits,
+            final_hits,
             &contexts,
             &subjects,
             &subject_titles,

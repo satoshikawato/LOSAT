@@ -300,6 +300,14 @@ pub(crate) struct GapAlignScratch {
     trace_rows: Vec<Vec<u8>>,
     trace_offsets: Vec<usize>,
     trace_rows_used: usize,
+    // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_gapalign.c:689-726
+    // ```c
+    // while (a_index > 0 || b_index > 0) {
+    //     ...
+    //     GapPrelimEditBlockAdd(edit_block, (EGapAlignOpType)script, 1);
+    // }
+    // ```
+    trace_ops_reversed: Vec<(u8, u32)>,
 }
 
 impl GapAlignScratch {
@@ -323,6 +331,11 @@ impl GapAlignScratch {
             trace_rows: Vec::with_capacity(100),
             trace_offsets: Vec::with_capacity(100),
             trace_rows_used: 0,
+            // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_gapalign.c:689-726
+            // ```c
+            // GapPrelimEditBlockAdd(edit_block, (EGapAlignOpType)script, 1);
+            // ```
+            trace_ops_reversed: Vec::new(),
         }
     }
 }
@@ -1815,7 +1828,14 @@ fn align_ex_protein_impl<const BLOSUM62: bool, const REVERSE: bool>(
     let mut a_index = a_offset;
     let mut b_index = b_offset;
     let mut script = SCRIPT_SUB;
-    let mut ops_reversed: Vec<(u8, u32)> = Vec::new();
+    // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_gapalign.c:689-726
+    // ```c
+    // while (a_index > 0 || b_index > 0) {
+    //     ...
+    //     GapPrelimEditBlockAdd(edit_block, (EGapAlignOpType)script, 1);
+    // }
+    // ```
+    scratch.trace_ops_reversed.clear();
 
     // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_gapalign.c:686-687
     // ```c
@@ -1875,10 +1895,10 @@ fn align_ex_protein_impl<const BLOSUM62: bool, const REVERSE: bool>(
                 b_index -= 1;
             }
         }
-        push_trace_op(&mut ops_reversed, op_type);
+        push_trace_op(&mut scratch.trace_ops_reversed, op_type);
     }
 
-    let mut edit_ops = Vec::new();
+    let mut edit_ops = Vec::with_capacity(scratch.trace_ops_reversed.len());
     // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_gapalign.c:689-726
     // ```c
     // while (a_index > 0 || b_index > 0) {
@@ -1898,7 +1918,7 @@ fn align_ex_protein_impl<const BLOSUM62: bool, const REVERSE: bool>(
     // `ALIGN_EX` must therefore return the preliminary traceback in the
     // `GapPrelimEditBlockAdd` insertion order for both directions. Only
     // `Blast_PrelimEditBlockToGapEditScript` reverses the forward half.
-    for (op_type, count) in ops_reversed {
+    for (op_type, count) in scratch.trace_ops_reversed.drain(..) {
         match op_type {
             x if x == SCRIPT_SUB => edit_ops.push(GapEditOp::Sub(count)),
             x if x == SCRIPT_GAP_IN_A => edit_ops.push(GapEditOp::Del(count)),

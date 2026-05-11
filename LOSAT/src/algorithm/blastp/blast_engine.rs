@@ -2076,6 +2076,79 @@ fn blastp_tabular_field_text(
     }
 }
 
+// NCBI reference: /mnt/c/Users/genom/GitHub/ncbi-blast/c++/src/objtools/align_format/tabular.cpp:1100-1108
+// ```c
+// void CBlastTabularInfo::Print()
+// {
+//     ITERATE(list<ETabularField>, iter, m_FieldsToShow) {
+//         if (iter != m_FieldsToShow.begin())
+//             m_Ostream << m_FieldDelimiter;
+//         x_PrintField(*iter);
+//     }
+//     m_Ostream << "\n";
+// }
+// ```
+fn write_blastp_hsp_tabular_field<W: Write>(
+    writer: &mut W,
+    field: BlastpTabularField,
+    hsp: &BlastpHsp,
+    query_id: &str,
+    subject_id: &str,
+    subject_length: usize,
+    subject_title: Option<&str>,
+) -> std::io::Result<()> {
+    match field {
+        BlastpTabularField::QuerySeqId | BlastpTabularField::QueryAccessionVersion => {
+            writer.write_all(query_id.as_bytes())
+        }
+        BlastpTabularField::QueryLength => write!(writer, "{}", hsp.query_length),
+        BlastpTabularField::SubjectSeqId | BlastpTabularField::SubjectAccessionVersion => {
+            writer.write_all(subject_id.as_bytes())
+        }
+        BlastpTabularField::SubjectLength => write!(writer, "{subject_length}"),
+        BlastpTabularField::QueryStart => write!(writer, "{}", hsp.q_start),
+        BlastpTabularField::QueryEnd => write!(writer, "{}", hsp.q_end),
+        BlastpTabularField::SubjectStart => write!(writer, "{}", hsp.s_start),
+        BlastpTabularField::SubjectEnd => write!(writer, "{}", hsp.s_end),
+        BlastpTabularField::QuerySeq
+        | BlastpTabularField::SubjectSeq
+        | BlastpTabularField::Btop => Ok(()),
+        BlastpTabularField::Evalue => {
+            writer.write_all(format_evalue_ncbi_tabular(hsp.e_value).as_bytes())
+        }
+        BlastpTabularField::BitScore => {
+            writer.write_all(format_bitscore_ncbi(hsp.bit_score).as_bytes())
+        }
+        BlastpTabularField::Score => write!(writer, "{}", hsp.raw_score),
+        BlastpTabularField::AlignmentLength => write!(writer, "{}", hsp.length),
+        BlastpTabularField::PercentIdentical => write!(writer, "{:.3}", hsp.identity),
+        BlastpTabularField::NumIdentical => write!(writer, "{}", hsp.num_ident),
+        BlastpTabularField::Mismatches => write!(writer, "{}", hsp.mismatch),
+        BlastpTabularField::Positives => write!(writer, "{}", hsp.num_positives),
+        BlastpTabularField::GapOpenings => write!(writer, "{}", hsp.gapopen),
+        BlastpTabularField::Gaps => write!(
+            writer,
+            "{}",
+            hsp.length
+                .saturating_sub(hsp.num_ident.saturating_add(hsp.mismatch))
+        ),
+        BlastpTabularField::PercentPositives => {
+            let ppos = if hsp.length > 0 {
+                (hsp.num_positives as f64 / hsp.length as f64) * 100.0
+            } else {
+                0.0
+            };
+            write!(writer, "{ppos:.2}")
+        }
+        BlastpTabularField::QueryFrame => writer.write_all(b"1"),
+        BlastpTabularField::SubjectFrame => writer.write_all(b"1"),
+        BlastpTabularField::Frames => writer.write_all(b"1/1"),
+        BlastpTabularField::SubjectTitle => {
+            writer.write_all(subject_title.unwrap_or_default().as_bytes())
+        }
+    }
+}
+
 // NCBI reference: /mnt/c/Users/genom/GitHub/ncbi-blast/c++/src/algo/blast/format/blast_format.cpp:68-93
 // ```c
 // CBlastFormat::CBlastFormat(..., CNcbiOstream& outfile, ...)
@@ -2166,15 +2239,17 @@ fn blastp_hit_list_hsp_count(hit_lists: &[Option<BlastpHitList>]) -> usize {
 // }
 // m_Ostream << "\n";
 // ```
-fn write_blastp_default_tabular_hit_lists(
+fn write_blastp_tabular_hit_lists(
     hit_lists: &[Option<BlastpHitList>],
+    fields: &[BlastpTabularField],
     outfmt: OutputFormat,
     writer: &mut impl Write,
     query_ids: &[Arc<str>],
     subject_ids: &[Arc<str>],
+    subjects: &[EncodedProtein],
+    subject_titles: &[Option<String>],
     context: &ReportContext,
 ) -> Result<()> {
-    let fields = default_blastp_tabular_fields();
     if outfmt == OutputFormat::TabularWithComments {
         write_blastp_outfmt7_header(
             writer,
@@ -2185,6 +2260,7 @@ fn write_blastp_default_tabular_hit_lists(
     }
 
     let config = OutputConfig::ncbi_compat();
+    let use_default_fields = fields == default_blastp_tabular_fields();
     for hit_list_opt in hit_lists {
         let Some(hit_list) = hit_list_opt else {
             continue;
@@ -2206,22 +2282,47 @@ fn write_blastp_default_tabular_hit_lists(
                     .get(hsp.s_idx as usize)
                     .map(|id| id.as_ref())
                     .unwrap_or("unknown");
-                write_hit_fields(
-                    writer,
-                    query_id,
-                    subject_id,
-                    hsp.identity,
-                    hsp.length,
-                    hsp.mismatch,
-                    hsp.gapopen,
-                    hsp.q_start,
-                    hsp.q_end,
-                    hsp.s_start,
-                    hsp.s_end,
-                    hsp.e_value,
-                    hsp.bit_score,
-                    &config,
-                )?;
+                if use_default_fields {
+                    write_hit_fields(
+                        writer,
+                        query_id,
+                        subject_id,
+                        hsp.identity,
+                        hsp.length,
+                        hsp.mismatch,
+                        hsp.gapopen,
+                        hsp.q_start,
+                        hsp.q_end,
+                        hsp.s_start,
+                        hsp.s_end,
+                        hsp.e_value,
+                        hsp.bit_score,
+                        &config,
+                    )?;
+                    continue;
+                }
+                let subject_length = subjects
+                    .get(hsp.s_idx as usize)
+                    .map(|subject| subject.aa_len)
+                    .unwrap_or_default();
+                let subject_title = subject_titles
+                    .get(hsp.s_idx as usize)
+                    .and_then(|title| title.as_deref());
+                for (index, field) in fields.iter().enumerate() {
+                    if index > 0 {
+                        writer.write_all(b"\t")?;
+                    }
+                    write_blastp_hsp_tabular_field(
+                        writer,
+                        *field,
+                        hsp,
+                        query_id,
+                        subject_id,
+                        subject_length,
+                        subject_title,
+                    )?;
+                }
+                writer.write_all(b"\n")?;
             }
         }
     }
@@ -4930,10 +5031,10 @@ fn run_resolved_with_records(
     //     x_PrintField(*iter);
     // }
     // ```
-    let stream_default_tabular = matches!(
+    let stream_tabular_hit_lists = matches!(
         outfmt,
         OutputFormat::Tabular | OutputFormat::TabularWithComments
-    ) && custom_fields.is_none();
+    ) && !render_alignment;
     // NCBI reference: /mnt/c/Users/genom/GitHub/ncbi-blast/c++/src/algo/blast/core/blast_hspstream.c:271-327
     // ```c
     // *hsp_list_out = hit_list->hsplist_array[last_hsplist_index];
@@ -4944,7 +5045,7 @@ fn run_resolved_with_records(
         || (matches!(
             outfmt,
             OutputFormat::Tabular | OutputFormat::TabularWithComments
-        ) && !stream_default_tabular)
+        ) && !stream_tabular_hit_lists)
     {
         Some(collect_hits_from_hit_lists(&hit_lists))
     } else {
@@ -4953,7 +5054,7 @@ fn run_resolved_with_records(
     let pairwise_hits = if matches!(
         outfmt,
         OutputFormat::Pairwise | OutputFormat::Tabular | OutputFormat::TabularWithComments
-    ) && !stream_default_tabular
+    ) && !stream_tabular_hit_lists
     {
         Some(build_pairwise_hits(
             final_hits.expect("final hits collected for rendered blastp output"),
@@ -5051,7 +5152,7 @@ fn run_resolved_with_records(
                 args.out.as_ref(),
                 in_memory_output.as_mut().map(|output| &mut **output),
             )?;
-            if stream_default_tabular {
+            if stream_tabular_hit_lists {
                 // NCBI reference: /mnt/c/Users/genom/GitHub/ncbi-blast/c++/src/objtools/align_format/tabular.cpp:1100-1108
                 // ```c
                 // ITERATE(list<ETabularField>, iter, m_FieldsToShow) {
@@ -5060,12 +5161,15 @@ fn run_resolved_with_records(
                 //     x_PrintField(*iter);
                 // }
                 // ```
-                write_blastp_default_tabular_hit_lists(
+                write_blastp_tabular_hit_lists(
                     &hit_lists,
+                    fields,
                     outfmt,
                     &mut writer,
                     &query_ids,
                     &subject_ids,
+                    &subjects,
+                    &subject_titles,
                     &context,
                 )?;
             } else {
@@ -6084,6 +6188,50 @@ mod tests {
             ),
             "2-D1"
         );
+    }
+
+    // NCBI reference: /mnt/c/Users/genom/GitHub/ncbi-blast/c++/src/objtools/align_format/tabular.cpp:1100-1108
+    // ```c
+    // ITERATE(list<ETabularField>, iter, m_FieldsToShow) {
+    //     if (iter != m_FieldsToShow.begin())
+    //         m_Ostream << m_FieldDelimiter;
+    //     x_PrintField(*iter);
+    // }
+    // ```
+    #[test]
+    fn test_blastp_hsp_tabular_field_matches_pairwise_metadata_without_alignment_text() {
+        let mut pairwise_hit = make_pairwise_hit();
+        pairwise_hit.gaps = Some(pairwise_hit.hit.gap_letters());
+        let hsp = BlastpHsp::from_hit(pairwise_hit.hit.clone());
+        let fields = [
+            BlastpTabularField::QueryAccessionVersion,
+            BlastpTabularField::SubjectAccessionVersion,
+            BlastpTabularField::QueryLength,
+            BlastpTabularField::SubjectLength,
+            BlastpTabularField::Positives,
+            BlastpTabularField::Gaps,
+            BlastpTabularField::PercentPositives,
+            BlastpTabularField::Frames,
+            BlastpTabularField::SubjectTitle,
+        ];
+
+        for field in fields {
+            let mut rendered = Vec::new();
+            write_blastp_hsp_tabular_field(
+                &mut rendered,
+                field,
+                &hsp,
+                "query1",
+                "subject1",
+                30,
+                Some("subject description"),
+            )
+            .expect("tabular field writes");
+            assert_eq!(
+                String::from_utf8(rendered).expect("tabular field is UTF-8"),
+                blastp_tabular_field_text(field, &pairwise_hit, "query1", "subject1")
+            );
+        }
     }
 
     // NCBI reference: /mnt/c/Users/genom/GitHub/ncbi-blast/c++/src/algo/blast/core/blast_options.c:1163-1169

@@ -24,6 +24,15 @@ pub const COMPRESSED_HITS_PER_OVERFLOW_CELL: usize = 4;
 pub const COMPRESSED_OVERFLOW_CELLS_IN_BANK: usize = 209_710;
 pub const COMPRESSED_OVERFLOW_MAX_BANKS: usize = 1024;
 
+// NCBI reference: /mnt/c/Users/genom/GitHub/ncbi-blast/c++/src/algo/blast/core/blast_aalookup.c:1303-1306
+// ```c
+// /* compute a custom score matrix, for use only
+//    with lookup table creation. The matrix dimensions
+//    are BLASTAA_SIZE x compressed_alphabet_size, and
+//    the score entries are scaled up by kMatrixScale */
+// ```
+pub type CompressedScoreMatrix = [[i32; BLASTAA_SIZE]; BLASTAA_SIZE];
+
 // NCBI reference: ncbi-blast/c++/include/algo/blast/core/blast_aalookup.h:203-208
 // ```c
 // typedef struct CompressedOverflowCell {
@@ -146,11 +155,19 @@ pub struct BlastCompressedAaLookupTable {
     pub exact_matches: i32,
 }
 
+// NCBI reference: /mnt/c/Users/genom/GitHub/ncbi-blast/c++/src/algo/blast/core/blast_aalookup.c:935-952
+// ```c
+// typedef struct CompressedNeighborInfo {
+//     Int4 row_max[BLASTAA_SIZE];
+//     Int4 matrixSorted[BLASTAA_SIZE][BLASTAA_SIZE];
+//     Uint1 matrixSortedChar[BLASTAA_SIZE][BLASTAA_SIZE];
+// } CompressedNeighborInfo;
+// ```
 #[derive(Clone, Debug)]
 pub struct CompressedNeighborInfo {
     row_max: [i32; BLASTAA_SIZE],
-    matrix_sorted: Vec<Vec<i32>>,
-    matrix_sorted_char: Vec<Vec<u8>>,
+    matrix_sorted: CompressedScoreMatrix,
+    matrix_sorted_char: [[u8; BLASTAA_SIZE]; BLASTAA_SIZE],
 }
 
 // NCBI reference: /mnt/c/Users/genom/GitHub/ncbi-blast/c++/src/algo/blast/core/blast_aalookup.c:1289-1320
@@ -213,10 +230,15 @@ impl BlastCompressedAaLookupTable {
     // ```
     fn compressed_list_get_new_cell(&mut self) -> usize {
         let cell_index = self.overflow_cells.len();
+        let max_cells = COMPRESSED_OVERFLOW_CELLS_IN_BANK * COMPRESSED_OVERFLOW_MAX_BANKS;
         assert!(
-            cell_index < COMPRESSED_OVERFLOW_CELLS_IN_BANK * COMPRESSED_OVERFLOW_MAX_BANKS,
+            cell_index < max_cells,
             "NCBI BLAST compressed overflow bank capacity exceeded"
         );
+        if cell_index == self.overflow_cells.capacity() {
+            let additional = COMPRESSED_OVERFLOW_CELLS_IN_BANK.min(max_cells - cell_index);
+            self.overflow_cells.reserve_exact(additional);
+        }
         self.overflow_cells.push(CompressedOverflowCell::default());
         cell_index
     }
@@ -268,10 +290,13 @@ impl BlastCompressedAaLookupTable {
                 query_offsets[(num_entries - 1) as usize] = query_offset;
             }
             5 => {
-                let CompressedBackbonePayload::Inline(query_offsets) =
-                    self.backbone[index].payload.clone()
-                else {
-                    unreachable!("NCBI BLAST overflow list cannot exist before entry 6");
+                let query_offsets = {
+                    let CompressedBackbonePayload::Inline(query_offsets) =
+                        &self.backbone[index].payload
+                    else {
+                        unreachable!("NCBI BLAST overflow list cannot exist before entry 6");
+                    };
+                    *query_offsets
                 };
                 let new_cell = self.compressed_list_get_new_cell();
                 self.overflow_cells[new_cell].next = None;
@@ -383,7 +408,7 @@ impl BlastCompressedAaLookupTable {
     pub fn add_word_hits(
         &mut self,
         info: &CompressedNeighborInfo,
-        matrix: &[Vec<i32>],
+        matrix: &CompressedScoreMatrix,
         query: &[u8],
         query_offset: i32,
     ) {
@@ -502,7 +527,7 @@ impl BlastCompressedAaLookupTable {
     // ```
     pub fn add_neighboring_words(
         &mut self,
-        matrix: &[Vec<i32>],
+        matrix: &CompressedScoreMatrix,
         query: &[u8],
         locations: &[(i32, i32)],
     ) {
@@ -943,7 +968,7 @@ impl CompressedNeighborInfo {
     //     }
     // }
     // ```
-    pub fn new(matrix: &[Vec<i32>], compressed_alphabet_size: usize) -> Self {
+    pub fn new(matrix: &CompressedScoreMatrix, compressed_alphabet_size: usize) -> Self {
         let mut row_max = [0i32; BLASTAA_SIZE];
         for row in 0..BLASTAA_SIZE {
             row_max[row] = matrix[row][0];
@@ -952,19 +977,22 @@ impl CompressedNeighborInfo {
             }
         }
 
-        let mut matrix_sorted = vec![vec![0i32; compressed_alphabet_size]; BLASTAA_SIZE];
-        let mut matrix_sorted_char = vec![vec![0u8; compressed_alphabet_size]; BLASTAA_SIZE];
+        let mut matrix_sorted = [[0i32; BLASTAA_SIZE]; BLASTAA_SIZE];
+        let mut matrix_sorted_char = [[0u8; BLASTAA_SIZE]; BLASTAA_SIZE];
         for long_char in 0..BLASTAA_SIZE {
-            let mut sort_table: Vec<(i32, u8)> = (0..compressed_alphabet_size)
-                .map(|short_char| {
-                    (
-                        row_max[long_char] - matrix[long_char][short_char],
-                        short_char as u8,
-                    )
-                })
-                .collect();
-            sort_table.sort_by(|lhs, rhs| lhs.0.cmp(&rhs.0));
-            for (i, &(_, letter)) in sort_table.iter().enumerate() {
+            let mut sort_table = [(0i32, 0u8); BLASTAA_SIZE];
+            for (short_char, entry) in sort_table
+                .iter_mut()
+                .enumerate()
+                .take(compressed_alphabet_size)
+            {
+                *entry = (
+                    row_max[long_char] - matrix[long_char][short_char],
+                    short_char as u8,
+                );
+            }
+            sort_table[..compressed_alphabet_size].sort_by(|lhs, rhs| lhs.0.cmp(&rhs.0));
+            for (i, &(_, letter)) in sort_table[..compressed_alphabet_size].iter().enumerate() {
                 matrix_sorted[long_char][i] = matrix[long_char][letter as usize];
                 matrix_sorted_char[long_char][i] = letter;
             }
@@ -1142,14 +1170,14 @@ fn compressed_probabilities(compressed_alphabet_size: usize) -> Option<[f64; BLA
 // ```
 pub fn build_blosum62_compressed_score_matrix(
     compressed_alphabet_size: usize,
-) -> Option<Vec<Vec<i32>>> {
+) -> Option<CompressedScoreMatrix> {
     let reverse = build_compressed_reverse_lookup(compressed_alphabet_size)?;
     let compressed_prob = compressed_probabilities(compressed_alphabet_size)?;
     let ungapped = lookup_protein_params_ungapped(ScoringMatrix::Blosum62);
     let matrix_info = build_matrix_info(ScoringMatrix::Blosum62, ungapped.lambda).ok()?;
     let matrix_scale_factor = 100.0 / ungapped.lambda;
     let min_freq = BLAST_SCORE_MIN as f64 / matrix_scale_factor;
-    let mut scores = vec![vec![0i32; compressed_alphabet_size]; BLASTAA_SIZE];
+    let mut scores = [[0i32; BLASTAA_SIZE]; BLASTAA_SIZE];
 
     for q in 0..BLASTAA_SIZE {
         for (s, group) in reverse.iter().enumerate() {
@@ -1249,13 +1277,46 @@ pub fn compute_encoded_compressed_index(
     word: &[u8],
     compressed_alphabet_size: usize,
 ) -> usize {
-    let mut index = 0usize;
-    let mut scale = 1usize;
-    for &letter in word.iter().take(word_size) {
-        index += letter as usize * scale;
-        scale *= compressed_alphabet_size;
+    debug_assert!(word.len() >= word_size);
+    let a = compressed_alphabet_size;
+    let a2 = a * a;
+    let a3 = a2 * a;
+    let a4 = a3 * a;
+    match word_size {
+        5 => {
+            usize::from(word[0])
+                + usize::from(word[1]) * a
+                + usize::from(word[2]) * a2
+                + usize::from(word[3]) * a3
+                + usize::from(word[4]) * a4
+        }
+        6 => {
+            usize::from(word[0])
+                + usize::from(word[1]) * a
+                + usize::from(word[2]) * a2
+                + usize::from(word[3]) * a3
+                + usize::from(word[4]) * a4
+                + usize::from(word[5]) * a4 * a
+        }
+        7 => {
+            usize::from(word[0])
+                + usize::from(word[1]) * a
+                + usize::from(word[2]) * a2
+                + usize::from(word[3]) * a3
+                + usize::from(word[4]) * a4
+                + usize::from(word[5]) * a4 * a
+                + usize::from(word[6]) * a4 * a * a
+        }
+        _ => {
+            let mut index = 0usize;
+            let mut scale = 1usize;
+            for &letter in word.iter().take(word_size) {
+                index += letter as usize * scale;
+                scale *= compressed_alphabet_size;
+            }
+            index
+        }
     }
-    index
 }
 
 // NCBI reference: ncbi-blast/c++/include/algo/blast/core/blast_aalookup.h:304-322

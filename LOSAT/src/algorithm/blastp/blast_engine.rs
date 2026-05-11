@@ -41,8 +41,8 @@ use crate::core::composition_adjustment::redo_alignment::{
 };
 use crate::report::{
     format_bitscore_ncbi, format_evalue_ncbi_tabular, write_blastp_pairwise_report,
-    BlastpPairwiseQuery, BlastpPairwiseReport, OutputFormat, PairwiseConfig, PairwiseHit,
-    ReportContext,
+    write_hit_fields, BlastpPairwiseQuery, BlastpPairwiseReport, OutputConfig, OutputFormat,
+    PairwiseConfig, PairwiseHit, ReportContext,
 };
 use crate::stats::search_space::SearchSpace;
 use crate::stats::{
@@ -69,7 +69,10 @@ use super::hsp::{
     get_prelim_hitlist_size, reap_hsplist_by_evalue, trim_by_max_hsps, BlastCompoHeap,
     BlastpHitList, BlastpHsp, BlastpHspList,
 };
-use super::kappa::{build_query_workspace, postprocess_preliminary_hits, BlastRedoAlignParams};
+use super::kappa::{
+    blastp_kappa_range_counters_env_enabled, build_query_workspace, postprocess_preliminary_hits,
+    print_blastp_kappa_range_counters, reset_blastp_kappa_range_counters, BlastRedoAlignParams,
+};
 
 // NCBI reference: ncbi-blast/c++/include/algo/blast/core/blast_extend.h:142-154
 // ```c
@@ -261,6 +264,29 @@ struct BlastpTiming {
     scan_ungapped_calls: AtomicU64,
     preliminary_gapped_ns: AtomicU64,
     preliminary_gapped_calls: AtomicU64,
+    // NCBI reference: /mnt/c/Users/genom/GitHub/ncbi-blast/c++/src/algo/blast/core/blast_gapalign.c:3955-4009
+    // ```c
+    // if (restricted_alignment &&
+    //     gap_align->score < cutoff &&
+    //     gap_align->score >= restricted_cutoff) {
+    //     ...
+    //     Blast_IntervalTreeReset(tree);
+    //     ...
+    //     redo_index = index;
+    //     redo_query = query_index;
+    // }
+    // ```
+    preliminary_exact_retry_count: AtomicU64,
+    preliminary_retry_removed_hsps: AtomicU64,
+    preliminary_interval_tree_rebuilds: AtomicU64,
+    preliminary_interval_tree_rebuild_nodes: AtomicU64,
+    // NCBI reference: /mnt/c/Users/genom/GitHub/ncbi-blast/c++/src/algo/blast/core/blast_hits.c:2478-2525
+    // ```c
+    // qsort(hsp_array, hsp_count, sizeof(BlastHSP*), s_QueryOffsetCompareHSPs);
+    // ...
+    // qsort(hsp_array, hsp_count, sizeof(BlastHSP*), s_QueryEndCompareHSPs);
+    // ```
+    preliminary_endpoint_duplicates_purged: AtomicU64,
     prelim_merge_sort_ns: AtomicU64,
     prelim_merge_sort_calls: AtomicU64,
     kappa_redo_ns: AtomicU64,
@@ -281,6 +307,11 @@ impl BlastpTiming {
             scan_ungapped_calls: AtomicU64::new(0),
             preliminary_gapped_ns: AtomicU64::new(0),
             preliminary_gapped_calls: AtomicU64::new(0),
+            preliminary_exact_retry_count: AtomicU64::new(0),
+            preliminary_retry_removed_hsps: AtomicU64::new(0),
+            preliminary_interval_tree_rebuilds: AtomicU64::new(0),
+            preliminary_interval_tree_rebuild_nodes: AtomicU64::new(0),
+            preliminary_endpoint_duplicates_purged: AtomicU64::new(0),
             prelim_merge_sort_ns: AtomicU64::new(0),
             prelim_merge_sort_calls: AtomicU64::new(0),
             kappa_redo_ns: AtomicU64::new(0),
@@ -304,6 +335,16 @@ impl BlastpTiming {
     fn record_call(counter: &AtomicU64, calls: &AtomicU64, start: Option<Instant>) {
         Self::record_duration(counter, start);
         calls.fetch_add(1, AtomicOrdering::Relaxed);
+    }
+
+    // NCBI reference: /mnt/c/Users/genom/GitHub/ncbi-blast/c++/src/algo/blast/core/blast_engine.c:1633-1705
+    // ```c
+    // BLAST_PreliminarySearchEngine(..., diagnostics, ...);
+    // Blast_DiagnosticsUpdate(diagnostics, local_diagnostics);
+    // ```
+    #[inline]
+    fn record_count(counter: &AtomicU64, value: usize) {
+        counter.fetch_add(value.min(u64::MAX as usize) as u64, AtomicOrdering::Relaxed);
     }
 
     #[inline]
@@ -382,6 +423,14 @@ fn print_blastp_timing(timing: &BlastpTiming, total_start: Option<Instant>) {
         "[TIMING] blastp_prelim_gapped: {:.3}s (calls={})",
         BlastpTiming::seconds(&timing.preliminary_gapped_ns),
         BlastpTiming::calls(&timing.preliminary_gapped_calls)
+    );
+    eprintln!(
+        "[TIMING] blastp_prelim_exact_retries: {} (removed_hsps={}, interval_tree_rebuilds={}, rebuild_nodes={}, endpoint_duplicates_purged={})",
+        BlastpTiming::calls(&timing.preliminary_exact_retry_count),
+        BlastpTiming::calls(&timing.preliminary_retry_removed_hsps),
+        BlastpTiming::calls(&timing.preliminary_interval_tree_rebuilds),
+        BlastpTiming::calls(&timing.preliminary_interval_tree_rebuild_nodes),
+        BlastpTiming::calls(&timing.preliminary_endpoint_duplicates_purged)
     );
     eprintln!(
         "[TIMING] blastp_prelim_merge_sort: {:.3}s (calls={})",
@@ -855,6 +904,37 @@ fn update_blastp_preliminary_hit_lists(
         let provisional_hit_list = preliminary_hit_lists[q_idx]
             .get_or_insert_with(|| BlastpHitList::new(prelim_hitlist_size));
         provisional_hit_list.update(provisional_hsp_list);
+    }
+}
+
+// NCBI reference: /mnt/c/Users/genom/GitHub/ncbi-blast/c++/src/algo/blast/core/blast_engine.c:1553-1554
+// ```c
+// /* Save the results. */
+// status = BlastHSPStreamWrite(hsp_stream, &hsp_list);
+// ```
+//
+// NCBI reference: /mnt/c/Users/genom/GitHub/ncbi-blast/c++/src/algo/blast/core/blast_hspstream.c:271-327
+// ```c
+// if (!hsp_stream->results_sorted)
+//     BlastHSPStreamClose(hsp_stream);
+// *hsp_list_out = hit_list->hsplist_array[last_hsplist_index];
+// ```
+#[cfg(all(feature = "parallel", not(target_arch = "wasm32")))]
+fn merge_blastp_subject_results_in_order(
+    preliminary_hit_lists: &mut [Option<BlastpHitList>],
+    subject_results: Vec<Option<BlastpSubjectResult>>,
+    prelim_hitlist_size: usize,
+) {
+    for (subject_index, subject_result) in subject_results.into_iter().enumerate() {
+        let Some(mut subject_result) = subject_result else {
+            continue;
+        };
+        debug_assert_eq!(subject_result.subject_index, subject_index);
+        update_blastp_preliminary_hit_lists(
+            preliminary_hit_lists,
+            &mut subject_result,
+            prelim_hitlist_size,
+        );
     }
 }
 
@@ -2056,6 +2136,99 @@ fn write_blastp_tabular_output(
     Ok(())
 }
 
+// NCBI reference: /mnt/c/Users/genom/GitHub/ncbi-blast/c++/src/algo/blast/core/blast_hspstream.c:271-327
+// ```c
+// *hsp_list_out = hit_list->hsplist_array[last_hsplist_index];
+// (*hsp_list_out)->query_index = index;
+// --hit_list->hsplist_count;
+// ```
+fn blastp_hit_list_hsp_count(hit_lists: &[Option<BlastpHitList>]) -> usize {
+    hit_lists
+        .iter()
+        .filter_map(|hit_list| hit_list.as_ref())
+        .map(|hit_list| {
+            hit_list
+                .hsplist_array
+                .iter()
+                .take(hit_list.hsplist_count)
+                .map(|hsp_list| hsp_list.hsps.len())
+                .sum::<usize>()
+        })
+        .sum()
+}
+
+// NCBI reference: /mnt/c/Users/genom/GitHub/ncbi-blast/c++/src/objtools/align_format/tabular.cpp:1100-1108
+// ```c
+// ITERATE(list<ETabularField>, iter, m_FieldsToShow) {
+//     if (iter != m_FieldsToShow.begin())
+//         m_Ostream << m_FieldDelimiter;
+//     x_PrintField(*iter);
+// }
+// m_Ostream << "\n";
+// ```
+fn write_blastp_default_tabular_hit_lists(
+    hit_lists: &[Option<BlastpHitList>],
+    outfmt: OutputFormat,
+    writer: &mut impl Write,
+    query_ids: &[Arc<str>],
+    subject_ids: &[Arc<str>],
+    context: &ReportContext,
+) -> Result<()> {
+    let fields = default_blastp_tabular_fields();
+    if outfmt == OutputFormat::TabularWithComments {
+        write_blastp_outfmt7_header(
+            writer,
+            context,
+            fields,
+            blastp_hit_list_hsp_count(hit_lists),
+        )?;
+    }
+
+    let config = OutputConfig::ncbi_compat();
+    for hit_list_opt in hit_lists {
+        let Some(hit_list) = hit_list_opt else {
+            continue;
+        };
+        for hsp_list in hit_list.hsplist_array.iter().take(hit_list.hsplist_count) {
+            for hsp in &hsp_list.hsps {
+                // NCBI reference: /mnt/c/Users/genom/GitHub/ncbi-blast/c++/include/algo/blast/core/blast_hits.h:153-166
+                // ```c
+                // typedef struct BlastHSPList {
+                //    Int4 oid;
+                //    Int4 query_index;
+                // } BlastHSPList;
+                // ```
+                let query_id = query_ids
+                    .get(hsp.q_idx as usize)
+                    .map(|id| id.as_ref())
+                    .unwrap_or("unknown");
+                let subject_id = subject_ids
+                    .get(hsp.s_idx as usize)
+                    .map(|id| id.as_ref())
+                    .unwrap_or("unknown");
+                write_hit_fields(
+                    writer,
+                    query_id,
+                    subject_id,
+                    hsp.identity,
+                    hsp.length,
+                    hsp.mismatch,
+                    hsp.gapopen,
+                    hsp.q_start,
+                    hsp.q_end,
+                    hsp.s_start,
+                    hsp.s_end,
+                    hsp.e_value,
+                    hsp.bit_score,
+                    &config,
+                )?;
+            }
+        }
+    }
+
+    Ok(())
+}
+
 // NCBI reference: ncbi-blast/c++/src/objtools/align_format/showalign.cpp:2122-2149
 // ```c
 // if(sequence_standard[i]==sequence[i]){
@@ -2782,9 +2955,9 @@ fn preliminary_hits_share_query_end_endpoint(
 fn purge_sorted_preliminary_endpoint_duplicates(
     hits: &mut Vec<BlastpPreliminaryHsp>,
     same_endpoint: fn(&BlastpPreliminaryHsp, &BlastpPreliminaryHsp) -> bool,
-) {
+) -> usize {
     if hits.len() <= 1 {
-        return;
+        return 0;
     }
 
     let mut write_index = 1usize;
@@ -2797,7 +2970,9 @@ fn purge_sorted_preliminary_endpoint_duplicates(
         }
         write_index += 1;
     }
+    let removed = hits.len().saturating_sub(write_index);
     hits.truncate(write_index);
+    removed
 }
 
 // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_gapalign.c:3870-3878
@@ -2828,24 +3003,24 @@ fn blastp_query_index_from_preliminary_context(
 // ```
 fn purge_preliminary_hits_with_common_endpoints(
     mut hits: Vec<BlastpPreliminaryHsp>,
-) -> Vec<BlastpPreliminaryHsp> {
+) -> (Vec<BlastpPreliminaryHsp>, usize) {
     if hits.len() <= 1 {
-        return hits;
+        return (hits, 0);
     }
 
     ncbi_qsort_preliminary_hits(&mut hits, preliminary_query_offset_compare);
-    purge_sorted_preliminary_endpoint_duplicates(
+    let mut purged = purge_sorted_preliminary_endpoint_duplicates(
         &mut hits,
         preliminary_hits_share_query_offset_endpoint,
     );
 
     ncbi_qsort_preliminary_hits(&mut hits, preliminary_query_end_compare);
-    purge_sorted_preliminary_endpoint_duplicates(
+    purged += purge_sorted_preliminary_endpoint_duplicates(
         &mut hits,
         preliminary_hits_share_query_end_endpoint,
     );
 
-    hits
+    (hits, purged)
 }
 
 // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_engine.c:540-555
@@ -2875,12 +3050,13 @@ fn prepare_preliminary_hits_for_kappa(
 // ...
 // Blast_HSPListSortByScore(hsp_list);
 // ```
-fn prepare_preliminary_hits_for_kappa_in_place(hits: &mut Vec<BlastpPreliminaryHsp>) {
-    let purged = purge_preliminary_hits_with_common_endpoints(std::mem::take(hits));
+fn prepare_preliminary_hits_for_kappa_in_place(hits: &mut Vec<BlastpPreliminaryHsp>) -> usize {
+    let (purged, purged_count) = purge_preliminary_hits_with_common_endpoints(std::mem::take(hits));
     *hits = purged;
     if !preliminary_hits_is_sorted_by_score_ncbi(hits) {
         ncbi_qsort_preliminary_hits(hits, preliminary_score_compare);
     }
+    purged_count
 }
 
 // NCBI reference: ncbi-blast/c++/src/algo/blast/core/hspfilter_collector.c:117-149
@@ -2944,10 +3120,12 @@ fn remove_preliminary_hits_for_query(
     preliminary_hits: &mut Vec<BlastpPreliminaryHsp>,
     query_index: usize,
     contexts: &[QueryContext],
-) {
+) -> usize {
+    let before = preliminary_hits.len();
     preliminary_hits.retain(|hsp| {
         blastp_query_index_from_preliminary_context(contexts, hsp.query_context) != query_index
     });
+    before.saturating_sub(preliminary_hits.len())
 }
 
 // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_kappa.c:3577-3584
@@ -3016,8 +3194,9 @@ fn rebuild_preliminary_interval_tree_from_list(
     interval_tree: &mut BlastIntervalTree,
     preliminary_hits: &[BlastpPreliminaryHsp],
     contexts: &[QueryContext],
-) {
+) -> usize {
     interval_tree.reset();
+    let mut inserted = 0usize;
     for preliminary_hsp in preliminary_hits {
         let context_idx = usize::try_from(preliminary_hsp.query_context)
             .expect("preliminary blastp query context must be non-negative");
@@ -3026,7 +3205,9 @@ fn rebuild_preliminary_interval_tree_from_list(
             contexts[context_idx].frame_base,
             IndexMethod::QueryAndSubject,
         );
+        inserted += 1;
     }
+    inserted
 }
 
 // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_gapalign.c:3777-3786
@@ -3385,6 +3566,13 @@ fn run_resolved_with_records(
     //                               lookup_wrap, word_options, ext_params, ...);
     // ```
     let timing_enabled = blastp_timing_env_enabled();
+    let kappa_range_counters_enabled = blastp_kappa_range_counters_env_enabled();
+    // NCBI reference: /mnt/c/Users/genom/GitHub/ncbi-blast/c++/src/algo/blast/core/blast_engine.c:1633-1705
+    // ```c
+    // BLAST_PreliminarySearchEngine(..., diagnostics, ...);
+    // Blast_DiagnosticsUpdate(diagnostics, local_diagnostics);
+    // ```
+    reset_blastp_kappa_range_counters(kappa_range_counters_enabled);
     let t_total = blastp_timing_start(timing_enabled);
     let timing = if timing_enabled {
         Some(Arc::new(BlastpTiming::new()))
@@ -4158,16 +4346,42 @@ fn run_resolved_with_records(
                 if let Some(restricted_slot) = restricted_align_array.get_mut(query_index) {
                     *restricted_slot = false;
                 }
-                remove_preliminary_hits_for_query(
+                // NCBI reference: /mnt/c/Users/genom/GitHub/ncbi-blast/c++/src/algo/blast/core/blast_gapalign.c:3975-4000
+                // ```c
+                // Blast_IntervalTreeReset(tree);
+                // /* remove all HSPs computed for the current query */
+                // for (index2 = 0; index2 < hsp_list->hspcnt; index2++) { ... }
+                // ```
+                let removed_hsps = remove_preliminary_hits_for_query(
                     &mut preliminary_hsp_list,
                     query_index,
                     &contexts,
                 );
-                rebuild_preliminary_interval_tree_from_list(
+                let rebuild_nodes = rebuild_preliminary_interval_tree_from_list(
                     interval_tree,
                     &preliminary_hsp_list,
                     &contexts,
                 );
+                if let Some(timing) = timing.as_ref() {
+                    // NCBI reference: /mnt/c/Users/genom/GitHub/ncbi-blast/c++/src/algo/blast/core/blast_gapalign.c:3975-4007
+                    // ```c
+                    // Blast_IntervalTreeReset(tree);
+                    // /* remove all HSPs computed for the current query */
+                    // ...
+                    // redo_index = index;
+                    // redo_query = query_index;
+                    // ```
+                    BlastpTiming::record_count(&timing.preliminary_exact_retry_count, 1);
+                    BlastpTiming::record_count(
+                        &timing.preliminary_retry_removed_hsps,
+                        removed_hsps,
+                    );
+                    BlastpTiming::record_count(&timing.preliminary_interval_tree_rebuilds, 1);
+                    BlastpTiming::record_count(
+                        &timing.preliminary_interval_tree_rebuild_nodes,
+                        rebuild_nodes,
+                    );
+                }
                 // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_gapalign.c:4001-4007
                 // ```c
                 // redo_index = index;
@@ -4208,7 +4422,25 @@ fn run_resolved_with_records(
         // ...
         // Blast_HSPListSortByScore(hsp_list);
         // ```
-        prepare_preliminary_hits_for_kappa_in_place(&mut preliminary_hsp_list);
+        // NCBI reference: /mnt/c/Users/genom/GitHub/ncbi-blast/c++/src/algo/blast/core/blast_hits.c:2478-2525
+        // ```c
+        // qsort(hsp_array, hsp_count, sizeof(BlastHSP*), s_QueryOffsetCompareHSPs);
+        // qsort(hsp_array, hsp_count, sizeof(BlastHSP*), s_QueryEndCompareHSPs);
+        // ```
+        let endpoint_duplicates_purged =
+            prepare_preliminary_hits_for_kappa_in_place(&mut preliminary_hsp_list);
+        if let Some(timing) = timing.as_ref() {
+            // NCBI reference: /mnt/c/Users/genom/GitHub/ncbi-blast/c++/src/algo/blast/core/blast_hits.c:2478-2525
+            // ```c
+            // qsort(hsp_array, hsp_count, sizeof(BlastHSP*), s_QueryOffsetCompareHSPs);
+            // ...
+            // qsort(hsp_array, hsp_count, sizeof(BlastHSP*), s_QueryEndCompareHSPs);
+            // ```
+            BlastpTiming::record_count(
+                &timing.preliminary_endpoint_duplicates_purged,
+                endpoint_duplicates_purged,
+            );
+        }
         let mut preliminary_hits_by_query = std::mem::take(&mut scratch.preliminary_hits_by_query);
         split_preliminary_hits_by_query_into(
             &mut preliminary_hsp_list,
@@ -4296,37 +4528,45 @@ fn run_resolved_with_records(
                 .num_threads(num_threads)
                 .build()
                 .context("failed to build BLASTP thread pool")?;
-            let mut subject_results: Vec<BlastpSubjectResult> = pool.install(|| {
-                subjects
-                    .par_iter()
-                    .enumerate()
-                    .map_init(
-                        || {
-                            BlastpSubjectScratch::new(
-                                offset_array_size,
-                                diag_array_size,
-                                window,
-                                total_query_span,
-                            )
-                        },
-                        |scratch, (s_idx, _subject)| {
-                            scratch.prepare_independent_subject(subject_diag_offsets[s_idx]);
-                            let mut subject_result = BlastpSubjectResult::new(s_idx);
-                            process_subject(scratch, s_idx, &mut subject_result);
-                            subject_result
-                        },
-                    )
-                    .collect()
+            // NCBI reference: /mnt/c/Users/genom/GitHub/ncbi-blast/c++/src/algo/blast/core/blast_engine.c:1409-1554
+            // ```c
+            // while ((seq_arg.oid = BlastSeqSrcIteratorNext(seq_src, itr)) != BLAST_SEQSRC_EOF) {
+            //     status = s_BlastSearchEngineCore(..., &hsp_list, ...);
+            //     status = BlastHSPStreamWrite(hsp_stream, &hsp_list);
+            // }
+            // ```
+            //
+            // Parallel workers write one subject result into its oid-indexed
+            // slot; the reducer below replays those slots in NCBI subject
+            // iteration order.
+            let mut subject_results: Vec<Option<BlastpSubjectResult>> =
+                std::iter::repeat_with(|| None)
+                    .take(subjects.len())
+                    .collect();
+            pool.install(|| {
+                subject_results.par_iter_mut().enumerate().for_each_init(
+                    || {
+                        BlastpSubjectScratch::new(
+                            offset_array_size,
+                            diag_array_size,
+                            window,
+                            total_query_span,
+                        )
+                    },
+                    |scratch, (s_idx, subject_result_slot)| {
+                        scratch.prepare_independent_subject(subject_diag_offsets[s_idx]);
+                        let mut subject_result = BlastpSubjectResult::new(s_idx);
+                        process_subject(scratch, s_idx, &mut subject_result);
+                        *subject_result_slot = Some(subject_result);
+                    },
+                );
             });
             let merge_sort_start = blastp_timing_start(timing_enabled);
-            subject_results.sort_by_key(|result| result.subject_index);
-            for mut subject_result in subject_results {
-                update_blastp_preliminary_hit_lists(
-                    &mut preliminary_hit_lists,
-                    &mut subject_result,
-                    prelim_hitlist_size,
-                );
-            }
+            merge_blastp_subject_results_in_order(
+                &mut preliminary_hit_lists,
+                subject_results,
+                prelim_hitlist_size,
+            );
             if let Some(timing) = timing.as_ref() {
                 BlastpTiming::record_call(
                     &timing.prelim_merge_sort_ns,
@@ -4646,11 +4886,6 @@ fn run_resolved_with_records(
         }
     }
 
-    // NCBI reference: /mnt/c/Users/genom/GitHub/ncbi-blast/c++/src/algo/blast/core/blast_engine.c:1554
-    // ```c
-    // status = BlastHSPStreamWrite(hsp_stream, &hsp_list);
-    // ```
-    let final_hits = collect_hits_from_hit_lists(&hit_lists);
     let query_header = query_headers.first().cloned();
     let subject_name_label = if subject_label.is_empty() {
         path_label(&args.subject)
@@ -4689,12 +4924,39 @@ fn run_resolved_with_records(
     };
     let render_alignment = matches!(outfmt, OutputFormat::Pairwise)
         || tabular_fields.is_some_and(blastp_tabular_fields_require_rendered_alignment);
+    // NCBI reference: /mnt/c/Users/genom/GitHub/ncbi-blast/c++/src/objtools/align_format/tabular.cpp:1100-1108
+    // ```c
+    // ITERATE(list<ETabularField>, iter, m_FieldsToShow) {
+    //     x_PrintField(*iter);
+    // }
+    // ```
+    let stream_default_tabular = matches!(
+        outfmt,
+        OutputFormat::Tabular | OutputFormat::TabularWithComments
+    ) && custom_fields.is_none();
+    // NCBI reference: /mnt/c/Users/genom/GitHub/ncbi-blast/c++/src/algo/blast/core/blast_hspstream.c:271-327
+    // ```c
+    // *hsp_list_out = hit_list->hsplist_array[last_hsplist_index];
+    // (*hsp_list_out)->query_index = index;
+    // --hit_list->hsplist_count;
+    // ```
+    let final_hits = if matches!(outfmt, OutputFormat::Pairwise)
+        || (matches!(
+            outfmt,
+            OutputFormat::Tabular | OutputFormat::TabularWithComments
+        ) && !stream_default_tabular)
+    {
+        Some(collect_hits_from_hit_lists(&hit_lists))
+    } else {
+        None
+    };
     let pairwise_hits = if matches!(
         outfmt,
         OutputFormat::Pairwise | OutputFormat::Tabular | OutputFormat::TabularWithComments
-    ) {
+    ) && !stream_default_tabular
+    {
         Some(build_pairwise_hits(
-            final_hits,
+            final_hits.expect("final hits collected for rendered blastp output"),
             &contexts,
             &subjects,
             &subject_titles,
@@ -4785,29 +5047,48 @@ fn run_resolved_with_records(
         }
         OutputFormat::Tabular | OutputFormat::TabularWithComments => {
             let fields = tabular_fields.expect("tabular fields prepared for blastp tabular output");
-            // NCBI reference: /mnt/c/Users/genom/GitHub/ncbi-blast/c++/src/objtools/align_format/tabular.cpp:1100-1108
-            // ```c
-            // ITERATE(list<ETabularField>, iter, m_FieldsToShow) {
-            //     if (iter != m_FieldsToShow.begin())
-            //         m_Ostream << m_FieldDelimiter;
-            //     x_PrintField(*iter);
-            // }
-            // ```
             let mut writer = open_output_writer(
                 args.out.as_ref(),
                 in_memory_output.as_mut().map(|output| &mut **output),
             )?;
-            write_blastp_tabular_output(
-                pairwise_hits
-                    .as_ref()
-                    .expect("pairwise hits prepared for blastp tabular outfmt"),
-                fields,
-                outfmt,
-                &mut writer,
-                &query_ids,
-                &subject_ids,
-                &context,
-            )?;
+            if stream_default_tabular {
+                // NCBI reference: /mnt/c/Users/genom/GitHub/ncbi-blast/c++/src/objtools/align_format/tabular.cpp:1100-1108
+                // ```c
+                // ITERATE(list<ETabularField>, iter, m_FieldsToShow) {
+                //     if (iter != m_FieldsToShow.begin())
+                //         m_Ostream << m_FieldDelimiter;
+                //     x_PrintField(*iter);
+                // }
+                // ```
+                write_blastp_default_tabular_hit_lists(
+                    &hit_lists,
+                    outfmt,
+                    &mut writer,
+                    &query_ids,
+                    &subject_ids,
+                    &context,
+                )?;
+            } else {
+                // NCBI reference: /mnt/c/Users/genom/GitHub/ncbi-blast/c++/src/objtools/align_format/tabular.cpp:1100-1108
+                // ```c
+                // ITERATE(list<ETabularField>, iter, m_FieldsToShow) {
+                //     if (iter != m_FieldsToShow.begin())
+                //         m_Ostream << m_FieldDelimiter;
+                //     x_PrintField(*iter);
+                // }
+                // ```
+                write_blastp_tabular_output(
+                    pairwise_hits
+                        .as_ref()
+                        .expect("pairwise hits prepared for blastp tabular outfmt"),
+                    fields,
+                    outfmt,
+                    &mut writer,
+                    &query_ids,
+                    &subject_ids,
+                    &context,
+                )?;
+            }
             Ok(())
         }
     };
@@ -4823,6 +5104,14 @@ fn run_resolved_with_records(
     if let Some(timing) = timing.as_ref() {
         print_blastp_timing(timing, t_total);
     }
+    // NCBI reference: /mnt/c/Users/genom/GitHub/ncbi-blast/c++/src/algo/blast/core/blast_engine.c:1633-1705
+    // ```c
+    // BLAST_PreliminarySearchEngine(..., diagnostics, ...);
+    // Blast_DiagnosticsUpdate(diagnostics, local_diagnostics);
+    // ```
+    if kappa_range_counters_enabled {
+        print_blastp_kappa_range_counters();
+    }
 
     Ok(())
 }
@@ -4833,6 +5122,83 @@ mod tests {
     use crate::algorithm::blastp::args::{BlastpCompBasedStats, BlastpSegSpec};
     use crate::stats::KarlinParams;
     use crate::utils::matrix::ncbistdaa;
+
+    fn make_test_blastp_hsp_list(oid: u32, raw_score: i32) -> BlastpHspList {
+        // NCBI reference: ncbi-blast/c++/include/algo/blast/core/blast_hits.h:125-148
+        // ```c
+        // typedef struct BlastHSP {
+        //    Int4 score;
+        //    double evalue;
+        //    BlastSeg query;
+        //    BlastSeg subject;
+        // } BlastHSP;
+        // ```
+        let hit = Hit {
+            identity: 100.0,
+            length: 10,
+            mismatch: 0,
+            gapopen: 0,
+            q_start: 1,
+            q_end: 10,
+            s_start: 1,
+            s_end: 10,
+            e_value: 1.0,
+            bit_score: 0.0,
+            num_ident: 10,
+            query_frame: 0,
+            query_length: 10,
+            q_idx: 0,
+            s_idx: oid,
+            raw_score,
+            gap_info: None,
+            num_positives: 10,
+        };
+        BlastpHspList {
+            oid,
+            query_index: 0,
+            hsps: vec![BlastpHsp::from_hit(hit)],
+            best_evalue: f64::MAX,
+        }
+    }
+
+    fn make_test_subject_result(oid: usize, raw_score: i32) -> BlastpSubjectResult {
+        // NCBI reference: /mnt/c/Users/genom/GitHub/ncbi-blast/c++/src/algo/blast/core/blast_engine.c:1553-1554
+        // ```c
+        // /* Save the results. */
+        // status = BlastHSPStreamWrite(hsp_stream, &hsp_list);
+        // ```
+        let mut result = BlastpSubjectResult::new(oid);
+        result
+            .query_hsp_lists
+            .push((0, make_test_blastp_hsp_list(oid as u32, raw_score)));
+        result
+    }
+
+    #[cfg(all(feature = "parallel", not(target_arch = "wasm32")))]
+    #[test]
+    fn test_merge_blastp_subject_results_replays_subject_index_order() {
+        // NCBI reference: /mnt/c/Users/genom/GitHub/ncbi-blast/c++/src/algo/blast/core/blast_engine.c:1409-1554
+        // ```c
+        // while ((seq_arg.oid = BlastSeqSrcIteratorNext(seq_src, itr)) != BLAST_SEQSRC_EOF) {
+        //     status = s_BlastSearchEngineCore(..., &hsp_list, ...);
+        //     status = BlastHSPStreamWrite(hsp_stream, &hsp_list);
+        // }
+        // ```
+        let mut preliminary_hit_lists = vec![None];
+        let subject_results = vec![
+            Some(make_test_subject_result(0, 50)),
+            Some(make_test_subject_result(1, 60)),
+            Some(make_test_subject_result(2, 70)),
+        ];
+
+        merge_blastp_subject_results_in_order(&mut preliminary_hit_lists, subject_results, 10);
+
+        let hit_list = preliminary_hit_lists[0]
+            .as_ref()
+            .expect("query hit list should be created");
+        let oids: Vec<u32> = hit_list.hsplist_array.iter().map(|list| list.oid).collect();
+        assert_eq!(oids, vec![0, 1, 2]);
+    }
 
     fn make_blastp_args() -> BlastpArgs {
         BlastpArgs {

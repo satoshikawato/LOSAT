@@ -65,6 +65,7 @@ run_losatp_case() {
 
     echo "Starting ${stem} (LOSATP)..."
     (time $LOSAT_BIN blastp -q "./fasta/${query}" -s "./fasta/${subject}" -o "./losat_out/${stem}.losatp.out" -n 1 --outfmt 6 )&>"./losat_out/${stem}.losatp.log"
+    (time $LOSAT_BIN blastp -q "./fasta/${query}" -s "./fasta/${subject}" -o "./losat_out/${stem}.losatp.n8.out" -n 8 --outfmt 6 )&>"./losat_out/${stem}.losatp.n8.log"
 }
 
 LOSATP_CASES=(

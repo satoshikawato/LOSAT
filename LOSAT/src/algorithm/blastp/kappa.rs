@@ -8,6 +8,7 @@ use anyhow::Result;
 use std::cell::RefCell;
 use std::ffi::c_void;
 use std::ptr::NonNull;
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering as AtomicOrdering};
 
 use crate::common::{GapEditOp, Hit};
 use crate::config::ScoringMatrix;
@@ -34,6 +35,75 @@ use super::hsp::{
 };
 
 pub(crate) use crate::core::composition_adjustment::redo_alignment::BlastRedoAlignParams;
+
+// NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_kappa.c:1614-1646
+// ```c
+// for (idx = 0;  idx < seqData->length;  idx++) {
+//     seqData->data[idx] = origData[idx];
+// }
+// status = s_DoSegSequenceData(seqData, eBlastTypeBlastp,
+//                              subject_maybe_biased);
+// seqData ->data    = &seqData->data[range->begin - 1];
+// *seqData->data++  = '\0';
+// seqData ->length  = range->end - range->begin;
+// ```
+//
+// LOSAT diagnostics count the corresponding query/subject range copies and
+// SEG range scans without changing the redo-alignment control flow.
+static BLASTP_KAPPA_RANGE_COUNTERS_ENABLED: AtomicBool = AtomicBool::new(false);
+static BLASTP_KAPPA_QUERY_RANGE_BYTES_COPIED: AtomicU64 = AtomicU64::new(0);
+static BLASTP_KAPPA_SUBJECT_RANGE_BYTES_COPIED: AtomicU64 = AtomicU64::new(0);
+static BLASTP_KAPPA_SUBJECT_SEG_RANGE_BYTES: AtomicU64 = AtomicU64::new(0);
+static BLASTP_KAPPA_SUBJECT_SEG_CALLS: AtomicU64 = AtomicU64::new(0);
+static BLASTP_KAPPA_SUBJECT_SEG_MASKED_RESIDUES: AtomicU64 = AtomicU64::new(0);
+
+#[inline]
+pub(crate) fn blastp_kappa_range_counters_env_enabled() -> bool {
+    std::env::var_os("LOSAT_TIMING").is_some()
+        || std::env::var("LOSAT_DIAGNOSTICS")
+            .map(|value| value == "1" || value.eq_ignore_ascii_case("true"))
+            .unwrap_or(false)
+}
+
+pub(crate) fn reset_blastp_kappa_range_counters(enabled: bool) {
+    BLASTP_KAPPA_QUERY_RANGE_BYTES_COPIED.store(0, AtomicOrdering::Relaxed);
+    BLASTP_KAPPA_SUBJECT_RANGE_BYTES_COPIED.store(0, AtomicOrdering::Relaxed);
+    BLASTP_KAPPA_SUBJECT_SEG_RANGE_BYTES.store(0, AtomicOrdering::Relaxed);
+    BLASTP_KAPPA_SUBJECT_SEG_CALLS.store(0, AtomicOrdering::Relaxed);
+    BLASTP_KAPPA_SUBJECT_SEG_MASKED_RESIDUES.store(0, AtomicOrdering::Relaxed);
+    BLASTP_KAPPA_RANGE_COUNTERS_ENABLED.store(enabled, AtomicOrdering::Relaxed);
+}
+
+#[inline]
+fn record_blastp_kappa_range_counter(counter: &AtomicU64, value: usize) {
+    if BLASTP_KAPPA_RANGE_COUNTERS_ENABLED.load(AtomicOrdering::Relaxed) {
+        counter.fetch_add(value.min(u64::MAX as usize) as u64, AtomicOrdering::Relaxed);
+    }
+}
+
+#[inline]
+fn record_blastp_kappa_range_event(counter: &AtomicU64) {
+    if BLASTP_KAPPA_RANGE_COUNTERS_ENABLED.load(AtomicOrdering::Relaxed) {
+        counter.fetch_add(1, AtomicOrdering::Relaxed);
+    }
+}
+
+pub(crate) fn print_blastp_kappa_range_counters() {
+    eprintln!(
+        "[TIMING] blastp_kappa_query_range_bytes_copied: {}",
+        BLASTP_KAPPA_QUERY_RANGE_BYTES_COPIED.load(AtomicOrdering::Relaxed)
+    );
+    eprintln!(
+        "[TIMING] blastp_kappa_subject_range_bytes_copied: {}",
+        BLASTP_KAPPA_SUBJECT_RANGE_BYTES_COPIED.load(AtomicOrdering::Relaxed)
+    );
+    eprintln!(
+        "[TIMING] blastp_kappa_subject_seg_range: {} bytes (calls={}, masked_residues={})",
+        BLASTP_KAPPA_SUBJECT_SEG_RANGE_BYTES.load(AtomicOrdering::Relaxed),
+        BLASTP_KAPPA_SUBJECT_SEG_CALLS.load(AtomicOrdering::Relaxed),
+        BLASTP_KAPPA_SUBJECT_SEG_MASKED_RESIDUES.load(AtomicOrdering::Relaxed)
+    );
+}
 
 #[inline(always)]
 fn blastp_positive_score<const BLOSUM62: bool>(
@@ -702,7 +772,45 @@ fn build_query_range_data(
     orig_query: &BlastCompoSequenceData,
     query_range: &BlastCompoSequenceRange,
 ) -> BlastCompoSequenceData {
-    BlastCompoSequenceData::copy_query_range_with_selenocysteine_fix(orig_query, query_range)
+    let query =
+        BlastCompoSequenceData::copy_query_range_with_selenocysteine_fix(orig_query, query_range);
+    record_blastp_kappa_range_counter(
+        &BLASTP_KAPPA_QUERY_RANGE_BYTES_COPIED,
+        query.length.max(0) as usize,
+    );
+    query
+}
+
+// NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_kappa.c:1614-1646
+// ```c
+// /* Copy the sequence data */
+// for (idx = 0;  idx < seqData->length;  idx++) {
+//     seqData->data[idx] = origData[idx];
+// }
+// ...
+// /* Fit the data to the range. */
+// seqData ->data    = &seqData->data[range->begin - 1];
+// *seqData->data++  = '\0';
+// seqData ->length  = range->end - range->begin;
+// ```
+fn build_subject_range_data_direct(
+    matching_seq: &BlastCompoMatchingSequence<'_>,
+    subject_range: &BlastCompoSequenceRange,
+) -> BlastCompoSequenceData {
+    let begin = usize::try_from(subject_range.begin)
+        .expect("NCBI blast_kappa.c requires non-negative subject_range.begin");
+    let end = usize::try_from(subject_range.end)
+        .expect("NCBI blast_kappa.c requires non-negative subject_range.end");
+    let subject_len = end.saturating_sub(begin);
+    let mut buffer = vec![0u8; subject_len + 2];
+    buffer[1..1 + subject_len].copy_from_slice(&matching_seq.data[begin..end]);
+    record_blastp_kappa_range_counter(&BLASTP_KAPPA_SUBJECT_RANGE_BYTES_COPIED, subject_len);
+    BlastCompoSequenceData {
+        buffer,
+        data_offset: 1,
+        length: i32::try_from(subject_len)
+            .expect("NCBI blast_kappa.c subject range length must fit in Int4"),
+    }
 }
 
 fn build_subject_range_data(
@@ -725,7 +833,7 @@ fn build_subject_range_data(
     // return s_SequenceGetProteinRange(..., queryData, ...);
     // ```
     let query = build_query_range_data(orig_query, query_range);
-    let mut subject = BlastCompoSequenceData::from_ncbistdaa(matching_seq.data);
+    let mut subject = build_subject_range_data_direct(matching_seq, subject_range);
     let mut subject_maybe_biased = subject_maybe_biased_in;
 
     // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_kappa.c:1626-1636
@@ -745,27 +853,44 @@ fn build_subject_range_data(
     let should_apply_seg = params.uses_composition_based_stats()
         && subject_maybe_biased
         && (!should_test_identical
-            || !test_near_identical(&subject, 0, &query, query_range.begin, query_words, align));
+            || !test_near_identical(
+                // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_kappa.c:1267-1277
+                // ```c
+                // int sStart = align->matchStart - seqOffset;
+                // int sEnd = align->matchEnd - seqOffset - 1;
+                // ```
+                //
+                // The Rust subject buffer already begins at `subject_range.begin`,
+                // so the NCBI `seqOffset` argument remains the original range
+                // origin.
+                &subject,
+                subject_range.begin,
+                &query,
+                query_range.begin,
+                query_words,
+                align,
+            ));
 
     if should_apply_seg {
         let seg_params = blastp_subject_seg_params();
         let masker = SegMasker::with_params(&seg_params);
+        record_blastp_kappa_range_event(&BLASTP_KAPPA_SUBJECT_SEG_CALLS);
+        record_blastp_kappa_range_counter(
+            &BLASTP_KAPPA_SUBJECT_SEG_RANGE_BYTES,
+            subject.length.max(0) as usize,
+        );
         let intervals = masker.mask_sequence(subject.data());
         subject_maybe_biased = !intervals.is_empty();
         for interval in &intervals {
+            record_blastp_kappa_range_counter(
+                &BLASTP_KAPPA_SUBJECT_SEG_MASKED_RESIDUES,
+                interval.end.saturating_sub(interval.start),
+            );
             for pos in interval.start..interval.end {
                 subject.buffer[subject.data_offset + pos] = ncbistdaa::X;
             }
         }
     }
-
-    // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_kappa.c:1638-1646
-    // ```c
-    // seqData->data    = &seqData->data[range->begin - 1];
-    // *seqData->data++ = '\0';
-    // seqData->length  = range->end - range->begin;
-    // ```
-    subject.fit_protein_range_in_place(subject_range);
 
     BlastRedoRangeResult {
         query,
@@ -2031,6 +2156,58 @@ mod tests {
 
         assert_eq!(range.subject.data(), &[3u8, 4, 5]);
         assert_eq!(range.subject.buffer[range.subject.data_offset - 1], 0);
+        assert_eq!(range.subject.buffer.len(), 5);
+    }
+
+    #[test]
+    fn test_subject_range_near_identical_uses_original_range_offset() {
+        // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_kappa.c:1267-1277
+        // ```c
+        // int sStart = align->matchStart - seqOffset;
+        // int sEnd = align->matchEnd - seqOffset - 1;
+        // ```
+        let mut residues = vec![9u8; 4];
+        residues.extend(std::iter::repeat(1u8).take(80));
+        residues.extend(std::iter::repeat(9u8).take(4));
+        let matching_seq = BlastCompoMatchingSequence::new(0, &residues);
+        let subject_range = BlastCompoSequenceRange {
+            begin: 4,
+            end: 84,
+            context: 0,
+        };
+        let query = BlastCompoSequenceData::from_ncbistdaa(&vec![1u8; 80]);
+        let query_range = BlastCompoSequenceRange {
+            begin: 0,
+            end: 80,
+            context: 0,
+        };
+        let params = test_redo_align_params();
+        let align = blast_compo_alignment_new(
+            80,
+            EMatrixAdjustRule::DontAdjustMatrix,
+            0,
+            80,
+            0,
+            4,
+            84,
+            0,
+            None,
+        );
+
+        let range = build_subject_range_data(
+            &matching_seq,
+            &subject_range,
+            &query,
+            &query_range,
+            Some(&build_query_word_hashes(query.data())),
+            &align,
+            true,
+            true,
+            &params,
+        );
+
+        assert!(range.subject_maybe_biased);
+        assert!(!range.subject.data().contains(&ncbistdaa::X));
     }
 
     // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_kappa.c:1682-1704

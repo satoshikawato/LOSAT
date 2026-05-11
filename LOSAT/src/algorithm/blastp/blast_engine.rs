@@ -584,6 +584,67 @@ fn fasta_defline(record: &fasta::Record) -> String {
     }
 }
 
+// NCBI reference: /mnt/c/Users/genom/GitHub/ncbi-blast/c++/src/algo/blast/core/blast_engine.c:1411-1426
+// ```c
+// /* iterate over all subject sequences */
+// while ( (seq_arg.oid = BlastSeqSrcIteratorNext(seq_src, itr))
+//        != BLAST_SEQSRC_EOF) {
+//    if (BlastSeqSrcGetSequence(seq_src, &seq_arg) < 0) {
+//        continue;
+//    }
+// ```
+struct BlastpPreparedSubject {
+    id: Arc<str>,
+    title: Option<String>,
+    encoded: EncodedProtein,
+}
+
+// NCBI reference: /mnt/c/Users/genom/GitHub/ncbi-blast/c++/src/algo/blast/core/blast_engine.c:1411-1426
+// ```c
+// /* iterate over all subject sequences */
+// while ( (seq_arg.oid = BlastSeqSrcIteratorNext(seq_src, itr))
+//        != BLAST_SEQSRC_EOF) {
+//    if (BlastSeqSrcGetSequence(seq_src, &seq_arg) < 0) {
+//        continue;
+//    }
+// ```
+//
+// NCBI reference: /mnt/c/Users/genom/GitHub/ncbi-blast/c++/src/algo/blast/core/blast_engine.c:1659-1668
+// ```c
+// /* Use a local diagnostics structure, because the one passed in an input
+//   argument can be shared between multiple threads ... */
+// BLAST_GapAlignSetUp(..., &gap_align)
+// ```
+fn prepare_blastp_subjects_preserving_order(
+    subject_records: &[fasta::Record],
+    num_threads: usize,
+) -> Result<Vec<BlastpPreparedSubject>> {
+    let prepare_subject = |record: &fasta::Record| BlastpPreparedSubject {
+        id: fasta_id(record),
+        title: record.desc().map(str::to_string),
+        encoded: encode_protein_sequence(record.seq()),
+    };
+
+    #[cfg(all(feature = "parallel", not(target_arch = "wasm32")))]
+    {
+        let num_threads = blastp_effective_num_threads(num_threads);
+        if num_threads > 1 && subject_records.len() > 1 {
+            let pool = rayon::ThreadPoolBuilder::new()
+                .num_threads(num_threads)
+                .build()
+                .context("failed to build BLASTP subject preparation thread pool")?;
+            return Ok(pool.install(|| subject_records.par_iter().map(prepare_subject).collect()));
+        }
+    }
+
+    #[cfg(any(not(feature = "parallel"), target_arch = "wasm32"))]
+    {
+        let _ = num_threads;
+    }
+
+    Ok(subject_records.iter().map(prepare_subject).collect())
+}
+
 // NCBI reference: /mnt/c/Users/genom/GitHub/ncbi-blast/c++/src/algo/blast/core/blast_engine.c:81-83
 // ```c
 // NCBI_XBLAST_EXPORT const int   kBlastMajorVersion = 2;
@@ -3696,11 +3757,6 @@ fn run_resolved_with_records(
         .iter()
         .map(|record| record.seq().len())
         .collect();
-    let subject_ids: Vec<Arc<str>> = subject_records.iter().map(fasta_id).collect();
-    let subject_titles: Vec<Option<String>> = subject_records
-        .iter()
-        .map(|record| record.desc().map(str::to_string))
-        .collect();
 
     let query_encoding_start = blastp_timing_start(timing_enabled);
     let seg_params = args.seg.params();
@@ -3718,10 +3774,25 @@ fn run_resolved_with_records(
     }
 
     let subject_encoding_start = blastp_timing_start(timing_enabled);
-    let subjects: Vec<EncodedProtein> = subject_records
-        .iter()
-        .map(|record| encode_protein_sequence(record.seq()))
-        .collect();
+    // NCBI reference: /mnt/c/Users/genom/GitHub/ncbi-blast/c++/src/algo/blast/core/blast_engine.c:1411-1426
+    // ```c
+    // /* iterate over all subject sequences */
+    // while ( (seq_arg.oid = BlastSeqSrcIteratorNext(seq_src, itr))
+    //        != BLAST_SEQSRC_EOF) {
+    //    if (BlastSeqSrcGetSequence(seq_src, &seq_arg) < 0) {
+    //        continue;
+    //    }
+    // ```
+    let prepared_subjects =
+        prepare_blastp_subjects_preserving_order(subject_records, args.num_threads)?;
+    let mut subject_ids = Vec::with_capacity(prepared_subjects.len());
+    let mut subject_titles = Vec::with_capacity(prepared_subjects.len());
+    let mut subjects = Vec::with_capacity(prepared_subjects.len());
+    for prepared_subject in prepared_subjects {
+        subject_ids.push(prepared_subject.id);
+        subject_titles.push(prepared_subject.title);
+        subjects.push(prepared_subject.encoded);
+    }
     if let Some(timing) = timing.as_ref() {
         BlastpTiming::record_duration(&timing.subject_encoding_ns, subject_encoding_start);
     }

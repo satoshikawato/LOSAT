@@ -326,3 +326,48 @@ precompute を検討する。
 - subject preprocessing の効果は subject FASTA の record 数と長さに依存する。次回 timing では
   `LOSAT_TIMING=1` の `blastp_subject_encoding` を、`-num_threads 1` と複数 thread の両方で比較する。
 
+
+
+## 実装メモ: 2026-05-11 Kappa redo query-level parallelization
+
+### 実装済み
+
+- `LOSAT/src/algorithm/blastp/blast_engine.rs` の composition-based statistics / Kappa redo 段階に、query 単位の deterministic parallel path を追加した。
+- `parallel` feature が有効で、`-num_threads` の実効値が 2 以上、かつ redo 対象 query が複数ある場合だけ Rayon thread pool で Kappa redo を並列実行する。
+- 各 worker は thread-local に `BlastCompositionWorkspace`、`GapAlignScratch`、`kappa_preliminary_hits`、query-local `BlastCompoHeap` を持つ。
+- main thread は `(query_index, BlastCompoHeap)` を query index に戻してから、既存の `fill_results_from_compo_heaps` に渡す。これにより final hit-list construction と output order は既存経路を維持する。
+- `-num_threads 1`、parallel feature 無効、wasm32 では従来の serial Kappa redo path を使う。
+
+### NCBI 参照コメント
+
+- 追加コード直上に以下の NCBI 参照コメントを置いた。
+  - `ncbi-blast/c++/src/algo/blast/core/blast_kappa.c:3119-3128`
+    - query ごとの `BlastCompo_Heap` 初期化。
+  - `ncbi-blast/c++/src/algo/blast/core/blast_kappa.c:3329-3334`
+    - thread-local `Blast_CompositionWorkspace` 初期化。
+  - `ncbi-blast/c++/src/algo/blast/core/blast_kappa.c:3436-3459`
+    - OpenMP `schedule(static)` redo loop と thread-local `redoneMatches` 使用。
+  - `ncbi-blast/c++/src/algo/blast/core/blast_kappa.c:3817-3850`
+    - thread-local result consolidation。
+
+### 検証
+
+- `rustfmt LOSAT/src/algorithm/blastp/blast_engine.rs --edition 2021`
+- `cargo build --release`
+- `cargo build --release --no-default-features`
+- LOSAT-only thread determinism check:
+  - `target/release/LOSAT blastp -query tests/fasta/AP027131.faa -subject tests/fasta/AP027133.faa -outfmt 6 -evalue 1e-5 -max_target_seqs 10 -num_threads 1 -out /tmp/losat_blastp_kappa_n1.out`
+  - `target/release/LOSAT blastp -query tests/fasta/AP027131.faa -subject tests/fasta/AP027133.faa -outfmt 6 -evalue 1e-5 -max_target_seqs 10 -num_threads 4 -out /tmp/losat_blastp_kappa_n4.out`
+  - `cmp -s` で byte-identical、両方 695 行。
+- `LOSAT_TIMING=1` の代表結果:
+  - `-num_threads 1`: `blastp_kappa_redo: 0.729s`, `blastp_total: 4.442s`
+  - `-num_threads 4`: `blastp_kappa_redo: 0.240s`, `blastp_total: 1.387s`
+  - timing 有効時の n1/n4 output も `cmp -s` で byte-identical。
+- 追加 smoke test:
+  - `target/release/LOSAT blastp -query tests/fasta/CoBV.faa -subject tests/fasta/PajaWSV.faa -num_threads 2 --outfmt 6 -out /tmp/losat_blastp_kappa_small_n2.out`
+
+### 未実施 / 残リスク
+
+- NCBI BLASTP との比較 oracle は今回実行していない。
+- 今回の並列化は query-level なので、single-query で多数 subject hit を持つケースでは Kappa redo はまだ serial path になる。
+- NCBI は `theseMatches` 全体を OpenMP static schedule で分割して thread-local heap を consolidate する。LOSAT は thread-count independent output を優先し、query index ごとの deterministic reducer にした。今後、single-query case も高速化する場合は、NCBI heap tie-breaker と early termination を保った match-level reducer が必要。

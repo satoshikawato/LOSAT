@@ -206,6 +206,17 @@ Phases 0-4 under the parity gate requested for this acceleration work.
     outfmt 6 output under `.codex_tmp/blastp_fast/`.
   - Full `blastp-fast` NCBI oracle comparison is still pending because no
     `blastp` executable was available on PATH in this Windows environment.
+- Additional Phase 4 compressed scan hot-loop pass:
+  - Added a byte-wide scan mirror of `scaled_compress_table` for compressed
+    amino-acid lookup tables so the `blastp-fast` subject scan indexes by
+    subject byte directly, matching NCBI `scaled_compress_table[next_char]`
+    timing while avoiding Rust `Option`/bounds-dispatch in the scan loop.
+  - Preserved the existing BLASTAA-sized compressed table for construction and
+    tests; out-of-NCBISTDAA bytes map to `-1` in the scan mirror and keep
+    NCBI's bad-character flush behavior.
+  - `rustfmt src/algorithm/tblastx/lookup/compressed.rs`: passed.
+  - `cargo build`: passed with pre-existing warnings.
+  - `cargo test --lib compressed_scan_subject`: 2 passed.
 
 ## Phase 0: Benchmark and Timing Harness
 
@@ -381,8 +392,8 @@ Current result:
 Goal: unlock NCBI's `blastp-fast` path instead of trying to emulate it with
 ad hoc filtering.
 
-Status: lookup construction scaffolding implemented; runtime integration not
-enabled.
+Status: construction, scan emission, and `word_size=5` runtime integration are
+implemented; full `blastp-fast` NCBI oracle certification is still pending.
 
 Implementation:
 
@@ -418,6 +429,10 @@ Current result:
 - Compressed subject scan integration is wired into BLASTP for the NCBI
   `word_size=5` path used by `blastp-fast`; `word_size=6/7` remain unsupported
   until dedicated NCBI comparison cases exist.
+- The compressed scan hot loop now uses a byte-wide mirror of NCBI's
+  `scaled_compress_table[next_char]` lookup to remove Rust-side
+  `Option`/bounds-dispatch without changing scan order, PV tests, hit copy
+  order, small-buffer resume behavior, or bad-character flush semantics.
 - `blastp-fast` is runtime-enabled but not yet parity-certified. Full NCBI
   oracle comparison remains required before marking Phase 4 complete.
 
@@ -480,6 +495,7 @@ because the acceptance check was parity preservation, not final release timing.
    ungapped extension, Kappa/alignment recounting, and lookup row scoring are
    parity-gated. Continue release timing and broader comparison sweeps.
 5. Phase 4 compressed lookup / `blastp-fast` port. Construction and scan tests
-   pass; `word_size=5` runtime wiring is in place, with NCBI oracle comparison
-   and `word_size=6/7` support still pending.
+   pass; `word_size=5` runtime wiring and compressed scan direct-table
+   hot-loop cleanup are in place, with NCBI oracle comparison and
+   `word_size=6/7` support still pending.
 6. Phase 5 CBS redo work only if profiling justifies it. Not started.

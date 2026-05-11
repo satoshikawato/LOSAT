@@ -130,6 +130,18 @@ pub struct BlastCompressedAaLookupTable {
     pub pv_array_bts: i32,
     pub compress_table: [u8; BLASTAA_SIZE],
     pub scaled_compress_table: [i32; BLASTAA_SIZE],
+    // NCBI reference: /mnt/c/Users/genom/GitHub/ncbi-blast/c++/src/algo/blast/core/blast_aascan.c:270-278
+    // ```c
+    // scaled_compress_table = lookup->scaled_compress_table;
+    // ...
+    // compressed_char = scaled_compress_table[next_char];
+    // next_char = s[word_length];
+    // ```
+    //
+    // Rust keeps a byte-wide scan mirror so the hot compressed BLASTP scan can
+    // index by `Uint1`-equivalent subject bytes without an Option/bounds branch;
+    // entries outside NCBISTDAA remain `-1`, preserving the bad-character flush.
+    scaled_compress_table_u8: [i32; 256],
     pub neighbor_matches: i32,
     pub exact_matches: i32,
 }
@@ -164,6 +176,7 @@ impl BlastCompressedAaLookupTable {
         let compress_table = build_compressed_translation(compressed_alphabet_size)?;
         let scaled_compress_table =
             build_scaled_compress_table(&compress_table, compressed_alphabet_size, word_size);
+        let scaled_compress_table_u8 = build_scaled_compress_table_u8(&scaled_compress_table);
         let backbone_size = compressed_alphabet_size
             .checked_pow(word_size as u32)?
             .checked_add(1)?;
@@ -182,6 +195,7 @@ impl BlastCompressedAaLookupTable {
             pv_array_bts: PV_ARRAY_BTS as i32,
             compress_table,
             scaled_compress_table,
+            scaled_compress_table_u8,
             neighbor_matches: 0,
             exact_matches: 0,
         })
@@ -721,11 +735,11 @@ impl BlastCompressedAaLookupTable {
                 let word = subject
                     .get(s..end)
                     .expect("NCBI BLAST compressed scan prime word must be in range");
-                let computed = compute_compressed_index(
+                let computed = compute_compressed_index_u8(
                     word_length - 1,
                     word,
                     compressed_alphabet_size,
-                    &self.scaled_compress_table,
+                    &self.scaled_compress_table_u8,
                 );
                 index = computed.0;
                 let skip = computed.1;
@@ -741,13 +755,10 @@ impl BlastCompressedAaLookupTable {
                 0
             };
             let mut preshift = compressed_reciprocal_divide(index, recip);
+            let scaled_compress_table = &self.scaled_compress_table_u8;
 
             while s <= s_last {
-                let mut compressed_char = self
-                    .scaled_compress_table
-                    .get(next_char as usize)
-                    .copied()
-                    .unwrap_or(-1);
+                let mut compressed_char = scaled_compress_table[usize::from(next_char)];
                 next_char = subject.get(s + word_length).copied().unwrap_or(0);
 
                 if compressed_char < 0 {
@@ -765,11 +776,7 @@ impl BlastCompressedAaLookupTable {
                     s += 1;
                     let mut skip = self.word_length - 1;
                     while skip != 0 && s <= s_last {
-                        compressed_char = self
-                            .scaled_compress_table
-                            .get(next_char as usize)
-                            .copied()
-                            .unwrap_or(-1);
+                        compressed_char = scaled_compress_table[usize::from(next_char)];
                         next_char = subject.get(s + word_length).copied().unwrap_or(0);
                         if compressed_char < 0 {
                             skip = self.word_length - 1;
@@ -1210,6 +1217,26 @@ pub fn build_scaled_compress_table(
     scaled
 }
 
+// NCBI reference: /mnt/c/Users/genom/GitHub/ncbi-blast/c++/src/algo/blast/core/blast_aalookup.c:1339-1347
+// ```c
+// lookup->scaled_compress_table = (Int4 *)malloc(
+//                                    BLASTAA_SIZE * sizeof(Int4));
+// ...
+// lookup->scaled_compress_table[i] = table_scale * letter;
+// ```
+//
+// NCBI reference: /mnt/c/Users/genom/GitHub/ncbi-blast/c++/src/algo/blast/core/blast_aascan.c:270-278
+// ```c
+// scaled_compress_table = lookup->scaled_compress_table;
+// ...
+// compressed_char = scaled_compress_table[next_char];
+// ```
+fn build_scaled_compress_table_u8(scaled_compress_table: &[i32; BLASTAA_SIZE]) -> [i32; 256] {
+    let mut table = [-1i32; 256];
+    table[..BLASTAA_SIZE].copy_from_slice(scaled_compress_table);
+    table
+}
+
 // NCBI reference: /mnt/c/Users/genom/GitHub/ncbi-blast/c++/src/algo/blast/core/blast_aalookup.c:859-909
 // ```c
 // index = w[0] + W6p1[w[1]] + W6p2[w[2]] + W6p3[w[3]] + W6p4[w[4]];
@@ -1257,6 +1284,39 @@ pub fn compute_compressed_index(
             .get(residue as usize)
             .copied()
             .unwrap_or(-1);
+        if ch < 0 {
+            skip = i32::try_from(i + 2).expect("NCBI BLAST compressed skip must fit in Int4");
+            ch = 0;
+        }
+        index = index / compressed_alphabet_size as i32 + ch;
+    }
+    (index, skip)
+}
+
+// NCBI reference: ncbi-blast/c++/include/algo/blast/core/blast_aalookup.h:304-322
+// ```c
+// *skip = 0;
+// for(i = 0; i < wordsize; i++) {
+//     Int4 ch = scaled_compress_table[word[i]];
+//     if (ch < 0){
+//         *skip = i + 2;
+//         ch = 0;
+//     }
+//     index = index / compressed_alphabet_size +  ch;
+// }
+// return index;
+// ```
+#[inline(always)]
+fn compute_compressed_index_u8(
+    word_size: usize,
+    word: &[u8],
+    compressed_alphabet_size: usize,
+    scaled_compress_table: &[i32; 256],
+) -> (i32, i32) {
+    let mut skip = 0i32;
+    let mut index = 0i32;
+    for (i, &residue) in word.iter().take(word_size).enumerate() {
+        let mut ch = scaled_compress_table[usize::from(residue)];
         if ch < 0 {
             skip = i32::try_from(i + 2).expect("NCBI BLAST compressed skip must fit in Int4");
             ch = 0;

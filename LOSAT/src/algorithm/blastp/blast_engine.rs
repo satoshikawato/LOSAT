@@ -17,7 +17,7 @@ use std::time::Instant;
 
 use crate::algorithm::blastn::interval_tree::{BlastIntervalTree, IndexMethod, TreeHsp};
 use crate::algorithm::tblastx::blast_aascan::{
-    s_blast_aa_scan_subject, BlastOffsetPair as OffsetPair,
+    s_blast_aa_scan_subject_one_range, BlastOffsetPair as OffsetPair,
 };
 use crate::algorithm::tblastx::blast_extend::DiagStruct;
 use crate::algorithm::tblastx::constants::{
@@ -1451,49 +1451,33 @@ impl BlastpRuntimeLookup {
             Self::Compressed(lookup) => lookup.longest_chain,
         }
     }
-
-    // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_aascan.c:552-568
-    // ```c
-    // if (lookup_wrap->lut_type == eAaLookupTable) {
-    //     lut->scansub_callback = (void *)s_BlastAaScanSubject;
-    // }
-    // else if (lookup_wrap->lut_type == eCompressedAaLookupTable) {
-    //     lut->scansub_callback = (void *)s_BlastCompressedAaScanSubject;
-    // }
-    // ```
-    #[inline]
-    fn scan_subject(
-        &self,
-        subject_sequence: &[u8],
-        seq_ranges: &[(i32, i32)],
-        offset_pairs: &mut [OffsetPair],
-        array_size: i32,
-        scan_range: &mut [i32; 3],
-    ) -> i32 {
-        match self {
-            Self::Aa(lookup) => s_blast_aa_scan_subject(
-                lookup,
-                subject_sequence,
-                seq_ranges,
-                offset_pairs,
-                array_size,
-                scan_range,
-            ),
-            Self::Compressed(lookup) => lookup.scan_subject(
-                subject_sequence,
-                seq_ranges,
-                offset_pairs,
-                array_size,
-                scan_range,
-            ),
-        }
-    }
 }
 
 #[derive(Clone, Copy)]
 enum BlastpOffsetPairScanMode {
     OneHit,
     TwoHit,
+}
+
+// NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_aascan.c:86-93
+// ```c
+// for (i = 0; i < numhits; i++) {
+//     offset_pairs[i + totalhits].qs_offsets.q_off = src[i];
+//     offset_pairs[i + totalhits].qs_offsets.s_off = s_off;
+// }
+// ```
+#[inline(always)]
+fn blastp_visit_scanned_offset_pairs<F>(offset_pairs: &[OffsetPair], hits: i32, visit: &mut F)
+where
+    F: FnMut(OffsetPair),
+{
+    let offset_pairs_ptr = offset_pairs.as_ptr();
+    for i in 0..hits as usize {
+        // SAFETY: the selected NCBI-shaped scan callback returns at most
+        // `array_size`, which is set to `offset_pairs.len()` for this buffer.
+        let pair = unsafe { *offset_pairs_ptr.add(i) };
+        visit(pair);
+    }
 }
 
 // NCBI reference: ncbi-blast/c++/src/algo/blast/core/aa_ungapped.c:492-505
@@ -1550,19 +1534,37 @@ fn blastp_for_each_offset_pair<F>(
     let array_size =
         i32::try_from(offset_pairs.len()).expect("NCBI BLAST offset pair array size must fit Int4");
 
-    while scan_range[1] <= scan_range[2] {
-        let hits = lookup.scan_subject(
-            subject_sequence,
-            &seq_ranges,
-            offset_pairs,
-            array_size,
-            &mut scan_range,
-        );
-
-        let offset_pairs_ptr = offset_pairs.as_ptr();
-        for i in 0..hits as usize {
-            let pair = unsafe { *offset_pairs_ptr.add(i) };
-            visit(pair);
+    // NCBI reference: /mnt/c/Users/genom/GitHub/ncbi-blast/c++/src/algo/blast/core/blast_aascan.c:552-568
+    // ```c
+    // if (lookup_wrap->lut_type == eAaLookupTable)
+    //    lut->scansub_callback = (void *)s_BlastAaScanSubject;
+    // else if (lookup_wrap->lut_type == eCompressedAaLookupTable)
+    //    lut->scansub_callback = (void *)s_BlastCompressedAaScanSubject;
+    // ```
+    match lookup {
+        BlastpRuntimeLookup::Aa(lookup) => {
+            while scan_range[1] <= scan_range[2] {
+                let hits = s_blast_aa_scan_subject_one_range(
+                    lookup,
+                    subject_sequence,
+                    offset_pairs,
+                    array_size,
+                    &mut scan_range,
+                );
+                blastp_visit_scanned_offset_pairs(offset_pairs, hits, &mut visit);
+            }
+        }
+        BlastpRuntimeLookup::Compressed(lookup) => {
+            while scan_range[1] <= scan_range[2] {
+                let hits = lookup.scan_subject(
+                    subject_sequence,
+                    &seq_ranges,
+                    offset_pairs,
+                    array_size,
+                    &mut scan_range,
+                );
+                blastp_visit_scanned_offset_pairs(offset_pairs, hits, &mut visit);
+            }
         }
     }
 }

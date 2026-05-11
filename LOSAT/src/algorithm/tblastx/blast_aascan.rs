@@ -178,6 +178,176 @@ pub fn s_blast_aa_scan_subject(
     totalhits
 }
 
+// NCBI reference: /mnt/c/Users/genom/GitHub/ncbi-blast/c++/src/algo/blast/core/aa_ungapped.c:495-504
+// ```c
+// scan_range[0] = 0;
+// scan_range[1] = subject->seq_ranges[0].left;
+// scan_range[2] = subject->seq_ranges[0].right - wordsize;
+// ...
+// hits = scansub(lookup_wrap, subject, offset_pairs, array_size, scan_range);
+// ```
+//
+// NCBI reference: /mnt/c/Users/genom/GitHub/ncbi-blast/c++/src/algo/blast/core/blast_aascan.c:75-127
+// ```c
+// while (s_DetermineScanningOffsets(subject, word_length, word_length, s_range)) {
+//     s_first=subject->sequence + s_range[1];
+//     s_last=subject->sequence + s_range[2];
+//     ...
+//     for (s = s_first; s <= s_last; s++) {
+//         index = ComputeTableIndexIncremental(..., s, index);
+//         if (PV_TEST(pv, index, PV_ARRAY_BTS)) { ... }
+//     }
+//     s_range[1] = (Int4)(s - subject->sequence);
+// }
+// ```
+#[inline]
+pub fn s_blast_aa_scan_subject_one_range(
+    lookup: &BlastAaLookupTable,
+    subject: &[u8],
+    offset_pairs: &mut [OffsetPair],
+    array_size: i32,
+    s_range: &mut [i32; 3],
+) -> i32 {
+    if s_range[1] > s_range[2] {
+        return 0;
+    }
+
+    let mut totalhits: i32 = 0;
+
+    // NCBI reference: /mnt/c/Users/genom/GitHub/ncbi-blast/c++/src/algo/blast/core/blast_aascan.c:67-73
+    // ```c
+    // lookup = (BlastAaLookupTable *) lookup_wrap->lut;
+    // pv = lookup->pv;
+    // bbc = (AaLookupBackboneCell *) lookup->thick_backbone;
+    // ovfl = (Int4 *) lookup->overflow;
+    // word_length = lookup->word_length;
+    // ```
+    let word_length = lookup.word_length as usize;
+    let charsize = lookup.charsize as usize;
+    let mask = lookup.mask as usize;
+    let pv = lookup.pv.as_ptr();
+    let backbone = lookup.backbone.as_ptr();
+    let overflow = lookup.overflow.as_ptr();
+
+    let s_first = s_range[1] as usize;
+    let s_last = s_range[2] as usize;
+
+    // NCBI reference: /mnt/c/Users/genom/GitHub/ncbi-blast/c++/include/algo/blast/core/blast_lookup.h:96-107
+    // ```c
+    // for(i = 0; i < wordsize; i++) {
+    //     index = (index << charsize) | word[i];
+    // }
+    // ```
+    let mut index: usize = 0;
+    for i in 0..(word_length - 1) {
+        // SAFETY: NCBI scan ranges are constructed for a sentinel-backed
+        // subject buffer; the prime step reads the first `word_length - 1`
+        // residues of the current scan word just like ComputeTableIndex.
+        let ch = unsafe { *subject.get_unchecked(s_first + i) } as usize;
+        index = (index << charsize) | ch;
+    }
+
+    let mut s = s_first;
+    while s <= s_last {
+        // NCBI reference: /mnt/c/Users/genom/GitHub/ncbi-blast/c++/include/algo/blast/core/blast_lookup.h:121-127
+        // ```c
+        // return ((index << charsize) | word[wordsize - 1]) & mask;
+        // ```
+        // SAFETY: The caller-provided scan range follows NCBI's subject
+        // sequence contract: positions through `s + word_length - 1` are valid
+        // in the sentinel-backed scan buffer.
+        let new_char = unsafe { *subject.get_unchecked(s + word_length - 1) } as usize;
+        index = ((index << charsize) | new_char) & mask;
+
+        // NCBI reference: /mnt/c/Users/genom/GitHub/ncbi-blast/c++/src/algo/blast/core/blast_aascan.c:89-97
+        // ```c
+        // if (PV_TEST(pv, index, PV_ARRAY_BTS)) {
+        //     numhits = bbc[index].num_used;
+        //     if (numhits <= (array_size - totalhits)) {
+        // ```
+        // SAFETY: `index` is masked to the lookup backbone space, and the PV
+        // allocation is sized from that same space during lookup finalization.
+        let pv_word = unsafe { *pv.add(index >> PV_ARRAY_BTS) };
+        if (pv_word & (1u32 << (index & PV_ARRAY_MASK))) != 0 {
+            // SAFETY: The same masked index addresses the finalized NCBI-style
+            // thick backbone cell.
+            let cell = unsafe { &*backbone.add(index) };
+            let numhits = cell.num_used;
+
+            if numhits <= array_size - totalhits {
+                let s_off = s as u32;
+                let dest_base = totalhits as usize;
+
+                if numhits as usize <= AA_HITS_PER_CELL {
+                    // NCBI reference: /mnt/c/Users/genom/GitHub/ncbi-blast/c++/src/algo/blast/core/blast_aascan.c:99-114
+                    // ```c
+                    // src = bbc[index].payload.entries;
+                    // for (i = 0; i < numhits; i++) {
+                    //     offset_pairs[i + totalhits].qs_offsets.q_off = src[i];
+                    //     offset_pairs[i + totalhits].qs_offsets.s_off = s_off;
+                    // }
+                    // ```
+                    unsafe {
+                        // SAFETY: The NCBI space check above guarantees
+                        // `numhits <= array_size - totalhits`, so this write is
+                        // within the caller-provided offset-pair buffer.
+                        let dest = offset_pairs.as_mut_ptr().add(dest_base);
+                        for i in 0..numhits as usize {
+                            (*dest.add(i)) = OffsetPair {
+                                q_off: cell.entries[i] as u32,
+                                s_off,
+                            };
+                        }
+                    }
+                } else {
+                    // NCBI reference: /mnt/c/Users/genom/GitHub/ncbi-blast/c++/src/algo/blast/core/blast_aascan.c:99-114
+                    // ```c
+                    // src = &(ovfl[bbc[index].payload.overflow_cursor]);
+                    // for (i = 0; i < numhits; i++) {
+                    //     offset_pairs[i + totalhits].qs_offsets.q_off = src[i];
+                    //     offset_pairs[i + totalhits].qs_offsets.s_off = s_off;
+                    // }
+                    // ```
+                    let cursor = cell.entries[0] as usize;
+                    unsafe {
+                        // SAFETY: For overflow cells, NCBI lookup construction
+                        // stores a cursor to `numhits` contiguous query offsets;
+                        // the destination bound is guarded by the same
+                        // `array_size - totalhits` check as the inline case.
+                        let src = overflow.add(cursor);
+                        let dest = offset_pairs.as_mut_ptr().add(dest_base);
+                        for i in 0..numhits as usize {
+                            (*dest.add(i)) = OffsetPair {
+                                q_off: *src.add(i) as u32,
+                                s_off,
+                            };
+                        }
+                    }
+                }
+                totalhits += numhits;
+            } else {
+                // NCBI reference: /mnt/c/Users/genom/GitHub/ncbi-blast/c++/src/algo/blast/core/blast_aascan.c:118-123
+                // ```c
+                // s_range[1] = (Int4)(s - subject->sequence);
+                // return totalhits;
+                // ```
+                s_range[1] = s as i32;
+                return totalhits;
+            }
+        }
+
+        s += 1;
+    }
+
+    // NCBI reference: /mnt/c/Users/genom/GitHub/ncbi-blast/c++/src/algo/blast/core/blast_aascan.c:125-127
+    // ```c
+    // } /* end for */
+    // s_range[1] = (Int4)(s - subject->sequence);
+    // ```
+    s_range[1] = s as i32;
+    totalhits
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

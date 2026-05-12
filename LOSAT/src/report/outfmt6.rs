@@ -323,6 +323,39 @@ pub fn format_bitscore_ncbi(bit_score: f64) -> String {
     }
 }
 
+/// Format percent identity exactly as NCBI tabular output does.
+///
+/// NCBI reference: /mnt/c/Users/genom/GitHub/ncbi-blast/c++/include/objtools/align_format/tabular.hpp:437-441
+/// ```c
+/// inline void CBlastTabularInfo::x_PrintPercentIdentical(void)
+/// {
+///     double perc_ident =
+///         (m_AlignLength > 0 ? ((double)m_NumIdent)/m_AlignLength * 100 : 0);
+///     m_Ostream << NStr::DoubleToString(perc_ident, 3);
+/// }
+/// ```
+/// NCBI reference: /mnt/c/Users/genom/GitHub/ncbi-blast/c++/src/corelib/ncbistr.cpp:2388-2401
+/// ```c
+/// case fDoubleFixed: // default
+/// default:
+///     format = "%.*f";
+///     break;
+/// ...
+/// n = ::snprintf(buffer, kMaxDoubleStringSize, format, (int)precision, value);
+/// ```
+pub fn format_percent_identity_ncbi(
+    num_ident: usize,
+    alignment_length: usize,
+    precision: usize,
+) -> String {
+    let perc_ident = if alignment_length > 0 {
+        (num_ident as f64 / alignment_length as f64) * 100.0
+    } else {
+        0.0
+    };
+    format!("{:.prec$}", perc_ident, prec = precision)
+}
+
 /// Write E-value exactly as NCBI BLAST does (base GetScoreString logic).
 ///
 /// NCBI reference: ncbi-blast/c++/src/objtools/align_format/align_format_util.cpp:965-983
@@ -412,7 +445,17 @@ pub fn format_hit(
     config: &OutputConfig,
 ) -> String {
     let delim = config.delimiter;
-    let identity_fmt = format!("{:.prec$}", hit.identity, prec = config.identity_decimals);
+    // NCBI reference: /mnt/c/Users/genom/GitHub/ncbi-blast/c++/include/objtools/align_format/tabular.hpp:437-441
+    // ```c
+    // double perc_ident =
+    //     (m_AlignLength > 0 ? ((double)m_NumIdent)/m_AlignLength * 100 : 0);
+    // m_Ostream << NStr::DoubleToString(perc_ident, 3);
+    // ```
+    let identity_fmt = if config.ncbi_evalue_format {
+        format_percent_identity_ncbi(hit.num_ident, hit.length, config.identity_decimals)
+    } else {
+        format!("{:.prec$}", hit.identity, prec = config.identity_decimals)
+    };
 
     // Use NCBI-compatible formatting when enabled
     let bit_score_fmt = if config.ncbi_evalue_format {
@@ -478,6 +521,7 @@ pub fn write_hit_fields<W: Write>(
     query_id: &str,
     subject_id: &str,
     identity: f64,
+    num_ident: usize,
     length: usize,
     mismatch: usize,
     gapopen: usize,
@@ -491,13 +535,18 @@ pub fn write_hit_fields<W: Write>(
 ) -> io::Result<()> {
     let delim = config.delimiter;
     write!(writer, "{}{}{}", query_id, delim, subject_id)?;
-    write!(
-        writer,
-        "{}{:.prec$}",
-        delim,
-        identity,
-        prec = config.identity_decimals
-    )?;
+    // NCBI reference: /mnt/c/Users/genom/GitHub/ncbi-blast/c++/include/objtools/align_format/tabular.hpp:437-441
+    // ```c
+    // double perc_ident =
+    //     (m_AlignLength > 0 ? ((double)m_NumIdent)/m_AlignLength * 100 : 0);
+    // m_Ostream << NStr::DoubleToString(perc_ident, 3);
+    // ```
+    let identity_fmt = if config.ncbi_evalue_format {
+        format_percent_identity_ncbi(num_ident, length, config.identity_decimals)
+    } else {
+        format!("{:.prec$}", identity, prec = config.identity_decimals)
+    };
+    write!(writer, "{}{}", delim, identity_fmt)?;
     write!(writer, "{}{}", delim, length)?;
     write!(writer, "{}{}", delim, mismatch)?;
     write!(writer, "{}{}", delim, gapopen)?;
@@ -574,6 +623,7 @@ pub fn write_outfmt6<W: Write>(
             query_id,
             subject_id,
             hit.identity,
+            hit.num_ident,
             hit.length,
             hit.mismatch,
             hit.gapopen,
@@ -704,6 +754,7 @@ pub fn write_outfmt7<W: Write>(
             query_id,
             subject_id,
             hit.identity,
+            hit.num_ident,
             hit.length,
             hit.mismatch,
             hit.gapopen,
@@ -832,6 +883,7 @@ pub fn write_outfmt7_grouped<W: Write>(
                 query_id,
                 subject_id,
                 hit.identity,
+                hit.num_ident,
                 hit.length,
                 hit.mismatch,
                 hit.gapopen,
@@ -1181,6 +1233,18 @@ mod tests {
     // ==========================================================================
 
     #[test]
+    fn test_format_percent_identity_ncbi_divides_before_scaling() {
+        // NCBI reference: /mnt/c/Users/genom/GitHub/ncbi-blast/c++/include/objtools/align_format/tabular.hpp:437-441
+        // ```c
+        // double perc_ident =
+        //     (m_AlignLength > 0 ? ((double)m_NumIdent)/m_AlignLength * 100 : 0);
+        // m_Ostream << NStr::DoubleToString(perc_ident, 3);
+        // ```
+        assert_eq!(format_percent_identity_ncbi(179, 320, 3), "55.937");
+        assert_eq!(format_percent_identity_ncbi(0, 0, 3), "0.000");
+    }
+
+    #[test]
     fn test_format_evalue_compat() {
         // Test the wrapper function with ncbi_compat flag
         assert_eq!(format_evalue(0.0, true), "0.0");
@@ -1231,7 +1295,13 @@ mod tests {
 
         assert!(line.contains("query1"));
         assert!(line.contains("subject1"));
-        assert!(line.contains("95.123"));
+        // NCBI reference: /mnt/c/Users/genom/GitHub/ncbi-blast/c++/include/objtools/align_format/tabular.hpp:437-441
+        // ```c
+        // double perc_ident =
+        //     (m_AlignLength > 0 ? ((double)m_NumIdent)/m_AlignLength * 100 : 0);
+        // m_Ostream << NStr::DoubleToString(perc_ident, 3);
+        // ```
+        assert!(line.contains("95.000"));
         // Bit score 185.5 > 99.9 should be truncated via `(long)bit_score`.
         assert!(line.contains("185"));
         // E-value 1e-50 should be "1.00e-50"

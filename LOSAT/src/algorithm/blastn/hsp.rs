@@ -892,6 +892,7 @@ pub fn write_output_blastn_hitlists_to_writer<W: Write>(
                     query_id,
                     subject_id,
                     hsp.identity,
+                    hsp.num_ident,
                     hsp.length,
                     hsp.mismatch,
                     hsp.gapopen,

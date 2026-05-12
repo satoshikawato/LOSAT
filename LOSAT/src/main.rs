@@ -36,6 +36,19 @@ enum Commands {
 // const string kArgMaxTargetSequences("max_target_seqs");
 // const string kArgGapOpen("gapopen");
 // const string kArgGapExtend("gapextend");
+// const string kArgWordSize("word_size");
+// const string kArgWindowSize("window_size");
+// const string kArgCompBasedStats("comp_based_stats");
+// ```
+//
+// NCBI reference: ncbi-blast/c++/src/algo/blast/blastinput/blast_args.cpp:190-210
+// ```c
+// const string kArgMaxHSPsPerSubject("max_hsps");
+// ```
+//
+// NCBI reference: ncbi-blast/c++/src/algo/blast/blastinput/blast_args.cpp:570-622
+// ```c
+// const string kArgWordThreshold("threshold");
 // ```
 fn normalize_ncbi_cli_args() -> Vec<OsString> {
     std::env::args_os()
@@ -51,10 +64,12 @@ fn normalize_ncbi_cli_args() -> Vec<OsString> {
                     "-num_threads" => OsString::from("-n"),
                     "-max_target_seqs" => OsString::from("--max-target-seqs"),
                     "-word_size" => OsString::from("--word-size"),
+                    "-threshold" => OsString::from("--threshold"),
                     "-window_size" => OsString::from("--window-size"),
                     "-gapopen" => OsString::from("--gap-open"),
                     "-gapextend" => OsString::from("--gap-extend"),
                     "-comp_based_stats" => OsString::from("--comp-based-stats"),
+                    "-max_hsps" => OsString::from("--max-hsps-per-subject"),
                     "-matrix" => OsString::from("--matrix"),
                     "-seg" => OsString::from("--seg"),
                     _ => arg,

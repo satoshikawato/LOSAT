@@ -548,6 +548,65 @@ NCBI reference:
 - `cargo test subject_seg --lib`: pass
 - `cargo test prepare_preliminary_hits_for_kappa --lib`: pass
 
+#### 2026-05-12 追記: preliminary gapped exact-retry の interval-tree rebuild / 再走査削減
+
+Kappa redo の重複 SEG と adjusted matrix row hot path を削った後、再計測では
+AP027131/NZ_CP006932 系の最大要素が `blastp_prelim_gapped` に移った。今回の作業開始時点の
+release build では、AP027131 vs NZ_CP006932 が
+`blastp_prelim_gapped: 1.772s`, `blastp_scan_ungapped: 1.595s`,
+`blastp_kappa_redo: 1.034s` だった。
+
+実装内容:
+
+- `LOSAT/src/algorithm/blastp/blast_engine.rs` の `BlastpSubjectScratch` に
+  query ごとの accepted preliminary HSP count を追加した。
+- restricted alignment が inconclusive になって exact retry へ切り替わるとき、
+  その query の accepted preliminary HSP が 0 件なら、NCBI の reset/remove/rebuild loop が
+  interval tree を同じ内容に戻すだけなので、tree reset と全 HSP list rebuild を省略する。
+- accepted preliminary HSP がある query では従来通り current query の HSP を除去し、
+  残りの HSP list から interval tree を再構築する。出力順維持のため ordered
+  `preliminary_hsp_list` はそのまま使う。
+- exact retry の再走査では、NCBI の `index = -1` restart と
+  `index < redo_index && query_index != redo_query` skip loop に合わせ、
+  lazily 作った first/next same-query index cache で同じ query の processable hit へ直接進める。
+  DP、cutoff、tree containment、HSP list order は変えていない。
+
+NCBI reference:
+
+- `/mnt/c/Users/genom/GitHub/ncbi-blast/c++/src/algo/blast/core/blast_gapalign.c:3697-3698`
+- `/mnt/c/Users/genom/GitHub/ncbi-blast/c++/src/algo/blast/core/blast_gapalign.c:3870-3878`
+- `/mnt/c/Users/genom/GitHub/ncbi-blast/c++/src/algo/blast/core/blast_gapalign.c:3975-4007`
+
+実測結果:
+
+- AP027131 vs NZ_CP006932:
+  `prelim_exact_retries: 5941`,
+  `interval_tree_rebuilds: 5941 -> 30`,
+  `rebuild_nodes: 142411 -> 1396`。
+  `blastp_prelim_gapped: 1.772s -> 1.750s`,
+  `blastp_total: 4.583s -> 4.575s`。
+- AP027078 vs AP027131:
+  `prelim_exact_retries: 3728`,
+  `interval_tree_rebuilds: 3728 -> 25`,
+  `rebuild_nodes: 66509 -> 915`。
+  `blastp_prelim_gapped: 1.255s -> 1.254s`,
+  `blastp_total: 3.450s -> 3.461s`。
+- wall time は noise が大きく改善幅は小さいが、exact retry の interval-tree rebuild という
+  最大 hot path 内の無駄な O(HSP list) 処理は大幅に減った。
+- `diff -q /tmp/losat_ap027131_nz_current.out /tmp/losat_ap027131_nz_final2.out`: no diff。
+- `diff -q /tmp/losat_ap027078_ap027131_current.out /tmp/losat_ap027078_ap027131_final2.out`: no diff。
+
+採用しなかった実装:
+
+- preliminary DP の subject residue 取得を unchecked に寄せる案は、
+  AP027131 vs NZ_CP006932 で `blastp_prelim_gapped` が約 2.074s まで悪化したため戻した。
+
+検証:
+
+- `rustfmt --edition 2021 src/algorithm/blastp/blast_engine.rs src/algorithm/blastp/gapalign.rs`: pass
+- `cargo test preliminary --lib`: pass
+- `cargo build --release`: pass
+
 ## 受け入れ条件
 
 - `LOSAT/tests/run_blastp_comparison.sh` の outfmt 6 diff がゼロ。

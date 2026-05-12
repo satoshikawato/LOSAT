@@ -213,6 +213,19 @@ struct BlastpSubjectScratch {
     // hsp_list = new_hsp_list;
     // ```
     preliminary_hsp_list: Vec<BlastpPreliminaryHsp>,
+    // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_gapalign.c:3975-3997
+    // ```c
+    // Blast_IntervalTreeReset(tree);
+    // /* remove all HSPs computed for the current query */
+    // for (index2 = 0; index2 < hsp_list->hspcnt; index2++) {
+    //     ...
+    // }
+    // ```
+    //
+    // Rust tracks how many accepted preliminary HSPs belong to each query so
+    // the redo path can tell when NCBI's remove/rebuild loop would leave the
+    // interval tree unchanged.
+    preliminary_hsp_counts_by_query: Vec<usize>,
     // NCBI reference: ncbi-blast/c++/src/algo/blast/core/hspfilter_collector.c:117-149
     // ```c
     // query_index = Blast_GetQueryIndexFromContext(hsp->context, program);
@@ -495,6 +508,7 @@ impl BlastpSubjectScratch {
             // Blast_IntervalTreeReset(tree);
             // ```
             preliminary_hsp_list: Vec::new(),
+            preliminary_hsp_counts_by_query: Vec::new(),
             preliminary_hits_by_query: Vec::new(),
             restricted_align_found: Vec::new(),
             restricted_align_array: Vec::new(),
@@ -538,6 +552,7 @@ impl BlastpSubjectScratch {
         // Blast_IntervalTreeReset(tree);
         // ```
         self.preliminary_hsp_list.clear();
+        self.preliminary_hsp_counts_by_query.clear();
         for query_hits in &mut self.preliminary_hits_by_query {
             query_hits.clear();
         }
@@ -1454,6 +1469,33 @@ fn blastp_get_ungapped_hsp_context_with_bounds(
     init_hsp: &InitHSP,
 ) -> usize {
     blastp_context_idx_for_query_offset_with_bounds(contexts, bounds, init_hsp.q_seed_absolute)
+}
+
+// NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_gapalign.c:3870-3878
+// ```c
+// /* If redo_index > -1 and redo_query > -1, the main loop is recomputing
+//    gappaed alignments for a single query ... Until index reaches redo_index
+//    again, skip all concatenated queries with index different from redo_query */
+// if (index < redo_index && query_index != redo_query) {
+//     continue;
+// }
+// ```
+#[inline]
+fn blastp_advance_preliminary_hit_index(
+    hit_index: usize,
+    redo_index: Option<usize>,
+    next_same_query_index: &[Option<usize>],
+) -> usize {
+    if let Some(redo_index) = redo_index {
+        if hit_index < redo_index && !next_same_query_index.is_empty() {
+            return next_same_query_index
+                .get(hit_index)
+                .and_then(|index| *index)
+                .map(|index| index.min(redo_index))
+                .unwrap_or(redo_index);
+        }
+    }
+    hit_index + 1
 }
 
 // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_gapalign.c:2374-2389
@@ -4400,6 +4442,10 @@ fn run_resolved_with_records(
         // order instead of HashMap iteration order.
         let mut preliminary_hsp_list = std::mem::take(&mut scratch.preliminary_hsp_list);
         preliminary_hsp_list.clear();
+        let mut preliminary_hsp_counts_by_query =
+            std::mem::take(&mut scratch.preliminary_hsp_counts_by_query);
+        preliminary_hsp_counts_by_query.clear();
+        preliminary_hsp_counts_by_query.resize(query_ids.len(), 0);
         // NCBI reference: /mnt/c/Users/genom/GitHub/ncbi-blast/c++/src/algo/blast/core/blast_engine.c:1481-1497
         // ```c
         // if (!gapped_calculation) {
@@ -4415,6 +4461,14 @@ fn run_resolved_with_records(
         // ```
         let mut redo_index: Option<usize> = None;
         let mut redo_query: Option<usize> = None;
+        let mut first_init_hsp_index_by_query: Vec<Option<usize>> = Vec::new();
+        // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_gapalign.c:3870-3878
+        // ```c
+        // if (index < redo_index && query_index != redo_query) {
+        //     continue;
+        // }
+        // ```
+        let mut next_same_query_index: Vec<Option<usize>> = Vec::new();
         // NCBI reference: ncbi-blast/c++/include/algo/blast/core/blast_gapalign.h:69-80
         // ```c
         // BlastGapDP* dp_mem; /**< scratch structures for dynamic programming */
@@ -4484,7 +4538,11 @@ fn run_resolved_with_records(
             };
             let tree_contains = interval_tree.contains_hsp(&ungapped_tree_hsp, ctx.frame_base, 0);
             if tree_contains {
-                hit_index += 1;
+                hit_index = blastp_advance_preliminary_hit_index(
+                    hit_index,
+                    redo_index,
+                    &next_same_query_index,
+                );
                 continue;
             }
             let restricted_alignment = restricted_align_array
@@ -4527,16 +4585,44 @@ fn run_resolved_with_records(
                 // /* remove all HSPs computed for the current query */
                 // for (index2 = 0; index2 < hsp_list->hspcnt; index2++) { ... }
                 // ```
-                let removed_hsps = remove_preliminary_hits_for_query(
-                    &mut preliminary_hsp_list,
-                    query_index,
-                    &contexts,
-                );
-                let rebuild_nodes = rebuild_preliminary_interval_tree_from_list(
-                    interval_tree,
-                    &preliminary_hsp_list,
-                    &contexts,
-                );
+                let accepted_for_query = preliminary_hsp_counts_by_query
+                    .get(query_index)
+                    .copied()
+                    .unwrap_or(0);
+                let (removed_hsps, rebuild_nodes) = if accepted_for_query == 0 {
+                    // NCBI reference: /mnt/c/Users/genom/GitHub/ncbi-blast/c++/src/algo/blast/core/blast_gapalign.c:3975-3997
+                    // ```c
+                    // Blast_IntervalTreeReset(tree);
+                    // /* remove all HSPs computed for the current query */
+                    // for (index2 = 0; index2 < hsp_list->hspcnt; index2++) {
+                    //     ...
+                    // }
+                    // ```
+                    //
+                    // With no accepted HSP for this query, NCBI's rebuild
+                    // would copy every existing non-query HSP back into the
+                    // tree. The current tree already contains exactly that set.
+                    (0, 0)
+                } else {
+                    let removed_hsps = remove_preliminary_hits_for_query(
+                        &mut preliminary_hsp_list,
+                        query_index,
+                        &contexts,
+                    );
+                    debug_assert_eq!(
+                        removed_hsps, accepted_for_query,
+                        "NCBI redo removal should drop all accepted HSPs for the retried query"
+                    );
+                    if let Some(count) = preliminary_hsp_counts_by_query.get_mut(query_index) {
+                        *count = 0;
+                    }
+                    let rebuild_nodes = rebuild_preliminary_interval_tree_from_list(
+                        interval_tree,
+                        &preliminary_hsp_list,
+                        &contexts,
+                    );
+                    (removed_hsps, rebuild_nodes)
+                };
                 if let Some(timing) = timing.as_ref() {
                     // NCBI reference: /mnt/c/Users/genom/GitHub/ncbi-blast/c++/src/algo/blast/core/blast_gapalign.c:3975-4007
                     // ```c
@@ -4551,11 +4637,13 @@ fn run_resolved_with_records(
                         &timing.preliminary_retry_removed_hsps,
                         removed_hsps,
                     );
-                    BlastpTiming::record_count(&timing.preliminary_interval_tree_rebuilds, 1);
-                    BlastpTiming::record_count(
-                        &timing.preliminary_interval_tree_rebuild_nodes,
-                        rebuild_nodes,
-                    );
+                    if accepted_for_query != 0 {
+                        BlastpTiming::record_count(&timing.preliminary_interval_tree_rebuilds, 1);
+                        BlastpTiming::record_count(
+                            &timing.preliminary_interval_tree_rebuild_nodes,
+                            rebuild_nodes,
+                        );
+                    }
                 }
                 // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_gapalign.c:4001-4007
                 // ```c
@@ -4566,11 +4654,58 @@ fn run_resolved_with_records(
                 // ```
                 redo_index = Some(hit_index);
                 redo_query = Some(query_index);
-                hit_index = 0;
+                if first_init_hsp_index_by_query.is_empty() {
+                    // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_gapalign.c:3870-3878
+                    // ```c
+                    // if (index < redo_index && query_index != redo_query) {
+                    //     continue;
+                    // }
+                    // ```
+                    //
+                    // NCBI restarts at the first initial hit and skips until
+                    // it finds the retried query. Rust precomputes that first
+                    // per-query hit lazily and jumps to the same first
+                    // processable index, preserving the subsequent hit order.
+                    first_init_hsp_index_by_query.resize(query_ids.len(), None);
+                    next_same_query_index.clear();
+                    next_same_query_index.resize(init_hsps.len(), None);
+                    let mut last_init_hsp_index_by_query = vec![None; query_ids.len()];
+                    for (index, init_hsp) in init_hsps.iter().enumerate() {
+                        let context_idx = blastp_get_ungapped_hsp_context_with_bounds(
+                            &contexts,
+                            context_lookup_bounds,
+                            init_hsp,
+                        );
+                        let init_query_index = usize::try_from(contexts[context_idx].q_idx)
+                            .expect("NCBI BLAST requires blastp query indices to fit in usize");
+                        if let Some(slot) = first_init_hsp_index_by_query.get_mut(init_query_index)
+                        {
+                            if slot.is_none() {
+                                *slot = Some(index);
+                            }
+                        }
+                        if let Some(last_index) =
+                            last_init_hsp_index_by_query.get_mut(init_query_index)
+                        {
+                            if let Some(previous_index) = *last_index {
+                                next_same_query_index[previous_index] = Some(index);
+                            }
+                            *last_index = Some(index);
+                        }
+                    }
+                }
+                hit_index = first_init_hsp_index_by_query
+                    .get(query_index)
+                    .and_then(|index| *index)
+                    .unwrap_or(0);
                 continue;
             }
             if preliminary_hsp.raw_score < cutoff {
-                hit_index += 1;
+                hit_index = blastp_advance_preliminary_hit_index(
+                    hit_index,
+                    redo_index,
+                    &next_same_query_index,
+                );
                 continue;
             }
             interval_tree.add_hsp(
@@ -4579,7 +4714,11 @@ fn run_resolved_with_records(
                 IndexMethod::QueryAndSubject,
             );
             preliminary_hsp_list.push(preliminary_hsp);
-            hit_index += 1;
+            if let Some(count) = preliminary_hsp_counts_by_query.get_mut(query_index) {
+                *count += 1;
+            }
+            hit_index =
+                blastp_advance_preliminary_hit_index(hit_index, redo_index, &next_same_query_index);
         }
         if let Some(timing) = timing.as_ref() {
             BlastpTiming::record_call(
@@ -4670,6 +4809,8 @@ fn run_resolved_with_records(
         }
         scratch.restricted_align_array = restricted_align_array;
         scratch.restricted_align_array.clear();
+        scratch.preliminary_hsp_counts_by_query = preliminary_hsp_counts_by_query;
+        scratch.preliminary_hsp_counts_by_query.clear();
         scratch.preliminary_hsp_list = preliminary_hsp_list;
         scratch.preliminary_hits_by_query = preliminary_hits_by_query;
     };

@@ -9,6 +9,7 @@ use std::collections::HashMap;
 use std::ffi::c_void;
 use std::ptr::NonNull;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering as AtomicOrdering};
+use std::sync::OnceLock;
 
 use crate::common::{GapEditOp, Hit};
 use crate::config::ScoringMatrix;
@@ -58,6 +59,105 @@ static BLASTP_KAPPA_SUBJECT_SEG_CALLS: AtomicU64 = AtomicU64::new(0);
 static BLASTP_KAPPA_SUBJECT_SEG_MASKED_RESIDUES: AtomicU64 = AtomicU64::new(0);
 static BLASTP_KAPPA_SUBJECT_SEG_CACHE_HITS: AtomicU64 = AtomicU64::new(0);
 static BLASTP_KAPPA_SUBJECT_SEG_CACHE_MISSES: AtomicU64 = AtomicU64::new(0);
+
+#[derive(Clone, Copy, Debug)]
+pub(crate) struct BlastpTraceHspTarget {
+    pub(crate) q_idx: Option<u32>,
+    pub(crate) s_idx: Option<u32>,
+    pub(crate) q_start: usize,
+    pub(crate) q_end: usize,
+    pub(crate) s_start: usize,
+    pub(crate) s_end: usize,
+}
+
+// NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_kappa.c:3658-3716
+// ```c
+// s_HSPListFromDistinctAlignments(...);
+// s_HitlistEvaluateAndPurge(...);
+// s_HSPListNormalizeScores(...);
+// s_ComputeNumIdentities(...);
+// ```
+//
+// NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_hits.c:746-824
+// ```c
+// s_Blast_HSPGetNumIdentitiesAndPositives(...)
+// ```
+pub(crate) fn blastp_trace_hsp_target() -> Option<BlastpTraceHspTarget> {
+    static TARGET: OnceLock<Option<BlastpTraceHspTarget>> = OnceLock::new();
+    *TARGET.get_or_init(|| {
+        let value = std::env::var("LOSAT_DEBUG_BLASTP_TRACE_HSP").ok()?;
+        let fields: Vec<&str> = value.split(',').map(str::trim).collect();
+        match fields.as_slice() {
+            [q_idx, s_idx, q_start, q_end, s_start, s_end] => Some(BlastpTraceHspTarget {
+                q_idx: q_idx.parse::<u32>().ok(),
+                s_idx: s_idx.parse::<u32>().ok(),
+                q_start: q_start.parse().ok()?,
+                q_end: q_end.parse().ok()?,
+                s_start: s_start.parse().ok()?,
+                s_end: s_end.parse().ok()?,
+            }),
+            [q_start, q_end, s_start, s_end] => Some(BlastpTraceHspTarget {
+                q_idx: None,
+                s_idx: None,
+                q_start: q_start.parse().ok()?,
+                q_end: q_end.parse().ok()?,
+                s_start: s_start.parse().ok()?,
+                s_end: s_end.parse().ok()?,
+            }),
+            _ => None,
+        }
+    })
+}
+
+#[inline]
+pub(crate) fn blastp_trace_matches_pair(
+    target: BlastpTraceHspTarget,
+    q_idx: u32,
+    s_idx: u32,
+) -> bool {
+    target.q_idx.is_none_or(|expected| expected == q_idx)
+        && target.s_idx.is_none_or(|expected| expected == s_idx)
+}
+
+#[inline]
+fn blastp_trace_matches_hsp(target: BlastpTraceHspTarget, hsp: &BlastpHsp) -> bool {
+    blastp_trace_matches_pair(target, hsp.q_idx, hsp.s_idx)
+        && hsp.q_start == target.q_start
+        && hsp.q_end == target.q_end
+        && hsp.s_start.min(hsp.s_end) == target.s_start
+        && hsp.s_start.max(hsp.s_end) == target.s_end
+}
+
+// NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_gapalign.c:360-374
+// ```c
+// SCRIPT_GAP_IN_A = eGapAlignDel,
+// SCRIPT_GAP_IN_B = eGapAlignIns,
+// ```
+fn blastp_trace_gap_summary(gap_info: Option<&[GapEditOp]>) -> String {
+    let Some(gap_info) = gap_info else {
+        return "ungapped".to_string();
+    };
+    let mut sub_ops = 0usize;
+    let mut del_ops = 0usize;
+    let mut ins_ops = 0usize;
+    let mut total_len = 0usize;
+    for op in gap_info {
+        total_len += op.num() as usize;
+        match op {
+            GapEditOp::Sub(_) => sub_ops += 1,
+            GapEditOp::Del(_) => del_ops += 1,
+            GapEditOp::Ins(_) => ins_ops += 1,
+        }
+    }
+    format!(
+        "ops={} sub_ops={} del_ops={} ins_ops={} total_len={}",
+        gap_info.len(),
+        sub_ops,
+        del_ops,
+        ins_ops,
+        total_len
+    )
+}
 
 #[inline]
 pub(crate) fn blastp_kappa_range_counters_env_enabled() -> bool {
@@ -1534,6 +1634,35 @@ pub(crate) fn postprocess_preliminary_hits(
     let incoming_aligns =
         build_incoming_alignment_list(&preliminary_hits, redo_align_params.score_divisor);
     let matching_seq = BlastCompoMatchingSequence::new(preliminary_hits[0].s_idx as i32, subject);
+    if let Some(target) = blastp_trace_hsp_target() {
+        if blastp_trace_matches_pair(target, preliminary_hits[0].q_idx, preliminary_hits[0].s_idx) {
+            // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_kappa.c:3612-3619
+            // ```c
+            // localMatch->hsp_array,  /* i */
+            // localMatch->hspcnt,     /* i */
+            // *pStatusCode = s_ResultHspToDistinctAlign(...);
+            // ```
+            eprintln!(
+                "[BLASTP_TRACE_HSP] kappa_input q_idx={} s_idx={} preliminary_count={} expect_value={}",
+                preliminary_hits[0].q_idx,
+                preliminary_hits[0].s_idx,
+                preliminary_hits.len(),
+                expect_value,
+            );
+            for (index, hit) in preliminary_hits.iter().enumerate() {
+                eprintln!(
+                    "[BLASTP_TRACE_HSP] preliminary[{index}] q={}..{} s={}..{} gapped_start=({}, {}) raw_score={}",
+                    hit.query_start + 1,
+                    hit.query_end,
+                    hit.subject_start + 1,
+                    hit.subject_end,
+                    hit.gapped_query_start,
+                    hit.gapped_subject_start,
+                    hit.raw_score,
+                );
+            }
+        }
+    }
     // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_kappa.c:2117-2133
     // ```c
     // if (sbp->kbp_gap[i] != NULL) {
@@ -1616,6 +1745,35 @@ pub(crate) fn postprocess_preliminary_hits(
             best_evalue: i32::MAX as f64,
         });
 
+    if let Some(target) = blastp_trace_hsp_target() {
+        if blastp_trace_matches_pair(target, preliminary_hits[0].q_idx, preliminary_hits[0].s_idx) {
+            // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_kappa.c:3658-3667
+            // ```c
+            // s_HSPListFromDistinctAlignments(hsp_list,
+            //         &alignments[context_index],
+            //         matchingSeq.index,
+            //         queryInfo, qframe);
+            // ```
+            eprintln!(
+                "[BLASTP_TRACE_HSP] from_distinct count={} pvalue={:?} lambda_ratio={:?}",
+                hsp_list.hsps.len(),
+                distinct_alignments.pvalue_for_this_pair,
+                distinct_alignments.lambda_ratio,
+            );
+            for (index, hsp) in hsp_list.hsps.iter().enumerate() {
+                eprintln!(
+                    "[BLASTP_TRACE_HSP] distinct_hsp[{index}] q={}..{} s={}..{} raw_score={} {}",
+                    hsp.q_start,
+                    hsp.q_end,
+                    hsp.s_start,
+                    hsp.s_end,
+                    hsp.raw_score,
+                    blastp_trace_gap_summary(hsp.gap_info.as_deref()),
+                );
+            }
+        }
+    }
+
     if hsp_list.hsps.len() > 1 {
         reap_contained_hits(&mut hsp_list);
     }
@@ -1647,6 +1805,36 @@ pub(crate) fn postprocess_preliminary_hits(
         redo_align_params.score_divisor,
     );
     recompute_num_identities(query_nomask, subject, &mut hsp_list.hsps, matrix);
+    if let Some(target) = blastp_trace_hsp_target() {
+        for (index, hsp) in hsp_list.hsps.iter().enumerate() {
+            if blastp_trace_matches_hsp(target, hsp) {
+                // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_kappa.c:459-535
+                // ```c
+                // s_ComputeNumIdentities(...);
+                // status = Blast_HSPGetNumIdentitiesAndPositives(query_nomask,
+                //                                                subject, hsp, ...);
+                // ```
+                eprintln!(
+                    "[BLASTP_TRACE_HSP] final_hsp[{index}] q={}..{} s={}..{} raw_score={} bit_score={:.12} evalue={:.12e} len={} ident={} positives={} gaps={} gap_opens={} mismatch={} identity={:.6} {}",
+                    hsp.q_start,
+                    hsp.q_end,
+                    hsp.s_start,
+                    hsp.s_end,
+                    hsp.raw_score,
+                    hsp.bit_score,
+                    hsp.e_value,
+                    hsp.length,
+                    hsp.num_ident,
+                    hsp.num_positives,
+                    hsp.length.saturating_sub(hsp.num_ident.saturating_add(hsp.mismatch)),
+                    hsp.gapopen,
+                    hsp.mismatch,
+                    hsp.identity,
+                    blastp_trace_gap_summary(hsp.gap_info.as_deref()),
+                );
+            }
+        }
+    }
 
     Ok(BlastpPostprocessResult {
         hsp_list: Some(hsp_list),

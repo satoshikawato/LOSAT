@@ -19,6 +19,7 @@ set -euo pipefail
 LOSAT_BIN="../target/debug/LOSAT"
 REF_DIR="./blast_out/blastp_outfmt7"
 FASTA_DIR="./fasta"
+source ./blastp_parity_options.sh
 
 # NCBI reference: ncbi-blast/c++/src/algo/blast/blastinput/cmdline_flags.cpp:46-94
 # ```c
@@ -45,8 +46,7 @@ run_case() {
         -query "${FASTA_DIR}/${query}" \
         -subject "${FASTA_DIR}/${subject}" \
         -outfmt 7 \
-        -evalue 1e-5 \
-        -max_target_seqs 10 \
+        "${BLASTP_PARITY_STRICT_OPTIONS[@]}" \
         -out "${OUT_DIR}/${stem}.out" \
         > "${OUT_DIR}/${stem}.log" 2>&1
 

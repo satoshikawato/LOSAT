@@ -19,6 +19,7 @@ LOSAT_BIN="../target/debug/LOSAT"
 REF_DIR="./blast_out/blastp_custom_fields"
 FASTA_DIR="./fasta"
 OUTFMT="6 std qlen slen positive ppos btop stitle"
+source ./blastp_parity_options.sh
 
 OUT_DIR="$(mktemp -d "${TMPDIR:-/tmp}/losat-blastp-custom-XXXXXX")"
 trap 'rm -rf "${OUT_DIR}"' EXIT
@@ -38,8 +39,7 @@ run_case() {
         -query "${FASTA_DIR}/${query}" \
         -subject "${FASTA_DIR}/${subject}" \
         -outfmt "${OUTFMT}" \
-        -evalue 1e-5 \
-        -max_target_seqs 10 \
+        "${BLASTP_PARITY_STRICT_OPTIONS[@]}" \
         -out "${OUT_DIR}/${stem}.out" \
         > "${OUT_DIR}/${stem}.log" 2>&1
 

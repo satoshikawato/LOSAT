@@ -69,6 +69,8 @@ use super::hsp::{
     get_prelim_hitlist_size, reap_hsplist_by_evalue, trim_by_max_hsps, BlastCompoHeap,
     BlastpHitList, BlastpHsp, BlastpHspList,
 };
+#[cfg(all(feature = "parallel", not(target_arch = "wasm32")))]
+use super::kappa::BlastpPostprocessResult;
 use super::kappa::{
     blastp_kappa_range_counters_env_enabled, build_query_workspace, postprocess_preliminary_hits,
     print_blastp_kappa_range_counters, reset_blastp_kappa_range_counters, BlastRedoAlignParams,
@@ -4904,8 +4906,142 @@ fn run_resolved_with_records(
     let use_parallel_kappa_redo = kappa_num_threads > 1 && kappa_parallel_query_indices.len() > 1;
     #[cfg(any(not(feature = "parallel"), target_arch = "wasm32"))]
     let use_parallel_kappa_redo = false;
+    #[cfg(all(feature = "parallel", not(target_arch = "wasm32")))]
+    let kappa_match_parallel_query_index = if kappa_num_threads > 1
+        && kappa_parallel_query_indices.len() == 1
+        && preliminary_hit_lists[kappa_parallel_query_indices[0]]
+            .as_ref()
+            .is_some_and(|hit_list| hit_list.hsplist_count > 1)
+    {
+        Some(kappa_parallel_query_indices[0])
+    } else {
+        None
+    };
+    #[cfg(all(feature = "parallel", not(target_arch = "wasm32")))]
+    let use_parallel_kappa_match_redo = kappa_match_parallel_query_index.is_some();
+    #[cfg(any(not(feature = "parallel"), target_arch = "wasm32"))]
+    let use_parallel_kappa_match_redo = false;
 
-    if use_parallel_kappa_redo {
+    if use_parallel_kappa_match_redo {
+        #[cfg(all(feature = "parallel", not(target_arch = "wasm32")))]
+        {
+            let q_idx = kappa_match_parallel_query_index
+                .expect("single-query Kappa redo parallel path requires a query index");
+            let preliminary_hit_list = preliminary_hit_lists[q_idx]
+                .as_ref()
+                .expect("single-query Kappa redo parallel path requires preliminary hits");
+            let local_matches =
+                &preliminary_hit_list.hsplist_array[..preliminary_hit_list.hsplist_count];
+            let ctx = &contexts[q_idx];
+            let query_raw = &ctx.aa_seq[1..ctx.aa_seq.len() - 1];
+            let query_nomask = query_nomask_sequence(ctx);
+
+            // NCBI reference: /mnt/c/Users/genom/GitHub/ncbi-blast/c++/src/algo/blast/core/blast_kappa.c:3429-3449
+            // ```c
+            // #pragma omp parallel ... num_threads(actual_num_threads)
+            // #pragma omp for schedule(static)
+            // for (b = 0; b < numMatches; ++b) {
+            // ```
+            //
+            // NCBI reference: /mnt/c/Users/genom/GitHub/ncbi-blast/c++/src/algo/blast/core/blast_kappa.c:3493-3503
+            // ```c
+            // scoringParams = score_params_tld[tid];
+            // redoneMatches = redoneMatches_tld[tid];
+            // NRrecord = NRrecord_tld[tid];
+            // redo_align_params = redo_align_params_tld[tid];
+            // ```
+            let pool = rayon::ThreadPoolBuilder::new()
+                .num_threads(kappa_num_threads)
+                .build()
+                .context("failed to build BLASTP Kappa match redo thread pool")?;
+            let precomputed: Vec<Result<Option<BlastpPostprocessResult>>> = pool.install(|| {
+                local_matches
+                    .par_iter()
+                    .map(|local_match| -> Result<Option<BlastpPostprocessResult>> {
+                        let mut kappa_preliminary_hits = Vec::with_capacity(local_match.hsps.len());
+                        kappa_preliminary_hits.extend(
+                            local_match
+                                .hsps
+                                .iter()
+                                .map(preliminary_hit_from_local_match_hsp),
+                        );
+                        if kappa_preliminary_hits.is_empty() {
+                            return Ok(None);
+                        }
+
+                        let s_idx = local_match.oid;
+                        let subject = &subjects[s_idx as usize];
+                        let subject_raw = &subject.aa_seq[1..subject.aa_seq.len() - 1];
+                        let redo_align_params = build_redo_align_params(q_idx)?;
+                        let query_workspace = build_query_workspace(
+                            query_raw,
+                            ctx.aa_len as i32,
+                            search_spaces[q_idx].length_adjustment as i32,
+                            search_spaces[q_idx].effective_space,
+                        );
+                        let mut composition_workspace = BlastCompositionWorkspace::new_blosum62();
+                        let mut kappa_gap_scratch = GapAlignScratch::new();
+
+                        // NCBI reference: /mnt/c/Users/genom/GitHub/ncbi-blast/c++/src/algo/blast/core/blast_kappa.c:3577-3585
+                        // ```c
+                        // *pStatusCode = s_ResultHspToDistinctAlign(...);
+                        // ```
+                        postprocess_preliminary_hits(
+                            &kappa_preliminary_hits,
+                            &query_workspace,
+                            &mut composition_workspace,
+                            query_nomask,
+                            subject_raw,
+                            args.scoring.matrix,
+                            &gapped_params,
+                            &gapped_gumbel,
+                            &redo_align_params,
+                            args.evalue,
+                            &mut kappa_gap_scratch,
+                        )
+                        .map(Some)
+                    })
+                    .collect()
+            });
+
+            // NCBI reference: /mnt/c/Users/genom/GitHub/ncbi-blast/c++/src/algo/blast/core/blast_kappa.c:3525-3529
+            // ```c
+            // if (BlastCompo_EarlyTermination(localMatch->best_evalue,
+            //                                 redoneMatches,
+            //                                 numQueries)) {
+            // ```
+            //
+            // NCBI reference: /mnt/c/Users/genom/GitHub/ncbi-blast/c++/src/algo/blast/core/blast_kappa.c:3817-3849
+            // ```c
+            // /* Reduce results from all threads and continue with business as usual */
+            // local_results = SThreadLocalDataArrayConsolidateResults(thread_data);
+            // ```
+            //
+            // The expensive redo calculation above runs in NCBI's static-loop
+            // spirit, but heap admission is replayed in the original HSP stream
+            // order so LOSAT keeps thread-count-independent output.
+            for (local_match, postprocessed) in local_matches.iter().zip(precomputed.into_iter()) {
+                if local_match.hsps.is_empty() {
+                    continue;
+                }
+                if blast_compo_early_termination(local_match.best_evalue, &redone_matches) {
+                    continue;
+                }
+                let Some(postprocessed) = postprocessed? else {
+                    continue;
+                };
+                let best_score = postprocessed.best_score;
+                let best_evalue = postprocessed.best_evalue;
+                let Some(hsp_list) = postprocessed.hsp_list else {
+                    continue;
+                };
+                let redone_match = &mut redone_matches[q_idx];
+                if redone_match.would_insert(best_evalue, best_score, local_match.oid) {
+                    redone_match.insert(hsp_list, best_evalue, best_score, local_match.oid);
+                }
+            }
+        }
+    } else if use_parallel_kappa_redo {
         #[cfg(all(feature = "parallel", not(target_arch = "wasm32")))]
         {
             // NCBI reference: /mnt/c/Users/genom/GitHub/ncbi-blast/c++/src/algo/blast/core/blast_kappa.c:3119-3128

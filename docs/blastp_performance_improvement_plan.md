@@ -371,3 +371,56 @@ precompute を検討する。
 - NCBI BLASTP との比較 oracle は今回実行していない。
 - 今回の並列化は query-level なので、single-query で多数 subject hit を持つケースでは Kappa redo はまだ serial path になる。
 - NCBI は `theseMatches` 全体を OpenMP static schedule で分割して thread-local heap を consolidate する。LOSAT は thread-count independent output を優先し、query index ごとの deterministic reducer にした。今後、single-query case も高速化する場合は、NCBI heap tie-breaker と early termination を保った match-level reducer が必要。
+
+
+## 実装メモ: 2026-05-11 Kappa single-query match-level precompute
+
+### 実装済み
+
+- `LOSAT/src/algorithm/blastp/blast_engine.rs` の Kappa redo 段階に、single-query で多数 `localMatch` がある場合の match-level parallel precompute path を追加した。
+- `parallel` feature が有効で、`-num_threads` の実効値が 2 以上、redo 対象 query が 1 つ、かつ preliminary `HSPList` が複数ある場合だけ有効になる。
+- Rayon thread pool で各 `localMatch` の composition/Kappa redo 計算を先に並列実行し、結果を `Vec<Result<Option<BlastpPostprocessResult>>>` に input order で保持する。
+- heap admission、`BlastCompo_EarlyTermination`、`BlastCompoHeap::would_insert` / `insert` は main thread で元の HSP stream order に沿って再生する。これにより redo 計算は並列化しつつ、thread count による output order/admission order の揺れを避ける。
+- multi-query case は既存の query-level parallel path を維持し、`-num_threads 1`、parallel feature 無効、wasm32 では従来の serial path を使う。
+
+### NCBI 参照コメント
+
+- 追加コード直上に以下の NCBI 参照コメントを置いた。
+  - `ncbi-blast/c++/src/algo/blast/core/blast_kappa.c:3429-3449`
+    - OpenMP `schedule(static)` の `theseMatches` redo loop。
+  - `ncbi-blast/c++/src/algo/blast/core/blast_kappa.c:3493-3503`
+    - thread-local `scoringParams`、`redoneMatches`、`NRrecord`、`redo_align_params` の使用。
+  - `ncbi-blast/c++/src/algo/blast/core/blast_kappa.c:3577-3585`
+    - `s_ResultHspToDistinctAlign` による match ごとの distinct alignment 変換。
+  - `ncbi-blast/c++/src/algo/blast/core/blast_kappa.c:3525-3529`
+    - `BlastCompo_EarlyTermination` 判定。
+  - `ncbi-blast/c++/src/algo/blast/core/blast_kappa.c:3817-3849`
+    - thread-local result consolidation。
+
+### 検証
+
+- `rustfmt LOSAT/src/algorithm/blastp/blast_engine.rs --edition 2021`
+- `cargo build --release`
+- `cargo build --release --no-default-features`
+- single-query LOSAT-only determinism check 1:
+  - query: `/tmp/losat_wssv_first_query.faa` (first record from `tests/fasta/WSSV.faa`)
+  - subject: `tests/fasta/PajaWSV.faa`
+  - `target/release/LOSAT blastp -query /tmp/losat_wssv_first_query.faa -subject tests/fasta/PajaWSV.faa -outfmt 6 -evalue 1e-5 -max_target_seqs 10 -num_threads 1 -out /tmp/losat_blastp_singleq_n1.out`
+  - same command with `-num_threads 4` to `/tmp/losat_blastp_singleq_n4.out`
+  - `cmp -s` で byte-identical、両方 7 行。
+- single-query LOSAT-only determinism/timing check 2:
+  - query: `/tmp/losat_ap027131_first_query.faa` (first record from `tests/fasta/AP027131.faa`)
+  - subject: `tests/fasta/AP027133.faa`
+  - `LOSAT_TIMING=1 ... -num_threads 1`: `blastp_kappa_redo: 0.011s`, `blastp_total: 0.045s`
+  - `LOSAT_TIMING=1 ... -num_threads 4`: `blastp_kappa_redo: 0.004s`, `blastp_total: 0.023s`
+  - `cmp -s` で byte-identical、両方 1 行。
+- broader thread comparison:
+  - `cd LOSAT/tests && LOSAT_BIN=../target/release/LOSAT LOSAT_BLASTP_THREADS=4 bash run_blastp_threads_comparison.sh`
+  - serial/threaded mismatches: 0
+  - threaded/NCBI mismatches: 4 (`AP027078.AP027131.blastp`, `AP027131.AP027133.blastp`, `AP027132.AP027133.blastp`, `AP027133.NZ_CP006932.blastp`)
+
+### 未実施 / 残リスク
+
+- この path は high-risk performance path として、redo 計算を early termination 判定より前に precompute する。heap admission は serial order で再生するため output は維持したが、serial なら early termination で skip された match も計算する可能性があり、hit が非常に多い single-query case では一時メモリと余分な CPU を使う。
+- NCBI BLASTP との bit-perfect parity は、既存 comparison script で 4 ケースの mismatch が残っている。今回の変更では serial/threaded mismatch は増えていないが、NCBI 差分の根本解消は別作業として残る。
+- `BlastRedoAlignParams` と query workspace は match ごとに作っている。thread-local reuse まで進めるとさらに速くなる可能性があるが、`gapping_params.context` の interior mutability と callback lifetime を NCBI `redo_align_params_tld` とさらに照合してから行う。

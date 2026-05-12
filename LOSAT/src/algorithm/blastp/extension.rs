@@ -6,7 +6,7 @@ use crate::config::ScoringMatrix;
 use crate::utils::matrix::{blosum62_score_ncbistdaa_direct, protein_score};
 
 #[inline(always)]
-fn residue_score(
+fn residue_score<const BLOSUM62: bool>(
     matrix: ScoringMatrix,
     query: &[u8],
     subject: &[u8],
@@ -19,7 +19,7 @@ fn residue_score(
     // ```
     let query_residue = query[q_off as usize];
     let subject_residue = subject[s_off as usize];
-    if matrix == ScoringMatrix::Blosum62 {
+    if BLOSUM62 {
         blosum62_score_ncbistdaa_direct(query_residue, subject_residue)
     } else {
         protein_score(matrix, query_residue, subject_residue)
@@ -95,7 +95,7 @@ pub(crate) struct BlastpTwoHitUngappedResult {
 //     return maxscore;
 // }
 // ```
-fn extend_right(
+fn extend_right<const BLOSUM62: bool>(
     matrix: ScoringMatrix,
     query: &[u8],
     subject: &[u8],
@@ -111,7 +111,7 @@ fn extend_right(
     let mut i = 0i32;
 
     while i < n {
-        score += residue_score(matrix, query, subject, q_off + i, s_off + i);
+        score += residue_score::<BLOSUM62>(matrix, query, subject, q_off + i, s_off + i);
 
         if score > best_score {
             best_score = score;
@@ -151,7 +151,7 @@ fn extend_right(
 //     return maxscore;
 // }
 // ```
-fn extend_left(
+fn extend_left<const BLOSUM62: bool>(
     matrix: ScoringMatrix,
     query: &[u8],
     subject: &[u8],
@@ -171,7 +171,7 @@ fn extend_left(
         let mut i = n;
 
         loop {
-            score += residue_score(matrix, query, subject, q_base + i, s_base + i);
+            score += residue_score::<BLOSUM62>(matrix, query, subject, q_base + i, s_base + i);
 
             if score > best_score {
                 best_score = score;
@@ -216,7 +216,69 @@ fn extend_left(
 //     return total_score;
 // }
 // ```
+#[allow(dead_code)]
 pub fn extend_one_hit(
+    matrix: ScoringMatrix,
+    query: &[u8],
+    subject: &[u8],
+    q_off: usize,
+    s_off: usize,
+    dropoff: i32,
+    word_size: usize,
+) -> Option<BlastpOneHitUngappedResult> {
+    // NCBI reference: ncbi-blast/c++/src/algo/blast/core/aa_ungapped.c:1040-1044
+    // ```c
+    // if (use_pssm)
+    //     sum += matrix[q_off + i][s[s_off + i]];
+    // else
+    //     sum += matrix[q[q_off + i]][s[s_off + i]];
+    // ```
+    if matrix == ScoringMatrix::Blosum62 {
+        extend_one_hit_impl::<true>(matrix, query, subject, q_off, s_off, dropoff, word_size)
+    } else {
+        extend_one_hit_impl::<false>(matrix, query, subject, q_off, s_off, dropoff, word_size)
+    }
+}
+
+// NCBI reference: ncbi-blast/c++/src/algo/blast/core/aa_ungapped.c:1040-1044
+// ```c
+// if (use_pssm)
+//     sum += matrix[q_off + i][s[s_off + i]];
+// else
+//     sum += matrix[q[q_off + i]][s[s_off + i]];
+// ```
+#[inline]
+pub(crate) fn extend_one_hit_blosum62(
+    query: &[u8],
+    subject: &[u8],
+    q_off: usize,
+    s_off: usize,
+    dropoff: i32,
+    word_size: usize,
+) -> Option<BlastpOneHitUngappedResult> {
+    extend_one_hit_impl::<true>(
+        ScoringMatrix::Blosum62,
+        query,
+        subject,
+        q_off,
+        s_off,
+        dropoff,
+        word_size,
+    )
+}
+
+// NCBI reference: ncbi-blast/c++/src/algo/blast/core/aa_ungapped.c:1020-1083
+// ```c
+// static Int4 s_BlastAaExtendOneHit(...)
+// {
+//     ...
+//     sum += matrix[q[q_off + i]][s[s_off + i]];
+//     ...
+//     left_score = s_BlastAaExtendLeft(matrix, subject, query, ...);
+//     total_score = s_BlastAaExtendRight(matrix, subject, query, ...);
+// }
+// ```
+fn extend_one_hit_impl<const BLOSUM62: bool>(
     matrix: ScoringMatrix,
     query: &[u8],
     subject: &[u8],
@@ -240,7 +302,7 @@ pub fn extend_one_hit(
     let mut q_best_left_off = q_off;
 
     for i in 0..word_size {
-        sum += residue_score(matrix, query, subject, q_off + i, s_off + i);
+        sum += residue_score::<BLOSUM62>(matrix, query, subject, q_off + i, s_off + i);
 
         if sum > score {
             score = sum;
@@ -258,7 +320,7 @@ pub fn extend_one_hit(
     let s_left_off = q_left_off + (s_off - q_off);
     let s_right_off = q_right_off + (s_off - q_off);
 
-    let (left_score, left_disp) = extend_left(
+    let (left_score, left_disp) = extend_left::<BLOSUM62>(
         matrix,
         query,
         subject,
@@ -267,7 +329,7 @@ pub fn extend_one_hit(
         dropoff,
         score,
     );
-    let (total_score, right_disp, s_last_off) = extend_right(
+    let (total_score, right_disp, s_last_off) = extend_right::<BLOSUM62>(
         matrix,
         query,
         subject,
@@ -314,7 +376,90 @@ pub fn extend_one_hit(
 //     return MAX(left_score, right_score);
 // }
 // ```
+#[allow(dead_code)]
 pub fn extend_two_hit(
+    matrix: ScoringMatrix,
+    query: &[u8],
+    subject: &[u8],
+    s_left_off: usize,
+    s_right_off: usize,
+    q_right_off: usize,
+    dropoff: i32,
+    word_size: usize,
+) -> Option<BlastpTwoHitUngappedResult> {
+    // NCBI reference: ncbi-blast/c++/src/algo/blast/core/aa_ungapped.c:1112-1116
+    // ```c
+    // if (use_pssm)
+    //     score += matrix[q_right_off + i][s[s_right_off + i]];
+    // else
+    //     score += matrix[q[q_right_off + i]][s[s_right_off + i]];
+    // ```
+    if matrix == ScoringMatrix::Blosum62 {
+        extend_two_hit_impl::<true>(
+            matrix,
+            query,
+            subject,
+            s_left_off,
+            s_right_off,
+            q_right_off,
+            dropoff,
+            word_size,
+        )
+    } else {
+        extend_two_hit_impl::<false>(
+            matrix,
+            query,
+            subject,
+            s_left_off,
+            s_right_off,
+            q_right_off,
+            dropoff,
+            word_size,
+        )
+    }
+}
+
+// NCBI reference: ncbi-blast/c++/src/algo/blast/core/aa_ungapped.c:1112-1116
+// ```c
+// if (use_pssm)
+//     score += matrix[q_right_off + i][s[s_right_off + i]];
+// else
+//     score += matrix[q[q_right_off + i]][s[s_right_off + i]];
+// ```
+#[inline]
+pub(crate) fn extend_two_hit_blosum62(
+    query: &[u8],
+    subject: &[u8],
+    s_left_off: usize,
+    s_right_off: usize,
+    q_right_off: usize,
+    dropoff: i32,
+    word_size: usize,
+) -> Option<BlastpTwoHitUngappedResult> {
+    extend_two_hit_impl::<true>(
+        ScoringMatrix::Blosum62,
+        query,
+        subject,
+        s_left_off,
+        s_right_off,
+        q_right_off,
+        dropoff,
+        word_size,
+    )
+}
+
+// NCBI reference: ncbi-blast/c++/src/algo/blast/core/aa_ungapped.c:1089-1155
+// ```c
+// static Int4 s_BlastAaExtendTwoHit(...)
+// {
+//     ...
+//     score += matrix[q[q_right_off + i]][s[s_right_off + i]];
+//     ...
+//     left_score = s_BlastAaExtendLeft(matrix, subject, query, ...);
+//     right_score = s_BlastAaExtendRight(matrix, subject, query, ...);
+// }
+// ```
+fn extend_two_hit_impl<const BLOSUM62: bool>(
     matrix: ScoringMatrix,
     query: &[u8],
     subject: &[u8],
@@ -340,7 +485,8 @@ pub fn extend_two_hit(
     let mut score = 0i32;
 
     for i in 0..word_size {
-        score += residue_score(matrix, query, subject, q_right_off + i, s_right_off + i);
+        score +=
+            residue_score::<BLOSUM62>(matrix, query, subject, q_right_off + i, s_right_off + i);
         if score > left_score {
             left_score = score;
             right_d = i + 1;
@@ -353,7 +499,7 @@ pub fn extend_two_hit(
     let mut right_extend = false;
     let mut s_last_off = s_right_off;
 
-    (left_score, left_d) = extend_left(
+    (left_score, left_d) = extend_left::<BLOSUM62>(
         matrix,
         query,
         subject,
@@ -365,7 +511,7 @@ pub fn extend_two_hit(
 
     if left_d >= (s_right_off - s_left_off) {
         right_extend = true;
-        (right_score, right_d, s_last_off) = extend_right(
+        (right_score, right_d, s_last_off) = extend_right::<BLOSUM62>(
             matrix,
             query,
             subject,

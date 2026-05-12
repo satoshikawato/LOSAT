@@ -1388,6 +1388,250 @@ fn hit_query_end_compare(a: &Hit, b: &Hit) -> Ordering {
         })
 }
 
+// NCBI reference: /mnt/c/Users/genom/GitHub/ncbi-blast/c++/src/algo/blast/core/blast_hits.c:2488-2500
+// ```c
+// hsp_count--;
+// hsp = hsp_array[i+j];
+// ...
+// for (k=i+j; k<hsp_count; k++) {
+//     hsp_array[k] = hsp_array[k+1];
+// }
+// hsp_array[hsp_count] = hsp;
+// ```
+//
+// NCBI reference: /mnt/c/Users/genom/GitHub/ncbi-blast/c++/src/algo/blast/core/blast_hits.c:2514-2525
+// ```c
+// hsp_count--;
+// hsp = hsp_array[i+j];
+// ...
+// for (k=i+j; k<hsp_count; k++) {
+//     hsp_array[k] = hsp_array[k+1];
+// }
+// hsp_array[hsp_count] = hsp;
+// ```
+const ENDPOINT_REMOVAL_BITMAP_THRESHOLD_DIVISOR: usize = 8;
+
+// NCBI reference: /mnt/c/Users/genom/GitHub/ncbi-blast/c++/src/algo/blast/core/blast_hits.c:2488-2500
+// ```c
+// hsp_count--;
+// hsp = hsp_array[i+j];
+// ...
+// for (k=i+j; k<hsp_count; k++) {
+//     hsp_array[k] = hsp_array[k+1];
+// }
+// ```
+//
+// NCBI mutates the pointer array in place without allocating a side bitmap.
+// Rust keeps the same active-prefix result, but only pays for a bitmap on large
+// HSP lists where repeated removed-index checks would dominate.
+const ENDPOINT_REMOVAL_BITMAP_MIN_HITS: usize = 256;
+
+// NCBI reference: /mnt/c/Users/genom/GitHub/ncbi-blast/c++/src/algo/blast/core/blast_hits.c:2488-2500
+// ```c
+// hsp_count--;
+// hsp = hsp_array[i+j];
+// ...
+// hsp_array[hsp_count] = hsp;
+// ```
+//
+// NCBI's pointer array removes common-endpoint HSPs from the active prefix and
+// leaves freed or trimmed entries outside that prefix. Rust records the same
+// removed active-prefix indices lazily, switching to a bitmap only when the
+// duplicate set is dense enough that index scanning becomes wasteful.
+enum EndpointRemovalMarks {
+    Indices(Vec<usize>),
+    Bitmap(Vec<bool>),
+}
+
+// NCBI reference: /mnt/c/Users/genom/GitHub/ncbi-blast/c++/src/algo/blast/core/blast_hits.c:2488-2500
+// ```c
+// hsp_count--;
+// hsp = hsp_array[i+j];
+// ...
+// hsp_array[hsp_count] = hsp;
+// ```
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+struct EndpointPurgePassStats {
+    removed_count: usize,
+    trimmed_count: usize,
+    allocated_removal_marks: bool,
+    used_bitmap: bool,
+    compacted: bool,
+}
+
+// NCBI reference: /mnt/c/Users/genom/GitHub/ncbi-blast/c++/src/algo/blast/core/blast_hits.c:2478-2527
+// ```c
+// qsort(hsp_array, hsp_count, sizeof(BlastHSP*), s_QueryOffsetCompareHSPs);
+// ...
+// qsort(hsp_array, hsp_count, sizeof(BlastHSP*), s_QueryEndCompareHSPs);
+// ```
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+struct EndpointPurgeStats {
+    start: EndpointPurgePassStats,
+    end: EndpointPurgePassStats,
+}
+
+// NCBI reference: /mnt/c/Users/genom/GitHub/ncbi-blast/c++/src/algo/blast/core/blast_hits.c:2488-2500
+// ```c
+// hsp_count--;
+// hsp = hsp_array[i+j];
+// ```
+fn mark_endpoint_removed<const TRACK_STATS: bool>(
+    marks: &mut Option<EndpointRemovalMarks>,
+    index: usize,
+    hits_len: usize,
+    stats: &mut EndpointPurgePassStats,
+) {
+    if marks.is_none() {
+        if TRACK_STATS {
+            stats.allocated_removal_marks = true;
+        }
+        *marks = Some(EndpointRemovalMarks::Indices(Vec::with_capacity(4)));
+    }
+
+    let dense_threshold = if hits_len >= ENDPOINT_REMOVAL_BITMAP_MIN_HITS {
+        hits_len / ENDPOINT_REMOVAL_BITMAP_THRESHOLD_DIVISOR
+    } else {
+        usize::MAX
+    };
+    match marks
+        .as_mut()
+        .expect("removal marks are allocated before recording an index")
+    {
+        EndpointRemovalMarks::Indices(indices)
+            if indices.len().saturating_add(1) > dense_threshold =>
+        {
+            let mut bitmap = vec![false; hits_len];
+            for removed_index in indices.drain(..) {
+                bitmap[removed_index] = true;
+            }
+            bitmap[index] = true;
+            *marks = Some(EndpointRemovalMarks::Bitmap(bitmap));
+            if TRACK_STATS {
+                stats.used_bitmap = true;
+            }
+        }
+        EndpointRemovalMarks::Indices(indices) => {
+            indices.push(index);
+        }
+        EndpointRemovalMarks::Bitmap(bitmap) => {
+            bitmap[index] = true;
+        }
+    }
+}
+
+// NCBI reference: /mnt/c/Users/genom/GitHub/ncbi-blast/c++/src/algo/blast/core/blast_hits.c:2496-2500
+// ```c
+// for (k=i+j; k<hsp_count; k++) {
+//     hsp_array[k] = hsp_array[k+1];
+// }
+// hsp_array[hsp_count] = hsp;
+// ```
+//
+// Rust performs the same active-prefix compaction once after the endpoint pass.
+// The active HSP order is preserved; removed HSPs are dropped in one retain pass
+// without building a replacement active Vec.
+fn compact_hits_after_endpoint_purge(mut hits: Vec<Hit>, marks: EndpointRemovalMarks) -> Vec<Hit> {
+    match marks {
+        EndpointRemovalMarks::Indices(indices) => {
+            let mut removed_iter = indices.into_iter();
+            let mut next_removed = removed_iter.next();
+            let mut read_index = 0usize;
+            hits.retain(|_| {
+                let keep = next_removed != Some(read_index);
+                if !keep {
+                    next_removed = removed_iter.next();
+                }
+                read_index += 1;
+                keep
+            });
+        }
+        EndpointRemovalMarks::Bitmap(bitmap) => {
+            let mut read_index = 0usize;
+            hits.retain(|_| {
+                let keep = !bitmap[read_index];
+                read_index += 1;
+                keep
+            });
+        }
+    }
+    hits
+}
+
+// NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_hits.c:2478-2502
+// ```c
+// qsort(hsp_array, hsp_count, sizeof(BlastHSP*), s_QueryOffsetCompareHSPs);
+// i = 0;
+// while (i < hsp_count) {
+//    j = 1;
+//    while (i+j < hsp_count && ... same start endpoint ...) {
+//       hsp_count--;
+//       hsp = hsp_array[i+j];
+//       ...
+//    }
+//    i += j;
+// }
+// ```
+//
+// NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_hits.c:2504-2527
+// ```c
+// qsort(hsp_array, hsp_count, sizeof(BlastHSP*), s_QueryEndCompareHSPs);
+// ...
+// while (i+j < hsp_count && ... same end endpoint ...) {
+//    hsp_count--;
+//    hsp = hsp_array[i+j];
+//    ...
+// }
+// ```
+fn purge_sorted_hits_with_common_endpoints<const TRACK_STATS: bool, S, T>(
+    hits: Vec<Hit>,
+    purge: bool,
+    same_endpoint: S,
+    trim_if_kept: T,
+) -> (Vec<Hit>, Vec<Hit>, EndpointPurgePassStats)
+where
+    S: Fn(&Hit, &Hit) -> bool,
+    T: Fn(&Hit, &Hit, &mut Hit) -> bool,
+{
+    let hits_len = hits.len();
+    let mut removal_marks: Option<EndpointRemovalMarks> = None;
+    let mut trimmed_hits = Vec::new();
+    let mut stats = EndpointPurgePassStats::default();
+
+    let mut i = 0usize;
+    while i < hits_len {
+        let mut j = i + 1;
+        while j < hits_len && same_endpoint(&hits[i], &hits[j]) {
+            mark_endpoint_removed::<TRACK_STATS>(&mut removal_marks, j, hits_len, &mut stats);
+            if TRACK_STATS {
+                stats.removed_count += 1;
+            }
+            if !purge {
+                let mut trimmed_hit = hits[j].clone();
+                if trim_if_kept(&hits[i], &hits[j], &mut trimmed_hit) {
+                    trimmed_hits.push(trimmed_hit);
+                    if TRACK_STATS {
+                        stats.trimmed_count += 1;
+                    }
+                }
+            }
+            j += 1;
+        }
+        i = j;
+    }
+
+    let hits = if let Some(removal_marks) = removal_marks {
+        if TRACK_STATS {
+            stats.compacted = true;
+        }
+        compact_hits_after_endpoint_purge(hits, removal_marks)
+    } else {
+        hits
+    };
+
+    (hits, trimmed_hits, stats)
+}
+
 // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_hits.c:2455-2535
 // ```c
 // Int4 Blast_HSPListPurgeHSPsWithCommonEndpoints(..., Boolean purge)
@@ -1395,10 +1639,47 @@ fn hit_query_end_compare(a: &Hit, b: &Hit) -> Ordering {
 //    ...
 // }
 // ```
-fn purge_hits_for_subject_ex(mut hits: Vec<Hit>, purge: bool) -> (Vec<Hit>, usize) {
+fn purge_hits_for_subject_ex(hits: Vec<Hit>, purge: bool) -> (Vec<Hit>, usize) {
+    let (hits, extra_start, _) = purge_hits_for_subject_ex_impl::<false>(hits, purge);
+    (hits, extra_start)
+}
+
+// NCBI reference: /mnt/c/Users/genom/GitHub/ncbi-blast/c++/src/algo/blast/core/blast_hits.c:2455-2535
+// ```c
+// Int4 Blast_HSPListPurgeHSPsWithCommonEndpoints(..., Boolean purge)
+// {
+//    ...
+//    qsort(hsp_array, hsp_count, sizeof(BlastHSP*), s_QueryOffsetCompareHSPs);
+//    ...
+//    qsort(hsp_array, hsp_count, sizeof(BlastHSP*), s_QueryEndCompareHSPs);
+//    ...
+//    return hsp_count;
+// }
+// ```
+fn purge_hits_for_subject_ex_with_stats(
+    hits: Vec<Hit>,
+    purge: bool,
+) -> (Vec<Hit>, usize, EndpointPurgeStats) {
+    purge_hits_for_subject_ex_impl::<true>(hits, purge)
+}
+
+// NCBI reference: /mnt/c/Users/genom/GitHub/ncbi-blast/c++/src/algo/blast/core/blast_hits.c:2455-2535
+// ```c
+// Int4 Blast_HSPListPurgeHSPsWithCommonEndpoints(..., Boolean purge)
+// {
+//    qsort(hsp_array, hsp_count, sizeof(BlastHSP*), s_QueryOffsetCompareHSPs);
+//    ...
+//    qsort(hsp_array, hsp_count, sizeof(BlastHSP*), s_QueryEndCompareHSPs);
+//    return hsp_count;
+// }
+// ```
+fn purge_hits_for_subject_ex_impl<const TRACK_STATS: bool>(
+    mut hits: Vec<Hit>,
+    purge: bool,
+) -> (Vec<Hit>, usize, EndpointPurgeStats) {
     let len = hits.len();
     if len <= 1 {
-        return (hits, len);
+        return (hits, len, EndpointPurgeStats::default());
     }
 
     let context = |h: &Hit| (h.q_idx, h.query_frame);
@@ -1408,38 +1689,39 @@ fn purge_hits_for_subject_ex(mut hits: Vec<Hit>, purge: bool) -> (Vec<Hit>, usiz
     let s_end = |h: &Hit| h.s_start.max(h.s_end);
 
     let mut trimmed_hits = Vec::new();
+    let mut purged_count = 0usize;
+    let mut stats = EndpointPurgeStats::default();
 
     // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_hits.c:2478
     // ```c
     // qsort(hsp_array, hsp_count, sizeof(BlastHSP*), s_QueryOffsetCompareHSPs);
     // ```
     hits.sort_unstable_by(hit_query_offset_compare);
-
-    let mut i = 0usize;
-    while i < hits.len() {
-        let j = i + 1;
-        if j >= hits.len() {
-            i += 1;
-            continue;
-        }
-
-        let same_context = context(&hits[i]) == context(&hits[j]);
-        let same_q_start = q_offset(&hits[i]) == q_offset(&hits[j]);
-        let same_s_start = s_offset(&hits[i]) == s_offset(&hits[j]);
-        if same_context && same_q_start && same_s_start {
-            let mut removed_hit = hits.remove(j);
-            if !purge && q_end(&removed_hit) > q_end(&hits[i]) {
-                let _ = cut_off_gap_edit_script(
-                    &mut removed_hit,
-                    q_end(&hits[i]),
-                    s_end(&hits[i]),
-                    true,
-                );
-                trimmed_hits.push(removed_hit);
-            }
-        } else {
-            i += 1;
-        }
+    let (active_hits, mut start_trimmed_hits, start_stats) =
+        purge_sorted_hits_with_common_endpoints::<TRACK_STATS, _, _>(
+            hits,
+            purge,
+            |best, candidate| {
+                context(best) == context(candidate)
+                    && q_offset(best) == q_offset(candidate)
+                    && s_offset(best) == s_offset(candidate)
+            },
+            |best, candidate, trimmed_hit| {
+                if q_end(candidate) > q_end(best) {
+                    let _ = cut_off_gap_edit_script(trimmed_hit, q_end(best), s_end(best), true);
+                    true
+                } else {
+                    false
+                }
+            },
+        );
+    hits = active_hits;
+    if TRACK_STATS {
+        purged_count += start_stats.removed_count;
+    }
+    trimmed_hits.append(&mut start_trimmed_hits);
+    if TRACK_STATS {
+        stats.start = start_stats;
     }
 
     // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_hits.c:2504
@@ -1447,37 +1729,38 @@ fn purge_hits_for_subject_ex(mut hits: Vec<Hit>, purge: bool) -> (Vec<Hit>, usiz
     // qsort(hsp_array, hsp_count, sizeof(BlastHSP*), s_QueryEndCompareHSPs);
     // ```
     hits.sort_unstable_by(hit_query_end_compare);
-
-    let mut i = 0usize;
-    while i < hits.len() {
-        let j = i + 1;
-        if j >= hits.len() {
-            i += 1;
-            continue;
-        }
-
-        let same_context = context(&hits[i]) == context(&hits[j]);
-        let same_q_end = q_end(&hits[i]) == q_end(&hits[j]);
-        let same_s_end = s_end(&hits[i]) == s_end(&hits[j]);
-        if same_context && same_q_end && same_s_end {
-            let mut removed_hit = hits.remove(j);
-            if !purge && q_offset(&removed_hit) < q_offset(&hits[i]) {
-                let _ = cut_off_gap_edit_script(
-                    &mut removed_hit,
-                    q_offset(&hits[i]),
-                    s_offset(&hits[i]),
-                    false,
-                );
-                trimmed_hits.push(removed_hit);
-            }
-        } else {
-            i += 1;
-        }
+    let (active_hits, mut end_trimmed_hits, end_stats) =
+        purge_sorted_hits_with_common_endpoints::<TRACK_STATS, _, _>(
+            hits,
+            purge,
+            |best, candidate| {
+                context(best) == context(candidate)
+                    && q_end(best) == q_end(candidate)
+                    && s_end(best) == s_end(candidate)
+            },
+            |best, candidate, trimmed_hit| {
+                if q_offset(candidate) < q_offset(best) {
+                    let _ =
+                        cut_off_gap_edit_script(trimmed_hit, q_offset(best), s_offset(best), false);
+                    true
+                } else {
+                    false
+                }
+            },
+        );
+    hits = active_hits;
+    if TRACK_STATS {
+        purged_count += end_stats.removed_count;
+    }
+    trimmed_hits.append(&mut end_trimmed_hits);
+    if TRACK_STATS {
+        stats.end = end_stats;
     }
 
     let extra_start = hits.len();
     hits.extend(trimmed_hits);
-    (hits, extra_start)
+    debug_assert!(!TRACK_STATS || extra_start + purged_count == len);
+    (hits, extra_start, stats)
 }
 
 // NCBI reference: ncbi-blast/c++/include/algo/blast/core/blast_hits.h:153-180
@@ -1658,6 +1941,93 @@ mod tests {
         assert_eq!(extra_start, 2);
         assert_eq!(purged[0].raw_score, 100);
         assert_eq!(purged[1].raw_score, 110);
+    }
+
+    // NCBI reference: /mnt/c/Users/genom/GitHub/ncbi-blast/c++/src/algo/blast/core/blast_hits.c:2478-2527
+    // ```c
+    // qsort(hsp_array, hsp_count, sizeof(BlastHSP*), s_QueryOffsetCompareHSPs);
+    // ...
+    // qsort(hsp_array, hsp_count, sizeof(BlastHSP*), s_QueryEndCompareHSPs);
+    // ```
+    #[test]
+    fn test_purge_hits_with_common_endpoints_no_duplicate_allocates_no_removal_marks() {
+        let hits = vec![
+            make_hit(100, 1, 10, 1, 10),
+            make_hit(90, 20, 30, 20, 30),
+            make_hit(80, 40, 50, 40, 50),
+        ];
+
+        let (purged, extra_start, stats) = purge_hits_for_subject_ex_with_stats(hits, true);
+
+        assert_eq!(extra_start, 3);
+        assert_eq!(purged.len(), 3);
+        assert_eq!(
+            purged
+                .iter()
+                .map(|hit| (hit.q_start, hit.q_end, hit.s_start, hit.s_end))
+                .collect::<Vec<_>>(),
+            vec![(1, 10, 1, 10), (20, 30, 20, 30), (40, 50, 40, 50)]
+        );
+        assert_eq!(stats.start.removed_count, 0);
+        assert_eq!(stats.end.removed_count, 0);
+        assert!(!stats.start.allocated_removal_marks);
+        assert!(!stats.end.allocated_removal_marks);
+        assert!(!stats.start.compacted);
+        assert!(!stats.end.compacted);
+    }
+
+    // NCBI reference: /mnt/c/Users/genom/GitHub/ncbi-blast/c++/src/algo/blast/core/blast_hits.c:2480-2500
+    // ```c
+    // while (i+j < hsp_count &&
+    //        hsp_array[i]->query.offset == hsp_array[i+j]->query.offset &&
+    //        hsp_array[i]->subject.offset == hsp_array[i+j]->subject.offset) {
+    //     hsp_count--;
+    //     ...
+    // }
+    // ```
+    #[test]
+    fn test_purge_hits_with_common_endpoints_sparse_duplicate_uses_index_marks() {
+        let best = make_hit(100, 1, 80, 1, 80);
+        let duplicate = make_hit(100, 1, 50, 1, 50);
+        let distinct = make_hit(90, 100, 120, 100, 120);
+
+        let (purged, extra_start, stats) =
+            purge_hits_for_subject_ex_with_stats(vec![duplicate, distinct, best], true);
+
+        assert_eq!(extra_start, 2);
+        assert_eq!(purged.len(), 2);
+        assert_eq!(purged[0].q_end, 80);
+        assert_eq!(purged[1].q_start, 100);
+        assert_eq!(stats.start.removed_count, 1);
+        assert!(stats.start.allocated_removal_marks);
+        assert!(!stats.start.used_bitmap);
+        assert!(stats.start.compacted);
+        assert_eq!(stats.end.removed_count, 0);
+    }
+
+    // NCBI reference: /mnt/c/Users/genom/GitHub/ncbi-blast/c++/src/algo/blast/core/blast_hits.c:2488-2500
+    // ```c
+    // hsp_count--;
+    // hsp = hsp_array[i+j];
+    // ...
+    // hsp_array[hsp_count] = hsp;
+    // ```
+    #[test]
+    fn test_purge_hits_with_common_endpoints_dense_duplicate_switches_to_bitmap() {
+        let mut hits = Vec::new();
+        for extra_len in 0..512 {
+            hits.push(make_hit(100, 1, 20 + extra_len, 1, 20 + extra_len));
+        }
+
+        let (purged, extra_start, stats) = purge_hits_for_subject_ex_with_stats(hits, true);
+
+        assert_eq!(extra_start, 1);
+        assert_eq!(purged.len(), 1);
+        assert_eq!(purged[0].q_end, 531);
+        assert_eq!(stats.start.removed_count, 511);
+        assert!(stats.start.allocated_removal_marks);
+        assert!(stats.start.used_bitmap);
+        assert!(stats.start.compacted);
     }
 
     #[test]

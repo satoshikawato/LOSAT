@@ -2882,6 +2882,23 @@ mod tests {
     use super::*;
     use crate::core::blast_stat::composition::compute_lambda_from_score_probs;
 
+    // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_kappa.c:551-572
+    // ```c
+    // s_CalcLambda(double probs[], int min_score, int max_score, double lambda0)
+    // {
+    //     return Blast_KarlinLambdaNR(&freq, lambda0);
+    // }
+    // ```
+    fn test_compute_lambda_from_score_probs(
+        score_probs: &[f64],
+        min_score: i32,
+        max_score: i32,
+        lambda0: f64,
+    ) -> Result<f64> {
+        compute_lambda_from_score_probs(score_probs, min_score, max_score, lambda0)
+            .map_err(anyhow::Error::msg)
+    }
+
     #[test]
     fn test_read_aa_composition_ignores_x_and_merges_u_into_c() {
         let seq = [1u8, 3, 21, 24];
@@ -2933,7 +2950,7 @@ mod tests {
             BlastCompoAdjustMode::CompositionMatrixAdjust,
             0,
             &mut workspace,
-            compute_lambda_from_score_probs,
+            test_compute_lambda_from_score_probs,
         )
         .unwrap()
         .expect("adjusted matrix result");
@@ -2963,7 +2980,7 @@ mod tests {
             BlastCompoAdjustMode::CompositionMatrixAdjust,
             0,
             &mut workspace,
-            compute_lambda_from_score_probs,
+            test_compute_lambda_from_score_probs,
         )
         .unwrap();
         assert!(adjusted.is_none());

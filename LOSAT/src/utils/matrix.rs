@@ -158,7 +158,7 @@ pub fn aa_char_to_ncbistdaa(aa: u8) -> u8 {
 // ...
 // };
 // ```
-pub static BLOSUM62: [i8; BLOSUM62_SIZE * BLOSUM62_SIZE] = [
+pub const BLOSUM62: [i8; BLOSUM62_SIZE * BLOSUM62_SIZE] = [
     /*A*/ 4, -1, -2, -2, 0, -1, -1, 0, -2, -1, -1, -1, -1, -2, -1, 1, 0, -3, -2, 0, -2, -1,
     -1, -1, -4, /*R*/ -1, 5, 0, -2, -3, 1, 0, -2, 0, -3, -2, 2, -1, -3, -2, -1, -1, -3, -2,
     -3, -1, -2, 0, -1, -4, /*N*/ -2, 0, 6, 1, -3, 0, 0, 0, 1, -3, -3, 0, -2, -3, -2, 1, 0, -4,
@@ -242,6 +242,44 @@ const NCBISTDAA_TO_BLOSUM62_DIRECT: [usize; BLASTAA_SIZE] = [
     blosum62_order::J as usize,
 ];
 
+const BLOSUM62_NCBISTDAA_DIRECT_SIZE: usize = BLASTAA_SIZE * BLASTAA_SIZE;
+
+// NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_stat.c:1559-1592
+// ```c
+// matrix[i][j] = BLAST_SCORE_MIN;
+// ...
+// matrix[u_index][i] = matrix[c_index][i];
+// matrix[o_index][i] = matrix[x_index][i];
+// ```
+//
+// NCBI reference: ncbi-blast/c++/src/util/tables/sm_blosum62.c:38-92
+// ```c
+// static const TNCBIScore s_Blosum62PSM[25 * 25] = {
+// ...
+// };
+// ```
+const fn build_blosum62_ncbistdaa_direct_scores() -> [i32; BLOSUM62_NCBISTDAA_DIRECT_SIZE] {
+    let mut scores = [BLAST_SCORE_MIN; BLOSUM62_NCBISTDAA_DIRECT_SIZE];
+    let mut q = 0usize;
+    while q < BLASTAA_SIZE {
+        let mut s = 0usize;
+        while s < BLASTAA_SIZE {
+            if q != ncbistdaa::GAP as usize && s != ncbistdaa::GAP as usize {
+                let q_index = NCBISTDAA_TO_BLOSUM62_DIRECT[q];
+                let s_index = NCBISTDAA_TO_BLOSUM62_DIRECT[s];
+                scores[q * BLASTAA_SIZE + s] =
+                    BLOSUM62[q_index * PROTEIN_MATRIX_SIZE + s_index] as i32;
+            }
+            s += 1;
+        }
+        q += 1;
+    }
+    scores
+}
+
+const BLOSUM62_NCBISTDAA_DIRECT_SCORES: [i32; BLOSUM62_NCBISTDAA_DIRECT_SIZE] =
+    build_blosum62_ncbistdaa_direct_scores();
+
 #[inline(always)]
 fn ncbistdaa_to_blosum62_direct_index(ncbi: u8) -> usize {
     if ncbi < BLASTAA_SIZE as u8 {
@@ -253,12 +291,36 @@ fn ncbistdaa_to_blosum62_direct_index(ncbi: u8) -> usize {
 
 #[inline(always)]
 pub fn blosum62_score_ncbistdaa_direct(aa1_ncbi: u8, aa2_ncbi: u8) -> i32 {
+    if aa1_ncbi < BLASTAA_SIZE as u8 && aa2_ncbi < BLASTAA_SIZE as u8 {
+        return BLOSUM62_NCBISTDAA_DIRECT_SCORES
+            [aa1_ncbi as usize * BLASTAA_SIZE + aa2_ncbi as usize];
+    }
     if aa1_ncbi == ncbistdaa::GAP || aa2_ncbi == ncbistdaa::GAP {
         return BLAST_SCORE_MIN;
     }
     let b1 = ncbistdaa_to_blosum62_direct_index(aa1_ncbi);
     let b2 = ncbistdaa_to_blosum62_direct_index(aa2_ncbi);
     BLOSUM62[b1 * PROTEIN_MATRIX_SIZE + b2] as i32
+}
+
+#[inline(always)]
+pub fn blosum62_ncbistdaa_score_row(row_ncbi: usize) -> &'static [i32] {
+    // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_aalookup.c:562-563
+    // ```c
+    // score -= info->row_max[query_word[current_pos]];
+    // row = info->matrix[query_word[current_pos]];
+    // ```
+    //
+    // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_stat.c:1559-1592
+    // ```c
+    // matrix[i][j] = BLAST_SCORE_MIN;
+    // ...
+    // matrix[u_index][i] = matrix[c_index][i];
+    // matrix[o_index][i] = matrix[x_index][i];
+    // ```
+    debug_assert!(row_ncbi < BLASTAA_SIZE);
+    let start = row_ncbi * BLASTAA_SIZE;
+    &BLOSUM62_NCBISTDAA_DIRECT_SCORES[start..start + BLASTAA_SIZE]
 }
 
 const BLOSUM45_TEXT: &str = r#"
@@ -697,6 +759,21 @@ mod tests {
                     protein_score(ScoringMatrix::Blosum62, q, s),
                     "direct BLOSUM62 score mismatch for NCBISTDAA {q}/{s}"
                 );
+            }
+        }
+    }
+
+    #[test]
+    fn test_blosum62_ncbistdaa_score_row_matches_direct_scores() {
+        // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_aalookup.c:562-563
+        // ```c
+        // score -= info->row_max[query_word[current_pos]];
+        // row = info->matrix[query_word[current_pos]];
+        // ```
+        for q in 0..BLASTAA_SIZE as u8 {
+            let row = blosum62_ncbistdaa_score_row(q as usize);
+            for s in 0..BLASTAA_SIZE as u8 {
+                assert_eq!(row[s as usize], blosum62_score_ncbistdaa_direct(q, s));
             }
         }
     }

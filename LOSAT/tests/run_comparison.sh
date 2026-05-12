@@ -12,7 +12,7 @@ LOSAT_BIN="../target/release/LOSAT"
 # Part 1: LOSAT Execution
 # ==========================================
 echo "Starting LOSAT commands..."
-
+<<COMMENTOUT
 # --- LOSATN Commands (Default / Megablast behavior) ---
 
 # NZ_CP006932 self (Default/Megablast)
@@ -54,7 +54,7 @@ echo "Starting LOSAT commands..."
 
 # MjPMNV vs MlPMNV
 (time $LOSAT_BIN blastn -q ./fasta/AP027202.fasta -s ./fasta/LC738875.fasta -o ./losat_out/MjPMNV.MlPMNV.losatn.blastn.out --task blastn -n 1 )&>./losat_out/MjPMNV.MlPMNV.losatn.blastn.log
-
+COMMENTOUT
 
 # --- LOSATP Commands ---
 echo "Starting LOSATP commands..."
@@ -65,6 +65,7 @@ run_losatp_case() {
 
     echo "Starting ${stem} (LOSATP)..."
     (time $LOSAT_BIN blastp -q "./fasta/${query}" -s "./fasta/${subject}" -o "./losat_out/${stem}.losatp.out" -n 1 --outfmt 6 )&>"./losat_out/${stem}.losatp.log"
+    (time $LOSAT_BIN blastp -q "./fasta/${query}" -s "./fasta/${subject}" -o "./losat_out/${stem}.losatp.n8.out" -n 8 --outfmt 6 )&>"./losat_out/${stem}.losatp.n8.log"
 }
 
 LOSATP_CASES=(
@@ -90,7 +91,7 @@ for losatp_case in "${LOSATP_CASES[@]}"; do
     IFS=":" read -r query subject stem <<<"$losatp_case"
     run_losatp_case "$query" "$subject" "$stem"
 done
-
+<<COMMENTOUT
 echo "Finished LOSATP commands!"
 # --- TLOSATX Commands (Genetic Code: 4) ---
 echo "Starting TLOSATX commands..."
@@ -158,7 +159,7 @@ echo "Starting AP027133 vs AP027132 (TLOSATX)..."
 
 echo "Finished TLOSATX commands!"
 
-
+COMMENTOUT
 
 echo "Finished LOSAT commands!"
 
@@ -302,7 +303,7 @@ echo "Starting AvCLPV vs PsCLPV (BLAST)..."
 
 # MjPMNV vs MlPMNV
 (time blastn -task blastn -query ./fasta/AP027202.fasta -subject ./fasta/LC738875.fasta -out ./blast_out/MjPMNV.MlPMNV.blastn.out -num_threads 1 -outfmt 7 )&>./blast_out/MjPMNV.MlPMNV.blastn.log
-COMMENTOUT
+
 
 wait
 
@@ -340,5 +341,5 @@ echo "Starting AP027132 vs NZ_CP006932 (BLASTP)..."
 (time  blastp -query ./fasta/AP027132.faa -subject ./fasta/NZ_CP006932.faa -out ./blast_out/AP027132.NZ_CP006932.BLASTP.out -num_threads 1 -outfmt 6 )&>./blast_out/AP027132.NZ_CP006932.BLASTP.log
 echo "Starting AP027133 vs NZ_CP006932 (BLASTP)..."
 (time  blastp -query ./fasta/AP027133.faa -subject ./fasta/NZ_CP006932.faa -out ./blast_out/AP027133.NZ_CP006932.BLASTP.out -num_threads 1 -outfmt 6 )&>./blast_out/AP027133.NZ_CP006932.BLASTP.log
-
+COMMENTOUT
 echo "All done."

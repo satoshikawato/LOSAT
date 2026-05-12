@@ -1662,6 +1662,44 @@ pub fn blast_redo_one_match<'seq>(
     lambda: f64,
     callbacks: &BlastRedoAlignCallbacks,
 ) -> Result<BlastRedoOneMatchResult> {
+    // NCBI reference: /mnt/c/Users/genom/GitHub/ncbi-blast/c++/src/algo/blast/core/blast_kappa.c:3329-3334
+    // ```c
+    // NRrecord_tld[i] = Blast_CompositionWorkspaceNew();
+    // status_code = Blast_CompositionWorkspaceInit(
+    //         NRrecord_tld[i],
+    //         scoringParams->options->matrix
+    // );
+    // ```
+    let mut composition_workspace = BlastCompositionWorkspace::new_blosum62();
+    blast_redo_one_match_with_workspace(
+        incoming_aligns,
+        params,
+        matching_seq,
+        query_info,
+        lambda,
+        callbacks,
+        &mut composition_workspace,
+    )
+}
+
+// NCBI reference: /mnt/c/Users/genom/GitHub/ncbi-blast/c++/src/algo/blast/composition_adjustment/redo_alignment.c:1101-1111
+// ```c
+// Blast_RedoOneMatch(...,
+//                    int numQueries, int ** matrix, int alphsize,
+//                    Blast_CompositionWorkspace * NRrecord,
+//                    double *pvalueForThisPair,
+//                    int compositionTestIndex,
+//                    double *LambdaRatio)
+// ```
+pub(crate) fn blast_redo_one_match_with_workspace<'seq>(
+    incoming_aligns: &Option<Box<BlastCompoAlignment>>,
+    params: &BlastRedoAlignParams,
+    matching_seq: &BlastCompoMatchingSequence<'seq>,
+    query_info: &BlastCompoQueryInfo,
+    lambda: f64,
+    callbacks: &BlastRedoAlignCallbacks,
+    composition_workspace: &mut BlastCompositionWorkspace,
+) -> Result<BlastRedoOneMatchResult> {
     if params.smith_waterman {
         bail!("blastp redo_alignment Smith-Waterman path is not yet ported");
     }
@@ -1685,7 +1723,6 @@ pub fn blast_redo_one_match<'seq>(
     let mut lambda_ratio = None;
     let mut matrix_adjust_rule = EMatrixAdjustRule::DontAdjustMatrix;
     let mut adjusted_matrix = None;
-    let mut composition_workspace = BlastCompositionWorkspace::new_blosum62();
 
     for window in windows {
         let query_index = usize::try_from(window.query_range.context).unwrap_or_default();
@@ -1798,7 +1835,15 @@ pub fn blast_redo_one_match<'seq>(
                             range.subject.length,
                             params.compo_adjust_mode,
                             params.composition_test_index,
-                            &mut composition_workspace,
+                            // NCBI reference: /mnt/c/Users/genom/GitHub/ncbi-blast/c++/src/algo/blast/composition_adjustment/redo_alignment.c:1240-1247
+                            // ```c
+                            // Blast_AdjustScores(matrix, query_composition,
+                            //         query.length, &subject_composition,
+                            //         subject.length, scaledMatrixInfo,
+                            //         compo_adjust_mode, RE_pseudocounts,
+                            //         NRrecord, &matrix_adjust_rule,
+                            // ```
+                            composition_workspace,
                             redo_calc_lambda,
                         )?;
                         if let Some(adjusted) = adjusted {
@@ -2037,7 +2082,15 @@ mod tests {
             eff_search_space: 1.0,
             words: None,
         };
-        let matching_seq = BlastCompoMatchingSequence::new(0, &vec![1u8; 100]);
+        // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_kappa.c:2939-2955
+        // ```c
+        // while (allMatches) {
+        //     matchingSeq = allMatches->matchingSeq;
+        //     allMatches = allMatches->next;
+        // }
+        // ```
+        let matching_residues = vec![1u8; 100];
+        let matching_seq = BlastCompoMatchingSequence::new(0, &matching_residues);
         let params = BlastRedoAlignParams {
             matrix_info: crate::core::composition_adjustment::adjust_scores::build_matrix_info(
                 crate::config::ScoringMatrix::Blosum62,

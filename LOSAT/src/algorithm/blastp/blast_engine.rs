@@ -74,6 +74,7 @@ use super::kappa::BlastpPostprocessResult;
 use super::kappa::{
     blastp_kappa_range_counters_env_enabled, build_query_workspace, postprocess_preliminary_hits,
     print_blastp_kappa_range_counters, reset_blastp_kappa_range_counters, BlastRedoAlignParams,
+    BlastpKappaSubjectRangeCache,
 };
 
 // NCBI reference: ncbi-blast/c++/include/algo/blast/core/blast_extend.h:142-154
@@ -3130,7 +3131,7 @@ fn purge_sorted_preliminary_endpoint_duplicates(
             continue;
         }
         if write_index != read_index {
-            hits.swap(write_index, read_index);
+            hits[write_index] = hits[read_index];
         }
         write_index += 1;
     }
@@ -4981,6 +4982,7 @@ fn run_resolved_with_records(
                         );
                         let mut composition_workspace = BlastCompositionWorkspace::new_blosum62();
                         let mut kappa_gap_scratch = GapAlignScratch::new();
+                        let mut kappa_subject_range_cache = BlastpKappaSubjectRangeCache::new();
 
                         // NCBI reference: /mnt/c/Users/genom/GitHub/ncbi-blast/c++/src/algo/blast/core/blast_kappa.c:3577-3585
                         // ```c
@@ -4998,6 +5000,7 @@ fn run_resolved_with_records(
                             &redo_align_params,
                             args.evalue,
                             &mut kappa_gap_scratch,
+                            &mut kappa_subject_range_cache,
                         )
                         .map(Some)
                     })
@@ -5075,6 +5078,7 @@ fn run_resolved_with_records(
                         let mut composition_workspace = BlastCompositionWorkspace::new_blosum62();
                         let mut kappa_preliminary_hits = Vec::new();
                         let mut kappa_gap_scratch = GapAlignScratch::new();
+                        let mut kappa_subject_range_cache = BlastpKappaSubjectRangeCache::new();
                         let mut redone_match =
                             BlastCompoHeap::new(args.max_target_seqs, PSI_INCLUSION_ETHRESH);
                         let redo_align_params = build_redo_align_params(q_idx)?;
@@ -5143,6 +5147,7 @@ fn run_resolved_with_records(
                                 &redo_align_params,
                                 args.evalue,
                                 &mut kappa_gap_scratch,
+                                &mut kappa_subject_range_cache,
                             )?;
                             let best_score = postprocessed.best_score;
                             let best_evalue = postprocessed.best_evalue;
@@ -5202,6 +5207,7 @@ fn run_resolved_with_records(
         //                                        &fence_hit);
         // ```
         let mut kappa_gap_scratch = GapAlignScratch::new();
+        let mut kappa_subject_range_cache = BlastpKappaSubjectRangeCache::new();
 
         for q_idx in 0..query_ids.len() {
             let redo_align_params = build_redo_align_params(q_idx)?;
@@ -5301,6 +5307,7 @@ fn run_resolved_with_records(
                     &redo_align_params,
                     args.evalue,
                     &mut kappa_gap_scratch,
+                    &mut kappa_subject_range_cache,
                 )?;
                 let best_score = postprocessed.best_score;
                 let best_evalue = postprocessed.best_evalue;

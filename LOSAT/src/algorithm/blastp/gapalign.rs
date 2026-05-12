@@ -562,17 +562,30 @@ fn gap_alloc_trace_row<'a>(
         if row.capacity() < row_capacity_slack {
             row.reserve(row_capacity_slack.saturating_sub(row.capacity()));
         }
-        if row_capacity > 0 {
-            row.resize(row_capacity, 0);
-        }
         row
     } else {
-        let mut row = Vec::with_capacity(row_capacity_slack);
-        if row_capacity > 0 {
-            row.resize(row_capacity, 0);
-        }
+        let row = Vec::with_capacity(row_capacity_slack);
         trace_rows.push(row);
         trace_rows.last_mut().unwrap()
+    }
+}
+
+// NCBI reference: /mnt/c/Users/genom/GitHub/ncbi-blast/c++/src/algo/blast/core/blast_gapalign.c:560-665
+// ```c
+// for (b_index = first_b_index; b_index < b_size; b_index++) {
+//    edit_script[b_index - orig_b_index] = script;
+// }
+// state_struct->used += MAX(b_index, b_size) - orig_b_index + 1;
+// ```
+#[inline(always)]
+fn gap_trace_row_write(row: &mut Vec<u8>, row_idx: usize, script: u8) {
+    if row_idx == row.len() {
+        row.push(script);
+    } else if row_idx < row.len() {
+        row[row_idx] = script;
+    } else {
+        row.resize(row_idx, SCRIPT_GAP_IN_A);
+        row.push(script);
     }
 }
 
@@ -727,6 +740,7 @@ fn prelim_edit_ops_to_gap_edit_script(
     fwd_prelim_tback: Vec<GapEditOp>,
 ) -> Vec<GapEditOp> {
     let mut esp = rev_prelim_tback;
+    esp.reserve(fwd_prelim_tback.len());
     let merge_ops = matches!(
         (esp.last(), fwd_prelim_tback.last()),
         (Some(GapEditOp::Sub(_)), Some(GapEditOp::Sub(_)))
@@ -777,8 +791,9 @@ fn prune_terminal_gap_ops(
     subject_start: &mut usize,
     subject_stop: &mut usize,
 ) {
-    while let Some(first) = edit_script.first().copied() {
-        match first {
+    let mut leading_gap_ops = 0usize;
+    while leading_gap_ops < edit_script.len() {
+        match edit_script[leading_gap_ops] {
             GapEditOp::Sub(_) => break,
             GapEditOp::Del(n) => {
                 *score_left += gap_open + gap_extend * n as i32;
@@ -789,7 +804,10 @@ fn prune_terminal_gap_ops(
                 *query_start += n as usize;
             }
         }
-        edit_script.remove(0);
+        leading_gap_ops += 1;
+    }
+    if leading_gap_ops > 0 {
+        edit_script.drain(0..leading_gap_ops);
     }
 
     while let Some(last) = edit_script.last().copied() {
@@ -925,7 +943,10 @@ fn blastp_query_residue<const REVERSE: bool>(
     } else {
         query_base + a_index
     };
-    query[absolute_index]
+    debug_assert!(absolute_index < query.len());
+    // SAFETY: ALIGN_EX and Blast_SemiGappedAlign iterate a_index inside the
+    // NCBI A sequence span; the debug assertion mirrors that precondition.
+    unsafe { *query.get_unchecked(absolute_index) }
 }
 
 // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_gapalign.c:852-866
@@ -953,15 +974,21 @@ fn blastp_subject_residue<const REVERSE: bool>(
     b_index: usize,
 ) -> u8 {
     let absolute_index = if REVERSE {
-        subject_base as isize + subject_length as isize - b_index as isize - 1
+        if b_index >= subject_length {
+            return 0;
+        } else {
+            subject_base + subject_length - b_index - 1
+        }
     } else {
-        subject_base as isize + b_index as isize + 1
+        subject_base + b_index + 1
     };
-    if absolute_index < 0 {
-        0
-    } else {
-        subject.get(absolute_index as usize).copied().unwrap_or(0)
+    if absolute_index >= subject.len() {
+        return 0;
     }
+    // SAFETY: the explicit absolute_index < subject.len() check preserves the
+    // prior sentinel behavior while avoiding a second bounds check in the DP
+    // cell hot loop.
+    unsafe { *subject.get_unchecked(absolute_index) }
 }
 
 fn align_ex_protein_score_only(
@@ -1822,9 +1849,7 @@ fn align_ex_protein_impl<const BLOSUM62: bool, const REVERSE: bool>(
 
             score_val = next_score;
             let row_idx = b_index.saturating_sub(orig_b_index);
-            if row_idx < edit_script_row.len() {
-                edit_script_row[row_idx] = script;
-            }
+            gap_trace_row_write(edit_script_row, row_idx, script);
         }
 
         // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_gapalign.c:638-639
@@ -1853,11 +1878,7 @@ fn align_ex_protein_impl<const BLOSUM62: bool, const REVERSE: bool>(
                 scratch.dp_mem[b_size].best_gap = score_gap_row - gap_open_extend;
                 score_gap_row -= gap_extend;
                 let row_idx = b_size.saturating_sub(orig_b_index);
-                if row_idx < edit_script_row.len() {
-                    edit_script_row[row_idx] = SCRIPT_GAP_IN_A;
-                } else {
-                    edit_script_row.push(SCRIPT_GAP_IN_A);
-                }
+                gap_trace_row_write(edit_script_row, row_idx, SCRIPT_GAP_IN_A);
                 b_size += 1;
             }
         }
@@ -1876,7 +1897,11 @@ fn align_ex_protein_impl<const BLOSUM62: bool, const REVERSE: bool>(
             .max(b_size)
             .saturating_sub(orig_b_index)
             .saturating_add(1);
-        edit_script_row.truncate(used_cells);
+        if edit_script_row.len() < used_cells {
+            edit_script_row.resize(used_cells, SCRIPT_GAP_IN_A);
+        } else {
+            edit_script_row.truncate(used_cells);
+        }
 
         if b_size <= len2 && b_size < scratch.dp_mem_alloc {
             scratch.dp_mem[b_size].best = GAP_MININT;

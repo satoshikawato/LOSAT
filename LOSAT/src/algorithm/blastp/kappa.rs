@@ -5,7 +5,7 @@
 //! Reference: ncbi-blast/c++/src/algo/blast/composition_adjustment/redo_alignment.c
 
 use anyhow::Result;
-use std::cell::RefCell;
+use std::collections::HashMap;
 use std::ffi::c_void;
 use std::ptr::NonNull;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering as AtomicOrdering};
@@ -56,6 +56,8 @@ static BLASTP_KAPPA_SUBJECT_RANGE_BYTES_COPIED: AtomicU64 = AtomicU64::new(0);
 static BLASTP_KAPPA_SUBJECT_SEG_RANGE_BYTES: AtomicU64 = AtomicU64::new(0);
 static BLASTP_KAPPA_SUBJECT_SEG_CALLS: AtomicU64 = AtomicU64::new(0);
 static BLASTP_KAPPA_SUBJECT_SEG_MASKED_RESIDUES: AtomicU64 = AtomicU64::new(0);
+static BLASTP_KAPPA_SUBJECT_SEG_CACHE_HITS: AtomicU64 = AtomicU64::new(0);
+static BLASTP_KAPPA_SUBJECT_SEG_CACHE_MISSES: AtomicU64 = AtomicU64::new(0);
 
 #[inline]
 pub(crate) fn blastp_kappa_range_counters_env_enabled() -> bool {
@@ -71,6 +73,8 @@ pub(crate) fn reset_blastp_kappa_range_counters(enabled: bool) {
     BLASTP_KAPPA_SUBJECT_SEG_RANGE_BYTES.store(0, AtomicOrdering::Relaxed);
     BLASTP_KAPPA_SUBJECT_SEG_CALLS.store(0, AtomicOrdering::Relaxed);
     BLASTP_KAPPA_SUBJECT_SEG_MASKED_RESIDUES.store(0, AtomicOrdering::Relaxed);
+    BLASTP_KAPPA_SUBJECT_SEG_CACHE_HITS.store(0, AtomicOrdering::Relaxed);
+    BLASTP_KAPPA_SUBJECT_SEG_CACHE_MISSES.store(0, AtomicOrdering::Relaxed);
     BLASTP_KAPPA_RANGE_COUNTERS_ENABLED.store(enabled, AtomicOrdering::Relaxed);
 }
 
@@ -102,6 +106,11 @@ pub(crate) fn print_blastp_kappa_range_counters() {
         BLASTP_KAPPA_SUBJECT_SEG_RANGE_BYTES.load(AtomicOrdering::Relaxed),
         BLASTP_KAPPA_SUBJECT_SEG_CALLS.load(AtomicOrdering::Relaxed),
         BLASTP_KAPPA_SUBJECT_SEG_MASKED_RESIDUES.load(AtomicOrdering::Relaxed)
+    );
+    eprintln!(
+        "[TIMING] blastp_kappa_subject_seg_cache: hits={} misses={}",
+        BLASTP_KAPPA_SUBJECT_SEG_CACHE_HITS.load(AtomicOrdering::Relaxed),
+        BLASTP_KAPPA_SUBJECT_SEG_CACHE_MISSES.load(AtomicOrdering::Relaxed)
     );
 }
 
@@ -167,6 +176,60 @@ pub(crate) struct BlastpKappaQueryWorkspace {
     pub length_adjustment: i32,
 }
 
+#[derive(Clone)]
+struct CachedSubjectRangeData {
+    subject: BlastCompoSequenceData,
+    subject_maybe_biased: bool,
+}
+
+// NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_kappa.c:1614-1646
+// ```c
+// status = s_DoSegSequenceData(seqData, eBlastTypeBlastp,
+//                              subject_maybe_biased);
+// ```
+//
+// Protein redo windows use the full subject range for each query. SEG masking
+// depends only on the subject range and SEG parameters after the near-identical
+// branch has decided masking is required, so Rust reuses that masked range for
+// later query-subject pairs while preserving the same returned sequence bytes.
+pub(crate) struct BlastpKappaSubjectRangeCache {
+    masked_ranges: HashMap<(i32, i32, i32), CachedSubjectRangeData>,
+}
+
+impl BlastpKappaSubjectRangeCache {
+    pub(crate) fn new() -> Self {
+        Self {
+            masked_ranges: HashMap::new(),
+        }
+    }
+
+    fn get(
+        &self,
+        matching_seq: &BlastCompoMatchingSequence<'_>,
+        subject_range: &BlastCompoSequenceRange,
+    ) -> Option<CachedSubjectRangeData> {
+        self.masked_ranges
+            .get(&(matching_seq.index, subject_range.begin, subject_range.end))
+            .cloned()
+    }
+
+    fn insert(
+        &mut self,
+        matching_seq: &BlastCompoMatchingSequence<'_>,
+        subject_range: &BlastCompoSequenceRange,
+        subject: &BlastCompoSequenceData,
+        subject_maybe_biased: bool,
+    ) {
+        self.masked_ranges.insert(
+            (matching_seq.index, subject_range.begin, subject_range.end),
+            CachedSubjectRangeData {
+                subject: subject.clone(),
+                subject_maybe_biased,
+            },
+        );
+    }
+}
+
 // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_kappa.c:1910-1916
 // ```c
 // BlastKappa_GappingParamsContext * context = gapping_params->context;
@@ -181,7 +244,9 @@ struct BlastpRedoAlignmentContext<'a> {
     // BlastGapAlignStruct * gap_align;  /**< additional parameters for a
     //                                      gapped alignment */
     // ```
-    gap_scratch: RefCell<&'a mut GapAlignScratch>,
+    gap_scratch: NonNull<GapAlignScratch>,
+    subject_range_cache: NonNull<BlastpKappaSubjectRangeCache>,
+    _scratch_lifetime: std::marker::PhantomData<&'a mut ()>,
 }
 
 // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_kappa.c:1000-1004
@@ -421,6 +486,14 @@ fn blastp_get_range_callback<'seq>(
     subject_maybe_biased: bool,
     params: &BlastRedoAlignParams,
 ) -> Result<BlastRedoRangeResult> {
+    let redo_context = blastp_redo_alignment_context(params);
+    // Safety: `postprocess_preliminary_hits` stores a pointer to its
+    // thread-local subject range cache for the synchronous duration of
+    // `Blast_RedoOneMatch`. NCBI passes the same state through
+    // `gapping_params->context` and invokes get_range/redo_one_alignment
+    // serially for one match.
+    let subject_range_cache = unsafe { redo_context.subject_range_cache.as_ptr().as_mut() }
+        .expect("blastp redo subject range cache pointer is valid during callback");
     Ok(build_subject_range_data(
         matching_seq,
         subject_range,
@@ -431,6 +504,7 @@ fn blastp_get_range_callback<'seq>(
         should_test_identical,
         subject_maybe_biased,
         params,
+        Some(subject_range_cache),
     ))
 }
 
@@ -468,7 +542,12 @@ fn blastp_redo_one_alignment_callback(
     // BlastKappa_GappingParamsContext * context = gapping_params->context;
     // BlastGapAlignStruct* gapAlign = context->gap_align;
     // ```
-    let mut gap_scratch = redo_context.gap_scratch.borrow_mut();
+    // Safety: `postprocess_preliminary_hits` stores a pointer to its
+    // thread-local `GapAlignScratch` for the synchronous duration of
+    // `Blast_RedoOneMatch`. The callback sequence is serial for a single
+    // match, mirroring NCBI's `context->gap_align` reuse.
+    let gap_scratch = unsafe { redo_context.gap_scratch.as_ptr().as_mut() }
+        .expect("blastp redo gap scratch pointer is valid during callback");
     let Some(mut redone_hit) = redo_preliminary_blastp_hit(
         preliminary_hsp,
         query_data,
@@ -480,7 +559,7 @@ fn blastp_redo_one_alignment_callback(
         params.gapping_params.gap_open,
         params.gapping_params.gap_extend,
         params.gapping_params.x_dropoff,
-        &mut **gap_scratch,
+        gap_scratch,
     ) else {
         return Ok(None);
     };
@@ -823,6 +902,7 @@ fn build_subject_range_data(
     should_test_identical: bool,
     subject_maybe_biased_in: bool,
     params: &BlastRedoAlignParams,
+    mut subject_range_cache: Option<&mut BlastpKappaSubjectRangeCache>,
 ) -> BlastRedoRangeResult {
     // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_kappa.c:1677-1709
     // ```c
@@ -833,7 +913,7 @@ fn build_subject_range_data(
     // return s_SequenceGetProteinRange(..., queryData, ...);
     // ```
     let query = build_query_range_data(orig_query, query_range);
-    let mut subject = build_subject_range_data_direct(matching_seq, subject_range);
+    let mut subject_for_near_identical: Option<BlastCompoSequenceData> = None;
     let mut subject_maybe_biased = subject_maybe_biased_in;
 
     // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_kappa.c:1626-1636
@@ -852,8 +932,11 @@ fn build_subject_range_data(
     // ```
     let should_apply_seg = params.uses_composition_based_stats()
         && subject_maybe_biased
-        && (!should_test_identical
-            || !test_near_identical(
+        && (!should_test_identical || {
+            let subject = subject_for_near_identical.get_or_insert_with(|| {
+                build_subject_range_data_direct(matching_seq, subject_range)
+            });
+            !test_near_identical(
                 // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_kappa.c:1267-1277
                 // ```c
                 // int sStart = align->matchStart - seqOffset;
@@ -863,15 +946,34 @@ fn build_subject_range_data(
                 // The Rust subject buffer already begins at `subject_range.begin`,
                 // so the NCBI `seqOffset` argument remains the original range
                 // origin.
-                &subject,
+                subject,
                 subject_range.begin,
                 &query,
                 query_range.begin,
                 query_words,
                 align,
-            ));
+            )
+        });
 
     if should_apply_seg {
+        if let Some(cache) = subject_range_cache.as_mut() {
+            if let Some(cached) = cache.get(matching_seq, subject_range) {
+                record_blastp_kappa_range_event(&BLASTP_KAPPA_SUBJECT_SEG_CACHE_HITS);
+                record_blastp_kappa_range_counter(
+                    &BLASTP_KAPPA_SUBJECT_RANGE_BYTES_COPIED,
+                    cached.subject.length.max(0) as usize,
+                );
+                return BlastRedoRangeResult {
+                    query,
+                    subject: cached.subject,
+                    subject_maybe_biased: cached.subject_maybe_biased,
+                };
+            }
+            record_blastp_kappa_range_event(&BLASTP_KAPPA_SUBJECT_SEG_CACHE_MISSES);
+        }
+        let mut subject = subject_for_near_identical
+            .take()
+            .unwrap_or_else(|| build_subject_range_data_direct(matching_seq, subject_range));
         let seg_params = blastp_subject_seg_params();
         let masker = SegMasker::with_params(&seg_params);
         record_blastp_kappa_range_event(&BLASTP_KAPPA_SUBJECT_SEG_CALLS);
@@ -890,8 +992,19 @@ fn build_subject_range_data(
                 subject.buffer[subject.data_offset + pos] = ncbistdaa::X;
             }
         }
+        if let Some(cache) = subject_range_cache.as_mut() {
+            cache.insert(matching_seq, subject_range, &subject, subject_maybe_biased);
+        }
+        return BlastRedoRangeResult {
+            query,
+            subject,
+            subject_maybe_biased,
+        };
     }
 
+    let subject = subject_for_near_identical
+        .take()
+        .unwrap_or_else(|| build_subject_range_data_direct(matching_seq, subject_range));
     BlastRedoRangeResult {
         query,
         subject,
@@ -1408,6 +1521,7 @@ pub(crate) fn postprocess_preliminary_hits(
     //                                      gapped alignment */
     // ```
     gap_scratch: &mut GapAlignScratch,
+    subject_range_cache: &mut BlastpKappaSubjectRangeCache,
 ) -> Result<BlastpPostprocessResult> {
     if preliminary_hits.is_empty() {
         return Ok(BlastpPostprocessResult {
@@ -1436,7 +1550,9 @@ pub(crate) fn postprocess_preliminary_hits(
         // BlastGapAlignStruct * gap_align;  /**< additional parameters for a
         //                                      gapped alignment */
         // ```
-        gap_scratch: RefCell::new(gap_scratch),
+        gap_scratch: NonNull::from(gap_scratch),
+        subject_range_cache: NonNull::from(subject_range_cache),
+        _scratch_lifetime: std::marker::PhantomData,
     };
     let previous_redo_context = redo_align_params
         .gapping_params
@@ -2016,6 +2132,7 @@ mod tests {
             false,
             true,
             &params,
+            None,
         );
         assert!(range.subject_maybe_biased);
         assert!(range.subject.data().contains(&ncbistdaa::X));
@@ -2059,6 +2176,7 @@ mod tests {
             true,
             true,
             &params,
+            None,
         );
         assert!(range.subject_maybe_biased);
         assert!(!range.subject.data().contains(&ncbistdaa::X));
@@ -2110,6 +2228,7 @@ mod tests {
             false,
             false,
             &params,
+            None,
         );
         assert!(!range.subject_maybe_biased);
         assert!(!range.subject.data().contains(&ncbistdaa::X));
@@ -2152,6 +2271,7 @@ mod tests {
             false,
             true,
             &params,
+            None,
         );
 
         assert_eq!(range.subject.data(), &[3u8, 4, 5]);
@@ -2204,6 +2324,7 @@ mod tests {
             true,
             true,
             &params,
+            None,
         );
 
         assert!(range.subject_maybe_biased);
@@ -2272,6 +2393,7 @@ mod tests {
             false,
             true,
             &params,
+            None,
         );
     }
 

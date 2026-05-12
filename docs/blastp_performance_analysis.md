@@ -496,6 +496,58 @@ NCBI reference:
   `blast_adjust_scores` 件数、`with_distinct_ends` の containment scan 件数を timing/counter 化し、
   実測で最も大きい path だけを削る。
 
+#### 2026-05-12 追記: Kappa redo adjusted matrix DP scoring hot path 削減
+
+「最大要素」を再計測した結果、subject SEG cache と raw pointer callback 化の後も
+`blastp_kappa_redo` が最大だった。今回は Kappa redo の再 traceback が使う adjusted matrix
+scoring の内側ループを削った。
+
+実装内容:
+
+- `LOSAT/src/algorithm/blastp/gapalign.rs` の `blastp_score_row_for_query` を
+  BLOSUM62 専用 row だけでなく、Kappa redo の `BlastpScoreMatrix::Adjusted` にも対応させた。
+- query residue ごとに adjusted matrix row を 1 回だけ取り、DP cell ごとの
+  `BlastpScoreMatrix::Adjusted` enum match と `matrix.scores[q][s]` の二段参照を避ける。
+- BLOSUM62 path は従来通り static row を返し、その他の scoring matrix は既存の
+  `score_matrix.score(query_residue, subject_residue)` fallback を維持した。
+- この変更は NCBI の `matrix_row = matrix[A[a_index]];` / `matrix_row[*b_ptr]` と同じ
+  row-addressed scoring への寄せであり、DP 範囲、x-drop、tie-break、edit script は変えていない。
+
+NCBI reference:
+
+- `/mnt/c/Users/genom/GitHub/ncbi-blast/c++/src/algo/blast/core/blast_gapalign.c:543-578`
+- `/mnt/c/Users/genom/GitHub/ncbi-blast/c++/src/algo/blast/core/blast_gapalign.c:841-859`
+- `/mnt/c/Users/genom/GitHub/ncbi-blast/c++/src/algo/blast/core/blast_gapalign.c:1080-1099`
+- `/mnt/c/Users/genom/GitHub/ncbi-blast/c++/src/algo/blast/core/blast_kappa.c:1902-1945`
+
+実測結果（AP027078 vs AP027131, `-n 1 --outfmt 6`, release build）:
+
+- 直前の subject SEG cache + raw pointer callback 後:
+  `blastp_total: 24.957s`, `blastp_kappa_redo: 17.891s`
+- adjusted matrix row hot path 後:
+  `blastp_total: 22.998s`, `blastp_kappa_redo: 16.947s`
+- 初期計測からの累積:
+  `blastp_total: 31.797s -> 22.998s`,
+  `blastp_kappa_redo: 23.281s -> 16.947s`
+- `blastp_kappa_subject_seg_cache: hits=80,016 misses=595` は維持。
+- `/tmp/losat_ap027078_ap027131.out` との `diff -q` は差分なし。
+
+採用しなかった計測:
+
+- `BlastCompoSequenceData.buffer` を `Vec<u8>` から `Arc<[u8]>` にして range clone/copy を減らす案は、
+  `blastp_total: 25.595s`, `blastp_kappa_redo: 18.241s` に悪化したため戻した。
+- single-query case で `windows_from_protein_aligns` の linked-list copy を迂回する案は、
+  `blastp_total: 26.729s`, `blastp_kappa_redo: 19.743s` に悪化したため戻した。
+- adjusted matrix row の indexing を `get_unchecked` にする案も release 実測で悪化したため、
+  safe indexing のまま残した。
+
+検証:
+
+- `cargo build --release`: pass
+- `cargo test gapalign --lib`: pass
+- `cargo test subject_seg --lib`: pass
+- `cargo test prepare_preliminary_hits_for_kappa --lib`: pass
+
 ## 受け入れ条件
 
 - `LOSAT/tests/run_blastp_comparison.sh` の outfmt 6 diff がゼロ。

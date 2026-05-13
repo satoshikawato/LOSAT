@@ -118,10 +118,21 @@ pub fn cut_off_gap_edit_script(
     s_cut: usize,
     cut_begin: bool,
 ) -> bool {
-    // NCBI reference: blast_hits.c:2392-2452
-    let gap_info = match &hit.gap_info {
-        Some(info) if !info.is_empty() => info.clone(),
-        _ => return false, // No gap_info, cannot trim
+    // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_hits.c:2392-2396
+    // ```c
+    // s_CutOffGapEditScript(BlastHSP* hsp, Int4 q_cut, Int4 s_cut, Boolean cut_begin)
+    // {
+    //    ...
+    //    GapEditScript *esp = hsp->gap_info;
+    // ```
+    // NCBI mutates the HSP's existing edit script in place. Move the Vec out
+    // while trimming so Rust does not clone the whole script in this hot path.
+    let mut gap_info = match hit.gap_info.take() {
+        Some(info) if !info.is_empty() => info,
+        other => {
+            hit.gap_info = other;
+            return false;
+        }
     };
 
     // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_hits.c:2398-2401
@@ -202,73 +213,63 @@ pub fn cut_off_gap_edit_script(
     }
 
     if !found {
+        hit.gap_info = Some(gap_info);
         return false;
     }
 
-    // Now trim the edit script based on cut_begin flag
-    // NCBI: if (cut_begin) { ... } else { ... }
-    let new_gap_info: Vec<GapEditOp>;
-
     if cut_begin {
-        // Keep END portion, update offsets
-        // NCBI reference: blast_hits.c:2426-2441
-        let mut new_ops = Vec::new();
-
-        // If cut is in middle of a Sub run, keep remaining part
-        let current_op = &gap_info[found_index];
-        if let GapEditOp::Sub(n) = current_op {
-            if found_opid < *n as usize {
-                // NCBI: ASSERT(esp->op_type[index] == eGapAlignSub);
-                // esp->num[0] = esp->num[index] - opid;
-                let remaining = *n as usize - found_opid;
-                if remaining > 0 {
-                    new_ops.push(GapEditOp::Sub(remaining as u32));
-                }
+        // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_hits.c:2426-2439
+        // ```c
+        // if (cut_begin) {
+        //     int new_index = 0;
+        //     if (opid < esp->num[index]) {
+        //        esp->op_type[0] = esp->op_type[index];
+        //        esp->num[0] = esp->num[index] - opid;
+        //        new_index++;
+        //     }
+        //     ++index;
+        //     for (; index < esp->size; index++, new_index++) {
+        //        esp->op_type[new_index] = esp->op_type[index];
+        //        esp->num[new_index] = esp->num[index];
+        //     }
+        //     esp->size = new_index;
+        // ```
+        // Keep the tail of the same edit script buffer.
+        let drain_end = match gap_info[found_index] {
+            GapEditOp::Sub(n) if found_opid < n as usize => {
+                gap_info[found_index] = GapEditOp::Sub((n as usize - found_opid) as u32);
+                found_index
             }
+            _ => found_index.saturating_add(1),
+        };
+        if drain_end > 0 {
+            gap_info.drain(0..drain_end);
         }
-
-        // Copy remaining operations
-        // NCBI: for (; index < esp->size; index++, new_index++) { ... }
-        for op in gap_info.iter().skip(found_index + 1) {
-            new_ops.push(*op);
-        }
-
-        new_gap_info = new_ops;
 
         // Update HSP coordinates
         // NCBI: hsp->query.offset += qid; hsp->subject.offset += sid;
         q_offset_0 = q_offset_0.saturating_add(qid);
         s_offset_0 = s_offset_0.saturating_add(sid);
     } else {
-        // Keep START portion, update ends
-        // NCBI reference: blast_hits.c:2442-2450
-        let mut new_ops = Vec::new();
-
-        // Copy operations up to the cut point
-        for (i, op) in gap_info.iter().enumerate() {
-            if i < found_index {
-                new_ops.push(*op);
-            } else if i == found_index {
-                // If cut is in middle of a Sub run, truncate it
-                if let GapEditOp::Sub(n) = op {
-                    if found_opid < *n as usize {
-                        // NCBI: esp->num[index] = opid;
-                        if found_opid > 0 {
-                            new_ops.push(GapEditOp::Sub(found_opid as u32));
-                        }
-                    } else {
-                        // Full run consumed
-                        new_ops.push(*op);
-                    }
-                } else {
-                    // Del/Ins: include full run (already consumed)
-                    new_ops.push(*op);
-                }
-                break;
+        // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_hits.c:2442-2449
+        // ```c
+        // } else {
+        //     if (opid < esp->num[index]) {
+        //        ASSERT(esp->op_type[index] == eGapAlignSub);
+        //        esp->num[index] = opid;
+        //     }
+        //     esp->size = index+1;
+        //     hsp->query.end = hsp->query.offset + qid;
+        //     hsp->subject.end = hsp->subject.offset + sid;
+        // }
+        // ```
+        // Keep the prefix and truncate the same edit script buffer.
+        if let GapEditOp::Sub(n) = gap_info[found_index] {
+            if found_opid < n as usize {
+                gap_info[found_index] = GapEditOp::Sub(found_opid as u32);
             }
         }
-
-        new_gap_info = new_ops;
+        gap_info.truncate(found_index.saturating_add(1));
 
         // Update HSP coordinates
         // NCBI: hsp->query.end = hsp->query.offset + qid;
@@ -303,10 +304,10 @@ pub fn cut_off_gap_edit_script(
     hit.s_end = s_end;
 
     // Update gap_info
-    hit.gap_info = if new_gap_info.is_empty() {
+    hit.gap_info = if gap_info.is_empty() {
         None
     } else {
-        Some(new_gap_info)
+        Some(gap_info)
     };
 
     // Update alignment length based on new gap_info

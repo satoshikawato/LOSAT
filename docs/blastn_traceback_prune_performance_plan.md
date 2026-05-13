@@ -410,3 +410,164 @@ If Phase 1 shows `traceback_alignment` dominates, optimize scratch reuse and
 edit-script ownership first. If endpoint purge or final containment dominates,
 optimize those before touching alignment code. Parity remains the gate for all
 performance changes.
+
+## Implementation Update: 2026-05-13
+
+This update focused on actual BLASTN traceback/prune hot-path changes rather
+than adding diagnostics or harness-only code. NCBI source comments were added
+next to the Rust implementation changes, following the repository porting
+requirements.
+
+Changed hot paths:
+
+- `LOSAT/src/algorithm/blastn/filtering/purge_endpoints.rs`
+  - Added a per-subject fast path for
+    `purge_hsps_with_common_endpoints_ex`, matching the normal
+    `BlastHSPList` shape used by NCBI traceback.
+  - Replaced repeated `Vec::remove` movement during common-start/common-end
+    purge with grouped compaction that preserves the NCBI active-prefix and
+    tail-order behavior from `blast_hits.c:2268-2535`.
+- `LOSAT/src/algorithm/blastn/interval_tree.rs`
+  - Matched NCBI's initial interval-tree node capacity of 100.
+  - Added `reserve_nodes_for_hsps` and used it before dense traceback/final
+    containment passes to avoid repeated `Vec` reallocations.
+  - Made `TreeHsp` `Copy` to remove hot-path clones.
+- `LOSAT/src/algorithm/blastn/blast_engine/run.rs`
+  - Reserved interval-tree storage from the observed preliminary/final HSP
+    counts before containment passes.
+- `LOSAT/src/algorithm/blastn/alignment/gapped.rs`
+  - Optimized traceback DP cell access by using raw pointer access for
+    `score_array` and unchecked score-matrix access after the NCBI sentinel
+    checks.
+  - Optimized BLASTNA identity counting by processing contiguous substitution
+    spans instead of checking bounds per aligned base.
+
+Rejected implementation:
+
+- A `MaybeUninit`-based trace-row allocation path was tested to avoid row
+  zero-fill. It either regressed the dense self case or made capacity handling
+  fragile, so it was removed from the final patch.
+
+Validation performed:
+
+- `cargo check`
+- `cargo build --release`
+- `cargo test test_purge_common_start_keeps_longer_end_on_score_tie`
+- `cargo test test_interval_tree_basic`
+- `PesePMNV.MjPMNV --task blastn -n 1` remained byte-identical to the current
+  LOSAT fixture.
+- `NZ_CP006932.NZ_CP006932 --task blastn -n 1` remained byte-identical to the
+  pre-final-DP-hot-loop LOSAT output, so the final DP pointer optimization did
+  not introduce a new output delta.
+
+Observed performance on the instrumented `NZ_CP006932.NZ_CP006932 --task blastn
+-n 1` run:
+
+| Measurement point | `traceback_alignment` | `traceback_prune` | Total |
+| --- | ---: | ---: | ---: |
+| Before final DP pointer optimization | 11.422s | 11.564s | 13.079s |
+| After final DP pointer optimization | 8.403s | 8.546s | 9.995s |
+
+The largest retained win came from reducing constant factors inside full
+traceback DP, not from changing BLASTN filtering order or skipping any NCBI
+required purge/re-evaluation step.
+
+Current caveat:
+
+- The current `NZ_CP006932.NZ_CP006932 --task blastn` LOSAT output still differs
+  from the existing fixture/oracle in this working tree. The final DP hot-loop
+  change did not create that delta, but parity for this dense self case remains
+  a blocker before treating the performance work as complete.
+
+## Next Direction
+
+Immediate priorities:
+
+1. Resolve the remaining `NZ_CP006932.NZ_CP006932 --task blastn` parity delta
+   before accepting further risky speedups. Focus on the first divergent stage
+   already identified in this plan: preliminary HSP handling, traceback tree
+   containment, common endpoint trimming, ambiguity re-evaluation, and final
+   containment.
+2. Re-run the validation matrix with at least three wall-time runs per case
+   after the parity delta is understood. Keep task-blastn outputs separate from
+   megablast outputs.
+3. If parity is confirmed for the changed regions, continue with hot-path
+   improvements in this order:
+   - Reuse or pre-size traceback edit-script storage only where the NCBI
+     lifetime/order permits identical output.
+   - Reduce temporary `TreeHsp` construction and repeated coordinate/context
+     recomputation in interval-tree containment.
+   - Add narrowly proven fast paths in ambiguity re-evaluation and identity
+     counting for unambiguous contiguous substitution spans.
+   - Address short-case fixed costs only after the dense traceback path is no
+     longer the dominant regression.
+
+Do not pursue optimizations that change hit order, score/e-value rounding,
+coordinate adjustment, endpoint trimming order, or the timing of NCBI-required
+re-evaluation. Any further unsafe optimization should first be tied to the
+corresponding NCBI source block and then validated against byte-for-byte LOSAT
+output before comparing against NCBI BLAST+.
+
+## Implementation Update: 2026-05-13, In-Place Endpoint Trim
+
+This update kept the BLASTN traceback/prune behavior on the NCBI path and
+focused on reducing hot-path allocation in endpoint trimming.
+
+Changed hot path:
+
+- `LOSAT/src/algorithm/blastn/filtering/purge_endpoints.rs`
+  - Updated `cut_off_gap_edit_script` to move the HSP `gap_info` vector out of
+    the HSP, mutate it, and put it back instead of cloning the whole edit
+    script before every trim.
+  - Replaced the temporary `new_ops` allocation with in-place `drain` for
+    `cut_begin=true` and `truncate` for `cut_begin=false`.
+  - This follows NCBI `s_CutOffGapEditScript`
+    (`blast_hits.c:2392-2452`), where `GapEditScript *esp = hsp->gap_info` is
+    rewritten in place and `esp->size` is adjusted after moving or truncating
+    the active edit-script prefix.
+
+Rejected implementation:
+
+- An explicit fast path for a single exact `Sub(n)` A/C/G/T HSP during
+  `Blast_HSPReevaluateWithAmbiguitiesGapped` was removed. NCBI BLAST does not
+  contain that branch; it always runs the `blast_hits.c:541-612` per-base
+  substitution loop for `eGapAlignSub` and the `blast_hits.c:619-637`
+  extension loop. Even though the shortcut can be reasoned about as equivalent
+  for a narrow case, it is not an NCBI control-flow equivalent and should not be
+  used until there is an explicit source-backed justification accepted for this
+  repository.
+
+Validation performed:
+
+- `rustfmt LOSAT/src/algorithm/blastn/filtering/purge_endpoints.rs --edition 2021`
+- `cargo check`
+- `cargo test test_purge_common_start_keeps_longer_end_on_score_tie`
+- `cargo build --release`
+- `PesePMNV.MjPMNV --task blastn -n 1` remained byte-identical to the current
+  LOSAT fixture.
+- `MelaMJNV.PemoMJNVA --task blastn -n 1` remained byte-identical to the
+  current LOSAT fixture in both debug `cargo run` and `target/release/LOSAT`.
+
+Current caveat:
+
+- This change removes edit-script clone/allocation work only when common
+  endpoint trimming actually calls `s_CutOffGapEditScript`-equivalent logic.
+  It is not expected to move cases dominated by full traceback DP unless those
+  cases also have substantial trimmed-HSP traffic.
+
+Next direction:
+
+1. Keep re-evaluation and identity-counting control flow literal to NCBI unless
+   a proposed shortcut exists in the NCBI source or is accepted as a strictly
+   implementation-level Rust optimization with byte-for-byte proof.
+2. Measure `purge_common_endpoint_pass1` and `purge_common_endpoint_pass2` on
+   `NZ_CP006932.NZ_CP006932 --task blastn -n 1` before and after this endpoint
+   trim change to quantify whether clone removal matters in the dense self
+   case.
+3. Continue with NCBI-shaped allocation reductions:
+   - Reuse existing edit-script buffers where NCBI mutates `GapEditScript` in
+     place.
+   - Avoid temporary `TreeHsp` or coordinate recomputation only where the
+     `BlastIntervalTreeContainsHSP/AddHSP` order and inputs remain identical.
+   - Keep final containment, endpoint purge, ambiguity re-evaluation, and
+     identity/length testing in the same order as `blast_traceback.c:633-692`.

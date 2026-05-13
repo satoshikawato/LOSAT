@@ -65,6 +65,7 @@ use super::super::hsp::{
 use super::super::interval_tree::{BlastIntervalTree, IndexMethod, TreeHsp};
 use super::super::lookup::{build_unmasked_ranges, reverse_complement};
 use super::super::ncbi_cutoffs::{compute_blastn_cutoff_score, GAP_TRIGGER_BIT_SCORE_NUCL};
+use super::super::tracing as blastn_trace;
 use crate::utils::dust::MaskedInterval;
 
 // Import from this module (blast_engine)
@@ -4493,6 +4494,15 @@ fn run_internal(args: BlastnArgs, mut in_memory: Option<BlastnInMemoryRun<'_>>) 
     let debug_mode = std::env::var("BLEMIR_DEBUG").is_ok();
     // BLASTN-specific debug mode: set LOSAT_DEBUG_BLASTN=1 to enable detailed hit loss diagnostics
     let blastn_debug = std::env::var("LOSAT_DEBUG_BLASTN").is_ok();
+    // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_traceback.c:350-692
+    // ```c
+    // ASSERT(Blast_HSPListIsSortedByScore(hsp_list));
+    // ...
+    // Blast_HSPListPurgeHSPsWithCommonEndpoints(..., FALSE);
+    // ...
+    // Blast_IntervalTreeReset(tree);
+    // ```
+    let blastn_trace_enabled = blastn_trace::enabled();
     // NCBI reference: ncbi-blast/c++/src/algo/blast/blastinput/blast_args.cpp:3267-3282
     // ```c
     // arg_desc.AddFlag("verbose", "Produce verbose output (show BLAST options)",
@@ -5348,6 +5358,46 @@ fn run_internal(args: BlastnArgs, mut in_memory: Option<BlastnInMemoryRun<'_>>) 
                                     dbg_window_seeds += 1;
                                 }
 
+                                // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_nascan.c:193-207
+                                // ```c
+                                // num_hits = s_BlastLookupGetNumHits(lookup, index);
+                                // if (num_hits == 0)
+                                //     continue;
+                                // s_BlastLookupRetrieve(lookup, index,
+                                //                       offset_pairs + total_hits, ...);
+                                // ```
+                                if blastn_trace_enabled
+                                    && blastn_trace::should_trace_range(
+                                        "seed",
+                                        q_idx,
+                                        s_idx,
+                                        s_id,
+                                        q_pos_usize,
+                                        q_pos_usize.saturating_add(lut_word_length),
+                                        kmer_start.saturating_add(chunk.offset),
+                                        kmer_start
+                                            .saturating_add(lut_word_length)
+                                            .saturating_add(chunk.offset),
+                                        ctx.seq.len(),
+                                        ctx.frame,
+                                    )
+                                {
+                                    blastn_trace::log(
+                                        "seed",
+                                        format!(
+                                            "subject={}({}) context={} q_off={} s_off={} lut_word_length={} lookup_index={} diag={} last_hit_pending",
+                                            s_id,
+                                            s_idx,
+                                            q_idx,
+                                            q_pos_usize,
+                                            kmer_start.saturating_add(chunk.offset),
+                                            lut_word_length,
+                                            pair.q_off,
+                                            diag
+                                        ),
+                                    );
+                                }
+
                                 // NCBI BLAST does NOT check mask_array/mask_hash at seed level
                                 // NCBI reference: na_ungapped.c:671-672
                                 // NCBI only checks: if (s_off_pos < last_hit) return 0;
@@ -6019,6 +6069,50 @@ fn run_internal(args: BlastnArgs, mut in_memory: Option<BlastnInMemoryRun<'_>>) 
                                 let ungapped_se = ungapped.s_start + ungapped.length;
                                 let ungapped_score = ungapped.score;
 
+                                // NCBI reference: ncbi-blast/c++/src/algo/blast/core/na_ungapped.c:740-758
+                                // ```c
+                                // s_NuclUngappedExtendExact(..., -(cutoffs->x_dropoff), ungapped_data);
+                                // ...
+                                // if (off_found || ungapped_data->score >= cutoffs->cutoff_score) {
+                                //     BLAST_SaveInitialHit(init_hitlist, q_off, s_off, final_data);
+                                // }
+                                // ```
+                                if blastn_trace_enabled
+                                    && blastn_trace::should_trace_range(
+                                        "ungapped",
+                                        q_idx,
+                                        s_idx,
+                                        s_id,
+                                        qs,
+                                        qe,
+                                        ss.saturating_add(chunk.offset),
+                                        ungapped_se.saturating_add(chunk.offset),
+                                        ctx.seq.len(),
+                                        ctx.frame,
+                                    )
+                                {
+                                    blastn_trace::log(
+                                        "ungapped",
+                                        format!(
+                                            "subject={}({}) context={} seed=({}, {}) ungapped=q{}..{} s{}..{} raw_score={} cutoff={} x_dropoff={} off_found={} accepted={}",
+                                            s_id,
+                                            s_idx,
+                                            q_idx,
+                                            q_off.saturating_sub(q_context_start),
+                                            s_off.saturating_add(chunk.offset),
+                                            qs,
+                                            qe,
+                                            ss.saturating_add(chunk.offset),
+                                            ungapped_se.saturating_add(chunk.offset),
+                                            ungapped_score,
+                                            cutoff_score,
+                                            x_dropoff,
+                                            off_found,
+                                            off_found || ungapped_score >= cutoff_score
+                                        ),
+                                    );
+                                }
+
                                 // NCBI reference: na_ungapped.c:757-758
                                 // s_end_pos = ungapped_data->length + ungapped_data->s_start + diag_table->offset;
                                 // This is the END of the UNGAPPED extension, used for last_hit update
@@ -6478,6 +6572,47 @@ fn run_internal(args: BlastnArgs, mut in_memory: Option<BlastnInMemoryRun<'_>>) 
 
                                 if debug_enabled && in_window {
                                     dbg_window_seeds += 1;
+                                }
+
+                                // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_nascan.c:193-207
+                                // ```c
+                                // num_hits = s_BlastLookupGetNumHits(lookup, index);
+                                // if (num_hits == 0)
+                                //     continue;
+                                // s_BlastLookupRetrieve(lookup, index,
+                                //                       offset_pairs + total_hits, ...);
+                                // ```
+                                if blastn_trace_enabled
+                                    && blastn_trace::should_trace_range(
+                                        "seed",
+                                        q_idx,
+                                        s_idx,
+                                        s_id,
+                                        q_pos_usize,
+                                        q_pos_usize.saturating_add(safe_k),
+                                        kmer_start.saturating_add(chunk.offset),
+                                        kmer_start
+                                            .saturating_add(safe_k)
+                                            .saturating_add(chunk.offset),
+                                        ctx.seq.len(),
+                                        ctx.frame,
+                                    )
+                                {
+                                    blastn_trace::log(
+                                        "seed",
+                                        format!(
+                                            "subject={}({}) context={} q_off={} s_off={} word_length={} lookup_index={} diag={} hits_for_lookup={}",
+                                            s_id,
+                                            s_idx,
+                                            q_idx,
+                                            q_pos_usize,
+                                            s_pos,
+                                            safe_k,
+                                            current_kmer,
+                                            diag,
+                                            matches_slice.len()
+                                        ),
+                                    );
                                 }
 
                                 // NCBI BLAST does NOT check mask_array/mask_hash at seed level
@@ -6976,6 +7111,50 @@ fn run_internal(args: BlastnArgs, mut in_memory: Option<BlastnInMemoryRun<'_>>) 
                                 let ungapped_se = ungapped.s_start + ungapped.length;
                                 let ungapped_score = ungapped.score;
 
+                                // NCBI reference: ncbi-blast/c++/src/algo/blast/core/na_ungapped.c:740-758
+                                // ```c
+                                // s_NuclUngappedExtendExact(..., -(cutoffs->x_dropoff), ungapped_data);
+                                // ...
+                                // if (off_found || ungapped_data->score >= cutoffs->cutoff_score) {
+                                //     BLAST_SaveInitialHit(init_hitlist, q_off, s_off, final_data);
+                                // }
+                                // ```
+                                if blastn_trace_enabled
+                                    && blastn_trace::should_trace_range(
+                                        "ungapped",
+                                        q_idx,
+                                        s_idx,
+                                        s_id,
+                                        qs,
+                                        qe,
+                                        ss.saturating_add(chunk.offset),
+                                        ungapped_se.saturating_add(chunk.offset),
+                                        ctx.seq.len(),
+                                        ctx.frame,
+                                    )
+                                {
+                                    blastn_trace::log(
+                                        "ungapped",
+                                        format!(
+                                            "subject={}({}) context={} seed=({}, {}) ungapped=q{}..{} s{}..{} raw_score={} cutoff={} x_dropoff={} off_found={} accepted={}",
+                                            s_id,
+                                            s_idx,
+                                            q_idx,
+                                            q_off,
+                                            s_off.saturating_add(chunk.offset),
+                                            qs,
+                                            qe,
+                                            ss.saturating_add(chunk.offset),
+                                            ungapped_se.saturating_add(chunk.offset),
+                                            ungapped_score,
+                                            cutoff_score,
+                                            x_dropoff,
+                                            off_found,
+                                            off_found || ungapped_score >= cutoff_score
+                                        ),
+                                    );
+                                }
+
                                 // NCBI reference: na_ungapped.c:757-758
                                 // s_end_pos = ungapped_data->length + ungapped_data->s_start + diag_table->offset;
                                 // This is the END of the UNGAPPED extension, used for last_hit update
@@ -7224,6 +7403,47 @@ fn run_internal(args: BlastnArgs, mut in_memory: Option<BlastnInMemoryRun<'_>>) 
                     min_diag_separation,
                 );
 
+                // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_gapalign.c:3908-3919
+                // ```c
+                // tmp_hsp.query.offset = q_start;
+                // tmp_hsp.query.end = q_end;
+                // tmp_hsp.subject.offset = s_start;
+                // tmp_hsp.subject.end = s_end;
+                // if (!BlastIntervalTreeContainsHSP(tree, &tmp_hsp, query_info,
+                //                                   hit_options->min_diag_separation))
+                // ```
+                if blastn_trace_enabled
+                    && blastn_trace::should_trace_range(
+                        "prelim",
+                        uh.context_idx,
+                        s_idx,
+                        s_id,
+                        uh.qs,
+                        uh.qe,
+                        uh.ss.saturating_add(chunk.offset),
+                        uh.se.saturating_add(chunk.offset),
+                        ctx.seq.len(),
+                        ctx.frame,
+                    )
+                {
+                    blastn_trace::log(
+                        "prelim",
+                        format!(
+                            "subject={}({}) context={} ungapped=q{}..{} s{}..{} raw_score={} tree_contains={} min_diag_separation={}",
+                            s_id,
+                            s_idx,
+                            uh.context_idx,
+                            uh.qs,
+                            uh.qe,
+                            uh.ss.saturating_add(chunk.offset),
+                            uh.se.saturating_add(chunk.offset),
+                            uh.score,
+                            is_contained,
+                            min_diag_separation
+                        ),
+                    );
+                }
+
                 if is_contained {
                     // NCBI: Skip gapped extension if ungapped HSP is contained
                     dbg_containment_skipped += 1;
@@ -7312,6 +7532,50 @@ fn run_internal(args: BlastnArgs, mut in_memory: Option<BlastnInMemoryRun<'_>>) 
 
                 dbg_gapped_calls += 1;
                 // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_gapalign.c:4058-4091
+                // ```c
+                // if (gap_align->score >= cutoff) {
+                //     status = Blast_HSPInit(gap_align->query_start,
+                //                           gap_align->query_stop,
+                //                           gap_align->subject_start,
+                //                           gap_align->subject_stop, ...);
+                //     status = BlastIntervalTreeAddHSP(new_hsp, tree, query_info,
+                //                                      eQueryAndSubject);
+                // }
+                // ```
+                if blastn_trace_enabled
+                    && blastn_trace::should_trace_range(
+                        "prelim",
+                        uh.context_idx,
+                        s_idx,
+                        s_id,
+                        prelim_qs,
+                        prelim_qe,
+                        prelim_ss.saturating_add(chunk.offset),
+                        prelim_se.saturating_add(chunk.offset),
+                        ctx.seq.len(),
+                        ctx.frame,
+                    )
+                {
+                    blastn_trace::log(
+                        "prelim",
+                        format!(
+                            "subject={}({}) context={} seed=({}, {}) prelim=q{}..{} s{}..{} raw_score={} cutoff={} x_drop_score_only={} accepted={}",
+                            s_id,
+                            s_idx,
+                            uh.context_idx,
+                            seed_qs,
+                            seed_ss.saturating_add(chunk.offset),
+                            prelim_qs,
+                            prelim_qe,
+                            prelim_ss.saturating_add(chunk.offset),
+                            prelim_se.saturating_add(chunk.offset),
+                            prelim_score,
+                            cutoff_score,
+                            if use_dp { x_drop_gapped.min(uh.score) } else { x_drop_gapped },
+                            prelim_score >= cutoff_score
+                        ),
+                    );
+                }
                 if prelim_score < cutoff_score {
                     continue;
                 }
@@ -7700,11 +7964,48 @@ fn run_internal(args: BlastnArgs, mut in_memory: Option<BlastnInMemoryRun<'_>>) 
                     query_context_offset: prelim.query_context_offset,
                     subject_frame_sign,
                 };
-                if interval_tree.contains_hsp(
+                let prelim_traceback_contained = interval_tree.contains_hsp(
                     &prelim_tree_hsp,
                     prelim.query_context_offset,
                     min_diag_separation,
-                ) {
+                );
+                // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_traceback.c:403-405
+                // ```c
+                // if (program_number == eBlastTypeRpsBlast ||
+                //     !BlastIntervalTreeContainsHSP(tree, hsp, query_info,
+                //                              hit_options->min_diag_separation)) {
+                // ```
+                if blastn_trace_enabled
+                    && blastn_trace::should_trace_range(
+                        "traceback",
+                        prelim.context_idx,
+                        s_idx,
+                        s_id,
+                        prelim.prelim_qs,
+                        prelim.prelim_qe,
+                        prelim.prelim_ss,
+                        prelim.prelim_se,
+                        ctx.seq.len(),
+                        ctx.frame,
+                    )
+                {
+                    blastn_trace::log(
+                        "traceback",
+                        format!(
+                            "subject={}({}) context={} prelim=q{}..{} s{}..{} raw_score={} tree_contains={}",
+                            s_id,
+                            s_idx,
+                            prelim.context_idx,
+                            prelim.prelim_qs,
+                            prelim.prelim_qe,
+                            prelim.prelim_ss,
+                            prelim.prelim_se,
+                            prelim.prelim_score,
+                            prelim_traceback_contained
+                        ),
+                    );
+                }
+                if prelim_traceback_contained {
                     continue;
                 }
 
@@ -7891,6 +8192,64 @@ fn run_internal(args: BlastnArgs, mut in_memory: Option<BlastnInMemoryRun<'_>>) 
                     final_se = final_se.saturating_add(start_shift);
                 }
 
+                // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_traceback.c:436-472
+                // ```c
+                // BlastGetOffsetsForGappedAlignment(..., &q_start, &s_start);
+                // ...
+                // BlastGetStartForGappedAlignmentNucl(query, subject, hsp);
+                // ...
+                // AdjustSubjectRange(&s_start, &adjusted_s_length, q_start,
+                //                    query_length, &start_shift);
+                // ```
+                // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_traceback.c:583-600
+                // ```c
+                // Blast_HSPUpdateWithTraceback(gap_align, hsp);
+                // ...
+                // Blast_HSPAdjustSubjectOffset(hsp, start_shift);
+                // ```
+                if blastn_trace_enabled
+                    && blastn_trace::should_trace_range(
+                        "traceback",
+                        prelim.context_idx,
+                        s_idx,
+                        s_id,
+                        final_qs,
+                        final_qe,
+                        final_ss,
+                        final_se,
+                        ctx.seq.len(),
+                        ctx.frame,
+                    )
+                {
+                    blastn_trace::log(
+                        "traceback",
+                        format!(
+                            "subject={}({}) context={} start=({}, {}) adjusted_start=({}, {}) start_shift={} adjusted_s_len={} final=q{}..{} s{}..{} raw_score={} x_drop={} aln_len={} identities={} mismatches={} gaps={} gap_letters={} edit_ops={}",
+                            s_id,
+                            s_idx,
+                            prelim.context_idx,
+                            trace_q_start,
+                            trace_s_start,
+                            trace_q_start,
+                            trace_s_start_adj,
+                            start_shift,
+                            adjusted_s_len,
+                            final_qs,
+                            final_qe,
+                            final_ss,
+                            final_se,
+                            score,
+                            x_drop_trace,
+                            aln_len,
+                            matches,
+                            mismatches,
+                            gaps,
+                            gap_letters,
+                            edit_ops.len()
+                        ),
+                    );
+                }
+
                 let final_tree_hsp = TreeHsp {
                     query_offset: final_qs as i32,
                     query_end: final_qe as i32,
@@ -8002,6 +8361,26 @@ fn run_internal(args: BlastnArgs, mut in_memory: Option<BlastnInMemoryRun<'_>>) 
         let hits_step1 = local_hits.len();
         let (mut local_hits, mut extra_start) =
             purge_hsps_with_common_endpoints_ex(local_hits, false);
+        // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_traceback.c:633-647
+        // ```c
+        // Int4 extra_start =
+        //     Blast_HSPListPurgeHSPsWithCommonEndpoints(program_number, hsp_list, FALSE);
+        // ...
+        // for (index=extra_start; index < hsp_list->hspcnt; index++) {
+        // ```
+        if blastn_trace_enabled && blastn_trace::should_trace_subject("purge", None, s_idx, s_id) {
+            blastn_trace::log(
+                "purge",
+                format!(
+                    "subject={}({}) pass=common_endpoint_trim before={} after={} extra_start={}",
+                    s_id,
+                    s_idx,
+                    hits_step1,
+                    local_hits.len(),
+                    extra_start
+                ),
+            );
+        }
         // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_traceback.c:640-644
         // ```c
         // /* Low level greedy algorithm ignores ambiguities, so the score
@@ -8054,6 +8433,27 @@ fn run_internal(args: BlastnArgs, mut in_memory: Option<BlastnInMemoryRun<'_>>) 
                 &score_matrix,
                 Some(&reeval_params),
             );
+            // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_traceback.c:647-665
+            // ```c
+            // delete_hsp = Blast_HSPReevaluateWithAmbiguitiesGapped(...);
+            // if (!delete_hsp)
+            //     delete_hsp = Blast_HSPTestIdentityAndLength(...);
+            // if (delete_hsp)
+            //     hsp_array[index] = Blast_HSPFree(hsp);
+            // ```
+            let trace_reeval = blastn_trace_enabled
+                && blastn_trace::should_trace_range(
+                    "purge",
+                    context_idx as u32,
+                    s_idx,
+                    s_id,
+                    hit.internal_q_offset_0,
+                    hit.internal_q_end_0,
+                    hit.internal_s_offset_0,
+                    hit.internal_s_end_0,
+                    hit.query_length,
+                    hit.query_frame,
+                );
             // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_traceback.c:656-663
             // ```c
             // delete_hsp = Blast_HSPReevaluateWithAmbiguitiesGapped(...);
@@ -8063,6 +8463,22 @@ fn run_internal(args: BlastnArgs, mut in_memory: Option<BlastnInMemoryRun<'_>>) 
             //                                                 score_options, hit_options);
             // ```
             if delete {
+                if trace_reeval {
+                    blastn_trace::log(
+                        "purge",
+                        format!(
+                            "subject={}({}) context={} pass=reeval q{}..{} s{}..{} deleted=true reason=score_or_gap_info cutoff={}",
+                            s_id,
+                            s_idx,
+                            context_idx,
+                            hit.internal_q_offset_0,
+                            hit.internal_q_end_0,
+                            hit.internal_s_offset_0,
+                            hit.internal_s_end_0,
+                            cutoff
+                        ),
+                    );
+                }
                 hit.raw_score = i32::MIN; // Mark for removal
                 continue;
             }
@@ -8073,7 +8489,46 @@ fn run_internal(args: BlastnArgs, mut in_memory: Option<BlastnInMemoryRun<'_>>) 
                 percent_identity,
                 min_hit_length,
             ) {
+                if trace_reeval {
+                    blastn_trace::log(
+                        "purge",
+                        format!(
+                            "subject={}({}) context={} pass=identity_length q{}..{} s{}..{} deleted=true raw_score={} identities={} aln_len={} identity={:.6}",
+                            s_id,
+                            s_idx,
+                            context_idx,
+                            hit.internal_q_offset_0,
+                            hit.internal_q_end_0,
+                            hit.internal_s_offset_0,
+                            hit.internal_s_end_0,
+                            hit.raw_score,
+                            hit.num_ident,
+                            hit.length,
+                            hit.identity
+                        ),
+                    );
+                }
                 hit.raw_score = i32::MIN; // Mark for removal
+            } else if trace_reeval {
+                blastn_trace::log(
+                    "purge",
+                    format!(
+                        "subject={}({}) context={} pass=reeval q{}..{} s{}..{} deleted=false raw_score={} evalue={:.12e} bit_score={:.12} identities={} aln_len={} identity={:.6}",
+                        s_id,
+                        s_idx,
+                        context_idx,
+                        hit.internal_q_offset_0,
+                        hit.internal_q_end_0,
+                        hit.internal_s_offset_0,
+                        hit.internal_s_end_0,
+                        hit.raw_score,
+                        hit.e_value,
+                        hit.bit_score,
+                        hit.num_ident,
+                        hit.length,
+                        hit.identity
+                    ),
+                );
             }
         }
         local_hits.retain(|h| h.raw_score != i32::MIN);
@@ -8086,6 +8541,22 @@ fn run_internal(args: BlastnArgs, mut in_memory: Option<BlastnInMemoryRun<'_>>) 
         // }
         let mut local_hits = purge_hsps_with_common_endpoints(local_hits);
         let hits_step4 = local_hits.len();
+        // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_traceback.c:666-668
+        // ```c
+        // Blast_HSPListPurgeNullHSPs(hsp_list);
+        // if(program_number == eBlastTypeBlastn) {
+        //     Blast_HSPListPurgeHSPsWithCommonEndpoints(program_number, hsp_list, TRUE);
+        // }
+        // ```
+        if blastn_trace_enabled && blastn_trace::should_trace_subject("purge", None, s_idx, s_id) {
+            blastn_trace::log(
+                "purge",
+                format!(
+                    "subject={}({}) pass=post_reeval before={} after_reeval={} after_delete_purge={}",
+                    s_id, s_idx, hits_step2, hits_step3, hits_step4
+                ),
+            );
+        }
 
         // Step 5: Re-sort by gapped score
         // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_traceback.c:671-672
@@ -8144,8 +8615,52 @@ fn run_internal(args: BlastnArgs, mut in_memory: Option<BlastnInMemoryRun<'_>>) 
                 subject_frame_sign: 1,
             };
 
-            // NCBI reference: blast_traceback.c:682-688
-            if !interval_tree.contains_hsp(&tree_hsp, query_context_offset, min_diag_separation) {
+            // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_traceback.c:678-688
+            // ```c
+            // Blast_IntervalTreeReset(tree);
+            // for (index = 0; index < hsp_list->hspcnt; index++) {
+            //     if (BlastIntervalTreeContainsHSP(tree, hsp, query_info,
+            //                                  hit_options->min_diag_separation)) {
+            //         hsp_array[index] = Blast_HSPFree(hsp);
+            //     } else {
+            //         BlastIntervalTreeAddHSP(hsp, tree, query_info, eQueryAndSubject);
+            //     }
+            // }
+            // ```
+            let final_tree_contains =
+                interval_tree.contains_hsp(&tree_hsp, query_context_offset, min_diag_separation);
+            if blastn_trace_enabled
+                && blastn_trace::should_trace_range(
+                    "purge",
+                    (hit.q_idx * 2 + if hit.query_frame < 0 { 1 } else { 0 }) as u32,
+                    s_idx,
+                    s_id,
+                    hit.internal_q_offset_0,
+                    hit.internal_q_end_0,
+                    hit.internal_s_offset_0,
+                    hit.internal_s_end_0,
+                    hit.query_length,
+                    hit.query_frame,
+                )
+            {
+                blastn_trace::log(
+                    "purge",
+                    format!(
+                        "subject={}({}) context={} pass=final_interval_tree q{}..{} s{}..{} raw_score={} contained={} min_diag_separation={}",
+                        s_id,
+                        s_idx,
+                        hit.q_idx * 2 + if hit.query_frame < 0 { 1 } else { 0 },
+                        hit.internal_q_offset_0,
+                        hit.internal_q_end_0,
+                        hit.internal_s_offset_0,
+                        hit.internal_s_end_0,
+                        hit.raw_score,
+                        final_tree_contains,
+                        min_diag_separation
+                    ),
+                );
+            }
+            if !final_tree_contains {
                 interval_tree.add_hsp(tree_hsp, query_context_offset, IndexMethod::QueryAndSubject);
                 final_hits.push(hit);
             }

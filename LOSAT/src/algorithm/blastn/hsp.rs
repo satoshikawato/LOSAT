@@ -7,6 +7,8 @@ use std::sync::Arc;
 use crate::common::{GapEditOp, Hit};
 use crate::report::{write_hit_fields, OutputConfig};
 
+use super::tracing as blastn_trace;
+
 #[derive(Debug, Clone)]
 // NCBI reference: ncbi-blast/c++/include/algo/blast/core/blast_hits.h:125-148
 // ```c
@@ -875,6 +877,47 @@ pub fn write_output_blastn_hitlists_to_writer<W: Write>(
                     .get(hsp.s_idx as usize)
                     .map(|id| id.as_ref())
                     .unwrap_or("unknown");
+                // NCBI reference: ncbi-blast/c++/src/objtools/align_format/tabular.cpp:1100-1108
+                // ```c
+                // ITERATE(list<ETabularField>, iter, m_FieldsToShow) {
+                //     if (iter != m_FieldsToShow.begin())
+                //         m_Ostream << m_FieldDelimiter;
+                //     x_PrintField(*iter);
+                // }
+                // m_Ostream << "\n";
+                // ```
+                if blastn_trace::should_trace_range(
+                    "hitlist",
+                    hsp.q_idx * 2 + if hsp.query_frame < 0 { 1 } else { 0 },
+                    hsp.s_idx as usize,
+                    subject_id,
+                    hsp.internal_q_offset_0,
+                    hsp.internal_q_end_0,
+                    hsp.internal_s_offset_0,
+                    hsp.internal_s_end_0,
+                    hsp.query_length,
+                    hsp.query_frame,
+                ) {
+                    blastn_trace::log(
+                        "hitlist",
+                        format!(
+                            "query={} subject={} q={}..{} s={}..{} raw_score={} bit_score={:.12} evalue={:.12e} length={} identities={} mismatches={} gapopen={}",
+                            query_id,
+                            subject_id,
+                            hsp.q_start,
+                            hsp.q_end,
+                            hsp.s_start,
+                            hsp.s_end,
+                            hsp.raw_score,
+                            hsp.bit_score,
+                            hsp.e_value,
+                            hsp.length,
+                            hsp.num_ident,
+                            hsp.mismatch,
+                            hsp.gapopen
+                        ),
+                    );
+                }
                 // NCBI reference: ncbi-blast/c++/src/objtools/align_format/tabular.cpp:1100-1108
                 // ```c
                 // void CBlastTabularInfo::Print()

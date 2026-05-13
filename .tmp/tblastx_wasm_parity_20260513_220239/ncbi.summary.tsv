@@ -1,0 +1,4 @@
+label	ncbi
+raw	/mnt/c/Users/genom/GitHub/LOSAT/.tmp/tblastx_wasm_parity_20260513_220239/ncbi.raw.out	86c05a04efb50e4026720e2d44fe2db2e6446f9594e174f3fde56931d09d5b49  /mnt/c/Users/genom/GitHub/LOSAT/.tmp/tblastx_wasm_parity_20260513_220239/ncbi.raw.out
+sorted	/mnt/c/Users/genom/GitHub/LOSAT/.tmp/tblastx_wasm_parity_20260513_220239/ncbi.sorted.out	dcac632b8fec619e300714c40aad109f67a00868d4fff6a2241d1b6ff867962d  /mnt/c/Users/genom/GitHub/LOSAT/.tmp/tblastx_wasm_parity_20260513_220239/ncbi.sorted.out
+line_count	4319

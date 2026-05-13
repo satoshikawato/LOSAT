@@ -178,7 +178,11 @@ unsafe fn extend_left_ungapped_avx2(
 //   }
 //   *length = n - best_i + 1;
 //   return maxscore;
-#[cfg(all(target_arch = "wasm32", target_feature = "simd128"))]
+#[cfg(all(
+    target_arch = "wasm32",
+    target_feature = "simd128",
+    not(feature = "tblastx-wasm-scalar")
+))]
 #[target_feature(enable = "simd128")]
 unsafe fn extend_left_ungapped_simd128(
     q_seq: &[u8],
@@ -286,7 +290,11 @@ fn extend_left_ungapped(
             }
         }
     }
-    #[cfg(all(target_arch = "wasm32", target_feature = "simd128"))]
+    #[cfg(all(
+        target_arch = "wasm32",
+        target_feature = "simd128",
+        not(feature = "tblastx-wasm-scalar")
+    ))]
     {
         // NCBI reference: ncbi-blast/c++/src/algo/blast/core/aa_ungapped.c:886-921
         // ```c
@@ -296,6 +304,9 @@ fn extend_left_ungapped(
         //    if ((maxscore - score) >= dropoff) break;
         // }
         // ```
+        // The `tblastx-wasm-scalar` feature is diagnostic-only: it keeps this
+        // exact scalar NCBI control flow available for native-vs-Wasm parity
+        // isolation while leaving production SIMD builds unchanged.
         unsafe {
             return extend_left_ungapped_simd128(q_seq, s_seq, q_off, s_off, initial_score, x_drop);
         }
@@ -471,7 +482,11 @@ unsafe fn extend_right_ungapped_avx2(
 //   }
 //   *length = best_i + 1;
 //   *s_last_off = s_off + i;
-#[cfg(all(target_arch = "wasm32", target_feature = "simd128"))]
+#[cfg(all(
+    target_arch = "wasm32",
+    target_feature = "simd128",
+    not(feature = "tblastx-wasm-scalar")
+))]
 #[target_feature(enable = "simd128")]
 unsafe fn extend_right_ungapped_simd128(
     q_seq: &[u8],
@@ -579,7 +594,11 @@ fn extend_right_ungapped(
             }
         }
     }
-    #[cfg(all(target_arch = "wasm32", target_feature = "simd128"))]
+    #[cfg(all(
+        target_arch = "wasm32",
+        target_feature = "simd128",
+        not(feature = "tblastx-wasm-scalar")
+    ))]
     {
         // NCBI reference: ncbi-blast/c++/src/algo/blast/core/aa_ungapped.c:846-866
         // ```c
@@ -589,6 +608,9 @@ fn extend_right_ungapped(
         //    if (score <= 0 || (maxscore - score) >= dropoff) break;
         // }
         // ```
+        // The `tblastx-wasm-scalar` feature is diagnostic-only: it keeps this
+        // exact scalar NCBI control flow available for native-vs-Wasm parity
+        // isolation while leaving production SIMD builds unchanged.
         unsafe {
             return extend_right_ungapped_simd128(
                 q_seq,

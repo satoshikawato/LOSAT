@@ -1,0 +1,4 @@
+label	native
+raw	/mnt/c/Users/genom/GitHub/LOSAT/.tmp/tblastx_wasm_parity_20260513_213603/native.raw.out	afcd6facbe1741140b477de4ab4600a61e791ae7e335022c1c45b1eb1bb507fa  /mnt/c/Users/genom/GitHub/LOSAT/.tmp/tblastx_wasm_parity_20260513_213603/native.raw.out
+sorted	/mnt/c/Users/genom/GitHub/LOSAT/.tmp/tblastx_wasm_parity_20260513_213603/native.sorted.out	1b1b5ee06f7309fb64c27a905750667e145e49677d1cb5541fbc26b9e3315972  /mnt/c/Users/genom/GitHub/LOSAT/.tmp/tblastx_wasm_parity_20260513_213603/native.sorted.out
+line_count	4350

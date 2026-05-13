@@ -23,7 +23,7 @@ use std::sync::OnceLock;
 #[cfg(all(feature = "parallel", not(target_arch = "wasm32")))]
 use rayon::prelude::*;
 
-use crate::algorithm::tblastx::chaining::UngappedHit;
+use crate::algorithm::tblastx::chaining::{hsp_list_order_tie_break, UngappedHit};
 use crate::algorithm::tblastx::diagnostics::diagnostics_enabled;
 use crate::algorithm::tblastx::extension::convert_coords;
 use crate::algorithm::tblastx::lookup::QueryContext;
@@ -202,6 +202,40 @@ fn fwd_compare_hsps_transl(a: &UngappedHit, b: &UngappedHit) -> Ordering {
         .then_with(|| a.s_aa_start.cmp(&b.s_aa_start))
 }
 
+// NCBI reference: /mnt/c/Users/genom/GitHub/ncbi-blast/c++/src/algo/blast/core/link_hsps.c:476-486
+// ```c
+// link_hsp_array =
+//    (LinkHSPStruct**) malloc(total_number_of_hsps*sizeof(LinkHSPStruct*));
+// for (index = 0; index < total_number_of_hsps; ++index) {
+//    link_hsp_array[index]->hsp = hsp_array[index];
+// }
+// qsort(link_hsp_array,total_number_of_hsps,sizeof(LinkHSPStruct*),
+//       s_RevCompareHSPsTbx);
+// ```
+#[inline]
+fn compare_hsps_with_list_order(
+    a: &UngappedHit,
+    b: &UngappedHit,
+    compare: fn(&UngappedHit, &UngappedHit) -> Ordering,
+) -> Ordering {
+    compare(a, b).then_with(|| hsp_list_order_tie_break(a, b))
+}
+
+// NCBI reference: /mnt/c/Users/genom/GitHub/ncbi-blast/c++/src/algo/blast/core/link_hsps.c:990-994
+// ```c
+// qsort(link_hsp_array,total_number_of_hsps,sizeof(LinkHSPStruct*),
+//       s_RevCompareHSPsTransl);
+// qsort(link_hsp_array, total_number_of_hsps,sizeof(LinkHSPStruct*),
+//       s_FwdCompareHSPsTransl);
+// ```
+#[inline]
+fn sort_hsps_by_ncbi_link_order(
+    hits: &mut [UngappedHit],
+    compare: fn(&UngappedHit, &UngappedHit) -> Ordering,
+) {
+    hits.sort_by(|a, b| compare_hsps_with_list_order(a, b, compare));
+}
+
 // ---------------------------------------------------------------------------
 // Core structures
 // ---------------------------------------------------------------------------
@@ -368,7 +402,7 @@ pub fn apply_sum_stats_even_gap_linking(
     //    qsort(link_hsp_array,total_number_of_hsps,sizeof(LinkHSPStruct*),
     //          s_RevCompareHSPsTbx);
     // ```
-    hits.sort_unstable_by(rev_compare_hsps_tbx);
+    sort_hsps_by_ncbi_link_order(&mut hits, rev_compare_hsps_tbx);
 
     // NCBI reference: /mnt/c/Users/genom/GitHub/ncbi-blast/c++/src/algo/blast/core/link_hsps.c:510-531
     // ```c
@@ -502,8 +536,8 @@ pub fn apply_sum_stats_even_gap_linking(
     //    qsort(link_hsp_array, total_number_of_hsps,sizeof(LinkHSPStruct*),
     //          s_FwdCompareHSPsTransl);
     // ```
-    results.sort_unstable_by(rev_compare_hsps_transl);
-    results.sort_unstable_by(fwd_compare_hsps_transl);
+    sort_hsps_by_ncbi_link_order(&mut results, rev_compare_hsps_transl);
+    sort_hsps_by_ncbi_link_order(&mut results, fwd_compare_hsps_transl);
 
     replay_ncbi_output_list(results)
 }
@@ -1837,6 +1871,12 @@ mod tests {
             raw_score: id, // Use raw_score as ID for verification
             e_value: 1e-10,
             num_ident: 0, // Mock value for tests
+            // NCBI reference: /mnt/c/Users/genom/GitHub/ncbi-blast/c++/src/algo/blast/core/blast_hits.c:1379-1381
+            // ```c
+            // qsort(hsp_list->hsp_array, hsp_list->hspcnt, sizeof(BlastHSP*),
+            //       ScoreCompareHSPs);
+            // ```
+            hsp_list_order: id as usize,
             ordering_method: 0,
             linked_set: false,
             start_of_chain: false,
@@ -1887,6 +1927,27 @@ mod tests {
         let replayed = replay_ncbi_output_list(vec![member, head, single]);
         let replayed_ids: Vec<usize> = replayed.iter().map(|hit| hit.link_id).collect();
         assert_eq!(replayed_ids, vec![1, 0, 2]);
+    }
+
+    #[test]
+    fn test_link_qsort_tie_uses_hsp_list_order_for_comparator_equal_hits() {
+        // NCBI reference: /mnt/c/Users/genom/GitHub/ncbi-blast/c++/src/algo/blast/core/link_hsps.c:483-486
+        // ```c
+        // /* Sort by (reverse) position. */
+        // if (kTranslatedQuery) {
+        //    qsort(link_hsp_array,total_number_of_hsps,sizeof(LinkHSPStruct*),
+        //          s_RevCompareHSPsTbx);
+        // ```
+        let mut later = mock_hit(100, 150, 200, 250, 20);
+        later.hsp_list_order = 2;
+        let mut earlier = mock_hit(100, 150, 200, 250, 10);
+        earlier.hsp_list_order = 1;
+        let mut hits = vec![later, earlier];
+
+        sort_hsps_by_ncbi_link_order(&mut hits, rev_compare_hsps_tbx);
+
+        let ordered: Vec<usize> = hits.iter().map(|hit| hit.hsp_list_order).collect();
+        assert_eq!(ordered, vec![1, 2]);
     }
 
     /// Verify LOSAT's HSP sort order matches NCBI's s_RevCompareHSPsTbx

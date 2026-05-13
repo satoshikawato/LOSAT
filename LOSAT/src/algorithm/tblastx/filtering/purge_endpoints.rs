@@ -204,6 +204,12 @@ mod tests {
             raw_score,
             e_value: 0.0,
             num_ident: 0,
+            // NCBI reference: /mnt/c/Users/genom/GitHub/ncbi-blast/c++/src/algo/blast/core/blast_hits.c:1379-1381
+            // ```c
+            // qsort(hsp_list->hsp_array, hsp_list->hspcnt, sizeof(BlastHSP*),
+            //       ScoreCompareHSPs);
+            // ```
+            hsp_list_order: 0,
             ordering_method: 0,
             linked_set: false,
             start_of_chain: false,
@@ -328,6 +334,12 @@ mod tests {
             raw_score: 100,
             e_value: 0.0,
             num_ident: 0,
+            // NCBI reference: /mnt/c/Users/genom/GitHub/ncbi-blast/c++/src/algo/blast/core/blast_hits.c:1379-1381
+            // ```c
+            // qsort(hsp_list->hsp_array, hsp_list->hspcnt, sizeof(BlastHSP*),
+            //       ScoreCompareHSPs);
+            // ```
+            hsp_list_order: 0,
             ordering_method: 0,
             linked_set: false,
             start_of_chain: false,
@@ -358,6 +370,12 @@ mod tests {
             raw_score: 90,
             e_value: 0.0,
             num_ident: 0,
+            // NCBI reference: /mnt/c/Users/genom/GitHub/ncbi-blast/c++/src/algo/blast/core/blast_hits.c:1379-1381
+            // ```c
+            // qsort(hsp_list->hsp_array, hsp_list->hspcnt, sizeof(BlastHSP*),
+            //       ScoreCompareHSPs);
+            // ```
+            hsp_list_order: 1,
             ordering_method: 0,
             linked_set: false,
             start_of_chain: false,

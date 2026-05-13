@@ -5,7 +5,7 @@
 //! This module contains InitHSP (initial HSP with absolute coordinates) and
 //! functions for converting to UngappedHit (context-relative coordinates).
 
-use super::chaining::UngappedHit;
+use super::chaining::{hsp_list_order_tie_break, UngappedHit};
 use super::extension::convert_coords;
 use super::lookup::QueryContext;
 use super::tracing::{trace_hsp_target, trace_match_target, trace_ungapped_hit_if_match};
@@ -248,6 +248,7 @@ pub fn get_ungapped_hsp_list(
 
         // Create UngappedHit with context-relative coordinates (before reevaluation)
         // NCBI: Blast_HSPInit creates HSP with original extension score
+        let hsp_list_order = ungapped_hits.len();
         let uh = UngappedHit {
             q_idx: init_hsp.q_idx,
             s_idx: init_hsp.s_idx,
@@ -272,6 +273,14 @@ pub fn get_ungapped_hsp_list(
             raw_score: init_hsp.score, // Original extension score (before reevaluation)
             e_value: f64::INFINITY,
             num_ident: 0, // Will be computed during reevaluation
+            // NCBI reference: /mnt/c/Users/genom/GitHub/ncbi-blast/c++/src/algo/blast/core/blast_gapalign.c:4719-4724
+            // ```c
+            // for (index=0;index<init_hsp_array->total;index++) {
+            //     init_hsp = init_hsp_array->init_hsp_array[index];
+            //     ...
+            //     Blast_HSPListSaveHSP(hsp_list, new_hsp);
+            // ```
+            hsp_list_order,
             ordering_method: 0,
             linked_set: false,
             start_of_chain: false,
@@ -334,6 +343,24 @@ pub(crate) fn score_compare_ungapped_hits_ncbi(a: &UngappedHit, b: &UngappedHit)
         .then_with(|| b.q_aa_end.cmp(&a.q_aa_end))
 }
 
+// NCBI reference: /mnt/c/Users/genom/GitHub/ncbi-blast/c++/src/algo/blast/core/blast_hits.c:1347-1355
+// ```c
+// if (0 == (result = BLAST_CMP(hsp2->score,          hsp1->score)) &&
+//     0 == (result = BLAST_CMP(hsp1->subject.offset, hsp2->subject.offset)) &&
+//     0 == (result = BLAST_CMP(hsp2->subject.end,    hsp1->subject.end)) &&
+//     0 == (result = BLAST_CMP(hsp1->query  .offset, hsp2->query  .offset))) {
+//     result = BLAST_CMP(hsp2->query.end, hsp1->query.end);
+// }
+// return result;
+// ```
+#[inline]
+pub(crate) fn score_compare_ungapped_hits_ncbi_then_list_order(
+    a: &UngappedHit,
+    b: &UngappedHit,
+) -> Ordering {
+    score_compare_ungapped_hits_ncbi(a, b).then_with(|| hsp_list_order_tie_break(a, b))
+}
+
 // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_hits.c:1366-1377
 // ```c
 // qsort(hsp_list->hsp_array, hsp_list->hspcnt, sizeof(BlastHSP*),
@@ -343,7 +370,18 @@ pub(crate) fn ncbi_qsort_ungapped_hits_by_score(hits: &mut [UngappedHit]) {
     if hits.len() <= 1 {
         return;
     }
-    hits.sort_unstable_by(score_compare_ungapped_hits_ncbi);
+    // NCBI reference: /mnt/c/Users/genom/GitHub/ncbi-blast/c++/src/algo/blast/core/blast_hits.c:1374-1381
+    // ```c
+    // void Blast_HSPListSortByScore(BlastHSPList* hsp_list)
+    // {
+    //     if (!Blast_HSPListIsSortedByScore(hsp_list)) {
+    //         qsort(hsp_list->hsp_array, hsp_list->hspcnt, sizeof(BlastHSP*),
+    //               ScoreCompareHSPs);
+    // ```
+    if ungapped_hits_is_sorted_by_score_ncbi(hits) {
+        return;
+    }
+    hits.sort_by(score_compare_ungapped_hits_ncbi_then_list_order);
 }
 
 // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_hits.c:1355-1369
@@ -418,6 +456,39 @@ mod tests {
             s_frame: 1,
             q_orig_len: 15,
             s_orig_len: 15,
+        }
+    }
+
+    fn make_ungapped_for_sort(raw_score: i32, hsp_list_order: usize) -> UngappedHit {
+        UngappedHit {
+            q_idx: hsp_list_order as u32,
+            s_idx: 0,
+            ctx_idx: 0,
+            s_f_idx: 0,
+            q_frame: 1,
+            s_frame: 1,
+            q_aa_start: 10,
+            q_aa_end: 20,
+            s_aa_start: 30,
+            s_aa_end: 40,
+            q_seed_off: 10,
+            s_seed_off: 30,
+            q_orig_len: 100,
+            s_orig_len: 100,
+            raw_score,
+            e_value: 0.0,
+            num_ident: 0,
+            // NCBI reference: /mnt/c/Users/genom/GitHub/ncbi-blast/c++/src/algo/blast/core/blast_hits.c:1379-1381
+            // ```c
+            // qsort(hsp_list->hsp_array, hsp_list->hspcnt, sizeof(BlastHSP*),
+            //       ScoreCompareHSPs);
+            // ```
+            hsp_list_order,
+            ordering_method: 0,
+            linked_set: false,
+            start_of_chain: false,
+            link_id: 0,
+            chain_next_link_id: None,
         }
     }
 
@@ -537,6 +608,32 @@ mod tests {
 
         let ordered_qidx: Vec<u32> = hits.iter().map(|hit| hit.q_idx).collect();
         assert_eq!(ordered_qidx, vec![1, 0]);
+    }
+
+    #[test]
+    fn test_ncbi_score_sort_uses_hsp_list_order_only_for_comparator_equal_hits() {
+        // NCBI reference: /mnt/c/Users/genom/GitHub/ncbi-blast/c++/src/algo/blast/core/blast_hits.c:1347-1355
+        // ```c
+        // if (0 == (result = BLAST_CMP(hsp2->score,          hsp1->score)) &&
+        //     0 == (result = BLAST_CMP(hsp1->subject.offset, hsp2->subject.offset)) &&
+        //     0 == (result = BLAST_CMP(hsp2->subject.end,    hsp1->subject.end)) &&
+        //     0 == (result = BLAST_CMP(hsp1->query  .offset, hsp2->query  .offset))) {
+        //     result = BLAST_CMP(hsp2->query.end, hsp1->query.end);
+        // }
+        // ```
+        let mut hits = vec![
+            make_ungapped_for_sort(90, 0),
+            make_ungapped_for_sort(100, 2),
+            make_ungapped_for_sort(100, 1),
+        ];
+
+        ncbi_qsort_ungapped_hits_by_score(&mut hits);
+
+        let ordered: Vec<(i32, usize)> = hits
+            .iter()
+            .map(|hit| (hit.raw_score, hit.hsp_list_order))
+            .collect();
+        assert_eq!(ordered, vec![(100, 1), (100, 2), (90, 0)]);
     }
 
     // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_gapalign.c:2384-2392

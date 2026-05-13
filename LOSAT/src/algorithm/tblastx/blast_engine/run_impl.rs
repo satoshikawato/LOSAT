@@ -1226,6 +1226,24 @@ fn run_internal(args: TblastxArgs, mut in_memory: Option<TblastxInMemoryRun<'_>>
             }
         } // End of subject frame loop
 
+        // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_engine.c:561-584
+        // ```c
+        // BLAST_GetUngappedHSPList(init_hitlist, query_info, subject,
+        //         hit_params->options, &hsp_list);
+        // Blast_HSPListsMerge(...);
+        // ```
+        // This snapshot records internal frame-relative HSPs immediately after
+        // the ungapped extension list is materialized. TBLASTX has no active
+        // common-endpoint purge in this ungapped path, so the post-purge
+        // diagnostic intentionally records the same NCBI-stage boundary.
+        if stage_dump::enabled() {
+            stage_dump::dump_ungapped_hits(
+                "after_initial_ungapped_extension",
+                &combined_ungapped_hits,
+            );
+            stage_dump::dump_ungapped_hits("after_common_endpoint_purge", &combined_ungapped_hits);
+        }
+
         // NCBI: Blast_HSPListReevaluateUngapped equivalent
         // Reference: blast_engine.c:1492-1497, blast_hits.c:2609-2737
         // Perform batch reevaluation on all HSPs after merging all frames
@@ -1240,6 +1258,16 @@ fn run_internal(args: TblastxArgs, mut in_memory: Option<TblastxInMemoryRun<'_>>
             is_long_sequence,
             &mut stats_hsp_filtered_by_reeval,
         );
+        // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_hits.c:2733-2734
+        // ```c
+        // /* Sort the HSP array by score (scores may have changed!) */
+        // Blast_HSPListSortByScore(hsp_list);
+        // ```
+        // Record the post-reevaluation list and the exact input to link_hsps.
+        if stage_dump::enabled() {
+            stage_dump::dump_ungapped_hits("after_reevaluate", &ungapped_hits);
+            stage_dump::dump_ungapped_hits("before_link_hsps", &ungapped_hits);
+        }
 
         if !ungapped_hits.is_empty() {
             // DEBUG: Print HSP statistics for long sequences
@@ -1354,6 +1382,17 @@ fn run_internal(args: TblastxArgs, mut in_memory: Option<TblastxInMemoryRun<'_>>
                 &length_adj_per_context,
                 &eff_searchsp_per_context,
             );
+            // NCBI reference: /mnt/c/Users/genom/GitHub/ncbi-blast/c++/src/algo/blast/core/link_hsps.c:959-982
+            // ```c
+            // H->hsp->evalue = (best_evalue == -1) ? H->hsp->evalue :
+            //                  MIN(H->hsp->evalue, best_evalue);
+            // H->ordering_method = ordering_method;
+            // ```
+            // Record linked_set/start_of_chain/order/e-value before output
+            // coordinate conversion can obscure frame-relative HSP identity.
+            if stage_dump::enabled() {
+                stage_dump::dump_ungapped_hits("after_link_hsps_before_output_conversion", &linked);
+            }
             if trace_hsp_target().is_some() {
                 for h in &linked {
                     trace_ungapped_hit_if_match("after_linking", h);
@@ -1404,6 +1443,9 @@ fn run_internal(args: TblastxArgs, mut in_memory: Option<TblastxInMemoryRun<'_>>
             }
 
             let mut final_hits: Vec<Hit> = Vec::new();
+            let dump_output_stage = stage_dump::enabled();
+            let mut output_snapshot_hits: Vec<UngappedHit> = Vec::new();
+            let mut output_snapshot_pairs: Vec<(Hit, UngappedHit)> = Vec::new();
             let mut filtered_by_evalue = 0usize;
             for h in linked {
                 // NCBI reference (verbatim, link_hsps.c:1018-1020):
@@ -1431,6 +1473,9 @@ fn run_internal(args: TblastxArgs, mut in_memory: Option<TblastxInMemoryRun<'_>>
                     diagnostics
                         .ungapped_evalue_passed
                         .fetch_add(1, AtomicOrdering::Relaxed);
+                }
+                if dump_output_stage {
+                    output_snapshot_hits.push(h.clone());
                 }
 
                 let ctx = &contexts_ref[h.ctx_idx];
@@ -1517,7 +1562,29 @@ fn run_internal(args: TblastxArgs, mut in_memory: Option<TblastxInMemoryRun<'_>>
                     num_positives: matches,
                 };
                 trace_final_hit_if_match("output_hit", &out_hit);
+                if dump_output_stage {
+                    output_snapshot_pairs.push((out_hit.clone(), h.clone()));
+                }
                 final_hits.push(out_hit);
+            }
+            // NCBI reference: /mnt/c/Users/genom/GitHub/ncbi-blast/c++/src/algo/blast/core/link_hsps.c:1018-1059
+            // ```c
+            // if (H->linked_set == TRUE && H->start_of_chain == FALSE)
+            //     continue;
+            // while (H->hsp_link.link[ordering_method]) { ... }
+            // ```
+            // The converted output hits are represented here by their original
+            // internal HSP rows after e-value filtering and before common.rs
+            // applies final HSP-list sorting for the selected output format.
+            if dump_output_stage {
+                stage_dump::dump_ungapped_hits(
+                    "after_output_conversion_before_final_sort",
+                    &output_snapshot_hits,
+                );
+                stage_dump::dump_final_output_order(
+                    "after_final_output_sort",
+                    &output_snapshot_pairs,
+                );
             }
 
             // DEBUG: Print output filtering statistics

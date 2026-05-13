@@ -202,9 +202,17 @@ pub fn reevaluate_ungapped_hit_ncbi_translated(
     //    sum += matrix[*query & kResidueMask][*subject];
     // }
     // ```
-    #[cfg(all(target_arch = "wasm32", target_feature = "simd128"))]
+    #[cfg(all(
+        target_arch = "wasm32",
+        target_feature = "simd128",
+        not(feature = "tblastx-wasm-scalar")
+    ))]
     {
         if hsp_len >= 32 {
+            // The `tblastx-wasm-scalar` feature is diagnostic-only: it keeps
+            // the exact scalar NCBI state machine (blast_hits.c:692-725)
+            // available for native-vs-Wasm parity isolation while leaving
+            // production SIMD builds unchanged.
             unsafe {
                 return reevaluate_ungapped_hit_ncbi_translated_wasm_simd128(
                     query_raw,
@@ -317,7 +325,11 @@ fn reevaluate_ungapped_hit_ncbi_translated_scalar(
 ///    sum += matrix[*query & kResidueMask][*subject];
 /// }
 /// ```
-#[cfg(all(target_arch = "wasm32", target_feature = "simd128"))]
+#[cfg(all(
+    target_arch = "wasm32",
+    target_feature = "simd128",
+    not(feature = "tblastx-wasm-scalar")
+))]
 #[target_feature(enable = "simd128")]
 unsafe fn reevaluate_ungapped_hit_ncbi_translated_wasm_simd128(
     query_raw: &[u8],

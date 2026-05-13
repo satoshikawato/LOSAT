@@ -19,6 +19,7 @@ pub mod lookup;
 pub mod ncbi_cutoffs;
 pub mod reevaluate;
 mod scan;
+pub mod stage_dump;
 pub mod sum_stats_linking;
 pub mod tracing;
 pub mod translation;

@@ -24,6 +24,11 @@ getrandom = { version = "0.2", features = ["js"] }
 [features]
 default = ["parallel"]
 parallel = ["rayon", "num_cpus"]
+# Diagnostic-only parity switch. NCBI BLAST has a single scalar C control flow
+# for TBLASTX ungapped extension/reevaluation (aa_ungapped.c:846-921,
+# blast_hits.c:675-733); this feature forces the Wasm build to use the matching
+# Rust scalar path even when the target enables simd128.
+tblastx-wasm-scalar = []
 
 [profile.release]
 lto = true

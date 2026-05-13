@@ -77,6 +77,7 @@ pub(crate) use super::ncbi_cutoffs::{
 pub(crate) use super::reevaluate::{
     get_num_identities_and_positives_ungapped, hsp_test, reevaluate_ungapped_hit_ncbi_translated,
 };
+pub(crate) use super::stage_dump;
 pub(crate) use super::sum_stats_linking::{
     apply_sum_stats_even_gap_linking, compute_avg_query_length_ncbi, find_smallest_lambda_params,
     LinkingParams,

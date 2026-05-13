@@ -571,3 +571,68 @@ Next direction:
      `BlastIntervalTreeContainsHSP/AddHSP` order and inputs remain identical.
    - Keep final containment, endpoint purge, ambiguity re-evaluation, and
      identity/length testing in the same order as `blast_traceback.c:633-692`.
+
+## Implementation Update: 2026-05-13, Direct Traceback Edit-Script Build
+
+This update continued the hot-path work inside BLASTN traceback rather than
+adding diagnostics or harness-only code. The changed code remains on the NCBI
+traceback control path and keeps the NCBI-required order of traceback,
+endpoint purge, ambiguity re-evaluation, identity/length testing, score resort,
+and final interval-tree containment.
+
+Changed hot path:
+
+- `LOSAT/src/algorithm/blastn/alignment/gapped.rs`
+  - Replaced the traceback edit-script construction path that first accumulated
+    `(op_type, count)` tuples and then converted them into `GapEditOp` values.
+    Traceback now appends directly into `Vec<GapEditOp>` with the same
+    run-length merge semantics as `GapPrelimEditBlockAdd`
+    (`gapinfo.c:174-185`).
+  - Kept the NCBI forward/reverse traceback ordering from
+    `blast_gapalign.c:689-727` and `blast_gapalign.c:2494-2496`: forward
+    traceback is reversed after construction, while reverse traceback is already
+    forward.
+  - Reused the left traceback vector as the final combined edit-script buffer
+    and moved right traceback operations into it, preserving the NCBI merge
+    behavior from `blast_gapalign.c:2498-2534` while avoiding an extra left-side
+    copy and right-side slice copy.
+  - Replaced the post-combine terminal-gap trimming copy
+    (`combined_edit_ops[start_idx..end_idx].to_vec()`) with in-place
+    `truncate`/`drain`, matching NCBI's in-place shortening in
+    `blast_gapalign.c:4683-4712`.
+
+Validation performed:
+
+- `cargo check`
+- `cargo build --release`
+- `PesePMNV.MjPMNV --task blastn -n 1` remained byte-identical to the current
+  LOSAT fixture.
+- `MelaMJNV.PemoMJNVA --task blastn -n 1` remained byte-identical to the
+  current LOSAT fixture.
+- `MjPMNV.MlPMNV --task blastn -n 1` remained byte-identical to the current
+  LOSAT fixture.
+
+Current caveat:
+
+- No new reliable timing table was recorded for this update. The implementation
+  removes allocation and copy work on the traceback edit-script path, but the
+  measured wall-clock delta should be collected in a quiet environment with the
+  validation matrix before treating this as a quantified performance win.
+
+Next direction:
+
+1. Re-run `NZ_CP006932.NZ_CP006932 --task blastn -n 1` with `LOSAT_TIMING=1`
+   in a quiet environment and compare `traceback_alignment`,
+   `traceback_hsp_build`, and `reevaluate_ambiguities` against the previous
+   baseline. This edit-script change should primarily affect traceback
+   allocation/copy overhead, not purge ordering.
+2. If byte identity remains stable on the dense self case, inspect the remaining
+   traceback allocation sites that still clone or copy `GapEditOp` buffers:
+   reevaluation partial-copy (`blast_hits.c:460-470` equivalent) and endpoint
+   trimming tails.
+3. Do not add shortcuts to ambiguity re-evaluation unless they are either found
+   in NCBI source or proven as a Rust-only storage optimization that preserves
+   the exact `Blast_HSPReevaluateWithAmbiguitiesGapped` loop decisions.
+4. Continue prioritizing allocation/copy reduction in existing NCBI-shaped hot
+   paths before touching scoring, sort keys, endpoint selection, or final
+   containment behavior.

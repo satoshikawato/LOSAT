@@ -12,7 +12,7 @@ LOSAT_BIN="../target/release/LOSAT"
 # Part 1: LOSAT Execution
 # ==========================================
 echo "Starting LOSAT commands..."
-<<COMMENTOUT
+
 # --- LOSATN Commands (Default / Megablast behavior) ---
 
 # NZ_CP006932 self (Default/Megablast)
@@ -54,8 +54,8 @@ echo "Starting LOSAT commands..."
 
 # MjPMNV vs MlPMNV
 (time $LOSAT_BIN blastn -q ./fasta/AP027202.fasta -s ./fasta/LC738875.fasta -o ./losat_out/MjPMNV.MlPMNV.losatn.blastn.out --task blastn -n 1 )&>./losat_out/MjPMNV.MlPMNV.losatn.blastn.log
-COMMENTOUT
 
+<<COMMENTOUT
 # --- LOSATP Commands ---
 echo "Starting LOSATP commands..."
 run_losatp_case() {
@@ -91,6 +91,7 @@ for losatp_case in "${LOSATP_CASES[@]}"; do
     IFS=":" read -r query subject stem <<<"$losatp_case"
     run_losatp_case "$query" "$subject" "$stem"
 done
+COMMENTOUT
 <<COMMENTOUT
 echo "Finished LOSATP commands!"
 # --- TLOSATX Commands (Genetic Code: 4) ---

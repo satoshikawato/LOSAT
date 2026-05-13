@@ -3513,6 +3513,62 @@ struct BlastnTiming {
     gapped_calls: std::sync::atomic::AtomicU64,
     traceback_ns: std::sync::atomic::AtomicU64,
     traceback_calls: std::sync::atomic::AtomicU64,
+    // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_traceback.c:358-613
+    // ```c
+    // ASSERT(Blast_HSPListIsSortedByScore(hsp_list));
+    // tree = Blast_IntervalTreeInit(...);
+    // for (index=0; index < num_initial_hsps; index++) {
+    //    if (... !BlastIntervalTreeContainsHSP(tree, hsp, query_info, ...)) {
+    //       BlastGetOffsetsForGappedAlignment(...);
+    //       BLAST_GreedyGappedAlignment(...);
+    //       Blast_HSPUpdateWithTraceback(gap_align, hsp);
+    //       BlastIntervalTreeAddHSP(hsp, tree, query_info, eQueryAndSubject);
+    //    }
+    // }
+    // ```
+    traceback_sort_prelim_ns: std::sync::atomic::AtomicU64,
+    traceback_tree_precheck_ns: std::sync::atomic::AtomicU64,
+    traceback_start_offsets_ns: std::sync::atomic::AtomicU64,
+    traceback_alignment_ns: std::sync::atomic::AtomicU64,
+    traceback_alignment_dp_ns: std::sync::atomic::AtomicU64,
+    traceback_alignment_greedy_ns: std::sync::atomic::AtomicU64,
+    traceback_hsp_build_ns: std::sync::atomic::AtomicU64,
+    // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_traceback.c:633-692
+    // ```c
+    // extra_start = Blast_HSPListPurgeHSPsWithCommonEndpoints(..., FALSE);
+    // delete_hsp = Blast_HSPReevaluateWithAmbiguitiesGapped(...);
+    // Blast_HSPListPurgeHSPsWithCommonEndpoints(..., TRUE);
+    // Blast_HSPListSortByScore(hsp_list);
+    // Blast_IntervalTreeReset(tree);
+    // for (index = 0; index < hsp_list->hspcnt; index++) {
+    //    if (BlastIntervalTreeContainsHSP(...)) ...
+    //    else BlastIntervalTreeAddHSP(...);
+    // }
+    // ```
+    purge_common_endpoint_pass1_ns: std::sync::atomic::AtomicU64,
+    reevaluate_ambiguities_ns: std::sync::atomic::AtomicU64,
+    identity_length_test_ns: std::sync::atomic::AtomicU64,
+    purge_common_endpoint_pass2_ns: std::sync::atomic::AtomicU64,
+    traceback_score_resort_ns: std::sync::atomic::AtomicU64,
+    traceback_final_tree_contains_ns: std::sync::atomic::AtomicU64,
+    traceback_final_tree_add_ns: std::sync::atomic::AtomicU64,
+    // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_traceback.c:836-892
+    // ```c
+    // Blast_TrimHSPListByMaxHsps(hsp_list, hit_options);
+    // s_BlastPruneExtraHits(results, hitlist_size);
+    // ```
+    traceback_postprocess_ns: std::sync::atomic::AtomicU64,
+    traceback_prelim_hsps: std::sync::atomic::AtomicU64,
+    traceback_tree_precheck_skipped_hsps: std::sync::atomic::AtomicU64,
+    traceback_full_traceback_hsps: std::sync::atomic::AtomicU64,
+    traceback_deleted_evalue_cutoff_hsps: std::sync::atomic::AtomicU64,
+    traceback_deleted_reevaluation_hsps: std::sync::atomic::AtomicU64,
+    traceback_deleted_identity_length_hsps: std::sync::atomic::AtomicU64,
+    traceback_removed_endpoint_pass1_hsps: std::sync::atomic::AtomicU64,
+    traceback_removed_endpoint_pass2_hsps: std::sync::atomic::AtomicU64,
+    traceback_removed_final_tree_hsps: std::sync::atomic::AtomicU64,
+    traceback_edit_script_lengths: std::sync::Mutex<Vec<u32>>,
+    traceback_alignment_lengths: std::sync::Mutex<Vec<u32>>,
     format_ns: std::sync::atomic::AtomicU64,
     format_calls: std::sync::atomic::AtomicU64,
 }
@@ -3528,9 +3584,209 @@ impl BlastnTiming {
             gapped_calls: std::sync::atomic::AtomicU64::new(0),
             traceback_ns: std::sync::atomic::AtomicU64::new(0),
             traceback_calls: std::sync::atomic::AtomicU64::new(0),
+            traceback_sort_prelim_ns: std::sync::atomic::AtomicU64::new(0),
+            traceback_tree_precheck_ns: std::sync::atomic::AtomicU64::new(0),
+            traceback_start_offsets_ns: std::sync::atomic::AtomicU64::new(0),
+            traceback_alignment_ns: std::sync::atomic::AtomicU64::new(0),
+            traceback_alignment_dp_ns: std::sync::atomic::AtomicU64::new(0),
+            traceback_alignment_greedy_ns: std::sync::atomic::AtomicU64::new(0),
+            traceback_hsp_build_ns: std::sync::atomic::AtomicU64::new(0),
+            purge_common_endpoint_pass1_ns: std::sync::atomic::AtomicU64::new(0),
+            reevaluate_ambiguities_ns: std::sync::atomic::AtomicU64::new(0),
+            identity_length_test_ns: std::sync::atomic::AtomicU64::new(0),
+            purge_common_endpoint_pass2_ns: std::sync::atomic::AtomicU64::new(0),
+            traceback_score_resort_ns: std::sync::atomic::AtomicU64::new(0),
+            traceback_final_tree_contains_ns: std::sync::atomic::AtomicU64::new(0),
+            traceback_final_tree_add_ns: std::sync::atomic::AtomicU64::new(0),
+            traceback_postprocess_ns: std::sync::atomic::AtomicU64::new(0),
+            traceback_prelim_hsps: std::sync::atomic::AtomicU64::new(0),
+            traceback_tree_precheck_skipped_hsps: std::sync::atomic::AtomicU64::new(0),
+            traceback_full_traceback_hsps: std::sync::atomic::AtomicU64::new(0),
+            traceback_deleted_evalue_cutoff_hsps: std::sync::atomic::AtomicU64::new(0),
+            traceback_deleted_reevaluation_hsps: std::sync::atomic::AtomicU64::new(0),
+            traceback_deleted_identity_length_hsps: std::sync::atomic::AtomicU64::new(0),
+            traceback_removed_endpoint_pass1_hsps: std::sync::atomic::AtomicU64::new(0),
+            traceback_removed_endpoint_pass2_hsps: std::sync::atomic::AtomicU64::new(0),
+            traceback_removed_final_tree_hsps: std::sync::atomic::AtomicU64::new(0),
+            traceback_edit_script_lengths: std::sync::Mutex::new(Vec::new()),
+            traceback_alignment_lengths: std::sync::Mutex::new(Vec::new()),
             format_ns: std::sync::atomic::AtomicU64::new(0),
             format_calls: std::sync::atomic::AtomicU64::new(0),
         }
+    }
+
+    fn record_duration(counter: &std::sync::atomic::AtomicU64, start: std::time::Instant) {
+        counter.fetch_add(
+            start.elapsed().as_nanos() as u64,
+            std::sync::atomic::Ordering::Relaxed,
+        );
+    }
+
+    fn record_ns(counter: &std::sync::atomic::AtomicU64, elapsed_ns: u64) {
+        counter.fetch_add(elapsed_ns, std::sync::atomic::Ordering::Relaxed);
+    }
+
+    fn record_count(counter: &std::sync::atomic::AtomicU64, count: u64) {
+        counter.fetch_add(count, std::sync::atomic::Ordering::Relaxed);
+    }
+
+    fn record_traceback_lengths(&self, edit_script_lengths: Vec<u32>, alignment_lengths: Vec<u32>) {
+        if !edit_script_lengths.is_empty() {
+            if let Ok(mut samples) = self.traceback_edit_script_lengths.lock() {
+                samples.extend(edit_script_lengths);
+            }
+        }
+        if !alignment_lengths.is_empty() {
+            if let Ok(mut samples) = self.traceback_alignment_lengths.lock() {
+                samples.extend(alignment_lengths);
+            }
+        }
+    }
+}
+
+fn timing_seconds(counter: &std::sync::atomic::AtomicU64) -> f64 {
+    counter.load(std::sync::atomic::Ordering::Relaxed) as f64 / 1e9
+}
+
+fn timing_count(counter: &std::sync::atomic::AtomicU64) -> u64 {
+    counter.load(std::sync::atomic::Ordering::Relaxed)
+}
+
+fn timing_length_stats(samples: &std::sync::Mutex<Vec<u32>>) -> (usize, u32, f64) {
+    let Ok(samples) = samples.lock() else {
+        return (0, 0, 0.0);
+    };
+    if samples.is_empty() {
+        return (0, 0, 0.0);
+    }
+    let mut sorted = samples.clone();
+    sorted.sort_unstable();
+    let count = sorted.len();
+    let max = sorted[count - 1];
+    let median = if count % 2 == 0 {
+        let upper = sorted[count / 2] as f64;
+        let lower = sorted[(count / 2) - 1] as f64;
+        (lower + upper) / 2.0
+    } else {
+        sorted[count / 2] as f64
+    };
+    (count, max, median)
+}
+
+fn print_blastn_timing(
+    timing: &BlastnTiming,
+    t_search_start: Option<std::time::Instant>,
+    t_total: Option<std::time::Instant>,
+) {
+    let scan_s = timing_seconds(&timing.scan_ns);
+    let scan_n = timing_count(&timing.scan_calls);
+    let ungapped_s = timing_seconds(&timing.ungapped_ns);
+    let ungapped_n = timing_count(&timing.ungapped_calls);
+    let gapped_s = timing_seconds(&timing.gapped_ns);
+    let gapped_n = timing_count(&timing.gapped_calls);
+    let traceback_s = timing_seconds(&timing.traceback_ns);
+    let traceback_n = timing_count(&timing.traceback_calls);
+    let format_s = timing_seconds(&timing.format_ns);
+    let format_n = timing_count(&timing.format_calls);
+
+    eprintln!("[TIMING] scan_lookup: {:.3}s (calls={})", scan_s, scan_n);
+    eprintln!(
+        "[TIMING] ungapped_extend: {:.3}s (calls={})",
+        ungapped_s, ungapped_n
+    );
+    eprintln!(
+        "[TIMING] gapped_extend: {:.3}s (calls={})",
+        gapped_s, gapped_n
+    );
+    eprintln!(
+        "[TIMING] traceback_prune: {:.3}s (calls={})",
+        traceback_s, traceback_n
+    );
+    eprintln!(
+        "[TIMING] traceback_sort_prelim: {:.3}s",
+        timing_seconds(&timing.traceback_sort_prelim_ns)
+    );
+    eprintln!(
+        "[TIMING] traceback_tree_precheck: {:.3}s",
+        timing_seconds(&timing.traceback_tree_precheck_ns)
+    );
+    eprintln!(
+        "[TIMING] traceback_start_offsets: {:.3}s",
+        timing_seconds(&timing.traceback_start_offsets_ns)
+    );
+    eprintln!(
+        "[TIMING] traceback_alignment: {:.3}s (dp={:.3}s greedy={:.3}s)",
+        timing_seconds(&timing.traceback_alignment_ns),
+        timing_seconds(&timing.traceback_alignment_dp_ns),
+        timing_seconds(&timing.traceback_alignment_greedy_ns)
+    );
+    eprintln!(
+        "[TIMING] traceback_hsp_build: {:.3}s",
+        timing_seconds(&timing.traceback_hsp_build_ns)
+    );
+    eprintln!(
+        "[TIMING] purge_common_endpoint_pass1: {:.3}s",
+        timing_seconds(&timing.purge_common_endpoint_pass1_ns)
+    );
+    eprintln!(
+        "[TIMING] reevaluate_ambiguities: {:.3}s",
+        timing_seconds(&timing.reevaluate_ambiguities_ns)
+    );
+    eprintln!(
+        "[TIMING] identity_length_test: {:.3}s",
+        timing_seconds(&timing.identity_length_test_ns)
+    );
+    eprintln!(
+        "[TIMING] purge_common_endpoint_pass2: {:.3}s",
+        timing_seconds(&timing.purge_common_endpoint_pass2_ns)
+    );
+    eprintln!(
+        "[TIMING] traceback_score_resort: {:.3}s",
+        timing_seconds(&timing.traceback_score_resort_ns)
+    );
+    eprintln!(
+        "[TIMING] traceback_final_tree_contains: {:.3}s",
+        timing_seconds(&timing.traceback_final_tree_contains_ns)
+    );
+    eprintln!(
+        "[TIMING] traceback_final_tree_add: {:.3}s",
+        timing_seconds(&timing.traceback_final_tree_add_ns)
+    );
+    eprintln!(
+        "[TIMING] traceback_postprocess: {:.3}s",
+        timing_seconds(&timing.traceback_postprocess_ns)
+    );
+    eprintln!(
+        "[TIMING] traceback_counts: prelim={} tree_skipped={} full_traceback={} deleted_evalue_cutoff={} deleted_reevaluation={} deleted_identity_length={} endpoint_pass1_removed={} endpoint_pass2_removed={} final_tree_removed={}",
+        timing_count(&timing.traceback_prelim_hsps),
+        timing_count(&timing.traceback_tree_precheck_skipped_hsps),
+        timing_count(&timing.traceback_full_traceback_hsps),
+        timing_count(&timing.traceback_deleted_evalue_cutoff_hsps),
+        timing_count(&timing.traceback_deleted_reevaluation_hsps),
+        timing_count(&timing.traceback_deleted_identity_length_hsps),
+        timing_count(&timing.traceback_removed_endpoint_pass1_hsps),
+        timing_count(&timing.traceback_removed_endpoint_pass2_hsps),
+        timing_count(&timing.traceback_removed_final_tree_hsps)
+    );
+    let (edit_count, edit_max, edit_median) =
+        timing_length_stats(&timing.traceback_edit_script_lengths);
+    let (aln_count, aln_max, aln_median) = timing_length_stats(&timing.traceback_alignment_lengths);
+    eprintln!(
+        "[TIMING] traceback_lengths: edit_script_samples={} edit_script_max={} edit_script_median={:.1} alignment_samples={} alignment_max={} alignment_median={:.1}",
+        edit_count, edit_max, edit_median, aln_count, aln_max, aln_median
+    );
+    eprintln!(
+        "[TIMING] format_output: {:.3}s (calls={})",
+        format_s, format_n
+    );
+    if let Some(t_search_start) = t_search_start {
+        eprintln!(
+            "[TIMING] search_total: {:.3}s",
+            t_search_start.elapsed().as_secs_f64()
+        );
+    }
+    if let Some(t_total) = t_total {
+        eprintln!("[TIMING] total: {:.3}s", t_total.elapsed().as_secs_f64());
     }
 }
 
@@ -3714,10 +3970,9 @@ fn post_process_hits_and_write(
     // ```
     if let Some(timing) = timing {
         let post_elapsed = chain_start.elapsed();
-        timing.traceback_ns.fetch_add(
-            post_elapsed.as_nanos() as u64,
-            std::sync::atomic::Ordering::Relaxed,
-        );
+        let post_elapsed_ns = post_elapsed.as_nanos() as u64;
+        BlastnTiming::record_ns(&timing.traceback_ns, post_elapsed_ns);
+        BlastnTiming::record_ns(&timing.traceback_postprocess_ns, post_elapsed_ns);
         timing
             .traceback_calls
             .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
@@ -7930,6 +8185,8 @@ fn run_internal(args: BlastnArgs, mut in_memory: Option<BlastnInMemoryRun<'_>>) 
             0,
             (s_len_full + 1) as i32,
         );
+        let mut traceback_edit_script_lengths: Vec<u32> = Vec::new();
+        let mut traceback_alignment_lengths: Vec<u32> = Vec::new();
 
         let prelim_hits = &mut combined_prelim_hits;
         if !prelim_hits.is_empty() {
@@ -7938,9 +8195,31 @@ fn run_internal(args: BlastnArgs, mut in_memory: Option<BlastnInMemoryRun<'_>>) 
             // /* Make sure the HSPs in the HSP list are sorted by score, as they should be. */
             // ASSERT(Blast_HSPListIsSortedByScore(hsp_list));
             // ```
+            if let Some(timing) = timing_ref {
+                BlastnTiming::record_count(&timing.traceback_prelim_hsps, prelim_hits.len() as u64);
+            }
+            let sort_prelim_start = if timing_enabled {
+                Some(std::time::Instant::now())
+            } else {
+                None
+            };
             prelim_hits.sort_unstable_by(score_compare_prelim_hits);
+            if let (Some(timing), Some(sort_prelim_start)) = (timing_ref, sort_prelim_start) {
+                BlastnTiming::record_duration(&timing.traceback_sort_prelim_ns, sort_prelim_start);
+            }
 
             interval_tree.reset();
+            // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_itree.c:66-70
+            // ```c
+            // if (tree->num_used == tree->num_alloc) {
+            //     tree->num_alloc = 2 * tree->num_alloc;
+            //     tree->nodes = (SIntervalNode *)realloc(tree->nodes, tree->num_alloc *
+            //                                                  sizeof(SIntervalNode));
+            // }
+            // ```
+            // Reserve from the preliminary HSP count before the hot add/contains loop.
+            // This preserves NCBI node order while avoiding repeated Vec growth.
+            interval_tree.reserve_nodes_for_hsps(prelim_hits.len());
 
             for prelim in prelim_hits.iter() {
                 let ctx = &query_contexts[prelim.context_idx as usize];
@@ -7952,6 +8231,11 @@ fn run_internal(args: BlastnArgs, mut in_memory: Option<BlastnInMemoryRun<'_>>) 
                 //     !BlastIntervalTreeContainsHSP(tree, hsp, query_info,
                 //                          hit_options->min_diag_separation)) {
                 // ```
+                let tree_precheck_start = if timing_enabled {
+                    Some(std::time::Instant::now())
+                } else {
+                    None
+                };
                 let subject_frame_sign = 1i32;
                 let prelim_tree_hsp = TreeHsp {
                     query_offset: prelim.prelim_qs as i32,
@@ -7969,6 +8253,13 @@ fn run_internal(args: BlastnArgs, mut in_memory: Option<BlastnInMemoryRun<'_>>) 
                     prelim.query_context_offset,
                     min_diag_separation,
                 );
+                if let (Some(timing), Some(tree_precheck_start)) = (timing_ref, tree_precheck_start)
+                {
+                    BlastnTiming::record_duration(
+                        &timing.traceback_tree_precheck_ns,
+                        tree_precheck_start,
+                    );
+                }
                 // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_traceback.c:403-405
                 // ```c
                 // if (program_number == eBlastTypeRpsBlast ||
@@ -8006,6 +8297,9 @@ fn run_internal(args: BlastnArgs, mut in_memory: Option<BlastnInMemoryRun<'_>>) 
                     );
                 }
                 if prelim_traceback_contained {
+                    if let Some(timing) = timing_ref {
+                        BlastnTiming::record_count(&timing.traceback_tree_precheck_skipped_hsps, 1);
+                    }
                     continue;
                 }
 
@@ -8029,6 +8323,11 @@ fn run_internal(args: BlastnArgs, mut in_memory: Option<BlastnInMemoryRun<'_>>) 
                 //    s_start = hsp->subject.gapped_start;
                 // }
                 // ```
+                let start_offsets_start = if timing_enabled {
+                    Some(std::time::Instant::now())
+                } else {
+                    None
+                };
                 if trace_q_start == 0 && trace_s_start == 0 {
                     let (q_start, s_start) = match blast_get_offsets_for_gapped_alignment(
                         q_seq_blastna,
@@ -8041,6 +8340,14 @@ fn run_internal(args: BlastnArgs, mut in_memory: Option<BlastnInMemoryRun<'_>>) 
                     ) {
                         Some(value) => value,
                         None => {
+                            if let (Some(timing), Some(start_offsets_start)) =
+                                (timing_ref, start_offsets_start)
+                            {
+                                BlastnTiming::record_duration(
+                                    &timing.traceback_start_offsets_ns,
+                                    start_offsets_start,
+                                );
+                            }
                             continue;
                         }
                     };
@@ -8068,10 +8375,7 @@ fn run_internal(args: BlastnArgs, mut in_memory: Option<BlastnInMemoryRun<'_>>) 
                 // adjusted_subject = subject + start_shift;
                 // hsp->subject.gapped_start = s_start;
                 // ```
-                let mut start_shift: usize = 0;
-                let mut adjusted_subject = s_seq_blastna;
                 let mut adjusted_s_len = s_seq_blastna.len();
-                let mut trace_s_start_adj = trace_s_start;
                 let mut s_start_i32 = trace_s_start as i32;
                 let mut s_len_i32 = adjusted_s_len as i32;
                 let start_shift_i32 = adjust_subject_range(
@@ -8080,12 +8384,27 @@ fn run_internal(args: BlastnArgs, mut in_memory: Option<BlastnInMemoryRun<'_>>) 
                     trace_q_start as i32,
                     q_seq_blastna.len() as i32,
                 );
-                start_shift = start_shift_i32 as usize;
+                let start_shift = start_shift_i32 as usize;
                 adjusted_s_len = s_len_i32 as usize;
-                trace_s_start_adj = s_start_i32 as usize;
-                adjusted_subject = &s_seq_blastna[start_shift..start_shift + adjusted_s_len];
+                let trace_s_start_adj = s_start_i32 as usize;
+                let adjusted_subject = &s_seq_blastna[start_shift..start_shift + adjusted_s_len];
+                if let (Some(timing), Some(start_offsets_start)) = (timing_ref, start_offsets_start)
+                {
+                    BlastnTiming::record_duration(
+                        &timing.traceback_start_offsets_ns,
+                        start_offsets_start,
+                    );
+                }
 
                 let x_drop_trace = x_drop_final;
+                if let Some(timing) = timing_ref {
+                    BlastnTiming::record_count(&timing.traceback_full_traceback_hsps, 1);
+                }
+                let alignment_start = if timing_enabled {
+                    Some(std::time::Instant::now())
+                } else {
+                    None
+                };
                 let (
                     final_qs,
                     final_qe,
@@ -8178,15 +8497,49 @@ fn run_internal(args: BlastnArgs, mut in_memory: Option<BlastnInMemoryRun<'_>>) 
                             0usize, aln_len, edit_ops,
                         ),
                         None => {
+                            if let (Some(timing), Some(alignment_start)) =
+                                (timing_ref, alignment_start)
+                            {
+                                let alignment_elapsed_ns =
+                                    alignment_start.elapsed().as_nanos() as u64;
+                                BlastnTiming::record_ns(
+                                    &timing.traceback_alignment_ns,
+                                    alignment_elapsed_ns,
+                                );
+                                BlastnTiming::record_ns(
+                                    &timing.traceback_alignment_greedy_ns,
+                                    alignment_elapsed_ns,
+                                );
+                            }
                             continue;
                         }
                     }
                 };
+                if let (Some(timing), Some(alignment_start)) = (timing_ref, alignment_start) {
+                    let alignment_elapsed_ns = alignment_start.elapsed().as_nanos() as u64;
+                    BlastnTiming::record_ns(&timing.traceback_alignment_ns, alignment_elapsed_ns);
+                    if use_dp {
+                        BlastnTiming::record_ns(
+                            &timing.traceback_alignment_dp_ns,
+                            alignment_elapsed_ns,
+                        );
+                    } else {
+                        BlastnTiming::record_ns(
+                            &timing.traceback_alignment_greedy_ns,
+                            alignment_elapsed_ns,
+                        );
+                    }
+                }
 
                 // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_traceback.c:598-600
                 // ```c
                 // Blast_HSPAdjustSubjectOffset(hsp, start_shift);
                 // ```
+                let hsp_build_start = if timing_enabled {
+                    Some(std::time::Instant::now())
+                } else {
+                    None
+                };
                 if start_shift != 0 {
                     final_ss = final_ss.saturating_add(start_shift);
                     final_se = final_se.saturating_add(start_shift);
@@ -8250,6 +8603,12 @@ fn run_internal(args: BlastnArgs, mut in_memory: Option<BlastnInMemoryRun<'_>>) 
                     );
                 }
 
+                if timing_enabled {
+                    traceback_edit_script_lengths
+                        .push(edit_ops.len().min(u32::MAX as usize) as u32);
+                    traceback_alignment_lengths.push(aln_len.min(u32::MAX as usize) as u32);
+                }
+
                 let final_tree_hsp = TreeHsp {
                     query_offset: final_qs as i32,
                     query_end: final_qe as i32,
@@ -8268,6 +8627,18 @@ fn run_internal(args: BlastnArgs, mut in_memory: Option<BlastnInMemoryRun<'_>>) 
                 );
 
                 if use_dp && hsp_test(matches, aln_len, percent_identity, min_hit_length) {
+                    if let Some(timing) = timing_ref {
+                        BlastnTiming::record_count(
+                            &timing.traceback_deleted_identity_length_hsps,
+                            1,
+                        );
+                    }
+                    if let (Some(timing), Some(hsp_build_start)) = (timing_ref, hsp_build_start) {
+                        BlastnTiming::record_duration(
+                            &timing.traceback_hsp_build_ns,
+                            hsp_build_start,
+                        );
+                    }
                     continue;
                 }
 
@@ -8280,6 +8651,15 @@ fn run_internal(args: BlastnArgs, mut in_memory: Option<BlastnInMemoryRun<'_>>) 
                 );
 
                 if eval > evalue_threshold {
+                    if let Some(timing) = timing_ref {
+                        BlastnTiming::record_count(&timing.traceback_deleted_evalue_cutoff_hsps, 1);
+                    }
+                    if let (Some(timing), Some(hsp_build_start)) = (timing_ref, hsp_build_start) {
+                        BlastnTiming::record_duration(
+                            &timing.traceback_hsp_build_ns,
+                            hsp_build_start,
+                        );
+                    }
                     continue;
                 }
 
@@ -8342,6 +8722,9 @@ fn run_internal(args: BlastnArgs, mut in_memory: Option<BlastnInMemoryRun<'_>>) 
                     gap_info,
                     num_positives: matches,
                 });
+                if let (Some(timing), Some(hsp_build_start)) = (timing_ref, hsp_build_start) {
+                    BlastnTiming::record_duration(&timing.traceback_hsp_build_ns, hsp_build_start);
+                }
             }
 
             prelim_hits.clear();
@@ -8359,8 +8742,23 @@ fn run_internal(args: BlastnArgs, mut in_memory: Option<BlastnInMemoryRun<'_>>) 
         // NCBI reference: blast_traceback.c:637-638
         // Blast_HSPListPurgeHSPsWithCommonEndpoints(program_number, hsp_list, FALSE);
         let hits_step1 = local_hits.len();
+        let purge_pass1_start = if timing_enabled {
+            Some(std::time::Instant::now())
+        } else {
+            None
+        };
         let (mut local_hits, mut extra_start) =
             purge_hsps_with_common_endpoints_ex(local_hits, false);
+        if let (Some(timing), Some(purge_pass1_start)) = (timing_ref, purge_pass1_start) {
+            BlastnTiming::record_duration(
+                &timing.purge_common_endpoint_pass1_ns,
+                purge_pass1_start,
+            );
+            BlastnTiming::record_count(
+                &timing.traceback_removed_endpoint_pass1_hsps,
+                hits_step1.saturating_sub(local_hits.len()) as u64,
+            );
+        }
         // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_traceback.c:633-647
         // ```c
         // Int4 extra_start =
@@ -8421,6 +8819,11 @@ fn run_internal(args: BlastnArgs, mut in_memory: Option<BlastnInMemoryRun<'_>>) 
             // NCBI reference: blast_traceback.c:653-665 (reevaluate with blastna sequences)
             let q_seq_blastna = encoded_queries_blastna[context_idx].as_slice();
             let s_seq_eval = s_seq_blastna;
+            let reeval_start = if timing_enabled {
+                Some(std::time::Instant::now())
+            } else {
+                None
+            };
             let delete = reevaluate_hsp_with_ambiguities_gapped_ex(
                 hit,
                 q_seq_blastna,
@@ -8433,6 +8836,9 @@ fn run_internal(args: BlastnArgs, mut in_memory: Option<BlastnInMemoryRun<'_>>) 
                 &score_matrix,
                 Some(&reeval_params),
             );
+            if let (Some(timing), Some(reeval_start)) = (timing_ref, reeval_start) {
+                BlastnTiming::record_duration(&timing.reevaluate_ambiguities_ns, reeval_start);
+            }
             // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_traceback.c:647-665
             // ```c
             // delete_hsp = Blast_HSPReevaluateWithAmbiguitiesGapped(...);
@@ -8463,6 +8869,9 @@ fn run_internal(args: BlastnArgs, mut in_memory: Option<BlastnInMemoryRun<'_>>) 
             //                                                 score_options, hit_options);
             // ```
             if delete {
+                if let Some(timing) = timing_ref {
+                    BlastnTiming::record_count(&timing.traceback_deleted_reevaluation_hsps, 1);
+                }
                 if trace_reeval {
                     blastn_trace::log(
                         "purge",
@@ -8482,13 +8891,29 @@ fn run_internal(args: BlastnArgs, mut in_memory: Option<BlastnInMemoryRun<'_>>) 
                 hit.raw_score = i32::MIN; // Mark for removal
                 continue;
             }
-            if blast_hsp_test_identity_and_length(
+            let identity_length_start = if timing_enabled {
+                Some(std::time::Instant::now())
+            } else {
+                None
+            };
+            let delete_identity_length = blast_hsp_test_identity_and_length(
                 hit,
                 q_seq_blastna,
                 s_seq_eval,
                 percent_identity,
                 min_hit_length,
-            ) {
+            );
+            if let (Some(timing), Some(identity_length_start)) = (timing_ref, identity_length_start)
+            {
+                BlastnTiming::record_duration(
+                    &timing.identity_length_test_ns,
+                    identity_length_start,
+                );
+            }
+            if delete_identity_length {
+                if let Some(timing) = timing_ref {
+                    BlastnTiming::record_count(&timing.traceback_deleted_identity_length_hsps, 1);
+                }
                 if trace_reeval {
                     blastn_trace::log(
                         "purge",
@@ -8539,8 +8964,23 @@ fn run_internal(args: BlastnArgs, mut in_memory: Option<BlastnInMemoryRun<'_>>) 
         // if(program_number == eBlastTypeBlastn) {
         //     Blast_HSPListPurgeHSPsWithCommonEndpoints(program_number, hsp_list, TRUE);
         // }
+        let purge_pass2_start = if timing_enabled {
+            Some(std::time::Instant::now())
+        } else {
+            None
+        };
         let mut local_hits = purge_hsps_with_common_endpoints(local_hits);
         let hits_step4 = local_hits.len();
+        if let (Some(timing), Some(purge_pass2_start)) = (timing_ref, purge_pass2_start) {
+            BlastnTiming::record_duration(
+                &timing.purge_common_endpoint_pass2_ns,
+                purge_pass2_start,
+            );
+            BlastnTiming::record_count(
+                &timing.traceback_removed_endpoint_pass2_hsps,
+                hits_step3.saturating_sub(hits_step4) as u64,
+            );
+        }
         // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_traceback.c:666-668
         // ```c
         // Blast_HSPListPurgeNullHSPs(hsp_list);
@@ -8573,12 +9013,32 @@ fn run_internal(args: BlastnArgs, mut in_memory: Option<BlastnInMemoryRun<'_>>) 
         //     result = BLAST_CMP(hsp2->query.end, hsp1->query.end);
         // }
         // ```
+        let score_resort_start = if timing_enabled {
+            Some(std::time::Instant::now())
+        } else {
+            None
+        };
         local_hits.sort_unstable_by(score_compare_blastn_hsps);
+        if let (Some(timing), Some(score_resort_start)) = (timing_ref, score_resort_start) {
+            BlastnTiming::record_duration(&timing.traceback_score_resort_ns, score_resort_start);
+        }
 
         // Step 6: Phase 2 - Tree reset and second containment pass
         // NCBI reference: blast_traceback.c:678
         // Blast_IntervalTreeReset(tree);
         interval_tree.reset();
+        // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_itree.c:66-70
+        // ```c
+        // if (tree->num_used == tree->num_alloc) {
+        //     tree->num_alloc = 2 * tree->num_alloc;
+        //     tree->nodes = (SIntervalNode *)realloc(tree->nodes, tree->num_alloc *
+        //                                                  sizeof(SIntervalNode));
+        // }
+        // ```
+        // The final containment pass adds at most one tree HSP for each surviving
+        // HSP. Reserving here only removes allocator churn; containment and order
+        // are still controlled by BlastIntervalTreeContainsHSP/AddHSP.
+        interval_tree.reserve_nodes_for_hsps(local_hits.len());
 
         // NCBI reference: blast_traceback.c:679-692
         // Remove any HSPs that are contained within other HSPs.
@@ -8627,8 +9087,21 @@ fn run_internal(args: BlastnArgs, mut in_memory: Option<BlastnInMemoryRun<'_>>) 
             //     }
             // }
             // ```
+            let final_tree_contains_start = if timing_enabled {
+                Some(std::time::Instant::now())
+            } else {
+                None
+            };
             let final_tree_contains =
                 interval_tree.contains_hsp(&tree_hsp, query_context_offset, min_diag_separation);
+            if let (Some(timing), Some(final_tree_contains_start)) =
+                (timing_ref, final_tree_contains_start)
+            {
+                BlastnTiming::record_duration(
+                    &timing.traceback_final_tree_contains_ns,
+                    final_tree_contains_start,
+                );
+            }
             if blastn_trace_enabled
                 && blastn_trace::should_trace_range(
                     "purge",
@@ -8661,8 +9134,23 @@ fn run_internal(args: BlastnArgs, mut in_memory: Option<BlastnInMemoryRun<'_>>) 
                 );
             }
             if !final_tree_contains {
+                let final_tree_add_start = if timing_enabled {
+                    Some(std::time::Instant::now())
+                } else {
+                    None
+                };
                 interval_tree.add_hsp(tree_hsp, query_context_offset, IndexMethod::QueryAndSubject);
+                if let (Some(timing), Some(final_tree_add_start)) =
+                    (timing_ref, final_tree_add_start)
+                {
+                    BlastnTiming::record_duration(
+                        &timing.traceback_final_tree_add_ns,
+                        final_tree_add_start,
+                    );
+                }
                 final_hits.push(hit);
+            } else if let Some(timing) = timing_ref {
+                BlastnTiming::record_count(&timing.traceback_removed_final_tree_hsps, 1);
             }
             // else: HSP is contained within another, skip (implicit delete)
         }
@@ -8683,6 +9171,12 @@ fn run_internal(args: BlastnArgs, mut in_memory: Option<BlastnInMemoryRun<'_>>) 
         if !final_hits.is_empty() {
             // NCBI reference: blast_traceback.c:633-692 (post-gapped processing is per-subject)
             *subject_hits = Some(final_hits);
+        }
+        if let Some(timing) = timing_ref {
+            timing.record_traceback_lengths(
+                std::mem::take(&mut traceback_edit_script_lengths),
+                std::mem::take(&mut traceback_alignment_lengths),
+            );
         }
         // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_traceback.c:358-373
         // ```c
@@ -8911,61 +9405,7 @@ fn run_internal(args: BlastnArgs, mut in_memory: Option<BlastnInMemoryRun<'_>>) 
             //    results, interrupt_search, progress_info);
             // ```
             if let Some(timing) = timing.as_ref() {
-                let scan_s = timing.scan_ns.load(std::sync::atomic::Ordering::Relaxed) as f64 / 1e9;
-                let scan_n = timing.scan_calls.load(std::sync::atomic::Ordering::Relaxed);
-                let ungapped_s = timing
-                    .ungapped_ns
-                    .load(std::sync::atomic::Ordering::Relaxed)
-                    as f64
-                    / 1e9;
-                let ungapped_n = timing
-                    .ungapped_calls
-                    .load(std::sync::atomic::Ordering::Relaxed);
-                let gapped_s =
-                    timing.gapped_ns.load(std::sync::atomic::Ordering::Relaxed) as f64 / 1e9;
-                let gapped_n = timing
-                    .gapped_calls
-                    .load(std::sync::atomic::Ordering::Relaxed);
-                let traceback_s = timing
-                    .traceback_ns
-                    .load(std::sync::atomic::Ordering::Relaxed)
-                    as f64
-                    / 1e9;
-                let traceback_n = timing
-                    .traceback_calls
-                    .load(std::sync::atomic::Ordering::Relaxed);
-                let format_s =
-                    timing.format_ns.load(std::sync::atomic::Ordering::Relaxed) as f64 / 1e9;
-                let format_n = timing
-                    .format_calls
-                    .load(std::sync::atomic::Ordering::Relaxed);
-
-                eprintln!("[TIMING] scan_lookup: {:.3}s (calls={})", scan_s, scan_n);
-                eprintln!(
-                    "[TIMING] ungapped_extend: {:.3}s (calls={})",
-                    ungapped_s, ungapped_n
-                );
-                eprintln!(
-                    "[TIMING] gapped_extend: {:.3}s (calls={})",
-                    gapped_s, gapped_n
-                );
-                eprintln!(
-                    "[TIMING] traceback_prune: {:.3}s (calls={})",
-                    traceback_s, traceback_n
-                );
-                eprintln!(
-                    "[TIMING] format_output: {:.3}s (calls={})",
-                    format_s, format_n
-                );
-                if let Some(t_search_start) = t_search_start {
-                    eprintln!(
-                        "[TIMING] search_total: {:.3}s",
-                        t_search_start.elapsed().as_secs_f64()
-                    );
-                }
-                if let Some(t_total) = t_total {
-                    eprintln!("[TIMING] total: {:.3}s", t_total.elapsed().as_secs_f64());
-                }
+                print_blastn_timing(timing.as_ref(), t_search_start, t_total);
             }
             return Ok(());
         }
@@ -9091,57 +9531,7 @@ fn run_internal(args: BlastnArgs, mut in_memory: Option<BlastnInMemoryRun<'_>>) 
     //    results, interrupt_search, progress_info);
     // ```
     if let Some(timing) = timing.as_ref() {
-        let scan_s = timing.scan_ns.load(std::sync::atomic::Ordering::Relaxed) as f64 / 1e9;
-        let scan_n = timing.scan_calls.load(std::sync::atomic::Ordering::Relaxed);
-        let ungapped_s = timing
-            .ungapped_ns
-            .load(std::sync::atomic::Ordering::Relaxed) as f64
-            / 1e9;
-        let ungapped_n = timing
-            .ungapped_calls
-            .load(std::sync::atomic::Ordering::Relaxed);
-        let gapped_s = timing.gapped_ns.load(std::sync::atomic::Ordering::Relaxed) as f64 / 1e9;
-        let gapped_n = timing
-            .gapped_calls
-            .load(std::sync::atomic::Ordering::Relaxed);
-        let traceback_s = timing
-            .traceback_ns
-            .load(std::sync::atomic::Ordering::Relaxed) as f64
-            / 1e9;
-        let traceback_n = timing
-            .traceback_calls
-            .load(std::sync::atomic::Ordering::Relaxed);
-        let format_s = timing.format_ns.load(std::sync::atomic::Ordering::Relaxed) as f64 / 1e9;
-        let format_n = timing
-            .format_calls
-            .load(std::sync::atomic::Ordering::Relaxed);
-
-        eprintln!("[TIMING] scan_lookup: {:.3}s (calls={})", scan_s, scan_n);
-        eprintln!(
-            "[TIMING] ungapped_extend: {:.3}s (calls={})",
-            ungapped_s, ungapped_n
-        );
-        eprintln!(
-            "[TIMING] gapped_extend: {:.3}s (calls={})",
-            gapped_s, gapped_n
-        );
-        eprintln!(
-            "[TIMING] traceback_prune: {:.3}s (calls={})",
-            traceback_s, traceback_n
-        );
-        eprintln!(
-            "[TIMING] format_output: {:.3}s (calls={})",
-            format_s, format_n
-        );
-        if let Some(t_search_start) = t_search_start {
-            eprintln!(
-                "[TIMING] search_total: {:.3}s",
-                t_search_start.elapsed().as_secs_f64()
-            );
-        }
-        if let Some(t_total) = t_total {
-            eprintln!("[TIMING] total: {:.3}s", t_total.elapsed().as_secs_f64());
-        }
+        print_blastn_timing(timing.as_ref(), t_search_start, t_total);
     }
     Ok(())
 }

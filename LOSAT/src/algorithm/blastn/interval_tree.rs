@@ -58,7 +58,7 @@ enum EndpointResult {
 
 /// HSP data stored in interval tree nodes
 /// NCBI reference: blast_itree.c - tree stores pointers to BlastHSP
-#[derive(Clone, Debug)]
+#[derive(Clone, Copy, Debug)]
 pub struct TreeHsp {
     pub query_offset: i32,
     pub query_end: i32,
@@ -156,7 +156,14 @@ impl BlastIntervalTree {
     /// * `s_max` - Maximum subject offset (subject_length + 1)
     pub fn new(q_min: i32, q_max: i32, s_min: i32, s_max: i32) -> Self {
         let mut tree = Self {
-            nodes: Vec::with_capacity(64),
+            // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_itree.c:135-153
+            // ```c
+            // Int4 size = 100;
+            // tree->nodes = (SIntervalNode *)malloc(size * sizeof(SIntervalNode));
+            // tree->num_alloc = size;
+            // tree->num_used = 0;
+            // ```
+            nodes: Vec::with_capacity(100),
             s_min,
             s_max,
         };
@@ -166,6 +173,25 @@ impl BlastIntervalTree {
         tree.nodes.push(root);
 
         tree
+    }
+
+    /// Reserve interval-tree node storage before a dense traceback/prune pass.
+    ///
+    /// NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_itree.c:66-70
+    /// ```c
+    /// if (tree->num_used == tree->num_alloc) {
+    ///     tree->num_alloc = 2 * tree->num_alloc;
+    ///     tree->nodes = (SIntervalNode *)realloc(tree->nodes, tree->num_alloc *
+    ///                                                  sizeof(SIntervalNode));
+    /// }
+    /// ```
+    /// Rust keeps the same node indices and insertion order, but can reserve
+    /// enough Vec storage from the observed HSP count to avoid repeated reallocs.
+    pub fn reserve_nodes_for_hsps(&mut self, hsp_count: usize) {
+        let target = hsp_count.saturating_mul(3).saturating_add(1).max(100);
+        if target > self.nodes.capacity() {
+            self.nodes.reserve(target - self.nodes.capacity());
+        }
     }
 
     /// Reset the tree for reuse
@@ -609,7 +635,7 @@ impl BlastIntervalTree {
 
         // NCBI reference: blast_itree.c:591-599
         // Encapsulate the input HSP in an SIntervalNode (leaf node)
-        let new_index = self.alloc_leaf_node(hsp.clone(), query_start);
+        let new_index = self.alloc_leaf_node(hsp, query_start);
 
         // Start the insertion loop
         self.add_hsp_internal(
@@ -769,7 +795,7 @@ impl BlastIntervalTree {
         let mid_index = self.alloc_internal_node(parent_root_index, which_half);
 
         // Get the old HSP data before we modify anything
-        let old_hsp = self.nodes[old_leaf_index].hsp.clone().unwrap();
+        let old_hsp = self.nodes[old_leaf_index].hsp.unwrap();
         let old_q_start = self.nodes[old_leaf_index].leftptr; // leftptr stores query_start for leaves
 
         // NCBI reference: blast_itree.c:717-720

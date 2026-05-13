@@ -10,6 +10,14 @@ pub mod interval_tree;
 pub mod lookup;
 pub mod ncbi_cutoffs;
 pub mod sequence_compare;
+// NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_traceback.c:633-692
+// ```c
+// Blast_HSPListPurgeHSPsWithCommonEndpoints(..., FALSE);
+// Blast_HSPReevaluateWithAmbiguitiesGapped(...);
+// Blast_HSPListPurgeHSPsWithCommonEndpoints(..., TRUE);
+// Blast_IntervalTreeReset(tree);
+// ```
+pub mod tracing;
 // NCBI reference: ncbi-blast/c++/include/algo/blast/core/blast_hits.h:125-166
 // ```c
 // typedef struct BlastHSP {

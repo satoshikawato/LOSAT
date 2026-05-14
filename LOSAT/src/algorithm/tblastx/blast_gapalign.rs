@@ -5,7 +5,7 @@
 //! This module contains InitHSP (initial HSP with absolute coordinates) and
 //! functions for converting to UngappedHit (context-relative coordinates).
 
-use super::chaining::{hsp_list_order_tie_break, UngappedHit};
+use super::chaining::UngappedHit;
 use super::extension::convert_coords;
 use super::lookup::QueryContext;
 use super::tracing::{trace_hsp_target, trace_match_target, trace_ungapped_hit_if_match};
@@ -353,14 +353,6 @@ pub(crate) fn score_compare_ungapped_hits_ncbi(a: &UngappedHit, b: &UngappedHit)
 // }
 // return result;
 // ```
-#[inline]
-pub(crate) fn score_compare_ungapped_hits_ncbi_then_list_order(
-    a: &UngappedHit,
-    b: &UngappedHit,
-) -> Ordering {
-    score_compare_ungapped_hits_ncbi(a, b).then_with(|| hsp_list_order_tie_break(a, b))
-}
-
 // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_hits.c:1366-1377
 // ```c
 // qsort(hsp_list->hsp_array, hsp_list->hspcnt, sizeof(BlastHSP*),
@@ -381,7 +373,15 @@ pub(crate) fn ncbi_qsort_ungapped_hits_by_score(hits: &mut [UngappedHit]) {
     if ungapped_hits_is_sorted_by_score_ncbi(hits) {
         return;
     }
-    hits.sort_by(score_compare_ungapped_hits_ncbi_then_list_order);
+    // NCBI reference: /mnt/c/Users/genom/GitHub/ncbi-blast/c++/src/algo/blast/core/blast_hits.c:1379-1381
+    // ```c
+    // qsort(hsp_list->hsp_array, hsp_list->hspcnt, sizeof(BlastHSP*),
+    //       ScoreCompareHSPs);
+    // ```
+    // `ScoreCompareHSPs` is a partial comparator for TBLASTX HSPs. Do not add
+    // frame or per-frame insertion-order keys when it returns equality; preserve
+    // the current BlastHSPList order for comparator-equal rows.
+    hits.sort_by(score_compare_ungapped_hits_ncbi);
 }
 
 // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_hits.c:1355-1369
@@ -611,7 +611,7 @@ mod tests {
     }
 
     #[test]
-    fn test_ncbi_score_sort_uses_hsp_list_order_only_for_comparator_equal_hits() {
+    fn test_ncbi_score_sort_preserves_current_hsp_list_order_for_equal_hits() {
         // NCBI reference: /mnt/c/Users/genom/GitHub/ncbi-blast/c++/src/algo/blast/core/blast_hits.c:1347-1355
         // ```c
         // if (0 == (result = BLAST_CMP(hsp2->score,          hsp1->score)) &&
@@ -633,7 +633,7 @@ mod tests {
             .iter()
             .map(|hit| (hit.raw_score, hit.hsp_list_order))
             .collect();
-        assert_eq!(ordered, vec![(100, 1), (100, 2), (90, 0)]);
+        assert_eq!(ordered, vec![(100, 2), (100, 1), (90, 0)]);
     }
 
     // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_gapalign.c:2384-2392

@@ -107,21 +107,6 @@ pub struct UngappedHit {
     pub chain_next_link_id: Option<usize>,
 }
 
-// NCBI reference: /mnt/c/Users/genom/GitHub/ncbi-blast/c++/src/algo/blast/core/blast_hits.c:1347-1355
-// ```c
-// if (0 == (result = BLAST_CMP(hsp2->score,          hsp1->score)) &&
-//     0 == (result = BLAST_CMP(hsp1->subject.offset, hsp2->subject.offset)) &&
-//     0 == (result = BLAST_CMP(hsp2->subject.end,    hsp1->subject.end)) &&
-//     0 == (result = BLAST_CMP(hsp1->query  .offset, hsp2->query  .offset))) {
-//     result = BLAST_CMP(hsp2->query.end, hsp1->query.end);
-// }
-// return result;
-// ```
-#[inline]
-pub(crate) fn hsp_list_order_tie_break(a: &UngappedHit, b: &UngappedHit) -> Ordering {
-    a.hsp_list_order.cmp(&b.hsp_list_order)
-}
-
 /// Sequence data for re-alignment during HSP chaining
 // NCBI reference: ncbi-blast/c++/include/algo/blast/core/blast_hits.h:153-166
 // ```c

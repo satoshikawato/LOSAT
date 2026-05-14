@@ -1520,7 +1520,15 @@ fn run_internal(args: TblastxArgs, mut in_memory: Option<TblastxInMemoryRun<'_>>
                     0.0
                 };
 
-                let bit = calc_bit_score(h.raw_score, &params);
+                // NCBI reference: /mnt/c/Users/genom/GitHub/ncbi-blast/c++/src/algo/blast/core/blast_hits.c:1918-1928
+                // ```c
+                // kbp = (gapped_calculation ? sbp->kbp_gap : sbp->kbp);
+                // hsp->bit_score =
+                //    (hsp->score*kbp[hsp->context]->Lambda - kbp[hsp->context]->logK) /
+                //    NCBIMATH_LN2;
+                // ```
+                let bit_params = &contexts_ref[h.ctx_idx].karlin_params;
+                let bit = calc_bit_score(h.raw_score, bit_params);
                 let (q_start, q_end) =
                     convert_coords(h.q_aa_start, h.q_aa_end, ctx.frame, ctx.orig_len);
                 let (s_start, s_end) =

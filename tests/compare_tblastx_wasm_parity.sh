@@ -9,6 +9,10 @@ set -euo pipefail
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 CRATE_DIR="$ROOT_DIR/LOSAT"
 SCRATCH_DIR="${1:-"$ROOT_DIR/.tmp/tblastx_wasm_parity_$(date +%Y%m%d_%H%M%S)"}"
+case "$SCRATCH_DIR" in
+  /*) ;;
+  *) SCRATCH_DIR="$ROOT_DIR/$SCRATCH_DIR" ;;
+esac
 
 QUERY="$CRATE_DIR/tests/fasta/LC738874.fasta"
 SUBJECT="$CRATE_DIR/tests/fasta/LC738875.fasta"

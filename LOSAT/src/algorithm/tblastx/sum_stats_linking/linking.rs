@@ -23,7 +23,7 @@ use std::sync::OnceLock;
 #[cfg(all(feature = "parallel", not(target_arch = "wasm32")))]
 use rayon::prelude::*;
 
-use crate::algorithm::tblastx::chaining::{hsp_list_order_tie_break, UngappedHit};
+use crate::algorithm::tblastx::chaining::UngappedHit;
 use crate::algorithm::tblastx::diagnostics::diagnostics_enabled;
 use crate::algorithm::tblastx::extension::convert_coords;
 use crate::algorithm::tblastx::lookup::QueryContext;
@@ -212,15 +212,6 @@ fn fwd_compare_hsps_transl(a: &UngappedHit, b: &UngappedHit) -> Ordering {
 // qsort(link_hsp_array,total_number_of_hsps,sizeof(LinkHSPStruct*),
 //       s_RevCompareHSPsTbx);
 // ```
-#[inline]
-fn compare_hsps_with_list_order(
-    a: &UngappedHit,
-    b: &UngappedHit,
-    compare: fn(&UngappedHit, &UngappedHit) -> Ordering,
-) -> Ordering {
-    compare(a, b).then_with(|| hsp_list_order_tie_break(a, b))
-}
-
 // NCBI reference: /mnt/c/Users/genom/GitHub/ncbi-blast/c++/src/algo/blast/core/link_hsps.c:990-994
 // ```c
 // qsort(link_hsp_array,total_number_of_hsps,sizeof(LinkHSPStruct*),
@@ -233,7 +224,16 @@ fn sort_hsps_by_ncbi_link_order(
     hits: &mut [UngappedHit],
     compare: fn(&UngappedHit, &UngappedHit) -> Ordering,
 ) {
-    hits.sort_by(|a, b| compare_hsps_with_list_order(a, b, compare));
+    // NCBI reference: /mnt/c/Users/genom/GitHub/ncbi-blast/c++/src/algo/blast/core/link_hsps.c:483-486
+    // ```c
+    // qsort(link_hsp_array,total_number_of_hsps,sizeof(LinkHSPStruct*),
+    //       s_RevCompareHSPsTbx);
+    // ```
+    // NCBI's translated-query comparators are partial: equal rows keep whatever
+    // order is present in the current LinkHSPStruct pointer array. Preserve that
+    // current order instead of using LOSAT's per-frame `hsp_list_order`, which
+    // is not unique after `Blast_HSPListsMerge`.
+    hits.sort_by(compare);
 }
 
 // ---------------------------------------------------------------------------
@@ -1930,7 +1930,7 @@ mod tests {
     }
 
     #[test]
-    fn test_link_qsort_tie_uses_hsp_list_order_for_comparator_equal_hits() {
+    fn test_link_qsort_tie_preserves_current_hsp_list_order_for_equal_hits() {
         // NCBI reference: /mnt/c/Users/genom/GitHub/ncbi-blast/c++/src/algo/blast/core/link_hsps.c:483-486
         // ```c
         // /* Sort by (reverse) position. */
@@ -1947,7 +1947,7 @@ mod tests {
         sort_hsps_by_ncbi_link_order(&mut hits, rev_compare_hsps_tbx);
 
         let ordered: Vec<usize> = hits.iter().map(|hit| hit.hsp_list_order).collect();
-        assert_eq!(ordered, vec![1, 2]);
+        assert_eq!(ordered, vec![2, 1]);
     }
 
     /// Verify LOSAT's HSP sort order matches NCBI's s_RevCompareHSPsTbx

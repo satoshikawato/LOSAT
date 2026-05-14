@@ -1,11 +1,11 @@
-[DEBUG OUTPUT_FILTER] Total linked HSPs: 92442
-[DEBUG OUTPUT_FILTER] Single HSPs (linked_set=false): 49006
-[DEBUG OUTPUT_FILTER] Chain heads (linked_set=true, start_of_chain=true): 3817
-[DEBUG OUTPUT_FILTER] Chain members (linked_set=true, start_of_chain=false): 39619 (included in output)
-[DEBUG OUTPUT_FILTER] Filtered by E-value (threshold=10): 47543
-[DEBUG OUTPUT_FILTER] Expected after E-value filter: 44899 (all HSPs - E-value filtered)
-[DEBUG OUTPUT_FILTER] Final hits after filtering: 44899
+[DEBUG OUTPUT_FILTER] Total linked HSPs: 44928
+[DEBUG OUTPUT_FILTER] Single HSPs (linked_set=false): 1397
+[DEBUG OUTPUT_FILTER] Chain heads (linked_set=true, start_of_chain=true): 3752
+[DEBUG OUTPUT_FILTER] Chain members (linked_set=true, start_of_chain=false): 39779 (included in output)
+[DEBUG OUTPUT_FILTER] Filtered by E-value (threshold=10): 90
+[DEBUG OUTPUT_FILTER] Expected after E-value filter: 44838 (all HSPs - E-value filtered)
+[DEBUG OUTPUT_FILTER] Final hits after filtering: 44838
 
-real	0m16.425s
-user	0m29.793s
-sys	0m0.022s
+real	0m21.142s
+user	0m42.569s
+sys	0m0.030s

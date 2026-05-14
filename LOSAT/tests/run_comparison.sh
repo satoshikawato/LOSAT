@@ -55,7 +55,7 @@ echo "Starting LOSAT commands..."
 # MjPMNV vs MlPMNV
 (time $LOSAT_BIN blastn -q ./fasta/AP027202.fasta -s ./fasta/LC738875.fasta -o ./losat_out/MjPMNV.MlPMNV.losatn.blastn.out --task blastn -n 1 )&>./losat_out/MjPMNV.MlPMNV.losatn.blastn.log
 
-<<COMMENTOUT
+
 # --- LOSATP Commands ---
 echo "Starting LOSATP commands..."
 run_losatp_case() {
@@ -91,8 +91,8 @@ for losatp_case in "${LOSATP_CASES[@]}"; do
     IFS=":" read -r query subject stem <<<"$losatp_case"
     run_losatp_case "$query" "$subject" "$stem"
 done
-COMMENTOUT
-<<COMMENTOUT
+
+
 echo "Finished LOSATP commands!"
 # --- TLOSATX Commands (Genetic Code: 4) ---
 echo "Starting TLOSATX commands..."
@@ -141,7 +141,7 @@ echo "Starting MeenMJNV vs MejoMJNV (TLOSATX)..."
 # AvCLPV vs PsCLPV
 echo "Starting AvCLPV vs PsCLPV (TLOSATX)..."
 (time $LOSAT_BIN tblastx -q ./fasta/AvCLPV.fasta -s ./fasta/PsCLPV.fasta -o ./losat_out/AvCLPV.PsCLPV.tlosatx.n8.out --query-gencode 1 --db-gencode 1 -n 8 )&>./losat_out/AvCLPV.PsCLPV.tlosatx.n8.log 
-
+<<COMMENTOUT
 echo "Starting NZ_CP006932 self (TLOSATX)..."
 # NZ_CP006932 self
 (time $LOSAT_BIN tblastx -q ./fasta/NZ_CP006932.fasta -s ./fasta/NZ_CP006932.fasta -o ./losat_out/NZ_CP006932.NZ_CP006932.tlosatx.n8.out --query-gencode 4 --db-gencode 4 -n 8 )&>./losat_out/NZ_CP006932.NZ_CP006932.tlosatx.n8.log 
@@ -157,7 +157,7 @@ echo "Starting AP027131 vs AP027133 (TLOSATX)..."
 echo "Starting AP027133 vs AP027132 (TLOSATX)..."
 # AP027133 vs AP027132
 (time $LOSAT_BIN tblastx -q ./fasta/AP027133.fasta -s ./fasta/AP027132.fasta -o ./losat_out/AP027133.AP027132.tlosatx.n8.out --query-gencode 4 --db-gencode 4 -n 8 )&>./losat_out/AP027133.AP027132.tlosatx.n8.log 
-
+COMMENTOUT
 echo "Finished TLOSATX commands!"
 
 COMMENTOUT

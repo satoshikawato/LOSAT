@@ -414,3 +414,41 @@ semantics and the existing NCBI comparator keys.
    preservation, model that exact NCBI-observed order with source-backed
    evidence. Until then, preserving list order for comparator-equal HSPs is the
    least invasive deterministic emulation of the NCBI comparator contract.
+
+## 2026-05-13 Validation Update: Native/Wasm Determinism Restored
+
+Diagnostic run:
+
+- Comparison artifacts:
+  `.tmp/tblastx_wasm_parity_codex_run_abs`
+- Case:
+  `tblastx -q LOSAT/tests/fasta/LC738874.fasta -s LOSAT/tests/fasta/LC738875.fasta --outfmt 6 -n 1`
+- Output line counts:
+  - native LOSAT: 4350
+  - Wasm SIMD LOSAT: 4350
+  - Wasm scalar LOSAT: 4350
+  - NCBI BLAST+ oracle: 4319
+- Raw SHA-256:
+  - native LOSAT:
+    `99bcf2883de7d83be21d2fe99aa8a4a46d91f8b3eff19817f5bffa0f4b48838c`
+  - Wasm SIMD LOSAT:
+    `99bcf2883de7d83be21d2fe99aa8a4a46d91f8b3eff19817f5bffa0f4b48838c`
+  - Wasm scalar LOSAT:
+    `99bcf2883de7d83be21d2fe99aa8a4a46d91f8b3eff19817f5bffa0f4b48838c`
+- Sorted diff line counts:
+  - native vs Wasm SIMD: 0
+  - native vs Wasm scalar: 0
+  - Wasm scalar vs Wasm SIMD: 0
+  - NCBI vs native: 3801
+  - NCBI vs Wasm SIMD: 3801
+  - NCBI vs Wasm scalar: 3801
+
+Result:
+
+- The comparator-equal HSP ordering repair satisfies the native/Wasm
+  determinism acceptance target for this fixture.
+- This does not close full TBLASTX NCBI parity for the fixture; the existing
+  native LOSAT vs NCBI hit-count gap remains 4350 vs 4319.
+- `tests/compare_tblastx_wasm_parity.sh` now normalizes a relative scratch
+  directory to an absolute path before passing `-o` to WASI, so both default
+  and explicit relative scratch invocations produce usable artifacts.

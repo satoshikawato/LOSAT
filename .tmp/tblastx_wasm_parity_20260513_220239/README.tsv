@@ -1,8 +1,0 @@
-scratch_dir	/mnt/c/Users/genom/GitHub/LOSAT/.tmp/tblastx_wasm_parity_20260513_220239
-query	/mnt/c/Users/genom/GitHub/LOSAT/LOSAT/tests/fasta/LC738874.fasta
-subject	/mnt/c/Users/genom/GitHub/LOSAT/LOSAT/tests/fasta/LC738875.fasta
-outfmt	6
-threads	1
-native_vs_wasm_simd_diff_lines	0
-native_vs_wasm_scalar_diff_lines	0
-wasm_scalar_vs_wasm_simd_diff_lines	0

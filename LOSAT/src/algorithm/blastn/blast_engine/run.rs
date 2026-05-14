@@ -68,14 +68,47 @@ use super::super::ncbi_cutoffs::{compute_blastn_cutoff_score, GAP_TRIGGER_BIT_SC
 use super::super::tracing as blastn_trace;
 use crate::utils::dust::MaskedInterval;
 
-// Import from this module (blast_engine)
-use super::calculate_evalue;
-
 // NCBI reference: ncbi-blast/c++/include/algo/blast/core/ncbi_math.h:160-161
 // ```c
 // #define NCBIMATH_LN2 0.69314718055994530941723212145818
 // ```
 const NCBIMATH_LN2: f64 = 0.69314718055994530941723212145818;
+
+// NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_hits.c:1887-1890
+// ```c
+// /* Get effective search space from the query information block */
+// hsp->evalue =
+//     BLAST_KarlinStoE_simple(score, kbp[kbp_context],
+//                      query_info->contexts[hsp->context].eff_searchsp);
+// ```
+// NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_hits.c:1923-1926
+// ```c
+// hsp->bit_score =
+//    (hsp->score*kbp[hsp->context]->Lambda - kbp[hsp->context]->logK) /
+//    NCBIMATH_LN2;
+// ```
+// NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_stat.c:4157-4171
+// ```c
+// BLAST_KarlinStoE_simple(Int4 S, Blast_KarlinBlk* kbp, Int8 searchsp)
+// {
+//    ...
+//    return (double) searchsp * exp((double)(-Lambda * S) + kbp->logK);
+// }
+// ```
+fn calculate_blastn_context_statistics(
+    raw_score: i32,
+    params: &crate::stats::KarlinParams,
+    eff_searchsp: i64,
+) -> (f64, f64) {
+    let log_k = params.k.ln();
+    let bit_score = (params.lambda * (raw_score as f64) - log_k) / NCBIMATH_LN2;
+    let e_value = if params.lambda < 0.0 || params.k < 0.0 || params.h < 0.0 {
+        -1.0
+    } else {
+        (eff_searchsp as f64) * (-(params.lambda) * (raw_score as f64) + log_k).exp()
+    };
+    (bit_score, e_value)
+}
 
 // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_gapalign.c:4155-4160
 // ```c
@@ -8642,13 +8675,23 @@ fn run_internal(args: BlastnArgs, mut in_memory: Option<BlastnInMemoryRun<'_>>) 
                     continue;
                 }
 
-                let (bit_score, eval) = calculate_evalue(
-                    score,
-                    ctx.seq.len(),
-                    db_len_total,
-                    db_num_seqs,
-                    &params_for_closure,
-                );
+                // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_traceback.c:234-250
+                // ```c
+                // Blast_HSPListGetEvalues(program_number, query_info, subject_length,
+                //                         hsp_list, kGapped, FALSE, sbp, 0,
+                //                         scale_factor);
+                // ...
+                // Blast_HSPListGetBitScores(hsp_list, kGapped, sbp);
+                // ```
+                // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_hits.c:1887-1890
+                // ```c
+                // hsp->evalue =
+                //     BLAST_KarlinStoE_simple(score, kbp[kbp_context],
+                //                      query_info->contexts[hsp->context].eff_searchsp);
+                // ```
+                let eff_searchsp = query_eff_searchsp[prelim.context_idx as usize];
+                let (bit_score, eval) =
+                    calculate_blastn_context_statistics(score, &params_for_closure, eff_searchsp);
 
                 if eval > evalue_threshold {
                     if let Some(timing) = timing_ref {
@@ -9553,5 +9596,40 @@ mod tests {
         let masks = vec![MaskedInterval::new(2, 5), MaskedInterval::new(8, 12)];
         let ranges = build_subject_seq_ranges_from_masks(&masks, 10);
         assert_eq!(ranges, vec![(2, 4), (8, 9)]);
+    }
+
+    // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_hits.c:1887-1890
+    // ```c
+    // hsp->evalue =
+    //     BLAST_KarlinStoE_simple(score, kbp[kbp_context],
+    //                      query_info->contexts[hsp->context].eff_searchsp);
+    // ```
+    // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_hits.c:1923-1926
+    // ```c
+    // hsp->bit_score =
+    //    (hsp->score*kbp[hsp->context]->Lambda - kbp[hsp->context]->logK) /
+    //    NCBIMATH_LN2;
+    // ```
+    #[test]
+    fn test_blastn_context_statistics_uses_supplied_eff_searchsp() {
+        let params = crate::stats::KarlinParams {
+            lambda: 0.625,
+            k: 0.41,
+            h: 0.78,
+            alpha: 1.0,
+            beta: -1.0,
+        };
+        let eff_searchsp = 44_573_947_800_i64;
+        let raw_score = 46;
+
+        let (bit_score, evalue) =
+            calculate_blastn_context_statistics(raw_score, &params, eff_searchsp);
+
+        let expected_bit_score = (params.lambda * raw_score as f64 - params.k.ln()) / NCBIMATH_LN2;
+        let expected_evalue =
+            (eff_searchsp as f64) * (-(params.lambda) * raw_score as f64 + params.k.ln()).exp();
+
+        assert_eq!(bit_score, expected_bit_score);
+        assert_eq!(evalue, expected_evalue);
     }
 }

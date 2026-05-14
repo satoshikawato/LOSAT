@@ -8,6 +8,7 @@
 use super::chaining::UngappedHit;
 use super::extension::convert_coords;
 use super::lookup::QueryContext;
+use super::ncbi_qsort::qsort_ungapped_hits_by;
 use super::tracing::{trace_hsp_target, trace_match_target, trace_ungapped_hit_if_match};
 use super::translation::QueryFrame;
 use std::cmp::Ordering;
@@ -379,9 +380,9 @@ pub(crate) fn ncbi_qsort_ungapped_hits_by_score(hits: &mut [UngappedHit]) {
     //       ScoreCompareHSPs);
     // ```
     // `ScoreCompareHSPs` is a partial comparator for TBLASTX HSPs. Do not add
-    // frame or per-frame insertion-order keys when it returns equality; preserve
-    // the current BlastHSPList order for comparator-equal rows.
-    hits.sort_by(score_compare_ungapped_hits_ncbi);
+    // frame or per-frame insertion-order keys when it returns equality; NCBI
+    // delegates comparator-equal rows to the platform qsort implementation.
+    qsort_ungapped_hits_by(hits, score_compare_ungapped_hits_ncbi);
 }
 
 // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_hits.c:1355-1369

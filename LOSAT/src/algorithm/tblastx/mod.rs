@@ -17,6 +17,7 @@ pub mod filtering;
 pub mod hsp_culling;
 pub mod lookup;
 pub mod ncbi_cutoffs;
+mod ncbi_qsort;
 pub mod reevaluate;
 mod scan;
 pub mod stage_dump;

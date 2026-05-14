@@ -243,6 +243,91 @@ fn gap_alloc_trace_row<'a>(
     }
 }
 
+// NCBI reference: ncbi-blast/c++/include/algo/blast/core/gapinfo.h:45-53
+// ```c
+// typedef enum {
+//    eGapAlignDel = 0, /**< Deletion: a gap in query */
+//    eGapAlignSub = 3, /**< Substitution */
+//    eGapAlignIns = 6, /**< Insertion: a gap in subject */
+// } EGapAlignOpType;
+// ```
+#[inline(always)]
+fn script_op_to_gap_edit_op(op_type: u8, count: u32) -> GapEditOp {
+    if op_type == SCRIPT_GAP_IN_A {
+        GapEditOp::Del(count)
+    } else if op_type == SCRIPT_GAP_IN_B {
+        GapEditOp::Ins(count)
+    } else {
+        GapEditOp::Sub(count)
+    }
+}
+
+// NCBI reference: ncbi-blast/c++/src/algo/blast/core/gapinfo.c:174-185
+// ```c
+// GapPrelimEditBlockAdd(GapPrelimEditBlock *edit_block,
+//                       EGapAlignOpType op_type, Int4 num_ops)
+// {
+//     if (num_ops == 0)
+//         return;
+//     if (edit_block->last_op == op_type)
+//         edit_block->edit_ops[edit_block->num_ops-1].num += num_ops;
+//     else
+//         s_GapPrelimEditBlockAddNew(edit_block, op_type, num_ops);
+// }
+// ```
+#[inline(always)]
+fn gap_edit_ops_add(ops: &mut Vec<GapEditOp>, op_type: u8, count: u32) {
+    if count == 0 {
+        return;
+    }
+    let op_type = op_type & SCRIPT_OP_MASK;
+    if let Some(last) = ops.last_mut() {
+        match (last, op_type) {
+            (GapEditOp::Sub(n), x) if x == SCRIPT_SUB => {
+                *n += count;
+                return;
+            }
+            (GapEditOp::Del(n), x) if x == SCRIPT_GAP_IN_A => {
+                *n += count;
+                return;
+            }
+            (GapEditOp::Ins(n), x) if x == SCRIPT_GAP_IN_B => {
+                *n += count;
+                return;
+            }
+            _ => {}
+        }
+    }
+    ops.push(script_op_to_gap_edit_op(op_type, count));
+}
+
+// NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_gapalign.c:2498-2501
+// ```c
+// fwd_prelim_tback->edit_ops[(fwd_prelim_tback->num_ops)-1].op_type ==
+//   rev_prelim_tback->edit_ops[(rev_prelim_tback->num_ops)-1].op_type
+// ```
+#[inline(always)]
+fn same_gap_edit_op_type(a: GapEditOp, b: GapEditOp) -> bool {
+    matches!(
+        (a, b),
+        (GapEditOp::Sub(_), GapEditOp::Sub(_))
+            | (GapEditOp::Del(_), GapEditOp::Del(_))
+            | (GapEditOp::Ins(_), GapEditOp::Ins(_))
+    )
+}
+
+// NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_gapalign.c:2520-2521
+// ```c
+// if (merge_ops)
+//     esp->num[index-1] += fwd_prelim_tback->edit_ops[(fwd_prelim_tback->num_ops)-1].num;
+// ```
+#[inline(always)]
+fn add_gap_edit_op_count(op: &mut GapEditOp, count: u32) {
+    match op {
+        GapEditOp::Sub(n) | GapEditOp::Del(n) | GapEditOp::Ins(n) => *n += count,
+    }
+}
+
 /// Select a gapped-start seed within an HSP using a sliding window score.
 ///
 /// NCBI reference: blast_gapalign.c:3248-3305 BlastGetOffsetsForGappedAlignment
@@ -1602,6 +1687,29 @@ const SCRIPT_OP_MASK: u8 = 0x07;
 const SCRIPT_EXTEND_GAP_A: u8 = 0x10;
 const SCRIPT_EXTEND_GAP_B: u8 = 0x40;
 
+#[inline]
+fn count_identical_blastna_span(q_span: &[u8], s_span: &[u8]) -> usize {
+    // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_hits.c:774-783
+    // ```c
+    // for (index=0; index < esp->num[i]; index++) {
+    //     q = q_start[index];
+    //     s = s_start[index];
+    //     if (s_Blast_HSPGetNumIdentitiesAndPositives(...))
+    //         ++num_ident;
+    // }
+    // ```
+    // The comparison is still byte-for-byte BLASTNA equality; the slice equality
+    // fast path only collapses long exact spans before falling back to counting.
+    if q_span.as_ptr() == s_span.as_ptr() || (q_span.len() >= 64 && q_span == s_span) {
+        return q_span.len();
+    }
+    q_span
+        .iter()
+        .zip(s_span.iter())
+        .filter(|(q, s)| q == s)
+        .count()
+}
+
 /// Compute alignment statistics from an edit script.
 /// NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_hits.c:745-818 (identity)
 /// NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_hits.c:1055-1074 (gap counts)
@@ -1623,17 +1731,18 @@ fn stats_from_edit_ops(
         let num = op.num() as usize;
         match *op {
             GapEditOp::Sub(_) => {
-                for _ in 0..num {
-                    if qi < q_seq.len() && si < s_seq.len() {
-                        if q_seq[qi] == s_seq[si] {
-                            matches += 1;
-                        } else {
-                            mismatches += 1;
-                        }
-                    }
-                    qi += 1;
-                    si += 1;
+                let available = num
+                    .min(q_seq.len().saturating_sub(qi))
+                    .min(s_seq.len().saturating_sub(si));
+                if available > 0 {
+                    let q_span = &q_seq[qi..qi + available];
+                    let s_span = &s_seq[si..si + available];
+                    let span_matches = count_identical_blastna_span(q_span, s_span);
+                    matches += span_matches;
+                    mismatches += available - span_matches;
                 }
+                qi += num;
+                si += num;
             }
             GapEditOp::Del(_) => {
                 gap_opens += 1;
@@ -1877,6 +1986,7 @@ fn extend_gapped_one_direction_with_traceback_with_scratch(
 
         // NCBI reference: blast_gapalign.c:563-636
         // Inner loop for each subject position
+        let score_ptr = score_array.as_mut_ptr();
         for b_index in first_b_index..b_size {
             // NCBI reference: blast_gapalign.c:563-578 (b_size can reach N+1; no b_index < N guard).
             // NCBI reference: blast_util.c:826 (NULLB sentinel at sequence ends).
@@ -1892,15 +2002,28 @@ fn extend_gapped_one_direction_with_traceback_with_scratch(
                 fence_hit = true;
                 break;
             }
-            let score_gap_col = score_array[b_index].best_gap;
+            // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_gapalign.c:578-631
+            // ```c
+            // next_score = score_array[b_index].best + matrix_row[*b_ptr];
+            // score_gap_col = score_array[b_index].best_gap;
+            // ...
+            // score_array[b_index].best = score;
+            // ```
+            // Safety: b_index is within first_b_index..b_size, and b_size is kept
+            // below gap_align->dp_mem_alloc / score_array.len() by the same band
+            // growth checks as NCBI ALIGN_EX.
+            let cell = unsafe { &mut *score_ptr.add(b_index) };
+            let score_gap_col = cell.best_gap;
             let row = (qc as usize) * BLASTNA_SIZE;
             // NCBI reference: blast_gapalign.c:563-567 (matrix_row lookup)
-            let match_score = score_matrix[row + (sc as usize)];
+            // Safety: BLASTNA encoding produces matrix indices 0..16; FENCE_SENTRY
+            // was handled above before indexing the BLASTNA matrix.
+            let match_score = unsafe { *score_matrix.get_unchecked(row + (sc as usize)) };
             // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_gapalign.c:578-579
             // ```c
             // next_score = score_array[b_index].best + matrix_row[*b_ptr];
             // ```
-            let next_score = score_array[b_index].best + match_score;
+            let next_score = cell.best + match_score;
 
             // NCBI reference: blast_gapalign.c:588-599
             // Determine script based on which path gives best score
@@ -1930,7 +2053,7 @@ fn extend_gapped_one_direction_with_traceback_with_scratch(
                 if b_index == first_b_index {
                     first_b_index += 1;
                 } else {
-                    score_array[b_index].best = GAP_MININT;
+                    cell.best = GAP_MININT;
                 }
             } else {
                 // NCBI reference: blast_gapalign.c:608-631
@@ -1950,9 +2073,9 @@ fn extend_gapped_one_direction_with_traceback_with_scratch(
                 let open_gap_col = score_val - (gap_open_extend as i32);
 
                 if score_gap_col_ext < open_gap_col {
-                    score_array[b_index].best_gap = open_gap_col;
+                    cell.best_gap = open_gap_col;
                 } else {
-                    score_array[b_index].best_gap = score_gap_col_ext;
+                    cell.best_gap = score_gap_col_ext;
                     script += script_col; // Mark as extending existing gap
                 }
 
@@ -1963,7 +2086,7 @@ fn extend_gapped_one_direction_with_traceback_with_scratch(
                     script += script_row; // Mark as extending existing gap
                 }
 
-                score_array[b_index].best = score_val;
+                cell.best = score_val;
             }
 
             // NCBI reference: blast_gapalign.c:634-635
@@ -1988,6 +2111,7 @@ fn extend_gapped_one_direction_with_traceback_with_scratch(
         // NCBI reference: blast_gapalign.c:641-648
         // Reallocate DP memory if needed
         gap_dp_reserve_band(score_array, dp_mem_alloc, last_b_index, num_extra_cells);
+        let score_ptr = score_array.as_mut_ptr();
 
         // NCBI reference: blast_gapalign.c:652-664
         // Band contraction or expansion
@@ -1997,8 +2121,16 @@ fn extend_gapped_one_direction_with_traceback_with_scratch(
             // NCBI reference: blast_gapalign.c:656-663
             // Extend band with gaps
             while score_gap_row >= best_score - x_dropoff && b_size <= n && b_size < *dp_mem_alloc {
-                score_array[b_size].best = score_gap_row;
-                score_array[b_size].best_gap = score_gap_row - (gap_open_extend as i32);
+                // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_gapalign.c:656-663
+                // ```c
+                // score_array[b_size].best = score_gap_row;
+                // score_array[b_size].best_gap = score_gap_row - gap_open_extend;
+                // ```
+                // Safety: loop condition keeps b_size below dp_mem_alloc, which is
+                // the allocated score_array length maintained by gap_dp_reserve_band.
+                let cell = unsafe { &mut *score_ptr.add(b_size) };
+                cell.best = score_gap_row;
+                cell.best_gap = score_gap_row - (gap_open_extend as i32);
                 score_gap_row -= gap_extend as i32;
                 // NCBI reference: blast_gapalign.c:661
                 let row_idx = b_size.saturating_sub(orig_b_index);
@@ -2014,8 +2146,15 @@ fn extend_gapped_one_direction_with_traceback_with_scratch(
         // NCBI reference: blast_gapalign.c:671-675
         // Sentinel
         if b_size <= n && b_size < *dp_mem_alloc {
-            score_array[b_size].best = GAP_MININT;
-            score_array[b_size].best_gap = GAP_MININT;
+            // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_gapalign.c:671-675
+            // ```c
+            // score_array[b_size].best = MININT;
+            // score_array[b_size].best_gap = MININT;
+            // ```
+            // Safety: b_size is checked against dp_mem_alloc / score_array.len().
+            let cell = unsafe { &mut *score_ptr.add(b_size) };
+            cell.best = GAP_MININT;
+            cell.best_gap = GAP_MININT;
             b_size += 1;
         }
     }
@@ -2042,8 +2181,18 @@ fn extend_gapped_one_direction_with_traceback_with_scratch(
     let mut b_index = b_offset;
     let mut script = SCRIPT_SUB;
 
-    // Collect operations in reverse order, then reverse at the end
-    let mut ops_reversed: Vec<(u8, u32)> = Vec::new(); // (op_type, count)
+    // Collect operations in reverse order, then reverse at the end.
+    //
+    // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_gapalign.c:689-727
+    // ```c
+    // while (a_index > 0 || b_index > 0) {
+    //     next_script =
+    //         edit_script[a_index][b_index - edit_start_offset[a_index]];
+    //     ...
+    //     GapPrelimEditBlockAdd(edit_block, (EGapAlignOpType)script, 1);
+    // }
+    // ```
+    let mut edit_ops: Vec<GapEditOp> = Vec::new();
 
     // NCBI reference: blast_gapalign.c:689-726
     // while (a_index > 0 || b_index > 0) {
@@ -2130,33 +2279,21 @@ fn extend_gapped_one_direction_with_traceback_with_scratch(
             }
         }
 
-        // NCBI reference: blast_gapalign.c:726
-        // GapPrelimEditBlockAdd(edit_block, script, 1);
-        // Add to ops (run-length encoded)
-        if let Some(last) = ops_reversed.last_mut() {
-            if last.0 == op_type {
-                last.1 += 1;
-            } else {
-                ops_reversed.push((op_type, 1));
-            }
-        } else {
-            ops_reversed.push((op_type, 1));
-        }
+        // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_gapalign.c:726
+        // ```c
+        // GapPrelimEditBlockAdd(edit_block, (EGapAlignOpType)script, 1);
+        // ```
+        // Build the run-length encoded edit script directly instead of first
+        // allocating an intermediate (op_type, count) vector and converting it.
+        gap_edit_ops_add(&mut edit_ops, op_type, 1);
     }
 
-    // Reverse to get forward order
-    ops_reversed.reverse();
-
-    // Convert to GapEditOp
-    let mut edit_ops: Vec<GapEditOp> = Vec::with_capacity(ops_reversed.len());
-    for (op_type, count) in ops_reversed {
-        match op_type {
-            x if x == SCRIPT_SUB => edit_ops.push(GapEditOp::Sub(count)),
-            x if x == SCRIPT_GAP_IN_A => edit_ops.push(GapEditOp::Del(count)), // Gap in query = Del
-            x if x == SCRIPT_GAP_IN_B => edit_ops.push(GapEditOp::Ins(count)), // Gap in subject = Ins
-            _ => edit_ops.push(GapEditOp::Sub(count)),                         // Default to Sub
-        }
-    }
+    // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_gapalign.c:2494-2496
+    // ```c
+    // The fwd_prelim_tback script will get reversed here as the traceback started from the highest scoring point
+    // and worked backwards.
+    // ```
+    edit_ops.reverse();
 
     // Compute statistics from edit script
     let (matches, mismatches, gap_opens, gap_letters) =
@@ -2404,6 +2541,7 @@ fn extend_gapped_one_direction_with_traceback_ex_with_scratch(
         let mut score_gap_row = GAP_MININT;
         let mut last_b_index = first_b_index;
 
+        let score_ptr = score_array.as_mut_ptr();
         for b_index in first_b_index..b_size {
             let sc = get_s(s_seq, b_index, len2, reverse);
             // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_gapalign.c:569-575
@@ -2417,14 +2555,27 @@ fn extend_gapped_one_direction_with_traceback_ex_with_scratch(
                 fence_hit = true;
                 break;
             }
-            let score_gap_col = score_array[b_index].best_gap;
+            // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_gapalign.c:578-631
+            // ```c
+            // next_score = score_array[b_index].best + matrix_row[*b_ptr];
+            // score_gap_col = score_array[b_index].best_gap;
+            // ...
+            // score_array[b_index].best = score;
+            // ```
+            // Safety: b_index is within first_b_index..b_size, and b_size is kept
+            // below gap_align->dp_mem_alloc / score_array.len() by the same band
+            // growth checks as NCBI ALIGN_EX.
+            let cell = unsafe { &mut *score_ptr.add(b_index) };
+            let score_gap_col = cell.best_gap;
             let row = (qc as usize) * BLASTNA_SIZE;
-            let match_score = score_matrix[row + (sc as usize)];
+            // Safety: BLASTNA encoding produces matrix indices 0..16; FENCE_SENTRY
+            // was handled above before indexing the BLASTNA matrix.
+            let match_score = unsafe { *score_matrix.get_unchecked(row + (sc as usize)) };
             // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_gapalign.c:578-579
             // ```c
             // next_score = score_array[b_index].best + matrix_row[*b_ptr];
             // ```
-            let next_score = score_array[b_index].best + match_score;
+            let next_score = cell.best + match_score;
 
             let mut script = SCRIPT_SUB;
             let mut script_col = SCRIPT_EXTEND_GAP_B;
@@ -2443,7 +2594,7 @@ fn extend_gapped_one_direction_with_traceback_ex_with_scratch(
                 if b_index == first_b_index {
                     first_b_index += 1;
                 } else {
-                    score_array[b_index].best = GAP_MININT;
+                    cell.best = GAP_MININT;
                 }
             } else {
                 last_b_index = b_index;
@@ -2459,9 +2610,9 @@ fn extend_gapped_one_direction_with_traceback_ex_with_scratch(
                 let open_gap_col = score_val - (gap_open_extend as i32);
 
                 if score_gap_col_ext < open_gap_col {
-                    score_array[b_index].best_gap = open_gap_col;
+                    cell.best_gap = open_gap_col;
                 } else {
-                    score_array[b_index].best_gap = score_gap_col_ext;
+                    cell.best_gap = score_gap_col_ext;
                     script += script_col;
                 }
 
@@ -2472,7 +2623,7 @@ fn extend_gapped_one_direction_with_traceback_ex_with_scratch(
                     script += script_row;
                 }
 
-                score_array[b_index].best = score_val;
+                cell.best = score_val;
             }
 
             score_val = next_score;
@@ -2491,13 +2642,22 @@ fn extend_gapped_one_direction_with_traceback_ex_with_scratch(
         }
 
         gap_dp_reserve_band(score_array, dp_mem_alloc, last_b_index, num_extra_cells);
+        let score_ptr = score_array.as_mut_ptr();
 
         if last_b_index < b_size.saturating_sub(1) {
             b_size = last_b_index + 1;
         } else {
             while score_gap_row >= best_score - x_dropoff && b_size <= n && b_size < *dp_mem_alloc {
-                score_array[b_size].best = score_gap_row;
-                score_array[b_size].best_gap = score_gap_row - (gap_open_extend as i32);
+                // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_gapalign.c:656-663
+                // ```c
+                // score_array[b_size].best = score_gap_row;
+                // score_array[b_size].best_gap = score_gap_row - gap_open_extend;
+                // ```
+                // Safety: loop condition keeps b_size below dp_mem_alloc, which is
+                // the allocated score_array length maintained by gap_dp_reserve_band.
+                let cell = unsafe { &mut *score_ptr.add(b_size) };
+                cell.best = score_gap_row;
+                cell.best_gap = score_gap_row - (gap_open_extend as i32);
                 score_gap_row -= gap_extend as i32;
                 let row_idx = b_size.saturating_sub(orig_b_index);
                 if row_idx < edit_script_row.len() {
@@ -2510,8 +2670,15 @@ fn extend_gapped_one_direction_with_traceback_ex_with_scratch(
         }
 
         if b_size <= n && b_size < *dp_mem_alloc {
-            score_array[b_size].best = GAP_MININT;
-            score_array[b_size].best_gap = GAP_MININT;
+            // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_gapalign.c:671-675
+            // ```c
+            // score_array[b_size].best = MININT;
+            // score_array[b_size].best_gap = MININT;
+            // ```
+            // Safety: b_size is checked against dp_mem_alloc / score_array.len().
+            let cell = unsafe { &mut *score_ptr.add(b_size) };
+            cell.best = GAP_MININT;
+            cell.best_gap = GAP_MININT;
             b_size += 1;
         }
     }
@@ -2532,7 +2699,16 @@ fn extend_gapped_one_direction_with_traceback_ex_with_scratch(
     let mut b_index = b_offset;
     let mut script = SCRIPT_SUB;
 
-    let mut ops_reversed: Vec<(u8, u32)> = Vec::new();
+    // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_gapalign.c:689-727
+    // ```c
+    // while (a_index > 0 || b_index > 0) {
+    //     next_script =
+    //         edit_script[a_index][b_index - edit_start_offset[a_index]];
+    //     ...
+    //     GapPrelimEditBlockAdd(edit_block, (EGapAlignOpType)script, 1);
+    // }
+    // ```
+    let mut edit_ops: Vec<GapEditOp> = Vec::new();
     while a_index > 0 || b_index > 0 {
         // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_gapalign.c:689-696
         // ```c
@@ -2596,15 +2772,11 @@ fn extend_gapped_one_direction_with_traceback_ex_with_scratch(
             }
         }
 
-        if let Some(last) = ops_reversed.last_mut() {
-            if last.0 == op_type {
-                last.1 += 1;
-            } else {
-                ops_reversed.push((op_type, 1));
-            }
-        } else {
-            ops_reversed.push((op_type, 1));
-        }
+        // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_gapalign.c:726
+        // ```c
+        // GapPrelimEditBlockAdd(edit_block, (EGapAlignOpType)script, 1);
+        // ```
+        gap_edit_ops_add(&mut edit_ops, op_type, 1);
     }
 
     // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_gapalign.c:2494-2496
@@ -2613,15 +2785,7 @@ fn extend_gapped_one_direction_with_traceback_ex_with_scratch(
     // and worked backwards. The rev_prelim_tback script does NOT get reversed.  Since it was reversed when the
     // traceback was produced it's already "forward"
     // ```
-    let mut edit_ops: Vec<GapEditOp> = Vec::with_capacity(ops_reversed.len());
-    for (op_type, count) in ops_reversed {
-        match op_type {
-            x if x == SCRIPT_SUB => edit_ops.push(GapEditOp::Sub(count)),
-            x if x == SCRIPT_GAP_IN_A => edit_ops.push(GapEditOp::Del(count)),
-            x if x == SCRIPT_GAP_IN_B => edit_ops.push(GapEditOp::Ins(count)),
-            _ => edit_ops.push(GapEditOp::Sub(count)),
-        }
-    }
+    // Reverse traceback already produces the forward preliminary script here.
 
     let q_sub = &q_seq[..len1.min(q_seq.len())];
     let s_sub = &s_seq[..len2.min(s_seq.len())];
@@ -2804,34 +2968,35 @@ pub fn extend_gapped_heuristic_with_traceback_with_scratch(
 
     let mut total_score = left_score + right_score;
 
-    // Combine edit scripts: left_ops + right_ops (merge if needed)
-    let mut combined_edit_ops: Vec<GapEditOp> =
-        Vec::with_capacity(left_edit_ops.len() + right_edit_ops.len());
-    combined_edit_ops.extend(left_edit_ops);
-
+    // Combine edit scripts: left_ops + right_ops (merge if needed).
+    //
+    // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_gapalign.c:2498-2534
+    // ```c
+    // if (fwd_prelim_tback->num_ops > 0 && rev_prelim_tback->num_ops > 0 &&
+    //     fwd_prelim_tback->edit_ops[(fwd_prelim_tback->num_ops)-1].op_type ==
+    //       rev_prelim_tback->edit_ops[(rev_prelim_tback->num_ops)-1].op_type)
+    //   merge_ops = TRUE;
+    // ...
+    // esp->num[index-1] += fwd_prelim_tback->edit_ops[(fwd_prelim_tback->num_ops)-1].num;
+    // ```
+    // Use the left traceback Vec as the final GapEditScript buffer and move the
+    // right traceback ops into it, avoiding the old left copy plus right slice copy.
+    let mut combined_edit_ops = left_edit_ops;
     if !right_edit_ops.is_empty() {
-        if let Some(last) = combined_edit_ops.last_mut() {
-            // NCBI reference: ncbi-blast/c++/src/algo/blast/core/gapinfo.c:174-185 (GapPrelimEditBlockAdd merge)
-            let same_type = matches!(
-                (&*last, &right_edit_ops[0]),
-                (GapEditOp::Sub(_), GapEditOp::Sub(_))
-                    | (GapEditOp::Del(_), GapEditOp::Del(_))
-                    | (GapEditOp::Ins(_), GapEditOp::Ins(_))
-            );
-            if same_type {
-                let add = right_edit_ops[0].num();
-                match last {
-                    GapEditOp::Sub(n) | GapEditOp::Del(n) | GapEditOp::Ins(n) => {
-                        *n += add;
-                    }
+        combined_edit_ops.reserve(right_edit_ops.len());
+        let mut right_iter = right_edit_ops.into_iter();
+        if let Some(first_right) = right_iter.next() {
+            if let Some(last) = combined_edit_ops.last_mut() {
+                if same_gap_edit_op_type(*last, first_right) {
+                    add_gap_edit_op_count(last, first_right.num());
+                } else {
+                    combined_edit_ops.push(first_right);
                 }
-                combined_edit_ops.extend_from_slice(&right_edit_ops[1..]);
             } else {
-                combined_edit_ops.extend_from_slice(&right_edit_ops);
+                combined_edit_ops.push(first_right);
             }
-        } else {
-            combined_edit_ops.extend_from_slice(&right_edit_ops);
         }
+        combined_edit_ops.extend(right_iter);
     }
 
     // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_gapalign.c:4683-4712
@@ -2893,7 +3058,29 @@ pub fn extend_gapped_heuristic_with_traceback_with_scratch(
         }
 
         if start_idx > 0 || end_idx < combined_edit_ops.len() {
-            combined_edit_ops = combined_edit_ops[start_idx..end_idx].to_vec();
+            // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_gapalign.c:4683-4712
+            // ```c
+            // while (esp->size && esp->op_type[0] != eGapAlignSub) {
+            //     ...
+            //     for (j=0; j < esp->size; j++) {
+            //         esp->op_type[j] = esp->op_type[j+1];
+            //         esp->num[j] = esp->num[j+1];
+            //     }
+            //     esp->size--;
+            // }
+            // while (esp->size && esp->op_type[i-1] != eGapAlignSub) {
+            //     ...
+            //     esp->size--;
+            // }
+            // ```
+            // Match NCBI's in-place edit-script shortening; avoid cloning the
+            // retained middle slice into a new Vec.
+            if end_idx < combined_edit_ops.len() {
+                combined_edit_ops.truncate(end_idx);
+            }
+            if start_idx > 0 {
+                combined_edit_ops.drain(0..start_idx);
+            }
         }
     }
 

@@ -8,15 +8,30 @@ use super::{
     compute_backbone_size, compute_mask, compute_unmasked_intervals, encode_kmer_3, ilog2, pv_set,
     QueryContext, LOOKUP_ALPHABET_SIZE, LOOKUP_WORD_LENGTH, PV_ARRAY_BTS,
 };
-use crate::config::ScoringMatrix;
 use crate::stats::karlin_calc::{
     apply_check_ideal, compute_aa_composition, compute_karlin_params_ungapped,
     compute_score_freq_profile, compute_std_aa_composition,
 };
-use crate::stats::{lookup_protein_params_ungapped, KarlinParams};
+use crate::stats::KarlinParams;
 use crate::utils::matrix::blosum62_ncbistdaa_score_row;
 
 pub const AA_HITS_PER_CELL: usize = 3;
+
+fn blosum62_ideal_karlin_params() -> KarlinParams {
+    // NCBI reference: /mnt/c/Users/genom/GitHub/ncbi-blast/c++/src/algo/blast/core/blast_stat.c:2833-2848
+    // ```c
+    // stdrfp = Blast_ResFreqNew(sbp);
+    // Blast_ResFreqStdComp(sbp, stdrfp);
+    // sfp = Blast_ScoreFreqNew(sbp->loscore, sbp->hiscore);
+    // BlastScoreFreqCalc(sbp, sfp, stdrfp, stdrfp);
+    // sbp->kbp_ideal = Blast_KarlinBlkNew();
+    // Blast_KarlinBlkUngappedCalc(sbp->kbp_ideal, sfp);
+    // ```
+    let std_comp = compute_std_aa_composition();
+    let sfp = compute_score_freq_profile(&std_comp, &std_comp, -4, 11);
+    compute_karlin_params_ungapped(&sfp)
+        .expect("BLOSUM62 ideal Karlin parameters must be computable")
+}
 
 /// NCBI AaLookupBackboneCell - EXACT port
 #[repr(C)]
@@ -377,7 +392,7 @@ pub(crate) fn prepare_blosum62_lookup_query_for_word_size(
     word_length: usize,
     check_ideal: bool,
 ) -> (Vec<u8>, Vec<(i32, i32)>, Vec<QueryContext>) {
-    let ideal_params = lookup_protein_params_ungapped(ScoringMatrix::Blosum62);
+    let ideal_params = blosum62_ideal_karlin_params();
     let std_comp = compute_std_aa_composition();
     let prepared = prepare_lookup_query(queries, ideal_params, &std_comp, word_length, check_ideal);
     (
@@ -722,8 +737,8 @@ pub fn build_ncbi_lookup(
     let backbone_size = compute_backbone_size(word_length, alphabet_size, charsize);
 
     // Compute ideal Karlin parameters (kbp_ideal) - used for check_ideal logic
-    // Reference: NCBI blast_stat.c:2754 Blast_ScoreBlkKbpIdealCalc
-    let ideal_params = lookup_protein_params_ungapped(ScoringMatrix::Blosum62);
+    // Reference: NCBI blast_stat.c:2833-2848 Blast_ScoreBlkKbpIdealCalc
+    let ideal_params = blosum62_ideal_karlin_params();
 
     // Compute standard amino acid composition (for database/subject)
     // Reference: NCBI blast_stat.c:2759 Blast_ResFreqStdComp
@@ -1244,7 +1259,7 @@ mod tests {
     }
 
     fn prepare_lookup_for_test(queries: Vec<Vec<QueryFrame>>) -> PreparedLookupQuery {
-        let ideal_params = lookup_protein_params_ungapped(ScoringMatrix::Blosum62);
+        let ideal_params = blosum62_ideal_karlin_params();
         let std_comp = compute_std_aa_composition();
         prepare_lookup_query(&queries, ideal_params, &std_comp, LOOKUP_WORD_LENGTH, true)
     }

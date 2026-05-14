@@ -66,6 +66,18 @@ pub struct UngappedHit {
     /// Number of identical residues (for Blast_HSPTest)
     /// Reference: blast_hits.c:Blast_HSPGetNumIdentitiesAndPositives
     pub num_ident: usize,
+    // NCBI reference: /mnt/c/Users/genom/GitHub/ncbi-blast/c++/src/algo/blast/core/blast_hits.c:1374-1381
+    // ```c
+    // void Blast_HSPListSortByScore(BlastHSPList* hsp_list)
+    // {
+    //     if (!Blast_HSPListIsSortedByScore(hsp_list)) {
+    //         qsort(hsp_list->hsp_array, hsp_list->hspcnt, sizeof(BlastHSP*),
+    //               ScoreCompareHSPs);
+    // ```
+    /// Nonprinted position in the current NCBI-equivalent `BlastHSPList`
+    /// before score/link qsort steps. Used only when the NCBI comparator
+    /// returns equality, so no biological tie-break absent from NCBI is added.
+    pub hsp_list_order: usize,
     /// NCBI ELinkOrderingMethod: 0 = small gaps, 1 = large gaps
     /// Reference: link_hsps.c line 973: H->ordering_method = ordering_method;
     pub ordering_method: u8,

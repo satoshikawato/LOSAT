@@ -27,6 +27,7 @@ use crate::algorithm::tblastx::chaining::UngappedHit;
 use crate::algorithm::tblastx::diagnostics::diagnostics_enabled;
 use crate::algorithm::tblastx::extension::convert_coords;
 use crate::algorithm::tblastx::lookup::QueryContext;
+use crate::algorithm::tblastx::ncbi_qsort::qsort_ungapped_hits_by;
 
 use super::cutoffs::calculate_link_hsp_cutoffs_ncbi;
 use super::params::LinkingParams;
@@ -58,6 +59,8 @@ const SENTINEL_IDX: usize = usize::MAX;
 ///
 /// Enable by setting:
 /// - `LOSAT_TRACE_HSP="qstart,qend,sstart,send"`
+/// - `LOSAT_TRACE_CHAIN_HSP="qstart,qend,sstart,send"` for chain-selection
+///   summaries without the per-candidate DP trace.
 #[derive(Clone, Copy, Debug)]
 struct TraceHspTarget {
     q_start: i32,
@@ -67,32 +70,61 @@ struct TraceHspTarget {
 }
 
 static TRACE_HSP_TARGET: OnceLock<Option<TraceHspTarget>> = OnceLock::new();
+static TRACE_CHAIN_TARGET: OnceLock<Option<TraceHspTarget>> = OnceLock::new();
+static TRACE_LINK_SELECTIONS: OnceLock<bool> = OnceLock::new();
 
 #[inline(always)]
 fn trace_hsp_target() -> Option<TraceHspTarget> {
-    *TRACE_HSP_TARGET.get_or_init(|| {
-        let raw = std::env::var("LOSAT_TRACE_HSP").ok()?;
-        let parts: Vec<&str> = raw
-            .split(|c: char| c == ',' || c == ':' || c == ';' || c.is_whitespace())
-            .filter(|p| !p.is_empty())
-            .collect();
-        if parts.len() != 4 {
-            eprintln!(
-                "[TRACE_HSP] invalid LOSAT_TRACE_HSP (expected 4 integers): {:?}",
-                raw
-            );
-            return None;
-        }
-        let q_start: i32 = parts[0].parse().ok()?;
-        let q_end: i32 = parts[1].parse().ok()?;
-        let s_start: i32 = parts[2].parse().ok()?;
-        let s_end: i32 = parts[3].parse().ok()?;
-        Some(TraceHspTarget {
-            q_start,
-            q_end,
-            s_start,
-            s_end,
-        })
+    *TRACE_HSP_TARGET.get_or_init(|| parse_trace_hsp_target_env("LOSAT_TRACE_HSP"))
+}
+
+#[inline(always)]
+fn trace_chain_target() -> Option<TraceHspTarget> {
+    *TRACE_CHAIN_TARGET.get_or_init(|| parse_trace_hsp_target_env("LOSAT_TRACE_CHAIN_HSP"))
+}
+
+#[inline(always)]
+fn trace_link_selection_summaries() -> bool {
+    *TRACE_LINK_SELECTIONS.get_or_init(|| std::env::var_os("LOSAT_TRACE_LINK_SELECTIONS").is_some())
+}
+
+// NCBI reference: /mnt/c/Users/genom/GitHub/ncbi-blast/c++/src/algo/blast/core/link_hsps.c:901-982
+// ```c
+// ordering_method =
+//    prob[0]<=prob[1] ? eLinkSmallGaps : eLinkLargeGaps;
+// best[ordering_method]->start_of_chain = TRUE;
+// for (H=best[ordering_method]; H!=NULL;
+//      H=H->hsp_link.link[ordering_method])
+// {
+//    H->linked_set = linked_set;
+//    H->ordering_method = ordering_method;
+//    H->hsp->evalue = prob[ordering_method];
+// ```
+// The parser is diagnostic-only; it selects the NCBI chain-removal boundary to
+// print and does not alter the linking algorithm or runtime output.
+#[inline(always)]
+fn parse_trace_hsp_target_env(var_name: &str) -> Option<TraceHspTarget> {
+    let raw = std::env::var(var_name).ok()?;
+    let parts: Vec<&str> = raw
+        .split(|c: char| c == ',' || c == ':' || c == ';' || c.is_whitespace())
+        .filter(|p| !p.is_empty())
+        .collect();
+    if parts.len() != 4 {
+        eprintln!(
+            "[TRACE_HSP] invalid {} (expected 4 integers): {:?}",
+            var_name, raw
+        );
+        return None;
+    }
+    let q_start: i32 = parts[0].parse().ok()?;
+    let q_end: i32 = parts[1].parse().ok()?;
+    let s_start: i32 = parts[2].parse().ok()?;
+    let s_end: i32 = parts[3].parse().ok()?;
+    Some(TraceHspTarget {
+        q_start,
+        q_end,
+        s_start,
+        s_end,
     })
 }
 
@@ -200,6 +232,39 @@ fn fwd_compare_hsps_transl(a: &UngappedHit, b: &UngappedHit) -> Ordering {
         .cmp(&translated_context_group(b))
         .then_with(|| a.q_aa_start.cmp(&b.q_aa_start))
         .then_with(|| a.s_aa_start.cmp(&b.s_aa_start))
+}
+
+// NCBI reference: /mnt/c/Users/genom/GitHub/ncbi-blast/c++/src/algo/blast/core/link_hsps.c:476-486
+// ```c
+// link_hsp_array =
+//    (LinkHSPStruct**) malloc(total_number_of_hsps*sizeof(LinkHSPStruct*));
+// for (index = 0; index < total_number_of_hsps; ++index) {
+//    link_hsp_array[index]->hsp = hsp_array[index];
+// }
+// qsort(link_hsp_array,total_number_of_hsps,sizeof(LinkHSPStruct*),
+//       s_RevCompareHSPsTbx);
+// ```
+// NCBI reference: /mnt/c/Users/genom/GitHub/ncbi-blast/c++/src/algo/blast/core/link_hsps.c:990-994
+// ```c
+// qsort(link_hsp_array,total_number_of_hsps,sizeof(LinkHSPStruct*),
+//       s_RevCompareHSPsTransl);
+// qsort(link_hsp_array, total_number_of_hsps,sizeof(LinkHSPStruct*),
+//       s_FwdCompareHSPsTransl);
+// ```
+#[inline]
+fn sort_hsps_by_ncbi_link_order(
+    hits: &mut [UngappedHit],
+    compare: fn(&UngappedHit, &UngappedHit) -> Ordering,
+) {
+    // NCBI reference: /mnt/c/Users/genom/GitHub/ncbi-blast/c++/src/algo/blast/core/link_hsps.c:483-486
+    // ```c
+    // qsort(link_hsp_array,total_number_of_hsps,sizeof(LinkHSPStruct*),
+    //       s_RevCompareHSPsTbx);
+    // ```
+    // NCBI's translated-query comparators are partial and NCBI delegates
+    // comparator-equal rows to the platform qsort implementation. Do not add
+    // frame or LOSAT insertion-order tie-breakers here.
+    qsort_ungapped_hits_by(hits, compare);
 }
 
 // ---------------------------------------------------------------------------
@@ -368,7 +433,7 @@ pub fn apply_sum_stats_even_gap_linking(
     //    qsort(link_hsp_array,total_number_of_hsps,sizeof(LinkHSPStruct*),
     //          s_RevCompareHSPsTbx);
     // ```
-    hits.sort_unstable_by(rev_compare_hsps_tbx);
+    sort_hsps_by_ncbi_link_order(&mut hits, rev_compare_hsps_tbx);
 
     // NCBI reference: /mnt/c/Users/genom/GitHub/ncbi-blast/c++/src/algo/blast/core/link_hsps.c:510-531
     // ```c
@@ -502,8 +567,8 @@ pub fn apply_sum_stats_even_gap_linking(
     //    qsort(link_hsp_array, total_number_of_hsps,sizeof(LinkHSPStruct*),
     //          s_FwdCompareHSPsTransl);
     // ```
-    results.sort_unstable_by(rev_compare_hsps_transl);
-    results.sort_unstable_by(fwd_compare_hsps_transl);
+    sort_hsps_by_ncbi_link_order(&mut results, rev_compare_hsps_transl);
+    sort_hsps_by_ncbi_link_order(&mut results, fwd_compare_hsps_transl);
 
     replay_ncbi_output_list(results)
 }
@@ -781,6 +846,8 @@ fn link_hsp_group_ncbi(
     // Also supports legacy `LOSAT_DEBUG_CHAINING` to enable debug prints.
     let trace_target = trace_hsp_target();
     let debug_chaining = trace_target.is_some() || std::env::var("LOSAT_DEBUG_CHAINING").is_ok();
+    let trace_chain_target = trace_chain_target();
+    let trace_link_selections = trace_link_selection_summaries();
 
     // Initialize HspLink array (indices 0..n correspond to HSPs)
     // NCBI uses 1-based indexing with lh_helper[0] as sentinel
@@ -832,6 +899,11 @@ fn link_hsp_group_ncbi(
 
     // Resolve the traced target HSP (if any) within this group (post-sort order).
     let target_hsp_idx: Option<usize> = trace_target.and_then(|t| {
+        group_hits
+            .iter()
+            .position(|h| trace_hit_matches_target(t, h))
+    });
+    let chain_target_hsp_idx: Option<usize> = trace_chain_target.and_then(|t| {
         group_hits
             .iter()
             .position(|h| trace_hit_matches_target(t, h))
@@ -921,6 +993,7 @@ fn link_hsp_group_ncbi(
     // Use pool_lh_helpers directly throughout the function (all lh_helpers references replaced)
 
     let mut remaining = n;
+    let mut selection_round = 0usize;
     let mut first_pass = true;
     // NCBI: path_changed tracks whether any removed HSP had linked_to > 0
     // If path_changed == 0, we can skip chain validation entirely
@@ -932,6 +1005,18 @@ fn link_hsp_group_ncbi(
     // and may be 0 for small search spaces (NCBI line 1076)
 
     while remaining > 0 {
+        // NCBI reference: /mnt/c/Users/genom/GitHub/ncbi-blast/c++/src/algo/blast/core/link_hsps.c:603-652
+        // ```c
+        // use_current_max=0;
+        // if (!first_pass){
+        //    ...
+        //    if(path_changed==0){
+        //       use_current_max=1;
+        //    }
+        // ```
+        // Diagnostic logs preserve the incoming `path_changed` value so we can
+        // distinguish NCBI's cached-path selection from a full DP recomputation.
+        let path_changed_at_loop_start = path_changed;
         // NCBI lines 607-625: Initialize max sums each pass
         // CRITICAL: must reset to -cutoff each pass to allow all HSPs to be candidates
         let mut best: [Option<usize>; 2] = [None, None];
@@ -1572,6 +1657,7 @@ fn link_hsp_group_ncbi(
         };
 
         let evalue = prob[ordering];
+        let remaining_before_chain = remaining;
 
         if diag_enabled {
             // Debug: count chain statistics
@@ -1614,6 +1700,8 @@ fn link_hsp_group_ncbi(
         // in a chain share the same E-value.
         let mut is_first = true;
         let mut cur = best_i;
+        let collect_chain_members =
+            debug_chaining || chain_target_hsp_idx.is_some() || trace_link_selections;
         let mut chain_members = Vec::new();
         loop {
             if debug_chaining && target_hsp_idx == Some(cur) {
@@ -1625,7 +1713,7 @@ fn link_hsp_group_ncbi(
                 );
             }
             // Avoid heap allocation in normal runs: chain_members is only used for debug output.
-            if debug_chaining {
+            if collect_chain_members {
                 chain_members.push(cur);
             }
             // NCBI line 968: if (H->linked_to>1) path_changed=1
@@ -1718,7 +1806,173 @@ fn link_hsp_group_ncbi(
             cur = next;
         }
 
+        let chain_contains_trace_target = chain_target_hsp_idx
+            .map(|target| chain_members.iter().any(|&idx| idx == target))
+            .unwrap_or(false);
+
+        if trace_link_selections || chain_contains_trace_target {
+            // NCBI reference: /mnt/c/Users/genom/GitHub/ncbi-blast/c++/src/algo/blast/core/link_hsps.c:901-982
+            // ```c
+            // prob[0] = BLAST_SmallGapSumE(...);
+            // prob[1] = BLAST_LargeGapSumE(...);
+            // ordering_method =
+            //    prob[0]<=prob[1] ? eLinkSmallGaps : eLinkLargeGaps;
+            // ...
+            // H->linked_set = linked_set;
+            // H->ordering_method = ordering_method;
+            // H->hsp->evalue = prob[ordering_method];
+            // ```
+            let describe_best = |candidate: Option<usize>| -> String {
+                let Some(idx) = candidate else {
+                    return "NA".to_string();
+                };
+                let hit = &group_hits[idx];
+                let link = &pool_hsp_links[idx];
+                format!(
+                    "idx={} raw={} num0={} sum0={} xsum0={:.6e} num1={} sum1={} xsum1={:.6e} q_aa={}..{} s_aa={}..{} q_frame={} s_frame={}",
+                    idx,
+                    hit.raw_score,
+                    link.num[0],
+                    link.sum[0],
+                    link.xsum[0],
+                    link.num[1],
+                    link.sum[1],
+                    link.xsum[1],
+                    hit.q_aa_start,
+                    hit.q_aa_end,
+                    hit.s_aa_start,
+                    hit.s_aa_end,
+                    hit.q_frame,
+                    hit.s_frame
+                )
+            };
+            let head = &group_hits[best_i];
+            let (head_q_start, head_q_end) = convert_coords(
+                head.q_aa_start,
+                head.q_aa_end,
+                head.q_frame,
+                head.q_orig_len,
+            );
+            let (head_s_start, head_s_end) = convert_coords(
+                head.s_aa_start,
+                head.s_aa_end,
+                head.s_frame,
+                head.s_orig_len,
+            );
+            eprintln!(
+                "[TRACE_LINK_SELECTION] context={} subject_sign={} round={} remaining_before={} used_current_max={} path_changed_in={} selected={} evalue={:.6e} chain_len={} linked_set={} target_in_chain={} prob_small={:.6e} prob_large={:.6e} head_idx={} head_raw={} head_q={}-{} head_s={}-{} head_q_frame={} head_s_frame={} best_small={} best_large={}",
+                query_context,
+                group_hits[0].s_frame.signum(),
+                selection_round,
+                remaining_before_chain,
+                use_current_max,
+                path_changed_at_loop_start,
+                ordering,
+                evalue,
+                chain_members.len(),
+                linked_set,
+                chain_contains_trace_target,
+                prob[0],
+                prob[1],
+                best_i,
+                head.raw_score,
+                head_q_start,
+                head_q_end,
+                head_s_start,
+                head_s_end,
+                head.q_frame,
+                head.s_frame,
+                describe_best(best[0]),
+                describe_best(best[1])
+            );
+        }
+
+        if chain_contains_trace_target {
+            // NCBI reference: /mnt/c/Users/genom/GitHub/ncbi-blast/c++/src/algo/blast/core/link_hsps.c:1046-1056
+            // ```c
+            // link = H->hsp_link.link[ordering_method];
+            // while (link)
+            // {
+            //    H->next = (LinkHSPStruct*) link;
+            //    H = H->next;
+            //    if (H != NULL)
+            //       link = H->hsp_link.link[ordering_method];
+            // ```
+            // Print the replay chain that NCBI follows from a selected chain
+            // head, without enabling the per-candidate DP trace.
+            eprintln!(
+                "[TRACE_LINK_SELECTION] target_chain_members head_idx={} ordering={} evalue={:.6e}",
+                best_i, ordering, evalue
+            );
+            for &idx in &chain_members {
+                let hit = &group_hits[idx];
+                let (q_start, q_end) =
+                    convert_coords(hit.q_aa_start, hit.q_aa_end, hit.q_frame, hit.q_orig_len);
+                let (s_start, s_end) =
+                    convert_coords(hit.s_aa_start, hit.s_aa_end, hit.s_frame, hit.s_orig_len);
+                let mark = if chain_target_hsp_idx == Some(idx) {
+                    "*"
+                } else {
+                    " "
+                };
+                eprintln!(
+                    "  {}idx={} raw_score={} q={}-{} s={}-{} q_frame={} s_frame={} q_aa={}-{} s_aa={}-{} start_of_chain={}",
+                    mark,
+                    idx,
+                    hit.raw_score,
+                    q_start,
+                    q_end,
+                    s_start,
+                    s_end,
+                    hit.q_frame,
+                    hit.s_frame,
+                    hit.q_aa_start,
+                    hit.q_aa_end,
+                    hit.s_aa_start,
+                    hit.s_aa_end,
+                    hit.start_of_chain,
+                );
+            }
+        }
+
         if debug_chaining && chain_members.iter().any(|&idx| target_hsp_idx == Some(idx)) {
+            // NCBI reference: /mnt/c/Users/genom/GitHub/ncbi-blast/c++/src/algo/blast/core/link_hsps.c:901-952
+            // ```c
+            // prob[0] = BLAST_SmallGapSumE(...);
+            // prob[1] = BLAST_LargeGapSumE(...);
+            // ordering_method =
+            //    prob[0]<=prob[1] ? eLinkSmallGaps : eLinkLargeGaps;
+            // ```
+            let describe_best = |candidate: Option<usize>| -> String {
+                let Some(idx) = candidate else {
+                    return "NA".to_string();
+                };
+                let hit = &group_hits[idx];
+                let link = &pool_hsp_links[idx];
+                format!(
+                    "idx={} raw={} num0={} sum0={} xsum0={:.6e} num1={} sum1={} xsum1={:.6e} q_aa={}..{} s_aa={}..{}",
+                    idx,
+                    hit.raw_score,
+                    link.num[0],
+                    link.sum[0],
+                    link.xsum[0],
+                    link.num[1],
+                    link.sum[1],
+                    link.xsum[1],
+                    hit.q_aa_start,
+                    hit.q_aa_end,
+                    hit.s_aa_start,
+                    hit.s_aa_end
+                )
+            };
+            eprintln!(
+                "[TRACE_LINKING] ordering_choice prob_small={:.6e} prob_large={:.6e} selected={} best_small={} best_large={}",
+                prob[0],
+                prob[1],
+                ordering,
+                describe_best(best[0]),
+                describe_best(best[1])
+            );
             eprintln!(
                 "[TRACE_LINKING] target_chain head_idx={} chain_len={} linked_set={} ordering={} evalue={:.3e}",
                 best_i,
@@ -1762,6 +2016,8 @@ fn link_hsp_group_ncbi(
                 );
             }
         }
+
+        selection_round += 1;
     }
 
     // NOTE: NCBI link_hsps.c:1016-1020 filters chain members (linked_set=true,
@@ -1837,6 +2093,12 @@ mod tests {
             raw_score: id, // Use raw_score as ID for verification
             e_value: 1e-10,
             num_ident: 0, // Mock value for tests
+            // NCBI reference: /mnt/c/Users/genom/GitHub/ncbi-blast/c++/src/algo/blast/core/blast_hits.c:1379-1381
+            // ```c
+            // qsort(hsp_list->hsp_array, hsp_list->hspcnt, sizeof(BlastHSP*),
+            //       ScoreCompareHSPs);
+            // ```
+            hsp_list_order: id as usize,
             ordering_method: 0,
             linked_set: false,
             start_of_chain: false,
@@ -1887,6 +2149,27 @@ mod tests {
         let replayed = replay_ncbi_output_list(vec![member, head, single]);
         let replayed_ids: Vec<usize> = replayed.iter().map(|hit| hit.link_id).collect();
         assert_eq!(replayed_ids, vec![1, 0, 2]);
+    }
+
+    #[test]
+    fn test_link_qsort_tie_preserves_current_hsp_list_order_for_equal_hits() {
+        // NCBI reference: /mnt/c/Users/genom/GitHub/ncbi-blast/c++/src/algo/blast/core/link_hsps.c:483-486
+        // ```c
+        // /* Sort by (reverse) position. */
+        // if (kTranslatedQuery) {
+        //    qsort(link_hsp_array,total_number_of_hsps,sizeof(LinkHSPStruct*),
+        //          s_RevCompareHSPsTbx);
+        // ```
+        let mut later = mock_hit(100, 150, 200, 250, 20);
+        later.hsp_list_order = 2;
+        let mut earlier = mock_hit(100, 150, 200, 250, 10);
+        earlier.hsp_list_order = 1;
+        let mut hits = vec![later, earlier];
+
+        sort_hsps_by_ncbi_link_order(&mut hits, rev_compare_hsps_tbx);
+
+        let ordered: Vec<usize> = hits.iter().map(|hit| hit.hsp_list_order).collect();
+        assert_eq!(ordered, vec![2, 1]);
     }
 
     /// Verify LOSAT's HSP sort order matches NCBI's s_RevCompareHSPsTbx

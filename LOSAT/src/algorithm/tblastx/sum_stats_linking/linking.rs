@@ -1753,6 +1753,43 @@ fn link_hsp_group_ncbi(
         }
 
         if debug_chaining && chain_members.iter().any(|&idx| target_hsp_idx == Some(idx)) {
+            // NCBI reference: /mnt/c/Users/genom/GitHub/ncbi-blast/c++/src/algo/blast/core/link_hsps.c:901-952
+            // ```c
+            // prob[0] = BLAST_SmallGapSumE(...);
+            // prob[1] = BLAST_LargeGapSumE(...);
+            // ordering_method =
+            //    prob[0]<=prob[1] ? eLinkSmallGaps : eLinkLargeGaps;
+            // ```
+            let describe_best = |candidate: Option<usize>| -> String {
+                let Some(idx) = candidate else {
+                    return "NA".to_string();
+                };
+                let hit = &group_hits[idx];
+                let link = &pool_hsp_links[idx];
+                format!(
+                    "idx={} raw={} num0={} sum0={} xsum0={:.6e} num1={} sum1={} xsum1={:.6e} q_aa={}..{} s_aa={}..{}",
+                    idx,
+                    hit.raw_score,
+                    link.num[0],
+                    link.sum[0],
+                    link.xsum[0],
+                    link.num[1],
+                    link.sum[1],
+                    link.xsum[1],
+                    hit.q_aa_start,
+                    hit.q_aa_end,
+                    hit.s_aa_start,
+                    hit.s_aa_end
+                )
+            };
+            eprintln!(
+                "[TRACE_LINKING] ordering_choice prob_small={:.6e} prob_large={:.6e} selected={} best_small={} best_large={}",
+                prob[0],
+                prob[1],
+                ordering,
+                describe_best(best[0]),
+                describe_best(best[1])
+            );
             eprintln!(
                 "[TRACE_LINKING] target_chain head_idx={} chain_len={} linked_set={} ordering={} evalue={:.3e}",
                 best_i,

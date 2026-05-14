@@ -119,6 +119,38 @@ fn run_internal(args: TblastxArgs, mut in_memory: Option<TblastxInMemoryRun<'_>>
     let use_parallel = num_threads > 1;
     let query_code = GeneticCode::from_id(args.query_gencode);
     let db_code = GeneticCode::from_id(args.db_gencode);
+    // NCBI source keeps two relevant translated-subject paths separate for
+    // local subject searches:
+    //
+    // Search-time translation uses `subject->gen_code_string` already attached
+    // to the local subject sequence.
+    // NCBI reference:
+    // ncbi-blast/c++/src/algo/blast/core/blast_engine.c:772-775
+    // ```c
+    // BLAST_GetAllTranslations(backup.sequence, eBlastEncodingNcbi2na,
+    //                          backup.full_range.right,
+    //                          subject->gen_code_string, &translation_buffer,
+    //                          &frame_offsets, NULL);
+    // ```
+    //
+    // The DB iterator path fills a missing translated-subject genetic code from
+    // `db_options->genetic_code`; that fill is on the seq_src path, not the
+    // already-materialized local `-subject` buffer.
+    // NCBI reference:
+    // ncbi-blast/c++/src/algo/blast/core/blast_engine.c:1458-1465
+    // ```c
+    // if (seq_arg.seq->gen_code_string == NULL) {
+    //     seq_arg.seq->gen_code_string =
+    //         GenCodeSingletonFind(db_options->genetic_code);
+    // }
+    // ```
+    //
+    // BLAST+ oracle for `tblastx -subject ... -query_gencode 4 -db_gencode 4`
+    // confirms this split: TGA is displayed as W in subject qseq/sseq, but the
+    // raw score is computed as if the local subject search translation still
+    // used the standard code. LOSAT's `-s/--subject` maps to this local subject
+    // mode, so search/score uses code 1 while reporting uses `--db-gencode`.
+    let db_search_code = GeneticCode::from_id(1);
 
     // [C] window = diag->window;
     let window = args.window_size as i32;
@@ -581,7 +613,10 @@ fn run_internal(args: TblastxArgs, mut in_memory: Option<TblastxInMemoryRun<'_>>
         //       subject_blk->length, frame, retval->translations[context], gen_code_string);
         // }
         // ```
-        let s_frames = generate_frames(s_rec.seq(), &db_code);
+        let s_frames = generate_frames(s_rec.seq(), &db_search_code);
+        let s_frames_report_storage =
+            (args.db_gencode != 1).then(|| generate_frames(s_rec.seq(), &db_code));
+        let s_frames_report = s_frames_report_storage.as_deref().unwrap_or(&s_frames);
 
         let s_len = s_rec.seq().len();
 
@@ -1404,6 +1439,7 @@ fn run_internal(args: TblastxArgs, mut in_memory: Option<TblastxInMemoryRun<'_>>
             prelinked_ungapped_hits,
             contexts_ref,
             &s_frames,
+            s_frames_report,
             &cutoff_scores,
             timing_enabled,
             &reeval_ns,
@@ -1613,7 +1649,8 @@ fn run_internal(args: TblastxArgs, mut in_memory: Option<TblastxInMemoryRun<'_>>
                 }
 
                 let ctx = &contexts_ref[h.ctx_idx];
-                let s_frame = &s_frames[h.s_f_idx];
+                let s_score_frame = &s_frames[h.s_f_idx];
+                let s_frame = &s_frames_report[h.s_f_idx];
 
                 // Compute identity/mismatch on demand (final hits only)
                 // NCBI computes identities using the *unmasked* query sequence buffer
@@ -1667,6 +1704,94 @@ fn run_internal(args: TblastxArgs, mut in_memory: Option<TblastxInMemoryRun<'_>>
                     convert_coords(h.q_aa_start, h.q_aa_end, ctx.frame, ctx.orig_len);
                 let (s_start, s_end) =
                     convert_coords(h.s_aa_start, h.s_aa_end, s_frame.frame, s_len);
+
+                // NCBI reference: /mnt/c/Users/genom/GitHub/ncbi-blast/c++/src/algo/blast/core/blast_filter.c:1379-1404
+                // ```c
+                // query_blk->sequence_start_nomask = BlastMemDup(query_blk->sequence_start, total_length);
+                // query_blk->sequence_nomask = query_blk->sequence_start_nomask + 1;
+                // Blast_MaskTheResidues(buffer, query_length, kIsNucl, ...);
+                // ```
+                // NCBI reference: /mnt/c/Users/genom/GitHub/ncbi-blast/c++/src/algo/blast/core/blast_hits.c:699-700
+                // ```c
+                // sum += matrix[*query & kResidueMask][*subject];
+                // query++;
+                // ```
+                // Diagnostic only: compare the traced HSP's masked working-query
+                // score against the preserved unmasked query copy used for identity
+                // reporting. Normal runtime behavior is unchanged unless both
+                // LOSAT_TRACE_HSP and LOSAT_TRACE_HSP_MASKS are set.
+                if std::env::var_os("LOSAT_TRACE_HSP_MASKS").is_some() {
+                    if let Some(target) = trace_hsp_target() {
+                        if trace_match_target(target, q_start, q_end, s_start, s_end) {
+                            let q_seq_masked = &ctx.aa_seq[1..ctx.aa_seq.len() - 1];
+                            let s_seq_scoring =
+                                &s_score_frame.aa_seq[1..s_score_frame.aa_seq.len() - 1];
+                            let mut masked_residues = 0usize;
+                            let mut masked_score = 0i32;
+                            let mut unmasked_score = 0i32;
+                            let mut report_unmasked_score = 0i32;
+                            let mut mask_runs = Vec::new();
+                            let mut current_mask_start: Option<usize> = None;
+                            for rel in 0..len {
+                                let q_pos = q0 + rel;
+                                let s_pos = s0 + rel;
+                                if q_pos >= q_seq_masked.len()
+                                    || q_pos >= q_seq_nomask.len()
+                                    || s_pos >= s_seq.len()
+                                    || s_pos >= s_seq_scoring.len()
+                                {
+                                    break;
+                                }
+                                let q_masked = q_seq_masked[q_pos];
+                                let q_unmasked = q_seq_nomask[q_pos];
+                                let subject_scoring = s_seq_scoring[s_pos];
+                                let subject_report = s_seq[s_pos];
+                                if q_masked != q_unmasked {
+                                    masked_residues += 1;
+                                    if current_mask_start.is_none() {
+                                        current_mask_start = Some(rel);
+                                    }
+                                } else if let Some(start) = current_mask_start.take() {
+                                    mask_runs.push(format!("{}..{}", start, rel));
+                                }
+                                masked_score +=
+                                    crate::utils::matrix::blosum62_score(q_masked, subject_scoring);
+                                unmasked_score += crate::utils::matrix::blosum62_score(
+                                    q_unmasked,
+                                    subject_scoring,
+                                );
+                                report_unmasked_score += crate::utils::matrix::blosum62_score(
+                                    q_unmasked,
+                                    subject_report,
+                                );
+                            }
+                            if let Some(start) = current_mask_start.take() {
+                                mask_runs.push(format!("{}..{}", start, len));
+                            }
+                            eprintln!(
+                                "[TRACE_HSP_MASKS] q={}-{} s={}-{} ctx_idx={} q_frame={} s_frame={} len={} raw_score={} masked_score={} unmasked_score={} report_unmasked_score={} masked_residues={} mask_runs={}",
+                                q_start,
+                                q_end,
+                                s_start,
+                                s_end,
+                                h.ctx_idx,
+                                ctx.frame,
+                                s_frame.frame,
+                                len,
+                                h.raw_score,
+                                masked_score,
+                                unmasked_score,
+                                report_unmasked_score,
+                                masked_residues,
+                                if mask_runs.is_empty() {
+                                    "none".to_string()
+                                } else {
+                                    mask_runs.join(",")
+                                }
+                            );
+                        }
+                    }
+                }
 
                 // NCBI reference: ncbi-blast/c++/include/algo/blast/core/blast_hits.h:153-166
                 // ```c

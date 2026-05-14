@@ -193,7 +193,8 @@ pub(crate) fn atomic_max_i32(dst: &AtomicI32, val: i32) {
 pub(crate) fn reevaluate_ungapped_hsp_list(
     ungapped_hits: Vec<UngappedHit>,
     contexts: &[QueryContext],
-    s_frames: &[QueryFrame],
+    s_frames_scoring: &[QueryFrame],
+    s_frames_report: &[QueryFrame],
     cutoff_scores: &[i32],
     timing_enabled: bool,
     reeval_ns: &AtomicU64,
@@ -205,7 +206,8 @@ pub(crate) fn reevaluate_ungapped_hsp_list(
 
     for mut hit in ungapped_hits {
         let ctx = &contexts[hit.ctx_idx];
-        let s_frame = &s_frames[hit.s_f_idx];
+        let s_frame_scoring = &s_frames_scoring[hit.s_f_idx];
+        let s_frame_report = &s_frames_report[hit.s_f_idx];
         // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_hits.c:686-688
         // ```c
         // Int4 cutoff_score = word_params->cutoffs[hsp->context].cutoff_score;
@@ -217,7 +219,7 @@ pub(crate) fn reevaluate_ungapped_hsp_list(
         // Reference: blast_query_info.c:311-315, blast_util.c:112-116.
         let query_full = &ctx.aa_seq;
         let query = &query_full[1..query_full.len() - 1];
-        let subject_full = &s_frame.aa_seq;
+        let subject_full = &s_frame_scoring.aa_seq;
         let subject = &subject_full[1..subject_full.len() - 1];
 
         // NCBI: query = query_start + hsp->query.offset (0-based offsets)
@@ -269,10 +271,29 @@ pub(crate) fn reevaluate_ungapped_hsp_list(
         // Reference: blast_filter.c:1381-1382, blast_util.c:112-116.
         let query_nomask_full = ctx.aa_seq_nomask.as_ref().unwrap_or(&ctx.aa_seq);
         let query_nomask = &query_nomask_full[1..query_nomask_full.len() - 1];
+        // NCBI uses the HSP's scoring subject for reevaluation above, then
+        // recomputes identities from the reporting sequence buffers.
+        //
+        // NCBI reference:
+        // ncbi-blast/c++/src/algo/blast/core/blast_hits.c:2708-2717
+        // ```c
+        // const Uint1* query_nomask = query_blk->sequence_nomask +
+        //     query_info->contexts[context].query_offset;
+        // Blast_HSPGetNumIdentitiesAndPositives(query_nomask,
+        //     subject_start, hsp, score_params->options, &align_length, sbp);
+        // ```
+        //
+        // For local `-subject` TBLASTX, NCBI BLAST+ scores the translated
+        // subject with the search-time subject buffer, while qseq/sseq and
+        // identity reporting follow the requested DB genetic code. Keep those
+        // buffers separate so code-4 TGA->W display parity does not change the
+        // raw-score path.
+        let subject_report_full = &s_frame_report.aa_seq;
+        let subject_report = &subject_report_full[1..subject_report_full.len() - 1];
         let num_ident = if let Some((num_ident, _align_length)) =
             get_num_identities_and_positives_ungapped(
                 query_nomask,
-                subject,
+                subject_report,
                 new_qs,
                 new_ss,
                 new_len,

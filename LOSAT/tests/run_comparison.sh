@@ -12,7 +12,7 @@ LOSAT_BIN="../target/release/LOSAT"
 # Part 1: LOSAT Execution
 # ==========================================
 echo "Starting LOSAT commands..."
-
+<<COMMENTOUT
 # --- LOSATN Commands (Default / Megablast behavior) ---
 
 # NZ_CP006932 self (Default/Megablast)
@@ -92,7 +92,7 @@ for losatp_case in "${LOSATP_CASES[@]}"; do
     run_losatp_case "$query" "$subject" "$stem"
 done
 
-
+COMMENTOUT
 echo "Finished LOSATP commands!"
 # --- TLOSATX Commands (Genetic Code: 4) ---
 echo "Starting TLOSATX commands..."
@@ -141,7 +141,7 @@ echo "Starting MeenMJNV vs MejoMJNV (TLOSATX)..."
 # AvCLPV vs PsCLPV
 echo "Starting AvCLPV vs PsCLPV (TLOSATX)..."
 (time $LOSAT_BIN tblastx -q ./fasta/AvCLPV.fasta -s ./fasta/PsCLPV.fasta -o ./losat_out/AvCLPV.PsCLPV.tlosatx.n8.out --query-gencode 1 --db-gencode 1 -n 8 )&>./losat_out/AvCLPV.PsCLPV.tlosatx.n8.log 
-<<COMMENTOUT
+
 echo "Starting NZ_CP006932 self (TLOSATX)..."
 # NZ_CP006932 self
 (time $LOSAT_BIN tblastx -q ./fasta/NZ_CP006932.fasta -s ./fasta/NZ_CP006932.fasta -o ./losat_out/NZ_CP006932.NZ_CP006932.tlosatx.n8.out --query-gencode 4 --db-gencode 4 -n 8 )&>./losat_out/NZ_CP006932.NZ_CP006932.tlosatx.n8.log 
@@ -157,10 +157,10 @@ echo "Starting AP027131 vs AP027133 (TLOSATX)..."
 echo "Starting AP027133 vs AP027132 (TLOSATX)..."
 # AP027133 vs AP027132
 (time $LOSAT_BIN tblastx -q ./fasta/AP027133.fasta -s ./fasta/AP027132.fasta -o ./losat_out/AP027133.AP027132.tlosatx.n8.out --query-gencode 4 --db-gencode 4 -n 8 )&>./losat_out/AP027133.AP027132.tlosatx.n8.log 
-COMMENTOUT
+
 echo "Finished TLOSATX commands!"
 
-COMMENTOUT
+
 
 echo "Finished LOSAT commands!"
 
@@ -244,7 +244,7 @@ echo "Starting AvCLPV vs PsCLPV (BLAST)..."
 # makeblastdb -in AP027132.fasta -dbtype nucl -title AP027132 -parse_seqids -hash_index -out AP027132
 # makeblastdb -in AP027133.fasta -dbtype nucl -title AP027133 -parse_seqids -hash_index -out AP027133
 
-
+COMMENTOUT
 # NZ_CP006932 self
 (time tblastx -query ./fasta/NZ_CP006932.fasta -db ./fasta/NZ_CP006932 -out ./blast_out/NZ_CP006932.NZ_CP006932.tblastx.n8.out -query_gencode 4 -db_gencode 4 -num_threads 8 -outfmt 6 )&>./blast_out/NZ_CP006932.NZ_CP006932.tblastx.n8.log &
 

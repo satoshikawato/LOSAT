@@ -109,6 +109,17 @@ impl SubjectSplitState {
         let residual = 0;
         self.offset = self.next - residual;
         let offset = self.offset;
+        // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_engine.c:580-584
+        // ```c
+        // Blast_HSPListAdjustOffsets(hsp_list, backup.offset);
+        // overlap = (backup.offset == backup.hard_ranges[backup.hm_index].left) ?
+        //           0 : dbseq_chunk_overlap;
+        // ```
+        //
+        // Preserve the current hard-range start before `hm_index` advances in the
+        // final-chunk branch below; the first chunk in a hard range has no prior
+        // chunk to overlap.
+        let hard_left = self.hard_ranges[self.hm_index].0;
         let hard_right = self.hard_ranges[self.hm_index].1;
         let length = if offset + (MAX_DBSEQ_LEN as i32) < hard_right {
             self.next = offset + MAX_DBSEQ_LEN as i32 - chunk_overlap as i32;
@@ -124,20 +135,7 @@ impl SubjectSplitState {
             length
         };
 
-        // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_engine.c:580-584
-        // ```c
-        // Blast_HSPListAdjustOffsets(hsp_list, backup.offset);
-        // overlap = (backup.offset == backup.hard_ranges[backup.hm_index].left) ?
-        //           0 : dbseq_chunk_overlap;
-        // status = Blast_HSPListsMerge(..., &(backup.offset), INT4_MIN,
-        //                              overlap, ...);
-        // ```
-        let range_start = if self.hm_index < self.hard_ranges.len() {
-            self.hard_ranges[self.hm_index].0
-        } else {
-            self.full_right
-        };
-        let overlap = if offset == range_start {
+        let overlap = if offset == hard_left {
             0
         } else {
             chunk_overlap
@@ -2617,5 +2615,132 @@ mod tests {
         merge_tblastx_subject_chunk_hits(&mut combined, incoming, 100, DBSEQ_CHUNK_OVERLAP);
 
         assert_eq!(combined.len(), 2);
+    }
+
+    // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_engine.c:221-310
+    // ```c
+    // if (backup->offset + MAX_DBSEQ_LEN <
+    //     backup->hard_ranges[backup->hm_index].right) {
+    //     subject->length = MAX_DBSEQ_LEN;
+    //     backup->next = backup->offset + MAX_DBSEQ_LEN - dbseq_chunk_overlap;
+    // } else {
+    //     subject->length = backup->hard_ranges[backup->hm_index].right
+    //                     - backup->offset;
+    // }
+    // ```
+    #[test]
+    fn subject_split_state_keeps_short_subjects_as_single_chunk() {
+        let mut split = SubjectSplitState::new(MAX_DBSEQ_LEN - 1);
+
+        assert_eq!(
+            split.next_chunk(DBSEQ_CHUNK_OVERLAP),
+            SubjectChunkStatus::Ok(SubjectChunk {
+                offset: 0,
+                length: MAX_DBSEQ_LEN - 1,
+                overlap: 0
+            })
+        );
+        assert_eq!(
+            split.next_chunk(DBSEQ_CHUNK_OVERLAP),
+            SubjectChunkStatus::Done
+        );
+    }
+
+    // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_hits.c:2857-2995
+    // ```c
+    // if (contexts_per_query < 0) {      /* subject seq is split */
+    //    if (hsp1->subject.end > split_offsets[0]) { ... }
+    //    if (hsp2->subject.offset < split_offsets[0] + chunk_overlap_size) { ... }
+    // }
+    // ```
+    #[test]
+    fn merge_tblastx_subject_chunk_hits_keeps_previous_hits_before_overlap_strip() {
+        let mut combined = vec![make_chunk_hit(0, 0, 90, 0, 90, 100)];
+        let incoming = vec![make_chunk_hit(0, 100, 180, 100, 180, 120)];
+
+        merge_tblastx_subject_chunk_hits(&mut combined, incoming, 100, DBSEQ_CHUNK_OVERLAP);
+
+        assert_eq!(combined.len(), 2);
+    }
+
+    // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_hits.c:2857-2995
+    // ```c
+    // if (contexts_per_query < 0) {      /* subject seq is split */
+    //    if (hsp2->subject.offset < split_offsets[0] + chunk_overlap_size) { ... }
+    // }
+    // ```
+    #[test]
+    fn merge_tblastx_subject_chunk_hits_keeps_current_hits_after_overlap_strip() {
+        let mut combined = vec![make_chunk_hit(0, 0, 140, 0, 140, 100)];
+        let incoming = vec![make_chunk_hit(0, 200, 260, 200, 260, 120)];
+
+        merge_tblastx_subject_chunk_hits(&mut combined, incoming, 100, DBSEQ_CHUNK_OVERLAP);
+
+        assert_eq!(combined.len(), 2);
+    }
+
+    // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_hits.c:1488-1533
+    // ```c
+    // if(hsp1->subject.frame != hsp2->subject.frame) return FALSE;
+    // if (CONTAINED_IN_HSP(...) || CONTAINED_IN_HSP(...)) {
+    //    ...
+    //    return TRUE;
+    // }
+    // ```
+    #[test]
+    fn merge_tblastx_subject_chunk_hits_merges_hsp_fully_inside_overlap_strip() {
+        let mut combined = vec![make_chunk_hit(0, 0, 190, 0, 190, 190)];
+        let incoming = vec![make_chunk_hit(0, 120, 180, 120, 180, 60)];
+
+        merge_tblastx_subject_chunk_hits(&mut combined, incoming, 100, DBSEQ_CHUNK_OVERLAP);
+
+        assert_eq!(combined.len(), 1);
+        assert_eq!(combined[0].q_aa_start, 0);
+        assert_eq!(combined[0].q_aa_end, 190);
+        assert_eq!(combined[0].s_aa_start, 0);
+        assert_eq!(combined[0].s_aa_end, 190);
+    }
+
+    // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_hits.c:1488-1533
+    // ```c
+    // if(hsp1->subject.frame != hsp2->subject.frame) return FALSE;
+    // ```
+    #[test]
+    fn merge_tblastx_subject_chunk_hits_merges_negative_subject_frame_overlap() {
+        let mut combined = vec![make_chunk_hit(0, 0, 120, 0, 120, 100)];
+        combined[0].s_frame = -1;
+        let mut incoming_hit = make_chunk_hit(0, 100, 220, 100, 220, 120);
+        incoming_hit.s_frame = -1;
+
+        merge_tblastx_subject_chunk_hits(
+            &mut combined,
+            vec![incoming_hit],
+            100,
+            DBSEQ_CHUNK_OVERLAP,
+        );
+
+        assert_eq!(combined.len(), 1);
+        assert_eq!(combined[0].s_frame, -1);
+        assert_eq!(combined[0].q_aa_end, 220);
+        assert_eq!(combined[0].s_aa_end, 220);
+    }
+
+    // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_hits.c:3038-3051
+    // ```c
+    // hsp->subject.offset += offset;
+    // hsp->subject.end += offset;
+    // hsp->subject.gapped_start += offset;
+    // ```
+    #[test]
+    fn adjust_tblastx_chunk_subject_offsets_adjusts_subject_coordinates() {
+        let mut hits = vec![make_chunk_hit(0, 10, 40, 20, 50, 100)];
+
+        adjust_tblastx_chunk_subject_offsets(&mut hits, 500);
+
+        assert_eq!(hits[0].s_aa_start, 520);
+        assert_eq!(hits[0].s_aa_end, 550);
+        assert_eq!(hits[0].s_seed_off, 520);
+        assert_eq!(hits[0].q_aa_start, 10);
+        assert_eq!(hits[0].q_seed_off, 10);
     }
 }

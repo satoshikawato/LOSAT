@@ -2858,6 +2858,34 @@ pub fn extend_gapped_heuristic_with_traceback(
 }
 
 // NCBI reference: ncbi-blast/c++/include/algo/blast/core/blast_gapalign.h:69-80 (BlastGapAlignStruct reuse)
+// NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_gapalign.c:4609-4647
+// ```c
+// score_left = ALIGN_EX(query, subject, q_start+1, s_start+1,
+//                       &private_q_length, &private_s_length,
+//                       rev_prelim_tback, gap_align, score_params,
+//                       q_start, FALSE, TRUE, fence_hit);
+// ...
+// score_right = ALIGN_EX(query+q_start, subject+s_start,
+//                        q_length-q_start-1, s_length-s_start-1,
+//                        &private_q_length, &private_s_length,
+//                        fwd_prelim_tback, gap_align, score_params,
+//                        q_start, FALSE, FALSE, fence_hit);
+// ```
+#[inline]
+fn debug_coords_traceback_enabled(qs: usize, ss: usize) -> bool {
+    let debug_all = std::env::var_os("LOSAT_DEBUG_COORDS").is_some();
+    let Some(filter) = std::env::var_os("LOSAT_DEBUG_COORDS_START") else {
+        return debug_all;
+    };
+    let filter = filter.to_string_lossy();
+    let Some((q_filter, s_filter)) = filter.split_once(',') else {
+        return false;
+    };
+
+    q_filter.trim().parse::<usize>().ok() == Some(qs)
+        && s_filter.trim().parse::<usize>().ok() == Some(ss)
+}
+
 pub fn extend_gapped_heuristic_with_traceback_with_scratch(
     q_seq: &[u8],
     s_seq: &[u8],
@@ -2981,6 +3009,8 @@ pub fn extend_gapped_heuristic_with_traceback_with_scratch(
     // ```
     // Use the left traceback Vec as the final GapEditScript buffer and move the
     // right traceback ops into it, avoiding the old left copy plus right slice copy.
+    let left_edit_op_count = left_edit_ops.len();
+    let right_edit_op_count = right_edit_ops.len();
     let mut combined_edit_ops = left_edit_ops;
     if !right_edit_ops.is_empty() {
         combined_edit_ops.reserve(right_edit_ops.len());
@@ -3086,6 +3116,50 @@ pub fn extend_gapped_heuristic_with_traceback_with_scratch(
 
     let (total_matches, total_mismatches, total_gaps, total_gap_letters) =
         stats_from_edit_ops(q_seq, s_seq, final_qs, final_ss, &combined_edit_ops);
+
+    // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_gapalign.c:4609-4647
+    // ```c
+    // score_left = ALIGN_EX(query, subject, q_start+1, s_start+1,
+    //                       &private_q_length, &private_s_length,
+    //                       rev_prelim_tback, gap_align, score_params,
+    //                       q_start, FALSE, TRUE, fence_hit);
+    // gap_align->query_start = q_start - private_q_length + 1;
+    // gap_align->subject_start = s_start - private_s_length + 1;
+    // ...
+    // score_right = ALIGN_EX(query+q_start, subject+s_start,
+    //                        q_length-q_start-1, s_length-s_start-1,
+    //                        &private_q_length, &private_s_length,
+    //                        fwd_prelim_tback, gap_align, score_params,
+    //                        q_start, FALSE, FALSE, fence_hit);
+    // gap_align->query_stop = q_start + private_q_length + 1;
+    // gap_align->subject_stop = s_start + private_s_length + 1;
+    // ```
+    // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_gapalign.c:4683-4712
+    // ```c
+    // while (esp->size && esp->op_type[0] != eGapAlignSub) { ... }
+    // while (esp->size && esp->op_type[i-1] != eGapAlignSub) { ... }
+    // ```
+    if debug_coords_traceback_enabled(qs, ss) {
+        eprintln!(
+            "[COORDS_TRACEBACK] start=({}, {}) left=q{} s{} score={} ops={} right=q{} s{} score={} ops={} final=q{}..{} s{}..{} total_score={} trimmed_ops={}",
+            qs,
+            ss,
+            left_q_consumed,
+            left_s_consumed,
+            left_score,
+            left_edit_op_count,
+            right_q_consumed,
+            right_s_consumed,
+            right_score,
+            right_edit_op_count,
+            final_qs,
+            final_qe,
+            final_ss,
+            final_se,
+            total_score,
+            combined_edit_ops.len()
+        );
+    }
 
     (
         final_qs,

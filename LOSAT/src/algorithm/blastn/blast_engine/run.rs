@@ -8286,10 +8286,23 @@ fn run_internal(args: BlastnArgs, mut in_memory: Option<BlastnInMemoryRun<'_>>) 
                         ctx.frame,
                     )
                 {
+                    // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_gapalign.c:4071-4076
+                    // ```c
+                    // status = Blast_HSPInit(gap_align->query_start,
+                    //               gap_align->query_stop, gap_align->subject_start,
+                    //               gap_align->subject_stop,
+                    //               init_hsp->offsets.qs_offsets.q_off,
+                    //               init_hsp->offsets.qs_offsets.s_off, context,
+                    //               query_frame, subject->frame, gap_align->score,
+                    //               &(gap_align->edit_script), &new_hsp);
+                    // ```
+                    // The init_hsp q_off/s_off values become the traceback
+                    // gapped_start seed that BlastGetStartForGappedAlignmentNucl
+                    // may keep or move.
                     blastn_trace::log(
                         "traceback",
                         format!(
-                            "subject={}({}) context={} prelim=q{}..{} s{}..{} raw_score={} tree_contains={} containing_hsp={:?}",
+                            "subject={}({}) context={} prelim=q{}..{} s{}..{} seed=({}, {}) raw_score={} tree_contains={} containing_hsp={:?}",
                             s_id,
                             s_idx,
                             prelim.context_idx,
@@ -8297,6 +8310,8 @@ fn run_internal(args: BlastnArgs, mut in_memory: Option<BlastnInMemoryRun<'_>>) 
                             prelim.prelim_qe,
                             prelim.prelim_ss,
                             prelim.prelim_se,
+                            prelim.seed_qs,
+                            prelim.seed_ss,
                             prelim.prelim_score,
                             prelim_traceback_contained,
                             traceback_containing_hsp
@@ -8616,6 +8631,35 @@ fn run_internal(args: BlastnArgs, mut in_memory: Option<BlastnInMemoryRun<'_>>) 
                     traceback_alignment_lengths.push(aln_len.min(u32::MAX as usize) as u32);
                 }
 
+                if use_dp && hsp_test(matches, aln_len, percent_identity, min_hit_length) {
+                    if let Some(timing) = timing_ref {
+                        BlastnTiming::record_count(
+                            &timing.traceback_deleted_identity_length_hsps,
+                            1,
+                        );
+                    }
+                    if let (Some(timing), Some(hsp_build_start)) = (timing_ref, hsp_build_start) {
+                        BlastnTiming::record_duration(
+                            &timing.traceback_hsp_build_ns,
+                            hsp_build_start,
+                        );
+                    }
+                    continue;
+                }
+
+                // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_traceback.c:583-612
+                // ```c
+                // Blast_HSPUpdateWithTraceback(gap_align, hsp);
+                // if (!delete_hsp && !kGreedyTraceback) {
+                //     Blast_HSPGetNumIdentitiesAndPositives(..., &align_length, ...);
+                //     delete_hsp = Blast_HSPTest(hsp, hit_options, align_length);
+                // }
+                // if (!delete_hsp) {
+                //     Blast_HSPAdjustSubjectOffset(hsp, start_shift);
+                //     status = BlastIntervalTreeAddHSP(hsp, tree, query_info,
+                //                                eQueryAndSubject);
+                // }
+                // ```
                 let final_tree_hsp = TreeHsp {
                     query_offset: final_qs as i32,
                     query_end: final_qe as i32,
@@ -8632,22 +8676,6 @@ fn run_internal(args: BlastnArgs, mut in_memory: Option<BlastnInMemoryRun<'_>>) 
                     prelim.query_context_offset,
                     IndexMethod::QueryAndSubject,
                 );
-
-                if use_dp && hsp_test(matches, aln_len, percent_identity, min_hit_length) {
-                    if let Some(timing) = timing_ref {
-                        BlastnTiming::record_count(
-                            &timing.traceback_deleted_identity_length_hsps,
-                            1,
-                        );
-                    }
-                    if let (Some(timing), Some(hsp_build_start)) = (timing_ref, hsp_build_start) {
-                        BlastnTiming::record_duration(
-                            &timing.traceback_hsp_build_ns,
-                            hsp_build_start,
-                        );
-                    }
-                    continue;
-                }
 
                 // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_traceback.c:234-250
                 // ```c

@@ -124,11 +124,6 @@
 [DEBUG LINKING_FILTER] subject_len_nucl=657101, group_size=137954
 [DEBUG LINKING_FILTER] INDEX 0 (small gap): cutoff=41, filtered=0, passed=0, total=0, filter_rate=0.00%
 [DEBUG LINKING_FILTER] INDEX 1 (large gap): cutoff=46, filtered=92368, passed=13726241, total=13818609, filter_rate=0.67%
-[DEBUG HSP_STATS] After reevaluation: 95183 HSPs
-[DEBUG HSP_STATS] Saved by cutoff: 516395
-[DEBUG HSP_STATS] Filtered by cutoff: 39492250
-[DEBUG HSP_STATS] Filtered by reeval: 0
-[DEBUG HSP_STATS] Score range: 41 - 11401 (avg: 56.20)
 [DEBUG LINKING_CUTOFF] avg_query_length=219033, subject_len_nucl=657101
 [DEBUG LINKING_CUTOFF] query_length_after_adj=218977, subject_length_after_adj=218977
 [DEBUG LINKING_CUTOFF] expected_length=56
@@ -153,14 +148,7 @@
 [DEBUG LINKING_FILTER] subject_len_nucl=657101, group_size=30737
 [DEBUG LINKING_FILTER] INDEX 0 (small gap): cutoff=41, filtered=0, passed=0, total=0, filter_rate=0.00%
 [DEBUG LINKING_FILTER] INDEX 1 (large gap): cutoff=46, filtered=1080, passed=8614919, total=8615999, filter_rate=0.01%
-[DEBUG OUTPUT_FILTER] Total linked HSPs: 95183
-[DEBUG OUTPUT_FILTER] Single HSPs (linked_set=false): 2345
-[DEBUG OUTPUT_FILTER] Chain heads (linked_set=true, start_of_chain=true): 6113
-[DEBUG OUTPUT_FILTER] Chain members (linked_set=true, start_of_chain=false): 86725 (included in output)
-[DEBUG OUTPUT_FILTER] Filtered by E-value (threshold=10): 743
-[DEBUG OUTPUT_FILTER] Expected after E-value filter: 94440 (all HSPs - E-value filtered)
-[DEBUG OUTPUT_FILTER] Final hits after filtering: 94440
 
-real	10m22.554s
-user	25m27.741s
-sys	0m0.301s
+real	9m53.526s
+user	24m40.337s
+sys	0m0.562s

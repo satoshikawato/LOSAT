@@ -10,6 +10,7 @@ from __future__ import annotations
 import argparse
 import csv
 import math
+import subprocess
 import sys
 from collections import Counter
 from dataclasses import dataclass
@@ -268,6 +269,108 @@ def read_manifest(path: Path) -> list[dict[str, str]]:
     return list(csv.DictReader(lines, delimiter="\t"))
 
 
+def manifest_bool(row: dict[str, str], field: str) -> bool:
+    value = row[field].strip().lower()
+    if value in {"1", "true", "yes", "on"}:
+        return True
+    if value in {"0", "false", "no", "off"}:
+        return False
+    raise ValueError(f"{row['case_id']}: invalid boolean {field}={row[field]!r}")
+
+
+def require_manifest_condition(row: dict[str, str], condition: bool, message: str) -> None:
+    if not condition:
+        raise ValueError(f"{row['case_id']}: {message}")
+
+
+def build_losat_command(row: dict[str, str], losat_bin: Path) -> list[str]:
+    # NCBI reference: ncbi-blast/c++/src/algo/blast/blastinput/cmdline_flags.cpp:46-97
+    # ```c
+    # const string kArgQuery("query");
+    # const string kArgSubject("subject");
+    # const string kTask("task");
+    # const string kArgNumThreads("num_threads");
+    # const string kArgEvalue("evalue");
+    # const string kArgMaxTargetSequences("max_target_seqs");
+    # const string kArgGapOpen("gapopen");
+    # const string kArgGapExtend("gapextend");
+    # const string kArgMismatch("penalty");
+    # const string kArgMatch("reward");
+    # ```
+    # NCBI reference: ncbi-blast/c++/src/algo/blast/blastinput/blast_args.cpp:203-207
+    # ```c
+    # arg_desc.AddOptionalKey(kArgMaxHSPsPerSubject, "int_value",
+    #                    "Set maximum number of HSPs per subject sequence to save for each query",
+    #                    CArgDescriptions::eInteger);
+    # ```
+    # NCBI reference: ncbi-blast/c++/src/algo/blast/blastinput/blast_args.cpp:2960-2968
+    # ```c
+    # if (args.Exist(kArgMaxTargetSequences) && args[kArgMaxTargetSequences]) {
+    #     hitlist_size = args[kArgMaxTargetSequences].AsInteger();
+    # }
+    # m_NumDescriptions = hitlist_size;
+    # m_NumAlignments = hitlist_size;
+    # ```
+    require_manifest_condition(row, manifest_bool(row, "dust"), "LOSAT CLI refresh currently supports only dust=true")
+    require_manifest_condition(
+        row,
+        manifest_bool(row, "soft_masking"),
+        "LOSAT CLI refresh currently supports only soft_masking=true",
+    )
+    require_manifest_condition(row, row["strand"] == "both", "LOSAT CLI refresh currently supports only strand=both")
+    require_manifest_condition(
+        row,
+        int(row["window_size"]) == 0,
+        "LOSAT CLI refresh currently supports only manifest window_size=0",
+    )
+    require_manifest_condition(
+        row,
+        int(row["scan_range"]) == 0,
+        "LOSAT CLI refresh currently supports only manifest scan_range=0",
+    )
+
+    return [
+        str(losat_bin),
+        "blastn",
+        "-q",
+        row["query"],
+        "-s",
+        row["subject"],
+        "--task",
+        row["task"],
+        "--reward",
+        row["reward"],
+        f"--penalty={row['penalty']}",
+        "--gap-open",
+        row["gap_open"],
+        "--gap-extend",
+        row["gap_extend"],
+        "--word-size",
+        row["word_size"],
+        "-n",
+        row["num_threads"],
+        "--evalue",
+        row["evalue"],
+        "--max-target-seqs",
+        row["max_target_seqs"],
+        "--max-hsps-per-subject",
+        row["max_hsps_per_subject"],
+        "--outfmt",
+        row["outfmt"],
+        "-o",
+        row["losat_out"],
+    ]
+
+
+def refresh_losat_output(root: Path, row: dict[str, str], losat_bin: Path, print_command: bool) -> None:
+    losat_out = root / row["losat_out"]
+    losat_out.parent.mkdir(parents=True, exist_ok=True)
+    cmd = build_losat_command(row, losat_bin)
+    if print_command:
+        print("refresh_losat:", " ".join(cmd))
+    subprocess.run(cmd, cwd=root, check=True)
+
+
 def select_targets(result: dict[str, object]) -> list[tuple[str, HspRow]]:
     ncbi_rows: list[HspRow] = result["ncbi_rows"]  # type: ignore[assignment]
     losat_rows: list[HspRow] = result["losat_rows"]  # type: ignore[assignment]
@@ -344,14 +447,29 @@ def main() -> int:
     parser.add_argument("--losat", type=Path, help="Direct LOSAT outfmt 6/7 path.")
     parser.add_argument("--limit", type=int, default=5)
     parser.add_argument("--write-targets", type=Path)
+    parser.add_argument(
+        "--refresh-losat",
+        action="store_true",
+        help="Regenerate selected LOSAT output paths from the manifest before comparison.",
+    )
+    parser.add_argument(
+        "--losat-bin",
+        type=Path,
+        default=Path("target/release/LOSAT"),
+        help="LOSAT executable to use with --refresh-losat, relative to cwd unless absolute.",
+    )
+    parser.add_argument("--print-refresh-commands", action="store_true")
     parser.add_argument("--fail-on-diff", action="store_true")
     args = parser.parse_args()
 
     root = Path.cwd()
     cases: list[tuple[str, Path, Path]] = []
+    refresh_rows: list[dict[str, str]] = []
     if args.ncbi or args.losat:
         if not (args.ncbi and args.losat):
             parser.error("--ncbi and --losat must be provided together")
+        if args.refresh_losat:
+            parser.error("--refresh-losat requires manifest-selected cases, not direct --ncbi/--losat paths")
         cases.append(("direct", args.ncbi, args.losat))
     else:
         wanted = set(args.case_id or [])
@@ -359,10 +477,16 @@ def main() -> int:
             case_id = row["case_id"]
             if wanted and case_id not in wanted:
                 continue
+            refresh_rows.append(row)
             cases.append((case_id, root / row["ncbi_out"], root / row["losat_out"]))
 
     if not cases:
         parser.error("no cases selected")
+
+    if args.refresh_losat:
+        losat_bin = args.losat_bin if args.losat_bin.is_absolute() else root / args.losat_bin
+        for row in refresh_rows:
+            refresh_losat_output(root, row, losat_bin, args.print_refresh_commands)
 
     results = []
     failed = False

@@ -23,7 +23,7 @@ use crate::core::blast_encoding::{
     encode_iupac_to_blastna, encode_iupac_to_ncbi2na_packed, COMPRESSION_RATIO,
 };
 use crate::stats::length_adjustment::compute_length_adjustment_ncbi;
-use crate::stats::lookup_nucl_params;
+use crate::stats::{lookup_nucl_params, requires_even_scores};
 
 // Import from parent blastn module (super::super:: because we're in blast_engine/)
 use super::super::alignment::{
@@ -99,13 +99,28 @@ fn calculate_blastn_context_statistics(
     raw_score: i32,
     params: &crate::stats::KarlinParams,
     eff_searchsp: i64,
+    round_down_evalue_score: bool,
 ) -> (f64, f64) {
     let log_k = params.k.ln();
     let bit_score = (params.lambda * (raw_score as f64) - log_k) / NCBIMATH_LN2;
+    // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_hits.c:1864-1870
+    // ```c
+    // /* Round score down to even number for E-value calculations only. */
+    // score = hsp->score;
+    // if (hsp_list && hsp_list->hspcnt != 0
+    //         && gapped_calculation && sbp->round_down) {
+    //     score &= ~1;
+    // }
+    // ```
+    let evalue_score = if round_down_evalue_score {
+        raw_score & !1
+    } else {
+        raw_score
+    };
     let e_value = if params.lambda < 0.0 || params.k < 0.0 || params.h < 0.0 {
         -1.0
     } else {
-        (eff_searchsp as f64) * (-(params.lambda) * (raw_score as f64) + log_k).exp()
+        (eff_searchsp as f64) * (-(params.lambda) * (evalue_score as f64) + log_k).exp()
     };
     (bit_score, e_value)
 }
@@ -4621,6 +4636,15 @@ fn run_internal(args: BlastnArgs, mut in_memory: Option<BlastnInMemoryRun<'_>>) 
     // Use gapped params for E-value calculations (same as before)
     let params = params_gapped.clone();
 
+    // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_stat.c:3300-3313
+    // ```c
+    // } else if (reward == 2 && penalty == -3) {
+    //     if ((status=s_SplitArrayOf8(blastn_values_2_3, ...)))
+    //        return status;
+    //     *round_down = TRUE;
+    // ```
+    let round_down_evalue_score = requires_even_scores(config.reward, config.penalty);
+
     // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_setup.c:821-846
     // ```c
     // BLAST_ComputeLengthAdjustment(..., query_length, db_length, db_num_seqs, &length_adjustment);
@@ -8690,8 +8714,12 @@ fn run_internal(args: BlastnArgs, mut in_memory: Option<BlastnInMemoryRun<'_>>) 
                 //                      query_info->contexts[hsp->context].eff_searchsp);
                 // ```
                 let eff_searchsp = query_eff_searchsp[prelim.context_idx as usize];
-                let (bit_score, eval) =
-                    calculate_blastn_context_statistics(score, &params_for_closure, eff_searchsp);
+                let (bit_score, eval) = calculate_blastn_context_statistics(
+                    score,
+                    &params_for_closure,
+                    eff_searchsp,
+                    round_down_evalue_score,
+                );
 
                 if eval > evalue_threshold {
                     if let Some(timing) = timing_ref {
@@ -8857,6 +8885,7 @@ fn run_internal(args: BlastnArgs, mut in_memory: Option<BlastnInMemoryRun<'_>>) 
                 eff_searchsp,
                 db_len: db_len_total,
                 db_num_seqs,
+                round_down_evalue_score,
             };
 
             // NCBI reference: blast_traceback.c:653-665 (reevaluate with blastna sequences)
@@ -9623,11 +9652,49 @@ mod tests {
         let raw_score = 46;
 
         let (bit_score, evalue) =
-            calculate_blastn_context_statistics(raw_score, &params, eff_searchsp);
+            calculate_blastn_context_statistics(raw_score, &params, eff_searchsp, false);
 
         let expected_bit_score = (params.lambda * raw_score as f64 - params.k.ln()) / NCBIMATH_LN2;
         let expected_evalue =
             (eff_searchsp as f64) * (-(params.lambda) * raw_score as f64 + params.k.ln()).exp();
+
+        assert_eq!(bit_score, expected_bit_score);
+        assert_eq!(evalue, expected_evalue);
+    }
+
+    // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_hits.c:1864-1870
+    // ```c
+    // score = hsp->score;
+    // if (hsp_list && hsp_list->hspcnt != 0
+    //         && gapped_calculation && sbp->round_down) {
+    //     score &= ~1;
+    // }
+    // ```
+    // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_hits.c:1923-1926
+    // ```c
+    // hsp->bit_score =
+    //    (hsp->score*kbp[hsp->context]->Lambda - kbp[hsp->context]->logK) /
+    //    NCBIMATH_LN2;
+    // ```
+    #[test]
+    fn test_blastn_context_statistics_rounds_evalue_score_only() {
+        let params = crate::stats::KarlinParams {
+            lambda: 0.625,
+            k: 0.41,
+            h: 0.78,
+            alpha: 0.8,
+            beta: -2.0,
+        };
+        let eff_searchsp = 86_850_803_746_i64;
+        let raw_score = 45;
+
+        let (bit_score, evalue) =
+            calculate_blastn_context_statistics(raw_score, &params, eff_searchsp, true);
+
+        let expected_bit_score = (params.lambda * raw_score as f64 - params.k.ln()) / NCBIMATH_LN2;
+        let expected_evalue_score = raw_score & !1;
+        let expected_evalue = (eff_searchsp as f64)
+            * (-(params.lambda) * expected_evalue_score as f64 + params.k.ln()).exp();
 
         assert_eq!(bit_score, expected_bit_score);
         assert_eq!(evalue, expected_evalue);

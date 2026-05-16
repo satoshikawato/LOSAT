@@ -948,6 +948,15 @@ pub struct ReevalParams {
     pub eff_searchsp: i64,
     pub db_len: usize,
     pub db_num_seqs: usize,
+    // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_hits.c:1864-1870
+    // ```c
+    // score = hsp->score;
+    // if (hsp_list && hsp_list->hspcnt != 0
+    //         && gapped_calculation && sbp->round_down) {
+    //     score &= ~1;
+    // }
+    // ```
+    pub round_down_evalue_score: bool,
 }
 
 /// Re-evaluate a gapped HSP after trimming, finding the best-scoring sub-alignment.
@@ -1449,11 +1458,29 @@ pub fn reevaluate_hsp_with_ambiguities_gapped_ex(
         hit.bit_score = ((params.lambda * (score as f64)) - log_k) / LN2;
 
         // E-value calculation
-        // NCBI reference: blast_stat.c BLAST_KarlinStoE_simple
+        // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_hits.c:1864-1870
+        // ```c
+        // /* Round score down to even number for E-value calculations only. */
+        // score = hsp->score;
+        // if (hsp_list && hsp_list->hspcnt != 0
+        //         && gapped_calculation && sbp->round_down) {
+        //     score &= ~1;
+        // }
+        // ```
+        let evalue_score = if params.round_down_evalue_score {
+            score & !1
+        } else {
+            score
+        };
+        // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_stat.c:4157-4171
+        // ```c
+        // return (double) searchsp * exp((double)(-Lambda * S) + kbp->logK);
+        // ```
         // E = K * searchsp * exp(-lambda * score)
         if params.eff_searchsp > 0 {
-            hit.e_value =
-                params.k * (params.eff_searchsp as f64) * (-params.lambda * (score as f64)).exp();
+            hit.e_value = params.k
+                * (params.eff_searchsp as f64)
+                * (-params.lambda * (evalue_score as f64)).exp();
         }
     }
 

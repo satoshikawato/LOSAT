@@ -11,6 +11,110 @@ use std::sync::Arc;
 // ```
 const MAX_DBSEQ_LEN: usize = 5_000_000;
 
+// NCBI reference: ncbi-blast/c++/include/algo/blast/core/blast_gapalign.h:54
+// ```c
+// #define MAX_DBSEQ_LEN 5000000
+// ```
+#[inline]
+fn tblastx_max_dbseq_len_for_run() -> usize {
+    #[cfg(debug_assertions)]
+    {
+        if let Ok(value) = std::env::var("LOSAT_TBLASTX_TEST_CHUNK_SIZE") {
+            if let Ok(parsed) = value.parse::<usize>() {
+                return parsed.max(DBSEQ_CHUNK_OVERLAP + 3);
+            }
+        }
+    }
+    MAX_DBSEQ_LEN
+}
+
+// NCBI reference: ncbi-blast/c++/src/algo/blast/core/aa_ungapped.c:492-505
+// ```c
+// while (scan_range[1] <= scan_range[2]) {
+//     hits = scansub(lookup_wrap, subject, offset_pairs, array_size, scan_range);
+// ```
+#[inline]
+fn tblastx_scan_chunk_size_for_run(search_unit_len: usize, num_threads: usize) -> usize {
+    #[cfg(debug_assertions)]
+    {
+        if let Ok(value) = std::env::var("LOSAT_TBLASTX_TEST_SCAN_CHUNK_SIZE") {
+            if let Ok(parsed) = value.parse::<usize>() {
+                return parsed.max(1);
+            }
+        }
+    }
+
+    if num_threads <= 1 {
+        search_unit_len.max(1)
+    } else {
+        search_unit_len.div_ceil(num_threads).max(1)
+    }
+}
+
+// NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_aascan.c:75-127
+// ```c
+// while (s_DetermineScanningOffsets(subject, word_length, word_length, s_range)) {
+//     ...
+//     for (s = s_first; s <= s_last; s++) {
+// ```
+fn tblastx_scan_interiors(
+    search_unit_len: usize,
+    scan_chunk_size: Option<usize>,
+) -> Vec<(usize, usize)> {
+    let chunk_size = scan_chunk_size.unwrap_or(search_unit_len).max(1);
+    let mut interiors = Vec::new();
+    let mut start = 0usize;
+    while start < search_unit_len {
+        let end = start.saturating_add(chunk_size).min(search_unit_len);
+        interiors.push((start, end));
+        start = end;
+    }
+    interiors
+}
+
+// NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_engine.c:221-310
+// ```c
+// subject->seq_ranges = subject->seq_ranges_allocated;
+// subject->num_seq_ranges = 0;
+// ...
+// subject->seq_ranges[subject->num_seq_ranges].left = MAX(...);
+// subject->seq_ranges[subject->num_seq_ranges].right = MIN(...);
+// ```
+//
+// NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_aascan.c:83-123
+// ```c
+// for (s = s_first; s <= s_last; s++) {
+//     ...
+//     offset_pairs[i + totalhits].qs_offsets.s_off = s_off;
+// }
+// ```
+fn clip_tblastx_seq_ranges_for_scan_interior(
+    seq_ranges: &[(i32, i32)],
+    interior_start: usize,
+    interior_end: usize,
+    wordsize: usize,
+    subject_len: usize,
+) -> Vec<(i32, i32)> {
+    if interior_start >= interior_end || subject_len < wordsize {
+        return Vec::new();
+    }
+
+    let emit_left = interior_start.min(subject_len);
+    let emit_right = interior_end.min(subject_len);
+    let read_right = emit_right
+        .saturating_add(wordsize.saturating_sub(1))
+        .min(subject_len);
+    let mut clipped = Vec::with_capacity(seq_ranges.len());
+    for &(left, right) in seq_ranges {
+        let range_left = (left.max(emit_left as i32)) as usize;
+        let range_right = (right.min(read_right as i32)) as usize;
+        if range_right.saturating_sub(range_left) >= wordsize {
+            clipped.push((range_left as i32, range_right as i32));
+        }
+    }
+    clipped
+}
+
 // NCBI reference: ncbi-blast/c++/include/algo/blast/core/blast_hits.h:190-192
 // ```c
 // /** Size of overlap in splitting query or database sequence */
@@ -61,6 +165,27 @@ enum SubjectChunkStatus {
     Ok(SubjectChunk),
 }
 
+// NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_engine.c:452-584
+// ```c
+// BlastInitHitListReset(init_hitlist);
+// aux_struct->WordFinder(..., init_hitlist, ...);
+// BLAST_GetUngappedHSPList(..., &hsp_list);
+// Blast_HSPListAdjustOffsets(hsp_list, backup.offset);
+// status = Blast_HSPListsMerge(&hsp_list, &combined_hsp_list, ...);
+// ```
+#[derive(Default)]
+struct TblastxChunkScanStats {
+    hsp_saved: usize,
+    hsp_filtered_by_cutoff: usize,
+    score_distribution: Vec<i32>,
+}
+
+struct TblastxChunkScanResult {
+    chunk: SubjectChunk,
+    hits: Vec<UngappedHit>,
+    stats: TblastxChunkScanStats,
+}
+
 impl SubjectSplitState {
     // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_engine.c:146-184
     // ```c
@@ -101,7 +226,7 @@ impl SubjectSplitState {
     //                     backup->full_range.right;
     // }
     // ```
-    fn next_chunk(&mut self, chunk_overlap: usize) -> SubjectChunkStatus {
+    fn next_chunk(&mut self, max_dbseq_len: usize, chunk_overlap: usize) -> SubjectChunkStatus {
         if self.next >= self.full_right {
             return SubjectChunkStatus::Done;
         }
@@ -121,9 +246,9 @@ impl SubjectSplitState {
         // chunk to overlap.
         let hard_left = self.hard_ranges[self.hm_index].0;
         let hard_right = self.hard_ranges[self.hm_index].1;
-        let length = if offset + (MAX_DBSEQ_LEN as i32) < hard_right {
-            self.next = offset + MAX_DBSEQ_LEN as i32 - chunk_overlap as i32;
-            MAX_DBSEQ_LEN
+        let length = if offset + (max_dbseq_len as i32) < hard_right {
+            self.next = offset + max_dbseq_len as i32 - chunk_overlap as i32;
+            max_dbseq_len
         } else {
             let length = (hard_right - offset).max(0) as usize;
             self.hm_index = self.hm_index.saturating_add(1);
@@ -466,6 +591,27 @@ fn run_internal(args: TblastxArgs, mut in_memory: Option<TblastxInMemoryRun<'_>>
     // ```
     #[cfg(all(feature = "parallel", not(target_arch = "wasm32")))]
     let use_parallel = num_threads > 1;
+    // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_engine.c:1002-1003
+    // ```c
+    // status = s_BlastSetUpAuxStructures(..., aux_struct);
+    // ```
+    //
+    // The scan-chunk experiment keeps the canonical two-hit state serial inside
+    // each NCBI WordFinder search unit, so subject-level parallelism is disabled
+    // while this gate is active.
+    let use_parallel_scan_chunks = std::env::var_os("LOSAT_TBLASTX_PARALLEL_SCAN_CHUNKS").is_some();
+    // NCBI reference: ncbi-blast/c++/src/algo/blast/api/prelim_stage.cpp:82-88
+    // ```c
+    // if (num_threads > 1) {
+    //     SetNumberOfThreads(num_threads);
+    // }
+    // ```
+    #[cfg(all(feature = "parallel", not(target_arch = "wasm32")))]
+    let use_parallel_chunks = use_parallel
+        && !use_parallel_scan_chunks
+        && std::env::var_os("LOSAT_TBLASTX_PARALLEL_CHUNKS").is_some();
+    #[cfg(any(not(feature = "parallel"), target_arch = "wasm32"))]
+    let use_parallel_chunks = false;
     let query_code = GeneticCode::from_id(args.query_gencode);
     let db_code = GeneticCode::from_id(args.db_gencode);
     // LOSAT intentionally treats `--db-gencode` as the subject genetic code for
@@ -796,7 +942,7 @@ fn run_internal(args: TblastxArgs, mut in_memory: Option<TblastxInMemoryRun<'_>>
     // Single-threaded NCBI runs the subject loop in-process, so we can
     // accumulate hits directly without an mpsc queue.
     #[cfg(all(feature = "parallel", not(target_arch = "wasm32")))]
-    let use_channel = use_parallel;
+    let use_channel = use_parallel && !use_parallel_scan_chunks;
     #[cfg(any(not(feature = "parallel"), target_arch = "wasm32"))]
     let use_channel = false;
 
@@ -1164,29 +1310,16 @@ fn run_internal(args: TblastxArgs, mut in_memory: Option<TblastxInMemoryRun<'_>>
             // ```
             let mut frame_ungapped_hits: Vec<UngappedHit> = Vec::new();
             let mut split_state = SubjectSplitState::new(s_aa_len);
+            let max_dbseq_len = tblastx_max_dbseq_len_for_run();
 
-            loop {
-                // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_engine.c:452-584
-                // ```c
-                // while (TRUE) {
-                //    status = s_GetNextSubjectChunk(subject, &backup, kNucleotide,
-                //                                   dbseq_chunk_overlap);
-                //    if (status == SUBJECT_SPLIT_DONE) break;
-                //    BlastInitHitListReset(init_hitlist);
-                //    aux_struct->WordFinder(..., init_hitlist, ...);
-                //    BLAST_GetUngappedHSPList(..., &hsp_list);
-                //    Blast_HSPListAdjustOffsets(hsp_list, backup.offset);
-                //    status = Blast_HSPListsMerge(&hsp_list, &combined_hsp_list, ...);
-                // }
-                // ```
-                let chunk = match split_state.next_chunk(DBSEQ_CHUNK_OVERLAP) {
-                    SubjectChunkStatus::Done => break,
-                    SubjectChunkStatus::Ok(chunk) => chunk,
-                };
-
-                // NCBI: BlastInitHitListReset(init_hitlist) - reset per chunk.
-                // Reference: ncbi-blast/c++/src/algo/blast/core/blast_engine.c:488-491
+            let scan_chunk = |chunk: SubjectChunk,
+                              offset_pairs: &mut [OffsetPair],
+                              diag_array: &mut [DiagStruct],
+                              diag_offset: &mut i32,
+                              scan_chunk_size: Option<usize>|
+             -> TblastxChunkScanResult {
                 let mut init_hsps: Vec<InitHSP> = Vec::new();
+                let mut stats = TblastxChunkScanStats::default();
                 let chunk_end = chunk.offset.saturating_add(chunk.length);
                 let subject = &subject_all[chunk.offset..chunk_end];
 
@@ -1194,454 +1327,488 @@ fn run_internal(args: TblastxArgs, mut in_memory: Option<TblastxInMemoryRun<'_>>
                     // NCBI still advances the diagonal table offset even when no hits can be found.
                     // References: ncbi-blast/c++/src/algo/blast/core/aa_ungapped.c:445-446,
                     // ncbi-blast/c++/src/algo/blast/core/blast_extend.c:167-173
-                    advance_tblastx_diag_offset(&mut diag_offset, diag_array, window, chunk.length);
-                    continue;
+                    advance_tblastx_diag_offset(diag_offset, diag_array, window, chunk.length);
+                    return TblastxChunkScanResult {
+                        chunk,
+                        hits: Vec::new(),
+                        stats,
+                    };
                 }
 
                 // NCBI subject seq_ranges are used by s_DetermineScanningOffsets (masksubj.inl).
                 // With no subject masking, the range is [0, subject->length].
                 // References: ncbi-blast/c++/src/algo/blast/core/aa_ungapped.c:509-511,
                 // ncbi-blast/c++/src/algo/blast/core/masksubj.inl:43-58
-                let seq_ranges: [(i32, i32); 1] = [(0, chunk.length as i32)];
-                // [C] scan_range[0] = 0;
-                // [C] scan_range[1] = subject->seq_ranges[0].left;
-                // [C] scan_range[2] = subject->seq_ranges[0].right - wordsize;
-                let mut scan_range: [i32; 3] = [0, seq_ranges[0].0, seq_ranges[0].1 - wordsize];
-
-                // [C] while (scan_range[1] <= scan_range[2])
-                while scan_range[1] <= scan_range[2] {
-                    let prev_scan_left = scan_range[1];
-                    // [C] hits = scansub(lookup_wrap, subject, offset_pairs, array_size, scan_range);
-                    let t0 = if timing_enabled {
-                        Some(Instant::now())
-                    } else {
-                        None
-                    };
-                    let hits = s_blast_aa_scan_subject(
-                        lookup_ref,
-                        subject,
-                        &seq_ranges,
-                        offset_pairs,
-                        offset_array_size,
-                        &mut scan_range,
+                let base_seq_ranges: [(i32, i32); 1] = [(0, chunk.length as i32)];
+                let scan_interiors = tblastx_scan_interiors(chunk.length, scan_chunk_size);
+                let mut previous_seed_s_off: Option<u32> = None;
+                for (_scan_chunk_index, (interior_start, interior_end)) in
+                    scan_interiors.into_iter().enumerate()
+                {
+                    let seq_ranges = clip_tblastx_seq_ranges_for_scan_interior(
+                        &base_seq_ranges,
+                        interior_start,
+                        interior_end,
+                        wordsize as usize,
+                        subject.len(),
                     );
-                    if let Some(t0) = t0 {
-                        scan_ns.fetch_add(t0.elapsed().as_nanos() as u64, AtomicOrdering::Relaxed);
-                        scan_calls.fetch_add(1, AtomicOrdering::Relaxed);
+                    if seq_ranges.is_empty() {
+                        continue;
                     }
+                    // [C] scan_range[0] = 0;
+                    // [C] scan_range[1] = subject->seq_ranges[0].left;
+                    // [C] scan_range[2] = subject->seq_ranges[0].right - wordsize;
+                    let mut scan_range: [i32; 3] = [0, seq_ranges[0].0, seq_ranges[0].1 - wordsize];
 
-                    if diag_enabled && hits > 0 {
-                        diagnostics
-                            .base
-                            .kmer_matches
-                            .fetch_add(hits as usize, AtomicOrdering::Relaxed);
-
-                        // DEBUG: Check for duplicate offset pairs in scan output
-                        if is_long_sequence {
-                            // NCBI BlastOffsetPair uses Uint4 offsets.
-                            // Reference: ncbi-blast/c++/include/algo/blast/core/blast_def.h:141-150
-                            let mut seen: HashSet<(u32, u32)> =
-                                HashSet::with_capacity(hits as usize);
-                            let mut duplicate_count = 0usize;
-                            for i in 0..hits as usize {
-                                let pair = unsafe { &*offset_pairs.as_ptr().add(i) };
-                                if !seen.insert((pair.q_off, pair.s_off)) {
-                                    duplicate_count += 1;
-                                }
-                            }
-                            if duplicate_count > 0 {
-                                eprintln!("[DEBUG SCAN_DUPES] s_f_idx={} scan_range=[{},{}] hits={} duplicates={} ({:.2}%)",
-                                    s_f_idx, prev_scan_left, scan_range[1], hits, duplicate_count,
-                                    (duplicate_count as f64 / hits as f64) * 100.0);
-                            }
+                    // [C] while (scan_range[1] <= scan_range[2])
+                    while scan_range[1] <= scan_range[2] {
+                        let prev_scan_left = scan_range[1];
+                        // [C] hits = scansub(lookup_wrap, subject, offset_pairs, array_size, scan_range);
+                        let t0 = if timing_enabled {
+                            Some(Instant::now())
+                        } else {
+                            None
+                        };
+                        let hits = s_blast_aa_scan_subject(
+                            lookup_ref,
+                            subject,
+                            &seq_ranges,
+                            offset_pairs,
+                            offset_array_size,
+                            &mut scan_range,
+                        );
+                        if let Some(t0) = t0 {
+                            scan_ns
+                                .fetch_add(t0.elapsed().as_nanos() as u64, AtomicOrdering::Relaxed);
+                            scan_calls.fetch_add(1, AtomicOrdering::Relaxed);
                         }
-                    }
 
-                    if hits == 0 && scan_range[1] == prev_scan_left {
-                        // Safety guard: with correct NCBI-sized offset arrays, this should not happen.
-                        // If it does, breaking avoids an infinite loop.
-                        break;
-                    }
+                        if diag_enabled && hits > 0 {
+                            diagnostics
+                                .base
+                                .kmer_matches
+                                .fetch_add(hits as usize, AtomicOrdering::Relaxed);
 
-                    // [C] for (i = 0; i < hits; ++i)
-                    // OPTIMIZATION: Use raw pointers to eliminate bounds checking in hot loop
-                    let diag_ptr = diag_array.as_mut_ptr();
-                    let offset_pairs_ptr = offset_pairs.as_ptr();
-
-                    for i in 0..hits as usize {
-                        // SAFETY: i < hits, and hits <= offset_array_size (checked by scan)
-                        let pair = unsafe { &*offset_pairs_ptr.add(i) };
-                        let query_offset = pair.q_off;
-                        let subject_offset = pair.s_off;
-
-                        // Debug: dump scan output around a target subject offset.
-                        // The scan output is produced by s_BlastAaScanSubject.
-                        // Reference: ncbi-blast/c++/src/algo/blast/core/blast_aascan.c:83-123
-                        if let Some((lo, hi)) = scan_debug_range {
-                            // NCBI offsets are Uint4; cast for debug range comparison only.
-                            // Reference: ncbi-blast/c++/include/algo/blast/core/blast_def.h:141-150
-                            let subject_offset_i32 = subject_offset as i32 + chunk.offset as i32;
-                            if subject_offset_i32 >= lo && subject_offset_i32 <= hi {
-                                eprintln!(
-                                    "[DEBUG SCAN_OFF] s_f_idx={} s_off={} local_s_off={} q_off={} scan_range=[{},{}] chunk_offset={} diag_offset={}",
-                                    s_f_idx,
-                                    subject_offset_i32,
-                                    subject_offset,
-                                    query_offset,
-                                    prev_scan_left,
-                                    scan_range[1],
-                                    chunk.offset,
-                                    diag_offset
-                                );
+                            // DEBUG: Check for duplicate offset pairs in scan output
+                            if is_long_sequence {
+                                // NCBI BlastOffsetPair uses Uint4 offsets.
+                                // Reference: ncbi-blast/c++/include/algo/blast/core/blast_def.h:141-150
+                                let mut seen: HashSet<(u32, u32)> =
+                                    HashSet::with_capacity(hits as usize);
+                                let mut duplicate_count = 0usize;
+                                for i in 0..hits as usize {
+                                    let pair = unsafe { &*offset_pairs.as_ptr().add(i) };
+                                    if !seen.insert((pair.q_off, pair.s_off)) {
+                                        duplicate_count += 1;
+                                    }
+                                }
+                                if duplicate_count > 0 {
+                                    eprintln!("[DEBUG SCAN_DUPES] s_f_idx={} scan_range=[{},{}] hits={} duplicates={} ({:.2}%)",
+                                        s_f_idx, prev_scan_left, scan_range[1], hits, duplicate_count,
+                                        (duplicate_count as f64 / hits as f64) * 100.0);
+                                }
                             }
                         }
 
-                        // [C] diag_coord = (query_offset - subject_offset) & diag_mask;
-                        // NCBI uses Uint4 for offsets; apply unsigned wrapping.
-                        // References: ncbi-blast/c++/include/algo/blast/core/blast_def.h:141-150
-                        //             ncbi-blast/c++/src/algo/blast/core/aa_ungapped.c:534
-                        let diag_coord = (query_offset.wrapping_sub(subject_offset)
-                            & (diag_mask as u32)) as usize;
-
-                        // SAFETY: diag_coord is masked by diag_mask, which is < diag_array.len()
-                        let diag_entry = unsafe { &mut *diag_ptr.add(diag_coord) };
-
-                        // [C] if (diag_array[diag_coord].flag)
-                        // Reference: ncbi-blast/c++/src/algo/blast/core/aa_ungapped.c:536-553
-                        if diag_entry.flag() != 0 {
-                            // [C] if ((Int4)(subject_offset + diag_offset) < diag_array[diag_coord].last_hit)
-                            let subject_plus_offset =
-                                subject_offset.wrapping_add(diag_offset as u32);
-                            if subject_plus_offset < diag_entry.last_hit() as u32 {
-                                if diag_enabled {
-                                    diagnostics
-                                        .base
-                                        .seeds_masked
-                                        .fetch_add(1, AtomicOrdering::Relaxed);
-                                }
-                                continue;
-                            }
-                            // [C] diag_array[diag_coord].last_hit = subject_offset + diag_offset;
-                            // [C] diag_array[diag_coord].flag = 0;
-                            diag_entry.set_last_hit(subject_plus_offset as i32);
-                            diag_entry.set_flag(0);
-                            // Track flag reset (hit after previous extension zone)
-                            if diag_enabled {
-                                diagnostics
-                                    .base
-                                    .seeds_flag_reset
-                                    .fetch_add(1, AtomicOrdering::Relaxed);
-                            }
+                        if hits == 0 && scan_range[1] == prev_scan_left {
+                            // Safety guard: with correct NCBI-sized offset arrays, this should not happen.
+                            // If it does, breaking avoids an infinite loop.
+                            break;
                         }
-                        // [C] else
-                        else {
-                            // [C] last_hit = diag_array[diag_coord].last_hit - diag_offset;
-                            let last_hit = diag_entry.last_hit() - diag_offset;
-                            // [C] diff = subject_offset - last_hit;
-                            // NCBI uses Uint4 for subject_offset; compute with unsigned wrap.
-                            // References: ncbi-blast/c++/include/algo/blast/core/blast_def.h:141-150
-                            //             ncbi-blast/c++/src/algo/blast/core/aa_ungapped.c:559-560
-                            let diff = subject_offset.wrapping_sub(last_hit as u32) as i32;
 
-                            // [C] if (diff >= window)
-                            // Reference: ncbi-blast/c++/src/algo/blast/core/aa_ungapped.c:562-569
-                            if diff >= window {
-                                if diag_enabled {
-                                    diagnostics
-                                        .base
-                                        .seeds_second_hit_too_far
-                                        .fetch_add(1, AtomicOrdering::Relaxed);
-                                }
-                                diag_entry.set_last_hit(
-                                    subject_offset.wrapping_add(diag_offset as u32) as i32,
-                                );
-                                continue;
-                            }
+                        // [C] for (i = 0; i < hits; ++i)
+                        // OPTIMIZATION: Use raw pointers to eliminate bounds checking in hot loop
+                        let diag_ptr = diag_array.as_mut_ptr();
+                        let offset_pairs_ptr = offset_pairs.as_ptr();
 
-                            // [C] if (diff < wordsize)
-                            // Reference: ncbi-blast/c++/src/algo/blast/core/aa_ungapped.c:573-580
-                            if diff < wordsize {
-                                if diag_enabled {
-                                    diagnostics
-                                        .base
-                                        .seeds_second_hit_overlap
-                                        .fetch_add(1, AtomicOrdering::Relaxed);
-                                }
-                                continue;
-                            }
+                        for i in 0..hits as usize {
+                            // SAFETY: i < hits, and hits <= offset_array_size (checked by scan)
+                            let pair = unsafe { &*offset_pairs_ptr.add(i) };
+                            let query_offset = pair.q_off;
+                            let subject_offset = pair.s_off;
+                            debug_assert!(
+                            previous_seed_s_off
+                                .map(|prev| subject_offset >= prev)
+                                .unwrap_or(true),
+                            "TBLASTX scan chunks must replay seeds in nondecreasing subject offset order"
+                        );
+                            previous_seed_s_off = Some(subject_offset);
 
-                            // [C] curr_context = BSearchContextInfo(query_offset, query_info);
-                            // NCBI passes Uint4 query_offset into BSearchContextInfo (Int4).
-                            // References: ncbi-blast/c++/include/algo/blast/core/blast_def.h:141-150
-                            //             ncbi-blast/c++/src/algo/blast/core/aa_ungapped.c:590
-                            let ctx_idx = lookup_ref.get_context_idx(query_offset as i32);
-                            let ctx = unsafe { contexts_ref.get_unchecked(ctx_idx) };
-                            let q_raw = query_offset.wrapping_sub(ctx.frame_base as u32) as usize;
-                            // NCBI uses masked sequence for extension; query->sequence is
-                            // sequence_start + 1, so offsets are 0-based in that buffer.
-                            // Reference: blast_query_info.c:311-315, blast_util.c:112-116.
-                            let query_full = &ctx.aa_seq;
-                            let query = &query_full[1..query_full.len() - 1];
-
-                            // [C] if (query_offset - diff < query_info->contexts[curr_context].query_offset)
-                            // Reference: ncbi-blast/c++/src/algo/blast/core/aa_ungapped.c:592-606
-                            let q_minus_diff = query_offset.wrapping_sub(diff as u32);
-                            if q_minus_diff < ctx.frame_base as u32 {
-                                if diag_enabled {
-                                    diagnostics
-                                        .base
-                                        .seeds_ctx_boundary_fail
-                                        .fetch_add(1, AtomicOrdering::Relaxed);
-                                }
-                                diag_entry.set_last_hit(
-                                    subject_offset.wrapping_add(diag_offset as u32) as i32,
-                                );
-                                continue;
-                            }
-
-                            if diag_enabled {
-                                diagnostics
-                                    .base
-                                    .seeds_second_hit_window
-                                    .fetch_add(1, AtomicOrdering::Relaxed);
-                                diagnostics
-                                    .base
-                                    .seeds_passed
-                                    .fetch_add(1, AtomicOrdering::Relaxed);
-                            }
-
-                            // [C] cutoffs = word_params->cutoffs + curr_context;
-                            // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_hits.c:686-688
-                            // ```c
-                            // Int4 cutoff_score = word_params->cutoffs[hsp->context].cutoff_score;
-                            // ```
-                            let cutoff = unsafe { *cutoff_scores.get_unchecked(ctx_idx) };
-                            // [C] cutoffs->x_dropoff (per-context x_dropoff)
-                            // Reference: aa_ungapped.c:579
-                            let x_dropoff =
-                                unsafe { *x_dropoff_per_context.get_unchecked(ctx_idx) };
-
-                            // [C] score = s_BlastAaExtendTwoHit(matrix, subject, query,
-                            //                                   last_hit + wordsize, subject_offset, query_offset, ...)
-                            // Two-hit ungapped extension (NCBI `s_BlastAaExtendTwoHit`)
-                            // Reference: ncbi-blast/c++/src/algo/blast/core/aa_ungapped.c:1089-1158
-                            let t0 = if timing_enabled {
-                                Some(Instant::now())
-                            } else {
-                                None
-                            };
-                            let (
-                                hsp_q_u,
-                                hsp_qe_u,
-                                hsp_s_u,
-                                _hsp_se_u,
-                                score,
-                                right_extend,
-                                s_last_off_u,
-                            ) = extend_hit_two_hit(
-                                query,
-                                subject,
-                                (last_hit + wordsize) as usize, // s_left_off (end of first hit word)
-                                subject_offset as usize,        // s_right_off (second hit start)
-                                q_raw as usize, // q_right_off (second hit start, local)
-                                x_dropoff,      // x_dropoff (per-context, NCBI parity)
-                            );
-                            if let Some(t0) = t0 {
-                                ungapped_ns.fetch_add(
-                                    t0.elapsed().as_nanos() as u64,
-                                    AtomicOrdering::Relaxed,
-                                );
-                                ungapped_calls.fetch_add(1, AtomicOrdering::Relaxed);
-                            }
-
-                            let hsp_q: i32 = hsp_q_u as i32;
-                            let hsp_s: i32 = hsp_s_u as i32;
-                            let hsp_len: i32 = (hsp_qe_u - hsp_q_u) as i32;
-                            let s_last_off: i32 = s_last_off_u as i32;
-
-                            if diag_enabled {
-                                diagnostics
-                                    .base
-                                    .ungapped_extensions
-                                    .fetch_add(1, AtomicOrdering::Relaxed);
-                                if right_extend {
-                                    diagnostics
-                                        .base
-                                        .ungapped_two_hit_extensions
-                                        .fetch_add(1, AtomicOrdering::Relaxed);
-                                } else {
-                                    diagnostics
-                                        .base
-                                        .ungapped_one_hit_extensions
-                                        .fetch_add(1, AtomicOrdering::Relaxed);
-                                }
-                                if hsp_len > 0 {
-                                    diagnostics
-                                        .base
-                                        .extension_total_length
-                                        .fetch_add(hsp_len as usize, AtomicOrdering::Relaxed);
-                                    atomic_max_usize(
-                                        &diagnostics.base.extension_max_length,
-                                        hsp_len as usize,
+                            // Debug: dump scan output around a target subject offset.
+                            // The scan output is produced by s_BlastAaScanSubject.
+                            // Reference: ncbi-blast/c++/src/algo/blast/core/blast_aascan.c:83-123
+                            if let Some((lo, hi)) = scan_debug_range {
+                                // NCBI offsets are Uint4; cast for debug range comparison only.
+                                // Reference: ncbi-blast/c++/include/algo/blast/core/blast_def.h:141-150
+                                let subject_offset_i32 =
+                                    subject_offset as i32 + chunk.offset as i32;
+                                if subject_offset_i32 >= lo && subject_offset_i32 <= hi {
+                                    eprintln!(
+                                        "[DEBUG SCAN_OFF] s_f_idx={} s_off={} local_s_off={} q_off={} scan_range=[{},{}] chunk_offset={} diag_offset={}",
+                                        s_f_idx,
+                                        subject_offset_i32,
+                                        subject_offset,
+                                        query_offset,
+                                        prev_scan_left,
+                                        scan_range[1],
+                                        chunk.offset,
+                                        diag_offset
                                     );
                                 }
                             }
 
-                            // NCBI: Update diagonal state based on right_extend
-                            // Reference: ncbi-blast/c++/src/algo/blast/core/aa_ungapped.c:636-648
-                            // if (right_extend) {
-                            //     diag_array[diag_coord].flag = 1;
-                            //     diag_array[diag_coord].last_hit = s_last_off - (wordsize - 1) + diag_offset;
-                            // } else {
-                            //     diag_array[diag_coord].last_hit = subject_offset + diag_offset;
-                            // }
-                            if right_extend {
-                                // "If an extension to the right happened, reset the last hit
-                                //  so that future hits to this diagonal must start over."
-                                diag_entry.set_flag(1);
-                                diag_entry.set_last_hit(s_last_off - (wordsize - 1) + diag_offset);
+                            // [C] diag_coord = (query_offset - subject_offset) & diag_mask;
+                            // NCBI uses Uint4 for offsets; apply unsigned wrapping.
+                            // References: ncbi-blast/c++/include/algo/blast/core/blast_def.h:141-150
+                            //             ncbi-blast/c++/src/algo/blast/core/aa_ungapped.c:534
+                            let diag_coord = (query_offset.wrapping_sub(subject_offset)
+                                & (diag_mask as u32))
+                                as usize;
+
+                            // SAFETY: diag_coord is masked by diag_mask, which is < diag_array.len()
+                            let diag_entry = unsafe { &mut *diag_ptr.add(diag_coord) };
+
+                            // [C] if (diag_array[diag_coord].flag)
+                            // Reference: ncbi-blast/c++/src/algo/blast/core/aa_ungapped.c:536-553
+                            if diag_entry.flag() != 0 {
+                                // [C] if ((Int4)(subject_offset + diag_offset) < diag_array[diag_coord].last_hit)
+                                let subject_plus_offset =
+                                    subject_offset.wrapping_add(*diag_offset as u32);
+                                if subject_plus_offset < diag_entry.last_hit() as u32 {
+                                    if diag_enabled {
+                                        diagnostics
+                                            .base
+                                            .seeds_masked
+                                            .fetch_add(1, AtomicOrdering::Relaxed);
+                                    }
+                                    continue;
+                                }
+                                // [C] diag_array[diag_coord].last_hit = subject_offset + diag_offset;
+                                // [C] diag_array[diag_coord].flag = 0;
+                                diag_entry.set_last_hit(subject_plus_offset as i32);
+                                diag_entry.set_flag(0);
+                                // Track flag reset (hit after previous extension zone)
                                 if diag_enabled {
                                     diagnostics
                                         .base
-                                        .mask_updates
+                                        .seeds_flag_reset
                                         .fetch_add(1, AtomicOrdering::Relaxed);
                                 }
-                            } else {
-                                // "Otherwise, make the present hit into the previous hit for this diagonal"
-                                diag_entry.set_last_hit(
-                                    subject_offset.wrapping_add(diag_offset as u32) as i32,
-                                );
                             }
+                            // [C] else
+                            else {
+                                // [C] last_hit = diag_array[diag_coord].last_hit - diag_offset;
+                                let last_hit = diag_entry.last_hit() - *diag_offset;
+                                // [C] diff = subject_offset - last_hit;
+                                // NCBI uses Uint4 for subject_offset; compute with unsigned wrap.
+                                // References: ncbi-blast/c++/include/algo/blast/core/blast_def.h:141-150
+                                //             ncbi-blast/c++/src/algo/blast/core/aa_ungapped.c:559-560
+                                let diff = subject_offset.wrapping_sub(last_hit as u32) as i32;
 
-                            // [C] if (score >= cutoffs->cutoff_score)
-                            // NCBI reference: aa_ungapped.c:575-591 (Extension後のcutoffチェック)
-                            if collect_hsp_saving_stats {
-                                if score >= cutoff {
-                                    stats_score_distribution.push(score);
-                                    stats_hsp_saved += 1; // Count saved HSPs
-                                } else {
-                                    stats_hsp_filtered_by_cutoff += 1;
+                                // [C] if (diff >= window)
+                                // Reference: ncbi-blast/c++/src/algo/blast/core/aa_ungapped.c:562-569
+                                if diff >= window {
+                                    if diag_enabled {
+                                        diagnostics
+                                            .base
+                                            .seeds_second_hit_too_far
+                                            .fetch_add(1, AtomicOrdering::Relaxed);
+                                    }
+                                    diag_entry.set_last_hit(
+                                        subject_offset.wrapping_add(*diag_offset as u32) as i32,
+                                    );
+                                    continue;
                                 }
-                            }
-                            if score >= cutoff {
+
+                                // [C] if (diff < wordsize)
+                                // Reference: ncbi-blast/c++/src/algo/blast/core/aa_ungapped.c:573-580
+                                if diff < wordsize {
+                                    if diag_enabled {
+                                        diagnostics
+                                            .base
+                                            .seeds_second_hit_overlap
+                                            .fetch_add(1, AtomicOrdering::Relaxed);
+                                    }
+                                    continue;
+                                }
+
+                                // [C] curr_context = BSearchContextInfo(query_offset, query_info);
+                                // NCBI passes Uint4 query_offset into BSearchContextInfo (Int4).
+                                // References: ncbi-blast/c++/include/algo/blast/core/blast_def.h:141-150
+                                //             ncbi-blast/c++/src/algo/blast/core/aa_ungapped.c:590
+                                let ctx_idx = lookup_ref.get_context_idx(query_offset as i32);
+                                let ctx = unsafe { contexts_ref.get_unchecked(ctx_idx) };
+                                let q_raw =
+                                    query_offset.wrapping_sub(ctx.frame_base as u32) as usize;
+                                // NCBI uses masked sequence for extension; query->sequence is
+                                // sequence_start + 1, so offsets are 0-based in that buffer.
+                                // Reference: blast_query_info.c:311-315, blast_util.c:112-116.
+                                let query_full = &ctx.aa_seq;
+                                let query = &query_full[1..query_full.len() - 1];
+
+                                // [C] if (query_offset - diff < query_info->contexts[curr_context].query_offset)
+                                // Reference: ncbi-blast/c++/src/algo/blast/core/aa_ungapped.c:592-606
+                                let q_minus_diff = query_offset.wrapping_sub(diff as u32);
+                                if q_minus_diff < ctx.frame_base as u32 {
+                                    if diag_enabled {
+                                        diagnostics
+                                            .base
+                                            .seeds_ctx_boundary_fail
+                                            .fetch_add(1, AtomicOrdering::Relaxed);
+                                    }
+                                    diag_entry.set_last_hit(
+                                        subject_offset.wrapping_add(*diag_offset as u32) as i32,
+                                    );
+                                    continue;
+                                }
+
                                 if diag_enabled {
                                     diagnostics
-                                        .ungapped_only_hits
+                                        .base
+                                        .seeds_second_hit_window
+                                        .fetch_add(1, AtomicOrdering::Relaxed);
+                                    diagnostics
+                                        .base
+                                        .seeds_passed
                                         .fetch_add(1, AtomicOrdering::Relaxed);
                                 }
 
-                                // Extra debug for a traced HSP: print seed/extension inputs and cutoffs.
-                                if let Some(target) = trace_hsp_target() {
-                                    // Compute outfmt coords for this candidate init-hsp (same logic as trace_init_hsp_if_match).
-                                    // NCBI offsets are 0-based in query/subject->sequence buffers.
-                                    // Reference: blast_gapalign.c:4756-4768, blast_aascan.c:110-113.
-                                    let q_aa_start = hsp_q_u as usize;
-                                    let q_aa_end = hsp_qe_u as usize;
-                                    let s_aa_start = hsp_s_u as usize + chunk.offset;
-                                    let s_aa_end = _hsp_se_u as usize + chunk.offset;
-                                    let (q_start_dna, q_end_dna) = convert_coords(
-                                        q_aa_start,
-                                        q_aa_end,
-                                        ctx.frame,
-                                        ctx.orig_len,
+                                // [C] cutoffs = word_params->cutoffs + curr_context;
+                                // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_hits.c:686-688
+                                // ```c
+                                // Int4 cutoff_score = word_params->cutoffs[hsp->context].cutoff_score;
+                                // ```
+                                let cutoff = unsafe { *cutoff_scores.get_unchecked(ctx_idx) };
+                                // [C] cutoffs->x_dropoff (per-context x_dropoff)
+                                // Reference: aa_ungapped.c:579
+                                let x_dropoff =
+                                    unsafe { *x_dropoff_per_context.get_unchecked(ctx_idx) };
+
+                                // [C] score = s_BlastAaExtendTwoHit(matrix, subject, query,
+                                //                                   last_hit + wordsize, subject_offset, query_offset, ...)
+                                // Two-hit ungapped extension (NCBI `s_BlastAaExtendTwoHit`)
+                                // Reference: ncbi-blast/c++/src/algo/blast/core/aa_ungapped.c:1089-1158
+                                let t0 = if timing_enabled {
+                                    Some(Instant::now())
+                                } else {
+                                    None
+                                };
+                                let (
+                                    hsp_q_u,
+                                    hsp_qe_u,
+                                    hsp_s_u,
+                                    _hsp_se_u,
+                                    score,
+                                    right_extend,
+                                    s_last_off_u,
+                                ) = extend_hit_two_hit(
+                                    query,
+                                    subject,
+                                    (last_hit + wordsize) as usize,
+                                    subject_offset as usize,
+                                    q_raw as usize,
+                                    x_dropoff,
+                                );
+                                if let Some(t0) = t0 {
+                                    ungapped_ns.fetch_add(
+                                        t0.elapsed().as_nanos() as u64,
+                                        AtomicOrdering::Relaxed,
                                     );
-                                    let (s_start_dna, s_end_dna) =
-                                        convert_coords(s_aa_start, s_aa_end, s_frame.frame, s_len);
-                                    if trace_match_target(
-                                        target,
-                                        q_start_dna,
-                                        q_end_dna,
-                                        s_start_dna,
-                                        s_end_dna,
-                                    ) {
-                                        eprintln!(
-                                            "[TRACE_HSP] seed/extend ctx_idx={} s_f_idx={} q_frame={} s_frame={} score={} cutoff={} x_dropoff={} last_hit={} subject_offset={} chunk_offset={} diff={} q_raw={} query_offset={} diag_coord={} right_extend={} s_last_off={}",
-                                            ctx_idx,
-                                            s_f_idx,
-                                            ctx.frame,
-                                            s_frame.frame,
-                                            score,
-                                            cutoff,
-                                            x_dropoff,
-                                            last_hit,
-                                            subject_offset,
-                                            chunk.offset,
-                                            diff,
-                                            q_raw,
-                                            query_offset,
-                                            diag_coord,
-                                            right_extend,
-                                            s_last_off,
-                                        );
-                                        // NCBI two-hit gating checks (diff/window/wordsize/context).
-                                        // Reference: ncbi-blast/c++/src/algo/blast/core/aa_ungapped.c:531-606
-                                        // NCBI uses Uint4 offsets; apply unsigned wrap here as well.
-                                        // Reference: ncbi-blast/c++/include/algo/blast/core/blast_def.h:141-150
-                                        let q_minus_diff = query_offset.wrapping_sub(diff as u32);
-                                        eprintln!(
-                                            "[TRACE_HSP] two_hit_pass diff={} window={} wordsize={} diff>=window={} diff<wordsize={} q_minus_diff={} ctx_frame_base={} q_minus_diff<base={} diag_offset={} diag_mask={} diag_array_size={}",
-                                            diff,
-                                            window,
-                                            wordsize,
-                                            diff >= window,
-                                            diff < wordsize,
-                                            q_minus_diff,
-                                            ctx.frame_base,
-                                            q_minus_diff < ctx.frame_base as u32,
-                                            diag_offset,
-                                            diag_mask,
-                                            diag_array_size
+                                    ungapped_calls.fetch_add(1, AtomicOrdering::Relaxed);
+                                }
+
+                                let hsp_q: i32 = hsp_q_u as i32;
+                                let hsp_s: i32 = hsp_s_u as i32;
+                                let hsp_len: i32 = (hsp_qe_u - hsp_q_u) as i32;
+                                let s_last_off: i32 = s_last_off_u as i32;
+
+                                if diag_enabled {
+                                    diagnostics
+                                        .base
+                                        .ungapped_extensions
+                                        .fetch_add(1, AtomicOrdering::Relaxed);
+                                    if right_extend {
+                                        diagnostics
+                                            .base
+                                            .ungapped_two_hit_extensions
+                                            .fetch_add(1, AtomicOrdering::Relaxed);
+                                    } else {
+                                        diagnostics
+                                            .base
+                                            .ungapped_one_hit_extensions
+                                            .fetch_add(1, AtomicOrdering::Relaxed);
+                                    }
+                                    if hsp_len > 0 {
+                                        diagnostics
+                                            .base
+                                            .extension_total_length
+                                            .fetch_add(hsp_len as usize, AtomicOrdering::Relaxed);
+                                        atomic_max_usize(
+                                            &diagnostics.base.extension_max_length,
+                                            hsp_len as usize,
                                         );
                                     }
                                 }
-                                // NCBI: BlastSaveInitHsp equivalent
-                                // Reference: blast_extend.c:360-375 BlastSaveInitHsp
-                                // Store HSP with absolute coordinates (before coordinate conversion)
-                                //
-                                // hsp_q is frame-relative coordinate in query->sequence (0-based),
-                                // frame_base is the context query_offset in the concatenated buffer.
-                                // NCBI: ungapped_data->q_start is absolute query offset.
-                                // Reference: blast_gapalign.c:4756-4768, blast_query_info.c:311-315.
-                                let hsp_q_absolute = ctx.frame_base + (hsp_q as i32);
-                                let hsp_qe_absolute = ctx.frame_base + ((hsp_q + hsp_len) as i32);
 
-                                let init = InitHSP {
-                                    q_start_absolute: hsp_q_absolute,
-                                    q_end_absolute: hsp_qe_absolute,
-                                    s_start: hsp_s,
-                                    s_end: hsp_s + hsp_len,
-                                    // NCBI reference: ncbi-blast/c++/src/algo/blast/core/aa_ungapped.c:589-592
-                                    // ```c
-                                    // BlastSaveInitHsp(ungapped_hsps, hsp_q, hsp_s,
-                                    //                  query_offset, subject_offset, hsp_len,
-                                    //                  score);
-                                    // ```
-                                    q_seed_absolute: query_offset as i32,
-                                    s_seed: subject_offset as i32,
-                                    score,
-                                    ctx_idx,
-                                    s_f_idx,
-                                    q_idx: ctx.q_idx,
-                                    s_idx: s_idx as u32,
-                                    q_frame: ctx.frame,
-                                    s_frame: s_frame.frame,
-                                    q_orig_len: ctx.orig_len,
-                                    s_orig_len: s_len,
-                                };
-                                trace_init_hsp_if_match("init_hsp_saved", &init, contexts_ref);
-                                init_hsps.push(init);
-                            } else if diag_enabled {
-                                diagnostics
-                                    .ungapped_cutoff_failed
-                                    .fetch_add(1, AtomicOrdering::Relaxed);
-                                atomic_min_i32(
-                                    &diagnostics.ungapped_cutoff_failed_min_score,
-                                    score,
-                                );
-                                atomic_max_i32(
-                                    &diagnostics.ungapped_cutoff_failed_max_score,
-                                    score,
-                                );
+                                // NCBI: Update diagonal state based on right_extend
+                                // Reference: ncbi-blast/c++/src/algo/blast/core/aa_ungapped.c:636-648
+                                // if (right_extend) {
+                                //     diag_array[diag_coord].flag = 1;
+                                //     diag_array[diag_coord].last_hit = s_last_off - (wordsize - 1) + diag_offset;
+                                // } else {
+                                //     diag_array[diag_coord].last_hit = subject_offset + diag_offset;
+                                // }
+                                if right_extend {
+                                    diag_entry.set_flag(1);
+                                    diag_entry
+                                        .set_last_hit(s_last_off - (wordsize - 1) + *diag_offset);
+                                    if diag_enabled {
+                                        diagnostics
+                                            .base
+                                            .mask_updates
+                                            .fetch_add(1, AtomicOrdering::Relaxed);
+                                    }
+                                } else {
+                                    diag_entry.set_last_hit(
+                                        subject_offset.wrapping_add(*diag_offset as u32) as i32,
+                                    );
+                                }
+
+                                // [C] if (score >= cutoffs->cutoff_score)
+                                // NCBI reference: aa_ungapped.c:575-591 (Extension後のcutoffチェック)
+                                if collect_hsp_saving_stats {
+                                    if score >= cutoff {
+                                        stats.score_distribution.push(score);
+                                        stats.hsp_saved += 1;
+                                    } else {
+                                        stats.hsp_filtered_by_cutoff += 1;
+                                    }
+                                }
+                                if score >= cutoff {
+                                    if diag_enabled {
+                                        diagnostics
+                                            .ungapped_only_hits
+                                            .fetch_add(1, AtomicOrdering::Relaxed);
+                                    }
+
+                                    // Extra debug for a traced HSP: print seed/extension inputs and cutoffs.
+                                    if let Some(target) = trace_hsp_target() {
+                                        // Compute outfmt coords for this candidate init-hsp (same logic as trace_init_hsp_if_match).
+                                        // NCBI offsets are 0-based in query/subject->sequence buffers.
+                                        // Reference: blast_gapalign.c:4756-4768, blast_aascan.c:110-113.
+                                        let q_aa_start = hsp_q_u as usize;
+                                        let q_aa_end = hsp_qe_u as usize;
+                                        let s_aa_start = hsp_s_u as usize + chunk.offset;
+                                        let s_aa_end = _hsp_se_u as usize + chunk.offset;
+                                        let (q_start_dna, q_end_dna) = convert_coords(
+                                            q_aa_start,
+                                            q_aa_end,
+                                            ctx.frame,
+                                            ctx.orig_len,
+                                        );
+                                        let (s_start_dna, s_end_dna) = convert_coords(
+                                            s_aa_start,
+                                            s_aa_end,
+                                            s_frame.frame,
+                                            s_len,
+                                        );
+                                        if trace_match_target(
+                                            target,
+                                            q_start_dna,
+                                            q_end_dna,
+                                            s_start_dna,
+                                            s_end_dna,
+                                        ) {
+                                            eprintln!(
+                                                "[TRACE_HSP] seed/extend ctx_idx={} s_f_idx={} q_frame={} s_frame={} score={} cutoff={} x_dropoff={} last_hit={} subject_offset={} chunk_offset={} diff={} q_raw={} query_offset={} diag_coord={} right_extend={} s_last_off={}",
+                                                ctx_idx,
+                                                s_f_idx,
+                                                ctx.frame,
+                                                s_frame.frame,
+                                                score,
+                                                cutoff,
+                                                x_dropoff,
+                                                last_hit,
+                                                subject_offset,
+                                                chunk.offset,
+                                                diff,
+                                                q_raw,
+                                                query_offset,
+                                                diag_coord,
+                                                right_extend,
+                                                s_last_off,
+                                            );
+                                            // NCBI two-hit gating checks (diff/window/wordsize/context).
+                                            // Reference: ncbi-blast/c++/src/algo/blast/core/aa_ungapped.c:531-606
+                                            // NCBI uses Uint4 offsets; apply unsigned wrap here as well.
+                                            // Reference: ncbi-blast/c++/include/algo/blast/core/blast_def.h:141-150
+                                            let q_minus_diff =
+                                                query_offset.wrapping_sub(diff as u32);
+                                            eprintln!(
+                                                "[TRACE_HSP] two_hit_pass diff={} window={} wordsize={} diff>=window={} diff<wordsize={} q_minus_diff={} ctx_frame_base={} q_minus_diff<base={} diag_offset={} diag_mask={} diag_array_size={}",
+                                                diff,
+                                                window,
+                                                wordsize,
+                                                diff >= window,
+                                                diff < wordsize,
+                                                q_minus_diff,
+                                                ctx.frame_base,
+                                                q_minus_diff < ctx.frame_base as u32,
+                                                diag_offset,
+                                                diag_mask,
+                                                diag_array_size
+                                            );
+                                        }
+                                    }
+                                    // NCBI: BlastSaveInitHsp equivalent
+                                    // Reference: blast_extend.c:360-375 BlastSaveInitHsp
+                                    // Store HSP with absolute coordinates (before coordinate conversion)
+                                    //
+                                    // hsp_q is frame-relative coordinate in query->sequence (0-based),
+                                    // frame_base is the context query_offset in the concatenated buffer.
+                                    // NCBI: ungapped_data->q_start is absolute query offset.
+                                    // Reference: blast_gapalign.c:4756-4768, blast_query_info.c:311-315.
+                                    let hsp_q_absolute = ctx.frame_base + hsp_q;
+                                    let hsp_qe_absolute = ctx.frame_base + (hsp_q + hsp_len);
+
+                                    let init = InitHSP {
+                                        q_start_absolute: hsp_q_absolute,
+                                        q_end_absolute: hsp_qe_absolute,
+                                        s_start: hsp_s,
+                                        s_end: hsp_s + hsp_len,
+                                        // NCBI reference: ncbi-blast/c++/src/algo/blast/core/aa_ungapped.c:589-592
+                                        // ```c
+                                        // BlastSaveInitHsp(ungapped_hsps, hsp_q, hsp_s,
+                                        //                  query_offset, subject_offset, hsp_len,
+                                        //                  score);
+                                        // ```
+                                        q_seed_absolute: query_offset as i32,
+                                        s_seed: subject_offset as i32,
+                                        score,
+                                        ctx_idx,
+                                        s_f_idx,
+                                        q_idx: ctx.q_idx,
+                                        s_idx: s_idx as u32,
+                                        q_frame: ctx.frame,
+                                        s_frame: s_frame.frame,
+                                        q_orig_len: ctx.orig_len,
+                                        s_orig_len: s_len,
+                                    };
+                                    trace_init_hsp_if_match("init_hsp_saved", &init, contexts_ref);
+                                    init_hsps.push(init);
+                                } else if diag_enabled {
+                                    diagnostics
+                                        .ungapped_cutoff_failed
+                                        .fetch_add(1, AtomicOrdering::Relaxed);
+                                    atomic_min_i32(
+                                        &diagnostics.ungapped_cutoff_failed_min_score,
+                                        score,
+                                    );
+                                    atomic_max_i32(
+                                        &diagnostics.ungapped_cutoff_failed_max_score,
+                                        score,
+                                    );
+                                }
                             }
                         }
                     }
@@ -1654,28 +1821,208 @@ fn run_internal(args: TblastxArgs, mut in_memory: Option<TblastxInMemoryRun<'_>>
                 // /* increment the offset in the diagonal array */
                 // Blast_ExtendWordExit(ewp, subject->length);
                 // ```
-                advance_tblastx_diag_offset(&mut diag_offset, diag_array, window, chunk.length);
+                advance_tblastx_diag_offset(diag_offset, diag_array, window, chunk.length);
 
-                // NCBI: BLAST_GetUngappedHSPList equivalent - per chunk conversion,
-                // then Blast_HSPListAdjustOffsets and Blast_HSPListsMerge.
-                // Reference: ncbi-blast/c++/src/algo/blast/core/blast_engine.c:561-584
-                // ```c
-                // BLAST_GetUngappedHSPList(init_hitlist, query_info, subject,
-                //         hit_params->options, &hsp_list);
-                // Blast_HSPListAdjustOffsets(hsp_list, backup.offset);
-                // status = Blast_HSPListsMerge(&hsp_list, &combined_hsp_list,
-                //      kHspNumMax, &(backup.offset), INT4_MIN, overlap, ...);
-                // ```
-                if !init_hsps.is_empty() {
-                    let mut chunk_ungapped_hits =
-                        get_ungapped_hsp_list(init_hsps, contexts_ref, &s_frames);
-                    adjust_tblastx_chunk_subject_offsets(&mut chunk_ungapped_hits, chunk.offset);
-                    merge_tblastx_subject_chunk_hits(
-                        &mut frame_ungapped_hits,
-                        chunk_ungapped_hits,
-                        chunk.offset,
-                        chunk.overlap,
+                let mut hits = if init_hsps.is_empty() {
+                    Vec::new()
+                } else {
+                    // NCBI: BLAST_GetUngappedHSPList equivalent - per chunk conversion,
+                    // then Blast_HSPListAdjustOffsets and Blast_HSPListsMerge.
+                    // Reference: ncbi-blast/c++/src/algo/blast/core/blast_engine.c:561-584
+                    // ```c
+                    // BLAST_GetUngappedHSPList(init_hitlist, query_info, subject,
+                    //         hit_params->options, &hsp_list);
+                    // Blast_HSPListAdjustOffsets(hsp_list, backup.offset);
+                    // status = Blast_HSPListsMerge(&hsp_list, &combined_hsp_list,
+                    //      kHspNumMax, &(backup.offset), INT4_MIN, overlap, ...);
+                    // ```
+                    get_ungapped_hsp_list(init_hsps, contexts_ref, &s_frames)
+                };
+                adjust_tblastx_chunk_subject_offsets(&mut hits, chunk.offset);
+                TblastxChunkScanResult { chunk, hits, stats }
+            };
+
+            if use_parallel_scan_chunks {
+                loop {
+                    // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_engine.c:452-584
+                    // ```c
+                    // while (TRUE) {
+                    //    status = s_GetNextSubjectChunk(subject, &backup, kNucleotide,
+                    //                                   dbseq_chunk_overlap);
+                    //    if (status == SUBJECT_SPLIT_DONE) break;
+                    //    BlastInitHitListReset(init_hitlist);
+                    //    aux_struct->WordFinder(..., init_hitlist, ...);
+                    //    BLAST_GetUngappedHSPList(..., &hsp_list);
+                    //    Blast_HSPListAdjustOffsets(hsp_list, backup.offset);
+                    //    status = Blast_HSPListsMerge(&hsp_list, &combined_hsp_list, ...);
+                    // }
+                    // ```
+                    let chunk = match split_state.next_chunk(max_dbseq_len, DBSEQ_CHUNK_OVERLAP) {
+                        SubjectChunkStatus::Done => break,
+                        SubjectChunkStatus::Ok(chunk) => chunk,
+                    };
+
+                    // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_aascan.c:83-123
+                    // ```c
+                    // for (s = s_first; s <= s_last; s++) {
+                    //     ...
+                    //     offset_pairs[i + totalhits].qs_offsets.s_off = s_off;
+                    // }
+                    // ```
+                    //
+                    // Experimental scan chunks split only the scan walk inside this
+                    // NCBI search unit. The reducer still extends against `subject`,
+                    // the full real chunk, and `Blast_ExtendWordExit` runs once below.
+                    let scan_size = tblastx_scan_chunk_size_for_run(chunk.length, num_threads);
+                    let result = scan_chunk(
+                        chunk,
+                        offset_pairs,
+                        diag_array,
+                        &mut diag_offset,
+                        Some(scan_size),
                     );
+                    stats_hsp_saved += result.stats.hsp_saved;
+                    stats_hsp_filtered_by_cutoff += result.stats.hsp_filtered_by_cutoff;
+                    stats_score_distribution.extend(result.stats.score_distribution);
+                    if !result.hits.is_empty() {
+                        merge_tblastx_subject_chunk_hits(
+                            &mut frame_ungapped_hits,
+                            result.hits,
+                            result.chunk.offset,
+                            result.chunk.overlap,
+                        );
+                    }
+                }
+            } else if use_parallel_chunks {
+                #[cfg(all(feature = "parallel", not(target_arch = "wasm32")))]
+                {
+                    // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_engine.c:452-584
+                    // ```c
+                    // while (TRUE) {
+                    //    status = s_GetNextSubjectChunk(subject, &backup, kNucleotide,
+                    //                                   dbseq_chunk_overlap);
+                    //    if (status == SUBJECT_SPLIT_DONE) break;
+                    //    ...
+                    //    status = Blast_HSPListsMerge(...);
+                    // }
+                    // ```
+                    let mut chunks = Vec::new();
+                    loop {
+                        match split_state.next_chunk(max_dbseq_len, DBSEQ_CHUNK_OVERLAP) {
+                            SubjectChunkStatus::Done => break,
+                            SubjectChunkStatus::Ok(chunk) => chunks.push(chunk),
+                        }
+                    }
+                    if chunks.len() <= 1 {
+                        for chunk in chunks {
+                            let result =
+                                scan_chunk(chunk, offset_pairs, diag_array, &mut diag_offset, None);
+                            stats_hsp_saved += result.stats.hsp_saved;
+                            stats_hsp_filtered_by_cutoff += result.stats.hsp_filtered_by_cutoff;
+                            stats_score_distribution.extend(result.stats.score_distribution);
+                            if !result.hits.is_empty() {
+                                merge_tblastx_subject_chunk_hits(
+                                    &mut frame_ungapped_hits,
+                                    result.hits,
+                                    result.chunk.offset,
+                                    result.chunk.overlap,
+                                );
+                            }
+                        }
+                    } else {
+                        let mut chunk_results: Vec<TblastxChunkScanResult> =
+                            Vec::with_capacity(chunks.len());
+                        chunks
+                            .par_iter()
+                            .map_init(
+                                || {
+                                    (
+                                        vec![OffsetPair::default(); offset_array_size as usize],
+                                        vec![DiagStruct::default(); diag_array_size as usize],
+                                    )
+                                },
+                                |state, chunk| {
+                                    let (offset_pairs, diag_array) = state;
+                                    for diag in diag_array.iter_mut() {
+                                        *diag = DiagStruct::default();
+                                    }
+                                    let mut chunk_diag_offset = window;
+                                    scan_chunk(
+                                        *chunk,
+                                        offset_pairs,
+                                        diag_array,
+                                        &mut chunk_diag_offset,
+                                        None,
+                                    )
+                                },
+                            )
+                            .collect_into_vec(&mut chunk_results);
+                        chunk_results.sort_by_key(|result| result.chunk.offset);
+                        for result in chunk_results {
+                            // Keep the canonical per-subject diagonal offset moving in the
+                            // same chunk order as NCBI before the next subject frame starts.
+                            // The experimental workers above use local diagonal tables; the
+                            // ordered merge below remains the NCBI `Blast_HSPListsMerge` path.
+                            // References: blast_engine.c:561-584, blast_extend.c:167-173.
+                            advance_tblastx_diag_offset(
+                                &mut diag_offset,
+                                diag_array,
+                                window,
+                                result.chunk.length,
+                            );
+                            stats_hsp_saved += result.stats.hsp_saved;
+                            stats_hsp_filtered_by_cutoff += result.stats.hsp_filtered_by_cutoff;
+                            stats_score_distribution.extend(result.stats.score_distribution);
+                            if !result.hits.is_empty() {
+                                merge_tblastx_subject_chunk_hits(
+                                    &mut frame_ungapped_hits,
+                                    result.hits,
+                                    result.chunk.offset,
+                                    result.chunk.overlap,
+                                );
+                            }
+                        }
+                    }
+                }
+                #[cfg(any(not(feature = "parallel"), target_arch = "wasm32"))]
+                {
+                    unreachable!("parallel chunk mode is disabled for this target");
+                }
+            } else {
+                loop {
+                    // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_engine.c:452-584
+                    // ```c
+                    // while (TRUE) {
+                    //    status = s_GetNextSubjectChunk(subject, &backup, kNucleotide,
+                    //                                   dbseq_chunk_overlap);
+                    //    if (status == SUBJECT_SPLIT_DONE) break;
+                    //    BlastInitHitListReset(init_hitlist);
+                    //    aux_struct->WordFinder(..., init_hitlist, ...);
+                    //    BLAST_GetUngappedHSPList(..., &hsp_list);
+                    //    Blast_HSPListAdjustOffsets(hsp_list, backup.offset);
+                    //    status = Blast_HSPListsMerge(&hsp_list, &combined_hsp_list, ...);
+                    // }
+                    // ```
+                    let chunk = match split_state.next_chunk(max_dbseq_len, DBSEQ_CHUNK_OVERLAP) {
+                        SubjectChunkStatus::Done => break,
+                        SubjectChunkStatus::Ok(chunk) => chunk,
+                    };
+
+                    // NCBI: BlastInitHitListReset(init_hitlist) - reset per chunk.
+                    // Reference: ncbi-blast/c++/src/algo/blast/core/blast_engine.c:488-491
+                    let result =
+                        scan_chunk(chunk, offset_pairs, diag_array, &mut diag_offset, None);
+                    stats_hsp_saved += result.stats.hsp_saved;
+                    stats_hsp_filtered_by_cutoff += result.stats.hsp_filtered_by_cutoff;
+                    stats_score_distribution.extend(result.stats.score_distribution);
+                    if !result.hits.is_empty() {
+                        merge_tblastx_subject_chunk_hits(
+                            &mut frame_ungapped_hits,
+                            result.hits,
+                            result.chunk.offset,
+                            result.chunk.overlap,
+                        );
+                    }
                 }
             }
 
@@ -2323,7 +2670,7 @@ fn run_internal(args: TblastxArgs, mut in_memory: Option<TblastxInMemoryRun<'_>>
     let mut single_state: Option<WorkerState> = None;
 
     #[cfg(all(feature = "parallel", not(target_arch = "wasm32")))]
-    if use_parallel {
+    if use_parallel && !use_parallel_scan_chunks {
         subjects_raw.par_iter().enumerate().for_each_init(
             || WorkerState {
                 // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_engine.c:1411-1475
@@ -2555,7 +2902,7 @@ mod tests {
         let mut split = SubjectSplitState::new(MAX_DBSEQ_LEN + 250);
 
         assert_eq!(
-            split.next_chunk(DBSEQ_CHUNK_OVERLAP),
+            split.next_chunk(MAX_DBSEQ_LEN, DBSEQ_CHUNK_OVERLAP),
             SubjectChunkStatus::Ok(SubjectChunk {
                 offset: 0,
                 length: MAX_DBSEQ_LEN,
@@ -2563,7 +2910,7 @@ mod tests {
             })
         );
         assert_eq!(
-            split.next_chunk(DBSEQ_CHUNK_OVERLAP),
+            split.next_chunk(MAX_DBSEQ_LEN, DBSEQ_CHUNK_OVERLAP),
             SubjectChunkStatus::Ok(SubjectChunk {
                 offset: MAX_DBSEQ_LEN - DBSEQ_CHUNK_OVERLAP,
                 length: DBSEQ_CHUNK_OVERLAP + 250,
@@ -2571,7 +2918,7 @@ mod tests {
             })
         );
         assert_eq!(
-            split.next_chunk(DBSEQ_CHUNK_OVERLAP),
+            split.next_chunk(MAX_DBSEQ_LEN, DBSEQ_CHUNK_OVERLAP),
             SubjectChunkStatus::Done
         );
     }
@@ -2633,7 +2980,7 @@ mod tests {
         let mut split = SubjectSplitState::new(MAX_DBSEQ_LEN - 1);
 
         assert_eq!(
-            split.next_chunk(DBSEQ_CHUNK_OVERLAP),
+            split.next_chunk(MAX_DBSEQ_LEN, DBSEQ_CHUNK_OVERLAP),
             SubjectChunkStatus::Ok(SubjectChunk {
                 offset: 0,
                 length: MAX_DBSEQ_LEN - 1,
@@ -2641,7 +2988,7 @@ mod tests {
             })
         );
         assert_eq!(
-            split.next_chunk(DBSEQ_CHUNK_OVERLAP),
+            split.next_chunk(MAX_DBSEQ_LEN, DBSEQ_CHUNK_OVERLAP),
             SubjectChunkStatus::Done
         );
     }
@@ -2742,5 +3089,30 @@ mod tests {
         assert_eq!(hits[0].s_seed_off, 520);
         assert_eq!(hits[0].q_aa_start, 10);
         assert_eq!(hits[0].q_seed_off, 10);
+    }
+
+    // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_aascan.c:83-127
+    // ```c
+    // for (s = s_first; s <= s_last; s++) { ... }
+    // s_range[1] = (Int4)(s - subject->sequence);
+    // ```
+    #[test]
+    fn scan_interior_ranges_keep_right_lookahead_without_duplicate_emission() {
+        let wordsize = 3usize;
+        let subject_len = 8usize;
+        let base_ranges = [(0, subject_len as i32)];
+
+        let left =
+            clip_tblastx_seq_ranges_for_scan_interior(&base_ranges, 0, 4, wordsize, subject_len);
+        let right =
+            clip_tblastx_seq_ranges_for_scan_interior(&base_ranges, 4, 8, wordsize, subject_len);
+
+        assert_eq!(left, vec![(0, 6)]);
+        assert_eq!(right, vec![(4, 8)]);
+
+        let left_emitted: Vec<i32> = (left[0].0..=left[0].1 - wordsize as i32).collect();
+        let right_emitted: Vec<i32> = (right[0].0..=right[0].1 - wordsize as i32).collect();
+        assert_eq!(left_emitted, vec![0, 1, 2, 3]);
+        assert_eq!(right_emitted, vec![4, 5]);
     }
 }

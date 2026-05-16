@@ -1,11 +1,4 @@
-[DEBUG OUTPUT_FILTER] Total linked HSPs: 23777
-[DEBUG OUTPUT_FILTER] Single HSPs (linked_set=false): 547
-[DEBUG OUTPUT_FILTER] Chain heads (linked_set=true, start_of_chain=true): 1110
-[DEBUG OUTPUT_FILTER] Chain members (linked_set=true, start_of_chain=false): 22120 (included in output)
-[DEBUG OUTPUT_FILTER] Filtered by E-value (threshold=10): 68
-[DEBUG OUTPUT_FILTER] Expected after E-value filter: 23709 (all HSPs - E-value filtered)
-[DEBUG OUTPUT_FILTER] Final hits after filtering: 23709
 
-real	0m10.394s
-user	0m19.474s
-sys	0m0.021s
+real	0m10.416s
+user	0m19.812s
+sys	0m0.019s

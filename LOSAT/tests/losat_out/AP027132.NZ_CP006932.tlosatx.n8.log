@@ -112,55 +112,9 @@
 [DEBUG LINKING_CUTOFF] cutoff_small_gap_raw=41, cutoff_big_gap_raw=45
 [DEBUG LINKING_CUTOFF] scale_factor=1, final_cutoff_small=41, final_cutoff_big=45
 [DEBUG LINKING_CUTOFF] gap_prob=0.5, ignore_small_gaps=false
-[DEBUG LINKING_FILTER] subject_len_nucl=657101, group_size=62864
+[DEBUG LINKING_FILTER] subject_len_nucl=657101, group_size=121529
 [DEBUG LINKING_FILTER] INDEX 0 (small gap): cutoff=41, filtered=0, passed=0, total=0, filter_rate=0.00%
-[DEBUG LINKING_FILTER] INDEX 1 (large gap): cutoff=45, filtered=41352, passed=1453045, total=1494397, filter_rate=2.77%
-[DEBUG LINKING_FILTER] subject_len_nucl=657101, group_size=62786
+[DEBUG LINKING_FILTER] INDEX 1 (large gap): cutoff=45, filtered=81006, passed=3164246, total=3245252, filter_rate=2.50%
+[DEBUG LINKING_FILTER] subject_len_nucl=657101, group_size=119136
 [DEBUG LINKING_FILTER] INDEX 0 (small gap): cutoff=41, filtered=0, passed=0, total=0, filter_rate=0.00%
-[DEBUG LINKING_FILTER] INDEX 1 (large gap): cutoff=45, filtered=41195, passed=1470555, total=1511750, filter_rate=2.72%
-[DEBUG LINKING_FILTER] subject_len_nucl=657101, group_size=74818
-[DEBUG LINKING_FILTER] INDEX 0 (small gap): cutoff=41, filtered=0, passed=0, total=0, filter_rate=0.00%
-[DEBUG LINKING_FILTER] INDEX 1 (large gap): cutoff=45, filtered=42520, passed=8689372, total=8731892, filter_rate=0.49%
-[DEBUG LINKING_FILTER] subject_len_nucl=657101, group_size=73903
-[DEBUG LINKING_FILTER] INDEX 0 (small gap): cutoff=41, filtered=0, passed=0, total=0, filter_rate=0.00%
-[DEBUG LINKING_FILTER] INDEX 1 (large gap): cutoff=45, filtered=41884, passed=8447836, total=8489720, filter_rate=0.49%
-[DEBUG HSP_STATS] After reevaluation: 63005 HSPs
-[DEBUG HSP_STATS] Saved by cutoff: 274371
-[DEBUG HSP_STATS] Filtered by cutoff: 25576266
-[DEBUG HSP_STATS] Filtered by reeval: 0
-[DEBUG HSP_STATS] Score range: 41 - 11016 (avg: 62.27)
-[DEBUG LINKING_CUTOFF] avg_query_length=214346, subject_len_nucl=657101
-[DEBUG LINKING_CUTOFF] query_length_after_adj=214290, subject_length_after_adj=218977
-[DEBUG LINKING_CUTOFF] expected_length=56
-[DEBUG LINKING_CUTOFF] search_sp=46924581330, window_sq=2500, 8*window_sq=20000
-[DEBUG LINKING_CUTOFF] search_sp > 8*window_sq: true
-[DEBUG LINKING_CUTOFF] y_variable=6.850569e-5
-[DEBUG LINKING_CUTOFF] x_variable_before_div=8.036502e5
-[DEBUG LINKING_CUTOFF] x_variable_after_div=1.607300e6
-[DEBUG LINKING_CUTOFF] x_small=3.425284e-1
-[DEBUG LINKING_CUTOFF] cutoff_small_gap_raw=41, cutoff_big_gap_raw=45
-[DEBUG LINKING_CUTOFF] scale_factor=1, final_cutoff_small=41, final_cutoff_big=45
-[DEBUG LINKING_CUTOFF] gap_prob=0.5, ignore_small_gaps=false
-[DEBUG LINKING_FILTER] subject_len_nucl=657101, group_size=9813
-[DEBUG LINKING_FILTER] INDEX 0 (small gap): cutoff=41, filtered=0, passed=0, total=0, filter_rate=0.00%
-[DEBUG LINKING_FILTER] INDEX 1 (large gap): cutoff=45, filtered=217, passed=176055, total=176272, filter_rate=0.12%
-[DEBUG LINKING_FILTER] subject_len_nucl=657101, group_size=9689
-[DEBUG LINKING_FILTER] INDEX 0 (small gap): cutoff=41, filtered=0, passed=0, total=0, filter_rate=0.00%
-[DEBUG LINKING_FILTER] INDEX 1 (large gap): cutoff=45, filtered=220, passed=185500, total=185720, filter_rate=0.12%
-[DEBUG LINKING_FILTER] subject_len_nucl=657101, group_size=21267
-[DEBUG LINKING_FILTER] INDEX 0 (small gap): cutoff=41, filtered=0, passed=0, total=0, filter_rate=0.00%
-[DEBUG LINKING_FILTER] INDEX 1 (large gap): cutoff=45, filtered=380, passed=5073646, total=5074026, filter_rate=0.01%
-[DEBUG LINKING_FILTER] subject_len_nucl=657101, group_size=22236
-[DEBUG LINKING_FILTER] INDEX 0 (small gap): cutoff=41, filtered=0, passed=0, total=0, filter_rate=0.00%
-[DEBUG LINKING_FILTER] INDEX 1 (large gap): cutoff=45, filtered=528, passed=5678435, total=5678963, filter_rate=0.01%
-[DEBUG OUTPUT_FILTER] Total linked HSPs: 63005
-[DEBUG OUTPUT_FILTER] Single HSPs (linked_set=false): 1811
-[DEBUG OUTPUT_FILTER] Chain heads (linked_set=true, start_of_chain=true): 4429
-[DEBUG OUTPUT_FILTER] Chain members (linked_set=true, start_of_chain=false): 56765 (included in output)
-[DEBUG OUTPUT_FILTER] Filtered by E-value (threshold=10): 430
-[DEBUG OUTPUT_FILTER] Expected after E-value filter: 62575 (all HSPs - E-value filtered)
-[DEBUG OUTPUT_FILTER] Final hits after filtering: 62575
-
-real	2m47.251s
-user	6m59.605s
-sys	0m0.103s
+[DEBUG LINKING_FILTER] INDEX 1 (large gap): cutoff=45, filtered=79039, passed=3153463, total=3232502, filter_rate=2.45%

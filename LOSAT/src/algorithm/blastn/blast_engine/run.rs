@@ -2786,74 +2786,6 @@ fn score_compare_prelim_hits(a: &PrelimHit, b: &PrelimHit) -> std::cmp::Ordering
         .then_with(|| b.prelim_qe.cmp(&a.prelim_qe))
 }
 
-// NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_hits.c:2455-2535
-// ```c
-// Blast_HSPListPurgeHSPsWithCommonEndpoints(program_number, hsp_list, TRUE);
-// ```
-fn purge_prelim_hits_with_common_endpoints(mut hits: Vec<PrelimHit>) -> Vec<PrelimHit> {
-    if hits.len() <= 1 {
-        return hits;
-    }
-
-    // Pass 1: common starts
-    // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_hits.c:2478
-    // ```c
-    // qsort(hsp_array, hsp_count, sizeof(BlastHSP*), s_QueryOffsetCompareHSPs);
-    // ```
-    hits.sort_unstable_by(|a, b| {
-        a.context_idx
-            .cmp(&b.context_idx)
-            .then_with(|| a.prelim_qs.cmp(&b.prelim_qs))
-            .then_with(|| a.prelim_ss.cmp(&b.prelim_ss))
-            .then_with(|| b.prelim_score.cmp(&a.prelim_score))
-            .then_with(|| b.prelim_qe.cmp(&a.prelim_qe))
-            .then_with(|| b.prelim_se.cmp(&a.prelim_se))
-    });
-
-    let mut i = 0usize;
-    while i + 1 < hits.len() {
-        let j = i + 1;
-        let same_context = hits[i].context_idx == hits[j].context_idx;
-        let same_q_start = hits[i].prelim_qs == hits[j].prelim_qs;
-        let same_s_start = hits[i].prelim_ss == hits[j].prelim_ss;
-        if same_context && same_q_start && same_s_start {
-            hits.remove(j);
-        } else {
-            i += 1;
-        }
-    }
-
-    // Pass 2: common ends
-    // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_hits.c:2504
-    // ```c
-    // qsort(hsp_array, hsp_count, sizeof(BlastHSP*), s_QueryEndCompareHSPs);
-    // ```
-    hits.sort_unstable_by(|a, b| {
-        a.context_idx
-            .cmp(&b.context_idx)
-            .then_with(|| a.prelim_qe.cmp(&b.prelim_qe))
-            .then_with(|| a.prelim_se.cmp(&b.prelim_se))
-            .then_with(|| b.prelim_score.cmp(&a.prelim_score))
-            .then_with(|| b.prelim_qs.cmp(&a.prelim_qs))
-            .then_with(|| b.prelim_ss.cmp(&a.prelim_ss))
-    });
-
-    let mut i = 0usize;
-    while i + 1 < hits.len() {
-        let j = i + 1;
-        let same_context = hits[i].context_idx == hits[j].context_idx;
-        let same_q_end = hits[i].prelim_qe == hits[j].prelim_qe;
-        let same_s_end = hits[i].prelim_se == hits[j].prelim_se;
-        if same_context && same_q_end && same_s_end {
-            hits.remove(j);
-        } else {
-            i += 1;
-        }
-    }
-
-    hits
-}
-
 // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_hits_priv.h:66-72
 // ```c
 // #define CONTAINED_IN_HSP(a,b,c,d,e,f) \
@@ -7709,11 +7641,12 @@ fn run_internal(args: BlastnArgs, mut in_memory: Option<BlastnInMemoryRun<'_>>) 
 
                 // NCBI reference: blast_gapalign.c:3918 BlastIntervalTreeContainsHSP
                 // Check if UNGAPPED HSP is contained in existing GAPPED HSPs
-                let is_contained = interval_tree.contains_hsp(
+                let containing_hsp = interval_tree.containing_hsp(
                     &ungapped_tree_hsp,
                     uh.query_context_offset,
                     min_diag_separation,
                 );
+                let is_contained = containing_hsp.is_some();
 
                 // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_gapalign.c:3908-3919
                 // ```c
@@ -7741,7 +7674,7 @@ fn run_internal(args: BlastnArgs, mut in_memory: Option<BlastnInMemoryRun<'_>>) 
                     blastn_trace::log(
                         "prelim",
                         format!(
-                            "subject={}({}) context={} ungapped=q{}..{} s{}..{} raw_score={} tree_contains={} min_diag_separation={}",
+                            "subject={}({}) context={} ungapped=q{}..{} s{}..{} raw_score={} tree_contains={} containing_hsp={:?} min_diag_separation={}",
                             s_id,
                             s_idx,
                             uh.context_idx,
@@ -7751,6 +7684,7 @@ fn run_internal(args: BlastnArgs, mut in_memory: Option<BlastnInMemoryRun<'_>>) 
                             uh.se.saturating_add(chunk.offset),
                             uh.score,
                             is_contained,
+                            containing_hsp,
                             min_diag_separation
                         ),
                     );
@@ -7994,9 +7928,23 @@ fn run_internal(args: BlastnArgs, mut in_memory: Option<BlastnInMemoryRun<'_>>) 
                 prelim_hits.drain(..).collect()
             };
             if !chunk_prelim_hits.is_empty() {
-                // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_hits.c:2455-2535
+                // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_gapalign.c:4058-4085
+                // ```c
+                // if (gap_align->score >= cutoff) {
+                //     status = Blast_HSPInit(..., &new_hsp);
+                //     status = Blast_HSPListSaveHSP(hsp_list, new_hsp);
+                //     status = BlastIntervalTreeAddHSP(new_hsp, tree, query_info,
+                //                                      eQueryAndSubject);
+                // }
+                // ```
+                // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_traceback.c:633-692
+                // ```c
+                // Blast_HSPListPurgeHSPsWithCommonEndpoints(program_number, hsp_list, FALSE);
+                // ...
                 // Blast_HSPListPurgeHSPsWithCommonEndpoints(program_number, hsp_list, TRUE);
-                chunk_prelim_hits = purge_prelim_hits_with_common_endpoints(chunk_prelim_hits);
+                // ```
+                // Preliminary gapped HSPs are not common-endpoint purged before
+                // traceback; the two purge passes happen only after full traceback.
                 chunk_prelim_hits.sort_unstable_by(score_compare_prelim_hits);
                 for hit in chunk_prelim_hits.iter_mut() {
                     hit.prelim_ss = hit.prelim_ss.saturating_add(chunk.offset);
@@ -8305,11 +8253,12 @@ fn run_internal(args: BlastnArgs, mut in_memory: Option<BlastnInMemoryRun<'_>>) 
                     query_context_offset: prelim.query_context_offset,
                     subject_frame_sign,
                 };
-                let prelim_traceback_contained = interval_tree.contains_hsp(
+                let traceback_containing_hsp = interval_tree.containing_hsp(
                     &prelim_tree_hsp,
                     prelim.query_context_offset,
                     min_diag_separation,
                 );
+                let prelim_traceback_contained = traceback_containing_hsp.is_some();
                 if let (Some(timing), Some(tree_precheck_start)) = (timing_ref, tree_precheck_start)
                 {
                     BlastnTiming::record_duration(
@@ -8340,7 +8289,7 @@ fn run_internal(args: BlastnArgs, mut in_memory: Option<BlastnInMemoryRun<'_>>) 
                     blastn_trace::log(
                         "traceback",
                         format!(
-                            "subject={}({}) context={} prelim=q{}..{} s{}..{} raw_score={} tree_contains={}",
+                            "subject={}({}) context={} prelim=q{}..{} s{}..{} raw_score={} tree_contains={} containing_hsp={:?}",
                             s_id,
                             s_idx,
                             prelim.context_idx,
@@ -8349,7 +8298,8 @@ fn run_internal(args: BlastnArgs, mut in_memory: Option<BlastnInMemoryRun<'_>>) 
                             prelim.prelim_ss,
                             prelim.prelim_se,
                             prelim.prelim_score,
-                            prelim_traceback_contained
+                            prelim_traceback_contained,
+                            traceback_containing_hsp
                         ),
                     );
                 }
@@ -9164,8 +9114,9 @@ fn run_internal(args: BlastnArgs, mut in_memory: Option<BlastnInMemoryRun<'_>>) 
             } else {
                 None
             };
-            let final_tree_contains =
-                interval_tree.contains_hsp(&tree_hsp, query_context_offset, min_diag_separation);
+            let final_tree_containing_hsp =
+                interval_tree.containing_hsp(&tree_hsp, query_context_offset, min_diag_separation);
+            let final_tree_contains = final_tree_containing_hsp.is_some();
             if let (Some(timing), Some(final_tree_contains_start)) =
                 (timing_ref, final_tree_contains_start)
             {
@@ -9191,7 +9142,7 @@ fn run_internal(args: BlastnArgs, mut in_memory: Option<BlastnInMemoryRun<'_>>) 
                 blastn_trace::log(
                     "purge",
                     format!(
-                        "subject={}({}) context={} pass=final_interval_tree q{}..{} s{}..{} raw_score={} contained={} min_diag_separation={}",
+                        "subject={}({}) context={} pass=final_interval_tree q{}..{} s{}..{} raw_score={} contained={} containing_hsp={:?} min_diag_separation={}",
                         s_id,
                         s_idx,
                         hit.q_idx * 2 + if hit.query_frame < 0 { 1 } else { 0 },
@@ -9201,6 +9152,7 @@ fn run_internal(args: BlastnArgs, mut in_memory: Option<BlastnInMemoryRun<'_>>) 
                         hit.internal_s_end_0,
                         hit.raw_score,
                         final_tree_contains,
+                        final_tree_containing_hsp,
                         min_diag_separation
                     ),
                 );

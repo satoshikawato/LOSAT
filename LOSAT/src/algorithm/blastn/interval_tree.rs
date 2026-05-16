@@ -891,19 +891,58 @@ impl BlastIntervalTree {
         mid_index
     }
 
-    /// Check if the tree contains an HSP that envelops the input HSP
+    /// Return the tree HSP that envelops the input HSP, if any.
     /// NCBI reference: blast_itree.c:930-995 BlastIntervalTreeContainsHSP
     ///
-    /// Uses proper interval tree traversal for O(log n) containment checks.
+    /// ```c
+    /// while (node->hsp == NULL) {
+    ///     tmp_index = node->midptr;
+    ///     if (tmp_index > 0) {
+    ///         if (s_MidpointTreeContainsHSP(tree, tmp_index,
+    ///                                       hsp, query_start,
+    ///                                       min_diag_separation)) {
+    ///             return TRUE;
+    ///         }
+    ///     }
+    ///     middle = ((Int8) node->leftend + (Int8) node->rightend) / 2;
+    ///     if (region_end < middle)
+    ///         tmp_index = node->leftptr;
+    ///     else if (region_start > middle)
+    ///         tmp_index = node->rightptr;
+    ///     if (tmp_index == 0)
+    ///         return FALSE;
+    ///     node = tree->nodes + tmp_index;
+    /// }
+    /// return s_HSPIsContained(hsp, query_start, node->hsp, node->leftptr,
+    ///                         min_diag_separation);
+    /// ```
+    ///
+    /// LOSAT returns the containing HSP for tracing only; containment traversal
+    /// and truth value are still the NCBI rules above.
     pub fn contains_hsp(
         &self,
         hsp: &TreeHsp,
         query_context_offset: i32,
         min_diag_separation: i32,
     ) -> bool {
+        self.containing_hsp(hsp, query_context_offset, min_diag_separation)
+            .is_some()
+    }
+
+    /// Return the tree HSP that envelops the input HSP, if any.
+    ///
+    /// NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_itree.c:930-995
+    /// See the snippet on `contains_hsp`; this method preserves that traversal
+    /// and exposes the matched tree HSP for Phase 6 parity diagnostics.
+    pub fn containing_hsp(
+        &self,
+        hsp: &TreeHsp,
+        query_context_offset: i32,
+        min_diag_separation: i32,
+    ) -> Option<TreeHsp> {
         // NCBI reference: blast_itree.c:942
         if self.nodes.is_empty() {
-            return false;
+            return None;
         }
 
         // NCBI reference: blast_itree.c:944-948
@@ -920,25 +959,27 @@ impl BlastIntervalTree {
             // NCBI reference: blast_itree.c:990-994
             // If this is a leaf node, check containment directly
             if node.hsp.is_some() {
+                let tree_hsp = node.hsp.as_ref().unwrap();
                 return Self::is_hsp_contained(
                     hsp,
                     query_start,
-                    node.hsp.as_ref().unwrap(),
+                    tree_hsp,
                     node.leftptr, // leftptr stores query_context_offset for leaves
                     min_diag_separation,
-                );
+                )
+                .then_some(*tree_hsp);
             }
 
             // NCBI reference: blast_itree.c:960-967
             // Check midpoint tree first (contains all HSPs straddling this node)
             if node.midptr > 0 {
-                if self.midpoint_tree_contains_hsp(
+                if let Some(tree_hsp) = self.midpoint_tree_containing_hsp(
                     node.midptr as usize,
                     hsp,
                     query_start,
                     min_diag_separation,
                 ) {
-                    return true;
+                    return Some(tree_hsp);
                 }
             }
 
@@ -957,7 +998,7 @@ impl BlastIntervalTree {
 
             // NCBI reference: blast_itree.c:987
             if next_idx == 0 {
-                return false;
+                return None;
             }
 
             node_idx = next_idx as usize;
@@ -1028,8 +1069,6 @@ impl BlastIntervalTree {
         )
     }
 
-    /// Check midpoint subtree (subject-indexed)
-    /// NCBI reference: blast_itree.c:864-927 s_MidpointTreeContainsHSP
     fn midpoint_tree_contains_hsp(
         &self,
         root_index: usize,
@@ -1037,6 +1076,44 @@ impl BlastIntervalTree {
         query_context_offset: i32,
         min_diag_separation: i32,
     ) -> bool {
+        self.midpoint_tree_containing_hsp(
+            root_index,
+            hsp,
+            query_context_offset,
+            min_diag_separation,
+        )
+        .is_some()
+    }
+
+    /// Check midpoint subtree (subject-indexed).
+    /// NCBI reference: blast_itree.c:864-927 s_MidpointTreeContainsHSP
+    ///
+    /// ```c
+    /// while (tmp_index != 0) {
+    ///     if (s_HSPIsContained(hsp, query_start, node->hsp,
+    ///                          node->leftptr, min_diag_separation)) {
+    ///         return TRUE;
+    ///     }
+    ///     tmp_index = node->midptr;
+    /// }
+    /// middle = ((Int8) node->leftend + (Int8) node->rightend) / 2;
+    /// if (region_end < middle)
+    ///     tmp_index = node->leftptr;
+    /// else if (region_start > middle)
+    ///     tmp_index = node->rightptr;
+    /// if (tmp_index == 0)
+    ///     return FALSE;
+    /// ```
+    ///
+    /// LOSAT returns the containing midpoint-list HSP for trace output while
+    /// preserving the same NCBI walk and predicate.
+    fn midpoint_tree_containing_hsp(
+        &self,
+        root_index: usize,
+        hsp: &TreeHsp,
+        query_context_offset: i32,
+        min_diag_separation: i32,
+    ) -> Option<TreeHsp> {
         let region_start = hsp.subject_offset;
         let region_end = hsp.subject_end;
         let mut current_idx = root_index;
@@ -1052,7 +1129,8 @@ impl BlastIntervalTree {
                     tree_hsp,
                     node.leftptr,
                     min_diag_separation,
-                );
+                )
+                .then_some(*tree_hsp);
             }
 
             // Check all HSPs in midpoint list
@@ -1067,7 +1145,7 @@ impl BlastIntervalTree {
                         tmp_node.leftptr,
                         min_diag_separation,
                     ) {
-                        return true;
+                        return Some(*tree_hsp);
                     }
                 }
                 tmp_idx = tmp_node.midptr;
@@ -1085,7 +1163,7 @@ impl BlastIntervalTree {
             };
 
             if next_idx == 0 {
-                return false;
+                return None;
             }
 
             current_idx = next_idx as usize;
@@ -1368,5 +1446,75 @@ mod tests {
         tree.add_hsp(tree_hsp, 0, IndexMethod::QueryAndSubject);
 
         assert!(tree.contains_hsp(&contained_hsp, 0, 0));
+    }
+
+    // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_itree.c:819-847
+    // ```c
+    // if (in_q_start != tree_q_start)
+    //     return FALSE;
+    // if (in_hsp->score <= tree_hsp->score &&
+    //     SIGN(in_hsp->subject.frame) == SIGN(tree_hsp->subject.frame) &&
+    //     CONTAINED_IN_HSP(... in_hsp->query.offset ... in_hsp->subject.offset) &&
+    //     CONTAINED_IN_HSP(... in_hsp->query.end ... in_hsp->subject.end)) {
+    //     if (min_diag_separation == 0)
+    //         return TRUE;
+    //     if (MB_HSP_CLOSE(... start ...) || MB_HSP_CLOSE(... end ...))
+    //         return TRUE;
+    // }
+    // ```
+    #[test]
+    fn test_containing_hsp_reports_ncbi_score_and_endpoint_semantics() {
+        let mut tree = BlastIntervalTree::new(0, 1000, 0, 2000);
+        let tree_hsp = make_tree_hsp(100, 200, 500, 600, 100, 1);
+        tree.add_hsp(tree_hsp, 0, IndexMethod::QueryAndSubject);
+
+        let lower_score_inside = make_tree_hsp(120, 180, 520, 580, 50, 1);
+        let equal_score_inside = make_tree_hsp(125, 175, 525, 575, 100, 1);
+        let higher_score_inside = make_tree_hsp(120, 180, 520, 580, 101, 1);
+        let endpoint_outside = make_tree_hsp(120, 220, 520, 620, 50, 1);
+        let opposite_subject_sign = make_tree_hsp(120, 180, 520, 580, 50, -1);
+
+        let container = tree
+            .containing_hsp(&lower_score_inside, 0, 0)
+            .expect("lower-score HSP with both endpoints inside must be contained");
+        assert_eq!(container.query_offset, tree_hsp.query_offset);
+        assert_eq!(container.subject_offset, tree_hsp.subject_offset);
+        assert!(tree.contains_hsp(&equal_score_inside, 0, 0));
+        assert!(!tree.contains_hsp(&higher_score_inside, 0, 0));
+        assert!(!tree.contains_hsp(&endpoint_outside, 0, 0));
+        assert!(!tree.contains_hsp(&opposite_subject_sign, 0, 0));
+    }
+
+    // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_itree.c:819-843
+    // ```c
+    // if (in_q_start != tree_q_start)
+    //     return FALSE;
+    // ...
+    // if (min_diag_separation == 0)
+    //     return TRUE;
+    // if (MB_HSP_CLOSE(tree_hsp->query.offset, tree_hsp->subject.offset,
+    //                  in_hsp->query.offset, in_hsp->subject.offset,
+    //                  min_diag_separation) ||
+    //     MB_HSP_CLOSE(tree_hsp->query.end, tree_hsp->subject.end,
+    //                  in_hsp->query.end, in_hsp->subject.end,
+    //                  min_diag_separation)) {
+    //     return TRUE;
+    // }
+    // ```
+    #[test]
+    fn test_containment_respects_query_context_and_diag_separation() {
+        let mut tree = BlastIntervalTree::new(0, 3000, 0, 2000);
+        let mut tree_hsp = make_tree_hsp(100, 200, 500, 600, 100, 1);
+        tree_hsp.query_context_offset = 1001;
+        tree.add_hsp(tree_hsp, 1001, IndexMethod::QueryAndSubject);
+
+        let same_context_far_diag = make_tree_hsp(150, 160, 500, 510, 50, 1);
+        let same_context_close_diag = make_tree_hsp(149, 159, 500, 510, 50, 1);
+        let different_context = make_tree_hsp(149, 159, 500, 510, 50, 1);
+
+        assert!(tree.contains_hsp(&same_context_far_diag, 1001, 0));
+        assert!(!tree.contains_hsp(&same_context_far_diag, 1001, 50));
+        assert!(tree.contains_hsp(&same_context_close_diag, 1001, 50));
+        assert!(!tree.contains_hsp(&different_context, 0, 0));
     }
 }

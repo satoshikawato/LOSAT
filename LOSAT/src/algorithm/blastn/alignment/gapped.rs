@@ -2033,6 +2033,22 @@ fn extend_gapped_one_direction_with_traceback_with_scratch(
         // NCBI reference: blast_gapalign.c:563-636
         // Inner loop for each subject position
         let score_ptr = score_array.as_mut_ptr();
+        // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_gapalign.c:563-665
+        // ```c
+        // for (b_index = first_b_index; b_index < b_size; b_index++) {
+        //     ...
+        //     if (matrix_index == FENCE_SENTRY) {
+        //         if (fence_hit) { *fence_hit = 1; }
+        //         break;
+        //     }
+        // }
+        // ...
+        // state_struct->used += MAX(b_index, b_size) - orig_b_index + 1;
+        // ```
+        // Track the C loop variable after the inner loop. NCBI exposes only
+        // this written traceback span for the row; retaining zero-filled tail
+        // cells lets traceback read unwritten cells as SCRIPT_GAP_IN_A.
+        let mut row_end_b_index = b_size;
         for b_index in first_b_index..b_size {
             // NCBI reference: blast_gapalign.c:563-578 (b_size can reach N+1; no b_index < N guard).
             // NCBI reference: blast_util.c:826 (NULLB sentinel at sequence ends).
@@ -2045,6 +2061,7 @@ fn extend_gapped_one_direction_with_traceback_with_scratch(
             // }
             // ```
             if sc == FENCE_SENTRY {
+                row_end_b_index = b_index;
                 fence_hit = true;
                 break;
             }
@@ -2187,6 +2204,24 @@ fn extend_gapped_one_direction_with_traceback_with_scratch(
                 }
                 b_size += 1;
             }
+        }
+
+        // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_gapalign.c:658-665
+        // ```c
+        // /* update the memory allocator to reflect the exact number
+        //    of traceback cells this row needed */
+        // state_struct->used += MAX(b_index, b_size) - orig_b_index + 1;
+        // ```
+        // Keep only the row cells NCBI marks used. This avoids making the
+        // allocation slack semantically visible during traceback.
+        let used_cells = row_end_b_index
+            .max(b_size)
+            .saturating_sub(orig_b_index)
+            .saturating_add(1);
+        if edit_script_row.len() < used_cells {
+            edit_script_row.resize(used_cells, SCRIPT_GAP_IN_A);
+        } else {
+            edit_script_row.truncate(used_cells);
         }
 
         // NCBI reference: blast_gapalign.c:671-675
@@ -2588,6 +2623,22 @@ fn extend_gapped_one_direction_with_traceback_ex_with_scratch(
         let mut last_b_index = first_b_index;
 
         let score_ptr = score_array.as_mut_ptr();
+        // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_gapalign.c:563-665
+        // ```c
+        // for (b_index = first_b_index; b_index < b_size; b_index++) {
+        //     ...
+        //     if (matrix_index == FENCE_SENTRY) {
+        //         if (fence_hit) { *fence_hit = 1; }
+        //         break;
+        //     }
+        // }
+        // ...
+        // state_struct->used += MAX(b_index, b_size) - orig_b_index + 1;
+        // ```
+        // Track the C loop variable after the inner loop. NCBI exposes only
+        // this written traceback span for the row; retaining zero-filled tail
+        // cells lets traceback read unwritten cells as SCRIPT_GAP_IN_A.
+        let mut row_end_b_index = b_size;
         for b_index in first_b_index..b_size {
             let sc = get_s(s_seq, b_index, len2, reverse);
             // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_gapalign.c:569-575
@@ -2598,6 +2649,7 @@ fn extend_gapped_one_direction_with_traceback_ex_with_scratch(
             // }
             // ```
             if sc == FENCE_SENTRY {
+                row_end_b_index = b_index;
                 fence_hit = true;
                 break;
             }
@@ -2713,6 +2765,24 @@ fn extend_gapped_one_direction_with_traceback_ex_with_scratch(
                 }
                 b_size += 1;
             }
+        }
+
+        // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_gapalign.c:658-665
+        // ```c
+        // /* update the memory allocator to reflect the exact number
+        //    of traceback cells this row needed */
+        // state_struct->used += MAX(b_index, b_size) - orig_b_index + 1;
+        // ```
+        // Keep only the row cells NCBI marks used. This avoids making the
+        // allocation slack semantically visible during traceback.
+        let used_cells = row_end_b_index
+            .max(b_size)
+            .saturating_sub(orig_b_index)
+            .saturating_add(1);
+        if edit_script_row.len() < used_cells {
+            edit_script_row.resize(used_cells, SCRIPT_GAP_IN_A);
+        } else {
+            edit_script_row.truncate(used_cells);
         }
 
         if b_size <= n && b_size < *dp_mem_alloc {

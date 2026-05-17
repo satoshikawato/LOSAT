@@ -2785,6 +2785,250 @@ fn score_compare_prelim_hits(a: &PrelimHit, b: &PrelimHit) -> std::cmp::Ordering
         .then_with(|| b.prelim_qe.cmp(&a.prelim_qe))
 }
 
+type PrelimHitCompare = fn(&PrelimHit, &PrelimHit) -> std::cmp::Ordering;
+
+// NCBI reference: /mnt/c/Users/genom/GitHub/ncbi-blast/c++/src/algo/blast/core/blast_hits.c:2268-2321
+// ```c
+// if (h1->context < h2->context) return -1;
+// if (h1->query.offset < h2->query.offset) return -1;
+// if (h1->subject.offset < h2->subject.offset) return -1;
+// if (h1->score < h2->score) return 1;
+// if (h1->query.end < h2->query.end) return 1;
+// if (h1->subject.end < h2->subject.end) return 1;
+// ```
+fn query_offset_compare_prelim_hits(a: &PrelimHit, b: &PrelimHit) -> std::cmp::Ordering {
+    a.context_idx
+        .cmp(&b.context_idx)
+        .then_with(|| a.prelim_qs.cmp(&b.prelim_qs))
+        .then_with(|| a.prelim_ss.cmp(&b.prelim_ss))
+        .then_with(|| b.prelim_score.cmp(&a.prelim_score))
+        .then_with(|| b.prelim_qe.cmp(&a.prelim_qe))
+        .then_with(|| b.prelim_se.cmp(&a.prelim_se))
+}
+
+// NCBI reference: /mnt/c/Users/genom/GitHub/ncbi-blast/c++/src/algo/blast/core/blast_hits.c:2327-2383
+// ```c
+// if (h1->context < h2->context) return -1;
+// if (h1->query.end < h2->query.end) return -1;
+// if (h1->subject.end < h2->subject.end) return -1;
+// if (h1->score < h2->score) return 1;
+// if (h1->query.offset < h2->query.offset) return 1;
+// if (h1->subject.offset < h2->subject.offset) return 1;
+// ```
+fn query_end_compare_prelim_hits(a: &PrelimHit, b: &PrelimHit) -> std::cmp::Ordering {
+    a.context_idx
+        .cmp(&b.context_idx)
+        .then_with(|| a.prelim_qe.cmp(&b.prelim_qe))
+        .then_with(|| a.prelim_se.cmp(&b.prelim_se))
+        .then_with(|| b.prelim_score.cmp(&a.prelim_score))
+        .then_with(|| b.prelim_qs.cmp(&a.prelim_qs))
+        .then_with(|| b.prelim_ss.cmp(&a.prelim_ss))
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+mod native_prelim_qsort {
+    use super::{PrelimHit, PrelimHitCompare};
+    use std::cell::Cell;
+    use std::cmp::Ordering;
+    use std::ffi::c_void;
+    use std::mem;
+    use std::os::raw::c_int;
+
+    #[derive(Clone, Copy)]
+    struct QsortContext {
+        hsps: *const PrelimHit,
+        len: usize,
+        compare: PrelimHitCompare,
+    }
+
+    thread_local! {
+        static QSORT_CONTEXT: Cell<Option<QsortContext>> = Cell::new(None);
+    }
+
+    unsafe extern "C" {
+        fn qsort(
+            base: *mut c_void,
+            nmemb: usize,
+            size: usize,
+            compar: extern "C" fn(*const c_void, *const c_void) -> c_int,
+        );
+    }
+
+    extern "C" fn compare_indices(lhs: *const c_void, rhs: *const c_void) -> c_int {
+        // Safety: qsort passes pointers to elements of the usize index array
+        // supplied in native_qsort_prelim_hits_by.
+        let lhs_index = unsafe { *(lhs as *const usize) };
+        let rhs_index = unsafe { *(rhs as *const usize) };
+
+        QSORT_CONTEXT.with(|cell| {
+            let Some(ctx) = cell.get() else {
+                return 0;
+            };
+            if lhs_index >= ctx.len || rhs_index >= ctx.len {
+                return 0;
+            }
+
+            // Safety: ctx.hsps points at `original`, which is kept alive for
+            // the whole qsort call; indices are checked against ctx.len above.
+            let lhs_hsp = unsafe { &*ctx.hsps.add(lhs_index) };
+            let rhs_hsp = unsafe { &*ctx.hsps.add(rhs_index) };
+
+            match (ctx.compare)(lhs_hsp, rhs_hsp) {
+                Ordering::Less => -1,
+                Ordering::Equal => 0,
+                Ordering::Greater => 1,
+            }
+        })
+    }
+
+    pub(super) fn native_qsort_prelim_hits_by(hsps: &mut [PrelimHit], compare: PrelimHitCompare) {
+        let original = hsps.to_vec();
+        let mut indices: Vec<usize> = (0..original.len()).collect();
+        let ctx = QsortContext {
+            hsps: original.as_ptr(),
+            len: original.len(),
+            compare,
+        };
+
+        QSORT_CONTEXT.with(|cell| {
+            let previous = cell.replace(Some(ctx));
+            // Safety: indices is a valid mutable array of usize elements; the
+            // comparator only reads from `original`, which outlives this call.
+            unsafe {
+                qsort(
+                    indices.as_mut_ptr().cast::<c_void>(),
+                    indices.len(),
+                    mem::size_of::<usize>(),
+                    compare_indices,
+                );
+            }
+            cell.set(previous);
+        });
+
+        for (dst, src) in indices.into_iter().enumerate() {
+            hsps[dst] = original[src].clone();
+        }
+    }
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+use native_prelim_qsort::native_qsort_prelim_hits_by;
+
+fn qsort_prelim_hits_by(hsps: &mut [PrelimHit], compare: PrelimHitCompare) {
+    if hsps.len() <= 1 {
+        return;
+    }
+
+    #[cfg(not(target_arch = "wasm32"))]
+    native_qsort_prelim_hits_by(hsps, compare);
+
+    #[cfg(target_arch = "wasm32")]
+    hsps.sort_unstable_by(compare);
+}
+
+fn sort_prelim_hits_by_score(hsps: &mut [PrelimHit]) {
+    if hsps.len() <= 1 {
+        return;
+    }
+
+    let sorted = hsps
+        .windows(2)
+        .all(|pair| score_compare_prelim_hits(&pair[0], &pair[1]) != std::cmp::Ordering::Greater);
+    if sorted {
+        return;
+    }
+
+    // NCBI reference: /mnt/c/Users/genom/GitHub/ncbi-blast/c++/src/algo/blast/core/blast_engine.c:555
+    // ```c
+    // Blast_HSPListSortByScore(hsp_list);
+    // ```
+    // NCBI reference: /mnt/c/Users/genom/GitHub/ncbi-blast/c++/src/algo/blast/core/blast_hits.c:1374-1382
+    // ```c
+    // void Blast_HSPListSortByScore(BlastHSPList* hsp_list)
+    // {
+    //     if (!hsp_list || hsp_list->hspcnt <= 1)
+    //         return;
+    //     if (!Blast_HSPListIsSortedByScore(hsp_list)) {
+    //         qsort(hsp_list->hsp_array, hsp_list->hspcnt, sizeof(BlastHSP*),
+    //               ScoreCompareHSPs);
+    //     }
+    // }
+    // ```
+    // NCBI reference: /mnt/c/Users/genom/GitHub/ncbi-blast/c++/src/algo/blast/core/blast_traceback.c:358-365
+    // ```c
+    // #ifdef _DEBUG
+    // { Blast_HSPListSortByScore(hsp_list); }
+    // #endif
+    // ASSERT(Blast_HSPListIsSortedByScore(hsp_list));
+    // ```
+    // Preliminary HSPs drive traceback interval-tree insertion order. Replay
+    // the platform qsort over indices so comparator-equal pointer ordering
+    // follows NCBI more closely than Rust's sort implementation.
+    qsort_prelim_hits_by(hsps, score_compare_prelim_hits);
+}
+
+fn purge_prelim_hits_with_common_endpoints(mut hsps: Vec<PrelimHit>) -> Vec<PrelimHit> {
+    if hsps.len() <= 1 {
+        return hsps;
+    }
+
+    // NCBI reference: /mnt/c/Users/genom/GitHub/ncbi-blast/c++/src/algo/blast/core/blast_engine.c:540-557
+    // ```c
+    // if (aux_struct->GetGappedScore) {
+    //     /* Removes redundant HSPs. */
+    //     Blast_HSPListPurgeHSPsWithCommonEndpoints(program_number, hsp_list, TRUE);
+    // }
+    // Blast_HSPListSortByScore(hsp_list);
+    // ```
+    // NCBI reference: /mnt/c/Users/genom/GitHub/ncbi-blast/c++/src/algo/blast/core/blast_hits.c:2455-2535
+    // ```c
+    // purge |= (program != eBlastTypeBlastn);
+    // qsort(hsp_array, hsp_count, sizeof(BlastHSP*), s_QueryOffsetCompareHSPs);
+    // ...
+    // if (!purge && (hsp->query.end > hsp_array[i]->query.end)) {
+    //     s_CutOffGapEditScript(...);
+    // } else {
+    //     hsp = Blast_HSPFree(hsp);
+    // }
+    // ...
+    // qsort(hsp_array, hsp_count, sizeof(BlastHSP*), s_QueryEndCompareHSPs);
+    // ```
+    // Preliminary BLASTN HSPs use purge=TRUE, so common-start/common-end
+    // duplicates are deleted, not trimmed. The full traceback stage still uses
+    // the later purge=FALSE/TRUE passes over final HSPs with edit scripts.
+    qsort_prelim_hits_by(&mut hsps, query_offset_compare_prelim_hits);
+    let mut kept: Vec<PrelimHit> = Vec::with_capacity(hsps.len());
+    for hsp in hsps {
+        let same_common_start = kept.last().is_some_and(|prev| {
+            prev.context_idx == hsp.context_idx
+                && prev.prelim_qs == hsp.prelim_qs
+                && prev.prelim_ss == hsp.prelim_ss
+        });
+        if !same_common_start {
+            kept.push(hsp);
+        }
+    }
+
+    if kept.len() <= 1 {
+        return kept;
+    }
+
+    qsort_prelim_hits_by(&mut kept, query_end_compare_prelim_hits);
+    let mut out: Vec<PrelimHit> = Vec::with_capacity(kept.len());
+    for hsp in kept {
+        let same_common_end = out.last().is_some_and(|prev| {
+            prev.context_idx == hsp.context_idx
+                && prev.prelim_qe == hsp.prelim_qe
+                && prev.prelim_se == hsp.prelim_se
+        });
+        if !same_common_end {
+            out.push(hsp);
+        }
+    }
+
+    out
+}
+
 // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_hits_priv.h:66-72
 // ```c
 // #define CONTAINED_IN_HSP(a,b,c,d,e,f) \
@@ -2940,8 +3184,8 @@ fn merge_prelim_hits_subject_split(
     // s_BlastHSPListsCombineByScore(hsp_list, combined_hsp_list, new_hspcnt);
     // ```
     // `s_BlastHSPListsCombineByScore` relies on `qsort`-ordered score lists;
-    // keep tie handling non-stable here as well.
-    combined.sort_unstable_by(score_compare_prelim_hits);
+    // keep the merged preliminary list on the same ordering path.
+    sort_prelim_hits_by_score(combined);
     incoming
 }
 
@@ -7994,15 +8238,17 @@ fn run_internal(args: BlastnArgs, mut in_memory: Option<BlastnInMemoryRun<'_>>) 
                 //                                      eQueryAndSubject);
                 // }
                 // ```
-                // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_traceback.c:633-692
+                // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_engine.c:540-557
                 // ```c
-                // Blast_HSPListPurgeHSPsWithCommonEndpoints(program_number, hsp_list, FALSE);
-                // ...
-                // Blast_HSPListPurgeHSPsWithCommonEndpoints(program_number, hsp_list, TRUE);
+                // if (aux_struct->GetGappedScore) {
+                //     Blast_HSPListPurgeHSPsWithCommonEndpoints(program_number, hsp_list, TRUE);
+                // }
+                // Blast_HSPListSortByScore(hsp_list);
                 // ```
-                // Preliminary gapped HSPs are not common-endpoint purged before
-                // traceback; the two purge passes happen only after full traceback.
-                chunk_prelim_hits.sort_unstable_by(score_compare_prelim_hits);
+                // NCBI purges redundant preliminary score-only gapped HSPs
+                // before subject chunk offset adjustment and final traceback.
+                chunk_prelim_hits = purge_prelim_hits_with_common_endpoints(chunk_prelim_hits);
+                sort_prelim_hits_by_score(&mut chunk_prelim_hits);
                 for hit in chunk_prelim_hits.iter_mut() {
                     hit.prelim_ss = hit.prelim_ss.saturating_add(chunk.offset);
                     hit.prelim_se = hit.prelim_se.saturating_add(chunk.offset);
@@ -8265,7 +8511,7 @@ fn run_internal(args: BlastnArgs, mut in_memory: Option<BlastnInMemoryRun<'_>>) 
             } else {
                 None
             };
-            prelim_hits.sort_unstable_by(score_compare_prelim_hits);
+            sort_prelim_hits_by_score(prelim_hits);
             if let (Some(timing), Some(sort_prelim_start)) = (timing_ref, sort_prelim_start) {
                 BlastnTiming::record_duration(&timing.traceback_sort_prelim_ns, sort_prelim_start);
             }

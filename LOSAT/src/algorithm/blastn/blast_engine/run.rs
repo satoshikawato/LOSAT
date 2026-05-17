@@ -5838,20 +5838,17 @@ fn run_internal(args: BlastnArgs, mut in_memory: Option<BlastnInMemoryRun<'_>>) 
                                     continue;
                                 }
 
-                                // NCBI reference: ncbi-blast/c++/src/algo/blast/core/na_ungapped.c:663-664
+                                // NCBI reference: /mnt/c/Users/genom/GitHub/ncbi-blast/c++/src/algo/blast/core/na_ungapped.c:663-664
                                 // ```c
                                 // diag = s_off + diag_table->diag_array_length - q_off;
                                 // real_diag = diag & diag_table->diag_mask;
                                 // ```
-                                let diag = if use_array_indexing {
+                                // This value is used only for seed trace output before the
+                                // word-length extension below adjusts q_off/s_off.
+                                let lookup_diag = if use_array_indexing {
                                     (kmer_start as isize + diag_array_length - q_off0 as isize)
                                         & diag_mask
                                 } else {
-                                    // NCBI reference: ncbi-blast/c++/src/algo/blast/core/na_ungapped.c:828-829
-                                    // ```c
-                                    // diag = s_off - q_off;
-                                    // s_end = s_off + word_length;
-                                    // ```
                                     kmer_start as isize - q_off0 as isize
                                 };
 
@@ -5906,7 +5903,7 @@ fn run_internal(args: BlastnArgs, mut in_memory: Option<BlastnInMemoryRun<'_>>) 
                                             kmer_start.saturating_add(chunk.offset),
                                             lut_word_length,
                                             pair.q_off,
-                                            diag
+                                            lookup_diag
                                         ),
                                     );
                                 }
@@ -5917,37 +5914,6 @@ fn run_internal(args: BlastnArgs, mut in_memory: Option<BlastnInMemoryRun<'_>>) 
                                 // This check happens below (line 753) using hit_level_array[real_diag].last_hit
                                 // The mask_array/mask_hash check above was LOSAT-specific and caused excessive filtering
                                 // REMOVED to match NCBI BLAST behavior
-
-                                // NCBI reference: na_ungapped.c:656-672
-                                // Two-hit filter: check if there's a previous hit within window_size
-                                // NCBI: Boolean two_hits = (window_size > 0);
-                                // NCBI: last_hit = hit_level_array[real_diag].last_hit;
-                                // NCBI: hit_saved = hit_level_array[real_diag].flag;
-                                // NCBI: if (s_off_pos < last_hit) return 0;  // hit within explored area
-                                let diag_idx = if use_array_indexing {
-                                    diag as usize
-                                } else {
-                                    0 // Not used for hash indexing
-                                };
-
-                                // Get current diagonal state
-                                let (last_hit, hit_saved) = if use_array_indexing
-                                    && diag_idx < diag_array_size
-                                {
-                                    let diag_entry = &hit_level_array[diag_idx];
-                                    (diag_entry.last_hit, diag_entry.flag != 0)
-                                } else if !use_array_indexing {
-                                    // NCBI reference: ncbi-blast/c++/src/algo/blast/core/na_ungapped.c:833-836
-                                    // ```c
-                                    // rc = s_BlastDiagHashRetrieve(hash_table, diag, &last_hit, &s_l, &hit_saved);
-                                    // if(!rc)  last_hit = 0;
-                                    // ```
-                                    let (level, _hit_len, hit_saved) =
-                                        diag_hash.retrieve(diag as i32).unwrap_or((0, 0, false));
-                                    (level, hit_saved)
-                                } else {
-                                    (0, false)
-                                };
 
                                 // NCBI reference: na_ungapped.c:1081-1140
                                 // For two-stage lookup, verify word_length match BEFORE ungapped extension
@@ -6151,14 +6117,49 @@ fn run_internal(args: BlastnArgs, mut in_memory: Option<BlastnInMemoryRun<'_>>) 
                                     (q_off0, kmer_start)
                                 };
 
-                                // NCBI reference: ncbi-blast/c++/src/algo/blast/core/na_ungapped.c:656-672
+                                // NCBI reference: /mnt/c/Users/genom/GitHub/ncbi-blast/c++/src/algo/blast/core/na_ungapped.c:1093-1155
                                 // ```c
-                                // last_hit = hit_level_array[real_diag].last_hit;
-                                // s_off_pos = s_off + diag_table->offset;
+                                // q_offset -= ext_left;
+                                // s_offset -= ext_left;
+                                // ...
+                                // hits_extended += s_BlastnDiagHashExtendInitialHit(query, subject,
+                                //                                  q_offset, s_offset,
+                                //                                  masked_locations,
+                                //                                  query_info, s_range,
+                                //                                  word_length, lut_word_length,
+                                //                                  lookup_wrap,
+                                // ```
+                                // NCBI reference: /mnt/c/Users/genom/GitHub/ncbi-blast/c++/src/algo/blast/core/na_ungapped.c:828-839
+                                // ```c
+                                // diag = s_off - q_off;
+                                // s_end = s_off + word_length;
+                                // s_off_pos = s_off + hash_table->offset;
+                                // rc = s_BlastDiagHashRetrieve(hash_table, diag, &last_hit, &s_l, &hit_saved);
+                                // if(!rc)  last_hit = 0;
                                 // if (s_off_pos < last_hit) return 0;
                                 // ```
-                                // NCBI calls s_Blastn* after left/right word-length verification, so s_off is
-                                // already adjusted by ext_left (s_BlastNaExtendDirect).
+                                // For two-stage lookup NCBI computes the diagonal after the
+                                // word-length extension has adjusted q_offset/s_offset.
+                                let diag = if use_array_indexing {
+                                    (s_ext_start as isize + diag_array_length
+                                        - q_ext_start as isize)
+                                        & diag_mask
+                                } else {
+                                    s_ext_start as isize - q_ext_start as isize
+                                };
+                                let diag_idx = if use_array_indexing { diag as usize } else { 0 };
+                                let (last_hit, hit_saved) = if use_array_indexing
+                                    && diag_idx < diag_array_size
+                                {
+                                    let diag_entry = &hit_level_array[diag_idx];
+                                    (diag_entry.last_hit, diag_entry.flag != 0)
+                                } else if !use_array_indexing {
+                                    let (level, _hit_len, hit_saved) =
+                                        diag_hash.retrieve(diag as i32).unwrap_or((0, 0, false));
+                                    (level, hit_saved)
+                                } else {
+                                    (0, false)
+                                };
                                 let s_off_pos = s_ext_start + diag_offset as usize;
                                 let s_off_pos_i32 = s_off_pos as i32;
 

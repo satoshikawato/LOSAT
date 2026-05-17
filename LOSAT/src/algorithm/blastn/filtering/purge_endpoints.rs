@@ -14,10 +14,11 @@
 //!
 //! Reference: blast_traceback.c:637-669
 
-use super::super::hsp::BlastnHsp;
+use super::super::hsp::{qsort_blastn_hsps_by, BlastnHsp};
 use super::super::tracing as blastn_trace;
 use crate::common::GapEditOp;
 use rustc_hash::FxHashMap;
+use std::cmp::Ordering;
 
 // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_hits.c:1122-1132
 // ```c
@@ -54,6 +55,76 @@ fn adjust_blastn_offsets(
         let s_end = subject_end;
         (q_start, q_end, s_start, s_end)
     }
+}
+
+// NCBI reference: /mnt/c/Users/genom/GitHub/ncbi-blast/c++/src/algo/blast/core/blast_hits.c:2484-2486
+// ```c
+// hsp_array[i]->query.offset == hsp_array[i+j]->query.offset &&
+// hsp_array[i]->subject.offset == hsp_array[i+j]->subject.offset
+// ```
+fn blastn_hsp_query_offsets(hsp: &BlastnHsp) -> (usize, usize) {
+    (hsp.internal_q_offset_0, hsp.internal_q_end_0)
+}
+
+// NCBI reference: /mnt/c/Users/genom/GitHub/ncbi-blast/c++/src/algo/blast/core/blast_hits.c:2484-2487
+// ```c
+// hsp_array[i]->context == hsp_array[i+j]->context &&
+// hsp_array[i]->query.offset == hsp_array[i+j]->query.offset &&
+// hsp_array[i]->subject.offset == hsp_array[i+j]->subject.offset &&
+// hsp_array[i]->subject.frame == hsp_array[i+j]->subject.frame
+// ```
+fn blastn_hsp_context(hsp: &BlastnHsp) -> u32 {
+    hsp.q_idx * 2 + if hsp.query_frame < 0 { 1 } else { 0 }
+}
+
+// NCBI reference: /mnt/c/Users/genom/GitHub/ncbi-blast/c++/src/algo/blast/core/blast_hits.c:2285-2318
+// ```c
+// if (h1->context < h2->context) return -1;
+// if (h1->context > h2->context) return 1;
+// if (h1->query.offset < h2->query.offset) return -1;
+// if (h1->query.offset > h2->query.offset) return 1;
+// if (h1->subject.offset < h2->subject.offset) return -1;
+// if (h1->subject.offset > h2->subject.offset) return 1;
+// if (h1->score < h2->score) return 1;
+// if (h1->score > h2->score) return -1;
+// if (h1->query.end < h2->query.end) return 1;
+// if (h1->query.end > h2->query.end) return -1;
+// if (h1->subject.end < h2->subject.end) return 1;
+// if (h1->subject.end > h2->subject.end) return -1;
+// ```
+fn compare_query_offset_hsps_for_common_endpoint(a: &BlastnHsp, b: &BlastnHsp) -> Ordering {
+    blastn_hsp_context(a)
+        .cmp(&blastn_hsp_context(b))
+        .then_with(|| a.internal_q_offset_0.cmp(&b.internal_q_offset_0))
+        .then_with(|| a.internal_s_offset_0.cmp(&b.internal_s_offset_0))
+        .then_with(|| b.raw_score.cmp(&a.raw_score))
+        .then_with(|| b.internal_q_end_0.cmp(&a.internal_q_end_0))
+        .then_with(|| b.internal_s_end_0.cmp(&a.internal_s_end_0))
+}
+
+// NCBI reference: /mnt/c/Users/genom/GitHub/ncbi-blast/c++/src/algo/blast/core/blast_hits.c:2350-2384
+// ```c
+// if (h1->context < h2->context) return -1;
+// if (h1->context > h2->context) return 1;
+// if (h1->query.end < h2->query.end) return -1;
+// if (h1->query.end > h2->query.end) return 1;
+// if (h1->subject.end < h2->subject.end) return -1;
+// if (h1->subject.end > h2->subject.end) return 1;
+// if (h1->score < h2->score) return 1;
+// if (h1->score > h2->score) return -1;
+// if (h1->query.offset < h2->query.offset) return 1;
+// if (h1->query.offset > h2->query.offset) return -1;
+// if (h1->subject.offset < h2->subject.offset) return 1;
+// if (h1->subject.offset > h2->subject.offset) return -1;
+// ```
+fn compare_query_end_hsps_for_common_endpoint(a: &BlastnHsp, b: &BlastnHsp) -> Ordering {
+    blastn_hsp_context(a)
+        .cmp(&blastn_hsp_context(b))
+        .then_with(|| a.internal_q_end_0.cmp(&b.internal_q_end_0))
+        .then_with(|| a.internal_s_end_0.cmp(&b.internal_s_end_0))
+        .then_with(|| b.raw_score.cmp(&a.raw_score))
+        .then_with(|| b.internal_q_offset_0.cmp(&a.internal_q_offset_0))
+        .then_with(|| b.internal_s_offset_0.cmp(&a.internal_s_offset_0))
 }
 
 // =============================================================================
@@ -484,13 +555,6 @@ fn purge_hsps_for_subject_ex(mut hits: Vec<BlastnHsp>, purge: bool) -> (Vec<Blas
     // hsp_array[i]->subject.offset == hsp_array[i+j]->subject.offset
     // ```
     // Endpoint purge compares canonical internal offsets/endpoints directly.
-    let q_offsets = |h: &BlastnHsp| (h.internal_q_offset_0, h.internal_q_end_0);
-    let context = |h: &BlastnHsp| -> u32 { h.q_idx * 2 + if h.query_frame < 0 { 1 } else { 0 } };
-    // NCBI uses CANONICAL coordinates: subject.offset < subject.end always
-    // ASSERT(hsp->subject.offset < hsp->subject.end) at blast_engine.c:1312
-    let s_offset = |h: &BlastnHsp| h.internal_s_offset_0; // NCBI subject.offset
-    let s_end_canon = |h: &BlastnHsp| h.internal_s_end_0; // NCBI subject.end
-
     // Pass 1: Remove HSPs with common START positions
     // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_hits.c:2285-2318
     // ```c
@@ -507,17 +571,11 @@ fn purge_hsps_for_subject_ex(mut hits: Vec<BlastnHsp>, purge: bool) -> (Vec<Blas
     // if (h1->subject.end < h2->subject.end) return 1;
     // if (h1->subject.end > h2->subject.end) return -1;
     // ```
-    hits.sort_by(|a, b| {
-        let (a_q_offset, a_q_end) = q_offsets(a);
-        let (b_q_offset, b_q_end) = q_offsets(b);
-        context(a)
-            .cmp(&context(b)) // context ASC
-            .then_with(|| a_q_offset.cmp(&b_q_offset)) // query.offset ASC
-            .then_with(|| s_offset(a).cmp(&s_offset(b))) // subject.offset ASC
-            .then_with(|| b.raw_score.cmp(&a.raw_score)) // score DESC
-            .then_with(|| b_q_end.cmp(&a_q_end)) // query.end DESC
-            .then_with(|| s_end_canon(b).cmp(&s_end_canon(a))) // subject.end DESC
-    });
+    // NCBI reference: /mnt/c/Users/genom/GitHub/ncbi-blast/c++/src/algo/blast/core/blast_hits.c:2478
+    // ```c
+    // qsort(hsp_array, hsp_count, sizeof(BlastHSP*), s_QueryOffsetCompareHSPs);
+    // ```
+    qsort_blastn_hsps_by(&mut hits, compare_query_offset_hsps_for_common_endpoint);
 
     // NCBI reference: blast_hits.c:2480-2500
     // if (!purge && (hsp->query.end > hsp_array[i]->query.end)) {
@@ -545,14 +603,14 @@ fn purge_hsps_for_subject_ex(mut hits: Vec<BlastnHsp>, purge: bool) -> (Vec<Blas
     let mut active_hits = Vec::with_capacity(hits.len());
     let mut sorted_iter = hits.into_iter().peekable();
     while let Some(keeper) = sorted_iter.next() {
-        let (_, keeper_q_end) = q_offsets(&keeper);
-        let keeper_context = context(&keeper);
+        let (_, keeper_q_end) = blastn_hsp_query_offsets(&keeper);
+        let keeper_context = blastn_hsp_context(&keeper);
         let keeper_q_offset = keeper.internal_q_offset_0;
         let keeper_s_offset = keeper.internal_s_offset_0;
         let keeper_s_end = keeper.internal_s_end_0;
 
         while sorted_iter.peek().is_some_and(|candidate| {
-            context(candidate) == keeper_context
+            blastn_hsp_context(candidate) == keeper_context
                 && candidate.internal_q_offset_0 == keeper_q_offset
                 && candidate.internal_s_offset_0 == keeper_s_offset
         }) {
@@ -602,17 +660,11 @@ fn purge_hsps_for_subject_ex(mut hits: Vec<BlastnHsp>, purge: bool) -> (Vec<Blas
 
     // Pass 2: Remove HSPs with common END positions
     // NCBI reference: blast_hits.c:2504-2526
-    hits.sort_by(|a, b| {
-        let (a_q_offset, a_q_end) = q_offsets(a);
-        let (b_q_offset, b_q_end) = q_offsets(b);
-        context(a)
-            .cmp(&context(b))
-            .then_with(|| a_q_end.cmp(&b_q_end))
-            .then_with(|| s_end_canon(a).cmp(&s_end_canon(b)))
-            .then_with(|| b.raw_score.cmp(&a.raw_score)) // score DESC
-            .then_with(|| b_q_offset.cmp(&a_q_offset)) // query.offset DESC
-            .then_with(|| s_offset(b).cmp(&s_offset(a))) // subject.offset DESC
-    });
+    // NCBI reference: /mnt/c/Users/genom/GitHub/ncbi-blast/c++/src/algo/blast/core/blast_hits.c:2504
+    // ```c
+    // qsort(hsp_array, hsp_count, sizeof(BlastHSP*), s_QueryEndCompareHSPs);
+    // ```
+    qsort_blastn_hsps_by(&mut hits, compare_query_end_hsps_for_common_endpoint);
 
     // NCBI reference: blast_hits.c:2516-2520
     // if (!purge && (hsp->query.offset < hsp_array[i]->query.offset)) {
@@ -641,12 +693,12 @@ fn purge_hsps_for_subject_ex(mut hits: Vec<BlastnHsp>, purge: bool) -> (Vec<Blas
     while let Some(keeper) = sorted_iter.next() {
         let keeper_q_offset = keeper.internal_q_offset_0;
         let keeper_q_end = keeper.internal_q_end_0;
-        let keeper_context = context(&keeper);
+        let keeper_context = blastn_hsp_context(&keeper);
         let keeper_s_offset = keeper.internal_s_offset_0;
         let keeper_s_end = keeper.internal_s_end_0;
 
         while sorted_iter.peek().is_some_and(|candidate| {
-            context(candidate) == keeper_context
+            blastn_hsp_context(candidate) == keeper_context
                 && candidate.internal_q_end_0 == keeper_q_end
                 && candidate.internal_s_end_0 == keeper_s_end
         }) {

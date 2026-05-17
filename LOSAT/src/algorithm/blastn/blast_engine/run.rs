@@ -58,9 +58,8 @@ use super::super::filtering::{
     subject_best_hit, ReevalParams,
 };
 use super::super::hsp::{
-    get_prelim_hitlist_size, score_compare_hsps as score_compare_blastn_hsps, trim_by_max_hsps,
-    write_output_blastn_hitlists, write_output_blastn_hitlists_to_writer, BlastnHitList, BlastnHsp,
-    BlastnHspList,
+    get_prelim_hitlist_size, sort_hsps_by_score, trim_by_max_hsps, write_output_blastn_hitlists,
+    write_output_blastn_hitlists_to_writer, BlastnHitList, BlastnHsp, BlastnHspList,
 };
 use super::super::interval_tree::{BlastIntervalTree, IndexMethod, TreeHsp};
 use super::super::lookup::{build_unmasked_ranges, reverse_complement};
@@ -3821,7 +3820,7 @@ fn update_hitlists_with_subject_hits(
         //     }
         // }
         // ```
-        hsps.sort_unstable_by(score_compare_blastn_hsps);
+        sort_hsps_by_score(&mut hsps);
 
         let oid = hsps[0].s_idx;
         let hsp_list = BlastnHspList {
@@ -9136,7 +9135,12 @@ fn run_internal(args: BlastnArgs, mut in_memory: Option<BlastnInMemoryRun<'_>>) 
         } else {
             None
         };
-        local_hits.sort_unstable_by(score_compare_blastn_hsps);
+        // NCBI reference: /mnt/c/Users/genom/GitHub/ncbi-blast/c++/src/algo/blast/core/blast_traceback.c:671-672
+        // ```c
+        // /* Sort HSPs by score again, as the scores might have changed. */
+        // Blast_HSPListSortByScore(hsp_list);
+        // ```
+        sort_hsps_by_score(&mut local_hits);
         if let (Some(timing), Some(score_resort_start)) = (timing_ref, score_resort_start) {
             BlastnTiming::record_duration(&timing.traceback_score_resort_ns, score_resort_start);
         }

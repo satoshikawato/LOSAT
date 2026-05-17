@@ -110,6 +110,8 @@ pub struct BlastnHitList {
     pub num_hits: usize,
 }
 
+pub type BlastnHspCompare = fn(&BlastnHsp, &BlastnHsp) -> Ordering;
+
 impl BlastnHsp {
     // NCBI reference: ncbi-blast/c++/include/algo/blast/core/blast_hits.h:125-148
     // ```c
@@ -371,6 +373,163 @@ pub fn evalue_compare_hsps(a: &BlastnHsp, b: &BlastnHsp) -> Ordering {
     }
 }
 
+// NCBI reference: /mnt/c/Users/genom/GitHub/ncbi-blast/c++/src/algo/blast/core/blast_hits.c:1379-1381
+// ```c
+// qsort(hsp_list->hsp_array, hsp_list->hspcnt, sizeof(BlastHSP*),
+//       ScoreCompareHSPs);
+// ```
+// NCBI reference: /mnt/c/Users/genom/GitHub/ncbi-blast/c++/src/algo/blast/core/blast_hits.c:1453-1454
+// ```c
+// qsort(hsp_list->hsp_array, hsp_list->hspcnt, sizeof(BlastHSP*),
+//       s_EvalueCompareHSPs);
+// ```
+// NCBI reference: /mnt/c/Users/genom/GitHub/ncbi-blast/c++/src/algo/blast/core/blast_hits.c:2478
+// ```c
+// qsort(hsp_array, hsp_count, sizeof(BlastHSP*), s_QueryOffsetCompareHSPs);
+// ```
+// NCBI reference: /mnt/c/Users/genom/GitHub/ncbi-blast/c++/src/algo/blast/core/blast_hits.c:2504
+// ```c
+// qsort(hsp_array, hsp_count, sizeof(BlastHSP*), s_QueryEndCompareHSPs);
+// ```
+// Sort an index array through the platform C qsort, then replay that order onto
+// Rust HSP values. NCBI sorts BlastHSP* arrays; sorting usize indices keeps Rust
+// values out of C while matching native qsort tie handling on parity builds.
+pub fn qsort_blastn_hsps_by(hsps: &mut [BlastnHsp], compare: BlastnHspCompare) {
+    if hsps.len() <= 1 {
+        return;
+    }
+
+    #[cfg(not(target_arch = "wasm32"))]
+    {
+        native_qsort_blastn_hsps_by(hsps, compare);
+    }
+
+    #[cfg(target_arch = "wasm32")]
+    {
+        // Wasm has no C qsort. Keep the comparator order; native builds are the
+        // NCBI BLAST+ parity target for qsort tie behavior.
+        hsps.sort_by(compare);
+    }
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+mod native_hsp_qsort {
+    use super::{BlastnHsp, BlastnHspCompare};
+    use std::cell::Cell;
+    use std::cmp::Ordering;
+    use std::ffi::c_void;
+    use std::mem;
+    use std::os::raw::c_int;
+
+    #[derive(Clone, Copy)]
+    struct QsortContext {
+        hsps: *const BlastnHsp,
+        len: usize,
+        compare: BlastnHspCompare,
+    }
+
+    thread_local! {
+        static QSORT_CONTEXT: Cell<Option<QsortContext>> = Cell::new(None);
+    }
+
+    unsafe extern "C" {
+        fn qsort(
+            base: *mut c_void,
+            nmemb: usize,
+            size: usize,
+            compar: extern "C" fn(*const c_void, *const c_void) -> c_int,
+        );
+    }
+
+    extern "C" fn compare_indices(lhs: *const c_void, rhs: *const c_void) -> c_int {
+        // Safety: qsort passes pointers to elements of the usize index array
+        // supplied in native_qsort_blastn_hsps_by.
+        let lhs_index = unsafe { *(lhs as *const usize) };
+        let rhs_index = unsafe { *(rhs as *const usize) };
+
+        QSORT_CONTEXT.with(|cell| {
+            let Some(ctx) = cell.get() else {
+                return 0;
+            };
+            if lhs_index >= ctx.len || rhs_index >= ctx.len {
+                return 0;
+            }
+
+            // Safety: ctx.hsps points at `original`, which is kept alive for the
+            // whole qsort call; indices are checked against ctx.len above.
+            let lhs_hsp = unsafe { &*ctx.hsps.add(lhs_index) };
+            let rhs_hsp = unsafe { &*ctx.hsps.add(rhs_index) };
+
+            match (ctx.compare)(lhs_hsp, rhs_hsp) {
+                Ordering::Less => -1,
+                Ordering::Equal => 0,
+                Ordering::Greater => 1,
+            }
+        })
+    }
+
+    pub(super) fn native_qsort_blastn_hsps_by(hsps: &mut [BlastnHsp], compare: BlastnHspCompare) {
+        let original = hsps.to_vec();
+        let mut indices: Vec<usize> = (0..original.len()).collect();
+        let ctx = QsortContext {
+            hsps: original.as_ptr(),
+            len: original.len(),
+            compare,
+        };
+
+        QSORT_CONTEXT.with(|cell| {
+            let previous = cell.replace(Some(ctx));
+            // Safety: indices is a valid mutable array of usize elements; the
+            // comparator only reads from `original`, which outlives this call.
+            unsafe {
+                qsort(
+                    indices.as_mut_ptr().cast::<c_void>(),
+                    indices.len(),
+                    mem::size_of::<usize>(),
+                    compare_indices,
+                );
+            }
+            cell.set(previous);
+        });
+
+        for (dst, src) in indices.into_iter().enumerate() {
+            hsps[dst] = original[src].clone();
+        }
+    }
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+use native_hsp_qsort::native_qsort_blastn_hsps_by;
+
+// NCBI reference: /mnt/c/Users/genom/GitHub/ncbi-blast/c++/src/algo/blast/core/blast_hits.c:1374-1382
+// ```c
+// void Blast_HSPListSortByScore(BlastHSPList* hsp_list)
+// {
+//     if (!hsp_list || hsp_list->hspcnt <= 1)
+//         return;
+//     if (!Blast_HSPListIsSortedByScore(hsp_list)) {
+//         qsort(hsp_list->hsp_array, hsp_list->hspcnt, sizeof(BlastHSP*),
+//               ScoreCompareHSPs);
+//     }
+// }
+// ```
+pub fn sort_hsps_by_score(hsps: &mut [BlastnHsp]) {
+    if hsps.len() <= 1 {
+        return;
+    }
+    let sorted = hsps
+        .windows(2)
+        .all(|pair| score_compare_hsps(&pair[0], &pair[1]) != Ordering::Greater);
+    if !sorted {
+        // NCBI reference: /mnt/c/Users/genom/GitHub/ncbi-blast/c++/src/algo/blast/core/blast_hits.c:1379-1381
+        // ```c
+        // qsort(hsp_list->hsp_array, hsp_list->hspcnt, sizeof(BlastHSP*),
+        //       ScoreCompareHSPs);
+        // ```
+        qsort_blastn_hsps_by(hsps, score_compare_hsps);
+    }
+}
+
 // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_hits.c:1437-1455
 // ```c
 // void Blast_HSPListSortByEvalue(BlastHSPList* hsp_list)
@@ -401,7 +560,12 @@ pub fn sort_hsplist_by_evalue(list: &mut BlastnHspList) {
             index += 1;
         }
         if index < list.hsps.len() - 1 {
-            list.hsps.sort_by(evalue_compare_hsps);
+            // NCBI reference: /mnt/c/Users/genom/GitHub/ncbi-blast/c++/src/algo/blast/core/blast_hits.c:1453-1454
+            // ```c
+            // qsort(hsp_list->hsp_array, hsp_list->hspcnt, sizeof(BlastHSP*),
+            //       s_EvalueCompareHSPs);
+            // ```
+            qsort_blastn_hsps_by(&mut list.hsps, evalue_compare_hsps);
         }
     }
 }

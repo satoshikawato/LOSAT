@@ -15,6 +15,7 @@
 //! Reference: blast_traceback.c:637-669
 
 use super::super::hsp::BlastnHsp;
+use super::super::tracing as blastn_trace;
 use crate::common::GapEditOp;
 use rustc_hash::FxHashMap;
 
@@ -566,10 +567,29 @@ fn purge_hsps_for_subject_ex(mut hits: Vec<BlastnHsp>, purge: bool) -> (Vec<Blas
                 // CRITICAL: NCBI's s_CutOffGapEditScript is a VOID function - it always moves
                 // the HSP to the end for re-evaluation, even if trimming doesn't change anything.
                 // LOSAT must match this behavior: always move to end when condition is met.
+                trace_common_endpoint_purge_decision(
+                    "common_start",
+                    "trim_begin",
+                    purge,
+                    &keeper,
+                    &removed_hit,
+                    keeper_q_end,
+                    keeper_s_end,
+                );
                 let _ = cut_off_gap_edit_script(&mut removed_hit, keeper_q_end, keeper_s_end, true);
                 // Always move to end for re-evaluation (matches NCBI void function behavior)
                 start_trimmed_hits.push(removed_hit);
                 start_trimmed += 1;
+            } else {
+                trace_common_endpoint_purge_decision(
+                    "common_start",
+                    "delete",
+                    purge,
+                    &keeper,
+                    &removed_hit,
+                    keeper_q_end,
+                    keeper_s_end,
+                );
             }
             // else: purge=true or hsp doesn't extend beyond, just delete
 
@@ -639,6 +659,15 @@ fn purge_hsps_for_subject_ex(mut hits: Vec<BlastnHsp>, purge: bool) -> (Vec<Blas
                 // Trim the end, keep the start portion
                 // NCBI reference: blast_hits.c:2516-2524
                 // CRITICAL: NCBI's s_CutOffGapEditScript is a VOID function - always move to end
+                trace_common_endpoint_purge_decision(
+                    "common_end",
+                    "trim_end",
+                    purge,
+                    &keeper,
+                    &removed_hit,
+                    keeper_q_offset,
+                    keeper_s_offset,
+                );
                 let _ = cut_off_gap_edit_script(
                     &mut removed_hit,
                     keeper_q_offset,
@@ -648,6 +677,16 @@ fn purge_hsps_for_subject_ex(mut hits: Vec<BlastnHsp>, purge: bool) -> (Vec<Blas
                 // Always move to end for re-evaluation (matches NCBI void function behavior)
                 end_trimmed_hits.push(removed_hit);
                 end_trimmed += 1;
+            } else {
+                trace_common_endpoint_purge_decision(
+                    "common_end",
+                    "delete",
+                    purge,
+                    &keeper,
+                    &removed_hit,
+                    keeper_q_offset,
+                    keeper_s_offset,
+                );
             }
             // else: purge=true or hsp doesn't start before, just delete
 
@@ -689,6 +728,105 @@ fn purge_hsps_for_subject_ex(mut hits: Vec<BlastnHsp>, purge: bool) -> (Vec<Blas
     ); // Silence unused warnings
 
     (hits, extra_start)
+}
+
+// NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_hits.c:2480-2499
+// ```c
+// while (i+j < hsp_count &&
+//        hsp_array[i]->query.offset == hsp_array[i+j]->query.offset &&
+//        hsp_array[i]->subject.offset == hsp_array[i+j]->subject.offset &&
+//        hsp_array[i]->subject.frame == hsp_array[i+j]->subject.frame) {
+//    hsp_count--;
+//    hsp = hsp_array[i+j];
+//    if (!purge && (hsp->query.end > hsp_array[i]->query.end)) {
+//        s_CutOffGapEditScript(hsp, hsp_array[i]->query.end,
+//                                  hsp_array[i]->subject.end, TRUE);
+//    } else {
+//        hsp = Blast_HSPFree(hsp);
+//    }
+// ```
+// NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_hits.c:2512-2525
+// ```c
+// while (i+j < hsp_count &&
+//        hsp_array[i]->query.end == hsp_array[i+j]->query.end &&
+//        hsp_array[i]->subject.end == hsp_array[i+j]->subject.end &&
+//        hsp_array[i]->subject.frame == hsp_array[i+j]->subject.frame) {
+//    hsp_count--;
+//    hsp = hsp_array[i+j];
+//    if (!purge && (hsp->query.offset < hsp_array[i]->query.offset)) {
+//        s_CutOffGapEditScript(hsp, hsp_array[i]->query.offset,
+//                                  hsp_array[i]->subject.offset, FALSE);
+//    } else {
+//        hsp = Blast_HSPFree(hsp);
+//    }
+// ```
+fn trace_common_endpoint_purge_decision(
+    pass: &str,
+    action: &str,
+    purge: bool,
+    keeper: &BlastnHsp,
+    removed: &BlastnHsp,
+    cut_q: usize,
+    cut_s: usize,
+) {
+    if !blastn_trace::enabled() {
+        return;
+    }
+
+    let keeper_context = keeper.q_idx * 2 + if keeper.query_frame < 0 { 1 } else { 0 };
+    let removed_context = removed.q_idx * 2 + if removed.query_frame < 0 { 1 } else { 0 };
+    let subject_id_for_numeric_filter = "";
+    let should_trace_keeper = blastn_trace::should_trace_range(
+        "purge",
+        keeper_context,
+        keeper.s_idx as usize,
+        subject_id_for_numeric_filter,
+        keeper.internal_q_offset_0,
+        keeper.internal_q_end_0,
+        keeper.internal_s_offset_0,
+        keeper.internal_s_end_0,
+        keeper.query_length,
+        keeper.query_frame,
+    );
+    let should_trace_removed = blastn_trace::should_trace_range(
+        "purge",
+        removed_context,
+        removed.s_idx as usize,
+        subject_id_for_numeric_filter,
+        removed.internal_q_offset_0,
+        removed.internal_q_end_0,
+        removed.internal_s_offset_0,
+        removed.internal_s_end_0,
+        removed.query_length,
+        removed.query_frame,
+    );
+    if !should_trace_keeper && !should_trace_removed {
+        return;
+    }
+
+    blastn_trace::log(
+        "purge",
+        format!(
+            "subject_idx={} context={} pass={} action={} purge={} keeper=q{}..{} s{}..{} raw_score={} removed=q{}..{} s{}..{} raw_score={} cut=({}, {})",
+            removed.s_idx,
+            removed_context,
+            pass,
+            action,
+            purge,
+            keeper.internal_q_offset_0,
+            keeper.internal_q_end_0,
+            keeper.internal_s_offset_0,
+            keeper.internal_s_end_0,
+            keeper.raw_score,
+            removed.internal_q_offset_0,
+            removed.internal_q_end_0,
+            removed.internal_s_offset_0,
+            removed.internal_s_end_0,
+            removed.raw_score,
+            cut_q,
+            cut_s
+        ),
+    );
 }
 
 // =============================================================================

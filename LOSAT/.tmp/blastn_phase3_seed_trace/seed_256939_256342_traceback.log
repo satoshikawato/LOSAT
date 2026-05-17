@@ -1,0 +1,2 @@
+[TRACE_BLASTN] stage=traceback subject=NZ_CP006932.1(0) context=0 prelim=q256930..257041 s256333..256444 seed=(256939, 256342) raw_score=117 tree_contains=false containing_hsp=None
+[TRACE_BLASTN] stage=traceback subject=NZ_CP006932.1(0) context=0 start=(256939, 256342) adjusted_start=(256939, 256342) start_shift=0 adjusted_s_len=657101 final=q256606..257189 s256084..256535 raw_score=220 x_drop=110 aln_len=586 identities=376 mismatches=72 gaps=8 gap_letters=138 edit_ops=17

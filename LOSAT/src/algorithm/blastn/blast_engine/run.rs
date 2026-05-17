@@ -37,6 +37,7 @@ use super::super::alignment::{
     // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_gapalign.c:2762-2936 (BLAST_GreedyGappedAlignment)
     greedy_gapped_alignment_score_only,
     greedy_gapped_alignment_with_traceback,
+    stats_from_edit_ops,
     // NCBI reference: ncbi-blast/c++/include/algo/blast/core/blast_gapalign.h:69-80 (BlastGapAlignStruct)
     GapAlignScratch,
     GreedyAlignScratch,
@@ -4714,6 +4715,18 @@ fn run_internal(args: BlastnArgs, mut in_memory: Option<BlastnInMemoryRun<'_>>) 
         .iter()
         .map(|ctx| encode_iupac_to_blastna(ctx.seq.as_slice()))
         .collect();
+    // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_setup.c:609-619
+    // ```c
+    // mask_at_hash = SBlastFilterOptionsMaskAtHash(filter_options);
+    // ...
+    // if (!mask_at_hash) {
+    //     BlastSetUp_MaskQuery(query_blk, query_info, filter_maskloc,
+    //                          program_number);
+    // }
+    // ```
+    // LOSATN currently exposes the NCBI soft-query-masking path: DUST/lcase
+    // masks restrict lookup-table entries through query_context_masks below,
+    // while the encoded traceback/scoring sequence remains unmodified.
     // NCBI reference: ncbi-blast/c++/src/algo/blast/api/blast_setup_cxx.cpp:500-603
     // ```c
     // int buflen = QueryInfo_GetSeqBufLen(qinfo);
@@ -8532,6 +8545,8 @@ fn run_internal(args: BlastnArgs, mut in_memory: Option<BlastnInMemoryRun<'_>>) 
             for prelim in prelim_hits.iter() {
                 let ctx = &query_contexts[prelim.context_idx as usize];
                 let q_seq_blastna = encoded_queries_blastna[prelim.context_idx as usize].as_slice();
+                let q_seq_nomask_blastna =
+                    encoded_queries_blastna[prelim.context_idx as usize].as_slice();
 
                 // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_traceback.c:403-405
                 // ```c
@@ -8880,6 +8895,35 @@ fn run_internal(args: BlastnArgs, mut in_memory: Option<BlastnInMemoryRun<'_>>) 
                     final_se = final_se.saturating_add(start_shift);
                 }
 
+                // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_traceback.c:583-597
+                // ```c
+                // Blast_HSPUpdateWithTraceback(gap_align, hsp);
+                // ...
+                // Blast_HSPGetNumIdentitiesAndPositives(query_nomask,
+                //        adjusted_subject, hsp, score_options, &align_length, sbp);
+                // ```
+                // Traceback scoring uses query_blk->sequence; identity/length
+                // reporting uses query_blk->sequence_nomask. In LOSATN's
+                // current soft-query-masking path these slices alias.
+                let (matches, mismatches, gaps, gap_letters, aln_len) = if use_dp {
+                    let (matches, mismatches, gaps, gap_letters) = stats_from_edit_ops(
+                        q_seq_nomask_blastna,
+                        s_seq_blastna,
+                        final_qs,
+                        final_ss,
+                        &edit_ops,
+                    );
+                    (
+                        matches,
+                        mismatches,
+                        gaps,
+                        gap_letters,
+                        matches + mismatches + gap_letters,
+                    )
+                } else {
+                    (matches, mismatches, gaps, gap_letters, aln_len)
+                };
+
                 // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_traceback.c:436-472
                 // ```c
                 // BlastGetOffsetsForGappedAlignment(..., &q_start, &s_start);
@@ -9181,6 +9225,7 @@ fn run_internal(args: BlastnArgs, mut in_memory: Option<BlastnInMemoryRun<'_>>) 
 
             // NCBI reference: blast_traceback.c:653-665 (reevaluate with blastna sequences)
             let q_seq_blastna = encoded_queries_blastna[context_idx].as_slice();
+            let q_seq_nomask_blastna = encoded_queries_blastna[context_idx].as_slice();
             let s_seq_eval = s_seq_blastna;
             let reeval_start = if timing_enabled {
                 Some(std::time::Instant::now())
@@ -9261,7 +9306,7 @@ fn run_internal(args: BlastnArgs, mut in_memory: Option<BlastnInMemoryRun<'_>>) 
             };
             let delete_identity_length = blast_hsp_test_identity_and_length(
                 hit,
-                q_seq_blastna,
+                q_seq_nomask_blastna,
                 s_seq_eval,
                 percent_identity,
                 min_hit_length,

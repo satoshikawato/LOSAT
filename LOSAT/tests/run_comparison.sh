@@ -232,10 +232,10 @@ echo "Starting MeenMJNV vs MejoMJNV (BLAST)..."
 echo "Starting AvCLPV vs PsCLPV (BLAST)..."
 (time tblastx -query ./fasta/AvCLPV.fasta -db ./fasta/PsCLPV -out ./blast_out/AvCLPV.PsCLPV.tblastx.n8.out -query_gencode 1 -db_gencode 1 -num_threads 8 -outfmt 6) &> ./blast_out/AvCLPV.PsCLPV.tblastx.n8.log
 
+COMMENTOUT
 
 
-
-
+<<COMMENTOUT
 # --- TBLASTX Commands (gencode 4) ---
 
 # makeblastdb -in NZ_CP006932.fasta -dbtype nucl -title NZ_CP006932 -parse_seqids -hash_index -out NZ_CP006932
@@ -244,7 +244,7 @@ echo "Starting AvCLPV vs PsCLPV (BLAST)..."
 # makeblastdb -in AP027132.fasta -dbtype nucl -title AP027132 -parse_seqids -hash_index -out AP027132
 # makeblastdb -in AP027133.fasta -dbtype nucl -title AP027133 -parse_seqids -hash_index -out AP027133
 
-COMMENTOUT
+
 # NZ_CP006932 self
 (time tblastx -query ./fasta/NZ_CP006932.fasta -db ./fasta/NZ_CP006932 -out ./blast_out/NZ_CP006932.NZ_CP006932.tblastx.n8.out -query_gencode 4 -db_gencode 4 -num_threads 8 -outfmt 6 )&>./blast_out/NZ_CP006932.NZ_CP006932.tblastx.n8.log &
 
@@ -259,7 +259,7 @@ COMMENTOUT
 
 # AP027133 vs AP027132
 (time tblastx -query ./fasta/AP027133.fasta -db ./fasta/AP027132 -out ./blast_out/AP027133.AP027132.tblastx.n8.out -query_gencode 4 -db_gencode 4 -num_threads 8 -outfmt 6 )&>./blast_out/AP027133.AP027132.tblastx.n8.log &
-
+COMMENTOUT
 
 # --- BLASTN Commands (Default / Megablast) ---
 
@@ -308,7 +308,7 @@ COMMENTOUT
 
 wait
 
-
+<<COMMENTOUT
 # --- BLASTP Commands ---
 echo "Starting WSSV vs PajaWSV (BLASTP)..."
 (time  blastp -query ./fasta/WSSV.faa -subject ./fasta/PajaWSV.faa -out ./blast_out/WSSV.PajaWSV.BLASTP.out -num_threads 1 -outfmt 6 )&>./blast_out/WSSV.PajaWSV.BLASTP.log

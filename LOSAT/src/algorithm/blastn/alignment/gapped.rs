@@ -225,11 +225,25 @@ fn gap_alloc_trace_row<'a>(
 
     if row_index < trace_rows.len() {
         let row = &mut trace_rows[row_index];
-        row.clear();
+        // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_gapalign.c:75-83
+        // ```c
+        // retval->state_array = (Uint1*) malloc(chunksize*sizeof(Uint1));
+        // retval->used = 0;
+        // ```
+        // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_gapalign.c:132-136
+        // ```c
+        // /*
+        // memset(state_struct->state_array, 0, state_struct->used);
+        // */
+        // state_struct->used = 0;
+        // ```
+        // s_GapPurgeState intentionally does not clear the traceback bytes.
+        // Preserve reused row contents so cells not overwritten in the current
+        // ALIGN_EX pass retain NCBI's state-array reuse behavior.
         if row.capacity() < row_capacity_slack {
             row.reserve(row_capacity_slack.saturating_sub(row.capacity()));
         }
-        if row_capacity > 0 {
+        if row.len() < row_capacity {
             row.resize(row_capacity, 0);
         }
         row
@@ -1759,7 +1773,7 @@ fn count_identical_blastna_span(q_span: &[u8], s_span: &[u8]) -> usize {
 /// Compute alignment statistics from an edit script.
 /// NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_hits.c:745-818 (identity)
 /// NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_hits.c:1055-1074 (gap counts)
-fn stats_from_edit_ops(
+pub(crate) fn stats_from_edit_ops(
     q_seq: &[u8],
     s_seq: &[u8],
     q_start: usize,
@@ -1930,7 +1944,7 @@ fn extend_gapped_one_direction_with_traceback_with_scratch(
     score_array[0].best_gap = -(gap_open_extend as i32);
 
     // First edit script row for initial gap extension
-    let row0 = gap_alloc_trace_row(trace_rows, trace_offsets, trace_rows_used, 0, 0);
+    let row0 = gap_alloc_trace_row(trace_rows, trace_offsets, trace_rows_used, 1, 0);
     row0.reserve(num_extra_cells);
     // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_gapalign.c:476-489
     // ```c
@@ -1943,7 +1957,7 @@ fn extend_gapped_one_direction_with_traceback_with_scratch(
     // }
     // ```
     // Keep a placeholder at index 0 so edit_script_row[i] aligns with NCBI's indexing.
-    row0.push(SCRIPT_GAP_IN_A);
+    row0[0] = SCRIPT_GAP_IN_A;
 
     // NCBI reference: blast_gapalign.c:481-490
     // for (i = 1; i <= N; i++) {
@@ -1961,7 +1975,11 @@ fn extend_gapped_one_direction_with_traceback_with_scratch(
         score_array[i].best = score;
         score_array[i].best_gap = score - (gap_open_extend as i32);
         score -= gap_extend as i32;
-        row0.push(SCRIPT_GAP_IN_A);
+        if i < row0.len() {
+            row0[i] = SCRIPT_GAP_IN_A;
+        } else {
+            row0.push(SCRIPT_GAP_IN_A);
+        }
         b_size = i + 1;
     }
 
@@ -2545,7 +2563,7 @@ fn extend_gapped_one_direction_with_traceback_ex_with_scratch(
     score_array[0].best = 0;
     score_array[0].best_gap = -(gap_open_extend as i32);
 
-    let row0 = gap_alloc_trace_row(trace_rows, trace_offsets, trace_rows_used, 0, 0);
+    let row0 = gap_alloc_trace_row(trace_rows, trace_offsets, trace_rows_used, 1, 0);
     row0.reserve(num_extra_cells);
     // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_gapalign.c:476-489
     // ```c
@@ -2558,7 +2576,7 @@ fn extend_gapped_one_direction_with_traceback_ex_with_scratch(
     // }
     // ```
     // Keep a placeholder at index 0 so edit_script_row[i] aligns with NCBI's indexing.
-    row0.push(SCRIPT_GAP_IN_A);
+    row0[0] = SCRIPT_GAP_IN_A;
 
     let mut b_size = 1usize;
     for i in 1..=n.min(*dp_mem_alloc - 1) {
@@ -2568,7 +2586,11 @@ fn extend_gapped_one_direction_with_traceback_ex_with_scratch(
         score_array[i].best = score;
         score_array[i].best_gap = score - (gap_open_extend as i32);
         score -= gap_extend as i32;
-        row0.push(SCRIPT_GAP_IN_A);
+        if i < row0.len() {
+            row0[i] = SCRIPT_GAP_IN_A;
+        } else {
+            row0.push(SCRIPT_GAP_IN_A);
+        }
         b_size = i + 1;
     }
 

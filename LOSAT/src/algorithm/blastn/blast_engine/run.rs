@@ -7725,6 +7725,56 @@ fn run_internal(args: BlastnArgs, mut in_memory: Option<BlastnInMemoryRun<'_>>) 
 
                         // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_gapalign.c:2959-2963 (x_dropoff limited by ungapped score)
                         let x_drop_score_only = x_drop_gapped.min(uh.score);
+                        // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_gapalign.c:2973-3003
+                        // ```c
+                        // offset_adjustment = COMPRESSION_RATIO -
+                        //      (init_hsp->offsets.qs_offsets.s_off % COMPRESSION_RATIO);
+                        // q_length = init_hsp->offsets.qs_offsets.q_off + offset_adjustment;
+                        // s_length = init_hsp->offsets.qs_offsets.s_off + offset_adjustment;
+                        // score_left = s_BlastAlignPackedNucl(query, subject, q_length, s_length, ...);
+                        // score_right = s_BlastAlignPackedNucl(query+q_length-1,
+                        //    subject+(s_length+3)/COMPRESSION_RATIO - 1, ...);
+                        // ```
+                        if blastn_trace_enabled
+                            && blastn_trace::should_trace_seed(
+                                "prelim",
+                                uh.context_idx,
+                                s_idx,
+                                s_id,
+                                seed_qs,
+                                seed_ss.saturating_add(chunk.offset),
+                            )
+                        {
+                            let offset_adjustment = COMPRESSION_RATIO - (seed_ss % COMPRESSION_RATIO);
+                            let mut score_q_anchor = seed_qs.saturating_add(offset_adjustment);
+                            let mut score_s_anchor = seed_ss.saturating_add(offset_adjustment);
+                            if score_q_anchor > q_seq_blastna.len()
+                                || score_s_anchor > subject_len
+                            {
+                                score_q_anchor =
+                                    score_q_anchor.saturating_sub(COMPRESSION_RATIO);
+                                score_s_anchor =
+                                    score_s_anchor.saturating_sub(COMPRESSION_RATIO);
+                            }
+                            blastn_trace::log(
+                                "prelim",
+                                format!(
+                                    "subject={}({}) context={} score_only_seed=({}, {}) local_seed_s={} offset_adjustment={} score_anchor=({}, {}) global_score_anchor_s={} x_drop_score_only={} ungapped_score={}",
+                                    s_id,
+                                    s_idx,
+                                    uh.context_idx,
+                                    seed_qs,
+                                    seed_ss.saturating_add(chunk.offset),
+                                    seed_ss,
+                                    offset_adjustment,
+                                    score_q_anchor,
+                                    score_s_anchor,
+                                    score_s_anchor.saturating_add(chunk.offset),
+                                    x_drop_score_only,
+                                    uh.score
+                                ),
+                            );
+                        }
 
                         // Preliminary DP gapped extension (score-only)
                         // NCBI reference: ncbi-blast/c++/src/algo/blast/api/blast_nucl_options.cpp:176-183
@@ -7788,19 +7838,29 @@ fn run_internal(args: BlastnArgs, mut in_memory: Option<BlastnInMemoryRun<'_>>) 
                 //                                      eQueryAndSubject);
                 // }
                 // ```
-                if blastn_trace_enabled
-                    && blastn_trace::should_trace_range(
+                let trace_prelim_seed = blastn_trace_enabled
+                    && blastn_trace::should_trace_seed(
                         "prelim",
                         uh.context_idx,
                         s_idx,
                         s_id,
-                        prelim_qs,
-                        prelim_qe,
-                        prelim_ss.saturating_add(chunk.offset),
-                        prelim_se.saturating_add(chunk.offset),
-                        ctx.seq.len(),
-                        ctx.frame,
-                    )
+                        seed_qs,
+                        seed_ss.saturating_add(chunk.offset),
+                    );
+                if blastn_trace_enabled
+                    && (trace_prelim_seed
+                        || blastn_trace::should_trace_range(
+                            "prelim",
+                            uh.context_idx,
+                            s_idx,
+                            s_id,
+                            prelim_qs,
+                            prelim_qe,
+                            prelim_ss.saturating_add(chunk.offset),
+                            prelim_se.saturating_add(chunk.offset),
+                            ctx.seq.len(),
+                            ctx.frame,
+                        ))
                 {
                     blastn_trace::log(
                         "prelim",
@@ -8259,6 +8319,15 @@ fn run_internal(args: BlastnArgs, mut in_memory: Option<BlastnInMemoryRun<'_>>) 
                     min_diag_separation,
                 );
                 let prelim_traceback_contained = traceback_containing_hsp.is_some();
+                let trace_traceback_seed = blastn_trace_enabled
+                    && blastn_trace::should_trace_seed(
+                        "traceback",
+                        prelim.context_idx,
+                        s_idx,
+                        s_id,
+                        prelim.seed_qs,
+                        prelim.seed_ss,
+                    );
                 if let (Some(timing), Some(tree_precheck_start)) = (timing_ref, tree_precheck_start)
                 {
                     BlastnTiming::record_duration(
@@ -8273,18 +8342,19 @@ fn run_internal(args: BlastnArgs, mut in_memory: Option<BlastnInMemoryRun<'_>>) 
                 //                              hit_options->min_diag_separation)) {
                 // ```
                 if blastn_trace_enabled
-                    && blastn_trace::should_trace_range(
-                        "traceback",
-                        prelim.context_idx,
-                        s_idx,
-                        s_id,
-                        prelim.prelim_qs,
-                        prelim.prelim_qe,
-                        prelim.prelim_ss,
-                        prelim.prelim_se,
-                        ctx.seq.len(),
-                        ctx.frame,
-                    )
+                    && (trace_traceback_seed
+                        || blastn_trace::should_trace_range(
+                            "traceback",
+                            prelim.context_idx,
+                            s_idx,
+                            s_id,
+                            prelim.prelim_qs,
+                            prelim.prelim_qe,
+                            prelim.prelim_ss,
+                            prelim.prelim_se,
+                            ctx.seq.len(),
+                            ctx.frame,
+                        ))
                 {
                     // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_gapalign.c:4071-4076
                     // ```c
@@ -8583,18 +8653,19 @@ fn run_internal(args: BlastnArgs, mut in_memory: Option<BlastnInMemoryRun<'_>>) 
                 // Blast_HSPAdjustSubjectOffset(hsp, start_shift);
                 // ```
                 if blastn_trace_enabled
-                    && blastn_trace::should_trace_range(
-                        "traceback",
-                        prelim.context_idx,
-                        s_idx,
-                        s_id,
-                        final_qs,
-                        final_qe,
-                        final_ss,
-                        final_se,
-                        ctx.seq.len(),
-                        ctx.frame,
-                    )
+                    && (trace_traceback_seed
+                        || blastn_trace::should_trace_range(
+                            "traceback",
+                            prelim.context_idx,
+                            s_idx,
+                            s_id,
+                            final_qs,
+                            final_qe,
+                            final_ss,
+                            final_se,
+                            ctx.seq.len(),
+                            ctx.frame,
+                        ))
                 {
                     blastn_trace::log(
                         "traceback",

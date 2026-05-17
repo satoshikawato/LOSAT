@@ -795,6 +795,26 @@ impl DiagHashTable {
     }
 }
 
+#[inline(always)]
+fn diag_hash_insert_window(window_size: usize, scan_range: usize, word_length: usize) -> i32 {
+    // NCBI reference: ncbi-blast/c++/src/algo/blast/core/na_ungapped.c:825-858, 939-941
+    // ```c
+    // Int4 Delta = MIN(word_params->options->scan_range, window_size - word_length);
+    // ...
+    // if (Delta < 0) Delta = 0;
+    // ...
+    // s_BlastDiagHashInsert(hash_table, diag, s_end_pos,
+    //                       (hit_ready) ? 0 : s_end_pos - s_off_pos,
+    //                       hit_ready, s_off_pos, window_size + Delta + 1);
+    // ```
+    // The clamp at line 858 is inside the two-hit off-diagonal block. In BLASTN
+    // one-hit mode (window_size == 0) that block is skipped, so the insert sees
+    // the original negative Delta.
+    let window = window_size as i32;
+    let delta = (scan_range as i32).min(window - word_length as i32);
+    window + delta + 1
+}
+
 // NCBI reference: ncbi-blast/c++/include/algo/blast/core/blast_def.h:135-149
 // ```c
 // typedef union BlastOffsetPair {
@@ -5704,14 +5724,7 @@ fn run_internal(args: BlastnArgs, mut in_memory: Option<BlastnInMemoryRun<'_>>) 
                     //                       hit_ready, s_off_pos, window_size + Delta + 1);
                     // ```
                     let diag_hash_window = if !use_array_indexing {
-                        let window_size_i32 = TWO_HIT_WINDOW as i32;
-                        let delta_calc = window_size_i32 - word_length as i32;
-                        let delta_limit = if delta_calc < 0 {
-                            0
-                        } else {
-                            (scan_range as i32).min(delta_calc)
-                        };
-                        window_size_i32 + delta_limit + 1
+                        diag_hash_insert_window(TWO_HIT_WINDOW, scan_range, word_length)
                     } else {
                         0
                     };
@@ -5997,8 +6010,16 @@ fn run_internal(args: BlastnArgs, mut in_memory: Option<BlastnInMemoryRun<'_>>) 
                                         if debug_enabled {
                                             dbg_left_ext_iters += 1;
                                         }
-                                        // NCBI BLAST: s_off--; q--;
-                                        // Reference: na_ungapped.c:1107-1108
+                                        // NCBI reference: ncbi-blast/c++/src/algo/blast/core/na_ungapped.c:1101-1114
+                                        // ```c
+                                        // Uint1 *q = query->sequence + q_offset;
+                                        // ...
+                                        // s_off--;
+                                        // q--;
+                                        // ```
+                                        // LOSAT's sentinel query buffer stores logical query offset
+                                        // `n` at `n + 1`, so after NCBI's pre-decrement the first
+                                        // left comparison at q_offset - 1 is buffer index q_offset.
                                         q_left -= 1;
                                         s_off -= 1;
                                         if s_off % COMPRESSION_RATIO == COMPRESSION_RATIO - 1 {
@@ -6063,6 +6084,17 @@ fn run_internal(args: BlastnArgs, mut in_memory: Option<BlastnInMemoryRun<'_>>) 
                                         }
 
                                         let mut ext_right = 0usize;
+                                        // NCBI reference: ncbi-blast/c++/src/algo/blast/core/na_ungapped.c:1120-1136
+                                        // ```c
+                                        // q = query->sequence + q_offset + lut_word_length;
+                                        // ...
+                                        // if (packed_subject_base != *q)
+                                        //     break;
+                                        // s_off++;
+                                        // q++;
+                                        // ```
+                                        // The right comparison checks q_offset + lut_word_length
+                                        // before incrementing q.
                                         let mut q_right = q_off0 + lut_word_length + 1;
                                         if q_right + (ext_to - ext_left)
                                             > encoded_query_concat_blastna_with_sentinels.len()
@@ -7191,19 +7223,11 @@ fn run_internal(args: BlastnArgs, mut in_memory: Option<BlastnInMemoryRun<'_>>) 
                                     // NCBI reference: ncbi-blast/c++/src/algo/blast/core/na_ungapped.c:825-826, 939-941
                                     // ```c
                                     // Delta = MIN(word_params->options->scan_range, window_size - word_length);
-                                    // if (Delta < 0) Delta = 0;
                                     // s_BlastDiagHashInsert(hash_table, diag, s_end_pos,
                                     //                       (hit_ready) ? 0 : s_end_pos - s_off_pos,
                                     //                       hit_ready, s_off_pos, window_size + Delta + 1);
                                     // ```
-                                    let window_size_i32 = TWO_HIT_WINDOW as i32;
-                                    let delta_calc = window_size_i32 - safe_k as i32;
-                                    let delta_limit = if delta_calc < 0 {
-                                        0
-                                    } else {
-                                        (scan_range as i32).min(delta_calc)
-                                    };
-                                    window_size_i32 + delta_limit + 1
+                                    diag_hash_insert_window(TWO_HIT_WINDOW, scan_range, safe_k)
                                 } else {
                                     0
                                 };
@@ -8472,6 +8496,45 @@ fn run_internal(args: BlastnArgs, mut in_memory: Option<BlastnInMemoryRun<'_>>) 
                     }
                 }
             }
+        }
+
+        if !combined_prelim_hits.is_empty() {
+            // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_engine.c:885-899
+            // ```c
+            // Blast_HSPListGetEvalues(program_number, query_info,
+            //          stat_length, hsp_list_out, score_options->gapped_calculation,
+            //          isRPS, gap_align->sbp, 0, scale_factor);
+            // ...
+            // status = s_Blast_HSPListReapByPrelimEvalue(hsp_list_out, hit_params);
+            // ```
+            // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_engine.c:642-671
+            // ```c
+            // cutoff = hit_params->prelim_evalue;
+            // ...
+            // if (hsp->evalue > cutoff) {
+            //     hsp_array[index] = Blast_HSPFree(hsp_array[index]);
+            // }
+            // ```
+            // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_parameters.c:868,933
+            // ```c
+            // params->prelim_evalue = options->expect_value;
+            // ```
+            // This reap happens after preliminary gapped scoring and before the
+            // traceback stream is consumed, so low preliminary scores cannot survive
+            // solely because traceback later finds a high-scoring alignment.
+            combined_prelim_hits.retain(|prelim| {
+                let eff_searchsp = query_eff_searchsp
+                    .get(prelim.context_idx as usize)
+                    .copied()
+                    .unwrap_or(0);
+                let (_, prelim_evalue) = calculate_blastn_context_statistics(
+                    prelim.prelim_score,
+                    &params_for_closure,
+                    eff_searchsp,
+                    round_down_evalue_score,
+                );
+                prelim_evalue <= evalue_threshold
+            });
         }
 
         if combined_prelim_hits.is_empty() {

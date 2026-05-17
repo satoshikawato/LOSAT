@@ -87,6 +87,13 @@ class HspRow:
         except ValueError:
             return float("nan")
 
+    @property
+    def diagnostic_impact(self) -> float:
+        bitscore = self.bitscore_float
+        if math.isinf(bitscore) or math.isnan(bitscore):
+            return 0.0
+        return self.length * bitscore
+
 
 def parse_outfmt(path: Path) -> list[HspRow]:
     rows: list[HspRow] = []
@@ -152,8 +159,45 @@ def length_bins(rows: Iterable[HspRow]) -> Counter[str]:
     return bins
 
 
+def identity_bins(rows: Iterable[HspRow]) -> Counter[str]:
+    bins: Counter[str] = Counter()
+    for row in rows:
+        pident = row.pident_float
+        if math.isnan(pident):
+            bins["nan"] += 1
+            continue
+        start = int(pident // 5) * 5
+        end = min(start + 4, 100)
+        bins[f"{start:03d}-{end:03d}"] += 1
+    return bins
+
+
+def sorted_counter(counter: Counter[str]) -> dict[str, int]:
+    return {key: counter[key] for key in sorted(counter)}
+
+
 def first_n(rows: list[HspRow], keys: set[tuple[str, str, int, int, int, int]], limit: int) -> list[HspRow]:
     return [row for row in rows if row.coord_key in keys][:limit]
+
+
+def rows_for_keys(rows: Iterable[HspRow], keys: set[tuple[str, str, int, int, int, int]]) -> list[HspRow]:
+    return [row for row in rows if row.coord_key in keys]
+
+
+def ranked_by_impact(
+    rows: Iterable[HspRow],
+    keys: set[tuple[str, str, int, int, int, int]],
+    limit: int,
+) -> list[HspRow]:
+    return sorted(
+        rows_for_keys(rows, keys),
+        key=lambda row: (row.diagnostic_impact, row.bitscore_float, row.length, -row.ordinal),
+        reverse=True,
+    )[:limit]
+
+
+def total_alignment_length(rows: Iterable[HspRow]) -> int:
+    return sum(row.length for row in rows)
 
 
 def compare_case(case_id: str, ncbi_path: Path, losat_path: Path, limit: int) -> dict[str, object]:
@@ -166,6 +210,8 @@ def compare_case(case_id: str, ncbi_path: Path, losat_path: Path, limit: int) ->
     common = ncbi_keys & losat_keys
     ncbi_only = ncbi_keys - losat_keys
     losat_only = losat_keys - ncbi_keys
+    ncbi_only_rows = rows_for_keys(ncbi_rows, ncbi_only)
+    losat_only_rows = rows_for_keys(losat_rows, losat_only)
 
     bitscore_diffs = []
     evalue_diffs = []
@@ -197,6 +243,8 @@ def compare_case(case_id: str, ncbi_path: Path, losat_path: Path, limit: int) ->
     print(f"  common_coord_keys: {len(common)}")
     print(f"  ncbi_only: {len(ncbi_only)}")
     print(f"  losat_only: {len(losat_only)}")
+    print(f"  ncbi_only_accumulated_length: {total_alignment_length(ncbi_only_rows)}")
+    print(f"  losat_only_accumulated_length: {total_alignment_length(losat_only_rows)}")
     print(f"  same_coordinate_bitscore_diffs: {len(bitscore_diffs)}")
     print(f"  same_coordinate_evalue_diffs: {len(evalue_diffs)}")
     print(f"  same_coordinate_pident_diffs: {len(pident_diffs)}")
@@ -209,6 +257,14 @@ def compare_case(case_id: str, ncbi_path: Path, losat_path: Path, limit: int) ->
     if losat_only:
         print("  first_losat_only:")
         for row in first_n(losat_rows, losat_only, limit):
+            print(format_row("    ", row))
+    if ncbi_only:
+        print("  top_ncbi_only_by_length_bitscore:")
+        for row in ranked_by_impact(ncbi_rows, ncbi_only, limit):
+            print(format_row("    ", row))
+    if losat_only:
+        print("  top_losat_only_by_length_bitscore:")
+        for row in ranked_by_impact(losat_rows, losat_only, limit):
             print(format_row("    ", row))
     if bitscore_diffs:
         print("  first_bitscore_diffs:")
@@ -235,10 +291,12 @@ def compare_case(case_id: str, ncbi_path: Path, losat_path: Path, limit: int) ->
             print(f"      ncbi={(ncbi.length, ncbi.mismatch, ncbi.gapopen)}")
             print(f"      losat={(losat.length, losat.mismatch, losat.gapopen)}")
 
-    print("  score_bins_ncbi_only:", dict(score_bins(ncbi_by_key[key] for key in ncbi_only)))
-    print("  score_bins_losat_only:", dict(score_bins(losat_by_key[key] for key in losat_only)))
-    print("  length_bins_ncbi_only:", dict(length_bins(ncbi_by_key[key] for key in ncbi_only)))
-    print("  length_bins_losat_only:", dict(length_bins(losat_by_key[key] for key in losat_only)))
+    print("  score_bins_ncbi_only:", sorted_counter(score_bins(ncbi_only_rows)))
+    print("  score_bins_losat_only:", sorted_counter(score_bins(losat_only_rows)))
+    print("  identity_bins_ncbi_only:", sorted_counter(identity_bins(ncbi_only_rows)))
+    print("  identity_bins_losat_only:", sorted_counter(identity_bins(losat_only_rows)))
+    print("  length_bins_ncbi_only:", sorted_counter(length_bins(ncbi_only_rows)))
+    print("  length_bins_losat_only:", sorted_counter(length_bins(losat_only_rows)))
 
     return {
         "case_id": case_id,
@@ -378,13 +436,13 @@ def select_targets(result: dict[str, object]) -> list[tuple[str, HspRow]]:
     losat_only: set[tuple[str, str, int, int, int, int]] = result["losat_only"]  # type: ignore[assignment]
     targets: list[tuple[str, HspRow]] = []
 
-    ncbi_first = first_n(ncbi_rows, ncbi_only, 50)
-    if ncbi_first:
-        targets.append(("ncbi_only_highish_first50", max(ncbi_first, key=lambda row: row.bitscore_float)))
+    ncbi_ranked = ranked_by_impact(ncbi_rows, ncbi_only, 1)
+    if ncbi_ranked:
+        targets.append(("ncbi_only_top_length_bitscore", ncbi_ranked[0]))
 
-    losat_first = first_n(losat_rows, losat_only, 50)
-    if losat_first:
-        targets.append(("losat_only_highish_first50", max(losat_first, key=lambda row: row.bitscore_float)))
+    losat_ranked = ranked_by_impact(losat_rows, losat_only, 1)
+    if losat_ranked:
+        targets.append(("losat_only_top_length_bitscore", losat_ranked[0]))
 
     losat_perfect = [row for row in losat_rows if row.coord_key in losat_only and row.pident_float == 100.0]
     if losat_perfect:

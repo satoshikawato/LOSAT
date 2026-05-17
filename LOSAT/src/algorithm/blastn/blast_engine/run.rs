@@ -8767,19 +8767,18 @@ fn run_internal(args: BlastnArgs, mut in_memory: Option<BlastnInMemoryRun<'_>>) 
                     eff_searchsp,
                     round_down_evalue_score,
                 );
-
-                if eval > evalue_threshold {
-                    if let Some(timing) = timing_ref {
-                        BlastnTiming::record_count(&timing.traceback_deleted_evalue_cutoff_hsps, 1);
-                    }
-                    if let (Some(timing), Some(hsp_build_start)) = (timing_ref, hsp_build_start) {
-                        BlastnTiming::record_duration(
-                            &timing.traceback_hsp_build_ns,
-                            hsp_build_start,
-                        );
-                    }
-                    continue;
-                }
+                // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_traceback.c:234-246
+                // ```c
+                // Blast_HSPListGetEvalues(program_number, query_info, subject_length,
+                //                         hsp_list, kGapped, FALSE, sbp, 0,
+                //                         scale_factor);
+                // Blast_HSPListReapByEvalue(hsp_list, hit_params->options);
+                // Blast_HSPListGetBitScores(hsp_list, kGapped, sbp);
+                // ```
+                // NCBI reaps by E-value only after common-endpoint purging,
+                // ambiguity re-evaluation, score resort, and final containment.
+                // Keep this traceback HSP in the subject list so it can still
+                // participate in those survivor-set decisions.
 
                 let identity = if aln_len > 0 {
                     ((matches as f64 / aln_len as f64) * 100.0).min(100.0)
@@ -9276,16 +9275,84 @@ fn run_internal(args: BlastnArgs, mut in_memory: Option<BlastnInMemoryRun<'_>>) 
             // else: HSP is contained within another, skip (implicit delete)
         }
 
+        // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_traceback.c:678-692
+        // ```c
+        // Blast_IntervalTreeReset(tree);
+        // for (index = 0; index < hsp_list->hspcnt; index++) {
+        //    if (BlastIntervalTreeContainsHSP(...)) {
+        //       hsp_array[index] = Blast_HSPFree(hsp);
+        //    } else {
+        //       BlastIntervalTreeAddHSP(...);
+        //    }
+        // }
+        // ```
+        // Keep the final-containment count separate from the later E-value reap.
+        let final_tree_hit_count = final_hits.len();
+
+        // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_traceback.c:234-246
+        // ```c
+        // Blast_HSPListGetEvalues(program_number, query_info, subject_length,
+        //                         hsp_list, kGapped, FALSE, sbp, 0,
+        //                         scale_factor);
+        // Blast_HSPListReapByEvalue(hsp_list, hit_params->options);
+        // Blast_HSPListGetBitScores(hsp_list, kGapped, sbp);
+        // ```
+        // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_hits.c:1983-2003
+        // ```c
+        // cutoff = hit_options->expect_value;
+        // for (index = 0; index < hsp_list->hspcnt; index++) {
+        //    hsp = hsp_array[index];
+        //    if (hsp->evalue > cutoff) {
+        //       hsp_array[index] = Blast_HSPFree(hsp_array[index]);
+        //    } else {
+        //       if (index > hsp_cnt)
+        //          hsp_array[hsp_cnt] = hsp_array[index];
+        //       hsp_cnt++;
+        //    }
+        // }
+        // ```
+        // Apply final gapped E-value assignment and reaping after all
+        // post-traceback survivor-set operations, matching
+        // s_HSPListPostTracebackUpdate.
+        let before_evalue_reap = final_hits.len();
+        for hit in final_hits.iter_mut() {
+            let context_idx = (hit.q_idx as usize) * 2 + if hit.query_frame < 0 { 1 } else { 0 };
+            let eff_searchsp = query_eff_searchsp.get(context_idx).copied().unwrap_or(0);
+            let (bit_score, eval) = calculate_blastn_context_statistics(
+                hit.raw_score,
+                &params_for_closure,
+                eff_searchsp,
+                round_down_evalue_score,
+            );
+            hit.bit_score = bit_score;
+            hit.e_value = eval;
+        }
+        final_hits.retain(|hit| hit.e_value <= evalue_threshold);
+        if let Some(timing) = timing_ref {
+            BlastnTiming::record_count(
+                &timing.traceback_deleted_evalue_cutoff_hsps,
+                before_evalue_reap.saturating_sub(final_hits.len()) as u64,
+            );
+        }
+
         // Phase 2 debug output
         if debug_mode || blastn_debug {
-            let phase2_tree_removed = hits_step4 - final_hits.len();
+            let phase2_tree_removed = hits_step4 - final_tree_hit_count;
+            let evalue_removed = final_tree_hit_count.saturating_sub(final_hits.len());
+            // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_traceback.c:234-246
+            // ```c
+            // Blast_HSPListReapByEvalue(hsp_list, hit_params->options);
+            // ```
+            // Report tree containment and the later E-value reap as separate
+            // phases, preserving the same ordering as NCBI traceback cleanup.
             eprintln!(
-                    "[DEBUG] Phase 2 breakdown: step1(extract)={}, step2(purge1)={} (-{}), step3(reeval)={} (-{}), step4(purge2)={} (-{}), step6(tree)={} (-{})",
+                    "[DEBUG] Phase 2 breakdown: step1(extract)={}, step2(purge1)={} (-{}), step3(reeval)={} (-{}), step4(purge2)={} (-{}), step6(tree)={} (-{}), evalue_reap={} (-{})",
                     hits_step1,
                     hits_step2, hits_step1 - hits_step2,
                     hits_step3, hits_step2 - hits_step3,
                     hits_step4, hits_step3 - hits_step4,
-                    final_hits.len(), phase2_tree_removed
+                    final_tree_hit_count, phase2_tree_removed,
+                    final_hits.len(), evalue_removed
                 );
         }
 

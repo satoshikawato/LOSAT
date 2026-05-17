@@ -234,17 +234,37 @@ struct GapPrelimEditOp {
 ///                          (diag_upper - diag_lower + 7) / 3);
 /// last_seq2_off[d + 1] = last_seq2_off[d + 1] - diag_lower + 2;
 /// ```
+#[derive(Clone, Copy, Default)]
+enum NonAffineGreedyRowStorage {
+    #[default]
+    None,
+    Base(usize),
+    Pool {
+        start: usize,
+    },
+}
+
 #[derive(Clone, Default)]
 struct NonAffineGreedyRow {
     origin: i32,
     values: Vec<i32>,
+    storage: NonAffineGreedyRowStorage,
 }
 
 impl NonAffineGreedyRow {
-    fn new(origin: i32, len: usize) -> Self {
+    fn from_base(origin: i32, values: &[i32], len: usize, base_index: usize) -> Self {
         Self {
             origin,
-            values: vec![INVALID_OFFSET; len],
+            values: values[..len].to_vec(),
+            storage: NonAffineGreedyRowStorage::Base(base_index),
+        }
+    }
+
+    fn from_pool(origin: i32, values: Vec<i32>, start: usize) -> Self {
+        Self {
+            origin,
+            values,
+            storage: NonAffineGreedyRowStorage::Pool { start },
         }
     }
 
@@ -267,6 +287,122 @@ impl NonAffineGreedyRow {
         let idx = idx as usize;
         debug_assert!(idx < self.values.len());
         self.values[idx] = value;
+    }
+
+    fn persist(&self, mem: &mut GreedyNonAffineMem) {
+        match self.storage {
+            NonAffineGreedyRowStorage::None => {}
+            NonAffineGreedyRowStorage::Base(index) => {
+                if index < mem.last_seq2_off.len() {
+                    let len = self.values.len();
+                    if mem.last_seq2_off[index].len() < len {
+                        mem.last_seq2_off[index].resize(len, 0);
+                    }
+                    mem.last_seq2_off[index][..len].copy_from_slice(&self.values);
+                }
+            }
+            NonAffineGreedyRowStorage::Pool { start } => {
+                let end = start + self.values.len();
+                if mem.traceback_pool.len() < end {
+                    mem.traceback_pool.resize(end, 0);
+                }
+                mem.traceback_pool[start..end].copy_from_slice(&self.values);
+            }
+        }
+    }
+}
+
+/// Persistent non-affine greedy scratch memory.
+///
+/// NCBI reference: ncbi-blast/c++/include/algo/blast/core/greedy_align.h:88-99
+/// ```c
+/// typedef struct SGreedyAlignMem {
+///    Int4 max_dist;
+///    Int4 xdrop;
+///    Int4** last_seq2_off;
+///    Int4* max_score;
+///    SGreedyOffset** last_seq2_off_affine;
+///    Int4* diag_bounds;
+///    SMBSpace* space;
+/// } SGreedyAlignMem;
+/// ```
+struct GreedyNonAffineMem {
+    last_seq2_off: [Vec<i32>; 2],
+    max_score: Vec<i32>,
+    traceback_pool: Vec<i32>,
+    traceback_used: usize,
+}
+
+impl GreedyNonAffineMem {
+    fn new() -> Self {
+        Self {
+            last_seq2_off: [Vec::new(), Vec::new()],
+            max_score: Vec::new(),
+            traceback_pool: Vec::new(),
+            traceback_used: 0,
+        }
+    }
+
+    fn ensure_base_capacity(&mut self, row_len: usize) {
+        // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_gapalign.c:211-228
+        // ```c
+        // gamp->last_seq2_off = (Int4**) malloc((max_d + 2) * sizeof(Int4*));
+        // gamp->last_seq2_off[0] =
+        //    (Int4*) malloc((max_d + max_d + 6) * sizeof(Int4) * 2);
+        // gamp->last_seq2_off[1] = gamp->last_seq2_off[0] + max_d + max_d + 6;
+        // ```
+        // The two rolling non-affine rows live for the lifetime of
+        // SGreedyAlignMem; BLAST_GreedyAlign overwrites only the cells it uses.
+        for row in &mut self.last_seq2_off {
+            if row.len() < row_len {
+                row.resize(row_len, 0);
+            }
+        }
+    }
+
+    fn ensure_max_score_capacity(&mut self, len: usize) {
+        // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_gapalign.c:257
+        // ```c
+        // gamp->max_score = (Int4*) malloc(sizeof(Int4) * (max_d + 1 + d_diff));
+        // ```
+        // BLAST_GreedyAlign clears only the leading xdrop-offset cells and
+        // writes the per-distance cells it reaches.
+        if self.max_score.len() < len {
+            self.max_score.resize(len, 0);
+        }
+    }
+
+    fn refresh_traceback_pool(&mut self) {
+        // NCBI reference: ncbi-blast/c++/src/algo/blast/core/greedy_align.c:67-77
+        // ```c
+        // static void s_RefreshMBSpace(SMBSpace* space)
+        // {
+        //     while (space != NULL) {
+        //         space->space_used = 0;
+        //         space = space->next;
+        //     }
+        // }
+        // ```
+        // Refreshing the pool rewinds allocation state but does not clear cells.
+        self.traceback_used = 0;
+    }
+
+    fn alloc_traceback_row(&mut self, int_len: usize) -> (usize, Vec<i32>) {
+        // NCBI reference: ncbi-blast/c++/src/algo/blast/core/greedy_align.c:99-125
+        // ```c
+        // out_ptr = pool->space_array + pool->space_used;
+        // pool->space_used += num_alloc;
+        // ```
+        // The C pool is allocated as SGreedyOffset cells. The caller converts
+        // that allocation to Int4 storage, so Rust stores the same data as a
+        // contiguous Int4 pool and preserves stale contents across refreshes.
+        let start = self.traceback_used;
+        let end = start + int_len;
+        if self.traceback_pool.len() < end {
+            self.traceback_pool.resize(end, 0);
+        }
+        self.traceback_used = end;
+        (start, self.traceback_pool[start..end].to_vec())
     }
 }
 
@@ -356,6 +492,7 @@ pub struct GreedyAlignScratch {
     // ```
     // NCBI keeps greedy scratch max_dist in BlastGapAlignStruct and only grows it.
     max_dist: i32,
+    non_affine_mem: GreedyNonAffineMem,
     affine_mem: GreedyAffineMem,
     fwd_prelim_tback: GapPrelimEditBlock,
     rev_prelim_tback: GapPrelimEditBlock,
@@ -365,6 +502,7 @@ impl GreedyAlignScratch {
     pub fn new() -> Self {
         Self {
             max_dist: 0,
+            non_affine_mem: GreedyNonAffineMem::new(),
             affine_mem: GreedyAffineMem::new(),
             fwd_prelim_tback: GapPrelimEditBlock::new(),
             rev_prelim_tback: GapPrelimEditBlock::new(),
@@ -2106,6 +2244,7 @@ fn blast_greedy_align(
     seq1_align_len: &mut i32,
     seq2_align_len: &mut i32,
     max_dist: i32,
+    non_affine_mem: &mut GreedyNonAffineMem,
     mut edit_block: Option<&mut GapPrelimEditBlock>,
     rem: u8,
     fence_hit: &mut bool,
@@ -2139,14 +2278,44 @@ fn blast_greedy_align(
     } else {
         2
     };
+    non_affine_mem.ensure_base_capacity(base_row_len);
+    non_affine_mem.ensure_max_score_capacity(
+        (max_dist as usize)
+            + (((xdrop_threshold + match_cost / 2) / (match_cost + mismatch_cost) + 1) as usize)
+            + 1,
+    );
+    if store_traceback {
+        // NCBI reference: ncbi-blast/c++/src/algo/blast/core/greedy_align.c:479-490
+        // ```c
+        // mem_pool = aux_data->space;
+        // ...
+        // else {
+        //     s_RefreshMBSpace(mem_pool);
+        // }
+        // ```
+        // Traceback row allocations reuse the same pool after rewinding
+        // space_used, preserving NCBI's allocation timing and stale cells.
+        non_affine_mem.refresh_traceback_pool();
+    }
     let mut last_seq2_off = vec![NonAffineGreedyRow::default(); rows];
-    last_seq2_off[0] = NonAffineGreedyRow::new(0, base_row_len);
-    last_seq2_off[1] = NonAffineGreedyRow::new(0, base_row_len);
+    last_seq2_off[0] =
+        NonAffineGreedyRow::from_base(0, &non_affine_mem.last_seq2_off[0], base_row_len, 0);
+    last_seq2_off[1] =
+        NonAffineGreedyRow::from_base(0, &non_affine_mem.last_seq2_off[1], base_row_len, 1);
 
     let xdrop_offset = (xdrop_threshold + match_cost / 2) / (match_cost + mismatch_cost) + 1;
     let max_score_len = (max_dist as usize) + (xdrop_offset as usize) + 1;
-    let mut max_score_base = vec![0; max_score_len];
+    non_affine_mem.ensure_max_score_capacity(max_score_len);
     let max_score_offset = xdrop_offset as usize;
+    for index in 0..max_score_offset {
+        // NCBI reference: ncbi-blast/c++/src/algo/blast/core/greedy_align.c:496-498
+        // ```c
+        // max_score = aux_data->max_score + xdrop_offset;
+        // for (index = 0; index < xdrop_offset; index++)
+        //     aux_data->max_score[index] = 0;
+        // ```
+        non_affine_mem.max_score[index] = 0;
+    }
 
     index = find_first_mismatch_greedy(seq1, seq2, len1, len2, 0, 0, reverse, rem, fence_hit);
 
@@ -2167,7 +2336,7 @@ fn blast_greedy_align(
     }
 
     last_seq2_off[0].set(diag_origin, seq1_index);
-    max_score_base[max_score_offset] = seq1_index * match_cost;
+    non_affine_mem.max_score[max_score_offset] = seq1_index * match_cost;
     diag_lower = diag_origin - 1;
     diag_upper = diag_origin + 1;
 
@@ -2205,8 +2374,8 @@ fn blast_greedy_align(
         last_seq2_off[prev_row_idx].set(diag_upper + 1, INVALID_OFFSET);
 
         let xdrop_score = {
-            let raw =
-                max_score_base[d as usize] + (match_cost + mismatch_cost) * d - xdrop_threshold;
+            let raw = non_affine_mem.max_score[d as usize] + (match_cost + mismatch_cost) * d
+                - xdrop_threshold;
             ((raw as f64) / (match_cost as f64 / 2.0)).ceil() as i32
         };
 
@@ -2265,15 +2434,15 @@ fn blast_greedy_align(
         }
 
         curr_score = curr_extent * (match_cost / 2) - d * (match_cost + mismatch_cost);
-        let prev_max = max_score_base[(d as usize - 1) + max_score_offset];
+        let prev_max = non_affine_mem.max_score[(d as usize - 1) + max_score_offset];
         if curr_score >= prev_max {
-            max_score_base[(d as usize) + max_score_offset] = curr_score;
+            non_affine_mem.max_score[(d as usize) + max_score_offset] = curr_score;
             best_dist = d;
             best_diag = curr_diag;
             *seq2_align_len = curr_seq2_index;
             *seq1_align_len = curr_seq2_index + best_diag - diag_origin;
         } else {
-            max_score_base[(d as usize) + max_score_offset] = prev_max;
+            non_affine_mem.max_score[(d as usize) + max_score_offset] = prev_max;
         }
 
         if diag_lower > diag_upper {
@@ -2299,16 +2468,33 @@ fn blast_greedy_align(
         // }
         // ```
         if store_traceback {
+            // NCBI reference: ncbi-blast/c++/src/algo/blast/core/greedy_align.c:666-678
+            // ```c
+            // last_seq2_off[d + 1] = (Int4*) s_GetMBSpace(mem_pool,
+            //                          (diag_upper - diag_lower + 7) / 3);
+            // last_seq2_off[d + 1] = last_seq2_off[d + 1] - diag_lower + 2;
+            // ```
+            // s_GetMBSpace allocates SGreedyOffset cells; each cell stores
+            // three Int4 values, so the reachable Int4 row length is rounded
+            // down to that 3-Int4 allocation unit exactly as in NCBI.
+            let row_len = (((diag_upper - diag_lower + 7) / 3) * 3).max(0) as usize;
+            let (pool_start, values) = non_affine_mem.alloc_traceback_row(row_len);
             last_seq2_off[(d + 1) as usize] =
-                NonAffineGreedyRow::new(diag_lower - 2, (diag_upper - diag_lower + 7) as usize);
+                NonAffineGreedyRow::from_pool(diag_lower - 2, values, pool_start);
         }
     }
 
     if !converged {
+        for row in &last_seq2_off {
+            row.persist(non_affine_mem);
+        }
         return -1;
     }
 
     if edit_block.is_none() {
+        for row in &last_seq2_off {
+            row.persist(non_affine_mem);
+        }
         return best_dist;
     }
 
@@ -2333,6 +2519,9 @@ fn blast_greedy_align(
             .as_mut()
             .unwrap()
             .add(GapAlignOpType::Sub, last_seq2_off[0].get(diag_origin));
+        for row in &last_seq2_off {
+            row.persist(non_affine_mem);
+        }
         return best_dist;
     }
 
@@ -2375,6 +2564,10 @@ fn blast_greedy_align(
         .unwrap()
         .add(GapAlignOpType::Sub, last_seq2_off[0].get(diag_origin));
 
+    for row in &last_seq2_off {
+        row.persist(non_affine_mem);
+    }
+
     best_dist
 }
 
@@ -2395,6 +2588,7 @@ fn blast_affine_greedy_align(
     seq2_align_len: &mut i32,
     max_dist: i32,
     affine_mem: &mut GreedyAffineMem,
+    non_affine_mem: &mut GreedyNonAffineMem,
     mut edit_block: Option<&mut GapPrelimEditBlock>,
     rem: u8,
     fence_hit: &mut bool,
@@ -2428,6 +2622,7 @@ fn blast_affine_greedy_align(
             seq1_align_len,
             seq2_align_len,
             max_dist,
+            non_affine_mem,
             edit_block,
             rem,
             fence_hit,
@@ -2912,6 +3107,7 @@ fn greedy_gapped_alignment_internal(
     let mut s_ext_l = 0;
 
     let affine_mem = &mut scratch.affine_mem;
+    let non_affine_mem = &mut scratch.non_affine_mem;
     let fwd_prelim_tback = &mut scratch.fwd_prelim_tback;
     let rev_prelim_tback = &mut scratch.rev_prelim_tback;
     if do_traceback {
@@ -2964,6 +3160,7 @@ fn greedy_gapped_alignment_internal(
             &mut s_ext_r,
             max_dist,
             affine_mem,
+            non_affine_mem,
             fwd_prelim_tback.as_deref_mut(),
             rem_forward,
             &mut fence_hit,
@@ -3005,6 +3202,7 @@ fn greedy_gapped_alignment_internal(
             &mut s_ext_l,
             max_dist,
             affine_mem,
+            non_affine_mem,
             rev_prelim_tback.as_deref_mut(),
             rem_reverse,
             &mut fence_hit,

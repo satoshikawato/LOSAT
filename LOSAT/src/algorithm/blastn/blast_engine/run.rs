@@ -7745,16 +7745,14 @@ fn run_internal(args: BlastnArgs, mut in_memory: Option<BlastnInMemoryRun<'_>>) 
                                 seed_ss.saturating_add(chunk.offset),
                             )
                         {
-                            let offset_adjustment = COMPRESSION_RATIO - (seed_ss % COMPRESSION_RATIO);
+                            let offset_adjustment =
+                                COMPRESSION_RATIO - (seed_ss % COMPRESSION_RATIO);
                             let mut score_q_anchor = seed_qs.saturating_add(offset_adjustment);
                             let mut score_s_anchor = seed_ss.saturating_add(offset_adjustment);
-                            if score_q_anchor > q_seq_blastna.len()
-                                || score_s_anchor > subject_len
+                            if score_q_anchor > q_seq_blastna.len() || score_s_anchor > subject_len
                             {
-                                score_q_anchor =
-                                    score_q_anchor.saturating_sub(COMPRESSION_RATIO);
-                                score_s_anchor =
-                                    score_s_anchor.saturating_sub(COMPRESSION_RATIO);
+                                score_q_anchor = score_q_anchor.saturating_sub(COMPRESSION_RATIO);
+                                score_s_anchor = score_s_anchor.saturating_sub(COMPRESSION_RATIO);
                             }
                             blastn_trace::log(
                                 "prelim",

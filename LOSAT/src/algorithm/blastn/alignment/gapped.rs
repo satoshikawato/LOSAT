@@ -328,6 +328,52 @@ fn add_gap_edit_op_count(op: &mut GapEditOp, count: u32) {
     }
 }
 
+// NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_gapalign.c:2494-2534
+// ```c
+// for (i=0; i < rev_prelim_tback->num_ops; i++) {
+//    op = rev_prelim_tback->edit_ops + i;
+//    esp->op_type[index] = op->op_type;
+//    esp->num[index] = op->num;
+// }
+// ...
+// for (; i >= 0; i--) {
+//    op = fwd_prelim_tback->edit_ops + i;
+//    esp->op_type[index] = op->op_type;
+//    esp->num[index] = op->num;
+// }
+// ```
+// Diagnostic-only formatter for comparing LOSAT traceback operation runs with
+// NCBI's GapEditScript op_type/num arrays.
+fn format_gap_edit_ops_for_trace(ops: &[GapEditOp]) -> String {
+    if ops.is_empty() {
+        return "[]".to_string();
+    }
+
+    let mut out = String::with_capacity(ops.len().saturating_mul(8).saturating_add(2));
+    out.push('[');
+    for (idx, op) in ops.iter().enumerate() {
+        if idx > 0 {
+            out.push(',');
+        }
+        match *op {
+            GapEditOp::Sub(n) => {
+                out.push('S');
+                out.push_str(&n.to_string());
+            }
+            GapEditOp::Del(n) => {
+                out.push('D');
+                out.push_str(&n.to_string());
+            }
+            GapEditOp::Ins(n) => {
+                out.push('I');
+                out.push_str(&n.to_string());
+            }
+        }
+    }
+    out.push(']');
+    out
+}
+
 /// Select a gapped-start seed within an HSP using a sliding window score.
 ///
 /// NCBI reference: blast_gapalign.c:3248-3305 BlastGetOffsetsForGappedAlignment
@@ -2995,6 +3041,17 @@ pub fn extend_gapped_heuristic_with_traceback_with_scratch(
     let mut final_se = ss + seed_len + right_s_consumed;
 
     let mut total_score = left_score + right_score;
+    let debug_traceback = debug_coords_traceback_enabled(qs, ss);
+    let left_edit_ops_trace = if debug_traceback {
+        Some(format_gap_edit_ops_for_trace(&left_edit_ops))
+    } else {
+        None
+    };
+    let right_edit_ops_trace = if debug_traceback {
+        Some(format_gap_edit_ops_for_trace(&right_edit_ops))
+    } else {
+        None
+    };
 
     // Combine edit scripts: left_ops + right_ops (merge if needed).
     //
@@ -3139,25 +3196,28 @@ pub fn extend_gapped_heuristic_with_traceback_with_scratch(
     // while (esp->size && esp->op_type[0] != eGapAlignSub) { ... }
     // while (esp->size && esp->op_type[i-1] != eGapAlignSub) { ... }
     // ```
-    if debug_coords_traceback_enabled(qs, ss) {
+    if debug_traceback {
         eprintln!(
-            "[COORDS_TRACEBACK] start=({}, {}) left=q{} s{} score={} ops={} right=q{} s{} score={} ops={} final=q{}..{} s{}..{} total_score={} trimmed_ops={}",
+            "[COORDS_TRACEBACK] start=({}, {}) left=q{} s{} score={} ops={} left_ops={} right=q{} s{} score={} ops={} right_ops={} final=q{}..{} s{}..{} total_score={} trimmed_ops={} final_ops={}",
             qs,
             ss,
             left_q_consumed,
             left_s_consumed,
             left_score,
             left_edit_op_count,
+            left_edit_ops_trace.as_deref().unwrap_or("[]"),
             right_q_consumed,
             right_s_consumed,
             right_score,
             right_edit_op_count,
+            right_edit_ops_trace.as_deref().unwrap_or("[]"),
             final_qs,
             final_qe,
             final_ss,
             final_se,
             total_score,
-            combined_edit_ops.len()
+            combined_edit_ops.len(),
+            format_gap_edit_ops_for_trace(&combined_edit_ops)
         );
     }
 

@@ -7,6 +7,7 @@ mkdir -p losat_out blast_out
 
 # Path to LOSAT binary
 LOSAT_BIN="../target/release/LOSAT"
+LOSATP_THREADS="${LOSATP_THREADS:-${LOSAT_BLASTP_THREADS:-8}}"
 
 # ==========================================
 # Part 1: LOSAT Execution
@@ -55,17 +56,24 @@ echo "Starting LOSAT commands..."
 # MjPMNV vs MlPMNV
 (time $LOSAT_BIN blastn -q ./fasta/AP027202.fasta -s ./fasta/LC738875.fasta -o ./losat_out/MjPMNV.MlPMNV.losatn.blastn.out --task blastn -n 1 )&>./losat_out/MjPMNV.MlPMNV.losatn.blastn.log
 
-<<COMMENTOUT
 # --- LOSATP Commands ---
 echo "Starting LOSATP commands..."
 run_losatp_case() {
     local query="$1"
     local subject="$2"
     local stem="$3"
+    local threaded_suffix="n${LOSATP_THREADS}"
 
     echo "Starting ${stem} (LOSATP)..."
-    (time $LOSAT_BIN blastp -q "./fasta/${query}" -s "./fasta/${subject}" -o "./losat_out/${stem}.losatp.out" -n 1 --outfmt 6 )&>"./losat_out/${stem}.losatp.log"
-    (time $LOSAT_BIN blastp -q "./fasta/${query}" -s "./fasta/${subject}" -o "./losat_out/${stem}.losatp.n8.out" -n 8 --outfmt 6 )&>"./losat_out/${stem}.losatp.n8.log"
+    # NCBI reference: ncbi-blast/c++/src/algo/blast/blastinput/cmdline_flags.cpp:46-94
+    # ```c
+    # const string kArgQuery("query");
+    # const string kArgSubject("subject");
+    # const string kArgOutput("out");
+    # const string kArgNumThreads("num_threads");
+    # ```
+    (time "${LOSAT_BIN}" blastp -query "./fasta/${query}" -subject "./fasta/${subject}" -out "./losat_out/${stem}.losatp.out" -num_threads 1 -outfmt 6 )&>"./losat_out/${stem}.losatp.log"
+    (time "${LOSAT_BIN}" blastp -query "./fasta/${query}" -subject "./fasta/${subject}" -out "./losat_out/${stem}.losatp.${threaded_suffix}.out" -num_threads "${LOSATP_THREADS}" -outfmt 6 )&>"./losat_out/${stem}.losatp.${threaded_suffix}.log"
 }
 
 LOSATP_CASES=(
@@ -94,6 +102,8 @@ done
 
 
 echo "Finished LOSATP commands!"
+
+<<COMMENTOUT
 # --- TLOSATX Commands (Genetic Code: 4) ---
 echo "Starting TLOSATX commands..."
 

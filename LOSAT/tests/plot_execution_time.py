@@ -11,10 +11,17 @@ import re
 LOG_DIR_LOSAT = "./losat_out"
 LOG_DIR_BLAST = "./blast_out"
 OUTPUT_IMAGE = "./plots/execution_time_comparison_all.png"
+LOSATP_THREADS = os.environ.get("LOSATP_THREADS") or os.environ.get("LOSAT_BLASTP_THREADS") or "8"
+LOSATP_MULTI_LABEL = f"LOSATP n{LOSATP_THREADS}"
 
 # === Color Settings (Seaborn Deep Palette) ===
 # Explicitly define colors to match other plots
-CUSTOM_PALETTE = {"LOSAT": "#dd8452", "BLAST+": "#4c72b0"}
+CUSTOM_PALETTE = {
+    "LOSAT": "#dd8452",
+    "BLAST+": "#4c72b0",
+    "LOSATP n1": "#55a868",
+    LOSATP_MULTI_LABEL: "#c44e52",
+}
 
 # === Comparison List (Full Version) ===
 comparisons = [
@@ -244,6 +251,21 @@ comparisons = [
     },
 ]
 
+# NCBI reference: ncbi-blast/c++/src/algo/blast/blastinput/cmdline_flags.cpp:46-94
+# ```c
+# const string kArgNumThreads("num_threads");
+# ```
+losatp_thread_comparisons = [
+    {
+        "name": item["name"],
+        "mode": "LOSATP Threads",
+        "single_log": item["losat_log"],
+        "multi_log": item["losat_log"].replace(".losatp.log", f".losatp.n{LOSATP_THREADS}.log"),
+    }
+    for item in comparisons
+    if item["mode"] == "BLASTP"
+]
+
 def parse_time(filepath):
     """Extract execution time (in seconds) from a log file."""
     if not os.path.exists(filepath):
@@ -272,7 +294,7 @@ def parse_time(filepath):
 
 def main():
     data = []
-    print(f"Checking {len(comparisons)} pairs...")
+    print(f"Checking {len(comparisons)} LOSAT/BLAST+ pairs...")
 
     for item in comparisons:
         # LOSAT
@@ -303,6 +325,32 @@ def main():
             if time_blast is None: missing.append(f"BLAST({item['blast_log']})")
             print(f"  [Skip] {item['name']}: Missing logs for {', '.join(missing)}")
 
+    print(f"Checking {len(losatp_thread_comparisons)} LOSATP thread pairs...")
+    for item in losatp_thread_comparisons:
+        single_path = os.path.join(LOG_DIR_LOSAT, item["single_log"])
+        multi_path = os.path.join(LOG_DIR_LOSAT, item["multi_log"])
+        time_single = parse_time(single_path)
+        time_multi = parse_time(multi_path)
+
+        if time_single is not None and time_multi is not None:
+            data.append({
+                "Task": item["name"],
+                "Mode": item["mode"],
+                "Tool": "LOSATP n1",
+                "Time (s)": time_single,
+            })
+            data.append({
+                "Task": item["name"],
+                "Mode": item["mode"],
+                "Tool": LOSATP_MULTI_LABEL,
+                "Time (s)": time_multi,
+            })
+        else:
+            missing = []
+            if time_single is None: missing.append(f"LOSATP n1({item['single_log']})")
+            if time_multi is None: missing.append(f"{LOSATP_MULTI_LABEL}({item['multi_log']})")
+            print(f"  [Skip] {item['name']}: Missing logs for {', '.join(missing)}")
+
     if not data:
         print("No valid time data found.")
         return
@@ -312,12 +360,8 @@ def main():
     # === Create Plots ===
     sns.set(style="whitegrid")
     
-    # Define custom colors: LOSAT = Orange, BLAST+ = Blue
-    # Using 'tab:blue' and 'tab:orange' to match standard matplotlib/seaborn defaults
-    CUSTOM_PALETTE = {"LOSAT": "#dd8452", "BLAST+": "#4c72b0"}
-
     # Graph settings
-    mode_order = ["TBLASTX", "Megablast", "BLASTN", "BLASTP"]
+    mode_order = ["TBLASTX", "Megablast", "BLASTN", "BLASTP", "LOSATP Threads"]
     g = sns.catplot(
         data=df, kind="bar",
         y="Task", x="Time (s)", hue="Tool", col="Mode",
@@ -331,7 +375,7 @@ def main():
     
     g.despine(left=True)
     g.set_axis_labels("Execution Time (seconds)", "")
-    g.fig.suptitle("Execution Time Comparison: LOSAT vs BLAST+ (All Tasks)", y=1.02)
+    g.fig.suptitle("Execution Time Comparison: LOSAT vs BLAST+ and LOSATP Threads", y=1.02)
     
     # Save
     os.makedirs(os.path.dirname(OUTPUT_IMAGE), exist_ok=True)
@@ -339,11 +383,19 @@ def main():
     print(f"\nPlot saved to {OUTPUT_IMAGE}")
     
     # Display Summary Table
-    print("\n--- Summary Table (Ratio < 1.0 means LOSAT is faster) ---")
+    print("\n--- Summary Table ---")
     try:
         summary = df.pivot(index=['Mode', 'Task'], columns='Tool', values='Time (s)')
-        summary['Ratio (LOSAT/BLAST)'] = (summary['LOSAT'] / summary['BLAST+']).round(2)
-        summary['Diff (s)'] = (summary['LOSAT'] - summary['BLAST+']).round(2)
+        if {"LOSAT", "BLAST+"}.issubset(summary.columns):
+            summary['Ratio (LOSAT/BLAST)'] = (summary['LOSAT'] / summary['BLAST+']).round(2)
+            summary['Diff LOSAT-BLAST (s)'] = (summary['LOSAT'] - summary['BLAST+']).round(2)
+        if {"LOSATP n1", LOSATP_MULTI_LABEL}.issubset(summary.columns):
+            summary[f"Speedup (n1/{LOSATP_MULTI_LABEL})"] = (
+                summary["LOSATP n1"] / summary[LOSATP_MULTI_LABEL]
+            ).round(2)
+            summary[f"Diff n1-{LOSATP_MULTI_LABEL} (s)"] = (
+                summary["LOSATP n1"] - summary[LOSATP_MULTI_LABEL]
+            ).round(2)
         print(summary)
     except Exception as e:
         print("Could not generate summary table:", e)

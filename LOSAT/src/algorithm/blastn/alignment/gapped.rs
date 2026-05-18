@@ -225,11 +225,25 @@ fn gap_alloc_trace_row<'a>(
 
     if row_index < trace_rows.len() {
         let row = &mut trace_rows[row_index];
-        row.clear();
+        // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_gapalign.c:75-83
+        // ```c
+        // retval->state_array = (Uint1*) malloc(chunksize*sizeof(Uint1));
+        // retval->used = 0;
+        // ```
+        // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_gapalign.c:132-136
+        // ```c
+        // /*
+        // memset(state_struct->state_array, 0, state_struct->used);
+        // */
+        // state_struct->used = 0;
+        // ```
+        // s_GapPurgeState intentionally does not clear the traceback bytes.
+        // Preserve reused row contents so cells not overwritten in the current
+        // ALIGN_EX pass retain NCBI's state-array reuse behavior.
         if row.capacity() < row_capacity_slack {
             row.reserve(row_capacity_slack.saturating_sub(row.capacity()));
         }
-        if row_capacity > 0 {
+        if row.len() < row_capacity {
             row.resize(row_capacity, 0);
         }
         row
@@ -326,6 +340,52 @@ fn add_gap_edit_op_count(op: &mut GapEditOp, count: u32) {
     match op {
         GapEditOp::Sub(n) | GapEditOp::Del(n) | GapEditOp::Ins(n) => *n += count,
     }
+}
+
+// NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_gapalign.c:2494-2534
+// ```c
+// for (i=0; i < rev_prelim_tback->num_ops; i++) {
+//    op = rev_prelim_tback->edit_ops + i;
+//    esp->op_type[index] = op->op_type;
+//    esp->num[index] = op->num;
+// }
+// ...
+// for (; i >= 0; i--) {
+//    op = fwd_prelim_tback->edit_ops + i;
+//    esp->op_type[index] = op->op_type;
+//    esp->num[index] = op->num;
+// }
+// ```
+// Diagnostic-only formatter for comparing LOSAT traceback operation runs with
+// NCBI's GapEditScript op_type/num arrays.
+fn format_gap_edit_ops_for_trace(ops: &[GapEditOp]) -> String {
+    if ops.is_empty() {
+        return "[]".to_string();
+    }
+
+    let mut out = String::with_capacity(ops.len().saturating_mul(8).saturating_add(2));
+    out.push('[');
+    for (idx, op) in ops.iter().enumerate() {
+        if idx > 0 {
+            out.push(',');
+        }
+        match *op {
+            GapEditOp::Sub(n) => {
+                out.push('S');
+                out.push_str(&n.to_string());
+            }
+            GapEditOp::Del(n) => {
+                out.push('D');
+                out.push_str(&n.to_string());
+            }
+            GapEditOp::Ins(n) => {
+                out.push('I');
+                out.push_str(&n.to_string());
+            }
+        }
+    }
+    out.push(']');
+    out
 }
 
 /// Select a gapped-start seed within an HSP using a sliding window score.
@@ -1713,7 +1773,7 @@ fn count_identical_blastna_span(q_span: &[u8], s_span: &[u8]) -> usize {
 /// Compute alignment statistics from an edit script.
 /// NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_hits.c:745-818 (identity)
 /// NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_hits.c:1055-1074 (gap counts)
-fn stats_from_edit_ops(
+pub(crate) fn stats_from_edit_ops(
     q_seq: &[u8],
     s_seq: &[u8],
     q_start: usize,
@@ -1884,7 +1944,7 @@ fn extend_gapped_one_direction_with_traceback_with_scratch(
     score_array[0].best_gap = -(gap_open_extend as i32);
 
     // First edit script row for initial gap extension
-    let row0 = gap_alloc_trace_row(trace_rows, trace_offsets, trace_rows_used, 0, 0);
+    let row0 = gap_alloc_trace_row(trace_rows, trace_offsets, trace_rows_used, 1, 0);
     row0.reserve(num_extra_cells);
     // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_gapalign.c:476-489
     // ```c
@@ -1897,7 +1957,7 @@ fn extend_gapped_one_direction_with_traceback_with_scratch(
     // }
     // ```
     // Keep a placeholder at index 0 so edit_script_row[i] aligns with NCBI's indexing.
-    row0.push(SCRIPT_GAP_IN_A);
+    row0[0] = SCRIPT_GAP_IN_A;
 
     // NCBI reference: blast_gapalign.c:481-490
     // for (i = 1; i <= N; i++) {
@@ -1915,7 +1975,11 @@ fn extend_gapped_one_direction_with_traceback_with_scratch(
         score_array[i].best = score;
         score_array[i].best_gap = score - (gap_open_extend as i32);
         score -= gap_extend as i32;
-        row0.push(SCRIPT_GAP_IN_A);
+        if i < row0.len() {
+            row0[i] = SCRIPT_GAP_IN_A;
+        } else {
+            row0.push(SCRIPT_GAP_IN_A);
+        }
         b_size = i + 1;
     }
 
@@ -1987,6 +2051,22 @@ fn extend_gapped_one_direction_with_traceback_with_scratch(
         // NCBI reference: blast_gapalign.c:563-636
         // Inner loop for each subject position
         let score_ptr = score_array.as_mut_ptr();
+        // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_gapalign.c:563-665
+        // ```c
+        // for (b_index = first_b_index; b_index < b_size; b_index++) {
+        //     ...
+        //     if (matrix_index == FENCE_SENTRY) {
+        //         if (fence_hit) { *fence_hit = 1; }
+        //         break;
+        //     }
+        // }
+        // ...
+        // state_struct->used += MAX(b_index, b_size) - orig_b_index + 1;
+        // ```
+        // Track the C loop variable after the inner loop. NCBI exposes only
+        // this written traceback span for the row; retaining zero-filled tail
+        // cells lets traceback read unwritten cells as SCRIPT_GAP_IN_A.
+        let mut row_end_b_index = b_size;
         for b_index in first_b_index..b_size {
             // NCBI reference: blast_gapalign.c:563-578 (b_size can reach N+1; no b_index < N guard).
             // NCBI reference: blast_util.c:826 (NULLB sentinel at sequence ends).
@@ -1999,6 +2079,7 @@ fn extend_gapped_one_direction_with_traceback_with_scratch(
             // }
             // ```
             if sc == FENCE_SENTRY {
+                row_end_b_index = b_index;
                 fence_hit = true;
                 break;
             }
@@ -2141,6 +2222,24 @@ fn extend_gapped_one_direction_with_traceback_with_scratch(
                 }
                 b_size += 1;
             }
+        }
+
+        // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_gapalign.c:658-665
+        // ```c
+        // /* update the memory allocator to reflect the exact number
+        //    of traceback cells this row needed */
+        // state_struct->used += MAX(b_index, b_size) - orig_b_index + 1;
+        // ```
+        // Keep only the row cells NCBI marks used. This avoids making the
+        // allocation slack semantically visible during traceback.
+        let used_cells = row_end_b_index
+            .max(b_size)
+            .saturating_sub(orig_b_index)
+            .saturating_add(1);
+        if edit_script_row.len() < used_cells {
+            edit_script_row.resize(used_cells, SCRIPT_GAP_IN_A);
+        } else {
+            edit_script_row.truncate(used_cells);
         }
 
         // NCBI reference: blast_gapalign.c:671-675
@@ -2464,7 +2563,7 @@ fn extend_gapped_one_direction_with_traceback_ex_with_scratch(
     score_array[0].best = 0;
     score_array[0].best_gap = -(gap_open_extend as i32);
 
-    let row0 = gap_alloc_trace_row(trace_rows, trace_offsets, trace_rows_used, 0, 0);
+    let row0 = gap_alloc_trace_row(trace_rows, trace_offsets, trace_rows_used, 1, 0);
     row0.reserve(num_extra_cells);
     // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_gapalign.c:476-489
     // ```c
@@ -2477,7 +2576,7 @@ fn extend_gapped_one_direction_with_traceback_ex_with_scratch(
     // }
     // ```
     // Keep a placeholder at index 0 so edit_script_row[i] aligns with NCBI's indexing.
-    row0.push(SCRIPT_GAP_IN_A);
+    row0[0] = SCRIPT_GAP_IN_A;
 
     let mut b_size = 1usize;
     for i in 1..=n.min(*dp_mem_alloc - 1) {
@@ -2487,7 +2586,11 @@ fn extend_gapped_one_direction_with_traceback_ex_with_scratch(
         score_array[i].best = score;
         score_array[i].best_gap = score - (gap_open_extend as i32);
         score -= gap_extend as i32;
-        row0.push(SCRIPT_GAP_IN_A);
+        if i < row0.len() {
+            row0[i] = SCRIPT_GAP_IN_A;
+        } else {
+            row0.push(SCRIPT_GAP_IN_A);
+        }
         b_size = i + 1;
     }
 
@@ -2542,6 +2645,22 @@ fn extend_gapped_one_direction_with_traceback_ex_with_scratch(
         let mut last_b_index = first_b_index;
 
         let score_ptr = score_array.as_mut_ptr();
+        // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_gapalign.c:563-665
+        // ```c
+        // for (b_index = first_b_index; b_index < b_size; b_index++) {
+        //     ...
+        //     if (matrix_index == FENCE_SENTRY) {
+        //         if (fence_hit) { *fence_hit = 1; }
+        //         break;
+        //     }
+        // }
+        // ...
+        // state_struct->used += MAX(b_index, b_size) - orig_b_index + 1;
+        // ```
+        // Track the C loop variable after the inner loop. NCBI exposes only
+        // this written traceback span for the row; retaining zero-filled tail
+        // cells lets traceback read unwritten cells as SCRIPT_GAP_IN_A.
+        let mut row_end_b_index = b_size;
         for b_index in first_b_index..b_size {
             let sc = get_s(s_seq, b_index, len2, reverse);
             // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_gapalign.c:569-575
@@ -2552,6 +2671,7 @@ fn extend_gapped_one_direction_with_traceback_ex_with_scratch(
             // }
             // ```
             if sc == FENCE_SENTRY {
+                row_end_b_index = b_index;
                 fence_hit = true;
                 break;
             }
@@ -2667,6 +2787,24 @@ fn extend_gapped_one_direction_with_traceback_ex_with_scratch(
                 }
                 b_size += 1;
             }
+        }
+
+        // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_gapalign.c:658-665
+        // ```c
+        // /* update the memory allocator to reflect the exact number
+        //    of traceback cells this row needed */
+        // state_struct->used += MAX(b_index, b_size) - orig_b_index + 1;
+        // ```
+        // Keep only the row cells NCBI marks used. This avoids making the
+        // allocation slack semantically visible during traceback.
+        let used_cells = row_end_b_index
+            .max(b_size)
+            .saturating_sub(orig_b_index)
+            .saturating_add(1);
+        if edit_script_row.len() < used_cells {
+            edit_script_row.resize(used_cells, SCRIPT_GAP_IN_A);
+        } else {
+            edit_script_row.truncate(used_cells);
         }
 
         if b_size <= n && b_size < *dp_mem_alloc {
@@ -2858,6 +2996,34 @@ pub fn extend_gapped_heuristic_with_traceback(
 }
 
 // NCBI reference: ncbi-blast/c++/include/algo/blast/core/blast_gapalign.h:69-80 (BlastGapAlignStruct reuse)
+// NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_gapalign.c:4609-4647
+// ```c
+// score_left = ALIGN_EX(query, subject, q_start+1, s_start+1,
+//                       &private_q_length, &private_s_length,
+//                       rev_prelim_tback, gap_align, score_params,
+//                       q_start, FALSE, TRUE, fence_hit);
+// ...
+// score_right = ALIGN_EX(query+q_start, subject+s_start,
+//                        q_length-q_start-1, s_length-s_start-1,
+//                        &private_q_length, &private_s_length,
+//                        fwd_prelim_tback, gap_align, score_params,
+//                        q_start, FALSE, FALSE, fence_hit);
+// ```
+#[inline]
+fn debug_coords_traceback_enabled(qs: usize, ss: usize) -> bool {
+    let debug_all = std::env::var_os("LOSAT_DEBUG_COORDS").is_some();
+    let Some(filter) = std::env::var_os("LOSAT_DEBUG_COORDS_START") else {
+        return debug_all;
+    };
+    let filter = filter.to_string_lossy();
+    let Some((q_filter, s_filter)) = filter.split_once(',') else {
+        return false;
+    };
+
+    q_filter.trim().parse::<usize>().ok() == Some(qs)
+        && s_filter.trim().parse::<usize>().ok() == Some(ss)
+}
+
 pub fn extend_gapped_heuristic_with_traceback_with_scratch(
     q_seq: &[u8],
     s_seq: &[u8],
@@ -2967,6 +3133,17 @@ pub fn extend_gapped_heuristic_with_traceback_with_scratch(
     let mut final_se = ss + seed_len + right_s_consumed;
 
     let mut total_score = left_score + right_score;
+    let debug_traceback = debug_coords_traceback_enabled(qs, ss);
+    let left_edit_ops_trace = if debug_traceback {
+        Some(format_gap_edit_ops_for_trace(&left_edit_ops))
+    } else {
+        None
+    };
+    let right_edit_ops_trace = if debug_traceback {
+        Some(format_gap_edit_ops_for_trace(&right_edit_ops))
+    } else {
+        None
+    };
 
     // Combine edit scripts: left_ops + right_ops (merge if needed).
     //
@@ -2981,6 +3158,8 @@ pub fn extend_gapped_heuristic_with_traceback_with_scratch(
     // ```
     // Use the left traceback Vec as the final GapEditScript buffer and move the
     // right traceback ops into it, avoiding the old left copy plus right slice copy.
+    let left_edit_op_count = left_edit_ops.len();
+    let right_edit_op_count = right_edit_ops.len();
     let mut combined_edit_ops = left_edit_ops;
     if !right_edit_ops.is_empty() {
         combined_edit_ops.reserve(right_edit_ops.len());
@@ -3086,6 +3265,53 @@ pub fn extend_gapped_heuristic_with_traceback_with_scratch(
 
     let (total_matches, total_mismatches, total_gaps, total_gap_letters) =
         stats_from_edit_ops(q_seq, s_seq, final_qs, final_ss, &combined_edit_ops);
+
+    // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_gapalign.c:4609-4647
+    // ```c
+    // score_left = ALIGN_EX(query, subject, q_start+1, s_start+1,
+    //                       &private_q_length, &private_s_length,
+    //                       rev_prelim_tback, gap_align, score_params,
+    //                       q_start, FALSE, TRUE, fence_hit);
+    // gap_align->query_start = q_start - private_q_length + 1;
+    // gap_align->subject_start = s_start - private_s_length + 1;
+    // ...
+    // score_right = ALIGN_EX(query+q_start, subject+s_start,
+    //                        q_length-q_start-1, s_length-s_start-1,
+    //                        &private_q_length, &private_s_length,
+    //                        fwd_prelim_tback, gap_align, score_params,
+    //                        q_start, FALSE, FALSE, fence_hit);
+    // gap_align->query_stop = q_start + private_q_length + 1;
+    // gap_align->subject_stop = s_start + private_s_length + 1;
+    // ```
+    // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_gapalign.c:4683-4712
+    // ```c
+    // while (esp->size && esp->op_type[0] != eGapAlignSub) { ... }
+    // while (esp->size && esp->op_type[i-1] != eGapAlignSub) { ... }
+    // ```
+    if debug_traceback {
+        eprintln!(
+            "[COORDS_TRACEBACK] start=({}, {}) left=q{} s{} score={} ops={} left_ops={} right=q{} s{} score={} ops={} right_ops={} final=q{}..{} s{}..{} total_score={} trimmed_ops={} final_ops={}",
+            qs,
+            ss,
+            left_q_consumed,
+            left_s_consumed,
+            left_score,
+            left_edit_op_count,
+            left_edit_ops_trace.as_deref().unwrap_or("[]"),
+            right_q_consumed,
+            right_s_consumed,
+            right_score,
+            right_edit_op_count,
+            right_edit_ops_trace.as_deref().unwrap_or("[]"),
+            final_qs,
+            final_qe,
+            final_ss,
+            final_se,
+            total_score,
+            combined_edit_ops.len(),
+            format_gap_edit_ops_for_trace(&combined_edit_ops)
+        );
+    }
 
     (
         final_qs,

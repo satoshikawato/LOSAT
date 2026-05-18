@@ -25,7 +25,7 @@ use super::alignment::build_blastna_matrix;
 use super::filtering::{
     purge_hsps_with_common_endpoints_ex, reevaluate_hsp_with_ambiguities_gapped, subject_best_hit,
 };
-use super::hsp::{score_compare_hsps as score_compare_blastn_hsps, BlastnHsp};
+use super::hsp::{sort_hsps_by_score, BlastnHsp};
 use super::interval_tree::{BlastIntervalTree, IndexMethod, TreeHsp};
 use crate::common::Hit;
 use crate::stats::KarlinParams;
@@ -105,7 +105,18 @@ pub fn filter_hsps(
     //     result = BLAST_CMP(hsp2->query.end, hsp1->query.end);
     // }
     // ```
-    result_hits.sort_by(score_compare_blastn_hsps);
+    // NCBI reference: /mnt/c/Users/genom/GitHub/ncbi-blast/c++/src/algo/blast/core/blast_hits.c:1374-1382
+    // ```c
+    // Blast_HSPListSortByScore(BlastHSPList* hsp_list)
+    // {
+    //     ...
+    //     if (!Blast_HSPListIsSortedByScore(hsp_list)) {
+    //         qsort(hsp_list->hsp_array, hsp_list->hspcnt, sizeof(BlastHSP*),
+    //               ScoreCompareHSPs);
+    //     }
+    // }
+    // ```
+    sort_hsps_by_score(&mut result_hits);
 
     // NOTE: NCBI does NOT have explicit dedup for identical coords+score.
     // NCBI only uses Blast_HSPListPurgeHSPsWithCommonEndpoints which handles
@@ -235,7 +246,12 @@ pub fn filter_hsps(
     //     }
     // }
     // ```
-    result_hits.sort_by(score_compare_blastn_hsps);
+    // NCBI reference: /mnt/c/Users/genom/GitHub/ncbi-blast/c++/src/algo/blast/core/blast_traceback.c:671-672
+    // ```c
+    // /* Sort HSPs by score again, as the scores might have changed. */
+    // Blast_HSPListSortByScore(hsp_list);
+    // ```
+    sort_hsps_by_score(&mut result_hits);
     let mut final_hits: Vec<BlastnHsp> = Vec::with_capacity(result_hits.len());
     let min_diag_separation: i32 = 0;
     // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_options.c:1482-1495

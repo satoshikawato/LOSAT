@@ -686,10 +686,24 @@ pub fn apply_dust_masking(
                 args.dust_level, args.dust_window, args.dust_linker
             );
         }
-        let masker = DustMasker::new(args.dust_level, args.dust_window, args.dust_linker);
+        let dust_level = args.dust_level;
+        let dust_window = args.dust_window;
+        let dust_linker = args.dust_linker;
         let masks: Vec<Vec<MaskedInterval>> = queries
             .iter()
-            .map(|record| masker.mask_sequence(record.seq()))
+            .map(|record| {
+                // NCBI reference: /mnt/c/Users/genom/GitHub/ncbi-blast/c++/src/algo/blast/api/dust_filter.cpp:92-102
+                // ```c
+                // void s_CombineDustMasksWithUserProvidedMasks(...)
+                // {
+                //     CSymDustMasker duster(level, window, linker);
+                //     CRef<CPacked_seqint> masked_locations =
+                //         duster.GetMaskedInts(*query_id, data);
+                // ```
+                // NCBI constructs a fresh CSymDustMasker for each query, which
+                // resets the converter's CRandom state before scanning that query.
+                DustMasker::new(dust_level, dust_window, dust_linker).mask_sequence(record.seq())
+            })
             .collect();
 
         let total_masked: usize = masks

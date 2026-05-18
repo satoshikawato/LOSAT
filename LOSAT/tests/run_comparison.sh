@@ -55,7 +55,7 @@ echo "Starting LOSAT commands..."
 # MjPMNV vs MlPMNV
 (time $LOSAT_BIN blastn -q ./fasta/AP027202.fasta -s ./fasta/LC738875.fasta -o ./losat_out/MjPMNV.MlPMNV.losatn.blastn.out --task blastn -n 1 )&>./losat_out/MjPMNV.MlPMNV.losatn.blastn.log
 
-
+<<COMMENTOUT
 # --- LOSATP Commands ---
 echo "Starting LOSATP commands..."
 run_losatp_case() {
@@ -141,7 +141,7 @@ echo "Starting MeenMJNV vs MejoMJNV (TLOSATX)..."
 # AvCLPV vs PsCLPV
 echo "Starting AvCLPV vs PsCLPV (TLOSATX)..."
 (time $LOSAT_BIN tblastx -q ./fasta/AvCLPV.fasta -s ./fasta/PsCLPV.fasta -o ./losat_out/AvCLPV.PsCLPV.tlosatx.n8.out --query-gencode 1 --db-gencode 1 -n 8 )&>./losat_out/AvCLPV.PsCLPV.tlosatx.n8.log 
-<<COMMENTOUT
+
 echo "Starting NZ_CP006932 self (TLOSATX)..."
 # NZ_CP006932 self
 (time $LOSAT_BIN tblastx -q ./fasta/NZ_CP006932.fasta -s ./fasta/NZ_CP006932.fasta -o ./losat_out/NZ_CP006932.NZ_CP006932.tlosatx.n8.out --query-gencode 4 --db-gencode 4 -n 8 )&>./losat_out/NZ_CP006932.NZ_CP006932.tlosatx.n8.log 
@@ -157,10 +157,10 @@ echo "Starting AP027131 vs AP027133 (TLOSATX)..."
 echo "Starting AP027133 vs AP027132 (TLOSATX)..."
 # AP027133 vs AP027132
 (time $LOSAT_BIN tblastx -q ./fasta/AP027133.fasta -s ./fasta/AP027132.fasta -o ./losat_out/AP027133.AP027132.tlosatx.n8.out --query-gencode 4 --db-gencode 4 -n 8 )&>./losat_out/AP027133.AP027132.tlosatx.n8.log 
-COMMENTOUT
-echo "Finished TLOSATX commands!"
 
+echo "Finished TLOSATX commands!"
 COMMENTOUT
+
 
 echo "Finished LOSAT commands!"
 
@@ -232,10 +232,10 @@ echo "Starting MeenMJNV vs MejoMJNV (BLAST)..."
 echo "Starting AvCLPV vs PsCLPV (BLAST)..."
 (time tblastx -query ./fasta/AvCLPV.fasta -db ./fasta/PsCLPV -out ./blast_out/AvCLPV.PsCLPV.tblastx.n8.out -query_gencode 1 -db_gencode 1 -num_threads 8 -outfmt 6) &> ./blast_out/AvCLPV.PsCLPV.tblastx.n8.log
 
+COMMENTOUT
 
 
-
-
+<<COMMENTOUT
 # --- TBLASTX Commands (gencode 4) ---
 
 # makeblastdb -in NZ_CP006932.fasta -dbtype nucl -title NZ_CP006932 -parse_seqids -hash_index -out NZ_CP006932
@@ -259,7 +259,7 @@ echo "Starting AvCLPV vs PsCLPV (BLAST)..."
 
 # AP027133 vs AP027132
 (time tblastx -query ./fasta/AP027133.fasta -db ./fasta/AP027132 -out ./blast_out/AP027133.AP027132.tblastx.n8.out -query_gencode 4 -db_gencode 4 -num_threads 8 -outfmt 6 )&>./blast_out/AP027133.AP027132.tblastx.n8.log &
-
+COMMENTOUT
 
 # --- BLASTN Commands (Default / Megablast) ---
 
@@ -308,7 +308,7 @@ echo "Starting AvCLPV vs PsCLPV (BLAST)..."
 
 wait
 
-
+<<COMMENTOUT
 # --- BLASTP Commands ---
 echo "Starting WSSV vs PajaWSV (BLASTP)..."
 (time  blastp -query ./fasta/WSSV.faa -subject ./fasta/PajaWSV.faa -out ./blast_out/WSSV.PajaWSV.BLASTP.out -num_threads 1 -outfmt 6 )&>./blast_out/WSSV.PajaWSV.BLASTP.log

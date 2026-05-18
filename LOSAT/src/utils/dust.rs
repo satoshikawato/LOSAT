@@ -8,6 +8,59 @@
 
 use std::collections::VecDeque;
 
+// NCBI reference: /mnt/c/Users/genom/GitHub/ncbi-blast/c++/src/util/random_gen.cpp:241-264
+// ```c
+// static const CRandom::TValue sm_State[CRandom::kStateSize] = {
+//     0xd53f1852,  0xdfc78b83,  0x4f256096,  0xe643df7,
+//     ...
+//     0x6e37bd55
+// };
+// m_RJ = kStateOffset;
+// m_RK = kStateSize - 1;
+// ```
+// NCBI reference: /mnt/c/Users/genom/GitHub/ncbi-blast/c++/include/util/random_gen.hpp:217-240
+// ```c
+// r = m_State[m_RK] + m_State[m_RJ--];
+// m_State[m_RK--] = r;
+// ...
+// return x_GetRand32Bits() >> 1;
+// ```
+struct NcbiLfgRandom {
+    state: [u32; 33],
+    rj: i32,
+    rk: i32,
+}
+
+impl NcbiLfgRandom {
+    fn new() -> Self {
+        Self {
+            state: [
+                0xd53f1852, 0xdfc78b83, 0x4f256096, 0x0e643df7, 0x82c359bf, 0xc7794dfa, 0xd5e9ffaa,
+                0x2c8cb64a, 0x2f07b334, 0xad5a7eb5, 0x96dc0cde, 0x6fc24589, 0xa5853646, 0xe71576e2,
+                0x0dae30df, 0xb09ce711, 0x5e56ef87, 0x4b4b0082, 0x6f4f340e, 0xc5bb17e8, 0xd788d765,
+                0x67498087, 0x9d7aba26, 0x261351d4, 0x411ee7ea, 0x0393a263, 0x2c5a5835, 0xc115fcd8,
+                0x25e9132c, 0xd0c6e906, 0xc2bc5b2d, 0x6c065c98, 0x6e37bd55,
+            ],
+            rj: 12,
+            rk: 32,
+        }
+    }
+
+    #[inline]
+    fn next(&mut self) -> u32 {
+        let r = self.state[self.rk as usize].wrapping_add(self.state[self.rj as usize]);
+        self.state[self.rk as usize] = r;
+        self.rj -= 1;
+        self.rk -= 1;
+        if self.rk < 0 {
+            self.rk = 32;
+        } else if self.rj < 0 {
+            self.rj = 32;
+        }
+        r >> 1
+    }
+}
+
 /// DUST filter parameters
 #[derive(Debug, Clone)]
 pub struct DustParams {
@@ -144,19 +197,34 @@ impl DustMasker {
     }
 
     #[inline]
+    fn convert_iupac_to_ncbi2na(base: u8, rng: &mut NcbiLfgRandom) -> u8 {
+        // NCBI reference: /mnt/c/Users/genom/GitHub/ncbi-blast/c++/include/algo/dustmask/symdust.hpp:75-84
+        // ```c
+        // switch( r )
+        // {
+        //     case 67: return 1;
+        //     case 71: return 2;
+        //     case 84: return 3;
+        //     case 78: return (m_Random.GetRand() & 0x3);
+        //     default: return 0;
+        // }
+        // ```
+        match base {
+            b'C' | b'c' => 1,
+            b'G' | b'g' => 2,
+            b'T' | b't' | b'U' | b'u' => 3,
+            b'N' | b'n' => (rng.next() & 0x3) as u8,
+            _ => 0,
+        }
+    }
+
+    #[inline]
     #[allow(dead_code)]
     fn encode_triplet(b1: u8, b2: u8, b3: u8) -> Option<u8> {
         let e1 = Self::encode_base(b1)?;
         let e2 = Self::encode_base(b2)?;
         let e3 = Self::encode_base(b3)?;
         Some((e1 << 4) | (e2 << 2) | e3)
-    }
-
-    /// Shift triplet encoding by one base
-    #[inline]
-    fn shift_triplet(prev_triplet: u8, new_base: u8) -> Option<u8> {
-        let e = Self::encode_base(new_base)?;
-        Some(((prev_triplet << 2) & 0x3F) | e)
     }
 
     /// Mask a sequence and return the list of masked intervals
@@ -184,6 +252,7 @@ impl DustMasker {
         }
 
         let mut current_start = start;
+        let mut rng = NcbiLfgRandom::new();
 
         while stop > current_start + 2 {
             // Initialize perfect intervals list for this window
@@ -192,20 +261,19 @@ impl DustMasker {
             // Create triplet window tracker
             let mut window = TripletWindow::new(self.window, self.low_k, &self.thresholds);
 
-            // Initialize first triplet
-            let b1 = seq[current_start];
-            let b2 = seq[current_start + 1];
-
-            let initial_triplet = match (Self::encode_base(b1), Self::encode_base(b2)) {
-                (Some(e1), Some(e2)) => (e1 << 2) | e2,
-                _ => {
-                    // Skip ambiguous bases at start
-                    current_start += 1;
-                    continue;
-                }
-            };
-
-            let mut current_triplet = initial_triplet;
+            // NCBI reference: /mnt/c/Users/genom/GitHub/ncbi-blast/c++/src/algo/dustmask/symdust.cpp:235-249
+            // ```c
+            // seq_citer_type it(seq, start);
+            // char c1 = *it, c2 = *++it;
+            // triplet_type t = (converter_( c1 )<<2) + converter_( c2 );
+            // it.SetPos(start + w.stop() + 2);
+            // ...
+            // t = ((t<<2)&TRIPLET_MASK) + (converter_( *it )&0x3);
+            // ++it;
+            // ```
+            let mut current_triplet =
+                (Self::convert_iupac_to_ncbi2na(seq[current_start], &mut rng) << 2)
+                    + Self::convert_iupac_to_ncbi2na(seq[current_start + 1], &mut rng);
             let mut pos = current_start + 2;
             let mut done = false;
 
@@ -219,17 +287,8 @@ impl DustMasker {
                 );
 
                 // Shift window by adding new triplet
-                let new_triplet = match Self::shift_triplet(current_triplet, seq[pos]) {
-                    Some(t) => t,
-                    None => {
-                        // Ambiguous base - restart from next position
-                        pos += 1;
-                        if pos < stop {
-                            current_start = pos - 2;
-                        }
-                        break;
-                    }
-                };
+                let new_triplet = ((current_triplet << 2) & 0x3F)
+                    + Self::convert_iupac_to_ncbi2na(seq[pos], &mut rng);
                 current_triplet = new_triplet;
                 pos += 1;
 
@@ -247,13 +306,8 @@ impl DustMasker {
                             &mut perfect_list,
                         );
 
-                        let new_triplet = match Self::shift_triplet(current_triplet, seq[pos]) {
-                            Some(t) => t,
-                            None => {
-                                pos += 1;
-                                break;
-                            }
-                        };
+                        let new_triplet = ((current_triplet << 2) & 0x3F)
+                            + Self::convert_iupac_to_ncbi2na(seq[pos], &mut rng);
                         current_triplet = new_triplet;
 
                         if window.shift_window(new_triplet, &mut perfect_list) {
@@ -299,11 +353,24 @@ impl DustMasker {
         if let Some(p) = perfect_list.back() {
             if p.start < wstart {
                 let interval_start = p.start + offset;
-                let interval_end = p.end + offset;
+                // NCBI reference: /mnt/c/Users/genom/GitHub/ncbi-blast/c++/src/algo/dustmask/symdust.cpp:185-208
+                // ```c
+                // TMaskedInterval b = P.back().bounds_;
+                // if( b.first < wstart ) {
+                //     TMaskedInterval b1( b.first + start, b.second + start );
+                //     ...
+                //     if( s + linker_ >= b1.first ) {
+                //         res.back().second = max( s, b1.second );
+                //     }
+                // ```
+                // NCBI stores b1.second as an inclusive CSeq_loc endpoint
+                // (dust_filter.cpp:101-112 passes GetTo() through). LOSAT's
+                // `MaskedInterval` is 0-based half-open, so add one here.
+                let interval_end = p.end + offset + 1;
 
                 // Try to merge with previous interval if within linker distance
                 if let Some(last) = result.last_mut() {
-                    if last.end + self.linker >= interval_start {
+                    if last.end.saturating_sub(1) + self.linker >= interval_start {
                         last.end = last.end.max(interval_end);
                     } else {
                         result.push(MaskedInterval::new(interval_start, interval_end));

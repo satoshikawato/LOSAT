@@ -9,6 +9,7 @@
 
 use crate::stats::length_adjustment::compute_length_adjustment_ncbi;
 use crate::stats::KarlinParams;
+use crate::stats::{compute_karlin_params_ungapped, score_freq_profile_from_probabilities};
 
 /// ln(2) constant used in NCBI BLAST
 /// Reference: ncbi-blast/c++/include/algo/blast/core/ncbi_math.h
@@ -28,6 +29,49 @@ pub const CUTOFF_E_BLASTN: f64 = 0.05;
 /// Smallest float to avoid floating point exception
 /// Reference: ncbi-blast/c++/src/algo/blast/core/blast_stat.c:4049
 const K_SMALL_FLOAT: f64 = 1.0e-297;
+
+/// Compute BLASTN ungapped Karlin parameters through NCBI's score-frequency path.
+///
+/// NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_stat.c:2758-2782
+/// ```c
+/// stdrfp = Blast_ResFreqNew(sbp);
+/// Blast_ResFreqStdComp(sbp, stdrfp);
+/// ...
+/// Blast_ResFreqString(sbp, rfp, (char*)buffer, query_length);
+/// sbp->sfp[context] = Blast_ScoreFreqNew(sbp->loscore, sbp->hiscore);
+/// BlastScoreFreqCalc(sbp, sbp->sfp[context], rfp, stdrfp);
+/// sbp->kbp_std[context] = kbp = Blast_KarlinBlkNew();
+/// loop_status = Blast_KarlinBlkUngappedCalc(kbp, sbp->sfp[context]);
+/// ```
+///
+/// NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_stat.c:1820-1826
+/// ```c
+/// static BLAST_LetterProb nt_prob[] = {
+///       { 'A', 25.00 },
+///       { 'C', 25.00 },
+///       { 'G', 25.00 },
+///       { 'T', 25.00 }
+///    };
+/// ```
+pub fn compute_blastn_ungapped_params_from_score_freq(
+    reward: i32,
+    penalty: i32,
+) -> Option<KarlinParams> {
+    let score_min = reward.min(penalty);
+    let score_max = reward.max(penalty);
+
+    // With NCBI's nucleotide standard composition, the database side is
+    // A/C/G/T = 0.25 each. After Blast_ResFreqString normalizes any valid
+    // query composition, the combined score probabilities for reward/penalty
+    // scoring are P(match)=0.25 and P(mismatch)=0.75.
+    let sfp = score_freq_profile_from_probabilities(
+        score_min,
+        score_max,
+        &[(reward, 0.25), (penalty, 0.75)],
+    );
+
+    compute_karlin_params_ungapped(&sfp).ok()
+}
 
 /// Calculate gap_trigger raw score from bit score using UNGAPPED Karlin params.
 ///

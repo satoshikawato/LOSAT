@@ -4,6 +4,7 @@
 //! - `LOSAT_TRACE_BLASTN_HSP="qstart,qend,sstart,send"`
 //! - `LOSAT_TRACE_BLASTN_CONTEXT=<context_idx>`
 //! - `LOSAT_TRACE_BLASTN_SUBJECT=<subject_id_or_index>`
+//! - `LOSAT_TRACE_BLASTN_SEED="q,s"`
 //! - `LOSAT_TRACE_BLASTN_STAGE=<seed|ungapped|prelim|traceback|purge|hitlist|all>`
 //!
 //! The target coordinates use final outfmt 6/7 coordinates, matching NCBI
@@ -54,6 +55,7 @@ enum StageFilter {
 #[derive(Clone, Debug)]
 struct TraceBlastnConfig {
     target: Option<TraceBlastnTarget>,
+    seed: Option<(usize, usize)>,
     context_idx: Option<u32>,
     subject: Option<String>,
     stage: StageFilter,
@@ -77,6 +79,9 @@ fn config() -> &'static TraceBlastnConfig {
         let target = std::env::var("LOSAT_TRACE_BLASTN_HSP")
             .ok()
             .and_then(|raw| parse_target(raw.as_str()));
+        let seed = std::env::var("LOSAT_TRACE_BLASTN_SEED")
+            .ok()
+            .and_then(|raw| parse_seed(raw.as_str()));
         let context_idx = std::env::var("LOSAT_TRACE_BLASTN_CONTEXT")
             .ok()
             .and_then(|raw| raw.trim().parse::<u32>().ok());
@@ -90,18 +95,41 @@ fn config() -> &'static TraceBlastnConfig {
             .and_then(parse_stage)
             .unwrap_or(StageFilter::All);
         let enabled = target.is_some()
+            || seed.is_some()
             || context_idx.is_some()
             || subject.is_some()
             || std::env::var("LOSAT_TRACE_BLASTN_STAGE").is_ok();
 
         TraceBlastnConfig {
             target,
+            seed,
             context_idx,
             subject,
             stage,
             enabled,
         }
     })
+}
+
+// NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_gapalign.c:4071-4076
+// ```c
+// Blast_HSPInit(...,
+//        init_hsp->offsets.qs_offsets.q_off,
+//        init_hsp->offsets.qs_offsets.s_off, ...);
+// ```
+fn parse_seed(raw: &str) -> Option<(usize, usize)> {
+    let parts: Vec<&str> = raw
+        .split(|c: char| c == ',' || c == ':' || c == ';' || c.is_whitespace())
+        .filter(|part| !part.is_empty())
+        .collect();
+    if parts.len() != 2 {
+        eprintln!(
+            "[TRACE_BLASTN] invalid LOSAT_TRACE_BLASTN_SEED (expected 2 integers): {:?}",
+            raw
+        );
+        return None;
+    }
+    Some((parts[0].parse().ok()?, parts[1].parse().ok()?))
 }
 
 fn parse_target(raw: &str) -> Option<TraceBlastnTarget> {
@@ -148,6 +176,40 @@ pub fn enabled() -> bool {
     config().enabled
 }
 
+// NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_gapalign.c:4071-4076
+// ```c
+// status = Blast_HSPInit(gap_align->query_start, gap_align->query_stop,
+//                        gap_align->subject_start, gap_align->subject_stop,
+//                        init_hsp->offsets.qs_offsets.q_off,
+//                        init_hsp->offsets.qs_offsets.s_off, context,
+//                        query_frame, subject->frame, gap_align->score,
+//                        &(gap_align->edit_script), &new_hsp);
+// ```
+pub fn should_trace_seed(
+    stage: &str,
+    context_idx: u32,
+    subject_idx: usize,
+    subject_id: &str,
+    seed_q: usize,
+    seed_s: usize,
+) -> bool {
+    let cfg = config();
+    if !cfg.enabled || !stage_matches(cfg.stage, stage) {
+        return false;
+    }
+    if let Some(wanted) = cfg.context_idx {
+        if wanted != context_idx {
+            return false;
+        }
+    }
+    if let Some(subject) = cfg.subject.as_deref() {
+        if subject != subject_id && subject.parse::<usize>().ok() != Some(subject_idx) {
+            return false;
+        }
+    }
+    cfg.seed == Some((seed_q, seed_s))
+}
+
 // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_gapalign.c:3908-3918
 // ```c
 // tmp_hsp.context = context;
@@ -185,6 +247,7 @@ pub fn should_trace_range(
         }
     }
     match cfg.target {
+        None if cfg.seed.is_some() => false,
         None => true,
         Some(target) => adjusted_range_overlaps_target(
             target,
@@ -227,6 +290,9 @@ pub fn should_trace_subject(
         if subject != subject_id && subject.parse::<usize>().ok() != Some(subject_idx) {
             return false;
         }
+    }
+    if cfg.target.is_none() && cfg.seed.is_some() {
+        return false;
     }
     true
 }

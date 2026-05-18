@@ -229,6 +229,64 @@ impl ScoreFreqProfile {
     }
 }
 
+/// Build a score frequency profile from already-combined score probabilities.
+///
+/// NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_stat.c:2151-2205
+/// ```c
+/// for (score = sfp->score_min; score <= sfp->score_max; score++)
+///    sfp->sprob[score] = 0.0;
+/// ...
+/// sfp->sprob[score] += rfp1->prob[index1] * rfp2->prob[index2];
+/// ...
+/// for (score = obs_min; score <= obs_max; score++) {
+///    sfp->sprob[score] /= score_sum;
+///    score_avg += score * sfp->sprob[score];
+/// }
+/// sfp->score_avg = score_avg;
+/// ```
+pub fn score_freq_profile_from_probabilities(
+    score_min: i32,
+    score_max: i32,
+    probabilities: &[(i32, f64)],
+) -> ScoreFreqProfile {
+    let mut sfp = ScoreFreqProfile::new(score_min, score_max);
+
+    for &(score, prob) in probabilities {
+        if score < score_min || score > score_max || prob <= 0.0 {
+            continue;
+        }
+        let current = sfp.get_prob(score);
+        sfp.set_prob(score, current + prob);
+    }
+
+    let mut score_sum = 0.0;
+    let mut score_avg = 0.0;
+    let mut obs_min = i32::MAX;
+    let mut obs_max = i32::MIN;
+
+    for score in score_min..=score_max {
+        let prob = sfp.get_prob(score);
+        if prob > 0.0 {
+            score_sum += prob;
+            obs_min = obs_min.min(score);
+            obs_max = obs_max.max(score);
+        }
+    }
+
+    if score_sum > 0.0001 || score_sum < -0.0001 {
+        for score in obs_min..=obs_max {
+            let prob = sfp.get_prob(score) / score_sum;
+            sfp.set_prob(score, prob);
+            score_avg += score as f64 * prob;
+        }
+    }
+
+    sfp.obs_min = if obs_min == i32::MAX { 0 } else { obs_min };
+    sfp.obs_max = if obs_max == i32::MIN { 0 } else { obs_max };
+    sfp.score_avg = score_avg;
+    sfp
+}
+
 /// Compute score frequency profile from two amino acid compositions
 /// Reference: NCBI BlastScoreFreqCalc (blast_stat.c:2151-2205)
 ///

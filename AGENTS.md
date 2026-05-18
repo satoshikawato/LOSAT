@@ -31,6 +31,14 @@ authoritative, current guidance for agent behavior in LOSAT.
    - Output must match NCBI BLAST+ exactly.
    - Do not simplify algorithms if it changes output.
    - Use the same floating-point precision as NCBI.
+   - Approved project exception: for TBLASTX local `-s/--subject` searches,
+     LOSAT must respect `--db-gencode` for subject translation/search/reporting
+     for every non-default genetic code. This local-subject non-default
+     `db_gencode` behavior is intentional even where NCBI BLAST+ local
+     `-subject` semantics differ. Do not count those subject-genetic-code-only
+     differences as LOSAT parity defects. This exception is narrow and does not
+     permit any other deviation from NCBI timing, ordering, scoring, filtering,
+     statistics, pruning, or output formatting.
 
 4. NCBI code comments are mandatory for modifications.
    - Every code change must include NCBI C/C++ reference comments with file path
@@ -90,6 +98,11 @@ authoritative, current guidance for agent behavior in LOSAT.
 
 - Sequence encoding: nucleotides are 2-bit packed; amino acids use NCBISTDAA with
   sentinel byte 0 (NULLB); BLOSUM62 is the scoring matrix.
+- Local `-s/--subject` TBLASTX searches intentionally honor `--db-gencode` for
+  translated subject search/reporting for every non-default genetic code. Do not
+  use NCBI BLAST+ local `-subject` non-default `db_gencode` output as a failure
+  oracle for that subject-genetic-code behavior; use NCBI as the oracle for all
+  other behavior in the same run.
 - Frame concatenation shares boundary sentinels; frame offset advances by
   `aa_len + 1`, not `aa_len + 2`.
 - Length adjustment asymmetry: query uses full adjustment, subject uses one third;

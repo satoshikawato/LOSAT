@@ -3,8 +3,14 @@
 # NCBI reference: ncbi-blast/c++/src/algo/blast/api/blast_nucl_options.cpp:231-249
 # hit saving defaults: hitlist_size=500, evalue=10, max_hsps_per_subject=0, min_diag_separation=50.
 case_id	task	reward	penalty	gap_open	gap_extend	word_size	window_size	scan_range	dust	soft_masking	strand	evalue	max_target_seqs	max_hsps_per_subject	num_threads	outfmt	query	subject	ncbi_out	losat_out
+PesePMNV.MjPMNV.task_blastn	blastn	2	-3	5	2	11	0	0	true	true	both	10	500	0	1	7	tests/fasta/AP027152.fasta	tests/fasta/AP027202.fasta	tests/blast_out/PesePMNV.MjPMNV.blastn.out	tests/losat_out/PesePMNV.MjPMNV.losatn.blastn.out
+PmeNMV.MjPMNV.task_blastn	blastn	2	-3	5	2	11	0	0	true	true	both	10	500	0	1	7	tests/fasta/LC738869.fasta	tests/fasta/AP027202.fasta	tests/blast_out/PmeNMV.MjPMNV.blastn.out	tests/losat_out/PmeNMV.MjPMNV.losatn.blastn.out
+PmeNMV.PesePMNV.task_blastn	blastn	2	-3	5	2	11	0	0	true	true	both	10	500	0	1	7	tests/fasta/LC738869.fasta	tests/fasta/AP027152.fasta	tests/blast_out/PmeNMV.PesePMNV.blastn.out	tests/losat_out/PmeNMV.PesePMNV.losatn.blastn.out
+PeseMJNV.PemoMJNVB.task_blastn	blastn	2	-3	5	2	11	0	0	true	true	both	10	500	0	1	7	tests/fasta/LC738873.fasta	tests/fasta/LC738871.fasta	tests/blast_out/PeseMJNV.PemoMJNVB.blastn.out	tests/losat_out/PeseMJNV.PemoMJNVB.losatn.blastn.out
 MelaMJNV.PemoMJNVA.task_blastn	blastn	2	-3	5	2	11	0	0	true	true	both	10	500	0	1	7	tests/fasta/LC738874.fasta	tests/fasta/LC738870.fasta	tests/blast_out/MelaMJNV.PemoMJNVA.blastn.out	tests/losat_out/MelaMJNV.PemoMJNVA.losatn.blastn.out
 PemoMJNVA.PeseMJNV.task_blastn	blastn	2	-3	5	2	11	0	0	true	true	both	10	500	0	1	7	tests/fasta/LC738870.fasta	tests/fasta/LC738873.fasta	tests/blast_out/PemoMJNVA.PeseMJNV.blastn.out	tests/losat_out/PemoMJNVA.PeseMJNV.losatn.blastn.out
+MjeNMV.MelaMJNV.task_blastn	blastn	2	-3	5	2	11	0	0	true	true	both	10	500	0	1	7	tests/fasta/LC738868.fasta	tests/fasta/LC738874.fasta	tests/blast_out/MjeNMV.MelaMJNV.blastn.out	tests/losat_out/MjeNMV.MelaMJNV.losatn.blastn.out
+MjPMNV.MlPMNV.task_blastn	blastn	2	-3	5	2	11	0	0	true	true	both	10	500	0	1	7	tests/fasta/AP027202.fasta	tests/fasta/LC738875.fasta	tests/blast_out/MjPMNV.MlPMNV.blastn.out	tests/losat_out/MjPMNV.MlPMNV.losatn.blastn.out
 NZ_CP006932.NZ_CP006932.task_blastn	blastn	2	-3	5	2	11	0	0	true	true	both	10	500	0	1	7	tests/fasta/NZ_CP006932.fasta	tests/fasta/NZ_CP006932.fasta	tests/blast_out/NZ_CP006932.NZ_CP006932.task_blastn.out	tests/losat_out/NZ_CP006932.NZ_CP006932.losatn.blastn.out
-EDL933.Sakai.megablast	megablast	1	-2	0	0	28	0	0	true	true	both	10	500	0	1	7	tests/fasta/EDL933.fna	tests/fasta/Sakai.fna	tests/blast_out/EDL933.Sakai.blastn.megablast.out	tests/losat_out/EDL933.Sakai.megablast.losatn.out
+EDL933.Sakai.megablast	megablast	1	-2	0	0	28	0	0	true	true	both	10	500	0	1	7	tests/fasta/EDL933.fna	tests/fasta/Sakai.fna	tests/blast_out/EDL933.Sakai.blastn.megablast.out	tests/losat_out/EDL933.Sakai.losatn.megablast.out
 Sakai.MG1655.megablast	megablast	1	-2	0	0	28	0	0	true	true	both	10	500	0	1	7	tests/fasta/Sakai.fna	tests/fasta/MG1655.fna	tests/blast_out/Sakai.MG1655.blastn.megablast.out	tests/losat_out/Sakai.MG1655.losatn.megablast.out

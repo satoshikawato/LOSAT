@@ -1,0 +1,30 @@
+[TRACE_BLASTN] stage=purge subject_idx=0 context=0 pass=common_start action=delete purge=false keeper=q0..657101 s0..657101 raw_score=1314202 removed=q0..657101 s0..657101 raw_score=1313843 cut=(657101, 657101)
+[TRACE_BLASTN] stage=purge subject_idx=0 context=0 pass=common_start action=delete purge=false keeper=q0..657101 s0..657101 raw_score=1314202 removed=q0..657101 s0..657101 raw_score=1313462 cut=(657101, 657101)
+[TRACE_BLASTN] stage=purge subject_idx=0 context=0 pass=common_start action=delete purge=false keeper=q256084..257713 s256354..258007 raw_score=600 removed=q256084..257713 s256354..258007 raw_score=600 cut=(257713, 258007)
+[TRACE_BLASTN] stage=purge subject_idx=0 context=0 pass=common_start action=delete purge=false keeper=q256354..258007 s256084..257713 raw_score=600 removed=q256354..258007 s256084..257713 raw_score=600 cut=(258007, 257713)
+[TRACE_BLASTN] stage=purge subject_idx=0 context=0 pass=common_start action=trim_begin purge=false keeper=q256354..258007 s256084..257713 raw_score=600 removed=q256354..258126 s256084..257859 raw_score=587 cut=(258007, 257713)
+[TRACE_BLASTN] stage=purge subject_idx=0 context=0 pass=common_start action=delete purge=false keeper=q256606..257189 s256084..256535 raw_score=220 removed=q256606..257189 s256084..256535 raw_score=215 cut=(257189, 256535)
+[TRACE_BLASTN] stage=purge subject_idx=0 context=0 pass=common_start action=delete purge=false keeper=q256606..257189 s256084..256535 raw_score=220 removed=q256606..256924 s256084..256372 raw_score=215 cut=(257189, 256535)
+[TRACE_BLASTN] stage=purge subject_idx=0 context=0 pass=common_start action=trim_begin purge=false keeper=q256923..257107 s256182..256372 raw_score=196 removed=q256923..257189 s256182..256409 raw_score=173 cut=(257107, 256372)
+[TRACE_BLASTN] stage=purge subject_idx=0 context=0 pass=common_end action=delete purge=false keeper=q256606..257189 s256084..256535 raw_score=220 removed=q257106..257189 s256452..256535 raw_score=126 cut=(256606, 256084)
+[TRACE_BLASTN] stage=purge subject_idx=0 context=0 pass=common_end action=delete purge=false keeper=q0..657101 s0..657101 raw_score=1314202 removed=q2899..657101 s2959..657101 raw_score=1308094 cut=(0, 0)
+[TRACE_BLASTN] stage=purge subject_idx=0 context=0 pass=common_end action=delete purge=false keeper=q0..657101 s0..657101 raw_score=1314202 removed=q320662..657101 s320596..657101 raw_score=669676 cut=(0, 0)
+[TRACE_BLASTN] stage=purge subject_idx=0 context=0 pass=common_end action=delete purge=false keeper=q0..657101 s0..657101 raw_score=1314202 removed=q320596..657101 s320662..657101 raw_score=669676 cut=(0, 0)
+[TRACE_BLASTN] stage=purge subject=NZ_CP006932.1(0) pass=common_endpoint_trim before=11655 after=11586 extra_start=10696
+[TRACE_BLASTN] stage=purge subject=NZ_CP006932.1(0) context=0 pass=reeval q257155..257189 s256375..256409 deleted=false raw_score=38 evalue=8.580511731616e0 bit_score=35.550311406270 identities=28 aln_len=34 identity=82.352941
+[TRACE_BLASTN] stage=purge subject=NZ_CP006932.1(0) pass=post_reeval before=11586 after_reeval=11569 after_delete_purge=11485
+[TRACE_BLASTN] stage=purge subject=NZ_CP006932.1(0) context=0 pass=final_interval_tree q0..657101 s0..657101 raw_score=1314202 contained=false containing_hsp=None min_diag_separation=50
+[TRACE_BLASTN] stage=purge subject=NZ_CP006932.1(0) context=0 pass=final_interval_tree q256209..257221 s256083..257038 raw_score=978 contained=false containing_hsp=None min_diag_separation=50
+[TRACE_BLASTN] stage=purge subject=NZ_CP006932.1(0) context=0 pass=final_interval_tree q256083..257038 s256209..257221 raw_score=978 contained=false containing_hsp=None min_diag_separation=50
+[TRACE_BLASTN] stage=purge subject=NZ_CP006932.1(0) context=0 pass=final_interval_tree q256354..258007 s256084..257713 raw_score=600 contained=false containing_hsp=None min_diag_separation=50
+[TRACE_BLASTN] stage=purge subject=NZ_CP006932.1(0) context=0 pass=final_interval_tree q256084..257713 s256354..258007 raw_score=600 contained=false containing_hsp=None min_diag_separation=50
+[TRACE_BLASTN] stage=purge subject=NZ_CP006932.1(0) context=0 pass=final_interval_tree q256480..257107 s256084..256624 raw_score=340 contained=false containing_hsp=None min_diag_separation=50
+[TRACE_BLASTN] stage=purge subject=NZ_CP006932.1(0) context=0 pass=final_interval_tree q256084..256624 s256480..257107 raw_score=340 contained=false containing_hsp=None min_diag_separation=50
+[TRACE_BLASTN] stage=purge subject=NZ_CP006932.1(0) context=0 pass=final_interval_tree q256606..257189 s256084..256535 raw_score=220 contained=false containing_hsp=None min_diag_separation=50
+[TRACE_BLASTN] stage=purge subject=NZ_CP006932.1(0) context=0 pass=final_interval_tree q256923..257107 s256182..256372 raw_score=196 contained=false containing_hsp=None min_diag_separation=50
+[TRACE_BLASTN] stage=purge subject=NZ_CP006932.1(0) context=0 pass=final_interval_tree q256599..256924 s256056..256372 raw_score=177 contained=false containing_hsp=None min_diag_separation=50
+[TRACE_BLASTN] stage=purge subject=NZ_CP006932.1(0) context=0 pass=final_interval_tree q256923..257221 s256452..256693 raw_score=143 contained=false containing_hsp=None min_diag_separation=50
+[TRACE_BLASTN] stage=purge subject=NZ_CP006932.1(0) context=0 pass=final_interval_tree q257106..257213 s256182..256289 raw_score=94 contained=false containing_hsp=None min_diag_separation=50
+[TRACE_BLASTN] stage=purge subject=NZ_CP006932.1(0) context=0 pass=final_interval_tree q256951..257040 s256084..256173 raw_score=73 contained=false containing_hsp=None min_diag_separation=50
+[TRACE_BLASTN] stage=purge subject=NZ_CP006932.1(0) context=0 pass=final_interval_tree q257134..257221 s256084..256171 raw_score=69 contained=false containing_hsp=None min_diag_separation=50
+[TRACE_BLASTN] stage=purge subject=NZ_CP006932.1(0) context=0 pass=final_interval_tree q257155..257189 s256375..256409 raw_score=38 contained=false containing_hsp=None min_diag_separation=50

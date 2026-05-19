@@ -11,10 +11,27 @@ import re
 LOG_DIR_LOSAT = "./losat_out"
 LOG_DIR_BLAST = "./blast_out"
 OUTPUT_IMAGE = "./plots/execution_time_comparison_all.png"
+LOSAT_THREADS = (
+    os.environ.get("LOSAT_THREADS")
+    or os.environ.get("LOSATP_THREADS")
+    or os.environ.get("LOSAT_BLASTP_THREADS")
+    or "8"
+)
+LOSAT_NATIVE_SINGLE_LABEL = "LOSAT native n1"
+LOSAT_NATIVE_MULTI_LABEL = f"LOSAT native n{LOSAT_THREADS}"
+LOSAT_WASM_SINGLE_LABEL = "LOSAT wasm n1"
+LOSAT_WASM_MULTI_LABEL = f"LOSAT wasm n{LOSAT_THREADS}"
 
 # === Color Settings (Seaborn Deep Palette) ===
 # Explicitly define colors to match other plots
-CUSTOM_PALETTE = {"LOSAT": "#dd8452", "BLAST+": "#4c72b0"}
+CUSTOM_PALETTE = {
+    "BLAST+": "#4c72b0",
+    "LOSAT": "#dd8452",
+    LOSAT_NATIVE_SINGLE_LABEL: "#55a868",
+    LOSAT_NATIVE_MULTI_LABEL: "#c44e52",
+    LOSAT_WASM_SINGLE_LABEL: "#8172b3",
+    LOSAT_WASM_MULTI_LABEL: "#937860",
+}
 
 # === Comparison List (Full Version) ===
 comparisons = [
@@ -244,6 +261,37 @@ comparisons = [
     },
 ]
 
+# NCBI reference: ncbi-blast/c++/src/algo/blast/blastinput/cmdline_flags.cpp:46-94
+# ```c
+# const string kArgNumThreads("num_threads");
+# ```
+def add_thread_suffix(log_name, suffix):
+    if not log_name.endswith(".log"):
+        return f"{log_name}.{suffix}.log"
+    return f"{log_name[:-4]}.{suffix}.log"
+
+
+def strip_thread_suffix(log_name):
+    return re.sub(r"\.n\d+\.log$", ".log", log_name)
+
+
+def normalize_thread_suffix(log_name, suffix):
+    if is_explicit_thread_log(log_name):
+        return re.sub(r"\.n\d+\.log$", f".{suffix}.log", log_name)
+    return add_thread_suffix(log_name, suffix)
+
+
+def add_wasm_suffix(log_name, suffix=None):
+    if not log_name.endswith(".log"):
+        return f"{log_name}.wasm{'.' + suffix if suffix else ''}.log"
+    stem = log_name[:-4]
+    if suffix:
+        return f"{stem}.wasm.{suffix}.log"
+    return f"{stem}.wasm.log"
+
+def is_explicit_thread_log(log_name):
+    return re.search(r"\.n\d+\.log$", log_name) is not None
+
 def parse_time(filepath):
     """Extract execution time (in seconds) from a log file."""
     if not os.path.exists(filepath):
@@ -275,33 +323,50 @@ def main():
     print(f"Checking {len(comparisons)} pairs...")
 
     for item in comparisons:
-        # LOSAT
-        losat_path = os.path.join(LOG_DIR_LOSAT, item['losat_log'])
-        time_losat = parse_time(losat_path)
-        
-        # BLAST
-        blast_path = os.path.join(LOG_DIR_BLAST, item['blast_log'])
-        time_blast = parse_time(blast_path)
+        missing = []
+        threaded_suffix = f"n{LOSAT_THREADS}"
+        candidate_logs = [
+            ("BLAST+", LOG_DIR_BLAST, normalize_thread_suffix(item["blast_log"], threaded_suffix)
+             if is_explicit_thread_log(item["blast_log"]) else item["blast_log"]),
+        ]
 
-        if time_losat is not None and time_blast is not None:
-            data.append({
-                'Task': item['name'],
-                'Mode': item['mode'],
-                'Tool': 'LOSAT',
-                'Time (s)': time_losat
-            })
-            data.append({
-                'Task': item['name'],
-                'Mode': item['mode'],
-                'Tool': 'BLAST+',
-                'Time (s)': time_blast
-            })
+        losat_log = item["losat_log"]
+        if is_explicit_thread_log(losat_log):
+            base_losat_log = strip_thread_suffix(losat_log)
+            candidate_logs.append(
+                (LOSAT_NATIVE_SINGLE_LABEL, LOG_DIR_LOSAT, normalize_thread_suffix(losat_log, "n1"))
+            )
+            candidate_logs.append(
+                (LOSAT_NATIVE_MULTI_LABEL, LOG_DIR_LOSAT, normalize_thread_suffix(losat_log, threaded_suffix))
+            )
+            candidate_logs.append((LOSAT_WASM_SINGLE_LABEL, LOG_DIR_LOSAT, add_wasm_suffix(base_losat_log)))
+            candidate_logs.append(
+                (LOSAT_WASM_MULTI_LABEL, LOG_DIR_LOSAT, add_wasm_suffix(base_losat_log, threaded_suffix))
+            )
         else:
-            # If one of the logs is missing
-            missing = []
-            if time_losat is None: missing.append(f"LOSAT({item['losat_log']})")
-            if time_blast is None: missing.append(f"BLAST({item['blast_log']})")
-            print(f"  [Skip] {item['name']}: Missing logs for {', '.join(missing)}")
+            candidate_logs.append((LOSAT_NATIVE_SINGLE_LABEL, LOG_DIR_LOSAT, losat_log))
+            candidate_logs.append(
+                (LOSAT_NATIVE_MULTI_LABEL, LOG_DIR_LOSAT, add_thread_suffix(losat_log, threaded_suffix))
+            )
+            candidate_logs.append((LOSAT_WASM_SINGLE_LABEL, LOG_DIR_LOSAT, add_wasm_suffix(losat_log)))
+            candidate_logs.append(
+                (LOSAT_WASM_MULTI_LABEL, LOG_DIR_LOSAT, add_wasm_suffix(losat_log, threaded_suffix))
+            )
+
+        for tool, log_dir, log_name in candidate_logs:
+            time_value = parse_time(os.path.join(log_dir, log_name))
+            if time_value is None:
+                missing.append(f"{tool}({log_name})")
+                continue
+            data.append({
+                "Task": item["name"],
+                "Mode": item["mode"],
+                "Tool": tool,
+                "Time (s)": time_value,
+            })
+
+        if missing:
+            print(f"  [Partial] {item['name']}: Missing logs for {', '.join(missing)}")
 
     if not data:
         print("No valid time data found.")
@@ -312,18 +377,23 @@ def main():
     # === Create Plots ===
     sns.set(style="whitegrid")
     
-    # Define custom colors: LOSAT = Orange, BLAST+ = Blue
-    # Using 'tab:blue' and 'tab:orange' to match standard matplotlib/seaborn defaults
-    CUSTOM_PALETTE = {"LOSAT": "#dd8452", "BLAST+": "#4c72b0"}
-
     # Graph settings
     mode_order = ["TBLASTX", "Megablast", "BLASTN", "BLASTP"]
+    tool_order = [
+        "BLAST+",
+        LOSAT_NATIVE_SINGLE_LABEL,
+        LOSAT_NATIVE_MULTI_LABEL,
+        LOSAT_WASM_SINGLE_LABEL,
+        LOSAT_WASM_MULTI_LABEL,
+        "LOSAT",
+    ]
     g = sns.catplot(
         data=df, kind="bar",
         y="Task", x="Time (s)", hue="Tool", col="Mode",
         height=8, aspect=0.8,
         sharex=False, sharey=False,
         palette=CUSTOM_PALETTE, # Apply the custom palette
+        hue_order=[tool for tool in tool_order if tool in df["Tool"].unique()],
         errorbar=None,
         col_wrap=4,
         col_order=[mode for mode in mode_order if mode in df["Mode"].unique()]
@@ -331,7 +401,7 @@ def main():
     
     g.despine(left=True)
     g.set_axis_labels("Execution Time (seconds)", "")
-    g.fig.suptitle("Execution Time Comparison: LOSAT vs BLAST+ (All Tasks)", y=1.02)
+    g.fig.suptitle("Execution Time Comparison: BLAST+ vs LOSAT Native/Wasm Threads", y=1.02)
     
     # Save
     os.makedirs(os.path.dirname(OUTPUT_IMAGE), exist_ok=True)
@@ -339,11 +409,25 @@ def main():
     print(f"\nPlot saved to {OUTPUT_IMAGE}")
     
     # Display Summary Table
-    print("\n--- Summary Table (Ratio < 1.0 means LOSAT is faster) ---")
+    print("\n--- Summary Table ---")
     try:
         summary = df.pivot(index=['Mode', 'Task'], columns='Tool', values='Time (s)')
-        summary['Ratio (LOSAT/BLAST)'] = (summary['LOSAT'] / summary['BLAST+']).round(2)
-        summary['Diff (s)'] = (summary['LOSAT'] - summary['BLAST+']).round(2)
+        if {LOSAT_NATIVE_SINGLE_LABEL, "BLAST+"}.issubset(summary.columns):
+            summary['Ratio (native n1/BLAST)'] = (
+                summary[LOSAT_NATIVE_SINGLE_LABEL] / summary['BLAST+']
+            ).round(2)
+        if {LOSAT_NATIVE_SINGLE_LABEL, LOSAT_NATIVE_MULTI_LABEL}.issubset(summary.columns):
+            summary[f"Speedup (native n1/native n{LOSAT_THREADS})"] = (
+                summary[LOSAT_NATIVE_SINGLE_LABEL] / summary[LOSAT_NATIVE_MULTI_LABEL]
+            ).round(2)
+        if {LOSAT_WASM_SINGLE_LABEL, LOSAT_WASM_MULTI_LABEL}.issubset(summary.columns):
+            summary[f"Speedup (wasm n1/wasm n{LOSAT_THREADS})"] = (
+                summary[LOSAT_WASM_SINGLE_LABEL] / summary[LOSAT_WASM_MULTI_LABEL]
+            ).round(2)
+        if {LOSAT_NATIVE_SINGLE_LABEL, LOSAT_WASM_SINGLE_LABEL}.issubset(summary.columns):
+            summary["Ratio (wasm n1/native n1)"] = (
+                summary[LOSAT_WASM_SINGLE_LABEL] / summary[LOSAT_NATIVE_SINGLE_LABEL]
+            ).round(2)
         print(summary)
     except Exception as e:
         print("Could not generate summary table:", e)

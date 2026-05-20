@@ -247,6 +247,13 @@ mod tests {
             q_idx: 0,
             s_idx: 0,
             raw_score: 20,
+            // NCBI reference: ncbi-blast/c++/include/algo/blast/core/blast_hits.h:125-143
+            // BlastHSP stores query/subject BlastSeg offsets used by HSP comparators.
+            sort_query_offset: 0,
+            sort_query_end: 0,
+            sort_subject_offset: 0,
+            sort_subject_end: 0,
+            has_sort_offsets: false,
             gap_info: None,
             num_positives: 4,
         };
@@ -278,6 +285,13 @@ mod tests {
             q_idx: 0,
             s_idx: 0,
             raw_score: 20,
+            // NCBI reference: ncbi-blast/c++/include/algo/blast/core/blast_hits.h:125-143
+            // BlastHSP stores query/subject BlastSeg offsets used by HSP comparators.
+            sort_query_offset: 0,
+            sort_query_end: 0,
+            sort_subject_offset: 0,
+            sort_subject_end: 0,
+            has_sort_offsets: false,
             gap_info: Some(vec![
                 GapEditOp::Sub(2),
                 GapEditOp::Del(1),

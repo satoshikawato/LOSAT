@@ -2529,6 +2529,18 @@ pub(crate) fn traceback_preliminary_blastp_hsp(
         q_idx: preliminary_hsp.q_idx,
         s_idx: preliminary_hsp.s_idx,
         raw_score: aligned.score,
+        // NCBI reference: ncbi-blast/c++/include/algo/blast/core/blast_hits.h:125-143
+        // ```c
+        // typedef struct BlastHSP {
+        //    BlastSeg query;
+        //    BlastSeg subject;
+        // } BlastHSP;
+        // ```
+        sort_query_offset: 0,
+        sort_query_end: 0,
+        sort_subject_offset: 0,
+        sort_subject_end: 0,
+        has_sort_offsets: false,
         gap_info: Some(aligned.edit_script),
         num_positives: aligned.num_positives,
     }
@@ -3165,6 +3177,13 @@ mod tests {
             q_idx: 0,
             s_idx: 0,
             raw_score: 0,
+            // NCBI reference: ncbi-blast/c++/include/algo/blast/core/blast_hits.h:125-143
+            // BlastHSP stores query/subject BlastSeg offsets used by HSP comparators.
+            sort_query_offset: 0,
+            sort_query_end: 0,
+            sort_subject_offset: 0,
+            sort_subject_end: 0,
+            has_sort_offsets: false,
             gap_info: Some(vec![GapEditOp::Sub(4)]),
             num_positives: 0,
         };
@@ -3209,6 +3228,13 @@ mod tests {
             q_idx: 0,
             s_idx: 0,
             raw_score: 0,
+            // NCBI reference: ncbi-blast/c++/include/algo/blast/core/blast_hits.h:125-143
+            // BlastHSP stores query/subject BlastSeg offsets used by HSP comparators.
+            sort_query_offset: 0,
+            sort_query_end: 0,
+            sort_subject_offset: 0,
+            sort_subject_end: 0,
+            has_sort_offsets: false,
             gap_info: Some(vec![GapEditOp::Sub(4)]),
             num_positives: 0,
         };
@@ -3258,6 +3284,13 @@ mod tests {
             q_idx: 0,
             s_idx: 0,
             raw_score: 0,
+            // NCBI reference: ncbi-blast/c++/include/algo/blast/core/blast_hits.h:125-143
+            // BlastHSP stores query/subject BlastSeg offsets used by HSP comparators.
+            sort_query_offset: 0,
+            sort_query_end: 0,
+            sort_subject_offset: 0,
+            sort_subject_end: 0,
+            has_sort_offsets: false,
             gap_info: Some(vec![GapEditOp::Ins(1), GapEditOp::Sub(2)]),
             num_positives: 0,
         };
@@ -3305,6 +3338,13 @@ mod tests {
             q_idx: 0,
             s_idx: 0,
             raw_score: 0,
+            // NCBI reference: ncbi-blast/c++/include/algo/blast/core/blast_hits.h:125-143
+            // BlastHSP stores query/subject BlastSeg offsets used by HSP comparators.
+            sort_query_offset: 0,
+            sort_query_end: 0,
+            sort_subject_offset: 0,
+            sort_subject_end: 0,
+            has_sort_offsets: false,
             gap_info: Some(vec![GapEditOp::Sub(1)]),
             num_positives: 0,
         };

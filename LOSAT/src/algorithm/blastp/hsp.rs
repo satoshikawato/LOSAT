@@ -79,6 +79,7 @@ impl BlastpHsp {
             raw_score,
             gap_info,
             num_positives,
+            ..
         } = hit;
         Self {
             identity,
@@ -139,6 +140,18 @@ impl BlastpHsp {
             q_idx: self.q_idx,
             s_idx: self.s_idx,
             raw_score: self.raw_score,
+            // NCBI reference: ncbi-blast/c++/include/algo/blast/core/blast_hits.h:125-143
+            // ```c
+            // typedef struct BlastHSP {
+            //    BlastSeg query;
+            //    BlastSeg subject;
+            // } BlastHSP;
+            // ```
+            sort_query_offset: 0,
+            sort_query_end: 0,
+            sort_subject_offset: 0,
+            sort_subject_end: 0,
+            has_sort_offsets: false,
             gap_info: self.gap_info,
             num_positives: self.num_positives,
         }
@@ -1805,6 +1818,13 @@ mod tests {
             q_idx: 0,
             s_idx: 0,
             raw_score: score,
+            // NCBI reference: ncbi-blast/c++/include/algo/blast/core/blast_hits.h:125-143
+            // BlastHSP stores query/subject BlastSeg offsets used by HSP comparators.
+            sort_query_offset: 0,
+            sort_query_end: 0,
+            sort_subject_offset: 0,
+            sort_subject_end: 0,
+            has_sort_offsets: false,
             gap_info: None,
             num_positives: 0,
         }

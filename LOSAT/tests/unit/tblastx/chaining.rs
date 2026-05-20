@@ -52,6 +52,13 @@ fn create_test_hit(
         q_idx,
         s_idx,
         raw_score: ((bit_score * 0.693 + (-0.041_f64).ln()) / 0.267) as i32,
+        // NCBI reference: ncbi-blast/c++/include/algo/blast/core/blast_hits.h:125-143
+        // BlastHSP stores query/subject BlastSeg offsets used by HSP comparators.
+        sort_query_offset: 0,
+        sort_query_end: 0,
+        sort_subject_offset: 0,
+        sort_subject_end: 0,
+        has_sort_offsets: false,
         gap_info: None,
         num_positives: q_end - q_start,
     }

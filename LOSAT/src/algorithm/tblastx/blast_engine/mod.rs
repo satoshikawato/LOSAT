@@ -55,7 +55,17 @@ pub(crate) use std::sync::atomic::{AtomicI32, AtomicU64, AtomicUsize, Ordering a
 pub(crate) use std::sync::mpsc::channel;
 pub(crate) use std::time::{Duration, Instant};
 
-pub(crate) use crate::common::{write_output_ncbi_order, write_output_ncbi_order_to_writer, Hit};
+// NCBI reference: /mnt/c/Users/genom/GitHub/ncbi-blast/c++/src/algo/blast/api/blast_seqalign.cpp:1574-1577
+// ```c
+// // Sort HSPs with e-values as first priority and scores as
+// // tie-breakers, since that is the order we want to see them in
+// // in Seq-aligns.
+// Blast_HSPListSortByEvalue(hsp_list);
+// ```
+pub(crate) use crate::common::{
+    write_output_ncbi_order_evalue_hsp_order, write_output_ncbi_order_evalue_hsp_order_to_writer,
+    Hit,
+};
 pub(crate) use crate::config::ScoringMatrix;
 pub(crate) use crate::stats::{lookup_protein_params_ungapped, KarlinParams};
 pub(crate) use crate::utils::genetic_code::GeneticCode;

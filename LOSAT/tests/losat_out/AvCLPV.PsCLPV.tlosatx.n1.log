@@ -35,6 +35,6 @@
 [DEBUG CUTOFF_CALC] log(K*searchsp/E)=7.068385e2, score_before_ceil=2.225520e3
 [DEBUG CUTOFF_CALC] final_score=2226 (ceil)
 
-real	4m52.910s
-user	10m38.109s
-sys	0m0.092s
+real	5m13.148s
+user	11m37.897s
+sys	0m0.109s

@@ -7,7 +7,7 @@
 use super::chaining::UngappedHit;
 use crate::common::{score_compare_hsps, Hit};
 use std::cmp::Ordering;
-use std::collections::{HashMap, HashSet};
+use std::collections::HashMap;
 use std::fs::{create_dir_all, metadata, OpenOptions};
 use std::io::Write;
 use std::path::PathBuf;
@@ -184,19 +184,38 @@ fn evalue_comp(evalue1: f64, evalue2: f64) -> Ordering {
     }
 }
 
+// NCBI reference: /mnt/c/Users/genom/GitHub/ncbi-blast/c++/src/algo/blast/core/blast_hits.c:1415-1434
+// ```c
+// static int
+// s_EvalueCompareHSPs(const void* v1, const void* v2)
+// {
+//    if ((retval = s_EvalueComp(h1->evalue, h2->evalue)) != 0)
+//       return retval;
+//    return ScoreCompareHSPs(v1, v2);
+// }
+// ```
+fn evalue_compare_final_pairs(a: &(Hit, UngappedHit), b: &(Hit, UngappedHit)) -> Ordering {
+    match evalue_comp(a.0.e_value, b.0.e_value) {
+        Ordering::Equal => score_compare_hsps(&a.0, &b.0),
+        ord => ord,
+    }
+}
+
 // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_hits.c:3194-3205
 // ```c
 // Blast_HSPResultsSortByEvalue(results);
 // s_Heapify((char*)hit_list->hsplist_array, ...,
 //          sizeof(BlastHSPList*), s_EvalueCompareHSPLists);
 // ```
-// NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_hits.c:1330-1377
+// NCBI reference: ncbi-blast/c++/src/algo/blast/api/blast_seqalign.cpp:1574-1577
 // ```c
-// qsort(hsp_list->hsp_array, hsp_list->hspcnt, sizeof(BlastHSP*),
-//       ScoreCompareHSPs);
+// // Sort HSPs with e-values as first priority and scores as
+// // tie-breakers, since that is the order we want to see them in
+// // in Seq-aligns.
+// Blast_HSPListSortByEvalue(hsp_list);
 // ```
-// Replays the same final ordering used by common.rs while dumping the paired
-// internal TBLASTX HSP rows instead of formatted nucleotide coordinates.
+// Replays the same final TBLASTX ordering used by common.rs while dumping the
+// paired internal HSP rows instead of formatted nucleotide coordinates.
 pub(crate) fn dump_final_output_order(stage: &str, pairs: &[(Hit, UngappedHit)]) {
     if !enabled() {
         return;
@@ -207,41 +226,72 @@ pub(crate) fn dump_final_output_order(stage: &str, pairs: &[(Hit, UngappedHit)])
     }
 
     let mut query_order = Vec::new();
-    let mut seen_queries = HashSet::new();
     let mut query_subject_hits: HashMap<(u32, u32), Vec<(Hit, UngappedHit)>> = HashMap::new();
 
     for (hit, internal) in pairs.iter().cloned() {
-        if seen_queries.insert(hit.q_idx) {
-            query_order.push(hit.q_idx);
-        }
+        query_order.push(hit.q_idx);
         query_subject_hits
             .entry((hit.q_idx, hit.s_idx))
             .or_default()
             .push((hit, internal));
     }
+    // NCBI reference: /mnt/c/Users/genom/GitHub/ncbi-blast/c++/src/algo/blast/core/blast_hits.c:3391-3397
+    // ```c
+    // for (index = 0; index < results->num_queries; ++index) {
+    //    hit_list = results->hitlist_array[index];
+    //    if (hit_list != NULL
+    //            && hit_list->hsplist_count > 1
+    //            && hit_list->hsplist_array != NULL) {
+    //       qsort(hit_list->hsplist_array, hit_list->hsplist_count,
+    // ```
+    query_order.sort_unstable();
+    query_order.dedup();
 
     let mut sorted_internal = Vec::with_capacity(pairs.len());
     for q_idx in query_order {
-        let subject_indices: Vec<u32> = query_subject_hits
+        // NCBI reference: /mnt/c/Users/genom/GitHub/ncbi-blast/c++/src/algo/blast/core/blast_hits.c:3331-3337
+        // ```c
+        // if (hit_list && hit_list->hsplist_count > 1) {
+        //    qsort(hit_list->hsplist_array, hit_list->hsplist_count,
+        //             sizeof(BlastHSPList*), s_EvalueCompareHSPLists);
+        // }
+        // s_BlastHitListPurge(hit_list);
+        // ```
+        let mut subject_indices: Vec<u32> = query_subject_hits
             .keys()
             .filter(|(query_idx, _)| *query_idx == q_idx)
             .map(|(_, subject_idx)| *subject_idx)
-            .collect::<HashSet<_>>()
-            .into_iter()
             .collect();
+        subject_indices.sort_unstable();
+        subject_indices.dedup();
 
         let mut groups: Vec<FinalSubjectGroup> = subject_indices
             .into_iter()
             .filter_map(|s_idx| {
                 let key = (q_idx, s_idx);
                 query_subject_hits.remove(&key).map(|mut hits| {
-                    hits.sort_by(|a, b| score_compare_hsps(&a.0, &b.0));
+                    // NCBI reference: /mnt/c/Users/genom/GitHub/ncbi-blast/c++/src/algo/blast/core/blast_hits.c:1437-1455
+                    // ```c
+                    // void Blast_HSPListSortByEvalue(BlastHSPList* hsp_list)
+                    // {
+                    //    qsort(hsp_list->hsp_array, hsp_list->hspcnt, sizeof(BlastHSP*),
+                    //          s_EvalueCompareHSPs);
+                    // }
+                    // ```
+                    hits.sort_by(evalue_compare_final_pairs);
                     let best_evalue = hits
                         .iter()
                         .map(|(hit, _)| hit.e_value)
                         .min_by(|a, b| a.partial_cmp(b).unwrap_or(Ordering::Equal))
                         .unwrap_or(f64::MAX);
-                    let best_score = hits.iter().map(|(hit, _)| hit.raw_score).max().unwrap_or(0);
+                    // NCBI reference: /mnt/c/Users/genom/GitHub/ncbi-blast/c++/src/algo/blast/core/blast_hits.c:3098-3104
+                    // ```c
+                    // if ((retval = s_EvalueComp(h1->best_evalue, h2->best_evalue)) != 0)
+                    //    return retval;
+                    // if (h1->hsp_array[0]->score > h2->hsp_array[0]->score) return -1;
+                    // if (h1->hsp_array[0]->score < h2->hsp_array[0]->score) return 1;
+                    // ```
+                    let best_score = hits.first().map(|(hit, _)| hit.raw_score).unwrap_or(0);
                     FinalSubjectGroup {
                         s_idx,
                         best_evalue,

@@ -2,6 +2,7 @@
 # coding: utf-8
 
 import os
+import re
 
 import matplotlib.pyplot as plt
 import pandas as pd
@@ -11,9 +12,27 @@ import seaborn as sns
 # === Configuration: Output Directory ===
 PLOT_DIR = "./plots"
 os.makedirs(PLOT_DIR, exist_ok=True)
+# NCBI reference: ncbi-blast/c++/src/algo/blast/blastinput/cmdline_flags.cpp:75
+# ```c
+# const string kArgNumThreads("num_threads");
+# ```
+LOSAT_THREADS = (
+    os.environ.get("LOSAT_THREADS")
+    or os.environ.get("LOSATP_THREADS")
+    or os.environ.get("LOSAT_BLASTP_THREADS")
+    or "8"
+)
+LOSAT_WASM_SINGLE_LABEL = "LOSAT wasm n1"
+LOSAT_WASM_MULTI_LABEL = f"LOSAT wasm n{LOSAT_THREADS}"
 
 # === Color Settings (Seaborn Deep Palette) ===
-CUSTOM_PALETTE = {"LOSAT": "#dd8452", "BLAST+": "#4c72b0"}
+CUSTOM_PALETTE = {
+    "LOSAT": "#dd8452",
+    "BLAST+": "#4c72b0",
+    LOSAT_WASM_SINGLE_LABEL: "#8172b3",
+    LOSAT_WASM_MULTI_LABEL: "#937860",
+}
+HUE_ORDER = ["BLAST+", "LOSAT", LOSAT_WASM_SINGLE_LABEL, LOSAT_WASM_MULTI_LABEL]
 
 # === Column Definitions (outfmt 7 / 6) ===
 COLUMNS = [
@@ -50,6 +69,29 @@ def load_blast(filepath, tool_name):
         return None
 
 
+def strip_thread_suffix(filepath):
+    return re.sub(r"\.n\d+\.out$", ".out", filepath)
+
+
+def add_wasm_suffix(filepath, suffix=None):
+    if not filepath.endswith(".out"):
+        return f"{filepath}.wasm{'.' + suffix if suffix else ''}.out"
+    stem = filepath[:-4]
+    if suffix:
+        return f"{stem}.wasm.{suffix}.out"
+    return f"{stem}.wasm.out"
+
+
+def losat_wasm_outputs(losat_path):
+    threaded_suffix = f"n{LOSAT_THREADS}"
+    base_path = strip_thread_suffix(losat_path)
+
+    return [
+        (LOSAT_WASM_SINGLE_LABEL, add_wasm_suffix(base_path)),
+        (LOSAT_WASM_MULTI_LABEL, add_wasm_suffix(base_path, threaded_suffix)),
+    ]
+
+
 def generate_comparison_plot(config):
     """Generate and save a comparison plot for a single pair."""
     name = config["name"]
@@ -61,12 +103,21 @@ def generate_comparison_plot(config):
 
     df_ncbi = load_blast(ncbi_path, "BLAST+")
     df_losat = load_blast(losat_path, "LOSAT")
+    optional_frames = []
+    for tool_name, wasm_path in losat_wasm_outputs(losat_path):
+        if not os.path.exists(wasm_path):
+            print(f"  [Optional] Missing {tool_name}: {wasm_path}")
+            continue
+        df_wasm = load_blast(wasm_path, tool_name)
+        if df_wasm is not None:
+            optional_frames.append(df_wasm)
 
     if df_ncbi is None or df_losat is None:
         print("  -> Skipped due to missing files.")
         return
 
-    df_merged = pd.concat([df_ncbi, df_losat])
+    df_merged = pd.concat([df_ncbi, df_losat, *optional_frames])
+    hue_order = [tool for tool in HUE_ORDER if tool in df_merged["Tool"].unique()]
 
     if df_merged.empty:
         print("  -> Skipped (No data rows found).")
@@ -89,6 +140,7 @@ def generate_comparison_plot(config):
             log_scale=True,
             ax=axes[0, 0],
             palette=CUSTOM_PALETTE,
+            hue_order=hue_order,
         )
         axes[0, 0].set_title("Accumulated Length vs Alignment Length")
         axes[0, 0].set_xlabel("Alignment Length (bp/aa)")
@@ -108,6 +160,7 @@ def generate_comparison_plot(config):
             common_norm=False,
             ax=axes[0, 1],
             palette=CUSTOM_PALETTE,
+            hue_order=hue_order,
         )
         axes[0, 1].set_title("Accumulated Length vs Identity")
         axes[0, 1].set_xlabel("Identity (%)")
@@ -125,6 +178,8 @@ def generate_comparison_plot(config):
             style="Tool",
             ax=axes[1, 0],
             palette=CUSTOM_PALETTE,
+            hue_order=hue_order,
+            style_order=hue_order,
         )
         axes[1, 0].set_xscale("log")
         axes[1, 0].set_title("Alignment Length vs Identity")
@@ -142,6 +197,7 @@ def generate_comparison_plot(config):
             alpha=0.5,
             ax=axes[1, 1],
             palette=CUSTOM_PALETTE,
+            hue_order=hue_order,
         )
         axes[1, 1].set_xscale("log")
         axes[1, 1].set_yscale("log")

@@ -31,9 +31,42 @@ pub(crate) fn qsort_ungapped_hits_by(hits: &mut [UngappedHit], compare: Ungapped
 
     #[cfg(target_arch = "wasm32")]
     {
-        // Wasm has no C qsort. Keep the comparator order; native builds are the
-        // NCBI BLAST+ parity target for qsort tie behavior.
-        hits.sort_by(compare);
+        // NCBI reference: /mnt/c/Users/genom/GitHub/ncbi-blast/c++/src/algo/blast/core/blast_hits.c:1379-1381
+        // ```c
+        // qsort(hsp_list->hsp_array, hsp_list->hspcnt, sizeof(BlastHSP*),
+        //       ScoreCompareHSPs);
+        // ```
+        // NCBI reference: /mnt/c/Users/genom/GitHub/ncbi-blast/c++/src/algo/blast/core/link_hsps.c:990-994
+        // ```c
+        // qsort(link_hsp_array,total_number_of_hsps,sizeof(LinkHSPStruct*),
+        //       s_RevCompareHSPsTransl);
+        // qsort(link_hsp_array, total_number_of_hsps,sizeof(LinkHSPStruct*),
+        //       s_FwdCompareHSPsTransl);
+        // ```
+        // Wasm has no C qsort. Keep the native wrapper's index-array replay
+        // shape so comparator-equal entries are carried forward in the current
+        // HSPList order without adding LOSAT-only tie-break fields.
+        index_replay_sort_ungapped_hits_by(hits, compare);
+    }
+}
+
+#[cfg(any(target_arch = "wasm32", test))]
+fn index_replay_sort_ungapped_hits_by(hits: &mut [UngappedHit], compare: UngappedHitCompare) {
+    let original = hits.to_vec();
+    let mut indices: Vec<usize> = (0..original.len()).collect();
+
+    // NCBI reference: /mnt/c/Users/genom/GitHub/ncbi-blast/c++/src/algo/blast/core/link_hsps.c:476-486
+    // ```c
+    // for (index = 0; index < total_number_of_hsps; ++index) {
+    //    link_hsp_array[index]->hsp = hsp_array[index];
+    // }
+    // qsort(link_hsp_array,total_number_of_hsps,sizeof(LinkHSPStruct*),
+    //       s_RevCompareHSPsTbx);
+    // ```
+    indices.sort_by(|&lhs_index, &rhs_index| compare(&original[lhs_index], &original[rhs_index]));
+
+    for (dst, src) in indices.into_iter().enumerate() {
+        hits[dst] = original[src].clone();
     }
 }
 
@@ -128,3 +161,54 @@ mod native {
 
 #[cfg(not(target_arch = "wasm32"))]
 use native::native_qsort_ungapped_hits_by;
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn hit(raw_score: i32, order: usize) -> UngappedHit {
+        UngappedHit {
+            q_idx: 0,
+            s_idx: 0,
+            ctx_idx: 0,
+            s_f_idx: 0,
+            q_frame: 1,
+            s_frame: 1,
+            q_aa_start: 0,
+            q_aa_end: 10,
+            s_aa_start: 0,
+            s_aa_end: 10,
+            q_seed_off: 0,
+            s_seed_off: 0,
+            q_orig_len: 10,
+            s_orig_len: 10,
+            raw_score,
+            e_value: 0.0,
+            num_ident: 0,
+            hsp_list_order: order,
+            ordering_method: 0,
+            linked_set: false,
+            start_of_chain: false,
+            link_id: order,
+            chain_next_link_id: None,
+        }
+    }
+
+    #[test]
+    fn index_replay_sort_uses_ncbi_comparator_without_extra_ties() {
+        // NCBI reference: /mnt/c/Users/genom/GitHub/ncbi-blast/c++/src/algo/blast/core/blast_hits.c:1347-1355
+        // ```c
+        // if (0 == (result = BLAST_CMP(hsp2->score,          hsp1->score)) &&
+        //     0 == (result = BLAST_CMP(hsp1->subject.offset, hsp2->subject.offset)) &&
+        //     0 == (result = BLAST_CMP(hsp2->subject.end,    hsp1->subject.end)) &&
+        //     0 == (result = BLAST_CMP(hsp1->query  .offset, hsp2->query  .offset))) {
+        //     result = BLAST_CMP(hsp2->query.end, hsp1->query.end);
+        // }
+        // ```
+        let mut hits = vec![hit(20, 0), hit(30, 1), hit(30, 2), hit(10, 3)];
+        index_replay_sort_ungapped_hits_by(&mut hits, |a, b| b.raw_score.cmp(&a.raw_score));
+
+        let orders: Vec<usize> = hits.iter().map(|h| h.hsp_list_order).collect();
+        assert_eq!(orders, vec![1, 2, 0, 3]);
+    }
+}

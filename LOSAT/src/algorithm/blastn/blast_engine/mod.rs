@@ -408,6 +408,18 @@ pub fn filter_hsps(
             q_idx: hit.q_idx,
             s_idx: hit.s_idx,
             raw_score: hit.raw_score,
+            // NCBI reference: ncbi-blast/c++/include/algo/blast/core/blast_hits.h:125-143
+            // ```c
+            // typedef struct BlastHSP {
+            //    BlastSeg query;
+            //    BlastSeg subject;
+            // } BlastHSP;
+            // ```
+            sort_query_offset: 0,
+            sort_query_end: 0,
+            sort_subject_offset: 0,
+            sort_subject_end: 0,
+            has_sort_offsets: false,
             gap_info: hit.gap_info,
             num_positives: hit.num_positives,
         });

@@ -8034,67 +8034,62 @@ fn run_internal(args: BlastnArgs, mut in_memory: Option<BlastnInMemoryRun<'_>>) 
                 // Select gapped-start seed within the ungapped HSP.
                 // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_gapalign.c:4012-4046
                 let cutoff_score = cutoff_scores[uh.query_idx as usize];
-                let (
-                    prelim_qs,
-                    prelim_qe,
-                    prelim_ss,
-                    prelim_se,
-                    prelim_score,
-                    seed_qs,
-                    seed_ss,
-                ) = if use_dp {
-                    // DP seed selection (blastn)
-                    // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_gapalign.c:4033-4045
-                    // ```c
-                    // if (s_end >= (Int4)init_hsp->offsets.qs_offsets.s_off + 8) {
-                    //    init_hsp->offsets.qs_offsets.s_off += 3;
-                    //    init_hsp->offsets.qs_offsets.q_off += 3;
-                    // }
-                    // status = s_BlastDynProgNtGappedAlignment(...);
-                    // ```
-                    // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_gapalign.c:4071-4076
-                    // ```c
-                    // status = Blast_HSPInit(...,
-                    //        init_hsp->offsets.qs_offsets.q_off,
-                    //        init_hsp->offsets.qs_offsets.s_off, ...);
-                    // ```
-                    let mut seed_qs = uh.seed_q_off;
-                    let mut seed_ss = uh.seed_s_off;
-                    if uh.se >= uh.seed_s_off.saturating_add(8) {
-                        seed_qs = seed_qs.saturating_add(3);
-                        seed_ss = seed_ss.saturating_add(3);
-                    }
-
-                    // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_gapalign.c:2959-2963 (x_dropoff limited by ungapped score)
-                    let x_drop_score_only = x_drop_gapped.min(uh.score);
-                    // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_gapalign.c:2973-3003
-                    // ```c
-                    // offset_adjustment = COMPRESSION_RATIO -
-                    //      (init_hsp->offsets.qs_offsets.s_off % COMPRESSION_RATIO);
-                    // q_length = init_hsp->offsets.qs_offsets.q_off + offset_adjustment;
-                    // s_length = init_hsp->offsets.qs_offsets.s_off + offset_adjustment;
-                    // score_left = s_BlastAlignPackedNucl(query, subject, q_length, s_length, ...);
-                    // score_right = s_BlastAlignPackedNucl(query+q_length-1,
-                    //    subject+(s_length+3)/COMPRESSION_RATIO - 1, ...);
-                    // ```
-                    if blastn_trace_enabled
-                        && blastn_trace::should_trace_seed(
-                            "prelim",
-                            uh.context_idx,
-                            s_idx,
-                            s_id,
-                            seed_qs,
-                            seed_ss.saturating_add(chunk.offset),
-                        )
-                    {
-                        let offset_adjustment = COMPRESSION_RATIO - (seed_ss % COMPRESSION_RATIO);
-                        let mut score_q_anchor = seed_qs.saturating_add(offset_adjustment);
-                        let mut score_s_anchor = seed_ss.saturating_add(offset_adjustment);
-                        if score_q_anchor > q_seq_blastna.len() || score_s_anchor > subject_len {
-                            score_q_anchor = score_q_anchor.saturating_sub(COMPRESSION_RATIO);
-                            score_s_anchor = score_s_anchor.saturating_sub(COMPRESSION_RATIO);
+                let (prelim_qs, prelim_qe, prelim_ss, prelim_se, prelim_score, seed_qs, seed_ss) =
+                    if use_dp {
+                        // DP seed selection (blastn)
+                        // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_gapalign.c:4033-4045
+                        // ```c
+                        // if (s_end >= (Int4)init_hsp->offsets.qs_offsets.s_off + 8) {
+                        //    init_hsp->offsets.qs_offsets.s_off += 3;
+                        //    init_hsp->offsets.qs_offsets.q_off += 3;
+                        // }
+                        // status = s_BlastDynProgNtGappedAlignment(...);
+                        // ```
+                        // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_gapalign.c:4071-4076
+                        // ```c
+                        // status = Blast_HSPInit(...,
+                        //        init_hsp->offsets.qs_offsets.q_off,
+                        //        init_hsp->offsets.qs_offsets.s_off, ...);
+                        // ```
+                        let mut seed_qs = uh.seed_q_off;
+                        let mut seed_ss = uh.seed_s_off;
+                        if uh.se >= uh.seed_s_off.saturating_add(8) {
+                            seed_qs = seed_qs.saturating_add(3);
+                            seed_ss = seed_ss.saturating_add(3);
                         }
-                        blastn_trace::log(
+
+                        // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_gapalign.c:2959-2963 (x_dropoff limited by ungapped score)
+                        let x_drop_score_only = x_drop_gapped.min(uh.score);
+                        // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_gapalign.c:2973-3003
+                        // ```c
+                        // offset_adjustment = COMPRESSION_RATIO -
+                        //      (init_hsp->offsets.qs_offsets.s_off % COMPRESSION_RATIO);
+                        // q_length = init_hsp->offsets.qs_offsets.q_off + offset_adjustment;
+                        // s_length = init_hsp->offsets.qs_offsets.s_off + offset_adjustment;
+                        // score_left = s_BlastAlignPackedNucl(query, subject, q_length, s_length, ...);
+                        // score_right = s_BlastAlignPackedNucl(query+q_length-1,
+                        //    subject+(s_length+3)/COMPRESSION_RATIO - 1, ...);
+                        // ```
+                        if blastn_trace_enabled
+                            && blastn_trace::should_trace_seed(
+                                "prelim",
+                                uh.context_idx,
+                                s_idx,
+                                s_id,
+                                seed_qs,
+                                seed_ss.saturating_add(chunk.offset),
+                            )
+                        {
+                            let offset_adjustment =
+                                COMPRESSION_RATIO - (seed_ss % COMPRESSION_RATIO);
+                            let mut score_q_anchor = seed_qs.saturating_add(offset_adjustment);
+                            let mut score_s_anchor = seed_ss.saturating_add(offset_adjustment);
+                            if score_q_anchor > q_seq_blastna.len() || score_s_anchor > subject_len
+                            {
+                                score_q_anchor = score_q_anchor.saturating_sub(COMPRESSION_RATIO);
+                                score_s_anchor = score_s_anchor.saturating_sub(COMPRESSION_RATIO);
+                            }
+                            blastn_trace::log(
                                 "prelim",
                                 format!(
                                     "subject={}({}) context={} score_only_seed=({}, {}) local_seed_s={} offset_adjustment={} score_anchor=({}, {}) global_score_anchor_s={} x_drop_score_only={} ungapped_score={}",
@@ -8112,57 +8107,57 @@ fn run_internal(args: BlastnArgs, mut in_memory: Option<BlastnInMemoryRun<'_>>) 
                                     uh.score
                                 ),
                             );
-                    }
+                        }
 
-                    // Preliminary DP gapped extension (score-only)
-                    // NCBI reference: ncbi-blast/c++/src/algo/blast/api/blast_nucl_options.cpp:176-183
-                    let (p_qs, p_qe, p_ss, p_se, p_score, _, _, _, _, _) =
-                        extend_gapped_heuristic_with_scratch(
+                        // Preliminary DP gapped extension (score-only)
+                        // NCBI reference: ncbi-blast/c++/src/algo/blast/api/blast_nucl_options.cpp:176-183
+                        let (p_qs, p_qe, p_ss, p_se, p_score, _, _, _, _, _) =
+                            extend_gapped_heuristic_with_scratch(
+                                q_seq_blastna,
+                                s_seq_score,
+                                subject_len,
+                                seed_qs,
+                                seed_ss,
+                                1,
+                                reward,
+                                penalty,
+                                &score_matrix,
+                                gap_open,
+                                gap_extend,
+                                x_drop_score_only,
+                                gap_scratch,
+                                true,
+                            );
+                        (p_qs, p_qe, p_ss, p_se, p_score, seed_qs, seed_ss)
+                    } else {
+                        // Greedy seed selection (megablast)
+                        // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_gapalign.c:4012-4017
+                        let ungapped_len = uh.qe.saturating_sub(uh.qs);
+                        let seed_qs = uh.qs + ungapped_len / 2;
+                        let seed_ss = uh.ss + ungapped_len / 2;
+
+                        let prelim = match greedy_gapped_alignment_score_only(
                             q_seq_blastna,
                             s_seq_score,
                             subject_len,
                             seed_qs,
                             seed_ss,
-                            1,
                             reward,
                             penalty,
-                            &score_matrix,
                             gap_open,
                             gap_extend,
-                            x_drop_score_only,
-                            gap_scratch,
-                            true,
-                        );
-                    (p_qs, p_qe, p_ss, p_se, p_score, seed_qs, seed_ss)
-                } else {
-                    // Greedy seed selection (megablast)
-                    // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_gapalign.c:4012-4017
-                    let ungapped_len = uh.qe.saturating_sub(uh.qs);
-                    let seed_qs = uh.qs + ungapped_len / 2;
-                    let seed_ss = uh.ss + ungapped_len / 2;
+                            x_drop_gapped,
+                            greedy_align_scratch,
+                        ) {
+                            Some(value) => value,
+                            None => {
+                                continue;
+                            }
+                        };
 
-                    let prelim = match greedy_gapped_alignment_score_only(
-                        q_seq_blastna,
-                        s_seq_score,
-                        subject_len,
-                        seed_qs,
-                        seed_ss,
-                        reward,
-                        penalty,
-                        gap_open,
-                        gap_extend,
-                        x_drop_gapped,
-                        greedy_align_scratch,
-                    ) {
-                        Some(value) => value,
-                        None => {
-                            continue;
-                        }
+                        let (p_qs, p_qe, p_ss, p_se, p_score, seed_qs, seed_ss) = prelim;
+                        (p_qs, p_qe, p_ss, p_se, p_score, seed_qs, seed_ss)
                     };
-
-                    let (p_qs, p_qe, p_ss, p_se, p_score, seed_qs, seed_ss) = prelim;
-                    (p_qs, p_qe, p_ss, p_se, p_score, seed_qs, seed_ss)
-                };
 
                 dbg_gapped_calls += 1;
                 // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_gapalign.c:4058-4091

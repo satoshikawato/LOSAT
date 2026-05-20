@@ -981,9 +981,19 @@ fn run_internal(args: TblastxArgs, mut in_memory: Option<TblastxInMemoryRun<'_>>
                 all.extend(h);
             }
             all.retain(|h| h.e_value <= evalue_threshold);
-            // NCBI-style output ordering: query (input order) → subject (best_evalue/score/oid) → HSP (score/coords)
-            // Reference: BLAST_LinkHsps() + s_EvalueCompareHSPLists() + ScoreCompareHSPs()
-            write_output_ncbi_order(all, out_path.as_ref(), &query_ids_out, &subject_ids_out)?;
+            // NCBI reference: /mnt/c/Users/genom/GitHub/ncbi-blast/c++/src/algo/blast/api/blast_seqalign.cpp:1574-1577
+            // ```c
+            // // Sort HSPs with e-values as first priority and scores as
+            // // tie-breakers, since that is the order we want to see them in
+            // // in Seq-aligns.
+            // Blast_HSPListSortByEvalue(hsp_list);
+            // ```
+            write_output_ncbi_order_evalue_hsp_order(
+                all,
+                out_path.as_ref(),
+                &query_ids_out,
+                &subject_ids_out,
+            )?;
             Ok(())
         }))
     } else {
@@ -2555,6 +2565,35 @@ fn run_internal(args: TblastxArgs, mut in_memory: Option<TblastxInMemoryRun<'_>>
                     q_idx: ctx.q_idx,
                     s_idx: h.s_idx,
                     raw_score: h.raw_score,
+                    // NCBI reference: /mnt/c/Users/genom/GitHub/ncbi-blast/c++/src/algo/blast/core/blast_gapalign.c:4754-4767
+                    // ```c
+                    // s_AdjustInitialHSPOffsets(init_hsp,
+                    //                           query_info->contexts[context].query_offset);
+                    // Blast_HSPInit(ungapped_data->q_start, ...,
+                    //               ungapped_data->s_start, ...,
+                    //               context, query_info->contexts[context].frame,
+                    //               subject->frame, ungapped_data->score, NULL, &new_hsp);
+                    // ```
+                    // NCBI reference: /mnt/c/Users/genom/GitHub/ncbi-blast/c++/src/algo/blast/core/blast_engine.c:808-812
+                    // ```c
+                    // subject->sequence = translation_buffer + frame_offsets[context] + 1;
+                    // subject->length = frame_offsets[context+1] - frame_offsets[context] - 1;
+                    // ```
+                    // NCBI reference: /mnt/c/Users/genom/GitHub/ncbi-blast/c++/src/algo/blast/core/blast_hits.c:1347-1353
+                    // ```c
+                    // BLAST_CMP(hsp1->subject.offset, hsp2->subject.offset)
+                    // BLAST_CMP(hsp2->subject.end,    hsp1->subject.end)
+                    // BLAST_CMP(hsp1->query  .offset, hsp2->query  .offset)
+                    // BLAST_CMP(hsp2->query.end, hsp1->query.end)
+                    // ```
+                    // TBLASTX ScoreCompareHSPs uses the context/frame-relative
+                    // BlastSeg offsets stored in Blast_HSPInit, not formatted
+                    // nucleotide coordinates or LOSAT's concatenated frame bases.
+                    sort_query_offset: h.q_aa_start,
+                    sort_query_end: h.q_aa_end,
+                    sort_subject_offset: h.s_aa_start,
+                    sort_subject_end: h.s_aa_end,
+                    has_sort_offsets: true,
                     gap_info: None,
                     num_positives: matches,
                 };
@@ -2753,21 +2792,21 @@ fn run_internal(args: TblastxArgs, mut in_memory: Option<TblastxInMemoryRun<'_>>
             all.extend(h);
         }
         all.retain(|h| h.e_value <= evalue_threshold);
-        // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_hits.c:1700-1704
+        // NCBI reference: /mnt/c/Users/genom/GitHub/ncbi-blast/c++/src/algo/blast/api/blast_seqalign.cpp:1574-1577
         // ```c
-        // s_Heapify((char*)hsp_array, (char*)hsp_array,
-        //          (char*)&hsp_array[hsp_list->hspcnt/2 - 1],
-        //          (char*)&hsp_array[hsp_list->hspcnt-1],
-        //          sizeof(BlastHSP*), ScoreCompareHSPs);
+        // // Sort HSPs with e-values as first priority and scores as
+        // // tie-breakers, since that is the order we want to see them in
+        // // in Seq-aligns.
+        // Blast_HSPListSortByEvalue(hsp_list);
         // ```
-        // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_hits.c:3202-3205
+        // NCBI reference: /mnt/c/Users/genom/GitHub/ncbi-blast/c++/src/algo/blast/core/blast_hits.c:3331-3337
         // ```c
-        // s_Heapify((char*)hit_list->hsplist_array, (char*)hit_list->hsplist_array,
-        //          (char*)&hit_list->hsplist_array[hit_list->hsplist_count/2 - 1],
-        //          (char*)&hit_list->hsplist_array[hit_list->hsplist_count-1],
-        //          sizeof(BlastHSPList*), s_EvalueCompareHSPLists);
+        // if (hit_list && hit_list->hsplist_count > 1) {
+        //    qsort(hit_list->hsplist_array, hit_list->hsplist_count,
+        //             sizeof(BlastHSPList*), s_EvalueCompareHSPLists);
+        // }
         // ```
-        write_output_ncbi_order(all, out_path.as_ref(), &query_ids, &subject_ids)?;
+        write_output_ncbi_order_evalue_hsp_order(all, out_path.as_ref(), &query_ids, &subject_ids)?;
     } else if let Some(state) = single_state {
         // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_engine.c:1411-1497
         // ```c
@@ -2778,24 +2817,34 @@ fn run_internal(args: TblastxArgs, mut in_memory: Option<TblastxInMemoryRun<'_>>
         // ```
         let mut all = state.hits;
         all.retain(|h| h.e_value <= evalue_threshold);
-        // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_hits.c:1700-1704
-        // ```c
-        // s_Heapify((char*)hsp_array, (char*)hsp_array,
-        //          (char*)&hsp_array[hsp_list->hspcnt/2 - 1],
-        //          (char*)&hsp_array[hsp_list->hspcnt-1],
-        //          sizeof(BlastHSP*), ScoreCompareHSPs);
-        // ```
-        // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_hits.c:3202-3205
-        // ```c
-        // s_Heapify((char*)hit_list->hsplist_array, (char*)hit_list->hsplist_array,
-        //          (char*)&hit_list->hsplist_array[hit_list->hsplist_count/2 - 1],
-        //          (char*)&hit_list->hsplist_array[hit_list->hsplist_count-1],
-        //          sizeof(BlastHSPList*), s_EvalueCompareHSPLists);
-        // ```
         if let Some(input) = in_memory.as_mut() {
-            write_output_ncbi_order_to_writer(all, input.output, &query_ids, &subject_ids)?;
+            // NCBI reference: /mnt/c/Users/genom/GitHub/ncbi-blast/c++/src/algo/blast/api/blast_seqalign.cpp:1574-1577
+            // ```c
+            // // Sort HSPs with e-values as first priority and scores as
+            // // tie-breakers, since that is the order we want to see them in
+            // // in Seq-aligns.
+            // Blast_HSPListSortByEvalue(hsp_list);
+            // ```
+            write_output_ncbi_order_evalue_hsp_order_to_writer(
+                all,
+                input.output,
+                &query_ids,
+                &subject_ids,
+            )?;
         } else {
-            write_output_ncbi_order(all, out_path.as_ref(), &query_ids, &subject_ids)?;
+            // NCBI reference: /mnt/c/Users/genom/GitHub/ncbi-blast/c++/src/algo/blast/core/blast_hits.c:3331-3337
+            // ```c
+            // if (hit_list && hit_list->hsplist_count > 1) {
+            //    qsort(hit_list->hsplist_array, hit_list->hsplist_count,
+            //             sizeof(BlastHSPList*), s_EvalueCompareHSPLists);
+            // }
+            // ```
+            write_output_ncbi_order_evalue_hsp_order(
+                all,
+                out_path.as_ref(),
+                &query_ids,
+                &subject_ids,
+            )?;
         }
     }
     if diag_enabled {

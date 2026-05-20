@@ -295,10 +295,7 @@ struct HspLink {
     s_end_trim: i32,
     sum: [i32; 2],  // sum for both indices
     xsum: [f64; 2], // normalized sum for both indices
-    // NCBI parity: precompute the per-HSP normalized score contribution once.
-    // This avoids recomputing (and re-ln'ing K) inside hot loops.
-    xscore: f64,
-    num: [i16; 2], // number of HSPs in chain for both indices
+    num: [i16; 2],  // number of HSPs in chain for both indices
     // Best previous HSP to link with for both indices (NCBI: LinkHSPStruct* or NULL).
     // We store an index into `hsp_links`, using SENTINEL_IDX as the NULL marker.
     link: [usize; 2],
@@ -417,10 +414,19 @@ pub fn apply_sum_stats_even_gap_linking(
     // 3. Process each frame group SEQUENTIALLY (lines 553-982)
     // =======================================================================
 
-    // Precompute logK per context once (NCBI: kbp[ctx]->logK).
-    // This is computed once at top level and reused across all frame groups.
-    // NCBI reference: link_hsps.c does not explicitly show this, but kbp[ctx]->logK
-    // is accessed per context, so we precompute to avoid repeated ln() calls.
+    // NCBI reference: /mnt/c/Users/genom/GitHub/ncbi-blast/c++/src/algo/blast/core/blast_stat.c:2722-2725
+    // ```c
+    // kbp->K = BlastKarlinLHtoK(sfp, kbp->Lambda, kbp->H);
+    // ...
+    // kbp->logK = log(kbp->K);
+    // ```
+    //
+    // NCBI reference: /mnt/c/Users/genom/GitHub/ncbi-blast/c++/src/algo/blast/core/link_hsps.c:750-752
+    // ```c
+    // new_xsum = H_hsp_xsum + H->hsp->score * kbp[H->hsp->context]->Lambda
+    //           - kbp[H->hsp->context]->logK;
+    // ```
+    // Keep per-context logK available for the exact NCBI xsum expression below.
     let log_k_by_ctx: Vec<f64> = query_contexts
         .iter()
         .map(|ctx| ctx.karlin_params.k.ln())
@@ -880,7 +886,6 @@ fn link_hsp_group_ncbi(
             s_end_trim: s_end - st,
             sum: [score - cutoff_small, score - cutoff_big],
             xsum: [xscore, xscore],
-            xscore,
             num: [1, 1],
             link: [SENTINEL_IDX, SENTINEL_IDX],
             changed: true,
@@ -1278,8 +1283,17 @@ fn link_hsp_group_ncbi(
 
                     // NCBI lines 750-767: Update this HSP's link info
                     let new_sum = h_sum + (i_score - cutoff_small);
-                    // NCBI parity: normalized score contribution is constant per HSP.
-                    let new_xsum = h_xsum + pool_hsp_links[i].xscore;
+                    let ctx_idx = pool_hsp_links[i].ctx_idx;
+                    // NCBI reference: /mnt/c/Users/genom/GitHub/ncbi-blast/c++/src/algo/blast/core/link_hsps.c:750-752
+                    // ```c
+                    // new_xsum = H_hsp_xsum + H->hsp->score * kbp[H->hsp->context]->Lambda
+                    //           - kbp[H->hsp->context]->logK;
+                    // ```
+                    // Preserve C's left-associative evaluation order; pre-adding
+                    // `(score * Lambda - logK)` changes 1-ULP chain E-value ties.
+                    let new_xsum = h_xsum
+                        + (i_score as f64) * query_contexts[ctx_idx].karlin_params.lambda
+                        - log_k_by_ctx[ctx_idx];
 
                     // is_target_hsp is already defined at line 1085, reuse it here
                     if is_target_hsp {
@@ -1331,8 +1345,6 @@ fn link_hsp_group_ncbi(
                 let mut h_link: usize = SENTINEL_IDX;
 
                 let i_score = pool_hsp_links[i].score;
-                let i_xscore = pool_hsp_links[i].xscore;
-
                 // NCBI line 781: H->hsp_link.changed=1
                 pool_hsp_links[i].changed = true;
                 let prev_link = pool_hsp_links[i].link[1];
@@ -1474,8 +1486,17 @@ fn link_hsp_group_ncbi(
 
                 // NCBI lines 863-895: Update this HSP's link info
                 let new_sum = h_sum + (i_score - cutoff_big);
-                // NCBI parity: normalized score contribution is constant per HSP.
-                let new_xsum = h_xsum + i_xscore;
+                let ctx_idx = pool_hsp_links[i].ctx_idx;
+                // NCBI reference: /mnt/c/Users/genom/GitHub/ncbi-blast/c++/src/algo/blast/core/link_hsps.c:866-867
+                // ```c
+                // new_xsum = H_hsp_xsum + H->hsp->score * kbp[H->hsp->context]->Lambda
+                //           - kbp[H->hsp->context]->logK;
+                // ```
+                // Preserve C's left-associative evaluation order; pre-adding
+                // `(score * Lambda - logK)` changes 1-ULP chain E-value ties.
+                let new_xsum = h_xsum
+                    + (i_score as f64) * query_contexts[ctx_idx].karlin_params.lambda
+                    - log_k_by_ctx[ctx_idx];
 
                 // is_target_hsp is already defined at line 1218, reuse it here
                 if is_target_hsp {

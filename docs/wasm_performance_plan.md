@@ -269,6 +269,11 @@ Status as of 2026-05-21:
     the combined preliminary HSP list and interval tree. The change keeps the
     NCBI traceback/init/reset order and only removes per-subject `Vec` and
     interval-tree allocation churn in `src/algorithm/blastn/blast_engine/run.rs`.
+  - TBLASTX serial Wasm scanning now avoids per-scan-partition allocation for
+    diagnostic scan interiors and clipped `seq_ranges` in
+    `src/algorithm/tblastx/blast_engine/run_impl.rs`. The scan partition order
+    and NCBI `seq_range` values are unchanged; only the temporary storage is
+    converted to an iterator plus reusable scratch `Vec`.
   - Verified the BLASTN scratch reuse on `LC738874.fasta` vs `LC738875.fasta`
     with `LOSAT_TIMING=1 cargo run --release -- blastn ... -num_threads 1
     -outfmt 6`; before/after outfmt 6 output diff was empty, and traceback
@@ -277,8 +282,12 @@ Status as of 2026-05-21:
     `cargo build --release --target wasm32-wasip1 --no-default-features`.
   - Verified the qsort replay behavior with:
     `cargo test index_replay --lib`.
+  - Verified the TBLASTX scan scratch change with:
+    `cargo check --lib`,
+    `cargo test scan_interior --lib`, and
+    `cargo build --release --target wasm32-wasip1 --no-default-features`.
   - Additional hot-path allocation optimization remains pending, especially
-    around TBLASTX scan/reevaluation/linking buckets and BLASTN traceback/
+    around TBLASTX reevaluation/linking buckets and BLASTN traceback/
     interval-tree memory behavior.
 - Phase 4 is partially implemented.
   - `tblastx-wasm-scalar` remains the diagnostic feature for forcing the

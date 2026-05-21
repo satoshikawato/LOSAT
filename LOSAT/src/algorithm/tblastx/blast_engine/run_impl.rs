@@ -51,6 +51,29 @@ fn tblastx_scan_chunk_size_for_run(search_unit_len: usize, num_threads: usize) -
     }
 }
 
+struct TblastxScanInteriors {
+    search_unit_len: usize,
+    chunk_size: usize,
+    next_start: usize,
+}
+
+impl Iterator for TblastxScanInteriors {
+    type Item = (usize, usize);
+
+    #[inline]
+    fn next(&mut self) -> Option<Self::Item> {
+        if self.next_start >= self.search_unit_len {
+            return None;
+        }
+        let start = self.next_start;
+        let end = start
+            .saturating_add(self.chunk_size)
+            .min(self.search_unit_len);
+        self.next_start = end;
+        Some((start, end))
+    }
+}
+
 // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_aascan.c:75-127
 // ```c
 // while (s_DetermineScanningOffsets(subject, word_length, word_length, s_range)) {
@@ -60,16 +83,20 @@ fn tblastx_scan_chunk_size_for_run(search_unit_len: usize, num_threads: usize) -
 fn tblastx_scan_interiors(
     search_unit_len: usize,
     scan_chunk_size: Option<usize>,
-) -> Vec<(usize, usize)> {
+) -> TblastxScanInteriors {
     let chunk_size = scan_chunk_size.unwrap_or(search_unit_len).max(1);
-    let mut interiors = Vec::new();
-    let mut start = 0usize;
-    while start < search_unit_len {
-        let end = start.saturating_add(chunk_size).min(search_unit_len);
-        interiors.push((start, end));
-        start = end;
+    // NCBI reference: ncbi-blast/c++/src/algo/blast/core/aa_ungapped.c:492-505
+    // ```c
+    // while (scan_range[1] <= scan_range[2]) {
+    //     hits = scansub(lookup_wrap, subject, offset_pairs, array_size, scan_range);
+    // ```
+    // Scan interiors only partition the same NCBI scan loop for diagnostic
+    // chunking. Yield them without allocating a Vec in the Wasm hot path.
+    TblastxScanInteriors {
+        search_unit_len,
+        chunk_size,
+        next_start: 0,
     }
-    interiors
 }
 
 // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_engine.c:221-310
@@ -88,15 +115,17 @@ fn tblastx_scan_interiors(
 //     offset_pairs[i + totalhits].qs_offsets.s_off = s_off;
 // }
 // ```
-fn clip_tblastx_seq_ranges_for_scan_interior(
+fn clip_tblastx_seq_ranges_for_scan_interior_into<'a>(
     seq_ranges: &[(i32, i32)],
     interior_start: usize,
     interior_end: usize,
     wordsize: usize,
     subject_len: usize,
-) -> Vec<(i32, i32)> {
+    clipped: &'a mut Vec<(i32, i32)>,
+) -> &'a [(i32, i32)] {
+    clipped.clear();
     if interior_start >= interior_end || subject_len < wordsize {
-        return Vec::new();
+        return clipped.as_slice();
     }
 
     let emit_left = interior_start.min(subject_len);
@@ -104,7 +133,6 @@ fn clip_tblastx_seq_ranges_for_scan_interior(
     let read_right = emit_right
         .saturating_add(wordsize.saturating_sub(1))
         .min(subject_len);
-    let mut clipped = Vec::with_capacity(seq_ranges.len());
     for &(left, right) in seq_ranges {
         let range_left = (left.max(emit_left as i32)) as usize;
         let range_right = (right.min(read_right as i32)) as usize;
@@ -112,6 +140,26 @@ fn clip_tblastx_seq_ranges_for_scan_interior(
             clipped.push((range_left as i32, range_right as i32));
         }
     }
+    clipped.as_slice()
+}
+
+#[cfg(test)]
+fn clip_tblastx_seq_ranges_for_scan_interior(
+    seq_ranges: &[(i32, i32)],
+    interior_start: usize,
+    interior_end: usize,
+    wordsize: usize,
+    subject_len: usize,
+) -> Vec<(i32, i32)> {
+    let mut clipped = Vec::with_capacity(seq_ranges.len());
+    clip_tblastx_seq_ranges_for_scan_interior_into(
+        seq_ranges,
+        interior_start,
+        interior_end,
+        wordsize,
+        subject_len,
+        &mut clipped,
+    );
     clipped
 }
 
@@ -1357,16 +1405,28 @@ fn run_internal(args: TblastxArgs, mut in_memory: Option<TblastxInMemoryRun<'_>>
                 // ncbi-blast/c++/src/algo/blast/core/masksubj.inl:43-58
                 let base_seq_ranges: [(i32, i32); 1] = [(0, chunk.length as i32)];
                 let scan_interiors = tblastx_scan_interiors(chunk.length, scan_chunk_size);
+                // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_engine.c:221-310
+                // ```c
+                // subject->seq_ranges = subject->seq_ranges_allocated;
+                // subject->seq_ranges[subject->num_seq_ranges].left = MAX(...);
+                // subject->seq_ranges[subject->num_seq_ranges].right = MIN(...);
+                // ```
+                // Reuse the scan-range scratch across scan interiors. This keeps
+                // the same NCBI seq_range values and scan order while avoiding a
+                // small Vec allocation for every Wasm serial scan partition.
+                let mut seq_ranges_scratch: Vec<(i32, i32)> =
+                    Vec::with_capacity(base_seq_ranges.len());
                 let mut previous_seed_s_off: Option<u32> = None;
                 for (_scan_chunk_index, (interior_start, interior_end)) in
                     scan_interiors.into_iter().enumerate()
                 {
-                    let seq_ranges = clip_tblastx_seq_ranges_for_scan_interior(
+                    let seq_ranges = clip_tblastx_seq_ranges_for_scan_interior_into(
                         &base_seq_ranges,
                         interior_start,
                         interior_end,
                         wordsize as usize,
                         subject.len(),
+                        &mut seq_ranges_scratch,
                     );
                     if seq_ranges.is_empty() {
                         continue;
@@ -3169,5 +3229,55 @@ mod tests {
         let right_emitted: Vec<i32> = (right[0].0..=right[0].1 - wordsize as i32).collect();
         assert_eq!(left_emitted, vec![0, 1, 2, 3]);
         assert_eq!(right_emitted, vec![4, 5]);
+    }
+
+    // NCBI reference: ncbi-blast/c++/src/algo/blast/core/aa_ungapped.c:492-505
+    // ```c
+    // while (scan_range[1] <= scan_range[2]) {
+    //     hits = scansub(lookup_wrap, subject, offset_pairs, array_size, scan_range);
+    // ```
+    #[test]
+    fn scan_interiors_iterates_without_changing_partition_order() {
+        let interiors: Vec<(usize, usize)> = tblastx_scan_interiors(10, Some(4)).collect();
+        assert_eq!(interiors, vec![(0, 4), (4, 8), (8, 10)]);
+    }
+
+    // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_engine.c:221-310
+    // ```c
+    // subject->seq_ranges[subject->num_seq_ranges].left = MAX(...);
+    // subject->seq_ranges[subject->num_seq_ranges].right = MIN(...);
+    // ```
+    #[test]
+    fn scan_interior_range_scratch_reuses_capacity() {
+        let wordsize = 3usize;
+        let subject_len = 8usize;
+        let base_ranges = [(0, subject_len as i32)];
+        let mut scratch = Vec::with_capacity(1);
+        let initial_capacity = scratch.capacity();
+
+        let left = clip_tblastx_seq_ranges_for_scan_interior_into(
+            &base_ranges,
+            0,
+            4,
+            wordsize,
+            subject_len,
+            &mut scratch,
+        )
+        .to_vec();
+        let after_left_capacity = scratch.capacity();
+        let right = clip_tblastx_seq_ranges_for_scan_interior_into(
+            &base_ranges,
+            4,
+            8,
+            wordsize,
+            subject_len,
+            &mut scratch,
+        )
+        .to_vec();
+
+        assert_eq!(left, vec![(0, 6)]);
+        assert_eq!(right, vec![(4, 8)]);
+        assert_eq!(after_left_capacity, initial_capacity);
+        assert_eq!(scratch.capacity(), initial_capacity);
     }
 }

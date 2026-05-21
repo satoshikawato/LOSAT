@@ -274,6 +274,11 @@ Status as of 2026-05-21:
     `src/algorithm/tblastx/blast_engine/run_impl.rs`. The scan partition order
     and NCBI `seq_range` values are unchanged; only the temporary storage is
     converted to an iterator plus reusable scratch `Vec`.
+  - TBLASTX ungapped HSP reevaluation now reuses the incoming HSP list buffer in
+    `src/algorithm/tblastx/blast_engine/mod.rs` with order-preserving
+    in-place survivor retention. This keeps the NCBI
+    `Blast_HSPListReevaluateUngapped` remove-then-score-sort sequence while
+    avoiding a fresh survivor `Vec` and per-survivor HSP moves on serial Wasm.
   - Verified the BLASTN scratch reuse on `LC738874.fasta` vs `LC738875.fasta`
     with `LOSAT_TIMING=1 cargo run --release -- blastn ... -num_threads 1
     -outfmt 6`; before/after outfmt 6 output diff was empty, and traceback
@@ -286,9 +291,14 @@ Status as of 2026-05-21:
     `cargo check --lib`,
     `cargo test scan_interior --lib`, and
     `cargo build --release --target wasm32-wasip1 --no-default-features`.
+  - Verified the TBLASTX reevaluation survivor-buffer reuse with
+    `cargo check --lib`. Full-repository `cargo fmt` was stopped after it ran
+    too long on the existing large tree; the touched Rust file was formatted
+    directly with `rustfmt src/algorithm/tblastx/blast_engine/mod.rs --edition
+    2021`.
   - Additional hot-path allocation optimization remains pending, especially
-    around TBLASTX reevaluation/linking buckets and BLASTN traceback/
-    interval-tree memory behavior.
+    around TBLASTX linking, remaining reevaluation profiling, and BLASTN
+    traceback/interval-tree memory behavior.
 - Phase 4 is partially implemented.
   - `tblastx-wasm-scalar` remains the diagnostic feature for forcing the
     scalar TBLASTX Wasm path.

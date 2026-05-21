@@ -212,9 +212,24 @@ pub(crate) fn reevaluate_ungapped_hsp_list(
     is_long_sequence: bool,
     stats_hsp_filtered_by_reeval: &mut usize,
 ) -> Vec<UngappedHit> {
-    let mut kept_hits = Vec::new();
+    let mut kept_hits = ungapped_hits;
 
-    for mut hit in ungapped_hits {
+    // NCBI reference: /mnt/c/Users/genom/GitHub/ncbi-blast/c++/src/algo/blast/core/blast_hits.c:2609-2737
+    // ```c
+    // for (index = 0; index < hsp_list->hspcnt; ++index) {
+    //    hsp = hsp_list->hsp_array[index];
+    //    ...
+    //    if (delete_hsp) {
+    //       Blast_HSPListRemoveHSP(hsp_list, index);
+    //       index--;
+    //    }
+    // }
+    // ```
+    // NCBI mutates the current HSP list in place and removes failed entries.
+    // `retain_mut` preserves that list order for survivors while reusing the
+    // same Vec allocation instead of copying every retained TBLASTX HSP into a
+    // fresh buffer on Wasm.
+    kept_hits.retain_mut(|hit| {
         let ctx = &contexts[hit.ctx_idx];
         let s_frame_scoring = &s_frames_scoring[hit.s_f_idx];
         let s_frame_report = &s_frames_report[hit.s_f_idx];
@@ -238,7 +253,7 @@ pub(crate) fn reevaluate_ungapped_hsp_list(
         let len_u = hit.q_aa_end.saturating_sub(hit.q_aa_start);
 
         if len_u == 0 {
-            continue;
+            return false;
         }
 
         // NCBI: Blast_HSPReevaluateWithAmbiguitiesUngapped (blast_hits.c:2702-2705)
@@ -267,7 +282,7 @@ pub(crate) fn reevaluate_ungapped_hsp_list(
                 reeval_ns.fetch_add(elapsed.as_nanos() as u64, AtomicOrdering::Relaxed);
                 reeval_calls.fetch_add(1, AtomicOrdering::Relaxed);
             }
-            continue;
+            return false;
         };
         if let Some(t) = t0 {
             let elapsed = t.elapsed();
@@ -310,7 +325,7 @@ pub(crate) fn reevaluate_ungapped_hsp_list(
             ) {
             num_ident
         } else {
-            continue;
+            return false;
         };
 
         // NCBI: Blast_HSPTest (blast_hits.c:2719)
@@ -329,7 +344,7 @@ pub(crate) fn reevaluate_ungapped_hsp_list(
         let percent_identity = 0.0;
         let min_hit_length = 0usize;
         if hsp_test(num_ident, new_len, percent_identity, min_hit_length) {
-            continue;
+            return false;
         }
 
         // Update hit with reevaluated coordinates and score (0-based offsets)
@@ -342,9 +357,9 @@ pub(crate) fn reevaluate_ungapped_hsp_list(
         hit.raw_score = new_score;
         hit.num_ident = num_ident;
 
-        trace_ungapped_hit_if_match("after_reevaluate", &hit);
-        kept_hits.push(hit);
-    }
+        trace_ungapped_hit_if_match("after_reevaluate", hit);
+        true
+    });
 
     // NCBI reference: /mnt/c/Users/genom/GitHub/ncbi-blast/c++/src/algo/blast/core/blast_hits.c:2733-2734
     // ```c

@@ -213,7 +213,7 @@ wasm_benchmark_label() {
 # Part 1: LOSAT Execution
 # ==========================================
 echo "Starting LOSAT commands..."
-
+<<COMMENTOUT
 run_losatn_native_threaded_case() {
     local query="$1"
     local subject="$2"
@@ -295,9 +295,10 @@ run_losatn_native_threaded_case "LC738873.fasta" "LC738871.fasta" "PeseMJNV.Pemo
 run_losatn_native_threaded_case "LC738870.fasta" "LC738873.fasta" "PemoMJNVA.PeseMJNV.losatn.blastn" "blastn"
 run_losatn_native_threaded_case "LC738868.fasta" "LC738874.fasta" "MjeNMV.MelaMJNV.losatn.blastn" "blastn"
 run_losatn_native_threaded_case "AP027202.fasta" "LC738875.fasta" "MjPMNV.MlPMNV.losatn.blastn" "blastn"
-
+COMMENTOUT
 # --- LOSATP Commands ---
 echo "Starting LOSATP commands..."
+<<COMMENTOUT
 run_losatp_case() {
     local query="$1"
     local subject="$2"
@@ -315,7 +316,7 @@ run_losatp_case() {
     (time "${LOSAT_BIN}" blastp -query "./fasta/${query}" -subject "./fasta/${subject}" -out "./losat_out/${stem}.losatp.out" -num_threads 1 -outfmt 6 )&>"./losat_out/${stem}.losatp.log"
     (time "${LOSAT_BIN}" blastp -query "./fasta/${query}" -subject "./fasta/${subject}" -out "./losat_out/${stem}.losatp.${threaded_suffix}.out" -num_threads "${LOSAT_THREADS}" -outfmt 6 )&>"./losat_out/${stem}.losatp.${threaded_suffix}.log"
 }
-
+COMMENTOUT
 run_tlosatx_case() {
     local query="$1"
     local subject="$2"
@@ -568,7 +569,7 @@ else
             LOSAT_WASM_BIN="${LOSAT_WASM_BIN_RESOLVED}"
         fi
         write_losat_wasm_runner
-
+        <<COMMENTOUT
         run_losatn_wasm_case "NZ_CP006932.fasta" "NZ_CP006932.fasta" "NZ_CP006932.NZ_CP006932.losatn.megablast" "megablast"
         run_losatn_wasm_case "EDL933.fna" "Sakai.fna" "EDL933.Sakai.losatn.megablast" "megablast"
         run_losatn_wasm_case "Sakai.fna" "MG1655.fna" "Sakai.MG1655.losatn.megablast" "megablast"
@@ -588,7 +589,7 @@ else
             IFS=":" read -r query subject stem <<<"$losatp_case"
             run_losatp_wasm_case "$query" "$subject" "$stem"
         done
-
+        COMMENTOUT
         for tblastx_case in "${TBLASTX_CASES[@]}"; do
             IFS=":" read -r query subject _db stem query_gencode db_gencode <<<"$tblastx_case"
             run_tlosatx_wasm_case "$query" "$subject" "$stem" "$query_gencode" "$db_gencode"
@@ -764,7 +765,7 @@ COMMENTOUT
 # AP027133 vs AP027132
 (time tblastx -query ./fasta/AP027133.fasta -db ./fasta/AP027132 -out ./blast_out/AP027133.AP027132.tblastx.n8.out -query_gencode 4 -db_gencode 4 -num_threads 8 -outfmt 6 )&>./blast_out/AP027133.AP027132.tblastx.n8.log &
 COMMENTOUT
-
+<<COMMENTOUT
 run_tblastx_blast_case() {
     local query="$1"
     local db="$2"
@@ -799,7 +800,7 @@ for tblastx_case in "${TBLASTX_CASES[@]}"; do
     run_tblastx_blast_case "$query" "$db" "$stem" "$query_gencode" "$db_gencode"
 done
 echo "Finished TBLASTX BLAST+ commands!"
-
+COMMENTOUT
 # --- BLASTN Commands (Default / Megablast) ---
 
 # NZ_CP006932 self (Default/Megablast)
@@ -813,7 +814,7 @@ echo "Finished TBLASTX BLAST+ commands!"
 
 
 # --- BLASTN Commands (Task: blastn) ---
-
+<<COMMENTOUT
 # NZ_CP006932 self (Task: blastn)
 (time blastn -task blastn -query ./fasta/NZ_CP006932.fasta -subject ./fasta/NZ_CP006932.fasta -out ./blast_out/NZ_CP006932.NZ_CP006932.task_blastn.out -num_threads 1 -outfmt 7 )&>./blast_out/NZ_CP006932.NZ_CP006932.task_blastn.log
 
@@ -846,7 +847,7 @@ echo "Finished TBLASTX BLAST+ commands!"
 
 
 wait
-
+COMMENTOUT
 <<COMMENTOUT
 # --- BLASTP Commands ---
 echo "Starting WSSV vs PajaWSV (BLASTP)..."

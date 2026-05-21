@@ -9,6 +9,7 @@ use crate::stats::sum_statistics::{
 use crate::stats::KarlinParams;
 use std::cell::RefCell;
 use std::cmp::Ordering;
+use std::mem::ManuallyDrop;
 use std::sync::OnceLock;
 // NCBI reference: ncbi-blast/c++/include/algo/blast/blastinput/blast_args.hpp:1290-1296
 // ```c
@@ -49,6 +50,83 @@ const BLAST_GAP_PROB: f64 = 0.5;
 
 /// Sentinel index indicating end of active list or "not in list"
 const SENTINEL_IDX: usize = usize::MAX;
+
+// NCBI reference: /mnt/c/Users/genom/GitHub/ncbi-blast/c++/src/algo/blast/core/link_hsps.c:1012-1059
+// ```c
+// for (index=0, last_hsp=NULL;index<total_number_of_hsps; index++) {
+//    H = link_hsp_array[index];
+//    if (H->linked_set == TRUE && H->start_of_chain == FALSE)
+//       continue;
+//    ...
+//    while (link) {
+//       H->next = (LinkHSPStruct*) link;
+//       H = H->next;
+//       if (H != NULL)
+//          link = H->hsp_link.link[ordering_method];
+// ```
+// NCBI replays pointers from the final qsort order into the output list. LOSAT
+// owns `UngappedHit` values, so this small owner moves each selected HSP out of
+// the sorted Vec exactly once instead of cloning every replayed HSP.
+struct ReplayHitSlots {
+    ptr: *mut UngappedHit,
+    len: usize,
+    cap: usize,
+    taken: Vec<bool>,
+}
+
+impl ReplayHitSlots {
+    fn from_vec(hits: Vec<UngappedHit>) -> Self {
+        let mut hits = ManuallyDrop::new(hits);
+        let len = hits.len();
+        Self {
+            ptr: hits.as_mut_ptr(),
+            len,
+            cap: hits.capacity(),
+            taken: vec![false; len],
+        }
+    }
+
+    #[inline]
+    fn is_taken(&self, index: usize) -> bool {
+        self.taken[index]
+    }
+
+    #[inline]
+    fn get(&self, index: usize) -> &UngappedHit {
+        debug_assert!(index < self.len);
+        debug_assert!(!self.taken[index]);
+        // Safety: `index < len`, and callers check `taken` before borrowing.
+        // The backing allocation is owned by this struct until Drop.
+        unsafe { &*self.ptr.add(index) }
+    }
+
+    #[inline]
+    fn take(&mut self, index: usize) -> UngappedHit {
+        debug_assert!(index < self.len);
+        debug_assert!(!self.taken[index]);
+        self.taken[index] = true;
+        // Safety: `index < len` and this slot has not been taken before. Marking
+        // it taken before `ptr::read` ensures Drop will not drop the moved value.
+        unsafe { std::ptr::read(self.ptr.add(index)) }
+    }
+}
+
+impl Drop for ReplayHitSlots {
+    fn drop(&mut self) {
+        // Safety: slots marked `taken` were moved out with `ptr::read`; all
+        // remaining initialized slots must be dropped once. Rebuilding a
+        // zero-length Vec with the original pointer/capacity releases the buffer
+        // without dropping moved or already-dropped elements.
+        unsafe {
+            for index in 0..self.len {
+                if !self.taken[index] {
+                    std::ptr::drop_in_place(self.ptr.add(index));
+                }
+            }
+            drop(Vec::from_raw_parts(self.ptr, 0, self.cap));
+        }
+    }
+}
 
 // ---------------------------------------------------------------------------
 // HSP tracing (opt-in via env var)
@@ -609,6 +687,7 @@ fn replay_ncbi_output_list(sorted_hits: Vec<UngappedHit>) -> Vec<UngappedHit> {
         return sorted_hits;
     }
 
+    let total_hits = sorted_hits.len();
     let max_link_id = sorted_hits.iter().map(|h| h.link_id).max().unwrap_or(0);
     let mut id_to_index = vec![SENTINEL_IDX; max_link_id + 1];
     for (index, hit) in sorted_hits.iter().enumerate() {
@@ -617,9 +696,13 @@ fn replay_ncbi_output_list(sorted_hits: Vec<UngappedHit>) -> Vec<UngappedHit> {
         }
     }
 
-    let mut replayed_indices = Vec::with_capacity(sorted_hits.len());
-    for index in 0..sorted_hits.len() {
-        let hit = &sorted_hits[index];
+    let mut slots = ReplayHitSlots::from_vec(sorted_hits);
+    let mut replayed = Vec::with_capacity(total_hits);
+    for index in 0..total_hits {
+        if slots.is_taken(index) {
+            continue;
+        }
+        let hit = slots.get(index);
         if hit.linked_set && !hit.start_of_chain {
             continue;
         }
@@ -627,8 +710,12 @@ fn replay_ncbi_output_list(sorted_hits: Vec<UngappedHit>) -> Vec<UngappedHit> {
         let mut current = index;
         let mut hops = 0usize;
         loop {
-            replayed_indices.push(current);
-            let Some(next_id) = sorted_hits[current].chain_next_link_id else {
+            if slots.is_taken(current) {
+                break;
+            }
+            let next_id = slots.get(current).chain_next_link_id;
+            replayed.push(slots.take(current));
+            let Some(next_id) = next_id else {
                 break;
             };
             if next_id >= id_to_index.len() {
@@ -640,16 +727,13 @@ fn replay_ncbi_output_list(sorted_hits: Vec<UngappedHit>) -> Vec<UngappedHit> {
             }
             current = next_index;
             hops += 1;
-            if hops > sorted_hits.len() {
+            if hops > total_hits {
                 break;
             }
         }
     }
 
-    replayed_indices
-        .into_iter()
-        .map(|index| sorted_hits[index].clone())
-        .collect()
+    replayed
 }
 
 // ---------------------------------------------------------------------------

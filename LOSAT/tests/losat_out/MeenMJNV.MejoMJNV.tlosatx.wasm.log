@@ -9,3 +9,7 @@
 [WASM-METADATA] browser_worker_parallel_verified=false
 [WASM-METADATA] wasi_runtime=node-wasi-preview1
 [WASM-METADATA] node_version=v18.19.1
+
+real	2m13.272s
+user	2m13.137s
+sys	0m0.116s

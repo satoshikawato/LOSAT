@@ -516,8 +516,8 @@ fn purge_hsps_for_subject_ex(hits: Vec<BlastnHsp>, purge: bool) -> (Vec<BlastnHs
     }
 
     let initial_count = len;
-    let mut hsp_array: Vec<Option<BlastnHsp>> = hits.into_iter().map(Some).collect();
-    let mut hsp_count = initial_count;
+    let mut active: Vec<BlastnHsp> = hits;
+    let mut tail: Vec<BlastnHsp> = Vec::new();
     let mut start_removed = 0usize;
     let mut end_removed = 0usize;
     let mut start_trimmed = 0usize;
@@ -530,11 +530,7 @@ fn purge_hsps_for_subject_ex(hits: Vec<BlastnHsp>, purge: bool) -> (Vec<BlastnHs
     //
     // qsort(hsp_array, hsp_count, sizeof(BlastHSP*), s_QueryOffsetCompareHSPs);
     // ```
-    qsort_hsp_array_prefix_by(
-        &mut hsp_array,
-        hsp_count,
-        compare_query_offset_hsps_for_common_endpoint,
-    );
+    qsort_hsp_array_prefix_by(&mut active, compare_query_offset_hsps_for_common_endpoint);
 
     // NCBI reference: blast_hits.c:2480-2500
     // if (!purge && (hsp->query.end > hsp_array[i]->query.end)) {
@@ -558,59 +554,55 @@ fn purge_hsps_for_subject_ex(hits: Vec<BlastnHsp>, purge: bool) -> (Vec<BlastnHs
     // ```
     // The C code keeps the sorted active prefix and moves trimmed/null HSPs to
     // the tail by decrementing hsp_count before shifting hsp_array left.
-    let mut i = 0usize;
-    while i < hsp_count {
-        let j = 1usize;
-        while i + j < hsp_count && same_common_start(&hsp_array, i, i + j) {
-            let (keeper_q_end, keeper_s_end) = {
-                let keeper = hsp_array[i]
-                    .as_ref()
-                    .expect("same_common_start requires a keeper HSP");
-                (keeper.internal_q_end_0, keeper.internal_s_end_0)
-            };
-            hsp_count -= 1;
-            let removed = hsp_array[i + j].take();
-            let mut tail_hsp = None;
-
-            if let Some(mut removed_hit) = removed {
-                let keeper = hsp_array[i]
-                    .as_ref()
-                    .expect("same_common_start requires a keeper HSP");
-                if !purge && removed_hit.internal_q_end_0 > keeper_q_end {
-                    trace_common_endpoint_purge_decision(
-                        "common_start",
-                        "trim_begin",
-                        purge,
-                        keeper,
-                        &removed_hit,
-                        keeper_q_end,
-                        keeper_s_end,
-                    );
-                    let _ =
-                        cut_off_gap_edit_script(&mut removed_hit, keeper_q_end, keeper_s_end, true);
-                    tail_hsp = Some(removed_hit);
-                    start_trimmed += 1;
-                } else {
-                    trace_common_endpoint_purge_decision(
-                        "common_start",
-                        "delete",
-                        purge,
-                        keeper,
-                        &removed_hit,
-                        keeper_q_end,
-                        keeper_s_end,
-                    );
-                }
-                start_removed += 1;
+    // For a run [best, h2, h3], repeated C shifts leave tail order [h3, h2].
+    // Build that same active-prefix/tail order directly so dense Wasm cases do
+    // not pay O(n^2) Vec movement for endpoint-equivalent HSP runs.
+    let mut start_active = Vec::with_capacity(active.len());
+    let mut start_tail = Vec::new();
+    let mut active_iter = active.into_iter().peekable();
+    while let Some(keeper) = active_iter.next() {
+        let keeper_q_end = keeper.internal_q_end_0;
+        let keeper_s_end = keeper.internal_s_end_0;
+        while active_iter
+            .peek()
+            .is_some_and(|next| same_common_start(&keeper, next))
+        {
+            let mut removed_hit = active_iter
+                .next()
+                .expect("peeked common-start HSP must be present");
+            if !purge && removed_hit.internal_q_end_0 > keeper_q_end {
+                trace_common_endpoint_purge_decision(
+                    "common_start",
+                    "trim_begin",
+                    purge,
+                    &keeper,
+                    &removed_hit,
+                    keeper_q_end,
+                    keeper_s_end,
+                );
+                let _ = cut_off_gap_edit_script(&mut removed_hit, keeper_q_end, keeper_s_end, true);
+                start_tail.push(removed_hit);
+                start_trimmed += 1;
+            } else {
+                trace_common_endpoint_purge_decision(
+                    "common_start",
+                    "delete",
+                    purge,
+                    &keeper,
+                    &removed_hit,
+                    keeper_q_end,
+                    keeper_s_end,
+                );
             }
-
-            for k in (i + j)..hsp_count {
-                hsp_array[k] = hsp_array[k + 1].take();
-            }
-            hsp_array[hsp_count] = tail_hsp;
+            start_removed += 1;
         }
-        i += j;
+        start_active.push(keeper);
     }
+    if !purge {
+        tail.reserve(start_tail.len());
+        tail.extend(start_tail.into_iter().rev());
+    }
+    active = start_active;
 
     // Pass 2: Remove HSPs with common END positions
     // NCBI reference: blast_hits.c:2504-2526
@@ -618,11 +610,7 @@ fn purge_hsps_for_subject_ex(hits: Vec<BlastnHsp>, purge: bool) -> (Vec<BlastnHs
     // ```c
     // qsort(hsp_array, hsp_count, sizeof(BlastHSP*), s_QueryEndCompareHSPs);
     // ```
-    qsort_hsp_array_prefix_by(
-        &mut hsp_array,
-        hsp_count,
-        compare_query_end_hsps_for_common_endpoint,
-    );
+    qsort_hsp_array_prefix_by(&mut active, compare_query_end_hsps_for_common_endpoint);
 
     // NCBI reference: blast_hits.c:2516-2520
     // if (!purge && (hsp->query.offset < hsp_array[i]->query.offset)) {
@@ -645,63 +633,56 @@ fn purge_hsps_for_subject_ex(hits: Vec<BlastnHsp>, purge: bool) -> (Vec<BlastnHs
     // }
     // ```
     // Repeat the same active-prefix mutation NCBI uses for common endpoints.
-    let mut i = 0usize;
-    while i < hsp_count {
-        let j = 1usize;
-        while i + j < hsp_count && same_common_end(&hsp_array, i, i + j) {
-            let (keeper_q_offset, keeper_s_offset) = {
-                let keeper = hsp_array[i]
-                    .as_ref()
-                    .expect("same_common_end requires a keeper HSP");
-                (keeper.internal_q_offset_0, keeper.internal_s_offset_0)
-            };
-            hsp_count -= 1;
-            let removed = hsp_array[i + j].take();
-            let mut tail_hsp = None;
-
-            if let Some(mut removed_hit) = removed {
-                let keeper = hsp_array[i]
-                    .as_ref()
-                    .expect("same_common_end requires a keeper HSP");
-                if !purge && removed_hit.internal_q_offset_0 < keeper_q_offset {
-                    trace_common_endpoint_purge_decision(
-                        "common_end",
-                        "trim_end",
-                        purge,
-                        keeper,
-                        &removed_hit,
-                        keeper_q_offset,
-                        keeper_s_offset,
-                    );
-                    let _ = cut_off_gap_edit_script(
-                        &mut removed_hit,
-                        keeper_q_offset,
-                        keeper_s_offset,
-                        false,
-                    );
-                    tail_hsp = Some(removed_hit);
-                    end_trimmed += 1;
-                } else {
-                    trace_common_endpoint_purge_decision(
-                        "common_end",
-                        "delete",
-                        purge,
-                        keeper,
-                        &removed_hit,
-                        keeper_q_offset,
-                        keeper_s_offset,
-                    );
-                }
-                end_removed += 1;
+    // NCBI inserts pass-2 tail entries in front of the pass-1 tail because
+    // hsp_count is decremented before writing hsp_array[hsp_count]. Preserve
+    // that tail layering while compacting the active prefix in one pass.
+    let mut end_active = Vec::with_capacity(active.len());
+    let mut end_tail = Vec::new();
+    let mut active_iter = active.into_iter().peekable();
+    while let Some(keeper) = active_iter.next() {
+        let keeper_q_offset = keeper.internal_q_offset_0;
+        let keeper_s_offset = keeper.internal_s_offset_0;
+        while active_iter
+            .peek()
+            .is_some_and(|next| same_common_end(&keeper, next))
+        {
+            let mut removed_hit = active_iter
+                .next()
+                .expect("peeked common-end HSP must be present");
+            if !purge && removed_hit.internal_q_offset_0 < keeper_q_offset {
+                trace_common_endpoint_purge_decision(
+                    "common_end",
+                    "trim_end",
+                    purge,
+                    &keeper,
+                    &removed_hit,
+                    keeper_q_offset,
+                    keeper_s_offset,
+                );
+                let _ = cut_off_gap_edit_script(
+                    &mut removed_hit,
+                    keeper_q_offset,
+                    keeper_s_offset,
+                    false,
+                );
+                end_tail.push(removed_hit);
+                end_trimmed += 1;
+            } else {
+                trace_common_endpoint_purge_decision(
+                    "common_end",
+                    "delete",
+                    purge,
+                    &keeper,
+                    &removed_hit,
+                    keeper_q_offset,
+                    keeper_s_offset,
+                );
             }
-
-            for k in (i + j)..hsp_count {
-                hsp_array[k] = hsp_array[k + 1].take();
-            }
-            hsp_array[hsp_count] = tail_hsp;
+            end_removed += 1;
         }
-        i += j;
+        end_active.push(keeper);
     }
+    active = end_active;
 
     // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_hits.c:2530-2535
     // ```c
@@ -714,19 +695,18 @@ fn purge_hsps_for_subject_ex(hits: Vec<BlastnHsp>, purge: bool) -> (Vec<BlastnHs
     // In purge=false mode NCBI leaves trimmed HSPs in the tail for
     // blast_traceback.c:647-665 to re-evaluate, while NULL tail entries are
     // skipped. Store the same live order and return the active-prefix boundary.
-    let extra_start = hsp_count;
-    let mut hits = Vec::with_capacity(initial_count);
-    for slot in hsp_array {
-        if let Some(hit) = slot {
-            hits.push(hit);
-        }
+    let extra_start = active.len();
+    if !purge {
+        active.reserve(end_tail.len().saturating_add(tail.len()));
+        active.extend(end_tail.into_iter().rev());
+        active.extend(tail);
     }
 
     // Debug output for purge statistics
     if std::env::var("LOSAT_DEBUG_BLASTN").is_ok() {
         eprintln!(
             "[DEBUG_PURGE] initial={}, start_removed={} (trimmed={}), end_removed={} (trimmed={}), active_prefix={}, final={}",
-            initial_count, start_removed, start_trimmed, end_removed, end_trimmed, extra_start, hits.len()
+            initial_count, start_removed, start_trimmed, end_removed, end_trimmed, extra_start, active.len()
         );
     }
 
@@ -738,7 +718,7 @@ fn purge_hsps_for_subject_ex(hits: Vec<BlastnHsp>, purge: bool) -> (Vec<BlastnHs
         end_trimmed,
     ); // Silence unused warnings
 
-    (hits, extra_start)
+    (active, extra_start)
 }
 
 // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_hits.c:2268-2387
@@ -747,38 +727,17 @@ fn purge_hsps_for_subject_ex(hits: Vec<BlastnHsp>, purge: bool) -> (Vec<BlastnHs
 // else if (!h1) return 1;
 // else if (!h2) return -1;
 // ```
-// NCBI's qsort callbacks sort NULL HSP pointers after real HSPs. The active
-// prefix normally contains only real HSPs, but preserve the NULL ordering when
-// mirroring Blast_HSPListPurgeHSPsWithCommonEndpoints exactly.
+// The compacted active prefix contains only live HSPs; trimmed or deleted HSPs
+// are layered into the tail separately to preserve the same NCBI prefix/tail
+// shape without sorting NULL slots.
 fn qsort_hsp_array_prefix_by(
-    hsp_array: &mut [Option<BlastnHsp>],
-    hsp_count: usize,
+    hsp_array: &mut [BlastnHsp],
     compare: fn(&BlastnHsp, &BlastnHsp) -> Ordering,
 ) {
-    if hsp_count <= 1 {
+    if hsp_array.len() <= 1 {
         return;
     }
-    let prefix_len = hsp_count.min(hsp_array.len());
-    let mut active = Vec::with_capacity(prefix_len);
-    let mut null_count = 0usize;
-    for slot in &mut hsp_array[..prefix_len] {
-        if let Some(hit) = slot.take() {
-            active.push(hit);
-        } else {
-            null_count += 1;
-        }
-    }
-
-    qsort_blastn_hsps_by(&mut active, compare);
-
-    let mut index = 0usize;
-    for hit in active {
-        hsp_array[index] = Some(hit);
-        index += 1;
-    }
-    for slot in &mut hsp_array[index..index + null_count] {
-        *slot = None;
-    }
+    qsort_blastn_hsps_by(hsp_array, compare);
 }
 
 // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_hits.c:2482-2487
@@ -789,13 +748,7 @@ fn qsort_hsp_array_prefix_by(
 // hsp_array[i]->subject.offset == hsp_array[i+j]->subject.offset &&
 // hsp_array[i]->subject.frame == hsp_array[i+j]->subject.frame
 // ```
-fn same_common_start(hsp_array: &[Option<BlastnHsp>], lhs: usize, rhs: usize) -> bool {
-    let (Some(a), Some(b)) = (
-        hsp_array.get(lhs).and_then(Option::as_ref),
-        hsp_array.get(rhs).and_then(Option::as_ref),
-    ) else {
-        return false;
-    };
+fn same_common_start(a: &BlastnHsp, b: &BlastnHsp) -> bool {
     blastn_hsp_context(a) == blastn_hsp_context(b)
         && a.internal_q_offset_0 == b.internal_q_offset_0
         && a.internal_s_offset_0 == b.internal_s_offset_0
@@ -809,13 +762,7 @@ fn same_common_start(hsp_array: &[Option<BlastnHsp>], lhs: usize, rhs: usize) ->
 // hsp_array[i]->subject.end == hsp_array[i+j]->subject.end &&
 // hsp_array[i]->subject.frame == hsp_array[i+j]->subject.frame
 // ```
-fn same_common_end(hsp_array: &[Option<BlastnHsp>], lhs: usize, rhs: usize) -> bool {
-    let (Some(a), Some(b)) = (
-        hsp_array.get(lhs).and_then(Option::as_ref),
-        hsp_array.get(rhs).and_then(Option::as_ref),
-    ) else {
-        return false;
-    };
+fn same_common_end(a: &BlastnHsp, b: &BlastnHsp) -> bool {
     blastn_hsp_context(a) == blastn_hsp_context(b)
         && a.internal_q_end_0 == b.internal_q_end_0
         && a.internal_s_end_0 == b.internal_s_end_0

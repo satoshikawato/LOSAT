@@ -279,6 +279,12 @@ Status as of 2026-05-21:
     in-place survivor retention. This keeps the NCBI
     `Blast_HSPListReevaluateUngapped` remove-then-score-sort sequence while
     avoiding a fresh survivor `Vec` and per-survivor HSP moves on serial Wasm.
+  - BLASTN common-endpoint purge now compacts active HSP prefixes in one pass
+    instead of repeatedly shifting a `Vec<Option<BlastnHsp>>` for every removed
+    endpoint duplicate in `src/algorithm/blastn/filtering/purge_endpoints.rs`.
+    The implementation preserves the NCBI `hsp_count--` active-prefix behavior
+    and the pass-1/pass-2 trimmed-tail ordering, but removes dense-case
+    O(n^2) element movement from the serial Wasm hot path.
   - Verified the BLASTN scratch reuse on `LC738874.fasta` vs `LC738875.fasta`
     with `LOSAT_TIMING=1 cargo run --release -- blastn ... -num_threads 1
     -outfmt 6`; before/after outfmt 6 output diff was empty, and traceback
@@ -296,6 +302,17 @@ Status as of 2026-05-21:
     too long on the existing large tree; the touched Rust file was formatted
     directly with `rustfmt src/algorithm/tblastx/blast_engine/mod.rs --edition
     2021`.
+  - Verified the BLASTN common-endpoint compaction with
+    `cargo check --lib`,
+    `cargo test test_purge_common_start_keeps_longer_end_on_score_tie --lib`,
+    `cargo build --release --target wasm32-wasip1 --no-default-features`, and
+    `LOSAT_TIMING=1 target/release/LOSAT blastn -query
+    tests/fasta/NZ_CP006932.fasta -subject tests/fasta/NZ_CP006932.fasta
+    -task blastn -num_threads 1 -outfmt 6`. The NZ self run produced 12,340
+    outfmt 6 rows, matching the NCBI task-blastn oracle after stripping
+    comment lines. The same run reported `purge_common_endpoint_pass1=0.006s`,
+    `purge_common_endpoint_pass2=0.003s`, `traceback_prune=2.722s`, and
+    `total=5.217s`.
   - Additional hot-path allocation optimization remains pending, especially
     around TBLASTX linking, remaining reevaluation profiling, and BLASTN
     traceback/interval-tree memory behavior.

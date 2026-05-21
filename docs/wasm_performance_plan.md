@@ -256,7 +256,16 @@ Status as of 2026-05-21:
     path on the same fixture.
   - The serial-mode benchmark records mode metadata and diffs command-WASI
     output against browser in-memory output before accepting the measurement.
-  - Hot-path allocation optimization remains pending.
+  - TBLASTX qsort-compatible HSP ordering now avoids cloning the full
+    `Vec<UngappedHit>` in the Wasm index-replay path. The implementation sorts
+    only the index array and applies the destination-to-source order in place
+    by cycle replay, reducing hot-path allocation/copy volume while preserving
+    the NCBI qsort comparator order.
+  - Verified the qsort replay behavior with:
+    `cargo test index_replay --lib`.
+  - Additional hot-path allocation optimization remains pending, especially
+    around TBLASTX scan/reevaluation/linking buckets and BLASTN traceback/
+    interval-tree memory behavior.
 - Phase 4 is partially implemented.
   - `tblastx-wasm-scalar` remains the diagnostic feature for forcing the
     scalar TBLASTX Wasm path.

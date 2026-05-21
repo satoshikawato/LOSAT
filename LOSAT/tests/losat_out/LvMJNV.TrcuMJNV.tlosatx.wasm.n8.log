@@ -1,4 +1,15 @@
+[WASM-METADATA] target_triple=wasm32-wasip1
+[WASM-METADATA] feature_set=--no-default-features
+[WASM-METADATA] execution_mode=command-wasi-serial
+[WASM-METADATA] threading_status=serial-command-wasi
+[WASM-METADATA] rayon_compiled=false
+[WASM-METADATA] requested_num_threads=8
+[WASM-METADATA] effective_engine_threads=1
+[WASM-METADATA] benchmark_label=LOSAT command-WASI serial (requested n8)
+[WASM-METADATA] browser_worker_parallel_verified=false
+[WASM-METADATA] wasi_runtime=node-wasi-preview1
+[WASM-METADATA] node_version=v18.19.1
 
-real	0m6.079s
-user	0m3.530s
-sys	0m0.095s
+real	0m2.958s
+user	0m3.317s
+sys	0m0.120s

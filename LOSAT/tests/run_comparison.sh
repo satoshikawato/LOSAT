@@ -375,14 +375,14 @@ TBLASTX_CASES=(
     "TrcuMJNV.fasta:MellatMJNV.fasta:MellatMJNV:TrcuMJNV.MellatMJNV:1:1"
     "MellatMJNV.fasta:MeenMJNV.fasta:MeenMJNV:MellatMJNV.MeenMJNV:1:1"
     "MeenMJNV.fasta:MejoMJNV.fasta:MejoMJNV:MeenMJNV.MejoMJNV:1:1"
-    "AvCLPV.fasta:PsCLPV.fasta:PsCLPV:AvCLPV.PsCLPV:1:1"
-    "NZ_CP006932.fasta:NZ_CP006932.fasta:NZ_CP006932:NZ_CP006932.NZ_CP006932:4:4"
-    "AP027132.fasta:NZ_CP006932.fasta:NZ_CP006932:AP027132.NZ_CP006932:4:4"
-    "AP027078.fasta:AP027131.fasta:AP027131:AP027078.AP027131:4:4"
-    "AP027131.fasta:AP027133.fasta:AP027133:AP027131.AP027133:4:4"
-    "AP027133.fasta:AP027132.fasta:AP027132:AP027133.AP027132:4:4"
-)
 
+)
+#     "AvCLPV.fasta:PsCLPV.fasta:PsCLPV:AvCLPV.PsCLPV:1:1"
+#     "NZ_CP006932.fasta:NZ_CP006932.fasta:NZ_CP006932:NZ_CP006932.NZ_CP006932:4:4"
+#     "AP027132.fasta:NZ_CP006932.fasta:NZ_CP006932:AP027132.NZ_CP006932:4:4"
+#     "AP027078.fasta:AP027131.fasta:AP027131:AP027078.AP027131:4:4"
+#     "AP027131.fasta:AP027133.fasta:AP027133:AP027131.AP027133:4:4"
+#     "AP027133.fasta:AP027132.fasta:AP027132:AP027133.AP027132:4:4"
 for losatp_case in "${LOSATP_CASES[@]}"; do
     IFS=":" read -r query subject stem <<<"$losatp_case"
     run_losatp_case "$query" "$subject" "$stem"

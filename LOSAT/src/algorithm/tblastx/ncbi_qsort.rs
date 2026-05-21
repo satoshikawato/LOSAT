@@ -52,8 +52,7 @@ pub(crate) fn qsort_ungapped_hits_by(hits: &mut [UngappedHit], compare: Ungapped
 
 #[cfg(any(target_arch = "wasm32", test))]
 fn index_replay_sort_ungapped_hits_by(hits: &mut [UngappedHit], compare: UngappedHitCompare) {
-    let original = hits.to_vec();
-    let mut indices: Vec<usize> = (0..original.len()).collect();
+    let mut indices: Vec<usize> = (0..hits.len()).collect();
 
     // NCBI reference: /mnt/c/Users/genom/GitHub/ncbi-blast/c++/src/algo/blast/core/link_hsps.c:476-486
     // ```c
@@ -63,10 +62,43 @@ fn index_replay_sort_ungapped_hits_by(hits: &mut [UngappedHit], compare: Ungappe
     // qsort(link_hsp_array,total_number_of_hsps,sizeof(LinkHSPStruct*),
     //       s_RevCompareHSPsTbx);
     // ```
-    indices.sort_by(|&lhs_index, &rhs_index| compare(&original[lhs_index], &original[rhs_index]));
+    indices.sort_by(|&lhs_index, &rhs_index| compare(&hits[lhs_index], &hits[rhs_index]));
 
-    for (dst, src) in indices.into_iter().enumerate() {
-        hits[dst] = original[src].clone();
+    apply_index_replay_permutation(hits, &mut indices);
+}
+
+fn apply_index_replay_permutation(hits: &mut [UngappedHit], indices: &mut [usize]) {
+    debug_assert_eq!(hits.len(), indices.len());
+
+    for start in 0..hits.len() {
+        if indices[start] == usize::MAX || indices[start] == start {
+            continue;
+        }
+
+        // NCBI reference: /mnt/c/Users/genom/GitHub/ncbi-blast/c++/src/algo/blast/core/blast_hits.c:1379-1381
+        // ```c
+        // qsort(hsp_list->hsp_array, hsp_list->hspcnt, sizeof(BlastHSP*),
+        //       ScoreCompareHSPs);
+        // ```
+        // NCBI sorts pointer arrays. This replays the same destination->source
+        // index order in place, avoiding the previous full HSP vector clone on
+        // Wasm while preserving the already-computed qsort/index order.
+        let saved = hits[start].clone();
+        let mut dst = start;
+
+        loop {
+            let src = indices[dst];
+            debug_assert_ne!(src, usize::MAX);
+            indices[dst] = usize::MAX;
+
+            if src == start {
+                hits[dst] = saved;
+                break;
+            }
+
+            hits[dst] = hits[src].clone();
+            dst = src;
+        }
     }
 }
 
@@ -130,18 +162,18 @@ mod native {
         hits: &mut [UngappedHit],
         compare: UngappedHitCompare,
     ) {
-        let original = hits.to_vec();
-        let mut indices: Vec<usize> = (0..original.len()).collect();
+        let mut indices: Vec<usize> = (0..hits.len()).collect();
         let ctx = QsortContext {
-            hits: original.as_ptr(),
-            len: original.len(),
+            hits: hits.as_ptr(),
+            len: hits.len(),
             compare,
         };
 
         QSORT_CONTEXT.with(|cell| {
             let previous = cell.replace(Some(ctx));
             // Safety: indices is a valid mutable array of usize elements; the
-            // comparator only reads from `original`, which outlives this call.
+            // comparator only reads from `hits`, which is not mutated until
+            // qsort returns and outlives this call.
             unsafe {
                 qsort(
                     indices.as_mut_ptr().cast::<c_void>(),
@@ -153,9 +185,7 @@ mod native {
             cell.set(previous);
         });
 
-        for (dst, src) in indices.into_iter().enumerate() {
-            hits[dst] = original[src].clone();
-        }
+        super::apply_index_replay_permutation(hits, &mut indices);
     }
 }
 
@@ -210,5 +240,21 @@ mod tests {
 
         let orders: Vec<usize> = hits.iter().map(|h| h.hsp_list_order).collect();
         assert_eq!(orders, vec![1, 2, 0, 3]);
+    }
+
+    #[test]
+    fn index_replay_permutation_handles_multi_element_cycles_in_place() {
+        // NCBI reference: /mnt/c/Users/genom/GitHub/ncbi-blast/c++/src/algo/blast/core/link_hsps.c:483-486
+        // ```c
+        // qsort(link_hsp_array,total_number_of_hsps,sizeof(LinkHSPStruct*),
+        //       s_RevCompareHSPsTbx);
+        // ```
+        let mut hits = vec![hit(0, 0), hit(0, 1), hit(0, 2), hit(0, 3), hit(0, 4)];
+        let mut indices = vec![2, 0, 1, 4, 3];
+
+        apply_index_replay_permutation(&mut hits, &mut indices);
+
+        let orders: Vec<usize> = hits.iter().map(|h| h.hsp_list_order).collect();
+        assert_eq!(orders, vec![2, 0, 1, 4, 3]);
     }
 }

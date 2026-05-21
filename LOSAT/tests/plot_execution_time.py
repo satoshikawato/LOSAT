@@ -19,8 +19,15 @@ LOSAT_THREADS = (
 )
 LOSAT_NATIVE_SINGLE_LABEL = "LOSAT native n1"
 LOSAT_NATIVE_MULTI_LABEL = f"LOSAT native n{LOSAT_THREADS}"
-LOSAT_WASM_SINGLE_LABEL = "LOSAT wasm n1"
-LOSAT_WASM_MULTI_LABEL = f"LOSAT wasm n{LOSAT_THREADS}"
+LOSAT_WASM_THREADS_VERIFIED = os.environ.get("LOSAT_WASM_THREADS_VERIFIED") == "1"
+LOSAT_WASM_SINGLE_LABEL = (
+    "LOSAT wasm n1" if LOSAT_WASM_THREADS_VERIFIED else "LOSAT wasm serial"
+)
+LOSAT_WASM_MULTI_LABEL = (
+    f"LOSAT wasm n{LOSAT_THREADS}"
+    if LOSAT_WASM_THREADS_VERIFIED
+    else f"LOSAT wasm serial (requested n{LOSAT_THREADS})"
+)
 
 # === Color Settings (Seaborn Deep Palette) ===
 # Explicitly define colors to match other plots
@@ -292,6 +299,30 @@ def add_wasm_suffix(log_name, suffix=None):
 def is_explicit_thread_log(log_name):
     return re.search(r"\.n\d+\.log$", log_name) is not None
 
+def parse_effective_engine_threads(filepath):
+    if not os.path.exists(filepath):
+        return None
+    try:
+        with open(filepath, "r") as f:
+            content = f.read()
+    except Exception:
+        return None
+    match = re.search(r"effective_engine_threads=(\d+)", content)
+    if match:
+        return int(match.group(1))
+    match = re.search(r"\[TIMING\] engine_threads: requested=\S+ effective=(\d+)", content)
+    if match:
+        return int(match.group(1))
+    return None
+
+def warn_if_serial_wasm_thread_label(tool, filepath):
+    if re.search(r"\bwasm n\d+\b", tool, flags=re.IGNORECASE):
+        effective_threads = parse_effective_engine_threads(filepath)
+        if effective_threads == 1:
+            print(
+                f"[Warning] {tool} label was produced from serial Wasm log: {filepath}"
+            )
+
 def parse_time(filepath):
     """Extract execution time (in seconds) from a log file."""
     if not os.path.exists(filepath):
@@ -354,7 +385,9 @@ def main():
             )
 
         for tool, log_dir, log_name in candidate_logs:
-            time_value = parse_time(os.path.join(log_dir, log_name))
+            log_path = os.path.join(log_dir, log_name)
+            warn_if_serial_wasm_thread_label(tool, log_path)
+            time_value = parse_time(log_path)
             if time_value is None:
                 missing.append(f"{tool}({log_name})")
                 continue
@@ -421,11 +454,11 @@ def main():
                 summary[LOSAT_NATIVE_SINGLE_LABEL] / summary[LOSAT_NATIVE_MULTI_LABEL]
             ).round(2)
         if {LOSAT_WASM_SINGLE_LABEL, LOSAT_WASM_MULTI_LABEL}.issubset(summary.columns):
-            summary[f"Speedup (wasm n1/wasm n{LOSAT_THREADS})"] = (
+            summary[f"Speedup ({LOSAT_WASM_SINGLE_LABEL}/{LOSAT_WASM_MULTI_LABEL})"] = (
                 summary[LOSAT_WASM_SINGLE_LABEL] / summary[LOSAT_WASM_MULTI_LABEL]
             ).round(2)
         if {LOSAT_NATIVE_SINGLE_LABEL, LOSAT_WASM_SINGLE_LABEL}.issubset(summary.columns):
-            summary["Ratio (wasm n1/native n1)"] = (
+            summary[f"Ratio ({LOSAT_WASM_SINGLE_LABEL}/native n1)"] = (
                 summary[LOSAT_WASM_SINGLE_LABEL] / summary[LOSAT_NATIVE_SINGLE_LABEL]
             ).round(2)
         print(summary)

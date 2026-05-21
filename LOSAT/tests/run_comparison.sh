@@ -16,6 +16,8 @@ LOSAT_WASM_BIN="${LOSAT_WASM_BIN:-../target/wasm32-wasip1/release/LOSAT.wasm}"
 LOSAT_WASM_RUNNER="./losat_out/run_losat_wasi.js"
 RUN_LOSAT_WASM="${RUN_LOSAT_WASM:-1}"
 BUILD_LOSAT_WASM="${BUILD_LOSAT_WASM:-0}"
+LOSAT_WASM_TARGET="${LOSAT_WASM_TARGET:-wasm32-wasip1}"
+LOSAT_WASM_FEATURES="${LOSAT_WASM_FEATURES:---no-default-features}"
 TBLASTX_BIN="${TBLASTX_BIN:-tblastx}"
 FASTA_DIR="${SCRIPT_DIR}/fasta"
 LOSAT_OUT_DIR="${SCRIPT_DIR}/losat_out"
@@ -63,6 +65,40 @@ resolve_losat_wasm_bin() {
     fi
 
     return 1
+}
+
+wasm_requested_num_threads() {
+    local expect_value=0
+    local arg
+
+    for arg in "$@"; do
+        if [ "${expect_value}" = "1" ]; then
+            printf '%s\n' "${arg}"
+            return 0
+        fi
+        case "${arg}" in
+            -n|-num_threads|--num_threads|--num-threads)
+                expect_value=1
+                ;;
+            --num_threads=*|--num-threads=*)
+                printf '%s\n' "${arg#*=}"
+                return 0
+                ;;
+        esac
+    done
+
+    printf 'unspecified\n'
+}
+
+wasm_rayon_compiled() {
+    case " ${LOSAT_WASM_FEATURES} " in
+        *" parallel "*|*"--features parallel"*|*"--features=parallel"*)
+            printf 'true\n'
+            ;;
+        *)
+            printf 'false\n'
+            ;;
+    esac
 }
 
 # ==========================================
@@ -290,9 +326,20 @@ JS
 
 run_losat_wasm() {
     local log="$1"
+    local requested_threads
     shift
 
-    (time env NODE_NO_WARNINGS=1 node "${LOSAT_WASM_RUNNER}" "${LOSAT_WASM_BIN}" "$@" )&>"${log}"
+    requested_threads="$(wasm_requested_num_threads "$@")"
+    {
+        printf '[WASM-METADATA] target_triple=%s\n' "${LOSAT_WASM_TARGET}"
+        printf '[WASM-METADATA] feature_set=%s\n' "${LOSAT_WASM_FEATURES}"
+        printf '[WASM-METADATA] rayon_compiled=%s\n' "$(wasm_rayon_compiled)"
+        printf '[WASM-METADATA] requested_num_threads=%s\n' "${requested_threads}"
+        printf '[WASM-METADATA] effective_engine_threads=1\n'
+        printf '[WASM-METADATA] wasi_runtime=node-wasi-preview1\n'
+        printf '[WASM-METADATA] node_version=%s\n' "$(node --version 2>/dev/null || printf 'unavailable')"
+        time env NODE_NO_WARNINGS=1 node "${LOSAT_WASM_RUNNER}" "${LOSAT_WASM_BIN}" "$@"
+    } &>"${log}"
 }
 
 run_losatn_wasm_case() {
@@ -389,7 +436,7 @@ if [ "${RUN_LOSAT_WASM}" = "0" ]; then
     echo "Skipping LOSAT Wasm commands because RUN_LOSAT_WASM=0."
 else
     if [ "${BUILD_LOSAT_WASM}" = "1" ]; then
-        (cd .. && cargo build --release --target wasm32-wasip1 --no-default-features)
+        (cd .. && cargo build --release --target "${LOSAT_WASM_TARGET}" ${LOSAT_WASM_FEATURES})
     fi
 
     if ! command -v node >/dev/null 2>&1; then

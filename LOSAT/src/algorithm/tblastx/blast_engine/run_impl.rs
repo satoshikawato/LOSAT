@@ -583,6 +583,12 @@ fn run_internal(args: TblastxArgs, mut in_memory: Option<TblastxInMemoryRun<'_>>
             }
         }
     };
+    if timing_enabled {
+        eprintln!(
+            "[TIMING] engine_threads: requested={} effective={}",
+            args.num_threads, num_threads
+        );
+    }
     // NCBI reference: ncbi-blast/c++/src/algo/blast/api/prelim_stage.cpp:82-88
     // ```c
     // if (num_threads > 1) {

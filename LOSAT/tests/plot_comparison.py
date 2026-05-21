@@ -22,8 +22,15 @@ LOSAT_THREADS = (
     or os.environ.get("LOSAT_BLASTP_THREADS")
     or "8"
 )
-LOSAT_WASM_SINGLE_LABEL = "LOSAT wasm n1"
-LOSAT_WASM_MULTI_LABEL = f"LOSAT wasm n{LOSAT_THREADS}"
+LOSAT_WASM_THREADS_VERIFIED = os.environ.get("LOSAT_WASM_THREADS_VERIFIED") == "1"
+LOSAT_WASM_SINGLE_LABEL = (
+    "LOSAT wasm n1" if LOSAT_WASM_THREADS_VERIFIED else "LOSAT wasm serial"
+)
+LOSAT_WASM_MULTI_LABEL = (
+    f"LOSAT wasm n{LOSAT_THREADS}"
+    if LOSAT_WASM_THREADS_VERIFIED
+    else f"LOSAT wasm serial (requested n{LOSAT_THREADS})"
+)
 
 # === Color Settings (Seaborn Deep Palette) ===
 CUSTOM_PALETTE = {
@@ -92,6 +99,37 @@ def losat_wasm_outputs(losat_path):
     ]
 
 
+def wasm_log_path_from_output(filepath):
+    return re.sub(r"\.out$", ".log", filepath)
+
+
+def parse_effective_engine_threads(filepath):
+    if not os.path.exists(filepath):
+        return None
+    try:
+        with open(filepath, "r") as f:
+            content = f.read()
+    except Exception:
+        return None
+    match = re.search(r"effective_engine_threads=(\d+)", content)
+    if match:
+        return int(match.group(1))
+    match = re.search(r"\[TIMING\] engine_threads: requested=\S+ effective=(\d+)", content)
+    if match:
+        return int(match.group(1))
+    return None
+
+
+def warn_if_serial_wasm_thread_label(tool_name, output_path):
+    if re.search(r"\bwasm n\d+\b", tool_name, flags=re.IGNORECASE):
+        log_path = wasm_log_path_from_output(output_path)
+        effective_threads = parse_effective_engine_threads(log_path)
+        if effective_threads == 1:
+            print(
+                f"[Warning] {tool_name} label was produced from serial Wasm log: {log_path}"
+            )
+
+
 def generate_comparison_plot(config):
     """Generate and save a comparison plot for a single pair."""
     name = config["name"]
@@ -108,6 +146,7 @@ def generate_comparison_plot(config):
         if not os.path.exists(wasm_path):
             print(f"  [Optional] Missing {tool_name}: {wasm_path}")
             continue
+        warn_if_serial_wasm_thread_label(tool_name, wasm_path)
         df_wasm = load_blast(wasm_path, tool_name)
         if df_wasm is not None:
             optional_frames.append(df_wasm)

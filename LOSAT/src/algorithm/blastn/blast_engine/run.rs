@@ -4409,6 +4409,12 @@ fn run_internal(args: BlastnArgs, mut in_memory: Option<BlastnInMemoryRun<'_>>) 
     } else {
         None
     };
+    if timing_enabled {
+        eprintln!(
+            "[TIMING] engine_threads: requested={} effective={}",
+            args.num_threads, num_threads
+        );
+    }
 
     // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_engine.c:478-536
     // ```c

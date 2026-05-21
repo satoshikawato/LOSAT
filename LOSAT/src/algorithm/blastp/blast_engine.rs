@@ -402,14 +402,7 @@ fn blastp_timing_start(enabled: bool) -> Option<Instant> {
 // ```
 #[inline]
 fn blastp_timing_env_enabled() -> bool {
-    #[cfg(target_arch = "wasm32")]
-    {
-        false
-    }
-    #[cfg(not(target_arch = "wasm32"))]
-    {
-        std::env::var_os("LOSAT_TIMING").is_some()
-    }
+    std::env::var_os("LOSAT_TIMING").is_some()
 }
 
 // NCBI reference: /mnt/c/Users/genom/GitHub/ncbi-blast/c++/src/algo/blast/core/blast_engine.c:1633-1705
@@ -928,13 +921,20 @@ fn build_redone_match_heaps(num_queries: usize, hitlist_size: usize) -> Vec<Blas
 //     m_NumThreads = num_threads;
 // }
 // ```
-#[cfg(all(feature = "parallel", not(target_arch = "wasm32")))]
 fn blastp_effective_num_threads(requested: usize) -> usize {
-    let cpu_count = num_cpus::get().max(1);
-    if requested == 0 {
-        cpu_count
-    } else {
-        requested.min(cpu_count)
+    #[cfg(all(feature = "parallel", not(target_arch = "wasm32")))]
+    {
+        let cpu_count = num_cpus::get().max(1);
+        if requested == 0 {
+            cpu_count
+        } else {
+            requested.min(cpu_count)
+        }
+    }
+    #[cfg(any(not(feature = "parallel"), target_arch = "wasm32"))]
+    {
+        let _ = requested;
+        1
     }
 }
 
@@ -3855,6 +3855,13 @@ fn run_resolved_with_records(
     } else {
         None
     };
+    if timing_enabled {
+        eprintln!(
+            "[TIMING] engine_threads: requested={} effective={}",
+            args.num_threads,
+            blastp_effective_num_threads(args.num_threads)
+        );
+    }
 
     let (outfmt, custom_fields) = OutputFormat::parse(&args.outfmt).map_err(anyhow::Error::msg)?;
     if outfmt == OutputFormat::Pairwise && custom_fields.is_some() {

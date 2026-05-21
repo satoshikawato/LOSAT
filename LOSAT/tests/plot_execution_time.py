@@ -19,15 +19,55 @@ LOSAT_THREADS = (
 )
 LOSAT_NATIVE_SINGLE_LABEL = "LOSAT native n1"
 LOSAT_NATIVE_MULTI_LABEL = f"LOSAT native n{LOSAT_THREADS}"
+LOSAT_WASM_SIMD_LABEL = "LOSAT Wasm SIMD"
+LOSAT_WASM_SCALAR_LABEL = "LOSAT Wasm scalar"
 LOSAT_WASM_THREADS_VERIFIED = os.environ.get("LOSAT_WASM_THREADS_VERIFIED") == "1"
-LOSAT_WASM_SINGLE_LABEL = (
-    "LOSAT wasm n1" if LOSAT_WASM_THREADS_VERIFIED else "LOSAT wasm serial"
+LOSAT_WASM_EXECUTION_MODE = os.environ.get(
+    "LOSAT_WASM_EXECUTION_MODE", "command-wasi-serial"
 )
-LOSAT_WASM_MULTI_LABEL = (
-    f"LOSAT wasm n{LOSAT_THREADS}"
-    if LOSAT_WASM_THREADS_VERIFIED
-    else f"LOSAT wasm serial (requested n{LOSAT_THREADS})"
-)
+
+
+# NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_engine.c:1407-1427
+# ```c
+# db_length = BlastSeqSrcGetTotLen(seq_src);
+# itr = BlastSeqSrcIteratorNewEx(MAX(BlastSeqSrcGetNumSeqs(seq_src)/100,1));
+# while ((seq_arg.oid = BlastSeqSrcIteratorNext(seq_src, itr)) != BLAST_SEQSRC_EOF) {
+#     if (BlastSeqSrcGetSequence(seq_src, &seq_arg) < 0) {
+#         continue;
+#     }
+# }
+# ```
+def wasm_mode_labels():
+    if LOSAT_WASM_EXECUTION_MODE == "command-wasi-serial":
+        return (
+            "LOSAT command-WASI serial",
+            f"LOSAT command-WASI serial (requested n{LOSAT_THREADS})",
+        )
+    if LOSAT_WASM_EXECUTION_MODE == "browser-in-memory-serial":
+        return (
+            "LOSAT browser in-memory serial",
+            f"LOSAT browser in-memory serial (requested n{LOSAT_THREADS})",
+        )
+    if LOSAT_WASM_EXECUTION_MODE == "browser-worker-parallel":
+        if LOSAT_WASM_THREADS_VERIFIED:
+            return ("LOSAT browser worker n1", f"LOSAT browser worker n{LOSAT_THREADS}")
+        return (
+            "LOSAT browser worker unverified",
+            f"LOSAT browser worker unverified (requested n{LOSAT_THREADS})",
+        )
+    if LOSAT_WASM_EXECUTION_MODE == "future-wasi-threaded":
+        if LOSAT_WASM_THREADS_VERIFIED:
+            return ("LOSAT WASI threaded n1", f"LOSAT WASI threaded n{LOSAT_THREADS}")
+        return (
+            "LOSAT WASI threaded unverified",
+            f"LOSAT WASI threaded unverified (requested n{LOSAT_THREADS})",
+        )
+    if LOSAT_WASM_THREADS_VERIFIED:
+        return ("LOSAT wasm n1", f"LOSAT wasm n{LOSAT_THREADS}")
+    return ("LOSAT wasm serial", f"LOSAT wasm serial (requested n{LOSAT_THREADS})")
+
+
+LOSAT_WASM_SINGLE_LABEL, LOSAT_WASM_MULTI_LABEL = wasm_mode_labels()
 
 # === Color Settings (Seaborn Deep Palette) ===
 # Explicitly define colors to match other plots
@@ -38,6 +78,8 @@ CUSTOM_PALETTE = {
     LOSAT_NATIVE_MULTI_LABEL: "#c44e52",
     LOSAT_WASM_SINGLE_LABEL: "#8172b3",
     LOSAT_WASM_MULTI_LABEL: "#937860",
+    LOSAT_WASM_SIMD_LABEL: "#64b5cd",
+    LOSAT_WASM_SCALAR_LABEL: "#da8bc3",
 }
 
 # === Comparison List (Full Version) ===
@@ -296,6 +338,17 @@ def add_wasm_suffix(log_name, suffix=None):
         return f"{stem}.wasm.{suffix}.log"
     return f"{stem}.wasm.log"
 
+
+# NCBI reference: ncbi-blast/c++/src/algo/blast/core/aa_ungapped.c:846-921
+# ```c
+# s_BlastAaExtendTwoHit(query, subject, word_params, ext_params,
+#                       hit_params, init_hitlist, hsp_list);
+# ```
+def add_wasm_build_suffix(log_name, build_mode):
+    if not log_name.endswith(".log"):
+        return f"{log_name}.wasm.{build_mode}.log"
+    return f"{log_name[:-4]}.wasm.{build_mode}.log"
+
 def is_explicit_thread_log(log_name):
     return re.search(r"\.n\d+\.log$", log_name) is not None
 
@@ -374,6 +427,13 @@ def main():
             candidate_logs.append(
                 (LOSAT_WASM_MULTI_LABEL, LOG_DIR_LOSAT, add_wasm_suffix(base_losat_log, threaded_suffix))
             )
+            if item["mode"] == "TBLASTX":
+                candidate_logs.append(
+                    (LOSAT_WASM_SIMD_LABEL, LOG_DIR_LOSAT, add_wasm_build_suffix(base_losat_log, "simd"))
+                )
+                candidate_logs.append(
+                    (LOSAT_WASM_SCALAR_LABEL, LOG_DIR_LOSAT, add_wasm_build_suffix(base_losat_log, "scalar"))
+                )
         else:
             candidate_logs.append((LOSAT_NATIVE_SINGLE_LABEL, LOG_DIR_LOSAT, losat_log))
             candidate_logs.append(
@@ -383,6 +443,13 @@ def main():
             candidate_logs.append(
                 (LOSAT_WASM_MULTI_LABEL, LOG_DIR_LOSAT, add_wasm_suffix(losat_log, threaded_suffix))
             )
+            if item["mode"] == "TBLASTX":
+                candidate_logs.append(
+                    (LOSAT_WASM_SIMD_LABEL, LOG_DIR_LOSAT, add_wasm_build_suffix(losat_log, "simd"))
+                )
+                candidate_logs.append(
+                    (LOSAT_WASM_SCALAR_LABEL, LOG_DIR_LOSAT, add_wasm_build_suffix(losat_log, "scalar"))
+                )
 
         for tool, log_dir, log_name in candidate_logs:
             log_path = os.path.join(log_dir, log_name)
@@ -418,6 +485,8 @@ def main():
         LOSAT_NATIVE_MULTI_LABEL,
         LOSAT_WASM_SINGLE_LABEL,
         LOSAT_WASM_MULTI_LABEL,
+        LOSAT_WASM_SIMD_LABEL,
+        LOSAT_WASM_SCALAR_LABEL,
         "LOSAT",
     ]
     g = sns.catplot(
@@ -434,7 +503,7 @@ def main():
     
     g.despine(left=True)
     g.set_axis_labels("Execution Time (seconds)", "")
-    g.fig.suptitle("Execution Time Comparison: BLAST+ vs LOSAT Native/Wasm Threads", y=1.02)
+    g.fig.suptitle("Execution Time Comparison: BLAST+ vs LOSAT Native/Wasm Modes", y=1.02)
     
     # Save
     os.makedirs(os.path.dirname(OUTPUT_IMAGE), exist_ok=True)
@@ -456,6 +525,10 @@ def main():
         if {LOSAT_WASM_SINGLE_LABEL, LOSAT_WASM_MULTI_LABEL}.issubset(summary.columns):
             summary[f"Speedup ({LOSAT_WASM_SINGLE_LABEL}/{LOSAT_WASM_MULTI_LABEL})"] = (
                 summary[LOSAT_WASM_SINGLE_LABEL] / summary[LOSAT_WASM_MULTI_LABEL]
+            ).round(2)
+        if {LOSAT_WASM_SCALAR_LABEL, LOSAT_WASM_SIMD_LABEL}.issubset(summary.columns):
+            summary["Speedup (Wasm scalar/SIMD)"] = (
+                summary[LOSAT_WASM_SCALAR_LABEL] / summary[LOSAT_WASM_SIMD_LABEL]
             ).round(2)
         if {LOSAT_NATIVE_SINGLE_LABEL, LOSAT_WASM_SINGLE_LABEL}.issubset(summary.columns):
             summary[f"Ratio ({LOSAT_WASM_SINGLE_LABEL}/native n1)"] = (

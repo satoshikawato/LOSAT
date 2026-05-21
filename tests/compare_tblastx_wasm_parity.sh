@@ -18,6 +18,8 @@ QUERY="$CRATE_DIR/tests/fasta/LC738874.fasta"
 SUBJECT="$CRATE_DIR/tests/fasta/LC738875.fasta"
 OUTFMT="6"
 THREADS="1"
+ALLOW_LOSAT_INTERNAL_DIFFS="${ALLOW_LOSAT_INTERNAL_DIFFS:-0}"
+REQUIRE_NCBI_TBLASTX_PARITY="${REQUIRE_NCBI_TBLASTX_PARITY:-0}"
 
 NATIVE_BIN="$CRATE_DIR/target/release/LOSAT"
 WASM_BIN="$CRATE_DIR/target/wasm32-wasip1/release/LOSAT.wasm"
@@ -87,6 +89,21 @@ compare_sorted() {
     >"$SCRATCH_DIR/${left}_vs_${right}.comm3"
 }
 
+# NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_engine.c:1407-1427
+# ```c
+# while ((seq_arg.oid = BlastSeqSrcIteratorNext(seq_src, itr)) != BLAST_SEQSRC_EOF) {
+#     if (BlastSeqSrcGetSequence(seq_src, &seq_arg) < 0) {
+#         continue;
+#     }
+# }
+# ```
+compare_raw() {
+  local left="$1"
+  local right="$2"
+  diff -u "$SCRATCH_DIR/${left}.raw.out" "$SCRATCH_DIR/${right}.raw.out" \
+    >"$SCRATCH_DIR/${left}_vs_${right}.raw.diff" || true
+}
+
 (
   cd "$CRATE_DIR"
   cargo build --release
@@ -118,10 +135,16 @@ fi
 compare_sorted native wasm_simd
 compare_sorted native wasm_scalar
 compare_sorted wasm_scalar wasm_simd
+compare_raw native wasm_simd
+compare_raw native wasm_scalar
+compare_raw wasm_scalar wasm_simd
 if [[ -f "$SCRATCH_DIR/ncbi.raw.out" ]]; then
   compare_sorted ncbi native
   compare_sorted ncbi wasm_simd
   compare_sorted ncbi wasm_scalar
+  compare_raw ncbi native
+  compare_raw ncbi wasm_simd
+  compare_raw ncbi wasm_scalar
 fi
 
 {
@@ -136,6 +159,50 @@ fi
   wc -l <"$SCRATCH_DIR/native_vs_wasm_scalar.comm3"
   printf 'wasm_scalar_vs_wasm_simd_diff_lines\t'
   wc -l <"$SCRATCH_DIR/wasm_scalar_vs_wasm_simd.comm3"
+  printf 'native_vs_wasm_simd_raw_diff_lines\t'
+  wc -l <"$SCRATCH_DIR/native_vs_wasm_simd.raw.diff"
+  printf 'native_vs_wasm_scalar_raw_diff_lines\t'
+  wc -l <"$SCRATCH_DIR/native_vs_wasm_scalar.raw.diff"
+  printf 'wasm_scalar_vs_wasm_simd_raw_diff_lines\t'
+  wc -l <"$SCRATCH_DIR/wasm_scalar_vs_wasm_simd.raw.diff"
+  if [[ -f "$SCRATCH_DIR/ncbi.raw.out" ]]; then
+    printf 'ncbi_vs_native_raw_diff_lines\t'
+    wc -l <"$SCRATCH_DIR/ncbi_vs_native.raw.diff"
+    printf 'ncbi_vs_wasm_simd_raw_diff_lines\t'
+    wc -l <"$SCRATCH_DIR/ncbi_vs_wasm_simd.raw.diff"
+    printf 'ncbi_vs_wasm_scalar_raw_diff_lines\t'
+    wc -l <"$SCRATCH_DIR/ncbi_vs_wasm_scalar.raw.diff"
+  fi
 } >"$SCRATCH_DIR/README.tsv"
+
+losat_internal_raw_diff_lines=$(
+  awk -F'\t' '
+    $1 == "native_vs_wasm_simd_raw_diff_lines" ||
+    $1 == "native_vs_wasm_scalar_raw_diff_lines" ||
+    $1 == "wasm_scalar_vs_wasm_simd_raw_diff_lines" { total += $2 }
+    END { print total + 0 }
+  ' "$SCRATCH_DIR/README.tsv"
+)
+
+if [[ "$losat_internal_raw_diff_lines" -ne 0 && "$ALLOW_LOSAT_INTERNAL_DIFFS" != "1" ]]; then
+  printf 'LOSAT native/Wasm scalar/Wasm SIMD raw outputs differ; inspect %s/*.raw.diff\n' \
+    "$SCRATCH_DIR" >&2
+  exit 1
+fi
+
+if [[ "$REQUIRE_NCBI_TBLASTX_PARITY" == "1" && -f "$SCRATCH_DIR/ncbi.raw.out" ]]; then
+  ncbi_raw_diff_lines=$(
+    awk -F'\t' '
+      $1 == "ncbi_vs_native_raw_diff_lines" ||
+      $1 == "ncbi_vs_wasm_simd_raw_diff_lines" ||
+      $1 == "ncbi_vs_wasm_scalar_raw_diff_lines" { total += $2 }
+      END { print total + 0 }
+    ' "$SCRATCH_DIR/README.tsv"
+  )
+  if [[ "$ncbi_raw_diff_lines" -ne 0 ]]; then
+    printf 'NCBI oracle output differs; inspect %s/*.raw.diff\n' "$SCRATCH_DIR" >&2
+    exit 1
+  fi
+fi
 
 printf 'Wrote TBLASTX Wasm parity artifacts to %s\n' "$SCRATCH_DIR"

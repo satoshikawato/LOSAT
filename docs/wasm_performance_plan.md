@@ -223,27 +223,56 @@ Use NCBI BLAST+ only in comparison scripts or manual oracle runs.
 Status as of 2026-05-21:
 
 - Phase 1 is implemented.
-  - Current command-Wasm plot labels now default to `LOSAT wasm serial` and
-    `LOSAT wasm serial (requested nN)`.
+  - Current command-Wasm plot labels now default to `LOSAT command-WASI
+    serial` and `LOSAT command-WASI serial (requested nN)`.
   - `LOSAT_WASM_THREADS_VERIFIED=1` is required before plot scripts emit
-    `LOSAT wasm nN` labels for Wasm runs.
+    `LOSAT wasm nN` or mode-specific threaded labels for Wasm runs.
   - TBLASTX, BLASTN, and BLASTP print requested and effective engine thread
     counts when `LOSAT_TIMING=1`.
   - `tests/run_comparison.sh` records command-Wasm metadata in each Wasm log:
     target triple, feature set, Rayon compile status, requested thread count,
-    effective engine thread count, WASI runtime label, and Node version.
+    effective engine thread count, execution mode, threading status, benchmark
+    label, WASI runtime label, and Node version.
   - Plot scripts warn if a `wasm nN` label is produced from a log whose
     effective engine thread count is `1`.
-- Phase 2 is not implemented.
-  - Wasm execution modes are not yet fully split into command-WASI serial,
-    browser in-memory serial, browser worker-parallel, and future
-    WASI-threaded runtime paths.
-  - Browser worker parallelism has not been prototyped.
-- Phase 3 is not implemented.
-  - Single-thread Wasm bucket benchmarking and hot-path allocation
-    optimization are still pending.
-- Phase 4 is not implemented beyond the existing `tblastx-wasm-scalar`
-  diagnostic feature.
-  - Scalar-vs-SIMD benchmark rows and additional SIMD parity gates are still
-    pending.
+- Phase 2 is partially implemented.
+  - `tests/run_comparison.sh` now has an explicit `LOSAT_WASM_EXECUTION_MODE`
+    switch with named modes: `command-wasi-serial`,
+    `browser-in-memory-serial`, `browser-worker-parallel`, and
+    `future-wasi-threaded`.
+  - `tests/run_comparison.sh` only executes `command-wasi-serial`; browser and
+    future threaded modes are skipped with an explicit message so they cannot be
+    confused with command-WASI serial runs.
+  - `tests/plot_execution_time.py` and `tests/plot_comparison.py` derive Wasm
+    labels from `LOSAT_WASM_EXECUTION_MODE`, so plots can distinguish
+    command-WASI serial, browser in-memory serial, browser worker, and future
+    WASI-threaded results.
+  - Browser worker parallelism remains intentionally disabled/unverified; no
+    worker-partitioned BLAST output is accepted until order, pruning,
+    statistics, and project `db_gencode` rules pass parity.
+- Phase 3 is partially implemented.
+  - Added `tests/benchmark_wasm_serial_modes.sh` to benchmark command-WASI
+    file-I/O execution against the `web_api.rs` browser/in-memory execution
+    path on the same fixture.
+  - The serial-mode benchmark records mode metadata and diffs command-WASI
+    output against browser in-memory output before accepting the measurement.
+  - Hot-path allocation optimization remains pending.
+- Phase 4 is partially implemented.
+  - `tblastx-wasm-scalar` remains the diagnostic feature for forcing the
+    scalar TBLASTX Wasm path.
+  - Added `LOSAT/tests/benchmark_tblastx_wasm_simd_modes.sh` to build/capture
+    command-WASI TBLASTX SIMD and scalar artifacts separately, run them against
+    the same fixture, record timing/metadata, and reject native-vs-scalar-vs-SIMD
+    raw output differences by default.
+  - `tests/compare_tblastx_wasm_parity.sh` now records raw byte diffs in
+    addition to sorted diffs and fails by default when LOSAT native, Wasm SIMD,
+    and Wasm scalar outputs differ. NCBI oracle raw-diff failure remains
+    opt-in with `REQUIRE_NCBI_TBLASTX_PARITY=1` because known TBLASTX parity
+    defects are tracked separately from the Wasm SIMD-vs-scalar gate.
+  - `LOSAT/tests/plot_execution_time.py` and
+    `LOSAT/tests/plot_comparison.py` now include optional TBLASTX
+    `LOSAT Wasm SIMD` and `LOSAT Wasm scalar` rows/series when matching
+    `.wasm.simd.*` and `.wasm.scalar.*` artifacts are present.
+  - Per-routine SIMD profiling for reevaluation, left/right ungapped extension,
+    and two-hit scan helpers is still pending.
 - Phase 5 remains an ongoing constraint for all later optimization work.

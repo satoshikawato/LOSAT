@@ -18,6 +18,8 @@ RUN_LOSAT_WASM="${RUN_LOSAT_WASM:-1}"
 BUILD_LOSAT_WASM="${BUILD_LOSAT_WASM:-0}"
 LOSAT_WASM_TARGET="${LOSAT_WASM_TARGET:-wasm32-wasip1}"
 LOSAT_WASM_FEATURES="${LOSAT_WASM_FEATURES:---no-default-features}"
+LOSAT_WASM_EXECUTION_MODE="${LOSAT_WASM_EXECUTION_MODE:-command-wasi-serial}"
+LOSAT_WASM_THREADS_VERIFIED="${LOSAT_WASM_THREADS_VERIFIED:-0}"
 TBLASTX_BIN="${TBLASTX_BIN:-tblastx}"
 FASTA_DIR="${SCRIPT_DIR}/fasta"
 LOSAT_OUT_DIR="${SCRIPT_DIR}/losat_out"
@@ -97,6 +99,112 @@ wasm_rayon_compiled() {
             ;;
         *)
             printf 'false\n'
+            ;;
+    esac
+}
+
+# NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_engine.c:1407-1427
+# ```c
+# db_length = BlastSeqSrcGetTotLen(seq_src);
+# itr = BlastSeqSrcIteratorNewEx(MAX(BlastSeqSrcGetNumSeqs(seq_src)/100,1));
+# while ((seq_arg.oid = BlastSeqSrcIteratorNext(seq_src, itr)) != BLAST_SEQSRC_EOF) {
+#     if (BlastSeqSrcGetSequence(seq_src, &seq_arg) < 0) {
+#         continue;
+#     }
+# }
+# ```
+wasm_effective_engine_threads() {
+    case "${LOSAT_WASM_EXECUTION_MODE}" in
+        command-wasi-serial|browser-in-memory-serial)
+            printf '1\n'
+            ;;
+        browser-worker-parallel|future-wasi-threaded)
+            if [ "${LOSAT_WASM_THREADS_VERIFIED}" = "1" ]; then
+                printf '%s\n' "$1"
+            else
+                printf '1\n'
+            fi
+            ;;
+        *)
+            printf 'unknown\n'
+            ;;
+    esac
+}
+
+# NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_engine.c:1407-1427
+# ```c
+# while ((seq_arg.oid = BlastSeqSrcIteratorNext(seq_src, itr)) != BLAST_SEQSRC_EOF) {
+#     if (BlastSeqSrcGetSequence(seq_src, &seq_arg) < 0) {
+#         continue;
+#     }
+# }
+# ```
+wasm_threading_status() {
+    case "${LOSAT_WASM_EXECUTION_MODE}" in
+        command-wasi-serial)
+            printf 'serial-command-wasi\n'
+            ;;
+        browser-in-memory-serial)
+            printf 'serial-browser-in-memory\n'
+            ;;
+        browser-worker-parallel)
+            if [ "${LOSAT_WASM_THREADS_VERIFIED}" = "1" ]; then
+                printf 'verified-browser-worker-parallel\n'
+            else
+                printf 'unverified-browser-worker-parallel-disabled\n'
+            fi
+            ;;
+        future-wasi-threaded)
+            if [ "${LOSAT_WASM_THREADS_VERIFIED}" = "1" ]; then
+                printf 'verified-wasi-threaded\n'
+            else
+                printf 'unverified-wasi-threaded-disabled\n'
+            fi
+            ;;
+        *)
+            printf 'unknown\n'
+            ;;
+    esac
+}
+
+# NCBI reference: ncbi-blast/c++/src/algo/blast/blastinput/cmdline_flags.cpp:75
+# ```c
+# const string kArgNumThreads("num_threads");
+# ```
+wasm_benchmark_label() {
+    local requested_threads="$1"
+
+    case "${LOSAT_WASM_EXECUTION_MODE}" in
+        command-wasi-serial)
+            if [ "${requested_threads}" = "1" ]; then
+                printf 'LOSAT command-WASI serial\n'
+            else
+                printf 'LOSAT command-WASI serial (requested n%s)\n' "${requested_threads}"
+            fi
+            ;;
+        browser-in-memory-serial)
+            if [ "${requested_threads}" = "1" ]; then
+                printf 'LOSAT browser in-memory serial\n'
+            else
+                printf 'LOSAT browser in-memory serial (requested n%s)\n' "${requested_threads}"
+            fi
+            ;;
+        browser-worker-parallel)
+            if [ "${LOSAT_WASM_THREADS_VERIFIED}" = "1" ]; then
+                printf 'LOSAT browser worker n%s\n' "${requested_threads}"
+            else
+                printf 'LOSAT browser worker unverified (requested n%s)\n' "${requested_threads}"
+            fi
+            ;;
+        future-wasi-threaded)
+            if [ "${LOSAT_WASM_THREADS_VERIFIED}" = "1" ]; then
+                printf 'LOSAT WASI threaded n%s\n' "${requested_threads}"
+            else
+                printf 'LOSAT WASI threaded unverified (requested n%s)\n' "${requested_threads}"
+            fi
+            ;;
+        *)
+            printf 'LOSAT wasm unknown-mode\n'
             ;;
     esac
 }
@@ -327,15 +435,21 @@ JS
 run_losat_wasm() {
     local log="$1"
     local requested_threads
+    local effective_threads
     shift
 
     requested_threads="$(wasm_requested_num_threads "$@")"
+    effective_threads="$(wasm_effective_engine_threads "${requested_threads}")"
     {
         printf '[WASM-METADATA] target_triple=%s\n' "${LOSAT_WASM_TARGET}"
         printf '[WASM-METADATA] feature_set=%s\n' "${LOSAT_WASM_FEATURES}"
+        printf '[WASM-METADATA] execution_mode=%s\n' "${LOSAT_WASM_EXECUTION_MODE}"
+        printf '[WASM-METADATA] threading_status=%s\n' "$(wasm_threading_status)"
         printf '[WASM-METADATA] rayon_compiled=%s\n' "$(wasm_rayon_compiled)"
         printf '[WASM-METADATA] requested_num_threads=%s\n' "${requested_threads}"
-        printf '[WASM-METADATA] effective_engine_threads=1\n'
+        printf '[WASM-METADATA] effective_engine_threads=%s\n' "${effective_threads}"
+        printf '[WASM-METADATA] benchmark_label=%s\n' "$(wasm_benchmark_label "${requested_threads}")"
+        printf '[WASM-METADATA] browser_worker_parallel_verified=false\n'
         printf '[WASM-METADATA] wasi_runtime=node-wasi-preview1\n'
         printf '[WASM-METADATA] node_version=%s\n' "$(node --version 2>/dev/null || printf 'unavailable')"
         time env NODE_NO_WARNINGS=1 node "${LOSAT_WASM_RUNNER}" "${LOSAT_WASM_BIN}" "$@"
@@ -434,6 +548,9 @@ run_tlosatx_wasm_case() {
 
 if [ "${RUN_LOSAT_WASM}" = "0" ]; then
     echo "Skipping LOSAT Wasm commands because RUN_LOSAT_WASM=0."
+elif [ "${LOSAT_WASM_EXECUTION_MODE}" != "command-wasi-serial" ]; then
+    echo "Skipping LOSAT command-Wasm commands because run_comparison.sh only executes command-wasi-serial mode."
+    echo "Requested LOSAT_WASM_EXECUTION_MODE=${LOSAT_WASM_EXECUTION_MODE}; use a browser/web_api harness for browser modes or a dedicated WASI-threaded runner once verified."
 else
     if [ "${BUILD_LOSAT_WASM}" = "1" ]; then
         (cd .. && cargo build --release --target "${LOSAT_WASM_TARGET}" ${LOSAT_WASM_FEATURES})

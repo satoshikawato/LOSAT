@@ -23,14 +23,54 @@ LOSAT_THREADS = (
     or "8"
 )
 LOSAT_WASM_THREADS_VERIFIED = os.environ.get("LOSAT_WASM_THREADS_VERIFIED") == "1"
-LOSAT_WASM_SINGLE_LABEL = (
-    "LOSAT wasm n1" if LOSAT_WASM_THREADS_VERIFIED else "LOSAT wasm serial"
+LOSAT_WASM_EXECUTION_MODE = os.environ.get(
+    "LOSAT_WASM_EXECUTION_MODE", "command-wasi-serial"
 )
-LOSAT_WASM_MULTI_LABEL = (
-    f"LOSAT wasm n{LOSAT_THREADS}"
-    if LOSAT_WASM_THREADS_VERIFIED
-    else f"LOSAT wasm serial (requested n{LOSAT_THREADS})"
-)
+LOSAT_WASM_SIMD_LABEL = "LOSAT Wasm SIMD"
+LOSAT_WASM_SCALAR_LABEL = "LOSAT Wasm scalar"
+
+
+# NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_engine.c:1407-1427
+# ```c
+# db_length = BlastSeqSrcGetTotLen(seq_src);
+# itr = BlastSeqSrcIteratorNewEx(MAX(BlastSeqSrcGetNumSeqs(seq_src)/100,1));
+# while ((seq_arg.oid = BlastSeqSrcIteratorNext(seq_src, itr)) != BLAST_SEQSRC_EOF) {
+#     if (BlastSeqSrcGetSequence(seq_src, &seq_arg) < 0) {
+#         continue;
+#     }
+# }
+# ```
+def wasm_mode_labels():
+    if LOSAT_WASM_EXECUTION_MODE == "command-wasi-serial":
+        return (
+            "LOSAT command-WASI serial",
+            f"LOSAT command-WASI serial (requested n{LOSAT_THREADS})",
+        )
+    if LOSAT_WASM_EXECUTION_MODE == "browser-in-memory-serial":
+        return (
+            "LOSAT browser in-memory serial",
+            f"LOSAT browser in-memory serial (requested n{LOSAT_THREADS})",
+        )
+    if LOSAT_WASM_EXECUTION_MODE == "browser-worker-parallel":
+        if LOSAT_WASM_THREADS_VERIFIED:
+            return ("LOSAT browser worker n1", f"LOSAT browser worker n{LOSAT_THREADS}")
+        return (
+            "LOSAT browser worker unverified",
+            f"LOSAT browser worker unverified (requested n{LOSAT_THREADS})",
+        )
+    if LOSAT_WASM_EXECUTION_MODE == "future-wasi-threaded":
+        if LOSAT_WASM_THREADS_VERIFIED:
+            return ("LOSAT WASI threaded n1", f"LOSAT WASI threaded n{LOSAT_THREADS}")
+        return (
+            "LOSAT WASI threaded unverified",
+            f"LOSAT WASI threaded unverified (requested n{LOSAT_THREADS})",
+        )
+    if LOSAT_WASM_THREADS_VERIFIED:
+        return ("LOSAT wasm n1", f"LOSAT wasm n{LOSAT_THREADS}")
+    return ("LOSAT wasm serial", f"LOSAT wasm serial (requested n{LOSAT_THREADS})")
+
+
+LOSAT_WASM_SINGLE_LABEL, LOSAT_WASM_MULTI_LABEL = wasm_mode_labels()
 
 # === Color Settings (Seaborn Deep Palette) ===
 CUSTOM_PALETTE = {
@@ -38,8 +78,17 @@ CUSTOM_PALETTE = {
     "BLAST+": "#4c72b0",
     LOSAT_WASM_SINGLE_LABEL: "#8172b3",
     LOSAT_WASM_MULTI_LABEL: "#937860",
+    LOSAT_WASM_SIMD_LABEL: "#64b5cd",
+    LOSAT_WASM_SCALAR_LABEL: "#da8bc3",
 }
-HUE_ORDER = ["BLAST+", "LOSAT", LOSAT_WASM_SINGLE_LABEL, LOSAT_WASM_MULTI_LABEL]
+HUE_ORDER = [
+    "BLAST+",
+    "LOSAT",
+    LOSAT_WASM_SINGLE_LABEL,
+    LOSAT_WASM_MULTI_LABEL,
+    LOSAT_WASM_SIMD_LABEL,
+    LOSAT_WASM_SCALAR_LABEL,
+]
 
 # === Column Definitions (outfmt 7 / 6) ===
 COLUMNS = [
@@ -89,14 +138,34 @@ def add_wasm_suffix(filepath, suffix=None):
     return f"{stem}.wasm.out"
 
 
-def losat_wasm_outputs(losat_path):
+# NCBI reference: ncbi-blast/c++/src/algo/blast/core/aa_ungapped.c:846-921
+# ```c
+# status =
+#     s_BlastAaExtendTwoHit(query, subject, word_params, ext_params,
+#                           hit_params, init_hitlist, hsp_list);
+# ```
+def add_wasm_build_suffix(filepath, build_mode):
+    if not filepath.endswith(".out"):
+        return f"{filepath}.wasm.{build_mode}.out"
+    return f"{filepath[:-4]}.wasm.{build_mode}.out"
+
+
+def losat_wasm_outputs(losat_path, mode_label):
     threaded_suffix = f"n{LOSAT_THREADS}"
     base_path = strip_thread_suffix(losat_path)
 
-    return [
+    outputs = [
         (LOSAT_WASM_SINGLE_LABEL, add_wasm_suffix(base_path)),
         (LOSAT_WASM_MULTI_LABEL, add_wasm_suffix(base_path, threaded_suffix)),
     ]
+    if mode_label == "TBLASTX":
+        outputs.extend(
+            [
+                (LOSAT_WASM_SIMD_LABEL, add_wasm_build_suffix(base_path, "simd")),
+                (LOSAT_WASM_SCALAR_LABEL, add_wasm_build_suffix(base_path, "scalar")),
+            ]
+        )
+    return outputs
 
 
 def wasm_log_path_from_output(filepath):
@@ -142,7 +211,7 @@ def generate_comparison_plot(config):
     df_ncbi = load_blast(ncbi_path, "BLAST+")
     df_losat = load_blast(losat_path, "LOSAT")
     optional_frames = []
-    for tool_name, wasm_path in losat_wasm_outputs(losat_path):
+    for tool_name, wasm_path in losat_wasm_outputs(losat_path, mode_label):
         if not os.path.exists(wasm_path):
             print(f"  [Optional] Missing {tool_name}: {wasm_path}")
             continue

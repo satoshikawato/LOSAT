@@ -3256,6 +3256,14 @@ struct SubjectScratch {
     //           &(gap_align->edit_script), &new_hsp);
     // ```
     prelim_hits: Vec<PrelimHit>,
+    // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_hits.c:3029
+    // ```c
+    // s_BlastHSPListsCombineByScore(hsp_list, combined_hsp_list, new_hspcnt);
+    // ```
+    // Reused storage for the per-subject preliminary HSP list assembled before
+    // traceback. NCBI owns one mutable HSP list through this phase; Rust keeps
+    // the same subject-local lifetime while avoiding a fresh Vec allocation.
+    combined_prelim_hits: Vec<PrelimHit>,
     ungapped_hits: Vec<UngappedHit>,
     // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_gapalign.c:356-357
     // ```c
@@ -3310,6 +3318,16 @@ struct SubjectScratch {
     // }
     // ```
     diag_table_offset: i32,
+    // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_traceback.c:371-373
+    // ```c
+    // tree = Blast_IntervalTreeInit(0, query_blk->length + 1,
+    //                               0, subject_length + 1);
+    // ```
+    // NCBI allocates an interval tree for traceback and resets it for later
+    // containment passes. Keep one subject-scratch tree and reset its bounds per
+    // subject to preserve insertion order while avoiding allocator churn on
+    // serial Wasm runs.
+    traceback_interval_tree: BlastIntervalTree,
     // NCBI reference: ncbi-blast/c++/src/algo/blast/core/lookup_wrap.c:255-288
     // ```c
     // Int4 GetOffsetArraySize(LookupTableWrap* lookup)
@@ -3354,6 +3372,7 @@ impl SubjectScratch {
             //           &(gap_align->edit_script), &new_hsp);
             // ```
             prelim_hits: Vec::new(),
+            combined_prelim_hits: Vec::new(),
             ungapped_hits: Vec::new(),
             // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_gapalign.c:356-357
             // ```c
@@ -3379,6 +3398,14 @@ impl SubjectScratch {
             hit_len_array: Vec::new(),
             diag_hash: DiagHashTable::new(TWO_HIT_WINDOW as i32),
             diag_table_offset: TWO_HIT_WINDOW as i32,
+            // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_traceback.c:371-373
+            // ```c
+            // tree = Blast_IntervalTreeInit(0, query_blk->length + 1,
+            //                               0, subject_length + 1);
+            // ```
+            // Real query/subject bounds are installed by reset_with_bounds()
+            // immediately before traceback for each subject.
+            traceback_interval_tree: BlastIntervalTree::new(0, 1, 0, 1),
             // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_engine.c:991-1041
             // ```c
             // Int4 offset_array_size = GetOffsetArraySize(lookup_wrap);
@@ -8390,7 +8417,14 @@ fn run_internal(args: BlastnArgs, mut in_memory: Option<BlastnInMemoryRun<'_>>) 
             chunk_prelim_hits
         };
 
-        let mut combined_prelim_hits: Vec<PrelimHit> = Vec::new();
+        // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_hits.c:3029
+        // ```c
+        // s_BlastHSPListsCombineByScore(hsp_list, combined_hsp_list, new_hspcnt);
+        // ```
+        // Keep the same per-subject HSP-list assembly semantics, but reuse the
+        // Rust allocation across subjects to reduce serial Wasm allocator work.
+        let mut combined_prelim_hits = std::mem::take(&mut subject_scratch.combined_prelim_hits);
+        combined_prelim_hits.clear();
         // NCBI reference: ncbi-blast/c++/src/algo/blast/api/prelim_stage.cpp:82-88
         // ```c
         // if (num_threads > 1) {
@@ -8599,6 +8633,7 @@ fn run_internal(args: BlastnArgs, mut in_memory: Option<BlastnInMemoryRun<'_>>) 
         }
 
         if combined_prelim_hits.is_empty() {
+            subject_scratch.combined_prelim_hits = combined_prelim_hits;
             return;
         }
 
@@ -8624,7 +8659,8 @@ fn run_internal(args: BlastnArgs, mut in_memory: Option<BlastnInMemoryRun<'_>>) 
         // tree = Blast_IntervalTreeInit(0, query_blk->length + 1,
         //                               0, subject_length + 1);
         // ```
-        let mut interval_tree = BlastIntervalTree::new(
+        let interval_tree = &mut subject_scratch.traceback_interval_tree;
+        interval_tree.reset_with_bounds(
             0,
             (query_concat_length + 1) as i32,
             0,
@@ -9802,6 +9838,8 @@ fn run_internal(args: BlastnArgs, mut in_memory: Option<BlastnInMemoryRun<'_>>) 
             // NCBI reference: blast_traceback.c:633-692 (post-gapped processing is per-subject)
             *subject_hits = Some(final_hits);
         }
+        combined_prelim_hits.clear();
+        subject_scratch.combined_prelim_hits = combined_prelim_hits;
         if let Some(timing) = timing_ref {
             timing.record_traceback_lengths(
                 std::mem::take(&mut traceback_edit_script_lengths),

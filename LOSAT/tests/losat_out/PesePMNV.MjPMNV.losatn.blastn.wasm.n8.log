@@ -10,6 +10,6 @@
 [WASM-METADATA] wasi_runtime=node-wasi-preview1
 [WASM-METADATA] node_version=v18.19.1
 
-real	0m0.519s
-user	0m0.592s
-sys	0m0.053s
+real	0m0.571s
+user	0m0.553s
+sys	0m0.067s

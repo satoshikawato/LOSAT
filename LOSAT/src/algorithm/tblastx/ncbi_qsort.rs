@@ -81,9 +81,16 @@ fn apply_index_replay_permutation(hits: &mut [UngappedHit], indices: &mut [usize
         //       ScoreCompareHSPs);
         // ```
         // NCBI sorts pointer arrays. This replays the same destination->source
-        // index order in place, avoiding the previous full HSP vector clone on
-        // Wasm while preserving the already-computed qsort/index order.
-        let saved = hits[start].clone();
+        // index order in place. Move HSP values by ownership instead of cloning
+        // them; this keeps the NCBI qsort/index order but reduces Wasm hot-path
+        // allocation/copy work during score/link sorting.
+        //
+        // Safety: `indices` is a destination->source permutation produced from
+        // exactly `0..hits.len()`. The loop follows one permutation cycle,
+        // marks each destination once, and uses `ptr::read`/`ptr::write` so each
+        // `UngappedHit` value is moved exactly once and remains initialized when
+        // the cycle closes.
+        let saved = unsafe { std::ptr::read(&hits[start]) };
         let mut dst = start;
 
         loop {
@@ -92,11 +99,16 @@ fn apply_index_replay_permutation(hits: &mut [UngappedHit], indices: &mut [usize
             indices[dst] = usize::MAX;
 
             if src == start {
-                hits[dst] = saved;
+                unsafe {
+                    std::ptr::write(&mut hits[dst], saved);
+                }
                 break;
             }
 
-            hits[dst] = hits[src].clone();
+            unsafe {
+                let moved = std::ptr::read(&hits[src]);
+                std::ptr::write(&mut hits[dst], moved);
+            }
             dst = src;
         }
     }

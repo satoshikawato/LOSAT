@@ -261,6 +261,20 @@ Status as of 2026-05-21:
     only the index array and applies the destination-to-source order in place
     by cycle replay, reducing hot-path allocation/copy volume while preserving
     the NCBI qsort comparator order.
+  - TBLASTX qsort-compatible HSP ordering now replays each permutation cycle by
+    moving `UngappedHit` ownership with `ptr::read`/`ptr::write` instead of
+    cloning every moved HSP. This keeps the same NCBI pointer-array qsort order
+    while further reducing Wasm score/link sort copy overhead.
+  - BLASTN serial Wasm traceback now reuses subject-local scratch storage for
+    the combined preliminary HSP list and interval tree. The change keeps the
+    NCBI traceback/init/reset order and only removes per-subject `Vec` and
+    interval-tree allocation churn in `src/algorithm/blastn/blast_engine/run.rs`.
+  - Verified the BLASTN scratch reuse on `LC738874.fasta` vs `LC738875.fasta`
+    with `LOSAT_TIMING=1 cargo run --release -- blastn ... -num_threads 1
+    -outfmt 6`; before/after outfmt 6 output diff was empty, and traceback
+    counts remained `prelim=9`, `tree_skipped=1`, `full_traceback=8`.
+  - Verified the command-WASI artifact still builds with:
+    `cargo build --release --target wasm32-wasip1 --no-default-features`.
   - Verified the qsort replay behavior with:
     `cargo test index_replay --lib`.
   - Additional hot-path allocation optimization remains pending, especially

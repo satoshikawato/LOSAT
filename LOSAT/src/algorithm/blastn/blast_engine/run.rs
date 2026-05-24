@@ -4809,24 +4809,29 @@ fn run_internal(args: BlastnArgs, mut in_memory: Option<BlastnInMemoryRun<'_>>) 
     #[cfg(not(all(feature = "parallel", target_arch = "wasm32", feature = "wasm-threads")))]
     let use_parallel = requested_parallel;
 
+    // Keep the pool local to this BLASTN run. Browser direct/WASI instances can
+    // execute multiple pair jobs in one process; a global Rayon pool would either
+    // fail on the second job or keep using the first job's thread count.
     // NCBI reference: ncbi-blast/c++/src/algo/blast/api/prelim_stage.cpp:82-88
     // ```c
     // if (num_threads > 1) {
     //     SetNumberOfThreads(num_threads);
     // }
     // ```
-    if use_parallel {
-        #[cfg(all(
-            feature = "parallel",
-            any(not(target_arch = "wasm32"), feature = "wasm-threads")
-        ))]
-        {
+    #[cfg(all(
+        feature = "parallel",
+        any(not(target_arch = "wasm32"), feature = "wasm-threads")
+    ))]
+    let parallel_pool = if use_parallel {
+        Some(
             rayon::ThreadPoolBuilder::new()
                 .num_threads(num_threads)
-                .build_global()
-                .context("Failed to build thread pool")?;
-        }
-    }
+                .build()
+                .context("Failed to build thread pool")?,
+        )
+    } else {
+        None
+    };
 
     // NCBI reference: ncbi-blast/c++/src/algo/blast/api/blast_setup_cxx.cpp:836-847
     // ```c
@@ -10111,38 +10116,44 @@ fn run_internal(args: BlastnArgs, mut in_memory: Option<BlastnInMemoryRun<'_>>) 
             let subject_records_ref = subject_records
                 .as_ref()
                 .expect("subject records must be loaded for parallel search");
-            let mut subject_hit_batches: Vec<(usize, Vec<BlastnHsp>)> = subject_records_ref
-                .par_iter()
-                .enumerate()
-                .map_init(
-                    || {
-                        (
-                            GapAlignScratch::new(),
-                            // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_engine.c:991-1041
-                            // ```c
-                            // Int4 offset_array_size = GetOffsetArraySize(lookup_wrap);
-                            // ...
-                            // aux_struct->offset_pairs =
-                            //   (BlastOffsetPair*) malloc(offset_array_size * sizeof(BlastOffsetPair));
-                            // ```
-                            SubjectScratch::new(queries_ref.len(), offset_array_size),
+            let parallel_pool = parallel_pool
+                .as_ref()
+                .expect("parallel pool must exist when use_parallel is true");
+            let mut subject_hit_batches: Vec<(usize, Vec<BlastnHsp>)> =
+                parallel_pool.install(|| {
+                    subject_records_ref
+                        .par_iter()
+                        .enumerate()
+                        .map_init(
+                            || {
+                                (
+                                    GapAlignScratch::new(),
+                                    // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_engine.c:991-1041
+                                    // ```c
+                                    // Int4 offset_array_size = GetOffsetArraySize(lookup_wrap);
+                                    // ...
+                                    // aux_struct->offset_pairs =
+                                    //   (BlastOffsetPair*) malloc(offset_array_size * sizeof(BlastOffsetPair));
+                                    // ```
+                                    SubjectScratch::new(queries_ref.len(), offset_array_size),
+                                )
+                            },
+                            |state, (s_idx, s_record)| {
+                                let (gap_scratch, subject_scratch) = state;
+                                let mut subject_hits: Option<Vec<BlastnHsp>> = None;
+                                process_subject(
+                                    s_idx,
+                                    s_record,
+                                    gap_scratch,
+                                    subject_scratch,
+                                    &mut subject_hits,
+                                );
+                                subject_hits.map(|hits| (s_idx, hits))
+                            },
                         )
-                    },
-                    |state, (s_idx, s_record)| {
-                        let (gap_scratch, subject_scratch) = state;
-                        let mut subject_hits: Option<Vec<BlastnHsp>> = None;
-                        process_subject(
-                            s_idx,
-                            s_record,
-                            gap_scratch,
-                            subject_scratch,
-                            &mut subject_hits,
-                        );
-                        subject_hits.map(|hits| (s_idx, hits))
-                    },
-                )
-                .filter_map(|hits| hits)
-                .collect();
+                        .filter_map(|hits| hits)
+                        .collect()
+                });
 
             if let Some(bar) = progress_bar.as_ref() {
                 bar.finish();
@@ -10322,55 +10333,60 @@ fn run_internal(args: BlastnArgs, mut in_memory: Option<BlastnInMemoryRun<'_>>) 
             let subject_records_ref = subject_records
                 .as_ref()
                 .expect("subject records must be loaded for parallel search");
-            subject_records_ref.par_iter().enumerate().for_each_init(
-                || {
-                    // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_gapalign.c:313-319 (BLAST_GapAlignStructNew)
-                    // NCBI reference: ncbi-blast/c++/include/algo/blast/core/blast_gapalign.h:69-80 (BlastGapAlignStruct per thread)
-                    // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_engine.c:488-491
-                    // ```c
-                    // hsp_list = Blast_HSPListFree(hsp_list);
-                    // BlastInitHitListReset(init_hitlist);
-                    // ```
-                    // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_extend.c:84-105
-                    // ```c
-                    // n = diag->diag_array_length;
-                    // diag->offset = diag->window;
-                    // diag_struct_array = diag->hit_level_array;
-                    // for (i = 0; i < n; i++) {
-                    //     diag_struct_array[i].flag = 0;
-                    //     diag_struct_array[i].last_hit = -diag->window;
-                    //     if (diag->hit_len_array) diag->hit_len_array[i] = 0;
-                    // }
-                    // ```
-                    (
-                        tx.clone(),
-                        GapAlignScratch::new(),
-                        // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_engine.c:991-1041
+            let parallel_pool = parallel_pool
+                .as_ref()
+                .expect("parallel pool must exist when use_parallel is true");
+            parallel_pool.install(|| {
+                subject_records_ref.par_iter().enumerate().for_each_init(
+                    || {
+                        // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_gapalign.c:313-319 (BLAST_GapAlignStructNew)
+                        // NCBI reference: ncbi-blast/c++/include/algo/blast/core/blast_gapalign.h:69-80 (BlastGapAlignStruct per thread)
+                        // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_engine.c:488-491
                         // ```c
-                        // Int4 offset_array_size = GetOffsetArraySize(lookup_wrap);
-                        // ...
-                        // aux_struct->offset_pairs =
-                        //   (BlastOffsetPair*) malloc(offset_array_size * sizeof(BlastOffsetPair));
+                        // hsp_list = Blast_HSPListFree(hsp_list);
+                        // BlastInitHitListReset(init_hitlist);
                         // ```
-                        SubjectScratch::new(queries_ref.len(), offset_array_size),
-                    )
-                },
-                |state, (s_idx, s_record)| {
-                    let (tx, gap_scratch, subject_scratch) = state;
-                    let mut subject_hits: Option<Vec<BlastnHsp>> = None;
-                    process_subject(
-                        s_idx,
-                        s_record,
-                        gap_scratch,
-                        subject_scratch,
-                        &mut subject_hits,
-                    );
-                    if let Some(hits) = subject_hits {
-                        // NCBI reference: blast_traceback.c:633-692 (post-gapped processing is per-subject)
-                        tx.send(Some(hits)).unwrap();
-                    }
-                },
-            );
+                        // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_extend.c:84-105
+                        // ```c
+                        // n = diag->diag_array_length;
+                        // diag->offset = diag->window;
+                        // diag_struct_array = diag->hit_level_array;
+                        // for (i = 0; i < n; i++) {
+                        //     diag_struct_array[i].flag = 0;
+                        //     diag_struct_array[i].last_hit = -diag->window;
+                        //     if (diag->hit_len_array) diag->hit_len_array[i] = 0;
+                        // }
+                        // ```
+                        (
+                            tx.clone(),
+                            GapAlignScratch::new(),
+                            // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_engine.c:991-1041
+                            // ```c
+                            // Int4 offset_array_size = GetOffsetArraySize(lookup_wrap);
+                            // ...
+                            // aux_struct->offset_pairs =
+                            //   (BlastOffsetPair*) malloc(offset_array_size * sizeof(BlastOffsetPair));
+                            // ```
+                            SubjectScratch::new(queries_ref.len(), offset_array_size),
+                        )
+                    },
+                    |state, (s_idx, s_record)| {
+                        let (tx, gap_scratch, subject_scratch) = state;
+                        let mut subject_hits: Option<Vec<BlastnHsp>> = None;
+                        process_subject(
+                            s_idx,
+                            s_record,
+                            gap_scratch,
+                            subject_scratch,
+                            &mut subject_hits,
+                        );
+                        if let Some(hits) = subject_hits {
+                            // NCBI reference: blast_traceback.c:633-692 (post-gapped processing is per-subject)
+                            tx.send(Some(hits)).unwrap();
+                        }
+                    },
+                );
+            });
 
             if let Some(bar) = progress_bar.as_ref() {
                 bar.finish();

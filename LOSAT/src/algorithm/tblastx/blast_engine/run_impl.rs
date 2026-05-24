@@ -1172,6 +1172,10 @@ fn run_internal(args: TblastxArgs, mut in_memory: Option<TblastxInMemoryRun<'_>>
     #[cfg(not(feature = "parallel"))]
     let use_parallel_chunks = false;
 
+    // Keep the Rayon registry local to this TBLASTX run. Browser direct/WASI
+    // workers may process several pair jobs with different `-num_threads`
+    // values; a process-global pool would fail after the first initialization
+    // or keep using the first job's thread count.
     // NCBI reference: ncbi-blast/c++/src/algo/blast/api/prelim_stage.cpp:82-88
     // ```c
     // if (num_threads > 1) {
@@ -1182,12 +1186,16 @@ fn run_internal(args: TblastxArgs, mut in_memory: Option<TblastxInMemoryRun<'_>>
         feature = "parallel",
         any(not(target_arch = "wasm32"), feature = "wasm-threads")
     ))]
-    if use_parallel {
-        rayon::ThreadPoolBuilder::new()
-            .num_threads(num_threads)
-            .build_global()
-            .context("Failed to build thread pool")?;
-    }
+    let parallel_pool = if use_parallel {
+        Some(
+            rayon::ThreadPoolBuilder::new()
+                .num_threads(num_threads)
+                .build()
+                .context("Failed to build thread pool")?,
+        )
+    } else {
+        None
+    };
 
     // NCBI reference: ncbi-blast/c++/include/algo/blast/core/blast_hits.h:153-166
     // ```c
@@ -3080,42 +3088,47 @@ fn run_internal(args: TblastxArgs, mut in_memory: Option<TblastxInMemoryRun<'_>>
         //     Blast_HSPListSortByEvalue(hsp_list);
         // }
         // ```
-        let subject_hit_batches: Vec<(usize, Vec<Hit>)> = subjects_raw
-            .par_iter()
-            .enumerate()
-            .map_init(
-                || WorkerState {
-                    // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_engine.c:1411-1475
-                    // ```c
-                    // while ( (seq_arg.oid = BlastSeqSrcIteratorNext(seq_src, itr))
-                    //        != BLAST_SEQSRC_EOF) {
-                    //    ...
-                    //    status = s_BlastSearchEngineCore(...);
-                    // }
-                    // ```
-                    tx: None,
-                    hits: Vec::new(),
-                    offset_pairs: vec![OffsetPair::default(); offset_array_size as usize],
-                    diag_array: vec![DiagStruct::default(); diag_array_size as usize],
-                    // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_extend.c:52-63
-                    // ```c
-                    // diag_table->diag_array_length = diag_array_length;
-                    // diag_table->diag_mask = diag_array_length-1;
-                    // diag_table->offset = window_size;
-                    // ```
-                    diag_offset: window,
-                },
-                |st, (s_idx, s_rec)| {
-                    process_subject(st, (s_idx, s_rec));
-                    if st.hits.is_empty() {
-                        None
-                    } else {
-                        Some((s_idx, std::mem::take(&mut st.hits)))
-                    }
-                },
-            )
-            .filter_map(|batch| batch)
-            .collect();
+        let parallel_pool = parallel_pool
+            .as_ref()
+            .expect("parallel pool must exist when use_parallel is true");
+        let subject_hit_batches: Vec<(usize, Vec<Hit>)> = parallel_pool.install(|| {
+            subjects_raw
+                .par_iter()
+                .enumerate()
+                .map_init(
+                    || WorkerState {
+                        // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_engine.c:1411-1475
+                        // ```c
+                        // while ( (seq_arg.oid = BlastSeqSrcIteratorNext(seq_src, itr))
+                        //        != BLAST_SEQSRC_EOF) {
+                        //    ...
+                        //    status = s_BlastSearchEngineCore(...);
+                        // }
+                        // ```
+                        tx: None,
+                        hits: Vec::new(),
+                        offset_pairs: vec![OffsetPair::default(); offset_array_size as usize],
+                        diag_array: vec![DiagStruct::default(); diag_array_size as usize],
+                        // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_extend.c:52-63
+                        // ```c
+                        // diag_table->diag_array_length = diag_array_length;
+                        // diag_table->diag_mask = diag_array_length-1;
+                        // diag_table->offset = window_size;
+                        // ```
+                        diag_offset: window,
+                    },
+                    |st, (s_idx, s_rec)| {
+                        process_subject(st, (s_idx, s_rec));
+                        if st.hits.is_empty() {
+                            None
+                        } else {
+                            Some((s_idx, std::mem::take(&mut st.hits)))
+                        }
+                    },
+                )
+                .filter_map(|batch| batch)
+                .collect()
+        });
         threaded_wasi_subject_hit_batches = Some(subject_hit_batches);
     } else {
         single_state = Some(for_each_subjects(
@@ -3142,25 +3155,30 @@ fn run_internal(args: TblastxArgs, mut in_memory: Option<TblastxInMemoryRun<'_>>
 
     #[cfg(all(feature = "parallel", not(target_arch = "wasm32")))]
     if use_parallel && !use_parallel_scan_chunks {
-        subjects_raw.par_iter().enumerate().for_each_init(
-            || WorkerState {
-                // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_engine.c:1411-1475
-                // ```c
-                // while (...) {
-                //    ...
-                //    status = s_BlastSearchEngineCore(..., &hsp_list, ...);
-                // }
-                // ```
-                tx: tx_opt.clone(),
-                hits: Vec::new(),
-                offset_pairs: vec![OffsetPair::default(); offset_array_size as usize],
-                diag_array: vec![DiagStruct::default(); diag_array_size as usize],
-                // NCBI: diag_table->offset = window_size;
-                // Source: ncbi-blast/c++/src/algo/blast/core/blast_extend.c:63
-                diag_offset: window,
-            },
-            &process_subject,
-        );
+        let parallel_pool = parallel_pool
+            .as_ref()
+            .expect("parallel pool must exist when use_parallel is true");
+        parallel_pool.install(|| {
+            subjects_raw.par_iter().enumerate().for_each_init(
+                || WorkerState {
+                    // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_engine.c:1411-1475
+                    // ```c
+                    // while (...) {
+                    //    ...
+                    //    status = s_BlastSearchEngineCore(..., &hsp_list, ...);
+                    // }
+                    // ```
+                    tx: tx_opt.clone(),
+                    hits: Vec::new(),
+                    offset_pairs: vec![OffsetPair::default(); offset_array_size as usize],
+                    diag_array: vec![DiagStruct::default(); diag_array_size as usize],
+                    // NCBI: diag_table->offset = window_size;
+                    // Source: ncbi-blast/c++/src/algo/blast/core/blast_extend.c:63
+                    diag_offset: window,
+                },
+                &process_subject,
+            );
+        });
     } else {
         single_state = Some(for_each_subjects(
             &subjects_raw,

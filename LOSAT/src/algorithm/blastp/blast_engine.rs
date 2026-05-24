@@ -84,6 +84,31 @@ use super::kappa::{
     BlastpTraceHspTarget,
 };
 
+// NCBI reference: ncbi-blast/c++/src/algo/blast/blastinput/blast_args.cpp:3205-3222
+// ```c
+// const int kMaxValue = static_cast<int>(CSystemInfo::GetCpuCount());
+// int num_threads = args[kArgNumThreads].AsInteger();
+// if (num_threads > kMaxValue) {
+//     m_NumThreads = kMaxValue;
+// } else {
+//     m_NumThreads = num_threads;
+// }
+// ```
+#[cfg(all(feature = "parallel", target_arch = "wasm32", feature = "wasm-threads"))]
+const BLASTP_WASI_PARALLEL_MIN_WORK_ITEMS_PER_THREAD: usize = 2;
+
+// NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_engine.c:1409-1475
+// ```c
+// while ( (seq_arg.oid = BlastSeqSrcIteratorNext(seq_src, itr))
+//        != BLAST_SEQSRC_EOF) {
+//    status =
+//        s_BlastSearchEngineCore(program_number, query, query_info,
+//                                seq_arg.seq, lookup_wrap, gap_align, ...);
+// }
+// ```
+#[cfg(all(feature = "parallel", target_arch = "wasm32", feature = "wasm-threads"))]
+const BLASTP_WASI_PARALLEL_MIN_SUBJECT_RESIDUES_PER_THREAD: usize = 4096;
+
 // NCBI reference: ncbi-blast/c++/include/algo/blast/core/blast_extend.h:142-154
 // ```c
 // typedef struct BlastUngappedData {
@@ -658,8 +683,18 @@ fn prepare_blastp_subjects_preserving_order(
         any(not(target_arch = "wasm32"), feature = "wasm-threads")
     ))]
     {
+        let requested_threads = num_threads;
         let num_threads = blastp_effective_num_threads(num_threads);
-        if num_threads > 1 && subject_records.len() > 1 {
+        // NCBI reference: /mnt/c/Users/genom/GitHub/ncbi-blast/c++/src/algo/blast/core/blast_engine.c:1411-1426
+        // ```c
+        // /* iterate over all subject sequences */
+        // while ( (seq_arg.oid = BlastSeqSrcIteratorNext(seq_src, itr))
+        //        != BLAST_SEQSRC_EOF) {
+        //    if (BlastSeqSrcGetSequence(seq_src, &seq_arg) < 0) {
+        //        continue;
+        //    }
+        // ```
+        if blastp_should_parallelize_subject_prep(subject_records, requested_threads, num_threads) {
             let pool = rayon::ThreadPoolBuilder::new()
                 .num_threads(num_threads)
                 .build()
@@ -947,13 +982,292 @@ fn build_redone_match_heaps(num_queries: usize, hitlist_size: usize) -> Vec<Blas
     feature = "parallel",
     any(not(target_arch = "wasm32"), feature = "wasm-threads")
 ))]
+fn blastp_available_thread_cap() -> usize {
+    // NCBI reference: ncbi-blast/c++/src/algo/blast/blastinput/blast_args.cpp:3205-3222
+    // ```c
+    // const int kMaxValue = static_cast<int>(CSystemInfo::GetCpuCount());
+    // int num_threads = args[kArgNumThreads].AsInteger();
+    // if (num_threads > kMaxValue) {
+    //     m_NumThreads = kMaxValue;
+    // } else {
+    //     m_NumThreads = num_threads;
+    // }
+    // ```
+    #[cfg(all(target_arch = "wasm32", feature = "wasm-threads"))]
+    {
+        if let Some(cap) = std::env::var("LOSAT_WASI_THREAD_CAP")
+            .ok()
+            .and_then(|raw| raw.parse::<usize>().ok())
+            .filter(|cap| *cap > 0)
+        {
+            return cap;
+        }
+    }
+
+    num_cpus::get().max(1)
+}
+
+// NCBI reference: ncbi-blast/c++/src/algo/blast/blastinput/blast_args.cpp:3205-3222
+// ```c
+// const int kMaxValue = static_cast<int>(CSystemInfo::GetCpuCount());
+// int num_threads = args[kArgNumThreads].AsInteger();
+// if (num_threads > kMaxValue) {
+//     m_NumThreads = kMaxValue;
+// } else {
+//     m_NumThreads = num_threads;
+// }
+// ```
+#[cfg(all(
+    feature = "parallel",
+    any(not(target_arch = "wasm32"), feature = "wasm-threads")
+))]
 fn blastp_effective_num_threads(requested: usize) -> usize {
-    let cpu_count = num_cpus::get().max(1);
+    let cpu_count = blastp_available_thread_cap();
     if requested == 0 {
         cpu_count
     } else {
         requested.min(cpu_count)
     }
+}
+
+// NCBI reference: ncbi-blast/c++/src/algo/blast/blastinput/blast_args.cpp:3205-3222
+// ```c
+// const int kMaxValue = static_cast<int>(CSystemInfo::GetCpuCount());
+// int num_threads = args[kArgNumThreads].AsInteger();
+// if (num_threads > kMaxValue) {
+//     m_NumThreads = kMaxValue;
+// } else {
+//     m_NumThreads = num_threads;
+// }
+// ```
+#[cfg(all(feature = "parallel", target_arch = "wasm32", feature = "wasm-threads"))]
+fn blastp_wasi_parallel_env_usize(name: &str, fallback: usize) -> usize {
+    std::env::var(name)
+        .ok()
+        .and_then(|raw| raw.parse::<usize>().ok())
+        .unwrap_or(fallback)
+}
+
+// NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_engine.c:1409-1475
+// ```c
+// /* iterate over all subject sequences */
+// while ( (seq_arg.oid = BlastSeqSrcIteratorNext(seq_src, itr))
+//        != BLAST_SEQSRC_EOF) {
+//    status = s_BlastSearchEngineCore(...);
+// }
+// ```
+//
+// NCBI reference: ncbi-blast/c++/src/algo/blast/api/prelim_stage.cpp:82-88
+// ```c
+// if (num_threads > 1) {
+//     SetNumberOfThreads(num_threads);
+// }
+// ```
+#[cfg(all(feature = "parallel", target_arch = "wasm32", feature = "wasm-threads"))]
+#[derive(Clone, Copy)]
+struct BlastpWasiParallelDecision {
+    parallel: bool,
+    min_worker_jobs: usize,
+    min_subject_residues: usize,
+    serial_reason: &'static str,
+}
+
+// NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_engine.c:1409-1475
+// ```c
+// while ( (seq_arg.oid = BlastSeqSrcIteratorNext(seq_src, itr))
+//        != BLAST_SEQSRC_EOF) {
+//    status = s_BlastSearchEngineCore(...);
+// }
+// ```
+//
+// NCBI reference: ncbi-blast/c++/src/algo/blast/api/prelim_stage.cpp:82-88
+// ```c
+// if (num_threads > 1) {
+//     SetNumberOfThreads(num_threads);
+// }
+// ```
+#[cfg(all(feature = "parallel", target_arch = "wasm32", feature = "wasm-threads"))]
+fn blastp_wasi_parallel_decision(
+    effective_threads: usize,
+    worker_jobs: usize,
+    total_subject_residues: usize,
+) -> BlastpWasiParallelDecision {
+    let min_worker_jobs = effective_threads.saturating_mul(blastp_wasi_parallel_env_usize(
+        "LOSAT_BLASTP_WASI_MIN_WORK_ITEMS_PER_THREAD",
+        BLASTP_WASI_PARALLEL_MIN_WORK_ITEMS_PER_THREAD,
+    ));
+    let min_subject_residues = effective_threads.saturating_mul(blastp_wasi_parallel_env_usize(
+        "LOSAT_BLASTP_WASI_MIN_SUBJECT_RESIDUES_PER_THREAD",
+        BLASTP_WASI_PARALLEL_MIN_SUBJECT_RESIDUES_PER_THREAD,
+    ));
+
+    let serial_reason = if effective_threads <= 1 {
+        "effective_threads<=1"
+    } else if worker_jobs <= 1 {
+        "worker_jobs<=1"
+    } else if worker_jobs < min_worker_jobs {
+        "worker_jobs<threshold"
+    } else if total_subject_residues < min_subject_residues {
+        "subject_residues<threshold"
+    } else {
+        "parallel"
+    };
+
+    BlastpWasiParallelDecision {
+        parallel: serial_reason == "parallel",
+        min_worker_jobs,
+        min_subject_residues,
+        serial_reason,
+    }
+}
+
+// NCBI reference: ncbi-blast/c++/src/algo/blast/api/prelim_stage.cpp:82-88
+// ```c
+// if (num_threads > 1) {
+//     SetNumberOfThreads(num_threads);
+// }
+// ```
+#[cfg(all(feature = "parallel", target_arch = "wasm32", feature = "wasm-threads"))]
+fn blastp_wasi_threads_debug_enabled() -> bool {
+    std::env::var("LOSAT_WASI_THREADS_DEBUG")
+        .map(|value| value == "1" || value.eq_ignore_ascii_case("true"))
+        .unwrap_or(false)
+}
+
+// NCBI reference: ncbi-blast/c++/src/algo/blast/api/prelim_stage.cpp:82-88
+// ```c
+// if (num_threads > 1) {
+//     SetNumberOfThreads(num_threads);
+// }
+// ```
+#[cfg(all(feature = "parallel", target_arch = "wasm32", feature = "wasm-threads"))]
+fn blastp_report_wasi_threading(
+    stage: &str,
+    requested_threads: usize,
+    effective_threads: usize,
+    rayon_pool_threads: usize,
+    subject_records: usize,
+    worker_jobs: usize,
+    total_subject_residues: usize,
+    decision: BlastpWasiParallelDecision,
+    parallel: bool,
+) {
+    if !blastp_wasi_threads_debug_enabled() {
+        return;
+    }
+    eprintln!(
+        "[losat-wasi-threads] blastp stage={stage} target_arch=wasm32 threaded_wasm=true \
+requested_threads={requested_threads} runner_thread_cap={} effective_threads={effective_threads} \
+rayon_pool_threads={rayon_pool_threads} subject_records={subject_records} worker_jobs={worker_jobs} \
+total_subject_residues={total_subject_residues} min_worker_jobs={} min_subject_residues={} \
+parallel={parallel} serial_reason={}",
+        blastp_available_thread_cap(),
+        decision.min_worker_jobs,
+        decision.min_subject_residues,
+        decision.serial_reason
+    );
+}
+
+// NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_engine.c:1409-1475
+// ```c
+// while ( (seq_arg.oid = BlastSeqSrcIteratorNext(seq_src, itr))
+//        != BLAST_SEQSRC_EOF) {
+//    status = s_BlastSearchEngineCore(...);
+// }
+// ```
+//
+// NCBI reference: ncbi-blast/c++/src/algo/blast/api/prelim_stage.cpp:82-88
+// ```c
+// if (num_threads > 1) {
+//     SetNumberOfThreads(num_threads);
+// }
+// ```
+#[cfg(all(
+    feature = "parallel",
+    any(not(target_arch = "wasm32"), feature = "wasm-threads")
+))]
+fn blastp_should_parallelize_stage(
+    stage: &str,
+    requested_threads: usize,
+    effective_threads: usize,
+    subject_records: usize,
+    worker_jobs: usize,
+    total_subject_residues: usize,
+) -> bool {
+    // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_engine.c:1409-1475
+    // ```c
+    // while ( (seq_arg.oid = BlastSeqSrcIteratorNext(seq_src, itr))
+    //        != BLAST_SEQSRC_EOF) {
+    //    status = s_BlastSearchEngineCore(...);
+    // }
+    // ```
+    #[cfg(all(target_arch = "wasm32", feature = "wasm-threads"))]
+    {
+        let decision =
+            blastp_wasi_parallel_decision(effective_threads, worker_jobs, total_subject_residues);
+        blastp_report_wasi_threading(
+            stage,
+            requested_threads,
+            effective_threads,
+            if decision.parallel {
+                effective_threads
+            } else {
+                0
+            },
+            subject_records,
+            worker_jobs,
+            total_subject_residues,
+            decision,
+            decision.parallel,
+        );
+        return decision.parallel;
+    }
+
+    // NCBI reference: ncbi-blast/c++/src/algo/blast/api/prelim_stage.cpp:82-88
+    // ```c
+    // if (num_threads > 1) {
+    //     SetNumberOfThreads(num_threads);
+    // }
+    // ```
+    #[cfg(not(all(target_arch = "wasm32", feature = "wasm-threads")))]
+    {
+        let _ = stage;
+        let _ = requested_threads;
+        let _ = subject_records;
+        let _ = total_subject_residues;
+        effective_threads > 1 && worker_jobs > 1
+    }
+}
+
+// NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_engine.c:1411-1426
+// ```c
+// /* iterate over all subject sequences */
+// while ( (seq_arg.oid = BlastSeqSrcIteratorNext(seq_src, itr))
+//        != BLAST_SEQSRC_EOF) {
+//    if (BlastSeqSrcGetSequence(seq_src, &seq_arg) < 0) {
+//        continue;
+//    }
+// ```
+#[cfg(all(
+    feature = "parallel",
+    any(not(target_arch = "wasm32"), feature = "wasm-threads")
+))]
+fn blastp_should_parallelize_subject_prep(
+    subject_records: &[fasta::Record],
+    requested_threads: usize,
+    effective_threads: usize,
+) -> bool {
+    blastp_should_parallelize_stage(
+        "subject-prep",
+        requested_threads,
+        effective_threads,
+        subject_records.len(),
+        subject_records.len(),
+        subject_records
+            .iter()
+            .map(|record| record.seq().len())
+            .sum::<usize>(),
+    )
 }
 
 // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_extend.c:152-169
@@ -4995,7 +5309,23 @@ fn run_resolved_with_records(
         feature = "parallel",
         any(not(target_arch = "wasm32"), feature = "wasm-threads")
     ))]
-    let use_parallel = num_threads > 1 && subjects.len() > 1;
+    let use_parallel = {
+        // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_engine.c:1409-1475
+        // ```c
+        // while ( (seq_arg.oid = BlastSeqSrcIteratorNext(seq_src, itr))
+        //        != BLAST_SEQSRC_EOF) {
+        //    status = s_BlastSearchEngineCore(...);
+        // }
+        // ```
+        blastp_should_parallelize_stage(
+            "prelim",
+            args.num_threads,
+            num_threads,
+            subjects.len(),
+            subjects.len(),
+            total_db_len,
+        )
+    };
     #[cfg(any(
         not(feature = "parallel"),
         all(target_arch = "wasm32", not(feature = "wasm-threads"))
@@ -5229,7 +5559,23 @@ fn run_resolved_with_records(
         feature = "parallel",
         any(not(target_arch = "wasm32"), feature = "wasm-threads")
     ))]
-    let use_parallel_kappa_redo = kappa_num_threads > 1 && kappa_parallel_query_indices.len() > 1;
+    let use_parallel_kappa_redo = {
+        // NCBI reference: /mnt/c/Users/genom/GitHub/ncbi-blast/c++/src/algo/blast/core/blast_kappa.c:3429-3449
+        // ```c
+        // #pragma omp parallel ... num_threads(actual_num_threads)
+        // #pragma omp for schedule(static)
+        // for (b = 0; b < numMatches; ++b) {
+        // ```
+        kappa_parallel_query_indices.len() > 1
+            && blastp_should_parallelize_stage(
+                "kappa-query-redo",
+                args.num_threads,
+                kappa_num_threads,
+                subjects.len(),
+                kappa_parallel_query_indices.len(),
+                total_db_len,
+            )
+    };
     #[cfg(any(
         not(feature = "parallel"),
         all(target_arch = "wasm32", not(feature = "wasm-threads"))
@@ -5239,15 +5585,34 @@ fn run_resolved_with_records(
         feature = "parallel",
         any(not(target_arch = "wasm32"), feature = "wasm-threads")
     ))]
-    let kappa_match_parallel_query_index = if kappa_num_threads > 1
-        && kappa_parallel_query_indices.len() == 1
-        && preliminary_hit_lists[kappa_parallel_query_indices[0]]
-            .as_ref()
-            .is_some_and(|hit_list| hit_list.hsplist_count > 1)
-    {
-        Some(kappa_parallel_query_indices[0])
-    } else {
-        None
+    let kappa_match_parallel_query_index = {
+        // NCBI reference: /mnt/c/Users/genom/GitHub/ncbi-blast/c++/src/algo/blast/core/blast_kappa.c:3429-3449
+        // ```c
+        // #pragma omp parallel ... num_threads(actual_num_threads)
+        // #pragma omp for schedule(static)
+        // for (b = 0; b < numMatches; ++b) {
+        // ```
+        if use_parallel_kappa_redo || kappa_parallel_query_indices.len() != 1 {
+            None
+        } else {
+            let q_idx = kappa_parallel_query_indices[0];
+            let match_jobs = preliminary_hit_lists[q_idx]
+                .as_ref()
+                .map(|hit_list| hit_list.hsplist_count)
+                .unwrap_or(0);
+            if blastp_should_parallelize_stage(
+                "kappa-match-redo",
+                args.num_threads,
+                kappa_num_threads,
+                subjects.len(),
+                match_jobs,
+                total_db_len,
+            ) {
+                Some(q_idx)
+            } else {
+                None
+            }
+        }
     };
     #[cfg(all(
         feature = "parallel",

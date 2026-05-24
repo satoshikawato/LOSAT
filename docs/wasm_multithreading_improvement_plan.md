@@ -226,3 +226,155 @@ The first code patch should be small and focused:
 
 This patch addresses the clearest current failure mode before touching BLASTN
 or TBLASTX algorithm partitioning.
+
+## 2026-05-24 Implementation Update
+
+Implemented the Phase 1 BLASTP threaded-WASI fix as a real execution-path
+performance change, not as an external harness-only measurement change.
+
+Changes made:
+
+- `LOSAT/tests/run_losat_wasi_threads.js` now publishes
+  `LOSAT_WASI_THREAD_CAP` into the WASI environment. The default is Node's
+  `os.availableParallelism()` when available, falling back to `os.cpus().length`.
+- `LOSAT/src/algorithm/blastp/blast_engine.rs` now uses that runner-provided
+  cap only for `all(target_arch = "wasm32", feature = "wasm-threads")`.
+  Native BLASTP still caps with `num_cpus::get()` to preserve the NCBI
+  `CSystemInfo::GetCpuCount()` rule.
+- BLASTP threaded-WASI diagnostics now report the requested thread count,
+  runner cap, effective thread count, Rayon pool size, subject record count,
+  submitted subject jobs, and whether the prelim search entered the parallel
+  path. Diagnostics remain stderr-only and disabled unless
+  `LOSAT_WASI_THREADS_DEBUG=1` or `true`.
+
+Validation performed:
+
+- `cargo check`
+- `rustfmt src/algorithm/blastp/blast_engine.rs --edition 2021`
+- `cargo check --target wasm32-wasip1-threads --features wasm-threads`
+- `cargo build --release --target wasm32-wasip1-threads --features wasm-threads`
+- `node --check LOSAT/tests/run_losat_wasi_threads.js`
+- Threaded Wasm BLASTP fixture:
+  `WSSV.faa` vs `PajaWSV.faa`, `-outfmt 6`, `-num_threads 1` and
+  `-num_threads 8`.
+
+Observed threaded-WASI behavior for the fixture:
+
+- Debug output reported `runner_thread_cap=32`, `requested_threads=8`,
+  `effective_threads=8`, `rayon_pool_threads=8`, `subject_records=86`,
+  `worker_jobs=86`, and `parallel=true`.
+- The threaded runner spawned workers instead of clamping BLASTP back to one
+  effective thread.
+- `n1` and `n8` output hashes were identical:
+  `ade827538e1f218b8c4b5dce88744d8495e58335144f7259bdb529801d220d10`.
+- One timing sample with debug disabled:
+  - `n1`: `real 4.17`, `user 4.48`, `sys 0.06`
+  - `n8`: `real 2.00`, `user 7.40`, `sys 0.20`
+
+Notes:
+
+- Whole-crate `cargo fmt` was not used to completion because rustfmt spent
+  several minutes formatting generated/large crate-root sources unrelated to
+  this patch. The edited Rust file was formatted directly with rustfmt.
+- The release build still reports Cargo's existing lib/bin Wasm output filename
+  collision warning; this patch did not change target naming.
+
+Next policy:
+
+- Treat this as the baseline for Phase 2. Do not add more scripts before
+  improving execution behavior.
+- Add conservative threaded-WASI small-job thresholds for BLASTP first, using
+  subject count and total subject residues. The goal is to avoid worker
+  startup overhead on tiny fixtures while keeping larger multi-subject searches
+  on the parallel path.
+- Extend the same diagnostic shape to BLASTN and TBLASTX only when it supports
+  a concrete scheduling decision or performance change.
+- For BLASTN, continue with existing NCBI subject-chunk semantics before
+  considering any query/range partitioning.
+- For TBLASTX, keep scan/frame partitioning diagnostic-only until the
+  NCBI-equivalent merge/filter timing is documented and parity-proven.
+
+## 2026-05-24 Phase 2 Implementation Update
+
+Implemented the first Phase 2 BLASTP threaded-WASI scheduling gate as an
+execution-path performance change.
+
+Changes made:
+
+- `LOSAT/src/algorithm/blastp/blast_engine.rs` now applies a threaded-WASI-only
+  parallelization decision before creating Rayon pools for BLASTP subject
+  preparation, preliminary subject search, Kappa query redo, and Kappa
+  single-query match redo.
+- Native behavior is unchanged: native parallel builds still use the existing
+  NCBI-style effective thread count and enter the parallel path whenever there
+  is more than one worker job.
+- Non-threaded command Wasm behavior is unchanged: `wasm32-wasip1` without
+  `wasm-threads` remains serial.
+- The new threaded-WASI defaults are conservative:
+  - `LOSAT_BLASTP_WASI_MIN_WORK_ITEMS_PER_THREAD=2`
+  - `LOSAT_BLASTP_WASI_MIN_SUBJECT_RESIDUES_PER_THREAD=4096`
+- The thresholds are environment-overridable for benchmark tuning. Setting both
+  values to `0` approximates the previous threaded-WASI scheduling behavior
+  except for inherently single-work-item stages.
+- BLASTP threaded-WASI diagnostics now include
+  `total_subject_residues`, `min_worker_jobs`, `min_subject_residues`, and
+  `serial_reason` for each gated stage.
+
+Validation performed:
+
+- `rustfmt src/algorithm/blastp/blast_engine.rs --edition 2021`
+- `cargo check`
+- `cargo check --target wasm32-wasip1-threads --features wasm-threads`
+- `cargo build --release --target wasm32-wasip1-threads --features wasm-threads`
+- Node artifact inspection confirmed the threaded artifact exports `_start` and
+  `wasi_thread_start`, and imports `wasi/thread-spawn`.
+- `cargo test test_merge_blastp_subject_results_replays_subject_index_order`
+- Threaded Wasm BLASTP fixtures:
+  - small: `WSSV.faa` vs the first `PajaWSV.faa` subject record,
+    `-outfmt 6`, `-num_threads 1` and `-num_threads 8`
+  - larger: `WSSV.faa` vs full `PajaWSV.faa`, `-outfmt 6`,
+    `-num_threads 1` and `-num_threads 8`
+
+Observed threaded-WASI behavior:
+
+- Small fixture with normal thresholds:
+  - `subject-prep`: `parallel=false`, `serial_reason=worker_jobs<=1`
+  - `prelim`: `parallel=false`, `serial_reason=worker_jobs<=1`
+  - `kappa-query-redo`: `parallel=false`,
+    `serial_reason=subject_residues<threshold`
+  - no worker spawn occurred for the `-num_threads 8` run
+  - `n1`: `real 0.32`, `user 0.49`, `sys 0.02`
+  - `n8`: `real 0.33`, `user 0.44`, `sys 0.06`
+  - `n8` with thresholds disabled: `real 0.59`, `user 0.84`, `sys 0.04`
+  - `n1`, `n8`, and threshold-disabled `n8` output hashes were identical:
+    `0bd7c066d9bf5fe302be681797ac4bb73f865c7a0e57d0e4293747c633f652f6`
+- Larger fixture:
+  - `subject-prep`, `prelim`, and `kappa-query-redo` all reported
+    `parallel=true`
+  - debug output showed worker spawn for the gated parallel stages
+  - `n1`: `real 4.31`, `user 4.67`, `sys 0.03`
+  - `n8` with debug disabled: `real 2.11`, `user 7.70`, `sys 0.13`
+  - `n1` and `n8` output hashes were identical:
+    `ade827538e1f218b8c4b5dce88744d8495e58335144f7259bdb529801d220d10`
+
+Notes:
+
+- The checked commands still emit the repository's existing warning set,
+  including the Cargo lib/bin Wasm output filename collision warning. This
+  patch did not change those unrelated warnings.
+- The new thresholds are not a parity mechanism; they only decide whether to
+  pay the threaded-WASI worker startup cost. Final reduction order and output
+  are unchanged.
+
+Next policy:
+
+- Tune the BLASTP threaded-WASI thresholds against a broader fixture matrix,
+  keeping output-hash checks paired with every timing sample.
+- Consider reusing or sharing a threaded-WASI Rayon pool across BLASTP stages.
+  The larger fixture still creates separate worker sets for subject preparation,
+  preliminary search, and Kappa redo, so pool startup overhead remains visible.
+- Add BLASTN and TBLASTX scheduling gates only when tied to concrete existing
+  subject/chunk work units and NCBI-equivalent merge ordering.
+- Do not introduce BLASTN query/range partitioning or TBLASTX frame/scan
+  partitioning until the corresponding NCBI merge, purge, filtering, and output
+  ordering points are fully documented and parity-proven.

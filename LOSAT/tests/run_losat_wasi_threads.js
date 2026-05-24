@@ -1,6 +1,7 @@
 const { Worker, isMainThread, parentPort, workerData } = require("worker_threads");
 const { WASI } = require("wasi");
 const fs = require("fs");
+const os = require("os");
 
 const DEFAULT_INITIAL_MEMORY_PAGES = 21;
 const DEFAULT_MAXIMUM_MEMORY_PAGES = 16384;
@@ -34,6 +35,23 @@ function parsePositiveIntEnv(name, fallback) {
     throw new Error(`${name} must be a positive integer`);
   }
   return parsed;
+}
+
+// NCBI reference: ncbi-blast/c++/src/algo/blast/blastinput/blast_args.cpp:3205-3222
+// ```c
+// const int kMaxValue = static_cast<int>(CSystemInfo::GetCpuCount());
+// int num_threads = args[kArgNumThreads].AsInteger();
+// if (num_threads > kMaxValue) {
+//     m_NumThreads = kMaxValue;
+// } else {
+//     m_NumThreads = num_threads;
+// }
+// ```
+function defaultRunnerThreadCap() {
+  if (typeof os.availableParallelism === "function") {
+    return Math.max(1, os.availableParallelism());
+  }
+  return Math.max(1, os.cpus().length || 1);
 }
 
 function debug(message) {
@@ -160,6 +178,22 @@ if (isMainThread) {
   const workers = new Set();
   let nextTid = 1;
   let terminatingWorkers = false;
+  // NCBI reference: ncbi-blast/c++/src/algo/blast/blastinput/blast_args.cpp:3205-3222
+  // ```c
+  // const int kMaxValue = static_cast<int>(CSystemInfo::GetCpuCount());
+  // int num_threads = args[kArgNumThreads].AsInteger();
+  // if (num_threads > kMaxValue) {
+  //     m_NumThreads = kMaxValue;
+  // } else {
+  //     m_NumThreads = num_threads;
+  // }
+  // ```
+  const runnerThreadCap = parsePositiveIntEnv(
+    "LOSAT_WASI_THREAD_CAP",
+    defaultRunnerThreadCap(),
+  );
+  process.env.LOSAT_WASI_THREAD_CAP = String(runnerThreadCap);
+  debug(`runner thread cap=${runnerThreadCap}`);
 
   WebAssembly.compile(bytes)
     .then(async (module) => {

@@ -173,6 +173,25 @@ fn next_arg<'a>(args: &'a [&str], index: &mut usize, flag: &str) -> Result<&'a s
         .ok_or_else(|| format!("{flag} requires a value"))
 }
 
+fn parse_num_threads_arg(value: &str, flag: &str) -> Result<usize, String> {
+    // NCBI reference: ncbi-blast/c++/src/algo/blast/blastinput/cmdline_flags.cpp:46-94
+    // ```c
+    // const string kArgNumThreads("num_threads");
+    // ```
+    // NCBI reference: ncbi-blast/c++/src/algo/blast/blastinput/blast_args.cpp:3205-3222
+    // ```c
+    // int num_threads = args[kArgNumThreads].AsInteger();
+    // if (num_threads > kMaxValue) {
+    //     m_NumThreads = kMaxValue;
+    // } else {
+    //     m_NumThreads = num_threads;
+    // }
+    // ```
+    value
+        .parse()
+        .map_err(|err| format!("{flag} parse error: {err}"))
+}
+
 fn parse_blastn_args(
     extra_args: &[&str],
     query: PathBuf,
@@ -236,6 +255,21 @@ fn parse_blastn_args(
             args.word_size = value
                 .parse()
                 .map_err(|err| format!("{flag} parse error: {err}"))?;
+        } else if flag == "--num-threads"
+            || flag == "--num_threads"
+            || flag == "-num_threads"
+            || flag == "-num-threads"
+        {
+            args.num_threads =
+                parse_num_threads_arg(next_arg(extra_args, &mut index, flag)?, flag)?;
+        } else if let Some(value) = flag.strip_prefix("--num-threads=") {
+            args.num_threads = parse_num_threads_arg(value, flag)?;
+        } else if let Some(value) = flag.strip_prefix("--num_threads=") {
+            args.num_threads = parse_num_threads_arg(value, flag)?;
+        } else if let Some(value) = flag.strip_prefix("-num_threads=") {
+            args.num_threads = parse_num_threads_arg(value, flag)?;
+        } else if let Some(value) = flag.strip_prefix("-num-threads=") {
+            args.num_threads = parse_num_threads_arg(value, flag)?;
         } else if flag == "--evalue" {
             args.evalue = next_arg(extra_args, &mut index, flag)?
                 .parse()
@@ -305,6 +339,21 @@ fn parse_tblastx_args(
             args.db_gencode = value
                 .parse()
                 .map_err(|err| format!("{flag} parse error: {err}"))?;
+        } else if flag == "--num-threads"
+            || flag == "--num_threads"
+            || flag == "-num_threads"
+            || flag == "-num-threads"
+        {
+            args.num_threads =
+                parse_num_threads_arg(next_arg(extra_args, &mut index, flag)?, flag)?;
+        } else if let Some(value) = flag.strip_prefix("--num-threads=") {
+            args.num_threads = parse_num_threads_arg(value, flag)?;
+        } else if let Some(value) = flag.strip_prefix("--num_threads=") {
+            args.num_threads = parse_num_threads_arg(value, flag)?;
+        } else if let Some(value) = flag.strip_prefix("-num_threads=") {
+            args.num_threads = parse_num_threads_arg(value, flag)?;
+        } else if let Some(value) = flag.strip_prefix("-num-threads=") {
+            args.num_threads = parse_num_threads_arg(value, flag)?;
         } else if flag == "--outfmt" {
             args.outfmt = next_arg(extra_args, &mut index, flag)?.to_string();
         } else if let Some(value) = flag.strip_prefix("--outfmt=") {

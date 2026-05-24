@@ -14,11 +14,24 @@ target-dir = "target"
 [alias]
 build-web = "build --release --lib --target wasm32-wasip1 --no-default-features"
 build-web-unknown = "build --release --lib --target wasm32-unknown-unknown --no-default-features"
+# NCBI reference: ncbi-blast/c++/src/algo/blast/blastinput/blast_args.cpp:3205-3222
+# ```c
+# int num_threads = args[kArgNumThreads].AsInteger();
+# if (num_threads > kMaxValue) {
+#     m_NumThreads = kMaxValue;
+# } else {
+#     m_NumThreads = num_threads;
+# }
+# ```
+build-web-threaded = "build --release --target wasm32-wasip1-threads --features wasm-threads"
 
 # The Rust code only enters its wasm SIMD routines behind
 # `cfg(all(target_arch = "wasm32", target_feature = "simd128"))`; this enables
 # those existing parity-preserving integer paths for browser/WASI builds.
 [target.wasm32-wasip1]
+rustflags = ["-C", "target-feature=+simd128"]
+
+[target.wasm32-wasip1-threads]
 rustflags = ["-C", "target-feature=+simd128"]
 
 [target.wasm32-unknown-unknown]

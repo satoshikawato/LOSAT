@@ -24,6 +24,20 @@ getrandom = { version = "0.2", features = ["js"] }
 [features]
 default = ["parallel"]
 parallel = ["rayon", "num_cpus"]
+# NCBI reference: ncbi-blast/c++/src/algo/blast/blastinput/blast_args.cpp:3205-3222
+# ```c
+# int num_threads = args[kArgNumThreads].AsInteger();
+# if (num_threads > kMaxValue) {
+#     m_NumThreads = kMaxValue;
+# } else {
+#     m_NumThreads = num_threads;
+# }
+# ```
+#
+# Opt-in only: real Wasm threading requires the wasm32-wasip1-threads target
+# and a WASI runtime that implements thread spawning. Plain wasm32-wasip1 and
+# browser command-Wasm builds remain serial.
+wasm-threads = ["parallel"]
 # Diagnostic-only parity switch. NCBI BLAST has a single scalar C control flow
 # for TBLASTX ungapped extension/reevaluation (aa_ungapped.c:846-921,
 # blast_hits.c:675-733); this feature forces the Wasm build to use the matching

@@ -563,11 +563,11 @@ fn run_internal(args: TblastxArgs, mut in_memory: Option<TblastxInMemoryRun<'_>>
     // }
     // ```
     let num_threads = {
-        #[cfg(target_arch = "wasm32")]
+        #[cfg(all(target_arch = "wasm32", not(feature = "wasm-threads")))]
         {
             1
         }
-        #[cfg(not(target_arch = "wasm32"))]
+        #[cfg(any(not(target_arch = "wasm32"), feature = "wasm-threads"))]
         {
             #[cfg(feature = "parallel")]
             {
@@ -589,7 +589,10 @@ fn run_internal(args: TblastxArgs, mut in_memory: Option<TblastxInMemoryRun<'_>>
     //     SetNumberOfThreads(num_threads);
     // }
     // ```
-    #[cfg(all(feature = "parallel", not(target_arch = "wasm32")))]
+    #[cfg(all(
+        feature = "parallel",
+        any(not(target_arch = "wasm32"), feature = "wasm-threads")
+    ))]
     let use_parallel = num_threads > 1;
     // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_engine.c:1002-1003
     // ```c
@@ -606,11 +609,17 @@ fn run_internal(args: TblastxArgs, mut in_memory: Option<TblastxInMemoryRun<'_>>
     //     SetNumberOfThreads(num_threads);
     // }
     // ```
-    #[cfg(all(feature = "parallel", not(target_arch = "wasm32")))]
+    #[cfg(all(
+        feature = "parallel",
+        any(not(target_arch = "wasm32"), feature = "wasm-threads")
+    ))]
     let use_parallel_chunks = use_parallel
         && !use_parallel_scan_chunks
         && std::env::var_os("LOSAT_TBLASTX_PARALLEL_CHUNKS").is_some();
-    #[cfg(any(not(feature = "parallel"), target_arch = "wasm32"))]
+    #[cfg(any(
+        not(feature = "parallel"),
+        all(target_arch = "wasm32", not(feature = "wasm-threads"))
+    ))]
     let use_parallel_chunks = false;
     let query_code = GeneticCode::from_id(args.query_gencode);
     let db_code = GeneticCode::from_id(args.db_gencode);
@@ -680,7 +689,10 @@ fn run_internal(args: TblastxArgs, mut in_memory: Option<TblastxInMemoryRun<'_>>
     //     SetNumberOfThreads(num_threads);
     // }
     // ```
-    #[cfg(all(feature = "parallel", not(target_arch = "wasm32")))]
+    #[cfg(all(
+        feature = "parallel",
+        any(not(target_arch = "wasm32"), feature = "wasm-threads")
+    ))]
     if use_parallel {
         rayon::ThreadPoolBuilder::new()
             .num_threads(num_threads)
@@ -941,9 +953,15 @@ fn run_internal(args: TblastxArgs, mut in_memory: Option<TblastxInMemoryRun<'_>>
     // ```
     // Single-threaded NCBI runs the subject loop in-process, so we can
     // accumulate hits directly without an mpsc queue.
-    #[cfg(all(feature = "parallel", not(target_arch = "wasm32")))]
+    #[cfg(all(
+        feature = "parallel",
+        any(not(target_arch = "wasm32"), feature = "wasm-threads")
+    ))]
     let use_channel = use_parallel && !use_parallel_scan_chunks;
-    #[cfg(any(not(feature = "parallel"), target_arch = "wasm32"))]
+    #[cfg(any(
+        not(feature = "parallel"),
+        all(target_arch = "wasm32", not(feature = "wasm-threads"))
+    ))]
     let use_channel = false;
 
     let (tx_opt, mut rx_opt) = if use_channel {
@@ -961,7 +979,10 @@ fn run_internal(args: TblastxArgs, mut in_memory: Option<TblastxInMemoryRun<'_>>
     //     SetNumberOfThreads(num_threads);
     // }
     // ```
-    #[cfg(all(feature = "parallel", not(target_arch = "wasm32")))]
+    #[cfg(all(
+        feature = "parallel",
+        any(not(target_arch = "wasm32"), feature = "wasm-threads")
+    ))]
     let writer = if use_channel {
         // NCBI reference: ncbi-blast/c++/include/algo/blast/core/blast_hits.h:153-166
         // ```c
@@ -1904,7 +1925,10 @@ fn run_internal(args: TblastxArgs, mut in_memory: Option<TblastxInMemoryRun<'_>>
                     }
                 }
             } else if use_parallel_chunks {
-                #[cfg(all(feature = "parallel", not(target_arch = "wasm32")))]
+                #[cfg(all(
+                    feature = "parallel",
+                    any(not(target_arch = "wasm32"), feature = "wasm-threads")
+                ))]
                 {
                     // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_engine.c:452-584
                     // ```c
@@ -1994,7 +2018,10 @@ fn run_internal(args: TblastxArgs, mut in_memory: Option<TblastxInMemoryRun<'_>>
                         }
                     }
                 }
-                #[cfg(any(not(feature = "parallel"), target_arch = "wasm32"))]
+                #[cfg(any(
+                    not(feature = "parallel"),
+                    all(target_arch = "wasm32", not(feature = "wasm-threads"))
+                ))]
                 {
                     unreachable!("parallel chunk mode is disabled for this target");
                 }
@@ -2708,7 +2735,10 @@ fn run_internal(args: TblastxArgs, mut in_memory: Option<TblastxInMemoryRun<'_>>
     // ```
     let mut single_state: Option<WorkerState> = None;
 
-    #[cfg(all(feature = "parallel", not(target_arch = "wasm32")))]
+    #[cfg(all(
+        feature = "parallel",
+        any(not(target_arch = "wasm32"), feature = "wasm-threads")
+    ))]
     if use_parallel && !use_parallel_scan_chunks {
         subjects_raw.par_iter().enumerate().for_each_init(
             || WorkerState {
@@ -2752,7 +2782,10 @@ fn run_internal(args: TblastxArgs, mut in_memory: Option<TblastxInMemoryRun<'_>>
         ));
     }
 
-    #[cfg(any(not(feature = "parallel"), target_arch = "wasm32"))]
+    #[cfg(any(
+        not(feature = "parallel"),
+        all(target_arch = "wasm32", not(feature = "wasm-threads"))
+    ))]
     {
         single_state = Some(for_each_subjects(
             &subjects_raw,
@@ -2782,7 +2815,10 @@ fn run_internal(args: TblastxArgs, mut in_memory: Option<TblastxInMemoryRun<'_>>
     }
 
     bar.finish();
-    #[cfg(all(feature = "parallel", not(target_arch = "wasm32")))]
+    #[cfg(all(
+        feature = "parallel",
+        any(not(target_arch = "wasm32"), feature = "wasm-threads")
+    ))]
     if let Some(writer) = writer {
         writer.join().unwrap()?;
     }

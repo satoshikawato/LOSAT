@@ -149,6 +149,6 @@
 [DEBUG LINKING_FILTER] INDEX 0 (small gap): cutoff=41, filtered=0, passed=0, total=0, filter_rate=0.00%
 [DEBUG LINKING_FILTER] INDEX 1 (large gap): cutoff=46, filtered=589, passed=428179, total=428768, filter_rate=0.14%
 
-real	22m18.516s
-user	22m18.173s
-sys	0m0.270s
+real	21m16.518s
+user	21m17.369s
+sys	0m0.198s

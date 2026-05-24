@@ -48,7 +48,10 @@ pub(crate) use indicatif::ProgressBar;
 // #endif
 // }
 // ```
-#[cfg(all(feature = "parallel", not(target_arch = "wasm32")))]
+#[cfg(all(
+    feature = "parallel",
+    any(not(target_arch = "wasm32"), feature = "wasm-threads")
+))]
 pub(crate) use rayon::prelude::*;
 pub(crate) use std::collections::HashSet;
 pub(crate) use std::sync::atomic::{AtomicI32, AtomicU64, AtomicUsize, Ordering as AtomicOrdering};

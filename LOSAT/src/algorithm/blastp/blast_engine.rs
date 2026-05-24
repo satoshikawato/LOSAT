@@ -4,7 +4,10 @@
 
 use anyhow::{bail, Context, Result};
 use bio::io::fasta;
-#[cfg(all(feature = "parallel", not(target_arch = "wasm32")))]
+#[cfg(all(
+    feature = "parallel",
+    any(not(target_arch = "wasm32"), feature = "wasm-threads")
+))]
 use rayon::prelude::*;
 use std::fs::File;
 use std::io::{BufWriter, Write};
@@ -69,7 +72,10 @@ use super::hsp::{
     get_prelim_hitlist_size, reap_hsplist_by_evalue, trim_by_max_hsps, BlastCompoHeap,
     BlastpHitList, BlastpHsp, BlastpHspList,
 };
-#[cfg(all(feature = "parallel", not(target_arch = "wasm32")))]
+#[cfg(all(
+    feature = "parallel",
+    any(not(target_arch = "wasm32"), feature = "wasm-threads")
+))]
 use super::kappa::BlastpPostprocessResult;
 use super::kappa::{
     blastp_kappa_range_counters_env_enabled, blastp_trace_hsp_target, blastp_trace_matches_pair,
@@ -529,7 +535,10 @@ impl BlastpSubjectScratch {
     //     calloc(diag_table->diag_array_length, sizeof(DiagStruct));
     // diag_table->offset = window_size;
     // ```
-    #[cfg(all(feature = "parallel", not(target_arch = "wasm32")))]
+    #[cfg(all(
+        feature = "parallel",
+        any(not(target_arch = "wasm32"), feature = "wasm-threads")
+    ))]
     fn prepare_independent_subject(&mut self, diag_offset: i32) {
         self.diag_offset = diag_offset;
         self.diag_array.fill(DiagStruct::default());
@@ -644,7 +653,10 @@ fn prepare_blastp_subjects_preserving_order(
         encoded: encode_protein_sequence(record.seq()),
     };
 
-    #[cfg(all(feature = "parallel", not(target_arch = "wasm32")))]
+    #[cfg(all(
+        feature = "parallel",
+        any(not(target_arch = "wasm32"), feature = "wasm-threads")
+    ))]
     {
         let num_threads = blastp_effective_num_threads(num_threads);
         if num_threads > 1 && subject_records.len() > 1 {
@@ -656,7 +668,10 @@ fn prepare_blastp_subjects_preserving_order(
         }
     }
 
-    #[cfg(any(not(feature = "parallel"), target_arch = "wasm32"))]
+    #[cfg(any(
+        not(feature = "parallel"),
+        all(target_arch = "wasm32", not(feature = "wasm-threads"))
+    ))]
     {
         let _ = num_threads;
     }
@@ -928,7 +943,10 @@ fn build_redone_match_heaps(num_queries: usize, hitlist_size: usize) -> Vec<Blas
 //     m_NumThreads = num_threads;
 // }
 // ```
-#[cfg(all(feature = "parallel", not(target_arch = "wasm32")))]
+#[cfg(all(
+    feature = "parallel",
+    any(not(target_arch = "wasm32"), feature = "wasm-threads")
+))]
 fn blastp_effective_num_threads(requested: usize) -> usize {
     let cpu_count = num_cpus::get().max(1);
     if requested == 0 {
@@ -947,7 +965,10 @@ fn blastp_effective_num_threads(requested: usize) -> usize {
 //     ewp->diag_table->offset += subject_length + ewp->diag_table->window;
 // }
 // ```
-#[cfg(all(feature = "parallel", not(target_arch = "wasm32")))]
+#[cfg(all(
+    feature = "parallel",
+    any(not(target_arch = "wasm32"), feature = "wasm-threads")
+))]
 fn blastp_subject_diag_offsets(subjects: &[EncodedProtein], window: i32) -> Vec<i32> {
     let mut offsets = Vec::with_capacity(subjects.len());
     let mut diag_offset = window;
@@ -999,7 +1020,10 @@ fn update_blastp_preliminary_hit_lists(
 //     BlastHSPStreamClose(hsp_stream);
 // *hsp_list_out = hit_list->hsplist_array[last_hsplist_index];
 // ```
-#[cfg(all(feature = "parallel", not(target_arch = "wasm32")))]
+#[cfg(all(
+    feature = "parallel",
+    any(not(target_arch = "wasm32"), feature = "wasm-threads")
+))]
 fn merge_blastp_subject_results_in_order(
     preliminary_hit_lists: &mut [Option<BlastpHitList>],
     subject_results: Vec<Option<BlastpSubjectResult>>,
@@ -4962,15 +4986,27 @@ fn run_resolved_with_records(
     //    BlastHSPStreamWrite(hsp_stream, &hsp_list);
     // }
     // ```
-    #[cfg(all(feature = "parallel", not(target_arch = "wasm32")))]
+    #[cfg(all(
+        feature = "parallel",
+        any(not(target_arch = "wasm32"), feature = "wasm-threads")
+    ))]
     let num_threads = blastp_effective_num_threads(args.num_threads);
-    #[cfg(all(feature = "parallel", not(target_arch = "wasm32")))]
+    #[cfg(all(
+        feature = "parallel",
+        any(not(target_arch = "wasm32"), feature = "wasm-threads")
+    ))]
     let use_parallel = num_threads > 1 && subjects.len() > 1;
-    #[cfg(any(not(feature = "parallel"), target_arch = "wasm32"))]
+    #[cfg(any(
+        not(feature = "parallel"),
+        all(target_arch = "wasm32", not(feature = "wasm-threads"))
+    ))]
     let use_parallel = false;
 
     if use_parallel {
-        #[cfg(all(feature = "parallel", not(target_arch = "wasm32")))]
+        #[cfg(all(
+            feature = "parallel",
+            any(not(target_arch = "wasm32"), feature = "wasm-threads")
+        ))]
         {
             // NCBI reference: /mnt/c/Users/genom/GitHub/ncbi-blast/c++/src/algo/blast/core/blast_engine.c:1633-1688
             // ```c
@@ -5170,7 +5206,10 @@ fn run_resolved_with_records(
         })
     };
 
-    #[cfg(all(feature = "parallel", not(target_arch = "wasm32")))]
+    #[cfg(all(
+        feature = "parallel",
+        any(not(target_arch = "wasm32"), feature = "wasm-threads")
+    ))]
     let kappa_parallel_query_indices: Vec<usize> = preliminary_hit_lists
         .iter()
         .enumerate()
@@ -5181,13 +5220,25 @@ fn run_resolved_with_records(
                 .map(|_| q_idx)
         })
         .collect();
-    #[cfg(all(feature = "parallel", not(target_arch = "wasm32")))]
+    #[cfg(all(
+        feature = "parallel",
+        any(not(target_arch = "wasm32"), feature = "wasm-threads")
+    ))]
     let kappa_num_threads = blastp_effective_num_threads(args.num_threads);
-    #[cfg(all(feature = "parallel", not(target_arch = "wasm32")))]
+    #[cfg(all(
+        feature = "parallel",
+        any(not(target_arch = "wasm32"), feature = "wasm-threads")
+    ))]
     let use_parallel_kappa_redo = kappa_num_threads > 1 && kappa_parallel_query_indices.len() > 1;
-    #[cfg(any(not(feature = "parallel"), target_arch = "wasm32"))]
+    #[cfg(any(
+        not(feature = "parallel"),
+        all(target_arch = "wasm32", not(feature = "wasm-threads"))
+    ))]
     let use_parallel_kappa_redo = false;
-    #[cfg(all(feature = "parallel", not(target_arch = "wasm32")))]
+    #[cfg(all(
+        feature = "parallel",
+        any(not(target_arch = "wasm32"), feature = "wasm-threads")
+    ))]
     let kappa_match_parallel_query_index = if kappa_num_threads > 1
         && kappa_parallel_query_indices.len() == 1
         && preliminary_hit_lists[kappa_parallel_query_indices[0]]
@@ -5198,13 +5249,22 @@ fn run_resolved_with_records(
     } else {
         None
     };
-    #[cfg(all(feature = "parallel", not(target_arch = "wasm32")))]
+    #[cfg(all(
+        feature = "parallel",
+        any(not(target_arch = "wasm32"), feature = "wasm-threads")
+    ))]
     let use_parallel_kappa_match_redo = kappa_match_parallel_query_index.is_some();
-    #[cfg(any(not(feature = "parallel"), target_arch = "wasm32"))]
+    #[cfg(any(
+        not(feature = "parallel"),
+        all(target_arch = "wasm32", not(feature = "wasm-threads"))
+    ))]
     let use_parallel_kappa_match_redo = false;
 
     if use_parallel_kappa_match_redo {
-        #[cfg(all(feature = "parallel", not(target_arch = "wasm32")))]
+        #[cfg(all(
+            feature = "parallel",
+            any(not(target_arch = "wasm32"), feature = "wasm-threads")
+        ))]
         {
             let q_idx = kappa_match_parallel_query_index
                 .expect("single-query Kappa redo parallel path requires a query index");
@@ -5325,7 +5385,10 @@ fn run_resolved_with_records(
             }
         }
     } else if use_parallel_kappa_redo {
-        #[cfg(all(feature = "parallel", not(target_arch = "wasm32")))]
+        #[cfg(all(
+            feature = "parallel",
+            any(not(target_arch = "wasm32"), feature = "wasm-threads")
+        ))]
         {
             // NCBI reference: /mnt/c/Users/genom/GitHub/ncbi-blast/c++/src/algo/blast/core/blast_kappa.c:3119-3128
             // ```c
@@ -5935,7 +5998,10 @@ mod tests {
         result
     }
 
-    #[cfg(all(feature = "parallel", not(target_arch = "wasm32")))]
+    #[cfg(all(
+        feature = "parallel",
+        any(not(target_arch = "wasm32"), feature = "wasm-threads")
+    ))]
     #[test]
     fn test_merge_blastp_subject_results_replays_subject_index_order() {
         // NCBI reference: /mnt/c/Users/genom/GitHub/ncbi-blast/c++/src/algo/blast/core/blast_engine.c:1409-1554

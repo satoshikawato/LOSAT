@@ -12,10 +12,23 @@ mkdir -p losat_out blast_out
 LOSAT_BIN="../target/release/LOSAT"
 LOSAT_THREADS="${LOSAT_THREADS:-${LOSATP_THREADS:-${LOSAT_BLASTP_THREADS:-8}}}"
 LOSATP_THREADS="${LOSATP_THREADS:-${LOSAT_THREADS}}"
+# NCBI reference: ncbi-blast/c++/src/algo/blast/blastinput/blast_args.cpp:3205-3222
+# ```c
+# int num_threads = args[kArgNumThreads].AsInteger();
+# if (num_threads > kMaxValue) {
+#     m_NumThreads = kMaxValue;
+# } else {
+#     m_NumThreads = num_threads;
+# }
+# ```
 LOSAT_WASM_BIN="${LOSAT_WASM_BIN:-../target/wasm32-wasip1/release/LOSAT.wasm}"
+LOSAT_WASM_THREADED_BIN="${LOSAT_WASM_THREADED_BIN:-../target/wasm32-wasip1-threads/release/LOSAT.wasm}"
 LOSAT_WASM_RUNNER="./losat_out/run_losat_wasi.js"
+LOSAT_WASM_THREADED_RUNNER="${SCRIPT_DIR}/run_losat_wasi_threads.js"
 RUN_LOSAT_WASM="${RUN_LOSAT_WASM:-1}"
+RUN_LOSAT_WASM_THREADED="${RUN_LOSAT_WASM_THREADED:-1}"
 BUILD_LOSAT_WASM="${BUILD_LOSAT_WASM:-0}"
+BUILD_LOSAT_WASM_THREADED="${BUILD_LOSAT_WASM_THREADED:-${BUILD_LOSAT_WASM}}"
 TBLASTX_BIN="${TBLASTX_BIN:-tblastx}"
 FASTA_DIR="${SCRIPT_DIR}/fasta"
 LOSAT_OUT_DIR="${SCRIPT_DIR}/losat_out"
@@ -24,12 +37,23 @@ case "${LOSAT_WASM_BIN}" in
     /*) ;;
     *) LOSAT_WASM_BIN="${SCRIPT_DIR}/${LOSAT_WASM_BIN}" ;;
 esac
+case "${LOSAT_WASM_THREADED_BIN}" in
+    /*) ;;
+    *) LOSAT_WASM_THREADED_BIN="${SCRIPT_DIR}/${LOSAT_WASM_THREADED_BIN}" ;;
+esac
 
 wasm_has_start_export() {
     local wasm_path="$1"
 
     [ -f "${wasm_path}" ] || return 1
     node -e 'const fs=require("fs"); const p=process.argv[1]; const m=new WebAssembly.Module(fs.readFileSync(p)); process.exit(WebAssembly.Module.exports(m).some((e)=>e.name==="_start") ? 0 : 1);' "${wasm_path}" >/dev/null 2>&1
+}
+
+wasm_imports_wasi_thread_spawn() {
+    local wasm_path="$1"
+
+    [ -f "${wasm_path}" ] || return 1
+    node -e 'const fs=require("fs"); const p=process.argv[1]; const m=new WebAssembly.Module(fs.readFileSync(p)); process.exit(WebAssembly.Module.imports(m).some((e)=>e.module==="wasi" && e.name==="thread-spawn") ? 0 : 1);' "${wasm_path}" >/dev/null 2>&1
 }
 
 resolve_losat_wasm_bin() {
@@ -292,7 +316,33 @@ run_losat_wasm() {
     local log="$1"
     shift
 
+    if [ "${LOSAT_WASM_AVAILABLE}" != "1" ]; then
+        echo "Skipping ${log} because serial LOSAT Wasm is unavailable."
+        return 0
+    fi
+
     (time env NODE_NO_WARNINGS=1 node "${LOSAT_WASM_RUNNER}" "${LOSAT_WASM_BIN}" "$@" )&>"${log}"
+}
+
+run_losat_wasm_threaded() {
+    local log="$1"
+    shift
+
+    # NCBI reference: ncbi-blast/c++/src/algo/blast/blastinput/blast_args.cpp:3205-3222
+    # ```c
+    # int num_threads = args[kArgNumThreads].AsInteger();
+    # if (num_threads > kMaxValue) {
+    #     m_NumThreads = kMaxValue;
+    # } else {
+    #     m_NumThreads = num_threads;
+    # }
+    # ```
+    if [ "${LOSAT_WASM_THREADED_AVAILABLE}" != "1" ]; then
+        echo "Skipping ${log} because threaded LOSAT Wasm is unavailable."
+        return 0
+    fi
+
+    (time env NODE_NO_WARNINGS=1 node "${LOSAT_WASM_THREADED_RUNNER}" "${LOSAT_WASM_THREADED_BIN}" "$@" )&>"${log}"
 }
 
 run_losatn_wasm_case() {
@@ -321,7 +371,7 @@ run_losatn_wasm_case() {
     # const string kTask("task");
     # ```
     run_losat_wasm "${log}" blastn -query "${FASTA_DIR}/${query}" -subject "${FASTA_DIR}/${subject}" -out "${out}" "${task_args[@]}" -num_threads 1
-    run_losat_wasm "${threaded_log}" blastn -query "${FASTA_DIR}/${query}" -subject "${FASTA_DIR}/${subject}" -out "${threaded_out}" "${task_args[@]}" -num_threads "${LOSAT_THREADS}"
+    run_losat_wasm_threaded "${threaded_log}" blastn -query "${FASTA_DIR}/${query}" -subject "${FASTA_DIR}/${subject}" -out "${threaded_out}" "${task_args[@]}" -num_threads "${LOSAT_THREADS}"
 }
 
 run_losatp_wasm_case() {
@@ -342,7 +392,7 @@ run_losatp_wasm_case() {
         "${LOSAT_OUT_DIR}/${stem}.losatp.wasm.log" \
         blastp -query "${FASTA_DIR}/${query}" -subject "${FASTA_DIR}/${subject}" \
         -out "${LOSAT_OUT_DIR}/${stem}.losatp.wasm.out" -num_threads 1 -outfmt 6
-    run_losat_wasm \
+    run_losat_wasm_threaded \
         "${LOSAT_OUT_DIR}/${stem}.losatp.wasm.${threaded_suffix}.log" \
         blastp -query "${FASTA_DIR}/${query}" -subject "${FASTA_DIR}/${subject}" \
         -out "${LOSAT_OUT_DIR}/${stem}.losatp.wasm.${threaded_suffix}.out" -num_threads "${LOSAT_THREADS}" -outfmt 6
@@ -378,7 +428,7 @@ run_tlosatx_wasm_case() {
         tblastx -query "${FASTA_DIR}/${query}" -subject "${FASTA_DIR}/${subject}" \
         -out "${LOSAT_OUT_DIR}/${stem}.tlosatx.wasm.out" --query-gencode "${query_gencode}" \
         --db-gencode "${db_gencode}" -num_threads 1 -outfmt 6
-    run_losat_wasm \
+    run_losat_wasm_threaded \
         "${LOSAT_OUT_DIR}/${stem}.tlosatx.wasm.${threaded_suffix}.log" \
         tblastx -query "${FASTA_DIR}/${query}" -subject "${FASTA_DIR}/${subject}" \
         -out "${LOSAT_OUT_DIR}/${stem}.tlosatx.wasm.${threaded_suffix}.out" --query-gencode "${query_gencode}" \
@@ -391,17 +441,61 @@ else
     if [ "${BUILD_LOSAT_WASM}" = "1" ]; then
         (cd .. && cargo build --release --target wasm32-wasip1 --no-default-features)
     fi
+    if [ "${BUILD_LOSAT_WASM_THREADED}" = "1" ]; then
+        (cd .. && cargo build --release --target wasm32-wasip1-threads --features wasm-threads)
+    fi
 
     if ! command -v node >/dev/null 2>&1; then
         echo "Skipping LOSAT Wasm commands because node is not available."
-    elif [ ! -f "${LOSAT_WASM_BIN}" ]; then
-        echo "Skipping LOSAT Wasm commands because ${LOSAT_WASM_BIN} does not exist."
-    elif ! LOSAT_WASM_BIN_RESOLVED="$(resolve_losat_wasm_bin "${LOSAT_WASM_BIN}")"; then
-        echo "Skipping LOSAT Wasm commands because no _start-exporting LOSAT command Wasm was found near ${LOSAT_WASM_BIN}."
     else
-        if [ "${LOSAT_WASM_BIN_RESOLVED}" != "${LOSAT_WASM_BIN}" ]; then
-            echo "Using LOSAT Wasm command artifact: ${LOSAT_WASM_BIN_RESOLVED}"
-            LOSAT_WASM_BIN="${LOSAT_WASM_BIN_RESOLVED}"
+        LOSAT_WASM_AVAILABLE=0
+        if [ ! -f "${LOSAT_WASM_BIN}" ]; then
+            echo "Skipping LOSAT Wasm n1 commands because ${LOSAT_WASM_BIN} does not exist."
+        elif ! LOSAT_WASM_BIN_RESOLVED="$(resolve_losat_wasm_bin "${LOSAT_WASM_BIN}")"; then
+            echo "Skipping LOSAT Wasm n1 commands because no _start-exporting LOSAT command Wasm was found near ${LOSAT_WASM_BIN}."
+        else
+            if [ "${LOSAT_WASM_BIN_RESOLVED}" != "${LOSAT_WASM_BIN}" ]; then
+                echo "Using LOSAT Wasm command artifact: ${LOSAT_WASM_BIN_RESOLVED}"
+                LOSAT_WASM_BIN="${LOSAT_WASM_BIN_RESOLVED}"
+            fi
+            # NCBI reference: ncbi-blast/c++/src/algo/blast/blastinput/blast_args.cpp:3205-3222
+            # ```c
+            # int num_threads = args[kArgNumThreads].AsInteger();
+            # if (num_threads > kMaxValue) {
+            #     m_NumThreads = kMaxValue;
+            # } else {
+            #     m_NumThreads = num_threads;
+            # }
+            # ```
+            LOSAT_WASM_AVAILABLE=1
+        fi
+
+        LOSAT_WASM_THREADED_AVAILABLE=0
+        if [ "${RUN_LOSAT_WASM_THREADED}" != "0" ]; then
+            if [ ! -f "${LOSAT_WASM_THREADED_BIN}" ]; then
+                echo "Skipping LOSAT Wasm n${LOSAT_THREADS} commands because ${LOSAT_WASM_THREADED_BIN} does not exist."
+            elif ! LOSAT_WASM_THREADED_BIN_RESOLVED="$(resolve_losat_wasm_bin "${LOSAT_WASM_THREADED_BIN}")"; then
+                echo "Skipping LOSAT Wasm n${LOSAT_THREADS} commands because no _start-exporting threaded LOSAT command Wasm was found near ${LOSAT_WASM_THREADED_BIN}."
+            elif ! wasm_imports_wasi_thread_spawn "${LOSAT_WASM_THREADED_BIN_RESOLVED}"; then
+                echo "Skipping LOSAT Wasm n${LOSAT_THREADS} commands because ${LOSAT_WASM_THREADED_BIN_RESOLVED} does not import wasi/thread-spawn."
+            elif [ ! -f "${LOSAT_WASM_THREADED_RUNNER}" ]; then
+                echo "Skipping LOSAT Wasm n${LOSAT_THREADS} commands because ${LOSAT_WASM_THREADED_RUNNER} does not exist."
+            else
+                if [ "${LOSAT_WASM_THREADED_BIN_RESOLVED}" != "${LOSAT_WASM_THREADED_BIN}" ]; then
+                    echo "Using LOSAT threaded Wasm command artifact: ${LOSAT_WASM_THREADED_BIN_RESOLVED}"
+                    LOSAT_WASM_THREADED_BIN="${LOSAT_WASM_THREADED_BIN_RESOLVED}"
+                fi
+                # NCBI reference: ncbi-blast/c++/src/algo/blast/blastinput/blast_args.cpp:3205-3222
+                # ```c
+                # int num_threads = args[kArgNumThreads].AsInteger();
+                # if (num_threads > kMaxValue) {
+                #     m_NumThreads = kMaxValue;
+                # } else {
+                #     m_NumThreads = num_threads;
+                # }
+                # ```
+                LOSAT_WASM_THREADED_AVAILABLE=1
+            fi
         fi
         write_losat_wasm_runner
 

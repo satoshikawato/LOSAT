@@ -15,7 +15,10 @@ use indicatif::{ProgressBar, ProgressStyle};
 // #endif
 // }
 // ```
-#[cfg(all(feature = "parallel", not(target_arch = "wasm32")))]
+#[cfg(all(
+    feature = "parallel",
+    any(not(target_arch = "wasm32"), feature = "wasm-threads")
+))]
 use rayon::prelude::*;
 use std::sync::{mpsc::channel, Arc};
 
@@ -4356,11 +4359,11 @@ fn run_internal(args: BlastnArgs, mut in_memory: Option<BlastnInMemoryRun<'_>>) 
     // }
     // ```
     let num_threads = {
-        #[cfg(target_arch = "wasm32")]
+        #[cfg(all(target_arch = "wasm32", not(feature = "wasm-threads")))]
         {
             1
         }
-        #[cfg(not(target_arch = "wasm32"))]
+        #[cfg(any(not(target_arch = "wasm32"), feature = "wasm-threads"))]
         {
             #[cfg(feature = "parallel")]
             {
@@ -4431,9 +4434,15 @@ fn run_internal(args: BlastnArgs, mut in_memory: Option<BlastnInMemoryRun<'_>>) 
     //     SetNumberOfThreads(num_threads);
     // }
     // ```
-    #[cfg(all(feature = "parallel", not(target_arch = "wasm32")))]
+    #[cfg(all(
+        feature = "parallel",
+        any(not(target_arch = "wasm32"), feature = "wasm-threads")
+    ))]
     let use_parallel = num_threads > 1;
-    #[cfg(any(not(feature = "parallel"), target_arch = "wasm32"))]
+    #[cfg(any(
+        not(feature = "parallel"),
+        all(target_arch = "wasm32", not(feature = "wasm-threads"))
+    ))]
     let use_parallel = false;
 
     // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_engine.c:478-536
@@ -4459,7 +4468,10 @@ fn run_internal(args: BlastnArgs, mut in_memory: Option<BlastnInMemoryRun<'_>>) 
     // }
     // ```
     if use_parallel {
-        #[cfg(all(feature = "parallel", not(target_arch = "wasm32")))]
+        #[cfg(all(
+            feature = "parallel",
+            any(not(target_arch = "wasm32"), feature = "wasm-threads")
+        ))]
         {
             rayon::ThreadPoolBuilder::new()
                 .num_threads(num_threads)
@@ -8392,7 +8404,10 @@ fn run_internal(args: BlastnArgs, mut in_memory: Option<BlastnInMemoryRun<'_>>) 
         // }
         // ```
         if use_parallel {
-            #[cfg(all(feature = "parallel", not(target_arch = "wasm32")))]
+            #[cfg(all(
+                feature = "parallel",
+                any(not(target_arch = "wasm32"), feature = "wasm-threads")
+            ))]
             {
                 // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_engine.c:478-536
                 // ```c
@@ -8499,7 +8514,10 @@ fn run_internal(args: BlastnArgs, mut in_memory: Option<BlastnInMemoryRun<'_>>) 
                     }
                 }
             }
-            #[cfg(any(not(feature = "parallel"), target_arch = "wasm32"))]
+            #[cfg(any(
+                not(feature = "parallel"),
+                all(target_arch = "wasm32", not(feature = "wasm-threads"))
+            ))]
             {
                 unreachable!("use_parallel is false when parallel threads are disabled");
             }
@@ -9826,7 +9844,10 @@ fn run_internal(args: BlastnArgs, mut in_memory: Option<BlastnInMemoryRun<'_>>) 
     };
 
     if use_parallel {
-        #[cfg(all(feature = "parallel", not(target_arch = "wasm32")))]
+        #[cfg(all(
+            feature = "parallel",
+            any(not(target_arch = "wasm32"), feature = "wasm-threads")
+        ))]
         {
             // Channel for sending hits
             // Use Option to signal completion: None means "all subjects processed"
@@ -10033,7 +10054,10 @@ fn run_internal(args: BlastnArgs, mut in_memory: Option<BlastnInMemoryRun<'_>>) 
             }
             return Ok(());
         }
-        #[cfg(any(not(feature = "parallel"), target_arch = "wasm32"))]
+        #[cfg(any(
+            not(feature = "parallel"),
+            all(target_arch = "wasm32", not(feature = "wasm-threads"))
+        ))]
         {
             unreachable!("use_parallel is false when parallel threads are disabled");
         }

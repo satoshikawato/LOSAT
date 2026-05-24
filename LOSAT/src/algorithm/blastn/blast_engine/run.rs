@@ -20,7 +20,18 @@ use indicatif::{ProgressBar, ProgressStyle};
     any(not(target_arch = "wasm32"), feature = "wasm-threads")
 ))]
 use rayon::prelude::*;
-use std::sync::{mpsc::channel, Arc};
+// NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_engine.c:1674-1783
+// ```c
+// BLAST_PreliminarySearchEngine(..., hsp_stream, ...);
+// ...
+// BLAST_ComputeTraceback(..., hsp_stream, ..., results, ...);
+// ```
+#[cfg(all(
+    feature = "parallel",
+    not(all(target_arch = "wasm32", feature = "wasm-threads"))
+))]
+use std::sync::mpsc::channel;
+use std::sync::Arc;
 
 use crate::core::blast_encoding::{
     encode_iupac_to_blastna, encode_iupac_to_ncbi2na_packed, COMPRESSION_RATIO,
@@ -10075,9 +10086,116 @@ fn run_internal(args: BlastnArgs, mut in_memory: Option<BlastnInMemoryRun<'_>>) 
     };
 
     if use_parallel {
+        #[cfg(all(feature = "parallel", target_arch = "wasm32", feature = "wasm-threads"))]
+        {
+            // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_engine.c:1409-1427
+            // ```c
+            // itr = BlastSeqSrcIteratorNewEx(MAX(BlastSeqSrcGetNumSeqs(seq_src)/100,1));
+            // while ( (seq_arg.oid = BlastSeqSrcIteratorNext(seq_src, itr))
+            //        != BLAST_SEQSRC_EOF) {
+            //    if (BlastSeqSrcGetSequence(seq_src, &seq_arg) < 0) {
+            //        continue;
+            //    }
+            // }
+            // ```
+            //
+            // NCBI reference: ncbi-blast/c++/src/algo/blast/core/hspfilter_collector.c:155-161
+            // ```c
+            // if (!results->hitlist_array[index]) {
+            //    results->hitlist_array[index] =
+            //       Blast_HitListNew(params->prelim_hitlist_size);
+            // }
+            // Blast_HitListUpdate(results->hitlist_array[index],
+            //                     hsp_list_array[index]);
+            // ```
+            let subject_records_ref = subject_records
+                .as_ref()
+                .expect("subject records must be loaded for parallel search");
+            let mut subject_hit_batches: Vec<(usize, Vec<BlastnHsp>)> = subject_records_ref
+                .par_iter()
+                .enumerate()
+                .map_init(
+                    || {
+                        (
+                            GapAlignScratch::new(),
+                            // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_engine.c:991-1041
+                            // ```c
+                            // Int4 offset_array_size = GetOffsetArraySize(lookup_wrap);
+                            // ...
+                            // aux_struct->offset_pairs =
+                            //   (BlastOffsetPair*) malloc(offset_array_size * sizeof(BlastOffsetPair));
+                            // ```
+                            SubjectScratch::new(queries_ref.len(), offset_array_size),
+                        )
+                    },
+                    |state, (s_idx, s_record)| {
+                        let (gap_scratch, subject_scratch) = state;
+                        let mut subject_hits: Option<Vec<BlastnHsp>> = None;
+                        process_subject(
+                            s_idx,
+                            s_record,
+                            gap_scratch,
+                            subject_scratch,
+                            &mut subject_hits,
+                        );
+                        subject_hits.map(|hits| (s_idx, hits))
+                    },
+                )
+                .filter_map(|hits| hits)
+                .collect();
+
+            if let Some(bar) = progress_bar.as_ref() {
+                bar.finish();
+            }
+
+            // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_engine.c:1411-1427
+            // ```c
+            // while ( (seq_arg.oid = BlastSeqSrcIteratorNext(seq_src, itr))
+            //        != BLAST_SEQSRC_EOF) {
+            //    ...
+            //    status = s_BlastSearchEngineCore(..., &hsp_list, ...);
+            // }
+            // ```
+            subject_hit_batches.sort_by_key(|(s_idx, _)| *s_idx);
+            let mut hit_lists: Vec<Option<BlastnHitList>> = Vec::with_capacity(query_ids_arc.len());
+            hit_lists.resize_with(query_ids_arc.len(), || None);
+            for (_, hits) in subject_hit_batches {
+                update_hitlists_with_subject_hits(&mut hit_lists, hits, prelim_hitlist_size);
+            }
+
+            post_process_hits_and_write(
+                hit_lists,
+                hitlist_size,
+                max_hsps_per_subject,
+                subject_besthit,
+                query_lengths.as_ref(),
+                BlastnOutputTarget::Path(&args.out),
+                verbose,
+                query_ids_arc.as_ref(),
+                subject_ids_arc.as_ref(),
+                timing.as_deref(),
+            )?;
+            // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_engine.c:1674-1783
+            // ```c
+            // BLAST_PreliminarySearchEngine(program_number, query, query_info,
+            //    seq_src, gap_align, score_params, lookup_wrap, word_options,
+            //    ext_params, hit_params, eff_len_params, psi_options,
+            //    db_options, hsp_stream, diagnostics, interrupt_search,
+            //    progress_info);
+            // ...
+            // BLAST_ComputeTraceback(program_number, hsp_stream, query, query_info,
+            //    seq_src, gap_align, score_params, ext_params, hit_params,
+            //    eff_len_params, db_options, psi_options, rps_info, pattern_blk,
+            //    results, interrupt_search, progress_info);
+            // ```
+            if let Some(timing) = timing.as_ref() {
+                print_blastn_timing(timing.as_ref(), t_search_start, t_total);
+            }
+            return Ok(());
+        }
         #[cfg(all(
             feature = "parallel",
-            any(not(target_arch = "wasm32"), feature = "wasm-threads")
+            not(all(target_arch = "wasm32", feature = "wasm-threads"))
         ))]
         {
             // Channel for sending hits

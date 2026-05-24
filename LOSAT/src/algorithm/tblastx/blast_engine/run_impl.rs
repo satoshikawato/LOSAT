@@ -1273,15 +1273,9 @@ fn run_internal(args: TblastxArgs, mut in_memory: Option<TblastxInMemoryRun<'_>>
     // ```
     // Single-threaded NCBI runs the subject loop in-process, so we can
     // accumulate hits directly without an mpsc queue.
-    #[cfg(all(
-        feature = "parallel",
-        any(not(target_arch = "wasm32"), feature = "wasm-threads")
-    ))]
+    #[cfg(all(feature = "parallel", not(target_arch = "wasm32")))]
     let use_channel = use_parallel && !use_parallel_scan_chunks;
-    #[cfg(any(
-        not(feature = "parallel"),
-        all(target_arch = "wasm32", not(feature = "wasm-threads"))
-    ))]
+    #[cfg(any(not(feature = "parallel"), target_arch = "wasm32"))]
     let use_channel = false;
 
     let (tx_opt, mut rx_opt) = if use_channel {
@@ -1299,10 +1293,7 @@ fn run_internal(args: TblastxArgs, mut in_memory: Option<TblastxInMemoryRun<'_>>
     //     SetNumberOfThreads(num_threads);
     // }
     // ```
-    #[cfg(all(
-        feature = "parallel",
-        any(not(target_arch = "wasm32"), feature = "wasm-threads")
-    ))]
+    #[cfg(all(feature = "parallel", not(target_arch = "wasm32")))]
     let writer = if use_channel {
         // NCBI reference: ncbi-blast/c++/include/algo/blast/core/blast_hits.h:153-166
         // ```c
@@ -3064,11 +3055,92 @@ fn run_internal(args: TblastxArgs, mut in_memory: Option<TblastxInMemoryRun<'_>>
     // }
     // ```
     let mut single_state: Option<WorkerState> = None;
+    #[cfg(all(feature = "parallel", target_arch = "wasm32", feature = "wasm-threads"))]
+    let mut threaded_wasi_subject_hit_batches: Option<Vec<(usize, Vec<Hit>)>> = None;
 
-    #[cfg(all(
-        feature = "parallel",
-        any(not(target_arch = "wasm32"), feature = "wasm-threads")
-    ))]
+    #[cfg(all(feature = "parallel", target_arch = "wasm32", feature = "wasm-threads"))]
+    if use_parallel && !use_parallel_scan_chunks {
+        // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_engine.c:1409-1427
+        // ```c
+        // itr = BlastSeqSrcIteratorNewEx(MAX(BlastSeqSrcGetNumSeqs(seq_src)/100,1));
+        // /* iterate over all subject sequences */
+        // while ( (seq_arg.oid = BlastSeqSrcIteratorNext(seq_src, itr))
+        //        != BLAST_SEQSRC_EOF) {
+        //    if (BlastSeqSrcGetSequence(seq_src, &seq_arg) < 0) {
+        //        continue;
+        //    }
+        // ```
+        //
+        // NCBI reference: ncbi-blast/c++/src/algo/blast/api/blast_seqalign.cpp:1569-1577
+        // ```c
+        // for (int index = 0; index < hit_list->hsplist_count; index++) {
+        //     BlastHSPList* hsp_list = hit_list->hsplist_array[index];
+        //     if (!hsp_list)
+        //         continue;
+        //     Blast_HSPListSortByEvalue(hsp_list);
+        // }
+        // ```
+        let subject_hit_batches: Vec<(usize, Vec<Hit>)> = subjects_raw
+            .par_iter()
+            .enumerate()
+            .map_init(
+                || WorkerState {
+                    // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_engine.c:1411-1475
+                    // ```c
+                    // while ( (seq_arg.oid = BlastSeqSrcIteratorNext(seq_src, itr))
+                    //        != BLAST_SEQSRC_EOF) {
+                    //    ...
+                    //    status = s_BlastSearchEngineCore(...);
+                    // }
+                    // ```
+                    tx: None,
+                    hits: Vec::new(),
+                    offset_pairs: vec![OffsetPair::default(); offset_array_size as usize],
+                    diag_array: vec![DiagStruct::default(); diag_array_size as usize],
+                    // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_extend.c:52-63
+                    // ```c
+                    // diag_table->diag_array_length = diag_array_length;
+                    // diag_table->diag_mask = diag_array_length-1;
+                    // diag_table->offset = window_size;
+                    // ```
+                    diag_offset: window,
+                },
+                |st, (s_idx, s_rec)| {
+                    process_subject(st, (s_idx, s_rec));
+                    if st.hits.is_empty() {
+                        None
+                    } else {
+                        Some((s_idx, std::mem::take(&mut st.hits)))
+                    }
+                },
+            )
+            .filter_map(|batch| batch)
+            .collect();
+        threaded_wasi_subject_hit_batches = Some(subject_hit_batches);
+    } else {
+        single_state = Some(for_each_subjects(
+            &subjects_raw,
+            || WorkerState {
+                // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_engine.c:1411-1475
+                // ```c
+                // while (...) {
+                //    ...
+                //    status = s_BlastSearchEngineCore(..., &hsp_list, ...);
+                // }
+                // ```
+                tx: tx_opt.clone(),
+                hits: Vec::new(),
+                offset_pairs: vec![OffsetPair::default(); offset_array_size as usize],
+                diag_array: vec![DiagStruct::default(); diag_array_size as usize],
+                // NCBI: diag_table->offset = window_size;
+                // Source: ncbi-blast/c++/src/algo/blast/core/blast_extend.c:63
+                diag_offset: window,
+            },
+            &process_subject,
+        ));
+    }
+
+    #[cfg(all(feature = "parallel", not(target_arch = "wasm32")))]
     if use_parallel && !use_parallel_scan_chunks {
         subjects_raw.par_iter().enumerate().for_each_init(
             || WorkerState {
@@ -3145,14 +3217,79 @@ fn run_internal(args: TblastxArgs, mut in_memory: Option<TblastxInMemoryRun<'_>>
     }
 
     bar.finish();
-    #[cfg(all(
-        feature = "parallel",
-        any(not(target_arch = "wasm32"), feature = "wasm-threads")
-    ))]
+    #[cfg(all(feature = "parallel", not(target_arch = "wasm32")))]
     if let Some(writer) = writer {
         writer.join().unwrap()?;
     }
-    if let Some(rx) = rx_opt.take() {
+    #[cfg(all(feature = "parallel", target_arch = "wasm32", feature = "wasm-threads"))]
+    let wrote_threaded_wasi_direct =
+        if let Some(mut subject_hit_batches) = threaded_wasi_subject_hit_batches {
+            // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_engine.c:1409-1427
+            // ```c
+            // itr = BlastSeqSrcIteratorNewEx(MAX(BlastSeqSrcGetNumSeqs(seq_src)/100,1));
+            // /* iterate over all subject sequences */
+            // while ( (seq_arg.oid = BlastSeqSrcIteratorNext(seq_src, itr))
+            //        != BLAST_SEQSRC_EOF) {
+            //    ...
+            //    status = s_BlastSearchEngineCore(...);
+            // }
+            // ```
+            subject_hit_batches.sort_by_key(|(s_idx, _)| *s_idx);
+            let mut all: Vec<Hit> = Vec::new();
+            for (_, hits) in subject_hit_batches {
+                all.extend(hits);
+            }
+            all.retain(|h| h.e_value <= evalue_threshold);
+            if let Some(input) = in_memory.as_mut() {
+                // NCBI reference: ncbi-blast/c++/src/algo/blast/api/blast_seqalign.cpp:1569-1577
+                // ```c
+                // for (int index = 0; index < hit_list->hsplist_count; index++) {
+                //     BlastHSPList* hsp_list = hit_list->hsplist_array[index];
+                //     if (!hsp_list)
+                //         continue;
+                //     Blast_HSPListSortByEvalue(hsp_list);
+                // }
+                // ```
+                write_output_ncbi_order_evalue_hsp_order_to_writer(
+                    all,
+                    input.output,
+                    &query_ids,
+                    &subject_ids,
+                )?;
+            } else {
+                // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_hits.c:3331-3337
+                // ```c
+                // if (hit_list && hit_list->hsplist_count > 1) {
+                //    qsort(hit_list->hsplist_array, hit_list->hsplist_count,
+                //             sizeof(BlastHSPList*), s_EvalueCompareHSPLists);
+                // }
+                // ```
+                write_output_ncbi_order_evalue_hsp_order(
+                    all,
+                    out_path.as_ref(),
+                    &query_ids,
+                    &subject_ids,
+                )?;
+            }
+            true
+        } else {
+            false
+        };
+    #[cfg(not(all(feature = "parallel", target_arch = "wasm32", feature = "wasm-threads")))]
+    let wrote_threaded_wasi_direct = false;
+
+    // NCBI reference: ncbi-blast/c++/src/algo/blast/api/blast_seqalign.cpp:1569-1577
+    // ```c
+    // for (int index = 0; index < hit_list->hsplist_count; index++) {
+    //     BlastHSPList* hsp_list = hit_list->hsplist_array[index];
+    //     if (!hsp_list)
+    //         continue;
+    //     Blast_HSPListSortByEvalue(hsp_list);
+    // }
+    // ```
+    if wrote_threaded_wasi_direct {
+        // Threaded-WASI direct reduction wrote the final NCBI-ordered output above.
+    } else if let Some(rx) = rx_opt.take() {
         let mut all: Vec<Hit> = Vec::new();
         for h in rx {
             all.extend(h);

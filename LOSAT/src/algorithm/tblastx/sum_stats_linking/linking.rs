@@ -349,6 +349,43 @@ struct BufferPools {
 /// ```
 /// We now mirror this by accepting pre-computed vectors instead of recalculating.
 pub fn apply_sum_stats_even_gap_linking(
+    hits: Vec<UngappedHit>,
+    params: &KarlinParams,
+    linking_params: &LinkingParams,
+    query_contexts: &[QueryContext],
+    subject_frame_bases: &[i32],
+    length_adj_per_context: &[i64],
+    eff_searchsp_per_context: &[i64],
+) -> Vec<UngappedHit> {
+    // NCBI reference: /mnt/c/Users/genom/GitHub/ncbi-blast/c++/src/algo/blast/core/link_hsps.c:553-558
+    // ```c
+    // for (frame_index=0; frame_index<num_query_frames; frame_index++)
+    // {
+    //    hp_start->next = hp_frame_start[frame_index];
+    //    number_of_hsps = hp_frame_number[frame_index];
+    // }
+    // ```
+    apply_sum_stats_even_gap_linking_with_parallel(
+        hits,
+        params,
+        linking_params,
+        query_contexts,
+        subject_frame_bases,
+        length_adj_per_context,
+        eff_searchsp_per_context,
+        true,
+    )
+}
+
+// NCBI reference: /mnt/c/Users/genom/GitHub/ncbi-blast/c++/src/algo/blast/core/link_hsps.c:553-558
+// ```c
+// for (frame_index=0; frame_index<num_query_frames; frame_index++)
+// {
+//    hp_start->next = hp_frame_start[frame_index];
+//    number_of_hsps = hp_frame_number[frame_index];
+// }
+// ```
+pub fn apply_sum_stats_even_gap_linking_with_parallel(
     mut hits: Vec<UngappedHit>,
     params: &KarlinParams,
     linking_params: &LinkingParams,
@@ -356,6 +393,7 @@ pub fn apply_sum_stats_even_gap_linking(
     subject_frame_bases: &[i32],
     length_adj_per_context: &[i64],
     eff_searchsp_per_context: &[i64],
+    allow_parallel: bool,
 ) -> Vec<UngappedHit> {
     if hits.is_empty() {
         return hits;
@@ -498,7 +536,7 @@ pub fn apply_sum_stats_even_gap_linking(
         feature = "parallel",
         any(not(target_arch = "wasm32"), feature = "wasm-threads")
     ))]
-    let mut results: Vec<UngappedHit> = {
+    let mut results: Vec<UngappedHit> = if allow_parallel && frame_groups.len() > 1 {
         // Use thread_local! macro for thread-local storage (rayon doesn't have ThreadLocal)
         thread_local! {
             static POOLS: RefCell<Option<BufferPools>> = RefCell::new(None);
@@ -541,6 +579,39 @@ pub fn apply_sum_stats_even_gap_linking(
             .into_iter()
             .flat_map(|(_, hits)| hits)
             .collect()
+    } else {
+        // NCBI reference: /mnt/c/Users/genom/GitHub/ncbi-blast/c++/src/algo/blast/core/link_hsps.c:553-558
+        // ```c
+        // for (frame_index=0; frame_index<num_query_frames; frame_index++)
+        // {
+        //    hp_start->next = hp_frame_start[frame_index];
+        //    number_of_hsps = hp_frame_number[frame_index];
+        // }
+        // ```
+        let mut pools = BufferPools {
+            lh_helpers: Vec::with_capacity(initial_lh_size),
+            hsp_links: Vec::with_capacity(total_hits),
+        };
+        let mut ordered: Vec<UngappedHit> = Vec::new();
+        for group_hits in frame_groups.into_iter() {
+            let processed = link_hsp_group_ncbi(
+                group_hits,
+                params,
+                &cutoffs,
+                linking_params.gap_decay_rate,
+                diag_enabled,
+                linking_params.subject_len_nucl,
+                query_contexts,
+                subject_frame_bases,
+                length_adj_per_context,
+                eff_searchsp_per_context,
+                &log_k_by_ctx,
+                &mut pools.lh_helpers,
+                &mut pools.hsp_links,
+            );
+            ordered.extend(processed);
+        }
+        ordered
     };
 
     #[cfg(any(

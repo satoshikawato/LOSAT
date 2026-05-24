@@ -29,5 +29,15 @@ pub use params::{
 // Re-export cutoff calculation
 pub use cutoffs::calculate_link_hsp_cutoffs_ncbi;
 
-// Re-export main linking function
-pub use linking::apply_sum_stats_even_gap_linking;
+// NCBI reference: ncbi-blast/c++/src/algo/blast/core/link_hsps.c:553-558
+// ```c
+// for (frame_index=0; frame_index<num_query_frames; frame_index++)
+// {
+//    hp_start->next = hp_frame_start[frame_index];
+//    number_of_hsps = hp_frame_number[frame_index];
+// }
+// ```
+// Re-export main linking functions
+pub use linking::{
+    apply_sum_stats_even_gap_linking, apply_sum_stats_even_gap_linking_with_parallel,
+};

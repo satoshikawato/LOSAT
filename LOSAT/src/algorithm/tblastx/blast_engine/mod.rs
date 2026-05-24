@@ -91,9 +91,17 @@ pub(crate) use super::reevaluate::{
     get_num_identities_and_positives_ungapped, hsp_test, reevaluate_ungapped_hit_ncbi_translated,
 };
 pub(crate) use super::stage_dump;
+// NCBI reference: ncbi-blast/c++/src/algo/blast/core/link_hsps.c:553-558
+// ```c
+// if (sum_params->link_hsp_params) {
+//     Blast_HSPListGetEvalues(query_info, hsp_list, score_params, sbp, 0, FALSE);
+//     hsp_list = Blast_HSPListPHIGetEvalues(query_info, hsp_list, score_params, sbp,
+//                                           sum_params->link_hsp_params, FALSE);
+// }
+// ```
 pub(crate) use super::sum_stats_linking::{
-    apply_sum_stats_even_gap_linking, compute_avg_query_length_ncbi, find_smallest_lambda_params,
-    LinkingParams,
+    apply_sum_stats_even_gap_linking_with_parallel, compute_avg_query_length_ncbi,
+    find_smallest_lambda_params, LinkingParams,
 };
 pub(crate) use super::tracing::{
     trace_final_hit_if_match, trace_hsp_target, trace_match_target, trace_ungapped_hit_if_match,

@@ -172,6 +172,26 @@ const MAX_DBSEQ_LEN: usize = 5_000_000;
 // ```
 const DBSEQ_CHUNK_OVERLAP: usize = 100;
 
+// NCBI reference: ncbi-blast/c++/src/algo/blast/api/prelim_stage.cpp:86-88
+// ```c
+// if (num_threads > 1) {
+//     SetNumberOfThreads(num_threads);
+// }
+// ```
+// Threaded-WASI worker startup is expensive enough that tiny BLASTN subject
+// sets run faster through the same serial subject/chunk order.
+#[cfg(all(feature = "parallel", target_arch = "wasm32", feature = "wasm-threads"))]
+const BLASTN_WASI_PARALLEL_MIN_WORK_ITEMS: usize = 2;
+
+// NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_engine.c:1407-1412
+// ```c
+// db_length = BlastSeqSrcGetTotLen(seq_src);
+// itr = BlastSeqSrcIteratorNewEx(MAX(BlastSeqSrcGetNumSeqs(seq_src)/100,1));
+// /* iterate over all subject sequences */
+// ```
+#[cfg(all(feature = "parallel", target_arch = "wasm32", feature = "wasm-threads"))]
+const BLASTN_WASI_PARALLEL_MIN_SUBJECT_BASES_PER_THREAD: usize = 262_144;
+
 // NCBI reference: ncbi-blast/c++/include/algo/blast/core/lookup_wrap.h:119
 // ```c
 // #define OFFSET_ARRAY_SIZE 4096
@@ -498,6 +518,174 @@ impl SubjectSplitState {
             overlap,
         })
     }
+}
+
+// NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_engine.c:221-251
+// ```c
+// if (backup->offset + MAX_DBSEQ_LEN < backup->hard_ranges[backup->hm_index].right) {
+//     subject->length = MAX_DBSEQ_LEN;
+//     backup->next = backup->offset + MAX_DBSEQ_LEN - dbseq_chunk_overlap;
+// } else {
+//     subject->length = backup->hard_ranges[backup->hm_index].right - backup->offset;
+//     backup->next = ... backup->full_range.right;
+// }
+// ```
+#[cfg(all(feature = "parallel", target_arch = "wasm32", feature = "wasm-threads"))]
+fn blastn_estimated_subject_chunks(subject_len: usize) -> usize {
+    if subject_len == 0 {
+        return 0;
+    }
+    if subject_len <= MAX_DBSEQ_LEN {
+        return 1;
+    }
+    let stride = MAX_DBSEQ_LEN.saturating_sub(DBSEQ_CHUNK_OVERLAP).max(1);
+    1 + subject_len.saturating_sub(MAX_DBSEQ_LEN).div_ceil(stride)
+}
+
+// NCBI reference: ncbi-blast/c++/src/algo/blast/blastinput/blast_args.cpp:3205-3222
+// ```c
+// const int kMaxValue = static_cast<int>(CSystemInfo::GetCpuCount());
+// int num_threads = args[kArgNumThreads].AsInteger();
+// if (num_threads > kMaxValue) {
+//     m_NumThreads = kMaxValue;
+// } else {
+//     m_NumThreads = num_threads;
+// }
+// ```
+#[cfg(all(feature = "parallel", target_arch = "wasm32", feature = "wasm-threads"))]
+fn blastn_wasi_parallel_env_usize(name: &str, fallback: usize) -> usize {
+    std::env::var(name)
+        .ok()
+        .and_then(|raw| raw.parse::<usize>().ok())
+        .unwrap_or(fallback)
+}
+
+// NCBI reference: ncbi-blast/c++/src/algo/blast/api/prelim_stage.cpp:86-88
+// ```c
+// if (num_threads > 1) {
+//     SetNumberOfThreads(num_threads);
+// }
+// ```
+#[cfg(all(feature = "parallel", target_arch = "wasm32", feature = "wasm-threads"))]
+#[derive(Clone, Copy)]
+struct BlastnWasiParallelDecision {
+    parallel: bool,
+    worker_jobs: usize,
+    min_worker_jobs: usize,
+    min_subject_bases: usize,
+    serial_reason: &'static str,
+}
+
+// NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_engine.c:1409-1475
+// ```c
+// while ( (seq_arg.oid = BlastSeqSrcIteratorNext(seq_src, itr))
+//        != BLAST_SEQSRC_EOF) {
+//    status = s_BlastSearchEngineCore(...);
+// }
+// ```
+//
+// NCBI reference: ncbi-blast/c++/src/algo/blast/api/prelim_stage.cpp:86-88
+// ```c
+// if (num_threads > 1) {
+//     SetNumberOfThreads(num_threads);
+// }
+// ```
+#[cfg(all(feature = "parallel", target_arch = "wasm32", feature = "wasm-threads"))]
+fn blastn_wasi_parallel_decision(
+    effective_threads: usize,
+    subject_records: usize,
+    subject_chunks: usize,
+    total_subject_bases: usize,
+    query_records: usize,
+    query_bases: usize,
+) -> BlastnWasiParallelDecision {
+    let worker_jobs = subject_records.max(subject_chunks);
+    let min_worker_jobs = blastn_wasi_parallel_env_usize(
+        "LOSAT_BLASTN_WASI_MIN_WORK_ITEMS",
+        BLASTN_WASI_PARALLEL_MIN_WORK_ITEMS,
+    );
+    let min_subject_bases = effective_threads.saturating_mul(blastn_wasi_parallel_env_usize(
+        "LOSAT_BLASTN_WASI_MIN_SUBJECT_BASES_PER_THREAD",
+        BLASTN_WASI_PARALLEL_MIN_SUBJECT_BASES_PER_THREAD,
+    ));
+
+    let serial_reason = if effective_threads <= 1 {
+        "effective_threads<=1"
+    } else if query_records == 0 || query_bases == 0 {
+        "query_bases=0"
+    } else if worker_jobs <= 1 {
+        "worker_jobs<=1"
+    } else if worker_jobs < min_worker_jobs {
+        "worker_jobs<threshold"
+    } else if total_subject_bases < min_subject_bases {
+        "subject_bases<threshold"
+    } else {
+        "parallel"
+    };
+
+    BlastnWasiParallelDecision {
+        parallel: serial_reason == "parallel",
+        worker_jobs,
+        min_worker_jobs,
+        min_subject_bases,
+        serial_reason,
+    }
+}
+
+// NCBI reference: ncbi-blast/c++/src/algo/blast/api/prelim_stage.cpp:86-88
+// ```c
+// if (num_threads > 1) {
+//     SetNumberOfThreads(num_threads);
+// }
+// ```
+#[cfg(all(feature = "parallel", target_arch = "wasm32", feature = "wasm-threads"))]
+fn blastn_wasi_threads_debug_enabled() -> bool {
+    std::env::var("LOSAT_WASI_THREADS_DEBUG")
+        .map(|value| value == "1" || value.eq_ignore_ascii_case("true"))
+        .unwrap_or(false)
+}
+
+// NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_engine.c:478-500
+// ```c
+// while (TRUE) {
+//     status = s_GetNextSubjectChunk(subject, &backup, kNucleotide,
+//                                    dbseq_chunk_overlap);
+//     if (status == SUBJECT_SPLIT_DONE) break;
+//     if (status == SUBJECT_SPLIT_NO_RANGE) continue;
+//     if (aux_struct->WordFinder) {
+//         aux_struct->WordFinder(...);
+// ```
+#[cfg(all(feature = "parallel", target_arch = "wasm32", feature = "wasm-threads"))]
+fn blastn_report_wasi_threading(
+    requested_threads: usize,
+    effective_threads: usize,
+    subject_records: usize,
+    subject_chunks: usize,
+    total_subject_bases: usize,
+    query_records: usize,
+    query_bases: usize,
+    decision: BlastnWasiParallelDecision,
+) {
+    if !blastn_wasi_threads_debug_enabled() {
+        return;
+    }
+    eprintln!(
+        "[losat-wasi-threads] blastn stage=search target_arch=wasm32 threaded_wasm=true \
+requested_threads={requested_threads} effective_threads={effective_threads} rayon_pool_threads={} \
+subject_records={subject_records} subject_chunks={subject_chunks} worker_jobs={} \
+total_subject_bases={total_subject_bases} query_records={query_records} query_bases={query_bases} \
+min_worker_jobs={} min_subject_bases={} parallel={} serial_reason={}",
+        if decision.parallel {
+            effective_threads
+        } else {
+            0
+        },
+        decision.worker_jobs,
+        decision.min_worker_jobs,
+        decision.min_subject_bases,
+        decision.parallel,
+        decision.serial_reason
+    );
 }
 
 // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_gapalign.c:4163-4191
@@ -4438,47 +4626,12 @@ fn run_internal(args: BlastnArgs, mut in_memory: Option<BlastnInMemoryRun<'_>>) 
         feature = "parallel",
         any(not(target_arch = "wasm32"), feature = "wasm-threads")
     ))]
-    let use_parallel = num_threads > 1;
+    let requested_parallel = num_threads > 1;
     #[cfg(any(
         not(feature = "parallel"),
         all(target_arch = "wasm32", not(feature = "wasm-threads"))
     ))]
-    let use_parallel = false;
-
-    // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_engine.c:478-536
-    // ```c
-    // while (TRUE) {
-    //     status = s_GetNextSubjectChunk(subject, &backup, kNucleotide,
-    //                                    dbseq_chunk_overlap);
-    //     if (status == SUBJECT_SPLIT_DONE) break;
-    //     if (status == SUBJECT_SPLIT_NO_RANGE) continue;
-    //     ...
-    // }
-    // ```
-    // NCBI reference: ncbi-blast/c++/src/algo/blast/api/prelim_stage.cpp:82-88
-    // ```c
-    // if (num_threads > 1) {
-    //     SetNumberOfThreads(num_threads);
-    // }
-    // ```
-    // NCBI reference: ncbi-blast/c++/src/algo/blast/api/prelim_stage.cpp:82-88
-    // ```c
-    // if (num_threads > 1) {
-    //     SetNumberOfThreads(num_threads);
-    // }
-    // ```
-    if use_parallel {
-        #[cfg(all(
-            feature = "parallel",
-            any(not(target_arch = "wasm32"), feature = "wasm-threads")
-        ))]
-        {
-            rayon::ThreadPoolBuilder::new()
-                .num_threads(num_threads)
-                .build_global()
-                .context("Failed to build thread pool")?;
-        }
-    }
+    let requested_parallel = false;
 
     // Configure task-specific parameters (initial configuration)
     let mut config = configure_task(&args);
@@ -4584,6 +4737,84 @@ fn run_internal(args: BlastnArgs, mut in_memory: Option<BlastnInMemoryRun<'_>>) 
     };
     if subject_metadata.db_num_seqs == 0 {
         return Ok(());
+    }
+
+    // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_engine.c:1409-1475
+    // ```c
+    // while ( (seq_arg.oid = BlastSeqSrcIteratorNext(seq_src, itr))
+    //        != BLAST_SEQSRC_EOF) {
+    //    status = s_BlastSearchEngineCore(...);
+    // }
+    // ```
+    //
+    // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_engine.c:478-500
+    // ```c
+    // while (TRUE) {
+    //     status = s_GetNextSubjectChunk(subject, &backup, kNucleotide,
+    //                                    dbseq_chunk_overlap);
+    //     if (status == SUBJECT_SPLIT_DONE) break;
+    //     if (status == SUBJECT_SPLIT_NO_RANGE) continue;
+    //     if (aux_struct->WordFinder) {
+    //         aux_struct->WordFinder(...);
+    // ```
+    #[cfg(all(feature = "parallel", target_arch = "wasm32", feature = "wasm-threads"))]
+    let use_parallel = if requested_parallel {
+        let subject_records_count = subject_metadata.db_num_seqs;
+        let subject_chunks = subject_records
+            .as_ref()
+            .map(|records| {
+                records
+                    .iter()
+                    .map(|record| blastn_estimated_subject_chunks(record.seq().len()))
+                    .sum::<usize>()
+            })
+            .unwrap_or_else(|| blastn_estimated_subject_chunks(subject_metadata.db_len_total));
+        let query_bases = queries
+            .iter()
+            .map(|record| record.seq().len())
+            .sum::<usize>();
+        let decision = blastn_wasi_parallel_decision(
+            num_threads,
+            subject_records_count,
+            subject_chunks,
+            subject_metadata.db_len_total,
+            queries.len(),
+            query_bases,
+        );
+        blastn_report_wasi_threading(
+            args.num_threads,
+            num_threads,
+            subject_records_count,
+            subject_chunks,
+            subject_metadata.db_len_total,
+            queries.len(),
+            query_bases,
+            decision,
+        );
+        decision.parallel
+    } else {
+        false
+    };
+    #[cfg(not(all(feature = "parallel", target_arch = "wasm32", feature = "wasm-threads")))]
+    let use_parallel = requested_parallel;
+
+    // NCBI reference: ncbi-blast/c++/src/algo/blast/api/prelim_stage.cpp:82-88
+    // ```c
+    // if (num_threads > 1) {
+    //     SetNumberOfThreads(num_threads);
+    // }
+    // ```
+    if use_parallel {
+        #[cfg(all(
+            feature = "parallel",
+            any(not(target_arch = "wasm32"), feature = "wasm-threads")
+        ))]
+        {
+            rayon::ThreadPoolBuilder::new()
+                .num_threads(num_threads)
+                .build_global()
+                .context("Failed to build thread pool")?;
+        }
     }
 
     // NCBI reference: ncbi-blast/c++/src/algo/blast/api/blast_setup_cxx.cpp:836-847

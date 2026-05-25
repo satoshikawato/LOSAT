@@ -378,3 +378,126 @@ Next policy:
 - Do not introduce BLASTN query/range partitioning or TBLASTX frame/scan
   partitioning until the corresponding NCBI merge, purge, filtering, and output
   ordering points are fully documented and parity-proven.
+
+## 2026-05-24 Phase 2 BLASTN Implementation Update
+
+Implemented the BLASTN threaded-WASI scheduling gate as an execution-path
+performance change. This avoids creating Rayon workers and the parallel writer
+thread for BLASTN jobs that have no useful subject/chunk parallelism.
+
+Changes made:
+
+- `LOSAT/src/algorithm/blastn/blast_engine/run.rs` now delays Rayon global pool
+  creation until after query and subject metadata are loaded.
+- Threaded-WASI BLASTN now estimates existing NCBI-style work units from:
+  subject record count, subject `MAX_DBSEQ_LEN` chunk count, total subject
+  bases, query record count, and query bases.
+- BLASTN `-num_threads N` now stays on the serial subject/chunk path when the
+  job has only one useful work item or is below conservative threaded-WASI
+  thresholds.
+- Native behavior is unchanged: native parallel builds still enter the existing
+  parallel path when `num_threads > 1`.
+- Non-threaded command Wasm behavior is unchanged: `wasm32-wasip1` without
+  `wasm-threads` remains serial.
+- The new threaded-WASI defaults are conservative and environment-overridable:
+  - `LOSAT_BLASTN_WASI_MIN_WORK_ITEMS=2`
+  - `LOSAT_BLASTN_WASI_MIN_SUBJECT_BASES_PER_THREAD=262144`
+- BLASTN threaded-WASI diagnostics now report effective threads, Rayon pool
+  threads, subject records, estimated subject chunks, worker jobs, subject
+  bases, query records, query bases, thresholds, and `serial_reason`.
+
+Validation performed:
+
+- `rustfmt src/algorithm/blastn/blast_engine/run.rs --edition 2021`
+- `cargo check`
+- `cargo check --target wasm32-wasip1-threads --features wasm-threads`
+- `cargo build --release --target wasm32-wasip1-threads --features wasm-threads`
+- Threaded Wasm BLASTN fixture:
+  `LC738874.fasta` vs `LC738870.fasta`, task `blastn`, `-num_threads 1` and
+  `-num_threads 8`.
+
+Observed threaded-WASI behavior for the BLASTN fixture:
+
+- Debug output for `-num_threads 8` reported
+  `subject_records=1`, `subject_chunks=1`, `worker_jobs=1`,
+  `total_subject_bases=294144`, `query_bases=287061`,
+  `rayon_pool_threads=0`, `parallel=false`, and
+  `serial_reason=worker_jobs<=1`.
+- The threaded runner did not spawn workers for this single-work-item BLASTN
+  case.
+- One timing sample with debug disabled:
+  - `n1`: `real 1.64`, `user 1.80`, `sys 0.04`
+  - `n8`: `real 1.46`, `user 1.70`, `sys 0.06`
+- `n1` and `n8` output hashes were identical:
+  `22304df47cc5de45febf3dbe6ce729abf9ad513916e6f9e0aa818b672bd126b1`.
+
+Notes:
+
+- This patch does not add new BLASTN partitioning. It only chooses between the
+  existing NCBI-ordered serial path and the existing subject/chunk parallel path.
+- The thresholds are not a parity mechanism; they only decide whether to pay
+  the threaded-WASI worker startup and writer-thread cost. Final subject/chunk
+  ordering, pruning, scoring, and output formatting are unchanged.
+- The checked commands still emit the repository's existing warning set,
+  including the Cargo lib/bin Wasm output filename collision warning.
+
+Next policy:
+
+- Tune BLASTN threaded-WASI thresholds with output-hash checks paired to every
+  timing sample.
+- Validate large BLASTN subjects that split into multiple `MAX_DBSEQ_LEN`
+  chunks before making chunk-level scheduling more aggressive.
+- Do not introduce BLASTN query/range partitioning until the corresponding
+  NCBI merge, purge, traceback, filtering, and output ordering points are fully
+  documented and parity-proven.
+- TBLASTX should get a similar gate only around already-documented subject/chunk
+  work units; scan/frame partitioning remains diagnostic-only until it has a
+  parity proof.
+
+## 2026-05-24 Per-Run Rayon Pool Implementation Update
+
+Implemented the remaining BLASTN and TBLASTX per-run Rayon pool change needed
+for browser-reused LOSAT workers.
+
+Changes made:
+
+- `LOSAT/src/algorithm/blastn/blast_engine/run.rs` no longer initializes a
+  process-global Rayon pool for each parallel BLASTN run. It now builds a local
+  pool after the final threaded-WASI/native scheduling decision and runs the
+  existing subject/chunk parallel search inside `ThreadPool::install`.
+- `LOSAT/src/algorithm/tblastx/blast_engine/run_impl.rs` now uses the same
+  per-run local pool for the existing TBLASTX subject-level and nested
+  subject-chunk parallel paths.
+- The change preserves the NCBI subject and chunk iteration order: workers still
+  collect per-subject or per-chunk results, then the existing ordered reducer
+  and formatter paths replay those results.
+- Serial plain Wasm behavior is unchanged. The change applies only where Rayon
+  parallelism is already enabled: native parallel builds and
+  `wasm32-wasip1-threads --features wasm-threads`.
+
+Why this matters:
+
+- Browser direct/WASI workers may run more than one LOSAT pair search in the
+  same process or Wasm worker.
+- A process-global Rayon pool can only be initialized once and can keep using
+  the first job's thread count. A local pool lets each job respect its effective
+  `-num_threads` value without changing BLAST scoring, pruning, filtering,
+  chaining, culling, or output formatting.
+
+Validation performed:
+
+- `rustfmt src/algorithm/blastn/blast_engine/run.rs src/algorithm/tblastx/blast_engine/run_impl.rs --edition 2021`
+- `cargo check`
+- `cargo check --target wasm32-wasip1-threads --features wasm-threads`
+- `cargo test tblastx_parallel_chunks_matches_serial_on_real_chunk_boundaries -- --nocapture`
+- `cargo build --release --target wasm32-wasip1-threads --features wasm-threads`
+- Node artifact inspection confirmed the threaded artifact exports `_start` and
+  `wasi_thread_start`, and imports `wasi/thread-spawn`.
+
+Notes:
+
+- Existing repository warnings remain, including the Cargo lib/bin Wasm output
+  filename collision warning.
+- Browser-side work remains in gbdraw: package `losat-threaded.wasm`, enable
+  COOP/COEP/CORP headers, implement WASI `thread-spawn` workers, and keep
+  pair-job worker count separate from per-job LOSAT thread count.

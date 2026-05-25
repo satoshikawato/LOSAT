@@ -668,9 +668,15 @@ struct BlastpPreparedSubject {
 //   argument can be shared between multiple threads ... */
 // BLAST_GapAlignSetUp(..., &gap_align)
 // ```
+#[cfg(all(
+    feature = "parallel",
+    any(not(target_arch = "wasm32"), feature = "wasm-threads")
+))]
 fn prepare_blastp_subjects_preserving_order(
     subject_records: &[fasta::Record],
-    num_threads: usize,
+    requested_threads: usize,
+    effective_threads: usize,
+    blastp_parallel_pool: &mut Option<rayon::ThreadPool>,
 ) -> Result<Vec<BlastpPreparedSubject>> {
     let prepare_subject = |record: &fasta::Record| BlastpPreparedSubject {
         id: fasta_id(record),
@@ -678,38 +684,52 @@ fn prepare_blastp_subjects_preserving_order(
         encoded: encode_protein_sequence(record.seq()),
     };
 
-    #[cfg(all(
-        feature = "parallel",
-        any(not(target_arch = "wasm32"), feature = "wasm-threads")
-    ))]
+    // NCBI reference: /mnt/c/Users/genom/GitHub/ncbi-blast/c++/src/algo/blast/core/blast_engine.c:1411-1426
+    // ```c
+    // /* iterate over all subject sequences */
+    // while ( (seq_arg.oid = BlastSeqSrcIteratorNext(seq_src, itr))
+    //        != BLAST_SEQSRC_EOF) {
+    //    if (BlastSeqSrcGetSequence(seq_src, &seq_arg) < 0) {
+    //        continue;
+    //    }
+    // ```
+    if blastp_should_parallelize_subject_prep(subject_records, requested_threads, effective_threads)
     {
-        let requested_threads = num_threads;
-        let num_threads = blastp_effective_num_threads(num_threads);
-        // NCBI reference: /mnt/c/Users/genom/GitHub/ncbi-blast/c++/src/algo/blast/core/blast_engine.c:1411-1426
+        // NCBI reference: /mnt/c/Users/genom/GitHub/ncbi-blast/c++/src/algo/blast/core/blast_engine.c:1633-1688
         // ```c
-        // /* iterate over all subject sequences */
-        // while ( (seq_arg.oid = BlastSeqSrcIteratorNext(seq_src, itr))
-        //        != BLAST_SEQSRC_EOF) {
-        //    if (BlastSeqSrcGetSequence(seq_src, &seq_arg) < 0) {
-        //        continue;
-        //    }
+        // BLAST_GapAlignSetUp(..., &gap_align)
+        // status = BLAST_PreliminarySearchEngine(...);
         // ```
-        if blastp_should_parallelize_subject_prep(subject_records, requested_threads, num_threads) {
-            let pool = rayon::ThreadPoolBuilder::new()
-                .num_threads(num_threads)
-                .build()
-                .context("failed to build BLASTP subject preparation thread pool")?;
-            return Ok(pool.install(|| subject_records.par_iter().map(prepare_subject).collect()));
-        }
+        let pool = get_or_build_blastp_thread_pool(blastp_parallel_pool, effective_threads)
+            .context("failed to build BLASTP subject preparation thread pool")?;
+        return Ok(pool.install(|| subject_records.par_iter().map(prepare_subject).collect()));
     }
 
-    #[cfg(any(
-        not(feature = "parallel"),
-        all(target_arch = "wasm32", not(feature = "wasm-threads"))
-    ))]
-    {
-        let _ = num_threads;
-    }
+    Ok(subject_records.iter().map(prepare_subject).collect())
+}
+
+// NCBI reference: /mnt/c/Users/genom/GitHub/ncbi-blast/c++/src/algo/blast/core/blast_engine.c:1411-1426
+// ```c
+// /* iterate over all subject sequences */
+// while ( (seq_arg.oid = BlastSeqSrcIteratorNext(seq_src, itr))
+//        != BLAST_SEQSRC_EOF) {
+//    if (BlastSeqSrcGetSequence(seq_src, &seq_arg) < 0) {
+//        continue;
+//    }
+// ```
+#[cfg(any(
+    not(feature = "parallel"),
+    all(target_arch = "wasm32", not(feature = "wasm-threads"))
+))]
+fn prepare_blastp_subjects_preserving_order(
+    subject_records: &[fasta::Record],
+    _num_threads: usize,
+) -> Result<Vec<BlastpPreparedSubject>> {
+    let prepare_subject = |record: &fasta::Record| BlastpPreparedSubject {
+        id: fasta_id(record),
+        title: record.desc().map(str::to_string),
+        encoded: encode_protein_sequence(record.seq()),
+    };
 
     Ok(subject_records.iter().map(prepare_subject).collect())
 }
@@ -1040,6 +1060,92 @@ fn blastp_effective_num_threads(requested: usize) -> usize {
 //     m_NumThreads = num_threads;
 // }
 // ```
+//
+// NCBI reference: ncbi-blast/c++/src/algo/blast/api/prelim_stage.cpp:82-88
+// ```c
+// if (num_threads > 1) {
+//     SetNumberOfThreads(num_threads);
+// }
+// ```
+#[cfg(all(
+    feature = "parallel",
+    any(not(target_arch = "wasm32"), feature = "wasm-threads")
+))]
+fn build_blastp_thread_pool(num_threads: usize) -> Result<rayon::ThreadPool> {
+    // NCBI reference: ncbi-blast/c++/src/algo/blast/api/prelim_stage.cpp:82-88
+    // ```c
+    // if (num_threads > 1) {
+    //     SetNumberOfThreads(num_threads);
+    // }
+    // ```
+    let builder = rayon::ThreadPoolBuilder::new().num_threads(num_threads);
+
+    // NCBI reference: ncbi-blast/c++/src/algo/blast/blastinput/blast_args.cpp:3205-3222
+    // ```c
+    // int num_threads = args[kArgNumThreads].AsInteger();
+    // if (num_threads > kMaxValue) {
+    //     m_NumThreads = kMaxValue;
+    // } else {
+    //     m_NumThreads = num_threads;
+    // }
+    // ```
+    #[cfg(all(target_arch = "wasm32", feature = "wasm-threads"))]
+    let builder = builder.use_current_thread();
+
+    builder
+        .build()
+        .context("failed to build BLASTP thread pool")
+}
+
+// NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_engine.c:1633-1688
+// ```c
+// BlastScoringParameters* score_params = NULL;
+// BlastExtensionParameters* ext_params = NULL;
+// BlastHitSavingParameters* hit_params = NULL;
+// BlastGapAlignStruct* gap_align = NULL;
+// ```
+#[cfg(all(
+    feature = "parallel",
+    any(not(target_arch = "wasm32"), feature = "wasm-threads")
+))]
+fn get_or_build_blastp_thread_pool(
+    pool: &mut Option<rayon::ThreadPool>,
+    num_threads: usize,
+) -> Result<&rayon::ThreadPool> {
+    if pool.is_none() {
+        // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_engine.c:1633-1688
+        // ```c
+        // BLAST_GapAlignSetUp(..., &gap_align)
+        // status = BLAST_PreliminarySearchEngine(...);
+        // ```
+        *pool = Some(build_blastp_thread_pool(num_threads)?);
+    }
+    Ok(pool
+        .as_ref()
+        .expect("BLASTP thread pool must exist after successful build"))
+}
+
+// NCBI reference: ncbi-blast/c++/src/algo/blast/api/prelim_stage.cpp:82-88
+// ```c
+// if (num_threads > 1) {
+//     SetNumberOfThreads(num_threads);
+// }
+// ```
+#[cfg(all(feature = "parallel", target_arch = "wasm32", feature = "wasm-threads"))]
+fn blastp_thread_pool_spawned_workers(num_threads: usize) -> usize {
+    num_threads.saturating_sub(1)
+}
+
+// NCBI reference: ncbi-blast/c++/src/algo/blast/blastinput/blast_args.cpp:3205-3222
+// ```c
+// const int kMaxValue = static_cast<int>(CSystemInfo::GetCpuCount());
+// int num_threads = args[kArgNumThreads].AsInteger();
+// if (num_threads > kMaxValue) {
+//     m_NumThreads = kMaxValue;
+// } else {
+//     m_NumThreads = num_threads;
+// }
+// ```
 #[cfg(all(feature = "parallel", target_arch = "wasm32", feature = "wasm-threads"))]
 fn blastp_wasi_parallel_env_usize(name: &str, fallback: usize) -> usize {
     std::env::var(name)
@@ -1155,10 +1261,22 @@ fn blastp_report_wasi_threading(
     if !blastp_wasi_threads_debug_enabled() {
         return;
     }
+    // NCBI reference: ncbi-blast/c++/src/algo/blast/api/prelim_stage.cpp:82-88
+    // ```c
+    // if (num_threads > 1) {
+    //     SetNumberOfThreads(num_threads);
+    // }
+    // ```
+    let expected_spawned_workers = if parallel {
+        blastp_thread_pool_spawned_workers(rayon_pool_threads)
+    } else {
+        0
+    };
     eprintln!(
         "[losat-wasi-threads] blastp stage={stage} target_arch=wasm32 threaded_wasm=true \
 requested_threads={requested_threads} runner_thread_cap={} effective_threads={effective_threads} \
-rayon_pool_threads={rayon_pool_threads} subject_records={subject_records} worker_jobs={worker_jobs} \
+rayon_pool_threads={rayon_pool_threads} expected_spawned_workers={expected_spawned_workers} \
+subject_records={subject_records} worker_jobs={worker_jobs} \
 total_subject_residues={total_subject_residues} min_worker_jobs={} min_subject_residues={} \
 parallel={parallel} serial_reason={}",
         blastp_available_thread_cap(),
@@ -4193,6 +4311,33 @@ fn run_resolved_with_records(
     } else {
         None
     };
+    // NCBI reference: /mnt/c/Users/genom/GitHub/ncbi-blast/c++/src/algo/blast/blastinput/blast_args.cpp:3205-3222
+    // ```c
+    // int num_threads = args[kArgNumThreads].AsInteger();
+    // if (num_threads > kMaxValue) {
+    //     m_NumThreads = kMaxValue;
+    // } else {
+    //     m_NumThreads = num_threads;
+    // }
+    // ```
+    //
+    // NCBI reference: /mnt/c/Users/genom/GitHub/ncbi-blast/c++/src/algo/blast/core/blast_engine.c:1633-1688
+    // ```c
+    // BlastScoringParameters* score_params = NULL;
+    // BlastExtensionParameters* ext_params = NULL;
+    // BlastHitSavingParameters* hit_params = NULL;
+    // BlastGapAlignStruct* gap_align = NULL;
+    // ```
+    #[cfg(all(
+        feature = "parallel",
+        any(not(target_arch = "wasm32"), feature = "wasm-threads")
+    ))]
+    let blastp_num_threads = blastp_effective_num_threads(args.num_threads);
+    #[cfg(all(
+        feature = "parallel",
+        any(not(target_arch = "wasm32"), feature = "wasm-threads")
+    ))]
+    let mut blastp_parallel_pool: Option<rayon::ThreadPool> = None;
 
     let (outfmt, custom_fields) = OutputFormat::parse(&args.outfmt).map_err(anyhow::Error::msg)?;
     if outfmt == OutputFormat::Pairwise && custom_fields.is_some() {
@@ -4235,6 +4380,20 @@ fn run_resolved_with_records(
     //        continue;
     //    }
     // ```
+    #[cfg(all(
+        feature = "parallel",
+        any(not(target_arch = "wasm32"), feature = "wasm-threads")
+    ))]
+    let prepared_subjects = prepare_blastp_subjects_preserving_order(
+        subject_records,
+        args.num_threads,
+        blastp_num_threads,
+        &mut blastp_parallel_pool,
+    )?;
+    #[cfg(any(
+        not(feature = "parallel"),
+        all(target_arch = "wasm32", not(feature = "wasm-threads"))
+    ))]
     let prepared_subjects =
         prepare_blastp_subjects_preserving_order(subject_records, args.num_threads)?;
     let mut subject_ids = Vec::with_capacity(prepared_subjects.len());
@@ -5304,11 +5463,6 @@ fn run_resolved_with_records(
         feature = "parallel",
         any(not(target_arch = "wasm32"), feature = "wasm-threads")
     ))]
-    let num_threads = blastp_effective_num_threads(args.num_threads);
-    #[cfg(all(
-        feature = "parallel",
-        any(not(target_arch = "wasm32"), feature = "wasm-threads")
-    ))]
     let use_parallel = {
         // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_engine.c:1409-1475
         // ```c
@@ -5320,7 +5474,7 @@ fn run_resolved_with_records(
         blastp_should_parallelize_stage(
             "prelim",
             args.num_threads,
-            num_threads,
+            blastp_num_threads,
             subjects.len(),
             subjects.len(),
             total_db_len,
@@ -5345,10 +5499,15 @@ fn run_resolved_with_records(
             // status = Blast_RunPreliminarySearchWithInterrupt_MT(...);
             // ```
             let subject_diag_offsets = blastp_subject_diag_offsets(&subjects, window);
-            let pool = rayon::ThreadPoolBuilder::new()
-                .num_threads(num_threads)
-                .build()
-                .context("failed to build BLASTP thread pool")?;
+            // NCBI reference: /mnt/c/Users/genom/GitHub/ncbi-blast/c++/src/algo/blast/core/blast_engine.c:1633-1688
+            // ```c
+            // BlastScoringParameters* score_params = NULL;
+            // BlastExtensionParameters* ext_params = NULL;
+            // BlastGapAlignStruct* gap_align = NULL;
+            // ```
+            let pool =
+                get_or_build_blastp_thread_pool(&mut blastp_parallel_pool, blastp_num_threads)
+                    .context("failed to build BLASTP preliminary search thread pool")?;
             // NCBI reference: /mnt/c/Users/genom/GitHub/ncbi-blast/c++/src/algo/blast/core/blast_engine.c:1409-1554
             // ```c
             // while ((seq_arg.oid = BlastSeqSrcIteratorNext(seq_src, itr)) != BLAST_SEQSRC_EOF) {
@@ -5554,11 +5713,6 @@ fn run_resolved_with_records(
         feature = "parallel",
         any(not(target_arch = "wasm32"), feature = "wasm-threads")
     ))]
-    let kappa_num_threads = blastp_effective_num_threads(args.num_threads);
-    #[cfg(all(
-        feature = "parallel",
-        any(not(target_arch = "wasm32"), feature = "wasm-threads")
-    ))]
     let use_parallel_kappa_redo = {
         // NCBI reference: /mnt/c/Users/genom/GitHub/ncbi-blast/c++/src/algo/blast/core/blast_kappa.c:3429-3449
         // ```c
@@ -5570,7 +5724,7 @@ fn run_resolved_with_records(
             && blastp_should_parallelize_stage(
                 "kappa-query-redo",
                 args.num_threads,
-                kappa_num_threads,
+                blastp_num_threads,
                 subjects.len(),
                 kappa_parallel_query_indices.len(),
                 total_db_len,
@@ -5603,7 +5757,7 @@ fn run_resolved_with_records(
             if blastp_should_parallelize_stage(
                 "kappa-match-redo",
                 args.num_threads,
-                kappa_num_threads,
+                blastp_num_threads,
                 subjects.len(),
                 match_jobs,
                 total_db_len,
@@ -5656,10 +5810,15 @@ fn run_resolved_with_records(
             // NRrecord = NRrecord_tld[tid];
             // redo_align_params = redo_align_params_tld[tid];
             // ```
-            let pool = rayon::ThreadPoolBuilder::new()
-                .num_threads(kappa_num_threads)
-                .build()
-                .context("failed to build BLASTP Kappa match redo thread pool")?;
+            // NCBI reference: /mnt/c/Users/genom/GitHub/ncbi-blast/c++/src/algo/blast/core/blast_kappa.c:3429-3459
+            // ```c
+            // #pragma omp parallel default(none) num_threads(actual_num_threads)
+            // #pragma omp for schedule(static)
+            // for (b = 0; b < numMatches; ++b) {
+            // ```
+            let pool =
+                get_or_build_blastp_thread_pool(&mut blastp_parallel_pool, blastp_num_threads)
+                    .context("failed to build BLASTP Kappa match redo thread pool")?;
             let precomputed: Vec<Result<Option<BlastpPostprocessResult>>> = pool.install(|| {
                 local_matches
                     .par_iter()
@@ -5775,10 +5934,15 @@ fn run_resolved_with_records(
             // for (b = 0; b < numMatches; ++b) {
             //     ... redoneMatches = redoneMatches_tld[tid];
             // ```
-            let pool = rayon::ThreadPoolBuilder::new()
-                .num_threads(kappa_num_threads)
-                .build()
-                .context("failed to build BLASTP Kappa redo thread pool")?;
+            // NCBI reference: /mnt/c/Users/genom/GitHub/ncbi-blast/c++/src/algo/blast/core/blast_kappa.c:3429-3459
+            // ```c
+            // #pragma omp parallel default(none) num_threads(actual_num_threads)
+            // #pragma omp for schedule(static)
+            // for (b = 0; b < numMatches; ++b) {
+            // ```
+            let pool =
+                get_or_build_blastp_thread_pool(&mut blastp_parallel_pool, blastp_num_threads)
+                    .context("failed to build BLASTP Kappa redo thread pool")?;
             let query_heaps: Result<Vec<(usize, BlastCompoHeap)>> = pool.install(|| {
                 kappa_parallel_query_indices
                     .par_iter()

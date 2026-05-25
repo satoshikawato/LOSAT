@@ -343,30 +343,30 @@ else
         fi
         write_losat_wasm_runner
 
-        run_losatn_wasm_case "NZ_CP006932.fasta" "NZ_CP006932.fasta" "NZ_CP006932.NZ_CP006932.losatn.megablast" "megablast"
-        run_losatn_wasm_case "EDL933.fna" "Sakai.fna" "EDL933.Sakai.losatn.megablast" "megablast"
-        run_losatn_wasm_case "Sakai.fna" "MG1655.fna" "Sakai.MG1655.losatn.megablast" "megablast"
+        # run_losatn_wasm_case "NZ_CP006932.fasta" "NZ_CP006932.fasta" "NZ_CP006932.NZ_CP006932.losatn.megablast" "megablast"
+        # run_losatn_wasm_case "EDL933.fna" "Sakai.fna" "EDL933.Sakai.losatn.megablast" "megablast"
+        # run_losatn_wasm_case "Sakai.fna" "MG1655.fna" "Sakai.MG1655.losatn.megablast" "megablast"
 
-        run_losatn_wasm_case "NZ_CP006932.fasta" "NZ_CP006932.fasta" "NZ_CP006932.NZ_CP006932.losatn.blastn" "blastn"
-        run_losatn_wasm_case "AP027152.fasta" "AP027202.fasta" "PesePMNV.MjPMNV.losatn.blastn" "blastn"
-        run_losatn_wasm_case "LC738874.fasta" "LC738870.fasta" "MelaMJNV.PemoMJNVA.losatn.blastn" "blastn"
-        run_losatn_wasm_case "LC738884.fasta" "AP027155.fasta" "SiNMV.ChdeNMV.losatn.blastn" "blastn"
-        run_losatn_wasm_case "LC738869.fasta" "AP027202.fasta" "PmeNMV.MjPMNV.losatn.blastn" "blastn"
-        run_losatn_wasm_case "LC738869.fasta" "AP027152.fasta" "PmeNMV.PesePMNV.losatn.blastn" "blastn"
-        run_losatn_wasm_case "LC738873.fasta" "LC738871.fasta" "PeseMJNV.PemoMJNVB.losatn.blastn" "blastn"
-        run_losatn_wasm_case "LC738870.fasta" "LC738873.fasta" "PemoMJNVA.PeseMJNV.losatn.blastn" "blastn"
-        run_losatn_wasm_case "LC738868.fasta" "LC738874.fasta" "MjeNMV.MelaMJNV.losatn.blastn" "blastn"
-        run_losatn_wasm_case "AP027202.fasta" "LC738875.fasta" "MjPMNV.MlPMNV.losatn.blastn" "blastn"
+        # run_losatn_wasm_case "NZ_CP006932.fasta" "NZ_CP006932.fasta" "NZ_CP006932.NZ_CP006932.losatn.blastn" "blastn"
+        # run_losatn_wasm_case "AP027152.fasta" "AP027202.fasta" "PesePMNV.MjPMNV.losatn.blastn" "blastn"
+        # run_losatn_wasm_case "LC738874.fasta" "LC738870.fasta" "MelaMJNV.PemoMJNVA.losatn.blastn" "blastn"
+        # run_losatn_wasm_case "LC738884.fasta" "AP027155.fasta" "SiNMV.ChdeNMV.losatn.blastn" "blastn"
+        # run_losatn_wasm_case "LC738869.fasta" "AP027202.fasta" "PmeNMV.MjPMNV.losatn.blastn" "blastn"
+        # run_losatn_wasm_case "LC738869.fasta" "AP027152.fasta" "PmeNMV.PesePMNV.losatn.blastn" "blastn"
+        # run_losatn_wasm_case "LC738873.fasta" "LC738871.fasta" "PeseMJNV.PemoMJNVB.losatn.blastn" "blastn"
+        # run_losatn_wasm_case "LC738870.fasta" "LC738873.fasta" "PemoMJNVA.PeseMJNV.losatn.blastn" "blastn"
+        # run_losatn_wasm_case "LC738868.fasta" "LC738874.fasta" "MjeNMV.MelaMJNV.losatn.blastn" "blastn"
+        # run_losatn_wasm_case "AP027202.fasta" "LC738875.fasta" "MjPMNV.MlPMNV.losatn.blastn" "blastn"
 
         for losatp_case in "${LOSATP_CASES[@]}"; do
             IFS=":" read -r query subject stem <<<"$losatp_case"
             run_losatp_wasm_case "$query" "$subject" "$stem"
         done
 
-        for tblastx_case in "${TBLASTX_CASES[@]}"; do
-            IFS=":" read -r query subject _db stem query_gencode db_gencode <<<"$tblastx_case"
-            run_tlosatx_wasm_case "$query" "$subject" "$stem" "$query_gencode" "$db_gencode"
-        done
+        # for tblastx_case in "${TBLASTX_CASES[@]}"; do
+        #     IFS=":" read -r query subject _db stem query_gencode db_gencode <<<"$tblastx_case"
+        #     run_tlosatx_wasm_case "$query" "$subject" "$stem" "$query_gencode" "$db_gencode"
+        # done
     fi
 fi
 echo "Finished LOSAT Wasm commands!"

@@ -203,6 +203,64 @@ const BLASTN_WASI_PARALLEL_MIN_WORK_ITEMS: usize = 2;
 #[cfg(all(feature = "parallel", target_arch = "wasm32", feature = "wasm-threads"))]
 const BLASTN_WASI_PARALLEL_MIN_SUBJECT_BASES_PER_THREAD: usize = 262_144;
 
+// NCBI reference: ncbi-blast/c++/src/algo/blast/blastinput/blast_args.cpp:3205-3222
+// ```c
+// const int kMaxValue = static_cast<int>(CSystemInfo::GetCpuCount());
+// int num_threads = args[kArgNumThreads].AsInteger();
+// if (num_threads > kMaxValue) {
+//     m_NumThreads = kMaxValue;
+// } else {
+//     m_NumThreads = num_threads;
+// }
+// ```
+//
+// NCBI reference: ncbi-blast/c++/src/algo/blast/api/prelim_stage.cpp:82-88
+// ```c
+// if (num_threads > 1) {
+//     SetNumberOfThreads(num_threads);
+// }
+// ```
+#[cfg(all(
+    feature = "parallel",
+    any(not(target_arch = "wasm32"), feature = "wasm-threads")
+))]
+fn build_blastn_thread_pool(num_threads: usize) -> Result<rayon::ThreadPool> {
+    // NCBI reference: ncbi-blast/c++/src/algo/blast/api/prelim_stage.cpp:82-88
+    // ```c
+    // if (num_threads > 1) {
+    //     SetNumberOfThreads(num_threads);
+    // }
+    // ```
+    let builder = rayon::ThreadPoolBuilder::new().num_threads(num_threads);
+
+    // NCBI reference: ncbi-blast/c++/src/algo/blast/blastinput/blast_args.cpp:3205-3222
+    // ```c
+    // int num_threads = args[kArgNumThreads].AsInteger();
+    // if (num_threads > kMaxValue) {
+    //     m_NumThreads = kMaxValue;
+    // } else {
+    //     m_NumThreads = num_threads;
+    // }
+    // ```
+    #[cfg(all(target_arch = "wasm32", feature = "wasm-threads"))]
+    let builder = builder.use_current_thread();
+
+    builder
+        .build()
+        .context("failed to build BLASTN thread pool")
+}
+
+// NCBI reference: ncbi-blast/c++/src/algo/blast/api/prelim_stage.cpp:82-88
+// ```c
+// if (num_threads > 1) {
+//     SetNumberOfThreads(num_threads);
+// }
+// ```
+#[cfg(all(feature = "parallel", target_arch = "wasm32", feature = "wasm-threads"))]
+fn blastn_thread_pool_spawned_workers(num_threads: usize) -> usize {
+    num_threads.saturating_sub(1)
+}
+
 // NCBI reference: ncbi-blast/c++/include/algo/blast/core/lookup_wrap.h:119
 // ```c
 // #define OFFSET_ARRAY_SIZE 4096
@@ -680,10 +738,15 @@ fn blastn_report_wasi_threading(
     if !blastn_wasi_threads_debug_enabled() {
         return;
     }
+    let expected_spawned_workers = if decision.parallel {
+        blastn_thread_pool_spawned_workers(effective_threads)
+    } else {
+        0
+    };
     eprintln!(
         "[losat-wasi-threads] blastn stage=search target_arch=wasm32 threaded_wasm=true \
 requested_threads={requested_threads} effective_threads={effective_threads} rayon_pool_threads={} \
-subject_records={subject_records} subject_chunks={subject_chunks} worker_jobs={} \
+expected_spawned_workers={expected_spawned_workers} subject_records={subject_records} subject_chunks={subject_chunks} worker_jobs={} \
 total_subject_bases={total_subject_bases} query_records={query_records} query_bases={query_bases} \
 min_worker_jobs={} min_subject_bases={} parallel={} serial_reason={}",
         if decision.parallel {
@@ -4823,12 +4886,7 @@ fn run_internal(args: BlastnArgs, mut in_memory: Option<BlastnInMemoryRun<'_>>) 
         any(not(target_arch = "wasm32"), feature = "wasm-threads")
     ))]
     let parallel_pool = if use_parallel {
-        Some(
-            rayon::ThreadPoolBuilder::new()
-                .num_threads(num_threads)
-                .build()
-                .context("Failed to build thread pool")?,
-        )
+        Some(build_blastn_thread_pool(num_threads)?)
     } else {
         None
     };

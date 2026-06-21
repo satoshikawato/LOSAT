@@ -72,25 +72,47 @@ authoritative, current guidance for agent behavior in LOSAT.
 
 ---
 
-## Current High-Priority Issues (Keep Updated)
+## Current Status and Active Work (Keep Updated)
 
-### TBLASTX long-sequence 2x hits
-- Long sequences (600kb+, gencode=4) produce ~2x hits; short sequences are near parity.
-- Excess hits cluster in ~22-30 bit scores, implying extension boundary or
-  reevaluation differences.
-- Investigate extension boundaries and `Blast_HSPListReevaluateUngapped` parity.
+### Active parity work
+- BLASTN task parity remains active. Re-run current comparison fixtures before
+  diagnosing; do not rely on old hit-count percentages. Recent work aligned
+  query-context offsets, output coordinate adjustment, x-drop clamping, common
+  endpoint purge ordering, ambiguity re-evaluation, edit-script trimming, and
+  hitlist pruning with NCBI. Remaining BLASTN work should focus only on a
+  reproducible current fixture and the corresponding NCBI source path.
+- BLASTP is implemented but remains secondary to TBLASTX/BLASTN. Treat BLASTP
+  parity and performance work as ongoing unless a current comparison fixture
+  proves the exact behavior being touched. Unsupported or incomplete BLASTP
+  behavior must fail fast; never delegate to external BLASTP.
+- Wasm/threading work is implementation-level only. Plain `wasm32-wasip1` builds
+  are intentionally serial; real command-Wasm threading requires the
+  `wasm32-wasip1-threads` target and `wasm-threads` feature. Any native or Wasm
+  work partitioning must reduce results back into the NCBI order.
 
-### TBLASTX chain formation differences
-- Short HSPs sometimes link into higher-score chains, causing E-value mismatches.
-- Focus on `link_hsps.c` parity and chain member filtering timing.
+### Resolved regression targets
+- The TBLASTX long-sequence AP027131/AP027133 gencode-4 local `-subject` 2x-hit
+  issue is resolved for the approved local-subject `db_gencode` behavior. Keep
+  this as a regression fixture; do not reopen the old extension-boundary or
+  reevaluation hypothesis without a new current diff.
+- The short LC738874/LC738875 TBLASTX threshold sweep reached exact NCBI parity
+  for hit counts, coordinates, E-values, and bit scores at `-evalue 10`, `100`,
+  and `10000`. Do not create a generic active TBLASTX chaining issue unless a
+  new fixture reproduces one.
+- Chain member filtering remains a critical parity rule, not an open issue:
+  filter `linked_set && !start_of_chain` during output, not during linking.
 
-### BLASTN coverage gap (blastn task)
-- Megablast parity is higher; blastn task shows ~90% coverage on some datasets.
-- Suspect gapped DP boundary/coordinate handling (`Blast_SemiGappedAlign`,
-  `extend_gapped_one_direction_ex`) in `blast_gapalign.c`.
-- Recent parity work aligned query-context offsets, output coordinate adjustment,
-  x-drop clamping, and hitlist pruning with NCBI; re-run comparisons before
-  digging deeper.
+### Performance work boundaries
+- External implementations such as DIAMOND may be read for data layout,
+  scheduling, cache locality, and SIMD implementation ideas only. They are not
+  parity or behavior authorities.
+- Do not import DIAMOND-style spaced seeds, minimizers, frequency masking,
+  sensitivity rounds, ungapped prefilters, or candidate-pruning heuristics into
+  LOSAT unless NCBI BLAST has the same behavior for the same program/task.
+- Performance changes must preserve the same candidate set, HSP construction,
+  pruning, ordering, statistics, and formatting as NCBI. If a faster path cannot
+  be proven byte-identical on the relevant fixtures, keep it disabled or remove
+  it.
 
 ---
 
@@ -143,17 +165,39 @@ authoritative, current guidance for agent behavior in LOSAT.
 
 ## Debug/Diagnostics Environment Variables
 
-- `LOSAT_TRACE_HSP="qstart,qend,sstart,send"` trace a specific HSP.
+- `LOSAT_TRACE_HSP="qstart,qend,sstart,send"` trace a specific TBLASTX HSP.
+- `LOSAT_TRACE_HSP_MASKS=1` print mask coverage for the traced TBLASTX HSP.
+- `LOSAT_TRACE_CHAIN_HSP="qstart,qend,sstart,send"` trace TBLASTX chain
+  selection for a specific HSP.
+- `LOSAT_TRACE_LINK_SELECTIONS=1` print TBLASTX link-selection details.
+- `LOSAT_DUMP_TBLASTX_STAGE=<dir>` append TBLASTX stage snapshots as TSV files.
+- `LOSAT_TRACE_BLASTN_HSP="qstart,qend,sstart,send"` trace a specific BLASTN
+  HSP.
+- `LOSAT_TRACE_BLASTN_SEED="q,s"` trace a specific BLASTN seed.
+- `LOSAT_TRACE_BLASTN_CONTEXT=<context_idx>` restrict BLASTN tracing by context.
+- `LOSAT_TRACE_BLASTN_SUBJECT=<subject_id_or_index>` restrict BLASTN tracing by
+  subject.
+- `LOSAT_TRACE_BLASTN_STAGE=<seed|ungapped|prelim|traceback|purge|hitlist|all>`
+  restrict BLASTN tracing by stage.
 - `LOSAT_DEBUG_CUTOFFS=1` cutoff calculations (tblastx + blastn).
+- `LOSAT_DEBUG_CUTOFFS_ALL=1` verbose TBLASTX cutoff diagnostics.
 - `LOSAT_DEBUG_CHAINING=1` chaining debug (legacy; tblastx).
 - `LOSAT_DEBUG_EXTENSION=1` tblastx extension debug.
+- `LOSAT_DEBUG_HSP_SAVING=1` TBLASTX HSP-save diagnostics.
+- `LOSAT_DEBUG_OUTPUT_FILTER=1` TBLASTX output filter diagnostics.
 - `LOSAT_DEBUG_BLASTN=1` blastn hit loss diagnostics.
 - `LOSAT_DEBUG_COORDS=1` blastn coordinate transforms.
+- `LOSAT_DEBUG_COORDS_START=<int>` narrow selected BLASTN coordinate diagnostics.
 - `LOSAT_DEBUG_SCAN_SOFF=<int>` tblastx scan debug center subject offset.
 - `LOSAT_DEBUG_SCAN_WINDOW=<int>` tblastx scan debug window size.
 - `LOSAT_TIMING=1` timing breakdown.
 - `LOSAT_DIAGNOSTICS=1` general diagnostics counters.
 - `LOSAT_STARTUP_TRACE=1` startup trace.
+- `LOSAT_WASI_THREADS_DEBUG=1` threaded-WASI scheduling diagnostics.
+- `LOSAT_TBLASTX_PARALLEL_CHUNKS=1` force TBLASTX subject-chunk parallel path
+  for diagnostics.
+- `LOSAT_TBLASTX_PARALLEL_SCAN_CHUNKS=1` diagnostic-only TBLASTX scan-interior
+  chunking; do not enable by default without parity proof.
 
 ---
 
@@ -200,7 +244,7 @@ LOSAT/                     # Rust crate root
 ├── Cargo.toml
 ├── src/
 │   ├── main.rs            # CLI entry; dispatch to blastn/tblastx
-│   ├── algorithm/         # Core algorithms (tblastx, blastn, common)
+│   ├── algorithm/         # Core algorithms (tblastx, blastn, blastp, common)
 │   ├── core/              # NCBI-ported primitives (stats, filters, encoding)
 │   ├── stats/             # Karlin-Altschul and sum statistics
 │   ├── align/             # Alignment utilities/traceback
@@ -231,6 +275,7 @@ Additional scripts and datasets live at repo root: `tests/`, `losat_out/`, and
 - CLI: `LOSAT/src/main.rs`
 - TBLASTX engine: `LOSAT/src/algorithm/tblastx/blast_engine/run_impl.rs`
 - BLASTN engine: `LOSAT/src/algorithm/blastn/blast_engine/run.rs`
+- BLASTP engine: `LOSAT/src/algorithm/blastp/blast_engine.rs`
 
 ---
 
@@ -285,6 +330,8 @@ This file consolidates their requirements; if there is a conflict, follow this f
 ## Project Summary
 
 LOSAT is a Rust reimplementation of NCBI BLAST targeting bit-perfect parity.
-Primary focus: TBLASTX and BLASTN. The Rust crate root is `LOSAT/`.
-Non-default `blastp` work remains a Rust porting task; incomplete areas must
-not be filled by delegating to external NCBI BLAST executables or libraries.
+Primary focus: TBLASTX and BLASTN. BLASTP support exists but remains secondary
+and must be treated as ongoing parity/performance work unless the touched path is
+covered by current comparison fixtures. The Rust crate root is `LOSAT/`.
+Incomplete areas must not be filled by delegating to external NCBI BLAST
+executables or libraries.

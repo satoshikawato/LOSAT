@@ -46,6 +46,7 @@ jobs:
           mkdir -p .tmp/release-readiness/quality
           git rev-parse HEAD > .tmp/release-readiness/quality/git-commit.txt
           rustc --version > .tmp/release-readiness/quality/rust-version.txt
+          rustc -vV > .tmp/release-readiness/quality/rust-version-verbose.txt
           cargo --version > .tmp/release-readiness/quality/cargo-version.txt
 
       - name: Format
@@ -77,11 +78,37 @@ jobs:
           find LOSAT/target/wasm32-wasip1/release -maxdepth 2 -name '*.wasm' \
             -exec sha256sum {} \; > .tmp/release-readiness/quality/wasm-sha256.txt
 
+      - name: Assemble release candidate artifacts
+        run: |
+          mkdir -p .tmp/release-readiness/artifacts
+          host_triple="$(sed -n 's/^host: //p' .tmp/release-readiness/quality/rust-version-verbose.txt)"
+          losat_version="$(awk '{ print $2 }' .tmp/release-readiness/quality/losat-version.txt)"
+          native_name="LOSAT-${losat_version}-${host_triple}"
+          cp LOSAT/target/release/LOSAT ".tmp/release-readiness/artifacts/${native_name}"
+          chmod +x ".tmp/release-readiness/artifacts/${native_name}"
+          tar -C .tmp/release-readiness/artifacts -czf \
+            ".tmp/release-readiness/artifacts/${native_name}.tar.gz" \
+            "${native_name}"
+          for wasm_path in LOSAT/target/wasm32-wasip1/release/*.wasm; do
+            wasm_name="$(basename "$wasm_path" .wasm)"
+            cp "$wasm_path" \
+              ".tmp/release-readiness/artifacts/${wasm_name}-${losat_version}-wasm32-wasip1.wasm"
+          done
+          sha256sum .tmp/release-readiness/artifacts/* \
+            > .tmp/release-readiness/quality/release-artifacts-sha256.txt
+
       - uses: actions/upload-artifact@v4
         if: always()
         with:
           name: release-readiness-quality
           path: .tmp/release-readiness/quality
+          if-no-files-found: warn
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: release-readiness-artifacts
+          path: .tmp/release-readiness/artifacts
           if-no-files-found: warn
 
   native-parity:

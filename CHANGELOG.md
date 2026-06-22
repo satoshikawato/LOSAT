@@ -14,6 +14,8 @@ BLAST-compatible local sequence alignment.
 - BLASTN `megablast` and `blastn` task fixtures for parity validation.
 - Experimental command-Wasm build support for `wasm32-wasip1`.
 - Release readiness, scope, and release-note draft documents.
+- Root release procedure checklist for v0.1.0 release candidates.
+- Contributor and security policy documents for release-candidate handling.
 
 ### Changed
 

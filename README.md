@@ -134,7 +134,10 @@ Browser-facing or embeddable Wasm APIs are not release-stable in v0.1.0.
 - Scope: [docs/v0.1.0_scope.md](docs/v0.1.0_scope.md)
 - Readiness plan: [docs/v0.1.0_release_readiness_plan.md](docs/v0.1.0_release_readiness_plan.md)
 - Release note draft: [docs/release/v0.1.0.md](docs/release/v0.1.0.md)
+- Release procedure: [RELEASE.md](RELEASE.md)
 - Changelog: [CHANGELOG.md](CHANGELOG.md)
+- Contributing: [CONTRIBUTING.md](CONTRIBUTING.md)
+- Security policy: [SECURITY.md](SECURITY.md)
 
 ## References
 

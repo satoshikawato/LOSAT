@@ -314,7 +314,11 @@ pub struct BlastpArgs {
     pub gap_open: Option<i32>,
     #[arg(long)]
     pub gap_extend: Option<i32>,
-    #[arg(long, value_parser = parse_comp_based_stats)]
+    // NCBI reference: ncbi-blast/c++/src/algo/blast/blastinput/cmdline_flags.cpp:46-94
+    // ```c
+    // const string kArgCompBasedStats("comp_based_stats");
+    // ```
+    #[arg(long, alias = "comp_based_stats", value_parser = parse_comp_based_stats)]
     pub comp_based_stats: Option<BlastpCompBasedStats>,
     #[arg(
         long,

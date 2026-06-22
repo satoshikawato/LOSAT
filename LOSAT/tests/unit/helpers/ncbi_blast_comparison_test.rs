@@ -72,12 +72,9 @@ fn test_length_adjustment_against_ncbi_blast() {
 
         if let Some(expected_conv) = case.expected_converged {
             assert_eq!(
-                result.converged,
-                expected_conv,
+                result.converged, expected_conv,
                 "Convergence mismatch for q_len={}, db_len={}, db_num_seqs={}",
-                case.query_length,
-                case.db_length,
-                case.db_num_seqs
+                case.query_length, case.db_length, case.db_num_seqs
             );
         }
     }

@@ -390,6 +390,7 @@ fn blast_score_chk(lo: i32, hi: i32) -> Result<(), String> {
 }
 
 /// NCBI reference: ncbi-blast/c++/src/algo/blast/core/ncbi_math.c:33-55
+#[rustfmt::skip]
 fn blast_expm1(x: f64) -> f64 {
     let absx = x.abs();
     if absx > 0.33 {

@@ -349,6 +349,7 @@ fn blast_score_chk(lo: i32, hi: i32) -> Result<(), String> {
 //     ...
 // }
 // ```
+#[rustfmt::skip]
 fn blast_expm1(x: f64) -> f64 {
     let absx = x.abs();
     if absx > 0.33 {

@@ -1,0 +1,27 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  rust:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy, rustfmt
+      - run: cd LOSAT && cargo fmt --check
+      - run: cd LOSAT && cargo clippy --all-targets --all-features -- -D warnings
+      - run: cd LOSAT && cargo test --all-features
+      - run: cd LOSAT && cargo build --release
+
+  wasm:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: wasm32-wasip1
+      - run: cd LOSAT && cargo build --release --target wasm32-wasip1 --no-default-features

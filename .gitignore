@@ -1,0 +1,13 @@
+# Local scratch and generated release artifacts.
+.codex_tmp/
+.tmp/
+artifacts/
+
+# Generated comparison output should be stored as release artifacts or scratch
+# unless explicitly documented as canonical fixture data.
+losat_out/
+tests/*_out/
+
+# Python caches.
+__pycache__/
+*.pyc

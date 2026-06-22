@@ -2,6 +2,38 @@
 name = "LOSAT"
 version = "0.1.0"
 edition = "2021"
+description = "Local sequence alignment tool implementing BLAST-compatible searches in Rust"
+license = "MIT"
+repository = "https://github.com/satoshikawato/LOSAT"
+readme = "../README.md"
+keywords = ["blast", "bioinformatics", "alignment", "wasm"]
+categories = ["science"]
+exclude = [
+    ".tmp/",
+    "losat_out/",
+    "tests/losat_out/",
+    "tests/blast_out/",
+    "tests/ncbi_out/",
+    "tests/__pycache__/",
+    "tests/blast_db/",
+    "tests/plots/",
+    "tests/fasta/*.ndb",
+    "tests/fasta/*.nhd",
+    "tests/fasta/*.nhi",
+    "tests/fasta/*.nhr",
+    "tests/fasta/*.nin",
+    "tests/fasta/*.njs",
+    "tests/fasta/*.nog",
+    "tests/fasta/*.nos",
+    "tests/fasta/*.not",
+    "tests/fasta/*.nsq",
+    "tests/fasta/*.ntf",
+    "tests/fasta/*.nto",
+    "LOSAT/",
+    "**/*.pyc",
+    "**/*.tmp",
+    "**/*.orig",
+]
 
 [lib]
 crate-type = ["rlib", "cdylib"]

@@ -1,11 +1,23 @@
 target/
-Cargo.lock
 routine.sh
+
+# Cargo.lock is intentionally not ignored for v0.1.0 CLI release
+# reproducibility. The lockfile should be reviewed and committed with the
+# release branch.
 
 # Test results and logs
 tests/test_*.out
 tests/test_*.log
 tests/*.log
+tests/losat_out/
+tests/blast_out/
+tests/ncbi_out/
+losat_out/
+.tmp/
+*.tmp
+*.orig
+__pycache__/
+*.pyc
 
 # Analysis markdown files (keep only essential documentation)
 tests/*_performance.md

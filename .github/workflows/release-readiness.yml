@@ -1,0 +1,195 @@
+name: Release Readiness
+
+on:
+  workflow_dispatch:
+    inputs:
+      run_native_parity:
+        description: Run native NCBI oracle comparison scripts
+        required: true
+        default: false
+        type: boolean
+      run_blastp_parity:
+        description: Also run BLASTP experimental parity scripts
+        required: true
+        default: false
+        type: boolean
+      run_wasm_parity:
+        description: Run Wasm parity diagnostics
+        required: true
+        default: false
+        type: boolean
+
+permissions:
+  contents: read
+
+defaults:
+  run:
+    shell: bash
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  quality:
+    name: Quality And Package Gate
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy, rustfmt
+          targets: wasm32-wasip1
+
+      - name: Capture build metadata
+        run: |
+          mkdir -p .tmp/release-readiness/quality
+          git rev-parse HEAD > .tmp/release-readiness/quality/git-commit.txt
+          rustc --version > .tmp/release-readiness/quality/rust-version.txt
+          cargo --version > .tmp/release-readiness/quality/cargo-version.txt
+
+      - name: Format
+        run: cd LOSAT && cargo fmt --check
+
+      - name: Clippy
+        run: cd LOSAT && cargo clippy --all-targets --all-features -- -D warnings
+
+      - name: Tests
+        run: cd LOSAT && cargo test --all-features
+
+      - name: Native release build
+        run: cd LOSAT && cargo build --release
+
+      - name: Serial Wasm build
+        run: cd LOSAT && cargo build --release --target wasm32-wasip1 --no-default-features
+
+      - name: Package dry run
+        run: |
+          cd LOSAT
+          cargo package --list > ../.tmp/release-readiness/quality/cargo-package-list.txt
+          cargo publish --dry-run --locked \
+            --config 'build.target-dir="/tmp/losat-cargo-publish-target"'
+
+      - name: Capture artifact metadata
+        run: |
+          LOSAT/target/release/LOSAT --version > .tmp/release-readiness/quality/losat-version.txt
+          sha256sum LOSAT/target/release/LOSAT > .tmp/release-readiness/quality/native-sha256.txt
+          find LOSAT/target/wasm32-wasip1/release -maxdepth 2 -name '*.wasm' \
+            -exec sha256sum {} \; > .tmp/release-readiness/quality/wasm-sha256.txt
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: release-readiness-quality
+          path: .tmp/release-readiness/quality
+          if-no-files-found: warn
+
+  native-parity:
+    name: Native NCBI Oracle Diagnostics
+    runs-on: ubuntu-latest
+    needs: quality
+    if: ${{ inputs.run_native_parity }}
+    env:
+      LOSAT_THREADS: "1"
+      LOSATP_THREADS: "1"
+      LOSAT_BLASTP_THREADS: "1"
+      RUN_LOSAT_WASM: "0"
+      RUN_LOSAT_WASM_THREADED: "0"
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - name: Install NCBI BLAST+ oracle
+        run: |
+          # NCBI BLAST+ is installed only for source-parity oracle output.
+          # NCBI reference: ncbi-blast/c++/src/objtools/align_format/format_flags.cpp:38-40
+          # defines the default tabular fields used by the comparison summaries.
+          sudo apt-get update
+          sudo apt-get install -y ncbi-blast+
+
+      - name: Capture oracle metadata
+        run: |
+          mkdir -p .tmp/release-readiness/native
+          git rev-parse HEAD > .tmp/release-readiness/native/git-commit.txt
+          rustc --version > .tmp/release-readiness/native/rust-version.txt
+          cargo --version > .tmp/release-readiness/native/cargo-version.txt
+          tblastx -version > .tmp/release-readiness/native/ncbi-tblastx-version.txt 2>&1
+          blastn -version > .tmp/release-readiness/native/ncbi-blastn-version.txt 2>&1
+          blastp -version > .tmp/release-readiness/native/ncbi-blastp-version.txt 2>&1
+
+      - name: Build LOSAT release binary
+        run: cd LOSAT && cargo build --release
+
+      - name: TBLASTX local-subject oracle fixture
+        run: |
+          # NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_engine.c:1482-1541
+          # defines the translated search post-processing order checked here.
+          LOSAT_SKIP_BUILD=1 bash tests/compare_tblastx_native_ncbi_parity.sh \
+            .tmp/release-readiness/native/tblastx-local-subject
+
+      - name: BLASTN manifest oracle fixtures
+        run: |
+          # NCBI reference: ncbi-blast/c++/src/algo/blast/blastinput/cmdline_flags.cpp:46-97
+          # defines the query, subject, task, evalue, thread, and output flags
+          # recorded by the BLASTN parity manifest.
+          cd LOSAT/tests
+          bash run_comparison.sh
+          cd ..
+          python3 tests/compare_blastn_parity.py \
+            --write-targets ../.tmp/release-readiness/native/blastn-trace-targets.tsv \
+            > ../.tmp/release-readiness/native/blastn-parity-summary.txt
+
+      - name: BLASTP experimental oracle fixtures
+        if: ${{ inputs.run_blastp_parity }}
+        run: |
+          # NCBI reference: ncbi-blast/c++/src/algo/blast/blastinput/blast_args.cpp:275-285
+          # covers the compressed protein lookup word-size branch under test.
+          cd LOSAT
+          cargo build
+          cd tests
+          bash run_blastp_comparison.sh
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: release-readiness-native-parity
+          path: |
+            .tmp/release-readiness/native
+            LOSAT/tests/losat_out
+            LOSAT/tests/blast_out
+          if-no-files-found: warn
+
+  wasm-parity:
+    name: Wasm Parity Diagnostics
+    runs-on: ubuntu-latest
+    needs: quality
+    if: ${{ inputs.run_wasm_parity }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: wasm32-wasip1
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Install NCBI BLAST+ oracle
+        run: |
+          # NCBI BLAST+ is used only by the diagnostic script as an oracle.
+          # NCBI reference: ncbi-blast/c++/src/algo/blast/blastinput/cmdline_flags.cpp:46-75
+          # defines the query, subject, output, genetic-code, and thread flags.
+          sudo apt-get update
+          sudo apt-get install -y ncbi-blast+
+
+      - name: Run TBLASTX Wasm parity diagnostic
+        run: bash tests/compare_tblastx_wasm_parity.sh .tmp/release-readiness/wasm/tblastx
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: release-readiness-wasm-parity
+          path: .tmp/release-readiness/wasm
+          if-no-files-found: warn

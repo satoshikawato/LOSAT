@@ -10,7 +10,7 @@
 #   ./compare_long_sequences_debug.sh AP027131.fna AP027133.fna 4
 #
 # Requirements:
-#   - LOSAT must be built and in PATH or LOSAT/target/release/losat
+#   - LOSAT must be built and in PATH or LOSAT/target/release/LOSAT
 #   - NCBI BLAST+ tblastx must be installed and in PATH
 #   - Python3 for analysis script
 
@@ -50,10 +50,24 @@ echo "Output directory: $OUTDIR"
 echo "============================================="
 
 # Find LOSAT executable
+# NCBI reference: ncbi-blast/c++/src/algo/blast/blastinput/tblastx_args.cpp:47-52
+# ```c
+# m_ClientId = string(kProgram) + " " + CBlastVersion().Print();
+# ```
+#
+# Harness note: binary discovery only selects the local LOSAT executable used to
+# produce comparison output; it does not alter BLAST behavior or invoke NCBI as
+# a LOSAT fallback.
 if command -v losat &> /dev/null; then
     LOSAT_CMD="losat"
+elif command -v LOSAT &> /dev/null; then
+    LOSAT_CMD="LOSAT"
+elif [ -f "LOSAT/target/release/LOSAT" ]; then
+    LOSAT_CMD="./LOSAT/target/release/LOSAT"
 elif [ -f "LOSAT/target/release/losat" ]; then
     LOSAT_CMD="./LOSAT/target/release/losat"
+elif [ -f "../LOSAT/target/release/LOSAT" ]; then
+    LOSAT_CMD="../LOSAT/target/release/LOSAT"
 elif [ -f "../LOSAT/target/release/losat" ]; then
     LOSAT_CMD="../LOSAT/target/release/losat"
 else
@@ -97,7 +111,7 @@ if command -v tblastx &> /dev/null; then
         -outfmt "6 qseqid sseqid pident length mismatch gapopen qstart qend sstart send evalue bitscore" \
         -out "$OUTDIR/ncbi_output.tsv" \
         2>"$OUTDIR/ncbi_debug.log"
-    
+
     # Extract effective search space and length adjustment from NCBI log
     echo "Extracting debug information from NCBI output..."
     grep -E "(Effective search space|Length adjustment|cutoff)" "$OUTDIR/ncbi_debug.log" > "$OUTDIR/ncbi_debug_extracted.txt" || true
@@ -200,4 +214,3 @@ echo "2. Compare cutoff values between LOSAT and NCBI"
 echo "3. Check HSP saving statistics and filtering rates"
 echo "4. Analyze score distributions to identify low-score hits"
 echo ""
-

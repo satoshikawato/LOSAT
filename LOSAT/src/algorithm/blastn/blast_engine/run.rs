@@ -4568,6 +4568,32 @@ fn fasta_records_from_bytes(bytes: &[u8]) -> Vec<bio::io::fasta::Record> {
         .collect()
 }
 
+// NCBI reference: /mnt/c/Users/genom/GitHub/ncbi-blast/c++/src/algo/blast/blastinput/blast_input_aux.cpp:242-246
+// ```c
+// CRef<CBlastFastaInputSource> fasta(new CBlastFastaInputSource(in, iconfig));
+// CRef<CBlastInput> input(new CBlastInput(fasta));
+// CRef<CScope> scope(new CScope(*CObjectManager::GetInstance()));
+// sequences = input->GetAllSeqs(*scope);
+// ```
+//
+// NCBI reference: /mnt/c/Users/genom/GitHub/ncbi-blast/c++/src/objtools/readers/fasta.cpp:428-431
+// ```c
+// if (need_defline  &&  GetLineReader().AtEOF()) {
+//     FASTA_ERROR(LineNumber(),
+//         "CFastaReader: Expected defline around line " << LineNumber(),
+//         CObjReaderParseException::eEOF);
+// ```
+fn read_blastn_fasta_records(
+    path: &std::path::Path,
+    role: &str,
+) -> Result<Vec<bio::io::fasta::Record>> {
+    bio::io::fasta::Reader::from_file(path)
+        .with_context(|| format!("failed to open {role} FASTA {}", path.display()))?
+        .records()
+        .collect::<std::result::Result<Vec<_>, _>>()
+        .with_context(|| format!("failed to read {role} FASTA {}", path.display()))
+}
+
 #[cfg(target_arch = "wasm32")]
 pub fn run_web_pair(args: BlastnArgs, query_fasta: &str, subject_fasta: &str) -> Result<Vec<u8>> {
     // NCBI reference: ncbi-blast/c++/src/algo/blast/api/blast_setup_cxx.cpp:836-847
@@ -4799,8 +4825,7 @@ fn run_internal(args: BlastnArgs, mut in_memory: Option<BlastnInMemoryRun<'_>>) 
         if let Some(input) = in_memory.as_mut() {
             Some(std::mem::take(&mut input.subjects))
         } else if load_subjects {
-            let subject_reader = bio::io::fasta::Reader::from_file(&args.subject)?;
-            Some(subject_reader.records().filter_map(|r| r.ok()).collect())
+            Some(read_blastn_fasta_records(&args.subject, "subject")?)
         } else {
             None
         };
@@ -10553,8 +10578,12 @@ fn run_internal(args: BlastnArgs, mut in_memory: Option<BlastnInMemoryRun<'_>>) 
             }
         }
     } else {
-        let subject_reader = bio::io::fasta::Reader::from_file(&args.subject)?;
-        for (s_idx, s_record) in subject_reader.records().filter_map(|r| r.ok()).enumerate() {
+        let subject_reader = bio::io::fasta::Reader::from_file(&args.subject)
+            .with_context(|| format!("failed to open subject FASTA {}", args.subject.display()))?;
+        for (s_idx, record_result) in subject_reader.records().enumerate() {
+            let s_record = record_result.with_context(|| {
+                format!("failed to read subject FASTA {}", args.subject.display())
+            })?;
             let mut subject_hits: Option<Vec<BlastnHsp>> = None;
             process_subject(
                 s_idx,

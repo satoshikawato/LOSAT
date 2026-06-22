@@ -18,14 +18,38 @@ use super::lookup::{
     NaLookupTable, PvDirectLookup, TwoStageLookup,
 };
 use crate::utils::dust::{DustMasker, MaskedInterval};
-use anyhow::Result;
+use anyhow::{Context, Result};
 use bio::io::fasta;
+use std::path::Path;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum LookupTableKind {
     Small,
     Mb,
     Na,
+}
+
+// NCBI reference: /mnt/c/Users/genom/GitHub/ncbi-blast/c++/src/algo/blast/blastinput/blast_input_aux.cpp:242-246
+// ```c
+// CRef<CBlastFastaInputSource> fasta(new CBlastFastaInputSource(in, iconfig));
+// CRef<CBlastInput> input(new CBlastInput(fasta));
+// CRef<CScope> scope(new CScope(*CObjectManager::GetInstance()));
+// sequences = input->GetAllSeqs(*scope);
+// ```
+//
+// NCBI reference: /mnt/c/Users/genom/GitHub/ncbi-blast/c++/src/objtools/readers/fasta.cpp:391-396
+// ```c
+// NCBI_THROW2(CObjReaderParseException, eNoDefline,
+//             "CFastaReader: Input doesn't start with"
+//             " a defline or comment around line " + NStr::NumericToString(lineNum),
+//              lineNum);
+// ```
+fn read_fasta_records(path: &Path, role: &str) -> Result<Vec<fasta::Record>> {
+    fasta::Reader::from_file(path)
+        .with_context(|| format!("failed to open {role} FASTA {}", path.display()))?
+        .records()
+        .collect::<std::result::Result<Vec<_>, _>>()
+        .with_context(|| format!("failed to read {role} FASTA {}", path.display()))
 }
 
 /// Task-specific configuration for BLASTN
@@ -469,8 +493,7 @@ pub fn read_queries(args: &BlastnArgs) -> Result<(Vec<fasta::Record>, Vec<String
     if args.verbose {
         eprintln!("Reading query & subject...");
     }
-    let query_reader = fasta::Reader::from_file(&args.query)?;
-    let queries: Vec<fasta::Record> = query_reader.records().filter_map(|r| r.ok()).collect();
+    let queries = read_fasta_records(&args.query, "query")?;
     let query_ids: Vec<String> = queries
         .iter()
         .map(|r| {
@@ -497,8 +520,7 @@ pub fn read_sequences(
     if args.verbose {
         eprintln!("Reading query & subject...");
     }
-    let query_reader = fasta::Reader::from_file(&args.query)?;
-    let queries: Vec<fasta::Record> = query_reader.records().filter_map(|r| r.ok()).collect();
+    let queries = read_fasta_records(&args.query, "query")?;
     let query_ids: Vec<String> = queries
         .iter()
         .map(|r| {
@@ -510,8 +532,7 @@ pub fn read_sequences(
         })
         .collect();
 
-    let subject_reader = fasta::Reader::from_file(&args.subject)?;
-    let subjects: Vec<fasta::Record> = subject_reader.records().filter_map(|r| r.ok()).collect();
+    let subjects = read_fasta_records(&args.subject, "subject")?;
 
     Ok((queries, query_ids, subjects))
 }
@@ -556,12 +577,15 @@ pub fn subject_metadata_from_records(records: &[fasta::Record]) -> SubjectMetada
 // }
 // ```
 pub fn scan_subjects_metadata(args: &BlastnArgs) -> Result<SubjectMetadata> {
-    let subject_reader = fasta::Reader::from_file(&args.subject)?;
+    let subject_reader = fasta::Reader::from_file(&args.subject)
+        .with_context(|| format!("failed to open subject FASTA {}", args.subject.display()))?;
     let mut subject_ids: Vec<String> = Vec::new();
     let mut db_len_total: usize = 0;
     let mut db_num_seqs: usize = 0;
 
-    for record in subject_reader.records().filter_map(|r| r.ok()) {
+    for record_result in subject_reader.records() {
+        let record = record_result
+            .with_context(|| format!("failed to read subject FASTA {}", args.subject.display()))?;
         subject_ids.push(
             record
                 .id()

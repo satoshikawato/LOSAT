@@ -17,6 +17,8 @@ exclude = [
     "tests/__pycache__/",
     "tests/blast_db/",
     "tests/plots/",
+    "tests/fasta/*.gb",
+    "tests/fasta/*.fna",
     "tests/fasta/*.ndb",
     "tests/fasta/*.nhd",
     "tests/fasta/*.nhi",

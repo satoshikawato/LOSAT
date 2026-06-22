@@ -10,7 +10,7 @@
 #   ./compare_self_tblastx.sh NZ_CP006932.fna 4
 #
 # Requirements:
-#   - LOSAT must be built and in PATH or LOSAT/target/release/losat
+#   - LOSAT must be built and in PATH or LOSAT/target/release/LOSAT
 #   - NCBI BLAST+ tblastx must be installed and in PATH
 #   - Python3 for analysis script
 
@@ -43,10 +43,24 @@ echo "Output directory: $OUTDIR"
 echo "============================================="
 
 # Find LOSAT executable
+# NCBI reference: ncbi-blast/c++/src/algo/blast/blastinput/tblastx_args.cpp:47-52
+# ```c
+# m_ClientId = string(kProgram) + " " + CBlastVersion().Print();
+# ```
+#
+# Harness note: binary discovery only selects the local LOSAT executable used to
+# produce comparison output; it does not alter BLAST behavior or invoke NCBI as
+# a LOSAT fallback.
 if command -v losat &> /dev/null; then
     LOSAT_CMD="losat"
+elif command -v LOSAT &> /dev/null; then
+    LOSAT_CMD="LOSAT"
+elif [ -f "LOSAT/target/release/LOSAT" ]; then
+    LOSAT_CMD="./LOSAT/target/release/LOSAT"
 elif [ -f "LOSAT/target/release/losat" ]; then
     LOSAT_CMD="./LOSAT/target/release/losat"
+elif [ -f "../LOSAT/target/release/LOSAT" ]; then
+    LOSAT_CMD="../LOSAT/target/release/LOSAT"
 elif [ -f "../LOSAT/target/release/losat" ]; then
     LOSAT_CMD="../LOSAT/target/release/losat"
 else

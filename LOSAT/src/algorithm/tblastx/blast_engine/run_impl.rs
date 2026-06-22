@@ -793,6 +793,29 @@ fn fasta_records_from_bytes(bytes: &[u8]) -> Vec<fasta::Record> {
         .collect()
 }
 
+// NCBI reference: /mnt/c/Users/genom/GitHub/ncbi-blast/c++/src/algo/blast/blastinput/blast_input_aux.cpp:242-246
+// ```c
+// CRef<CBlastFastaInputSource> fasta(new CBlastFastaInputSource(in, iconfig));
+// CRef<CBlastInput> input(new CBlastInput(fasta));
+// CRef<CScope> scope(new CScope(*CObjectManager::GetInstance()));
+// sequences = input->GetAllSeqs(*scope);
+// ```
+//
+// NCBI reference: /mnt/c/Users/genom/GitHub/ncbi-blast/c++/src/objtools/readers/fasta.cpp:420-425
+// ```c
+// if( ! bad_residue_positions.m_BadIndexMap.empty() ) {
+//     NCBI_THROW2(CBadResiduesException, eBadResidues,
+//         "CFastaReader: There are invalid " + x_NucOrProt() + "residue(s) in input sequence",
+//         bad_residue_positions );
+// ```
+fn read_tblastx_fasta_records(path: &std::path::Path, role: &str) -> Result<Vec<fasta::Record>> {
+    fasta::Reader::from_file(path)
+        .with_context(|| format!("failed to open {role} FASTA {}", path.display()))?
+        .records()
+        .collect::<std::result::Result<Vec<_>, _>>()
+        .with_context(|| format!("failed to read {role} FASTA {}", path.display()))
+}
+
 #[cfg(target_arch = "wasm32")]
 pub fn run_web_pair(args: TblastxArgs, query_fasta: &str, subject_fasta: &str) -> Result<Vec<u8>> {
     // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_engine.c:1407-1427
@@ -979,8 +1002,7 @@ fn run_internal(args: TblastxArgs, mut in_memory: Option<TblastxInMemoryRun<'_>>
     let queries_raw: Vec<fasta::Record> = if let Some(input) = in_memory.as_mut() {
         std::mem::take(&mut input.queries)
     } else {
-        let query_reader = fasta::Reader::from_file(&args.query)?;
-        query_reader.records().filter_map(|r| r.ok()).collect()
+        read_tblastx_fasta_records(&args.query, "query")?
     };
     // NCBI reference: ncbi-blast/c++/include/algo/blast/core/blast_hits.h:153-166
     // ```c
@@ -1128,8 +1150,7 @@ fn run_internal(args: TblastxArgs, mut in_memory: Option<TblastxInMemoryRun<'_>>
     let subjects_raw: Vec<fasta::Record> = if let Some(input) = in_memory.as_mut() {
         std::mem::take(&mut input.subjects)
     } else {
-        let subject_reader = fasta::Reader::from_file(&args.subject)?;
-        subject_reader.records().filter_map(|r| r.ok()).collect()
+        read_tblastx_fasta_records(&args.subject, "subject")?
     };
     if queries_raw.is_empty() || subjects_raw.is_empty() {
         return Ok(());

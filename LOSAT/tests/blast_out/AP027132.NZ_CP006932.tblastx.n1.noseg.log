@@ -1,2 +1,0 @@
-Warning: [tblastx] Number of threads was reduced to 20 to match the number of available CPUs
-Warning: [tblastx] 'num_threads' is currently ignored when 'subject' is specified.

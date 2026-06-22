@@ -1,2 +1,0 @@
-[TRACE_BLASTN] stage=prelim subject=NZ_CP006932.1(0) context=0 score_only_seed=(257074, 256462) local_seed_s=256462 offset_adjustment=2 score_anchor=(257076, 256464) global_score_anchor_s=256464 x_drop_score_only=33 ungapped_score=40
-[TRACE_BLASTN] stage=prelim subject=NZ_CP006932.1(0) context=0 seed=(257074, 256462) prelim=q256930..257094 s256333..256482 raw_score=118 cutoff=31 x_drop_score_only=33 accepted=true

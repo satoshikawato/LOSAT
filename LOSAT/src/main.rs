@@ -3,9 +3,30 @@ use clap::{Parser, Subcommand};
 use std::ffi::OsString;
 use LOSAT::algorithm::{blastn, blastp, tblastx};
 
+// NCBI reference: ncbi-blast/c++/include/algo/blast/api/version.hpp:49-60
+// ```c++
+// class CBlastVersion : public CVersionInfo {
+// public:
+//     CBlastVersion()
+//         : CVersionInfo(kBlastMajorVersion,
+//                        kBlastMinorVersion,
+//                        kBlastPatchVersion) {}
+//     virtual string Print(void) const {
+//         return CVersionInfo::Print() + "+";
+//     }
+// };
+// ```
+//
+// NCBI reference: ncbi-blast/c++/src/algo/blast/blastinput/blastn_args.cpp:48-53
+// NCBI reference: ncbi-blast/c++/src/algo/blast/blastinput/blastp_args.cpp:47-52
+// NCBI reference: ncbi-blast/c++/src/algo/blast/blastinput/tblastx_args.cpp:47-52
+// ```c++
+// m_ClientId = string(kProgram) + " " + CBlastVersion().Print();
+// m_ClientId = kProgram + " " + CBlastVersion().Print();
+// ```
 #[derive(Parser)]
 #[command(name = "losat")]
-#[command(version = "0.1.0")]
+#[command(version)]
 #[command(about = "A miniaturized reimplementation of BLAST algorithm", long_about = None)]
 struct Cli {
     #[command(subcommand)]

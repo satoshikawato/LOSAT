@@ -1209,30 +1209,9 @@ mod tests {
     // }
     // ```
     #[test]
-    fn test_fixture_exponent_padding() {
-        let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
-            .join("tests/blast_out/EDL933.Sakai.blastn.megablast.out");
-        let data = std::fs::read_to_string(&path).expect("read EDL933/Sakai fixture");
-
-        let mut has_pos = false;
-        let mut has_neg = false;
-        for line in data.lines() {
-            if line.starts_with('#') || line.is_empty() {
-                continue;
-            }
-            if line.contains("e+05") {
-                has_pos = true;
-            }
-            if line.contains("e-05") {
-                has_neg = true;
-            }
-            if has_pos && has_neg {
-                break;
-            }
-        }
-
-        assert!(has_pos, "expected e+NN exponent in fixture output");
-        assert!(has_neg, "expected e-NN exponent in fixture output");
+    fn test_exponent_padding_without_generated_fixture() {
+        assert_eq!(format_evalue_ncbi_tabular(5e-5), "5.00e-05");
+        assert_eq!(format_bitscore_ncbi(100000.0), "1.000e+05");
     }
 
     // ==========================================================================

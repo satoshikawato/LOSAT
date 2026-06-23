@@ -61,6 +61,6 @@ fn test_chaining_constants() {
 fn test_sentinel_constants() {
     // NCBI BLAST sentinel (NULLB) is 0.
     assert_eq!(SENTINEL_BYTE, 0);
-    // Sentinel score must match NCBI BLOSUM62 defscore (-4).
-    assert_eq!(SENTINEL_PENALTY, -4);
+    // NCBI initializes NULLB score-matrix rows/columns to BLAST_SCORE_MIN.
+    assert_eq!(SENTINEL_PENALTY, i16::MIN as i32);
 }

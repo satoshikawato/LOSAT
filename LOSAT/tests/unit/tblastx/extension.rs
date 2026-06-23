@@ -23,9 +23,12 @@ fn test_get_score_matches() {
     // Identical amino acids should have positive scores
     for aa in 0u8..28u8 {
         let score = get_score(aa, aa);
-        // Most amino acids have positive self-scores in BLOSUM62
-        // (except some rare cases, but generally true)
-        assert!(score >= -4); // BLOSUM62 minimum is around -4
+        if aa == ncbistdaa::GAP {
+            // NCBI blast core keeps NULLB/GAP rows at BLAST_SCORE_MIN.
+            assert_eq!(score, i16::MIN as i32);
+        } else {
+            assert!(score >= -4);
+        }
     }
 }
 
@@ -259,8 +262,30 @@ fn test_extend_gapped_protein_basic() {
 #[test]
 fn test_extend_gapped_protein_with_gaps() {
     // Create sequences that require gaps for optimal alignment
-    let q_seq = [0u8, 1u8, 2u8, 3u8, 4u8, 5u8, 6u8, 7u8, 8u8, 9u8];
-    let s_seq = [0u8, 1u8, 2u8, 20u8, 21u8, 3u8, 4u8, 5u8, 6u8, 7u8]; // Insertion in subject
+    let q_seq = [
+        ncbistdaa::A,
+        ncbistdaa::C,
+        ncbistdaa::D,
+        ncbistdaa::E,
+        ncbistdaa::F,
+        ncbistdaa::G,
+        ncbistdaa::H,
+        ncbistdaa::I,
+        ncbistdaa::K,
+        ncbistdaa::L,
+    ];
+    let s_seq = [
+        ncbistdaa::A,
+        ncbistdaa::C,
+        ncbistdaa::D,
+        ncbistdaa::W,
+        ncbistdaa::Y,
+        ncbistdaa::E,
+        ncbistdaa::F,
+        ncbistdaa::G,
+        ncbistdaa::H,
+        ncbistdaa::I,
+    ]; // Insertion in subject
 
     let qs = 0;
     let ss = 0;
@@ -282,8 +307,8 @@ fn test_extend_gapped_protein_with_gaps() {
 
 #[test]
 fn test_extend_gapped_protein_at_boundaries() {
-    let q_seq = [0u8, 1u8, 2u8];
-    let s_seq = [0u8, 1u8, 2u8];
+    let q_seq = [ncbistdaa::A, ncbistdaa::C, ncbistdaa::D];
+    let s_seq = [ncbistdaa::A, ncbistdaa::C, ncbistdaa::D];
 
     // Start at beginning
     let qs = 0;

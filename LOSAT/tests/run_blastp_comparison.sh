@@ -48,7 +48,14 @@ run_case() {
         -out "${OUT_DIR}/${stem}.out" \
         > "${OUT_DIR}/${stem}.log" 2>&1
 
-    diff -u "${REF_DIR}/${stem}.out" "${OUT_DIR}/${stem}.out"
+    # NCBI reference: ncbi-blast/c++/src/objtools/align_format/tabular.cpp:1106-1108
+    # ```c
+    #     x_PrintField(*iter);
+    # }
+    # m_Ostream << "\n";
+    # ```
+    # The parity assertion is on tabular fields; ignore fixture CRLF storage.
+    diff -u --strip-trailing-cr "${REF_DIR}/${stem}.out" "${OUT_DIR}/${stem}.out"
 }
 
 run_case "WSSV.faa" "PajaWSV.faa" "WSSV.PajaWSV.blastp"

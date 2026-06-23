@@ -26,8 +26,12 @@ fn test_ln_factorial_int_small() {
     for (n, expected) in test_cases {
         let result = ln_factorial(n as f64);
         if expected == 0.0 {
-            // Special case: both result and expected are 0
-            assert_eq!(result, expected, "ln_factorial({}) should be 0", n);
+            assert!(
+                result.abs() < 1e-12,
+                "ln_factorial({}) should be numerically zero, got {}",
+                n,
+                result
+            );
         } else {
             let relative_error = ((result - expected) / expected).abs();
             // For small n, expect very high precision

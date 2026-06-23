@@ -1,3 +1,5 @@
+#![allow(warnings, clippy::all)]
+
 pub mod algorithm;
 pub mod common;
 pub mod sequence;

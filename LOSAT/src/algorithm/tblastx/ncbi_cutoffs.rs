@@ -257,8 +257,15 @@ pub fn cutoff_score_from_evalue(
     let score_before_ceil = log_value / karlin_params.lambda;
     let score = score_before_ceil.ceil();
 
-    // Debug output for long sequences (600kb+)
-    if eff_searchsp > 40_000_000_000 {
+    // NCBI reference: /mnt/c/Users/genom/GitHub/ncbi-blast/c++/src/algo/blast/core/blast_parameters.c:360-363
+    // ```c
+    // BLAST_Cutoffs(&new_cutoff, &cutoff_e, kbp,
+    //               MIN((Uint8)subj_length,
+    //                   (Uint8)query_length)*((Uint8)subj_length),
+    //               TRUE, gap_decay_rate);
+    // ```
+    // NCBI computes the cutoff without emitting unconditional diagnostics.
+    if std::env::var_os("LOSAT_DEBUG_CUTOFFS").is_some() && eff_searchsp > 40_000_000_000 {
         eprintln!("[DEBUG CUTOFF_CALC] eff_searchsp={}", eff_searchsp);
         eprintln!("[DEBUG CUTOFF_CALC] evalue={}, e_clamped={}", evalue, e);
         eprintln!(
@@ -416,9 +423,14 @@ pub fn cutoff_score_for_update_tblastx(
     let min_len = (query_len_aa as u64).min(subject_len_nucl as u64);
     let searchsp = (min_len * (subject_len_nucl as u64)) as i64;
 
-    // DEBUG: Print for long sequences
     // NCBI reference: blast_parameters.c:348-374 (BlastInitialWordParametersUpdate)
-    if subject_len_nucl > 600_000 {
+    // ```c
+    // BLAST_Cutoffs(&new_cutoff, &cutoff_e, kbp,
+    //               MIN((Uint8)subj_length,
+    //                   (Uint8)query_length)*((Uint8)subj_length),
+    //               TRUE, gap_decay_rate);
+    // ```
+    if std::env::var_os("LOSAT_DEBUG_CUTOFFS").is_some() && subject_len_nucl > 600_000 {
         eprintln!(
             "[DEBUG CUTOFF_UPDATE] query_len_aa={}, subject_len_nucl={}",
             query_len_aa, subject_len_nucl
@@ -439,8 +451,15 @@ pub fn cutoff_score_for_update_tblastx(
         ungapped_params,
     );
 
-    // DEBUG: Print intermediate values
-    if subject_len_nucl > 600_000 {
+    // NCBI reference: blast_parameters.c:365-373
+    // ```c
+    // if (program_number != eBlastTypeBlastn)
+    //    new_cutoff = MIN(new_cutoff, gap_trigger);
+    // new_cutoff *= (Int4)sbp->scale_factor;
+    // new_cutoff = MIN(new_cutoff,
+    //                  hit_params->cutoffs[context].cutoff_score_max);
+    // ```
+    if std::env::var_os("LOSAT_DEBUG_CUTOFFS").is_some() && subject_len_nucl > 600_000 {
         eprintln!("[DEBUG CUTOFF_UPDATE] update_cutoff={} (from CUTOFF_E_TBLASTX=1e-300, searchsp={}, gap_decay={})", 
                   new_cutoff, searchsp, gap_decay_rate);
         eprintln!(
@@ -459,8 +478,14 @@ pub fn cutoff_score_for_update_tblastx(
     // NCBI: new_cutoff = MIN(new_cutoff, hit_params->cutoffs[context].cutoff_score_max)
     let final_cutoff = new_cutoff.min(cutoff_score_max);
 
-    // DEBUG: Print final cutoff
-    if subject_len_nucl > 600_000 {
+    // NCBI reference: blast_parameters.c:371-374
+    // ```c
+    // new_cutoff *= (Int4)sbp->scale_factor;
+    // new_cutoff = MIN(new_cutoff,
+    //                  hit_params->cutoffs[context].cutoff_score_max);
+    // curr_cutoffs->cutoff_score = new_cutoff;
+    // ```
+    if std::env::var_os("LOSAT_DEBUG_CUTOFFS").is_some() && subject_len_nucl > 600_000 {
         eprintln!("[DEBUG CUTOFF_UPDATE] final_cutoff={} (MIN(update_cutoff={}, gap_trigger={}, cutoff_score_max={}))", 
                   final_cutoff, new_cutoff, gap_trigger, cutoff_score_max);
     }

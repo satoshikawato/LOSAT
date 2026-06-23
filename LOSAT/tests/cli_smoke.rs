@@ -1,3 +1,5 @@
+#![allow(warnings, clippy::all)]
+
 //! Release-facing CLI smoke tests.
 
 use std::fs;

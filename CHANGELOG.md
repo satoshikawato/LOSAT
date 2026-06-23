@@ -42,6 +42,7 @@ BLAST-compatible local sequence alignment.
 
 ### Verification
 
-Final release verification is pending. The release tag must record NCBI BLAST+
-version, LOSAT commit, commands, fixtures, checksums, and diff summaries in
-`docs/release/v0.1.0.md`.
+Current local release-gate evidence is recorded in `docs/release/v0.1.0.md`.
+The supported TBLASTX candidate scope has current native NCBI parity evidence;
+BLASTN remains experimental due residual fixture differences, and the final tag
+still requires a clean release-branch rerun plus workflow artifact checksums.

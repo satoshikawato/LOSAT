@@ -8240,7 +8240,16 @@ mod tests {
     // ```
     #[test]
     fn test_build_restricted_align_array_uses_first_init_hsp_per_query() {
-        let contexts = vec![make_query_context(0, 0), make_query_context(1, 1000)];
+        let contexts = vec![
+            QueryContext {
+                aa_len: 1000,
+                ..make_query_context(0, 0)
+            },
+            QueryContext {
+                aa_len: 1000,
+                ..make_query_context(1, 1000)
+            },
+        ];
         let init_hsps = vec![
             make_init_hsp(20, 20, 20, 20, 20, 45),
             make_init_hsp(0, 20, 0, 0, 0, 80),
@@ -8262,7 +8271,16 @@ mod tests {
     // ```
     #[test]
     fn test_build_restricted_align_array_uses_qoff_not_cached_context() {
-        let contexts = vec![make_query_context(0, 0), make_query_context(1, 1000)];
+        let contexts = vec![
+            QueryContext {
+                aa_len: 1000,
+                ..make_query_context(0, 0)
+            },
+            QueryContext {
+                aa_len: 1000,
+                ..make_query_context(1, 1000)
+            },
+        ];
         let init_hsps = vec![
             make_init_hsp(0, 20, 0, 0, 0, 80),
             make_init_hsp(1005, 20, 50, 1005, 50, 45),

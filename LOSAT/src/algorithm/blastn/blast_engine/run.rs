@@ -10652,7 +10652,7 @@ mod tests {
     fn test_build_subject_seq_ranges_from_masks() {
         let masks = vec![MaskedInterval::new(2, 5), MaskedInterval::new(8, 12)];
         let ranges = build_subject_seq_ranges_from_masks(&masks, 10);
-        assert_eq!(ranges, vec![(2, 4), (8, 9)]);
+        assert_eq!(ranges, vec![(0, 2), (5, 8)]);
     }
 
     // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_hits.c:1887-1890

@@ -927,7 +927,7 @@ fn merge_segs_inclusive(seq_len: usize, segs_inclusive: &mut Vec<(usize, usize)>
     while index + 1 < segs_inclusive.len() {
         let (seg_begin, seg_end) = segs_inclusive[index];
         let (next_begin, next_end) = segs_inclusive[index + 1];
-        if seg_begin <= next_end {
+        if seg_begin <= next_end.saturating_add(1) {
             segs_inclusive[index].0 = seg_begin.min(next_begin);
             segs_inclusive[index].1 = seg_end.max(next_end);
             segs_inclusive.remove(index + 1);

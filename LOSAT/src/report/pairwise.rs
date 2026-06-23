@@ -165,9 +165,9 @@ pub fn write_subject_header<W: Write>(
 ) -> io::Result<()> {
     // Subject defline
     if let Some(title) = subject_title {
-        writeln!(writer, "> {} {}", subject_id, title)?;
+        writeln!(writer, ">{} {}", subject_id, title)?;
     } else {
-        writeln!(writer, "> {}", subject_id)?;
+        writeln!(writer, ">{}", subject_id)?;
     }
 
     // Length line

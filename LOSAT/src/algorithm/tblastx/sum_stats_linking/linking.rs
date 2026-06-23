@@ -2136,8 +2136,16 @@ fn link_hsp_group_ncbi(
     // If active_head becomes SENTINEL_IDX but remaining > 0, this indicates
     // a bug in the linking logic, not a valid case for E-value calculation.
 
-    // Output filtering statistics for long sequences
-    if is_long_sequence
+    // NCBI reference: /mnt/c/Users/genom/GitHub/ncbi-blast/c++/src/algo/blast/core/link_hsps.c:492-496
+    // ```c
+    // cutoff[0] = link_hsp_params->cutoff_small_gap;
+    // cutoff[1] = link_hsp_params->cutoff_big_gap;
+    //
+    // ignore_small_gaps = (cutoff[0] == 0);
+    // ```
+    // NCBI applies the cutoffs without unconditional stderr diagnostics.
+    if (debug_chaining || trace_link_selections || std::env::var_os("LOSAT_DIAGNOSTICS").is_some())
+        && is_long_sequence
         && (stats_index0_filtered > 0
             || stats_index0_passed > 0
             || stats_index1_filtered > 0

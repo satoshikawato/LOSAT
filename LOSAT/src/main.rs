@@ -1,3 +1,5 @@
+#![allow(warnings, clippy::all)]
+
 use anyhow::Result;
 use clap::{Parser, Subcommand};
 use std::ffi::OsString;

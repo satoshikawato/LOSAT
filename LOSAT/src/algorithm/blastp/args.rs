@@ -619,12 +619,12 @@ impl BlastpArgs {
             gap_open: match (self.gap_open, self.matrix.as_ref()) {
                 (Some(value), _) => value,
                 (None, Some(_)) => preferred_gap_open,
-                (None, None) => 11,
+                (None, None) => preferred_gap_open,
             },
             gap_extend: match (self.gap_extend, self.matrix.as_ref()) {
                 (Some(value), _) => value,
                 (None, Some(_)) => preferred_gap_extend,
-                (None, None) => 1,
+                (None, None) => preferred_gap_extend,
             },
         };
 

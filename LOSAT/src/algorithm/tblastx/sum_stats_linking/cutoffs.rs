@@ -208,8 +208,23 @@ pub fn calculate_link_hsp_cutoffs_ncbi(
     let final_cutoff_small = cutoff_small_gap * scale;
     let final_cutoff_big = cutoff_big_gap * scale;
 
-    // Debug output for long sequences (600kb+)
-    if subject_len_nucl > 600_000 {
+    // NCBI reference: /mnt/c/Users/genom/GitHub/ncbi-blast/c++/src/algo/blast/core/blast_parameters.c:1062-1081
+    // ```c
+    // if (search_sp > 8*window_size*window_size) {
+    //    link_hsp_params->cutoff_big_gap =
+    //       (Int4) floor((log(x_variable)/kbp->Lambda)) + 1;
+    //    link_hsp_params->cutoff_small_gap =
+    //       MAX(word_params->cutoff_score_min,
+    //           (Int4) floor((log(x_variable)/kbp->Lambda)) + 1);
+    // } else {
+    //    link_hsp_params->gap_prob = 0;
+    //    link_hsp_params->cutoff_small_gap = 0;
+    // }
+    // link_hsp_params->cutoff_big_gap *= (Int4)sbp->scale_factor;
+    // link_hsp_params->cutoff_small_gap *= (Int4)sbp->scale_factor;
+    // ```
+    // NCBI computes these values without unconditional stderr diagnostics.
+    if std::env::var_os("LOSAT_DEBUG_CUTOFFS").is_some() && subject_len_nucl > 600_000 {
         eprintln!(
             "[DEBUG LINKING_CUTOFF] avg_query_length={}, subject_len_nucl={}",
             avg_query_length, subject_len_nucl

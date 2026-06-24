@@ -5,6 +5,7 @@
 
 use anyhow::{Context, Result};
 use indicatif::{ProgressBar, ProgressStyle};
+use crate::common::GapEditOp;
 // NCBI reference: ncbi-blast/c++/include/algo/blast/blastinput/blast_args.hpp:1290-1296
 // ```c
 // CMTArgs(...)
@@ -91,6 +92,44 @@ use crate::utils::dust::MaskedInterval;
 // #define NCBIMATH_LN2 0.69314718055994530941723212145818
 // ```
 const NCBIMATH_LN2: f64 = 0.69314718055994530941723212145818;
+
+// NCBI reference: /mnt/c/Users/genom/GitHub/ncbi-blast/c++/include/algo/blast/core/gapinfo.h:43-61
+// ```c
+// typedef enum EGapAlignOpType {
+//    eGapAlignDel = 0, /**< Deletion: a gap in query */
+//    eGapAlignSub = 3, /**< Substitution */
+//    eGapAlignIns = 6, /**< Insertion: a gap in subject */
+// } EGapAlignOpType;
+// typedef struct GapEditScript {
+//    EGapAlignOpType* op_type;
+//    Int4* num;
+//    Int4 size;
+// } GapEditScript;
+// ```
+fn format_gap_edit_ops_for_trace(ops: &[GapEditOp]) -> String {
+    let mut out = String::from("[");
+    for (idx, op) in ops.iter().enumerate() {
+        if idx > 0 {
+            out.push(',');
+        }
+        match *op {
+            GapEditOp::Sub(n) => {
+                out.push('S');
+                out.push_str(&n.to_string());
+            }
+            GapEditOp::Del(n) => {
+                out.push('D');
+                out.push_str(&n.to_string());
+            }
+            GapEditOp::Ins(n) => {
+                out.push('I');
+                out.push_str(&n.to_string());
+            }
+        }
+    }
+    out.push(']');
+    out
+}
 
 // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_hits.c:1887-1890
 // ```c
@@ -6304,7 +6343,7 @@ fn run_internal(args: BlastnArgs, mut in_memory: Option<BlastnInMemoryRun<'_>>) 
                                 // NCBI reference: na_ungapped.c:1081-1140
                                 // For two-stage lookup, verify word_length match BEFORE ungapped extension
                                 // This is done by left+right extension from the lut_word_length match position
-                                let (q_ext_start, s_ext_start) = if word_length > lut_word_length {
+                                let (q_ext_start, s_ext_start, word_ext_left, word_ext_right) = if word_length > lut_word_length {
                                     // NCBI BLAST: s_BlastNaExtend left/right extension uses packed subject
                                     // NCBI reference: ncbi-blast/c++/src/algo/blast/core/na_ungapped.c:1093-1144
                                     // ```c
@@ -6425,6 +6464,7 @@ fn run_internal(args: BlastnArgs, mut in_memory: Option<BlastnInMemoryRun<'_>>) 
                                     //         q++;
                                     //     }
                                     // }
+                                    let mut ext_right = 0usize;
                                     if ext_left < ext_to {
                                         // NCBI BLAST: s_off = s_offset + lut_word_length;
                                         // NCBI BLAST: if (s_off + ext_to - ext_left > s_range) continue;
@@ -6435,7 +6475,6 @@ fn run_internal(args: BlastnArgs, mut in_memory: Option<BlastnInMemoryRun<'_>>) 
                                             continue;
                                         }
 
-                                        let mut ext_right = 0usize;
                                         // NCBI reference: ncbi-blast/c++/src/algo/blast/core/na_ungapped.c:1120-1136
                                         // ```c
                                         // q = query->sequence + q_offset + lut_word_length;
@@ -6497,10 +6536,10 @@ fn run_internal(args: BlastnArgs, mut in_memory: Option<BlastnInMemoryRun<'_>>) 
                                     // Adjust positions for type_of_word and ungapped extension
                                     // NCBI BLAST: q_offset -= ext_left; s_offset -= ext_left;
                                     // Reference: na_ungapped.c:1143-1144
-                                    (q_off0 - ext_left, kmer_start - ext_left)
+                                    (q_off0 - ext_left, kmer_start - ext_left, ext_left, ext_right)
                                 } else {
                                     // word_length == lut_word_length, no extension needed
-                                    (q_off0, kmer_start)
+                                    (q_off0, kmer_start, 0, 0)
                                 };
 
                                 // NCBI reference: /mnt/c/Users/genom/GitHub/ncbi-blast/c++/src/algo/blast/core/na_ungapped.c:1093-1155
@@ -6571,6 +6610,58 @@ fn run_internal(args: BlastnArgs, mut in_memory: Option<BlastnInMemoryRun<'_>>) 
                                 let mut off_found = false;
                                 let mut hit_ready = true;
                                 let query_mask = ctx.masks.as_slice();
+
+                                // NCBI reference: ncbi-blast/c++/src/algo/blast/core/na_ungapped.c:1093-1155
+                                // ```c
+                                // q_offset -= ext_left;
+                                // s_offset -= ext_left;
+                                // hits_extended += s_BlastnDiagHashExtendInitialHit(query, subject,
+                                //                                  q_offset, s_offset,
+                                //                                  masked_locations, query_info,
+                                //                                  s_range, word_length, lut_word_length,
+                                //                                  lookup_wrap, word_params, matrix,
+                                //                                  ewp->hash_table, init_hitlist,
+                                //                                  check_masks);
+                                // ```
+                                if blastn_trace_enabled
+                                    && blastn_trace::should_trace_range(
+                                        "seed",
+                                        q_idx,
+                                        s_idx,
+                                        s_id,
+                                        q_ext_start.saturating_sub(q_context_start),
+                                        q_ext_start
+                                            .saturating_add(word_length)
+                                            .saturating_sub(q_context_start),
+                                        s_ext_start.saturating_add(chunk.offset),
+                                        s_ext_start
+                                            .saturating_add(word_length)
+                                            .saturating_add(chunk.offset),
+                                        ctx.seq.len(),
+                                        ctx.frame,
+                                    )
+                                {
+                                    blastn_trace::log(
+                                        "seed",
+                                        format!(
+                                            "subject={}({}) context={} word_extend raw_seed=({}, {}) adjusted_seed=({}, {}) ext_left={} ext_right={} diag={} last_hit={} hit_saved={} s_off_pos={} s_end_pos={}",
+                                            s_id,
+                                            s_idx,
+                                            q_idx,
+                                            q_off0.saturating_sub(q_context_start),
+                                            kmer_start.saturating_add(chunk.offset),
+                                            q_ext_start.saturating_sub(q_context_start),
+                                            s_ext_start.saturating_add(chunk.offset),
+                                            word_ext_left,
+                                            word_ext_right,
+                                            diag,
+                                            last_hit,
+                                            hit_saved,
+                                            s_off_pos,
+                                            s_end_pos
+                                        ),
+                                    );
+                                }
 
                                 // NCBI reference: ncbi-blast/c++/src/algo/blast/core/na_ungapped.c:41-69 (s_MBLookup)
                                 // ```c
@@ -6875,6 +6966,60 @@ fn run_internal(args: BlastnArgs, mut in_memory: Option<BlastnInMemoryRun<'_>>) 
                                     s_end += ext;
                                     s_end_pos += ext;
                                     // hit_ready remains true (default) - extension will proceed
+                                }
+
+                                // NCBI reference: ncbi-blast/c++/src/algo/blast/core/na_ungapped.c:841-921
+                                // ```c
+                                // if (two_hits && (hit_saved || s_end_pos > last_hit + window_size )) {
+                                //     word_type = s_TypeOfWord(..., TRUE, &extended);
+                                //     ...
+                                //     if (word_type == 1) {
+                                //         ...
+                                //         if (!off_found) {
+                                //             hit_ready = 0;
+                                //         }
+                                //     }
+                                // } else if (check_masks) {
+                                //     if (!s_TypeOfWord(..., FALSE, &extended)) return 0;
+                                // }
+                                // ```
+                                if blastn_trace_enabled
+                                    && blastn_trace::should_trace_range(
+                                        "seed",
+                                        q_idx,
+                                        s_idx,
+                                        s_id,
+                                        q_off.saturating_sub(q_context_start),
+                                        q_off
+                                            .saturating_add(word_length)
+                                            .saturating_add(extended)
+                                            .saturating_sub(q_context_start),
+                                        s_off.saturating_add(chunk.offset),
+                                        s_end_pos
+                                            .saturating_sub(diag_offset as usize)
+                                            .saturating_add(chunk.offset),
+                                        ctx.seq.len(),
+                                        ctx.frame,
+                                    )
+                                {
+                                    blastn_trace::log(
+                                        "seed",
+                                        format!(
+                                            "subject={}({}) context={} type_of_word seed=({}, {}) word_type={} extended={} two_hits={} hit_ready={} off_found={} window_end={} s_end_pos={}",
+                                            s_id,
+                                            s_idx,
+                                            q_idx,
+                                            q_off.saturating_sub(q_context_start),
+                                            s_off.saturating_add(chunk.offset),
+                                            word_type,
+                                            extended,
+                                            two_hits,
+                                            hit_ready,
+                                            off_found,
+                                            window_end,
+                                            s_end_pos
+                                        ),
+                                    );
                                 }
 
                                 // NCBI reference: ncbi-blast/c++/src/algo/blast/core/na_ungapped.c:728-766
@@ -8375,7 +8520,21 @@ fn run_internal(args: BlastnArgs, mut in_memory: Option<BlastnInMemoryRun<'_>>) 
 
                 // Select gapped-start seed within the ungapped HSP.
                 // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_gapalign.c:4012-4046
-                let cutoff_score = cutoff_scores[uh.query_idx as usize];
+                //
+                // NCBI reference: /mnt/c/Users/genom/GitHub/ncbi-blast/c++/src/algo/blast/core/blast_gapalign.c:3924-3927,4058
+                // ```c
+                // if (is_rpsblast)
+                //    cutoff = hit_params->cutoffs[rps_cutoff_index].cutoff_score;
+                // else
+                //    cutoff = hit_params->cutoffs[context].cutoff_score;
+                // ...
+                // if (gap_align->score >= cutoff) {
+                // ```
+                // The score-only gapped HSP enters the preliminary HSP list and
+                // interval tree only if it reaches the hit-saving cutoff, not
+                // the lower BlastInitialWordParameters cutoff used for saving
+                // ungapped HSPs.
+                let cutoff_score = hit_saving_cutoff_scores[uh.query_idx as usize];
                 let (prelim_qs, prelim_qe, prelim_ss, prelim_se, prelim_score, seed_qs, seed_ss) =
                     if use_dp {
                         // DP seed selection (blastn)
@@ -9439,7 +9598,7 @@ fn run_internal(args: BlastnArgs, mut in_memory: Option<BlastnInMemoryRun<'_>>) 
                     blastn_trace::log(
                         "traceback",
                         format!(
-                            "subject={}({}) context={} start=({}, {}) adjusted_start=({}, {}) start_shift={} adjusted_s_len={} final=q{}..{} s{}..{} raw_score={} x_drop={} aln_len={} identities={} mismatches={} gaps={} gap_letters={} edit_ops={}",
+                            "subject={}({}) context={} start=({}, {}) adjusted_start=({}, {}) start_shift={} adjusted_s_len={} final=q{}..{} s{}..{} raw_score={} x_drop={} aln_len={} identities={} mismatches={} gaps={} gap_letters={} edit_ops_len={} edit_ops={}",
                             s_id,
                             s_idx,
                             prelim.context_idx,
@@ -9460,7 +9619,8 @@ fn run_internal(args: BlastnArgs, mut in_memory: Option<BlastnInMemoryRun<'_>>) 
                             mismatches,
                             gaps,
                             gap_letters,
-                            edit_ops.len()
+                            edit_ops.len(),
+                            format_gap_edit_ops_for_trace(&edit_ops)
                         ),
                     );
                 }
@@ -9835,7 +9995,7 @@ fn run_internal(args: BlastnArgs, mut in_memory: Option<BlastnInMemoryRun<'_>>) 
                 blastn_trace::log(
                     "purge",
                     format!(
-                        "subject={}({}) context={} pass=reeval q{}..{} s{}..{} deleted=false raw_score={} evalue={:.12e} bit_score={:.12} identities={} aln_len={} identity={:.6}",
+                        "subject={}({}) context={} pass=reeval q{}..{} s{}..{} deleted=false raw_score={} evalue={:.12e} bit_score={:.12} identities={} aln_len={} identity={:.6} gap_info={}",
                         s_id,
                         s_idx,
                         context_idx,
@@ -9848,7 +10008,11 @@ fn run_internal(args: BlastnArgs, mut in_memory: Option<BlastnInMemoryRun<'_>>) 
                         hit.bit_score,
                         hit.num_ident,
                         hit.length,
-                        hit.identity
+                        hit.identity,
+                        hit.gap_info
+                            .as_deref()
+                            .map(format_gap_edit_ops_for_trace)
+                            .unwrap_or_else(|| "[]".to_string())
                     ),
                 );
             }

@@ -739,9 +739,16 @@ pub fn extend_gapped_heuristic_with_scratch(
         // NCBI reference: blast_gapalign.c:2995-3007 (right extension)
         let (right_q_consumed, right_s_consumed, right_score, right_dp_cells) =
             if q_length < q_seq.len() && s_length < subject_len {
-                // NCBI reference: blast_gapalign.c:2999-3003 (query+q_length-1, subject+(s_length+3)/4-1)
+                // NCBI reference: /mnt/c/Users/genom/GitHub/ncbi-blast/c++/src/algo/blast/core/blast_gapalign.c:2999-3003
+                // ```c
+                // score_right = s_BlastAlignPackedNucl(query+q_length-1,
+                //    subject+(s_length+3)/COMPRESSION_RATIO - 1,
+                //    query_blk->length-q_length,
+                //    subject_blk->length-s_length, &(gap_align->query_stop),
+                //    &(gap_align->subject_stop), gap_align, score_params, FALSE, x_dropoff);
+                // ```
                 let query_offset = q_length as isize - 1;
-                let subject_byte_offset = (s_length + 3) / COMPRESSION_RATIO;
+                let subject_byte_offset = ((s_length + 3) / COMPRESSION_RATIO) as isize - 1;
                 blast_align_packed_nucl_with_scratch(
                     q_seq,
                     s_seq,
@@ -1272,7 +1279,7 @@ fn blast_align_packed_nucl_with_scratch(
     gap_extend: i32,
     x_drop: i32,
     reverse_sequence: bool,
-    subject_byte_offset: usize,
+    subject_byte_offset: isize,
     gap_scratch: &mut GapAlignScratch,
 ) -> (usize, usize, i32, usize) {
     // NCBI reference: blast_gapalign.c:3063-3074
@@ -1332,9 +1339,24 @@ fn blast_align_packed_nucl_with_scratch(
             let byte = subject_packed.get(byte_index).copied().unwrap_or(0);
             (byte >> (2 * shift)) & 0x03
         } else {
-            let byte_index = subject_byte_offset + (a_index - 1) / COMPRESSION_RATIO;
+            // NCBI reference: /mnt/c/Users/genom/GitHub/ncbi-blast/c++/src/algo/blast/core/blast_gapalign.c:3130-3133
+            // ```c
+            // a_base_pair = NCBI2NA_UNPACK_BASE(A[1+((a_index-1)/4)],
+            //                                  (3-((a_index-1)%4)));
+            // ```
+            // `subject_byte_offset` is the already-shifted A pointer base from
+            // blast_gapalign.c:2999-3000, so the `A[1 + ...]` index must be
+            // applied relative to that base.
+            let byte_index = subject_byte_offset + 1 + ((a_index - 1) / COMPRESSION_RATIO) as isize;
             let shift = 3 - ((a_index - 1) % COMPRESSION_RATIO);
-            let byte = subject_packed.get(byte_index).copied().unwrap_or(0);
+            let byte = if byte_index >= 0 {
+                subject_packed
+                    .get(byte_index as usize)
+                    .copied()
+                    .unwrap_or(0)
+            } else {
+                0
+            };
             (byte >> (2 * shift)) & 0x03
         };
 

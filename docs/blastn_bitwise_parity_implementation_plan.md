@@ -193,21 +193,39 @@ policy and is intentionally not applied.
 
 Status: in progress  
 Behavior implemented: The comparison helper now has a raw-byte gate in
-addition to its structured diagnostic diff.  
-Evidence: fresh manifest refresh: all 11 cases have identical hit counts and
-coordinate keys; 10 cases have exact structured values; Sakai/MG1655 has the
-five residual edit-derived statistic differences documented in Phase 2.
+addition to its structured diagnostic diff, executes fresh paired NCBI/LOSAT
+runs with identical relative input paths, and passes the supported `dust=true`
+manifest value to LOSAT's flag-form CLI.
+Evidence: release binary rebuilt, then this fresh native serial gate was run:
+`python tests/compare_blastn_parity.py --fresh-paired
+--paired-output-dir /tmp/losat-blastn-manifest-20260810
+--losat-bin target/release/LOSAT --ncbi-bin blastn --limit 1
+--fail-on-diff --fail-on-byte-diff`.  NCBI was `blastn 2.17.0+` (build Aug 11
+2025 09:46:06), LOSAT commit was `76e3a1ff95a8c4590070e620e85a23e5bd87f53f`,
+and Rust was `1.92.0`.  The 9 task-blastn cases, both megablast cases, and the
+three compact multi-query/outfmt cases have exact raw bytes and structured
+rows except for Sakai/MG1655's five Phase 2 edit-script statistic residuals.
+Sakai/MG1655 still has 6476/6476 rows and coordinate keys.  Exact-output SHA-256
+examples from the fresh pair are: `PesePMNV.MjPMNV.task_blastn`,
+`cadccd5ba65c5632193b2866713328ca3689e684ab8718a773df8decf4d8284c`;
+`PmeNMV.MjPMNV.task_blastn`,
+`30717748c1eac9b994512c1117eb440d1c5a2ec7f05f45dcfe3d50bd3ca13177`;
+`EDL933.Sakai.megablast`,
+`4b4b2501f1d87303c3060c5b0c100fbd381604a72e4df130e23701ff81e49fac`;
+`compact.multi_query.outfmt7`,
+`58b0673dc9379427777880c709b9edb35647806e78de74197899680fac402547`.
 `env CARGO_TARGET_DIR=/tmp/losatn-parity-test-target cargo test --release`
-passes (392 passed, 1 ignored in library tests; 5 CLI tests; 4 compressed
-lookup tests; 177 integration tests, 2 ignored). `cargo clippy --release
---all-targets` and the release build also pass.  
-Deviation: the full raw-byte manifest gate is not yet a valid acceptance claim
-because the checked-in NCBI output fixtures were generated with different
-relative subject paths; the fresh same-argument focused fixture is byte exact.
- 
-Remaining risk: run the full Rust test gate and add fresh paired raw-byte
-artifacts before declaring native serial parity complete. `cargo fmt --
---check` remains non-clean because the already-dirty `run.rs` contains
-unrelated formatting drift; no whole-file formatting rewrite was applied.
-Deviation: none  
-Remaining risk: native parity must pass before any Wasm/threading claim.
+passes: 392 library tests passed with 1 ignored, 5 CLI tests passed, 4
+compressed-lookup tests passed, and 177 integration tests passed with 2
+ignored.  `env CARGO_TARGET_DIR=/tmp/losatn-parity-test-target cargo clippy
+--release --all-targets` also passes.
+Deviation: the raw-byte manifest gate is now truthful and fresh, but it is not
+green because the installed NCBI binary emits five score-equivalent,
+edit-script-derived statistic alternatives for Sakai/MG1655.  No post-hoc
+alignment preference was added because the inspected NCBI source does not
+authorize it.  `cargo fmt -- --check` remains non-clean because the existing
+dirty `src/algorithm/blastn/blast_engine/run.rs` has unrelated formatting drift;
+no whole-file formatting rewrite was applied.
+Remaining risk: native serial BLASTN parity is not complete until the
+NCBI-source/binary traceback discrepancy is resolved.  No Wasm/threading claim
+is made.

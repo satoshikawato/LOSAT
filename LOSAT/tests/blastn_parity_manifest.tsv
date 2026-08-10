@@ -14,3 +14,11 @@ MjPMNV.MlPMNV.task_blastn	blastn	2	-3	5	2	11	0	0	true	true	both	10	500	0	1	7	tes
 NZ_CP006932.NZ_CP006932.task_blastn	blastn	2	-3	5	2	11	0	0	true	true	both	10	500	0	1	7	tests/fasta/NZ_CP006932.fasta	tests/fasta/NZ_CP006932.fasta	tests/blast_out/NZ_CP006932.NZ_CP006932.task_blastn.out	tests/losat_out/NZ_CP006932.NZ_CP006932.losatn.blastn.out
 EDL933.Sakai.megablast	megablast	1	-2	0	0	28	0	0	true	true	both	10	500	0	1	7	tests/fasta/EDL933.fna	tests/fasta/Sakai.fna	tests/blast_out/EDL933.Sakai.blastn.megablast.out	tests/losat_out/EDL933.Sakai.losatn.megablast.out
 Sakai.MG1655.megablast	megablast	1	-2	0	0	28	0	0	true	true	both	10	500	0	1	7	tests/fasta/Sakai.fna	tests/fasta/MG1655.fna	tests/blast_out/Sakai.MG1655.blastn.megablast.out	tests/losat_out/Sakai.MG1655.losatn.megablast.out
+# NCBI reference: ncbi-blast/c++/src/algo/blast/format/blast_format.cpp:770-775,794-808,828-832
+# outfmt 6/7 iterate every retained alignment; outfmt 7 additionally prints one header per query.
+# NCBI reference: ncbi-blast/c++/src/objtools/align_format/tabular.cpp:1275-1283,1322-1325
+# no-hit query sections emit "# 0 hits found" and the footer records the number of processed queries.
+# A '-' output marker means the permanent fixture must be executed with --fresh-paired; no stale oracle artifact is used.
+compact.multi_query.outfmt6	blastn	2	-3	5	2	11	0	0	true	true	both	10	500	0	1	6	tests/fasta/blastn_parity_compact.fasta	tests/fasta/blastn_parity_compact.fasta	-	-
+compact.multi_query.outfmt7	blastn	2	-3	5	2	11	0	0	true	true	both	10	500	0	1	7	tests/fasta/blastn_parity_compact.fasta	tests/fasta/blastn_parity_compact.fasta	-	-
+compact.multi_query.no_hit.outfmt7	blastn	2	-3	5	2	11	0	0	true	true	both	1e-100	500	0	1	7	tests/fasta/blastn_parity_compact.fasta	tests/fasta/blastn_parity_compact.fasta	-	-

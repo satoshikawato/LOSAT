@@ -3261,6 +3261,17 @@ fn greedy_gapped_alignment_internal(
         if fence_hit {
             return None;
         }
+        if debug_greedy_traceback_enabled(q_off, s_off) {
+            // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_gapalign.c:2805-2831
+            // ```c
+            // score = BLAST_AffineGreedyAlign(..., &q_ext_r, &s_ext_r, ...);
+            // if (score >= 0) break;
+            // ```
+            eprintln!(
+                "[GREEDY_DIRECTION] right q_ext={} s_ext={} score={}",
+                q_ext_r, s_ext_r, score
+            );
+        }
         if score >= 0 {
             scratch.max_dist = max_dist;
             break;
@@ -3302,6 +3313,17 @@ fn greedy_gapped_alignment_internal(
         );
         if fence_hit {
             return None;
+        }
+        if debug_greedy_traceback_enabled(q_off, s_off) {
+            // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_gapalign.c:2836-2864
+            // ```c
+            // score1 = BLAST_AffineGreedyAlign(..., &q_ext_l, &s_ext_l, ...);
+            // if (score1 >= 0) { score += score1; break; }
+            // ```
+            eprintln!(
+                "[GREEDY_DIRECTION] left q_ext={} s_ext={} score={}",
+                q_ext_l, s_ext_l, score_left
+            );
         }
         if score_left >= 0 {
             score += score_left;

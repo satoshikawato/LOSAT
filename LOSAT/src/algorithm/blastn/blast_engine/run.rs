@@ -74,8 +74,9 @@ use super::super::filtering::{
     subject_best_hit, ReevalParams,
 };
 use super::super::hsp::{
-    get_prelim_hitlist_size, sort_hsps_by_score, trim_by_max_hsps, write_output_blastn_hitlists,
-    write_output_blastn_hitlists_to_writer, BlastnHitList, BlastnHsp, BlastnHspList,
+    get_prelim_hitlist_size, parse_blastn_output_format, sort_hsps_by_score, trim_by_max_hsps,
+    write_output_blastn_hitlists, write_output_blastn_hitlists_to_writer, BlastnHitList,
+    BlastnHsp, BlastnHspList, BlastnOutputFormat,
 };
 use super::super::interval_tree::{BlastIntervalTree, IndexMethod, TreeHsp};
 use super::super::lookup::{build_unmasked_ranges, reverse_complement};
@@ -92,6 +93,21 @@ use crate::utils::dust::MaskedInterval;
 // #define NCBIMATH_LN2 0.69314718055994530941723212145818
 // ```
 const NCBIMATH_LN2: f64 = 0.69314718055994530941723212145818;
+
+// NCBI reference: ncbi-blast/c++/src/objtools/align_format/showdefline.cpp:69-79
+// ```c
+// string CShowBlastDefline::GetDefline(const CBioseq_Handle& bioseq) const
+// {
+//     return bioseq.GetSeqId()->AsFastaString();
+// }
+// ```
+#[inline]
+fn fasta_defline(record: &bio::io::fasta::Record) -> Arc<str> {
+    match record.desc() {
+        Some(desc) => Arc::<str>::from(format!("{} {}", record.id(), desc)),
+        None => Arc::<str>::from(record.id()),
+    }
+}
 
 // NCBI reference: /mnt/c/Users/genom/GitHub/ncbi-blast/c++/include/algo/blast/core/gapinfo.h:43-61
 // ```c
@@ -4419,6 +4435,9 @@ fn post_process_hits_and_write(
     verbose: bool,
     query_ids: &[Arc<str>],
     subject_ids: &[Arc<str>],
+    output_format: BlastnOutputFormat,
+    query_titles: &[Arc<str>],
+    subject_title: &str,
     timing: Option<&BlastnTiming>,
 ) -> Result<()> {
     // NCBI reference: ncbi-blast/c++/include/algo/blast/core/blast_hits.h:183-187
@@ -4550,10 +4569,26 @@ fn post_process_hits_and_write(
     // ```
     match output_target {
         BlastnOutputTarget::Path(out_path) => {
-            write_output_blastn_hitlists(&hit_lists, out_path.as_ref(), query_ids, subject_ids)?;
+            write_output_blastn_hitlists(
+                &hit_lists,
+                out_path.as_ref(),
+                query_ids,
+                subject_ids,
+                output_format,
+                query_titles,
+                subject_title,
+            )?;
         }
         BlastnOutputTarget::Writer(writer) => {
-            write_output_blastn_hitlists_to_writer(&hit_lists, writer, query_ids, subject_ids)?;
+            write_output_blastn_hitlists_to_writer(
+                &hit_lists,
+                writer,
+                query_ids,
+                subject_ids,
+                output_format,
+                query_titles,
+                subject_title,
+            )?;
         }
     }
 
@@ -4664,6 +4699,8 @@ pub fn run(args: BlastnArgs) -> Result<()> {
 }
 
 fn run_internal(args: BlastnArgs, mut in_memory: Option<BlastnInMemoryRun<'_>>) -> Result<()> {
+    let output_format = parse_blastn_output_format(&args.outfmt).map_err(anyhow::Error::msg)?;
+
     // NCBI reference: ncbi-blast/c++/include/algo/blast/blastinput/blast_args.hpp:1290-1296
     // ```c
     // CMTArgs(...)
@@ -4992,6 +5029,23 @@ fn run_internal(args: BlastnArgs, mut in_memory: Option<BlastnInMemoryRun<'_>>) 
     // seq_arg.encoding = eBlastEncodingProtein;
     // ```
     let seq_data = prepare_sequence_data(&args, queries, query_ids, subject_metadata);
+
+    // NCBI reference: ncbi-blast/c++/src/objtools/align_format/tabular.cpp:1264-1284
+    // ```c
+    // x_PrintQueryAndDbNames(program_version, bioseq, dbname, rid, iteration,
+    //                        subj_bioseq);
+    // ```
+    let query_titles_arc = Arc::new(
+        seq_data
+            .queries
+            .iter()
+            .map(fasta_defline)
+            .collect::<Vec<Arc<str>>>(),
+    );
+    let subject_title = Arc::<str>::from(format!(
+        "User specified sequence set (Input: {})",
+        args.subject.display()
+    ));
 
     // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_hits.c:2589-2593
     // ```c
@@ -10431,6 +10485,9 @@ fn run_internal(args: BlastnArgs, mut in_memory: Option<BlastnInMemoryRun<'_>>) 
                 verbose,
                 query_ids_arc.as_ref(),
                 subject_ids_arc.as_ref(),
+                output_format,
+                query_titles_arc.as_ref(),
+                subject_title.as_ref(),
                 timing.as_deref(),
             )?;
             // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_engine.c:1674-1783
@@ -10563,6 +10620,9 @@ fn run_internal(args: BlastnArgs, mut in_memory: Option<BlastnInMemoryRun<'_>>) 
                     verbose,
                     query_ids_arc.as_ref(),
                     subject_ids_arc.as_ref(),
+                    output_format,
+                    query_titles_arc.as_ref(),
+                    subject_title.as_ref(),
                     timing_for_writer.as_deref(),
                 )
             });
@@ -10779,6 +10839,9 @@ fn run_internal(args: BlastnArgs, mut in_memory: Option<BlastnInMemoryRun<'_>>) 
         args.verbose,
         query_ids_arc.as_ref(),
         subject_ids_arc.as_ref(),
+        output_format,
+        query_titles_arc.as_ref(),
+        subject_title.as_ref(),
         timing.as_deref(),
     )?;
     // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_engine.c:1674-1783

@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import argparse
 import csv
+import hashlib
 import math
 import subprocess
 import sys
@@ -123,6 +124,34 @@ def parse_outfmt(path: Path) -> list[HspRow]:
                 )
             )
     return rows
+
+
+# NCBI reference: ncbi-blast/c++/src/objtools/align_format/tabular.cpp:1098-1108
+# ```c
+# m_Ostream << "\n";
+# // The tabular writer emits the selected fields and delimiters directly to
+# // the output stream; byte comparison is therefore the final output gate.
+# ```
+def compare_raw_bytes(ncbi_path: Path, losat_path: Path) -> bool:
+    ncbi_bytes = ncbi_path.read_bytes()
+    losat_bytes = losat_path.read_bytes()
+    if ncbi_bytes == losat_bytes:
+        print(f"  raw_bytes: exact ({len(ncbi_bytes)} bytes)")
+        return True
+
+    common_len = min(len(ncbi_bytes), len(losat_bytes))
+    first_diff = next(
+        (index for index in range(common_len) if ncbi_bytes[index] != losat_bytes[index]),
+        common_len,
+    )
+    print(
+        "  raw_bytes: DIFFER"
+        f" (ncbi={len(ncbi_bytes)} bytes, losat={len(losat_bytes)} bytes,"
+        f" first_diff={first_diff})"
+    )
+    print(f"  raw_sha256_ncbi: {hashlib.sha256(ncbi_bytes).hexdigest()}")
+    print(f"  raw_sha256_losat: {hashlib.sha256(losat_bytes).hexdigest()}")
+    return False
 
 
 def rows_by_coord(rows: Iterable[HspRow]) -> dict[tuple[str, str, int, int, int, int], HspRow]:
@@ -518,6 +547,11 @@ def main() -> int:
     )
     parser.add_argument("--print-refresh-commands", action="store_true")
     parser.add_argument("--fail-on-diff", action="store_true")
+    parser.add_argument(
+        "--fail-on-byte-diff",
+        action="store_true",
+        help="Compare complete NCBI/LOSAT files byte-for-byte and fail on any difference.",
+    )
     args = parser.parse_args()
 
     root = Path.cwd()
@@ -549,9 +583,12 @@ def main() -> int:
     results = []
     failed = False
     for case_id, ncbi_path, losat_path in cases:
+        raw_equal = compare_raw_bytes(ncbi_path, losat_path) if args.fail_on_byte_diff else True
         result = compare_case(case_id, ncbi_path, losat_path, args.limit)
         results.append(result)
         failed |= bool(
+            not raw_equal
+            or
             result["ncbi_only"]
             or result["losat_only"]
             or result["bitscore_diffs"]

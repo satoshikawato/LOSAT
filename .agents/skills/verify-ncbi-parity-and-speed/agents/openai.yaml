@@ -1,0 +1,4 @@
+interface:
+  display_name: "Verify NCBI Parity and Speed"
+  short_description: "Prove LOSAT output parity and performance"
+  default_prompt: "Use $verify-ncbi-parity-and-speed to compare this LOSAT path with NCBI and verify its benchmark gate."

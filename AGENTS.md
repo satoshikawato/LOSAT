@@ -72,19 +72,15 @@ authoritative, current guidance for agent behavior in LOSAT.
 
 ---
 
-## Current Status and Active Work (Keep Updated)
+## Parity boundaries and regression targets
 
-### Active parity work
-- BLASTN task parity remains active. Re-run current comparison fixtures before
-  diagnosing; do not rely on old hit-count percentages. Recent work aligned
-  query-context offsets, output coordinate adjustment, x-drop clamping, common
-  endpoint purge ordering, ambiguity re-evaluation, edit-script trimming, and
-  hitlist pruning with NCBI. Remaining BLASTN work should focus only on a
-  reproducible current fixture and the corresponding NCBI source path.
-- BLASTP is implemented but remains secondary to TBLASTX/BLASTN. Treat BLASTP
-  parity and performance work as ongoing unless a current comparison fixture
-  proves the exact behavior being touched. Unsupported or incomplete BLASTP
-  behavior must fail fast; never delegate to external BLASTP.
+### Program and target boundaries
+- Re-run current comparison fixtures before diagnosing BLASTN. Do not rely on
+  old hit-count percentages or session notes. Start from one reproducible
+  current fixture and the corresponding NCBI source path.
+- BLASTP is secondary to TBLASTX and BLASTN. A current comparison fixture must
+  prove the exact behavior being changed. Unsupported or incomplete BLASTP
+  behavior must fail fast; never delegate it to external BLASTP.
 - Wasm/threading work is implementation-level only. Plain `wasm32-wasip1` builds
   are intentionally serial; real command-Wasm threading requires the
   `wasm32-wasip1-threads` target and `wasm-threads` feature. Any native or Wasm
@@ -212,6 +208,10 @@ cd LOSAT && cargo fmt
 
 ## Testing Expectations
 
+- Use `$verify-ncbi-parity-and-speed` for parity, benchmark, native/Wasm, and
+  release-evidence work.
+- Ask the `ncbi_parity_auditor` custom agent for an independent read-only check
+  before accepting a release-facing parity or performance claim.
 - Add unit tests for NCBI-ported functions, including edge cases and boundaries.
 - Reference NCBI unit tests when available:
   `ncbi-blast/c++/src/algo/blast/unit_tests/`.

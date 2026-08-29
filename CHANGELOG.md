@@ -28,8 +28,9 @@ BLAST-compatible local sequence alignment.
 
 ### Known Limitations
 
-- BLASTN remains experimental until current comparison fixtures prove
-  bit-perfect parity for the exact release scope.
+- BLASTN remains experimental until current comparison fixtures prove exact
+  parity for source-defined behavior and satisfy the narrow source-compatible
+  contract for the demonstrated source-underdetermined equal-HSP tie.
 - BLASTP remains experimental in v0.1.0.
 - Rust library and embeddable Web/Wasm APIs are internal only.
 - Large database search workflows are outside the v0.1.0 release scope.
@@ -43,6 +44,8 @@ BLAST-compatible local sequence alignment.
 ### Verification
 
 Current local release-gate evidence is recorded in `docs/release/v0.1.0.md`.
-The supported TBLASTX candidate scope has current native NCBI parity evidence;
-BLASTN remains experimental due residual fixture differences, and the final tag
-still requires a clean release-branch rerun plus workflow artifact checksums.
+The supported TBLASTX candidate scope has current native NCBI parity evidence.
+BLASTN has 13 exact source-defined cases plus one narrowly source-compatible
+equal-HSP case and remains experimental pending a separate release-scope
+promotion. The final tag still requires a clean release-branch rerun plus
+workflow artifact checksums.

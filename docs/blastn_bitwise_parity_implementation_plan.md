@@ -2,17 +2,20 @@
 
 Status: in progress  
 Owner: Codex  
-Updated: 2026-08-10
+Updated: 2026-08-29
 
 ## Objective
 
-Make the supported pure-Rust LOSATN BLASTN path byte-identical to the NCBI
-BLASTN oracle for the declared fixtures and options. NCBI C/C++ is the only
-behavioral authority; NCBI BLAST+ is used only for comparison and diagnostics.
+Make the supported pure-Rust LOSATN BLASTN path exact for source-defined NCBI
+BLASTN behavior and source-compatible for the narrowly documented
+source-underdetermined equal-HSP tie class. NCBI C/C++ is the only behavioral
+authority; NCBI BLAST+ is used only for comparison and diagnostics.
 
 No runtime, build-time, FFI, or fallback dependency on NCBI BLAST may be added.
-The only accepted parity exception is the existing local-subject TBLASTX
-non-default `db_gencode` exception; it does not apply to BLASTN.
+The only accepted behavioral deviation is the existing local-subject TBLASTX
+non-default `db_gencode` exception; it does not apply to BLASTN. The BLASTN
+source-underdetermined tie policy is not a behavioral deviation: it preserves
+the set of survivor representations permitted by NCBI source.
 
 ## Frozen current evidence
 
@@ -40,19 +43,25 @@ checks raw bytes for fresh paired runs.
 
 ## Compatibility contract for source-underdetermined ties
 
-Source-defined BLASTN cases require exact parity. When distinct HSP edit scripts
-tie on every field in the NCBI common-endpoint comparator, the NCBI BLAST+
-2.17.0 source does not define which edit script must survive its `qsort` and
-first-survivor purge. Those source-underdetermined ties require deterministic
-LOSAT canonicalization under
-[`PD-BLASTN-HSP-CANONICALIZATION`](product_decisions/PD-BLASTN-HSP-CANONICALIZATION.md).
-A particular precompiled binary's arbitrary survivor among comparator-equal
-elements is not treated as a source-defined compatibility contract.
+Source-defined BLASTN cases require exact official NCBI BLAST+ 2.17.0 binary
+parity. When distinct HSP edit scripts tie on every field in the NCBI
+common-endpoint comparator, the NCBI source does not define which edit script
+must survive its `qsort` and first-survivor purge. Under
+[`PD-BLASTN-HSP-CANONICALIZATION`](product_decisions/PD-BLASTN-HSP-CANONICALIZATION.md)
+Version 1.1, LOSAT preserves that source semantics and does not add a secondary
+total order solely to reproduce one precompiled binary's survivor.
 
-The Product Decision is an explicit LOSAT deterministic compatibility
-extension, not an attribution of the secondary ordering to NCBI. Its production
-implementation, including identical native and Wasm semantics, remains future
-work; this decision-and-component-test change does not alter runtime ordering.
+For the current 14-case manifest, 13 source-defined cases require exact parity.
+The known source-underdetermined case may be accepted only with the same HSP row
+count, HSP membership and coordinate keys, E-values, and bit scores, and only
+when differences are confined to the observed edit-script-derived `pident`,
+alignment-length, mismatch, and gap-open fields. Coordinate, HSP-set, score,
+E-value, formatter, and unrelated algorithm differences remain failures.
+
+No cross-platform deterministic survivor is claimed. Supported native/Wasm
+executions are to be monitored and tested; a LOSAT-specific canonicalization
+may be reconsidered only after evidence of a material supported-platform
+incompatibility.
 
 ## Scope and non-goals
 
@@ -64,8 +73,8 @@ In scope:
 3. Greedy traceback, preliminary edit-block conversion, gap reduction, and
    post-traceback ambiguity re-evaluation needed by the residual megablast
    cases.
-4. Native serial execution first; threaded/Wasm parity only after the native
-   gate is exact.
+4. Native serial execution first; threaded/Wasm evidence only after the native
+   source-compatibility gate is satisfied.
 
 Out of scope:
 
@@ -140,27 +149,34 @@ Work:
 
 Acceptance evidence:
 
-- The five residual HSPs have identical edit-derived length, identity,
-  mismatches, and gap opens.
-- The focused megablast output has no structured field differences.
+- The five residual HSPs match the NCBI 2.17.0 source path through final greedy
+  edit-script construction.
+- The precompiled-binary residual is classified at the source-underdetermined
+  common-endpoint survivor boundary, with row count, membership/coordinate
+  keys, E-values, and bit scores unchanged.
 - No task-blastn fixture regresses.
 
-## Phase 3 — Full native parity and regression gate
+## Phase 3 — Full native source-compatibility and regression gate
 
 Work:
 
 1. Run the complete current BLASTN manifest in a fresh temporary directory with
    a release build and fixed `num_threads=1`.
-2. Require both raw-byte equality and structured equality for outfmt 6/7.
+2. Require raw-byte and structured equality for source-defined outfmt 6/7
+   cases; apply only the fixed invariants to the known source-underdetermined
+   tie.
 3. Re-run the existing focused Rust tests and the broader requested Rust gate.
-4. Repeat the focused fixture to confirm deterministic output.
+4. Repeat the focused fixture to monitor survivor stability on the tested
+   target, without inferring a cross-platform deterministic contract.
 5. Record commands, source versions, checksums, first divergence, and residual
    risk in the evidence section below.
 
 Acceptance evidence:
 
-- All declared native serial fixtures are byte-identical.
-- No accepted exception is used for BLASTN.
+- All 13 source-defined native serial fixtures are byte-identical.
+- The known source-underdetermined case satisfies the fixed row-count,
+  membership/coordinate, E-value, bit-score, and differing-field invariants.
+- No BLASTN deviation from source-defined behavior is used.
 - Any unsupported option remains an explicit Rust error rather than an NCBI
   fallback.
 
@@ -226,7 +242,8 @@ the NCBI-only policy and is intentionally not applied.
 
 ### Phase 3
 
-Status: in progress  
+Status: native serial source-compatibility contract satisfied; supported-target
+monitoring remains
 Behavior implemented: The comparison helper now has a raw-byte gate in
 addition to its structured diagnostic diff, executes fresh paired NCBI/LOSAT
 runs with identical relative input paths, and passes the supported `dust=true`
@@ -256,11 +273,11 @@ passes: 395 library tests passed with 1 ignored, 5 CLI tests passed, 4
 compressed-lookup tests passed, and 177 integration tests passed with 2
 ignored.  `env CARGO_TARGET_DIR=/tmp/losatn-parity-test-target cargo clippy
 --release --all-targets` also passes.
-Deviation: the raw-byte manifest gate is now truthful and fresh, but it is not
-green because the installed NCBI binary emits five score-equivalent,
-edit-script-derived statistic alternatives for Sakai/MG1655.  No post-hoc
+Deviation: the raw-byte diagnostic is truthful and fresh; the only non-identical
+output is the installed NCBI binary's five score-equivalent,
+edit-script-derived statistic alternatives for Sakai/MG1655. No post-hoc
 alignment preference was added because the inspected NCBI source does not
-authorize it.  `cargo fmt -- --check` remains non-clean because the existing
+authorize it. `cargo fmt -- --check` remains non-clean because the existing
 dirty `src/algorithm/blastn/blast_engine/run.rs` has unrelated formatting drift;
 no whole-file formatting rewrite was applied.
 Additional fresh Sakai/MG1655 verification on 2026-08-10 returned 6476 common
@@ -268,6 +285,10 @@ HSPs and the same five residual statistic differences. Raw output sizes were
 536880 bytes each, with first byte difference at offset 82036; SHA-256 was
 `2e15963c66e5f552088e468d17a1a86b779be61e7ed6331e57314f6e93c69ffa` for NCBI
 and `9edd4883881316976c82c3e3674cab6d4d863e17ac89e3db2052b2ed7996df74` for
-LOSAT. Native serial BLASTN parity is therefore not complete until the
-NCBI-source/binary traceback discrepancy is resolved. No Wasm/threading claim
-is made.
+LOSAT. Under Product Decision Version 1.1, this is the known
+source-underdetermined case: the other 13 manifest cases are byte-identical,
+and this case retains identical row count, membership/coordinate keys,
+E-values, and bit scores with differences limited to `pident`, alignment
+length, mismatch, and gap-open fields. The native serial manifest therefore
+satisfies the revised source-compatibility contract. No Wasm/threading survivor
+claim is made.

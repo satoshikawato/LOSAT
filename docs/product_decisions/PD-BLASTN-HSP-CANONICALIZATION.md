@@ -1,30 +1,17 @@
-# Product Decision: BLASTN HSP edit-script canonicalization
+# Product Decision: BLASTN common-endpoint equal-HSP policy
 
 - Decision ID: `PD-BLASTN-HSP-CANONICALIZATION`
-- Version: 1.0
+- Version: 1.1
 - Date: 2026-08-29
-- Status: Accepted; implementation pending
+- Status: Accepted; Version 1.0 canonicalization requirement withdrawn for
+  v0.1.0
 
 ## Scope
 
 This decision governs BLASTN HSPs that compare equal under the NCBI
 common-endpoint comparator but have different normalized `gap_info` edit
-scripts. It defines the contract for a later implementation change. It does not
-change current LOSAT runtime behavior.
-
-## Problem
-
-Distinct score-equivalent traceback paths can have the same query context,
-query and subject endpoints, and raw score while retaining different edit
-scripts. Those scripts can produce different identity, alignment-length,
-mismatch, and gap-open values even though the HSP coordinate and score keys are
-unchanged.
-
-Leaving the survivor dependent on an unspecified equal-element sort order makes
-native, Wasm, and cross-platform results potentially disagree. This is also
-user-visible downstream: gbdraw comparison filtering applies both identity and
-alignment-length thresholds directly ([`gbdraw/io/comparisons.py`, lines
-29-45](https://github.com/satoshikawato/gbdraw/blob/fd286c5e664e31f03e986f96c06c14d70580a963/gbdraw/io/comparisons.py#L29-L45)).
+scripts. It revises the Version 1.0 product policy without changing LOSAT
+runtime or test behavior.
 
 ## NCBI source behavior
 
@@ -38,118 +25,117 @@ and each returns equality after those fields tie.
 `blast_hits.c:2455-2535` passes those comparators to C `qsort` and keeps the
 first HSP in each common-start or common-end group. C `qsort` does not define a
 stable relative order for comparator-equal elements. The release source
-therefore does not select one canonical edit script for this tie class.
+therefore does not select one unique edit-script survivor for this tie class.
 
-LOSAT currently mirrors that comparator field set. Native LOSAT routes the
-sort through platform C `qsort`, while wasm32 uses Rust sorting. Consequently,
-the current source does not define one cross-platform survivor when only the
-edit script differs.
-
-## Observed compatibility consequence
-
-A fresh comparison against NCBI BLAST+ 2.17.0+ contains 14 cases: 13 are
-byte-exact and one, `Sakai.MG1655.megablast`, is a value difference. That case
-has the same row count, coordinate keys, E-values, and bit scores, but five rows
-have different edit-script-derived values; two of those rows also differ in
-percent identity. Static source analysis classifies the residual as
-`CANONICALIZATION_DECISION_REQUIRED`.
-
-Those five rows demonstrate the consequence, but they are not an implementation
-oracle. A precompiled binary's arbitrary survivor among source-equal elements
-does not add an ordering rule to the 2.17.0 source contract.
+The static source audit also found LOSAT's greedy traceback, edit-script
+construction, gap reduction, post-traceback re-evaluation, identity/length
+counting, and tabular derivation semantically aligned with the relevant NCBI
+2.17.0 source path for the supported case. The remaining observed discrepancy
+is at this common-endpoint survivor boundary; the audit found no missing NCBI
+secondary ordering rule to port.
 
 ## Decision
 
-LOSAT shall define a deterministic total order for normalized BLASTN edit
-scripts when all fields used by the NCBI common-endpoint comparator are equal.
-This rule is a **LOSAT deterministic compatibility extension**. It is not a
-claim that NCBI BLAST+ 2.17.0 source defines the ordering.
+LOSAT v0.1.0 shall preserve the NCBI BLAST+ 2.17.0 source semantics for
+common-endpoint HSP ties.
 
-The extension exists to provide native reproducibility, Wasm reproducibility,
-cross-platform reproducibility, and stable downstream gbdraw behavior.
+When NCBI's comparator treats distinct score-equivalent edit scripts as equal,
+LOSAT does not introduce an additional canonical ordering solely to reproduce
+a particular precompiled NCBI binary. Such ties are source-underdetermined and
+may have more than one source-compatible edit-script representation.
 
-## Canonical owner
+A LOSAT-specific deterministic canonicalization may be reconsidered only if
+supported native/Wasm execution is demonstrated to produce materially
+inconsistent behavior that matters to the supported product contract. A
+theoretical possibility of inconsistent ordering is not sufficient evidence
+for adding that policy.
 
-The normalized edit-script representation is the canonical secondary key.
-Derived values such as percent identity, alignment length, mismatch count,
-gap-open count, E-value, and bit score remain outputs of the selected script;
-they must not select that script. Biological identifiers, case names,
-accessions, and coordinates copied from observed residual rows are also
-excluded from the key.
+## Compatibility contract
 
-## Required ordering semantics
+### NCBI source compatibility
 
-The future implementation shall use these semantics exactly:
+NCBI source permits multiple survivor representations for comparator-equal
+edit scripts. LOSAT may therefore produce any representation that the source
+permits without violating the source-level contract. This allowance is limited
+to the demonstrated common-endpoint tie class; it does not authorize any other
+algorithm or formatting difference.
 
-1. Represent an edit script as the complete run-length-encoded sequence of
-   `GapEditOp` values. For the comparison key, remove zero-length operations
-   and coalesce adjacent operations of the same kind without integer wrap.
-   Preserve all other operation boundaries and their stored order.
-2. Include script presence in the key: `None` has presence rank `0` and
-   `Some(...)` has presence rank `1`. This distinguishes an absent script from
-   a present empty script.
-3. Map each normalized operation to `(operation_kind_rank, operation_length)`.
-   Operation-kind ranks are `Sub = 0`, `Del = 1`, and `Ins = 2`.
-4. Compare operation lengths as unsigned integer counts in ascending order.
-5. Compare the complete tuple vectors lexicographically in ascending order.
-   At the first unequal tuple, the smaller tuple sorts first. If one vector is
-   an exact prefix of the other, the shorter vector sorts first.
-6. Use the stored normalized operation order. Do not sort the operations
-   inside a script.
-7. For reverse-strand HSPs, compare the internal stored script in the same
-   order. Do not reverse the vector and do not exchange `Del` and `Ins`.
-   Output-coordinate orientation is not part of this key.
-8. Append this key only after every NCBI-defined field in the common-start or
-   common-end comparator has tied. Apply it in both common-start and common-end
-   sort passes, before their survivor-selection loops. The lower canonical key
-   sorts first and is therefore the survivor considered first by the existing
-   purge logic.
-9. If the normalized representations, including presence, are structurally
-   identical, the secondary comparison returns equality. Instance identity or
-   allocation order is not a further key because either survivor has the same
-   canonical script representation.
-10. Native and wasm32 implementations must use these exact semantics. Platform
-    sort stability must not decide between structurally different scripts.
+### Precompiled-binary byte parity
 
-The ascending ranks and direct tuple-vector comparison are intentionally
-representation-derived. They do not encode preferences such as "fewer gaps is
-better" and were not chosen to reproduce the five observed NCBI-binary rows.
+Source-defined behavior continues to require exact parity with the official
+NCBI BLAST+ 2.17.0 binary. For a source-underdetermined tie, one precompiled
+binary's chosen edit-script representation is diagnostic evidence rather than
+a normative source contract.
 
-## Native/Wasm requirement
+### Determinism
 
-The later implementation PR must wire one shared semantic comparator into both
-native and wasm32 common-endpoint ordering. Tests must cover both purge passes,
-reverse-strand stored order, prefix ordering, all operation-kind ranks, script
-presence, identical normalized scripts, and native/Wasm output agreement.
-Until that implementation lands, no deterministic cross-platform survivor
-claim may be made for this tie class.
+No cross-platform deterministic edit-script survivor behavior is claimed
+without supporting evidence. LOSAT will monitor and test the supported native
+and Wasm executions. If future evidence demonstrates a material inconsistency
+between supported executions, this decision must be reopened before adopting a
+LOSAT-specific ordering rule.
+
+### Downstream gbdraw impact
+
+Distinct source-compatible scripts can change percent identity and alignment
+length. Those fields matter near the gbdraw comparison thresholds
+([`gbdraw/io/comparisons.py`, lines 29-45](https://github.com/satoshikawato/gbdraw/blob/fd286c5e664e31f03e986f96c06c14d70580a963/gbdraw/io/comparisons.py#L29-L45)).
+That downstream sensitivity is a reason to monitor and test supported
+executions, but it does not by itself justify inventing an ordering rule before
+an actual supported-platform incompatibility is observed.
+
+## v0.1.0 release gate
+
+For the current 14-case supported BLASTN manifest:
+
+- The 13 source-defined cases require exact official NCBI BLAST+ 2.17.0 binary
+  parity.
+- The known source-underdetermined case may be accepted only when evidence
+  shows the same HSP row count, the same HSP membership and coordinate keys,
+  the same E-values, and the same bit scores, with differences limited to the
+  source-underdetermined edit-script-derived fields currently observed:
+  percent identity, alignment length, mismatch count, and gap-open count.
+
+This exception does not permit coordinate changes, HSP-set changes, E-value
+changes, bit-score changes, unrelated formatter differences, or unrelated
+algorithm differences. It must not be generalized beyond the demonstrated
+equal-HSP tie class.
+
+## Existing component evidence
+
+The component tests added with Version 1.0 remain useful and must not be
+removed or weakened:
+
+- `equivalent_scripts_keep_endpoints_and_score`
+- `common_endpoint_comparator_ignores_edit_script`
+- `source_compatible_first_survivor_accepts_either_equal_order`
+- `source_compatible_purge_never_synthesizes_edit_script`
+
+They establish that different edit scripts can be score/endpoint equivalent,
+the NCBI-compatible comparator does not inspect the edit script, either
+incoming equal order is source-compatible, and purge does not synthesize a
+third edit script. They do not establish or require canonicalization.
 
 ## Non-goals
 
-- No production comparator, sort invocation, survivor selection, traceback,
-  edit-script construction, metric derivation, or output behavior changes in
-  this decision PR.
+- No comparator, sort, purge, traceback, edit-script, metric, formatter, or
+  other runtime behavior change.
+- No Rust, Python, test, manifest, fixture, expected-output, workflow, BLASTP,
+  or TBLASTX change.
 - No special case for `Sakai.MG1655.megablast` or any of its rows.
-- No attempt to infer undocumented intent from one NCBI binary build.
-- No change to source-defined BLASTN parity requirements.
-- No gbdraw code or cross-repository runtime dependency.
+- No weakening of exact parity for source-defined behavior.
+- No claim that supported native/Wasm executions have already demonstrated one
+  deterministic survivor.
 
-## Release-gate impact
+## Revision history
 
-Source-defined BLASTN cases continue to require exact parity. For HSP ties that
-the NCBI source leaves equal, release evidence shall require the deterministic
-LOSAT canonicalization defined here and identical native/Wasm semantics. A
-particular precompiled NCBI binary's arbitrary equal-element survivor is
-diagnostic evidence, not the source-defined acceptance contract.
+Version 1.0 correctly recorded the NCBI source-level ambiguity, then proposed a
+LOSAT-specific representation-derived secondary total order using script
+presence, operation-kind ranks, operation lengths, lexicographic comparison,
+stored reverse-strand order, and application before both purge passes. That
+canonicalization proposal is a withdrawn, non-normative historical record for
+v0.1.0.
 
-This document alone does not clear the release gate: the extension remains
-implementation-pending, and the known 13-exact plus 1-value-difference result
-is expected to remain unchanged in this PR.
-
-## Reversibility / future revision process
-
-Changing the canonical key is a compatibility change. A revision must update
-this document's version, explain the reason, add representation-level component
-tests and native/Wasm evidence, and identify downstream compatibility impact.
-It must not silently rewrite expected binary rows or make derived statistics
-the canonical owner.
+Version 1.1 preserves the source audit and withdraws the additional LOSAT
+ordering requirement. Future canonicalization requires a new revision backed
+by evidence of a material incompatibility in supported execution.

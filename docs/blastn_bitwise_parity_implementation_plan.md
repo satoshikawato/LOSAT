@@ -38,6 +38,22 @@ The comparison helper retains its structured diagnostic view (comment lines are
 ignored and duplicate coordinate keys are reported) and now independently
 checks raw bytes for fresh paired runs.
 
+## Compatibility contract for source-underdetermined ties
+
+Source-defined BLASTN cases require exact parity. When distinct HSP edit scripts
+tie on every field in the NCBI common-endpoint comparator, the NCBI BLAST+
+2.17.0 source does not define which edit script must survive its `qsort` and
+first-survivor purge. Those source-underdetermined ties require deterministic
+LOSAT canonicalization under
+[`PD-BLASTN-HSP-CANONICALIZATION`](product_decisions/PD-BLASTN-HSP-CANONICALIZATION.md).
+A particular precompiled binary's arbitrary survivor among comparator-equal
+elements is not treated as a source-defined compatibility contract.
+
+The Product Decision is an explicit LOSAT deterministic compatibility
+extension, not an attribution of the secondary ordering to NCBI. Its production
+implementation, including identical native and Wasm semantics, remains future
+work; this decision-and-component-test change does not alter runtime ordering.
+
 ## Scope and non-goals
 
 In scope:

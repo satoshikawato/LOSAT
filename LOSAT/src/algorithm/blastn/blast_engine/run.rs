@@ -10882,6 +10882,21 @@ mod tests {
         assert_eq!(ranges, vec![(0, 2), (5, 8)]);
     }
 
+    // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_hits.c:1122-1132
+    // ```c
+    // if (hsp->query.frame != hsp->subject.frame) {
+    //    *q_end = query_length - hsp->query.offset;
+    //    *q_start = *q_end - hsp->query.end + hsp->query.offset + 1;
+    //    *s_end = hsp->subject.offset + 1;
+    //    *s_start = hsp->subject.end;
+    // }
+    // ```
+    #[test]
+    fn test_adjust_blastn_offsets_minus_query_keeps_internal_subject_order() {
+        let adjusted = adjust_blastn_offsets(10, 20, 30, 40, 100, -1);
+        assert_eq!(adjusted, (81, 90, 40, 31));
+    }
+
     // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_hits.c:1887-1890
     // ```c
     // hsp->evalue =

@@ -16,22 +16,27 @@ non-default `db_gencode` exception; it does not apply to BLASTN.
 
 ## Frozen current evidence
 
-The current release binary was rebuilt before diagnosis. Fresh manifest runs
-cover 11 cases from [`tests/blastn_parity_manifest.tsv`](../LOSAT/tests/blastn_parity_manifest.tsv):
+The current native release binary is pinned to LOSAT commit
+`92b934d8defd299bdf821055d92053b8f8923fad` and SHA-256
+`d87f8c210d3506bd75ac9b0a5d7628a8c64bcb9c26f0b99923c2742fea366582`.
+Fresh manifest runs cover all 14 cases from
+[`tests/blastn_parity_manifest.tsv`](../LOSAT/tests/blastn_parity_manifest.tsv):
 
-- 10 cases match NCBI in hit count, coordinate keys, identity, alignment
-  length, mismatches, gap opens, E-value, and bit score.
+- 13 cases are byte-identical and match NCBI in hit count, coordinate keys,
+  identity, alignment length, mismatches, gap opens, E-value, and bit score.
 - `Sakai.MG1655.megablast` has 6476 common HSPs and five same-coordinate
   statistic differences. Bit scores and E-values still match.
-- A traced residual first diverges in the greedy traceback edit script after
-  seed, ungapped extension, and preliminary gapped coordinates/raw score
-  match.
+- The installed binary's first residual differs from LOSAT in the
+  edit-script-derived statistics, but a direct current-source trace of all
+  five residual HSPs produces the same greedy scripts as LOSAT.
 - The active BLASTN writer in [`src/algorithm/blastn/hsp.rs`](../LOSAT/src/algorithm/blastn/hsp.rs)
-  writes data rows only. The generic outfmt-7 header writer is not used by the
-  BLASTN engine, so raw outfmt-7 bytes cannot match NCBI.
+  emits NCBI-compatible outfmt-6/7 rows and headers, and
+  [`tests/compare_blastn_parity.py`](../LOSAT/tests/compare_blastn_parity.py)
+  checks both structured fields and raw bytes for fresh paired runs.
 
-The comparison helper is diagnostic, not a bitwise gate: it ignores comment
-lines, collapses duplicate coordinate keys, and does not validate raw bytes.
+The comparison helper retains its structured diagnostic view (comment lines are
+ignored and duplicate coordinate keys are reported) and now independently
+checks raw bytes for fresh paired runs.
 
 ## Scope and non-goals
 
@@ -166,28 +171,42 @@ expected `# 0 hits found` header.
 
 ### Phase 2
 
-Status: source audit complete; residual binary-oracle discrepancy unresolved  
+Status: current-source traceback parity confirmed; installed-binary discrepancy
+remains unresolved
 Behavior implemented: The active greedy traceback and post-traceback path was
 audited against `greedy_align.c`, `blast_gapalign.c`, `blast_hits.c`, and
 `blast_traceback.c`. Temporary internal tracing was used to compare the first
-residual HSP, then removed. No reducer or score/statistics workaround was
-introduced because it would not be supported by the NCBI source.  
-Evidence: For the first residual HSP, seed, ungapped extension, preliminary
+residual HSP, then removed. NCBI-referenced regression tests now cover
+repeated-base tie cases, zero-gap-penalty indels, affine traceback, reverse
+greedy traversal, empty/one-base boundaries, and minus-query coordinate
+conversion. No reducer or score/statistics workaround was introduced because
+it would not be supported by the NCBI source.
+Evidence: For all five residual HSPs, seed, ungapped extension, preliminary
 score/coordinates, forward and reverse preliminary blocks, merged edit script,
-`s_ReduceGaps`, and ambiguity re-evaluation all match the current NCBI
-2.17.0+ source path. The installed NCBI 2.17.0+ binary (build Aug 11 2025)
-still emits a score-equivalent alternative gap placement on five
-Sakai/MG1655 HSPs. The current NCBI 2.17.0+ source snapshot used for the
-audit is dated Dec 21 2025; the source-level C harness produced the same edit
-script as LOSAT for the traced HSP, including after the NCBI
-score-only-then-traceback memory reuse sequence.  
+`s_ReduceGaps`, and final greedy edit script were compared with the current
+NCBI source implementation. A corrected source-level C harness calling
+`BLAST_GreedyGappedAlignment` produced these `full_ops` values, exactly
+matching LOSAT's traces: row 1
+`S152,I1,S1,I1,S8,D2,S68`; row 2
+`S30,D2,S1,D1,S3,I1,S1,I2,S66`; row 3
+`S30,D2,S4,I1,S3,I1,S19,I1,S41`; row 4 `S139`; row 5
+`S34,D1,S65,D1,S10`. The current NCBI source snapshot used for the audit is
+commit `598d8ae6a72b923127ba2fbfaffd48e4c83bfbf4` (2025-12-21). The installed
+NCBI 2.17.0+ binary (build Aug 11 2025) still emits score-equivalent
+alternative gap placements on the same five output rows. Focused isolated
+tests pass:
+`env CARGO_TARGET_DIR=/tmp/losatn-greedy-test-target cargo test --lib greedy
+-- --nocapture` (2 passed) and
+`env CARGO_TARGET_DIR=/tmp/losatn-greedy-test-target cargo test --lib
+test_adjust_blastn_offsets_minus_query_keeps_internal_subject_order`
+(1 passed).
 Deviation: five installed-binary residuals remain: length/mismatch/gap-open
 differences on 5 rows and pident differences on 2 rows; coordinates, hit
-count, bit score, and E-value remain exact.  
-Remaining risk: matching the older installed binary would require an
-authoritative source or instrumented binary showing its tie choice. A
-post-hoc score-equivalent alignment preference would violate the NCBI-only
-policy and is intentionally not applied.
+count, bit score, and E-value remain exact. These are not current-source
+traceback defects.
+Remaining risk: the August 2025 installed binary's exact source/provenance is
+not available. A post-hoc score-equivalent alignment preference would violate
+the NCBI-only policy and is intentionally not applied.
 
 ### Phase 3
 
@@ -196,16 +215,18 @@ Behavior implemented: The comparison helper now has a raw-byte gate in
 addition to its structured diagnostic diff, executes fresh paired NCBI/LOSAT
 runs with identical relative input paths, and passes the supported `dust=true`
 manifest value to LOSAT's flag-form CLI.
-Evidence: release binary rebuilt, then this fresh native serial gate was run:
+Evidence: release binary rebuilt, then the complete fresh native serial gate
+was run:
 `python tests/compare_blastn_parity.py --fresh-paired
---paired-output-dir /tmp/losat-blastn-manifest-20260810
---losat-bin target/release/LOSAT --ncbi-bin blastn --limit 1
---fail-on-diff --fail-on-byte-diff`.  NCBI was `blastn 2.17.0+` (build Aug 11
-2025 09:46:06), LOSAT commit was `76e3a1ff95a8c4590070e620e85a23e5bd87f53f`,
-and Rust was `1.92.0`.  The 9 task-blastn cases, both megablast cases, and the
-three compact multi-query/outfmt cases have exact raw bytes and structured
-rows except for Sakai/MG1655's five Phase 2 edit-script statistic residuals.
-Sakai/MG1655 still has 6476/6476 rows and coordinate keys.  Exact-output SHA-256
+--paired-output-dir /tmp/losat-blastn-manifest-20260810-full
+--losat-bin target/release/LOSAT --ncbi-bin blastn`. NCBI was
+`blastn 2.17.0+` (build Aug 11 2025 09:46:06), with binary SHA-256
+`0b88d4a00cb7fa579c203653151175b24c83d27fe240d420abe7b5261a3083d1`;
+LOSAT was commit `92b934d8defd299bdf821055d92053b8f8923fad` with binary
+SHA-256 `d87f8c210d3506bd75ac9b0a5d7628a8c64bcb9c26f0b99923c2742fea366582`,
+and Rust was `1.92.0`. Thirteen of the 14 cases have exact raw bytes and
+structured rows. Sakai/MG1655 still has 6476/6476 rows and coordinate keys,
+but five Phase 2 edit-script statistic residuals. Exact-output SHA-256
 examples from the fresh pair are: `PesePMNV.MjPMNV.task_blastn`,
 `cadccd5ba65c5632193b2866713328ca3689e684ab8718a773df8decf4d8284c`;
 `PmeNMV.MjPMNV.task_blastn`,
@@ -215,7 +236,7 @@ examples from the fresh pair are: `PesePMNV.MjPMNV.task_blastn`,
 `compact.multi_query.outfmt7`,
 `58b0673dc9379427777880c709b9edb35647806e78de74197899680fac402547`.
 `env CARGO_TARGET_DIR=/tmp/losatn-parity-test-target cargo test --release`
-passes: 392 library tests passed with 1 ignored, 5 CLI tests passed, 4
+passes: 395 library tests passed with 1 ignored, 5 CLI tests passed, 4
 compressed-lookup tests passed, and 177 integration tests passed with 2
 ignored.  `env CARGO_TARGET_DIR=/tmp/losatn-parity-test-target cargo clippy
 --release --all-targets` also passes.
@@ -226,6 +247,11 @@ alignment preference was added because the inspected NCBI source does not
 authorize it.  `cargo fmt -- --check` remains non-clean because the existing
 dirty `src/algorithm/blastn/blast_engine/run.rs` has unrelated formatting drift;
 no whole-file formatting rewrite was applied.
-Remaining risk: native serial BLASTN parity is not complete until the
-NCBI-source/binary traceback discrepancy is resolved.  No Wasm/threading claim
+Additional fresh Sakai/MG1655 verification on 2026-08-10 returned 6476 common
+HSPs and the same five residual statistic differences. Raw output sizes were
+536880 bytes each, with first byte difference at offset 82036; SHA-256 was
+`2e15963c66e5f552088e468d17a1a86b779be61e7ed6331e57314f6e93c69ffa` for NCBI
+and `9edd4883881316976c82c3e3674cab6d4d863e17ac89e3db2052b2ed7996df74` for
+LOSAT. Native serial BLASTN parity is therefore not complete until the
+NCBI-source/binary traceback discrepancy is resolved. No Wasm/threading claim
 is made.

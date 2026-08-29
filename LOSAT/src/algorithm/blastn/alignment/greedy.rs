@@ -3582,3 +3582,183 @@ pub fn greedy_gapped_alignment_with_traceback(
         edit_ops,
     ))
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_greedy_traceback_ncbi_regression_cases() {
+        // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_gapalign.c:2762-2936
+        // ```c
+        // BLAST_AffineGreedyAlign(..., fwd_prelim_tback, ...);
+        // BLAST_AffineGreedyAlign(..., rev_prelim_tback, ...);
+        // esp = Blast_PrelimEditBlockToGapEditScript(rev_prelim_tback,
+        //                                             fwd_prelim_tback);
+        // if (esp) s_ReduceGaps(esp, query+q_off-q_ext_l,
+        //                          subject+s_off-s_ext_l, ...);
+        // ```
+        let cases: &[(
+            &[u8],
+            &[u8],
+            usize,
+            usize,
+            i32,
+            i32,
+            i32,
+            i32,
+            i32,
+            (usize, usize, usize, usize, i32, usize),
+            &[GapEditOp],
+        )] = &[
+            (
+                &[0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0],
+                &[0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0],
+                5,
+                5,
+                1,
+                -2,
+                0,
+                0,
+                54,
+                (0, 11, 0, 11, 11, 11),
+                &[GapEditOp::Sub(11)],
+            ),
+            (
+                &[0, 0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0],
+                &[0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0],
+                6,
+                5,
+                1,
+                -2,
+                0,
+                0,
+                54,
+                (1, 12, 0, 11, 11, 11),
+                &[GapEditOp::Sub(11)],
+            ),
+            (
+                &[0, 1, 2, 3, 0, 1, 2],
+                &[0, 1, 2, 0, 1, 2],
+                3,
+                3,
+                1,
+                -2,
+                0,
+                0,
+                54,
+                (0, 7, 0, 6, 3, 7),
+                &[GapEditOp::Sub(3), GapEditOp::Ins(1), GapEditOp::Sub(3)],
+            ),
+            (
+                &[0, 1, 2, 3, 0, 1],
+                &[0, 1, 2, 3, 0, 1],
+                3,
+                3,
+                1,
+                -2,
+                5,
+                2,
+                54,
+                (0, 6, 0, 6, 6, 6),
+                &[GapEditOp::Sub(6)],
+            ),
+            (
+                &[0],
+                &[0],
+                0,
+                0,
+                1,
+                -2,
+                5,
+                2,
+                54,
+                (0, 1, 0, 1, 1, 1),
+                &[GapEditOp::Sub(1)],
+            ),
+        ];
+
+        for (
+            query,
+            subject,
+            q_off,
+            s_off,
+            reward,
+            penalty,
+            gap_open,
+            gap_extend,
+            x_drop,
+            expected,
+            expected_ops,
+        ) in cases
+        {
+            let mut scratch = GreedyAlignScratch::new();
+            let result = greedy_gapped_alignment_with_traceback(
+                query,
+                subject,
+                subject.len(),
+                *q_off,
+                *s_off,
+                *reward,
+                *penalty,
+                *gap_open,
+                *gap_extend,
+                *x_drop,
+                &mut scratch,
+            )
+            .expect("NCBI greedy traceback converges for the bounded fixture");
+            assert_eq!(
+                (result.0, result.1, result.2, result.3, result.4, result.5),
+                *expected
+            );
+            assert_eq!(result.6, *expected_ops);
+        }
+    }
+
+    #[test]
+    fn test_greedy_reverse_and_empty_boundary_cases() {
+        // NCBI reference: ncbi-blast/c++/src/algo/blast/core/greedy_align.c:380-453
+        // ```c
+        // Int4 BLAST_GreedyAlign(..., Boolean reverse, ...)
+        // {
+        //     index = s_FindFirstMismatch(..., reverse, ...);
+        //     ...
+        // }
+        // ```
+        let reverse = greedy_align_one_direction_ex(
+            &[0, 1, 2, 3],
+            &[0, 1, 2, 3],
+            4,
+            4,
+            1,
+            -2,
+            0,
+            0,
+            54,
+            true,
+        );
+        assert_eq!(reverse, (4, 4, 4, 4, 0, 0, 0));
+
+        // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_gapalign.c:2762-2793
+        // ```c
+        // q_avail = query_length - q_off;
+        // s_avail = subject_length - s_off;
+        // if (q_avail <= 0 || s_avail <= 0) return -1;
+        // ```
+        let mut scratch = GreedyAlignScratch::new();
+        assert!(greedy_gapped_alignment_with_traceback(
+            &[],
+            &[],
+            0,
+            0,
+            0,
+            1,
+            -2,
+            5,
+            2,
+            54,
+            &mut scratch,
+        )
+        .is_none());
+    }
+}

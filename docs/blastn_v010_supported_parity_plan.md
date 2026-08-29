@@ -1,10 +1,12 @@
 # BLASTN v0.1.0 Supported-Parity Completion Plan
 
-Status: planned.
+Status: revised 2026-08-29 for Product Decision Version 1.1.
 
-Goal: make BLASTN eligible for v0.1.0 supported scope by eliminating every
-current NCBI BLAST+ difference in `tests/blastn_parity_manifest.tsv`, then
-recording fresh release evidence from a clean release branch.
+Goal: make BLASTN eligible for v0.1.0 supported scope by requiring exact NCBI
+BLAST+ 2.17.0 binary parity for source-defined behavior and the fixed
+source-compatibility invariants for the demonstrated source-underdetermined
+equal-HSP tie class, then recording fresh release evidence from a clean release
+branch.
 
 This plan is only for promoting BLASTN. If v0.1.0 ships with BLASTN marked
 experimental, this plan is not a release blocker.
@@ -35,29 +37,18 @@ python3 tests/compare_blastn_parity.py \
 
 Current artifact summary:
 
-| Case | Mode | NCBI hits | LOSAT hits | Current difference |
-| --- | --- | ---: | ---: | --- |
-| `PesePMNV.MjPMNV.task_blastn` | task-blastn | 241 | 241 | exact |
-| `PmeNMV.MjPMNV.task_blastn` | task-blastn | 208 | 208 | exact |
-| `PmeNMV.PesePMNV.task_blastn` | task-blastn | 1431 | 1431 | exact |
-| `PeseMJNV.PemoMJNVB.task_blastn` | task-blastn | 11668 | 11660 | 8 NCBI-only HSPs |
-| `MelaMJNV.PemoMJNVA.task_blastn` | task-blastn | 2729 | 2724 | 5 NCBI-only HSPs |
-| `PemoMJNVA.PeseMJNV.task_blastn` | task-blastn | 2940 | 2939 | 1 NCBI-only HSP |
-| `MjeNMV.MelaMJNV.task_blastn` | task-blastn | 2668 | 2664 | 5 NCBI-only HSPs, 1 LOSAT-only HSP |
-| `MjPMNV.MlPMNV.task_blastn` | task-blastn | 54402 | 54401 | 1 NCBI-only HSP |
-| `NZ_CP006932.NZ_CP006932.task_blastn` | task-blastn | 12340 | 12340 | exact |
-| `EDL933.Sakai.megablast` | megablast | 5718 | 5718 | exact |
-| `Sakai.MG1655.megablast` | megablast | 6476 | 6476 | 2 pident diffs, 5 length/mismatch/gapopen diffs |
-
-Observed shape:
-
-- task-blastn shared-coordinate HSPs currently have zero bit-score, E-value,
-  pident, length, mismatch, and gapopen differences.
-- task-blastn remaining defects are final survivor-set differences: LOSAT loses
-  a small number of NCBI HSPs and keeps one LOSAT-only HSP.
-- megablast remaining defects keep the same hit count, coordinates, bit score,
-  and E-value, but disagree in edit-script-derived statistics for a few shared
-  HSPs.
+- The current manifest contains 14 cases.
+- Thirteen source-defined cases are byte-identical, including HSP membership,
+  coordinates, statistics, order, and formatting.
+- `Sakai.MG1655.megablast` has 6476 rows with the same HSP membership and
+  coordinate keys, E-values, and bit scores. Five comparator-equal rows differ
+  only in edit-script-derived alignment length, mismatch count, and gap-open
+  count; two of those rows also differ in `pident`.
+- Static NCBI BLAST+ 2.17.0 source analysis establishes that the remaining
+  common-endpoint survivor is source-underdetermined. The release contract is
+  defined by
+  [`PD-BLASTN-HSP-CANONICALIZATION`](product_decisions/PD-BLASTN-HSP-CANONICALIZATION.md)
+  Version 1.1, not by one precompiled binary's survivor.
 
 Before any patch, refresh this baseline and save:
 
@@ -222,7 +213,7 @@ Exit criteria for task-blastn:
   diffs are all zero.
 - Output order and formatting are verified for the release output mode.
 
-## Phase 4: Diagnose The Megablast Statistic Diffs
+## Phase 4: Classify The Megablast Statistic Diffs
 
 Focus on `Sakai.MG1655.megablast`, because hit count, coordinates, bit score,
 and E-value already match.
@@ -258,12 +249,17 @@ Exit criteria:
 
 - The first edit-script/statistic divergence is known for each representative
   HSP.
-- The fix target is tied to an NCBI source function and exact line range.
+- Each difference is classified as source-defined or as the demonstrated
+  source-underdetermined common-endpoint tie.
+- A source-underdetermined tie is not assigned a synthetic fix target when the
+  NCBI source contains no secondary ordering rule.
 
-## Phase 5: Patch Megablast Edit-Script Statistics
+## Phase 5: Resolve Source-Defined Megablast Differences
 
-Patch the proven megablast offender without changing task-blastn behavior unless
-NCBI uses the same shared helper for both modes.
+Patch only a proven source-defined megablast offender, without changing
+task-blastn behavior unless NCBI uses the same shared helper for both modes. Do
+not add canonicalization to force a source-underdetermined tie to match one
+precompiled binary.
 
 Verification after each patch:
 
@@ -278,18 +274,19 @@ Exit criteria for megablast:
 - `EDL933.Sakai.megablast` remains exact.
 - `Sakai.MG1655.megablast` has:
   - equal hit count.
-  - equal coordinate keys.
+  - equal HSP membership and coordinate keys.
   - zero shared-coordinate bit-score diffs.
   - zero shared-coordinate E-value diffs.
-  - zero shared-coordinate pident diffs.
-  - zero shared-coordinate length/mismatch/gapopen diffs.
+  - differences, if any, limited to the source-underdetermined `pident`,
+    alignment-length, mismatch, and gap-open fields.
 - Output order and formatting are verified for the release output mode.
 
 ## Phase 6: Strict Output And Release Evidence
 
 Once the manifest summary is clean, verify release-facing output:
 
-1. Compare exact output lines for every BLASTN manifest row.
+1. Compare exact output lines for every source-defined BLASTN manifest row and
+   verify the fixed invariants for the known source-underdetermined row set.
 2. If the field-wise comparator ignores comments, add a separate formatting
    check for outfmt `7` comments and field ordering.
 3. Confirm outfmt `6` and outfmt `7` behavior for BLASTN if both are claimed in
@@ -318,18 +315,29 @@ Required BLASTN release evidence:
 - Manifest command lines.
 - Input checksums.
 - Output checksums.
-- Diff summaries showing zero differences.
-- Any approved deviations. For BLASTN, no deviation is currently approved.
+- Diff summaries showing 13 source-defined cases with zero differences and the
+  known source-underdetermined case with the same row count, HSP membership and
+  coordinate keys, E-values, and bit scores.
+- Field-level evidence that any accepted residual is limited to `pident`,
+  alignment length, mismatch, and gap-open values from the demonstrated tie
+  class. This source-compatible classification is not an approved behavioral
+  deviation.
 
 ## Final Acceptance Checklist
 
 BLASTN may be promoted to supported only when all are true:
 
-- `tests/blastn_parity_manifest.tsv` has 11/11 exact cases.
-- task-blastn has `NCBI-only = 0` and `LOSAT-only = 0` for all 9 cases.
-- megablast has zero pident, length, mismatch, and gapopen diffs for both cases.
-- bit score, E-value, coordinates, hit order, and formatting match NCBI for the
-  release output modes.
+- The current 14-case manifest has 13 source-defined cases with exact official
+  NCBI BLAST+ 2.17.0 binary parity.
+- Every case has identical HSP membership and coordinate keys, E-values, and
+  bit scores.
+- The only non-byte-identical case is the demonstrated source-underdetermined
+  equal-HSP tie, and its differences are limited to `pident`, alignment length,
+  mismatch, and gap-open fields.
+- Hit order and formatting match NCBI for source-defined behavior, with no
+  unrelated formatter difference admitted by the narrow tie policy.
+- Supported native/Wasm executions are monitored and tested without claiming a
+  deterministic survivor that has not been demonstrated.
 - All Rust behavior changes include NCBI source comments with path, line
   numbers, and C/C++ snippets.
 - No LOSAT runtime, build, fallback, or unsupported path invokes NCBI BLAST.

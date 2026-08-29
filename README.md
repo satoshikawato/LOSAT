@@ -18,8 +18,8 @@ NCBI comparison evidence for every supported area.
 | Area | v0.1.0 status | Notes |
 | --- | --- | --- |
 | TBLASTX local `-query`/`-subject` | Supported candidate | Must pass native NCBI parity fixtures, except for the approved local-subject `--db-gencode` behavior below. |
-| BLASTN `--task megablast` | Experimental | Promotion requires exact source-defined parity and the narrow source-compatible equal-HSP contract documented in the Product Decision. |
-| BLASTN `--task blastn` | Experimental | Promotion requires exact source-defined parity and the narrow source-compatible equal-HSP contract documented in the Product Decision. |
+| BLASTN `--task megablast` | Supported for the declared v0.1.0 local profile | The committed 14-case gate requires exact source-defined parity and one narrow source-underdetermined equal-HSP contract. |
+| BLASTN `--task blastn` | Supported for the declared v0.1.0 local profile | Native certification covers the committed local query/subject manifest; it is not a generic BLASTN claim. |
 | BLASTP | Experimental | The CLI subcommand exists, but BLASTP remains secondary to TBLASTX/BLASTN for v0.1.0. |
 | Native CLI | Supported candidate | Release artifacts must include build metadata and checksums. |
 | `wasm32-wasip1` serial command build | Experimental | Must match the corresponding native output before being promoted. |
@@ -123,10 +123,13 @@ Browser-facing or embeddable Wasm APIs are not release-stable in v0.1.0.
   searches against external BLAST databases.
 - Unsupported options must be treated as unsupported, not silently delegated to
   NCBI BLAST+.
-- BLASTN and BLASTP are experimental in the v0.1.0 scope. BLASTN promotion
-  requires exact parity for source-defined behavior; its demonstrated
-  source-underdetermined equal-HSP tie is governed by
-  [Product Decision Version 1.1](docs/product_decisions/PD-BLASTN-HSP-CANONICALIZATION.md).
+- BLASTN support is limited to the local query/subject `megablast` and `blastn`
+  profile in the committed certification manifest. `dc-megablast`, database
+  search, and threaded-Wasm BLASTN certification remain outside this claim.
+  The one demonstrated source-underdetermined equal-HSP tie is governed by
+  [Product Decision Version 1.1](docs/product_decisions/PD-BLASTN-HSP-CANONICALIZATION.md)
+  and the [durable certification record](docs/release/blastn_v0.1.0_certification.md).
+- BLASTP remains experimental in the v0.1.0 scope.
 - Existing comparison outputs under `LOSAT/tests/*_out` are release hygiene
   targets; regenerated output should be treated as artifact or scratch data
   unless explicitly documented as canonical fixture data.

@@ -1,4 +1,5 @@
 # Local scratch and generated release artifacts.
+/config.log
 .codex_tmp/
 .tmp/
 artifacts/

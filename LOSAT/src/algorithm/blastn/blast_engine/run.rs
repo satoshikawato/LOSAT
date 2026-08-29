@@ -3,9 +3,9 @@
 //! This module contains the main `run()` function that coordinates the BLASTN
 //! search process.
 
+use crate::common::GapEditOp;
 use anyhow::{Context, Result};
 use indicatif::{ProgressBar, ProgressStyle};
-use crate::common::GapEditOp;
 // NCBI reference: ncbi-blast/c++/include/algo/blast/blastinput/blast_args.hpp:1290-1296
 // ```c
 // CMTArgs(...)
@@ -75,8 +75,8 @@ use super::super::filtering::{
 };
 use super::super::hsp::{
     get_prelim_hitlist_size, parse_blastn_output_format, sort_hsps_by_score, trim_by_max_hsps,
-    write_output_blastn_hitlists, write_output_blastn_hitlists_to_writer, BlastnHitList,
-    BlastnHsp, BlastnHspList, BlastnOutputFormat,
+    write_output_blastn_hitlists, write_output_blastn_hitlists_to_writer, BlastnHitList, BlastnHsp,
+    BlastnHspList, BlastnOutputFormat,
 };
 use super::super::interval_tree::{BlastIntervalTree, IndexMethod, TreeHsp};
 use super::super::lookup::{build_unmasked_ranges, reverse_complement};
@@ -6397,204 +6397,212 @@ fn run_internal(args: BlastnArgs, mut in_memory: Option<BlastnInMemoryRun<'_>>) 
                                 // NCBI reference: na_ungapped.c:1081-1140
                                 // For two-stage lookup, verify word_length match BEFORE ungapped extension
                                 // This is done by left+right extension from the lut_word_length match position
-                                let (q_ext_start, s_ext_start, word_ext_left, word_ext_right) = if word_length > lut_word_length {
-                                    // NCBI BLAST: s_BlastNaExtend left/right extension uses packed subject
-                                    // NCBI reference: ncbi-blast/c++/src/algo/blast/core/na_ungapped.c:1093-1144
-                                    // ```c
-                                    // Int4 ext_left = 0;
-                                    // Int4 s_off = s_offset;
-                                    // Uint1 *q = query->sequence + q_offset;
-                                    // Uint1 *s = subject->sequence + s_off / COMPRESSION_RATIO;
-                                    // for (; ext_left < MIN(ext_to, s_offset); ++ext_left) {
-                                    //     s_off--;
-                                    //     q--;
-                                    //     if (s_off % COMPRESSION_RATIO == 3)
-                                    //         s--;
-                                    //     if (((Uint1) (*s << (2 * (s_off % COMPRESSION_RATIO))) >> 6) != *q)
-                                    //         break;
-                                    // }
-                                    // if (ext_left < ext_to) {
-                                    //     Int4 ext_right = 0;
-                                    //     s_off = s_offset + lut_word_length;
-                                    //     if (s_off + ext_to - ext_left > s_range) continue;
-                                    //     q = query->sequence + q_offset + lut_word_length;
-                                    //     s = subject->sequence + s_off / COMPRESSION_RATIO;
-                                    //     for (; ext_right < ext_to - ext_left; ++ext_right) {
-                                    //         if (((Uint1) (*s << (2 * (s_off % COMPRESSION_RATIO))) >> 6) != *q)
-                                    //             break;
-                                    //         s_off++;
-                                    //         q++;
-                                    //         if (s_off % COMPRESSION_RATIO == 0)
-                                    //             s++;
-                                    //     }
-                                    //     if (ext_left + ext_right < ext_to) continue;
-                                    // }
-                                    let ext_to = word_length - lut_word_length;
-                                    // NCBI reference: ncbi-blast/c++/src/algo/blast/core/na_ungapped.c:1101-1114
-                                    // ```c
-                                    // Int4 ext_left = 0;
-                                    // Int4 s_off = s_offset;
-                                    // Uint1 *q = query->sequence + q_offset;
-                                    // Uint1 *s = subject->sequence + s_off / COMPRESSION_RATIO;
-                                    // for (; ext_left < MIN(ext_to, s_offset); ++ext_left) {
-                                    //     s_off--;
-                                    //     q--;
-                                    //     if (s_off % COMPRESSION_RATIO == 3)
-                                    //         s--;
-                                    //     if (((Uint1) (*s << (2 * (s_off % COMPRESSION_RATIO))) >> 6) != *q)
-                                    //         break;
-                                    // }
-                                    // ```
-                                    let max_ext_left =
-                                        ext_to.min(kmer_start).min(q_off0.saturating_add(1));
-                                    let mut ext_left = 0usize;
-                                    let mut q_left = q_off0 + 1;
-                                    let mut s_off = kmer_start;
-                                    let mut s_idx = s_off / COMPRESSION_RATIO;
-                                    while ext_left < max_ext_left {
-                                        if debug_enabled {
-                                            dbg_left_ext_iters += 1;
-                                        }
+                                let (q_ext_start, s_ext_start, word_ext_left, word_ext_right) =
+                                    if word_length > lut_word_length {
+                                        // NCBI BLAST: s_BlastNaExtend left/right extension uses packed subject
+                                        // NCBI reference: ncbi-blast/c++/src/algo/blast/core/na_ungapped.c:1093-1144
+                                        // ```c
+                                        // Int4 ext_left = 0;
+                                        // Int4 s_off = s_offset;
+                                        // Uint1 *q = query->sequence + q_offset;
+                                        // Uint1 *s = subject->sequence + s_off / COMPRESSION_RATIO;
+                                        // for (; ext_left < MIN(ext_to, s_offset); ++ext_left) {
+                                        //     s_off--;
+                                        //     q--;
+                                        //     if (s_off % COMPRESSION_RATIO == 3)
+                                        //         s--;
+                                        //     if (((Uint1) (*s << (2 * (s_off % COMPRESSION_RATIO))) >> 6) != *q)
+                                        //         break;
+                                        // }
+                                        // if (ext_left < ext_to) {
+                                        //     Int4 ext_right = 0;
+                                        //     s_off = s_offset + lut_word_length;
+                                        //     if (s_off + ext_to - ext_left > s_range) continue;
+                                        //     q = query->sequence + q_offset + lut_word_length;
+                                        //     s = subject->sequence + s_off / COMPRESSION_RATIO;
+                                        //     for (; ext_right < ext_to - ext_left; ++ext_right) {
+                                        //         if (((Uint1) (*s << (2 * (s_off % COMPRESSION_RATIO))) >> 6) != *q)
+                                        //             break;
+                                        //         s_off++;
+                                        //         q++;
+                                        //         if (s_off % COMPRESSION_RATIO == 0)
+                                        //             s++;
+                                        //     }
+                                        //     if (ext_left + ext_right < ext_to) continue;
+                                        // }
+                                        let ext_to = word_length - lut_word_length;
                                         // NCBI reference: ncbi-blast/c++/src/algo/blast/core/na_ungapped.c:1101-1114
                                         // ```c
+                                        // Int4 ext_left = 0;
+                                        // Int4 s_off = s_offset;
                                         // Uint1 *q = query->sequence + q_offset;
-                                        // ...
-                                        // s_off--;
-                                        // q--;
+                                        // Uint1 *s = subject->sequence + s_off / COMPRESSION_RATIO;
+                                        // for (; ext_left < MIN(ext_to, s_offset); ++ext_left) {
+                                        //     s_off--;
+                                        //     q--;
+                                        //     if (s_off % COMPRESSION_RATIO == 3)
+                                        //         s--;
+                                        //     if (((Uint1) (*s << (2 * (s_off % COMPRESSION_RATIO))) >> 6) != *q)
+                                        //         break;
+                                        // }
                                         // ```
-                                        // LOSAT's sentinel query buffer stores logical query offset
-                                        // `n` at `n + 1`, so after NCBI's pre-decrement the first
-                                        // left comparison at q_offset - 1 is buffer index q_offset.
-                                        q_left -= 1;
-                                        s_off -= 1;
-                                        if s_off % COMPRESSION_RATIO == COMPRESSION_RATIO - 1 {
-                                            s_idx -= 1;
-                                        }
-                                        // SAFETY: s_idx tracks s_off / COMPRESSION_RATIO within bounds by max_ext_left.
-                                        let s_byte =
-                                            unsafe { *search_seq_packed.get_unchecked(s_idx) };
-                                        let s_base = ((s_byte << (2 * (s_off % COMPRESSION_RATIO)))
-                                            >> 6)
-                                            as u8;
-                                        // SAFETY: q_left is bounded by the outer-sentinel query buffer.
-                                        let q_base = unsafe {
-                                            *encoded_query_concat_blastna_with_sentinels
-                                                .get_unchecked(q_left)
-                                        };
-                                        if s_base != q_base {
-                                            break;
-                                        }
-                                        ext_left += 1;
-                                    }
-
-                                    // RIGHT extension (forwards from lut_word_length end)
-                                    // NCBI BLAST: na_ungapped.c:1120-1136
-                                    // if (ext_left < ext_to) {
-                                    //     Int4 ext_right = 0;
-                                    //     s_off = s_offset + lut_word_length;
-                                    //     if (s_off + ext_to - ext_left > s_range) continue;
-                                    //     q = query->sequence + q_offset + lut_word_length;
-                                    //     s = subject->sequence + s_off / COMPRESSION_RATIO;
-                                    //     for (; ext_right < ext_to - ext_left; ++ext_right) {
-                                    //         if (((Uint1) (*s << (2 * (s_off % COMPRESSION_RATIO))) >> 6) != *q)
-                                    //             break;
-                                    //         s_off++;
-                                    //         q++;
-                                    //         if (s_off % COMPRESSION_RATIO == 0)
-                                    //             s++;
-                                    //     }
-                                    // }
-                                    // Only do right extension if left didn't get all bases
-                                    // NCBI reference: na_ungapped.c:1120-1136
-                                    // if (ext_left < ext_to) {
-                                    //     Int4 ext_right = 0;
-                                    //     s_off = s_offset + lut_word_length;
-                                    //     if (s_off + ext_to - ext_left > s_range) continue;
-                                    //     q = query->sequence + q_offset + lut_word_length;
-                                    //     s = subject->sequence + s_off / COMPRESSION_RATIO;
-                                    //     for (; ext_right < ext_to - ext_left; ++ext_right) {
-                                    //         if (mismatch) break;
-                                    //         s_off++;
-                                    //         q++;
-                                    //     }
-                                    // }
-                                    let mut ext_right = 0usize;
-                                    if ext_left < ext_to {
-                                        // NCBI BLAST: s_off = s_offset + lut_word_length;
-                                        // NCBI BLAST: if (s_off + ext_to - ext_left > s_range) continue;
-                                        // Reference: na_ungapped.c:1122-1124
-                                        let mut s_off = kmer_start + lut_word_length;
-                                        if s_off + (ext_to - ext_left) > s_range {
-                                            // Not enough room in subject, skip this seed (NCBI behavior)
-                                            continue;
-                                        }
-
-                                        // NCBI reference: ncbi-blast/c++/src/algo/blast/core/na_ungapped.c:1120-1136
-                                        // ```c
-                                        // q = query->sequence + q_offset + lut_word_length;
-                                        // ...
-                                        // if (packed_subject_base != *q)
-                                        //     break;
-                                        // s_off++;
-                                        // q++;
-                                        // ```
-                                        // The right comparison checks q_offset + lut_word_length
-                                        // before incrementing q.
-                                        let mut q_right = q_off0 + lut_word_length + 1;
-                                        if q_right + (ext_to - ext_left)
-                                            > encoded_query_concat_blastna_with_sentinels.len()
-                                        {
-                                            continue;
-                                        }
+                                        let max_ext_left =
+                                            ext_to.min(kmer_start).min(q_off0.saturating_add(1));
+                                        let mut ext_left = 0usize;
+                                        let mut q_left = q_off0 + 1;
+                                        let mut s_off = kmer_start;
                                         let mut s_idx = s_off / COMPRESSION_RATIO;
-
-                                        // NCBI BLAST: for (; ext_right < ext_to - ext_left; ++ext_right)
-                                        // Reference: na_ungapped.c:1128-1136
-                                        while ext_right < (ext_to - ext_left) {
+                                        while ext_left < max_ext_left {
                                             if debug_enabled {
-                                                dbg_right_ext_iters += 1;
+                                                dbg_left_ext_iters += 1;
                                             }
-                                            // NCBI BLAST: if (base mismatch) break;
-                                            // Reference: na_ungapped.c:1129-1131
-                                            // SAFETY: s_idx tracks s_off / COMPRESSION_RATIO within bounds by s_len check above.
+                                            // NCBI reference: ncbi-blast/c++/src/algo/blast/core/na_ungapped.c:1101-1114
+                                            // ```c
+                                            // Uint1 *q = query->sequence + q_offset;
+                                            // ...
+                                            // s_off--;
+                                            // q--;
+                                            // ```
+                                            // LOSAT's sentinel query buffer stores logical query offset
+                                            // `n` at `n + 1`, so after NCBI's pre-decrement the first
+                                            // left comparison at q_offset - 1 is buffer index q_offset.
+                                            q_left -= 1;
+                                            s_off -= 1;
+                                            if s_off % COMPRESSION_RATIO == COMPRESSION_RATIO - 1 {
+                                                s_idx -= 1;
+                                            }
+                                            // SAFETY: s_idx tracks s_off / COMPRESSION_RATIO within bounds by max_ext_left.
                                             let s_byte =
                                                 unsafe { *search_seq_packed.get_unchecked(s_idx) };
                                             let s_base = ((s_byte
                                                 << (2 * (s_off % COMPRESSION_RATIO)))
                                                 >> 6)
                                                 as u8;
-                                            // SAFETY: q_right is bounded by the outer-sentinel query buffer.
+                                            // SAFETY: q_left is bounded by the outer-sentinel query buffer.
                                             let q_base = unsafe {
                                                 *encoded_query_concat_blastna_with_sentinels
-                                                    .get_unchecked(q_right)
+                                                    .get_unchecked(q_left)
                                             };
                                             if s_base != q_base {
                                                 break;
                                             }
-                                            ext_right += 1;
-                                            q_right += 1;
-                                            s_off += 1;
-                                            if s_off % COMPRESSION_RATIO == 0 {
-                                                s_idx += 1;
+                                            ext_left += 1;
+                                        }
+
+                                        // RIGHT extension (forwards from lut_word_length end)
+                                        // NCBI BLAST: na_ungapped.c:1120-1136
+                                        // if (ext_left < ext_to) {
+                                        //     Int4 ext_right = 0;
+                                        //     s_off = s_offset + lut_word_length;
+                                        //     if (s_off + ext_to - ext_left > s_range) continue;
+                                        //     q = query->sequence + q_offset + lut_word_length;
+                                        //     s = subject->sequence + s_off / COMPRESSION_RATIO;
+                                        //     for (; ext_right < ext_to - ext_left; ++ext_right) {
+                                        //         if (((Uint1) (*s << (2 * (s_off % COMPRESSION_RATIO))) >> 6) != *q)
+                                        //             break;
+                                        //         s_off++;
+                                        //         q++;
+                                        //         if (s_off % COMPRESSION_RATIO == 0)
+                                        //             s++;
+                                        //     }
+                                        // }
+                                        // Only do right extension if left didn't get all bases
+                                        // NCBI reference: na_ungapped.c:1120-1136
+                                        // if (ext_left < ext_to) {
+                                        //     Int4 ext_right = 0;
+                                        //     s_off = s_offset + lut_word_length;
+                                        //     if (s_off + ext_to - ext_left > s_range) continue;
+                                        //     q = query->sequence + q_offset + lut_word_length;
+                                        //     s = subject->sequence + s_off / COMPRESSION_RATIO;
+                                        //     for (; ext_right < ext_to - ext_left; ++ext_right) {
+                                        //         if (mismatch) break;
+                                        //         s_off++;
+                                        //         q++;
+                                        //     }
+                                        // }
+                                        let mut ext_right = 0usize;
+                                        if ext_left < ext_to {
+                                            // NCBI BLAST: s_off = s_offset + lut_word_length;
+                                            // NCBI BLAST: if (s_off + ext_to - ext_left > s_range) continue;
+                                            // Reference: na_ungapped.c:1122-1124
+                                            let mut s_off = kmer_start + lut_word_length;
+                                            if s_off + (ext_to - ext_left) > s_range {
+                                                // Not enough room in subject, skip this seed (NCBI behavior)
+                                                continue;
+                                            }
+
+                                            // NCBI reference: ncbi-blast/c++/src/algo/blast/core/na_ungapped.c:1120-1136
+                                            // ```c
+                                            // q = query->sequence + q_offset + lut_word_length;
+                                            // ...
+                                            // if (packed_subject_base != *q)
+                                            //     break;
+                                            // s_off++;
+                                            // q++;
+                                            // ```
+                                            // The right comparison checks q_offset + lut_word_length
+                                            // before incrementing q.
+                                            let mut q_right = q_off0 + lut_word_length + 1;
+                                            if q_right + (ext_to - ext_left)
+                                                > encoded_query_concat_blastna_with_sentinels.len()
+                                            {
+                                                continue;
+                                            }
+                                            let mut s_idx = s_off / COMPRESSION_RATIO;
+
+                                            // NCBI BLAST: for (; ext_right < ext_to - ext_left; ++ext_right)
+                                            // Reference: na_ungapped.c:1128-1136
+                                            while ext_right < (ext_to - ext_left) {
+                                                if debug_enabled {
+                                                    dbg_right_ext_iters += 1;
+                                                }
+                                                // NCBI BLAST: if (base mismatch) break;
+                                                // Reference: na_ungapped.c:1129-1131
+                                                // SAFETY: s_idx tracks s_off / COMPRESSION_RATIO within bounds by s_len check above.
+                                                let s_byte = unsafe {
+                                                    *search_seq_packed.get_unchecked(s_idx)
+                                                };
+                                                let s_base = ((s_byte
+                                                    << (2 * (s_off % COMPRESSION_RATIO)))
+                                                    >> 6)
+                                                    as u8;
+                                                // SAFETY: q_right is bounded by the outer-sentinel query buffer.
+                                                let q_base = unsafe {
+                                                    *encoded_query_concat_blastna_with_sentinels
+                                                        .get_unchecked(q_right)
+                                                };
+                                                if s_base != q_base {
+                                                    break;
+                                                }
+                                                ext_right += 1;
+                                                q_right += 1;
+                                                s_off += 1;
+                                                if s_off % COMPRESSION_RATIO == 0 {
+                                                    s_idx += 1;
+                                                }
+                                            }
+
+                                            // NCBI BLAST: if (ext_left + ext_right < ext_to) continue;
+                                            // Reference: na_ungapped.c:1125
+                                            if ext_left + ext_right < ext_to {
+                                                // Word_length match failed, skip this seed
+                                                continue;
                                             }
                                         }
 
-                                        // NCBI BLAST: if (ext_left + ext_right < ext_to) continue;
-                                        // Reference: na_ungapped.c:1125
-                                        if ext_left + ext_right < ext_to {
-                                            // Word_length match failed, skip this seed
-                                            continue;
-                                        }
-                                    }
-
-                                    // Adjust positions for type_of_word and ungapped extension
-                                    // NCBI BLAST: q_offset -= ext_left; s_offset -= ext_left;
-                                    // Reference: na_ungapped.c:1143-1144
-                                    (q_off0 - ext_left, kmer_start - ext_left, ext_left, ext_right)
-                                } else {
-                                    // word_length == lut_word_length, no extension needed
-                                    (q_off0, kmer_start, 0, 0)
-                                };
+                                        // Adjust positions for type_of_word and ungapped extension
+                                        // NCBI BLAST: q_offset -= ext_left; s_offset -= ext_left;
+                                        // Reference: na_ungapped.c:1143-1144
+                                        (
+                                            q_off0 - ext_left,
+                                            kmer_start - ext_left,
+                                            ext_left,
+                                            ext_right,
+                                        )
+                                    } else {
+                                        // word_length == lut_word_length, no extension needed
+                                        (q_off0, kmer_start, 0, 0)
+                                    };
 
                                 // NCBI reference: /mnt/c/Users/genom/GitHub/ncbi-blast/c++/src/algo/blast/core/na_ungapped.c:1093-1155
                                 // ```c

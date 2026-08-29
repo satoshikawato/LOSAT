@@ -1,0 +1,21 @@
+case_id	profile_ids	contract	query	subject	query_gencode	db_gencode	gencode_args	num_threads	outfmt	repeatability_required	coverage_note
+p01_ap027280_self	P2	parity	LOSAT/tests/fasta/AP027280.fasta	LOSAT/tests/fasta/AP027280.fasta	1	1	explicit	1	6	yes	historical self comparison
+p02_mje_mela	P1,P2	parity	LOSAT/tests/fasta/MjeNMV.fasta	LOSAT/tests/fasta/MelaMJNV.fasta	1	1	explicit	1	6	yes	historical forward comparison
+p03_mela_pemojnva	P1,P2	parity	LOSAT/tests/fasta/MelaMJNV.fasta	LOSAT/tests/fasta/PemoMJNVA.fasta	1	1	explicit	1	6	yes	historical forward comparison and serial Wasm probe
+p04_pemojnva_pesemjnv	P1,P2	parity	LOSAT/tests/fasta/PemoMJNVA.fasta	LOSAT/tests/fasta/PeseMJNV.fasta	1	1	explicit	1	6	yes	historical forward comparison
+p05_pesemjnv_pemojnva	P1,P2	parity	LOSAT/tests/fasta/PeseMJNV.fasta	LOSAT/tests/fasta/PemoMJNVB.fasta	1	1	explicit	1	6	yes	historical forward comparison
+p06_pemojnva_lvmjnv	P1,P2	parity	LOSAT/tests/fasta/PemoMJNVB.fasta	LOSAT/tests/fasta/LvMJNV.fasta	1	1	explicit	1	6	yes	historical forward comparison
+p07_lvmjnv_trcumjnv	P1,P2	parity	LOSAT/tests/fasta/LvMJNV.fasta	LOSAT/tests/fasta/TrcuMJNV.fasta	1	1	explicit	1	6	yes	historical forward comparison
+p08_trcumjnv_mellatmjnv	P1,P2	parity	LOSAT/tests/fasta/TrcuMJNV.fasta	LOSAT/tests/fasta/MellatMJNV.fasta	1	1	explicit	1	6	yes	historical forward comparison
+p09_mellatmjnv_meenmjnv	P1,P2	parity	LOSAT/tests/fasta/MellatMJNV.fasta	LOSAT/tests/fasta/MeenMJNV.fasta	1	1	explicit	1	6	yes	historical forward comparison
+p10_meenmjnv_mejomjnv	P1,P2	parity	LOSAT/tests/fasta/MeenMJNV.fasta	LOSAT/tests/fasta/MejoMJNV.fasta	1	1	explicit	1	6	yes	historical forward comparison
+p11_avclpv_psclpv	P1,P2	parity	LOSAT/tests/fasta/AvCLPV.fasta	LOSAT/tests/fasta/PsCLPV.fasta	1	1	explicit	1	6	yes	historical longer comparison
+d01_nz_self_code4	P2	approved_db_gencode_deviation	LOSAT/tests/fasta/NZ_CP006932.fasta	LOSAT/tests/fasta/NZ_CP006932.fasta	4	4	explicit	1	6	no	historical approved local-subject deviation
+d02_ap027132_nz_code4	P1,P2	approved_db_gencode_deviation	LOSAT/tests/fasta/AP027132.fasta	LOSAT/tests/fasta/NZ_CP006932.fasta	4	4	explicit	1	6	no	historical approved local-subject deviation
+d03_ap027078_ap027131_code4	P1,P2	approved_db_gencode_deviation	LOSAT/tests/fasta/AP027078.fasta	LOSAT/tests/fasta/AP027131.fasta	4	4	explicit	1	6	no	historical approved local-subject deviation
+d04_ap027131_ap027133_code4	P1,P2	approved_db_gencode_deviation	LOSAT/tests/fasta/AP027131.fasta	LOSAT/tests/fasta/AP027133.fasta	4	4	explicit	1	6	no	historical long-sequence approved-deviation regression
+d05_ap027133_ap027132_code4	P1,P2	approved_db_gencode_deviation	LOSAT/tests/fasta/AP027133.fasta	LOSAT/tests/fasta/AP027132.fasta	4	4	explicit	1	6	no	historical approved local-subject deviation
+p12_lc738874_lc738875_default	P1,P2	parity	LOSAT/tests/fasta/LC738874.fasta	LOSAT/tests/fasta/LC738875.fasta	1	1	implicit	1	6	yes	targeted default-options and serial Wasm comparison
+p13_mela_mje_reverse	P2	parity	LOSAT/tests/fasta/MelaMJNV.fasta	LOSAT/tests/fasta/MjeNMV.fasta	1	1	explicit	1	6	yes	reverse direction of p02
+p14_ap027131_ap027133_query4	P1,P2	parity	LOSAT/tests/fasta/AP027131.fasta	LOSAT/tests/fasta/AP027133.fasta	4	1	explicit	1	6	yes	non-default query code with default subject code
+d06_ap027131_ap027133_db4	P1,P2	approved_db_gencode_deviation	LOSAT/tests/fasta/AP027131.fasta	LOSAT/tests/fasta/AP027133.fasta	1	4	explicit	1	6	yes	subject-only deviation and serial Wasm comparison

@@ -1,6 +1,3 @@
 rule	path	symbol	classification
 rust.imported_abi	LOSAT/src/algorithm/tblastx/ncbi_qsort.rs	qsort	temporary_production_algorithm_delegation
 rust.imported_abi_call	LOSAT/src/algorithm/tblastx/ncbi_qsort.rs	qsort@native_qsort_ungapped_hits_by	temporary_production_algorithm_delegation
-rust.imported_abi	LOSAT/src/common.rs	qsort	temporary_production_algorithm_delegation
-rust.imported_abi_call	LOSAT/src/common.rs	qsort@qsort_hit_indices	temporary_production_algorithm_delegation
-rust.imported_abi_call	LOSAT/src/common.rs	qsort@qsort_subject_group_indices	temporary_production_algorithm_delegation

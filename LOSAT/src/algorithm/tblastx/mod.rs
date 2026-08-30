@@ -17,13 +17,13 @@ pub mod filtering;
 pub mod hsp_culling;
 pub mod lookup;
 pub mod ncbi_cutoffs;
-mod ncbi_qsort;
 pub mod reevaluate;
 mod scan;
 pub mod stage_dump;
 pub mod sum_stats_linking;
 pub mod tracing;
 pub mod translation;
+mod ungapped_hit_sort;
 
 pub use args::TblastxArgs;
 pub use blast_engine::run;

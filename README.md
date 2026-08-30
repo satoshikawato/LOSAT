@@ -1,9 +1,9 @@
 # LOSAT
 
-LOSAT (LOcal Sequence Alignment Tool) is a Rust implementation of
-BLAST-compatible local sequence alignment. The project is built for native CLI
-use and WebAssembly-oriented embedding, without delegating runtime behavior to
-NCBI BLAST+ executables or libraries.
+LOSAT (LOcal Sequence Alignment Tool) is a Rust implementation of NCBI BLAST
+local-sequence-alignment behavior for the certified profiles described below.
+The project is built for native CLI use and WebAssembly-oriented embedding,
+without delegating runtime behavior to NCBI BLAST+ executables or libraries.
 
 NCBI BLAST C/C++ source code is the behavioral authority for LOSAT. NCBI BLAST+
 may be used as a validation oracle in tests and release checks, but it is not a
@@ -12,17 +12,17 @@ component.
 
 ## v0.1.0 Scope
 
-The v0.1.0 release candidate is parity-gated. A final tag must include current
-NCBI comparison evidence for every supported area.
+The v0.1.0 release candidate is certification-gated. Program-profile
+certification is complete for the scopes below, but the release itself remains
+unpublished pending final release-wide artifact certification.
 
 | Area | v0.1.0 status | Notes |
 | --- | --- | --- |
-| TBLASTX local `-query`/`-subject` | Supported candidate | Must pass native NCBI parity fixtures, except for the approved local-subject `--db-gencode` behavior below. |
-| BLASTN `--task megablast` | Supported for the declared v0.1.0 local profile | The committed 14-case gate requires exact source-defined parity and one narrow source-underdetermined equal-HSP contract. |
-| BLASTN `--task blastn` | Supported for the declared v0.1.0 local profile | Native certification covers the committed local query/subject manifest; it is not a generic BLASTN claim. |
-| BLASTP | Experimental | The CLI subcommand exists, but BLASTP remains secondary to TBLASTX/BLASTN for v0.1.0. |
-| Native CLI | Supported candidate | Release artifacts must include build metadata and checksums. |
-| `wasm32-wasip1` serial command build | Experimental | Must match the corresponding native output before being promoted. |
+| BLASTN `--task blastn` and `--task megablast` | Supported for the certified local profile | The [14-case certification](docs/release/blastn_v0.1.0_certification.md) covers 13 exact source-defined cases and one Version 1.1 source-underdetermined equal-HSP case. |
+| BLASTP / LOSATP | Supported for the certified gbdraw local profiles | The [nine-case certification](docs/release/blastp_v0.1.0_certification.md) covers gbdraw P1-P3 local query/subject workflows with standard outfmt 6. |
+| TBLASTX / TLOSATX | Supported for the certified gbdraw local profiles | The [20-case certification](docs/release/tblastx_v0.1.0_certification.md) covers gbdraw P1-P2 local query/subject workflows and the approved `--db-gencode` behavior below. |
+| Native CLI | Supported candidate | Program profiles are certified; final release artifacts, provenance, checksums, target matrix, and artifact smoke tests remain pending. |
+| `wasm32-wasip1` serial command build | Program-specific evidence only | BLASTP P1-P3 raw profiles have certified serial fallback evidence; BLASTN and TBLASTX have targeted native/serial-Wasm equality evidence. This is not general Wasm support. |
 | `wasm32-wasip1-threads` | Experimental | Requires the `wasm-threads` feature and a WASI runtime with thread support. |
 | Rust library API | Internal only | No semver-stable API commitment in v0.1.0. |
 | Web or embeddable Wasm API | Internal only | Public ABI and memory ownership are not yet release-stable. |
@@ -61,7 +61,7 @@ target/release/LOSAT blastn \
   --outfmt 6
 ```
 
-Run BLASTP experimental mode:
+Run local BLASTP:
 
 ```bash
 target/release/LOSAT blastp \
@@ -81,23 +81,32 @@ selected program implements the requested fields.
 
 ## Verification
 
-Release validation compares LOSAT output against NCBI BLAST+ output using local
-fixtures. The release gate records the NCBI BLAST+ version, LOSAT commit,
-commands, inputs, output paths, checksums, and diff summaries.
-
-Primary comparison entry points:
+The durable certification records above are the support authorities. Their
+committed gate entry points are:
 
 ```bash
-cd LOSAT/tests
-bash run_comparison.sh
-python3 compare_blastn_parity.py
-bash run_blastp_comparison.sh
+cd LOSAT
+cargo build --release --locked
+python3 tests/compare_blastn_parity.py \
+  --manifest tests/blastn_parity_manifest.tsv \
+  --fresh-paired \
+  --paired-output-dir /tmp/losat-blastn-v010-certification/paired-base \
+  --losat-bin target/release/LOSAT \
+  --ncbi-bin /home/kawato/tools/ncbi-blast-oracle/ncbi-blast-2.17.0+/bin/blastn
+python3 tests/certify_blastn_v010.py \
+  --manifest tests/blastn_parity_manifest.tsv \
+  --paired-output-dir /tmp/losat-blastn-v010-certification/paired-base \
+  --exceptions tests/blastn_v010_source_exceptions.tsv
 
-cd ../..
-bash tests/compare_tblastx_native_ncbi_parity.sh
-bash tests/compare_self_tblastx.sh
-bash tests/compare_long_sequences_debug.sh
+cd ..
+python LOSAT/tests/audit_blastp_v010.py \
+  --output-dir /tmp/losat-blastp-v010-audit/final-native
+python LOSAT/tests/audit_tblastx_v010.py \
+  --output-dir /tmp/losat-tblastx-v010-certification/final-native
 ```
+
+Older broad comparison scripts remain useful diagnostics, but they are not the
+v0.1.0 support authorities.
 
 NCBI BLAST+ is allowed only in these comparison and diagnostic workflows. LOSAT
 runtime code must fail explicitly for unsupported behavior rather than invoking
@@ -129,7 +138,15 @@ Browser-facing or embeddable Wasm APIs are not release-stable in v0.1.0.
   The one demonstrated source-underdetermined equal-HSP tie is governed by
   [Product Decision Version 1.1](docs/product_decisions/PD-BLASTN-HSP-CANONICALIZATION.md)
   and the [durable certification record](docs/release/blastn_v0.1.0_certification.md).
-- BLASTP remains experimental in the v0.1.0 scope.
+- BLASTP support is limited to the certified gbdraw P1-P3 local query/subject
+  profiles with standard outfmt 6. Database/remote search, alternate tasks and
+  options, other output formats, and threaded Wasm remain outside this claim.
+- TBLASTX support is limited to the certified gbdraw P1-P2 local query/subject
+  profiles with standard outfmt 6 and one thread per job. Other search modes,
+  output formats, unexercised options, and threaded Wasm remain outside this
+  claim.
+- Serial Wasm evidence is program- and case-specific as stated in each
+  certification record; it does not promote all Wasm behavior.
 - Existing comparison outputs under `LOSAT/tests/*_out` are release hygiene
   targets; regenerated output should be treated as artifact or scratch data
   unless explicitly documented as canonical fixture data.

@@ -6,6 +6,9 @@ v0.1.0 gate lives in:
 - [docs/v0.1.0_release_readiness_plan.md](docs/v0.1.0_release_readiness_plan.md)
 - [docs/release/v0.1.0.md](docs/release/v0.1.0.md)
 - [docs/v0.1.0_scope.md](docs/v0.1.0_scope.md)
+- [BLASTN v0.1.0 certification](docs/release/blastn_v0.1.0_certification.md)
+- [BLASTP v0.1.0 certification](docs/release/blastp_v0.1.0_certification.md)
+- [TBLASTX v0.1.0 certification](docs/release/tblastx_v0.1.0_certification.md)
 
 ## v0.1.0 Release Candidate Gate
 
@@ -17,7 +20,8 @@ Before tagging:
 - Confirm NCBI BLAST+ is used only as a comparison oracle, never as LOSAT
   runtime, build, feature, fallback, or unsupported-feature implementation.
 - Run the native quality gate from a clean release branch.
-- Run current NCBI parity fixtures for every supported scope.
+- Enforce the committed certification gates for every supported program
+  profile; use older broad comparison scripts only as diagnostics.
 - Record NCBI BLAST+ version, LOSAT commit, command lines, inputs, outputs,
   checksums, and diff summaries in the release note.
 - Build native/Wasm artifacts only for targets documented in the release note.
@@ -42,18 +46,24 @@ cargo publish --dry-run --locked \
 NCBI BLAST+ executables may be used only in this validation role.
 
 ```bash
-cd LOSAT/tests
-RUN_LOSAT_WASM=0 RUN_LOSAT_WASM_THREADED=0 bash run_comparison.sh
-python3 compare_blastn_parity.py
-bash run_blastp_comparison.sh
+cd LOSAT
+cargo build --release --locked
+python3 tests/compare_blastn_parity.py \
+  --manifest tests/blastn_parity_manifest.tsv \
+  --fresh-paired \
+  --paired-output-dir /tmp/losat-blastn-v010-certification/paired-base \
+  --losat-bin target/release/LOSAT \
+  --ncbi-bin /home/kawato/tools/ncbi-blast-oracle/ncbi-blast-2.17.0+/bin/blastn
+python3 tests/certify_blastn_v010.py \
+  --manifest tests/blastn_parity_manifest.tsv \
+  --paired-output-dir /tmp/losat-blastn-v010-certification/paired-base \
+  --exceptions tests/blastn_v010_source_exceptions.tsv
 
-cd ../..
-bash tests/compare_tblastx_native_ncbi_parity.sh
-bash tests/compare_self_tblastx.sh LOSAT/tests/fasta/NZ_CP006932.fasta 4
-bash tests/compare_long_sequences_debug.sh \
-  LOSAT/tests/fasta/AP027131.fasta \
-  LOSAT/tests/fasta/AP027133.fasta \
-  4
+cd ..
+python LOSAT/tests/audit_blastp_v010.py \
+  --output-dir /tmp/losat-blastp-v010-audit/final-native
+python LOSAT/tests/audit_tblastx_v010.py \
+  --output-dir /tmp/losat-tblastx-v010-certification/final-native
 ```
 
 ## Artifact Gate

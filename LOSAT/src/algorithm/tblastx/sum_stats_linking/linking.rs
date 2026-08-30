@@ -30,7 +30,7 @@ use crate::algorithm::tblastx::chaining::UngappedHit;
 use crate::algorithm::tblastx::diagnostics::diagnostics_enabled;
 use crate::algorithm::tblastx::extension::convert_coords;
 use crate::algorithm::tblastx::lookup::QueryContext;
-use crate::algorithm::tblastx::ncbi_qsort::qsort_ungapped_hits_by;
+use crate::algorithm::tblastx::ungapped_hit_sort::sort_ungapped_hits_by_index_replay;
 
 use super::cutoffs::calculate_link_hsp_cutoffs_ncbi;
 use super::params::LinkingParams;
@@ -267,7 +267,7 @@ fn sort_hsps_by_ncbi_link_order(
     // NCBI's translated-query comparators are partial and NCBI delegates
     // comparator-equal rows to the platform qsort implementation. Do not add
     // frame or LOSAT insertion-order tie-breakers here.
-    qsort_ungapped_hits_by(hits, compare);
+    sort_ungapped_hits_by_index_replay(hits, compare);
 }
 
 // ---------------------------------------------------------------------------
@@ -2261,7 +2261,7 @@ mod tests {
     }
 
     #[test]
-    fn test_link_qsort_tie_preserves_current_hsp_list_order_for_equal_hits() {
+    fn test_link_sort_tie_preserves_current_hsp_list_order_for_equal_hits() {
         // NCBI reference: /mnt/c/Users/genom/GitHub/ncbi-blast/c++/src/algo/blast/core/link_hsps.c:483-486
         // ```c
         // /* Sort by (reverse) position. */

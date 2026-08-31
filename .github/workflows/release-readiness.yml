@@ -3,18 +3,12 @@ name: Release Readiness
 on:
   workflow_dispatch:
     inputs:
-      run_native_parity:
-        description: Run native NCBI oracle comparison scripts
+      candidate_sha:
+        description: Exact commit SHA to check out and certify
         required: true
-        default: false
-        type: boolean
-      run_blastp_parity:
-        description: Also run BLASTP experimental parity scripts
-        required: true
-        default: false
-        type: boolean
-      run_wasm_parity:
-        description: Run Wasm parity diagnostics
+        type: string
+      run_integrated_certification:
+        description: Run the full 43-native/41-serial-Wasm certification
         required: true
         default: false
         type: boolean
@@ -35,11 +29,21 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.candidate_sha }}
 
       - uses: dtolnay/rust-toolchain@stable
         with:
+          toolchain: 1.92.0
           components: clippy, rustfmt
           targets: wasm32-wasip1
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 18.19.1
+
+      - name: Verify exact candidate SHA
+        run: test "$(git rev-parse HEAD)" = "${{ inputs.candidate_sha }}"
 
       - name: Capture build metadata
         run: |
@@ -53,16 +57,22 @@ jobs:
         run: cd LOSAT && cargo fmt --check
 
       - name: Clippy
-        run: cd LOSAT && cargo clippy --all-targets --all-features -- -D warnings
+        run: cd LOSAT && cargo clippy --all-targets --all-features --locked -- -D warnings
 
       - name: Tests
-        run: cd LOSAT && cargo test --all-features
+        run: cd LOSAT && cargo test --all-features --locked
+
+      - name: Runtime boundary and integrated-driver tests
+        run: |
+          python LOSAT/tests/check_pure_rust_runtime_boundary.py
+          python -m unittest LOSAT/tests/test_check_pure_rust_runtime_boundary.py
+          python -m unittest LOSAT/tests/test_certify_integrated_runtime_v010.py
 
       - name: Native release build
-        run: cd LOSAT && cargo build --release
+        run: cd LOSAT && cargo build --release --locked
 
       - name: Serial Wasm build
-        run: cd LOSAT && cargo build --release --target wasm32-wasip1 --no-default-features
+        run: cd LOSAT && cargo build --release --target wasm32-wasip1 --no-default-features --locked
 
       - name: Package dry run
         run: |
@@ -111,112 +121,56 @@ jobs:
           path: .tmp/release-readiness/artifacts
           if-no-files-found: warn
 
-  native-parity:
-    name: Native NCBI Oracle Diagnostics
-    runs-on: ubuntu-latest
+  integrated-certification:
+    name: Integrated Linux Native And Serial-Wasm Certification
+    runs-on: [self-hosted, linux, x64, losat-certification]
     needs: quality
-    if: ${{ inputs.run_native_parity }}
+    if: ${{ inputs.run_integrated_certification }}
     env:
-      LOSAT_THREADS: "1"
-      LOSATP_THREADS: "1"
-      LOSAT_BLASTP_THREADS: "1"
-      RUN_LOSAT_WASM: "0"
-      RUN_LOSAT_WASM_THREADED: "0"
+      EVIDENCE_DIR: /tmp/losat-integrated-${{ github.run_id }}-${{ github.run_attempt }}
     steps:
       - uses: actions/checkout@v4
-
-      - uses: dtolnay/rust-toolchain@stable
-
-      - name: Install NCBI BLAST+ oracle
-        run: |
-          # NCBI BLAST+ is installed only for source-parity oracle output.
-          # NCBI reference: ncbi-blast/c++/src/objtools/align_format/format_flags.cpp:38-40
-          # defines the default tabular fields used by the comparison summaries.
-          sudo apt-get update
-          sudo apt-get install -y ncbi-blast+
-
-      - name: Capture oracle metadata
-        run: |
-          mkdir -p .tmp/release-readiness/native
-          git rev-parse HEAD > .tmp/release-readiness/native/git-commit.txt
-          rustc --version > .tmp/release-readiness/native/rust-version.txt
-          cargo --version > .tmp/release-readiness/native/cargo-version.txt
-          tblastx -version > .tmp/release-readiness/native/ncbi-tblastx-version.txt 2>&1
-          blastn -version > .tmp/release-readiness/native/ncbi-blastn-version.txt 2>&1
-          blastp -version > .tmp/release-readiness/native/ncbi-blastp-version.txt 2>&1
-
-      - name: Build LOSAT release binary
-        run: cd LOSAT && cargo build --release
-
-      - name: TBLASTX local-subject oracle fixture
-        run: |
-          # NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_engine.c:1482-1541
-          # defines the translated search post-processing order checked here.
-          LOSAT_SKIP_BUILD=1 bash tests/compare_tblastx_native_ncbi_parity.sh \
-            .tmp/release-readiness/native/tblastx-local-subject
-
-      - name: BLASTN manifest oracle fixtures
-        run: |
-          # NCBI reference: ncbi-blast/c++/src/algo/blast/blastinput/cmdline_flags.cpp:46-97
-          # defines the query, subject, task, evalue, thread, and output flags
-          # recorded by the BLASTN parity manifest.
-          cd LOSAT/tests
-          bash run_comparison.sh
-          cd ..
-          python3 tests/compare_blastn_parity.py \
-            --write-targets ../.tmp/release-readiness/native/blastn-trace-targets.tsv \
-            > ../.tmp/release-readiness/native/blastn-parity-summary.txt
-
-      - name: BLASTP experimental oracle fixtures
-        if: ${{ inputs.run_blastp_parity }}
-        run: |
-          # NCBI reference: ncbi-blast/c++/src/algo/blast/blastinput/blast_args.cpp:275-285
-          # covers the compressed protein lookup word-size branch under test.
-          cd LOSAT
-          cargo build
-          cd tests
-          bash run_blastp_comparison.sh
-
-      - uses: actions/upload-artifact@v4
-        if: always()
         with:
-          name: release-readiness-native-parity
-          path: |
-            .tmp/release-readiness/native
-            LOSAT/tests/losat_out
-            LOSAT/tests/blast_out
-          if-no-files-found: warn
-
-  wasm-parity:
-    name: Wasm Parity Diagnostics
-    runs-on: ubuntu-latest
-    needs: quality
-    if: ${{ inputs.run_wasm_parity }}
-    steps:
-      - uses: actions/checkout@v4
+          ref: ${{ inputs.candidate_sha }}
 
       - uses: dtolnay/rust-toolchain@stable
         with:
+          toolchain: 1.92.0
+          components: clippy, rustfmt
           targets: wasm32-wasip1
 
       - uses: actions/setup-node@v4
         with:
-          node-version: 22
+          node-version: 18.19.1
 
-      - name: Install NCBI BLAST+ oracle
+      - name: Verify exact candidate and frozen official oracles
         run: |
-          # NCBI BLAST+ is used only by the diagnostic script as an oracle.
-          # NCBI reference: ncbi-blast/c++/src/algo/blast/blastinput/cmdline_flags.cpp:46-75
-          # defines the query, subject, output, genetic-code, and thread flags.
-          sudo apt-get update
-          sudo apt-get install -y ncbi-blast+
+          test "$(git rev-parse HEAD)" = "${{ inputs.candidate_sha }}"
+          test -x /home/kawato/tools/ncbi-blast-oracle/ncbi-blast-2.17.0+/bin/blastn
+          test -x /home/kawato/tools/ncbi-blast-oracle/ncbi-blast-2.17.0+/bin/blastp
+          test -x /home/kawato/tools/ncbi-blast-oracle/ncbi-blast-2.17.0+/bin/tblastx
+          test -f /home/kawato/tools/ncbi-blast-source/ncbi-blast-2.17.0+-src.tar.gz
 
-      - name: Run TBLASTX Wasm parity diagnostic
-        run: bash tests/compare_tblastx_wasm_parity.sh .tmp/release-readiness/wasm/tblastx
+      - name: Build exact native and serial-Wasm artifacts
+        run: |
+          cd LOSAT
+          cargo build --release --locked
+          cargo build --release --target wasm32-wasip1 --no-default-features --locked
+
+      - name: Run full integrated certification
+        run: |
+          # NCBI references:
+          # ncbi-blast/c++/src/algo/blast/format/blast_format.cpp:770-832
+          # ncbi-blast/c++/src/objtools/align_format/format_flags.cpp:39-45
+          # The committed program authorities classify raw NCBI/LOSAT output;
+          # this workflow only invokes and archives that evidence.
+          python LOSAT/tests/certify_integrated_runtime_v010.py \
+            --expected-sha "${{ inputs.candidate_sha }}" \
+            --output-dir "${EVIDENCE_DIR}"
 
       - uses: actions/upload-artifact@v4
         if: always()
         with:
-          name: release-readiness-wasm-parity
-          path: .tmp/release-readiness/wasm
-          if-no-files-found: warn
+          name: integrated-runtime-certification-${{ inputs.candidate_sha }}
+          path: /tmp/losat-integrated-${{ github.run_id }}-${{ github.run_attempt }}
+          if-no-files-found: error

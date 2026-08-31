@@ -36,45 +36,26 @@ REVIEWED_NON_ALGORITHM = "reviewed_non_algorithm_integration"
 # NCBI references:
 # - ncbi-blast/c++/src/algo/blast/core/blast_hits.c:1379-1381
 # - ncbi-blast/c++/src/algo/blast/core/link_hsps.c:483-486
-# These are the only project-owned host-qsort boundaries found by the revised
-# live audit. This ceiling may shrink as PRs 2-4 remove owners, but it may not
-# expand inside an implementation PR.
-AUTHORITATIVE_TEMPORARY_KEYS = frozenset(
+# NCBI owns the comparator behavior at these call sites. LOSAT's completed
+# migration owns sorting in Rust, so removed host-qsort adapter vocabulary is
+# now a zero-state regression signal rather than an allowlist candidate.
+OBSOLETE_QSORT_ADAPTER_NAMES = frozenset(
     {
-        ("rust.imported_abi", "LOSAT/src/algorithm/blastn/blast_engine/run.rs", "qsort"),
-        (
-            "rust.imported_abi_call",
-            "LOSAT/src/algorithm/blastn/blast_engine/run.rs",
-            "qsort@native_qsort_prelim_hits_by",
-        ),
-        ("rust.imported_abi", "LOSAT/src/algorithm/blastn/hsp.rs", "qsort"),
-        (
-            "rust.imported_abi_call",
-            "LOSAT/src/algorithm/blastn/hsp.rs",
-            "qsort@native_qsort_blastn_hsps_by",
-        ),
-        (
-            "rust.imported_abi",
-            "LOSAT/src/algorithm/tblastx/ncbi_qsort.rs",
-            "qsort",
-        ),
-        (
-            "rust.imported_abi_call",
-            "LOSAT/src/algorithm/tblastx/ncbi_qsort.rs",
-            "qsort@native_qsort_ungapped_hits_by",
-        ),
-        ("rust.imported_abi", "LOSAT/src/common.rs", "qsort"),
-        (
-            "rust.imported_abi_call",
-            "LOSAT/src/common.rs",
-            "qsort@qsort_hit_indices",
-        ),
-        (
-            "rust.imported_abi_call",
-            "LOSAT/src/common.rs",
-            "qsort@qsort_subject_group_indices",
-        ),
+        "native_hsp_qsort",
+        "native_prelim_qsort",
+        "native_qsort_blastn_hsps_by",
+        "native_qsort_prelim_hits_by",
+        "native_qsort_ungapped_hits_by",
+        "output_qsort_native",
+        "qsort_hit_indices",
+        "qsort_hits_by",
+        "qsort_subject_group_indices",
+        "qsort_subject_groups_by",
+        "qsort_ungapped_hits_by",
     }
+)
+OBSOLETE_QSORT_ADAPTER_PATHS = frozenset(
+    {"LOSAT/src/algorithm/tblastx/ncbi_qsort.rs"}
 )
 
 IMPORT_BLOCK_RE = re.compile(
@@ -399,7 +380,38 @@ def _scan_rust_file(path: Path, root: Path) -> tuple[list[Finding], list[Observa
             )
         )
 
+    for name in sorted(OBSOLETE_QSORT_ADAPTER_NAMES):
+        match = re.search(rf"\b{re.escape(name)}\b", text)
+        if match is not None:
+            findings.append(
+                Finding(
+                    "rust.obsolete_qsort_adapter",
+                    rel,
+                    name,
+                    _line_number(text, match.start()),
+                    "obsolete_production_adapter",
+                    "removed project-owned host-qsort adapter name",
+                )
+            )
+
     return findings, observations
+
+
+def _scan_obsolete_adapter_paths(root: Path) -> list[Finding]:
+    findings: list[Finding] = []
+    for rel in sorted(OBSOLETE_QSORT_ADAPTER_PATHS):
+        if (root / rel).exists():
+            findings.append(
+                Finding(
+                    "path.obsolete_qsort_adapter",
+                    rel,
+                    Path(rel).name,
+                    1,
+                    "obsolete_production_adapter",
+                    "removed project-owned host-qsort adapter path",
+                )
+            )
+    return findings
 
 
 def _dependency_tables(value: object, path: tuple[str, ...] = ()) -> Iterable[tuple[str, Mapping[str, object]]]:
@@ -570,6 +582,7 @@ def audit_repository(
 
     findings.extend(_scan_manifest(root / "LOSAT" / "Cargo.toml", root))
     findings.extend(_scan_build_scripts(root))
+    findings.extend(_scan_obsolete_adapter_paths(root))
     if metadata is None:
         metadata = load_cargo_metadata(root)
     cargo_links = _scan_cargo_links(metadata)
@@ -622,16 +635,16 @@ def evaluate_findings(
     allowlist: Sequence[AllowlistEntry],
     *,
     expected_classification: str = TEMPORARY_DELEGATION,
-    permitted_keys: frozenset[tuple[str, str, str]] | None = None,
+    require_empty_allowlist: bool = False,
 ) -> Evaluation:
     finding_by_key = {finding.key: finding for finding in findings}
     invalid: list[str] = []
     allow_by_key: dict[tuple[str, str, str], AllowlistEntry] = {}
     for entry in allowlist:
-        if permitted_keys is not None and entry.key not in permitted_keys:
+        if require_empty_allowlist:
             invalid.append(
-                f"{entry.rule} {entry.path} {entry.symbol}: temporary inventory "
-                "may only shrink from the frozen Revision 2 baseline"
+                f"{entry.rule} {entry.path} {entry.symbol}: finalized production "
+                "delegation allowlist must contain zero entries"
             )
             continue
         allow_by_key[entry.key] = entry
@@ -760,7 +773,7 @@ def main(argv: Sequence[str] | None = None) -> int:
             production_findings,
             allowlist,
             expected_classification=TEMPORARY_DELEGATION,
-            permitted_keys=AUTHORITATIVE_TEMPORARY_KEYS,
+            require_empty_allowlist=True,
         )
         dependency_evaluation = evaluate_findings(
             dependency_signals,

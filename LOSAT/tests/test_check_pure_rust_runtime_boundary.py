@@ -107,6 +107,42 @@ pub fn program_name() -> &'static str { "blastn" }
 
         self.assertEqual(report.findings, [])
 
+    def test_removed_qsort_adapter_names_and_paths_are_zero_state_findings(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            write_fixture(root, "fn native_qsort_blastn_hsps_by() {}\n")
+            obsolete_path = (
+                root
+                / "LOSAT"
+                / "src"
+                / "algorithm"
+                / "tblastx"
+                / "ncbi_qsort.rs"
+            )
+            obsolete_path.parent.mkdir(parents=True)
+            obsolete_path.write_text(
+                "pub fn pure_rust_placeholder() {}\n", encoding="utf-8"
+            )
+            report = boundary.audit_repository(root, metadata=empty_metadata())
+
+        keys = {finding.key for finding in report.findings}
+        self.assertIn(
+            (
+                "rust.obsolete_qsort_adapter",
+                "LOSAT/src/lib.rs",
+                "native_qsort_blastn_hsps_by",
+            ),
+            keys,
+        )
+        self.assertIn(
+            (
+                "path.obsolete_qsort_adapter",
+                "LOSAT/src/algorithm/tblastx/ncbi_qsort.rs",
+                "ncbi_qsort.rs",
+            ),
+            keys,
+        )
+
     def test_project_build_script_is_a_review_signal(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
@@ -166,16 +202,9 @@ host_c = { package = "libc", version = "0.2" }
             finding.symbol,
             boundary.TEMPORARY_DELEGATION,
         )
-        permitted = frozenset({finding.key})
-        self.assertTrue(
-            boundary.evaluate_findings(
-                [finding], [exact], permitted_keys=permitted
-            ).passed
-        )
+        self.assertTrue(boundary.evaluate_findings([finding], [exact]).passed)
 
-        unknown = boundary.evaluate_findings(
-            [finding], [], permitted_keys=permitted
-        )
+        unknown = boundary.evaluate_findings([finding], [])
         self.assertFalse(unknown.passed)
         self.assertEqual(unknown.unexpected, [finding])
 
@@ -186,9 +215,7 @@ host_c = { package = "libc", version = "0.2" }
             boundary.TEMPORARY_DELEGATION,
         )
         stale = boundary.evaluate_findings(
-            [finding],
-            [exact, stale_entry],
-            permitted_keys=permitted | frozenset({stale_entry.key}),
+            [finding], [exact, stale_entry]
         )
         self.assertFalse(stale.passed)
         self.assertEqual(stale.stale, [stale_entry])
@@ -209,13 +236,16 @@ host_c = { package = "libc", version = "0.2" }
             boundary.TEMPORARY_DELEGATION,
         )
         expanded = boundary.evaluate_findings(
-            [finding, expanded_finding],
-            [exact, expanded_entry],
-            permitted_keys=permitted,
+            [finding, expanded_finding], [exact, expanded_entry]
         )
-        self.assertFalse(expanded.passed)
-        self.assertEqual(expanded.unexpected, [expanded_finding])
-        self.assertEqual(len(expanded.invalid_allowlist), 1)
+        self.assertTrue(expanded.passed)
+
+        finalized = boundary.evaluate_findings(
+            [finding], [exact], require_empty_allowlist=True
+        )
+        self.assertFalse(finalized.passed)
+        self.assertEqual(finalized.unexpected, [finding])
+        self.assertEqual(len(finalized.invalid_allowlist), 1)
 
     def test_cargo_links_metadata_uses_separate_exact_review_inventory(self) -> None:
         metadata = {

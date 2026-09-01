@@ -1,0 +1,183 @@
+name: Windows And macOS Native Certification
+
+run-name: Platform native certification ${{ inputs.candidate_sha }}
+
+on:
+  workflow_dispatch:
+    inputs:
+      candidate_sha:
+        description: Exact committed and pushed PR 6 candidate SHA
+        required: true
+        type: string
+      resume_run_id:
+        description: Optional prior workflow run ID whose verified checkpoints may be reused
+        required: false
+        default: ""
+        type: string
+
+permissions:
+  actions: read
+  contents: read
+
+defaults:
+  run:
+    shell: bash
+
+env:
+  CARGO_TERM_COLOR: always
+  CERT_TOOLCHAIN: 1.92.0
+
+jobs:
+  platform-certification:
+    name: ${{ matrix.display_name }} (${{ matrix.target_triple }})
+    strategy:
+      fail-fast: false
+      max-parallel: 3
+      matrix:
+        include:
+          - platform_id: windows-x64
+            display_name: Windows x64
+            runner: windows-2025
+            target_triple: x86_64-pc-windows-msvc
+            executable_suffix: .exe
+            oracle_archive: ncbi-blast-2.17.0+-x64-win64.tar.gz
+          - platform_id: macos-arm64
+            display_name: macOS arm64
+            runner: macos-15
+            target_triple: aarch64-apple-darwin
+            executable_suffix: ""
+            oracle_archive: ncbi-blast-2.17.0+-aarch64-macosx.tar.gz
+          - platform_id: macos-x64
+            display_name: macOS x64
+            runner: macos-15-intel
+            target_triple: x86_64-apple-darwin
+            executable_suffix: ""
+            oracle_archive: ncbi-blast-2.17.0+-x64-macosx.tar.gz
+    runs-on: ${{ matrix.runner }}
+    env:
+      PLATFORM_ID: ${{ matrix.platform_id }}
+      CANDIDATE_SHA: ${{ inputs.candidate_sha }}
+      RESUME_RUN_ID: ${{ inputs.resume_run_id }}
+      EVIDENCE_DIR: ${{ github.workspace }}/platform-certification-evidence/${{ matrix.platform_id }}
+      CHECKPOINT_DIR: ${{ github.workspace }}/platform-certification-checkpoint/${{ matrix.platform_id }}
+      DOWNLOAD_DIR: ${{ github.workspace }}/platform-certification-downloads/${{ matrix.platform_id }}
+      ORACLE_DIR: ${{ github.workspace }}/platform-certification-oracle/${{ matrix.platform_id }}
+      ARTIFACT_NAME: platform-native-${{ matrix.platform_id }}
+    steps:
+      - name: Initialize durable in-workspace evidence paths
+        run: |
+          if [[ ! "$CANDIDATE_SHA" =~ ^[0-9a-f]{40}$ ]]; then
+            echo "candidate_sha must be exactly 40 lowercase hex digits" >&2
+            exit 1
+          fi
+          if [[ -n "$RESUME_RUN_ID" && ! "$RESUME_RUN_ID" =~ ^[0-9]+$ ]]; then
+            echo "resume_run_id must be numeric when supplied" >&2
+            exit 1
+          fi
+          mkdir -p "$EVIDENCE_DIR" "$CHECKPOINT_DIR" "$DOWNLOAD_DIR" "$ORACLE_DIR"
+          printf '%s\n' \
+            "candidate_sha=$CANDIDATE_SHA" \
+            "platform_id=$PLATFORM_ID" \
+            "run_id=$GITHUB_RUN_ID" \
+            "run_attempt=$GITHUB_RUN_ATTEMPT" \
+            "started_at=$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
+            > "$EVIDENCE_DIR/workflow-started.txt"
+
+      - uses: actions/checkout@v4
+        with:
+          clean: false
+          fetch-depth: 1
+          ref: ${{ inputs.candidate_sha }}
+
+      - name: Verify exact committed candidate SHA
+        run: test "$(git rev-parse HEAD)" = "$CANDIDATE_SHA"
+
+      - name: Recover checkpoint from an earlier attempt of this run
+        if: ${{ inputs.resume_run_id == '' }}
+        continue-on-error: true
+        uses: actions/download-artifact@v4
+        with:
+          name: ${{ env.ARTIFACT_NAME }}
+          path: ${{ env.CHECKPOINT_DIR }}
+          github-token: ${{ github.token }}
+          run-id: ${{ github.run_id }}
+
+      - name: Recover checkpoint from the requested prior run
+        if: ${{ inputs.resume_run_id != '' }}
+        uses: actions/download-artifact@v4
+        with:
+          name: ${{ env.ARTIFACT_NAME }}
+          path: ${{ env.CHECKPOINT_DIR }}
+          github-token: ${{ github.token }}
+          run-id: ${{ inputs.resume_run_id }}
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: 1.92.0
+
+      - name: Build exact native release artifact
+        run: cd LOSAT && cargo build --release --locked
+
+      - name: Download official NCBI BLAST+ 2.17.0 archive and checksum
+        env:
+          ARCHIVE_NAME: ${{ matrix.oracle_archive }}
+        run: |
+          encoded_name="${ARCHIVE_NAME/+/%2B}"
+          base_url="https://ftp.ncbi.nlm.nih.gov/blast/executables/blast%2B/2.17.0"
+          curl --fail --location --retry 3 \
+            --output "$DOWNLOAD_DIR/$ARCHIVE_NAME" \
+            "$base_url/$encoded_name"
+          curl --fail --location --retry 3 \
+            --output "$DOWNLOAD_DIR/$ARCHIVE_NAME.md5" \
+            "$base_url/$encoded_name.md5"
+
+      - name: Verify pinned NCBI provenance before extraction
+        env:
+          ARCHIVE_NAME: ${{ matrix.oracle_archive }}
+        run: |
+          python LOSAT/tests/certify_platform_native_v010.py verify-archive \
+            --platform-id "$PLATFORM_ID" \
+            --archive "$DOWNLOAD_DIR/$ARCHIVE_NAME" \
+            --checksum "$DOWNLOAD_DIR/$ARCHIVE_NAME.md5"
+
+      - name: Extract the verified official oracle archive
+        env:
+          ARCHIVE_NAME: ${{ matrix.oracle_archive }}
+        run: tar -xzf "$DOWNLOAD_DIR/$ARCHIVE_NAME" -C "$ORACLE_DIR"
+
+      - name: Run or resume exact 61-execution platform certification
+        env:
+          ARCHIVE_NAME: ${{ matrix.oracle_archive }}
+          EXECUTABLE_SUFFIX: ${{ matrix.executable_suffix }}
+        run: |
+          native_bin="$GITHUB_WORKSPACE/LOSAT/target/release/LOSAT$EXECUTABLE_SUFFIX"
+          oracle_bin="$ORACLE_DIR/ncbi-blast-2.17.0+/bin"
+          resume_args=()
+          if [[ -f "$CHECKPOINT_DIR/identity.json" ]]; then
+            resume_args=(--resume-dir "$CHECKPOINT_DIR")
+          fi
+          # NCBI reference:
+          # ncbi-blast/c++/src/algo/blast/format/blast_format.cpp:770-832
+          # Existing program authorities build and classify the raw outputs;
+          # the platform driver only invokes them and checks PR 5 SHA-256 values.
+          python LOSAT/tests/certify_platform_native_v010.py certify \
+            --expected-sha "$CANDIDATE_SHA" \
+            --platform-id "$PLATFORM_ID" \
+            --output-dir "$EVIDENCE_DIR" \
+            "${resume_args[@]}" \
+            --native-bin "$native_bin" \
+            --oracle-archive "$DOWNLOAD_DIR/$ARCHIVE_NAME" \
+            --oracle-checksum "$DOWNLOAD_DIR/$ARCHIVE_NAME.md5" \
+            --blastn-oracle "$oracle_bin/blastn$EXECUTABLE_SUFFIX" \
+            --blastp-oracle "$oracle_bin/blastp$EXECUTABLE_SUFFIX" \
+            --tblastx-oracle "$oracle_bin/tblastx$EXECUTABLE_SUFFIX"
+
+      - name: Upload incremental platform evidence
+        if: ${{ always() }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ env.ARTIFACT_NAME }}
+          path: ${{ env.EVIDENCE_DIR }}
+          if-no-files-found: error
+          overwrite: true
+          retention-days: 30

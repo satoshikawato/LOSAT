@@ -1,5 +1,16 @@
 #[cfg(target_arch = "aarch64")]
 use std::arch::aarch64::*;
+// NCBI reference: ncbi-blast/c++/src/algo/blast/core/greedy_align.c:351-357
+// while (seq1_index < len1 && seq2_index < len2 &&
+//        seq1[seq1_index] < 4 &&
+//        seq1[seq1_index] == seq2[seq2_index]) {
+//     ++seq1_index;
+//     ++seq2_index;
+// }
+// This Rust-only import makes the existing AArch64 runtime dispatch compile;
+// it does not change NCBI's exact-match comparison condition.
+#[cfg(target_arch = "aarch64")]
+use std::arch::is_aarch64_feature_detected;
 #[cfg(target_arch = "x86_64")]
 use std::arch::x86_64::*;
 

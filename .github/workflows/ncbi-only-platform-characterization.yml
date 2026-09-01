@@ -1,0 +1,29 @@
+# Bootstrap registration file only.
+#
+# GitHub requires a workflow_dispatch workflow path to exist on the default
+# branch before that path can be dispatched at another ref. The diagnostic
+# implementation intentionally lives on its candidate branch. This default-
+# branch definition is inert and fail-closed if it is ever dispatched directly.
+
+name: NCBI-only Platform Characterization (Bootstrap Only)
+
+on:
+  workflow_dispatch:
+    inputs:
+      candidate_sha:
+        description: Exact committed and pushed diagnostic candidate SHA
+        required: true
+        type: string
+
+permissions: {}
+
+jobs:
+  bootstrap-only:
+    name: Bootstrap only - characterization unavailable on this ref
+    runs-on: ubuntu-latest
+    steps:
+      - name: Refuse characterization from bootstrap workflow
+        shell: bash
+        run: |
+          echo "::error::bootstrap only: dispatch the diagnostic candidate ref, not the default-branch registration workflow"
+          exit 1

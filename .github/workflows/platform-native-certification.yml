@@ -132,6 +132,30 @@ jobs:
           github-token: ${{ github.token }}
           run-id: ${{ inputs.resume_run_id }}
 
+      - name: Preflight controlled historical fixture path
+        run: |
+          evidence_log="$EVIDENCE_DIR/workflow-started.txt"
+          printf '%s\n' \
+            "stage=controlled_path_preflight" \
+            "stage_started_at=$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
+            >> "$evidence_log"
+          set +e
+          python LOSAT/tests/certify_platform_native_v010.py preflight-path \
+            --output-dir "$EVIDENCE_DIR" \
+            2>&1 | tee -a "$evidence_log"
+          preflight_status=${PIPESTATUS[0]}
+          set -e
+          printf '%s\n' \
+            "controlled_path_preflight_exit_status=$preflight_status" \
+            >> "$evidence_log"
+          if [[ $preflight_status -ne 0 ]]; then
+            printf '%s\n' \
+              "failure_stage=controlled_path_preflight" \
+              "failure_status=$preflight_status" \
+              >> "$evidence_log"
+            exit "$preflight_status"
+          fi
+
       - name: Record frozen Rust toolchain installation stage
         run: |
           printf '%s\n' \
@@ -266,7 +290,12 @@ jobs:
             "stage_started_at=$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
             >> "$evidence_log"
           set +e
-          tar -xzf "$DOWNLOAD_DIR/$ARCHIVE_NAME" -C "$ORACLE_DIR" \
+          python LOSAT/tests/certify_platform_native_v010.py \
+            extract-verified-archive \
+            --platform-id "$PLATFORM_ID" \
+            --archive "$DOWNLOAD_DIR/$ARCHIVE_NAME" \
+            --checksum "$DOWNLOAD_DIR/$ARCHIVE_NAME.md5" \
+            --destination "$ORACLE_DIR" \
             2>&1 | tee -a "$evidence_log"
           extract_status=${PIPESTATUS[0]}
           set -e

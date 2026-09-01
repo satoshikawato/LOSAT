@@ -14,18 +14,20 @@ import importlib.util
 import io
 import json
 import os
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 import platform
 import re
 import shutil
 import subprocess
 import sys
+import tarfile
 from types import ModuleType
 from typing import Iterable, Sequence
 
 
 EXPECTED_COUNTS = {"blastn": 14, "blastp": 9, "tblastx": 20}
 EXPECTED_EXECUTIONS = {"matrix": 43, "oracle": 6, "repeatability": 12}
+EXPECTED_STAGED_FIXTURE_COUNT = 34
 RUNTIME_CERT_SHA = "5845d22ed9842449628a647f29b8c6762511ca59"
 PR5_EVIDENCE_MANIFEST_SHA256 = (
     "b9fc98a376d2849274c86b4e4769d2ee38b76025adbb4d63d3da4a5e3e7cdb5c"
@@ -34,6 +36,21 @@ CERT_TOOLCHAIN = "1.92.0"
 EVIDENCE_SCHEMA = 1
 SAFE_CASE_ID = re.compile(r"^[A-Za-z0-9_.-]+$")
 SHA_PATTERN = re.compile(r"^[0-9a-f]{40}$")
+HISTORICAL_LEXICAL_ROOT = "/tmp/losat-pr5-runtime-cert-5845d22/LOSAT"
+INPUT_OPTIONS = {
+    "blastn": {
+        "query": ("-q", "-query"),
+        "subject": ("-s", "-subject"),
+    },
+    "blastp": {
+        "query": ("--query", "-query"),
+        "subject": ("--subject", "-subject"),
+    },
+    "tblastx": {
+        "query": ("--query", "-query"),
+        "subject": ("--subject", "-subject"),
+    },
+}
 
 
 @dataclass(frozen=True)
@@ -117,6 +134,15 @@ class SearchStep:
     output_rel: str
     final_output_rel: str
     expected_losat_sha256: str
+
+
+@dataclass(frozen=True)
+class StagedFixture:
+    source_repo_relative: str
+    source_path: str
+    lexical_target_path: str
+    physical_target_path: str
+    sha256: str
 
 
 @dataclass
@@ -248,6 +274,136 @@ def verify_archive(
         "checksum": str(checksum.resolve()),
         "checksum_url": platform_spec.checksum_url,
     }
+
+
+def extract_verified_archive(
+    platform_spec: PlatformSpec, archive: Path, checksum: Path, destination: Path
+) -> dict[str, object]:
+    archive_record = verify_archive(platform_spec, archive, checksum)
+    destination.mkdir(parents=True, exist_ok=True)
+    try:
+        with tarfile.open(archive, mode="r:gz") as bundle:
+            members = bundle.getmembers()
+            if sys.version_info >= (3, 12):
+                bundle.extractall(path=destination, filter="fully_trusted")
+            else:
+                bundle.extractall(path=destination)
+    except tarfile.TarError as error:
+        raise CertificationFailure(
+            f"verified NCBI archive extraction failed: {error}"
+        ) from error
+    return {
+        "status": "EXTRACTED_VERIFIED_ARCHIVE",
+        "archive": archive_record,
+        "destination": str(destination.absolute()),
+        "member_count": len(members),
+        "implementation": "python.tarfile.open(mode=r:gz).extractall",
+    }
+
+
+def _controlled_relative(value: str | PurePosixPath) -> PurePosixPath:
+    relative = PurePosixPath(value)
+    if relative.is_absolute() or not relative.parts or ".." in relative.parts:
+        raise CertificationFailure(f"invalid controlled fixture path: {value}")
+    return relative
+
+
+def historical_lexical_path(relative: str | PurePosixPath) -> str:
+    controlled = _controlled_relative(relative)
+    return f"{HISTORICAL_LEXICAL_ROOT}/{controlled.as_posix()}"
+
+
+def controlled_physical_path(lexical_path: str) -> Path:
+    prefix = f"{HISTORICAL_LEXICAL_ROOT}/"
+    if lexical_path != HISTORICAL_LEXICAL_ROOT and not lexical_path.startswith(prefix):
+        raise CertificationFailure(
+            f"path is outside the controlled lexical root: {lexical_path}"
+        )
+    return Path(os.path.abspath(lexical_path))
+
+
+def preflight_controlled_fixture_path(output_dir: Path) -> dict[str, object]:
+    output_dir.mkdir(parents=True, exist_ok=True)
+    evidence_path = output_dir / "controlled-path-preflight.json"
+    lexical_sentinel = historical_lexical_path(
+        ".platform-native-certification-path-preflight"
+    )
+    physical_sentinel = controlled_physical_path(lexical_sentinel)
+    payload = b"LOSAT_PLATFORM_CERTIFICATION_PATH_PREFLIGHT\n"
+    record: dict[str, object] = {
+        "status": "IN_PROGRESS",
+        "lexical_root": HISTORICAL_LEXICAL_ROOT,
+        "lexical_sentinel_path": lexical_sentinel,
+        "physical_sentinel_path": str(physical_sentinel),
+        "expected_sha256": hashlib.sha256(payload).hexdigest(),
+        "platform": platform.system(),
+        "subprocess_contract": {
+            "api": "subprocess.run",
+            "shell": False,
+            "msys_or_git_bash_involved": False,
+            "search_driver_uses_literal_argv": True,
+        },
+    }
+    try:
+        if platform.system() == "Windows" and not physical_sentinel.drive:
+            raise CertificationFailure(
+                "Windows controlled physical path is not drive-qualified"
+            )
+        physical_sentinel.parent.mkdir(parents=True, exist_ok=True)
+        physical_sentinel.write_bytes(payload)
+        record["physical_path_created"] = physical_sentinel.is_file()
+        with open(lexical_sentinel, "rb") as handle:
+            direct_bytes = handle.read()
+        if direct_bytes != payload:
+            raise CertificationFailure("controlled lexical sentinel read changed bytes")
+        probe = (
+            "import hashlib,json,sys;"
+            "p=sys.argv[1];"
+            "data=open(p,'rb').read();"
+            "print(json.dumps({'argv':p,'sha256':hashlib.sha256(data).hexdigest()}))"
+        )
+        completed = subprocess.run(
+            [sys.executable, "-c", probe, lexical_sentinel],
+            capture_output=True,
+            text=False,
+            check=False,
+            shell=False,
+        )
+        record["subprocess"] = {
+            "argv": [sys.executable, "-c", "<probe>", lexical_sentinel],
+            "returncode": completed.returncode,
+            "stdout": completed.stdout.decode("utf-8", errors="replace"),
+            "stderr": completed.stderr.decode("utf-8", errors="replace"),
+        }
+        if completed.returncode != 0:
+            raise CertificationFailure(
+                f"controlled path subprocess failed: {completed.returncode}"
+            )
+        child_record = json.loads(completed.stdout.decode("utf-8"))
+        if child_record != {
+            "argv": lexical_sentinel,
+            "sha256": hashlib.sha256(payload).hexdigest(),
+        }:
+            raise CertificationFailure(
+                "shell-free subprocess did not preserve the controlled lexical argv"
+            )
+        record["direct_read_sha256"] = hashlib.sha256(direct_bytes).hexdigest()
+        record["lexical_read_verified"] = True
+        record["child_observation"] = child_record
+        record["status"] = "VERIFIED"
+        atomic_write_json(evidence_path, record)
+        return record
+    except (CertificationFailure, OSError, ValueError) as error:
+        record["status"] = "FAILED"
+        record["error"] = str(error)
+        atomic_write_json(evidence_path, record)
+        if isinstance(error, CertificationFailure):
+            raise
+        raise CertificationFailure(
+            f"controlled path preflight failed: {error}"
+        ) from error
+    finally:
+        physical_sentinel.unlink(missing_ok=True)
 
 
 def replace_output(command: Sequence[str], output: Path) -> list[str]:
@@ -404,9 +560,59 @@ def load_catalog(repo_root: Path) -> Catalog:
 
 def _blastn_command_row(repo_root: Path, row: dict[str, str]) -> dict[str, str]:
     command_row = dict(row)
-    command_row["query"] = str((repo_root / "LOSAT" / row["query"]).resolve())
-    command_row["subject"] = str((repo_root / "LOSAT" / row["subject"]).resolve())
+    command_row["query"] = str(repo_root / "LOSAT" / row["query"])
+    command_row["subject"] = str(repo_root / "LOSAT" / row["subject"])
     return command_row
+
+
+def _input_arguments(
+    command: Sequence[str], program: str
+) -> list[tuple[str, str, str]]:
+    arguments: list[tuple[str, str, str]] = []
+    for role, aliases in INPUT_OPTIONS[program].items():
+        present = [option for option in aliases if option in command]
+        if len(present) != 1 or command.count(present[0]) != 1:
+            raise CertificationFailure(
+                f"{program} command must contain exactly one {role} input: {command}"
+            )
+        option = present[0]
+        option_index = command.index(option)
+        if option_index + 1 >= len(command):
+            raise CertificationFailure(f"{program} command has no value for {option}")
+        arguments.append((role, option, command[option_index + 1]))
+    return arguments
+
+
+# NCBI reference: ncbi-blast/c++/src/algo/blast/format/blast_format.cpp:794-808
+# ```c++
+# if (m_FormatType == CFormattingArgs::eTabularWithComments) {
+#     if (m_IsDbScan)
+#         dbname = string("User specified sequence set (Input: ")
+#                  + m_SubjectTag + string(")");
+#     tabinfo.PrintHeader(strProgVersion, *(bhandle.GetBioseqCore()),
+#                         dbname, results.GetRID(), itr_num, aln_set,
+#                         subject_bioseq);
+# }
+# ```
+# The input argument is therefore certification provenance for commented tabular
+# output. Only its filesystem layer is redirected to the immutable PR 5 spelling.
+def _adapt_fixture_arguments(
+    command: Sequence[str], program: str, repo_root: Path
+) -> list[str]:
+    updated = list(command)
+    source_root = repo_root / "LOSAT"
+    for _, option, source_value in _input_arguments(updated, program):
+        source_path = Path(source_value)
+        try:
+            relative = source_path.relative_to(source_root)
+        except ValueError as error:
+            raise CertificationFailure(
+                f"authoritative {program} fixture is outside LOSAT: {source_path}"
+            ) from error
+        updated[updated.index(option) + 1] = historical_lexical_path(
+            PurePosixPath(*relative.parts)
+        )
+    return updated
 
 
 def _base_commands(
@@ -422,28 +628,171 @@ def _base_commands(
     unused_losat = output_dir / "unused.losat.out"
     if program == "blastn":
         row = _blastn_command_row(repo_root, catalog.blastn_rows[case_id])
-        return (
+        commands = (
             catalog.blastn_compare.build_ncbi_command(
                 row, str(oracles[program]), unused_ncbi
             ),
             catalog.blastn_compare.build_losat_command(row, native_bin, unused_losat),
         )
-    if program == "blastp":
-        return catalog.blastp_audit.build_commands(
+    elif program == "blastp":
+        commands = catalog.blastp_audit.build_commands(
             catalog.blastp_cases[case_id],
             oracles[program],
             native_bin,
             output_dir,
         )
-    if program == "tblastx":
-        return catalog.tblastx_audit.build_commands(
+    elif program == "tblastx":
+        commands = catalog.tblastx_audit.build_commands(
             catalog.tblastx_cases[case_id],
             oracles[program],
             native_bin,
             unused_ncbi,
             unused_losat,
         )
-    raise CertificationFailure(f"unsupported program: {program}")
+    else:
+        raise CertificationFailure(f"unsupported program: {program}")
+    ncbi_command, losat_command = commands
+    return (
+        _adapt_fixture_arguments(ncbi_command, program, repo_root),
+        _adapt_fixture_arguments(losat_command, program, repo_root),
+    )
+
+
+def _option_value(command: Sequence[str], option: str) -> str:
+    if command.count(option) != 1:
+        raise CertificationFailure(
+            f"command must contain exactly one {option}: {command}"
+        )
+    option_index = command.index(option)
+    if option_index + 1 >= len(command):
+        raise CertificationFailure(f"command has no value for {option}")
+    return command[option_index + 1]
+
+
+def validate_planned_input_contract(steps: Sequence[SearchStep]) -> None:
+    matrix_steps = [step for step in steps if step.kind == "matrix"]
+    if len(matrix_steps) != 43:
+        raise CertificationFailure(
+            f"controlled path validation expected 43 matrix cases, found {len(matrix_steps)}"
+        )
+    prefix = f"{HISTORICAL_LEXICAL_ROOT}/"
+    for step in steps:
+        for _, option, value in _input_arguments(step.command, step.program):
+            if not value.startswith(prefix):
+                raise CertificationFailure(
+                    f"planned {step.step_id} {option} is outside controlled root: {value}"
+                )
+
+    blastn_matrix = [step for step in matrix_steps if step.program == "blastn"]
+    path_sensitive = [
+        step for step in blastn_matrix if _option_value(step.command, "--outfmt") == "7"
+    ]
+    headerless = [
+        step for step in blastn_matrix if _option_value(step.command, "--outfmt") == "6"
+    ]
+    if len(path_sensitive) != 13 or len(headerless) != 1:
+        raise CertificationFailure(
+            "BLASTN path contract must remain 13 outfmt 7 plus one outfmt 6 case"
+        )
+    for step in path_sensitive:
+        subject = {
+            role: value
+            for role, _, value in _input_arguments(step.command, step.program)
+        }["subject"]
+        if not subject.startswith(prefix):
+            raise CertificationFailure(
+                f"BLASTN outfmt 7 subject is outside controlled root: {step.case_id}"
+            )
+
+
+def _fixture_relative_from_lexical(lexical_path: str) -> PurePosixPath:
+    prefix = f"{HISTORICAL_LEXICAL_ROOT}/"
+    if not lexical_path.startswith(prefix):
+        raise CertificationFailure(
+            f"fixture argument is outside controlled root: {lexical_path}"
+        )
+    return _controlled_relative(lexical_path.removeprefix(prefix))
+
+
+def required_fixture_relatives(steps: Sequence[SearchStep]) -> list[PurePosixPath]:
+    required: set[PurePosixPath] = set()
+    for step in steps:
+        if step.kind != "matrix":
+            continue
+        for _, _, value in _input_arguments(step.command, step.program):
+            required.add(_fixture_relative_from_lexical(value))
+    return sorted(required, key=PurePosixPath.as_posix)
+
+
+def stage_required_fixtures(
+    repo_root: Path, steps: Sequence[SearchStep], output_dir: Path
+) -> list[StagedFixture]:
+    evidence_path = output_dir / "fixture-staging.json"
+    records: list[StagedFixture] = []
+    status = "IN_PROGRESS"
+    failure: str | None = None
+    try:
+        for relative in required_fixture_relatives(steps):
+            source_repo_relative = PurePosixPath("LOSAT") / relative
+            source = repo_root.joinpath(*source_repo_relative.parts)
+            lexical_target = historical_lexical_path(relative)
+            physical_target = controlled_physical_path(lexical_target)
+            if not source.is_file():
+                raise CertificationFailure(
+                    f"authoritative fixture is missing: {source_repo_relative.as_posix()}"
+                )
+            source_hash = sha256_path(source)
+            physical_target.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copyfile(source, physical_target)
+            target_hash = sha256_path(physical_target)
+            if (
+                target_hash != source_hash
+                or physical_target.read_bytes() != source.read_bytes()
+            ):
+                raise CertificationFailure(
+                    f"staged fixture bytes changed: {source_repo_relative.as_posix()}"
+                )
+            records.append(
+                StagedFixture(
+                    source_repo_relative=source_repo_relative.as_posix(),
+                    source_path=str(source.absolute()),
+                    lexical_target_path=lexical_target,
+                    physical_target_path=str(physical_target),
+                    sha256=source_hash,
+                )
+            )
+        status = "VERIFIED"
+        return records
+    except (CertificationFailure, OSError) as error:
+        failure = str(error)
+        if isinstance(error, CertificationFailure):
+            raise
+        raise CertificationFailure(f"fixture staging failed: {error}") from error
+    finally:
+        evidence: dict[str, object] = {
+            "status": status if failure is None else "FAILED",
+            "lexical_root": HISTORICAL_LEXICAL_ROOT,
+            "staged_input_count": len(records),
+            "inputs": [asdict(record) for record in records],
+        }
+        if failure is not None:
+            evidence["error"] = failure
+        atomic_write_json(evidence_path, evidence)
+
+
+def fixture_staging_identity(records: Sequence[StagedFixture]) -> dict[str, object]:
+    return {
+        "lexical_root": HISTORICAL_LEXICAL_ROOT,
+        "staged_input_count": len(records),
+        "inputs": [
+            {
+                "source_repo_relative": record.source_repo_relative,
+                "lexical_target_path": record.lexical_target_path,
+                "sha256": record.sha256,
+            }
+            for record in records
+        ],
+    }
 
 
 # NCBI reference: ncbi-blast/c++/src/algo/blast/format/blast_format.cpp:770-832
@@ -569,6 +918,7 @@ def build_steps(
         raise CertificationFailure(
             f"execution plan must be exactly 43+6+12=61, observed {dict(counts)}"
         )
+    validate_planned_input_contract(steps)
     return steps
 
 
@@ -764,6 +1114,7 @@ def record_identity(
     archive_record: dict[str, str],
     oracles: dict[str, Path],
     canonical_manifest: Path,
+    controlled_fixtures: dict[str, object],
 ) -> dict[str, object]:
     observed_os = platform.system()
     observed_machine = normalize_machine(platform.machine())
@@ -858,6 +1209,7 @@ def record_identity(
             "runtime_cert_sha": RUNTIME_CERT_SHA,
             "pr5_evidence_manifest_sha256": PR5_EVIDENCE_MANIFEST_SHA256,
         },
+        "controlled_fixtures": controlled_fixtures,
         "execution_contract": {
             "matrix": 43,
             "oracle": 6,
@@ -899,6 +1251,10 @@ def _write_state(
 
 
 def _identity_resume_key(identity: dict[str, object]) -> dict[str, object]:
+    if "controlled_fixtures" not in identity:
+        raise CertificationFailure(
+            "resume identity lacks the controlled fixture-path contract"
+        )
     return {
         "evidence_schema": identity["evidence_schema"],
         "source_sha": identity["source_sha"],
@@ -911,6 +1267,7 @@ def _identity_resume_key(identity: dict[str, object]) -> dict[str, object]:
             program: value["sha256"] for program, value in identity["oracles"].items()
         },
         "canonical_manifest_sha256": identity["canonical_manifest"]["sha256"],
+        "controlled_fixtures": identity["controlled_fixtures"],
     }
 
 
@@ -1032,6 +1389,7 @@ def _execute_step(
         capture_output=True,
         text=False,
         check=False,
+        shell=False,
     )
     log_dir = partial_output.parent
     atomic_write_bytes(log_dir / "stdout.log", completed.stdout)
@@ -1245,7 +1603,7 @@ def certify(args: argparse.Namespace) -> None:
     output_dir = args.output_dir.resolve()
     output_dir.mkdir(parents=True, exist_ok=True)
     preexisting = {path.name for path in output_dir.iterdir()}
-    if preexisting - {"workflow-started.txt"}:
+    if preexisting - {"workflow-started.txt", "controlled-path-preflight.json"}:
         raise CertificationFailure(f"output directory must be new or empty: {output_dir}")
     platform_spec = PLATFORMS[args.platform_id]
     initial_state = {
@@ -1256,6 +1614,7 @@ def certify(args: argparse.Namespace) -> None:
         "expected_execution_count": 61,
     }
     atomic_write_json(output_dir / "state.json", initial_state)
+    preflight_controlled_fixture_path(output_dir)
     certified_sha = validate_git_identity(repo_root, args.expected_sha)
     archive_record = verify_archive(
         platform_spec, args.oracle_archive.resolve(), args.oracle_checksum.resolve()
@@ -1268,6 +1627,21 @@ def certify(args: argparse.Namespace) -> None:
     canonical_manifest = (
         repo_root / "LOSAT" / "tests" / "platform_native_v010_canonical.tsv"
     )
+    catalog = load_catalog(repo_root)
+    steps = build_steps(
+        repo_root,
+        output_dir,
+        catalog,
+        args.native_bin.resolve(),
+        oracles,
+    )
+    staged_fixtures = stage_required_fixtures(repo_root, steps, output_dir)
+    if len(staged_fixtures) != EXPECTED_STAGED_FIXTURE_COUNT:
+        raise CertificationFailure(
+            "controlled fixture set changed: "
+            f"expected {EXPECTED_STAGED_FIXTURE_COUNT}, found {len(staged_fixtures)}"
+        )
+    controlled_fixtures = fixture_staging_identity(staged_fixtures)
     identity = record_identity(
         repo_root,
         output_dir,
@@ -1277,14 +1651,7 @@ def certify(args: argparse.Namespace) -> None:
         archive_record,
         oracles,
         canonical_manifest,
-    )
-    catalog = load_catalog(repo_root)
-    steps = build_steps(
-        repo_root,
-        output_dir,
-        catalog,
-        args.native_bin.resolve(),
-        oracles,
+        controlled_fixtures,
     )
     atomic_write_json(
         output_dir / "command_plan.json",
@@ -1293,6 +1660,8 @@ def certify(args: argparse.Namespace) -> None:
             "platform_id": platform_spec.platform_id,
             "created_at": utc_now(),
             "execution_count": len(steps),
+            "controlled_fixture_root": HISTORICAL_LEXICAL_ROOT,
+            "staged_fixture_count": len(staged_fixtures),
             "executions": [asdict(step) for step in steps],
         },
     )
@@ -1329,6 +1698,22 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
     archive_parser.add_argument("--archive", type=Path, required=True)
     archive_parser.add_argument("--checksum", type=Path, required=True)
 
+    extraction_parser = subparsers.add_parser(
+        "extract-verified-archive",
+        help="extract a pinned official NCBI archive with Python tarfile",
+    )
+    extraction_parser.add_argument(
+        "--platform-id", choices=sorted(PLATFORMS), required=True
+    )
+    extraction_parser.add_argument("--archive", type=Path, required=True)
+    extraction_parser.add_argument("--checksum", type=Path, required=True)
+    extraction_parser.add_argument("--destination", type=Path, required=True)
+
+    preflight_parser = subparsers.add_parser(
+        "preflight-path", help="verify the controlled historical fixture path"
+    )
+    preflight_parser.add_argument("--output-dir", type=Path, required=True)
+
     certify_parser = subparsers.add_parser(
         "certify", help="run or resume the exact 61-execution platform gate"
     )
@@ -1354,6 +1739,17 @@ def main(argv: Sequence[str] | None = None) -> int:
             record = verify_archive(
                 PLATFORMS[args.platform_id], args.archive.resolve(), args.checksum.resolve()
             )
+            print(json.dumps(record, sort_keys=True))
+        elif args.mode == "extract-verified-archive":
+            record = extract_verified_archive(
+                PLATFORMS[args.platform_id],
+                args.archive.resolve(),
+                args.checksum.resolve(),
+                args.destination.absolute(),
+            )
+            print(json.dumps(record, sort_keys=True))
+        elif args.mode == "preflight-path":
+            record = preflight_controlled_fixture_path(args.output_dir.resolve())
             print(json.dumps(record, sort_keys=True))
         else:
             certify(args)

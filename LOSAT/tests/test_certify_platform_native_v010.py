@@ -13,11 +13,14 @@ from collections import Counter
 from dataclasses import replace
 import hashlib
 import importlib.util
+import io
 import json
 from pathlib import Path
 import sys
+import tarfile
 import tempfile
 import unittest
+from unittest import mock
 
 
 SCRIPT = Path(__file__).with_name("certify_platform_native_v010.py")
@@ -114,6 +117,280 @@ class PlatformCertificationTests(unittest.TestCase):
                 for program, case_id, _ in platform_cert.REPRESENTATIVES
             },
         )
+
+    def test_planned_fixture_paths_use_pr5_root_without_resolved_path_leaks(
+        self,
+    ) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            steps = platform_cert.build_steps(
+                self.repo_root,
+                root,
+                self.catalog,
+                root / "LOSAT",
+                {
+                    "blastn": root / "blastn",
+                    "blastp": root / "blastp",
+                    "tblastx": root / "tblastx",
+                },
+            )
+        self.assertEqual(
+            platform_cert.HISTORICAL_LEXICAL_ROOT,
+            "/tmp/losat-pr5-runtime-cert-5845d22/LOSAT",
+        )
+        matrix = [step for step in steps if step.kind == "matrix"]
+        self.assertEqual(len(matrix), 43)
+        blastn = [step for step in matrix if step.program == "blastn"]
+        path_sensitive = {
+            step.case_id
+            for step in blastn
+            if platform_cert._option_value(step.command, "--outfmt") == "7"
+        }
+        self.assertEqual(
+            path_sensitive,
+            {
+                "PesePMNV.MjPMNV.task_blastn",
+                "PmeNMV.MjPMNV.task_blastn",
+                "PmeNMV.PesePMNV.task_blastn",
+                "PeseMJNV.PemoMJNVB.task_blastn",
+                "MelaMJNV.PemoMJNVA.task_blastn",
+                "PemoMJNVA.PeseMJNV.task_blastn",
+                "MjeNMV.MelaMJNV.task_blastn",
+                "MjPMNV.MlPMNV.task_blastn",
+                "NZ_CP006932.NZ_CP006932.task_blastn",
+                "EDL933.Sakai.megablast",
+                "Sakai.MG1655.megablast",
+                "compact.multi_query.outfmt7",
+                "compact.multi_query.no_hit.outfmt7",
+            },
+        )
+        headerless = [step for step in blastn if step.case_id not in path_sensitive]
+        self.assertEqual(
+            [step.case_id for step in headerless], ["compact.multi_query.outfmt6"]
+        )
+        prefix = f"{platform_cert.HISTORICAL_LEXICAL_ROOT}/"
+        for step in steps:
+            for _, _, value in platform_cert._input_arguments(
+                step.command, step.program
+            ):
+                self.assertTrue(value.startswith(prefix))
+                self.assertNotIn(str(self.repo_root), value)
+                self.assertNotIn("\\", value)
+        for step in matrix:
+            if step.program in {"blastp", "tblastx"}:
+                self.assertEqual(
+                    platform_cert._option_value(step.command, "--outfmt"), "6"
+                )
+                self.assertEqual(
+                    step.expected_losat_sha256,
+                    self.catalog.canonical[(step.program, step.case_id)][
+                        "losat_sha256"
+                    ],
+                )
+        self.assertEqual(
+            len(platform_cert.required_fixture_relatives(steps)),
+            platform_cert.EXPECTED_STAGED_FIXTURE_COUNT,
+        )
+
+    def test_fixture_staging_preserves_source_bytes_and_records_both_paths(
+        self,
+    ) -> None:
+        relative = Path("tests/fasta/platform_cert_stage_unit_fixture.fa")
+        lexical = platform_cert.historical_lexical_path(relative.as_posix())
+        physical = platform_cert.controlled_physical_path(lexical)
+        payload = b">fixture\r\nACGTN\r\n"
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            source = root / "LOSAT" / relative
+            source.parent.mkdir(parents=True)
+            source.write_bytes(payload)
+            output = root / "evidence"
+            output.mkdir()
+            step = platform_cert.SearchStep(
+                execution_index=1,
+                step_id="matrix:blastn:fixture",
+                kind="matrix",
+                program="blastn",
+                case_id="fixture",
+                semantic_class="EXACT_TEXT",
+                run_index=1,
+                command=(
+                    "LOSAT",
+                    "blastn",
+                    "-q",
+                    lexical,
+                    "-s",
+                    lexical,
+                    "--outfmt",
+                    "7",
+                    "-o",
+                    "unused.out",
+                ),
+                environment=(),
+                output_rel="unused.out.partial",
+                final_output_rel="unused.out",
+                expected_losat_sha256="0" * 64,
+            )
+            try:
+                records = platform_cert.stage_required_fixtures(root, [step], output)
+                self.assertEqual(len(records), 1)
+                self.assertEqual(physical.read_bytes(), payload)
+                self.assertEqual(records[0].lexical_target_path, lexical)
+                self.assertEqual(records[0].physical_target_path, str(physical))
+                self.assertEqual(records[0].sha256, hashlib.sha256(payload).hexdigest())
+                evidence = json.loads(
+                    (output / "fixture-staging.json").read_text(encoding="utf-8")
+                )
+                self.assertEqual(evidence["status"], "VERIFIED")
+                self.assertEqual(evidence["staged_input_count"], 1)
+            finally:
+                physical.unlink(missing_ok=True)
+
+    def test_physical_and_lexical_controlled_paths_are_not_conflated(self) -> None:
+        lexical = platform_cert.historical_lexical_path("tests/fasta/fixture.fa")
+        with mock.patch.object(
+            platform_cert.os.path,
+            "abspath",
+            return_value=r"D:\tmp\losat-pr5-runtime-cert-5845d22\LOSAT\tests\fasta\fixture.fa",
+        ):
+            physical = platform_cert.controlled_physical_path(lexical)
+        self.assertEqual(
+            lexical,
+            "/tmp/losat-pr5-runtime-cert-5845d22/LOSAT/tests/fasta/fixture.fa",
+        )
+        self.assertNotEqual(str(physical), lexical)
+
+    def test_controlled_path_preflight_proves_literal_shell_free_argv(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            output = Path(temporary)
+            record = platform_cert.preflight_controlled_fixture_path(output)
+            evidence = json.loads(
+                (output / "controlled-path-preflight.json").read_text(encoding="utf-8")
+            )
+        self.assertEqual(record["status"], "VERIFIED")
+        self.assertEqual(
+            evidence["child_observation"]["argv"], record["lexical_sentinel_path"]
+        )
+        self.assertFalse(evidence["subprocess_contract"]["shell"])
+        self.assertFalse(evidence["subprocess_contract"]["msys_or_git_bash_involved"])
+
+    def test_controlled_path_preflight_is_fail_closed_before_search(self) -> None:
+        lexical = platform_cert.historical_lexical_path(
+            ".platform-native-certification-path-preflight"
+        )
+        altered = json.dumps(
+            {
+                "argv": r"D:\tmp\rewritten-by-a-shell",
+                "sha256": hashlib.sha256(
+                    b"LOSAT_PLATFORM_CERTIFICATION_PATH_PREFLIGHT\n"
+                ).hexdigest(),
+            }
+        ).encode()
+        completed = platform_cert.subprocess.CompletedProcess(
+            args=[sys.executable, "-c", "<probe>", lexical],
+            returncode=0,
+            stdout=altered,
+            stderr=b"",
+        )
+        with tempfile.TemporaryDirectory() as temporary:
+            output = Path(temporary)
+            with mock.patch.object(
+                platform_cert.subprocess, "run", return_value=completed
+            ):
+                with self.assertRaises(platform_cert.CertificationFailure):
+                    platform_cert.preflight_controlled_fixture_path(output)
+            evidence = json.loads(
+                (output / "controlled-path-preflight.json").read_text(encoding="utf-8")
+            )
+        self.assertEqual(evidence["status"], "FAILED")
+        self.assertIn("did not preserve", evidence["error"])
+
+    def test_matrix_hashing_preserves_raw_output_without_rewriting(self) -> None:
+        payload = (
+            b"# BLASTN 2.17.0+\r\n"
+            b"# Database: /tmp/losat-pr5-runtime-cert-5845d22/LOSAT/tests/fasta/s.fa\r\n"
+            b"q\ts\t100.000\r\n"
+        )
+        raw_hash = hashlib.sha256(payload).hexdigest()
+        self.assertNotEqual(
+            raw_hash,
+            hashlib.sha256(platform_cert.canonical_newlines(payload)).hexdigest(),
+        )
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            output_rel = "matrix/blastn/fixture/losat.out.partial"
+            partial = root / output_rel
+            writer = (
+                "from pathlib import Path;import sys;"
+                "Path(sys.argv[1]).parent.mkdir(parents=True,exist_ok=True);"
+                "Path(sys.argv[1]).write_bytes(bytes.fromhex(sys.argv[2]))"
+            )
+            step = platform_cert.SearchStep(
+                execution_index=1,
+                step_id="matrix:blastn:fixture",
+                kind="matrix",
+                program="blastn",
+                case_id="fixture",
+                semantic_class="EXACT_TEXT",
+                run_index=1,
+                command=(sys.executable, "-c", writer, str(partial), payload.hex()),
+                environment=(),
+                output_rel=output_rel,
+                final_output_rel=output_rel.removesuffix(".partial"),
+                expected_losat_sha256=raw_hash,
+            )
+            identity = {
+                "source_sha": "a" * 40,
+                "platform_id": "test",
+                "losat": {"sha256": "b" * 64},
+            }
+            record = platform_cert._execute_step(
+                root, root, identity, self.catalog, step
+            )
+            final_output = root / step.final_output_rel
+            self.assertEqual(final_output.read_bytes(), payload)
+            self.assertIn(b"# Database:", final_output.read_bytes())
+            self.assertEqual(record["output_sha256"], raw_hash)
+            self.assertEqual(
+                record["verification"]["classification"],
+                "CANONICAL_PR5_RAW_BYTES",
+            )
+
+    def test_python_tarfile_extracts_only_after_pinned_verification(self) -> None:
+        payload = b"official oracle fixture\n"
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            archive = root / "fixture.tar.gz"
+            with tarfile.open(archive, mode="w:gz") as bundle:
+                member = tarfile.TarInfo("ncbi-blast-2.17.0+/bin/blastn")
+                member.size = len(payload)
+                bundle.addfile(member, io.BytesIO(payload))
+            digest = hashlib.md5(
+                archive.read_bytes(), usedforsecurity=False
+            ).hexdigest()
+            spec = replace(
+                platform_cert.PLATFORMS["macos-arm64"],
+                archive_name=archive.name,
+                archive_md5=digest,
+            )
+            checksum = root / f"{archive.name}.md5"
+            destination = root / "oracle"
+            checksum.write_text(f"{'0' * 32}  {archive.name}\n", encoding="ascii")
+            with self.assertRaises(platform_cert.CertificationFailure):
+                platform_cert.extract_verified_archive(
+                    spec, archive, checksum, destination
+                )
+            self.assertFalse(destination.exists())
+            checksum.write_text(f"{digest}  {archive.name}\n", encoding="ascii")
+            record = platform_cert.extract_verified_archive(
+                spec, archive, checksum, destination
+            )
+            self.assertEqual(
+                (destination / "ncbi-blast-2.17.0+/bin/blastn").read_bytes(),
+                payload,
+            )
+            self.assertEqual(record["status"], "EXTRACTED_VERIFIED_ARCHIVE")
+            self.assertEqual(record["member_count"], 1)
 
     def test_archive_requires_pinned_published_record_and_content(self) -> None:
         content = b"official archive fixture"
@@ -221,10 +498,18 @@ class PlatformCertificationTests(unittest.TestCase):
                 "tblastx": {"sha256": "f" * 64},
             },
             "canonical_manifest": {"sha256": "1" * 64},
+            "controlled_fixtures": {
+                "lexical_root": platform_cert.HISTORICAL_LEXICAL_ROOT,
+                "staged_input_count": 34,
+                "inputs": [],
+            },
         }
         key = platform_cert._identity_resume_key(identity)
         changed = json.loads(json.dumps(identity))
         changed["losat"]["sha256"] = "2" * 64
+        self.assertNotEqual(key, platform_cert._identity_resume_key(changed))
+        changed = json.loads(json.dumps(identity))
+        changed["controlled_fixtures"]["lexical_root"] = "/tmp/not-authoritative"
         self.assertNotEqual(key, platform_cert._identity_resume_key(changed))
 
     def test_manual_workflow_has_only_the_three_pr6_platform_jobs(self) -> None:
@@ -241,6 +526,9 @@ class PlatformCertificationTests(unittest.TestCase):
         for excluded in ("ubuntu-latest", "wasm32", "benchmark", "soak"):
             self.assertNotIn(excluded, workflow.lower())
         self.assertIn("--expected-sha \"$CANDIDATE_SHA\"", workflow)
+        self.assertIn("preflight-path", workflow)
+        self.assertIn("extract-verified-archive", workflow)
+        self.assertNotIn("tar -xzf", workflow)
         self.assertIn("actions/upload-artifact@v4", workflow)
         self.assertIn("if: ${{ always() }}", workflow)
 
@@ -261,6 +549,11 @@ class PlatformCertificationTests(unittest.TestCase):
                 "tblastx": {"sha256": "f" * 64},
             },
             "canonical_manifest": {"sha256": "1" * 64},
+            "controlled_fixtures": {
+                "lexical_root": platform_cert.HISTORICAL_LEXICAL_ROOT,
+                "staged_input_count": 34,
+                "inputs": [],
+            },
         }
         step = platform_cert.SearchStep(
             execution_index=1,

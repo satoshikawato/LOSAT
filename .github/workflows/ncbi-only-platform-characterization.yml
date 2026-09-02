@@ -1,0 +1,344 @@
+name: NCBI-only Platform Characterization
+
+run-name: NCBI-only platform characterization ${{ inputs.candidate_sha }}
+
+on:
+  workflow_dispatch:
+    inputs:
+      candidate_sha:
+        description: Exact committed diagnostic candidate SHA
+        required: true
+        type: string
+
+permissions:
+  actions: read
+  contents: read
+
+defaults:
+  run:
+    shell: bash
+
+env:
+  PR6_CERT_SHA_V3: 0e29e2201e2d1b03124c0b9d6698a81bfed8cec0
+
+jobs:
+  stage-fixtures:
+    name: Stage immutable fixtures (${{ matrix.platform_id }})
+    strategy:
+      fail-fast: false
+      max-parallel: 3
+      matrix:
+        include:
+          - platform_id: windows-x64
+            runner: windows-2025
+          - platform_id: macos-arm64
+            runner: macos-15
+          - platform_id: macos-x64
+            runner: macos-15-intel
+    runs-on: ${{ matrix.runner }}
+    env:
+      CANDIDATE_SHA: ${{ inputs.candidate_sha }}
+      FIXTURE_ARTIFACT_DIR: ${{ github.workspace }}/ncbi-characterization-fixtures/${{ matrix.platform_id }}
+    steps:
+      - name: Validate candidate input
+        run: |
+          set -euo pipefail
+          if [[ ! "$CANDIDATE_SHA" =~ ^[0-9a-f]{40}$ ]]; then
+            echo "candidate_sha must be exactly 40 lowercase hex digits" >&2
+            exit 1
+          fi
+
+      - uses: actions/checkout@v4
+        with:
+          clean: false
+          fetch-depth: 0
+          ref: ${{ inputs.candidate_sha }}
+
+      - name: Verify exact candidate and V3 ancestry
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$CANDIDATE_SHA"
+          git merge-base --is-ancestor "$PR6_CERT_SHA_V3" "$CANDIDATE_SHA"
+
+      - name: Stage fixture bytes from immutable Git objects
+        run: |
+          set -euo pipefail
+          python LOSAT/tests/characterize_ncbi_platform_variance_v010.py stage-fixtures \
+            --candidate-sha "$CANDIDATE_SHA" \
+            --platform-id "${{ matrix.platform_id }}" \
+            --output-dir "$FIXTURE_ARTIFACT_DIR"
+
+      - name: Upload platform fixture evidence
+        uses: actions/upload-artifact@v4
+        with:
+          name: ncbi-characterization-fixtures-${{ matrix.platform_id }}
+          path: ${{ env.FIXTURE_ARTIFACT_DIR }}
+          if-no-files-found: error
+          retention-days: 30
+
+  verify-fixture-invariance:
+    name: Verify three-platform fixture invariance
+    needs: stage-fixtures
+    runs-on: ubuntu-24.04
+    env:
+      CANDIDATE_SHA: ${{ inputs.candidate_sha }}
+      FIXTURE_ROOT: ${{ github.workspace }}/fixture-bundles
+      GATE_ROOT: ${{ github.workspace }}/fixture-invariance
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          clean: false
+          fetch-depth: 1
+          ref: ${{ inputs.candidate_sha }}
+
+      - uses: actions/download-artifact@v4
+        with:
+          name: ncbi-characterization-fixtures-windows-x64
+          path: ${{ env.FIXTURE_ROOT }}/windows-x64
+
+      - uses: actions/download-artifact@v4
+        with:
+          name: ncbi-characterization-fixtures-macos-arm64
+          path: ${{ env.FIXTURE_ROOT }}/macos-arm64
+
+      - uses: actions/download-artifact@v4
+        with:
+          name: ncbi-characterization-fixtures-macos-x64
+          path: ${{ env.FIXTURE_ROOT }}/macos-x64
+
+      - name: Compare all staged fixture identities before NCBI
+        run: |
+          set -euo pipefail
+          mkdir -p "$GATE_ROOT"
+          python LOSAT/tests/characterize_ncbi_platform_variance_v010.py \
+            verify-fixture-invariance \
+            --manifest "$FIXTURE_ROOT/windows-x64/fixture_manifest.json" \
+            --manifest "$FIXTURE_ROOT/macos-arm64/fixture_manifest.json" \
+            --manifest "$FIXTURE_ROOT/macos-x64/fixture_manifest.json" \
+            --output "$GATE_ROOT/fixture_invariance.json"
+
+      - name: Upload fixture-invariance gate
+        uses: actions/upload-artifact@v4
+        with:
+          name: ncbi-characterization-fixture-invariance
+          path: ${{ env.GATE_ROOT }}
+          if-no-files-found: error
+          retention-days: 30
+
+  retained-linux-evidence:
+    name: Export retained PR 5 Linux evidence without rerun
+    runs-on: [self-hosted, linux, x64, losat-certification]
+    env:
+      LINUX_EVIDENCE_ROOT: /mnt/c/Users/genom/LOSAT-certification-evidence/losat-pr5-integrated-5845d22-20260831-resumed-final
+      LINUX_ARTIFACT_DIR: /tmp/losat-ncbi-characterization-linux-${{ github.run_id }}-${{ github.run_attempt }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          clean: false
+          fetch-depth: 1
+          ref: ${{ inputs.candidate_sha }}
+
+      - name: Verify exact diagnostic candidate
+        run: test "$(git rev-parse HEAD)" = "${{ inputs.candidate_sha }}"
+
+      - name: Export only the retained six Linux oracle outputs
+        run: |
+          set -euo pipefail
+          python LOSAT/tests/characterize_ncbi_platform_variance_v010.py \
+            export-linux-reference \
+            --source-root "$LINUX_EVIDENCE_ROOT" \
+            --output-dir "$LINUX_ARTIFACT_DIR"
+
+      - name: Upload verified retained Linux evidence
+        uses: actions/upload-artifact@v4
+        with:
+          name: ncbi-characterization-retained-linux
+          path: ${{ env.LINUX_ARTIFACT_DIR }}
+          if-no-files-found: error
+          retention-days: 30
+
+  characterize:
+    name: Official NCBI only (${{ matrix.platform_id }})
+    needs: [verify-fixture-invariance, retained-linux-evidence]
+    timeout-minutes: 180
+    strategy:
+      fail-fast: false
+      max-parallel: 3
+      matrix:
+        include:
+          - platform_id: windows-x64
+            runner: windows-2025
+            executable_suffix: .exe
+            oracle_archive: ncbi-blast-2.17.0+-x64-win64.tar.gz
+          - platform_id: macos-arm64
+            runner: macos-15
+            executable_suffix: ""
+            oracle_archive: ncbi-blast-2.17.0+-aarch64-macosx.tar.gz
+          - platform_id: macos-x64
+            runner: macos-15-intel
+            executable_suffix: ""
+            oracle_archive: ncbi-blast-2.17.0+-x64-macosx.tar.gz
+    runs-on: ${{ matrix.runner }}
+    env:
+      CANDIDATE_SHA: ${{ inputs.candidate_sha }}
+      PLATFORM_ID: ${{ matrix.platform_id }}
+      FIXTURE_BUNDLE: ${{ github.workspace }}/fixture-bundle
+      INVARIANCE_ROOT: ${{ github.workspace }}/fixture-invariance
+      LINUX_BUNDLE: ${{ github.workspace }}/retained-linux
+      DOWNLOAD_DIR: ${{ github.workspace }}/ncbi-characterization-downloads/${{ matrix.platform_id }}
+      ORACLE_DIR: ${{ github.workspace }}/ncbi-characterization-oracle/${{ matrix.platform_id }}
+      EVIDENCE_DIR: ${{ github.workspace }}/ncbi-characterization-evidence/${{ matrix.platform_id }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          clean: false
+          fetch-depth: 0
+          ref: ${{ inputs.candidate_sha }}
+
+      - name: Initialize fail-closed evidence directory
+        run: |
+          set -euo pipefail
+          mkdir -p "$EVIDENCE_DIR" "$DOWNLOAD_DIR" "$ORACLE_DIR"
+          printf '%s\n' \
+            "status=PREEXECUTION" \
+            "candidate_sha=$CANDIDATE_SHA" \
+            "platform_id=$PLATFORM_ID" \
+            "losat_executions=0" \
+            "expected_authoritative_ncbi_searches=6" \
+            "expected_diagnostic_ncbi_searches=6" \
+            "expected_ncbi_searches=12" \
+            > "$EVIDENCE_DIR/workflow_state.txt"
+
+      - uses: actions/download-artifact@v4
+        with:
+          name: ncbi-characterization-fixtures-${{ matrix.platform_id }}
+          path: ${{ env.FIXTURE_BUNDLE }}
+
+      - uses: actions/download-artifact@v4
+        with:
+          name: ncbi-characterization-fixture-invariance
+          path: ${{ env.INVARIANCE_ROOT }}
+
+      - uses: actions/download-artifact@v4
+        with:
+          name: ncbi-characterization-retained-linux
+          path: ${{ env.LINUX_BUNDLE }}
+
+      - name: Download official NCBI BLAST+ 2.17.0 archive and published MD5
+        env:
+          ARCHIVE_NAME: ${{ matrix.oracle_archive }}
+        run: |
+          set -euo pipefail
+          encoded_name="${ARCHIVE_NAME/+/%2B}"
+          base_url="https://ftp.ncbi.nlm.nih.gov/blast/executables/blast%2B/2.17.0"
+          curl --fail --location --retry 3 \
+            --output "$DOWNLOAD_DIR/$ARCHIVE_NAME" \
+            "$base_url/$encoded_name"
+          curl --fail --location --retry 3 \
+            --output "$DOWNLOAD_DIR/$ARCHIVE_NAME.md5" \
+            "$base_url/$encoded_name.md5"
+
+      - name: Verify and extract the pinned official archive
+        env:
+          ARCHIVE_NAME: ${{ matrix.oracle_archive }}
+        run: |
+          set -euo pipefail
+          python LOSAT/tests/certify_platform_native_v010.py verify-archive \
+            --platform-id "$PLATFORM_ID" \
+            --archive "$DOWNLOAD_DIR/$ARCHIVE_NAME" \
+            --checksum "$DOWNLOAD_DIR/$ARCHIVE_NAME.md5"
+          python LOSAT/tests/certify_platform_native_v010.py extract-verified-archive \
+            --platform-id "$PLATFORM_ID" \
+            --archive "$DOWNLOAD_DIR/$ARCHIVE_NAME" \
+            --checksum "$DOWNLOAD_DIR/$ARCHIVE_NAME.md5" \
+            --destination "$ORACLE_DIR"
+
+      - name: Run exactly six authoritative and six diagnostic NCBI searches
+        env:
+          ARCHIVE_NAME: ${{ matrix.oracle_archive }}
+          EXECUTABLE_SUFFIX: ${{ matrix.executable_suffix }}
+        run: |
+          set -euo pipefail
+          oracle_bin="$ORACLE_DIR/ncbi-blast-2.17.0+/bin"
+          # NCBI references:
+          # ncbi-blast/c++/src/objtools/align_format/format_flags.cpp:38-45
+          # ncbi-blast/c++/src/objtools/align_format/tabular.cpp:1098-1108
+          # The existing authorities build each authoritative command. The
+          # driver runs it first, then runs its paired rich-output command with
+          # no argv change except -outfmt. It never invokes LOSAT.
+          python LOSAT/tests/characterize_ncbi_platform_variance_v010.py characterize \
+            --candidate-sha "$CANDIDATE_SHA" \
+            --platform-id "$PLATFORM_ID" \
+            --output-dir "$EVIDENCE_DIR" \
+            --fixture-bundle "$FIXTURE_BUNDLE" \
+            --invariance-manifest "$INVARIANCE_ROOT/fixture_invariance.json" \
+            --linux-bundle "$LINUX_BUNDLE" \
+            --oracle-archive "$DOWNLOAD_DIR/$ARCHIVE_NAME" \
+            --oracle-checksum "$DOWNLOAD_DIR/$ARCHIVE_NAME.md5" \
+            --blastn-oracle "$oracle_bin/blastn$EXECUTABLE_SUFFIX" \
+            --blastp-oracle "$oracle_bin/blastp$EXECUTABLE_SUFFIX" \
+            --tblastx-oracle "$oracle_bin/tblastx$EXECUTABLE_SUFFIX"
+
+      - name: Upload machine-auditable characterization evidence
+        if: ${{ always() }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: ncbi-characterization-${{ matrix.platform_id }}
+          path: ${{ env.EVIDENCE_DIR }}
+          if-no-files-found: error
+          retention-days: 30
+
+  analyze-rich-diagnostics:
+    name: Compare retained Linux and three-platform rich diagnostics
+    needs: [characterize, retained-linux-evidence]
+    runs-on: ubuntu-24.04
+    env:
+      PLATFORM_ROOT: ${{ github.workspace }}/platform-evidence
+      LINUX_BUNDLE: ${{ github.workspace }}/retained-linux
+      ANALYSIS_ROOT: ${{ github.workspace }}/rich-diagnostic-analysis
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          clean: false
+          fetch-depth: 1
+          ref: ${{ inputs.candidate_sha }}
+
+      - uses: actions/download-artifact@v4
+        with:
+          name: ncbi-characterization-windows-x64
+          path: ${{ env.PLATFORM_ROOT }}/windows-x64
+
+      - uses: actions/download-artifact@v4
+        with:
+          name: ncbi-characterization-macos-arm64
+          path: ${{ env.PLATFORM_ROOT }}/macos-arm64
+
+      - uses: actions/download-artifact@v4
+        with:
+          name: ncbi-characterization-macos-x64
+          path: ${{ env.PLATFORM_ROOT }}/macos-x64
+
+      - uses: actions/download-artifact@v4
+        with:
+          name: ncbi-characterization-retained-linux
+          path: ${{ env.LINUX_BUNDLE }}
+
+      - name: Enforce 18 authoritative plus 18 diagnostic searches
+        run: |
+          set -euo pipefail
+          mkdir -p "$ANALYSIS_ROOT"
+          python LOSAT/tests/characterize_ncbi_platform_variance_v010.py \
+            analyze-platforms \
+            --platform-evidence "$PLATFORM_ROOT/windows-x64" \
+            --platform-evidence "$PLATFORM_ROOT/macos-arm64" \
+            --platform-evidence "$PLATFORM_ROOT/macos-x64" \
+            --linux-bundle "$LINUX_BUNDLE" \
+            --output "$ANALYSIS_ROOT/rich_diagnostic_analysis.json"
+
+      - name: Upload separated rich diagnostic analysis
+        uses: actions/upload-artifact@v4
+        with:
+          name: ncbi-characterization-rich-diagnostic-analysis
+          path: ${{ env.ANALYSIS_ROOT }}
+          if-no-files-found: error
+          retention-days: 30

@@ -584,6 +584,221 @@ class DiagnosticSeparationTests(unittest.TestCase):
         self.assertEqual(distinct_count, 2)
 
 
+# NCBI references:
+# - ncbi-blast/c++/src/objtools/align_format/format_flags.cpp:38-45,
+#   57-68, 86-101, 114-119, 144-146 defines the invariant and rich fields.
+# - ncbi-blast/c++/src/objtools/align_format/tabular.cpp:762-773 obtains score,
+#   E-value, and bit score; 778-840 obtains IDs; 900-1027 derives alignment
+#   length, qseq, sseq, and BTOP; 1031-1069 derives endpoints.
+class ExhaustiveRichComparisonTests(unittest.TestCase):
+    def diagnostic_row(self, row_index=1, **overrides):
+        row = {
+            "row_index": row_index,
+            "query_id": "q",
+            "subject_id": "s",
+            "pident": "100.000",
+            "length": "10",
+            "mismatch": "0",
+            "gapopen": "0",
+            "qstart": "1",
+            "qend": "10",
+            "sstart": "1",
+            "send": "10",
+            "evalue": "1e-5",
+            "bitscore": "20",
+            "score": "40",
+            "btop": "10",
+            "qseq": "ACGT",
+            "sseq": "ACGT",
+        }
+        row.update(overrides)
+        return row
+
+    def groups(self, rows_by_platform, triggers=None):
+        return driver.exhaustive_rich_representation_groups(
+            "blastn", "case", rows_by_platform, triggers or {}
+        )
+
+    def three_platform_rich_difference(self, **identity_overrides):
+        common = self.diagnostic_row(**identity_overrides)
+        alternative = self.diagnostic_row(
+            btop="4AC5",
+            qseq="AC-GT",
+            sseq="ACTGT",
+            **identity_overrides,
+        )
+        return {
+            "platform-a": [alternative],
+            "platform-b": [common],
+            "platform-c": [common],
+        }
+
+    def test_rich_only_difference_needs_no_standard_field_seed(self) -> None:
+        groups = self.groups(self.three_platform_rich_difference())
+        self.assertEqual(len(groups), 1)
+        group = groups[0]
+        self.assertFalse(group["standard_authoritative_fields_changed"])
+        self.assertFalse(group["authoritative_seeded"])
+        self.assertTrue(group["rich_only"])
+        self.assertFalse(group["diagnostic_used_for_authoritative_pass_fail"])
+        self.assertEqual(
+            set(group["alignment_identity"]),
+            {
+                "program",
+                "case_id",
+                *driver.RICH_INVARIANT_FIELDS,
+                "raw_score",
+            },
+        )
+
+    def test_authoritative_seeded_rich_difference_remains_distinct(self) -> None:
+        rows = self.three_platform_rich_difference()
+        identity = driver.alignment_representation_identity(
+            "blastn", "case", rows["platform-a"][0]
+        )
+        groups = self.groups(rows, {identity: [{"field": "pident"}]})
+        self.assertEqual(len(groups), 1)
+        self.assertTrue(groups[0]["standard_authoritative_fields_changed"])
+        self.assertTrue(groups[0]["authoritative_seeded"])
+        self.assertFalse(groups[0]["rich_only"])
+        self.assertEqual(
+            groups[0]["triggering_authoritative_differences"],
+            [{"field": "pident"}],
+        )
+
+    def test_identical_rich_rows_are_not_reported(self) -> None:
+        self.assertEqual(
+            self.groups(
+                {
+                    platform_id: [self.diagnostic_row()]
+                    for platform_id in ("platform-a", "platform-b", "platform-c")
+                }
+            ),
+            [],
+        )
+
+    def test_duplicate_invariant_identities_preserve_multiplicity(self) -> None:
+        duplicate_rows = [self.diagnostic_row(1), self.diagnostic_row(2)]
+        groups = self.groups(
+            {
+                "platform-a": duplicate_rows,
+                "platform-b": [self.diagnostic_row()],
+                "platform-c": [self.diagnostic_row()],
+            }
+        )
+        self.assertEqual(len(groups), 1)
+        evidence = {
+            record["platform_id"]: record
+            for record in groups[0]["platform_representation_multisets"]
+        }
+        self.assertEqual(evidence["platform-a"]["row_count"], 2)
+        self.assertEqual(
+            evidence["platform-a"]["representations"][0]["multiplicity"], 2
+        )
+        self.assertEqual(
+            evidence["platform-b"]["representations"][0]["multiplicity"], 1
+        )
+
+    def test_row_order_only_differences_do_not_create_groups(self) -> None:
+        first = self.diagnostic_row(btop="10", qseq="ACGT", sseq="ACGT")
+        second = self.diagnostic_row(
+            row_index=2, btop="4AC5", qseq="AC-GT", sseq="ACTGT"
+        )
+        self.assertEqual(
+            self.groups(
+                {
+                    "platform-a": [first, second],
+                    "platform-b": [second, first],
+                    "platform-c": [first, second],
+                }
+            ),
+            [],
+        )
+
+    def test_differing_score_prevents_rich_grouping(self) -> None:
+        rows = self.three_platform_rich_difference()
+        rows["platform-a"][0]["score"] = "41"
+        self.assertEqual(self.groups(rows), [])
+
+    def test_differing_endpoint_prevents_rich_grouping(self) -> None:
+        for field, value in (
+            ("qstart", "2"),
+            ("qend", "9"),
+            ("sstart", "2"),
+            ("send", "9"),
+        ):
+            with self.subTest(field=field):
+                rows = self.three_platform_rich_difference()
+                rows["platform-a"][0][field] = value
+                self.assertEqual(self.groups(rows), [])
+
+    def test_differing_length_evalue_or_bitscore_prevents_grouping(self) -> None:
+        for field, value in (
+            ("length", "11"),
+            ("evalue", "2e-5"),
+            ("bitscore", "21"),
+        ):
+            with self.subTest(field=field):
+                rows = self.three_platform_rich_difference()
+                rows["platform-a"][0][field] = value
+                self.assertEqual(self.groups(rows), [])
+
+    def test_platform_relationship_is_derived_without_named_divergent_host(
+        self,
+    ) -> None:
+        group = self.groups(self.three_platform_rich_difference())[0]
+        classes = [
+            item["platform_ids"] for item in group["platform_equivalence_classes"]
+        ]
+        self.assertEqual(classes, [["platform-a"], ["platform-b", "platform-c"]])
+        platform_hashes = {
+            item["platform_id"]: item["representation_multiset_sha256"]
+            for item in group["platform_representation_multisets"]
+        }
+        for equivalence_class in group["platform_equivalence_classes"]:
+            self.assertEqual(
+                {
+                    platform_hashes[platform_id]
+                    for platform_id in equivalence_class["platform_ids"]
+                },
+                {equivalence_class["representation_multiset_sha256"]},
+            )
+        self.assertNotIn("windows", json.dumps(group).lower())
+
+    def test_seeded_rich_only_and_exhaustive_counts_are_distinct(self) -> None:
+        first = self.three_platform_rich_difference(qstart="1", qend="10")
+        second = self.three_platform_rich_difference(qstart="21", qend="30")
+        rows = {
+            platform_id: [first[platform_id][0], second[platform_id][0]]
+            for platform_id in first
+        }
+        seeded_identity = driver.alignment_representation_identity(
+            "blastn", "case", first["platform-a"][0]
+        )
+        counts = driver.rich_representation_group_counts(
+            self.groups(rows, {seeded_identity: [{"field": "pident"}]})
+        )
+        self.assertEqual(
+            counts,
+            {
+                "authoritative_seeded_equal_score_representation_group_count": 1,
+                "rich_only_equal_score_representation_group_count": 1,
+                "exhaustive_equal_score_representation_group_count": 2,
+            },
+        )
+
+    def test_linux_rich_evidence_is_explicitly_unavailable(self) -> None:
+        linux = b"q\ts\t100\t10\t0\t0\t1\t10\t1\t10\t1e-5\t20\n"
+        evidence = driver.retained_linux_rich_evidence(linux)
+        self.assertFalse(evidence["rich_comparison_available"])
+        self.assertFalse(evidence["rich_fields_available"])
+        self.assertEqual(
+            evidence["unavailable_fields"], ["score", "btop", "qseq", "sseq"]
+        )
+        self.assertFalse(evidence["inference_or_synthesis_performed"])
+        self.assertFalse(evidence["rerun_performed"])
+
+
 class WorkflowContractTests(unittest.TestCase):
     @classmethod
     def setUpClass(cls) -> None:

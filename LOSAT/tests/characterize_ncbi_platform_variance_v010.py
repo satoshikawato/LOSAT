@@ -45,6 +45,7 @@ RETAINED_LINUX_MANIFEST = (
 )
 RETAINED_LINUX_EVIDENCE_SCHEMA = 3
 EVIDENCE_SCHEMA = 2
+RICH_ANALYSIS_SCHEMA = 3
 EXPECTED_FIXTURE_COUNT = 10
 EXPECTED_REPRESENTATIVE_COUNT = 6
 EXPECTED_PLATFORM_AUTHORITATIVE_EXECUTIONS = 6
@@ -92,6 +93,27 @@ KEY_FIELDS = ("query_id", "subject_id", "qstart", "qend", "sstart", "send")
 #   in place and appends explicitly requested fields in requested order.
 DIAGNOSTIC_OUTFMT = "6 std score btop qseq sseq"
 DIAGNOSTIC_FIELDS = (*STANDARD_FIELDS, "score", "btop", "qseq", "sseq")
+# NCBI references:
+# - ncbi-blast/c++/src/objtools/align_format/format_flags.cpp:38-45,
+#   57-68, 86-101, 114-119, 144-146 assigns the standard, score, qseq,
+#   sseq, length, E-value, bit-score, and BTOP field identities.
+# - ncbi-blast/c++/src/objtools/align_format/tabular.cpp:762-773 obtains raw
+#   score, E-value, and bit score; 778-840 obtains query and subject IDs;
+#   900-1027 derives alignment length, qseq, sseq, and BTOP; 1031-1069 derives
+#   query and subject endpoints.
+RICH_INVARIANT_FIELDS = (
+    "query_id",
+    "subject_id",
+    "qstart",
+    "qend",
+    "sstart",
+    "send",
+    "score",
+    "length",
+    "evalue",
+    "bitscore",
+)
+RICH_REPRESENTATION_FIELDS = ("btop", "qseq", "sseq")
 
 
 @dataclass(frozen=True)
@@ -1320,8 +1342,22 @@ def alignment_representation_identity(
     return (
         program,
         case_id,
-        *(str(row[field]) for field in KEY_FIELDS),
-        str(row["score"]),
+        *(str(row[field]) for field in RICH_INVARIANT_FIELDS),
+    )
+
+
+def _rich_representation_multiset(
+    rows: Iterable[dict[str, str | int]],
+) -> Counter[tuple[str, ...]]:
+    """Retain duplicate NCBI alignment representations as a multiset.
+
+    NCBI reference: ncbi-blast/c++/src/objtools/align_format/tabular.cpp:
+    973-1027 constructs qseq, sseq, and BTOP for each emitted alignment. Rows
+    sharing the invariant fields remain separate emitted representations.
+    """
+
+    return Counter(
+        tuple(str(row[field]) for field in RICH_REPRESENTATION_FIELDS) for row in rows
     )
 
 
@@ -1333,20 +1369,24 @@ def rich_representation_finding(
 
     NCBI reference: ncbi-blast/c++/src/objtools/align_format/tabular.cpp:
     973-1027 obtains qseq/sseq and constructs BTOP from the alignment.  A claim
-    of alternate representation therefore requires distinct values in those
-    fields for rows already grouped by equal raw score and endpoints.
+    of alternate representation therefore requires distinct multisets in
+    those fields for rows already grouped by the complete invariant identity.
     """
 
-    distinct_representations = {
-        (
-            str(row["btop"]),
-            str(row["qseq"]),
-            str(row["sseq"]),
-        )
-        for row in platform_representations
-    }
     matched_platforms = {str(row["platform_id"]) for row in platform_representations}
-    if len(distinct_representations) > 1:
+    representations_by_platform = {
+        platform_id: _rich_representation_multiset(
+            row
+            for row in platform_representations
+            if str(row["platform_id"]) == platform_id
+        )
+        for platform_id in matched_platforms
+    }
+    distinct_multisets = {
+        tuple(sorted(representations.items()))
+        for representations in representations_by_platform.values()
+    }
+    if len(distinct_multisets) > 1:
         finding = (
             "EVIDENCE_CONSISTENT_WITH_ALTERNATIVE_EQUAL_SCORING_"
             "ALIGNMENT_REPRESENTATIONS"
@@ -1358,7 +1398,197 @@ def rich_representation_finding(
         )
     else:
         finding = "RICH_REPRESENTATION_COMPARISON_INCOMPLETE"
-    return finding, len(distinct_representations), matched_platforms
+    return finding, len(distinct_multisets), matched_platforms
+
+
+def _alignment_identity_record(identity: tuple[str, ...]) -> dict[str, str]:
+    values = dict(zip(RICH_INVARIANT_FIELDS, identity[2:], strict=True))
+    return {
+        "program": identity[0],
+        "case_id": identity[1],
+        **values,
+        "raw_score": values["score"],
+    }
+
+
+def _rich_multiset_evidence(
+    platform_representations: Sequence[dict[str, str | int]],
+) -> tuple[list[dict[str, object]], list[dict[str, object]]]:
+    """Hash each exact rich representation and derive platform equivalence.
+
+    NCBI reference: ncbi-blast/c++/src/objtools/align_format/tabular.cpp:
+    973-1027 constructs the exact qseq, sseq, and BTOP values hashed here.
+    Equivalence classes are derived from the complete per-platform multiset,
+    so platform names never imply which representation is divergent.
+    """
+
+    rows_by_platform: dict[str, list[dict[str, str | int]]] = {}
+    for row in platform_representations:
+        rows_by_platform.setdefault(str(row["platform_id"]), []).append(row)
+
+    records = []
+    equivalence: dict[tuple[tuple[tuple[str, ...], int], ...], list[str]] = {}
+    signature_hashes: dict[tuple[tuple[tuple[str, ...], int], ...], str] = {}
+    for platform_id, rows in sorted(rows_by_platform.items()):
+        multiset = _rich_representation_multiset(rows)
+        signature = tuple(sorted(multiset.items()))
+        equivalence.setdefault(signature, []).append(platform_id)
+        representations = [
+            {
+                "multiplicity": multiplicity,
+                "btop_sha256": sha256_bytes(values[0].encode("utf-8")),
+                "qseq_sha256": sha256_bytes(values[1].encode("utf-8")),
+                "sseq_sha256": sha256_bytes(values[2].encode("utf-8")),
+            }
+            for values, multiplicity in signature
+        ]
+        multiset_sha256 = sha256_bytes(
+            json.dumps(
+                representations,
+                sort_keys=True,
+                separators=(",", ":"),
+            ).encode("utf-8")
+        )
+        signature_hashes[signature] = multiset_sha256
+        records.append(
+            {
+                "platform_id": platform_id,
+                "row_indices": sorted(int(row["row_index"]) for row in rows),
+                "row_count": len(rows),
+                "representations": representations,
+                "representation_multiset_sha256": multiset_sha256,
+            }
+        )
+    classes = [
+        {
+            "platform_ids": sorted(platform_ids),
+            "representation_multiset_sha256": signature_hashes[signature],
+        }
+        for signature, platform_ids in equivalence.items()
+    ]
+    classes.sort(key=lambda item: item["platform_ids"])
+    return records, classes
+
+
+def exhaustive_rich_representation_groups(
+    program: str,
+    case_id: str,
+    diagnostics_by_platform: dict[str, list[dict[str, str | int]]],
+    triggers_by_identity: dict[tuple[str, ...], list[dict[str, object]]],
+) -> list[dict[str, object]]:
+    """Discover rich differences from every diagnostic row, symmetrically.
+
+    NCBI references:
+    - ncbi-blast/c++/src/objtools/align_format/format_flags.cpp:38-45,
+      57-68, 86-101, 114-119, 144-146 defines every invariant and rich field.
+    - ncbi-blast/c++/src/objtools/align_format/tabular.cpp:762-773 obtains raw
+      score, E-value, and bit score; 778-840 obtains query and subject IDs;
+      900-1027 derives alignment length, qseq, sseq, and BTOP; 1031-1069
+      derives query and subject endpoints before tabular emission.
+
+    Missing invariant identities are not rich alternatives: at least two
+    platforms must contain the same complete invariant identity. Duplicate
+    identities are compared as order-independent BTOP/qseq/sseq multisets.
+    """
+
+    expected_platforms = set(diagnostics_by_platform)
+    representations_by_identity: dict[tuple[str, ...], list[dict[str, str | int]]] = {}
+    for platform_id, rows in sorted(diagnostics_by_platform.items()):
+        for row in rows:
+            identity = alignment_representation_identity(program, case_id, row)
+            representations_by_identity.setdefault(identity, []).append(
+                {
+                    "platform_id": platform_id,
+                    "row_index": row["row_index"],
+                    **{field: row[field] for field in DIAGNOSTIC_FIELDS},
+                }
+            )
+    groups = []
+    for identity, platform_representations in sorted(
+        representations_by_identity.items()
+    ):
+        platforms_present = {
+            str(row["platform_id"]) for row in platform_representations
+        }
+        if len(platforms_present) < 2:
+            continue
+        finding, distinct_count, matched_platforms = rich_representation_finding(
+            platform_representations, expected_platforms
+        )
+        if not finding.startswith("EVIDENCE_CONSISTENT_WITH_ALTERNATIVE"):
+            continue
+        multiset_evidence, equivalence_classes = _rich_multiset_evidence(
+            platform_representations
+        )
+        triggers = list(triggers_by_identity.get(identity, []))
+        authoritative_seeded = bool(triggers)
+        groups.append(
+            {
+                "alignment_identity": _alignment_identity_record(identity),
+                "platforms_present": sorted(platforms_present),
+                "all_new_platforms_present": platforms_present == expected_platforms,
+                "triggering_authoritative_differences": triggers,
+                "standard_authoritative_fields_changed": authoritative_seeded,
+                "authoritative_seeded": authoritative_seeded,
+                "rich_only": not authoritative_seeded,
+                "platform_representation_multisets": multiset_evidence,
+                "platform_equivalence_classes": equivalence_classes,
+                "matched_new_platforms": sorted(matched_platforms),
+                "distinct_btop_qseq_sseq_multiset_count": distinct_count,
+                "finding": finding,
+                "diagnostic_used_for_authoritative_pass_fail": False,
+            }
+        )
+    return groups
+
+
+def rich_representation_group_counts(
+    groups: Sequence[dict[str, object]],
+) -> dict[str, int]:
+    authoritative_seeded = sum(bool(group["authoritative_seeded"]) for group in groups)
+    rich_only = sum(bool(group["rich_only"]) for group in groups)
+    exhaustive = len(groups)
+    if authoritative_seeded + rich_only != exhaustive:
+        raise CharacterizationFailure("rich group classifications are not exhaustive")
+    return {
+        "authoritative_seeded_equal_score_representation_group_count": (
+            authoritative_seeded
+        ),
+        "rich_only_equal_score_representation_group_count": rich_only,
+        "exhaustive_equal_score_representation_group_count": exhaustive,
+    }
+
+
+def retained_linux_rich_evidence(linux_raw: bytes) -> dict[str, object]:
+    return {
+        "source": "retained PR 5 authoritative output",
+        "raw_sha256": sha256_bytes(linux_raw),
+        "row_count": len(parse_structured_rows(linux_raw)),
+        "rich_comparison_available": False,
+        "rich_fields_available": False,
+        "unavailable_fields": ["score", "btop", "qseq", "sseq"],
+        "inference_or_synthesis_performed": False,
+        "rerun_performed": False,
+    }
+
+
+def rich_group_platform_relationship_patterns(
+    groups: Sequence[dict[str, object]],
+) -> list[dict[str, object]]:
+    patterns = Counter(
+        tuple(
+            tuple(equivalence_class["platform_ids"])
+            for equivalence_class in group["platform_equivalence_classes"]
+        )
+        for group in groups
+    )
+    return [
+        {
+            "platform_equivalence_classes": [list(item) for item in pattern],
+            "group_count": count,
+        }
+        for pattern, count in sorted(patterns.items())
+    ]
 
 
 def _case_authority_context(representative: Representative) -> dict[str, object]:
@@ -1622,8 +1852,10 @@ def analyze_platforms(
     NCBI references:
     - ncbi-blast/c++/src/objtools/align_format/format_flags.cpp:38-41,
       96-101, 114-119, 144-146 defines the standard and added rich fields.
-    - ncbi-blast/c++/src/objtools/align_format/tabular.cpp:895-1027 derives
-      coordinates, identity, aligned sequences, and BTOP from each alignment.
+    - ncbi-blast/c++/src/objtools/align_format/tabular.cpp:762-773 obtains raw
+      score, E-value, and bit score; 778-840 obtains query and subject IDs;
+      900-1027 derives alignment length, identity, aligned sequences, and
+      BTOP; 1031-1069 derives query and subject endpoints.
     """
 
     if len(platform_roots) != 3:
@@ -1661,7 +1893,7 @@ def analyze_platforms(
     case_analyses = []
     total_changed_authoritative_hsps = 0
     total_unmatched_changed_authoritative_hsps = 0
-    alternative_representation_groups = 0
+    all_rich_groups = []
     for representative in REPRESENTATIVES:
         linux_raw = linux_paths[
             (representative.program, representative.case_id)
@@ -1762,65 +1994,23 @@ def analyze_platforms(
                 )
                 triggers_by_identity.setdefault(identity_key, []).append(trigger)
 
-        rich_groups = []
-        for identity_key, triggers in sorted(triggers_by_identity.items()):
-            platform_representations = []
-            for platform_id, rows in sorted(diagnostics_by_platform.items()):
-                for row in rows:
-                    if (
-                        alignment_representation_identity(
-                            representative.program, representative.case_id, row
-                        )
-                        == identity_key
-                    ):
-                        platform_representations.append(
-                            {
-                                "platform_id": platform_id,
-                                "row_index": row["row_index"],
-                                **{field: row[field] for field in DIAGNOSTIC_FIELDS},
-                            }
-                        )
-            finding, distinct_count, matched_platforms = rich_representation_finding(
-                platform_representations, expected_platforms
-            )
-            if finding.startswith("EVIDENCE_CONSISTENT_WITH_ALTERNATIVE"):
-                alternative_representation_groups += 1
-            rich_groups.append(
-                {
-                    "alignment_identity": {
-                        "program": identity_key[0],
-                        "case_id": identity_key[1],
-                        "query_id": identity_key[2],
-                        "subject_id": identity_key[3],
-                        "qstart": identity_key[4],
-                        "qend": identity_key[5],
-                        "sstart": identity_key[6],
-                        "send": identity_key[7],
-                        "raw_score": identity_key[8],
-                    },
-                    "triggering_authoritative_differences": triggers,
-                    "platform_representations": platform_representations,
-                    "matched_new_platforms": sorted(matched_platforms),
-                    "distinct_btop_qseq_sseq_count": distinct_count,
-                    "finding": finding,
-                    "diagnostic_used_for_authoritative_pass_fail": False,
-                }
-            )
+        rich_groups = exhaustive_rich_representation_groups(
+            representative.program,
+            representative.case_id,
+            diagnostics_by_platform,
+            triggers_by_identity,
+        )
+        case_group_counts = rich_representation_group_counts(rich_groups)
+        all_rich_groups.extend(rich_groups)
         case_analyses.append(
             {
                 "program": representative.program,
                 "case_id": representative.case_id,
                 "semantic_class": representative.semantic_class,
                 "authority_context": _case_authority_context(representative),
-                "linux_retained": {
-                    "source": "retained PR 5 authoritative output",
-                    "raw_sha256": sha256_bytes(linux_raw),
-                    "row_count": len(linux_rows),
-                    "rich_fields_available": False,
-                    "unavailable_fields": ["score", "btop", "qseq", "sseq"],
-                    "rerun_performed": False,
-                },
+                "linux_retained": retained_linux_rich_evidence(linux_raw),
                 "platform_authoritative_results": platform_authoritative_results,
+                **case_group_counts,
                 "rich_diagnostic_groups": rich_groups,
                 "unmatched_changed_authoritative_hsps": unmatched,
             }
@@ -1842,10 +2032,11 @@ def analyze_platforms(
         or total_count != EXPECTED_TOTAL_EXECUTIONS
     ):
         raise CharacterizationFailure("three-platform 18+18 count ratchet failed")
+    group_counts = rich_representation_group_counts(all_rich_groups)
     atomic_write_json(
         output,
         {
-            "evidence_schema": EVIDENCE_SCHEMA,
+            "evidence_schema": RICH_ANALYSIS_SCHEMA,
             "status": "RICH_DIAGNOSTIC_ANALYSIS_COMPLETE",
             "created_at": utc_now(),
             "platform_ids": sorted(roots),
@@ -1863,8 +2054,25 @@ def analyze_platforms(
             "total_unmatched_changed_authoritative_hsps": (
                 total_unmatched_changed_authoritative_hsps
             ),
+            **group_counts,
             "alternative_equal_scoring_representation_groups": (
-                alternative_representation_groups
+                group_counts[
+                    "authoritative_seeded_equal_score_representation_group_count"
+                ]
+            ),
+            "alternative_equal_scoring_representation_groups_scope": (
+                "compatibility field retaining the former authoritative-seeded "
+                "scope; it is not the exhaustive rich-diagnostic count"
+            ),
+            "linux_rich_comparison": {
+                "available": False,
+                "retained_fields": list(STANDARD_FIELDS),
+                "unavailable_fields": ["score", "btop", "qseq", "sseq"],
+                "inference_or_synthesis_performed": False,
+                "linux_ncbi_reruns": 0,
+            },
+            "rich_group_platform_relationship_patterns": (
+                rich_group_platform_relationship_patterns(all_rich_groups)
             ),
             "cases": case_analyses,
         },

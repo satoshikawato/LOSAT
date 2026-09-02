@@ -35,6 +35,12 @@ PR5_EVIDENCE_MANIFEST_SHA256 = (
 CERT_TOOLCHAIN = "1.92.0"
 EVIDENCE_SCHEMA = 1
 NATIVE_AUTHORITY_VERSION = "ncbi-platform-variance-v0.1.0"
+NATIVE_AUTHORITY_REPO_RELATIVE = PurePosixPath(
+    "LOSAT/tests/ncbi_platform_variance_v010.json"
+)
+CANONICAL_MANIFEST_REPO_RELATIVE = PurePosixPath(
+    "LOSAT/tests/platform_native_v010_canonical.tsv"
+)
 SAFE_CASE_ID = re.compile(r"^[A-Za-z0-9_.-]+$")
 SHA_PATTERN = re.compile(r"^[0-9a-f]{40}$")
 SHA256_PATTERN = re.compile(r"^[0-9a-f]{64}$")
@@ -141,10 +147,12 @@ class SearchStep:
 @dataclass(frozen=True)
 class StagedFixture:
     source_repo_relative: str
-    source_path: str
+    source_git_object: str
     lexical_target_path: str
     physical_target_path: str
     sha256: str
+    byte_length: int
+    newline_profile: dict[str, int]
 
 
 @dataclass
@@ -960,10 +968,7 @@ def _validate_native_authority_document(document: dict[str, object]) -> NativeAu
 #   dispatches the selected output format.
 # - ncbi-blast/c++/src/objtools/align_format/tabular.cpp:1098-1108
 #   writes the selected fields and row terminator directly to the output stream.
-def load_native_authority(path: Path) -> NativeAuthority:
-    if not path.is_file():
-        raise CertificationFailure(f"native authority file is missing: {path}")
-    raw = path.read_bytes()
+def _load_native_authority_bytes(raw: bytes, path: Path) -> NativeAuthority:
     try:
         document = json.loads(raw, object_pairs_hook=_strict_json_object)
     except (UnicodeDecodeError, json.JSONDecodeError) as error:
@@ -979,6 +984,14 @@ def load_native_authority(path: Path) -> NativeAuthority:
         outputs=validated.outputs,
         diagnostics=validated.diagnostics,
     )
+
+
+def load_native_authority(
+    repo_root: Path, candidate_sha: str, path: Path
+) -> NativeAuthority:
+    repository_relative = _repository_relative_path(repo_root, path)
+    raw = read_git_blob_bytes(repo_root, candidate_sha, repository_relative)
+    return _load_native_authority_bytes(raw, path)
 
 
 def resolve_native_authority(
@@ -1032,6 +1045,74 @@ def run_capture(
     return subprocess.run(
         list(command), cwd=cwd, capture_output=True, text=False, check=False
     )
+
+
+# NCBI references:
+# - ncbi-blast/c++/src/algo/blast/format/blast_format.cpp:770-832
+#   formats the search result produced from the supplied query and subject.
+# - ncbi-blast/c++/src/objtools/align_format/tabular.cpp:1098-1108
+#   emits the raw fields whose certification fingerprint is input-byte-bound.
+# Certification therefore materializes the exact candidate Git blobs before either
+# implementation runs; checkout filters are not an input authority.
+def resolve_git_head_sha(repo_root: Path) -> str:
+    completed = run_capture(
+        ["git", "rev-parse", "--verify", "HEAD^{commit}"], repo_root
+    )
+    if completed.returncode != 0:
+        raise CertificationFailure("cannot resolve exact candidate Git commit")
+    try:
+        candidate_sha = completed.stdout.decode("ascii").strip()
+    except UnicodeDecodeError as error:
+        raise CertificationFailure("candidate Git commit is not ASCII") from error
+    if not SHA_PATTERN.fullmatch(candidate_sha):
+        raise CertificationFailure("candidate Git commit is not a full lowercase SHA")
+    return candidate_sha
+
+
+def _repository_relative_path(repo_root: Path, path: Path) -> PurePosixPath:
+    try:
+        relative = path.resolve().relative_to(repo_root.resolve())
+    except ValueError as error:
+        raise CertificationFailure(
+            f"certification control path is outside the repository: {path}"
+        ) from error
+    repository_relative = PurePosixPath(*relative.parts)
+    if not repository_relative.parts:
+        raise CertificationFailure("certification control path is the repository root")
+    return repository_relative
+
+
+def read_git_blob_bytes(
+    repo_root: Path,
+    candidate_sha: str,
+    repository_relative_path: str | PurePosixPath,
+) -> bytes:
+    if not SHA_PATTERN.fullmatch(candidate_sha):
+        raise CertificationFailure(
+            "candidate Git SHA must be exactly 40 lowercase hex digits"
+        )
+    relative_text = str(repository_relative_path)
+    relative = PurePosixPath(relative_text)
+    if (
+        relative.is_absolute()
+        or not relative.parts
+        or any(part in {"", ".", ".."} for part in relative.parts)
+        or "\\" in relative_text
+        or ":" in relative_text
+    ):
+        raise CertificationFailure(
+            f"invalid repository-relative Git blob path: {relative_text}"
+        )
+    object_type = run_capture(["git", "cat-file", "-t", candidate_sha], repo_root)
+    if object_type.returncode != 0 or object_type.stdout != b"commit\n":
+        raise CertificationFailure(
+            f"candidate Git object is missing or is not a commit: {candidate_sha}"
+        )
+    git_object = f"{candidate_sha}:{relative.as_posix()}"
+    completed = run_capture(["git", "cat-file", "blob", git_object], repo_root)
+    if completed.returncode != 0:
+        raise CertificationFailure(f"candidate Git blob is missing: {git_object}")
+    return completed.stdout
 
 
 def normalize_machine(value: str) -> str:
@@ -1282,10 +1363,17 @@ def replace_output(command: Sequence[str], output: Path) -> list[str]:
     raise CertificationFailure(f"output option absent from command: {command}")
 
 
-def _canonical_lines(path: Path) -> tuple[list[str], list[str]]:
+# NCBI reference: ncbi-blast/c++/src/algo/blast/format/blast_format.cpp:770-832
+# The frozen raw-output hashes select accepted formatter bytes, so the manifest
+# that supplies them is parsed from the exact candidate Git blob.
+def _canonical_lines(raw: bytes) -> tuple[list[str], list[str]]:
+    try:
+        text = raw.decode("utf-8")
+    except UnicodeDecodeError as error:
+        raise CertificationFailure("canonical manifest is not UTF-8") from error
     comments: list[str] = []
     data: list[str] = []
-    for line in path.read_text(encoding="utf-8").splitlines(keepends=True):
+    for line in text.splitlines(keepends=True):
         if line.startswith("#"):
             comments.append(line.rstrip("\r\n"))
         elif line.strip():
@@ -1293,7 +1381,7 @@ def _canonical_lines(path: Path) -> tuple[list[str], list[str]]:
     return comments, data
 
 
-def load_catalog(repo_root: Path) -> Catalog:
+def load_catalog(repo_root: Path, candidate_sha: str) -> Catalog:
     tests_dir = repo_root / "LOSAT" / "tests"
     blastn_compare = load_authority(
         "platform_blastn_compare", tests_dir / "compare_blastn_parity.py"
@@ -1308,8 +1396,10 @@ def load_catalog(repo_root: Path) -> Catalog:
         "platform_tblastx_audit", tests_dir / "audit_tblastx_v010.py"
     )
 
-    canonical_path = tests_dir / "platform_native_v010_canonical.tsv"
-    comments, data_lines = _canonical_lines(canonical_path)
+    canonical_bytes = read_git_blob_bytes(
+        repo_root, candidate_sha, CANONICAL_MANIFEST_REPO_RELATIVE
+    )
+    comments, data_lines = _canonical_lines(canonical_bytes)
     required_comments = {
         "# Canonical LOSAT native output hashes from PR 5 integrated certification.",
         f"# RUNTIME_CERT_SHA={RUNTIME_CERT_SHA}",
@@ -1592,8 +1682,16 @@ def required_fixture_relatives(steps: Sequence[SearchStep]) -> list[PurePosixPat
     return sorted(required, key=PurePosixPath.as_posix)
 
 
+# NCBI references:
+# - ncbi-blast/c++/src/algo/blast/format/blast_format.cpp:770-832
+# - ncbi-blast/c++/src/objtools/align_format/tabular.cpp:1098-1108
+# The exact query/subject bytes feed the certified raw formatter bytes. Copy the
+# candidate blob verbatim; do not normalize or repair committed data.
 def stage_required_fixtures(
-    repo_root: Path, steps: Sequence[SearchStep], output_dir: Path
+    repo_root: Path,
+    candidate_sha: str,
+    steps: Sequence[SearchStep],
+    output_dir: Path,
 ) -> list[StagedFixture]:
     evidence_path = output_dir / "fixture-staging.json"
     records: list[StagedFixture] = []
@@ -1602,31 +1700,29 @@ def stage_required_fixtures(
     try:
         for relative in required_fixture_relatives(steps):
             source_repo_relative = PurePosixPath("LOSAT") / relative
-            source = repo_root.joinpath(*source_repo_relative.parts)
+            source_git_object = f"{candidate_sha}:{source_repo_relative.as_posix()}"
             lexical_target = historical_lexical_path(relative)
             physical_target = controlled_physical_path(lexical_target)
-            if not source.is_file():
-                raise CertificationFailure(
-                    f"authoritative fixture is missing: {source_repo_relative.as_posix()}"
-                )
-            source_hash = sha256_path(source)
-            physical_target.parent.mkdir(parents=True, exist_ok=True)
-            shutil.copyfile(source, physical_target)
+            source_bytes = read_git_blob_bytes(
+                repo_root, candidate_sha, source_repo_relative
+            )
+            source_hash = hashlib.sha256(source_bytes).hexdigest()
+            atomic_write_bytes(physical_target, source_bytes)
+            target_bytes = physical_target.read_bytes()
             target_hash = sha256_path(physical_target)
-            if (
-                target_hash != source_hash
-                or physical_target.read_bytes() != source.read_bytes()
-            ):
+            if target_hash != source_hash or target_bytes != source_bytes:
                 raise CertificationFailure(
                     f"staged fixture bytes changed: {source_repo_relative.as_posix()}"
                 )
             records.append(
                 StagedFixture(
                     source_repo_relative=source_repo_relative.as_posix(),
-                    source_path=str(source.absolute()),
+                    source_git_object=source_git_object,
                     lexical_target_path=lexical_target,
                     physical_target_path=str(physical_target),
                     sha256=source_hash,
+                    byte_length=len(source_bytes),
+                    newline_profile=newline_profile(source_bytes),
                 )
             )
         status = "VERIFIED"
@@ -1651,12 +1747,16 @@ def stage_required_fixtures(
 def fixture_staging_identity(records: Sequence[StagedFixture]) -> dict[str, object]:
     return {
         "lexical_root": HISTORICAL_LEXICAL_ROOT,
+        "materialization": "EXACT_CANDIDATE_GIT_BLOB_BYTES",
         "staged_input_count": len(records),
         "inputs": [
             {
                 "source_repo_relative": record.source_repo_relative,
+                "source_git_object": record.source_git_object,
                 "lexical_target_path": record.lexical_target_path,
                 "sha256": record.sha256,
+                "byte_length": record.byte_length,
+                "newline_profile": record.newline_profile,
             }
             for record in records
         ],
@@ -1969,15 +2069,15 @@ def _verify_native_invocation_identity(
         lexical = str(expected_input["lexical_path"])
         if command[command.index(option) + 1] != lexical:
             raise CertificationFailure(f"native invocation {role} lexical path changed")
-        repository_path = repo_root / str(expected_input["repository_relative"])
+        repository_relative = str(expected_input["repository_relative"])
+        candidate_bytes = read_git_blob_bytes(
+            repo_root, str(identity.get("source_sha", "")), repository_relative
+        )
         controlled_path = controlled_physical_path(lexical)
-        for label, path in (
-            ("repository", repository_path),
-            ("controlled", controlled_path),
-        ):
-            if not path.is_file():
-                raise CertificationFailure(f"native {role} {label} input is missing")
-            data = path.read_bytes()
+        if not controlled_path.is_file():
+            raise CertificationFailure(f"native {role} controlled input is missing")
+        controlled_bytes = controlled_path.read_bytes()
+        for data in (candidate_bytes, controlled_bytes):
             observed = {
                 "sha256": hashlib.sha256(data).hexdigest(),
                 "byte_length": len(data),
@@ -1991,7 +2091,7 @@ def _verify_native_invocation_identity(
                 raise CertificationFailure(
                     f"native invocation {role} input identity changed"
                 )
-        if repository_path.read_bytes() != controlled_path.read_bytes():
+        if candidate_bytes != controlled_bytes:
             raise CertificationFailure(
                 f"native invocation {role} staging changed bytes"
             )
@@ -2212,10 +2312,7 @@ def validate_git_identity(repo_root: Path, expected_sha: str) -> str:
         raise CertificationFailure(
             "expected SHA must be exactly 40 lowercase hex digits"
         )
-    head = run_capture(["git", "rev-parse", "HEAD"], repo_root)
-    if head.returncode != 0:
-        raise CertificationFailure("cannot resolve git HEAD")
-    observed = head.stdout.decode().strip()
+    observed = resolve_git_head_sha(repo_root)
     if observed != expected_sha:
         raise CertificationFailure(
             f"certification SHA mismatch: expected {expected_sha}, observed {observed}"
@@ -2261,6 +2358,13 @@ def record_identity(
     controlled_fixtures: dict[str, object],
     authority: NativeAuthority,
 ) -> dict[str, object]:
+    canonical_relative = _repository_relative_path(repo_root, canonical_manifest)
+    if canonical_relative != CANONICAL_MANIFEST_REPO_RELATIVE:
+        raise CertificationFailure("canonical manifest repository path changed")
+    canonical_bytes = read_git_blob_bytes(repo_root, expected_sha, canonical_relative)
+    authority_relative = _repository_relative_path(repo_root, authority.path)
+    if authority_relative != NATIVE_AUTHORITY_REPO_RELATIVE:
+        raise CertificationFailure("native authority repository path changed")
     observed_os = platform.system()
     observed_machine = normalize_machine(platform.machine())
     authority_platform = validate_native_platform_sanity(
@@ -2353,6 +2457,7 @@ def record_identity(
         "authority_version": authority.authority_version,
         "authority_file_sha256": authority.file_sha256,
         "authority_file": str(authority.path),
+        "authority_file_git_object": f"{expected_sha}:{authority_relative.as_posix()}",
         "runner_label": platform_spec.runner_label,
         "os": {
             "system": observed_os,
@@ -2382,7 +2487,8 @@ def record_identity(
         "oracles": oracle_identities,
         "canonical_manifest": {
             "path": str(canonical_manifest.resolve()),
-            "sha256": sha256_path(canonical_manifest),
+            "git_object": f"{expected_sha}:{canonical_relative.as_posix()}",
+            "sha256": hashlib.sha256(canonical_bytes).hexdigest(),
             "runtime_cert_sha": RUNTIME_CERT_SHA,
             "pr5_evidence_manifest_sha256": PR5_EVIDENCE_MANIFEST_SHA256,
         },
@@ -3449,7 +3555,6 @@ def aggregate_platform_evidence(
 
 def certify(args: argparse.Namespace) -> None:
     repo_root = args.repo_root.resolve()
-    authority = load_native_authority(args.authority.resolve())
     output_dir = args.output_dir.resolve()
     output_dir.mkdir(parents=True, exist_ok=True)
     preexisting = {path.name for path in output_dir.iterdir()}
@@ -3457,6 +3562,14 @@ def certify(args: argparse.Namespace) -> None:
         raise CertificationFailure(
             f"output directory must be new or empty: {output_dir}"
         )
+    certified_sha = validate_git_identity(repo_root, args.expected_sha)
+    authority_path = args.authority.resolve()
+    if (
+        _repository_relative_path(repo_root, authority_path)
+        != NATIVE_AUTHORITY_REPO_RELATIVE
+    ):
+        raise CertificationFailure("native authority repository path changed")
+    authority = load_native_authority(repo_root, certified_sha, authority_path)
     platform_spec = PLATFORMS[args.platform_id]
     authority_platform = validate_native_platform_sanity(
         authority, platform_spec.platform_id
@@ -3472,7 +3585,6 @@ def certify(args: argparse.Namespace) -> None:
     }
     atomic_write_json(output_dir / "state.json", initial_state)
     preflight_controlled_fixture_path(output_dir)
-    certified_sha = validate_git_identity(repo_root, args.expected_sha)
     archive_record = verify_archive(
         platform_spec,
         args.oracle_archive.resolve(),
@@ -3487,7 +3599,7 @@ def certify(args: argparse.Namespace) -> None:
     canonical_manifest = (
         repo_root / "LOSAT" / "tests" / "platform_native_v010_canonical.tsv"
     )
-    catalog = load_catalog(repo_root)
+    catalog = load_catalog(repo_root, certified_sha)
     validate_native_authority_catalog(authority, catalog)
     steps = build_steps(
         repo_root,
@@ -3496,7 +3608,9 @@ def certify(args: argparse.Namespace) -> None:
         args.native_bin.resolve(),
         oracles,
     )
-    staged_fixtures = stage_required_fixtures(repo_root, steps, output_dir)
+    staged_fixtures = stage_required_fixtures(
+        repo_root, certified_sha, steps, output_dir
+    )
     if len(staged_fixtures) != EXPECTED_STAGED_FIXTURE_COUNT:
         raise CertificationFailure(
             "controlled fixture set changed: "
@@ -3624,9 +3738,13 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
 def main(argv: Sequence[str] | None = None) -> int:
     args = parse_args(argv)
     output_dir = getattr(args, "output_dir", None)
+    repo_root = Path(__file__).resolve().parents[2]
     try:
         if args.mode == "verify-archive":
-            authority = load_native_authority(args.authority.resolve())
+            candidate_sha = resolve_git_head_sha(repo_root)
+            authority = load_native_authority(
+                repo_root, candidate_sha, args.authority.resolve()
+            )
             record = verify_archive(
                 PLATFORMS[args.platform_id],
                 args.archive.resolve(),
@@ -3635,7 +3753,10 @@ def main(argv: Sequence[str] | None = None) -> int:
             )
             print(json.dumps(record, sort_keys=True))
         elif args.mode == "extract-verified-archive":
-            authority = load_native_authority(args.authority.resolve())
+            candidate_sha = resolve_git_head_sha(repo_root)
+            authority = load_native_authority(
+                repo_root, candidate_sha, args.authority.resolve()
+            )
             record = extract_verified_archive(
                 PLATFORMS[args.platform_id],
                 args.archive.resolve(),
@@ -3651,12 +3772,15 @@ def main(argv: Sequence[str] | None = None) -> int:
             certify(args)
             print("PLATFORM_NATIVE_CERTIFIED")
         else:
-            authority = load_native_authority(args.authority.resolve())
-            catalog = load_catalog(Path(__file__).resolve().parents[2])
+            candidate_sha = validate_git_identity(repo_root, args.expected_sha)
+            authority = load_native_authority(
+                repo_root, candidate_sha, args.authority.resolve()
+            )
+            catalog = load_catalog(repo_root, candidate_sha)
             aggregate_platform_evidence(
                 args.input_root.resolve(),
                 args.output.resolve(),
-                args.expected_sha,
+                candidate_sha,
                 authority,
                 catalog,
             )

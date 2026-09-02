@@ -18,6 +18,7 @@ import importlib.util
 import io
 import json
 from pathlib import Path
+import subprocess
 import sys
 import tarfile
 import tempfile
@@ -38,9 +39,12 @@ class PlatformCertificationTests(unittest.TestCase):
     @classmethod
     def setUpClass(cls) -> None:
         cls.repo_root = Path(__file__).resolve().parents[2]
-        cls.catalog = platform_cert.load_catalog(cls.repo_root)
+        cls.candidate_sha = platform_cert.resolve_git_head_sha(cls.repo_root)
+        cls.catalog = platform_cert.load_catalog(cls.repo_root, cls.candidate_sha)
         cls.authority_path = SCRIPT.with_name("ncbi_platform_variance_v010.json")
-        cls.authority = platform_cert.load_native_authority(cls.authority_path)
+        cls.authority = platform_cert.load_native_authority(
+            cls.repo_root, cls.candidate_sha, cls.authority_path
+        )
         cls.authority_document = copy.deepcopy(cls.authority.document)
 
     def assert_authority_rejected(self, mutate) -> None:
@@ -50,7 +54,31 @@ class PlatformCertificationTests(unittest.TestCase):
             path = Path(temporary) / "authority.json"
             path.write_text(json.dumps(document), encoding="utf-8")
             with self.assertRaises(platform_cert.CertificationFailure):
-                platform_cert.load_native_authority(path)
+                platform_cert._load_native_authority_bytes(path.read_bytes(), path)
+
+    def commit_files(self, root: Path, files: dict[str, bytes]) -> str:
+        subprocess.run(["git", "init", "--quiet"], cwd=root, check=True)
+        for relative, payload in files.items():
+            path = root / relative
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_bytes(payload)
+        subprocess.run(["git", "add", "--all"], cwd=root, check=True)
+        subprocess.run(
+            [
+                "git",
+                "-c",
+                "user.name=LOSAT Certifier Test",
+                "-c",
+                "user.email=certifier-test@example.invalid",
+                "commit",
+                "--quiet",
+                "-m",
+                "Create immutable-byte fixture",
+            ],
+            cwd=root,
+            check=True,
+        )
+        return platform_cert.resolve_git_head_sha(root)
 
     def authority_for_payload(
         self,
@@ -72,6 +100,34 @@ class PlatformCertificationTests(unittest.TestCase):
             **changes,
         }
         return replace(self.authority, outputs=outputs)
+
+    def native_invocation_identity(self, step, platform_id: str) -> dict[str, object]:
+        platform_record = self.authority.platforms[platform_id]
+        archive = platform_record["archive"]
+        checksum = archive["checksum"]
+        executable = next(
+            item
+            for item in platform_record["executables"]
+            if item["program"] == step.program
+        )
+        return {
+            "source_sha": self.candidate_sha,
+            "platform_id": platform_id,
+            "authority_version": self.authority.authority_version,
+            "authority_file_sha256": self.authority.file_sha256,
+            "oracle_archive": {
+                "archive_name": archive["filename"],
+                "archive_checksum_algorithm": checksum["algorithm"],
+                "archive_md5": checksum["value"],
+            },
+            "oracles": {
+                step.program: {
+                    "path": step.command[0],
+                    "sha256": executable["sha256"],
+                    "architecture": executable["architecture"],
+                }
+            },
+        }
 
     def create_aggregate_fixture(self, root: Path):
         canonical_rows = copy.deepcopy(self.catalog.canonical_rows)
@@ -363,7 +419,13 @@ class PlatformCertificationTests(unittest.TestCase):
         )
         self.assertEqual(
             self.authority.file_sha256,
-            hashlib.sha256(self.authority_path.read_bytes()).hexdigest(),
+            hashlib.sha256(
+                platform_cert.read_git_blob_bytes(
+                    self.repo_root,
+                    self.candidate_sha,
+                    platform_cert.NATIVE_AUTHORITY_REPO_RELATIVE,
+                )
+            ).hexdigest(),
         )
 
     def test_strict_json_rejects_duplicate_keys(self) -> None:
@@ -379,7 +441,95 @@ class PlatformCertificationTests(unittest.TestCase):
             with self.assertRaisesRegex(
                 platform_cert.CertificationFailure, "duplicate authority JSON key"
             ):
-                platform_cert.load_native_authority(path)
+                platform_cert._load_native_authority_bytes(path.read_bytes(), path)
+
+    def test_runtime_authority_hash_uses_git_blob_when_worktree_is_crlf(self) -> None:
+        raw = platform_cert.read_git_blob_bytes(
+            self.repo_root,
+            self.candidate_sha,
+            platform_cert.NATIVE_AUTHORITY_REPO_RELATIVE,
+        )
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            relative = platform_cert.NATIVE_AUTHORITY_REPO_RELATIVE.as_posix()
+            candidate_sha = self.commit_files(root, {relative: raw})
+            authority_path = root / relative
+            authority_path.write_bytes(raw.replace(b"\n", b"\r\n"))
+            authority = platform_cert.load_native_authority(
+                root, candidate_sha, authority_path
+            )
+        self.assertEqual(
+            authority.file_sha256,
+            "fb156568b854e64196cb0bcc369cd32fd1b1d298f654c5d230ce64ed62f10c2f",
+        )
+        self.assertEqual(authority.document, self.authority.document)
+
+    def test_git_blob_authority_retains_strict_duplicate_key_validation(self) -> None:
+        raw = platform_cert.read_git_blob_bytes(
+            self.repo_root,
+            self.candidate_sha,
+            platform_cert.NATIVE_AUTHORITY_REPO_RELATIVE,
+        )
+        duplicate = raw.replace(
+            b'  "schema_version": 1',
+            b'  "schema_version": 1,\n  "schema_version": 1',
+            1,
+        )
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            relative = platform_cert.NATIVE_AUTHORITY_REPO_RELATIVE.as_posix()
+            candidate_sha = self.commit_files(root, {relative: duplicate})
+            with self.assertRaisesRegex(
+                platform_cert.CertificationFailure, "duplicate authority JSON key"
+            ):
+                platform_cert.load_native_authority(
+                    root, candidate_sha, root / relative
+                )
+
+    def test_git_blob_reader_and_candidate_identity_fail_closed(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            candidate_sha = self.commit_files(root, {"tracked.txt": b"tracked\n"})
+            with self.assertRaisesRegex(
+                platform_cert.CertificationFailure, "candidate Git blob is missing"
+            ):
+                platform_cert.read_git_blob_bytes(root, candidate_sha, "missing.txt")
+            with self.assertRaisesRegex(
+                platform_cert.CertificationFailure,
+                "candidate Git object is missing or is not a commit",
+            ):
+                platform_cert.read_git_blob_bytes(root, "0" * 40, "tracked.txt")
+            with self.assertRaisesRegex(
+                platform_cert.CertificationFailure, "certification SHA mismatch"
+            ):
+                platform_cert.validate_git_identity(root, "0" * 40)
+
+    def test_canonical_manifest_is_parsed_and_identified_from_git_bytes(self) -> None:
+        raw = platform_cert.read_git_blob_bytes(
+            self.repo_root,
+            self.candidate_sha,
+            platform_cert.CANONICAL_MANIFEST_REPO_RELATIVE,
+        )
+        self.assertEqual(
+            hashlib.sha256(raw).hexdigest(),
+            "7e65cfb4de0dc575c47d059f1e29ddc9999fc50887ac769fb8f299a9ec97760c",
+        )
+        self.assertEqual(
+            hashlib.sha256(raw.replace(b"\n", b"\r\n")).hexdigest(),
+            "199e123e7980b01a68c6ad9605b7c7dec7310e06e7d339b476def52b52c06e4e",
+        )
+        with mock.patch.object(
+            platform_cert,
+            "read_git_blob_bytes",
+            wraps=platform_cert.read_git_blob_bytes,
+        ) as read_blob:
+            catalog = platform_cert.load_catalog(self.repo_root, self.candidate_sha)
+        read_blob.assert_any_call(
+            self.repo_root,
+            self.candidate_sha,
+            platform_cert.CANONICAL_MANIFEST_REPO_RELATIVE,
+        )
+        self.assertEqual(catalog.canonical_rows, self.catalog.canonical_rows)
 
     def test_strict_authority_rejects_unknown_fields_versions_and_platforms(
         self,
@@ -592,6 +742,7 @@ class PlatformCertificationTests(unittest.TestCase):
                 if item["program"] == "blastn"
             )
             identity = {
+                "source_sha": self.candidate_sha,
                 "platform_id": "macos-x64",
                 "authority_version": self.authority.authority_version,
                 "authority_file_sha256": self.authority.file_sha256,
@@ -722,6 +873,72 @@ class PlatformCertificationTests(unittest.TestCase):
                         "NATIVE_NCBI_AUTHORITY_MISS",
                     ):
                         verify(authority, observed_identity, observed_step)
+
+    def test_changed_committed_gate_b_fixture_hard_fails_without_normalization(
+        self,
+    ) -> None:
+        representative = self.authority.representatives[
+            ("blastn", "PesePMNV.MjPMNV.task_blastn")
+        ]
+        files = {}
+        for role in ("query", "subject"):
+            relative = representative[role]["repository_relative"]
+            files[relative] = platform_cert.read_git_blob_bytes(
+                self.repo_root, self.candidate_sha, relative
+            )
+        files[representative["query"]["repository_relative"]] += b"CHANGED\n"
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            changed_sha = self.commit_files(root, files)
+            output = root / "evidence"
+            output.mkdir()
+            steps = platform_cert.build_steps(
+                self.repo_root,
+                output,
+                self.catalog,
+                root / "LOSAT",
+                {
+                    "blastn": root / "blastn",
+                    "blastp": root / "blastp",
+                    "tblastx": root / "tblastx",
+                },
+            )
+            step = next(
+                item
+                for item in steps
+                if item.step_id == "oracle:blastn:PesePMNV.MjPMNV.task_blastn"
+            )
+            identity = self.native_invocation_identity(step, "macos-x64")
+            identity["source_sha"] = changed_sha
+            controlled = {}
+            for role in ("query", "subject"):
+                expected = representative[role]
+                destination = root / "controlled" / f"{role}.fasta"
+                destination.parent.mkdir(parents=True, exist_ok=True)
+                destination.write_bytes(
+                    platform_cert.read_git_blob_bytes(
+                        root, changed_sha, expected["repository_relative"]
+                    )
+                )
+                controlled[expected["lexical_path"]] = destination
+            with (
+                mock.patch.object(
+                    platform_cert,
+                    "controlled_physical_path",
+                    side_effect=lambda lexical: controlled[lexical],
+                ),
+                self.assertRaisesRegex(
+                    platform_cert.CertificationFailure,
+                    "native invocation query input identity changed",
+                ),
+            ):
+                platform_cert.verify_native_invocation_identity(
+                    root,
+                    output,
+                    self.authority,
+                    identity,
+                    step,
+                )
 
     def test_native_raw_fingerprint_is_decisive_for_every_field(self) -> None:
         payload = b"q\ts\t100.000\t4\t0\t0\t1\t4\t1\t4\t1e-10\t20.0\r\n"
@@ -1004,20 +1221,23 @@ class PlatformCertificationTests(unittest.TestCase):
             platform_cert.EXPECTED_STAGED_FIXTURE_COUNT,
         )
 
-    def test_fixture_staging_preserves_source_bytes_and_records_both_paths(
+    def test_fixture_staging_uses_lf_git_blob_not_crlf_worktree_bytes(
         self,
     ) -> None:
         relative = Path("tests/fasta/platform_cert_stage_unit_fixture.fa")
         lexical = platform_cert.historical_lexical_path(relative.as_posix())
-        physical = platform_cert.controlled_physical_path(lexical)
-        payload = b">fixture\r\nACGTN\r\n"
+        git_payload = b">fixture\nACGTN\n"
+        worktree_payload = git_payload.replace(b"\n", b"\r\n")
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)
             source = root / "LOSAT" / relative
-            source.parent.mkdir(parents=True)
-            source.write_bytes(payload)
+            candidate_sha = self.commit_files(
+                root, {f"LOSAT/{relative.as_posix()}": git_payload}
+            )
+            source.write_bytes(worktree_payload)
             output = root / "evidence"
             output.mkdir()
+            physical = root / "controlled" / relative
             step = platform_cert.SearchStep(
                 execution_index=1,
                 step_id="matrix:blastn:fixture",
@@ -1043,20 +1263,151 @@ class PlatformCertificationTests(unittest.TestCase):
                 final_output_rel="unused.out",
                 expected_losat_sha256="0" * 64,
             )
-            try:
-                records = platform_cert.stage_required_fixtures(root, [step], output)
+            with mock.patch.object(
+                platform_cert,
+                "controlled_physical_path",
+                return_value=physical,
+            ):
+                records = platform_cert.stage_required_fixtures(
+                    root, candidate_sha, [step], output
+                )
                 self.assertEqual(len(records), 1)
-                self.assertEqual(physical.read_bytes(), payload)
+                self.assertEqual(physical.read_bytes(), git_payload)
                 self.assertEqual(records[0].lexical_target_path, lexical)
                 self.assertEqual(records[0].physical_target_path, str(physical))
-                self.assertEqual(records[0].sha256, hashlib.sha256(payload).hexdigest())
+                self.assertEqual(
+                    records[0].source_git_object,
+                    f"{candidate_sha}:LOSAT/{relative.as_posix()}",
+                )
+                self.assertEqual(
+                    records[0].sha256, hashlib.sha256(git_payload).hexdigest()
+                )
+                self.assertEqual(records[0].byte_length, len(git_payload))
+                self.assertEqual(
+                    records[0].newline_profile,
+                    platform_cert.newline_profile(git_payload),
+                )
                 evidence = json.loads(
                     (output / "fixture-staging.json").read_text(encoding="utf-8")
                 )
                 self.assertEqual(evidence["status"], "VERIFIED")
                 self.assertEqual(evidence["staged_input_count"], 1)
-            finally:
-                physical.unlink(missing_ok=True)
+                self.assertEqual(
+                    evidence["inputs"][0]["source_git_object"],
+                    records[0].source_git_object,
+                )
+
+    def test_all_controlled_fixtures_and_pese_gate_b_use_candidate_git_bytes(
+        self,
+    ) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            output = root / "evidence"
+            output.mkdir()
+            oracles = {
+                "blastn": root / "blastn",
+                "blastp": root / "blastp",
+                "tblastx": root / "tblastx",
+            }
+            steps = platform_cert.build_steps(
+                self.repo_root,
+                output,
+                self.catalog,
+                root / "LOSAT",
+                oracles,
+            )
+            physical_root = root / "controlled"
+
+            def physical_for(lexical: str) -> Path:
+                relative = platform_cert._fixture_relative_from_lexical(lexical)
+                return physical_root.joinpath(*relative.parts)
+
+            with mock.patch.object(
+                platform_cert,
+                "controlled_physical_path",
+                side_effect=physical_for,
+            ):
+                records = platform_cert.stage_required_fixtures(
+                    self.repo_root,
+                    self.candidate_sha,
+                    steps,
+                    output,
+                )
+                self.assertEqual(
+                    len(records), platform_cert.EXPECTED_STAGED_FIXTURE_COUNT
+                )
+                for record in records:
+                    blob = platform_cert.read_git_blob_bytes(
+                        self.repo_root,
+                        self.candidate_sha,
+                        record.source_repo_relative,
+                    )
+                    self.assertEqual(
+                        Path(record.physical_target_path).read_bytes(), blob
+                    )
+                    self.assertEqual(record.sha256, hashlib.sha256(blob).hexdigest())
+
+                representative = self.authority.representatives[
+                    ("blastn", "PesePMNV.MjPMNV.task_blastn")
+                ]
+                by_relative = {
+                    record.source_repo_relative: record for record in records
+                }
+                for role in ("query", "subject"):
+                    expected = representative[role]
+                    record = by_relative[expected["repository_relative"]]
+                    self.assertEqual(record.sha256, expected["sha256"])
+                    self.assertEqual(record.byte_length, expected["byte_length"])
+                    self.assertEqual(
+                        record.newline_profile, expected["newline_profile"]
+                    )
+
+                step = next(
+                    item
+                    for item in steps
+                    if item.step_id == "oracle:blastn:PesePMNV.MjPMNV.task_blastn"
+                )
+                platform_record = self.authority.platforms["macos-x64"]
+                archive = platform_record["archive"]
+                checksum = archive["checksum"]
+                executable = next(
+                    item
+                    for item in platform_record["executables"]
+                    if item["program"] == "blastn"
+                )
+                identity = {
+                    "source_sha": self.candidate_sha,
+                    "platform_id": "macos-x64",
+                    "authority_version": self.authority.authority_version,
+                    "authority_file_sha256": self.authority.file_sha256,
+                    "oracle_archive": {
+                        "archive_name": archive["filename"],
+                        "archive_checksum_algorithm": checksum["algorithm"],
+                        "archive_md5": checksum["value"],
+                    },
+                    "oracles": {
+                        "blastn": {
+                            "path": step.command[0],
+                            "sha256": executable["sha256"],
+                            "architecture": executable["architecture"],
+                        }
+                    },
+                }
+                invocation = platform_cert.verify_native_invocation_identity(
+                    self.repo_root,
+                    output,
+                    self.authority,
+                    identity,
+                    step,
+                )
+                self.assertEqual(
+                    invocation["inputs"]["query"]["sha256"],
+                    "d78996c7897146934aee27db0df03c5655b67e75d4216e2a0b2dcf1c94f27093",
+                )
+                self.assertEqual(
+                    invocation["inputs"]["subject"]["sha256"],
+                    "0b9f7dfc0bc4720aea9c196d9d6b5fc6addc4058cb9c64ebba2ea6657f6e8fb6",
+                )
 
     def test_physical_and_lexical_controlled_paths_are_not_conflated(self) -> None:
         lexical = platform_cert.historical_lexical_path("tests/fasta/fixture.fa")

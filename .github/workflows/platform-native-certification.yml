@@ -389,3 +389,60 @@ jobs:
           if-no-files-found: error
           overwrite: true
           retention-days: 30
+
+  cross-platform-aggregation:
+    name: Aggregate three exact native platform certificates
+    needs: [platform-certification]
+    runs-on: ubuntu-24.04
+    env:
+      CANDIDATE_SHA: ${{ inputs.candidate_sha }}
+      AGGREGATE_INPUT: ${{ github.workspace }}/platform-native-aggregate-input
+      AGGREGATE_OUTPUT: ${{ github.workspace }}/platform-native-aggregate-output
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          clean: false
+          fetch-depth: 1
+          ref: ${{ inputs.candidate_sha }}
+
+      - name: Verify exact committed candidate SHA
+        run: test "$(git rev-parse HEAD)" = "$CANDIDATE_SHA"
+
+      - name: Download exact Windows x64 certificate
+        uses: actions/download-artifact@v4
+        with:
+          name: platform-native-windows-x64
+          path: ${{ env.AGGREGATE_INPUT }}/platform-native-windows-x64
+
+      - name: Download exact macOS arm64 certificate
+        uses: actions/download-artifact@v4
+        with:
+          name: platform-native-macos-arm64
+          path: ${{ env.AGGREGATE_INPUT }}/platform-native-macos-arm64
+
+      - name: Download exact macOS x64 certificate
+        uses: actions/download-artifact@v4
+        with:
+          name: platform-native-macos-x64
+          path: ${{ env.AGGREGATE_INPUT }}/platform-native-macos-x64
+
+      - name: Require all three authority-bound 61-execution certificates
+        run: |
+          mkdir -p "$AGGREGATE_OUTPUT"
+          # NCBI references:
+          # ncbi-blast/c++/src/algo/blast/format/blast_format.cpp:770-832
+          # ncbi-blast/c++/src/objtools/align_format/tabular.cpp:1098-1108
+          # Matrix cells bind exact raw NCBI formatter bytes before this hosted
+          # job checks cross-platform evidence identity and integrity.
+          python LOSAT/tests/certify_platform_native_v010.py aggregate \
+            --input-root "$AGGREGATE_INPUT" \
+            --expected-sha "$CANDIDATE_SHA" \
+            --output "$AGGREGATE_OUTPUT/cross-platform-summary.json"
+
+      - name: Upload cross-platform aggregate evidence
+        uses: actions/upload-artifact@v4
+        with:
+          name: platform-native-cross-platform-aggregate
+          path: ${{ env.AGGREGATE_OUTPUT }}
+          if-no-files-found: error
+          retention-days: 30

@@ -75,6 +75,15 @@ authoritative, current guidance for agent behavior in LOSAT.
 ## Parity boundaries and regression targets
 
 ### Program and target boundaries
+- PR 6 native certification has two non-interchangeable contracts under
+  `PD-NCBI-PLATFORM-VARIANCE`: Gate A requires every LOSAT result to match the
+  frozen PR 5 raw bytes; Gate B requires each of six official NCBI searches to
+  match its exact registered platform fingerprint. Never restore the old
+  requirement that LOSAT equal platform-local NCBI bytes when those registered
+  fingerprints differ. Native fingerprints never become LOSAT expected output,
+  never authorize platform-specific LOSAT behavior, and never create a new
+  parity exception. An unknown native fingerprint hard-fails and requires a new
+  characterized authority version and review.
 - Re-run current comparison fixtures before diagnosing BLASTN. Do not rely on
   old hit-count percentages or session notes. Start from one reproducible
   current fixture and the corresponding NCBI source path.

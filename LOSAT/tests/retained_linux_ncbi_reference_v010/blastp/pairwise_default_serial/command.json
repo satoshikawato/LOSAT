@@ -1,0 +1,18 @@
+{
+  "argv": [
+    "/home/kawato/tools/ncbi-blast-oracle/ncbi-blast-2.17.0+/bin/blastp",
+    "-query",
+    "/tmp/losat-pr5-runtime-cert-5845d22/LOSAT/tests/fasta/SicyWSV.faa",
+    "-subject",
+    "/tmp/losat-pr5-runtime-cert-5845d22/LOSAT/tests/fasta/PajaWSV.faa",
+    "-outfmt",
+    "6",
+    "-num_threads",
+    "1",
+    "-max_hsps",
+    "1",
+    "-out",
+    "/tmp/losat-pr5-integrated-5845d22-20260831-final/native/blastp/pairwise_default_serial.ncbi.tsv"
+  ],
+  "cwd": "/tmp/losat-pr5-runtime-cert-5845d22"
+}

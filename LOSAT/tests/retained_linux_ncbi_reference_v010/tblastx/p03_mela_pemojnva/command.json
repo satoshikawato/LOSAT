@@ -1,0 +1,20 @@
+{
+  "argv": [
+    "/home/kawato/tools/ncbi-blast-oracle/ncbi-blast-2.17.0+/bin/tblastx",
+    "-query",
+    "/tmp/losat-pr5-runtime-cert-5845d22/LOSAT/tests/fasta/MelaMJNV.fasta",
+    "-subject",
+    "/tmp/losat-pr5-runtime-cert-5845d22/LOSAT/tests/fasta/PemoMJNVA.fasta",
+    "-outfmt",
+    "6",
+    "-num_threads",
+    "1",
+    "-query_gencode",
+    "1",
+    "-db_gencode",
+    "1",
+    "-out",
+    "/tmp/losat-pr5-integrated-5845d22-20260831-final/native/tblastx/p03_mela_pemojnva/ncbi.tsv"
+  ],
+  "cwd": "/tmp/losat-pr5-runtime-cert-5845d22"
+}

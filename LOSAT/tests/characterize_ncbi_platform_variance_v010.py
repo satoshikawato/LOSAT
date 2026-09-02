@@ -27,7 +27,6 @@ import os
 from pathlib import Path, PurePosixPath
 import platform
 import re
-import shutil
 import subprocess
 import sys
 from types import ModuleType
@@ -38,10 +37,13 @@ PR6_CERT_SHA_V3 = "0e29e2201e2d1b03124c0b9d6698a81bfed8cec0"
 PR5_EVIDENCE_MANIFEST_SHA256 = (
     "b9fc98a376d2849274c86b4e4769d2ee38b76025adbb4d63d3da4a5e3e7cdb5c"
 )
-PR5_EVIDENCE_ROOT = Path(
-    "/mnt/c/Users/genom/LOSAT-certification-evidence/"
-    "losat-pr5-integrated-5845d22-20260831-resumed-final"
+RETAINED_LINUX_REFERENCE_ROOT = PurePosixPath(
+    "LOSAT/tests/retained_linux_ncbi_reference_v010"
 )
+RETAINED_LINUX_MANIFEST = (
+    RETAINED_LINUX_REFERENCE_ROOT / "linux_reference_manifest.json"
+)
+RETAINED_LINUX_EVIDENCE_SCHEMA = 3
 EVIDENCE_SCHEMA = 2
 EXPECTED_FIXTURE_COUNT = 10
 EXPECTED_REPRESENTATIVE_COUNT = 6
@@ -57,6 +59,7 @@ ALLOWED_DIAGNOSTIC_CHANGES = {
     "LOSAT/tests/characterize_ncbi_platform_variance_v010.py",
     "LOSAT/tests/test_characterize_ncbi_platform_variance_v010.py",
 }
+ALLOWED_DIAGNOSTIC_PREFIXES = (f"{RETAINED_LINUX_REFERENCE_ROOT.as_posix()}/",)
 
 
 # NCBI reference: ncbi-blast/c++/src/objtools/align_format/format_flags.cpp:38-45
@@ -242,7 +245,12 @@ def verify_candidate(repo_root: Path, candidate_sha: str) -> None:
         .decode("utf-8")
         .splitlines()
     )
-    unexpected = changed - ALLOWED_DIAGNOSTIC_CHANGES
+    unexpected = {
+        path
+        for path in changed
+        if path not in ALLOWED_DIAGNOSTIC_CHANGES
+        and not any(path.startswith(prefix) for prefix in ALLOWED_DIAGNOSTIC_PREFIXES)
+    }
     if unexpected:
         raise CharacterizationFailure(
             "diagnostic candidate changes protected paths: "
@@ -319,23 +327,26 @@ def compare_pair_commands(
     diagnostic_outfmt = _option_value(diagnostic, "-outfmt")
     authoritative_normalized = _normalized_command_without_outfmt(authoritative)
     diagnostic_normalized = _normalized_command_without_outfmt(diagnostic)
-    differences = [
-        {
-            "argument_index": index,
-            "authoritative": authoritative_value,
-            "diagnostic": diagnostic_value,
-        }
-        for index, (authoritative_value, diagnostic_value) in enumerate(
-            zip(authoritative, diagnostic, strict=True)
-        )
-        if authoritative_value != diagnostic_value
-    ] if len(authoritative) == len(diagnostic) else []
+    differences = (
+        [
+            {
+                "argument_index": index,
+                "authoritative": authoritative_value,
+                "diagnostic": diagnostic_value,
+            }
+            for index, (authoritative_value, diagnostic_value) in enumerate(
+                zip(authoritative, diagnostic, strict=True)
+            )
+            if authoritative_value != diagnostic_value
+        ]
+        if len(authoritative) == len(diagnostic)
+        else []
+    )
     identical_non_output_arguments = (
         len(authoritative) == len(diagnostic)
         and authoritative_normalized == diagnostic_normalized
         and len(differences) == 1
-        and differences[0]["argument_index"]
-        == authoritative.index("-outfmt") + 1
+        and differences[0]["argument_index"] == authoritative.index("-outfmt") + 1
     )
     if not identical_non_output_arguments:
         raise CharacterizationFailure(
@@ -677,67 +688,300 @@ def verify_fixture_invariance(manifests: Sequence[Path], output: Path) -> None:
     atomic_write_json(output, record)
 
 
-def _parse_manifest(path: Path) -> dict[str, str]:
-    records: dict[str, str] = {}
-    for line in path.read_text(encoding="utf-8").splitlines():
-        if not line:
-            continue
-        digest, separator, relative = line.partition("  ")
-        if not separator or not re.fullmatch(r"[0-9a-f]{64}", digest):
-            raise CharacterizationFailure(f"invalid retained manifest line: {line!r}")
-        records[relative.removeprefix("./")] = digest
-    return records
-
-
-def export_linux_reference(source_root: Path, output_dir: Path) -> None:
-    manifest_path = source_root / "FINAL_EVIDENCE_MANIFEST.sha256"
-    if not manifest_path.is_file():
-        raise CharacterizationFailure("retained PR 5 Linux evidence is unavailable")
-    observed_manifest = sha256_path(manifest_path)
-    if observed_manifest != PR5_EVIDENCE_MANIFEST_SHA256:
-        raise CharacterizationFailure(
-            "retained PR 5 Linux evidence manifest differs from accepted evidence"
-        )
-    manifest = _parse_manifest(manifest_path)
-    records = []
-    for representative in REPRESENTATIVES:
-        source = source_root / representative.linux_relative
-        expected = manifest.get(representative.linux_relative)
-        if expected is None or not source.is_file() or sha256_path(source) != expected:
-            raise CharacterizationFailure(
-                f"retained Linux output is unusable: {representative.linux_relative}"
-            )
-        destination_relative = PurePosixPath(
-            representative.program, representative.case_id, "ncbi.raw.out"
-        )
-        destination = output_dir.joinpath(*destination_relative.parts)
-        destination.parent.mkdir(parents=True, exist_ok=True)
-        shutil.copyfile(source, destination)
-        if sha256_path(destination) != expected:
-            raise CharacterizationFailure("copy changed retained Linux evidence")
-        records.append(
-            {
-                "program": representative.program,
-                "case_id": representative.case_id,
-                "semantic_class": representative.semantic_class,
-                "source_relative": representative.linux_relative,
-                "artifact_relative": destination_relative.as_posix(),
-                "sha256": expected,
-                "byte_length": destination.stat().st_size,
-                "newline_profile": newline_profile(destination.read_bytes()),
-            }
-        )
-    atomic_write_json(
-        output_dir / "linux_reference_manifest.json",
-        {
-            "evidence_schema": EVIDENCE_SCHEMA,
-            "status": "RETAINED_PR5_LINUX_EVIDENCE_VERIFIED",
-            "created_at": utc_now(),
-            "source_manifest_sha256": observed_manifest,
-            "case_count": len(records),
-            "cases": records,
-        },
+def _retained_command_relative(representative: Representative) -> str:
+    relative = representative.linux_relative
+    if relative.endswith(".ncbi.out"):
+        return relative.removesuffix(".ncbi.out") + ".ncbi.command.json"
+    if relative.endswith(".ncbi.tsv"):
+        return relative.removesuffix(".ncbi.tsv") + ".ncbi.command.json"
+    if relative.endswith("/ncbi.tsv"):
+        return relative.removesuffix("/ncbi.tsv") + "/ncbi.command.json"
+    raise CharacterizationFailure(
+        f"unexpected retained output path: {representative.linux_relative}"
     )
+
+
+def _expected_retained_payloads() -> dict[str, tuple[Representative, str, str]]:
+    expected: dict[str, tuple[Representative, str, str]] = {}
+    for representative in REPRESENTATIVES:
+        base = PurePosixPath(representative.program, representative.case_id)
+        expected[(base / "command.json").as_posix()] = (
+            representative,
+            "exact_retained_ncbi_command_metadata",
+            _retained_command_relative(representative),
+        )
+        expected[(base / "ncbi.raw.out").as_posix()] = (
+            representative,
+            "exact_retained_ncbi_raw_output",
+            representative.linux_relative,
+        )
+    return expected
+
+
+def _validate_retained_command(
+    representative: Representative, command_bytes: bytes
+) -> None:
+    try:
+        command_record = json.loads(command_bytes.decode("utf-8"))
+    except (UnicodeDecodeError, json.JSONDecodeError) as error:
+        raise CharacterizationFailure(
+            f"invalid retained command metadata: {representative.case_id}"
+        ) from error
+    argv = command_record.get("argv")
+    cwd = command_record.get("cwd")
+    if (
+        not isinstance(argv, list)
+        or not argv
+        or not all(isinstance(value, str) for value in argv)
+        or not isinstance(cwd, str)
+    ):
+        raise CharacterizationFailure(
+            f"incomplete retained command metadata: {representative.case_id}"
+        )
+    expected = {
+        "PesePMNV.MjPMNV.task_blastn": (
+            "AP027152.fasta",
+            "AP027202.fasta",
+            "7",
+            "blastn",
+            "1",
+            "1",
+        ),
+        "Sakai.MG1655.megablast": (
+            "Sakai.fna",
+            "MG1655.fna",
+            "7",
+            "megablast",
+            "1",
+            "1",
+        ),
+        "pairwise_default_serial": (
+            "SicyWSV.faa",
+            "PajaWSV.faa",
+            "6",
+            "blastp",
+            "1",
+            "1",
+        ),
+        "p03_mela_pemojnva": (
+            "MelaMJNV.fasta",
+            "PemoMJNVA.fasta",
+            "6",
+            "tblastx",
+            "1",
+            "1",
+        ),
+        "p14_ap027131_ap027133_query4": (
+            "AP027131.fasta",
+            "AP027133.fasta",
+            "6",
+            "tblastx",
+            "4",
+            "1",
+        ),
+        "d06_ap027131_ap027133_db4": (
+            "AP027131.fasta",
+            "AP027133.fasta",
+            "6",
+            "tblastx",
+            "1",
+            "4",
+        ),
+    }[representative.case_id]
+    query_name, subject_name, outfmt, task, query_gencode, db_gencode = expected
+    executable = PurePosixPath(argv[0]).name
+    observed_task = (
+        _option_value(argv, "-task") if "-task" in argv else representative.program
+    )
+    observed_query_gencode = (
+        _option_value(argv, "-query_gencode") if "-query_gencode" in argv else "1"
+    )
+    observed_db_gencode = (
+        _option_value(argv, "-db_gencode") if "-db_gencode" in argv else "1"
+    )
+    output = _option_value(argv, "-out")
+    if (
+        executable != representative.program
+        or PurePosixPath(_option_value(argv, "-query")).name != query_name
+        or PurePosixPath(_option_value(argv, "-subject")).name != subject_name
+        or _option_value(argv, "-outfmt") != outfmt
+        or _option_value(argv, "-num_threads") != "1"
+        or observed_task != task
+        or observed_query_gencode != query_gencode
+        or observed_db_gencode != db_gencode
+        or not output.endswith(f"/{representative.linux_relative}")
+        or not cwd.endswith("/losat-pr5-runtime-cert-5845d22")
+    ):
+        raise CharacterizationFailure(
+            f"retained command does not identify intended case: {representative.case_id}"
+        )
+
+
+def _validate_linux_reference_payloads(
+    manifest: dict, payloads: dict[str, bytes]
+) -> None:
+    if (
+        manifest.get("evidence_schema") != RETAINED_LINUX_EVIDENCE_SCHEMA
+        or manifest.get("status") != "RETAINED_PR5_LINUX_EVIDENCE_VERIFIED"
+        or manifest.get("source_manifest_sha256") != PR5_EVIDENCE_MANIFEST_SHA256
+        or manifest.get("case_count") != EXPECTED_REPRESENTATIVE_COUNT
+        or manifest.get("tracked_payload_file_count") != 12
+    ):
+        raise CharacterizationFailure(
+            "retained Linux evidence manifest identity changed"
+        )
+    provenance = manifest.get("provenance", {})
+    if (
+        provenance.get("retained_evidence_manifest", {}).get("sha256")
+        != PR5_EVIDENCE_MANIFEST_SHA256
+        or provenance.get("runtime_evidence_identity", {}).get("runtime_cert_sha")
+        != "5845d22ed9842449628a647f29b8c6762511ca59"
+        or provenance.get("oracle_identity", {}).get("source_retained_evidence_path")
+        != "oracle_identities.json"
+    ):
+        raise CharacterizationFailure("retained Linux provenance is incomplete")
+
+    expected_payloads = _expected_retained_payloads()
+    records = manifest.get("files")
+    if not isinstance(records, list) or len(records) != len(expected_payloads):
+        raise CharacterizationFailure("retained Linux payload inventory changed")
+    records_by_artifact: dict[str, dict] = {}
+    for record in records:
+        try:
+            repository_relative = PurePosixPath(record["repository_relative"])
+            artifact_relative = repository_relative.relative_to(
+                RETAINED_LINUX_REFERENCE_ROOT
+            ).as_posix()
+        except (KeyError, ValueError) as error:
+            raise CharacterizationFailure(
+                "retained payload escaped its tracked reference directory"
+            ) from error
+        if artifact_relative in records_by_artifact:
+            raise CharacterizationFailure(
+                f"duplicate retained payload: {artifact_relative}"
+            )
+        records_by_artifact[artifact_relative] = record
+    if set(records_by_artifact) != set(expected_payloads) or set(payloads) != set(
+        expected_payloads
+    ):
+        raise CharacterizationFailure("retained Linux payload set changed")
+
+    for artifact_relative, (
+        representative,
+        role,
+        source_relative,
+    ) in expected_payloads.items():
+        record = records_by_artifact[artifact_relative]
+        data = payloads[artifact_relative]
+        if (
+            record.get("program") != representative.program
+            or record.get("case_id") != representative.case_id
+            or record.get("file_role") != role
+            or record.get("source_retained_evidence_path") != source_relative
+            or record.get("byte_length") != len(data)
+            or record.get("sha256") != sha256_bytes(data)
+            or record.get("newline_profile") != newline_profile(data)
+        ):
+            raise CharacterizationFailure(
+                f"retained payload differs from manifest: {artifact_relative}"
+            )
+        if role == "exact_retained_ncbi_command_metadata":
+            _validate_retained_command(representative, data)
+
+    expected_cases = {(item.program, item.case_id): item for item in REPRESENTATIVES}
+    cases = manifest.get("cases")
+    if not isinstance(cases, list) or len(cases) != len(expected_cases):
+        raise CharacterizationFailure("retained Linux case inventory changed")
+    observed_cases: set[tuple[str, str]] = set()
+    for record in cases:
+        key = (record.get("program"), record.get("case_id"))
+        representative = expected_cases.get(key)
+        if representative is None or key in observed_cases:
+            raise CharacterizationFailure("retained Linux case identity changed")
+        observed_cases.add(key)
+        base = PurePosixPath(representative.program, representative.case_id)
+        metadata = record.get("retained_classifier_metadata", {})
+        output_data = payloads[(base / "ncbi.raw.out").as_posix()]
+        if (
+            record.get("semantic_class") != representative.semantic_class
+            or record.get("artifact_relative") != (base / "ncbi.raw.out").as_posix()
+            or record.get("artifact_command_relative")
+            != (base / "command.json").as_posix()
+            or record.get("sha256") != sha256_bytes(output_data)
+            or metadata.get("source_retained_evidence_path") != "native_contracts.tsv"
+            or not metadata.get("contract")
+            or not metadata.get("classification")
+        ):
+            raise CharacterizationFailure(
+                f"retained case metadata changed: {representative.case_id}"
+            )
+    if observed_cases != set(expected_cases):
+        raise CharacterizationFailure("retained Linux case set changed")
+
+
+def _tracked_linux_reference_from_git(
+    repo_root: Path, source_sha: str
+) -> tuple[bytes, dict, dict[str, bytes]]:
+    if not SHA40.fullmatch(source_sha):
+        raise CharacterizationFailure("candidate SHA must be 40 lowercase hex digits")
+    _, manifest_bytes = _git_blob(repo_root, RETAINED_LINUX_MANIFEST, source_sha)
+    try:
+        manifest = json.loads(manifest_bytes.decode("utf-8"))
+    except (UnicodeDecodeError, json.JSONDecodeError) as error:
+        raise CharacterizationFailure(
+            "tracked retained Linux manifest is invalid"
+        ) from error
+    payloads: dict[str, bytes] = {}
+    for record in manifest.get("files", []):
+        repository_relative = PurePosixPath(record["repository_relative"])
+        try:
+            artifact_relative = repository_relative.relative_to(
+                RETAINED_LINUX_REFERENCE_ROOT
+            ).as_posix()
+        except ValueError as error:
+            raise CharacterizationFailure(
+                "tracked retained payload escaped its reference directory"
+            ) from error
+        _, payloads[artifact_relative] = _git_blob(
+            repo_root, repository_relative, source_sha
+        )
+    tracked = set(
+        git_output(
+            repo_root,
+            [
+                "ls-tree",
+                "-r",
+                "--name-only",
+                source_sha,
+                "--",
+                RETAINED_LINUX_REFERENCE_ROOT.as_posix(),
+            ],
+        )
+        .decode("utf-8")
+        .splitlines()
+    )
+    expected_tracked = {RETAINED_LINUX_MANIFEST.as_posix()} | {
+        (RETAINED_LINUX_REFERENCE_ROOT / relative).as_posix() for relative in payloads
+    }
+    if tracked != expected_tracked:
+        raise CharacterizationFailure(
+            "tracked retained Linux directory contains an unbound file"
+        )
+    _validate_linux_reference_payloads(manifest, payloads)
+    return manifest_bytes, manifest, payloads
+
+
+def export_linux_reference(
+    repo_root: Path, candidate_sha: str, output_dir: Path
+) -> None:
+    verify_candidate(repo_root, candidate_sha)
+    manifest_bytes, _, payloads = _tracked_linux_reference_from_git(
+        repo_root, candidate_sha
+    )
+    atomic_write_bytes(output_dir / "linux_reference_manifest.json", manifest_bytes)
+    for relative, data in payloads.items():
+        atomic_write_bytes(output_dir.joinpath(*PurePosixPath(relative).parts), data)
+    _validate_linux_bundle(output_dir)
 
 
 def _validate_fixture_bundle(
@@ -812,13 +1056,27 @@ def _validate_linux_bundle(
 ) -> tuple[dict[tuple[str, str], Path], dict]:
     manifest_path = bundle_root / "linux_reference_manifest.json"
     manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
-    if (
-        manifest["status"] != "RETAINED_PR5_LINUX_EVIDENCE_VERIFIED"
-        or manifest["source_manifest_sha256"] != PR5_EVIDENCE_MANIFEST_SHA256
-        or manifest["case_count"] != EXPECTED_REPRESENTATIVE_COUNT
-    ):
+    payloads: dict[str, bytes] = {}
+    for record in manifest.get("files", []):
+        repository_relative = PurePosixPath(record["repository_relative"])
+        artifact_relative = repository_relative.relative_to(
+            RETAINED_LINUX_REFERENCE_ROOT
+        ).as_posix()
+        path = bundle_root.joinpath(*PurePosixPath(artifact_relative).parts)
+        if not path.is_file():
+            raise CharacterizationFailure(
+                f"retained Linux payload is missing: {artifact_relative}"
+            )
+        payloads[artifact_relative] = path.read_bytes()
+    _validate_linux_reference_payloads(manifest, payloads)
+    observed_files = {
+        path.relative_to(bundle_root).as_posix()
+        for path in bundle_root.rglob("*")
+        if path.is_file()
+    }
+    if observed_files != {"linux_reference_manifest.json"} | set(payloads):
         raise CharacterizationFailure(
-            "retained Linux evidence artifact is not authoritative"
+            "retained Linux artifact contains an unbound file"
         )
     paths: dict[tuple[str, str], Path] = {}
     for record in manifest["cases"]:
@@ -1087,9 +1345,7 @@ def rich_representation_finding(
         )
         for row in platform_representations
     }
-    matched_platforms = {
-        str(row["platform_id"]) for row in platform_representations
-    }
+    matched_platforms = {str(row["platform_id"]) for row in platform_representations}
     if len(distinct_representations) > 1:
         finding = (
             "EVIDENCE_CONSISTENT_WITH_ALTERNATIVE_EQUAL_SCORING_"
@@ -1126,9 +1382,7 @@ def _pair_identity_record(
 ) -> dict[str, object]:
     authoritative = pair["authoritative"]
     diagnostic = pair["diagnostic"]
-    comparison = compare_pair_commands(
-        authoritative["argv"], diagnostic["argv"]
-    )
+    comparison = compare_pair_commands(authoritative["argv"], diagnostic["argv"])
     program = str(pair["program"])
     authoritative_inputs = {
         role: (option, value)
@@ -1170,9 +1424,7 @@ def _pair_identity_record(
         "program": program,
         "case_id": pair["case_id"],
         **comparison,
-        "same_executable_path": (
-            authoritative["argv"][0] == diagnostic["argv"][0]
-        ),
+        "same_executable_path": (authoritative["argv"][0] == diagnostic["argv"][0]),
         "authoritative_executable_sha256": oracle_sha256,
         "diagnostic_executable_sha256": oracle_sha256,
         "identical_executable_sha256": True,
@@ -1251,9 +1503,7 @@ def _execute_paired_search(
         raise CharacterizationFailure(
             f"refusing to overwrite {role} raw output: {pair['case_id']}"
         )
-    atomic_write_json(
-        role_dir / "command.json", _command_record(repo_root, pair, role)
-    )
+    atomic_write_json(role_dir / "command.json", _command_record(repo_root, pair, role))
     started_at = utc_now()
     completed = run_bytes(pair[role]["argv"], repo_root)
     completed_at = utc_now()
@@ -1293,9 +1543,7 @@ def changed_hsp_diagnostic_records(
                 "linux_retained_authoritative": difference["linux_row"],
                 "platform_authoritative": difference["platform_row"],
                 "platform_diagnostic": diagnostic_row,
-                "authoritative_field_differences": difference[
-                    "field_differences"
-                ],
+                "authoritative_field_differences": difference["field_differences"],
                 "diagnostic_used_for_authoritative_pass_fail": False,
             }
         )
@@ -1419,17 +1667,13 @@ def analyze_platforms(
             (representative.program, representative.case_id)
         ].read_bytes()
         linux_rows = parse_structured_rows(linux_raw)
-        diagnostics_by_platform: dict[
-            str, list[dict[str, str | int]]
-        ] = {}
+        diagnostics_by_platform: dict[str, list[dict[str, str | int]]] = {}
         triggers_by_identity: dict[tuple[str, ...], list[dict[str, object]]] = {}
         unmatched = []
         platform_authoritative_results = []
         for platform_id in sorted(roots):
             case_dir = (
-                roots[platform_id]
-                / representative.program
-                / representative.case_id
+                roots[platform_id] / representative.program / representative.case_id
             )
             authoritative_path = case_dir / "authoritative" / "ncbi.raw.out"
             diagnostic_path = case_dir / "diagnostic" / "ncbi.raw.out"
@@ -1442,9 +1686,7 @@ def analyze_platforms(
                 )
             )
             diagnostic_command = json.loads(
-                (case_dir / "diagnostic" / "command.json").read_text(
-                    encoding="utf-8"
-                )
+                (case_dir / "diagnostic" / "command.json").read_text(encoding="utf-8")
             )
             observed_pair_comparison = compare_pair_commands(
                 authoritative_command["argv"], diagnostic_command["argv"]
@@ -1458,8 +1700,7 @@ def analyze_platforms(
                 or not observed_pair_comparison["identical_non_output_arguments"]
                 or authoritative_command["authoritative_comparison_eligible"]
                 is not True
-                or diagnostic_command["authoritative_comparison_eligible"]
-                is not False
+                or diagnostic_command["authoritative_comparison_eligible"] is not False
             ):
                 raise CharacterizationFailure(
                     f"pair identity artifact failed for "
@@ -1539,10 +1780,8 @@ def analyze_platforms(
                                 **{field: row[field] for field in DIAGNOSTIC_FIELDS},
                             }
                         )
-            finding, distinct_count, matched_platforms = (
-                rich_representation_finding(
-                    platform_representations, expected_platforms
-                )
+            finding, distinct_count, matched_platforms = rich_representation_finding(
+                platform_representations, expected_platforms
             )
             if finding.startswith("EVIDENCE_CONSISTENT_WITH_ALTERNATIVE"):
                 alternative_representation_groups += 1
@@ -1592,8 +1831,7 @@ def analyze_platforms(
         for summary in summaries.values()
     )
     diagnostic_count = sum(
-        int(summary["diagnostic_search_executions"])
-        for summary in summaries.values()
+        int(summary["diagnostic_search_executions"]) for summary in summaries.values()
     )
     total_count = sum(
         int(summary["ncbi_search_executions"]) for summary in summaries.values()
@@ -1611,9 +1849,7 @@ def analyze_platforms(
             "status": "RICH_DIAGNOSTIC_ANALYSIS_COMPLETE",
             "created_at": utc_now(),
             "platform_ids": sorted(roots),
-            "retained_linux_manifest_sha256": linux_manifest[
-                "source_manifest_sha256"
-            ],
+            "retained_linux_manifest_sha256": linux_manifest["source_manifest_sha256"],
             "authoritative_search_count": authoritative_count,
             "diagnostic_search_count": diagnostic_count,
             "total_ncbi_search_count": total_count,
@@ -1634,10 +1870,9 @@ def analyze_platforms(
         },
     )
 
+
 def characterize(args: argparse.Namespace) -> None:
-    repo_root, output_dir, plan, identity, linux_paths = _prepare_characterization(
-        args
-    )
+    repo_root, output_dir, plan, identity, linux_paths = _prepare_characterization(args)
     summaries = []
     for pair in plan:
         representative = next(
@@ -1665,7 +1900,9 @@ def characterize(args: argparse.Namespace) -> None:
             authoritative_dir / "ncbi.raw.out"
         )
         if retained_platform_raw != platform_raw:
-            raise CharacterizationFailure("authoritative raw bytes changed after capture")
+            raise CharacterizationFailure(
+                "authoritative raw bytes changed after capture"
+            )
         linux_raw = linux_paths[
             (representative.program, representative.case_id)
         ].read_bytes()
@@ -1706,9 +1943,7 @@ def characterize(args: argparse.Namespace) -> None:
         comparison["authority_context"] = _case_authority_context(representative)
         comparison["platform_source"] = "authoritative/ncbi.raw.out"
         comparison["diagnostic_output_used"] = False
-        atomic_write_json(
-            authoritative_dir / "linux_comparison.json", comparison
-        )
+        atomic_write_json(authoritative_dir / "linux_comparison.json", comparison)
         diagnostic_record = {
             "evidence_schema": EVIDENCE_SCHEMA,
             "raw_sha256": sha256_bytes(diagnostic_raw),
@@ -1839,7 +2074,8 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
     invariant.add_argument("--output", type=Path, required=True)
 
     linux = subparsers.add_parser("export-linux-reference")
-    linux.add_argument("--source-root", type=Path, default=PR5_EVIDENCE_ROOT)
+    linux.add_argument("--repo-root", type=Path, default=default_root)
+    linux.add_argument("--candidate-sha", required=True)
     linux.add_argument("--output-dir", type=Path, required=True)
 
     run = subparsers.add_parser("characterize")
@@ -1882,7 +2118,9 @@ def main(argv: Sequence[str] | None = None) -> int:
             verify_fixture_invariance(args.manifest, args.output.resolve())
         elif args.mode == "export-linux-reference":
             export_linux_reference(
-                args.source_root.resolve(), args.output_dir.resolve()
+                args.repo_root.resolve(),
+                args.candidate_sha,
+                args.output_dir.resolve(),
             )
         elif args.mode == "analyze-platforms":
             analyze_platforms(

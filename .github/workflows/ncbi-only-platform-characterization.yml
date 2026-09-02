@@ -127,26 +127,29 @@ jobs:
 
   retained-linux-evidence:
     name: Export retained PR 5 Linux evidence without rerun
-    runs-on: [self-hosted, linux, x64, losat-certification]
+    runs-on: ubuntu-24.04
     env:
-      LINUX_EVIDENCE_ROOT: /mnt/c/Users/genom/LOSAT-certification-evidence/losat-pr5-integrated-5845d22-20260831-resumed-final
-      LINUX_ARTIFACT_DIR: /tmp/losat-ncbi-characterization-linux-${{ github.run_id }}-${{ github.run_attempt }}
+      CANDIDATE_SHA: ${{ inputs.candidate_sha }}
+      LINUX_ARTIFACT_DIR: ${{ github.workspace }}/ncbi-characterization-retained-linux
     steps:
       - uses: actions/checkout@v4
         with:
           clean: false
-          fetch-depth: 1
+          fetch-depth: 0
           ref: ${{ inputs.candidate_sha }}
 
-      - name: Verify exact diagnostic candidate
-        run: test "$(git rev-parse HEAD)" = "${{ inputs.candidate_sha }}"
+      - name: Verify exact diagnostic candidate and V3 ancestry
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$CANDIDATE_SHA"
+          git merge-base --is-ancestor "$PR6_CERT_SHA_V3" "$CANDIDATE_SHA"
 
-      - name: Export only the retained six Linux oracle outputs
+      - name: Verify and export retained Linux Git-blob evidence
         run: |
           set -euo pipefail
           python LOSAT/tests/characterize_ncbi_platform_variance_v010.py \
             export-linux-reference \
-            --source-root "$LINUX_EVIDENCE_ROOT" \
+            --candidate-sha "$CANDIDATE_SHA" \
             --output-dir "$LINUX_ARTIFACT_DIR"
 
       - name: Upload verified retained Linux evidence

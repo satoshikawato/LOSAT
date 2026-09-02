@@ -9,9 +9,12 @@ These tests preserve the default twelve-field order and emitted row order.
 
 from __future__ import annotations
 
+import hashlib
 import importlib.util
 import json
 from pathlib import Path, PurePosixPath
+import re
+import shutil
 import subprocess
 import sys
 import tempfile
@@ -24,6 +27,8 @@ TESTS_DIR = Path(__file__).resolve().parent
 REPO_ROOT = TESTS_DIR.parents[1]
 SCRIPT_PATH = TESTS_DIR / "characterize_ncbi_platform_variance_v010.py"
 WORKFLOW_PATH = REPO_ROOT / ".github/workflows/ncbi-only-platform-characterization.yml"
+REFERENCE_ROOT = TESTS_DIR / "retained_linux_ncbi_reference_v010"
+REFERENCE_MANIFEST_PATH = REFERENCE_ROOT / "linux_reference_manifest.json"
 
 
 def load_driver():
@@ -69,12 +74,8 @@ class InventoryTests(unittest.TestCase):
             ],
         )
         self.assertEqual(len(self.plan), driver.EXPECTED_REPRESENTATIVE_COUNT)
-        self.assertEqual(
-            len(self.plan) * 2, driver.EXPECTED_PLATFORM_EXECUTIONS
-        )
-        self.assertEqual(
-            len(self.plan) * 2 * 3, driver.EXPECTED_TOTAL_EXECUTIONS
-        )
+        self.assertEqual(len(self.plan) * 2, driver.EXPECTED_PLATFORM_EXECUTIONS)
+        self.assertEqual(len(self.plan) * 2 * 3, driver.EXPECTED_TOTAL_EXECUTIONS)
         self.assertEqual(driver.EXPECTED_TOTAL_AUTHORITATIVE_EXECUTIONS, 18)
         self.assertEqual(driver.EXPECTED_TOTAL_DIAGNOSTIC_EXECUTIONS, 18)
         self.assertEqual(driver.EXPECTED_TOTAL_EXECUTIONS, 36)
@@ -95,13 +96,15 @@ class InventoryTests(unittest.TestCase):
         sakai = by_case["Sakai.MG1655.megablast"]
         self.assertEqual(sakai["authoritative"]["semantics"]["task"], "megablast")
         self.assertEqual(
-            by_case["p14_ap027131_ap027133_query4"]["authoritative"]
-            ["semantics"]["query_gencode"],
+            by_case["p14_ap027131_ap027133_query4"]["authoritative"]["semantics"][
+                "query_gencode"
+            ],
             "4",
         )
         self.assertEqual(
-            by_case["d06_ap027131_ap027133_db4"]["authoritative"]
-            ["semantics"]["db_gencode"],
+            by_case["d06_ap027131_ap027133_db4"]["authoritative"]["semantics"][
+                "db_gencode"
+            ],
             "4",
         )
         for pair in self.plan:
@@ -143,17 +146,11 @@ class InventoryTests(unittest.TestCase):
                 pair["authoritative"]["argv"], pair["diagnostic"]["argv"]
             )
             self.assertTrue(comparison["identical_non_output_arguments"])
-            self.assertEqual(
-                comparison["diagnostic_outfmt"], driver.DIAGNOSTIC_OUTFMT
-            )
+            self.assertEqual(comparison["diagnostic_outfmt"], driver.DIAGNOSTIC_OUTFMT)
             self.assertEqual(len(comparison["argument_differences"]), 1)
             self.assertEqual(
-                driver.input_arguments(
-                    pair["authoritative"]["argv"], pair["program"]
-                ),
-                driver.input_arguments(
-                    pair["diagnostic"]["argv"], pair["program"]
-                ),
+                driver.input_arguments(pair["authoritative"]["argv"], pair["program"]),
+                driver.input_arguments(pair["diagnostic"]["argv"], pair["program"]),
             )
 
     def test_pair_identity_records_identical_input_hashes(self) -> None:
@@ -274,6 +271,137 @@ class FixtureByteTests(unittest.TestCase):
                 driver.verify_fixture_invariance(paths, output)
 
 
+class RetainedLinuxReferenceTests(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls) -> None:
+        cls.manifest_bytes = REFERENCE_MANIFEST_PATH.read_bytes()
+        cls.manifest = json.loads(cls.manifest_bytes.decode("utf-8"))
+        cls.payloads = {
+            Path(record["repository_relative"])
+            .relative_to(driver.RETAINED_LINUX_REFERENCE_ROOT.as_posix())
+            .as_posix(): REPO_ROOT.joinpath(
+                *PurePosixPath(record["repository_relative"]).parts
+            ).read_bytes()
+            for record in cls.manifest["files"]
+        }
+        driver._validate_linux_reference_payloads(cls.manifest, cls.payloads)
+
+    def test_exact_six_cases_and_twelve_bound_payloads(self) -> None:
+        self.assertEqual(
+            [
+                (record["program"], record["case_id"])
+                for record in self.manifest["cases"]
+            ],
+            [
+                ("blastn", "PesePMNV.MjPMNV.task_blastn"),
+                ("blastn", "Sakai.MG1655.megablast"),
+                ("blastp", "pairwise_default_serial"),
+                ("tblastx", "p03_mela_pemojnva"),
+                ("tblastx", "p14_ap027131_ap027133_query4"),
+                ("tblastx", "d06_ap027131_ap027133_db4"),
+            ],
+        )
+        self.assertEqual(self.manifest["case_count"], 6)
+        self.assertEqual(self.manifest["tracked_payload_file_count"], 12)
+        observed = {
+            path.relative_to(REFERENCE_ROOT).as_posix()
+            for path in REFERENCE_ROOT.rglob("*")
+            if path.is_file() and path != REFERENCE_MANIFEST_PATH
+        }
+        self.assertEqual(observed, set(self.payloads))
+
+    def test_every_payload_matches_manifest_without_transformation(self) -> None:
+        for record in self.manifest["files"]:
+            artifact_relative = (
+                Path(record["repository_relative"])
+                .relative_to(driver.RETAINED_LINUX_REFERENCE_ROOT.as_posix())
+                .as_posix()
+            )
+            data = self.payloads[artifact_relative]
+            self.assertEqual(len(data), record["byte_length"])
+            self.assertEqual(hashlib.sha256(data).hexdigest(), record["sha256"])
+            self.assertEqual(driver.newline_profile(data), record["newline_profile"])
+
+    def test_exact_command_metadata_is_retained_for_each_case(self) -> None:
+        for representative in driver.REPRESENTATIVES:
+            relative = PurePosixPath(
+                representative.program, representative.case_id, "command.json"
+            ).as_posix()
+            record = json.loads(self.payloads[relative].decode("utf-8"))
+            self.assertEqual(
+                PurePosixPath(record["argv"][0]).name, representative.program
+            )
+            self.assertEqual(driver._option_value(record["argv"], "-num_threads"), "1")
+            driver._validate_retained_command(representative, self.payloads[relative])
+
+    def test_provenance_binds_pr5_runtime_manifest_and_direct_oracle_record(
+        self,
+    ) -> None:
+        provenance = self.manifest["provenance"]
+        self.assertEqual(
+            provenance["retained_evidence_manifest"]["sha256"],
+            driver.PR5_EVIDENCE_MANIFEST_SHA256,
+        )
+        self.assertEqual(
+            provenance["runtime_evidence_identity"]["runtime_cert_sha"],
+            "5845d22ed9842449628a647f29b8c6762511ca59",
+        )
+        oracle = provenance["oracle_identity"]
+        self.assertEqual(
+            oracle["source_retained_evidence_path"], "oracle_identities.json"
+        )
+        self.assertIn("directly", oracle["provenance_statement"])
+        self.assertIn("no companion installation", oracle["provenance_statement"])
+
+    def test_git_blob_export_ignores_changed_checkout_bytes(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            copied = root.joinpath(*driver.RETAINED_LINUX_REFERENCE_ROOT.parts)
+            copied.parent.mkdir(parents=True)
+            shutil.copytree(REFERENCE_ROOT, copied)
+            subprocess.run(["git", "init", "-q"], cwd=root, check=True)
+            subprocess.run(
+                ["git", "config", "user.email", "test@example.invalid"],
+                cwd=root,
+                check=True,
+            )
+            subprocess.run(
+                ["git", "config", "user.name", "Reference Test"],
+                cwd=root,
+                check=True,
+            )
+            subprocess.run(
+                ["git", "config", "core.autocrlf", "false"],
+                cwd=root,
+                check=True,
+            )
+            subprocess.run(
+                ["git", "add", driver.RETAINED_LINUX_REFERENCE_ROOT.as_posix()],
+                cwd=root,
+                check=True,
+            )
+            subprocess.run(
+                ["git", "commit", "-q", "-m", "retained reference"],
+                cwd=root,
+                check=True,
+            )
+            source_sha = (
+                subprocess.check_output(["git", "rev-parse", "HEAD"], cwd=root)
+                .decode("ascii")
+                .strip()
+            )
+            relative = "blastn/PesePMNV.MjPMNV.task_blastn/ncbi.raw.out"
+            original = self.payloads[relative]
+            changed = copied.joinpath(*PurePosixPath(relative).parts)
+            changed.write_bytes(original.replace(b"\n", b"\r\n"))
+            manifest_bytes, _, payloads = driver._tracked_linux_reference_from_git(
+                root, source_sha
+            )
+            self.assertEqual(manifest_bytes, self.manifest_bytes)
+            self.assertEqual(payloads[relative], original)
+            self.assertNotEqual(payloads[relative], changed.read_bytes())
+
+
 class StructuredComparisonTests(unittest.TestCase):
     def test_reports_exact_row_field_values_and_key_order(self) -> None:
         linux = b"q\ts\t73.413\t3020\t101\t4\t1\t3020\t1\t3020\t0.0\t900\n"
@@ -311,7 +439,9 @@ class StructuredComparisonTests(unittest.TestCase):
 
 
 class DiagnosticSeparationTests(unittest.TestCase):
-    def test_pair_capture_preserves_raw_bytes_and_authoritative_runs_first(self) -> None:
+    def test_pair_capture_preserves_raw_bytes_and_authoritative_runs_first(
+        self,
+    ) -> None:
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)
             authority, catalog = driver.load_platform_authority(REPO_ROOT)
@@ -387,7 +517,9 @@ class DiagnosticSeparationTests(unittest.TestCase):
         authoritative_rows = driver.parse_structured_rows(
             ("\t".join(values[:12]) + "\n").encode("utf-8")
         )
-        self.assertEqual(driver.standard_projection(diagnostic_rows), authoritative_rows)
+        self.assertEqual(
+            driver.standard_projection(diagnostic_rows), authoritative_rows
+        )
         self.assertEqual(diagnostic_rows[0]["score"], "2210")
         self.assertEqual(diagnostic_rows[0]["btop"], "10AC5")
         self.assertEqual(diagnostic_rows[0]["qseq"], "AC-GT")
@@ -423,9 +555,7 @@ class DiagnosticSeparationTests(unittest.TestCase):
             platform,
             linux,
         )
-        records = driver.changed_hsp_diagnostic_records(
-            comparison, diagnostic_rows
-        )
+        records = driver.changed_hsp_diagnostic_records(comparison, diagnostic_rows)
         self.assertEqual(len(records), 1)
         self.assertEqual(records[0]["platform_diagnostic"]["score"], "40")
         self.assertFalse(records[0]["diagnostic_used_for_authoritative_pass_fail"])
@@ -434,8 +564,7 @@ class DiagnosticSeparationTests(unittest.TestCase):
         expected = {"windows-x64", "macos-arm64", "macos-x64"}
         common = {"btop": "10", "qseq": "ACGT", "sseq": "ACGT"}
         rows = [
-            {"platform_id": platform_id, **common}
-            for platform_id in sorted(expected)
+            {"platform_id": platform_id, **common} for platform_id in sorted(expected)
         ]
         finding, distinct_count, matched = driver.rich_representation_finding(
             rows, expected
@@ -450,9 +579,7 @@ class DiagnosticSeparationTests(unittest.TestCase):
             "qseq": "AC-GT",
             "sseq": "ACTGT",
         }
-        finding, distinct_count, _ = driver.rich_representation_finding(
-            rows, expected
-        )
+        finding, distinct_count, _ = driver.rich_representation_finding(rows, expected)
         self.assertIn("ALTERNATIVE_EQUAL_SCORING", finding)
         self.assertEqual(distinct_count, 2)
 
@@ -461,6 +588,29 @@ class WorkflowContractTests(unittest.TestCase):
     @classmethod
     def setUpClass(cls) -> None:
         cls.authority, _ = driver.load_platform_authority(REPO_ROOT)
+
+    def _job_run_text(self, job_name: str) -> str:
+        document = yaml.load(
+            WORKFLOW_PATH.read_text(encoding="utf-8"), Loader=yaml.BaseLoader
+        )
+        return "\n".join(
+            step.get("run", "") for step in document["jobs"][job_name]["steps"]
+        )
+
+    def assert_no_blast_or_losat_invocation(self, run_text: str) -> None:
+        self.assertIsNone(
+            re.search(
+                r"(?:^|\s|[;&|])(?:[^\s]*/)?"
+                r"(?:blastn|blastp|tblastx|blast_formatter)(?=\s|$)",
+                run_text,
+            )
+        )
+        self.assertIsNone(
+            re.search(
+                r"(?:^|\s|[;&|])(?:[^\s]*/)?LOSAT(?:\.exe|\.wasm)?(?=\s|$)",
+                run_text,
+            )
+        )
 
     def test_yaml_parses_and_has_exact_topology(self) -> None:
         document = yaml.load(
@@ -503,14 +653,61 @@ class WorkflowContractTests(unittest.TestCase):
             WORKFLOW_PATH.read_text(encoding="utf-8"), Loader=yaml.BaseLoader
         )
         analysis = document["jobs"]["analyze-rich-diagnostics"]
-        self.assertEqual(
-            analysis["needs"], ["characterize", "retained-linux-evidence"]
-        )
+        self.assertEqual(analysis["needs"], ["characterize", "retained-linux-evidence"])
         text = WORKFLOW_PATH.read_text(encoding="utf-8")
         self.assertIn("analyze-platforms", text)
         self.assertEqual(text.count("--platform-evidence"), 3)
         self.assertIn("18 authoritative plus 18 diagnostic", text)
         self.assertNotIn("linux-rerun", text.lower())
+
+    def test_retained_linux_export_is_hosted_git_blob_transport_only(self) -> None:
+        document = yaml.load(
+            WORKFLOW_PATH.read_text(encoding="utf-8"), Loader=yaml.BaseLoader
+        )
+        job = document["jobs"]["retained-linux-evidence"]
+        self.assertEqual(job["runs-on"], "ubuntu-24.04")
+        serialized = json.dumps(job, sort_keys=True)
+        self.assertNotIn("self-hosted", serialized)
+        self.assertNotIn("/mnt/c/", serialized)
+        self.assertNotIn("LINUX_EVIDENCE_ROOT", serialized)
+        self.assertIn("export-linux-reference", serialized)
+        self.assertIn("--candidate-sha", serialized)
+        self.assertIn("ncbi-characterization-retained-linux", serialized)
+        run_text = self._job_run_text("retained-linux-evidence")
+        self.assertNotIn("curl ", run_text)
+        self.assertNotIn("cargo ", run_text)
+        self.assertNotIn("run_losat", run_text)
+        self.assertNotIn("--native-bin", run_text)
+        self.assert_no_blast_or_losat_invocation(run_text)
+
+    def test_analysis_job_cannot_execute_blast_or_losat(self) -> None:
+        run_text = self._job_run_text("analyze-rich-diagnostics")
+        self.assertNotIn("cargo ", run_text)
+        self.assertNotIn("run_losat", run_text)
+        self.assertNotIn("--native-bin", run_text)
+        self.assert_no_blast_or_losat_invocation(run_text)
+
+    def test_main_bootstrap_and_protected_contracts_are_unmodified(self) -> None:
+        changed = set(
+            subprocess.check_output(
+                ["git", "diff", "--name-only", driver.PR6_CERT_SHA_V3],
+                cwd=REPO_ROOT,
+            )
+            .decode("utf-8")
+            .splitlines()
+        )
+        protected = {
+            "LOSAT/src/main.rs",
+            "LOSAT/tests/platform_native_v010_canonical.tsv",
+            ".github/workflows/platform-native-certification-v010.yml",
+            "LOSAT/tests/certify_platform_native_v010.py",
+            "LOSAT/tests/test_certify_platform_native_v010.py",
+        }
+        self.assertTrue(changed.isdisjoint(protected))
+        self.assertFalse(
+            any(path.startswith("docs/product_decisions/") for path in changed)
+        )
+        self.assertFalse(any(path.startswith(".agents/plans/") for path in changed))
 
     def test_official_archive_inventory_matches_accepted_platform_authority(
         self,

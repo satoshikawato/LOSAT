@@ -1,0 +1,318 @@
+{
+  "case_count": 6,
+  "cases": [
+    {
+      "artifact_command_relative": "blastn/PesePMNV.MjPMNV.task_blastn/command.json",
+      "artifact_relative": "blastn/PesePMNV.MjPMNV.task_blastn/ncbi.raw.out",
+      "case_id": "PesePMNV.MjPMNV.task_blastn",
+      "program": "blastn",
+      "retained_classifier_metadata": {
+        "classification": "EXACT_TEXT",
+        "contract": "EXACT_TEXT",
+        "result_sha256_kind": "retained_losat_output",
+        "result_sha256": "fcd9236c7b02488d868feaf35166a472c73e9f9e6cc45fc6d7449a9edc7d4120",
+        "source_retained_evidence_path": "native_contracts.tsv"
+      },
+      "semantic_class": "ordinary_exact",
+      "sha256": "fcd9236c7b02488d868feaf35166a472c73e9f9e6cc45fc6d7449a9edc7d4120"
+    },
+    {
+      "artifact_command_relative": "blastn/Sakai.MG1655.megablast/command.json",
+      "artifact_relative": "blastn/Sakai.MG1655.megablast/ncbi.raw.out",
+      "case_id": "Sakai.MG1655.megablast",
+      "program": "blastn",
+      "retained_classifier_metadata": {
+        "classification": "SOURCE_UNDETERMINED_ACCEPTED",
+        "contract": "SOURCE_UNDETERMINED_ACCEPTED",
+        "result_sha256_kind": "retained_losat_output",
+        "result_sha256": "3f27c1f1396b59ecb7e78827b5da390e9c97a276c05cbc7a6c82f56bd0a03262",
+        "source_retained_evidence_path": "native_contracts.tsv"
+      },
+      "semantic_class": "source_undetermined",
+      "sha256": "ac8177764f35b2fb92777f8b1d01ea646cc55ae21b05f1f486ee231348a34a45"
+    },
+    {
+      "artifact_command_relative": "blastp/pairwise_default_serial/command.json",
+      "artifact_relative": "blastp/pairwise_default_serial/ncbi.raw.out",
+      "case_id": "pairwise_default_serial",
+      "program": "blastp",
+      "retained_classifier_metadata": {
+        "classification": "EXACT_TEXT",
+        "contract": "source_defined_exact",
+        "result_sha256_kind": "retained_losat_output",
+        "result_sha256": "fd4b010800e32ce6c823cb38b42a10b7845f3342edae892acccc8f554f9edf34",
+        "source_retained_evidence_path": "native_contracts.tsv"
+      },
+      "semantic_class": "representative",
+      "sha256": "fd4b010800e32ce6c823cb38b42a10b7845f3342edae892acccc8f554f9edf34"
+    },
+    {
+      "artifact_command_relative": "tblastx/p03_mela_pemojnva/command.json",
+      "artifact_relative": "tblastx/p03_mela_pemojnva/ncbi.raw.out",
+      "case_id": "p03_mela_pemojnva",
+      "program": "tblastx",
+      "retained_classifier_metadata": {
+        "classification": "EXACT_TEXT",
+        "contract": "parity",
+        "result_sha256_kind": "retained_losat_output",
+        "result_sha256": "bbef153094025db89dd4a69b2a3c4246b0b8853396fe740bc7e1bd654db105b6",
+        "source_retained_evidence_path": "native_contracts.tsv"
+      },
+      "semantic_class": "ordinary_exact",
+      "sha256": "bbef153094025db89dd4a69b2a3c4246b0b8853396fe740bc7e1bd654db105b6"
+    },
+    {
+      "artifact_command_relative": "tblastx/p14_ap027131_ap027133_query4/command.json",
+      "artifact_relative": "tblastx/p14_ap027131_ap027133_query4/ncbi.raw.out",
+      "case_id": "p14_ap027131_ap027133_query4",
+      "program": "tblastx",
+      "retained_classifier_metadata": {
+        "classification": "EXACT_TEXT",
+        "contract": "parity",
+        "result_sha256_kind": "retained_losat_output",
+        "result_sha256": "ef33958a8c31146eea7a2b7fea4e7ff1c690e451058c007f1a0cb60047a43de6",
+        "source_retained_evidence_path": "native_contracts.tsv"
+      },
+      "semantic_class": "query_gencode_exact",
+      "sha256": "ef33958a8c31146eea7a2b7fea4e7ff1c690e451058c007f1a0cb60047a43de6"
+    },
+    {
+      "artifact_command_relative": "tblastx/d06_ap027131_ap027133_db4/command.json",
+      "artifact_relative": "tblastx/d06_ap027131_ap027133_db4/ncbi.raw.out",
+      "case_id": "d06_ap027131_ap027133_db4",
+      "program": "tblastx",
+      "retained_classifier_metadata": {
+        "classification": "HSP_SET_DIFF",
+        "contract": "approved_db_gencode_deviation",
+        "result_sha256_kind": "retained_losat_output",
+        "result_sha256": "719339294d0f22d0f415dd33106a0fd93c25ac372b1456d19d92390fce081df1",
+        "source_retained_evidence_path": "native_contracts.tsv"
+      },
+      "semantic_class": "db_gencode_deviation",
+      "sha256": "8d5ff1d0d92f27488ba91da061366ef808db382cd73b3e8577385d150e9e8a29"
+    }
+  ],
+  "evidence_schema": 3,
+  "files": [
+    {
+      "byte_length": 796,
+      "case_id": "PesePMNV.MjPMNV.task_blastn",
+      "file_role": "exact_retained_ncbi_command_metadata",
+      "newline_profile": {
+        "bare_cr_count": 0,
+        "bare_lf_count": 38,
+        "crlf_count": 0,
+        "lf_count": 38
+      },
+      "program": "blastn",
+      "repository_relative": "LOSAT/tests/retained_linux_ncbi_reference_v010/blastn/PesePMNV.MjPMNV.task_blastn/command.json",
+      "sha256": "12dcaadab051ce184edd2c2b0007296bff0b83db385a347df377e913bd598edd",
+      "source_retained_evidence_path": "native/blastn/PesePMNV.MjPMNV.task_blastn.ncbi.command.json"
+    },
+    {
+      "byte_length": 18573,
+      "case_id": "PesePMNV.MjPMNV.task_blastn",
+      "file_role": "exact_retained_ncbi_raw_output",
+      "newline_profile": {
+        "bare_cr_count": 0,
+        "bare_lf_count": 247,
+        "crlf_count": 0,
+        "lf_count": 247
+      },
+      "program": "blastn",
+      "repository_relative": "LOSAT/tests/retained_linux_ncbi_reference_v010/blastn/PesePMNV.MjPMNV.task_blastn/ncbi.raw.out",
+      "sha256": "fcd9236c7b02488d868feaf35166a472c73e9f9e6cc45fc6d7449a9edc7d4120",
+      "source_retained_evidence_path": "native/blastn/PesePMNV.MjPMNV.task_blastn.ncbi.out"
+    },
+    {
+      "byte_length": 785,
+      "case_id": "Sakai.MG1655.megablast",
+      "file_role": "exact_retained_ncbi_command_metadata",
+      "newline_profile": {
+        "bare_cr_count": 0,
+        "bare_lf_count": 38,
+        "crlf_count": 0,
+        "lf_count": 38
+      },
+      "program": "blastn",
+      "repository_relative": "LOSAT/tests/retained_linux_ncbi_reference_v010/blastn/Sakai.MG1655.megablast/command.json",
+      "sha256": "77509cbcd3bae414ee7d05358c31c0dfbfe0537301356567e4eef11e6c6a8337",
+      "source_retained_evidence_path": "native/blastn/Sakai.MG1655.megablast.ncbi.command.json"
+    },
+    {
+      "byte_length": 536922,
+      "case_id": "Sakai.MG1655.megablast",
+      "file_role": "exact_retained_ncbi_raw_output",
+      "newline_profile": {
+        "bare_cr_count": 0,
+        "bare_lf_count": 6482,
+        "crlf_count": 0,
+        "lf_count": 6482
+      },
+      "program": "blastn",
+      "repository_relative": "LOSAT/tests/retained_linux_ncbi_reference_v010/blastn/Sakai.MG1655.megablast/ncbi.raw.out",
+      "sha256": "ac8177764f35b2fb92777f8b1d01ea646cc55ae21b05f1f486ee231348a34a45",
+      "source_retained_evidence_path": "native/blastn/Sakai.MG1655.megablast.ncbi.out"
+    },
+    {
+      "byte_length": 511,
+      "case_id": "pairwise_default_serial",
+      "file_role": "exact_retained_ncbi_command_metadata",
+      "newline_profile": {
+        "bare_cr_count": 0,
+        "bare_lf_count": 18,
+        "crlf_count": 0,
+        "lf_count": 18
+      },
+      "program": "blastp",
+      "repository_relative": "LOSAT/tests/retained_linux_ncbi_reference_v010/blastp/pairwise_default_serial/command.json",
+      "sha256": "9de94f69a86d05734504648cfbfb65974da4470c42c625e966f5312191f7be9e",
+      "source_retained_evidence_path": "native/blastp/pairwise_default_serial.ncbi.command.json"
+    },
+    {
+      "byte_length": 29641,
+      "case_id": "pairwise_default_serial",
+      "file_role": "exact_retained_ncbi_raw_output",
+      "newline_profile": {
+        "bare_cr_count": 0,
+        "bare_lf_count": 475,
+        "crlf_count": 0,
+        "lf_count": 475
+      },
+      "program": "blastp",
+      "repository_relative": "LOSAT/tests/retained_linux_ncbi_reference_v010/blastp/pairwise_default_serial/ncbi.raw.out",
+      "sha256": "fd4b010800e32ce6c823cb38b42a10b7845f3342edae892acccc8f554f9edf34",
+      "source_retained_evidence_path": "native/blastp/pairwise_default_serial.ncbi.tsv"
+    },
+    {
+      "byte_length": 547,
+      "case_id": "p03_mela_pemojnva",
+      "file_role": "exact_retained_ncbi_command_metadata",
+      "newline_profile": {
+        "bare_cr_count": 0,
+        "bare_lf_count": 20,
+        "crlf_count": 0,
+        "lf_count": 20
+      },
+      "program": "tblastx",
+      "repository_relative": "LOSAT/tests/retained_linux_ncbi_reference_v010/tblastx/p03_mela_pemojnva/command.json",
+      "sha256": "55b2e6c5a146a908a4b8333ccd64fdc41a515eee84097323702b10df671535e4",
+      "source_retained_evidence_path": "native/tblastx/p03_mela_pemojnva/ncbi.command.json"
+    },
+    {
+      "byte_length": 351051,
+      "case_id": "p03_mela_pemojnva",
+      "file_role": "exact_retained_ncbi_raw_output",
+      "newline_profile": {
+        "bare_cr_count": 0,
+        "bare_lf_count": 4794,
+        "crlf_count": 0,
+        "lf_count": 4794
+      },
+      "program": "tblastx",
+      "repository_relative": "LOSAT/tests/retained_linux_ncbi_reference_v010/tblastx/p03_mela_pemojnva/ncbi.raw.out",
+      "sha256": "bbef153094025db89dd4a69b2a3c4246b0b8853396fe740bc7e1bd654db105b6",
+      "source_retained_evidence_path": "native/tblastx/p03_mela_pemojnva/ncbi.tsv"
+    },
+    {
+      "byte_length": 557,
+      "case_id": "p14_ap027131_ap027133_query4",
+      "file_role": "exact_retained_ncbi_command_metadata",
+      "newline_profile": {
+        "bare_cr_count": 0,
+        "bare_lf_count": 20,
+        "crlf_count": 0,
+        "lf_count": 20
+      },
+      "program": "tblastx",
+      "repository_relative": "LOSAT/tests/retained_linux_ncbi_reference_v010/tblastx/p14_ap027131_ap027133_query4/command.json",
+      "sha256": "d337aaf6f253013dc0a12db865bf51e3436833bbbadcfc79b9832a4b5a1c79e1",
+      "source_retained_evidence_path": "native/tblastx/p14_ap027131_ap027133_query4/ncbi.command.json"
+    },
+    {
+      "byte_length": 1122212,
+      "case_id": "p14_ap027131_ap027133_query4",
+      "file_role": "exact_retained_ncbi_raw_output",
+      "newline_profile": {
+        "bare_cr_count": 0,
+        "bare_lf_count": 14871,
+        "crlf_count": 0,
+        "lf_count": 14871
+      },
+      "program": "tblastx",
+      "repository_relative": "LOSAT/tests/retained_linux_ncbi_reference_v010/tblastx/p14_ap027131_ap027133_query4/ncbi.raw.out",
+      "sha256": "ef33958a8c31146eea7a2b7fea4e7ff1c690e451058c007f1a0cb60047a43de6",
+      "source_retained_evidence_path": "native/tblastx/p14_ap027131_ap027133_query4/ncbi.tsv"
+    },
+    {
+      "byte_length": 554,
+      "case_id": "d06_ap027131_ap027133_db4",
+      "file_role": "exact_retained_ncbi_command_metadata",
+      "newline_profile": {
+        "bare_cr_count": 0,
+        "bare_lf_count": 20,
+        "crlf_count": 0,
+        "lf_count": 20
+      },
+      "program": "tblastx",
+      "repository_relative": "LOSAT/tests/retained_linux_ncbi_reference_v010/tblastx/d06_ap027131_ap027133_db4/command.json",
+      "sha256": "757535ae1de9b7365c53326ef42415276772d61799ec5380cf2a459ad2758ffb",
+      "source_retained_evidence_path": "native/tblastx/d06_ap027131_ap027133_db4/ncbi.command.json"
+    },
+    {
+      "byte_length": 954534,
+      "case_id": "d06_ap027131_ap027133_db4",
+      "file_role": "exact_retained_ncbi_raw_output",
+      "newline_profile": {
+        "bare_cr_count": 0,
+        "bare_lf_count": 12672,
+        "crlf_count": 0,
+        "lf_count": 12672
+      },
+      "program": "tblastx",
+      "repository_relative": "LOSAT/tests/retained_linux_ncbi_reference_v010/tblastx/d06_ap027131_ap027133_db4/ncbi.raw.out",
+      "sha256": "8d5ff1d0d92f27488ba91da061366ef808db382cd73b3e8577385d150e9e8a29",
+      "source_retained_evidence_path": "native/tblastx/d06_ap027131_ap027133_db4/ncbi.tsv"
+    }
+  ],
+  "provenance": {
+    "compatibility_authority": "Unchanged; this bundle transports retained historical PR 5 Linux NCBI evidence only.",
+    "oracle_identity": {
+      "executables": {
+        "blastn": {
+          "sha256": "33b64bc67d3149cee2459b2f7766b363323df632cf12c099546de00aea9698b5",
+          "version": "2.17.0+"
+        },
+        "blastp": {
+          "sha256": "5ce267c04e4988c265357bfbedc64e809545b6fcfae7ff6775266fabbee8ba0e",
+          "version": "2.17.0+"
+        },
+        "tblastx": {
+          "sha256": "583e5d60bbd444ac455d20e0956c5aa0aeef675da8daee8204d8f9376ddb8804",
+          "version": "2.17.0+"
+        }
+      },
+      "official_source_archive": {
+        "name": "ncbi-blast-2.17.0+-src.tar.gz",
+        "sha256": "502057a88e9990e34e62758be21ea474cc0ad68d6a63a2e37b2372af1e5ea147"
+      },
+      "provenance_statement": "Recovered directly from oracle_identities.json in the retained final evidence tree; no companion installation was consulted for these recorded identities.",
+      "source_retained_evidence_path": "oracle_identities.json",
+      "source_sha256": "336faf81e9157f4ab0d67fdec0afdaedfa853e9959a60dd5f8ecee3c408f4b02"
+    },
+    "primary_retained_source_root": "/mnt/c/Users/genom/LOSAT-certification-evidence/losat-pr5-integrated-5845d22-20260831-resumed-final",
+    "retained_evidence_manifest": {
+      "source_retained_evidence_path": "FINAL_EVIDENCE_MANIFEST.sha256",
+      "sha256": "b9fc98a376d2849274c86b4e4769d2ee38b76025adbb4d63d3da4a5e3e7cdb5c"
+    },
+    "runtime_evidence_identity": {
+      "checkpoint_sha256": "7cdac0ea675de9c0ab248a065321aca76589198268e63568adfed941b92f4225",
+      "original_evidence_dir": "/tmp/losat-pr5-integrated-5845d22-20260831-final",
+      "runtime_cert_sha": "5845d22ed9842449628a647f29b8c6762511ca59",
+      "source_retained_evidence_path": "CHECKPOINT.txt"
+    }
+  },
+  "source_manifest_sha256": "b9fc98a376d2849274c86b4e4769d2ee38b76025adbb4d63d3da4a5e3e7cdb5c",
+  "status": "RETAINED_PR5_LINUX_EVIDENCE_VERIFIED",
+  "tracked_payload_file_count": 12
+}

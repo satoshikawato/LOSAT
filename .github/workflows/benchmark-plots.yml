@@ -20,8 +20,6 @@ permissions:
 jobs:
   render:
     runs-on: ubuntu-latest
-    env:
-      MPLCONFIGDIR: ${{ runner.temp }}/matplotlib
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -32,14 +30,17 @@ jobs:
       # NCBI schema reference: ncbi-blast/c++/src/objtools/align_format/format_flags.cpp:38-40,109-116.
       # This job transforms the committed normalized `length` and `pident` data only.
       - name: Test data-only renderer
-        run: python -m unittest tests/test_render_benchmark_plots.py
+        run: |
+          export MPLCONFIGDIR="$RUNNER_TEMP/matplotlib"
+          python -m unittest tests/test_render_benchmark_plots.py
       - name: Render committed snapshot
-        run: >-
-          python scripts/render_benchmark_plots.py
-          --snapshot benchmarks/v0.1.0
-          --output "${{ runner.temp }}/benchmark-plots"
+        run: |
+          export MPLCONFIGDIR="$RUNNER_TEMP/matplotlib"
+          python scripts/render_benchmark_plots.py \
+            --snapshot benchmarks/v0.1.0 \
+            --output "$RUNNER_TEMP/benchmark-plots"
       - name: Verify deterministic plot data
         run: |
-          cmp benchmarks/v0.1.0/plot_data.json "${{ runner.temp }}/benchmark-plots/plot_data.json"
-          test -s "${{ runner.temp }}/benchmark-plots/hit_distribution.png"
-          test -s "${{ runner.temp }}/benchmark-plots/execution_time.png"
+          cmp benchmarks/v0.1.0/plot_data.json "$RUNNER_TEMP/benchmark-plots/plot_data.json"
+          test -s "$RUNNER_TEMP/benchmark-plots/hit_distribution.png"
+          test -s "$RUNNER_TEMP/benchmark-plots/execution_time.png"

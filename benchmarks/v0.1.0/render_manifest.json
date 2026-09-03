@@ -1,13 +1,13 @@
 {
   "inputs": {
     "alignment_results.tsv.gz": "5fd5beb14d87fdc536ac00d53a0a8d08a0c2d541d0d30029a46aeaa041fbcd18",
-    "execution_times.tsv": "80be40c0333fa9156a13c583d84a68ce5a1011767b6d8edc4307e52374333063",
-    "metadata.json": "e67cd40dfd1342b4cf2c26da802e4e97391fd4db22df57bce2aa6a513ec82200"
+    "execution_times.tsv": "c7b4eb17245dfd0dade44068a65e5afcc084fb7fa50a639301b5bb3bf7323a13",
+    "metadata.json": "13690f146de752733045985885b18ba0bc0d28a9dcd2cd6580281596d61374c8"
   },
   "outputs": {
-    "execution_time.png": "de0eb1080b6a95fa0bded31f40ea8c037e2ebbaf3c0a88a1b6280d7c66ff4e2d",
+    "execution_time.png": "4c6c58dafa7d656800cfb2ac9ddef3296fb1e732af77d91b4c126446067ff0c4",
     "hit_distribution.png": "2cd27ef41661c35a289c9af29d356ee3e2e4dee460854d9dc21b83ef75fd4851",
-    "plot_data.json": "d959b59dab08a7813d6a9ed07b96d4d929a21e1d5d2630dfa66c74c99b24a7e9"
+    "plot_data.json": "acf31c1e82997d2bec17ca40f877ceada9a6d24ed10319d60849119168d17167"
   },
   "plotted_rows": {
     "alignment": {
@@ -19,11 +19,12 @@
       "tblastx:NCBI BLAST+": 505912
     },
     "execution_time": {
+      "final_v0.1.0_current_2026-09-03": 60,
       "historical_plot_2026_06": 219,
       "pr93_performance_lineage": 4
     }
   },
   "renderer_version": 1,
   "schema_version": 1,
-  "snapshot_id": "v0.1.0-recovered-2026-09-03"
+  "snapshot_id": "v0.1.0-final-benchmark-2026-09-03"
 }

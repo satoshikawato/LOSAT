@@ -9,6 +9,7 @@ import gzip
 import hashlib
 import json
 import math
+import statistics
 from collections import defaultdict
 from pathlib import Path
 from typing import Iterator
@@ -38,6 +39,8 @@ ALIGNMENT_FIELDS = {
     "length",
 }
 TIMING_FIELDS = {
+    "benchmark_losat_sha",
+    "benchmark_timestamp",
     "provenance_id",
     "program",
     "mode",
@@ -52,6 +55,13 @@ TIMING_FIELDS = {
     "source_path",
     "source_sha256",
     "raw_elapsed",
+    "warmup_count",
+    "sample_index",
+    "wall_seconds",
+    "output_sha256",
+    "environment_id",
+    "tool",
+    "contract",
 }
 
 # NCBI reference: ncbi-blast/c++/src/objtools/align_format/format_flags.cpp:38-40,109-116
@@ -464,106 +474,160 @@ def render_historical_timing_panel(axis, rows: list[dict[str, str]], mode: str) 
     axis.grid(False, axis="y")
 
 
+def summarize_current_timing(rows: list[dict[str, str]]) -> list[dict[str, object]]:
+    case_order = list(dict.fromkeys(row["case_id"] for row in rows))
+    summaries: list[dict[str, object]] = []
+    for case_id in case_order:
+        for tool in IMPLEMENTATIONS:
+            group = [
+                row
+                for row in rows
+                if row["case_id"] == case_id and row["tool"] == tool
+            ]
+            if len(group) != 5:
+                raise ValueError(
+                    f"current timing group must contain five samples: {case_id} {tool}"
+                )
+            if {row["sample_index"] for row in group} != {"1", "2", "3", "4", "5"}:
+                raise ValueError(f"invalid sample indexes: {case_id} {tool}")
+            if {row["warmup_count"] for row in group} != {"1"}:
+                raise ValueError(f"invalid warmup count: {case_id} {tool}")
+            if {row["thread_count"] for row in group} != {"1"}:
+                raise ValueError(f"invalid thread count: {case_id} {tool}")
+            output_hashes = {row["output_sha256"] for row in group}
+            if len(output_hashes) != 1 or "" in output_hashes:
+                raise ValueError(f"unstable output hashes: {case_id} {tool}")
+            values = [float(row["wall_seconds"]) for row in group]
+            if any(not math.isfinite(value) or value <= 0 for value in values):
+                raise ValueError(f"invalid current timing sample: {case_id} {tool}")
+            summaries.append(
+                {
+                    "case_id": case_id,
+                    "contract": group[0]["contract"],
+                    "max": max(values),
+                    "mean": statistics.fmean(values),
+                    "median": statistics.median(values),
+                    "min": min(values),
+                    "n": len(values),
+                    "output_sha256": next(iter(output_hashes)),
+                    "program": group[0]["program"],
+                    "tool": tool,
+                }
+            )
+    return summaries
+
+
 def render_execution_time(
-    path: Path, output: Path
+    path: Path, output: Path, timing_metadata: dict[str, object]
 ) -> tuple[dict[str, int], dict[str, object]]:
     rows = load_timing_rows(path)
     history = [row for row in rows if row["provenance_id"] == "historical_plot_2026_06"]
     pr93 = [row for row in rows if row["provenance_id"] == "pr93_performance_lineage"]
-    if not history or not pr93:
+    provenance_groups = timing_metadata.get("provenance_groups")
+    if not isinstance(provenance_groups, dict):
+        raise ValueError("execution timing metadata is missing provenance groups")
+    current_ids = [
+        provenance_id
+        for provenance_id, group in provenance_groups.items()
+        if isinstance(group, dict) and group.get("used_for_current_plot") is True
+    ]
+    if len(current_ids) != 1:
+        raise ValueError("execution snapshot must identify one current plot series")
+    current_id = current_ids[0]
+    current_meta = provenance_groups[current_id]
+    if not isinstance(current_meta, dict):
+        raise ValueError("current timing provenance must be an object")
+    current = [row for row in rows if row["provenance_id"] == current_id]
+    if not history or not pr93 or not current:
         raise ValueError(
-            "execution snapshot must contain historical and PR 93 provenance groups"
+            "execution snapshot must contain current, historical, and PR 93 provenance groups"
         )
-
-    fig = plt.figure(figsize=(18, 14.5))
-    grid = fig.add_gridspec(
-        3, 2, height_ratios=(1.15, 1.15, 0.62), hspace=0.42, wspace=0.38
-    )
-    modes = ("TBLASTX", "Megablast", "BLASTN", "BLASTP")
-    history_axes = [fig.add_subplot(grid[index // 2, index % 2]) for index in range(4)]
-    for axis, mode in zip(history_axes, modes):
-        render_historical_timing_panel(axis, history, mode)
-
-    legend_order = [
-        ("NCBI BLAST+ n1", "#4c72b0", ""),
-        ("NCBI BLAST+ n8", "#4c72b0", "//"),
-        ("LOSAT native n1", "#dd8452", ""),
-        ("LOSAT native n8", "#e6a700", "//"),
-        ("LOSAT wasm n1", "#8172b3", ""),
-        ("LOSAT wasm n8", "#937860", "//"),
-    ]
-    legend_handles = [
-        Patch(facecolor=color, edgecolor="#374151", hatch=hatch, label=label)
-        for label, color, hatch in legend_order
-        if any(history_series(row) == label for row in history)
-    ]
-    fig.legend(
-        handles=legend_handles,
-        loc="upper center",
-        ncol=6,
-        frameon=False,
-        bbox_to_anchor=(0.5, 0.93),
-        fontsize=8.5,
-    )
-
-    lineage_axis = fig.add_subplot(grid[2, :])
-    cases = list(dict.fromkeys(row["case_id"] for row in pr93))
+    summaries = summarize_current_timing(current)
+    cases = list(dict.fromkeys(row["case_id"] for row in current))
     labels = {
-        "p11_avclpv_psclpv": "p11 AvCLPV vs PsCLPV",
-        "d06_ap027131_ap027133_db4": "d06 AP027131 vs AP027133 db-gencode 4",
+        "PesePMNV.MjPMNV.task_blastn": "BLASTN · PesePMNV/MjPMNV",
+        "Sakai.MG1655.megablast": "Megablast · Sakai/MG1655†",
+        "pairwise_default_serial": "BLASTP · pairwise default",
+        "p03_mela_pemojnva": "TBLASTX · p03 Mela/PemoMJNVA",
+        "d06_ap027131_ap027133_db4": "TBLASTX · d06 AP027131/AP027133 db4‡",
+        "p11_avclpv_psclpv": "TBLASTX · p11 AvCLPV/PsCLPV",
     }
-    lineage_series = ("LOSAT baseline", "LOSAT candidate")
-    lineage_colors = {"LOSAT baseline": "#6b7280", "LOSAT candidate": "#dd8452"}
-    lineage_hatches = {"LOSAT baseline": "", "LOSAT candidate": "//"}
-    lookup = {
-        (row["case_id"], row["implementation"]): float(row["seconds"]) for row in pr93
-    }
-    y_positions = np.arange(len(cases), dtype=float)
-    for index, series in enumerate(lineage_series):
-        values = [lookup[(case, series)] for case in cases]
-        bars = lineage_axis.barh(
-            y_positions + (index - 0.5) * 0.32,
-            values,
-            height=0.3,
-            color=lineage_colors[series],
-            edgecolor="#374151",
-            linewidth=0.5,
-            hatch=lineage_hatches[series],
-            label=series,
+    colors = {"NCBI BLAST+": "#4c72b0", "LOSAT": "#dd8452"}
+    markers = {"NCBI BLAST+": "o", "LOSAT": "s"}
+    lookup = {(row["case_id"], row["tool"]): row for row in summaries}
+    positions = np.arange(len(cases), dtype=float)
+    fig, axis = plt.subplots(figsize=(16, 8.8))
+    for index, tool in enumerate(IMPLEMENTATIONS):
+        group = [lookup[(case, tool)] for case in cases]
+        medians = np.array([float(row["median"]) for row in group])
+        minima = np.array([float(row["min"]) for row in group])
+        maxima = np.array([float(row["max"]) for row in group])
+        y_values = positions + (index - 0.5) * 0.24
+        axis.errorbar(
+            medians,
+            y_values,
+            xerr=np.vstack((medians - minima, maxima - medians)),
+            fmt=markers[tool],
+            color=colors[tool],
+            ecolor=colors[tool],
+            capsize=4,
+            elinewidth=1.4,
+            markersize=7.5,
+            label=f"{tool} median (whisker: min–max)",
         )
-        lineage_axis.bar_label(
-            bars, labels=[f"{value:.2f} s" for value in values], padding=4, fontsize=8
-        )
-    lineage_axis.set_yticks(y_positions, [labels[case] for case in cases])
-    lineage_axis.invert_yaxis()
-    lineage_axis.set_xlim(left=0)
-    lineage_axis.set_xlabel("Retained reported value (seconds)")
-    lineage_axis.set_title(
-        "PR 93 TBLASTX lineage — raw samples, statistic definition, thread count, and commands unavailable"
-    )
-    lineage_axis.grid(True, axis="x")
-    lineage_axis.grid(False, axis="y")
-    lineage_axis.legend(frameon=False, loc="lower right")
+        for x_value, y_value in zip(medians, y_values):
+            axis.annotate(
+                f"{x_value:.3g} s",
+                (x_value, y_value),
+                xytext=(7, 0),
+                textcoords="offset points",
+                va="center",
+                fontsize=8,
+                color=colors[tool],
+            )
+    axis.set_yticks(positions, [labels.get(case, case) for case in cases])
+    axis.invert_yaxis()
+    axis.set_xscale("log")
+    axis.set_xlabel("Wall-clock seconds (log scale)")
+    axis.set_title("One warmup + five timed repetitions per tool/case; points show medians")
+    axis.grid(True, axis="x", which="both")
+    axis.grid(False, axis="y")
+    axis.legend(frameon=False, loc="upper right")
 
-    fig.suptitle("Recovered execution-time records", fontsize=18, y=0.985)
+    environment = current_meta.get("environment", {})
+    if not isinstance(environment, dict):
+        environment = {}
+    fig.suptitle("Final v0.1.0 execution-time benchmark", fontsize=18, y=0.965)
     fig.text(
         0.5,
-        0.952,
-        "Historical panel: May–June 2026 plot inputs · producing LOSAT SHA and complete NCBI identity unknown · not final v0.1.0",
+        0.925,
+        f"LOSAT {current_meta.get('benchmark_losat_sha', '')} · NCBI BLAST+ {current_meta.get('ncbi_version', '')} · "
+        f"{environment.get('os', '')} · {environment.get('cpu_model', '')}",
         ha="center",
-        fontsize=10,
+        fontsize=9.5,
         color="#4b5563",
     )
     fig.text(
         0.5,
-        0.012,
-        "PR 93 values compare base 3ba0024 with candidate d929055. No certification wall-clock time or invented sample is included.",
+        0.025,
+        "Threads: 1 · warmup: 1 · timed repetitions: 5 · median statistic; whiskers span all five samples. "
+        "† Source-undetermined accepted contract. ‡ Approved local-subject db-gencode deviation.",
         ha="center",
         va="bottom",
         fontsize=8.5,
         color="#4b5563",
     )
-    fig.subplots_adjust(left=0.16, right=0.975, top=0.90, bottom=0.07)
+    fig.text(
+        0.5,
+        0.008,
+        f"The {len(history)} historical rows and {len(pr93)} PR 93 scalar values remain retained as separate provenance and are not plotted as current data. "
+        "Single-machine result; no cross-machine portability claim.",
+        ha="center",
+        va="bottom",
+        fontsize=8,
+        color="#4b5563",
+    )
+    fig.subplots_adjust(left=0.25, right=0.965, top=0.84, bottom=0.12)
     fig.savefig(
         output,
         dpi=140,
@@ -574,11 +638,27 @@ def render_execution_time(
     )
     plt.close(fig)
     counts = {
+        current_id: len(current),
         "historical_plot_2026_06": len(history),
         "pr93_performance_lineage": len(pr93),
     }
     plot_data = {
         "counts": counts,
+        "current": {
+            "provenance_id": current_id,
+            "samples": [
+                {
+                    "case_id": row["case_id"],
+                    "output_sha256": row["output_sha256"],
+                    "sample_index": int(row["sample_index"]),
+                    "tool": row["tool"],
+                    "wall_seconds": float(row["wall_seconds"]),
+                }
+                for row in current
+            ],
+            "statistic": "median",
+            "summaries": summaries,
+        },
         "historical": [
             {
                 "case_id": row["case_id"],
@@ -609,7 +689,12 @@ def render(snapshot: Path, output: Path) -> dict[str, object]:
     hit_path = output / "hit_distribution.png"
     time_path = output / "execution_time.png"
     hit_counts, alignment_plot_data = render_hit_distribution(alignment_path, hit_path)
-    timing_counts, timing_plot_data = render_execution_time(timing_path, time_path)
+    timing_metadata = metadata["datasets"]["execution_times"]
+    if not isinstance(timing_metadata, dict):
+        raise ValueError("execution timing metadata must be an object")
+    timing_counts, timing_plot_data = render_execution_time(
+        timing_path, time_path, timing_metadata
+    )
     plot_data_path = output / "plot_data.json"
     plot_data = {
         "schema_version": 1,

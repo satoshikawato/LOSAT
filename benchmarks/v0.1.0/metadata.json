@@ -1,4 +1,5 @@
 {
+  "benchmark_completed_at": "2026-09-03T23:33:07.441755+09:00",
   "datasets": {
     "alignment_results": {
       "cases": [
@@ -3091,8 +3092,11 @@
     },
     "execution_times": {
       "certification_wall_clock_used_as_benchmark": false,
-      "complete_final_v0.1.0_samples_available": false,
+      "complete_final_v0.1.0_samples_available": true,
+      "current_plot_provenance_id": "final_v0.1.0_current_2026-09-03",
+      "current_plot_statistic": "median",
       "details": {
+        "current_rows": 60,
         "historical_rows": 219,
         "missing_historical_inputs": [
           "LOSAT/tests/losat_out/AP027132.NZ_CP006932.tlosatx.n8.log"
@@ -3101,6 +3105,241 @@
       },
       "file": "execution_times.tsv",
       "provenance_groups": {
+        "final_v0.1.0_current_2026-09-03": {
+          "alignment_matrix_rerun": false,
+          "benchmark_losat_sha": "1ef13ed09e9cf6e3d6c3b1a1ed9527a389c3992d",
+          "build": {
+            "command": "cargo build --release --locked",
+            "cwd": "/tmp/losat-v010-benchmark-runtime/LOSAT",
+            "features": "default",
+            "git_head": "1ef13ed09e9cf6e3d6c3b1a1ed9527a389c3992d",
+            "losat_executable_path": "/tmp/losat-v010-benchmark-runtime/LOSAT/target/release/LOSAT",
+            "losat_executable_sha256": "058587655963bf1eb253f232fdb5553819105646c0d1c50bbece96e410446819",
+            "matches_certified_linux_binary_sha256": true,
+            "profile": "release",
+            "rebuilt_between_samples": false
+          },
+          "case_selection": {
+            "case_count": 6,
+            "case_ids": [
+              "PesePMNV.MjPMNV.task_blastn",
+              "Sakai.MG1655.megablast",
+              "pairwise_default_serial",
+              "p03_mela_pemojnva",
+              "d06_ap027131_ap027133_db4",
+              "p11_avclpv_psclpv"
+            ],
+            "heavy_tblastx_rationale": "p11_avclpv_psclpv is exact-certified and has both a retained historical one-thread timing and the additional PR 93 baseline/candidate scalar lineage."
+          },
+          "collection_audit": {
+            "durable_sample_location": "benchmarks/v0.1.0/execution_times.tsv",
+            "nonempty_stderr_files": 0,
+            "raw_all_runs_jsonl_sha256": "29b773351689639bd4a6e60d5495d7ca9e705e1cc6212804503e1ac0602f7717",
+            "raw_files_session_location": "/tmp/losat-v010-current-benchmark-20260903",
+            "raw_output_files": 72,
+            "raw_stderr_files": 72,
+            "raw_summary_json_sha256": "dcef700c022e79be74c878a1b03d3ec18ae709e6b776c3557aa0d273379eb4fe",
+            "raw_timed_samples_tsv_sha256": "1ef553643c5e8f8c2eb2ebd8e32b0532127e6f8de21e368e15d7f1a5f836b2da",
+            "temporary_collector_sha256": "a817820f747d415e46a2ca9927df8e637ce2e641fed8d601de28dc357d63e411"
+          },
+          "environment": {
+            "benchmark_completed_at": "2026-09-03T23:33:07.441755+09:00",
+            "benchmark_started_at": "2026-09-03T21:03:39.404305+09:00",
+            "cargo_version": "cargo 1.92.0 (344c4567c 2025-10-21)",
+            "cpu_model": "Intel(R) Core(TM) i9-14900HX",
+            "environment_id": "wsl2-ubuntu24.04-i9-14900hx-20260903",
+            "locale": "C",
+            "logical_cpu_count": 32,
+            "machine": "Microsoft WSL2 x86_64",
+            "os": "Ubuntu 24.04.3 LTS; Linux 5.15.167.4-microsoft-standard-WSL2",
+            "rust_version": "rustc 1.92.0 (ded5c06cf 2025-12-08)",
+            "same_machine_and_session": true
+          },
+          "ncbi_downloaded": false,
+          "ncbi_executables": {
+            "blastn": {
+              "path": "/home/kawato/tools/ncbi-blast-oracle/ncbi-blast-2.17.0+/bin/blastn",
+              "sha256": "33b64bc67d3149cee2459b2f7766b363323df632cf12c099546de00aea9698b5"
+            },
+            "blastp": {
+              "path": "/home/kawato/tools/ncbi-blast-oracle/ncbi-blast-2.17.0+/bin/blastp",
+              "sha256": "5ce267c04e4988c265357bfbedc64e809545b6fcfae7ff6775266fabbee8ba0e"
+            },
+            "tblastx": {
+              "path": "/home/kawato/tools/ncbi-blast-oracle/ncbi-blast-2.17.0+/bin/tblastx",
+              "sha256": "583e5d60bbd444ac455d20e0956c5aa0aeef675da8daee8204d8f9376ddb8804"
+            }
+          },
+          "ncbi_version": "2.17.0+",
+          "output_validation": {
+            "all_repeated_outputs_byte_stable_per_tool_case": true,
+            "d06_contract": "APPROVED_DB_GENCODE_DEVIATION",
+            "exact_contracts_matched": true,
+            "outfmt7_path_handling": "Raw output hashes are retained. For comparison with certified hashes only, the embedded local subject-root prefix was replaced with the certified evidence root; alignment content was unchanged.",
+            "sakai_contract": "SOURCE_UNDETERMINED_ACCEPTED",
+            "timed_outputs_checked": 60,
+            "warmup_outputs_checked": 12
+          },
+          "pr6_183_execution_rerun": false,
+          "pr6_certified_ancestor_sha": "647e5f13c6f6c32f7877568e187125d7f71ece19",
+          "protocol": {
+            "additional_statistics": [
+              "arithmetic_mean",
+              "minimum",
+              "maximum",
+              "sample_count"
+            ],
+            "group_count": 12,
+            "historical_timing_used_as_current": false,
+            "output_sink": "regular file on the same local /tmp filesystem for both tools",
+            "primary_statistic": "median",
+            "sample_count": 60,
+            "thread_count": 1,
+            "timed_repetitions_per_tool_case": 5,
+            "tool_order_within_case": [
+              "NCBI BLAST+",
+              "LOSAT"
+            ],
+            "wall_clock": "Python time.perf_counter_ns around one process execution",
+            "warmup_count_per_tool_case": 1
+          },
+          "renderer_executes_benchmark": false,
+          "representative_of_final_v0.1.0": true,
+          "row_count": 60,
+          "runtime_gate": {
+            "cargo_lock_blob_equal_pr6_to_main": true,
+            "cargo_toml_blob_equal_pr6_to_main": true,
+            "losat_src_delta_pr6_to_main": "NONE",
+            "origin_main_sha": "1ef13ed09e9cf6e3d6c3b1a1ed9527a389c3992d",
+            "pr6_is_ancestor": true,
+            "pr6_recertification_required": false,
+            "status": "PASS"
+          },
+          "status": "AVAILABLE_CURRENT",
+          "summaries": [
+            {
+              "case_id": "PesePMNV.MjPMNV.task_blastn",
+              "max": 0.216429087,
+              "mean": 0.21379229660000001,
+              "median": 0.213818362,
+              "min": 0.210174638,
+              "n": 5,
+              "program": "blastn",
+              "tool": "NCBI BLAST+"
+            },
+            {
+              "case_id": "PesePMNV.MjPMNV.task_blastn",
+              "max": 0.165760804,
+              "mean": 0.165028477,
+              "median": 0.164657309,
+              "min": 0.164508153,
+              "n": 5,
+              "program": "blastn",
+              "tool": "LOSAT"
+            },
+            {
+              "case_id": "Sakai.MG1655.megablast",
+              "max": 0.96898034,
+              "mean": 0.9348064060000001,
+              "median": 0.929382247,
+              "min": 0.912383895,
+              "n": 5,
+              "program": "blastn",
+              "tool": "NCBI BLAST+"
+            },
+            {
+              "case_id": "Sakai.MG1655.megablast",
+              "max": 1.074555952,
+              "mean": 1.0204296164,
+              "median": 1.017127977,
+              "min": 0.980273985,
+              "n": 5,
+              "program": "blastn",
+              "tool": "LOSAT"
+            },
+            {
+              "case_id": "pairwise_default_serial",
+              "max": 0.728515864,
+              "mean": 0.7195893908000001,
+              "median": 0.720131352,
+              "min": 0.711284775,
+              "n": 5,
+              "program": "blastp",
+              "tool": "NCBI BLAST+"
+            },
+            {
+              "case_id": "pairwise_default_serial",
+              "max": 0.790817463,
+              "mean": 0.7795856999999999,
+              "median": 0.776687883,
+              "min": 0.772382833,
+              "n": 5,
+              "program": "blastp",
+              "tool": "LOSAT"
+            },
+            {
+              "case_id": "p03_mela_pemojnva",
+              "max": 3.817088554,
+              "mean": 3.6692948478,
+              "median": 3.685739181,
+              "min": 3.557826716,
+              "n": 5,
+              "program": "tblastx",
+              "tool": "NCBI BLAST+"
+            },
+            {
+              "case_id": "p03_mela_pemojnva",
+              "max": 4.641082934,
+              "mean": 4.5847390214,
+              "median": 4.587412746,
+              "min": 4.514241256,
+              "n": 5,
+              "program": "tblastx",
+              "tool": "LOSAT"
+            },
+            {
+              "case_id": "d06_ap027131_ap027133_db4",
+              "max": 49.995277755,
+              "mean": 48.7936107634,
+              "median": 48.442958331,
+              "min": 48.043482235,
+              "n": 5,
+              "program": "tblastx",
+              "tool": "NCBI BLAST+"
+            },
+            {
+              "case_id": "d06_ap027131_ap027133_db4",
+              "max": 57.702002841,
+              "mean": 55.3688805978,
+              "median": 54.583679526,
+              "min": 53.922937639,
+              "n": 5,
+              "program": "tblastx",
+              "tool": "LOSAT"
+            },
+            {
+              "case_id": "p11_avclpv_psclpv",
+              "max": 830.116112588,
+              "mean": 753.876024505,
+              "median": 744.49939544,
+              "min": 719.402148681,
+              "n": 5,
+              "program": "tblastx",
+              "tool": "NCBI BLAST+"
+            },
+            {
+              "case_id": "p11_avclpv_psclpv",
+              "max": 618.23809942,
+              "mean": 605.7418344596001,
+              "median": 602.319407823,
+              "min": 599.959878038,
+              "n": 5,
+              "program": "tblastx",
+              "tool": "LOSAT"
+            }
+          ],
+          "used_for_current_plot": true
+        },
         "historical_plot_2026_06": {
           "date_range": "2026-05-17 to 2026-06-23 (source-file mtimes)",
           "historical_plot_sha256": "98a051df40c94ac925db942f21ace3dea829842f5ad6d319295df196246c5e00",
@@ -3110,6 +3349,7 @@
           "reproduction": "The retained logs reproduce the committed historical execution-time PNG byte-for-byte with the historical renderer.",
           "row_count": 219,
           "status": "AVAILABLE_HISTORICAL",
+          "used_for_current_plot": false,
           "used_for_historical_plot": true
         },
         "pr93_performance_lineage": {
@@ -3122,12 +3362,13 @@
           "row_count": 4,
           "statistic_definition": null,
           "status": "PARTIAL",
-          "thread_count": null
+          "thread_count": null,
+          "used_for_current_plot": false
         }
       },
-      "row_count": 223,
-      "sha256": "80be40c0333fa9156a13c583d84a68ce5a1011767b6d8edc4307e52374333063",
-      "status": "PARTIAL"
+      "row_count": 283,
+      "sha256": "c7b4eb17245dfd0dade44068a65e5afcc084fb7fa50a639301b5bb3bf7323a13",
+      "status": "AVAILABLE_CURRENT"
     }
   },
   "inventory": {
@@ -3159,8 +3400,8 @@
     }
   },
   "recovered_on": "2026-09-03",
-  "recovery_policy": "Representation-only recovery; no LOSAT, NCBI, benchmark, or build command was executed.",
+  "recovery_policy": "Alignment evidence remains the unchanged recovered PR 5 snapshot. The final-v0.1.0 timing series was collected once from final main in a separate manual process; the renderer executes no benchmark, NCBI, LOSAT, or network operation.",
   "repository_base": "1ef13ed09e9cf6e3d6c3b1a1ed9527a389c3992d",
   "schema_version": 1,
-  "snapshot_id": "v0.1.0-recovered-2026-09-03"
+  "snapshot_id": "v0.1.0-final-benchmark-2026-09-03"
 }

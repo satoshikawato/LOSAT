@@ -50,6 +50,15 @@ TIMING_HEADER = [
     "source_path",
     "source_sha256",
     "raw_elapsed",
+    "warmup_count",
+    "sample_index",
+    "wall_seconds",
+    "output_sha256",
+    "benchmark_losat_sha",
+    "environment_id",
+    "tool",
+    "contract",
+    "benchmark_timestamp",
 ]
 
 
@@ -76,6 +85,17 @@ class RendererTests(unittest.TestCase):
                 "execution_times": {
                     "file": "execution_times.tsv",
                     "sha256": sha256(self.snapshot / "execution_times.tsv"),
+                    "provenance_groups": {
+                        "unit_current": {
+                            "benchmark_losat_sha": "candidate-sha",
+                            "environment": {
+                                "cpu_model": "unit-test CPU",
+                                "os": "unit-test OS",
+                            },
+                            "ncbi_version": "2.17.0+",
+                            "used_for_current_plot": True,
+                        }
+                    },
                 },
             },
         }
@@ -132,6 +152,7 @@ class RendererTests(unittest.TestCase):
                     "abc",
                     "0:02.50",
                 ]
+                + [""] * 9
             )
             for case_id, baseline, candidate in (
                 ("p11_avclpv_psclpv", "639.21", "636.70"),
@@ -158,6 +179,37 @@ class RendererTests(unittest.TestCase):
                             "def",
                             "",
                         ]
+                        + [""] * 9
+                    )
+            for implementation, baseline in (("NCBI BLAST+", 2.0), ("LOSAT", 1.5)):
+                for sample_index in range(1, 6):
+                    seconds = baseline + sample_index / 10
+                    writer.writerow(
+                        [
+                            "unit_current",
+                            "tblastx",
+                            "TBLASTX",
+                            "current-case",
+                            implementation,
+                            "1",
+                            str(seconds),
+                            "wall_clock_sample",
+                            "candidate-sha",
+                            "2.17.0+",
+                            "2026-09-03",
+                            "",
+                            "output-hash",
+                            str(seconds),
+                            "1",
+                            str(sample_index),
+                            str(seconds),
+                            "output-hash",
+                            "candidate-sha",
+                            "unit-environment",
+                            implementation,
+                            "EXACT_TEXT",
+                            f"2026-09-03T00:00:0{sample_index}+00:00",
+                        ]
                     )
 
     def test_render_is_deterministic_within_one_environment(self) -> None:
@@ -181,6 +233,14 @@ class RendererTests(unittest.TestCase):
         metadata, _ = RENDERER.load_metadata(self.snapshot)
         with self.assertRaisesRegex(ValueError, "checksum mismatch"):
             RENDERER.verified_dataset_path(self.snapshot, metadata, "execution_times")
+
+    def test_current_timing_uses_all_five_samples_and_median(self) -> None:
+        rows = RENDERER.load_timing_rows(self.snapshot / "execution_times.tsv")
+        current = [row for row in rows if row["provenance_id"] == "unit_current"]
+        summaries = RENDERER.summarize_current_timing(current)
+        self.assertEqual(len(summaries), 2)
+        self.assertEqual([summary["n"] for summary in summaries], [5, 5])
+        self.assertEqual([summary["median"] for summary in summaries], [2.3, 1.8])
 
     def test_snapshot_file_cannot_escape_snapshot(self) -> None:
         with self.assertRaisesRegex(ValueError, "escapes snapshot directory"):

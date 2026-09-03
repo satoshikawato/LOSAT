@@ -2,8 +2,13 @@ from __future__ import annotations
 
 import csv
 from pathlib import Path
+import sys
 import tempfile
 import unittest
+
+TESTS_DIR = Path(__file__).resolve().parent
+if str(TESTS_DIR) not in sys.path:
+    sys.path.insert(0, str(TESTS_DIR))
 
 import generate_benchmark_visuals_v010 as bench
 

@@ -21,6 +21,8 @@ jobs:
         run: python3 -m unittest discover -s LOSAT/tests -p 'test_check_pure_rust_runtime_boundary.py'
       - name: Release-candidate tooling tests
         run: python3 -m unittest LOSAT/tests/test_prepare_release_candidate_v010.py
+      - name: Benchmark visualization tooling tests
+        run: python3 -m unittest LOSAT/tests/test_generate_benchmark_visuals_v010.py
       - run: cd LOSAT && cargo fmt --check
       - run: cd LOSAT && cargo clippy --all-targets --all-features -- -D warnings
       - run: cd LOSAT && cargo test --all-features

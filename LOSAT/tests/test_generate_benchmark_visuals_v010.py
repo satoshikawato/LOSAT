@@ -36,6 +36,26 @@ class BenchmarkVisualizationTests(unittest.TestCase):
         self.assertEqual(counts, {"blastn": 14, "blastp": 9, "tblastx": 20})
         self.assertEqual(len(cases), 43)
 
+    def test_command_construction_supports_every_current_manifest_case(self) -> None:
+        repo_root = TESTS_DIR.parents[1]
+        cases = bench.load_cases(repo_root)
+        oracles = {program: Path("/tmp") / program for program in bench.PROGRAMS}
+        losat_bin = Path("/tmp/LOSAT")
+        for case in cases:
+            for tool in bench.TOOLS:
+                output = Path("/tmp") / f"{case.program}-{case.case_id}-{tool}.tsv"
+                command = bench.command_for(
+                    case,
+                    tool,
+                    output,
+                    repo_root,
+                    losat_bin,
+                    oracles,
+                )
+                self.assertTrue(command)
+                self.assertEqual(command[-1], str(output))
+                self.assertIn(str(oracles[case.program]) if tool == "NCBI BLAST+" else str(losat_bin), command)
+
     def test_select_representative_cases_uses_declared_ids_only(self) -> None:
         cases = []
         for program in bench.PROGRAMS:

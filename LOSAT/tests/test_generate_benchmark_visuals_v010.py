@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import csv
+from collections import Counter
 from pathlib import Path
 import sys
 import tempfile
@@ -27,6 +28,13 @@ class BenchmarkVisualizationTests(unittest.TestCase):
             )
             rows = bench.read_tsv_manifest(path)
         self.assertEqual([row["case_id"] for row in rows], ["alpha", "beta"])
+
+    def test_load_cases_uses_current_three_program_manifests(self) -> None:
+        repo_root = TESTS_DIR.parents[1]
+        cases = bench.load_cases(repo_root)
+        counts = Counter(case.program for case in cases)
+        self.assertEqual(counts, {"blastn": 14, "blastp": 9, "tblastx": 20})
+        self.assertEqual(len(cases), 43)
 
     def test_select_representative_cases_uses_declared_ids_only(self) -> None:
         cases = []

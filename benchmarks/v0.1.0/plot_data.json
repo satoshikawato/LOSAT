@@ -1,0 +1,2814 @@
+{
+  "inputs": {
+    "alignment_results.tsv.gz": "5fd5beb14d87fdc536ac00d53a0a8d08a0c2d541d0d30029a46aeaa041fbcd18",
+    "execution_times.tsv": "c7b4eb17245dfd0dade44068a65e5afcc084fb7fa50a639301b5bb3bf7323a13",
+    "metadata.json": "13690f146de752733045985885b18ba0bc0d28a9dcd2cd6580281596d61374c8"
+  },
+  "plots": {
+    "execution_time": {
+      "counts": {
+        "final_v0.1.0_current_2026-09-03": 60,
+        "historical_plot_2026_06": 219,
+        "pr93_performance_lineage": 4
+      },
+      "current": {
+        "provenance_id": "final_v0.1.0_current_2026-09-03",
+        "samples": [
+          {
+            "case_id": "PesePMNV.MjPMNV.task_blastn",
+            "output_sha256": "b0c4e833fe503cdf04c51b621feede8b842910e31a675c1e8f53ee74e3f97df2",
+            "sample_index": 1,
+            "tool": "NCBI BLAST+",
+            "wall_seconds": 0.216429087
+          },
+          {
+            "case_id": "PesePMNV.MjPMNV.task_blastn",
+            "output_sha256": "b0c4e833fe503cdf04c51b621feede8b842910e31a675c1e8f53ee74e3f97df2",
+            "sample_index": 2,
+            "tool": "NCBI BLAST+",
+            "wall_seconds": 0.210174638
+          },
+          {
+            "case_id": "PesePMNV.MjPMNV.task_blastn",
+            "output_sha256": "b0c4e833fe503cdf04c51b621feede8b842910e31a675c1e8f53ee74e3f97df2",
+            "sample_index": 3,
+            "tool": "NCBI BLAST+",
+            "wall_seconds": 0.212964022
+          },
+          {
+            "case_id": "PesePMNV.MjPMNV.task_blastn",
+            "output_sha256": "b0c4e833fe503cdf04c51b621feede8b842910e31a675c1e8f53ee74e3f97df2",
+            "sample_index": 4,
+            "tool": "NCBI BLAST+",
+            "wall_seconds": 0.213818362
+          },
+          {
+            "case_id": "PesePMNV.MjPMNV.task_blastn",
+            "output_sha256": "b0c4e833fe503cdf04c51b621feede8b842910e31a675c1e8f53ee74e3f97df2",
+            "sample_index": 5,
+            "tool": "NCBI BLAST+",
+            "wall_seconds": 0.215575374
+          },
+          {
+            "case_id": "PesePMNV.MjPMNV.task_blastn",
+            "output_sha256": "b0c4e833fe503cdf04c51b621feede8b842910e31a675c1e8f53ee74e3f97df2",
+            "sample_index": 1,
+            "tool": "LOSAT",
+            "wall_seconds": 0.16463717
+          },
+          {
+            "case_id": "PesePMNV.MjPMNV.task_blastn",
+            "output_sha256": "b0c4e833fe503cdf04c51b621feede8b842910e31a675c1e8f53ee74e3f97df2",
+            "sample_index": 2,
+            "tool": "LOSAT",
+            "wall_seconds": 0.164657309
+          },
+          {
+            "case_id": "PesePMNV.MjPMNV.task_blastn",
+            "output_sha256": "b0c4e833fe503cdf04c51b621feede8b842910e31a675c1e8f53ee74e3f97df2",
+            "sample_index": 3,
+            "tool": "LOSAT",
+            "wall_seconds": 0.165578949
+          },
+          {
+            "case_id": "PesePMNV.MjPMNV.task_blastn",
+            "output_sha256": "b0c4e833fe503cdf04c51b621feede8b842910e31a675c1e8f53ee74e3f97df2",
+            "sample_index": 4,
+            "tool": "LOSAT",
+            "wall_seconds": 0.164508153
+          },
+          {
+            "case_id": "PesePMNV.MjPMNV.task_blastn",
+            "output_sha256": "b0c4e833fe503cdf04c51b621feede8b842910e31a675c1e8f53ee74e3f97df2",
+            "sample_index": 5,
+            "tool": "LOSAT",
+            "wall_seconds": 0.165760804
+          },
+          {
+            "case_id": "Sakai.MG1655.megablast",
+            "output_sha256": "e8133123aca0c945699e64108a9d162e9ce01414023fac86d2677c00bd4ad678",
+            "sample_index": 1,
+            "tool": "NCBI BLAST+",
+            "wall_seconds": 0.912383895
+          },
+          {
+            "case_id": "Sakai.MG1655.megablast",
+            "output_sha256": "e8133123aca0c945699e64108a9d162e9ce01414023fac86d2677c00bd4ad678",
+            "sample_index": 2,
+            "tool": "NCBI BLAST+",
+            "wall_seconds": 0.929382247
+          },
+          {
+            "case_id": "Sakai.MG1655.megablast",
+            "output_sha256": "e8133123aca0c945699e64108a9d162e9ce01414023fac86d2677c00bd4ad678",
+            "sample_index": 3,
+            "tool": "NCBI BLAST+",
+            "wall_seconds": 0.925973904
+          },
+          {
+            "case_id": "Sakai.MG1655.megablast",
+            "output_sha256": "e8133123aca0c945699e64108a9d162e9ce01414023fac86d2677c00bd4ad678",
+            "sample_index": 4,
+            "tool": "NCBI BLAST+",
+            "wall_seconds": 0.96898034
+          },
+          {
+            "case_id": "Sakai.MG1655.megablast",
+            "output_sha256": "e8133123aca0c945699e64108a9d162e9ce01414023fac86d2677c00bd4ad678",
+            "sample_index": 5,
+            "tool": "NCBI BLAST+",
+            "wall_seconds": 0.937311644
+          },
+          {
+            "case_id": "Sakai.MG1655.megablast",
+            "output_sha256": "7cf8aab37cfa0110a4216535a00c9382ade5a500555126675de2c80e0b72faf8",
+            "sample_index": 1,
+            "tool": "LOSAT",
+            "wall_seconds": 1.017127977
+          },
+          {
+            "case_id": "Sakai.MG1655.megablast",
+            "output_sha256": "7cf8aab37cfa0110a4216535a00c9382ade5a500555126675de2c80e0b72faf8",
+            "sample_index": 2,
+            "tool": "LOSAT",
+            "wall_seconds": 0.980273985
+          },
+          {
+            "case_id": "Sakai.MG1655.megablast",
+            "output_sha256": "7cf8aab37cfa0110a4216535a00c9382ade5a500555126675de2c80e0b72faf8",
+            "sample_index": 3,
+            "tool": "LOSAT",
+            "wall_seconds": 1.074555952
+          },
+          {
+            "case_id": "Sakai.MG1655.megablast",
+            "output_sha256": "7cf8aab37cfa0110a4216535a00c9382ade5a500555126675de2c80e0b72faf8",
+            "sample_index": 4,
+            "tool": "LOSAT",
+            "wall_seconds": 0.989100514
+          },
+          {
+            "case_id": "Sakai.MG1655.megablast",
+            "output_sha256": "7cf8aab37cfa0110a4216535a00c9382ade5a500555126675de2c80e0b72faf8",
+            "sample_index": 5,
+            "tool": "LOSAT",
+            "wall_seconds": 1.041089654
+          },
+          {
+            "case_id": "pairwise_default_serial",
+            "output_sha256": "fd4b010800e32ce6c823cb38b42a10b7845f3342edae892acccc8f554f9edf34",
+            "sample_index": 1,
+            "tool": "NCBI BLAST+",
+            "wall_seconds": 0.715873349
+          },
+          {
+            "case_id": "pairwise_default_serial",
+            "output_sha256": "fd4b010800e32ce6c823cb38b42a10b7845f3342edae892acccc8f554f9edf34",
+            "sample_index": 2,
+            "tool": "NCBI BLAST+",
+            "wall_seconds": 0.728515864
+          },
+          {
+            "case_id": "pairwise_default_serial",
+            "output_sha256": "fd4b010800e32ce6c823cb38b42a10b7845f3342edae892acccc8f554f9edf34",
+            "sample_index": 3,
+            "tool": "NCBI BLAST+",
+            "wall_seconds": 0.722141614
+          },
+          {
+            "case_id": "pairwise_default_serial",
+            "output_sha256": "fd4b010800e32ce6c823cb38b42a10b7845f3342edae892acccc8f554f9edf34",
+            "sample_index": 4,
+            "tool": "NCBI BLAST+",
+            "wall_seconds": 0.720131352
+          },
+          {
+            "case_id": "pairwise_default_serial",
+            "output_sha256": "fd4b010800e32ce6c823cb38b42a10b7845f3342edae892acccc8f554f9edf34",
+            "sample_index": 5,
+            "tool": "NCBI BLAST+",
+            "wall_seconds": 0.711284775
+          },
+          {
+            "case_id": "pairwise_default_serial",
+            "output_sha256": "fd4b010800e32ce6c823cb38b42a10b7845f3342edae892acccc8f554f9edf34",
+            "sample_index": 1,
+            "tool": "LOSAT",
+            "wall_seconds": 0.782937303
+          },
+          {
+            "case_id": "pairwise_default_serial",
+            "output_sha256": "fd4b010800e32ce6c823cb38b42a10b7845f3342edae892acccc8f554f9edf34",
+            "sample_index": 2,
+            "tool": "LOSAT",
+            "wall_seconds": 0.772382833
+          },
+          {
+            "case_id": "pairwise_default_serial",
+            "output_sha256": "fd4b010800e32ce6c823cb38b42a10b7845f3342edae892acccc8f554f9edf34",
+            "sample_index": 3,
+            "tool": "LOSAT",
+            "wall_seconds": 0.790817463
+          },
+          {
+            "case_id": "pairwise_default_serial",
+            "output_sha256": "fd4b010800e32ce6c823cb38b42a10b7845f3342edae892acccc8f554f9edf34",
+            "sample_index": 4,
+            "tool": "LOSAT",
+            "wall_seconds": 0.775103018
+          },
+          {
+            "case_id": "pairwise_default_serial",
+            "output_sha256": "fd4b010800e32ce6c823cb38b42a10b7845f3342edae892acccc8f554f9edf34",
+            "sample_index": 5,
+            "tool": "LOSAT",
+            "wall_seconds": 0.776687883
+          },
+          {
+            "case_id": "p03_mela_pemojnva",
+            "output_sha256": "bbef153094025db89dd4a69b2a3c4246b0b8853396fe740bc7e1bd654db105b6",
+            "sample_index": 1,
+            "tool": "NCBI BLAST+",
+            "wall_seconds": 3.557826716
+          },
+          {
+            "case_id": "p03_mela_pemojnva",
+            "output_sha256": "bbef153094025db89dd4a69b2a3c4246b0b8853396fe740bc7e1bd654db105b6",
+            "sample_index": 2,
+            "tool": "NCBI BLAST+",
+            "wall_seconds": 3.685739181
+          },
+          {
+            "case_id": "p03_mela_pemojnva",
+            "output_sha256": "bbef153094025db89dd4a69b2a3c4246b0b8853396fe740bc7e1bd654db105b6",
+            "sample_index": 3,
+            "tool": "NCBI BLAST+",
+            "wall_seconds": 3.817088554
+          },
+          {
+            "case_id": "p03_mela_pemojnva",
+            "output_sha256": "bbef153094025db89dd4a69b2a3c4246b0b8853396fe740bc7e1bd654db105b6",
+            "sample_index": 4,
+            "tool": "NCBI BLAST+",
+            "wall_seconds": 3.698912687
+          },
+          {
+            "case_id": "p03_mela_pemojnva",
+            "output_sha256": "bbef153094025db89dd4a69b2a3c4246b0b8853396fe740bc7e1bd654db105b6",
+            "sample_index": 5,
+            "tool": "NCBI BLAST+",
+            "wall_seconds": 3.586907101
+          },
+          {
+            "case_id": "p03_mela_pemojnva",
+            "output_sha256": "bbef153094025db89dd4a69b2a3c4246b0b8853396fe740bc7e1bd654db105b6",
+            "sample_index": 1,
+            "tool": "LOSAT",
+            "wall_seconds": 4.553550682
+          },
+          {
+            "case_id": "p03_mela_pemojnva",
+            "output_sha256": "bbef153094025db89dd4a69b2a3c4246b0b8853396fe740bc7e1bd654db105b6",
+            "sample_index": 2,
+            "tool": "LOSAT",
+            "wall_seconds": 4.587412746
+          },
+          {
+            "case_id": "p03_mela_pemojnva",
+            "output_sha256": "bbef153094025db89dd4a69b2a3c4246b0b8853396fe740bc7e1bd654db105b6",
+            "sample_index": 3,
+            "tool": "LOSAT",
+            "wall_seconds": 4.627407489
+          },
+          {
+            "case_id": "p03_mela_pemojnva",
+            "output_sha256": "bbef153094025db89dd4a69b2a3c4246b0b8853396fe740bc7e1bd654db105b6",
+            "sample_index": 4,
+            "tool": "LOSAT",
+            "wall_seconds": 4.514241256
+          },
+          {
+            "case_id": "p03_mela_pemojnva",
+            "output_sha256": "bbef153094025db89dd4a69b2a3c4246b0b8853396fe740bc7e1bd654db105b6",
+            "sample_index": 5,
+            "tool": "LOSAT",
+            "wall_seconds": 4.641082934
+          },
+          {
+            "case_id": "d06_ap027131_ap027133_db4",
+            "output_sha256": "8d5ff1d0d92f27488ba91da061366ef808db382cd73b3e8577385d150e9e8a29",
+            "sample_index": 1,
+            "tool": "NCBI BLAST+",
+            "wall_seconds": 49.995277755
+          },
+          {
+            "case_id": "d06_ap027131_ap027133_db4",
+            "output_sha256": "8d5ff1d0d92f27488ba91da061366ef808db382cd73b3e8577385d150e9e8a29",
+            "sample_index": 2,
+            "tool": "NCBI BLAST+",
+            "wall_seconds": 48.434454728
+          },
+          {
+            "case_id": "d06_ap027131_ap027133_db4",
+            "output_sha256": "8d5ff1d0d92f27488ba91da061366ef808db382cd73b3e8577385d150e9e8a29",
+            "sample_index": 3,
+            "tool": "NCBI BLAST+",
+            "wall_seconds": 48.043482235
+          },
+          {
+            "case_id": "d06_ap027131_ap027133_db4",
+            "output_sha256": "8d5ff1d0d92f27488ba91da061366ef808db382cd73b3e8577385d150e9e8a29",
+            "sample_index": 4,
+            "tool": "NCBI BLAST+",
+            "wall_seconds": 48.442958331
+          },
+          {
+            "case_id": "d06_ap027131_ap027133_db4",
+            "output_sha256": "8d5ff1d0d92f27488ba91da061366ef808db382cd73b3e8577385d150e9e8a29",
+            "sample_index": 5,
+            "tool": "NCBI BLAST+",
+            "wall_seconds": 49.051880768
+          },
+          {
+            "case_id": "d06_ap027131_ap027133_db4",
+            "output_sha256": "719339294d0f22d0f415dd33106a0fd93c25ac372b1456d19d92390fce081df1",
+            "sample_index": 1,
+            "tool": "LOSAT",
+            "wall_seconds": 54.471115737
+          },
+          {
+            "case_id": "d06_ap027131_ap027133_db4",
+            "output_sha256": "719339294d0f22d0f415dd33106a0fd93c25ac372b1456d19d92390fce081df1",
+            "sample_index": 2,
+            "tool": "LOSAT",
+            "wall_seconds": 53.922937639
+          },
+          {
+            "case_id": "d06_ap027131_ap027133_db4",
+            "output_sha256": "719339294d0f22d0f415dd33106a0fd93c25ac372b1456d19d92390fce081df1",
+            "sample_index": 3,
+            "tool": "LOSAT",
+            "wall_seconds": 56.164667246
+          },
+          {
+            "case_id": "d06_ap027131_ap027133_db4",
+            "output_sha256": "719339294d0f22d0f415dd33106a0fd93c25ac372b1456d19d92390fce081df1",
+            "sample_index": 4,
+            "tool": "LOSAT",
+            "wall_seconds": 57.702002841
+          },
+          {
+            "case_id": "d06_ap027131_ap027133_db4",
+            "output_sha256": "719339294d0f22d0f415dd33106a0fd93c25ac372b1456d19d92390fce081df1",
+            "sample_index": 5,
+            "tool": "LOSAT",
+            "wall_seconds": 54.583679526
+          },
+          {
+            "case_id": "p11_avclpv_psclpv",
+            "output_sha256": "1eb11f5caa4d1030a016e67bafc90acaecb0a1fe76f9b11256fe1343f0571fe4",
+            "sample_index": 1,
+            "tool": "NCBI BLAST+",
+            "wall_seconds": 720.698986161
+          },
+          {
+            "case_id": "p11_avclpv_psclpv",
+            "output_sha256": "1eb11f5caa4d1030a016e67bafc90acaecb0a1fe76f9b11256fe1343f0571fe4",
+            "sample_index": 2,
+            "tool": "NCBI BLAST+",
+            "wall_seconds": 719.402148681
+          },
+          {
+            "case_id": "p11_avclpv_psclpv",
+            "output_sha256": "1eb11f5caa4d1030a016e67bafc90acaecb0a1fe76f9b11256fe1343f0571fe4",
+            "sample_index": 3,
+            "tool": "NCBI BLAST+",
+            "wall_seconds": 754.663479655
+          },
+          {
+            "case_id": "p11_avclpv_psclpv",
+            "output_sha256": "1eb11f5caa4d1030a016e67bafc90acaecb0a1fe76f9b11256fe1343f0571fe4",
+            "sample_index": 4,
+            "tool": "NCBI BLAST+",
+            "wall_seconds": 830.116112588
+          },
+          {
+            "case_id": "p11_avclpv_psclpv",
+            "output_sha256": "1eb11f5caa4d1030a016e67bafc90acaecb0a1fe76f9b11256fe1343f0571fe4",
+            "sample_index": 5,
+            "tool": "NCBI BLAST+",
+            "wall_seconds": 744.49939544
+          },
+          {
+            "case_id": "p11_avclpv_psclpv",
+            "output_sha256": "1eb11f5caa4d1030a016e67bafc90acaecb0a1fe76f9b11256fe1343f0571fe4",
+            "sample_index": 1,
+            "tool": "LOSAT",
+            "wall_seconds": 618.23809942
+          },
+          {
+            "case_id": "p11_avclpv_psclpv",
+            "output_sha256": "1eb11f5caa4d1030a016e67bafc90acaecb0a1fe76f9b11256fe1343f0571fe4",
+            "sample_index": 2,
+            "tool": "LOSAT",
+            "wall_seconds": 602.319407823
+          },
+          {
+            "case_id": "p11_avclpv_psclpv",
+            "output_sha256": "1eb11f5caa4d1030a016e67bafc90acaecb0a1fe76f9b11256fe1343f0571fe4",
+            "sample_index": 3,
+            "tool": "LOSAT",
+            "wall_seconds": 607.145001914
+          },
+          {
+            "case_id": "p11_avclpv_psclpv",
+            "output_sha256": "1eb11f5caa4d1030a016e67bafc90acaecb0a1fe76f9b11256fe1343f0571fe4",
+            "sample_index": 4,
+            "tool": "LOSAT",
+            "wall_seconds": 599.959878038
+          },
+          {
+            "case_id": "p11_avclpv_psclpv",
+            "output_sha256": "1eb11f5caa4d1030a016e67bafc90acaecb0a1fe76f9b11256fe1343f0571fe4",
+            "sample_index": 5,
+            "tool": "LOSAT",
+            "wall_seconds": 601.046785103
+          }
+        ],
+        "statistic": "median",
+        "summaries": [
+          {
+            "case_id": "PesePMNV.MjPMNV.task_blastn",
+            "contract": "EXACT_TEXT",
+            "max": 0.216429087,
+            "mean": 0.21379229660000001,
+            "median": 0.213818362,
+            "min": 0.210174638,
+            "n": 5,
+            "output_sha256": "b0c4e833fe503cdf04c51b621feede8b842910e31a675c1e8f53ee74e3f97df2",
+            "program": "blastn",
+            "tool": "NCBI BLAST+"
+          },
+          {
+            "case_id": "PesePMNV.MjPMNV.task_blastn",
+            "contract": "EXACT_TEXT",
+            "max": 0.165760804,
+            "mean": 0.165028477,
+            "median": 0.164657309,
+            "min": 0.164508153,
+            "n": 5,
+            "output_sha256": "b0c4e833fe503cdf04c51b621feede8b842910e31a675c1e8f53ee74e3f97df2",
+            "program": "blastn",
+            "tool": "LOSAT"
+          },
+          {
+            "case_id": "Sakai.MG1655.megablast",
+            "contract": "SOURCE_UNDETERMINED_ACCEPTED",
+            "max": 0.96898034,
+            "mean": 0.9348064060000001,
+            "median": 0.929382247,
+            "min": 0.912383895,
+            "n": 5,
+            "output_sha256": "e8133123aca0c945699e64108a9d162e9ce01414023fac86d2677c00bd4ad678",
+            "program": "blastn",
+            "tool": "NCBI BLAST+"
+          },
+          {
+            "case_id": "Sakai.MG1655.megablast",
+            "contract": "SOURCE_UNDETERMINED_ACCEPTED",
+            "max": 1.074555952,
+            "mean": 1.0204296164,
+            "median": 1.017127977,
+            "min": 0.980273985,
+            "n": 5,
+            "output_sha256": "7cf8aab37cfa0110a4216535a00c9382ade5a500555126675de2c80e0b72faf8",
+            "program": "blastn",
+            "tool": "LOSAT"
+          },
+          {
+            "case_id": "pairwise_default_serial",
+            "contract": "EXACT_TEXT",
+            "max": 0.728515864,
+            "mean": 0.7195893908000001,
+            "median": 0.720131352,
+            "min": 0.711284775,
+            "n": 5,
+            "output_sha256": "fd4b010800e32ce6c823cb38b42a10b7845f3342edae892acccc8f554f9edf34",
+            "program": "blastp",
+            "tool": "NCBI BLAST+"
+          },
+          {
+            "case_id": "pairwise_default_serial",
+            "contract": "EXACT_TEXT",
+            "max": 0.790817463,
+            "mean": 0.7795856999999999,
+            "median": 0.776687883,
+            "min": 0.772382833,
+            "n": 5,
+            "output_sha256": "fd4b010800e32ce6c823cb38b42a10b7845f3342edae892acccc8f554f9edf34",
+            "program": "blastp",
+            "tool": "LOSAT"
+          },
+          {
+            "case_id": "p03_mela_pemojnva",
+            "contract": "EXACT_TEXT",
+            "max": 3.817088554,
+            "mean": 3.6692948478,
+            "median": 3.685739181,
+            "min": 3.557826716,
+            "n": 5,
+            "output_sha256": "bbef153094025db89dd4a69b2a3c4246b0b8853396fe740bc7e1bd654db105b6",
+            "program": "tblastx",
+            "tool": "NCBI BLAST+"
+          },
+          {
+            "case_id": "p03_mela_pemojnva",
+            "contract": "EXACT_TEXT",
+            "max": 4.641082934,
+            "mean": 4.5847390214,
+            "median": 4.587412746,
+            "min": 4.514241256,
+            "n": 5,
+            "output_sha256": "bbef153094025db89dd4a69b2a3c4246b0b8853396fe740bc7e1bd654db105b6",
+            "program": "tblastx",
+            "tool": "LOSAT"
+          },
+          {
+            "case_id": "d06_ap027131_ap027133_db4",
+            "contract": "APPROVED_DB_GENCODE_DEVIATION",
+            "max": 49.995277755,
+            "mean": 48.7936107634,
+            "median": 48.442958331,
+            "min": 48.043482235,
+            "n": 5,
+            "output_sha256": "8d5ff1d0d92f27488ba91da061366ef808db382cd73b3e8577385d150e9e8a29",
+            "program": "tblastx",
+            "tool": "NCBI BLAST+"
+          },
+          {
+            "case_id": "d06_ap027131_ap027133_db4",
+            "contract": "APPROVED_DB_GENCODE_DEVIATION",
+            "max": 57.702002841,
+            "mean": 55.3688805978,
+            "median": 54.583679526,
+            "min": 53.922937639,
+            "n": 5,
+            "output_sha256": "719339294d0f22d0f415dd33106a0fd93c25ac372b1456d19d92390fce081df1",
+            "program": "tblastx",
+            "tool": "LOSAT"
+          },
+          {
+            "case_id": "p11_avclpv_psclpv",
+            "contract": "EXACT_TEXT",
+            "max": 830.116112588,
+            "mean": 753.876024505,
+            "median": 744.49939544,
+            "min": 719.402148681,
+            "n": 5,
+            "output_sha256": "1eb11f5caa4d1030a016e67bafc90acaecb0a1fe76f9b11256fe1343f0571fe4",
+            "program": "tblastx",
+            "tool": "NCBI BLAST+"
+          },
+          {
+            "case_id": "p11_avclpv_psclpv",
+            "contract": "EXACT_TEXT",
+            "max": 618.23809942,
+            "mean": 605.7418344596001,
+            "median": 602.319407823,
+            "min": 599.959878038,
+            "n": 5,
+            "output_sha256": "1eb11f5caa4d1030a016e67bafc90acaecb0a1fe76f9b11256fe1343f0571fe4",
+            "program": "tblastx",
+            "tool": "LOSAT"
+          }
+        ]
+      },
+      "historical": [
+        {
+          "case_id": "NZ_CP006932_Self",
+          "mode": "TBLASTX",
+          "seconds": 1524.162,
+          "series": "NCBI BLAST+ n8"
+        },
+        {
+          "case_id": "NZ_CP006932_Self",
+          "mode": "TBLASTX",
+          "seconds": 1299.63,
+          "series": "LOSAT native n1"
+        },
+        {
+          "case_id": "NZ_CP006932_Self",
+          "mode": "TBLASTX",
+          "seconds": 580.863,
+          "series": "LOSAT native n8"
+        },
+        {
+          "case_id": "NZ_CP006932_Self",
+          "mode": "TBLASTX",
+          "seconds": 1348.224,
+          "series": "LOSAT wasm n1"
+        },
+        {
+          "case_id": "NZ_CP006932_Self",
+          "mode": "TBLASTX",
+          "seconds": 1290.386,
+          "series": "LOSAT wasm n8"
+        },
+        {
+          "case_id": "AP027132_vs_NZ",
+          "mode": "TBLASTX",
+          "seconds": 1903.873,
+          "series": "NCBI BLAST+ n8"
+        },
+        {
+          "case_id": "AP027132_vs_NZ",
+          "mode": "TBLASTX",
+          "seconds": 1536.411,
+          "series": "LOSAT native n1"
+        },
+        {
+          "case_id": "AP027132_vs_NZ",
+          "mode": "TBLASTX",
+          "seconds": 1624.257,
+          "series": "LOSAT wasm n1"
+        },
+        {
+          "case_id": "AP027132_vs_NZ",
+          "mode": "TBLASTX",
+          "seconds": 1537.564,
+          "series": "LOSAT wasm n8"
+        },
+        {
+          "case_id": "AP027078_vs_AP027131",
+          "mode": "TBLASTX",
+          "seconds": 1269.136,
+          "series": "NCBI BLAST+ n8"
+        },
+        {
+          "case_id": "AP027078_vs_AP027131",
+          "mode": "TBLASTX",
+          "seconds": 775.489,
+          "series": "LOSAT native n1"
+        },
+        {
+          "case_id": "AP027078_vs_AP027131",
+          "mode": "TBLASTX",
+          "seconds": 294.09,
+          "series": "LOSAT native n8"
+        },
+        {
+          "case_id": "AP027078_vs_AP027131",
+          "mode": "TBLASTX",
+          "seconds": 793.63,
+          "series": "LOSAT wasm n1"
+        },
+        {
+          "case_id": "AP027078_vs_AP027131",
+          "mode": "TBLASTX",
+          "seconds": 727.156,
+          "series": "LOSAT wasm n8"
+        },
+        {
+          "case_id": "AP027131_vs_AP027133",
+          "mode": "TBLASTX",
+          "seconds": 486.781,
+          "series": "NCBI BLAST+ n8"
+        },
+        {
+          "case_id": "AP027131_vs_AP027133",
+          "mode": "TBLASTX",
+          "seconds": 263.526,
+          "series": "LOSAT native n1"
+        },
+        {
+          "case_id": "AP027131_vs_AP027133",
+          "mode": "TBLASTX",
+          "seconds": 87.735,
+          "series": "LOSAT native n8"
+        },
+        {
+          "case_id": "AP027131_vs_AP027133",
+          "mode": "TBLASTX",
+          "seconds": 265.174,
+          "series": "LOSAT wasm n1"
+        },
+        {
+          "case_id": "AP027131_vs_AP027133",
+          "mode": "TBLASTX",
+          "seconds": 248.965,
+          "series": "LOSAT wasm n8"
+        },
+        {
+          "case_id": "AP027133_vs_AP027132",
+          "mode": "TBLASTX",
+          "seconds": 1286.089,
+          "series": "NCBI BLAST+ n8"
+        },
+        {
+          "case_id": "AP027133_vs_AP027132",
+          "mode": "TBLASTX",
+          "seconds": 1225.24,
+          "series": "LOSAT native n1"
+        },
+        {
+          "case_id": "AP027133_vs_AP027132",
+          "mode": "TBLASTX",
+          "seconds": 469.546,
+          "series": "LOSAT native n8"
+        },
+        {
+          "case_id": "AP027133_vs_AP027132",
+          "mode": "TBLASTX",
+          "seconds": 1055.222,
+          "series": "LOSAT wasm n1"
+        },
+        {
+          "case_id": "AP027133_vs_AP027132",
+          "mode": "TBLASTX",
+          "seconds": 1018.121,
+          "series": "LOSAT wasm n8"
+        },
+        {
+          "case_id": "AP027280_Self",
+          "mode": "TBLASTX",
+          "seconds": 24.921,
+          "series": "NCBI BLAST+ n8"
+        },
+        {
+          "case_id": "AP027280_Self",
+          "mode": "TBLASTX",
+          "seconds": 31.741,
+          "series": "LOSAT native n1"
+        },
+        {
+          "case_id": "AP027280_Self",
+          "mode": "TBLASTX",
+          "seconds": 18.543,
+          "series": "LOSAT native n8"
+        },
+        {
+          "case_id": "AP027280_Self",
+          "mode": "TBLASTX",
+          "seconds": 39.721,
+          "series": "LOSAT wasm n1"
+        },
+        {
+          "case_id": "AP027280_Self",
+          "mode": "TBLASTX",
+          "seconds": 39.095,
+          "series": "LOSAT wasm n8"
+        },
+        {
+          "case_id": "MjeNMV_vs_MelaMJNV",
+          "mode": "TBLASTX",
+          "seconds": 16.547,
+          "series": "NCBI BLAST+ n8"
+        },
+        {
+          "case_id": "MjeNMV_vs_MelaMJNV",
+          "mode": "TBLASTX",
+          "seconds": 19.18,
+          "series": "LOSAT native n1"
+        },
+        {
+          "case_id": "MjeNMV_vs_MelaMJNV",
+          "mode": "TBLASTX",
+          "seconds": 10.139,
+          "series": "LOSAT native n8"
+        },
+        {
+          "case_id": "MjeNMV_vs_MelaMJNV",
+          "mode": "TBLASTX",
+          "seconds": 22.943,
+          "series": "LOSAT wasm n1"
+        },
+        {
+          "case_id": "MjeNMV_vs_MelaMJNV",
+          "mode": "TBLASTX",
+          "seconds": 20.511,
+          "series": "LOSAT wasm n8"
+        },
+        {
+          "case_id": "MelaMJNV_vs_PemoMJNVA",
+          "mode": "TBLASTX",
+          "seconds": 3.937,
+          "series": "NCBI BLAST+ n8"
+        },
+        {
+          "case_id": "MelaMJNV_vs_PemoMJNVA",
+          "mode": "TBLASTX",
+          "seconds": 3.837,
+          "series": "LOSAT native n1"
+        },
+        {
+          "case_id": "MelaMJNV_vs_PemoMJNVA",
+          "mode": "TBLASTX",
+          "seconds": 3.275,
+          "series": "LOSAT native n8"
+        },
+        {
+          "case_id": "MelaMJNV_vs_PemoMJNVA",
+          "mode": "TBLASTX",
+          "seconds": 5.503,
+          "series": "LOSAT wasm n1"
+        },
+        {
+          "case_id": "MelaMJNV_vs_PemoMJNVA",
+          "mode": "TBLASTX",
+          "seconds": 7.378,
+          "series": "LOSAT wasm n8"
+        },
+        {
+          "case_id": "PemoMJNVA_vs_PeseMJNV",
+          "mode": "TBLASTX",
+          "seconds": 13.924,
+          "series": "NCBI BLAST+ n8"
+        },
+        {
+          "case_id": "PemoMJNVA_vs_PeseMJNV",
+          "mode": "TBLASTX",
+          "seconds": 15.155,
+          "series": "LOSAT native n1"
+        },
+        {
+          "case_id": "PemoMJNVA_vs_PeseMJNV",
+          "mode": "TBLASTX",
+          "seconds": 9.987,
+          "series": "LOSAT native n8"
+        },
+        {
+          "case_id": "PemoMJNVA_vs_PeseMJNV",
+          "mode": "TBLASTX",
+          "seconds": 22.6,
+          "series": "LOSAT wasm n1"
+        },
+        {
+          "case_id": "PemoMJNVA_vs_PeseMJNV",
+          "mode": "TBLASTX",
+          "seconds": 29.628,
+          "series": "LOSAT wasm n8"
+        },
+        {
+          "case_id": "PeseMJNV_vs_PemoMJNVB",
+          "mode": "TBLASTX",
+          "seconds": 36.167,
+          "series": "NCBI BLAST+ n8"
+        },
+        {
+          "case_id": "PeseMJNV_vs_PemoMJNVB",
+          "mode": "TBLASTX",
+          "seconds": 87.143,
+          "series": "LOSAT native n1"
+        },
+        {
+          "case_id": "PeseMJNV_vs_PemoMJNVB",
+          "mode": "TBLASTX",
+          "seconds": 19.28,
+          "series": "LOSAT native n8"
+        },
+        {
+          "case_id": "PeseMJNV_vs_PemoMJNVB",
+          "mode": "TBLASTX",
+          "seconds": 65.454,
+          "series": "LOSAT wasm n1"
+        },
+        {
+          "case_id": "PeseMJNV_vs_PemoMJNVB",
+          "mode": "TBLASTX",
+          "seconds": 54.74,
+          "series": "LOSAT wasm n8"
+        },
+        {
+          "case_id": "PemoMJNVB_vs_LvMJNV",
+          "mode": "TBLASTX",
+          "seconds": 263.072,
+          "series": "NCBI BLAST+ n8"
+        },
+        {
+          "case_id": "PemoMJNVB_vs_LvMJNV",
+          "mode": "TBLASTX",
+          "seconds": 203.816,
+          "series": "LOSAT native n1"
+        },
+        {
+          "case_id": "PemoMJNVB_vs_LvMJNV",
+          "mode": "TBLASTX",
+          "seconds": 65.313,
+          "series": "LOSAT native n8"
+        },
+        {
+          "case_id": "PemoMJNVB_vs_LvMJNV",
+          "mode": "TBLASTX",
+          "seconds": 308.738,
+          "series": "LOSAT wasm n1"
+        },
+        {
+          "case_id": "PemoMJNVB_vs_LvMJNV",
+          "mode": "TBLASTX",
+          "seconds": 275.127,
+          "series": "LOSAT wasm n8"
+        },
+        {
+          "case_id": "LvMJNV_vs_TrcuMJNV",
+          "mode": "TBLASTX",
+          "seconds": 2.405,
+          "series": "NCBI BLAST+ n8"
+        },
+        {
+          "case_id": "LvMJNV_vs_TrcuMJNV",
+          "mode": "TBLASTX",
+          "seconds": 2.063,
+          "series": "LOSAT native n1"
+        },
+        {
+          "case_id": "LvMJNV_vs_TrcuMJNV",
+          "mode": "TBLASTX",
+          "seconds": 1.455,
+          "series": "LOSAT native n8"
+        },
+        {
+          "case_id": "LvMJNV_vs_TrcuMJNV",
+          "mode": "TBLASTX",
+          "seconds": 3.065,
+          "series": "LOSAT wasm n1"
+        },
+        {
+          "case_id": "LvMJNV_vs_TrcuMJNV",
+          "mode": "TBLASTX",
+          "seconds": 2.826,
+          "series": "LOSAT wasm n8"
+        },
+        {
+          "case_id": "TrcuMJNV_vs_MellatMJNV",
+          "mode": "TBLASTX",
+          "seconds": 15.32,
+          "series": "NCBI BLAST+ n8"
+        },
+        {
+          "case_id": "TrcuMJNV_vs_MellatMJNV",
+          "mode": "TBLASTX",
+          "seconds": 13.766,
+          "series": "LOSAT native n1"
+        },
+        {
+          "case_id": "TrcuMJNV_vs_MellatMJNV",
+          "mode": "TBLASTX",
+          "seconds": 5.988,
+          "series": "LOSAT native n8"
+        },
+        {
+          "case_id": "TrcuMJNV_vs_MellatMJNV",
+          "mode": "TBLASTX",
+          "seconds": 15.7,
+          "series": "LOSAT wasm n1"
+        },
+        {
+          "case_id": "TrcuMJNV_vs_MellatMJNV",
+          "mode": "TBLASTX",
+          "seconds": 19.196,
+          "series": "LOSAT wasm n8"
+        },
+        {
+          "case_id": "MellatMJNV_vs_MeenMJNV",
+          "mode": "TBLASTX",
+          "seconds": 80.829,
+          "series": "NCBI BLAST+ n8"
+        },
+        {
+          "case_id": "MellatMJNV_vs_MeenMJNV",
+          "mode": "TBLASTX",
+          "seconds": 71.267,
+          "series": "LOSAT native n1"
+        },
+        {
+          "case_id": "MellatMJNV_vs_MeenMJNV",
+          "mode": "TBLASTX",
+          "seconds": 34.845,
+          "series": "LOSAT native n8"
+        },
+        {
+          "case_id": "MellatMJNV_vs_MeenMJNV",
+          "mode": "TBLASTX",
+          "seconds": 82.594,
+          "series": "LOSAT wasm n1"
+        },
+        {
+          "case_id": "MellatMJNV_vs_MeenMJNV",
+          "mode": "TBLASTX",
+          "seconds": 85.222,
+          "series": "LOSAT wasm n8"
+        },
+        {
+          "case_id": "MeenMJNV_vs_MejoMJNV",
+          "mode": "TBLASTX",
+          "seconds": 128.908,
+          "series": "NCBI BLAST+ n8"
+        },
+        {
+          "case_id": "MeenMJNV_vs_MejoMJNV",
+          "mode": "TBLASTX",
+          "seconds": 112.609,
+          "series": "LOSAT native n1"
+        },
+        {
+          "case_id": "MeenMJNV_vs_MejoMJNV",
+          "mode": "TBLASTX",
+          "seconds": 41.467,
+          "series": "LOSAT native n8"
+        },
+        {
+          "case_id": "MeenMJNV_vs_MejoMJNV",
+          "mode": "TBLASTX",
+          "seconds": 140.093,
+          "series": "LOSAT wasm n1"
+        },
+        {
+          "case_id": "MeenMJNV_vs_MejoMJNV",
+          "mode": "TBLASTX",
+          "seconds": 126.474,
+          "series": "LOSAT wasm n8"
+        },
+        {
+          "case_id": "AvCLPV_vs_PsCLPV",
+          "mode": "TBLASTX",
+          "seconds": 733.027,
+          "series": "NCBI BLAST+ n8"
+        },
+        {
+          "case_id": "AvCLPV_vs_PsCLPV",
+          "mode": "TBLASTX",
+          "seconds": 602.571,
+          "series": "LOSAT native n1"
+        },
+        {
+          "case_id": "AvCLPV_vs_PsCLPV",
+          "mode": "TBLASTX",
+          "seconds": 356.061,
+          "series": "LOSAT native n8"
+        },
+        {
+          "case_id": "AvCLPV_vs_PsCLPV",
+          "mode": "TBLASTX",
+          "seconds": 834.408,
+          "series": "LOSAT wasm n1"
+        },
+        {
+          "case_id": "AvCLPV_vs_PsCLPV",
+          "mode": "TBLASTX",
+          "seconds": 822.552,
+          "series": "LOSAT wasm n8"
+        },
+        {
+          "case_id": "NZ_CP006932_Self",
+          "mode": "Megablast",
+          "seconds": 0.311,
+          "series": "NCBI BLAST+ n1"
+        },
+        {
+          "case_id": "NZ_CP006932_Self",
+          "mode": "Megablast",
+          "seconds": 0.254,
+          "series": "LOSAT native n1"
+        },
+        {
+          "case_id": "NZ_CP006932_Self",
+          "mode": "Megablast",
+          "seconds": 0.272,
+          "series": "LOSAT native n8"
+        },
+        {
+          "case_id": "NZ_CP006932_Self",
+          "mode": "Megablast",
+          "seconds": 0.417,
+          "series": "LOSAT wasm n1"
+        },
+        {
+          "case_id": "NZ_CP006932_Self",
+          "mode": "Megablast",
+          "seconds": 0.358,
+          "series": "LOSAT wasm n8"
+        },
+        {
+          "case_id": "EDL933_vs_Sakai",
+          "mode": "Megablast",
+          "seconds": 1.15,
+          "series": "NCBI BLAST+ n1"
+        },
+        {
+          "case_id": "EDL933_vs_Sakai",
+          "mode": "Megablast",
+          "seconds": 1.287,
+          "series": "LOSAT native n1"
+        },
+        {
+          "case_id": "EDL933_vs_Sakai",
+          "mode": "Megablast",
+          "seconds": 1.238,
+          "series": "LOSAT native n8"
+        },
+        {
+          "case_id": "EDL933_vs_Sakai",
+          "mode": "Megablast",
+          "seconds": 1.495,
+          "series": "LOSAT wasm n1"
+        },
+        {
+          "case_id": "EDL933_vs_Sakai",
+          "mode": "Megablast",
+          "seconds": 1.546,
+          "series": "LOSAT wasm n8"
+        },
+        {
+          "case_id": "Sakai_vs_MG1655",
+          "mode": "Megablast",
+          "seconds": 1.116,
+          "series": "NCBI BLAST+ n1"
+        },
+        {
+          "case_id": "Sakai_vs_MG1655",
+          "mode": "Megablast",
+          "seconds": 1.398,
+          "series": "LOSAT native n1"
+        },
+        {
+          "case_id": "Sakai_vs_MG1655",
+          "mode": "Megablast",
+          "seconds": 1.137,
+          "series": "LOSAT native n8"
+        },
+        {
+          "case_id": "Sakai_vs_MG1655",
+          "mode": "Megablast",
+          "seconds": 1.203,
+          "series": "LOSAT wasm n1"
+        },
+        {
+          "case_id": "Sakai_vs_MG1655",
+          "mode": "Megablast",
+          "seconds": 1.229,
+          "series": "LOSAT wasm n8"
+        },
+        {
+          "case_id": "NZ_CP006932_Self",
+          "mode": "BLASTN",
+          "seconds": 6.808,
+          "series": "NCBI BLAST+ n1"
+        },
+        {
+          "case_id": "NZ_CP006932_Self",
+          "mode": "BLASTN",
+          "seconds": 6.64,
+          "series": "LOSAT native n1"
+        },
+        {
+          "case_id": "NZ_CP006932_Self",
+          "mode": "BLASTN",
+          "seconds": 6.132,
+          "series": "LOSAT native n8"
+        },
+        {
+          "case_id": "NZ_CP006932_Self",
+          "mode": "BLASTN",
+          "seconds": 9.846,
+          "series": "LOSAT wasm n1"
+        },
+        {
+          "case_id": "NZ_CP006932_Self",
+          "mode": "BLASTN",
+          "seconds": 13.02,
+          "series": "LOSAT wasm n8"
+        },
+        {
+          "case_id": "PesePMNV_vs_MjPMNV",
+          "mode": "BLASTN",
+          "seconds": 0.269,
+          "series": "NCBI BLAST+ n1"
+        },
+        {
+          "case_id": "PesePMNV_vs_MjPMNV",
+          "mode": "BLASTN",
+          "seconds": 0.202,
+          "series": "LOSAT native n1"
+        },
+        {
+          "case_id": "PesePMNV_vs_MjPMNV",
+          "mode": "BLASTN",
+          "seconds": 0.241,
+          "series": "LOSAT native n8"
+        },
+        {
+          "case_id": "PesePMNV_vs_MjPMNV",
+          "mode": "BLASTN",
+          "seconds": 0.466,
+          "series": "LOSAT wasm n1"
+        },
+        {
+          "case_id": "PesePMNV_vs_MjPMNV",
+          "mode": "BLASTN",
+          "seconds": 0.46,
+          "series": "LOSAT wasm n8"
+        },
+        {
+          "case_id": "MelaMJNV_vs_PemoMJNVA",
+          "mode": "BLASTN",
+          "seconds": 0.632,
+          "series": "NCBI BLAST+ n1"
+        },
+        {
+          "case_id": "MelaMJNV_vs_PemoMJNVA",
+          "mode": "BLASTN",
+          "seconds": 0.474,
+          "series": "LOSAT native n1"
+        },
+        {
+          "case_id": "MelaMJNV_vs_PemoMJNVA",
+          "mode": "BLASTN",
+          "seconds": 0.54,
+          "series": "LOSAT native n8"
+        },
+        {
+          "case_id": "MelaMJNV_vs_PemoMJNVA",
+          "mode": "BLASTN",
+          "seconds": 1.012,
+          "series": "LOSAT wasm n1"
+        },
+        {
+          "case_id": "MelaMJNV_vs_PemoMJNVA",
+          "mode": "BLASTN",
+          "seconds": 0.962,
+          "series": "LOSAT wasm n8"
+        },
+        {
+          "case_id": "SiNMV_vs_ChdeNMV",
+          "mode": "BLASTN",
+          "seconds": 1.144,
+          "series": "NCBI BLAST+ n1"
+        },
+        {
+          "case_id": "SiNMV_vs_ChdeNMV",
+          "mode": "BLASTN",
+          "seconds": 0.881,
+          "series": "LOSAT native n1"
+        },
+        {
+          "case_id": "SiNMV_vs_ChdeNMV",
+          "mode": "BLASTN",
+          "seconds": 0.924,
+          "series": "LOSAT native n8"
+        },
+        {
+          "case_id": "SiNMV_vs_ChdeNMV",
+          "mode": "BLASTN",
+          "seconds": 2.076,
+          "series": "LOSAT wasm n1"
+        },
+        {
+          "case_id": "SiNMV_vs_ChdeNMV",
+          "mode": "BLASTN",
+          "seconds": 1.936,
+          "series": "LOSAT wasm n8"
+        },
+        {
+          "case_id": "PmeNMV_vs_MjPMNV",
+          "mode": "BLASTN",
+          "seconds": 0.274,
+          "series": "NCBI BLAST+ n1"
+        },
+        {
+          "case_id": "PmeNMV_vs_MjPMNV",
+          "mode": "BLASTN",
+          "seconds": 0.222,
+          "series": "LOSAT native n1"
+        },
+        {
+          "case_id": "PmeNMV_vs_MjPMNV",
+          "mode": "BLASTN",
+          "seconds": 0.225,
+          "series": "LOSAT native n8"
+        },
+        {
+          "case_id": "PmeNMV_vs_MjPMNV",
+          "mode": "BLASTN",
+          "seconds": 0.419,
+          "series": "LOSAT wasm n1"
+        },
+        {
+          "case_id": "PmeNMV_vs_MjPMNV",
+          "mode": "BLASTN",
+          "seconds": 0.421,
+          "series": "LOSAT wasm n8"
+        },
+        {
+          "case_id": "PmeNMV_vs_PesePMNV",
+          "mode": "BLASTN",
+          "seconds": 0.468,
+          "series": "NCBI BLAST+ n1"
+        },
+        {
+          "case_id": "PmeNMV_vs_PesePMNV",
+          "mode": "BLASTN",
+          "seconds": 0.39,
+          "series": "LOSAT native n1"
+        },
+        {
+          "case_id": "PmeNMV_vs_PesePMNV",
+          "mode": "BLASTN",
+          "seconds": 0.354,
+          "series": "LOSAT native n8"
+        },
+        {
+          "case_id": "PmeNMV_vs_PesePMNV",
+          "mode": "BLASTN",
+          "seconds": 0.797,
+          "series": "LOSAT wasm n1"
+        },
+        {
+          "case_id": "PmeNMV_vs_PesePMNV",
+          "mode": "BLASTN",
+          "seconds": 0.748,
+          "series": "LOSAT wasm n8"
+        },
+        {
+          "case_id": "PeseMJNV_vs_PemoMJNVB",
+          "mode": "BLASTN",
+          "seconds": 2.609,
+          "series": "NCBI BLAST+ n1"
+        },
+        {
+          "case_id": "PeseMJNV_vs_PemoMJNVB",
+          "mode": "BLASTN",
+          "seconds": 2.122,
+          "series": "LOSAT native n1"
+        },
+        {
+          "case_id": "PeseMJNV_vs_PemoMJNVB",
+          "mode": "BLASTN",
+          "seconds": 2.057,
+          "series": "LOSAT native n8"
+        },
+        {
+          "case_id": "PeseMJNV_vs_PemoMJNVB",
+          "mode": "BLASTN",
+          "seconds": 3.944,
+          "series": "LOSAT wasm n1"
+        },
+        {
+          "case_id": "PeseMJNV_vs_PemoMJNVB",
+          "mode": "BLASTN",
+          "seconds": 4.208,
+          "series": "LOSAT wasm n8"
+        },
+        {
+          "case_id": "PemoMJNVA_vs_PeseMJNV",
+          "mode": "BLASTN",
+          "seconds": 1.669,
+          "series": "NCBI BLAST+ n1"
+        },
+        {
+          "case_id": "PemoMJNVA_vs_PeseMJNV",
+          "mode": "BLASTN",
+          "seconds": 1.345,
+          "series": "LOSAT native n1"
+        },
+        {
+          "case_id": "PemoMJNVA_vs_PeseMJNV",
+          "mode": "BLASTN",
+          "seconds": 1.495,
+          "series": "LOSAT native n8"
+        },
+        {
+          "case_id": "PemoMJNVA_vs_PeseMJNV",
+          "mode": "BLASTN",
+          "seconds": 2.925,
+          "series": "LOSAT wasm n1"
+        },
+        {
+          "case_id": "PemoMJNVA_vs_PeseMJNV",
+          "mode": "BLASTN",
+          "seconds": 2.963,
+          "series": "LOSAT wasm n8"
+        },
+        {
+          "case_id": "MjeNMV_vs_MelaMJNV",
+          "mode": "BLASTN",
+          "seconds": 1.02,
+          "series": "NCBI BLAST+ n1"
+        },
+        {
+          "case_id": "MjeNMV_vs_MelaMJNV",
+          "mode": "BLASTN",
+          "seconds": 0.841,
+          "series": "LOSAT native n1"
+        },
+        {
+          "case_id": "MjeNMV_vs_MelaMJNV",
+          "mode": "BLASTN",
+          "seconds": 0.953,
+          "series": "LOSAT native n8"
+        },
+        {
+          "case_id": "MjeNMV_vs_MelaMJNV",
+          "mode": "BLASTN",
+          "seconds": 1.775,
+          "series": "LOSAT wasm n1"
+        },
+        {
+          "case_id": "MjeNMV_vs_MelaMJNV",
+          "mode": "BLASTN",
+          "seconds": 1.778,
+          "series": "LOSAT wasm n8"
+        },
+        {
+          "case_id": "MjPMNV_vs_MlPMNV",
+          "mode": "BLASTN",
+          "seconds": 13.006,
+          "series": "NCBI BLAST+ n1"
+        },
+        {
+          "case_id": "MjPMNV_vs_MlPMNV",
+          "mode": "BLASTN",
+          "seconds": 12.795,
+          "series": "LOSAT native n1"
+        },
+        {
+          "case_id": "MjPMNV_vs_MlPMNV",
+          "mode": "BLASTN",
+          "seconds": 11.231,
+          "series": "LOSAT native n8"
+        },
+        {
+          "case_id": "MjPMNV_vs_MlPMNV",
+          "mode": "BLASTN",
+          "seconds": 24.009,
+          "series": "LOSAT wasm n1"
+        },
+        {
+          "case_id": "MjPMNV_vs_MlPMNV",
+          "mode": "BLASTN",
+          "seconds": 23.699,
+          "series": "LOSAT wasm n8"
+        },
+        {
+          "case_id": "WSSV.PajaWSV",
+          "mode": "BLASTP",
+          "seconds": 2.24,
+          "series": "NCBI BLAST+ n1"
+        },
+        {
+          "case_id": "WSSV.PajaWSV",
+          "mode": "BLASTP",
+          "seconds": 2.452,
+          "series": "LOSAT native n1"
+        },
+        {
+          "case_id": "WSSV.PajaWSV",
+          "mode": "BLASTP",
+          "seconds": 0.8,
+          "series": "LOSAT native n8"
+        },
+        {
+          "case_id": "WSSV.PajaWSV",
+          "mode": "BLASTP",
+          "seconds": 2.832,
+          "series": "LOSAT wasm n1"
+        },
+        {
+          "case_id": "WSSV.PajaWSV",
+          "mode": "BLASTP",
+          "seconds": 1.176,
+          "series": "LOSAT wasm n8"
+        },
+        {
+          "case_id": "WSSV.SicyWSV",
+          "mode": "BLASTP",
+          "seconds": 1.387,
+          "series": "NCBI BLAST+ n1"
+        },
+        {
+          "case_id": "WSSV.SicyWSV",
+          "mode": "BLASTP",
+          "seconds": 2.585,
+          "series": "LOSAT native n1"
+        },
+        {
+          "case_id": "WSSV.SicyWSV",
+          "mode": "BLASTP",
+          "seconds": 0.538,
+          "series": "LOSAT native n8"
+        },
+        {
+          "case_id": "WSSV.SicyWSV",
+          "mode": "BLASTP",
+          "seconds": 1.701,
+          "series": "LOSAT wasm n1"
+        },
+        {
+          "case_id": "WSSV.SicyWSV",
+          "mode": "BLASTP",
+          "seconds": 1.015,
+          "series": "LOSAT wasm n8"
+        },
+        {
+          "case_id": "WSSV.CoBV",
+          "mode": "BLASTP",
+          "seconds": 1.734,
+          "series": "NCBI BLAST+ n1"
+        },
+        {
+          "case_id": "WSSV.CoBV",
+          "mode": "BLASTP",
+          "seconds": 1.821,
+          "series": "LOSAT native n1"
+        },
+        {
+          "case_id": "WSSV.CoBV",
+          "mode": "BLASTP",
+          "seconds": 0.627,
+          "series": "LOSAT native n8"
+        },
+        {
+          "case_id": "WSSV.CoBV",
+          "mode": "BLASTP",
+          "seconds": 2.27,
+          "series": "LOSAT wasm n1"
+        },
+        {
+          "case_id": "WSSV.CoBV",
+          "mode": "BLASTP",
+          "seconds": 1.175,
+          "series": "LOSAT wasm n8"
+        },
+        {
+          "case_id": "PajaWSV.SicyWSV",
+          "mode": "BLASTP",
+          "seconds": 0.72,
+          "series": "NCBI BLAST+ n1"
+        },
+        {
+          "case_id": "PajaWSV.SicyWSV",
+          "mode": "BLASTP",
+          "seconds": 0.825,
+          "series": "LOSAT native n1"
+        },
+        {
+          "case_id": "PajaWSV.SicyWSV",
+          "mode": "BLASTP",
+          "seconds": 0.35,
+          "series": "LOSAT native n8"
+        },
+        {
+          "case_id": "PajaWSV.SicyWSV",
+          "mode": "BLASTP",
+          "seconds": 1.051,
+          "series": "LOSAT wasm n1"
+        },
+        {
+          "case_id": "PajaWSV.SicyWSV",
+          "mode": "BLASTP",
+          "seconds": 0.727,
+          "series": "LOSAT wasm n8"
+        },
+        {
+          "case_id": "PajaWSV.CoBV",
+          "mode": "BLASTP",
+          "seconds": 1.042,
+          "series": "NCBI BLAST+ n1"
+        },
+        {
+          "case_id": "PajaWSV.CoBV",
+          "mode": "BLASTP",
+          "seconds": 1.214,
+          "series": "LOSAT native n1"
+        },
+        {
+          "case_id": "PajaWSV.CoBV",
+          "mode": "BLASTP",
+          "seconds": 0.474,
+          "series": "LOSAT native n8"
+        },
+        {
+          "case_id": "PajaWSV.CoBV",
+          "mode": "BLASTP",
+          "seconds": 1.398,
+          "series": "LOSAT wasm n1"
+        },
+        {
+          "case_id": "PajaWSV.CoBV",
+          "mode": "BLASTP",
+          "seconds": 0.869,
+          "series": "LOSAT wasm n8"
+        },
+        {
+          "case_id": "SicyWSV.CoBV",
+          "mode": "BLASTP",
+          "seconds": 0.718,
+          "series": "NCBI BLAST+ n1"
+        },
+        {
+          "case_id": "SicyWSV.CoBV",
+          "mode": "BLASTP",
+          "seconds": 0.82,
+          "series": "LOSAT native n1"
+        },
+        {
+          "case_id": "SicyWSV.CoBV",
+          "mode": "BLASTP",
+          "seconds": 0.392,
+          "series": "LOSAT native n8"
+        },
+        {
+          "case_id": "SicyWSV.CoBV",
+          "mode": "BLASTP",
+          "seconds": 0.945,
+          "series": "LOSAT wasm n1"
+        },
+        {
+          "case_id": "SicyWSV.CoBV",
+          "mode": "BLASTP",
+          "seconds": 0.745,
+          "series": "LOSAT wasm n8"
+        },
+        {
+          "case_id": "AP027078.AP027131",
+          "mode": "BLASTP",
+          "seconds": 24.084,
+          "series": "NCBI BLAST+ n1"
+        },
+        {
+          "case_id": "AP027078.AP027131",
+          "mode": "BLASTP",
+          "seconds": 27.981,
+          "series": "LOSAT native n1"
+        },
+        {
+          "case_id": "AP027078.AP027131",
+          "mode": "BLASTP",
+          "seconds": 5.283,
+          "series": "LOSAT native n8"
+        },
+        {
+          "case_id": "AP027078.AP027131",
+          "mode": "BLASTP",
+          "seconds": 37.682,
+          "series": "LOSAT wasm n1"
+        },
+        {
+          "case_id": "AP027078.AP027131",
+          "mode": "BLASTP",
+          "seconds": 7.662,
+          "series": "LOSAT wasm n8"
+        },
+        {
+          "case_id": "AP027078.AP027132",
+          "mode": "BLASTP",
+          "seconds": 21.665,
+          "series": "NCBI BLAST+ n1"
+        },
+        {
+          "case_id": "AP027078.AP027132",
+          "mode": "BLASTP",
+          "seconds": 23.671,
+          "series": "LOSAT native n1"
+        },
+        {
+          "case_id": "AP027078.AP027132",
+          "mode": "BLASTP",
+          "seconds": 5.576,
+          "series": "LOSAT native n8"
+        },
+        {
+          "case_id": "AP027078.AP027132",
+          "mode": "BLASTP",
+          "seconds": 32.256,
+          "series": "LOSAT wasm n1"
+        },
+        {
+          "case_id": "AP027078.AP027132",
+          "mode": "BLASTP",
+          "seconds": 6.794,
+          "series": "LOSAT wasm n8"
+        },
+        {
+          "case_id": "AP027078.AP027133",
+          "mode": "BLASTP",
+          "seconds": 18.178,
+          "series": "NCBI BLAST+ n1"
+        },
+        {
+          "case_id": "AP027078.AP027133",
+          "mode": "BLASTP",
+          "seconds": 20.558,
+          "series": "LOSAT native n1"
+        },
+        {
+          "case_id": "AP027078.AP027133",
+          "mode": "BLASTP",
+          "seconds": 3.847,
+          "series": "LOSAT native n8"
+        },
+        {
+          "case_id": "AP027078.AP027133",
+          "mode": "BLASTP",
+          "seconds": 28.357,
+          "series": "LOSAT wasm n1"
+        },
+        {
+          "case_id": "AP027078.AP027133",
+          "mode": "BLASTP",
+          "seconds": 6.089,
+          "series": "LOSAT wasm n8"
+        },
+        {
+          "case_id": "AP027078.NZ_CP006932",
+          "mode": "BLASTP",
+          "seconds": 26.212,
+          "series": "NCBI BLAST+ n1"
+        },
+        {
+          "case_id": "AP027078.NZ_CP006932",
+          "mode": "BLASTP",
+          "seconds": 28.203,
+          "series": "LOSAT native n1"
+        },
+        {
+          "case_id": "AP027078.NZ_CP006932",
+          "mode": "BLASTP",
+          "seconds": 5.803,
+          "series": "LOSAT native n8"
+        },
+        {
+          "case_id": "AP027078.NZ_CP006932",
+          "mode": "BLASTP",
+          "seconds": 38.187,
+          "series": "LOSAT wasm n1"
+        },
+        {
+          "case_id": "AP027078.NZ_CP006932",
+          "mode": "BLASTP",
+          "seconds": 7.912,
+          "series": "LOSAT wasm n8"
+        },
+        {
+          "case_id": "AP027131.AP027132",
+          "mode": "BLASTP",
+          "seconds": 31.954,
+          "series": "NCBI BLAST+ n1"
+        },
+        {
+          "case_id": "AP027131.AP027132",
+          "mode": "BLASTP",
+          "seconds": 33.561,
+          "series": "LOSAT native n1"
+        },
+        {
+          "case_id": "AP027131.AP027132",
+          "mode": "BLASTP",
+          "seconds": 7.809,
+          "series": "LOSAT native n8"
+        },
+        {
+          "case_id": "AP027131.AP027132",
+          "mode": "BLASTP",
+          "seconds": 45.297,
+          "series": "LOSAT wasm n1"
+        },
+        {
+          "case_id": "AP027131.AP027132",
+          "mode": "BLASTP",
+          "seconds": 8.998,
+          "series": "LOSAT wasm n8"
+        },
+        {
+          "case_id": "AP027131.AP027133",
+          "mode": "BLASTP",
+          "seconds": 28.843,
+          "series": "NCBI BLAST+ n1"
+        },
+        {
+          "case_id": "AP027131.AP027133",
+          "mode": "BLASTP",
+          "seconds": 30.152,
+          "series": "LOSAT native n1"
+        },
+        {
+          "case_id": "AP027131.AP027133",
+          "mode": "BLASTP",
+          "seconds": 5.71,
+          "series": "LOSAT native n8"
+        },
+        {
+          "case_id": "AP027131.AP027133",
+          "mode": "BLASTP",
+          "seconds": 39.725,
+          "series": "LOSAT wasm n1"
+        },
+        {
+          "case_id": "AP027131.AP027133",
+          "mode": "BLASTP",
+          "seconds": 8.174,
+          "series": "LOSAT wasm n8"
+        },
+        {
+          "case_id": "AP027131.NZ_CP006932",
+          "mode": "BLASTP",
+          "seconds": 36.357,
+          "series": "NCBI BLAST+ n1"
+        },
+        {
+          "case_id": "AP027131.NZ_CP006932",
+          "mode": "BLASTP",
+          "seconds": 41.892,
+          "series": "LOSAT native n1"
+        },
+        {
+          "case_id": "AP027131.NZ_CP006932",
+          "mode": "BLASTP",
+          "seconds": 7.441,
+          "series": "LOSAT native n8"
+        },
+        {
+          "case_id": "AP027131.NZ_CP006932",
+          "mode": "BLASTP",
+          "seconds": 54.689,
+          "series": "LOSAT wasm n1"
+        },
+        {
+          "case_id": "AP027131.NZ_CP006932",
+          "mode": "BLASTP",
+          "seconds": 10.854,
+          "series": "LOSAT wasm n8"
+        },
+        {
+          "case_id": "AP027132.AP027133",
+          "mode": "BLASTP",
+          "seconds": 25.019,
+          "series": "NCBI BLAST+ n1"
+        },
+        {
+          "case_id": "AP027132.AP027133",
+          "mode": "BLASTP",
+          "seconds": 29.544,
+          "series": "LOSAT native n1"
+        },
+        {
+          "case_id": "AP027132.AP027133",
+          "mode": "BLASTP",
+          "seconds": 5.495,
+          "series": "LOSAT native n8"
+        },
+        {
+          "case_id": "AP027132.AP027133",
+          "mode": "BLASTP",
+          "seconds": 38.537,
+          "series": "LOSAT wasm n1"
+        },
+        {
+          "case_id": "AP027132.AP027133",
+          "mode": "BLASTP",
+          "seconds": 8.378,
+          "series": "LOSAT wasm n8"
+        },
+        {
+          "case_id": "AP027132.NZ_CP006932",
+          "mode": "BLASTP",
+          "seconds": 36.3,
+          "series": "NCBI BLAST+ n1"
+        },
+        {
+          "case_id": "AP027132.NZ_CP006932",
+          "mode": "BLASTP",
+          "seconds": 38.48,
+          "series": "LOSAT native n1"
+        },
+        {
+          "case_id": "AP027132.NZ_CP006932",
+          "mode": "BLASTP",
+          "seconds": 9.347,
+          "series": "LOSAT native n8"
+        },
+        {
+          "case_id": "AP027132.NZ_CP006932",
+          "mode": "BLASTP",
+          "seconds": 52.292,
+          "series": "LOSAT wasm n1"
+        },
+        {
+          "case_id": "AP027132.NZ_CP006932",
+          "mode": "BLASTP",
+          "seconds": 10.938,
+          "series": "LOSAT wasm n8"
+        }
+      ],
+      "pr93": [
+        {
+          "case_id": "p11_avclpv_psclpv",
+          "seconds": 639.21,
+          "series": "LOSAT baseline"
+        },
+        {
+          "case_id": "p11_avclpv_psclpv",
+          "seconds": 636.7,
+          "series": "LOSAT candidate"
+        },
+        {
+          "case_id": "d06_ap027131_ap027133_db4",
+          "seconds": 60.26,
+          "series": "LOSAT baseline"
+        },
+        {
+          "case_id": "d06_ap027131_ap027133_db4",
+          "seconds": 60.65,
+          "series": "LOSAT candidate"
+        }
+      ]
+    },
+    "hit_distribution": {
+      "counts": {
+        "blastn:LOSAT": 100825,
+        "blastn:NCBI BLAST+": 100825,
+        "blastp:LOSAT": 2814,
+        "blastp:NCBI BLAST+": 2814,
+        "tblastx:LOSAT": 656316,
+        "tblastx:NCBI BLAST+": 505912
+      },
+      "identity_edges": [
+        0.0,
+        2.0,
+        4.0,
+        6.0,
+        8.0,
+        10.0,
+        12.0,
+        14.0,
+        16.0,
+        18.0,
+        20.0,
+        22.0,
+        24.0,
+        26.0,
+        28.0,
+        30.0,
+        32.0,
+        34.0,
+        36.0,
+        38.0,
+        40.0,
+        42.0,
+        44.0,
+        46.0,
+        48.0,
+        50.0,
+        52.0,
+        54.0,
+        56.0,
+        58.0,
+        60.0,
+        62.0,
+        64.0,
+        66.0,
+        68.0,
+        70.0,
+        72.0,
+        74.0,
+        76.0,
+        78.0,
+        80.0,
+        82.0,
+        84.0,
+        86.0,
+        88.0,
+        90.0,
+        92.0,
+        94.0,
+        96.0,
+        98.0,
+        100.0
+      ],
+      "programs": {
+        "blastn": {
+          "length_edges": [
+            18.0,
+            22.20852408629802,
+            27.40103011620442,
+            33.807579851394635,
+            41.71202507939677,
+            51.46458409244724,
+            63.49735863380136,
+            78.34347881306012,
+            96.66072423467918,
+            119.26066790916025,
+            147.14463421158743,
+            181.54806405875294,
+            223.99525297053296,
+            276.36688726736094,
+            340.9833706962444,
+            420.7076333963686,
+            519.0719783095936,
+            640.4345851561656,
+            790.172606118833,
+            974.920408629054,
+            1202.8635209589938,
+            1484.1013043192804,
+            1831.0944201933926,
+            2259.216918619494,
+            2787.4374085185004,
+            3439.159490340627,
+            4243.258687658349,
+            5235.3618205140965,
+            6459.425505076247,
+            7969.683717396315,
+            9833.050710998517,
+            12132.085753166699,
+            14968.651037013087,
+            18468.424838605268,
+            22786.46988134169,
+            28114.103622304505,
+            34687.374858923766,
+            42797.52222471434,
+            52803.87795341349,
+            65149.78863212911,
+            80382.25833632592,
+            99176.18446518463,
+            122364.26008234375,
+            150973.86763004283,
+            186272.59864796558,
+            229824.41631614766,
+            283558.9491875865,
+            349856.9862732157,
+            431655.96146712924,
+            532580.1009576048,
+            657101.0
+          ],
+          "series": {
+            "LOSAT": {
+              "identity_hist": [
+                0.0,
+                0.0,
+                0.0,
+                0.0,
+                0.0,
+                0.0,
+                0.0,
+                0.0,
+                0.0,
+                0.0,
+                0.0,
+                0.0,
+                0.0,
+                0.0,
+                0.0,
+                0.0,
+                0.0,
+                0.0,
+                0.0,
+                0.0,
+                0.0,
+                0.0,
+                0.0,
+                0.0,
+                0.0,
+                0.0,
+                0.0,
+                0.0,
+                0.0,
+                0.0,
+                19305.0,
+                96503.0,
+                356005.0,
+                629073.0,
+                1366695.0,
+                1105870.0,
+                1182691.0,
+                1261702.0,
+                1443969.0,
+                1227061.0,
+                1169290.0,
+                969493.0,
+                828041.0,
+                688587.0,
+                657545.0,
+                561386.0,
+                492438.0,
+                904550.0,
+                1909178.0,
+                10329458.0
+              ],
+              "length_hist": [
+                44448.0,
+                140750.0,
+                216530.0,
+                454898.0,
+                427863.0,
+                677635.0,
+                624289.0,
+                978971.0,
+                917571.0,
+                596233.0,
+                545063.0,
+                589700.0,
+                392165.0,
+                441249.0,
+                948753.0,
+                913299.0,
+                624818.0,
+                520444.0,
+                620600.0,
+                657561.0,
+                724865.0,
+                635577.0,
+                601331.0,
+                636126.0,
+                562241.0,
+                493550.0,
+                749686.0,
+                363806.0,
+                318771.0,
+                366147.0,
+                614395.0,
+                713192.0,
+                682434.0,
+                375502.0,
+                394090.0,
+                319741.0,
+                707929.0,
+                585385.0,
+                122817.0,
+                140507.0,
+                362355.0,
+                227302.0,
+                585648.0,
+                324665.0,
+                193455.0,
+                1014532.0,
+                594676.0,
+                781148.0,
+                479263.0,
+                1194864.0
+              ],
+              "scatter_count": 5931,
+              "scatter_sha256": "ba790cc88c324155a9d2fe8d984f31ac1aed3e12efe35db2779932af53e1f117"
+            },
+            "NCBI BLAST+": {
+              "identity_hist": [
+                0.0,
+                0.0,
+                0.0,
+                0.0,
+                0.0,
+                0.0,
+                0.0,
+                0.0,
+                0.0,
+                0.0,
+                0.0,
+                0.0,
+                0.0,
+                0.0,
+                0.0,
+                0.0,
+                0.0,
+                0.0,
+                0.0,
+                0.0,
+                0.0,
+                0.0,
+                0.0,
+                0.0,
+                0.0,
+                0.0,
+                0.0,
+                0.0,
+                0.0,
+                0.0,
+                19305.0,
+                96503.0,
+                356005.0,
+                629073.0,
+                1366695.0,
+                1105870.0,
+                1182691.0,
+                1261702.0,
+                1443969.0,
+                1227061.0,
+                1169290.0,
+                969384.0,
+                828155.0,
+                688587.0,
+                657545.0,
+                561386.0,
+                492438.0,
+                904550.0,
+                1909178.0,
+                10329458.0
+              ],
+              "length_hist": [
+                44448.0,
+                140750.0,
+                216530.0,
+                454898.0,
+                427863.0,
+                677635.0,
+                624289.0,
+                978971.0,
+                917574.0,
+                596235.0,
+                545063.0,
+                589700.0,
+                392165.0,
+                441249.0,
+                948753.0,
+                913299.0,
+                624818.0,
+                520444.0,
+                620600.0,
+                657561.0,
+                724865.0,
+                635577.0,
+                601331.0,
+                636126.0,
+                562241.0,
+                493550.0,
+                749686.0,
+                363806.0,
+                318771.0,
+                366147.0,
+                614395.0,
+                713192.0,
+                682434.0,
+                375502.0,
+                394090.0,
+                319741.0,
+                707929.0,
+                585385.0,
+                122817.0,
+                140507.0,
+                362355.0,
+                227302.0,
+                585648.0,
+                324665.0,
+                193455.0,
+                1014532.0,
+                594676.0,
+                781148.0,
+                479263.0,
+                1194864.0
+              ],
+              "scatter_count": 5931,
+              "scatter_sha256": "ba790cc88c324155a9d2fe8d984f31ac1aed3e12efe35db2779932af53e1f117"
+            }
+          }
+        },
+        "blastp": {
+          "length_edges": [
+            5.0,
+            5.768094798732265,
+            6.654183521432442,
+            7.676392271956884,
+            8.85563166738061,
+            10.216024592021364,
+            11.78539966259187,
+            13.595860498955432,
+            15.684442445662851,
+            18.093870178368693,
+            20.873431692957062,
+            24.07998655596777,
+            27.779129041404115,
+            32.0465299474071,
+            36.96948454141132,
+            42.64869829902548,
+            49.200346966262096,
+            56.758453086383845,
+            65.47762760633199,
+            75.53623264588235,
+            87.14003012810886,
+            100.52639090866353,
+            115.9691505071176,
+            133.78421077070087,
+            154.33600205979616,
+            178.0449381476485,
+            205.39601633401185,
+            236.94873869930822,
+            273.3485574515301,
+            315.34007849542775,
+            363.78229332025984,
+            419.6661507942972,
+            484.1348283201153,
+            558.507117023679,
+            644.3043993518472,
+            743.2817709403413,
+            857.463943390698,
+            989.1866623944675,
+            1141.1444884665714,
+            1316.4459177052045,
+            1518.6769701455428,
+            1751.9745464901964,
+            2021.1110538242842,
+            2331.5920314448285,
+            2689.7687738684995,
+            3102.968254868671,
+            3579.6430103078633,
+            4129.54404581502,
+            4763.920306360282,
+            5495.748788138353,
+            6340.0
+          ],
+          "series": {
+            "LOSAT": {
+              "identity_hist": [
+                0.0,
+                0.0,
+                0.0,
+                0.0,
+                0.0,
+                0.0,
+                0.0,
+                0.0,
+                46.0,
+                1975.0,
+                6643.0,
+                13499.0,
+                28210.0,
+                29183.0,
+                33221.0,
+                36861.0,
+                28962.0,
+                20302.0,
+                19343.0,
+                9233.0,
+                22186.0,
+                40681.0,
+                16776.0,
+                1346.0,
+                20280.0,
+                1707.0,
+                3337.0,
+                620.0,
+                450.0,
+                135.0,
+                2345.0,
+                76.0,
+                155.0,
+                21.0,
+                84.0,
+                40.0,
+                921.0,
+                20.0,
+                45.0,
+                0.0,
+                0.0,
+                1870.0,
+                0.0,
+                0.0,
+                0.0,
+                0.0,
+                0.0,
+                0.0,
+                0.0,
+                64102.0
+              ],
+              "length_hist": [
+                5.0,
+                0.0,
+                49.0,
+                8.0,
+                134.0,
+                121.0,
+                275.0,
+                686.0,
+                2276.0,
+                1724.0,
+                4045.0,
+                4038.0,
+                6860.0,
+                6553.0,
+                9723.0,
+                11511.0,
+                9519.0,
+                10763.0,
+                10435.0,
+                8811.0,
+                9410.0,
+                6743.0,
+                6672.0,
+                3338.0,
+                4024.0,
+                1325.0,
+                5342.0,
+                7496.0,
+                7960.0,
+                5294.0,
+                8855.0,
+                17746.0,
+                6053.0,
+                12781.0,
+                6993.0,
+                25190.0,
+                23749.0,
+                27658.0,
+                31337.0,
+                2716.0,
+                20976.0,
+                4006.0,
+                14947.0,
+                14336.0,
+                0.0,
+                0.0,
+                0.0,
+                4245.0,
+                0.0,
+                37947.0
+              ],
+              "scatter_count": 2814,
+              "scatter_sha256": "cfe8a78a0147668eba49df0732509cac58516f98a3eb710e0c3ae4c7cd908fb9"
+            },
+            "NCBI BLAST+": {
+              "identity_hist": [
+                0.0,
+                0.0,
+                0.0,
+                0.0,
+                0.0,
+                0.0,
+                0.0,
+                0.0,
+                46.0,
+                1975.0,
+                6643.0,
+                13499.0,
+                28210.0,
+                29183.0,
+                33221.0,
+                36861.0,
+                28962.0,
+                20302.0,
+                19343.0,
+                9233.0,
+                22186.0,
+                40681.0,
+                16776.0,
+                1346.0,
+                20280.0,
+                1707.0,
+                3337.0,
+                620.0,
+                450.0,
+                135.0,
+                2345.0,
+                76.0,
+                155.0,
+                21.0,
+                84.0,
+                40.0,
+                921.0,
+                20.0,
+                45.0,
+                0.0,
+                0.0,
+                1870.0,
+                0.0,
+                0.0,
+                0.0,
+                0.0,
+                0.0,
+                0.0,
+                0.0,
+                64102.0
+              ],
+              "length_hist": [
+                5.0,
+                0.0,
+                49.0,
+                8.0,
+                134.0,
+                121.0,
+                275.0,
+                686.0,
+                2276.0,
+                1724.0,
+                4045.0,
+                4038.0,
+                6860.0,
+                6553.0,
+                9723.0,
+                11511.0,
+                9519.0,
+                10763.0,
+                10435.0,
+                8811.0,
+                9410.0,
+                6743.0,
+                6672.0,
+                3338.0,
+                4024.0,
+                1325.0,
+                5342.0,
+                7496.0,
+                7960.0,
+                5294.0,
+                8855.0,
+                17746.0,
+                6053.0,
+                12781.0,
+                6993.0,
+                25190.0,
+                23749.0,
+                27658.0,
+                31337.0,
+                2716.0,
+                20976.0,
+                4006.0,
+                14947.0,
+                14336.0,
+                0.0,
+                0.0,
+                0.0,
+                4245.0,
+                0.0,
+                37947.0
+              ],
+              "scatter_count": 2814,
+              "scatter_sha256": "cfe8a78a0147668eba49df0732509cac58516f98a3eb710e0c3ae4c7cd908fb9"
+            }
+          }
+        },
+        "tblastx": {
+          "length_edges": [
+            4.0,
+            4.55990448484958,
+            5.1981822277378305,
+            5.925803613331779,
+            6.755274618192358,
+            7.70085175697147,
+            8.778787115943995,
+            10.007607685383185,
+            11.40843379179848,
+            13.00534210308285,
+            14.82577944571264,
+            16.90103454647395,
+            19.266775806766066,
+            21.963664352465997,
+            25.03805289613514,
+            28.542782423246916,
+            32.53809039546235,
+            37.09264608067746,
+            42.28473080455484,
+            48.20358340908674,
+            54.950934043228834,
+            62.6427526475982,
+            71.41124218527646,
+            81.40711087733047,
+            92.80216249704652,
+            105.79224924350557,
+            120.60063794694636,
+            137.48184746250038,
+            156.72602320741527,
+            178.66392402903318,
+            203.67260711520322,
+            232.18190865640557,
+            264.6818316458197,
+            301.7309677949939,
+            343.96609831659913,
+            392.1131385875182,
+            446.9996148034176,
+            509.5688870670345,
+            580.8963633691953,
+            662.207983140001,
+            754.901288055822,
+            860.5694422561165,
+            981.0286148170426,
+            1118.3491951175006,
+            1274.891377611053,
+            1453.3457276161746,
+            1656.7794253484938,
+            1888.688983013276,
+            2153.0603410320587,
+            2454.437376305962,
+            2798.0
+          ],
+          "series": {
+            "LOSAT": {
+              "identity_hist": [
+                0.0,
+                0.0,
+                0.0,
+                0.0,
+                0.0,
+                2628.0,
+                14692.0,
+                24906.0,
+                58107.0,
+                114319.0,
+                242626.0,
+                339775.0,
+                449055.0,
+                571899.0,
+                678678.0,
+                897704.0,
+                1030070.0,
+                1114638.0,
+                1125275.0,
+                977992.0,
+                1303964.0,
+                1181502.0,
+                1242534.0,
+                1338447.0,
+                876487.0,
+                1469981.0,
+                1089519.0,
+                793311.0,
+                727946.0,
+                576710.0,
+                741722.0,
+                650815.0,
+                656189.0,
+                571927.0,
+                452317.0,
+                395509.0,
+                337322.0,
+                298186.0,
+                250721.0,
+                208405.0,
+                243809.0,
+                196841.0,
+                171652.0,
+                157792.0,
+                155290.0,
+                217282.0,
+                238189.0,
+                295442.0,
+                494330.0,
+                2681795.0
+              ],
+              "length_hist": [
+                308.0,
+                2895.0,
+                0.0,
+                3096.0,
+                9905.0,
+                27064.0,
+                127907.0,
+                117645.0,
+                361646.0,
+                238812.0,
+                615971.0,
+                1024997.0,
+                775901.0,
+                1642235.0,
+                1272299.0,
+                1628591.0,
+                1971755.0,
+                1639870.0,
+                1572598.0,
+                1275535.0,
+                1402703.0,
+                1011071.0,
+                1054223.0,
+                780639.0,
+                866195.0,
+                897442.0,
+                1000157.0,
+                1459279.0,
+                1956527.0,
+                440753.0,
+                371939.0,
+                323800.0,
+                286023.0,
+                251544.0,
+                316934.0,
+                181937.0,
+                145229.0,
+                142671.0,
+                125583.0,
+                102583.0,
+                66600.0,
+                51723.0,
+                34264.0,
+                31326.0,
+                13411.0,
+                12269.0,
+                6797.0,
+                3908.0,
+                8942.0,
+                2798.0
+              ],
+              "scatter_count": 5967,
+              "scatter_sha256": "1f9ce72ee71e7f5bb6fa7fec775d7d46e4ab7eb7076b6456a94f418fd290fbc7"
+            },
+            "NCBI BLAST+": {
+              "identity_hist": [
+                0.0,
+                0.0,
+                0.0,
+                0.0,
+                0.0,
+                2591.0,
+                14382.0,
+                24528.0,
+                56823.0,
+                109309.0,
+                218168.0,
+                285300.0,
+                345408.0,
+                406291.0,
+                454973.0,
+                591335.0,
+                689325.0,
+                760073.0,
+                784826.0,
+                720436.0,
+                986258.0,
+                936505.0,
+                1033774.0,
+                1143370.0,
+                837883.0,
+                1287124.0,
+                963209.0,
+                738188.0,
+                665889.0,
+                543351.0,
+                686558.0,
+                624613.0,
+                639702.0,
+                546073.0,
+                443871.0,
+                377593.0,
+                328074.0,
+                291861.0,
+                241994.0,
+                205076.0,
+                241173.0,
+                196803.0,
+                168906.0,
+                155537.0,
+                153218.0,
+                216109.0,
+                239949.0,
+                294221.0,
+                491781.0,
+                2662100.0
+              ],
+              "length_hist": [
+                308.0,
+                2645.0,
+                0.0,
+                1812.0,
+                4263.0,
+                14696.0,
+                77771.0,
+                75955.0,
+                246268.0,
+                161070.0,
+                429863.0,
+                683843.0,
+                517858.0,
+                1113909.0,
+                908978.0,
+                1220554.0,
+                1563321.0,
+                1378778.0,
+                1351031.0,
+                1118132.0,
+                1294648.0,
+                960816.0,
+                993782.0,
+                753892.0,
+                835745.0,
+                884308.0,
+                980427.0,
+                1442543.0,
+                1944902.0,
+                431033.0,
+                361990.0,
+                318532.0,
+                276336.0,
+                243405.0,
+                308350.0,
+                176044.0,
+                143486.0,
+                134521.0,
+                121848.0,
+                99631.0,
+                72123.0,
+                46904.0,
+                33382.0,
+                30054.0,
+                13411.0,
+                12269.0,
+                3446.0,
+                3908.0,
+                8942.0,
+                2798.0
+              ],
+              "scatter_count": 5952,
+              "scatter_sha256": "a6045c86c515ffc7be8c69310be62d7aa5b3f6792977676b26b51b1a5f72f9f0"
+            }
+          }
+        }
+      }
+    }
+  },
+  "renderer_source_sha256": "f34c5a6b988f8a10f76c3a33886e6a5341bf1134dc543946de709a3f70ce924a",
+  "renderer_version": 1,
+  "schema_version": 1,
+  "snapshot_id": "v0.1.0-final-benchmark-2026-09-03"
+}

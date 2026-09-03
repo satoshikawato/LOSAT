@@ -118,6 +118,26 @@ NCBI BLAST+ is allowed only in these comparison and diagnostic workflows. LOSAT
 runtime code must fail explicitly for unsupported behavior rather than invoking
 NCBI tools as a fallback.
 
+## Benchmark
+
+### Hit Distribution
+
+![v0.1.0 hit distribution](benchmarks/v0.1.0/hit_distribution.png)
+
+The current v0.1.0 certified alignment snapshot covers all 43 declared
+contracts and compares LOSAT with NCBI BLAST+. See the
+[complete methodology and provenance](benchmarks/v0.1.0/README.md).
+
+### Execution Time
+
+![v0.1.0 execution time](benchmarks/v0.1.0/execution_time.png)
+
+The execution-time figure uses final v0.1.0 main SHA
+`1ef13ed09e9cf6e3d6c3b1a1ed9527a389c3992d`, NCBI BLAST+ 2.17.0, and six
+representative one-thread cases. It shows the median of five timed repetitions
+after one warmup. Results are machine-specific and are not a cross-platform
+performance guarantee.
+
 ## WebAssembly
 
 The crate can be built for command-style WASI targets. Plain `wasm32-wasip1`

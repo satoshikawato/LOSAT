@@ -1,0 +1,183 @@
+name: Benchmark Visualizations
+
+run-name: Benchmark visuals ${{ github.sha }}
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - "LOSAT/src/**"
+      - "LOSAT/Cargo.toml"
+      - "LOSAT/Cargo.lock"
+      - "LOSAT/.cargo/**"
+      - "LOSAT/tests/blastn_parity_manifest.tsv"
+      - "LOSAT/tests/blastp_v010_parity_manifest.tsv"
+      - "LOSAT/tests/tblastx_v010_parity_manifest.tsv"
+      - "LOSAT/tests/generate_benchmark_visuals_v010.py"
+      - "LOSAT/tests/test_generate_benchmark_visuals_v010.py"
+      - ".github/workflows/benchmark-visualizations.yml"
+  workflow_dispatch:
+    inputs:
+      scope:
+        description: Certified-case coverage used for the diagnostic snapshot
+        required: true
+        default: representative
+        type: choice
+        options:
+          - representative
+          - full
+      mode:
+        description: Visual distributions, timing benchmark, or both
+        required: true
+        default: both
+        type: choice
+        options:
+          - visual
+          - performance
+          - both
+      repetitions:
+        description: Timed samples per tool/case after one warmup
+        required: true
+        default: "3"
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: benchmark-visualizations-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  NCBI_VERSION: 2.17.0
+  NCBI_ARCHIVE: ncbi-blast-2.17.0+-x64-linux.tar.gz
+  CARGO_TERM_COLOR: always
+
+jobs:
+  benchmark-visualizations:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 360
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: 1.92.0
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Verify benchmark tooling unit tests
+        run: python3 -m unittest LOSAT/tests/test_generate_benchmark_visuals_v010.py
+
+      - name: Build LOSAT release binary
+        run: cd LOSAT && cargo build --release --locked
+
+      - name: Install plotting dependency
+        run: python3 -m pip install --disable-pip-version-check "matplotlib>=3.8,<4"
+
+      - name: Download and verify official NCBI BLAST+ archive
+        id: ncbi
+        shell: bash
+        run: |
+          set -euo pipefail
+          download_dir="$RUNNER_TEMP/losat-benchmark-ncbi-download"
+          extract_dir="$RUNNER_TEMP/losat-benchmark-ncbi"
+          mkdir -p "$download_dir" "$extract_dir"
+          encoded_name="${NCBI_ARCHIVE/+/%2B}"
+          base_url="https://ftp.ncbi.nlm.nih.gov/blast/executables/blast%2B/${NCBI_VERSION}"
+          archive_url="$base_url/$encoded_name"
+          checksum_url="$archive_url.md5"
+          archive_path="$download_dir/$NCBI_ARCHIVE"
+          checksum_path="$archive_path.md5"
+
+          curl --fail --location --retry 3 --output "$archive_path" "$archive_url"
+          curl --fail --location --retry 3 --output "$checksum_path" "$checksum_url"
+
+          published_md5="$({ python3 - "$checksum_path" <<'PY'
+          import pathlib
+          import re
+          import sys
+          text = pathlib.Path(sys.argv[1]).read_text(encoding="utf-8", errors="strict")
+          match = re.search(r"(?i)\b[0-9a-f]{32}\b", text)
+          if not match:
+              raise SystemExit("published NCBI checksum did not contain an MD5 digest")
+          print(match.group(0).lower())
+          PY
+          } )"
+          actual_md5="$({ python3 - "$archive_path" <<'PY'
+          import hashlib
+          import pathlib
+          import sys
+          digest = hashlib.md5(usedforsecurity=False)
+          with pathlib.Path(sys.argv[1]).open("rb") as handle:
+              for chunk in iter(lambda: handle.read(1024 * 1024), b""):
+                  digest.update(chunk)
+          print(digest.hexdigest())
+          PY
+          } )"
+          test "$published_md5" = "$actual_md5"
+
+          tar -xzf "$archive_path" -C "$extract_dir"
+          oracle_dir="$extract_dir/ncbi-blast-${NCBI_VERSION}+/bin"
+          test -x "$oracle_dir/blastn"
+          test -x "$oracle_dir/blastp"
+          test -x "$oracle_dir/tblastx"
+
+          echo "oracle_dir=$oracle_dir" >> "$GITHUB_OUTPUT"
+          echo "archive_url=$archive_url" >> "$GITHUB_OUTPUT"
+          echo "archive_md5=$actual_md5" >> "$GITHUB_OUTPUT"
+
+      - name: Resolve diagnostic run policy
+        id: policy
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [[ "$GITHUB_EVENT_NAME" == "workflow_dispatch" ]]; then
+            scope='${{ inputs.scope }}'
+            mode='${{ inputs.mode }}'
+            repetitions='${{ inputs.repetitions }}'
+          else
+            # Automatic main snapshots stay bounded. Full coverage and timing are
+            # explicit manual operations because GitHub-hosted timing is noisy and
+            # the full 43-case matrix is intentionally expensive.
+            scope="representative"
+            mode="visual"
+            repetitions="3"
+          fi
+          if [[ ! "$repetitions" =~ ^[1-9][0-9]*$ ]]; then
+            echo "repetitions must be a positive integer" >&2
+            exit 1
+          fi
+          echo "scope=$scope" >> "$GITHUB_OUTPUT"
+          echo "mode=$mode" >> "$GITHUB_OUTPUT"
+          echo "repetitions=$repetitions" >> "$GITHUB_OUTPUT"
+
+      - name: Generate fresh diagnostic plots and raw tables
+        env:
+          NCBI_ARCHIVE_URL: ${{ steps.ncbi.outputs.archive_url }}
+          NCBI_ARCHIVE_MD5: ${{ steps.ncbi.outputs.archive_md5 }}
+        run: |
+          python3 LOSAT/tests/generate_benchmark_visuals_v010.py \
+            --oracle-dir '${{ steps.ncbi.outputs.oracle_dir }}' \
+            --output-dir benchmark-visualizations \
+            --scope '${{ steps.policy.outputs.scope }}' \
+            --mode '${{ steps.policy.outputs.mode }}' \
+            --warmups 1 \
+            --repetitions '${{ steps.policy.outputs.repetitions }}' \
+            --candidate-sha "$GITHUB_SHA"
+
+      - name: Add diagnostic summary
+        if: ${{ always() && hashFiles('benchmark-visualizations/summary.md') != '' }}
+        run: cat benchmark-visualizations/summary.md >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload benchmark visualization evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: benchmark-visualizations-${{ github.sha }}-${{ steps.policy.outputs.scope }}-${{ steps.policy.outputs.mode }}
+          path: benchmark-visualizations/
+          if-no-files-found: error
+          retention-days: 30

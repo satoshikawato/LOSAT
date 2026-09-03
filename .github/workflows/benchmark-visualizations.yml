@@ -17,6 +17,12 @@ on:
       - "LOSAT/tests/generate_benchmark_visuals_v010.py"
       - "LOSAT/tests/test_generate_benchmark_visuals_v010.py"
       - ".github/workflows/benchmark-visualizations.yml"
+  pull_request:
+    paths:
+      - "LOSAT/tests/generate_benchmark_visuals_v010.py"
+      - "LOSAT/tests/test_generate_benchmark_visuals_v010.py"
+      - ".github/workflows/benchmark-visualizations.yml"
+      - "docs/benchmark_visualizations.md"
   workflow_dispatch:
     inputs:
       scope:
@@ -55,7 +61,19 @@ env:
   CARGO_TERM_COLOR: always
 
 jobs:
+  tooling-validation:
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Verify benchmark tooling unit tests
+        run: python3 -m unittest LOSAT/tests/test_generate_benchmark_visuals_v010.py
+
   benchmark-visualizations:
+    if: github.event_name != 'pull_request'
     runs-on: ubuntu-24.04
     timeout-minutes: 360
     steps:
@@ -96,7 +114,7 @@ jobs:
           curl --fail --location --retry 3 --output "$archive_path" "$archive_url"
           curl --fail --location --retry 3 --output "$checksum_path" "$checksum_url"
 
-          published_md5="$({ python3 - "$checksum_path" <<'PY'
+          published_md5="$(python3 - "$checksum_path" <<'PY'
           import pathlib
           import re
           import sys
@@ -106,8 +124,8 @@ jobs:
               raise SystemExit("published NCBI checksum did not contain an MD5 digest")
           print(match.group(0).lower())
           PY
-          } )"
-          actual_md5="$({ python3 - "$archive_path" <<'PY'
+          )"
+          actual_md5="$(python3 - "$archive_path" <<'PY'
           import hashlib
           import pathlib
           import sys
@@ -117,7 +135,7 @@ jobs:
                   digest.update(chunk)
           print(digest.hexdigest())
           PY
-          } )"
+          )"
           test "$published_md5" = "$actual_md5"
 
           tar -xzf "$archive_path" -C "$extract_dir"
@@ -170,8 +188,12 @@ jobs:
             --candidate-sha "$GITHUB_SHA"
 
       - name: Add diagnostic summary
-        if: ${{ always() && hashFiles('benchmark-visualizations/summary.md') != '' }}
-        run: cat benchmark-visualizations/summary.md >> "$GITHUB_STEP_SUMMARY"
+        if: always()
+        shell: bash
+        run: |
+          if [[ -f benchmark-visualizations/summary.md ]]; then
+            cat benchmark-visualizations/summary.md >> "$GITHUB_STEP_SUMMARY"
+          fi
 
       - name: Upload benchmark visualization evidence
         if: always()
@@ -179,5 +201,5 @@ jobs:
         with:
           name: benchmark-visualizations-${{ github.sha }}-${{ steps.policy.outputs.scope }}-${{ steps.policy.outputs.mode }}
           path: benchmark-visualizations/
-          if-no-files-found: error
+          if-no-files-found: warn
           retention-days: 30

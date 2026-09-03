@@ -1,8 +1,8 @@
 # Product Decision: Pure-Rust runtime authority
 
 - Decision ID: `PD-PURE-RUST-RUNTIME-AUTHORITY`
-- Version: 1.0
-- Date: 2026-08-30
+- Version: 1.1
+- Date: 2026-09-02
 - Status: Accepted
 
 ## Scope
@@ -80,11 +80,16 @@ LOSAT output across supported native platforms is a raw-byte contract. LOSAT
 output must not be normalized or reordered after generation to make a
 comparison pass.
 
-During representative platform-native NCBI checks, a source-defined oracle
-difference may be recorded as `LINE_ENDING_ONLY` only after proving that the
-sole difference is `CRLF` versus `LF`, with unchanged row order and every
-non-newline byte identical. This is a diagnostic classification, not a LOSAT
-product exception and not permission to normalize LOSAT output or hashes.
+[`PD-NCBI-PLATFORM-VARIANCE`](PD-NCBI-PLATFORM-VARIANCE.md) defines the
+replacement dual release contract. LOSAT continues to match the frozen PR 5
+raw bytes in Gate A. Separately, each representative official NCBI execution
+must match its exact finite platform fingerprint in Gate B. A platform-local
+NCBI fingerprint is never a LOSAT expected output, semantic tolerance, or
+product exception, and it cannot compensate for a LOSAT canonical-hash failure.
+
+Windows NCBI CRLF output and platform-local NCBI TBLASTX row order are exact
+Gate B fingerprint data. They are not permission to normalize, reorder, or
+make LOSAT platform-variable.
 
 ## Enforcement and migration
 

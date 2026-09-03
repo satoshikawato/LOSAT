@@ -1,8 +1,8 @@
 # Product Decision: BLASTN common-endpoint equal-HSP policy
 
 - Decision ID: `PD-BLASTN-HSP-CANONICALIZATION`
-- Version: 1.1
-- Date: 2026-08-29
+- Version: 1.2
+- Date: 2026-09-02
 - Status: Accepted; Version 1.0 canonicalization requirement withdrawn for
   v0.1.0
 
@@ -67,6 +67,13 @@ NCBI BLAST+ 2.17.0 binary. For a source-underdetermined tie, one precompiled
 binary's chosen edit-script representation is diagnostic evidence rather than
 a normative source contract.
 
+For the bounded Windows/macOS release gate,
+[`PD-NCBI-PLATFORM-VARIANCE`](PD-NCBI-PLATFORM-VARIANCE.md) records exact
+platform-local official-binary fingerprints independently from the frozen
+LOSAT canonical bytes. This decision's LOSAT source-underdetermined authority
+does not require those registered NCBI raw bytes to become LOSAT output and
+does not allow a semantic diagnostic to rescue an unknown native fingerprint.
+
 ### Determinism
 
 No cross-platform deterministic edit-script survivor behavior is claimed
@@ -128,6 +135,9 @@ third edit script. They do not establish or require canonicalization.
   deterministic survivor.
 
 ## Revision history
+
+Version 1.2 cross-references the bounded native-NCBI platform authority. It
+does not change the Version 1.1 LOSAT source-underdetermined policy.
 
 Version 1.0 correctly recorded the NCBI source-level ambiguity, then proposed a
 LOSAT-specific representation-derived secondary total order using script

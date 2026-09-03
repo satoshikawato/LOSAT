@@ -118,6 +118,21 @@ NCBI BLAST+ is allowed only in these comparison and diagnostic workflows. LOSAT
 runtime code must fail explicitly for unsupported behavior rather than invoking
 NCBI tools as a fallback.
 
+## Performance
+
+The repository retains the benchmark visualizations used to compare LOSAT with
+NCBI BLAST during development. These plots are diagnostic summaries rather than
+v0.1.0 certification authorities; the certification records above define the
+release support contract.
+
+### Hit Distribution (Sensitivity)
+
+![Hit distribution comparison](./LOSAT/tests/plots/overall_trend_comparison.png)
+
+### Execution Time
+
+![Execution time comparison](./LOSAT/tests/plots/execution_time_comparison_all.png)
+
 ## WebAssembly
 
 The crate can be built for command-style WASI targets. Plain `wasm32-wasip1`

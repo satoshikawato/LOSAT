@@ -1,0 +1,29 @@
+{
+  "inputs": {
+    "alignment_results.tsv.gz": "5fd5beb14d87fdc536ac00d53a0a8d08a0c2d541d0d30029a46aeaa041fbcd18",
+    "execution_times.tsv": "80be40c0333fa9156a13c583d84a68ce5a1011767b6d8edc4307e52374333063",
+    "metadata.json": "e67cd40dfd1342b4cf2c26da802e4e97391fd4db22df57bce2aa6a513ec82200"
+  },
+  "outputs": {
+    "execution_time.png": "de0eb1080b6a95fa0bded31f40ea8c037e2ebbaf3c0a88a1b6280d7c66ff4e2d",
+    "hit_distribution.png": "2cd27ef41661c35a289c9af29d356ee3e2e4dee460854d9dc21b83ef75fd4851",
+    "plot_data.json": "d959b59dab08a7813d6a9ed07b96d4d929a21e1d5d2630dfa66c74c99b24a7e9"
+  },
+  "plotted_rows": {
+    "alignment": {
+      "blastn:LOSAT": 100825,
+      "blastn:NCBI BLAST+": 100825,
+      "blastp:LOSAT": 2814,
+      "blastp:NCBI BLAST+": 2814,
+      "tblastx:LOSAT": 656316,
+      "tblastx:NCBI BLAST+": 505912
+    },
+    "execution_time": {
+      "historical_plot_2026_06": 219,
+      "pr93_performance_lineage": 4
+    }
+  },
+  "renderer_version": 1,
+  "schema_version": 1,
+  "snapshot_id": "v0.1.0-recovered-2026-09-03"
+}

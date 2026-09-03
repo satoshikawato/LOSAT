@@ -743,7 +743,7 @@ fn merge_tblastx_subject_chunk_hits(
     });
     combined.append(&mut incoming);
     if !ungapped_hits_is_sorted_by_score_ncbi(combined) {
-        ncbi_qsort_ungapped_hits_by_score(combined);
+        sort_ungapped_hits_by_score_ncbi(combined);
     }
 }
 
@@ -2485,7 +2485,7 @@ fn run_internal(args: TblastxArgs, mut in_memory: Option<TblastxInMemoryRun<'_>>
                 // ```
                 combined_ungapped_hits.extend(frame_ungapped_hits);
                 if !ungapped_hits_is_sorted_by_score_ncbi(&combined_ungapped_hits) {
-                    ncbi_qsort_ungapped_hits_by_score(&mut combined_ungapped_hits);
+                    sort_ungapped_hits_by_score_ncbi(&mut combined_ungapped_hits);
                 }
             }
         } // End of subject frame loop
@@ -2624,7 +2624,7 @@ fn run_internal(args: TblastxArgs, mut in_memory: Option<TblastxInMemoryRun<'_>>
         // blast_engine.c:1515-1520 and controls tie order for link_hsps.c
         // comparator-equal short HSPs.
         if !ungapped_hits_is_sorted_by_score_ncbi(&ungapped_hits) {
-            ncbi_qsort_ungapped_hits_by_score(&mut ungapped_hits);
+            sort_ungapped_hits_by_score_ncbi(&mut ungapped_hits);
         }
         // Record the post-reevaluation list and the exact input to link_hsps.
         if stage_dump::enabled() {

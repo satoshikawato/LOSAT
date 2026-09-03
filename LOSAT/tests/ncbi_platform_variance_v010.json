@@ -1,0 +1,1810 @@
+{
+  "authority_version": "ncbi-platform-variance-v0.1.0",
+  "characterization_provenance": {
+    "analysis_fix_sha": "cfd213f57691607429c4e21edbf314899310d805",
+    "candidate_sha": "be67253156ce10b852166709e9519ab54709fd80",
+    "characterization_run_id": 33582928402,
+    "corrected_replay_sha256": "37e95cf9252ede022cc0d3f3f6a43f4776f78b3e31febd2a76bf2d2d667be2db",
+    "execution_counts": {
+      "authoritative_ncbi": 18,
+      "diagnostic_ncbi": 18,
+      "linux_ncbi_reruns": 0,
+      "losat": 0,
+      "total_ncbi": 36
+    },
+    "platform_runs": [
+      {
+        "fixture_manifest_sha256": "74362a88d88466f8e1d0b09b5cd7ffd40ba092738c1548148152b53a2ea9cd38",
+        "identity_sha256": "f6ab073718ddd67f5b31013ff9cd5b034eae9cba78cb99411a8a6bd7a2c38bbf",
+        "platform_id": "windows-x64",
+        "runner": {
+          "ImageOS": "win25-vs2026",
+          "ImageVersion": "20260824.214.3",
+          "RUNNER_ARCH": "X64",
+          "RUNNER_OS": "Windows",
+          "machine": "x86_64",
+          "platform": "Windows-2025Server-10.0.26100-SP0",
+          "release": "2025Server",
+          "system": "Windows",
+          "version": "10.0.26100"
+        },
+        "runner_label": "windows-2025"
+      },
+      {
+        "fixture_manifest_sha256": "e6997c094f138fdd7919e98f3ef1a10d32bfc31b6546f844202f9640ffdb68e5",
+        "identity_sha256": "f27bae8cf2d44f062e53b23f56761c97d9ca059b76e1b6917dd9f443758a3388",
+        "platform_id": "macos-arm64",
+        "runner": {
+          "ImageOS": "macos15",
+          "ImageVersion": "20260727.0256.1",
+          "RUNNER_ARCH": "ARM64",
+          "RUNNER_OS": "macOS",
+          "machine": "arm64",
+          "platform": "macOS-15.7.7-arm64-arm-64bit-Mach-O",
+          "release": "24.6.0",
+          "system": "Darwin",
+          "version": "Darwin Kernel Version 24.6.0: Tue Apr 21 20:18:00 PDT 2026; root:xnu-11417.140.69.710.16~1/RELEASE_ARM64_VMAPPLE"
+        },
+        "runner_label": "macos-15"
+      },
+      {
+        "fixture_manifest_sha256": "c751f7a5f4ef7f24a60f0a1bbe733d6526f1204429846dfca46fa9b2ad058de0",
+        "identity_sha256": "3cfa019a2e295ff4446ffcc5c820b6142f372f616476d2cc9319ac33e4879573",
+        "platform_id": "macos-x64",
+        "runner": {
+          "ImageOS": "macos15",
+          "ImageVersion": "20260824.0482.1",
+          "RUNNER_ARCH": "X64",
+          "RUNNER_OS": "macOS",
+          "machine": "x86_64",
+          "platform": "macOS-15.7.9-x86_64-i386-64bit-Mach-O",
+          "release": "24.6.0",
+          "system": "Darwin",
+          "version": "Darwin Kernel Version 24.6.0: Tue Jul 21 20:50:07 PDT 2026; root:xnu-11417.140.69.711.44~1/RELEASE_X86_64"
+        },
+        "runner_label": "macos-15-intel"
+      }
+    ],
+    "pr6_v3_run_id": 33503928773,
+    "pr6_v3_sha": "0e29e2201e2d1b03124c0b9d6698a81bfed8cec0",
+    "retained_linux_lineage": {
+      "evidence_manifest_sha256": "b9fc98a376d2849274c86b4e4769d2ee38b76025adbb4d63d3da4a5e3e7cdb5c",
+      "runtime_cert_sha": "5845d22ed9842449628a647f29b8c6762511ca59"
+    },
+    "rich_group_counts": {
+      "authoritative_seeded": 7,
+      "exhaustive": 11,
+      "rich_only": 4
+    },
+    "rich_groups": [
+      {
+        "alignment_identity": {
+          "bitscore": "7612",
+          "case_id": "PesePMNV.MjPMNV.task_blastn",
+          "evalue": "0.0",
+          "length": "12777",
+          "program": "blastn",
+          "qend": "123820",
+          "qstart": "111308",
+          "query_id": "AP027152.1",
+          "raw_score": "8441",
+          "score": "8441",
+          "send": "274863",
+          "sstart": "287526",
+          "subject_id": "AP027202.1"
+        },
+        "authoritative_seeded": true,
+        "platform_representation_multisets": [
+          {
+            "platform_id": "macos-arm64",
+            "representation_multiset_sha256": "053e402eb5390bf937a8454e0ebbcbd1c01fab9afb112fae0882b3c2b5be4a94",
+            "representations": [
+              {
+                "btop_sha256": "81b7aa882de069b4baf097e599984e2d4fc5f7c3779e26dc1fd22dae275f87be",
+                "multiplicity": 1,
+                "qseq_sha256": "10a57539a0aa85155cc54062c5a8ea178461e5e1a14029dc888aa2f13a63f32a",
+                "sseq_sha256": "bee64843ee9b4036fd1576ce5d063d71f528d248f1d7aa3f74f61b434ce6f035"
+              }
+            ],
+            "row_count": 1,
+            "row_indices": [
+              1
+            ]
+          },
+          {
+            "platform_id": "macos-x64",
+            "representation_multiset_sha256": "053e402eb5390bf937a8454e0ebbcbd1c01fab9afb112fae0882b3c2b5be4a94",
+            "representations": [
+              {
+                "btop_sha256": "81b7aa882de069b4baf097e599984e2d4fc5f7c3779e26dc1fd22dae275f87be",
+                "multiplicity": 1,
+                "qseq_sha256": "10a57539a0aa85155cc54062c5a8ea178461e5e1a14029dc888aa2f13a63f32a",
+                "sseq_sha256": "bee64843ee9b4036fd1576ce5d063d71f528d248f1d7aa3f74f61b434ce6f035"
+              }
+            ],
+            "row_count": 1,
+            "row_indices": [
+              1
+            ]
+          },
+          {
+            "platform_id": "windows-x64",
+            "representation_multiset_sha256": "507dad70383e3c49e9d2400e62adc2cdf41e04890a716b11992c0d3aea7ff374",
+            "representations": [
+              {
+                "btop_sha256": "9ea5ec0bafd2521ee0db7e8e091a368ba8890b2908152a6c6dfad7aae435580b",
+                "multiplicity": 1,
+                "qseq_sha256": "eaa027fefaacc8ca4c2b4d83d259bbf2854b2de52e9178fdb07bbaf1d1bc07b5",
+                "sseq_sha256": "973f1d5dbefda3b1641cbbc2af607da39cac9952e9e9dcb548aff8b1604f2893"
+              }
+            ],
+            "row_count": 1,
+            "row_indices": [
+              1
+            ]
+          }
+        ],
+        "rich_only": false
+      },
+      {
+        "alignment_identity": {
+          "bitscore": "2206",
+          "case_id": "PesePMNV.MjPMNV.task_blastn",
+          "evalue": "0.0",
+          "length": "2884",
+          "program": "blastn",
+          "qend": "131531",
+          "qstart": "128682",
+          "query_id": "AP027152.1",
+          "raw_score": "2446",
+          "score": "2446",
+          "send": "179263",
+          "sstart": "182097",
+          "subject_id": "AP027202.1"
+        },
+        "authoritative_seeded": false,
+        "platform_representation_multisets": [
+          {
+            "platform_id": "macos-arm64",
+            "representation_multiset_sha256": "5dc65188d8d9b9db3c99607c61072ef11d01f5bb4cc9cc5bf9df911cf5464a94",
+            "representations": [
+              {
+                "btop_sha256": "43b0257af6c946436e72002593db06abc380ef137c96d71288b99dcd27a9a0f9",
+                "multiplicity": 1,
+                "qseq_sha256": "537ab66e6d4c68f347a1bede5ce47d8cbf220dd06405ac7bbe62078efc7bf0b3",
+                "sseq_sha256": "3c9cf5256fdd1070a6fe8ff2c8f8142ad80003b40040de2414d121c3ede3cc6d"
+              }
+            ],
+            "row_count": 1,
+            "row_indices": [
+              15
+            ]
+          },
+          {
+            "platform_id": "macos-x64",
+            "representation_multiset_sha256": "5dc65188d8d9b9db3c99607c61072ef11d01f5bb4cc9cc5bf9df911cf5464a94",
+            "representations": [
+              {
+                "btop_sha256": "43b0257af6c946436e72002593db06abc380ef137c96d71288b99dcd27a9a0f9",
+                "multiplicity": 1,
+                "qseq_sha256": "537ab66e6d4c68f347a1bede5ce47d8cbf220dd06405ac7bbe62078efc7bf0b3",
+                "sseq_sha256": "3c9cf5256fdd1070a6fe8ff2c8f8142ad80003b40040de2414d121c3ede3cc6d"
+              }
+            ],
+            "row_count": 1,
+            "row_indices": [
+              15
+            ]
+          },
+          {
+            "platform_id": "windows-x64",
+            "representation_multiset_sha256": "f7125303344459fed608aedb779d4b264f88c2ca261bb9463fe3c9328832fda4",
+            "representations": [
+              {
+                "btop_sha256": "2b5eafe98c1bde1f297c1895b5173fab9ef176d7bc427095e1c92e786c6652cb",
+                "multiplicity": 1,
+                "qseq_sha256": "8a5f50bffaaefdbca8f602ee3c349d6e93c33f61ebc3b841f591a0fc57609f6c",
+                "sseq_sha256": "a7c2f53aac60b9f146886ebdf9758eb4d7fc8a3b98bb2bf13bc242d357bed41f"
+              }
+            ],
+            "row_count": 1,
+            "row_indices": [
+              15
+            ]
+          }
+        ],
+        "rich_only": true
+      },
+      {
+        "alignment_identity": {
+          "bitscore": "2482",
+          "case_id": "PesePMNV.MjPMNV.task_blastn",
+          "evalue": "0.0",
+          "length": "4194",
+          "program": "blastn",
+          "qend": "247528",
+          "qstart": "243478",
+          "query_id": "AP027152.1",
+          "raw_score": "2752",
+          "score": "2752",
+          "send": "260193",
+          "sstart": "264365",
+          "subject_id": "AP027202.1"
+        },
+        "authoritative_seeded": true,
+        "platform_representation_multisets": [
+          {
+            "platform_id": "macos-arm64",
+            "representation_multiset_sha256": "dacb5d30882c9ce53dac29e29f984916120e350a9706950930e335209c7ae05e",
+            "representations": [
+              {
+                "btop_sha256": "6a1c8bff7ab2e32345ea70a7a8e108ac3c8dfc40a6e294297947a13ef0889cff",
+                "multiplicity": 1,
+                "qseq_sha256": "049cd17ac1a89e5f24ce790f6b61e9e6f73675feb0c2aa65640164298abfed77",
+                "sseq_sha256": "1585e8768f9b64b01d2f330379fa374237336da84a6d79cbf3c4bc5130e6ad71"
+              }
+            ],
+            "row_count": 1,
+            "row_indices": [
+              12
+            ]
+          },
+          {
+            "platform_id": "macos-x64",
+            "representation_multiset_sha256": "dacb5d30882c9ce53dac29e29f984916120e350a9706950930e335209c7ae05e",
+            "representations": [
+              {
+                "btop_sha256": "6a1c8bff7ab2e32345ea70a7a8e108ac3c8dfc40a6e294297947a13ef0889cff",
+                "multiplicity": 1,
+                "qseq_sha256": "049cd17ac1a89e5f24ce790f6b61e9e6f73675feb0c2aa65640164298abfed77",
+                "sseq_sha256": "1585e8768f9b64b01d2f330379fa374237336da84a6d79cbf3c4bc5130e6ad71"
+              }
+            ],
+            "row_count": 1,
+            "row_indices": [
+              12
+            ]
+          },
+          {
+            "platform_id": "windows-x64",
+            "representation_multiset_sha256": "661e181a65ede8c513d22b60eb366e2d7207ce964b1879251084ec5e3d8fe698",
+            "representations": [
+              {
+                "btop_sha256": "1a33cd2a6e17f95b4c7cb5e64e56cb352ae7fb6e7fbf43a5c14f7889fbdb09ca",
+                "multiplicity": 1,
+                "qseq_sha256": "bbceb552ac48a15601cc52df4abd05fb6fd5afee3b180c8727902403475702e6",
+                "sseq_sha256": "ce8bfef056cd4a73f955a87d306bb8501f9b7f327880568e1dfadcfbf1db1c29"
+              }
+            ],
+            "row_count": 1,
+            "row_indices": [
+              12
+            ]
+          }
+        ],
+        "rich_only": false
+      },
+      {
+        "alignment_identity": {
+          "bitscore": "23857",
+          "case_id": "Sakai.MG1655.megablast",
+          "evalue": "0.0",
+          "length": "14885",
+          "program": "blastn",
+          "qend": "2002987",
+          "qstart": "1988109",
+          "query_id": "NC_002695.2",
+          "raw_score": "12919",
+          "score": "12919",
+          "send": "1487020",
+          "sstart": "1472161",
+          "subject_id": "NC_000913.3"
+        },
+        "authoritative_seeded": true,
+        "platform_representation_multisets": [
+          {
+            "platform_id": "macos-arm64",
+            "representation_multiset_sha256": "9b52d8637de19a19d9c23c65f2386d95926317d9d4bd1c0d3a9e562819713136",
+            "representations": [
+              {
+                "btop_sha256": "c95a774cbb7f09836cbd3fa00c084b63a98cee0ca234f9f158db8082e09369c0",
+                "multiplicity": 1,
+                "qseq_sha256": "d38016beca3b18f1061e7c8f73562af1bc0a66fd76f222c2f94d1ca7d9532333",
+                "sseq_sha256": "183c0de2265ab7a8e3f6eb996ac1f87b42a1b8062cc267d623f43a049c9aa917"
+              }
+            ],
+            "row_count": 1,
+            "row_indices": [
+              101
+            ]
+          },
+          {
+            "platform_id": "macos-x64",
+            "representation_multiset_sha256": "9b52d8637de19a19d9c23c65f2386d95926317d9d4bd1c0d3a9e562819713136",
+            "representations": [
+              {
+                "btop_sha256": "c95a774cbb7f09836cbd3fa00c084b63a98cee0ca234f9f158db8082e09369c0",
+                "multiplicity": 1,
+                "qseq_sha256": "d38016beca3b18f1061e7c8f73562af1bc0a66fd76f222c2f94d1ca7d9532333",
+                "sseq_sha256": "183c0de2265ab7a8e3f6eb996ac1f87b42a1b8062cc267d623f43a049c9aa917"
+              }
+            ],
+            "row_count": 1,
+            "row_indices": [
+              101
+            ]
+          },
+          {
+            "platform_id": "windows-x64",
+            "representation_multiset_sha256": "0b817a84767342d583b4a7a247a4c101f685cc65f2f1572dc2e30a1b3192ca06",
+            "representations": [
+              {
+                "btop_sha256": "da55f9cbb8883ea8d5533eea225f6ce63fa0cafc96f023e7e2f839fa28d01e91",
+                "multiplicity": 1,
+                "qseq_sha256": "d38016beca3b18f1061e7c8f73562af1bc0a66fd76f222c2f94d1ca7d9532333",
+                "sseq_sha256": "97ef377edb52b52ccd7493177cc893a3b19ab0572dd4e1b2a22198e1023faa25"
+              }
+            ],
+            "row_count": 1,
+            "row_indices": [
+              101
+            ]
+          }
+        ],
+        "rich_only": false
+      },
+      {
+        "alignment_identity": {
+          "bitscore": "66622",
+          "case_id": "Sakai.MG1655.megablast",
+          "evalue": "0.0",
+          "length": "37905",
+          "program": "blastn",
+          "qend": "2111462",
+          "qstart": "2073573",
+          "query_id": "NC_002695.2",
+          "raw_score": "36077",
+          "score": "36077",
+          "send": "1590079",
+          "sstart": "1552192",
+          "subject_id": "NC_000913.3"
+        },
+        "authoritative_seeded": false,
+        "platform_representation_multisets": [
+          {
+            "platform_id": "macos-arm64",
+            "representation_multiset_sha256": "c5a2d6571d90d7b4cb00210feb822a511cfc139fb432899e7b82da508185bb30",
+            "representations": [
+              {
+                "btop_sha256": "024dfa229a0e254f80537ac665ad0666b61bf9a055d8e744f26ba3c03f972a2d",
+                "multiplicity": 1,
+                "qseq_sha256": "99e0575735b2b6374d425cc446fd4e53b1009760203cdbd37d19a5b2e42299ac",
+                "sseq_sha256": "5efc6cc2b0fcdc06f9dc783733b32c6df8928ae1b2beeb87fe800665fd6fef77"
+              }
+            ],
+            "row_count": 1,
+            "row_indices": [
+              18
+            ]
+          },
+          {
+            "platform_id": "macos-x64",
+            "representation_multiset_sha256": "c5a2d6571d90d7b4cb00210feb822a511cfc139fb432899e7b82da508185bb30",
+            "representations": [
+              {
+                "btop_sha256": "024dfa229a0e254f80537ac665ad0666b61bf9a055d8e744f26ba3c03f972a2d",
+                "multiplicity": 1,
+                "qseq_sha256": "99e0575735b2b6374d425cc446fd4e53b1009760203cdbd37d19a5b2e42299ac",
+                "sseq_sha256": "5efc6cc2b0fcdc06f9dc783733b32c6df8928ae1b2beeb87fe800665fd6fef77"
+              }
+            ],
+            "row_count": 1,
+            "row_indices": [
+              18
+            ]
+          },
+          {
+            "platform_id": "windows-x64",
+            "representation_multiset_sha256": "89b8c0c65c7e51fa6c2ee46c43f819ec6622214b6022e4614d555e627809ba41",
+            "representations": [
+              {
+                "btop_sha256": "b9d8060ba6069f50025347465376f4b387323bab66722b75e69d8205cfee5180",
+                "multiplicity": 1,
+                "qseq_sha256": "99e0575735b2b6374d425cc446fd4e53b1009760203cdbd37d19a5b2e42299ac",
+                "sseq_sha256": "e5bec7ae628d2a5a883aa169dfc22748e536bf89729096e55d358dd6fb46f587"
+              }
+            ],
+            "row_count": 1,
+            "row_indices": [
+              18
+            ]
+          }
+        ],
+        "rich_only": true
+      },
+      {
+        "alignment_identity": {
+          "bitscore": "26422",
+          "case_id": "Sakai.MG1655.megablast",
+          "evalue": "0.0",
+          "length": "15012",
+          "program": "blastn",
+          "qend": "3053074",
+          "qstart": "3038077",
+          "query_id": "NC_002695.2",
+          "raw_score": "14308",
+          "score": "14308",
+          "send": "2319952",
+          "sstart": "2304955",
+          "subject_id": "NC_000913.3"
+        },
+        "authoritative_seeded": true,
+        "platform_representation_multisets": [
+          {
+            "platform_id": "macos-arm64",
+            "representation_multiset_sha256": "003f64f516180bbe90850501ef71313ad8107ef20200aaced82ccab3d8e31fb2",
+            "representations": [
+              {
+                "btop_sha256": "a54b8b2a740c91127ff85e7ff4007d3a57afda8f2cf435f6c523408a40ab00e2",
+                "multiplicity": 1,
+                "qseq_sha256": "3076ece7477e2dc30055feffe16cf44851b85d45abafebe9858f3dc0d4d9d621",
+                "sseq_sha256": "ef2a36f8fb6d233b80fb20b1777ce28115c324bb47a49450e02b6a0e4f1ecc70"
+              }
+            ],
+            "row_count": 1,
+            "row_indices": [
+              83
+            ]
+          },
+          {
+            "platform_id": "macos-x64",
+            "representation_multiset_sha256": "003f64f516180bbe90850501ef71313ad8107ef20200aaced82ccab3d8e31fb2",
+            "representations": [
+              {
+                "btop_sha256": "a54b8b2a740c91127ff85e7ff4007d3a57afda8f2cf435f6c523408a40ab00e2",
+                "multiplicity": 1,
+                "qseq_sha256": "3076ece7477e2dc30055feffe16cf44851b85d45abafebe9858f3dc0d4d9d621",
+                "sseq_sha256": "ef2a36f8fb6d233b80fb20b1777ce28115c324bb47a49450e02b6a0e4f1ecc70"
+              }
+            ],
+            "row_count": 1,
+            "row_indices": [
+              83
+            ]
+          },
+          {
+            "platform_id": "windows-x64",
+            "representation_multiset_sha256": "1e92496de433fb935c19cb3cc4d5b42dc97fd981533725f44fe6ac51a1c52d9d",
+            "representations": [
+              {
+                "btop_sha256": "d61db5b1fb58a82b8146970957ff9a8958d483fc73315548e5d73d6928f6a924",
+                "multiplicity": 1,
+                "qseq_sha256": "4d074229ccf701ed96ef811cfd634eee45fbe7f8c0f43f565729ea72fef4fe0e",
+                "sseq_sha256": "950e4bf5688fcd6cac6403bff950a5564c33e9bea5ce0a2b5bcc4952fda929c5"
+              }
+            ],
+            "row_count": 1,
+            "row_indices": [
+              83
+            ]
+          }
+        ],
+        "rich_only": false
+      },
+      {
+        "alignment_identity": {
+          "bitscore": "224",
+          "case_id": "Sakai.MG1655.megablast",
+          "evalue": "6.40e-55",
+          "length": "345",
+          "program": "blastn",
+          "qend": "391568",
+          "qstart": "391256",
+          "query_id": "NC_002695.2",
+          "raw_score": "121",
+          "score": "121",
+          "send": "4614256",
+          "sstart": "4614592",
+          "subject_id": "NC_000913.3"
+        },
+        "authoritative_seeded": true,
+        "platform_representation_multisets": [
+          {
+            "platform_id": "macos-arm64",
+            "representation_multiset_sha256": "46041ee85b156cc9d921f7ee232b8f38e97f4884a4905f5350bff78d62359b2e",
+            "representations": [
+              {
+                "btop_sha256": "c3ca2ab7bd0f17cf6116beddc05f0f12a00b2073a7b67c5f0f6a8ae8ff805a9d",
+                "multiplicity": 1,
+                "qseq_sha256": "548886ca8ae2ed8d1047500969cbcd941a9228e2bd447171e1a7c72b56c733fc",
+                "sseq_sha256": "84960dc26fd1bc7efff71c7f30c2a0d43e29ce01452a3536639810c952c59abc"
+              }
+            ],
+            "row_count": 1,
+            "row_indices": [
+              730
+            ]
+          },
+          {
+            "platform_id": "macos-x64",
+            "representation_multiset_sha256": "46041ee85b156cc9d921f7ee232b8f38e97f4884a4905f5350bff78d62359b2e",
+            "representations": [
+              {
+                "btop_sha256": "c3ca2ab7bd0f17cf6116beddc05f0f12a00b2073a7b67c5f0f6a8ae8ff805a9d",
+                "multiplicity": 1,
+                "qseq_sha256": "548886ca8ae2ed8d1047500969cbcd941a9228e2bd447171e1a7c72b56c733fc",
+                "sseq_sha256": "84960dc26fd1bc7efff71c7f30c2a0d43e29ce01452a3536639810c952c59abc"
+              }
+            ],
+            "row_count": 1,
+            "row_indices": [
+              730
+            ]
+          },
+          {
+            "platform_id": "windows-x64",
+            "representation_multiset_sha256": "d619ea2454672f7f10f0254936ac18ad80d7940e15a4bc38bcb94ea80e6bcfec",
+            "representations": [
+              {
+                "btop_sha256": "7862c9073a798e84292172045b1866df2610fa482cf8f65725feb13fa5843da5",
+                "multiplicity": 1,
+                "qseq_sha256": "4a8fe50f0c85e5ca055f8491d6252c199325059991bef879898263c6c43627b5",
+                "sseq_sha256": "3a67a5b5e0ddaf2afa417e0bbc401490ebda851eda3c100f9014b5da017260b1"
+              }
+            ],
+            "row_count": 1,
+            "row_indices": [
+              730
+            ]
+          }
+        ],
+        "rich_only": false
+      },
+      {
+        "alignment_identity": {
+          "bitscore": "364",
+          "case_id": "Sakai.MG1655.megablast",
+          "evalue": "3.61e-97",
+          "length": "438",
+          "program": "blastn",
+          "qend": "391659",
+          "qstart": "391256",
+          "query_id": "NC_002695.2",
+          "raw_score": "197",
+          "score": "197",
+          "send": "375365",
+          "sstart": "374931",
+          "subject_id": "NC_000913.3"
+        },
+        "authoritative_seeded": false,
+        "platform_representation_multisets": [
+          {
+            "platform_id": "macos-arm64",
+            "representation_multiset_sha256": "dba00da3bac04d3bf715638a1525cb2c98a228b9402274b8e2c3b40e85437ec6",
+            "representations": [
+              {
+                "btop_sha256": "a14d24f1a1761b5599255344ea517ef28006000c025b7a63e4002ca46a539725",
+                "multiplicity": 1,
+                "qseq_sha256": "bc7436cfc414a5b7011967cdd0400f7b510e78cd0f58d696e1809f47e04084f0",
+                "sseq_sha256": "6b20157c6146de13422eedf76a1f9ea326d498d9f9a26bda2527c267a744b05d"
+              }
+            ],
+            "row_count": 1,
+            "row_indices": [
+              624
+            ]
+          },
+          {
+            "platform_id": "macos-x64",
+            "representation_multiset_sha256": "dba00da3bac04d3bf715638a1525cb2c98a228b9402274b8e2c3b40e85437ec6",
+            "representations": [
+              {
+                "btop_sha256": "a14d24f1a1761b5599255344ea517ef28006000c025b7a63e4002ca46a539725",
+                "multiplicity": 1,
+                "qseq_sha256": "bc7436cfc414a5b7011967cdd0400f7b510e78cd0f58d696e1809f47e04084f0",
+                "sseq_sha256": "6b20157c6146de13422eedf76a1f9ea326d498d9f9a26bda2527c267a744b05d"
+              }
+            ],
+            "row_count": 1,
+            "row_indices": [
+              624
+            ]
+          },
+          {
+            "platform_id": "windows-x64",
+            "representation_multiset_sha256": "619e30d162c96ae8228695cacffbb2e1f5bb63f5dc7e824dc03a6772025ac7b6",
+            "representations": [
+              {
+                "btop_sha256": "f425b3879e1e3a1812cbe54c32bd02f7ac06c68210a7ff28c2cdcf9727b4dcef",
+                "multiplicity": 1,
+                "qseq_sha256": "c6df5da79e3386121c4bf327c3e88c2b9b92cb967d186b34a7f2ebbe508c046d",
+                "sseq_sha256": "6b20157c6146de13422eedf76a1f9ea326d498d9f9a26bda2527c267a744b05d"
+              }
+            ],
+            "row_count": 1,
+            "row_indices": [
+              624
+            ]
+          }
+        ],
+        "rich_only": true
+      },
+      {
+        "alignment_identity": {
+          "bitscore": "5149",
+          "case_id": "Sakai.MG1655.megablast",
+          "evalue": "0.0",
+          "length": "3073",
+          "program": "blastn",
+          "qend": "414650",
+          "qstart": "411592",
+          "query_id": "NC_002695.2",
+          "raw_score": "2788",
+          "score": "2788",
+          "send": "357674",
+          "sstart": "354612",
+          "subject_id": "NC_000913.3"
+        },
+        "authoritative_seeded": true,
+        "platform_representation_multisets": [
+          {
+            "platform_id": "macos-arm64",
+            "representation_multiset_sha256": "c21d855bfdd1f8838c3eaace52a9dbd6815c97c26fc1994c7c1d13b3cd488f21",
+            "representations": [
+              {
+                "btop_sha256": "ebd5d96e716974b5a3c49f2c8a94a659ce5bd7ef2ee191137464713ecdf66862",
+                "multiplicity": 1,
+                "qseq_sha256": "b9db939ffc0542c7ed92a1916f8648691d8de48c66809341c7e79cc8fcc0572c",
+                "sseq_sha256": "31f53b82687bb0f3c5f0e9cd5190371e1150bd31ccca47f80bd65d114616c11d"
+              }
+            ],
+            "row_count": 1,
+            "row_indices": [
+              309
+            ]
+          },
+          {
+            "platform_id": "macos-x64",
+            "representation_multiset_sha256": "c21d855bfdd1f8838c3eaace52a9dbd6815c97c26fc1994c7c1d13b3cd488f21",
+            "representations": [
+              {
+                "btop_sha256": "ebd5d96e716974b5a3c49f2c8a94a659ce5bd7ef2ee191137464713ecdf66862",
+                "multiplicity": 1,
+                "qseq_sha256": "b9db939ffc0542c7ed92a1916f8648691d8de48c66809341c7e79cc8fcc0572c",
+                "sseq_sha256": "31f53b82687bb0f3c5f0e9cd5190371e1150bd31ccca47f80bd65d114616c11d"
+              }
+            ],
+            "row_count": 1,
+            "row_indices": [
+              309
+            ]
+          },
+          {
+            "platform_id": "windows-x64",
+            "representation_multiset_sha256": "a1edd5bf4d3698d3fbecd9c567ed349855f39336ea4ae4e9e69614824fb5e62f",
+            "representations": [
+              {
+                "btop_sha256": "145751bc63136bea5f5dfaaf03f8317b2b84f000761286c1ed199b09ddfc2d23",
+                "multiplicity": 1,
+                "qseq_sha256": "b9db939ffc0542c7ed92a1916f8648691d8de48c66809341c7e79cc8fcc0572c",
+                "sseq_sha256": "ac6001fd2ea5e35bc46822402d470b01c89c6b65fa217e0ead975cf8b834368f"
+              }
+            ],
+            "row_count": 1,
+            "row_indices": [
+              309
+            ]
+          }
+        ],
+        "rich_only": false
+      },
+      {
+        "alignment_identity": {
+          "bitscore": "21252",
+          "case_id": "Sakai.MG1655.megablast",
+          "evalue": "0.0",
+          "length": "12605",
+          "program": "blastn",
+          "qend": "620788",
+          "qstart": "608201",
+          "query_id": "NC_002695.2",
+          "raw_score": "11508",
+          "score": "11508",
+          "send": "526997",
+          "sstart": "514404",
+          "subject_id": "NC_000913.3"
+        },
+        "authoritative_seeded": true,
+        "platform_representation_multisets": [
+          {
+            "platform_id": "macos-arm64",
+            "representation_multiset_sha256": "fc6eca30dff7109fd7f7a107d01828d8f1244789b8de9b252ee8049eb5d13832",
+            "representations": [
+              {
+                "btop_sha256": "2bc17c61bbcf1c11c7f5878fc06360f6ac2298f6e1309c8dd70aa783ece041b5",
+                "multiplicity": 1,
+                "qseq_sha256": "1a01409b51d8b7147ab0b525add5e7c83a4a25b2e827a19399736841bbdc84c1",
+                "sseq_sha256": "fa5088dbb5812aaebb2d65bc9574da26d027d6b14b08d7f3baddd44e8e6a381c"
+              }
+            ],
+            "row_count": 1,
+            "row_indices": [
+              122
+            ]
+          },
+          {
+            "platform_id": "macos-x64",
+            "representation_multiset_sha256": "fc6eca30dff7109fd7f7a107d01828d8f1244789b8de9b252ee8049eb5d13832",
+            "representations": [
+              {
+                "btop_sha256": "2bc17c61bbcf1c11c7f5878fc06360f6ac2298f6e1309c8dd70aa783ece041b5",
+                "multiplicity": 1,
+                "qseq_sha256": "1a01409b51d8b7147ab0b525add5e7c83a4a25b2e827a19399736841bbdc84c1",
+                "sseq_sha256": "fa5088dbb5812aaebb2d65bc9574da26d027d6b14b08d7f3baddd44e8e6a381c"
+              }
+            ],
+            "row_count": 1,
+            "row_indices": [
+              122
+            ]
+          },
+          {
+            "platform_id": "windows-x64",
+            "representation_multiset_sha256": "d4134863e829670dcc03680e0f451384c5f06dafb728067c3e8fd3d1b78b73a7",
+            "representations": [
+              {
+                "btop_sha256": "3543e628897a775c8f191642d22f42073824339f491c41811e327968895d190d",
+                "multiplicity": 1,
+                "qseq_sha256": "1a01409b51d8b7147ab0b525add5e7c83a4a25b2e827a19399736841bbdc84c1",
+                "sseq_sha256": "6ef4abdd62a2c75176d9c5481b17fb12a487c320925eb1941ca8d9cef7fdf5e3"
+              }
+            ],
+            "row_count": 1,
+            "row_indices": [
+              122
+            ]
+          }
+        ],
+        "rich_only": false
+      },
+      {
+        "alignment_identity": {
+          "bitscore": "1303",
+          "case_id": "pairwise_default_serial",
+          "evalue": "0.0",
+          "length": "2125",
+          "program": "blastp",
+          "qend": "2084",
+          "qstart": "10",
+          "query_id": "BDT63124.1",
+          "raw_score": "3373",
+          "score": "3373",
+          "send": "2002",
+          "sstart": "1",
+          "subject_id": "BDT63579.1"
+        },
+        "authoritative_seeded": false,
+        "platform_representation_multisets": [
+          {
+            "platform_id": "macos-arm64",
+            "representation_multiset_sha256": "c6b551f60c76901c698bdaa982f2568e0f920bda2a45567011c44be1478160bb",
+            "representations": [
+              {
+                "btop_sha256": "f58514c21bc9c1f9b366ea56e5174639f9842283a0a01d2894e94f9ccc818e61",
+                "multiplicity": 1,
+                "qseq_sha256": "a1526f8fa2d27b39d728982bf6b31ae8ac6d9a444da437a69a1e7a34424831d0",
+                "sseq_sha256": "cf07184869c44484a92bfb3f2de1fed0328bb1cb232fceb4095d9a910fdaef53"
+              }
+            ],
+            "row_count": 1,
+            "row_indices": [
+              281
+            ]
+          },
+          {
+            "platform_id": "macos-x64",
+            "representation_multiset_sha256": "c6b551f60c76901c698bdaa982f2568e0f920bda2a45567011c44be1478160bb",
+            "representations": [
+              {
+                "btop_sha256": "f58514c21bc9c1f9b366ea56e5174639f9842283a0a01d2894e94f9ccc818e61",
+                "multiplicity": 1,
+                "qseq_sha256": "a1526f8fa2d27b39d728982bf6b31ae8ac6d9a444da437a69a1e7a34424831d0",
+                "sseq_sha256": "cf07184869c44484a92bfb3f2de1fed0328bb1cb232fceb4095d9a910fdaef53"
+              }
+            ],
+            "row_count": 1,
+            "row_indices": [
+              281
+            ]
+          },
+          {
+            "platform_id": "windows-x64",
+            "representation_multiset_sha256": "a327dbda7da6900a34946dc5a2804404d6b04b957d0e68d010b7ec208cb4c118",
+            "representations": [
+              {
+                "btop_sha256": "5ee100b0ad426c71940b799d258735b4bab132ad198c8d504b677159ad5c72a4",
+                "multiplicity": 1,
+                "qseq_sha256": "8938bd4c645ef47ff772287ef9d3041dd3e2133fbb0c554f5089def408b13d66",
+                "sseq_sha256": "cf07184869c44484a92bfb3f2de1fed0328bb1cb232fceb4095d9a910fdaef53"
+              }
+            ],
+            "row_count": 1,
+            "row_indices": [
+              281
+            ]
+          }
+        ],
+        "rich_only": true
+      }
+    ],
+    "runtime_enforced": false
+  },
+  "diagnostic_metadata": [
+    {
+      "case_id": "PesePMNV.MjPMNV.task_blastn",
+      "complete_row_order_equal": false,
+      "differing_row_count": 1,
+      "lf_diagnostic_sha256": "3f42d3af0e559c2ee354e688cc76d38bbb1596e2438678560543528d8235da6c",
+      "native_ncbi_reference_class": "HSP_STATISTIC_VARIANCE",
+      "platform_id": "windows-x64",
+      "program": "blastn",
+      "retained_linux_raw_sha256": "fcd9236c7b02488d868feaf35166a472c73e9f9e6cc45fc6d7449a9edc7d4120",
+      "retained_linux_row_count": 241,
+      "row_key_multiset_equal": true,
+      "row_key_order_equal": true,
+      "runtime_enforced": false
+    },
+    {
+      "case_id": "PesePMNV.MjPMNV.task_blastn",
+      "complete_row_order_equal": false,
+      "differing_row_count": 2,
+      "lf_diagnostic_sha256": "970916242008dfcfdaf8e1bfdde65500c595d39491fb4b04104b063203e5b63a",
+      "native_ncbi_reference_class": "HSP_STATISTIC_VARIANCE",
+      "platform_id": "macos-arm64",
+      "program": "blastn",
+      "retained_linux_raw_sha256": "fcd9236c7b02488d868feaf35166a472c73e9f9e6cc45fc6d7449a9edc7d4120",
+      "retained_linux_row_count": 241,
+      "row_key_multiset_equal": true,
+      "row_key_order_equal": true,
+      "runtime_enforced": false
+    },
+    {
+      "case_id": "PesePMNV.MjPMNV.task_blastn",
+      "complete_row_order_equal": false,
+      "differing_row_count": 2,
+      "lf_diagnostic_sha256": "970916242008dfcfdaf8e1bfdde65500c595d39491fb4b04104b063203e5b63a",
+      "native_ncbi_reference_class": "HSP_STATISTIC_VARIANCE",
+      "platform_id": "macos-x64",
+      "program": "blastn",
+      "retained_linux_raw_sha256": "fcd9236c7b02488d868feaf35166a472c73e9f9e6cc45fc6d7449a9edc7d4120",
+      "retained_linux_row_count": 241,
+      "row_key_multiset_equal": true,
+      "row_key_order_equal": true,
+      "runtime_enforced": false
+    },
+    {
+      "case_id": "Sakai.MG1655.megablast",
+      "complete_row_order_equal": false,
+      "differing_row_count": 7,
+      "lf_diagnostic_sha256": "6a5c3157c5a4c3159e38520a7a5c603ee3be873f1df6a26fd4e976c54aad4ee1",
+      "native_ncbi_reference_class": "HSP_STATISTIC_VARIANCE",
+      "platform_id": "windows-x64",
+      "program": "blastn",
+      "retained_linux_raw_sha256": "ac8177764f35b2fb92777f8b1d01ea646cc55ae21b05f1f486ee231348a34a45",
+      "retained_linux_row_count": 6476,
+      "row_key_multiset_equal": true,
+      "row_key_order_equal": true,
+      "runtime_enforced": false
+    },
+    {
+      "case_id": "Sakai.MG1655.megablast",
+      "complete_row_order_equal": false,
+      "differing_row_count": 8,
+      "lf_diagnostic_sha256": "a0a205f969851132b145e24882be1691eba353dadbe8b0560d575afbedffeba1",
+      "native_ncbi_reference_class": "HSP_STATISTIC_VARIANCE",
+      "platform_id": "macos-arm64",
+      "program": "blastn",
+      "retained_linux_raw_sha256": "ac8177764f35b2fb92777f8b1d01ea646cc55ae21b05f1f486ee231348a34a45",
+      "retained_linux_row_count": 6476,
+      "row_key_multiset_equal": true,
+      "row_key_order_equal": true,
+      "runtime_enforced": false
+    },
+    {
+      "case_id": "Sakai.MG1655.megablast",
+      "complete_row_order_equal": false,
+      "differing_row_count": 8,
+      "lf_diagnostic_sha256": "a0a205f969851132b145e24882be1691eba353dadbe8b0560d575afbedffeba1",
+      "native_ncbi_reference_class": "HSP_STATISTIC_VARIANCE",
+      "platform_id": "macos-x64",
+      "program": "blastn",
+      "retained_linux_raw_sha256": "ac8177764f35b2fb92777f8b1d01ea646cc55ae21b05f1f486ee231348a34a45",
+      "retained_linux_row_count": 6476,
+      "row_key_multiset_equal": true,
+      "row_key_order_equal": true,
+      "runtime_enforced": false
+    },
+    {
+      "case_id": "pairwise_default_serial",
+      "complete_row_order_equal": true,
+      "differing_row_count": 0,
+      "lf_diagnostic_sha256": "fd4b010800e32ce6c823cb38b42a10b7845f3342edae892acccc8f554f9edf34",
+      "native_ncbi_reference_class": "OUTPUT_NEWLINE_ONLY",
+      "platform_id": "windows-x64",
+      "program": "blastp",
+      "retained_linux_raw_sha256": "fd4b010800e32ce6c823cb38b42a10b7845f3342edae892acccc8f554f9edf34",
+      "retained_linux_row_count": 475,
+      "row_key_multiset_equal": true,
+      "row_key_order_equal": true,
+      "runtime_enforced": false
+    },
+    {
+      "case_id": "pairwise_default_serial",
+      "complete_row_order_equal": true,
+      "differing_row_count": 0,
+      "lf_diagnostic_sha256": "fd4b010800e32ce6c823cb38b42a10b7845f3342edae892acccc8f554f9edf34",
+      "native_ncbi_reference_class": "EXACT_TO_RETAINED_LINUX_REFERENCE",
+      "platform_id": "macos-arm64",
+      "program": "blastp",
+      "retained_linux_raw_sha256": "fd4b010800e32ce6c823cb38b42a10b7845f3342edae892acccc8f554f9edf34",
+      "retained_linux_row_count": 475,
+      "row_key_multiset_equal": true,
+      "row_key_order_equal": true,
+      "runtime_enforced": false
+    },
+    {
+      "case_id": "pairwise_default_serial",
+      "complete_row_order_equal": true,
+      "differing_row_count": 0,
+      "lf_diagnostic_sha256": "fd4b010800e32ce6c823cb38b42a10b7845f3342edae892acccc8f554f9edf34",
+      "native_ncbi_reference_class": "EXACT_TO_RETAINED_LINUX_REFERENCE",
+      "platform_id": "macos-x64",
+      "program": "blastp",
+      "retained_linux_raw_sha256": "fd4b010800e32ce6c823cb38b42a10b7845f3342edae892acccc8f554f9edf34",
+      "retained_linux_row_count": 475,
+      "row_key_multiset_equal": true,
+      "row_key_order_equal": true,
+      "runtime_enforced": false
+    },
+    {
+      "case_id": "p03_mela_pemojnva",
+      "complete_row_order_equal": false,
+      "differing_row_count": 2,
+      "lf_diagnostic_sha256": "76e15faa378bffe318f872b90382310a6f2484e7b1e0db6ff5d5601b765b79b0",
+      "native_ncbi_reference_class": "ROW_ORDER_VARIANCE",
+      "platform_id": "windows-x64",
+      "program": "tblastx",
+      "retained_linux_raw_sha256": "bbef153094025db89dd4a69b2a3c4246b0b8853396fe740bc7e1bd654db105b6",
+      "retained_linux_row_count": 4794,
+      "row_key_multiset_equal": true,
+      "row_key_order_equal": false,
+      "runtime_enforced": false
+    },
+    {
+      "case_id": "p03_mela_pemojnva",
+      "complete_row_order_equal": false,
+      "differing_row_count": 114,
+      "lf_diagnostic_sha256": "86994c013601cc3d3d3a89bd0f893b66026ea163808fa1d3b5fc6638e1c940df",
+      "native_ncbi_reference_class": "ROW_ORDER_VARIANCE",
+      "platform_id": "macos-arm64",
+      "program": "tblastx",
+      "retained_linux_raw_sha256": "bbef153094025db89dd4a69b2a3c4246b0b8853396fe740bc7e1bd654db105b6",
+      "retained_linux_row_count": 4794,
+      "row_key_multiset_equal": true,
+      "row_key_order_equal": false,
+      "runtime_enforced": false
+    },
+    {
+      "case_id": "p03_mela_pemojnva",
+      "complete_row_order_equal": false,
+      "differing_row_count": 2,
+      "lf_diagnostic_sha256": "edf561609ebdb8be93dd74aad9b1e090bc83e4f622e4ed17c69ff63fc572a645",
+      "native_ncbi_reference_class": "ROW_ORDER_VARIANCE",
+      "platform_id": "macos-x64",
+      "program": "tblastx",
+      "retained_linux_raw_sha256": "bbef153094025db89dd4a69b2a3c4246b0b8853396fe740bc7e1bd654db105b6",
+      "retained_linux_row_count": 4794,
+      "row_key_multiset_equal": true,
+      "row_key_order_equal": false,
+      "runtime_enforced": false
+    },
+    {
+      "case_id": "p14_ap027131_ap027133_query4",
+      "complete_row_order_equal": false,
+      "differing_row_count": 4,
+      "lf_diagnostic_sha256": "69db14a4c4dc30a370c19ae75754ff25144e12463d312f55bb18ace57c28e331",
+      "native_ncbi_reference_class": "ROW_ORDER_VARIANCE",
+      "platform_id": "windows-x64",
+      "program": "tblastx",
+      "retained_linux_raw_sha256": "ef33958a8c31146eea7a2b7fea4e7ff1c690e451058c007f1a0cb60047a43de6",
+      "retained_linux_row_count": 14871,
+      "row_key_multiset_equal": true,
+      "row_key_order_equal": false,
+      "runtime_enforced": false
+    },
+    {
+      "case_id": "p14_ap027131_ap027133_query4",
+      "complete_row_order_equal": false,
+      "differing_row_count": 590,
+      "lf_diagnostic_sha256": "01a9790ece7f66d6ad1391a9ea84a847b0f75150a16a615f3b2b487eefd81961",
+      "native_ncbi_reference_class": "ROW_ORDER_VARIANCE",
+      "platform_id": "macos-arm64",
+      "program": "tblastx",
+      "retained_linux_raw_sha256": "ef33958a8c31146eea7a2b7fea4e7ff1c690e451058c007f1a0cb60047a43de6",
+      "retained_linux_row_count": 14871,
+      "row_key_multiset_equal": true,
+      "row_key_order_equal": false,
+      "runtime_enforced": false
+    },
+    {
+      "case_id": "p14_ap027131_ap027133_query4",
+      "complete_row_order_equal": false,
+      "differing_row_count": 4,
+      "lf_diagnostic_sha256": "69db14a4c4dc30a370c19ae75754ff25144e12463d312f55bb18ace57c28e331",
+      "native_ncbi_reference_class": "ROW_ORDER_VARIANCE",
+      "platform_id": "macos-x64",
+      "program": "tblastx",
+      "retained_linux_raw_sha256": "ef33958a8c31146eea7a2b7fea4e7ff1c690e451058c007f1a0cb60047a43de6",
+      "retained_linux_row_count": 14871,
+      "row_key_multiset_equal": true,
+      "row_key_order_equal": false,
+      "runtime_enforced": false
+    },
+    {
+      "case_id": "d06_ap027131_ap027133_db4",
+      "complete_row_order_equal": true,
+      "differing_row_count": 0,
+      "lf_diagnostic_sha256": "8d5ff1d0d92f27488ba91da061366ef808db382cd73b3e8577385d150e9e8a29",
+      "native_ncbi_reference_class": "OUTPUT_NEWLINE_ONLY",
+      "platform_id": "windows-x64",
+      "program": "tblastx",
+      "retained_linux_raw_sha256": "8d5ff1d0d92f27488ba91da061366ef808db382cd73b3e8577385d150e9e8a29",
+      "retained_linux_row_count": 12672,
+      "row_key_multiset_equal": true,
+      "row_key_order_equal": true,
+      "runtime_enforced": false
+    },
+    {
+      "case_id": "d06_ap027131_ap027133_db4",
+      "complete_row_order_equal": false,
+      "differing_row_count": 422,
+      "lf_diagnostic_sha256": "7d3086ea8f14560d72fbc422d6cb925c83a4d207e99eb8b3e46a531a457f213f",
+      "native_ncbi_reference_class": "ROW_ORDER_VARIANCE",
+      "platform_id": "macos-arm64",
+      "program": "tblastx",
+      "retained_linux_raw_sha256": "8d5ff1d0d92f27488ba91da061366ef808db382cd73b3e8577385d150e9e8a29",
+      "retained_linux_row_count": 12672,
+      "row_key_multiset_equal": true,
+      "row_key_order_equal": false,
+      "runtime_enforced": false
+    },
+    {
+      "case_id": "d06_ap027131_ap027133_db4",
+      "complete_row_order_equal": true,
+      "differing_row_count": 0,
+      "lf_diagnostic_sha256": "8d5ff1d0d92f27488ba91da061366ef808db382cd73b3e8577385d150e9e8a29",
+      "native_ncbi_reference_class": "EXACT_TO_RETAINED_LINUX_REFERENCE",
+      "platform_id": "macos-x64",
+      "program": "tblastx",
+      "retained_linux_raw_sha256": "8d5ff1d0d92f27488ba91da061366ef808db382cd73b3e8577385d150e9e8a29",
+      "retained_linux_row_count": 12672,
+      "row_key_multiset_equal": true,
+      "row_key_order_equal": true,
+      "runtime_enforced": false
+    }
+  ],
+  "normative_acceptance": {
+    "ncbi_release": "2.17.0",
+    "platforms": [
+      {
+        "architecture": "x86_64",
+        "archive": {
+          "checksum": {
+            "algorithm": "md5",
+            "value": "dcd973097407a2910061ff4fb51b09fb"
+          },
+          "filename": "ncbi-blast-2.17.0+-x64-win64.tar.gz",
+          "release": "2.17.0",
+          "retrieval_url": "https://ftp.ncbi.nlm.nih.gov/blast/executables/blast%2B/2.17.0/ncbi-blast-2.17.0%2B-x64-win64.tar.gz"
+        },
+        "executables": [
+          {
+            "architecture": "x86_64",
+            "program": "blastn",
+            "sha256": "edb4642391bc47f4bb791dabf8a125779795070c32c8c888098e4cd6294265b8"
+          },
+          {
+            "architecture": "x86_64",
+            "program": "blastp",
+            "sha256": "e787c13e8dce7318a9bb09459f7d98abac64f45feb5197fd463f1898b77eefe2"
+          },
+          {
+            "architecture": "x86_64",
+            "program": "tblastx",
+            "sha256": "196ec30dbf386affdb88de91c11b11b4d11089bfa9c9ca84bda73ed249b0c19e"
+          }
+        ],
+        "expected_outputs": [
+          {
+            "byte_length": 18820,
+            "case_id": "PesePMNV.MjPMNV.task_blastn",
+            "data_row_count": 241,
+            "newline_profile": {
+              "bare_cr_count": 0,
+              "bare_lf_count": 0,
+              "crlf_count": 247,
+              "lf_count": 247
+            },
+            "program": "blastn",
+            "raw_sha256": "176beab8c6094d943fd5093430bb5b5484fb1f8c03e078ddf8dd577d8a8b4ca4"
+          },
+          {
+            "byte_length": 543406,
+            "case_id": "Sakai.MG1655.megablast",
+            "data_row_count": 6476,
+            "newline_profile": {
+              "bare_cr_count": 0,
+              "bare_lf_count": 0,
+              "crlf_count": 6482,
+              "lf_count": 6482
+            },
+            "program": "blastn",
+            "raw_sha256": "e8c9e93c54fd8d9fc5dab169de4ff02dfb8cae61524d5457eeabd9a81e81b05e"
+          },
+          {
+            "byte_length": 30116,
+            "case_id": "pairwise_default_serial",
+            "data_row_count": 475,
+            "newline_profile": {
+              "bare_cr_count": 0,
+              "bare_lf_count": 0,
+              "crlf_count": 475,
+              "lf_count": 475
+            },
+            "program": "blastp",
+            "raw_sha256": "8b6bb2fb42b03d29dac6162634069a8e76a3bdf57fb30f5e865c92086680c2a7"
+          },
+          {
+            "byte_length": 355845,
+            "case_id": "p03_mela_pemojnva",
+            "data_row_count": 4794,
+            "newline_profile": {
+              "bare_cr_count": 0,
+              "bare_lf_count": 0,
+              "crlf_count": 4794,
+              "lf_count": 4794
+            },
+            "program": "tblastx",
+            "raw_sha256": "499962cd61fa481209ea1b74aecba16161244235748a01da26c629040ccd088b"
+          },
+          {
+            "byte_length": 1137083,
+            "case_id": "p14_ap027131_ap027133_query4",
+            "data_row_count": 14871,
+            "newline_profile": {
+              "bare_cr_count": 0,
+              "bare_lf_count": 0,
+              "crlf_count": 14871,
+              "lf_count": 14871
+            },
+            "program": "tblastx",
+            "raw_sha256": "0521ac543168213ead8b5cf3579e363dbb05263d0a06d96f175ea9a58ae6210a"
+          },
+          {
+            "byte_length": 967206,
+            "case_id": "d06_ap027131_ap027133_db4",
+            "data_row_count": 12672,
+            "newline_profile": {
+              "bare_cr_count": 0,
+              "bare_lf_count": 0,
+              "crlf_count": 12672,
+              "lf_count": 12672
+            },
+            "program": "tblastx",
+            "raw_sha256": "df19b57884dd111db38d32cbadff0e820b32aa60d704e2eaac73190aad7963bd"
+          }
+        ],
+        "normalized_machine": "x86_64",
+        "platform_id": "windows-x64",
+        "platform_system": "Windows"
+      },
+      {
+        "architecture": "arm64",
+        "archive": {
+          "checksum": {
+            "algorithm": "md5",
+            "value": "8dc685eb284713db76de41a4dabf96ad"
+          },
+          "filename": "ncbi-blast-2.17.0+-aarch64-macosx.tar.gz",
+          "release": "2.17.0",
+          "retrieval_url": "https://ftp.ncbi.nlm.nih.gov/blast/executables/blast%2B/2.17.0/ncbi-blast-2.17.0%2B-aarch64-macosx.tar.gz"
+        },
+        "executables": [
+          {
+            "architecture": "arm64",
+            "program": "blastn",
+            "sha256": "f82ab4919beb806745d6dce427001316af8cbda9edab7163af4d5b7ec930a7da"
+          },
+          {
+            "architecture": "arm64",
+            "program": "blastp",
+            "sha256": "753f0695a39ba19b2d351b0bb851b6051169b8b9e22c095fd634cc2a93cddf55"
+          },
+          {
+            "architecture": "arm64",
+            "program": "tblastx",
+            "sha256": "7bb5c055843f77a021b73e54ca603bb0f7d68f716cf8f8d7e6ac0d17da7a91ca"
+          }
+        ],
+        "expected_outputs": [
+          {
+            "byte_length": 18573,
+            "case_id": "PesePMNV.MjPMNV.task_blastn",
+            "data_row_count": 241,
+            "newline_profile": {
+              "bare_cr_count": 0,
+              "bare_lf_count": 247,
+              "crlf_count": 0,
+              "lf_count": 247
+            },
+            "program": "blastn",
+            "raw_sha256": "970916242008dfcfdaf8e1bfdde65500c595d39491fb4b04104b063203e5b63a"
+          },
+          {
+            "byte_length": 536922,
+            "case_id": "Sakai.MG1655.megablast",
+            "data_row_count": 6476,
+            "newline_profile": {
+              "bare_cr_count": 0,
+              "bare_lf_count": 6482,
+              "crlf_count": 0,
+              "lf_count": 6482
+            },
+            "program": "blastn",
+            "raw_sha256": "a0a205f969851132b145e24882be1691eba353dadbe8b0560d575afbedffeba1"
+          },
+          {
+            "byte_length": 29641,
+            "case_id": "pairwise_default_serial",
+            "data_row_count": 475,
+            "newline_profile": {
+              "bare_cr_count": 0,
+              "bare_lf_count": 475,
+              "crlf_count": 0,
+              "lf_count": 475
+            },
+            "program": "blastp",
+            "raw_sha256": "fd4b010800e32ce6c823cb38b42a10b7845f3342edae892acccc8f554f9edf34"
+          },
+          {
+            "byte_length": 351051,
+            "case_id": "p03_mela_pemojnva",
+            "data_row_count": 4794,
+            "newline_profile": {
+              "bare_cr_count": 0,
+              "bare_lf_count": 4794,
+              "crlf_count": 0,
+              "lf_count": 4794
+            },
+            "program": "tblastx",
+            "raw_sha256": "86994c013601cc3d3d3a89bd0f893b66026ea163808fa1d3b5fc6638e1c940df"
+          },
+          {
+            "byte_length": 1122212,
+            "case_id": "p14_ap027131_ap027133_query4",
+            "data_row_count": 14871,
+            "newline_profile": {
+              "bare_cr_count": 0,
+              "bare_lf_count": 14871,
+              "crlf_count": 0,
+              "lf_count": 14871
+            },
+            "program": "tblastx",
+            "raw_sha256": "01a9790ece7f66d6ad1391a9ea84a847b0f75150a16a615f3b2b487eefd81961"
+          },
+          {
+            "byte_length": 954534,
+            "case_id": "d06_ap027131_ap027133_db4",
+            "data_row_count": 12672,
+            "newline_profile": {
+              "bare_cr_count": 0,
+              "bare_lf_count": 12672,
+              "crlf_count": 0,
+              "lf_count": 12672
+            },
+            "program": "tblastx",
+            "raw_sha256": "7d3086ea8f14560d72fbc422d6cb925c83a4d207e99eb8b3e46a531a457f213f"
+          }
+        ],
+        "normalized_machine": "arm64",
+        "platform_id": "macos-arm64",
+        "platform_system": "Darwin"
+      },
+      {
+        "architecture": "x86_64",
+        "archive": {
+          "checksum": {
+            "algorithm": "md5",
+            "value": "cde7979c0edca21da0567ab172b68b0e"
+          },
+          "filename": "ncbi-blast-2.17.0+-x64-macosx.tar.gz",
+          "release": "2.17.0",
+          "retrieval_url": "https://ftp.ncbi.nlm.nih.gov/blast/executables/blast%2B/2.17.0/ncbi-blast-2.17.0%2B-x64-macosx.tar.gz"
+        },
+        "executables": [
+          {
+            "architecture": "x86_64",
+            "program": "blastn",
+            "sha256": "86f9f64b956b7e64246057ba51f3b5ff38bee8917d05612768dee94c4eba6186"
+          },
+          {
+            "architecture": "x86_64",
+            "program": "blastp",
+            "sha256": "239cd3939e09dd4f352494ea4cc0cdb8e59390c3119c76221bad67379f80a232"
+          },
+          {
+            "architecture": "x86_64",
+            "program": "tblastx",
+            "sha256": "840aa6d5be20b9c34271aee077f9520d6a26b21eeb3bfc37e9a5ce4ee878b19a"
+          }
+        ],
+        "expected_outputs": [
+          {
+            "byte_length": 18573,
+            "case_id": "PesePMNV.MjPMNV.task_blastn",
+            "data_row_count": 241,
+            "newline_profile": {
+              "bare_cr_count": 0,
+              "bare_lf_count": 247,
+              "crlf_count": 0,
+              "lf_count": 247
+            },
+            "program": "blastn",
+            "raw_sha256": "970916242008dfcfdaf8e1bfdde65500c595d39491fb4b04104b063203e5b63a"
+          },
+          {
+            "byte_length": 536922,
+            "case_id": "Sakai.MG1655.megablast",
+            "data_row_count": 6476,
+            "newline_profile": {
+              "bare_cr_count": 0,
+              "bare_lf_count": 6482,
+              "crlf_count": 0,
+              "lf_count": 6482
+            },
+            "program": "blastn",
+            "raw_sha256": "a0a205f969851132b145e24882be1691eba353dadbe8b0560d575afbedffeba1"
+          },
+          {
+            "byte_length": 29641,
+            "case_id": "pairwise_default_serial",
+            "data_row_count": 475,
+            "newline_profile": {
+              "bare_cr_count": 0,
+              "bare_lf_count": 475,
+              "crlf_count": 0,
+              "lf_count": 475
+            },
+            "program": "blastp",
+            "raw_sha256": "fd4b010800e32ce6c823cb38b42a10b7845f3342edae892acccc8f554f9edf34"
+          },
+          {
+            "byte_length": 351051,
+            "case_id": "p03_mela_pemojnva",
+            "data_row_count": 4794,
+            "newline_profile": {
+              "bare_cr_count": 0,
+              "bare_lf_count": 4794,
+              "crlf_count": 0,
+              "lf_count": 4794
+            },
+            "program": "tblastx",
+            "raw_sha256": "edf561609ebdb8be93dd74aad9b1e090bc83e4f622e4ed17c69ff63fc572a645"
+          },
+          {
+            "byte_length": 1122212,
+            "case_id": "p14_ap027131_ap027133_query4",
+            "data_row_count": 14871,
+            "newline_profile": {
+              "bare_cr_count": 0,
+              "bare_lf_count": 14871,
+              "crlf_count": 0,
+              "lf_count": 14871
+            },
+            "program": "tblastx",
+            "raw_sha256": "69db14a4c4dc30a370c19ae75754ff25144e12463d312f55bb18ace57c28e331"
+          },
+          {
+            "byte_length": 954534,
+            "case_id": "d06_ap027131_ap027133_db4",
+            "data_row_count": 12672,
+            "newline_profile": {
+              "bare_cr_count": 0,
+              "bare_lf_count": 12672,
+              "crlf_count": 0,
+              "lf_count": 12672
+            },
+            "program": "tblastx",
+            "raw_sha256": "8d5ff1d0d92f27488ba91da061366ef808db382cd73b3e8577385d150e9e8a29"
+          }
+        ],
+        "normalized_machine": "x86_64",
+        "platform_id": "macos-x64",
+        "platform_system": "Darwin"
+      }
+    ],
+    "representatives": [
+      {
+        "authoritative_outfmt": "7",
+        "case_id": "PesePMNV.MjPMNV.task_blastn",
+        "environment_overrides": {},
+        "lexical_fixture_root": "/tmp/losat-pr5-runtime-cert-5845d22/LOSAT",
+        "losat_contract": "EXACT_TEXT",
+        "losat_parity_class": "EXACT_TEXT",
+        "ordered_argv_template": [
+          "{oracle}",
+          "-query",
+          "/tmp/losat-pr5-runtime-cert-5845d22/LOSAT/tests/fasta/AP027152.fasta",
+          "-subject",
+          "/tmp/losat-pr5-runtime-cert-5845d22/LOSAT/tests/fasta/AP027202.fasta",
+          "-task",
+          "blastn",
+          "-reward",
+          "2",
+          "-penalty",
+          "-3",
+          "-gapopen",
+          "5",
+          "-gapextend",
+          "2",
+          "-word_size",
+          "11",
+          "-dust",
+          "yes",
+          "-soft_masking",
+          "true",
+          "-strand",
+          "both",
+          "-evalue",
+          "10",
+          "-max_target_seqs",
+          "500",
+          "-num_threads",
+          "1",
+          "-outfmt",
+          "7",
+          "-out",
+          "{output}"
+        ],
+        "program": "blastn",
+        "query": {
+          "byte_length": 281379,
+          "lexical_path": "/tmp/losat-pr5-runtime-cert-5845d22/LOSAT/tests/fasta/AP027152.fasta",
+          "newline_profile": {
+            "bare_cr_count": 0,
+            "bare_lf_count": 3964,
+            "crlf_count": 0,
+            "lf_count": 3964
+          },
+          "option": "-query",
+          "repository_relative": "LOSAT/tests/fasta/AP027152.fasta",
+          "role": "query",
+          "sha256": "d78996c7897146934aee27db0df03c5655b67e75d4216e2a0b2dcf1c94f27093"
+        },
+        "shell": false,
+        "subject": {
+          "byte_length": 328657,
+          "lexical_path": "/tmp/losat-pr5-runtime-cert-5845d22/LOSAT/tests/fasta/AP027202.fasta",
+          "newline_profile": {
+            "bare_cr_count": 0,
+            "bare_lf_count": 4630,
+            "crlf_count": 0,
+            "lf_count": 4630
+          },
+          "option": "-subject",
+          "repository_relative": "LOSAT/tests/fasta/AP027202.fasta",
+          "role": "subject",
+          "sha256": "0b9f7dfc0bc4720aea9c196d9d6b5fc6addc4058cb9c64ebba2ea6657f6e8fb6"
+        },
+        "working_directory_contract": "repository_root"
+      },
+      {
+        "authoritative_outfmt": "7",
+        "case_id": "Sakai.MG1655.megablast",
+        "environment_overrides": {},
+        "lexical_fixture_root": "/tmp/losat-pr5-runtime-cert-5845d22/LOSAT",
+        "losat_contract": "SOURCE_UNDETERMINED_ACCEPTED",
+        "losat_parity_class": "SOURCE_UNDETERMINED_ACCEPTED",
+        "ordered_argv_template": [
+          "{oracle}",
+          "-query",
+          "/tmp/losat-pr5-runtime-cert-5845d22/LOSAT/tests/fasta/Sakai.fna",
+          "-subject",
+          "/tmp/losat-pr5-runtime-cert-5845d22/LOSAT/tests/fasta/MG1655.fna",
+          "-task",
+          "megablast",
+          "-reward",
+          "1",
+          "-penalty",
+          "-2",
+          "-gapopen",
+          "0",
+          "-gapextend",
+          "0",
+          "-word_size",
+          "28",
+          "-dust",
+          "yes",
+          "-soft_masking",
+          "true",
+          "-strand",
+          "both",
+          "-evalue",
+          "10",
+          "-max_target_seqs",
+          "500",
+          "-num_threads",
+          "1",
+          "-outfmt",
+          "7",
+          "-out",
+          "{output}"
+        ],
+        "program": "blastn",
+        "query": {
+          "byte_length": 5577201,
+          "lexical_path": "/tmp/losat-pr5-runtime-cert-5845d22/LOSAT/tests/fasta/Sakai.fna",
+          "newline_profile": {
+            "bare_cr_count": 0,
+            "bare_lf_count": 78554,
+            "crlf_count": 0,
+            "lf_count": 78554
+          },
+          "option": "-query",
+          "repository_relative": "LOSAT/tests/fasta/Sakai.fna",
+          "role": "query",
+          "sha256": "d2144b241e49c16d5e09d3218f1d2f65bf424a4c813f2633874f983ac15d1999"
+        },
+        "shell": false,
+        "subject": {
+          "byte_length": 4708035,
+          "lexical_path": "/tmp/losat-pr5-runtime-cert-5845d22/LOSAT/tests/fasta/MG1655.fna",
+          "newline_profile": {
+            "bare_cr_count": 0,
+            "bare_lf_count": 66312,
+            "crlf_count": 0,
+            "lf_count": 66312
+          },
+          "option": "-subject",
+          "repository_relative": "LOSAT/tests/fasta/MG1655.fna",
+          "role": "subject",
+          "sha256": "6b195feda4c66140f6762742eb8b30c2652f02b45878b174f5b00ef85ecc95d7"
+        },
+        "working_directory_contract": "repository_root"
+      },
+      {
+        "authoritative_outfmt": "6",
+        "case_id": "pairwise_default_serial",
+        "environment_overrides": {},
+        "lexical_fixture_root": "/tmp/losat-pr5-runtime-cert-5845d22/LOSAT",
+        "losat_contract": "source_defined_exact",
+        "losat_parity_class": "EXACT_TEXT",
+        "ordered_argv_template": [
+          "{oracle}",
+          "-query",
+          "/tmp/losat-pr5-runtime-cert-5845d22/LOSAT/tests/fasta/SicyWSV.faa",
+          "-subject",
+          "/tmp/losat-pr5-runtime-cert-5845d22/LOSAT/tests/fasta/PajaWSV.faa",
+          "-outfmt",
+          "6",
+          "-num_threads",
+          "1",
+          "-max_hsps",
+          "1",
+          "-out",
+          "{output}"
+        ],
+        "program": "blastp",
+        "query": {
+          "byte_length": 70128,
+          "lexical_path": "/tmp/losat-pr5-runtime-cert-5845d22/LOSAT/tests/fasta/SicyWSV.faa",
+          "newline_profile": {
+            "bare_cr_count": 0,
+            "bare_lf_count": 1206,
+            "crlf_count": 0,
+            "lf_count": 1206
+          },
+          "option": "-query",
+          "repository_relative": "LOSAT/tests/fasta/SicyWSV.faa",
+          "role": "query",
+          "sha256": "5018a0a34281a0fed92ac7e902104a3dfe2412ba054ae6966dbfe248549fd56c"
+        },
+        "shell": false,
+        "subject": {
+          "byte_length": 73498,
+          "lexical_path": "/tmp/losat-pr5-runtime-cert-5845d22/LOSAT/tests/fasta/PajaWSV.faa",
+          "newline_profile": {
+            "bare_cr_count": 0,
+            "bare_lf_count": 1243,
+            "crlf_count": 0,
+            "lf_count": 1243
+          },
+          "option": "-subject",
+          "repository_relative": "LOSAT/tests/fasta/PajaWSV.faa",
+          "role": "subject",
+          "sha256": "d6ea8b8258357feb1f2c78d8948ffbeaa5d9afa11ba6e7278351bad130e7ae61"
+        },
+        "working_directory_contract": "repository_root"
+      },
+      {
+        "authoritative_outfmt": "6",
+        "case_id": "p03_mela_pemojnva",
+        "environment_overrides": {},
+        "lexical_fixture_root": "/tmp/losat-pr5-runtime-cert-5845d22/LOSAT",
+        "losat_contract": "parity",
+        "losat_parity_class": "EXACT_TEXT",
+        "ordered_argv_template": [
+          "{oracle}",
+          "-query",
+          "/tmp/losat-pr5-runtime-cert-5845d22/LOSAT/tests/fasta/MelaMJNV.fasta",
+          "-subject",
+          "/tmp/losat-pr5-runtime-cert-5845d22/LOSAT/tests/fasta/PemoMJNVA.fasta",
+          "-outfmt",
+          "6",
+          "-num_threads",
+          "1",
+          "-query_gencode",
+          "1",
+          "-db_gencode",
+          "1",
+          "-out",
+          "{output}"
+        ],
+        "program": "tblastx",
+        "query": {
+          "byte_length": 291249,
+          "lexical_path": "/tmp/losat-pr5-runtime-cert-5845d22/LOSAT/tests/fasta/MelaMJNV.fasta",
+          "newline_profile": {
+            "bare_cr_count": 0,
+            "bare_lf_count": 4103,
+            "crlf_count": 0,
+            "lf_count": 4103
+          },
+          "option": "-query",
+          "repository_relative": "LOSAT/tests/fasta/MelaMJNV.fasta",
+          "role": "query",
+          "sha256": "099fcec7fbd5e8c77d583e59be0eaa7e525b7023bd6fc8eaeab9b9f3a0ac42f7"
+        },
+        "shell": false,
+        "subject": {
+          "byte_length": 298427,
+          "lexical_path": "/tmp/losat-pr5-runtime-cert-5845d22/LOSAT/tests/fasta/PemoMJNVA.fasta",
+          "newline_profile": {
+            "bare_cr_count": 0,
+            "bare_lf_count": 4205,
+            "crlf_count": 0,
+            "lf_count": 4205
+          },
+          "option": "-subject",
+          "repository_relative": "LOSAT/tests/fasta/PemoMJNVA.fasta",
+          "role": "subject",
+          "sha256": "f289aa47634597eb5c84fc0e6ead64065f4a30d4124a6501ef17a90501c3c680"
+        },
+        "working_directory_contract": "repository_root"
+      },
+      {
+        "authoritative_outfmt": "6",
+        "case_id": "p14_ap027131_ap027133_query4",
+        "environment_overrides": {},
+        "lexical_fixture_root": "/tmp/losat-pr5-runtime-cert-5845d22/LOSAT",
+        "losat_contract": "parity",
+        "losat_parity_class": "EXACT_TEXT",
+        "ordered_argv_template": [
+          "{oracle}",
+          "-query",
+          "/tmp/losat-pr5-runtime-cert-5845d22/LOSAT/tests/fasta/AP027131.fasta",
+          "-subject",
+          "/tmp/losat-pr5-runtime-cert-5845d22/LOSAT/tests/fasta/AP027133.fasta",
+          "-outfmt",
+          "6",
+          "-num_threads",
+          "1",
+          "-query_gencode",
+          "4",
+          "-db_gencode",
+          "1",
+          "-out",
+          "{output}"
+        ],
+        "program": "tblastx",
+        "query": {
+          "byte_length": 671644,
+          "lexical_path": "/tmp/losat-pr5-runtime-cert-5845d22/LOSAT/tests/fasta/AP027131.fasta",
+          "newline_profile": {
+            "bare_cr_count": 0,
+            "bare_lf_count": 9461,
+            "crlf_count": 0,
+            "lf_count": 9461
+          },
+          "option": "-query",
+          "repository_relative": "LOSAT/tests/fasta/AP027131.fasta",
+          "role": "query",
+          "sha256": "184a9e3264cf522a1187716754cf9bca6dab8e882d76f9a267862751570bde80"
+        },
+        "shell": false,
+        "subject": {
+          "byte_length": 614931,
+          "lexical_path": "/tmp/losat-pr5-runtime-cert-5845d22/LOSAT/tests/fasta/AP027133.fasta",
+          "newline_profile": {
+            "bare_cr_count": 0,
+            "bare_lf_count": 8662,
+            "crlf_count": 0,
+            "lf_count": 8662
+          },
+          "option": "-subject",
+          "repository_relative": "LOSAT/tests/fasta/AP027133.fasta",
+          "role": "subject",
+          "sha256": "3942c9759d39d8d209b26b63e822b60c43de4c16d1477158dce8ab07966dd07d"
+        },
+        "working_directory_contract": "repository_root"
+      },
+      {
+        "authoritative_outfmt": "6",
+        "case_id": "d06_ap027131_ap027133_db4",
+        "environment_overrides": {},
+        "lexical_fixture_root": "/tmp/losat-pr5-runtime-cert-5845d22/LOSAT",
+        "losat_contract": "approved_db_gencode_deviation",
+        "losat_parity_class": "HSP_SET_DIFF",
+        "ordered_argv_template": [
+          "{oracle}",
+          "-query",
+          "/tmp/losat-pr5-runtime-cert-5845d22/LOSAT/tests/fasta/AP027131.fasta",
+          "-subject",
+          "/tmp/losat-pr5-runtime-cert-5845d22/LOSAT/tests/fasta/AP027133.fasta",
+          "-outfmt",
+          "6",
+          "-num_threads",
+          "1",
+          "-query_gencode",
+          "1",
+          "-db_gencode",
+          "4",
+          "-out",
+          "{output}"
+        ],
+        "program": "tblastx",
+        "query": {
+          "byte_length": 671644,
+          "lexical_path": "/tmp/losat-pr5-runtime-cert-5845d22/LOSAT/tests/fasta/AP027131.fasta",
+          "newline_profile": {
+            "bare_cr_count": 0,
+            "bare_lf_count": 9461,
+            "crlf_count": 0,
+            "lf_count": 9461
+          },
+          "option": "-query",
+          "repository_relative": "LOSAT/tests/fasta/AP027131.fasta",
+          "role": "query",
+          "sha256": "184a9e3264cf522a1187716754cf9bca6dab8e882d76f9a267862751570bde80"
+        },
+        "shell": false,
+        "subject": {
+          "byte_length": 614931,
+          "lexical_path": "/tmp/losat-pr5-runtime-cert-5845d22/LOSAT/tests/fasta/AP027133.fasta",
+          "newline_profile": {
+            "bare_cr_count": 0,
+            "bare_lf_count": 8662,
+            "crlf_count": 0,
+            "lf_count": 8662
+          },
+          "option": "-subject",
+          "repository_relative": "LOSAT/tests/fasta/AP027133.fasta",
+          "role": "subject",
+          "sha256": "3942c9759d39d8d209b26b63e822b60c43de4c16d1477158dce8ab07966dd07d"
+        },
+        "working_directory_contract": "repository_root"
+      }
+    ]
+  },
+  "schema_version": 1
+}

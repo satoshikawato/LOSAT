@@ -453,9 +453,6 @@ fn compare_subject_groups(a: &SubjectGroup, b: &SubjectGroup) -> Ordering {
     b.s_idx.cmp(&a.s_idx)
 }
 
-type HitCompare = fn(&Hit, &Hit) -> Ordering;
-type SubjectGroupCompare = fn(&SubjectGroup, &SubjectGroup) -> Ordering;
-
 // NCBI reference: /mnt/c/Users/genom/GitHub/ncbi-blast/c++/src/algo/blast/core/blast_hits.c:1379-1381
 // ```c
 // qsort(hsp_list->hsp_array, hsp_list->hspcnt, sizeof(BlastHSP*),
@@ -466,26 +463,6 @@ type SubjectGroupCompare = fn(&SubjectGroup, &SubjectGroup) -> Ordering;
 // qsort(hsp_list->hsp_array, hsp_list->hspcnt, sizeof(BlastHSP*),
 //       s_EvalueCompareHSPs);
 // ```
-// LOSAT owns Hit values in a Vec rather than a BlastHSP* array. Sort pointer-
-// sized indices with the native C qsort, then replay that order onto the Vec so
-// comparator-equal entries follow the same qsort behavior without LOSAT-only
-// tie-break fields.
-fn qsort_hits_by(hits: &mut Vec<Hit>, compare: HitCompare) {
-    if hits.len() <= 1 {
-        return;
-    }
-
-    let mut slots: Vec<Option<Hit>> = std::mem::take(hits).into_iter().map(Some).collect();
-    let mut indices: Vec<usize> = (0..slots.len()).collect();
-    qsort_hit_indices(&slots, &mut indices, compare);
-
-    hits.extend(
-        indices
-            .into_iter()
-            .map(|index| slots[index].take().expect("qsort replay index used once")),
-    );
-}
-
 // NCBI reference: /mnt/c/Users/genom/GitHub/ncbi-blast/c++/src/algo/blast/core/blast_hits.c:3331-3337
 // ```c
 // if (hit_list && hit_list->hsplist_count > 1) {
@@ -493,233 +470,30 @@ fn qsort_hits_by(hits: &mut Vec<Hit>, compare: HitCompare) {
 //             sizeof(BlastHSPList*), s_EvalueCompareHSPLists);
 // }
 // ```
-// Sort BlastHSPList-equivalent subject groups through the same pointer-sized
-// index replay used for HSPs.
-fn qsort_subject_groups_by(subject_groups: &mut Vec<SubjectGroup>, compare: SubjectGroupCompare) {
-    if subject_groups.len() <= 1 {
+// LOSAT owns complete Hit and SubjectGroup values rather than NCBI pointer
+// arrays. Stable-sort their original indices with the unchanged NCBI
+// comparator, then move each complete record exactly once in that index order.
+// Comparator-equal records therefore retain their incoming relative order
+// without adding a LOSAT-only tie-break field.
+fn stable_sort_by_index_replay<T>(records: &mut Vec<T>, compare: fn(&T, &T) -> Ordering) {
+    if records.len() <= 1 {
         return;
     }
 
-    let mut slots: Vec<Option<SubjectGroup>> = std::mem::take(subject_groups)
-        .into_iter()
-        .map(Some)
-        .collect();
+    let mut slots: Vec<Option<T>> = std::mem::take(records).into_iter().map(Some).collect();
     let mut indices: Vec<usize> = (0..slots.len()).collect();
-    qsort_subject_group_indices(&slots, &mut indices, compare);
-
-    subject_groups.extend(
-        indices
-            .into_iter()
-            .map(|index| slots[index].take().expect("qsort replay index used once")),
-    );
-}
-
-#[cfg(target_arch = "wasm32")]
-fn qsort_hit_indices(slots: &[Option<Hit>], indices: &mut [usize], compare: HitCompare) {
-    // NCBI reference: /mnt/c/Users/genom/GitHub/ncbi-blast/c++/src/algo/blast/core/blast_hits.c:1379-1381
-    // ```c
-    // qsort(hsp_list->hsp_array, hsp_list->hspcnt, sizeof(BlastHSP*),
-    //       ScoreCompareHSPs);
-    // ```
-    // Wasm has no C qsort in this build. Keep the same index-array replay
-    // shape and avoid adding ordering criteria beyond NCBI's comparator.
     indices.sort_by(|&lhs, &rhs| {
         compare(
-            slots[lhs].as_ref().expect("qsort lhs slot present"),
-            slots[rhs].as_ref().expect("qsort rhs slot present"),
+            slots[lhs].as_ref().expect("stable sort lhs slot present"),
+            slots[rhs].as_ref().expect("stable sort rhs slot present"),
         )
     });
-}
 
-#[cfg(target_arch = "wasm32")]
-fn qsort_subject_group_indices(
-    slots: &[Option<SubjectGroup>],
-    indices: &mut [usize],
-    compare: SubjectGroupCompare,
-) {
-    // NCBI reference: /mnt/c/Users/genom/GitHub/ncbi-blast/c++/src/algo/blast/core/blast_hits.c:3331-3337
-    // ```c
-    // qsort(hit_list->hsplist_array, hit_list->hsplist_count,
-    //          sizeof(BlastHSPList*), s_EvalueCompareHSPLists);
-    // ```
-    // Wasm replays sorted indices so subject grouping follows the same
-    // comparator surface as the native qsort wrapper.
-    indices.sort_by(|&lhs, &rhs| {
-        compare(
-            slots[lhs].as_ref().expect("qsort lhs slot present"),
-            slots[rhs].as_ref().expect("qsort rhs slot present"),
-        )
-    });
-}
-
-#[cfg(not(target_arch = "wasm32"))]
-fn qsort_hit_indices(slots: &[Option<Hit>], indices: &mut [usize], compare: HitCompare) {
-    output_qsort_native::qsort_hit_indices(slots, indices, compare);
-}
-
-#[cfg(not(target_arch = "wasm32"))]
-fn qsort_subject_group_indices(
-    slots: &[Option<SubjectGroup>],
-    indices: &mut [usize],
-    compare: SubjectGroupCompare,
-) {
-    output_qsort_native::qsort_subject_group_indices(slots, indices, compare);
-}
-
-#[cfg(not(target_arch = "wasm32"))]
-mod output_qsort_native {
-    use super::{Hit, HitCompare, SubjectGroup, SubjectGroupCompare};
-    use std::cell::Cell;
-    use std::cmp::Ordering;
-    use std::ffi::c_void;
-    use std::mem;
-    use std::os::raw::c_int;
-
-    #[derive(Clone, Copy)]
-    struct HitQsortContext {
-        slots: *const Option<Hit>,
-        len: usize,
-        compare: HitCompare,
-    }
-
-    #[derive(Clone, Copy)]
-    struct SubjectGroupQsortContext {
-        slots: *const Option<SubjectGroup>,
-        len: usize,
-        compare: SubjectGroupCompare,
-    }
-
-    thread_local! {
-        static HIT_QSORT_CONTEXT: Cell<Option<HitQsortContext>> = const { Cell::new(None) };
-        static SUBJECT_GROUP_QSORT_CONTEXT: Cell<Option<SubjectGroupQsortContext>> = const { Cell::new(None) };
-    }
-
-    unsafe extern "C" {
-        fn qsort(
-            base: *mut c_void,
-            nmemb: usize,
-            size: usize,
-            compar: extern "C" fn(*const c_void, *const c_void) -> c_int,
-        );
-    }
-
-    extern "C" fn compare_hit_indices(lhs: *const c_void, rhs: *const c_void) -> c_int {
-        // Safety: qsort passes pointers to elements of the usize index array
-        // supplied in qsort_hit_indices.
-        let lhs_index = unsafe { *(lhs as *const usize) };
-        let rhs_index = unsafe { *(rhs as *const usize) };
-
-        HIT_QSORT_CONTEXT.with(|cell| {
-            let Some(ctx) = cell.get() else {
-                return 0;
-            };
-            if lhs_index >= ctx.len || rhs_index >= ctx.len {
-                return 0;
-            }
-
-            // Safety: ctx.slots points at the immutable slots slice that
-            // outlives the qsort call; indices are checked against ctx.len.
-            let lhs_hit = unsafe { &*ctx.slots.add(lhs_index) }
-                .as_ref()
-                .expect("qsort lhs slot present");
-            let rhs_hit = unsafe { &*ctx.slots.add(rhs_index) }
-                .as_ref()
-                .expect("qsort rhs slot present");
-
-            match (ctx.compare)(lhs_hit, rhs_hit) {
-                Ordering::Less => -1,
-                Ordering::Equal => 0,
-                Ordering::Greater => 1,
-            }
-        })
-    }
-
-    extern "C" fn compare_subject_group_indices(lhs: *const c_void, rhs: *const c_void) -> c_int {
-        // Safety: qsort passes pointers to elements of the usize index array
-        // supplied in qsort_subject_group_indices.
-        let lhs_index = unsafe { *(lhs as *const usize) };
-        let rhs_index = unsafe { *(rhs as *const usize) };
-
-        SUBJECT_GROUP_QSORT_CONTEXT.with(|cell| {
-            let Some(ctx) = cell.get() else {
-                return 0;
-            };
-            if lhs_index >= ctx.len || rhs_index >= ctx.len {
-                return 0;
-            }
-
-            // Safety: ctx.slots points at the immutable slots slice that
-            // outlives the qsort call; indices are checked against ctx.len.
-            let lhs_group = unsafe { &*ctx.slots.add(lhs_index) }
-                .as_ref()
-                .expect("qsort lhs slot present");
-            let rhs_group = unsafe { &*ctx.slots.add(rhs_index) }
-                .as_ref()
-                .expect("qsort rhs slot present");
-
-            match (ctx.compare)(lhs_group, rhs_group) {
-                Ordering::Less => -1,
-                Ordering::Equal => 0,
-                Ordering::Greater => 1,
-            }
-        })
-    }
-
-    pub(super) fn qsort_hit_indices(
-        slots: &[Option<Hit>],
-        indices: &mut [usize],
-        compare: HitCompare,
-    ) {
-        let ctx = HitQsortContext {
-            slots: slots.as_ptr(),
-            len: slots.len(),
-            compare,
-        };
-
-        HIT_QSORT_CONTEXT.with(|cell| {
-            let previous = cell.replace(Some(ctx));
-            // Safety: indices is a valid mutable array of pointer-sized usize
-            // elements; the comparator only reads from `slots`, which outlives
-            // this call.
-            unsafe {
-                qsort(
-                    indices.as_mut_ptr().cast::<c_void>(),
-                    indices.len(),
-                    mem::size_of::<usize>(),
-                    compare_hit_indices,
-                );
-            }
-            cell.set(previous);
-        });
-    }
-
-    pub(super) fn qsort_subject_group_indices(
-        slots: &[Option<SubjectGroup>],
-        indices: &mut [usize],
-        compare: SubjectGroupCompare,
-    ) {
-        let ctx = SubjectGroupQsortContext {
-            slots: slots.as_ptr(),
-            len: slots.len(),
-            compare,
-        };
-
-        SUBJECT_GROUP_QSORT_CONTEXT.with(|cell| {
-            let previous = cell.replace(Some(ctx));
-            // Safety: indices is a valid mutable array of pointer-sized usize
-            // elements; the comparator only reads from `slots`, which outlives
-            // this call.
-            unsafe {
-                qsort(
-                    indices.as_mut_ptr().cast::<c_void>(),
-                    indices.len(),
-                    mem::size_of::<usize>(),
-                    compare_subject_group_indices,
-                );
-            }
-            cell.set(previous);
-        });
-    }
+    records.extend(indices.into_iter().map(|index| {
+        slots[index]
+            .take()
+            .expect("stable sort replay index used once")
+    }));
 }
 
 pub fn write_output(
@@ -1130,7 +904,7 @@ fn write_output_ncbi_order_with_format_to_writer_impl<W: Write>(
                             //          sizeof(BlastHSP*), ScoreCompareHSPs);
                             // }
                             // ```
-                            qsort_hits_by(&mut hsp_hits, score_compare_hsps);
+                            stable_sort_by_index_replay(&mut hsp_hits, score_compare_hsps);
                         }
                         HspOutputOrder::EvalueCompare => {
                             // NCBI reference: /mnt/c/Users/genom/GitHub/ncbi-blast/c++/src/algo/blast/api/blast_seqalign.cpp:1574-1577
@@ -1140,7 +914,7 @@ fn write_output_ncbi_order_with_format_to_writer_impl<W: Write>(
                             // // in Seq-aligns.
                             // Blast_HSPListSortByEvalue(hsp_list);
                             // ```
-                            qsort_hits_by(&mut hsp_hits, evalue_compare_hsps);
+                            stable_sort_by_index_replay(&mut hsp_hits, evalue_compare_hsps);
                         }
                     }
 
@@ -1176,7 +950,7 @@ fn write_output_ncbi_order_with_format_to_writer_impl<W: Write>(
         //             sizeof(BlastHSPList*), s_EvalueCompareHSPLists);
         // }
         // ```
-        qsort_subject_groups_by(&mut subject_groups, compare_subject_groups);
+        stable_sort_by_index_replay(&mut subject_groups, compare_subject_groups);
 
         // Step 3: Output in order based on format
         match outfmt {
@@ -1272,4 +1046,157 @@ fn write_output_ncbi_order_with_format_to_writer_impl<W: Write>(
     }
 
     Ok(())
+}
+
+// NCBI reference: /mnt/c/Users/genom/GitHub/ncbi-blast/c++/src/algo/blast/core/blast_hits.c:1347-1355
+// ```c
+// if (0 == (result = BLAST_CMP(hsp2->score,          hsp1->score)) &&
+//     0 == (result = BLAST_CMP(hsp1->subject.offset, hsp2->subject.offset)) &&
+//     0 == (result = BLAST_CMP(hsp2->subject.end,    hsp1->subject.end)) &&
+//     0 == (result = BLAST_CMP(hsp1->query.offset,   hsp2->query.offset))) {
+//     result = BLAST_CMP(hsp2->query.end, hsp1->query.end);
+// }
+// ```
+// NCBI reference: /mnt/c/Users/genom/GitHub/ncbi-blast/c++/src/algo/blast/core/blast_hits.c:3095-3106
+// ```c
+// if ((retval = s_EvalueComp(h1->best_evalue, h2->best_evalue)) != 0)
+//    return retval;
+// if (h1->hsp_array[0]->score > h2->hsp_array[0]->score) return -1;
+// if (h1->hsp_array[0]->score < h2->hsp_array[0]->score) return 1;
+// return BLAST_CMP(h2->oid, h1->oid);
+// ```
+#[cfg(test)]
+mod shared_output_sort_tests {
+    use super::*;
+
+    fn hit(marker: usize, raw_score: i32, e_value: f64) -> Hit {
+        Hit {
+            identity: marker as f64,
+            length: 100 + marker,
+            mismatch: marker + 1,
+            gapopen: marker + 2,
+            q_start: 11,
+            q_end: 20,
+            s_start: 31,
+            s_end: 40,
+            e_value,
+            bit_score: 50.0 + marker as f64,
+            num_ident: marker + 3,
+            query_frame: 1,
+            query_length: 200,
+            q_idx: 0,
+            s_idx: 0,
+            raw_score,
+            sort_query_offset: 10,
+            sort_query_end: 20,
+            sort_subject_offset: 30,
+            sort_subject_end: 40,
+            has_sort_offsets: true,
+            gap_info: Some(vec![GapEditOp::Sub(marker as u32)]),
+            num_positives: marker + 4,
+        }
+    }
+
+    fn output_bit_scores(bytes: &[u8]) -> Vec<String> {
+        String::from_utf8(bytes.to_vec())
+            .expect("shared output is UTF-8")
+            .lines()
+            .map(|line| {
+                line.split('\t')
+                    .nth(11)
+                    .expect("outfmt 6 bit-score field")
+                    .to_owned()
+            })
+            .collect()
+    }
+
+    #[test]
+    fn stable_equal_hit_indices_preserve_incoming_complete_records() {
+        let mut hits = vec![hit(11, 100, 1.0e-20), hit(22, 100, 1.0e-20)];
+        let original = hits
+            .iter()
+            .map(|value| format!("{value:?}"))
+            .collect::<Vec<_>>();
+
+        stable_sort_by_index_replay(&mut hits, score_compare_hsps);
+
+        assert_eq!(
+            hits.iter()
+                .map(|value| format!("{value:?}"))
+                .collect::<Vec<_>>(),
+            original
+        );
+    }
+
+    #[test]
+    fn stable_equal_subject_group_indices_preserve_incoming_order() {
+        let mut groups = vec![
+            SubjectGroup {
+                s_idx: 7,
+                best_evalue: 1.0e-30,
+                best_score: 200,
+                hits: vec![hit(11, 200, 1.0e-30)],
+            },
+            SubjectGroup {
+                s_idx: 7,
+                best_evalue: 1.0e-30,
+                best_score: 200,
+                hits: vec![hit(22, 200, 1.0e-30)],
+            },
+        ];
+
+        stable_sort_by_index_replay(&mut groups, compare_subject_groups);
+
+        assert_eq!(groups[0].hits[0].identity, 11.0);
+        assert_eq!(groups[1].hits[0].identity, 22.0);
+    }
+
+    #[test]
+    fn index_replay_moves_each_complete_record_without_synthesis_or_loss() {
+        let mut hits = vec![
+            hit(11, 100, 1.0e-10),
+            hit(22, 300, 1.0e-20),
+            hit(33, 200, 1.0e-30),
+        ];
+        let expected = [1, 2, 0]
+            .into_iter()
+            .map(|index| format!("{:?}", hits[index]))
+            .collect::<Vec<_>>();
+
+        stable_sort_by_index_replay(&mut hits, score_compare_hsps);
+
+        assert_eq!(
+            hits.iter()
+                .map(|value| format!("{value:?}"))
+                .collect::<Vec<_>>(),
+            expected
+        );
+    }
+
+    #[test]
+    fn public_score_and_evalue_output_entry_points_keep_comparator_semantics() {
+        let hits = vec![hit(11, 200, 1.0e-5), hit(22, 100, 1.0e-20)];
+        let query_ids = vec![Arc::<str>::from("query")];
+        let subject_ids = vec![Arc::<str>::from("subject")];
+        let mut score_output = Vec::new();
+        let mut evalue_output = Vec::new();
+
+        write_output_ncbi_order_to_writer(
+            hits.clone(),
+            &mut score_output,
+            &query_ids,
+            &subject_ids,
+        )
+        .expect("score-order shared output");
+        write_output_ncbi_order_evalue_hsp_order_to_writer(
+            hits,
+            &mut evalue_output,
+            &query_ids,
+            &subject_ids,
+        )
+        .expect("evalue-order shared output");
+
+        assert_eq!(output_bit_scores(&score_output), ["61.0", "72.0"]);
+        assert_eq!(output_bit_scores(&evalue_output), ["72.0", "61.0"]);
+    }
 }

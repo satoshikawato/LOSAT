@@ -1,0 +1,157 @@
+{
+  "schema_version": 1,
+  "release": "v0.1.0",
+  "package_name": "LOSAT",
+  "package_version": "0.1.0",
+  "integration_base_sha": "77ce8248d8a06b2f412bf669dc6b89a3b858d322",
+  "cert_toolchain": {
+    "rust": "1.92.0",
+    "cargo": "1.92.0",
+    "node": "18.19.1",
+    "profile": "release",
+    "locked": true,
+    "output_affecting_environment": {
+      "CARGO_BUILD_RUSTFLAGS": "",
+      "CARGO_ENCODED_RUSTFLAGS": "",
+      "CC": "",
+      "CFLAGS": "",
+      "CPPFLAGS": "",
+      "LDFLAGS": "",
+      "RUSTC_LINKER": "",
+      "RUSTFLAGS": ""
+    }
+  },
+  "binary_hash_policy": {
+    "candidate_artifact_hashes": "generated and verified for the exact RC workflow outputs",
+    "historical_certification_hashes": "retained as certification provenance only; they are not cross-runner reproducibility gates",
+    "cross_runner_binary_equality_required": false
+  },
+  "certification_lineage": {
+    "integrated_runtime": {
+      "decision": "INTEGRATED_RUNTIME_CERTIFIED",
+      "sha": "5845d22ed9842449628a647f29b8c6762511ca59",
+      "evidence_manifest_sha256": "b9fc98a376d2849274c86b4e4769d2ee38b76025adbb4d63d3da4a5e3e7cdb5c",
+      "native_contracts": 43,
+      "serial_wasm_equalities": 41
+    },
+    "cross_platform_native": {
+      "decision": "CROSS_PLATFORM_NATIVE_CERTIFIED",
+      "sha": "647e5f13c6f6c32f7877568e187125d7f71ece19",
+      "run_id": 33625511701,
+      "native_contracts_per_platform": 43,
+      "platform_executions": 183
+    },
+    "merge_ci": {
+      "sha": "77ce8248d8a06b2f412bf669dc6b89a3b858d322",
+      "run_id": 33699268200,
+      "status": "completed",
+      "conclusion": "success"
+    },
+    "post_pr5_reviewed_change": {
+      "sha": "2e03e0ead4c5bbc1c3e279cb12f0eccc2608fd0a",
+      "scope": "aarch64-only standard-library feature-detection macro import",
+      "effect": "compile portability only; no comparison condition or observable BLAST behavior changed",
+      "coverage": "PR 6 certified all 43 canonical native contracts on macOS arm64 after this change; the cfg is inapplicable to Linux x64 and wasm32-wasip1"
+    },
+    "rerun_required": false,
+    "rerun_reason": "PR 7 changes release tooling, focused tests, and release documentation only; runtime/build/contract authorities remain byte-identical to the PR 6 integration base"
+  },
+  "smoke": {
+    "program": "blastp",
+    "case_id": "pairwise_default_serial",
+    "query": "LOSAT/tests/fasta/SicyWSV.faa",
+    "subject": "LOSAT/tests/fasta/PajaWSV.faa",
+    "expected_output_sha256": "fd4b010800e32ce6c823cb38b42a10b7845f3342edae892acccc8f554f9edf34",
+    "arguments": [
+      "blastp",
+      "--query",
+      "{query}",
+      "--subject",
+      "{subject}",
+      "--max-hsps-per-subject",
+      "1",
+      "--outfmt",
+      "6",
+      "--num-threads",
+      "1",
+      "--out",
+      "{output}"
+    ]
+  },
+  "artifacts": [
+    {
+      "kind": "native",
+      "target": "x86_64-unknown-linux-gnu",
+      "runner": "ubuntu-24.04",
+      "binary_name": "LOSAT",
+      "archive_format": "tar.gz",
+      "filename": "LOSAT-0.1.0-x86_64-unknown-linux-gnu.tar.gz",
+      "features": "default",
+      "build_command": "cargo build --release --locked",
+      "historical_certification_binary_sha256": "058587655963bf1eb253f232fdb5553819105646c0d1c50bbece96e410446819"
+    },
+    {
+      "kind": "native",
+      "target": "x86_64-pc-windows-msvc",
+      "runner": "windows-2025",
+      "binary_name": "LOSAT.exe",
+      "archive_format": "zip",
+      "filename": "LOSAT-0.1.0-x86_64-pc-windows-msvc.zip",
+      "features": "default",
+      "build_command": "cargo build --release --locked",
+      "historical_certification_binary_sha256": "7621d18f384f4cbb81505eb14c429748d394ac2358ca88b04b80d1f5b15dae47"
+    },
+    {
+      "kind": "native",
+      "target": "aarch64-apple-darwin",
+      "runner": "macos-15",
+      "binary_name": "LOSAT",
+      "archive_format": "tar.gz",
+      "filename": "LOSAT-0.1.0-aarch64-apple-darwin.tar.gz",
+      "features": "default",
+      "build_command": "cargo build --release --locked",
+      "historical_certification_binary_sha256": "d8e81b7ef82ef311c23fe39dd3711bc83d14d10c1bf6d4c08117ec84961b5825"
+    },
+    {
+      "kind": "native",
+      "target": "x86_64-apple-darwin",
+      "runner": "macos-15-intel",
+      "binary_name": "LOSAT",
+      "archive_format": "tar.gz",
+      "filename": "LOSAT-0.1.0-x86_64-apple-darwin.tar.gz",
+      "features": "default",
+      "build_command": "cargo build --release --locked",
+      "historical_certification_binary_sha256": "3d3bfd84640095887c77fa539f591118f97cb00ae5459e6b35e32ca6da1aa99a"
+    },
+    {
+      "kind": "wasm",
+      "target": "wasm32-wasip1",
+      "runner": "ubuntu-24.04",
+      "binary_name": "LOSAT.wasm",
+      "archive_format": "tar.gz",
+      "filename": "LOSAT-0.1.0-wasm32-wasip1.tar.gz",
+      "features": "no-default-features",
+      "build_command": "cargo build --release --target wasm32-wasip1 --no-default-features --locked",
+      "historical_certification_binary_sha256": "000691b99169ddca8072954fdfa64348ad94b75546432655f6a05daea1d5eb47"
+    },
+    {
+      "kind": "source",
+      "target": "source",
+      "runner": "ubuntu-24.04",
+      "binary_name": null,
+      "archive_format": "crate",
+      "filename": "LOSAT-0.1.0.crate",
+      "features": "default",
+      "build_command": "cargo package --locked",
+      "historical_certification_binary_sha256": null
+    }
+  ],
+  "publication": {
+    "tag_created": false,
+    "github_release_created": false,
+    "registry_upload_performed": false,
+    "bioconda_submission_performed": false,
+    "signing_performed": false,
+    "notarization_performed": false
+  }
+}

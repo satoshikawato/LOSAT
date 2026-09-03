@@ -1,0 +1,10 @@
+case_id	profile_ids	use_case	query	subject	max_hsps_per_subject	max_target_seqs	num_threads	outfmt	coverage_note
+pairwise_default_serial	P1	pairwise	LOSAT/tests/fasta/SicyWSV.faa	LOSAT/tests/fasta/PajaWSV.faa	1		1	6	default target limit and multiple subject candidates
+pairwise_limit1_serial	P1	pairwise	LOSAT/tests/fasta/SicyWSV.faa	LOSAT/tests/fasta/PajaWSV.faa	1	1	1	6	positive candidate-limit lower boundary
+pairwise_limit5_serial	P1	pairwise	LOSAT/tests/fasta/SicyWSV.faa	LOSAT/tests/fasta/PajaWSV.faa	1	5	1	6	explicit candidate limit used by gbdraw
+pairwise_nohit_serial	P1	pairwise	LOSAT/tests/fasta/SicyWSV.faa	LOSAT/tests/fasta/AP027078.faa	1		1	6	query contexts with no retained row
+pairwise_default_thread4	P1	pairwise	LOSAT/tests/fasta/SicyWSV.faa	LOSAT/tests/fasta/PajaWSV.faa	1		4	6	native threaded execution
+all_hsp_forward_serial	P2,P3	orthogroup-collinear	LOSAT/tests/fasta/SicyWSV.faa	LOSAT/tests/fasta/PajaWSV.faa			1	6	all-HSP directional search with default target limit
+all_hsp_reverse_limit5_serial	P2,P3	orthogroup-collinear	LOSAT/tests/fasta/PajaWSV.faa	LOSAT/tests/fasta/SicyWSV.faa		5	1	6	reverse directional search with explicit candidate limit
+all_hsp_self_serial	P2,P3	orthogroup-collinear	LOSAT/tests/fasta/SicyWSV.faa	LOSAT/tests/fasta/SicyWSV.faa			1	6	self search required by grouping and collinear workflows
+all_hsp_forward_thread4	P2,P3	orthogroup-collinear	LOSAT/tests/fasta/SicyWSV.faa	LOSAT/tests/fasta/PajaWSV.faa			4	6	native threaded all-HSP execution

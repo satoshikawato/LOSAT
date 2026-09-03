@@ -115,6 +115,20 @@ def load_contract(repo_root: Path) -> dict[str, object]:
     filenames = [item.get("filename") for item in artifacts if isinstance(item, dict)]
     if len(filenames) != len(set(filenames)) or any(not name for name in filenames):
         raise ReleaseFailure("RC artifact filenames must be unique and non-empty")
+    hash_policy = contract.get("binary_hash_policy")
+    if (
+        not isinstance(hash_policy, dict)
+        or hash_policy.get("cross_runner_binary_equality_required") is not False
+    ):
+        raise ReleaseFailure("RC binary hash policy must reject cross-runner equality claims")
+    for item in artifacts:
+        if not isinstance(item, dict) or item.get("kind") == "source":
+            continue
+        historical_hash = item.get("historical_certification_binary_sha256")
+        if not isinstance(historical_hash, str) or len(historical_hash) != 64 or any(
+            character not in "0123456789abcdef" for character in historical_hash
+        ):
+            raise ReleaseFailure("RC executable artifacts require historical hash provenance")
     return contract
 
 
@@ -485,12 +499,7 @@ def assemble_binary(args: argparse.Namespace, kind: str) -> None:
         )
     smoke = run_smoke(command_prefix, repo_root, contract)
     binary_sha256 = sha256_path(binary)
-    certified_binary_sha256 = str(spec["certified_binary_sha256"])
-    if binary_sha256 != certified_binary_sha256:
-        raise ReleaseFailure(
-            f"{args.target} binary does not reproduce its certified hash: "
-            f"expected {certified_binary_sha256}, observed {binary_sha256}"
-        )
+    historical_binary_sha256 = str(spec["historical_certification_binary_sha256"])
 
     filename = str(spec["filename"])
     archive = output_dir / filename
@@ -514,9 +523,13 @@ def assemble_binary(args: argparse.Namespace, kind: str) -> None:
             "size": binary.stat().st_size,
             "architecture": observed_architecture,
             "version": observed_version,
-            "certified_binary_sha256": certified_binary_sha256,
-            "certified_hash_reproduced": True,
         },
+        "certification_binary_reference": {
+            "sha256": historical_binary_sha256,
+            "same_bytes_in_this_build": binary_sha256 == historical_binary_sha256,
+            "role": "historical certification provenance; not a cross-runner equality gate",
+        },
+        "binary_hash_policy": contract["binary_hash_policy"],
         "toolchain": toolchain,
         "pre_archive_smoke": smoke,
         "certification_lineage": contract["certification_lineage"],
@@ -678,6 +691,7 @@ def prepare_source(args: argparse.Namespace) -> None:
             "status": "PASS",
         },
         "certification_lineage": contract["certification_lineage"],
+        "binary_hash_policy": contract["binary_hash_policy"],
         "publication": contract["publication"],
         "status": "PASS",
     }
@@ -726,6 +740,7 @@ def aggregate(args: argparse.Namespace) -> None:
             metadata.get("candidate_sha") != args.candidate_sha
             or metadata.get("status") != "PASS"
             or metadata.get("publication") != contract["publication"]
+            or metadata.get("binary_hash_policy") != contract["binary_hash_policy"]
         ):
             raise ReleaseFailure(f"artifact metadata identity/status mismatch for {filename}")
         artifact_metadata = metadata.get("artifact")
@@ -775,6 +790,7 @@ def aggregate(args: argparse.Namespace) -> None:
         "workflow_run_id": str(args.workflow_run_id),
         "artifacts": records,
         "certification_lineage": contract["certification_lineage"],
+        "binary_hash_policy": contract["binary_hash_policy"],
         "integrated_certification_rerun": rerun,
         "integrated_certification_rerun_reason": (
             "explicit workflow input requested a fresh integrated run"

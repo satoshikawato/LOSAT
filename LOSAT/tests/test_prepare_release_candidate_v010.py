@@ -81,6 +81,15 @@ class ReleaseCandidateTests(unittest.TestCase):
             183,
         )
         self.assertFalse(any(contract["publication"].values()))
+        self.assertFalse(
+            contract["binary_hash_policy"]["cross_runner_binary_equality_required"]
+        )
+        for item in contract["artifacts"]:
+            historical_hash = item["historical_certification_binary_sha256"]
+            if item["kind"] == "source":
+                self.assertIsNone(historical_hash)
+            else:
+                self.assertRegex(historical_hash, r"^[0-9a-f]{64}$")
 
     def test_tar_and_zip_assembly_are_deterministic(self) -> None:
         entries = [
@@ -163,6 +172,49 @@ class ReleaseCandidateTests(unittest.TestCase):
             Path(subject), (REPO_ROOT / contract["smoke"]["subject"]).resolve()
         )
 
+    def test_candidate_binary_hash_is_recorded_without_cross_runner_equality(self) -> None:
+        contract = deepcopy(release.load_contract(REPO_ROOT))
+        target = "x86_64-unknown-linux-gnu"
+        spec = release.artifact_spec(contract, "native", target)
+        spec["historical_certification_binary_sha256"] = "f" * 64
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            binary = root / "LOSAT"
+            image = bytearray(64)
+            image[:6] = b"\x7fELF\x02\x01"
+            image[18:20] = (62).to_bytes(2, "little")
+            binary.write_bytes(image)
+            output_dir = root / "output"
+            args = argparse.Namespace(
+                repo_root=REPO_ROOT,
+                candidate_sha="a" * 40,
+                target=target,
+                binary=binary,
+                output_dir=output_dir,
+            )
+            with (
+                mock.patch.object(release, "load_contract", return_value=contract),
+                mock.patch.object(release, "validate_candidate"),
+                mock.patch.object(release, "capture_toolchain", return_value={}),
+                mock.patch.object(release, "version_output", return_value="losat 0.1.0"),
+                mock.patch.object(release, "run_smoke", return_value={"status": "PASS"}),
+            ):
+                release.assemble_binary(args, "native")
+
+            metadata = json.loads(
+                (output_dir / f"{spec['filename']}.metadata.json").read_text(
+                    encoding="utf-8"
+                )
+            )
+            self.assertEqual(metadata["candidate_sha"], args.candidate_sha)
+            self.assertEqual(metadata["binary"]["sha256"], release.sha256_path(binary))
+            self.assertFalse(
+                metadata["certification_binary_reference"]["same_bytes_in_this_build"]
+            )
+            self.assertEqual(
+                metadata["certification_binary_reference"]["sha256"], "f" * 64
+            )
+
     def test_source_crate_rejects_generated_content(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             crate = Path(temp_dir) / "LOSAT-0.1.0.crate"
@@ -241,6 +293,7 @@ class ReleaseCandidateTests(unittest.TestCase):
                             else {}
                         ),
                         "certification_lineage": contract["certification_lineage"],
+                        "binary_hash_policy": contract["binary_hash_policy"],
                         "publication": contract["publication"],
                         "status": "PASS",
                     },

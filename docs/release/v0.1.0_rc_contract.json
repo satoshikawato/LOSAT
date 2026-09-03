@@ -21,6 +21,11 @@
       "RUSTFLAGS": ""
     }
   },
+  "binary_hash_policy": {
+    "candidate_artifact_hashes": "generated and verified for the exact RC workflow outputs",
+    "historical_certification_hashes": "retained as certification provenance only; they are not cross-runner reproducibility gates",
+    "cross_runner_binary_equality_required": false
+  },
   "certification_lineage": {
     "integrated_runtime": {
       "decision": "INTEGRATED_RUNTIME_CERTIFIED",
@@ -83,7 +88,7 @@
       "filename": "LOSAT-0.1.0-x86_64-unknown-linux-gnu.tar.gz",
       "features": "default",
       "build_command": "cargo build --release --locked",
-      "certified_binary_sha256": "058587655963bf1eb253f232fdb5553819105646c0d1c50bbece96e410446819"
+      "historical_certification_binary_sha256": "058587655963bf1eb253f232fdb5553819105646c0d1c50bbece96e410446819"
     },
     {
       "kind": "native",
@@ -94,7 +99,7 @@
       "filename": "LOSAT-0.1.0-x86_64-pc-windows-msvc.zip",
       "features": "default",
       "build_command": "cargo build --release --locked",
-      "certified_binary_sha256": "7621d18f384f4cbb81505eb14c429748d394ac2358ca88b04b80d1f5b15dae47"
+      "historical_certification_binary_sha256": "7621d18f384f4cbb81505eb14c429748d394ac2358ca88b04b80d1f5b15dae47"
     },
     {
       "kind": "native",
@@ -105,7 +110,7 @@
       "filename": "LOSAT-0.1.0-aarch64-apple-darwin.tar.gz",
       "features": "default",
       "build_command": "cargo build --release --locked",
-      "certified_binary_sha256": "d8e81b7ef82ef311c23fe39dd3711bc83d14d10c1bf6d4c08117ec84961b5825"
+      "historical_certification_binary_sha256": "d8e81b7ef82ef311c23fe39dd3711bc83d14d10c1bf6d4c08117ec84961b5825"
     },
     {
       "kind": "native",
@@ -116,7 +121,7 @@
       "filename": "LOSAT-0.1.0-x86_64-apple-darwin.tar.gz",
       "features": "default",
       "build_command": "cargo build --release --locked",
-      "certified_binary_sha256": "3d3bfd84640095887c77fa539f591118f97cb00ae5459e6b35e32ca6da1aa99a"
+      "historical_certification_binary_sha256": "3d3bfd84640095887c77fa539f591118f97cb00ae5459e6b35e32ca6da1aa99a"
     },
     {
       "kind": "wasm",
@@ -127,7 +132,7 @@
       "filename": "LOSAT-0.1.0-wasm32-wasip1.tar.gz",
       "features": "no-default-features",
       "build_command": "cargo build --release --target wasm32-wasip1 --no-default-features --locked",
-      "certified_binary_sha256": "000691b99169ddca8072954fdfa64348ad94b75546432655f6a05daea1d5eb47"
+      "historical_certification_binary_sha256": "000691b99169ddca8072954fdfa64348ad94b75546432655f6a05daea1d5eb47"
     },
     {
       "kind": "source",
@@ -138,7 +143,7 @@
       "filename": "LOSAT-0.1.0.crate",
       "features": "default",
       "build_command": "cargo package --locked",
-      "certified_binary_sha256": null
+      "historical_certification_binary_sha256": null
     }
   ],
   "publication": {

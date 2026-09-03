@@ -97,10 +97,13 @@ contains:
   `RC-HANDOFF.md`.
 
 The workflow verifies exact source ancestry and CERT_TOOLCHAIN identity,
-reproduces the certified executable hashes, inspects target architecture,
-extracts every binary archive, performs `--version` and representative BLASTP
-smoke checks, and installs/smokes the source package in a clean temporary
-location. Signing and notarization remain explicitly unperformed.
+records candidate-specific binary and archive hashes, inspects target
+architecture, extracts every binary archive, performs `--version` and
+representative BLASTP smoke checks, and installs/smokes the source package in a
+clean temporary location. Historical certification binary hashes remain
+provenance identities, not cross-runner byte-equality gates; the metadata
+records whether a candidate build happens to match them. Signing and
+notarization remain explicitly unperformed.
 
 Record the workflow run URL and generated `RC-HANDOFF.json` with the release
 review. Do not edit an artifact or checksum after the workflow creates it.

@@ -8,9 +8,9 @@
 use super::chaining::UngappedHit;
 use super::extension::convert_coords;
 use super::lookup::QueryContext;
-use super::ncbi_qsort::qsort_ungapped_hits_by;
 use super::tracing::{trace_hsp_target, trace_match_target, trace_ungapped_hit_if_match};
 use super::translation::QueryFrame;
+use super::ungapped_hit_sort::sort_ungapped_hits_by_index_replay;
 use std::cmp::Ordering;
 
 /// NCBI BlastInitHSP equivalent - stores initial HSP with absolute coordinates
@@ -323,7 +323,7 @@ pub fn get_ungapped_hsp_list(
     // }
     // ```
     if !ungapped_hits_is_sorted_by_score_ncbi(&ungapped_hits) {
-        ncbi_qsort_ungapped_hits_by_score(&mut ungapped_hits);
+        sort_ungapped_hits_by_score_ncbi(&mut ungapped_hits);
     }
     ungapped_hits
 }
@@ -359,7 +359,7 @@ pub(crate) fn score_compare_ungapped_hits_ncbi(a: &UngappedHit, b: &UngappedHit)
 // qsort(hsp_list->hsp_array, hsp_list->hspcnt, sizeof(BlastHSP*),
 //       ScoreCompareHSPs);
 // ```
-pub(crate) fn ncbi_qsort_ungapped_hits_by_score(hits: &mut [UngappedHit]) {
+pub(crate) fn sort_ungapped_hits_by_score_ncbi(hits: &mut [UngappedHit]) {
     if hits.len() <= 1 {
         return;
     }
@@ -382,7 +382,7 @@ pub(crate) fn ncbi_qsort_ungapped_hits_by_score(hits: &mut [UngappedHit]) {
     // `ScoreCompareHSPs` is a partial comparator for TBLASTX HSPs. Do not add
     // frame or per-frame insertion-order keys when it returns equality; NCBI
     // delegates comparator-equal rows to the platform qsort implementation.
-    qsort_ungapped_hits_by(hits, score_compare_ungapped_hits_ncbi);
+    sort_ungapped_hits_by_index_replay(hits, score_compare_ungapped_hits_ncbi);
 }
 
 // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_hits.c:1355-1369
@@ -628,7 +628,7 @@ mod tests {
             make_ungapped_for_sort(100, 1),
         ];
 
-        ncbi_qsort_ungapped_hits_by_score(&mut hits);
+        sort_ungapped_hits_by_score_ncbi(&mut hits);
 
         let ordered: Vec<(i32, usize)> = hits
             .iter()

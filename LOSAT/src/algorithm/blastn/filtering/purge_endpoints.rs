@@ -933,6 +933,257 @@ const BLASTNA_SIZE: usize = 16;
 mod tests {
     use super::*;
 
+    // NCBI reference: ncbi-blast/c++/include/algo/blast/core/gapinfo.h:45-53
+    // ```c
+    // typedef enum {
+    //    eGapAlignDel = 0, /**< Deletion: a gap in query */
+    //    eGapAlignSub = 3, /**< Substitution */
+    //    eGapAlignIns = 6, /**< Insertion: a gap in subject */
+    // } EGapAlignOpType;
+    // ```
+    fn edit_script_consumption(edit_ops: &[GapEditOp]) -> (usize, usize) {
+        edit_ops.iter().fold(
+            (0usize, 0usize),
+            |(query_consumed, subject_consumed), op| match op {
+                GapEditOp::Sub(count) => (
+                    query_consumed + *count as usize,
+                    subject_consumed + *count as usize,
+                ),
+                GapEditOp::Del(count) => (query_consumed, subject_consumed + *count as usize),
+                GapEditOp::Ins(count) => (query_consumed + *count as usize, subject_consumed),
+            },
+        )
+    }
+
+    // NCBI reference: ncbi-blast/c++/include/algo/blast/core/blast_hits.h:125-148
+    // ```c
+    // typedef struct BlastHSP {
+    //    Int4 score;
+    //    Int4 num_ident;
+    //    BlastSeg query;
+    //    BlastSeg subject;
+    //    Int4 context;
+    //    GapEditScript* gap_info;
+    // } BlastHSP;
+    // ```
+    fn opaque_equal_endpoint_hsps() -> (BlastnHsp, BlastnHsp) {
+        let g_ops = vec![
+            GapEditOp::Sub(10),
+            GapEditOp::Ins(1),
+            GapEditOp::Sub(1),
+            GapEditOp::Del(1),
+            GapEditOp::Sub(10),
+        ];
+        let s_ops = vec![GapEditOp::Sub(22)];
+        let opaque_query = [1u8; 22];
+        let opaque_subject = [1u8; 22];
+        let g_stats = stats_from_edit_ops(&opaque_query, &opaque_subject, 0, 0, &g_ops);
+        let s_stats = stats_from_edit_ops(&opaque_query, &opaque_subject, 0, 0, &s_ops);
+
+        let make_hsp = |gap_info: Vec<GapEditOp>,
+                        (matches, mismatches, gap_opens, _gap_letters, align_length): (
+            usize,
+            usize,
+            usize,
+            usize,
+            usize,
+        )| BlastnHsp {
+            identity: matches as f64 * 100.0 / align_length as f64,
+            length: align_length,
+            mismatch: mismatches,
+            gapopen: gap_opens,
+            q_start: 6,
+            q_end: 27,
+            s_start: 12,
+            s_end: 33,
+            e_value: 1.0e-9,
+            bit_score: 31.0,
+            num_ident: matches,
+            query_frame: 1,
+            query_length: 64,
+            q_idx: 2,
+            s_idx: 3,
+            raw_score: 42,
+            internal_q_offset_0: 5,
+            internal_q_end_0: 27,
+            internal_s_offset_0: 11,
+            internal_s_end_0: 33,
+            internal_query_context_offset: 0,
+            gap_info: Some(gap_info),
+            num_positives: matches,
+        };
+
+        (make_hsp(g_ops, g_stats), make_hsp(s_ops, s_stats))
+    }
+
+    // Test-only post-sort injection seam for the NCBI first-survivor loop.
+    // It intentionally omits qsort so tests can supply either permitted order
+    // without depending on the host libc's ordering of comparator-equal items.
+    //
+    // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_hits.c:2478-2500
+    // ```c
+    // qsort(hsp_array, hsp_count, sizeof(BlastHSP*), s_QueryOffsetCompareHSPs);
+    // while (i+j < hsp_count &&
+    //        hsp_array[i]->context == hsp_array[i+j]->context &&
+    //        hsp_array[i]->query.offset == hsp_array[i+j]->query.offset &&
+    //        hsp_array[i]->subject.offset == hsp_array[i+j]->subject.offset) {
+    //    hsp_count--;
+    //    hsp = hsp_array[i+j];
+    //    hsp = Blast_HSPFree(hsp);
+    //    for (k=i+j; k<hsp_count; k++) hsp_array[k] = hsp_array[k+1];
+    // }
+    // ```
+    fn purge_after_injected_common_start_sort(post_sort_order: Vec<BlastnHsp>) -> Vec<BlastnHsp> {
+        let mut hsp_array: Vec<Option<BlastnHsp>> = post_sort_order.into_iter().map(Some).collect();
+        let mut hsp_count = hsp_array.len();
+        let mut i = 0usize;
+        while i < hsp_count {
+            let j = 1usize;
+            while i + j < hsp_count && same_common_start(&hsp_array, i, i + j) {
+                hsp_count -= 1;
+                let _removed = hsp_array[i + j].take();
+                for k in (i + j)..hsp_count {
+                    hsp_array[k] = hsp_array[k + 1].take();
+                }
+                hsp_array[hsp_count] = None;
+            }
+            i += j;
+        }
+        hsp_array.into_iter().take(hsp_count).flatten().collect()
+    }
+
+    // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_hits.c:2268-2387
+    // Both common-endpoint comparators return zero after context, endpoints,
+    // and score tie; neither comparator examines GapEditScript.
+    #[test]
+    fn equivalent_scripts_keep_endpoints_and_score() {
+        let (g_path, s_path) = opaque_equal_endpoint_hsps();
+        let g_ops = g_path
+            .gap_info
+            .as_deref()
+            .expect("G path has an edit script");
+        let s_ops = s_path
+            .gap_info
+            .as_deref()
+            .expect("S path has an edit script");
+
+        assert_eq!(edit_script_consumption(g_ops), (22, 22));
+        assert_eq!(edit_script_consumption(s_ops), (22, 22));
+        assert_eq!(g_path.internal_q_offset_0, s_path.internal_q_offset_0);
+        assert_eq!(g_path.internal_q_end_0, s_path.internal_q_end_0);
+        assert_eq!(g_path.internal_s_offset_0, s_path.internal_s_offset_0);
+        assert_eq!(g_path.internal_s_end_0, s_path.internal_s_end_0);
+        assert_eq!(g_path.raw_score, s_path.raw_score);
+        assert_ne!(g_ops, s_ops);
+        assert_eq!(
+            (
+                g_path.num_ident,
+                g_path.length,
+                g_path.mismatch,
+                g_path.gapopen
+            ),
+            (21, 23, 0, 2)
+        );
+        assert_eq!(
+            (
+                s_path.num_ident,
+                s_path.length,
+                s_path.mismatch,
+                s_path.gapopen
+            ),
+            (22, 22, 0, 0)
+        );
+    }
+
+    // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_hits.c:2285-2387
+    // ```c
+    // if (h1->score < h2->score) return 1;
+    // if (h1->score > h2->score) return -1;
+    // ... compare the remaining endpoint ...
+    // return 0;
+    // ```
+    #[test]
+    fn common_endpoint_comparator_ignores_edit_script() {
+        let (g_path, s_path) = opaque_equal_endpoint_hsps();
+
+        assert_ne!(g_path.gap_info, s_path.gap_info);
+        assert_eq!(
+            compare_query_offset_hsps_for_common_endpoint(&g_path, &s_path),
+            Ordering::Equal
+        );
+        assert_eq!(
+            compare_query_offset_hsps_for_common_endpoint(&s_path, &g_path),
+            Ordering::Equal
+        );
+        assert_eq!(
+            compare_query_end_hsps_for_common_endpoint(&g_path, &s_path),
+            Ordering::Equal
+        );
+        assert_eq!(
+            compare_query_end_hsps_for_common_endpoint(&s_path, &g_path),
+            Ordering::Equal
+        );
+    }
+
+    // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_hits.c:2478-2500
+    // The common-start purge keeps hsp_array[i] and frees hsp_array[i+j].
+    #[test]
+    fn source_compatible_first_survivor_accepts_either_equal_order() {
+        let (g_path, s_path) = opaque_equal_endpoint_hsps();
+        let g_script = g_path.gap_info.clone();
+        let s_script = s_path.gap_info.clone();
+
+        let g_then_s = purge_after_injected_common_start_sort(vec![g_path.clone(), s_path.clone()]);
+        let s_then_g = purge_after_injected_common_start_sort(vec![s_path, g_path]);
+
+        assert_eq!(g_then_s.len(), 1);
+        assert_eq!(s_then_g.len(), 1);
+        assert_eq!(g_then_s[0].gap_info, g_script);
+        assert_eq!(s_then_g[0].gap_info, s_script);
+    }
+
+    // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_hits.c:2488-2498
+    // In purge mode the non-survivor is freed; the keeper's GapEditScript is
+    // neither trimmed nor combined with the removed HSP.
+    #[test]
+    fn source_compatible_purge_never_synthesizes_edit_script() {
+        let (g_path, s_path) = opaque_equal_endpoint_hsps();
+        let exact_inputs = [
+            (
+                g_path.gap_info.clone(),
+                g_path.num_ident,
+                g_path.length,
+                g_path.mismatch,
+                g_path.gapopen,
+            ),
+            (
+                s_path.gap_info.clone(),
+                s_path.num_ident,
+                s_path.length,
+                s_path.mismatch,
+                s_path.gapopen,
+            ),
+        ];
+
+        let survivors =
+            purge_after_injected_common_start_sort(vec![g_path.clone(), s_path.clone()])
+                .into_iter()
+                .chain(purge_after_injected_common_start_sort(vec![s_path, g_path]))
+                .collect::<Vec<_>>();
+        assert_eq!(survivors.len(), 2);
+
+        for survivor in survivors {
+            let observed = (
+                survivor.gap_info,
+                survivor.num_ident,
+                survivor.length,
+                survivor.mismatch,
+                survivor.gapopen,
+            );
+            assert!(exact_inputs.contains(&observed));
+        }
+    }
+
     // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_hits.c:2285-2318
     // ```c
     // if (h1->query.offset < h2->query.offset) return -1;

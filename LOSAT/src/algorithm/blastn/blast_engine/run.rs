@@ -3,6 +3,7 @@
 //! This module contains the main `run()` function that coordinates the BLASTN
 //! search process.
 
+use crate::common::GapEditOp;
 use anyhow::{Context, Result};
 use indicatif::{ProgressBar, ProgressStyle};
 // NCBI reference: ncbi-blast/c++/include/algo/blast/blastinput/blast_args.hpp:1290-1296
@@ -73,8 +74,9 @@ use super::super::filtering::{
     subject_best_hit, ReevalParams,
 };
 use super::super::hsp::{
-    get_prelim_hitlist_size, sort_hsps_by_score, trim_by_max_hsps, write_output_blastn_hitlists,
-    write_output_blastn_hitlists_to_writer, BlastnHitList, BlastnHsp, BlastnHspList,
+    get_prelim_hitlist_size, parse_blastn_output_format, sort_hsps_by_score, trim_by_max_hsps,
+    write_output_blastn_hitlists, write_output_blastn_hitlists_to_writer, BlastnHitList, BlastnHsp,
+    BlastnHspList, BlastnOutputFormat,
 };
 use super::super::interval_tree::{BlastIntervalTree, IndexMethod, TreeHsp};
 use super::super::lookup::{build_unmasked_ranges, reverse_complement};
@@ -91,6 +93,59 @@ use crate::utils::dust::MaskedInterval;
 // #define NCBIMATH_LN2 0.69314718055994530941723212145818
 // ```
 const NCBIMATH_LN2: f64 = 0.69314718055994530941723212145818;
+
+// NCBI reference: ncbi-blast/c++/src/objtools/align_format/showdefline.cpp:69-79
+// ```c
+// string CShowBlastDefline::GetDefline(const CBioseq_Handle& bioseq) const
+// {
+//     return bioseq.GetSeqId()->AsFastaString();
+// }
+// ```
+#[inline]
+fn fasta_defline(record: &bio::io::fasta::Record) -> Arc<str> {
+    match record.desc() {
+        Some(desc) => Arc::<str>::from(format!("{} {}", record.id(), desc)),
+        None => Arc::<str>::from(record.id()),
+    }
+}
+
+// NCBI reference: /mnt/c/Users/genom/GitHub/ncbi-blast/c++/include/algo/blast/core/gapinfo.h:43-61
+// ```c
+// typedef enum EGapAlignOpType {
+//    eGapAlignDel = 0, /**< Deletion: a gap in query */
+//    eGapAlignSub = 3, /**< Substitution */
+//    eGapAlignIns = 6, /**< Insertion: a gap in subject */
+// } EGapAlignOpType;
+// typedef struct GapEditScript {
+//    EGapAlignOpType* op_type;
+//    Int4* num;
+//    Int4 size;
+// } GapEditScript;
+// ```
+fn format_gap_edit_ops_for_trace(ops: &[GapEditOp]) -> String {
+    let mut out = String::from("[");
+    for (idx, op) in ops.iter().enumerate() {
+        if idx > 0 {
+            out.push(',');
+        }
+        match *op {
+            GapEditOp::Sub(n) => {
+                out.push('S');
+                out.push_str(&n.to_string());
+            }
+            GapEditOp::Del(n) => {
+                out.push('D');
+                out.push_str(&n.to_string());
+            }
+            GapEditOp::Ins(n) => {
+                out.push('I');
+                out.push_str(&n.to_string());
+            }
+        }
+    }
+    out.push(']');
+    out
+}
 
 // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_hits.c:1887-1890
 // ```c
@@ -3115,105 +3170,19 @@ fn query_end_compare_prelim_hits(a: &PrelimHit, b: &PrelimHit) -> std::cmp::Orde
         .then_with(|| b.prelim_ss.cmp(&a.prelim_ss))
 }
 
-#[cfg(not(target_arch = "wasm32"))]
-mod native_prelim_qsort {
-    use super::{PrelimHit, PrelimHitCompare};
-    use std::cell::Cell;
-    use std::cmp::Ordering;
-    use std::ffi::c_void;
-    use std::mem;
-    use std::os::raw::c_int;
-
-    #[derive(Clone, Copy)]
-    struct QsortContext {
-        hsps: *const PrelimHit,
-        len: usize,
-        compare: PrelimHitCompare,
-    }
-
-    thread_local! {
-        static QSORT_CONTEXT: Cell<Option<QsortContext>> = Cell::new(None);
-    }
-
-    unsafe extern "C" {
-        fn qsort(
-            base: *mut c_void,
-            nmemb: usize,
-            size: usize,
-            compar: extern "C" fn(*const c_void, *const c_void) -> c_int,
-        );
-    }
-
-    extern "C" fn compare_indices(lhs: *const c_void, rhs: *const c_void) -> c_int {
-        // Safety: qsort passes pointers to elements of the usize index array
-        // supplied in native_qsort_prelim_hits_by.
-        let lhs_index = unsafe { *(lhs as *const usize) };
-        let rhs_index = unsafe { *(rhs as *const usize) };
-
-        QSORT_CONTEXT.with(|cell| {
-            let Some(ctx) = cell.get() else {
-                return 0;
-            };
-            if lhs_index >= ctx.len || rhs_index >= ctx.len {
-                return 0;
-            }
-
-            // Safety: ctx.hsps points at `original`, which is kept alive for
-            // the whole qsort call; indices are checked against ctx.len above.
-            let lhs_hsp = unsafe { &*ctx.hsps.add(lhs_index) };
-            let rhs_hsp = unsafe { &*ctx.hsps.add(rhs_index) };
-
-            match (ctx.compare)(lhs_hsp, rhs_hsp) {
-                Ordering::Less => -1,
-                Ordering::Equal => 0,
-                Ordering::Greater => 1,
-            }
-        })
-    }
-
-    pub(super) fn native_qsort_prelim_hits_by(hsps: &mut [PrelimHit], compare: PrelimHitCompare) {
-        let original = hsps.to_vec();
-        let mut indices: Vec<usize> = (0..original.len()).collect();
-        let ctx = QsortContext {
-            hsps: original.as_ptr(),
-            len: original.len(),
-            compare,
-        };
-
-        QSORT_CONTEXT.with(|cell| {
-            let previous = cell.replace(Some(ctx));
-            // Safety: indices is a valid mutable array of usize elements; the
-            // comparator only reads from `original`, which outlives this call.
-            unsafe {
-                qsort(
-                    indices.as_mut_ptr().cast::<c_void>(),
-                    indices.len(),
-                    mem::size_of::<usize>(),
-                    compare_indices,
-                );
-            }
-            cell.set(previous);
-        });
-
-        for (dst, src) in indices.into_iter().enumerate() {
-            hsps[dst] = original[src].clone();
-        }
-    }
-}
-
-#[cfg(not(target_arch = "wasm32"))]
-use native_prelim_qsort::native_qsort_prelim_hits_by;
-
 fn qsort_prelim_hits_by(hsps: &mut [PrelimHit], compare: PrelimHitCompare) {
     if hsps.len() <= 1 {
         return;
     }
 
-    #[cfg(not(target_arch = "wasm32"))]
-    native_qsort_prelim_hits_by(hsps, compare);
-
-    #[cfg(target_arch = "wasm32")]
-    hsps.sort_unstable_by(compare);
+    // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_hits.c:1379-1381
+    // ```c
+    // qsort(hsp_list->hsp_array, hsp_list->hspcnt, sizeof(BlastHSP*),
+    //       ScoreCompareHSPs);
+    // ```
+    // Keep the NCBI comparator fields and call timing while using the same
+    // stable Rust sort on every target.
+    hsps.sort_by(compare);
 }
 
 fn sort_prelim_hits_by_score(hsps: &mut [PrelimHit]) {
@@ -3251,9 +3220,8 @@ fn sort_prelim_hits_by_score(hsps: &mut [PrelimHit]) {
     // #endif
     // ASSERT(Blast_HSPListIsSortedByScore(hsp_list));
     // ```
-    // Preliminary HSPs drive traceback interval-tree insertion order. Replay
-    // the platform qsort over indices so comparator-equal pointer ordering
-    // follows NCBI more closely than Rust's sort implementation.
+    // Preliminary HSPs drive traceback interval-tree insertion order. The
+    // target-neutral stable sort preserves incoming order for comparator ties.
     qsort_prelim_hits_by(hsps, score_compare_prelim_hits);
 }
 
@@ -4380,6 +4348,9 @@ fn post_process_hits_and_write(
     verbose: bool,
     query_ids: &[Arc<str>],
     subject_ids: &[Arc<str>],
+    output_format: BlastnOutputFormat,
+    query_titles: &[Arc<str>],
+    subject_title: &str,
     timing: Option<&BlastnTiming>,
 ) -> Result<()> {
     // NCBI reference: ncbi-blast/c++/include/algo/blast/core/blast_hits.h:183-187
@@ -4511,10 +4482,26 @@ fn post_process_hits_and_write(
     // ```
     match output_target {
         BlastnOutputTarget::Path(out_path) => {
-            write_output_blastn_hitlists(&hit_lists, out_path.as_ref(), query_ids, subject_ids)?;
+            write_output_blastn_hitlists(
+                &hit_lists,
+                out_path.as_ref(),
+                query_ids,
+                subject_ids,
+                output_format,
+                query_titles,
+                subject_title,
+            )?;
         }
         BlastnOutputTarget::Writer(writer) => {
-            write_output_blastn_hitlists_to_writer(&hit_lists, writer, query_ids, subject_ids)?;
+            write_output_blastn_hitlists_to_writer(
+                &hit_lists,
+                writer,
+                query_ids,
+                subject_ids,
+                output_format,
+                query_titles,
+                subject_title,
+            )?;
         }
     }
 
@@ -4625,6 +4612,8 @@ pub fn run(args: BlastnArgs) -> Result<()> {
 }
 
 fn run_internal(args: BlastnArgs, mut in_memory: Option<BlastnInMemoryRun<'_>>) -> Result<()> {
+    let output_format = parse_blastn_output_format(&args.outfmt).map_err(anyhow::Error::msg)?;
+
     // NCBI reference: ncbi-blast/c++/include/algo/blast/blastinput/blast_args.hpp:1290-1296
     // ```c
     // CMTArgs(...)
@@ -4953,6 +4942,23 @@ fn run_internal(args: BlastnArgs, mut in_memory: Option<BlastnInMemoryRun<'_>>) 
     // seq_arg.encoding = eBlastEncodingProtein;
     // ```
     let seq_data = prepare_sequence_data(&args, queries, query_ids, subject_metadata);
+
+    // NCBI reference: ncbi-blast/c++/src/objtools/align_format/tabular.cpp:1264-1284
+    // ```c
+    // x_PrintQueryAndDbNames(program_version, bioseq, dbname, rid, iteration,
+    //                        subj_bioseq);
+    // ```
+    let query_titles_arc = Arc::new(
+        seq_data
+            .queries
+            .iter()
+            .map(fasta_defline)
+            .collect::<Vec<Arc<str>>>(),
+    );
+    let subject_title = Arc::<str>::from(format!(
+        "User specified sequence set (Input: {})",
+        args.subject.display()
+    ));
 
     // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_hits.c:2589-2593
     // ```c
@@ -6304,204 +6310,212 @@ fn run_internal(args: BlastnArgs, mut in_memory: Option<BlastnInMemoryRun<'_>>) 
                                 // NCBI reference: na_ungapped.c:1081-1140
                                 // For two-stage lookup, verify word_length match BEFORE ungapped extension
                                 // This is done by left+right extension from the lut_word_length match position
-                                let (q_ext_start, s_ext_start) = if word_length > lut_word_length {
-                                    // NCBI BLAST: s_BlastNaExtend left/right extension uses packed subject
-                                    // NCBI reference: ncbi-blast/c++/src/algo/blast/core/na_ungapped.c:1093-1144
-                                    // ```c
-                                    // Int4 ext_left = 0;
-                                    // Int4 s_off = s_offset;
-                                    // Uint1 *q = query->sequence + q_offset;
-                                    // Uint1 *s = subject->sequence + s_off / COMPRESSION_RATIO;
-                                    // for (; ext_left < MIN(ext_to, s_offset); ++ext_left) {
-                                    //     s_off--;
-                                    //     q--;
-                                    //     if (s_off % COMPRESSION_RATIO == 3)
-                                    //         s--;
-                                    //     if (((Uint1) (*s << (2 * (s_off % COMPRESSION_RATIO))) >> 6) != *q)
-                                    //         break;
-                                    // }
-                                    // if (ext_left < ext_to) {
-                                    //     Int4 ext_right = 0;
-                                    //     s_off = s_offset + lut_word_length;
-                                    //     if (s_off + ext_to - ext_left > s_range) continue;
-                                    //     q = query->sequence + q_offset + lut_word_length;
-                                    //     s = subject->sequence + s_off / COMPRESSION_RATIO;
-                                    //     for (; ext_right < ext_to - ext_left; ++ext_right) {
-                                    //         if (((Uint1) (*s << (2 * (s_off % COMPRESSION_RATIO))) >> 6) != *q)
-                                    //             break;
-                                    //         s_off++;
-                                    //         q++;
-                                    //         if (s_off % COMPRESSION_RATIO == 0)
-                                    //             s++;
-                                    //     }
-                                    //     if (ext_left + ext_right < ext_to) continue;
-                                    // }
-                                    let ext_to = word_length - lut_word_length;
-                                    // NCBI reference: ncbi-blast/c++/src/algo/blast/core/na_ungapped.c:1101-1114
-                                    // ```c
-                                    // Int4 ext_left = 0;
-                                    // Int4 s_off = s_offset;
-                                    // Uint1 *q = query->sequence + q_offset;
-                                    // Uint1 *s = subject->sequence + s_off / COMPRESSION_RATIO;
-                                    // for (; ext_left < MIN(ext_to, s_offset); ++ext_left) {
-                                    //     s_off--;
-                                    //     q--;
-                                    //     if (s_off % COMPRESSION_RATIO == 3)
-                                    //         s--;
-                                    //     if (((Uint1) (*s << (2 * (s_off % COMPRESSION_RATIO))) >> 6) != *q)
-                                    //         break;
-                                    // }
-                                    // ```
-                                    let max_ext_left =
-                                        ext_to.min(kmer_start).min(q_off0.saturating_add(1));
-                                    let mut ext_left = 0usize;
-                                    let mut q_left = q_off0 + 1;
-                                    let mut s_off = kmer_start;
-                                    let mut s_idx = s_off / COMPRESSION_RATIO;
-                                    while ext_left < max_ext_left {
-                                        if debug_enabled {
-                                            dbg_left_ext_iters += 1;
-                                        }
+                                let (q_ext_start, s_ext_start, word_ext_left, word_ext_right) =
+                                    if word_length > lut_word_length {
+                                        // NCBI BLAST: s_BlastNaExtend left/right extension uses packed subject
+                                        // NCBI reference: ncbi-blast/c++/src/algo/blast/core/na_ungapped.c:1093-1144
+                                        // ```c
+                                        // Int4 ext_left = 0;
+                                        // Int4 s_off = s_offset;
+                                        // Uint1 *q = query->sequence + q_offset;
+                                        // Uint1 *s = subject->sequence + s_off / COMPRESSION_RATIO;
+                                        // for (; ext_left < MIN(ext_to, s_offset); ++ext_left) {
+                                        //     s_off--;
+                                        //     q--;
+                                        //     if (s_off % COMPRESSION_RATIO == 3)
+                                        //         s--;
+                                        //     if (((Uint1) (*s << (2 * (s_off % COMPRESSION_RATIO))) >> 6) != *q)
+                                        //         break;
+                                        // }
+                                        // if (ext_left < ext_to) {
+                                        //     Int4 ext_right = 0;
+                                        //     s_off = s_offset + lut_word_length;
+                                        //     if (s_off + ext_to - ext_left > s_range) continue;
+                                        //     q = query->sequence + q_offset + lut_word_length;
+                                        //     s = subject->sequence + s_off / COMPRESSION_RATIO;
+                                        //     for (; ext_right < ext_to - ext_left; ++ext_right) {
+                                        //         if (((Uint1) (*s << (2 * (s_off % COMPRESSION_RATIO))) >> 6) != *q)
+                                        //             break;
+                                        //         s_off++;
+                                        //         q++;
+                                        //         if (s_off % COMPRESSION_RATIO == 0)
+                                        //             s++;
+                                        //     }
+                                        //     if (ext_left + ext_right < ext_to) continue;
+                                        // }
+                                        let ext_to = word_length - lut_word_length;
                                         // NCBI reference: ncbi-blast/c++/src/algo/blast/core/na_ungapped.c:1101-1114
                                         // ```c
+                                        // Int4 ext_left = 0;
+                                        // Int4 s_off = s_offset;
                                         // Uint1 *q = query->sequence + q_offset;
-                                        // ...
-                                        // s_off--;
-                                        // q--;
+                                        // Uint1 *s = subject->sequence + s_off / COMPRESSION_RATIO;
+                                        // for (; ext_left < MIN(ext_to, s_offset); ++ext_left) {
+                                        //     s_off--;
+                                        //     q--;
+                                        //     if (s_off % COMPRESSION_RATIO == 3)
+                                        //         s--;
+                                        //     if (((Uint1) (*s << (2 * (s_off % COMPRESSION_RATIO))) >> 6) != *q)
+                                        //         break;
+                                        // }
                                         // ```
-                                        // LOSAT's sentinel query buffer stores logical query offset
-                                        // `n` at `n + 1`, so after NCBI's pre-decrement the first
-                                        // left comparison at q_offset - 1 is buffer index q_offset.
-                                        q_left -= 1;
-                                        s_off -= 1;
-                                        if s_off % COMPRESSION_RATIO == COMPRESSION_RATIO - 1 {
-                                            s_idx -= 1;
-                                        }
-                                        // SAFETY: s_idx tracks s_off / COMPRESSION_RATIO within bounds by max_ext_left.
-                                        let s_byte =
-                                            unsafe { *search_seq_packed.get_unchecked(s_idx) };
-                                        let s_base = ((s_byte << (2 * (s_off % COMPRESSION_RATIO)))
-                                            >> 6)
-                                            as u8;
-                                        // SAFETY: q_left is bounded by the outer-sentinel query buffer.
-                                        let q_base = unsafe {
-                                            *encoded_query_concat_blastna_with_sentinels
-                                                .get_unchecked(q_left)
-                                        };
-                                        if s_base != q_base {
-                                            break;
-                                        }
-                                        ext_left += 1;
-                                    }
-
-                                    // RIGHT extension (forwards from lut_word_length end)
-                                    // NCBI BLAST: na_ungapped.c:1120-1136
-                                    // if (ext_left < ext_to) {
-                                    //     Int4 ext_right = 0;
-                                    //     s_off = s_offset + lut_word_length;
-                                    //     if (s_off + ext_to - ext_left > s_range) continue;
-                                    //     q = query->sequence + q_offset + lut_word_length;
-                                    //     s = subject->sequence + s_off / COMPRESSION_RATIO;
-                                    //     for (; ext_right < ext_to - ext_left; ++ext_right) {
-                                    //         if (((Uint1) (*s << (2 * (s_off % COMPRESSION_RATIO))) >> 6) != *q)
-                                    //             break;
-                                    //         s_off++;
-                                    //         q++;
-                                    //         if (s_off % COMPRESSION_RATIO == 0)
-                                    //             s++;
-                                    //     }
-                                    // }
-                                    // Only do right extension if left didn't get all bases
-                                    // NCBI reference: na_ungapped.c:1120-1136
-                                    // if (ext_left < ext_to) {
-                                    //     Int4 ext_right = 0;
-                                    //     s_off = s_offset + lut_word_length;
-                                    //     if (s_off + ext_to - ext_left > s_range) continue;
-                                    //     q = query->sequence + q_offset + lut_word_length;
-                                    //     s = subject->sequence + s_off / COMPRESSION_RATIO;
-                                    //     for (; ext_right < ext_to - ext_left; ++ext_right) {
-                                    //         if (mismatch) break;
-                                    //         s_off++;
-                                    //         q++;
-                                    //     }
-                                    // }
-                                    if ext_left < ext_to {
-                                        // NCBI BLAST: s_off = s_offset + lut_word_length;
-                                        // NCBI BLAST: if (s_off + ext_to - ext_left > s_range) continue;
-                                        // Reference: na_ungapped.c:1122-1124
-                                        let mut s_off = kmer_start + lut_word_length;
-                                        if s_off + (ext_to - ext_left) > s_range {
-                                            // Not enough room in subject, skip this seed (NCBI behavior)
-                                            continue;
-                                        }
-
-                                        let mut ext_right = 0usize;
-                                        // NCBI reference: ncbi-blast/c++/src/algo/blast/core/na_ungapped.c:1120-1136
-                                        // ```c
-                                        // q = query->sequence + q_offset + lut_word_length;
-                                        // ...
-                                        // if (packed_subject_base != *q)
-                                        //     break;
-                                        // s_off++;
-                                        // q++;
-                                        // ```
-                                        // The right comparison checks q_offset + lut_word_length
-                                        // before incrementing q.
-                                        let mut q_right = q_off0 + lut_word_length + 1;
-                                        if q_right + (ext_to - ext_left)
-                                            > encoded_query_concat_blastna_with_sentinels.len()
-                                        {
-                                            continue;
-                                        }
+                                        let max_ext_left =
+                                            ext_to.min(kmer_start).min(q_off0.saturating_add(1));
+                                        let mut ext_left = 0usize;
+                                        let mut q_left = q_off0 + 1;
+                                        let mut s_off = kmer_start;
                                         let mut s_idx = s_off / COMPRESSION_RATIO;
-
-                                        // NCBI BLAST: for (; ext_right < ext_to - ext_left; ++ext_right)
-                                        // Reference: na_ungapped.c:1128-1136
-                                        while ext_right < (ext_to - ext_left) {
+                                        while ext_left < max_ext_left {
                                             if debug_enabled {
-                                                dbg_right_ext_iters += 1;
+                                                dbg_left_ext_iters += 1;
                                             }
-                                            // NCBI BLAST: if (base mismatch) break;
-                                            // Reference: na_ungapped.c:1129-1131
-                                            // SAFETY: s_idx tracks s_off / COMPRESSION_RATIO within bounds by s_len check above.
+                                            // NCBI reference: ncbi-blast/c++/src/algo/blast/core/na_ungapped.c:1101-1114
+                                            // ```c
+                                            // Uint1 *q = query->sequence + q_offset;
+                                            // ...
+                                            // s_off--;
+                                            // q--;
+                                            // ```
+                                            // LOSAT's sentinel query buffer stores logical query offset
+                                            // `n` at `n + 1`, so after NCBI's pre-decrement the first
+                                            // left comparison at q_offset - 1 is buffer index q_offset.
+                                            q_left -= 1;
+                                            s_off -= 1;
+                                            if s_off % COMPRESSION_RATIO == COMPRESSION_RATIO - 1 {
+                                                s_idx -= 1;
+                                            }
+                                            // SAFETY: s_idx tracks s_off / COMPRESSION_RATIO within bounds by max_ext_left.
                                             let s_byte =
                                                 unsafe { *search_seq_packed.get_unchecked(s_idx) };
                                             let s_base = ((s_byte
                                                 << (2 * (s_off % COMPRESSION_RATIO)))
                                                 >> 6)
                                                 as u8;
-                                            // SAFETY: q_right is bounded by the outer-sentinel query buffer.
+                                            // SAFETY: q_left is bounded by the outer-sentinel query buffer.
                                             let q_base = unsafe {
                                                 *encoded_query_concat_blastna_with_sentinels
-                                                    .get_unchecked(q_right)
+                                                    .get_unchecked(q_left)
                                             };
                                             if s_base != q_base {
                                                 break;
                                             }
-                                            ext_right += 1;
-                                            q_right += 1;
-                                            s_off += 1;
-                                            if s_off % COMPRESSION_RATIO == 0 {
-                                                s_idx += 1;
+                                            ext_left += 1;
+                                        }
+
+                                        // RIGHT extension (forwards from lut_word_length end)
+                                        // NCBI BLAST: na_ungapped.c:1120-1136
+                                        // if (ext_left < ext_to) {
+                                        //     Int4 ext_right = 0;
+                                        //     s_off = s_offset + lut_word_length;
+                                        //     if (s_off + ext_to - ext_left > s_range) continue;
+                                        //     q = query->sequence + q_offset + lut_word_length;
+                                        //     s = subject->sequence + s_off / COMPRESSION_RATIO;
+                                        //     for (; ext_right < ext_to - ext_left; ++ext_right) {
+                                        //         if (((Uint1) (*s << (2 * (s_off % COMPRESSION_RATIO))) >> 6) != *q)
+                                        //             break;
+                                        //         s_off++;
+                                        //         q++;
+                                        //         if (s_off % COMPRESSION_RATIO == 0)
+                                        //             s++;
+                                        //     }
+                                        // }
+                                        // Only do right extension if left didn't get all bases
+                                        // NCBI reference: na_ungapped.c:1120-1136
+                                        // if (ext_left < ext_to) {
+                                        //     Int4 ext_right = 0;
+                                        //     s_off = s_offset + lut_word_length;
+                                        //     if (s_off + ext_to - ext_left > s_range) continue;
+                                        //     q = query->sequence + q_offset + lut_word_length;
+                                        //     s = subject->sequence + s_off / COMPRESSION_RATIO;
+                                        //     for (; ext_right < ext_to - ext_left; ++ext_right) {
+                                        //         if (mismatch) break;
+                                        //         s_off++;
+                                        //         q++;
+                                        //     }
+                                        // }
+                                        let mut ext_right = 0usize;
+                                        if ext_left < ext_to {
+                                            // NCBI BLAST: s_off = s_offset + lut_word_length;
+                                            // NCBI BLAST: if (s_off + ext_to - ext_left > s_range) continue;
+                                            // Reference: na_ungapped.c:1122-1124
+                                            let mut s_off = kmer_start + lut_word_length;
+                                            if s_off + (ext_to - ext_left) > s_range {
+                                                // Not enough room in subject, skip this seed (NCBI behavior)
+                                                continue;
+                                            }
+
+                                            // NCBI reference: ncbi-blast/c++/src/algo/blast/core/na_ungapped.c:1120-1136
+                                            // ```c
+                                            // q = query->sequence + q_offset + lut_word_length;
+                                            // ...
+                                            // if (packed_subject_base != *q)
+                                            //     break;
+                                            // s_off++;
+                                            // q++;
+                                            // ```
+                                            // The right comparison checks q_offset + lut_word_length
+                                            // before incrementing q.
+                                            let mut q_right = q_off0 + lut_word_length + 1;
+                                            if q_right + (ext_to - ext_left)
+                                                > encoded_query_concat_blastna_with_sentinels.len()
+                                            {
+                                                continue;
+                                            }
+                                            let mut s_idx = s_off / COMPRESSION_RATIO;
+
+                                            // NCBI BLAST: for (; ext_right < ext_to - ext_left; ++ext_right)
+                                            // Reference: na_ungapped.c:1128-1136
+                                            while ext_right < (ext_to - ext_left) {
+                                                if debug_enabled {
+                                                    dbg_right_ext_iters += 1;
+                                                }
+                                                // NCBI BLAST: if (base mismatch) break;
+                                                // Reference: na_ungapped.c:1129-1131
+                                                // SAFETY: s_idx tracks s_off / COMPRESSION_RATIO within bounds by s_len check above.
+                                                let s_byte = unsafe {
+                                                    *search_seq_packed.get_unchecked(s_idx)
+                                                };
+                                                let s_base = ((s_byte
+                                                    << (2 * (s_off % COMPRESSION_RATIO)))
+                                                    >> 6)
+                                                    as u8;
+                                                // SAFETY: q_right is bounded by the outer-sentinel query buffer.
+                                                let q_base = unsafe {
+                                                    *encoded_query_concat_blastna_with_sentinels
+                                                        .get_unchecked(q_right)
+                                                };
+                                                if s_base != q_base {
+                                                    break;
+                                                }
+                                                ext_right += 1;
+                                                q_right += 1;
+                                                s_off += 1;
+                                                if s_off % COMPRESSION_RATIO == 0 {
+                                                    s_idx += 1;
+                                                }
+                                            }
+
+                                            // NCBI BLAST: if (ext_left + ext_right < ext_to) continue;
+                                            // Reference: na_ungapped.c:1125
+                                            if ext_left + ext_right < ext_to {
+                                                // Word_length match failed, skip this seed
+                                                continue;
                                             }
                                         }
 
-                                        // NCBI BLAST: if (ext_left + ext_right < ext_to) continue;
-                                        // Reference: na_ungapped.c:1125
-                                        if ext_left + ext_right < ext_to {
-                                            // Word_length match failed, skip this seed
-                                            continue;
-                                        }
-                                    }
-
-                                    // Adjust positions for type_of_word and ungapped extension
-                                    // NCBI BLAST: q_offset -= ext_left; s_offset -= ext_left;
-                                    // Reference: na_ungapped.c:1143-1144
-                                    (q_off0 - ext_left, kmer_start - ext_left)
-                                } else {
-                                    // word_length == lut_word_length, no extension needed
-                                    (q_off0, kmer_start)
-                                };
+                                        // Adjust positions for type_of_word and ungapped extension
+                                        // NCBI BLAST: q_offset -= ext_left; s_offset -= ext_left;
+                                        // Reference: na_ungapped.c:1143-1144
+                                        (
+                                            q_off0 - ext_left,
+                                            kmer_start - ext_left,
+                                            ext_left,
+                                            ext_right,
+                                        )
+                                    } else {
+                                        // word_length == lut_word_length, no extension needed
+                                        (q_off0, kmer_start, 0, 0)
+                                    };
 
                                 // NCBI reference: /mnt/c/Users/genom/GitHub/ncbi-blast/c++/src/algo/blast/core/na_ungapped.c:1093-1155
                                 // ```c
@@ -6571,6 +6585,58 @@ fn run_internal(args: BlastnArgs, mut in_memory: Option<BlastnInMemoryRun<'_>>) 
                                 let mut off_found = false;
                                 let mut hit_ready = true;
                                 let query_mask = ctx.masks.as_slice();
+
+                                // NCBI reference: ncbi-blast/c++/src/algo/blast/core/na_ungapped.c:1093-1155
+                                // ```c
+                                // q_offset -= ext_left;
+                                // s_offset -= ext_left;
+                                // hits_extended += s_BlastnDiagHashExtendInitialHit(query, subject,
+                                //                                  q_offset, s_offset,
+                                //                                  masked_locations, query_info,
+                                //                                  s_range, word_length, lut_word_length,
+                                //                                  lookup_wrap, word_params, matrix,
+                                //                                  ewp->hash_table, init_hitlist,
+                                //                                  check_masks);
+                                // ```
+                                if blastn_trace_enabled
+                                    && blastn_trace::should_trace_range(
+                                        "seed",
+                                        q_idx,
+                                        s_idx,
+                                        s_id,
+                                        q_ext_start.saturating_sub(q_context_start),
+                                        q_ext_start
+                                            .saturating_add(word_length)
+                                            .saturating_sub(q_context_start),
+                                        s_ext_start.saturating_add(chunk.offset),
+                                        s_ext_start
+                                            .saturating_add(word_length)
+                                            .saturating_add(chunk.offset),
+                                        ctx.seq.len(),
+                                        ctx.frame,
+                                    )
+                                {
+                                    blastn_trace::log(
+                                        "seed",
+                                        format!(
+                                            "subject={}({}) context={} word_extend raw_seed=({}, {}) adjusted_seed=({}, {}) ext_left={} ext_right={} diag={} last_hit={} hit_saved={} s_off_pos={} s_end_pos={}",
+                                            s_id,
+                                            s_idx,
+                                            q_idx,
+                                            q_off0.saturating_sub(q_context_start),
+                                            kmer_start.saturating_add(chunk.offset),
+                                            q_ext_start.saturating_sub(q_context_start),
+                                            s_ext_start.saturating_add(chunk.offset),
+                                            word_ext_left,
+                                            word_ext_right,
+                                            diag,
+                                            last_hit,
+                                            hit_saved,
+                                            s_off_pos,
+                                            s_end_pos
+                                        ),
+                                    );
+                                }
 
                                 // NCBI reference: ncbi-blast/c++/src/algo/blast/core/na_ungapped.c:41-69 (s_MBLookup)
                                 // ```c
@@ -6875,6 +6941,60 @@ fn run_internal(args: BlastnArgs, mut in_memory: Option<BlastnInMemoryRun<'_>>) 
                                     s_end += ext;
                                     s_end_pos += ext;
                                     // hit_ready remains true (default) - extension will proceed
+                                }
+
+                                // NCBI reference: ncbi-blast/c++/src/algo/blast/core/na_ungapped.c:841-921
+                                // ```c
+                                // if (two_hits && (hit_saved || s_end_pos > last_hit + window_size )) {
+                                //     word_type = s_TypeOfWord(..., TRUE, &extended);
+                                //     ...
+                                //     if (word_type == 1) {
+                                //         ...
+                                //         if (!off_found) {
+                                //             hit_ready = 0;
+                                //         }
+                                //     }
+                                // } else if (check_masks) {
+                                //     if (!s_TypeOfWord(..., FALSE, &extended)) return 0;
+                                // }
+                                // ```
+                                if blastn_trace_enabled
+                                    && blastn_trace::should_trace_range(
+                                        "seed",
+                                        q_idx,
+                                        s_idx,
+                                        s_id,
+                                        q_off.saturating_sub(q_context_start),
+                                        q_off
+                                            .saturating_add(word_length)
+                                            .saturating_add(extended)
+                                            .saturating_sub(q_context_start),
+                                        s_off.saturating_add(chunk.offset),
+                                        s_end_pos
+                                            .saturating_sub(diag_offset as usize)
+                                            .saturating_add(chunk.offset),
+                                        ctx.seq.len(),
+                                        ctx.frame,
+                                    )
+                                {
+                                    blastn_trace::log(
+                                        "seed",
+                                        format!(
+                                            "subject={}({}) context={} type_of_word seed=({}, {}) word_type={} extended={} two_hits={} hit_ready={} off_found={} window_end={} s_end_pos={}",
+                                            s_id,
+                                            s_idx,
+                                            q_idx,
+                                            q_off.saturating_sub(q_context_start),
+                                            s_off.saturating_add(chunk.offset),
+                                            word_type,
+                                            extended,
+                                            two_hits,
+                                            hit_ready,
+                                            off_found,
+                                            window_end,
+                                            s_end_pos
+                                        ),
+                                    );
                                 }
 
                                 // NCBI reference: ncbi-blast/c++/src/algo/blast/core/na_ungapped.c:728-766
@@ -8375,7 +8495,21 @@ fn run_internal(args: BlastnArgs, mut in_memory: Option<BlastnInMemoryRun<'_>>) 
 
                 // Select gapped-start seed within the ungapped HSP.
                 // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_gapalign.c:4012-4046
-                let cutoff_score = cutoff_scores[uh.query_idx as usize];
+                //
+                // NCBI reference: /mnt/c/Users/genom/GitHub/ncbi-blast/c++/src/algo/blast/core/blast_gapalign.c:3924-3927,4058
+                // ```c
+                // if (is_rpsblast)
+                //    cutoff = hit_params->cutoffs[rps_cutoff_index].cutoff_score;
+                // else
+                //    cutoff = hit_params->cutoffs[context].cutoff_score;
+                // ...
+                // if (gap_align->score >= cutoff) {
+                // ```
+                // The score-only gapped HSP enters the preliminary HSP list and
+                // interval tree only if it reaches the hit-saving cutoff, not
+                // the lower BlastInitialWordParameters cutoff used for saving
+                // ungapped HSPs.
+                let cutoff_score = hit_saving_cutoff_scores[uh.query_idx as usize];
                 let (prelim_qs, prelim_qe, prelim_ss, prelim_se, prelim_score, seed_qs, seed_ss) =
                     if use_dp {
                         // DP seed selection (blastn)
@@ -9439,7 +9573,7 @@ fn run_internal(args: BlastnArgs, mut in_memory: Option<BlastnInMemoryRun<'_>>) 
                     blastn_trace::log(
                         "traceback",
                         format!(
-                            "subject={}({}) context={} start=({}, {}) adjusted_start=({}, {}) start_shift={} adjusted_s_len={} final=q{}..{} s{}..{} raw_score={} x_drop={} aln_len={} identities={} mismatches={} gaps={} gap_letters={} edit_ops={}",
+                            "subject={}({}) context={} start=({}, {}) adjusted_start=({}, {}) start_shift={} adjusted_s_len={} final=q{}..{} s{}..{} raw_score={} x_drop={} aln_len={} identities={} mismatches={} gaps={} gap_letters={} edit_ops_len={} edit_ops={}",
                             s_id,
                             s_idx,
                             prelim.context_idx,
@@ -9460,7 +9594,8 @@ fn run_internal(args: BlastnArgs, mut in_memory: Option<BlastnInMemoryRun<'_>>) 
                             mismatches,
                             gaps,
                             gap_letters,
-                            edit_ops.len()
+                            edit_ops.len(),
+                            format_gap_edit_ops_for_trace(&edit_ops)
                         ),
                     );
                 }
@@ -9835,7 +9970,7 @@ fn run_internal(args: BlastnArgs, mut in_memory: Option<BlastnInMemoryRun<'_>>) 
                 blastn_trace::log(
                     "purge",
                     format!(
-                        "subject={}({}) context={} pass=reeval q{}..{} s{}..{} deleted=false raw_score={} evalue={:.12e} bit_score={:.12} identities={} aln_len={} identity={:.6}",
+                        "subject={}({}) context={} pass=reeval q{}..{} s{}..{} deleted=false raw_score={} evalue={:.12e} bit_score={:.12} identities={} aln_len={} identity={:.6} gap_info={}",
                         s_id,
                         s_idx,
                         context_idx,
@@ -9848,7 +9983,11 @@ fn run_internal(args: BlastnArgs, mut in_memory: Option<BlastnInMemoryRun<'_>>) 
                         hit.bit_score,
                         hit.num_ident,
                         hit.length,
-                        hit.identity
+                        hit.identity,
+                        hit.gap_info
+                            .as_deref()
+                            .map(format_gap_edit_ops_for_trace)
+                            .unwrap_or_else(|| "[]".to_string())
                     ),
                 );
             }
@@ -10267,6 +10406,9 @@ fn run_internal(args: BlastnArgs, mut in_memory: Option<BlastnInMemoryRun<'_>>) 
                 verbose,
                 query_ids_arc.as_ref(),
                 subject_ids_arc.as_ref(),
+                output_format,
+                query_titles_arc.as_ref(),
+                subject_title.as_ref(),
                 timing.as_deref(),
             )?;
             // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_engine.c:1674-1783
@@ -10399,6 +10541,9 @@ fn run_internal(args: BlastnArgs, mut in_memory: Option<BlastnInMemoryRun<'_>>) 
                     verbose,
                     query_ids_arc.as_ref(),
                     subject_ids_arc.as_ref(),
+                    output_format,
+                    query_titles_arc.as_ref(),
+                    subject_title.as_ref(),
                     timing_for_writer.as_deref(),
                 )
             });
@@ -10615,6 +10760,9 @@ fn run_internal(args: BlastnArgs, mut in_memory: Option<BlastnInMemoryRun<'_>>) 
         args.verbose,
         query_ids_arc.as_ref(),
         subject_ids_arc.as_ref(),
+        output_format,
+        query_titles_arc.as_ref(),
+        subject_title.as_ref(),
         timing.as_deref(),
     )?;
     // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_engine.c:1674-1783
@@ -10640,6 +10788,78 @@ fn run_internal(args: BlastnArgs, mut in_memory: Option<BlastnInMemoryRun<'_>>) 
 mod tests {
     use super::*;
 
+    // NCBI reference: ncbi-blast/c++/include/algo/blast/core/blast_hits.h:125-148
+    // ```c
+    // typedef struct BlastHSP {
+    //    Int4 score;
+    //    BlastSeg query;
+    //    BlastSeg subject;
+    //    Int4 context;
+    // } BlastHSP;
+    // ```
+    fn make_equal_prelim_hit(query_idx: u32, seed_qs: usize, seed_ss: usize) -> PrelimHit {
+        PrelimHit {
+            context_idx: 0,
+            query_idx,
+            query_frame: 1,
+            query_context_offset: 0,
+            prelim_qs: 10,
+            prelim_qe: 30,
+            prelim_ss: 20,
+            prelim_se: 40,
+            prelim_score: 50,
+            seed_qs,
+            seed_ss,
+        }
+    }
+
+    // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_hits.c:1330-1353
+    // ```c
+    // if (0 == (result = BLAST_CMP(hsp2->score, hsp1->score)) && ...) {
+    //     result = BLAST_CMP(hsp2->query.end, hsp1->query.end);
+    // }
+    // return result;
+    // ```
+    #[test]
+    fn stable_prelim_sort_preserves_equal_complete_record_order() {
+        let mut hsps = vec![
+            make_equal_prelim_hit(7, 101, 201),
+            make_equal_prelim_hit(3, 102, 202),
+            make_equal_prelim_hit(9, 103, 203),
+        ];
+
+        qsort_prelim_hits_by(&mut hsps, score_compare_prelim_hits);
+
+        assert_eq!(
+            hsps.iter().map(|hsp| hsp.query_idx).collect::<Vec<_>>(),
+            vec![7, 3, 9]
+        );
+        assert_eq!(
+            hsps.iter()
+                .map(|hsp| (hsp.seed_qs, hsp.seed_ss))
+                .collect::<Vec<_>>(),
+            vec![(101, 201), (102, 202), (103, 203)]
+        );
+    }
+
+    // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_hits.c:2478-2532
+    // ```c
+    // qsort(hsp_array, hsp_count, sizeof(BlastHSP*), s_QueryOffsetCompareHSPs);
+    // ...
+    // hsp = Blast_HSPFree(hsp);
+    // ```
+    #[test]
+    fn prelim_purge_retains_the_first_complete_equal_record() {
+        let first = make_equal_prelim_hit(7, 101, 201);
+        let second = make_equal_prelim_hit(3, 102, 202);
+
+        let kept = purge_prelim_hits_with_common_endpoints(vec![first, second]);
+
+        assert_eq!(kept.len(), 1);
+        assert_eq!(kept[0].query_idx, 7);
+        assert_eq!((kept[0].seed_qs, kept[0].seed_ss), (101, 201));
+    }
+
     // NCBI reference: ncbi-blast/c++/src/algo/blast/api/blast_setup_cxx.cpp:689-706
     // ```c
     // p.first = (slp->GetInt().GetFrom() > offset)? slp->GetInt().GetFrom() - offset : 0;
@@ -10653,6 +10873,21 @@ mod tests {
         let masks = vec![MaskedInterval::new(2, 5), MaskedInterval::new(8, 12)];
         let ranges = build_subject_seq_ranges_from_masks(&masks, 10);
         assert_eq!(ranges, vec![(0, 2), (5, 8)]);
+    }
+
+    // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_hits.c:1122-1132
+    // ```c
+    // if (hsp->query.frame != hsp->subject.frame) {
+    //    *q_end = query_length - hsp->query.offset;
+    //    *q_start = *q_end - hsp->query.end + hsp->query.offset + 1;
+    //    *s_end = hsp->subject.offset + 1;
+    //    *s_start = hsp->subject.end;
+    // }
+    // ```
+    #[test]
+    fn test_adjust_blastn_offsets_minus_query_keeps_internal_subject_order() {
+        let adjusted = adjust_blastn_offsets(10, 20, 30, 40, 100, -1);
+        assert_eq!(adjusted, (81, 90, 40, 31));
     }
 
     // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_hits.c:1887-1890

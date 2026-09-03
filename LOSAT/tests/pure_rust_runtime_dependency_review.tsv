@@ -1,0 +1,3 @@
+rule	path	symbol	classification
+cargo.links_metadata	LOSAT/Cargo.lock	rayon-core@1.13.0|links=rayon-core|kinds=normal	reviewed_non_algorithm_integration
+cargo.links_metadata	LOSAT/Cargo.lock	wasm-bindgen-shared@0.2.121|links=wasm_bindgen|kinds=normal	reviewed_non_algorithm_integration

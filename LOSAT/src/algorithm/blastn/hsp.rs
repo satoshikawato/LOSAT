@@ -9,6 +9,80 @@ use crate::report::{write_hit_fields, OutputConfig};
 
 use super::tracing as blastn_trace;
 
+// NCBI reference: ncbi-blast/c++/src/algo/blast/format/blast_format.cpp:770-782
+// ```c
+// if (m_FormatType == CFormattingArgs::eTabular ||
+//     m_FormatType == CFormattingArgs::eTabularWithComments) {
+//     CBlastTabularInfo tabinfo(m_Outfile, m_CustomOutputFormatSpec, kDelim);
+// }
+// ```
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum BlastnOutputFormat {
+    Tabular,
+    TabularWithComments,
+}
+
+// NCBI reference: ncbi-blast/c++/src/algo/blast/blastinput/blast_args.cpp:2120-2145
+// ```c
+// const string& format = args[kArgOutfmt].AsString();
+// m_FormatType = CFormattingArgs::GetFormatType(format);
+// ```
+pub fn parse_blastn_output_format(spec: &str) -> Result<BlastnOutputFormat, String> {
+    let mut parts = spec.split_whitespace();
+    let format = parts.next().unwrap_or("6");
+    if parts.next().is_some() {
+        return Err(format!(
+            "unsupported BLASTN custom outfmt specification: {spec:?}"
+        ));
+    }
+    match format {
+        "6" => Ok(BlastnOutputFormat::Tabular),
+        "7" => Ok(BlastnOutputFormat::TabularWithComments),
+        _ => Err(format!("unsupported BLASTN output format: {format}")),
+    }
+}
+
+const NCBI_BLASTN_VERSION: &str = "2.17.0+";
+
+// NCBI reference: ncbi-blast/c++/src/objtools/align_format/tabular.cpp:1264-1284
+// ```c
+// x_PrintQueryAndDbNames(program_version, bioseq, dbname, rid, iteration,
+//                        subj_bioseq);
+// if (align_set) {
+//     int num_hits = align_set->Get().size();
+//     if (num_hits != 0) PrintFieldNames(is_csv);
+//     m_Ostream << "# " << num_hits << " hits found" << "\n";
+// }
+// ```
+fn write_blastn_outfmt7_header<W: Write>(
+    writer: &mut W,
+    query_title: &str,
+    subject_title: &str,
+    num_hits: usize,
+) -> io::Result<()> {
+    writeln!(writer, "# BLASTN {NCBI_BLASTN_VERSION}")?;
+    writeln!(writer, "# Query: {query_title}")?;
+    writeln!(writer, "# Database: {subject_title}")?;
+    if num_hits > 0 {
+        writeln!(
+            writer,
+            "# Fields: query acc.ver, subject acc.ver, % identity, alignment length, mismatches, gap opens, q. start, q. end, s. start, s. end, evalue, bit score"
+        )?;
+    }
+    writeln!(writer, "# {num_hits} hits found")
+}
+
+fn blastn_hsp_count(hit_list: Option<&BlastnHitList>) -> usize {
+    hit_list
+        .map(|list| {
+            list.hsplist_array
+                .iter()
+                .map(|hsp_list| hsp_list.hsps.len())
+                .sum()
+        })
+        .unwrap_or(0)
+}
+
 #[derive(Debug, Clone)]
 // NCBI reference: ncbi-blast/c++/include/algo/blast/core/blast_hits.h:125-148
 // ```c
@@ -404,115 +478,20 @@ pub fn evalue_compare_hsps(a: &BlastnHsp, b: &BlastnHsp) -> Ordering {
 // ```c
 // qsort(hsp_array, hsp_count, sizeof(BlastHSP*), s_QueryEndCompareHSPs);
 // ```
-// Sort an index array through the platform C qsort, then replay that order onto
-// Rust HSP values. NCBI sorts BlastHSP* arrays; sorting usize indices keeps Rust
-// values out of C while matching native qsort tie handling on parity builds.
+// Preserve NCBI's comparator and invocation timing while using one stable,
+// target-neutral Rust sort. Comparator-equal HSPs retain their incoming order.
 pub fn qsort_blastn_hsps_by(hsps: &mut [BlastnHsp], compare: BlastnHspCompare) {
     if hsps.len() <= 1 {
         return;
     }
 
-    #[cfg(not(target_arch = "wasm32"))]
-    {
-        native_qsort_blastn_hsps_by(hsps, compare);
-    }
-
-    #[cfg(target_arch = "wasm32")]
-    {
-        // Wasm has no C qsort. Keep the comparator order; native builds are the
-        // NCBI BLAST+ parity target for qsort tie behavior.
-        hsps.sort_by(compare);
-    }
+    // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_hits.c:1379-1381
+    // ```c
+    // qsort(hsp_list->hsp_array, hsp_list->hspcnt, sizeof(BlastHSP*),
+    //       ScoreCompareHSPs);
+    // ```
+    hsps.sort_by(compare);
 }
-
-#[cfg(not(target_arch = "wasm32"))]
-mod native_hsp_qsort {
-    use super::{BlastnHsp, BlastnHspCompare};
-    use std::cell::Cell;
-    use std::cmp::Ordering;
-    use std::ffi::c_void;
-    use std::mem;
-    use std::os::raw::c_int;
-
-    #[derive(Clone, Copy)]
-    struct QsortContext {
-        hsps: *const BlastnHsp,
-        len: usize,
-        compare: BlastnHspCompare,
-    }
-
-    thread_local! {
-        static QSORT_CONTEXT: Cell<Option<QsortContext>> = Cell::new(None);
-    }
-
-    unsafe extern "C" {
-        fn qsort(
-            base: *mut c_void,
-            nmemb: usize,
-            size: usize,
-            compar: extern "C" fn(*const c_void, *const c_void) -> c_int,
-        );
-    }
-
-    extern "C" fn compare_indices(lhs: *const c_void, rhs: *const c_void) -> c_int {
-        // Safety: qsort passes pointers to elements of the usize index array
-        // supplied in native_qsort_blastn_hsps_by.
-        let lhs_index = unsafe { *(lhs as *const usize) };
-        let rhs_index = unsafe { *(rhs as *const usize) };
-
-        QSORT_CONTEXT.with(|cell| {
-            let Some(ctx) = cell.get() else {
-                return 0;
-            };
-            if lhs_index >= ctx.len || rhs_index >= ctx.len {
-                return 0;
-            }
-
-            // Safety: ctx.hsps points at `original`, which is kept alive for the
-            // whole qsort call; indices are checked against ctx.len above.
-            let lhs_hsp = unsafe { &*ctx.hsps.add(lhs_index) };
-            let rhs_hsp = unsafe { &*ctx.hsps.add(rhs_index) };
-
-            match (ctx.compare)(lhs_hsp, rhs_hsp) {
-                Ordering::Less => -1,
-                Ordering::Equal => 0,
-                Ordering::Greater => 1,
-            }
-        })
-    }
-
-    pub(super) fn native_qsort_blastn_hsps_by(hsps: &mut [BlastnHsp], compare: BlastnHspCompare) {
-        let original = hsps.to_vec();
-        let mut indices: Vec<usize> = (0..original.len()).collect();
-        let ctx = QsortContext {
-            hsps: original.as_ptr(),
-            len: original.len(),
-            compare,
-        };
-
-        QSORT_CONTEXT.with(|cell| {
-            let previous = cell.replace(Some(ctx));
-            // Safety: indices is a valid mutable array of usize elements; the
-            // comparator only reads from `original`, which outlives this call.
-            unsafe {
-                qsort(
-                    indices.as_mut_ptr().cast::<c_void>(),
-                    indices.len(),
-                    mem::size_of::<usize>(),
-                    compare_indices,
-                );
-            }
-            cell.set(previous);
-        });
-
-        for (dst, src) in indices.into_iter().enumerate() {
-            hsps[dst] = original[src].clone();
-        }
-    }
-}
-
-#[cfg(not(target_arch = "wasm32"))]
-use native_hsp_qsort::native_qsort_blastn_hsps_by;
 
 // NCBI reference: /mnt/c/Users/genom/GitHub/ncbi-blast/c++/src/algo/blast/core/blast_hits.c:1374-1382
 // ```c
@@ -1006,6 +985,9 @@ pub fn write_output_blastn_hitlists(
     out_path: Option<&PathBuf>,
     query_ids: &[Arc<str>],
     subject_ids: &[Arc<str>],
+    output_format: BlastnOutputFormat,
+    query_titles: &[Arc<str>],
+    subject_title: &str,
 ) -> io::Result<()> {
     let stdout = io::stdout();
     let mut writer: Box<dyn Write> = if let Some(path) = out_path {
@@ -1014,7 +996,15 @@ pub fn write_output_blastn_hitlists(
         Box::new(BufWriter::new(stdout.lock()))
     };
 
-    write_output_blastn_hitlists_to_writer(hit_lists, &mut writer, query_ids, subject_ids)
+    write_output_blastn_hitlists_to_writer(
+        hit_lists,
+        &mut writer,
+        query_ids,
+        subject_ids,
+        output_format,
+        query_titles,
+        subject_title,
+    )
 }
 
 /// Write BLASTN hit lists to an existing writer.
@@ -1036,10 +1026,25 @@ pub fn write_output_blastn_hitlists_to_writer<W: Write>(
     writer: &mut W,
     query_ids: &[Arc<str>],
     subject_ids: &[Arc<str>],
+    output_format: BlastnOutputFormat,
+    query_titles: &[Arc<str>],
+    subject_title: &str,
 ) -> io::Result<()> {
     let config = OutputConfig::ncbi_compat();
 
-    for hit_list_opt in hit_lists.iter() {
+    for (q_idx, hit_list_opt) in hit_lists.iter().enumerate() {
+        if output_format == BlastnOutputFormat::TabularWithComments {
+            let query_title = query_titles
+                .get(q_idx)
+                .map(|title| title.as_ref())
+                .unwrap_or("unknown");
+            write_blastn_outfmt7_header(
+                writer,
+                query_title,
+                subject_title,
+                blastn_hsp_count(hit_list_opt.as_ref()),
+            )?;
+        }
         let hit_list = match hit_list_opt {
             Some(value) => value,
             None => continue,
@@ -1128,6 +1133,14 @@ pub fn write_output_blastn_hitlists_to_writer<W: Write>(
         }
     }
 
+    if output_format == BlastnOutputFormat::TabularWithComments {
+        // NCBI reference: ncbi-blast/c++/src/objtools/align_format/tabular.cpp:1324
+        // ```c
+        // m_Ostream << "# BLAST processed " << num_queries << " queries\n";
+        // ```
+        writeln!(writer, "# BLAST processed {} queries", hit_lists.len())?;
+    }
+
     Ok(())
 }
 
@@ -1171,6 +1184,29 @@ mod tests {
             gap_info: None,
             num_positives: 0,
         }
+    }
+
+    // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_hits.c:1330-1353
+    // ```c
+    // if (0 == (result = BLAST_CMP(hsp2->score, hsp1->score)) && ...) {
+    //     result = BLAST_CMP(hsp2->query.end, hsp1->query.end);
+    // }
+    // return result;
+    // ```
+    #[test]
+    fn stable_hsp_sort_preserves_comparator_equal_input_order() {
+        let mut hsps = vec![
+            make_hsp(1.0, 100, 7),
+            make_hsp(1.0, 100, 3),
+            make_hsp(1.0, 100, 9),
+        ];
+
+        qsort_blastn_hsps_by(&mut hsps, |_, _| Ordering::Equal);
+
+        assert_eq!(
+            hsps.iter().map(|hsp| hsp.s_idx).collect::<Vec<_>>(),
+            vec![7, 3, 9]
+        );
     }
 
     #[test]
@@ -1230,5 +1266,47 @@ mod tests {
         hit_list.update(hsp_list_c);
         assert_eq!(hit_list.hsplist_count, 1);
         assert_eq!(hit_list.hsplist_array[0].oid, 20);
+    }
+
+    // NCBI reference: ncbi-blast/c++/src/objtools/align_format/tabular.cpp:1264-1284
+    // ```c
+    // x_PrintQueryAndDbNames(program_version, bioseq, dbname, rid, iteration,
+    //                        subj_bioseq);
+    // if (align_set) {
+    //     int num_hits = align_set->Get().size();
+    //     if (num_hits != 0) PrintFieldNames(is_csv);
+    //     m_Ostream << "# " << num_hits << " hits found" << "\n";
+    // }
+    // ```
+    #[test]
+    fn test_blastn_outfmt7_header_matches_ncbi_shape() {
+        let hit_lists = vec![None];
+        let query_ids = vec![Arc::<str>::from("query")];
+        let subject_ids = vec![Arc::<str>::from("subject")];
+        let query_titles = vec![Arc::<str>::from("query full description")];
+        let mut output = Vec::new();
+
+        write_output_blastn_hitlists_to_writer(
+            &hit_lists,
+            &mut output,
+            &query_ids,
+            &subject_ids,
+            BlastnOutputFormat::TabularWithComments,
+            &query_titles,
+            "User specified sequence set (Input: subject.fasta)",
+        )
+        .unwrap();
+
+        assert_eq!(
+            String::from_utf8(output).unwrap(),
+            "# BLASTN 2.17.0+\n# Query: query full description\n# Database: User specified sequence set (Input: subject.fasta)\n# 0 hits found\n# BLAST processed 1 queries\n"
+        );
+    }
+
+    #[test]
+    fn test_blastn_rejects_custom_outfmt_until_fields_are_ported() {
+        assert!(parse_blastn_output_format("6").is_ok());
+        assert!(parse_blastn_output_format("7").is_ok());
+        assert!(parse_blastn_output_format("6 qaccver saccver").is_err());
     }
 }

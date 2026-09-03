@@ -529,6 +529,76 @@ impl GapEditScript {
     }
 }
 
+// NCBI reference: /mnt/c/Users/genom/GitHub/ncbi-blast/c++/include/algo/blast/core/gapinfo.h:56-61
+// ```c
+// typedef struct GapEditScript {
+//    EGapAlignOpType* op_type;
+//    Int4* num;
+//    Int4 size;
+// } GapEditScript;
+// ```
+fn format_gap_edit_script_for_trace(esp: &GapEditScript) -> String {
+    let mut out = String::from("[");
+    for i in 0..esp.size {
+        if i > 0 {
+            out.push(',');
+        }
+        let tag = match esp.op_type[i] {
+            GapAlignOpType::Sub => 'S',
+            GapAlignOpType::Del => 'D',
+            GapAlignOpType::Ins => 'I',
+            GapAlignOpType::Invalid => 'X',
+        };
+        out.push(tag);
+        out.push_str(&esp.num[i].to_string());
+    }
+    out.push(']');
+    out
+}
+
+// NCBI reference: /mnt/c/Users/genom/GitHub/ncbi-blast/c++/include/algo/blast/core/gapinfo.h:70-78
+// ```c
+// typedef struct GapPrelimEditBlock {
+//    GapPrelimEditScript* edit_ops;
+//    Int4 num_ops_allocated;
+//    Int4 num_ops;
+//    EGapAlignOpType last_op;
+// } GapPrelimEditBlock;
+// ```
+fn format_gap_prelim_edit_block_for_trace(block: &GapPrelimEditBlock) -> String {
+    let mut out = String::from("[");
+    for i in 0..block.num_ops {
+        if i > 0 {
+            out.push(',');
+        }
+        let op = block.edit_ops[i];
+        let tag = match op.op_type {
+            GapAlignOpType::Sub => 'S',
+            GapAlignOpType::Del => 'D',
+            GapAlignOpType::Ins => 'I',
+            GapAlignOpType::Invalid => 'X',
+        };
+        out.push(tag);
+        out.push_str(&op.num.to_string());
+    }
+    out.push(']');
+    out
+}
+
+fn debug_greedy_traceback_enabled(q_off: usize, s_off: usize) -> bool {
+    let debug_all = std::env::var_os("LOSAT_DEBUG_COORDS").is_some();
+    let Some(filter) = std::env::var_os("LOSAT_DEBUG_COORDS_START") else {
+        return debug_all;
+    };
+    let filter = filter.to_string_lossy();
+    let Some((q_filter, s_filter)) = filter.split_once(',') else {
+        return false;
+    };
+
+    q_filter.trim().parse::<usize>().ok() == Some(q_off)
+        && s_filter.trim().parse::<usize>().ok() == Some(s_off)
+}
+
 /// Signal that a diagonal/offset is invalid
 // INVALID_OFFSET and INVALID_DIAG are imported from constants
 
@@ -1627,10 +1697,21 @@ fn prelim_edit_block_to_gap_edit_script(
     let mut esp = GapEditScript::new(size);
     let mut index = 0usize;
 
-    for op in &rev_prelim_tback.edit_ops {
-        if index >= esp.size {
-            break;
-        }
+    // NCBI reference: /mnt/c/Users/genom/GitHub/ncbi-blast/c++/src/algo/blast/core/blast_gapalign.c:2509-2515
+    // ```c
+    // index = 0;
+    // for (i=0; i < rev_prelim_tback->num_ops; i++) {
+    //    op = rev_prelim_tback->edit_ops + i;
+    //    esp->op_type[index] = op->op_type;
+    //    esp->num[index] = op->num;
+    //    index++;
+    // }
+    // ```
+    for op in rev_prelim_tback
+        .edit_ops
+        .iter()
+        .take(rev_prelim_tback.num_ops)
+    {
         esp.op_type[index] = op.op_type;
         esp.num[index] = op.num;
         index += 1;
@@ -1650,11 +1731,22 @@ fn prelim_edit_block_to_gap_edit_script(
         fwd_prelim_tback.num_ops as isize - 1
     };
 
+    // NCBI reference: /mnt/c/Users/genom/GitHub/ncbi-blast/c++/src/algo/blast/core/blast_gapalign.c:2523-2534
+    // ```c
+    // if (merge_ops)
+    //    i = fwd_prelim_tback->num_ops - 2;
+    // else
+    //    i = fwd_prelim_tback->num_ops - 1;
+    //
+    // for (; i >= 0; i--) {
+    //    op = fwd_prelim_tback->edit_ops + i;
+    //    esp->op_type[index] = op->op_type;
+    //    esp->num[index] = op->num;
+    //    index++;
+    // }
+    // ```
     while i >= 0 {
         let op = fwd_prelim_tback.edit_ops[i as usize];
-        if index >= esp.size {
-            break;
-        }
         esp.op_type[index] = op.op_type;
         esp.num[index] = op.num;
         index += 1;
@@ -3169,6 +3261,17 @@ fn greedy_gapped_alignment_internal(
         if fence_hit {
             return None;
         }
+        if debug_greedy_traceback_enabled(q_off, s_off) {
+            // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_gapalign.c:2805-2831
+            // ```c
+            // score = BLAST_AffineGreedyAlign(..., &q_ext_r, &s_ext_r, ...);
+            // if (score >= 0) break;
+            // ```
+            eprintln!(
+                "[GREEDY_DIRECTION] right q_ext={} s_ext={} score={}",
+                q_ext_r, s_ext_r, score
+            );
+        }
         if score >= 0 {
             scratch.max_dist = max_dist;
             break;
@@ -3211,6 +3314,17 @@ fn greedy_gapped_alignment_internal(
         if fence_hit {
             return None;
         }
+        if debug_greedy_traceback_enabled(q_off, s_off) {
+            // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_gapalign.c:2836-2864
+            // ```c
+            // score1 = BLAST_AffineGreedyAlign(..., &q_ext_l, &s_ext_l, ...);
+            // if (score1 >= 0) { score += score1; break; }
+            // ```
+            eprintln!(
+                "[GREEDY_DIRECTION] left q_ext={} s_ext={} score={}",
+                q_ext_l, s_ext_l, score_left
+            );
+        }
         if score_left >= 0 {
             score += score_left;
             scratch.max_dist = max_dist;
@@ -3238,6 +3352,28 @@ fn greedy_gapped_alignment_internal(
             let s_start = s_off as i32 - s_ext_l;
             let q_end = q_off as i32 + q_ext_r;
             let s_end = s_off as i32 + s_ext_r;
+            let debug_traceback = debug_greedy_traceback_enabled(q_off, s_off);
+            if debug_traceback {
+                // NCBI reference: /mnt/c/Users/genom/GitHub/ncbi-blast/c++/src/algo/blast/core/blast_gapalign.c:2876-2882
+                // ```c
+                // esp = Blast_PrelimEditBlockToGapEditScript(rev_prelim_tback,
+                //                                      fwd_prelim_tback);
+                // if (esp) s_ReduceGaps(esp, query+q_off-q_ext_l,
+                //                          subject+s_off-s_ext_l, ...);
+                // ```
+                eprintln!(
+                    "[GREEDY_TRACEBACK] start=({}, {}) q_ext_l={} q_ext_r={} s_ext_l={} s_ext_r={} rev_block={} fwd_block={} pre_reduce={}",
+                    q_off,
+                    s_off,
+                    q_ext_l,
+                    q_ext_r,
+                    s_ext_l,
+                    s_ext_r,
+                    format_gap_prelim_edit_block_for_trace(rev),
+                    format_gap_prelim_edit_block_for_trace(fwd),
+                    format_gap_edit_script_for_trace(&esp)
+                );
+            }
 
             // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_gapalign.c:2881 (s_ReduceGaps query+q_off-q_ext_l, subject+s_off-s_ext_l)
             reduce_gaps(
@@ -3249,6 +3385,20 @@ fn greedy_gapped_alignment_internal(
                 s_start as usize,
                 s_end as usize,
             );
+            if debug_traceback {
+                // NCBI reference: /mnt/c/Users/genom/GitHub/ncbi-blast/c++/src/algo/blast/core/blast_gapalign.c:2669-2758
+                // ```c
+                // static void s_ReduceGaps(GapEditScript* esp, const Uint1 *q,
+                //                         const Uint1 *s, const Uint1 *qf,
+                //                         const Uint1 *sf) { ... }
+                // ```
+                eprintln!(
+                    "[GREEDY_TRACEBACK] start=({}, {}) post_reduce={}",
+                    q_off,
+                    s_off,
+                    format_gap_edit_script_for_trace(&esp)
+                );
+            }
             edit_script = Some(esp);
         }
     } else {
@@ -3431,4 +3581,184 @@ pub fn greedy_gapped_alignment_with_traceback(
         align_length,
         edit_ops,
     ))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_greedy_traceback_ncbi_regression_cases() {
+        // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_gapalign.c:2762-2936
+        // ```c
+        // BLAST_AffineGreedyAlign(..., fwd_prelim_tback, ...);
+        // BLAST_AffineGreedyAlign(..., rev_prelim_tback, ...);
+        // esp = Blast_PrelimEditBlockToGapEditScript(rev_prelim_tback,
+        //                                             fwd_prelim_tback);
+        // if (esp) s_ReduceGaps(esp, query+q_off-q_ext_l,
+        //                          subject+s_off-s_ext_l, ...);
+        // ```
+        let cases: &[(
+            &[u8],
+            &[u8],
+            usize,
+            usize,
+            i32,
+            i32,
+            i32,
+            i32,
+            i32,
+            (usize, usize, usize, usize, i32, usize),
+            &[GapEditOp],
+        )] = &[
+            (
+                &[0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0],
+                &[0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0],
+                5,
+                5,
+                1,
+                -2,
+                0,
+                0,
+                54,
+                (0, 11, 0, 11, 11, 11),
+                &[GapEditOp::Sub(11)],
+            ),
+            (
+                &[0, 0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0],
+                &[0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0],
+                6,
+                5,
+                1,
+                -2,
+                0,
+                0,
+                54,
+                (1, 12, 0, 11, 11, 11),
+                &[GapEditOp::Sub(11)],
+            ),
+            (
+                &[0, 1, 2, 3, 0, 1, 2],
+                &[0, 1, 2, 0, 1, 2],
+                3,
+                3,
+                1,
+                -2,
+                0,
+                0,
+                54,
+                (0, 7, 0, 6, 3, 7),
+                &[GapEditOp::Sub(3), GapEditOp::Ins(1), GapEditOp::Sub(3)],
+            ),
+            (
+                &[0, 1, 2, 3, 0, 1],
+                &[0, 1, 2, 3, 0, 1],
+                3,
+                3,
+                1,
+                -2,
+                5,
+                2,
+                54,
+                (0, 6, 0, 6, 6, 6),
+                &[GapEditOp::Sub(6)],
+            ),
+            (
+                &[0],
+                &[0],
+                0,
+                0,
+                1,
+                -2,
+                5,
+                2,
+                54,
+                (0, 1, 0, 1, 1, 1),
+                &[GapEditOp::Sub(1)],
+            ),
+        ];
+
+        for (
+            query,
+            subject,
+            q_off,
+            s_off,
+            reward,
+            penalty,
+            gap_open,
+            gap_extend,
+            x_drop,
+            expected,
+            expected_ops,
+        ) in cases
+        {
+            let mut scratch = GreedyAlignScratch::new();
+            let result = greedy_gapped_alignment_with_traceback(
+                query,
+                subject,
+                subject.len(),
+                *q_off,
+                *s_off,
+                *reward,
+                *penalty,
+                *gap_open,
+                *gap_extend,
+                *x_drop,
+                &mut scratch,
+            )
+            .expect("NCBI greedy traceback converges for the bounded fixture");
+            assert_eq!(
+                (result.0, result.1, result.2, result.3, result.4, result.5),
+                *expected
+            );
+            assert_eq!(result.6, *expected_ops);
+        }
+    }
+
+    #[test]
+    fn test_greedy_reverse_and_empty_boundary_cases() {
+        // NCBI reference: ncbi-blast/c++/src/algo/blast/core/greedy_align.c:380-453
+        // ```c
+        // Int4 BLAST_GreedyAlign(..., Boolean reverse, ...)
+        // {
+        //     index = s_FindFirstMismatch(..., reverse, ...);
+        //     ...
+        // }
+        // ```
+        let reverse = greedy_align_one_direction_ex(
+            &[0, 1, 2, 3],
+            &[0, 1, 2, 3],
+            4,
+            4,
+            1,
+            -2,
+            0,
+            0,
+            54,
+            true,
+        );
+        assert_eq!(reverse, (4, 4, 4, 4, 0, 0, 0));
+
+        // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_gapalign.c:2762-2793
+        // ```c
+        // q_avail = query_length - q_off;
+        // s_avail = subject_length - s_off;
+        // if (q_avail <= 0 || s_avail <= 0) return -1;
+        // ```
+        let mut scratch = GreedyAlignScratch::new();
+        assert!(greedy_gapped_alignment_with_traceback(
+            &[],
+            &[],
+            0,
+            0,
+            0,
+            1,
+            -2,
+            5,
+            2,
+            54,
+            &mut scratch,
+        )
+        .is_none());
+    }
 }

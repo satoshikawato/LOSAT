@@ -119,8 +119,19 @@ pub struct BlastnArgs {
     ///   6 = Tabular (tab-separated values, default)
     ///   7 = Tabular with comment lines (headers)
     ///
-    /// Custom field specification is supported for formats 6 and 7:
-    ///   -outfmt "6 qaccver saccver pident length"
+    // NCBI reference: ncbi-blast/c++/src/algo/blast/format/blast_format.cpp:770-782
+    // ```c
+    // case 6: case 7:
+    //     formatter = new CBlastTabularFormatter(...);
+    //     break;
+    // ```
+    // NCBI reference: ncbi-blast/c++/src/objtools/align_format/tabular.cpp:1098-1108
+    // ```c
+    // ITERATE(list<ETabularField>, iter, m_FieldsToShow) {
+    //     x_PrintField(*iter);
+    // }
+    // ```
+    /// Custom field specifications are not yet ported and fail explicitly.
     ///
     /// Default fields: qaccver saccver pident length mismatch gapopen qstart qend sstart send evalue bitscore
     #[arg(long, default_value = "6")]

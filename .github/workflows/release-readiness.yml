@@ -1,14 +1,16 @@
 name: Release Readiness
 
+run-name: Release readiness ${{ inputs.candidate_sha }}
+
 on:
   workflow_dispatch:
     inputs:
       candidate_sha:
-        description: Exact commit SHA to check out and certify
+        description: Exact committed SHA to assemble and verify
         required: true
         type: string
       run_integrated_certification:
-        description: Run the full 43-native/41-serial-Wasm certification
+        description: Rerun the full 43-native/41-serial-Wasm campaign only when the post-merge gate requires it
         required: true
         default: false
         type: boolean
@@ -22,14 +24,17 @@ defaults:
 
 env:
   CARGO_TERM_COLOR: always
+  CERT_TOOLCHAIN: 1.92.0
+  CANDIDATE_SHA: ${{ inputs.candidate_sha }}
 
 jobs:
   quality:
-    name: Quality And Package Gate
-    runs-on: ubuntu-latest
+    name: Quality, Package, And Clean Install
+    runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v4
         with:
+          fetch-depth: 0
           ref: ${{ inputs.candidate_sha }}
 
       - uses: dtolnay/rust-toolchain@stable
@@ -42,16 +47,28 @@ jobs:
         with:
           node-version: 18.19.1
 
-      - name: Verify exact candidate SHA
-        run: test "$(git rev-parse HEAD)" = "${{ inputs.candidate_sha }}"
+      - name: Verify exact candidate and certification lineage
+        run: |
+          [[ "$CANDIDATE_SHA" =~ ^[0-9a-f]{40}$ ]]
+          test "$(git rev-parse HEAD)" = "$CANDIDATE_SHA"
+          python LOSAT/tests/prepare_release_candidate_v010.py --help >/dev/null
 
-      - name: Capture build metadata
+      - name: Capture quality metadata
         run: |
           mkdir -p .tmp/release-readiness/quality
           git rev-parse HEAD > .tmp/release-readiness/quality/git-commit.txt
-          rustc --version > .tmp/release-readiness/quality/rust-version.txt
-          rustc -vV > .tmp/release-readiness/quality/rust-version-verbose.txt
-          cargo --version > .tmp/release-readiness/quality/cargo-version.txt
+          rustc -vV > .tmp/release-readiness/quality/rustc-vV.txt
+          cargo -V > .tmp/release-readiness/quality/cargo-V.txt
+          node --version > .tmp/release-readiness/quality/node-version.txt
+
+      - name: Pure-Rust runtime boundary
+        run: python LOSAT/tests/check_pure_rust_runtime_boundary.py --root .
+
+      - name: Focused release and certification tooling tests
+        run: |
+          python -m unittest LOSAT/tests/test_prepare_release_candidate_v010.py
+          python -m unittest LOSAT/tests/test_check_pure_rust_runtime_boundary.py
+          python -m unittest LOSAT/tests/test_certify_integrated_runtime_v010.py
 
       - name: Format
         run: cd LOSAT && cargo fmt --check
@@ -62,67 +79,154 @@ jobs:
       - name: Tests
         run: cd LOSAT && cargo test --all-features --locked
 
-      - name: Runtime boundary and integrated-driver tests
-        run: |
-          python LOSAT/tests/check_pure_rust_runtime_boundary.py
-          python -m unittest LOSAT/tests/test_check_pure_rust_runtime_boundary.py
-          python -m unittest LOSAT/tests/test_certify_integrated_runtime_v010.py
-
-      - name: Native release build
-        run: cd LOSAT && cargo build --release --locked
-
-      - name: Serial Wasm build
-        run: cd LOSAT && cargo build --release --target wasm32-wasip1 --no-default-features --locked
-
-      - name: Package dry run
+      - name: Native and serial-Wasm release builds
         run: |
           cd LOSAT
+          cargo build --release --locked
+          cargo build --release --target wasm32-wasip1 --no-default-features --locked
+
+      - name: Package and publish dry runs
+        run: |
+          package_target="$RUNNER_TEMP/losat-cargo-package-target"
+          cd LOSAT
           cargo package --list > ../.tmp/release-readiness/quality/cargo-package-list.txt
+          cargo package --locked \
+            --config "build.target-dir=\"${package_target}\""
           cargo publish --dry-run --locked \
-            --config 'build.target-dir="/tmp/losat-cargo-publish-target"'
-
-      - name: Capture artifact metadata
-        run: |
-          LOSAT/target/release/LOSAT --version > .tmp/release-readiness/quality/losat-version.txt
-          sha256sum LOSAT/target/release/LOSAT > .tmp/release-readiness/quality/native-sha256.txt
-          find LOSAT/target/wasm32-wasip1/release -maxdepth 2 -name '*.wasm' \
-            -exec sha256sum {} \; > .tmp/release-readiness/quality/wasm-sha256.txt
-
-      - name: Assemble release candidate artifacts
-        run: |
-          mkdir -p .tmp/release-readiness/artifacts
-          host_triple="$(sed -n 's/^host: //p' .tmp/release-readiness/quality/rust-version-verbose.txt)"
-          losat_version="$(awk '{ print $2 }' .tmp/release-readiness/quality/losat-version.txt)"
-          native_name="LOSAT-${losat_version}-${host_triple}"
-          cp LOSAT/target/release/LOSAT ".tmp/release-readiness/artifacts/${native_name}"
-          chmod +x ".tmp/release-readiness/artifacts/${native_name}"
-          tar -C .tmp/release-readiness/artifacts -czf \
-            ".tmp/release-readiness/artifacts/${native_name}.tar.gz" \
-            "${native_name}"
-          for wasm_path in LOSAT/target/wasm32-wasip1/release/*.wasm; do
-            wasm_name="$(basename "$wasm_path" .wasm)"
-            cp "$wasm_path" \
-              ".tmp/release-readiness/artifacts/${wasm_name}-${losat_version}-wasm32-wasip1.wasm"
-          done
-          sha256sum .tmp/release-readiness/artifacts/* \
-            > .tmp/release-readiness/quality/release-artifacts-sha256.txt
+            --config "build.target-dir=\"${package_target}\""
+          cd ..
+          python LOSAT/tests/prepare_release_candidate_v010.py source \
+            --repo-root . \
+            --candidate-sha "$CANDIDATE_SHA" \
+            --crate "${package_target}/package/LOSAT-0.1.0.crate" \
+            --output-dir .tmp/release-readiness/source
 
       - uses: actions/upload-artifact@v4
         if: always()
         with:
-          name: release-readiness-quality
+          name: rc-quality-evidence
           path: .tmp/release-readiness/quality
-          if-no-files-found: warn
+          if-no-files-found: error
+          retention-days: 30
 
       - uses: actions/upload-artifact@v4
-        if: always()
         with:
-          name: release-readiness-artifacts
-          path: .tmp/release-readiness/artifacts
-          if-no-files-found: warn
+          name: rc-source-package
+          path: .tmp/release-readiness/source
+          if-no-files-found: error
+          retention-days: 30
+
+  native-artifacts:
+    name: Native artifact ${{ matrix.target_triple }}
+    needs: quality
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - platform_id: linux-x64
+            runner: ubuntu-24.04
+            target_triple: x86_64-unknown-linux-gnu
+            executable_suffix: ""
+          - platform_id: windows-x64
+            runner: windows-2025
+            target_triple: x86_64-pc-windows-msvc
+            executable_suffix: .exe
+          - platform_id: macos-arm64
+            runner: macos-15
+            target_triple: aarch64-apple-darwin
+            executable_suffix: ""
+          - platform_id: macos-x64
+            runner: macos-15-intel
+            target_triple: x86_64-apple-darwin
+            executable_suffix: ""
+    runs-on: ${{ matrix.runner }}
+    env:
+      TARGET_TRIPLE: ${{ matrix.target_triple }}
+      EXECUTABLE_SUFFIX: ${{ matrix.executable_suffix }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          ref: ${{ inputs.candidate_sha }}
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: 1.92.0
+
+      - name: Verify exact committed candidate SHA
+        run: |
+          [[ "$CANDIDATE_SHA" =~ ^[0-9a-f]{40}$ ]]
+          test "$(git rev-parse HEAD)" = "$CANDIDATE_SHA"
+
+      - name: Build exact native release artifact
+        run: cd LOSAT && cargo build --release --locked
+
+      - name: Assemble, extract, and smoke native artifact
+        run: |
+          # NCBI reference: ncbi-blast/c++/src/algo/blast/blastinput/cmdline_flags.cpp:46-107
+          # The helper invokes a committed BLASTP contract without changing or classifying its output.
+          python LOSAT/tests/prepare_release_candidate_v010.py native \
+            --repo-root . \
+            --candidate-sha "$CANDIDATE_SHA" \
+            --target "$TARGET_TRIPLE" \
+            --binary "LOSAT/target/release/LOSAT${EXECUTABLE_SUFFIX}" \
+            --output-dir ".tmp/release-readiness/native-${{ matrix.platform_id }}"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: rc-native-${{ matrix.platform_id }}
+          path: .tmp/release-readiness/native-${{ matrix.platform_id }}
+          if-no-files-found: error
+          retention-days: 30
+
+  serial-wasm-artifact:
+    name: Serial wasm32-wasip1 artifact
+    needs: quality
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          ref: ${{ inputs.candidate_sha }}
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: 1.92.0
+          targets: wasm32-wasip1
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 18.19.1
+
+      - name: Verify exact committed candidate SHA
+        run: |
+          [[ "$CANDIDATE_SHA" =~ ^[0-9a-f]{40}$ ]]
+          test "$(git rev-parse HEAD)" = "$CANDIDATE_SHA"
+
+      - name: Build exact serial-Wasm release artifact
+        run: cd LOSAT && cargo build --release --target wasm32-wasip1 --no-default-features --locked
+
+      - name: Assemble, extract, and smoke serial-Wasm artifact
+        run: |
+          # NCBI reference: ncbi-blast/c++/src/algo/blast/blastinput/cmdline_flags.cpp:46-107
+          # The WASI runner supplies the existing CLI inputs and does not implement BLAST behavior.
+          python LOSAT/tests/prepare_release_candidate_v010.py wasm \
+            --repo-root . \
+            --candidate-sha "$CANDIDATE_SHA" \
+            --target wasm32-wasip1 \
+            --binary LOSAT/target/wasm32-wasip1/release/LOSAT.wasm \
+            --runner LOSAT/tests/run_losat_wasi.js \
+            --output-dir .tmp/release-readiness/serial-wasm
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: rc-serial-wasm
+          path: .tmp/release-readiness/serial-wasm
+          if-no-files-found: error
+          retention-days: 30
 
   integrated-certification:
-    name: Integrated Linux Native And Serial-Wasm Certification
+    name: Optional integrated Linux native and serial-Wasm recertification
     runs-on: [self-hosted, linux, x64, losat-certification]
     needs: quality
     if: ${{ inputs.run_integrated_certification }}
@@ -131,6 +235,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
+          fetch-depth: 0
           ref: ${{ inputs.candidate_sha }}
 
       - uses: dtolnay/rust-toolchain@stable
@@ -145,7 +250,7 @@ jobs:
 
       - name: Verify exact candidate and frozen official oracles
         run: |
-          test "$(git rev-parse HEAD)" = "${{ inputs.candidate_sha }}"
+          test "$(git rev-parse HEAD)" = "$CANDIDATE_SHA"
           test -x /home/kawato/tools/ncbi-blast-oracle/ncbi-blast-2.17.0+/bin/blastn
           test -x /home/kawato/tools/ncbi-blast-oracle/ncbi-blast-2.17.0+/bin/blastp
           test -x /home/kawato/tools/ncbi-blast-oracle/ncbi-blast-2.17.0+/bin/tblastx
@@ -157,16 +262,13 @@ jobs:
           cargo build --release --locked
           cargo build --release --target wasm32-wasip1 --no-default-features --locked
 
-      - name: Run full integrated certification
+      - name: Run full integrated certification only when explicitly requested
         run: |
-          # NCBI references:
-          # ncbi-blast/c++/src/algo/blast/format/blast_format.cpp:770-832
-          # ncbi-blast/c++/src/objtools/align_format/format_flags.cpp:39-45
-          # The committed program authorities classify raw NCBI/LOSAT output;
-          # this workflow only invokes and archives that evidence.
+          # NCBI reference: ncbi-blast/c++/src/algo/blast/format/blast_format.cpp:770-832
+          # Existing program authorities classify raw output; this job only invokes and archives them.
           python LOSAT/tests/certify_integrated_runtime_v010.py \
-            --expected-sha "${{ inputs.candidate_sha }}" \
-            --output-dir "${EVIDENCE_DIR}"
+            --expected-sha "$CANDIDATE_SHA" \
+            --output-dir "$EVIDENCE_DIR"
 
       - uses: actions/upload-artifact@v4
         if: always()
@@ -174,3 +276,54 @@ jobs:
           name: integrated-runtime-certification-${{ inputs.candidate_sha }}
           path: /tmp/losat-integrated-${{ github.run_id }}-${{ github.run_attempt }}
           if-no-files-found: error
+          retention-days: 30
+
+  handoff:
+    name: Aggregate exact-SHA RC handoff
+    needs: [quality, native-artifacts, serial-wasm-artifact, integrated-certification]
+    if: >-
+      ${{ always() &&
+          needs.quality.result == 'success' &&
+          needs.native-artifacts.result == 'success' &&
+          needs.serial-wasm-artifact.result == 'success' &&
+          (needs.integrated-certification.result == 'success' ||
+           needs.integrated-certification.result == 'skipped') }}
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          ref: ${{ inputs.candidate_sha }}
+
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: rc-native-*
+          path: .tmp/release-readiness/inputs
+          merge-multiple: true
+
+      - uses: actions/download-artifact@v4
+        with:
+          name: rc-serial-wasm
+          path: .tmp/release-readiness/inputs
+
+      - uses: actions/download-artifact@v4
+        with:
+          name: rc-source-package
+          path: .tmp/release-readiness/inputs
+
+      - name: Verify checksums and create handoff manifest
+        run: |
+          python LOSAT/tests/prepare_release_candidate_v010.py aggregate \
+            --repo-root . \
+            --candidate-sha "$CANDIDATE_SHA" \
+            --input-root .tmp/release-readiness/inputs \
+            --output-dir .tmp/release-readiness/handoff \
+            --workflow-run-id "$GITHUB_RUN_ID" \
+            --integrated-certification-rerun "${{ inputs.run_integrated_certification }}"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: LOSAT-v0.1.0-rc-${{ inputs.candidate_sha }}
+          path: .tmp/release-readiness/handoff
+          if-no-files-found: error
+          retention-days: 30

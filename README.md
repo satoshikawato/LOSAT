@@ -14,15 +14,16 @@ component.
 
 The v0.1.0 release candidate is certification-gated. Program-profile
 certification is complete for the scopes below, but the release itself remains
-unpublished pending final release-wide artifact certification.
+unpublished. Exact-SHA artifact certification is emitted by the manual release
+workflow and is not copied back into source documentation.
 
 | Area | v0.1.0 status | Notes |
 | --- | --- | --- |
-| BLASTN `--task blastn` and `--task megablast` | Supported for the certified local profile | The [14-case certification](docs/release/blastn_v0.1.0_certification.md) covers 13 exact source-defined cases and one Version 1.1 source-underdetermined equal-HSP case. |
+| BLASTN `--task blastn` and `--task megablast` | Supported for the certified local profile | The [14-case certification](docs/release/blastn_v0.1.0_certification.md) covers 13 exact source-defined cases and one Version 1.2 source-underdetermined equal-HSP case. |
 | BLASTP / LOSATP | Supported for the certified gbdraw local profiles | The [nine-case certification](docs/release/blastp_v0.1.0_certification.md) covers gbdraw P1-P3 local query/subject workflows with standard outfmt 6. |
 | TBLASTX / TLOSATX | Supported for the certified gbdraw local profiles | The [20-case certification](docs/release/tblastx_v0.1.0_certification.md) covers gbdraw P1-P2 local query/subject workflows and the approved `--db-gencode` behavior below. |
-| Native CLI | Supported candidate | Program profiles are certified; final release artifacts, provenance, checksums, target matrix, and artifact smoke tests remain pending. |
-| `wasm32-wasip1` serial command build | Program-specific evidence only | BLASTP P1-P3 raw profiles have certified serial fallback evidence; BLASTN and TBLASTX have targeted native/serial-Wasm equality evidence. This is not general Wasm support. |
+| Native CLI | Supported candidate on Linux x64, Windows x64, macOS arm64, and macOS x64 | PR 6 certified all 43 declared native contracts against the frozen Linux LOSAT output on each non-Linux target. Exact-SHA release archives are produced and certified only by the final RC workflow. |
+| `wasm32-wasip1` serial command build | Supported candidate for directly applicable certified rows | PR 5 established raw-byte equality with native LOSAT for all 41 directly applicable rows: BLASTN 14, BLASTP 7, and TBLASTX 20. This is not generic Wasm support. |
 | `wasm32-wasip1-threads` | Experimental | Requires the `wasm-threads` feature and a WASI runtime with thread support. |
 | Rust library API | Internal only | No semver-stable API commitment in v0.1.0. |
 | Web or embeddable Wasm API | Internal only | Public ABI and memory ownership are not yet release-stable. |
@@ -81,8 +82,13 @@ selected program implements the requested fields.
 
 ## Verification
 
-The durable certification records above are the support authorities. Their
-committed gate entry points are:
+The program records above, the
+[integrated native/serial-Wasm record](docs/release/pure_rust_runtime_v0.1.0_certification.md),
+and the PR 6 cross-platform certificate are the support authorities. The
+integrated result is 43/43 policy-accepted native contracts and 41/41 directly
+applicable serial-Wasm/native byte equalities. PR 6 run `33625511701` produced
+`CROSS_PLATFORM_NATIVE_CERTIFIED` for Windows x64, macOS arm64, and macOS x64.
+The committed program gate entry points are:
 
 ```bash
 cd LOSAT
@@ -136,7 +142,7 @@ Browser-facing or embeddable Wasm APIs are not release-stable in v0.1.0.
   profile in the committed certification manifest. `dc-megablast`, database
   search, and threaded-Wasm BLASTN certification remain outside this claim.
   The one demonstrated source-underdetermined equal-HSP tie is governed by
-  [Product Decision Version 1.1](docs/product_decisions/PD-BLASTN-HSP-CANONICALIZATION.md)
+  [Product Decision Version 1.2](docs/product_decisions/PD-BLASTN-HSP-CANONICALIZATION.md)
   and the [durable certification record](docs/release/blastn_v0.1.0_certification.md).
 - BLASTP support is limited to the certified gbdraw P1-P3 local query/subject
   profiles with standard outfmt 6. Database/remote search, alternate tasks and
@@ -145,8 +151,9 @@ Browser-facing or embeddable Wasm APIs are not release-stable in v0.1.0.
   profiles with standard outfmt 6 and one thread per job. Other search modes,
   output formats, unexercised options, and threaded Wasm remain outside this
   claim.
-- Serial Wasm evidence is program- and case-specific as stated in each
-  certification record; it does not promote all Wasm behavior.
+- Serial Wasm evidence covers the 41 directly applicable rows in the declared
+  program manifests; it does not promote unlisted options, threaded Wasm, or a
+  browser/embeddable ABI.
 - Existing comparison outputs under `LOSAT/tests/*_out` are release hygiene
   targets; regenerated output should be treated as artifact or scratch data
   unless explicitly documented as canonical fixture data.
@@ -156,6 +163,7 @@ Browser-facing or embeddable Wasm APIs are not release-stable in v0.1.0.
 - Scope: [docs/v0.1.0_scope.md](docs/v0.1.0_scope.md)
 - Readiness plan: [docs/v0.1.0_release_readiness_plan.md](docs/v0.1.0_release_readiness_plan.md)
 - Release note draft: [docs/release/v0.1.0.md](docs/release/v0.1.0.md)
+- Exact-SHA RC contract: [docs/release/v0.1.0_rc_contract.json](docs/release/v0.1.0_rc_contract.json)
 - Release procedure: [RELEASE.md](RELEASE.md)
 - Changelog: [CHANGELOG.md](CHANGELOG.md)
 - Contributing: [CONTRIBUTING.md](CONTRIBUTING.md)

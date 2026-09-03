@@ -19,6 +19,8 @@ jobs:
         run: python3 LOSAT/tests/check_pure_rust_runtime_boundary.py --root .
       - name: Pure-Rust boundary checker tests
         run: python3 -m unittest discover -s LOSAT/tests -p 'test_check_pure_rust_runtime_boundary.py'
+      - name: Release-candidate tooling tests
+        run: python3 -m unittest LOSAT/tests/test_prepare_release_candidate_v010.py
       - run: cd LOSAT && cargo fmt --check
       - run: cd LOSAT && cargo clippy --all-targets --all-features -- -D warnings
       - run: cd LOSAT && cargo test --all-features

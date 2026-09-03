@@ -27,6 +27,10 @@ Before tagging:
 - Build native/Wasm artifacts only for targets documented in the release note.
 - Record artifact checksums and smoke-test extracted artifacts.
 - Keep generated comparison output and debug scratch out of release source.
+- Use the exact-SHA RC contract in
+  [`docs/release/v0.1.0_rc_contract.json`](docs/release/v0.1.0_rc_contract.json);
+  do not copy version, target, or certification authority into another release
+  script.
 
 ## Required Local Gate
 
@@ -37,13 +41,23 @@ cargo clippy --all-targets --all-features -- -D warnings
 cargo test --all-features
 cargo build --release
 cargo package --list
+cargo package --locked \
+  --config 'build.target-dir="/tmp/losat-cargo-package-target"'
 cargo publish --dry-run --locked \
   --config 'build.target-dir="/tmp/losat-cargo-publish-target"'
 ```
 
-## Required Parity Gate
+## Certified Parity Authority
 
 NCBI BLAST+ executables may be used only in this validation role.
+
+The merged PR 5/PR 6 evidence satisfies this gate for an exact-SHA candidate
+whose runtime, build, fixture, classifier, exception, and Product Decision
+inputs remain unchanged. Do not rerun the commands below solely because release
+documentation or artifact metadata changed. They remain the bounded
+recertification entry points if the post-merge gate finds an invalidating
+change; in that case, stop the ordinary RC path until the new evidence is
+formally reviewed.
 
 ```bash
 cd LOSAT
@@ -68,10 +82,31 @@ python LOSAT/tests/audit_tblastx_v010.py \
 
 ## Artifact Gate
 
-Use `.github/workflows/release-readiness.yml` on the release branch to assemble
-release-candidate artifacts and collect checksums. Copy the resulting metadata
-into [docs/release/v0.1.0.md](docs/release/v0.1.0.md) before drafting the
-GitHub Release.
+Run `.github/workflows/release-readiness.yml` manually with the exact committed
+candidate SHA. Leave `run_integrated_certification` false unless the post-merge
+gate identifies an output-affecting runtime/build/contract change after the
+certified lineage.
+
+The workflow must finish with one `LOSAT-v0.1.0-rc-<SHA>` handoff artifact. It
+contains:
+
+- native archives for Linux x64, Windows x64, macOS arm64, and macOS x64;
+- the serial `wasm32-wasip1` command artifact;
+- the Cargo source package produced by the package/publish dry runs;
+- `SHA256SUMS`, per-artifact metadata, `RC-HANDOFF.json`, and
+  `RC-HANDOFF.md`.
+
+The workflow verifies exact source ancestry and CERT_TOOLCHAIN identity,
+records candidate-specific binary and archive hashes, inspects target
+architecture, extracts every binary archive, performs `--version` and
+representative BLASTP smoke checks, and installs/smokes the source package in a
+clean temporary location. Historical certification binary hashes remain
+provenance identities, not cross-runner byte-equality gates; the metadata
+records whether a candidate build happens to match them. Signing and
+notarization remain explicitly unperformed.
+
+Record the workflow run URL and generated `RC-HANDOFF.json` with the release
+review. Do not edit an artifact or checksum after the workflow creates it.
 
 ## Publish
 

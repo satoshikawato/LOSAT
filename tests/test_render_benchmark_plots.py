@@ -59,6 +59,11 @@ TIMING_HEADER = [
     "tool",
     "contract",
     "benchmark_timestamp",
+    "material_environment_id",
+    "collection_segment",
+    "boot_id",
+    "effective_thread_label",
+    "effective_thread_evidence",
 ]
 
 
@@ -152,7 +157,7 @@ class RendererTests(unittest.TestCase):
                     "abc",
                     "0:02.50",
                 ]
-                + [""] * 9
+                + [""] * 14
             )
             for case_id, baseline, candidate in (
                 ("p11_avclpv_psclpv", "639.21", "636.70"),
@@ -179,19 +184,38 @@ class RendererTests(unittest.TestCase):
                             "def",
                             "",
                         ]
-                        + [""] * 9
+                        + [""] * 14
                     )
-            for implementation, baseline in (("NCBI BLAST+", 2.0), ("LOSAT", 1.5)):
+            # NCBI reference: ncbi-blast/c++/src/app/blast/tblastx_app.cpp:191-194
+            # CLocalBlast lcl_blast(queries, opts_hndl, db_adapter);
+            # lcl_blast.SetNumberOfThreads(m_CmdLineArgs->GetNumThreads());
+            # results = lcl_blast.Run();
+            for mode_index, (mode, implementation, threads, effective) in enumerate(
+                (
+                    ("ncbi_n1", "NCBI BLAST+", "1", "requested/configured 1"),
+                    ("ncbi_n8", "NCBI BLAST+", "8", "requested/configured 8"),
+                    ("losat_native_n1", "LOSAT native", "1", "requested/configured 1"),
+                    ("losat_native_n8", "LOSAT native", "8", "requested/configured 8"),
+                    ("losat_wasm_serial", "LOSAT serial Wasm", "1", "serial command-Wasm"),
+                    (
+                        "losat_wasm_threads_requested_n8",
+                        "LOSAT threaded Wasm requested n8",
+                        "8",
+                        "effective serial",
+                    ),
+                ),
+                start=1,
+            ):
                 for sample_index in range(1, 6):
-                    seconds = baseline + sample_index / 10
+                    seconds = mode_index + sample_index / 10
                     writer.writerow(
                         [
                             "unit_current",
                             "tblastx",
-                            "TBLASTX",
+                            mode,
                             "current-case",
                             implementation,
-                            "1",
+                            threads,
                             str(seconds),
                             "wall_clock_sample",
                             "candidate-sha",
@@ -209,6 +233,11 @@ class RendererTests(unittest.TestCase):
                             implementation,
                             "EXACT_TEXT",
                             f"2026-09-03T00:00:0{sample_index}+00:00",
+                            "unit-material-environment",
+                            "1",
+                            "unit-boot",
+                            effective,
+                            "unit-probe",
                         ]
                     )
 
@@ -238,9 +267,20 @@ class RendererTests(unittest.TestCase):
         rows = RENDERER.load_timing_rows(self.snapshot / "execution_times.tsv")
         current = [row for row in rows if row["provenance_id"] == "unit_current"]
         summaries = RENDERER.summarize_current_timing(current)
-        self.assertEqual(len(summaries), 2)
-        self.assertEqual([summary["n"] for summary in summaries], [5, 5])
-        self.assertEqual([summary["median"] for summary in summaries], [2.3, 1.8])
+        self.assertEqual(len(summaries), 6)
+        self.assertEqual([summary["n"] for summary in summaries], [5] * 6)
+        self.assertEqual(
+            [summary["median"] for summary in summaries],
+            [1.3, 2.3, 3.3, 4.3, 5.3, 6.3],
+        )
+        self.assertEqual(
+            [summary["min"] for summary in summaries],
+            [1.1, 2.1, 3.1, 4.1, 5.1, 6.1],
+        )
+        self.assertEqual(
+            [summary["max"] for summary in summaries],
+            [1.5, 2.5, 3.5, 4.5, 5.5, 6.5],
+        )
 
     def test_snapshot_file_cannot_escape_snapshot(self) -> None:
         with self.assertRaisesRegex(ValueError, "escapes snapshot directory"):

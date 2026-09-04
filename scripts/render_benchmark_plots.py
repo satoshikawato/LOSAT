@@ -22,10 +22,40 @@ import numpy as np
 from matplotlib.patches import Patch
 
 
-RENDERER_VERSION = 1
+RENDERER_VERSION = 2
 PROGRAMS = ("blastn", "blastp", "tblastx")
 IMPLEMENTATIONS = ("NCBI BLAST+", "LOSAT")
 PROGRAM_LABELS = {"blastn": "BLASTN", "blastp": "BLASTP", "tblastx": "TBLASTX"}
+# NCBI reference: ncbi-blast/c++/src/app/blast/tblastx_app.cpp:191-194
+# CLocalBlast lcl_blast(queries, opts_hndl, db_adapter);
+# lcl_blast.SetNumberOfThreads(m_CmdLineArgs->GetNumThreads());
+# results = lcl_blast.Run();
+# These timing labels retain requested thread configurations; the data-only
+# renderer does not implement or alter search behavior.
+TIMING_MODES = (
+    "ncbi_n1",
+    "ncbi_n8",
+    "losat_native_n1",
+    "losat_native_n8",
+    "losat_wasm_serial",
+    "losat_wasm_threads_requested_n8",
+)
+TIMING_MODE_LABELS = {
+    "ncbi_n1": "NCBI BLAST+ n1",
+    "ncbi_n8": "NCBI BLAST+ n8",
+    "losat_native_n1": "LOSAT native n1",
+    "losat_native_n8": "LOSAT native n8",
+    "losat_wasm_serial": "LOSAT serial Wasm n1",
+    "losat_wasm_threads_requested_n8": "LOSAT threaded Wasm requested n8",
+}
+TIMING_MODE_THREADS = {
+    "ncbi_n1": "1",
+    "ncbi_n8": "8",
+    "losat_native_n1": "1",
+    "losat_native_n8": "8",
+    "losat_wasm_serial": "1",
+    "losat_wasm_threads_requested_n8": "8",
+}
 ALIGNMENT_FIELDS = {
     "program",
     "case_id",
@@ -62,6 +92,11 @@ TIMING_FIELDS = {
     "environment_id",
     "tool",
     "contract",
+    "material_environment_id",
+    "collection_segment",
+    "boot_id",
+    "effective_thread_label",
+    "effective_thread_evidence",
 }
 
 # NCBI reference: ncbi-blast/c++/src/objtools/align_format/format_flags.cpp:38-40,109-116
@@ -478,40 +513,45 @@ def summarize_current_timing(rows: list[dict[str, str]]) -> list[dict[str, objec
     case_order = list(dict.fromkeys(row["case_id"] for row in rows))
     summaries: list[dict[str, object]] = []
     for case_id in case_order:
-        for tool in IMPLEMENTATIONS:
+        for mode in TIMING_MODES:
             group = [
                 row
                 for row in rows
-                if row["case_id"] == case_id and row["tool"] == tool
+                if row["case_id"] == case_id and row["mode"] == mode
             ]
             if len(group) != 5:
                 raise ValueError(
-                    f"current timing group must contain five samples: {case_id} {tool}"
+                    f"current timing group must contain five samples: {case_id} {mode}"
                 )
             if {row["sample_index"] for row in group} != {"1", "2", "3", "4", "5"}:
-                raise ValueError(f"invalid sample indexes: {case_id} {tool}")
+                raise ValueError(f"invalid sample indexes: {case_id} {mode}")
             if {row["warmup_count"] for row in group} != {"1"}:
-                raise ValueError(f"invalid warmup count: {case_id} {tool}")
-            if {row["thread_count"] for row in group} != {"1"}:
-                raise ValueError(f"invalid thread count: {case_id} {tool}")
+                raise ValueError(f"invalid warmup count: {case_id} {mode}")
+            if {row["thread_count"] for row in group} != {TIMING_MODE_THREADS[mode]}:
+                raise ValueError(f"invalid thread count: {case_id} {mode}")
             output_hashes = {row["output_sha256"] for row in group}
             if len(output_hashes) != 1 or "" in output_hashes:
-                raise ValueError(f"unstable output hashes: {case_id} {tool}")
+                raise ValueError(f"unstable output hashes: {case_id} {mode}")
             values = [float(row["wall_seconds"]) for row in group]
             if any(not math.isfinite(value) or value <= 0 for value in values):
-                raise ValueError(f"invalid current timing sample: {case_id} {tool}")
+                raise ValueError(f"invalid current timing sample: {case_id} {mode}")
             summaries.append(
                 {
                     "case_id": case_id,
                     "contract": group[0]["contract"],
+                    "effective_thread_evidence": group[0]["effective_thread_evidence"],
+                    "effective_thread_label": group[0]["effective_thread_label"],
+                    "implementation": group[0]["implementation"],
                     "max": max(values),
                     "mean": statistics.fmean(values),
                     "median": statistics.median(values),
                     "min": min(values),
+                    "mode": mode,
                     "n": len(values),
                     "output_sha256": next(iter(output_hashes)),
                     "program": group[0]["program"],
-                    "tool": tool,
+                    "thread_count": int(group[0]["thread_count"]),
+                    "tool": group[0]["tool"],
                 }
             )
     return summaries
@@ -552,55 +592,77 @@ def render_execution_time(
         "d06_ap027131_ap027133_db4": "TBLASTX · d06 AP027131/AP027133 db4‡",
         "p11_avclpv_psclpv": "TBLASTX · p11 AvCLPV/PsCLPV",
     }
-    colors = {"NCBI BLAST+": "#4c72b0", "LOSAT": "#dd8452"}
-    markers = {"NCBI BLAST+": "o", "LOSAT": "s"}
-    lookup = {(row["case_id"], row["tool"]): row for row in summaries}
+    colors = {
+        "ncbi_n1": "#4c72b0",
+        "ncbi_n8": "#55a4c9",
+        "losat_native_n1": "#dd8452",
+        "losat_native_n8": "#e6a700",
+        "losat_wasm_serial": "#8172b3",
+        "losat_wasm_threads_requested_n8": "#937860",
+    }
+    markers = {
+        "ncbi_n1": "o",
+        "ncbi_n8": "^",
+        "losat_native_n1": "s",
+        "losat_native_n8": "D",
+        "losat_wasm_serial": "P",
+        "losat_wasm_threads_requested_n8": "X",
+    }
+    lookup = {(row["case_id"], row["mode"]): row for row in summaries}
     positions = np.arange(len(cases), dtype=float)
-    fig, axis = plt.subplots(figsize=(16, 8.8))
-    for index, tool in enumerate(IMPLEMENTATIONS):
-        group = [lookup[(case, tool)] for case in cases]
-        medians = np.array([float(row["median"]) for row in group])
-        minima = np.array([float(row["min"]) for row in group])
-        maxima = np.array([float(row["max"]) for row in group])
-        y_values = positions + (index - 0.5) * 0.24
-        axis.errorbar(
-            medians,
-            y_values,
-            xerr=np.vstack((medians - minima, maxima - medians)),
-            fmt=markers[tool],
-            color=colors[tool],
-            ecolor=colors[tool],
-            capsize=4,
-            elinewidth=1.4,
-            markersize=7.5,
-            label=f"{tool} median (whisker: min–max)",
-        )
-        for x_value, y_value in zip(medians, y_values):
-            axis.annotate(
-                f"{x_value:.3g} s",
-                (x_value, y_value),
-                xytext=(7, 0),
-                textcoords="offset points",
-                va="center",
-                fontsize=8,
-                color=colors[tool],
+    fig, axes = plt.subplots(2, 1, figsize=(16, 12.5), sharex=True)
+    panel_modes = (
+        (
+            "Native comparison: NCBI BLAST+ and LOSAT, n1/n8",
+            ("ncbi_n1", "ncbi_n8", "losat_native_n1", "losat_native_n8"),
+        ),
+        (
+            "LOSAT runtime landscape: native and Wasm",
+            (
+                "losat_native_n1",
+                "losat_native_n8",
+                "losat_wasm_serial",
+                "losat_wasm_threads_requested_n8",
+            ),
+        ),
+    )
+    for axis, (title, modes) in zip(axes, panel_modes):
+        for index, mode in enumerate(modes):
+            group = [lookup[(case, mode)] for case in cases]
+            medians = np.array([float(row["median"]) for row in group])
+            minima = np.array([float(row["min"]) for row in group])
+            maxima = np.array([float(row["max"]) for row in group])
+            y_values = positions + (index - 1.5) * 0.17
+            axis.errorbar(
+                medians,
+                y_values,
+                xerr=np.vstack((medians - minima, maxima - medians)),
+                fmt=markers[mode],
+                color=colors[mode],
+                ecolor=colors[mode],
+                capsize=3.5,
+                elinewidth=1.25,
+                markersize=6.8,
+                label=f"{TIMING_MODE_LABELS[mode]} median",
             )
-    axis.set_yticks(positions, [labels.get(case, case) for case in cases])
-    axis.invert_yaxis()
-    axis.set_xscale("log")
-    axis.set_xlabel("Wall-clock seconds (log scale)")
-    axis.set_title("One warmup + five timed repetitions per tool/case; points show medians")
-    axis.grid(True, axis="x", which="both")
-    axis.grid(False, axis="y")
-    axis.legend(frameon=False, loc="upper right")
+        axis.set_yticks(positions, [labels.get(case, case) for case in cases])
+        axis.invert_yaxis()
+        axis.set_xscale("log")
+        axis.set_title(title)
+        axis.grid(True, axis="x", which="both")
+        axis.grid(False, axis="y")
+        axis.legend(frameon=False, loc="upper right", ncol=2, fontsize=8.2)
+    axes[-1].set_xlabel(
+        "Wall-clock seconds (log scale); whiskers span min–max of all five samples"
+    )
 
     environment = current_meta.get("environment", {})
     if not isinstance(environment, dict):
         environment = {}
-    fig.suptitle("Final v0.1.0 execution-time benchmark", fontsize=18, y=0.965)
+    fig.suptitle("Full v0.1.0 execution-time landscape", fontsize=18, y=0.978)
     fig.text(
         0.5,
-        0.925,
+        0.948,
         f"LOSAT {current_meta.get('benchmark_losat_sha', '')} · NCBI BLAST+ {current_meta.get('ncbi_version', '')} · "
         f"{environment.get('os', '')} · {environment.get('cpu_model', '')}",
         ha="center",
@@ -609,8 +671,9 @@ def render_execution_time(
     )
     fig.text(
         0.5,
-        0.025,
-        "Threads: 1 · warmup: 1 · timed repetitions: 5 · median statistic; whiskers span all five samples. "
+        0.027,
+        "Protocol warmup: 1 · timed repetitions: 5 · median statistic; all samples retained. "
+        "Requested n8 labels denote configuration; per-case effective-thread evidence is retained in plot_data.json. "
         "† Source-undetermined accepted contract. ‡ Approved local-subject db-gencode deviation.",
         ha="center",
         va="bottom",
@@ -620,14 +683,14 @@ def render_execution_time(
     fig.text(
         0.5,
         0.008,
-        f"The {len(history)} historical rows and {len(pr93)} PR 93 scalar values remain retained as separate provenance and are not plotted as current data. "
-        "Single-machine result; no cross-machine portability claim.",
+        f"The {len(history)} historical rows and {len(pr93)} PR 93 scalar values remain separate. "
+        "Same-machine controlled benchmark · two WSL boot segments · binaries/toolchains revalidated after restart · resume warmups excluded.",
         ha="center",
         va="bottom",
         fontsize=8,
         color="#4b5563",
     )
-    fig.subplots_adjust(left=0.25, right=0.965, top=0.84, bottom=0.12)
+    fig.subplots_adjust(left=0.26, right=0.97, top=0.91, bottom=0.105, hspace=0.24)
     fig.savefig(
         output,
         dpi=140,
@@ -642,15 +705,25 @@ def render_execution_time(
         "historical_plot_2026_06": len(history),
         "pr93_performance_lineage": len(pr93),
     }
+    for provenance_id, group in provenance_groups.items():
+        if isinstance(group, dict) and group.get("status") == "SUPERSEDED_HISTORICAL":
+            counts[provenance_id] = sum(
+                row["provenance_id"] == provenance_id for row in rows
+            )
     plot_data = {
         "counts": counts,
         "current": {
             "provenance_id": current_id,
             "samples": [
                 {
+                    "boot_id": row["boot_id"],
                     "case_id": row["case_id"],
+                    "collection_segment": int(row["collection_segment"]),
+                    "effective_thread_label": row["effective_thread_label"],
+                    "mode": row["mode"],
                     "output_sha256": row["output_sha256"],
                     "sample_index": int(row["sample_index"]),
+                    "thread_count": int(row["thread_count"]),
                     "tool": row["tool"],
                     "wall_seconds": float(row["wall_seconds"]),
                 }

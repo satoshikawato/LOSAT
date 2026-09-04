@@ -132,11 +132,16 @@ contracts and compares LOSAT with NCBI BLAST+. See the
 
 ![v0.1.0 execution time](benchmarks/v0.1.0/execution_time.png)
 
-The execution-time figure uses final v0.1.0 main SHA
-`1ef13ed09e9cf6e3d6c3b1a1ed9527a389c3992d`, NCBI BLAST+ 2.17.0, and six
-representative one-thread cases. It shows the median of five timed repetitions
-after one warmup. Results are machine-specific and are not a cross-platform
-performance guarantee.
+The execution-time figure uses exact v0.1.0 benchmark SHA
+`af3e2ea837afdb8a00cf19920f68be4f0bf3bfb5`, NCBI BLAST+ 2.17.0, and six
+representative cases across NCBI/native n1/n8 plus serial and requested-n8
+threaded Wasm modes. It shows the median and min–max range of all five retained
+timed repetitions after one protocol warmup. This was a same-machine controlled
+benchmark collected in two execution segments, with binary/toolchain identities
+revalidated after restart; six restart-conditioning warmups were excluded from
+timed statistics. Results are machine-specific and are not a cross-platform
+performance guarantee, and this characterization does not expand the certified
+feature or target scope above.
 
 ## WebAssembly
 

@@ -41,12 +41,14 @@ TIMING_MODES = (
     "losat_wasm_threads_requested_n8",
 )
 TIMING_MODE_LABELS = {
-    "ncbi_n1": "NCBI BLAST+ n1",
-    "ncbi_n8": "NCBI BLAST+ n8",
+    "ncbi_n1": "NCBI n1",
+    "ncbi_n8": "NCBI n8",
     "losat_native_n1": "LOSAT native n1",
     "losat_native_n8": "LOSAT native n8",
-    "losat_wasm_serial": "LOSAT serial Wasm n1",
-    "losat_wasm_threads_requested_n8": "LOSAT threaded Wasm requested n8",
+    "losat_wasm_serial": "LOSAT Wasm serial",
+    "losat_wasm_threads_requested_n8": (
+        "LOSAT Wasm threaded (requested n8; effective varies)"
+    ),
 }
 TIMING_MODE_THREADS = {
     "ncbi_n1": "1",
@@ -585,12 +587,12 @@ def render_execution_time(
     summaries = summarize_current_timing(current)
     cases = list(dict.fromkeys(row["case_id"] for row in current))
     labels = {
-        "PesePMNV.MjPMNV.task_blastn": "BLASTN · PesePMNV/MjPMNV",
-        "Sakai.MG1655.megablast": "Megablast · Sakai/MG1655†",
-        "pairwise_default_serial": "BLASTP · pairwise default",
-        "p03_mela_pemojnva": "TBLASTX · p03 Mela/PemoMJNVA",
-        "d06_ap027131_ap027133_db4": "TBLASTX · d06 AP027131/AP027133 db4‡",
-        "p11_avclpv_psclpv": "TBLASTX · p11 AvCLPV/PsCLPV",
+        "PesePMNV.MjPMNV.task_blastn": "BLASTN\nPesePMNV/MjPMNV",
+        "Sakai.MG1655.megablast": "Megablast\nSakai/MG1655†",
+        "pairwise_default_serial": "BLASTP\npairwise default",
+        "p03_mela_pemojnva": "TBLASTX p03\nMela/PemoMJNVA",
+        "d06_ap027131_ap027133_db4": "TBLASTX d06\nAP027131/AP027133 db4‡",
+        "p11_avclpv_psclpv": "TBLASTX p11\nAvCLPV/PsCLPV",
     }
     colors = {
         "ncbi_n1": "#4c72b0",
@@ -610,70 +612,42 @@ def render_execution_time(
     }
     lookup = {(row["case_id"], row["mode"]): row for row in summaries}
     positions = np.arange(len(cases), dtype=float)
-    fig, axes = plt.subplots(2, 1, figsize=(16, 12.5), sharex=True)
-    panel_modes = (
-        (
-            "Native comparison: NCBI BLAST+ and LOSAT, n1/n8",
-            ("ncbi_n1", "ncbi_n8", "losat_native_n1", "losat_native_n8"),
-        ),
-        (
-            "LOSAT runtime landscape: native and Wasm",
-            (
-                "losat_native_n1",
-                "losat_native_n8",
-                "losat_wasm_serial",
-                "losat_wasm_threads_requested_n8",
-            ),
-        ),
-    )
-    for axis, (title, modes) in zip(axes, panel_modes):
-        for index, mode in enumerate(modes):
-            group = [lookup[(case, mode)] for case in cases]
-            medians = np.array([float(row["median"]) for row in group])
-            minima = np.array([float(row["min"]) for row in group])
-            maxima = np.array([float(row["max"]) for row in group])
-            y_values = positions + (index - 1.5) * 0.17
-            axis.errorbar(
-                medians,
-                y_values,
-                xerr=np.vstack((medians - minima, maxima - medians)),
-                fmt=markers[mode],
-                color=colors[mode],
-                ecolor=colors[mode],
-                capsize=3.5,
-                elinewidth=1.25,
-                markersize=6.8,
-                label=f"{TIMING_MODE_LABELS[mode]} median",
-            )
-        axis.set_yticks(positions, [labels.get(case, case) for case in cases])
-        axis.invert_yaxis()
-        axis.set_xscale("log")
-        axis.set_title(title)
-        axis.grid(True, axis="x", which="both")
-        axis.grid(False, axis="y")
-        axis.legend(frameon=False, loc="upper right", ncol=2, fontsize=8.2)
-    axes[-1].set_xlabel(
-        "Wall-clock seconds (log scale); whiskers span min–max of all five samples"
-    )
-
-    environment = current_meta.get("environment", {})
-    if not isinstance(environment, dict):
-        environment = {}
-    fig.suptitle("Full v0.1.0 execution-time landscape", fontsize=18, y=0.978)
+    fig = plt.figure(figsize=(16, 9.5))
+    axis = fig.add_axes((0.075, 0.18, 0.91, 0.73))
+    offset_step = 0.115
+    center = (len(TIMING_MODES) - 1) / 2
+    for index, mode in enumerate(TIMING_MODES):
+        group = [lookup[(case, mode)] for case in cases]
+        medians = np.array([float(row["median"]) for row in group])
+        minima = np.array([float(row["min"]) for row in group])
+        maxima = np.array([float(row["max"]) for row in group])
+        x_values = positions + (index - center) * offset_step
+        axis.errorbar(
+            x_values,
+            medians,
+            yerr=np.vstack((medians - minima, maxima - medians)),
+            fmt=markers[mode],
+            color=colors[mode],
+            ecolor=colors[mode],
+            capsize=3.5,
+            elinewidth=1.25,
+            markersize=6.8,
+            label=TIMING_MODE_LABELS[mode],
+        )
+    axis.set_xticks(positions, [labels.get(case, case) for case in cases])
+    axis.set_xlim(-0.55, len(cases) - 0.45)
+    axis.set_ylim(bottom=0)
+    axis.set_ylabel("Execution time (s)")
+    axis.set_title("Execution time comparison", fontsize=18, pad=15)
+    axis.grid(True, axis="y")
+    axis.grid(False, axis="x")
+    axis.legend(frameon=False, loc="upper left", ncol=3, fontsize=8.5)
     fig.text(
         0.5,
-        0.948,
-        f"LOSAT {current_meta.get('benchmark_losat_sha', '')} · NCBI BLAST+ {current_meta.get('ncbi_version', '')} · "
-        f"{environment.get('os', '')} · {environment.get('cpu_model', '')}",
-        ha="center",
-        fontsize=9.5,
-        color="#4b5563",
-    )
-    fig.text(
-        0.5,
-        0.027,
+        0.055,
         "Protocol warmup: 1 · timed repetitions: 5 · median statistic; all samples retained. "
-        "Requested n8 labels denote configuration; per-case effective-thread evidence is retained in plot_data.json. "
+        "Whiskers span min–max. Threaded-Wasm requested n8 is effective threaded for BLASTP and "
+        "effective serial for the current BLASTN/TBLASTX probes. "
         "† Source-undetermined accepted contract. ‡ Approved local-subject db-gencode deviation.",
         ha="center",
         va="bottom",
@@ -690,7 +664,6 @@ def render_execution_time(
         fontsize=8,
         color="#4b5563",
     )
-    fig.subplots_adjust(left=0.26, right=0.97, top=0.91, bottom=0.105, hspace=0.24)
     fig.savefig(
         output,
         dpi=140,

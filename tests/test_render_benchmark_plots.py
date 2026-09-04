@@ -7,10 +7,12 @@ import csv
 import gzip
 import hashlib
 import importlib.util
+import inspect
 import json
 import tempfile
 import unittest
 from pathlib import Path
+from unittest import mock
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -281,6 +283,40 @@ class RendererTests(unittest.TestCase):
             [summary["max"] for summary in summaries],
             [1.5, 2.5, 3.5, 4.5, 5.5, 6.5],
         )
+
+    def test_execution_time_figure_is_one_panel_with_linear_y_axis(self) -> None:
+        metadata, _ = RENDERER.load_metadata(self.snapshot)
+        figures = []
+        original_figure = RENDERER.plt.figure
+
+        def capture_figure(*args, **kwargs):
+            figure = original_figure(*args, **kwargs)
+            figures.append(figure)
+            return figure
+
+        with mock.patch.object(
+            RENDERER.plt, "figure", side_effect=capture_figure
+        ):
+            RENDERER.render_execution_time(
+                self.snapshot / "execution_times.tsv",
+                Path(self.temporary_directory.name) / "execution-time.png",
+                metadata["datasets"]["execution_times"],
+            )
+
+        self.assertEqual(len(figures), 1)
+        self.assertEqual(len(figures[0].axes), 1)
+        axis = figures[0].axes[0]
+        self.assertEqual(axis.get_xscale(), "linear")
+        self.assertEqual(axis.get_yscale(), "linear")
+        self.assertEqual(axis.get_ylabel(), "Execution time (s)")
+        self.assertEqual(axis.get_title(), "Execution time comparison")
+        self.assertEqual(
+            axis.get_legend_handles_labels()[1],
+            [RENDERER.TIMING_MODE_LABELS[mode] for mode in RENDERER.TIMING_MODES],
+        )
+        source = inspect.getsource(RENDERER.render_execution_time)
+        for forbidden in ("set_xscale(", "set_yscale(", "semilogy(", "symlog("):
+            self.assertNotIn(forbidden, source)
 
     def test_snapshot_file_cannot_escape_snapshot(self) -> None:
         with self.assertRaisesRegex(ValueError, "escapes snapshot directory"):

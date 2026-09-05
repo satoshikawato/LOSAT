@@ -1,0 +1,28 @@
+{
+  "cwd": "/mnt/c/Users/genom/GitHub/LOSAT",
+  "environment_overrides": {
+    "LOSAT_WASI_THREAD_CAP": "8",
+    "LOSAT_WASM_MEMORY_MAXIMUM_PAGES": "16384",
+    "NODE_NO_WARNINGS": "1"
+  },
+  "ordered_argv": [
+    "/tmp/losat-pr01-20260905/native/release/LOSAT",
+    "tblastx",
+    "--query",
+    "/tmp/losat-pr5-runtime-cert-5845d22/LOSAT/tests/fasta/MelaMJNV.fasta",
+    "--subject",
+    "/tmp/losat-pr5-runtime-cert-5845d22/LOSAT/tests/fasta/PemoMJNVA.fasta",
+    "--outfmt",
+    "6",
+    "--num-threads",
+    "4",
+    "--query-gencode",
+    "1",
+    "--db-gencode",
+    "1",
+    "--out",
+    "/mnt/c/Users/genom/GitHub/LOSAT/docs/wasm-performance/PR01/cold/tblastx/p03_mela_pemojnva/native-4/repeat-4/output.txt"
+  ],
+  "shell": false,
+  "sink": "/mnt/c/Users/genom/GitHub/LOSAT/docs/wasm-performance/PR01/cold/tblastx/p03_mela_pemojnva/native-4/repeat-4/output.txt"
+}

@@ -1,0 +1,7 @@
+{
+  "checked_utc": "2026-09-05T05:56:49.329256+00:00",
+  "tracked_files_checked": 457,
+  "differences": [],
+  "status": "PASS",
+  "scope": "All pre-existing tracked-file bytes; new PR01 test/docs/evidence files excluded"
+}

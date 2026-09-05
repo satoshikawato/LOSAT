@@ -1,0 +1,11 @@
+{
+  "failures": [],
+  "final_broad_gate": "NOT_RUN",
+  "medians": {},
+  "phase": "profile",
+  "release_certification": "NOT_RUN",
+  "sample_count": 8,
+  "schema_version": "losat-wasm-perf-run-v1",
+  "selected_cases": 4,
+  "status": "PASS_EXECUTED_SCOPE"
+}

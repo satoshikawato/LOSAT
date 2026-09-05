@@ -1,0 +1,22 @@
+LOSAT pure-Rust runtime boundary audit
+production_rust_files	151
+temporary_production_findings	0
+cargo_links_findings	2
+rust_implemented_abi	13
+INFO	rust.implemented_abi	LOSAT/src/web_api.rs:834	losat_web_alloc	rust_implemented_export_or_callback
+INFO	rust.implemented_abi	LOSAT/src/web_api.rs:1031	losat_web_clear	rust_implemented_export_or_callback
+INFO	rust.implemented_abi	LOSAT/src/web_api.rs:915	losat_web_clear_fasta_store	rust_implemented_export_or_callback
+INFO	rust.implemented_abi	LOSAT/src/web_api.rs:842	losat_web_dealloc	rust_implemented_export_or_callback
+INFO	rust.implemented_abi	LOSAT/src/web_api.rs:1026	losat_web_error_len	rust_implemented_export_or_callback
+INFO	rust.implemented_abi	LOSAT/src/web_api.rs:1021	losat_web_error_ptr	rust_implemented_export_or_callback
+INFO	rust.implemented_abi	LOSAT/src/web_api.rs:1037	losat_web_has_direct_api	rust_implemented_export_or_callback
+INFO	rust.implemented_abi	LOSAT/src/web_api.rs:892	losat_web_release_fasta	rust_implemented_export_or_callback
+INFO	rust.implemented_abi	LOSAT/src/web_api.rs:1016	losat_web_result_len	rust_implemented_export_or_callback
+INFO	rust.implemented_abi	LOSAT/src/web_api.rs:1008	losat_web_result_ptr	rust_implemented_export_or_callback
+INFO	rust.implemented_abi	LOSAT/src/web_api.rs:932	losat_web_run_pair	rust_implemented_export_or_callback
+INFO	rust.implemented_abi	LOSAT/src/web_api.rs:975	losat_web_run_pair_handles	rust_implemented_export_or_callback
+INFO	rust.implemented_abi	LOSAT/src/web_api.rs:852	losat_web_store_fasta	rust_implemented_export_or_callback
+REVIEWED_DEPENDENCY	cargo.links_metadata	LOSAT/Cargo.lock:1	rayon-core@1.13.0|links=rayon-core|kinds=normal	reviewed_non_algorithm_integration
+REVIEWED_DEPENDENCY	cargo.links_metadata	LOSAT/Cargo.lock:1	wasm-bindgen-shared@0.2.121|links=wasm_bindgen|kinds=normal	reviewed_non_algorithm_integration
+summary	temporary_allowed=0	temporary_unexpected=0	temporary_stale=0	temporary_invalid=0	dependencies_reviewed=2	dependencies_unexpected=0	dependencies_stale=0	dependencies_invalid=0
+result	PASS

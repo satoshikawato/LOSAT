@@ -1,0 +1,13 @@
+{
+  "cpu_system_seconds": 0.06,
+  "cpu_user_seconds": 1.65,
+  "exit_status": 0,
+  "output": "/mnt/c/Users/genom/GitHub/LOSAT/docs/wasm-performance/PR01/cold/blastp/pairwise_default_serial/threaded-2/repeat-2/output.txt",
+  "peak_rss_bytes": 125272064,
+  "raw_output_bytes": 29641,
+  "raw_output_sha256": "fd4b010800e32ce6c823cb38b42a10b7845f3342edae892acccc8f554f9edf34",
+  "reason": null,
+  "started_utc": "2026-09-05T05:39:54Z",
+  "status": "PASS",
+  "wall_seconds": 0.9016765979977208
+}

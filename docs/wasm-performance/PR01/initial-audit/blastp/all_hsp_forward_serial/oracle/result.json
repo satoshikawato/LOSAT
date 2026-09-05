@@ -1,0 +1,12 @@
+{
+  "cpu_system_seconds": 0.01,
+  "cpu_user_seconds": 0.95,
+  "exit_status": 0,
+  "output": "/mnt/c/Users/genom/GitHub/LOSAT/docs/wasm-performance/PR01/initial-audit/blastp/all_hsp_forward_serial/oracle/output.txt",
+  "peak_rss_bytes": 30011392,
+  "raw_output_bytes": 33167,
+  "raw_output_sha256": "a6d38a3200c9570726550a12858101d1eaa414dca236f925da5651e95d819b5d",
+  "reason": null,
+  "status": "PASS",
+  "wall_seconds": 1.0774877650001145
+}

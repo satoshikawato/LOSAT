@@ -1,0 +1,3 @@
+retry oracle p11_avclpv_psclpv
+oracle p11_avclpv_psclpv: TIMEOUT 600.028s
+retry p11_avclpv_psclpv native

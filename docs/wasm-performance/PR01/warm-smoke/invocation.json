@@ -1,0 +1,17 @@
+{
+  "argv": [
+    "LOSAT/tests/wasm_performance.py",
+    "run",
+    "--manifest",
+    "docs/wasm-performance/PR01/baseline/manifest.json",
+    "--output",
+    "docs/wasm-performance/PR01/warm-smoke",
+    "--phase",
+    "warm",
+    "--case",
+    "compact.multi_query.outfmt6"
+  ],
+  "harness_sha256": "c9c4d5c0f6e75e600d2b0d7a3366bdbfd7dbc87d96c20a5ba7aaa11cbdc03f69",
+  "manifest_sha256": "adf2abbe80e01b2edae9b2731e0d2063fa2949231243bed6ca76abfe6f55a688",
+  "phase": "warm"
+}

@@ -1,0 +1,13 @@
+{
+  "cpu_system_seconds": null,
+  "cpu_user_seconds": null,
+  "exit_status": -9,
+  "output": "/mnt/c/Users/genom/GitHub/LOSAT/docs/wasm-performance/PR01/followup-20260905/concurrent-audit/p11_avclpv_psclpv/native/output.txt",
+  "peak_rss_bytes": null,
+  "raw_output_bytes": null,
+  "raw_output_sha256": null,
+  "reason": "exceeded 600s",
+  "started_utc": "2026-09-05T06:59:22Z",
+  "status": "TIMEOUT",
+  "wall_seconds": 600.0136803530004
+}

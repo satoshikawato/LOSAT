@@ -1,0 +1,12 @@
+benchmark: blastn/PesePMNV.MjPMNV.task_blastn
+benchmark: blastn/EDL933.Sakai.megablast
+benchmark: blastn/compact.multi_query.outfmt6
+benchmark: blastn/compact.multi_query.no_hit.outfmt7
+benchmark: blastp/pairwise_default_serial
+benchmark: blastp/all_hsp_self_serial
+benchmark: tblastx/p03_mela_pemojnva
+benchmark: tblastx/p11_avclpv_psclpv
+benchmark: tblastx/p12_lc738874_lc738875_default
+benchmark: blastp/pr01_blastp_no_hit
+benchmark: tblastx/pr01_tblastx_no_hit
+samples=639 failures=9

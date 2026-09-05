@@ -1,0 +1,15 @@
+[TIMING] blastp_query_encoding_seg: 0.000s
+[TIMING] blastp_subject_encoding: 0.001s
+[TIMING] blastp_build_lookup: 0.060s
+[TIMING] blastp_scan_ungapped: 0.177s (calls=530)
+[TIMING] blastp_prelim_gapped: 0.028s (calls=530)
+[TIMING] blastp_prelim_exact_retries: 0 (removed_hsps=0, interval_tree_rebuilds=0, rebuild_nodes=0, endpoint_duplicates_purged=0)
+[TIMING] blastp_prelim_merge_sort: 0.000s (calls=531)
+[TIMING] blastp_kappa_redo: 0.000s (calls=1)
+[TIMING] blastp_final_traceback_stats: 0.000s (calls=1)
+[TIMING] blastp_output_format: 0.015s (calls=1)
+[TIMING] blastp_total: 0.296s
+[TIMING] blastp_kappa_query_range_bytes_copied: 0
+[TIMING] blastp_kappa_subject_range_bytes_copied: 0
+[TIMING] blastp_kappa_subject_seg_range: 0 bytes (calls=0, masked_residues=0)
+[TIMING] blastp_kappa_subject_seg_cache: hits=0 misses=0

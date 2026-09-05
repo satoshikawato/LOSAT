@@ -1,0 +1,14 @@
+[losat-wasi-threads] runner thread cap=8
+[losat-wasi-threads] starting main _start
+[losat-wasi-threads] tblastx stage=search target_arch=wasm32 threaded_wasm=true requested_threads=2 effective_threads=2 rayon_pool_threads=0 expected_spawned_workers=0 subject_records=1 subject_chunk_work_items=1 worker_jobs=1 total_subject_bases=359647 query_records=1 query_bases=287061 min_worker_jobs=2 min_subject_bases=524288 parallel=false parallel_chunks=false forced_parallel_chunks=false serial_reason=worker_jobs<=1
+[TIMING] read_queries: 0.131s
+[TIMING] build_lookup: 0.151s
+[TIMING] read_subjects: 0.000s
+[TIMING] scan_subject: 0.167s (calls=31292)
+[TIMING] ungapped_extend: 1.326s (calls=3360317)
+[TIMING] reevaluate: 0.001s (calls=4350)
+[TIMING] sum_stats_linking: 0.039s (calls=1)
+[TIMING] identity_calc: 0.000s (calls=0)
+[TIMING] search_total: 10.855s
+[TIMING] total: 11.185s
+[losat-wasi-threads] main _start returned; terminating workers

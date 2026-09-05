@@ -1,0 +1,30 @@
+{
+  "blastn": {
+    "path": "/home/kawato/tools/ncbi-blast-oracle/ncbi-blast-2.17.0+/bin/blastn",
+    "sha256": "33b64bc67d3149cee2459b2f7766b363323df632cf12c099546de00aea9698b5",
+    "version": [
+      "blastn: 2.17.0+",
+      " Package: blast 2.17.0, build Jul  1 2025 08:59:18"
+    ]
+  },
+  "blastp": {
+    "path": "/home/kawato/tools/ncbi-blast-oracle/ncbi-blast-2.17.0+/bin/blastp",
+    "sha256": "5ce267c04e4988c265357bfbedc64e809545b6fcfae7ff6775266fabbee8ba0e",
+    "version": [
+      "blastp: 2.17.0+",
+      " Package: blast 2.17.0, build Jul  1 2025 08:59:18"
+    ]
+  },
+  "tblastx": {
+    "path": "/home/kawato/tools/ncbi-blast-oracle/ncbi-blast-2.17.0+/bin/tblastx",
+    "sha256": "583e5d60bbd444ac455d20e0956c5aa0aeef675da8daee8204d8f9376ddb8804",
+    "version": [
+      "tblastx: 2.17.0+",
+      " Package: blast 2.17.0, build Jul  1 2025 08:59:18"
+    ]
+  },
+  "official_source_archive": {
+    "path": "/home/kawato/tools/ncbi-blast-source/ncbi-blast-2.17.0+-src.tar.gz",
+    "sha256": "502057a88e9990e34e62758be21ea474cc0ad68d6a63a2e37b2372af1e5ea147"
+  }
+}

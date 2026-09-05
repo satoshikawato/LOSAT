@@ -1,0 +1,15 @@
+{
+  "failures": [],
+  "medians": {
+    "blastn/compact.multi_query.outfmt6": {
+      "max_seconds": 0.018933312997221948,
+      "median_seconds": 0.005460336003452539,
+      "min_seconds": 0.003258865997195244,
+      "samples": 5
+    }
+  },
+  "phase": "warm",
+  "resident": "NOT_RUN",
+  "status": "PASS_EXECUTED_SCOPE",
+  "threaded_warm": "NOT_RUN"
+}

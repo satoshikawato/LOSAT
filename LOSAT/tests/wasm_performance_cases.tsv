@@ -1,0 +1,15 @@
+program	case_id	role	gap_eligible	protected	benchmark
+blastn	compact.multi_query.outfmt6	small	false	true	true
+blastn	compact.multi_query.no_hit.outfmt7	no-hit	false	true	true
+blastn	PesePMNV.MjPMNV.task_blastn	representative	true	true	true
+blastn	NZ_CP006932.NZ_CP006932.task_blastn	heavy-self	false	true	false
+blastn	EDL933.Sakai.megablast	heavy-megablast	true	true	true
+blastn	Sakai.MG1655.megablast	protected-source-underdetermined	false	true	false
+blastp	pairwise_default_serial	small	false	true	true
+blastp	pairwise_nohit_serial	no-hit-query-contexts	false	true	false
+blastp	all_hsp_self_serial	heavy-self	true	true	true
+tblastx	p12_lc738874_lc738875_default	small	false	true	true
+tblastx	p03_mela_pemojnva	heavy-representative	true	true	true
+tblastx	p11_avclpv_psclpv	heavy-linking	true	true	true
+tblastx	p01_ap027280_self	heavy-self	false	true	false
+tblastx	d06_ap027131_ap027133_db4	protected-genetic-code	false	true	false

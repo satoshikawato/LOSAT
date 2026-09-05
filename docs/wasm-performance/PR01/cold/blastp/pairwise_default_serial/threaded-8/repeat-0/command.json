@@ -1,0 +1,28 @@
+{
+  "cwd": "/mnt/c/Users/genom/GitHub/LOSAT",
+  "environment_overrides": {
+    "LOSAT_WASI_THREAD_CAP": "8",
+    "LOSAT_WASM_MEMORY_MAXIMUM_PAGES": "16384",
+    "NODE_NO_WARNINGS": "1"
+  },
+  "ordered_argv": [
+    "/usr/bin/node",
+    "/mnt/c/Users/genom/GitHub/LOSAT/LOSAT/tests/run_losat_wasi_threads.js",
+    "/tmp/losat-pr01-20260905/threaded/wasm32-wasip1-threads/release/LOSAT.wasm",
+    "blastp",
+    "--query",
+    "/tmp/losat-pr5-runtime-cert-5845d22/LOSAT/tests/fasta/SicyWSV.faa",
+    "--subject",
+    "/tmp/losat-pr5-runtime-cert-5845d22/LOSAT/tests/fasta/PajaWSV.faa",
+    "--outfmt",
+    "6",
+    "--num-threads",
+    "8",
+    "--max-hsps-per-subject",
+    "1",
+    "--out",
+    "/mnt/c/Users/genom/GitHub/LOSAT/docs/wasm-performance/PR01/cold/blastp/pairwise_default_serial/threaded-8/repeat-0/output.txt"
+  ],
+  "shell": false,
+  "sink": "/mnt/c/Users/genom/GitHub/LOSAT/docs/wasm-performance/PR01/cold/blastp/pairwise_default_serial/threaded-8/repeat-0/output.txt"
+}

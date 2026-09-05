@@ -1,0 +1,41 @@
+{
+  "archive_sha256": "502057a88e9990e34e62758be21ea474cc0ad68d6a63a2e37b2372af1e5ea147",
+  "sources": [
+    {
+      "path": "c++/src/algo/blast/core/blast_engine.c",
+      "archive_member": "ncbi-blast-2.17.0+-src/c++/src/algo/blast/core/blast_engine.c",
+      "official_sha256": "1e17d65cb0f10aab632469555dc7d98af198cad6bbe63e6dd97c1e6f9725ba48",
+      "local_sha256": "314e820758bdc8a4e070e72858a54db3827d12b1b1a3ae148e911c0eb5a641ba",
+      "same_source_text_ignoring_checkout_crlf": true
+    },
+    {
+      "path": "c++/src/algo/blast/core/blast_traceback.c",
+      "archive_member": "ncbi-blast-2.17.0+-src/c++/src/algo/blast/core/blast_traceback.c",
+      "official_sha256": "65d62426c66e79f794f8965ecda71f7deafe0827ed612ab9804d55346d670932",
+      "local_sha256": "20f9279de108db2442a7cd297b27b738b48b7729e8b3180d2f9df974102f87f7",
+      "same_source_text_ignoring_checkout_crlf": true
+    },
+    {
+      "path": "c++/src/algo/blast/core/blast_kappa.c",
+      "archive_member": "ncbi-blast-2.17.0+-src/c++/src/algo/blast/core/blast_kappa.c",
+      "official_sha256": "dff4b613721fa698afe2f951950566b9e446db7aeb00d55d56e31f772283616b",
+      "local_sha256": "fafd8a9c22dec6d749e0acf7ba7618761af016ba4a6a8c84d4170aadc2ff1104",
+      "same_source_text_ignoring_checkout_crlf": true
+    },
+    {
+      "path": "c++/src/algo/blast/format/blast_format.cpp",
+      "archive_member": "ncbi-blast-2.17.0+-src/c++/src/algo/blast/format/blast_format.cpp",
+      "official_sha256": "5bef03e54293680c35818b122b75d2ce16ea0db9e8f760f97cf827d99b2da907",
+      "local_sha256": "c094f6781db2c034f0e8da7663b6c08fa176c2987d67b776a0fa41bb585c712c",
+      "same_source_text_ignoring_checkout_crlf": true
+    },
+    {
+      "path": "c++/src/objtools/align_format/tabular.cpp",
+      "archive_member": "ncbi-blast-2.17.0+-src/c++/src/objtools/align_format/tabular.cpp",
+      "official_sha256": "0521c3dd3ed994a9191ef9adde8b8770e6abc042941e00b9abe1e09008f4af22",
+      "local_sha256": "6aea38e78b97574415ebe90b0b1e9fe39008e77e882090129c0e62489f8f5f44",
+      "same_source_text_ignoring_checkout_crlf": true
+    }
+  ],
+  "note": "CRLF comparison identifies source checkout only; search output gates never normalize bytes."
+}

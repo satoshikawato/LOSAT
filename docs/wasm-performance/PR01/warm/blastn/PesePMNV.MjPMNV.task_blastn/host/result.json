@@ -1,0 +1,13 @@
+{
+  "cpu_system_seconds": 0.04,
+  "cpu_user_seconds": 2.98,
+  "exit_status": 0,
+  "output": "/mnt/c/Users/genom/GitHub/LOSAT/docs/wasm-performance/PR01/warm/blastn/PesePMNV.MjPMNV.task_blastn/host/output.txt",
+  "peak_rss_bytes": 155787264,
+  "raw_output_bytes": 6445,
+  "raw_output_sha256": "9bcd545fa451e8878cdfda29bdafc072954d20308eae103ede6173b46f0caed8",
+  "reason": null,
+  "started_utc": "2026-09-05T05:59:06Z",
+  "status": "PASS",
+  "wall_seconds": 3.030999544000224
+}

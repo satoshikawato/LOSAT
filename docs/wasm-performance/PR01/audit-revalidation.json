@@ -1,0 +1,593 @@
+{
+  "method": "retained raw SHA/length verification plus current existing exception validators; no new searches",
+  "rows": [
+    {
+      "canonical_gate": "PASS",
+      "case_id": "PesePMNV.MjPMNV.task_blastn",
+      "kind": "native",
+      "oracle_contract": "PASS",
+      "program": "blastn"
+    },
+    {
+      "canonical_gate": "PASS",
+      "case_id": "PesePMNV.MjPMNV.task_blastn",
+      "kind": "serial",
+      "oracle_contract": "PASS",
+      "program": "blastn"
+    },
+    {
+      "canonical_gate": "PASS",
+      "case_id": "PmeNMV.MjPMNV.task_blastn",
+      "kind": "native",
+      "oracle_contract": "PASS",
+      "program": "blastn"
+    },
+    {
+      "canonical_gate": "PASS",
+      "case_id": "PmeNMV.MjPMNV.task_blastn",
+      "kind": "serial",
+      "oracle_contract": "PASS",
+      "program": "blastn"
+    },
+    {
+      "canonical_gate": "PASS",
+      "case_id": "PmeNMV.PesePMNV.task_blastn",
+      "kind": "native",
+      "oracle_contract": "PASS",
+      "program": "blastn"
+    },
+    {
+      "canonical_gate": "PASS",
+      "case_id": "PmeNMV.PesePMNV.task_blastn",
+      "kind": "serial",
+      "oracle_contract": "PASS",
+      "program": "blastn"
+    },
+    {
+      "canonical_gate": "PASS",
+      "case_id": "PeseMJNV.PemoMJNVB.task_blastn",
+      "kind": "native",
+      "oracle_contract": "PASS",
+      "program": "blastn"
+    },
+    {
+      "canonical_gate": "PASS",
+      "case_id": "PeseMJNV.PemoMJNVB.task_blastn",
+      "kind": "serial",
+      "oracle_contract": "PASS",
+      "program": "blastn"
+    },
+    {
+      "canonical_gate": "PASS",
+      "case_id": "MelaMJNV.PemoMJNVA.task_blastn",
+      "kind": "native",
+      "oracle_contract": "PASS",
+      "program": "blastn"
+    },
+    {
+      "canonical_gate": "PASS",
+      "case_id": "MelaMJNV.PemoMJNVA.task_blastn",
+      "kind": "serial",
+      "oracle_contract": "PASS",
+      "program": "blastn"
+    },
+    {
+      "canonical_gate": "PASS",
+      "case_id": "PemoMJNVA.PeseMJNV.task_blastn",
+      "kind": "native",
+      "oracle_contract": "PASS",
+      "program": "blastn"
+    },
+    {
+      "canonical_gate": "PASS",
+      "case_id": "PemoMJNVA.PeseMJNV.task_blastn",
+      "kind": "serial",
+      "oracle_contract": "PASS",
+      "program": "blastn"
+    },
+    {
+      "canonical_gate": "PASS",
+      "case_id": "MjeNMV.MelaMJNV.task_blastn",
+      "kind": "native",
+      "oracle_contract": "PASS",
+      "program": "blastn"
+    },
+    {
+      "canonical_gate": "PASS",
+      "case_id": "MjeNMV.MelaMJNV.task_blastn",
+      "kind": "serial",
+      "oracle_contract": "PASS",
+      "program": "blastn"
+    },
+    {
+      "canonical_gate": "PASS",
+      "case_id": "MjPMNV.MlPMNV.task_blastn",
+      "kind": "native",
+      "oracle_contract": "PASS",
+      "program": "blastn"
+    },
+    {
+      "canonical_gate": "PASS",
+      "case_id": "MjPMNV.MlPMNV.task_blastn",
+      "kind": "serial",
+      "oracle_contract": "PASS",
+      "program": "blastn"
+    },
+    {
+      "canonical_gate": "PASS",
+      "case_id": "NZ_CP006932.NZ_CP006932.task_blastn",
+      "kind": "native",
+      "oracle_contract": "PASS",
+      "program": "blastn"
+    },
+    {
+      "canonical_gate": "PASS",
+      "case_id": "NZ_CP006932.NZ_CP006932.task_blastn",
+      "kind": "serial",
+      "oracle_contract": "PASS",
+      "program": "blastn"
+    },
+    {
+      "canonical_gate": "PASS",
+      "case_id": "EDL933.Sakai.megablast",
+      "kind": "native",
+      "oracle_contract": "PASS",
+      "program": "blastn"
+    },
+    {
+      "canonical_gate": "PASS",
+      "case_id": "EDL933.Sakai.megablast",
+      "kind": "serial",
+      "oracle_contract": "PASS",
+      "program": "blastn"
+    },
+    {
+      "canonical_gate": "PASS",
+      "case_id": "Sakai.MG1655.megablast",
+      "kind": "native",
+      "oracle_contract": "PASS",
+      "program": "blastn"
+    },
+    {
+      "canonical_gate": "PASS",
+      "case_id": "Sakai.MG1655.megablast",
+      "kind": "serial",
+      "oracle_contract": "PASS",
+      "program": "blastn"
+    },
+    {
+      "canonical_gate": "PASS",
+      "case_id": "compact.multi_query.outfmt6",
+      "kind": "native",
+      "oracle_contract": "PASS",
+      "program": "blastn"
+    },
+    {
+      "canonical_gate": "PASS",
+      "case_id": "compact.multi_query.outfmt6",
+      "kind": "serial",
+      "oracle_contract": "PASS",
+      "program": "blastn"
+    },
+    {
+      "canonical_gate": "PASS",
+      "case_id": "compact.multi_query.outfmt7",
+      "kind": "native",
+      "oracle_contract": "PASS",
+      "program": "blastn"
+    },
+    {
+      "canonical_gate": "PASS",
+      "case_id": "compact.multi_query.outfmt7",
+      "kind": "serial",
+      "oracle_contract": "PASS",
+      "program": "blastn"
+    },
+    {
+      "canonical_gate": "PASS",
+      "case_id": "compact.multi_query.no_hit.outfmt7",
+      "kind": "native",
+      "oracle_contract": "PASS",
+      "program": "blastn"
+    },
+    {
+      "canonical_gate": "PASS",
+      "case_id": "compact.multi_query.no_hit.outfmt7",
+      "kind": "serial",
+      "oracle_contract": "PASS",
+      "program": "blastn"
+    },
+    {
+      "canonical_gate": "PASS",
+      "case_id": "pairwise_default_serial",
+      "kind": "native",
+      "oracle_contract": "PASS",
+      "program": "blastp"
+    },
+    {
+      "canonical_gate": "PASS",
+      "case_id": "pairwise_default_serial",
+      "kind": "serial",
+      "oracle_contract": "PASS",
+      "program": "blastp"
+    },
+    {
+      "canonical_gate": "PASS",
+      "case_id": "pairwise_limit1_serial",
+      "kind": "native",
+      "oracle_contract": "PASS",
+      "program": "blastp"
+    },
+    {
+      "canonical_gate": "PASS",
+      "case_id": "pairwise_limit1_serial",
+      "kind": "serial",
+      "oracle_contract": "PASS",
+      "program": "blastp"
+    },
+    {
+      "canonical_gate": "PASS",
+      "case_id": "pairwise_limit5_serial",
+      "kind": "native",
+      "oracle_contract": "PASS",
+      "program": "blastp"
+    },
+    {
+      "canonical_gate": "PASS",
+      "case_id": "pairwise_limit5_serial",
+      "kind": "serial",
+      "oracle_contract": "PASS",
+      "program": "blastp"
+    },
+    {
+      "canonical_gate": "PASS",
+      "case_id": "pairwise_nohit_serial",
+      "kind": "native",
+      "oracle_contract": "PASS",
+      "program": "blastp"
+    },
+    {
+      "canonical_gate": "PASS",
+      "case_id": "pairwise_nohit_serial",
+      "kind": "serial",
+      "oracle_contract": "PASS",
+      "program": "blastp"
+    },
+    {
+      "canonical_gate": "PASS",
+      "case_id": "pairwise_default_thread4",
+      "kind": "native",
+      "oracle_contract": "PASS",
+      "program": "blastp"
+    },
+    {
+      "canonical_gate": "PASS",
+      "case_id": "all_hsp_forward_serial",
+      "kind": "native",
+      "oracle_contract": "PASS",
+      "program": "blastp"
+    },
+    {
+      "canonical_gate": "PASS",
+      "case_id": "all_hsp_forward_serial",
+      "kind": "serial",
+      "oracle_contract": "PASS",
+      "program": "blastp"
+    },
+    {
+      "canonical_gate": "PASS",
+      "case_id": "all_hsp_reverse_limit5_serial",
+      "kind": "native",
+      "oracle_contract": "PASS",
+      "program": "blastp"
+    },
+    {
+      "canonical_gate": "PASS",
+      "case_id": "all_hsp_reverse_limit5_serial",
+      "kind": "serial",
+      "oracle_contract": "PASS",
+      "program": "blastp"
+    },
+    {
+      "canonical_gate": "PASS",
+      "case_id": "all_hsp_self_serial",
+      "kind": "native",
+      "oracle_contract": "PASS",
+      "program": "blastp"
+    },
+    {
+      "canonical_gate": "PASS",
+      "case_id": "all_hsp_self_serial",
+      "kind": "serial",
+      "oracle_contract": "PASS",
+      "program": "blastp"
+    },
+    {
+      "canonical_gate": "PASS",
+      "case_id": "all_hsp_forward_thread4",
+      "kind": "native",
+      "oracle_contract": "PASS",
+      "program": "blastp"
+    },
+    {
+      "canonical_gate": "PASS",
+      "case_id": "p01_ap027280_self",
+      "kind": "native",
+      "oracle_contract": "PASS",
+      "program": "tblastx"
+    },
+    {
+      "canonical_gate": "PASS",
+      "case_id": "p01_ap027280_self",
+      "kind": "serial",
+      "oracle_contract": "PASS",
+      "program": "tblastx"
+    },
+    {
+      "canonical_gate": "PASS",
+      "case_id": "p02_mje_mela",
+      "kind": "native",
+      "oracle_contract": "PASS",
+      "program": "tblastx"
+    },
+    {
+      "canonical_gate": "PASS",
+      "case_id": "p02_mje_mela",
+      "kind": "serial",
+      "oracle_contract": "PASS",
+      "program": "tblastx"
+    },
+    {
+      "canonical_gate": "PASS",
+      "case_id": "p03_mela_pemojnva",
+      "kind": "native",
+      "oracle_contract": "PASS",
+      "program": "tblastx"
+    },
+    {
+      "canonical_gate": "PASS",
+      "case_id": "p03_mela_pemojnva",
+      "kind": "serial",
+      "oracle_contract": "PASS",
+      "program": "tblastx"
+    },
+    {
+      "canonical_gate": "PASS",
+      "case_id": "p04_pemojnva_pesemjnv",
+      "kind": "native",
+      "oracle_contract": "PASS",
+      "program": "tblastx"
+    },
+    {
+      "canonical_gate": "PASS",
+      "case_id": "p04_pemojnva_pesemjnv",
+      "kind": "serial",
+      "oracle_contract": "PASS",
+      "program": "tblastx"
+    },
+    {
+      "canonical_gate": "PASS",
+      "case_id": "p05_pesemjnv_pemojnva",
+      "kind": "native",
+      "oracle_contract": "PASS",
+      "program": "tblastx"
+    },
+    {
+      "canonical_gate": "PASS",
+      "case_id": "p05_pesemjnv_pemojnva",
+      "kind": "serial",
+      "oracle_contract": "PASS",
+      "program": "tblastx"
+    },
+    {
+      "canonical_gate": "TIMEOUT",
+      "case_id": "p06_pemojnva_lvmjnv",
+      "kind": "native",
+      "oracle_contract": "TIMEOUT",
+      "program": "tblastx"
+    },
+    {
+      "canonical_gate": "TIMEOUT",
+      "case_id": "p06_pemojnva_lvmjnv",
+      "kind": "serial",
+      "oracle_contract": "TIMEOUT",
+      "program": "tblastx"
+    },
+    {
+      "canonical_gate": "PASS",
+      "case_id": "p07_lvmjnv_trcumjnv",
+      "kind": "native",
+      "oracle_contract": "PASS",
+      "program": "tblastx"
+    },
+    {
+      "canonical_gate": "PASS",
+      "case_id": "p07_lvmjnv_trcumjnv",
+      "kind": "serial",
+      "oracle_contract": "PASS",
+      "program": "tblastx"
+    },
+    {
+      "canonical_gate": "PASS",
+      "case_id": "p08_trcumjnv_mellatmjnv",
+      "kind": "native",
+      "oracle_contract": "PASS",
+      "program": "tblastx"
+    },
+    {
+      "canonical_gate": "PASS",
+      "case_id": "p08_trcumjnv_mellatmjnv",
+      "kind": "serial",
+      "oracle_contract": "PASS",
+      "program": "tblastx"
+    },
+    {
+      "canonical_gate": "PASS",
+      "case_id": "p09_mellatmjnv_meenmjnv",
+      "kind": "native",
+      "oracle_contract": "PASS",
+      "program": "tblastx"
+    },
+    {
+      "canonical_gate": "PASS",
+      "case_id": "p09_mellatmjnv_meenmjnv",
+      "kind": "serial",
+      "oracle_contract": "PASS",
+      "program": "tblastx"
+    },
+    {
+      "canonical_gate": "PASS",
+      "case_id": "p10_meenmjnv_mejomjnv",
+      "kind": "native",
+      "oracle_contract": "TIMEOUT",
+      "program": "tblastx"
+    },
+    {
+      "canonical_gate": "TIMEOUT",
+      "case_id": "p10_meenmjnv_mejomjnv",
+      "kind": "serial",
+      "oracle_contract": "TIMEOUT",
+      "program": "tblastx"
+    },
+    {
+      "canonical_gate": "TIMEOUT",
+      "case_id": "p11_avclpv_psclpv",
+      "kind": "native",
+      "oracle_contract": "TIMEOUT",
+      "program": "tblastx"
+    },
+    {
+      "canonical_gate": "TIMEOUT",
+      "case_id": "p11_avclpv_psclpv",
+      "kind": "serial",
+      "oracle_contract": "TIMEOUT",
+      "program": "tblastx"
+    },
+    {
+      "canonical_gate": "TIMEOUT",
+      "case_id": "d01_nz_self_code4",
+      "kind": "native",
+      "oracle_contract": "TIMEOUT",
+      "program": "tblastx"
+    },
+    {
+      "canonical_gate": "TIMEOUT",
+      "case_id": "d01_nz_self_code4",
+      "kind": "serial",
+      "oracle_contract": "TIMEOUT",
+      "program": "tblastx"
+    },
+    {
+      "canonical_gate": "TIMEOUT",
+      "case_id": "d02_ap027132_nz_code4",
+      "kind": "native",
+      "oracle_contract": "TIMEOUT",
+      "program": "tblastx"
+    },
+    {
+      "canonical_gate": "TIMEOUT",
+      "case_id": "d02_ap027132_nz_code4",
+      "kind": "serial",
+      "oracle_contract": "TIMEOUT",
+      "program": "tblastx"
+    },
+    {
+      "canonical_gate": "TIMEOUT",
+      "case_id": "d03_ap027078_ap027131_code4",
+      "kind": "native",
+      "oracle_contract": "TIMEOUT",
+      "program": "tblastx"
+    },
+    {
+      "canonical_gate": "TIMEOUT",
+      "case_id": "d03_ap027078_ap027131_code4",
+      "kind": "serial",
+      "oracle_contract": "TIMEOUT",
+      "program": "tblastx"
+    },
+    {
+      "canonical_gate": "TIMEOUT",
+      "case_id": "d04_ap027131_ap027133_code4",
+      "kind": "native",
+      "oracle_contract": "NOT_RUN",
+      "program": "tblastx"
+    },
+    {
+      "canonical_gate": "TIMEOUT",
+      "case_id": "d04_ap027131_ap027133_code4",
+      "kind": "serial",
+      "oracle_contract": "NOT_RUN",
+      "program": "tblastx"
+    },
+    {
+      "canonical_gate": "TIMEOUT",
+      "case_id": "d05_ap027133_ap027132_code4",
+      "kind": "native",
+      "oracle_contract": "TIMEOUT",
+      "program": "tblastx"
+    },
+    {
+      "canonical_gate": "TIMEOUT",
+      "case_id": "d05_ap027133_ap027132_code4",
+      "kind": "serial",
+      "oracle_contract": "TIMEOUT",
+      "program": "tblastx"
+    },
+    {
+      "canonical_gate": "PASS",
+      "case_id": "p12_lc738874_lc738875_default",
+      "kind": "native",
+      "oracle_contract": "PASS",
+      "program": "tblastx"
+    },
+    {
+      "canonical_gate": "PASS",
+      "case_id": "p12_lc738874_lc738875_default",
+      "kind": "serial",
+      "oracle_contract": "PASS",
+      "program": "tblastx"
+    },
+    {
+      "canonical_gate": "PASS",
+      "case_id": "p13_mela_mje_reverse",
+      "kind": "native",
+      "oracle_contract": "PASS",
+      "program": "tblastx"
+    },
+    {
+      "canonical_gate": "PASS",
+      "case_id": "p13_mela_mje_reverse",
+      "kind": "serial",
+      "oracle_contract": "PASS",
+      "program": "tblastx"
+    },
+    {
+      "canonical_gate": "PASS",
+      "case_id": "p14_ap027131_ap027133_query4",
+      "kind": "native",
+      "oracle_contract": "PASS",
+      "program": "tblastx"
+    },
+    {
+      "canonical_gate": "PASS",
+      "case_id": "p14_ap027131_ap027133_query4",
+      "kind": "serial",
+      "oracle_contract": "PASS",
+      "program": "tblastx"
+    },
+    {
+      "canonical_gate": "PASS",
+      "case_id": "d06_ap027131_ap027133_db4",
+      "kind": "native",
+      "oracle_contract": "PASS",
+      "program": "tblastx"
+    },
+    {
+      "canonical_gate": "PASS",
+      "case_id": "d06_ap027131_ap027133_db4",
+      "kind": "serial",
+      "oracle_contract": "PASS",
+      "program": "tblastx"
+    }
+  ]
+}

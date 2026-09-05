@@ -1,0 +1,12 @@
+{
+  "cpu_system_seconds": 0.0,
+  "cpu_user_seconds": 1.29,
+  "exit_status": 0,
+  "output": "/mnt/c/Users/genom/GitHub/LOSAT/docs/wasm-performance/PR01/initial-audit/blastn/MjeNMV.MelaMJNV.task_blastn/oracle/output.txt",
+  "peak_rss_bytes": 46886912,
+  "raw_output_bytes": 199140,
+  "raw_output_sha256": "f83cb49246648cc641cbe638735d79eaecb24de0064699d54b52d69d74619058",
+  "reason": null,
+  "status": "PASS",
+  "wall_seconds": 1.3285540720025892
+}

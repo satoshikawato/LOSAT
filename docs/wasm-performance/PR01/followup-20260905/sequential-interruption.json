@@ -1,0 +1,22 @@
+{
+  "status": "INTERRUPTED",
+  "reason": "Switch correctness-only retries to bounded concurrency; preserve all completed results and unfinished files. Not a timeout or parity failure.",
+  "utc": "2026-09-05T06:57:55Z",
+  "owned_processes": {
+    "936817": {
+      "ppid": 931364,
+      "pgid": 936817,
+      "command": "/usr/bin/time -f %U\t%S\t%M -o /mnt/c/Users/genom/GitHub/LOSAT/docs/wasm-performance/PR01/followup-20260905/retry-audit/p11_avclpv_psclpv/native/usage.txt /tmp/losat-pr01-20260905/native/release/LOSAT tblastx --query /tmp/losat-pr5-runtime-cert-5845d22/LOSAT/tests/fasta/AvCLPV.fasta --subject /tmp/losat-pr5-runtime-cert-5845d22/LOSAT/tests/fasta/PsCLPV.fasta --outfmt 6 --num-threads 1 --query-gencode 1 --db-gencode 1 --out /mnt/c/Users/genom/GitHub/LOSAT/docs/wasm-performance/PR01/followup-20260905/retry-audit/p11_avclpv_psclpv/native/output.txt "
+    },
+    "936819": {
+      "ppid": 936817,
+      "pgid": 936817,
+      "command": "/tmp/losat-pr01-20260905/native/release/LOSAT tblastx --query /tmp/losat-pr5-runtime-cert-5845d22/LOSAT/tests/fasta/AvCLPV.fasta --subject /tmp/losat-pr5-runtime-cert-5845d22/LOSAT/tests/fasta/PsCLPV.fasta --outfmt 6 --num-threads 1 --query-gencode 1 --db-gencode 1 --out /mnt/c/Users/genom/GitHub/LOSAT/docs/wasm-performance/PR01/followup-20260905/retry-audit/p11_avclpv_psclpv/native/output.txt "
+    },
+    "931364": {
+      "ppid": 931363,
+      "pgid": 931362,
+      "command": "python3 -u docs/wasm-performance/PR01/followup-20260905/retry_audit.py "
+    }
+  }
+}

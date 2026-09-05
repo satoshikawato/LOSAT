@@ -1,0 +1,18 @@
+{
+  "cwd": "/mnt/c/Users/genom/GitHub/LOSAT",
+  "environment_overrides": {
+    "LOSAT_WASI_THREAD_CAP": "8",
+    "LOSAT_WASM_MEMORY_MAXIMUM_PAGES": "16384",
+    "NODE_NO_WARNINGS": "1"
+  },
+  "ordered_argv": [
+    "/usr/bin/node",
+    "/mnt/c/Users/genom/GitHub/LOSAT/LOSAT/tests/run_wasm_performance_warm.js",
+    "/tmp/losat-pr01-20260905/serial/wasm32-wasip1/release/LOSAT.wasm",
+    "/mnt/c/Users/genom/GitHub/LOSAT/docs/wasm-performance/PR01/warm/blastp/all_hsp_self_serial/jobs.json",
+    "--out",
+    "/mnt/c/Users/genom/GitHub/LOSAT/docs/wasm-performance/PR01/warm/blastp/all_hsp_self_serial/host/output.txt"
+  ],
+  "shell": false,
+  "sink": "/mnt/c/Users/genom/GitHub/LOSAT/docs/wasm-performance/PR01/warm/blastp/all_hsp_self_serial/host/output.txt"
+}

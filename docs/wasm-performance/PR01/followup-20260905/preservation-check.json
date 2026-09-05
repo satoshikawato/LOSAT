@@ -1,0 +1,21 @@
+{
+  "catalog_oracle_process_counts": {
+    "PASS": 42,
+    "TIMEOUT": 1
+  },
+  "existing_harnesses": "UNCHANGED",
+  "final_preflight": "PASS",
+  "old_raw_manifests_samples_canonical": "UNCHANGED",
+  "permitted_document_updates": [
+    "docs/wasm-performance/PR01/EVIDENCE.md",
+    "docs/wasm-performance/PR01/HOTSPOTS.md",
+    "docs/wasm-performance/PR01/PR_DESCRIPTION.md",
+    "docs/wasm-performance/PR01/RESULTS.md",
+    "docs/wasm-performance/PR01/RUNBOOK.md"
+  ],
+  "preexisting_evidence_files_checked": 4982,
+  "status": "PASS",
+  "tracked_files_checked": 457,
+  "tracked_mismatches": [],
+  "unexpected_evidence_changes": []
+}

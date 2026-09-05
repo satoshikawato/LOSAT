@@ -1,0 +1,13 @@
+{
+  "cpu_system_seconds": 0.03,
+  "cpu_user_seconds": 0.25,
+  "exit_status": 0,
+  "output": "/mnt/c/Users/genom/GitHub/LOSAT/docs/wasm-performance/PR01/warm/blastn/compact.multi_query.no_hit.outfmt7/host/output.txt",
+  "peak_rss_bytes": 92852224,
+  "raw_output_bytes": 6685,
+  "raw_output_sha256": "4acb20792f46a9ace3a83da4ed3c2d262ca6ff1880db57d271a5d54162c474d3",
+  "reason": null,
+  "started_utc": "2026-09-05T05:59:23Z",
+  "status": "PASS",
+  "wall_seconds": 0.43249441499938257
+}

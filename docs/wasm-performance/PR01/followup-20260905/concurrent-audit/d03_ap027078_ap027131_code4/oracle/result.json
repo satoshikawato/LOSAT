@@ -1,0 +1,13 @@
+{
+  "cpu_system_seconds": 0.04,
+  "cpu_user_seconds": 255.6,
+  "exit_status": 0,
+  "output": "/mnt/c/Users/genom/GitHub/LOSAT/docs/wasm-performance/PR01/followup-20260905/concurrent-audit/d03_ap027078_ap027131_code4/oracle/output.txt",
+  "peak_rss_bytes": 176586752,
+  "raw_output_bytes": 2290717,
+  "raw_output_sha256": "0de06df66c7832c78dec6f4def4defd5226db3db87acb4f52ccd324fd122526d",
+  "reason": null,
+  "started_utc": "2026-09-05T07:19:44Z",
+  "status": "PASS",
+  "wall_seconds": 255.92169802300123
+}

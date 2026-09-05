@@ -1,0 +1,13 @@
+{
+  "cpu_system_seconds": null,
+  "cpu_user_seconds": null,
+  "exit_status": -9,
+  "output": "/mnt/c/Users/genom/GitHub/LOSAT/docs/wasm-performance/PR01/followup-20260905/concurrent-audit/d03_ap027078_ap027131_code4/serial/output.txt",
+  "peak_rss_bytes": null,
+  "raw_output_bytes": null,
+  "raw_output_sha256": null,
+  "reason": "exceeded 600s",
+  "started_utc": "2026-09-05T07:28:41Z",
+  "status": "TIMEOUT",
+  "wall_seconds": 600.0028584900028
+}

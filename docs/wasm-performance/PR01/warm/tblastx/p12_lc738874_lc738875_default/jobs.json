@@ -1,0 +1,116 @@
+[
+  {
+    "argv": [
+      "/tmp/losat-pr01-20260905/serial/wasm32-wasip1/release/LOSAT.wasm",
+      "tblastx",
+      "--query",
+      "/tmp/losat-pr5-runtime-cert-5845d22/LOSAT/tests/fasta/LC738874.fasta",
+      "--subject",
+      "/tmp/losat-pr5-runtime-cert-5845d22/LOSAT/tests/fasta/LC738875.fasta",
+      "--outfmt",
+      "6",
+      "--num-threads",
+      "1",
+      "--out",
+      "/mnt/c/Users/genom/GitHub/LOSAT/docs/wasm-performance/PR01/warm/tblastx/p12_lc738874_lc738875_default/repeat-0.txt"
+    ],
+    "expected_sha256": "86c05a04efb50e4026720e2d44fe2db2e6446f9594e174f3fde56931d09d5b49",
+    "output": "/mnt/c/Users/genom/GitHub/LOSAT/docs/wasm-performance/PR01/warm/tblastx/p12_lc738874_lc738875_default/repeat-0.txt",
+    "repeat": 0
+  },
+  {
+    "argv": [
+      "/tmp/losat-pr01-20260905/serial/wasm32-wasip1/release/LOSAT.wasm",
+      "tblastx",
+      "--query",
+      "/tmp/losat-pr5-runtime-cert-5845d22/LOSAT/tests/fasta/LC738874.fasta",
+      "--subject",
+      "/tmp/losat-pr5-runtime-cert-5845d22/LOSAT/tests/fasta/LC738875.fasta",
+      "--outfmt",
+      "6",
+      "--num-threads",
+      "1",
+      "--out",
+      "/mnt/c/Users/genom/GitHub/LOSAT/docs/wasm-performance/PR01/warm/tblastx/p12_lc738874_lc738875_default/repeat-1.txt"
+    ],
+    "expected_sha256": "86c05a04efb50e4026720e2d44fe2db2e6446f9594e174f3fde56931d09d5b49",
+    "output": "/mnt/c/Users/genom/GitHub/LOSAT/docs/wasm-performance/PR01/warm/tblastx/p12_lc738874_lc738875_default/repeat-1.txt",
+    "repeat": 1
+  },
+  {
+    "argv": [
+      "/tmp/losat-pr01-20260905/serial/wasm32-wasip1/release/LOSAT.wasm",
+      "tblastx",
+      "--query",
+      "/tmp/losat-pr5-runtime-cert-5845d22/LOSAT/tests/fasta/LC738874.fasta",
+      "--subject",
+      "/tmp/losat-pr5-runtime-cert-5845d22/LOSAT/tests/fasta/LC738875.fasta",
+      "--outfmt",
+      "6",
+      "--num-threads",
+      "1",
+      "--out",
+      "/mnt/c/Users/genom/GitHub/LOSAT/docs/wasm-performance/PR01/warm/tblastx/p12_lc738874_lc738875_default/repeat-2.txt"
+    ],
+    "expected_sha256": "86c05a04efb50e4026720e2d44fe2db2e6446f9594e174f3fde56931d09d5b49",
+    "output": "/mnt/c/Users/genom/GitHub/LOSAT/docs/wasm-performance/PR01/warm/tblastx/p12_lc738874_lc738875_default/repeat-2.txt",
+    "repeat": 2
+  },
+  {
+    "argv": [
+      "/tmp/losat-pr01-20260905/serial/wasm32-wasip1/release/LOSAT.wasm",
+      "tblastx",
+      "--query",
+      "/tmp/losat-pr5-runtime-cert-5845d22/LOSAT/tests/fasta/LC738874.fasta",
+      "--subject",
+      "/tmp/losat-pr5-runtime-cert-5845d22/LOSAT/tests/fasta/LC738875.fasta",
+      "--outfmt",
+      "6",
+      "--num-threads",
+      "1",
+      "--out",
+      "/mnt/c/Users/genom/GitHub/LOSAT/docs/wasm-performance/PR01/warm/tblastx/p12_lc738874_lc738875_default/repeat-3.txt"
+    ],
+    "expected_sha256": "86c05a04efb50e4026720e2d44fe2db2e6446f9594e174f3fde56931d09d5b49",
+    "output": "/mnt/c/Users/genom/GitHub/LOSAT/docs/wasm-performance/PR01/warm/tblastx/p12_lc738874_lc738875_default/repeat-3.txt",
+    "repeat": 3
+  },
+  {
+    "argv": [
+      "/tmp/losat-pr01-20260905/serial/wasm32-wasip1/release/LOSAT.wasm",
+      "tblastx",
+      "--query",
+      "/tmp/losat-pr5-runtime-cert-5845d22/LOSAT/tests/fasta/LC738874.fasta",
+      "--subject",
+      "/tmp/losat-pr5-runtime-cert-5845d22/LOSAT/tests/fasta/LC738875.fasta",
+      "--outfmt",
+      "6",
+      "--num-threads",
+      "1",
+      "--out",
+      "/mnt/c/Users/genom/GitHub/LOSAT/docs/wasm-performance/PR01/warm/tblastx/p12_lc738874_lc738875_default/repeat-4.txt"
+    ],
+    "expected_sha256": "86c05a04efb50e4026720e2d44fe2db2e6446f9594e174f3fde56931d09d5b49",
+    "output": "/mnt/c/Users/genom/GitHub/LOSAT/docs/wasm-performance/PR01/warm/tblastx/p12_lc738874_lc738875_default/repeat-4.txt",
+    "repeat": 4
+  },
+  {
+    "argv": [
+      "/tmp/losat-pr01-20260905/serial/wasm32-wasip1/release/LOSAT.wasm",
+      "tblastx",
+      "--query",
+      "/tmp/losat-pr5-runtime-cert-5845d22/LOSAT/tests/fasta/LC738874.fasta",
+      "--subject",
+      "/tmp/losat-pr5-runtime-cert-5845d22/LOSAT/tests/fasta/LC738875.fasta",
+      "--outfmt",
+      "6",
+      "--num-threads",
+      "1",
+      "--out",
+      "/mnt/c/Users/genom/GitHub/LOSAT/docs/wasm-performance/PR01/warm/tblastx/p12_lc738874_lc738875_default/repeat-5.txt"
+    ],
+    "expected_sha256": "86c05a04efb50e4026720e2d44fe2db2e6446f9594e174f3fde56931d09d5b49",
+    "output": "/mnt/c/Users/genom/GitHub/LOSAT/docs/wasm-performance/PR01/warm/tblastx/p12_lc738874_lc738875_default/repeat-5.txt",
+    "repeat": 5
+  }
+]

@@ -1,0 +1,126 @@
+{
+  "checked_utc": "2026-09-05T06:13:01.322667+00:00",
+  "scope": "Final implementation and review artifacts; individual search output SHA/bytes reside in samples.tsv and run directories",
+  "files": [
+    {
+      "path": "LOSAT/tests/wasm_performance.py",
+      "sha256": "f451bc93df01b4f5513dfe6dc247d84edd1ee6f025915844e0202e94fbe1f12b",
+      "bytes": 43744
+    },
+    {
+      "path": "LOSAT/tests/wasm_performance_cases.tsv",
+      "sha256": "6966d4e6c043d24e5d67e769c14628d84a649b6e9fae2765fb3dea4d84a8bb42",
+      "bytes": 932
+    },
+    {
+      "path": "LOSAT/tests/wasm_performance_extra_cases.json",
+      "sha256": "4336fb575bdefb43c5a1267355f94a9fb209c1c82466f45a31b2937189021f3b",
+      "bytes": 924
+    },
+    {
+      "path": "LOSAT/tests/run_wasm_performance_warm.js",
+      "sha256": "d86792c0bbaee8458c71535f06db7210e8b1a6549a55767a2512e2af577e47f3",
+      "bytes": 3009
+    },
+    {
+      "path": "LOSAT/tests/test_wasm_performance.py",
+      "sha256": "e502df1942d9a8a0e40c643e94fd214b1ca46ba01f71d6abbd28a5f95bae2fa0",
+      "bytes": 7874
+    },
+    {
+      "path": "LOSAT/tests/summarize_wasm_performance.py",
+      "sha256": "19032f1e6e299384c7723f03befda6326c50206b8580bd2d6c37bb32d779025a",
+      "bytes": 20808
+    },
+    {
+      "path": "docs/wasm-performance/PR01/EVIDENCE.md",
+      "sha256": "570319dee830fe3a42ffb1d8ca1e04cd945cbc27114e6816d9c060546fbbb451",
+      "bytes": 10507
+    },
+    {
+      "path": "docs/wasm-performance/PR01/RESULTS.md",
+      "sha256": "b1204912eaadb46b250bedf41c58ce0b97ada347cee256b81be3b34f8a26df67",
+      "bytes": 2349
+    },
+    {
+      "path": "docs/wasm-performance/PR01/HOTSPOTS.md",
+      "sha256": "098aabc9f0a1fc914af84616c53a1e0677e115db973f23ef952ca90fe75a770d",
+      "bytes": 5159
+    },
+    {
+      "path": "docs/wasm-performance/PR01/PR_DESCRIPTION.md",
+      "sha256": "9041268dc3ce36bed54c77864b1f476768ad6cf17ba4fcb398099fab5926eac6",
+      "bytes": 3497
+    },
+    {
+      "path": "docs/wasm-performance/PR01/RUNBOOK.md",
+      "sha256": "e4b6dc179785d69b873422780b4c2a9fe3bf8730abf5537cf65b59bcf3278f01",
+      "bytes": 6847
+    },
+    {
+      "path": "docs/wasm-performance/PR01/RUN_MANIFEST.jsonl",
+      "sha256": "0f07b144dc89bab2367982ff9a31036f84c9ddebc317b62bcae28981766a2d40",
+      "bytes": 704860
+    },
+    {
+      "path": "docs/wasm-performance/PR01/samples.tsv",
+      "sha256": "8d52b8aee8d6adf53a996d32860bb296a10d0fd5b731ce3664cfa0ffbb27d7e9",
+      "bytes": 293858
+    },
+    {
+      "path": "docs/wasm-performance/PR01/stage-profiles.json",
+      "sha256": "d0352722b44bd910217609bc1e941b10855502a866af4bd3e325ab4063261048",
+      "bytes": 107530
+    },
+    {
+      "path": "docs/wasm-performance/PR01/comparisons.json",
+      "sha256": "44c7b1e202caafb41ff2e016423d99dda2a188e9107230f9ad74363e19c70382",
+      "bytes": 6535
+    },
+    {
+      "path": "docs/wasm-performance/PR01/audit-revalidation.json",
+      "sha256": "33642d6a93cdcb35766560fbcece7ba853ebc131285fac850e29e64e09a4a4c2",
+      "bytes": 14781
+    },
+    {
+      "path": "docs/wasm-performance/PR01/export-validation.json",
+      "sha256": "3b42c7ead8baccb026c85efe4a36295758e81b295c448ac43bf75b0a49ddd041",
+      "bytes": 177
+    },
+    {
+      "path": "docs/wasm-performance/PR01/auditor-review.json",
+      "sha256": "4eee05ed93ffb59f30da04cbb37e4f20cbc0496b2ae0f22eabba37622b6b793f",
+      "bytes": 2149
+    },
+    {
+      "path": "docs/wasm-performance/PR01/preservation-check.json",
+      "sha256": "227f0d66190da3837eaa808c20bcbc50ff77be0ed932762fdf3db12b710af812",
+      "bytes": 223
+    },
+    {
+      "path": "docs/wasm-performance/PR01/negative-tests.log",
+      "sha256": "3cc3412d85382f8d36f483005d5fc817420a5b25785872d23fee99df63d45575",
+      "bytes": 116
+    },
+    {
+      "path": "docs/wasm-performance/PR01/final-checks.log",
+      "sha256": "c6486b51f483249343d4a4bdb91c41be31f0bdc28887b2f4cd4800e174f8bd6b",
+      "bytes": 45
+    },
+    {
+      "path": "docs/wasm-performance/PR01/contract/manifest.json",
+      "sha256": "fe1b776ab6916bbbb4a5743f4d735c75a07bf4479349ebf81644b9b885c7b919",
+      "bytes": 173627
+    },
+    {
+      "path": "docs/wasm-performance/PR01/cpu-profile/tblastx.cpuprofile",
+      "sha256": "d66377205928a85d1d40c5e74f0901ce09de87fc0a63dc38214466d65a84d17b",
+      "bytes": 135680
+    },
+    {
+      "path": "docs/wasm-performance/PR01/cpu-profile/summary.json",
+      "sha256": "a5b8f4fcb8c8c7ae0470d5901509da80a9a396e244c0cd14a06c319e81c61dc7",
+      "bytes": 7008
+    }
+  ]
+}

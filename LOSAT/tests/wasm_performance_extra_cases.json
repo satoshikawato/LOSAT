@@ -1,0 +1,24 @@
+{
+  "schema_version": 1,
+  "cases": [
+    {
+      "program": "blastp",
+      "case_id": "pr01_blastp_no_hit",
+      "base_case_id": "pairwise_nohit_serial",
+      "evalue": "1e-180",
+      "expected_raw_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "role": "no-hit",
+      "authority": "Empty outfmt6 contract; must be verified with the fixed official oracle before use. Never infer from LOSAT."
+    },
+    {
+      "program": "tblastx",
+      "case_id": "pr01_tblastx_no_hit",
+      "base_case_id": "p12_lc738874_lc738875_default",
+      "input_relative": "tests/fasta/blastn_parity_compact.fasta",
+      "evalue": "1e-180",
+      "expected_raw_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "role": "no-hit",
+      "authority": "Empty outfmt6 contract; must be verified with the fixed official oracle before use. Never infer from LOSAT."
+    }
+  ]
+}

@@ -1,0 +1,102 @@
+{
+  "agent": "ncbi_parity_auditor",
+  "mode": "independent read-only",
+  "status": "READ_ONLY_FINAL_FOLLOWUP_REVIEW_COMPLETED",
+  "scope_decision": "SUPPORTED_LOCAL_FOLLOWUP_ONLY",
+  "pr01_acceptance": "NOT_PROVEN / NOT_ACCEPTED",
+  "pr02_implementation": "BLOCKED_BY_UNACCEPTED_PR01",
+  "catalog": {
+    "rows": 84,
+    "pass": 74,
+    "timeout": 10,
+    "native": {
+      "pass": 38,
+      "timeout": 5
+    },
+    "serial": {
+      "pass": 36,
+      "timeout": 5
+    },
+    "behavioral": {
+      "PASS": 74,
+      "NOT_RUN": 8,
+      "TIMEOUT": 2
+    },
+    "checks": [
+      "unique complete selector sets",
+      "exact ordered argv and cwd",
+      "saved process results",
+      "raw SHA and byte counts",
+      "current behavioral and exception validators"
+    ],
+    "newly_validated": [
+      "p06 native/serial",
+      "p10 native/serial",
+      "d04 native/serial"
+    ],
+    "classification_notes": [
+      "p10 native reused from original successful process",
+      "d04 existing local-subject genetic-code contract, not EXACT_NCBI",
+      "d06 protected query code differs from d04 and cannot substitute"
+    ]
+  },
+  "execution": {
+    "concurrent_attempts": 21,
+    "process_pass": 11,
+    "process_timeout": 10,
+    "earlier_p11_oracle": "TIMEOUT at600 seconds",
+    "interrupted_native": "separately recorded; not accepted",
+    "retry_timings": "excluded from all performance comparisons"
+  },
+  "preservation": {
+    "tracked_files_rehashed": 457,
+    "preexisting_evidence_files_rehashed": 4982,
+    "permitted_document_changes": 5,
+    "unexpected_changes": 0,
+    "artifacts_and_preflight": "PASS",
+    "original_manifests_raw_samples_canonical_auditor_record": "UNCHANGED"
+  },
+  "profile": {
+    "program": "blastp",
+    "runtime": "serial Wasm",
+    "samples": 1475,
+    "redo_inclusive": 997,
+    "alignment_leaf_in_redo": 685,
+    "raw_bytes": 35004,
+    "raw_gate": "PASS",
+    "claim": "Scoped Kappa/redo investigation only; no allocation/reset dominance or optimization benefit"
+  },
+  "retained_performance": {
+    "completed_cold_series": 90,
+    "cold_timed_samples": 450,
+    "warm_pass_outputs": 60,
+    "missing_p11": "explicit; no complete eligible-set certification"
+  },
+  "remaining_blockers": [
+    "native/serial p11,d01,d02,d03,d05",
+    "p11 oracle",
+    "p11 declared cold and warm baseline series",
+    "subsequent acceptance review"
+  ],
+  "requirements": {
+    "native_effective_threads": "null+reason allowed; limits same-effective-N and efficiency claims",
+    "pr02": "jobs/caps/thresholds and stage threading evidence within PR02",
+    "pr03": "lifecycle/resident",
+    "pr07_pr10": "finer attribution",
+    "pr12": "real browsers",
+    "release_pr13": "registered platform Gate B"
+  },
+  "remaining_orchestration_findings": [],
+  "auditor_actions": "No files edited; no searches executed",
+  "reviewed_files_sha256": {
+    "combined-audit.json": "ab883f2345d5440b260d8735c793e6052cae7706aecabb2d9d5c79450b20ed9d",
+    "manifest-concurrent.json": "71a67708abb502402d199b357349419a0e9422fcd3195a9e582805f8a56943cb",
+    "EVIDENCE.md": "2a07212f0d9ba0b9b5f953eec2900d2531912a0824cc61d6a6a487d0913bbea1",
+    "PR_DESCRIPTION.md": "10404951f67dad90d539b8df3868f5543df18bd6ec8df5b19d9b2f190c427dd7",
+    "REQUIREMENTS.md": "fa46b9d28660305385526e94e7cfac801300d248c1a2cbf305998955d3430f27",
+    "preservation-check.json": "b3ce575ef8e33704157a1636fddf40208ee0491c4eff5d1dbe131488e662266c",
+    "retry_concurrent.py": "ba2d8a618ecd0805fb874422c4e274f0f512ee56689f64ac8ebfab0b75dfdaf4",
+    "reconcile.py": "4940736b98ff041c68eaaf2e8c679e802b7aeb39483f422176e8849d3fe22672",
+    "blastp-cpu-profile/summary.json": "f32c15594de56a7276dd0364716107f4e2dd421e71bceee72312354a7b299d64"
+  }
+}

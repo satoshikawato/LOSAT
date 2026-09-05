@@ -1,0 +1,12 @@
+{
+  "cpu_system_seconds": 0.02,
+  "cpu_user_seconds": 2.51,
+  "exit_status": 0,
+  "output": "/mnt/c/Users/genom/GitHub/LOSAT/docs/wasm-performance/PR01/initial-audit/tblastx/p07_lvmjnv_trcumjnv/native-1/repeat-0/output.txt",
+  "peak_rss_bytes": 66650112,
+  "raw_output_bytes": 245877,
+  "raw_output_sha256": "cc79c6f0d9253e03dea324c102cf0f405465fa76ae65ef7419b2a36a66958c41",
+  "reason": null,
+  "status": "PASS",
+  "wall_seconds": 2.603080803000921
+}

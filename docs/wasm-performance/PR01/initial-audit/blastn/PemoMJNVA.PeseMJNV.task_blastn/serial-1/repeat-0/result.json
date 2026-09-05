@@ -1,0 +1,12 @@
+{
+  "cpu_system_seconds": 0.06,
+  "cpu_user_seconds": 6.1,
+  "exit_status": 0,
+  "output": "/mnt/c/Users/genom/GitHub/LOSAT/docs/wasm-performance/PR01/initial-audit/blastn/PemoMJNVA.PeseMJNV.task_blastn/serial-1/repeat-0/output.txt",
+  "peak_rss_bytes": 117325824,
+  "raw_output_bytes": 219724,
+  "raw_output_sha256": "f4ffd5d0451fa94376313c9b44d0ef237ef2aa2cb348a700d0280c9db84a59e5",
+  "reason": null,
+  "status": "PASS",
+  "wall_seconds": 5.9431551639972895
+}

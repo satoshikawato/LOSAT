@@ -1,0 +1,22 @@
+test_bad_exit_even_with_expected_output (test_wasm_performance.GateTests.test_bad_exit_even_with_expected_output) ... ok
+test_default_omission_is_preserved (test_wasm_performance.GateTests.test_default_omission_is_preserved) ... ok
+test_exporter_median_excludes_warmup_and_diagnostic (test_wasm_performance.GateTests.test_exporter_median_excludes_warmup_and_diagnostic) ... ok
+test_exporter_rejects_failure_after_successful_warmup (test_wasm_performance.GateTests.test_exporter_rejects_failure_after_successful_warmup) ... ok
+test_exporter_requires_complete_series (test_wasm_performance.GateTests.test_exporter_requires_complete_series) ... ok
+test_header_path_is_not_normalized (test_wasm_performance.GateTests.test_header_path_is_not_normalized) ... ok
+test_library_is_not_command (test_wasm_performance.GateTests.test_library_is_not_command) ... ok
+test_manifest_argv_tampering_is_rejected (test_wasm_performance.GateTests.test_manifest_argv_tampering_is_rejected) ... ok
+test_missing_artifact_and_oracle (test_wasm_performance.GateTests.test_missing_artifact_and_oracle) ... ok
+test_missing_output (test_wasm_performance.GateTests.test_missing_output) ... ok
+test_order_and_newlines_are_normative (test_wasm_performance.GateTests.test_order_and_newlines_are_normative) ... ok
+test_pairwise_header_is_not_normalized (test_wasm_performance.GateTests.test_pairwise_header_is_not_normalized) ... ok
+test_readonly_output_directory (test_wasm_performance.GateTests.test_readonly_output_directory) ... ok
+test_serial_threaded_mislabel (test_wasm_performance.GateTests.test_serial_threaded_mislabel) ... ok
+test_sorted_diff_is_diagnostic_only (test_wasm_performance.GateTests.test_sorted_diff_is_diagnostic_only) ... ok
+test_timeout_never_zero_time_pass (test_wasm_performance.GateTests.test_timeout_never_zero_time_pass) ... ok
+test_wrong_hash (test_wasm_performance.GateTests.test_wrong_hash) ... ok
+
+----------------------------------------------------------------------
+Ran 17 tests in 1.905s
+
+OK

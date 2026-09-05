@@ -1,0 +1,99 @@
+{
+  "cargo_V": "cargo 1.92.0 (344c4567c 2025-10-21)",
+  "cargo_config": "LOSAT/.cargo/config.toml",
+  "cargo_config_sha256": "dfc8cebcb5b37d2f9863387934d74a8e09bdbea13d28db7ae3846070f7dc2d2e",
+  "environment_flags": {
+    "CARGO_BUILD_RUSTFLAGS": "",
+    "CARGO_ENCODED_RUSTFLAGS": "",
+    "CC": "",
+    "CFLAGS": "",
+    "CPPFLAGS": "",
+    "LDFLAGS": "",
+    "RUSTC_LINKER": "",
+    "RUSTFLAGS": ""
+  },
+  "host_triple": "x86_64-unknown-linux-gnu",
+  "native": {
+    "cargo_lock_sha256": "7a81afba8adc0fee7efe2868103dd468fe274c7e28629df4dd360725336b26e8",
+    "cwd": "/mnt/c/Users/genom/GitHub/LOSAT/LOSAT",
+    "features": [
+      "parallel"
+    ],
+    "ordered_argv": [
+      "cargo",
+      "build",
+      "--locked",
+      "--release",
+      "--bin",
+      "LOSAT",
+      "--target-dir",
+      "/tmp/losat-pr01-20260905/native"
+    ],
+    "profile": "release",
+    "rustflags": [],
+    "target": "x86_64-unknown-linux-gnu"
+  },
+  "node_version": "v18.19.1",
+  "output_affecting_linker_build_flags": [],
+  "rustc_vV": [
+    "rustc 1.92.0 (ded5c06cf 2025-12-08)",
+    "binary: rustc",
+    "commit-hash: ded5c06cf21d2b93bffd5d884aa6e96934ee4234",
+    "commit-date: 2025-12-08",
+    "host: x86_64-unknown-linux-gnu",
+    "release: 1.92.0",
+    "LLVM version: 21.1.3"
+  ],
+  "serial_wasm": {
+    "cargo_lock_sha256": "7a81afba8adc0fee7efe2868103dd468fe274c7e28629df4dd360725336b26e8",
+    "cwd": "/mnt/c/Users/genom/GitHub/LOSAT/LOSAT",
+    "features": [],
+    "ordered_argv": [
+      "cargo",
+      "build",
+      "--locked",
+      "--release",
+      "--bin",
+      "LOSAT",
+      "--target",
+      "wasm32-wasip1",
+      "--no-default-features",
+      "--target-dir",
+      "/tmp/losat-pr01-20260905/serial"
+    ],
+    "profile": "release",
+    "rustflags": [
+      "-C",
+      "target-feature=+simd128"
+    ],
+    "target": "wasm32-wasip1"
+  },
+  "threaded_wasm": {
+    "cargo_lock_sha256": "7a81afba8adc0fee7efe2868103dd468fe274c7e28629df4dd360725336b26e8",
+    "cwd": "/mnt/c/Users/genom/GitHub/LOSAT/LOSAT",
+    "features": [
+      "parallel",
+      "wasm-threads"
+    ],
+    "ordered_argv": [
+      "cargo",
+      "build",
+      "--locked",
+      "--release",
+      "--bin",
+      "LOSAT",
+      "--target",
+      "wasm32-wasip1-threads",
+      "--features",
+      "wasm-threads",
+      "--target-dir",
+      "/tmp/losat-pr01-20260905/threaded"
+    ],
+    "profile": "release",
+    "rustflags": [
+      "-C",
+      "target-feature=+simd128"
+    ],
+    "target": "wasm32-wasip1-threads"
+  }
+}

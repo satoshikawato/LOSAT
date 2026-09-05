@@ -1,0 +1,210 @@
+{
+  "method": "Top leaf sample counts divided by all V8 CPU samples; not engine wall-time attribution",
+  "requested_interval_microseconds": 1000,
+  "samples": 7112,
+  "profile_duration_microseconds": 7991390,
+  "profile_sha256": "d66377205928a85d1d40c5e74f0901ce09de87fc0a63dc38214466d65a84d17b",
+  "raw_output_gate": "PASS",
+  "top_leaf_functions": [
+    {
+      "node_id": 222,
+      "samples": 4153,
+      "percent_of_samples": 58.394263217097865,
+      "functionName": "_ZN5LOSAT9algorithm7tblastx17sum_stats_linking7linking19link_hsp_group_ncbi17h42ddb464340ba1bdE",
+      "scriptId": "104",
+      "url": "wasm://wasm/LOSAT-19948defd475b4fd.wasm-007c5836",
+      "lineNumber": 0,
+      "columnNumber": 1123142
+    },
+    {
+      "node_id": 185,
+      "samples": 1950,
+      "percent_of_samples": 27.418447694038246,
+      "functionName": "_ZN5LOSAT9algorithm7tblastx12blast_engine8run_impl12run_internal28_$u7b$$u7b$closure$u7d$$u7d$28_$u7b$$u7b$closure$u7d$$u7d$17ha49706f23038999eE",
+      "scriptId": "104",
+      "url": "wasm://wasm/LOSAT-19948defd475b4fd.wasm-007c5836",
+      "lineNumber": 0,
+      "columnNumber": 1069157
+    },
+    {
+      "node_id": 187,
+      "samples": 247,
+      "percent_of_samples": 3.4730033745781776,
+      "functionName": "getenv",
+      "scriptId": "104",
+      "url": "wasm://wasm/LOSAT-19948defd475b4fd.wasm-007c5836",
+      "lineNumber": 0,
+      "columnNumber": 1583715
+    },
+    {
+      "node_id": 188,
+      "samples": 239,
+      "percent_of_samples": 3.3605174353205847,
+      "functionName": "strncmp",
+      "scriptId": "104",
+      "url": "wasm://wasm/LOSAT-19948defd475b4fd.wasm-007c5836",
+      "lineNumber": 0,
+      "columnNumber": 1596382
+    },
+    {
+      "node_id": 186,
+      "samples": 66,
+      "percent_of_samples": 0.9280089988751405,
+      "functionName": "_ZN3std3env7_var_os17h302524206514e2cfE",
+      "scriptId": "104",
+      "url": "wasm://wasm/LOSAT-19948defd475b4fd.wasm-007c5836",
+      "lineNumber": 0,
+      "columnNumber": 94295
+    },
+    {
+      "node_id": 153,
+      "samples": 54,
+      "percent_of_samples": 0.7592800899887514,
+      "functionName": "_ZN5LOSAT5utils3seg9SegMasker13mask_sequence7seg_seq17hf402e9488e7b8424E",
+      "scriptId": "104",
+      "url": "wasm://wasm/LOSAT-19948defd475b4fd.wasm-007c5836",
+      "lineNumber": 0,
+      "columnNumber": 527412
+    },
+    {
+      "node_id": 172,
+      "samples": 44,
+      "percent_of_samples": 0.6186726659167604,
+      "functionName": "_ZN5LOSAT9algorithm7tblastx6lookup8backbone25blast_lookup_add_word_hit17h82634bbcef9b2addE",
+      "scriptId": "104",
+      "url": "wasm://wasm/LOSAT-19948defd475b4fd.wasm-007c5836",
+      "lineNumber": 0,
+      "columnNumber": 939497
+    },
+    {
+      "node_id": 171,
+      "samples": 36,
+      "percent_of_samples": 0.5061867266591676,
+      "functionName": "_ZN5LOSAT9algorithm7tblastx6lookup8backbone27blast_aa_add_word_hits_core17h939b61e02e257a15E",
+      "scriptId": "104",
+      "url": "wasm://wasm/LOSAT-19948defd475b4fd.wasm-007c5836",
+      "lineNumber": 0,
+      "columnNumber": 940256
+    },
+    {
+      "node_id": 154,
+      "samples": 19,
+      "percent_of_samples": 0.26715410573678294,
+      "functionName": "_ZN5LOSAT5utils3seg25entropy_from_state_vector17h135c6ea54011552aE",
+      "scriptId": "104",
+      "url": "wasm://wasm/LOSAT-19948defd475b4fd.wasm-007c5836",
+      "lineNumber": 0,
+      "columnNumber": 532083
+    },
+    {
+      "node_id": 135,
+      "samples": 13,
+      "percent_of_samples": 0.18278965129358832,
+      "functionName": "(idle)",
+      "scriptId": "0",
+      "url": "",
+      "lineNumber": -1,
+      "columnNumber": -1
+    },
+    {
+      "node_id": 176,
+      "samples": 13,
+      "percent_of_samples": 0.18278965129358832,
+      "functionName": "dlmalloc",
+      "scriptId": "104",
+      "url": "wasm://wasm/LOSAT-19948defd475b4fd.wasm-007c5836",
+      "lineNumber": 0,
+      "columnNumber": 1570520
+    },
+    {
+      "node_id": 157,
+      "samples": 12,
+      "percent_of_samples": 0.1687289088863892,
+      "functionName": "_ZN5LOSAT5utils3seg9SegWindow8state_on17h1121e055dc97c2f7E",
+      "scriptId": "104",
+      "url": "wasm://wasm/LOSAT-19948defd475b4fd.wasm-007c5836",
+      "lineNumber": 0,
+      "columnNumber": 531255
+    },
+    {
+      "node_id": 189,
+      "samples": 12,
+      "percent_of_samples": 0.1687289088863892,
+      "functionName": "__strchrnul",
+      "scriptId": "104",
+      "url": "wasm://wasm/LOSAT-19948defd475b4fd.wasm-007c5836",
+      "lineNumber": 0,
+      "columnNumber": 1595148
+    },
+    {
+      "node_id": 226,
+      "samples": 12,
+      "percent_of_samples": 0.1687289088863892,
+      "functionName": "_ZN5LOSAT5stats14sum_statistics16blast_sum_p_calc28_$u7b$$u7b$closure$u7d$$u7d$17had1213535db05aa9E",
+      "scriptId": "104",
+      "url": "wasm://wasm/LOSAT-19948defd475b4fd.wasm-007c5836",
+      "lineNumber": 0,
+      "columnNumber": 523778
+    },
+    {
+      "node_id": 161,
+      "samples": 11,
+      "percent_of_samples": 0.1546681664791901,
+      "functionName": "_ZN5LOSAT9algorithm7tblastx6lookup8backbone17build_ncbi_lookup17h1998decc3c6dd5c1E",
+      "scriptId": "104",
+      "url": "wasm://wasm/LOSAT-19948defd475b4fd.wasm-007c5836",
+      "lineNumber": 0,
+      "columnNumber": 839636
+    },
+    {
+      "node_id": 152,
+      "samples": 10,
+      "percent_of_samples": 0.140607424071991,
+      "functionName": "_ZN5LOSAT9algorithm7tblastx11translation18translate_sequence17h3fe95e3f480e1ea2E",
+      "scriptId": "104",
+      "url": "wasm://wasm/LOSAT-19948defd475b4fd.wasm-007c5836",
+      "lineNumber": 0,
+      "columnNumber": 1016710
+    },
+    {
+      "node_id": 164,
+      "samples": 10,
+      "percent_of_samples": 0.140607424071991,
+      "functionName": "_ZN5LOSAT9algorithm7tblastx6lookup8backbone25blast_lookup_add_word_hit17h82634bbcef9b2addE",
+      "scriptId": "104",
+      "url": "wasm://wasm/LOSAT-19948defd475b4fd.wasm-007c5836",
+      "lineNumber": 0,
+      "columnNumber": 939497
+    },
+    {
+      "node_id": 184,
+      "samples": 10,
+      "percent_of_samples": 0.140607424071991,
+      "functionName": "_ZN5LOSAT9algorithm7tblastx11translation18translate_sequence17h3fe95e3f480e1ea2E",
+      "scriptId": "104",
+      "url": "wasm://wasm/LOSAT-19948defd475b4fd.wasm-007c5836",
+      "lineNumber": 0,
+      "columnNumber": 1016710
+    },
+    {
+      "node_id": 227,
+      "samples": 10,
+      "percent_of_samples": 0.140607424071991,
+      "functionName": "exp",
+      "scriptId": "104",
+      "url": "wasm://wasm/LOSAT-19948defd475b4fd.wasm-007c5836",
+      "lineNumber": 0,
+      "columnNumber": 1584686
+    },
+    {
+      "node_id": 206,
+      "samples": 9,
+      "percent_of_samples": 0.1265466816647919,
+      "functionName": "_ZN5LOSAT9algorithm7tblastx17sum_stats_linking7linking46apply_sum_stats_even_gap_linking_with_parallel17ha51de1e81793f5bbE",
+      "scriptId": "104",
+      "url": "wasm://wasm/LOSAT-19948defd475b4fd.wasm-007c5836",
+      "lineNumber": 0,
+      "columnNumber": 1101371
+    }
+  ]
+}

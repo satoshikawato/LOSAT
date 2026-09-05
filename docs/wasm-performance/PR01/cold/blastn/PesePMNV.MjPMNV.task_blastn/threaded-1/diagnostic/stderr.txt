@@ -1,0 +1,25 @@
+[losat-wasi-threads] runner thread cap=8
+[losat-wasi-threads] starting main _start
+[TIMING] scan_lookup: 0.021s (calls=1)
+[TIMING] ungapped_extend: 0.008s (calls=43117)
+[TIMING] gapped_extend: 0.040s (calls=2339)
+[TIMING] traceback_prune: 0.430s (calls=2)
+[TIMING] traceback_sort_prelim: 0.000s
+[TIMING] traceback_tree_precheck: 0.000s
+[TIMING] traceback_start_offsets: 0.000s
+[TIMING] traceback_alignment: 0.428s (dp=0.428s greedy=0.000s)
+[TIMING] traceback_hsp_build: 0.000s
+[TIMING] purge_common_endpoint_pass1: 0.000s
+[TIMING] reevaluate_ambiguities: 0.000s
+[TIMING] identity_length_test: 0.000s
+[TIMING] purge_common_endpoint_pass2: 0.000s
+[TIMING] traceback_score_resort: 0.000s
+[TIMING] traceback_final_tree_contains: 0.000s
+[TIMING] traceback_final_tree_add: 0.000s
+[TIMING] traceback_postprocess: 0.000s
+[TIMING] traceback_counts: prelim=439 tree_skipped=189 full_traceback=250 deleted_evalue_cutoff=0 deleted_reevaluation=0 deleted_identity_length=0 endpoint_pass1_removed=8 endpoint_pass2_removed=1 final_tree_removed=0
+[TIMING] traceback_lengths: edit_script_samples=250 edit_script_max=291 edit_script_median=3.0 alignment_samples=250 alignment_max=12777 alignment_median=103.5
+[TIMING] format_output: 0.020s (calls=1)
+[TIMING] search_total: 0.597s
+[TIMING] total: 0.662s
+[losat-wasi-threads] main _start returned; terminating workers

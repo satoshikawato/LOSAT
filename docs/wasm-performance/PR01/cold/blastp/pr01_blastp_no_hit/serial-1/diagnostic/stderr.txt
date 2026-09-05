@@ -1,0 +1,4 @@
+[TIMING] blastp_kappa_query_range_bytes_copied: 0
+[TIMING] blastp_kappa_subject_range_bytes_copied: 0
+[TIMING] blastp_kappa_subject_seg_range: 0 bytes (calls=0, masked_residues=0)
+[TIMING] blastp_kappa_subject_seg_cache: hits=0 misses=0

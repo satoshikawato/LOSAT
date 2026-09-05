@@ -1,0 +1,4 @@
+[TIMING] blastp_kappa_query_range_bytes_copied: 1183406
+[TIMING] blastp_kappa_subject_range_bytes_copied: 2152993
+[TIMING] blastp_kappa_subject_seg_range: 66738 bytes (calls=86, masked_residues=3147)
+[TIMING] blastp_kappa_subject_seg_cache: hits=1468 misses=86

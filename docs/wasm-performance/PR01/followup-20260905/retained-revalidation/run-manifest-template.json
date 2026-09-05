@@ -1,0 +1,95 @@
+{
+  "schema_version": "losat-wasm-perf-run-v1",
+  "status": "TEMPLATE_NOT_EXECUTABLE",
+  "required_before_execution": "Replace all null identities and argv fields; resolve fixture authority; never infer missing outputs as PASS.",
+  "pr_id": null,
+  "run_id": null,
+  "baseline_or_candidate": null,
+  "source": {
+    "head": null,
+    "dirty_identity": null,
+    "source_snapshot_sha256": null
+  },
+  "build": {
+    "rustc_verbose": null,
+    "cargo_version": null,
+    "cargo_lock_sha256": null,
+    "target": null,
+    "features": [],
+    "rustflags": null,
+    "profile": "release",
+    "artifact_path": null,
+    "artifact_sha256": null,
+    "expected_exports": [],
+    "expected_imports": []
+  },
+  "hardware": {
+    "cpu_model": null,
+    "physical_cores": null,
+    "logical_cpus": null,
+    "memory_bytes": null,
+    "os": null,
+    "power_mode": null
+  },
+  "runtime": {
+    "name": null,
+    "version": null,
+    "argv_prefix": null,
+    "flags": [],
+    "host_source_sha256": null
+  },
+  "fixture": {
+    "id": null,
+    "program": null,
+    "task": null,
+    "query_path": null,
+    "query_sha256": null,
+    "subject_path": null,
+    "subject_sha256": null,
+    "manifest_path": null,
+    "manifest_sha256": null,
+    "contract_class": null,
+    "expected_raw_sha256": null,
+    "expected_raw_bytes": null
+  },
+  "command": {
+    "ordered_argv": null,
+    "cwd": null,
+    "controlled_lexical_paths": [],
+    "environment_overrides": {},
+    "output_sink": null
+  },
+  "threads": {
+    "requested": null,
+    "host_cap": null,
+    "effective_compute": null,
+    "spawned_helpers": null,
+    "actual_work_items": null
+  },
+  "oracle": {
+    "official_version": null,
+    "source_sha256": null,
+    "executable_sha256": null,
+    "ordered_argv": null,
+    "platform_authority_version": null,
+    "platform_authority_sha256": null
+  },
+  "measurement": {
+    "boundary": null,
+    "warmup_count": 1,
+    "timed_repetitions": 5,
+    "diagnostics_enabled": false,
+    "sample_file": null,
+    "eligible_case_set_sha256": null,
+    "memory_budget_bytes": null
+  },
+  "result": {
+    "exit_status": null,
+    "raw_output_sha256": null,
+    "raw_output_bytes": null,
+    "parity_status": "NOT_RUN",
+    "performance_status": "NOT_RUN",
+    "audit_status": "NOT_RUN",
+    "missing_reason": null
+  }
+}

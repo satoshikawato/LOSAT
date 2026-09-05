@@ -1,0 +1,42 @@
+start p10_meenmjnv_mejomjnv oracle
+start p10_meenmjnv_mejomjnv serial
+start p11_avclpv_psclpv native
+done p10_meenmjnv_mejomjnv oracle: PASS 123.436s
+start p11_avclpv_psclpv serial
+done p10_meenmjnv_mejomjnv serial: PASS 220.938s
+start d01_nz_self_code4 oracle
+done p11_avclpv_psclpv native: TIMEOUT 600.014s
+start d01_nz_self_code4 native
+done d01_nz_self_code4 oracle: PASS 400.108s
+start d01_nz_self_code4 serial
+done p11_avclpv_psclpv serial: TIMEOUT 600.009s
+start d02_ap027132_nz_code4 oracle
+done d02_ap027132_nz_code4 oracle: PASS 435.242s
+start d02_ap027132_nz_code4 native
+done d01_nz_self_code4 native: TIMEOUT 600.007s
+start d02_ap027132_nz_code4 serial
+done d01_nz_self_code4 serial: TIMEOUT 600.013s
+start d03_ap027078_ap027131_code4 oracle
+done d03_ap027078_ap027131_code4 oracle: PASS 255.922s
+start d03_ap027078_ap027131_code4 native
+done d02_ap027132_nz_code4 native: TIMEOUT 600.055s
+start d03_ap027078_ap027131_code4 serial
+done d02_ap027132_nz_code4 serial: TIMEOUT 600.003s
+start d04_ap027131_ap027133_code4 native
+done d04_ap027131_ap027133_code4 native: PASS 270.896s
+start d04_ap027131_ap027133_code4 serial
+done d03_ap027078_ap027131_code4 native: TIMEOUT 600.017s
+start d05_ap027133_ap027132_code4 oracle
+done d03_ap027078_ap027131_code4 serial: TIMEOUT 600.003s
+start d05_ap027133_ap027132_code4 native
+done d05_ap027133_ap027132_code4 oracle: PASS 314.907s
+start d05_ap027133_ap027132_code4 serial
+done d04_ap027131_ap027133_code4 serial: PASS 379.144s
+start p06_pemojnva_lvmjnv oracle
+done p06_pemojnva_lvmjnv oracle: PASS 280.191s
+start p06_pemojnva_lvmjnv native
+done p06_pemojnva_lvmjnv native: PASS 227.985s
+start p06_pemojnva_lvmjnv serial
+done d05_ap027133_ap027132_code4 native: TIMEOUT 600.003s
+done d05_ap027133_ap027132_code4 serial: TIMEOUT 600.003s
+done p06_pemojnva_lvmjnv serial: PASS 470.448s

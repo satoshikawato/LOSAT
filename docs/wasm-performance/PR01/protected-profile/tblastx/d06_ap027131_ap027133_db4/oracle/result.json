@@ -1,0 +1,13 @@
+{
+  "cpu_system_seconds": 0.04,
+  "cpu_user_seconds": 49.92,
+  "exit_status": 0,
+  "output": "/mnt/c/Users/genom/GitHub/LOSAT/docs/wasm-performance/PR01/protected-profile/tblastx/d06_ap027131_ap027133_db4/oracle/output.txt",
+  "peak_rss_bytes": 124788736,
+  "raw_output_bytes": 954534,
+  "raw_output_sha256": "8d5ff1d0d92f27488ba91da061366ef808db382cd73b3e8577385d150e9e8a29",
+  "reason": null,
+  "started_utc": "2026-09-05T06:05:30Z",
+  "status": "PASS",
+  "wall_seconds": 50.239573014998314
+}

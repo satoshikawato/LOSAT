@@ -1,0 +1,140 @@
+[
+  {
+    "argv": [
+      "/tmp/losat-pr01-20260905/serial/wasm32-wasip1/release/LOSAT.wasm",
+      "tblastx",
+      "--query",
+      "/tmp/losat-pr5-runtime-cert-5845d22/LOSAT/tests/fasta/MelaMJNV.fasta",
+      "--subject",
+      "/tmp/losat-pr5-runtime-cert-5845d22/LOSAT/tests/fasta/PemoMJNVA.fasta",
+      "--outfmt",
+      "6",
+      "--num-threads",
+      "1",
+      "--query-gencode",
+      "1",
+      "--db-gencode",
+      "1",
+      "--out",
+      "/mnt/c/Users/genom/GitHub/LOSAT/docs/wasm-performance/PR01/warm/tblastx/p03_mela_pemojnva/repeat-0.txt"
+    ],
+    "expected_sha256": "bbef153094025db89dd4a69b2a3c4246b0b8853396fe740bc7e1bd654db105b6",
+    "output": "/mnt/c/Users/genom/GitHub/LOSAT/docs/wasm-performance/PR01/warm/tblastx/p03_mela_pemojnva/repeat-0.txt",
+    "repeat": 0
+  },
+  {
+    "argv": [
+      "/tmp/losat-pr01-20260905/serial/wasm32-wasip1/release/LOSAT.wasm",
+      "tblastx",
+      "--query",
+      "/tmp/losat-pr5-runtime-cert-5845d22/LOSAT/tests/fasta/MelaMJNV.fasta",
+      "--subject",
+      "/tmp/losat-pr5-runtime-cert-5845d22/LOSAT/tests/fasta/PemoMJNVA.fasta",
+      "--outfmt",
+      "6",
+      "--num-threads",
+      "1",
+      "--query-gencode",
+      "1",
+      "--db-gencode",
+      "1",
+      "--out",
+      "/mnt/c/Users/genom/GitHub/LOSAT/docs/wasm-performance/PR01/warm/tblastx/p03_mela_pemojnva/repeat-1.txt"
+    ],
+    "expected_sha256": "bbef153094025db89dd4a69b2a3c4246b0b8853396fe740bc7e1bd654db105b6",
+    "output": "/mnt/c/Users/genom/GitHub/LOSAT/docs/wasm-performance/PR01/warm/tblastx/p03_mela_pemojnva/repeat-1.txt",
+    "repeat": 1
+  },
+  {
+    "argv": [
+      "/tmp/losat-pr01-20260905/serial/wasm32-wasip1/release/LOSAT.wasm",
+      "tblastx",
+      "--query",
+      "/tmp/losat-pr5-runtime-cert-5845d22/LOSAT/tests/fasta/MelaMJNV.fasta",
+      "--subject",
+      "/tmp/losat-pr5-runtime-cert-5845d22/LOSAT/tests/fasta/PemoMJNVA.fasta",
+      "--outfmt",
+      "6",
+      "--num-threads",
+      "1",
+      "--query-gencode",
+      "1",
+      "--db-gencode",
+      "1",
+      "--out",
+      "/mnt/c/Users/genom/GitHub/LOSAT/docs/wasm-performance/PR01/warm/tblastx/p03_mela_pemojnva/repeat-2.txt"
+    ],
+    "expected_sha256": "bbef153094025db89dd4a69b2a3c4246b0b8853396fe740bc7e1bd654db105b6",
+    "output": "/mnt/c/Users/genom/GitHub/LOSAT/docs/wasm-performance/PR01/warm/tblastx/p03_mela_pemojnva/repeat-2.txt",
+    "repeat": 2
+  },
+  {
+    "argv": [
+      "/tmp/losat-pr01-20260905/serial/wasm32-wasip1/release/LOSAT.wasm",
+      "tblastx",
+      "--query",
+      "/tmp/losat-pr5-runtime-cert-5845d22/LOSAT/tests/fasta/MelaMJNV.fasta",
+      "--subject",
+      "/tmp/losat-pr5-runtime-cert-5845d22/LOSAT/tests/fasta/PemoMJNVA.fasta",
+      "--outfmt",
+      "6",
+      "--num-threads",
+      "1",
+      "--query-gencode",
+      "1",
+      "--db-gencode",
+      "1",
+      "--out",
+      "/mnt/c/Users/genom/GitHub/LOSAT/docs/wasm-performance/PR01/warm/tblastx/p03_mela_pemojnva/repeat-3.txt"
+    ],
+    "expected_sha256": "bbef153094025db89dd4a69b2a3c4246b0b8853396fe740bc7e1bd654db105b6",
+    "output": "/mnt/c/Users/genom/GitHub/LOSAT/docs/wasm-performance/PR01/warm/tblastx/p03_mela_pemojnva/repeat-3.txt",
+    "repeat": 3
+  },
+  {
+    "argv": [
+      "/tmp/losat-pr01-20260905/serial/wasm32-wasip1/release/LOSAT.wasm",
+      "tblastx",
+      "--query",
+      "/tmp/losat-pr5-runtime-cert-5845d22/LOSAT/tests/fasta/MelaMJNV.fasta",
+      "--subject",
+      "/tmp/losat-pr5-runtime-cert-5845d22/LOSAT/tests/fasta/PemoMJNVA.fasta",
+      "--outfmt",
+      "6",
+      "--num-threads",
+      "1",
+      "--query-gencode",
+      "1",
+      "--db-gencode",
+      "1",
+      "--out",
+      "/mnt/c/Users/genom/GitHub/LOSAT/docs/wasm-performance/PR01/warm/tblastx/p03_mela_pemojnva/repeat-4.txt"
+    ],
+    "expected_sha256": "bbef153094025db89dd4a69b2a3c4246b0b8853396fe740bc7e1bd654db105b6",
+    "output": "/mnt/c/Users/genom/GitHub/LOSAT/docs/wasm-performance/PR01/warm/tblastx/p03_mela_pemojnva/repeat-4.txt",
+    "repeat": 4
+  },
+  {
+    "argv": [
+      "/tmp/losat-pr01-20260905/serial/wasm32-wasip1/release/LOSAT.wasm",
+      "tblastx",
+      "--query",
+      "/tmp/losat-pr5-runtime-cert-5845d22/LOSAT/tests/fasta/MelaMJNV.fasta",
+      "--subject",
+      "/tmp/losat-pr5-runtime-cert-5845d22/LOSAT/tests/fasta/PemoMJNVA.fasta",
+      "--outfmt",
+      "6",
+      "--num-threads",
+      "1",
+      "--query-gencode",
+      "1",
+      "--db-gencode",
+      "1",
+      "--out",
+      "/mnt/c/Users/genom/GitHub/LOSAT/docs/wasm-performance/PR01/warm/tblastx/p03_mela_pemojnva/repeat-5.txt"
+    ],
+    "expected_sha256": "bbef153094025db89dd4a69b2a3c4246b0b8853396fe740bc7e1bd654db105b6",
+    "output": "/mnt/c/Users/genom/GitHub/LOSAT/docs/wasm-performance/PR01/warm/tblastx/p03_mela_pemojnva/repeat-5.txt",
+    "repeat": 5
+  }
+]

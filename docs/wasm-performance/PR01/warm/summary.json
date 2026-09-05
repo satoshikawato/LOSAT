@@ -1,0 +1,77 @@
+{
+  "failures": [
+    {
+      "case_id": "p11_avclpv_psclpv",
+      "program": "tblastx",
+      "reason": "warm oracle gate TIMEOUT failed",
+      "status": "NOT_RUN",
+      "timed": false
+    }
+  ],
+  "medians": {
+    "blastn/EDL933.Sakai.megablast": {
+      "max_seconds": 1.5072057130001486,
+      "median_seconds": 1.4359955930002033,
+      "min_seconds": 1.3277513250000774,
+      "samples": 5
+    },
+    "blastn/PesePMNV.MjPMNV.task_blastn": {
+      "max_seconds": 0.44186209299787876,
+      "median_seconds": 0.4214693240001798,
+      "min_seconds": 0.41813504699990156,
+      "samples": 5
+    },
+    "blastn/compact.multi_query.no_hit.outfmt7": {
+      "max_seconds": 0.01517433499917388,
+      "median_seconds": 0.01374770800024271,
+      "min_seconds": 0.009624722000211477,
+      "samples": 5
+    },
+    "blastn/compact.multi_query.outfmt6": {
+      "max_seconds": 0.020734092999249696,
+      "median_seconds": 0.013805568996816873,
+      "min_seconds": 0.010728946000337601,
+      "samples": 5
+    },
+    "blastp/all_hsp_self_serial": {
+      "max_seconds": 1.5905835280008613,
+      "median_seconds": 1.5724773040004074,
+      "min_seconds": 1.5387286060005427,
+      "samples": 5
+    },
+    "blastp/pairwise_default_serial": {
+      "max_seconds": 1.1811403899975121,
+      "median_seconds": 1.1632112459987403,
+      "min_seconds": 1.1512932779975236,
+      "samples": 5
+    },
+    "blastp/pr01_blastp_no_hit": {
+      "max_seconds": 0.4404498529992998,
+      "median_seconds": 0.4265983089990914,
+      "min_seconds": 0.41152826299890877,
+      "samples": 5
+    },
+    "tblastx/p03_mela_pemojnva": {
+      "max_seconds": 7.218776489000767,
+      "median_seconds": 7.152940104000271,
+      "min_seconds": 7.091341247998178,
+      "samples": 5
+    },
+    "tblastx/p12_lc738874_lc738875_default": {
+      "max_seconds": 7.197845990002155,
+      "median_seconds": 7.039130680002272,
+      "min_seconds": 7.006623110000044,
+      "samples": 5
+    },
+    "tblastx/pr01_tblastx_no_hit": {
+      "max_seconds": 0.011461370002478362,
+      "median_seconds": 0.00812142799794674,
+      "min_seconds": 0.0069954699985682964,
+      "samples": 5
+    }
+  },
+  "phase": "warm",
+  "resident": "NOT_RUN",
+  "status": "FAIL",
+  "threaded_warm": "NOT_RUN"
+}

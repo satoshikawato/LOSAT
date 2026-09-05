@@ -1,0 +1,13 @@
+{
+  "cpu_system_seconds": null,
+  "cpu_user_seconds": null,
+  "exit_status": -9,
+  "output": "/mnt/c/Users/genom/GitHub/LOSAT/docs/wasm-performance/PR01/warm/tblastx/p11_avclpv_psclpv/oracle/output.txt",
+  "peak_rss_bytes": null,
+  "raw_output_bytes": 0,
+  "raw_output_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+  "reason": "exceeded 120s",
+  "started_utc": "2026-09-05T06:00:36Z",
+  "status": "TIMEOUT",
+  "wall_seconds": 120.022878623
+}

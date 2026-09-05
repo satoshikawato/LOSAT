@@ -1,0 +1,45 @@
+{
+  "rustc_vV": [
+    "rustc 1.92.0 (ded5c06cf 2025-12-08)",
+    "binary: rustc",
+    "commit-hash: ded5c06cf21d2b93bffd5d884aa6e96934ee4234",
+    "commit-date: 2025-12-08",
+    "host: x86_64-unknown-linux-gnu",
+    "release: 1.92.0",
+    "LLVM version: 21.1.3"
+  ],
+  "cargo_V": "cargo 1.92.0 (344c4567c 2025-10-21)",
+  "node_version": "v18.19.1",
+  "host_triple": "x86_64-unknown-linux-gnu",
+  "native": {
+    "target_triple": "x86_64-unknown-linux-gnu",
+    "cargo_features": "default",
+    "profile": "release",
+    "locked": true,
+    "build_command": "cargo build --release --locked"
+  },
+  "serial_wasm": {
+    "target_triple": "wasm32-wasip1",
+    "cargo_features": "no-default-features",
+    "profile": "release",
+    "locked": true,
+    "build_command": "cargo build --release --target wasm32-wasip1 --no-default-features --locked",
+    "target_rustflags": [
+      "-C",
+      "target-feature=+simd128"
+    ]
+  },
+  "environment_flags": {
+    "RUSTFLAGS": "",
+    "CARGO_ENCODED_RUSTFLAGS": "",
+    "CARGO_BUILD_RUSTFLAGS": "",
+    "RUSTC_LINKER": "",
+    "CC": "",
+    "CFLAGS": "",
+    "CPPFLAGS": "",
+    "LDFLAGS": ""
+  },
+  "cargo_config": "LOSAT/.cargo/config.toml",
+  "cargo_config_sha256": "dfc8cebcb5b37d2f9863387934d74a8e09bdbea13d28db7ae3846070f7dc2d2e",
+  "output_affecting_linker_build_flags": []
+}

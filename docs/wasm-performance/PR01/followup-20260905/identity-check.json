@@ -1,0 +1,30 @@
+{
+  "artifacts": {
+    "native": {
+      "path": "/tmp/losat-pr01-20260905/native/release/LOSAT",
+      "sha256": "058587655963bf1eb253f232fdb5553819105646c0d1c50bbece96e410446819"
+    },
+    "serial": {
+      "imports_exports_match": true,
+      "path": "/tmp/losat-pr01-20260905/serial/wasm32-wasip1/release/LOSAT.wasm",
+      "sha256": "000691b99169ddca8072954fdfa64348ad94b75546432655f6a05daea1d5eb47"
+    },
+    "threaded": {
+      "imports_exports_match": true,
+      "path": "/tmp/losat-pr01-20260905/threaded/wasm32-wasip1-threads/release/LOSAT.wasm",
+      "sha256": "557f7cb99aa0a48dc64207e5efe7833b753cf343b6f3550cbd3b83040d3d25f1"
+    }
+  },
+  "existing_harness_hashes": {
+    "LOSAT/tests/run_wasm_performance_warm.js": "d86792c0bbaee8458c71535f06db7210e8b1a6549a55767a2512e2af577e47f3",
+    "LOSAT/tests/summarize_wasm_performance.py": "19032f1e6e299384c7723f03befda6326c50206b8580bd2d6c37bb32d779025a",
+    "LOSAT/tests/test_wasm_performance.py": "e502df1942d9a8a0e40c643e94fd214b1ca46ba01f71d6abbd28a5f95bae2fa0",
+    "LOSAT/tests/wasm_performance.py": "f451bc93df01b4f5513dfe6dc247d84edd1ee6f025915844e0202e94fbe1f12b",
+    "LOSAT/tests/wasm_performance_cases.tsv": "6966d4e6c043d24e5d67e769c14628d84a649b6e9fae2765fb3dea4d84a8bb42",
+    "LOSAT/tests/wasm_performance_extra_cases.json": "4336fb575bdefb43c5a1267355f94a9fb209c1c82466f45a31b2937189021f3b"
+  },
+  "head": "af3e2ea837afdb8a00cf19920f68be4f0bf3bfb5",
+  "manifest_preflight": "PASS",
+  "tracked_file_count": 457,
+  "tracked_mismatches": []
+}

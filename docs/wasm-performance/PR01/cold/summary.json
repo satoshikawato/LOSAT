@@ -1,0 +1,796 @@
+{
+  "failures": [
+    {
+      "active_workers": null,
+      "boundary": "cold-process-through-teardown",
+      "case_id": "p11_avclpv_psclpv",
+      "contract_class": "EXACT_TEXT",
+      "effective_compute_threads": null,
+      "host_cap": 8,
+      "kind": "native",
+      "oracle_status": "TIMEOUT",
+      "platform_gate_b": "NOT_RUN",
+      "platform_reason": "Linux local baseline is outside the registered Windows/macOS Gate B",
+      "program": "tblastx",
+      "reason": "oracle gate TIMEOUT; timing forbidden",
+      "spawned_helpers": null,
+      "status": "NOT_RUN",
+      "threads_requested": 1
+    },
+    {
+      "active_workers": null,
+      "boundary": "cold-process-through-teardown",
+      "case_id": "p11_avclpv_psclpv",
+      "contract_class": "EXACT_TEXT",
+      "effective_compute_threads": null,
+      "host_cap": 8,
+      "kind": "native",
+      "oracle_status": "TIMEOUT",
+      "platform_gate_b": "NOT_RUN",
+      "platform_reason": "Linux local baseline is outside the registered Windows/macOS Gate B",
+      "program": "tblastx",
+      "reason": "oracle gate TIMEOUT; timing forbidden",
+      "spawned_helpers": null,
+      "status": "NOT_RUN",
+      "threads_requested": 2
+    },
+    {
+      "active_workers": null,
+      "boundary": "cold-process-through-teardown",
+      "case_id": "p11_avclpv_psclpv",
+      "contract_class": "EXACT_TEXT",
+      "effective_compute_threads": null,
+      "host_cap": 8,
+      "kind": "native",
+      "oracle_status": "TIMEOUT",
+      "platform_gate_b": "NOT_RUN",
+      "platform_reason": "Linux local baseline is outside the registered Windows/macOS Gate B",
+      "program": "tblastx",
+      "reason": "oracle gate TIMEOUT; timing forbidden",
+      "spawned_helpers": null,
+      "status": "NOT_RUN",
+      "threads_requested": 4
+    },
+    {
+      "active_workers": null,
+      "boundary": "cold-process-through-teardown",
+      "case_id": "p11_avclpv_psclpv",
+      "contract_class": "EXACT_TEXT",
+      "effective_compute_threads": null,
+      "host_cap": 8,
+      "kind": "native",
+      "oracle_status": "TIMEOUT",
+      "platform_gate_b": "NOT_RUN",
+      "platform_reason": "Linux local baseline is outside the registered Windows/macOS Gate B",
+      "program": "tblastx",
+      "reason": "oracle gate TIMEOUT; timing forbidden",
+      "spawned_helpers": null,
+      "status": "NOT_RUN",
+      "threads_requested": 8
+    },
+    {
+      "active_workers": null,
+      "boundary": "cold-process-through-teardown",
+      "case_id": "p11_avclpv_psclpv",
+      "contract_class": "EXACT_TEXT",
+      "effective_compute_threads": 1,
+      "host_cap": 8,
+      "kind": "serial",
+      "oracle_status": "TIMEOUT",
+      "platform_gate_b": "NOT_RUN",
+      "platform_reason": "Linux local baseline is outside the registered Windows/macOS Gate B",
+      "program": "tblastx",
+      "reason": "oracle gate TIMEOUT; timing forbidden",
+      "spawned_helpers": null,
+      "status": "NOT_RUN",
+      "threads_requested": 1
+    },
+    {
+      "active_workers": null,
+      "boundary": "cold-process-through-teardown",
+      "case_id": "p11_avclpv_psclpv",
+      "contract_class": "EXACT_TEXT",
+      "effective_compute_threads": null,
+      "host_cap": 8,
+      "kind": "threaded",
+      "oracle_status": "TIMEOUT",
+      "platform_gate_b": "NOT_RUN",
+      "platform_reason": "Linux local baseline is outside the registered Windows/macOS Gate B",
+      "program": "tblastx",
+      "reason": "oracle gate TIMEOUT; timing forbidden",
+      "spawned_helpers": null,
+      "status": "NOT_RUN",
+      "threads_requested": 1
+    },
+    {
+      "active_workers": null,
+      "boundary": "cold-process-through-teardown",
+      "case_id": "p11_avclpv_psclpv",
+      "contract_class": "EXACT_TEXT",
+      "effective_compute_threads": null,
+      "host_cap": 8,
+      "kind": "threaded",
+      "oracle_status": "TIMEOUT",
+      "platform_gate_b": "NOT_RUN",
+      "platform_reason": "Linux local baseline is outside the registered Windows/macOS Gate B",
+      "program": "tblastx",
+      "reason": "oracle gate TIMEOUT; timing forbidden",
+      "spawned_helpers": null,
+      "status": "NOT_RUN",
+      "threads_requested": 2
+    },
+    {
+      "active_workers": null,
+      "boundary": "cold-process-through-teardown",
+      "case_id": "p11_avclpv_psclpv",
+      "contract_class": "EXACT_TEXT",
+      "effective_compute_threads": null,
+      "host_cap": 8,
+      "kind": "threaded",
+      "oracle_status": "TIMEOUT",
+      "platform_gate_b": "NOT_RUN",
+      "platform_reason": "Linux local baseline is outside the registered Windows/macOS Gate B",
+      "program": "tblastx",
+      "reason": "oracle gate TIMEOUT; timing forbidden",
+      "spawned_helpers": null,
+      "status": "NOT_RUN",
+      "threads_requested": 4
+    },
+    {
+      "active_workers": null,
+      "boundary": "cold-process-through-teardown",
+      "case_id": "p11_avclpv_psclpv",
+      "contract_class": "EXACT_TEXT",
+      "effective_compute_threads": null,
+      "host_cap": 8,
+      "kind": "threaded",
+      "oracle_status": "TIMEOUT",
+      "platform_gate_b": "NOT_RUN",
+      "platform_reason": "Linux local baseline is outside the registered Windows/macOS Gate B",
+      "program": "tblastx",
+      "reason": "oracle gate TIMEOUT; timing forbidden",
+      "spawned_helpers": null,
+      "status": "NOT_RUN",
+      "threads_requested": 8
+    }
+  ],
+  "final_broad_gate": "NOT_RUN",
+  "medians": {
+    "blastn/EDL933.Sakai.megablast/native/1": {
+      "max_seconds": 1.084714876000362,
+      "median_seconds": 1.0613255190000928,
+      "min_seconds": 1.0573301930016896,
+      "peak_rss_bytes": 232095744,
+      "samples": 5
+    },
+    "blastn/EDL933.Sakai.megablast/native/2": {
+      "max_seconds": 1.116445453997585,
+      "median_seconds": 1.0266534490001504,
+      "min_seconds": 0.9925893809995614,
+      "peak_rss_bytes": 233451520,
+      "samples": 5
+    },
+    "blastn/EDL933.Sakai.megablast/native/4": {
+      "max_seconds": 1.0675159969978267,
+      "median_seconds": 1.0536972549998609,
+      "min_seconds": 1.0454914350011677,
+      "peak_rss_bytes": 233500672,
+      "samples": 5
+    },
+    "blastn/EDL933.Sakai.megablast/native/8": {
+      "max_seconds": 1.0567639670007338,
+      "median_seconds": 1.0435865170002216,
+      "min_seconds": 1.0107459270002437,
+      "peak_rss_bytes": 233455616,
+      "samples": 5
+    },
+    "blastn/EDL933.Sakai.megablast/serial/1": {
+      "max_seconds": 1.8214859559993783,
+      "median_seconds": 1.7177571960019122,
+      "min_seconds": 1.702244256000995,
+      "peak_rss_bytes": 315703296,
+      "samples": 5
+    },
+    "blastn/EDL933.Sakai.megablast/threaded/1": {
+      "max_seconds": 1.9138102610013448,
+      "median_seconds": 1.7354095449991291,
+      "min_seconds": 1.7053036380020785,
+      "peak_rss_bytes": 324562944,
+      "samples": 5
+    },
+    "blastn/EDL933.Sakai.megablast/threaded/2": {
+      "max_seconds": 1.8034307080015424,
+      "median_seconds": 1.749088992997713,
+      "min_seconds": 1.7322868570008723,
+      "peak_rss_bytes": 336273408,
+      "samples": 5
+    },
+    "blastn/EDL933.Sakai.megablast/threaded/4": {
+      "max_seconds": 1.9931467859969416,
+      "median_seconds": 1.842043743999966,
+      "min_seconds": 1.8176280269981362,
+      "peak_rss_bytes": 364494848,
+      "samples": 5
+    },
+    "blastn/EDL933.Sakai.megablast/threaded/8": {
+      "max_seconds": 2.0654804189980496,
+      "median_seconds": 2.0123757389992534,
+      "min_seconds": 1.961078524000186,
+      "peak_rss_bytes": 399867904,
+      "samples": 5
+    },
+    "blastn/PesePMNV.MjPMNV.task_blastn/native/1": {
+      "max_seconds": 0.26471007600048324,
+      "median_seconds": 0.2303395669987367,
+      "min_seconds": 0.22618034900006023,
+      "peak_rss_bytes": 32874496,
+      "samples": 5
+    },
+    "blastn/PesePMNV.MjPMNV.task_blastn/native/2": {
+      "max_seconds": 0.24064425999677042,
+      "median_seconds": 0.2117372369975783,
+      "min_seconds": 0.18006419200173696,
+      "peak_rss_bytes": 32518144,
+      "samples": 5
+    },
+    "blastn/PesePMNV.MjPMNV.task_blastn/native/4": {
+      "max_seconds": 0.2557899899984477,
+      "median_seconds": 0.2296143640014634,
+      "min_seconds": 0.21783225600302103,
+      "peak_rss_bytes": 34914304,
+      "samples": 5
+    },
+    "blastn/PesePMNV.MjPMNV.task_blastn/native/8": {
+      "max_seconds": 0.24887223000041558,
+      "median_seconds": 0.21642531999896164,
+      "min_seconds": 0.2078201269978308,
+      "peak_rss_bytes": 34811904,
+      "samples": 5
+    },
+    "blastn/PesePMNV.MjPMNV.task_blastn/serial/1": {
+      "max_seconds": 0.7538719700023648,
+      "median_seconds": 0.732478161000472,
+      "min_seconds": 0.6773267280004802,
+      "peak_rss_bytes": 118292480,
+      "samples": 5
+    },
+    "blastn/PesePMNV.MjPMNV.task_blastn/threaded/1": {
+      "max_seconds": 0.7627874969984987,
+      "median_seconds": 0.7408862209995277,
+      "min_seconds": 0.7140830409989576,
+      "peak_rss_bytes": 131194880,
+      "samples": 5
+    },
+    "blastn/PesePMNV.MjPMNV.task_blastn/threaded/2": {
+      "max_seconds": 0.7783980140011408,
+      "median_seconds": 0.7359441140033596,
+      "min_seconds": 0.6816007229972456,
+      "peak_rss_bytes": 129511424,
+      "samples": 5
+    },
+    "blastn/PesePMNV.MjPMNV.task_blastn/threaded/4": {
+      "max_seconds": 0.7559276569991198,
+      "median_seconds": 0.7352282270003343,
+      "min_seconds": 0.6991236499998195,
+      "peak_rss_bytes": 129650688,
+      "samples": 5
+    },
+    "blastn/PesePMNV.MjPMNV.task_blastn/threaded/8": {
+      "max_seconds": 0.7640775520012539,
+      "median_seconds": 0.7202313779998804,
+      "min_seconds": 0.6856579080013034,
+      "peak_rss_bytes": 137863168,
+      "samples": 5
+    },
+    "blastn/compact.multi_query.no_hit.outfmt7/native/1": {
+      "max_seconds": 0.05233077999946545,
+      "median_seconds": 0.0472224359982647,
+      "min_seconds": 0.008946875997935422,
+      "peak_rss_bytes": 4825088,
+      "samples": 5
+    },
+    "blastn/compact.multi_query.no_hit.outfmt7/native/2": {
+      "max_seconds": 0.07410963399888715,
+      "median_seconds": 0.04656005600190838,
+      "min_seconds": 0.011818967999715824,
+      "peak_rss_bytes": 5033984,
+      "samples": 5
+    },
+    "blastn/compact.multi_query.no_hit.outfmt7/native/4": {
+      "max_seconds": 0.06856220699773985,
+      "median_seconds": 0.04678347200024291,
+      "min_seconds": 0.017733119002514286,
+      "peak_rss_bytes": 7110656,
+      "samples": 5
+    },
+    "blastn/compact.multi_query.no_hit.outfmt7/native/8": {
+      "max_seconds": 0.07601982900087023,
+      "median_seconds": 0.040060962997813476,
+      "min_seconds": 0.018404726000881055,
+      "peak_rss_bytes": 6934528,
+      "samples": 5
+    },
+    "blastn/compact.multi_query.no_hit.outfmt7/serial/1": {
+      "max_seconds": 0.19171456299955025,
+      "median_seconds": 0.1703446069986967,
+      "min_seconds": 0.16226648299925728,
+      "peak_rss_bytes": 91541504,
+      "samples": 5
+    },
+    "blastn/compact.multi_query.no_hit.outfmt7/threaded/1": {
+      "max_seconds": 0.20877638300225954,
+      "median_seconds": 0.1765070569999807,
+      "min_seconds": 0.14952092800012906,
+      "peak_rss_bytes": 90263552,
+      "samples": 5
+    },
+    "blastn/compact.multi_query.no_hit.outfmt7/threaded/2": {
+      "max_seconds": 0.19813221499862266,
+      "median_seconds": 0.18172970899831853,
+      "min_seconds": 0.16085003099942696,
+      "peak_rss_bytes": 90206208,
+      "samples": 5
+    },
+    "blastn/compact.multi_query.no_hit.outfmt7/threaded/4": {
+      "max_seconds": 0.20050747799905366,
+      "median_seconds": 0.16055805799987866,
+      "min_seconds": 0.13873594899996533,
+      "peak_rss_bytes": 90091520,
+      "samples": 5
+    },
+    "blastn/compact.multi_query.no_hit.outfmt7/threaded/8": {
+      "max_seconds": 0.17530541900123353,
+      "median_seconds": 0.1563512900029309,
+      "min_seconds": 0.14459506700222846,
+      "peak_rss_bytes": 89161728,
+      "samples": 5
+    },
+    "blastn/compact.multi_query.outfmt6/native/1": {
+      "max_seconds": 0.06114543999865418,
+      "median_seconds": 0.037165832000027876,
+      "min_seconds": 0.010866233002161607,
+      "peak_rss_bytes": 4763648,
+      "samples": 5
+    },
+    "blastn/compact.multi_query.outfmt6/native/2": {
+      "max_seconds": 0.060580883000511676,
+      "median_seconds": 0.023813437001081184,
+      "min_seconds": 0.010184276001382386,
+      "peak_rss_bytes": 5124096,
+      "samples": 5
+    },
+    "blastn/compact.multi_query.outfmt6/native/4": {
+      "max_seconds": 0.054464644999825396,
+      "median_seconds": 0.04140277899932698,
+      "min_seconds": 0.037875527999858605,
+      "peak_rss_bytes": 5226496,
+      "samples": 5
+    },
+    "blastn/compact.multi_query.outfmt6/native/8": {
+      "max_seconds": 0.0711269759995048,
+      "median_seconds": 0.029611313999339473,
+      "min_seconds": 0.010112767002283363,
+      "peak_rss_bytes": 7229440,
+      "samples": 5
+    },
+    "blastn/compact.multi_query.outfmt6/serial/1": {
+      "max_seconds": 0.1806918139991467,
+      "median_seconds": 0.16748444400218432,
+      "min_seconds": 0.15049427899793955,
+      "peak_rss_bytes": 106356736,
+      "samples": 5
+    },
+    "blastn/compact.multi_query.outfmt6/threaded/1": {
+      "max_seconds": 0.2412082940027176,
+      "median_seconds": 0.16304369199860957,
+      "min_seconds": 0.15852444199845195,
+      "peak_rss_bytes": 111448064,
+      "samples": 5
+    },
+    "blastn/compact.multi_query.outfmt6/threaded/2": {
+      "max_seconds": 0.21918588600237854,
+      "median_seconds": 0.18547407500227564,
+      "min_seconds": 0.1588492810005846,
+      "peak_rss_bytes": 111517696,
+      "samples": 5
+    },
+    "blastn/compact.multi_query.outfmt6/threaded/4": {
+      "max_seconds": 0.2419046930008335,
+      "median_seconds": 0.19712887900095666,
+      "min_seconds": 0.16066409400082193,
+      "peak_rss_bytes": 112840704,
+      "samples": 5
+    },
+    "blastn/compact.multi_query.outfmt6/threaded/8": {
+      "max_seconds": 0.22062240399827715,
+      "median_seconds": 0.17017236999890883,
+      "min_seconds": 0.15971922999960952,
+      "peak_rss_bytes": 112230400,
+      "samples": 5
+    },
+    "blastp/all_hsp_self_serial/native/1": {
+      "max_seconds": 1.1077934829991136,
+      "median_seconds": 1.0462146290010423,
+      "min_seconds": 1.0127310540010512,
+      "peak_rss_bytes": 27140096,
+      "samples": 5
+    },
+    "blastp/all_hsp_self_serial/native/2": {
+      "max_seconds": 0.6716140749995247,
+      "median_seconds": 0.6214352610004426,
+      "min_seconds": 0.6061185110011138,
+      "peak_rss_bytes": 31404032,
+      "samples": 5
+    },
+    "blastp/all_hsp_self_serial/native/4": {
+      "max_seconds": 0.4131877479994728,
+      "median_seconds": 0.37282694299938157,
+      "min_seconds": 0.3657060450022982,
+      "peak_rss_bytes": 33054720,
+      "samples": 5
+    },
+    "blastp/all_hsp_self_serial/native/8": {
+      "max_seconds": 0.32909460999871953,
+      "median_seconds": 0.29371452699706424,
+      "min_seconds": 0.27905061799901887,
+      "peak_rss_bytes": 36118528,
+      "samples": 5
+    },
+    "blastp/all_hsp_self_serial/serial/1": {
+      "max_seconds": 1.768503444000089,
+      "median_seconds": 1.7248805669987632,
+      "min_seconds": 1.6863854520015593,
+      "peak_rss_bytes": 125898752,
+      "samples": 5
+    },
+    "blastp/all_hsp_self_serial/threaded/1": {
+      "max_seconds": 1.7858211689999735,
+      "median_seconds": 1.7556342640018556,
+      "min_seconds": 1.7256571180005267,
+      "peak_rss_bytes": 115380224,
+      "samples": 5
+    },
+    "blastp/all_hsp_self_serial/threaded/2": {
+      "max_seconds": 1.1411408639978617,
+      "median_seconds": 1.1126180440005555,
+      "min_seconds": 1.0853725550005038,
+      "peak_rss_bytes": 125247488,
+      "samples": 5
+    },
+    "blastp/all_hsp_self_serial/threaded/4": {
+      "max_seconds": 0.9679681779998646,
+      "median_seconds": 0.8638662660014234,
+      "min_seconds": 0.8278740829991875,
+      "peak_rss_bytes": 145477632,
+      "samples": 5
+    },
+    "blastp/all_hsp_self_serial/threaded/8": {
+      "max_seconds": 0.9381703149992973,
+      "median_seconds": 0.9136579810001422,
+      "min_seconds": 0.876760008999554,
+      "peak_rss_bytes": 184934400,
+      "samples": 5
+    },
+    "blastp/pairwise_default_serial/native/1": {
+      "max_seconds": 0.8020011610024085,
+      "median_seconds": 0.7917626329981431,
+      "min_seconds": 0.783514982998895,
+      "peak_rss_bytes": 27242496,
+      "samples": 5
+    },
+    "blastp/pairwise_default_serial/native/2": {
+      "max_seconds": 0.5252041460007604,
+      "median_seconds": 0.5055983349993767,
+      "min_seconds": 0.4862640920000558,
+      "peak_rss_bytes": 29470720,
+      "samples": 5
+    },
+    "blastp/pairwise_default_serial/native/4": {
+      "max_seconds": 0.3200265000014042,
+      "median_seconds": 0.30551340199963306,
+      "min_seconds": 0.3002201300005254,
+      "peak_rss_bytes": 31297536,
+      "samples": 5
+    },
+    "blastp/pairwise_default_serial/native/8": {
+      "max_seconds": 0.2455883670008916,
+      "median_seconds": 0.22812939999857917,
+      "min_seconds": 0.22658581499854336,
+      "peak_rss_bytes": 36913152,
+      "samples": 5
+    },
+    "blastp/pairwise_default_serial/serial/1": {
+      "max_seconds": 1.3812049819971435,
+      "median_seconds": 1.3155362709985639,
+      "min_seconds": 1.296866377000697,
+      "peak_rss_bytes": 122830848,
+      "samples": 5
+    },
+    "blastp/pairwise_default_serial/threaded/1": {
+      "max_seconds": 1.3762588320023497,
+      "median_seconds": 1.362059766001039,
+      "min_seconds": 1.3287573609995889,
+      "peak_rss_bytes": 115523584,
+      "samples": 5
+    },
+    "blastp/pairwise_default_serial/threaded/2": {
+      "max_seconds": 0.977390344000014,
+      "median_seconds": 0.9507164909991843,
+      "min_seconds": 0.9016765979977208,
+      "peak_rss_bytes": 126218240,
+      "samples": 5
+    },
+    "blastp/pairwise_default_serial/threaded/4": {
+      "max_seconds": 0.7501838999996835,
+      "median_seconds": 0.7258226480007579,
+      "min_seconds": 0.7163928299996769,
+      "peak_rss_bytes": 144986112,
+      "samples": 5
+    },
+    "blastp/pairwise_default_serial/threaded/8": {
+      "max_seconds": 0.9634359180017782,
+      "median_seconds": 0.8579637170005299,
+      "min_seconds": 0.8408585899996979,
+      "peak_rss_bytes": 185761792,
+      "samples": 5
+    },
+    "blastp/pr01_blastp_no_hit/native/1": {
+      "max_seconds": 0.3498133039975073,
+      "median_seconds": 0.33824264600116294,
+      "min_seconds": 0.30547216000195476,
+      "peak_rss_bytes": 27787264,
+      "samples": 5
+    },
+    "blastp/pr01_blastp_no_hit/native/2": {
+      "max_seconds": 0.2518742790016404,
+      "median_seconds": 0.23973913599911612,
+      "min_seconds": 0.19171223699959228,
+      "peak_rss_bytes": 27418624,
+      "samples": 5
+    },
+    "blastp/pr01_blastp_no_hit/native/4": {
+      "max_seconds": 0.19937484999900335,
+      "median_seconds": 0.15515467400109628,
+      "min_seconds": 0.14323669000077643,
+      "peak_rss_bytes": 27521024,
+      "samples": 5
+    },
+    "blastp/pr01_blastp_no_hit/native/8": {
+      "max_seconds": 0.14216274800128303,
+      "median_seconds": 0.13852059300188557,
+      "min_seconds": 0.13033109499883722,
+      "peak_rss_bytes": 30416896,
+      "samples": 5
+    },
+    "blastp/pr01_blastp_no_hit/serial/1": {
+      "max_seconds": 0.6453891900018789,
+      "median_seconds": 0.6196185119988513,
+      "min_seconds": 0.5737755099980859,
+      "peak_rss_bytes": 126296064,
+      "samples": 5
+    },
+    "blastp/pr01_blastp_no_hit/threaded/1": {
+      "max_seconds": 0.6691328180022538,
+      "median_seconds": 0.6245639539993135,
+      "min_seconds": 0.5812811670002702,
+      "peak_rss_bytes": 115101696,
+      "samples": 5
+    },
+    "blastp/pr01_blastp_no_hit/threaded/2": {
+      "max_seconds": 0.5569857699993008,
+      "median_seconds": 0.5190090039977804,
+      "min_seconds": 0.5084775440009253,
+      "peak_rss_bytes": 121683968,
+      "samples": 5
+    },
+    "blastp/pr01_blastp_no_hit/threaded/4": {
+      "max_seconds": 0.6669362350003212,
+      "median_seconds": 0.5756290450008237,
+      "min_seconds": 0.5137115149991587,
+      "peak_rss_bytes": 144531456,
+      "samples": 5
+    },
+    "blastp/pr01_blastp_no_hit/threaded/8": {
+      "max_seconds": 0.8940673249999236,
+      "median_seconds": 0.7907452229992487,
+      "min_seconds": 0.738578102998872,
+      "peak_rss_bytes": 181264384,
+      "samples": 5
+    },
+    "tblastx/p03_mela_pemojnva/native/1": {
+      "max_seconds": 4.65740575000018,
+      "median_seconds": 4.563896837000357,
+      "min_seconds": 4.501878970997495,
+      "peak_rss_bytes": 70422528,
+      "samples": 5
+    },
+    "tblastx/p03_mela_pemojnva/native/2": {
+      "max_seconds": 3.0799429030012107,
+      "median_seconds": 3.057443924997642,
+      "min_seconds": 3.027669119001075,
+      "peak_rss_bytes": 96501760,
+      "samples": 5
+    },
+    "tblastx/p03_mela_pemojnva/native/4": {
+      "max_seconds": 2.536857594997855,
+      "median_seconds": 2.4946988849987974,
+      "min_seconds": 2.461553842997091,
+      "peak_rss_bytes": 100737024,
+      "samples": 5
+    },
+    "tblastx/p03_mela_pemojnva/native/8": {
+      "max_seconds": 2.558776695997949,
+      "median_seconds": 2.523495659999753,
+      "min_seconds": 2.461497734999284,
+      "peak_rss_bytes": 100995072,
+      "samples": 5
+    },
+    "tblastx/p03_mela_pemojnva/serial/1": {
+      "max_seconds": 8.140366890002042,
+      "median_seconds": 8.10997718499857,
+      "min_seconds": 7.964010360999964,
+      "peak_rss_bytes": 166526976,
+      "samples": 5
+    },
+    "tblastx/p03_mela_pemojnva/threaded/1": {
+      "max_seconds": 8.38902892799888,
+      "median_seconds": 8.182922754000174,
+      "min_seconds": 8.080022277001262,
+      "peak_rss_bytes": 161206272,
+      "samples": 5
+    },
+    "tblastx/p03_mela_pemojnva/threaded/2": {
+      "max_seconds": 8.47528900999896,
+      "median_seconds": 8.152864592000697,
+      "min_seconds": 7.907923397000559,
+      "peak_rss_bytes": 164368384,
+      "samples": 5
+    },
+    "tblastx/p03_mela_pemojnva/threaded/4": {
+      "max_seconds": 8.059723648002546,
+      "median_seconds": 7.996668761999899,
+      "min_seconds": 7.909152131000155,
+      "peak_rss_bytes": 164913152,
+      "samples": 5
+    },
+    "tblastx/p03_mela_pemojnva/threaded/8": {
+      "max_seconds": 8.095836896998662,
+      "median_seconds": 8.036817874999542,
+      "min_seconds": 8.007806816000084,
+      "peak_rss_bytes": 162242560,
+      "samples": 5
+    },
+    "tblastx/p12_lc738874_lc738875_default/native/1": {
+      "max_seconds": 4.960856424000667,
+      "median_seconds": 4.816924154001754,
+      "min_seconds": 4.699994449001679,
+      "peak_rss_bytes": 77012992,
+      "samples": 5
+    },
+    "tblastx/p12_lc738874_lc738875_default/native/2": {
+      "max_seconds": 3.500996964001388,
+      "median_seconds": 3.4281004939984996,
+      "min_seconds": 3.3667441029974725,
+      "peak_rss_bytes": 101588992,
+      "samples": 5
+    },
+    "tblastx/p12_lc738874_lc738875_default/native/4": {
+      "max_seconds": 2.7542138200005866,
+      "median_seconds": 2.7202423679991625,
+      "min_seconds": 2.625213897001231,
+      "peak_rss_bytes": 108158976,
+      "samples": 5
+    },
+    "tblastx/p12_lc738874_lc738875_default/native/8": {
+      "max_seconds": 2.7023348080001597,
+      "median_seconds": 2.6619656830007443,
+      "min_seconds": 2.5731485079995764,
+      "peak_rss_bytes": 109674496,
+      "samples": 5
+    },
+    "tblastx/p12_lc738874_lc738875_default/serial/1": {
+      "max_seconds": 10.224504955000157,
+      "median_seconds": 10.128098245997535,
+      "min_seconds": 10.00512503400023,
+      "peak_rss_bytes": 164958208,
+      "samples": 5
+    },
+    "tblastx/p12_lc738874_lc738875_default/threaded/1": {
+      "max_seconds": 10.219912523996754,
+      "median_seconds": 10.165765313999145,
+      "min_seconds": 10.13006613700054,
+      "peak_rss_bytes": 161624064,
+      "samples": 5
+    },
+    "tblastx/p12_lc738874_lc738875_default/threaded/2": {
+      "max_seconds": 10.278359730000375,
+      "median_seconds": 10.136600050998823,
+      "min_seconds": 10.035147407001205,
+      "peak_rss_bytes": 163209216,
+      "samples": 5
+    },
+    "tblastx/p12_lc738874_lc738875_default/threaded/4": {
+      "max_seconds": 10.289776408000762,
+      "median_seconds": 10.247094655998808,
+      "min_seconds": 10.080183933001535,
+      "peak_rss_bytes": 163164160,
+      "samples": 5
+    },
+    "tblastx/p12_lc738874_lc738875_default/threaded/8": {
+      "max_seconds": 10.47119474200008,
+      "median_seconds": 10.2578097839978,
+      "min_seconds": 10.245720290000463,
+      "peak_rss_bytes": 162910208,
+      "samples": 5
+    },
+    "tblastx/pr01_tblastx_no_hit/native/1": {
+      "max_seconds": 0.05770576500071911,
+      "median_seconds": 0.045715592001215555,
+      "min_seconds": 0.036001128999487264,
+      "peak_rss_bytes": 6103040,
+      "samples": 5
+    },
+    "tblastx/pr01_tblastx_no_hit/native/2": {
+      "max_seconds": 0.05984179799997946,
+      "median_seconds": 0.036670357003458776,
+      "min_seconds": 0.02416395900218049,
+      "peak_rss_bytes": 7069696,
+      "samples": 5
+    },
+    "tblastx/pr01_tblastx_no_hit/native/4": {
+      "max_seconds": 0.062397313999099424,
+      "median_seconds": 0.0406773870017787,
+      "min_seconds": 0.03275064000263228,
+      "peak_rss_bytes": 7385088,
+      "samples": 5
+    },
+    "tblastx/pr01_tblastx_no_hit/native/8": {
+      "max_seconds": 0.04790054999830318,
+      "median_seconds": 0.043487784001627006,
+      "min_seconds": 0.025986405002186075,
+      "peak_rss_bytes": 6246400,
+      "samples": 5
+    },
+    "tblastx/pr01_tblastx_no_hit/serial/1": {
+      "max_seconds": 0.23788921400046092,
+      "median_seconds": 0.1891704910012777,
+      "min_seconds": 0.14312172100108,
+      "peak_rss_bytes": 84520960,
+      "samples": 5
+    },
+    "tblastx/pr01_tblastx_no_hit/threaded/1": {
+      "max_seconds": 0.22838302300078794,
+      "median_seconds": 0.1850954820001789,
+      "min_seconds": 0.1576722619975044,
+      "peak_rss_bytes": 89272320,
+      "samples": 5
+    },
+    "tblastx/pr01_tblastx_no_hit/threaded/2": {
+      "max_seconds": 0.20923002199924667,
+      "median_seconds": 0.19635146200016607,
+      "min_seconds": 0.16286271500212024,
+      "peak_rss_bytes": 95375360,
+      "samples": 5
+    },
+    "tblastx/pr01_tblastx_no_hit/threaded/4": {
+      "max_seconds": 0.26689843900021515,
+      "median_seconds": 0.22497614999883808,
+      "min_seconds": 0.17312624699843582,
+      "peak_rss_bytes": 89284608,
+      "samples": 5
+    },
+    "tblastx/pr01_tblastx_no_hit/threaded/8": {
+      "max_seconds": 0.250915526998142,
+      "median_seconds": 0.1867796470032772,
+      "min_seconds": 0.13958646299943211,
+      "peak_rss_bytes": 88707072,
+      "samples": 5
+    }
+  },
+  "phase": "benchmark",
+  "release_certification": "NOT_RUN",
+  "sample_count": 639,
+  "schema_version": "losat-wasm-perf-run-v1",
+  "selected_cases": 11,
+  "status": "FAIL"
+}

@@ -1,0 +1,59 @@
+[
+  {
+    "name": "cold",
+    "command": [
+      "python3",
+      "LOSAT/tests/wasm_performance.py",
+      "run",
+      "--manifest",
+      "/mnt/c/Users/genom/GitHub/LOSAT/docs/wasm-performance/PR01/contract/manifest.json",
+      "--output",
+      "/mnt/c/Users/genom/GitHub/LOSAT/docs/wasm-performance/PR01/cold",
+      "--phase",
+      "benchmark"
+    ],
+    "exit": 1
+  },
+  {
+    "name": "warm",
+    "command": [
+      "python3",
+      "LOSAT/tests/wasm_performance.py",
+      "run",
+      "--manifest",
+      "/mnt/c/Users/genom/GitHub/LOSAT/docs/wasm-performance/PR01/contract/manifest.json",
+      "--output",
+      "/mnt/c/Users/genom/GitHub/LOSAT/docs/wasm-performance/PR01/warm",
+      "--phase",
+      "warm"
+    ],
+    "exit": 1
+  },
+  {
+    "name": "protected-profile",
+    "command": [
+      "python3",
+      "LOSAT/tests/wasm_performance.py",
+      "run",
+      "--manifest",
+      "/mnt/c/Users/genom/GitHub/LOSAT/docs/wasm-performance/PR01/contract/manifest.json",
+      "--output",
+      "/mnt/c/Users/genom/GitHub/LOSAT/docs/wasm-performance/PR01/protected-profile",
+      "--phase",
+      "profile",
+      "--targets",
+      "native",
+      "--threads",
+      "1",
+      "--case",
+      "NZ_CP006932.NZ_CP006932.task_blastn",
+      "--case",
+      "p01_ap027280_self",
+      "--case",
+      "Sakai.MG1655.megablast",
+      "--case",
+      "d06_ap027131_ap027133_db4"
+    ],
+    "exit": 0
+  }
+]

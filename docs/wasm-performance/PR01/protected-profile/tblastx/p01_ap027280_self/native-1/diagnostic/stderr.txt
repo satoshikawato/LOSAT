@@ -1,0 +1,10 @@
+[TIMING] read_queries: 0.084s
+[TIMING] build_lookup: 0.117s
+[TIMING] read_subjects: 0.000s
+[TIMING] scan_subject: 0.113s (calls=38114)
+[TIMING] ungapped_extend: 0.477s (calls=4067119)
+[TIMING] reevaluate: 0.005s (calls=42790)
+[TIMING] sum_stats_linking: 8.605s (calls=1)
+[TIMING] identity_calc: 0.000s (calls=0)
+[TIMING] search_total: 31.952s
+[TIMING] total: 32.193s

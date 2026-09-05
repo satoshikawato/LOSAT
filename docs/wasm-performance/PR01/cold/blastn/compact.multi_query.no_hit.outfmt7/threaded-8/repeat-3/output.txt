@@ -1,0 +1,9 @@
+# BLASTN 2.17.0+
+# Query: blastn_parity_alpha compact multi-query parity fixture alpha
+# Database: User specified sequence set (Input: /tmp/losat-pr5-runtime-cert-5845d22/LOSAT/tests/fasta/blastn_parity_compact.fasta)
+# 0 hits found
+# BLASTN 2.17.0+
+# Query: blastn_parity_beta compact multi-query parity fixture beta
+# Database: User specified sequence set (Input: /tmp/losat-pr5-runtime-cert-5845d22/LOSAT/tests/fasta/blastn_parity_compact.fasta)
+# 0 hits found
+# BLAST processed 2 queries

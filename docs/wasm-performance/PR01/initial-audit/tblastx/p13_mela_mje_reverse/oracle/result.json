@@ -1,0 +1,12 @@
+{
+  "cpu_system_seconds": 0.07,
+  "cpu_user_seconds": 11.02,
+  "exit_status": 0,
+  "output": "/mnt/c/Users/genom/GitHub/LOSAT/docs/wasm-performance/PR01/initial-audit/tblastx/p13_mela_mje_reverse/oracle/output.txt",
+  "peak_rss_bytes": 118415360,
+  "raw_output_bytes": 1674606,
+  "raw_output_sha256": "b34593f9506fb9ca9856c8b9e840295ff40e99c75b4ac144d867da8c032e062b",
+  "reason": null,
+  "status": "PASS",
+  "wall_seconds": 11.212794192000729
+}

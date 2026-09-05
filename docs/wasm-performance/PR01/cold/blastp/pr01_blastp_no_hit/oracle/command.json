@@ -1,0 +1,27 @@
+{
+  "cwd": "/mnt/c/Users/genom/GitHub/LOSAT",
+  "environment_overrides": {
+    "LOSAT_WASI_THREAD_CAP": "8",
+    "LOSAT_WASM_MEMORY_MAXIMUM_PAGES": "16384",
+    "NODE_NO_WARNINGS": "1"
+  },
+  "ordered_argv": [
+    "/home/kawato/tools/ncbi-blast-oracle/ncbi-blast-2.17.0+/bin/blastp",
+    "-query",
+    "/tmp/losat-pr5-runtime-cert-5845d22/LOSAT/tests/fasta/SicyWSV.faa",
+    "-subject",
+    "/tmp/losat-pr5-runtime-cert-5845d22/LOSAT/tests/fasta/AP027078.faa",
+    "-outfmt",
+    "6",
+    "-num_threads",
+    "1",
+    "-max_hsps",
+    "1",
+    "-out",
+    "/mnt/c/Users/genom/GitHub/LOSAT/docs/wasm-performance/PR01/cold/blastp/pr01_blastp_no_hit/oracle/output.txt",
+    "-evalue",
+    "1e-180"
+  ],
+  "shell": false,
+  "sink": "/mnt/c/Users/genom/GitHub/LOSAT/docs/wasm-performance/PR01/cold/blastp/pr01_blastp_no_hit/oracle/output.txt"
+}

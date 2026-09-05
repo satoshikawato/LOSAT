@@ -1,0 +1,22 @@
+[TIMING] scan_lookup: 0.233s (calls=1)
+[TIMING] ungapped_extend: 0.162s (calls=1991372)
+[TIMING] gapped_extend: 1.828s (calls=195387)
+[TIMING] traceback_prune: 3.024s (calls=2)
+[TIMING] traceback_sort_prelim: 0.000s
+[TIMING] traceback_tree_precheck: 0.006s
+[TIMING] traceback_start_offsets: 0.002s
+[TIMING] traceback_alignment: 2.947s (dp=2.947s greedy=0.000s)
+[TIMING] traceback_hsp_build: 0.011s
+[TIMING] purge_common_endpoint_pass1: 0.040s
+[TIMING] reevaluate_ambiguities: 0.000s
+[TIMING] identity_length_test: 0.000s
+[TIMING] purge_common_endpoint_pass2: 0.006s
+[TIMING] traceback_score_resort: 0.001s
+[TIMING] traceback_final_tree_contains: 0.002s
+[TIMING] traceback_final_tree_add: 0.005s
+[TIMING] traceback_postprocess: 0.000s
+[TIMING] traceback_counts: prelim=14245 tree_skipped=1777 full_traceback=12468 deleted_evalue_cutoff=0 deleted_reevaluation=20 deleted_identity_length=0 endpoint_pass1_removed=52 endpoint_pass2_removed=55 final_tree_removed=1
+[TIMING] traceback_lengths: edit_script_samples=12468 edit_script_max=179 edit_script_median=3.0 alignment_samples=12468 alignment_max=657176 alignment_median=47.0
+[TIMING] format_output: 0.212s (calls=1)
+[TIMING] search_total: 5.597s
+[TIMING] total: 5.698s

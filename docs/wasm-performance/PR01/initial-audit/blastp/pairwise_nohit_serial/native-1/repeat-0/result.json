@@ -1,0 +1,12 @@
+{
+  "cpu_system_seconds": 0.0,
+  "cpu_user_seconds": 0.99,
+  "exit_status": 0,
+  "output": "/mnt/c/Users/genom/GitHub/LOSAT/docs/wasm-performance/PR01/initial-audit/blastp/pairwise_nohit_serial/native-1/repeat-0/output.txt",
+  "peak_rss_bytes": 27754496,
+  "raw_output_bytes": 20354,
+  "raw_output_sha256": "8c39d7c6c27963e78c01fac416bd86542b64501301919bd74df280e31aa6f4b8",
+  "reason": null,
+  "status": "PASS",
+  "wall_seconds": 1.0794281550006417
+}

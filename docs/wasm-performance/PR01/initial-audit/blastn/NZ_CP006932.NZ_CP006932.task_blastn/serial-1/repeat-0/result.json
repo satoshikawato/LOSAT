@@ -1,0 +1,12 @@
+{
+  "cpu_system_seconds": 0.52,
+  "cpu_user_seconds": 27.98,
+  "exit_status": 0,
+  "output": "/mnt/c/Users/genom/GitHub/LOSAT/docs/wasm-performance/PR01/initial-audit/blastn/NZ_CP006932.NZ_CP006932.task_blastn/serial-1/repeat-0/output.txt",
+  "peak_rss_bytes": 291602432,
+  "raw_output_bytes": 994393,
+  "raw_output_sha256": "723d7a8f515cb6d853758d4ccc7054c7cebd3b84ef5932f816d7b9bed0bab8c3",
+  "reason": null,
+  "status": "PASS",
+  "wall_seconds": 26.205726549000246
+}

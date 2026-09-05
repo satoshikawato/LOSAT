@@ -1,0 +1,30 @@
+{
+  "cwd": "/mnt/c/Users/genom/GitHub/LOSAT",
+  "environment_overrides": {
+    "LOSAT_WASI_THREAD_CAP": "8",
+    "LOSAT_WASM_MEMORY_MAXIMUM_PAGES": "16384",
+    "NODE_NO_WARNINGS": "1"
+  },
+  "ordered_argv": [
+    "/usr/bin/node",
+    "/mnt/c/Users/genom/GitHub/LOSAT/LOSAT/tests/run_losat_wasi.js",
+    "/tmp/losat-pr01-20260905/serial/wasm32-wasip1/release/LOSAT.wasm",
+    "tblastx",
+    "--query",
+    "/tmp/losat-pr5-runtime-cert-5845d22/LOSAT/tests/fasta/PemoMJNVB.fasta",
+    "--subject",
+    "/tmp/losat-pr5-runtime-cert-5845d22/LOSAT/tests/fasta/LvMJNV.fasta",
+    "--outfmt",
+    "6",
+    "--num-threads",
+    "1",
+    "--query-gencode",
+    "1",
+    "--db-gencode",
+    "1",
+    "--out",
+    "/mnt/c/Users/genom/GitHub/LOSAT/docs/wasm-performance/PR01/followup-20260905/concurrent-audit/p06_pemojnva_lvmjnv/serial/output.txt"
+  ],
+  "shell": false,
+  "sink": "/mnt/c/Users/genom/GitHub/LOSAT/docs/wasm-performance/PR01/followup-20260905/concurrent-audit/p06_pemojnva_lvmjnv/serial/output.txt"
+}

@@ -1,0 +1,13 @@
+{
+  "cpu_system_seconds": 0.06,
+  "cpu_user_seconds": 0.95,
+  "exit_status": 0,
+  "output": "/mnt/c/Users/genom/GitHub/LOSAT/docs/wasm-performance/PR01/cold/blastn/EDL933.Sakai.megablast/native-1/repeat-0/output.txt",
+  "peak_rss_bytes": 230273024,
+  "raw_output_bytes": 473434,
+  "raw_output_sha256": "3a000ebc6294d85b000112cee74f8de78fd9e932532e8c07a17d84f6f1379b16",
+  "reason": null,
+  "started_utc": "2026-09-05T05:37:06Z",
+  "status": "PASS",
+  "wall_seconds": 1.0549523619993124
+}

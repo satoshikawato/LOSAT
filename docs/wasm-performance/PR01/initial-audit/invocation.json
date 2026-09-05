@@ -1,0 +1,14 @@
+{
+  "argv": [
+    "LOSAT/tests/wasm_performance.py",
+    "run",
+    "--manifest",
+    "docs/wasm-performance/PR01/frozen/manifest.json",
+    "--output",
+    "docs/wasm-performance/PR01/initial-audit",
+    "--phase",
+    "audit"
+  ],
+  "manifest_sha256": "71ec2ddfc74e3a0eda586ae773bc979ddc1011102e612d1ce576b7c0d45d9aef",
+  "phase": "audit"
+}

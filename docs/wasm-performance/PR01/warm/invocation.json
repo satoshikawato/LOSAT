@@ -1,0 +1,17 @@
+{
+  "argv": [
+    "LOSAT/tests/wasm_performance.py",
+    "run",
+    "--manifest",
+    "/mnt/c/Users/genom/GitHub/LOSAT/docs/wasm-performance/PR01/contract/manifest.json",
+    "--output",
+    "/mnt/c/Users/genom/GitHub/LOSAT/docs/wasm-performance/PR01/warm",
+    "--phase",
+    "warm"
+  ],
+  "harness_sha256": "ce6f9b88535c0b833a47db987b8a76788bfd636604a5809bc85924896433f36d",
+  "manifest_sha256": "fe1b776ab6916bbbb4a5743f4d735c75a07bf4479349ebf81644b9b885c7b919",
+  "phase": "warm",
+  "run_id": "warm",
+  "started_utc": "2026-09-05T05:59:06Z"
+}

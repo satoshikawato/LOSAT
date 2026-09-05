@@ -1,0 +1,10 @@
+{
+  "status": "PASS",
+  "run_manifest_rows": 99,
+  "cold_series_statuses": {
+    "PASS": 90,
+    "NOT_RUN": 9
+  },
+  "warm_medians_recomputed": 10,
+  "timed_warm_samples": 50
+}

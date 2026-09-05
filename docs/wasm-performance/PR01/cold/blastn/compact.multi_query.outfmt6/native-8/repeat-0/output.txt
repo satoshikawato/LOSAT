@@ -1,0 +1,2 @@
+blastn_parity_alpha	blastn_parity_alpha	100.000	76	0	0	1	76	1	76	2.09e-38	138
+blastn_parity_beta	blastn_parity_beta	100.000	76	0	0	1	76	1	76	2.09e-38	138

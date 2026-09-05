@@ -1,0 +1,10 @@
+[losat-wasi-threads] runner thread cap=8
+[losat-wasi-threads] starting main _start
+[losat-wasi-threads] blastp stage=subject-prep target_arch=wasm32 threaded_wasm=true requested_threads=1 runner_thread_cap=8 effective_threads=1 rayon_pool_threads=0 expected_spawned_workers=0 subject_records=89 worker_jobs=89 total_subject_residues=64069 min_worker_jobs=2 min_subject_residues=4096 parallel=false serial_reason=effective_threads<=1
+[losat-wasi-threads] blastp stage=prelim target_arch=wasm32 threaded_wasm=true requested_threads=1 runner_thread_cap=8 effective_threads=1 rayon_pool_threads=0 expected_spawned_workers=0 subject_records=89 worker_jobs=89 total_subject_residues=64069 min_worker_jobs=2 min_subject_residues=4096 parallel=false serial_reason=effective_threads<=1
+[losat-wasi-threads] blastp stage=kappa-query-redo target_arch=wasm32 threaded_wasm=true requested_threads=1 runner_thread_cap=8 effective_threads=1 rayon_pool_threads=0 expected_spawned_workers=0 subject_records=89 worker_jobs=89 total_subject_residues=64069 min_worker_jobs=2 min_subject_residues=4096 parallel=false serial_reason=effective_threads<=1
+[TIMING] blastp_kappa_query_range_bytes_copied: 1606009
+[TIMING] blastp_kappa_subject_range_bytes_copied: 2627299
+[TIMING] blastp_kappa_subject_seg_range: 63910 bytes (calls=87, masked_residues=2513)
+[TIMING] blastp_kappa_subject_seg_cache: hits=1871 misses=87
+[losat-wasi-threads] main _start returned; terminating workers

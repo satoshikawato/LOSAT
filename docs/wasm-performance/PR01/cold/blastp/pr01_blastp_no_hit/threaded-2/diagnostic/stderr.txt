@@ -1,0 +1,15 @@
+[losat-wasi-threads] runner thread cap=8
+[losat-wasi-threads] starting main _start
+[losat-wasi-threads] blastp stage=subject-prep target_arch=wasm32 threaded_wasm=true requested_threads=2 runner_thread_cap=8 effective_threads=2 rayon_pool_threads=2 expected_spawned_workers=1 subject_records=530 worker_jobs=530 total_subject_residues=185481 min_worker_jobs=4 min_subject_residues=8192 parallel=true serial_reason=parallel
+[losat-wasi-threads] spawn tid=1 start_arg=2982472
+[losat-wasi-threads] worker boot tid=1
+[losat-wasi-threads] worker instantiate tid=1 start_arg=2982472
+[losat-wasi-threads] worker start tid=1
+[losat-wasi-threads] blastp stage=prelim target_arch=wasm32 threaded_wasm=true requested_threads=2 runner_thread_cap=8 effective_threads=2 rayon_pool_threads=2 expected_spawned_workers=1 subject_records=530 worker_jobs=530 total_subject_residues=185481 min_worker_jobs=4 min_subject_residues=8192 parallel=true serial_reason=parallel
+[TIMING] blastp_kappa_query_range_bytes_copied: 0
+[TIMING] blastp_kappa_subject_range_bytes_copied: 0
+[TIMING] blastp_kappa_subject_seg_range: 0 bytes (calls=0, masked_residues=0)
+[TIMING] blastp_kappa_subject_seg_cache: hits=0 misses=0
+[losat-wasi-threads] main _start returned; terminating workers
+[losat-wasi-threads] worker done tid=1
+[losat-wasi-threads] worker exit code=1

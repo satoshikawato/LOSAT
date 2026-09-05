@@ -1,0 +1,5 @@
+profile: blastn/NZ_CP006932.NZ_CP006932.task_blastn
+profile: blastn/Sakai.MG1655.megablast
+profile: tblastx/p01_ap027280_self
+profile: tblastx/d06_ap027131_ap027133_db4
+samples=8 failures=0

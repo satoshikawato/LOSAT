@@ -1,0 +1,38 @@
+{
+  "agent": "ncbi_parity_auditor",
+  "status": "READ_ONLY_FINAL_LOCAL_SCOPE_REVIEW_COMPLETED",
+  "first_review": {
+    "command_binding": "fixed; canonical argv/cwd/applicability independently reconstructed",
+    "wait_polling": "fixed; blocking waitpid with watchdog",
+    "thread_observation": "per-stage threaded effective values and helper spawns recorded; native/active remain unknown",
+    "not_run_jsonl": "fixed",
+    "missing_rss_zero": "fixed; null retained",
+    "manifest_repetitions": "fixed; minimum 1+5 enforced",
+    "serial_memory_limit": "fixed; null with module-defined explanation"
+  },
+  "second_review": {
+    "warm_runtime_flags": "fixed",
+    "warm_minimum_repetitions": "fixed",
+    "warm_instance_lifecycle": "supports shared Module only, fresh instance/WASI/memory per command, hash-fail stop",
+    "smoke_output_sha_recheck": "PASS"
+  },
+  "release_certification": "NOT_RUN",
+  "final_full_scope_acceptance": "NOT_PROVEN",
+  "exporter_review": {
+    "series_status": "fixed; every required row including diagnostic controls status, failed result_source retained",
+    "median_revalidation": "fixed; recomputed from timed samples, mismatch fails",
+    "sample_revalidation": "frozen raw SHA and saved successful process measurements checked",
+    "focused_tests": "17 PASS",
+    "independent_followup": "read-only auditor found no remaining blocker within these fixes; complete PR01 stays NOT_PROVEN"
+  },
+  "final_review": {
+    "initial_audit": "84 rows; 68 PASS, 15 TIMEOUT, 1 oracle timeout; 69 completed raw outputs rehashed",
+    "cold": "639 rows; 630 PASS, 9 NOT_RUN; 90 series and 450 timed samples; medians and peak RSS revalidated",
+    "warm": "60 PASS, 1 NOT_RUN; outputs rehashed",
+    "protected_profile": "8 PASS; outputs rehashed",
+    "run_manifest": "99 series, 90 PASS, 9 NOT_RUN",
+    "cpu_profile": "7112 samples, 4153 linking (58.4%); raw output gate rechecked; LOSAT/NCBI call timing independently inspected",
+    "claim_scope": "supports local serial p03 linking investigation priority only; no unsupported acceptance or performance claim found",
+    "overall": "NOT_PROVEN / NOT_ACCEPTED"
+  }
+}

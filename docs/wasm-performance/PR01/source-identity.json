@@ -1,0 +1,2028 @@
+{
+  "head": "af3e2ea837afdb8a00cf19920f68be4f0bf3bfb5",
+  "plan_comparison": [
+    {
+      "path": "AGENTS.md",
+      "sha256": "a7edd9ba09d52a5e09a5acd94d71792b2b57acf6c9775f96a8e7acf773ee6498",
+      "plan_sha256": "a7edd9ba09d52a5e09a5acd94d71792b2b57acf6c9775f96a8e7acf773ee6498",
+      "matches_plan": true
+    },
+    {
+      "path": "LOSAT/Cargo.toml",
+      "sha256": "3033944d936581b1d559ad4510598243d8cbd99d0ef186c34c64098840040cad",
+      "plan_sha256": "3033944d936581b1d559ad4510598243d8cbd99d0ef186c34c64098840040cad",
+      "matches_plan": true
+    },
+    {
+      "path": "LOSAT/Cargo.lock",
+      "sha256": "7a81afba8adc0fee7efe2868103dd468fe274c7e28629df4dd360725336b26e8",
+      "plan_sha256": "7a81afba8adc0fee7efe2868103dd468fe274c7e28629df4dd360725336b26e8",
+      "matches_plan": true
+    },
+    {
+      "path": "LOSAT/.cargo/config.toml",
+      "sha256": "dfc8cebcb5b37d2f9863387934d74a8e09bdbea13d28db7ae3846070f7dc2d2e",
+      "plan_sha256": "dfc8cebcb5b37d2f9863387934d74a8e09bdbea13d28db7ae3846070f7dc2d2e",
+      "matches_plan": true
+    },
+    {
+      "path": "LOSAT/src/lib.rs",
+      "sha256": "6d7d655f87b346233a54c3dc800763401632c3154fb7f7063057e664001a3f62",
+      "plan_sha256": "6d7d655f87b346233a54c3dc800763401632c3154fb7f7063057e664001a3f62",
+      "matches_plan": true
+    },
+    {
+      "path": "LOSAT/src/web_api.rs",
+      "sha256": "b19322dcefc28c9d8945a233f49424f703c81848b7a5be5c2d7f1d01b77047e3",
+      "plan_sha256": "b19322dcefc28c9d8945a233f49424f703c81848b7a5be5c2d7f1d01b77047e3",
+      "matches_plan": true
+    },
+    {
+      "path": "LOSAT/src/algorithm/blastn/blast_engine/run.rs",
+      "sha256": "ebbcf51b8d7c6d6543a031f942f262bb114737c4dc8546c2af88102c6e0de757",
+      "plan_sha256": "ebbcf51b8d7c6d6543a031f942f262bb114737c4dc8546c2af88102c6e0de757",
+      "matches_plan": true
+    },
+    {
+      "path": "LOSAT/src/algorithm/blastn/alignment/greedy.rs",
+      "sha256": "22f05dfe67bb30e15cf390062be689bdd89bc9040c86a70d96110c81ee02c237",
+      "plan_sha256": "22f05dfe67bb30e15cf390062be689bdd89bc9040c86a70d96110c81ee02c237",
+      "matches_plan": true
+    },
+    {
+      "path": "LOSAT/src/algorithm/blastn/alignment/gapped.rs",
+      "sha256": "76c96117a74ed5272200c2273e6f1cd918c1227bd4e4776443fab3cec442417b",
+      "plan_sha256": "76c96117a74ed5272200c2273e6f1cd918c1227bd4e4776443fab3cec442417b",
+      "matches_plan": true
+    },
+    {
+      "path": "LOSAT/src/algorithm/blastn/sequence_compare.rs",
+      "sha256": "da09b1dc5e2f56813c49ae4d9621192e483dcf256513059bba629de36213895a",
+      "plan_sha256": "da09b1dc5e2f56813c49ae4d9621192e483dcf256513059bba629de36213895a",
+      "matches_plan": true
+    },
+    {
+      "path": "LOSAT/src/algorithm/blastn/interval_tree.rs",
+      "sha256": "0b3317f3837f8e07d3198fdcd8a73dd541a799ea1b519fae0d752ce327803808",
+      "plan_sha256": "0b3317f3837f8e07d3198fdcd8a73dd541a799ea1b519fae0d752ce327803808",
+      "matches_plan": true
+    },
+    {
+      "path": "LOSAT/src/algorithm/blastn/filtering/purge_endpoints.rs",
+      "sha256": "1a3ad466a73dc337629f945ff12a5d05b5602fb9097b69176a5e2c788f0ae3fb",
+      "plan_sha256": "1a3ad466a73dc337629f945ff12a5d05b5602fb9097b69176a5e2c788f0ae3fb",
+      "matches_plan": true
+    },
+    {
+      "path": "LOSAT/src/algorithm/blastp/blast_engine.rs",
+      "sha256": "1e475ee96fca78b4e01147ce707da3f665a9827522702399a0e7e26e97d2c7ac",
+      "plan_sha256": "1e475ee96fca78b4e01147ce707da3f665a9827522702399a0e7e26e97d2c7ac",
+      "matches_plan": true
+    },
+    {
+      "path": "LOSAT/src/algorithm/tblastx/blast_engine/run_impl.rs",
+      "sha256": "910e8c4ea49030fd151ccd088c7511b72aaf685be21cf0bd39cc651b7bf1574a",
+      "plan_sha256": "910e8c4ea49030fd151ccd088c7511b72aaf685be21cf0bd39cc651b7bf1574a",
+      "matches_plan": true
+    },
+    {
+      "path": "LOSAT/src/algorithm/tblastx/extension/ungapped.rs",
+      "sha256": "8113dd453129d72f40ac42c1a50a4be7c605ccb0a07b6c854fb709c4154bbd9a",
+      "plan_sha256": "8113dd453129d72f40ac42c1a50a4be7c605ccb0a07b6c854fb709c4154bbd9a",
+      "matches_plan": true
+    },
+    {
+      "path": "LOSAT/src/algorithm/tblastx/extension/two_hit.rs",
+      "sha256": "922f743f2a723f2f6390da2e1493bcf6c936515eade8488ec7c61d85daa382e4",
+      "plan_sha256": "922f743f2a723f2f6390da2e1493bcf6c936515eade8488ec7c61d85daa382e4",
+      "matches_plan": true
+    },
+    {
+      "path": "LOSAT/src/algorithm/tblastx/reevaluate.rs",
+      "sha256": "866a87680dc747ecb8de13b2b2e260e5a21b86c09bbe0edddab57803ca9a2e53",
+      "plan_sha256": "866a87680dc747ecb8de13b2b2e260e5a21b86c09bbe0edddab57803ca9a2e53",
+      "matches_plan": true
+    },
+    {
+      "path": "LOSAT/src/algorithm/tblastx/sum_stats_linking/linking.rs",
+      "sha256": "676b25b8eb54bea1c60d95fc604cfa15f556dcde30048a0571070bc602d3b8f2",
+      "plan_sha256": "676b25b8eb54bea1c60d95fc604cfa15f556dcde30048a0571070bc602d3b8f2",
+      "matches_plan": true
+    },
+    {
+      "path": "LOSAT/tests/run_losat_wasi_threads.js",
+      "sha256": "1570ea56e9bb5852b4a07119e7560486873aae1e65c45fc2dbea9d656974ded2",
+      "plan_sha256": "1570ea56e9bb5852b4a07119e7560486873aae1e65c45fc2dbea9d656974ded2",
+      "matches_plan": true
+    },
+    {
+      "path": "LOSAT/tests/run_wasm_comparison.sh",
+      "sha256": "61d29888614bf99550db811e2ceb037ae01411ad59f9ccf291d81b54e1101753",
+      "plan_sha256": "61d29888614bf99550db811e2ceb037ae01411ad59f9ccf291d81b54e1101753",
+      "matches_plan": true
+    },
+    {
+      "path": "tests/compare_tblastx_wasm_parity.sh",
+      "sha256": "b156f62cf62d014d6e9a6653d9e421c449946e9f3b6532ce559f37c6744dcabf",
+      "plan_sha256": "b156f62cf62d014d6e9a6653d9e421c449946e9f3b6532ce559f37c6744dcabf",
+      "matches_plan": true
+    },
+    {
+      "path": "LOSAT/tests/blastn_parity_manifest.tsv",
+      "sha256": "008399696d66d9397cacf8c05116026e51d0f84836c34653705b019cf8a0f4d5",
+      "plan_sha256": "008399696d66d9397cacf8c05116026e51d0f84836c34653705b019cf8a0f4d5",
+      "matches_plan": true
+    },
+    {
+      "path": "LOSAT/tests/blastp_v010_parity_manifest.tsv",
+      "sha256": "db840dd8c181a02436e98086343379d93b012a7d952cc59a8c9102c91372cb31",
+      "plan_sha256": "db840dd8c181a02436e98086343379d93b012a7d952cc59a8c9102c91372cb31",
+      "matches_plan": true
+    },
+    {
+      "path": "LOSAT/tests/tblastx_v010_parity_manifest.tsv",
+      "sha256": "843fe736ca2d284d779a79c605689cbbc1a34a45aabb76c46ed0fd55c0783f9a",
+      "plan_sha256": "843fe736ca2d284d779a79c605689cbbc1a34a45aabb76c46ed0fd55c0783f9a",
+      "matches_plan": true
+    },
+    {
+      "path": "LOSAT/tests/platform_native_v010_canonical.tsv",
+      "sha256": "7e65cfb4de0dc575c47d059f1e29ddc9999fc50887ac769fb8f299a9ec97760c",
+      "plan_sha256": "7e65cfb4de0dc575c47d059f1e29ddc9999fc50887ac769fb8f299a9ec97760c",
+      "matches_plan": true
+    },
+    {
+      "path": "LOSAT/tests/ncbi_platform_variance_v010.json",
+      "sha256": "df0c18e6d0e05aac74e4200e5350c64b35cbb2294c4bdd06b5507dbf87fda1ef",
+      "plan_sha256": "df0c18e6d0e05aac74e4200e5350c64b35cbb2294c4bdd06b5507dbf87fda1ef",
+      "matches_plan": true
+    },
+    {
+      "path": "LOSAT/tests/certify_integrated_runtime_v010.py",
+      "sha256": "be8b59f7bb8fbfca6852271da7865ea48a509d0dabfb3ddf0356b6f586efdd9d",
+      "plan_sha256": "be8b59f7bb8fbfca6852271da7865ea48a509d0dabfb3ddf0356b6f586efdd9d",
+      "matches_plan": true
+    },
+    {
+      "path": "LOSAT/tests/certify_platform_native_v010.py",
+      "sha256": "44de19ca2742275335cdc6d0627bbf32f069d0cb48eb66c6c62303369aeb5a61",
+      "plan_sha256": "44de19ca2742275335cdc6d0627bbf32f069d0cb48eb66c6c62303369aeb5a61",
+      "matches_plan": true
+    },
+    {
+      "path": "LOSAT/tests/check_pure_rust_runtime_boundary.py",
+      "sha256": "ce39f8d33a1820f9ca14b56cf4ccc6445ccc6a2267dd0c17ec7b172015510b74",
+      "plan_sha256": "ce39f8d33a1820f9ca14b56cf4ccc6445ccc6a2267dd0c17ec7b172015510b74",
+      "matches_plan": true
+    },
+    {
+      "path": "docs/product_decisions/PD-NCBI-PLATFORM-VARIANCE.md",
+      "sha256": "0af8a25a851cc94f058c0841100e4240e6b1e84adbe67b4e4e5823e682e6cc0b",
+      "plan_sha256": "0af8a25a851cc94f058c0841100e4240e6b1e84adbe67b4e4e5823e682e6cc0b",
+      "matches_plan": true
+    },
+    {
+      "path": "docs/product_decisions/PD-BLASTN-HSP-CANONICALIZATION.md",
+      "sha256": "2b5e5f5ebaae10147686cbc21de36d4ea078fb53f26e3a947c6230e24db56ac5",
+      "plan_sha256": "2b5e5f5ebaae10147686cbc21de36d4ea078fb53f26e3a947c6230e24db56ac5",
+      "matches_plan": true
+    },
+    {
+      "path": "docs/release/pure_rust_runtime_v0.1.0_certification.md",
+      "sha256": "43a268377f240ca31e2954b2cbaa229a2db16e2c86c1cbc944c383c1ca8a1ff3",
+      "plan_sha256": "43a268377f240ca31e2954b2cbaa229a2db16e2c86c1cbc944c383c1ca8a1ff3",
+      "matches_plan": true
+    }
+  ],
+  "tracked_files": [
+    {
+      "path": ".agents/skills/verify-ncbi-parity-and-speed/SKILL.md",
+      "sha256": "a41bf7a895b5b4776f6c63fc514610e9770c2fba766c6e85d13f322ef2296bd4"
+    },
+    {
+      "path": ".agents/skills/verify-ncbi-parity-and-speed/agents/openai.yaml",
+      "sha256": "8e4b29f20037f930b29188e9f0995fa04bff408033fd5402230d7852b2f940b4"
+    },
+    {
+      "path": ".agents/skills/verify-ncbi-parity-and-speed/references/commands.md",
+      "sha256": "b2473cf89f925427f4e70145e479ca96d4c3ffcc3ba2af3b10de97cc03b5bad4"
+    },
+    {
+      "path": ".agents/skills/verify-ncbi-parity-and-speed/references/evidence.md",
+      "sha256": "8232527b45fdd891efec0d560a33ed388feb58dfaf04ee35b51eb7124d0eab28"
+    },
+    {
+      "path": ".agents/skills/verify-ncbi-parity-and-speed/references/exceptions.md",
+      "sha256": "2e84579f861309793c697c9eb34cbfec063a1a05fba3bde52b243dc396ecd83d"
+    },
+    {
+      "path": ".claude/settings.json",
+      "sha256": "a02cac9879b7d00502d211ce435016e9c0505d2f07dfd0bf8cf90dc68fa70c32"
+    },
+    {
+      "path": ".claude/settings.local.json",
+      "sha256": "86c0b472ff890049a56f48f594f1b5b0628f4b757e3aa2262852418c7353c4dd"
+    },
+    {
+      "path": ".codex",
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "path": ".cursor/rules/cursorrules.mdc",
+      "sha256": "20b202d873e917beca69c535e4fc43ef94552e19bfc8dc6415885ffbb0d4f0cc"
+    },
+    {
+      "path": ".cursor/rules/global_rules.mdc",
+      "sha256": "390dbab81274160d5bcba92388d1b5e940b48e2e93071bad96821e34d6de9b81"
+    },
+    {
+      "path": ".github/workflows/benchmark-plots.yml",
+      "sha256": "4dc017fd690b8119719c763b51638d41c00ae5c90aadf34bb3efbd756ecb55c8"
+    },
+    {
+      "path": ".github/workflows/ci.yml",
+      "sha256": "5df31123f421686dd5bfea903a0c253657a174e201bb063a4c463874d924b19d"
+    },
+    {
+      "path": ".github/workflows/ncbi-only-platform-characterization.yml",
+      "sha256": "68c74f225359e31161256ea0596bf3cdff8f642414cd4561463fef520ab0a4b1"
+    },
+    {
+      "path": ".github/workflows/platform-native-certification.yml",
+      "sha256": "8b0a33dd42f670b72c455660a00808d3765e17e3ae414d034f741846b4fde2f5"
+    },
+    {
+      "path": ".github/workflows/release-readiness.yml",
+      "sha256": "71ce6edc4edbe3d4fe4d126758469fa31ac2c8c664a08486a8f6d7d38ff3693a"
+    },
+    {
+      "path": ".gitignore",
+      "sha256": "7440fad499fd05dd7bae2bad034e05925313759c82495cd188c5652dd457f486"
+    },
+    {
+      "path": ".vscode/extensions.json",
+      "sha256": "377b93292332cf8f6ed00dcafa911a8ca2ee6d6c7957603578646c7518b7df09"
+    },
+    {
+      "path": ".vscode/settings.json",
+      "sha256": "bca1429ea11c5d36ae45baccdca3928b8342b06d32b7d162359a0a8dfa029bfa"
+    },
+    {
+      "path": "AGENTS.md",
+      "sha256": "a7edd9ba09d52a5e09a5acd94d71792b2b57acf6c9775f96a8e7acf773ee6498"
+    },
+    {
+      "path": "CHANGELOG.md",
+      "sha256": "ec7d33efd3737883294790515026abe895373714ad756fe95eb909e135f8c533"
+    },
+    {
+      "path": "CLAUDE.md",
+      "sha256": "aeee5790a929cd5cb6a8eab45307cc66ad9a86f4196912d2a1d23af4c51b36e2"
+    },
+    {
+      "path": "CONTRIBUTING.md",
+      "sha256": "6f6369aad3995f9bb66ec521919a3b12354a35d3b187108016c18085760303ce"
+    },
+    {
+      "path": "GBDRAW_BLASTP_PROFILE_COVERAGE.tsv",
+      "sha256": "2f6e6edab823217582aadbb5f9a56cc19a16cc7905903356035e22904ee8ece3"
+    },
+    {
+      "path": "LICENSE",
+      "sha256": "e88f4ce0a4c51e8a7780c212aa4241c2b3e970749badf19f1b2ca96b976dc87b"
+    },
+    {
+      "path": "LOSAT/.cargo/config.toml",
+      "sha256": "dfc8cebcb5b37d2f9863387934d74a8e09bdbea13d28db7ae3846070f7dc2d2e"
+    },
+    {
+      "path": "LOSAT/.gitignore",
+      "sha256": "40b481d34a96c2559920f93c46a03e146e2f3a86edc1333e7af40da3da1ab239"
+    },
+    {
+      "path": "LOSAT/Cargo.lock",
+      "sha256": "7a81afba8adc0fee7efe2868103dd468fe274c7e28629df4dd360725336b26e8"
+    },
+    {
+      "path": "LOSAT/Cargo.toml",
+      "sha256": "3033944d936581b1d559ad4510598243d8cbd99d0ef186c34c64098840040cad"
+    },
+    {
+      "path": "LOSAT/LOSAT/tests/analyze_tblastx_feature_overlap.py",
+      "sha256": "0a5d83f2f9a2c9c56df9eaf490d3f0a9b3e1624ff3c944dc8338ee867ba9bd90"
+    },
+    {
+      "path": "LOSAT/matrix",
+      "sha256": "fde87b1c3f7144d4b66d04e95051057d846335875b1b206dff2c6585a7f1c89c"
+    },
+    {
+      "path": "LOSAT/src/algorithm/blastn/alignment/gapped.rs",
+      "sha256": "76c96117a74ed5272200c2273e6f1cd918c1227bd4e4776443fab3cec442417b"
+    },
+    {
+      "path": "LOSAT/src/algorithm/blastn/alignment/greedy.rs",
+      "sha256": "22f05dfe67bb30e15cf390062be689bdd89bc9040c86a70d96110c81ee02c237"
+    },
+    {
+      "path": "LOSAT/src/algorithm/blastn/alignment/mod.rs",
+      "sha256": "6f2f74378e5ba3d04d1d77521e334c30950d82228a7af35cbd7c7c0a79397bda"
+    },
+    {
+      "path": "LOSAT/src/algorithm/blastn/alignment/statistics.rs",
+      "sha256": "f74843f8006c05256d69287ae2f4235c07b03d84c38472ab96b8a856a3016ec5"
+    },
+    {
+      "path": "LOSAT/src/algorithm/blastn/alignment/utilities.rs",
+      "sha256": "02ddd89787f0b27769fedfb39bb09e1f4a26fbcca2f4c4a311ebc3564e3abfdc"
+    },
+    {
+      "path": "LOSAT/src/algorithm/blastn/args.rs",
+      "sha256": "890ecb706619b8d183fe62d68408038486fd5d54b6ba71385e72b86a80b40e81"
+    },
+    {
+      "path": "LOSAT/src/algorithm/blastn/blast_engine/mod.rs",
+      "sha256": "404a446184a5039faeb42b525ee84b5ea885a6679c11f1adfccf75466486540c"
+    },
+    {
+      "path": "LOSAT/src/algorithm/blastn/blast_engine/run.rs",
+      "sha256": "ebbcf51b8d7c6d6543a031f942f262bb114737c4dc8546c2af88102c6e0de757"
+    },
+    {
+      "path": "LOSAT/src/algorithm/blastn/blast_extend.rs",
+      "sha256": "0f9eb7cc48d8e440113f53e275402ce08d11b640a84e963346f5284b4421731a"
+    },
+    {
+      "path": "LOSAT/src/algorithm/blastn/constants.rs",
+      "sha256": "fa17c93f9c668481c0bcca89900cbe1cde09d1a7a689109f160623a2f0c4d405"
+    },
+    {
+      "path": "LOSAT/src/algorithm/blastn/coordination.rs",
+      "sha256": "c18840e8a232f30235ea4062a912f695be0c3450900e2a4a3b8c340b499681ed"
+    },
+    {
+      "path": "LOSAT/src/algorithm/blastn/extension.rs",
+      "sha256": "de356d9187279f45a5a660dac4e658eda042f1bc2c69bbe40c3b71dc9975346d"
+    },
+    {
+      "path": "LOSAT/src/algorithm/blastn/filtering/mod.rs",
+      "sha256": "b4d49b5c0d301a4af5464bc8e073647a0c90d766c3da0d1c340fc63b02e3ce29"
+    },
+    {
+      "path": "LOSAT/src/algorithm/blastn/filtering/purge_endpoints.rs",
+      "sha256": "1a3ad466a73dc337629f945ff12a5d05b5602fb9097b69176a5e2c788f0ae3fb"
+    },
+    {
+      "path": "LOSAT/src/algorithm/blastn/filtering/subject_best_hit.rs",
+      "sha256": "ccff3d81a1478a4d2811dbc6e5f805b30eddc29f70b9afe294b5c075a5e71476"
+    },
+    {
+      "path": "LOSAT/src/algorithm/blastn/hsp.rs",
+      "sha256": "4795e3acaa1b30c855400cdf269639e1e1e311b88d586b6f72a6ef18908ca652"
+    },
+    {
+      "path": "LOSAT/src/algorithm/blastn/interval_tree.rs",
+      "sha256": "0b3317f3837f8e07d3198fdcd8a73dd541a799ea1b519fae0d752ce327803808"
+    },
+    {
+      "path": "LOSAT/src/algorithm/blastn/lookup.rs",
+      "sha256": "e2141df7521711ce7bd09761bc13083aa072648e2c459f4d94a34892f4c00a66"
+    },
+    {
+      "path": "LOSAT/src/algorithm/blastn/mod.rs",
+      "sha256": "ca73cfe78ddb1a156ceac31f95d9cc4682d83e42a65c83d0e0608a6dbfd2d797"
+    },
+    {
+      "path": "LOSAT/src/algorithm/blastn/ncbi_cutoffs.rs",
+      "sha256": "f9c2b3c66ff5e1c532d995da97997202a7193cecaa4416d0cf9cd1f01391cc4e"
+    },
+    {
+      "path": "LOSAT/src/algorithm/blastn/sequence_compare.rs",
+      "sha256": "da09b1dc5e2f56813c49ae4d9621192e483dcf256513059bba629de36213895a"
+    },
+    {
+      "path": "LOSAT/src/algorithm/blastn/tracing.rs",
+      "sha256": "389dc0e97599b5da8a0262a30e812aa0dcc296112762edfe581818a702a0ba12"
+    },
+    {
+      "path": "LOSAT/src/algorithm/blastp/alignment.rs",
+      "sha256": "cf0163b896457d0c68292305250c1da2f25bf8672b19080a009eb3bf7c65a45d"
+    },
+    {
+      "path": "LOSAT/src/algorithm/blastp/args.rs",
+      "sha256": "759cc57ef6a9f30a41b7057c0455ed75766929c9c4b0f2ba27878acfb0a5907e"
+    },
+    {
+      "path": "LOSAT/src/algorithm/blastp/blast_engine.rs",
+      "sha256": "1e475ee96fca78b4e01147ce707da3f665a9827522702399a0e7e26e97d2c7ac"
+    },
+    {
+      "path": "LOSAT/src/algorithm/blastp/encoding.rs",
+      "sha256": "2977a51bea5e6247dced8fe537057ff25bb90711ab3ac50cf4af3f1d0bc6912c"
+    },
+    {
+      "path": "LOSAT/src/algorithm/blastp/extension.rs",
+      "sha256": "3cf2d13a54b474ec5c30134462a19d33a223104c25ce190f0d0380fcbf486cb3"
+    },
+    {
+      "path": "LOSAT/src/algorithm/blastp/gapalign.rs",
+      "sha256": "d3150935b550f4ce8bd03cc95892f1cde587ea1c3043b7520e1c78da04322fb7"
+    },
+    {
+      "path": "LOSAT/src/algorithm/blastp/hsp.rs",
+      "sha256": "728f645d36ce6ed6604b38e7b2964c701f7123f17d15c4fd4f7548a210e7f6af"
+    },
+    {
+      "path": "LOSAT/src/algorithm/blastp/kappa.rs",
+      "sha256": "799dd66f420d5dbe515aff23ed92c7b41b74e938dd8871069ffcb8e88ade439f"
+    },
+    {
+      "path": "LOSAT/src/algorithm/blastp/mod.rs",
+      "sha256": "b8206420237d6e125be4218ff763806f9e4b3e7c2750993b6eb007793d41ea80"
+    },
+    {
+      "path": "LOSAT/src/algorithm/common/chaining.rs",
+      "sha256": "ea2305c841730fd031c6b88688e18aa036f1779294fe802447f71b49ca103fa6"
+    },
+    {
+      "path": "LOSAT/src/algorithm/common/diagnostics.rs",
+      "sha256": "36084595da4e88d970a9b884199858c67fdab4b480ea25af0b4d78a21ef6d5ba"
+    },
+    {
+      "path": "LOSAT/src/algorithm/common/evalue.rs",
+      "sha256": "349370d05a2d5caf42dd53c1580643803040ba11b813bb8c2f34538fbc7ca6a4"
+    },
+    {
+      "path": "LOSAT/src/algorithm/common/mod.rs",
+      "sha256": "3bd8fccb9d4cf3ff8389afea76c39afa24ba4c61d53d14a9c9c022656f528ea6"
+    },
+    {
+      "path": "LOSAT/src/algorithm/mod.rs",
+      "sha256": "f6b662a4b10ad45951bd179e8e06700b612cbd462b477e719e8990074ae3fbfc"
+    },
+    {
+      "path": "LOSAT/src/algorithm/tblastx/args.rs",
+      "sha256": "03588b1036629d46791538ed16062c7d877bead22110d7c3a4db1bbbc8ba6748"
+    },
+    {
+      "path": "LOSAT/src/algorithm/tblastx/blast_aascan.rs",
+      "sha256": "22eea27bea2a0beb22567217854028e03e7cb98452ff477ca735b6a169386b19"
+    },
+    {
+      "path": "LOSAT/src/algorithm/tblastx/blast_engine/mod.rs",
+      "sha256": "0c0d36963e396bf8c3e1fac7ea8ef961f12e3988124badf9ff6c2eaf3f025148"
+    },
+    {
+      "path": "LOSAT/src/algorithm/tblastx/blast_engine/run_impl.rs",
+      "sha256": "910e8c4ea49030fd151ccd088c7511b72aaf685be21cf0bd39cc651b7bf1574a"
+    },
+    {
+      "path": "LOSAT/src/algorithm/tblastx/blast_extend.rs",
+      "sha256": "1e68ae367d54c1730e108985478346c79bdd6160cd077391f22bf0e60b541df4"
+    },
+    {
+      "path": "LOSAT/src/algorithm/tblastx/blast_gapalign.rs",
+      "sha256": "254651f45eb951f2e1c870e0ed47254bfc7037ee7ab183855b48229705258ff4"
+    },
+    {
+      "path": "LOSAT/src/algorithm/tblastx/chaining.rs",
+      "sha256": "ab3a30ccfdaa99c4af5da88f9735fad50967a1acc2090a4b8a531c2402ba9ab4"
+    },
+    {
+      "path": "LOSAT/src/algorithm/tblastx/constants.rs",
+      "sha256": "b226bf97a60388cf891659bc800ba4bc86028a29f66370dc4bff67aef796b0cc"
+    },
+    {
+      "path": "LOSAT/src/algorithm/tblastx/diagnostics.rs",
+      "sha256": "d357e7d44d42766cc0a98546398c2f798c0603846546b5cd959080175760e29c"
+    },
+    {
+      "path": "LOSAT/src/algorithm/tblastx/extension/gapped.rs",
+      "sha256": "13cca8d4395f2f6160d1a19499a205b2bf4b4907c019be8d06a837939803f841"
+    },
+    {
+      "path": "LOSAT/src/algorithm/tblastx/extension/mod.rs",
+      "sha256": "bd80fd59f4a5a3d6d6a79515d17f2d0b4567f3d65f6181e47c7a4c6d319b10cc"
+    },
+    {
+      "path": "LOSAT/src/algorithm/tblastx/extension/two_hit.rs",
+      "sha256": "922f743f2a723f2f6390da2e1493bcf6c936515eade8488ec7c61d85daa382e4"
+    },
+    {
+      "path": "LOSAT/src/algorithm/tblastx/extension/ungapped.rs",
+      "sha256": "8113dd453129d72f40ac42c1a50a4be7c605ccb0a07b6c854fb709c4154bbd9a"
+    },
+    {
+      "path": "LOSAT/src/algorithm/tblastx/filtering/mod.rs",
+      "sha256": "f2bc2da747a67f797a224eba016b0bee0c2d962262e97e5b51f1e73561ff7e0f"
+    },
+    {
+      "path": "LOSAT/src/algorithm/tblastx/filtering/purge_endpoints.rs",
+      "sha256": "bf5b21c637557b5878a38b9ca390c94d2857648041a0b544a1562ec6030c9f6e"
+    },
+    {
+      "path": "LOSAT/src/algorithm/tblastx/hsp_culling.rs",
+      "sha256": "1bea72c29be476f0fbc397b37a56dcda9227b7c3356a38f496e4b2492f47fcd6"
+    },
+    {
+      "path": "LOSAT/src/algorithm/tblastx/lookup/backbone.rs",
+      "sha256": "991fc736ee24883fc200b20e79aa5ba799a59a0f88ea6e46ba82649584155035"
+    },
+    {
+      "path": "LOSAT/src/algorithm/tblastx/lookup/compressed.rs",
+      "sha256": "d5e84601258545fcfb771555eff3b829ec4a5d0888467a3276b01507b8fcaf6b"
+    },
+    {
+      "path": "LOSAT/src/algorithm/tblastx/lookup/mod.rs",
+      "sha256": "abe9b5a068f7c18a2ec7784248cca54dea294a1fba14b9f56878dce380ea6c84"
+    },
+    {
+      "path": "LOSAT/src/algorithm/tblastx/mod.rs",
+      "sha256": "766e948e38ed302b689967fe090070fa7d770acf58395a8e0829ab2cb2c24efa"
+    },
+    {
+      "path": "LOSAT/src/algorithm/tblastx/ncbi_cutoffs.rs",
+      "sha256": "fccc85fefc8f530d45cfd4b9c38fc0266ce4178fd206f7c754e9ac2c51644571"
+    },
+    {
+      "path": "LOSAT/src/algorithm/tblastx/reevaluate.rs",
+      "sha256": "866a87680dc747ecb8de13b2b2e260e5a21b86c09bbe0edddab57803ca9a2e53"
+    },
+    {
+      "path": "LOSAT/src/algorithm/tblastx/scan/mod.rs",
+      "sha256": "7a2624cb9e1b4bf68472d64962c8499845882d13bfc30f401359ca400469146c"
+    },
+    {
+      "path": "LOSAT/src/algorithm/tblastx/scan/offset_pairs.rs",
+      "sha256": "66131f053022cc5d4760a5e2f7ab18f9ca63484888b4b1b8209afc95b9815df5"
+    },
+    {
+      "path": "LOSAT/src/algorithm/tblastx/stage_dump.rs",
+      "sha256": "6f371a987f76ca84ee3e09006fe855928abbdcb017dbf1b4ef922827dec46a57"
+    },
+    {
+      "path": "LOSAT/src/algorithm/tblastx/sum_stats_linking/cutoffs.rs",
+      "sha256": "1c7cc519799c105ec3f9c21ab94009f987eac8012501682091a92f001f4efb68"
+    },
+    {
+      "path": "LOSAT/src/algorithm/tblastx/sum_stats_linking/linking.rs",
+      "sha256": "676b25b8eb54bea1c60d95fc604cfa15f556dcde30048a0571070bc602d3b8f2"
+    },
+    {
+      "path": "LOSAT/src/algorithm/tblastx/sum_stats_linking/mod.rs",
+      "sha256": "01485d66b1c04efa9306451033041c40da01b0d6f2b6d06259c2bc69cabfe356"
+    },
+    {
+      "path": "LOSAT/src/algorithm/tblastx/sum_stats_linking/params.rs",
+      "sha256": "f2cadc02a570f41789af7767524b45bc5071c8f10f0baf015d39dcfc43ce841b"
+    },
+    {
+      "path": "LOSAT/src/algorithm/tblastx/tracing.rs",
+      "sha256": "acdd9f149a807a043d0ef4a154c7aaf15f0bb17258fa3ff547b17b71c84deb94"
+    },
+    {
+      "path": "LOSAT/src/algorithm/tblastx/translation.rs",
+      "sha256": "afb85c4e98bf537871fdc9a1296b201548c8e47083f4e95622074da62926ca72"
+    },
+    {
+      "path": "LOSAT/src/algorithm/tblastx/ungapped_hit_sort.rs",
+      "sha256": "f2f95d9b800290eb6931efd552ea3a0650da000f953340636c9ef5a43b1cfbf1"
+    },
+    {
+      "path": "LOSAT/src/align/mod.rs",
+      "sha256": "358dd8ec3af9c3ad76562b0e99afa2004f57a646efcd5861ea0aea214a304e53"
+    },
+    {
+      "path": "LOSAT/src/align/result.rs",
+      "sha256": "213fd145c7997f1ea2a894da542c87c3d402f8c8eb7c0d8e4a5035da274f9cc5"
+    },
+    {
+      "path": "LOSAT/src/align/sw_banded.rs",
+      "sha256": "3e4536ccc859693b1adb73010e545c9be158c6bd8b4e37d27a52caa7f6d1faf9"
+    },
+    {
+      "path": "LOSAT/src/align/traceback.rs",
+      "sha256": "e221e1ddbf0d390041e9b8e39af79816f7f2cca7ce33d5476d16b095ec1d8978"
+    },
+    {
+      "path": "LOSAT/src/api/blast_nucl_options.rs",
+      "sha256": "7b90e7d1f25bb81b1a2321006b8069c4f96675cbb5ce7cc06d2ec527d56bbab3"
+    },
+    {
+      "path": "LOSAT/src/api/blast_options_handle.rs",
+      "sha256": "01fd9a6e3646054e70dbee743fc7137dc2ada501628efb483a220be1897aaf84"
+    },
+    {
+      "path": "LOSAT/src/api/blast_results.rs",
+      "sha256": "41e55046cb916b98dbdba3fe41cd0ad5adb2387f73f668ca83ed429ae3e2fdb4"
+    },
+    {
+      "path": "LOSAT/src/api/local_blast.rs",
+      "sha256": "0f3088026a61457a4a3a790d2e5c15234945aadbdeffd193d9515c11bf09842f"
+    },
+    {
+      "path": "LOSAT/src/api/mod.rs",
+      "sha256": "d4b3509c97b0ff5f73d940acc411a64f56a55a9d7edf70ce0a7d4b93071b9385"
+    },
+    {
+      "path": "LOSAT/src/api/tblastx_options.rs",
+      "sha256": "ec49b534b5a1e79d856accf83f6c83100a23d97298f1ecf2ac1e0d99b2e29727"
+    },
+    {
+      "path": "LOSAT/src/blastinput/blast_args.rs",
+      "sha256": "7f2eeeddd56709a683e146327428a07fca3e8dbdd12349e41beca7305eec914b"
+    },
+    {
+      "path": "LOSAT/src/blastinput/blastn_args.rs",
+      "sha256": "0cebee567b286c058ae9607523758e1cb54582d931061d26174dced030308cf9"
+    },
+    {
+      "path": "LOSAT/src/blastinput/blastp_args.rs",
+      "sha256": "22b3648ccfedad515ea7727af2a04e91d6bb053b53f351710973a02e94416fe2"
+    },
+    {
+      "path": "LOSAT/src/blastinput/mod.rs",
+      "sha256": "dd4ec8ae437befd901c6476da045290f04b3db999980dbe420b72719035aeda7"
+    },
+    {
+      "path": "LOSAT/src/blastinput/tblastx_args.rs",
+      "sha256": "8b40ac67692f6db8013c3817bdad8a2d489c22982750d9f02ca7ee943c1eba94"
+    },
+    {
+      "path": "LOSAT/src/common.rs",
+      "sha256": "41d484087775d8edcd1ce3871b2cb0a5f917f3600e8833e2cdada48288651dd9"
+    },
+    {
+      "path": "LOSAT/src/config/compat.rs",
+      "sha256": "f221c1ce9e407e319918fc3fd9701953ee0fff2bb014c15546065d91c0b03d1a"
+    },
+    {
+      "path": "LOSAT/src/config/mod.rs",
+      "sha256": "df34c04136f1da987dd745643230ce451bdd31f799115681cf0e206206620a78"
+    },
+    {
+      "path": "LOSAT/src/core/aa_ungapped.rs",
+      "sha256": "e5c3f7e8b5e4d884131eed77e4f2e076d2fc499f25ab09ee51688581dcc90321"
+    },
+    {
+      "path": "LOSAT/src/core/blast_aalookup.rs",
+      "sha256": "5c81f5c4c1c4f369eb814bfd883f395a693954488ca870de0623ba6e98469b6c"
+    },
+    {
+      "path": "LOSAT/src/core/blast_aascan.rs",
+      "sha256": "3845e743d68afd04e770bb9ed35c9360644478de21fbfce304cc978cb897312c"
+    },
+    {
+      "path": "LOSAT/src/core/blast_diagnostics.rs",
+      "sha256": "9718644f2ea23af1c7bd723ca700b421eb9ca2bea46e56e46092e84759aea99d"
+    },
+    {
+      "path": "LOSAT/src/core/blast_encoding.rs",
+      "sha256": "2a2e1985273a5cfcc5f3386c5f6bbb30c8e9b3814ab23351876c3c8dd0a5253e"
+    },
+    {
+      "path": "LOSAT/src/core/blast_engine.rs",
+      "sha256": "899800bd7e26ae68987e879abb3ac547fd852011e69bdd2f73e189e2276aba17"
+    },
+    {
+      "path": "LOSAT/src/core/blast_extend.rs",
+      "sha256": "d5c9eed7131409f84d388aa45393c6cde6cd5079f06d4a18e44cb9196b33cdfa"
+    },
+    {
+      "path": "LOSAT/src/core/blast_filter.rs",
+      "sha256": "61eed993bd5d2d6807a79cf06620327cfc6f1c4b85ca4eb86bc504f3ee8fc479"
+    },
+    {
+      "path": "LOSAT/src/core/blast_gapalign.rs",
+      "sha256": "3574d27d86e4ff7d0b297a190e9cd7dcef704598c806ec0e1f0ff2c60cfa83f3"
+    },
+    {
+      "path": "LOSAT/src/core/blast_hits.rs",
+      "sha256": "8c8b4cc4c7d091d8146785a1746288d89840d362834e0ab258f5f9a3975ae109"
+    },
+    {
+      "path": "LOSAT/src/core/blast_lookup.rs",
+      "sha256": "040a9b4522f96f975076c5e4eb3843c692822005dcb33c9f631be2c2064ae361"
+    },
+    {
+      "path": "LOSAT/src/core/blast_nalookup.rs",
+      "sha256": "bdd2e0eb37776217da39039d14262d81d93b20e078b9114dbdf686660fef6067"
+    },
+    {
+      "path": "LOSAT/src/core/blast_options.rs",
+      "sha256": "14ec7e6033037ae256499cd8283bd56428e7b45ff318805a19ce28e461f5a051"
+    },
+    {
+      "path": "LOSAT/src/core/blast_parameters.rs",
+      "sha256": "fce8ac6566eeb53f2030bc08cd9cc8771fd07820745e2ffca508d7d004cbba66"
+    },
+    {
+      "path": "LOSAT/src/core/blast_seg.rs",
+      "sha256": "207d75f0e6da535baaa9b1a8bd462cdcdedaea6075acba421c3b09d080f073e3"
+    },
+    {
+      "path": "LOSAT/src/core/blast_seg_lnfact.rs",
+      "sha256": "0dea7eed56267218e41ddef37858ed8f11cc324cd638d7ea039cd9a9c6024a31"
+    },
+    {
+      "path": "LOSAT/src/core/blast_stat/composition.rs",
+      "sha256": "b2cdcd3ecea9f8871e1913e0b3f67b3f68650df4265324f03c204a85f9b6fe1c"
+    },
+    {
+      "path": "LOSAT/src/core/blast_stat/karlin_params.rs",
+      "sha256": "ff7bb5d71ee6bf7f5e869b5596621772f1aa0b30a77c957fb711fb7328fbb5d3"
+    },
+    {
+      "path": "LOSAT/src/core/blast_stat/length_adjustment.rs",
+      "sha256": "967cc317763e8e07154f856c803ec4287718a5bbc36d99805311ea902423b632"
+    },
+    {
+      "path": "LOSAT/src/core/blast_stat/lookup_tables.rs",
+      "sha256": "22701892528036328480efb11d44d84e43cae8d34178ce31ca84bfccfe5406a6"
+    },
+    {
+      "path": "LOSAT/src/core/blast_stat/mod.rs",
+      "sha256": "56d8c0db7c0ff494fc3ca1f6fa3b58be3484f738158da6d559a91914782901eb"
+    },
+    {
+      "path": "LOSAT/src/core/blast_stat/score_calc.rs",
+      "sha256": "9ad2290386800fcf2717e0721d88ca2fece9dc21f6de0c3c05a2f0a7633d8c27"
+    },
+    {
+      "path": "LOSAT/src/core/blast_stat/search_space.rs",
+      "sha256": "024dddde826dcce705624c47351dfbda42ee24006ecf138207c96428d6e9e70d"
+    },
+    {
+      "path": "LOSAT/src/core/blast_stat/sum_statistics.rs",
+      "sha256": "74c50b6944e0d826ebdc3c2654981a5400cd91cc22838e84bcac6502d37edf52"
+    },
+    {
+      "path": "LOSAT/src/core/blast_util.rs",
+      "sha256": "f92ea7e18fee71c5f44c79b71fb340503c2126f903237d6c644aedde526584fd"
+    },
+    {
+      "path": "LOSAT/src/core/composition_adjustment/adjust_scores.rs",
+      "sha256": "132683f52e7671055d2be7a9b93d28e78392dc1565c8e4432d5fbfb9f0d23a27"
+    },
+    {
+      "path": "LOSAT/src/core/composition_adjustment/blosum62_start_freq_ratios.inc.rs",
+      "sha256": "2c3a942611cf819acc5b6e13c81224a1de2fc0238cd55e20fa026fcd70697706"
+    },
+    {
+      "path": "LOSAT/src/core/composition_adjustment/mod.rs",
+      "sha256": "5b76918bd3e2d52acd8c4427289ca10d6e487aa499a1d12cd36311479e0818d4"
+    },
+    {
+      "path": "LOSAT/src/core/composition_adjustment/redo_alignment.rs",
+      "sha256": "79bddb5852fe86de117300dfae8a8e61368a59b0a00906377bc5b6bcb0ae1991"
+    },
+    {
+      "path": "LOSAT/src/core/gencode_singleton.rs",
+      "sha256": "35478e91724fe99258fbe33774ebfff0537619ebe1e8bd39bc93d03133b8edb5"
+    },
+    {
+      "path": "LOSAT/src/core/greedy_align.rs",
+      "sha256": "9970b62cd0f10900762ef21233f074d6acafc5da544d14f8c3b83972c6c17a0a"
+    },
+    {
+      "path": "LOSAT/src/core/hspfilter_culling.rs",
+      "sha256": "f8a4ebcaee4470b8aba85edc97ce3eabf9e5719562e28762083c6c2f4ab6a246"
+    },
+    {
+      "path": "LOSAT/src/core/link_hsps.rs",
+      "sha256": "f4326392a1e70e4a6d1ec96da541c5c28f969e1147aaf32d06316cf8f6555886"
+    },
+    {
+      "path": "LOSAT/src/core/mod.rs",
+      "sha256": "bc7d4aa6cf798de434db548e124d8bcbe4189c25549db94eaa76d901f118a16f"
+    },
+    {
+      "path": "LOSAT/src/core/na_ungapped.rs",
+      "sha256": "c5c3c48ed4b54cdec7e5215ec71e66e32ebd3b17d30428c4079cf26ad9822dff"
+    },
+    {
+      "path": "LOSAT/src/format/blast_format.rs",
+      "sha256": "cc1e228d4ad045e6bd81b28872931a59fdd577607aec601f4cd2372abf427093"
+    },
+    {
+      "path": "LOSAT/src/format/mod.rs",
+      "sha256": "e150a4f7c7e337d4202e14f06a2b3d175116b8159798f5f3fbc03a28ee9e3875"
+    },
+    {
+      "path": "LOSAT/src/lib.rs",
+      "sha256": "6d7d655f87b346233a54c3dc800763401632c3154fb7f7063057e664001a3f62"
+    },
+    {
+      "path": "LOSAT/src/main.rs",
+      "sha256": "b08f3c4c4be0e13195a991e2b9b7f4a7f356c481b2fb84b2571a9010b6c14133"
+    },
+    {
+      "path": "LOSAT/src/post/chain.rs",
+      "sha256": "ba7229a5dfd840771d1be93391dcdb4d1fddc07bede92516986b4371424d4a5e"
+    },
+    {
+      "path": "LOSAT/src/post/filter.rs",
+      "sha256": "bfb5b207ebb9d526e3cdf67fd50f6b784943bc95f319b65d6e910e01b67cb184"
+    },
+    {
+      "path": "LOSAT/src/post/mod.rs",
+      "sha256": "4a90cba4bb42236233002af4291c48f9cb6470bc1194254eee954c0f97caa16a"
+    },
+    {
+      "path": "LOSAT/src/report/mod.rs",
+      "sha256": "d3bf806a62007d2bb9c023dceb85abbfcb6cc337578a1444a6440c0307e4ceb8"
+    },
+    {
+      "path": "LOSAT/src/report/outfmt6.rs",
+      "sha256": "1cbb0febd320b5cdd12807653db9985a55ad22b72ae72acd87ee5f3890399aeb"
+    },
+    {
+      "path": "LOSAT/src/report/pairwise.rs",
+      "sha256": "d47a0f7c6d3129a14daeb14184085f6fcd51ce078358e08142878af04ca8d3f3"
+    },
+    {
+      "path": "LOSAT/src/seed/aa_word_finder.rs",
+      "sha256": "100a511cade5548770866fdc89b3b007ed83234d0caae16ceb4a72fa0b08e8db"
+    },
+    {
+      "path": "LOSAT/src/seed/mod.rs",
+      "sha256": "194804358726229ade9e3da31004f2ba6e163c6ebffb5c930998da88fc02f8b7"
+    },
+    {
+      "path": "LOSAT/src/seed/na_word_finder.rs",
+      "sha256": "a9b25986d43384ebfe88f8b365cf1d416fcb914c39e9f16cbfcf0fd362f6c0db"
+    },
+    {
+      "path": "LOSAT/src/sequence/mod.rs",
+      "sha256": "fc42d8238955e9ebcae1cd1fb173bce79ff538910795ae34a10dc3dac634762f"
+    },
+    {
+      "path": "LOSAT/src/sequence/packed_nucleotide.rs",
+      "sha256": "ee6500b5ec3300fef7d4483a1ceda671651901a716777a96d25429bcdc1b7568"
+    },
+    {
+      "path": "LOSAT/src/stats/karlin.rs",
+      "sha256": "803c43cdb49de6a42902cab6b4d7eec624aa561b1c5d615534e29bd75a534217"
+    },
+    {
+      "path": "LOSAT/src/stats/karlin_calc.rs",
+      "sha256": "446c8f87cc29080e503b064b05c25d21dc167ad2d6b2c56f7905207aacf765f0"
+    },
+    {
+      "path": "LOSAT/src/stats/length_adjustment.rs",
+      "sha256": "065d7d17bedcafc5d5950c380106940a5545af658a443c5ac68d45dc09f50068"
+    },
+    {
+      "path": "LOSAT/src/stats/mod.rs",
+      "sha256": "7a83b4cc50b322f3851688ed3e013db6c454682a1dac8ee90a1cc842dadb886b"
+    },
+    {
+      "path": "LOSAT/src/stats/search_space.rs",
+      "sha256": "d69f3e9a2593ea498134270534e9416e9784cf0fefd7551a659ef417c18cbd8d"
+    },
+    {
+      "path": "LOSAT/src/stats/spouge.rs",
+      "sha256": "5fdcb7cb31b61aa034798e0bac34ef3628d3ac9a160052996fb32bdaf0799279"
+    },
+    {
+      "path": "LOSAT/src/stats/sum_statistics.rs",
+      "sha256": "caf0dee921eefc318f456d6235910d9cb9ac54c55a0d20fd67025ba1d8ab69bd"
+    },
+    {
+      "path": "LOSAT/src/stats/tables.rs",
+      "sha256": "55a6507911251d877c2637161d0c8320b61176754adb914101f080000dcac5a2"
+    },
+    {
+      "path": "LOSAT/src/utils/dust.rs",
+      "sha256": "078b3e1dcb14bf1c9a8e6296e7d3cbbe25b6fd712a2e8bae10334a3aee85e8b0"
+    },
+    {
+      "path": "LOSAT/src/utils/genetic_code.rs",
+      "sha256": "2f088bc55288ac812034660287e1ebc27f8d59dedd6921da1184e4666a1602e8"
+    },
+    {
+      "path": "LOSAT/src/utils/matrix.rs",
+      "sha256": "f108452b450fc3751c5e1dfd372007f13d9d014fcb56211e2f9bc12950560fc2"
+    },
+    {
+      "path": "LOSAT/src/utils/mod.rs",
+      "sha256": "4c6446b1d7af181cfce5129d8c0fea1f35c861019fffca2273ddec2f80f36340"
+    },
+    {
+      "path": "LOSAT/src/utils/seg.rs",
+      "sha256": "b893702f9e4110b43463b9f0c207a4489e28ae57d544632ec7ea2bbef7b6112e"
+    },
+    {
+      "path": "LOSAT/src/utils/seg_lnfact.rs",
+      "sha256": "0dea7eed56267218e41ddef37858ed8f11cc324cd638d7ea039cd9a9c6024a31"
+    },
+    {
+      "path": "LOSAT/src/web_api.rs",
+      "sha256": "b19322dcefc28c9d8945a233f49424f703c81848b7a5be5c2d7f1d01b77047e3"
+    },
+    {
+      "path": "LOSAT/tests/analyze_tblastx_feature_overlap.py",
+      "sha256": "52729b4fe397952ae7ffc20156f882ff8080ae7c15522751e5e7d0bad88457d9"
+    },
+    {
+      "path": "LOSAT/tests/analyze_tblastx_hit_gap.py",
+      "sha256": "8ca2c8b34815385aad95b80d5c7b217afc26c89bc683a81f55018df723f52824"
+    },
+    {
+      "path": "LOSAT/tests/audit_blastp_v010.py",
+      "sha256": "0649b20eeacff3fd955407afe61b5ef06e310b8479a80ee7327f2ac2f0027604"
+    },
+    {
+      "path": "LOSAT/tests/audit_tblastx_v010.py",
+      "sha256": "f9fc69daad4f4beeb2ed1e2655bfa13aaef7f15d357e80475cf994c45c3743e4"
+    },
+    {
+      "path": "LOSAT/tests/blastn_parity_manifest.tsv",
+      "sha256": "008399696d66d9397cacf8c05116026e51d0f84836c34653705b019cf8a0f4d5"
+    },
+    {
+      "path": "LOSAT/tests/blastn_trace_targets.tsv",
+      "sha256": "be40064eae4162b6b671f3129f625dc5da828f32b2fc1ae8b276bdbe76286d0b"
+    },
+    {
+      "path": "LOSAT/tests/blastn_v010_source_exceptions.tsv",
+      "sha256": "66f90708a4b23d064353b810a8014c8896e4fb31dd8f7a25626a375504fc99fc"
+    },
+    {
+      "path": "LOSAT/tests/blastp_parity_options.sh",
+      "sha256": "d1347f0c6bfbd91a67ab39a32e35c8734cbdc6484cfcfb12b0bbf6ba4629787f"
+    },
+    {
+      "path": "LOSAT/tests/blastp_v010_parity_manifest.tsv",
+      "sha256": "db840dd8c181a02436e98086343379d93b012a7d952cc59a8c9102c91372cb31"
+    },
+    {
+      "path": "LOSAT/tests/certify_blastn_v010.py",
+      "sha256": "2e08d5b2ddbf58f592d84c728b19d1a37f4cb96ddbe3ca1bb0c6730889eb1b4c"
+    },
+    {
+      "path": "LOSAT/tests/certify_integrated_runtime_v010.py",
+      "sha256": "be8b59f7bb8fbfca6852271da7865ea48a509d0dabfb3ddf0356b6f586efdd9d"
+    },
+    {
+      "path": "LOSAT/tests/certify_platform_native_v010.py",
+      "sha256": "44de19ca2742275335cdc6d0627bbf32f069d0cb48eb66c6c62303369aeb5a61"
+    },
+    {
+      "path": "LOSAT/tests/check_pure_rust_runtime_boundary.py",
+      "sha256": "ce39f8d33a1820f9ca14b56cf4ccc6445ccc6a2267dd0c17ec7b172015510b74"
+    },
+    {
+      "path": "LOSAT/tests/check_tblastx_overlong_tail.py",
+      "sha256": "1695adc1dcc30b327634dabc9d5453116cf3e5b81e1a2e92ccab42613d6cfa5b"
+    },
+    {
+      "path": "LOSAT/tests/cli_smoke.rs",
+      "sha256": "909e21763bec6e18cc17d340f353bc8a4d4fdda79635921218f0ec1af59b8b95"
+    },
+    {
+      "path": "LOSAT/tests/compare_blastn_parity.py",
+      "sha256": "65c9691d0382187fdbd1f34e18988b722ebbc5caa0e57962b0140aa295bc1733"
+    },
+    {
+      "path": "LOSAT/tests/compare_distributions.sh",
+      "sha256": "04b915ce966f1791aa5eddf84b748b2a98eac20f7ed9dd12275b045c41698253"
+    },
+    {
+      "path": "LOSAT/tests/compare_results.sh",
+      "sha256": "60be1d23a9ea142e49f123569685cab5f0b847d693f28e3925bdd2e312c707c2"
+    },
+    {
+      "path": "LOSAT/tests/compressed_lookup.rs",
+      "sha256": "34db172066f2eba803f083b0165c125f5fd85d217ef14f9dd3ee5f1ca12a1e46"
+    },
+    {
+      "path": "LOSAT/tests/fasta/AP027078.faa",
+      "sha256": "3d589927308951648b0db6653b3b3b0291a18ef1b6e6585893b495bb4ae91866"
+    },
+    {
+      "path": "LOSAT/tests/fasta/AP027078.fasta",
+      "sha256": "e607146469386e0a2837435075ec1aedb3465bc17d53f6d1b072e47ffcfdd9ac"
+    },
+    {
+      "path": "LOSAT/tests/fasta/AP027131.faa",
+      "sha256": "f454d69ec8658655b003b543abb1a6a164826ef2d689b533f9a413369014db3b"
+    },
+    {
+      "path": "LOSAT/tests/fasta/AP027131.fasta",
+      "sha256": "8c9fe3f0547acf1683f9f867c80853e6cd79815d2e593637e70457c14edb11d1"
+    },
+    {
+      "path": "LOSAT/tests/fasta/AP027132.faa",
+      "sha256": "f824a3ec3bfe0b18d912eac13caeced3197172641135ebc292429fb20d919ded"
+    },
+    {
+      "path": "LOSAT/tests/fasta/AP027132.fasta",
+      "sha256": "5c1003b69cc365c42f5e6ac19afbcdc99bc04e05dc49ceeef93bfeb1bf02d04f"
+    },
+    {
+      "path": "LOSAT/tests/fasta/AP027133.faa",
+      "sha256": "a70011592cb69fe3812250f9fbd166c52bc03f2cbf34d4aee6bdca2190dcc5cc"
+    },
+    {
+      "path": "LOSAT/tests/fasta/AP027133.fasta",
+      "sha256": "fb47f4339e55347a9693dda49a0989ec2946fa9170a21cea7d418e3e95adeb3a"
+    },
+    {
+      "path": "LOSAT/tests/fasta/AP027152.fasta",
+      "sha256": "52d61c03e8e7b2985ad533f59044b1e99e5e804663c0fd38621938e3ff58c67e"
+    },
+    {
+      "path": "LOSAT/tests/fasta/AP027155.fasta",
+      "sha256": "ec8ee034b057c16da481084ca0be5406de209081c741460878800a9213dba91e"
+    },
+    {
+      "path": "LOSAT/tests/fasta/AP027202.fasta",
+      "sha256": "7b3542ab08c30a01618aab45526e33f2464a7d6ade21e0c133681abbb53c4192"
+    },
+    {
+      "path": "LOSAT/tests/fasta/AP027280.fasta",
+      "sha256": "14c68a026e685896afdc5366902999d5960589cf301a76b3f1a732a8f4708b6a"
+    },
+    {
+      "path": "LOSAT/tests/fasta/AvCLPV.faa",
+      "sha256": "49b476f36b1363078105ea2ee4fe8f365ee869329193f75eb654b9088c8d13e4"
+    },
+    {
+      "path": "LOSAT/tests/fasta/AvCLPV.fasta",
+      "sha256": "b2455fef9704bc1880e7d635237dd0a8cfd1420dee650f05b1349c7208fbfaeb"
+    },
+    {
+      "path": "LOSAT/tests/fasta/AvCLPV.gb",
+      "sha256": "75f55cccfb810223a3762b9a5332981f8dc791701ca26435d319df514eda20a5"
+    },
+    {
+      "path": "LOSAT/tests/fasta/ChdeNMV.faa",
+      "sha256": "715d7ffc6b3163a0433a8250ecb179dbd32b9747548baa5a71b1cede7006596a"
+    },
+    {
+      "path": "LOSAT/tests/fasta/CoBV.faa",
+      "sha256": "505e1378f1c38b7497b4d45cb96917daaebccdf2037586983decde9365af76e7"
+    },
+    {
+      "path": "LOSAT/tests/fasta/EDL933.fna",
+      "sha256": "53afb4ceb61826119e72b85a9467ba3d53091d709015b8fcd783df49f894d79d"
+    },
+    {
+      "path": "LOSAT/tests/fasta/EDL933.gb",
+      "sha256": "2f26382f35ef0a86219f4bdf9b8dca3e95a3d52d445a316f1cf0552236aa0a61"
+    },
+    {
+      "path": "LOSAT/tests/fasta/HtNMV.faa",
+      "sha256": "21aca19a01128b8dd408f2d452c51dfee64bf106ff2c983792c7baec0acb76eb"
+    },
+    {
+      "path": "LOSAT/tests/fasta/LC738868.fasta",
+      "sha256": "f91873bd2957bfaefe377aa221ffd1e0b57e657e5d26ba86c52fce891ac0cedf"
+    },
+    {
+      "path": "LOSAT/tests/fasta/LC738869.fasta",
+      "sha256": "f8da6a61ee345b2567253f80c282ef49d1c038a5ba454c425ea2c5687412356a"
+    },
+    {
+      "path": "LOSAT/tests/fasta/LC738870.fasta",
+      "sha256": "e38d663db3478cec0694e419f00b769f1937c756f3a3f827711c24d531fb4a07"
+    },
+    {
+      "path": "LOSAT/tests/fasta/LC738871.fasta",
+      "sha256": "bf8f36453079205b1a5e861edec8a18cf66e657bd7aaa8741d9c0bf0740f629e"
+    },
+    {
+      "path": "LOSAT/tests/fasta/LC738873.fasta",
+      "sha256": "d25a1f2a40a50beadd1e6ab591aaa028730ae811cf861a0d81d9624caaa78649"
+    },
+    {
+      "path": "LOSAT/tests/fasta/LC738874.fasta",
+      "sha256": "491f80b482acc96600773c3493358c0262dbf714cb5d76f8f5560a92ecccac1a"
+    },
+    {
+      "path": "LOSAT/tests/fasta/LC738875.fasta",
+      "sha256": "f397c2e82e5f7f7d12cebd0a62e2146000f0a13c9cbfc662ea0ba63c45d93e15"
+    },
+    {
+      "path": "LOSAT/tests/fasta/LC738884.fasta",
+      "sha256": "805c5d86b5f4e2fda5bcbab26e3917ea47ed573e707f0bcce0c20538c04c4801"
+    },
+    {
+      "path": "LOSAT/tests/fasta/LC741431.fasta",
+      "sha256": "28e4192f69a71e2848292f124640e7c2bf8f7944708176774e2cffd159187b3d"
+    },
+    {
+      "path": "LOSAT/tests/fasta/LvMJNV.faa",
+      "sha256": "5c77e7cd3a870c56f6a0e35c39944201c6faff4168619f3dae3dcb4bdf646be4"
+    },
+    {
+      "path": "LOSAT/tests/fasta/LvMJNV.fasta",
+      "sha256": "38dedf6c9ca26e1db66da8749d4d640301559c7972cedf54e73c38be66dd3076"
+    },
+    {
+      "path": "LOSAT/tests/fasta/MG1655.fna",
+      "sha256": "8b7293217f53c5d00e2eabd0b21889e71087104e61eee8d68104bbb4f35385fe"
+    },
+    {
+      "path": "LOSAT/tests/fasta/MG1655.gb",
+      "sha256": "2d435f9dca4de925783365842812a43a9e6c3c0d1d79db46e2255a7e6a444a8f"
+    },
+    {
+      "path": "LOSAT/tests/fasta/MeenMJNV.faa",
+      "sha256": "4b2638956d820fda464d11b8322d7a4cfc13df4cba7d185565a08663a47fd8ba"
+    },
+    {
+      "path": "LOSAT/tests/fasta/MeenMJNV.fasta",
+      "sha256": "b4e004de96516a6b8b913544aa0dad0b3627f872cddfa05bb87d2f8489d43e2b"
+    },
+    {
+      "path": "LOSAT/tests/fasta/MeenNMV.faa",
+      "sha256": "6155d20c13ad07a35cb4e8254e51efc4077a4a77d47b81ed6e27badb55989586"
+    },
+    {
+      "path": "LOSAT/tests/fasta/MejoMJNV.faa",
+      "sha256": "55ec6ae418dd1ddd83f7977e97d69984df815b82369ef4fa757931727c488698"
+    },
+    {
+      "path": "LOSAT/tests/fasta/MejoMJNV.fasta",
+      "sha256": "35fa0ea2a2e266553d61d1bd317bebb94b76f195f2adab91ca31c7cd556bf55d"
+    },
+    {
+      "path": "LOSAT/tests/fasta/MelaMJNV.fasta",
+      "sha256": "491f80b482acc96600773c3493358c0262dbf714cb5d76f8f5560a92ecccac1a"
+    },
+    {
+      "path": "LOSAT/tests/fasta/MellatMJNV.fasta",
+      "sha256": "6a08c6a71813684a623fd89eec6fd486f9a2d2aa786f4ee107934ba6712d8438"
+    },
+    {
+      "path": "LOSAT/tests/fasta/MetlamMJNV.faa",
+      "sha256": "24b1179c75814e3c836b4778cbc1bc61e29cfe6ea8e61c22cff26586af863c5a"
+    },
+    {
+      "path": "LOSAT/tests/fasta/MjPMNV.faa",
+      "sha256": "5f733ad63c17281d3dcf4a4cc8ea34e54c1a3efb240310f720eff5e8a4edf0e7"
+    },
+    {
+      "path": "LOSAT/tests/fasta/MjeNMV.faa",
+      "sha256": "87141bb568912fb039112d169a89d370706911175c03f209bfdfe58417ef3831"
+    },
+    {
+      "path": "LOSAT/tests/fasta/MjeNMV.fasta",
+      "sha256": "f91873bd2957bfaefe377aa221ffd1e0b57e657e5d26ba86c52fce891ac0cedf"
+    },
+    {
+      "path": "LOSAT/tests/fasta/MlMJNV.faa",
+      "sha256": "e7ad74d3b9640d110cd193c10d69d2c55d696c933c4d61db87c7ad500f85d560"
+    },
+    {
+      "path": "LOSAT/tests/fasta/MlPMNV.faa",
+      "sha256": "b210ebd05b6e8cf0c5379b065f2fb5b7ef5a39d2569442b9767d4068322a9f3c"
+    },
+    {
+      "path": "LOSAT/tests/fasta/NZ_CP006932.faa",
+      "sha256": "61b882399e10f26f1ba1daf27599370f265b678ae95cbb3bccdd443b34dd9e20"
+    },
+    {
+      "path": "LOSAT/tests/fasta/NZ_CP006932.fasta",
+      "sha256": "2190d5bf137d0bed3e3093624303b24b29d0923e04b27069f10e5ca145892617"
+    },
+    {
+      "path": "LOSAT/tests/fasta/PajaWSV.faa",
+      "sha256": "02b4d9b0836e98657e17368bd3ce530a53db32099d38fd92b95c16c6ba0dbcb2"
+    },
+    {
+      "path": "LOSAT/tests/fasta/PemoMJNVA.faa",
+      "sha256": "9fd6f5db00c5860ce79b7c4b7471ce5cbaee6a65ebe1061e133cfe545c997665"
+    },
+    {
+      "path": "LOSAT/tests/fasta/PemoMJNVA.fasta",
+      "sha256": "e38d663db3478cec0694e419f00b769f1937c756f3a3f827711c24d531fb4a07"
+    },
+    {
+      "path": "LOSAT/tests/fasta/PemoMJNVB.faa",
+      "sha256": "58c912f8a8e4912c4624256174d667f9c801ceb72a2e6ae05ae43f859ad0f695"
+    },
+    {
+      "path": "LOSAT/tests/fasta/PemoMJNVB.fasta",
+      "sha256": "bf8f36453079205b1a5e861edec8a18cf66e657bd7aaa8741d9c0bf0740f629e"
+    },
+    {
+      "path": "LOSAT/tests/fasta/PeseMJNV.faa",
+      "sha256": "78454b8a1f9afadd8d91190d56edcaf14ea967a5eff9badf16a45141d4c5a5cf"
+    },
+    {
+      "path": "LOSAT/tests/fasta/PeseMJNV.fasta",
+      "sha256": "d25a1f2a40a50beadd1e6ab591aaa028730ae811cf861a0d81d9624caaa78649"
+    },
+    {
+      "path": "LOSAT/tests/fasta/PesePMNV.faa",
+      "sha256": "ac941769b2fa84961d07a966d2cce40390dc4b65cfdd1e1f05b01b1a9e2d8503"
+    },
+    {
+      "path": "LOSAT/tests/fasta/PmeNMV.faa",
+      "sha256": "ee3d2312ce7f719339a8167d4481737c4b42ea8874ad8f414860ef8f169c9257"
+    },
+    {
+      "path": "LOSAT/tests/fasta/PsCLPV.faa",
+      "sha256": "4fdf9fd6aa853339cd6053d8f93d131234ce352188431e64c0e0048f897c67c9"
+    },
+    {
+      "path": "LOSAT/tests/fasta/PsCLPV.fasta",
+      "sha256": "bef80f19ee5c7414d08ad70948821abde74d602feabd6bc91df63f354c4df9c3"
+    },
+    {
+      "path": "LOSAT/tests/fasta/PsCLPV.gb",
+      "sha256": "92cba17670829a37c6366d61e3a99a58c0e58d1266ea8a726cb45e45bf519ad5"
+    },
+    {
+      "path": "LOSAT/tests/fasta/Sakai.fna",
+      "sha256": "a5ecd2fbab298838e7ebc1e6b4372b7e20470f9242638b6cd4422153926c1723"
+    },
+    {
+      "path": "LOSAT/tests/fasta/Sakai.gb",
+      "sha256": "9a8f26887a1fb77f23b54c6361e4d04912eb0fe863bd9822dccffedda83851df"
+    },
+    {
+      "path": "LOSAT/tests/fasta/SiNMV.faa",
+      "sha256": "33014d35dbd8c85021536dbf690781d2d19b80149ab5810c6ff558888833ed24"
+    },
+    {
+      "path": "LOSAT/tests/fasta/SicyWSV.faa",
+      "sha256": "0d44dd510387bd2b7dbb4d7fc5642aa9afb48f68a2a98b942291368908de13ef"
+    },
+    {
+      "path": "LOSAT/tests/fasta/TrcuMJNV.faa",
+      "sha256": "f48be9286add728534a45f54b2c91df83f6c214e6b1e30d61b165d0fb2db0c26"
+    },
+    {
+      "path": "LOSAT/tests/fasta/TrcuMJNV.fasta",
+      "sha256": "20b55f19367d27efc6c8710f5a664ba243f93513663df5798f2bf524f5496ad9"
+    },
+    {
+      "path": "LOSAT/tests/fasta/TrcuNMV.faa",
+      "sha256": "35e0393cc54e1c618e95314f06e6122f6e14ca0d924b664cb0e82ac42aa9f190"
+    },
+    {
+      "path": "LOSAT/tests/fasta/WSSV.faa",
+      "sha256": "271718cda9c319818ee1e749ed3ceeb7664e32ada6d0e0b92d821db8ef4ec930"
+    },
+    {
+      "path": "LOSAT/tests/fasta/blastn_parity_compact.fasta",
+      "sha256": "ea5b6fde64c3e914b2110d2ea76f7ff38e661419dc9ae6f54e8817af80e99e1d"
+    },
+    {
+      "path": "LOSAT/tests/fasta/small_test.fasta",
+      "sha256": "ca6550fae829c6d4ef738da709efe0b4fdee1ed8a46cb1896ff503ed360da22f"
+    },
+    {
+      "path": "LOSAT/tests/fasta/truncated/AP027131_100000.fasta",
+      "sha256": "ae330d7d6e6f29e4f87e98b742be9d626e9de453ddb1d1bd8e5d9de2b0adeb1a"
+    },
+    {
+      "path": "LOSAT/tests/fasta/truncated/AP027131_100k.fasta",
+      "sha256": "1bd1655081e9c6188a21cbd3530bb578967de672e133e022c4e63dc80b1dc17d"
+    },
+    {
+      "path": "LOSAT/tests/fasta/truncated/AP027131_200000.fasta",
+      "sha256": "eda2fb6634229e19abfc23666743bff2c230752983d8426d45c9cfefb9f9b834"
+    },
+    {
+      "path": "LOSAT/tests/fasta/truncated/AP027131_200k.fasta",
+      "sha256": "4344a5f6a3ca93d22499828bc4d1c3ce04dc2fdba892591b4661eaac2ae83c25"
+    },
+    {
+      "path": "LOSAT/tests/fasta/truncated/AP027131_300000.fasta",
+      "sha256": "e216a1fc2ded15b17a013a4e23fc7816fa087ea4409dd3475509f94a911efd36"
+    },
+    {
+      "path": "LOSAT/tests/fasta/truncated/AP027131_300k.fasta",
+      "sha256": "b28274f9fac532ef518c1c7d0096b0b65b32e952ddd1d84d702781b33e9902cc"
+    },
+    {
+      "path": "LOSAT/tests/fasta/truncated/AP027131_50k.fasta",
+      "sha256": "1138a10ac6f9a3c2354e2bfd7584492fe669079240daa6c2465f9313594bc9c9"
+    },
+    {
+      "path": "LOSAT/tests/fasta/truncated/AP027133_100000.fasta",
+      "sha256": "027df95b72e96a569360dfc5d462030629fcc60579d792a7693141641b27b511"
+    },
+    {
+      "path": "LOSAT/tests/fasta/truncated/AP027133_100k.fasta",
+      "sha256": "8adb09e15927b199de61d444d50ffe4d0490a73dc32f8c0f7e39b83ff8a55fc1"
+    },
+    {
+      "path": "LOSAT/tests/fasta/truncated/AP027133_200000.fasta",
+      "sha256": "8e4aa2dd0c7dc2c353b0068cb351e54d40caf865f4b2d9d425aa320dfe830299"
+    },
+    {
+      "path": "LOSAT/tests/fasta/truncated/AP027133_200k.fasta",
+      "sha256": "e1bf57205fe952ab5dc0360c48e4c8dbcbf7415a1b6d82a95b5f2583120533d2"
+    },
+    {
+      "path": "LOSAT/tests/fasta/truncated/AP027133_300000.fasta",
+      "sha256": "ce36fbf039dadc2e2a23c5e683954d84c7c4f109bf1391ea44493d5337d4346c"
+    },
+    {
+      "path": "LOSAT/tests/fasta/truncated/AP027133_300k.fasta",
+      "sha256": "3f00b6c54ed5a50e583074797b889afde3632fb23994e2f45d81d6a625ef987e"
+    },
+    {
+      "path": "LOSAT/tests/fasta/truncated/AP027133_50k.fasta",
+      "sha256": "f9019ad5a32f597c6e4fa09ec58d0c3f7f4ba1e34ba45137f6e6d12b583d702a"
+    },
+    {
+      "path": "LOSAT/tests/find_tblastx_extra_hsp.py",
+      "sha256": "2f84e3dfc37ed53af2925239a8fdc081af9e539bad15473cbc080eed54875f66"
+    },
+    {
+      "path": "LOSAT/tests/find_tblastx_missing_hsp.py",
+      "sha256": "12b0dc9ebcd3cac456e31ba6b2dd9710e1e3fa4882ab1bd08177d6ba6444d8d7"
+    },
+    {
+      "path": "LOSAT/tests/gap_penalty_test_summary.txt",
+      "sha256": "926475f835302f64985515591b0da16ed2740e8b4ccd1e2449e34164792e5c1a"
+    },
+    {
+      "path": "LOSAT/tests/ncbi_platform_variance_v010.json",
+      "sha256": "df0c18e6d0e05aac74e4200e5350c64b35cbb2294c4bdd06b5507dbf87fda1ef"
+    },
+    {
+      "path": "LOSAT/tests/platform_native_v010_canonical.tsv",
+      "sha256": "7e65cfb4de0dc575c47d059f1e29ddc9999fc50887ac769fb8f299a9ec97760c"
+    },
+    {
+      "path": "LOSAT/tests/plot_comparison.py",
+      "sha256": "f9c83aa6ba44648c10b3ea5ff09261b5a575816c16510e472d8fc7b4db1a3fbd"
+    },
+    {
+      "path": "LOSAT/tests/plot_execution_time.py",
+      "sha256": "1e502ebce8c8a08c8978fb2b56378b92a0cd627de8de5105b14965bb40ccfccd"
+    },
+    {
+      "path": "LOSAT/tests/plot_execution_time.sh",
+      "sha256": "f9827e97bef47a005fa729172833850c17c2fb083b61a68ff78dff321f00cf75"
+    },
+    {
+      "path": "LOSAT/tests/plot_overall_trend.py",
+      "sha256": "4af91c8c991c5646cec6e36dce921025282c362342f9bda3110d603d8117cbb6"
+    },
+    {
+      "path": "LOSAT/tests/plots/compare_AP027078.AP027131_BLASTP.png",
+      "sha256": "e35f82f95f4a120ec36d42320b3651e5f5f2ecd5b9e8acf9e6ed1cd61cf9b9df"
+    },
+    {
+      "path": "LOSAT/tests/plots/compare_AP027078.AP027132_BLASTP.png",
+      "sha256": "bb6541ad1ea87619cf4c9f7d284b82b087d19f7762d0efe0b4b13109af21b3a4"
+    },
+    {
+      "path": "LOSAT/tests/plots/compare_AP027078.AP027133_BLASTP.png",
+      "sha256": "d945ab4c79a8f3369f89659e6a0d86da2898a36f031d5cf9586a3c312db3c9c7"
+    },
+    {
+      "path": "LOSAT/tests/plots/compare_AP027078.NZ_CP006932_BLASTP.png",
+      "sha256": "8b1fa3fb592c8c85e8c2c340f03cce39c5b418802b5aaeb8d160251af33c29f0"
+    },
+    {
+      "path": "LOSAT/tests/plots/compare_AP027078_vs_AP027131_TBLASTX.png",
+      "sha256": "43b8c9c20cfcd2f061c08b9a7aeff49eaef1bdc36001b1bc9c24581182d15a84"
+    },
+    {
+      "path": "LOSAT/tests/plots/compare_AP027131.AP027132_BLASTP.png",
+      "sha256": "d9b88297a6d63e5c4a1f5e526255066f1583cac466b63a975f0c2634a12fa643"
+    },
+    {
+      "path": "LOSAT/tests/plots/compare_AP027131.AP027133_BLASTP.png",
+      "sha256": "4f466b46c63de59ec97bc40e18149036516b73532ea48a7b9a8ac5c5ea5c62d3"
+    },
+    {
+      "path": "LOSAT/tests/plots/compare_AP027131.NZ_CP006932_BLASTP.png",
+      "sha256": "c89b86030a5b25f3d53806a387b6ccbdd2bec42e7d31f6e1196e1c73e8b90d33"
+    },
+    {
+      "path": "LOSAT/tests/plots/compare_AP027131_vs_AP027133_TBLASTX.png",
+      "sha256": "923ac7f8b9201b0156ea321970613dcde145ff9582d095347392adeef7d6599f"
+    },
+    {
+      "path": "LOSAT/tests/plots/compare_AP027132.AP027133_BLASTP.png",
+      "sha256": "432c19c58b82dbec1970c3695a0583a94cf1c64530457065f2900f59dc4c6101"
+    },
+    {
+      "path": "LOSAT/tests/plots/compare_AP027132.NZ_CP006932_BLASTP.png",
+      "sha256": "40714f4909b480ef90bfa6a38e615c939a2075037a629bf238ee0a4100f10ccb"
+    },
+    {
+      "path": "LOSAT/tests/plots/compare_AP027132_vs_NZ_CP006932_TBLASTX.png",
+      "sha256": "427caa16590344d88b6812ba0fabea3542e7fd6ab7126f68c8d528f6c3f2da86"
+    },
+    {
+      "path": "LOSAT/tests/plots/compare_AP027133_vs_AP027132_TBLASTX.png",
+      "sha256": "5e112d74c04443b759eed9050c6841df67c208b2c3e238807faa139c3391b140"
+    },
+    {
+      "path": "LOSAT/tests/plots/compare_AP027280_Self_TBLASTX.png",
+      "sha256": "61920553af4c927dd1d3881377b0e584aa9f3b7bef49a8d9110f491180d3c860"
+    },
+    {
+      "path": "LOSAT/tests/plots/compare_AvCLPV_vs_PsCLPV_TBLASTX.png",
+      "sha256": "4a5ec7f97a4afe7c0b5895d22515b907ea713e1e04f7360702a6842e864114f5"
+    },
+    {
+      "path": "LOSAT/tests/plots/compare_EDL933_vs_Sakai_Megablast.png",
+      "sha256": "4949f1184f2495510c2a84bf673d77b38cf437d25404a5ce2900b406b289bccf"
+    },
+    {
+      "path": "LOSAT/tests/plots/compare_LvMJNV_vs_TrcuMJNV_TBLASTX.png",
+      "sha256": "db0f6159e34847457b81a2c1587fc4432507c85297a948fdb0cea63c8db5039e"
+    },
+    {
+      "path": "LOSAT/tests/plots/compare_MeenMJNV_vs_MejoMJNV_TBLASTX.png",
+      "sha256": "ee9b1dac555036d8d6c4672fbdc174883e5c686754bc050d1e90631bd4a097a8"
+    },
+    {
+      "path": "LOSAT/tests/plots/compare_MelaMJNV_vs_PemoMJNVA_BLASTN.png",
+      "sha256": "67a53d4a083bc9f465c9f15ce2bef300fb01dd02225342d26c00f61e54706fd0"
+    },
+    {
+      "path": "LOSAT/tests/plots/compare_MelaMJNV_vs_PemoMJNVA_TBLASTX.png",
+      "sha256": "c6f53778eb4d3dbef9083ac5dec62f0c2bb531d457aa1dd252948113ba5d821f"
+    },
+    {
+      "path": "LOSAT/tests/plots/compare_MellatMJNV_vs_MeenMJNV_TBLASTX.png",
+      "sha256": "0f3e80d83af11fd0d382f54eec2e13134dff680fb9fa0e63b66e885301b98075"
+    },
+    {
+      "path": "LOSAT/tests/plots/compare_MjPMNV_vs_MlPMNV_BLASTN.png",
+      "sha256": "cd3db429aebf9630b90f2720cc681d534f044c6cc683e35a9dc94365783b21f4"
+    },
+    {
+      "path": "LOSAT/tests/plots/compare_MjeNMV_vs_MelaMJNV_BLASTN.png",
+      "sha256": "9aed52570816981c16311ad4052b1af41faed633167babb60d02bb054e1157bb"
+    },
+    {
+      "path": "LOSAT/tests/plots/compare_MjeNMV_vs_MelaMJNV_TBLASTX.png",
+      "sha256": "a66813c334a01304fe500a72a38bc158e3054f1cf373aa962a817b958427e17b"
+    },
+    {
+      "path": "LOSAT/tests/plots/compare_NZ_CP006932_Self_BLASTN_Task.png",
+      "sha256": "faf8b762a46af4a767b12cd913f0adee7a744a1db777e4b086e96d9376196b79"
+    },
+    {
+      "path": "LOSAT/tests/plots/compare_NZ_CP006932_Self_TBLASTX.png",
+      "sha256": "aa9da44c8febcd4802f43eedfedecd67f24bd2d72b412db0580e5d0e72e4329c"
+    },
+    {
+      "path": "LOSAT/tests/plots/compare_PajaWSV.CoBV_BLASTP.png",
+      "sha256": "32d86e419ca57295486ab4f7d92ddb0c7d3624b510f8170d440cae728944a13e"
+    },
+    {
+      "path": "LOSAT/tests/plots/compare_PajaWSV.SicyWSV_BLASTP.png",
+      "sha256": "eb34c5326c63411a4b83c21dde254b473710aeac9c8ac6271f0b9cdd78b71ffa"
+    },
+    {
+      "path": "LOSAT/tests/plots/compare_PemoMJNVA_vs_PeseMJNV_BLASTN.png",
+      "sha256": "c33104c90069148d50a6d6e3bd73dc8867394e136acd56588dd773cfff3ab803"
+    },
+    {
+      "path": "LOSAT/tests/plots/compare_PemoMJNVA_vs_PeseMJNV_TBLASTX.png",
+      "sha256": "d4b638d3adb65d3b835110c33451a206942cf9077f24968458f7b462f1491273"
+    },
+    {
+      "path": "LOSAT/tests/plots/compare_PemoMJNVB_vs_LvMJNV_TBLASTX.png",
+      "sha256": "15701cadb512e608dd5b5d0939a7b6a12745e748307a832c3de2846a4a2e7bb8"
+    },
+    {
+      "path": "LOSAT/tests/plots/compare_PeseMJNV_vs_PemoMJNVB_BLASTN.png",
+      "sha256": "a3b56fc4266ec1a8982457ecf7807b00522d3449a01b779a2ab9a92446d50f9e"
+    },
+    {
+      "path": "LOSAT/tests/plots/compare_PeseMJNV_vs_PemoMJNVB_TBLASTX.png",
+      "sha256": "9392e1331c6e5113fe51f4e3ae443b7e5ebdaf28618a4688d90464b3b09fbf95"
+    },
+    {
+      "path": "LOSAT/tests/plots/compare_PesePMNV_vs_MjPMNV_BLASTN.png",
+      "sha256": "696358e33385e1752f5db6b0a7f60eac64d68cc09174954b2efe03dd079d5f65"
+    },
+    {
+      "path": "LOSAT/tests/plots/compare_PmeNMV_vs_MjPMNV_BLASTN.png",
+      "sha256": "96c17962eeaf32b7be14ece06f0cb9287922c808506539d3be2b2e5a6134c5ea"
+    },
+    {
+      "path": "LOSAT/tests/plots/compare_PmeNMV_vs_PesePMNV_BLASTN.png",
+      "sha256": "efb3a0ae64132faacd12094de2e06d770b3fc7cb7330792fb2c5cd649bd0e39e"
+    },
+    {
+      "path": "LOSAT/tests/plots/compare_Sakai_vs_MG1655_Megablast.png",
+      "sha256": "2edf0c2ce06b426c152ee7325a10b11fd5a18667c69ef9be4984467487f721e6"
+    },
+    {
+      "path": "LOSAT/tests/plots/compare_SiNMV_vs_ChdeNMV_BLASTN.png",
+      "sha256": "552c6d85688ce3cf3658d1306b44a0356966327ef2d1514eb684de3e16c943af"
+    },
+    {
+      "path": "LOSAT/tests/plots/compare_SicyWSV.CoBV_BLASTP.png",
+      "sha256": "8c677cfc2ee2fbd99568494cf3fc0b047084c2333548ba2cff49fc2d44a156c9"
+    },
+    {
+      "path": "LOSAT/tests/plots/compare_TrcuMJNV_vs_MellatMJNV_TBLASTX.png",
+      "sha256": "5920e912a9c0be6fa773c44865465037ce930c47356b5c8451b725fb6af592c7"
+    },
+    {
+      "path": "LOSAT/tests/plots/compare_WSSV.CoBV_BLASTP.png",
+      "sha256": "e3d8db29109bbf3471fe2efcbaef91975c591505ad0a828b5212ecbda882ad97"
+    },
+    {
+      "path": "LOSAT/tests/plots/compare_WSSV.PajaWSV_BLASTP.png",
+      "sha256": "0a195040a66a117f1ec7849e4f0ae694efad998d755c3784b6f4a3579538dfa6"
+    },
+    {
+      "path": "LOSAT/tests/plots/compare_WSSV.SicyWSV_BLASTP.png",
+      "sha256": "99ae5a89abd7118b7086c4440049b6a22ad177822b2739b8123664eb1d318161"
+    },
+    {
+      "path": "LOSAT/tests/plots/execution_time_comparison_all.png",
+      "sha256": "98a051df40c94ac925db942f21ace3dea829842f5ad6d319295df196246c5e00"
+    },
+    {
+      "path": "LOSAT/tests/plots/nz_self_missing_hsps_focusbin.csv",
+      "sha256": "e7141238f4d6892aa4bd364fc46d66bee6708e48d8dc17c64b4a57aca346300b"
+    },
+    {
+      "path": "LOSAT/tests/plots/nz_self_tblastx_deficit_bins.csv",
+      "sha256": "1722a79986745d40ac76ebc7a2b700ec31e65a289cd7b9f751fdadc5d7f581ca"
+    },
+    {
+      "path": "LOSAT/tests/plots/overall_trend_comparison.png",
+      "sha256": "14734c2327a2caf9c08b5ba2fa07b7d00a08c53565e45c89e28d886d77216fee"
+    },
+    {
+      "path": "LOSAT/tests/prepare_release_candidate_v010.py",
+      "sha256": "5798c5487f50a26beb2591658360085cf2b3491c94ceb2ec5e1383b68aa82281"
+    },
+    {
+      "path": "LOSAT/tests/pure_rust_runtime_allowlist.tsv",
+      "sha256": "0e35a2d05baa10f1db75cb77c10e7f8c8d23cbd1c00178002edfc0cb82eb8adf"
+    },
+    {
+      "path": "LOSAT/tests/pure_rust_runtime_dependency_review.tsv",
+      "sha256": "fad8b03cffbdb85b37af3dbe584a73c34a38be4d640b6ae2e509a771d49d9caf"
+    },
+    {
+      "path": "LOSAT/tests/run_all_tests.sh",
+      "sha256": "c873765e541855b5fb9fb33a91974b90269351a777208284b2623653c7d324e3"
+    },
+    {
+      "path": "LOSAT/tests/run_blastp_comparison.sh",
+      "sha256": "201661ebf9db1f5d833afed4b4bfc2101cfcb94d9b0209edd2ccde81b933a664"
+    },
+    {
+      "path": "LOSAT/tests/run_blastp_custom_fields_comparison.sh",
+      "sha256": "99531ce90f4268d5e6e219f76ebb52efbdd1870cc33ad3cbb9412ce611409ff4"
+    },
+    {
+      "path": "LOSAT/tests/run_blastp_outfmt7_comparison.sh",
+      "sha256": "d42ab0907e438486a18a894b9dc38ba6156a07ba824b4c0575d95780909aa1a6"
+    },
+    {
+      "path": "LOSAT/tests/run_blastp_pairwise_comparison.sh",
+      "sha256": "0f3eaa606ba3f64d1b134273d3bcceec53aa8cc548a1f2ba39b1018c2936e4b9"
+    },
+    {
+      "path": "LOSAT/tests/run_blastp_pairwise_threads_comparison.sh",
+      "sha256": "a786335c29e747fca2ab4992e2352a3a8f6c9b96b06c399fce94b704b5770ece"
+    },
+    {
+      "path": "LOSAT/tests/run_blastp_threads_comparison.sh",
+      "sha256": "c643270bf340a5cca44aa9bef2a100b5891f3112554a35453e49fa10d5802a74"
+    },
+    {
+      "path": "LOSAT/tests/run_comparison.sh",
+      "sha256": "b10f068e6d7b99214c4ef51bbd808221ecf49d946c30d8ef7247973851e8787d"
+    },
+    {
+      "path": "LOSAT/tests/run_losat_wasi.js",
+      "sha256": "4763eb2e55271c434af1b781d05cc7fffdec039e0747da138afd609c36b5b4fd"
+    },
+    {
+      "path": "LOSAT/tests/run_losat_wasi_threads.js",
+      "sha256": "1570ea56e9bb5852b4a07119e7560486873aae1e65c45fc2dbea9d656974ded2"
+    },
+    {
+      "path": "LOSAT/tests/run_wasm_comparison.sh",
+      "sha256": "61d29888614bf99550db811e2ceb037ae01411ad59f9ccf291d81b54e1101753"
+    },
+    {
+      "path": "LOSAT/tests/tblastx_v010_parity_manifest.tsv",
+      "sha256": "843fe736ca2d284d779a79c605689cbbc1a34a45aabb76c46ed0fd55c0783f9a"
+    },
+    {
+      "path": "LOSAT/tests/test_audit_blastp_v010.py",
+      "sha256": "8ac630f7eb0fcf13138b0d473e749493fbeba073c40a7f0562234fae7a38e42a"
+    },
+    {
+      "path": "LOSAT/tests/test_audit_tblastx_v010.py",
+      "sha256": "7d58b0c81e0e6539ef9445da8a93c4427dc0723cd1a58b30e395a19c0c8d0f51"
+    },
+    {
+      "path": "LOSAT/tests/test_certify_blastn_v010.py",
+      "sha256": "c69c4e71ffbbb7f21ea2e1d44378721a4d864d4b54a9733836da4cf9244182f6"
+    },
+    {
+      "path": "LOSAT/tests/test_certify_integrated_runtime_v010.py",
+      "sha256": "506d29388668205a53d095c5e15b8feb30129f7fd545eccc0691cf162e0323f5"
+    },
+    {
+      "path": "LOSAT/tests/test_certify_platform_native_v010.py",
+      "sha256": "55def0f519a077e61b98d63856bce6a9e9765515198375a6d1aa3148be34ab63"
+    },
+    {
+      "path": "LOSAT/tests/test_check_pure_rust_runtime_boundary.py",
+      "sha256": "7928568989b986efec8c887b3a757927ad7b24987e0a2cc4d3d95d2e9f17acd9"
+    },
+    {
+      "path": "LOSAT/tests/test_compare_blastn_parity.py",
+      "sha256": "a5e05c94c1e8e053e2e9914ceee6591cc10e21db20d291c4c9e0abfc59eeb88c"
+    },
+    {
+      "path": "LOSAT/tests/test_prepare_release_candidate_v010.py",
+      "sha256": "d7beeefb3ea52315d697f3c6ec9587a62f7c55cf00dc963117774fba78bda4b2"
+    },
+    {
+      "path": "LOSAT/tests/unit/blastn/alignment.rs",
+      "sha256": "3fe9caa8a895558bd6c34ce8afc2cdb6aa68c0e79e31a00bbbc3ada03e6afc96"
+    },
+    {
+      "path": "LOSAT/tests/unit/blastn/args.rs",
+      "sha256": "941bd4beab4faf22dac59bdc86e8f45c464d406c6851e4c900613a82c870d80b"
+    },
+    {
+      "path": "LOSAT/tests/unit/blastn/constants.rs",
+      "sha256": "67595961e87f8457775dcb36bdfacf938435698da2088c119b3529c72adc460e"
+    },
+    {
+      "path": "LOSAT/tests/unit/blastn/extension.rs",
+      "sha256": "1a462e54167ac88bbf77357cabbde7043fd18e3c8cfe1d33a633b3fefdbb3e9f"
+    },
+    {
+      "path": "LOSAT/tests/unit/blastn/lookup.rs",
+      "sha256": "7227a5f07c175c02f8ed70537408ce1f4ce15368f98cef472b84d144c26f83a2"
+    },
+    {
+      "path": "LOSAT/tests/unit/blastn/mod.rs",
+      "sha256": "664aacb05d6402bfc9de805ce42f1c4a943780b59dbef48901433d0271bee8de"
+    },
+    {
+      "path": "LOSAT/tests/unit/common/chaining.rs",
+      "sha256": "18253d56b76d1ec6cff8ec9f284d5e950049df3df4acd93d199f4af1652b2f56"
+    },
+    {
+      "path": "LOSAT/tests/unit/common/diagnostics.rs",
+      "sha256": "4e96b6b6a01634dcdbed04d52cac40c1f6d32f95c5e6663847c3d06034e14968"
+    },
+    {
+      "path": "LOSAT/tests/unit/common/evalue.rs",
+      "sha256": "4f3bb3b298514f4bda2b768b8e5c4d0355e546ded1619dfb8c519abc2f3abf32"
+    },
+    {
+      "path": "LOSAT/tests/unit/common/evalue_ncbi.rs",
+      "sha256": "ae7f550816032a1cab68449603d145077af455e9dfafaec2d21858732af3d603"
+    },
+    {
+      "path": "LOSAT/tests/unit/common/mod.rs",
+      "sha256": "92c730b56fdd04d8e1b43755f963ba2beb8b31619b4ac5a2e2a15635f28ae367"
+    },
+    {
+      "path": "LOSAT/tests/unit/helpers.rs",
+      "sha256": "0b6f0adaa7f9aa750d915550e6856f2e64e3bba79ded0716e1fd6886a31fe984"
+    },
+    {
+      "path": "LOSAT/tests/unit/helpers/extract_ncbi_cases.py",
+      "sha256": "ffc00845bd90fcdb6e42acfb78ab95d0ce40ee682ccfcc6e0613d9926972ea51"
+    },
+    {
+      "path": "LOSAT/tests/unit/helpers/extract_ncbi_cases_enhanced.py",
+      "sha256": "86968467bc506f6db24169e2375dbf5fc814a24050883f4a1b1d2ba848642b7e"
+    },
+    {
+      "path": "LOSAT/tests/unit/helpers/generate_ncbi_reference.sh",
+      "sha256": "92e5ead5e28a5abf2284ad0fc3a773d99d0ba6ecf8732cb45a8e4675a9da5f4b"
+    },
+    {
+      "path": "LOSAT/tests/unit/helpers/ncbi_blast_comparison_test.rs",
+      "sha256": "bdb6f99f712e71ee1f56627eed3fda093d2bfe72f36bb06f43c84ba7384644b3"
+    },
+    {
+      "path": "LOSAT/tests/unit/helpers/ncbi_reference.rs",
+      "sha256": "4b95d45de322a823a9d787a45a44ae92b40d7cc13c56c393026d4c9382353412"
+    },
+    {
+      "path": "LOSAT/tests/unit/helpers/ncbi_reference_data/simple_test.log",
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "path": "LOSAT/tests/unit/helpers/ncbi_reference_data/simple_test.out",
+      "sha256": "08688a6956e6b64920dac679b89348923d16ab3cc0bad4754a064c58adf4f53e"
+    },
+    {
+      "path": "LOSAT/tests/unit/helpers/ncbi_reference_data/simple_test2.log",
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "path": "LOSAT/tests/unit/helpers/ncbi_reference_data/simple_test2.out",
+      "sha256": "08688a6956e6b64920dac679b89348923d16ab3cc0bad4754a064c58adf4f53e"
+    },
+    {
+      "path": "LOSAT/tests/unit/helpers/run_verification_example.sh",
+      "sha256": "0d1ff10fd3ab11ff19c3da55cfcb68c0dddcdd8d6a1ade4e36bee3cfb5beb9d2"
+    },
+    {
+      "path": "LOSAT/tests/unit/helpers/test_ncbi_comparison.rs",
+      "sha256": "c58a135839af834c9fb3e981f4c4d1837edc09e0358dae0875f20142548b081b"
+    },
+    {
+      "path": "LOSAT/tests/unit/helpers/test_ncbi_manual.rs",
+      "sha256": "b7a817a2032487e615115c7a839d0ee11f33349f7f9507b1d6949c03076f0581"
+    },
+    {
+      "path": "LOSAT/tests/unit/helpers/test_sequences/query.fasta",
+      "sha256": "d9d1e3d8bea478115a65584407ed5ed810526309382e1c0009e8e8ab27256351"
+    },
+    {
+      "path": "LOSAT/tests/unit/helpers/test_sequences/subject.fasta",
+      "sha256": "d9d1e3d8bea478115a65584407ed5ed810526309382e1c0009e8e8ab27256351"
+    },
+    {
+      "path": "LOSAT/tests/unit/helpers/verify_ncbi_implementation.sh",
+      "sha256": "f49167093a0fe3d7443fd5b4222f912e85e5d1550ec989f276166648f801bbde"
+    },
+    {
+      "path": "LOSAT/tests/unit/mod.rs",
+      "sha256": "f837418d2ecbbbc1329d584717c935bf22fee97ad9531198f04ac7db9a44a35b"
+    },
+    {
+      "path": "LOSAT/tests/unit/stats/evalue_precision.rs",
+      "sha256": "faf17b6e3820bafbcbe6a04a176b3f5f37e22743a2d6203650257f944a292b2b"
+    },
+    {
+      "path": "LOSAT/tests/unit/stats/evalue_precision_fix_verification.rs",
+      "sha256": "9ea822b4dcb763566ad03eeeccfc0e14c6cc28fa68f6113ab70a58e8c3c03c26"
+    },
+    {
+      "path": "LOSAT/tests/unit/stats/mod.rs",
+      "sha256": "ddc455b42b6e173b0223ae54f2242606d17d2b448c479df9eff27fd1410f5a7c"
+    },
+    {
+      "path": "LOSAT/tests/unit/tblastx/args.rs",
+      "sha256": "792f76e8274a7a92624fd4152988320e274de583ba13775780cb32994b0bd830"
+    },
+    {
+      "path": "LOSAT/tests/unit/tblastx/chaining.rs",
+      "sha256": "c808c5c87e67311b688f2d9857f2d9ad4e765069a146624bd241b609fea972ff"
+    },
+    {
+      "path": "LOSAT/tests/unit/tblastx/constants.rs",
+      "sha256": "36f7a5ea5d2a362be2dd1a88a43ae6297ea2736e2c7177ac3e3153237e44a742"
+    },
+    {
+      "path": "LOSAT/tests/unit/tblastx/extension.rs",
+      "sha256": "bd58dd37fb6e24340a7f2cbd237250abb727d4cdc173429a66c44ef87067d7d1"
+    },
+    {
+      "path": "LOSAT/tests/unit/tblastx/lookup.rs",
+      "sha256": "31ec9e6dacb04a7bccd97c559644aa7ecf4a971045fa3d8b0cd556d3ded05aab"
+    },
+    {
+      "path": "LOSAT/tests/unit/tblastx/mod.rs",
+      "sha256": "7328298545879e2a0504aed230409255b94726d7dee3542ee965f54dc590798b"
+    },
+    {
+      "path": "LOSAT/tests/unit/tblastx/run_engine.rs",
+      "sha256": "cf361d604996b40d416557fd3df1f3e9075d11b32e42bb54b60b3ef987b0ae34"
+    },
+    {
+      "path": "LOSAT/tests/unit/tblastx/translation.rs",
+      "sha256": "28522c164054c521547f85ad0a0e09b004ba0c3cdd9345e736993c45dcb3879c"
+    },
+    {
+      "path": "LOSAT/tests/unit_tests.rs",
+      "sha256": "db6f574fcb57cf9d00e17f62c5010b55e053c26ecf5b61dbdb7a7b129b0f7f53"
+    },
+    {
+      "path": "README.md",
+      "sha256": "a92a25f76305bd49a4b04e8146f7c56a13ba18c6cc776461851567e1064c87b9"
+    },
+    {
+      "path": "RELEASE.md",
+      "sha256": "978597d6bfe2b9031f995d06867e7b7dab2bb1ffb331dc5f7daed86887b1638e"
+    },
+    {
+      "path": "SECURITY.md",
+      "sha256": "8fb32fe31e5322639f556e5defd7e33725872511e49206e70e1dd21bb47a7928"
+    },
+    {
+      "path": "benchmarks/v0.1.0/README.md",
+      "sha256": "e5ed7b847908defcf325cf442ce5508550b7421222d03386d4c889dce163b4cf"
+    },
+    {
+      "path": "benchmarks/v0.1.0/alignment_results.tsv.gz",
+      "sha256": "5fd5beb14d87fdc536ac00d53a0a8d08a0c2d541d0d30029a46aeaa041fbcd18"
+    },
+    {
+      "path": "benchmarks/v0.1.0/execution_time.png",
+      "sha256": "4c6c58dafa7d656800cfb2ac9ddef3296fb1e732af77d91b4c126446067ff0c4"
+    },
+    {
+      "path": "benchmarks/v0.1.0/execution_times.tsv",
+      "sha256": "30b0634ef350b19ebdf3794ef9b64c816bc5baf7fb3f240655c1158d0a60482d"
+    },
+    {
+      "path": "benchmarks/v0.1.0/hit_distribution.png",
+      "sha256": "2cd27ef41661c35a289c9af29d356ee3e2e4dee460854d9dc21b83ef75fd4851"
+    },
+    {
+      "path": "benchmarks/v0.1.0/metadata.json",
+      "sha256": "98e10f2d7bc7ce5d1b343b687fe4804cb12aea87ab0f8404b393e7fd70815a45"
+    },
+    {
+      "path": "benchmarks/v0.1.0/plot_data.json",
+      "sha256": "223780966fdec040a62b2bf040091faa23263426bda2097c3da39a57711f647f"
+    },
+    {
+      "path": "benchmarks/v0.1.0/render_manifest.json",
+      "sha256": "00a004f22b011f58a3a1b390567496aaaff0d9e0b16d1269954efc4ed88d2776"
+    },
+    {
+      "path": "cursorrules.mdc",
+      "sha256": "bcb439f896766a39e1ea3765e773aed0e953b8ec542ca2e894492a7c783a9c95"
+    },
+    {
+      "path": "docs/architecture/pure_rust_runtime_authority.md",
+      "sha256": "0da5213a1d1e5fa152cb036b5214901e0b0b52c90e31a30ac093771ec082ed32"
+    },
+    {
+      "path": "docs/blastn_bit_parity_fix_plan.md",
+      "sha256": "f279de681e737bfa8fffeb4410413091ee5505151fe9a984c60161d4799d8b92"
+    },
+    {
+      "path": "docs/blastn_bitwise_parity_implementation_plan.md",
+      "sha256": "e35ecfa96ed94614be8ade53ec05922d66ef84405287f10eac33d0bf8f2ead72"
+    },
+    {
+      "path": "docs/blastn_edl933_sakai_megablast_extra_hsps_fix_plan.md",
+      "sha256": "72a9811506df1fd68b4031450d1563c93b9d11951175ff2109a854c6b8bbd395"
+    },
+    {
+      "path": "docs/blastn_hit_score_divergence_fix_plan.md",
+      "sha256": "00146a0892f97bd2a6a2a6caef82ba8e71e4baf21b8f275a0fca7e842e0895c0"
+    },
+    {
+      "path": "docs/blastn_traceback_prune_performance_plan.md",
+      "sha256": "e39d243053850605ac71951ba82f122748c8f4b604c1605e86231d5b3506e897"
+    },
+    {
+      "path": "docs/blastn_v010_supported_parity_plan.md",
+      "sha256": "fa10c996153e4d9575b829f1e25c3bfc265213cc1f0703d1c1fd7bce5dbc46a6"
+    },
+    {
+      "path": "docs/blastn_visual_divergence_fix_plan.md",
+      "sha256": "74447297ff31e64dc3336e9a75a7769b89ecc17a903cdc950956f522b24e96a5"
+    },
+    {
+      "path": "docs/blastp_bit_parity_implementation_plan.md",
+      "sha256": "de71cf7de6246598056ce06501a3a885d9087984e4d97127d4166ce79c177728"
+    },
+    {
+      "path": "docs/blastp_performance_analysis.md",
+      "sha256": "3ab93e2e4bf0e026daeb98332fb96d2d9ef01af4a18c62fcf38ceae135d5f27a"
+    },
+    {
+      "path": "docs/blastp_wasm_current_thread_pool_plan.md",
+      "sha256": "9704e5fb488333a06ddab3ac8552ffe919d38e60eb22621747f6b1c443daf34e"
+    },
+    {
+      "path": "docs/product_decisions/PD-BLASTN-HSP-CANONICALIZATION.md",
+      "sha256": "2b5e5f5ebaae10147686cbc21de36d4ea078fb53f26e3a947c6230e24db56ac5"
+    },
+    {
+      "path": "docs/product_decisions/PD-NCBI-PLATFORM-VARIANCE.md",
+      "sha256": "0af8a25a851cc94f058c0841100e4240e6b1e84adbe67b4e4e5823e682e6cc0b"
+    },
+    {
+      "path": "docs/product_decisions/PD-PURE-RUST-RUNTIME-AUTHORITY.md",
+      "sha256": "17636890b4d1308fce68cdd40fb4ca1597ce49a6947e2f29cc1499c4e58cf139"
+    },
+    {
+      "path": "docs/release/blastn_v0.1.0_certification.md",
+      "sha256": "12d0acf39962e329c8a3e962712ee630fc75feded7af84b48e2e369b15ec006d"
+    },
+    {
+      "path": "docs/release/blastp_v0.1.0_certification.md",
+      "sha256": "0ec6a070ad1122792f5874ef31195c9f32a0e2f2887dfc2c0f9a00b14c14bf13"
+    },
+    {
+      "path": "docs/release/pure_rust_runtime_v0.1.0_certification.md",
+      "sha256": "43a268377f240ca31e2954b2cbaa229a2db16e2c86c1cbc944c383c1ca8a1ff3"
+    },
+    {
+      "path": "docs/release/tblastx_v0.1.0_certification.md",
+      "sha256": "705a06424858d7d6eede19da0c19a7a2ae334e7b62ac4e087f2921c8a0fea259"
+    },
+    {
+      "path": "docs/release/v0.1.0.md",
+      "sha256": "9a0728249d2c6f0936f7e69175c744763f96b0a4f5acf63f3c7b97d6a242e570"
+    },
+    {
+      "path": "docs/release/v0.1.0_rc_contract.json",
+      "sha256": "8f406a5047f14e754c0a33c847693a4a0294e0cafc26cb2ae7915f8cb850dc6f"
+    },
+    {
+      "path": "docs/tblastx_native_ncbi_parity_plan.md",
+      "sha256": "f8eeb8ffb974d5077122df658ba9eedbbfdbb488e8f84967b3b212892d811a44"
+    },
+    {
+      "path": "docs/tblastx_wasm_parity_plan.md",
+      "sha256": "7a6c265011d1b2aee6dbb66ff09285a416133a5c718002ea3528fa345e6c009a"
+    },
+    {
+      "path": "docs/v0.1.0_release_readiness_plan.md",
+      "sha256": "d6053cc484333942bb3201edf5d4941f73d66775fdc759adf24614210bd788ab"
+    },
+    {
+      "path": "docs/v0.1.0_scope.md",
+      "sha256": "6ca2073946f63f1b16fa7b4b175ee04f9564661701ea4b8efa15b05019e10356"
+    },
+    {
+      "path": "docs/wasm_multithreading_improvement_plan.md",
+      "sha256": "12b04bec14994ded87f739b775ca2a02be2401af0dea4d1c120132b042774392"
+    },
+    {
+      "path": "losat_out/AP027280.AP027280.tlosatx.n1.final.out",
+      "sha256": "efc1ed005b8c2475398f873f9123d84a0ed00a9d5134f8fbbe268e1349db09cf"
+    },
+    {
+      "path": "losat_out/AP027280.AP027280.tlosatx.n1.log",
+      "sha256": "1f5e7fed8f64761ce58ec9875471cd434ca7f67518076a40a4d1ccaf727bb6e5"
+    },
+    {
+      "path": "losat_out/AP027280.AP027280.tlosatx.n1.opt.out",
+      "sha256": "efc1ed005b8c2475398f873f9123d84a0ed00a9d5134f8fbbe268e1349db09cf"
+    },
+    {
+      "path": "losat_out/AP027280.AP027280.tlosatx.n1.out",
+      "sha256": "efc1ed005b8c2475398f873f9123d84a0ed00a9d5134f8fbbe268e1349db09cf"
+    },
+    {
+      "path": "losat_out/AP027280.AP027280.tlosatx.n1.timing.out",
+      "sha256": "efc1ed005b8c2475398f873f9123d84a0ed00a9d5134f8fbbe268e1349db09cf"
+    },
+    {
+      "path": "packaging/bioconda/README.md",
+      "sha256": "30a7cd87224a07f3190c7f38495be3797f8a7f7a41c501e0a0e1d5a96bc741c7"
+    },
+    {
+      "path": "packaging/bioconda/build.sh",
+      "sha256": "6fc5fd1ec7a7988803968288ec907a335bfb2a7a55e595e1d1df67723c57d86b"
+    },
+    {
+      "path": "packaging/bioconda/meta.yaml.template",
+      "sha256": "07950a762a6ef22de25ed57743798e9f5a468425e40467d9b3ab64d9caa33c50"
+    },
+    {
+      "path": "scripts/render_benchmark_plots.py",
+      "sha256": "1f439869eb3be6ddf5e215c04eaeb79eab542e34219e321f724a388407077a6b"
+    },
+    {
+      "path": "tests/analyze_blast_results.py",
+      "sha256": "dae11d1f9a2255303b4a2a6b4ceaa3a48cc8fe309639701f2ec949a406b01055"
+    },
+    {
+      "path": "tests/analyze_debug_output.py",
+      "sha256": "cc0db3177e1b0b8ea76c83ab4e9d499287dbad1f30bf00950f6e3b54c02ff012"
+    },
+    {
+      "path": "tests/classify_tblastx_outfmt6.py",
+      "sha256": "1b87fb5ca7be0c62a29c3301e529ba9344cee031fef89e00a9eb818bf32e2479"
+    },
+    {
+      "path": "tests/compare_long_sequences_debug.sh",
+      "sha256": "9648630cd8e588ed8baed4fbd3f79bc18b0529dce1eace16e71a039c9dadfc68"
+    },
+    {
+      "path": "tests/compare_self_tblastx.sh",
+      "sha256": "9eb430b9006abeb1cfced142efd65792334986132df3db1ed5d69f2922f8513f"
+    },
+    {
+      "path": "tests/compare_tblastx_native_ncbi_parity.sh",
+      "sha256": "af9b10f192523b430e91da61556249eb7320eb17e5b34b11e9d38c9c2b64fd6c"
+    },
+    {
+      "path": "tests/compare_tblastx_wasm_parity.sh",
+      "sha256": "b156f62cf62d014d6e9a6653d9e421c449946e9f3b6532ce559f37c6744dcabf"
+    },
+    {
+      "path": "tests/test_render_benchmark_plots.py",
+      "sha256": "a4903c65d40073686baf5ff7b0dbc138da794b779d51c9d3427239ab9356dc00"
+    }
+  ],
+  "dirty_identity": "b901975997bc4754f1bd0d2eb222f9c2a6c9c575e11405faf1656f2db25b82be"
+}

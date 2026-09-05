@@ -1,0 +1,116 @@
+[
+  {
+    "argv": [
+      "/tmp/losat-pr01-20260905/serial/wasm32-wasip1/release/LOSAT.wasm",
+      "blastp",
+      "--query",
+      "/tmp/losat-pr5-runtime-cert-5845d22/LOSAT/tests/fasta/SicyWSV.faa",
+      "--subject",
+      "/tmp/losat-pr5-runtime-cert-5845d22/LOSAT/tests/fasta/SicyWSV.faa",
+      "--outfmt",
+      "6",
+      "--num-threads",
+      "1",
+      "--out",
+      "/mnt/c/Users/genom/GitHub/LOSAT/docs/wasm-performance/PR01/warm/blastp/all_hsp_self_serial/repeat-0.txt"
+    ],
+    "expected_sha256": "67911f4a93327e9622afe10d15a66d9e52ae8e1c3d905db9ca5fb018d6612e46",
+    "output": "/mnt/c/Users/genom/GitHub/LOSAT/docs/wasm-performance/PR01/warm/blastp/all_hsp_self_serial/repeat-0.txt",
+    "repeat": 0
+  },
+  {
+    "argv": [
+      "/tmp/losat-pr01-20260905/serial/wasm32-wasip1/release/LOSAT.wasm",
+      "blastp",
+      "--query",
+      "/tmp/losat-pr5-runtime-cert-5845d22/LOSAT/tests/fasta/SicyWSV.faa",
+      "--subject",
+      "/tmp/losat-pr5-runtime-cert-5845d22/LOSAT/tests/fasta/SicyWSV.faa",
+      "--outfmt",
+      "6",
+      "--num-threads",
+      "1",
+      "--out",
+      "/mnt/c/Users/genom/GitHub/LOSAT/docs/wasm-performance/PR01/warm/blastp/all_hsp_self_serial/repeat-1.txt"
+    ],
+    "expected_sha256": "67911f4a93327e9622afe10d15a66d9e52ae8e1c3d905db9ca5fb018d6612e46",
+    "output": "/mnt/c/Users/genom/GitHub/LOSAT/docs/wasm-performance/PR01/warm/blastp/all_hsp_self_serial/repeat-1.txt",
+    "repeat": 1
+  },
+  {
+    "argv": [
+      "/tmp/losat-pr01-20260905/serial/wasm32-wasip1/release/LOSAT.wasm",
+      "blastp",
+      "--query",
+      "/tmp/losat-pr5-runtime-cert-5845d22/LOSAT/tests/fasta/SicyWSV.faa",
+      "--subject",
+      "/tmp/losat-pr5-runtime-cert-5845d22/LOSAT/tests/fasta/SicyWSV.faa",
+      "--outfmt",
+      "6",
+      "--num-threads",
+      "1",
+      "--out",
+      "/mnt/c/Users/genom/GitHub/LOSAT/docs/wasm-performance/PR01/warm/blastp/all_hsp_self_serial/repeat-2.txt"
+    ],
+    "expected_sha256": "67911f4a93327e9622afe10d15a66d9e52ae8e1c3d905db9ca5fb018d6612e46",
+    "output": "/mnt/c/Users/genom/GitHub/LOSAT/docs/wasm-performance/PR01/warm/blastp/all_hsp_self_serial/repeat-2.txt",
+    "repeat": 2
+  },
+  {
+    "argv": [
+      "/tmp/losat-pr01-20260905/serial/wasm32-wasip1/release/LOSAT.wasm",
+      "blastp",
+      "--query",
+      "/tmp/losat-pr5-runtime-cert-5845d22/LOSAT/tests/fasta/SicyWSV.faa",
+      "--subject",
+      "/tmp/losat-pr5-runtime-cert-5845d22/LOSAT/tests/fasta/SicyWSV.faa",
+      "--outfmt",
+      "6",
+      "--num-threads",
+      "1",
+      "--out",
+      "/mnt/c/Users/genom/GitHub/LOSAT/docs/wasm-performance/PR01/warm/blastp/all_hsp_self_serial/repeat-3.txt"
+    ],
+    "expected_sha256": "67911f4a93327e9622afe10d15a66d9e52ae8e1c3d905db9ca5fb018d6612e46",
+    "output": "/mnt/c/Users/genom/GitHub/LOSAT/docs/wasm-performance/PR01/warm/blastp/all_hsp_self_serial/repeat-3.txt",
+    "repeat": 3
+  },
+  {
+    "argv": [
+      "/tmp/losat-pr01-20260905/serial/wasm32-wasip1/release/LOSAT.wasm",
+      "blastp",
+      "--query",
+      "/tmp/losat-pr5-runtime-cert-5845d22/LOSAT/tests/fasta/SicyWSV.faa",
+      "--subject",
+      "/tmp/losat-pr5-runtime-cert-5845d22/LOSAT/tests/fasta/SicyWSV.faa",
+      "--outfmt",
+      "6",
+      "--num-threads",
+      "1",
+      "--out",
+      "/mnt/c/Users/genom/GitHub/LOSAT/docs/wasm-performance/PR01/warm/blastp/all_hsp_self_serial/repeat-4.txt"
+    ],
+    "expected_sha256": "67911f4a93327e9622afe10d15a66d9e52ae8e1c3d905db9ca5fb018d6612e46",
+    "output": "/mnt/c/Users/genom/GitHub/LOSAT/docs/wasm-performance/PR01/warm/blastp/all_hsp_self_serial/repeat-4.txt",
+    "repeat": 4
+  },
+  {
+    "argv": [
+      "/tmp/losat-pr01-20260905/serial/wasm32-wasip1/release/LOSAT.wasm",
+      "blastp",
+      "--query",
+      "/tmp/losat-pr5-runtime-cert-5845d22/LOSAT/tests/fasta/SicyWSV.faa",
+      "--subject",
+      "/tmp/losat-pr5-runtime-cert-5845d22/LOSAT/tests/fasta/SicyWSV.faa",
+      "--outfmt",
+      "6",
+      "--num-threads",
+      "1",
+      "--out",
+      "/mnt/c/Users/genom/GitHub/LOSAT/docs/wasm-performance/PR01/warm/blastp/all_hsp_self_serial/repeat-5.txt"
+    ],
+    "expected_sha256": "67911f4a93327e9622afe10d15a66d9e52ae8e1c3d905db9ca5fb018d6612e46",
+    "output": "/mnt/c/Users/genom/GitHub/LOSAT/docs/wasm-performance/PR01/warm/blastp/all_hsp_self_serial/repeat-5.txt",
+    "repeat": 5
+  }
+]

@@ -1,0 +1,37 @@
+{
+  "archive": {
+    "path": "/home/kawato/tools/ncbi-blast-source/ncbi-blast-2.17.0+-src.tar.gz",
+    "sha256": "502057a88e9990e34e62758be21ea474cc0ad68d6a63a2e37b2372af1e5ea147"
+  },
+  "sources": [
+    {
+      "archive_member": "ncbi-blast-2.17.0+-src/c++/src/algo/blast/core/blast_kappa.c",
+      "local_sha256": "fafd8a9c22dec6d749e0acf7ba7618761af016ba4a6a8c84d4170aadc2ff1104",
+      "official_sha256": "dff4b613721fa698afe2f951950566b9e446db7aeb00d55d56e31f772283616b",
+      "path": "c++/src/algo/blast/core/blast_kappa.c",
+      "source_text_equal_ignoring_checkout_crlf": true
+    },
+    {
+      "archive_member": "ncbi-blast-2.17.0+-src/c++/src/algo/blast/composition_adjustment/redo_alignment.c",
+      "local_sha256": "873feff4bcea894351d995e3d38695fd0f2252d3bf191a0e99a32532759c9821",
+      "official_sha256": "11c4592d703a9b241ac687659e1f587ade9742ff3a8491626b9520c03862b37c",
+      "path": "c++/src/algo/blast/composition_adjustment/redo_alignment.c",
+      "source_text_equal_ignoring_checkout_crlf": true
+    },
+    {
+      "archive_member": "ncbi-blast-2.17.0+-src/c++/src/algo/blast/blastinput/blast_args.cpp",
+      "local_sha256": "f2c084fe5155cd2eb23313f89979175f99ddea2b58f6ae733e2f32025893c51f",
+      "official_sha256": "c495828ef29b66a3afaa537ff6838f35e9d100f37121577dd0953117b0dc9336",
+      "path": "c++/src/algo/blast/blastinput/blast_args.cpp",
+      "source_text_equal_ignoring_checkout_crlf": true
+    },
+    {
+      "archive_member": "ncbi-blast-2.17.0+-src/c++/src/algo/blast/api/prelim_stage.cpp",
+      "local_sha256": "d7a6d47ce8caea36ae2c48c2870f694442918f312b3d456eee915ae9281afcfd",
+      "official_sha256": "8f9d012fe8f42233febb817255c4f56e4ad145632a2b7df650b85ac62446ebaa",
+      "path": "c++/src/algo/blast/api/prelim_stage.cpp",
+      "source_text_equal_ignoring_checkout_crlf": true
+    }
+  ],
+  "status": "PASS"
+}

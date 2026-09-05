@@ -1,0 +1,12 @@
+{
+  "cpu_system_seconds": null,
+  "cpu_user_seconds": null,
+  "exit_status": null,
+  "output": "/mnt/c/Users/genom/GitHub/LOSAT/docs/wasm-performance/PR01/initial-audit/tblastx/p11_avclpv_psclpv/native-1/repeat-0/output.txt",
+  "peak_rss_bytes": null,
+  "raw_output_bytes": null,
+  "raw_output_sha256": null,
+  "reason": "exceeded 120s",
+  "status": "TIMEOUT",
+  "wall_seconds": 120.01905330899899
+}

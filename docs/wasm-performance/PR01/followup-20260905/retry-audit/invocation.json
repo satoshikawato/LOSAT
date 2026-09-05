@@ -1,0 +1,19 @@
+{
+  "argv": [
+    "docs/wasm-performance/PR01/followup-20260905/retry_audit.py"
+  ],
+  "driver_sha256": "96649dffc89a831bde50f2f363c67b680e78f1b521399906eaa98b45f0dd9bfa",
+  "harness_sha256": "f451bc93df01b4f5513dfe6dc247d84edd1ee6f025915844e0202e94fbe1f12b",
+  "manifest_sha256": "cf0ece7ff6a85d2d9fa833c38e404e8b31ec92c98a16459d37064b18b20a82d3",
+  "selected_cases": [
+    "p11_avclpv_psclpv",
+    "p10_meenmjnv_mejomjnv",
+    "d01_nz_self_code4",
+    "d02_ap027132_nz_code4",
+    "d03_ap027078_ap027131_code4",
+    "d04_ap027131_ap027133_code4",
+    "d05_ap027133_ap027132_code4",
+    "p06_pemojnva_lvmjnv"
+  ],
+  "timing_eligible": false
+}

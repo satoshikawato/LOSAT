@@ -1,0 +1,25 @@
+{
+  "archive_path": "/home/kawato/tools/ncbi-blast-oracle/downloads/2.17.0/ncbi-blast-2.17.0+-x64-linux.tar.gz",
+  "sha256": "3888112d8207831aa47371d93583c601f058f88b5db22dc782438b039a3a411b",
+  "published_checksum_file": "/home/kawato/tools/ncbi-blast-oracle/downloads/2.17.0/ncbi-blast-2.17.0+-x64-linux.tar.gz.md5",
+  "published_md5": "bdec166721de3b55f90a3badc83538e8",
+  "observed_md5": "bdec166721de3b55f90a3badc83538e8",
+  "status": "PASS",
+  "executables": {
+    "blastn": {
+      "member": "ncbi-blast-2.17.0+/bin/blastn",
+      "sha256": "33b64bc67d3149cee2459b2f7766b363323df632cf12c099546de00aea9698b5",
+      "equals_installed_bytes": true
+    },
+    "blastp": {
+      "member": "ncbi-blast-2.17.0+/bin/blastp",
+      "sha256": "5ce267c04e4988c265357bfbedc64e809545b6fcfae7ff6775266fabbee8ba0e",
+      "equals_installed_bytes": true
+    },
+    "tblastx": {
+      "member": "ncbi-blast-2.17.0+/bin/tblastx",
+      "sha256": "583e5d60bbd444ac455d20e0956c5aa0aeef675da8daee8204d8f9376ddb8804",
+      "equals_installed_bytes": true
+    }
+  }
+}

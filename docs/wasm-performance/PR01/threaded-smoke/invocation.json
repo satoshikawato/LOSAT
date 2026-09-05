@@ -1,0 +1,22 @@
+{
+  "argv": [
+    "LOSAT/tests/wasm_performance.py",
+    "run",
+    "--manifest",
+    "docs/wasm-performance/PR01/contract/manifest.json",
+    "--output",
+    "docs/wasm-performance/PR01/threaded-smoke",
+    "--phase",
+    "profile",
+    "--targets",
+    "threaded",
+    "--threads",
+    "1",
+    "4",
+    "--case",
+    "all_hsp_self_serial"
+  ],
+  "harness_sha256": "fb220778789ab2d673e58563c75290b301cd5ae016f225407bee609bba689017",
+  "manifest_sha256": "fe1b776ab6916bbbb4a5743f4d735c75a07bf4479349ebf81644b9b885c7b919",
+  "phase": "profile"
+}

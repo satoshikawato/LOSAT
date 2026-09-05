@@ -1,0 +1,290 @@
+{
+  "leaf_samples": [
+    {
+      "count": 685,
+      "fraction": 0.46440677966101696,
+      "function": "_ZN5LOSAT9algorithm6blastp8gapalign16align_ex_protein17h04862ea25c6c43c8E"
+    },
+    {
+      "count": 253,
+      "fraction": 0.17152542372881355,
+      "function": "_ZN5LOSAT4core22composition_adjustment14redo_alignment35blast_redo_one_match_with_workspace17h30252fbeaa56e9e2E"
+    },
+    {
+      "count": 186,
+      "fraction": 0.12610169491525425,
+      "function": "_ZN5LOSAT9algorithm6blastp8gapalign27align_ex_protein_score_only17h94ca0a547f24e647E"
+    },
+    {
+      "count": 86,
+      "fraction": 0.05830508474576271,
+      "function": "_ZN5LOSAT9algorithm6blastp12blast_engine25run_resolved_with_records28_$u7b$$u7b$closure$u7d$$u7d$28_$u7b$$u7b$closure$u7d$$u7d$17hc07230c36d0c91d1E"
+    },
+    {
+      "count": 30,
+      "fraction": 0.020338983050847456,
+      "function": "log"
+    },
+    {
+      "count": 24,
+      "fraction": 0.016271186440677966,
+      "function": "compileForInternalLoader"
+    },
+    {
+      "count": 24,
+      "fraction": 0.016271186440677966,
+      "function": "_ZN5LOSAT9algorithm7tblastx6lookup8backbone27blast_aa_add_word_hits_core17h939b61e02e257a15E"
+    },
+    {
+      "count": 22,
+      "fraction": 0.014915254237288136,
+      "function": "_ZN5LOSAT9algorithm7tblastx6lookup8backbone25blast_lookup_add_word_hit17h82634bbcef9b2addE"
+    },
+    {
+      "count": 21,
+      "fraction": 0.01423728813559322,
+      "function": "_ZN5LOSAT5stats11karlin_calc30compute_karlin_params_ungapped17h10abdc9260aef59dE"
+    },
+    {
+      "count": 21,
+      "fraction": 0.01423728813559322,
+      "function": "_ZN5LOSAT9algorithm6blastp12blast_engine25run_resolved_with_records28_$u7b$$u7b$closure$u7d$$u7d$17h1865b24bfc61801dE"
+    },
+    {
+      "count": 13,
+      "fraction": 0.008813559322033898,
+      "function": "(idle)"
+    },
+    {
+      "count": 10,
+      "fraction": 0.006779661016949152,
+      "function": "_ZN5LOSAT9algorithm6blastp9extension11extend_left17h3525539ac8392086E"
+    },
+    {
+      "count": 9,
+      "fraction": 0.006101694915254237,
+      "function": "dlmalloc"
+    },
+    {
+      "count": 9,
+      "fraction": 0.006101694915254237,
+      "function": "_ZN5LOSAT4core22composition_adjustment13adjust_scores13multiply_by_a17hd6d42f780250e1abE"
+    },
+    {
+      "count": 7,
+      "fraction": 0.0047457627118644066,
+      "function": "realpathSync"
+    },
+    {
+      "count": 6,
+      "fraction": 0.004067796610169492,
+      "function": "calloc"
+    },
+    {
+      "count": 5,
+      "fraction": 0.003389830508474576,
+      "function": "read"
+    },
+    {
+      "count": 5,
+      "fraction": 0.003389830508474576,
+      "function": "_ZN3std2io8buffered9bufwriter18BufWriter$LT$W$GT$9flush_buf17heb6a3b5053211464E"
+    },
+    {
+      "count": 4,
+      "fraction": 0.002711864406779661,
+      "function": "_ZN5LOSAT9algorithm6blastp12blast_engine25run_resolved_with_records17h9c73f7154988ad34E"
+    },
+    {
+      "count": 4,
+      "fraction": 0.002711864406779661,
+      "function": "_ZN5LOSAT4core22composition_adjustment13adjust_scores19read_aa_composition17h82b07e3b8d4e166eE"
+    },
+    {
+      "count": 4,
+      "fraction": 0.002711864406779661,
+      "function": "_ZN5LOSAT9algorithm6blastp8gapalign19gap_alloc_trace_row17h9d51959ab74fe57cE"
+    },
+    {
+      "count": 3,
+      "fraction": 0.002033898305084746,
+      "function": "(program)"
+    },
+    {
+      "count": 3,
+      "fraction": 0.002033898305084746,
+      "function": ""
+    },
+    {
+      "count": 3,
+      "fraction": 0.002033898305084746,
+      "function": "dlfree"
+    },
+    {
+      "count": 3,
+      "fraction": 0.002033898305084746,
+      "function": "_ZN3std2fs11OpenOptions5_open17h7cc58d6816264795E"
+    },
+    {
+      "count": 2,
+      "fraction": 0.0013559322033898306,
+      "function": "(garbage collector)"
+    },
+    {
+      "count": 2,
+      "fraction": 0.0013559322033898306,
+      "function": "WASI"
+    },
+    {
+      "count": 2,
+      "fraction": 0.0013559322033898306,
+      "function": "_ZN5LOSAT9algorithm7tblastx6lookup8backbone17build_ncbi_lookup17h1998decc3c6dd5c1E"
+    },
+    {
+      "count": 2,
+      "fraction": 0.0013559322033898306,
+      "function": "_ZN5LOSAT9algorithm6blastp9extension12extend_right17hf561bcf50743aefaE"
+    },
+    {
+      "count": 2,
+      "fraction": 0.0013559322033898306,
+      "function": "_ZN5LOSAT9algorithm6blastn13interval_tree17BlastIntervalTree30interval_tree_has_hsp_endpoint17h627c20053555c1eaE"
+    },
+    {
+      "count": 1,
+      "fraction": 0.0006779661016949153,
+      "function": "internalBinding"
+    },
+    {
+      "count": 1,
+      "fraction": 0.0006779661016949153,
+      "function": "wrapConsole"
+    },
+    {
+      "count": 1,
+      "fraction": 0.0006779661016949153,
+      "function": "initializeGlobalConsole"
+    },
+    {
+      "count": 1,
+      "fraction": 0.0006779661016949153,
+      "function": "setupUserModules"
+    },
+    {
+      "count": 1,
+      "fraction": 0.0006779661016949153,
+      "function": "stat"
+    },
+    {
+      "count": 1,
+      "fraction": 0.0006779661016949153,
+      "function": "toRealPath"
+    },
+    {
+      "count": 1,
+      "fraction": 0.0006779661016949153,
+      "function": "readPackage"
+    },
+    {
+      "count": 1,
+      "fraction": 0.0006779661016949153,
+      "function": "openSync"
+    },
+    {
+      "count": 1,
+      "fraction": 0.0006779661016949153,
+      "function": "tryStatSync"
+    },
+    {
+      "count": 1,
+      "fraction": 0.0006779661016949153,
+      "function": "readSync"
+    },
+    {
+      "count": 1,
+      "fraction": 0.0006779661016949153,
+      "function": "closeSync"
+    },
+    {
+      "count": 1,
+      "fraction": 0.0006779661016949153,
+      "function": "syncExports"
+    },
+    {
+      "count": 1,
+      "fraction": 0.0006779661016949153,
+      "function": "compile"
+    },
+    {
+      "count": 1,
+      "fraction": 0.0006779661016949153,
+      "function": "instantiate"
+    },
+    {
+      "count": 1,
+      "fraction": 0.0006779661016949153,
+      "function": "_ZN4core3str4iter22SplitInternal$LT$P$GT$4next17h91ddbe6be6356aa3E"
+    },
+    {
+      "count": 1,
+      "fraction": 0.0006779661016949153,
+      "function": "_ZN5LOSAT9algorithm7tblastx6lookup8backbone20prepare_lookup_query17h14302c823ce61016E"
+    },
+    {
+      "count": 1,
+      "fraction": 0.0006779661016949153,
+      "function": "_ZN5alloc7raw_vec20RawVecInner$LT$A$GT$7reserve21do_reserve_and_handle17hc8745c9061db68a7E"
+    },
+    {
+      "count": 1,
+      "fraction": 0.0006779661016949153,
+      "function": "_ZN5LOSAT9algorithm6blastn13interval_tree17BlastIntervalTree14containing_hsp17h5e1813e1542eac9dE"
+    },
+    {
+      "count": 1,
+      "fraction": 0.0006779661016949153,
+      "function": "_ZN5LOSAT9algorithm6blastp12blast_engine32preliminary_query_offset_compare17h371d8ac19da7bfe2E"
+    },
+    {
+      "count": 1,
+      "fraction": 0.0006779661016949153,
+      "function": "_ZN5LOSAT5utils3seg9SegMasker13mask_sequence7seg_seq17hf402e9488e7b8424E"
+    },
+    {
+      "count": 1,
+      "fraction": 0.0006779661016949153,
+      "function": "malloc"
+    },
+    {
+      "count": 1,
+      "fraction": 0.0006779661016949153,
+      "function": "_ZN5LOSAT4core22composition_adjustment13adjust_scores14set_xuo_scores17hea20b9a8a0521d36E"
+    },
+    {
+      "count": 1,
+      "fraction": 0.0006779661016949153,
+      "function": "_ZN5LOSAT4core10blast_stat11composition17compute_lambda_nr17h3abfadfa97cf2b5fE"
+    },
+    {
+      "count": 1,
+      "fraction": 0.0006779661016949153,
+      "function": "fmin"
+    },
+    {
+      "count": 1,
+      "fraction": 0.0006779661016949153,
+      "function": "__wasi_fd_close"
+    }
+  ],
+  "limitations": [
+    "Diagnostic CPU attribution, not engine wall-time partition or latency benchmark.",
+    "Oracle audit may overlap; no latency numbers used.",
+    "Inclusive redo includes alignment work and does not isolate allocation/reset.",
+    "Release inlining and sampling limit stage attribution."
+  ],
+  "profile_sha256": "71a479a2ec54f5c5949af33571b7558233071d0dd6de061b406bd98adb77dda0",
+  "redo_workspace_inclusive_fraction": 0.6759322033898305,
+  "redo_workspace_inclusive_samples": 997,
+  "requested_interval_microseconds": 1000,
+  "sample_count": 1475
+}

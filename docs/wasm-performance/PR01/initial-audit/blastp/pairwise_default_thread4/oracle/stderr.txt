@@ -1,0 +1,1 @@
+Warning: [blastp] 'num_threads' is currently ignored when 'subject' is specified.

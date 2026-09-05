@@ -30,8 +30,16 @@ Ubuntu 24.04.3 machine with an Intel Core i9-14900HX. The six modes are NCBI
 BLAST+ n1/n8, LOSAT native n1/n8, LOSAT serial `wasm32-wasip1`, and LOSAT
 threaded `wasm32-wasip1-threads` requested n8. All use regular-file output on
 the persistent evidence filesystem. Each case/mode group has one protocol
-warmup followed by five retained timed repetitions; points show the median and
+warmup followed by five retained timed repetitions; bar lengths show the median and
 whiskers show the full five-sample range.
+
+The execution-time figure uses horizontal grouped bars in four facets:
+TBLASTX, BLASTN, Megablast, and BLASTP. Each facet has its own zero-based linear
+axis in seconds (`sharex=False`), sized to include its full retained range.
+All six NCBI/native/Wasm modes appear together for each case with one shared
+legend. The compact 2×2 layout keeps case labels readable; exact case IDs remain
+in `plot_data.json` and `metadata.json`. The historical
+`LOSAT/tests/plot_execution_time.py` supplies only the visual-layout reference.
 
 This is a same-machine controlled benchmark collected in two execution
 segments, with binary/toolchain identities revalidated after restart. Segment 1

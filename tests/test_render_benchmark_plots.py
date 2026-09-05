@@ -7,7 +7,6 @@ import csv
 import gzip
 import hashlib
 import importlib.util
-import inspect
 import json
 import tempfile
 import unittest
@@ -284,8 +283,18 @@ class RendererTests(unittest.TestCase):
             [1.5, 2.5, 3.5, 4.5, 5.5, 6.5],
         )
 
-    def test_execution_time_figure_is_one_panel_with_linear_y_axis(self) -> None:
-        metadata, _ = RENDERER.load_metadata(self.snapshot)
+    # NCBI reference: ncbi-blast/c++/src/algo/blast/blastinput/blastn_args.cpp:48,55-61
+    # static const char kProgram[] = "blastn";
+    # static const char kDefaultTask[] = "megablast";
+    # SetTask(kDefaultTask);
+    # arg.Reset(new CTaskCmdLineArgs(tasks, kDefaultTask));
+    # Validate presentation of the recorded task identities and samples only.
+    def test_current_snapshot_has_independent_linear_facets_and_all_modes(self) -> None:
+        snapshot = ROOT / "benchmarks" / "v0.1.0"
+        metadata, _ = RENDERER.load_metadata(snapshot)
+        expected = json.loads((snapshot / "plot_data.json").read_text())[
+            "plots"
+        ]["execution_time"]
         figures = []
         original_figure = RENDERER.plt.figure
 
@@ -297,26 +306,73 @@ class RendererTests(unittest.TestCase):
         with mock.patch.object(
             RENDERER.plt, "figure", side_effect=capture_figure
         ):
-            RENDERER.render_execution_time(
-                self.snapshot / "execution_times.tsv",
+            _, plot_data = RENDERER.render_execution_time(
+                snapshot / "execution_times.tsv",
                 Path(self.temporary_directory.name) / "execution-time.png",
                 metadata["datasets"]["execution_times"],
             )
 
         self.assertEqual(len(figures), 1)
-        self.assertEqual(len(figures[0].axes), 1)
-        axis = figures[0].axes[0]
-        self.assertEqual(axis.get_xscale(), "linear")
-        self.assertEqual(axis.get_yscale(), "linear")
-        self.assertEqual(axis.get_ylabel(), "Execution time (s)")
-        self.assertEqual(axis.get_title(), "Execution time comparison")
+        figure = figures[0]
+        expected_facets = {
+            "TBLASTX": [
+                "p03_mela_pemojnva",
+                "d06_ap027131_ap027133_db4",
+                "p11_avclpv_psclpv",
+            ],
+            "BLASTN": ["PesePMNV.MjPMNV.task_blastn"],
+            "Megablast": ["Sakai.MG1655.megablast"],
+            "BLASTP": ["pairwise_default_serial"],
+        }
         self.assertEqual(
-            axis.get_legend_handles_labels()[1],
+            [axis.get_title() for axis in figure.axes], list(expected_facets)
+        )
+        self.assertEqual(len(figure.legends), 1)
+        self.assertEqual(
+            [text.get_text() for text in figure.legends[0].get_texts()],
             [RENDERER.TIMING_MODE_LABELS[mode] for mode in RENDERER.TIMING_MODES],
         )
-        source = inspect.getsource(RENDERER.render_execution_time)
-        for forbidden in ("set_xscale(", "set_yscale(", "semilogy(", "symlog("):
-            self.assertNotIn(forbidden, source)
+        self.assertEqual(len({axis.get_xlim() for axis in figure.axes}), 4)
+        self.assertEqual(sum(len(axis.patches) for axis in figure.axes), 36)
+        summaries = expected["current"]["summaries"]
+        lookup = {(row["case_id"], row["mode"]): row for row in summaries}
+        for axis in figure.axes:
+            self.assertEqual(axis.get_xscale(), "linear")
+            self.assertEqual(axis.get_yscale(), "linear")
+            self.assertEqual(axis.get_xlabel(), "Execution time (s)")
+            self.assertEqual(axis.get_xlim()[0], 0)
+            self.assertEqual(list(axis.get_shared_x_axes().get_siblings(axis)), [axis])
+            self.assertIsNone(axis.get_legend())
+            self.assertEqual(axis.xaxis.get_offset_text().get_text(), "")
+            cases = expected_facets[axis.get_title()]
+            self.assertEqual(len(axis.get_yticklabels()), len(cases))
+            self.assertEqual(len({bar.get_y() for bar in axis.patches}), len(cases) * 6)
+            for mode in RENDERER.TIMING_MODES:
+                bars = next(
+                    container for container in axis.containers
+                    if container.get_label() == RENDERER.TIMING_MODE_LABELS[mode]
+                )
+                self.assertEqual(len(bars), len(cases))
+                segments = bars.errorbar.lines[2][0].get_segments()
+                self.assertEqual(len(segments), len(cases))
+                for case, bar, segment in zip(cases, bars, segments):
+                    summary = lookup[(case, mode)]
+                    self.assertEqual(bar.get_x(), 0)
+                    self.assertAlmostEqual(bar.get_width(), summary["median"])
+                    self.assertAlmostEqual(segment[0][0], summary["min"])
+                    self.assertAlmostEqual(segment[1][0], summary["max"])
+                    self.assertLess(summary["max"], axis.get_xlim()[1])
+                    if axis.get_title() == "BLASTN":
+                        self.assertGreater(bar.get_width() / axis.get_xlim()[1], 0.25)
+            facet_max = max(
+                lookup[(case, mode)]["max"]
+                for case in cases for mode in RENDERER.TIMING_MODES
+            )
+            self.assertLess(axis.get_xlim()[1], facet_max * 1.25)
+        self.assertEqual(len(plot_data["current"]["samples"]), 180)
+        self.assertEqual(len(plot_data["current"]["summaries"]), 36)
+        self.assertEqual([row["n"] for row in summaries], [5] * 36)
+        self.assertEqual(plot_data, expected)
 
     def test_snapshot_file_cannot_escape_snapshot(self) -> None:
         with self.assertRaisesRegex(ValueError, "escapes snapshot directory"):

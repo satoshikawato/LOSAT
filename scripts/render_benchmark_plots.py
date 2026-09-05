@@ -46,9 +46,7 @@ TIMING_MODE_LABELS = {
     "losat_native_n1": "LOSAT native n1",
     "losat_native_n8": "LOSAT native n8",
     "losat_wasm_serial": "LOSAT Wasm serial",
-    "losat_wasm_threads_requested_n8": (
-        "LOSAT Wasm threaded (requested n8; effective varies)"
-    ),
+    "losat_wasm_threads_requested_n8": "LOSAT Wasm threaded",
 }
 TIMING_MODE_THREADS = {
     "ncbi_n1": "1",
@@ -559,6 +557,14 @@ def summarize_current_timing(rows: list[dict[str, str]]) -> list[dict[str, objec
     return summaries
 
 
+# NCBI reference: ncbi-blast/c++/src/algo/blast/blastinput/blastn_args.cpp:48,55-61
+# static const char kProgram[] = "blastn";
+# static const char kDefaultTask[] = "megablast";
+# SetTask(kDefaultTask);
+# arg.Reset(new CTaskCmdLineArgs(tasks, kDefaultTask));
+# Megablast is a distinct task within BLASTN. Facets retain the exact current
+# snapshot case identities; the horizontal layout and independent linear axes
+# follow LOSAT/tests/plot_execution_time.py, without reading its historical logs.
 def render_execution_time(
     path: Path, output: Path, timing_metadata: dict[str, object]
 ) -> tuple[dict[str, int], dict[str, object]]:
@@ -587,82 +593,128 @@ def render_execution_time(
     summaries = summarize_current_timing(current)
     cases = list(dict.fromkeys(row["case_id"] for row in current))
     labels = {
-        "PesePMNV.MjPMNV.task_blastn": "BLASTN\nPesePMNV/MjPMNV",
-        "Sakai.MG1655.megablast": "Megablast\nSakai/MG1655†",
-        "pairwise_default_serial": "BLASTP\npairwise default",
-        "p03_mela_pemojnva": "TBLASTX p03\nMela/PemoMJNVA",
-        "d06_ap027131_ap027133_db4": "TBLASTX d06\nAP027131/AP027133 db4‡",
-        "p11_avclpv_psclpv": "TBLASTX p11\nAvCLPV/PsCLPV",
+        "PesePMNV.MjPMNV.task_blastn": "PesePMNV /\nMjPMNV",
+        "Sakai.MG1655.megablast": "Sakai / MG1655†",
+        "pairwise_default_serial": "Pairwise default",
+        "p03_mela_pemojnva": "p03 · MelaMJNV /\nPemoMJNVA",
+        "d06_ap027131_ap027133_db4": "d06 · AP027131 /\nAP027133 (db4)‡",
+        "p11_avclpv_psclpv": "p11 · AvCLPV /\nPsCLPV",
     }
+    case_programs = {row["case_id"]: row["program"] for row in summaries}
+    facet_cases: dict[str, list[str]] = defaultdict(list)
+    for case in cases:
+        facet = (
+            "Megablast"
+            if case == "Sakai.MG1655.megablast"
+            else PROGRAM_LABELS[case_programs[case]]
+        )
+        facet_cases[facet].append(case)
+    facets = [
+        facet for facet in ("TBLASTX", "BLASTN", "Megablast", "BLASTP")
+        if facet in facet_cases
+    ]
     colors = {
         "ncbi_n1": "#4c72b0",
-        "ncbi_n8": "#55a4c9",
+        "ncbi_n8": "#4c72b0",
         "losat_native_n1": "#dd8452",
-        "losat_native_n8": "#e6a700",
-        "losat_wasm_serial": "#8172b3",
-        "losat_wasm_threads_requested_n8": "#937860",
+        "losat_native_n8": "#dd8452",
+        "losat_wasm_serial": "#b86b8d",
+        "losat_wasm_threads_requested_n8": "#b86b8d",
     }
-    markers = {
-        "ncbi_n1": "o",
-        "ncbi_n8": "^",
-        "losat_native_n1": "s",
-        "losat_native_n8": "D",
-        "losat_wasm_serial": "P",
-        "losat_wasm_threads_requested_n8": "X",
+    hatches = {
+        "ncbi_n1": "",
+        "ncbi_n8": "///",
+        "losat_native_n1": "",
+        "losat_native_n8": "///",
+        "losat_wasm_serial": "",
+        "losat_wasm_threads_requested_n8": "///",
     }
     lookup = {(row["case_id"], row["mode"]): row for row in summaries}
-    positions = np.arange(len(cases), dtype=float)
-    fig = plt.figure(figsize=(16, 9.5))
-    axis = fig.add_axes((0.075, 0.18, 0.91, 0.73))
-    offset_step = 0.115
+    columns = min(2, len(facets))
+    rows_count = math.ceil(len(facets) / columns)
+    fig, axes = plt.subplots(
+        rows_count, columns, figsize=(7.5 * columns, 3.4 * rows_count + 3),
+        sharex=False, sharey=False, squeeze=False,
+    )
+    bar_height = 0.12
     center = (len(TIMING_MODES) - 1) / 2
-    for index, mode in enumerate(TIMING_MODES):
-        group = [lookup[(case, mode)] for case in cases]
-        medians = np.array([float(row["median"]) for row in group])
-        minima = np.array([float(row["min"]) for row in group])
-        maxima = np.array([float(row["max"]) for row in group])
-        x_values = positions + (index - center) * offset_step
-        axis.errorbar(
-            x_values,
-            medians,
-            yerr=np.vstack((medians - minima, maxima - medians)),
-            fmt=markers[mode],
-            color=colors[mode],
-            ecolor=colors[mode],
-            capsize=3.5,
-            elinewidth=1.25,
-            markersize=6.8,
-            label=TIMING_MODE_LABELS[mode],
+    for axis, facet in zip(axes.flat, facets):
+        tasks = facet_cases[facet]
+        positions = np.arange(len(tasks), dtype=float)
+        maximum = max(
+            float(lookup[(case, mode)]["max"])
+            for case in tasks for mode in TIMING_MODES
         )
-    axis.set_xticks(positions, [labels.get(case, case) for case in cases])
-    axis.set_xlim(-0.55, len(cases) - 0.45)
-    axis.set_ylim(bottom=0)
-    axis.set_ylabel("Execution time (s)")
-    axis.set_title("Execution time comparison", fontsize=18, pad=15)
-    axis.grid(True, axis="y")
-    axis.grid(False, axis="x")
-    axis.legend(frameon=False, loc="upper left", ncol=3, fontsize=8.5)
+        for index, mode in enumerate(TIMING_MODES):
+            group = [lookup[(case, mode)] for case in tasks]
+            medians = np.array([float(row["median"]) for row in group])
+            minima = np.array([float(row["min"]) for row in group])
+            maxima = np.array([float(row["max"]) for row in group])
+            y_values = positions + (index - center) * bar_height
+            axis.barh(
+                y_values, medians, height=bar_height * 0.88,
+                xerr=np.vstack((medians - minima, maxima - medians)).tolist(),
+                color=colors[mode], edgecolor="#374151", linewidth=0.45,
+                hatch=hatches[mode], label=TIMING_MODE_LABELS[mode],
+                error_kw={"ecolor": "#1f2937", "capsize": 2.5, "elinewidth": 1},
+            )
+            for y_value, median, upper in zip(y_values, medians, maxima):
+                axis.text(
+                    upper + maximum * 0.015, y_value, f"{median:.3g}",
+                    va="center", fontsize=8.5,
+                )
+        axis.set_yticks(positions, [labels.get(case, case) for case in tasks], fontsize=10)
+        axis.set_ylim(len(tasks) - 0.5, -0.5)
+        axis.set_xlim(0, maximum * 1.14)
+        axis.ticklabel_format(axis="x", style="plain", useOffset=False)
+        axis.set_xlabel("Execution time (s)", fontsize=11)
+        axis.set_title(facet, fontsize=14, fontweight="bold", pad=12)
+        axis.set_axisbelow(True)
+        axis.grid(True, axis="x")
+        axis.grid(False, axis="y")
+        axis.spines[["top", "right"]].set_visible(False)
+        axis.tick_params(axis="y", length=0, pad=8)
+    for axis in list(axes.flat)[len(facets):]:
+        fig.delaxes(axis)
+    fig.suptitle("LOSAT v0.1.0 execution time", fontsize=18, y=0.985)
+    fig.text(
+        0.5, 0.945,
+        "Bars: median of five timed samples · Whiskers: retained min–max · Independent linear axes",
+        ha="center", fontsize=11, color="#4b5563",
+    )
+    fig.legend(
+        handles=[
+            Patch(facecolor=colors[mode], edgecolor="#374151", linewidth=0.45,
+                  hatch=hatches[mode], label=TIMING_MODE_LABELS[mode])
+            for mode in TIMING_MODES
+        ],
+        loc="upper center", bbox_to_anchor=(0.5, 0.923), ncol=3,
+        frameon=False, fontsize=10, handlelength=2.5, columnspacing=3,
+    )
     fig.text(
         0.5,
-        0.055,
-        "Protocol warmup: 1 · timed repetitions: 5 · median statistic; all samples retained. "
-        "Whiskers span min–max. Threaded-Wasm requested n8 is effective threaded for BLASTP and "
-        "effective serial for the current BLASTN/TBLASTX probes. "
+        0.064,
+        "Threaded Wasm: requested n8; effective threaded for BLASTP, effective serial for current BLASTN/TBLASTX probes.\n"
         "† Source-undetermined accepted contract. ‡ Approved local-subject db-gencode deviation.",
         ha="center",
         va="bottom",
         fontsize=8.5,
+        linespacing=1.6,
         color="#4b5563",
     )
     fig.text(
         0.5,
-        0.008,
-        f"The {len(history)} historical rows and {len(pr93)} PR 93 scalar values remain separate. "
-        "Same-machine controlled benchmark · two WSL boot segments · binaries/toolchains revalidated after restart · resume warmups excluded.",
+        0.012,
+        "Same-machine controlled benchmark · two WSL boot segments · binaries/toolchains revalidated after restart.\n"
+        f"Protocol warmup: 1 · resume warmups excluded · {len(history)} historical rows and {len(pr93)} PR 93 scalar values excluded from this figure.",
         ha="center",
         va="bottom",
         fontsize=8,
+        linespacing=1.6,
         color="#4b5563",
+    )
+    fig.subplots_adjust(
+        left=0.14, right=0.985, top=0.81, bottom=0.16, hspace=0.48, wspace=0.48,
     )
     fig.savefig(
         output,

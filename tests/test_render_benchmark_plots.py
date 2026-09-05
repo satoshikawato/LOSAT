@@ -256,6 +256,78 @@ class RendererTests(unittest.TestCase):
         ):
             self.assertEqual(sha256(first / filename), sha256(second / filename))
 
+    # NCBI reference: ncbi-blast/c++/src/objtools/align_format/format_flags.cpp:111-113
+    # SFormatSpec("length", "Alignment length", eAlignmentLength),
+    # Canonicalize derived coordinates only, preserving recorded lengths/weights.
+    def test_derived_edge_neighboring_floats_serialize_identically(self) -> None:
+        value = 532580.1009576048  # First differing edge in PR #105's push run.
+        for perturbed in (
+            value,
+            RENDERER.np.nextafter(value, float("inf")),
+            RENDERER.np.nextafter(value, -float("inf")),
+        ):
+            with self.subTest(value=perturbed):
+                self.assertEqual(
+                    json.dumps(RENDERER.canonical_plot_float(perturbed)),
+                    "532580.100958",
+                )
+
+    def test_length_edges_are_canonical_before_aggregation_and_serialization(self) -> None:
+        path = self.snapshot / "alignment_results.tsv.gz"
+        original_geomspace = RENDERER.np.geomspace
+        with mock.patch.object(
+            RENDERER, "canonical_plot_float", side_effect=float
+        ):
+            unrounded = RENDERER.aggregate_alignments(path)
+        expected = RENDERER.aggregate_alignments(path)
+
+        for direction in (float("inf"), -float("inf")):
+            def perturbed_geomspace(*args, **kwargs):
+                edges = original_geomspace(*args, **kwargs)
+                edges[1:-1] = RENDERER.np.nextafter(edges[1:-1], direction)
+                return edges
+
+            with self.subTest(direction=direction), mock.patch.object(
+                RENDERER.np, "geomspace", side_effect=perturbed_geomspace
+            ):
+                actual = RENDERER.aggregate_alignments(path)
+            self.assertEqual(
+                json.dumps({k: v.tolist() for k, v in actual["length_edges"].items()}),
+                json.dumps({k: v.tolist() for k, v in expected["length_edges"].items()}),
+            )
+            for program_index, program in enumerate(RENDERER.PROGRAMS):
+                edges = actual["length_edges"][program]
+                self.assertEqual(len(edges), 51)
+                self.assertTrue(RENDERER.np.all(edges > 0))
+                self.assertTrue(RENDERER.np.all(RENDERER.np.diff(edges) > 0))
+                self.assertEqual(edges[0], 10 + program_index * 4)
+                self.assertEqual(edges[-1], 12 + program_index * 4)
+            for key in ("counts", "scatter"):
+                self.assertEqual(actual[key], unrounded[key])
+            for key in ("length_hist", "identity_hist"):
+                for series in actual[key]:
+                    RENDERER.np.testing.assert_array_equal(
+                        actual[key][series], unrounded[key][series]
+                    )
+
+    def test_equal_length_edges_keep_exact_expanded_bounds(self) -> None:
+        rows = list(RENDERER.alignment_rows(self.snapshot / "alignment_results.tsv.gz"))
+        for length in (1, 19):
+            for row in rows:
+                row["length"] = str(length)
+            with self.subTest(length=length), mock.patch.object(
+                RENDERER, "alignment_rows", side_effect=lambda _: iter(rows)
+            ):
+                aggregated = RENDERER.aggregate_alignments(Path("unused"))
+                for edges in aggregated["length_edges"].values():
+                    self.assertEqual(len(edges), 51)
+                    self.assertTrue(RENDERER.np.all(edges > 0))
+                    self.assertTrue(RENDERER.np.all(RENDERER.np.diff(edges) > 0))
+                    self.assertEqual(edges[0], max(1.0, length * 0.9))
+                    self.assertEqual(edges[-1], length * 1.1)
+                for weights in aggregated["length_hist"].values():
+                    self.assertEqual(weights.sum(), 3 * length)
+
     def test_dataset_checksum_mismatch_fails_closed(self) -> None:
         timing_path = self.snapshot / "execution_times.tsv"
         with timing_path.open("a", encoding="utf-8") as handle:

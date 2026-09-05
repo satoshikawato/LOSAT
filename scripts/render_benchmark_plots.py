@@ -178,6 +178,14 @@ def checked_alignment_values(row: dict[str, str]) -> tuple[str, str, float, int]
     return program, implementation, pident, length
 
 
+# NCBI reference: ncbi-blast/c++/src/objtools/align_format/format_flags.cpp:111-113
+# SFormatSpec("length", "Alignment length", eAlignmentLength),
+# Preserve the source alignment length; only derived plotting coordinates use
+# 12 significant digits to discard runner-dependent geomspace rounding noise.
+def canonical_plot_float(value: float) -> float:
+    return float(format(float(value), ".12g"))
+
+
 def aggregate_alignments(
     path: Path, max_scatter_points: int = 6000
 ) -> dict[str, object]:
@@ -205,7 +213,12 @@ def aggregate_alignments(
         if lower == upper:
             lower = max(1.0, lower * 0.9)
             upper = upper * 1.1
-        length_edges[program] = np.geomspace(lower, upper, 51)
+        edges = np.array(
+            [canonical_plot_float(value) for value in np.geomspace(lower, upper, 51)]
+        )
+        # Preserve exact bounds for histogram indexing and endpoint inclusion.
+        edges[0], edges[-1] = lower, upper
+        length_edges[program] = edges
     identity_edges = np.linspace(0.0, 100.0, 51)
     length_hist = {
         key: np.zeros(50, dtype=float)

@@ -1,5 +1,5 @@
 {
-  "benchmark_completed_at": "2026-09-03T23:33:07.441755+09:00",
+  "benchmark_completed_at": "2026-09-05T00:35:21.633872+09:00",
   "datasets": {
     "alignment_results": {
       "cases": [
@@ -3093,15 +3093,16 @@
     "execution_times": {
       "certification_wall_clock_used_as_benchmark": false,
       "complete_final_v0.1.0_samples_available": true,
-      "current_plot_provenance_id": "final_v0.1.0_current_2026-09-03",
+      "current_plot_provenance_id": "final_v0.1.0_full_performance_af3e2ea_2026-09-04",
       "current_plot_statistic": "median",
       "details": {
-        "current_rows": 60,
+        "current_rows": 180,
+        "superseded_current_rows": 60,
         "historical_rows": 219,
+        "pr93_rows": 4,
         "missing_historical_inputs": [
           "LOSAT/tests/losat_out/AP027132.NZ_CP006932.tlosatx.n8.log"
-        ],
-        "pr93_rows": 4
+        ]
       },
       "file": "execution_times.tsv",
       "provenance_groups": {
@@ -3204,7 +3205,7 @@
             "warmup_count_per_tool_case": 1
           },
           "renderer_executes_benchmark": false,
-          "representative_of_final_v0.1.0": true,
+          "representative_of_final_v0.1.0": false,
           "row_count": 60,
           "runtime_gate": {
             "cargo_lock_blob_equal_pr6_to_main": true,
@@ -3215,7 +3216,7 @@
             "pr6_recertification_required": false,
             "status": "PASS"
           },
-          "status": "AVAILABLE_CURRENT",
+          "status": "SUPERSEDED_HISTORICAL",
           "summaries": [
             {
               "case_id": "PesePMNV.MjPMNV.task_blastn",
@@ -3338,7 +3339,9 @@
               "tool": "LOSAT"
             }
           ],
-          "used_for_current_plot": true
+          "used_for_current_plot": false,
+          "superseded_by": "final_v0.1.0_full_performance_af3e2ea_2026-09-04",
+          "supersession_reason": "Retained unchanged as historical evidence; replaced in the current plot by the exact-af3e2ea six-mode full-performance protocol."
         },
         "historical_plot_2026_06": {
           "date_range": "2026-05-17 to 2026-06-23 (source-file mtimes)",
@@ -3364,10 +3367,1710 @@
           "status": "PARTIAL",
           "thread_count": null,
           "used_for_current_plot": false
+        },
+        "final_v0.1.0_full_performance_af3e2ea_2026-09-04": {
+          "alignment_matrix_rerun": false,
+          "benchmark_losat_sha": "af3e2ea837afdb8a00cf19920f68be4f0bf3bfb5",
+          "builds": {
+            "original_session_artifacts": {
+              "native": {
+                "artifact_path": "/mnt/c/Users/genom/LOSAT-benchmark-evidence/v0.1.0-full-performance-af3e2ea/artifacts/LOSAT-native",
+                "artifact_sha256": "058587655963bf1eb253f232fdb5553819105646c0d1c50bbece96e410446819",
+                "benchmark_sha": "af3e2ea837afdb8a00cf19920f68be4f0bf3bfb5",
+                "command": [
+                  "cargo",
+                  "build",
+                  "--release",
+                  "--locked"
+                ],
+                "completed_at": "2026-09-04T12:16:05.992862+09:00",
+                "completed_valid_build_count": 1,
+                "cwd": "/tmp/losat-v010-full-performance-runtime-af3e2ea/LOSAT",
+                "elapsed_seconds": 42.640844069,
+                "environment_id": "84a8633e8954fd0f14db62f77650ed88cc470d3f9f335611004819706a99ad1c",
+                "exit_status": 0,
+                "name": "native",
+                "rebuilt_between_samples": false,
+                "source_path": "/tmp/losat-v010-full-performance-runtime-af3e2ea/LOSAT/target/release/LOSAT",
+                "source_sha256": "058587655963bf1eb253f232fdb5553819105646c0d1c50bbece96e410446819",
+                "started_at": "2026-09-04T12:15:22.320436+09:00",
+                "status": "VALID",
+                "stderr_path": "/mnt/c/Users/genom/LOSAT-benchmark-evidence/v0.1.0-full-performance-af3e2ea/builds/native.stderr",
+                "stderr_sha256": "5f32d8d507eb93a7164a914967e4eb5ccec35256dab2d9edc82d033ecbadde0a",
+                "stdout_path": "/mnt/c/Users/genom/LOSAT-benchmark-evidence/v0.1.0-full-performance-af3e2ea/builds/native.stdout",
+                "stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+              },
+              "serial_wasm": {
+                "artifact_path": "/mnt/c/Users/genom/LOSAT-benchmark-evidence/v0.1.0-full-performance-af3e2ea/artifacts/LOSAT-serial.wasm",
+                "artifact_sha256": "000691b99169ddca8072954fdfa64348ad94b75546432655f6a05daea1d5eb47",
+                "benchmark_sha": "af3e2ea837afdb8a00cf19920f68be4f0bf3bfb5",
+                "command": [
+                  "cargo",
+                  "build",
+                  "--release",
+                  "--target",
+                  "wasm32-wasip1",
+                  "--no-default-features",
+                  "--locked"
+                ],
+                "completed_at": "2026-09-04T12:16:41.081213+09:00",
+                "completed_valid_build_count": 1,
+                "cwd": "/tmp/losat-v010-full-performance-runtime-af3e2ea/LOSAT",
+                "elapsed_seconds": 33.564777656,
+                "environment_id": "84a8633e8954fd0f14db62f77650ed88cc470d3f9f335611004819706a99ad1c",
+                "exit_status": 0,
+                "name": "serial_wasm",
+                "rebuilt_between_samples": false,
+                "source_path": "/tmp/losat-v010-full-performance-runtime-af3e2ea/LOSAT/target/wasm32-wasip1/release/LOSAT.wasm",
+                "source_sha256": "000691b99169ddca8072954fdfa64348ad94b75546432655f6a05daea1d5eb47",
+                "started_at": "2026-09-04T12:16:06.099881+09:00",
+                "status": "VALID",
+                "stderr_path": "/mnt/c/Users/genom/LOSAT-benchmark-evidence/v0.1.0-full-performance-af3e2ea/builds/serial_wasm.stderr",
+                "stderr_sha256": "0b24232d677bb1df4e028579e06e5bdeda2220475157a3621e3941bb350dd8ad",
+                "stdout_path": "/mnt/c/Users/genom/LOSAT-benchmark-evidence/v0.1.0-full-performance-af3e2ea/builds/serial_wasm.stdout",
+                "stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+              },
+              "threaded_wasm": {
+                "artifact_path": "/mnt/c/Users/genom/LOSAT-benchmark-evidence/v0.1.0-full-performance-af3e2ea/artifacts/LOSAT-threaded.wasm",
+                "artifact_sha256": "557f7cb99aa0a48dc64207e5efe7833b753cf343b6f3550cbd3b83040d3d25f1",
+                "benchmark_sha": "af3e2ea837afdb8a00cf19920f68be4f0bf3bfb5",
+                "command": [
+                  "cargo",
+                  "build",
+                  "--release",
+                  "--target",
+                  "wasm32-wasip1-threads",
+                  "--features",
+                  "wasm-threads",
+                  "--locked"
+                ],
+                "completed_at": "2026-09-04T12:17:17.933514+09:00",
+                "completed_valid_build_count": 1,
+                "cwd": "/tmp/losat-v010-full-performance-runtime-af3e2ea/LOSAT",
+                "elapsed_seconds": 35.674245343,
+                "environment_id": "84a8633e8954fd0f14db62f77650ed88cc470d3f9f335611004819706a99ad1c",
+                "exit_status": 0,
+                "name": "threaded_wasm",
+                "rebuilt_between_samples": false,
+                "source_path": "/tmp/losat-v010-full-performance-runtime-af3e2ea/LOSAT/target/wasm32-wasip1-threads/release/LOSAT.wasm",
+                "source_sha256": "557f7cb99aa0a48dc64207e5efe7833b753cf343b6f3550cbd3b83040d3d25f1",
+                "started_at": "2026-09-04T12:16:41.196086+09:00",
+                "status": "VALID",
+                "stderr_path": "/mnt/c/Users/genom/LOSAT-benchmark-evidence/v0.1.0-full-performance-af3e2ea/builds/threaded_wasm.stderr",
+                "stderr_sha256": "009f6d6a93f1c8cf62fc3b92dd63ab3dccbe5d7869d0c8662e1941018f4065de",
+                "stdout_path": "/mnt/c/Users/genom/LOSAT-benchmark-evidence/v0.1.0-full-performance-af3e2ea/builds/threaded_wasm.stdout",
+                "stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+              }
+            },
+            "post_restart_rebuild_revalidation": {
+              "benchmark_losat_sha": "af3e2ea837afdb8a00cf19920f68be4f0bf3bfb5",
+              "boot_id": "942079cc-0a9f-43b4-9b08-7c377d67a6d6",
+              "builds": {
+                "native": {
+                  "cargo_reported_elapsed_seconds": 45.49,
+                  "command": [
+                    "cargo",
+                    "build",
+                    "--release",
+                    "--locked"
+                  ],
+                  "cwd": "/tmp/losat-v010-full-performance-runtime-af3e2ea/LOSAT",
+                  "matches_recorded_identity": true,
+                  "rebuild_count_after_restart": 1,
+                  "rebuilt_path": "/tmp/losat-v010-full-performance-runtime-af3e2ea/LOSAT/target/release/LOSAT",
+                  "rebuilt_sha256": "058587655963bf1eb253f232fdb5553819105646c0d1c50bbece96e410446819",
+                  "retained_artifact_path": "/mnt/c/Users/genom/LOSAT-benchmark-evidence/v0.1.0-full-performance-af3e2ea/artifacts/LOSAT-native",
+                  "retained_artifact_sha256": "058587655963bf1eb253f232fdb5553819105646c0d1c50bbece96e410446819",
+                  "status": "PASS"
+                },
+                "serial_wasm": {
+                  "cargo_reported_elapsed_seconds": 35.11,
+                  "command": [
+                    "cargo",
+                    "build",
+                    "--release",
+                    "--target",
+                    "wasm32-wasip1",
+                    "--no-default-features",
+                    "--locked"
+                  ],
+                  "cwd": "/tmp/losat-v010-full-performance-runtime-af3e2ea/LOSAT",
+                  "matches_recorded_identity": true,
+                  "rebuild_count_after_restart": 1,
+                  "rebuilt_path": "/tmp/losat-v010-full-performance-runtime-af3e2ea/LOSAT/target/wasm32-wasip1/release/LOSAT.wasm",
+                  "rebuilt_sha256": "000691b99169ddca8072954fdfa64348ad94b75546432655f6a05daea1d5eb47",
+                  "retained_artifact_path": "/mnt/c/Users/genom/LOSAT-benchmark-evidence/v0.1.0-full-performance-af3e2ea/artifacts/LOSAT-serial.wasm",
+                  "retained_artifact_sha256": "000691b99169ddca8072954fdfa64348ad94b75546432655f6a05daea1d5eb47",
+                  "status": "PASS"
+                },
+                "threaded_wasm": {
+                  "cargo_reported_elapsed_seconds": 38.78,
+                  "command": [
+                    "cargo",
+                    "build",
+                    "--release",
+                    "--target",
+                    "wasm32-wasip1-threads",
+                    "--features",
+                    "wasm-threads",
+                    "--locked"
+                  ],
+                  "cwd": "/tmp/losat-v010-full-performance-runtime-af3e2ea/LOSAT",
+                  "matches_recorded_identity": true,
+                  "rebuild_count_after_restart": 1,
+                  "rebuilt_path": "/tmp/losat-v010-full-performance-runtime-af3e2ea/LOSAT/target/wasm32-wasip1-threads/release/LOSAT.wasm",
+                  "rebuilt_sha256": "557f7cb99aa0a48dc64207e5efe7833b753cf343b6f3550cbd3b83040d3d25f1",
+                  "retained_artifact_path": "/mnt/c/Users/genom/LOSAT-benchmark-evidence/v0.1.0-full-performance-af3e2ea/artifacts/LOSAT-threaded.wasm",
+                  "retained_artifact_sha256": "557f7cb99aa0a48dc64207e5efe7833b753cf343b6f3550cbd3b83040d3d25f1",
+                  "status": "PASS"
+                }
+              },
+              "collection_segment": 2,
+              "policy": "rebuild exact artifacts once after restart; require recorded SHA-256",
+              "recorded_at": "2026-09-04T21:38:17.942341+09:00",
+              "schema_version": 1,
+              "status": "PASS"
+            }
+          },
+          "case_selection": {
+            "case_count": 6,
+            "case_ids": [
+              "PesePMNV.MjPMNV.task_blastn",
+              "Sakai.MG1655.megablast",
+              "pairwise_default_serial",
+              "p03_mela_pemojnva",
+              "d06_ap027131_ap027133_db4",
+              "p11_avclpv_psclpv"
+            ],
+            "heavy_tblastx_rationale": "p11_avclpv_psclpv is exact-certified and retains historical and PR 93 scalar timing context."
+          },
+          "collection_audit": {
+            "durable_sample_location": "benchmarks/v0.1.0/execution_times.tsv",
+            "raw_evidence_location": "/mnt/c/Users/genom/LOSAT-benchmark-evidence/v0.1.0-full-performance-af3e2ea",
+            "raw_all_runs_tsv_sha256": "4f83d1c1e132dc5363d32a11256f6dc48f05f65fc7342c604d1ed7a8fce4ef60",
+            "raw_timed_samples_tsv_sha256": "702faf105d2bd055b66bf684ad3af20055581bbfd279155b00dec8303512835d",
+            "raw_summary_json_sha256": "52a680a3bb46084b1b5dde781e40c6f33457b5151f150ee540a28334ee656e73",
+            "collection_segments_json_sha256": "5d22fa46c7b754c18cf4bbe3e17378cc2b1452fff182dafb28cc552eb16c4857",
+            "segment_bias_audit_json_sha256": "33136325d6297f2a53fa4617b8c67d5bf509ea7fa44fba1a909401ee56241064",
+            "original_collector_sha256": "fbf7c7ef4de02d9541a288ef2799188ce490751008cd48adcf55082734cd6b70",
+            "resume_collector_sha256": "1cda78245046c1b99d11baccc6ee3b4ae3444c29d301d41a0adfb72162726411",
+            "segment_1_completion_count": 207,
+            "segment_1_completion_manifest_sha256": "f7f675dfebf65f57e457a0f4b431f3a301ceb971b7dd15b66d73cfd783d284e9",
+            "newly_collected_missing_timed_samples": 9,
+            "protocol_output_files": 216,
+            "protocol_stdout_files": 216,
+            "protocol_stderr_files": 216,
+            "protocol_nonempty_stderr_files": 36,
+            "resume_warmup_record_count": 6
+          },
+          "collection_provenance": {
+            "description": "same-machine controlled benchmark collected in two execution segments, with binary/toolchain identities revalidated after restart",
+            "same_physical_machine": true,
+            "same_uninterrupted_session": false,
+            "same_single_boot_session": false,
+            "same_exact_losat_sha": true,
+            "same_verified_binaries_and_toolchain": true,
+            "same_benchmark_protocol": true,
+            "material_environment_id": "63cfb47e9aacd5ffbd6dbaa17f907afc34b73e5925569e62370a675cb96df76f",
+            "boot_id_role": "collection-segment provenance only",
+            "segments": [
+              {
+                "collection_segment": 1,
+                "boot_id": "d95508ef-366f-4b1c-862c-b613b0caa163",
+                "completed_protocol_invocations": 207
+              },
+              {
+                "collection_segment": 2,
+                "boot_id": "942079cc-0a9f-43b4-9b08-7c377d67a6d6",
+                "completed_protocol_invocations": 9
+              }
+            ],
+            "mem_total_guard": {
+              "allowed_delta_kib": -4,
+              "classification": "one-page WSL boot telemetry; independently reviewed non-material",
+              "delta_kib": -4,
+              "larger_or_different_delta": "MATERIAL_BENCHMARK_ENVIRONMENT_CHANGED",
+              "segment_1_kib": 32732992,
+              "segment_2_kib": 32732988
+            },
+            "resume_warmup_count": 6,
+            "resume_warmups_excluded_from_timed_statistics": true,
+            "all_216_restart_performed": false,
+            "total_additional_executions": 15
+          },
+          "environment": {
+            "benchmark_started_at": "2026-09-04T12:18:16.829724+09:00",
+            "benchmark_completed_at": "2026-09-05T00:35:21.633872+09:00",
+            "cargo_version": "cargo 1.92.0 (344c4567c 2025-10-21)",
+            "cpu_model": "Intel(R) Core(TM) i9-14900HX",
+            "logical_cpu_count": 32,
+            "available_cpu_count": 32,
+            "machine": "Microsoft WSL2 x86_64",
+            "node_version": "v18.19.1",
+            "os": "Ubuntu 24.04.3 LTS; Linux 5.15.167.4-microsoft-standard-WSL2",
+            "rust_version": "rustc 1.92.0 (ded5c06cf 2025-12-08)",
+            "segment_1_environment_id": "84a8633e8954fd0f14db62f77650ed88cc470d3f9f335611004819706a99ad1c",
+            "segment_2_environment_id": "0b9371efef6fece9acdffcef7ef4399836935e5953b88222d0a87786df7993ef"
+          },
+          "ncbi_downloaded": false,
+          "ncbi_executables": {
+            "blastn": {
+              "path": "/home/kawato/tools/ncbi-blast-oracle/ncbi-blast-2.17.0+/bin/blastn",
+              "sha256": "33b64bc67d3149cee2459b2f7766b363323df632cf12c099546de00aea9698b5",
+              "version": [
+                "blastn: 2.17.0+",
+                " Package: blast 2.17.0, build Jul  1 2025 08:59:18"
+              ]
+            },
+            "blastp": {
+              "path": "/home/kawato/tools/ncbi-blast-oracle/ncbi-blast-2.17.0+/bin/blastp",
+              "sha256": "5ce267c04e4988c265357bfbedc64e809545b6fcfae7ff6775266fabbee8ba0e",
+              "version": [
+                "blastp: 2.17.0+",
+                " Package: blast 2.17.0, build Jul  1 2025 08:59:18"
+              ]
+            },
+            "tblastx": {
+              "path": "/home/kawato/tools/ncbi-blast-oracle/ncbi-blast-2.17.0+/bin/tblastx",
+              "sha256": "583e5d60bbd444ac455d20e0956c5aa0aeef675da8daee8204d8f9376ddb8804",
+              "version": [
+                "tblastx: 2.17.0+",
+                " Package: blast 2.17.0, build Jul  1 2025 08:59:18"
+              ]
+            }
+          },
+          "ncbi_version": "2.17.0+",
+          "output_validation": {
+            "all_repeated_outputs_byte_stable_per_mode_case": true,
+            "case_contract_validation": {
+              "PesePMNV.MjPMNV.task_blastn": {
+                "classification": "EXACT_TEXT",
+                "status": "PASS",
+                "validation": "raw byte equality with same-session official NCBI output"
+              },
+              "Sakai.MG1655.megablast": {
+                "classification": "SOURCE_UNDETERMINED_ACCEPTED",
+                "differing_coord_keys": 5,
+                "field_diffs": {
+                  "gapopen": 5,
+                  "length": 2,
+                  "mismatch": 2,
+                  "pident": 2
+                },
+                "status": "PASS",
+                "validation": "existing certify_blastn_v010 source-exception authority"
+              },
+              "d06_ap027131_ap027133_db4": {
+                "classification": "HSP_SET_DIFF",
+                "metrics": {
+                  "extra_key_count": 3514,
+                  "losat_rows": 13644,
+                  "losat_sha256": "719339294d0f22d0f415dd33106a0fd93c25ac372b1456d19d92390fce081df1",
+                  "missing_key_count": 2542,
+                  "ncbi_rows": 12672,
+                  "ncbi_sha256": "8d5ff1d0d92f27488ba91da061366ef808db382cd73b3e8577385d150e9e8a29"
+                },
+                "output_ids_valid": true,
+                "status": "PASS",
+                "validation": "existing audit_tblastx_v010 deviation authority"
+              },
+              "p03_mela_pemojnva": {
+                "classification": "EXACT_TEXT",
+                "status": "PASS",
+                "validation": "raw byte equality with same-session official NCBI output"
+              },
+              "p11_avclpv_psclpv": {
+                "classification": "EXACT_TEXT",
+                "status": "PASS",
+                "validation": "raw byte equality with same-session official NCBI output"
+              },
+              "pairwise_default_serial": {
+                "classification": "EXACT_TEXT",
+                "status": "PASS",
+                "validation": "raw byte equality with same-session official NCBI output"
+              }
+            },
+            "ncbi_n1_n8_validation": {
+              "PesePMNV.MjPMNV.task_blastn": {
+                "classification": "EXACT_TEXT",
+                "status": "PASS"
+              },
+              "Sakai.MG1655.megablast": {
+                "classification": "EXACT_TEXT",
+                "status": "PASS"
+              },
+              "d06_ap027131_ap027133_db4": {
+                "classification": "EXACT_TEXT",
+                "status": "PASS"
+              },
+              "p03_mela_pemojnva": {
+                "classification": "EXACT_TEXT",
+                "status": "PASS"
+              },
+              "p11_avclpv_psclpv": {
+                "classification": "EXACT_TEXT",
+                "status": "PASS"
+              },
+              "pairwise_default_serial": {
+                "classification": "EXACT_TEXT",
+                "status": "PASS"
+              }
+            },
+            "timed_outputs_checked": 180,
+            "protocol_warmup_outputs_checked": 36,
+            "resume_warmup_outputs_checked": 6
+          },
+          "protocol": {
+            "additional_statistics": [
+              "mean",
+              "min",
+              "max",
+              "n"
+            ],
+            "execution": "sequential; no concurrent groups",
+            "outlier_policy": "retain every successful timed sample",
+            "output_sink": "regular files in persistent evidence directory",
+            "primary_statistic": "median",
+            "timed_repetitions_per_group": 5,
+            "timed_rotation": "case c, round r rotates base order by (c+r-1) modulo six",
+            "wall_clock": "time.perf_counter_ns around taskset and full process",
+            "warmup_order": [
+              "ncbi_n1",
+              "ncbi_n8",
+              "losat_native_n1",
+              "losat_native_n8",
+              "losat_wasm_serial",
+              "losat_wasm_threads_requested_n8"
+            ],
+            "warmups_per_group": 1,
+            "group_count": 36,
+            "mode_count": 6,
+            "modes": [
+              "ncbi_n1",
+              "ncbi_n8",
+              "losat_native_n1",
+              "losat_native_n8",
+              "losat_wasm_serial",
+              "losat_wasm_threads_requested_n8"
+            ],
+            "sample_count": 180,
+            "affinity_policy": {
+              "available_logical_cpus": [
+                0,
+                1,
+                2,
+                3,
+                4,
+                5,
+                6,
+                7,
+                8,
+                9,
+                10,
+                11,
+                12,
+                13,
+                14,
+                15,
+                16,
+                17,
+                18,
+                19,
+                20,
+                21,
+                22,
+                23,
+                24,
+                25,
+                26,
+                27,
+                28,
+                29,
+                30,
+                31
+              ],
+              "n1_policy": "taskset to first CPU in selected n8 set",
+              "n8_policy": "taskset to same first eight available logical CPUs",
+              "selected_n1_cpu": 0,
+              "selected_n8_cpus": [
+                0,
+                1,
+                2,
+                3,
+                4,
+                5,
+                6,
+                7
+              ]
+            },
+            "resume_warmup_policy": "One non-counted restart-conditioning execution before the first new timed sample of each resumed case/mode."
+          },
+          "renderer_executes_benchmark": false,
+          "representative_of_final_v0.1.0": true,
+          "row_count": 180,
+          "runtime_gate": {
+            "benchmark_git_sha_exact": true,
+            "production_rust_changed_for_collection": false,
+            "certification_campaigns_rerun": false,
+            "status": "PASS"
+          },
+          "segment_bias_audit": {
+            "automatic_full_restart_performed": false,
+            "groups_entirely_segment_1": [
+              "PesePMNV.MjPMNV.task_blastn / ncbi_n1",
+              "PesePMNV.MjPMNV.task_blastn / ncbi_n8",
+              "PesePMNV.MjPMNV.task_blastn / losat_native_n1",
+              "PesePMNV.MjPMNV.task_blastn / losat_native_n8",
+              "PesePMNV.MjPMNV.task_blastn / losat_wasm_serial",
+              "PesePMNV.MjPMNV.task_blastn / losat_wasm_threads_requested_n8",
+              "Sakai.MG1655.megablast / ncbi_n1",
+              "Sakai.MG1655.megablast / ncbi_n8",
+              "Sakai.MG1655.megablast / losat_native_n1",
+              "Sakai.MG1655.megablast / losat_native_n8",
+              "Sakai.MG1655.megablast / losat_wasm_serial",
+              "Sakai.MG1655.megablast / losat_wasm_threads_requested_n8",
+              "pairwise_default_serial / ncbi_n1",
+              "pairwise_default_serial / ncbi_n8",
+              "pairwise_default_serial / losat_native_n1",
+              "pairwise_default_serial / losat_native_n8",
+              "pairwise_default_serial / losat_wasm_serial",
+              "pairwise_default_serial / losat_wasm_threads_requested_n8",
+              "p03_mela_pemojnva / ncbi_n1",
+              "p03_mela_pemojnva / ncbi_n8",
+              "p03_mela_pemojnva / losat_native_n1",
+              "p03_mela_pemojnva / losat_native_n8",
+              "p03_mela_pemojnva / losat_wasm_serial",
+              "p03_mela_pemojnva / losat_wasm_threads_requested_n8",
+              "d06_ap027131_ap027133_db4 / ncbi_n1",
+              "d06_ap027131_ap027133_db4 / ncbi_n8",
+              "d06_ap027131_ap027133_db4 / losat_native_n1",
+              "d06_ap027131_ap027133_db4 / losat_native_n8",
+              "d06_ap027131_ap027133_db4 / losat_wasm_serial",
+              "d06_ap027131_ap027133_db4 / losat_wasm_threads_requested_n8"
+            ],
+            "groups_entirely_segment_2": [],
+            "samples_discarded_or_adjusted": 0,
+            "schema_version": 1,
+            "split_group_count": 6,
+            "split_groups": [
+              {
+                "case_id": "p11_avclpv_psclpv",
+                "descriptive_statistics": {
+                  "1": {
+                    "max": 686.448999818,
+                    "median": 666.235134167,
+                    "min": 661.681456901,
+                    "n": 3
+                  },
+                  "2": {
+                    "max": 681.653616652,
+                    "median": 677.1944571715001,
+                    "min": 672.735297691,
+                    "n": 2
+                  }
+                },
+                "group": "p11_avclpv_psclpv / ncbi_n1",
+                "mode": "ncbi_n1",
+                "samples_by_segment": {
+                  "1": [
+                    {
+                      "sample_index": 1,
+                      "wall_seconds": 661.681456901
+                    },
+                    {
+                      "sample_index": 2,
+                      "wall_seconds": 666.235134167
+                    },
+                    {
+                      "sample_index": 3,
+                      "wall_seconds": 686.448999818
+                    }
+                  ],
+                  "2": [
+                    {
+                      "sample_index": 4,
+                      "wall_seconds": 672.735297691
+                    },
+                    {
+                      "sample_index": 5,
+                      "wall_seconds": 681.653616652
+                    }
+                  ]
+                }
+              },
+              {
+                "case_id": "p11_avclpv_psclpv",
+                "descriptive_statistics": {
+                  "1": {
+                    "max": 681.98205662,
+                    "median": 680.435513065,
+                    "min": 669.720063694,
+                    "n": 3
+                  },
+                  "2": {
+                    "max": 667.030888271,
+                    "median": 662.0399840095,
+                    "min": 657.049079748,
+                    "n": 2
+                  }
+                },
+                "group": "p11_avclpv_psclpv / ncbi_n8",
+                "mode": "ncbi_n8",
+                "samples_by_segment": {
+                  "1": [
+                    {
+                      "sample_index": 1,
+                      "wall_seconds": 669.720063694
+                    },
+                    {
+                      "sample_index": 2,
+                      "wall_seconds": 680.435513065
+                    },
+                    {
+                      "sample_index": 3,
+                      "wall_seconds": 681.98205662
+                    }
+                  ],
+                  "2": [
+                    {
+                      "sample_index": 4,
+                      "wall_seconds": 667.030888271
+                    },
+                    {
+                      "sample_index": 5,
+                      "wall_seconds": 657.049079748
+                    }
+                  ]
+                }
+              },
+              {
+                "case_id": "p11_avclpv_psclpv",
+                "descriptive_statistics": {
+                  "1": {
+                    "max": 611.426015733,
+                    "median": 592.6100223645001,
+                    "min": 575.576270355,
+                    "n": 4
+                  },
+                  "2": {
+                    "max": 600.137202515,
+                    "median": 600.137202515,
+                    "min": 600.137202515,
+                    "n": 1
+                  }
+                },
+                "group": "p11_avclpv_psclpv / losat_native_n1",
+                "mode": "losat_native_n1",
+                "samples_by_segment": {
+                  "1": [
+                    {
+                      "sample_index": 1,
+                      "wall_seconds": 575.576270355
+                    },
+                    {
+                      "sample_index": 2,
+                      "wall_seconds": 581.074205988
+                    },
+                    {
+                      "sample_index": 3,
+                      "wall_seconds": 611.426015733
+                    },
+                    {
+                      "sample_index": 4,
+                      "wall_seconds": 604.145838741
+                    }
+                  ],
+                  "2": [
+                    {
+                      "sample_index": 5,
+                      "wall_seconds": 600.137202515
+                    }
+                  ]
+                }
+              },
+              {
+                "case_id": "p11_avclpv_psclpv",
+                "descriptive_statistics": {
+                  "1": {
+                    "max": 328.148712701,
+                    "median": 287.131855694,
+                    "min": 274.587674203,
+                    "n": 4
+                  },
+                  "2": {
+                    "max": 282.193664768,
+                    "median": 282.193664768,
+                    "min": 282.193664768,
+                    "n": 1
+                  }
+                },
+                "group": "p11_avclpv_psclpv / losat_native_n8",
+                "mode": "losat_native_n8",
+                "samples_by_segment": {
+                  "1": [
+                    {
+                      "sample_index": 1,
+                      "wall_seconds": 276.343073941
+                    },
+                    {
+                      "sample_index": 2,
+                      "wall_seconds": 328.148712701
+                    },
+                    {
+                      "sample_index": 3,
+                      "wall_seconds": 297.920637447
+                    },
+                    {
+                      "sample_index": 4,
+                      "wall_seconds": 274.587674203
+                    }
+                  ],
+                  "2": [
+                    {
+                      "sample_index": 5,
+                      "wall_seconds": 282.193664768
+                    }
+                  ]
+                }
+              },
+              {
+                "case_id": "p11_avclpv_psclpv",
+                "descriptive_statistics": {
+                  "1": {
+                    "max": 829.203945926,
+                    "median": 775.3994995765,
+                    "min": 764.744861847,
+                    "n": 4
+                  },
+                  "2": {
+                    "max": 813.355130642,
+                    "median": 813.355130642,
+                    "min": 813.355130642,
+                    "n": 1
+                  }
+                },
+                "group": "p11_avclpv_psclpv / losat_wasm_serial",
+                "mode": "losat_wasm_serial",
+                "samples_by_segment": {
+                  "1": [
+                    {
+                      "sample_index": 1,
+                      "wall_seconds": 764.744861847
+                    },
+                    {
+                      "sample_index": 2,
+                      "wall_seconds": 829.203945926
+                    },
+                    {
+                      "sample_index": 3,
+                      "wall_seconds": 781.627655139
+                    },
+                    {
+                      "sample_index": 4,
+                      "wall_seconds": 769.171344014
+                    }
+                  ],
+                  "2": [
+                    {
+                      "sample_index": 5,
+                      "wall_seconds": 813.355130642
+                    }
+                  ]
+                }
+              },
+              {
+                "case_id": "p11_avclpv_psclpv",
+                "descriptive_statistics": {
+                  "1": {
+                    "max": 791.963669189,
+                    "median": 787.908108406,
+                    "min": 770.884228976,
+                    "n": 3
+                  },
+                  "2": {
+                    "max": 780.60536504,
+                    "median": 771.2377676325,
+                    "min": 761.870170225,
+                    "n": 2
+                  }
+                },
+                "group": "p11_avclpv_psclpv / losat_wasm_threads_requested_n8",
+                "mode": "losat_wasm_threads_requested_n8",
+                "samples_by_segment": {
+                  "1": [
+                    {
+                      "sample_index": 1,
+                      "wall_seconds": 791.963669189
+                    },
+                    {
+                      "sample_index": 2,
+                      "wall_seconds": 787.908108406
+                    },
+                    {
+                      "sample_index": 3,
+                      "wall_seconds": 770.884228976
+                    }
+                  ],
+                  "2": [
+                    {
+                      "sample_index": 4,
+                      "wall_seconds": 780.60536504
+                    },
+                    {
+                      "sample_index": 5,
+                      "wall_seconds": 761.870170225
+                    }
+                  ]
+                }
+              }
+            ],
+            "status": "PENDING_INDEPENDENT_REVIEW"
+          },
+          "segment_bias_review": {
+            "status": "APPROVE_PASS",
+            "affected_case_recollection_required": false,
+            "split_case_ids": [
+              "p11_avclpv_psclpv"
+            ],
+            "split_group_count": 6,
+            "range_overlap_group_count": 5,
+            "segment_median_shift_direction": {
+              "faster": 3,
+              "slower": 3
+            },
+            "median_segment_shift_percent": -0.225,
+            "combined_vs_segment_1_median_range_percent": [
+              -1.72,
+              1.27
+            ],
+            "assessment": "Acceptable same-machine continuity; no conspicuous systematic restart shift and no misleading combined median."
+          },
+          "status": "AVAILABLE_CURRENT",
+          "summaries": [
+            {
+              "case_id": "PesePMNV.MjPMNV.task_blastn",
+              "contract": "EXACT_TEXT",
+              "cpu_affinity": [
+                0
+              ],
+              "effective_thread_evidence": "command-line option and taskset affinity",
+              "effective_thread_label": "requested/configured 1",
+              "implementation": "NCBI BLAST+",
+              "max": 0.806767403,
+              "mean": 0.5478373616000001,
+              "median": 0.490161507,
+              "min": 0.46153047,
+              "mode": "ncbi_n1",
+              "n": 5,
+              "output_sha256": "d78705fa8123df369c187b8de8c69e08cf809479a74f22dc3ba32d0bf1e4626b",
+              "program": "blastn",
+              "requested_threads": 1,
+              "runtime": "native",
+              "tool_binary_sha256": "33b64bc67d3149cee2459b2f7766b363323df632cf12c099546de00aea9698b5",
+              "warmup_count": 1
+            },
+            {
+              "case_id": "PesePMNV.MjPMNV.task_blastn",
+              "contract": "EXACT_TEXT",
+              "cpu_affinity": [
+                0,
+                1,
+                2,
+                3,
+                4,
+                5,
+                6,
+                7
+              ],
+              "effective_thread_evidence": "command-line option and taskset affinity",
+              "effective_thread_label": "requested/configured 8",
+              "implementation": "NCBI BLAST+",
+              "max": 0.777577,
+              "mean": 0.6353862946,
+              "median": 0.741014354,
+              "min": 0.442728598,
+              "mode": "ncbi_n8",
+              "n": 5,
+              "output_sha256": "d78705fa8123df369c187b8de8c69e08cf809479a74f22dc3ba32d0bf1e4626b",
+              "program": "blastn",
+              "requested_threads": 8,
+              "runtime": "native",
+              "tool_binary_sha256": "33b64bc67d3149cee2459b2f7766b363323df632cf12c099546de00aea9698b5",
+              "warmup_count": 1
+            },
+            {
+              "case_id": "PesePMNV.MjPMNV.task_blastn",
+              "contract": "EXACT_TEXT",
+              "cpu_affinity": [
+                0
+              ],
+              "effective_thread_evidence": "command-line option and taskset affinity",
+              "effective_thread_label": "requested/configured 1",
+              "implementation": "LOSAT native",
+              "max": 0.401990951,
+              "mean": 0.3298535528,
+              "median": 0.302595718,
+              "min": 0.274769323,
+              "mode": "losat_native_n1",
+              "n": 5,
+              "output_sha256": "d78705fa8123df369c187b8de8c69e08cf809479a74f22dc3ba32d0bf1e4626b",
+              "program": "blastn",
+              "requested_threads": 1,
+              "runtime": "native",
+              "tool_binary_sha256": "058587655963bf1eb253f232fdb5553819105646c0d1c50bbece96e410446819",
+              "warmup_count": 1
+            },
+            {
+              "case_id": "PesePMNV.MjPMNV.task_blastn",
+              "contract": "EXACT_TEXT",
+              "cpu_affinity": [
+                0,
+                1,
+                2,
+                3,
+                4,
+                5,
+                6,
+                7
+              ],
+              "effective_thread_evidence": "command-line option and taskset affinity",
+              "effective_thread_label": "requested/configured 8",
+              "implementation": "LOSAT native",
+              "max": 0.597046868,
+              "mean": 0.36625718799999996,
+              "median": 0.350769933,
+              "min": 0.232079343,
+              "mode": "losat_native_n8",
+              "n": 5,
+              "output_sha256": "d78705fa8123df369c187b8de8c69e08cf809479a74f22dc3ba32d0bf1e4626b",
+              "program": "blastn",
+              "requested_threads": 8,
+              "runtime": "native",
+              "tool_binary_sha256": "058587655963bf1eb253f232fdb5553819105646c0d1c50bbece96e410446819",
+              "warmup_count": 1
+            },
+            {
+              "case_id": "PesePMNV.MjPMNV.task_blastn",
+              "contract": "EXACT_TEXT",
+              "cpu_affinity": [
+                0
+              ],
+              "effective_thread_evidence": "wasm32-wasip1 --no-default-features",
+              "effective_thread_label": "serial command-Wasm",
+              "implementation": "LOSAT serial Wasm",
+              "max": 0.694089795,
+              "mean": 0.6346961832,
+              "median": 0.623383402,
+              "min": 0.58953415,
+              "mode": "losat_wasm_serial",
+              "n": 5,
+              "output_sha256": "d78705fa8123df369c187b8de8c69e08cf809479a74f22dc3ba32d0bf1e4626b",
+              "program": "blastn",
+              "requested_threads": 1,
+              "runtime": "node-wasi-preview1",
+              "tool_binary_sha256": "000691b99169ddca8072954fdfa64348ad94b75546432655f6a05daea1d5eb47",
+              "warmup_count": 1
+            },
+            {
+              "case_id": "PesePMNV.MjPMNV.task_blastn",
+              "contract": "EXACT_TEXT",
+              "cpu_affinity": [
+                0,
+                1,
+                2,
+                3,
+                4,
+                5,
+                6,
+                7
+              ],
+              "effective_thread_evidence": "/mnt/c/Users/genom/LOSAT-benchmark-evidence/v0.1.0-full-performance-af3e2ea/probes/blastn.json",
+              "effective_thread_label": "effective serial",
+              "implementation": "LOSAT threaded Wasm requested n8",
+              "max": 0.530258165,
+              "mean": 0.483330429,
+              "median": 0.498078827,
+              "min": 0.40641558,
+              "mode": "losat_wasm_threads_requested_n8",
+              "n": 5,
+              "output_sha256": "d78705fa8123df369c187b8de8c69e08cf809479a74f22dc3ba32d0bf1e4626b",
+              "program": "blastn",
+              "requested_threads": 8,
+              "runtime": "node-wasi-preview1-threads",
+              "tool_binary_sha256": "557f7cb99aa0a48dc64207e5efe7833b753cf343b6f3550cbd3b83040d3d25f1",
+              "warmup_count": 1
+            },
+            {
+              "case_id": "Sakai.MG1655.megablast",
+              "contract": "SOURCE_UNDETERMINED_ACCEPTED",
+              "cpu_affinity": [
+                0
+              ],
+              "effective_thread_evidence": "command-line option and taskset affinity",
+              "effective_thread_label": "requested/configured 1",
+              "implementation": "NCBI BLAST+",
+              "max": 1.552855913,
+              "mean": 1.2734357723999998,
+              "median": 1.192618685,
+              "min": 1.11782611,
+              "mode": "ncbi_n1",
+              "n": 5,
+              "output_sha256": "93b1d1f1eea390fd5980219cbbece823d5fc96d070a4c2d905a86cf8e9c22200",
+              "program": "blastn",
+              "requested_threads": 1,
+              "runtime": "native",
+              "tool_binary_sha256": "33b64bc67d3149cee2459b2f7766b363323df632cf12c099546de00aea9698b5",
+              "warmup_count": 1
+            },
+            {
+              "case_id": "Sakai.MG1655.megablast",
+              "contract": "SOURCE_UNDETERMINED_ACCEPTED",
+              "cpu_affinity": [
+                0,
+                1,
+                2,
+                3,
+                4,
+                5,
+                6,
+                7
+              ],
+              "effective_thread_evidence": "command-line option and taskset affinity",
+              "effective_thread_label": "requested/configured 8",
+              "implementation": "NCBI BLAST+",
+              "max": 1.428296251,
+              "mean": 1.1440803912,
+              "median": 1.086675307,
+              "min": 1.041524641,
+              "mode": "ncbi_n8",
+              "n": 5,
+              "output_sha256": "93b1d1f1eea390fd5980219cbbece823d5fc96d070a4c2d905a86cf8e9c22200",
+              "program": "blastn",
+              "requested_threads": 8,
+              "runtime": "native",
+              "tool_binary_sha256": "33b64bc67d3149cee2459b2f7766b363323df632cf12c099546de00aea9698b5",
+              "warmup_count": 1
+            },
+            {
+              "case_id": "Sakai.MG1655.megablast",
+              "contract": "SOURCE_UNDETERMINED_ACCEPTED",
+              "cpu_affinity": [
+                0
+              ],
+              "effective_thread_evidence": "command-line option and taskset affinity",
+              "effective_thread_label": "requested/configured 1",
+              "implementation": "LOSAT native",
+              "max": 1.115408624,
+              "mean": 0.9598891139999999,
+              "median": 0.953917594,
+              "min": 0.864342363,
+              "mode": "losat_native_n1",
+              "n": 5,
+              "output_sha256": "d609b0d77e79148bd27d1fbc7d26a588c62a8ec6cd6af6901c0d93aa02787802",
+              "program": "blastn",
+              "requested_threads": 1,
+              "runtime": "native",
+              "tool_binary_sha256": "058587655963bf1eb253f232fdb5553819105646c0d1c50bbece96e410446819",
+              "warmup_count": 1
+            },
+            {
+              "case_id": "Sakai.MG1655.megablast",
+              "contract": "SOURCE_UNDETERMINED_ACCEPTED",
+              "cpu_affinity": [
+                0,
+                1,
+                2,
+                3,
+                4,
+                5,
+                6,
+                7
+              ],
+              "effective_thread_evidence": "command-line option and taskset affinity",
+              "effective_thread_label": "requested/configured 8",
+              "implementation": "LOSAT native",
+              "max": 1.052283484,
+              "mean": 0.9928087405999999,
+              "median": 0.991877386,
+              "min": 0.955019154,
+              "mode": "losat_native_n8",
+              "n": 5,
+              "output_sha256": "d609b0d77e79148bd27d1fbc7d26a588c62a8ec6cd6af6901c0d93aa02787802",
+              "program": "blastn",
+              "requested_threads": 8,
+              "runtime": "native",
+              "tool_binary_sha256": "058587655963bf1eb253f232fdb5553819105646c0d1c50bbece96e410446819",
+              "warmup_count": 1
+            },
+            {
+              "case_id": "Sakai.MG1655.megablast",
+              "contract": "SOURCE_UNDETERMINED_ACCEPTED",
+              "cpu_affinity": [
+                0
+              ],
+              "effective_thread_evidence": "wasm32-wasip1 --no-default-features",
+              "effective_thread_label": "serial command-Wasm",
+              "implementation": "LOSAT serial Wasm",
+              "max": 1.611698872,
+              "mean": 1.5437502316,
+              "median": 1.54350434,
+              "min": 1.499560002,
+              "mode": "losat_wasm_serial",
+              "n": 5,
+              "output_sha256": "d609b0d77e79148bd27d1fbc7d26a588c62a8ec6cd6af6901c0d93aa02787802",
+              "program": "blastn",
+              "requested_threads": 1,
+              "runtime": "node-wasi-preview1",
+              "tool_binary_sha256": "000691b99169ddca8072954fdfa64348ad94b75546432655f6a05daea1d5eb47",
+              "warmup_count": 1
+            },
+            {
+              "case_id": "Sakai.MG1655.megablast",
+              "contract": "SOURCE_UNDETERMINED_ACCEPTED",
+              "cpu_affinity": [
+                0,
+                1,
+                2,
+                3,
+                4,
+                5,
+                6,
+                7
+              ],
+              "effective_thread_evidence": "/mnt/c/Users/genom/LOSAT-benchmark-evidence/v0.1.0-full-performance-af3e2ea/probes/blastn.json",
+              "effective_thread_label": "effective serial",
+              "implementation": "LOSAT threaded Wasm requested n8",
+              "max": 1.397648132,
+              "mean": 1.3341743797999999,
+              "median": 1.334621225,
+              "min": 1.265475416,
+              "mode": "losat_wasm_threads_requested_n8",
+              "n": 5,
+              "output_sha256": "d609b0d77e79148bd27d1fbc7d26a588c62a8ec6cd6af6901c0d93aa02787802",
+              "program": "blastn",
+              "requested_threads": 8,
+              "runtime": "node-wasi-preview1-threads",
+              "tool_binary_sha256": "557f7cb99aa0a48dc64207e5efe7833b753cf343b6f3550cbd3b83040d3d25f1",
+              "warmup_count": 1
+            },
+            {
+              "case_id": "pairwise_default_serial",
+              "contract": "EXACT_TEXT",
+              "cpu_affinity": [
+                0
+              ],
+              "effective_thread_evidence": "command-line option and taskset affinity",
+              "effective_thread_label": "requested/configured 1",
+              "implementation": "NCBI BLAST+",
+              "max": 1.274717396,
+              "mean": 1.1956556858,
+              "median": 1.25063743,
+              "min": 0.969461105,
+              "mode": "ncbi_n1",
+              "n": 5,
+              "output_sha256": "fd4b010800e32ce6c823cb38b42a10b7845f3342edae892acccc8f554f9edf34",
+              "program": "blastp",
+              "requested_threads": 1,
+              "runtime": "native",
+              "tool_binary_sha256": "5ce267c04e4988c265357bfbedc64e809545b6fcfae7ff6775266fabbee8ba0e",
+              "warmup_count": 1
+            },
+            {
+              "case_id": "pairwise_default_serial",
+              "contract": "EXACT_TEXT",
+              "cpu_affinity": [
+                0,
+                1,
+                2,
+                3,
+                4,
+                5,
+                6,
+                7
+              ],
+              "effective_thread_evidence": "command-line option and taskset affinity",
+              "effective_thread_label": "requested/configured 8",
+              "implementation": "NCBI BLAST+",
+              "max": 1.344463654,
+              "mean": 1.2643058178,
+              "median": 1.263827883,
+              "min": 1.207500688,
+              "mode": "ncbi_n8",
+              "n": 5,
+              "output_sha256": "fd4b010800e32ce6c823cb38b42a10b7845f3342edae892acccc8f554f9edf34",
+              "program": "blastp",
+              "requested_threads": 8,
+              "runtime": "native",
+              "tool_binary_sha256": "5ce267c04e4988c265357bfbedc64e809545b6fcfae7ff6775266fabbee8ba0e",
+              "warmup_count": 1
+            },
+            {
+              "case_id": "pairwise_default_serial",
+              "contract": "EXACT_TEXT",
+              "cpu_affinity": [
+                0
+              ],
+              "effective_thread_evidence": "command-line option and taskset affinity",
+              "effective_thread_label": "requested/configured 1",
+              "implementation": "LOSAT native",
+              "max": 0.895013901,
+              "mean": 0.7089720904,
+              "median": 0.654474723,
+              "min": 0.636754596,
+              "mode": "losat_native_n1",
+              "n": 5,
+              "output_sha256": "fd4b010800e32ce6c823cb38b42a10b7845f3342edae892acccc8f554f9edf34",
+              "program": "blastp",
+              "requested_threads": 1,
+              "runtime": "native",
+              "tool_binary_sha256": "058587655963bf1eb253f232fdb5553819105646c0d1c50bbece96e410446819",
+              "warmup_count": 1
+            },
+            {
+              "case_id": "pairwise_default_serial",
+              "contract": "EXACT_TEXT",
+              "cpu_affinity": [
+                0,
+                1,
+                2,
+                3,
+                4,
+                5,
+                6,
+                7
+              ],
+              "effective_thread_evidence": "command-line option and taskset affinity",
+              "effective_thread_label": "requested/configured 8",
+              "implementation": "LOSAT native",
+              "max": 0.363414804,
+              "mean": 0.272413611,
+              "median": 0.244927637,
+              "min": 0.223299307,
+              "mode": "losat_native_n8",
+              "n": 5,
+              "output_sha256": "fd4b010800e32ce6c823cb38b42a10b7845f3342edae892acccc8f554f9edf34",
+              "program": "blastp",
+              "requested_threads": 8,
+              "runtime": "native",
+              "tool_binary_sha256": "058587655963bf1eb253f232fdb5553819105646c0d1c50bbece96e410446819",
+              "warmup_count": 1
+            },
+            {
+              "case_id": "pairwise_default_serial",
+              "contract": "EXACT_TEXT",
+              "cpu_affinity": [
+                0
+              ],
+              "effective_thread_evidence": "wasm32-wasip1 --no-default-features",
+              "effective_thread_label": "serial command-Wasm",
+              "implementation": "LOSAT serial Wasm",
+              "max": 1.111331348,
+              "mean": 1.0815885997999999,
+              "median": 1.090408214,
+              "min": 1.034560642,
+              "mode": "losat_wasm_serial",
+              "n": 5,
+              "output_sha256": "fd4b010800e32ce6c823cb38b42a10b7845f3342edae892acccc8f554f9edf34",
+              "program": "blastp",
+              "requested_threads": 1,
+              "runtime": "node-wasi-preview1",
+              "tool_binary_sha256": "000691b99169ddca8072954fdfa64348ad94b75546432655f6a05daea1d5eb47",
+              "warmup_count": 1
+            },
+            {
+              "case_id": "pairwise_default_serial",
+              "contract": "EXACT_TEXT",
+              "cpu_affinity": [
+                0,
+                1,
+                2,
+                3,
+                4,
+                5,
+                6,
+                7
+              ],
+              "effective_thread_evidence": "/mnt/c/Users/genom/LOSAT-benchmark-evidence/v0.1.0-full-performance-af3e2ea/probes/blastp.json",
+              "effective_thread_label": "effective threaded",
+              "implementation": "LOSAT threaded Wasm requested n8",
+              "max": 0.753851295,
+              "mean": 0.7067529868,
+              "median": 0.70146779,
+              "min": 0.648936141,
+              "mode": "losat_wasm_threads_requested_n8",
+              "n": 5,
+              "output_sha256": "fd4b010800e32ce6c823cb38b42a10b7845f3342edae892acccc8f554f9edf34",
+              "program": "blastp",
+              "requested_threads": 8,
+              "runtime": "node-wasi-preview1-threads",
+              "tool_binary_sha256": "557f7cb99aa0a48dc64207e5efe7833b753cf343b6f3550cbd3b83040d3d25f1",
+              "warmup_count": 1
+            },
+            {
+              "case_id": "p03_mela_pemojnva",
+              "contract": "EXACT_TEXT",
+              "cpu_affinity": [
+                0
+              ],
+              "effective_thread_evidence": "command-line option and taskset affinity",
+              "effective_thread_label": "requested/configured 1",
+              "implementation": "NCBI BLAST+",
+              "max": 3.648521902,
+              "mean": 3.4594447266,
+              "median": 3.471238944,
+              "min": 3.28937059,
+              "mode": "ncbi_n1",
+              "n": 5,
+              "output_sha256": "bbef153094025db89dd4a69b2a3c4246b0b8853396fe740bc7e1bd654db105b6",
+              "program": "tblastx",
+              "requested_threads": 1,
+              "runtime": "native",
+              "tool_binary_sha256": "583e5d60bbd444ac455d20e0956c5aa0aeef675da8daee8204d8f9376ddb8804",
+              "warmup_count": 1
+            },
+            {
+              "case_id": "p03_mela_pemojnva",
+              "contract": "EXACT_TEXT",
+              "cpu_affinity": [
+                0,
+                1,
+                2,
+                3,
+                4,
+                5,
+                6,
+                7
+              ],
+              "effective_thread_evidence": "command-line option and taskset affinity",
+              "effective_thread_label": "requested/configured 8",
+              "implementation": "NCBI BLAST+",
+              "max": 3.360745982,
+              "mean": 3.2999452106,
+              "median": 3.303325377,
+              "min": 3.242977593,
+              "mode": "ncbi_n8",
+              "n": 5,
+              "output_sha256": "bbef153094025db89dd4a69b2a3c4246b0b8853396fe740bc7e1bd654db105b6",
+              "program": "tblastx",
+              "requested_threads": 8,
+              "runtime": "native",
+              "tool_binary_sha256": "583e5d60bbd444ac455d20e0956c5aa0aeef675da8daee8204d8f9376ddb8804",
+              "warmup_count": 1
+            },
+            {
+              "case_id": "p03_mela_pemojnva",
+              "contract": "EXACT_TEXT",
+              "cpu_affinity": [
+                0
+              ],
+              "effective_thread_evidence": "command-line option and taskset affinity",
+              "effective_thread_label": "requested/configured 1",
+              "implementation": "LOSAT native",
+              "max": 4.055830448,
+              "mean": 3.9357001494,
+              "median": 4.036182267,
+              "min": 3.73941987,
+              "mode": "losat_native_n1",
+              "n": 5,
+              "output_sha256": "bbef153094025db89dd4a69b2a3c4246b0b8853396fe740bc7e1bd654db105b6",
+              "program": "tblastx",
+              "requested_threads": 1,
+              "runtime": "native",
+              "tool_binary_sha256": "058587655963bf1eb253f232fdb5553819105646c0d1c50bbece96e410446819",
+              "warmup_count": 1
+            },
+            {
+              "case_id": "p03_mela_pemojnva",
+              "contract": "EXACT_TEXT",
+              "cpu_affinity": [
+                0,
+                1,
+                2,
+                3,
+                4,
+                5,
+                6,
+                7
+              ],
+              "effective_thread_evidence": "command-line option and taskset affinity",
+              "effective_thread_label": "requested/configured 8",
+              "implementation": "LOSAT native",
+              "max": 2.419030314,
+              "mean": 2.2832154549999997,
+              "median": 2.257771887,
+              "min": 2.160374262,
+              "mode": "losat_native_n8",
+              "n": 5,
+              "output_sha256": "bbef153094025db89dd4a69b2a3c4246b0b8853396fe740bc7e1bd654db105b6",
+              "program": "tblastx",
+              "requested_threads": 8,
+              "runtime": "native",
+              "tool_binary_sha256": "058587655963bf1eb253f232fdb5553819105646c0d1c50bbece96e410446819",
+              "warmup_count": 1
+            },
+            {
+              "case_id": "p03_mela_pemojnva",
+              "contract": "EXACT_TEXT",
+              "cpu_affinity": [
+                0
+              ],
+              "effective_thread_evidence": "wasm32-wasip1 --no-default-features",
+              "effective_thread_label": "serial command-Wasm",
+              "implementation": "LOSAT serial Wasm",
+              "max": 5.967438747,
+              "mean": 5.8459275994,
+              "median": 5.900730279,
+              "min": 5.636081397,
+              "mode": "losat_wasm_serial",
+              "n": 5,
+              "output_sha256": "bbef153094025db89dd4a69b2a3c4246b0b8853396fe740bc7e1bd654db105b6",
+              "program": "tblastx",
+              "requested_threads": 1,
+              "runtime": "node-wasi-preview1",
+              "tool_binary_sha256": "000691b99169ddca8072954fdfa64348ad94b75546432655f6a05daea1d5eb47",
+              "warmup_count": 1
+            },
+            {
+              "case_id": "p03_mela_pemojnva",
+              "contract": "EXACT_TEXT",
+              "cpu_affinity": [
+                0,
+                1,
+                2,
+                3,
+                4,
+                5,
+                6,
+                7
+              ],
+              "effective_thread_evidence": "/mnt/c/Users/genom/LOSAT-benchmark-evidence/v0.1.0-full-performance-af3e2ea/probes/tblastx.json",
+              "effective_thread_label": "effective serial",
+              "implementation": "LOSAT threaded Wasm requested n8",
+              "max": 5.795768023,
+              "mean": 5.636925708,
+              "median": 5.641723856,
+              "min": 5.511312925,
+              "mode": "losat_wasm_threads_requested_n8",
+              "n": 5,
+              "output_sha256": "bbef153094025db89dd4a69b2a3c4246b0b8853396fe740bc7e1bd654db105b6",
+              "program": "tblastx",
+              "requested_threads": 8,
+              "runtime": "node-wasi-preview1-threads",
+              "tool_binary_sha256": "557f7cb99aa0a48dc64207e5efe7833b753cf343b6f3550cbd3b83040d3d25f1",
+              "warmup_count": 1
+            },
+            {
+              "case_id": "d06_ap027131_ap027133_db4",
+              "contract": "APPROVED_DB_GENCODE_DEVIATION",
+              "cpu_affinity": [
+                0
+              ],
+              "effective_thread_evidence": "command-line option and taskset affinity",
+              "effective_thread_label": "requested/configured 1",
+              "implementation": "NCBI BLAST+",
+              "max": 42.769963671,
+              "mean": 41.2619005556,
+              "median": 41.088606691,
+              "min": 40.534888115,
+              "mode": "ncbi_n1",
+              "n": 5,
+              "output_sha256": "8d5ff1d0d92f27488ba91da061366ef808db382cd73b3e8577385d150e9e8a29",
+              "program": "tblastx",
+              "requested_threads": 1,
+              "runtime": "native",
+              "tool_binary_sha256": "583e5d60bbd444ac455d20e0956c5aa0aeef675da8daee8204d8f9376ddb8804",
+              "warmup_count": 1
+            },
+            {
+              "case_id": "d06_ap027131_ap027133_db4",
+              "contract": "APPROVED_DB_GENCODE_DEVIATION",
+              "cpu_affinity": [
+                0,
+                1,
+                2,
+                3,
+                4,
+                5,
+                6,
+                7
+              ],
+              "effective_thread_evidence": "command-line option and taskset affinity",
+              "effective_thread_label": "requested/configured 8",
+              "implementation": "NCBI BLAST+",
+              "max": 42.878257923,
+              "mean": 41.9054568658,
+              "median": 42.20334378,
+              "min": 40.71527475,
+              "mode": "ncbi_n8",
+              "n": 5,
+              "output_sha256": "8d5ff1d0d92f27488ba91da061366ef808db382cd73b3e8577385d150e9e8a29",
+              "program": "tblastx",
+              "requested_threads": 8,
+              "runtime": "native",
+              "tool_binary_sha256": "583e5d60bbd444ac455d20e0956c5aa0aeef675da8daee8204d8f9376ddb8804",
+              "warmup_count": 1
+            },
+            {
+              "case_id": "d06_ap027131_ap027133_db4",
+              "contract": "APPROVED_DB_GENCODE_DEVIATION",
+              "cpu_affinity": [
+                0
+              ],
+              "effective_thread_evidence": "command-line option and taskset affinity",
+              "effective_thread_label": "requested/configured 1",
+              "implementation": "LOSAT native",
+              "max": 49.214754338,
+              "mean": 48.5865011068,
+              "median": 48.992957891,
+              "min": 47.699639968,
+              "mode": "losat_native_n1",
+              "n": 5,
+              "output_sha256": "719339294d0f22d0f415dd33106a0fd93c25ac372b1456d19d92390fce081df1",
+              "program": "tblastx",
+              "requested_threads": 1,
+              "runtime": "native",
+              "tool_binary_sha256": "058587655963bf1eb253f232fdb5553819105646c0d1c50bbece96e410446819",
+              "warmup_count": 1
+            },
+            {
+              "case_id": "d06_ap027131_ap027133_db4",
+              "contract": "APPROVED_DB_GENCODE_DEVIATION",
+              "cpu_affinity": [
+                0,
+                1,
+                2,
+                3,
+                4,
+                5,
+                6,
+                7
+              ],
+              "effective_thread_evidence": "command-line option and taskset affinity",
+              "effective_thread_label": "requested/configured 8",
+              "implementation": "LOSAT native",
+              "max": 18.320587144,
+              "mean": 17.963896998000003,
+              "median": 17.833132369,
+              "min": 17.673172274,
+              "mode": "losat_native_n8",
+              "n": 5,
+              "output_sha256": "719339294d0f22d0f415dd33106a0fd93c25ac372b1456d19d92390fce081df1",
+              "program": "tblastx",
+              "requested_threads": 8,
+              "runtime": "native",
+              "tool_binary_sha256": "058587655963bf1eb253f232fdb5553819105646c0d1c50bbece96e410446819",
+              "warmup_count": 1
+            },
+            {
+              "case_id": "d06_ap027131_ap027133_db4",
+              "contract": "APPROVED_DB_GENCODE_DEVIATION",
+              "cpu_affinity": [
+                0
+              ],
+              "effective_thread_evidence": "wasm32-wasip1 --no-default-features",
+              "effective_thread_label": "serial command-Wasm",
+              "implementation": "LOSAT serial Wasm",
+              "max": 59.650423486,
+              "mean": 57.786246160199994,
+              "median": 57.820214904,
+              "min": 56.587707245,
+              "mode": "losat_wasm_serial",
+              "n": 5,
+              "output_sha256": "719339294d0f22d0f415dd33106a0fd93c25ac372b1456d19d92390fce081df1",
+              "program": "tblastx",
+              "requested_threads": 1,
+              "runtime": "node-wasi-preview1",
+              "tool_binary_sha256": "000691b99169ddca8072954fdfa64348ad94b75546432655f6a05daea1d5eb47",
+              "warmup_count": 1
+            },
+            {
+              "case_id": "d06_ap027131_ap027133_db4",
+              "contract": "APPROVED_DB_GENCODE_DEVIATION",
+              "cpu_affinity": [
+                0,
+                1,
+                2,
+                3,
+                4,
+                5,
+                6,
+                7
+              ],
+              "effective_thread_evidence": "/mnt/c/Users/genom/LOSAT-benchmark-evidence/v0.1.0-full-performance-af3e2ea/probes/tblastx.json",
+              "effective_thread_label": "effective serial",
+              "implementation": "LOSAT threaded Wasm requested n8",
+              "max": 57.612389797,
+              "mean": 56.8915171476,
+              "median": 56.965123663,
+              "min": 55.82692736,
+              "mode": "losat_wasm_threads_requested_n8",
+              "n": 5,
+              "output_sha256": "719339294d0f22d0f415dd33106a0fd93c25ac372b1456d19d92390fce081df1",
+              "program": "tblastx",
+              "requested_threads": 8,
+              "runtime": "node-wasi-preview1-threads",
+              "tool_binary_sha256": "557f7cb99aa0a48dc64207e5efe7833b753cf343b6f3550cbd3b83040d3d25f1",
+              "warmup_count": 1
+            },
+            {
+              "case_id": "p11_avclpv_psclpv",
+              "contract": "EXACT_TEXT",
+              "cpu_affinity": [
+                0
+              ],
+              "effective_thread_evidence": "command-line option and taskset affinity",
+              "effective_thread_label": "requested/configured 1",
+              "implementation": "NCBI BLAST+",
+              "max": 686.448999818,
+              "mean": 673.7509010458,
+              "median": 672.735297691,
+              "min": 661.681456901,
+              "mode": "ncbi_n1",
+              "n": 5,
+              "output_sha256": "1eb11f5caa4d1030a016e67bafc90acaecb0a1fe76f9b11256fe1343f0571fe4",
+              "program": "tblastx",
+              "requested_threads": 1,
+              "runtime": "native",
+              "tool_binary_sha256": "583e5d60bbd444ac455d20e0956c5aa0aeef675da8daee8204d8f9376ddb8804",
+              "warmup_count": 1
+            },
+            {
+              "case_id": "p11_avclpv_psclpv",
+              "contract": "EXACT_TEXT",
+              "cpu_affinity": [
+                0,
+                1,
+                2,
+                3,
+                4,
+                5,
+                6,
+                7
+              ],
+              "effective_thread_evidence": "command-line option and taskset affinity",
+              "effective_thread_label": "requested/configured 8",
+              "implementation": "NCBI BLAST+",
+              "max": 681.98205662,
+              "mean": 671.2435202796,
+              "median": 669.720063694,
+              "min": 657.049079748,
+              "mode": "ncbi_n8",
+              "n": 5,
+              "output_sha256": "1eb11f5caa4d1030a016e67bafc90acaecb0a1fe76f9b11256fe1343f0571fe4",
+              "program": "tblastx",
+              "requested_threads": 8,
+              "runtime": "native",
+              "tool_binary_sha256": "583e5d60bbd444ac455d20e0956c5aa0aeef675da8daee8204d8f9376ddb8804",
+              "warmup_count": 1
+            },
+            {
+              "case_id": "p11_avclpv_psclpv",
+              "contract": "EXACT_TEXT",
+              "cpu_affinity": [
+                0
+              ],
+              "effective_thread_evidence": "command-line option and taskset affinity",
+              "effective_thread_label": "requested/configured 1",
+              "implementation": "LOSAT native",
+              "max": 611.426015733,
+              "mean": 594.4719066664,
+              "median": 600.137202515,
+              "min": 575.576270355,
+              "mode": "losat_native_n1",
+              "n": 5,
+              "output_sha256": "1eb11f5caa4d1030a016e67bafc90acaecb0a1fe76f9b11256fe1343f0571fe4",
+              "program": "tblastx",
+              "requested_threads": 1,
+              "runtime": "native",
+              "tool_binary_sha256": "058587655963bf1eb253f232fdb5553819105646c0d1c50bbece96e410446819",
+              "warmup_count": 1
+            },
+            {
+              "case_id": "p11_avclpv_psclpv",
+              "contract": "EXACT_TEXT",
+              "cpu_affinity": [
+                0,
+                1,
+                2,
+                3,
+                4,
+                5,
+                6,
+                7
+              ],
+              "effective_thread_evidence": "command-line option and taskset affinity",
+              "effective_thread_label": "requested/configured 8",
+              "implementation": "LOSAT native",
+              "max": 328.148712701,
+              "mean": 291.838752612,
+              "median": 282.193664768,
+              "min": 274.587674203,
+              "mode": "losat_native_n8",
+              "n": 5,
+              "output_sha256": "1eb11f5caa4d1030a016e67bafc90acaecb0a1fe76f9b11256fe1343f0571fe4",
+              "program": "tblastx",
+              "requested_threads": 8,
+              "runtime": "native",
+              "tool_binary_sha256": "058587655963bf1eb253f232fdb5553819105646c0d1c50bbece96e410446819",
+              "warmup_count": 1
+            },
+            {
+              "case_id": "p11_avclpv_psclpv",
+              "contract": "EXACT_TEXT",
+              "cpu_affinity": [
+                0
+              ],
+              "effective_thread_evidence": "wasm32-wasip1 --no-default-features",
+              "effective_thread_label": "serial command-Wasm",
+              "implementation": "LOSAT serial Wasm",
+              "max": 829.203945926,
+              "mean": 791.6205875136,
+              "median": 781.627655139,
+              "min": 764.744861847,
+              "mode": "losat_wasm_serial",
+              "n": 5,
+              "output_sha256": "1eb11f5caa4d1030a016e67bafc90acaecb0a1fe76f9b11256fe1343f0571fe4",
+              "program": "tblastx",
+              "requested_threads": 1,
+              "runtime": "node-wasi-preview1",
+              "tool_binary_sha256": "000691b99169ddca8072954fdfa64348ad94b75546432655f6a05daea1d5eb47",
+              "warmup_count": 1
+            },
+            {
+              "case_id": "p11_avclpv_psclpv",
+              "contract": "EXACT_TEXT",
+              "cpu_affinity": [
+                0,
+                1,
+                2,
+                3,
+                4,
+                5,
+                6,
+                7
+              ],
+              "effective_thread_evidence": "/mnt/c/Users/genom/LOSAT-benchmark-evidence/v0.1.0-full-performance-af3e2ea/probes/tblastx.json",
+              "effective_thread_label": "effective serial",
+              "implementation": "LOSAT threaded Wasm requested n8",
+              "max": 791.963669189,
+              "mean": 778.6463083672,
+              "median": 780.60536504,
+              "min": 761.870170225,
+              "mode": "losat_wasm_threads_requested_n8",
+              "n": 5,
+              "output_sha256": "1eb11f5caa4d1030a016e67bafc90acaecb0a1fe76f9b11256fe1343f0571fe4",
+              "program": "tblastx",
+              "requested_threads": 8,
+              "runtime": "node-wasi-preview1-threads",
+              "tool_binary_sha256": "557f7cb99aa0a48dc64207e5efe7833b753cf343b6f3550cbd3b83040d3d25f1",
+              "warmup_count": 1
+            }
+          ],
+          "used_for_current_plot": true
         }
       },
-      "row_count": 283,
-      "sha256": "c7b4eb17245dfd0dade44068a65e5afcc084fb7fa50a639301b5bb3bf7323a13",
+      "row_count": 463,
+      "sha256": "c3b2c0318fe1002659cadb063583208445a570e7ccf748215fe94467dbd22d76",
       "status": "AVAILABLE_CURRENT"
     }
   },
@@ -3403,5 +5106,5 @@
   "recovery_policy": "Alignment evidence remains the unchanged recovered PR 5 snapshot. The final-v0.1.0 timing series was collected once from final main in a separate manual process; the renderer executes no benchmark, NCBI, LOSAT, or network operation.",
   "repository_base": "1ef13ed09e9cf6e3d6c3b1a1ed9527a389c3992d",
   "schema_version": 1,
-  "snapshot_id": "v0.1.0-final-benchmark-2026-09-03"
+  "snapshot_id": "v0.1.0-full-performance-af3e2ea-2026-09-04"
 }

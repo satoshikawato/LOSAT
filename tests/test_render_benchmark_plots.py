@@ -11,6 +11,7 @@ import json
 import tempfile
 import unittest
 from pathlib import Path
+from unittest import mock
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -59,6 +60,11 @@ TIMING_HEADER = [
     "tool",
     "contract",
     "benchmark_timestamp",
+    "material_environment_id",
+    "collection_segment",
+    "boot_id",
+    "effective_thread_label",
+    "effective_thread_evidence",
 ]
 
 
@@ -152,7 +158,7 @@ class RendererTests(unittest.TestCase):
                     "abc",
                     "0:02.50",
                 ]
-                + [""] * 9
+                + [""] * 14
             )
             for case_id, baseline, candidate in (
                 ("p11_avclpv_psclpv", "639.21", "636.70"),
@@ -179,19 +185,38 @@ class RendererTests(unittest.TestCase):
                             "def",
                             "",
                         ]
-                        + [""] * 9
+                        + [""] * 14
                     )
-            for implementation, baseline in (("NCBI BLAST+", 2.0), ("LOSAT", 1.5)):
+            # NCBI reference: ncbi-blast/c++/src/app/blast/tblastx_app.cpp:191-194
+            # CLocalBlast lcl_blast(queries, opts_hndl, db_adapter);
+            # lcl_blast.SetNumberOfThreads(m_CmdLineArgs->GetNumThreads());
+            # results = lcl_blast.Run();
+            for mode_index, (mode, implementation, threads, effective) in enumerate(
+                (
+                    ("ncbi_n1", "NCBI BLAST+", "1", "requested/configured 1"),
+                    ("ncbi_n8", "NCBI BLAST+", "8", "requested/configured 8"),
+                    ("losat_native_n1", "LOSAT native", "1", "requested/configured 1"),
+                    ("losat_native_n8", "LOSAT native", "8", "requested/configured 8"),
+                    ("losat_wasm_serial", "LOSAT serial Wasm", "1", "serial command-Wasm"),
+                    (
+                        "losat_wasm_threads_requested_n8",
+                        "LOSAT threaded Wasm requested n8",
+                        "8",
+                        "effective serial",
+                    ),
+                ),
+                start=1,
+            ):
                 for sample_index in range(1, 6):
-                    seconds = baseline + sample_index / 10
+                    seconds = mode_index + sample_index / 10
                     writer.writerow(
                         [
                             "unit_current",
                             "tblastx",
-                            "TBLASTX",
+                            mode,
                             "current-case",
                             implementation,
-                            "1",
+                            threads,
                             str(seconds),
                             "wall_clock_sample",
                             "candidate-sha",
@@ -209,6 +234,11 @@ class RendererTests(unittest.TestCase):
                             implementation,
                             "EXACT_TEXT",
                             f"2026-09-03T00:00:0{sample_index}+00:00",
+                            "unit-material-environment",
+                            "1",
+                            "unit-boot",
+                            effective,
+                            "unit-probe",
                         ]
                     )
 
@@ -226,6 +256,78 @@ class RendererTests(unittest.TestCase):
         ):
             self.assertEqual(sha256(first / filename), sha256(second / filename))
 
+    # NCBI reference: ncbi-blast/c++/src/objtools/align_format/format_flags.cpp:111-113
+    # SFormatSpec("length", "Alignment length", eAlignmentLength),
+    # Canonicalize derived coordinates only, preserving recorded lengths/weights.
+    def test_derived_edge_neighboring_floats_serialize_identically(self) -> None:
+        value = 532580.1009576048  # First differing edge in PR #105's push run.
+        for perturbed in (
+            value,
+            RENDERER.np.nextafter(value, float("inf")),
+            RENDERER.np.nextafter(value, -float("inf")),
+        ):
+            with self.subTest(value=perturbed):
+                self.assertEqual(
+                    json.dumps(RENDERER.canonical_plot_float(perturbed)),
+                    "532580.100958",
+                )
+
+    def test_length_edges_are_canonical_before_aggregation_and_serialization(self) -> None:
+        path = self.snapshot / "alignment_results.tsv.gz"
+        original_geomspace = RENDERER.np.geomspace
+        with mock.patch.object(
+            RENDERER, "canonical_plot_float", side_effect=float
+        ):
+            unrounded = RENDERER.aggregate_alignments(path)
+        expected = RENDERER.aggregate_alignments(path)
+
+        for direction in (float("inf"), -float("inf")):
+            def perturbed_geomspace(*args, **kwargs):
+                edges = original_geomspace(*args, **kwargs)
+                edges[1:-1] = RENDERER.np.nextafter(edges[1:-1], direction)
+                return edges
+
+            with self.subTest(direction=direction), mock.patch.object(
+                RENDERER.np, "geomspace", side_effect=perturbed_geomspace
+            ):
+                actual = RENDERER.aggregate_alignments(path)
+            self.assertEqual(
+                json.dumps({k: v.tolist() for k, v in actual["length_edges"].items()}),
+                json.dumps({k: v.tolist() for k, v in expected["length_edges"].items()}),
+            )
+            for program_index, program in enumerate(RENDERER.PROGRAMS):
+                edges = actual["length_edges"][program]
+                self.assertEqual(len(edges), 51)
+                self.assertTrue(RENDERER.np.all(edges > 0))
+                self.assertTrue(RENDERER.np.all(RENDERER.np.diff(edges) > 0))
+                self.assertEqual(edges[0], 10 + program_index * 4)
+                self.assertEqual(edges[-1], 12 + program_index * 4)
+            for key in ("counts", "scatter"):
+                self.assertEqual(actual[key], unrounded[key])
+            for key in ("length_hist", "identity_hist"):
+                for series in actual[key]:
+                    RENDERER.np.testing.assert_array_equal(
+                        actual[key][series], unrounded[key][series]
+                    )
+
+    def test_equal_length_edges_keep_exact_expanded_bounds(self) -> None:
+        rows = list(RENDERER.alignment_rows(self.snapshot / "alignment_results.tsv.gz"))
+        for length in (1, 19):
+            for row in rows:
+                row["length"] = str(length)
+            with self.subTest(length=length), mock.patch.object(
+                RENDERER, "alignment_rows", side_effect=lambda _: iter(rows)
+            ):
+                aggregated = RENDERER.aggregate_alignments(Path("unused"))
+                for edges in aggregated["length_edges"].values():
+                    self.assertEqual(len(edges), 51)
+                    self.assertTrue(RENDERER.np.all(edges > 0))
+                    self.assertTrue(RENDERER.np.all(RENDERER.np.diff(edges) > 0))
+                    self.assertEqual(edges[0], max(1.0, length * 0.9))
+                    self.assertEqual(edges[-1], length * 1.1)
+                for weights in aggregated["length_hist"].values():
+                    self.assertEqual(weights.sum(), 3 * length)
+
     def test_dataset_checksum_mismatch_fails_closed(self) -> None:
         timing_path = self.snapshot / "execution_times.tsv"
         with timing_path.open("a", encoding="utf-8") as handle:
@@ -238,9 +340,111 @@ class RendererTests(unittest.TestCase):
         rows = RENDERER.load_timing_rows(self.snapshot / "execution_times.tsv")
         current = [row for row in rows if row["provenance_id"] == "unit_current"]
         summaries = RENDERER.summarize_current_timing(current)
-        self.assertEqual(len(summaries), 2)
-        self.assertEqual([summary["n"] for summary in summaries], [5, 5])
-        self.assertEqual([summary["median"] for summary in summaries], [2.3, 1.8])
+        self.assertEqual(len(summaries), 6)
+        self.assertEqual([summary["n"] for summary in summaries], [5] * 6)
+        self.assertEqual(
+            [summary["median"] for summary in summaries],
+            [1.3, 2.3, 3.3, 4.3, 5.3, 6.3],
+        )
+        self.assertEqual(
+            [summary["min"] for summary in summaries],
+            [1.1, 2.1, 3.1, 4.1, 5.1, 6.1],
+        )
+        self.assertEqual(
+            [summary["max"] for summary in summaries],
+            [1.5, 2.5, 3.5, 4.5, 5.5, 6.5],
+        )
+
+    # NCBI reference: ncbi-blast/c++/src/algo/blast/blastinput/blastn_args.cpp:48,55-61
+    # static const char kProgram[] = "blastn";
+    # static const char kDefaultTask[] = "megablast";
+    # SetTask(kDefaultTask);
+    # arg.Reset(new CTaskCmdLineArgs(tasks, kDefaultTask));
+    # Validate presentation of the recorded task identities and samples only.
+    def test_current_snapshot_has_independent_linear_facets_and_all_modes(self) -> None:
+        snapshot = ROOT / "benchmarks" / "v0.1.0"
+        metadata, _ = RENDERER.load_metadata(snapshot)
+        expected = json.loads((snapshot / "plot_data.json").read_text())[
+            "plots"
+        ]["execution_time"]
+        figures = []
+        original_figure = RENDERER.plt.figure
+
+        def capture_figure(*args, **kwargs):
+            figure = original_figure(*args, **kwargs)
+            figures.append(figure)
+            return figure
+
+        with mock.patch.object(
+            RENDERER.plt, "figure", side_effect=capture_figure
+        ):
+            _, plot_data = RENDERER.render_execution_time(
+                snapshot / "execution_times.tsv",
+                Path(self.temporary_directory.name) / "execution-time.png",
+                metadata["datasets"]["execution_times"],
+            )
+
+        self.assertEqual(len(figures), 1)
+        figure = figures[0]
+        expected_facets = {
+            "TBLASTX": [
+                "p03_mela_pemojnva",
+                "d06_ap027131_ap027133_db4",
+                "p11_avclpv_psclpv",
+            ],
+            "BLASTN": ["PesePMNV.MjPMNV.task_blastn"],
+            "Megablast": ["Sakai.MG1655.megablast"],
+            "BLASTP": ["pairwise_default_serial"],
+        }
+        self.assertEqual(
+            [axis.get_title() for axis in figure.axes], list(expected_facets)
+        )
+        self.assertEqual(len(figure.legends), 1)
+        self.assertEqual(
+            [text.get_text() for text in figure.legends[0].get_texts()],
+            [RENDERER.TIMING_MODE_LABELS[mode] for mode in RENDERER.TIMING_MODES],
+        )
+        self.assertEqual(len({axis.get_xlim() for axis in figure.axes}), 4)
+        self.assertEqual(sum(len(axis.patches) for axis in figure.axes), 36)
+        summaries = expected["current"]["summaries"]
+        lookup = {(row["case_id"], row["mode"]): row for row in summaries}
+        for axis in figure.axes:
+            self.assertEqual(axis.get_xscale(), "linear")
+            self.assertEqual(axis.get_yscale(), "linear")
+            self.assertEqual(axis.get_xlabel(), "Execution time (s)")
+            self.assertEqual(axis.get_xlim()[0], 0)
+            self.assertEqual(list(axis.get_shared_x_axes().get_siblings(axis)), [axis])
+            self.assertIsNone(axis.get_legend())
+            self.assertEqual(axis.xaxis.get_offset_text().get_text(), "")
+            cases = expected_facets[axis.get_title()]
+            self.assertEqual(len(axis.get_yticklabels()), len(cases))
+            self.assertEqual(len({bar.get_y() for bar in axis.patches}), len(cases) * 6)
+            for mode in RENDERER.TIMING_MODES:
+                bars = next(
+                    container for container in axis.containers
+                    if container.get_label() == RENDERER.TIMING_MODE_LABELS[mode]
+                )
+                self.assertEqual(len(bars), len(cases))
+                segments = bars.errorbar.lines[2][0].get_segments()
+                self.assertEqual(len(segments), len(cases))
+                for case, bar, segment in zip(cases, bars, segments):
+                    summary = lookup[(case, mode)]
+                    self.assertEqual(bar.get_x(), 0)
+                    self.assertAlmostEqual(bar.get_width(), summary["median"])
+                    self.assertAlmostEqual(segment[0][0], summary["min"])
+                    self.assertAlmostEqual(segment[1][0], summary["max"])
+                    self.assertLess(summary["max"], axis.get_xlim()[1])
+                    if axis.get_title() == "BLASTN":
+                        self.assertGreater(bar.get_width() / axis.get_xlim()[1], 0.25)
+            facet_max = max(
+                lookup[(case, mode)]["max"]
+                for case in cases for mode in RENDERER.TIMING_MODES
+            )
+            self.assertLess(axis.get_xlim()[1], facet_max * 1.25)
+        self.assertEqual(len(plot_data["current"]["samples"]), 180)
+        self.assertEqual(len(plot_data["current"]["summaries"]), 36)
+        self.assertEqual([row["n"] for row in summaries], [5] * 36)
+        self.assertEqual(plot_data, expected)
 
     def test_snapshot_file_cannot_escape_snapshot(self) -> None:
         with self.assertRaisesRegex(ValueError, "escapes snapshot directory"):

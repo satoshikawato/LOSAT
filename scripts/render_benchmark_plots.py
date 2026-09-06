@@ -22,10 +22,40 @@ import numpy as np
 from matplotlib.patches import Patch
 
 
-RENDERER_VERSION = 1
+RENDERER_VERSION = 2
 PROGRAMS = ("blastn", "blastp", "tblastx")
 IMPLEMENTATIONS = ("NCBI BLAST+", "LOSAT")
 PROGRAM_LABELS = {"blastn": "BLASTN", "blastp": "BLASTP", "tblastx": "TBLASTX"}
+# NCBI reference: ncbi-blast/c++/src/app/blast/tblastx_app.cpp:191-194
+# CLocalBlast lcl_blast(queries, opts_hndl, db_adapter);
+# lcl_blast.SetNumberOfThreads(m_CmdLineArgs->GetNumThreads());
+# results = lcl_blast.Run();
+# These timing labels retain requested thread configurations; the data-only
+# renderer does not implement or alter search behavior.
+TIMING_MODES = (
+    "ncbi_n1",
+    "ncbi_n8",
+    "losat_native_n1",
+    "losat_native_n8",
+    "losat_wasm_serial",
+    "losat_wasm_threads_requested_n8",
+)
+TIMING_MODE_LABELS = {
+    "ncbi_n1": "NCBI n1",
+    "ncbi_n8": "NCBI n8",
+    "losat_native_n1": "LOSAT native n1",
+    "losat_native_n8": "LOSAT native n8",
+    "losat_wasm_serial": "LOSAT Wasm serial",
+    "losat_wasm_threads_requested_n8": "LOSAT Wasm threaded",
+}
+TIMING_MODE_THREADS = {
+    "ncbi_n1": "1",
+    "ncbi_n8": "8",
+    "losat_native_n1": "1",
+    "losat_native_n8": "8",
+    "losat_wasm_serial": "1",
+    "losat_wasm_threads_requested_n8": "8",
+}
 ALIGNMENT_FIELDS = {
     "program",
     "case_id",
@@ -62,6 +92,11 @@ TIMING_FIELDS = {
     "environment_id",
     "tool",
     "contract",
+    "material_environment_id",
+    "collection_segment",
+    "boot_id",
+    "effective_thread_label",
+    "effective_thread_evidence",
 }
 
 # NCBI reference: ncbi-blast/c++/src/objtools/align_format/format_flags.cpp:38-40,109-116
@@ -143,6 +178,14 @@ def checked_alignment_values(row: dict[str, str]) -> tuple[str, str, float, int]
     return program, implementation, pident, length
 
 
+# NCBI reference: ncbi-blast/c++/src/objtools/align_format/format_flags.cpp:111-113
+# SFormatSpec("length", "Alignment length", eAlignmentLength),
+# Preserve the source alignment length; only derived plotting coordinates use
+# 12 significant digits to discard runner-dependent geomspace rounding noise.
+def canonical_plot_float(value: float) -> float:
+    return float(format(float(value), ".12g"))
+
+
 def aggregate_alignments(
     path: Path, max_scatter_points: int = 6000
 ) -> dict[str, object]:
@@ -170,7 +213,12 @@ def aggregate_alignments(
         if lower == upper:
             lower = max(1.0, lower * 0.9)
             upper = upper * 1.1
-        length_edges[program] = np.geomspace(lower, upper, 51)
+        edges = np.array(
+            [canonical_plot_float(value) for value in np.geomspace(lower, upper, 51)]
+        )
+        # Preserve exact bounds for histogram indexing and endpoint inclusion.
+        edges[0], edges[-1] = lower, upper
+        length_edges[program] = edges
     identity_edges = np.linspace(0.0, 100.0, 51)
     length_hist = {
         key: np.zeros(50, dtype=float)
@@ -478,45 +526,58 @@ def summarize_current_timing(rows: list[dict[str, str]]) -> list[dict[str, objec
     case_order = list(dict.fromkeys(row["case_id"] for row in rows))
     summaries: list[dict[str, object]] = []
     for case_id in case_order:
-        for tool in IMPLEMENTATIONS:
+        for mode in TIMING_MODES:
             group = [
                 row
                 for row in rows
-                if row["case_id"] == case_id and row["tool"] == tool
+                if row["case_id"] == case_id and row["mode"] == mode
             ]
             if len(group) != 5:
                 raise ValueError(
-                    f"current timing group must contain five samples: {case_id} {tool}"
+                    f"current timing group must contain five samples: {case_id} {mode}"
                 )
             if {row["sample_index"] for row in group} != {"1", "2", "3", "4", "5"}:
-                raise ValueError(f"invalid sample indexes: {case_id} {tool}")
+                raise ValueError(f"invalid sample indexes: {case_id} {mode}")
             if {row["warmup_count"] for row in group} != {"1"}:
-                raise ValueError(f"invalid warmup count: {case_id} {tool}")
-            if {row["thread_count"] for row in group} != {"1"}:
-                raise ValueError(f"invalid thread count: {case_id} {tool}")
+                raise ValueError(f"invalid warmup count: {case_id} {mode}")
+            if {row["thread_count"] for row in group} != {TIMING_MODE_THREADS[mode]}:
+                raise ValueError(f"invalid thread count: {case_id} {mode}")
             output_hashes = {row["output_sha256"] for row in group}
             if len(output_hashes) != 1 or "" in output_hashes:
-                raise ValueError(f"unstable output hashes: {case_id} {tool}")
+                raise ValueError(f"unstable output hashes: {case_id} {mode}")
             values = [float(row["wall_seconds"]) for row in group]
             if any(not math.isfinite(value) or value <= 0 for value in values):
-                raise ValueError(f"invalid current timing sample: {case_id} {tool}")
+                raise ValueError(f"invalid current timing sample: {case_id} {mode}")
             summaries.append(
                 {
                     "case_id": case_id,
                     "contract": group[0]["contract"],
+                    "effective_thread_evidence": group[0]["effective_thread_evidence"],
+                    "effective_thread_label": group[0]["effective_thread_label"],
+                    "implementation": group[0]["implementation"],
                     "max": max(values),
                     "mean": statistics.fmean(values),
                     "median": statistics.median(values),
                     "min": min(values),
+                    "mode": mode,
                     "n": len(values),
                     "output_sha256": next(iter(output_hashes)),
                     "program": group[0]["program"],
-                    "tool": tool,
+                    "thread_count": int(group[0]["thread_count"]),
+                    "tool": group[0]["tool"],
                 }
             )
     return summaries
 
 
+# NCBI reference: ncbi-blast/c++/src/algo/blast/blastinput/blastn_args.cpp:48,55-61
+# static const char kProgram[] = "blastn";
+# static const char kDefaultTask[] = "megablast";
+# SetTask(kDefaultTask);
+# arg.Reset(new CTaskCmdLineArgs(tasks, kDefaultTask));
+# Megablast is a distinct task within BLASTN. Facets retain the exact current
+# snapshot case identities; the horizontal layout and independent linear axes
+# follow LOSAT/tests/plot_execution_time.py, without reading its historical logs.
 def render_execution_time(
     path: Path, output: Path, timing_metadata: dict[str, object]
 ) -> tuple[dict[str, int], dict[str, object]]:
@@ -545,89 +606,129 @@ def render_execution_time(
     summaries = summarize_current_timing(current)
     cases = list(dict.fromkeys(row["case_id"] for row in current))
     labels = {
-        "PesePMNV.MjPMNV.task_blastn": "BLASTN · PesePMNV/MjPMNV",
-        "Sakai.MG1655.megablast": "Megablast · Sakai/MG1655†",
-        "pairwise_default_serial": "BLASTP · pairwise default",
-        "p03_mela_pemojnva": "TBLASTX · p03 Mela/PemoMJNVA",
-        "d06_ap027131_ap027133_db4": "TBLASTX · d06 AP027131/AP027133 db4‡",
-        "p11_avclpv_psclpv": "TBLASTX · p11 AvCLPV/PsCLPV",
+        "PesePMNV.MjPMNV.task_blastn": "PesePMNV /\nMjPMNV",
+        "Sakai.MG1655.megablast": "Sakai / MG1655†",
+        "pairwise_default_serial": "Pairwise default",
+        "p03_mela_pemojnva": "p03 · MelaMJNV /\nPemoMJNVA",
+        "d06_ap027131_ap027133_db4": "d06 · AP027131 /\nAP027133 (db4)‡",
+        "p11_avclpv_psclpv": "p11 · AvCLPV /\nPsCLPV",
     }
-    colors = {"NCBI BLAST+": "#4c72b0", "LOSAT": "#dd8452"}
-    markers = {"NCBI BLAST+": "o", "LOSAT": "s"}
-    lookup = {(row["case_id"], row["tool"]): row for row in summaries}
-    positions = np.arange(len(cases), dtype=float)
-    fig, axis = plt.subplots(figsize=(16, 8.8))
-    for index, tool in enumerate(IMPLEMENTATIONS):
-        group = [lookup[(case, tool)] for case in cases]
-        medians = np.array([float(row["median"]) for row in group])
-        minima = np.array([float(row["min"]) for row in group])
-        maxima = np.array([float(row["max"]) for row in group])
-        y_values = positions + (index - 0.5) * 0.24
-        axis.errorbar(
-            medians,
-            y_values,
-            xerr=np.vstack((medians - minima, maxima - medians)),
-            fmt=markers[tool],
-            color=colors[tool],
-            ecolor=colors[tool],
-            capsize=4,
-            elinewidth=1.4,
-            markersize=7.5,
-            label=f"{tool} median (whisker: min–max)",
+    case_programs = {row["case_id"]: row["program"] for row in summaries}
+    facet_cases: dict[str, list[str]] = defaultdict(list)
+    for case in cases:
+        facet = (
+            "Megablast"
+            if case == "Sakai.MG1655.megablast"
+            else PROGRAM_LABELS[case_programs[case]]
         )
-        for x_value, y_value in zip(medians, y_values):
-            axis.annotate(
-                f"{x_value:.3g} s",
-                (x_value, y_value),
-                xytext=(7, 0),
-                textcoords="offset points",
-                va="center",
-                fontsize=8,
-                color=colors[tool],
+        facet_cases[facet].append(case)
+    facets = [
+        facet for facet in ("TBLASTX", "BLASTN", "Megablast", "BLASTP")
+        if facet in facet_cases
+    ]
+    colors = {
+        "ncbi_n1": "#4c72b0",
+        "ncbi_n8": "#4c72b0",
+        "losat_native_n1": "#dd8452",
+        "losat_native_n8": "#dd8452",
+        "losat_wasm_serial": "#b86b8d",
+        "losat_wasm_threads_requested_n8": "#b86b8d",
+    }
+    hatches = {
+        "ncbi_n1": "",
+        "ncbi_n8": "///",
+        "losat_native_n1": "",
+        "losat_native_n8": "///",
+        "losat_wasm_serial": "",
+        "losat_wasm_threads_requested_n8": "///",
+    }
+    lookup = {(row["case_id"], row["mode"]): row for row in summaries}
+    columns = min(2, len(facets))
+    rows_count = math.ceil(len(facets) / columns)
+    fig, axes = plt.subplots(
+        rows_count, columns, figsize=(7.5 * columns, 3.4 * rows_count + 3),
+        sharex=False, sharey=False, squeeze=False,
+    )
+    bar_height = 0.12
+    center = (len(TIMING_MODES) - 1) / 2
+    for axis, facet in zip(axes.flat, facets):
+        tasks = facet_cases[facet]
+        positions = np.arange(len(tasks), dtype=float)
+        maximum = max(
+            float(lookup[(case, mode)]["max"])
+            for case in tasks for mode in TIMING_MODES
+        )
+        for index, mode in enumerate(TIMING_MODES):
+            group = [lookup[(case, mode)] for case in tasks]
+            medians = np.array([float(row["median"]) for row in group])
+            minima = np.array([float(row["min"]) for row in group])
+            maxima = np.array([float(row["max"]) for row in group])
+            y_values = positions + (index - center) * bar_height
+            axis.barh(
+                y_values, medians, height=bar_height * 0.88,
+                xerr=np.vstack((medians - minima, maxima - medians)).tolist(),
+                color=colors[mode], edgecolor="#374151", linewidth=0.45,
+                hatch=hatches[mode], label=TIMING_MODE_LABELS[mode],
+                error_kw={"ecolor": "#1f2937", "capsize": 2.5, "elinewidth": 1},
             )
-    axis.set_yticks(positions, [labels.get(case, case) for case in cases])
-    axis.invert_yaxis()
-    axis.set_xscale("log")
-    axis.set_xlabel("Wall-clock seconds (log scale)")
-    axis.set_title("One warmup + five timed repetitions per tool/case; points show medians")
-    axis.grid(True, axis="x", which="both")
-    axis.grid(False, axis="y")
-    axis.legend(frameon=False, loc="upper right")
-
-    environment = current_meta.get("environment", {})
-    if not isinstance(environment, dict):
-        environment = {}
-    fig.suptitle("Final v0.1.0 execution-time benchmark", fontsize=18, y=0.965)
+            for y_value, median, upper in zip(y_values, medians, maxima):
+                axis.text(
+                    upper + maximum * 0.015, y_value, f"{median:.3g}",
+                    va="center", fontsize=8.5,
+                )
+        axis.set_yticks(positions, [labels.get(case, case) for case in tasks], fontsize=10)
+        axis.set_ylim(len(tasks) - 0.5, -0.5)
+        axis.set_xlim(0, maximum * 1.14)
+        axis.ticklabel_format(axis="x", style="plain", useOffset=False)
+        axis.set_xlabel("Execution time (s)", fontsize=11)
+        axis.set_title(facet, fontsize=14, fontweight="bold", pad=12)
+        axis.set_axisbelow(True)
+        axis.grid(True, axis="x")
+        axis.grid(False, axis="y")
+        axis.spines[["top", "right"]].set_visible(False)
+        axis.tick_params(axis="y", length=0, pad=8)
+    for axis in list(axes.flat)[len(facets):]:
+        fig.delaxes(axis)
+    fig.suptitle("LOSAT v0.1.0 execution time", fontsize=18, y=0.985)
     fig.text(
-        0.5,
-        0.925,
-        f"LOSAT {current_meta.get('benchmark_losat_sha', '')} · NCBI BLAST+ {current_meta.get('ncbi_version', '')} · "
-        f"{environment.get('os', '')} · {environment.get('cpu_model', '')}",
-        ha="center",
-        fontsize=9.5,
-        color="#4b5563",
+        0.5, 0.945,
+        "Bars: median of five timed samples · Whiskers: retained min–max · Independent linear axes",
+        ha="center", fontsize=11, color="#4b5563",
+    )
+    fig.legend(
+        handles=[
+            Patch(facecolor=colors[mode], edgecolor="#374151", linewidth=0.45,
+                  hatch=hatches[mode], label=TIMING_MODE_LABELS[mode])
+            for mode in TIMING_MODES
+        ],
+        loc="upper center", bbox_to_anchor=(0.5, 0.923), ncol=3,
+        frameon=False, fontsize=10, handlelength=2.5, columnspacing=3,
     )
     fig.text(
         0.5,
-        0.025,
-        "Threads: 1 · warmup: 1 · timed repetitions: 5 · median statistic; whiskers span all five samples. "
+        0.064,
+        "Threaded Wasm: requested n8; effective threaded for BLASTP, effective serial for current BLASTN/TBLASTX probes.\n"
         "† Source-undetermined accepted contract. ‡ Approved local-subject db-gencode deviation.",
         ha="center",
         va="bottom",
         fontsize=8.5,
+        linespacing=1.6,
         color="#4b5563",
     )
     fig.text(
         0.5,
-        0.008,
-        f"The {len(history)} historical rows and {len(pr93)} PR 93 scalar values remain retained as separate provenance and are not plotted as current data. "
-        "Single-machine result; no cross-machine portability claim.",
+        0.012,
+        "Same-machine controlled benchmark · two WSL boot segments · binaries/toolchains revalidated after restart.\n"
+        f"Protocol warmup: 1 · resume warmups excluded · {len(history)} historical rows and {len(pr93)} PR 93 scalar values excluded from this figure.",
         ha="center",
         va="bottom",
         fontsize=8,
+        linespacing=1.6,
         color="#4b5563",
     )
-    fig.subplots_adjust(left=0.25, right=0.965, top=0.84, bottom=0.12)
+    fig.subplots_adjust(
+        left=0.14, right=0.985, top=0.81, bottom=0.16, hspace=0.48, wspace=0.48,
+    )
     fig.savefig(
         output,
         dpi=140,
@@ -642,15 +743,25 @@ def render_execution_time(
         "historical_plot_2026_06": len(history),
         "pr93_performance_lineage": len(pr93),
     }
+    for provenance_id, group in provenance_groups.items():
+        if isinstance(group, dict) and group.get("status") == "SUPERSEDED_HISTORICAL":
+            counts[provenance_id] = sum(
+                row["provenance_id"] == provenance_id for row in rows
+            )
     plot_data = {
         "counts": counts,
         "current": {
             "provenance_id": current_id,
             "samples": [
                 {
+                    "boot_id": row["boot_id"],
                     "case_id": row["case_id"],
+                    "collection_segment": int(row["collection_segment"]),
+                    "effective_thread_label": row["effective_thread_label"],
+                    "mode": row["mode"],
                     "output_sha256": row["output_sha256"],
                     "sample_index": int(row["sample_index"]),
+                    "thread_count": int(row["thread_count"]),
                     "tool": row["tool"],
                     "wall_seconds": float(row["wall_seconds"]),
                 }

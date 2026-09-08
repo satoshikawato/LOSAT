@@ -1797,13 +1797,29 @@ fn align_ex_protein_impl<const BLOSUM62: bool, const REVERSE: bool>(
         // `MAX(b_index, b_size) - orig_b_index + 1`.
         let mut row_end_b_index = b_size;
 
-        for b_index in first_b_index..b_size {
+        // NCBI reference: c++/src/algo/blast/core/blast_gapalign.c:563-635
+        // ```c
+        // for (b_index = first_b_index; b_index < b_size; b_index++) {
+        //     score_gap_col = score_array[b_index].best_gap;
+        //     ...
+        //     next_score = score_array[b_index].best + matrix_row[*b_ptr];
+        //     ... score_array[b_index].best_gap = score_gap_col;
+        //     score_array[b_index].best = score;
+        //     edit_script_row[b_index] = script;
+        // }
+        // ```
+        // Capture the row's starting band independently of the X-drop cursor.
+        // The slice borrow ends after this ascending scan, before DP reserve.
+        let band_start = first_b_index;
+        let dp_band = &mut scratch.dp_mem[band_start..b_size];
+        for (band_index, cell) in dp_band.iter_mut().enumerate() {
+            let b_index = band_start + band_index;
             let sc = if b_index < len2 {
                 blastp_subject_residue::<REVERSE>(s_seq, 0, len2, b_index)
             } else {
                 0
             };
-            let score_gap_col = scratch.dp_mem[b_index].best_gap;
+            let score_gap_col = cell.best_gap;
             // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_gapalign.c:571-573
             // ```c
             // matrix_index = *b_ptr;
@@ -1819,7 +1835,7 @@ fn align_ex_protein_impl<const BLOSUM62: bool, const REVERSE: bool>(
                 *fence_hit = true;
                 break;
             }
-            let next_score = scratch.dp_mem[b_index].best
+            let next_score = cell.best
                 + blastp_score_from_row::<BLOSUM62>(score_matrix, matrix_row, qc, sc);
 
             let mut script = SCRIPT_SUB;
@@ -1836,7 +1852,7 @@ fn align_ex_protein_impl<const BLOSUM62: bool, const REVERSE: bool>(
                 if b_index == first_b_index {
                     first_b_index += 1;
                 } else {
-                    scratch.dp_mem[b_index].best = GAP_MININT;
+                    cell.best = GAP_MININT;
                 }
             } else {
                 last_b_index = b_index;
@@ -1850,9 +1866,9 @@ fn align_ex_protein_impl<const BLOSUM62: bool, const REVERSE: bool>(
                 let score_gap_col_ext = score_gap_col - gap_extend;
                 let open_gap_col = score_val - gap_open_extend;
                 if score_gap_col_ext < open_gap_col {
-                    scratch.dp_mem[b_index].best_gap = open_gap_col;
+                    cell.best_gap = open_gap_col;
                 } else {
-                    scratch.dp_mem[b_index].best_gap = score_gap_col_ext;
+                    cell.best_gap = score_gap_col_ext;
                     script += SCRIPT_EXTEND_GAP_B;
                 }
 
@@ -1862,7 +1878,7 @@ fn align_ex_protein_impl<const BLOSUM62: bool, const REVERSE: bool>(
                 } else {
                     script += SCRIPT_EXTEND_GAP_A;
                 }
-                scratch.dp_mem[b_index].best = score_val;
+                cell.best = score_val;
             }
 
             score_val = next_score;
@@ -3851,4 +3867,71 @@ mod tests {
 
         assert!(result.is_none());
     }
+    // NCBI 2.17.0: c++/src/algo/blast/core/blast_gapalign.c:431-432,531-669,689-726
+    // ```c
+    // if(N <= 0 || M <= 0) return 0;
+    // orig_b_index = first_b_index;
+    // for (b_index = first_b_index; b_index < b_size; b_index++) {
+    //     ... edit_script_row[b_index] = script;
+    // }
+    // next_script = edit_script[a_index][b_index - edit_start_offset[a_index]];
+    // ```
+    // A changing band and scratch reuse must preserve every used row byte,
+    // not only the resulting score or final tabular output.
+    #[test]
+    fn test_traceback_contiguous_rows_reused_scratch_matches_fresh() {
+        let mut adjusted = AdjustedProteinMatrix { scores: [[-3; 28]; 28] };
+        for i in 1..28 {
+            adjusted.scores[i][i] = 2;
+        }
+        let mut scratch = GapAlignScratch::new();
+        let mut saw_offset = false;
+        let mut saw_gap = false;
+        let mut saw_fence = false;
+        for score_matrix in [
+            BlastpScoreMatrix::standard(ScoringMatrix::Blosum62),
+            BlastpScoreMatrix::Standard(ScoringMatrix::Blosum50),
+            BlastpScoreMatrix::Adjusted(&adjusted),
+        ] {
+            for reverse in [false, true] {
+                for (gap_open, gap_extend, x_drop) in [(11, 1, 25), (2, 0, 4), (0, 0, 2)] {
+                    for len in [128usize, 1, 32, 0, 7, 2] {
+                        for variant in 0..4 {
+                            let query: Vec<u8> = (0..=len)
+                                .map(|i| [ncbistdaa::A, ncbistdaa::C, ncbistdaa::G][i % 3])
+                                .collect();
+                            let mut subject = query.clone();
+                            if variant == 1 {
+                                subject.splice(len / 2..len / 2, [ncbistdaa::W; 3]);
+                            } else if variant == 2 && len > 3 {
+                                subject.drain(len / 2..len / 2 + 2);
+                            } else if variant == 3 && len > 3 {
+                                subject[len / 2] = FENCE_SENTRY;
+                            }
+                            let run = |scratch: &mut GapAlignScratch| {
+                                let mut fence = false;
+                                let result = align_ex_protein(
+                                    &query, &subject, len, subject.len() - 1,
+                                    score_matrix, gap_open, gap_extend, x_drop,
+                                    reverse, scratch, &mut fence,
+                                );
+                                // Empty inputs return before resetting existing scratch.
+                                let used = if len == 0 { 0 } else { scratch.trace_rows_used };
+                                (result, fence, scratch.trace_offsets[..used].to_vec(),
+                                    scratch.trace_rows[..used].to_vec())
+                            };
+                            let fresh = run(&mut GapAlignScratch::new());
+                            let reused = run(&mut scratch);
+                            assert_eq!(reused, fresh);
+                            saw_offset |= reused.2.iter().any(|&offset| offset > 0);
+                            saw_gap |= reused.0.3.iter().any(|op| !matches!(op, GapEditOp::Sub(_)));
+                            saw_fence |= reused.1;
+                        }
+                    }
+                }
+            }
+        }
+        assert!(saw_offset && saw_gap && saw_fence);
+    }
+
 }

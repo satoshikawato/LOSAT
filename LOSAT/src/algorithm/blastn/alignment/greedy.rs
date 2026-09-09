@@ -2389,11 +2389,28 @@ fn blast_greedy_align(
         // space_used, preserving NCBI's allocation timing and stale cells.
         non_affine_mem.refresh_traceback_pool();
     }
-    let mut last_seq2_off = vec![NonAffineGreedyRow::default(); rows];
-    last_seq2_off[0] =
-        NonAffineGreedyRow::from_base(0, &non_affine_mem.last_seq2_off[0], base_row_len, 0);
-    last_seq2_off[1] =
-        NonAffineGreedyRow::from_base(0, &non_affine_mem.last_seq2_off[1], base_row_len, 1);
+    // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_gapalign.c:216-228
+    // ```c
+    // gamp->last_seq2_off[0] =
+    //    (Int4*) malloc((max_d + max_d + 6) * sizeof(Int4) * 2);
+    // gamp->last_seq2_off[1] = gamp->last_seq2_off[0] + max_d + max_d + 6;
+    // ```
+    // Only the two base rows exist initially. Reserve the descriptor capacity
+    // once, then retain each traceback row when NCBI allocates it. Unused
+    // distance slots have no cells to read, persist, or destroy.
+    let mut last_seq2_off = Vec::with_capacity(rows);
+    last_seq2_off.push(NonAffineGreedyRow::from_base(
+        0,
+        &non_affine_mem.last_seq2_off[0],
+        base_row_len,
+        0,
+    ));
+    last_seq2_off.push(NonAffineGreedyRow::from_base(
+        0,
+        &non_affine_mem.last_seq2_off[1],
+        base_row_len,
+        1,
+    ));
 
     let xdrop_offset = (xdrop_threshold + match_cost / 2) / (match_cost + mismatch_cost) + 1;
     let max_score_len = (max_dist as usize) + (xdrop_offset as usize) + 1;
@@ -2571,8 +2588,21 @@ fn blast_greedy_align(
             // down to that 3-Int4 allocation unit exactly as in NCBI.
             let row_len = (((diag_upper - diag_lower + 7) / 3) * 3).max(0) as usize;
             let (pool_start, values) = non_affine_mem.alloc_traceback_row(row_len);
-            last_seq2_off[(d + 1) as usize] =
-                NonAffineGreedyRow::from_pool(diag_lower - 2, values, pool_start);
+            // NCBI reference: ncbi-blast/c++/src/algo/blast/core/greedy_align.c:673-678
+            // ```c
+            // last_seq2_off[d + 1] = (Int4*) s_GetMBSpace(mem_pool,
+            //                          (diag_upper - diag_lower + 7) / 3);
+            // last_seq2_off[d + 1] = last_seq2_off[d + 1] - diag_lower + 2;
+            // ```
+            // At distance d, rows 0..=d already exist. Append d+1, including
+            // the last nonconverged iteration, preserving pool allocation and
+            // snapshot/persist behavior on retries and fence returns.
+            debug_assert_eq!(last_seq2_off.len(), (d + 1) as usize);
+            last_seq2_off.push(NonAffineGreedyRow::from_pool(
+                diag_lower - 2,
+                values,
+                pool_start,
+            ));
         }
     }
 
@@ -3693,25 +3723,32 @@ mod tests {
         ) in cases
         {
             let mut scratch = GreedyAlignScratch::new();
-            let result = greedy_gapped_alignment_with_traceback(
-                query,
-                subject,
-                subject.len(),
-                *q_off,
-                *s_off,
-                *reward,
-                *penalty,
-                *gap_open,
-                *gap_extend,
-                *x_drop,
-                &mut scratch,
-            )
-            .expect("NCBI greedy traceback converges for the bounded fixture");
-            assert_eq!(
-                (result.0, result.1, result.2, result.3, result.4, result.5),
-                *expected
-            );
-            assert_eq!(result.6, *expected_ops);
+            // NCBI reference: ncbi-blast/c++/src/algo/blast/core/greedy_align.c:479-490
+            // ```c
+            // else { s_RefreshMBSpace(mem_pool); }
+            // ```
+            // Reuse the same scratch for the existing frozen cases and edits.
+            for _ in 0..2 {
+                let result = greedy_gapped_alignment_with_traceback(
+                    query,
+                    subject,
+                    subject.len(),
+                    *q_off,
+                    *s_off,
+                    *reward,
+                    *penalty,
+                    *gap_open,
+                    *gap_extend,
+                    *x_drop,
+                    &mut scratch,
+                )
+                .expect("NCBI greedy traceback converges for the bounded fixture");
+                assert_eq!(
+                    (result.0, result.1, result.2, result.3, result.4, result.5),
+                    *expected
+                );
+                assert_eq!(result.6, *expected_ops);
+            }
         }
     }
 

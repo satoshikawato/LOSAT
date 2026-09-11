@@ -375,10 +375,15 @@ pub fn extend_hit_two_hit(
     s_right_off: usize, // Position of second hit (R) in subject
     q_right_off: usize, // Position of second hit (R) in query
     x_drop: i32,
+    // NCBI reference: ncbi-blast/c++/src/algo/blast/core/aa_ungapped.c:1089-1096
+    // ```c
+    // s_BlastAaExtendTwoHit(..., Int4 q_right_off, Int4 dropoff, ...)
+    // ```
+    // Existing LOSAT diagnostics only; supplied by the current search owner.
+    debug_ext: bool,
 ) -> (usize, usize, usize, usize, i32, bool, usize) {
     // DEBUG: Print sequence segment for tracing
     static DEBUG_PRINTED: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
-    let debug_ext = std::env::var("LOSAT_DEBUG_EXTENSION").is_ok();
 
     let k_size = 3;
 

@@ -848,6 +848,16 @@ pub fn run(args: TblastxArgs) -> Result<()> {
 }
 
 fn run_internal(args: TblastxArgs, mut in_memory: Option<TblastxInMemoryRun<'_>>) -> Result<()> {
+    // NCBI reference: ncbi-blast/c++/src/algo/blast/core/aa_ungapped.c:575-582
+    // ```c
+    // score = s_BlastAaExtendTwoHit(matrix, subject, query,
+    //     last_hit + wordsize, subject_offset, query_offset,
+    //     cutoffs->x_dropoff, &hsp_q, &hsp_s, &hsp_len, use_pssm,
+    //     wordsize, &right_extend, &s_last_off);
+    // ```
+    // LOSAT-only existing diagnostics: capture configuration once per search;
+    // the NCBI extension inputs and all biological decisions stay unchanged.
+    let extension_debug_enabled = std::env::var("LOSAT_DEBUG_EXTENSION").is_ok();
     // Optional timing breakdown (disabled by default to preserve output/parity logs)
     let timing_enabled = std::env::var_os("LOSAT_TIMING").is_some();
     let t_total = Instant::now();
@@ -2037,6 +2047,10 @@ fn run_internal(args: TblastxArgs, mut in_memory: Option<TblastxInMemoryRun<'_>>
                                     subject_offset as usize,
                                     q_raw as usize,
                                     x_dropoff,
+                                    // NCBI aa_ungapped.c:576-582 (call above):
+                                    // score = s_BlastAaExtendTwoHit(...);
+                                    // Search-local LOSAT diagnostic flag only.
+                                    extension_debug_enabled,
                                 );
                                 if let Some(t0) = t0 {
                                     ungapped_ns.fetch_add(

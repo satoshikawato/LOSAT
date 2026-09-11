@@ -168,8 +168,18 @@ fn test_extend_hit_two_hit_basic() {
 
     // NCBI default is 7 bits => raw x-drop is 16 for BLOSUM62 ungapped.
     let x_drop = X_DROP_UNGAPPED;
-    let (q_start, q_end, s_start, s_end, score, right_extended, _s_last_off) =
-        extend_hit_two_hit(&q_seq, &s_seq, s_left_off, s_right_off, q_right_off, x_drop);
+    // NCBI c++/src/algo/blast/core/aa_ungapped.c:576-582:
+    // score = s_BlastAaExtendTwoHit(matrix, subject, query, ...);
+    // Preserve extension inputs; disable the search-local LOSAT diagnostic flag.
+    let (q_start, q_end, s_start, s_end, score, right_extended, _s_last_off) = extend_hit_two_hit(
+        &q_seq,
+        &s_seq,
+        s_left_off,
+        s_right_off,
+        q_right_off,
+        x_drop,
+        false,
+    );
 
     // Should extend and connect the two hits
     assert!(score > 0);
@@ -195,8 +205,18 @@ fn test_extend_hit_two_hit_no_connection() {
     let q_right_off = 6;
 
     let x_drop = X_DROP_UNGAPPED;
-    let (q_start, q_end, s_start, s_end, score, right_extended, _s_last_off) =
-        extend_hit_two_hit(&q_seq, &s_seq, s_left_off, s_right_off, q_right_off, x_drop);
+    // NCBI c++/src/algo/blast/core/aa_ungapped.c:576-582:
+    // score = s_BlastAaExtendTwoHit(matrix, subject, query, ...);
+    // Preserve extension inputs; disable the search-local LOSAT diagnostic flag.
+    let (q_start, q_end, s_start, s_end, score, right_extended, _s_last_off) = extend_hit_two_hit(
+        &q_seq,
+        &s_seq,
+        s_left_off,
+        s_right_off,
+        q_right_off,
+        x_drop,
+        false,
+    );
 
     // Should extend left from second hit, but may not reach first hit
     assert!(score >= 0);
@@ -222,8 +242,18 @@ fn test_extend_hit_two_hit_at_boundaries() {
     let q_right_off = 1;
 
     let x_drop = X_DROP_UNGAPPED;
-    let (q_start, q_end, s_start, s_end, score, _right_extended, _s_last_off) =
-        extend_hit_two_hit(&q_seq, &s_seq, s_left_off, s_right_off, q_right_off, x_drop);
+    // NCBI c++/src/algo/blast/core/aa_ungapped.c:576-582:
+    // score = s_BlastAaExtendTwoHit(matrix, subject, query, ...);
+    // Preserve extension inputs; disable the search-local LOSAT diagnostic flag.
+    let (q_start, q_end, s_start, s_end, score, _right_extended, _s_last_off) = extend_hit_two_hit(
+        &q_seq,
+        &s_seq,
+        s_left_off,
+        s_right_off,
+        q_right_off,
+        x_drop,
+        false,
+    );
 
     // Should handle boundary conditions correctly
     assert!(score >= 0);

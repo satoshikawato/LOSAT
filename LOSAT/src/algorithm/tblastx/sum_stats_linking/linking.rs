@@ -286,6 +286,120 @@ struct LhHelper {
     maxsum1: i32,       // NCBI: threshold for stopping link attempts (unused with if(0))
 }
 
+// NCBI c++/src/algo/blast/core/link_hsps.c:608-633,654-658:
+// max0 = -cutoff[0]; max1 = -cutoff[1];
+// if(sum0>=max0) { max0=sum0; best[0]=H; }
+// if(sum1>=max1) { max1=sum1; best[1]=H; }
+// /* Inside this while loop, the linked list order never changes */
+// Each channel retains its own (score, stable post-sort group index) winner.
+// SENTINEL_IDX means inactive, never a real contender at cutoff equality.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+struct DualMaximum {
+    sum: [i32; 2],
+    index: [usize; 2],
+}
+
+// NCBI c++/src/algo/blast/core/link_hsps.c:610-623:
+// for (H=hp_start->next; H!=NULL; H=H->next) {
+//   if(sum0>=max0) { max0=sum0; best[0]=H; }
+//   if(sum1>=max1) { max1=sum1; best[1]=H; }
+impl DualMaximum {
+    const INACTIVE: Self = Self {
+        sum: [0; 2],
+        index: [SENTINEL_IDX; 2],
+    };
+
+    #[inline]
+    fn active(index: usize, sum: [i32; 2]) -> Self {
+        Self {
+            sum,
+            index: [index; 2],
+        }
+    }
+
+    #[inline]
+    fn reduce(left: Self, right: Self) -> Self {
+        let mut result = left;
+        for channel in 0..2 {
+            if right.index[channel] != SENTINEL_IDX
+                && (left.index[channel] == SENTINEL_IDX
+                    || right.sum[channel] > left.sum[channel]
+                    || (right.sum[channel] == left.sum[channel]
+                        && right.index[channel] > left.index[channel]))
+            {
+                result.sum[channel] = right.sum[channel];
+                result.index[channel] = right.index[channel];
+            }
+        }
+        result
+    }
+}
+
+// NCBI c++/src/algo/blast/core/link_hsps.c:603-659,897-908,942-978:
+// if (!first_pass) { /* find the current max sums */ }
+// if(!use_current_max) { /* recompute stored sums */ }
+// best[0]->hsp_link.sum[0] += (best[0]->hsp_link.num[0])*cutoff[0];
+// if (H->prev) (H->prev)->next=H->next;
+// A group-local flat tree mirrors stored sums and physical membership only.
+// It does not validate paths or recompute survivors after predecessor removal.
+struct DualMaximumTree {
+    capacity: usize,
+    nodes: Vec<DualMaximum>,
+}
+
+// NCBI c++/src/algo/blast/core/link_hsps.c:608-633,755-758,869-873,975-978:
+// H->hsp_link.sum[index] = new_sum;
+// if(sum0>=max0) { max0=sum0; best[0]=H; }
+// if(sum1>=max1) { max1=sum1; best[1]=H; }
+// if (H->next) (H->next)->prev=H->prev;
+// if (H->prev) (H->prev)->next=H->next;
+impl DualMaximumTree {
+    fn new(group_len: usize) -> Self {
+        let capacity = group_len.max(1).next_power_of_two();
+        Self {
+            capacity,
+            nodes: vec![DualMaximum::INACTIVE; capacity * 2],
+        }
+    }
+
+    fn rebuild(&mut self, links: &[HspLink], mut active: usize) {
+        self.nodes[self.capacity..].fill(DualMaximum::INACTIVE);
+        while active != SENTINEL_IDX {
+            self.nodes[self.capacity + active] = DualMaximum::active(active, links[active].sum);
+            active = links[active].next_active;
+        }
+        for parent in (1..self.capacity).rev() {
+            self.nodes[parent] =
+                DualMaximum::reduce(self.nodes[parent * 2], self.nodes[parent * 2 + 1]);
+        }
+    }
+
+    #[inline]
+    fn update(&mut self, index: usize, leaf: DualMaximum) {
+        let mut position = self.capacity + index;
+        self.nodes[position] = leaf;
+        while position > 1 {
+            position /= 2;
+            self.nodes[position] =
+                DualMaximum::reduce(self.nodes[position * 2], self.nodes[position * 2 + 1]);
+        }
+    }
+
+    #[inline]
+    fn maxima(&self, cutoffs: [i32; 2], ignore_small_gaps: bool) -> ([Option<usize>; 2], [i32; 2]) {
+        let root = self.nodes[1];
+        let mut best = [None; 2];
+        let mut sums = [-cutoffs[0], -cutoffs[1]];
+        for channel in usize::from(ignore_small_gaps)..2 {
+            if root.index[channel] != SENTINEL_IDX && root.sum[channel] >= sums[channel] {
+                best[channel] = Some(root.index[channel]);
+                sums[channel] = root.sum[channel];
+            }
+        }
+        (best, sums)
+    }
+}
+
 /// HSP link information (NCBI BlastHSPLink structure)
 /// Reference: link_hsps.c:63-71
 #[derive(Clone)]
@@ -1077,6 +1191,11 @@ fn link_hsp_group_ncbi(
     // Remaining entries (2..n+2) will be populated during linking passes
     // Use pool_lh_helpers directly throughout the function (all lh_helpers references replaced)
 
+    // NCBI c++/src/algo/blast/core/link_hsps.c:654-658:
+    // /* Inside this while loop, the linked list order never changes */
+    // Allocate once per sorted group; stable leaves survive all cached rounds.
+    let mut maximum_tree = DualMaximumTree::new(n);
+
     let mut remaining = n;
     let mut selection_round = 0usize;
     let mut first_pass = true;
@@ -1123,28 +1242,11 @@ fn link_hsp_group_ncbi(
             // so they cannot appear in hp_start->next traversal.
             // In LOSAT, we also unlink processed HSPs (lines 1623-1642), so they cannot
             // appear in active_head traversal either. No defensive checks needed.
-            if !ignore_small_gaps {
-                let mut cur = active_head;
-                while cur != SENTINEL_IDX {
-                    // NCBI line 613: if(sum0>=max0)
-                    if pool_hsp_links[cur].sum[0] >= best_sum[0] {
-                        best_sum[0] = pool_hsp_links[cur].sum[0];
-                        best[0] = Some(cur);
-                    }
-                    cur = pool_hsp_links[cur].next_active;
-                }
-            }
-            {
-                let mut cur = active_head;
-                while cur != SENTINEL_IDX {
-                    // NCBI line 618: if(sum1>=max1)
-                    if pool_hsp_links[cur].sum[1] >= best_sum[1] {
-                        best_sum[1] = pool_hsp_links[cur].sum[1];
-                        best[1] = Some(cur);
-                    }
-                    cur = pool_hsp_links[cur].next_active;
-                }
-            }
+            // NCBI c++/src/algo/blast/core/link_hsps.c:608-633:
+            // if(sum0>=max0) { max0=sum0; best[0]=H; }
+            // if(sum1>=max1) { max1=sum1; best[1]=H; }
+            // Read the exact stored-score maxima before unchanged path validation.
+            (best, best_sum) = maximum_tree.maxima([cutoff_small, cutoff_big], ignore_small_gaps);
 
             // NCBI line 635: if(path_changed==0) use_current_max=1
             if !path_changed {
@@ -1642,6 +1744,13 @@ fn link_hsp_group_ncbi(
                 }
             }
 
+            // NCBI c++/src/algo/blast/core/link_hsps.c:755-758,869-898:
+            // H->hsp_link.sum[index] = new_sum;
+            // path_changed=0; first_pass=0;
+            // Rebuild only after both existing DP stages finish. Preserve their
+            // selected best/sums, including any incoming cached maximum boundary.
+            maximum_tree.rebuild(pool_hsp_links, active_head);
+
             // NCBI line 897: path_changed=0 after first pass computation
             path_changed = false;
             first_pass = false;
@@ -1656,6 +1765,10 @@ fn link_hsp_group_ncbi(
                 // NCBI lines 907-908: Add back cutoff*num that was subtracted during DP
                 // best[0]->hsp_link.sum[0] += (best[0]->hsp_link.num[0])*cutoff[0];
                 pool_hsp_links[bi].sum[0] += (pool_hsp_links[bi].num[0] as i32) * cutoff_small;
+                // NCBI c++/src/algo/blast/core/link_hsps.c:907-908:
+                // best[0]->hsp_link.sum[0] += (best[0]->hsp_link.num[0])*cutoff[0];
+                // Mirror the persistent addback even if another chain is selected.
+                maximum_tree.update(bi, DualMaximum::active(bi, pool_hsp_links[bi].sum));
 
                 let num = pool_hsp_links[bi].num[0] as usize;
                 let xsum = pool_hsp_links[bi].xsum[0];
@@ -1709,6 +1822,10 @@ fn link_hsp_group_ncbi(
             if let Some(bi) = best[1] {
                 // NCBI lines 942-943: Add back cutoff*num
                 pool_hsp_links[bi].sum[1] += (pool_hsp_links[bi].num[1] as i32) * cutoff_big;
+                // NCBI c++/src/algo/blast/core/link_hsps.c:942-943:
+                // best[1]->hsp_link.sum[1] += (best[1]->hsp_link.num[1])*cutoff[1];
+                // Mirror the persistent addback even if another chain is selected.
+                maximum_tree.update(bi, DualMaximum::active(bi, pool_hsp_links[bi].sum));
 
                 let num = pool_hsp_links[bi].num[1] as usize;
                 let xsum = pool_hsp_links[bi].xsum[1];
@@ -1844,6 +1961,13 @@ fn link_hsp_group_ncbi(
                 pool_hsp_links[cur].next_active = SENTINEL_IDX;
                 pool_hsp_links[cur].prev_active = SENTINEL_IDX;
             }
+
+            // NCBI c++/src/algo/blast/core/link_hsps.c:965-978:
+            // for (H=best[ordering_method]; H!=NULL; H=H->hsp_link.link[ordering_method]) {
+            //   if (H->prev) (H->prev)->next=H->next;
+            // }
+            // Remove every physical chain member without renumbering survivors.
+            maximum_tree.update(cur, DualMaximum::INACTIVE);
 
             // NCBI line 972: H->linked_set = linked_set
             // NCBI reference (verbatim, link_hsps.c:972):
@@ -2175,6 +2299,258 @@ fn link_hsp_group_ncbi(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    // NCBI c++/src/algo/blast/core/link_hsps.c:608-633:
+    // if(sum0>=max0) { max0=sum0; best[0]=H; }
+    // if(sum1>=max1) { max1=sum1; best[1]=H; }
+    // Reconciled T01 list scan, retained verbatim as the tree's reference.
+    fn reference_maxima(
+        pool_hsp_links: &[HspLink],
+        active_head: usize,
+        cutoffs: [i32; 2],
+        ignore_small_gaps: bool,
+    ) -> ([Option<usize>; 2], [i32; 2]) {
+        let mut best = [None; 2];
+        let mut best_sum = [-cutoffs[0], -cutoffs[1]];
+        if !ignore_small_gaps {
+            let mut cur = active_head;
+            while cur != SENTINEL_IDX {
+                // NCBI line 613: if(sum0>=max0)
+                if pool_hsp_links[cur].sum[0] >= best_sum[0] {
+                    best_sum[0] = pool_hsp_links[cur].sum[0];
+                    best[0] = Some(cur);
+                }
+                // NCBI c++/src/algo/blast/core/link_hsps.c:618-623:
+                // if(sum1>=max1) { max1=sum1; best[1]=H; }
+                // Both independent maxima are complete before path validation.
+                if pool_hsp_links[cur].sum[1] >= best_sum[1] {
+                    best_sum[1] = pool_hsp_links[cur].sum[1];
+                    best[1] = Some(cur);
+                }
+                cur = pool_hsp_links[cur].next_active;
+            }
+        } else {
+            // NCBI c++/src/algo/blast/core/link_hsps.c:624-633:
+            // for (H=hp_start->next; H!=NULL; H=H->next) {
+            //    Int4 sum=H->hsp_link.sum[1];
+            //    if(sum>=maxscore) { maxscore=sum; best[1]=H; }
+            // }
+            let mut cur = active_head;
+            while cur != SENTINEL_IDX {
+                // NCBI line 618: if(sum1>=max1)
+                if pool_hsp_links[cur].sum[1] >= best_sum[1] {
+                    best_sum[1] = pool_hsp_links[cur].sum[1];
+                    best[1] = Some(cur);
+                }
+                cur = pool_hsp_links[cur].next_active;
+            }
+        }
+
+        (best, best_sum)
+    }
+
+    // NCBI c++/src/algo/blast/core/link_hsps.c:610-633,755-758,975-978:
+    // for (H=hp_start->next; H!=NULL; H=H->next) { /* stored sums */ }
+    // if (H->prev) (H->prev)->next=H->next;
+    // Finite state fixture with stable leaves and a separately maintained list.
+    fn tree_links(scores: &[[i32; 2]], active: &[bool]) -> (Vec<HspLink>, usize) {
+        let mut links: Vec<_> = scores
+            .iter()
+            .map(|&sum| HspLink {
+                score: 0,
+                ctx_idx: 0,
+                q_off_trim: 0,
+                s_off_trim: 0,
+                q_end_trim: 0,
+                s_end_trim: 0,
+                sum,
+                xsum: [0.0; 2],
+                num: [1; 2],
+                link: [SENTINEL_IDX; 2],
+                changed: false,
+                linked_to: 0,
+                start_of_chain: false,
+                linked_set: false,
+                next_active: SENTINEL_IDX,
+                prev_active: SENTINEL_IDX,
+            })
+            .collect();
+        let mut head = SENTINEL_IDX;
+        let mut previous = SENTINEL_IDX;
+        for (index, &enabled) in active.iter().enumerate() {
+            if enabled {
+                if previous == SENTINEL_IDX {
+                    head = index;
+                } else {
+                    links[previous].next_active = index;
+                }
+                links[index].prev_active = previous;
+                previous = index;
+            }
+        }
+        (links, head)
+    }
+
+    // NCBI c++/src/algo/blast/core/link_hsps.c:608-633:
+    // max0 = -cutoff[0]; max1 = -cutoff[1];
+    // if(sum0>=max0) { max0=sum0; best[0]=H; }
+    // if(sum1>=max1) { max1=sum1; best[1]=H; }
+    #[test]
+    fn dual_maximum_boundaries_and_channel_ties() {
+        let cases: Vec<(Vec<[i32; 2]>, Vec<bool>, [Option<usize>; 2], [i32; 2])> = vec![
+            (vec![], vec![], [None, None], [-10, -20]),
+            (vec![[4, 5]], vec![true], [Some(0), Some(0)], [4, 5]),
+            (vec![[-10, -20]], vec![true], [Some(0), Some(0)], [-10, -20]),
+            (vec![[-11, -21]], vec![true], [None, None], [-10, -20]),
+            (
+                vec![[9, 1], [2, 8]],
+                vec![true, true],
+                [Some(0), Some(1)],
+                [9, 8],
+            ),
+            (
+                vec![[9, 9], [9, 9], [9, 9]],
+                vec![true; 3],
+                [Some(2), Some(2)],
+                [9, 9],
+            ),
+            (
+                vec![[99, 99], [7, 8], [99, 99]],
+                vec![false, true, false],
+                [Some(1), Some(1)],
+                [7, 8],
+            ),
+            (vec![[99, 99]], vec![false], [None, None], [-10, -20]),
+        ];
+        for (scores, active, expected_best, expected_sum) in cases {
+            let (links, head) = tree_links(&scores, &active);
+            let mut tree = DualMaximumTree::new(scores.len());
+            tree.rebuild(&links, head);
+            assert_eq!(tree.maxima([10, 20], false), (expected_best, expected_sum));
+            for ignore in [false, true] {
+                assert_eq!(
+                    tree.maxima([10, 20], ignore),
+                    reference_maxima(&links, head, [10, 20], ignore)
+                );
+            }
+        }
+    }
+
+    // NCBI c++/src/algo/blast/core/link_hsps.c:907-908,936-937,965-978:
+    // best[0]->hsp_link.sum[0] += (best[0]->hsp_link.num[0])*cutoff[0];
+    // ordering_method = prob[0]<=prob[1] ? eLinkSmallGaps : eLinkLargeGaps;
+    // for (H=best[ordering_method]; H!=NULL; H=H->hsp_link.link[ordering_method])
+    #[test]
+    fn dual_maximum_surviving_addback_and_multi_remove() {
+        let mut scores = vec![[9, 1], [2, 12], [3, 11], [1, 4], [0, 2]];
+        let mut active = vec![true; 5];
+        let (links, head) = tree_links(&scores, &active);
+        let mut tree = DualMaximumTree::new(5);
+        tree.rebuild(&links, head);
+        assert_eq!(tree.capacity, 8);
+        // Small winner survives selection/removal of the independent large chain.
+        scores[0][0] += 10;
+        tree.update(0, DualMaximum::active(0, scores[0]));
+        for index in [1, 2, 4] {
+            active[index] = false;
+            tree.update(index, DualMaximum::INACTIVE);
+            let (links, head) = tree_links(&scores, &active);
+            assert_eq!(
+                tree.maxima([10, 20], false),
+                reference_maxima(&links, head, [10, 20], false)
+            );
+        }
+        assert_eq!(tree.maxima([10, 20], false), ([Some(0), Some(3)], [19, 4]));
+        // Explicit increase, decrease, nonmaximum and maximum removals.
+        for (index, sum) in [(3, [30, 40]), (3, [-100, -100]), (0, [-10, -20])] {
+            scores[index] = sum;
+            tree.update(index, DualMaximum::active(index, sum));
+            let (links, head) = tree_links(&scores, &active);
+            assert_eq!(
+                tree.maxima([10, 20], false),
+                reference_maxima(&links, head, [10, 20], false)
+            );
+        }
+        for index in [3, 0] {
+            tree.update(index, DualMaximum::INACTIVE);
+        }
+        assert_eq!(tree.maxima([10, 20], false), ([None, None], [-10, -20]));
+    }
+
+    // NCBI c++/src/algo/blast/core/link_hsps.c:659,755-758,869-873:
+    // if(!use_current_max) { ... H->hsp_link.sum[index] = new_sum; ... }
+    #[test]
+    fn dual_maximum_rebuild_replaces_unrepaired_state() {
+        let mut tree = DualMaximumTree::new(5);
+        for (scores, active) in [
+            (
+                vec![[99, 1], [2, 80], [70, 70], [8, 9], [6, 7]],
+                vec![true; 5],
+            ),
+            (
+                vec![[-40, -40], [3, 4], [90, 90], [11, 22], [33, 12]],
+                vec![true, false, false, true, true],
+            ),
+            (vec![[2, 2]; 5], vec![false, true, true, false, false]),
+            (vec![[100, 100]; 5], vec![false; 5]),
+        ] {
+            // Change only reference state: no point updates before the rebuild.
+            let (links, head) = tree_links(&scores, &active);
+            tree.rebuild(&links, head);
+            for ignore in [false, true] {
+                assert_eq!(
+                    tree.maxima([10, 20], ignore),
+                    reference_maxima(&links, head, [10, 20], ignore)
+                );
+            }
+        }
+    }
+
+    // NCBI c++/src/algo/blast/core/link_hsps.c:659,755-758,869-873,975-978:
+    // if(!use_current_max) { ... H->hsp_link.sum[index] = new_sum; ... }
+    // if (H->prev) (H->prev)->next=H->next;
+    // Deterministic finite transitions, including rebuilt arbitrary stored state.
+    #[test]
+    fn dual_maximum_deterministic_state_transitions() {
+        let mut seed = 0x0911_2026_u32;
+        for size in [0, 1, 2, 3, 7, 8, 9, 31, 65] {
+            let mut scores = vec![[0; 2]; size];
+            let mut active = vec![true; size];
+            let mut tree = DualMaximumTree::new(size);
+            let allocation = tree.nodes.as_ptr();
+            for round in 0..160 {
+                for index in 0..size {
+                    seed = seed.wrapping_mul(1664525).wrapping_add(1013904223);
+                    if round % 11 == 0 || seed % 7 == 0 {
+                        scores[index] = [(seed % 101) as i32 - 50, ((seed >> 8) % 101) as i32 - 50];
+                        active[index] = seed & 8 != 0;
+                        tree.update(
+                            index,
+                            if active[index] {
+                                DualMaximum::active(index, scores[index])
+                            } else {
+                                DualMaximum::INACTIVE
+                            },
+                        );
+                    }
+                }
+                let (links, head) = tree_links(&scores, &active);
+                if round % 11 == 0 {
+                    tree.rebuild(&links, head);
+                }
+                for cutoffs in [[0, 0], [10, 20], [-10, -20], [i32::MAX, i32::MAX]] {
+                    for ignore in [false, true] {
+                        assert_eq!(
+                            tree.maxima(cutoffs, ignore),
+                            reference_maxima(&links, head, cutoffs, ignore),
+                            "size={size} round={round}"
+                        );
+                    }
+                }
+                assert_eq!(allocation, tree.nodes.as_ptr());
+            }
+        }
+    }
 
     /// Helper to create a mock UngappedHit with specified coordinates
     fn mock_hit(

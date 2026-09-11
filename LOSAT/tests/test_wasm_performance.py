@@ -117,7 +117,7 @@ class GateTests(unittest.TestCase):
 
     def execute(self, script, timeout=5):
         return perf.execute(
-            [sys.executable, "-c", script, "--out", "unused"],
+            [sys.executable, "-c", script, "-out", "unused"],
             self.root,
             self.root / "run",
             os.environ.copy(),
@@ -149,7 +149,7 @@ class GateTests(unittest.TestCase):
         _, argv = catalog.blastp_audit.build_commands(
             case, Path("oracle"), Path("LOSAT"), self.root
         )
-        self.assertNotIn("--max-target-seqs", argv)
+        self.assertNotIn("-max_target_seqs", argv)
 
     def test_readonly_output_directory(self):
         (self.root / "run").mkdir()
@@ -203,7 +203,7 @@ class GateTests(unittest.TestCase):
         case = next(
             c for c in cases if c["case_id"] == "compact.multi_query.no_hit.outfmt7"
         )
-        case["losat_argv"] += ["--evalue", "1e-180"]
+        case["losat_argv"] += ["-evalue", "1e-180"]
         with self.assertRaisesRegex(
             perf.GateFailure, "ordered argv authority mismatch"
         ):

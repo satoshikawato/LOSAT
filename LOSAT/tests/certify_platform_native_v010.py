@@ -1643,10 +1643,10 @@ def validate_planned_input_contract(steps: Sequence[SearchStep]) -> None:
 
     blastn_matrix = [step for step in matrix_steps if step.program == "blastn"]
     path_sensitive = [
-        step for step in blastn_matrix if _option_value(step.command, "--outfmt") == "7"
+        step for step in blastn_matrix if _option_value(step.command, "-outfmt") == "7"
     ]
     headerless = [
-        step for step in blastn_matrix if _option_value(step.command, "--outfmt") == "6"
+        step for step in blastn_matrix if _option_value(step.command, "-outfmt") == "6"
     ]
     if len(path_sensitive) != 13 or len(headerless) != 1:
         raise CertificationFailure(

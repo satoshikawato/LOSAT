@@ -49,7 +49,7 @@ if [[ "${LOSAT_SKIP_BUILD:-0}" != "1" ]]; then
 fi
 
 run_native() {
-  "$NATIVE_BIN" tblastx -q "$QUERY" -s "$SUBJECT" --outfmt "$OUTFMT" -n "$THREADS" -o "$1"
+  "$NATIVE_BIN" tblastx -query "$QUERY" -subject "$SUBJECT" -outfmt "$OUTFMT" -num_threads "$THREADS" -out "$1"
 }
 
 run_ncbi() {
@@ -77,7 +77,7 @@ summarize_output() {
   printf 'subject\t%s\n' "$SUBJECT"
   printf 'outfmt\t%s\n' "$OUTFMT"
   printf 'threads\t%s\n' "$THREADS"
-  printf 'native_command\t%s tblastx -q %s -s %s --outfmt %s -n %s -o %s\n' \
+  printf 'native_command\t%s tblastx -query %s -subject %s -outfmt %s -num_threads %s -out %s\n' \
     "$NATIVE_BIN" "$QUERY" "$SUBJECT" "$OUTFMT" "$THREADS" "$SCRATCH_DIR/native.raw.out"
   printf 'ncbi_command\t%s -query %s -subject %s -outfmt %s -num_threads %s -out %s\n' \
     "$NCBI_TBLASTX_PATH" "$QUERY" "$SUBJECT" "$OUTFMT" "$THREADS" "$SCRATCH_DIR/ncbi.raw.out"

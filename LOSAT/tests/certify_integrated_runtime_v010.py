@@ -636,14 +636,14 @@ def certify(
                 "native",
                 native_outputs[key],
                 native_commands[key],
-                "-o" if program == "blastn" else "--out",
+                "-out" if program == "blastn" else "-out",
                 native_environments[key],
             ),
             (
                 "serial_wasm",
                 wasm_outputs[key],
                 wasm_commands[key],
-                "-o" if program == "blastn" else "--out",
+                "-out" if program == "blastn" else "-out",
                 node_environment,
             ),
         ):

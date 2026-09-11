@@ -2248,7 +2248,7 @@ fn validate_requested_blastp_support(args: &ResolvedBlastpArgs) -> Result<()> {
     // ```
     if args.ungapped {
         bail!(
-            "unsupported pure-Rust blastp --ungapped: ungapped-only blastp search is not yet ported"
+            "unsupported pure-Rust blastp -ungapped: ungapped-only blastp search is not yet ported"
         );
     }
     // NCBI reference: /mnt/c/Users/genom/GitHub/ncbi-blast/c++/src/algo/blast/blastinput/cmdline_flags.cpp:113
@@ -2280,11 +2280,13 @@ fn validate_requested_blastp_support(args: &ResolvedBlastpArgs) -> Result<()> {
             args.scoring.gap_extend
         );
     }
+    // NCBI api/blast_advprot_options.cpp:57:
+    // m_Opts->SetCompositionBasedStats(eCompositionMatrixAdjust);
     if args.comp_based_stats.mode != BlastpCompositionMode::CompositionMatrixAdjust
         || args.comp_based_stats.unified_p
     {
         bail!(
-            "unsupported pure-Rust blastp composition mode {:?}{}: only --comp_based_stats 2 is currently supported",
+            "unsupported pure-Rust blastp composition mode {:?}{}: only -comp_based_stats 2 is currently supported",
             args.comp_based_stats.mode,
             if args.comp_based_stats.unified_p {
                 " with unified P-values"
@@ -2434,6 +2436,20 @@ fn blastp_tabular_fields_require_rendered_alignment(fields: &[BlastpTabularField
                 | BlastpTabularField::Btop
         )
     })
+}
+
+// NCBI blast_args.cpp:2657-2660; tabular.cpp:1100-1108:
+// ITERATE(list<ETabularField>, iter, m_FieldsToShow) { x_PrintField(*iter); }
+// Validate the CLI specification before loading any input sequences.
+pub(crate) fn validate_cli_outfmt(spec: &str) -> Result<String, String> {
+    let (format, fields) = OutputFormat::parse(spec)?;
+    if let Some(fields) = fields {
+        if format == OutputFormat::Pairwise {
+            return Err("blastp outfmt 0 does not accept custom field lists".into());
+        }
+        parse_blastp_tabular_fields(&fields).map_err(|error| error.to_string())?;
+    }
+    Ok(spec.into())
 }
 
 // NCBI reference: /mnt/c/Users/genom/GitHub/ncbi-blast/c++/src/objtools/align_format/format_flags.cpp:39-145
@@ -6567,7 +6583,7 @@ mod tests {
             num_threads: 1,
             out: None,
             max_target_seqs: 500,
-            max_hsps_per_subject: 0,
+            max_hsps_per_subject: None,
             ungapped: false,
             window_size: None,
             matrix: None,
@@ -7538,7 +7554,7 @@ mod tests {
         });
         let resolved = args.resolve().expect("resolved blastp args");
         let err = validate_requested_blastp_support(&resolved).expect_err("unsupported unified p");
-        assert!(err.to_string().contains("only --comp_based_stats 2"));
+        assert!(err.to_string().contains("only -comp_based_stats 2"));
     }
 
     // NCBI reference: /mnt/c/Users/genom/GitHub/ncbi-blast/c++/src/algo/blast/core/blast_gapalign.c:4209-4319

@@ -52,11 +52,11 @@ const wasi = new WASI({
 JS
 
 run_native() {
-  "$NATIVE_BIN" tblastx -q "$QUERY" -s "$SUBJECT" --outfmt "$OUTFMT" -n "$THREADS" -o "$1"
+  "$NATIVE_BIN" tblastx -query "$QUERY" -subject "$SUBJECT" -outfmt "$OUTFMT" -num_threads "$THREADS" -out "$1"
 }
 
 run_wasm() {
-  node "$NODE_RUNNER" "$WASM_BIN" tblastx -q "$QUERY" -s "$SUBJECT" --outfmt "$OUTFMT" -n "$THREADS" -o "$1"
+  node "$NODE_RUNNER" "$WASM_BIN" tblastx -query "$QUERY" -subject "$SUBJECT" -outfmt "$OUTFMT" -num_threads "$THREADS" -out "$1"
 }
 
 run_ncbi() {

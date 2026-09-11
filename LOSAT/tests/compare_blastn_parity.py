@@ -576,38 +576,37 @@ def build_losat_command(
     command = [
         str(losat_bin),
         "blastn",
-        "-q",
+        "-query",
         row["query"],
-        "-s",
+        "-subject",
         row["subject"],
-        "--task",
+        "-task",
         row["task"],
-        "--reward",
+        "-reward",
         row["reward"],
-        f"--penalty={row['penalty']}",
-        "--gap-open",
+        f"-penalty={row['penalty']}",
+        "-gapopen",
         row["gap_open"],
-        "--gap-extend",
+        "-gapextend",
         row["gap_extend"],
-        "--word-size",
+        "-word_size",
         row["word_size"],
-        "-n",
+        "-num_threads",
         row["num_threads"],
-        "--evalue",
+        "-evalue",
         row["evalue"],
-        "--max-target-seqs",
+        "-max_target_seqs",
         row["max_target_seqs"],
-        "--max-hsps-per-subject",
-        row["max_hsps_per_subject"],
-        "--outfmt",
+        "-outfmt",
         row["outfmt"],
-        "-o",
+        "-out",
         output,
     ]
-    # LOSAT exposes dust as a clap flag; its default is the NCBI nucleotide
-    # default (enabled), so only the enabled manifest value is representable.
-    if manifest_bool(row, "dust"):
-        command.insert(command.index("--outfmt"), "--dust")
+    # NCBI blast_args.cpp:203-207,410-420: omission leaves unlimited HSPs;
+    # DUST is a single yes/no or three-parameter value.
+    if int(row["max_hsps_per_subject"]) > 0:
+        command.extend(["-max_hsps", row["max_hsps_per_subject"]])
+    command.extend(["-dust", "yes" if manifest_bool(row, "dust") else "no"])
     return command
 
 

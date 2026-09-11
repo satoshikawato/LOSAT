@@ -1,115 +1,27 @@
 #![allow(warnings, clippy::all)]
 
 use anyhow::Result;
-use clap::{Parser, Subcommand};
-use std::ffi::OsString;
 use LOSAT::algorithm::{blastn, blastp, tblastx};
-
-// NCBI reference: ncbi-blast/c++/include/algo/blast/api/version.hpp:49-60
-// ```c++
-// class CBlastVersion : public CVersionInfo {
-// public:
-//     CBlastVersion()
-//         : CVersionInfo(kBlastMajorVersion,
-//                        kBlastMinorVersion,
-//                        kBlastPatchVersion) {}
-//     virtual string Print(void) const {
-//         return CVersionInfo::Print() + "+";
-//     }
-// };
-// ```
-//
-// NCBI reference: ncbi-blast/c++/src/algo/blast/blastinput/blastn_args.cpp:48-53
-// NCBI reference: ncbi-blast/c++/src/algo/blast/blastinput/blastp_args.cpp:47-52
-// NCBI reference: ncbi-blast/c++/src/algo/blast/blastinput/tblastx_args.cpp:47-52
-// ```c++
-// m_ClientId = string(kProgram) + " " + CBlastVersion().Print();
-// m_ClientId = kProgram + " " + CBlastVersion().Print();
-// ```
-#[derive(Parser)]
-#[command(name = "losat")]
-#[command(version)]
-#[command(about = "A miniaturized reimplementation of BLAST algorithm", long_about = None)]
-struct Cli {
-    #[command(subcommand)]
-    command: Commands,
-}
-
-#[derive(Subcommand)]
-enum Commands {
-    /// Nucleotide vs Nucleotide (Megablast/Blastn)
-    Blastn(blastn::BlastnArgs),
-
-    /// Protein vs Protein
-    Blastp(blastp::BlastpArgs),
-
-    /// Translated DNA vs Translated DNA (Gapped)
-    Tblastx(tblastx::TblastxArgs),
-}
-
-// NCBI reference: ncbi-blast/c++/src/algo/blast/blastinput/cmdline_flags.cpp:46-94
-// ```c
-// const string kArgQuery("query");
-// const string kArgOutput("out");
-// const string kArgSubject("subject");
-// const string kTask("task");
-// const string kArgNumThreads("num_threads");
-// const string kArgMatrixName("matrix");
-// const string kArgEvalue("evalue");
-// const string kArgMaxTargetSequences("max_target_seqs");
-// const string kArgGapOpen("gapopen");
-// const string kArgGapExtend("gapextend");
-// const string kArgWordSize("word_size");
-// const string kArgWindowSize("window_size");
-// const string kArgCompBasedStats("comp_based_stats");
-// ```
-//
-// NCBI reference: ncbi-blast/c++/src/algo/blast/blastinput/blast_args.cpp:190-210
-// ```c
-// const string kArgMaxHSPsPerSubject("max_hsps");
-// ```
-//
-// NCBI reference: ncbi-blast/c++/src/algo/blast/blastinput/blast_args.cpp:570-622
-// ```c
-// const string kArgWordThreshold("threshold");
-// ```
-fn normalize_ncbi_cli_args() -> Vec<OsString> {
-    std::env::args_os()
-        .map(|arg| {
-            if let Some(text) = arg.to_str() {
-                match text {
-                    "-query" => OsString::from("-q"),
-                    "-subject" => OsString::from("-s"),
-                    "-out" => OsString::from("-o"),
-                    "-outfmt" => OsString::from("--outfmt"),
-                    "-evalue" => OsString::from("--evalue"),
-                    "-task" => OsString::from("--task"),
-                    "-num_threads" => OsString::from("-n"),
-                    "-max_target_seqs" => OsString::from("--max-target-seqs"),
-                    "-word_size" => OsString::from("--word-size"),
-                    "-threshold" => OsString::from("--threshold"),
-                    "-window_size" => OsString::from("--window-size"),
-                    "-gapopen" => OsString::from("--gap-open"),
-                    "-gapextend" => OsString::from("--gap-extend"),
-                    "-comp_based_stats" => OsString::from("--comp-based-stats"),
-                    "-max_hsps" => OsString::from("--max-hsps-per-subject"),
-                    "-matrix" => OsString::from("--matrix"),
-                    "-seg" => OsString::from("--seg"),
-                    _ => arg,
-                }
-            } else {
-                arg
-            }
-        })
-        .collect()
-}
+use LOSAT::cli::{Cli, Commands};
 
 fn main() -> Result<()> {
     let startup_trace = std::env::var("LOSAT_STARTUP_TRACE").ok().as_deref() == Some("1");
     if startup_trace {
         eprintln!("[startup] enter main");
     }
-    let cli = Cli::parse_from(normalize_ncbi_cli_args());
+    // NCBI blastinput/cmdline_flags.cpp:46-94: kArgQuery("query"), kArgSubject("subject").
+    let cli: Cli = match LOSAT::cli::try_parse_from(std::env::args_os()) {
+        Ok(cli) => cli,
+        Err(error) => {
+            let message = LOSAT::cli::render_message(&error);
+            if error.use_stderr() {
+                eprint!("{message}");
+            } else {
+                print!("{message}");
+            }
+            std::process::exit(error.exit_code());
+        }
+    };
     if startup_trace {
         eprintln!("[startup] after clap parse");
     }

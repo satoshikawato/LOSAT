@@ -158,10 +158,13 @@ or unrelated BLASTP modes.
 
 ## Exclusions
 
+The v0.1.0 public CLI accepts only `-task blastp`. Internal short/fast task
+resolution is retained for future work and is not a public capability.
+
 The following are not certified by this record:
 
 - database, remote, or non-local-subject searches;
-- `blastp-short`, `blastp-fast`, custom matrices, non-default gaps, SEG-enabled
+- Custom matrices, non-default gaps, SEG-enabled
   searches, other composition modes, ungapped search, or Smith-Waterman
   traceback;
 - outfmt 0, 7, custom tabular fields, or any format other than standard outfmt

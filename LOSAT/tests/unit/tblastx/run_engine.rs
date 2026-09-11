@@ -54,10 +54,7 @@ fn db_gencode_controls_local_subject_search_translation() {
         query_gencode: 4,
         db_gencode: 4,
         max_target_seqs: 500,
-        seg: false,
-        seg_window: 12,
-        seg_locut: 2.2,
-        seg_hicut: 2.5,
+        seg: LOSAT::blastinput::value_parsers::SegSpec::No,
         window_size: 40,
         outfmt: "6".to_string(),
         culling_limit: 0,
@@ -84,7 +81,7 @@ fn db_gencode_controls_local_subject_search_translation() {
 
     assert!(
         has_full_length_w_hit,
-        "--db-gencode 4 should translate local subject TGA codons as W during search"
+        "-db_gencode 4 should translate local subject TGA codons as W during search"
     );
 }
 
@@ -109,20 +106,24 @@ fn tblastx_output_filter_debug_stderr_is_env_gated() {
 
     let base_args = [
         "tblastx",
-        "-q",
+        "-query",
         query.to_str().expect("query path UTF-8"),
-        "-s",
+        "-subject",
         subject.to_str().expect("subject path UTF-8"),
-        "--seg=false",
-        "--outfmt",
+        "-seg",
+        "no",
+        "-outfmt",
         "6",
-        "-n",
+        "-num_threads",
         "1",
     ];
 
     let normal = Command::new(losat_binary())
         .args(base_args)
-        .args(["-o", out_normal.to_str().expect("normal output path UTF-8")])
+        .args([
+            "-out",
+            out_normal.to_str().expect("normal output path UTF-8"),
+        ])
         .env_remove("LOSAT_DEBUG_OUTPUT_FILTER")
         .env_remove("LOSAT_DEBUG_HSP_SAVING")
         .env_remove("LOSAT_DIAGNOSTICS")
@@ -148,7 +149,7 @@ fn tblastx_output_filter_debug_stderr_is_env_gated() {
 
     let debug = Command::new(losat_binary())
         .args(base_args)
-        .args(["-o", out_debug.to_str().expect("debug output path UTF-8")])
+        .args(["-out", out_debug.to_str().expect("debug output path UTF-8")])
         .env("LOSAT_DEBUG_OUTPUT_FILTER", "1")
         .env_remove("LOSAT_DEBUG_HSP_SAVING")
         .env_remove("LOSAT_DIAGNOSTICS")
@@ -196,21 +197,22 @@ fn tblastx_parallel_chunks_matches_serial_on_real_chunk_boundaries() {
 
     let base_args = [
         "tblastx",
-        "-q",
+        "-query",
         query.to_str().expect("query path UTF-8"),
-        "-s",
+        "-subject",
         subject.to_str().expect("subject path UTF-8"),
-        "--seg=false",
-        "--outfmt",
+        "-seg",
+        "no",
+        "-outfmt",
         "6",
     ];
 
     let serial = Command::new(losat_binary())
         .args(base_args)
         .args([
-            "-n",
+            "-num_threads",
             "1",
-            "-o",
+            "-out",
             out_serial.to_str().expect("serial output path UTF-8"),
         ])
         .env("LOSAT_TBLASTX_TEST_CHUNK_SIZE", chunk_size_aa)
@@ -228,9 +230,9 @@ fn tblastx_parallel_chunks_matches_serial_on_real_chunk_boundaries() {
     let parallel = Command::new(losat_binary())
         .args(base_args)
         .args([
-            "-n",
+            "-num_threads",
             "2",
-            "-o",
+            "-out",
             out_parallel.to_str().expect("parallel output path UTF-8"),
         ])
         .env("LOSAT_TBLASTX_TEST_CHUNK_SIZE", chunk_size_aa)
@@ -289,7 +291,7 @@ fn tblastx_parallel_scan_chunks_matches_normal_on_ap027133_50k() {
     assert_parallel_scan_chunks_match_normal(
         &query,
         &subject,
-        &["--query-gencode", "1", "--db-gencode", "1", "--seg=false"],
+        &["-query_gencode", "1", "-db_gencode", "1", "-seg", "no"],
         true,
     );
 }
@@ -312,7 +314,7 @@ fn tblastx_parallel_scan_chunks_matches_normal_on_mjenmv() {
     assert_parallel_scan_chunks_match_normal(
         &query,
         &subject,
-        &["--query-gencode", "1", "--db-gencode", "1", "--seg=true"],
+        &["-query_gencode", "1", "-db_gencode", "1", "-seg", "yes"],
         false,
     );
 }
@@ -329,11 +331,11 @@ fn assert_parallel_scan_chunks_match_normal(
 
     let mut base_args = vec![
         "tblastx",
-        "-q",
+        "-query",
         query.to_str().expect("query path UTF-8"),
-        "-s",
+        "-subject",
         subject.to_str().expect("subject path UTF-8"),
-        "--outfmt",
+        "-outfmt",
         "6",
     ];
     base_args.extend_from_slice(extra_args);
@@ -341,9 +343,9 @@ fn assert_parallel_scan_chunks_match_normal(
     let normal = Command::new(losat_binary())
         .args(&base_args)
         .args([
-            "-n",
+            "-num_threads",
             "1",
-            "-o",
+            "-out",
             out_normal.to_str().expect("normal output path UTF-8"),
         ])
         .env_remove("LOSAT_TBLASTX_PARALLEL_SCAN_CHUNKS")
@@ -363,9 +365,9 @@ fn assert_parallel_scan_chunks_match_normal(
     let scan = Command::new(losat_binary())
         .args(&base_args)
         .args([
-            "-n",
+            "-num_threads",
             "2",
-            "-o",
+            "-out",
             out_scan.to_str().expect("scan output path UTF-8"),
         ])
         .env("LOSAT_TBLASTX_PARALLEL_SCAN_CHUNKS", "1")

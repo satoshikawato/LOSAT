@@ -91,6 +91,18 @@ class ReleaseCandidateTests(unittest.TestCase):
             else:
                 self.assertRegex(historical_hash, r"^[0-9a-f]{64}$")
 
+    # NCBI api/blast_options_handle.cpp:381-387: Create(eBlastp, locality).
+    # The unreleased v0.1.0 contract exposes only the ordinary BLASTP task.
+    def test_contract_exposes_only_ordinary_blastp(self) -> None:
+        contract = release.load_contract(REPO_ROOT)
+        self.assertEqual(contract["public_cli"], {
+            "blastp_tasks": ["blastp"], "blastp_default_task": "blastp",
+        })
+        arguments = contract["smoke"]["arguments"]
+        self.assertEqual(arguments[arguments.index("-task") + 1], "blastp")
+        for unsupported in ["blastp-short", "blastp-fast", "-use_sw_tback"]:
+            self.assertNotIn(unsupported, arguments)
+
     def test_tar_and_zip_assembly_are_deterministic(self) -> None:
         entries = [
             ("LOSAT-0.1.0-test/LOSAT", b"binary\0bytes", 0o755),
@@ -158,15 +170,15 @@ class ReleaseCandidateTests(unittest.TestCase):
         def fake_run_capture(command, cwd, *, clean_losat_environment=False):
             del cwd, clean_losat_environment
             observed_command.extend(command)
-            output = Path(command[command.index("--out") + 1])
+            output = Path(command[command.index("-out") + 1])
             output.write_bytes(b"smoke-output\n")
             return subprocess.CompletedProcess(command, 0, "", "")
 
         with mock.patch.object(release, "run_capture", side_effect=fake_run_capture):
             release.run_smoke(["node", "runner.js", "LOSAT.wasm"], REPO_ROOT, contract)
 
-        query = observed_command[observed_command.index("--query") + 1]
-        subject = observed_command[observed_command.index("--subject") + 1]
+        query = observed_command[observed_command.index("-query") + 1]
+        subject = observed_command[observed_command.index("-subject") + 1]
         self.assertEqual(Path(query), (REPO_ROOT / contract["smoke"]["query"]).resolve())
         self.assertEqual(
             Path(subject), (REPO_ROOT / contract["smoke"]["subject"]).resolve()

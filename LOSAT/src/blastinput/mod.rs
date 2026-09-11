@@ -16,3 +16,6 @@ pub mod blast_args;
 pub mod blastn_args;
 pub mod blastp_args;
 pub mod tblastx_args;
+
+// NCBI blastinput/blast_args.cpp:332-349: shared string-valued filtering arguments.
+pub mod value_parsers;

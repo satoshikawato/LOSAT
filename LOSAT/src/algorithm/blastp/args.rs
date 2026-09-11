@@ -7,123 +7,8 @@ use std::path::PathBuf;
 use crate::config::{ProteinScoringSpec, ScoringMatrix};
 use crate::utils::seg::SegParams;
 
-// NCBI reference: ncbi-blast/c++/src/algo/blast/blastinput/blast_args.cpp:386-407
-// ```c
-// if (m_QueryIsProtein && args[kArgSegFiltering]) {
-//     const string& seg_opts = args[kArgSegFiltering].AsString();
-//     if (seg_opts == kDfltArgNoFiltering) {
-//         opt.SetSegFiltering(false);
-//     } else if (seg_opts == kDfltArgApplyFiltering) {
-//         opt.SetSegFiltering(true);
-//     } else {
-//         x_TokenizeFilteringArgs(seg_opts, tokens);
-//         opt.SetSegFilteringWindow(NStr::StringToInt(tokens[0]));
-//         opt.SetSegFilteringLocut(NStr::StringToDouble(tokens[1]));
-//         opt.SetSegFilteringHicut(NStr::StringToDouble(tokens[2]));
-//     }
-// }
-// ```
-#[derive(Debug, Clone, PartialEq)]
-pub enum BlastpSegSpec {
-    No,
-    Yes,
-    WindowLocutHicut {
-        window: usize,
-        locut: f64,
-        hicut: f64,
-    },
-}
-
-impl BlastpSegSpec {
-    #[inline]
-    pub fn is_enabled(&self) -> bool {
-        !matches!(self, Self::No)
-    }
-
-    #[inline]
-    pub fn params(&self) -> Option<SegParams> {
-        match self {
-            Self::No => None,
-            Self::Yes => Some(SegParams::default()),
-            Self::WindowLocutHicut {
-                window,
-                locut,
-                hicut,
-            } => Some(SegParams::new(*window, *locut, *hicut)),
-        }
-    }
-
-    // NCBI reference: /mnt/c/Users/genom/GitHub/ncbi-blast/c++/src/algo/blast/blastinput/blast_args.cpp:396-407
-    // ```c
-    // if (seg_opts == kDfltArgNoFiltering) {
-    //     opt.SetSegFiltering(false);
-    // } else if (seg_opts == kDfltArgApplyFiltering) {
-    //     opt.SetSegFiltering(true);
-    // } else {
-    //     x_TokenizeFilteringArgs(seg_opts, tokens);
-    // }
-    // ```
-    pub fn to_ncbi_cli_string(&self) -> String {
-        match self {
-            Self::No => "no".to_string(),
-            Self::Yes => "yes".to_string(),
-            Self::WindowLocutHicut {
-                window,
-                locut,
-                hicut,
-            } => format!("{window} {locut} {hicut}"),
-        }
-    }
-}
-
-// NCBI reference: ncbi-blast/c++/src/algo/blast/blastinput/blast_args.cpp:367-381,396-407
-// ```c
-// NStr::Split(filtering_args, " ", output);
-// if (output.size() != 3) {
-//     NCBI_THROW(CInputException, eInvalidInput,
-//                "Invalid number of arguments to filtering option");
-// }
-// ...
-// if (seg_opts == kDfltArgNoFiltering) {
-//     opt.SetSegFiltering(false);
-// } else if (seg_opts == kDfltArgApplyFiltering) {
-//     opt.SetSegFiltering(true);
-// } else {
-//     x_TokenizeFilteringArgs(seg_opts, tokens);
-//     opt.SetSegFilteringWindow(...);
-//     opt.SetSegFilteringLocut(...);
-//     opt.SetSegFilteringHicut(...);
-// }
-// ```
-fn parse_seg_filtering(value: &str) -> Result<BlastpSegSpec, String> {
-    if value.eq_ignore_ascii_case("no") || value.eq_ignore_ascii_case("false") || value == "0" {
-        return Ok(BlastpSegSpec::No);
-    }
-    if value.eq_ignore_ascii_case("yes") || value.eq_ignore_ascii_case("true") || value == "1" {
-        return Ok(BlastpSegSpec::Yes);
-    }
-
-    let tokens: Vec<&str> = value.split_whitespace().collect();
-    if tokens.len() != 3 {
-        return Err("invalid number of arguments to filtering option".to_string());
-    }
-
-    let window = tokens[0]
-        .parse::<usize>()
-        .map_err(|_| "invalid input for filtering parameters".to_string())?;
-    let locut = tokens[1]
-        .parse::<f64>()
-        .map_err(|_| "invalid input for filtering parameters".to_string())?;
-    let hicut = tokens[2]
-        .parse::<f64>()
-        .map_err(|_| "invalid input for filtering parameters".to_string())?;
-
-    Ok(BlastpSegSpec::WindowLocutHicut {
-        window,
-        locut,
-        hicut,
-    })
-}
+pub use crate::blastinput::value_parsers::SegSpec as BlastpSegSpec;
+use crate::blastinput::value_parsers::*;
 
 // NCBI reference: ncbi-blast/c++/src/algo/blast/blastinput/blast_args.cpp:825-876
 // ```c
@@ -215,7 +100,7 @@ impl BlastpCompBasedStats {
 //     opt.SetUnifiedP(1);
 // }
 // ```
-fn parse_comp_based_stats(value: &str) -> Result<BlastpCompBasedStats, String> {
+pub fn parse_comp_based_stats(value: &str) -> Result<BlastpCompBasedStats, String> {
     let mut chars = value.chars();
     let Some(first) = chars.next() else {
         return Err("composition-based statistics option cannot be empty".to_string());
@@ -233,11 +118,19 @@ fn parse_comp_based_stats(value: &str) -> Result<BlastpCompBasedStats, String> {
         }
     };
 
-    let unified_p = mode != BlastpCompositionMode::NoCompositionBasedStats
-        && chars
-            .next()
-            .map(|c| c.eq_ignore_ascii_case(&'u'))
-            .unwrap_or(false);
+    // CLI v2 requires the complete mode token. NCBI blast_args.cpp:879-883:
+    // if (program == eBlastp && compo_mode != eNoCompositionBasedStats &&
+    //     tolower(comp_stat_string[1]) == 'u') { opt.SetUnifiedP(1); }
+    // The sole suffix is lowercase u, and only on enabled modes.
+    let unified_p = match (chars.next(), chars.next()) {
+        (None, None) => false,
+        (Some('u'), None) if mode != BlastpCompositionMode::NoCompositionBasedStats => true,
+        _ => {
+            return Err(format!(
+                "invalid composition-based statistics token '{value}'"
+            ))
+        }
+    };
 
     Ok(BlastpCompBasedStats { mode, unified_p })
 }
@@ -282,58 +175,78 @@ pub enum BlastpLookupTableType {
 // CBlastProteinOptionsHandle::SetQueryOptionDefaults();
 // SetSegFiltering(false);
 // ```
+// CLI v2 names/defaults: NCBI c++/src/algo/blast/blastinput/blast_args.cpp:
+// 166-170,203-207,332-349,2657-2660,3158-3163; cmdline_flags.cpp:46-94.
+// arg_desc.AddOptionalKey(kArgMaxHSPsPerSubject, "int_value", ..., eInteger);
+// arg_desc.SetConstraint(kArgMaxHSPsPerSubject, new CArgAllowValuesGreaterThanOrEqual(1));
+// arg_desc.AddDefaultKey(kArgNumThreads, "int_value", ..., NStr::IntToString(kDfltValue));
+// The single-dash lexical translation is owned by crate::cli.
 #[derive(Args, Debug, Clone)]
+#[command(rename_all = "snake_case")]
 pub struct BlastpArgs {
-    #[arg(short, long)]
+    #[arg(long, value_parser = file_path(), value_name = "PATH")]
     pub query: PathBuf,
-    #[arg(short, long)]
+    #[arg(long, value_parser = file_path(), value_name = "PATH")]
     pub subject: PathBuf,
-    #[arg(long, default_value = "blastp")]
+    // NCBI api/blast_options_handle.cpp:381-387:
+    // CBlastOptionsFactory::Create(eBlastp, locality);
+    // v0.1.0 exposes only the comparison-supported ordinary task.
+    #[arg(long, default_value = "blastp", value_parser = ["blastp"])]
     pub task: String,
-    #[arg(short, long)]
+    // NCBI c++/src/algo/blast/api/blast_options_handle.cpp:388-394:
+    // if (task == "blastp-short") { ... opts->SetEvalueThreshold(20000); }
+    // Keep omission distinct so resolve() retains the selected task's default.
+    #[arg(long, value_parser = nonnegative_f64, help = "[default: 10]")]
     pub evalue: Option<f64>,
-    #[arg(short, long)]
+    #[arg(long, value_parser = positive_f64, help = "[default: resolved from configuration]", long_help = "Default blastp configuration: BLOSUM62, word size 3, threshold 11, window 40, gaps 11/1. Explicit matrix/word size overrides resolve their associated defaults.")]
     pub threshold: Option<f64>,
-    #[arg(short, long)]
+    #[arg(long, value_parser = blastp_word_size, help = "[default: resolved from configuration]", long_help = "Default blastp configuration: BLOSUM62, word size 3, threshold 11, window 40, gaps 11/1. Explicit matrix/word size overrides resolve their associated defaults.")]
     pub word_size: Option<usize>,
-    #[arg(short = 'n', long, default_value_t = 1)]
+    #[arg(long, default_value_t = 1, value_parser = positive_usize)]
     pub num_threads: usize,
-    #[arg(short, long)]
+    #[arg(long, value_name = "PATH")]
     pub out: Option<PathBuf>,
-    #[arg(long, default_value_t = 500)]
+    #[arg(long, default_value_t = 500, value_parser = positive_usize)]
     pub max_target_seqs: usize,
-    #[arg(long, default_value_t = 0)]
-    pub max_hsps_per_subject: usize,
+    #[arg(long = "max_hsps", value_parser = positive_usize)]
+    pub max_hsps_per_subject: Option<usize>,
     #[arg(long)]
     pub ungapped: bool,
-    #[arg(long)]
+    #[arg(long, help = "[default: resolved from configuration]", long_help = "Default blastp configuration: BLOSUM62, word size 3, threshold 11, window 40, gaps 11/1. Explicit matrix/word size overrides resolve their associated defaults.", value_parser = nonnegative_usize)]
     pub window_size: Option<usize>,
-    #[arg(long)]
+    #[arg(
+        long,
+        help = "[default: resolved from configuration]",
+        long_help = "Default blastp configuration: BLOSUM62, word size 3, threshold 11, window 40, gaps 11/1. Explicit matrix/word size overrides resolve their associated defaults."
+    )]
     pub matrix: Option<String>,
-    #[arg(long)]
+    #[arg(long = "gapopen", value_parser = nonnegative_i32, help = "[default: resolved from configuration]", long_help = "Default blastp configuration: BLOSUM62, word size 3, threshold 11, window 40, gaps 11/1. Explicit matrix/word size overrides resolve their associated defaults.")]
     pub gap_open: Option<i32>,
-    #[arg(long)]
+    #[arg(long = "gapextend", value_parser = nonnegative_i32, help = "[default: resolved from configuration]", long_help = "Default blastp configuration: BLOSUM62, word size 3, threshold 11, window 40, gaps 11/1. Explicit matrix/word size overrides resolve their associated defaults.")]
     pub gap_extend: Option<i32>,
     // NCBI reference: ncbi-blast/c++/src/algo/blast/blastinput/cmdline_flags.cpp:46-94
     // ```c
     // const string kArgCompBasedStats("comp_based_stats");
     // ```
-    #[arg(long, alias = "comp_based_stats", value_parser = parse_comp_based_stats)]
+    #[arg(long, value_parser = parse_comp_based_stats)]
     pub comp_based_stats: Option<BlastpCompBasedStats>,
     #[arg(
         long,
         value_parser = parse_seg_filtering,
         action = clap::ArgAction::Set,
         num_args = 1
-    )]
+    , help = "SEG: no, yes, or \"WINDOW LOCUT HICUT\" [default: no]")]
     pub seg: Option<BlastpSegSpec>,
-    #[arg(long = "use_sw_tback")]
+    // NCBI api/blast_advprot_options.cpp:58:
+    // m_Opts->SetSmithWatermanMode(false);
+    // Retain internal configuration; this unported path is not public in v0.1.0.
+    #[arg(skip)]
     pub use_sw_tback: bool,
-    #[arg(long, default_value = "0")]
+    #[arg(long, default_value = "0", value_name = "SPEC", value_parser = super::blast_engine::validate_cli_outfmt)]
     pub outfmt: String,
 }
 
-// NCBI reference: /mnt/c/Users/genom/GitHub/ncbi-blast/c++/src/algo/blast/api/blast_options_handle.cpp:378-399
+// NCBI reference: /mnt/c/Users/genom/GitHub/ncbi-blast/c++/src/algo/blast/api/blast_options_handle.cpp:388-400
 // ```c
 // else if (!NStr::CompareNocase(task, "blastp") ||
 //          !NStr::CompareNocase(task, "blastp-short") ||
@@ -367,7 +280,7 @@ struct BlastpTaskDefaults {
     chaining: bool,
 }
 
-// NCBI reference: /mnt/c/Users/genom/GitHub/ncbi-blast/c++/src/algo/blast/api/blast_options_handle.cpp:378-399
+// NCBI reference: /mnt/c/Users/genom/GitHub/ncbi-blast/c++/src/algo/blast/api/blast_options_handle.cpp:388-400
 // ```c
 // if (task == "blastp-short") {
 //    opts->SetMatrixName("PAM30");
@@ -680,7 +593,9 @@ impl BlastpArgs {
             num_threads: self.num_threads,
             out: self.out.clone(),
             max_target_seqs: self.max_target_seqs,
-            max_hsps_per_subject: self.max_hsps_per_subject,
+            // NCBI blast_args.cpp:317-318: if (args[kArgMaxHSPsPerSubject])
+            // opt.SetMaxHspsPerSubject(args[kArgMaxHSPsPerSubject].AsInteger());
+            max_hsps_per_subject: self.max_hsps_per_subject.unwrap_or(0),
             ungapped: self.ungapped,
             window_size,
             scoring,
@@ -698,6 +613,11 @@ mod tests {
     use super::*;
     use clap::Parser;
 
+    // NCBI blast_args.cpp:332-349: parse the same single string as the public CLI.
+    fn parse_cli<const N: usize>(args: [&str; N]) -> TestCli {
+        crate::cli::try_parse_from(args).unwrap()
+    }
+
     #[derive(clap::Parser, Debug)]
     struct TestCli {
         #[command(subcommand)]
@@ -711,7 +631,7 @@ mod tests {
 
     #[test]
     fn test_default_blastp_options_resolve_to_ncbi_defaults() {
-        let cli = TestCli::parse_from(["losat", "blastp", "-q", "q.faa", "-s", "s.faa"]);
+        let cli = parse_cli(["losat", "blastp", "-query", "q.faa", "-subject", "s.faa"]);
         let TestCommand::Blastp(args) = cli.command;
         assert_eq!(args.evalue, None);
         assert_eq!(args.threshold, None);
@@ -756,17 +676,11 @@ mod tests {
 
     #[test]
     fn test_blastp_short_task_resolves_ncbi_defaults() {
-        let cli = TestCli::parse_from([
-            "losat",
-            "blastp",
-            "-q",
-            "q.faa",
-            "-s",
-            "s.faa",
-            "--task",
-            "blastp-short",
-        ]);
-        let TestCommand::Blastp(args) = cli.command;
+        // NCBI api/blast_options_handle.cpp:388-400 preserves future internal task defaults.
+        // opts->SetEvalueThreshold(20000); opts->SetWordSize(5);
+        let cli = parse_cli(["losat", "blastp", "-query", "q.faa", "-subject", "s.faa"]);
+        let TestCommand::Blastp(mut args) = cli.command;
+        args.task = "blastp-short".into();
         let resolved = args.resolve().expect("resolved blastp-short args");
         assert_eq!(resolved.task, "blastp-short");
         assert_eq!(resolved.evalue, 20000.0);
@@ -778,23 +692,20 @@ mod tests {
         assert_eq!(resolved.window_size, 15);
         assert_eq!(resolved.seg, BlastpSegSpec::No);
         assert!(!resolved.chaining);
+        args.evalue = Some(42.0);
+        assert_eq!(args.resolve().unwrap().evalue, 42.0);
     }
 
     #[test]
     fn test_blastp_fast_task_resolves_ncbi_defaults() {
-        let cli = TestCli::parse_from([
-            "losat",
-            "blastp",
-            "-q",
-            "q.faa",
-            "-s",
-            "s.faa",
-            "--task",
-            "blastp-fast",
-        ]);
-        let TestCommand::Blastp(args) = cli.command;
+        // NCBI api/blast_options_handle.cpp:388-400 preserves future internal task defaults.
+        // opts->SetEvalueThreshold(20000); opts->SetWordSize(5);
+        let cli = parse_cli(["losat", "blastp", "-query", "q.faa", "-subject", "s.faa"]);
+        let TestCommand::Blastp(mut args) = cli.command;
+        args.task = "blastp-fast".into();
         let resolved = args.resolve().expect("resolved blastp-fast args");
         assert_eq!(resolved.task, "blastp-fast");
+        assert_eq!(resolved.evalue, 10.0);
         assert_eq!(resolved.word_size, 5);
         assert_eq!(resolved.threshold, 19.3);
         assert_eq!(
@@ -802,30 +713,32 @@ mod tests {
             BlastpLookupTableType::CompressedAaLookupTable
         );
         assert!(resolved.chaining);
+        args.evalue = Some(42.0);
+        assert_eq!(args.resolve().unwrap().evalue, 42.0);
     }
 
     #[test]
     fn test_seg_yes_no_and_custom_parser() {
-        let cli = TestCli::parse_from([
-            "losat", "blastp", "-q", "q.faa", "-s", "s.faa", "--seg", "no",
+        let cli = parse_cli([
+            "losat", "blastp", "-query", "q.faa", "-subject", "s.faa", "-seg", "no",
         ]);
         let TestCommand::Blastp(args) = cli.command;
         assert_eq!(args.seg, Some(BlastpSegSpec::No));
 
-        let cli = TestCli::parse_from([
-            "losat", "blastp", "-q", "q.faa", "-s", "s.faa", "--seg", "yes",
+        let cli = parse_cli([
+            "losat", "blastp", "-query", "q.faa", "-subject", "s.faa", "-seg", "yes",
         ]);
         let TestCommand::Blastp(args) = cli.command;
         assert_eq!(args.seg, Some(BlastpSegSpec::Yes));
 
-        let cli = TestCli::parse_from([
+        let cli = parse_cli([
             "losat",
             "blastp",
-            "-q",
+            "-query",
             "q.faa",
-            "-s",
+            "-subject",
             "s.faa",
-            "--seg",
+            "-seg",
             "15 2.5 3.0",
         ]);
         let TestCommand::Blastp(args) = cli.command;
@@ -880,8 +793,8 @@ mod tests {
 
     #[test]
     fn test_matrix_resolution_updates_gap_threshold_and_window_defaults() {
-        let cli = TestCli::parse_from([
-            "losat", "blastp", "-q", "q.faa", "-s", "s.faa", "--matrix", "BLOSUM45",
+        let cli = parse_cli([
+            "losat", "blastp", "-query", "q.faa", "-subject", "s.faa", "-matrix", "BLOSUM45",
         ]);
         let TestCommand::Blastp(args) = cli.command;
         let resolved = args.resolve().expect("resolved blastp args");
@@ -894,17 +807,9 @@ mod tests {
 
     #[test]
     fn test_explicit_gap_values_override_matrix_defaults_independently() {
-        let cli = TestCli::parse_from([
-            "losat",
-            "blastp",
-            "-q",
-            "q.faa",
-            "-s",
-            "s.faa",
-            "--matrix",
-            "PAM70",
-            "--gap-open",
-            "12",
+        let cli = parse_cli([
+            "losat", "blastp", "-query", "q.faa", "-subject", "s.faa", "-matrix", "PAM70",
+            "-gapopen", "12",
         ]);
         let TestCommand::Blastp(args) = cli.command;
         let resolved = args.resolve().expect("resolved blastp args");
@@ -915,14 +820,14 @@ mod tests {
 
     #[test]
     fn test_word_size_above_four_selects_compressed_lookup_thresholds() {
-        let cli = TestCli::parse_from([
+        let cli = parse_cli([
             "losat",
             "blastp",
-            "-q",
+            "-query",
             "q.faa",
-            "-s",
+            "-subject",
             "s.faa",
-            "--word-size",
+            "-word_size",
             "5",
         ]);
         let TestCommand::Blastp(args) = cli.command;
@@ -933,14 +838,14 @@ mod tests {
         );
         assert_eq!(resolved.threshold, 19.3);
 
-        let cli = TestCli::parse_from([
+        let cli = parse_cli([
             "losat",
             "blastp",
-            "-q",
+            "-query",
             "q.faa",
-            "-s",
+            "-subject",
             "s.faa",
-            "--word-size",
+            "-word_size",
             "7",
         ]);
         let TestCommand::Blastp(args) = cli.command;
@@ -950,15 +855,15 @@ mod tests {
 
     #[test]
     fn test_ungapped_with_composition_based_stats_is_rejected() {
-        let cli = TestCli::parse_from([
+        let cli = parse_cli([
             "losat",
             "blastp",
-            "-q",
+            "-query",
             "q.faa",
-            "-s",
+            "-subject",
             "s.faa",
-            "--ungapped",
-            "--comp_based_stats",
+            "-ungapped",
+            "-comp_based_stats",
             "2",
         ]);
         let TestCommand::Blastp(args) = cli.command;

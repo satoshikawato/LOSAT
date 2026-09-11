@@ -180,13 +180,13 @@ def build_commands(
     losat = [
         str(losat_bin),
         "tblastx",
-        "--query",
+        "-query",
         str(case.query),
-        "--subject",
+        "-subject",
         str(case.subject),
-        "--outfmt",
+        "-outfmt",
         case.outfmt,
-        "--num-threads",
+        "-num_threads",
         str(case.num_threads),
     ]
     if case.gencode_args == "explicit":
@@ -200,14 +200,14 @@ def build_commands(
         )
         losat.extend(
             [
-                "--query-gencode",
+                "-query_gencode",
                 str(case.query_gencode),
-                "--db-gencode",
+                "-db_gencode",
                 str(case.db_gencode),
             ]
         )
     ncbi.extend(["-out", str(ncbi_output)])
-    losat.extend(["--out", str(losat_output)])
+    losat.extend(["-out", str(losat_output)])
     return ncbi, losat
 
 

@@ -74,21 +74,21 @@ echo ""
 
 # Run LOSAT TBLASTX (standard mode)
 echo "Running LOSAT TBLASTX (standard mode)..."
-LOSAT_DIAGNOSTICS=1 $LOSAT_CMD tblastx \
+LOSAT_DIAGNOSTICS=1 $LOSAT_CMD tblastx -outfmt 6 \
     -query "$FASTA_FILE" \
     -subject "$FASTA_FILE" \
-    --query_gencode "$GENCODE" \
-    --db_gencode "$GENCODE" \
+    -query_gencode "$GENCODE" \
+    -db_gencode "$GENCODE" \
     -out "$OUTDIR/losat_standard.tsv" \
     2>"$OUTDIR/losat_standard.log"
 
 # Run LOSAT TBLASTX (NCBI-compatible mode)
 echo "Running LOSAT TBLASTX (NCBI-compat mode)..."
-LOSAT_DIAGNOSTICS=1 $LOSAT_CMD tblastx \
+LOSAT_DIAGNOSTICS=1 $LOSAT_CMD tblastx -outfmt 6 \
     -query "$FASTA_FILE" \
     -subject "$FASTA_FILE" \
-    --query_gencode "$GENCODE" \
-    --db_gencode "$GENCODE" \
+    -query_gencode "$GENCODE" \
+    -db_gencode "$GENCODE" \
     --ncbi_compat \
     -out "$OUTDIR/losat_ncbi_compat.tsv" \
     2>"$OUTDIR/losat_ncbi_compat.log"

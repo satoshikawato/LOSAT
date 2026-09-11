@@ -177,7 +177,7 @@ class CompareBlastnParityTests(unittest.TestCase):
                     from pathlib import Path
 
                     args = sys.argv[1:]
-                    output_flag = "-out" if "-out" in args else "-o"
+                    output_flag = "-out" if "-out" in args else "-out"
                     output = Path(args[args.index(output_flag) + 1])
                     output.write_bytes(b"query\\tsubject\\t100.000\\t11\\t0\\t0\\t1\\t11\\t1\\t11\\t1e-05\\t20.0\\n")
                     Path(str(output) + ".invocation.json").write_text(
@@ -241,7 +241,7 @@ class CompareBlastnParityTests(unittest.TestCase):
             row["query"],
         )
         self.assertEqual(
-            losat_invocation["args"][losat_invocation["args"].index("-q") + 1],
+            losat_invocation["args"][losat_invocation["args"].index("-query") + 1],
             row["query"],
         )
         self.assertEqual(
@@ -249,7 +249,7 @@ class CompareBlastnParityTests(unittest.TestCase):
             row["subject"],
         )
         self.assertEqual(
-            losat_invocation["args"][losat_invocation["args"].index("-s") + 1],
+            losat_invocation["args"][losat_invocation["args"].index("-subject") + 1],
             row["subject"],
         )
         self.assertIn("raw_bytes: exact", completed.stdout)

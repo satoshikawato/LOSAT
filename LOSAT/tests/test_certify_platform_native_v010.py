@@ -1173,7 +1173,7 @@ class PlatformCertificationTests(unittest.TestCase):
         path_sensitive = {
             step.case_id
             for step in blastn
-            if platform_cert._option_value(step.command, "--outfmt") == "7"
+            if platform_cert._option_value(step.command, "-outfmt") == "7"
         }
         self.assertEqual(
             path_sensitive,
@@ -1208,7 +1208,7 @@ class PlatformCertificationTests(unittest.TestCase):
         for step in matrix:
             if step.program in {"blastp", "tblastx"}:
                 self.assertEqual(
-                    platform_cert._option_value(step.command, "--outfmt"), "6"
+                    platform_cert._option_value(step.command, "-outfmt"), "6"
                 )
                 self.assertEqual(
                     step.expected_losat_sha256,
@@ -1253,7 +1253,7 @@ class PlatformCertificationTests(unittest.TestCase):
                     lexical,
                     "-s",
                     lexical,
-                    "--outfmt",
+                    "-outfmt",
                     "7",
                     "-o",
                     "unused.out",

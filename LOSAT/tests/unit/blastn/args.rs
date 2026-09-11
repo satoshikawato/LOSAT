@@ -8,33 +8,29 @@ fn parse_args(args: &[&str]) -> BlastnArgs {
     let mut all_args = vec!["losat".to_string(), "blastn".to_string()];
     all_args.extend(args.iter().map(|s| s.to_string()));
 
-    // Create a command and add BlastnArgs as arguments
-    // Use the same approach as main.rs: create a subcommand
-    let cmd = Command::new("losat").subcommand(BlastnArgs::augment_args(Command::new("blastn")));
-
-    let matches = cmd.get_matches_from(all_args);
-    let sub_matches = matches.subcommand_matches("blastn").unwrap();
-
-    BlastnArgs::from_arg_matches(sub_matches).unwrap()
+    // NCBI blast_args.cpp:2657-2660: select the implemented tabular formatter explicitly.
+    all_args.extend(["-outfmt".into(), "6".into()]);
+    let cli: LOSAT::cli::Cli = LOSAT::cli::try_parse_from(all_args).unwrap();
+    let LOSAT::cli::Commands::Blastn(args) = cli.command else {
+        panic!("wrong program")
+    };
+    args
 }
 
 #[test]
 fn test_default_values() {
-    let args = parse_args(&["-q", "query.fasta", "-s", "subject.fasta"]);
+    let args = parse_args(&["-query", "query.fasta", "-subject", "subject.fasta"]);
 
     assert_eq!(args.task, "megablast");
     assert_eq!(args.word_size, 28);
-    assert_eq!(args.num_threads, 0);
+    assert_eq!(args.num_threads, 1);
     assert_eq!(args.evalue, 10.0);
-    assert_eq!(args.max_target_seqs, None);
+    assert_eq!(args.max_target_seqs, Some(500));
     assert_eq!(args.reward, 1);
     assert_eq!(args.penalty, -2);
     assert_eq!(args.gap_open, 0);
     assert_eq!(args.gap_extend, 0);
-    assert_eq!(args.dust, true);
-    assert_eq!(args.dust_level, 20);
-    assert_eq!(args.dust_window, 64);
-    assert_eq!(args.dust_linker, 1);
+    assert_eq!(args.dust.params(), Some((20, 64, 1)));
     assert_eq!(args.verbose, false);
     assert_eq!(args.scan_step, 0);
 }
@@ -42,11 +38,11 @@ fn test_default_values() {
 #[test]
 fn test_custom_task() {
     let args = parse_args(&[
-        "-q",
+        "-query",
         "query.fasta",
-        "-s",
+        "-subject",
         "subject.fasta",
-        "--task",
+        "-task",
         "blastn",
     ]);
     assert_eq!(args.task, "blastn");
@@ -55,11 +51,11 @@ fn test_custom_task() {
 #[test]
 fn test_custom_word_size() {
     let args = parse_args(&[
-        "-q",
+        "-query",
         "query.fasta",
-        "-s",
+        "-subject",
         "subject.fasta",
-        "--word-size",
+        "-word_size",
         "11",
     ]);
     assert_eq!(args.word_size, 11);
@@ -67,18 +63,25 @@ fn test_custom_word_size() {
 
 #[test]
 fn test_custom_num_threads() {
-    let args = parse_args(&["-q", "query.fasta", "-s", "subject.fasta", "-n", "4"]);
+    let args = parse_args(&[
+        "-query",
+        "query.fasta",
+        "-subject",
+        "subject.fasta",
+        "-num_threads",
+        "4",
+    ]);
     assert_eq!(args.num_threads, 4);
 }
 
 #[test]
 fn test_custom_evalue() {
     let args = parse_args(&[
-        "-q",
+        "-query",
         "query.fasta",
-        "-s",
+        "-subject",
         "subject.fasta",
-        "--evalue",
+        "-evalue",
         "1e-5",
     ]);
     assert_eq!(args.evalue, 1e-5);
@@ -87,11 +90,11 @@ fn test_custom_evalue() {
 #[test]
 fn test_custom_max_target_seqs() {
     let args = parse_args(&[
-        "-q",
+        "-query",
         "query.fasta",
-        "-s",
+        "-subject",
         "subject.fasta",
-        "--max-target-seqs",
+        "-max_target_seqs",
         "1000",
     ]);
     assert_eq!(args.max_target_seqs, Some(1000));
@@ -100,16 +103,16 @@ fn test_custom_max_target_seqs() {
 #[test]
 fn test_custom_scoring_parameters() {
     let args = parse_args(&[
-        "-q",
+        "-query",
         "query.fasta",
-        "-s",
+        "-subject",
         "subject.fasta",
-        "--reward",
+        "-reward",
         "2",
-        "--penalty=-3",
-        "--gap-open",
+        "-penalty=-3",
+        "-gapopen",
         "5",
-        "--gap-extend",
+        "-gapextend",
         "2",
     ]);
     assert_eq!(args.reward, 2);
@@ -120,54 +123,40 @@ fn test_custom_scoring_parameters() {
 
 #[test]
 fn test_dust_options() {
-    // Note: --dust is a bool flag, so we can't set it to false directly
+    // Note: -dust is a bool flag, so we can't set it to false directly
     // We'll test the other dust options instead
     let args = parse_args(&[
-        "-q",
+        "-query",
         "query.fasta",
-        "-s",
+        "-subject",
         "subject.fasta",
-        "--dust-level",
-        "30",
-        "--dust-window",
-        "32",
-        "--dust-linker",
-        "2",
+        "-dust",
+        "30 32 2",
     ]);
     // dust defaults to true
-    assert_eq!(args.dust, true);
-    assert_eq!(args.dust_level, 30);
-    assert_eq!(args.dust_window, 32);
-    assert_eq!(args.dust_linker, 2);
+    assert_eq!(args.dust.params(), Some((30, 32, 2)));
 }
 
 #[test]
 fn test_verbose_flag() {
-    let args = parse_args(&["-q", "query.fasta", "-s", "subject.fasta", "-v"]);
-    assert_eq!(args.verbose, true);
-}
-
-#[test]
-fn test_scan_step() {
     let args = parse_args(&[
-        "-q",
+        "-query",
         "query.fasta",
-        "-s",
+        "-subject",
         "subject.fasta",
-        "--scan-step",
-        "8",
+        "-verbose",
     ]);
-    assert_eq!(args.scan_step, 8);
+    assert_eq!(args.verbose, true);
 }
 
 #[test]
 fn test_output_path() {
     let args = parse_args(&[
-        "-q",
+        "-query",
         "query.fasta",
-        "-s",
+        "-subject",
         "subject.fasta",
-        "-o",
+        "-out",
         "output.txt",
     ]);
     assert_eq!(args.out, Some(PathBuf::from("output.txt")));
@@ -175,7 +164,7 @@ fn test_output_path() {
 
 #[test]
 fn test_query_and_subject_paths() {
-    let args = parse_args(&["-q", "query.fasta", "-s", "subject.fasta"]);
+    let args = parse_args(&["-query", "query.fasta", "-subject", "subject.fasta"]);
     assert_eq!(args.query, PathBuf::from("query.fasta"));
     assert_eq!(args.subject, PathBuf::from("subject.fasta"));
 }

@@ -19,16 +19,16 @@ workflow and is not copied back into source documentation.
 
 | Area | v0.1.0 status | Notes |
 | --- | --- | --- |
-| BLASTN `--task blastn` and `--task megablast` | Supported for the certified local profile | The [14-case certification](docs/release/blastn_v0.1.0_certification.md) covers 13 exact source-defined cases and one Version 1.2 source-underdetermined equal-HSP case. |
+| BLASTN `-task blastn` and `-task megablast` | Supported for the certified local profile | The [14-case certification](docs/release/blastn_v0.1.0_certification.md) covers 13 exact source-defined cases and one Version 1.2 source-underdetermined equal-HSP case. |
 | BLASTP / LOSATP | Supported for the certified gbdraw local profiles | The [nine-case certification](docs/release/blastp_v0.1.0_certification.md) covers gbdraw P1-P3 local query/subject workflows with standard outfmt 6. |
-| TBLASTX / TLOSATX | Supported for the certified gbdraw local profiles | The [20-case certification](docs/release/tblastx_v0.1.0_certification.md) covers gbdraw P1-P2 local query/subject workflows and the approved `--db-gencode` behavior below. |
+| TBLASTX / TLOSATX | Supported for the certified gbdraw local profiles | The [20-case certification](docs/release/tblastx_v0.1.0_certification.md) covers gbdraw P1-P2 local query/subject workflows and the approved `-db_gencode` behavior below. |
 | Native CLI | Supported candidate on Linux x64, Windows x64, macOS arm64, and macOS x64 | PR 6 certified all 43 declared native contracts against the frozen Linux LOSAT output on each non-Linux target. Exact-SHA release archives are produced and certified only by the final RC workflow. |
 | `wasm32-wasip1` serial command build | Supported candidate for directly applicable certified rows | PR 5 established raw-byte equality with native LOSAT for all 41 directly applicable rows: BLASTN 14, BLASTP 7, and TBLASTX 20. This is not generic Wasm support. |
 | `wasm32-wasip1-threads` | Experimental | Requires the `wasm-threads` feature and a WASI runtime with thread support. |
 | Rust library API | Internal only | No semver-stable API commitment in v0.1.0. |
 | Web or embeddable Wasm API | Internal only | Public ABI and memory ownership are not yet release-stable. |
 
-TBLASTX local `-subject` searches intentionally honor `--db-gencode` for subject
+TBLASTX local `-subject` searches intentionally honor `-db_gencode` for subject
 translation/search/reporting for every non-default genetic code. This is the
 only approved v0.1.0 behavior difference from NCBI BLAST+ local `-subject`
 semantics; all other timing, ordering, scoring, filtering, statistics, pruning,
@@ -47,38 +47,54 @@ Run local TBLASTX:
 
 ```bash
 target/release/LOSAT tblastx \
-  -q tests/fasta/LC738874.fasta \
-  -s tests/fasta/LC738875.fasta \
-  --outfmt 6
+  -query tests/fasta/LC738874.fasta \
+  -subject tests/fasta/LC738875.fasta \
+  -outfmt 6
 ```
 
 Run local BLASTN:
 
 ```bash
 target/release/LOSAT blastn \
-  -q tests/fasta/EDL933.fna \
-  -s tests/fasta/Sakai.fna \
-  --task megablast \
-  --outfmt 6
+  -query tests/fasta/EDL933.fna \
+  -subject tests/fasta/Sakai.fna \
+  -task megablast \
+  -outfmt 6
 ```
 
 Run local BLASTP:
 
 ```bash
 target/release/LOSAT blastp \
-  -q tests/fasta/AP027078.faa \
-  -s tests/fasta/AP027131.faa \
-  --outfmt 6
+  -query tests/fasta/AP027078.faa \
+  -subject tests/fasta/AP027131.faa \
+  -outfmt 6
 ```
 
-Supported output formats currently exposed by the CLI are:
+CLI v2 accepts NCBI single-dash option names only. Old spellings such as
+`--query`, `--num-threads`, and `-q` are rejected. Common defaults are
+`-evalue 10`, `-num_threads 1`, `-max_target_seqs 500`, and `-outfmt 0`.
+For v0.1.0, BLASTP publicly accepts only `-task blastp` (also the default).
+Other task values are rejected at CLI parsing. The ordinary E-value default
+remains 10; an explicit `-evalue` overrides it.
+Thread count 0 is invalid; callers must resolve AUTO before invoking LOSAT.
 
-- `0`: pairwise alignment view
-- `6`: tabular output
-- `7`: tabular output with comment lines
+| Program | Implemented output formats |
+| --- | --- |
+| BLASTN | 6 and 7, standard fields only |
+| BLASTP | 0, 6 and 7; implemented custom fields in 6/7 |
+| TBLASTX | 6, standard fields only |
 
-Custom field specifications are supported for formats `6` and `7` where the
-selected program implements the requested fields.
+BLASTN and TBLASTX reject the default format 0 until it is implemented; pass
+`-outfmt 6` explicitly for the examples above. Unsupported formats or fields
+fail instead of silently selecting tabular output.
+
+Protein filtering uses `-seg no`, `-seg yes`, or `-seg "12 2.2 2.5"`.
+BLASTN uses `-dust no`, `-dust yes`, or `-dust "20 64 1"`.
+`-max_hsps` is optional and must be positive when supplied. Run
+`losat blastp -help` (or `--help`) for canonical options and task defaults.
+See the [CLI v2 implementation record](docs/cli_v2_migration.md) for capability
+boundaries, regression evidence, and validation commands.
 
 ## Verification
 

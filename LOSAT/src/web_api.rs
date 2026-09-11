@@ -218,17 +218,15 @@ fn parse_blastn_args(
         hitlist_size: 500,
         limit_lookup: false,
         max_db_word_count: 30,
-        max_hsps_per_subject: 0,
+        max_hsps_per_subject: None,
         min_diag_separation: 0,
         out: Some(out),
         reward: 1,
         penalty: -2,
         gap_open: 0,
         gap_extend: 0,
-        dust: true,
-        dust_level: 20,
-        dust_window: 64,
-        dust_linker: 1,
+        // NCBI blast_options.c:46-48: kDustLevel=20, kDustWindow=64, kDustLinker=1.
+        dust: crate::blastinput::value_parsers::DustSpec::Yes,
         lcase_masking: false,
         subject_besthit: false,
         verbose: false,
@@ -239,42 +237,32 @@ fn parse_blastn_args(
     let mut index = 0;
     while index < extra_args.len() {
         let flag = extra_args[index];
-        if let Some(value) = flag.strip_prefix("--task=") {
+        if let Some(value) = flag.strip_prefix("-task=") {
             args.task = value.to_string();
-        } else if flag == "--task" {
+        } else if flag == "-task" {
             args.task = next_arg(extra_args, &mut index, flag)?.to_string();
-        } else if flag == "--outfmt" {
+        } else if flag == "-outfmt" {
             args.outfmt = next_arg(extra_args, &mut index, flag)?.to_string();
-        } else if let Some(value) = flag.strip_prefix("--outfmt=") {
+        } else if let Some(value) = flag.strip_prefix("-outfmt=") {
             args.outfmt = value.to_string();
-        } else if flag == "--word-size" || flag == "--word_size" {
+        } else if flag == "-word_size" {
             args.word_size = next_arg(extra_args, &mut index, flag)?
                 .parse()
                 .map_err(|err| format!("{flag} parse error: {err}"))?;
-        } else if let Some(value) = flag.strip_prefix("--word-size=") {
+        } else if let Some(value) = flag.strip_prefix("-word_size=") {
             args.word_size = value
                 .parse()
                 .map_err(|err| format!("{flag} parse error: {err}"))?;
-        } else if flag == "--num-threads"
-            || flag == "--num_threads"
-            || flag == "-num_threads"
-            || flag == "-num-threads"
-        {
+        } else if flag == "-num_threads" {
             args.num_threads =
                 parse_num_threads_arg(next_arg(extra_args, &mut index, flag)?, flag)?;
-        } else if let Some(value) = flag.strip_prefix("--num-threads=") {
-            args.num_threads = parse_num_threads_arg(value, flag)?;
-        } else if let Some(value) = flag.strip_prefix("--num_threads=") {
-            args.num_threads = parse_num_threads_arg(value, flag)?;
         } else if let Some(value) = flag.strip_prefix("-num_threads=") {
             args.num_threads = parse_num_threads_arg(value, flag)?;
-        } else if let Some(value) = flag.strip_prefix("-num-threads=") {
-            args.num_threads = parse_num_threads_arg(value, flag)?;
-        } else if flag == "--evalue" {
+        } else if flag == "-evalue" {
             args.evalue = next_arg(extra_args, &mut index, flag)?
                 .parse()
                 .map_err(|err| format!("{flag} parse error: {err}"))?;
-        } else if let Some(value) = flag.strip_prefix("--evalue=") {
+        } else if let Some(value) = flag.strip_prefix("-evalue=") {
             args.evalue = value
                 .parse()
                 .map_err(|err| format!("{flag} parse error: {err}"))?;
@@ -311,10 +299,8 @@ fn parse_tblastx_args(
         query_gencode: 1,
         db_gencode: 1,
         max_target_seqs: 500,
-        seg: true,
-        seg_window: 12,
-        seg_locut: 2.2,
-        seg_hicut: 2.5,
+        // NCBI blast_options.c:83-85: window=kSegWindow; locut=kSegLocut; hicut=kSegHicut.
+        seg: BlastpSegSpec::Yes,
         window_size: 40,
         outfmt: "6".to_string(),
         culling_limit: 0,
@@ -323,46 +309,36 @@ fn parse_tblastx_args(
     let mut index = 0;
     while index < extra_args.len() {
         let flag = extra_args[index];
-        if flag == "--query-gencode" {
+        if flag == "-query_gencode" {
             args.query_gencode = next_arg(extra_args, &mut index, flag)?
                 .parse()
                 .map_err(|err| format!("{flag} parse error: {err}"))?;
-        } else if let Some(value) = flag.strip_prefix("--query-gencode=") {
+        } else if let Some(value) = flag.strip_prefix("-query_gencode=") {
             args.query_gencode = value
                 .parse()
                 .map_err(|err| format!("{flag} parse error: {err}"))?;
-        } else if flag == "--db-gencode" {
+        } else if flag == "-db_gencode" {
             args.db_gencode = next_arg(extra_args, &mut index, flag)?
                 .parse()
                 .map_err(|err| format!("{flag} parse error: {err}"))?;
-        } else if let Some(value) = flag.strip_prefix("--db-gencode=") {
+        } else if let Some(value) = flag.strip_prefix("-db_gencode=") {
             args.db_gencode = value
                 .parse()
                 .map_err(|err| format!("{flag} parse error: {err}"))?;
-        } else if flag == "--num-threads"
-            || flag == "--num_threads"
-            || flag == "-num_threads"
-            || flag == "-num-threads"
-        {
+        } else if flag == "-num_threads" {
             args.num_threads =
                 parse_num_threads_arg(next_arg(extra_args, &mut index, flag)?, flag)?;
-        } else if let Some(value) = flag.strip_prefix("--num-threads=") {
-            args.num_threads = parse_num_threads_arg(value, flag)?;
-        } else if let Some(value) = flag.strip_prefix("--num_threads=") {
-            args.num_threads = parse_num_threads_arg(value, flag)?;
         } else if let Some(value) = flag.strip_prefix("-num_threads=") {
             args.num_threads = parse_num_threads_arg(value, flag)?;
-        } else if let Some(value) = flag.strip_prefix("-num-threads=") {
-            args.num_threads = parse_num_threads_arg(value, flag)?;
-        } else if flag == "--outfmt" {
+        } else if flag == "-outfmt" {
             args.outfmt = next_arg(extra_args, &mut index, flag)?.to_string();
-        } else if let Some(value) = flag.strip_prefix("--outfmt=") {
+        } else if let Some(value) = flag.strip_prefix("-outfmt=") {
             args.outfmt = value.to_string();
-        } else if flag == "--evalue" {
+        } else if flag == "-evalue" {
             args.evalue = next_arg(extra_args, &mut index, flag)?
                 .parse()
                 .map_err(|err| format!("{flag} parse error: {err}"))?;
-        } else if let Some(value) = flag.strip_prefix("--evalue=") {
+        } else if let Some(value) = flag.strip_prefix("-evalue=") {
             args.evalue = value
                 .parse()
                 .map_err(|err| format!("{flag} parse error: {err}"))?;
@@ -389,30 +365,7 @@ fn parse_tblastx_args(
 // }
 // ```
 fn parse_blastp_comp_based_stats(value: &str) -> Result<BlastpCompBasedStats, String> {
-    let mut chars = value.chars();
-    let Some(first) = chars.next() else {
-        return Err("composition-based statistics option cannot be empty".to_string());
-    };
-
-    let mode = match first {
-        '0' | 'F' | 'f' => BlastpCompositionMode::NoCompositionBasedStats,
-        '1' => BlastpCompositionMode::CompositionBasedStats,
-        '2' | 'D' | 'd' | 'T' | 't' => BlastpCompositionMode::CompositionMatrixAdjust,
-        '3' => BlastpCompositionMode::ForceFullMatrixAdjust,
-        _ => {
-            return Err(format!(
-                "invalid composition-based statistics mode '{value}'"
-            ))
-        }
-    };
-
-    let unified_p = mode != BlastpCompositionMode::NoCompositionBasedStats
-        && chars
-            .next()
-            .map(|c| c.eq_ignore_ascii_case(&'u'))
-            .unwrap_or(false);
-
-    Ok(BlastpCompBasedStats { mode, unified_p })
+    crate::algorithm::blastp::args::parse_comp_based_stats(value)
 }
 
 // NCBI reference: /mnt/c/Users/genom/GitHub/ncbi-blast/c++/src/algo/blast/blastinput/blast_args.cpp:386-407
@@ -429,33 +382,7 @@ fn parse_blastp_comp_based_stats(value: &str) -> Result<BlastpCompBasedStats, St
 // }
 // ```
 fn parse_blastp_seg(value: &str) -> Result<BlastpSegSpec, String> {
-    if value.eq_ignore_ascii_case("no") || value.eq_ignore_ascii_case("false") || value == "0" {
-        return Ok(BlastpSegSpec::No);
-    }
-    if value.eq_ignore_ascii_case("yes") || value.eq_ignore_ascii_case("true") || value == "1" {
-        return Ok(BlastpSegSpec::Yes);
-    }
-
-    let tokens: Vec<&str> = value.split_whitespace().collect();
-    if tokens.len() != 3 {
-        return Err("invalid number of arguments to filtering option".to_string());
-    }
-
-    let window = tokens[0]
-        .parse::<usize>()
-        .map_err(|_| "invalid input for filtering parameters".to_string())?;
-    let locut = tokens[1]
-        .parse::<f64>()
-        .map_err(|_| "invalid input for filtering parameters".to_string())?;
-    let hicut = tokens[2]
-        .parse::<f64>()
-        .map_err(|_| "invalid input for filtering parameters".to_string())?;
-
-    Ok(BlastpSegSpec::WindowLocutHicut {
-        window,
-        locut,
-        hicut,
-    })
+    crate::blastinput::value_parsers::parse_seg_filtering(value)
 }
 
 // NCBI reference: /mnt/c/Users/genom/GitHub/ncbi-blast/c++/src/algo/blast/blastinput/blastp_args.cpp:71-115
@@ -496,7 +423,7 @@ fn parse_blastp_args(
         num_threads: 1,
         out: Some(out),
         max_target_seqs: 500,
-        max_hsps_per_subject: 0,
+        max_hsps_per_subject: None,
         ungapped: false,
         window_size: None,
         matrix: None,
@@ -511,183 +438,137 @@ fn parse_blastp_args(
     let mut index = 0;
     while index < extra_args.len() {
         let flag = extra_args[index];
-        if let Some(value) = flag.strip_prefix("--task=") {
+        if let Some(value) = flag.strip_prefix("-task=") {
             args.task = value.to_string();
-        } else if flag == "--task" {
+        } else if flag == "-task" {
             args.task = next_arg(extra_args, &mut index, flag)?.to_string();
-        } else if flag == "--outfmt" {
+        } else if flag == "-outfmt" {
             args.outfmt = next_arg(extra_args, &mut index, flag)?.to_string();
-        } else if let Some(value) = flag.strip_prefix("--outfmt=") {
+        } else if let Some(value) = flag.strip_prefix("-outfmt=") {
             args.outfmt = value.to_string();
-        } else if flag == "--evalue" {
+        } else if flag == "-evalue" {
             args.evalue = Some(
                 next_arg(extra_args, &mut index, flag)?
                     .parse()
                     .map_err(|err| format!("{flag} parse error: {err}"))?,
             );
-        } else if let Some(value) = flag.strip_prefix("--evalue=") {
+        } else if let Some(value) = flag.strip_prefix("-evalue=") {
             args.evalue = Some(
                 value
                     .parse()
                     .map_err(|err| format!("{flag} parse error: {err}"))?,
             );
-        } else if flag == "--threshold" {
+        } else if flag == "-threshold" {
             args.threshold = Some(
                 next_arg(extra_args, &mut index, flag)?
                     .parse()
                     .map_err(|err| format!("{flag} parse error: {err}"))?,
             );
-        } else if let Some(value) = flag.strip_prefix("--threshold=") {
+        } else if let Some(value) = flag.strip_prefix("-threshold=") {
             args.threshold = Some(
                 value
                     .parse()
                     .map_err(|err| format!("{flag} parse error: {err}"))?,
             );
-        } else if flag == "--word-size" || flag == "--word_size" {
+        } else if flag == "-word_size" {
             args.word_size = Some(
                 next_arg(extra_args, &mut index, flag)?
                     .parse()
                     .map_err(|err| format!("{flag} parse error: {err}"))?,
             );
-        } else if let Some(value) = flag.strip_prefix("--word-size=") {
+        } else if let Some(value) = flag.strip_prefix("-word_size=") {
             args.word_size = Some(
                 value
                     .parse()
                     .map_err(|err| format!("{flag} parse error: {err}"))?,
             );
-        } else if let Some(value) = flag.strip_prefix("--word_size=") {
-            args.word_size = Some(
-                value
-                    .parse()
-                    .map_err(|err| format!("{flag} parse error: {err}"))?,
-            );
-        } else if flag == "--num-threads" || flag == "--num_threads" {
+        } else if flag == "-num_threads" {
             args.num_threads = next_arg(extra_args, &mut index, flag)?
                 .parse()
                 .map_err(|err| format!("{flag} parse error: {err}"))?;
-        } else if let Some(value) = flag.strip_prefix("--num-threads=") {
+        } else if let Some(value) = flag.strip_prefix("-num_threads=") {
             args.num_threads = value
                 .parse()
                 .map_err(|err| format!("{flag} parse error: {err}"))?;
-        } else if let Some(value) = flag.strip_prefix("--num_threads=") {
-            args.num_threads = value
-                .parse()
-                .map_err(|err| format!("{flag} parse error: {err}"))?;
-        } else if flag == "--max-target-seqs" || flag == "--max_target_seqs" {
+        } else if flag == "-max_target_seqs" {
             args.max_target_seqs = next_arg(extra_args, &mut index, flag)?
                 .parse()
                 .map_err(|err| format!("{flag} parse error: {err}"))?;
-        } else if let Some(value) = flag.strip_prefix("--max-target-seqs=") {
+        } else if let Some(value) = flag.strip_prefix("-max_target_seqs=") {
             args.max_target_seqs = value
                 .parse()
                 .map_err(|err| format!("{flag} parse error: {err}"))?;
-        } else if let Some(value) = flag.strip_prefix("--max_target_seqs=") {
-            args.max_target_seqs = value
-                .parse()
-                .map_err(|err| format!("{flag} parse error: {err}"))?;
-        } else if flag == "--max-hsps-per-subject" || flag == "--max_hsps_per_subject" {
-            args.max_hsps_per_subject = next_arg(extra_args, &mut index, flag)?
-                .parse()
-                .map_err(|err| format!("{flag} parse error: {err}"))?;
-        } else if let Some(value) = flag.strip_prefix("--max-hsps-per-subject=") {
-            args.max_hsps_per_subject = value
-                .parse()
-                .map_err(|err| format!("{flag} parse error: {err}"))?;
-        } else if let Some(value) = flag.strip_prefix("--max_hsps_per_subject=") {
-            args.max_hsps_per_subject = value
-                .parse()
-                .map_err(|err| format!("{flag} parse error: {err}"))?;
-        } else if flag == "--window-size" || flag == "--window_size" {
+        } else if flag == "-max_hsps" {
+            args.max_hsps_per_subject = Some(
+                next_arg(extra_args, &mut index, flag)?
+                    .parse()
+                    .map_err(|err| format!("{flag} parse error: {err}"))?,
+            );
+        } else if let Some(value) = flag.strip_prefix("-max_hsps=") {
+            args.max_hsps_per_subject = Some(
+                value
+                    .parse()
+                    .map_err(|err| format!("{flag} parse error: {err}"))?,
+            );
+        } else if flag == "-window_size" {
             args.window_size = Some(
                 next_arg(extra_args, &mut index, flag)?
                     .parse()
                     .map_err(|err| format!("{flag} parse error: {err}"))?,
             );
-        } else if let Some(value) = flag.strip_prefix("--window-size=") {
+        } else if let Some(value) = flag.strip_prefix("-window_size=") {
             args.window_size = Some(
                 value
                     .parse()
                     .map_err(|err| format!("{flag} parse error: {err}"))?,
             );
-        } else if let Some(value) = flag.strip_prefix("--window_size=") {
-            args.window_size = Some(
-                value
-                    .parse()
-                    .map_err(|err| format!("{flag} parse error: {err}"))?,
-            );
-        } else if flag == "--matrix" {
+        } else if flag == "-matrix" {
             args.matrix = Some(next_arg(extra_args, &mut index, flag)?.to_string());
-        } else if let Some(value) = flag.strip_prefix("--matrix=") {
+        } else if let Some(value) = flag.strip_prefix("-matrix=") {
             args.matrix = Some(value.to_string());
-        } else if flag == "--gap-open" || flag == "--gapopen" || flag == "--gap_open" {
+        // NCBI blastinput/cmdline_flags.cpp:93-94:
+        // kArgGapOpen("gapopen"); kArgGapExtend("gapextend");
+        } else if flag == "-gapopen" {
             args.gap_open = Some(
                 next_arg(extra_args, &mut index, flag)?
                     .parse()
                     .map_err(|err| format!("{flag} parse error: {err}"))?,
             );
-        } else if let Some(value) = flag.strip_prefix("--gap-open=") {
+        } else if let Some(value) = flag.strip_prefix("-gapopen=") {
             args.gap_open = Some(
                 value
                     .parse()
                     .map_err(|err| format!("{flag} parse error: {err}"))?,
             );
-        } else if let Some(value) = flag.strip_prefix("--gapopen=") {
-            args.gap_open = Some(
-                value
-                    .parse()
-                    .map_err(|err| format!("{flag} parse error: {err}"))?,
-            );
-        } else if let Some(value) = flag.strip_prefix("--gap_open=") {
-            args.gap_open = Some(
-                value
-                    .parse()
-                    .map_err(|err| format!("{flag} parse error: {err}"))?,
-            );
-        } else if flag == "--gap-extend" || flag == "--gapextend" || flag == "--gap_extend" {
+        } else if flag == "-gapextend" {
             args.gap_extend = Some(
                 next_arg(extra_args, &mut index, flag)?
                     .parse()
                     .map_err(|err| format!("{flag} parse error: {err}"))?,
             );
-        } else if let Some(value) = flag.strip_prefix("--gap-extend=") {
+        } else if let Some(value) = flag.strip_prefix("-gapextend=") {
             args.gap_extend = Some(
                 value
                     .parse()
                     .map_err(|err| format!("{flag} parse error: {err}"))?,
             );
-        } else if let Some(value) = flag.strip_prefix("--gapextend=") {
-            args.gap_extend = Some(
-                value
-                    .parse()
-                    .map_err(|err| format!("{flag} parse error: {err}"))?,
-            );
-        } else if let Some(value) = flag.strip_prefix("--gap_extend=") {
-            args.gap_extend = Some(
-                value
-                    .parse()
-                    .map_err(|err| format!("{flag} parse error: {err}"))?,
-            );
-        } else if flag == "--comp-based-stats" || flag == "--comp_based_stats" {
+        } else if flag == "-comp_based_stats" {
             args.comp_based_stats = Some(parse_blastp_comp_based_stats(next_arg(
                 extra_args, &mut index, flag,
             )?)?);
-        } else if let Some(value) = flag.strip_prefix("--comp-based-stats=") {
+        } else if let Some(value) = flag.strip_prefix("-comp_based_stats=") {
             args.comp_based_stats = Some(parse_blastp_comp_based_stats(value)?);
-        } else if let Some(value) = flag.strip_prefix("--comp_based_stats=") {
-            args.comp_based_stats = Some(parse_blastp_comp_based_stats(value)?);
-        } else if flag == "--seg" {
+        } else if flag == "-seg" {
             args.seg = Some(parse_blastp_seg(next_arg(extra_args, &mut index, flag)?)?);
-        } else if let Some(value) = flag.strip_prefix("--seg=") {
+        } else if let Some(value) = flag.strip_prefix("-seg=") {
             args.seg = Some(parse_blastp_seg(value)?);
-        } else if flag == "--ungapped" {
+        } else if flag == "-ungapped" {
             args.ungapped = true;
-        } else if let Some(value) = flag.strip_prefix("--ungapped=") {
+        } else if let Some(value) = flag.strip_prefix("-ungapped=") {
             args.ungapped = value.eq_ignore_ascii_case("true") || value == "1";
-        } else if flag == "--use_sw_tback" || flag == "--use-sw-tback" {
+        } else if flag == "-use_sw_tback" {
             args.use_sw_tback = true;
-        } else if let Some(value) = flag.strip_prefix("--use_sw_tback=") {
-            args.use_sw_tback = value.eq_ignore_ascii_case("true") || value == "1";
-        } else if let Some(value) = flag.strip_prefix("--use-sw-tback=") {
+        } else if let Some(value) = flag.strip_prefix("-use_sw_tback=") {
             args.use_sw_tback = value.eq_ignore_ascii_case("true") || value == "1";
         } else {
             return Err(format!("unsupported blastp argument for web API: {flag}"));
@@ -707,7 +588,7 @@ fn run_pair(
 ) -> Result<Vec<u8>, String> {
     let mut extra = parse_extra_args(extra_args);
     let outfmt = web_outfmt_or_default(outfmt);
-    extra.push("--outfmt");
+    extra.push("-outfmt");
     extra.push(outfmt);
 
     // NCBI reference: ncbi-blast/c++/src/algo/blast/api/blast_setup_cxx.cpp:486-651
@@ -775,7 +656,7 @@ fn run_pair_handles(
 ) -> Result<Vec<u8>, String> {
     let mut extra = parse_extra_args(extra_args);
     let outfmt = web_outfmt_or_default(outfmt);
-    extra.push("--outfmt");
+    extra.push("-outfmt");
     extra.push(outfmt);
 
     // NCBI reference: /mnt/c/Users/genom/GitHub/ncbi-blast/c++/src/algo/blast/api/blast_setup_cxx.cpp:606-617

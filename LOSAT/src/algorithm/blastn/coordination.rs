@@ -698,7 +698,9 @@ pub fn apply_dust_masking(
     args: &BlastnArgs,
     queries: &[fasta::Record],
 ) -> Vec<Vec<MaskedInterval>> {
-    if args.dust {
+    // NCBI blast_args.cpp:418-420: opt.SetDustFilteringLevel(...);
+    // opt.SetDustFilteringWindow(...); opt.SetDustFilteringLinker(...);
+    if let Some((dust_level, dust_window, dust_linker)) = args.dust.params() {
         // NCBI reference: ncbi-blast/c++/src/algo/blast/api/dust_filter.cpp:92-128
         // ```c
         // orig_query_mask->Add(*query_masks,  kTopFlags, 0);
@@ -707,12 +709,9 @@ pub fn apply_dust_masking(
         if args.verbose {
             eprintln!(
                 "Applying DUST filter (level={}, window={}, linker={})...",
-                args.dust_level, args.dust_window, args.dust_linker
+                dust_level, dust_window, dust_linker
             );
         }
-        let dust_level = args.dust_level;
-        let dust_window = args.dust_window;
-        let dust_linker = args.dust_linker;
         let masks: Vec<Vec<MaskedInterval>> = queries
             .iter()
             .map(|record| {
@@ -773,7 +772,7 @@ pub fn build_lookup_tables(
             config.use_two_stage,
             config.lut_word_length,
             config.use_direct_lookup,
-            args.dust
+            args.dust.is_enabled()
         );
     }
 

@@ -115,50 +115,50 @@ run_losatn_native_threaded_case() {
     # const string kArgNumThreads("num_threads");
     # const string kTask("task");
     # ```
-    (time "${LOSAT_BIN}" blastn -query "./fasta/${query}" -subject "./fasta/${subject}" -out "./losat_out/${stem}.${threaded_suffix}.out" "${task_args[@]}" -num_threads "${LOSAT_THREADS}" )&>"./losat_out/${stem}.${threaded_suffix}.log"
+    (time "${LOSAT_BIN}" blastn -outfmt 6 -query "./fasta/${query}" -subject "./fasta/${subject}" -out "./losat_out/${stem}.${threaded_suffix}.out" "${task_args[@]}" -num_threads "${LOSAT_THREADS}" )&>"./losat_out/${stem}.${threaded_suffix}.log"
 }
 
 # --- LOSATN Commands (Default / Megablast behavior) ---
 
 # NZ_CP006932 self (Default/Megablast)
-(time $LOSAT_BIN blastn -q ./fasta/NZ_CP006932.fasta -s ./fasta/NZ_CP006932.fasta -o ./losat_out/NZ_CP006932.NZ_CP006932.losatn.megablast.out -n 1 )&>./losat_out/NZ_CP006932.NZ_CP006932.losatn.megablast.log
+(time $LOSAT_BIN blastn -outfmt 6 -query ./fasta/NZ_CP006932.fasta -subject ./fasta/NZ_CP006932.fasta -out ./losat_out/NZ_CP006932.NZ_CP006932.losatn.megablast.out -num_threads 1 )&>./losat_out/NZ_CP006932.NZ_CP006932.losatn.megablast.log
 
 # EDL933 vs Sakai
-(time $LOSAT_BIN blastn -q ./fasta/EDL933.fna -s ./fasta/Sakai.fna -o ./losat_out/EDL933.Sakai.losatn.megablast.out -n 1 )&>./losat_out/EDL933.Sakai.losatn.megablast.log
+(time $LOSAT_BIN blastn -outfmt 6 -query ./fasta/EDL933.fna -subject ./fasta/Sakai.fna -out ./losat_out/EDL933.Sakai.losatn.megablast.out -num_threads 1 )&>./losat_out/EDL933.Sakai.losatn.megablast.log
 
 # Sakai vs MG1655
-(time $LOSAT_BIN blastn -q ./fasta/Sakai.fna -s ./fasta/MG1655.fna -o ./losat_out/Sakai.MG1655.losatn.megablast.out -n 1 )&>./losat_out/Sakai.MG1655.losatn.megablast.log
+(time $LOSAT_BIN blastn -outfmt 6 -query ./fasta/Sakai.fna -subject ./fasta/MG1655.fna -out ./losat_out/Sakai.MG1655.losatn.megablast.out -num_threads 1 )&>./losat_out/Sakai.MG1655.losatn.megablast.log
 
 
 # --- LOSATN Commands (Task: blastn) ---
 # NZ_CP006932 self (Task: blastn)
-(time $LOSAT_BIN blastn -q ./fasta/NZ_CP006932.fasta -s ./fasta/NZ_CP006932.fasta -o ./losat_out/NZ_CP006932.NZ_CP006932.losatn.blastn.out --task blastn -n 1 )&>./losat_out/NZ_CP006932.NZ_CP006932.losatn.blastn.log
+(time $LOSAT_BIN blastn -outfmt 6 -query ./fasta/NZ_CP006932.fasta -subject ./fasta/NZ_CP006932.fasta -out ./losat_out/NZ_CP006932.NZ_CP006932.losatn.blastn.out -task blastn -outfmt 6 -num_threads 1 )&>./losat_out/NZ_CP006932.NZ_CP006932.losatn.blastn.log
 # PesePMNV vs MjPMNV
-(time $LOSAT_BIN blastn -q ./fasta/AP027152.fasta -s ./fasta/AP027202.fasta -o ./losat_out/PesePMNV.MjPMNV.losatn.blastn.out --task blastn -n 1 )&>./losat_out/PesePMNV.MjPMNV.losatn.blastn.log
+(time $LOSAT_BIN blastn -outfmt 6 -query ./fasta/AP027152.fasta -subject ./fasta/AP027202.fasta -out ./losat_out/PesePMNV.MjPMNV.losatn.blastn.out -task blastn -outfmt 6 -num_threads 1 )&>./losat_out/PesePMNV.MjPMNV.losatn.blastn.log
 
 # MelaMJNV vs PemoMJNVA
-(time $LOSAT_BIN blastn -q ./fasta/LC738874.fasta -s ./fasta/LC738870.fasta -o ./losat_out/MelaMJNV.PemoMJNVA.losatn.blastn.out --task blastn -n 1 )&>./losat_out/MelaMJNV.PemoMJNVA.losatn.blastn.log
+(time $LOSAT_BIN blastn -outfmt 6 -query ./fasta/LC738874.fasta -subject ./fasta/LC738870.fasta -out ./losat_out/MelaMJNV.PemoMJNVA.losatn.blastn.out -task blastn -outfmt 6 -num_threads 1 )&>./losat_out/MelaMJNV.PemoMJNVA.losatn.blastn.log
 
 # SiNMV vs ChdeNMV
-(time $LOSAT_BIN blastn -q ./fasta/LC738884.fasta -s ./fasta/AP027155.fasta -o ./losat_out/SiNMV.ChdeNMV.losatn.blastn.out --task blastn -n 1 )&>./losat_out/SiNMV.ChdeNMV.losatn.blastn.log
+(time $LOSAT_BIN blastn -outfmt 6 -query ./fasta/LC738884.fasta -subject ./fasta/AP027155.fasta -out ./losat_out/SiNMV.ChdeNMV.losatn.blastn.out -task blastn -outfmt 6 -num_threads 1 )&>./losat_out/SiNMV.ChdeNMV.losatn.blastn.log
 
 # PmeNMV vs MjPMNV
-(time $LOSAT_BIN blastn -q ./fasta/LC738869.fasta -s ./fasta/AP027202.fasta -o ./losat_out/PmeNMV.MjPMNV.losatn.blastn.out --task blastn -n 1 )&>./losat_out/PmeNMV.MjPMNV.losatn.blastn.log
+(time $LOSAT_BIN blastn -outfmt 6 -query ./fasta/LC738869.fasta -subject ./fasta/AP027202.fasta -out ./losat_out/PmeNMV.MjPMNV.losatn.blastn.out -task blastn -outfmt 6 -num_threads 1 )&>./losat_out/PmeNMV.MjPMNV.losatn.blastn.log
 
 # PmeNMV vs PesePMNV
-(time $LOSAT_BIN blastn -q ./fasta/LC738869.fasta -s ./fasta/AP027152.fasta -o ./losat_out/PmeNMV.PesePMNV.losatn.blastn.out --task blastn -n 1 )&>./losat_out/PmeNMV.PesePMNV.losatn.blastn.log
+(time $LOSAT_BIN blastn -outfmt 6 -query ./fasta/LC738869.fasta -subject ./fasta/AP027152.fasta -out ./losat_out/PmeNMV.PesePMNV.losatn.blastn.out -task blastn -outfmt 6 -num_threads 1 )&>./losat_out/PmeNMV.PesePMNV.losatn.blastn.log
 
 # PeseMJNV vs PemoMJNVB
-(time $LOSAT_BIN blastn -q ./fasta/LC738873.fasta -s ./fasta/LC738871.fasta -o ./losat_out/PeseMJNV.PemoMJNVB.losatn.blastn.out --task blastn -n 1 )&>./losat_out/PeseMJNV.PemoMJNVB.losatn.blastn.log
+(time $LOSAT_BIN blastn -outfmt 6 -query ./fasta/LC738873.fasta -subject ./fasta/LC738871.fasta -out ./losat_out/PeseMJNV.PemoMJNVB.losatn.blastn.out -task blastn -outfmt 6 -num_threads 1 )&>./losat_out/PeseMJNV.PemoMJNVB.losatn.blastn.log
 
 # PemoMJNVA vs PeseMJNV
-(time $LOSAT_BIN blastn -q ./fasta/LC738870.fasta -s ./fasta/LC738873.fasta -o ./losat_out/PemoMJNVA.PeseMJNV.losatn.blastn.out --task blastn -n 1 )&>./losat_out/PemoMJNVA.PeseMJNV.losatn.blastn.log
+(time $LOSAT_BIN blastn -outfmt 6 -query ./fasta/LC738870.fasta -subject ./fasta/LC738873.fasta -out ./losat_out/PemoMJNVA.PeseMJNV.losatn.blastn.out -task blastn -outfmt 6 -num_threads 1 )&>./losat_out/PemoMJNVA.PeseMJNV.losatn.blastn.log
 
 # MjeNMV vs MelaMJNV
-(time $LOSAT_BIN blastn -q ./fasta/LC738868.fasta -s ./fasta/LC738874.fasta -o ./losat_out/MjeNMV.MelaMJNV.losatn.blastn.out --task blastn -n 1 )&>./losat_out/MjeNMV.MelaMJNV.losatn.blastn.log
+(time $LOSAT_BIN blastn -outfmt 6 -query ./fasta/LC738868.fasta -subject ./fasta/LC738874.fasta -out ./losat_out/MjeNMV.MelaMJNV.losatn.blastn.out -task blastn -outfmt 6 -num_threads 1 )&>./losat_out/MjeNMV.MelaMJNV.losatn.blastn.log
 
 # MjPMNV vs MlPMNV
-(time $LOSAT_BIN blastn -q ./fasta/AP027202.fasta -s ./fasta/LC738875.fasta -o ./losat_out/MjPMNV.MlPMNV.losatn.blastn.out --task blastn -n 1 )&>./losat_out/MjPMNV.MlPMNV.losatn.blastn.log
+(time $LOSAT_BIN blastn -outfmt 6 -query ./fasta/AP027202.fasta -subject ./fasta/LC738875.fasta -out ./losat_out/MjPMNV.MlPMNV.losatn.blastn.out -task blastn -outfmt 6 -num_threads 1 )&>./losat_out/MjPMNV.MlPMNV.losatn.blastn.log
 
 # --- LOSATN multithread timing commands ---
 run_losatn_native_threaded_case "NZ_CP006932.fasta" "NZ_CP006932.fasta" "NZ_CP006932.NZ_CP006932.losatn.megablast" "megablast"
@@ -221,8 +221,8 @@ run_tlosatx_case() {
     #                        CArgDescriptions::eString,
     #                        NStr::IntToString(dft_outfmt));
     # ```
-    (time "${LOSAT_BIN}" tblastx -query "./fasta/${query}" -subject "./fasta/${subject}" -out "./losat_out/${stem}.tlosatx.n1.out" --query-gencode "${query_gencode}" --db-gencode "${db_gencode}" -num_threads 1 -outfmt 6 )&>"./losat_out/${stem}.tlosatx.n1.log"
-    (time "${LOSAT_BIN}" tblastx -query "./fasta/${query}" -subject "./fasta/${subject}" -out "./losat_out/${stem}.tlosatx.${threaded_suffix}.out" --query-gencode "${query_gencode}" --db-gencode "${db_gencode}" -num_threads "${LOSAT_THREADS}" -outfmt 6 )&>"./losat_out/${stem}.tlosatx.${threaded_suffix}.log"
+    (time "${LOSAT_BIN}" tblastx -query "./fasta/${query}" -subject "./fasta/${subject}" -out "./losat_out/${stem}.tlosatx.n1.out" -query_gencode "${query_gencode}" -db_gencode "${db_gencode}" -num_threads 1 -outfmt 6 )&>"./losat_out/${stem}.tlosatx.n1.log"
+    (time "${LOSAT_BIN}" tblastx -query "./fasta/${query}" -subject "./fasta/${subject}" -out "./losat_out/${stem}.tlosatx.${threaded_suffix}.out" -query_gencode "${query_gencode}" -db_gencode "${db_gencode}" -num_threads "${LOSAT_THREADS}" -outfmt 6 )&>"./losat_out/${stem}.tlosatx.${threaded_suffix}.log"
 }
 
 LOSATP_CASES=(
@@ -370,8 +370,8 @@ run_losatn_wasm_case() {
     # const string kArgNumThreads("num_threads");
     # const string kTask("task");
     # ```
-    run_losat_wasm "${log}" blastn -query "${FASTA_DIR}/${query}" -subject "${FASTA_DIR}/${subject}" -out "${out}" "${task_args[@]}" -num_threads 1
-    run_losat_wasm_threaded "${threaded_log}" blastn -query "${FASTA_DIR}/${query}" -subject "${FASTA_DIR}/${subject}" -out "${threaded_out}" "${task_args[@]}" -num_threads "${LOSAT_THREADS}"
+    run_losat_wasm "${log}" blastn -outfmt 6 -query "${FASTA_DIR}/${query}" -subject "${FASTA_DIR}/${subject}" -out "${out}" "${task_args[@]}" -num_threads 1
+    run_losat_wasm_threaded "${threaded_log}" blastn -outfmt 6 -query "${FASTA_DIR}/${query}" -subject "${FASTA_DIR}/${subject}" -out "${threaded_out}" "${task_args[@]}" -num_threads "${LOSAT_THREADS}"
 }
 
 run_losatp_wasm_case() {
@@ -426,13 +426,13 @@ run_tlosatx_wasm_case() {
     run_losat_wasm \
         "${LOSAT_OUT_DIR}/${stem}.tlosatx.wasm.log" \
         tblastx -query "${FASTA_DIR}/${query}" -subject "${FASTA_DIR}/${subject}" \
-        -out "${LOSAT_OUT_DIR}/${stem}.tlosatx.wasm.out" --query-gencode "${query_gencode}" \
-        --db-gencode "${db_gencode}" -num_threads 1 -outfmt 6
+        -out "${LOSAT_OUT_DIR}/${stem}.tlosatx.wasm.out" -query_gencode "${query_gencode}" \
+        -db_gencode "${db_gencode}" -num_threads 1 -outfmt 6
     run_losat_wasm_threaded \
         "${LOSAT_OUT_DIR}/${stem}.tlosatx.wasm.${threaded_suffix}.log" \
         tblastx -query "${FASTA_DIR}/${query}" -subject "${FASTA_DIR}/${subject}" \
-        -out "${LOSAT_OUT_DIR}/${stem}.tlosatx.wasm.${threaded_suffix}.out" --query-gencode "${query_gencode}" \
-        --db-gencode "${db_gencode}" -num_threads "${LOSAT_THREADS}" -outfmt 6
+        -out "${LOSAT_OUT_DIR}/${stem}.tlosatx.wasm.${threaded_suffix}.out" -query_gencode "${query_gencode}" \
+        -db_gencode "${db_gencode}" -num_threads "${LOSAT_THREADS}" -outfmt 6
 }
 
 if [ "${RUN_LOSAT_WASM}" = "0" ]; then
@@ -533,64 +533,64 @@ echo "Starting TLOSATX commands..."
 
 # --- TLOSATX Commands (Genetic Code: 1) ---
 echo "Starting AP027280 self..."
-(time $LOSAT_BIN tblastx -q ./fasta/AP027280.fasta -s ./fasta/AP027280.fasta -o ./losat_out/AP027280.AP027280.tlosatx.n1.out --query-gencode 1 --db-gencode 1 -n 1)&>./losat_out/AP027280.AP027280.tlosatx.n1.log 
-(time $LOSAT_BIN tblastx -q ./fasta/AP027280.fasta -s ./fasta/AP027280.fasta -o ./losat_out/AP027280.AP027280.tlosatx.n8.out --query-gencode 1 --db-gencode 1 -n 8 )&>./losat_out/AP027280.AP027280.tlosatx.n8.log 
+(time $LOSAT_BIN tblastx -outfmt 6 -query ./fasta/AP027280.fasta -subject ./fasta/AP027280.fasta -out ./losat_out/AP027280.AP027280.tlosatx.n1.out -query_gencode 1 -db_gencode 1 -num_threads 1)&>./losat_out/AP027280.AP027280.tlosatx.n1.log 
+(time $LOSAT_BIN tblastx -outfmt 6 -query ./fasta/AP027280.fasta -subject ./fasta/AP027280.fasta -out ./losat_out/AP027280.AP027280.tlosatx.n8.out -query_gencode 1 -db_gencode 1 -num_threads 8 )&>./losat_out/AP027280.AP027280.tlosatx.n8.log 
 
 # MjeNMV vs MelaMJNV
 echo "Starting MjeNMV vs MelaMJNV (TLOSATX)..."
-(time $LOSAT_BIN tblastx -q ./fasta/MjeNMV.fasta -s ./fasta/MelaMJNV.fasta -o ./losat_out/MjeNMV.MelaMJNV.tlosatx.n8.out --query-gencode 1 --db-gencode 1 -n 8 ) &> ./losat_out/MjeNMV.MelaMJNV.tlosatx.n8.log 
+(time $LOSAT_BIN tblastx -outfmt 6 -query ./fasta/MjeNMV.fasta -subject ./fasta/MelaMJNV.fasta -out ./losat_out/MjeNMV.MelaMJNV.tlosatx.n8.out -query_gencode 1 -db_gencode 1 -num_threads 8 ) &> ./losat_out/MjeNMV.MelaMJNV.tlosatx.n8.log 
 
 # MelaMJNV vs PemoMJNVA
 echo "Starting MelaMJNV vs PemoMJNVA (TLOSATX)..."
-(time $LOSAT_BIN tblastx -q ./fasta/MelaMJNV.fasta -s ./fasta/PemoMJNVA.fasta -o ./losat_out/MelaMJNV.PemoMJNVA.tlosatx.n8.out --query-gencode 1 --db-gencode 1 -n 8 ) &> ./losat_out/MelaMJNV.PemoMJNVA.tlosatx.n8.log 
+(time $LOSAT_BIN tblastx -outfmt 6 -query ./fasta/MelaMJNV.fasta -subject ./fasta/PemoMJNVA.fasta -out ./losat_out/MelaMJNV.PemoMJNVA.tlosatx.n8.out -query_gencode 1 -db_gencode 1 -num_threads 8 ) &> ./losat_out/MelaMJNV.PemoMJNVA.tlosatx.n8.log 
 
 # PemoMJNVA vs PeseMJNV
 echo "Starting PemoMJNVA vs PeseMJNV (TLOSATX)..."
-(time $LOSAT_BIN tblastx -q ./fasta/PemoMJNVA.fasta -s ./fasta/PeseMJNV.fasta -o ./losat_out/PemoMJNVA.PeseMJNV.tlosatx.n8.out --query-gencode 1 --db-gencode 1 -n 8 ) &> ./losat_out/PemoMJNVA.PeseMJNV.tlosatx.n8.log 
+(time $LOSAT_BIN tblastx -outfmt 6 -query ./fasta/PemoMJNVA.fasta -subject ./fasta/PeseMJNV.fasta -out ./losat_out/PemoMJNVA.PeseMJNV.tlosatx.n8.out -query_gencode 1 -db_gencode 1 -num_threads 8 ) &> ./losat_out/PemoMJNVA.PeseMJNV.tlosatx.n8.log 
 
 # PeseMJNV vs PemoMJNVB
 echo "Starting PeseMJNV vs PemoMJNVB (TLOSATX)..."
-(time $LOSAT_BIN tblastx -q ./fasta/PeseMJNV.fasta -s ./fasta/PemoMJNVB.fasta -o ./losat_out/PeseMJNV.PemoMJNVB.tlosatx.n8.out --query-gencode 1 --db-gencode 1 -n 8 ) &> ./losat_out/PeseMJNV.PemoMJNVB.tlosatx.n8.log 
+(time $LOSAT_BIN tblastx -outfmt 6 -query ./fasta/PeseMJNV.fasta -subject ./fasta/PemoMJNVB.fasta -out ./losat_out/PeseMJNV.PemoMJNVB.tlosatx.n8.out -query_gencode 1 -db_gencode 1 -num_threads 8 ) &> ./losat_out/PeseMJNV.PemoMJNVB.tlosatx.n8.log 
 
 # PemoMJNVB vs LvMJNV
 echo "Starting PemoMJNVB vs LvMJNV (TLOSATX)..."
-(time $LOSAT_BIN tblastx -q ./fasta/PemoMJNVB.fasta -s ./fasta/LvMJNV.fasta -o ./losat_out/PemoMJNVB.LvMJNV.tlosatx.n8.out --query-gencode 1 --db-gencode 1 -n 8 ) &> ./losat_out/PemoMJNVB.LvMJNV.tlosatx.n8.log 
+(time $LOSAT_BIN tblastx -outfmt 6 -query ./fasta/PemoMJNVB.fasta -subject ./fasta/LvMJNV.fasta -out ./losat_out/PemoMJNVB.LvMJNV.tlosatx.n8.out -query_gencode 1 -db_gencode 1 -num_threads 8 ) &> ./losat_out/PemoMJNVB.LvMJNV.tlosatx.n8.log 
 
 # LvMJNV vs TrcuMJNV
 echo "Starting LvMJNV vs TrcuMJNV (TLOSATX)..."
-(time $LOSAT_BIN tblastx -q ./fasta/LvMJNV.fasta -s ./fasta/TrcuMJNV.fasta -o ./losat_out/LvMJNV.TrcuMJNV.tlosatx.n8.out --query-gencode 1 --db-gencode 1 -n 8 ) &> ./losat_out/LvMJNV.TrcuMJNV.tlosatx.n8.log 
+(time $LOSAT_BIN tblastx -outfmt 6 -query ./fasta/LvMJNV.fasta -subject ./fasta/TrcuMJNV.fasta -out ./losat_out/LvMJNV.TrcuMJNV.tlosatx.n8.out -query_gencode 1 -db_gencode 1 -num_threads 8 ) &> ./losat_out/LvMJNV.TrcuMJNV.tlosatx.n8.log 
 
 # TrcuMJNV vs MellatMJNV
 echo "Starting TrcuMJNV vs MellatMJNV (TLOSATX)..."
-(time $LOSAT_BIN tblastx -q ./fasta/TrcuMJNV.fasta -s ./fasta/MellatMJNV.fasta -o ./losat_out/TrcuMJNV.MellatMJNV.tlosatx.n8.out --query-gencode 1 --db-gencode 1 -n 8 ) &> ./losat_out/TrcuMJNV.MellatMJNV.tlosatx.n8.log 
+(time $LOSAT_BIN tblastx -outfmt 6 -query ./fasta/TrcuMJNV.fasta -subject ./fasta/MellatMJNV.fasta -out ./losat_out/TrcuMJNV.MellatMJNV.tlosatx.n8.out -query_gencode 1 -db_gencode 1 -num_threads 8 ) &> ./losat_out/TrcuMJNV.MellatMJNV.tlosatx.n8.log 
 
 # MellatMJNV vs MeenMJNV
 echo "Starting MellatMJNV vs MeenMJNV (TLOSATX)..."
-(time $LOSAT_BIN tblastx -q ./fasta/MellatMJNV.fasta -s ./fasta/MeenMJNV.fasta -o ./losat_out/MellatMJNV.MeenMJNV.tlosatx.n8.out --query-gencode 1 --db-gencode 1 -n 8 ) &> ./losat_out/MellatMJNV.MeenMJNV.tlosatx.n8.log 
+(time $LOSAT_BIN tblastx -outfmt 6 -query ./fasta/MellatMJNV.fasta -subject ./fasta/MeenMJNV.fasta -out ./losat_out/MellatMJNV.MeenMJNV.tlosatx.n8.out -query_gencode 1 -db_gencode 1 -num_threads 8 ) &> ./losat_out/MellatMJNV.MeenMJNV.tlosatx.n8.log 
 
 # MeenMJNV vs MejoMJNV
 echo "Starting MeenMJNV vs MejoMJNV (TLOSATX)..."
-(time $LOSAT_BIN tblastx -q ./fasta/MeenMJNV.fasta -s ./fasta/MejoMJNV.fasta -o ./losat_out/MeenMJNV.MejoMJNV.tlosatx.n8.out --query-gencode 1 --db-gencode 1 -n 8 ) &> ./losat_out/MeenMJNV.MejoMJNV.tlosatx.n8.log 
+(time $LOSAT_BIN tblastx -outfmt 6 -query ./fasta/MeenMJNV.fasta -subject ./fasta/MejoMJNV.fasta -out ./losat_out/MeenMJNV.MejoMJNV.tlosatx.n8.out -query_gencode 1 -db_gencode 1 -num_threads 8 ) &> ./losat_out/MeenMJNV.MejoMJNV.tlosatx.n8.log 
 
 # AvCLPV vs PsCLPV
 echo "Starting AvCLPV vs PsCLPV (TLOSATX)..."
-(time $LOSAT_BIN tblastx -q ./fasta/AvCLPV.fasta -s ./fasta/PsCLPV.fasta -o ./losat_out/AvCLPV.PsCLPV.tlosatx.n8.out --query-gencode 1 --db-gencode 1 -n 8 )&>./losat_out/AvCLPV.PsCLPV.tlosatx.n8.log 
+(time $LOSAT_BIN tblastx -outfmt 6 -query ./fasta/AvCLPV.fasta -subject ./fasta/PsCLPV.fasta -out ./losat_out/AvCLPV.PsCLPV.tlosatx.n8.out -query_gencode 1 -db_gencode 1 -num_threads 8 )&>./losat_out/AvCLPV.PsCLPV.tlosatx.n8.log 
 
 echo "Starting NZ_CP006932 self (TLOSATX)..."
 # NZ_CP006932 self
-(time $LOSAT_BIN tblastx -q ./fasta/NZ_CP006932.fasta -s ./fasta/NZ_CP006932.fasta -o ./losat_out/NZ_CP006932.NZ_CP006932.tlosatx.n8.out --query-gencode 4 --db-gencode 4 -n 8 )&>./losat_out/NZ_CP006932.NZ_CP006932.tlosatx.n8.log 
+(time $LOSAT_BIN tblastx -outfmt 6 -query ./fasta/NZ_CP006932.fasta -subject ./fasta/NZ_CP006932.fasta -out ./losat_out/NZ_CP006932.NZ_CP006932.tlosatx.n8.out -query_gencode 4 -db_gencode 4 -num_threads 8 )&>./losat_out/NZ_CP006932.NZ_CP006932.tlosatx.n8.log 
 echo "Starting AP027132 vs NZ_CP006932 (TLOSATX)..."
 # AP027132 vs NZ_CP006932
-(time $LOSAT_BIN tblastx -q ./fasta/AP027132.fasta -s ./fasta/NZ_CP006932.fasta -o ./losat_out/AP027132.NZ_CP006932.tlosatx.n8.out --query-gencode 4 --db-gencode 4 -n 8 )&>./losat_out/AP027132.NZ_CP006932.tlosatx.n8.log 
+(time $LOSAT_BIN tblastx -outfmt 6 -query ./fasta/AP027132.fasta -subject ./fasta/NZ_CP006932.fasta -out ./losat_out/AP027132.NZ_CP006932.tlosatx.n8.out -query_gencode 4 -db_gencode 4 -num_threads 8 )&>./losat_out/AP027132.NZ_CP006932.tlosatx.n8.log 
 echo "Starting AP027078 vs AP027131 (TLOSATX)..."
 # AP027078 vs AP027131
-(time $LOSAT_BIN tblastx -q ./fasta/AP027078.fasta -s ./fasta/AP027131.fasta -o ./losat_out/AP027078.AP027131.tlosatx.n8.out --query-gencode 4 --db-gencode 4 -n 8 )&>./losat_out/AP027078.AP027131.tlosatx.n8.log 
+(time $LOSAT_BIN tblastx -outfmt 6 -query ./fasta/AP027078.fasta -subject ./fasta/AP027131.fasta -out ./losat_out/AP027078.AP027131.tlosatx.n8.out -query_gencode 4 -db_gencode 4 -num_threads 8 )&>./losat_out/AP027078.AP027131.tlosatx.n8.log 
 echo "Starting AP027131 vs AP027133 (TLOSATX)..."
 # AP027131 vs AP027133
-(time $LOSAT_BIN tblastx -q ./fasta/AP027131.fasta -s ./fasta/AP027133.fasta -o ./losat_out/AP027131.AP027133.tlosatx.n8.out --query-gencode 4 --db-gencode 4 -n 8 )&>./losat_out/AP027131.AP027133.tlosatx.n8.log 
+(time $LOSAT_BIN tblastx -outfmt 6 -query ./fasta/AP027131.fasta -subject ./fasta/AP027133.fasta -out ./losat_out/AP027131.AP027133.tlosatx.n8.out -query_gencode 4 -db_gencode 4 -num_threads 8 )&>./losat_out/AP027131.AP027133.tlosatx.n8.log 
 echo "Starting AP027133 vs AP027132 (TLOSATX)..."
 # AP027133 vs AP027132
-(time $LOSAT_BIN tblastx -q ./fasta/AP027133.fasta -s ./fasta/AP027132.fasta -o ./losat_out/AP027133.AP027132.tlosatx.n8.out --query-gencode 4 --db-gencode 4 -n 8 )&>./losat_out/AP027133.AP027132.tlosatx.n8.log 
+(time $LOSAT_BIN tblastx -outfmt 6 -query ./fasta/AP027133.fasta -subject ./fasta/AP027132.fasta -out ./losat_out/AP027133.AP027132.tlosatx.n8.out -query_gencode 4 -db_gencode 4 -num_threads 8 )&>./losat_out/AP027133.AP027132.tlosatx.n8.log 
 
 echo "Finished TLOSATX commands!"
 COMMENTOUT

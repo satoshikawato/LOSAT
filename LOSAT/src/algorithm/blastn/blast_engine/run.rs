@@ -5378,7 +5378,10 @@ fn run_internal(args: BlastnArgs, mut in_memory: Option<BlastnInMemoryRun<'_>>) 
         Some(max_target_seqs) if max_target_seqs > 0 => max_target_seqs,
         _ => args.hitlist_size,
     };
-    let max_hsps_per_subject = args.max_hsps_per_subject;
+    // NCBI blast_args.cpp:317-318: if (... args[kArgMaxHSPsPerSubject]) {
+    // opt.SetMaxHspsPerSubject(args[kArgMaxHSPsPerSubject].AsInteger()); }
+    // CLI omission maps to the engine's unlimited sentinel.
+    let max_hsps_per_subject = args.max_hsps_per_subject.unwrap_or(0);
     // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_hits.c:43-70 (GetPrelimHitlistSize)
     // ```c
     // Int4
@@ -11192,23 +11195,24 @@ mod tests {
         )
         .unwrap();
         let execute = |threads: usize, outfmt: &str| {
-            let args = Options::parse_from([
+            let args = crate::cli::try_parse_from::<Options, _, _>([
                 "test",
-                "-q",
+                "-query",
                 query_path.to_str().unwrap(),
-                "-s",
+                "-subject",
                 subject_path.to_str().unwrap(),
-                "--task",
+                "-task",
                 "blastn",
-                "--word-size",
+                "-word_size",
                 "11",
-                "--num-threads",
+                "-num_threads",
                 &threads.to_string(),
-                "--outfmt",
+                "-outfmt",
                 outfmt,
-                "--out",
+                "-out",
                 output_path.to_str().unwrap(),
             ])
+            .unwrap()
             .blastn;
             run(args).unwrap();
             std::fs::read(&output_path).unwrap()

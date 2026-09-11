@@ -72,7 +72,7 @@ class IntegratedRuntimeCertificationTests(unittest.TestCase):
         )
 
     def test_wasm_command_preserves_losat_arguments_and_output_replacement(self) -> None:
-        native = ["/tmp/LOSAT", "blastn", "-q", "/tmp/q.fa", "-o", "/tmp/a.out"]
+        native = ["/tmp/LOSAT", "blastn", "-query", "/tmp/q.fa", "-out", "/tmp/a.out"]
         wasm = integrated.wasm_command(
             "node", Path("/repo/tests/run.js"), Path("/tmp/LOSAT.wasm"), native
         )
@@ -83,14 +83,14 @@ class IntegratedRuntimeCertificationTests(unittest.TestCase):
                 "/repo/tests/run.js",
                 "/tmp/LOSAT.wasm",
                 "blastn",
-                "-q",
+                "-query",
                 "/tmp/q.fa",
-                "-o",
+                "-out",
                 "/tmp/a.out",
             ],
         )
         self.assertEqual(
-            integrated.replace_output(wasm, "-o", Path("/tmp/run2.out"))[-1],
+            integrated.replace_output(wasm, "-out", Path("/tmp/run2.out"))[-1],
             "/tmp/run2.out",
         )
 

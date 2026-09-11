@@ -227,7 +227,7 @@ def freeze(args):
                 "benchmark": "true",
             },
         }
-        item["losat_argv"] = [*base["losat_argv"], "--evalue", extra["evalue"]]
+        item["losat_argv"] = [*base["losat_argv"], "-evalue", extra["evalue"]]
         item["oracle_argv"] = [*base["oracle_argv"], "-evalue", extra["evalue"]]
         if extra.get("input_relative"):
             lexical = authority.historical_lexical_path(extra["input_relative"])
@@ -523,7 +523,7 @@ def diagnostic_diff(expected, observed, directory):
 def thread_command(case, kind, threads, manifest, exact=False):
     argv = list(case["losat_argv"])
     argv[0] = manifest["artifacts"][kind]["path"]
-    options = ("--num-threads", "--num_threads", "-num_threads", "-n")
+    options = ("-num_threads",)
     option = next((x for x in options if x in argv), None)
     if not exact:
         if option is None:
@@ -622,7 +622,7 @@ def preflight(manifest):
             }:
                 raise GateFailure("extra case measurement policy mismatch")
             for field, option in (
-                ("losat_argv", "--evalue"),
+                ("losat_argv", "-evalue"),
                 ("oracle_argv", "-evalue"),
             ):
                 command = [*base[field], option, extra["evalue"]]
@@ -767,10 +767,7 @@ def run(args):
                     option = next(
                         x
                         for x in (
-                            "--num-threads",
-                            "--num_threads",
                             "-num_threads",
-                            "-n",
                         )
                         if x in command
                     )
@@ -985,7 +982,7 @@ def run_warm(args, manifest, dest):
             manifest["runtime"]["runners"]["warm_serial"],
             manifest["artifacts"]["serial"]["path"],
             str(directory / "jobs.json"),
-            "--out",
+            "-out",
             "unused",
         ]
         execution = execute(

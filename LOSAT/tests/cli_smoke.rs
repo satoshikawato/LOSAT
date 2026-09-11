@@ -115,11 +115,11 @@ fn unsupported_blastp_option_fails_before_file_io() {
     let missing_query = temp_path("missing_query", "faa");
     let missing_subject = temp_path("missing_subject", "faa");
     let output = clean_losat_command()
-        .args(["blastp", "-q"])
+        .args(["blastp", "-query"])
         .arg(&missing_query)
-        .arg("-s")
+        .arg("-subject")
         .arg(&missing_subject)
-        .args(["--word-size", "7"])
+        .args(["-word_size", "7"])
         .output()
         .expect("run unsupported blastp");
 
@@ -147,9 +147,9 @@ fn missing_input_file_reports_explicit_query_error() {
     let missing_query = temp_path("missing_query", "fa");
     let missing_subject = temp_path("missing_subject", "fa");
     let output = clean_losat_command()
-        .args(["blastn", "-q"])
+        .args(["blastn", "-outfmt", "6", "-query"])
         .arg(&missing_query)
-        .arg("-s")
+        .arg("-subject")
         .arg(&missing_subject)
         .output()
         .expect("run blastn with missing input");
@@ -181,9 +181,9 @@ fn malformed_fasta_reports_parse_error() {
     fs::write(&subject, ">s\nACGTACGTACGT\n").expect("write subject FASTA");
 
     let output = clean_losat_command()
-        .args(["blastn", "-q"])
+        .args(["blastn", "-outfmt", "6", "-query"])
         .arg(&query)
-        .arg("-s")
+        .arg("-subject")
         .arg(&subject)
         .output()
         .expect("run blastn with malformed FASTA");
@@ -219,11 +219,11 @@ fn normal_tblastx_run_keeps_stderr_clean_without_debug_env() {
     fs::write(&subject, ">s\nATGATGATGATGATGATGATGATGATGATG\n").expect("write subject FASTA");
 
     let output = clean_losat_command()
-        .args(["tblastx", "-q"])
+        .args(["tblastx", "-query"])
         .arg(&query)
-        .arg("-s")
+        .arg("-subject")
         .arg(&subject)
-        .args(["--seg=false", "--outfmt", "6", "-n", "1", "-o"])
+        .args(["-seg", "no", "-outfmt", "6", "-num_threads", "1", "-out"])
         .arg(&out)
         .output()
         .expect("run tblastx");

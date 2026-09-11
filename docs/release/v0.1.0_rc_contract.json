@@ -56,6 +56,10 @@
     "rerun_required": false,
     "rerun_reason": "PR 7 changes release tooling, focused tests, and release documentation only; runtime/build/contract authorities remain byte-identical to the PR 6 integration base"
   },
+  "public_cli": {
+    "blastp_tasks": ["blastp"],
+    "blastp_default_task": "blastp"
+  },
   "smoke": {
     "program": "blastp",
     "case_id": "pairwise_default_serial",
@@ -64,17 +68,19 @@
     "expected_output_sha256": "fd4b010800e32ce6c823cb38b42a10b7845f3342edae892acccc8f554f9edf34",
     "arguments": [
       "blastp",
-      "--query",
+      "-task",
+      "blastp",
+      "-query",
       "{query}",
-      "--subject",
+      "-subject",
       "{subject}",
-      "--max-hsps-per-subject",
+      "-max_hsps",
       "1",
-      "--outfmt",
+      "-outfmt",
       "6",
-      "--num-threads",
+      "-num_threads",
       "1",
-      "--out",
+      "-out",
       "{output}"
     ]
   },

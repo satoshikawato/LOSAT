@@ -213,8 +213,8 @@ run_losatn_wasm_case() {
     # const string kArgNumThreads("num_threads");
     # const string kTask("task");
     # ```
-    run_losat_wasm "${log}" blastn -query "${FASTA_DIR}/${query}" -subject "${FASTA_DIR}/${subject}" -out "${out}" "${task_args[@]}" -num_threads 1
-    run_losat_wasm_threaded "${threaded_log}" blastn -query "${FASTA_DIR}/${query}" -subject "${FASTA_DIR}/${subject}" -out "${threaded_out}" "${task_args[@]}" -num_threads "${LOSAT_THREADS}"
+    run_losat_wasm "${log}" blastn -outfmt 6 -query "${FASTA_DIR}/${query}" -subject "${FASTA_DIR}/${subject}" -out "${out}" "${task_args[@]}" -num_threads 1
+    run_losat_wasm_threaded "${threaded_log}" blastn -outfmt 6 -query "${FASTA_DIR}/${query}" -subject "${FASTA_DIR}/${subject}" -out "${threaded_out}" "${task_args[@]}" -num_threads "${LOSAT_THREADS}"
 }
 
 run_losatp_wasm_case() {
@@ -269,13 +269,13 @@ run_tlosatx_wasm_case() {
     run_losat_wasm \
         "${LOSAT_OUT_DIR}/${stem}.tlosatx.wasm.log" \
         tblastx -query "${FASTA_DIR}/${query}" -subject "${FASTA_DIR}/${subject}" \
-        -out "${LOSAT_OUT_DIR}/${stem}.tlosatx.wasm.out" --query-gencode "${query_gencode}" \
-        --db-gencode "${db_gencode}" -num_threads 1 -outfmt 6
+        -out "${LOSAT_OUT_DIR}/${stem}.tlosatx.wasm.out" -query_gencode "${query_gencode}" \
+        -db_gencode "${db_gencode}" -num_threads 1 -outfmt 6
     run_losat_wasm_threaded \
         "${LOSAT_OUT_DIR}/${stem}.tlosatx.wasm.${threaded_suffix}.log" \
         tblastx -query "${FASTA_DIR}/${query}" -subject "${FASTA_DIR}/${subject}" \
-        -out "${LOSAT_OUT_DIR}/${stem}.tlosatx.wasm.${threaded_suffix}.out" --query-gencode "${query_gencode}" \
-        --db-gencode "${db_gencode}" -num_threads "${LOSAT_THREADS}" -outfmt 6
+        -out "${LOSAT_OUT_DIR}/${stem}.tlosatx.wasm.${threaded_suffix}.out" -query_gencode "${query_gencode}" \
+        -db_gencode "${db_gencode}" -num_threads "${LOSAT_THREADS}" -outfmt 6
 }
 
 echo "Starting LOSAT Wasm commands..."

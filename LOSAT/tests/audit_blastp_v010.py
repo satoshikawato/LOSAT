@@ -150,23 +150,23 @@ def build_commands(case: Case, oracle: Path, losat_bin: Path, outputs: Path) -> 
     losat = [
         str(losat_bin),
         "blastp",
-        "--query",
+        "-query",
         str(case.query),
-        "--subject",
+        "-subject",
         str(case.subject),
-        "--outfmt",
+        "-outfmt",
         case.outfmt,
-        "--num-threads",
+        "-num_threads",
         str(case.num_threads),
     ]
     if case.max_hsps_per_subject is not None:
         ncbi.extend(["-max_hsps", str(case.max_hsps_per_subject)])
-        losat.extend(["--max-hsps-per-subject", str(case.max_hsps_per_subject)])
+        losat.extend(["-max_hsps", str(case.max_hsps_per_subject)])
     if case.max_target_seqs is not None:
         ncbi.extend(["-max_target_seqs", str(case.max_target_seqs)])
-        losat.extend(["--max-target-seqs", str(case.max_target_seqs)])
+        losat.extend(["-max_target_seqs", str(case.max_target_seqs)])
     ncbi.extend(["-out", str(ncbi_output)])
-    losat.extend(["--out", str(losat_output)])
+    losat.extend(["-out", str(losat_output)])
     return ncbi, losat
 
 

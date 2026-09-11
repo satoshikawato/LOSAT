@@ -1062,8 +1062,10 @@ fn run_internal(args: TblastxArgs, mut in_memory: Option<TblastxInMemoryRun<'_>>
         .map(|r| generate_frames(r.seq(), &query_code))
         .collect();
 
-    if args.seg {
-        let seg = SegMasker::new(args.seg_window, args.seg_locut, args.seg_hicut);
+    // NCBI blast_args.cpp:404-406: opt.SetSegFilteringWindow(...);
+    // opt.SetSegFilteringLocut(...); opt.SetSegFilteringHicut(...);
+    if let Some(params) = args.seg.params() {
+        let seg = SegMasker::new(params.window, params.locut, params.hicut);
         for frames in &mut query_frames {
             for frame in frames {
                 if frame.aa_seq.len() >= 3 {

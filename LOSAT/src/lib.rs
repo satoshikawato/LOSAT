@@ -20,3 +20,6 @@ pub mod format;
 
 #[cfg(target_arch = "wasm32")]
 pub mod web_api;
+
+// NCBI blastinput/blast_args.cpp:332-349: shared string-valued filtering arguments.
+pub mod cli;

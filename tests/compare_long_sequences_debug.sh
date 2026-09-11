@@ -88,11 +88,11 @@ echo ""
 
 # Run LOSAT TBLASTX with debug output
 echo "Running LOSAT TBLASTX (with debug output)..."
-LOSAT_DIAGNOSTICS=1 $LOSAT_CMD tblastx \
+LOSAT_DIAGNOSTICS=1 $LOSAT_CMD tblastx -outfmt 6 \
     -query "$QUERY_FILE" \
     -subject "$SUBJECT_FILE" \
-    --query_gencode "$GENCODE" \
-    --db_gencode "$GENCODE" \
+    -query_gencode "$GENCODE" \
+    -db_gencode "$GENCODE" \
     -out "$OUTDIR/losat_output.tsv" \
     2>"$OUTDIR/losat_debug.log"
 

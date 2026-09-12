@@ -2089,6 +2089,22 @@ fn extend_gapped_one_direction_with_traceback_with_scratch(
         // this written traceback span for the row; retaining zero-filled tail
         // cells lets traceback read unwritten cells as SCRIPT_GAP_IN_A.
         let mut row_end_b_index = b_size;
+        // NCBI reference: c++/src/algo/blast/core/blast_gapalign.c:531-539,563-635:
+        // ```c
+        // edit_script_row = edit_script[a_index] - first_b_index;
+        // for (b_index = first_b_index; b_index < b_size; b_index++) {
+        //     ...
+        //     edit_script_row[b_index] = script;
+        // }
+        // ```
+        // Borrow this non-growing row as a slice for the existing main loop.
+        // The Vec remains available for NCBI band growth after the borrow ends.
+        // Serial Wasm retains Vec row access; native and threaded Wasm use
+        // the N12 slice borrow. These artifacts share the same DP loop.
+        #[cfg(all(target_arch = "wasm32", not(feature = "wasm-threads")))]
+        let trace_row_cells = &mut *edit_script_row;
+        #[cfg(not(all(target_arch = "wasm32", not(feature = "wasm-threads"))))]
+        let trace_row_cells = edit_script_row.as_mut_slice();
         for b_index in first_b_index..b_size {
             // NCBI reference: blast_gapalign.c:563-578 (b_size can reach N+1; no b_index < N guard).
             // NCBI reference: blast_util.c:826 (NULLB sentinel at sequence ends).
@@ -2197,8 +2213,8 @@ fn extend_gapped_one_direction_with_traceback_with_scratch(
             // edit_script_row[b_index] = script;
             score_val = next_score;
             let row_idx = b_index.saturating_sub(orig_b_index);
-            if row_idx < edit_script_row.len() {
-                edit_script_row[row_idx] = script;
+            if row_idx < trace_row_cells.len() {
+                trace_row_cells[row_idx] = script;
             }
         }
 
@@ -2683,6 +2699,22 @@ fn extend_gapped_one_direction_with_traceback_ex_with_scratch(
         // this written traceback span for the row; retaining zero-filled tail
         // cells lets traceback read unwritten cells as SCRIPT_GAP_IN_A.
         let mut row_end_b_index = b_size;
+        // NCBI reference: c++/src/algo/blast/core/blast_gapalign.c:531-539,563-635:
+        // ```c
+        // edit_script_row = edit_script[a_index] - first_b_index;
+        // for (b_index = first_b_index; b_index < b_size; b_index++) {
+        //     ...
+        //     edit_script_row[b_index] = script;
+        // }
+        // ```
+        // Borrow this non-growing row as a slice for the existing main loop.
+        // The Vec remains available for NCBI band growth after the borrow ends.
+        // Serial Wasm retains Vec row access; native and threaded Wasm use
+        // the N12 slice borrow. These artifacts share the same DP loop.
+        #[cfg(all(target_arch = "wasm32", not(feature = "wasm-threads")))]
+        let trace_row_cells = &mut *edit_script_row;
+        #[cfg(not(all(target_arch = "wasm32", not(feature = "wasm-threads"))))]
+        let trace_row_cells = edit_script_row.as_mut_slice();
         for b_index in first_b_index..b_size {
             let sc = get_s(s_seq, b_index, len2, reverse);
             // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_gapalign.c:569-575
@@ -2770,8 +2802,8 @@ fn extend_gapped_one_direction_with_traceback_ex_with_scratch(
 
             score_val = next_score;
             let row_idx = b_index.saturating_sub(orig_b_index);
-            if row_idx < edit_script_row.len() {
-                edit_script_row[row_idx] = script;
+            if row_idx < trace_row_cells.len() {
+                trace_row_cells[row_idx] = script;
             }
         }
 

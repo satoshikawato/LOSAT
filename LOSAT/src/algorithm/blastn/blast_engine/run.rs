@@ -9280,6 +9280,22 @@ fn run_internal(args: BlastnArgs, mut in_memory: Option<BlastnInMemoryRun<'_>>) 
                 any(not(target_arch = "wasm32"), feature = "wasm-threads")
             ))]
             let mut speculative_results = Vec::new();
+            // NCBI reference: c++/src/algo/blast/core/blast_traceback.c:403-405,509-513,598-601
+            // ```c
+            // if (!BlastIntervalTreeContainsHSP(tree, hsp, query_info, ...)) {
+            //     BLAST_GappedAlignmentWithTraceback(...);
+            //     ...
+            //     BlastIntervalTreeAddHSP(hsp, tree, query_info, eQueryAndSubject);
+            // }
+            // ```
+            // Scheduling only; ordered containment and insertion stay unchanged.
+            // Serial Wasm compiles out the speculative path and retains batch 8.
+            const SPECULATIVE_TRACEBACK_BATCH_SIZE: usize =
+                if cfg!(all(target_arch = "wasm32", not(feature = "wasm-threads"))) {
+                    8
+                } else {
+                    16
+                };
             for prelim_index in 0..prelim_hits.len() {
                 // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_traceback.c:403-405,436-472,583-612
                 // ```c
@@ -9295,8 +9311,9 @@ fn run_internal(args: BlastnArgs, mut in_memory: Option<BlastnInMemoryRun<'_>>) 
                     feature = "parallel",
                     any(not(target_arch = "wasm32"), feature = "wasm-threads")
                 ))]
-                if speculative_traceback && prelim_index % 8 == 0 {
-                    let batch_end = (prelim_index + 8).min(prelim_hits.len());
+                if speculative_traceback && prelim_index % SPECULATIVE_TRACEBACK_BATCH_SIZE == 0 {
+                    let batch_end =
+                        (prelim_index + SPECULATIVE_TRACEBACK_BATCH_SIZE).min(prelim_hits.len());
                     let jobs: Vec<_> = (prelim_index..batch_end)
                         .filter(|&index| {
                             let p = &prelim_hits[index];
@@ -9555,7 +9572,8 @@ fn run_internal(args: BlastnArgs, mut in_memory: Option<BlastnInMemoryRun<'_>>) 
                         // Endpoint replacement can invalidate batch-start containment. A newly eligible
                         // HSP therefore runs the unchanged DP here, at its original sequential position.
                         let precomputed = if speculative_traceback {
-                            speculative_results[prelim_index % 8].take()
+                            speculative_results[prelim_index % SPECULATIVE_TRACEBACK_BATCH_SIZE]
+                                .take()
                         } else {
                             None
                         };

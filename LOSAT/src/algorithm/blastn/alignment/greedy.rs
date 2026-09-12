@@ -2130,6 +2130,17 @@ fn ncbi2na_unpack_base(byte: u8, pos: u8) -> u8 {
 
 /// Find first mismatch with fence detection.
 /// NCBI reference: ncbi-blast/c++/src/algo/blast/core/greedy_align.c:297-375 (s_FindFirstMismatch)
+// NCBI reference: ncbi-blast/c++/src/algo/blast/core/greedy_align.c:313-317
+// ```c
+// static NCBI_INLINE Int4 s_FindFirstMismatch(const Uint1 *seq1, const Uint1 *seq2,
+//                                 Int4 len1, Int4 len2,
+//                                 Int4 seq1_index, Int4 seq2_index,
+//                                 Boolean *fence_hit,
+//                                 Boolean reverse, Uint1 rem)
+// ```
+// Keep the short mismatch scans in the recurrence to avoid a call boundary
+// for each surviving diagonal, as intended by NCBI_INLINE.
+#[inline(always)]
 fn find_first_mismatch_greedy(
     seq1: &[u8],
     seq2: &[u8],
@@ -2470,17 +2481,34 @@ fn blast_greedy_align(
             (d & 1) as usize
         };
 
-        // NCBI reference: ncbi-blast/c++/src/algo/blast/core/greedy_align.c:514-517
+        // NCBI reference: ncbi-blast/c++/src/algo/blast/core/greedy_align.c:548-550,657-678
+        // ```c
+        // seq2_index = MAX(last_seq2_off[d - 1][k + 1],
+        //                  last_seq2_off[d - 1][k]) + 1;
+        // seq2_index = MAX(seq2_index, last_seq2_off[d - 1][k - 1]);
+        // if (edit_block == NULL) last_seq2_off[d + 1] = last_seq2_off[d - 1];
+        // ```
+        // Consecutive distances use distinct rows, including the two rolling
+        // rows without traceback. Borrow their descriptors once per distance.
+        let (previous_row, current_row) = if prev_row_idx < row_idx {
+            let (before, after) = last_seq2_off.split_at_mut(row_idx);
+            (&mut before[prev_row_idx], &mut after[0])
+        } else {
+            let (before, after) = last_seq2_off.split_at_mut(prev_row_idx);
+            (&mut after[0], &mut before[row_idx])
+        };
+
+        // NCBI reference: ncbi-blast/c++/src/algo/blast/core/greedy_align.c:523-526
         // ```c
         // last_seq2_off[d - 1][diag_lower-1] = kInvalidOffset;
         // last_seq2_off[d - 1][diag_lower] = kInvalidOffset;
         // last_seq2_off[d - 1][diag_upper] = kInvalidOffset;
         // last_seq2_off[d - 1][diag_upper+1] = kInvalidOffset;
         // ```
-        last_seq2_off[prev_row_idx].set(diag_lower - 1, INVALID_OFFSET);
-        last_seq2_off[prev_row_idx].set(diag_lower, INVALID_OFFSET);
-        last_seq2_off[prev_row_idx].set(diag_upper, INVALID_OFFSET);
-        last_seq2_off[prev_row_idx].set(diag_upper + 1, INVALID_OFFSET);
+        previous_row.set(diag_lower - 1, INVALID_OFFSET);
+        previous_row.set(diag_lower, INVALID_OFFSET);
+        previous_row.set(diag_upper, INVALID_OFFSET);
+        previous_row.set(diag_upper + 1, INVALID_OFFSET);
 
         let xdrop_score = {
             let raw = non_affine_mem.max_score[d as usize] + (match_cost + mismatch_cost) * d
@@ -2488,20 +2516,41 @@ fn blast_greedy_align(
             ((raw as f64) / (match_cost as f64 / 2.0)).ceil() as i32
         };
 
-        for k_val in tmp_diag_lower..=tmp_diag_upper {
-            k = k_val;
-            seq2_index = last_seq2_off[prev_row_idx]
-                .get(k + 1)
-                .max(last_seq2_off[prev_row_idx].get(k))
-                + 1;
-            seq2_index = seq2_index.max(last_seq2_off[prev_row_idx].get(k - 1));
+        // NCBI reference: ncbi-blast/c++/src/algo/blast/core/greedy_align.c:537-550,562,589,673-678
+        // ```c
+        // for (k = tmp_diag_lower; k <= tmp_diag_upper; k++) {
+        //     seq2_index = MAX(last_seq2_off[d - 1][k + 1],
+        //                      last_seq2_off[d - 1][k]) + 1;
+        //     seq2_index = MAX(seq2_index, last_seq2_off[d - 1][k - 1]);
+        //     /* ... */ last_seq2_off[d][k] = kInvalidOffset;
+        //     /* ... */ last_seq2_off[d][k] = seq2_index;
+        // }
+        // last_seq2_off[d + 1] = (Int4*) s_GetMBSpace(mem_pool,
+        //                          (diag_upper - diag_lower + 7) / 3);
+        // last_seq2_off[d + 1] = last_seq2_off[d + 1] - diag_lower + 2;
+        // ```
+        // Each allocated row covers its band plus two cells on each side;
+        // the next band expands by at most one. The previous slice therefore
+        // includes every k-1/k/k+1, and the current slice every writable k.
+        // Check these ranges once without changing lengths, cells or storage.
+        let band_len = (tmp_diag_upper - tmp_diag_lower + 1) as usize;
+        let previous_start = (tmp_diag_lower - 1 - previous_row.origin) as usize;
+        let current_start = (tmp_diag_lower - current_row.origin) as usize;
+        let previous = &previous_row.values[previous_start..previous_start + band_len + 2];
+        let current = &mut current_row.values[current_start..current_start + band_len];
+        for (cell_index, (previous, cell)) in
+            previous.windows(3).zip(current.iter_mut()).enumerate()
+        {
+            k = tmp_diag_lower + cell_index as i32;
+            seq2_index = previous[2].max(previous[1]) + 1;
+            seq2_index = seq2_index.max(previous[0]);
             seq1_index = seq2_index + k - diag_origin;
 
             if seq2_index < 0 || seq1_index + seq2_index < xdrop_score {
                 if k == diag_lower {
                     diag_lower += 1;
                 } else {
-                    last_seq2_off[row_idx].set(k, INVALID_OFFSET);
+                    *cell = INVALID_OFFSET;
                 }
                 continue;
             }
@@ -2524,7 +2573,7 @@ fn blast_greedy_align(
             seq1_index += index;
             seq2_index += index;
 
-            last_seq2_off[row_idx].set(k, seq2_index);
+            *cell = seq2_index;
 
             if seq1_index + seq2_index > curr_extent {
                 curr_extent = seq1_index + seq2_index;

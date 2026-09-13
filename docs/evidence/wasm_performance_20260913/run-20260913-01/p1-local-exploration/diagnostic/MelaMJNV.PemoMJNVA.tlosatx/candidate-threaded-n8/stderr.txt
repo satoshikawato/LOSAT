@@ -1,0 +1,2 @@
+[losat-wasi-threads] shared-memory guards: 125 fills, 1233 copies
+Error: unsupported num_threads=8: this build does not support parallel search

@@ -1,0 +1,32 @@
+{
+  "run_id": "e8e05e422feb4c5d8318ca71e863c168",
+  "status": "PASS",
+  "ordered_argv": [
+    "/mnt/c/Users/genom/GitHub/LOSAT/docs/evidence/wasm_performance_20260913/run-20260913-01/final-build/artifacts/LOSAT",
+    "blastp",
+    "-query",
+    "/mnt/c/Users/genom/GitHub/LOSAT/LOSAT/tests/fasta/SicyWSV.faa",
+    "-subject",
+    "/mnt/c/Users/genom/GitHub/LOSAT/LOSAT/tests/fasta/CoBV.faa",
+    "-outfmt",
+    "6",
+    "-num_threads",
+    "1",
+    "-out",
+    "/mnt/c/Users/genom/GitHub/LOSAT/docs/evidence/wasm_performance_20260913/run-20260913-01/p4-simple/losat_out/SicyWSV.CoBV.losatp.out"
+  ],
+  "output": "/mnt/c/Users/genom/GitHub/LOSAT/docs/evidence/wasm_performance_20260913/run-20260913-01/p4-simple/losat_out/SicyWSV.CoBV.losatp.out",
+  "cwd": "/mnt/c/Users/genom/GitHub/LOSAT/LOSAT/tests",
+  "argv_sha256": "7be505b5cd6027427071c489479eef72f7ea7a2af220e82cec0055de4c2f9b32",
+  "oracle_version": null,
+  "files": {
+    "/mnt/c/Users/genom/GitHub/LOSAT/docs/evidence/wasm_performance_20260913/run-20260913-01/final-build/artifacts/LOSAT": "834a99ed11f6a4415df6f119d11736a16e50515d1f0f851fda9a3f687688a35f",
+    "/mnt/c/Users/genom/GitHub/LOSAT/LOSAT/tests/fasta/SicyWSV.faa": "0d44dd510387bd2b7dbb4d7fc5642aa9afb48f68a2a98b942291368908de13ef",
+    "/mnt/c/Users/genom/GitHub/LOSAT/LOSAT/tests/fasta/CoBV.faa": "505e1378f1c38b7497b4d45cb96917daaebccdf2037586983decde9365af76e7"
+  },
+  "started_utc": "2026-09-13T09:55:21Z",
+  "exit_status": 0,
+  "output_sha256": "2e6448cfedbf825f939a66374ccfefcf9dec8351b09351a84fd3680a0cac3b0c",
+  "log_sha256": "b671a37c711d85d596175463a2e165f76c9975828937abc8eb087db6fa4108ee",
+  "ended_utc": "2026-09-13T09:55:22Z"
+}

@@ -1,0 +1,26 @@
+{
+  "files": {
+    "LOSAT/tests/comparison_data.py": "742da1d0ed6924d9f194e9623878100215c4c3508101b7ca49b64b46b797876d",
+    "LOSAT/tests/run_comparison.sh": "f8591f2cd4c73b3f815e59582e08552d37450558b9378a2e1798f8ab963de901",
+    "LOSAT/tests/test_simple_comparison.py": "ef21350f869bd3fec010dec80ca1b3cda5775ad6b69156969886c5eebc171dc5",
+    "LOSAT/tests/README.md": "6f2fbdc2404a5983cacd8a00d3f37bfa99eb0479f6211555e8b17ae31ac0e02a",
+    "docs/wasm_performance_optimization_plan_20260913.md": "c79691f35dc12943836e184d95b4d926e22262187f7aeb56c2938c3e9bc74fc1"
+  },
+  "archive_sha256": "14c93f21d88421f96dc50fbd64fd8ee666a4ec0110ba797b3260a110979fc8ed",
+  "changes_by_category": {
+    "production": [],
+    "comparison_config": [
+      "LOSAT/tests/comparison_data.py",
+      "LOSAT/tests/run_comparison.sh"
+    ],
+    "tests": [
+      "LOSAT/tests/test_simple_comparison.py"
+    ],
+    "documentation": [
+      "LOSAT/tests/README.md",
+      "docs/wasm_performance_optimization_plan_20260913.md"
+    ],
+    "generated_evidence": "this run directory"
+  },
+  "comment_only_after_tests": "Corrected the new argv-manifest test reference comment to the inspected NCBI cmdline_flags.cpp snippet. Executable Python is unchanged from 39-test PASS."
+}

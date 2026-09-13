@@ -1,0 +1,11 @@
+{
+  "status": "ACCEPTED",
+  "scope": "run_comparison.sh and run_wasm_comparison.sh cold TBLASTX Node/WASI launch profile",
+  "gate_evaluation": "tblastx-evaluation.json",
+  "policy": "tblastx-policy.json",
+  "independent_read_only_auditor": "/root/audit_measurement (ncbi_parity_auditor)",
+  "auditor_result": "Supports limited compilation-profile acceptance; raw/argv/clock/memory/source lineage checked. Legacy boottime unavailable; detailed worker events are diagnostic-only.",
+  "production_rust_integrated": false,
+  "runtime_host_js_modified": false,
+  "formal_release_parity": "PARTIAL; unchanged prior megablast findings and incomplete gates"
+}

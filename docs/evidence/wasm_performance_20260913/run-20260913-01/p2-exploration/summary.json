@@ -1,0 +1,138 @@
+[
+  {
+    "case_id": "MelaMJNV.PemoMJNVA.losatn.blastn",
+    "version": "baseline",
+    "kind": "threaded",
+    "threads": 1,
+    "boundary": "cold-process",
+    "median_seconds": 0.8887927340110764,
+    "min_seconds": 0.7662478010170162,
+    "max_seconds": 0.8945983480080031,
+    "samples": [
+      0.7662478010170162,
+      0.8945983480080031,
+      0.8887927340110764
+    ],
+    "peak_rss_bytes": 135000064,
+    "raw_output_sha256": "f7264639f1f1aa9b25e43e7da0cef44a40951de43b9ab9bc60cec3f565966b99"
+  },
+  {
+    "case_id": "MelaMJNV.PemoMJNVA.losatn.blastn",
+    "version": "baseline",
+    "kind": "threaded",
+    "threads": 8,
+    "boundary": "cold-process",
+    "median_seconds": 0.7863430439902004,
+    "min_seconds": 0.7185930840205401,
+    "max_seconds": 0.7901271049922798,
+    "samples": [
+      0.7185930840205401,
+      0.7863430439902004,
+      0.7901271049922798
+    ],
+    "peak_rss_bytes": 275615744,
+    "raw_output_sha256": "f7264639f1f1aa9b25e43e7da0cef44a40951de43b9ab9bc60cec3f565966b99"
+  },
+  {
+    "case_id": "MelaMJNV.PemoMJNVA.losatn.blastn",
+    "version": "candidate",
+    "kind": "threaded",
+    "threads": 1,
+    "boundary": "cold-process",
+    "median_seconds": 0.9037495820084587,
+    "min_seconds": 0.8318368969776202,
+    "max_seconds": 0.9072804079914931,
+    "samples": [
+      0.8318368969776202,
+      0.9072804079914931,
+      0.9037495820084587
+    ],
+    "peak_rss_bytes": 136404992,
+    "raw_output_sha256": "f7264639f1f1aa9b25e43e7da0cef44a40951de43b9ab9bc60cec3f565966b99"
+  },
+  {
+    "case_id": "MelaMJNV.PemoMJNVA.losatn.blastn",
+    "version": "candidate",
+    "kind": "threaded",
+    "threads": 8,
+    "boundary": "cold-process",
+    "median_seconds": 0.9335622919898015,
+    "min_seconds": 0.879921966989059,
+    "max_seconds": 0.9542964640131686,
+    "samples": [
+      0.879921966989059,
+      0.9335622919898015,
+      0.9542964640131686
+    ],
+    "peak_rss_bytes": 283004928,
+    "raw_output_sha256": "f7264639f1f1aa9b25e43e7da0cef44a40951de43b9ab9bc60cec3f565966b99"
+  },
+  {
+    "case_id": "MjPMNV.MlPMNV.losatn.blastn",
+    "version": "baseline",
+    "kind": "threaded",
+    "threads": 1,
+    "boundary": "cold-process",
+    "median_seconds": 20.88262938099797,
+    "min_seconds": 19.396721019991674,
+    "max_seconds": 21.108295629994245,
+    "samples": [
+      19.396721019991674,
+      21.108295629994245,
+      20.88262938099797
+    ],
+    "peak_rss_bytes": 200863744,
+    "raw_output_sha256": "9a30fc9c61c4eb33d79c638ce62a330884d1330f56e4ba4f49d54b6547228603"
+  },
+  {
+    "case_id": "MjPMNV.MlPMNV.losatn.blastn",
+    "version": "baseline",
+    "kind": "threaded",
+    "threads": 8,
+    "boundary": "cold-process",
+    "median_seconds": 11.983701096993173,
+    "min_seconds": 11.07185263899737,
+    "max_seconds": 12.31309867001255,
+    "samples": [
+      11.07185263899737,
+      12.31309867001255,
+      11.983701096993173
+    ],
+    "peak_rss_bytes": 346943488,
+    "raw_output_sha256": "9a30fc9c61c4eb33d79c638ce62a330884d1330f56e4ba4f49d54b6547228603"
+  },
+  {
+    "case_id": "MjPMNV.MlPMNV.losatn.blastn",
+    "version": "candidate",
+    "kind": "threaded",
+    "threads": 1,
+    "boundary": "cold-process",
+    "median_seconds": 21.32881247898331,
+    "min_seconds": 19.455658295977628,
+    "max_seconds": 21.418208414979745,
+    "samples": [
+      19.455658295977628,
+      21.418208414979745,
+      21.32881247898331
+    ],
+    "peak_rss_bytes": 189173760,
+    "raw_output_sha256": "9a30fc9c61c4eb33d79c638ce62a330884d1330f56e4ba4f49d54b6547228603"
+  },
+  {
+    "case_id": "MjPMNV.MlPMNV.losatn.blastn",
+    "version": "candidate",
+    "kind": "threaded",
+    "threads": 8,
+    "boundary": "cold-process",
+    "median_seconds": 11.021612479002215,
+    "min_seconds": 10.834536615002435,
+    "max_seconds": 11.917518351983745,
+    "samples": [
+      10.834536615002435,
+      11.021612479002215,
+      11.917518351983745
+    ],
+    "peak_rss_bytes": 357466112,
+    "raw_output_sha256": "9a30fc9c61c4eb33d79c638ce62a330884d1330f56e4ba4f49d54b6547228603"
+  }
+]

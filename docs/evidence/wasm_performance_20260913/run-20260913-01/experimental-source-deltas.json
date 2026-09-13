@@ -1,0 +1,36 @@
+{
+  "diagnostic": {
+    "archive": "diagnostic-source-delta.tar.gz",
+    "sha256": "5fc2a665f645fedc028bc45e157b8ef4d9eac7b5aa3745c9e2d62c5e7f9f5607",
+    "base_archive": "baseline-source-v2.tar.gz",
+    "files": {
+      "LOSAT/src/algorithm/blastn/alignment/gapped.rs": "0a16c18d311acaf94f615adf9fc26649abadf34d4535ac3bd6f44b38e620b7c5",
+      "LOSAT/src/algorithm/blastn/blast_engine/run.rs": "fbf0480dd206a62996bd800defd1f19efc9d7069c67a763768b011b2a10db7e7",
+      "LOSAT/src/algorithm/blastp/blast_engine.rs": "deea62dee4e682b3f4154e02c764900f8dcad42ac263ac37726a419ec263830e"
+    }
+  },
+  "p1-candidate": {
+    "archive": "p1-candidate-source-delta.tar.gz",
+    "sha256": "1cc77016a5f99c638c2c0683f0538d04bd04cad5f2059d7923decab5e91937d9",
+    "base_archive": "baseline-source-v2.tar.gz",
+    "files": {
+      "LOSAT/src/algorithm/tblastx/sum_stats_linking/linking.rs": "c892f44f4ff297c47c9d04c9f3f66a035695f6b5fec2c470747ca2b475915dd4"
+    }
+  },
+  "p2-candidate": {
+    "archive": "p2-candidate-source-delta.tar.gz",
+    "sha256": "b5f2f66832a21c4634c39dc64246da1254ab75d1d0689c6ef4bbada429c26e89",
+    "base_archive": "baseline-source-v2.tar.gz",
+    "files": {
+      "LOSAT/src/algorithm/blastn/blast_engine/run.rs": "c75df4ba6e09e0e865caad920f94cd2f4a686d6b76746916c284d1c107b3e81e"
+    }
+  },
+  "p3-candidate": {
+    "archive": "p3-candidate-source-delta.tar.gz",
+    "sha256": "76f52e276a52ef04dc696ff34e6d708501a8af407d6c871bf30428898511a5a9",
+    "base_archive": "baseline-source-v2.tar.gz",
+    "files": {
+      "LOSAT/src/algorithm/blastp/gapalign.rs": "c96595286f2578706fee109a22539370d16089339c89c2035cabf3956b02ebc2"
+    }
+  }
+}

@@ -1,0 +1,70 @@
+[
+  {
+    "case_id": "AP027078.AP027131.losatp",
+    "version": "baseline",
+    "kind": "threaded",
+    "threads": 8,
+    "boundary": "cold-process",
+    "median_seconds": 6.4261558370199054,
+    "min_seconds": 6.248779496003408,
+    "max_seconds": 6.455740119999973,
+    "samples": [
+      6.4261558370199054,
+      6.248779496003408,
+      6.455740119999973
+    ],
+    "peak_rss_bytes": 306745344,
+    "raw_output_sha256": "5bdaa58908a96768c26c329ade49a97d4e2d705895e457709eae094b14c708d4"
+  },
+  {
+    "case_id": "AP027078.AP027131.losatp",
+    "version": "candidate",
+    "kind": "threaded",
+    "threads": 8,
+    "boundary": "cold-process",
+    "median_seconds": 6.630151662015123,
+    "min_seconds": 6.535600668983534,
+    "max_seconds": 7.15908959400258,
+    "samples": [
+      7.15908959400258,
+      6.535600668983534,
+      6.630151662015123
+    ],
+    "peak_rss_bytes": 313479168,
+    "raw_output_sha256": "5bdaa58908a96768c26c329ade49a97d4e2d705895e457709eae094b14c708d4"
+  },
+  {
+    "case_id": "AP027132.NZ_CP006932.losatp",
+    "version": "baseline",
+    "kind": "threaded",
+    "threads": 8,
+    "boundary": "cold-process",
+    "median_seconds": 9.580418079014635,
+    "min_seconds": 9.297015107993502,
+    "max_seconds": 9.802849689003779,
+    "samples": [
+      9.802849689003779,
+      9.580418079014635,
+      9.297015107993502
+    ],
+    "peak_rss_bytes": 323690496,
+    "raw_output_sha256": "cd81f8fef3dff78fb48f5923de43c84f1af78d006aaa9a8cae2c2f1f20aed181"
+  },
+  {
+    "case_id": "AP027132.NZ_CP006932.losatp",
+    "version": "candidate",
+    "kind": "threaded",
+    "threads": 8,
+    "boundary": "cold-process",
+    "median_seconds": 9.647522312996443,
+    "min_seconds": 9.603479092009366,
+    "max_seconds": 9.79104264700436,
+    "samples": [
+      9.79104264700436,
+      9.603479092009366,
+      9.647522312996443
+    ],
+    "peak_rss_bytes": 323796992,
+    "raw_output_sha256": "cd81f8fef3dff78fb48f5923de43c84f1af78d006aaa9a8cae2c2f1f20aed181"
+  }
+]

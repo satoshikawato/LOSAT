@@ -1,0 +1,4 @@
+[losat-thread-pool] program=tblastx requested_threads=1 pool_threads=0 caller_participates=false measured_activity=null
+[losat-thread-stage] program=tblastx stage=subjects work_items=1 parallel_selected=false measured_activity=null
+[losat-thread-stage] program=tblastx stage=linking work_items=4 parallel_selected=false measured_activity=null
+[losat-thread-stage] program=tblastx stage=linking work_items=4 parallel_selected=false measured_activity=null

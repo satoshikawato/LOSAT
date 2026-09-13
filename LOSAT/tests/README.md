@@ -2,9 +2,10 @@
 
 Use `run_comparison.sh` and the three `plot_*.py` scripts for everyday checks.
 They share the 45 historical pairs in `comparison_cases.tsv` (TBLASTX, Megablast,
-BLASTN and BLASTP), and write the existing `.out` / Bash `time` `.log` files.
-No performance manifest, profiling phase, warm worker or certification run is
-needed. `wasm_performance.py` remains available for detailed performance work.
+BLASTN and BLASTP), and retain the familiar `.out` / Bash `time` `.log` filenames inside a fresh run
+directory. A small `run.json` and per-output `.run.json` bind status, argv and
+file hashes to that run. `wasm_performance.py` remains available for detailed
+performance work; these quick checks do not require profiling or certification.
 
 From the repository root:
 
@@ -15,6 +16,7 @@ cargo build --release --bin LOSAT --target wasm32-wasip1 --no-default-features -
 cargo build --release --bin LOSAT --target wasm32-wasip1-threads --features wasm-threads --target-dir target/threaded-command
 cd tests
 
+export BENCHMARK_DIR="$(mktemp -d /tmp/losat-comparison.XXXXXX)/run"
 ./run_comparison.sh
 ./plot_overall_trend.py
 ./plot_comparison.py
@@ -27,14 +29,19 @@ LTS version, such as Node 24), NCBI BLAST+ (`blastn`, `blastp`,
 `--bin LOSAT` builds the command artifact with `_start`; library Wasm artifacts
 cannot run these CLI comparisons. Missing or incorrect artifacts fail explicitly.
 
-To add only Wasm results to existing native/NCBI results:
+To compare Wasm with a fresh NCBI oracle without running native LOSAT:
 
 ```bash
-./run_wasm_comparison.sh
+export BENCHMARK_DIR="$(mktemp -d /tmp/losat-comparison.XXXXXX)/run"
+RUN_NATIVE=0 ./run_comparison.sh
 ./plot_overall_trend.py
 ./plot_comparison.py
 ./plot_execution_time.py
 ```
+
+`run_wasm_comparison.sh` collects Wasm-only diagnostics in a new directory.
+Without a matching fresh oracle, those results are not eligible for comparison
+plots. Separate invocations cannot append results to an existing run.
 
 To run LOSATN/BLASTN and LOSATP/BLASTP without TBLASTX, select both nucleotide
 tasks (`megablast` and `blastn`) and the protein task (`blastp`):
@@ -54,7 +61,7 @@ To run a small selection and keep previous results intact, use the same exported
 settings for execution and plotting:
 
 ```bash
-export BENCHMARK_DIR="$(mktemp -d /tmp/losat-comparison.XXXXXX)"
+export BENCHMARK_DIR="$(mktemp -d /tmp/losat-comparison.XXXXXX)/run"
 export BENCHMARK_PROGRAMS=blastp
 export BENCHMARK_CASE=WSSV.PajaWSV
 export LOSAT_THREADS=4
@@ -75,20 +82,48 @@ command immediately (SIGTERM, shell exit 143), including while its main thread
 waits inside Wasm. Both Wasm runners preserve explicit WASI exit codes. The outer
 timeout still covers failures that cannot reach a JavaScript error handler.
 Relative `BENCHMARK_DIR` paths resolve from this `tests` directory, even when
-the scripts are launched elsewhere. Without `BENCHMARK_DIR`, selected results
-in `tests/losat_out`, `tests/blast_out` and `tests/plots` are overwritten.
+the scripts are launched elsewhere. The destination must not already exist. Without `BENCHMARK_DIR`, the runner
+creates a directory under `tests/benchmark-runs/` and prints its path; export
+that path as `BENCHMARK_DIR` before plotting. Existing run files are preserved.
 
 `RUN_LOSAT_WASM=0 ./run_comparison.sh` runs native and NCBI only.
 `RUN_LOSAT_WASM_THREADED=0` disables threaded Wasm. `RUN_NATIVE=0` and
-`RUN_NCBI=0` disable those runners. Plotting discovers available result files;
-these runner switches do not hide previously collected series. Use a fresh
-`BENCHMARK_DIR` to isolate a new run. See `./run_comparison.sh --help` for binary
+`RUN_NCBI=0` disable those runners. Plotting admits only successful outputs with matching run metadata, argv,
+log and output hashes. Runner switches do not import results from older runs. See `./run_comparison.sh --help` for binary
 overrides and optional Wasm build switches.
 
 The script uses `node` from your current `PATH`; it does not install or pin Node.
 Set `NODE_BIN=/path/to/node` to select a different executable for both serial and
-threaded Wasm. At startup it prints the actual Node/V8 versions, executable path,
-and Wasm file paths/modification times. When building Wasm it also prints the
+threaded Wasm. `run_comparison.sh` and `run_wasm_comparison.sh` now add
+`--no-liftoff --no-wasm-tier-up` **only for TBLASTX**. This TurboFan compilation
+profile was verified on Node 24.21.0 / V8 13.6.233.17-node.53. Five measured cold
+runs per condition gave 6.56 → 4.44 seconds on the primary n8 fixture; two
+preserved controls gave about 2.8× speedups. Peak process RSS increased by about
+28, 47 and 37 MiB respectively. The TBLASTX memory tradeoff was explicitly accepted;
+BLASTN and BLASTP retain their common Node settings. See the
+[follow-up evidence](../../docs/evidence/wasm_performance_20260913/run-20260913-02/REPORT.md)
+for the exact fixtures, historical measurement limits and acceptance policy.
+
+Set `NODE_TBLASTX_ARGS_JSON='[]'` to disable the TBLASTX additions, including when
+collecting an ordinary-compilation baseline. `NODE_ARGS_JSON='[]'` supplies common
+Node arguments for all programs; TBLASTX-specific arguments follow them. Both
+variables require JSON arrays of strings. The run manifest records the effective
+argv by program, and each result records the actual ordered command.
+
+These defaults belong to the comparison scripts. Direct Node invocations must
+supply the flags before the runner script, for example:
+
+```bash
+"$NODE_BIN" --no-liftoff --no-wasm-tier-up run_losat_wasi_threads.js \
+  "$LOSAT_WASM_THREADED_BIN" tblastx -query fasta/MelaMJNV.fasta \
+  -subject fasta/PemoMJNVA.fasta -outfmt 6 -num_threads 8 -out /tmp/tblastx.out
+```
+
+The measured improvement applies to cold Node/WASI launches. It does not establish
+a browser speedup or the same gain for reused modules/reactors. Unsupported flags
+fail explicitly; there is no silent fallback to a different compilation mode.
+At startup the comparison script prints the actual Node/V8 versions, executable
+path, and Wasm file paths/modification times. When building Wasm it also prints the
 Rust/Cargo versions. Rust compiles the release Wasm artifacts; Node executes them.
 
 The threaded runner applies a shared-memory compatibility guard for all search
@@ -142,8 +177,10 @@ compilation**, with no warmup. Thread counts are requested counts; they are not
 measurements of active workers. These plots are quick diagnostics, not release
 certification or repeated-sample speed claims. `plots/execution_times.tsv`
 contains the plotted seconds and source log paths. New logs record exit status;
-failed or interrupted runs are excluded. Old logs without exit status can still be plotted but
-cannot retrospectively prove successful execution.
+failed or interrupted runs are excluded. Old logs without explicit successful
+status and matching provenance are historical evidence only and cannot be
+plotted as current results. Timing bars additionally require exact raw equality
+with the same run's NCBI oracle, including lexical numeric formatting.
 
 Per-pair plots accept any available LOSAT series with NCBI. Overall distributions
 use only the intersection of pairs available across the series present in each

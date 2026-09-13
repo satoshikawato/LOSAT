@@ -1,0 +1,28 @@
+{
+  "argv": [
+    "/home/kawato/micromamba/bin/makeblastdb",
+    "-in",
+    "/mnt/c/Users/genom/GitHub/LOSAT/LOSAT/tests/fasta/AP027133.fasta",
+    "-dbtype",
+    "nucl",
+    "-parse_seqids",
+    "-out",
+    "/mnt/c/Users/genom/GitHub/LOSAT/docs/evidence/wasm_performance_20260913/run-20260913-01/p1-long/oracle-db/AP027131.AP027133.tlosatx"
+  ],
+  "exit_status": 0,
+  "tool_sha256": "407bf59ec36ee6444104a90f28eab282e374a0dfe4c7ffee89a65d82dc51c4bf",
+  "input_sha256": "fb47f4339e55347a9693dda49a0989ec2946fa9170a21cea7d418e3e95adeb3a",
+  "tool_version": "makeblastdb: 2.17.0+\n Package: blast 2.17.0, build Aug 11 2025 09:46:06",
+  "database_files": {
+    "/mnt/c/Users/genom/GitHub/LOSAT/docs/evidence/wasm_performance_20260913/run-20260913-01/p1-long/oracle-db/AP027131.AP027133.tlosatx.ndb": "ec9debe11db002e53cedbe775afcab747ce4473493921bb6708139acc8e0b6df",
+    "/mnt/c/Users/genom/GitHub/LOSAT/docs/evidence/wasm_performance_20260913/run-20260913-01/p1-long/oracle-db/AP027131.AP027133.tlosatx.nhr": "725c7f70bfce4580ab7f1cc6c32f75fa3899cdc03387f742068082145385a962",
+    "/mnt/c/Users/genom/GitHub/LOSAT/docs/evidence/wasm_performance_20260913/run-20260913-01/p1-long/oracle-db/AP027131.AP027133.tlosatx.nin": "6ee1f72b3ed630466bbe7ac1fb315c379858639bda765d261d99fee6c833d1a6",
+    "/mnt/c/Users/genom/GitHub/LOSAT/docs/evidence/wasm_performance_20260913/run-20260913-01/p1-long/oracle-db/AP027131.AP027133.tlosatx.njs": "b7c525152fc12a52f294650f25c10740a790add78bc2b168350a7132b974a0e2",
+    "/mnt/c/Users/genom/GitHub/LOSAT/docs/evidence/wasm_performance_20260913/run-20260913-01/p1-long/oracle-db/AP027131.AP027133.tlosatx.nog": "b31ad5df85471fcfc39c04f43c7ff3cf90f86afe7e9d1b6e554cf442ce107cc4",
+    "/mnt/c/Users/genom/GitHub/LOSAT/docs/evidence/wasm_performance_20260913/run-20260913-01/p1-long/oracle-db/AP027131.AP027133.tlosatx.nos": "2bfec199113c0d3b7185df23a388f644a012a671c366e448c2952bb80da2f0a5",
+    "/mnt/c/Users/genom/GitHub/LOSAT/docs/evidence/wasm_performance_20260913/run-20260913-01/p1-long/oracle-db/AP027131.AP027133.tlosatx.not": "e2099cbf3445ac30a98dcc86f0b899eac91fd0a23cf2825f48bd01daadee347a",
+    "/mnt/c/Users/genom/GitHub/LOSAT/docs/evidence/wasm_performance_20260913/run-20260913-01/p1-long/oracle-db/AP027131.AP027133.tlosatx.nsq": "f3d371ba85e74ab942d226bbbbd0612636ee85de896343b18060cd15602fc6e0",
+    "/mnt/c/Users/genom/GitHub/LOSAT/docs/evidence/wasm_performance_20260913/run-20260913-01/p1-long/oracle-db/AP027131.AP027133.tlosatx.ntf": "67982e4d7b1490b09cce06e7c29175c6bd011cd542cfacb1a1c310084a50821a",
+    "/mnt/c/Users/genom/GitHub/LOSAT/docs/evidence/wasm_performance_20260913/run-20260913-01/p1-long/oracle-db/AP027131.AP027133.tlosatx.nto": "7c9fa136d4413fa6173637e883b6998d32e1d675f88cddff9dcbcf331820f4b8"
+  }
+}

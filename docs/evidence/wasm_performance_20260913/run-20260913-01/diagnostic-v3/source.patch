@@ -1,0 +1,192 @@
+--- a/LOSAT/src/algorithm/blastn/blast_engine/run.rs
++++ b/LOSAT/src/algorithm/blastn/blast_engine/run.rs
+@@ -8988,6 +8988,13 @@
+                 feature = "parallel",
+                 any(not(target_arch = "wasm32"), feature = "wasm-threads")
+             ))]
++            let scratch_started = timing_enabled.then(std::time::Instant::now);
++            // NCBI reference: c++/src/algo/blast/core/blast_traceback.c:403-405,509-512,598-601
++            // if (!BlastIntervalTreeContainsHSP(tree, hsp, query_info, ...)) {
++            //     BLAST_GappedAlignmentWithTraceback(...); ... BlastIntervalTreeAddHSP(...);
++            // }
++            // Diagnostic-only ordered replay and slot timing; search state is unchanged.
++            #[cfg(all(feature = "parallel", any(not(target_arch = "wasm32"), feature = "wasm-threads")))]
+             let mut speculative_scratch: Vec<_> = if speculative_traceback {
+                 (0..num_threads).map(|_| GapAlignScratch::new()).collect()
+             } else {
+@@ -8998,6 +9005,21 @@
+                 any(not(target_arch = "wasm32"), feature = "wasm-threads")
+             ))]
+             let mut speculative_results = Vec::new();
++            // NCBI reference: c++/src/algo/blast/core/blast_traceback.c:403-405,509-512,598-601
++            // if (!BlastIntervalTreeContainsHSP(tree, hsp, query_info, ...)) {
++            //     BLAST_GappedAlignmentWithTraceback(...); ... BlastIntervalTreeAddHSP(...);
++            // }
++            // Dedicated diagnostics aggregate slot-local samples only after the subject stage.
++            #[cfg(all(feature = "parallel", any(not(target_arch = "wasm32"), feature = "wasm-threads")))]
++            let mut dp_diagnostics = Vec::new();
++            #[cfg(all(feature = "parallel", any(not(target_arch = "wasm32"), feature = "wasm-threads")))]
++            let mut dp_consumed = 0usize;
++            #[cfg(all(feature = "parallel", any(not(target_arch = "wasm32"), feature = "wasm-threads")))]
++            let mut dp_fallback = 0usize;
++            #[cfg(all(feature = "parallel", any(not(target_arch = "wasm32"), feature = "wasm-threads")))]
++            let scratch_seconds = scratch_started.map(|s| s.elapsed().as_secs_f64()).unwrap_or(0.0);
++            #[cfg(all(feature = "parallel", any(not(target_arch = "wasm32"), feature = "wasm-threads")))]
++            let scratch_initial_capacities: Vec<_> = if timing_enabled { speculative_scratch.iter().map(GapAlignScratch::diagnostic_capacity).collect() } else { Vec::new() };
+             // NCBI reference: c++/src/algo/blast/core/blast_traceback.c:403-405,509-513,598-601
+             // ```c
+             // if (!BlastIntervalTreeContainsHSP(tree, hsp, query_info, ...)) {
+@@ -9032,6 +9054,7 @@
+                 if speculative_traceback && prelim_index % SPECULATIVE_TRACEBACK_BATCH_SIZE == 0 {
+                     let batch_end =
+                         (prelim_index + SPECULATIVE_TRACEBACK_BATCH_SIZE).min(prelim_hits.len());
++                    let batch_started = timing_enabled.then(std::time::Instant::now);
+                     let jobs: Vec<_> = (prelim_index..batch_end)
+                         .filter(|&index| {
+                             let p = &prelim_hits[index];
+@@ -9054,12 +9077,18 @@
+                         .collect();
+                     // NCBI reference: c++/src/algo/blast/core/blast_traceback.c:509-513
+                     // BLAST_GappedAlignmentWithTraceback(...);
++                    // NCBI reference: c++/src/algo/blast/core/blast_engine.c:1659-1668
++                    // /* Use a local diagnostics structure ... */
++                    // The dedicated timing build aggregates stage logging below;
++                    // per-batch stderr I/O is excluded from its measured batches.
++                    if !timing_enabled {
+                     crate::utils::threading::report_stage(
+                         "blastn",
+                         "dp_traceback",
+                         jobs.len(),
+                         jobs.len() > 1,
+                     );
++                    }
+                     speculative_results = (prelim_index..batch_end).map(|_| None).collect();
+                     let pool = parallel_pool;
+                     let computed: Vec<_> = pool.install(|| {
+@@ -9067,7 +9096,9 @@
+                             .par_iter_mut()
+                             .enumerate()
+                             .map(|(slot, scratch)| {
+-                                jobs.iter()
++                                let slot_start = batch_started.map(|s| s.elapsed().as_secs_f64()).unwrap_or(0.0);
++                                let started = timing_enabled.then(std::time::Instant::now);
++                                let values = jobs.iter()
+                                     .skip(slot)
+                                     .step_by(num_threads)
+                                     .filter_map(|&index| {
+@@ -9090,12 +9121,22 @@
+                                             );
+                                         Some((index, result))
+                                     })
+-                                    .collect::<Vec<_>>()
++                                    .collect::<Vec<_>>();
++                                let elapsed = started.map(|s| s.elapsed().as_secs_f64()).unwrap_or(0.0);
++                                let slot_end = batch_started.map(|s| s.elapsed().as_secs_f64()).unwrap_or(0.0);
++                                (values, (slot, elapsed, slot_start, slot_end))
+                             })
+                             .collect()
+                     });
+-                    for (index, result) in computed.into_iter().flatten() {
+-                        speculative_results[index - prelim_index] = Some(result);
++                    let mut slots = Vec::new();
++                    for (values, metrics) in computed {
++                        if timing_enabled { slots.push((values.len(), metrics)); }
++                        for (index, result) in values {
++                            speculative_results[index - prelim_index] = Some(result);
++                        }
++                    }
++                    if let Some(started) = batch_started {
++                        dp_diagnostics.push((prelim_index, jobs.len(), started.elapsed().as_secs_f64(), slots));
+                     }
+                 }
+ 
+@@ -9304,12 +9345,27 @@
+                             None
+                         };
+ 
++            // NCBI reference: c++/src/algo/blast/core/blast_traceback.c:403-405,509-512,598-601
++            // if (!BlastIntervalTreeContainsHSP(tree, hsp, query_info, ...)) {
++            //     BLAST_GappedAlignmentWithTraceback(...); ... BlastIntervalTreeAddHSP(...);
++            // }
++            // Dedicated diagnostics aggregate slot-local samples only after the subject stage.
++            #[cfg(all(feature = "parallel", any(not(target_arch = "wasm32"), feature = "wasm-threads")))]
++                        if timing_enabled && precomputed.is_some() { dp_consumed += 1; }
++
+                         #[cfg(not(all(
+                             feature = "parallel",
+                             any(not(target_arch = "wasm32"), feature = "wasm-threads")
+                         )))]
+                         let precomputed = None;
+                         precomputed.unwrap_or_else(|| {
++            // NCBI reference: c++/src/algo/blast/core/blast_traceback.c:403-405,509-512,598-601
++            // if (!BlastIntervalTreeContainsHSP(tree, hsp, query_info, ...)) {
++            //     BLAST_GappedAlignmentWithTraceback(...); ... BlastIntervalTreeAddHSP(...);
++            // }
++            // Diagnostic-only ordered replay and slot timing; search state is unchanged.
++            #[cfg(all(feature = "parallel", any(not(target_arch = "wasm32"), feature = "wasm-threads")))]
++                            if timing_enabled && speculative_traceback { dp_fallback += 1; }
+                             extend_gapped_heuristic_with_traceback_with_scratch(
+                                 q_seq_blastna,
+                                 adjusted_subject,
+@@ -9667,6 +9723,22 @@
+                 }
+             }
+ 
++            // NCBI reference: c++/src/algo/blast/core/blast_traceback.c:403-405,509-512,598-601
++            // if (!BlastIntervalTreeContainsHSP(tree, hsp, query_info, ...)) {
++            //     BLAST_GappedAlignmentWithTraceback(...); ... BlastIntervalTreeAddHSP(...);
++            // }
++            // Dedicated diagnostics aggregate slot-local samples only after the subject stage.
++            #[cfg(all(feature = "parallel", any(not(target_arch = "wasm32"), feature = "wasm-threads")))]
++            if timing_enabled && speculative_traceback {
++                // NCBI reference: c++/src/algo/blast/core/blast_gapalign.c:75-113,128-139
++                // state_struct->used = 0; /* state buffers remain allocated */
++                // Rust scratch capacities only grow; inspect retained capacity once
++                // after replay, outside all batch/slot clocks. This excludes realloc peaks.
++                let scratch_final_capacities: Vec<_> = speculative_scratch.iter().map(GapAlignScratch::diagnostic_capacity).collect();
++                let max_jobs = dp_diagnostics.iter().map(|(_, jobs, _, _)| *jobs).max().unwrap_or(0);
++                crate::utils::threading::report_stage("blastn", "dp_traceback_max_batch", max_jobs, max_jobs > 1);
++                eprintln!("[DP-DIAGNOSTIC] subject={} consumed={} fallback={} scratch_count={} scratch_creation_seconds={} scratch_initial={:?} scratch_final={:?} batches={:?}", s_idx, dp_consumed, dp_fallback, speculative_scratch.len(), scratch_seconds, scratch_initial_capacities, scratch_final_capacities, dp_diagnostics);
++            }
+             prelim_hits.clear();
+         }
+ 
+--- a/LOSAT/src/algorithm/blastn/alignment/gapped.rs
++++ b/LOSAT/src/algorithm/blastn/alignment/gapped.rs
+@@ -117,6 +117,17 @@
+ }
+ 
+ impl GapAlignScratch {
++    // NCBI reference: c++/src/algo/blast/core/blast_gapalign.c:75-83,132-136
++    // retval->state_array = (Uint1*) malloc(chunksize*sizeof(Uint1));
++    // state_struct->used = 0;
++    // Diagnostic-only capacity accounting; does not clear or change scratch.
++    pub fn diagnostic_capacity(&self) -> usize {
++        self.dp_mem.capacity() * std::mem::size_of::<BlastGapDP>()
++            + self.trace_offsets.capacity() * std::mem::size_of::<usize>()
++            + self.trace_rows.capacity() * std::mem::size_of::<Vec<u8>>()
++            + self.trace_rows.iter().map(Vec::capacity).sum::<usize>()
++    }
++
+     pub fn new() -> Self {
+         // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_gapalign.c:313-319 (BLAST_GapAlignStructNew)
+         let dp_mem_alloc = 1000;
+--- a/LOSAT/src/algorithm/blastp/blast_engine.rs
++++ b/LOSAT/src/algorithm/blastp/blast_engine.rs
+@@ -407,11 +407,14 @@
+ // ```
+ #[inline]
+ fn blastp_timing_env_enabled() -> bool {
+-    #[cfg(target_arch = "wasm32")]
++    // NCBI reference: c++/src/algo/blast/core/blast_engine.c:1674-1681
++    // status = BLAST_PreliminarySearchEngine(program, query, query_info, ...);
++    // Diagnostic build only: WASI supplies the monotonic clock; browsers do not.
++    #[cfg(all(target_arch = "wasm32", not(target_os = "wasi")))]
+     {
+         false
+     }
+-    #[cfg(not(target_arch = "wasm32"))]
++    #[cfg(any(not(target_arch = "wasm32"), target_os = "wasi"))]
+     {
+         std::env::var_os("LOSAT_TIMING").is_some()
+     }

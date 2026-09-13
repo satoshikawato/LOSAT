@@ -1,0 +1,13 @@
+{
+  "cpu_system_seconds": 1.35,
+  "cpu_user_seconds": 10.59,
+  "exit_status": 0,
+  "output": "/mnt/c/Users/genom/GitHub/LOSAT/docs/evidence/wasm_performance_20260913/run-20260913-01/p0-traps/blastn-nz-self/output.txt",
+  "peak_rss_bytes": 880496640,
+  "raw_output_bytes": 993967,
+  "raw_output_sha256": "806751f2ac851244fcf72eac9a242a9e6997071e8a4812bf3ce903d802cf4ea4",
+  "reason": null,
+  "started_utc": "2026-09-13T07:09:33Z",
+  "status": "PASS",
+  "wall_seconds": 9.727436890010722
+}

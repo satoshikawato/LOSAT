@@ -1,0 +1,22 @@
+{
+  "status": "REJECTED",
+  "reason": "Neither main input reaches10% improvement. No integration.",
+  "comparisons": [
+    {
+      "case": "AP027078.AP027131.losatp",
+      "baseline_seconds": 6.40025333900121,
+      "candidate_seconds": 6.582997810008237,
+      "improvement_percent": -2.8552693358782744,
+      "baseline_rss": 309923840,
+      "candidate_rss": 319385600
+    },
+    {
+      "case": "AP027132.NZ_CP006932.losatp",
+      "baseline_seconds": 9.22850689801271,
+      "candidate_seconds": 9.500732438988052,
+      "improvement_percent": -2.9498329901445297,
+      "baseline_rss": 321687552,
+      "candidate_rss": 322764800
+    }
+  ]
+}

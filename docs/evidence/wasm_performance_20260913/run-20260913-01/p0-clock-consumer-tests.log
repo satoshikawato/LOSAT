@@ -1,0 +1,18 @@
+............[Missing] AP027280_Self (TBLASTX): LOSAT native n1
+[Missing] AP027280_Self (TBLASTX): LOSAT native n8
+[Missing] AP027280_Self (TBLASTX): LOSAT native n1
+[Missing] AP027280_Self (TBLASTX): LOSAT native n8
+[Missing] AP027280_Self (TBLASTX): LOSAT wasm threads n8
+benchmark: blastn/synthetic
+samples=1 failures=1
+benchmark: blastn/synthetic
+samples=7 failures=0
+warm: blastn/synthetic
+warm: blastn/synthetic
+audit: blastn/synthetic
+samples=1 failures=0
+........................
+----------------------------------------------------------------------
+Ran 36 tests in 15.802s
+
+OK

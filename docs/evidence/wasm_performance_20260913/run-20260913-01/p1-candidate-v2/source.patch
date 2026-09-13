@@ -1,0 +1,203 @@
+--- baseline/LOSAT/src/algorithm/tblastx/sum_stats_linking/linking.rs
++++ candidate/LOSAT/src/algorithm/tblastx/sum_stats_linking/linking.rs
+@@ -856,6 +856,93 @@
+ 
+ use super::params::LinkHspCutoffs;
+ 
++// NCBI reference: c++/src/algo/blast/core/link_hsps.c:703-746
++// for (H2_index=H_index-1; H2_index>1; H2_index=H2_index-1) {
++//     q_off_t = lh_helper[H2_index].q_off_trim;
++//     s_off_t = lh_helper[H2_index].s_off_trim;
++//     if(q_off_t > (H_q_et_gap+trim_size)) break;
++//     if (b1|b2|b5|b4) continue;
++//     if (sum>H_hsp_sum) {
++//         H2=lh_helper[H2_index].ptr;
++//         H_hsp_num=H2->hsp_link.num[index];
++//         H_hsp_sum=H2->hsp_link.sum[index];
++//         H_hsp_xsum=H2->hsp_link.xsum[index]; H_hsp_link=H2;
++//     }
++// }
++// Preserve one predecessor scan per HSP, including strict ties and break order.
++// Wasm retains this call boundary so later calls can use V8's optimized code;
++// native builds inline the same calculation. No search or chain boundary moves.
++#[cfg_attr(target_arch = "wasm32", inline(never))]
++#[cfg_attr(not(target_arch = "wasm32"), inline(always))]
++fn small_gap_predecessor(
++    h_lh_idx: usize,
++    ends: [i32; 2],
++    pool_lh_helpers: &[LhHelper],
++    pool_hsp_links: &[HspLink],
++    group_hits: &[UngappedHit],
++    is_target_hsp: bool,
++) -> (i32, f64, i16, usize) {
++    let [h_qe, h_se] = ends;
++    let h_qe_gap = h_qe + WINDOW_SIZE;
++    let h_se_gap = h_se + WINDOW_SIZE;
++    let mut h_sum = 0i32;
++    let mut h_xsum = 0.0f64;
++    let mut h_num = 0i16;
++    let mut h_link = SENTINEL_IDX;
++    for j_lh_idx in (2..h_lh_idx).rev() {
++        let helper = &pool_lh_helpers[j_lh_idx];
++        let qo = helper.q_off_trim;
++        let so = helper.s_off_trim;
++        let sum = helper.sum[0];
++
++        // NCBI line 717
++        if qo > h_qe_gap + TRIM_SIZE {
++            if is_target_hsp {
++                eprintln!(
++                    "  [BREAK] j_lh_idx={}, qo={} > h_qe_gap+TRIM_SIZE={}",
++                    j_lh_idx,
++                    qo,
++                    h_qe_gap + TRIM_SIZE
++                );
++            }
++            break;
++        }
++        // NCBI lines 719-724
++        let skip = qo <= h_qe || so <= h_se || qo > h_qe_gap || so > h_se_gap;
++        if skip {
++            if is_target_hsp {
++                eprintln!("  [SKIP] j_lh_idx={}, qo={}, so={}, conditions: qo<={}? {} so<={}? {} qo>{}? {} so>{}? {}",
++                    j_lh_idx, qo, so, h_qe, qo <= h_qe, h_se, so <= h_se,
++                    h_qe_gap, qo > h_qe_gap, h_se_gap, so > h_se_gap);
++            }
++            continue;
++        }
++
++        // NCBI line 727: if (sum>H_hsp_sum)
++        if sum > h_sum {
++            let j = helper.hsp_idx; // Use stored hsp_idx (NCBI: ptr)
++            if is_target_hsp {
++                eprintln!("  [LINK] j_lh_idx={}, j={}, sum={} > h_sum={}, linking to HSP {}",
++                    j_lh_idx, j, sum, h_sum, j);
++                eprintln!(
++                    "    Linked HSP: q_aa={}-{}, s_aa={}-{}, score={}, num={}",
++                    group_hits[j].q_aa_start,
++                    group_hits[j].q_aa_end,
++                    group_hits[j].s_aa_start,
++                    group_hits[j].s_aa_end,
++                    pool_hsp_links[j].score,
++                    pool_hsp_links[j].num[0]
++                );
++            }
++            h_num = pool_hsp_links[j].num[0];
++            h_sum = pool_hsp_links[j].sum[0];
++            h_xsum = pool_hsp_links[j].xsum[0];
++            h_link = j;
++        }
++    }
++    (h_sum, h_xsum, h_num, h_link)
++}
++
+ /// NCBI-style HSP linking for moderate-sized groups
+ ///
+ /// # Arguments
+@@ -1411,57 +1498,12 @@
+                         }
+ 
+                         // Inner loop: NCBI lines 706-742
+-                        for j_lh_idx in (2..h_lh_idx).rev() {
+-                            let helper = &pool_lh_helpers[j_lh_idx];
+-                            let qo = helper.q_off_trim;
+-                            let so = helper.s_off_trim;
+-                            let sum = helper.sum[0];
+-
+-                            // NCBI line 717
+-                            if qo > h_qe_gap + TRIM_SIZE {
+-                                if is_target_hsp {
+-                                    eprintln!(
+-                                        "  [BREAK] j_lh_idx={}, qo={} > h_qe_gap+TRIM_SIZE={}",
+-                                        j_lh_idx,
+-                                        qo,
+-                                        h_qe_gap + TRIM_SIZE
+-                                    );
+-                                }
+-                                break;
+-                            }
+-                            // NCBI lines 719-724
+-                            let skip = qo <= h_qe || so <= h_se || qo > h_qe_gap || so > h_se_gap;
+-                            if skip {
+-                                if is_target_hsp {
+-                                    eprintln!("  [SKIP] j_lh_idx={}, qo={}, so={}, conditions: qo<={}? {} so<={}? {} qo>{}? {} so>{}? {}",
+-                                        j_lh_idx, qo, so, h_qe, qo <= h_qe, h_se, so <= h_se,
+-                                        h_qe_gap, qo > h_qe_gap, h_se_gap, so > h_se_gap);
+-                                }
+-                                continue;
+-                            }
+-
+-                            // NCBI line 727: if (sum>H_hsp_sum)
+-                            if sum > h_sum {
+-                                let j = helper.hsp_idx; // Use stored hsp_idx (NCBI: ptr)
+-                                if is_target_hsp {
+-                                    eprintln!("  [LINK] j_lh_idx={}, j={}, sum={} > h_sum={}, linking to HSP {}",
+-                                        j_lh_idx, j, sum, h_sum, j);
+-                                    eprintln!(
+-                                        "    Linked HSP: q_aa={}-{}, s_aa={}-{}, score={}, num={}",
+-                                        group_hits[j].q_aa_start,
+-                                        group_hits[j].q_aa_end,
+-                                        group_hits[j].s_aa_start,
+-                                        group_hits[j].s_aa_end,
+-                                        pool_hsp_links[j].score,
+-                                        pool_hsp_links[j].num[0]
+-                                    );
+-                                }
+-                                h_num = pool_hsp_links[j].num[0];
+-                                h_sum = pool_hsp_links[j].sum[0];
+-                                h_xsum = pool_hsp_links[j].xsum[0];
+-                                h_link = j;
+-                            }
+-                        }
++                        // NCBI reference: c++/src/algo/blast/core/link_hsps.c:710-746
++                        // for (H2_index=H_index-1; H2_index>1; H2_index=H2_index-1) { ... }
++                        (h_sum, h_xsum, h_num, h_link) = small_gap_predecessor(
++                            h_lh_idx, [h_qe, h_se], pool_lh_helpers, pool_hsp_links,
++                            &group_hits, is_target_hsp,
++                        );
+                     } else if is_target_hsp {
+                         eprintln!("[DEBUG_CHAINING] INDEX 0 (small gap): score {} <= cutoff_small {}, skipping",
+                             i_score, cutoff_small);
+@@ -2302,6 +2344,42 @@
+ 
+ #[cfg(test)]
+ mod tests {
++    // NCBI reference: c++/src/algo/blast/core/link_hsps.c:710-746
++    // if(q_off_t > (H_q_et_gap+trim_size)) break;
++    // if (b1|b2|b5|b4) continue;
++    // if (sum>H_hsp_sum) { H2=lh_helper[H2_index].ptr; ... }
++    #[test]
++    fn small_gap_predecessor_preserves_ties_and_window_boundaries() {
++        let link = HspLink {
++            score: 10, ctx_idx: 0, q_off_trim: 0, s_off_trim: 0,
++            q_end_trim: 0, s_end_trim: 0, sum: [9, 0], xsum: [0.125, 0.0],
++            num: [2, 0], link: [SENTINEL_IDX; 2], changed: false, linked_to: 0,
++            start_of_chain: false, linked_set: false,
++            next_active: SENTINEL_IDX, prev_active: SENTINEL_IDX,
++        };
++        let helper = LhHelper { hsp_idx: 0, q_off_trim: 11, s_off_trim: 11,
++            sum: [9, 0], next_larger: 0, maxsum1: 0 };
++        let links = [link.clone(), link];
++        let mut helpers = vec![helper; 4];
++        helpers[3].hsp_idx = 1;
++        let scan = |helpers: &[LhHelper], count| small_gap_predecessor(count, [10, 10], helpers, &links, &[], false);
++        assert_eq!(scan(&helpers, 2), (0, 0.0, 0, SENTINEL_IDX));
++        // A strict score comparison retains the first predecessor in reverse order.
++        assert_eq!(scan(&helpers, 4), (9, 0.125, 2, 1));
++        for (q, subject, selected) in [
++            (10, 11, 0), (11, 10, 0),
++            (10 + WINDOW_SIZE, 10 + WINDOW_SIZE, 1),
++            (10 + WINDOW_SIZE + 1, 11, 0),
++            (11, 10 + WINDOW_SIZE + 1, 0),
++        ] {
++            helpers[3].q_off_trim = q; helpers[3].s_off_trim = subject;
++            assert_eq!(scan(&helpers, 4).3, selected, "q={q} subject={subject}");
++        }
++        helpers[3].q_off_trim = 10 + WINDOW_SIZE + TRIM_SIZE + 1;
++        helpers[3].s_off_trim = 11;
++        assert_eq!(scan(&helpers, 4), (0, 0.0, 0, SENTINEL_IDX));
++    }
++
+     use super::*;
+ 
+     // NCBI c++/src/algo/blast/core/link_hsps.c:608-633:

@@ -1,0 +1,21 @@
+{
+  "cwd": "/mnt/c/Users/genom/GitHub/LOSAT",
+  "environment_overrides": {
+    "NODE_NO_WARNINGS": "1"
+  },
+  "ordered_argv": [
+    "/home/kawato/micromamba/bin/blastp",
+    "-query",
+    "/mnt/c/Users/genom/GitHub/LOSAT/LOSAT/tests/fasta/AP027078.faa",
+    "-subject",
+    "/mnt/c/Users/genom/GitHub/LOSAT/LOSAT/tests/fasta/AP027131.faa",
+    "-outfmt",
+    "6",
+    "-out",
+    "/mnt/c/Users/genom/GitHub/LOSAT/docs/evidence/wasm_performance_20260913/run-20260913-02/matrix-exploration/oracle/AP027078.AP027131.losatp/output.txt",
+    "-num_threads",
+    "1"
+  ],
+  "shell": false,
+  "sink": "/mnt/c/Users/genom/GitHub/LOSAT/docs/evidence/wasm_performance_20260913/run-20260913-02/matrix-exploration/oracle/AP027078.AP027131.losatp/output.txt"
+}

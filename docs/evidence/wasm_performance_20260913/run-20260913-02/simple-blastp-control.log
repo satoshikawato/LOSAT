@@ -1,0 +1,10 @@
+Node: v24.21.0; V8: 13.6.233.17-node.53; executable: /tmp/losat-node-check/node-v24.21.0-linux-x64/bin/node
+Wasm serial: /mnt/c/Users/genom/GitHub/LOSAT/docs/evidence/wasm_performance_20260913/run-20260913-01/artifacts/losat-serial-command.wasm; modified: 2026-09-13T07:07:08.000Z
+Wasm threaded: /mnt/c/Users/genom/GitHub/LOSAT/docs/evidence/wasm_performance_20260913/run-20260913-01/artifacts/losat-threaded-command.wasm; modified: 2026-09-13T07:07:58.000Z
+Running SicyWSV.CoBV.losatp.wasm
+Finished SicyWSV.CoBV.losatp.wasm: 0.997 s
+Running SicyWSV.CoBV.losatp.wasm.n8
+Finished SicyWSV.CoBV.losatp.wasm.n8: 1.108 s
+Running SicyWSV.CoBV.BLASTP
+Finished SicyWSV.CoBV.BLASTP: 0.811 s
+Finished 1 pairs. Results: /mnt/c/Users/genom/GitHub/LOSAT/docs/evidence/wasm_performance_20260913/run-20260913-02/simple-blastp-control

@@ -1,0 +1,26 @@
+[
+  {
+    "kind": "threaded-command",
+    "argv": [
+      "cargo",
+      "build",
+      "--offline",
+      "--locked",
+      "--release",
+      "--bin",
+      "LOSAT",
+      "--target",
+      "wasm32-wasip1-threads",
+      "--features",
+      "wasm-threads",
+      "--target-dir",
+      "/tmp/losat-wasm-perf-20260913/diagnostic/threaded-command"
+    ],
+    "cwd": "/tmp/losat-wasm-perf-20260913/diagnostic-source/LOSAT",
+    "started_utc": "2026-09-13T07:36:37.963964+00:00",
+    "exit_status": 0,
+    "ended_utc": "2026-09-13T07:37:06.264160+00:00",
+    "path": "/mnt/c/Users/genom/GitHub/LOSAT/docs/evidence/wasm_performance_20260913/run-20260913-01/diagnostic/artifacts/losat-threaded-command.wasm",
+    "sha256": "219d98e91565b158120043826d0f6971bf977bde40dd476c20af7151b87adf00"
+  }
+]

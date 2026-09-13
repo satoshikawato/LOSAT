@@ -1,0 +1,16 @@
+{
+  "cpu_system_seconds": 2.38,
+  "cpu_user_seconds": 7.34,
+  "ended_utc": "2026-09-13T07:26:49Z",
+  "exit_status": 0,
+  "output": "/mnt/c/Users/genom/GitHub/LOSAT/docs/evidence/wasm_performance_20260913/run-20260913-01/p1-profiles-ext4/Mela-turbofan-n8/process/output.txt",
+  "peak_rss_bytes": 332492800,
+  "raw_output_bytes": 351051,
+  "raw_output_sha256": "bbef153094025db89dd4a69b2a3c4246b0b8853396fe740bc7e1bd654db105b6",
+  "reason": null,
+  "started_utc": "2026-09-13T07:26:39Z",
+  "status": "PASS",
+  "timeout_seconds": 3600,
+  "unavailable_metrics": {},
+  "wall_seconds": 8.6562211989949
+}

@@ -1,0 +1,18 @@
+[
+  {
+    "case_id": "MelaMJNV.PemoMJNVA.tlosatx",
+    "version": "baseline",
+    "kind": "threaded",
+    "threads": 8,
+    "status": "NOT_RUN",
+    "reason": "paired diagnostic gate failed"
+  },
+  {
+    "case_id": "MelaMJNV.PemoMJNVA.tlosatx",
+    "version": "candidate",
+    "kind": "threaded",
+    "threads": 8,
+    "status": "NOT_RUN",
+    "reason": "paired diagnostic gate failed"
+  }
+]

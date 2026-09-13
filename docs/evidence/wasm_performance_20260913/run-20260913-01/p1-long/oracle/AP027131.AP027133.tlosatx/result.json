@@ -1,0 +1,27 @@
+{
+  "boottime_seconds": 493.45719722798094,
+  "clock_agreement": false,
+  "cpu_system_seconds": 0.06,
+  "cpu_user_seconds": 524.55,
+  "ended_utc": "2026-09-13T08:46:08Z",
+  "exit_status": 0,
+  "gnu_elapsed_seconds": 526.52,
+  "output": "/mnt/c/Users/genom/GitHub/LOSAT/docs/evidence/wasm_performance_20260913/run-20260913-01/p1-long/oracle/AP027131.AP027133.tlosatx/output.txt",
+  "peak_rss_bytes": 244961280,
+  "process_ended_utc": "2026-09-13T08:46:08Z",
+  "raw_output_bytes": 2270680,
+  "raw_output_sha256": "1da3bfe7d96d50a96726a44e2df98f5e81c05bee9cd655ad51bb8d44aa377963",
+  "realtime_seconds": 526.5736701488495,
+  "reason": null,
+  "started_utc": "2026-09-13T08:37:22Z",
+  "status": "PASS",
+  "timeout_seconds": 3600.0,
+  "unavailable_metrics": {},
+  "wall_seconds": 493.45719342600205,
+  "watchdog_clocks": {
+    "started": {
+      "monotonic": 151218.909388894,
+      "realtime": 1789288642.3490012
+    }
+  }
+}

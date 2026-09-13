@@ -1,0 +1,18 @@
+{
+  "base": "baseline-source-v2.tar.gz",
+  "archive": "final-task-source.tar.gz",
+  "files": {
+    "LOSAT/tests/comparison_data.py": "103f06858a91119335b533533005536c8da91a76979d43998ec7114d4fea1b11",
+    "LOSAT/tests/run_comparison.sh": "193bd1857acb8e1f29fb808cf342aaf9fe95436264d679e6babfc7046b1db94c",
+    "LOSAT/tests/plot_execution_time.py": "628ce65f93e27d78bb887e49f56a845e258cb9806209422461ad23bcca777b3f",
+    "LOSAT/tests/wasm_performance.py": "844ab57bb4f4ff9b54a26c53aac857a27176e041bbe66b1b679f8de8d7396a13",
+    "LOSAT/tests/benchmark_wasm_threading.py": "48265cc6556db7f5e6a8efcc8212e3f2f6d0f8a8dc8932ba4e8e79decdc9d42b",
+    "LOSAT/tests/benchmark_wasi_reuse.js": "a0effdc582f7fcc1dc8fc35736f031f6a85fb8597461393ef8bdda0ffdcfc32b",
+    "LOSAT/tests/test_simple_comparison.py": "42836666285e2a26b427c12fc05da948b963084669d0768b1365927245490c18",
+    "LOSAT/tests/test_wasm_performance.py": "2d3ec1484dded1adfade7832b9742d7e5d6c575402d0e486f0e092791a454d18",
+    "LOSAT/tests/test_benchmark_wasm_threading.py": "a5b3f33b4f19ace487be27e92c24c6bea78bea32e53cedbca0ce2145bcee2e54",
+    "LOSAT/tests/test_benchmark_wasi_reuse.js": "d381d567824ca86d576e61e63e119a0b8f3cde85d52404f67e4a52307c75373e",
+    "LOSAT/tests/README.md": "2b0cf6dd206fa4d16c510213381bfe0db98ae3f185abd1a8ce4564fdcb60d8ff",
+    "docs/wasm_performance_optimization_plan_20260913.md": "f31a78b49a16c5ae16ba977dc011617a968656e8b0339a985ee2709d38f277b8"
+  }
+}

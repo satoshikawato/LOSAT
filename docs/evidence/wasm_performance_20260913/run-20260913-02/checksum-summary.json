@@ -1,0 +1,12 @@
+{
+  "status": "SEALED",
+  "recorded_utc": "2026-09-13T11:00:04.203290+00:00",
+  "files": 939,
+  "bytes": 56311891,
+  "inventory_sha256": "12d780751b61e3815a77a9ba597830813de7dddffcaaa089b8fbfc90d966c3aa",
+  "exclusions": [
+    "SHA256SUMS",
+    "checksum-summary.json"
+  ],
+  "policy": "Previous run remains immutable; future edits or experiments require a new evidence version."
+}

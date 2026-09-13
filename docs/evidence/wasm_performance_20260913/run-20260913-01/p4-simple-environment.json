@@ -1,0 +1,21 @@
+{
+  "LC_ALL": "C",
+  "NODE_NO_WARNINGS": "1",
+  "BENCHMARK_DIR": "/mnt/c/Users/genom/GitHub/LOSAT/docs/evidence/wasm_performance_20260913/run-20260913-01/p4-simple",
+  "BENCHMARK_PROGRAMS": "blastp",
+  "BENCHMARK_CASE": "SicyWSV.CoBV.losatp",
+  "LOSAT_THREADS": "8",
+  "BENCHMARK_TIMEOUT": "300",
+  "RUN_NATIVE": "1",
+  "RUN_NCBI": "1",
+  "RUN_LOSAT_WASM": "1",
+  "RUN_LOSAT_WASM_THREADED": "1",
+  "BUILD_LOSAT_WASM": "0",
+  "BUILD_LOSAT_WASM_THREADED": "0",
+  "LOSAT_BIN": "/mnt/c/Users/genom/GitHub/LOSAT/docs/evidence/wasm_performance_20260913/run-20260913-01/final-build/artifacts/LOSAT",
+  "LOSAT_WASM_BIN": "/mnt/c/Users/genom/GitHub/LOSAT/docs/evidence/wasm_performance_20260913/run-20260913-01/final-build/artifacts/losat-serial-command.wasm",
+  "LOSAT_WASM_THREADED_BIN": "/mnt/c/Users/genom/GitHub/LOSAT/docs/evidence/wasm_performance_20260913/run-20260913-01/final-build/artifacts/losat-threaded-command.wasm",
+  "NODE_BIN": "/tmp/losat-node-check/node-v24.21.0-linux-x64/bin/node",
+  "NODE_ARGS_JSON": "[]",
+  "BLASTP_BIN": "/home/kawato/micromamba/bin/blastp"
+}

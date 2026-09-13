@@ -1,0 +1,29 @@
+{
+  "boottime_seconds": 0.32035515300231054,
+  "cpu_system_seconds": 0.04,
+  "cpu_user_seconds": 0.18,
+  "elapsed_clock": "CLOCK_MONOTONIC; realtime and GNU elapsed are adjustable-clock diagnostics",
+  "ended_utc": "2026-09-13T09:46:41Z",
+  "exit_status": 0,
+  "gnu_elapsed_seconds": 0.29,
+  "monotonic_clock_agreement": true,
+  "output": "/mnt/c/Users/genom/GitHub/LOSAT/docs/evidence/wasm_performance_20260913/run-20260913-01/p4-megablast/diagnostic/NZ_CP006932.NZ_CP006932.losatn.megablast/baseline-native-n8/output.txt",
+  "peak_rss_bytes": 89174016,
+  "process_ended_utc": "2026-09-13T09:46:41Z",
+  "raw_output_bytes": 38401,
+  "raw_output_sha256": "ed126557e395031711c8bb604dbc036befcb25855ad9bf8919f0dfe2e1e12a92",
+  "realtime_clock_agreement": true,
+  "realtime_seconds": 0.3203556537628174,
+  "reason": null,
+  "started_utc": "2026-09-13T09:46:40Z",
+  "status": "PASS",
+  "timeout_seconds": 300,
+  "unavailable_metrics": {},
+  "wall_seconds": 0.3203525640128646,
+  "watchdog_clocks": {
+    "started": {
+      "monotonic": 155118.75685064,
+      "realtime": 1789292800.71056
+    }
+  }
+}

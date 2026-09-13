@@ -431,10 +431,16 @@ def execute(argv, cwd, directory, env, timeout):
         },
     )
     usage = directory / "usage.txt"
-    measured = ["/usr/bin/time", "-f", "%U\t%S\t%M", "-o", str(usage), *argv]
+    measured = ["/usr/bin/time", "-f", "%U\t%S\t%M\t%e", "-o", str(usage), *argv]
+    # NCBI reference: c++/src/algo/blast/api/prelim_stage.cpp:178-188
+    # (*thread)->Join(&result);
+    # Independent clock evidence covers the same process-completion boundary.
+    realtime_start = time.time()
+    boottime_start = time.clock_gettime(time.CLOCK_BOOTTIME) if hasattr(time, "CLOCK_BOOTTIME") else None
     start = time.monotonic()
     started_utc = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
     status, exit_code, reason = "PASS", None, None
+    watchdog_clocks = {}
     with (
         (directory / "stdout.txt").open("wb") as stdout,
         (directory / "stderr.txt").open("wb") as stderr,
@@ -451,14 +457,29 @@ def execute(argv, cwd, directory, env, timeout):
             expired = threading.Event()
 
             def expire():
+                # NCBI reference: c++/src/algo/blast/api/prelim_stage.cpp:178-188
+                # (*thread)->Join(&result);
+                # Test-only deadline: CPython 3.13 parking_lot.c uses realtime
+                # sem_timedwait when HAVE_SEM_CLOCKWAIT is absent. A forward
+                # clock step may wake Timer early; verify the monotonic deadline.
+                while True:
+                    remaining = watchdog_deadline - time.monotonic()
+                    if remaining <= 0:
+                        break
+                    watchdog_clocks["early_wakeups"] = watchdog_clocks.get("early_wakeups", 0) + 1
+                    if watchdog.finished.wait(remaining):
+                        return
                 if process.poll() is None:
                     expired.set()
+                    watchdog_clocks["fired"] = {"monotonic": time.monotonic(), "realtime": time.time()}
                     try:
                         os.killpg(process.pid, signal.SIGKILL)
                     except ProcessLookupError:
                         pass
 
             watchdog = threading.Timer(timeout, expire)
+            watchdog_clocks["started"] = {"monotonic": time.monotonic(), "realtime": time.time()}
+            watchdog_deadline = watchdog_clocks["started"]["monotonic"] + timeout
             watchdog.start()
             try:
                 exit_code = process.wait()  # Blocking waitpid: no timeout polling bias.
@@ -472,26 +493,39 @@ def execute(argv, cwd, directory, env, timeout):
         except OSError as error:
             status, reason = "BAD_EXIT", str(error)
     elapsed = time.monotonic() - start
+    realtime_elapsed = time.time() - realtime_start
+    boottime_elapsed = time.clock_gettime(time.CLOCK_BOOTTIME) - boottime_start if boottime_start is not None else None
+    process_ended_utc = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
     if status == "PASS" and not output.is_file():
         status, reason = "MISSING_OUTPUT", "successful subprocess did not write output"
-    user = system = rss = None
+    user = system = rss = gnu_elapsed = None
     if usage.exists():
         fields = (
             usage.read_text().strip().splitlines()[-1].split("\t")
             if usage.read_text().strip()
             else []
         )
-        if len(fields) == 3:
+        if len(fields) in (3, 4):
             user, system, rss = (
                 float(fields[0]),
                 float(fields[1]),
                 int(fields[2]) * 1024,
             )
+            if len(fields) == 4:
+                gnu_elapsed = float(fields[3])
     result = {
         "status": status,
         "reason": reason,
         "exit_status": exit_code,
         "wall_seconds": elapsed,
+        "realtime_seconds": realtime_elapsed,
+        "boottime_seconds": boottime_elapsed,
+        "gnu_elapsed_seconds": gnu_elapsed,
+        "process_ended_utc": process_ended_utc,
+        "watchdog_clocks": watchdog_clocks,
+        "realtime_clock_agreement": abs(realtime_elapsed - elapsed) <= max(0.1, 0.05 * elapsed),
+        "monotonic_clock_agreement": boottime_elapsed is None or abs(boottime_elapsed - elapsed) <= max(0.1, 0.05 * elapsed),
+        "elapsed_clock": "CLOCK_MONOTONIC; realtime and GNU elapsed are adjustable-clock diagnostics",
         "cpu_user_seconds": user,
         "cpu_system_seconds": system,
         "peak_rss_bytes": rss,
@@ -499,7 +533,17 @@ def execute(argv, cwd, directory, env, timeout):
         "raw_output_sha256": digest(output) if output.is_file() else None,
         "raw_output_bytes": output.stat().st_size if output.is_file() else None,
     }
+    # NCBI reference: c++/src/algo/blast/api/prelim_stage.cpp:178-188
+    # (*thread)->Join(&result); ... BlastSeqSrcSetNumberOfThreads(..., 0);
+    # End-to-end evidence ends after process/worker completion, including failures.
     result["started_utc"] = started_utc
+    result["ended_utc"] = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
+    result["timeout_seconds"] = timeout
+    result["unavailable_metrics"] = {
+        key: "GNU time did not finish reporting (for example, process-group timeout)"
+        for key in ("cpu_user_seconds", "cpu_system_seconds", "peak_rss_bytes")
+        if result[key] is None
+    }
     dump(directory / "result.json", result)
     return result
 
@@ -847,6 +891,12 @@ def run(args):
                         > manifest["measurement"]["memory_budget_bytes"]
                     ):
                         status = "MEMORY_BUDGET_FAIL"
+                    # NCBI reference: c++/src/algo/blast/api/prelim_stage.cpp:178-188
+                    # (*thread)->Join(&result);
+                    # Clock validity gates timing, independently of canonical bytes.
+                    if status == "PASS" and args.phase != "audit" and not result["monotonic_clock_agreement"]:
+                        status = "CLOCK_INCONSISTENT"
+                        result["reason"] = "boottime disagrees with monotonic duration"
                     sample = {
                         **entry,
                         **result,
@@ -1041,6 +1091,13 @@ def run_warm(args, manifest, dest):
                 > manifest["measurement"]["memory_budget_bytes"]
             ):
                 sample["status"] = "MEMORY_BUDGET_FAIL"
+            # NCBI reference: c++/src/algo/blast/api/prelim_stage.cpp:178-188
+            # (*thread)->Join(&result);
+            # Retain failed host clock evidence and suppress every affected median.
+            sample["monotonic_clock_agreement"] = execution["monotonic_clock_agreement"]
+            if sample["status"] == "PASS" and not sample["monotonic_clock_agreement"]:
+                sample["status"] = "CLOCK_INCONSISTENT"
+                sample["reason"] = "boottime disagrees with monotonic duration"
             rows.append(sample)
             with (dest / "samples.jsonl").open("a") as handle:
                 handle.write(json.dumps(sample, sort_keys=True) + "\n")

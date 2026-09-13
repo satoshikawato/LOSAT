@@ -1,0 +1,59 @@
+/home/kawato/.config/matplotlib is not a writable directory
+Matplotlib created a temporary cache directory at /tmp/matplotlib-kxo3yz9z because there was an issue with the default path (/home/kawato/.config/matplotlib); it is highly recommended to set the MPLCONFIGDIR environment variable to a writable directory, in particular to speed up the import of Matplotlib and to better support multiprocessing.
+test_malformed_output_fails_instead_of_dropping_rows (test_simple_comparison.SimpleComparisonTests.test_malformed_output_fails_instead_of_dropping_rows) ... ok
+test_nondefault_threads_find_matching_ncbi_and_native (test_simple_comparison.SimpleComparisonTests.test_nondefault_threads_find_matching_ncbi_and_native) ... ok
+test_old_missing_tampered_and_cross_run_evidence_are_rejected (test_simple_comparison.SimpleComparisonTests.test_old_missing_tampered_and_cross_run_evidence_are_rejected) ... ok
+test_one_thread_has_distinct_wasm_builds (test_simple_comparison.SimpleComparisonTests.test_one_thread_has_distinct_wasm_builds) ... ok
+test_overall_excludes_different_pair_sets (test_simple_comparison.SimpleComparisonTests.test_overall_excludes_different_pair_sets) ... ok
+test_runner_failure_timeout_and_missing_output_are_retained (test_simple_comparison.SimpleComparisonTests.test_runner_failure_timeout_and_missing_output_are_retained) ... ok
+test_runner_prints_each_time_before_starting_next_run (test_simple_comparison.SimpleComparisonTests.test_runner_prints_each_time_before_starting_next_run) ... ok
+test_selected_oracle_version_is_preserved (test_simple_comparison.SimpleComparisonTests.test_selected_oracle_version_is_preserved) ... ok
+test_tblastx_profile_manifest_matches_nul_delimited_argv (test_simple_comparison.SimpleComparisonTests.test_tblastx_profile_manifest_matches_nul_delimited_argv) ... ok
+test_tblastx_profile_rejects_malformed_argv (test_simple_comparison.SimpleComparisonTests.test_tblastx_profile_rejects_malformed_argv) ... ok
+test_timing_plot_excludes_lexically_different_output (test_simple_comparison.SimpleComparisonTests.test_timing_plot_excludes_lexically_different_output) ... ok
+test_turbofan_profile_is_tblastx_only_and_can_be_disabled (test_simple_comparison.SimpleComparisonTests.test_turbofan_profile_is_tblastx_only_and_can_be_disabled) ... ok
+test_wall_time_formats_and_explicit_failure (test_simple_comparison.SimpleComparisonTests.test_wall_time_formats_and_explicit_failure) ... ok
+test_zero_hits_are_present_and_failed_outputs_are_absent (test_simple_comparison.SimpleComparisonTests.test_zero_hits_are_present_and_failed_outputs_are_absent) ... ok
+test_bad_exit_even_with_expected_output (test_wasm_performance.GateTests.test_bad_exit_even_with_expected_output) ... ok
+test_clock_consistency_gates_cold_warm_but_preserves_raw_audit (test_wasm_performance.GateTests.test_clock_consistency_gates_cold_warm_but_preserves_raw_audit) ... [Missing] AP027280_Self (TBLASTX): LOSAT native n1
+[Missing] AP027280_Self (TBLASTX): LOSAT native n8
+[Missing] AP027280_Self (TBLASTX): LOSAT native n1
+[Missing] AP027280_Self (TBLASTX): LOSAT native n8
+[Missing] AP027280_Self (TBLASTX): LOSAT wasm threads n8
+benchmark: blastn/synthetic
+samples=1 failures=1
+benchmark: blastn/synthetic
+samples=7 failures=0
+warm: blastn/synthetic
+warm: blastn/synthetic
+audit: blastn/synthetic
+samples=1 failures=0
+ok
+test_default_omission_is_preserved (test_wasm_performance.GateTests.test_default_omission_is_preserved) ... ok
+test_early_watchdog_wake_preserves_success_and_cancellation (test_wasm_performance.GateTests.test_early_watchdog_wake_preserves_success_and_cancellation) ... ok
+test_early_watchdog_wake_still_expires_at_monotonic_deadline (test_wasm_performance.GateTests.test_early_watchdog_wake_still_expires_at_monotonic_deadline) ... ok
+test_exporter_median_excludes_warmup_and_diagnostic (test_wasm_performance.GateTests.test_exporter_median_excludes_warmup_and_diagnostic) ... ok
+test_exporter_rejects_failure_after_successful_warmup (test_wasm_performance.GateTests.test_exporter_rejects_failure_after_successful_warmup) ... ok
+test_exporter_requires_complete_series (test_wasm_performance.GateTests.test_exporter_requires_complete_series) ... ok
+test_header_path_is_not_normalized (test_wasm_performance.GateTests.test_header_path_is_not_normalized) ... ok
+test_library_is_not_command (test_wasm_performance.GateTests.test_library_is_not_command) ... ok
+test_manifest_argv_tampering_is_rejected (test_wasm_performance.GateTests.test_manifest_argv_tampering_is_rejected) ... ok
+test_missing_artifact_and_oracle (test_wasm_performance.GateTests.test_missing_artifact_and_oracle) ... ok
+test_missing_output (test_wasm_performance.GateTests.test_missing_output) ... ok
+test_order_and_newlines_are_normative (test_wasm_performance.GateTests.test_order_and_newlines_are_normative) ... ok
+test_pairwise_header_is_not_normalized (test_wasm_performance.GateTests.test_pairwise_header_is_not_normalized) ... ok
+test_readonly_output_directory (test_wasm_performance.GateTests.test_readonly_output_directory) ... ok
+test_serial_threaded_mislabel (test_wasm_performance.GateTests.test_serial_threaded_mislabel) ... ok
+test_sorted_diff_is_diagnostic_only (test_wasm_performance.GateTests.test_sorted_diff_is_diagnostic_only) ... ok
+test_timeout_never_zero_time_pass (test_wasm_performance.GateTests.test_timeout_never_zero_time_pass) ... ok
+test_wrong_hash (test_wasm_performance.GateTests.test_wrong_hash) ... ok
+test_missing_or_contradictory_worker_events_fail (test_wasm_performance.ThreadEvidenceTests.test_missing_or_contradictory_worker_events_fail) ... ok
+test_serial_subject_stage_does_not_shrink_dp_pool (test_wasm_performance.ThreadEvidenceTests.test_serial_subject_stage_does_not_shrink_dp_pool) ... ok
+test_cold_failure_retained_before_abort (test_benchmark_wasm_threading.BenchmarkFailureTests.test_cold_failure_retained_before_abort) ... ok
+test_diagnostic_failure_retained_and_timings_skipped (test_benchmark_wasm_threading.BenchmarkFailureTests.test_diagnostic_failure_retained_and_timings_skipped) ... ok
+test_nonfinite_timeouts_rejected_before_run_creation (test_benchmark_wasm_threading.BenchmarkFailureTests.test_nonfinite_timeouts_rejected_before_run_creation) ... ok
+
+----------------------------------------------------------------------
+Ran 39 tests in 38.807s
+
+OK

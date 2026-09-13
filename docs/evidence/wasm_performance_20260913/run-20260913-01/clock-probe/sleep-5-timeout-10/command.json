@@ -1,0 +1,14 @@
+{
+  "cwd": "/mnt/c/Users/genom/GitHub/LOSAT",
+  "environment_overrides": {},
+  "ordered_argv": [
+    "/home/kawato/micromamba/bin/python3",
+    "-c",
+    "import sys,time,json;from pathlib import Path;start=[time.time(),time.monotonic(),time.clock_gettime(time.CLOCK_BOOTTIME)];time.sleep(float(sys.argv[1]));end=[time.time(),time.monotonic(),time.clock_gettime(time.CLOCK_BOOTTIME)];Path(sys.argv[3]).write_text(json.dumps({\"start\":start,\"end\":end}))",
+    "5",
+    "-out",
+    "/mnt/c/Users/genom/GitHub/LOSAT/docs/evidence/wasm_performance_20260913/run-20260913-01/clock-probe/sleep-5-timeout-10/output.txt"
+  ],
+  "shell": false,
+  "sink": "/mnt/c/Users/genom/GitHub/LOSAT/docs/evidence/wasm_performance_20260913/run-20260913-01/clock-probe/sleep-5-timeout-10/output.txt"
+}

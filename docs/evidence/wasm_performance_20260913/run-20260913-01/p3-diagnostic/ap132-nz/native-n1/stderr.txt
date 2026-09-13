@@ -1,0 +1,19 @@
+[losat-thread-pool] program=blastp requested_threads=1 pool_threads=0 caller_participates=false measured_activity=null
+[losat-thread-stage] program=blastp stage=subject-prep work_items=581 parallel_selected=false measured_activity=null
+[losat-thread-stage] program=blastp stage=prelim work_items=581 parallel_selected=false measured_activity=null
+[losat-thread-stage] program=blastp stage=kappa-query-redo work_items=573 parallel_selected=false measured_activity=null
+[TIMING] blastp_query_encoding_seg: 0.000s
+[TIMING] blastp_subject_encoding: 0.001s
+[TIMING] blastp_build_lookup: 0.173s
+[TIMING] blastp_scan_ungapped: 1.868s (calls=581)
+[TIMING] blastp_prelim_gapped: 9.246s (calls=581)
+[TIMING] blastp_prelim_exact_retries: 0 (removed_hsps=0, interval_tree_rebuilds=0, rebuild_nodes=0, endpoint_duplicates_purged=6523)
+[TIMING] blastp_prelim_merge_sort: 0.012s (calls=582)
+[TIMING] blastp_kappa_redo: 32.514s (calls=1)
+[TIMING] blastp_final_traceback_stats: 0.000s (calls=1)
+[TIMING] blastp_output_format: 0.015s (calls=1)
+[TIMING] blastp_total: 43.994s
+[TIMING] blastp_kappa_query_range_bytes_copied: 42154079
+[TIMING] blastp_kappa_subject_range_bytes_copied: 48894697
+[TIMING] blastp_kappa_subject_seg_range: 199959 bytes (calls=581, masked_residues=5416)
+[TIMING] blastp_kappa_subject_seg_cache: hits=110712 misses=581

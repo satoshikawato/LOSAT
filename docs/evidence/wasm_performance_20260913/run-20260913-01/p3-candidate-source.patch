@@ -1,0 +1,55 @@
+--- baseline/LOSAT/src/algorithm/blastp/gapalign.rs
++++ candidate/LOSAT/src/algorithm/blastp/gapalign.rs
+@@ -1882,8 +1882,16 @@
+             }
+ 
+             score_val = next_score;
+-            let row_idx = b_index.saturating_sub(orig_b_index);
+-            gap_trace_row_write(edit_script_row, row_idx, script);
++            // NCBI reference: c++/src/algo/blast/core/blast_gapalign.c:563-635
++            // for (b_index = first_b_index; b_index < b_size; b_index++) {
++            //     ... edit_script_row[b_index] = script;
++            // }
++            // The row starts empty and band_start is orig_b_index. Each visited
++            // cell writes once in ascending order; X-drop only moves the next
++            // row's start. A fence exits before this write. No gap filling or
++            // overwrite dispatch is needed for this contiguous inner span.
++            debug_assert_eq!(edit_script_row.len(), band_index);
++            edit_script_row.push(script);
+         }
+ 
+         // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_gapalign.c:638-639
+@@ -3898,7 +3906,7 @@
+             for reverse in [false, true] {
+                 for (gap_open, gap_extend, x_drop) in [(11, 1, 25), (2, 0, 4), (0, 0, 2)] {
+                     for len in [128usize, 1, 32, 0, 7, 2] {
+-                        for variant in 0..4 {
++                        for variant in 0..5 {
+                             let query: Vec<u8> = (0..=len)
+                                 .map(|i| [ncbistdaa::A, ncbistdaa::C, ncbistdaa::G][i % 3])
+                                 .collect();
+@@ -3909,6 +3917,13 @@
+                                 subject.drain(len / 2..len / 2 + 2);
+                             } else if variant == 3 && len > 3 {
+                                 subject[len / 2] = FENCE_SENTRY;
++                            } else if variant == 4 && len > 0 {
++                                // NCBI reference: c++/src/algo/blast/core/blast_gapalign.c:571-576
++                                // if (matrix_index == FENCE_SENTRY) { ... break; }
++                                // Reusing a previously populated row must also handle
++                                // a fence before its first traceback-byte write.
++                                let first = if reverse { subject.len() - 2 } else { 1 };
++                                subject[first] = FENCE_SENTRY;
+                             }
+                             let run = |scratch: &mut GapAlignScratch| {
+                                 let mut fence = false;
+@@ -3937,6 +3952,10 @@
+                             let fresh = run(&mut GapAlignScratch::new());
+                             let reused = run(&mut scratch);
+                             assert_eq!(reused, fresh);
++                            if variant == 4 && len > 0 {
++                                assert!(reused.1);
++                                assert!(reused.3.last().unwrap().is_empty());
++                            }
+                             saw_offset |= reused.2.iter().any(|&offset| offset > 0);
+                             saw_gap |= reused
+                                 .0

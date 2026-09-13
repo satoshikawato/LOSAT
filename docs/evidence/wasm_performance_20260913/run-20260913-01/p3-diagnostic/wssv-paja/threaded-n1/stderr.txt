@@ -1,0 +1,9 @@
+[losat-wasi-threads] shared-memory guards: 125 fills, 1233 copies
+[losat-thread-pool] program=blastp requested_threads=1 pool_threads=0 caller_participates=false measured_activity=null
+[losat-thread-stage] program=blastp stage=subject-prep work_items=86 parallel_selected=false measured_activity=null
+[losat-thread-stage] program=blastp stage=prelim work_items=86 parallel_selected=false measured_activity=null
+[losat-thread-stage] program=blastp stage=kappa-query-redo work_items=177 parallel_selected=false measured_activity=null
+[TIMING] blastp_kappa_query_range_bytes_copied: 2912505
+[TIMING] blastp_kappa_subject_range_bytes_copied: 5902788
+[TIMING] blastp_kappa_subject_seg_range: 66738 bytes (calls=86, masked_residues=3147)
+[TIMING] blastp_kappa_subject_seg_cache: hits=4631 misses=86

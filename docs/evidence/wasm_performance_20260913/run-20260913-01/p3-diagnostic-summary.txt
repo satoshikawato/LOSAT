@@ -1,0 +1,235 @@
+ap078-ap131 native 1 31.849
+[TIMING] blastp_query_encoding_seg: 0.000s
+[TIMING] blastp_subject_encoding: 0.001s
+[TIMING] blastp_build_lookup: 0.181s
+[TIMING] blastp_scan_ungapped: 1.680s (calls=595)
+[TIMING] blastp_prelim_gapped: 5.885s (calls=595)
+[TIMING] blastp_prelim_exact_retries: 0 (removed_hsps=0, interval_tree_rebuilds=0, rebuild_nodes=0, endpoint_duplicates_purged=2893)
+[TIMING] blastp_prelim_merge_sort: 0.007s (calls=596)
+[TIMING] blastp_kappa_redo: 23.885s (calls=1)
+[TIMING] blastp_final_traceback_stats: 0.000s (calls=1)
+[TIMING] blastp_output_format: 0.015s (calls=1)
+[TIMING] blastp_total: 31.748s
+[TIMING] blastp_kappa_query_range_bytes_copied: 30854137
+[TIMING] blastp_kappa_subject_range_bytes_copied: 37395261
+[TIMING] blastp_kappa_subject_seg_range: 201757 bytes (calls=595, masked_residues=6627)
+[TIMING] blastp_kappa_subject_seg_cache: hits=80016 misses=595
+ap078-ap131 serial 1 37.877
+[TIMING] blastp_kappa_query_range_bytes_copied: 30854137
+[TIMING] blastp_kappa_subject_range_bytes_copied: 37395261
+[TIMING] blastp_kappa_subject_seg_range: 201757 bytes (calls=595, masked_residues=6627)
+[TIMING] blastp_kappa_subject_seg_cache: hits=80016 misses=595
+ap078-ap131 threaded 1 36.965
+[TIMING] blastp_kappa_query_range_bytes_copied: 30854137
+[TIMING] blastp_kappa_subject_range_bytes_copied: 37395261
+[TIMING] blastp_kappa_subject_seg_range: 201757 bytes (calls=595, masked_residues=6627)
+[TIMING] blastp_kappa_subject_seg_cache: hits=80016 misses=595
+ap078-ap131 threaded 8 6.951
+[TIMING] blastp_kappa_query_range_bytes_copied: 30854137
+[TIMING] blastp_kappa_subject_range_bytes_copied: 37395261
+[TIMING] blastp_kappa_subject_seg_range: 37395261 bytes (calls=80611, masked_residues=1245183)
+[TIMING] blastp_kappa_subject_seg_cache: hits=0 misses=80611
+ap078-ap131 instrumented 8 7.203
+[TIMING] blastp_query_encoding_seg: 0.001s
+[TIMING] blastp_subject_encoding: 0.002s
+[TIMING] blastp_build_lookup: 0.226s
+[TIMING] blastp_scan_ungapped: 2.505s (calls=595)
+[TIMING] blastp_prelim_gapped: 7.448s (calls=595)
+[TIMING] blastp_prelim_exact_retries: 0 (removed_hsps=0, interval_tree_rebuilds=0, rebuild_nodes=0, endpoint_duplicates_purged=2893)
+[TIMING] blastp_prelim_merge_sort: 0.009s (calls=2)
+[TIMING] blastp_kappa_redo: 5.119s (calls=1)
+[TIMING] blastp_final_traceback_stats: 0.000s (calls=1)
+[TIMING] blastp_output_format: 0.035s (calls=1)
+[TIMING] blastp_total: 6.698s
+[TIMING] blastp_kappa_query_range_bytes_copied: 30854137
+[TIMING] blastp_kappa_subject_range_bytes_copied: 37395261
+[TIMING] blastp_kappa_subject_seg_range: 37395261 bytes (calls=80611, masked_residues=1245183)
+[TIMING] blastp_kappa_subject_seg_cache: hits=0 misses=80611
+ap132-nz native 1 44.093
+[TIMING] blastp_query_encoding_seg: 0.000s
+[TIMING] blastp_subject_encoding: 0.001s
+[TIMING] blastp_build_lookup: 0.173s
+[TIMING] blastp_scan_ungapped: 1.868s (calls=581)
+[TIMING] blastp_prelim_gapped: 9.246s (calls=581)
+[TIMING] blastp_prelim_exact_retries: 0 (removed_hsps=0, interval_tree_rebuilds=0, rebuild_nodes=0, endpoint_duplicates_purged=6523)
+[TIMING] blastp_prelim_merge_sort: 0.012s (calls=582)
+[TIMING] blastp_kappa_redo: 32.514s (calls=1)
+[TIMING] blastp_final_traceback_stats: 0.000s (calls=1)
+[TIMING] blastp_output_format: 0.015s (calls=1)
+[TIMING] blastp_total: 43.994s
+[TIMING] blastp_kappa_query_range_bytes_copied: 42154079
+[TIMING] blastp_kappa_subject_range_bytes_copied: 48894697
+[TIMING] blastp_kappa_subject_seg_range: 199959 bytes (calls=581, masked_residues=5416)
+[TIMING] blastp_kappa_subject_seg_cache: hits=110712 misses=581
+ap132-nz serial 1 54.845
+[TIMING] blastp_kappa_query_range_bytes_copied: 42154079
+[TIMING] blastp_kappa_subject_range_bytes_copied: 48894697
+[TIMING] blastp_kappa_subject_seg_range: 199959 bytes (calls=581, masked_residues=5416)
+[TIMING] blastp_kappa_subject_seg_cache: hits=110712 misses=581
+ap132-nz threaded 1 55.822
+[TIMING] blastp_kappa_query_range_bytes_copied: 42154079
+[TIMING] blastp_kappa_subject_range_bytes_copied: 48894697
+[TIMING] blastp_kappa_subject_seg_range: 199959 bytes (calls=581, masked_residues=5416)
+[TIMING] blastp_kappa_subject_seg_cache: hits=110712 misses=581
+ap132-nz threaded 8 11.583
+[TIMING] blastp_kappa_query_range_bytes_copied: 42154079
+[TIMING] blastp_kappa_subject_range_bytes_copied: 48882586
+[TIMING] blastp_kappa_subject_seg_range: 48704635 bytes (calls=111293, masked_residues=1319880)
+[TIMING] blastp_kappa_subject_seg_cache: hits=0 misses=111293
+ap132-nz instrumented 8 12.325
+[TIMING] blastp_query_encoding_seg: 0.004s
+[TIMING] blastp_subject_encoding: 0.015s
+[TIMING] blastp_build_lookup: 0.250s
+[TIMING] blastp_scan_ungapped: 3.062s (calls=581)
+[TIMING] blastp_prelim_gapped: 12.376s (calls=581)
+[TIMING] blastp_prelim_exact_retries: 0 (removed_hsps=0, interval_tree_rebuilds=0, rebuild_nodes=0, endpoint_duplicates_purged=6523)
+[TIMING] blastp_prelim_merge_sort: 0.012s (calls=2)
+[TIMING] blastp_kappa_redo: 7.558s (calls=1)
+[TIMING] blastp_final_traceback_stats: 0.000s (calls=1)
+[TIMING] blastp_output_format: 0.103s (calls=1)
+[TIMING] blastp_total: 10.055s
+[TIMING] blastp_kappa_query_range_bytes_copied: 42154079
+[TIMING] blastp_kappa_subject_range_bytes_copied: 48882586
+[TIMING] blastp_kappa_subject_seg_range: 48704635 bytes (calls=111293, masked_residues=1319880)
+[TIMING] blastp_kappa_subject_seg_cache: hits=0 misses=111293
+ap131-nz native 1 47.381
+[TIMING] blastp_query_encoding_seg: 0.000s
+[TIMING] blastp_subject_encoding: 0.001s
+[TIMING] blastp_build_lookup: 0.180s
+[TIMING] blastp_scan_ungapped: 1.946s (calls=581)
+[TIMING] blastp_prelim_gapped: 9.993s (calls=581)
+[TIMING] blastp_prelim_exact_retries: 0 (removed_hsps=0, interval_tree_rebuilds=0, rebuild_nodes=0, endpoint_duplicates_purged=7688)
+[TIMING] blastp_prelim_merge_sort: 0.013s (calls=582)
+[TIMING] blastp_kappa_redo: 34.649s (calls=1)
+[TIMING] blastp_final_traceback_stats: 0.000s (calls=1)
+[TIMING] blastp_output_format: 0.022s (calls=1)
+[TIMING] blastp_total: 47.022s
+[TIMING] blastp_kappa_query_range_bytes_copied: 43481831
+[TIMING] blastp_kappa_subject_range_bytes_copied: 51181109
+[TIMING] blastp_kappa_subject_seg_range: 199922 bytes (calls=580, masked_residues=5416)
+[TIMING] blastp_kappa_subject_seg_cache: hits=116851 misses=580
+ap131-nz serial 1 57.958
+[TIMING] blastp_kappa_query_range_bytes_copied: 43481831
+[TIMING] blastp_kappa_subject_range_bytes_copied: 51181109
+[TIMING] blastp_kappa_subject_seg_range: 199922 bytes (calls=580, masked_residues=5416)
+[TIMING] blastp_kappa_subject_seg_cache: hits=116851 misses=580
+ap131-nz threaded 1 57.658
+[TIMING] blastp_kappa_query_range_bytes_copied: 43481831
+[TIMING] blastp_kappa_subject_range_bytes_copied: 51181109
+[TIMING] blastp_kappa_subject_seg_range: 199922 bytes (calls=580, masked_residues=5416)
+[TIMING] blastp_kappa_subject_seg_cache: hits=116851 misses=580
+ap131-nz threaded 8 12.18
+[TIMING] blastp_kappa_query_range_bytes_copied: 43481831
+[TIMING] blastp_kappa_subject_range_bytes_copied: 51180877
+[TIMING] blastp_kappa_subject_seg_range: 51180877 bytes (calls=117431, masked_residues=1401255)
+[TIMING] blastp_kappa_subject_seg_cache: hits=0 misses=117431
+ap131-nz instrumented 8 12.049
+[TIMING] blastp_query_encoding_seg: 0.002s
+[TIMING] blastp_subject_encoding: 0.011s
+[TIMING] blastp_build_lookup: 0.236s
+[TIMING] blastp_scan_ungapped: 3.099s (calls=581)
+[TIMING] blastp_prelim_gapped: 13.179s (calls=581)
+[TIMING] blastp_prelim_exact_retries: 0 (removed_hsps=0, interval_tree_rebuilds=0, rebuild_nodes=0, endpoint_duplicates_purged=7688)
+[TIMING] blastp_prelim_merge_sort: 0.012s (calls=2)
+[TIMING] blastp_kappa_redo: 8.013s (calls=1)
+[TIMING] blastp_final_traceback_stats: 0.000s (calls=1)
+[TIMING] blastp_output_format: 0.029s (calls=1)
+[TIMING] blastp_total: 10.509s
+[TIMING] blastp_kappa_query_range_bytes_copied: 43481831
+[TIMING] blastp_kappa_subject_range_bytes_copied: 51180877
+[TIMING] blastp_kappa_subject_seg_range: 51180877 bytes (calls=117431, masked_residues=1401255)
+[TIMING] blastp_kappa_subject_seg_cache: hits=0 misses=117431
+wssv-paja native 1 2.923
+[TIMING] blastp_query_encoding_seg: 0.000s
+[TIMING] blastp_subject_encoding: 0.001s
+[TIMING] blastp_build_lookup: 0.088s
+[TIMING] blastp_scan_ungapped: 0.176s (calls=86)
+[TIMING] blastp_prelim_gapped: 0.548s (calls=86)
+[TIMING] blastp_prelim_exact_retries: 0 (removed_hsps=0, interval_tree_rebuilds=0, rebuild_nodes=0, endpoint_duplicates_purged=2773)
+[TIMING] blastp_prelim_merge_sort: 0.000s (calls=87)
+[TIMING] blastp_kappa_redo: 1.844s (calls=1)
+[TIMING] blastp_final_traceback_stats: 0.000s (calls=1)
+[TIMING] blastp_output_format: 0.013s (calls=1)
+[TIMING] blastp_total: 2.730s
+[TIMING] blastp_kappa_query_range_bytes_copied: 2912505
+[TIMING] blastp_kappa_subject_range_bytes_copied: 5902788
+[TIMING] blastp_kappa_subject_seg_range: 66738 bytes (calls=86, masked_residues=3147)
+[TIMING] blastp_kappa_subject_seg_cache: hits=4631 misses=86
+wssv-paja serial 1 3.647
+[TIMING] blastp_kappa_query_range_bytes_copied: 2912505
+[TIMING] blastp_kappa_subject_range_bytes_copied: 5902788
+[TIMING] blastp_kappa_subject_seg_range: 66738 bytes (calls=86, masked_residues=3147)
+[TIMING] blastp_kappa_subject_seg_cache: hits=4631 misses=86
+wssv-paja threaded 1 3.773
+[TIMING] blastp_kappa_query_range_bytes_copied: 2912505
+[TIMING] blastp_kappa_subject_range_bytes_copied: 5902788
+[TIMING] blastp_kappa_subject_seg_range: 66738 bytes (calls=86, masked_residues=3147)
+[TIMING] blastp_kappa_subject_seg_cache: hits=4631 misses=86
+wssv-paja threaded 8 2.059
+[TIMING] blastp_kappa_query_range_bytes_copied: 2912505
+[TIMING] blastp_kappa_subject_range_bytes_copied: 5902788
+[TIMING] blastp_kappa_subject_seg_range: 5902788 bytes (calls=4717, masked_residues=333980)
+[TIMING] blastp_kappa_subject_seg_cache: hits=0 misses=4717
+wssv-paja instrumented 8 2.284
+[TIMING] blastp_query_encoding_seg: 0.002s
+[TIMING] blastp_subject_encoding: 0.012s
+[TIMING] blastp_build_lookup: 0.120s
+[TIMING] blastp_scan_ungapped: 0.356s (calls=86)
+[TIMING] blastp_prelim_gapped: 0.669s (calls=86)
+[TIMING] blastp_prelim_exact_retries: 0 (removed_hsps=0, interval_tree_rebuilds=0, rebuild_nodes=0, endpoint_duplicates_purged=2773)
+[TIMING] blastp_prelim_merge_sort: 0.001s (calls=2)
+[TIMING] blastp_kappa_redo: 0.461s (calls=1)
+[TIMING] blastp_final_traceback_stats: 0.000s (calls=1)
+[TIMING] blastp_output_format: 0.012s (calls=1)
+[TIMING] blastp_total: 0.811s
+[TIMING] blastp_kappa_query_range_bytes_copied: 2912505
+[TIMING] blastp_kappa_subject_range_bytes_copied: 5902788
+[TIMING] blastp_kappa_subject_seg_range: 5902788 bytes (calls=4717, masked_residues=333980)
+[TIMING] blastp_kappa_subject_seg_cache: hits=0 misses=4717
+sicy-cobv native 1 1.363
+[TIMING] blastp_query_encoding_seg: 0.000s
+[TIMING] blastp_subject_encoding: 0.006s
+[TIMING] blastp_build_lookup: 0.084s
+[TIMING] blastp_scan_ungapped: 0.086s (calls=105)
+[TIMING] blastp_prelim_gapped: 0.114s (calls=105)
+[TIMING] blastp_prelim_exact_retries: 0 (removed_hsps=0, interval_tree_rebuilds=0, rebuild_nodes=0, endpoint_duplicates_purged=194)
+[TIMING] blastp_prelim_merge_sort: 0.000s (calls=106)
+[TIMING] blastp_kappa_redo: 0.449s (calls=1)
+[TIMING] blastp_final_traceback_stats: 0.000s (calls=1)
+[TIMING] blastp_output_format: 0.011s (calls=1)
+[TIMING] blastp_total: 0.839s
+[TIMING] blastp_kappa_query_range_bytes_copied: 1272321
+[TIMING] blastp_kappa_subject_range_bytes_copied: 2051199
+[TIMING] blastp_kappa_subject_seg_range: 68354 bytes (calls=102, masked_residues=1896)
+[TIMING] blastp_kappa_subject_seg_cache: hits=1562 misses=102
+sicy-cobv serial 1 1.054
+[TIMING] blastp_kappa_query_range_bytes_copied: 1272321
+[TIMING] blastp_kappa_subject_range_bytes_copied: 2051199
+[TIMING] blastp_kappa_subject_seg_range: 68354 bytes (calls=102, masked_residues=1896)
+[TIMING] blastp_kappa_subject_seg_cache: hits=1562 misses=102
+sicy-cobv threaded 1 1.364
+[TIMING] blastp_kappa_query_range_bytes_copied: 1272321
+[TIMING] blastp_kappa_subject_range_bytes_copied: 2051199
+[TIMING] blastp_kappa_subject_seg_range: 68354 bytes (calls=102, masked_residues=1896)
+[TIMING] blastp_kappa_subject_seg_cache: hits=1562 misses=102
+sicy-cobv threaded 8 1.655
+[TIMING] blastp_kappa_query_range_bytes_copied: 1272321
+[TIMING] blastp_kappa_subject_range_bytes_copied: 2051199
+[TIMING] blastp_kappa_subject_seg_range: 2051199 bytes (calls=1664, masked_residues=69056)
+[TIMING] blastp_kappa_subject_seg_cache: hits=0 misses=1664
+sicy-cobv instrumented 8 1.842
+[TIMING] blastp_query_encoding_seg: 0.001s
+[TIMING] blastp_subject_encoding: 0.014s
+[TIMING] blastp_build_lookup: 0.091s
+[TIMING] blastp_scan_ungapped: 0.211s (calls=105)
+[TIMING] blastp_prelim_gapped: 0.159s (calls=105)
+[TIMING] blastp_prelim_exact_retries: 0 (removed_hsps=0, interval_tree_rebuilds=0, rebuild_nodes=0, endpoint_duplicates_purged=194)
+[TIMING] blastp_prelim_merge_sort: 0.001s (calls=2)
+[TIMING] blastp_kappa_redo: 0.167s (calls=1)
+[TIMING] blastp_final_traceback_stats: 0.000s (calls=1)
+[TIMING] blastp_output_format: 0.008s (calls=1)
+[TIMING] blastp_total: 0.375s
+[TIMING] blastp_kappa_query_range_bytes_copied: 1272321
+[TIMING] blastp_kappa_subject_range_bytes_copied: 2051199
+[TIMING] blastp_kappa_subject_seg_range: 2051199 bytes (calls=1664, masked_residues=69056)
+[TIMING] blastp_kappa_subject_seg_cache: hits=0 misses=1664

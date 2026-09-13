@@ -1,0 +1,10 @@
+Node: v24.21.0; V8: 13.6.233.17-node.53; executable: /tmp/losat-node-check/node-v24.21.0-linux-x64/bin/node
+Wasm serial: /mnt/c/Users/genom/GitHub/LOSAT/docs/evidence/wasm_performance_20260913/run-20260913-01/artifacts/losat-serial-command.wasm; modified: 2026-09-13T07:07:08.000Z
+Wasm threaded: /mnt/c/Users/genom/GitHub/LOSAT/docs/evidence/wasm_performance_20260913/run-20260913-01/artifacts/losat-threaded-command.wasm; modified: 2026-09-13T07:07:58.000Z
+Running PesePMNV.MjPMNV.losatn.blastn.wasm
+Finished PesePMNV.MjPMNV.losatn.blastn.wasm: 0.717 s
+Running PesePMNV.MjPMNV.losatn.blastn.wasm.n8
+Finished PesePMNV.MjPMNV.losatn.blastn.wasm.n8: 1.184 s
+Running PesePMNV.MjPMNV.blastn
+Finished PesePMNV.MjPMNV.blastn: 0.409 s
+Finished 1 pairs. Results: /mnt/c/Users/genom/GitHub/LOSAT/docs/evidence/wasm_performance_20260913/run-20260913-02/simple-blastn-control

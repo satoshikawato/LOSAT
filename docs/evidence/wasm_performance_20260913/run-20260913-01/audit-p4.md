@@ -1,0 +1,13 @@
+# Independent read-only P4 audit
+
+Auditor: custom `ncbi_parity_auditor`, `/root/audit_measurement`. No builds, benchmarks, tests or edits were delegated. The following records its returned findings.
+
+All33 output hashes were verified against actual bytes; all processes exited0. For each fixture, all ten baseline/final LOSAT results are byte-identical across native n1/n8, serial n1 and threaded n1/n8. EDL933/Sakai has5,718 raw-identical rows. NZ self megablast has one differing row among454. Sakai/MG1655 has five differing rows among6,476. The raw benchmark remains PARTIAL with20 exclusions and no measured repetitions.
+
+Sakai rows986,1275,1479,1656,1970 reproduce the exact registered five coordinate keys and counts pident=2,length=2,mismatch=2,gapopen=5 in `LOSAT/tests/blastn_v010_source_exceptions.tsv:5`. The retained PR5 native file at `/mnt/c/Users/genom/LOSAT-certification-evidence/losat-pr5-integrated-5845d22-20260831-final/native/blastn/Sakai.MG1655.megablast.losat.out` hashes to canonical `3f27c1f1396b59ecb7e78827b5da390e9c97a276c05cbc7a6c82f56bd0a03262`. Its data-row bytes equal current LOSAT outfmt6 bytes `82e6e0aa…`, and the retained PR5 NCBI data rows equal current oracle `89bc2da3…`. This is diagnostic correspondence only: PR5 is outfmt7, P4 is outfmt6, so it is not a raw GateA pass and does not relabel the failure.
+
+NZ authority registers `NZ_CP006932.NZ_CP006932.task_blastn`, not megablast. Its row101 at query320597–321685/subject321850–322940 differs in pident77.807→77.788, length1131→1130, mismatch169→171, gapopen67→65 (NCBI→LOSAT). No registered exception covers it.
+
+NCBI `blast_hits.c:2268–2387` compares context/endpoints/score but not gap_info; `2455–2535` qsorts and retains the first equal-endpoint survivor. Corresponding Rust owners are `filtering/purge_endpoints.rs:94–132`, stable sorting in `hsp.rs:483–495`, and preliminary selection in `blast_engine/run.rs:2905–3049`. Adding identity/gap/edit-script tie-breakers would lack authority. This is not proof of NZ's cause: `greedy_align.c:278–294` has explicit strict traceback comparisons, mirrored in `alignment/greedy.rs:2317–2333`; directional merge and gap reduction occur at3284–3478. Causal resolution requires raw scores/seeds and pre/post traceback, reduction and purge states. Reported coordinate/E-value/bit-score equality does not expose those states.
+
+All158 final source entries match both actual current files and the frozen snapshot. All four final artifact bytes match recorded and baseline hashes. These differences predate this task's adopted changes. NZ raw parity and its first causal divergence remain unresolved; Sakai's narrow classification is unchanged.

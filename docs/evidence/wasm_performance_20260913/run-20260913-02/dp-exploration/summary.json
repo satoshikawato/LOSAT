@@ -1,0 +1,70 @@
+[
+  {
+    "case_id": "AP027078.AP027131.losatp",
+    "version": "baseline",
+    "kind": "threaded",
+    "threads": 8,
+    "boundary": "cold-process",
+    "median_seconds": 6.40025333900121,
+    "min_seconds": 6.396242462011287,
+    "max_seconds": 6.470780281000771,
+    "samples": [
+      6.470780281000771,
+      6.396242462011287,
+      6.40025333900121
+    ],
+    "peak_rss_bytes": 309923840,
+    "raw_output_sha256": "5bdaa58908a96768c26c329ade49a97d4e2d705895e457709eae094b14c708d4"
+  },
+  {
+    "case_id": "AP027078.AP027131.losatp",
+    "version": "candidate",
+    "kind": "threaded",
+    "threads": 8,
+    "boundary": "cold-process",
+    "median_seconds": 6.582997810008237,
+    "min_seconds": 6.527502160024596,
+    "max_seconds": 7.082625406997977,
+    "samples": [
+      7.082625406997977,
+      6.582997810008237,
+      6.527502160024596
+    ],
+    "peak_rss_bytes": 319385600,
+    "raw_output_sha256": "5bdaa58908a96768c26c329ade49a97d4e2d705895e457709eae094b14c708d4"
+  },
+  {
+    "case_id": "AP027132.NZ_CP006932.losatp",
+    "version": "baseline",
+    "kind": "threaded",
+    "threads": 8,
+    "boundary": "cold-process",
+    "median_seconds": 9.22850689801271,
+    "min_seconds": 9.18727251997916,
+    "max_seconds": 9.405315388983581,
+    "samples": [
+      9.22850689801271,
+      9.405315388983581,
+      9.18727251997916
+    ],
+    "peak_rss_bytes": 321687552,
+    "raw_output_sha256": "cd81f8fef3dff78fb48f5923de43c84f1af78d006aaa9a8cae2c2f1f20aed181"
+  },
+  {
+    "case_id": "AP027132.NZ_CP006932.losatp",
+    "version": "candidate",
+    "kind": "threaded",
+    "threads": 8,
+    "boundary": "cold-process",
+    "median_seconds": 9.500732438988052,
+    "min_seconds": 9.375795978005044,
+    "max_seconds": 9.63778669401654,
+    "samples": [
+      9.500732438988052,
+      9.63778669401654,
+      9.375795978005044
+    ],
+    "peak_rss_bytes": 322764800,
+    "raw_output_sha256": "cd81f8fef3dff78fb48f5923de43c84f1af78d006aaa9a8cae2c2f1f20aed181"
+  }
+]

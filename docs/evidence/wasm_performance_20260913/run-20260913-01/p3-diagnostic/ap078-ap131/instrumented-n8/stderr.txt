@@ -1,0 +1,84 @@
+[losat-wasi-threads] shared-memory guards: 126 fills, 1233 copies
+[losat-wasi-event] {"event":"spawn_attempt","at_ms":141.269181,"tid":1,"attempt":1}
+[losat-wasi-event] {"event":"spawned","at_ms":145.380868,"tid":1}
+[losat-wasi-threads] worker boot tid=1
+[losat-wasi-threads] worker instantiate tid=1 start_arg=3187528
+[losat-wasi-threads] worker start tid=1
+[losat-wasi-event] {"event":"ready","at_ms":182.765663,"tid":1}
+[losat-wasi-event] {"event":"spawn_attempt","at_ms":183.131001,"tid":2,"attempt":2}
+[losat-wasi-event] {"event":"spawned","at_ms":183.70214,"tid":2}
+[losat-wasi-threads] worker boot tid=2
+[losat-wasi-threads] worker instantiate tid=2 start_arg=4237816
+[losat-wasi-threads] worker start tid=2
+[losat-wasi-event] {"event":"ready","at_ms":220.088495,"tid":2}
+[losat-wasi-event] {"event":"spawn_attempt","at_ms":222.049055,"tid":3,"attempt":3}
+[losat-wasi-event] {"event":"spawned","at_ms":222.596904,"tid":3}
+[losat-wasi-threads] worker boot tid=3
+[losat-wasi-threads] worker instantiate tid=3 start_arg=5291880
+[losat-wasi-threads] worker start tid=3
+[losat-wasi-event] {"event":"ready","at_ms":259.4088,"tid":3}
+[losat-wasi-event] {"event":"spawn_attempt","at_ms":259.56594,"tid":4,"attempt":4}
+[losat-wasi-event] {"event":"spawned","at_ms":260.010411,"tid":4}
+[losat-wasi-threads] worker boot tid=4
+[losat-wasi-threads] worker instantiate tid=4 start_arg=6343384
+[losat-wasi-threads] worker start tid=4
+[losat-wasi-event] {"event":"ready","at_ms":298.716929,"tid":4}
+[losat-wasi-event] {"event":"spawn_attempt","at_ms":298.853423,"tid":5,"attempt":5}
+[losat-wasi-event] {"event":"spawned","at_ms":299.386581,"tid":5}
+[losat-wasi-threads] worker boot tid=5
+[losat-wasi-threads] worker instantiate tid=5 start_arg=7394904
+[losat-wasi-threads] worker start tid=5
+[losat-wasi-event] {"event":"ready","at_ms":337.871902,"tid":5}
+[losat-wasi-event] {"event":"spawn_attempt","at_ms":338.01392,"tid":6,"attempt":6}
+[losat-wasi-event] {"event":"spawned","at_ms":338.452125,"tid":6}
+[losat-wasi-threads] worker boot tid=6
+[losat-wasi-threads] worker instantiate tid=6 start_arg=8446424
+[losat-wasi-threads] worker start tid=6
+[losat-wasi-event] {"event":"ready","at_ms":379.461488,"tid":6}
+[losat-wasi-event] {"event":"spawn_attempt","at_ms":379.600316,"tid":7,"attempt":7}
+[losat-wasi-event] {"event":"spawned","at_ms":380.011126,"tid":7}
+[losat-wasi-threads] worker boot tid=7
+[losat-wasi-threads] worker instantiate tid=7 start_arg=9497944
+[losat-wasi-threads] worker start tid=7
+[losat-wasi-event] {"event":"ready","at_ms":414.874176,"tid":7}
+[losat-wasi-event] {"event":"spawn_attempt","at_ms":415.00969,"tid":8,"attempt":8}
+[losat-wasi-event] {"event":"spawned","at_ms":415.47807,"tid":8}
+[losat-wasi-threads] worker boot tid=8
+[losat-wasi-threads] worker instantiate tid=8 start_arg=10549464
+[losat-wasi-threads] worker start tid=8
+[losat-wasi-event] {"event":"ready","at_ms":457.227343,"tid":8}
+[losat-thread-pool] program=blastp requested_threads=8 pool_threads=8 caller_participates=false measured_activity=null
+[losat-thread-stage] program=blastp stage=subject-prep work_items=595 parallel_selected=true measured_activity=null
+[losat-thread-stage] program=blastp stage=prelim work_items=595 parallel_selected=true measured_activity=null
+[losat-thread-stage] program=blastp stage=kappa-query-redo work_items=530 parallel_selected=true measured_activity=null
+[TIMING] blastp_query_encoding_seg: 0.001s
+[TIMING] blastp_subject_encoding: 0.002s
+[TIMING] blastp_build_lookup: 0.226s
+[TIMING] blastp_scan_ungapped: 2.505s (calls=595)
+[TIMING] blastp_prelim_gapped: 7.448s (calls=595)
+[TIMING] blastp_prelim_exact_retries: 0 (removed_hsps=0, interval_tree_rebuilds=0, rebuild_nodes=0, endpoint_duplicates_purged=2893)
+[TIMING] blastp_prelim_merge_sort: 0.009s (calls=2)
+[TIMING] blastp_kappa_redo: 5.119s (calls=1)
+[TIMING] blastp_final_traceback_stats: 0.000s (calls=1)
+[TIMING] blastp_output_format: 0.035s (calls=1)
+[TIMING] blastp_total: 6.698s
+[TIMING] blastp_kappa_query_range_bytes_copied: 30854137
+[TIMING] blastp_kappa_subject_range_bytes_copied: 37395261
+[TIMING] blastp_kappa_subject_seg_range: 37395261 bytes (calls=80611, masked_residues=1245183)
+[TIMING] blastp_kappa_subject_seg_cache: hits=0 misses=80611
+[losat-wasi-threads] worker done tid=3
+[losat-wasi-threads] worker done tid=1
+[losat-wasi-threads] worker done tid=4
+[losat-wasi-threads] worker done tid=2
+[losat-wasi-threads] worker done tid=5
+[losat-wasi-threads] worker done tid=7
+[losat-wasi-threads] worker done tid=6
+[losat-wasi-threads] worker done tid=8
+[losat-wasi-event] {"event":"exited","at_ms":7171.560148,"tid":1,"code":0}
+[losat-wasi-event] {"event":"exited","at_ms":7174.163046,"tid":3,"code":0}
+[losat-wasi-event] {"event":"exited","at_ms":7175.143048,"tid":4,"code":0}
+[losat-wasi-event] {"event":"exited","at_ms":7175.386351,"tid":5,"code":0}
+[losat-wasi-event] {"event":"exited","at_ms":7175.537791,"tid":2,"code":0}
+[losat-wasi-event] {"event":"exited","at_ms":7175.645722,"tid":6,"code":0}
+[losat-wasi-event] {"event":"exited","at_ms":7175.963005,"tid":8,"code":0}
+[losat-wasi-event] {"event":"exited","at_ms":7176.119629,"tid":7,"code":0}

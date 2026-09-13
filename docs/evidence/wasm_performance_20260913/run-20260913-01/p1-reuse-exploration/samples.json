@@ -1,0 +1,655 @@
+[
+  {
+    "status": "PASS",
+    "reason": null,
+    "exit_status": 0,
+    "wall_seconds": 3.6518564650032204,
+    "realtime_seconds": 3.6518611907958984,
+    "boottime_seconds": 3.6518605629971717,
+    "gnu_elapsed_seconds": 3.63,
+    "process_ended_utc": "2026-09-13T08:51:25Z",
+    "watchdog_clocks": {
+      "started": {
+        "monotonic": 152006.439306469,
+        "realtime": 1789289482.2489247
+      }
+    },
+    "realtime_clock_agreement": true,
+    "monotonic_clock_agreement": true,
+    "elapsed_clock": "CLOCK_MONOTONIC; realtime and GNU elapsed are adjustable-clock diagnostics",
+    "cpu_user_seconds": 3.89,
+    "cpu_system_seconds": 0.0,
+    "peak_rss_bytes": 129900544,
+    "output": "/mnt/c/Users/genom/GitHub/LOSAT/docs/evidence/wasm_performance_20260913/run-20260913-01/p1-reuse-exploration/oracle/MelaMJNV.PemoMJNVA.tlosatx/output.txt",
+    "raw_output_sha256": "bbef153094025db89dd4a69b2a3c4246b0b8853396fe740bc7e1bd654db105b6",
+    "raw_output_bytes": 351051,
+    "started_utc": "2026-09-13T08:51:22Z",
+    "ended_utc": "2026-09-13T08:51:25Z",
+    "timeout_seconds": 300,
+    "unavailable_metrics": {},
+    "case_id": "MelaMJNV.PemoMJNVA.tlosatx",
+    "version": "oracle",
+    "phase": "oracle",
+    "timed": false
+  },
+  {
+    "status": "PASS",
+    "reason": null,
+    "exit_status": 0,
+    "wall_seconds": 6.591433194000274,
+    "realtime_seconds": 6.591437101364136,
+    "boottime_seconds": 6.591435970010934,
+    "gnu_elapsed_seconds": 6.57,
+    "process_ended_utc": "2026-09-13T08:51:32Z",
+    "watchdog_clocks": {
+      "started": {
+        "monotonic": 152010.164564722,
+        "realtime": 1789289485.9741828
+      }
+    },
+    "realtime_clock_agreement": true,
+    "monotonic_clock_agreement": true,
+    "elapsed_clock": "CLOCK_MONOTONIC; realtime and GNU elapsed are adjustable-clock diagnostics",
+    "cpu_user_seconds": 7.32,
+    "cpu_system_seconds": 0.03,
+    "peak_rss_bytes": 154402816,
+    "output": "/mnt/c/Users/genom/GitHub/LOSAT/docs/evidence/wasm_performance_20260913/run-20260913-01/p1-reuse-exploration/diagnostic/MelaMJNV.PemoMJNVA.tlosatx/baseline-serial-n1/output.txt",
+    "raw_output_sha256": "bbef153094025db89dd4a69b2a3c4246b0b8853396fe740bc7e1bd654db105b6",
+    "raw_output_bytes": 351051,
+    "started_utc": "2026-09-13T08:51:25Z",
+    "ended_utc": "2026-09-13T08:51:32Z",
+    "timeout_seconds": 300,
+    "unavailable_metrics": {},
+    "case_id": "MelaMJNV.PemoMJNVA.tlosatx",
+    "version": "baseline",
+    "kind": "serial",
+    "threads": 1,
+    "timed": false,
+    "phase": "diagnostic",
+    "raw_equal": true,
+    "thread_contract": {
+      "requested_threads": 1,
+      "pool_threads": 0,
+      "caller_participates": false,
+      "effective_compute_threads": 1,
+      "thread_stages": [
+        {
+          "program": "tblastx",
+          "stage": "subjects",
+          "work_items": 1,
+          "parallel_selected": false,
+          "measured_activity": null
+        },
+        {
+          "program": "tblastx",
+          "stage": "linking",
+          "work_items": 4,
+          "parallel_selected": false,
+          "measured_activity": null
+        },
+        {
+          "program": "tblastx",
+          "stage": "linking",
+          "work_items": 4,
+          "parallel_selected": false,
+          "measured_activity": null
+        }
+      ],
+      "host_worker_counts": null,
+      "measured_activity": null
+    }
+  },
+  {
+    "status": "PASS",
+    "reason": null,
+    "exit_status": 0,
+    "wall_seconds": 6.697088535991497,
+    "realtime_seconds": 6.697091341018677,
+    "boottime_seconds": 6.697090934991138,
+    "gnu_elapsed_seconds": 6.68,
+    "process_ended_utc": "2026-09-13T08:51:39Z",
+    "watchdog_clocks": {
+      "started": {
+        "monotonic": 152016.829769521,
+        "realtime": 1789289492.6393878
+      }
+    },
+    "realtime_clock_agreement": true,
+    "monotonic_clock_agreement": true,
+    "elapsed_clock": "CLOCK_MONOTONIC; realtime and GNU elapsed are adjustable-clock diagnostics",
+    "cpu_user_seconds": 7.43,
+    "cpu_system_seconds": 0.04,
+    "peak_rss_bytes": 163729408,
+    "output": "/mnt/c/Users/genom/GitHub/LOSAT/docs/evidence/wasm_performance_20260913/run-20260913-01/p1-reuse-exploration/diagnostic/MelaMJNV.PemoMJNVA.tlosatx/baseline-threaded-n1/output.txt",
+    "raw_output_sha256": "bbef153094025db89dd4a69b2a3c4246b0b8853396fe740bc7e1bd654db105b6",
+    "raw_output_bytes": 351051,
+    "started_utc": "2026-09-13T08:51:32Z",
+    "ended_utc": "2026-09-13T08:51:39Z",
+    "timeout_seconds": 300,
+    "unavailable_metrics": {},
+    "case_id": "MelaMJNV.PemoMJNVA.tlosatx",
+    "version": "baseline",
+    "kind": "threaded",
+    "threads": 1,
+    "timed": false,
+    "phase": "diagnostic",
+    "raw_equal": true,
+    "thread_contract": {
+      "requested_threads": 1,
+      "pool_threads": 0,
+      "caller_participates": false,
+      "effective_compute_threads": 1,
+      "thread_stages": [
+        {
+          "program": "tblastx",
+          "stage": "subjects",
+          "work_items": 1,
+          "parallel_selected": false,
+          "measured_activity": null
+        },
+        {
+          "program": "tblastx",
+          "stage": "linking",
+          "work_items": 4,
+          "parallel_selected": false,
+          "measured_activity": null
+        },
+        {
+          "program": "tblastx",
+          "stage": "linking",
+          "work_items": 4,
+          "parallel_selected": false,
+          "measured_activity": null
+        }
+      ],
+      "host_worker_counts": {
+        "spawn_attempt": 0,
+        "spawned": 0,
+        "ready": 0,
+        "exited": 0
+      },
+      "measured_activity": null
+    }
+  },
+  {
+    "status": "PASS",
+    "reason": null,
+    "exit_status": 0,
+    "wall_seconds": 7.631159521988593,
+    "realtime_seconds": 7.6311633586883545,
+    "boottime_seconds": 7.6311633749864995,
+    "gnu_elapsed_seconds": 7.61,
+    "process_ended_utc": "2026-09-13T08:51:47Z",
+    "watchdog_clocks": {
+      "started": {
+        "monotonic": 152023.606128517,
+        "realtime": 1789289499.4157465
+      }
+    },
+    "realtime_clock_agreement": true,
+    "monotonic_clock_agreement": true,
+    "elapsed_clock": "CLOCK_MONOTONIC; realtime and GNU elapsed are adjustable-clock diagnostics",
+    "cpu_user_seconds": 20.11,
+    "cpu_system_seconds": 0.09,
+    "peak_rss_bytes": 304861184,
+    "output": "/mnt/c/Users/genom/GitHub/LOSAT/docs/evidence/wasm_performance_20260913/run-20260913-01/p1-reuse-exploration/diagnostic/MelaMJNV.PemoMJNVA.tlosatx/baseline-threaded-n8/output.txt",
+    "raw_output_sha256": "bbef153094025db89dd4a69b2a3c4246b0b8853396fe740bc7e1bd654db105b6",
+    "raw_output_bytes": 351051,
+    "started_utc": "2026-09-13T08:51:39Z",
+    "ended_utc": "2026-09-13T08:51:47Z",
+    "timeout_seconds": 300,
+    "unavailable_metrics": {},
+    "case_id": "MelaMJNV.PemoMJNVA.tlosatx",
+    "version": "baseline",
+    "kind": "threaded",
+    "threads": 8,
+    "timed": false,
+    "phase": "diagnostic",
+    "raw_equal": true,
+    "thread_contract": {
+      "requested_threads": 8,
+      "pool_threads": 8,
+      "caller_participates": false,
+      "effective_compute_threads": 8,
+      "thread_stages": [
+        {
+          "program": "tblastx",
+          "stage": "subjects",
+          "work_items": 1,
+          "parallel_selected": false,
+          "measured_activity": null
+        },
+        {
+          "program": "tblastx",
+          "stage": "linking",
+          "work_items": 4,
+          "parallel_selected": true,
+          "measured_activity": null
+        },
+        {
+          "program": "tblastx",
+          "stage": "linking",
+          "work_items": 4,
+          "parallel_selected": true,
+          "measured_activity": null
+        }
+      ],
+      "host_worker_counts": {
+        "spawn_attempt": 8,
+        "spawned": 8,
+        "ready": 8,
+        "exited": 8
+      },
+      "measured_activity": null
+    }
+  },
+  {
+    "status": "PASS",
+    "reason": null,
+    "exit_status": 0,
+    "wall_seconds": 6.184284667018801,
+    "realtime_seconds": 8.464638948440552,
+    "boottime_seconds": 6.184287091018632,
+    "gnu_elapsed_seconds": 8.45,
+    "process_ended_utc": "2026-09-13T08:51:55Z",
+    "watchdog_clocks": {
+      "started": {
+        "monotonic": 152031.327268458,
+        "realtime": 1789289507.136887
+      }
+    },
+    "realtime_clock_agreement": false,
+    "monotonic_clock_agreement": true,
+    "elapsed_clock": "CLOCK_MONOTONIC; realtime and GNU elapsed are adjustable-clock diagnostics",
+    "cpu_user_seconds": 6.44,
+    "cpu_system_seconds": 0.03,
+    "peak_rss_bytes": 144420864,
+    "output": "/mnt/c/Users/genom/GitHub/LOSAT/docs/evidence/wasm_performance_20260913/run-20260913-01/p1-reuse-exploration/diagnostic/MelaMJNV.PemoMJNVA.tlosatx/candidate-serial-n1/output.txt",
+    "raw_output_sha256": "bbef153094025db89dd4a69b2a3c4246b0b8853396fe740bc7e1bd654db105b6",
+    "raw_output_bytes": 351051,
+    "started_utc": "2026-09-13T08:51:47Z",
+    "ended_utc": "2026-09-13T08:51:55Z",
+    "timeout_seconds": 300,
+    "unavailable_metrics": {},
+    "case_id": "MelaMJNV.PemoMJNVA.tlosatx",
+    "version": "candidate",
+    "kind": "serial",
+    "threads": 1,
+    "timed": false,
+    "phase": "diagnostic",
+    "raw_equal": true,
+    "thread_contract": {
+      "requested_threads": 1,
+      "pool_threads": 0,
+      "caller_participates": false,
+      "effective_compute_threads": 1,
+      "thread_stages": [
+        {
+          "program": "tblastx",
+          "stage": "subjects",
+          "work_items": 1,
+          "parallel_selected": false,
+          "measured_activity": null
+        },
+        {
+          "program": "tblastx",
+          "stage": "linking",
+          "work_items": 4,
+          "parallel_selected": false,
+          "measured_activity": null
+        },
+        {
+          "program": "tblastx",
+          "stage": "linking",
+          "work_items": 4,
+          "parallel_selected": false,
+          "measured_activity": null
+        }
+      ],
+      "host_worker_counts": null,
+      "measured_activity": null
+    }
+  },
+  {
+    "status": "PASS",
+    "reason": null,
+    "exit_status": 0,
+    "wall_seconds": 6.1737136770098004,
+    "realtime_seconds": 6.173717021942139,
+    "boottime_seconds": 6.173716167977545,
+    "gnu_elapsed_seconds": 6.15,
+    "process_ended_utc": "2026-09-13T08:52:01Z",
+    "watchdog_clocks": {
+      "started": {
+        "monotonic": 152037.586686544,
+        "realtime": 1789289515.6766562
+      }
+    },
+    "realtime_clock_agreement": true,
+    "monotonic_clock_agreement": true,
+    "elapsed_clock": "CLOCK_MONOTONIC; realtime and GNU elapsed are adjustable-clock diagnostics",
+    "cpu_user_seconds": 6.49,
+    "cpu_system_seconds": 0.06,
+    "peak_rss_bytes": 172892160,
+    "output": "/mnt/c/Users/genom/GitHub/LOSAT/docs/evidence/wasm_performance_20260913/run-20260913-01/p1-reuse-exploration/diagnostic/MelaMJNV.PemoMJNVA.tlosatx/candidate-threaded-n1/output.txt",
+    "raw_output_sha256": "bbef153094025db89dd4a69b2a3c4246b0b8853396fe740bc7e1bd654db105b6",
+    "raw_output_bytes": 351051,
+    "started_utc": "2026-09-13T08:51:55Z",
+    "ended_utc": "2026-09-13T08:52:01Z",
+    "timeout_seconds": 300,
+    "unavailable_metrics": {},
+    "case_id": "MelaMJNV.PemoMJNVA.tlosatx",
+    "version": "candidate",
+    "kind": "threaded",
+    "threads": 1,
+    "timed": false,
+    "phase": "diagnostic",
+    "raw_equal": true,
+    "thread_contract": {
+      "requested_threads": 1,
+      "pool_threads": 0,
+      "caller_participates": false,
+      "effective_compute_threads": 1,
+      "thread_stages": [
+        {
+          "program": "tblastx",
+          "stage": "subjects",
+          "work_items": 1,
+          "parallel_selected": false,
+          "measured_activity": null
+        },
+        {
+          "program": "tblastx",
+          "stage": "linking",
+          "work_items": 4,
+          "parallel_selected": false,
+          "measured_activity": null
+        },
+        {
+          "program": "tblastx",
+          "stage": "linking",
+          "work_items": 4,
+          "parallel_selected": false,
+          "measured_activity": null
+        }
+      ],
+      "host_worker_counts": {
+        "spawn_attempt": 0,
+        "spawned": 0,
+        "ready": 0,
+        "exited": 0
+      },
+      "measured_activity": null
+    }
+  },
+  {
+    "status": "PASS",
+    "reason": null,
+    "exit_status": 0,
+    "wall_seconds": 5.687725423980737,
+    "realtime_seconds": 5.687729358673096,
+    "boottime_seconds": 5.687729279015912,
+    "gnu_elapsed_seconds": 5.65,
+    "process_ended_utc": "2026-09-13T08:52:07Z",
+    "watchdog_clocks": {
+      "started": {
+        "monotonic": 152043.893059199,
+        "realtime": 1789289521.9830294
+      }
+    },
+    "realtime_clock_agreement": true,
+    "monotonic_clock_agreement": true,
+    "elapsed_clock": "CLOCK_MONOTONIC; realtime and GNU elapsed are adjustable-clock diagnostics",
+    "cpu_user_seconds": 7.14,
+    "cpu_system_seconds": 0.18,
+    "peak_rss_bytes": 325414912,
+    "output": "/mnt/c/Users/genom/GitHub/LOSAT/docs/evidence/wasm_performance_20260913/run-20260913-01/p1-reuse-exploration/diagnostic/MelaMJNV.PemoMJNVA.tlosatx/candidate-threaded-n8/output.txt",
+    "raw_output_sha256": "bbef153094025db89dd4a69b2a3c4246b0b8853396fe740bc7e1bd654db105b6",
+    "raw_output_bytes": 351051,
+    "started_utc": "2026-09-13T08:52:01Z",
+    "ended_utc": "2026-09-13T08:52:07Z",
+    "timeout_seconds": 300,
+    "unavailable_metrics": {},
+    "case_id": "MelaMJNV.PemoMJNVA.tlosatx",
+    "version": "candidate",
+    "kind": "threaded",
+    "threads": 8,
+    "timed": false,
+    "phase": "diagnostic",
+    "raw_equal": true,
+    "thread_contract": {
+      "requested_threads": 8,
+      "pool_threads": 8,
+      "caller_participates": false,
+      "effective_compute_threads": 8,
+      "thread_stages": [
+        {
+          "program": "tblastx",
+          "stage": "subjects",
+          "work_items": 1,
+          "parallel_selected": false,
+          "measured_activity": null
+        },
+        {
+          "program": "tblastx",
+          "stage": "linking",
+          "work_items": 4,
+          "parallel_selected": true,
+          "measured_activity": null
+        },
+        {
+          "program": "tblastx",
+          "stage": "linking",
+          "work_items": 4,
+          "parallel_selected": true,
+          "measured_activity": null
+        }
+      ],
+      "host_worker_counts": {
+        "spawn_attempt": 8,
+        "spawned": 8,
+        "ready": 8,
+        "exited": 8
+      },
+      "measured_activity": null
+    }
+  },
+  {
+    "status": "PASS",
+    "reason": null,
+    "exit_status": 0,
+    "wall_seconds": 21.473628909006948,
+    "realtime_seconds": 23.649428367614746,
+    "boottime_seconds": 21.473631289001787,
+    "gnu_elapsed_seconds": 23.62,
+    "process_ended_utc": "2026-09-13T08:52:31Z",
+    "watchdog_clocks": {
+      "started": {
+        "monotonic": 152049.751198704,
+        "realtime": 1789289527.8411682
+      }
+    },
+    "realtime_clock_agreement": false,
+    "monotonic_clock_agreement": true,
+    "elapsed_clock": "CLOCK_MONOTONIC; realtime and GNU elapsed are adjustable-clock diagnostics",
+    "cpu_user_seconds": 22.09,
+    "cpu_system_seconds": 0.13,
+    "peak_rss_bytes": 287764480,
+    "output": "/mnt/c/Users/genom/GitHub/LOSAT/docs/evidence/wasm_performance_20260913/run-20260913-01/p1-reuse-exploration/reuse/session0-baseline-serial-command-compiled-module/process/output.txt",
+    "raw_output_sha256": "21cce74fbe19f09e3c5fc5e675467a741dfe4f087d4afa0530a7e03f65158cab",
+    "raw_output_bytes": 10112,
+    "started_utc": "2026-09-13T08:52:07Z",
+    "ended_utc": "2026-09-13T08:52:31Z",
+    "timeout_seconds": 3600,
+    "unavailable_metrics": {},
+    "version": "baseline",
+    "kind": "serial-command",
+    "phase": "reuse-process",
+    "timed": false
+  },
+  {
+    "status": "PASS",
+    "reason": null,
+    "exit_status": 0,
+    "wall_seconds": 36.12832319299923,
+    "realtime_seconds": 38.35245108604431,
+    "boottime_seconds": 36.12832804498612,
+    "gnu_elapsed_seconds": 38.31,
+    "process_ended_utc": "2026-09-13T08:53:10Z",
+    "watchdog_clocks": {
+      "started": {
+        "monotonic": 152071.528284639,
+        "realtime": 1789289551.7940516
+      }
+    },
+    "realtime_clock_agreement": false,
+    "monotonic_clock_agreement": true,
+    "elapsed_clock": "CLOCK_MONOTONIC; realtime and GNU elapsed are adjustable-clock diagnostics",
+    "cpu_user_seconds": 43.82,
+    "cpu_system_seconds": 0.85,
+    "peak_rss_bytes": 687190016,
+    "output": "/mnt/c/Users/genom/GitHub/LOSAT/docs/evidence/wasm_performance_20260913/run-20260913-01/p1-reuse-exploration/reuse/session0-baseline-threaded-command-compiled-module/process/output.txt",
+    "raw_output_sha256": "6e1ffb8c13a995d71d98311b8a9e2ee9044b7ae278125c84fba92c59b4aaccd0",
+    "raw_output_bytes": 31191,
+    "started_utc": "2026-09-13T08:52:31Z",
+    "ended_utc": "2026-09-13T08:53:10Z",
+    "timeout_seconds": 3600,
+    "unavailable_metrics": {},
+    "version": "baseline",
+    "kind": "threaded-command",
+    "phase": "reuse-process",
+    "timed": false
+  },
+  {
+    "status": "PASS",
+    "reason": null,
+    "exit_status": 0,
+    "wall_seconds": 35.138889752008254,
+    "realtime_seconds": 37.272199392318726,
+    "boottime_seconds": 35.13889229402412,
+    "gnu_elapsed_seconds": 37.25,
+    "process_ended_utc": "2026-09-13T08:53:47Z",
+    "watchdog_clocks": {
+      "started": {
+        "monotonic": 152107.750608396,
+        "realtime": 1789289590.2404957
+      }
+    },
+    "realtime_clock_agreement": false,
+    "monotonic_clock_agreement": true,
+    "elapsed_clock": "CLOCK_MONOTONIC; realtime and GNU elapsed are adjustable-clock diagnostics",
+    "cpu_user_seconds": 45.74,
+    "cpu_system_seconds": 0.21,
+    "peak_rss_bytes": 308776960,
+    "output": "/mnt/c/Users/genom/GitHub/LOSAT/docs/evidence/wasm_performance_20260913/run-20260913-01/p1-reuse-exploration/reuse/session0-baseline-threaded-reactor-same-instance/process/output.txt",
+    "raw_output_sha256": "b30411b48ace503881466800e83064fdf7bc81e1dd18e7ec3f00d3e2c2b57667",
+    "raw_output_bytes": 30929,
+    "started_utc": "2026-09-13T08:53:10Z",
+    "ended_utc": "2026-09-13T08:53:47Z",
+    "timeout_seconds": 3600,
+    "unavailable_metrics": {},
+    "version": "baseline",
+    "kind": "threaded-reactor",
+    "phase": "reuse-process",
+    "timed": false
+  },
+  {
+    "status": "PASS",
+    "reason": null,
+    "exit_status": 0,
+    "wall_seconds": 20.37145217502257,
+    "realtime_seconds": 22.504335641860962,
+    "boottime_seconds": 20.371454567008186,
+    "gnu_elapsed_seconds": 22.48,
+    "process_ended_utc": "2026-09-13T08:54:10Z",
+    "watchdog_clocks": {
+      "started": {
+        "monotonic": 152143.02802217,
+        "realtime": 1789289627.6512163
+      }
+    },
+    "realtime_clock_agreement": false,
+    "monotonic_clock_agreement": true,
+    "elapsed_clock": "CLOCK_MONOTONIC; realtime and GNU elapsed are adjustable-clock diagnostics",
+    "cpu_user_seconds": 21.17,
+    "cpu_system_seconds": 0.1,
+    "peak_rss_bytes": 279416832,
+    "output": "/mnt/c/Users/genom/GitHub/LOSAT/docs/evidence/wasm_performance_20260913/run-20260913-01/p1-reuse-exploration/reuse/session0-candidate-serial-command-compiled-module/process/output.txt",
+    "raw_output_sha256": "7cecb0d93130ef7838ffc35d86dad1e9b280605b612df5ea82deea40bd2738c5",
+    "raw_output_bytes": 10166,
+    "started_utc": "2026-09-13T08:53:47Z",
+    "ended_utc": "2026-09-13T08:54:10Z",
+    "timeout_seconds": 3600,
+    "unavailable_metrics": {},
+    "version": "candidate",
+    "kind": "serial-command",
+    "phase": "reuse-process",
+    "timed": false
+  },
+  {
+    "status": "PASS",
+    "reason": null,
+    "exit_status": 0,
+    "wall_seconds": 34.778732375008985,
+    "realtime_seconds": 36.81630897521973,
+    "boottime_seconds": 34.77873505098978,
+    "gnu_elapsed_seconds": 36.8,
+    "process_ended_utc": "2026-09-13T08:54:47Z",
+    "watchdog_clocks": {
+      "started": {
+        "monotonic": 152163.514658917,
+        "realtime": 1789289650.270733
+      }
+    },
+    "realtime_clock_agreement": false,
+    "monotonic_clock_agreement": true,
+    "elapsed_clock": "CLOCK_MONOTONIC; realtime and GNU elapsed are adjustable-clock diagnostics",
+    "cpu_user_seconds": 43.84,
+    "cpu_system_seconds": 0.61,
+    "peak_rss_bytes": 710602752,
+    "output": "/mnt/c/Users/genom/GitHub/LOSAT/docs/evidence/wasm_performance_20260913/run-20260913-01/p1-reuse-exploration/reuse/session0-candidate-threaded-command-compiled-module/process/output.txt",
+    "raw_output_sha256": "7229df142e07220a4444b40bd73cef3564078d2c9caf4450c38a2e65d8afeba5",
+    "raw_output_bytes": 31220,
+    "started_utc": "2026-09-13T08:54:10Z",
+    "ended_utc": "2026-09-13T08:54:47Z",
+    "timeout_seconds": 3600,
+    "unavailable_metrics": {},
+    "version": "candidate",
+    "kind": "threaded-command",
+    "phase": "reuse-process",
+    "timed": false
+  },
+  {
+    "status": "PASS",
+    "reason": null,
+    "exit_status": 0,
+    "wall_seconds": 33.54992412700085,
+    "realtime_seconds": 35.57736420631409,
+    "boottime_seconds": 33.54992782601039,
+    "gnu_elapsed_seconds": 35.56,
+    "process_ended_utc": "2026-09-13T08:55:22Z",
+    "watchdog_clocks": {
+      "started": {
+        "monotonic": 152198.36562033,
+        "realtime": 1789289687.1592677
+      }
+    },
+    "realtime_clock_agreement": false,
+    "monotonic_clock_agreement": true,
+    "elapsed_clock": "CLOCK_MONOTONIC; realtime and GNU elapsed are adjustable-clock diagnostics",
+    "cpu_user_seconds": 43.78,
+    "cpu_system_seconds": 0.24,
+    "peak_rss_bytes": 295399424,
+    "output": "/mnt/c/Users/genom/GitHub/LOSAT/docs/evidence/wasm_performance_20260913/run-20260913-01/p1-reuse-exploration/reuse/session0-candidate-threaded-reactor-same-instance/process/output.txt",
+    "raw_output_sha256": "163cfb4b2ea2804459d3f1bdf12235c2e953e5d9679e751763073af827013271",
+    "raw_output_bytes": 30949,
+    "started_utc": "2026-09-13T08:54:47Z",
+    "ended_utc": "2026-09-13T08:55:22Z",
+    "timeout_seconds": 3600,
+    "unavailable_metrics": {},
+    "version": "candidate",
+    "kind": "threaded-reactor",
+    "phase": "reuse-process",
+    "timed": false
+  }
+]

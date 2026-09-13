@@ -1,0 +1,16 @@
+{
+  "cpu_system_seconds": 0.01,
+  "cpu_user_seconds": 0.14,
+  "ended_utc": "2026-09-13T07:39:18Z",
+  "exit_status": 1,
+  "output": "/mnt/c/Users/genom/GitHub/LOSAT/docs/evidence/wasm_performance_20260913/run-20260913-01/p1-local-exploration/diagnostic/MelaMJNV.PemoMJNVA.tlosatx/candidate-threaded-n8/output.txt",
+  "peak_rss_bytes": 95903744,
+  "raw_output_bytes": null,
+  "raw_output_sha256": null,
+  "reason": "subprocess exit 1",
+  "started_utc": "2026-09-13T07:39:18Z",
+  "status": "BAD_EXIT",
+  "timeout_seconds": 300,
+  "unavailable_metrics": {},
+  "wall_seconds": 0.21316349800326861
+}

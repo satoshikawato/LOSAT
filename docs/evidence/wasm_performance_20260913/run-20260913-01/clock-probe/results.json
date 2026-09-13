@@ -1,0 +1,118 @@
+[
+  {
+    "status": "PASS",
+    "reason": null,
+    "exit_status": 0,
+    "wall_seconds": 0.21041559797595255,
+    "realtime_seconds": 0.21042394638061523,
+    "boottime_seconds": 0.210421755007701,
+    "gnu_elapsed_seconds": 0.16,
+    "process_ended_utc": "2026-09-13T08:19:10Z",
+    "watchdog_clocks": {
+      "started": {
+        "monotonic": 150193.791406539,
+        "realtime": 1789287550.7036872
+      }
+    },
+    "clock_agreement": true,
+    "cpu_user_seconds": 0.03,
+    "cpu_system_seconds": 0.0,
+    "peak_rss_bytes": 11481088,
+    "output": "/mnt/c/Users/genom/GitHub/LOSAT/docs/evidence/wasm_performance_20260913/run-20260913-01/clock-probe/sleep-0.1-timeout-5/output.txt",
+    "raw_output_sha256": "63f2d09f81ac38a0893d69c228d9418eaad8a47db6bb435e2ad6f137a7744222",
+    "raw_output_bytes": 132,
+    "started_utc": "2026-09-13T08:19:10Z",
+    "ended_utc": "2026-09-13T08:19:11Z",
+    "timeout_seconds": 5,
+    "unavailable_metrics": {}
+  },
+  {
+    "status": "PASS",
+    "reason": null,
+    "exit_status": 0,
+    "wall_seconds": 1.0844246890046634,
+    "realtime_seconds": 3.39255690574646,
+    "boottime_seconds": 1.0844295290007722,
+    "gnu_elapsed_seconds": 3.35,
+    "process_ended_utc": "2026-09-13T08:19:14Z",
+    "watchdog_clocks": {
+      "started": {
+        "monotonic": 150194.213263608,
+        "realtime": 1789287551.1255443
+      }
+    },
+    "clock_agreement": false,
+    "cpu_user_seconds": 0.02,
+    "cpu_system_seconds": 0.0,
+    "peak_rss_bytes": 11456512,
+    "output": "/mnt/c/Users/genom/GitHub/LOSAT/docs/evidence/wasm_performance_20260913/run-20260913-01/clock-probe/sleep-1-timeout-5/output.txt",
+    "raw_output_sha256": "38641819a00e818a539fb72fe6e90328e3a8e1cfda20a6b1ece2891242d944c8",
+    "raw_output_bytes": 131,
+    "started_utc": "2026-09-13T08:19:11Z",
+    "ended_utc": "2026-09-13T08:19:14Z",
+    "timeout_seconds": 5,
+    "unavailable_metrics": {}
+  },
+  {
+    "status": "PASS",
+    "reason": null,
+    "exit_status": 0,
+    "wall_seconds": 5.085361053002998,
+    "realtime_seconds": 5.085367918014526,
+    "boottime_seconds": 5.085366798011819,
+    "gnu_elapsed_seconds": 5.04,
+    "process_ended_utc": "2026-09-13T08:19:19Z",
+    "watchdog_clocks": {
+      "started": {
+        "monotonic": 150195.431793122,
+        "realtime": 1789287554.6521993
+      }
+    },
+    "clock_agreement": true,
+    "cpu_user_seconds": 0.03,
+    "cpu_system_seconds": 0.0,
+    "peak_rss_bytes": 11284480,
+    "output": "/mnt/c/Users/genom/GitHub/LOSAT/docs/evidence/wasm_performance_20260913/run-20260913-01/clock-probe/sleep-5-timeout-10/output.txt",
+    "raw_output_sha256": "d94d69b9f0bac08f64d8725a243a914c6cdc461a5cee7fdde77a5e165f48b11a",
+    "raw_output_bytes": 131,
+    "started_utc": "2026-09-13T08:19:14Z",
+    "ended_utc": "2026-09-13T08:19:19Z",
+    "timeout_seconds": 10,
+    "unavailable_metrics": {}
+  },
+  {
+    "status": "TIMEOUT",
+    "reason": "exceeded 2s",
+    "exit_status": -9,
+    "wall_seconds": 2.042377359000966,
+    "realtime_seconds": 2.0423827171325684,
+    "boottime_seconds": 2.0423799680138472,
+    "gnu_elapsed_seconds": null,
+    "process_ended_utc": "2026-09-13T08:19:21Z",
+    "watchdog_clocks": {
+      "started": {
+        "monotonic": 150200.722614837,
+        "realtime": 1789287559.9430203
+      },
+      "fired": {
+        "monotonic": 150202.722919119,
+        "realtime": 1789287561.943325
+      }
+    },
+    "clock_agreement": true,
+    "cpu_user_seconds": null,
+    "cpu_system_seconds": null,
+    "peak_rss_bytes": null,
+    "output": "/mnt/c/Users/genom/GitHub/LOSAT/docs/evidence/wasm_performance_20260913/run-20260913-01/clock-probe/sleep-10-timeout-2/output.txt",
+    "raw_output_sha256": null,
+    "raw_output_bytes": null,
+    "started_utc": "2026-09-13T08:19:19Z",
+    "ended_utc": "2026-09-13T08:19:21Z",
+    "timeout_seconds": 2,
+    "unavailable_metrics": {
+      "cpu_user_seconds": "GNU time did not finish reporting (for example, process-group timeout)",
+      "cpu_system_seconds": "GNU time did not finish reporting (for example, process-group timeout)",
+      "peak_rss_bytes": "GNU time did not finish reporting (for example, process-group timeout)"
+    }
+  }
+]

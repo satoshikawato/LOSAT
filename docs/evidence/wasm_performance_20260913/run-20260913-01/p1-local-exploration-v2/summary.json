@@ -1,0 +1,70 @@
+[
+  {
+    "case_id": "MelaMJNV.PemoMJNVA.tlosatx",
+    "version": "baseline",
+    "kind": "threaded",
+    "threads": 1,
+    "boundary": "cold-process",
+    "median_seconds": 6.240058955998393,
+    "min_seconds": 6.034383709979011,
+    "max_seconds": 6.401751151017379,
+    "samples": [
+      6.401751151017379,
+      6.034383709979011,
+      6.240058955998393
+    ],
+    "peak_rss_bytes": 170696704,
+    "raw_output_sha256": "bbef153094025db89dd4a69b2a3c4246b0b8853396fe740bc7e1bd654db105b6"
+  },
+  {
+    "case_id": "MelaMJNV.PemoMJNVA.tlosatx",
+    "version": "baseline",
+    "kind": "threaded",
+    "threads": 8,
+    "boundary": "cold-process",
+    "median_seconds": 6.563906536990544,
+    "min_seconds": 6.529054982995149,
+    "max_seconds": 6.637786492006853,
+    "samples": [
+      6.529054982995149,
+      6.563906536990544,
+      6.637786492006853
+    ],
+    "peak_rss_bytes": 300056576,
+    "raw_output_sha256": "bbef153094025db89dd4a69b2a3c4246b0b8853396fe740bc7e1bd654db105b6"
+  },
+  {
+    "case_id": "MelaMJNV.PemoMJNVA.tlosatx",
+    "version": "candidate",
+    "kind": "threaded",
+    "threads": 1,
+    "boundary": "cold-process",
+    "median_seconds": 6.232990816992242,
+    "min_seconds": 5.940997252007946,
+    "max_seconds": 6.258431062015006,
+    "samples": [
+      5.940997252007946,
+      6.258431062015006,
+      6.232990816992242
+    ],
+    "peak_rss_bytes": 170213376,
+    "raw_output_sha256": "bbef153094025db89dd4a69b2a3c4246b0b8853396fe740bc7e1bd654db105b6"
+  },
+  {
+    "case_id": "MelaMJNV.PemoMJNVA.tlosatx",
+    "version": "candidate",
+    "kind": "threaded",
+    "threads": 8,
+    "boundary": "cold-process",
+    "median_seconds": 6.446778188983444,
+    "min_seconds": 6.406491895002546,
+    "max_seconds": 6.468304062000243,
+    "samples": [
+      6.406491895002546,
+      6.446778188983444,
+      6.468304062000243
+    ],
+    "peak_rss_bytes": 315822080,
+    "raw_output_sha256": "bbef153094025db89dd4a69b2a3c4246b0b8853396fe740bc7e1bd654db105b6"
+  }
+]

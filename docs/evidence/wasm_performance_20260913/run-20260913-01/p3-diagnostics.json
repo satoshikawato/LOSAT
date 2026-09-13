@@ -1,0 +1,1782 @@
+[
+  {
+    "status": "PASS",
+    "reason": null,
+    "exit_status": 0,
+    "wall_seconds": 29.810947097983444,
+    "realtime_seconds": 29.810952186584473,
+    "boottime_seconds": 29.810952092986554,
+    "gnu_elapsed_seconds": 29.77,
+    "process_ended_utc": "2026-09-13T09:20:28Z",
+    "watchdog_clocks": {
+      "started": {
+        "monotonic": 153615.474901194,
+        "realtime": 1789291198.707025
+      }
+    },
+    "realtime_clock_agreement": true,
+    "monotonic_clock_agreement": true,
+    "elapsed_clock": "CLOCK_MONOTONIC; realtime and GNU elapsed are adjustable-clock diagnostics",
+    "cpu_user_seconds": 31.58,
+    "cpu_system_seconds": 0.05,
+    "peak_rss_bytes": 85766144,
+    "output": "/mnt/c/Users/genom/GitHub/LOSAT/docs/evidence/wasm_performance_20260913/run-20260913-01/p3-diagnostic/ap078-ap131/oracle/output.txt",
+    "raw_output_sha256": "5bdaa58908a96768c26c329ade49a97d4e2d705895e457709eae094b14c708d4",
+    "raw_output_bytes": 385994,
+    "started_utc": "2026-09-13T09:19:58Z",
+    "ended_utc": "2026-09-13T09:20:28Z",
+    "timeout_seconds": 3600,
+    "unavailable_metrics": {},
+    "case_id": "ap078-ap131",
+    "kind": "oracle",
+    "threads": 1,
+    "diagnostic": true
+  },
+  {
+    "status": "PASS",
+    "reason": null,
+    "exit_status": 0,
+    "wall_seconds": 31.84885739799938,
+    "realtime_seconds": 33.945096254348755,
+    "boottime_seconds": 31.848861564008985,
+    "gnu_elapsed_seconds": 33.91,
+    "process_ended_utc": "2026-09-13T09:21:02Z",
+    "watchdog_clocks": {
+      "started": {
+        "monotonic": 153645.340950496,
+        "realtime": 1789291228.573075
+      }
+    },
+    "realtime_clock_agreement": false,
+    "monotonic_clock_agreement": true,
+    "elapsed_clock": "CLOCK_MONOTONIC; realtime and GNU elapsed are adjustable-clock diagnostics",
+    "cpu_user_seconds": 33.77,
+    "cpu_system_seconds": 0.01,
+    "peak_rss_bytes": 67932160,
+    "output": "/mnt/c/Users/genom/GitHub/LOSAT/docs/evidence/wasm_performance_20260913/run-20260913-01/p3-diagnostic/ap078-ap131/native-n1/output.txt",
+    "raw_output_sha256": "5bdaa58908a96768c26c329ade49a97d4e2d705895e457709eae094b14c708d4",
+    "raw_output_bytes": 385994,
+    "started_utc": "2026-09-13T09:20:28Z",
+    "ended_utc": "2026-09-13T09:21:02Z",
+    "timeout_seconds": 3600,
+    "unavailable_metrics": {},
+    "case_id": "ap078-ap131",
+    "kind": "native",
+    "threads": 1,
+    "diagnostic": true,
+    "artifact_sha256": "834a99ed11f6a4415df6f119d11736a16e50515d1f0f851fda9a3f687688a35f",
+    "raw_equal": true,
+    "thread_contract": {
+      "requested_threads": 1,
+      "pool_threads": 0,
+      "caller_participates": false,
+      "effective_compute_threads": 1,
+      "thread_stages": [
+        {
+          "program": "blastp",
+          "stage": "subject-prep",
+          "work_items": 595,
+          "parallel_selected": false,
+          "measured_activity": null
+        },
+        {
+          "program": "blastp",
+          "stage": "prelim",
+          "work_items": 595,
+          "parallel_selected": false,
+          "measured_activity": null
+        },
+        {
+          "program": "blastp",
+          "stage": "kappa-query-redo",
+          "work_items": 530,
+          "parallel_selected": false,
+          "measured_activity": null
+        }
+      ],
+      "host_worker_counts": null,
+      "measured_activity": null
+    }
+  },
+  {
+    "status": "PASS",
+    "reason": null,
+    "exit_status": 0,
+    "wall_seconds": 37.87663314299425,
+    "realtime_seconds": 41.99732947349548,
+    "boottime_seconds": 37.87663569900906,
+    "gnu_elapsed_seconds": 41.98,
+    "process_ended_utc": "2026-09-13T09:21:44Z",
+    "watchdog_clocks": {
+      "started": {
+        "monotonic": 153677.252747864,
+        "realtime": 1789291262.581106
+      }
+    },
+    "realtime_clock_agreement": false,
+    "monotonic_clock_agreement": true,
+    "elapsed_clock": "CLOCK_MONOTONIC; realtime and GNU elapsed are adjustable-clock diagnostics",
+    "cpu_user_seconds": 40.29,
+    "cpu_system_seconds": 0.06,
+    "peak_rss_bytes": 149176320,
+    "output": "/mnt/c/Users/genom/GitHub/LOSAT/docs/evidence/wasm_performance_20260913/run-20260913-01/p3-diagnostic/ap078-ap131/serial-n1/output.txt",
+    "raw_output_sha256": "5bdaa58908a96768c26c329ade49a97d4e2d705895e457709eae094b14c708d4",
+    "raw_output_bytes": 385994,
+    "started_utc": "2026-09-13T09:21:02Z",
+    "ended_utc": "2026-09-13T09:21:44Z",
+    "timeout_seconds": 3600,
+    "unavailable_metrics": {},
+    "case_id": "ap078-ap131",
+    "kind": "serial",
+    "threads": 1,
+    "diagnostic": true,
+    "artifact_sha256": "f687af514acb81a62219237c25425412d24c8d5a527d11a988e41dc114c53940",
+    "raw_equal": true,
+    "thread_contract": {
+      "requested_threads": 1,
+      "pool_threads": 0,
+      "caller_participates": false,
+      "effective_compute_threads": 1,
+      "thread_stages": [],
+      "host_worker_counts": null,
+      "measured_activity": null
+    }
+  },
+  {
+    "status": "PASS",
+    "reason": null,
+    "exit_status": 0,
+    "wall_seconds": 36.96543828200083,
+    "realtime_seconds": 38.86816716194153,
+    "boottime_seconds": 36.9654419440194,
+    "gnu_elapsed_seconds": 38.84,
+    "process_ended_utc": "2026-09-13T09:22:23Z",
+    "watchdog_clocks": {
+      "started": {
+        "monotonic": 153715.215997543,
+        "realtime": 1789291304.665049
+      }
+    },
+    "realtime_clock_agreement": false,
+    "monotonic_clock_agreement": true,
+    "elapsed_clock": "CLOCK_MONOTONIC; realtime and GNU elapsed are adjustable-clock diagnostics",
+    "cpu_user_seconds": 39.25,
+    "cpu_system_seconds": 0.06,
+    "peak_rss_bytes": 162324480,
+    "output": "/mnt/c/Users/genom/GitHub/LOSAT/docs/evidence/wasm_performance_20260913/run-20260913-01/p3-diagnostic/ap078-ap131/threaded-n1/output.txt",
+    "raw_output_sha256": "5bdaa58908a96768c26c329ade49a97d4e2d705895e457709eae094b14c708d4",
+    "raw_output_bytes": 385994,
+    "started_utc": "2026-09-13T09:21:44Z",
+    "ended_utc": "2026-09-13T09:22:23Z",
+    "timeout_seconds": 3600,
+    "unavailable_metrics": {},
+    "case_id": "ap078-ap131",
+    "kind": "threaded",
+    "threads": 1,
+    "diagnostic": true,
+    "artifact_sha256": "13b88d349ec3449330b11428bb15e9a688448c4e144e756b6f038b4b9412a437",
+    "raw_equal": true,
+    "thread_contract": {
+      "requested_threads": 1,
+      "pool_threads": 0,
+      "caller_participates": false,
+      "effective_compute_threads": 1,
+      "thread_stages": [
+        {
+          "program": "blastp",
+          "stage": "subject-prep",
+          "work_items": 595,
+          "parallel_selected": false,
+          "measured_activity": null
+        },
+        {
+          "program": "blastp",
+          "stage": "prelim",
+          "work_items": 595,
+          "parallel_selected": false,
+          "measured_activity": null
+        },
+        {
+          "program": "blastp",
+          "stage": "kappa-query-redo",
+          "work_items": 530,
+          "parallel_selected": false,
+          "measured_activity": null
+        }
+      ],
+      "host_worker_counts": {
+        "spawn_attempt": 0,
+        "spawned": 0,
+        "ready": 0,
+        "exited": 0
+      },
+      "measured_activity": null
+    }
+  },
+  {
+    "status": "PASS",
+    "reason": null,
+    "exit_status": 0,
+    "wall_seconds": 6.951155265007401,
+    "realtime_seconds": 6.9511590003967285,
+    "boottime_seconds": 6.951157659990713,
+    "gnu_elapsed_seconds": 6.94,
+    "process_ended_utc": "2026-09-13T09:22:30Z",
+    "watchdog_clocks": {
+      "started": {
+        "monotonic": 153752.27172796,
+        "realtime": 1789291343.6235032
+      }
+    },
+    "realtime_clock_agreement": true,
+    "monotonic_clock_agreement": true,
+    "elapsed_clock": "CLOCK_MONOTONIC; realtime and GNU elapsed are adjustable-clock diagnostics",
+    "cpu_user_seconds": 52.26,
+    "cpu_system_seconds": 0.58,
+    "peak_rss_bytes": 296349696,
+    "output": "/mnt/c/Users/genom/GitHub/LOSAT/docs/evidence/wasm_performance_20260913/run-20260913-01/p3-diagnostic/ap078-ap131/threaded-n8/output.txt",
+    "raw_output_sha256": "5bdaa58908a96768c26c329ade49a97d4e2d705895e457709eae094b14c708d4",
+    "raw_output_bytes": 385994,
+    "started_utc": "2026-09-13T09:22:23Z",
+    "ended_utc": "2026-09-13T09:22:30Z",
+    "timeout_seconds": 3600,
+    "unavailable_metrics": {},
+    "case_id": "ap078-ap131",
+    "kind": "threaded",
+    "threads": 8,
+    "diagnostic": true,
+    "artifact_sha256": "13b88d349ec3449330b11428bb15e9a688448c4e144e756b6f038b4b9412a437",
+    "raw_equal": true,
+    "thread_contract": {
+      "requested_threads": 8,
+      "pool_threads": 8,
+      "caller_participates": false,
+      "effective_compute_threads": 8,
+      "thread_stages": [
+        {
+          "program": "blastp",
+          "stage": "subject-prep",
+          "work_items": 595,
+          "parallel_selected": true,
+          "measured_activity": null
+        },
+        {
+          "program": "blastp",
+          "stage": "prelim",
+          "work_items": 595,
+          "parallel_selected": true,
+          "measured_activity": null
+        },
+        {
+          "program": "blastp",
+          "stage": "kappa-query-redo",
+          "work_items": 530,
+          "parallel_selected": true,
+          "measured_activity": null
+        }
+      ],
+      "host_worker_counts": {
+        "spawn_attempt": 8,
+        "spawned": 8,
+        "ready": 8,
+        "exited": 8
+      },
+      "measured_activity": null
+    }
+  },
+  {
+    "status": "PASS",
+    "reason": null,
+    "exit_status": 0,
+    "wall_seconds": 7.202678614004981,
+    "realtime_seconds": 7.202682018280029,
+    "boottime_seconds": 7.202681196999038,
+    "gnu_elapsed_seconds": 7.18,
+    "process_ended_utc": "2026-09-13T09:22:37Z",
+    "watchdog_clocks": {
+      "started": {
+        "monotonic": 153759.283696749,
+        "realtime": 1789291350.635472
+      }
+    },
+    "realtime_clock_agreement": true,
+    "monotonic_clock_agreement": true,
+    "elapsed_clock": "CLOCK_MONOTONIC; realtime and GNU elapsed are adjustable-clock diagnostics",
+    "cpu_user_seconds": 54.31,
+    "cpu_system_seconds": 0.54,
+    "peak_rss_bytes": 310132736,
+    "output": "/mnt/c/Users/genom/GitHub/LOSAT/docs/evidence/wasm_performance_20260913/run-20260913-01/p3-diagnostic/ap078-ap131/instrumented-n8/output.txt",
+    "raw_output_sha256": "5bdaa58908a96768c26c329ade49a97d4e2d705895e457709eae094b14c708d4",
+    "raw_output_bytes": 385994,
+    "started_utc": "2026-09-13T09:22:30Z",
+    "ended_utc": "2026-09-13T09:22:37Z",
+    "timeout_seconds": 3600,
+    "unavailable_metrics": {},
+    "case_id": "ap078-ap131",
+    "kind": "instrumented",
+    "threads": 8,
+    "diagnostic": true,
+    "artifact_sha256": "7401e52f848649fdb2d01e3c50273007317a04b0d61dac027bc1175dba98bf77",
+    "raw_equal": true,
+    "thread_contract": {
+      "requested_threads": 8,
+      "pool_threads": 8,
+      "caller_participates": false,
+      "effective_compute_threads": 8,
+      "thread_stages": [
+        {
+          "program": "blastp",
+          "stage": "subject-prep",
+          "work_items": 595,
+          "parallel_selected": true,
+          "measured_activity": null
+        },
+        {
+          "program": "blastp",
+          "stage": "prelim",
+          "work_items": 595,
+          "parallel_selected": true,
+          "measured_activity": null
+        },
+        {
+          "program": "blastp",
+          "stage": "kappa-query-redo",
+          "work_items": 530,
+          "parallel_selected": true,
+          "measured_activity": null
+        }
+      ],
+      "host_worker_counts": {
+        "spawn_attempt": 8,
+        "spawned": 8,
+        "ready": 8,
+        "exited": 8
+      },
+      "measured_activity": null
+    }
+  },
+  {
+    "status": "PASS",
+    "reason": null,
+    "exit_status": 0,
+    "wall_seconds": 40.99421882702154,
+    "realtime_seconds": 45.064860582351685,
+    "boottime_seconds": 40.99422092200257,
+    "gnu_elapsed_seconds": 45.04,
+    "process_ended_utc": "2026-09-13T09:23:22Z",
+    "watchdog_clocks": {
+      "started": {
+        "monotonic": 153766.591185013,
+        "realtime": 1789291357.9429607
+      }
+    },
+    "realtime_clock_agreement": false,
+    "monotonic_clock_agreement": true,
+    "elapsed_clock": "CLOCK_MONOTONIC; realtime and GNU elapsed are adjustable-clock diagnostics",
+    "cpu_user_seconds": 43.23,
+    "cpu_system_seconds": 0.14,
+    "peak_rss_bytes": 87597056,
+    "output": "/mnt/c/Users/genom/GitHub/LOSAT/docs/evidence/wasm_performance_20260913/run-20260913-01/p3-diagnostic/ap132-nz/oracle/output.txt",
+    "raw_output_sha256": "cd81f8fef3dff78fb48f5923de43c84f1af78d006aaa9a8cae2c2f1f20aed181",
+    "raw_output_bytes": 530562,
+    "started_utc": "2026-09-13T09:22:37Z",
+    "ended_utc": "2026-09-13T09:23:23Z",
+    "timeout_seconds": 3600,
+    "unavailable_metrics": {},
+    "case_id": "ap132-nz",
+    "kind": "oracle",
+    "threads": 1,
+    "diagnostic": true
+  },
+  {
+    "status": "PASS",
+    "reason": null,
+    "exit_status": 0,
+    "wall_seconds": 44.093119440978626,
+    "realtime_seconds": 46.361067056655884,
+    "boottime_seconds": 44.09312231099466,
+    "gnu_elapsed_seconds": 46.34,
+    "process_ended_utc": "2026-09-13T09:24:09Z",
+    "watchdog_clocks": {
+      "started": {
+        "monotonic": 153807.62115832,
+        "realtime": 1789291403.0435712
+      }
+    },
+    "realtime_clock_agreement": false,
+    "monotonic_clock_agreement": true,
+    "elapsed_clock": "CLOCK_MONOTONIC; realtime and GNU elapsed are adjustable-clock diagnostics",
+    "cpu_user_seconds": 46.96,
+    "cpu_system_seconds": 0.04,
+    "peak_rss_bytes": 91287552,
+    "output": "/mnt/c/Users/genom/GitHub/LOSAT/docs/evidence/wasm_performance_20260913/run-20260913-01/p3-diagnostic/ap132-nz/native-n1/output.txt",
+    "raw_output_sha256": "cd81f8fef3dff78fb48f5923de43c84f1af78d006aaa9a8cae2c2f1f20aed181",
+    "raw_output_bytes": 530562,
+    "started_utc": "2026-09-13T09:23:23Z",
+    "ended_utc": "2026-09-13T09:24:09Z",
+    "timeout_seconds": 3600,
+    "unavailable_metrics": {},
+    "case_id": "ap132-nz",
+    "kind": "native",
+    "threads": 1,
+    "diagnostic": true,
+    "artifact_sha256": "834a99ed11f6a4415df6f119d11736a16e50515d1f0f851fda9a3f687688a35f",
+    "raw_equal": true,
+    "thread_contract": {
+      "requested_threads": 1,
+      "pool_threads": 0,
+      "caller_participates": false,
+      "effective_compute_threads": 1,
+      "thread_stages": [
+        {
+          "program": "blastp",
+          "stage": "subject-prep",
+          "work_items": 581,
+          "parallel_selected": false,
+          "measured_activity": null
+        },
+        {
+          "program": "blastp",
+          "stage": "prelim",
+          "work_items": 581,
+          "parallel_selected": false,
+          "measured_activity": null
+        },
+        {
+          "program": "blastp",
+          "stage": "kappa-query-redo",
+          "work_items": 573,
+          "parallel_selected": false,
+          "measured_activity": null
+        }
+      ],
+      "host_worker_counts": null,
+      "measured_activity": null
+    }
+  },
+  {
+    "status": "PASS",
+    "reason": null,
+    "exit_status": 0,
+    "wall_seconds": 54.84496230899822,
+    "realtime_seconds": 59.025481939315796,
+    "boottime_seconds": 54.84496504897834,
+    "gnu_elapsed_seconds": 59.0,
+    "process_ended_utc": "2026-09-13T09:25:08Z",
+    "watchdog_clocks": {
+      "started": {
+        "monotonic": 153851.798795419,
+        "realtime": 1789291449.4891527
+      }
+    },
+    "realtime_clock_agreement": false,
+    "monotonic_clock_agreement": true,
+    "elapsed_clock": "CLOCK_MONOTONIC; realtime and GNU elapsed are adjustable-clock diagnostics",
+    "cpu_user_seconds": 58.46,
+    "cpu_system_seconds": 0.11,
+    "peak_rss_bytes": 160440320,
+    "output": "/mnt/c/Users/genom/GitHub/LOSAT/docs/evidence/wasm_performance_20260913/run-20260913-01/p3-diagnostic/ap132-nz/serial-n1/output.txt",
+    "raw_output_sha256": "cd81f8fef3dff78fb48f5923de43c84f1af78d006aaa9a8cae2c2f1f20aed181",
+    "raw_output_bytes": 530562,
+    "started_utc": "2026-09-13T09:24:09Z",
+    "ended_utc": "2026-09-13T09:25:08Z",
+    "timeout_seconds": 3600,
+    "unavailable_metrics": {},
+    "case_id": "ap132-nz",
+    "kind": "serial",
+    "threads": 1,
+    "diagnostic": true,
+    "artifact_sha256": "f687af514acb81a62219237c25425412d24c8d5a527d11a988e41dc114c53940",
+    "raw_equal": true,
+    "thread_contract": {
+      "requested_threads": 1,
+      "pool_threads": 0,
+      "caller_participates": false,
+      "effective_compute_threads": 1,
+      "thread_stages": [],
+      "host_worker_counts": null,
+      "measured_activity": null
+    }
+  },
+  {
+    "status": "PASS",
+    "reason": null,
+    "exit_status": 0,
+    "wall_seconds": 55.82240559501224,
+    "realtime_seconds": 57.91051363945007,
+    "boottime_seconds": 55.82241132800118,
+    "gnu_elapsed_seconds": 57.89,
+    "process_ended_utc": "2026-09-13T09:26:06Z",
+    "watchdog_clocks": {
+      "started": {
+        "monotonic": 153906.710964333,
+        "realtime": 1789291508.5818377
+      }
+    },
+    "realtime_clock_agreement": true,
+    "monotonic_clock_agreement": true,
+    "elapsed_clock": "CLOCK_MONOTONIC; realtime and GNU elapsed are adjustable-clock diagnostics",
+    "cpu_user_seconds": 59.51,
+    "cpu_system_seconds": 0.03,
+    "peak_rss_bytes": 179322880,
+    "output": "/mnt/c/Users/genom/GitHub/LOSAT/docs/evidence/wasm_performance_20260913/run-20260913-01/p3-diagnostic/ap132-nz/threaded-n1/output.txt",
+    "raw_output_sha256": "cd81f8fef3dff78fb48f5923de43c84f1af78d006aaa9a8cae2c2f1f20aed181",
+    "raw_output_bytes": 530562,
+    "started_utc": "2026-09-13T09:25:08Z",
+    "ended_utc": "2026-09-13T09:26:06Z",
+    "timeout_seconds": 3600,
+    "unavailable_metrics": {},
+    "case_id": "ap132-nz",
+    "kind": "threaded",
+    "threads": 1,
+    "diagnostic": true,
+    "artifact_sha256": "13b88d349ec3449330b11428bb15e9a688448c4e144e756b6f038b4b9412a437",
+    "raw_equal": true,
+    "thread_contract": {
+      "requested_threads": 1,
+      "pool_threads": 0,
+      "caller_participates": false,
+      "effective_compute_threads": 1,
+      "thread_stages": [
+        {
+          "program": "blastp",
+          "stage": "subject-prep",
+          "work_items": 581,
+          "parallel_selected": false,
+          "measured_activity": null
+        },
+        {
+          "program": "blastp",
+          "stage": "prelim",
+          "work_items": 581,
+          "parallel_selected": false,
+          "measured_activity": null
+        },
+        {
+          "program": "blastp",
+          "stage": "kappa-query-redo",
+          "work_items": 573,
+          "parallel_selected": false,
+          "measured_activity": null
+        }
+      ],
+      "host_worker_counts": {
+        "spawn_attempt": 0,
+        "spawned": 0,
+        "ready": 0,
+        "exited": 0
+      },
+      "measured_activity": null
+    }
+  },
+  {
+    "status": "PASS",
+    "reason": null,
+    "exit_status": 0,
+    "wall_seconds": 11.583150678983657,
+    "realtime_seconds": 13.675137758255005,
+    "boottime_seconds": 11.583155603992054,
+    "gnu_elapsed_seconds": 13.63,
+    "process_ended_utc": "2026-09-13T09:26:20Z",
+    "watchdog_clocks": {
+      "started": {
+        "monotonic": 153963.002658362,
+        "realtime": 1789291566.9616342
+      }
+    },
+    "realtime_clock_agreement": false,
+    "monotonic_clock_agreement": true,
+    "elapsed_clock": "CLOCK_MONOTONIC; realtime and GNU elapsed are adjustable-clock diagnostics",
+    "cpu_user_seconds": 78.04,
+    "cpu_system_seconds": 0.55,
+    "peak_rss_bytes": 315355136,
+    "output": "/mnt/c/Users/genom/GitHub/LOSAT/docs/evidence/wasm_performance_20260913/run-20260913-01/p3-diagnostic/ap132-nz/threaded-n8/output.txt",
+    "raw_output_sha256": "cd81f8fef3dff78fb48f5923de43c84f1af78d006aaa9a8cae2c2f1f20aed181",
+    "raw_output_bytes": 530562,
+    "started_utc": "2026-09-13T09:26:06Z",
+    "ended_utc": "2026-09-13T09:26:20Z",
+    "timeout_seconds": 3600,
+    "unavailable_metrics": {},
+    "case_id": "ap132-nz",
+    "kind": "threaded",
+    "threads": 8,
+    "diagnostic": true,
+    "artifact_sha256": "13b88d349ec3449330b11428bb15e9a688448c4e144e756b6f038b4b9412a437",
+    "raw_equal": true,
+    "thread_contract": {
+      "requested_threads": 8,
+      "pool_threads": 8,
+      "caller_participates": false,
+      "effective_compute_threads": 8,
+      "thread_stages": [
+        {
+          "program": "blastp",
+          "stage": "subject-prep",
+          "work_items": 581,
+          "parallel_selected": true,
+          "measured_activity": null
+        },
+        {
+          "program": "blastp",
+          "stage": "prelim",
+          "work_items": 581,
+          "parallel_selected": true,
+          "measured_activity": null
+        },
+        {
+          "program": "blastp",
+          "stage": "kappa-query-redo",
+          "work_items": 573,
+          "parallel_selected": true,
+          "measured_activity": null
+        }
+      ],
+      "host_worker_counts": {
+        "spawn_attempt": 8,
+        "spawned": 8,
+        "ready": 8,
+        "exited": 8
+      },
+      "measured_activity": null
+    }
+  },
+  {
+    "status": "PASS",
+    "reason": null,
+    "exit_status": 0,
+    "wall_seconds": 12.325248220004141,
+    "realtime_seconds": 12.325253963470459,
+    "boottime_seconds": 12.32525146700209,
+    "gnu_elapsed_seconds": 12.28,
+    "process_ended_utc": "2026-09-13T09:26:33Z",
+    "watchdog_clocks": {
+      "started": {
+        "monotonic": 153975.047136313,
+        "realtime": 1789291581.098095
+      }
+    },
+    "realtime_clock_agreement": true,
+    "monotonic_clock_agreement": true,
+    "elapsed_clock": "CLOCK_MONOTONIC; realtime and GNU elapsed are adjustable-clock diagnostics",
+    "cpu_user_seconds": 81.58,
+    "cpu_system_seconds": 0.7,
+    "peak_rss_bytes": 325156864,
+    "output": "/mnt/c/Users/genom/GitHub/LOSAT/docs/evidence/wasm_performance_20260913/run-20260913-01/p3-diagnostic/ap132-nz/instrumented-n8/output.txt",
+    "raw_output_sha256": "cd81f8fef3dff78fb48f5923de43c84f1af78d006aaa9a8cae2c2f1f20aed181",
+    "raw_output_bytes": 530562,
+    "started_utc": "2026-09-13T09:26:21Z",
+    "ended_utc": "2026-09-13T09:26:33Z",
+    "timeout_seconds": 3600,
+    "unavailable_metrics": {},
+    "case_id": "ap132-nz",
+    "kind": "instrumented",
+    "threads": 8,
+    "diagnostic": true,
+    "artifact_sha256": "7401e52f848649fdb2d01e3c50273007317a04b0d61dac027bc1175dba98bf77",
+    "raw_equal": true,
+    "thread_contract": {
+      "requested_threads": 8,
+      "pool_threads": 8,
+      "caller_participates": false,
+      "effective_compute_threads": 8,
+      "thread_stages": [
+        {
+          "program": "blastp",
+          "stage": "subject-prep",
+          "work_items": 581,
+          "parallel_selected": true,
+          "measured_activity": null
+        },
+        {
+          "program": "blastp",
+          "stage": "prelim",
+          "work_items": 581,
+          "parallel_selected": true,
+          "measured_activity": null
+        },
+        {
+          "program": "blastp",
+          "stage": "kappa-query-redo",
+          "work_items": 573,
+          "parallel_selected": true,
+          "measured_activity": null
+        }
+      ],
+      "host_worker_counts": {
+        "spawn_attempt": 8,
+        "spawned": 8,
+        "ready": 8,
+        "exited": 8
+      },
+      "measured_activity": null
+    }
+  },
+  {
+    "status": "PASS",
+    "reason": null,
+    "exit_status": 0,
+    "wall_seconds": 44.237739941017935,
+    "realtime_seconds": 46.3271689414978,
+    "boottime_seconds": 44.23774509798386,
+    "gnu_elapsed_seconds": 46.29,
+    "process_ended_utc": "2026-09-13T09:27:19Z",
+    "watchdog_clocks": {
+      "started": {
+        "monotonic": 153987.611065649,
+        "realtime": 1789291593.6620245
+      }
+    },
+    "realtime_clock_agreement": true,
+    "monotonic_clock_agreement": true,
+    "elapsed_clock": "CLOCK_MONOTONIC; realtime and GNU elapsed are adjustable-clock diagnostics",
+    "cpu_user_seconds": 46.2,
+    "cpu_system_seconds": 0.07,
+    "peak_rss_bytes": 88473600,
+    "output": "/mnt/c/Users/genom/GitHub/LOSAT/docs/evidence/wasm_performance_20260913/run-20260913-01/p3-diagnostic/ap131-nz/oracle/output.txt",
+    "raw_output_sha256": "6d0073c9289cd5e27cc215c4e4d441cb15013c0bd62a3859c2b0bea0ed24f750",
+    "raw_output_bytes": 512675,
+    "started_utc": "2026-09-13T09:26:33Z",
+    "ended_utc": "2026-09-13T09:27:20Z",
+    "timeout_seconds": 3600,
+    "unavailable_metrics": {},
+    "case_id": "ap131-nz",
+    "kind": "oracle",
+    "threads": 1,
+    "diagnostic": true
+  },
+  {
+    "status": "PASS",
+    "reason": null,
+    "exit_status": 0,
+    "wall_seconds": 47.38127888698364,
+    "realtime_seconds": 51.53994917869568,
+    "boottime_seconds": 47.38128433798556,
+    "gnu_elapsed_seconds": 51.49,
+    "process_ended_utc": "2026-09-13T09:28:11Z",
+    "watchdog_clocks": {
+      "started": {
+        "monotonic": 154032.176659977,
+        "realtime": 1789291640.3170416
+      }
+    },
+    "realtime_clock_agreement": false,
+    "monotonic_clock_agreement": true,
+    "elapsed_clock": "CLOCK_MONOTONIC; realtime and GNU elapsed are adjustable-clock diagnostics",
+    "cpu_user_seconds": 50.03,
+    "cpu_system_seconds": 0.05,
+    "peak_rss_bytes": 93450240,
+    "output": "/mnt/c/Users/genom/GitHub/LOSAT/docs/evidence/wasm_performance_20260913/run-20260913-01/p3-diagnostic/ap131-nz/native-n1/output.txt",
+    "raw_output_sha256": "6d0073c9289cd5e27cc215c4e4d441cb15013c0bd62a3859c2b0bea0ed24f750",
+    "raw_output_bytes": 512675,
+    "started_utc": "2026-09-13T09:27:20Z",
+    "ended_utc": "2026-09-13T09:28:11Z",
+    "timeout_seconds": 3600,
+    "unavailable_metrics": {},
+    "case_id": "ap131-nz",
+    "kind": "native",
+    "threads": 1,
+    "diagnostic": true,
+    "artifact_sha256": "834a99ed11f6a4415df6f119d11736a16e50515d1f0f851fda9a3f687688a35f",
+    "raw_equal": true,
+    "thread_contract": {
+      "requested_threads": 1,
+      "pool_threads": 0,
+      "caller_participates": false,
+      "effective_compute_threads": 1,
+      "thread_stages": [
+        {
+          "program": "blastp",
+          "stage": "subject-prep",
+          "work_items": 581,
+          "parallel_selected": false,
+          "measured_activity": null
+        },
+        {
+          "program": "blastp",
+          "stage": "prelim",
+          "work_items": 581,
+          "parallel_selected": false,
+          "measured_activity": null
+        },
+        {
+          "program": "blastp",
+          "stage": "kappa-query-redo",
+          "work_items": 595,
+          "parallel_selected": false,
+          "measured_activity": null
+        }
+      ],
+      "host_worker_counts": null,
+      "measured_activity": null
+    }
+  },
+  {
+    "status": "PASS",
+    "reason": null,
+    "exit_status": 0,
+    "wall_seconds": 57.957585591997486,
+    "realtime_seconds": 62.144912004470825,
+    "boottime_seconds": 57.957588373014005,
+    "gnu_elapsed_seconds": 62.12,
+    "process_ended_utc": "2026-09-13T09:29:14Z",
+    "watchdog_clocks": {
+      "started": {
+        "monotonic": 154079.899221936,
+        "realtime": 1789291692.198267
+      }
+    },
+    "realtime_clock_agreement": false,
+    "monotonic_clock_agreement": true,
+    "elapsed_clock": "CLOCK_MONOTONIC; realtime and GNU elapsed are adjustable-clock diagnostics",
+    "cpu_user_seconds": 61.42,
+    "cpu_system_seconds": 0.06,
+    "peak_rss_bytes": 169455616,
+    "output": "/mnt/c/Users/genom/GitHub/LOSAT/docs/evidence/wasm_performance_20260913/run-20260913-01/p3-diagnostic/ap131-nz/serial-n1/output.txt",
+    "raw_output_sha256": "6d0073c9289cd5e27cc215c4e4d441cb15013c0bd62a3859c2b0bea0ed24f750",
+    "raw_output_bytes": 512675,
+    "started_utc": "2026-09-13T09:28:12Z",
+    "ended_utc": "2026-09-13T09:29:14Z",
+    "timeout_seconds": 3600,
+    "unavailable_metrics": {},
+    "case_id": "ap131-nz",
+    "kind": "serial",
+    "threads": 1,
+    "diagnostic": true,
+    "artifact_sha256": "f687af514acb81a62219237c25425412d24c8d5a527d11a988e41dc114c53940",
+    "raw_equal": true,
+    "thread_contract": {
+      "requested_threads": 1,
+      "pool_threads": 0,
+      "caller_participates": false,
+      "effective_compute_threads": 1,
+      "thread_stages": [],
+      "host_worker_counts": null,
+      "measured_activity": null
+    }
+  },
+  {
+    "status": "PASS",
+    "reason": null,
+    "exit_status": 0,
+    "wall_seconds": 57.65816917299526,
+    "realtime_seconds": 61.953171730041504,
+    "boottime_seconds": 57.658172535011545,
+    "gnu_elapsed_seconds": 61.92,
+    "process_ended_utc": "2026-09-13T09:30:16Z",
+    "watchdog_clocks": {
+      "started": {
+        "monotonic": 154138.098121723,
+        "realtime": 1789291754.5844898
+      }
+    },
+    "realtime_clock_agreement": false,
+    "monotonic_clock_agreement": true,
+    "elapsed_clock": "CLOCK_MONOTONIC; realtime and GNU elapsed are adjustable-clock diagnostics",
+    "cpu_user_seconds": 61.18,
+    "cpu_system_seconds": 0.12,
+    "peak_rss_bytes": 175849472,
+    "output": "/mnt/c/Users/genom/GitHub/LOSAT/docs/evidence/wasm_performance_20260913/run-20260913-01/p3-diagnostic/ap131-nz/threaded-n1/output.txt",
+    "raw_output_sha256": "6d0073c9289cd5e27cc215c4e4d441cb15013c0bd62a3859c2b0bea0ed24f750",
+    "raw_output_bytes": 512675,
+    "started_utc": "2026-09-13T09:29:14Z",
+    "ended_utc": "2026-09-13T09:30:16Z",
+    "timeout_seconds": 3600,
+    "unavailable_metrics": {},
+    "case_id": "ap131-nz",
+    "kind": "threaded",
+    "threads": 1,
+    "diagnostic": true,
+    "artifact_sha256": "13b88d349ec3449330b11428bb15e9a688448c4e144e756b6f038b4b9412a437",
+    "raw_equal": true,
+    "thread_contract": {
+      "requested_threads": 1,
+      "pool_threads": 0,
+      "caller_participates": false,
+      "effective_compute_threads": 1,
+      "thread_stages": [
+        {
+          "program": "blastp",
+          "stage": "subject-prep",
+          "work_items": 581,
+          "parallel_selected": false,
+          "measured_activity": null
+        },
+        {
+          "program": "blastp",
+          "stage": "prelim",
+          "work_items": 581,
+          "parallel_selected": false,
+          "measured_activity": null
+        },
+        {
+          "program": "blastp",
+          "stage": "kappa-query-redo",
+          "work_items": 595,
+          "parallel_selected": false,
+          "measured_activity": null
+        }
+      ],
+      "host_worker_counts": {
+        "spawn_attempt": 0,
+        "spawned": 0,
+        "ready": 0,
+        "exited": 0
+      },
+      "measured_activity": null
+    }
+  },
+  {
+    "status": "PASS",
+    "reason": null,
+    "exit_status": 0,
+    "wall_seconds": 12.179790544003481,
+    "realtime_seconds": 12.179795265197754,
+    "boottime_seconds": 12.179793611023342,
+    "gnu_elapsed_seconds": 12.15,
+    "process_ended_utc": "2026-09-13T09:30:28Z",
+    "watchdog_clocks": {
+      "started": {
+        "monotonic": 154195.835375462,
+        "realtime": 1789291816.6167397
+      }
+    },
+    "realtime_clock_agreement": true,
+    "monotonic_clock_agreement": true,
+    "elapsed_clock": "CLOCK_MONOTONIC; realtime and GNU elapsed are adjustable-clock diagnostics",
+    "cpu_user_seconds": 84.77,
+    "cpu_system_seconds": 0.59,
+    "peak_rss_bytes": 322609152,
+    "output": "/mnt/c/Users/genom/GitHub/LOSAT/docs/evidence/wasm_performance_20260913/run-20260913-01/p3-diagnostic/ap131-nz/threaded-n8/output.txt",
+    "raw_output_sha256": "6d0073c9289cd5e27cc215c4e4d441cb15013c0bd62a3859c2b0bea0ed24f750",
+    "raw_output_bytes": 512675,
+    "started_utc": "2026-09-13T09:30:16Z",
+    "ended_utc": "2026-09-13T09:30:28Z",
+    "timeout_seconds": 3600,
+    "unavailable_metrics": {},
+    "case_id": "ap131-nz",
+    "kind": "threaded",
+    "threads": 8,
+    "diagnostic": true,
+    "artifact_sha256": "13b88d349ec3449330b11428bb15e9a688448c4e144e756b6f038b4b9412a437",
+    "raw_equal": true,
+    "thread_contract": {
+      "requested_threads": 8,
+      "pool_threads": 8,
+      "caller_participates": false,
+      "effective_compute_threads": 8,
+      "thread_stages": [
+        {
+          "program": "blastp",
+          "stage": "subject-prep",
+          "work_items": 581,
+          "parallel_selected": true,
+          "measured_activity": null
+        },
+        {
+          "program": "blastp",
+          "stage": "prelim",
+          "work_items": 581,
+          "parallel_selected": true,
+          "measured_activity": null
+        },
+        {
+          "program": "blastp",
+          "stage": "kappa-query-redo",
+          "work_items": 595,
+          "parallel_selected": true,
+          "measured_activity": null
+        }
+      ],
+      "host_worker_counts": {
+        "spawn_attempt": 8,
+        "spawned": 8,
+        "ready": 8,
+        "exited": 8
+      },
+      "measured_activity": null
+    }
+  },
+  {
+    "status": "PASS",
+    "reason": null,
+    "exit_status": 0,
+    "wall_seconds": 12.04864141100552,
+    "realtime_seconds": 12.048645496368408,
+    "boottime_seconds": 12.048645175993443,
+    "gnu_elapsed_seconds": 12.02,
+    "process_ended_utc": "2026-09-13T09:30:41Z",
+    "watchdog_clocks": {
+      "started": {
+        "monotonic": 154208.293529526,
+        "realtime": 1789291829.0748935
+      }
+    },
+    "realtime_clock_agreement": true,
+    "monotonic_clock_agreement": true,
+    "elapsed_clock": "CLOCK_MONOTONIC; realtime and GNU elapsed are adjustable-clock diagnostics",
+    "cpu_user_seconds": 86.91,
+    "cpu_system_seconds": 0.55,
+    "peak_rss_bytes": 318947328,
+    "output": "/mnt/c/Users/genom/GitHub/LOSAT/docs/evidence/wasm_performance_20260913/run-20260913-01/p3-diagnostic/ap131-nz/instrumented-n8/output.txt",
+    "raw_output_sha256": "6d0073c9289cd5e27cc215c4e4d441cb15013c0bd62a3859c2b0bea0ed24f750",
+    "raw_output_bytes": 512675,
+    "started_utc": "2026-09-13T09:30:29Z",
+    "ended_utc": "2026-09-13T09:30:41Z",
+    "timeout_seconds": 3600,
+    "unavailable_metrics": {},
+    "case_id": "ap131-nz",
+    "kind": "instrumented",
+    "threads": 8,
+    "diagnostic": true,
+    "artifact_sha256": "7401e52f848649fdb2d01e3c50273007317a04b0d61dac027bc1175dba98bf77",
+    "raw_equal": true,
+    "thread_contract": {
+      "requested_threads": 8,
+      "pool_threads": 8,
+      "caller_participates": false,
+      "effective_compute_threads": 8,
+      "thread_stages": [
+        {
+          "program": "blastp",
+          "stage": "subject-prep",
+          "work_items": 581,
+          "parallel_selected": true,
+          "measured_activity": null
+        },
+        {
+          "program": "blastp",
+          "stage": "prelim",
+          "work_items": 581,
+          "parallel_selected": true,
+          "measured_activity": null
+        },
+        {
+          "program": "blastp",
+          "stage": "kappa-query-redo",
+          "work_items": 595,
+          "parallel_selected": true,
+          "measured_activity": null
+        }
+      ],
+      "host_worker_counts": {
+        "spawn_attempt": 8,
+        "spawned": 8,
+        "ready": 8,
+        "exited": 8
+      },
+      "measured_activity": null
+    }
+  },
+  {
+    "status": "PASS",
+    "reason": null,
+    "exit_status": 0,
+    "wall_seconds": 2.7899755499965977,
+    "realtime_seconds": 2.7899811267852783,
+    "boottime_seconds": 2.7899797040154226,
+    "gnu_elapsed_seconds": 2.76,
+    "process_ended_utc": "2026-09-13T09:30:44Z",
+    "watchdog_clocks": {
+      "started": {
+        "monotonic": 154220.808826595,
+        "realtime": 1789291841.5901906
+      }
+    },
+    "realtime_clock_agreement": true,
+    "monotonic_clock_agreement": true,
+    "elapsed_clock": "CLOCK_MONOTONIC; realtime and GNU elapsed are adjustable-clock diagnostics",
+    "cpu_user_seconds": 2.72,
+    "cpu_system_seconds": 0.01,
+    "peak_rss_bytes": 74788864,
+    "output": "/mnt/c/Users/genom/GitHub/LOSAT/docs/evidence/wasm_performance_20260913/run-20260913-01/p3-diagnostic/wssv-paja/oracle/output.txt",
+    "raw_output_sha256": "ade827538e1f218b8c4b5dce88744d8495e58335144f7259bdb529801d220d10",
+    "raw_output_bytes": 80334,
+    "started_utc": "2026-09-13T09:30:41Z",
+    "ended_utc": "2026-09-13T09:30:44Z",
+    "timeout_seconds": 3600,
+    "unavailable_metrics": {},
+    "case_id": "wssv-paja",
+    "kind": "oracle",
+    "threads": 1,
+    "diagnostic": true
+  },
+  {
+    "status": "PASS",
+    "reason": null,
+    "exit_status": 0,
+    "wall_seconds": 2.9227170840022154,
+    "realtime_seconds": 4.931670665740967,
+    "boottime_seconds": 2.9227226459770463,
+    "gnu_elapsed_seconds": 4.89,
+    "process_ended_utc": "2026-09-13T09:30:49Z",
+    "watchdog_clocks": {
+      "started": {
+        "monotonic": 154223.89034208,
+        "realtime": 1789291844.671707
+      }
+    },
+    "realtime_clock_agreement": false,
+    "monotonic_clock_agreement": true,
+    "elapsed_clock": "CLOCK_MONOTONIC; realtime and GNU elapsed are adjustable-clock diagnostics",
+    "cpu_user_seconds": 2.77,
+    "cpu_system_seconds": 0.03,
+    "peak_rss_bytes": 37294080,
+    "output": "/mnt/c/Users/genom/GitHub/LOSAT/docs/evidence/wasm_performance_20260913/run-20260913-01/p3-diagnostic/wssv-paja/native-n1/output.txt",
+    "raw_output_sha256": "ade827538e1f218b8c4b5dce88744d8495e58335144f7259bdb529801d220d10",
+    "raw_output_bytes": 80334,
+    "started_utc": "2026-09-13T09:30:44Z",
+    "ended_utc": "2026-09-13T09:30:49Z",
+    "timeout_seconds": 3600,
+    "unavailable_metrics": {},
+    "case_id": "wssv-paja",
+    "kind": "native",
+    "threads": 1,
+    "diagnostic": true,
+    "artifact_sha256": "834a99ed11f6a4415df6f119d11736a16e50515d1f0f851fda9a3f687688a35f",
+    "raw_equal": true,
+    "thread_contract": {
+      "requested_threads": 1,
+      "pool_threads": 0,
+      "caller_participates": false,
+      "effective_compute_threads": 1,
+      "thread_stages": [
+        {
+          "program": "blastp",
+          "stage": "subject-prep",
+          "work_items": 86,
+          "parallel_selected": false,
+          "measured_activity": null
+        },
+        {
+          "program": "blastp",
+          "stage": "prelim",
+          "work_items": 86,
+          "parallel_selected": false,
+          "measured_activity": null
+        },
+        {
+          "program": "blastp",
+          "stage": "kappa-query-redo",
+          "work_items": 177,
+          "parallel_selected": false,
+          "measured_activity": null
+        }
+      ],
+      "host_worker_counts": null,
+      "measured_activity": null
+    }
+  },
+  {
+    "status": "PASS",
+    "reason": null,
+    "exit_status": 0,
+    "wall_seconds": 3.646896688005654,
+    "realtime_seconds": 3.646902322769165,
+    "boottime_seconds": 3.646899897023104,
+    "gnu_elapsed_seconds": 3.6,
+    "process_ended_utc": "2026-09-13T09:30:53Z",
+    "watchdog_clocks": {
+      "started": {
+        "monotonic": 154227.176940914,
+        "realtime": 1789291849.967252
+      }
+    },
+    "realtime_clock_agreement": true,
+    "monotonic_clock_agreement": true,
+    "elapsed_clock": "CLOCK_MONOTONIC; realtime and GNU elapsed are adjustable-clock diagnostics",
+    "cpu_user_seconds": 3.72,
+    "cpu_system_seconds": 0.02,
+    "peak_rss_bytes": 124751872,
+    "output": "/mnt/c/Users/genom/GitHub/LOSAT/docs/evidence/wasm_performance_20260913/run-20260913-01/p3-diagnostic/wssv-paja/serial-n1/output.txt",
+    "raw_output_sha256": "ade827538e1f218b8c4b5dce88744d8495e58335144f7259bdb529801d220d10",
+    "raw_output_bytes": 80334,
+    "started_utc": "2026-09-13T09:30:49Z",
+    "ended_utc": "2026-09-13T09:30:53Z",
+    "timeout_seconds": 3600,
+    "unavailable_metrics": {},
+    "case_id": "wssv-paja",
+    "kind": "serial",
+    "threads": 1,
+    "diagnostic": true,
+    "artifact_sha256": "f687af514acb81a62219237c25425412d24c8d5a527d11a988e41dc114c53940",
+    "raw_equal": true,
+    "thread_contract": {
+      "requested_threads": 1,
+      "pool_threads": 0,
+      "caller_participates": false,
+      "effective_compute_threads": 1,
+      "thread_stages": [],
+      "host_worker_counts": null,
+      "measured_activity": null
+    }
+  },
+  {
+    "status": "PASS",
+    "reason": null,
+    "exit_status": 0,
+    "wall_seconds": 3.772826172003988,
+    "realtime_seconds": 3.772834300994873,
+    "boottime_seconds": 3.7728325790085364,
+    "gnu_elapsed_seconds": 3.72,
+    "process_ended_utc": "2026-09-13T09:30:57Z",
+    "watchdog_clocks": {
+      "started": {
+        "monotonic": 154231.155786502,
+        "realtime": 1789291853.9460974
+      }
+    },
+    "realtime_clock_agreement": true,
+    "monotonic_clock_agreement": true,
+    "elapsed_clock": "CLOCK_MONOTONIC; realtime and GNU elapsed are adjustable-clock diagnostics",
+    "cpu_user_seconds": 3.8,
+    "cpu_system_seconds": 0.06,
+    "peak_rss_bytes": 147898368,
+    "output": "/mnt/c/Users/genom/GitHub/LOSAT/docs/evidence/wasm_performance_20260913/run-20260913-01/p3-diagnostic/wssv-paja/threaded-n1/output.txt",
+    "raw_output_sha256": "ade827538e1f218b8c4b5dce88744d8495e58335144f7259bdb529801d220d10",
+    "raw_output_bytes": 80334,
+    "started_utc": "2026-09-13T09:30:53Z",
+    "ended_utc": "2026-09-13T09:30:57Z",
+    "timeout_seconds": 3600,
+    "unavailable_metrics": {},
+    "case_id": "wssv-paja",
+    "kind": "threaded",
+    "threads": 1,
+    "diagnostic": true,
+    "artifact_sha256": "13b88d349ec3449330b11428bb15e9a688448c4e144e756b6f038b4b9412a437",
+    "raw_equal": true,
+    "thread_contract": {
+      "requested_threads": 1,
+      "pool_threads": 0,
+      "caller_participates": false,
+      "effective_compute_threads": 1,
+      "thread_stages": [
+        {
+          "program": "blastp",
+          "stage": "subject-prep",
+          "work_items": 86,
+          "parallel_selected": false,
+          "measured_activity": null
+        },
+        {
+          "program": "blastp",
+          "stage": "prelim",
+          "work_items": 86,
+          "parallel_selected": false,
+          "measured_activity": null
+        },
+        {
+          "program": "blastp",
+          "stage": "kappa-query-redo",
+          "work_items": 177,
+          "parallel_selected": false,
+          "measured_activity": null
+        }
+      ],
+      "host_worker_counts": {
+        "spawn_attempt": 0,
+        "spawned": 0,
+        "ready": 0,
+        "exited": 0
+      },
+      "measured_activity": null
+    }
+  },
+  {
+    "status": "PASS",
+    "reason": null,
+    "exit_status": 0,
+    "wall_seconds": 2.0588116320141125,
+    "realtime_seconds": 2.0588159561157227,
+    "boottime_seconds": 2.0588144029898103,
+    "gnu_elapsed_seconds": 2.04,
+    "process_ended_utc": "2026-09-13T09:30:59Z",
+    "watchdog_clocks": {
+      "started": {
+        "monotonic": 154235.13432577,
+        "realtime": 1789291857.924636
+      }
+    },
+    "realtime_clock_agreement": true,
+    "monotonic_clock_agreement": true,
+    "elapsed_clock": "CLOCK_MONOTONIC; realtime and GNU elapsed are adjustable-clock diagnostics",
+    "cpu_user_seconds": 5.82,
+    "cpu_system_seconds": 0.39,
+    "peak_rss_bytes": 272482304,
+    "output": "/mnt/c/Users/genom/GitHub/LOSAT/docs/evidence/wasm_performance_20260913/run-20260913-01/p3-diagnostic/wssv-paja/threaded-n8/output.txt",
+    "raw_output_sha256": "ade827538e1f218b8c4b5dce88744d8495e58335144f7259bdb529801d220d10",
+    "raw_output_bytes": 80334,
+    "started_utc": "2026-09-13T09:30:57Z",
+    "ended_utc": "2026-09-13T09:31:00Z",
+    "timeout_seconds": 3600,
+    "unavailable_metrics": {},
+    "case_id": "wssv-paja",
+    "kind": "threaded",
+    "threads": 8,
+    "diagnostic": true,
+    "artifact_sha256": "13b88d349ec3449330b11428bb15e9a688448c4e144e756b6f038b4b9412a437",
+    "raw_equal": true,
+    "thread_contract": {
+      "requested_threads": 8,
+      "pool_threads": 8,
+      "caller_participates": false,
+      "effective_compute_threads": 8,
+      "thread_stages": [
+        {
+          "program": "blastp",
+          "stage": "subject-prep",
+          "work_items": 86,
+          "parallel_selected": true,
+          "measured_activity": null
+        },
+        {
+          "program": "blastp",
+          "stage": "prelim",
+          "work_items": 86,
+          "parallel_selected": true,
+          "measured_activity": null
+        },
+        {
+          "program": "blastp",
+          "stage": "kappa-query-redo",
+          "work_items": 177,
+          "parallel_selected": true,
+          "measured_activity": null
+        }
+      ],
+      "host_worker_counts": {
+        "spawn_attempt": 8,
+        "spawned": 8,
+        "ready": 8,
+        "exited": 8
+      },
+      "measured_activity": null
+    }
+  },
+  {
+    "status": "PASS",
+    "reason": null,
+    "exit_status": 0,
+    "wall_seconds": 2.2842948570032604,
+    "realtime_seconds": 2.2842984199523926,
+    "boottime_seconds": 2.2842980929999612,
+    "gnu_elapsed_seconds": 2.25,
+    "process_ended_utc": "2026-09-13T09:31:02Z",
+    "watchdog_clocks": {
+      "started": {
+        "monotonic": 154237.312005849,
+        "realtime": 1789291860.1023169
+      }
+    },
+    "realtime_clock_agreement": true,
+    "monotonic_clock_agreement": true,
+    "elapsed_clock": "CLOCK_MONOTONIC; realtime and GNU elapsed are adjustable-clock diagnostics",
+    "cpu_user_seconds": 5.88,
+    "cpu_system_seconds": 0.37,
+    "peak_rss_bytes": 277037056,
+    "output": "/mnt/c/Users/genom/GitHub/LOSAT/docs/evidence/wasm_performance_20260913/run-20260913-01/p3-diagnostic/wssv-paja/instrumented-n8/output.txt",
+    "raw_output_sha256": "ade827538e1f218b8c4b5dce88744d8495e58335144f7259bdb529801d220d10",
+    "raw_output_bytes": 80334,
+    "started_utc": "2026-09-13T09:31:00Z",
+    "ended_utc": "2026-09-13T09:31:02Z",
+    "timeout_seconds": 3600,
+    "unavailable_metrics": {},
+    "case_id": "wssv-paja",
+    "kind": "instrumented",
+    "threads": 8,
+    "diagnostic": true,
+    "artifact_sha256": "7401e52f848649fdb2d01e3c50273007317a04b0d61dac027bc1175dba98bf77",
+    "raw_equal": true,
+    "thread_contract": {
+      "requested_threads": 8,
+      "pool_threads": 8,
+      "caller_participates": false,
+      "effective_compute_threads": 8,
+      "thread_stages": [
+        {
+          "program": "blastp",
+          "stage": "subject-prep",
+          "work_items": 86,
+          "parallel_selected": true,
+          "measured_activity": null
+        },
+        {
+          "program": "blastp",
+          "stage": "prelim",
+          "work_items": 86,
+          "parallel_selected": true,
+          "measured_activity": null
+        },
+        {
+          "program": "blastp",
+          "stage": "kappa-query-redo",
+          "work_items": 177,
+          "parallel_selected": true,
+          "measured_activity": null
+        }
+      ],
+      "host_worker_counts": {
+        "spawn_attempt": 8,
+        "spawned": 8,
+        "ready": 8,
+        "exited": 8
+      },
+      "measured_activity": null
+    }
+  },
+  {
+    "status": "PASS",
+    "reason": null,
+    "exit_status": 0,
+    "wall_seconds": 0.8865142130234744,
+    "realtime_seconds": 0.8865172863006592,
+    "boottime_seconds": 0.8865168259944767,
+    "gnu_elapsed_seconds": 0.86,
+    "process_ended_utc": "2026-09-13T09:31:03Z",
+    "watchdog_clocks": {
+      "started": {
+        "monotonic": 154239.86703818,
+        "realtime": 1789291862.6573489
+      }
+    },
+    "realtime_clock_agreement": true,
+    "monotonic_clock_agreement": true,
+    "elapsed_clock": "CLOCK_MONOTONIC; realtime and GNU elapsed are adjustable-clock diagnostics",
+    "cpu_user_seconds": 0.82,
+    "cpu_system_seconds": 0.01,
+    "peak_rss_bytes": 74420224,
+    "output": "/mnt/c/Users/genom/GitHub/LOSAT/docs/evidence/wasm_performance_20260913/run-20260913-01/p3-diagnostic/sicy-cobv/oracle/output.txt",
+    "raw_output_sha256": "2e6448cfedbf825f939a66374ccfefcf9dec8351b09351a84fd3680a0cac3b0c",
+    "raw_output_bytes": 35748,
+    "started_utc": "2026-09-13T09:31:02Z",
+    "ended_utc": "2026-09-13T09:31:03Z",
+    "timeout_seconds": 3600,
+    "unavailable_metrics": {},
+    "case_id": "sicy-cobv",
+    "kind": "oracle",
+    "threads": 1,
+    "diagnostic": true
+  },
+  {
+    "status": "PASS",
+    "reason": null,
+    "exit_status": 0,
+    "wall_seconds": 1.3632636300171725,
+    "realtime_seconds": 1.3632688522338867,
+    "boottime_seconds": 1.3632675239932723,
+    "gnu_elapsed_seconds": 1.33,
+    "process_ended_utc": "2026-09-13T09:31:04Z",
+    "watchdog_clocks": {
+      "started": {
+        "monotonic": 154240.859456238,
+        "realtime": 1789291863.6497672
+      }
+    },
+    "realtime_clock_agreement": true,
+    "monotonic_clock_agreement": true,
+    "elapsed_clock": "CLOCK_MONOTONIC; realtime and GNU elapsed are adjustable-clock diagnostics",
+    "cpu_user_seconds": 0.75,
+    "cpu_system_seconds": 0.04,
+    "peak_rss_bytes": 27107328,
+    "output": "/mnt/c/Users/genom/GitHub/LOSAT/docs/evidence/wasm_performance_20260913/run-20260913-01/p3-diagnostic/sicy-cobv/native-n1/output.txt",
+    "raw_output_sha256": "2e6448cfedbf825f939a66374ccfefcf9dec8351b09351a84fd3680a0cac3b0c",
+    "raw_output_bytes": 35748,
+    "started_utc": "2026-09-13T09:31:03Z",
+    "ended_utc": "2026-09-13T09:31:05Z",
+    "timeout_seconds": 3600,
+    "unavailable_metrics": {},
+    "case_id": "sicy-cobv",
+    "kind": "native",
+    "threads": 1,
+    "diagnostic": true,
+    "artifact_sha256": "834a99ed11f6a4415df6f119d11736a16e50515d1f0f851fda9a3f687688a35f",
+    "raw_equal": true,
+    "thread_contract": {
+      "requested_threads": 1,
+      "pool_threads": 0,
+      "caller_participates": false,
+      "effective_compute_threads": 1,
+      "thread_stages": [
+        {
+          "program": "blastp",
+          "stage": "subject-prep",
+          "work_items": 105,
+          "parallel_selected": false,
+          "measured_activity": null
+        },
+        {
+          "program": "blastp",
+          "stage": "prelim",
+          "work_items": 105,
+          "parallel_selected": false,
+          "measured_activity": null
+        },
+        {
+          "program": "blastp",
+          "stage": "kappa-query-redo",
+          "work_items": 89,
+          "parallel_selected": false,
+          "measured_activity": null
+        }
+      ],
+      "host_worker_counts": null,
+      "measured_activity": null
+    }
+  },
+  {
+    "status": "PASS",
+    "reason": null,
+    "exit_status": 0,
+    "wall_seconds": 1.0543411160178948,
+    "realtime_seconds": 1.0543463230133057,
+    "boottime_seconds": 1.054343814990716,
+    "gnu_elapsed_seconds": 1.0,
+    "process_ended_utc": "2026-09-13T09:31:06Z",
+    "watchdog_clocks": {
+      "started": {
+        "monotonic": 154242.53979128,
+        "realtime": 1789291865.3301022
+      }
+    },
+    "realtime_clock_agreement": true,
+    "monotonic_clock_agreement": true,
+    "elapsed_clock": "CLOCK_MONOTONIC; realtime and GNU elapsed are adjustable-clock diagnostics",
+    "cpu_user_seconds": 1.16,
+    "cpu_system_seconds": 0.05,
+    "peak_rss_bytes": 118661120,
+    "output": "/mnt/c/Users/genom/GitHub/LOSAT/docs/evidence/wasm_performance_20260913/run-20260913-01/p3-diagnostic/sicy-cobv/serial-n1/output.txt",
+    "raw_output_sha256": "2e6448cfedbf825f939a66374ccfefcf9dec8351b09351a84fd3680a0cac3b0c",
+    "raw_output_bytes": 35748,
+    "started_utc": "2026-09-13T09:31:05Z",
+    "ended_utc": "2026-09-13T09:31:06Z",
+    "timeout_seconds": 3600,
+    "unavailable_metrics": {},
+    "case_id": "sicy-cobv",
+    "kind": "serial",
+    "threads": 1,
+    "diagnostic": true,
+    "artifact_sha256": "f687af514acb81a62219237c25425412d24c8d5a527d11a988e41dc114c53940",
+    "raw_equal": true,
+    "thread_contract": {
+      "requested_threads": 1,
+      "pool_threads": 0,
+      "caller_participates": false,
+      "effective_compute_threads": 1,
+      "thread_stages": [],
+      "host_worker_counts": null,
+      "measured_activity": null
+    }
+  },
+  {
+    "status": "PASS",
+    "reason": null,
+    "exit_status": 0,
+    "wall_seconds": 1.3637031679973006,
+    "realtime_seconds": 1.363710880279541,
+    "boottime_seconds": 1.3637080379994586,
+    "gnu_elapsed_seconds": 1.32,
+    "process_ended_utc": "2026-09-13T09:31:07Z",
+    "watchdog_clocks": {
+      "started": {
+        "monotonic": 154243.836722233,
+        "realtime": 1789291866.6270332
+      }
+    },
+    "realtime_clock_agreement": true,
+    "monotonic_clock_agreement": true,
+    "elapsed_clock": "CLOCK_MONOTONIC; realtime and GNU elapsed are adjustable-clock diagnostics",
+    "cpu_user_seconds": 1.32,
+    "cpu_system_seconds": 0.07,
+    "peak_rss_bytes": 130056192,
+    "output": "/mnt/c/Users/genom/GitHub/LOSAT/docs/evidence/wasm_performance_20260913/run-20260913-01/p3-diagnostic/sicy-cobv/threaded-n1/output.txt",
+    "raw_output_sha256": "2e6448cfedbf825f939a66374ccfefcf9dec8351b09351a84fd3680a0cac3b0c",
+    "raw_output_bytes": 35748,
+    "started_utc": "2026-09-13T09:31:06Z",
+    "ended_utc": "2026-09-13T09:31:08Z",
+    "timeout_seconds": 3600,
+    "unavailable_metrics": {},
+    "case_id": "sicy-cobv",
+    "kind": "threaded",
+    "threads": 1,
+    "diagnostic": true,
+    "artifact_sha256": "13b88d349ec3449330b11428bb15e9a688448c4e144e756b6f038b4b9412a437",
+    "raw_equal": true,
+    "thread_contract": {
+      "requested_threads": 1,
+      "pool_threads": 0,
+      "caller_participates": false,
+      "effective_compute_threads": 1,
+      "thread_stages": [
+        {
+          "program": "blastp",
+          "stage": "subject-prep",
+          "work_items": 105,
+          "parallel_selected": false,
+          "measured_activity": null
+        },
+        {
+          "program": "blastp",
+          "stage": "prelim",
+          "work_items": 105,
+          "parallel_selected": false,
+          "measured_activity": null
+        },
+        {
+          "program": "blastp",
+          "stage": "kappa-query-redo",
+          "work_items": 89,
+          "parallel_selected": false,
+          "measured_activity": null
+        }
+      ],
+      "host_worker_counts": {
+        "spawn_attempt": 0,
+        "spawned": 0,
+        "ready": 0,
+        "exited": 0
+      },
+      "measured_activity": null
+    }
+  },
+  {
+    "status": "PASS",
+    "reason": null,
+    "exit_status": 0,
+    "wall_seconds": 1.6546756800089497,
+    "realtime_seconds": 1.6546802520751953,
+    "boottime_seconds": 1.6546799479983747,
+    "gnu_elapsed_seconds": 1.62,
+    "process_ended_utc": "2026-09-13T09:31:09Z",
+    "watchdog_clocks": {
+      "started": {
+        "monotonic": 154245.42997615,
+        "realtime": 1789291868.2202861
+      }
+    },
+    "realtime_clock_agreement": true,
+    "monotonic_clock_agreement": true,
+    "elapsed_clock": "CLOCK_MONOTONIC; realtime and GNU elapsed are adjustable-clock diagnostics",
+    "cpu_user_seconds": 2.62,
+    "cpu_system_seconds": 0.16,
+    "peak_rss_bytes": 273072128,
+    "output": "/mnt/c/Users/genom/GitHub/LOSAT/docs/evidence/wasm_performance_20260913/run-20260913-01/p3-diagnostic/sicy-cobv/threaded-n8/output.txt",
+    "raw_output_sha256": "2e6448cfedbf825f939a66374ccfefcf9dec8351b09351a84fd3680a0cac3b0c",
+    "raw_output_bytes": 35748,
+    "started_utc": "2026-09-13T09:31:08Z",
+    "ended_utc": "2026-09-13T09:31:10Z",
+    "timeout_seconds": 3600,
+    "unavailable_metrics": {},
+    "case_id": "sicy-cobv",
+    "kind": "threaded",
+    "threads": 8,
+    "diagnostic": true,
+    "artifact_sha256": "13b88d349ec3449330b11428bb15e9a688448c4e144e756b6f038b4b9412a437",
+    "raw_equal": true,
+    "thread_contract": {
+      "requested_threads": 8,
+      "pool_threads": 8,
+      "caller_participates": false,
+      "effective_compute_threads": 8,
+      "thread_stages": [
+        {
+          "program": "blastp",
+          "stage": "subject-prep",
+          "work_items": 105,
+          "parallel_selected": true,
+          "measured_activity": null
+        },
+        {
+          "program": "blastp",
+          "stage": "prelim",
+          "work_items": 105,
+          "parallel_selected": true,
+          "measured_activity": null
+        },
+        {
+          "program": "blastp",
+          "stage": "kappa-query-redo",
+          "work_items": 89,
+          "parallel_selected": true,
+          "measured_activity": null
+        }
+      ],
+      "host_worker_counts": {
+        "spawn_attempt": 8,
+        "spawned": 8,
+        "ready": 8,
+        "exited": 8
+      },
+      "measured_activity": null
+    }
+  },
+  {
+    "status": "PASS",
+    "reason": null,
+    "exit_status": 0,
+    "wall_seconds": 1.8418783569941297,
+    "realtime_seconds": 1.8418817520141602,
+    "boottime_seconds": 1.8418816560006235,
+    "gnu_elapsed_seconds": 1.8,
+    "process_ended_utc": "2026-09-13T09:31:12Z",
+    "watchdog_clocks": {
+      "started": {
+        "monotonic": 154247.498600461,
+        "realtime": 1789291870.2889109
+      }
+    },
+    "realtime_clock_agreement": true,
+    "monotonic_clock_agreement": true,
+    "elapsed_clock": "CLOCK_MONOTONIC; realtime and GNU elapsed are adjustable-clock diagnostics",
+    "cpu_user_seconds": 2.31,
+    "cpu_system_seconds": 0.23,
+    "peak_rss_bytes": 267796480,
+    "output": "/mnt/c/Users/genom/GitHub/LOSAT/docs/evidence/wasm_performance_20260913/run-20260913-01/p3-diagnostic/sicy-cobv/instrumented-n8/output.txt",
+    "raw_output_sha256": "2e6448cfedbf825f939a66374ccfefcf9dec8351b09351a84fd3680a0cac3b0c",
+    "raw_output_bytes": 35748,
+    "started_utc": "2026-09-13T09:31:10Z",
+    "ended_utc": "2026-09-13T09:31:12Z",
+    "timeout_seconds": 3600,
+    "unavailable_metrics": {},
+    "case_id": "sicy-cobv",
+    "kind": "instrumented",
+    "threads": 8,
+    "diagnostic": true,
+    "artifact_sha256": "7401e52f848649fdb2d01e3c50273007317a04b0d61dac027bc1175dba98bf77",
+    "raw_equal": true,
+    "thread_contract": {
+      "requested_threads": 8,
+      "pool_threads": 8,
+      "caller_participates": false,
+      "effective_compute_threads": 8,
+      "thread_stages": [
+        {
+          "program": "blastp",
+          "stage": "subject-prep",
+          "work_items": 105,
+          "parallel_selected": true,
+          "measured_activity": null
+        },
+        {
+          "program": "blastp",
+          "stage": "prelim",
+          "work_items": 105,
+          "parallel_selected": true,
+          "measured_activity": null
+        },
+        {
+          "program": "blastp",
+          "stage": "kappa-query-redo",
+          "work_items": 89,
+          "parallel_selected": true,
+          "measured_activity": null
+        }
+      ],
+      "host_worker_counts": {
+        "spawn_attempt": 8,
+        "spawned": 8,
+        "ready": 8,
+        "exited": 8
+      },
+      "measured_activity": null
+    }
+  }
+]

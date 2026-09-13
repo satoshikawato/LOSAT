@@ -1,0 +1,16 @@
+{
+  "cpu_system_seconds": 0.25,
+  "cpu_user_seconds": 2.23,
+  "ended_utc": "2026-09-13T08:01:36Z",
+  "exit_status": 0,
+  "output": "/mnt/c/Users/genom/GitHub/LOSAT/docs/evidence/wasm_performance_20260913/run-20260913-01/p1-controls/diagnostic/EDL933.Sakai.losatn.megablast/candidate-threaded-n8/output.txt",
+  "peak_rss_bytes": 461463552,
+  "raw_output_bytes": 473032,
+  "raw_output_sha256": "300a925ef86f20af9c0eff53f1c73638bdf80d47f5153352086a3e7bfd416c0c",
+  "reason": null,
+  "started_utc": "2026-09-13T08:01:32Z",
+  "status": "PASS",
+  "timeout_seconds": 300,
+  "unavailable_metrics": {},
+  "wall_seconds": 3.315398467995692
+}

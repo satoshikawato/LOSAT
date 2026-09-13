@@ -1,0 +1,54 @@
+{
+  "status": "FAIL",
+  "code_source": "Git index for selected files; HEAD for other code dependencies; original FASTA files read-only",
+  "source_sha256": {
+    "LOSAT/tests/README.md": "6f2fbdc2404a5983cacd8a00d3f37bfa99eb0479f6211555e8b17ae31ac0e02a",
+    "LOSAT/tests/benchmark_wasi_reuse.js": "a0effdc582f7fcc1dc8fc35736f031f6a85fb8597461393ef8bdda0ffdcfc32b",
+    "LOSAT/tests/benchmark_wasm_threading.py": "48265cc6556db7f5e6a8efcc8212e3f2f6d0f8a8dc8932ba4e8e79decdc9d42b",
+    "LOSAT/tests/comparison_cases.tsv": "9d09061d15077a77fc6f775e42a0276f6121a8a489e0d9759fe7cc2c5daf496a",
+    "LOSAT/tests/comparison_data.py": "742da1d0ed6924d9f194e9623878100215c4c3508101b7ca49b64b46b797876d",
+    "LOSAT/tests/plot_comparison.py": "d9f5813f08311d6cbff38e9796f10987c933f792a1fc752e89d4628e1f5130cb",
+    "LOSAT/tests/plot_execution_time.py": "628ce65f93e27d78bb887e49f56a845e258cb9806209422461ad23bcca777b3f",
+    "LOSAT/tests/plot_overall_trend.py": "6e9bbf50532b4985dfe9ff0af0ad603b64f98415cb957a3566448621f75e4894",
+    "LOSAT/tests/run_comparison.sh": "f8591f2cd4c73b3f815e59582e08552d37450558b9378a2e1798f8ab963de901",
+    "LOSAT/tests/run_wasm_comparison.sh": "bd13ad0a44c09cd692cd8548f0f041097ce5386c323c262349a94542ea1b9c30",
+    "LOSAT/tests/test_benchmark_wasi_reuse.js": "d381d567824ca86d576e61e63e119a0b8f3cde85d52404f67e4a52307c75373e",
+    "LOSAT/tests/test_benchmark_wasm_threading.py": "a5b3f33b4f19ace487be27e92c24c6bea78bea32e53cedbca0ce2145bcee2e54",
+    "LOSAT/tests/test_simple_comparison.py": "ef21350f869bd3fec010dec80ca1b3cda5775ad6b69156969886c5eebc171dc5",
+    "LOSAT/tests/test_wasm_performance.py": "4033c76c115bf3430bb3c242369c985b1e8d39612f42c67063c1d132346f6f4d",
+    "LOSAT/tests/wasm_performance.py": "33bf0515740554c754204be55baa3ac1f2701f656b495e58e242d2decae6c95f",
+    "docs/wasm_performance_optimization_plan_20260913.md": "c79691f35dc12943836e184d95b4d926e22262187f7aeb56c2938c3e9bc74fc1"
+  },
+  "checks": [
+    {
+      "argv": [
+        "/home/kawato/micromamba/bin/python3",
+        "-m",
+        "unittest",
+        "-v",
+        "test_simple_comparison",
+        "test_wasm_performance",
+        "test_benchmark_wasm_threading"
+      ],
+      "exit_status": 1
+    },
+    {
+      "argv": [
+        "bash",
+        "-n",
+        "LOSAT/tests/run_comparison.sh"
+      ],
+      "exit_status": 0,
+      "stderr": ""
+    },
+    {
+      "argv": [
+        "bash",
+        "-n",
+        "LOSAT/tests/run_wasm_comparison.sh"
+      ],
+      "exit_status": 0,
+      "stderr": ""
+    }
+  ]
+}

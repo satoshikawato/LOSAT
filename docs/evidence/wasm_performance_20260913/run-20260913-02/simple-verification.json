@@ -1,0 +1,37 @@
+[
+  {
+    "name": "tblastx-default",
+    "searches": 3,
+    "status": "PASS",
+    "raw_byte_identical_to_current_ncbi": true,
+    "sha256": "bbef153094025db89dd4a69b2a3c4246b0b8853396fe740bc7e1bd654db105b6",
+    "actual_node_flags": [
+      "--no-liftoff",
+      "--no-wasm-tier-up"
+    ]
+  },
+  {
+    "name": "tblastx-optout",
+    "searches": 3,
+    "status": "PASS",
+    "raw_byte_identical_to_current_ncbi": true,
+    "sha256": "bbef153094025db89dd4a69b2a3c4246b0b8853396fe740bc7e1bd654db105b6",
+    "actual_node_flags": []
+  },
+  {
+    "name": "blastp-control",
+    "searches": 3,
+    "status": "PASS",
+    "raw_byte_identical_to_current_ncbi": true,
+    "sha256": "2e6448cfedbf825f939a66374ccfefcf9dec8351b09351a84fd3680a0cac3b0c",
+    "actual_node_flags": []
+  },
+  {
+    "name": "blastn-control",
+    "searches": 3,
+    "status": "PASS",
+    "raw_byte_identical_to_current_ncbi": true,
+    "sha256": "833dc5ac297a0a9dd42c2de7faf00dd6e0387a95cc468f240520ac184758e903",
+    "actual_node_flags": []
+  }
+]

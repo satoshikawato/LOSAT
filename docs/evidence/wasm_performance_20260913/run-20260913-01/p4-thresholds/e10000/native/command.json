@@ -1,0 +1,25 @@
+{
+  "cwd": "/mnt/c/Users/genom/GitHub/LOSAT",
+  "environment_overrides": {
+    "LOSAT_WASI_THREADS_DEBUG": "1",
+    "NODE_NO_WARNINGS": "1"
+  },
+  "ordered_argv": [
+    "/mnt/c/Users/genom/GitHub/LOSAT/docs/evidence/wasm_performance_20260913/run-20260913-01/final-build/artifacts/LOSAT",
+    "tblastx",
+    "-query",
+    "/mnt/c/Users/genom/GitHub/LOSAT/docs/evidence/wasm_performance_20260913/run-20260913-01/p4-thresholds/fixtures/LC738874.fasta",
+    "-subject",
+    "/mnt/c/Users/genom/GitHub/LOSAT/docs/evidence/wasm_performance_20260913/run-20260913-01/p4-thresholds/fixtures/LC738875.fasta",
+    "-outfmt",
+    "6",
+    "-evalue",
+    "10000",
+    "-out",
+    "/mnt/c/Users/genom/GitHub/LOSAT/docs/evidence/wasm_performance_20260913/run-20260913-01/p4-thresholds/e10000/native/output.txt",
+    "-num_threads",
+    "1"
+  ],
+  "shell": false,
+  "sink": "/mnt/c/Users/genom/GitHub/LOSAT/docs/evidence/wasm_performance_20260913/run-20260913-01/p4-thresholds/e10000/native/output.txt"
+}

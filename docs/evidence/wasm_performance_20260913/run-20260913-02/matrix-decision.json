@@ -1,0 +1,37 @@
+{
+  "status": "REJECTED",
+  "reason": "Neither main input reaches frozen 10% exploration threshold; no production integration.",
+  "comparisons": [
+    {
+      "case": "AP027078.AP027131.losatp",
+      "kind": "threaded",
+      "threads": 8,
+      "baseline_seconds": 6.60743658899446,
+      "candidate_seconds": 6.620072788005928,
+      "speedup": 0.9980912295957891,
+      "improvement_percent": -0.1912420776389201,
+      "baseline_rss_bytes": 317788160,
+      "candidate_rss_bytes": 313552896,
+      "rss_delta_bytes": -4235264,
+      "raw_output_sha256": "5bdaa58908a96768c26c329ade49a97d4e2d705895e457709eae094b14c708d4",
+      "samples_per_condition": 3,
+      "evidence": "run-20260913-02/matrix-exploration"
+    },
+    {
+      "case": "AP027132.NZ_CP006932.losatp",
+      "kind": "threaded",
+      "threads": 8,
+      "baseline_seconds": 9.778996441018535,
+      "candidate_seconds": 9.246466181997675,
+      "speedup": 1.0575928412583895,
+      "improvement_percent": 5.445653469993427,
+      "baseline_rss_bytes": 322215936,
+      "candidate_rss_bytes": 327393280,
+      "rss_delta_bytes": 5177344,
+      "raw_output_sha256": "cd81f8fef3dff78fb48f5923de43c84f1af78d006aaa9a8cae2c2f1f20aed181",
+      "samples_per_condition": 3,
+      "evidence": "run-20260913-02/matrix-exploration"
+    }
+  ],
+  "source_comment_errata": "Archived rejected snapshot cites cells 578/859/1099. Actual NCBI blast_gapalign.c cells are 578/866/1115/1180; restricted wrapper reference should include 1078\u20131115 and 1180. Do not alter measured source retroactively. Correct before any new candidate version."
+}

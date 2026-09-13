@@ -1,0 +1,70 @@
+[
+  {
+    "case_id": "AP027078.AP027131.losatp",
+    "version": "baseline",
+    "kind": "threaded",
+    "threads": 8,
+    "boundary": "cold-process",
+    "median_seconds": 6.906907955999486,
+    "min_seconds": 6.869621041027131,
+    "max_seconds": 7.224327022006037,
+    "samples": [
+      7.224327022006037,
+      6.906907955999486,
+      6.869621041027131
+    ],
+    "peak_rss_bytes": 308043776,
+    "raw_output_sha256": "5bdaa58908a96768c26c329ade49a97d4e2d705895e457709eae094b14c708d4"
+  },
+  {
+    "case_id": "AP027078.AP027131.losatp",
+    "version": "candidate",
+    "kind": "threaded",
+    "threads": 8,
+    "boundary": "cold-process",
+    "median_seconds": 7.2100499119842425,
+    "min_seconds": 7.1206497290113475,
+    "max_seconds": 7.439198289997876,
+    "samples": [
+      7.439198289997876,
+      7.2100499119842425,
+      7.1206497290113475
+    ],
+    "peak_rss_bytes": 308109312,
+    "raw_output_sha256": "5bdaa58908a96768c26c329ade49a97d4e2d705895e457709eae094b14c708d4"
+  },
+  {
+    "case_id": "AP027132.NZ_CP006932.losatp",
+    "version": "baseline",
+    "kind": "threaded",
+    "threads": 8,
+    "boundary": "cold-process",
+    "median_seconds": 10.453639052982908,
+    "min_seconds": 9.947335812001256,
+    "max_seconds": 10.805679446988506,
+    "samples": [
+      10.453639052982908,
+      10.805679446988506,
+      9.947335812001256
+    ],
+    "peak_rss_bytes": 328818688,
+    "raw_output_sha256": "cd81f8fef3dff78fb48f5923de43c84f1af78d006aaa9a8cae2c2f1f20aed181"
+  },
+  {
+    "case_id": "AP027132.NZ_CP006932.losatp",
+    "version": "candidate",
+    "kind": "threaded",
+    "threads": 8,
+    "boundary": "cold-process",
+    "median_seconds": 10.196128466021037,
+    "min_seconds": 10.137492795009166,
+    "max_seconds": 10.548953381978208,
+    "samples": [
+      10.548953381978208,
+      10.137492795009166,
+      10.196128466021037
+    ],
+    "peak_rss_bytes": 322297856,
+    "raw_output_sha256": "cd81f8fef3dff78fb48f5923de43c84f1af78d006aaa9a8cae2c2f1f20aed181"
+  }
+]

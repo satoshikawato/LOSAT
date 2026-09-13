@@ -1,0 +1,42 @@
+[
+  {
+    "status": "BAD_EXIT",
+    "reason": "subprocess exit 143",
+    "exit_status": 143,
+    "wall_seconds": 64.722594285995,
+    "cpu_user_seconds": 4.35,
+    "cpu_system_seconds": 8.71,
+    "peak_rss_bytes": 131072000,
+    "output": "/mnt/c/Users/genom/GitHub/LOSAT/docs/evidence/wasm_performance_20260913/run-20260913-01/p1-profiles/Mela-default-n8/process/output.txt",
+    "raw_output_sha256": null,
+    "raw_output_bytes": null,
+    "started_utc": "2026-09-13T07:23:05Z",
+    "ended_utc": "2026-09-13T07:24:14Z",
+    "timeout_seconds": 3600,
+    "unavailable_metrics": {},
+    "case_id": "Mela",
+    "mode": "default",
+    "artifact_sha256": "13b88d349ec3449330b11428bb15e9a688448c4e144e756b6f038b4b9412a437",
+    "diagnostic": true
+  },
+  {
+    "status": "BAD_EXIT",
+    "reason": "subprocess exit 143",
+    "exit_status": 143,
+    "wall_seconds": 65.81974840600742,
+    "cpu_user_seconds": 4.73,
+    "cpu_system_seconds": 8.37,
+    "peak_rss_bytes": 148160512,
+    "output": "/mnt/c/Users/genom/GitHub/LOSAT/docs/evidence/wasm_performance_20260913/run-20260913-01/p1-profiles/Mela-turbofan-n8/process/output.txt",
+    "raw_output_sha256": null,
+    "raw_output_bytes": null,
+    "started_utc": "2026-09-13T07:24:14Z",
+    "ended_utc": "2026-09-13T07:25:24Z",
+    "timeout_seconds": 3600,
+    "unavailable_metrics": {},
+    "case_id": "Mela",
+    "mode": "turbofan",
+    "artifact_sha256": "13b88d349ec3449330b11428bb15e9a688448c4e144e756b6f038b4b9412a437",
+    "diagnostic": true
+  }
+]

@@ -1,0 +1,31 @@
+{
+  "run_id": "e8e05e422feb4c5d8318ca71e863c168",
+  "status": "PASS",
+  "ordered_argv": [
+    "/home/kawato/micromamba/bin/blastp",
+    "-query",
+    "/mnt/c/Users/genom/GitHub/LOSAT/LOSAT/tests/fasta/SicyWSV.faa",
+    "-subject",
+    "/mnt/c/Users/genom/GitHub/LOSAT/LOSAT/tests/fasta/CoBV.faa",
+    "-outfmt",
+    "6",
+    "-num_threads",
+    "1",
+    "-out",
+    "/mnt/c/Users/genom/GitHub/LOSAT/docs/evidence/wasm_performance_20260913/run-20260913-01/p4-simple/blast_out/SicyWSV.CoBV.BLASTP.out"
+  ],
+  "output": "/mnt/c/Users/genom/GitHub/LOSAT/docs/evidence/wasm_performance_20260913/run-20260913-01/p4-simple/blast_out/SicyWSV.CoBV.BLASTP.out",
+  "cwd": "/mnt/c/Users/genom/GitHub/LOSAT/LOSAT/tests",
+  "argv_sha256": "94f181c967509a9222b7575fa6d38365e7b22be6d536c86dcdfb8fc270d92290",
+  "oracle_version": "blastp: 2.17.0+\n Package: blast 2.17.0, build Aug 11 2025 09:46:06",
+  "files": {
+    "/home/kawato/micromamba/bin/blastp": "fdcbaa25cfdee5359231ae178713d2c28272e694614b847c5b2b7407c3d8a08b",
+    "/mnt/c/Users/genom/GitHub/LOSAT/LOSAT/tests/fasta/SicyWSV.faa": "0d44dd510387bd2b7dbb4d7fc5642aa9afb48f68a2a98b942291368908de13ef",
+    "/mnt/c/Users/genom/GitHub/LOSAT/LOSAT/tests/fasta/CoBV.faa": "505e1378f1c38b7497b4d45cb96917daaebccdf2037586983decde9365af76e7"
+  },
+  "started_utc": "2026-09-13T09:55:25Z",
+  "exit_status": 0,
+  "output_sha256": "2e6448cfedbf825f939a66374ccfefcf9dec8351b09351a84fd3680a0cac3b0c",
+  "log_sha256": "ff2854334e9dc5382a14f9fdc7ffab0dad5d58021b7cd294c4ce835d0bfd3739",
+  "ended_utc": "2026-09-13T09:55:26Z"
+}

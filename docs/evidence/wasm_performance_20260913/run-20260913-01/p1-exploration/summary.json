@@ -1,0 +1,308 @@
+[
+  {
+    "case_id": "MelaMJNV.PemoMJNVA.tlosatx",
+    "version": "baseline",
+    "kind": "native",
+    "threads": 1,
+    "boundary": "cold-process",
+    "median_seconds": 3.9438666139903944,
+    "min_seconds": 3.872988314018585,
+    "max_seconds": 4.121937218995299,
+    "samples": [
+      4.121937218995299,
+      3.872988314018585,
+      3.9438666139903944
+    ],
+    "peak_rss_bytes": 70811648,
+    "raw_output_sha256": "bbef153094025db89dd4a69b2a3c4246b0b8853396fe740bc7e1bd654db105b6"
+  },
+  {
+    "case_id": "MelaMJNV.PemoMJNVA.tlosatx",
+    "version": "baseline",
+    "kind": "native",
+    "threads": 2,
+    "boundary": "cold-process",
+    "median_seconds": 2.7116804190154653,
+    "min_seconds": 2.700489227019716,
+    "max_seconds": 2.79223397601163,
+    "samples": [
+      2.79223397601163,
+      2.700489227019716,
+      2.7116804190154653
+    ],
+    "peak_rss_bytes": 74502144,
+    "raw_output_sha256": "bbef153094025db89dd4a69b2a3c4246b0b8853396fe740bc7e1bd654db105b6"
+  },
+  {
+    "case_id": "MelaMJNV.PemoMJNVA.tlosatx",
+    "version": "baseline",
+    "kind": "native",
+    "threads": 4,
+    "boundary": "cold-process",
+    "median_seconds": 2.34983536801883,
+    "min_seconds": 2.292330394993769,
+    "max_seconds": 2.5515760539856274,
+    "samples": [
+      2.5515760539856274,
+      2.292330394993769,
+      2.34983536801883
+    ],
+    "peak_rss_bytes": 78966784,
+    "raw_output_sha256": "bbef153094025db89dd4a69b2a3c4246b0b8853396fe740bc7e1bd654db105b6"
+  },
+  {
+    "case_id": "MelaMJNV.PemoMJNVA.tlosatx",
+    "version": "baseline",
+    "kind": "native",
+    "threads": 8,
+    "boundary": "cold-process",
+    "median_seconds": 2.285423338005785,
+    "min_seconds": 2.28100151399849,
+    "max_seconds": 2.3127947710163426,
+    "samples": [
+      2.28100151399849,
+      2.285423338005785,
+      2.3127947710163426
+    ],
+    "peak_rss_bytes": 79335424,
+    "raw_output_sha256": "bbef153094025db89dd4a69b2a3c4246b0b8853396fe740bc7e1bd654db105b6"
+  },
+  {
+    "case_id": "MelaMJNV.PemoMJNVA.tlosatx",
+    "version": "baseline",
+    "kind": "serial",
+    "threads": 1,
+    "boundary": "cold-process",
+    "median_seconds": 6.1341354079777375,
+    "min_seconds": 6.004620513005648,
+    "max_seconds": 6.185562828992261,
+    "samples": [
+      6.1341354079777375,
+      6.004620513005648,
+      6.185562828992261
+    ],
+    "peak_rss_bytes": 159002624,
+    "raw_output_sha256": "bbef153094025db89dd4a69b2a3c4246b0b8853396fe740bc7e1bd654db105b6"
+  },
+  {
+    "case_id": "MelaMJNV.PemoMJNVA.tlosatx",
+    "version": "baseline",
+    "kind": "threaded",
+    "threads": 1,
+    "boundary": "cold-process",
+    "median_seconds": 6.182123117003357,
+    "min_seconds": 6.176614744996186,
+    "max_seconds": 6.318480913003441,
+    "samples": [
+      6.182123117003357,
+      6.176614744996186,
+      6.318480913003441
+    ],
+    "peak_rss_bytes": 177205248,
+    "raw_output_sha256": "bbef153094025db89dd4a69b2a3c4246b0b8853396fe740bc7e1bd654db105b6"
+  },
+  {
+    "case_id": "MelaMJNV.PemoMJNVA.tlosatx",
+    "version": "baseline",
+    "kind": "threaded",
+    "threads": 2,
+    "boundary": "cold-process",
+    "median_seconds": 5.47069140500389,
+    "min_seconds": 5.4369510779797565,
+    "max_seconds": 5.572741540003335,
+    "samples": [
+      5.4369510779797565,
+      5.572741540003335,
+      5.47069140500389
+    ],
+    "peak_rss_bytes": 209149952,
+    "raw_output_sha256": "bbef153094025db89dd4a69b2a3c4246b0b8853396fe740bc7e1bd654db105b6"
+  },
+  {
+    "case_id": "MelaMJNV.PemoMJNVA.tlosatx",
+    "version": "baseline",
+    "kind": "threaded",
+    "threads": 4,
+    "boundary": "cold-process",
+    "median_seconds": 6.836666510993382,
+    "min_seconds": 6.662484878994292,
+    "max_seconds": 6.844792530988343,
+    "samples": [
+      6.844792530988343,
+      6.662484878994292,
+      6.836666510993382
+    ],
+    "peak_rss_bytes": 243146752,
+    "raw_output_sha256": "bbef153094025db89dd4a69b2a3c4246b0b8853396fe740bc7e1bd654db105b6"
+  },
+  {
+    "case_id": "MelaMJNV.PemoMJNVA.tlosatx",
+    "version": "baseline",
+    "kind": "threaded",
+    "threads": 8,
+    "boundary": "cold-process",
+    "median_seconds": 6.887499005009886,
+    "min_seconds": 6.723037018004106,
+    "max_seconds": 6.989589365985012,
+    "samples": [
+      6.887499005009886,
+      6.989589365985012,
+      6.723037018004106
+    ],
+    "peak_rss_bytes": 307888128,
+    "raw_output_sha256": "bbef153094025db89dd4a69b2a3c4246b0b8853396fe740bc7e1bd654db105b6"
+  },
+  {
+    "case_id": "MelaMJNV.PemoMJNVA.tlosatx",
+    "version": "candidate",
+    "kind": "native",
+    "threads": 1,
+    "boundary": "cold-process",
+    "median_seconds": 3.8043678019894287,
+    "min_seconds": 3.785802911996143,
+    "max_seconds": 3.8750553009740543,
+    "samples": [
+      3.8043678019894287,
+      3.785802911996143,
+      3.8750553009740543
+    ],
+    "peak_rss_bytes": 70860800,
+    "raw_output_sha256": "bbef153094025db89dd4a69b2a3c4246b0b8853396fe740bc7e1bd654db105b6"
+  },
+  {
+    "case_id": "MelaMJNV.PemoMJNVA.tlosatx",
+    "version": "candidate",
+    "kind": "native",
+    "threads": 2,
+    "boundary": "cold-process",
+    "median_seconds": 2.753012837987626,
+    "min_seconds": 2.719359003996942,
+    "max_seconds": 2.75809624401154,
+    "samples": [
+      2.753012837987626,
+      2.719359003996942,
+      2.75809624401154
+    ],
+    "peak_rss_bytes": 74485760,
+    "raw_output_sha256": "bbef153094025db89dd4a69b2a3c4246b0b8853396fe740bc7e1bd654db105b6"
+  },
+  {
+    "case_id": "MelaMJNV.PemoMJNVA.tlosatx",
+    "version": "candidate",
+    "kind": "native",
+    "threads": 4,
+    "boundary": "cold-process",
+    "median_seconds": 2.3032727929821704,
+    "min_seconds": 2.2340225460065994,
+    "max_seconds": 2.333428774989443,
+    "samples": [
+      2.2340225460065994,
+      2.3032727929821704,
+      2.333428774989443
+    ],
+    "peak_rss_bytes": 79310848,
+    "raw_output_sha256": "bbef153094025db89dd4a69b2a3c4246b0b8853396fe740bc7e1bd654db105b6"
+  },
+  {
+    "case_id": "MelaMJNV.PemoMJNVA.tlosatx",
+    "version": "candidate",
+    "kind": "native",
+    "threads": 8,
+    "boundary": "cold-process",
+    "median_seconds": 2.2890244610025547,
+    "min_seconds": 2.2877548790129367,
+    "max_seconds": 2.315435754979262,
+    "samples": [
+      2.2877548790129367,
+      2.2890244610025547,
+      2.315435754979262
+    ],
+    "peak_rss_bytes": 80080896,
+    "raw_output_sha256": "bbef153094025db89dd4a69b2a3c4246b0b8853396fe740bc7e1bd654db105b6"
+  },
+  {
+    "case_id": "MelaMJNV.PemoMJNVA.tlosatx",
+    "version": "candidate",
+    "kind": "serial",
+    "threads": 1,
+    "boundary": "cold-process",
+    "median_seconds": 5.427378257998498,
+    "min_seconds": 5.304048235004302,
+    "max_seconds": 5.439455487998202,
+    "samples": [
+      5.304048235004302,
+      5.439455487998202,
+      5.427378257998498
+    ],
+    "peak_rss_bytes": 148770816,
+    "raw_output_sha256": "bbef153094025db89dd4a69b2a3c4246b0b8853396fe740bc7e1bd654db105b6"
+  },
+  {
+    "case_id": "MelaMJNV.PemoMJNVA.tlosatx",
+    "version": "candidate",
+    "kind": "threaded",
+    "threads": 1,
+    "boundary": "cold-process",
+    "median_seconds": 5.392334399977699,
+    "min_seconds": 5.24923998999293,
+    "max_seconds": 5.496010064001894,
+    "samples": [
+      5.392334399977699,
+      5.496010064001894,
+      5.24923998999293
+    ],
+    "peak_rss_bytes": 181055488,
+    "raw_output_sha256": "bbef153094025db89dd4a69b2a3c4246b0b8853396fe740bc7e1bd654db105b6"
+  },
+  {
+    "case_id": "MelaMJNV.PemoMJNVA.tlosatx",
+    "version": "candidate",
+    "kind": "threaded",
+    "threads": 2,
+    "boundary": "cold-process",
+    "median_seconds": 4.579639418981969,
+    "min_seconds": 4.3360914179938845,
+    "max_seconds": 4.657543433015235,
+    "samples": [
+      4.657543433015235,
+      4.3360914179938845,
+      4.579639418981969
+    ],
+    "peak_rss_bytes": 219222016,
+    "raw_output_sha256": "bbef153094025db89dd4a69b2a3c4246b0b8853396fe740bc7e1bd654db105b6"
+  },
+  {
+    "case_id": "MelaMJNV.PemoMJNVA.tlosatx",
+    "version": "candidate",
+    "kind": "threaded",
+    "threads": 4,
+    "boundary": "cold-process",
+    "median_seconds": 4.161862831999315,
+    "min_seconds": 4.010306283016689,
+    "max_seconds": 4.280954247980844,
+    "samples": [
+      4.280954247980844,
+      4.010306283016689,
+      4.161862831999315
+    ],
+    "peak_rss_bytes": 258125824,
+    "raw_output_sha256": "bbef153094025db89dd4a69b2a3c4246b0b8853396fe740bc7e1bd654db105b6"
+  },
+  {
+    "case_id": "MelaMJNV.PemoMJNVA.tlosatx",
+    "version": "candidate",
+    "kind": "threaded",
+    "threads": 8,
+    "boundary": "cold-process",
+    "median_seconds": 4.577112165978178,
+    "min_seconds": 4.555885645997478,
+    "max_seconds": 4.73782034299802,
+    "samples": [
+      4.555885645997478,
+      4.577112165978178,
+      4.73782034299802
+    ],
+    "peak_rss_bytes": 327675904,
+    "raw_output_sha256": "bbef153094025db89dd4a69b2a3c4246b0b8853396fe740bc7e1bd654db105b6"
+  }
+]

@@ -1,0 +1,21 @@
+[
+  [
+    "thresholds",
+    [
+      "/home/kawato/micromamba/bin/python3",
+      "/mnt/c/Users/genom/GitHub/LOSAT/LOSAT/tests/check_tblastx_thread_thresholds.py",
+      "--native",
+      "/mnt/c/Users/genom/GitHub/LOSAT/docs/evidence/wasm_performance_20260913/run-20260913-01/final-build/artifacts/LOSAT",
+      "--serial",
+      "/mnt/c/Users/genom/GitHub/LOSAT/docs/evidence/wasm_performance_20260913/run-20260913-01/final-build/artifacts/losat-serial-command.wasm",
+      "--threaded",
+      "/mnt/c/Users/genom/GitHub/LOSAT/docs/evidence/wasm_performance_20260913/run-20260913-01/final-build/artifacts/losat-threaded-command.wasm",
+      "--oracle",
+      "/home/kawato/micromamba/bin/tblastx",
+      "--output-dir",
+      "/mnt/c/Users/genom/GitHub/LOSAT/docs/evidence/wasm_performance_20260913/run-20260913-01/p4-thresholds",
+      "--node",
+      "/tmp/losat-node-check/node-v24.21.0-linux-x64/bin/node"
+    ]
+  ]
+]

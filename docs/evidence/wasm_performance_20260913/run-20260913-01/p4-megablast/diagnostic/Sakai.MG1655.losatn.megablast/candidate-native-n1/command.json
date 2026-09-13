@@ -1,0 +1,26 @@
+{
+  "cwd": "/mnt/c/Users/genom/GitHub/LOSAT",
+  "environment_overrides": {
+    "LOSAT_TIMING": "1",
+    "LOSAT_WASI_THREADS_DEBUG": "1",
+    "NODE_NO_WARNINGS": "1"
+  },
+  "ordered_argv": [
+    "/tmp/losat-wasm-perf-20260913/final/native-command/release/LOSAT",
+    "blastn",
+    "-query",
+    "/mnt/c/Users/genom/GitHub/LOSAT/LOSAT/tests/fasta/Sakai.fna",
+    "-subject",
+    "/mnt/c/Users/genom/GitHub/LOSAT/LOSAT/tests/fasta/MG1655.fna",
+    "-outfmt",
+    "6",
+    "-task",
+    "megablast",
+    "-out",
+    "/mnt/c/Users/genom/GitHub/LOSAT/docs/evidence/wasm_performance_20260913/run-20260913-01/p4-megablast/diagnostic/Sakai.MG1655.losatn.megablast/candidate-native-n1/output.txt",
+    "-num_threads",
+    "1"
+  ],
+  "shell": false,
+  "sink": "/mnt/c/Users/genom/GitHub/LOSAT/docs/evidence/wasm_performance_20260913/run-20260913-01/p4-megablast/diagnostic/Sakai.MG1655.losatn.megablast/candidate-native-n1/output.txt"
+}

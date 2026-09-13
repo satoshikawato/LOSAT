@@ -8,11 +8,14 @@ Synthetic subprocesses exercise the harness only, never certify a search.
 """
 
 import hashlib
+import json
+from types import SimpleNamespace
 import os
 from pathlib import Path
 import sys
 import tempfile
 import unittest
+from unittest import mock
 
 import wasm_performance as perf
 import summarize_wasm_performance as summary
@@ -68,6 +71,65 @@ class GateTests(unittest.TestCase):
         self.assertEqual(status, "PASS")
         self.assertEqual(median["median_seconds"], 3)
         self.assertIsNone(median["peak_rss_bytes"])
+
+    # NCBI c++/src/algo/blast/api/prelim_stage.cpp:178-188:
+    # (*thread)->Join(&result);
+    # Synthetic exact bytes isolate timing admission from the independent raw gate.
+    def test_clock_consistency_gates_cold_warm_but_preserves_raw_audit(self):
+        for phase, consistent in [("benchmark", False), ("benchmark", True),
+                                  ("warm", False), ("warm", True), ("audit", False)]:
+            with self.subTest(phase=phase, consistent=consistent):
+                directory = self.root / f"{phase}-{consistent}"
+                directory.mkdir()
+                output = directory / "exact.out"
+                output.write_bytes(b"synthetic exact bytes\n")
+                (directory / "stderr.txt").write_text("")
+                expected = hashlib.sha256(output.read_bytes()).hexdigest()
+                case = {"program": "blastn", "case_id": "synthetic", "focus": {"benchmark": "true"},
+                        "serial_applicable": True, "classification": "EXACT_TEXT",
+                        "losat_sha256": expected, "oracle_argv": ["oracle"]}
+                manifest = {"cases": [case], "cwd": str(directory),
+                            "measurement": {"host_cap": 1, "thread_matrix": [1], "timeout_seconds": 1,
+                                            "warmup_count": 1, "timed_repetitions": 5,
+                                            "memory_budget_bytes": 10000, "boundary": "synthetic"},
+                            "runtime": {"node": "node", "flags": [], "runners": {"warm_serial": "warm"}},
+                            "artifacts": {"serial": {"path": "synthetic.wasm"}}}
+                manifest_path = directory / "manifest.json"
+                manifest_path.write_text(json.dumps(manifest))
+                args = SimpleNamespace(phase=phase, threads=None if phase == "audit" else [1],
+                                       targets=["serial"], case=None, manifest=manifest_path,
+                                       output=directory / "results")
+                result = {"status": "PASS", "exit_status": 0, "output": str(output),
+                          "raw_output_sha256": expected, "raw_output_bytes": output.stat().st_size,
+                          "peak_rss_bytes": 1, "wall_seconds": 1,
+                          "monotonic_clock_agreement": consistent, "realtime_clock_agreement": False}
+                warm = directory / "warm.json"
+                warm.write_text(json.dumps({"compile_seconds": 0.1, "samples": [
+                    {"repeat": i, "output": str(output), "exit_status": 0,
+                     "wall_seconds": i + 1, "process_lifetime_peak_rss_bytes": 1}
+                    for i in range(6)]}))
+
+                def execute(argv, *unused):
+                    if argv == ["oracle"]:
+                        return {**result, "monotonic_clock_agreement": True}
+                    return {**result, "output": str(warm) if phase == "warm" else str(output)}
+
+                with mock.patch.object(perf, "preflight"), \
+                     mock.patch.object(perf, "execute", side_effect=execute), \
+                     mock.patch.object(perf, "thread_command", return_value=["node", "runner", "synthetic.wasm", "-num_threads", "1", "-out", "unused"]), \
+                     mock.patch.object(perf, "oracle_contract", return_value="PASS"), \
+                     mock.patch.object(perf, "validate_thread_evidence", return_value={}):
+                    code = perf.run(args)
+                report = json.loads((args.output / "summary.json").read_text())
+                rows = [json.loads(line) for line in (args.output / "samples.jsonl").read_text().splitlines()]
+                accepted = consistent or phase == "audit"
+                self.assertEqual(code, 0 if accepted else 1)
+                self.assertTrue(all(row["status"] == ("PASS" if accepted else "CLOCK_INCONSISTENT") for row in rows))
+                self.assertEqual(bool(report["medians"]), consistent and phase != "audit")
+                if phase == "audit":
+                    self.assertEqual(rows[0]["canonical_gate"], "PASS")
+                elif not consistent:
+                    self.assertTrue(all(row["monotonic_clock_agreement"] is False for row in rows))
 
     def test_wrong_hash(self):
         path = self.root / "artifact"
@@ -140,6 +202,31 @@ class GateTests(unittest.TestCase):
         result = self.execute("import time;time.sleep(5)", timeout=0.05)
         self.assertEqual(result["status"], "TIMEOUT")
         self.assertGreater(result["wall_seconds"], 0)
+
+    # NCBI reference: c++/src/algo/blast/api/prelim_stage.cpp:178-188
+    # (*thread)->Join(&result);
+    # An early host timer wake must not terminate a search before its deadline.
+    def test_early_watchdog_wake_preserves_success_and_cancellation(self):
+        timer = perf.threading.Timer
+        with mock.patch.object(perf.threading, "Timer", side_effect=lambda interval, callback: timer(0.001, callback)):
+            result = self.execute(
+                "import time,pathlib,sys;time.sleep(0.08);pathlib.Path(sys.argv[-1]).write_bytes(b'ok')",
+                timeout=0.5,
+            )
+        self.assertEqual(result["status"], "PASS")
+        self.assertGreaterEqual(result["watchdog_clocks"]["early_wakeups"], 1)
+        self.assertNotIn("fired", result["watchdog_clocks"])
+
+    # NCBI reference: c++/src/algo/blast/api/prelim_stage.cpp:178-188
+    # (*thread)->Join(&result);
+    # The same early wake still terminates a hung child at the monotonic deadline.
+    def test_early_watchdog_wake_still_expires_at_monotonic_deadline(self):
+        timer = perf.threading.Timer
+        with mock.patch.object(perf.threading, "Timer", side_effect=lambda interval, callback: timer(0.001, callback)):
+            result = self.execute("import time;time.sleep(5)", timeout=0.07)
+        self.assertEqual(result["status"], "TIMEOUT")
+        clocks = result["watchdog_clocks"]
+        self.assertGreaterEqual(clocks["fired"]["monotonic"] - clocks["started"]["monotonic"], 0.07)
 
     def test_default_omission_is_preserved(self):
         catalog = perf.authority.load_catalog(

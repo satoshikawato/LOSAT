@@ -1,0 +1,154 @@
+[
+  {
+    "case_id": "MjeNMV.MelaMJNV.tlosatx",
+    "version": "baseline",
+    "kind": "threaded",
+    "threads": 8,
+    "boundary": "cold-process",
+    "median_seconds": 39.76796326698968,
+    "min_seconds": 39.29299898899626,
+    "max_seconds": 40.20524653600296,
+    "samples": [
+      39.82976372499252,
+      39.64765717001865,
+      39.76796326698968,
+      40.20524653600296,
+      39.29299898899626
+    ],
+    "peak_rss_bytes": 312815616,
+    "raw_output_sha256": "b309f77fee038f0559d870737ebeba732c11eba4f7e495f045acbfb831817fd7"
+  },
+  {
+    "case_id": "MjeNMV.MelaMJNV.tlosatx",
+    "version": "candidate",
+    "kind": "threaded",
+    "threads": 8,
+    "boundary": "cold-process",
+    "median_seconds": 14.364418744982686,
+    "min_seconds": 13.177590690000216,
+    "max_seconds": 14.955735454015667,
+    "samples": [
+      13.177590690000216,
+      13.340612619998865,
+      14.955735454015667,
+      14.83238564102794,
+      14.364418744982686
+    ],
+    "peak_rss_bytes": 362442752,
+    "raw_output_sha256": "b309f77fee038f0559d870737ebeba732c11eba4f7e495f045acbfb831817fd7"
+  },
+  {
+    "case_id": "AP027280.AP027280.tlosatx",
+    "version": "baseline",
+    "kind": "threaded",
+    "threads": 8,
+    "boundary": "cold-process",
+    "median_seconds": 70.5319212230097,
+    "min_seconds": 68.93413032399258,
+    "max_seconds": 70.9461099600012,
+    "samples": [
+      70.5319212230097,
+      68.93413032399258,
+      70.65173332201084,
+      70.51338559700525,
+      70.9461099600012
+    ],
+    "peak_rss_bytes": 325005312,
+    "raw_output_sha256": "845d15661c2a30fa69e01bcd8140792e55a1fa06bbb52181632680435a08eda8"
+  },
+  {
+    "case_id": "AP027280.AP027280.tlosatx",
+    "version": "candidate",
+    "kind": "threaded",
+    "threads": 8,
+    "boundary": "cold-process",
+    "median_seconds": 25.571660214016447,
+    "min_seconds": 24.791125004994683,
+    "max_seconds": 26.94369438799913,
+    "samples": [
+      25.571660214016447,
+      24.954783359979047,
+      24.791125004994683,
+      26.94369438799913,
+      26.34464284600108
+    ],
+    "peak_rss_bytes": 363646976,
+    "raw_output_sha256": "845d15661c2a30fa69e01bcd8140792e55a1fa06bbb52181632680435a08eda8"
+  },
+  {
+    "case_id": "WSSV.PajaWSV.losatp",
+    "version": "baseline",
+    "kind": "threaded",
+    "threads": 8,
+    "boundary": "cold-process",
+    "median_seconds": 1.2179887279926334,
+    "min_seconds": 1.1657438719994389,
+    "max_seconds": 1.2573264480161015,
+    "samples": [
+      1.1657438719994389,
+      1.2548548429913353,
+      1.2179887279926334,
+      1.2167050019779708,
+      1.2573264480161015
+    ],
+    "peak_rss_bytes": 294772736,
+    "raw_output_sha256": "ade827538e1f218b8c4b5dce88744d8495e58335144f7259bdb529801d220d10"
+  },
+  {
+    "case_id": "WSSV.PajaWSV.losatp",
+    "version": "candidate",
+    "kind": "threaded",
+    "threads": 8,
+    "boundary": "cold-process",
+    "median_seconds": 2.471884858008707,
+    "min_seconds": 1.9749856170092244,
+    "max_seconds": 2.8809999380027875,
+    "samples": [
+      2.1674685000034515,
+      2.471884858008707,
+      1.9749856170092244,
+      2.612921136984369,
+      2.8809999380027875
+    ],
+    "peak_rss_bytes": 403607552,
+    "raw_output_sha256": "ade827538e1f218b8c4b5dce88744d8495e58335144f7259bdb529801d220d10"
+  },
+  {
+    "case_id": "EDL933.Sakai.losatn.megablast",
+    "version": "baseline",
+    "kind": "threaded",
+    "threads": 8,
+    "boundary": "cold-process",
+    "median_seconds": 2.2788618020131253,
+    "min_seconds": 1.968319944018731,
+    "max_seconds": 2.9750243560119998,
+    "samples": [
+      2.1814673079934437,
+      1.968319944018731,
+      2.2788618020131253,
+      2.6293432969832793,
+      2.9750243560119998
+    ],
+    "peak_rss_bytes": 476729344,
+    "raw_output_sha256": "300a925ef86f20af9c0eff53f1c73638bdf80d47f5153352086a3e7bfd416c0c"
+  },
+  {
+    "case_id": "EDL933.Sakai.losatn.megablast",
+    "version": "candidate",
+    "kind": "threaded",
+    "threads": 8,
+    "boundary": "cold-process",
+    "median_seconds": 3.1357500269950833,
+    "min_seconds": 2.460991963976994,
+    "max_seconds": 4.487140288983937,
+    "samples": [
+      2.9192184309940785,
+      3.1357500269950833,
+      2.460991963976994,
+      4.487140288983937,
+      4.047026389016537
+    ],
+    "peak_rss_bytes": 476880896,
+    "raw_output_sha256": "300a925ef86f20af9c0eff53f1c73638bdf80d47f5153352086a3e7bfd416c0c"
+  }
+]

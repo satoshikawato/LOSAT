@@ -1,0 +1,69 @@
+{
+  "snapshot_files": 538,
+  "snapshot_files_changed": {
+    "LOSAT/tests/README.md": {
+      "baseline": "42021b426255953be8e492a0657e19ffc67af7c6b1f2dc57f21b097580078f39",
+      "current": "2b0cf6dd206fa4d16c510213381bfe0db98ae3f185abd1a8ce4564fdcb60d8ff"
+    },
+    "LOSAT/tests/benchmark_wasi_reuse.js": {
+      "baseline": "562e9380bf41fcbf13e8b845ee6b4f6b8dc82809cde550fffd11b96cd402f7a3",
+      "current": "a0effdc582f7fcc1dc8fc35736f031f6a85fb8597461393ef8bdda0ffdcfc32b"
+    },
+    "LOSAT/tests/benchmark_wasm_threading.py": {
+      "baseline": "56b8c120095502e4b238ad88ceb5b0cd31df49907bb225ec7a75db248e7b9a71",
+      "current": "48265cc6556db7f5e6a8efcc8212e3f2f6d0f8a8dc8932ba4e8e79decdc9d42b"
+    },
+    "LOSAT/tests/comparison_data.py": {
+      "baseline": "7ffd472ebbc2bc531615182327faf7a0deed6173e6eb3a24a439d5a369697b56",
+      "current": "103f06858a91119335b533533005536c8da91a76979d43998ec7114d4fea1b11"
+    },
+    "LOSAT/tests/plot_execution_time.py": {
+      "baseline": "976356137685959e418badf3880228daea8fa1978f1960b2262c3ed87f18239e",
+      "current": "628ce65f93e27d78bb887e49f56a845e258cb9806209422461ad23bcca777b3f"
+    },
+    "LOSAT/tests/run_comparison.sh": {
+      "baseline": "3a5dd48b45a6e8a4f59037bfb781ca5343a1d2169d0d93b87c40a96fcbeece24",
+      "current": "193bd1857acb8e1f29fb808cf342aaf9fe95436264d679e6babfc7046b1db94c"
+    },
+    "LOSAT/tests/test_simple_comparison.py": {
+      "baseline": "14415ec0c814d6ddf7f8c72ab7dd6379a035f1efae5141076fed4324d30902ef",
+      "current": "42836666285e2a26b427c12fc05da948b963084669d0768b1365927245490c18"
+    },
+    "LOSAT/tests/test_wasm_performance.py": {
+      "baseline": "5561492bfcfe7efdafd77c3301bdbaa846cd3450123a2ab76b0a0af646144416",
+      "current": "2d3ec1484dded1adfade7832b9742d7e5d6c575402d0e486f0e092791a454d18"
+    },
+    "LOSAT/tests/wasm_performance.py": {
+      "baseline": "56678a78b55afcb0cdbf505dd296996a5653c2b3133263055c29ccde97f28efb",
+      "current": "844ab57bb4f4ff9b54a26c53aac857a27176e041bbe66b1b679f8de8d7396a13"
+    },
+    "docs/wasm_performance_optimization_plan_20260913.md": {
+      "baseline": "c613c39cf3fb4013353c6942dbecaa1249ce81dbbcaefdeb241b3c895581bee2",
+      "current": "f31a78b49a16c5ae16ba977dc011617a968656e8b0339a985ee2709d38f277b8"
+    }
+  },
+  "task_owned_files": [
+    "LOSAT/tests/comparison_data.py",
+    "LOSAT/tests/run_comparison.sh",
+    "LOSAT/tests/plot_execution_time.py",
+    "LOSAT/tests/wasm_performance.py",
+    "LOSAT/tests/benchmark_wasm_threading.py",
+    "LOSAT/tests/benchmark_wasi_reuse.js",
+    "LOSAT/tests/test_simple_comparison.py",
+    "LOSAT/tests/test_wasm_performance.py",
+    "LOSAT/tests/test_benchmark_wasm_threading.py",
+    "LOSAT/tests/test_benchmark_wasi_reuse.js",
+    "LOSAT/tests/README.md",
+    "docs/wasm_performance_optimization_plan_20260913.md"
+  ],
+  "unrelated_snapshot_files_unchanged": 528,
+  "initial_patch_trailing_nonpatch_bytes": {
+    "length": 33,
+    "hex": "1f8b0808314ba66a02ff696e697469616c2d776f726b747265652e706174636800",
+    "handling": "Original archive unchanged; only this exact terminal gzip header excluded from patch comparison."
+  },
+  "initial_tracked_dirty_patches": 271,
+  "final_tracked_dirty_patches": 275,
+  "unrelated_tracked_dirty_patches_identical": true,
+  "limits": "Checks frozen source/input/runner files and all tracked dirty patches. Initial untracked files outside the snapshot were not all byte-hashed. No commit, index, or user source edits were reverted."
+}

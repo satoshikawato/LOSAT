@@ -1,0 +1,30 @@
+[
+  {
+    "case": "AP027078.AP027131.losatp",
+    "version": "baseline-threaded-n8",
+    "hits": 0,
+    "misses": 80611,
+    "source": "docs/evidence/wasm_performance_20260913/run-20260913-02/cache-exploration/diagnostic/AP027078.AP027131.losatp/baseline-threaded-n8/stderr.txt"
+  },
+  {
+    "case": "AP027078.AP027131.losatp",
+    "version": "candidate-threaded-n8",
+    "hits": 18908,
+    "misses": 61703,
+    "source": "docs/evidence/wasm_performance_20260913/run-20260913-02/cache-exploration/diagnostic/AP027078.AP027131.losatp/candidate-threaded-n8/stderr.txt"
+  },
+  {
+    "case": "AP027132.NZ_CP006932.losatp",
+    "version": "baseline-threaded-n8",
+    "hits": 0,
+    "misses": 111293,
+    "source": "docs/evidence/wasm_performance_20260913/run-20260913-02/cache-exploration/diagnostic/AP027132.NZ_CP006932.losatp/baseline-threaded-n8/stderr.txt"
+  },
+  {
+    "case": "AP027132.NZ_CP006932.losatp",
+    "version": "candidate-threaded-n8",
+    "hits": 32838,
+    "misses": 78455,
+    "source": "docs/evidence/wasm_performance_20260913/run-20260913-02/cache-exploration/diagnostic/AP027132.NZ_CP006932.losatp/candidate-threaded-n8/stderr.txt"
+  }
+]

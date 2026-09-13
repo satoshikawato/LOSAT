@@ -1,0 +1,29 @@
+{
+  "boottime_seconds": 34.77873505098978,
+  "cpu_system_seconds": 0.61,
+  "cpu_user_seconds": 43.84,
+  "elapsed_clock": "CLOCK_MONOTONIC; realtime and GNU elapsed are adjustable-clock diagnostics",
+  "ended_utc": "2026-09-13T08:54:47Z",
+  "exit_status": 0,
+  "gnu_elapsed_seconds": 36.8,
+  "monotonic_clock_agreement": true,
+  "output": "/mnt/c/Users/genom/GitHub/LOSAT/docs/evidence/wasm_performance_20260913/run-20260913-01/p1-reuse-exploration/reuse/session0-candidate-threaded-command-compiled-module/process/output.txt",
+  "peak_rss_bytes": 710602752,
+  "process_ended_utc": "2026-09-13T08:54:47Z",
+  "raw_output_bytes": 31220,
+  "raw_output_sha256": "7229df142e07220a4444b40bd73cef3564078d2c9caf4450c38a2e65d8afeba5",
+  "realtime_clock_agreement": false,
+  "realtime_seconds": 36.81630897521973,
+  "reason": null,
+  "started_utc": "2026-09-13T08:54:10Z",
+  "status": "PASS",
+  "timeout_seconds": 3600,
+  "unavailable_metrics": {},
+  "wall_seconds": 34.778732375008985,
+  "watchdog_clocks": {
+    "started": {
+      "monotonic": 152163.514658917,
+      "realtime": 1789289650.270733
+    }
+  }
+}

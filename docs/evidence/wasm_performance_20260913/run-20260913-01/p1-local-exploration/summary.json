@@ -1,0 +1,36 @@
+[
+  {
+    "case_id": "MelaMJNV.PemoMJNVA.tlosatx",
+    "version": "baseline",
+    "kind": "threaded",
+    "threads": 1,
+    "boundary": "cold-process",
+    "median_seconds": 5.999117760977242,
+    "min_seconds": 5.900523768999847,
+    "max_seconds": 6.123487467993982,
+    "samples": [
+      5.900523768999847,
+      5.999117760977242,
+      6.123487467993982
+    ],
+    "peak_rss_bytes": 174641152,
+    "raw_output_sha256": "bbef153094025db89dd4a69b2a3c4246b0b8853396fe740bc7e1bd654db105b6"
+  },
+  {
+    "case_id": "MelaMJNV.PemoMJNVA.tlosatx",
+    "version": "candidate",
+    "kind": "threaded",
+    "threads": 1,
+    "boundary": "cold-process",
+    "median_seconds": 5.822415350994561,
+    "min_seconds": 5.788579699990805,
+    "max_seconds": 6.041230496019125,
+    "samples": [
+      5.788579699990805,
+      5.822415350994561,
+      6.041230496019125
+    ],
+    "peak_rss_bytes": 170135552,
+    "raw_output_sha256": "bbef153094025db89dd4a69b2a3c4246b0b8853396fe740bc7e1bd654db105b6"
+  }
+]

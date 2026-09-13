@@ -1,0 +1,24 @@
+{
+  "cwd": "/mnt/c/Users/genom/GitHub/LOSAT",
+  "environment_overrides": {
+    "NODE_NO_WARNINGS": "1"
+  },
+  "ordered_argv": [
+    "/tmp/losat-node-check/node-v24.21.0-linux-x64/bin/node",
+    "/mnt/c/Users/genom/GitHub/LOSAT/LOSAT/tests/run_losat_wasi_threads.js",
+    "/mnt/c/Users/genom/GitHub/LOSAT/docs/evidence/wasm_performance_20260913/run-20260913-02/cache-build/artifacts/losat-threaded-command.wasm",
+    "blastp",
+    "-query",
+    "/mnt/c/Users/genom/GitHub/LOSAT/LOSAT/tests/fasta/AP027132.faa",
+    "-subject",
+    "/mnt/c/Users/genom/GitHub/LOSAT/LOSAT/tests/fasta/NZ_CP006932.faa",
+    "-outfmt",
+    "6",
+    "-out",
+    "/mnt/c/Users/genom/GitHub/LOSAT/docs/evidence/wasm_performance_20260913/run-20260913-02/cache-exploration/cold/repeat-0/AP027132.NZ_CP006932.losatp-candidate-threaded-n8/output.txt",
+    "-num_threads",
+    "8"
+  ],
+  "shell": false,
+  "sink": "/mnt/c/Users/genom/GitHub/LOSAT/docs/evidence/wasm_performance_20260913/run-20260913-02/cache-exploration/cold/repeat-0/AP027132.NZ_CP006932.losatp-candidate-threaded-n8/output.txt"
+}

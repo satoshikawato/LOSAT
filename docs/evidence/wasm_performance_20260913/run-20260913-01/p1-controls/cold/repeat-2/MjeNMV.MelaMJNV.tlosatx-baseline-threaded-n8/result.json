@@ -1,0 +1,16 @@
+{
+  "cpu_system_seconds": 0.21,
+  "cpu_user_seconds": 85.98,
+  "ended_utc": "2026-09-13T08:07:56Z",
+  "exit_status": 0,
+  "output": "/mnt/c/Users/genom/GitHub/LOSAT/docs/evidence/wasm_performance_20260913/run-20260913-01/p1-controls/cold/repeat-2/MjeNMV.MelaMJNV.tlosatx-baseline-threaded-n8/output.txt",
+  "peak_rss_bytes": 312336384,
+  "raw_output_bytes": 1728659,
+  "raw_output_sha256": "b309f77fee038f0559d870737ebeba732c11eba4f7e495f045acbfb831817fd7",
+  "reason": null,
+  "started_utc": "2026-09-13T08:07:14Z",
+  "status": "PASS",
+  "timeout_seconds": 300,
+  "unavailable_metrics": {},
+  "wall_seconds": 39.64765717001865
+}

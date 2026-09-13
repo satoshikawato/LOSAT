@@ -1,0 +1,30 @@
+--- a/LOSAT/src/algorithm/blastp/gapalign.rs
++++ b/LOSAT/src/algorithm/blastp/gapalign.rs
+@@ -1097,6 +1097,13 @@
+ // ...
+ // next_score = score_array[b_index].best + matrix_row[ *b_ptr ];
+ // ```
++// NCBI reference: c++/src/algo/blast/core/blast_gapalign.c:841-866
++// if (reverse_sequence) matrix_row = matrix[A[M - a_index]];
++// else matrix_row = matrix[A[a_index]];
++// next_score = score_array[b_index].best + matrix_row[*b_ptr];
++// Keep each existing direction/matrix specialization as a separate Wasm body.
++// This changes compilation boundaries only; arguments, cells and replay are identical.
++#[cfg_attr(target_arch = "wasm32", inline(never))]
+ fn align_ex_protein_score_only_impl<const BLOSUM62: bool, const REVERSE: bool>(
+     query: &[u8],
+     query_base: usize,
+@@ -1674,6 +1681,13 @@
+ // ...
+ // next_score = score_array[b_index].best + matrix_row[ *b_ptr ];
+ // ```
++// NCBI reference: c++/src/algo/blast/core/blast_gapalign.c:543-578
++// if (reverse_sequence) matrix_row = matrix[A[M - a_index]];
++// else matrix_row = matrix[A[a_index]];
++// next_score = score_array[b_index].best + matrix_row[*b_ptr];
++// Keep each existing direction/matrix specialization as a separate Wasm body.
++// This changes compilation boundaries only; arguments, cells and replay are identical.
++#[cfg_attr(target_arch = "wasm32", inline(never))]
+ fn align_ex_protein_impl<const BLOSUM62: bool, const REVERSE: bool>(
+     q_seq: &[u8],
+     s_seq: &[u8],

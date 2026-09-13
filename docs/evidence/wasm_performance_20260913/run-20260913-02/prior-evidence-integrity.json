@@ -1,0 +1,7 @@
+{
+  "status": "PASS",
+  "prior_inventory_sha256": "b26b6bb9845563727c4281498b01c56fd57cb13099cd379818ff5ee5a04f3284",
+  "files_verified": 3426,
+  "prior_directory": "../run-20260913-01",
+  "mutated_prior_files": []
+}

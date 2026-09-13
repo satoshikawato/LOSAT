@@ -1,0 +1,42 @@
+NZ_CP006932.NZ_CP006932.losatn.megablast/baseline-native-n1 PARITY_FAIL
+NZ_CP006932.NZ_CP006932.losatn.megablast/baseline-native-n8 PARITY_FAIL
+NZ_CP006932.NZ_CP006932.losatn.megablast/baseline-serial-n1 PARITY_FAIL
+NZ_CP006932.NZ_CP006932.losatn.megablast/baseline-threaded-n1 PARITY_FAIL
+NZ_CP006932.NZ_CP006932.losatn.megablast/baseline-threaded-n8 PARITY_FAIL
+NZ_CP006932.NZ_CP006932.losatn.megablast/candidate-native-n1 PARITY_FAIL
+NZ_CP006932.NZ_CP006932.losatn.megablast/candidate-native-n8 PARITY_FAIL
+NZ_CP006932.NZ_CP006932.losatn.megablast/candidate-serial-n1 PARITY_FAIL
+NZ_CP006932.NZ_CP006932.losatn.megablast/candidate-threaded-n1 PARITY_FAIL
+NZ_CP006932.NZ_CP006932.losatn.megablast/candidate-threaded-n8 PARITY_FAIL
+EDL933.Sakai.losatn.megablast/baseline-native-n1 PASS
+EDL933.Sakai.losatn.megablast/baseline-native-n8 PASS
+EDL933.Sakai.losatn.megablast/baseline-serial-n1 PASS
+EDL933.Sakai.losatn.megablast/baseline-threaded-n1 PASS
+EDL933.Sakai.losatn.megablast/baseline-threaded-n8 PASS
+EDL933.Sakai.losatn.megablast/candidate-native-n1 PASS
+EDL933.Sakai.losatn.megablast/candidate-native-n8 PASS
+EDL933.Sakai.losatn.megablast/candidate-serial-n1 PASS
+EDL933.Sakai.losatn.megablast/candidate-threaded-n1 PASS
+EDL933.Sakai.losatn.megablast/candidate-threaded-n8 PASS
+Sakai.MG1655.losatn.megablast/baseline-native-n1 PARITY_FAIL
+Sakai.MG1655.losatn.megablast/baseline-native-n8 PARITY_FAIL
+Sakai.MG1655.losatn.megablast/baseline-serial-n1 PARITY_FAIL
+Sakai.MG1655.losatn.megablast/baseline-threaded-n1 PARITY_FAIL
+Sakai.MG1655.losatn.megablast/baseline-threaded-n8 PARITY_FAIL
+Sakai.MG1655.losatn.megablast/candidate-native-n1 PARITY_FAIL
+Sakai.MG1655.losatn.megablast/candidate-native-n8 PARITY_FAIL
+Sakai.MG1655.losatn.megablast/candidate-serial-n1 PARITY_FAIL
+Sakai.MG1655.losatn.megablast/candidate-threaded-n1 PARITY_FAIL
+Sakai.MG1655.losatn.megablast/candidate-threaded-n8 PARITY_FAIL
+completed 33 process samples; reuse samples separate; excluded 20
+Traceback (most recent call last):
+  File "/mnt/c/Users/genom/GitHub/LOSAT/LOSAT/tests/benchmark_wasm_threading.py", line 282, in <module>
+    if __name__=='__main__': main()
+                             ~~~~^^
+  File "/mnt/c/Users/genom/GitHub/LOSAT/LOSAT/tests/benchmark_wasm_threading.py", line 103, in main
+    run_benchmark(args, out)
+    ~~~~~~~~~~~~~^^^^^^^^^^^
+  File "/mnt/c/Users/genom/GitHub/LOSAT/LOSAT/tests/benchmark_wasm_threading.py", line 280, in run_benchmark
+    if status != 'COMPLETE': raise RuntimeError(f'{status}: see excluded.json')
+                             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+RuntimeError: PARTIAL: see excluded.json

@@ -1,0 +1,7 @@
+{
+  "status": "PARTIAL",
+  "excluded": 20,
+  "samples": 33,
+  "ended_utc": "2026-09-13T09:47:27Z",
+  "reason": "PARTIAL: see excluded.json"
+}

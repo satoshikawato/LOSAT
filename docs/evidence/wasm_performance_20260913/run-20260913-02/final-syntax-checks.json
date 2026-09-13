@@ -1,0 +1,24 @@
+[
+  {
+    "argv": [
+      "bash",
+      "-n",
+      "LOSAT/tests/run_comparison.sh"
+    ],
+    "exit_status": 0,
+    "stdout": "",
+    "stderr": ""
+  },
+  {
+    "argv": [
+      "/home/kawato/micromamba/bin/python3",
+      "-m",
+      "py_compile",
+      "LOSAT/tests/comparison_data.py",
+      "LOSAT/tests/test_simple_comparison.py"
+    ],
+    "exit_status": 0,
+    "stdout": "",
+    "stderr": ""
+  }
+]

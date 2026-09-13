@@ -1,0 +1,27 @@
+{
+  "boottime_seconds": 5.085366798011819,
+  "clock_agreement": true,
+  "cpu_system_seconds": 0.0,
+  "cpu_user_seconds": 0.03,
+  "ended_utc": "2026-09-13T08:19:19Z",
+  "exit_status": 0,
+  "gnu_elapsed_seconds": 5.04,
+  "output": "/mnt/c/Users/genom/GitHub/LOSAT/docs/evidence/wasm_performance_20260913/run-20260913-01/clock-probe/sleep-5-timeout-10/output.txt",
+  "peak_rss_bytes": 11284480,
+  "process_ended_utc": "2026-09-13T08:19:19Z",
+  "raw_output_bytes": 131,
+  "raw_output_sha256": "d94d69b9f0bac08f64d8725a243a914c6cdc461a5cee7fdde77a5e165f48b11a",
+  "realtime_seconds": 5.085367918014526,
+  "reason": null,
+  "started_utc": "2026-09-13T08:19:14Z",
+  "status": "PASS",
+  "timeout_seconds": 10,
+  "unavailable_metrics": {},
+  "wall_seconds": 5.085361053002998,
+  "watchdog_clocks": {
+    "started": {
+      "monotonic": 150195.431793122,
+      "realtime": 1789287554.6521993
+    }
+  }
+}

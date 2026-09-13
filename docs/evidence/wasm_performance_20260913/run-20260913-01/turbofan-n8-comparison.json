@@ -1,0 +1,57 @@
+[
+  {
+    "case": "MelaMJNV.PemoMJNVA.tlosatx",
+    "normal_seconds": 6.812854004994733,
+    "turbofan_seconds": 3.9881688579916954,
+    "speedup": 1.708266186207936,
+    "normal_peak_rss_mib": 293.89453125,
+    "turbofan_peak_rss_mib": 309.34765625,
+    "rss_increase_mib": 15.453125,
+    "rss_increase_percent": 5.258051224796301,
+    "source": "p1-adoption/summary.json"
+  },
+  {
+    "case": "MjeNMV.MelaMJNV.tlosatx",
+    "normal_seconds": 39.76796326698968,
+    "turbofan_seconds": 14.364418744982686,
+    "speedup": 2.76850487116857,
+    "normal_peak_rss_mib": 298.32421875,
+    "turbofan_peak_rss_mib": 345.65234375,
+    "rss_increase_mib": 47.328125,
+    "rss_increase_percent": 15.864660669625907,
+    "source": "p1-controls/summary.json"
+  },
+  {
+    "case": "AP027280.AP027280.tlosatx",
+    "normal_seconds": 70.5319212230097,
+    "turbofan_seconds": 25.571660214016447,
+    "speedup": 2.758206570582752,
+    "normal_peak_rss_mib": 309.94921875,
+    "turbofan_peak_rss_mib": 346.80078125,
+    "rss_increase_mib": 36.8515625,
+    "rss_increase_percent": 11.889548439134433,
+    "source": "p1-controls/summary.json"
+  },
+  {
+    "case": "WSSV.PajaWSV.losatp",
+    "normal_seconds": 1.2179887279926334,
+    "turbofan_seconds": 2.471884858008707,
+    "speedup": 0.4927368376591039,
+    "normal_peak_rss_mib": 281.1171875,
+    "turbofan_peak_rss_mib": 384.91015625,
+    "rss_increase_mib": 103.79296875,
+    "rss_increase_percent": 36.92160186754856,
+    "source": "p1-controls/summary.json"
+  },
+  {
+    "case": "EDL933.Sakai.losatn.megablast",
+    "normal_seconds": 2.2788618020131253,
+    "turbofan_seconds": 3.1357500269950833,
+    "speedup": 0.7267357992170396,
+    "normal_peak_rss_mib": 454.64453125,
+    "turbofan_peak_rss_mib": 454.7890625,
+    "rss_increase_mib": 0.14453125,
+    "rss_increase_percent": 0.0317899457852544,
+    "source": "p1-controls/summary.json"
+  }
+]

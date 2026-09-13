@@ -1,0 +1,29 @@
+{
+  "cache": {
+    "baseline_archive": "../run-20260913-01/baseline-source-v2.tar.gz",
+    "baseline_sha256": "9065378caf283da2cfa1cd4766ede84bc994306f9bf61a436b919ee67b2da33e",
+    "changed_files": {
+      "LOSAT/src/algorithm/blastp/blast_engine.rs": "390bbc5545a3908351e64d4f186e06d326dc81283be8170119e70baaf9ccadd9"
+    },
+    "patch": "cache-source.patch",
+    "patch_sha256": "8b2bebbf5532293478dd70daabd4590688bd8fc6e823b13e5d8e8aa4876e633b"
+  },
+  "dp": {
+    "baseline_archive": "../run-20260913-01/baseline-source-v2.tar.gz",
+    "baseline_sha256": "9065378caf283da2cfa1cd4766ede84bc994306f9bf61a436b919ee67b2da33e",
+    "changed_files": {
+      "LOSAT/src/algorithm/blastp/gapalign.rs": "86ed4839d12e865f895d1700b6a65ee74e6103401a216a1ca85ef33b11e7a050"
+    },
+    "patch": "dp-source.patch",
+    "patch_sha256": "183234fe50fac19d8e82b55c18f374b1c6dc56b00c75bcc4ba672b214a1b06a2"
+  },
+  "matrix": {
+    "baseline_archive": "../run-20260913-01/baseline-source-v2.tar.gz",
+    "baseline_sha256": "9065378caf283da2cfa1cd4766ede84bc994306f9bf61a436b919ee67b2da33e",
+    "changed_files": {
+      "LOSAT/src/algorithm/blastp/gapalign.rs": "cbc96c75d54636c7e098ffb892bbc5139cb1158519367eeca464a36b867fc2b2"
+    },
+    "patch": "matrix-source.patch",
+    "patch_sha256": "2668bc7fda13e2f23e75ad0938408319ad279d6cb58e0e1f484c38ac0db5b7cb"
+  }
+}

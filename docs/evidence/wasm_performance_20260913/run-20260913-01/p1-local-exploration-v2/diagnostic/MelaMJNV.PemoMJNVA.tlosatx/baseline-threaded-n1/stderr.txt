@@ -1,0 +1,15 @@
+[losat-wasi-threads] shared-memory guards: 125 fills, 1233 copies
+[losat-thread-pool] program=tblastx requested_threads=1 pool_threads=0 caller_participates=false measured_activity=null
+[losat-thread-stage] program=tblastx stage=subjects work_items=1 parallel_selected=false measured_activity=null
+[losat-thread-stage] program=tblastx stage=linking work_items=4 parallel_selected=false measured_activity=null
+[losat-thread-stage] program=tblastx stage=linking work_items=4 parallel_selected=false measured_activity=null
+[TIMING] read_queries: 0.128s
+[TIMING] build_lookup: 0.146s
+[TIMING] read_subjects: 0.008s
+[TIMING] scan_subject: 0.157s (calls=28475)
+[TIMING] ungapped_extend: 0.501s (calls=3525106)
+[TIMING] reevaluate: 0.002s (calls=4844)
+[TIMING] sum_stats_linking: 0.014s (calls=1)
+[TIMING] identity_calc: 0.000s (calls=0)
+[TIMING] search_total: 6.235s
+[TIMING] total: 6.550s

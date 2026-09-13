@@ -1,0 +1,994 @@
+[
+  {
+    "condition": "Mela-default-n8",
+    "isolate_log": "isolate-0x38a68000-5-v8.log",
+    "ticks": 10469,
+    "unmapped_ticks": 10437,
+    "top": [
+      [
+        "ArrayIncludesSmi",
+        9
+      ],
+      [
+        "instruction /mnt/c/Users/genom/GitHub/LOSAT/LOSAT/tests/wasi_shared_memory.js:77:21",
+        6
+      ],
+      [
+        "Mov",
+        2
+      ],
+      [
+        "uint /mnt/c/Users/genom/GitHub/LOSAT/LOSAT/tests/wasi_shared_memory.js:44:7",
+        2
+      ],
+      [
+        "CreateShallowArrayLiteral",
+        2
+      ],
+      [
+        "CallFunction_ReceiverIsAny",
+        1
+      ],
+      [
+        "Call_ReceiverIsNotNullOrUndefined_Baseline_Compact",
+        1
+      ],
+      [
+        "StrictEqual_Baseline",
+        1
+      ],
+      [
+        "guardSharedMemory /mnt/c/Users/genom/GitHub/LOSAT/LOSAT/tests/wasi_shared_memory.js:141:27",
+        1
+      ],
+      [
+        "memarg /mnt/c/Users/genom/GitHub/LOSAT/LOSAT/tests/wasi_shared_memory.js:65:9",
+        1
+      ],
+      [
+        "Return",
+        1
+      ],
+      [
+        "dlfree",
+        1
+      ],
+      [
+        "TestEqualStrict",
+        1
+      ],
+      [
+        "InterpreterEntryTrampoline",
+        1
+      ],
+      [
+        "GetKeyedProperty",
+        1
+      ],
+      [
+        "ToString",
+        1
+      ]
+    ],
+    "losat": [
+      [
+        "instruction /mnt/c/Users/genom/GitHub/LOSAT/LOSAT/tests/wasi_shared_memory.js:77:21",
+        6
+      ],
+      [
+        "uint /mnt/c/Users/genom/GitHub/LOSAT/LOSAT/tests/wasi_shared_memory.js:44:7",
+        2
+      ],
+      [
+        "guardSharedMemory /mnt/c/Users/genom/GitHub/LOSAT/LOSAT/tests/wasi_shared_memory.js:141:27",
+        1
+      ],
+      [
+        "memarg /mnt/c/Users/genom/GitHub/LOSAT/LOSAT/tests/wasi_shared_memory.js:65:9",
+        1
+      ]
+    ]
+  },
+  {
+    "condition": "Mela-default-n8",
+    "isolate_log": "isolate-0x7f8978002000-5-v8.log",
+    "ticks": 8094,
+    "unmapped_ticks": 8091,
+    "top": [
+      [
+        "Call_ReceiverIsAny",
+        2
+      ],
+      [
+        "LdaImmutableCurrentContextSlot",
+        1
+      ]
+    ],
+    "losat": []
+  },
+  {
+    "condition": "Mela-default-n8",
+    "isolate_log": "isolate-0x7f89a0001000-5-v8.log",
+    "ticks": 8335,
+    "unmapped_ticks": 8334,
+    "top": [
+      [
+        "TestEqualStrict",
+        1
+      ]
+    ],
+    "losat": []
+  },
+  {
+    "condition": "Mela-default-n8",
+    "isolate_log": "isolate-0x7f89a4001000-5-v8.log",
+    "ticks": 8503,
+    "unmapped_ticks": 8499,
+    "top": [
+      [
+        "ReflectGetOwnPropertyDescriptor",
+        1
+      ],
+      [
+        "CallFunction_ReceiverIsAny",
+        1
+      ],
+      [
+        "LoadIC_NoFeedback",
+        1
+      ],
+      [
+        "BaselineOutOfLinePrologue",
+        1
+      ]
+    ],
+    "losat": []
+  },
+  {
+    "condition": "Mela-default-n8",
+    "isolate_log": "isolate-0x7f89f4001000-5-v8.log",
+    "ticks": 8532,
+    "unmapped_ticks": 8525,
+    "top": [
+      [
+        "ReflectGetOwnPropertyDescriptor",
+        1
+      ],
+      [
+        "%[dfijoOs]",
+        1
+      ],
+      [
+        "Star0",
+        1
+      ],
+      [
+        "LoadIC_NoFeedback",
+        1
+      ],
+      [
+        "JumpLoop.Wide",
+        1
+      ],
+      [
+        "LoadIC",
+        1
+      ],
+      [
+        "CallFunction_ReceiverIsNullOrUndefined",
+        1
+      ]
+    ],
+    "losat": []
+  },
+  {
+    "condition": "Mela-default-n8",
+    "isolate_log": "isolate-0x7f8a1c001000-5-v8.log",
+    "ticks": 8477,
+    "unmapped_ticks": 5148,
+    "top": [
+      [
+        "_ZN5LOSAT9algorithm7tblastx17sum_stats_linking7linking19link_hsp_group_ncbi17h3401281f418c37c1E",
+        3322
+      ],
+      [
+        "log",
+        2
+      ],
+      [
+        "OrdinaryGetOwnPropertyDescriptor",
+        1
+      ],
+      [
+        "InterpreterEntryTrampoline",
+        1
+      ],
+      [
+        "StringPrototypeCharCodeAt",
+        1
+      ],
+      [
+        "_ZN5LOSAT5stats14sum_statistics16blast_sum_p_calc28_$u7b$$u7b$closure$u7d$$u7d$17h2dce6aac813d1bddE",
+        1
+      ],
+      [
+        "_ZN5LOSAT5stats14sum_statistics16blast_sum_p_calc17h2c1c7d26332006ccE",
+        1
+      ]
+    ],
+    "losat": [
+      [
+        "_ZN5LOSAT9algorithm7tblastx17sum_stats_linking7linking19link_hsp_group_ncbi17h3401281f418c37c1E",
+        3322
+      ],
+      [
+        "_ZN5LOSAT5stats14sum_statistics16blast_sum_p_calc28_$u7b$$u7b$closure$u7d$$u7d$17h2dce6aac813d1bddE",
+        1
+      ],
+      [
+        "_ZN5LOSAT5stats14sum_statistics16blast_sum_p_calc17h2c1c7d26332006ccE",
+        1
+      ]
+    ]
+  },
+  {
+    "condition": "Mela-default-n8",
+    "isolate_log": "isolate-0x7f8a44001000-5-v8.log",
+    "ticks": 8505,
+    "unmapped_ticks": 5467,
+    "top": [
+      [
+        "_ZN5LOSAT9algorithm7tblastx17sum_stats_linking7linking19link_hsp_group_ncbi17h3401281f418c37c1E",
+        3022
+      ],
+      [
+        "exp",
+        5
+      ],
+      [
+        "_ZN5LOSAT9algorithm7tblastx17sum_stats_linking7linking15DualMaximumTree6update17h834ba8aeba36b5dfE",
+        3
+      ],
+      [
+        "_ZN5LOSAT5stats14sum_statistics16blast_sum_p_calc28_$u7b$$u7b$closure$u7d$$u7d$17h2dce6aac813d1bddE",
+        2
+      ],
+      [
+        "OrdinaryGetOwnPropertyDescriptor",
+        1
+      ],
+      [
+        "CallFunction_ReceiverIsAny",
+        1
+      ],
+      [
+        "StoreIC_NoFeedback",
+        1
+      ],
+      [
+        "ToString",
+        1
+      ],
+      [
+        "_ZN5LOSAT5stats14sum_statistics16blast_sum_p_calc17h2c1c7d26332006ccE",
+        1
+      ],
+      [
+        "Call_ReceiverIsAny",
+        1
+      ]
+    ],
+    "losat": [
+      [
+        "_ZN5LOSAT9algorithm7tblastx17sum_stats_linking7linking19link_hsp_group_ncbi17h3401281f418c37c1E",
+        3022
+      ],
+      [
+        "_ZN5LOSAT9algorithm7tblastx17sum_stats_linking7linking15DualMaximumTree6update17h834ba8aeba36b5dfE",
+        3
+      ],
+      [
+        "_ZN5LOSAT5stats14sum_statistics16blast_sum_p_calc28_$u7b$$u7b$closure$u7d$$u7d$17h2dce6aac813d1bddE",
+        2
+      ],
+      [
+        "_ZN5LOSAT5stats14sum_statistics16blast_sum_p_calc17h2c1c7d26332006ccE",
+        1
+      ]
+    ]
+  },
+  {
+    "condition": "Mela-default-n8",
+    "isolate_log": "isolate-0x7f8a4c001000-5-v8.log",
+    "ticks": 8645,
+    "unmapped_ticks": 5210,
+    "top": [
+      [
+        "_ZN5LOSAT9algorithm7tblastx17sum_stats_linking7linking19link_hsp_group_ncbi17h3401281f418c37c1E",
+        3425
+      ],
+      [
+        "_ZN5LOSAT5stats14sum_statistics16blast_sum_p_calc28_$u7b$$u7b$closure$u7d$$u7d$17h2dce6aac813d1bddE",
+        2
+      ],
+      [
+        "exp",
+        2
+      ],
+      [
+        "log",
+        2
+      ],
+      [
+        "ArrayIteratorPrototypeNext",
+        1
+      ],
+      [
+        "FastNewClosure",
+        1
+      ],
+      [
+        "ArrayPrototypePush",
+        1
+      ],
+      [
+        "_ZN5LOSAT9algorithm7tblastx17sum_stats_linking7linking15DualMaximumTree6update17h834ba8aeba36b5dfE",
+        1
+      ]
+    ],
+    "losat": [
+      [
+        "_ZN5LOSAT9algorithm7tblastx17sum_stats_linking7linking19link_hsp_group_ncbi17h3401281f418c37c1E",
+        3425
+      ],
+      [
+        "_ZN5LOSAT5stats14sum_statistics16blast_sum_p_calc28_$u7b$$u7b$closure$u7d$$u7d$17h2dce6aac813d1bddE",
+        2
+      ],
+      [
+        "_ZN5LOSAT9algorithm7tblastx17sum_stats_linking7linking15DualMaximumTree6update17h834ba8aeba36b5dfE",
+        1
+      ]
+    ]
+  },
+  {
+    "condition": "Mela-default-n8",
+    "isolate_log": "isolate-0x7f8a70001000-5-v8.log",
+    "ticks": 8352,
+    "unmapped_ticks": 3991,
+    "top": [
+      [
+        "_ZN5LOSAT9algorithm7tblastx17sum_stats_linking7linking19link_hsp_group_ncbi17h3401281f418c37c1E",
+        2464
+      ],
+      [
+        "_ZN5LOSAT9algorithm7tblastx12blast_engine8run_impl11run_in_pool28_$u7b$$u7b$closure$u7d$$u7d$28_$u7b$$u7b$closure$u7d$$u7d$17h666c0cd3316f5ad2E",
+        1609
+      ],
+      [
+        "_ZN5LOSAT5utils3seg9SegMasker13mask_sequence7seg_seq17h41b196252a52cca5E",
+        65
+      ],
+      [
+        "_ZN5LOSAT9algorithm7tblastx6lookup8backbone25blast_lookup_add_word_hit17h7610dfa31490a14dE",
+        62
+      ],
+      [
+        "dlmalloc",
+        23
+      ],
+      [
+        "_ZN5LOSAT9algorithm7tblastx6lookup8backbone27blast_aa_add_word_hits_core17h8f6d90b971975d8cE",
+        23
+      ],
+      [
+        "_ZN5LOSAT9algorithm7tblastx11translation18translate_sequence17h4c4095e2d2fb0ab9E",
+        18
+      ],
+      [
+        "_ZN5LOSAT5utils3seg9SegWindow8state_on17h381cfe0a13090138E",
+        14
+      ],
+      [
+        "log",
+        12
+      ],
+      [
+        "_ZN5LOSAT9algorithm7tblastx6lookup8backbone17build_ncbi_lookup17h82050347c7978647E",
+        9
+      ],
+      [
+        "_ZN4core5slice4sort6stable9quicksort9quicksort17he2dfa525305332bfE",
+        9
+      ],
+      [
+        "_ZN5LOSAT5utils3seg25entropy_from_state_vector17hc6f5fffe87f6af56E",
+        6
+      ],
+      [
+        "dlfree",
+        6
+      ],
+      [
+        "_ZN5LOSAT9algorithm7tblastx14blast_gapalign32score_compare_ungapped_hits_ncbi17h50f674f3d8efe77cE",
+        5
+      ],
+      [
+        "_ZN5LOSAT9algorithm7tblastx12blast_engine8run_impl11run_in_pool28_$u7b$$u7b$closure$u7d$$u7d$17h4c786436ed607637E",
+        3
+      ],
+      [
+        "_ZN5LOSAT9algorithm7tblastx17sum_stats_linking7linking20rev_compare_hsps_tbx17h6a7a1f26a8cba491E",
+        2
+      ],
+      [
+        "_ZN5LOSAT9algorithm7tblastx17ungapped_hit_sort34sort_ungapped_hits_by_index_replay17h961d40aeb1531859E",
+        2
+      ],
+      [
+        "_ZN5LOSAT9algorithm7tblastx17sum_stats_linking7linking15DualMaximumTree6update17h834ba8aeba36b5dfE",
+        2
+      ],
+      [
+        "_ZN5LOSAT9algorithm7tblastx17sum_stats_linking7linking46apply_sum_stats_even_gap_linking_with_parallel17hf5d5f1edc369f203E",
+        2
+      ],
+      [
+        "_ZN5LOSAT9algorithm7tblastx17sum_stats_linking7linking23rev_compare_hsps_transl17h39c5c055f9e36c5cE",
+        2
+      ]
+    ],
+    "losat": [
+      [
+        "_ZN5LOSAT9algorithm7tblastx17sum_stats_linking7linking19link_hsp_group_ncbi17h3401281f418c37c1E",
+        2464
+      ],
+      [
+        "_ZN5LOSAT9algorithm7tblastx12blast_engine8run_impl11run_in_pool28_$u7b$$u7b$closure$u7d$$u7d$28_$u7b$$u7b$closure$u7d$$u7d$17h666c0cd3316f5ad2E",
+        1609
+      ],
+      [
+        "_ZN5LOSAT5utils3seg9SegMasker13mask_sequence7seg_seq17h41b196252a52cca5E",
+        65
+      ],
+      [
+        "_ZN5LOSAT9algorithm7tblastx6lookup8backbone25blast_lookup_add_word_hit17h7610dfa31490a14dE",
+        62
+      ],
+      [
+        "_ZN5LOSAT9algorithm7tblastx6lookup8backbone27blast_aa_add_word_hits_core17h8f6d90b971975d8cE",
+        23
+      ],
+      [
+        "_ZN5LOSAT9algorithm7tblastx11translation18translate_sequence17h4c4095e2d2fb0ab9E",
+        18
+      ],
+      [
+        "_ZN5LOSAT5utils3seg9SegWindow8state_on17h381cfe0a13090138E",
+        14
+      ],
+      [
+        "_ZN5LOSAT9algorithm7tblastx6lookup8backbone17build_ncbi_lookup17h82050347c7978647E",
+        9
+      ],
+      [
+        "_ZN5LOSAT5utils3seg25entropy_from_state_vector17hc6f5fffe87f6af56E",
+        6
+      ],
+      [
+        "_ZN5LOSAT9algorithm7tblastx14blast_gapalign32score_compare_ungapped_hits_ncbi17h50f674f3d8efe77cE",
+        5
+      ],
+      [
+        "_ZN5LOSAT9algorithm7tblastx12blast_engine8run_impl11run_in_pool28_$u7b$$u7b$closure$u7d$$u7d$17h4c786436ed607637E",
+        3
+      ],
+      [
+        "_ZN5LOSAT9algorithm7tblastx17sum_stats_linking7linking20rev_compare_hsps_tbx17h6a7a1f26a8cba491E",
+        2
+      ],
+      [
+        "_ZN5LOSAT9algorithm7tblastx17ungapped_hit_sort34sort_ungapped_hits_by_index_replay17h961d40aeb1531859E",
+        2
+      ],
+      [
+        "_ZN5LOSAT9algorithm7tblastx17sum_stats_linking7linking15DualMaximumTree6update17h834ba8aeba36b5dfE",
+        2
+      ],
+      [
+        "_ZN5LOSAT9algorithm7tblastx17sum_stats_linking7linking46apply_sum_stats_even_gap_linking_with_parallel17hf5d5f1edc369f203E",
+        2
+      ],
+      [
+        "_ZN5LOSAT9algorithm7tblastx17sum_stats_linking7linking23rev_compare_hsps_transl17h39c5c055f9e36c5cE",
+        2
+      ],
+      [
+        "_ZN5LOSAT9algorithm7tblastx17sum_stats_linking7linking23fwd_compare_hsps_transl17h39283829a98cf22dE",
+        2
+      ],
+      [
+        "_ZN5LOSAT9algorithm7tblastx11translation15generate_frames17h350c126b1c3045dfE",
+        1
+      ],
+      [
+        "_ZN5LOSAT5stats11karlin_calc30compute_karlin_params_ungapped17h5dec1977d2890294E",
+        1
+      ],
+      [
+        "_ZN5LOSAT9algorithm7tblastx6lookup8backbone20prepare_lookup_query17h12f28f5622c45fbdE",
+        1
+      ]
+    ]
+  },
+  {
+    "condition": "Mela-turbofan-n8",
+    "isolate_log": "isolate-0x3e5c4000-40-v8.log",
+    "ticks": 6790,
+    "unmapped_ticks": 6762,
+    "top": [
+      [
+        "instruction /mnt/c/Users/genom/GitHub/LOSAT/LOSAT/tests/wasi_shared_memory.js:77:21",
+        6
+      ],
+      [
+        "ArrayIncludesSmi",
+        6
+      ],
+      [
+        "memarg /mnt/c/Users/genom/GitHub/LOSAT/LOSAT/tests/wasi_shared_memory.js:65:9",
+        3
+      ],
+      [
+        "guardSharedMemory /mnt/c/Users/genom/GitHub/LOSAT/LOSAT/tests/wasi_shared_memory.js:141:27",
+        2
+      ],
+      [
+        "CreateTypedArray",
+        2
+      ],
+      [
+        "LoadIC_NoFeedback",
+        1
+      ],
+      [
+        "signed /mnt/c/Users/genom/GitHub/LOSAT/LOSAT/tests/wasi_shared_memory.js:53:9",
+        1
+      ],
+      [
+        "ArrayIncludes",
+        1
+      ],
+      [
+        "TypedArrayPrototypeByteLength",
+        1
+      ],
+      [
+        "Call_ReceiverIsAny",
+        1
+      ],
+      [
+        "CallFunction_ReceiverIsAny",
+        1
+      ],
+      [
+        "Readable.pipe node:internal/streams/readable:920:35",
+        1
+      ],
+      [
+        "TestEqualStrict",
+        1
+      ],
+      [
+        "BaselineOutOfLinePrologue",
+        1
+      ]
+    ],
+    "losat": [
+      [
+        "instruction /mnt/c/Users/genom/GitHub/LOSAT/LOSAT/tests/wasi_shared_memory.js:77:21",
+        6
+      ],
+      [
+        "memarg /mnt/c/Users/genom/GitHub/LOSAT/LOSAT/tests/wasi_shared_memory.js:65:9",
+        3
+      ],
+      [
+        "guardSharedMemory /mnt/c/Users/genom/GitHub/LOSAT/LOSAT/tests/wasi_shared_memory.js:141:27",
+        2
+      ],
+      [
+        "signed /mnt/c/Users/genom/GitHub/LOSAT/LOSAT/tests/wasi_shared_memory.js:53:9",
+        1
+      ]
+    ]
+  },
+  {
+    "condition": "Mela-turbofan-n8",
+    "isolate_log": "isolate-0x7fd4d4002000-40-v8.log",
+    "ticks": 4268,
+    "unmapped_ticks": 4267,
+    "top": [
+      [
+        "ArrayTimSortIntoCopy",
+        1
+      ]
+    ],
+    "losat": []
+  },
+  {
+    "condition": "Mela-turbofan-n8",
+    "isolate_log": "isolate-0x7fd4fc001000-40-v8.log",
+    "ticks": 4398,
+    "unmapped_ticks": 4395,
+    "top": [
+      [
+        "CreateObjectLiteral",
+        1
+      ],
+      [
+        "CopyDataProperties",
+        1
+      ],
+      [
+        "GetNamedProperty",
+        1
+      ]
+    ],
+    "losat": []
+  },
+  {
+    "condition": "Mela-turbofan-n8",
+    "isolate_log": "isolate-0x7fd528001000-40-v8.log",
+    "ticks": 4514,
+    "unmapped_ticks": 4512,
+    "top": [
+      [
+        "FastNewClosure",
+        1
+      ],
+      [
+        "CallRuntime",
+        1
+      ]
+    ],
+    "losat": []
+  },
+  {
+    "condition": "Mela-turbofan-n8",
+    "isolate_log": "isolate-0x7fd550001000-40-v8.log",
+    "ticks": 4691,
+    "unmapped_ticks": 4690,
+    "top": [
+      [
+        "Construct",
+        1
+      ]
+    ],
+    "losat": []
+  },
+  {
+    "condition": "Mela-turbofan-n8",
+    "isolate_log": "isolate-0x7fd578001000-40-v8.log",
+    "ticks": 4667,
+    "unmapped_ticks": 4100,
+    "top": [
+      [
+        "_ZN5LOSAT9algorithm7tblastx17sum_stats_linking7linking19link_hsp_group_ncbi17h3401281f418c37c1E",
+        556
+      ],
+      [
+        "_ZN5LOSAT5stats14sum_statistics16blast_sum_p_calc28_$u7b$$u7b$closure$u7d$$u7d$17h2dce6aac813d1bddE",
+        5
+      ],
+      [
+        "exp",
+        2
+      ],
+      [
+        "JumpLoop.Wide",
+        1
+      ],
+      [
+        "ArrayReduce",
+        1
+      ],
+      [
+        "InterpreterEntryTrampoline",
+        1
+      ],
+      [
+        "log",
+        1
+      ]
+    ],
+    "losat": [
+      [
+        "_ZN5LOSAT9algorithm7tblastx17sum_stats_linking7linking19link_hsp_group_ncbi17h3401281f418c37c1E",
+        556
+      ],
+      [
+        "_ZN5LOSAT5stats14sum_statistics16blast_sum_p_calc28_$u7b$$u7b$closure$u7d$$u7d$17h2dce6aac813d1bddE",
+        5
+      ]
+    ]
+  },
+  {
+    "condition": "Mela-turbofan-n8",
+    "isolate_log": "isolate-0x7fd5a0001000-40-v8.log",
+    "ticks": 4801,
+    "unmapped_ticks": 4269,
+    "top": [
+      [
+        "_ZN5LOSAT9algorithm7tblastx17sum_stats_linking7linking19link_hsp_group_ncbi17h3401281f418c37c1E",
+        520
+      ],
+      [
+        "_ZN5LOSAT5stats14sum_statistics16blast_sum_p_calc28_$u7b$$u7b$closure$u7d$$u7d$17h2dce6aac813d1bddE",
+        4
+      ],
+      [
+        "log",
+        2
+      ],
+      [
+        "StaInArrayLiteral",
+        1
+      ],
+      [
+        "StoreIC_NoFeedback",
+        1
+      ],
+      [
+        "KeyedLoadIC_Megamorphic",
+        1
+      ],
+      [
+        "LoadIC_NoFeedback",
+        1
+      ],
+      [
+        "exp",
+        1
+      ],
+      [
+        "_ZN5LOSAT9algorithm7tblastx17sum_stats_linking7linking15DualMaximumTree6update17h834ba8aeba36b5dfE",
+        1
+      ]
+    ],
+    "losat": [
+      [
+        "_ZN5LOSAT9algorithm7tblastx17sum_stats_linking7linking19link_hsp_group_ncbi17h3401281f418c37c1E",
+        520
+      ],
+      [
+        "_ZN5LOSAT5stats14sum_statistics16blast_sum_p_calc28_$u7b$$u7b$closure$u7d$$u7d$17h2dce6aac813d1bddE",
+        4
+      ],
+      [
+        "_ZN5LOSAT9algorithm7tblastx17sum_stats_linking7linking15DualMaximumTree6update17h834ba8aeba36b5dfE",
+        1
+      ]
+    ]
+  },
+  {
+    "condition": "Mela-turbofan-n8",
+    "isolate_log": "isolate-0x7fd5c8001000-40-v8.log",
+    "ticks": 4876,
+    "unmapped_ticks": 4198,
+    "top": [
+      [
+        "_ZN5LOSAT9algorithm7tblastx17sum_stats_linking7linking19link_hsp_group_ncbi17h3401281f418c37c1E",
+        665
+      ],
+      [
+        "exp",
+        4
+      ],
+      [
+        "_ZN5LOSAT5stats14sum_statistics16blast_sum_p_calc28_$u7b$$u7b$closure$u7d$$u7d$17h2dce6aac813d1bddE",
+        4
+      ],
+      [
+        "log",
+        2
+      ],
+      [
+        "CreateShallowObjectLiteral",
+        1
+      ],
+      [
+        "InterpreterEntryTrampoline",
+        1
+      ],
+      [
+        "CallFunction_ReceiverIsAny",
+        1
+      ]
+    ],
+    "losat": [
+      [
+        "_ZN5LOSAT9algorithm7tblastx17sum_stats_linking7linking19link_hsp_group_ncbi17h3401281f418c37c1E",
+        665
+      ],
+      [
+        "_ZN5LOSAT5stats14sum_statistics16blast_sum_p_calc28_$u7b$$u7b$closure$u7d$$u7d$17h2dce6aac813d1bddE",
+        4
+      ]
+    ]
+  },
+  {
+    "condition": "Mela-turbofan-n8",
+    "isolate_log": "isolate-0x7fd7fc001000-40-v8.log",
+    "ticks": 4678,
+    "unmapped_ticks": 2590,
+    "top": [
+      [
+        "_ZN5LOSAT9algorithm7tblastx12blast_engine8run_impl11run_in_pool28_$u7b$$u7b$closure$u7d$$u7d$28_$u7b$$u7b$closure$u7d$$u7d$17h666c0cd3316f5ad2E",
+        1367
+      ],
+      [
+        "_ZN5LOSAT9algorithm7tblastx17sum_stats_linking7linking19link_hsp_group_ncbi17h3401281f418c37c1E",
+        448
+      ],
+      [
+        "_ZN5LOSAT9algorithm7tblastx6lookup8backbone25blast_lookup_add_word_hit17h7610dfa31490a14dE",
+        57
+      ],
+      [
+        "_ZN5LOSAT5utils3seg9SegMasker13mask_sequence7seg_seq17h41b196252a52cca5E",
+        40
+      ],
+      [
+        "dlmalloc",
+        29
+      ],
+      [
+        "_ZN5LOSAT9algorithm7tblastx6lookup8backbone27blast_aa_add_word_hits_core17h8f6d90b971975d8cE",
+        29
+      ],
+      [
+        "_ZN5LOSAT9algorithm7tblastx11translation18translate_sequence17h4c4095e2d2fb0ab9E",
+        17
+      ],
+      [
+        "_ZN5LOSAT5utils3seg25entropy_from_state_vector17hc6f5fffe87f6af56E",
+        16
+      ],
+      [
+        "log",
+        13
+      ],
+      [
+        "_ZN5LOSAT5utils3seg9SegWindow8state_on17h381cfe0a13090138E",
+        9
+      ],
+      [
+        "_ZN5LOSAT9algorithm7tblastx6lookup8backbone17build_ncbi_lookup17h82050347c7978647E",
+        8
+      ],
+      [
+        "_ZN4core5slice4sort6stable9quicksort9quicksort17he2dfa525305332bfE",
+        8
+      ],
+      [
+        "dlfree",
+        4
+      ],
+      [
+        "_ZN5LOSAT9algorithm7tblastx14blast_gapalign32score_compare_ungapped_hits_ncbi17h50f674f3d8efe77cE",
+        3
+      ],
+      [
+        "_ZN5LOSAT9algorithm7tblastx17ungapped_hit_sort34sort_ungapped_hits_by_index_replay17h961d40aeb1531859E",
+        3
+      ],
+      [
+        "_ZN5LOSAT9algorithm7tblastx17sum_stats_linking7linking20rev_compare_hsps_tbx17h6a7a1f26a8cba491E",
+        3
+      ],
+      [
+        "_ZN5LOSAT5stats14sum_statistics16blast_sum_p_calc28_$u7b$$u7b$closure$u7d$$u7d$17h2dce6aac813d1bddE",
+        3
+      ],
+      [
+        "LoadIC_NoFeedback",
+        2
+      ],
+      [
+        "realloc",
+        2
+      ],
+      [
+        "_ZN5LOSAT9algorithm7tblastx12blast_engine8run_impl11run_in_pool28_$u7b$$u7b$closure$u7d$$u7d$17h4c786436ed607637E",
+        2
+      ]
+    ],
+    "losat": [
+      [
+        "_ZN5LOSAT9algorithm7tblastx12blast_engine8run_impl11run_in_pool28_$u7b$$u7b$closure$u7d$$u7d$28_$u7b$$u7b$closure$u7d$$u7d$17h666c0cd3316f5ad2E",
+        1367
+      ],
+      [
+        "_ZN5LOSAT9algorithm7tblastx17sum_stats_linking7linking19link_hsp_group_ncbi17h3401281f418c37c1E",
+        448
+      ],
+      [
+        "_ZN5LOSAT9algorithm7tblastx6lookup8backbone25blast_lookup_add_word_hit17h7610dfa31490a14dE",
+        57
+      ],
+      [
+        "_ZN5LOSAT5utils3seg9SegMasker13mask_sequence7seg_seq17h41b196252a52cca5E",
+        40
+      ],
+      [
+        "_ZN5LOSAT9algorithm7tblastx6lookup8backbone27blast_aa_add_word_hits_core17h8f6d90b971975d8cE",
+        29
+      ],
+      [
+        "_ZN5LOSAT9algorithm7tblastx11translation18translate_sequence17h4c4095e2d2fb0ab9E",
+        17
+      ],
+      [
+        "_ZN5LOSAT5utils3seg25entropy_from_state_vector17hc6f5fffe87f6af56E",
+        16
+      ],
+      [
+        "_ZN5LOSAT5utils3seg9SegWindow8state_on17h381cfe0a13090138E",
+        9
+      ],
+      [
+        "_ZN5LOSAT9algorithm7tblastx6lookup8backbone17build_ncbi_lookup17h82050347c7978647E",
+        8
+      ],
+      [
+        "_ZN5LOSAT9algorithm7tblastx14blast_gapalign32score_compare_ungapped_hits_ncbi17h50f674f3d8efe77cE",
+        3
+      ],
+      [
+        "_ZN5LOSAT9algorithm7tblastx17ungapped_hit_sort34sort_ungapped_hits_by_index_replay17h961d40aeb1531859E",
+        3
+      ],
+      [
+        "_ZN5LOSAT9algorithm7tblastx17sum_stats_linking7linking20rev_compare_hsps_tbx17h6a7a1f26a8cba491E",
+        3
+      ],
+      [
+        "_ZN5LOSAT5stats14sum_statistics16blast_sum_p_calc28_$u7b$$u7b$closure$u7d$$u7d$17h2dce6aac813d1bddE",
+        3
+      ],
+      [
+        "_ZN5LOSAT9algorithm7tblastx12blast_engine8run_impl11run_in_pool28_$u7b$$u7b$closure$u7d$$u7d$17h4c786436ed607637E",
+        2
+      ],
+      [
+        "_ZN5LOSAT9algorithm7tblastx17sum_stats_linking7linking46apply_sum_stats_even_gap_linking_with_parallel17hf5d5f1edc369f203E",
+        2
+      ],
+      [
+        "_ZN5LOSAT9algorithm7tblastx17sum_stats_linking7linking23rev_compare_hsps_transl17h39c5c055f9e36c5cE",
+        2
+      ],
+      [
+        "_ZN5LOSAT9algorithm7tblastx17sum_stats_linking7linking23fwd_compare_hsps_transl17h39283829a98cf22dE",
+        2
+      ],
+      [
+        "_ZN5LOSAT9algorithm7tblastx11translation15generate_frames17h350c126b1c3045dfE",
+        1
+      ],
+      [
+        "_ZN5LOSAT9algorithm7tblastx6lookup8backbone20prepare_lookup_query17h12f28f5622c45fbdE",
+        1
+      ],
+      [
+        "_ZN5LOSAT5stats14sum_statistics16blast_sum_p_calc17h2c1c7d26332006ccE",
+        1
+      ],
+      [
+        "_ZN5LOSAT6report7outfmt616write_hit_fields17h44b5ea23022c058fE",
+        1
+      ]
+    ]
+  }
+]

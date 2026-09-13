@@ -1,0 +1,13 @@
+{
+  "argv": [
+    "/home/kawato/micromamba/bin/python3",
+    "-m",
+    "unittest",
+    "-v",
+    "test_simple_comparison",
+    "test_wasm_performance",
+    "test_benchmark_wasm_threading"
+  ],
+  "cwd": "/mnt/c/Users/genom/GitHub/LOSAT/LOSAT/tests",
+  "exit_status": 0
+}

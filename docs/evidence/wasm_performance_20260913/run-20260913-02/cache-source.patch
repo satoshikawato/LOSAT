@@ -1,0 +1,35 @@
+--- a/LOSAT/src/algorithm/blastp/blast_engine.rs
++++ b/LOSAT/src/algorithm/blastp/blast_engine.rs
+@@ -5645,11 +5645,21 @@
+             let query_heaps: Result<Vec<(usize, BlastCompoHeap)>> = pool.install(|| {
+                 kappa_parallel_query_indices
+                     .par_iter()
+-                    .map(|&q_idx| -> Result<(usize, BlastCompoHeap)> {
++                    // NCBI reference: c++/src/algo/blast/core/blast_kappa.c:1414-1454,1626-1646,3493-3503
++                    // #define BLASTP_MASK_INSTRUCTIONS "S 10 1.8 2.1"
++                    // if (compo_adjust_mode && (!subject_maybe_biased || *subject_maybe_biased)) {
++                    //     if (!shouldTestIdentical || !s_TestNearIdentical(...))
++                    //         status = s_DoSegSequenceData(seqData, eBlastTypeBlastp, subject_maybe_biased);
++                    // }
++                    // NRrecord = NRrecord_tld[tid];
++                    // Reuse only the existing deterministic subject/range SEG memoization
++                    // within one search. Its lookup remains after the query-dependent gate;
++                    // heaps, composition workspace and traceback state stay query-local.
++                    // Rayon creates folder-local state, not exactly one cache per worker.
++                    .map_init(BlastpKappaSubjectRangeCache::new, |kappa_subject_range_cache, &q_idx| -> Result<(usize, BlastCompoHeap)> {
+                         let mut composition_workspace = BlastCompositionWorkspace::new_blosum62();
+                         let mut kappa_preliminary_hits = Vec::new();
+                         let mut kappa_gap_scratch = GapAlignScratch::new();
+-                        let mut kappa_subject_range_cache = BlastpKappaSubjectRangeCache::new();
+                         let mut redone_match =
+                             BlastCompoHeap::new(args.max_target_seqs, PSI_INCLUSION_ETHRESH);
+                         let redo_align_params = build_redo_align_params(q_idx)?;
+@@ -5718,7 +5728,7 @@
+                                 &redo_align_params,
+                                 args.evalue,
+                                 &mut kappa_gap_scratch,
+-                                &mut kappa_subject_range_cache,
++                                kappa_subject_range_cache,
+                             )?;
+                             let best_score = postprocessed.best_score;
+                             let best_evalue = postprocessed.best_evalue;

@@ -1,0 +1,41 @@
+{
+  "head": "c0e123d771f3a58c7529aed4d3f684a1a81f4cb5",
+  "artifacts": {
+    "native": {
+      "path": "/mnt/c/Users/genom/GitHub/LOSAT/docs/evidence/wasm_performance_20260913/run-20260913-01/final-build/artifacts/LOSAT",
+      "sha256": "834a99ed11f6a4415df6f119d11736a16e50515d1f0f851fda9a3f687688a35f"
+    },
+    "serial": {
+      "path": "/mnt/c/Users/genom/GitHub/LOSAT/docs/evidence/wasm_performance_20260913/run-20260913-01/final-build/artifacts/losat-serial-command.wasm",
+      "sha256": "f687af514acb81a62219237c25425412d24c8d5a527d11a988e41dc114c53940"
+    },
+    "threaded": {
+      "path": "/mnt/c/Users/genom/GitHub/LOSAT/docs/evidence/wasm_performance_20260913/run-20260913-01/final-build/artifacts/losat-threaded-command.wasm",
+      "sha256": "13b88d349ec3449330b11428bb15e9a688448c4e144e756b6f038b4b9412a437"
+    },
+    "oracle": {
+      "path": "/home/kawato/micromamba/bin/tblastx",
+      "sha256": "9b6121d254d2c634114ac91c0bf4faa252b93532b1142cfb3ade2336fb830873"
+    }
+  },
+  "fixtures": {
+    "LC738874.fasta": "491f80b482acc96600773c3493358c0262dbf714cb5d76f8f5560a92ecccac1a",
+    "LC738875.fasta": "f397c2e82e5f7f7d12cebd0a62e2146000f0a13c9cbfc662ea0ba63c45d93e15"
+  },
+  "node": "{\"node\":\"24.21.0\",\"acorn\":\"8.18.0\",\"ada\":\"4.0.0\",\"amaro\":\"1.1.11\",\"ares\":\"1.34.8\",\"brotli\":\"1.2.0\",\"cldr\":\"48.0\",\"icu\":\"78.3\",\"llhttp\":\"9.4.3\",\"merve\":\"1.2.2\",\"modules\":\"137\",\"napi\":\"10\",\"nbytes\":\"0.1.4\",\"ncrypto\":\"0.0.1\",\"nghttp2\":\"1.70.0\",\"nghttp3\":\"\",\"ngtcp2\":\"\",\"openssl\":\"3.5.8\",\"simdjson\":\"4.6.7\",\"simdutf\":\"6.4.0\",\"sqlite\":\"3.53.4\",\"tz\":\"2026c\",\"undici\":\"7.29.1\",\"unicode\":\"17.0\",\"uv\":\"1.52.1\",\"uvwasi\":\"0.0.23\",\"v8\":\"13.6.233.17-node.53\",\"zlib\":\"1.3.2.1-motley-8002e91\",\"zstd\":\"1.5.7\"}\n",
+  "runners": {
+    "benchmark_wasi_reuse.js": "a0effdc582f7fcc1dc8fc35736f031f6a85fb8597461393ef8bdda0ffdcfc32b",
+    "check_wasi_api_limits.js": "15eeefd76058f23137390b4209f873eae836be96341bb68052f2c96667a07903",
+    "check_wasi_fault.js": "5d73bddf74955394ddc254692e0565b62eb0667407224bee43dce6a050ac9ba9",
+    "check_wasi_reactor.js": "d5aae0e1f8e9199389d2fbfea80f46897a72cfd1db028c45de3093de6004dab0",
+    "run_losat_wasi.js": "21311c960920364e3072605a8d5626478b99c010b30e07cab98461f4b5e2c729",
+    "run_losat_wasi_threads.js": "faf39e6c83178530c3b21d49ee0929d67e6b9258061cc50c057876617c759c4b",
+    "run_wasm_performance_warm.js": "d86792c0bbaee8458c71535f06db7210e8b1a6549a55767a2512e2af577e47f3",
+    "test_benchmark_wasi_reuse.js": "d381d567824ca86d576e61e63e119a0b8f3cde85d52404f67e4a52307c75373e",
+    "test_wasi_runners.js": "48371eaaeece9e3e7b640db8b4acb4cf8b188f0386e75c5b205ddabfcaa4b2a3",
+    "test_wasi_shared_memory.js": "54924dc5fc8e3acac3588f675b8871a7725c4504f5e5ed6a6f50cff7da80ac9d",
+    "wasi_artifact.js": "37ca747261b090bf16720b2109a4511a57d90f4b67cf94c158b9bee9fc1d3f73",
+    "wasi_shared_memory.js": "a11fad8fdd346b3a93edd35f783552d97cd5c5ccb08c491e732a6b8dae552e50",
+    "wasi_thread_host.js": "69480b0d7128ea0f264700dad31f25253e09963867ac28b6b3997704c637a5c3"
+  }
+}

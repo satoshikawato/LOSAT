@@ -1,0 +1,215 @@
+--- a/LOSAT/tests/comparison_data.py
++++ b/LOSAT/tests/comparison_data.py
+@@ -126,6 +126,11 @@
+             "schema": "losat-simple-comparison-v2", "run_id": uuid.uuid4().hex,
+             "started_utc": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
+             "node_argv": [os.environ.get("NODE_BIN", "node"), *node_args()],
++            # NCBI reference: c++/src/algo/blast/blastinput/cmdline_flags.cpp:46-75
++            # const string kArgQuery("query"); const string kArgSubject("subject");
++            # Compilation settings are host argv, separate from unchanged search argv.
++            "node_argv_by_program": {program: [os.environ.get("NODE_BIN", "node"), *node_args(program)]
++                                     for program in ("tblastx", "blastn", "blastp")},
+             "source_hashes": {str(p.relative_to(SCRIPT_DIR.parent)):sha256(p)
+                               for p in [*sorted((SCRIPT_DIR.parent/"src").rglob("*.rs")), SCRIPT_DIR.parent/"Cargo.toml", SCRIPT_DIR.parent/"Cargo.lock", SCRIPT_DIR.parent/"build.rs", SCRIPT_DIR.parent/".cargo/config.toml"]},
+             "toolchain": {name: subprocess.check_output([name, "--version"], text=True).strip()
+@@ -137,6 +142,10 @@
+                               if p.suffix in {".py", ".js", ".sh", ".tsv"}},
+         }, indent=2) + "\n")
+         (directory / "node-args.bin").write_bytes(b"".join(x.encode() + b"\0" for x in node_args()))
++        # NCBI reference: c++/src/algo/blast/blastinput/cmdline_flags.cpp:46-75
++        # const string kArgQuery("query"); const string kArgSubject("subject");
++        # Preserve argument boundaries for the program-specific host profile.
++        (directory / "node-tblastx-args.bin").write_bytes(b"".join(x.encode() + b"\0" for x in node_args("tblastx")))
+         return
+     stem = Path(rest[0]).resolve()
+     manifest = json.loads((directory / "run.json").read_text())
+@@ -184,10 +193,20 @@
+     record_path.write_text(json.dumps(record, indent=2) + "\n")
+ 
+ 
+-def node_args():
+-    args = json.loads(os.environ.get("NODE_ARGS_JSON", "[]"))
+-    if not isinstance(args, list) or any(not isinstance(x, str) or "\0" in x for x in args):
+-        raise ValueError("NODE_ARGS_JSON must be a JSON array of strings without NUL")
++# NCBI reference: c++/src/algo/blast/blastinput/cmdline_flags.cpp:46-75
++# const string kArgQuery("query"); const string kArgSubject("subject");
++# Host compilation does not change search arguments or NCBI behavior. The user
++# approved the measured TBLASTX memory tradeoff; other programs retain their flags.
++def node_args(program=None):
++    settings = [("NODE_ARGS_JSON", "[]")]
++    if program == "tblastx":
++        settings.append(("NODE_TBLASTX_ARGS_JSON", '["--no-liftoff", "--no-wasm-tier-up"]'))
++    args = []
++    for name, default in settings:
++        values = json.loads(os.environ.get(name, default))
++        if not isinstance(values, list) or any(not isinstance(x, str) or "\0" in x for x in values):
++            raise ValueError(f"{name} must be a JSON array of strings without NUL")
++        args.extend(values)
+     return args
+ 
+ 
+--- a/LOSAT/tests/run_comparison.sh
++++ b/LOSAT/tests/run_comparison.sh
+@@ -38,7 +38,10 @@
+   BUILD_LOSAT_WASM=0 BUILD_LOSAT_WASM_THREADED=$BUILD_LOSAT_WASM
+   LOSAT_BIN, LOSAT_WASM_BIN, LOSAT_WASM_THREADED_BIN override artifacts.
+   NODE_BIN=node selects the Node executable for both Wasm targets.
+-  NODE_ARGS_JSON='[]' supplies Node flags as a JSON argv array (not search args).
++  NODE_ARGS_JSON='[]' supplies common Node flags as a JSON argv array.
++  TBLASTX additionally defaults to --no-liftoff --no-wasm-tier-up (TurboFan).
++  NODE_TBLASTX_ARGS_JSON='[]' disables that TBLASTX-only profile.
++  These are host compilation flags, not search args; other programs are unchanged.
+   BLASTN_BIN, BLASTP_BIN, TBLASTX_BIN, MAKEBLASTDB_BIN override NCBI tools.
+ 
+ Each selected condition runs once. Wall time includes process startup and Wasm
+@@ -65,6 +68,10 @@
+ python3 "$SCRIPT_DIR/comparison_data.py" init "$BENCHMARK_DIR"
+ BENCHMARK_DIR="$(cd "$BENCHMARK_DIR" && pwd)"
+ mapfile -d '' -t NODE_ARGS < "$BENCHMARK_DIR/node-args.bin"
++# NCBI reference: c++/src/algo/blast/blastinput/cmdline_flags.cpp:46-75
++# const string kArgQuery("query"); const string kArgSubject("subject");
++# Use the recorded program-specific host argv without changing search arguments.
++mapfile -d '' -t TBLASTX_NODE_ARGS < "$BENCHMARK_DIR/node-tblastx-args.bin"
+ LOSAT_OUT_DIR="$BENCHMARK_DIR/losat_out"
+ BLAST_OUT_DIR="$BENCHMARK_DIR/blast_out"
+ FASTA_DIR="$SCRIPT_DIR/fasta"
+@@ -194,9 +201,15 @@
+         fi
+     fi
+     if [[ "$RUN_LOSAT_WASM" == 1 ]]; then
+-        run_timed "$LOSAT_OUT_DIR/$losat_stem.wasm" env NODE_NO_WARNINGS=1 "$NODE_BIN" "${NODE_ARGS[@]}" "$SCRIPT_DIR/run_losat_wasi.js" "$LOSAT_WASM_BIN" "$program" "${args[@]}" -num_threads 1
++        # NCBI reference: c++/src/algo/blast/blastinput/cmdline_flags.cpp:46-75
++        # const string kArgQuery("query"); const string kArgSubject("subject");
++        # Select Node compilation before starting this command process; worker
++        # isolates inherit the same flags. BLASTN and BLASTP use common args only.
++        search_node_args=("${NODE_ARGS[@]}")
++        if [[ "$program" == tblastx ]]; then search_node_args=("${TBLASTX_NODE_ARGS[@]}"); fi
++        run_timed "$LOSAT_OUT_DIR/$losat_stem.wasm" env NODE_NO_WARNINGS=1 "$NODE_BIN" "${search_node_args[@]}" "$SCRIPT_DIR/run_losat_wasi.js" "$LOSAT_WASM_BIN" "$program" "${args[@]}" -num_threads 1
+         if [[ "$RUN_LOSAT_WASM_THREADED" == 1 ]]; then
+-            run_timed "$LOSAT_OUT_DIR/$losat_stem.wasm.n$LOSAT_THREADS" env NODE_NO_WARNINGS=1 "$NODE_BIN" "${NODE_ARGS[@]}" "$SCRIPT_DIR/run_losat_wasi_threads.js" "$LOSAT_WASM_THREADED_BIN" "$program" "${args[@]}" -num_threads "$LOSAT_THREADS"
++            run_timed "$LOSAT_OUT_DIR/$losat_stem.wasm.n$LOSAT_THREADS" env NODE_NO_WARNINGS=1 "$NODE_BIN" "${search_node_args[@]}" "$SCRIPT_DIR/run_losat_wasi_threads.js" "$LOSAT_WASM_THREADED_BIN" "$program" "${args[@]}" -num_threads "$LOSAT_THREADS"
+         fi
+     fi
+     if [[ "$RUN_NCBI" == 1 ]]; then
+--- a/LOSAT/tests/test_simple_comparison.py
++++ b/LOSAT/tests/test_simple_comparison.py
+@@ -64,6 +64,40 @@
+         record = json.loads(Path(str(stem) + '.run.json').read_text())
+         self.assertEqual(record['oracle_version'], 'synthetic oracle version')
+         self.assertEqual(record['files'][str(oracle.resolve())], data.sha256(oracle))
++
++    # NCBI reference: c++/src/algo/blast/blastinput/cmdline_flags.cpp:46-75
++    # const string kArgQuery("query"); const string kArgSubject("subject");
++    # The compilation profile changes only the selected TBLASTX host argv.
++    def test_turbofan_profile_is_tblastx_only_and_can_be_disabled(self):
++        with patch.dict(os.environ, {"NODE_ARGS_JSON": '["--trace-warnings"]'}, clear=True):
++            expected = ["--trace-warnings", "--no-liftoff", "--no-wasm-tier-up"]
++            self.assertEqual(data.node_args("tblastx"), expected)
++            for program in (None, "blastn", "blastp", "megablast"):
++                self.assertEqual(data.node_args(program), ["--trace-warnings"])
++            with patch.dict(os.environ, {"NODE_TBLASTX_ARGS_JSON": "[]"}):
++                self.assertEqual(data.node_args("tblastx"), ["--trace-warnings"])
++
++    # NCBI reference: c++/src/algo/blast/blastinput/cmdline_flags.cpp:46-75
++    # const string kArgQuery("query"); const string kArgSubject("subject");
++    # Reject malformed host options before any search rather than use a fallback.
++    def test_tblastx_profile_rejects_malformed_argv(self):
++        for value in ('{}', '[1]', '["bad\\u0000arg"]', 'not-json'):
++            with self.subTest(value=value), patch.dict(os.environ, {"NODE_TBLASTX_ARGS_JSON": value}, clear=True):
++                with self.assertRaises(ValueError):
++                    data.node_args("tblastx")
++
++    # NCBI reference: c++/src/algo/blast/blastinput/cmdline_flags.cpp:46-75
++    # const string kArgQuery("query"); const string kArgSubject("subject");
++    # Persist exactly the same argument array that the shell consumes.
++    def test_tblastx_profile_manifest_matches_nul_delimited_argv(self):
++        directory = self.root / "profile"
++        with patch.dict(os.environ, {"RUN_LOSAT_WASM": "0", "NODE_ARGS_JSON": '["--trace-warnings"]'}, clear=True):
++            data.record_cli(["init", str(directory)])
++        manifest = json.loads((directory / "run.json").read_text())
++        flags = (directory / "node-tblastx-args.bin").read_bytes().split(b"\0")[:-1]
++        self.assertEqual([x.decode() for x in flags], manifest["node_argv_by_program"]["tblastx"][1:])
++        self.assertNotIn("--no-liftoff", manifest["node_argv_by_program"]["blastp"])
++        self.assertNotIn("--no-liftoff", manifest["node_argv_by_program"]["blastn"])
+ 
+     def test_one_thread_has_distinct_wasm_builds(self):
+         with patch.object(data, "LOSAT_THREADS", 1):
+--- a/LOSAT/tests/README.md
++++ b/LOSAT/tests/README.md
+@@ -94,14 +94,36 @@
+ 
+ The script uses `node` from your current `PATH`; it does not install or pin Node.
+ Set `NODE_BIN=/path/to/node` to select a different executable for both serial and
+-threaded Wasm. Pass Node flags separately as a JSON argv array, for example
+-`NODE_ARGS_JSON='["--no-liftoff","--no-wasm-tier-up"]'`. These experimental flags
+-reduce wall time in measured TBLASTX workloads but exceeded memory-regression
+-limits in two TBLASTX controls and slowed small BLASTP/megablast searches.
+-They remain experiments and are not defaults. See the
+-[optimization evidence](../../docs/evidence/wasm_performance_20260913/run-20260913-01/P1.md)
+-for the measured scope and invocation lifetimes. At startup it prints the actual Node/V8 versions, executable path,
+-and Wasm file paths/modification times. When building Wasm it also prints the
++threaded Wasm. `run_comparison.sh` and `run_wasm_comparison.sh` now add
++`--no-liftoff --no-wasm-tier-up` **only for TBLASTX**. This TurboFan compilation
++profile was verified on Node 24.21.0 / V8 13.6.233.17-node.53. Five measured cold
++runs per condition gave 6.56 → 4.44 seconds on the primary n8 fixture; two
++preserved controls gave about 2.8× speedups. Peak process RSS increased by about
++28, 47 and 37 MiB respectively. The TBLASTX memory tradeoff was explicitly accepted;
++BLASTN and BLASTP retain their common Node settings. See the
++[follow-up evidence](../../docs/evidence/wasm_performance_20260913/run-20260913-02/REPORT.md)
++for the exact fixtures, historical measurement limits and acceptance policy.
++
++Set `NODE_TBLASTX_ARGS_JSON='[]'` to disable the TBLASTX additions, including when
++collecting an ordinary-compilation baseline. `NODE_ARGS_JSON='[]'` supplies common
++Node arguments for all programs; TBLASTX-specific arguments follow them. Both
++variables require JSON arrays of strings. The run manifest records the effective
++argv by program, and each result records the actual ordered command.
++
++These defaults belong to the comparison scripts. Direct Node invocations must
++supply the flags before the runner script, for example:
++
++```bash
++"$NODE_BIN" --no-liftoff --no-wasm-tier-up run_losat_wasi_threads.js \
++  "$LOSAT_WASM_THREADED_BIN" tblastx -query fasta/MelaMJNV.fasta \
++  -subject fasta/PemoMJNVA.fasta -outfmt 6 -num_threads 8 -out /tmp/tblastx.out
++```
++
++The measured improvement applies to cold Node/WASI launches. It does not establish
++a browser speedup or the same gain for reused modules/reactors. Unsupported flags
++fail explicitly; there is no silent fallback to a different compilation mode.
++At startup the comparison script prints the actual Node/V8 versions, executable
++path, and Wasm file paths/modification times. When building Wasm it also prints the
+ Rust/Cargo versions. Rust compiles the release Wasm artifacts; Node executes them.
+ 
+ The threaded runner applies a shared-memory compatibility guard for all search
+--- a/docs/wasm_performance_optimization_plan_20260913.md
++++ b/docs/wasm_performance_optimization_plan_20260913.md
+@@ -2,7 +2,7 @@
+ 
+ 作成日: 2026-09-13
+ 
+-状態: 計測基盤を実装し、P1〜P3の採否を確定。P4は既存megablast出力差によりPARTIAL。[最終報告](evidence/wasm_performance_20260913/run-20260913-01/REPORT.md)に結果と制約を記録。
++状態: 計測基盤と TBLASTX 限定 TurboFan 比較実行設定を実装。ユーザーのメモリ増許容を受けた [追加報告](evidence/wasm_performance_20260913/run-20260913-02/REPORT.md)に再測定・採用と追加 Rust 3候補の棄却を記録。[初回報告](evidence/wasm_performance_20260913/run-20260913-01/REPORT.md)は凍結したまま保持。P4は既存 megablast 出力差により PARTIAL。
+ 
+ 対象: LOSAT Native、WASI serial command、WASI threaded command。再利用時の検証には既存reactorも使用する。
+ 
+@@ -291,10 +291,17 @@
+ | 段階 | 状態 | 成果物・判断 |
+ |---|---|---|
+ | P0 測定固定 | COMPLETE | 新規 run・status/argv/hash の検証、baseline 再build、旧 trap の非再現。完全な source snapshot は `snapshot-v2.json`。 |
+-| P1 TBLASTXコンパイル方式 | COMPLETE | 設定 A/B・worker profile・長配列の raw parity 完了。汎用 TurboFan 固定はメモリ/他task回帰、局所 Rust 候補は 1.78% に留まり REJECTED。再利用の探索測定も完了。 |
++| P1 TBLASTXコンパイル方式 | ACCEPTED（限定） | run-02で TBLASTX の cold Node/WASI 比較実行へ TurboFan を採用。主対象 n8 は6.56→4.44秒、RSS +27.95 MiB。旧2対照は約2.8倍、+47.33/+36.85 MiB。ユーザー承認後のメモリ条件で再評価。汎用採用・局所 Rust 候補の棄却記録は保持。 |
+ | P2 BLASTN並列DP | COMPLETE | 5入力の raw parity と DP 診断完了。Wasm batch32 は大入力 8.03%短縮・もう一方18.72%悪化で REJECTED。元の batch16 を維持。 |
+-| P3 BLASTP上位処理 | COMPLETE | 5入力の raw parity、worker を含む Wasm profile 完了。DP 行書込み候補は4.39%悪化/2.46%短縮で REJECTED。 |
+-| P4 統合検証 | PARTIAL | 最終4成果物はbaselineと同一。閾値12件・実比較/描画5件PASS。既存megablast2入力のraw差は未合格のまま保存。 |
++| P3 BLASTP上位処理 | COMPLETE | 5入力の raw parity と Wasm profile 完了。初回DP行書込みに加え、run-02でquery間SEG cache再利用、DP関数境界、adjusted matrix行特殊化を個別実装・計測。最大5.45%短縮に留まり全て REJECTED。 |
++| P4 統合検証 | PARTIAL | 検索Rust・Wasm成果物はbaselineと同一。run-02は43 process PASS、実比較12件raw一致。既存閾値12件と前段回帰を保持。既存megablast2入力のraw差と正式認証の未完了分は未合格のまま。 |
++
++run-02 の方針変更はユーザー回答「TBLASTX限定でメモリ増を許容する」に基づく。
++TBLASTX cold Node/WASI のピーク RSS 増分だけを `max(基準の10%, 48 MiB)`
++へ変更し、出力・スレッド・wall の基準は維持する。これは計測上の採用基準であり、
++実行時のメモリ上限ではない。比較スクリプトでのみ既定適用し、直接 Node 起動には
++明示フラグが必要。旧対照の時間は元の CLOCK_MONOTONIC 観測値を再評価したもので、
++新測定ではない。ブラウザや再利用時へ同じ倍率を外挿しない。
+ 
+ 非実装の検証完了は `COMPLETE`、候補採用は `ACCEPTED`、棄却は `REJECTED`、対象外の根拠を確認した場合は `SKIPPED`、測定が不確定なら `INCONCLUSIVE` と記録する。前段階の非採用は次段階の独立した調査を妨げないが、未解決の共有runtime障害や出力差が影響する候補は採用しない。
+ 

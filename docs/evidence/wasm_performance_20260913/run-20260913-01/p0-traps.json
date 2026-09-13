@@ -1,0 +1,6343 @@
+[
+  {
+    "status": "PASS",
+    "reason": null,
+    "exit_status": 0,
+    "wall_seconds": 9.727436890010722,
+    "cpu_user_seconds": 10.59,
+    "cpu_system_seconds": 1.35,
+    "peak_rss_bytes": 880496640,
+    "output": "/mnt/c/Users/genom/GitHub/LOSAT/docs/evidence/wasm_performance_20260913/run-20260913-01/p0-traps/blastn-nz-self/output.txt",
+    "raw_output_sha256": "806751f2ac851244fcf72eac9a242a9e6997071e8a4812bf3ce903d802cf4ea4",
+    "raw_output_bytes": 993967,
+    "started_utc": "2026-09-13T07:09:33Z",
+    "case_id": "blastn-nz-self",
+    "artifact_sha256": "13b88d349ec3449330b11428bb15e9a688448c4e144e756b6f038b4b9412a437",
+    "input_hashes": {
+      "NZ_CP006932.fasta": "2190d5bf137d0bed3e3093624303b24b29d0923e04b27069f10e5ca145892617"
+    },
+    "diagnostic": true,
+    "thread_contract": {
+      "requested_threads": 8,
+      "pool_threads": 8,
+      "caller_participates": false,
+      "effective_compute_threads": 8,
+      "thread_stages": [
+        {
+          "program": "blastn",
+          "stage": "subjects",
+          "work_items": 1,
+          "parallel_selected": false,
+          "measured_activity": null
+        },
+        {
+          "program": "blastn",
+          "stage": "subject_chunks",
+          "work_items": 1,
+          "parallel_selected": false,
+          "measured_activity": null
+        },
+        {
+          "program": "blastn",
+          "stage": "dp_traceback",
+          "work_items": 16,
+          "parallel_selected": true,
+          "measured_activity": null
+        },
+        {
+          "program": "blastn",
+          "stage": "dp_traceback",
+          "work_items": 16,
+          "parallel_selected": true,
+          "measured_activity": null
+        },
+        {
+          "program": "blastn",
+          "stage": "dp_traceback",
+          "work_items": 14,
+          "parallel_selected": true,
+          "measured_activity": null
+        },
+        {
+          "program": "blastn",
+          "stage": "dp_traceback",
+          "work_items": 16,
+          "parallel_selected": true,
+          "measured_activity": null
+        },
+        {
+          "program": "blastn",
+          "stage": "dp_traceback",
+          "work_items": 14,
+          "parallel_selected": true,
+          "measured_activity": null
+        },
+        {
+          "program": "blastn",
+          "stage": "dp_traceback",
+          "work_items": 16,
+          "parallel_selected": true,
+          "measured_activity": null
+        },
+        {
+          "program": "blastn",
+          "stage": "dp_traceback",
+          "work_items": 16,
+          "parallel_selected": true,
+          "measured_activity": null
+        },
+        {
+          "program": "blastn",
+          "stage": "dp_traceback",
+          "work_items": 16,
+          "parallel_selected": true,
+          "measured_activity": null
+        },
+        {
+          "program": "blastn",
+          "stage": "dp_traceback",
+          "work_items": 16,
+          "parallel_selected": true,
+          "measured_activity": null
+        },
+        {
+          "program": "blastn",
+          "stage": "dp_traceback",
+          "work_items": 12,
+          "parallel_selected": true,
+          "measured_activity": null
+        },
+        {
+          "program": "blastn",
+          "stage": "dp_traceback",
+          "work_items": 16,
+          "parallel_selected": true,
+          "measured_activity": null
+        },
+        {
+          "program": "blastn",
+          "stage": "dp_traceback",
+          "work_items": 16,
+          "parallel_selected": true,
+          "measured_activity": null
+        },
+        {
+          "program": "blastn",
+          "stage": "dp_traceback",
+          "work_items": 14,
+          "parallel_selected": true,
+          "measured_activity": null
+        },
+        {
+          "program": "blastn",
+          "stage": "dp_traceback",
+          "work_items": 12,
+          "parallel_selected": true,
+          "measured_activity": null
+        },
+        {
+          "program": "blastn",
+          "stage": "dp_traceback",
+          "work_items": 14,
+          "parallel_selected": true,
+          "measured_activity": null
+        },
+        {
+          "program": "blastn",
+          "stage": "dp_traceback",
+          "work_items": 10,
+          "parallel_selected": true,
+          "measured_activity": null
+        },
+        {
+          "program": "blastn",
+          "stage": "dp_traceback",
+          "work_items": 15,
+          "parallel_selected": true,
+          "measured_activity": null
+        },
+        {
+          "program": "blastn",
+          "stage": "dp_traceback",
+          "work_items": 13,
+          "parallel_selected": true,
+          "measured_activity": null
+        },
+        {
+          "program": "blastn",
+          "stage": "dp_traceback",
+          "work_items": 7,
+          "parallel_selected": true,
+          "measured_activity": null
+        },
+        {
+          "program": "blastn",
+          "stage": "dp_traceback",
+          "work_items": 11,
+          "parallel_selected": true,
+          "measured_activity": null
+        },
+        {
+          "program": "blastn",
+          "stage": "dp_traceback",
+          "work_items": 11,
+          "parallel_selected": true,
+          "measured_activity": null
+        },
+        {
+          "program": "blastn",
+          "stage": "dp_traceback",
+          "work_items": 8,
+          "parallel_selected": true,
+          "measured_activity": null
+        },
+        {
+          "program": "blastn",
+          "stage": "dp_traceback",
+          "work_items": 14,
+          "parallel_selected": true,
+          "measured_activity": null
+        },
+        {
+          "program": "blastn",
+          "stage": "dp_traceback",
+          "work_items": 10,
+          "parallel_selected": true,
+          "measured_activity": null
+        },
+        {
+          "program": "blastn",
+          "stage": "dp_traceback",
+          "work_items": 12,
+          "parallel_selected": true,
+          "measured_activity": null
+        },
+        {
+          "program": "blastn",
+          "stage": "dp_traceback",
+          "work_items": 16,
+          "parallel_selected": true,
+          "measured_activity": null
+        },
+        {
+          "program": "blastn",
+          "stage": "dp_traceback",
+          "work_items": 12,
+          "parallel_selected": true,
+          "measured_activity": null
+        },
+        {
+          "program": "blastn",
+          "stage": "dp_traceback",
+          "work_items": 14,
+          "parallel_selected": true,
+          "measured_activity": null
+        },
+        {
+          "program": "blastn",
+          "stage": "dp_traceback",
+          "work_items": 7,
+          "parallel_selected": true,
+          "measured_activity": null
+        },
+        {
+          "program": "blastn",
+          "stage": "dp_traceback",
+          "work_items": 11,
+          "parallel_selected": true,
+          "measured_activity": null
+        },
+        {
+          "program": "blastn",
+          "stage": "dp_traceback",
+          "work_items": 12,
+          "parallel_selected": true,
+          "measured_activity": null
+        },
+        {
+          "program": "blastn",
+          "stage": "dp_traceback",
+          "work_items": 10,
+          "parallel_selected": true,
+          "measured_activity": null
+        },
+        {
+          "program": "blastn",
+          "stage": "dp_traceback",
+          "work_items": 6,
+          "parallel_selected": true,
+          "measured_activity": null
+        },
+        {
+          "program": "blastn",
+          "stage": "dp_traceback",
+          "work_items": 10,
+          "parallel_selected": true,
+          "measured_activity": null
+        },
+        {
+          "program": "blastn",
+          "stage": "dp_traceback",
+          "work_items": 9,
+          "parallel_selected": true,
+          "measured_activity": null
+        },
+        {
+          "program": "blastn",
+          "stage": "dp_traceback",
+          "work_items": 10,
+          "parallel_selected": true,
+          "measured_activity": null
+        },
+        {
+          "program": "blastn",
+          "stage": "dp_traceback",
+          "work_items": 14,
+          "parallel_selected": true,
+          "measured_activity": null
+        },
+        {
+          "program": "blastn",
+          "stage": "dp_traceback",
+          "work_items": 8,
+          "parallel_selected": true,
+          "measured_activity": null
+        },
+        {
+          "program": "blastn",
+          "stage": "dp_traceback",
+          "work_items": 10,
+          "parallel_selected": true,
+          "measured_activity": null
+        },
+        {
+          "program": "blastn",
+          "stage": "dp_traceback",
+          "work_items": 14,
+          "parallel_selected": true,
+          "measured_activity": null
+        },
+        {
+          "program": "blastn",
+          "stage": "dp_traceback",
+          "work_items": 8,
+          "parallel_selected": true,
+          "measured_activity": null
+        },
+        {
+          "program": "blastn",
+          "stage": "dp_traceback",
+          "work_items": 6,
+          "parallel_selected": true,
+          "measured_activity": null
+        },
+        {
+          "program": "blastn",
+          "stage": "dp_traceback",
+          "work_items": 12,
+          "parallel_selected": true,
+          "measured_activity": null
+        },
+        {
+          "program": "blastn",
+          "stage": "dp_traceback",
+          "work_items": 10,
+          "parallel_selected": true,
+          "measured_activity": null
+        },
+        {
+          "program": "blastn",
+          "stage": "dp_traceback",
+          "work_items": 4,
+          "parallel_selected": true,
+          "measured_activity": null
+        },
+        {
+          "program": "blastn",
+          "stage": "dp_traceback",
+          "work_items": 8,
+          "parallel_selected": true,
+          "measured_activity": null
+        },
+        {
+          "program": "blastn",
+          "stage": "dp_traceback",
+          "work_items": 11,
+          "parallel_selected": true,
+          "measured_activity": null
+        },
+        {
+          "program": "blastn",
+          "stage": "dp_traceback",
+          "work_items": 9,
+          "parallel_selected": true,
+          "measured_activity": null
+        },
+        {
+          "program": "blastn",
+          "stage": "dp_traceback",
+          "work_items": 12,
+          "parallel_selected": true,
+          "measured_activity": null
+        },
+        {
+          "program": "blastn",
+          "stage": "dp_traceback",
+          "work_items": 7,
+          "parallel_selected": true,
+          "measured_activity": null
+        },
+        {
+          "program": "blastn",
+          "stage": "dp_traceback",
+          "work_items": 5,
+          "parallel_selected": true,
+          "measured_activity": null
+        },
+        {
+          "program": "blastn",
+          "stage": "dp_traceback",
+          "work_items": 15,
+          "parallel_selected": true,
+          "measured_activity": null
+        },
+        {
+          "program": "blastn",
+          "stage": "dp_traceback",
+          "work_items": 8,
+          "parallel_selected": true,
+          "measured_activity": null
+        },
+        {
+          "program": "blastn",
+          "stage": "dp_traceback",
+          "work_items": 4,
+          "parallel_selected": true,
+          "measured_activity": null
+        },
+        {
+          "program": "blastn",
+          "stage": "dp_traceback",
+          "work_items": 8,
+          "parallel_selected": true,
+          "measured_activity": null
+        },
+        {
+          "program": "blastn",
+          "stage": "dp_traceback",
+          "work_items": 10,
+          "parallel_selected": true,
+          "measured_activity": null
+        },
+        {
+          "program": "blastn",
+          "stage": "dp_traceback",
+          "work_items": 5,
+          "parallel_selected": true,
+          "measured_activity": null
+        },
+        {
+          "program": "blastn",
+          "stage": "dp_traceback",
+          "work_items": 7,
+          "parallel_selected": true,
+          "measured_activity": null
+        },
+        {
+          "program": "blastn",
+          "stage": "dp_traceback",
+          "work_items": 12,
+          "parallel_selected": true,
+          "measured_activity": null
+        },
+        {
+          "program": "blastn",
+          "stage": "dp_traceback",
+          "work_items": 16,
+          "parallel_selected": true,
+          "measured_activity": null
+        },
+        {
+          "program": "blastn",
+          "stage": "dp_traceback",
+          "work_items": 14,
+          "parallel_selected": true,
+          "measured_activity": null
+        },
+        {
+          "program": "blastn",
+          "stage": "dp_traceback",
+          "work_items": 14,
+          "parallel_selected": true,
+          "measured_activity": null
+        },
+        {
+          "program": "blastn",
+          "stage": "dp_traceback",
+          "work_items": 8,
+          "parallel_selected": true,
+          "measured_activity": null
+        },
+        {
+          "program": "blastn",
+          "stage": "dp_traceback",
+          "work_items": 11,
+          "parallel_selected": true,
+          "measured_activity": null
+        },
+        {
+          "program": "blastn",
+          "stage": "dp_traceback",
+          "work_items": 11,
+          "parallel_selected": true,
+          "measured_activity": null
+        },
+        {
+          "program": "blastn",
+          "stage": "dp_traceback",
+          "work_items": 13,
+          "parallel_selected": true,
+          "measured_activity": null
+        },
+        {
+          "program": "blastn",
+          "stage": "dp_traceback",
+          "work_items": 10,
+          "parallel_selected": true,
+          "measured_activity": null
+        },
+        {
+          "program": "blastn",
+          "stage": "dp_traceback",
+          "work_items": 10,
+          "parallel_selected": true,
+          "measured_activity": null
+        },
+        {
+          "program": "blastn",
+          "stage": "dp_traceback",
+          "work_items": 9,
+          "parallel_selected": true,
+          "measured_activity": null
+        },
+        {
+          "program": "blastn",
+          "stage": "dp_traceback",
+          "work_items": 16,
+          "parallel_selected": true,
+          "measured_activity": null
+        },
+        {
+          "program": "blastn",
+          "stage": "dp_traceback",
+          "work_items": 6,
+          "parallel_selected": true,
+          "measured_activity": null
+        },
+        {
+          "program": "blastn",
+          "stage": "dp_traceback",
+          "work_items": 11,
+          "parallel_selected": true,
+          "measured_activity": null
+        },
+        {
+          "program": "blastn",
+          "stage": "dp_traceback",
+          "work_items": 7,
+          "parallel_selected": true,
+          "measured_activity": null
+        },
+        {
+          "program": "blastn",
+          "stage": "dp_traceback",
+          "work_items": 9,
+          "parallel_selected": true,
+          "measured_activity": null
+        },
+        {
+          "program": "blastn",
+          "stage": "dp_traceback",
+          "work_items": 13,
+          "parallel_selected": true,
+          "measured_activity": null
+        },
+        {
+          "program": "blastn",
+          "stage": "dp_traceback",
+          "work_items": 4,
+          "parallel_selected": true,
+          "measured_activity": null
+        },
+        {
+          "program": "blastn",
+          "stage": "dp_traceback",
+          "work_items": 8,
+          "parallel_selected": true,
+          "measured_activity": null
+        },
+        {
+          "program": "blastn",
+          "stage": "dp_traceback",
+          "work_items": 4,
+          "parallel_selected": true,
+          "measured_activity": null
+        },
+        {
+          "program": "blastn",
+          "stage": "dp_traceback",
+          "work_items": 4,
+          "parallel_selected": true,
+          "measured_activity": null
+        },
+        {
+          "program": "blastn",
+          "stage": "dp_traceback",
+          "work_items": 7,
+          "parallel_selected": true,
+          "measured_activity": null
+        },
+        {
+          "program": "blastn",
+          "stage": "dp_traceback",
+          "work_items": 7,
+          "parallel_selected": true,
+          "measured_activity": null
+        },
+        {
+          "program": "blastn",
+          "stage": "dp_traceback",
+          "work_items": 6,
+          "parallel_selected": true,
+          "measured_activity": null
+        },
+        {
+          "program": "blastn",
+          "stage": "dp_traceback",
+          "work_items": 6,
+          "parallel_selected": true,
+          "measured_activity": null
+        },
+        {
+          "program": "blastn",
+          "stage": "dp_traceback",
+          "work_items": 8,
+          "parallel_selected": true,
+          "measured_activity": null
+        },
+        {
+          "program": "blastn",
+          "stage": "dp_traceback",
+          "work_items": 9,
+          "parallel_selected": true,
+          "measured_activity": null
+        },
+        {
+          "program": "blastn",
+          "stage": "dp_traceback",
+          "work_items": 5,
+          "parallel_selected": true,
+          "measured_activity": null
+        },
+        {
+          "program": "blastn",
+          "stage": "dp_traceback",
+          "work_items": 7,
+          "parallel_selected": true,
+          "measured_activity": null
+        },
+        {
+          "program": "blastn",
+          "stage": "dp_traceback",
+          "work_items": 7,
+          "parallel_selected": true,
+          "measured_activity": null
+        },
+        {
+          "program": "blastn",
+          "stage": "dp_traceback",
+          "work_items": 10,
+          "parallel_selected": true,
+          "measured_activity": null
+        },
+        {
+          "program": "blastn",
+          "stage": "dp_traceback",
+          "work_items": 11,
+          "parallel_selected": true,
+          "measured_activity": null
+        },
+        {
+          "program": "blastn",
+          "stage": "dp_traceback",
+          "work_items": 7,
+          "parallel_selected": true,
+          "measured_activity": null
+        },
+        {
+          "program": "blastn",
+          "stage": "dp_traceback",
+          "work_items": 13,
+          "parallel_selected": true,
+          "measured_activity": null
+        },
+        {
+          "program": "blastn",
+          "stage": "dp_traceback",
+          "work_items": 4,
+          "parallel_selected": true,
+          "measured_activity": null
+        },
+        {
+          "program": "blastn",
+          "stage": "dp_traceback",
+          "work_items": 10,
+          "parallel_selected": true,
+          "measured_activity": null
+        },
+        {
+          "program": "blastn",
+          "stage": "dp_traceback",
+          "work_items": 13,
+          "parallel_selected": true,
+          "measured_activity": null
+        },
+        {
+          "program": "blastn",
+          "stage": "dp_traceback",
+          "work_items": 12,
+          "parallel_selected": true,
+          "measured_activity": null
+        },
+        {
+          "program": "blastn",
+          "stage": "dp_traceback",
+          "work_items": 10,
+          "parallel_selected": true,
+          "measured_activity": null
+        },
+        {
+          "program": "blastn",
+          "stage": "dp_traceback",
+          "work_items": 14,
+          "parallel_selected": true,
+          "measured_activity": null
+        },
+        {
+          "program": "blastn",
+          "stage": "dp_traceback",
+          "work_items": 10,
+          "parallel_selected": true,
+          "measured_activity": null
+        },
+        {
+          "program": "blastn",
+          "stage": "dp_traceback",
+          "work_items": 14,
+          "parallel_selected": true,
+          "measured_activity": null
+        },
+        {
+          "program": "blastn",
+          "stage": "dp_traceback",
+          "work_items": 6,
+          "parallel_selected": true,
+          "measured_activity": null
+        },
+        {
+          "program": "blastn",
+          "stage": "dp_traceback",
+          "work_items": 8,
+          "parallel_selected": true,
+          "measured_activity": null
+        },
+        {
+          "program": "blastn",
+          "stage": "dp_traceback",
+          "work_items": 15,
+          "parallel_selected": true,
+          "measured_activity": null
+        },
+        {
+          "program": "blastn",
+          "stage": "dp_traceback",
+          "work_items": 11,
+          "parallel_selected": true,
+          "measured_activity": null
+        },
+        {
+          "program": "blastn",
+          "stage": "dp_traceback",
+          "work_items": 10,
+          "parallel_selected": true,
+          "measured_activity": null
+        },
+        {
+          "program": "blastn",
+          "stage": "dp_traceback",
+          "work_items": 10,
+          "parallel_selected": true,
+          "measured_activity": null
+        },
+        {
+          "program": "blastn",
+          "stage": "dp_traceback",
+          "work_items": 6,
+          "parallel_selected": true,
+          "measured_activity": null
+        },
+        {
+          "program": "blastn",
+          "stage": "dp_traceback",
+          "work_items": 13,
+          "parallel_selected": true,
+          "measured_activity": null
+        },
+        {
+          "program": "blastn",
+          "stage": "dp_traceback",
+          "work_items": 11,
+          "parallel_selected": true,
+          "measured_activity": null
+        },
+        {
+          "program": "blastn",
+          "stage": "dp_traceback",
+          "work_items": 9,
+          "parallel_selected": true,
+          "measured_activity": null
+        },
+        {
+          "program": "blastn",
+          "stage": "dp_traceback",
+          "work_items": 8,
+          "parallel_selected": true,
+          "measured_activity": null
+        },
+        {
+          "program": "blastn",
+          "stage": "dp_traceback",
+          "work_items": 9,
+          "parallel_selected": true,
+          "measured_activity": null
+        },
+        {
+          "program": "blastn",
+          "stage": "dp_traceback",
+          "work_items": 7,
+          "parallel_selected": true,
+          "measured_activity": null
+        },
+        {
+          "program": "blastn",
+          "stage": "dp_traceback",
+          "work_items": 12,
+          "parallel_selected": true,
+          "measured_activity": null
+        },
+        {
+          "program": "blastn",
+          "stage": "dp_traceback",
+          "work_items": 12,
+          "parallel_selected": true,
+          "measured_activity": null
+        },
+        {
+          "program": "blastn",
+          "stage": "dp_traceback",
+          "work_items": 6,
+          "parallel_selected": true,
+          "measured_activity": null
+        },
+        {
+          "program": "blastn",
+          "stage": "dp_traceback",
+          "work_items": 10,
+          "parallel_selected": true,
+          "measured_activity": null
+        },
+        {
+          "program": "blastn",
+          "stage": "dp_traceback",
+          "work_items": 6,
+          "parallel_selected": true,
+          "measured_activity": null
+        },
+        {
+          "program": "blastn",
+          "stage": "dp_traceback",
+          "work_items": 7,
+          "parallel_selected": true,
+          "measured_activity": null
+        },
+        {
+          "program": "blastn",
+          "stage": "dp_traceback",
+          "work_items": 7,
+          "parallel_selected": true,
+          "measured_activity": null
+        },
+        {
+          "program": "blastn",
+          "stage": "dp_traceback",
+          "work_items": 9,
+          "parallel_selected": true,
+          "measured_activity": null
+        },
+        {
+          "program": "blastn",
+          "stage": "dp_traceback",
+          "work_items": 9,
+          "parallel_selected": true,
+          "measured_activity": null
+        },
+        {
+          "program": "blastn",
+          "stage": "dp_traceback",
+          "work_items": 14,
+          "parallel_selected": true,
+          "measured_activity": null
+        },
+        {
+          "program": "blastn",
+          "stage": "dp_traceback",
+          "work_items": 12,
+          "parallel_selected": true,
+          "measured_activity": null
+        },
+        {
+          "program": "blastn",
+          "stage": "dp_traceback",
+          "work_items": 11,
+          "parallel_selected": true,
+          "measured_activity": null
+        },
+        {
+          "program": "blastn",
+          "stage": "dp_traceback",
+          "work_items": 8,
+          "parallel_selected": true,
+          "measured_activity": null
+        },
+        {
+          "program": "blastn",
+          "stage": "dp_traceback",
+          "work_items": 5,
+          "parallel_selected": true,
+          "measured_activity": null
+        },
+        {
+          "program": "blastn",
+          "stage": "dp_traceback",
+          "work_items": 7,
+          "parallel_selected": true,
+          "measured_activity": null
+        },
+        {
+          "program": "blastn",
+          "stage": "dp_traceback",
+          "work_items": 10,
+          "parallel_selected": true,
+          "measured_activity": null
+        },
+        {
+          "program": "blastn",
+          "stage": "dp_traceback",
+          "work_items": 13,
+          "parallel_selected": true,
+          "measured_activity": null
+        },
+        {
+          "program": "blastn",
+          "stage": "dp_traceback",
+          "work_items": 9,
+          "parallel_selected": true,
+          "measured_activity": null
+        },
+        {
+          "program": "blastn",
+          "stage": "dp_traceback",
+          "work_items": 14,
+          "parallel_selected": true,
+          "measured_activity": null
+        },
+        {
+          "program": "blastn",
+          "stage": "dp_traceback",
+          "work_items": 9,
+          "parallel_selected": true,
+          "measured_activity": null
+        },
+        {
+          "program": "blastn",
+          "stage": "dp_traceback",
+          "work_items": 12,
+          "parallel_selected": true,
+          "measured_activity": null
+        },
+        {
+          "program": "blastn",
+          "stage": "dp_traceback",
+          "work_items": 8,
+          "parallel_selected": true,
+          "measured_activity": null
+        },
+        {
+          "program": "blastn",
+          "stage": "dp_traceback",
+          "work_items": 14,
+          "parallel_selected": true,
+          "measured_activity": null
+        },
+        {
+          "program": "blastn",
+          "stage": "dp_traceback",
+          "work_items": 13,
+          "parallel_selected": true,
+          "measured_activity": null
+        },
+        {
+          "program": "blastn",
+          "stage": "dp_traceback",
+          "work_items": 11,
+          "parallel_selected": true,
+          "measured_activity": null
+        },
+        {
+          "program": "blastn",
+          "stage": "dp_traceback",
+          "work_items": 11,
+          "parallel_selected": true,
+          "measured_activity": null
+        },
+        {
+          "program": "blastn",
+          "stage": "dp_traceback",
+          "work_items": 7,
+          "parallel_selected": true,
+          "measured_activity": null
+        },
+        {
+          "program": "blastn",
+          "stage": "dp_traceback",
+          "work_items": 12,
+          "parallel_selected": true,
+          "measured_activity": null
+        },
+        {
+          "program": "blastn",
+          "stage": "dp_traceback",
+          "work_items": 14,
+          "parallel_selected": true,
+          "measured_activity": null
+        },
+        {
+          "program": "blastn",
+          "stage": "dp_traceback",
+          "work_items": 8,
+          "parallel_selected": true,
+          "measured_activity": null
+        },
+        {
+          "program": "blastn",
+          "stage": "dp_traceback",
+          "work_items": 12,
+          "parallel_selected": true,
+          "measured_activity": null
+        },
+        {
+          "program": "blastn",
+          "stage": "dp_traceback",
+          "work_items": 12,
+          "parallel_selected": true,
+          "measured_activity": null
+        },
+        {
+          "program": "blastn",
+          "stage": "dp_traceback",
+          "work_items": 13,
+          "parallel_selected": true,
+          "measured_activity": null
+        },
+        {
+          "program": "blastn",
+          "stage": "dp_traceback",
+          "work_items": 6,
+          "parallel_selected": true,
+          "measured_activity": null
+        },
+        {
+          "program": "blastn",
+          "stage": "dp_traceback",
+          "work_items": 15,
+          "parallel_selected": true,
+          "measured_activity": null
+        },
+        {
+          "program": "blastn",
+          "stage": "dp_traceback",
+          "work_items": 9,
+          "parallel_selected": true,
+          "measured_activity": null
+        },
+        {
+          "program": "blastn",
+          "stage": "dp_traceback",
+          "work_items": 12,
+          "parallel_selected": true,
+          "measured_activity": null
+        },
+        {
+          "program": "blastn",
+          "stage": "dp_traceback",
+          "work_items": 7,
+          "parallel_selected": true,
+          "measured_activity": null
+        },
+        {
+          "program": "blastn",
+          "stage": "dp_traceback",
+          "work_items": 11,
+          "parallel_selected": true,
+          "measured_activity": null
+        },
+        {
+          "program": "blastn",
+          "stage": "dp_traceback",
+          "work_items": 9,
+          "parallel_selected": true,
+          "measured_activity": null
+        },
+        {
+          "program": "blastn",
+          "stage": "dp_traceback",
+          "work_items": 11,
+          "parallel_selected": true,
+          "measured_activity": null
+        },
+        {
+          "program": "blastn",
+          "stage": "dp_traceback",
+          "work_items": 15,
+          "parallel_selected": true,
+          "measured_activity": null
+        },
+        {
+          "program": "blastn",
+          "stage": "dp_traceback",
+          "work_items": 12,
+          "parallel_selected": true,
+          "measured_activity": null
+        },
+        {
+          "program": "blastn",
+          "stage": "dp_traceback",
+          "work_items": 10,
+          "parallel_selected": true,
+          "measured_activity": null
+        },
+        {
+          "program": "blastn",
+          "stage": "dp_traceback",
+          "work_items": 10,
+          "parallel_selected": true,
+          "measured_activity": null
+        },
+        {
+          "program": "blastn",
+          "stage": "dp_traceback",
+          "work_items": 15,
+          "parallel_selected": true,
+          "measured_activity": null
+        },
+        {
+          "program": "blastn",
+          "stage": "dp_traceback",
+          "work_items": 8,
+          "parallel_selected": true,
+          "measured_activity": null
+        },
+        {
+          "program": "blastn",
+          "stage": "dp_traceback",
+          "work_items": 7,
+          "parallel_selected": true,
+          "measured_activity": null
+        },
+        {
+          "program": "blastn",
+          "stage": "dp_traceback",
+          "work_items": 8,
+          "parallel_selected": true,
+          "measured_activity": null
+        },
+        {
+          "program": "blastn",
+          "stage": "dp_traceback",
+          "work_items": 5,
+          "parallel_selected": true,
+          "measured_activity": null
+        },
+        {
+          "program": "blastn",
+          "stage": "dp_traceback",
+          "work_items": 9,
+          "parallel_selected": true,
+          "measured_activity": null
+        },
+        {
+          "program": "blastn",
+          "stage": "dp_traceback",
+          "work_items": 11,
+          "parallel_selected": true,
+          "measured_activity": null
+        },
+        {
+          "program": "blastn",
+          "stage": "dp_traceback",
+          "work_items": 11,
+          "parallel_selected": true,
+          "measured_activity": null
+        },
+        {
+          "program": "blastn",
+          "stage": "dp_traceback",
+          "work_items": 5,
+          "parallel_selected": true,
+          "measured_activity": null
+        },
+        {
+          "program": "blastn",
+          "stage": "dp_traceback",
+          "work_items": 0,
+          "parallel_selected": false,
+          "measured_activity": null
+        },
+        {
+          "program": "blastn",
+          "stage": "dp_traceback",
+          "work_items": 6,
+          "parallel_selected": true,
+          "measured_activity": null
+        },
+        {
+          "program": "blastn",
+          "stage": "dp_traceback",
+          "work_items": 10,
+          "parallel_selected": true,
+          "measured_activity": null
+        },
+        {
+          "program": "blastn",
+          "stage": "dp_traceback",
+          "work_items": 14,
+          "parallel_selected": true,
+          "measured_activity": null
+        },
+        {
+          "program": "blastn",
+          "stage": "dp_traceback",
+          "work_items": 10,
+          "parallel_selected": true,
+          "measured_activity": null
+        },
+        {
+          "program": "blastn",
+          "stage": "dp_traceback",
+          "work_items": 8,
+          "parallel_selected": true,
+          "measured_activity": null
+        },
+        {
+          "program": "blastn",
+          "stage": "dp_traceback",
+          "work_items": 11,
+          "parallel_selected": true,
+          "measured_activity": null
+        },
+        {
+          "program": "blastn",
+          "stage": "dp_traceback",
+          "work_items": 9,
+          "parallel_selected": true,
+          "measured_activity": null
+        },
+        {
+          "program": "blastn",
+          "stage": "dp_traceback",
+          "work_items": 8,
+          "parallel_selected": true,
+          "measured_activity": null
+        },
+        {
+          "program": "blastn",
+          "stage": "dp_traceback",
+          "work_items": 5,
+          "parallel_selected": true,
+          "measured_activity": null
+        },
+        {
+          "program": "blastn",
+          "stage": "dp_traceback",
+          "work_items": 2,
+          "parallel_selected": true,
+          "measured_activity": null
+        },
+        {
+          "program": "blastn",
+          "stage": "dp_traceback",
+          "work_items": 0,
+          "parallel_selected": false,
+          "measured_activity": null
+        },
+        {
+          "program": "blastn",
+          "stage": "dp_traceback",
+          "work_items": 11,
+          "parallel_selected": true,
+          "measured_activity": null
+        },
+        {
+          "program": "blastn",
+          "stage": "dp_traceback",
+          "work_items": 13,
+          "parallel_selected": true,
+          "measured_activity": null
+        },
+        {
+          "program": "blastn",
+          "stage": "dp_traceback",
+          "work_items": 10,
+          "parallel_selected": true,
+          "measured_activity": null
+        },
+        {
+          "program": "blastn",
+          "stage": "dp_traceback",
+          "work_items": 6,
+          "parallel_selected": true,
+          "measured_activity": null
+        },
+        {
+          "program": "blastn",
+          "stage": "dp_traceback",
+          "work_items": 9,
+          "parallel_selected": true,
+          "measured_activity": null
+        },
+        {
+          "program": "blastn",
+          "stage": "dp_traceback",
+          "work_items": 11,
+          "parallel_selected": true,
+          "measured_activity": null
+        },
+        {
+          "program": "blastn",
+          "stage": "dp_traceback",
+          "work_items": 2,
+          "parallel_selected": true,
+          "measured_activity": null
+        },
+        {
+          "program": "blastn",
+          "stage": "dp_traceback",
+          "work_items": 1,
+          "parallel_selected": false,
+          "measured_activity": null
+        },
+        {
+          "program": "blastn",
+          "stage": "dp_traceback",
+          "work_items": 12,
+          "parallel_selected": true,
+          "measured_activity": null
+        },
+        {
+          "program": "blastn",
+          "stage": "dp_traceback",
+          "work_items": 12,
+          "parallel_selected": true,
+          "measured_activity": null
+        },
+        {
+          "program": "blastn",
+          "stage": "dp_traceback",
+          "work_items": 14,
+          "parallel_selected": true,
+          "measured_activity": null
+        },
+        {
+          "program": "blastn",
+          "stage": "dp_traceback",
+          "work_items": 11,
+          "parallel_selected": true,
+          "measured_activity": null
+        },
+        {
+          "program": "blastn",
+          "stage": "dp_traceback",
+          "work_items": 13,
+          "parallel_selected": true,
+          "measured_activity": null
+        },
+        {
+          "program": "blastn",
+          "stage": "dp_traceback",
+          "work_items": 6,
+          "parallel_selected": true,
+          "measured_activity": null
+        },
+        {
+          "program": "blastn",
+          "stage": "dp_traceback",
+          "work_items": 6,
+          "parallel_selected": true,
+          "measured_activity": null
+        },
+        {
+          "program": "blastn",
+          "stage": "dp_traceback",
+          "work_items": 13,
+          "parallel_selected": true,
+          "measured_activity": null
+        },
+        {
+          "program": "blastn",
+          "stage": "dp_traceback",
+          "work_items": 8,
+          "parallel_selected": true,
+          "measured_activity": null
+        },
+        {
+          "program": "blastn",
+          "stage": "dp_traceback",
+          "work_items": 12,
+          "parallel_selected": true,
+          "measured_activity": null
+        },
+        {
+          "program": "blastn",
+          "stage": "dp_traceback",
+          "work_items": 13,
+          "parallel_selected": true,
+          "measured_activity": null
+        },
+        {
+          "program": "blastn",
+          "stage": "dp_traceback",
+          "work_items": 12,
+          "parallel_selected": true,
+          "measured_activity": null
+        },
+        {
+          "program": "blastn",
+          "stage": "dp_traceback",
+          "work_items": 12,
+          "parallel_selected": true,
+          "measured_activity": null
+        },
+        {
+          "program": "blastn",
+          "stage": "dp_traceback",
+          "work_items": 11,
+          "parallel_selected": true,
+          "measured_activity": null
+        },
+        {
+          "program": "blastn",
+          "stage": "dp_traceback",
+          "work_items": 12,
+          "parallel_selected": true,
+          "measured_activity": null
+        },
+        {
+          "program": "blastn",
+          "stage": "dp_traceback",
+          "work_items": 14,
+          "parallel_selected": true,
+          "measured_activity": null
+        },
+        {
+          "program": "blastn",
+          "stage": "dp_traceback",
+          "work_items": 10,
+          "parallel_selected": true,
+          "measured_activity": null
+        },
+        {
+          "program": "blastn",
+          "stage": "dp_traceback",
+          "work_items": 7,
+          "parallel_selected": true,
+          "measured_activity": null
+        },
+        {
+          "program": "blastn",
+          "stage": "dp_traceback",
+          "work_items": 13,
+          "parallel_selected": true,
+          "measured_activity": null
+        },
+        {
+          "program": "blastn",
+          "stage": "dp_traceback",
+          "work_items": 4,
+          "parallel_selected": true,
+          "measured_activity": null
+        },
+        {
+          "program": "blastn",
+          "stage": "dp_traceback",
+          "work_items": 12,
+          "parallel_selected": true,
+          "measured_activity": null
+        },
+        {
+          "program": "blastn",
+          "stage": "dp_traceback",
+          "work_items": 16,
+          "parallel_selected": true,
+          "measured_activity": null
+        },
+        {
+          "program": "blastn",
+          "stage": "dp_traceback",
+          "work_items": 6,
+          "parallel_selected": true,
+          "measured_activity": null
+        },
+        {
+          "program": "blastn",
+          "stage": "dp_traceback",
+          "work_items": 12,
+          "parallel_selected": true,
+          "measured_activity": null
+        },
+        {
+          "program": "blastn",
+          "stage": "dp_traceback",
+          "work_items": 13,
+          "parallel_selected": true,
+          "measured_activity": null
+        },
+        {
+          "program": "blastn",
+          "stage": "dp_traceback",
+          "work_items": 12,
+          "parallel_selected": true,
+          "measured_activity": null
+        },
+        {
+          "program": "blastn",
+          "stage": "dp_traceback",
+          "work_items": 10,
+          "parallel_selected": true,
+          "measured_activity": null
+        },
+        {
+          "program": "blastn",
+          "stage": "dp_traceback",
+          "work_items": 6,
+          "parallel_selected": true,
+          "measured_activity": null
+        },
+        {
+          "program": "blastn",
+          "stage": "dp_traceback",
+          "work_items": 12,
+          "parallel_selected": true,
+          "measured_activity": null
+        },
+        {
+          "program": "blastn",
+          "stage": "dp_traceback",
+          "work_items": 11,
+          "parallel_selected": true,
+          "measured_activity": null
+        },
+        {
+          "program": "blastn",
+          "stage": "dp_traceback",
+          "work_items": 13,
+          "parallel_selected": true,
+          "measured_activity": null
+        },
+        {
+          "program": "blastn",
+          "stage": "dp_traceback",
+          "work_items": 16,
+          "parallel_selected": true,
+          "measured_activity": null
+        },
+        {
+          "program": "blastn",
+          "stage": "dp_traceback",
+          "work_items": 10,
+          "parallel_selected": true,
+          "measured_activity": null
+        },
+        {
+          "program": "blastn",
+          "stage": "dp_traceback",
+          "work_items": 12,
+          "parallel_selected": true,
+          "measured_activity": null
+        },
+        {
+          "program": "blastn",
+          "stage": "dp_traceback",
+          "work_items": 11,
+          "parallel_selected": true,
+          "measured_activity": null
+        },
+        {
+          "program": "blastn",
+          "stage": "dp_traceback",
+          "work_items": 13,
+          "parallel_selected": true,
+          "measured_activity": null
+        },
+        {
+          "program": "blastn",
+          "stage": "dp_traceback",
+          "work_items": 16,
+          "parallel_selected": true,
+          "measured_activity": null
+        },
+        {
+          "program": "blastn",
+          "stage": "dp_traceback",
+          "work_items": 15,
+          "parallel_selected": true,
+          "measured_activity": null
+        },
+        {
+          "program": "blastn",
+          "stage": "dp_traceback",
+          "work_items": 13,
+          "parallel_selected": true,
+          "measured_activity": null
+        },
+        {
+          "program": "blastn",
+          "stage": "dp_traceback",
+          "work_items": 11,
+          "parallel_selected": true,
+          "measured_activity": null
+        },
+        {
+          "program": "blastn",
+          "stage": "dp_traceback",
+          "work_items": 15,
+          "parallel_selected": true,
+          "measured_activity": null
+        },
+        {
+          "program": "blastn",
+          "stage": "dp_traceback",
+          "work_items": 10,
+          "parallel_selected": true,
+          "measured_activity": null
+        },
+        {
+          "program": "blastn",
+          "stage": "dp_traceback",
+          "work_items": 10,
+          "parallel_selected": true,
+          "measured_activity": null
+        },
+        {
+          "program": "blastn",
+          "stage": "dp_traceback",
+          "work_items": 11,
+          "parallel_selected": true,
+          "measured_activity": null
+        },
+        {
+          "program": "blastn",
+          "stage": "dp_traceback",
+          "work_items": 12,
+          "parallel_selected": true,
+          "measured_activity": null
+        },
+        {
+          "program": "blastn",
+          "stage": "dp_traceback",
+          "work_items": 10,
+          "parallel_selected": true,
+          "measured_activity": null
+        },
+        {
+          "program": "blastn",
+          "stage": "dp_traceback",
+          "work_items": 14,
+          "parallel_selected": true,
+          "measured_activity": null
+        },
+        {
+          "program": "blastn",
+          "stage": "dp_traceback",
+          "work_items": 14,
+          "parallel_selected": true,
+          "measured_activity": null
+        },
+        {
+          "program": "blastn",
+          "stage": "dp_traceback",
+          "work_items": 10,
+          "parallel_selected": true,
+          "measured_activity": null
+        },
+        {
+          "program": "blastn",
+          "stage": "dp_traceback",
+          "work_items": 13,
+          "parallel_selected": true,
+          "measured_activity": null
+        },
+        {
+          "program": "blastn",
+          "stage": "dp_traceback",
+          "work_items": 10,
+          "parallel_selected": true,
+          "measured_activity": null
+        },
+        {
+          "program": "blastn",
+          "stage": "dp_traceback",
+          "work_items": 13,
+          "parallel_selected": true,
+          "measured_activity": null
+        },
+        {
+          "program": "blastn",
+          "stage": "dp_traceback",
+          "work_items": 15,
+          "parallel_selected": true,
+          "measured_activity": null
+        },
+        {
+          "program": "blastn",
+          "stage": "dp_traceback",
+          "work_items": 13,
+          "parallel_selected": true,
+          "measured_activity": null
+        },
+        {
+          "program": "blastn",
+          "stage": "dp_traceback",
+          "work_items": 16,
+          "parallel_selected": true,
+          "measured_activity": null
+        },
+        {
+          "program": "blastn",
+          "stage": "dp_traceback",
+          "work_items": 6,
+          "parallel_selected": true,
+          "measured_activity": null
+        },
+        {
+          "program": "blastn",
+          "stage": "dp_traceback",
+          "work_items": 13,
+          "parallel_selected": true,
+          "measured_activity": null
+        },
+        {
+          "program": "blastn",
+          "stage": "dp_traceback",
+          "work_items": 8,
+          "parallel_selected": true,
+          "measured_activity": null
+        },
+        {
+          "program": "blastn",
+          "stage": "dp_traceback",
+          "work_items": 9,
+          "parallel_selected": true,
+          "measured_activity": null
+        },
+        {
+          "program": "blastn",
+          "stage": "dp_traceback",
+          "work_items": 11,
+          "parallel_selected": true,
+          "measured_activity": null
+        },
+        {
+          "program": "blastn",
+          "stage": "dp_traceback",
+          "work_items": 15,
+          "parallel_selected": true,
+          "measured_activity": null
+        },
+        {
+          "program": "blastn",
+          "stage": "dp_traceback",
+          "work_items": 13,
+          "parallel_selected": true,
+          "measured_activity": null
+        },
+        {
+          "program": "blastn",
+          "stage": "dp_traceback",
+          "work_items": 15,
+          "parallel_selected": true,
+          "measured_activity": null
+        },
+        {
+          "program": "blastn",
+          "stage": "dp_traceback",
+          "work_items": 13,
+          "parallel_selected": true,
+          "measured_activity": null
+        },
+        {
+          "program": "blastn",
+          "stage": "dp_traceback",
+          "work_items": 10,
+          "parallel_selected": true,
+          "measured_activity": null
+        },
+        {
+          "program": "blastn",
+          "stage": "dp_traceback",
+          "work_items": 11,
+          "parallel_selected": true,
+          "measured_activity": null
+        },
+        {
+          "program": "blastn",
+          "stage": "dp_traceback",
+          "work_items": 13,
+          "parallel_selected": true,
+          "measured_activity": null
+        },
+        {
+          "program": "blastn",
+          "stage": "dp_traceback",
+          "work_items": 11,
+          "parallel_selected": true,
+          "measured_activity": null
+        },
+        {
+          "program": "blastn",
+          "stage": "dp_traceback",
+          "work_items": 12,
+          "parallel_selected": true,
+          "measured_activity": null
+        },
+        {
+          "program": "blastn",
+          "stage": "dp_traceback",
+          "work_items": 10,
+          "parallel_selected": true,
+          "measured_activity": null
+        },
+        {
+          "program": "blastn",
+          "stage": "dp_traceback",
+          "work_items": 11,
+          "parallel_selected": true,
+          "measured_activity": null
+        },
+        {
+          "program": "blastn",
+          "stage": "dp_traceback",
+          "work_items": 10,
+          "parallel_selected": true,
+          "measured_activity": null
+        },
+        {
+          "program": "blastn",
+          "stage": "dp_traceback",
+          "work_items": 12,
+          "parallel_selected": true,
+          "measured_activity": null
+        },
+        {
+          "program": "blastn",
+          "stage": "dp_traceback",
+          "work_items": 14,
+          "parallel_selected": true,
+          "measured_activity": null
+        },
+        {
+          "program": "blastn",
+          "stage": "dp_traceback",
+          "work_items": 12,
+          "parallel_selected": true,
+          "measured_activity": null
+        },
+        {
+          "program": "blastn",
+          "stage": "dp_traceback",
+          "work_items": 14,
+          "parallel_selected": true,
+          "measured_activity": null
+        },
+        {
+          "program": "blastn",
+          "stage": "dp_traceback",
+          "work_items": 9,
+          "parallel_selected": true,
+          "measured_activity": null
+        },
+        {
+          "program": "blastn",
+          "stage": "dp_traceback",
+          "work_items": 12,
+          "parallel_selected": true,
+          "measured_activity": null
+        },
+        {
+          "program": "blastn",
+          "stage": "dp_traceback",
+          "work_items": 15,
+          "parallel_selected": true,
+          "measured_activity": null
+        },
+        {
+          "program": "blastn",
+          "stage": "dp_traceback",
+          "work_items": 14,
+          "parallel_selected": true,
+          "measured_activity": null
+        },
+        {
+          "program": "blastn",
+          "stage": "dp_traceback",
+          "work_items": 16,
+          "parallel_selected": true,
+          "measured_activity": null
+        },
+        {
+          "program": "blastn",
+          "stage": "dp_traceback",
+          "work_items": 16,
+          "parallel_selected": true,
+          "measured_activity": null
+        },
+        {
+          "program": "blastn",
+          "stage": "dp_traceback",
+          "work_items": 15,
+          "parallel_selected": true,
+          "measured_activity": null
+        },
+        {
+          "program": "blastn",
+          "stage": "dp_traceback",
+          "work_items": 15,
+          "parallel_selected": true,
+          "measured_activity": null
+        },
+        {
+          "program": "blastn",
+          "stage": "dp_traceback",
+          "work_items": 10,
+          "parallel_selected": true,
+          "measured_activity": null
+        },
+        {
+          "program": "blastn",
+          "stage": "dp_traceback",
+          "work_items": 14,
+          "parallel_selected": true,
+          "measured_activity": null
+        },
+        {
+          "program": "blastn",
+          "stage": "dp_traceback",
+          "work_items": 8,
+          "parallel_selected": true,
+          "measured_activity": null
+        },
+        {
+          "program": "blastn",
+          "stage": "dp_traceback",
+          "work_items": 15,
+          "parallel_selected": true,
+          "measured_activity": null
+        },
+        {
+          "program": "blastn",
+          "stage": "dp_traceback",
+          "work_items": 16,
+          "parallel_selected": true,
+          "measured_activity": null
+        },
+        {
+          "program": "blastn",
+          "stage": "dp_traceback",
+          "work_items": 16,
+          "parallel_selected": true,
+          "measured_activity": null
+        },
+        {
+          "program": "blastn",
+          "stage": "dp_traceback",
+          "work_items": 16,
+          "parallel_selected": true,
+          "measured_activity": null
+        },
+        {
+          "program": "blastn",
+          "stage": "dp_traceback",
+          "work_items": 14,
+          "parallel_selected": true,
+          "measured_activity": null
+        },
+        {
+          "program": "blastn",
+          "stage": "dp_traceback",
+          "work_items": 11,
+          "parallel_selected": true,
+          "measured_activity": null
+        },
+        {
+          "program": "blastn",
+          "stage": "dp_traceback",
+          "work_items": 12,
+          "parallel_selected": true,
+          "measured_activity": null
+        },
+        {
+          "program": "blastn",
+          "stage": "dp_traceback",
+          "work_items": 11,
+          "parallel_selected": true,
+          "measured_activity": null
+        },
+        {
+          "program": "blastn",
+          "stage": "dp_traceback",
+          "work_items": 15,
+          "parallel_selected": true,
+          "measured_activity": null
+        },
+        {
+          "program": "blastn",
+          "stage": "dp_traceback",
+          "work_items": 15,
+          "parallel_selected": true,
+          "measured_activity": null
+        },
+        {
+          "program": "blastn",
+          "stage": "dp_traceback",
+          "work_items": 12,
+          "parallel_selected": true,
+          "measured_activity": null
+        },
+        {
+          "program": "blastn",
+          "stage": "dp_traceback",
+          "work_items": 13,
+          "parallel_selected": true,
+          "measured_activity": null
+        },
+        {
+          "program": "blastn",
+          "stage": "dp_traceback",
+          "work_items": 13,
+          "parallel_selected": true,
+          "measured_activity": null
+        },
+        {
+          "program": "blastn",
+          "stage": "dp_traceback",
+          "work_items": 15,
+          "parallel_selected": true,
+          "measured_activity": null
+        },
+        {
+          "program": "blastn",
+          "stage": "dp_traceback",
+          "work_items": 15,
+          "parallel_selected": true,
+          "measured_activity": null
+        },
+        {
+          "program": "blastn",
+          "stage": "dp_traceback",
+          "work_items": 16,
+          "parallel_selected": true,
+          "measured_activity": null
+        },
+        {
+          "program": "blastn",
+          "stage": "dp_traceback",
+          "work_items": 13,
+          "parallel_selected": true,
+          "measured_activity": null
+        },
+        {
+          "program": "blastn",
+          "stage": "dp_traceback",
+          "work_items": 15,
+          "parallel_selected": true,
+          "measured_activity": null
+        },
+        {
+          "program": "blastn",
+          "stage": "dp_traceback",
+          "work_items": 13,
+          "parallel_selected": true,
+          "measured_activity": null
+        },
+        {
+          "program": "blastn",
+          "stage": "dp_traceback",
+          "work_items": 15,
+          "parallel_selected": true,
+          "measured_activity": null
+        },
+        {
+          "program": "blastn",
+          "stage": "dp_traceback",
+          "work_items": 12,
+          "parallel_selected": true,
+          "measured_activity": null
+        },
+        {
+          "program": "blastn",
+          "stage": "dp_traceback",
+          "work_items": 11,
+          "parallel_selected": true,
+          "measured_activity": null
+        },
+        {
+          "program": "blastn",
+          "stage": "dp_traceback",
+          "work_items": 16,
+          "parallel_selected": true,
+          "measured_activity": null
+        },
+        {
+          "program": "blastn",
+          "stage": "dp_traceback",
+          "work_items": 12,
+          "parallel_selected": true,
+          "measured_activity": null
+        },
+        {
+          "program": "blastn",
+          "stage": "dp_traceback",
+          "work_items": 14,
+          "parallel_selected": true,
+          "measured_activity": null
+        },
+        {
+          "program": "blastn",
+          "stage": "dp_traceback",
+          "work_items": 9,
+          "parallel_selected": true,
+          "measured_activity": null
+        },
+        {
+          "program": "blastn",
+          "stage": "dp_traceback",
+          "work_items": 13,
+          "parallel_selected": true,
+          "measured_activity": null
+        },
+        {
+          "program": "blastn",
+          "stage": "dp_traceback",
+          "work_items": 14,
+          "parallel_selected": true,
+          "measured_activity": null
+        },
+        {
+          "program": "blastn",
+          "stage": "dp_traceback",
+          "work_items": 13,
+          "parallel_selected": true,
+          "measured_activity": null
+        },
+        {
+          "program": "blastn",
+          "stage": "dp_traceback",
+          "work_items": 14,
+          "parallel_selected": true,
+          "measured_activity": null
+        },
+        {
+          "program": "blastn",
+          "stage": "dp_traceback",
+          "work_items": 15,
+          "parallel_selected": true,
+          "measured_activity": null
+        },
+        {
+          "program": "blastn",
+          "stage": "dp_traceback",
+          "work_items": 13,
+          "parallel_selected": true,
+          "measured_activity": null
+        },
+        {
+          "program": "blastn",
+          "stage": "dp_traceback",
+          "work_items": 13,
+          "parallel_selected": true,
+          "measured_activity": null
+        },
+        {
+          "program": "blastn",
+          "stage": "dp_traceback",
+          "work_items": 13,
+          "parallel_selected": true,
+          "measured_activity": null
+        },
+        {
+          "program": "blastn",
+          "stage": "dp_traceback",
+          "work_items": 14,
+          "parallel_selected": true,
+          "measured_activity": null
+        },
+        {
+          "program": "blastn",
+          "stage": "dp_traceback",
+          "work_items": 14,
+          "parallel_selected": true,
+          "measured_activity": null
+        },
+        {
+          "program": "blastn",
+          "stage": "dp_traceback",
+          "work_items": 14,
+          "parallel_selected": true,
+          "measured_activity": null
+        },
+        {
+          "program": "blastn",
+          "stage": "dp_traceback",
+          "work_items": 15,
+          "parallel_selected": true,
+          "measured_activity": null
+        },
+        {
+          "program": "blastn",
+          "stage": "dp_traceback",
+          "work_items": 16,
+          "parallel_selected": true,
+          "measured_activity": null
+        },
+        {
+          "program": "blastn",
+          "stage": "dp_traceback",
+          "work_items": 16,
+          "parallel_selected": true,
+          "measured_activity": null
+        },
+        {
+          "program": "blastn",
+          "stage": "dp_traceback",
+          "work_items": 15,
+          "parallel_selected": true,
+          "measured_activity": null
+        },
+        {
+          "program": "blastn",
+          "stage": "dp_traceback",
+          "work_items": 14,
+          "parallel_selected": true,
+          "measured_activity": null
+        },
+        {
+          "program": "blastn",
+          "stage": "dp_traceback",
+          "work_items": 14,
+          "parallel_selected": true,
+          "measured_activity": null
+        },
+        {
+          "program": "blastn",
+          "stage": "dp_traceback",
+          "work_items": 16,
+          "parallel_selected": true,
+          "measured_activity": null
+        },
+        {
+          "program": "blastn",
+          "stage": "dp_traceback",
+          "work_items": 15,
+          "parallel_selected": true,
+          "measured_activity": null
+        },
+        {
+          "program": "blastn",
+          "stage": "dp_traceback",
+          "work_items": 11,
+          "parallel_selected": true,
+          "measured_activity": null
+        },
+        {
+          "program": "blastn",
+          "stage": "dp_traceback",
+          "work_items": 16,
+          "parallel_selected": true,
+          "measured_activity": null
+        },
+        {
+          "program": "blastn",
+          "stage": "dp_traceback",
+          "work_items": 14,
+          "parallel_selected": true,
+          "measured_activity": null
+        },
+        {
+          "program": "blastn",
+          "stage": "dp_traceback",
+          "work_items": 14,
+          "parallel_selected": true,
+          "measured_activity": null
+        },
+        {
+          "program": "blastn",
+          "stage": "dp_traceback",
+          "work_items": 15,
+          "parallel_selected": true,
+          "measured_activity": null
+        },
+        {
+          "program": "blastn",
+          "stage": "dp_traceback",
+          "work_items": 12,
+          "parallel_selected": true,
+          "measured_activity": null
+        },
+        {
+          "program": "blastn",
+          "stage": "dp_traceback",
+          "work_items": 14,
+          "parallel_selected": true,
+          "measured_activity": null
+        },
+        {
+          "program": "blastn",
+          "stage": "dp_traceback",
+          "work_items": 15,
+          "parallel_selected": true,
+          "measured_activity": null
+        },
+        {
+          "program": "blastn",
+          "stage": "dp_traceback",
+          "work_items": 12,
+          "parallel_selected": true,
+          "measured_activity": null
+        },
+        {
+          "program": "blastn",
+          "stage": "dp_traceback",
+          "work_items": 15,
+          "parallel_selected": true,
+          "measured_activity": null
+        },
+        {
+          "program": "blastn",
+          "stage": "dp_traceback",
+          "work_items": 16,
+          "parallel_selected": true,
+          "measured_activity": null
+        },
+        {
+          "program": "blastn",
+          "stage": "dp_traceback",
+          "work_items": 16,
+          "parallel_selected": true,
+          "measured_activity": null
+        },
+        {
+          "program": "blastn",
+          "stage": "dp_traceback",
+          "work_items": 11,
+          "parallel_selected": true,
+          "measured_activity": null
+        },
+        {
+          "program": "blastn",
+          "stage": "dp_traceback",
+          "work_items": 14,
+          "parallel_selected": true,
+          "measured_activity": null
+        },
+        {
+          "program": "blastn",
+          "stage": "dp_traceback",
+          "work_items": 16,
+          "parallel_selected": true,
+          "measured_activity": null
+        },
+        {
+          "program": "blastn",
+          "stage": "dp_traceback",
+          "work_items": 14,
+          "parallel_selected": true,
+          "measured_activity": null
+        },
+        {
+          "program": "blastn",
+          "stage": "dp_traceback",
+          "work_items": 16,
+          "parallel_selected": true,
+          "measured_activity": null
+        },
+        {
+          "program": "blastn",
+          "stage": "dp_traceback",
+          "work_items": 12,
+          "parallel_selected": true,
+          "measured_activity": null
+        },
+        {
+          "program": "blastn",
+          "stage": "dp_traceback",
+          "work_items": 12,
+          "parallel_selected": true,
+          "measured_activity": null
+        },
+        {
+          "program": "blastn",
+          "stage": "dp_traceback",
+          "work_items": 15,
+          "parallel_selected": true,
+          "measured_activity": null
+        },
+        {
+          "program": "blastn",
+          "stage": "dp_traceback",
+          "work_items": 15,
+          "parallel_selected": true,
+          "measured_activity": null
+        },
+        {
+          "program": "blastn",
+          "stage": "dp_traceback",
+          "work_items": 16,
+          "parallel_selected": true,
+          "measured_activity": null
+        },
+        {
+          "program": "blastn",
+          "stage": "dp_traceback",
+          "work_items": 16,
+          "parallel_selected": true,
+          "measured_activity": null
+        },
+        {
+          "program": "blastn",
+          "stage": "dp_traceback",
+          "work_items": 15,
+          "parallel_selected": true,
+          "measured_activity": null
+        },
+        {
+          "program": "blastn",
+          "stage": "dp_traceback",
+          "work_items": 13,
+          "parallel_selected": true,
+          "measured_activity": null
+        },
+        {
+          "program": "blastn",
+          "stage": "dp_traceback",
+          "work_items": 15,
+          "parallel_selected": true,
+          "measured_activity": null
+        },
+        {
+          "program": "blastn",
+          "stage": "dp_traceback",
+          "work_items": 16,
+          "parallel_selected": true,
+          "measured_activity": null
+        },
+        {
+          "program": "blastn",
+          "stage": "dp_traceback",
+          "work_items": 16,
+          "parallel_selected": true,
+          "measured_activity": null
+        },
+        {
+          "program": "blastn",
+          "stage": "dp_traceback",
+          "work_items": 15,
+          "parallel_selected": true,
+          "measured_activity": null
+        },
+        {
+          "program": "blastn",
+          "stage": "dp_traceback",
+          "work_items": 15,
+          "parallel_selected": true,
+          "measured_activity": null
+        },
+        {
+          "program": "blastn",
+          "stage": "dp_traceback",
+          "work_items": 15,
+          "parallel_selected": true,
+          "measured_activity": null
+        },
+        {
+          "program": "blastn",
+          "stage": "dp_traceback",
+          "work_items": 16,
+          "parallel_selected": true,
+          "measured_activity": null
+        },
+        {
+          "program": "blastn",
+          "stage": "dp_traceback",
+          "work_items": 13,
+          "parallel_selected": true,
+          "measured_activity": null
+        },
+        {
+          "program": "blastn",
+          "stage": "dp_traceback",
+          "work_items": 14,
+          "parallel_selected": true,
+          "measured_activity": null
+        },
+        {
+          "program": "blastn",
+          "stage": "dp_traceback",
+          "work_items": 16,
+          "parallel_selected": true,
+          "measured_activity": null
+        },
+        {
+          "program": "blastn",
+          "stage": "dp_traceback",
+          "work_items": 16,
+          "parallel_selected": true,
+          "measured_activity": null
+        },
+        {
+          "program": "blastn",
+          "stage": "dp_traceback",
+          "work_items": 16,
+          "parallel_selected": true,
+          "measured_activity": null
+        },
+        {
+          "program": "blastn",
+          "stage": "dp_traceback",
+          "work_items": 14,
+          "parallel_selected": true,
+          "measured_activity": null
+        },
+        {
+          "program": "blastn",
+          "stage": "dp_traceback",
+          "work_items": 11,
+          "parallel_selected": true,
+          "measured_activity": null
+        },
+        {
+          "program": "blastn",
+          "stage": "dp_traceback",
+          "work_items": 15,
+          "parallel_selected": true,
+          "measured_activity": null
+        },
+        {
+          "program": "blastn",
+          "stage": "dp_traceback",
+          "work_items": 15,
+          "parallel_selected": true,
+          "measured_activity": null
+        },
+        {
+          "program": "blastn",
+          "stage": "dp_traceback",
+          "work_items": 16,
+          "parallel_selected": true,
+          "measured_activity": null
+        },
+        {
+          "program": "blastn",
+          "stage": "dp_traceback",
+          "work_items": 15,
+          "parallel_selected": true,
+          "measured_activity": null
+        },
+        {
+          "program": "blastn",
+          "stage": "dp_traceback",
+          "work_items": 15,
+          "parallel_selected": true,
+          "measured_activity": null
+        },
+        {
+          "program": "blastn",
+          "stage": "dp_traceback",
+          "work_items": 15,
+          "parallel_selected": true,
+          "measured_activity": null
+        },
+        {
+          "program": "blastn",
+          "stage": "dp_traceback",
+          "work_items": 16,
+          "parallel_selected": true,
+          "measured_activity": null
+        },
+        {
+          "program": "blastn",
+          "stage": "dp_traceback",
+          "work_items": 15,
+          "parallel_selected": true,
+          "measured_activity": null
+        },
+        {
+          "program": "blastn",
+          "stage": "dp_traceback",
+          "work_items": 16,
+          "parallel_selected": true,
+          "measured_activity": null
+        },
+        {
+          "program": "blastn",
+          "stage": "dp_traceback",
+          "work_items": 15,
+          "parallel_selected": true,
+          "measured_activity": null
+        },
+        {
+          "program": "blastn",
+          "stage": "dp_traceback",
+          "work_items": 15,
+          "parallel_selected": true,
+          "measured_activity": null
+        },
+        {
+          "program": "blastn",
+          "stage": "dp_traceback",
+          "work_items": 16,
+          "parallel_selected": true,
+          "measured_activity": null
+        },
+        {
+          "program": "blastn",
+          "stage": "dp_traceback",
+          "work_items": 16,
+          "parallel_selected": true,
+          "measured_activity": null
+        },
+        {
+          "program": "blastn",
+          "stage": "dp_traceback",
+          "work_items": 16,
+          "parallel_selected": true,
+          "measured_activity": null
+        },
+        {
+          "program": "blastn",
+          "stage": "dp_traceback",
+          "work_items": 14,
+          "parallel_selected": true,
+          "measured_activity": null
+        },
+        {
+          "program": "blastn",
+          "stage": "dp_traceback",
+          "work_items": 15,
+          "parallel_selected": true,
+          "measured_activity": null
+        },
+        {
+          "program": "blastn",
+          "stage": "dp_traceback",
+          "work_items": 16,
+          "parallel_selected": true,
+          "measured_activity": null
+        },
+        {
+          "program": "blastn",
+          "stage": "dp_traceback",
+          "work_items": 16,
+          "parallel_selected": true,
+          "measured_activity": null
+        },
+        {
+          "program": "blastn",
+          "stage": "dp_traceback",
+          "work_items": 16,
+          "parallel_selected": true,
+          "measured_activity": null
+        },
+        {
+          "program": "blastn",
+          "stage": "dp_traceback",
+          "work_items": 16,
+          "parallel_selected": true,
+          "measured_activity": null
+        },
+        {
+          "program": "blastn",
+          "stage": "dp_traceback",
+          "work_items": 14,
+          "parallel_selected": true,
+          "measured_activity": null
+        },
+        {
+          "program": "blastn",
+          "stage": "dp_traceback",
+          "work_items": 15,
+          "parallel_selected": true,
+          "measured_activity": null
+        },
+        {
+          "program": "blastn",
+          "stage": "dp_traceback",
+          "work_items": 15,
+          "parallel_selected": true,
+          "measured_activity": null
+        },
+        {
+          "program": "blastn",
+          "stage": "dp_traceback",
+          "work_items": 11,
+          "parallel_selected": true,
+          "measured_activity": null
+        },
+        {
+          "program": "blastn",
+          "stage": "dp_traceback",
+          "work_items": 6,
+          "parallel_selected": true,
+          "measured_activity": null
+        },
+        {
+          "program": "blastn",
+          "stage": "dp_traceback",
+          "work_items": 12,
+          "parallel_selected": true,
+          "measured_activity": null
+        },
+        {
+          "program": "blastn",
+          "stage": "dp_traceback",
+          "work_items": 16,
+          "parallel_selected": true,
+          "measured_activity": null
+        },
+        {
+          "program": "blastn",
+          "stage": "dp_traceback",
+          "work_items": 16,
+          "parallel_selected": true,
+          "measured_activity": null
+        },
+        {
+          "program": "blastn",
+          "stage": "dp_traceback",
+          "work_items": 16,
+          "parallel_selected": true,
+          "measured_activity": null
+        },
+        {
+          "program": "blastn",
+          "stage": "dp_traceback",
+          "work_items": 16,
+          "parallel_selected": true,
+          "measured_activity": null
+        },
+        {
+          "program": "blastn",
+          "stage": "dp_traceback",
+          "work_items": 16,
+          "parallel_selected": true,
+          "measured_activity": null
+        },
+        {
+          "program": "blastn",
+          "stage": "dp_traceback",
+          "work_items": 16,
+          "parallel_selected": true,
+          "measured_activity": null
+        },
+        {
+          "program": "blastn",
+          "stage": "dp_traceback",
+          "work_items": 16,
+          "parallel_selected": true,
+          "measured_activity": null
+        },
+        {
+          "program": "blastn",
+          "stage": "dp_traceback",
+          "work_items": 16,
+          "parallel_selected": true,
+          "measured_activity": null
+        },
+        {
+          "program": "blastn",
+          "stage": "dp_traceback",
+          "work_items": 16,
+          "parallel_selected": true,
+          "measured_activity": null
+        },
+        {
+          "program": "blastn",
+          "stage": "dp_traceback",
+          "work_items": 16,
+          "parallel_selected": true,
+          "measured_activity": null
+        },
+        {
+          "program": "blastn",
+          "stage": "dp_traceback",
+          "work_items": 15,
+          "parallel_selected": true,
+          "measured_activity": null
+        },
+        {
+          "program": "blastn",
+          "stage": "dp_traceback",
+          "work_items": 15,
+          "parallel_selected": true,
+          "measured_activity": null
+        },
+        {
+          "program": "blastn",
+          "stage": "dp_traceback",
+          "work_items": 16,
+          "parallel_selected": true,
+          "measured_activity": null
+        },
+        {
+          "program": "blastn",
+          "stage": "dp_traceback",
+          "work_items": 16,
+          "parallel_selected": true,
+          "measured_activity": null
+        },
+        {
+          "program": "blastn",
+          "stage": "dp_traceback",
+          "work_items": 16,
+          "parallel_selected": true,
+          "measured_activity": null
+        },
+        {
+          "program": "blastn",
+          "stage": "dp_traceback",
+          "work_items": 16,
+          "parallel_selected": true,
+          "measured_activity": null
+        },
+        {
+          "program": "blastn",
+          "stage": "dp_traceback",
+          "work_items": 16,
+          "parallel_selected": true,
+          "measured_activity": null
+        },
+        {
+          "program": "blastn",
+          "stage": "dp_traceback",
+          "work_items": 16,
+          "parallel_selected": true,
+          "measured_activity": null
+        },
+        {
+          "program": "blastn",
+          "stage": "dp_traceback",
+          "work_items": 16,
+          "parallel_selected": true,
+          "measured_activity": null
+        },
+        {
+          "program": "blastn",
+          "stage": "dp_traceback",
+          "work_items": 14,
+          "parallel_selected": true,
+          "measured_activity": null
+        },
+        {
+          "program": "blastn",
+          "stage": "dp_traceback",
+          "work_items": 14,
+          "parallel_selected": true,
+          "measured_activity": null
+        },
+        {
+          "program": "blastn",
+          "stage": "dp_traceback",
+          "work_items": 15,
+          "parallel_selected": true,
+          "measured_activity": null
+        },
+        {
+          "program": "blastn",
+          "stage": "dp_traceback",
+          "work_items": 16,
+          "parallel_selected": true,
+          "measured_activity": null
+        },
+        {
+          "program": "blastn",
+          "stage": "dp_traceback",
+          "work_items": 14,
+          "parallel_selected": true,
+          "measured_activity": null
+        },
+        {
+          "program": "blastn",
+          "stage": "dp_traceback",
+          "work_items": 15,
+          "parallel_selected": true,
+          "measured_activity": null
+        },
+        {
+          "program": "blastn",
+          "stage": "dp_traceback",
+          "work_items": 14,
+          "parallel_selected": true,
+          "measured_activity": null
+        },
+        {
+          "program": "blastn",
+          "stage": "dp_traceback",
+          "work_items": 16,
+          "parallel_selected": true,
+          "measured_activity": null
+        },
+        {
+          "program": "blastn",
+          "stage": "dp_traceback",
+          "work_items": 16,
+          "parallel_selected": true,
+          "measured_activity": null
+        },
+        {
+          "program": "blastn",
+          "stage": "dp_traceback",
+          "work_items": 16,
+          "parallel_selected": true,
+          "measured_activity": null
+        },
+        {
+          "program": "blastn",
+          "stage": "dp_traceback",
+          "work_items": 16,
+          "parallel_selected": true,
+          "measured_activity": null
+        },
+        {
+          "program": "blastn",
+          "stage": "dp_traceback",
+          "work_items": 16,
+          "parallel_selected": true,
+          "measured_activity": null
+        },
+        {
+          "program": "blastn",
+          "stage": "dp_traceback",
+          "work_items": 16,
+          "parallel_selected": true,
+          "measured_activity": null
+        },
+        {
+          "program": "blastn",
+          "stage": "dp_traceback",
+          "work_items": 16,
+          "parallel_selected": true,
+          "measured_activity": null
+        },
+        {
+          "program": "blastn",
+          "stage": "dp_traceback",
+          "work_items": 16,
+          "parallel_selected": true,
+          "measured_activity": null
+        },
+        {
+          "program": "blastn",
+          "stage": "dp_traceback",
+          "work_items": 16,
+          "parallel_selected": true,
+          "measured_activity": null
+        },
+        {
+          "program": "blastn",
+          "stage": "dp_traceback",
+          "work_items": 16,
+          "parallel_selected": true,
+          "measured_activity": null
+        },
+        {
+          "program": "blastn",
+          "stage": "dp_traceback",
+          "work_items": 14,
+          "parallel_selected": true,
+          "measured_activity": null
+        },
+        {
+          "program": "blastn",
+          "stage": "dp_traceback",
+          "work_items": 16,
+          "parallel_selected": true,
+          "measured_activity": null
+        },
+        {
+          "program": "blastn",
+          "stage": "dp_traceback",
+          "work_items": 16,
+          "parallel_selected": true,
+          "measured_activity": null
+        },
+        {
+          "program": "blastn",
+          "stage": "dp_traceback",
+          "work_items": 14,
+          "parallel_selected": true,
+          "measured_activity": null
+        },
+        {
+          "program": "blastn",
+          "stage": "dp_traceback",
+          "work_items": 16,
+          "parallel_selected": true,
+          "measured_activity": null
+        },
+        {
+          "program": "blastn",
+          "stage": "dp_traceback",
+          "work_items": 16,
+          "parallel_selected": true,
+          "measured_activity": null
+        },
+        {
+          "program": "blastn",
+          "stage": "dp_traceback",
+          "work_items": 16,
+          "parallel_selected": true,
+          "measured_activity": null
+        },
+        {
+          "program": "blastn",
+          "stage": "dp_traceback",
+          "work_items": 16,
+          "parallel_selected": true,
+          "measured_activity": null
+        },
+        {
+          "program": "blastn",
+          "stage": "dp_traceback",
+          "work_items": 16,
+          "parallel_selected": true,
+          "measured_activity": null
+        },
+        {
+          "program": "blastn",
+          "stage": "dp_traceback",
+          "work_items": 16,
+          "parallel_selected": true,
+          "measured_activity": null
+        },
+        {
+          "program": "blastn",
+          "stage": "dp_traceback",
+          "work_items": 16,
+          "parallel_selected": true,
+          "measured_activity": null
+        },
+        {
+          "program": "blastn",
+          "stage": "dp_traceback",
+          "work_items": 15,
+          "parallel_selected": true,
+          "measured_activity": null
+        },
+        {
+          "program": "blastn",
+          "stage": "dp_traceback",
+          "work_items": 16,
+          "parallel_selected": true,
+          "measured_activity": null
+        },
+        {
+          "program": "blastn",
+          "stage": "dp_traceback",
+          "work_items": 13,
+          "parallel_selected": true,
+          "measured_activity": null
+        },
+        {
+          "program": "blastn",
+          "stage": "dp_traceback",
+          "work_items": 14,
+          "parallel_selected": true,
+          "measured_activity": null
+        },
+        {
+          "program": "blastn",
+          "stage": "dp_traceback",
+          "work_items": 12,
+          "parallel_selected": true,
+          "measured_activity": null
+        },
+        {
+          "program": "blastn",
+          "stage": "dp_traceback",
+          "work_items": 9,
+          "parallel_selected": true,
+          "measured_activity": null
+        },
+        {
+          "program": "blastn",
+          "stage": "dp_traceback",
+          "work_items": 15,
+          "parallel_selected": true,
+          "measured_activity": null
+        },
+        {
+          "program": "blastn",
+          "stage": "dp_traceback",
+          "work_items": 15,
+          "parallel_selected": true,
+          "measured_activity": null
+        },
+        {
+          "program": "blastn",
+          "stage": "dp_traceback",
+          "work_items": 16,
+          "parallel_selected": true,
+          "measured_activity": null
+        },
+        {
+          "program": "blastn",
+          "stage": "dp_traceback",
+          "work_items": 15,
+          "parallel_selected": true,
+          "measured_activity": null
+        },
+        {
+          "program": "blastn",
+          "stage": "dp_traceback",
+          "work_items": 16,
+          "parallel_selected": true,
+          "measured_activity": null
+        },
+        {
+          "program": "blastn",
+          "stage": "dp_traceback",
+          "work_items": 16,
+          "parallel_selected": true,
+          "measured_activity": null
+        },
+        {
+          "program": "blastn",
+          "stage": "dp_traceback",
+          "work_items": 16,
+          "parallel_selected": true,
+          "measured_activity": null
+        },
+        {
+          "program": "blastn",
+          "stage": "dp_traceback",
+          "work_items": 16,
+          "parallel_selected": true,
+          "measured_activity": null
+        },
+        {
+          "program": "blastn",
+          "stage": "dp_traceback",
+          "work_items": 16,
+          "parallel_selected": true,
+          "measured_activity": null
+        },
+        {
+          "program": "blastn",
+          "stage": "dp_traceback",
+          "work_items": 16,
+          "parallel_selected": true,
+          "measured_activity": null
+        },
+        {
+          "program": "blastn",
+          "stage": "dp_traceback",
+          "work_items": 16,
+          "parallel_selected": true,
+          "measured_activity": null
+        },
+        {
+          "program": "blastn",
+          "stage": "dp_traceback",
+          "work_items": 16,
+          "parallel_selected": true,
+          "measured_activity": null
+        },
+        {
+          "program": "blastn",
+          "stage": "dp_traceback",
+          "work_items": 16,
+          "parallel_selected": true,
+          "measured_activity": null
+        },
+        {
+          "program": "blastn",
+          "stage": "dp_traceback",
+          "work_items": 16,
+          "parallel_selected": true,
+          "measured_activity": null
+        },
+        {
+          "program": "blastn",
+          "stage": "dp_traceback",
+          "work_items": 16,
+          "parallel_selected": true,
+          "measured_activity": null
+        },
+        {
+          "program": "blastn",
+          "stage": "dp_traceback",
+          "work_items": 16,
+          "parallel_selected": true,
+          "measured_activity": null
+        },
+        {
+          "program": "blastn",
+          "stage": "dp_traceback",
+          "work_items": 15,
+          "parallel_selected": true,
+          "measured_activity": null
+        },
+        {
+          "program": "blastn",
+          "stage": "dp_traceback",
+          "work_items": 16,
+          "parallel_selected": true,
+          "measured_activity": null
+        },
+        {
+          "program": "blastn",
+          "stage": "dp_traceback",
+          "work_items": 16,
+          "parallel_selected": true,
+          "measured_activity": null
+        },
+        {
+          "program": "blastn",
+          "stage": "dp_traceback",
+          "work_items": 16,
+          "parallel_selected": true,
+          "measured_activity": null
+        },
+        {
+          "program": "blastn",
+          "stage": "dp_traceback",
+          "work_items": 16,
+          "parallel_selected": true,
+          "measured_activity": null
+        },
+        {
+          "program": "blastn",
+          "stage": "dp_traceback",
+          "work_items": 16,
+          "parallel_selected": true,
+          "measured_activity": null
+        },
+        {
+          "program": "blastn",
+          "stage": "dp_traceback",
+          "work_items": 16,
+          "parallel_selected": true,
+          "measured_activity": null
+        },
+        {
+          "program": "blastn",
+          "stage": "dp_traceback",
+          "work_items": 16,
+          "parallel_selected": true,
+          "measured_activity": null
+        },
+        {
+          "program": "blastn",
+          "stage": "dp_traceback",
+          "work_items": 16,
+          "parallel_selected": true,
+          "measured_activity": null
+        },
+        {
+          "program": "blastn",
+          "stage": "dp_traceback",
+          "work_items": 16,
+          "parallel_selected": true,
+          "measured_activity": null
+        },
+        {
+          "program": "blastn",
+          "stage": "dp_traceback",
+          "work_items": 16,
+          "parallel_selected": true,
+          "measured_activity": null
+        },
+        {
+          "program": "blastn",
+          "stage": "dp_traceback",
+          "work_items": 16,
+          "parallel_selected": true,
+          "measured_activity": null
+        },
+        {
+          "program": "blastn",
+          "stage": "dp_traceback",
+          "work_items": 16,
+          "parallel_selected": true,
+          "measured_activity": null
+        },
+        {
+          "program": "blastn",
+          "stage": "dp_traceback",
+          "work_items": 16,
+          "parallel_selected": true,
+          "measured_activity": null
+        },
+        {
+          "program": "blastn",
+          "stage": "dp_traceback",
+          "work_items": 16,
+          "parallel_selected": true,
+          "measured_activity": null
+        },
+        {
+          "program": "blastn",
+          "stage": "dp_traceback",
+          "work_items": 16,
+          "parallel_selected": true,
+          "measured_activity": null
+        },
+        {
+          "program": "blastn",
+          "stage": "dp_traceback",
+          "work_items": 16,
+          "parallel_selected": true,
+          "measured_activity": null
+        },
+        {
+          "program": "blastn",
+          "stage": "dp_traceback",
+          "work_items": 15,
+          "parallel_selected": true,
+          "measured_activity": null
+        },
+        {
+          "program": "blastn",
+          "stage": "dp_traceback",
+          "work_items": 16,
+          "parallel_selected": true,
+          "measured_activity": null
+        },
+        {
+          "program": "blastn",
+          "stage": "dp_traceback",
+          "work_items": 16,
+          "parallel_selected": true,
+          "measured_activity": null
+        },
+        {
+          "program": "blastn",
+          "stage": "dp_traceback",
+          "work_items": 16,
+          "parallel_selected": true,
+          "measured_activity": null
+        },
+        {
+          "program": "blastn",
+          "stage": "dp_traceback",
+          "work_items": 16,
+          "parallel_selected": true,
+          "measured_activity": null
+        },
+        {
+          "program": "blastn",
+          "stage": "dp_traceback",
+          "work_items": 16,
+          "parallel_selected": true,
+          "measured_activity": null
+        },
+        {
+          "program": "blastn",
+          "stage": "dp_traceback",
+          "work_items": 16,
+          "parallel_selected": true,
+          "measured_activity": null
+        },
+        {
+          "program": "blastn",
+          "stage": "dp_traceback",
+          "work_items": 15,
+          "parallel_selected": true,
+          "measured_activity": null
+        },
+        {
+          "program": "blastn",
+          "stage": "dp_traceback",
+          "work_items": 16,
+          "parallel_selected": true,
+          "measured_activity": null
+        },
+        {
+          "program": "blastn",
+          "stage": "dp_traceback",
+          "work_items": 16,
+          "parallel_selected": true,
+          "measured_activity": null
+        },
+        {
+          "program": "blastn",
+          "stage": "dp_traceback",
+          "work_items": 16,
+          "parallel_selected": true,
+          "measured_activity": null
+        },
+        {
+          "program": "blastn",
+          "stage": "dp_traceback",
+          "work_items": 16,
+          "parallel_selected": true,
+          "measured_activity": null
+        },
+        {
+          "program": "blastn",
+          "stage": "dp_traceback",
+          "work_items": 16,
+          "parallel_selected": true,
+          "measured_activity": null
+        },
+        {
+          "program": "blastn",
+          "stage": "dp_traceback",
+          "work_items": 16,
+          "parallel_selected": true,
+          "measured_activity": null
+        },
+        {
+          "program": "blastn",
+          "stage": "dp_traceback",
+          "work_items": 16,
+          "parallel_selected": true,
+          "measured_activity": null
+        },
+        {
+          "program": "blastn",
+          "stage": "dp_traceback",
+          "work_items": 16,
+          "parallel_selected": true,
+          "measured_activity": null
+        },
+        {
+          "program": "blastn",
+          "stage": "dp_traceback",
+          "work_items": 16,
+          "parallel_selected": true,
+          "measured_activity": null
+        },
+        {
+          "program": "blastn",
+          "stage": "dp_traceback",
+          "work_items": 16,
+          "parallel_selected": true,
+          "measured_activity": null
+        },
+        {
+          "program": "blastn",
+          "stage": "dp_traceback",
+          "work_items": 16,
+          "parallel_selected": true,
+          "measured_activity": null
+        },
+        {
+          "program": "blastn",
+          "stage": "dp_traceback",
+          "work_items": 16,
+          "parallel_selected": true,
+          "measured_activity": null
+        },
+        {
+          "program": "blastn",
+          "stage": "dp_traceback",
+          "work_items": 16,
+          "parallel_selected": true,
+          "measured_activity": null
+        },
+        {
+          "program": "blastn",
+          "stage": "dp_traceback",
+          "work_items": 16,
+          "parallel_selected": true,
+          "measured_activity": null
+        },
+        {
+          "program": "blastn",
+          "stage": "dp_traceback",
+          "work_items": 16,
+          "parallel_selected": true,
+          "measured_activity": null
+        },
+        {
+          "program": "blastn",
+          "stage": "dp_traceback",
+          "work_items": 16,
+          "parallel_selected": true,
+          "measured_activity": null
+        },
+        {
+          "program": "blastn",
+          "stage": "dp_traceback",
+          "work_items": 16,
+          "parallel_selected": true,
+          "measured_activity": null
+        },
+        {
+          "program": "blastn",
+          "stage": "dp_traceback",
+          "work_items": 16,
+          "parallel_selected": true,
+          "measured_activity": null
+        },
+        {
+          "program": "blastn",
+          "stage": "dp_traceback",
+          "work_items": 16,
+          "parallel_selected": true,
+          "measured_activity": null
+        },
+        {
+          "program": "blastn",
+          "stage": "dp_traceback",
+          "work_items": 16,
+          "parallel_selected": true,
+          "measured_activity": null
+        },
+        {
+          "program": "blastn",
+          "stage": "dp_traceback",
+          "work_items": 16,
+          "parallel_selected": true,
+          "measured_activity": null
+        },
+        {
+          "program": "blastn",
+          "stage": "dp_traceback",
+          "work_items": 16,
+          "parallel_selected": true,
+          "measured_activity": null
+        },
+        {
+          "program": "blastn",
+          "stage": "dp_traceback",
+          "work_items": 16,
+          "parallel_selected": true,
+          "measured_activity": null
+        },
+        {
+          "program": "blastn",
+          "stage": "dp_traceback",
+          "work_items": 16,
+          "parallel_selected": true,
+          "measured_activity": null
+        },
+        {
+          "program": "blastn",
+          "stage": "dp_traceback",
+          "work_items": 16,
+          "parallel_selected": true,
+          "measured_activity": null
+        },
+        {
+          "program": "blastn",
+          "stage": "dp_traceback",
+          "work_items": 16,
+          "parallel_selected": true,
+          "measured_activity": null
+        },
+        {
+          "program": "blastn",
+          "stage": "dp_traceback",
+          "work_items": 16,
+          "parallel_selected": true,
+          "measured_activity": null
+        },
+        {
+          "program": "blastn",
+          "stage": "dp_traceback",
+          "work_items": 16,
+          "parallel_selected": true,
+          "measured_activity": null
+        },
+        {
+          "program": "blastn",
+          "stage": "dp_traceback",
+          "work_items": 16,
+          "parallel_selected": true,
+          "measured_activity": null
+        },
+        {
+          "program": "blastn",
+          "stage": "dp_traceback",
+          "work_items": 16,
+          "parallel_selected": true,
+          "measured_activity": null
+        },
+        {
+          "program": "blastn",
+          "stage": "dp_traceback",
+          "work_items": 16,
+          "parallel_selected": true,
+          "measured_activity": null
+        },
+        {
+          "program": "blastn",
+          "stage": "dp_traceback",
+          "work_items": 16,
+          "parallel_selected": true,
+          "measured_activity": null
+        },
+        {
+          "program": "blastn",
+          "stage": "dp_traceback",
+          "work_items": 16,
+          "parallel_selected": true,
+          "measured_activity": null
+        },
+        {
+          "program": "blastn",
+          "stage": "dp_traceback",
+          "work_items": 16,
+          "parallel_selected": true,
+          "measured_activity": null
+        },
+        {
+          "program": "blastn",
+          "stage": "dp_traceback",
+          "work_items": 16,
+          "parallel_selected": true,
+          "measured_activity": null
+        },
+        {
+          "program": "blastn",
+          "stage": "dp_traceback",
+          "work_items": 16,
+          "parallel_selected": true,
+          "measured_activity": null
+        },
+        {
+          "program": "blastn",
+          "stage": "dp_traceback",
+          "work_items": 16,
+          "parallel_selected": true,
+          "measured_activity": null
+        },
+        {
+          "program": "blastn",
+          "stage": "dp_traceback",
+          "work_items": 16,
+          "parallel_selected": true,
+          "measured_activity": null
+        },
+        {
+          "program": "blastn",
+          "stage": "dp_traceback",
+          "work_items": 16,
+          "parallel_selected": true,
+          "measured_activity": null
+        },
+        {
+          "program": "blastn",
+          "stage": "dp_traceback",
+          "work_items": 15,
+          "parallel_selected": true,
+          "measured_activity": null
+        },
+        {
+          "program": "blastn",
+          "stage": "dp_traceback",
+          "work_items": 16,
+          "parallel_selected": true,
+          "measured_activity": null
+        },
+        {
+          "program": "blastn",
+          "stage": "dp_traceback",
+          "work_items": 16,
+          "parallel_selected": true,
+          "measured_activity": null
+        },
+        {
+          "program": "blastn",
+          "stage": "dp_traceback",
+          "work_items": 16,
+          "parallel_selected": true,
+          "measured_activity": null
+        },
+        {
+          "program": "blastn",
+          "stage": "dp_traceback",
+          "work_items": 16,
+          "parallel_selected": true,
+          "measured_activity": null
+        },
+        {
+          "program": "blastn",
+          "stage": "dp_traceback",
+          "work_items": 11,
+          "parallel_selected": true,
+          "measured_activity": null
+        },
+        {
+          "program": "blastn",
+          "stage": "dp_traceback",
+          "work_items": 13,
+          "parallel_selected": true,
+          "measured_activity": null
+        },
+        {
+          "program": "blastn",
+          "stage": "dp_traceback",
+          "work_items": 15,
+          "parallel_selected": true,
+          "measured_activity": null
+        },
+        {
+          "program": "blastn",
+          "stage": "dp_traceback",
+          "work_items": 16,
+          "parallel_selected": true,
+          "measured_activity": null
+        },
+        {
+          "program": "blastn",
+          "stage": "dp_traceback",
+          "work_items": 16,
+          "parallel_selected": true,
+          "measured_activity": null
+        },
+        {
+          "program": "blastn",
+          "stage": "dp_traceback",
+          "work_items": 16,
+          "parallel_selected": true,
+          "measured_activity": null
+        },
+        {
+          "program": "blastn",
+          "stage": "dp_traceback",
+          "work_items": 15,
+          "parallel_selected": true,
+          "measured_activity": null
+        },
+        {
+          "program": "blastn",
+          "stage": "dp_traceback",
+          "work_items": 16,
+          "parallel_selected": true,
+          "measured_activity": null
+        },
+        {
+          "program": "blastn",
+          "stage": "dp_traceback",
+          "work_items": 16,
+          "parallel_selected": true,
+          "measured_activity": null
+        },
+        {
+          "program": "blastn",
+          "stage": "dp_traceback",
+          "work_items": 16,
+          "parallel_selected": true,
+          "measured_activity": null
+        },
+        {
+          "program": "blastn",
+          "stage": "dp_traceback",
+          "work_items": 16,
+          "parallel_selected": true,
+          "measured_activity": null
+        },
+        {
+          "program": "blastn",
+          "stage": "dp_traceback",
+          "work_items": 16,
+          "parallel_selected": true,
+          "measured_activity": null
+        },
+        {
+          "program": "blastn",
+          "stage": "dp_traceback",
+          "work_items": 16,
+          "parallel_selected": true,
+          "measured_activity": null
+        },
+        {
+          "program": "blastn",
+          "stage": "dp_traceback",
+          "work_items": 16,
+          "parallel_selected": true,
+          "measured_activity": null
+        },
+        {
+          "program": "blastn",
+          "stage": "dp_traceback",
+          "work_items": 16,
+          "parallel_selected": true,
+          "measured_activity": null
+        },
+        {
+          "program": "blastn",
+          "stage": "dp_traceback",
+          "work_items": 16,
+          "parallel_selected": true,
+          "measured_activity": null
+        },
+        {
+          "program": "blastn",
+          "stage": "dp_traceback",
+          "work_items": 16,
+          "parallel_selected": true,
+          "measured_activity": null
+        },
+        {
+          "program": "blastn",
+          "stage": "dp_traceback",
+          "work_items": 16,
+          "parallel_selected": true,
+          "measured_activity": null
+        },
+        {
+          "program": "blastn",
+          "stage": "dp_traceback",
+          "work_items": 16,
+          "parallel_selected": true,
+          "measured_activity": null
+        },
+        {
+          "program": "blastn",
+          "stage": "dp_traceback",
+          "work_items": 16,
+          "parallel_selected": true,
+          "measured_activity": null
+        },
+        {
+          "program": "blastn",
+          "stage": "dp_traceback",
+          "work_items": 16,
+          "parallel_selected": true,
+          "measured_activity": null
+        },
+        {
+          "program": "blastn",
+          "stage": "dp_traceback",
+          "work_items": 16,
+          "parallel_selected": true,
+          "measured_activity": null
+        },
+        {
+          "program": "blastn",
+          "stage": "dp_traceback",
+          "work_items": 16,
+          "parallel_selected": true,
+          "measured_activity": null
+        },
+        {
+          "program": "blastn",
+          "stage": "dp_traceback",
+          "work_items": 16,
+          "parallel_selected": true,
+          "measured_activity": null
+        },
+        {
+          "program": "blastn",
+          "stage": "dp_traceback",
+          "work_items": 16,
+          "parallel_selected": true,
+          "measured_activity": null
+        },
+        {
+          "program": "blastn",
+          "stage": "dp_traceback",
+          "work_items": 16,
+          "parallel_selected": true,
+          "measured_activity": null
+        },
+        {
+          "program": "blastn",
+          "stage": "dp_traceback",
+          "work_items": 16,
+          "parallel_selected": true,
+          "measured_activity": null
+        },
+        {
+          "program": "blastn",
+          "stage": "dp_traceback",
+          "work_items": 16,
+          "parallel_selected": true,
+          "measured_activity": null
+        },
+        {
+          "program": "blastn",
+          "stage": "dp_traceback",
+          "work_items": 16,
+          "parallel_selected": true,
+          "measured_activity": null
+        },
+        {
+          "program": "blastn",
+          "stage": "dp_traceback",
+          "work_items": 16,
+          "parallel_selected": true,
+          "measured_activity": null
+        },
+        {
+          "program": "blastn",
+          "stage": "dp_traceback",
+          "work_items": 16,
+          "parallel_selected": true,
+          "measured_activity": null
+        },
+        {
+          "program": "blastn",
+          "stage": "dp_traceback",
+          "work_items": 15,
+          "parallel_selected": true,
+          "measured_activity": null
+        },
+        {
+          "program": "blastn",
+          "stage": "dp_traceback",
+          "work_items": 14,
+          "parallel_selected": true,
+          "measured_activity": null
+        },
+        {
+          "program": "blastn",
+          "stage": "dp_traceback",
+          "work_items": 16,
+          "parallel_selected": true,
+          "measured_activity": null
+        },
+        {
+          "program": "blastn",
+          "stage": "dp_traceback",
+          "work_items": 16,
+          "parallel_selected": true,
+          "measured_activity": null
+        },
+        {
+          "program": "blastn",
+          "stage": "dp_traceback",
+          "work_items": 16,
+          "parallel_selected": true,
+          "measured_activity": null
+        },
+        {
+          "program": "blastn",
+          "stage": "dp_traceback",
+          "work_items": 16,
+          "parallel_selected": true,
+          "measured_activity": null
+        },
+        {
+          "program": "blastn",
+          "stage": "dp_traceback",
+          "work_items": 16,
+          "parallel_selected": true,
+          "measured_activity": null
+        },
+        {
+          "program": "blastn",
+          "stage": "dp_traceback",
+          "work_items": 16,
+          "parallel_selected": true,
+          "measured_activity": null
+        },
+        {
+          "program": "blastn",
+          "stage": "dp_traceback",
+          "work_items": 16,
+          "parallel_selected": true,
+          "measured_activity": null
+        },
+        {
+          "program": "blastn",
+          "stage": "dp_traceback",
+          "work_items": 16,
+          "parallel_selected": true,
+          "measured_activity": null
+        },
+        {
+          "program": "blastn",
+          "stage": "dp_traceback",
+          "work_items": 16,
+          "parallel_selected": true,
+          "measured_activity": null
+        },
+        {
+          "program": "blastn",
+          "stage": "dp_traceback",
+          "work_items": 16,
+          "parallel_selected": true,
+          "measured_activity": null
+        },
+        {
+          "program": "blastn",
+          "stage": "dp_traceback",
+          "work_items": 16,
+          "parallel_selected": true,
+          "measured_activity": null
+        },
+        {
+          "program": "blastn",
+          "stage": "dp_traceback",
+          "work_items": 16,
+          "parallel_selected": true,
+          "measured_activity": null
+        },
+        {
+          "program": "blastn",
+          "stage": "dp_traceback",
+          "work_items": 16,
+          "parallel_selected": true,
+          "measured_activity": null
+        },
+        {
+          "program": "blastn",
+          "stage": "dp_traceback",
+          "work_items": 16,
+          "parallel_selected": true,
+          "measured_activity": null
+        },
+        {
+          "program": "blastn",
+          "stage": "dp_traceback",
+          "work_items": 16,
+          "parallel_selected": true,
+          "measured_activity": null
+        },
+        {
+          "program": "blastn",
+          "stage": "dp_traceback",
+          "work_items": 16,
+          "parallel_selected": true,
+          "measured_activity": null
+        },
+        {
+          "program": "blastn",
+          "stage": "dp_traceback",
+          "work_items": 16,
+          "parallel_selected": true,
+          "measured_activity": null
+        },
+        {
+          "program": "blastn",
+          "stage": "dp_traceback",
+          "work_items": 16,
+          "parallel_selected": true,
+          "measured_activity": null
+        },
+        {
+          "program": "blastn",
+          "stage": "dp_traceback",
+          "work_items": 16,
+          "parallel_selected": true,
+          "measured_activity": null
+        },
+        {
+          "program": "blastn",
+          "stage": "dp_traceback",
+          "work_items": 16,
+          "parallel_selected": true,
+          "measured_activity": null
+        },
+        {
+          "program": "blastn",
+          "stage": "dp_traceback",
+          "work_items": 16,
+          "parallel_selected": true,
+          "measured_activity": null
+        },
+        {
+          "program": "blastn",
+          "stage": "dp_traceback",
+          "work_items": 16,
+          "parallel_selected": true,
+          "measured_activity": null
+        },
+        {
+          "program": "blastn",
+          "stage": "dp_traceback",
+          "work_items": 16,
+          "parallel_selected": true,
+          "measured_activity": null
+        },
+        {
+          "program": "blastn",
+          "stage": "dp_traceback",
+          "work_items": 16,
+          "parallel_selected": true,
+          "measured_activity": null
+        },
+        {
+          "program": "blastn",
+          "stage": "dp_traceback",
+          "work_items": 16,
+          "parallel_selected": true,
+          "measured_activity": null
+        },
+        {
+          "program": "blastn",
+          "stage": "dp_traceback",
+          "work_items": 16,
+          "parallel_selected": true,
+          "measured_activity": null
+        },
+        {
+          "program": "blastn",
+          "stage": "dp_traceback",
+          "work_items": 16,
+          "parallel_selected": true,
+          "measured_activity": null
+        },
+        {
+          "program": "blastn",
+          "stage": "dp_traceback",
+          "work_items": 16,
+          "parallel_selected": true,
+          "measured_activity": null
+        },
+        {
+          "program": "blastn",
+          "stage": "dp_traceback",
+          "work_items": 16,
+          "parallel_selected": true,
+          "measured_activity": null
+        },
+        {
+          "program": "blastn",
+          "stage": "dp_traceback",
+          "work_items": 16,
+          "parallel_selected": true,
+          "measured_activity": null
+        },
+        {
+          "program": "blastn",
+          "stage": "dp_traceback",
+          "work_items": 16,
+          "parallel_selected": true,
+          "measured_activity": null
+        },
+        {
+          "program": "blastn",
+          "stage": "dp_traceback",
+          "work_items": 16,
+          "parallel_selected": true,
+          "measured_activity": null
+        },
+        {
+          "program": "blastn",
+          "stage": "dp_traceback",
+          "work_items": 16,
+          "parallel_selected": true,
+          "measured_activity": null
+        },
+        {
+          "program": "blastn",
+          "stage": "dp_traceback",
+          "work_items": 16,
+          "parallel_selected": true,
+          "measured_activity": null
+        },
+        {
+          "program": "blastn",
+          "stage": "dp_traceback",
+          "work_items": 16,
+          "parallel_selected": true,
+          "measured_activity": null
+        },
+        {
+          "program": "blastn",
+          "stage": "dp_traceback",
+          "work_items": 16,
+          "parallel_selected": true,
+          "measured_activity": null
+        },
+        {
+          "program": "blastn",
+          "stage": "dp_traceback",
+          "work_items": 16,
+          "parallel_selected": true,
+          "measured_activity": null
+        },
+        {
+          "program": "blastn",
+          "stage": "dp_traceback",
+          "work_items": 10,
+          "parallel_selected": true,
+          "measured_activity": null
+        },
+        {
+          "program": "blastn",
+          "stage": "dp_traceback",
+          "work_items": 16,
+          "parallel_selected": true,
+          "measured_activity": null
+        },
+        {
+          "program": "blastn",
+          "stage": "dp_traceback",
+          "work_items": 16,
+          "parallel_selected": true,
+          "measured_activity": null
+        },
+        {
+          "program": "blastn",
+          "stage": "dp_traceback",
+          "work_items": 16,
+          "parallel_selected": true,
+          "measured_activity": null
+        },
+        {
+          "program": "blastn",
+          "stage": "dp_traceback",
+          "work_items": 16,
+          "parallel_selected": true,
+          "measured_activity": null
+        },
+        {
+          "program": "blastn",
+          "stage": "dp_traceback",
+          "work_items": 16,
+          "parallel_selected": true,
+          "measured_activity": null
+        },
+        {
+          "program": "blastn",
+          "stage": "dp_traceback",
+          "work_items": 16,
+          "parallel_selected": true,
+          "measured_activity": null
+        },
+        {
+          "program": "blastn",
+          "stage": "dp_traceback",
+          "work_items": 16,
+          "parallel_selected": true,
+          "measured_activity": null
+        },
+        {
+          "program": "blastn",
+          "stage": "dp_traceback",
+          "work_items": 16,
+          "parallel_selected": true,
+          "measured_activity": null
+        },
+        {
+          "program": "blastn",
+          "stage": "dp_traceback",
+          "work_items": 16,
+          "parallel_selected": true,
+          "measured_activity": null
+        },
+        {
+          "program": "blastn",
+          "stage": "dp_traceback",
+          "work_items": 16,
+          "parallel_selected": true,
+          "measured_activity": null
+        },
+        {
+          "program": "blastn",
+          "stage": "dp_traceback",
+          "work_items": 16,
+          "parallel_selected": true,
+          "measured_activity": null
+        },
+        {
+          "program": "blastn",
+          "stage": "dp_traceback",
+          "work_items": 16,
+          "parallel_selected": true,
+          "measured_activity": null
+        },
+        {
+          "program": "blastn",
+          "stage": "dp_traceback",
+          "work_items": 16,
+          "parallel_selected": true,
+          "measured_activity": null
+        },
+        {
+          "program": "blastn",
+          "stage": "dp_traceback",
+          "work_items": 16,
+          "parallel_selected": true,
+          "measured_activity": null
+        },
+        {
+          "program": "blastn",
+          "stage": "dp_traceback",
+          "work_items": 16,
+          "parallel_selected": true,
+          "measured_activity": null
+        },
+        {
+          "program": "blastn",
+          "stage": "dp_traceback",
+          "work_items": 16,
+          "parallel_selected": true,
+          "measured_activity": null
+        },
+        {
+          "program": "blastn",
+          "stage": "dp_traceback",
+          "work_items": 16,
+          "parallel_selected": true,
+          "measured_activity": null
+        },
+        {
+          "program": "blastn",
+          "stage": "dp_traceback",
+          "work_items": 16,
+          "parallel_selected": true,
+          "measured_activity": null
+        },
+        {
+          "program": "blastn",
+          "stage": "dp_traceback",
+          "work_items": 16,
+          "parallel_selected": true,
+          "measured_activity": null
+        },
+        {
+          "program": "blastn",
+          "stage": "dp_traceback",
+          "work_items": 16,
+          "parallel_selected": true,
+          "measured_activity": null
+        },
+        {
+          "program": "blastn",
+          "stage": "dp_traceback",
+          "work_items": 16,
+          "parallel_selected": true,
+          "measured_activity": null
+        },
+        {
+          "program": "blastn",
+          "stage": "dp_traceback",
+          "work_items": 16,
+          "parallel_selected": true,
+          "measured_activity": null
+        },
+        {
+          "program": "blastn",
+          "stage": "dp_traceback",
+          "work_items": 16,
+          "parallel_selected": true,
+          "measured_activity": null
+        },
+        {
+          "program": "blastn",
+          "stage": "dp_traceback",
+          "work_items": 16,
+          "parallel_selected": true,
+          "measured_activity": null
+        },
+        {
+          "program": "blastn",
+          "stage": "dp_traceback",
+          "work_items": 16,
+          "parallel_selected": true,
+          "measured_activity": null
+        },
+        {
+          "program": "blastn",
+          "stage": "dp_traceback",
+          "work_items": 16,
+          "parallel_selected": true,
+          "measured_activity": null
+        },
+        {
+          "program": "blastn",
+          "stage": "dp_traceback",
+          "work_items": 16,
+          "parallel_selected": true,
+          "measured_activity": null
+        },
+        {
+          "program": "blastn",
+          "stage": "dp_traceback",
+          "work_items": 16,
+          "parallel_selected": true,
+          "measured_activity": null
+        },
+        {
+          "program": "blastn",
+          "stage": "dp_traceback",
+          "work_items": 16,
+          "parallel_selected": true,
+          "measured_activity": null
+        },
+        {
+          "program": "blastn",
+          "stage": "dp_traceback",
+          "work_items": 16,
+          "parallel_selected": true,
+          "measured_activity": null
+        },
+        {
+          "program": "blastn",
+          "stage": "dp_traceback",
+          "work_items": 16,
+          "parallel_selected": true,
+          "measured_activity": null
+        },
+        {
+          "program": "blastn",
+          "stage": "dp_traceback",
+          "work_items": 16,
+          "parallel_selected": true,
+          "measured_activity": null
+        },
+        {
+          "program": "blastn",
+          "stage": "dp_traceback",
+          "work_items": 16,
+          "parallel_selected": true,
+          "measured_activity": null
+        },
+        {
+          "program": "blastn",
+          "stage": "dp_traceback",
+          "work_items": 16,
+          "parallel_selected": true,
+          "measured_activity": null
+        },
+        {
+          "program": "blastn",
+          "stage": "dp_traceback",
+          "work_items": 16,
+          "parallel_selected": true,
+          "measured_activity": null
+        },
+        {
+          "program": "blastn",
+          "stage": "dp_traceback",
+          "work_items": 16,
+          "parallel_selected": true,
+          "measured_activity": null
+        },
+        {
+          "program": "blastn",
+          "stage": "dp_traceback",
+          "work_items": 16,
+          "parallel_selected": true,
+          "measured_activity": null
+        },
+        {
+          "program": "blastn",
+          "stage": "dp_traceback",
+          "work_items": 16,
+          "parallel_selected": true,
+          "measured_activity": null
+        },
+        {
+          "program": "blastn",
+          "stage": "dp_traceback",
+          "work_items": 16,
+          "parallel_selected": true,
+          "measured_activity": null
+        },
+        {
+          "program": "blastn",
+          "stage": "dp_traceback",
+          "work_items": 16,
+          "parallel_selected": true,
+          "measured_activity": null
+        },
+        {
+          "program": "blastn",
+          "stage": "dp_traceback",
+          "work_items": 16,
+          "parallel_selected": true,
+          "measured_activity": null
+        },
+        {
+          "program": "blastn",
+          "stage": "dp_traceback",
+          "work_items": 15,
+          "parallel_selected": true,
+          "measured_activity": null
+        },
+        {
+          "program": "blastn",
+          "stage": "dp_traceback",
+          "work_items": 16,
+          "parallel_selected": true,
+          "measured_activity": null
+        },
+        {
+          "program": "blastn",
+          "stage": "dp_traceback",
+          "work_items": 15,
+          "parallel_selected": true,
+          "measured_activity": null
+        },
+        {
+          "program": "blastn",
+          "stage": "dp_traceback",
+          "work_items": 16,
+          "parallel_selected": true,
+          "measured_activity": null
+        },
+        {
+          "program": "blastn",
+          "stage": "dp_traceback",
+          "work_items": 16,
+          "parallel_selected": true,
+          "measured_activity": null
+        },
+        {
+          "program": "blastn",
+          "stage": "dp_traceback",
+          "work_items": 16,
+          "parallel_selected": true,
+          "measured_activity": null
+        },
+        {
+          "program": "blastn",
+          "stage": "dp_traceback",
+          "work_items": 16,
+          "parallel_selected": true,
+          "measured_activity": null
+        },
+        {
+          "program": "blastn",
+          "stage": "dp_traceback",
+          "work_items": 16,
+          "parallel_selected": true,
+          "measured_activity": null
+        },
+        {
+          "program": "blastn",
+          "stage": "dp_traceback",
+          "work_items": 16,
+          "parallel_selected": true,
+          "measured_activity": null
+        },
+        {
+          "program": "blastn",
+          "stage": "dp_traceback",
+          "work_items": 16,
+          "parallel_selected": true,
+          "measured_activity": null
+        },
+        {
+          "program": "blastn",
+          "stage": "dp_traceback",
+          "work_items": 16,
+          "parallel_selected": true,
+          "measured_activity": null
+        },
+        {
+          "program": "blastn",
+          "stage": "dp_traceback",
+          "work_items": 16,
+          "parallel_selected": true,
+          "measured_activity": null
+        },
+        {
+          "program": "blastn",
+          "stage": "dp_traceback",
+          "work_items": 16,
+          "parallel_selected": true,
+          "measured_activity": null
+        },
+        {
+          "program": "blastn",
+          "stage": "dp_traceback",
+          "work_items": 16,
+          "parallel_selected": true,
+          "measured_activity": null
+        },
+        {
+          "program": "blastn",
+          "stage": "dp_traceback",
+          "work_items": 16,
+          "parallel_selected": true,
+          "measured_activity": null
+        },
+        {
+          "program": "blastn",
+          "stage": "dp_traceback",
+          "work_items": 16,
+          "parallel_selected": true,
+          "measured_activity": null
+        },
+        {
+          "program": "blastn",
+          "stage": "dp_traceback",
+          "work_items": 16,
+          "parallel_selected": true,
+          "measured_activity": null
+        },
+        {
+          "program": "blastn",
+          "stage": "dp_traceback",
+          "work_items": 16,
+          "parallel_selected": true,
+          "measured_activity": null
+        },
+        {
+          "program": "blastn",
+          "stage": "dp_traceback",
+          "work_items": 16,
+          "parallel_selected": true,
+          "measured_activity": null
+        },
+        {
+          "program": "blastn",
+          "stage": "dp_traceback",
+          "work_items": 16,
+          "parallel_selected": true,
+          "measured_activity": null
+        },
+        {
+          "program": "blastn",
+          "stage": "dp_traceback",
+          "work_items": 16,
+          "parallel_selected": true,
+          "measured_activity": null
+        },
+        {
+          "program": "blastn",
+          "stage": "dp_traceback",
+          "work_items": 16,
+          "parallel_selected": true,
+          "measured_activity": null
+        },
+        {
+          "program": "blastn",
+          "stage": "dp_traceback",
+          "work_items": 16,
+          "parallel_selected": true,
+          "measured_activity": null
+        },
+        {
+          "program": "blastn",
+          "stage": "dp_traceback",
+          "work_items": 16,
+          "parallel_selected": true,
+          "measured_activity": null
+        },
+        {
+          "program": "blastn",
+          "stage": "dp_traceback",
+          "work_items": 16,
+          "parallel_selected": true,
+          "measured_activity": null
+        },
+        {
+          "program": "blastn",
+          "stage": "dp_traceback",
+          "work_items": 16,
+          "parallel_selected": true,
+          "measured_activity": null
+        },
+        {
+          "program": "blastn",
+          "stage": "dp_traceback",
+          "work_items": 16,
+          "parallel_selected": true,
+          "measured_activity": null
+        },
+        {
+          "program": "blastn",
+          "stage": "dp_traceback",
+          "work_items": 16,
+          "parallel_selected": true,
+          "measured_activity": null
+        },
+        {
+          "program": "blastn",
+          "stage": "dp_traceback",
+          "work_items": 16,
+          "parallel_selected": true,
+          "measured_activity": null
+        },
+        {
+          "program": "blastn",
+          "stage": "dp_traceback",
+          "work_items": 16,
+          "parallel_selected": true,
+          "measured_activity": null
+        },
+        {
+          "program": "blastn",
+          "stage": "dp_traceback",
+          "work_items": 16,
+          "parallel_selected": true,
+          "measured_activity": null
+        },
+        {
+          "program": "blastn",
+          "stage": "dp_traceback",
+          "work_items": 16,
+          "parallel_selected": true,
+          "measured_activity": null
+        },
+        {
+          "program": "blastn",
+          "stage": "dp_traceback",
+          "work_items": 16,
+          "parallel_selected": true,
+          "measured_activity": null
+        },
+        {
+          "program": "blastn",
+          "stage": "dp_traceback",
+          "work_items": 16,
+          "parallel_selected": true,
+          "measured_activity": null
+        },
+        {
+          "program": "blastn",
+          "stage": "dp_traceback",
+          "work_items": 16,
+          "parallel_selected": true,
+          "measured_activity": null
+        },
+        {
+          "program": "blastn",
+          "stage": "dp_traceback",
+          "work_items": 16,
+          "parallel_selected": true,
+          "measured_activity": null
+        },
+        {
+          "program": "blastn",
+          "stage": "dp_traceback",
+          "work_items": 16,
+          "parallel_selected": true,
+          "measured_activity": null
+        },
+        {
+          "program": "blastn",
+          "stage": "dp_traceback",
+          "work_items": 16,
+          "parallel_selected": true,
+          "measured_activity": null
+        },
+        {
+          "program": "blastn",
+          "stage": "dp_traceback",
+          "work_items": 15,
+          "parallel_selected": true,
+          "measured_activity": null
+        },
+        {
+          "program": "blastn",
+          "stage": "dp_traceback",
+          "work_items": 16,
+          "parallel_selected": true,
+          "measured_activity": null
+        },
+        {
+          "program": "blastn",
+          "stage": "dp_traceback",
+          "work_items": 16,
+          "parallel_selected": true,
+          "measured_activity": null
+        },
+        {
+          "program": "blastn",
+          "stage": "dp_traceback",
+          "work_items": 16,
+          "parallel_selected": true,
+          "measured_activity": null
+        },
+        {
+          "program": "blastn",
+          "stage": "dp_traceback",
+          "work_items": 15,
+          "parallel_selected": true,
+          "measured_activity": null
+        },
+        {
+          "program": "blastn",
+          "stage": "dp_traceback",
+          "work_items": 16,
+          "parallel_selected": true,
+          "measured_activity": null
+        },
+        {
+          "program": "blastn",
+          "stage": "dp_traceback",
+          "work_items": 16,
+          "parallel_selected": true,
+          "measured_activity": null
+        },
+        {
+          "program": "blastn",
+          "stage": "dp_traceback",
+          "work_items": 16,
+          "parallel_selected": true,
+          "measured_activity": null
+        },
+        {
+          "program": "blastn",
+          "stage": "dp_traceback",
+          "work_items": 16,
+          "parallel_selected": true,
+          "measured_activity": null
+        },
+        {
+          "program": "blastn",
+          "stage": "dp_traceback",
+          "work_items": 16,
+          "parallel_selected": true,
+          "measured_activity": null
+        },
+        {
+          "program": "blastn",
+          "stage": "dp_traceback",
+          "work_items": 16,
+          "parallel_selected": true,
+          "measured_activity": null
+        },
+        {
+          "program": "blastn",
+          "stage": "dp_traceback",
+          "work_items": 16,
+          "parallel_selected": true,
+          "measured_activity": null
+        },
+        {
+          "program": "blastn",
+          "stage": "dp_traceback",
+          "work_items": 16,
+          "parallel_selected": true,
+          "measured_activity": null
+        },
+        {
+          "program": "blastn",
+          "stage": "dp_traceback",
+          "work_items": 16,
+          "parallel_selected": true,
+          "measured_activity": null
+        },
+        {
+          "program": "blastn",
+          "stage": "dp_traceback",
+          "work_items": 16,
+          "parallel_selected": true,
+          "measured_activity": null
+        },
+        {
+          "program": "blastn",
+          "stage": "dp_traceback",
+          "work_items": 16,
+          "parallel_selected": true,
+          "measured_activity": null
+        },
+        {
+          "program": "blastn",
+          "stage": "dp_traceback",
+          "work_items": 16,
+          "parallel_selected": true,
+          "measured_activity": null
+        },
+        {
+          "program": "blastn",
+          "stage": "dp_traceback",
+          "work_items": 16,
+          "parallel_selected": true,
+          "measured_activity": null
+        },
+        {
+          "program": "blastn",
+          "stage": "dp_traceback",
+          "work_items": 16,
+          "parallel_selected": true,
+          "measured_activity": null
+        },
+        {
+          "program": "blastn",
+          "stage": "dp_traceback",
+          "work_items": 16,
+          "parallel_selected": true,
+          "measured_activity": null
+        },
+        {
+          "program": "blastn",
+          "stage": "dp_traceback",
+          "work_items": 16,
+          "parallel_selected": true,
+          "measured_activity": null
+        },
+        {
+          "program": "blastn",
+          "stage": "dp_traceback",
+          "work_items": 16,
+          "parallel_selected": true,
+          "measured_activity": null
+        },
+        {
+          "program": "blastn",
+          "stage": "dp_traceback",
+          "work_items": 16,
+          "parallel_selected": true,
+          "measured_activity": null
+        },
+        {
+          "program": "blastn",
+          "stage": "dp_traceback",
+          "work_items": 16,
+          "parallel_selected": true,
+          "measured_activity": null
+        },
+        {
+          "program": "blastn",
+          "stage": "dp_traceback",
+          "work_items": 16,
+          "parallel_selected": true,
+          "measured_activity": null
+        },
+        {
+          "program": "blastn",
+          "stage": "dp_traceback",
+          "work_items": 16,
+          "parallel_selected": true,
+          "measured_activity": null
+        },
+        {
+          "program": "blastn",
+          "stage": "dp_traceback",
+          "work_items": 16,
+          "parallel_selected": true,
+          "measured_activity": null
+        },
+        {
+          "program": "blastn",
+          "stage": "dp_traceback",
+          "work_items": 16,
+          "parallel_selected": true,
+          "measured_activity": null
+        },
+        {
+          "program": "blastn",
+          "stage": "dp_traceback",
+          "work_items": 16,
+          "parallel_selected": true,
+          "measured_activity": null
+        },
+        {
+          "program": "blastn",
+          "stage": "dp_traceback",
+          "work_items": 16,
+          "parallel_selected": true,
+          "measured_activity": null
+        },
+        {
+          "program": "blastn",
+          "stage": "dp_traceback",
+          "work_items": 16,
+          "parallel_selected": true,
+          "measured_activity": null
+        },
+        {
+          "program": "blastn",
+          "stage": "dp_traceback",
+          "work_items": 16,
+          "parallel_selected": true,
+          "measured_activity": null
+        },
+        {
+          "program": "blastn",
+          "stage": "dp_traceback",
+          "work_items": 16,
+          "parallel_selected": true,
+          "measured_activity": null
+        },
+        {
+          "program": "blastn",
+          "stage": "dp_traceback",
+          "work_items": 16,
+          "parallel_selected": true,
+          "measured_activity": null
+        },
+        {
+          "program": "blastn",
+          "stage": "dp_traceback",
+          "work_items": 16,
+          "parallel_selected": true,
+          "measured_activity": null
+        },
+        {
+          "program": "blastn",
+          "stage": "dp_traceback",
+          "work_items": 16,
+          "parallel_selected": true,
+          "measured_activity": null
+        },
+        {
+          "program": "blastn",
+          "stage": "dp_traceback",
+          "work_items": 16,
+          "parallel_selected": true,
+          "measured_activity": null
+        },
+        {
+          "program": "blastn",
+          "stage": "dp_traceback",
+          "work_items": 16,
+          "parallel_selected": true,
+          "measured_activity": null
+        },
+        {
+          "program": "blastn",
+          "stage": "dp_traceback",
+          "work_items": 16,
+          "parallel_selected": true,
+          "measured_activity": null
+        },
+        {
+          "program": "blastn",
+          "stage": "dp_traceback",
+          "work_items": 16,
+          "parallel_selected": true,
+          "measured_activity": null
+        },
+        {
+          "program": "blastn",
+          "stage": "dp_traceback",
+          "work_items": 16,
+          "parallel_selected": true,
+          "measured_activity": null
+        },
+        {
+          "program": "blastn",
+          "stage": "dp_traceback",
+          "work_items": 16,
+          "parallel_selected": true,
+          "measured_activity": null
+        },
+        {
+          "program": "blastn",
+          "stage": "dp_traceback",
+          "work_items": 16,
+          "parallel_selected": true,
+          "measured_activity": null
+        },
+        {
+          "program": "blastn",
+          "stage": "dp_traceback",
+          "work_items": 16,
+          "parallel_selected": true,
+          "measured_activity": null
+        },
+        {
+          "program": "blastn",
+          "stage": "dp_traceback",
+          "work_items": 16,
+          "parallel_selected": true,
+          "measured_activity": null
+        },
+        {
+          "program": "blastn",
+          "stage": "dp_traceback",
+          "work_items": 16,
+          "parallel_selected": true,
+          "measured_activity": null
+        },
+        {
+          "program": "blastn",
+          "stage": "dp_traceback",
+          "work_items": 16,
+          "parallel_selected": true,
+          "measured_activity": null
+        },
+        {
+          "program": "blastn",
+          "stage": "dp_traceback",
+          "work_items": 16,
+          "parallel_selected": true,
+          "measured_activity": null
+        },
+        {
+          "program": "blastn",
+          "stage": "dp_traceback",
+          "work_items": 16,
+          "parallel_selected": true,
+          "measured_activity": null
+        },
+        {
+          "program": "blastn",
+          "stage": "dp_traceback",
+          "work_items": 16,
+          "parallel_selected": true,
+          "measured_activity": null
+        },
+        {
+          "program": "blastn",
+          "stage": "dp_traceback",
+          "work_items": 16,
+          "parallel_selected": true,
+          "measured_activity": null
+        },
+        {
+          "program": "blastn",
+          "stage": "dp_traceback",
+          "work_items": 16,
+          "parallel_selected": true,
+          "measured_activity": null
+        },
+        {
+          "program": "blastn",
+          "stage": "dp_traceback",
+          "work_items": 16,
+          "parallel_selected": true,
+          "measured_activity": null
+        },
+        {
+          "program": "blastn",
+          "stage": "dp_traceback",
+          "work_items": 16,
+          "parallel_selected": true,
+          "measured_activity": null
+        },
+        {
+          "program": "blastn",
+          "stage": "dp_traceback",
+          "work_items": 16,
+          "parallel_selected": true,
+          "measured_activity": null
+        },
+        {
+          "program": "blastn",
+          "stage": "dp_traceback",
+          "work_items": 16,
+          "parallel_selected": true,
+          "measured_activity": null
+        },
+        {
+          "program": "blastn",
+          "stage": "dp_traceback",
+          "work_items": 16,
+          "parallel_selected": true,
+          "measured_activity": null
+        },
+        {
+          "program": "blastn",
+          "stage": "dp_traceback",
+          "work_items": 16,
+          "parallel_selected": true,
+          "measured_activity": null
+        },
+        {
+          "program": "blastn",
+          "stage": "dp_traceback",
+          "work_items": 16,
+          "parallel_selected": true,
+          "measured_activity": null
+        },
+        {
+          "program": "blastn",
+          "stage": "dp_traceback",
+          "work_items": 16,
+          "parallel_selected": true,
+          "measured_activity": null
+        },
+        {
+          "program": "blastn",
+          "stage": "dp_traceback",
+          "work_items": 16,
+          "parallel_selected": true,
+          "measured_activity": null
+        },
+        {
+          "program": "blastn",
+          "stage": "dp_traceback",
+          "work_items": 16,
+          "parallel_selected": true,
+          "measured_activity": null
+        },
+        {
+          "program": "blastn",
+          "stage": "dp_traceback",
+          "work_items": 16,
+          "parallel_selected": true,
+          "measured_activity": null
+        },
+        {
+          "program": "blastn",
+          "stage": "dp_traceback",
+          "work_items": 16,
+          "parallel_selected": true,
+          "measured_activity": null
+        },
+        {
+          "program": "blastn",
+          "stage": "dp_traceback",
+          "work_items": 16,
+          "parallel_selected": true,
+          "measured_activity": null
+        },
+        {
+          "program": "blastn",
+          "stage": "dp_traceback",
+          "work_items": 16,
+          "parallel_selected": true,
+          "measured_activity": null
+        },
+        {
+          "program": "blastn",
+          "stage": "dp_traceback",
+          "work_items": 16,
+          "parallel_selected": true,
+          "measured_activity": null
+        },
+        {
+          "program": "blastn",
+          "stage": "dp_traceback",
+          "work_items": 16,
+          "parallel_selected": true,
+          "measured_activity": null
+        },
+        {
+          "program": "blastn",
+          "stage": "dp_traceback",
+          "work_items": 16,
+          "parallel_selected": true,
+          "measured_activity": null
+        },
+        {
+          "program": "blastn",
+          "stage": "dp_traceback",
+          "work_items": 16,
+          "parallel_selected": true,
+          "measured_activity": null
+        },
+        {
+          "program": "blastn",
+          "stage": "dp_traceback",
+          "work_items": 16,
+          "parallel_selected": true,
+          "measured_activity": null
+        },
+        {
+          "program": "blastn",
+          "stage": "dp_traceback",
+          "work_items": 16,
+          "parallel_selected": true,
+          "measured_activity": null
+        },
+        {
+          "program": "blastn",
+          "stage": "dp_traceback",
+          "work_items": 16,
+          "parallel_selected": true,
+          "measured_activity": null
+        },
+        {
+          "program": "blastn",
+          "stage": "dp_traceback",
+          "work_items": 16,
+          "parallel_selected": true,
+          "measured_activity": null
+        },
+        {
+          "program": "blastn",
+          "stage": "dp_traceback",
+          "work_items": 16,
+          "parallel_selected": true,
+          "measured_activity": null
+        },
+        {
+          "program": "blastn",
+          "stage": "dp_traceback",
+          "work_items": 14,
+          "parallel_selected": true,
+          "measured_activity": null
+        },
+        {
+          "program": "blastn",
+          "stage": "dp_traceback",
+          "work_items": 15,
+          "parallel_selected": true,
+          "measured_activity": null
+        },
+        {
+          "program": "blastn",
+          "stage": "dp_traceback",
+          "work_items": 16,
+          "parallel_selected": true,
+          "measured_activity": null
+        },
+        {
+          "program": "blastn",
+          "stage": "dp_traceback",
+          "work_items": 16,
+          "parallel_selected": true,
+          "measured_activity": null
+        },
+        {
+          "program": "blastn",
+          "stage": "dp_traceback",
+          "work_items": 16,
+          "parallel_selected": true,
+          "measured_activity": null
+        },
+        {
+          "program": "blastn",
+          "stage": "dp_traceback",
+          "work_items": 16,
+          "parallel_selected": true,
+          "measured_activity": null
+        },
+        {
+          "program": "blastn",
+          "stage": "dp_traceback",
+          "work_items": 16,
+          "parallel_selected": true,
+          "measured_activity": null
+        },
+        {
+          "program": "blastn",
+          "stage": "dp_traceback",
+          "work_items": 16,
+          "parallel_selected": true,
+          "measured_activity": null
+        },
+        {
+          "program": "blastn",
+          "stage": "dp_traceback",
+          "work_items": 16,
+          "parallel_selected": true,
+          "measured_activity": null
+        },
+        {
+          "program": "blastn",
+          "stage": "dp_traceback",
+          "work_items": 16,
+          "parallel_selected": true,
+          "measured_activity": null
+        },
+        {
+          "program": "blastn",
+          "stage": "dp_traceback",
+          "work_items": 16,
+          "parallel_selected": true,
+          "measured_activity": null
+        },
+        {
+          "program": "blastn",
+          "stage": "dp_traceback",
+          "work_items": 16,
+          "parallel_selected": true,
+          "measured_activity": null
+        },
+        {
+          "program": "blastn",
+          "stage": "dp_traceback",
+          "work_items": 16,
+          "parallel_selected": true,
+          "measured_activity": null
+        },
+        {
+          "program": "blastn",
+          "stage": "dp_traceback",
+          "work_items": 16,
+          "parallel_selected": true,
+          "measured_activity": null
+        },
+        {
+          "program": "blastn",
+          "stage": "dp_traceback",
+          "work_items": 16,
+          "parallel_selected": true,
+          "measured_activity": null
+        },
+        {
+          "program": "blastn",
+          "stage": "dp_traceback",
+          "work_items": 16,
+          "parallel_selected": true,
+          "measured_activity": null
+        },
+        {
+          "program": "blastn",
+          "stage": "dp_traceback",
+          "work_items": 16,
+          "parallel_selected": true,
+          "measured_activity": null
+        },
+        {
+          "program": "blastn",
+          "stage": "dp_traceback",
+          "work_items": 16,
+          "parallel_selected": true,
+          "measured_activity": null
+        },
+        {
+          "program": "blastn",
+          "stage": "dp_traceback",
+          "work_items": 16,
+          "parallel_selected": true,
+          "measured_activity": null
+        },
+        {
+          "program": "blastn",
+          "stage": "dp_traceback",
+          "work_items": 16,
+          "parallel_selected": true,
+          "measured_activity": null
+        },
+        {
+          "program": "blastn",
+          "stage": "dp_traceback",
+          "work_items": 16,
+          "parallel_selected": true,
+          "measured_activity": null
+        },
+        {
+          "program": "blastn",
+          "stage": "dp_traceback",
+          "work_items": 16,
+          "parallel_selected": true,
+          "measured_activity": null
+        },
+        {
+          "program": "blastn",
+          "stage": "dp_traceback",
+          "work_items": 16,
+          "parallel_selected": true,
+          "measured_activity": null
+        },
+        {
+          "program": "blastn",
+          "stage": "dp_traceback",
+          "work_items": 16,
+          "parallel_selected": true,
+          "measured_activity": null
+        },
+        {
+          "program": "blastn",
+          "stage": "dp_traceback",
+          "work_items": 16,
+          "parallel_selected": true,
+          "measured_activity": null
+        },
+        {
+          "program": "blastn",
+          "stage": "dp_traceback",
+          "work_items": 16,
+          "parallel_selected": true,
+          "measured_activity": null
+        },
+        {
+          "program": "blastn",
+          "stage": "dp_traceback",
+          "work_items": 16,
+          "parallel_selected": true,
+          "measured_activity": null
+        },
+        {
+          "program": "blastn",
+          "stage": "dp_traceback",
+          "work_items": 16,
+          "parallel_selected": true,
+          "measured_activity": null
+        },
+        {
+          "program": "blastn",
+          "stage": "dp_traceback",
+          "work_items": 16,
+          "parallel_selected": true,
+          "measured_activity": null
+        },
+        {
+          "program": "blastn",
+          "stage": "dp_traceback",
+          "work_items": 16,
+          "parallel_selected": true,
+          "measured_activity": null
+        },
+        {
+          "program": "blastn",
+          "stage": "dp_traceback",
+          "work_items": 16,
+          "parallel_selected": true,
+          "measured_activity": null
+        },
+        {
+          "program": "blastn",
+          "stage": "dp_traceback",
+          "work_items": 16,
+          "parallel_selected": true,
+          "measured_activity": null
+        },
+        {
+          "program": "blastn",
+          "stage": "dp_traceback",
+          "work_items": 16,
+          "parallel_selected": true,
+          "measured_activity": null
+        },
+        {
+          "program": "blastn",
+          "stage": "dp_traceback",
+          "work_items": 16,
+          "parallel_selected": true,
+          "measured_activity": null
+        },
+        {
+          "program": "blastn",
+          "stage": "dp_traceback",
+          "work_items": 16,
+          "parallel_selected": true,
+          "measured_activity": null
+        },
+        {
+          "program": "blastn",
+          "stage": "dp_traceback",
+          "work_items": 16,
+          "parallel_selected": true,
+          "measured_activity": null
+        },
+        {
+          "program": "blastn",
+          "stage": "dp_traceback",
+          "work_items": 16,
+          "parallel_selected": true,
+          "measured_activity": null
+        },
+        {
+          "program": "blastn",
+          "stage": "dp_traceback",
+          "work_items": 16,
+          "parallel_selected": true,
+          "measured_activity": null
+        },
+        {
+          "program": "blastn",
+          "stage": "dp_traceback",
+          "work_items": 16,
+          "parallel_selected": true,
+          "measured_activity": null
+        },
+        {
+          "program": "blastn",
+          "stage": "dp_traceback",
+          "work_items": 16,
+          "parallel_selected": true,
+          "measured_activity": null
+        },
+        {
+          "program": "blastn",
+          "stage": "dp_traceback",
+          "work_items": 16,
+          "parallel_selected": true,
+          "measured_activity": null
+        },
+        {
+          "program": "blastn",
+          "stage": "dp_traceback",
+          "work_items": 16,
+          "parallel_selected": true,
+          "measured_activity": null
+        },
+        {
+          "program": "blastn",
+          "stage": "dp_traceback",
+          "work_items": 16,
+          "parallel_selected": true,
+          "measured_activity": null
+        },
+        {
+          "program": "blastn",
+          "stage": "dp_traceback",
+          "work_items": 16,
+          "parallel_selected": true,
+          "measured_activity": null
+        },
+        {
+          "program": "blastn",
+          "stage": "dp_traceback",
+          "work_items": 16,
+          "parallel_selected": true,
+          "measured_activity": null
+        },
+        {
+          "program": "blastn",
+          "stage": "dp_traceback",
+          "work_items": 16,
+          "parallel_selected": true,
+          "measured_activity": null
+        },
+        {
+          "program": "blastn",
+          "stage": "dp_traceback",
+          "work_items": 16,
+          "parallel_selected": true,
+          "measured_activity": null
+        },
+        {
+          "program": "blastn",
+          "stage": "dp_traceback",
+          "work_items": 16,
+          "parallel_selected": true,
+          "measured_activity": null
+        },
+        {
+          "program": "blastn",
+          "stage": "dp_traceback",
+          "work_items": 16,
+          "parallel_selected": true,
+          "measured_activity": null
+        },
+        {
+          "program": "blastn",
+          "stage": "dp_traceback",
+          "work_items": 16,
+          "parallel_selected": true,
+          "measured_activity": null
+        },
+        {
+          "program": "blastn",
+          "stage": "dp_traceback",
+          "work_items": 16,
+          "parallel_selected": true,
+          "measured_activity": null
+        },
+        {
+          "program": "blastn",
+          "stage": "dp_traceback",
+          "work_items": 16,
+          "parallel_selected": true,
+          "measured_activity": null
+        },
+        {
+          "program": "blastn",
+          "stage": "dp_traceback",
+          "work_items": 16,
+          "parallel_selected": true,
+          "measured_activity": null
+        },
+        {
+          "program": "blastn",
+          "stage": "dp_traceback",
+          "work_items": 13,
+          "parallel_selected": true,
+          "measured_activity": null
+        },
+        {
+          "program": "blastn",
+          "stage": "dp_traceback",
+          "work_items": 16,
+          "parallel_selected": true,
+          "measured_activity": null
+        },
+        {
+          "program": "blastn",
+          "stage": "dp_traceback",
+          "work_items": 14,
+          "parallel_selected": true,
+          "measured_activity": null
+        },
+        {
+          "program": "blastn",
+          "stage": "dp_traceback",
+          "work_items": 15,
+          "parallel_selected": true,
+          "measured_activity": null
+        },
+        {
+          "program": "blastn",
+          "stage": "dp_traceback",
+          "work_items": 13,
+          "parallel_selected": true,
+          "measured_activity": null
+        },
+        {
+          "program": "blastn",
+          "stage": "dp_traceback",
+          "work_items": 15,
+          "parallel_selected": true,
+          "measured_activity": null
+        },
+        {
+          "program": "blastn",
+          "stage": "dp_traceback",
+          "work_items": 16,
+          "parallel_selected": true,
+          "measured_activity": null
+        },
+        {
+          "program": "blastn",
+          "stage": "dp_traceback",
+          "work_items": 16,
+          "parallel_selected": true,
+          "measured_activity": null
+        },
+        {
+          "program": "blastn",
+          "stage": "dp_traceback",
+          "work_items": 15,
+          "parallel_selected": true,
+          "measured_activity": null
+        },
+        {
+          "program": "blastn",
+          "stage": "dp_traceback",
+          "work_items": 16,
+          "parallel_selected": true,
+          "measured_activity": null
+        },
+        {
+          "program": "blastn",
+          "stage": "dp_traceback",
+          "work_items": 16,
+          "parallel_selected": true,
+          "measured_activity": null
+        },
+        {
+          "program": "blastn",
+          "stage": "dp_traceback",
+          "work_items": 16,
+          "parallel_selected": true,
+          "measured_activity": null
+        },
+        {
+          "program": "blastn",
+          "stage": "dp_traceback",
+          "work_items": 16,
+          "parallel_selected": true,
+          "measured_activity": null
+        },
+        {
+          "program": "blastn",
+          "stage": "dp_traceback",
+          "work_items": 16,
+          "parallel_selected": true,
+          "measured_activity": null
+        },
+        {
+          "program": "blastn",
+          "stage": "dp_traceback",
+          "work_items": 16,
+          "parallel_selected": true,
+          "measured_activity": null
+        },
+        {
+          "program": "blastn",
+          "stage": "dp_traceback",
+          "work_items": 15,
+          "parallel_selected": true,
+          "measured_activity": null
+        },
+        {
+          "program": "blastn",
+          "stage": "dp_traceback",
+          "work_items": 16,
+          "parallel_selected": true,
+          "measured_activity": null
+        },
+        {
+          "program": "blastn",
+          "stage": "dp_traceback",
+          "work_items": 16,
+          "parallel_selected": true,
+          "measured_activity": null
+        },
+        {
+          "program": "blastn",
+          "stage": "dp_traceback",
+          "work_items": 16,
+          "parallel_selected": true,
+          "measured_activity": null
+        },
+        {
+          "program": "blastn",
+          "stage": "dp_traceback",
+          "work_items": 16,
+          "parallel_selected": true,
+          "measured_activity": null
+        },
+        {
+          "program": "blastn",
+          "stage": "dp_traceback",
+          "work_items": 16,
+          "parallel_selected": true,
+          "measured_activity": null
+        },
+        {
+          "program": "blastn",
+          "stage": "dp_traceback",
+          "work_items": 16,
+          "parallel_selected": true,
+          "measured_activity": null
+        },
+        {
+          "program": "blastn",
+          "stage": "dp_traceback",
+          "work_items": 16,
+          "parallel_selected": true,
+          "measured_activity": null
+        },
+        {
+          "program": "blastn",
+          "stage": "dp_traceback",
+          "work_items": 16,
+          "parallel_selected": true,
+          "measured_activity": null
+        },
+        {
+          "program": "blastn",
+          "stage": "dp_traceback",
+          "work_items": 16,
+          "parallel_selected": true,
+          "measured_activity": null
+        },
+        {
+          "program": "blastn",
+          "stage": "dp_traceback",
+          "work_items": 16,
+          "parallel_selected": true,
+          "measured_activity": null
+        },
+        {
+          "program": "blastn",
+          "stage": "dp_traceback",
+          "work_items": 16,
+          "parallel_selected": true,
+          "measured_activity": null
+        },
+        {
+          "program": "blastn",
+          "stage": "dp_traceback",
+          "work_items": 16,
+          "parallel_selected": true,
+          "measured_activity": null
+        },
+        {
+          "program": "blastn",
+          "stage": "dp_traceback",
+          "work_items": 16,
+          "parallel_selected": true,
+          "measured_activity": null
+        },
+        {
+          "program": "blastn",
+          "stage": "dp_traceback",
+          "work_items": 16,
+          "parallel_selected": true,
+          "measured_activity": null
+        },
+        {
+          "program": "blastn",
+          "stage": "dp_traceback",
+          "work_items": 16,
+          "parallel_selected": true,
+          "measured_activity": null
+        },
+        {
+          "program": "blastn",
+          "stage": "dp_traceback",
+          "work_items": 16,
+          "parallel_selected": true,
+          "measured_activity": null
+        },
+        {
+          "program": "blastn",
+          "stage": "dp_traceback",
+          "work_items": 16,
+          "parallel_selected": true,
+          "measured_activity": null
+        },
+        {
+          "program": "blastn",
+          "stage": "dp_traceback",
+          "work_items": 16,
+          "parallel_selected": true,
+          "measured_activity": null
+        },
+        {
+          "program": "blastn",
+          "stage": "dp_traceback",
+          "work_items": 16,
+          "parallel_selected": true,
+          "measured_activity": null
+        },
+        {
+          "program": "blastn",
+          "stage": "dp_traceback",
+          "work_items": 16,
+          "parallel_selected": true,
+          "measured_activity": null
+        },
+        {
+          "program": "blastn",
+          "stage": "dp_traceback",
+          "work_items": 16,
+          "parallel_selected": true,
+          "measured_activity": null
+        },
+        {
+          "program": "blastn",
+          "stage": "dp_traceback",
+          "work_items": 16,
+          "parallel_selected": true,
+          "measured_activity": null
+        },
+        {
+          "program": "blastn",
+          "stage": "dp_traceback",
+          "work_items": 16,
+          "parallel_selected": true,
+          "measured_activity": null
+        },
+        {
+          "program": "blastn",
+          "stage": "dp_traceback",
+          "work_items": 16,
+          "parallel_selected": true,
+          "measured_activity": null
+        },
+        {
+          "program": "blastn",
+          "stage": "dp_traceback",
+          "work_items": 16,
+          "parallel_selected": true,
+          "measured_activity": null
+        },
+        {
+          "program": "blastn",
+          "stage": "dp_traceback",
+          "work_items": 16,
+          "parallel_selected": true,
+          "measured_activity": null
+        },
+        {
+          "program": "blastn",
+          "stage": "dp_traceback",
+          "work_items": 16,
+          "parallel_selected": true,
+          "measured_activity": null
+        },
+        {
+          "program": "blastn",
+          "stage": "dp_traceback",
+          "work_items": 16,
+          "parallel_selected": true,
+          "measured_activity": null
+        },
+        {
+          "program": "blastn",
+          "stage": "dp_traceback",
+          "work_items": 16,
+          "parallel_selected": true,
+          "measured_activity": null
+        },
+        {
+          "program": "blastn",
+          "stage": "dp_traceback",
+          "work_items": 16,
+          "parallel_selected": true,
+          "measured_activity": null
+        },
+        {
+          "program": "blastn",
+          "stage": "dp_traceback",
+          "work_items": 16,
+          "parallel_selected": true,
+          "measured_activity": null
+        },
+        {
+          "program": "blastn",
+          "stage": "dp_traceback",
+          "work_items": 16,
+          "parallel_selected": true,
+          "measured_activity": null
+        },
+        {
+          "program": "blastn",
+          "stage": "dp_traceback",
+          "work_items": 16,
+          "parallel_selected": true,
+          "measured_activity": null
+        },
+        {
+          "program": "blastn",
+          "stage": "dp_traceback",
+          "work_items": 16,
+          "parallel_selected": true,
+          "measured_activity": null
+        },
+        {
+          "program": "blastn",
+          "stage": "dp_traceback",
+          "work_items": 16,
+          "parallel_selected": true,
+          "measured_activity": null
+        },
+        {
+          "program": "blastn",
+          "stage": "dp_traceback",
+          "work_items": 16,
+          "parallel_selected": true,
+          "measured_activity": null
+        },
+        {
+          "program": "blastn",
+          "stage": "dp_traceback",
+          "work_items": 16,
+          "parallel_selected": true,
+          "measured_activity": null
+        },
+        {
+          "program": "blastn",
+          "stage": "dp_traceback",
+          "work_items": 16,
+          "parallel_selected": true,
+          "measured_activity": null
+        },
+        {
+          "program": "blastn",
+          "stage": "dp_traceback",
+          "work_items": 16,
+          "parallel_selected": true,
+          "measured_activity": null
+        },
+        {
+          "program": "blastn",
+          "stage": "dp_traceback",
+          "work_items": 16,
+          "parallel_selected": true,
+          "measured_activity": null
+        },
+        {
+          "program": "blastn",
+          "stage": "dp_traceback",
+          "work_items": 16,
+          "parallel_selected": true,
+          "measured_activity": null
+        },
+        {
+          "program": "blastn",
+          "stage": "dp_traceback",
+          "work_items": 16,
+          "parallel_selected": true,
+          "measured_activity": null
+        },
+        {
+          "program": "blastn",
+          "stage": "dp_traceback",
+          "work_items": 16,
+          "parallel_selected": true,
+          "measured_activity": null
+        },
+        {
+          "program": "blastn",
+          "stage": "dp_traceback",
+          "work_items": 16,
+          "parallel_selected": true,
+          "measured_activity": null
+        },
+        {
+          "program": "blastn",
+          "stage": "dp_traceback",
+          "work_items": 16,
+          "parallel_selected": true,
+          "measured_activity": null
+        },
+        {
+          "program": "blastn",
+          "stage": "dp_traceback",
+          "work_items": 16,
+          "parallel_selected": true,
+          "measured_activity": null
+        },
+        {
+          "program": "blastn",
+          "stage": "dp_traceback",
+          "work_items": 16,
+          "parallel_selected": true,
+          "measured_activity": null
+        },
+        {
+          "program": "blastn",
+          "stage": "dp_traceback",
+          "work_items": 16,
+          "parallel_selected": true,
+          "measured_activity": null
+        },
+        {
+          "program": "blastn",
+          "stage": "dp_traceback",
+          "work_items": 16,
+          "parallel_selected": true,
+          "measured_activity": null
+        },
+        {
+          "program": "blastn",
+          "stage": "dp_traceback",
+          "work_items": 16,
+          "parallel_selected": true,
+          "measured_activity": null
+        },
+        {
+          "program": "blastn",
+          "stage": "dp_traceback",
+          "work_items": 16,
+          "parallel_selected": true,
+          "measured_activity": null
+        },
+        {
+          "program": "blastn",
+          "stage": "dp_traceback",
+          "work_items": 16,
+          "parallel_selected": true,
+          "measured_activity": null
+        },
+        {
+          "program": "blastn",
+          "stage": "dp_traceback",
+          "work_items": 16,
+          "parallel_selected": true,
+          "measured_activity": null
+        },
+        {
+          "program": "blastn",
+          "stage": "dp_traceback",
+          "work_items": 16,
+          "parallel_selected": true,
+          "measured_activity": null
+        },
+        {
+          "program": "blastn",
+          "stage": "dp_traceback",
+          "work_items": 16,
+          "parallel_selected": true,
+          "measured_activity": null
+        },
+        {
+          "program": "blastn",
+          "stage": "dp_traceback",
+          "work_items": 16,
+          "parallel_selected": true,
+          "measured_activity": null
+        },
+        {
+          "program": "blastn",
+          "stage": "dp_traceback",
+          "work_items": 16,
+          "parallel_selected": true,
+          "measured_activity": null
+        },
+        {
+          "program": "blastn",
+          "stage": "dp_traceback",
+          "work_items": 16,
+          "parallel_selected": true,
+          "measured_activity": null
+        },
+        {
+          "program": "blastn",
+          "stage": "dp_traceback",
+          "work_items": 16,
+          "parallel_selected": true,
+          "measured_activity": null
+        },
+        {
+          "program": "blastn",
+          "stage": "dp_traceback",
+          "work_items": 16,
+          "parallel_selected": true,
+          "measured_activity": null
+        },
+        {
+          "program": "blastn",
+          "stage": "dp_traceback",
+          "work_items": 16,
+          "parallel_selected": true,
+          "measured_activity": null
+        },
+        {
+          "program": "blastn",
+          "stage": "dp_traceback",
+          "work_items": 16,
+          "parallel_selected": true,
+          "measured_activity": null
+        },
+        {
+          "program": "blastn",
+          "stage": "dp_traceback",
+          "work_items": 16,
+          "parallel_selected": true,
+          "measured_activity": null
+        },
+        {
+          "program": "blastn",
+          "stage": "dp_traceback",
+          "work_items": 16,
+          "parallel_selected": true,
+          "measured_activity": null
+        },
+        {
+          "program": "blastn",
+          "stage": "dp_traceback",
+          "work_items": 16,
+          "parallel_selected": true,
+          "measured_activity": null
+        },
+        {
+          "program": "blastn",
+          "stage": "dp_traceback",
+          "work_items": 16,
+          "parallel_selected": true,
+          "measured_activity": null
+        },
+        {
+          "program": "blastn",
+          "stage": "dp_traceback",
+          "work_items": 16,
+          "parallel_selected": true,
+          "measured_activity": null
+        },
+        {
+          "program": "blastn",
+          "stage": "dp_traceback",
+          "work_items": 16,
+          "parallel_selected": true,
+          "measured_activity": null
+        },
+        {
+          "program": "blastn",
+          "stage": "dp_traceback",
+          "work_items": 15,
+          "parallel_selected": true,
+          "measured_activity": null
+        },
+        {
+          "program": "blastn",
+          "stage": "dp_traceback",
+          "work_items": 16,
+          "parallel_selected": true,
+          "measured_activity": null
+        },
+        {
+          "program": "blastn",
+          "stage": "dp_traceback",
+          "work_items": 16,
+          "parallel_selected": true,
+          "measured_activity": null
+        },
+        {
+          "program": "blastn",
+          "stage": "dp_traceback",
+          "work_items": 15,
+          "parallel_selected": true,
+          "measured_activity": null
+        },
+        {
+          "program": "blastn",
+          "stage": "dp_traceback",
+          "work_items": 16,
+          "parallel_selected": true,
+          "measured_activity": null
+        },
+        {
+          "program": "blastn",
+          "stage": "dp_traceback",
+          "work_items": 16,
+          "parallel_selected": true,
+          "measured_activity": null
+        },
+        {
+          "program": "blastn",
+          "stage": "dp_traceback",
+          "work_items": 5,
+          "parallel_selected": true,
+          "measured_activity": null
+        }
+      ],
+      "host_worker_counts": {
+        "spawn_attempt": 8,
+        "spawned": 8,
+        "ready": 8,
+        "exited": 8
+      },
+      "measured_activity": null
+    }
+  },
+  {
+    "status": "PASS",
+    "reason": null,
+    "exit_status": 0,
+    "wall_seconds": 11.929577884002356,
+    "cpu_user_seconds": 94.61,
+    "cpu_system_seconds": 0.58,
+    "peak_rss_bytes": 321048576,
+    "output": "/mnt/c/Users/genom/GitHub/LOSAT/docs/evidence/wasm_performance_20260913/run-20260913-01/p0-traps/blastp-ap131-nz/output.txt",
+    "raw_output_sha256": "6d0073c9289cd5e27cc215c4e4d441cb15013c0bd62a3859c2b0bea0ed24f750",
+    "raw_output_bytes": 512675,
+    "started_utc": "2026-09-13T07:09:45Z",
+    "case_id": "blastp-ap131-nz",
+    "artifact_sha256": "13b88d349ec3449330b11428bb15e9a688448c4e144e756b6f038b4b9412a437",
+    "input_hashes": {
+      "AP027131.faa": "f454d69ec8658655b003b543abb1a6a164826ef2d689b533f9a413369014db3b",
+      "NZ_CP006932.faa": "61b882399e10f26f1ba1daf27599370f265b678ae95cbb3bccdd443b34dd9e20"
+    },
+    "diagnostic": true,
+    "thread_contract": {
+      "requested_threads": 8,
+      "pool_threads": 8,
+      "caller_participates": false,
+      "effective_compute_threads": 8,
+      "thread_stages": [
+        {
+          "program": "blastp",
+          "stage": "subject-prep",
+          "work_items": 581,
+          "parallel_selected": true,
+          "measured_activity": null
+        },
+        {
+          "program": "blastp",
+          "stage": "prelim",
+          "work_items": 581,
+          "parallel_selected": true,
+          "measured_activity": null
+        },
+        {
+          "program": "blastp",
+          "stage": "kappa-query-redo",
+          "work_items": 595,
+          "parallel_selected": true,
+          "measured_activity": null
+        }
+      ],
+      "host_worker_counts": {
+        "spawn_attempt": 8,
+        "spawned": 8,
+        "ready": 8,
+        "exited": 8
+      },
+      "measured_activity": null
+    }
+  }
+]

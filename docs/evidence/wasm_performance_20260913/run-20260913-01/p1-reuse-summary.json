@@ -1,0 +1,432 @@
+[
+  {
+    "condition": "session0-baseline-serial-command-compiled-module",
+    "mode": "compiled-module",
+    "threads": 1,
+    "purpose": "exploration only; one AB session, warmup1 and3 measurements",
+    "first_invocation_seconds": 6.384103523,
+    "first_n8_follows_n1_in_same_module": false,
+    "median_seconds": 4.946591438999998,
+    "samples": [
+      5.039520909999999,
+      4.946591438999998,
+      4.8442205509999985
+    ],
+    "min_seconds": 4.8442205509999985,
+    "max_seconds": 5.039520909999999,
+    "linear_memory_bytes_after_each_invocation": [
+      67305472,
+      67305472,
+      67305472,
+      67305472
+    ],
+    "rss_bytes_after_each_invocation": [
+      155385856,
+      221446144,
+      221761536,
+      221822976
+    ],
+    "process_lifetime_peak_rss_bytes": 287764480,
+    "source": "/mnt/c/Users/genom/GitHub/LOSAT/docs/evidence/wasm_performance_20260913/run-20260913-01/p1-reuse-exploration/reuse/session0-baseline-serial-command-compiled-module/process/output.txt",
+    "artifact_sha256": "f687af514acb81a62219237c25425412d24c8d5a527d11a988e41dc114c53940",
+    "node_argv": [
+      "/tmp/losat-node-check/node-v24.21.0-linux-x64/bin/node"
+    ],
+    "preparation": {
+      "validation_including_raw_compile_seconds": 0.004329867999999998,
+      "guard_seconds": 0,
+      "second_compile_seconds": 0.006107225,
+      "input_load_seconds": 3.8809999999998016e-06,
+      "resident_input_bytes": 0,
+      "final_instance_close_seconds": 3.6739999995916152e-06
+    }
+  },
+  {
+    "condition": "session0-baseline-threaded-command-compiled-module",
+    "mode": "compiled-module",
+    "threads": 1,
+    "purpose": "exploration only; one AB session, warmup1 and3 measurements",
+    "first_invocation_seconds": 6.058325750999999,
+    "first_n8_follows_n1_in_same_module": false,
+    "median_seconds": 4.7622058130000005,
+    "samples": [
+      4.718187922000001,
+      4.7622058130000005,
+      4.7672960830000015
+    ],
+    "min_seconds": 4.718187922000001,
+    "max_seconds": 4.7672960830000015,
+    "linear_memory_bytes_after_each_invocation": [
+      67239936,
+      67239936,
+      67239936,
+      67239936
+    ],
+    "rss_bytes_after_each_invocation": [
+      162603008,
+      418795520,
+      484802560,
+      687190016
+    ],
+    "process_lifetime_peak_rss_bytes": 687190016,
+    "source": "/mnt/c/Users/genom/GitHub/LOSAT/docs/evidence/wasm_performance_20260913/run-20260913-01/p1-reuse-exploration/reuse/session0-baseline-threaded-command-compiled-module/process/output.txt",
+    "artifact_sha256": "13b88d349ec3449330b11428bb15e9a688448c4e144e756b6f038b4b9412a437",
+    "node_argv": [
+      "/tmp/losat-node-check/node-v24.21.0-linux-x64/bin/node"
+    ],
+    "preparation": {
+      "validation_including_raw_compile_seconds": 0.006116918999999996,
+      "guard_seconds": 0.04613971300000003,
+      "guarded_compile_seconds": 0.0025776769999999944,
+      "input_load_seconds": 4.961999999977706e-06,
+      "resident_input_bytes": 0,
+      "final_instance_close_seconds": 4.108000000996981e-06
+    }
+  },
+  {
+    "condition": "session0-baseline-threaded-command-compiled-module",
+    "mode": "compiled-module",
+    "threads": 8,
+    "purpose": "exploration only; one AB session, warmup1 and3 measurements",
+    "first_invocation_seconds": 3.8544120089999994,
+    "first_n8_follows_n1_in_same_module": true,
+    "median_seconds": 3.8153860139999995,
+    "samples": [
+      3.8318570579999998,
+      3.8153860139999995,
+      3.650271769000003
+    ],
+    "min_seconds": 3.650271769000003,
+    "max_seconds": 3.8318570579999998,
+    "linear_memory_bytes_after_each_invocation": [
+      75694080,
+      75694080,
+      75694080,
+      75694080
+    ],
+    "rss_bytes_after_each_invocation": [
+      278016000,
+      352993280,
+      554414080,
+      620650496
+    ],
+    "process_lifetime_peak_rss_bytes": 687190016,
+    "source": "/mnt/c/Users/genom/GitHub/LOSAT/docs/evidence/wasm_performance_20260913/run-20260913-01/p1-reuse-exploration/reuse/session0-baseline-threaded-command-compiled-module/process/output.txt",
+    "artifact_sha256": "13b88d349ec3449330b11428bb15e9a688448c4e144e756b6f038b4b9412a437",
+    "node_argv": [
+      "/tmp/losat-node-check/node-v24.21.0-linux-x64/bin/node"
+    ],
+    "preparation": {
+      "validation_including_raw_compile_seconds": 0.006116918999999996,
+      "guard_seconds": 0.04613971300000003,
+      "guarded_compile_seconds": 0.0025776769999999944,
+      "input_load_seconds": 4.961999999977706e-06,
+      "resident_input_bytes": 0,
+      "final_instance_close_seconds": 4.108000000996981e-06
+    }
+  },
+  {
+    "condition": "session0-baseline-threaded-reactor-same-instance",
+    "mode": "same-instance",
+    "threads": 1,
+    "purpose": "exploration only; one AB session, warmup1 and3 measurements",
+    "first_invocation_seconds": 6.122158262999999,
+    "first_n8_follows_n1_in_same_module": false,
+    "median_seconds": 4.858785598999998,
+    "samples": [
+      4.858785598999998,
+      5.0963031979999975,
+      4.824054271999998
+    ],
+    "min_seconds": 4.824054271999998,
+    "max_seconds": 5.0963031979999975,
+    "linear_memory_bytes_after_each_invocation": [
+      68354048,
+      77529088,
+      77529088,
+      77529088
+    ],
+    "rss_bytes_after_each_invocation": [
+      158838784,
+      232923136,
+      232923136,
+      235085824
+    ],
+    "process_lifetime_peak_rss_bytes": 308776960,
+    "source": "/mnt/c/Users/genom/GitHub/LOSAT/docs/evidence/wasm_performance_20260913/run-20260913-01/p1-reuse-exploration/reuse/session0-baseline-threaded-reactor-same-instance/process/output.txt",
+    "artifact_sha256": "f853c69b6ea9070b3d86a9b9be3dd8e9c539c40475a4da84f37089dd4bb8975a",
+    "node_argv": [
+      "/tmp/losat-node-check/node-v24.21.0-linux-x64/bin/node"
+    ],
+    "preparation": {
+      "validation_including_raw_compile_seconds": 0.004321681999999996,
+      "guard_seconds": 0.033974687,
+      "guarded_compile_seconds": 0.0024376000000000033,
+      "input_load_seconds": 0.016682602,
+      "resident_input_bytes": 597984,
+      "final_instance_close_seconds": 0.00011171099999774014
+    }
+  },
+  {
+    "condition": "session0-baseline-threaded-reactor-same-instance",
+    "mode": "same-instance",
+    "threads": 8,
+    "purpose": "exploration only; one AB session, warmup1 and3 measurements",
+    "first_invocation_seconds": 3.2904321249999993,
+    "first_n8_follows_n1_in_same_module": true,
+    "median_seconds": 3.5400790899999994,
+    "samples": [
+      3.586343384,
+      3.5400790899999994,
+      3.4096537339999995
+    ],
+    "min_seconds": 3.4096537339999995,
+    "max_seconds": 3.586343384,
+    "linear_memory_bytes_after_each_invocation": [
+      77529088,
+      77529088,
+      77529088,
+      77529088
+    ],
+    "rss_bytes_after_each_invocation": [
+      222068736,
+      231845888,
+      234336256,
+      235085824
+    ],
+    "process_lifetime_peak_rss_bytes": 308776960,
+    "source": "/mnt/c/Users/genom/GitHub/LOSAT/docs/evidence/wasm_performance_20260913/run-20260913-01/p1-reuse-exploration/reuse/session0-baseline-threaded-reactor-same-instance/process/output.txt",
+    "artifact_sha256": "f853c69b6ea9070b3d86a9b9be3dd8e9c539c40475a4da84f37089dd4bb8975a",
+    "node_argv": [
+      "/tmp/losat-node-check/node-v24.21.0-linux-x64/bin/node"
+    ],
+    "preparation": {
+      "validation_including_raw_compile_seconds": 0.004321681999999996,
+      "guard_seconds": 0.033974687,
+      "guarded_compile_seconds": 0.0024376000000000033,
+      "input_load_seconds": 0.016682602,
+      "resident_input_bytes": 597984,
+      "final_instance_close_seconds": 0.00011171099999774014
+    }
+  },
+  {
+    "condition": "session0-candidate-serial-command-compiled-module",
+    "mode": "compiled-module",
+    "threads": 1,
+    "purpose": "exploration only; one AB session, warmup1 and3 measurements",
+    "first_invocation_seconds": 5.174947560000001,
+    "first_n8_follows_n1_in_same_module": false,
+    "median_seconds": 5.026121811999999,
+    "samples": [
+      4.8251838829999985,
+      5.026121811999999,
+      5.070698471000002
+    ],
+    "min_seconds": 4.8251838829999985,
+    "max_seconds": 5.070698471000002,
+    "linear_memory_bytes_after_each_invocation": [
+      67305472,
+      67305472,
+      67305472,
+      67305472
+    ],
+    "rss_bytes_after_each_invocation": [
+      147156992,
+      213221376,
+      213413888,
+      213573632
+    ],
+    "process_lifetime_peak_rss_bytes": 279416832,
+    "source": "/mnt/c/Users/genom/GitHub/LOSAT/docs/evidence/wasm_performance_20260913/run-20260913-01/p1-reuse-exploration/reuse/session0-candidate-serial-command-compiled-module/process/output.txt",
+    "artifact_sha256": "f687af514acb81a62219237c25425412d24c8d5a527d11a988e41dc114c53940",
+    "node_argv": [
+      "/tmp/losat-node-check/node-v24.21.0-linux-x64/bin/node",
+      "--no-liftoff",
+      "--no-wasm-tier-up"
+    ],
+    "preparation": {
+      "validation_including_raw_compile_seconds": 0.020036327,
+      "guard_seconds": 0,
+      "second_compile_seconds": 0.006384315000000001,
+      "input_load_seconds": 4.694000000000642e-06,
+      "resident_input_bytes": 0,
+      "final_instance_close_seconds": 4.275999999663327e-06
+    }
+  },
+  {
+    "condition": "session0-candidate-threaded-command-compiled-module",
+    "mode": "compiled-module",
+    "threads": 1,
+    "purpose": "exploration only; one AB session, warmup1 and3 measurements",
+    "first_invocation_seconds": 5.513925812999999,
+    "first_n8_follows_n1_in_same_module": false,
+    "median_seconds": 4.905099107000002,
+    "samples": [
+      4.905099107000002,
+      4.936546871000002,
+      4.88362962
+    ],
+    "min_seconds": 4.88362962,
+    "max_seconds": 4.936546871000002,
+    "linear_memory_bytes_after_each_invocation": [
+      67239936,
+      67239936,
+      67239936,
+      67239936
+    ],
+    "rss_bytes_after_each_invocation": [
+      180666368,
+      441974784,
+      507981824,
+      710602752
+    ],
+    "process_lifetime_peak_rss_bytes": 710602752,
+    "source": "/mnt/c/Users/genom/GitHub/LOSAT/docs/evidence/wasm_performance_20260913/run-20260913-01/p1-reuse-exploration/reuse/session0-candidate-threaded-command-compiled-module/process/output.txt",
+    "artifact_sha256": "13b88d349ec3449330b11428bb15e9a688448c4e144e756b6f038b4b9412a437",
+    "node_argv": [
+      "/tmp/losat-node-check/node-v24.21.0-linux-x64/bin/node",
+      "--no-liftoff",
+      "--no-wasm-tier-up"
+    ],
+    "preparation": {
+      "validation_including_raw_compile_seconds": 0.027121619999999992,
+      "guard_seconds": 0.04916784200000001,
+      "guarded_compile_seconds": 0.0026276809999999954,
+      "input_load_seconds": 4.417999999986933e-06,
+      "resident_input_bytes": 0,
+      "final_instance_close_seconds": 3.463000000920147e-06
+    }
+  },
+  {
+    "condition": "session0-candidate-threaded-command-compiled-module",
+    "mode": "compiled-module",
+    "threads": 8,
+    "purpose": "exploration only; one AB session, warmup1 and3 measurements",
+    "first_invocation_seconds": 3.540610138,
+    "first_n8_follows_n1_in_same_module": true,
+    "median_seconds": 3.525494667000003,
+    "samples": [
+      3.5582212610000004,
+      3.4882023130000053,
+      3.525494667000003
+    ],
+    "min_seconds": 3.4882023130000053,
+    "max_seconds": 3.5582212610000004,
+    "linear_memory_bytes_after_each_invocation": [
+      75628544,
+      75628544,
+      75628544,
+      75628544
+    ],
+    "rss_bytes_after_each_invocation": [
+      308408320,
+      379748352,
+      575193088,
+      644632576
+    ],
+    "process_lifetime_peak_rss_bytes": 710602752,
+    "source": "/mnt/c/Users/genom/GitHub/LOSAT/docs/evidence/wasm_performance_20260913/run-20260913-01/p1-reuse-exploration/reuse/session0-candidate-threaded-command-compiled-module/process/output.txt",
+    "artifact_sha256": "13b88d349ec3449330b11428bb15e9a688448c4e144e756b6f038b4b9412a437",
+    "node_argv": [
+      "/tmp/losat-node-check/node-v24.21.0-linux-x64/bin/node",
+      "--no-liftoff",
+      "--no-wasm-tier-up"
+    ],
+    "preparation": {
+      "validation_including_raw_compile_seconds": 0.027121619999999992,
+      "guard_seconds": 0.04916784200000001,
+      "guarded_compile_seconds": 0.0026276809999999954,
+      "input_load_seconds": 4.417999999986933e-06,
+      "resident_input_bytes": 0,
+      "final_instance_close_seconds": 3.463000000920147e-06
+    }
+  },
+  {
+    "condition": "session0-candidate-threaded-reactor-same-instance",
+    "mode": "same-instance",
+    "threads": 1,
+    "purpose": "exploration only; one AB session, warmup1 and3 measurements",
+    "first_invocation_seconds": 5.064955319,
+    "first_n8_follows_n1_in_same_module": false,
+    "median_seconds": 4.836155439000001,
+    "samples": [
+      4.782807267,
+      4.839761699000002,
+      4.836155439000001
+    ],
+    "min_seconds": 4.782807267,
+    "max_seconds": 4.839761699000002,
+    "linear_memory_bytes_after_each_invocation": [
+      68354048,
+      77529088,
+      77529088,
+      77529088
+    ],
+    "rss_bytes_after_each_invocation": [
+      161566720,
+      236789760,
+      236789760,
+      240558080
+    ],
+    "process_lifetime_peak_rss_bytes": 295399424,
+    "source": "/mnt/c/Users/genom/GitHub/LOSAT/docs/evidence/wasm_performance_20260913/run-20260913-01/p1-reuse-exploration/reuse/session0-candidate-threaded-reactor-same-instance/process/output.txt",
+    "artifact_sha256": "f853c69b6ea9070b3d86a9b9be3dd8e9c539c40475a4da84f37089dd4bb8975a",
+    "node_argv": [
+      "/tmp/losat-node-check/node-v24.21.0-linux-x64/bin/node",
+      "--no-liftoff",
+      "--no-wasm-tier-up"
+    ],
+    "preparation": {
+      "validation_including_raw_compile_seconds": 0.025392688,
+      "guard_seconds": 0.040249691,
+      "guarded_compile_seconds": 0.0031932170000000043,
+      "input_load_seconds": 0.007329838000000023,
+      "resident_input_bytes": 597984,
+      "final_instance_close_seconds": 0.000114940999999817
+    }
+  },
+  {
+    "condition": "session0-candidate-threaded-reactor-same-instance",
+    "mode": "same-instance",
+    "threads": 8,
+    "purpose": "exploration only; one AB session, warmup1 and3 measurements",
+    "first_invocation_seconds": 3.414909923,
+    "first_n8_follows_n1_in_same_module": true,
+    "median_seconds": 3.400593563,
+    "samples": [
+      3.400593563,
+      3.361457475000003,
+      3.465166773000001
+    ],
+    "min_seconds": 3.361457475000003,
+    "max_seconds": 3.465166773000001,
+    "linear_memory_bytes_after_each_invocation": [
+      77529088,
+      77529088,
+      77529088,
+      77529088
+    ],
+    "rss_bytes_after_each_invocation": [
+      227704832,
+      236253184,
+      238419968,
+      240558080
+    ],
+    "process_lifetime_peak_rss_bytes": 295399424,
+    "source": "/mnt/c/Users/genom/GitHub/LOSAT/docs/evidence/wasm_performance_20260913/run-20260913-01/p1-reuse-exploration/reuse/session0-candidate-threaded-reactor-same-instance/process/output.txt",
+    "artifact_sha256": "f853c69b6ea9070b3d86a9b9be3dd8e9c539c40475a4da84f37089dd4bb8975a",
+    "node_argv": [
+      "/tmp/losat-node-check/node-v24.21.0-linux-x64/bin/node",
+      "--no-liftoff",
+      "--no-wasm-tier-up"
+    ],
+    "preparation": {
+      "validation_including_raw_compile_seconds": 0.025392688,
+      "guard_seconds": 0.040249691,
+      "guarded_compile_seconds": 0.0031932170000000043,
+      "input_load_seconds": 0.007329838000000023,
+      "resident_input_bytes": 597984,
+      "final_instance_close_seconds": 0.000114940999999817
+    }
+  }
+]

@@ -1,0 +1,5 @@
+[losat-thread-pool] program=blastp requested_threads=1 pool_threads=0 caller_participates=false measured_activity=null
+[TIMING] blastp_kappa_query_range_bytes_copied: 1272321
+[TIMING] blastp_kappa_subject_range_bytes_copied: 2051199
+[TIMING] blastp_kappa_subject_seg_range: 68354 bytes (calls=102, masked_residues=1896)
+[TIMING] blastp_kappa_subject_seg_cache: hits=1562 misses=102

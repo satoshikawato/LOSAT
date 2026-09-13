@@ -1,0 +1,25 @@
+{
+  "cwd": "/mnt/c/Users/genom/GitHub/LOSAT",
+  "environment_overrides": {
+    "NODE_NO_WARNINGS": "1"
+  },
+  "ordered_argv": [
+    "/home/kawato/micromamba/bin/tblastx",
+    "-query",
+    "/mnt/c/Users/genom/GitHub/LOSAT/LOSAT/tests/fasta/AP027280.fasta",
+    "-subject",
+    "/mnt/c/Users/genom/GitHub/LOSAT/LOSAT/tests/fasta/AP027280.fasta",
+    "-outfmt",
+    "6",
+    "-query_gencode",
+    "1",
+    "-db_gencode",
+    "1",
+    "-out",
+    "/mnt/c/Users/genom/GitHub/LOSAT/docs/evidence/wasm_performance_20260913/run-20260913-01/p1-controls/oracle/AP027280.AP027280.tlosatx/output.txt",
+    "-num_threads",
+    "1"
+  ],
+  "shell": false,
+  "sink": "/mnt/c/Users/genom/GitHub/LOSAT/docs/evidence/wasm_performance_20260913/run-20260913-01/p1-controls/oracle/AP027280.AP027280.tlosatx/output.txt"
+}

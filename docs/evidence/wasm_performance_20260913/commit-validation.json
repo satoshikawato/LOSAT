@@ -1,0 +1,7 @@
+{
+  "status": "COMMIT_USING_EXISTING_VALIDATION",
+  "prior_test_gate": "run-20260913-02/final-python-tests.log: 39 tests OK",
+  "source_index_matches_validated_working_files_except_crlf_to_lf": true,
+  "additional_test_attempt": "Stopped after isolated-checkout fixture-containment failures; actual original worktree suite already passed. Initial attempt logs retained. No further test execution, as requested by user.",
+  "new_performance_runs": 0
+}

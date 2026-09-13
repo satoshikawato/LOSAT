@@ -1,0 +1,25 @@
+[losat-thread-pool] program=blastn requested_threads=1 pool_threads=0 caller_participates=false measured_activity=null
+[losat-thread-stage] program=blastn stage=subjects work_items=1 parallel_selected=false measured_activity=null
+[losat-thread-stage] program=blastn stage=subject_chunks work_items=1 parallel_selected=false measured_activity=null
+[TIMING] scan_lookup: 0.038s (calls=1)
+[TIMING] ungapped_extend: 0.028s (calls=148167)
+[TIMING] gapped_extend: 0.357s (calls=31863)
+[TIMING] traceback_prune: 7.021s (calls=2)
+[TIMING] traceback_sort_prelim: 0.000s
+[TIMING] traceback_tree_precheck: 0.010s
+[TIMING] traceback_start_offsets: 0.004s
+[TIMING] traceback_alignment: 6.925s (dp=6.925s greedy=0.000s)
+[TIMING] traceback_hsp_build: 0.019s
+[TIMING] purge_common_endpoint_pass1: 0.037s
+[TIMING] reevaluate_ambiguities: 0.000s
+[TIMING] identity_length_test: 0.000s
+[TIMING] purge_common_endpoint_pass2: 0.006s
+[TIMING] traceback_score_resort: 0.003s
+[TIMING] traceback_final_tree_contains: 0.003s
+[TIMING] traceback_final_tree_add: 0.007s
+[TIMING] traceback_postprocess: 0.000s
+[TIMING] traceback_counts: prelim=12543 tree_skipped=758 full_traceback=11785 deleted_evalue_cutoff=0 deleted_reevaluation=27 deleted_identity_length=0 endpoint_pass1_removed=65 endpoint_pass2_removed=8 final_tree_removed=17
+[TIMING] traceback_lengths: edit_script_samples=11785 edit_script_max=307 edit_script_median=1.0 alignment_samples=11785 alignment_max=20413 alignment_median=39.0
+[TIMING] format_output: 0.035s (calls=1)
+[TIMING] search_total: 7.515s
+[TIMING] total: 7.584s

@@ -1,0 +1,19 @@
+{
+  "run_id": "f2dc19aa53fa49028e65a47f30c07159",
+  "input": "/mnt/c/Users/genom/GitHub/LOSAT/LOSAT/tests/fasta/PemoMJNVA.fasta",
+  "input_sha256": "e38d663db3478cec0694e419f00b769f1937c756f3a3f827711c24d531fb4a07",
+  "executable": "/home/kawato/micromamba/bin/makeblastdb",
+  "executable_sha256": "407bf59ec36ee6444104a90f28eab282e374a0dfe4c7ffee89a65d82dc51c4bf",
+  "version": "makeblastdb: 2.17.0+\n Package: blast 2.17.0, build Aug 11 2025 09:46:06",
+  "ordered_argv": [
+    "/home/kawato/micromamba/bin/makeblastdb",
+    "-in",
+    "/mnt/c/Users/genom/GitHub/LOSAT/LOSAT/tests/fasta/PemoMJNVA.fasta",
+    "-dbtype",
+    "nucl",
+    "-parse_seqids",
+    "-out",
+    "/mnt/c/Users/genom/GitHub/LOSAT/docs/evidence/wasm_performance_20260913/run-20260913-02/simple-tblastx-optout/blast_out/db/PemoMJNVA"
+  ],
+  "exit_status": 0
+}

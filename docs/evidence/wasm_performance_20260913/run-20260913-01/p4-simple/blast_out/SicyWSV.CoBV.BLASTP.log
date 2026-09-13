@@ -1,0 +1,5 @@
+simple_benchmark=1
+real	0.741
+user	0.799
+sys	0.000
+exit_status=0

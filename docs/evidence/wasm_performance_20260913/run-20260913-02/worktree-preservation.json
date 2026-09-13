@@ -1,0 +1,29 @@
+{
+  "followup_snapshot_files": 210,
+  "changed": {
+    "LOSAT/tests/comparison_data.py": {
+      "baseline": "103f06858a91119335b533533005536c8da91a76979d43998ec7114d4fea1b11",
+      "current": "742da1d0ed6924d9f194e9623878100215c4c3508101b7ca49b64b46b797876d"
+    },
+    "LOSAT/tests/test_simple_comparison.py": {
+      "baseline": "42836666285e2a26b427c12fc05da948b963084669d0768b1365927245490c18",
+      "current": "ef21350f869bd3fec010dec80ca1b3cda5775ad6b69156969886c5eebc171dc5"
+    },
+    "LOSAT/tests/run_comparison.sh": {
+      "baseline": "193bd1857acb8e1f29fb808cf342aaf9fe95436264d679e6babfc7046b1db94c",
+      "current": "f8591f2cd4c73b3f815e59582e08552d37450558b9378a2e1798f8ab963de901"
+    },
+    "LOSAT/tests/README.md": {
+      "baseline": "2b0cf6dd206fa4d16c510213381bfe0db98ae3f185abd1a8ce4564fdcb60d8ff",
+      "current": "6f2fbdc2404a5983cacd8a00d3f37bfa99eb0479f6211555e8b17ae31ac0e02a"
+    },
+    "docs/wasm_performance_optimization_plan_20260913.md": {
+      "baseline": "f31a78b49a16c5ae16ba977dc011617a968656e8b0339a985ee2709d38f277b8",
+      "current": "c79691f35dc12943836e184d95b4d926e22262187f7aeb56c2938c3e9bc74fc1"
+    }
+  },
+  "unchanged_followup_snapshot_files": 205,
+  "previous_snapshot_files_outside_owned_paths_verified": 533,
+  "production_source_unchanged": true,
+  "note": "Checks cover the saved snapshots, not unrecorded arbitrary files. The original run preserves the initial unrelated dirty patch."
+}

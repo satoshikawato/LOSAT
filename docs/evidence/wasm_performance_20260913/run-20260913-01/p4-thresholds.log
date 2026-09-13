@@ -1,0 +1,10 @@
+10 native raw parity PASS
+10 serial raw parity PASS
+10 threaded raw parity PASS
+100 native raw parity PASS
+100 serial raw parity PASS
+100 threaded raw parity PASS
+10000 native raw parity PASS
+10000 serial raw parity PASS
+10000 threaded raw parity PASS
+12 threshold records PASS

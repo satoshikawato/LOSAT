@@ -1,0 +1,29 @@
+{
+  "boottime_seconds": 1.1502157639770303,
+  "cpu_system_seconds": 0.04,
+  "cpu_user_seconds": 1.02,
+  "elapsed_clock": "CLOCK_MONOTONIC; realtime and GNU elapsed are adjustable-clock diagnostics",
+  "ended_utc": "2026-09-13T09:46:47Z",
+  "exit_status": 0,
+  "gnu_elapsed_seconds": 1.13,
+  "monotonic_clock_agreement": true,
+  "output": "/mnt/c/Users/genom/GitHub/LOSAT/docs/evidence/wasm_performance_20260913/run-20260913-01/p4-megablast/oracle/EDL933.Sakai.losatn.megablast/output.txt",
+  "peak_rss_bytes": 227999744,
+  "process_ended_utc": "2026-09-13T09:46:47Z",
+  "raw_output_bytes": 473032,
+  "raw_output_sha256": "300a925ef86f20af9c0eff53f1c73638bdf80d47f5153352086a3e7bfd416c0c",
+  "realtime_clock_agreement": true,
+  "realtime_seconds": 1.150216817855835,
+  "reason": null,
+  "started_utc": "2026-09-13T09:46:46Z",
+  "status": "PASS",
+  "timeout_seconds": 300,
+  "unavailable_metrics": {},
+  "wall_seconds": 1.1502130779845174,
+  "watchdog_clocks": {
+    "started": {
+      "monotonic": 155124.251233526,
+      "realtime": 1789292806.204943
+    }
+  }
+}

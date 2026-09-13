@@ -1,0 +1,16 @@
+{
+  "cpu_system_seconds": 0.31,
+  "cpu_user_seconds": 7.08,
+  "ended_utc": "2026-09-13T08:09:54Z",
+  "exit_status": 0,
+  "output": "/mnt/c/Users/genom/GitHub/LOSAT/docs/evidence/wasm_performance_20260913/run-20260913-01/p1-controls/cold/repeat-2/WSSV.PajaWSV.losatp-candidate-threaded-n8/output.txt",
+  "peak_rss_bytes": 376471552,
+  "raw_output_bytes": 80334,
+  "raw_output_sha256": "ade827538e1f218b8c4b5dce88744d8495e58335144f7259bdb529801d220d10",
+  "reason": null,
+  "started_utc": "2026-09-13T08:09:51Z",
+  "status": "PASS",
+  "timeout_seconds": 300,
+  "unavailable_metrics": {},
+  "wall_seconds": 2.471884858008707
+}

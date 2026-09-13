@@ -1,0 +1,33 @@
+{
+  "run_id": "c7d433f0cfaf4c569bf054ed07ced104",
+  "status": "PASS",
+  "ordered_argv": [
+    "/home/kawato/micromamba/bin/blastn",
+    "-query",
+    "/mnt/c/Users/genom/GitHub/LOSAT/LOSAT/tests/fasta/AP027152.fasta",
+    "-subject",
+    "/mnt/c/Users/genom/GitHub/LOSAT/LOSAT/tests/fasta/AP027202.fasta",
+    "-outfmt",
+    "6",
+    "-task",
+    "blastn",
+    "-num_threads",
+    "1",
+    "-out",
+    "/mnt/c/Users/genom/GitHub/LOSAT/docs/evidence/wasm_performance_20260913/run-20260913-02/simple-blastn-control/blast_out/PesePMNV.MjPMNV.blastn.out"
+  ],
+  "output": "/mnt/c/Users/genom/GitHub/LOSAT/docs/evidence/wasm_performance_20260913/run-20260913-02/simple-blastn-control/blast_out/PesePMNV.MjPMNV.blastn.out",
+  "cwd": "/mnt/c/Users/genom/GitHub/LOSAT/LOSAT/tests",
+  "argv_sha256": "9da11dac6c992dc58de217becbcbfe2fad26c433def4a959375545c0e2055211",
+  "oracle_version": "blastn: 2.17.0+\n Package: blast 2.17.0, build Aug 11 2025 09:46:06",
+  "files": {
+    "/home/kawato/micromamba/bin/blastn": "0b88d4a00cb7fa579c203653151175b24c83d27fe240d420abe7b5261a3083d1",
+    "/mnt/c/Users/genom/GitHub/LOSAT/LOSAT/tests/fasta/AP027152.fasta": "52d61c03e8e7b2985ad533f59044b1e99e5e804663c0fd38621938e3ff58c67e",
+    "/mnt/c/Users/genom/GitHub/LOSAT/LOSAT/tests/fasta/AP027202.fasta": "7b3542ab08c30a01618aab45526e33f2464a7d6ade21e0c133681abbb53c4192"
+  },
+  "started_utc": "2026-09-13T10:50:28Z",
+  "exit_status": 0,
+  "output_sha256": "833dc5ac297a0a9dd42c2de7faf00dd6e0387a95cc468f240520ac184758e903",
+  "log_sha256": "ccec59de3c93cd417c9049cd48d747727313934880676be1f222b5065a6a1a4e",
+  "ended_utc": "2026-09-13T10:50:29Z"
+}

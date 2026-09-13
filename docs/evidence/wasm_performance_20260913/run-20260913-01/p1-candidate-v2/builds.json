@@ -1,0 +1,69 @@
+[
+  {
+    "kind": "native-command",
+    "argv": [
+      "cargo",
+      "build",
+      "--offline",
+      "--locked",
+      "--release",
+      "--bin",
+      "LOSAT",
+      "--target-dir",
+      "/tmp/losat-wasm-perf-20260913/p1-candidate/native-command"
+    ],
+    "cwd": "/tmp/losat-wasm-perf-20260913/p1-candidate-source/LOSAT",
+    "started_utc": "2026-09-13T07:41:45.124042+00:00",
+    "exit_status": 0,
+    "ended_utc": "2026-09-13T07:42:18.768758+00:00",
+    "path": "/mnt/c/Users/genom/GitHub/LOSAT/docs/evidence/wasm_performance_20260913/run-20260913-01/p1-candidate-v2/artifacts/LOSAT",
+    "sha256": "b31f86ad5e69c75789080083067b73f5a6f20642c01ce2db78448fa08e67b3a1"
+  },
+  {
+    "kind": "serial-command",
+    "argv": [
+      "cargo",
+      "build",
+      "--offline",
+      "--locked",
+      "--release",
+      "--bin",
+      "LOSAT",
+      "--target",
+      "wasm32-wasip1",
+      "--no-default-features",
+      "--target-dir",
+      "/tmp/losat-wasm-perf-20260913/p1-candidate/serial-command"
+    ],
+    "cwd": "/tmp/losat-wasm-perf-20260913/p1-candidate-source/LOSAT",
+    "started_utc": "2026-09-13T07:42:18.825478+00:00",
+    "exit_status": 0,
+    "ended_utc": "2026-09-13T07:42:46.843747+00:00",
+    "path": "/mnt/c/Users/genom/GitHub/LOSAT/docs/evidence/wasm_performance_20260913/run-20260913-01/p1-candidate-v2/artifacts/losat-serial-command.wasm",
+    "sha256": "41e3a10ea8d01914cc0bb10532630ab8707b4e1fac1c77fc3f4dfa32ab0a0a6b"
+  },
+  {
+    "kind": "threaded-command",
+    "argv": [
+      "cargo",
+      "build",
+      "--offline",
+      "--locked",
+      "--release",
+      "--bin",
+      "LOSAT",
+      "--target",
+      "wasm32-wasip1-threads",
+      "--features",
+      "wasm-threads",
+      "--target-dir",
+      "/tmp/losat-wasm-perf-20260913/p1-candidate/threaded-command"
+    ],
+    "cwd": "/tmp/losat-wasm-perf-20260913/p1-candidate-source/LOSAT",
+    "started_utc": "2026-09-13T07:42:46.888525+00:00",
+    "exit_status": 0,
+    "ended_utc": "2026-09-13T07:43:17.254386+00:00",
+    "path": "/mnt/c/Users/genom/GitHub/LOSAT/docs/evidence/wasm_performance_20260913/run-20260913-01/p1-candidate-v2/artifacts/losat-threaded-command.wasm",
+    "sha256": "991271695d278b473ce31e7499c025b5bf78493f3ed6c46d97f8259bcc626e18"
+  }
+]

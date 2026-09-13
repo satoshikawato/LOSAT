@@ -1,0 +1,1 @@
+{"status":"FAIL","phase":"post-processing assertions; no searches","reason":"Legacy p1-controls lacks boottime crosscheck fields. v1 correctly stopped on missing data; v2 records UNAVAILABLE and retains original audited CLOCK_MONOTONIC policy rather than inventing a pass."}

@@ -1,0 +1,27 @@
+{
+  "boottime_seconds": 66.15303827400203,
+  "clock_agreement": false,
+  "cpu_system_seconds": 0.22,
+  "cpu_user_seconds": 193.62,
+  "ended_utc": "2026-09-13T08:50:34Z",
+  "exit_status": 0,
+  "gnu_elapsed_seconds": 70.49,
+  "output": "/mnt/c/Users/genom/GitHub/LOSAT/docs/evidence/wasm_performance_20260913/run-20260913-01/p1-long/diagnostic/AP027131.AP027133.tlosatx/candidate-threaded-n8/output.txt",
+  "peak_rss_bytes": 515252224,
+  "process_ended_utc": "2026-09-13T08:50:34Z",
+  "raw_output_bytes": 2270680,
+  "raw_output_sha256": "1da3bfe7d96d50a96726a44e2df98f5e81c05bee9cd655ad51bb8d44aa377963",
+  "realtime_seconds": 70.52971839904785,
+  "reason": null,
+  "started_utc": "2026-09-13T08:49:23Z",
+  "status": "PASS",
+  "timeout_seconds": 3600.0,
+  "unavailable_metrics": {},
+  "wall_seconds": 66.15303458200651,
+  "watchdog_clocks": {
+    "started": {
+      "monotonic": 151896.675121719,
+      "realtime": 1789289363.7856271
+    }
+  }
+}

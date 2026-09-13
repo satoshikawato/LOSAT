@@ -1,0 +1,31 @@
+[losat-wasi-threads] shared-memory guards: 125 fills, 1233 copies
+[losat-wasi-event] {"event":"spawn_attempt","at_ms":86.406736,"tid":1,"attempt":1}
+[losat-wasi-event] {"event":"spawned","at_ms":90.848538,"tid":1}
+[losat-wasi-threads] worker boot tid=1
+[losat-wasi-threads] worker instantiate tid=1 start_arg=2506312
+[losat-wasi-threads] worker start tid=1
+[losat-wasi-event] {"event":"ready","at_ms":114.664987,"tid":1}
+[losat-wasi-event] {"event":"spawn_attempt","at_ms":114.902895,"tid":2,"attempt":2}
+[losat-wasi-event] {"event":"spawned","at_ms":115.427813,"tid":2}
+[losat-wasi-threads] worker boot tid=2
+[losat-wasi-threads] worker instantiate tid=2 start_arg=3555688
+[losat-wasi-threads] worker start tid=2
+[losat-wasi-event] {"event":"ready","at_ms":138.860772,"tid":2}
+[losat-thread-pool] program=tblastx requested_threads=2 pool_threads=2 caller_participates=false measured_activity=null
+[losat-thread-stage] program=tblastx stage=subjects work_items=1 parallel_selected=false measured_activity=null
+[losat-thread-stage] program=tblastx stage=linking work_items=4 parallel_selected=true measured_activity=null
+[losat-thread-stage] program=tblastx stage=linking work_items=4 parallel_selected=true measured_activity=null
+[TIMING] read_queries: 0.129s
+[TIMING] build_lookup: 0.145s
+[TIMING] read_subjects: 0.048s
+[TIMING] scan_subject: 0.122s (calls=28475)
+[TIMING] ungapped_extend: 0.427s (calls=3525106)
+[TIMING] reevaluate: 0.002s (calls=4844)
+[TIMING] sum_stats_linking: 0.009s (calls=1)
+[TIMING] identity_calc: 0.000s (calls=0)
+[TIMING] search_total: 5.222s
+[TIMING] total: 5.610s
+[losat-wasi-threads] worker done tid=2
+[losat-wasi-threads] worker done tid=1
+[losat-wasi-event] {"event":"exited","at_ms":5761.427875,"tid":1,"code":0}
+[losat-wasi-event] {"event":"exited","at_ms":5762.860886,"tid":2,"code":0}

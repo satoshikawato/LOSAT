@@ -1,0 +1,29 @@
+{
+  "boottime_seconds": 0.831839926977409,
+  "cpu_system_seconds": 0.04,
+  "cpu_user_seconds": 0.95,
+  "elapsed_clock": "CLOCK_MONOTONIC; realtime and GNU elapsed are adjustable-clock diagnostics",
+  "ended_utc": "2026-09-13T09:15:41Z",
+  "exit_status": 0,
+  "gnu_elapsed_seconds": 0.81,
+  "monotonic_clock_agreement": true,
+  "output": "/mnt/c/Users/genom/GitHub/LOSAT/docs/evidence/wasm_performance_20260913/run-20260913-01/p2-exploration/cold/repeat-0/MelaMJNV.PemoMJNVA.losatn.blastn-candidate-threaded-n1/output.txt",
+  "peak_rss_bytes": 132845568,
+  "process_ended_utc": "2026-09-13T09:15:41Z",
+  "raw_output_bytes": 200989,
+  "raw_output_sha256": "f7264639f1f1aa9b25e43e7da0cef44a40951de43b9ab9bc60cec3f565966b99",
+  "realtime_clock_agreement": true,
+  "realtime_seconds": 0.831840991973877,
+  "reason": null,
+  "started_utc": "2026-09-13T09:15:40Z",
+  "status": "PASS",
+  "timeout_seconds": 300,
+  "unavailable_metrics": {},
+  "wall_seconds": 0.8318368969776202,
+  "watchdog_clocks": {
+    "started": {
+      "monotonic": 153374.620724326,
+      "realtime": 1789290940.980212
+    }
+  }
+}

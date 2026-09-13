@@ -1,0 +1,6 @@
+Task	Mode	Tool	Time (s)	Query	Subject	Log
+SicyWSV.CoBV	BLASTP	BLAST+	0.741	SicyWSV.faa	CoBV.faa	/mnt/c/Users/genom/GitHub/LOSAT/docs/evidence/wasm_performance_20260913/run-20260913-01/p4-simple/blast_out/SicyWSV.CoBV.BLASTP.log
+SicyWSV.CoBV	BLASTP	LOSAT native n1	0.717	SicyWSV.faa	CoBV.faa	/mnt/c/Users/genom/GitHub/LOSAT/docs/evidence/wasm_performance_20260913/run-20260913-01/p4-simple/losat_out/SicyWSV.CoBV.losatp.log
+SicyWSV.CoBV	BLASTP	LOSAT native n8	0.301	SicyWSV.faa	CoBV.faa	/mnt/c/Users/genom/GitHub/LOSAT/docs/evidence/wasm_performance_20260913/run-20260913-01/p4-simple/losat_out/SicyWSV.CoBV.losatp.n8.log
+SicyWSV.CoBV	BLASTP	LOSAT wasm serial n1	0.908	SicyWSV.faa	CoBV.faa	/mnt/c/Users/genom/GitHub/LOSAT/docs/evidence/wasm_performance_20260913/run-20260913-01/p4-simple/losat_out/SicyWSV.CoBV.losatp.wasm.log
+SicyWSV.CoBV	BLASTP	LOSAT wasm threads n8	0.699	SicyWSV.faa	CoBV.faa	/mnt/c/Users/genom/GitHub/LOSAT/docs/evidence/wasm_performance_20260913/run-20260913-01/p4-simple/losat_out/SicyWSV.CoBV.losatp.wasm.n8.log

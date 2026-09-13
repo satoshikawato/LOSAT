@@ -1,0 +1,24 @@
+Node: v24.21.0; V8: 13.6.233.17-node.53; executable: /tmp/losat-node-check/node-v24.21.0-linux-x64/bin/node
+Wasm serial: /mnt/c/Users/genom/GitHub/LOSAT/docs/evidence/wasm_performance_20260913/run-20260913-01/final-build/artifacts/losat-serial-command.wasm; modified: 2026-09-13T07:07:08.000Z
+Wasm threaded: /mnt/c/Users/genom/GitHub/LOSAT/docs/evidence/wasm_performance_20260913/run-20260913-01/final-build/artifacts/losat-threaded-command.wasm; modified: 2026-09-13T07:07:58.000Z
+Running SicyWSV.CoBV.losatp
+Finished SicyWSV.CoBV.losatp: 0.717 s
+Running SicyWSV.CoBV.losatp.n8
+Finished SicyWSV.CoBV.losatp.n8: 0.301 s
+Running SicyWSV.CoBV.losatp.wasm
+Finished SicyWSV.CoBV.losatp.wasm: 0.908 s
+Running SicyWSV.CoBV.losatp.wasm.n8
+Finished SicyWSV.CoBV.losatp.wasm.n8: 0.699 s
+Running SicyWSV.CoBV.BLASTP
+Finished SicyWSV.CoBV.BLASTP: 0.741 s
+Finished 1 pairs. Results: /mnt/c/Users/genom/GitHub/LOSAT/docs/evidence/wasm_performance_20260913/run-20260913-01/p4-simple
+/mnt/c/Users/genom/GitHub/LOSAT/LOSAT/tests/plot_execution_time.py:10: DeprecationWarning: Parsing dates involving a day of month without a year specified is ambiguious
+and fails to parse leap day. The default behavior will change in Python 3.15
+to either always raise an exception or to use a different default year (TBD).
+To avoid trouble, add a specific year to the input & format.
+See https://github.com/python/cpython/issues/70647.
+  import seaborn as sns
+Plot saved to /mnt/c/Users/genom/GitHub/LOSAT/docs/evidence/wasm_performance_20260913/run-20260913-01/p4-simple/plots/execution_time_comparison_all.png
+Tool                 BLAST+  LOSAT native n1  LOSAT native n8  LOSAT wasm serial n1  LOSAT wasm threads n8  Ratio (LOSAT wasm serial n1/LOSAT native n1)  Ratio (LOSAT wasm threads n8/LOSAT native n8)
+Mode   Task                                                                                                                                                                                            
+BLASTP SicyWSV.CoBV   0.741            0.717            0.301                 0.908                  0.699                                          1.27                                           2.32

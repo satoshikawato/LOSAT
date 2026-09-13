@@ -1,0 +1,70 @@
+[
+  {
+    "case_id": "AP027078.AP027131.losatp",
+    "version": "baseline",
+    "kind": "threaded",
+    "threads": 8,
+    "boundary": "cold-process",
+    "median_seconds": 6.60743658899446,
+    "min_seconds": 6.555384445993695,
+    "max_seconds": 6.614271981990896,
+    "samples": [
+      6.555384445993695,
+      6.60743658899446,
+      6.614271981990896
+    ],
+    "peak_rss_bytes": 317788160,
+    "raw_output_sha256": "5bdaa58908a96768c26c329ade49a97d4e2d705895e457709eae094b14c708d4"
+  },
+  {
+    "case_id": "AP027078.AP027131.losatp",
+    "version": "candidate",
+    "kind": "threaded",
+    "threads": 8,
+    "boundary": "cold-process",
+    "median_seconds": 6.620072788005928,
+    "min_seconds": 6.268793730996549,
+    "max_seconds": 7.1536669970082585,
+    "samples": [
+      6.268793730996549,
+      7.1536669970082585,
+      6.620072788005928
+    ],
+    "peak_rss_bytes": 313552896,
+    "raw_output_sha256": "5bdaa58908a96768c26c329ade49a97d4e2d705895e457709eae094b14c708d4"
+  },
+  {
+    "case_id": "AP027132.NZ_CP006932.losatp",
+    "version": "baseline",
+    "kind": "threaded",
+    "threads": 8,
+    "boundary": "cold-process",
+    "median_seconds": 9.778996441018535,
+    "min_seconds": 9.427631280006608,
+    "max_seconds": 9.905594182986533,
+    "samples": [
+      9.905594182986533,
+      9.427631280006608,
+      9.778996441018535
+    ],
+    "peak_rss_bytes": 322215936,
+    "raw_output_sha256": "cd81f8fef3dff78fb48f5923de43c84f1af78d006aaa9a8cae2c2f1f20aed181"
+  },
+  {
+    "case_id": "AP027132.NZ_CP006932.losatp",
+    "version": "candidate",
+    "kind": "threaded",
+    "threads": 8,
+    "boundary": "cold-process",
+    "median_seconds": 9.246466181997675,
+    "min_seconds": 9.100082660996122,
+    "max_seconds": 9.842623051983537,
+    "samples": [
+      9.246466181997675,
+      9.100082660996122,
+      9.842623051983537
+    ],
+    "peak_rss_bytes": 327393280,
+    "raw_output_sha256": "cd81f8fef3dff78fb48f5923de43c84f1af78d006aaa9a8cae2c2f1f20aed181"
+  }
+]

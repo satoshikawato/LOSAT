@@ -1,0 +1,6 @@
+{
+  "experimental_source_delta_archives": "PASS",
+  "threshold_raw_hashes": 12,
+  "threshold_pair_raw_equality": "PASS",
+  "task_source_files": 12
+}

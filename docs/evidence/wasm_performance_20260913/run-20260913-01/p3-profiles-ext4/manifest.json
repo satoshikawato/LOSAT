@@ -1,0 +1,27 @@
+{
+  "snapshot_sha256": "51e2ddeb46e68c93bfb41c74a48c7a7be6be273f9f3ce1f7f7969abfd1eea0d0",
+  "diagnostic_manifest_sha256": "65a715d8b04597b9fed220926f243033b3d03f9c79e98fd4b9f14c8d57977548",
+  "driver_sha256": "6eb18dac0f425a469f1f243d0db8de84a0fe9639dfcd12a344cb50370ce1a6c2",
+  "node_sha256": "7fde7b8afa198da66257f42ee2001d874c7355631e6d1579a5fb5ef1f246df4c",
+  "runner_hashes": {
+    "benchmark_wasi_reuse.js": "a0effdc582f7fcc1dc8fc35736f031f6a85fb8597461393ef8bdda0ffdcfc32b",
+    "check_wasi_api_limits.js": "15eeefd76058f23137390b4209f873eae836be96341bb68052f2c96667a07903",
+    "check_wasi_fault.js": "5d73bddf74955394ddc254692e0565b62eb0667407224bee43dce6a050ac9ba9",
+    "check_wasi_reactor.js": "d5aae0e1f8e9199389d2fbfea80f46897a72cfd1db028c45de3093de6004dab0",
+    "run_losat_wasi.js": "21311c960920364e3072605a8d5626478b99c010b30e07cab98461f4b5e2c729",
+    "run_losat_wasi_threads.js": "faf39e6c83178530c3b21d49ee0929d67e6b9258061cc50c057876617c759c4b",
+    "run_wasm_performance_warm.js": "d86792c0bbaee8458c71535f06db7210e8b1a6549a55767a2512e2af577e47f3",
+    "test_benchmark_wasi_reuse.js": "d381d567824ca86d576e61e63e119a0b8f3cde85d52404f67e4a52307c75373e",
+    "test_wasi_runners.js": "48371eaaeece9e3e7b640db8b4acb4cf8b188f0386e75c5b205ddabfcaa4b2a3",
+    "test_wasi_shared_memory.js": "54924dc5fc8e3acac3588f675b8871a7725c4504f5e5ed6a6f50cff7da80ac9d",
+    "wasi_artifact.js": "37ca747261b090bf16720b2109a4511a57d90f4b67cf94c158b9bee9fc1d3f73",
+    "wasi_shared_memory.js": "a11fad8fdd346b3a93edd35f783552d97cd5c5ccb08c491e732a6b8dae552e50",
+    "wasi_thread_host.js": "69480b0d7128ea0f264700dad31f25253e09963867ac28b6b3997704c637a5c3"
+  },
+  "environment": {
+    "LC_ALL": "C",
+    "NODE_NO_WARNINGS": "1",
+    "LOSAT_WASI_THREADS_DEBUG": "1"
+  },
+  "purpose": "dedicated Wasm V8 profile, not adoption timing; all nine isolate logs retained"
+}

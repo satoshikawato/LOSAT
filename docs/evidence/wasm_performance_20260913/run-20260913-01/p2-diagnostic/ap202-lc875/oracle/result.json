@@ -1,0 +1,29 @@
+{
+  "boottime_seconds": 14.378500852995785,
+  "cpu_system_seconds": 0.06,
+  "cpu_user_seconds": 14.59,
+  "elapsed_clock": "CLOCK_MONOTONIC; realtime and GNU elapsed are adjustable-clock diagnostics",
+  "ended_utc": "2026-09-13T08:59:47Z",
+  "exit_status": 0,
+  "gnu_elapsed_seconds": 14.35,
+  "monotonic_clock_agreement": true,
+  "output": "/mnt/c/Users/genom/GitHub/LOSAT/docs/evidence/wasm_performance_20260913/run-20260913-01/p2-diagnostic/ap202-lc875/oracle/output.txt",
+  "peak_rss_bytes": 190578688,
+  "process_ended_utc": "2026-09-13T08:59:47Z",
+  "raw_output_bytes": 4238551,
+  "raw_output_sha256": "9a30fc9c61c4eb33d79c638ce62a330884d1330f56e4ba4f49d54b6547228603",
+  "realtime_clock_agreement": true,
+  "realtime_seconds": 14.378501415252686,
+  "reason": null,
+  "started_utc": "2026-09-13T08:59:32Z",
+  "status": "PASS",
+  "timeout_seconds": 300,
+  "unavailable_metrics": {},
+  "wall_seconds": 14.378498318023048,
+  "watchdog_clocks": {
+    "started": {
+      "monotonic": 152466.89263462,
+      "realtime": 1789289972.7466369
+    }
+  }
+}

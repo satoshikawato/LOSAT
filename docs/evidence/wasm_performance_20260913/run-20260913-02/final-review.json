@@ -1,0 +1,14 @@
+{
+  "status": "PASS",
+  "independent_report_review": "No material errors or contradictions; source, profile scope, old/new timing boundaries, diagnostic thread evidence and PARTIAL P4 accurately stated.",
+  "post_test_comment_correction": {
+    "tested_source_sha256": "5fcaf37bcef8744dc82a72b4be6a130285ca26078f175404074757ceeeea42d2",
+    "final_source_sha256": "ef21350f869bd3fec010dec80ca1b3cda5775ad6b69156969886c5eebc171dc5",
+    "python_ast_identical": true
+  },
+  "report_links": "All local Markdown targets exist.",
+  "new_measured_processes": 97,
+  "new_real_simple_searches": 12,
+  "python_tests": 39,
+  "prior_evidence_files_verified": 3426
+}

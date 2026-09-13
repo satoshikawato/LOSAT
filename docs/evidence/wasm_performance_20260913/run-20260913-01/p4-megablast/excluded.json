@@ -1,0 +1,162 @@
+[
+  {
+    "case_id": "NZ_CP006932.NZ_CP006932.losatn.megablast",
+    "version": "baseline",
+    "kind": "native",
+    "threads": 1,
+    "status": "NOT_RUN",
+    "reason": "paired diagnostic gate failed"
+  },
+  {
+    "case_id": "NZ_CP006932.NZ_CP006932.losatn.megablast",
+    "version": "baseline",
+    "kind": "native",
+    "threads": 8,
+    "status": "NOT_RUN",
+    "reason": "paired diagnostic gate failed"
+  },
+  {
+    "case_id": "NZ_CP006932.NZ_CP006932.losatn.megablast",
+    "version": "baseline",
+    "kind": "serial",
+    "threads": 1,
+    "status": "NOT_RUN",
+    "reason": "paired diagnostic gate failed"
+  },
+  {
+    "case_id": "NZ_CP006932.NZ_CP006932.losatn.megablast",
+    "version": "baseline",
+    "kind": "threaded",
+    "threads": 1,
+    "status": "NOT_RUN",
+    "reason": "paired diagnostic gate failed"
+  },
+  {
+    "case_id": "NZ_CP006932.NZ_CP006932.losatn.megablast",
+    "version": "baseline",
+    "kind": "threaded",
+    "threads": 8,
+    "status": "NOT_RUN",
+    "reason": "paired diagnostic gate failed"
+  },
+  {
+    "case_id": "NZ_CP006932.NZ_CP006932.losatn.megablast",
+    "version": "candidate",
+    "kind": "native",
+    "threads": 1,
+    "status": "NOT_RUN",
+    "reason": "paired diagnostic gate failed"
+  },
+  {
+    "case_id": "NZ_CP006932.NZ_CP006932.losatn.megablast",
+    "version": "candidate",
+    "kind": "native",
+    "threads": 8,
+    "status": "NOT_RUN",
+    "reason": "paired diagnostic gate failed"
+  },
+  {
+    "case_id": "NZ_CP006932.NZ_CP006932.losatn.megablast",
+    "version": "candidate",
+    "kind": "serial",
+    "threads": 1,
+    "status": "NOT_RUN",
+    "reason": "paired diagnostic gate failed"
+  },
+  {
+    "case_id": "NZ_CP006932.NZ_CP006932.losatn.megablast",
+    "version": "candidate",
+    "kind": "threaded",
+    "threads": 1,
+    "status": "NOT_RUN",
+    "reason": "paired diagnostic gate failed"
+  },
+  {
+    "case_id": "NZ_CP006932.NZ_CP006932.losatn.megablast",
+    "version": "candidate",
+    "kind": "threaded",
+    "threads": 8,
+    "status": "NOT_RUN",
+    "reason": "paired diagnostic gate failed"
+  },
+  {
+    "case_id": "Sakai.MG1655.losatn.megablast",
+    "version": "baseline",
+    "kind": "native",
+    "threads": 1,
+    "status": "NOT_RUN",
+    "reason": "paired diagnostic gate failed"
+  },
+  {
+    "case_id": "Sakai.MG1655.losatn.megablast",
+    "version": "baseline",
+    "kind": "native",
+    "threads": 8,
+    "status": "NOT_RUN",
+    "reason": "paired diagnostic gate failed"
+  },
+  {
+    "case_id": "Sakai.MG1655.losatn.megablast",
+    "version": "baseline",
+    "kind": "serial",
+    "threads": 1,
+    "status": "NOT_RUN",
+    "reason": "paired diagnostic gate failed"
+  },
+  {
+    "case_id": "Sakai.MG1655.losatn.megablast",
+    "version": "baseline",
+    "kind": "threaded",
+    "threads": 1,
+    "status": "NOT_RUN",
+    "reason": "paired diagnostic gate failed"
+  },
+  {
+    "case_id": "Sakai.MG1655.losatn.megablast",
+    "version": "baseline",
+    "kind": "threaded",
+    "threads": 8,
+    "status": "NOT_RUN",
+    "reason": "paired diagnostic gate failed"
+  },
+  {
+    "case_id": "Sakai.MG1655.losatn.megablast",
+    "version": "candidate",
+    "kind": "native",
+    "threads": 1,
+    "status": "NOT_RUN",
+    "reason": "paired diagnostic gate failed"
+  },
+  {
+    "case_id": "Sakai.MG1655.losatn.megablast",
+    "version": "candidate",
+    "kind": "native",
+    "threads": 8,
+    "status": "NOT_RUN",
+    "reason": "paired diagnostic gate failed"
+  },
+  {
+    "case_id": "Sakai.MG1655.losatn.megablast",
+    "version": "candidate",
+    "kind": "serial",
+    "threads": 1,
+    "status": "NOT_RUN",
+    "reason": "paired diagnostic gate failed"
+  },
+  {
+    "case_id": "Sakai.MG1655.losatn.megablast",
+    "version": "candidate",
+    "kind": "threaded",
+    "threads": 1,
+    "status": "NOT_RUN",
+    "reason": "paired diagnostic gate failed"
+  },
+  {
+    "case_id": "Sakai.MG1655.losatn.megablast",
+    "version": "candidate",
+    "kind": "threaded",
+    "threads": 8,
+    "status": "NOT_RUN",
+    "reason": "paired diagnostic gate failed"
+  }
+]

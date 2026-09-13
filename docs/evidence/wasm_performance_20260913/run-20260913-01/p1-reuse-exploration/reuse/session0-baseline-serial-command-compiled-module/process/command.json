@@ -1,0 +1,18 @@
+{
+  "cwd": "/mnt/c/Users/genom/GitHub/LOSAT",
+  "environment_overrides": {
+    "NODE_NO_WARNINGS": "1"
+  },
+  "ordered_argv": [
+    "/tmp/losat-node-check/node-v24.21.0-linux-x64/bin/node",
+    "/mnt/c/Users/genom/GitHub/LOSAT/LOSAT/tests/benchmark_wasi_reuse.js",
+    "/tmp/losat-wasm-perf-20260913/baseline/serial-command/wasm32-wasip1/release/LOSAT.wasm",
+    "serial-command",
+    "compiled-module",
+    "/mnt/c/Users/genom/GitHub/LOSAT/docs/evidence/wasm_performance_20260913/run-20260913-01/p1-reuse-exploration/reuse/session0-baseline-serial-command-compiled-module/jobs.json",
+    "-out",
+    "/mnt/c/Users/genom/GitHub/LOSAT/docs/evidence/wasm_performance_20260913/run-20260913-01/p1-reuse-exploration/reuse/session0-baseline-serial-command-compiled-module/process/output.txt"
+  ],
+  "shell": false,
+  "sink": "/mnt/c/Users/genom/GitHub/LOSAT/docs/evidence/wasm_performance_20260913/run-20260913-01/p1-reuse-exploration/reuse/session0-baseline-serial-command-compiled-module/process/output.txt"
+}

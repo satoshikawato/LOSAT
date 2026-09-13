@@ -14,8 +14,20 @@ const hash = bytes => crypto.createHash("sha256").update(bytes).digest("hex");
 // Each sample completes one search with the same inputs. Compile reuse and
 // reactor instance reuse are separate measurements with explicit boundaries.
 (async () => {
-  const [artifact, kind, mode, jobsFile, resultFile] = process.argv.slice(2);
+  const [artifact, kind, mode, jobsFile, outputFlag, outputPath] = process.argv.slice(2);
+  const resultFile = outputFlag === "-out" ? outputPath : outputFlag;
+  assert.ok(["compiled-module", "same-instance"].includes(mode));
+  assert.ok(mode !== "same-instance" || kind.endsWith("reactor"), "commands cannot reuse an exited instance");
   const jobs = JSON.parse(fs.readFileSync(jobsFile, "utf8"));
+  // NCBI reference: c++/src/objtools/align_format/tabular.cpp:1100-1108
+  // x_PrintField(*iter); ... m_Ostream << "\\n";
+  // Never let a stale result supply bytes for a successful command invocation.
+  fs.closeSync(fs.openSync(resultFile, "wx"));
+  const paths = new Set();
+  for (const job of jobs) {
+    assert.ok(!paths.has(job.output) && !fs.existsSync(job.output), `existing output: ${job.output}`);
+    paths.add(job.output);
+  }
   let prepared, module, timings, identity;
   if (kind.startsWith("threaded")) {
     prepared = await prepareThreadHost(artifact, kind); ({ timings, identity } = prepared);
@@ -37,8 +49,13 @@ const hash = bytes => crypto.createHash("sha256").update(bytes).digest("hex");
   }
   timings.input_load_seconds=(performance.now()-inputStart)/1000;
   timings.resident_input_bytes=[...inputs.values()].reduce((n,v)=>n+Buffer.byteLength(v.query)+Buffer.byteLength(v.subject),0);
-  const instances = new Map(), samples = [];
-  const save = () => fs.writeFileSync(resultFile, JSON.stringify({ identity, timings, mode, samples }, null, 2));
+  const instances = new Map();
+  const samples = jobs.map(job => ({ case_id:job.case_id, repeat:job.repeat, timed:job.timed,
+    threads:job.threads, status:"NOT_RUN", eligible_for_timing:false, output:job.output }));
+  const save = () => fs.writeFileSync(resultFile, JSON.stringify({ identity, timings, mode,
+    node_argv:[process.execPath, ...process.execArgv], instance_scope:mode === "same-instance" ? "per-case" : "per-job",
+    samples }, null, 2));
+  save();
   async function create(job) {
     if (prepared) return prepared.create(job.argv || []);
     const wasi = new WASI({version:"preview1", args:[artifact,...(job.argv||[])], env:process.env, preopens:{"/":"/"}, returnOnExit:true});
@@ -46,43 +63,93 @@ const hash = bytes => crypto.createHash("sha256").update(bytes).digest("hex");
     if (kind.endsWith("reactor")) wasi.initialize(instance);
     return {instance, memory:instance.exports.memory, events:[], start:()=>wasi.start(instance), waitForWorkers:async()=>{}, close:async()=>{}};
   }
+  // NCBI reference: c++/src/algo/blast/api/prelim_stage.cpp:172-188
+  // (*thread)->Run(); ... (*thread)->Join(&result);
+  // Complete lifecycle, exact bytes, and success status must all hold for timing.
   try {
-    for (const job of jobs) {
-      const key = job.case_id;
+    for (const [index, job] of jobs.entries()) {
+      const sample = samples[index], key = job.case_id;
       let host = mode === "same-instance" ? instances.get(key) : null;
-      const start = performance.now(), cpu = process.cpuUsage();
-      if (!host) {
-        host = await create(job);
-        if (mode === "same-instance") instances.set(key, host);
+      sample.status = "RUNNING"; save();
+      // Evidence serialization is outside the measured runtime boundary.
+      // NCBI reference: c++/src/algo/blast/api/prelim_stage.cpp:178-188
+      // (*thread)->Join(&result);
+      // Capture wall-clock evidence at the same endpoints as the monotonic timer.
+      const realtimeStart = Date.now(), start = performance.now(), cpu = process.cpuUsage();
+      let runtimeEnd, realtimeEnd, runtimeCpu, failure = null;
+      try {
+        if (!host) {
+          host = await create(job);
+          if (mode === "same-instance") instances.set(key, host);
+        }
+        const instantiated = performance.now();
+        let data, exitStatus;
+        if (kind.endsWith("reactor")) {
+          const response = runPair(host, job.program, inputs.get(key).query, inputs.get(key).subject, job.format || "6", job.extra);
+          exitStatus = response.status; data = response.result;
+          sample.exit_status = exitStatus;
+          assert.equal(exitStatus, 0, response.error);
+          fs.writeFileSync(job.output, data, {flag:"wx"});
+        } else {
+          exitStatus = host.start(); sample.exit_status = exitStatus;
+          assert.equal(exitStatus, 0);
+          data = fs.readFileSync(job.output);
+        }
+        const returned = performance.now();
+        const events = await host.waitForWorkers() || [];
+        const exited = performance.now();
+        runtimeEnd = exited; realtimeEnd = Date.now(); runtimeCpu = process.cpuUsage(cpu);
+        const n = job.threads;
+        const counts = Object.fromEntries(["spawn_attempt","spawned","ready","exited"].map(e=>[e,events.filter(x=>x.event===e).length]));
+        Object.assign(sample, { instantiate_seconds:(instantiated-start)/1000,
+          invocation_including_io_and_api_copy_seconds:(returned-instantiated)/1000,
+          host_exit_wait_seconds:(exited-returned)/1000, raw_output_sha256:hash(data),
+          expected_sha256:job.expected_sha256, raw_equal:hash(data) === job.expected_sha256,
+          events, host_worker_counts:counts, memory_bytes:host.memory.buffer.byteLength });
+        if (prepared) {
+          const expected = n === 1 ? 0 : n;
+          const tids = events.filter(e=>e.event === "spawn_attempt").map(e=>e.tid).sort((a,b)=>a-b);
+          for (const event of Object.keys(counts)) {
+            assert.equal(counts[event], expected);
+            assert.deepEqual(events.filter(e=>e.event===event).map(e=>e.tid).sort((a,b)=>a-b), tids);
+          }
+          assert.equal(new Set(tids).size, expected);
+        }
+        assert.ok(events.filter(e=>e.event==="exited").every(e=>e.code===0));
+        sample.thread_contract = "PASS";
+        assert.ok(sample.raw_equal, `raw mismatch: ${key}`);
+        sample.status = "PASS";
+      } catch (error) {
+        failure = error; sample.status = sample.raw_equal === false ? "PARITY_FAIL" : "FAIL";
+        sample.reason = String(error.stack || error);
+      } finally {
+        runtimeEnd ??= performance.now(); realtimeEnd ??= Date.now(); runtimeCpu ??= process.cpuUsage(cpu);
+        const closingRealtime = Date.now(), closing = performance.now(), closingCpu = process.cpuUsage();
+        if (host && mode !== "same-instance") {
+          try { await host.close(); } catch (error) {
+            failure ||= error; sample.status = "FAIL"; sample.close_error = String(error);
+          }
+        }
+        const closeSeconds = (performance.now()-closing)/1000, closeCpu = process.cpuUsage(closingCpu);
+        const wallSeconds = (runtimeEnd-start)/1000 + closeSeconds;
+        const realtimeSeconds = (realtimeEnd-realtimeStart + Date.now()-closingRealtime)/1000;
+        const clockAgreement = Math.abs(realtimeSeconds-wallSeconds) <= Math.max(0.1, 0.05*wallSeconds);
+        Object.assign(sample, { boundary:mode, wall_seconds:wallSeconds,
+          realtime_seconds:realtimeSeconds, realtime_clock_agreement:clockAgreement,
+          elapsed_clock:"performance.now() (CLOCK_MONOTONIC); Date.now() is an adjustable-clock diagnostic",
+          close_seconds:closeSeconds, cpu_user_seconds:(runtimeCpu.user+closeCpu.user)/1e6,
+          cpu_system_seconds:(runtimeCpu.system+closeCpu.system)/1e6,
+          process_lifetime_peak_rss_bytes:process.resourceUsage().maxRSS*1024, rss_after_bytes:process.memoryUsage().rss,
+          eligible_for_timing:sample.status === "PASS" && job.timed });
+        save();
       }
-      const instantiated = performance.now();
-      let data, status;
-      if (kind.endsWith("reactor")) {
-        const response = runPair(host, job.program, inputs.get(key).query, inputs.get(key).subject, job.format || "6", job.extra);
-        status = response.status; data = response.result;
-        assert.equal(status, 0, response.error);
-        fs.writeFileSync(job.output, data);
-      } else {
-        status = host.start(); data = fs.readFileSync(job.output);
-      }
-      const returned = performance.now();
-      const events = await host.waitForWorkers() || [];
-      const exited = performance.now();
-      const n = job.threads;
-      const counts = Object.fromEntries(["spawn_attempt","spawned","ready","exited"].map(e=>[e,events.filter(x=>x.event===e).length]));
-      if (prepared) for (const count of Object.values(counts)) assert.equal(count,n===1?0:n);
-      assert.ok(events.filter(e=>e.event==="exited").every(e=>e.code===0));
-      const usage = process.cpuUsage(cpu);
-      const sample = { case_id:key, repeat:job.repeat, timed:job.timed, threads:n, status,
-        boundary:mode, wall_seconds:(exited-start)/1000, instantiate_seconds:(instantiated-start)/1000,
-        invocation_including_io_and_api_copy_seconds:(returned-instantiated)/1000, host_exit_wait_seconds:(exited-returned)/1000,
-        cpu_user_seconds:usage.user/1e6, cpu_system_seconds:usage.system/1e6,
-        process_lifetime_peak_rss_bytes:process.resourceUsage().maxRSS*1024,
-        rss_after_bytes:process.memoryUsage().rss, memory_bytes:host.memory.buffer.byteLength,
-        raw_output_sha256:hash(data), output:job.output, events, host_worker_counts:counts };
-      samples.push(sample); save();
-      assert.equal(status,0); assert.equal(sample.raw_output_sha256,job.expected_sha256,`raw mismatch: ${key}`);
-      if (mode !== "same-instance") await host.close();
+      if (failure) throw failure;
     }
-  } finally { for (const host of instances.values()) await host.close(); save(); }
+  } finally {
+    const closing = performance.now();
+    for (const host of instances.values()) await host.close();
+    timings.final_instance_close_seconds = (performance.now()-closing)/1000;
+    save();
+  }
+
 })().catch(error=>{console.error(error);process.exitCode=1;});

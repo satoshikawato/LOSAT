@@ -1,0 +1,43 @@
+{
+  "run_id": "f2dc19aa53fa49028e65a47f30c07159",
+  "status": "PASS",
+  "ordered_argv": [
+    "env",
+    "NODE_NO_WARNINGS=1",
+    "/tmp/losat-node-check/node-v24.21.0-linux-x64/bin/node",
+    "/mnt/c/Users/genom/GitHub/LOSAT/LOSAT/tests/run_losat_wasi.js",
+    "/mnt/c/Users/genom/GitHub/LOSAT/docs/evidence/wasm_performance_20260913/run-20260913-01/artifacts/losat-serial-command.wasm",
+    "tblastx",
+    "-query",
+    "/mnt/c/Users/genom/GitHub/LOSAT/LOSAT/tests/fasta/MelaMJNV.fasta",
+    "-subject",
+    "/mnt/c/Users/genom/GitHub/LOSAT/LOSAT/tests/fasta/PemoMJNVA.fasta",
+    "-outfmt",
+    "6",
+    "-query_gencode",
+    "1",
+    "-db_gencode",
+    "1",
+    "-num_threads",
+    "1",
+    "-out",
+    "/mnt/c/Users/genom/GitHub/LOSAT/docs/evidence/wasm_performance_20260913/run-20260913-02/simple-tblastx-optout/losat_out/MelaMJNV.PemoMJNVA.tlosatx.wasm.out"
+  ],
+  "output": "/mnt/c/Users/genom/GitHub/LOSAT/docs/evidence/wasm_performance_20260913/run-20260913-02/simple-tblastx-optout/losat_out/MelaMJNV.PemoMJNVA.tlosatx.wasm.out",
+  "cwd": "/mnt/c/Users/genom/GitHub/LOSAT/LOSAT/tests",
+  "argv_sha256": "7403130ef8c9e12adfdd260e637c52605a571d68e886fa1471942c5f9248d937",
+  "oracle_version": null,
+  "files": {
+    "/tmp/losat-node-check/node-v24.21.0-linux-x64/bin/node": "7fde7b8afa198da66257f42ee2001d874c7355631e6d1579a5fb5ef1f246df4c",
+    "/mnt/c/Users/genom/GitHub/LOSAT/LOSAT/tests/run_losat_wasi.js": "21311c960920364e3072605a8d5626478b99c010b30e07cab98461f4b5e2c729",
+    "/mnt/c/Users/genom/GitHub/LOSAT/docs/evidence/wasm_performance_20260913/run-20260913-01/artifacts/losat-serial-command.wasm": "f687af514acb81a62219237c25425412d24c8d5a527d11a988e41dc114c53940",
+    "/mnt/c/Users/genom/GitHub/LOSAT/LOSAT/tests/fasta/MelaMJNV.fasta": "491f80b482acc96600773c3493358c0262dbf714cb5d76f8f5560a92ecccac1a",
+    "/mnt/c/Users/genom/GitHub/LOSAT/LOSAT/tests/fasta/PemoMJNVA.fasta": "e38d663db3478cec0694e419f00b769f1937c756f3a3f827711c24d531fb4a07",
+    "/usr/bin/env": "886e5fa8be716b03eeda48856e0f04493f2969fc148fb7812594ffac647fa050"
+  },
+  "started_utc": "2026-09-13T10:49:46Z",
+  "exit_status": 0,
+  "output_sha256": "bbef153094025db89dd4a69b2a3c4246b0b8853396fe740bc7e1bd654db105b6",
+  "log_sha256": "69b7a4f7731fd5a25c29cdec1abaf1bc6eca3e517a3a67bf318d019f472a7f3f",
+  "ended_utc": "2026-09-13T10:49:55Z"
+}

@@ -1,0 +1,17 @@
+--- baseline/LOSAT/src/algorithm/blastn/blast_engine/run.rs
++++ candidate/LOSAT/src/algorithm/blastn/blast_engine/run.rs
+@@ -9011,6 +9011,14 @@
+             const SPECULATIVE_TRACEBACK_BATCH_SIZE: usize =
+                 if cfg!(all(target_arch = "wasm32", not(feature = "wasm-threads"))) {
+                     8
++                } else if cfg!(target_arch = "wasm32") {
++                    // NCBI reference: c++/src/algo/blast/core/blast_traceback.c:403-405,509-512,598-601
++                    // if (!BlastIntervalTreeContainsHSP(...)) {
++                    //     BLAST_GappedAlignmentWithTraceback(...); ... BlastIntervalTreeAddHSP(...);
++                    // }
++                    // Scheduling experiment only: retain ordered containment and insertion;
++                    // double the threaded-Wasm speculative window within the same search pool.
++                    32
+                 } else {
+                     16
+                 };

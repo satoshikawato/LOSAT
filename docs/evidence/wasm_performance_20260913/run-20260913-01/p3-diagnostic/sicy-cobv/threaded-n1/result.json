@@ -1,0 +1,29 @@
+{
+  "boottime_seconds": 1.3637080379994586,
+  "cpu_system_seconds": 0.07,
+  "cpu_user_seconds": 1.32,
+  "elapsed_clock": "CLOCK_MONOTONIC; realtime and GNU elapsed are adjustable-clock diagnostics",
+  "ended_utc": "2026-09-13T09:31:08Z",
+  "exit_status": 0,
+  "gnu_elapsed_seconds": 1.32,
+  "monotonic_clock_agreement": true,
+  "output": "/mnt/c/Users/genom/GitHub/LOSAT/docs/evidence/wasm_performance_20260913/run-20260913-01/p3-diagnostic/sicy-cobv/threaded-n1/output.txt",
+  "peak_rss_bytes": 130056192,
+  "process_ended_utc": "2026-09-13T09:31:07Z",
+  "raw_output_bytes": 35748,
+  "raw_output_sha256": "2e6448cfedbf825f939a66374ccfefcf9dec8351b09351a84fd3680a0cac3b0c",
+  "realtime_clock_agreement": true,
+  "realtime_seconds": 1.363710880279541,
+  "reason": null,
+  "started_utc": "2026-09-13T09:31:06Z",
+  "status": "PASS",
+  "timeout_seconds": 3600,
+  "unavailable_metrics": {},
+  "wall_seconds": 1.3637031679973006,
+  "watchdog_clocks": {
+    "started": {
+      "monotonic": 154243.836722233,
+      "realtime": 1789291866.6270332
+    }
+  }
+}

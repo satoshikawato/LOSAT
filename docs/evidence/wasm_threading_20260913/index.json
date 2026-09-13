@@ -1,0 +1,31 @@
+{
+  "archive": "evidence.tar.gz",
+  "sha256": "284296ec044db0d5ea4cf1be8f731a1b11cec12cf9e360bacfddfe8f5e380039",
+  "bytes": 49960799,
+  "members": 7598,
+  "manifest": "SHA256-MANIFEST.json",
+  "source_head": "78c7556da6fa18b44447c3a3fa73774a8ee5956f",
+  "scope": "Local dirty-tree implementation validation; frozen regression99/145 completed,46 deferred by user; not hosted platform or RC certification",
+  "all_archived_member_hashes_verified": true,
+  "final_roots": [
+    "matrix-repaired-formats",
+    "frozen-deferred.json",
+    "frozen-final",
+    "frozen-timeout-retries",
+    "frozen-continuation",
+    "lc-thresholds",
+    "performance-final",
+    "format-artifacts",
+    "format-artifacts-reverse",
+    "validation-package-smoke-final"
+  ],
+  "historical_roots": [
+    "baseline-runs",
+    "s01-runs",
+    "s02-runs",
+    "s03-api",
+    "s03-api-2",
+    "frozen-regression"
+  ],
+  "profile_scope": "cost-profile is a separate pre-final-format instrumented diagnostic build"
+}

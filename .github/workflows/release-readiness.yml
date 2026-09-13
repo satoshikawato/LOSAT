@@ -28,6 +28,11 @@ env:
   CANDIDATE_SHA: ${{ inputs.candidate_sha }}
 
 jobs:
+  threading-regression:
+    uses: ./.github/workflows/wasm-threading.yml
+    with:
+      candidate_sha: ${{ inputs.candidate_sha }}
+
   quality:
     name: Quality, Package, And Clean Install
     runs-on: ubuntu-24.04
@@ -83,7 +88,7 @@ jobs:
         run: |
           cd LOSAT
           cargo build --release --locked
-          cargo build --release --target wasm32-wasip1 --no-default-features --locked
+          cargo build --release --bin LOSAT --target wasm32-wasip1 --no-default-features --target-dir target/serial-command --locked
 
       - name: Package and publish dry runs
         run: |
@@ -204,7 +209,7 @@ jobs:
           test "$(git rev-parse HEAD)" = "$CANDIDATE_SHA"
 
       - name: Build exact serial-Wasm release artifact
-        run: cd LOSAT && cargo build --release --target wasm32-wasip1 --no-default-features --locked
+        run: cd LOSAT && cargo build --release --bin LOSAT --target wasm32-wasip1 --no-default-features --target-dir target/serial-command --locked
 
       - name: Assemble, extract, and smoke serial-Wasm artifact
         run: |
@@ -214,7 +219,7 @@ jobs:
             --repo-root . \
             --candidate-sha "$CANDIDATE_SHA" \
             --target wasm32-wasip1 \
-            --binary LOSAT/target/wasm32-wasip1/release/LOSAT.wasm \
+            --binary LOSAT/target/serial-command/wasm32-wasip1/release/LOSAT.wasm \
             --runner LOSAT/tests/run_losat_wasi.js \
             --output-dir .tmp/release-readiness/serial-wasm
 
@@ -260,7 +265,7 @@ jobs:
         run: |
           cd LOSAT
           cargo build --release --locked
-          cargo build --release --target wasm32-wasip1 --no-default-features --locked
+          cargo build --release --bin LOSAT --target wasm32-wasip1 --no-default-features --target-dir target/serial-command --locked
 
       - name: Run full integrated certification only when explicitly requested
         run: |
@@ -280,10 +285,11 @@ jobs:
 
   handoff:
     name: Aggregate exact-SHA RC handoff
-    needs: [quality, native-artifacts, serial-wasm-artifact, integrated-certification]
+    needs: [quality, native-artifacts, serial-wasm-artifact, integrated-certification, threading-regression]
     if: >-
       ${{ always() &&
           needs.quality.result == 'success' &&
+          needs.threading-regression.result == 'success' &&
           needs.native-artifacts.result == 'success' &&
           needs.serial-wasm-artifact.result == 'success' &&
           (needs.integrated-certification.result == 'success' ||

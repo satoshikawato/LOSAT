@@ -89,6 +89,13 @@ impl FastaStore {
     }
 }
 
+// NCBI reference: c++/src/app/blast/blast_app_util.hpp:260-266
+// catch (const std::exception& e) { LOG_POST(Error << "Error: " << e.what()); }
+// Preserve the Rust engine context and its underlying cause across the ABI.
+fn engine_error(err: anyhow::Error) -> String {
+    format!("{err:#}")
+}
+
 fn set_result(bytes: Vec<u8>) {
     *last_result().lock().expect("result mutex poisoned") = bytes;
     last_error().lock().expect("error mutex poisoned").clear();
@@ -619,7 +626,7 @@ fn run_pair(
                 query_fasta,
                 subject_fasta,
             )
-            .map_err(|err: anyhow::Error| err.to_string())
+            .map_err(engine_error)
         }
         "blastn" => blastn::run_web_pair(
             parse_blastn_args(
@@ -631,7 +638,7 @@ fn run_pair(
             query_fasta,
             subject_fasta,
         )
-        .map_err(|err: anyhow::Error| err.to_string()),
+        .map_err(engine_error),
         "tblastx" => tblastx::run_web_pair(
             parse_tblastx_args(
                 &extra,
@@ -642,7 +649,7 @@ fn run_pair(
             query_fasta,
             subject_fasta,
         )
-        .map_err(|err: anyhow::Error| err.to_string()),
+        .map_err(engine_error),
         other => return Err(format!("unsupported LOSAT program: {other}")),
     }
 }
@@ -702,7 +709,7 @@ fn run_pair_handles(
                 &query.label,
                 &subject.label,
             )
-            .map_err(|err: anyhow::Error| err.to_string())
+            .map_err(engine_error)
         }
         "blastn" | "tblastx" => Err(format!(
             "FASTA handle API is not yet ported for {program}; use losat_web_run_pair"

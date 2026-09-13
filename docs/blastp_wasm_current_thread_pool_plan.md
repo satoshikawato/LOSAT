@@ -1,3 +1,5 @@
+> Superseded by the [2026-09-13 threading remediation](wasm_threading_remediation_plan_20260913.md). The current implementation uses N dedicated search-scoped workers and separately initialized reactor artifacts. Evidence below is historical.
+
 # BLASTP Wasm Current-Thread Pool Plan
 
 ## Summary

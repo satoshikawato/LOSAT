@@ -124,3 +124,12 @@ If publishing to crates.io:
 cd LOSAT
 cargo publish
 ```
+
+
+Threading remediation builds use separate `serial-command`, `threaded-command`,
+`serial-reactor`, and `threaded-reactor` target directories. The release assembler
+checks that its input is a serial command before running or packaging it. The
+frozen v0.1.0 artifact contract remains serial-only. Threaded/reactor integration
+checks are additional regression evidence, not promotion into that contract.
+The Node 18 certification record is historical; current threading gates pin
+Rust 1.92.0 and Node 24.21.0 and retain their own artifact metadata.

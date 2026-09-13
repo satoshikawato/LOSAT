@@ -158,6 +158,29 @@ pub fn program_name() -> &'static str { "blastn" }
             {finding.key for finding in report.findings},
         )
 
+    # NCBI reference: c++/src/algo/blast/api/prelim_stage.cpp:145-188
+    # (*thread)->Run(); (*thread)->Join(&result);
+    # Only the reviewed Rust CRT startup is accepted; an added native route fails.
+    def test_reviewed_wasi_crt_is_exact_and_cannot_hide_added_code(self) -> None:
+        source = (Path(__file__).resolve().parents[1] / "build.rs").read_text()
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            write_fixture(root, "pub fn pure_rust() {}\n")
+            script = root / "LOSAT/build.rs"
+            script.write_text(source)
+            self.assertFalse(boundary._scan_build_scripts(root))
+            other = root / "other/build.rs"
+            other.parent.mkdir()
+            other.write_text(source)
+            self.assertTrue(boundary._scan_build_scripts(root))
+            other.unlink()
+            script.write_text(source + '\nextern "C" { fn blastn(); }\n')
+            self.assertTrue(boundary._scan_build_scripts(root))
+            script.write_text(source + '\nfn extra() { std::process::Command::new("blastn"); }\n')
+            self.assertTrue(boundary._scan_build_scripts(root))
+            script.write_text(source + '\nfn extra() { cc::Build::new(); }\n')
+            self.assertIn("build.native_code", {f.rule for f in boundary._scan_build_scripts(root)})
+
     def test_renamed_native_dependency_is_detected_with_renamed_direct_call(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)

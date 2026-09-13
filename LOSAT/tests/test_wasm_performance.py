@@ -212,3 +212,31 @@ class GateTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+# NCBI reference: c++/src/algo/blast/api/prelim_stage.cpp:177-188
+# (*thread)->Run(); (*thread)->Join(&result);
+class ThreadEvidenceTests(unittest.TestCase):
+    def record(self):
+        import json
+        lines = ["[losat-thread-pool] program=blastn requested_threads=2 pool_threads=2 caller_participates=false",
+                 "[losat-thread-stage] program=blastn stage=subjects work_items=1 parallel_selected=false",
+                 "[losat-thread-stage] program=blastn stage=dp_traceback work_items=8 parallel_selected=true"]
+        for event in ["spawn_attempt", "spawned", "ready", "exited"]:
+            for tid in [1, 2]:
+                lines.append("[losat-wasi-event] " + json.dumps(dict(event=event, tid=tid, code=0)))
+        return "\n".join(lines)
+
+    def test_serial_subject_stage_does_not_shrink_dp_pool(self):
+        value = perf.validate_thread_evidence(self.record(), 2, "threaded")
+        self.assertEqual(value["pool_threads"], 2)
+        self.assertEqual(value["host_worker_counts"]["ready"], 2)
+
+    def test_missing_or_contradictory_worker_events_fail(self):
+        for bad in [self.record().replace('"ready"', '"missing"', 1),
+                    self.record().replace('"tid": 2', '"tid": 1'),
+                    self.record().replace('"code": 0', '"code": 1'),
+                    self.record().replace('pool_threads=2', 'pool_threads=1'),
+                    'effective_threads=2 parallel=false']:
+            with self.assertRaises(perf.GateFailure):
+                perf.validate_thread_evidence(bad, 2, "threaded")

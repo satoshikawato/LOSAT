@@ -1835,8 +1835,8 @@ fn align_ex_protein_impl<const BLOSUM62: bool, const REVERSE: bool>(
                 *fence_hit = true;
                 break;
             }
-            let next_score = cell.best
-                + blastp_score_from_row::<BLOSUM62>(score_matrix, matrix_row, qc, sc);
+            let next_score =
+                cell.best + blastp_score_from_row::<BLOSUM62>(score_matrix, matrix_row, qc, sc);
 
             let mut script = SCRIPT_SUB;
             if score_val < score_gap_col {
@@ -3880,7 +3880,9 @@ mod tests {
     // not only the resulting score or final tabular output.
     #[test]
     fn test_traceback_contiguous_rows_reused_scratch_matches_fresh() {
-        let mut adjusted = AdjustedProteinMatrix { scores: [[-3; 28]; 28] };
+        let mut adjusted = AdjustedProteinMatrix {
+            scores: [[-3; 28]; 28],
+        };
         for i in 1..28 {
             adjusted.scores[i][i] = 2;
         }
@@ -3911,20 +3913,36 @@ mod tests {
                             let run = |scratch: &mut GapAlignScratch| {
                                 let mut fence = false;
                                 let result = align_ex_protein(
-                                    &query, &subject, len, subject.len() - 1,
-                                    score_matrix, gap_open, gap_extend, x_drop,
-                                    reverse, scratch, &mut fence,
+                                    &query,
+                                    &subject,
+                                    len,
+                                    subject.len() - 1,
+                                    score_matrix,
+                                    gap_open,
+                                    gap_extend,
+                                    x_drop,
+                                    reverse,
+                                    scratch,
+                                    &mut fence,
                                 );
                                 // Empty inputs return before resetting existing scratch.
                                 let used = if len == 0 { 0 } else { scratch.trace_rows_used };
-                                (result, fence, scratch.trace_offsets[..used].to_vec(),
-                                    scratch.trace_rows[..used].to_vec())
+                                (
+                                    result,
+                                    fence,
+                                    scratch.trace_offsets[..used].to_vec(),
+                                    scratch.trace_rows[..used].to_vec(),
+                                )
                             };
                             let fresh = run(&mut GapAlignScratch::new());
                             let reused = run(&mut scratch);
                             assert_eq!(reused, fresh);
                             saw_offset |= reused.2.iter().any(|&offset| offset > 0);
-                            saw_gap |= reused.0.3.iter().any(|op| !matches!(op, GapEditOp::Sub(_)));
+                            saw_gap |= reused
+                                .0
+                                 .3
+                                .iter()
+                                .any(|op| !matches!(op, GapEditOp::Sub(_)));
                             saw_fence |= reused.1;
                         }
                     }
@@ -3933,5 +3951,4 @@ mod tests {
         }
         assert!(saw_offset && saw_gap && saw_fence);
     }
-
 }

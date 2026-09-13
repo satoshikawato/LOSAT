@@ -486,8 +486,17 @@ def assemble_binary(args: argparse.Namespace, kind: str) -> None:
             )
         command_prefix = [str(binary)]
     else:
-        if binary.read_bytes()[:4] != b"\0asm":
-            raise ReleaseFailure("serial-Wasm artifact has no WebAssembly magic")
+        # NCBI reference: c++/src/app/blast/blastn_app.cpp:172-176
+        # CATCH_ALL(status); return status;
+        # The frozen release scope is serial command WASI. Reject a reactor or
+        # threaded artifact before running its entry point or assembling it.
+        inspection = subprocess.run(
+            [args.node, str(repo_root / "LOSAT/tests/wasi_artifact.js"), str(binary), "serial-command"],
+            cwd=repo_root, capture_output=True, text=True, check=False,
+        )
+        if inspection.returncode:
+            raise ReleaseFailure(f"invalid serial command artifact: {inspection.stderr.strip()}")
+        wasm_identity = json.loads(inspection.stdout)
         observed_architecture = "wasm32"
         command_prefix = [args.node, "--no-warnings", str(args.runner.resolve()), str(binary)]
 
@@ -535,6 +544,8 @@ def assemble_binary(args: argparse.Namespace, kind: str) -> None:
         "certification_lineage": contract["certification_lineage"],
         "publication": contract["publication"],
     }
+    if kind == "wasm":
+        metadata["binary"]["wasi_identity"] = wasm_identity
     entries = archive_entries(
         repo_root, root_name, str(spec["binary_name"]), binary, metadata
     )

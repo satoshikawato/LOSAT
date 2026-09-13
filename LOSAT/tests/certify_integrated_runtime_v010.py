@@ -169,6 +169,7 @@ def validate_git_identity(repo_root: Path, expected_sha: str) -> str:
         )
     output_paths = [
         "LOSAT/src",
+        "LOSAT/build.rs",
         "LOSAT/Cargo.toml",
         "LOSAT/Cargo.lock",
         "LOSAT/.cargo/config.toml",
@@ -244,7 +245,7 @@ def record_toolchain(repo_root: Path, output_dir: Path) -> dict[str, object]:
             "profile": "release",
             "locked": True,
             "build_command": (
-                "cargo build --release --target wasm32-wasip1 "
+                "cargo build --release --bin LOSAT --target wasm32-wasip1 --target-dir target/serial-command "
                 "--no-default-features --locked"
             ),
             "target_rustflags": wasm_rustflags,
@@ -784,6 +785,7 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
         default=repo_root
         / "LOSAT"
         / "target"
+        / "serial-command"
         / "wasm32-wasip1"
         / "release"
         / "LOSAT.wasm",

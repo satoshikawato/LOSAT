@@ -167,11 +167,28 @@ builds are serial. Threaded Wasm builds require `wasm32-wasip1-threads`, the
 
 ```bash
 cd LOSAT
-cargo build --release --target wasm32-wasip1 --no-default-features
-cargo build --release --target wasm32-wasip1-threads --features wasm-threads
+cargo build --release --bin LOSAT --target wasm32-wasip1 --no-default-features --target-dir target/serial-command
+cargo build --release --bin LOSAT --target wasm32-wasip1-threads --features wasm-threads --target-dir target/threaded-command
 ```
 
-Browser-facing or embeddable Wasm APIs are not release-stable in v0.1.0.
+Use `cargo build-web-threaded-reactor` for the separate internal reactor artifact.
+`_start` commands and `_initialize` reactors are not interchangeable. The reactor
+links the selected Rust toolchain's `crt1-reactor.o`; initialize it once with
+`WASI.initialize`, then call the direct API. Build all four artifact kinds with
+`python tests/build_wasi_artifacts.py --target-dir target --output-dir ../.tmp/wasi-artifacts`.
+The helper checks kind/imports/exports and records hashes and build metadata.
+
+`-num_threads 1` runs on the caller without a compute pool. A supported
+`-num_threads N` creates exactly N dedicated compute workers for that search and
+joins them before returning. Unsupported targets, excessive requests, malformed
+caps, and spawn failures return errors. Explicit `LOSAT_WASI_THREAD_CAP` is a
+rejection limit; it never silently reduces N. Input size does not override N.
+
+Threaded command/reactor tests use Rust 1.92.0 and Node 24.21.0. See
+[threading tests](LOSAT/tests/README.md#threading-contract-gates) and the
+[remediation plan](docs/wasm_threading_remediation_plan_20260913.md).
+Browser-facing or embeddable Wasm APIs remain internal and are not release-stable
+in v0.1.0; these gates do not expand the frozen release certification scope.
 
 ## Limitations
 

@@ -83,32 +83,6 @@ use super::kappa::{
     reset_blastp_kappa_range_counters, BlastRedoAlignParams, BlastpKappaSubjectRangeCache,
     BlastpTraceHspTarget,
 };
-
-// NCBI reference: ncbi-blast/c++/src/algo/blast/blastinput/blast_args.cpp:3205-3222
-// ```c
-// const int kMaxValue = static_cast<int>(CSystemInfo::GetCpuCount());
-// int num_threads = args[kArgNumThreads].AsInteger();
-// if (num_threads > kMaxValue) {
-//     m_NumThreads = kMaxValue;
-// } else {
-//     m_NumThreads = num_threads;
-// }
-// ```
-#[cfg(all(feature = "parallel", target_arch = "wasm32", feature = "wasm-threads"))]
-const BLASTP_WASI_PARALLEL_MIN_WORK_ITEMS_PER_THREAD: usize = 2;
-
-// NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_engine.c:1409-1475
-// ```c
-// while ( (seq_arg.oid = BlastSeqSrcIteratorNext(seq_src, itr))
-//        != BLAST_SEQSRC_EOF) {
-//    status =
-//        s_BlastSearchEngineCore(program_number, query, query_info,
-//                                seq_arg.seq, lookup_wrap, gap_align, ...);
-// }
-// ```
-#[cfg(all(feature = "parallel", target_arch = "wasm32", feature = "wasm-threads"))]
-const BLASTP_WASI_PARALLEL_MIN_SUBJECT_RESIDUES_PER_THREAD: usize = 4096;
-
 // NCBI reference: ncbi-blast/c++/include/algo/blast/core/blast_extend.h:142-154
 // ```c
 // typedef struct BlastUngappedData {
@@ -676,7 +650,7 @@ fn prepare_blastp_subjects_preserving_order(
     subject_records: &[fasta::Record],
     requested_threads: usize,
     effective_threads: usize,
-    blastp_parallel_pool: &mut Option<rayon::ThreadPool>,
+    blastp_parallel_pool: &crate::utils::threading::SearchPool<'_>,
 ) -> Result<Vec<BlastpPreparedSubject>> {
     let prepare_subject = |record: &fasta::Record| BlastpPreparedSubject {
         id: fasta_id(record),
@@ -700,8 +674,7 @@ fn prepare_blastp_subjects_preserving_order(
         // BLAST_GapAlignSetUp(..., &gap_align)
         // status = BLAST_PreliminarySearchEngine(...);
         // ```
-        let pool = get_or_build_blastp_thread_pool(blastp_parallel_pool, effective_threads)
-            .context("failed to build BLASTP subject preparation thread pool")?;
+        let pool = blastp_parallel_pool;
         return Ok(pool.install(|| subject_records.par_iter().map(prepare_subject).collect()));
     }
 
@@ -976,316 +949,6 @@ fn build_redone_match_heaps(num_queries: usize, hitlist_size: usize) -> Vec<Blas
         .map(|_| BlastCompoHeap::new(hitlist_size, PSI_INCLUSION_ETHRESH))
         .collect()
 }
-
-// NCBI reference: ncbi-blast/c++/include/algo/blast/blastinput/blast_args.hpp:1290-1296
-// ```c
-// CMTArgs(...)
-// {
-// #ifdef NCBI_NO_THREADS
-//     m_NumThreads = CThreadable::kMinNumThreads;
-//     m_MTMode = eNotSupported;
-// #endif
-// }
-// ```
-//
-// NCBI reference: ncbi-blast/c++/src/algo/blast/blastinput/blast_args.cpp:3205-3222
-// ```c
-// const int kMaxValue = static_cast<int>(CSystemInfo::GetCpuCount());
-// int num_threads = args[kArgNumThreads].AsInteger();
-// if (num_threads > kMaxValue) {
-//     m_NumThreads = kMaxValue;
-// } else {
-//     m_NumThreads = num_threads;
-// }
-// ```
-#[cfg(all(
-    feature = "parallel",
-    any(not(target_arch = "wasm32"), feature = "wasm-threads")
-))]
-fn blastp_available_thread_cap() -> usize {
-    // NCBI reference: ncbi-blast/c++/src/algo/blast/blastinput/blast_args.cpp:3205-3222
-    // ```c
-    // const int kMaxValue = static_cast<int>(CSystemInfo::GetCpuCount());
-    // int num_threads = args[kArgNumThreads].AsInteger();
-    // if (num_threads > kMaxValue) {
-    //     m_NumThreads = kMaxValue;
-    // } else {
-    //     m_NumThreads = num_threads;
-    // }
-    // ```
-    #[cfg(all(target_arch = "wasm32", feature = "wasm-threads"))]
-    {
-        if let Some(cap) = std::env::var("LOSAT_WASI_THREAD_CAP")
-            .ok()
-            .and_then(|raw| raw.parse::<usize>().ok())
-            .filter(|cap| *cap > 0)
-        {
-            return cap;
-        }
-    }
-
-    num_cpus::get().max(1)
-}
-
-// NCBI reference: ncbi-blast/c++/src/algo/blast/blastinput/blast_args.cpp:3205-3222
-// ```c
-// const int kMaxValue = static_cast<int>(CSystemInfo::GetCpuCount());
-// int num_threads = args[kArgNumThreads].AsInteger();
-// if (num_threads > kMaxValue) {
-//     m_NumThreads = kMaxValue;
-// } else {
-//     m_NumThreads = num_threads;
-// }
-// ```
-#[cfg(all(
-    feature = "parallel",
-    any(not(target_arch = "wasm32"), feature = "wasm-threads")
-))]
-fn blastp_effective_num_threads(requested: usize) -> usize {
-    let cpu_count = blastp_available_thread_cap();
-    if requested == 0 {
-        cpu_count
-    } else {
-        requested.min(cpu_count)
-    }
-}
-
-// NCBI reference: ncbi-blast/c++/src/algo/blast/blastinput/blast_args.cpp:3205-3222
-// ```c
-// const int kMaxValue = static_cast<int>(CSystemInfo::GetCpuCount());
-// int num_threads = args[kArgNumThreads].AsInteger();
-// if (num_threads > kMaxValue) {
-//     m_NumThreads = kMaxValue;
-// } else {
-//     m_NumThreads = num_threads;
-// }
-// ```
-//
-// NCBI reference: ncbi-blast/c++/src/algo/blast/api/prelim_stage.cpp:82-88
-// ```c
-// if (num_threads > 1) {
-//     SetNumberOfThreads(num_threads);
-// }
-// ```
-#[cfg(all(
-    feature = "parallel",
-    any(not(target_arch = "wasm32"), feature = "wasm-threads")
-))]
-fn build_blastp_thread_pool(num_threads: usize) -> Result<rayon::ThreadPool> {
-    // NCBI reference: ncbi-blast/c++/src/algo/blast/api/prelim_stage.cpp:82-88
-    // ```c
-    // if (num_threads > 1) {
-    //     SetNumberOfThreads(num_threads);
-    // }
-    // ```
-    let builder = rayon::ThreadPoolBuilder::new().num_threads(num_threads);
-
-    // NCBI reference: ncbi-blast/c++/src/algo/blast/blastinput/blast_args.cpp:3205-3222
-    // ```c
-    // int num_threads = args[kArgNumThreads].AsInteger();
-    // if (num_threads > kMaxValue) {
-    //     m_NumThreads = kMaxValue;
-    // } else {
-    //     m_NumThreads = num_threads;
-    // }
-    // ```
-    #[cfg(all(target_arch = "wasm32", feature = "wasm-threads"))]
-    let builder = builder.use_current_thread();
-
-    builder
-        .build()
-        .context("failed to build BLASTP thread pool")
-}
-
-// NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_engine.c:1633-1688
-// ```c
-// BlastScoringParameters* score_params = NULL;
-// BlastExtensionParameters* ext_params = NULL;
-// BlastHitSavingParameters* hit_params = NULL;
-// BlastGapAlignStruct* gap_align = NULL;
-// ```
-#[cfg(all(
-    feature = "parallel",
-    any(not(target_arch = "wasm32"), feature = "wasm-threads")
-))]
-fn get_or_build_blastp_thread_pool(
-    pool: &mut Option<rayon::ThreadPool>,
-    num_threads: usize,
-) -> Result<&rayon::ThreadPool> {
-    if pool.is_none() {
-        // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_engine.c:1633-1688
-        // ```c
-        // BLAST_GapAlignSetUp(..., &gap_align)
-        // status = BLAST_PreliminarySearchEngine(...);
-        // ```
-        *pool = Some(build_blastp_thread_pool(num_threads)?);
-    }
-    Ok(pool
-        .as_ref()
-        .expect("BLASTP thread pool must exist after successful build"))
-}
-
-// NCBI reference: ncbi-blast/c++/src/algo/blast/api/prelim_stage.cpp:82-88
-// ```c
-// if (num_threads > 1) {
-//     SetNumberOfThreads(num_threads);
-// }
-// ```
-#[cfg(all(feature = "parallel", target_arch = "wasm32", feature = "wasm-threads"))]
-fn blastp_thread_pool_spawned_workers(num_threads: usize) -> usize {
-    num_threads.saturating_sub(1)
-}
-
-// NCBI reference: ncbi-blast/c++/src/algo/blast/blastinput/blast_args.cpp:3205-3222
-// ```c
-// const int kMaxValue = static_cast<int>(CSystemInfo::GetCpuCount());
-// int num_threads = args[kArgNumThreads].AsInteger();
-// if (num_threads > kMaxValue) {
-//     m_NumThreads = kMaxValue;
-// } else {
-//     m_NumThreads = num_threads;
-// }
-// ```
-#[cfg(all(feature = "parallel", target_arch = "wasm32", feature = "wasm-threads"))]
-fn blastp_wasi_parallel_env_usize(name: &str, fallback: usize) -> usize {
-    std::env::var(name)
-        .ok()
-        .and_then(|raw| raw.parse::<usize>().ok())
-        .unwrap_or(fallback)
-}
-
-// NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_engine.c:1409-1475
-// ```c
-// /* iterate over all subject sequences */
-// while ( (seq_arg.oid = BlastSeqSrcIteratorNext(seq_src, itr))
-//        != BLAST_SEQSRC_EOF) {
-//    status = s_BlastSearchEngineCore(...);
-// }
-// ```
-//
-// NCBI reference: ncbi-blast/c++/src/algo/blast/api/prelim_stage.cpp:82-88
-// ```c
-// if (num_threads > 1) {
-//     SetNumberOfThreads(num_threads);
-// }
-// ```
-#[cfg(all(feature = "parallel", target_arch = "wasm32", feature = "wasm-threads"))]
-#[derive(Clone, Copy)]
-struct BlastpWasiParallelDecision {
-    parallel: bool,
-    min_worker_jobs: usize,
-    min_subject_residues: usize,
-    serial_reason: &'static str,
-}
-
-// NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_engine.c:1409-1475
-// ```c
-// while ( (seq_arg.oid = BlastSeqSrcIteratorNext(seq_src, itr))
-//        != BLAST_SEQSRC_EOF) {
-//    status = s_BlastSearchEngineCore(...);
-// }
-// ```
-//
-// NCBI reference: ncbi-blast/c++/src/algo/blast/api/prelim_stage.cpp:82-88
-// ```c
-// if (num_threads > 1) {
-//     SetNumberOfThreads(num_threads);
-// }
-// ```
-#[cfg(all(feature = "parallel", target_arch = "wasm32", feature = "wasm-threads"))]
-fn blastp_wasi_parallel_decision(
-    effective_threads: usize,
-    worker_jobs: usize,
-    total_subject_residues: usize,
-) -> BlastpWasiParallelDecision {
-    let min_worker_jobs = effective_threads.saturating_mul(blastp_wasi_parallel_env_usize(
-        "LOSAT_BLASTP_WASI_MIN_WORK_ITEMS_PER_THREAD",
-        BLASTP_WASI_PARALLEL_MIN_WORK_ITEMS_PER_THREAD,
-    ));
-    let min_subject_residues = effective_threads.saturating_mul(blastp_wasi_parallel_env_usize(
-        "LOSAT_BLASTP_WASI_MIN_SUBJECT_RESIDUES_PER_THREAD",
-        BLASTP_WASI_PARALLEL_MIN_SUBJECT_RESIDUES_PER_THREAD,
-    ));
-
-    let serial_reason = if effective_threads <= 1 {
-        "effective_threads<=1"
-    } else if worker_jobs <= 1 {
-        "worker_jobs<=1"
-    } else if worker_jobs < min_worker_jobs {
-        "worker_jobs<threshold"
-    } else if total_subject_residues < min_subject_residues {
-        "subject_residues<threshold"
-    } else {
-        "parallel"
-    };
-
-    BlastpWasiParallelDecision {
-        parallel: serial_reason == "parallel",
-        min_worker_jobs,
-        min_subject_residues,
-        serial_reason,
-    }
-}
-
-// NCBI reference: ncbi-blast/c++/src/algo/blast/api/prelim_stage.cpp:82-88
-// ```c
-// if (num_threads > 1) {
-//     SetNumberOfThreads(num_threads);
-// }
-// ```
-#[cfg(all(feature = "parallel", target_arch = "wasm32", feature = "wasm-threads"))]
-fn blastp_wasi_threads_debug_enabled() -> bool {
-    std::env::var("LOSAT_WASI_THREADS_DEBUG")
-        .map(|value| value == "1" || value.eq_ignore_ascii_case("true"))
-        .unwrap_or(false)
-}
-
-// NCBI reference: ncbi-blast/c++/src/algo/blast/api/prelim_stage.cpp:82-88
-// ```c
-// if (num_threads > 1) {
-//     SetNumberOfThreads(num_threads);
-// }
-// ```
-#[cfg(all(feature = "parallel", target_arch = "wasm32", feature = "wasm-threads"))]
-fn blastp_report_wasi_threading(
-    stage: &str,
-    requested_threads: usize,
-    effective_threads: usize,
-    rayon_pool_threads: usize,
-    subject_records: usize,
-    worker_jobs: usize,
-    total_subject_residues: usize,
-    decision: BlastpWasiParallelDecision,
-    parallel: bool,
-) {
-    if !blastp_wasi_threads_debug_enabled() {
-        return;
-    }
-    // NCBI reference: ncbi-blast/c++/src/algo/blast/api/prelim_stage.cpp:82-88
-    // ```c
-    // if (num_threads > 1) {
-    //     SetNumberOfThreads(num_threads);
-    // }
-    // ```
-    let expected_spawned_workers = if parallel {
-        blastp_thread_pool_spawned_workers(rayon_pool_threads)
-    } else {
-        0
-    };
-    eprintln!(
-        "[losat-wasi-threads] blastp stage={stage} target_arch=wasm32 threaded_wasm=true \
-requested_threads={requested_threads} runner_thread_cap={} effective_threads={effective_threads} \
-rayon_pool_threads={rayon_pool_threads} expected_spawned_workers={expected_spawned_workers} \
-subject_records={subject_records} worker_jobs={worker_jobs} \
-total_subject_residues={total_subject_residues} min_worker_jobs={} min_subject_residues={} \
-parallel={parallel} serial_reason={}",
-        blastp_available_thread_cap(),
-        decision.min_worker_jobs,
-        decision.min_subject_residues,
-        decision.serial_reason
-    );
-}
-
 // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_engine.c:1409-1475
 // ```c
 // while ( (seq_arg.oid = BlastSeqSrcIteratorNext(seq_src, itr))
@@ -1306,55 +969,18 @@ parallel={parallel} serial_reason={}",
 ))]
 fn blastp_should_parallelize_stage(
     stage: &str,
-    requested_threads: usize,
+    _requested_threads: usize,
     effective_threads: usize,
-    subject_records: usize,
+    _subject_records: usize,
     worker_jobs: usize,
-    total_subject_residues: usize,
+    _total_subject_residues: usize,
 ) -> bool {
-    // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_engine.c:1409-1475
-    // ```c
-    // while ( (seq_arg.oid = BlastSeqSrcIteratorNext(seq_src, itr))
-    //        != BLAST_SEQSRC_EOF) {
-    //    status = s_BlastSearchEngineCore(...);
-    // }
-    // ```
-    #[cfg(all(target_arch = "wasm32", feature = "wasm-threads"))]
-    {
-        let decision =
-            blastp_wasi_parallel_decision(effective_threads, worker_jobs, total_subject_residues);
-        blastp_report_wasi_threading(
-            stage,
-            requested_threads,
-            effective_threads,
-            if decision.parallel {
-                effective_threads
-            } else {
-                0
-            },
-            subject_records,
-            worker_jobs,
-            total_subject_residues,
-            decision,
-            decision.parallel,
-        );
-        return decision.parallel;
-    }
-
-    // NCBI reference: ncbi-blast/c++/src/algo/blast/api/prelim_stage.cpp:82-88
-    // ```c
-    // if (num_threads > 1) {
-    //     SetNumberOfThreads(num_threads);
-    // }
-    // ```
-    #[cfg(not(all(target_arch = "wasm32", feature = "wasm-threads")))]
-    {
-        let _ = stage;
-        let _ = requested_threads;
-        let _ = subject_records;
-        let _ = total_subject_residues;
-        effective_threads > 1 && worker_jobs > 1
-    }
+    // NCBI reference: c++/src/algo/blast/core/blast_engine.c:1409-1475
+    // while ((seq_arg.oid = BlastSeqSrcIteratorNext(seq_src, itr)) != BLAST_SEQSRC_EOF) { ... }
+    // This stage selects existing independent jobs within the verified pool.
+    let parallel = effective_threads > 1 && worker_jobs > 1;
+    crate::utils::threading::report_stage("blastp", stage, worker_jobs, parallel);
+    parallel
 }
 
 // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_engine.c:1411-1426
@@ -2325,9 +1951,13 @@ fn validate_requested_blastp_support(args: &ResolvedBlastpArgs) -> Result<()> {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum BlastpTabularField {
     QuerySeqId,
+    // NCBI reference: c++/src/objtools/align_format/tabular.cpp:1132-1135,1146-1149
+    // case eQueryAccession: ... "query acc."; case eQueryAccessionVersion: ... "query acc.ver";
+    QueryAccession,
     QueryAccessionVersion,
     QueryLength,
     SubjectSeqId,
+    SubjectAccession,
     SubjectAccessionVersion,
     SubjectLength,
     QueryStart,
@@ -2354,38 +1984,42 @@ enum BlastpTabularField {
     SubjectTitle,
 }
 
+// NCBI reference: c++/src/objtools/align_format/tabular.cpp:1111-1217
+// case eQuerySeqId: m_Ostream << "query id"; break;
+// case eBitScore: m_Ostream << "bit score"; break;
 impl BlastpTabularField {
-    #[inline]
-    fn name(self) -> &'static str {
+    fn header_name(self) -> &'static str {
         match self {
-            Self::QuerySeqId => "qseqid",
-            Self::QueryAccessionVersion => "qaccver",
-            Self::QueryLength => "qlen",
-            Self::SubjectSeqId => "sseqid",
-            Self::SubjectAccessionVersion => "saccver",
-            Self::SubjectLength => "slen",
-            Self::QueryStart => "qstart",
-            Self::QueryEnd => "qend",
-            Self::SubjectStart => "sstart",
-            Self::SubjectEnd => "send",
-            Self::QuerySeq => "qseq",
-            Self::SubjectSeq => "sseq",
+            Self::QuerySeqId => "query id",
+            Self::QueryAccession => "query acc.",
+            Self::QueryAccessionVersion => "query acc.ver",
+            Self::QueryLength => "query length",
+            Self::SubjectSeqId => "subject id",
+            Self::SubjectAccession => "subject acc.",
+            Self::SubjectAccessionVersion => "subject acc.ver",
+            Self::SubjectLength => "subject length",
+            Self::QueryStart => "q. start",
+            Self::QueryEnd => "q. end",
+            Self::SubjectStart => "s. start",
+            Self::SubjectEnd => "s. end",
+            Self::QuerySeq => "query seq",
+            Self::SubjectSeq => "subject seq",
             Self::Evalue => "evalue",
-            Self::BitScore => "bitscore",
+            Self::BitScore => "bit score",
             Self::Score => "score",
-            Self::AlignmentLength => "length",
-            Self::PercentIdentical => "pident",
-            Self::NumIdentical => "nident",
-            Self::Mismatches => "mismatch",
-            Self::Positives => "positive",
-            Self::GapOpenings => "gapopen",
+            Self::AlignmentLength => "alignment length",
+            Self::PercentIdentical => "% identity",
+            Self::NumIdentical => "identical",
+            Self::Mismatches => "mismatches",
+            Self::Positives => "positives",
+            Self::GapOpenings => "gap opens",
             Self::Gaps => "gaps",
-            Self::PercentPositives => "ppos",
-            Self::QueryFrame => "qframe",
-            Self::SubjectFrame => "sframe",
-            Self::Frames => "frames",
-            Self::Btop => "btop",
-            Self::SubjectTitle => "stitle",
+            Self::PercentPositives => "% positives",
+            Self::QueryFrame => "query frame",
+            Self::SubjectFrame => "sbjct frame",
+            Self::Frames => "query/sbjct frames",
+            Self::Btop => "BTOP",
+            Self::SubjectTitle => "subject title",
         }
     }
 }
@@ -2472,10 +2106,15 @@ fn parse_blastp_tabular_fields(spec: &str) -> Result<Vec<BlastpTabularField>> {
         } else {
             vec![match token {
                 "qseqid" => BlastpTabularField::QuerySeqId,
-                "qacc" | "qaccver" => BlastpTabularField::QueryAccessionVersion,
+                // NCBI reference: c++/src/objtools/align_format/tabular.cpp:179-188,1132-1149
+                // eAccession uses GetLabel(...,0), eAccVersion uses fLabel_Version.
+                // Local FASTA IDs retain their spelling in both fields; fields remain distinct.
+                "qacc" => BlastpTabularField::QueryAccession,
+                "qaccver" => BlastpTabularField::QueryAccessionVersion,
                 "qlen" => BlastpTabularField::QueryLength,
                 "sseqid" => BlastpTabularField::SubjectSeqId,
-                "sacc" | "saccver" => BlastpTabularField::SubjectAccessionVersion,
+                "sacc" => BlastpTabularField::SubjectAccession,
+                "saccver" => BlastpTabularField::SubjectAccessionVersion,
                 "slen" => BlastpTabularField::SubjectLength,
                 "qstart" => BlastpTabularField::QueryStart,
                 "qend" => BlastpTabularField::QueryEnd,
@@ -2583,13 +2222,19 @@ fn write_blastp_outfmt7_header<W: Write>(
     if let Some(ref query) = context.query_name {
         writeln!(writer, "# Query: {}", query)?;
     }
-    if let Some(ref db) = context.subject_name {
+    // NCBI reference: c++/src/algo/blast/format/blast_format.cpp:790-803
+    // dbname = string("User specified sequence set (Input: ") + m_SubjectTag + string(")");
+    if let Some(db) = context
+        .database_name
+        .as_ref()
+        .or(context.subject_name.as_ref())
+    {
         writeln!(writer, "# Database: {}", db)?;
     }
     if num_hits > 0 {
         let field_list = fields
             .iter()
-            .map(|field| field.name())
+            .map(|field| field.header_name())
             .collect::<Vec<_>>()
             .join(", ");
         writeln!(writer, "# Fields: {}", field_list)?;
@@ -2611,13 +2256,13 @@ fn blastp_tabular_field_text(
     let subject_frame = blastp_frame_value(hit.subject_frame);
 
     match field {
-        BlastpTabularField::QuerySeqId | BlastpTabularField::QueryAccessionVersion => {
-            query_id.to_string()
-        }
+        BlastpTabularField::QuerySeqId
+        | BlastpTabularField::QueryAccession
+        | BlastpTabularField::QueryAccessionVersion => query_id.to_string(),
         BlastpTabularField::QueryLength => h.query_length.to_string(),
-        BlastpTabularField::SubjectSeqId | BlastpTabularField::SubjectAccessionVersion => {
-            subject_id.to_string()
-        }
+        BlastpTabularField::SubjectSeqId
+        | BlastpTabularField::SubjectAccession
+        | BlastpTabularField::SubjectAccessionVersion => subject_id.to_string(),
         BlastpTabularField::SubjectLength => hit.subject_length.unwrap_or_default().to_string(),
         BlastpTabularField::QueryStart => h.q_start.to_string(),
         BlastpTabularField::QueryEnd => h.q_end.to_string(),
@@ -2659,7 +2304,12 @@ fn blastp_tabular_field_text(
             let subject_seq = hit.subject_seq.as_deref().unwrap_or("");
             build_btop(query_seq, subject_seq)
         }
-        BlastpTabularField::SubjectTitle => hit.subject_title.clone().unwrap_or_default(),
+        // NCBI reference: c++/src/objtools/align_format/tabular.cpp:415-439,845-859
+        // m_SubjectDefline.Reset(); if (bdlRef.NotEmpty()) m_SubjectDefline = bdlRef;
+        // NCBI reference: c++/src/objtools/blast/seqdb_reader/seqdbvol.cpp:1234-1258
+        // if (!(*iter)->IsUser()) continue; ... return failure;
+        // Local FASTA has no ASN BLAST defline user object, even when it has a title.
+        BlastpTabularField::SubjectTitle => "N/A".to_string(),
     }
 }
 
@@ -2682,16 +2332,15 @@ fn write_blastp_hsp_tabular_field<W: Write>(
     query_id: &str,
     subject_id: &str,
     subject_length: usize,
-    subject_title: Option<&str>,
 ) -> std::io::Result<()> {
     match field {
-        BlastpTabularField::QuerySeqId | BlastpTabularField::QueryAccessionVersion => {
-            writer.write_all(query_id.as_bytes())
-        }
+        BlastpTabularField::QuerySeqId
+        | BlastpTabularField::QueryAccession
+        | BlastpTabularField::QueryAccessionVersion => writer.write_all(query_id.as_bytes()),
         BlastpTabularField::QueryLength => write!(writer, "{}", hsp.query_length),
-        BlastpTabularField::SubjectSeqId | BlastpTabularField::SubjectAccessionVersion => {
-            writer.write_all(subject_id.as_bytes())
-        }
+        BlastpTabularField::SubjectSeqId
+        | BlastpTabularField::SubjectAccession
+        | BlastpTabularField::SubjectAccessionVersion => writer.write_all(subject_id.as_bytes()),
         BlastpTabularField::SubjectLength => write!(writer, "{subject_length}"),
         BlastpTabularField::QueryStart => write!(writer, "{}", hsp.q_start),
         BlastpTabularField::QueryEnd => write!(writer, "{}", hsp.q_end),
@@ -2739,7 +2388,10 @@ fn write_blastp_hsp_tabular_field<W: Write>(
         BlastpTabularField::SubjectFrame => writer.write_all(b"1"),
         BlastpTabularField::Frames => writer.write_all(b"1/1"),
         BlastpTabularField::SubjectTitle => {
-            writer.write_all(subject_title.unwrap_or_default().as_bytes())
+            // NCBI reference: c++/src/objtools/align_format/tabular.cpp:415-439,845-859
+            // m_SubjectDefline.Reset(); if (bdlRef.NotEmpty()) m_SubjectDefline = bdlRef;
+            // Local FASTA has no BLAST defline object (seqdbvol.cpp:1234-1258).
+            writer.write_all(b"N/A")
         }
     }
 }
@@ -2782,25 +2434,40 @@ fn write_blastp_tabular_output(
     outfmt: OutputFormat,
     writer: &mut impl Write,
     query_ids: &[Arc<str>],
+    query_headers: &[String],
     subject_ids: &[Arc<str>],
     context: &ReportContext,
 ) -> Result<()> {
-    if outfmt == OutputFormat::TabularWithComments {
-        write_blastp_outfmt7_header(writer, context, fields, hits.len())?;
-    }
-
-    for hit in hits {
-        let (query_id, subject_id) = hit.hit.resolve_ids(query_ids, subject_ids);
-        for (index, field) in fields.iter().enumerate() {
-            if index > 0 {
-                writer.write_all(b"\t")?;
-            }
-            let value = blastp_tabular_field_text(*field, hit, query_id, subject_id);
-            writer.write_all(value.as_bytes())?;
+    // NCBI reference: c++/src/objtools/align_format/tabular.cpp:1264-1283,1322-1325
+    // PrintHeader(..., const CBioseq& bioseq, ..., const CSeq_align_set* align_set, ...);
+    // m_Ostream << "# BLAST processed " << num_queries << " queries\n";
+    let mut start = 0;
+    for (q_idx, query_header) in query_headers.iter().enumerate() {
+        let mut end = start;
+        while end < hits.len() && hits[end].hit.q_idx as usize == q_idx {
+            end += 1;
         }
-        writer.write_all(b"\n")?;
+        if outfmt == OutputFormat::TabularWithComments {
+            let mut query_context = context.clone();
+            query_context.query_name = Some(query_header.clone());
+            write_blastp_outfmt7_header(writer, &query_context, fields, end - start)?;
+        }
+        for hit in &hits[start..end] {
+            let (query_id, subject_id) = hit.hit.resolve_ids(query_ids, subject_ids);
+            for (index, field) in fields.iter().enumerate() {
+                if index > 0 {
+                    writer.write_all(b"\t")?;
+                }
+                let value = blastp_tabular_field_text(*field, hit, query_id, subject_id);
+                writer.write_all(value.as_bytes())?;
+            }
+            writer.write_all(b"\n")?;
+        }
+        start = end;
     }
-
+    if outfmt == OutputFormat::TabularWithComments {
+        writeln!(writer, "# BLAST processed {} queries", query_headers.len())?;
+    }
     Ok(())
 }
 
@@ -2840,23 +2507,27 @@ fn write_blastp_tabular_hit_lists(
     outfmt: OutputFormat,
     writer: &mut impl Write,
     query_ids: &[Arc<str>],
+    query_headers: &[String],
     subject_ids: &[Arc<str>],
     subjects: &[EncodedProtein],
-    subject_titles: &[Option<String>],
     context: &ReportContext,
 ) -> Result<()> {
-    if outfmt == OutputFormat::TabularWithComments {
-        write_blastp_outfmt7_header(
-            writer,
-            context,
-            fields,
-            blastp_hit_list_hsp_count(hit_lists),
-        )?;
-    }
-
     let config = OutputConfig::ncbi_compat();
     let use_default_fields = fields == default_blastp_tabular_fields();
-    for hit_list_opt in hit_lists {
+    // NCBI reference: c++/src/objtools/align_format/tabular.cpp:1264-1283,1322-1325
+    // PrintHeader(..., const CBioseq& bioseq, ..., const CSeq_align_set* align_set, ...);
+    // m_Ostream << "# BLAST processed " << num_queries << " queries\n";
+    for (q_idx, hit_list_opt) in hit_lists.iter().enumerate() {
+        if outfmt == OutputFormat::TabularWithComments {
+            let mut query_context = context.clone();
+            query_context.query_name = Some(query_headers[q_idx].clone());
+            write_blastp_outfmt7_header(
+                writer,
+                &query_context,
+                fields,
+                blastp_hit_list_hsp_count(std::slice::from_ref(hit_list_opt)),
+            )?;
+        }
         let Some(hit_list) = hit_list_opt else {
             continue;
         };
@@ -2901,9 +2572,6 @@ fn write_blastp_tabular_hit_lists(
                     .get(hsp.s_idx as usize)
                     .map(|subject| subject.aa_len)
                     .unwrap_or_default();
-                let subject_title = subject_titles
-                    .get(hsp.s_idx as usize)
-                    .and_then(|title| title.as_deref());
                 for (index, field) in fields.iter().enumerate() {
                     if index > 0 {
                         writer.write_all(b"\t")?;
@@ -2915,7 +2583,6 @@ fn write_blastp_tabular_hit_lists(
                         query_id,
                         subject_id,
                         subject_length,
-                        subject_title,
                     )?;
                 }
                 writer.write_all(b"\n")?;
@@ -2923,6 +2590,9 @@ fn write_blastp_tabular_hit_lists(
         }
     }
 
+    if outfmt == OutputFormat::TabularWithComments {
+        writeln!(writer, "# BLAST processed {} queries", query_headers.len())?;
+    }
     Ok(())
 }
 
@@ -4304,7 +3974,32 @@ fn run_resolved_with_records(
     subject_records: &[fasta::Record],
     _query_label: &str,
     subject_label: &str,
+    in_memory_output: Option<&mut Vec<u8>>,
+) -> Result<()> {
+    crate::utils::threading::with_search_pool(args.num_threads, "blastp", |pool| {
+        run_resolved_in_pool(
+            args,
+            query_records,
+            subject_records,
+            _query_label,
+            subject_label,
+            in_memory_output,
+            pool,
+        )
+    })
+}
+
+// NCBI reference: c++/src/algo/blast/api/prelim_stage.cpp:145-188
+// TBlastThreads the_threads(GetNumberOfThreads());
+// (*thread)->Run(); (*thread)->Join(&result);
+fn run_resolved_in_pool(
+    args: ResolvedBlastpArgs,
+    query_records: &[fasta::Record],
+    subject_records: &[fasta::Record],
+    _query_label: &str,
+    subject_label: &str,
     mut in_memory_output: Option<&mut Vec<u8>>,
+    blastp_parallel_pool: &crate::utils::threading::SearchPool<'_>,
 ) -> Result<()> {
     // NCBI reference: /mnt/c/Users/genom/GitHub/ncbi-blast/c++/src/algo/blast/core/blast_engine.c:1633-1681
     // ```c
@@ -4348,13 +4043,7 @@ fn run_resolved_with_records(
         feature = "parallel",
         any(not(target_arch = "wasm32"), feature = "wasm-threads")
     ))]
-    let blastp_num_threads = blastp_effective_num_threads(args.num_threads);
-    #[cfg(all(
-        feature = "parallel",
-        any(not(target_arch = "wasm32"), feature = "wasm-threads")
-    ))]
-    let mut blastp_parallel_pool: Option<rayon::ThreadPool> = None;
-
+    let blastp_num_threads = blastp_parallel_pool.threads();
     let (outfmt, custom_fields) = OutputFormat::parse(&args.outfmt).map_err(anyhow::Error::msg)?;
     if outfmt == OutputFormat::Pairwise && custom_fields.is_some() {
         bail!("blastp outfmt 0 does not accept custom field lists");
@@ -4404,7 +4093,7 @@ fn run_resolved_with_records(
         subject_records,
         args.num_threads,
         blastp_num_threads,
-        &mut blastp_parallel_pool,
+        blastp_parallel_pool,
     )?;
     #[cfg(any(
         not(feature = "parallel"),
@@ -5521,9 +5210,7 @@ fn run_resolved_with_records(
             // BlastExtensionParameters* ext_params = NULL;
             // BlastGapAlignStruct* gap_align = NULL;
             // ```
-            let pool =
-                get_or_build_blastp_thread_pool(&mut blastp_parallel_pool, blastp_num_threads)
-                    .context("failed to build BLASTP preliminary search thread pool")?;
+            let pool = blastp_parallel_pool;
             // NCBI reference: /mnt/c/Users/genom/GitHub/ncbi-blast/c++/src/algo/blast/core/blast_engine.c:1409-1554
             // ```c
             // while ((seq_arg.oid = BlastSeqSrcIteratorNext(seq_src, itr)) != BLAST_SEQSRC_EOF) {
@@ -5832,9 +5519,7 @@ fn run_resolved_with_records(
             // #pragma omp for schedule(static)
             // for (b = 0; b < numMatches; ++b) {
             // ```
-            let pool =
-                get_or_build_blastp_thread_pool(&mut blastp_parallel_pool, blastp_num_threads)
-                    .context("failed to build BLASTP Kappa match redo thread pool")?;
+            let pool = blastp_parallel_pool;
             let precomputed: Vec<Result<Option<BlastpPostprocessResult>>> = pool.install(|| {
                 local_matches
                     .par_iter()
@@ -5956,9 +5641,7 @@ fn run_resolved_with_records(
             // #pragma omp for schedule(static)
             // for (b = 0; b < numMatches; ++b) {
             // ```
-            let pool =
-                get_or_build_blastp_thread_pool(&mut blastp_parallel_pool, blastp_num_threads)
-                    .context("failed to build BLASTP Kappa redo thread pool")?;
+            let pool = blastp_parallel_pool;
             let query_heaps: Result<Vec<(usize, BlastCompoHeap)>> = pool.install(|| {
                 kappa_parallel_query_indices
                     .par_iter()
@@ -6424,10 +6107,12 @@ fn run_resolved_with_records(
                     fields,
                     outfmt,
                     &mut writer,
+                    // NCBI reference: c++/src/objtools/align_format/tabular.cpp:1295-1309
+                    // AcknowledgeBlastQuery(bioseq, ..., kTabularFormat, rid);
                     &query_ids,
+                    &query_headers,
                     &subject_ids,
                     &subjects,
-                    &subject_titles,
                     &context,
                 )?;
             } else {
@@ -6446,7 +6131,10 @@ fn run_resolved_with_records(
                     fields,
                     outfmt,
                     &mut writer,
+                    // NCBI reference: c++/src/objtools/align_format/tabular.cpp:1295-1309
+                    // AcknowledgeBlastQuery(bioseq, ..., kTabularFormat, rid);
                     &query_ids,
+                    &query_headers,
                     &subject_ids,
                     &context,
                 )?;
@@ -7396,6 +7084,25 @@ mod tests {
     //     "evalue bitscore";
     // const char* kDfltArgTabularOutputFmtTag("std");
     // ```
+    // NCBI reference: c++/src/objtools/align_format/tabular.cpp:1132-1135,1146-1149
+    // case eQueryAccession: ... "query acc."; case eQueryAccessionVersion: ... "query acc.ver";
+    #[test]
+    fn accession_and_version_columns_remain_distinct() {
+        let fields = parse_blastp_tabular_fields("qacc qaccver sacc saccver").unwrap();
+        assert_eq!(
+            fields
+                .iter()
+                .map(|field| field.header_name())
+                .collect::<Vec<_>>(),
+            [
+                "query acc.",
+                "query acc.ver",
+                "subject acc.",
+                "subject acc.ver"
+            ]
+        );
+    }
+
     #[test]
     fn test_parse_blastp_tabular_fields_expands_std_and_dedups() {
         let fields = parse_blastp_tabular_fields("std qlen qaccver").expect("parsed fields");
@@ -7452,7 +7159,7 @@ mod tests {
                 "query1",
                 "subject1"
             ),
-            "subject description"
+            "N/A"
         );
         assert_eq!(
             blastp_tabular_field_text(
@@ -7492,16 +7199,8 @@ mod tests {
 
         for field in fields {
             let mut rendered = Vec::new();
-            write_blastp_hsp_tabular_field(
-                &mut rendered,
-                field,
-                &hsp,
-                "query1",
-                "subject1",
-                30,
-                Some("subject description"),
-            )
-            .expect("tabular field writes");
+            write_blastp_hsp_tabular_field(&mut rendered, field, &hsp, "query1", "subject1", 30)
+                .expect("tabular field writes");
             assert_eq!(
                 String::from_utf8(rendered).expect("tabular field is UTF-8"),
                 blastp_tabular_field_text(field, &pairwise_hit, "query1", "subject1")

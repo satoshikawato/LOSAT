@@ -1,3 +1,5 @@
+> Successor: [2026-09-13 threading remediation](../wasm_threading_remediation_plan_20260913.md) replaces the earlier pool-size and reactor lifecycle assumptions. Evidence below is historical.
+
 # 進捗台帳 — LOSATN / LOSATP Wasm性能改善
 
 本ファイルが、このパッケージに沿う開発の進捗の正本である。現時点では計画作成のみで、下記sessionは実行していない。S00が実在pathと初期baseを記入する。各担当は自分の状態・成果path・次の推奨だけを更新し、無関係な状態を成功へ変更しない。

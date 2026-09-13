@@ -4,6 +4,7 @@
 
 const fs = require("fs");
 const { WASI } = require("wasi");
+const { inspectArtifact } = require("./wasi_artifact");
 
 // NCBI reference:
 // ncbi-blast/c++/src/algo/blast/blastinput/cmdline_flags.cpp:46-75
@@ -19,6 +20,10 @@ if (!wasmPath) {
 const args = [wasmPath, ...process.argv.slice(3)];
 const wasi = new WASI({
   version: "preview1",
+  // NCBI reference: c++/src/app/blast/blastn_app.cpp:172-176
+  // CATCH_ALL(status)
+  // return status;
+  returnOnExit: true,
   args,
   env: process.env,
   preopens: { "/": "/" },
@@ -26,6 +31,9 @@ const wasi = new WASI({
 
 (async () => {
   const bytes = fs.readFileSync(wasmPath);
+  // NCBI reference: c++/src/app/blast/blastn_app.cpp:172-176
+  // CATCH_ALL(status); return status;
+  inspectArtifact(bytes, "serial-command");
   const module = await WebAssembly.compile(bytes);
   const instance = await WebAssembly.instantiate(module, {
     wasi_snapshot_preview1: wasi.wasiImport,
@@ -35,7 +43,10 @@ const wasi = new WASI({
       `${wasmPath} does not export _start; use the LOSAT command-Wasm artifact.`,
     );
   }
-  wasi.start(instance);
+  // NCBI reference: c++/src/app/blast/blastn_app.cpp:172-176
+  // CATCH_ALL(status)
+  // return status;
+  process.exitCode = wasi.start(instance);
 })().catch((error) => {
   console.error(error && error.stack ? error.stack : String(error));
   process.exit(1);

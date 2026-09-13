@@ -62,7 +62,6 @@ fn tblastx_scan_chunk_size_for_run(search_unit_len: usize, num_threads: usize) -
 //                     - backup->offset;
 // }
 // ```
-#[cfg(all(feature = "parallel", target_arch = "wasm32", feature = "wasm-threads"))]
 fn tblastx_estimated_aa_chunks(aa_len: usize, max_dbseq_len: usize) -> usize {
     if aa_len == 0 {
         return 0;
@@ -82,7 +81,6 @@ fn tblastx_estimated_aa_chunks(aa_len: usize, max_dbseq_len: usize) -> usize {
 //       subject_blk->length, frame, retval->translations[context], gen_code_string);
 // }
 // ```
-#[cfg(all(feature = "parallel", target_arch = "wasm32", feature = "wasm-threads"))]
 fn tblastx_estimated_subject_chunk_work_items(
     subject_nucl_len: usize,
     max_dbseq_len: usize,
@@ -95,253 +93,6 @@ fn tblastx_estimated_subject_chunk_work_items(
     }
     max_frame_chunks
 }
-
-// NCBI reference: ncbi-blast/c++/src/algo/blast/api/prelim_stage.cpp:82-88
-// ```c
-// if (num_threads > 1) {
-//     SetNumberOfThreads(num_threads);
-// }
-// ```
-#[cfg(all(feature = "parallel", target_arch = "wasm32", feature = "wasm-threads"))]
-const TBLASTX_WASI_PARALLEL_MIN_WORK_ITEMS: usize = 2;
-
-// NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_engine.c:1407-1412
-// ```c
-// db_length = BlastSeqSrcGetTotLen(seq_src);
-// itr = BlastSeqSrcIteratorNewEx(MAX(BlastSeqSrcGetNumSeqs(seq_src)/100,1));
-// /* iterate over all subject sequences */
-// ```
-#[cfg(all(feature = "parallel", target_arch = "wasm32", feature = "wasm-threads"))]
-const TBLASTX_WASI_PARALLEL_MIN_SUBJECT_BASES_PER_THREAD: usize = 262_144;
-
-// NCBI reference: ncbi-blast/c++/src/algo/blast/blastinput/blast_args.cpp:3205-3222
-// ```c
-// const int kMaxValue = static_cast<int>(CSystemInfo::GetCpuCount());
-// int num_threads = args[kArgNumThreads].AsInteger();
-// if (num_threads > kMaxValue) {
-//     m_NumThreads = kMaxValue;
-// } else {
-//     m_NumThreads = num_threads;
-// }
-// ```
-//
-// NCBI reference: ncbi-blast/c++/src/algo/blast/api/prelim_stage.cpp:82-88
-// ```c
-// if (num_threads > 1) {
-//     SetNumberOfThreads(num_threads);
-// }
-// ```
-#[cfg(all(
-    feature = "parallel",
-    any(not(target_arch = "wasm32"), feature = "wasm-threads")
-))]
-fn build_tblastx_thread_pool(num_threads: usize) -> Result<rayon::ThreadPool> {
-    // NCBI reference: ncbi-blast/c++/src/algo/blast/api/prelim_stage.cpp:82-88
-    // ```c
-    // if (num_threads > 1) {
-    //     SetNumberOfThreads(num_threads);
-    // }
-    // ```
-    let builder = rayon::ThreadPoolBuilder::new().num_threads(num_threads);
-
-    // NCBI reference: ncbi-blast/c++/src/algo/blast/blastinput/blast_args.cpp:3205-3222
-    // ```c
-    // int num_threads = args[kArgNumThreads].AsInteger();
-    // if (num_threads > kMaxValue) {
-    //     m_NumThreads = kMaxValue;
-    // } else {
-    //     m_NumThreads = num_threads;
-    // }
-    // ```
-    #[cfg(all(target_arch = "wasm32", feature = "wasm-threads"))]
-    let builder = builder.use_current_thread();
-
-    builder
-        .build()
-        .context("failed to build TBLASTX thread pool")
-}
-
-// NCBI reference: ncbi-blast/c++/src/algo/blast/api/prelim_stage.cpp:82-88
-// ```c
-// if (num_threads > 1) {
-//     SetNumberOfThreads(num_threads);
-// }
-// ```
-#[cfg(all(feature = "parallel", target_arch = "wasm32", feature = "wasm-threads"))]
-fn tblastx_thread_pool_spawned_workers(num_threads: usize) -> usize {
-    num_threads.saturating_sub(1)
-}
-
-// NCBI reference: ncbi-blast/c++/src/algo/blast/blastinput/blast_args.cpp:3205-3222
-// ```c
-// const int kMaxValue = static_cast<int>(CSystemInfo::GetCpuCount());
-// int num_threads = args[kArgNumThreads].AsInteger();
-// if (num_threads > kMaxValue) {
-//     m_NumThreads = kMaxValue;
-// } else {
-//     m_NumThreads = num_threads;
-// }
-// ```
-#[cfg(all(feature = "parallel", target_arch = "wasm32", feature = "wasm-threads"))]
-fn tblastx_wasi_parallel_env_usize(name: &str, fallback: usize) -> usize {
-    std::env::var(name)
-        .ok()
-        .and_then(|raw| raw.parse::<usize>().ok())
-        .unwrap_or(fallback)
-}
-
-// NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_engine.c:1409-1475
-// ```c
-// while ( (seq_arg.oid = BlastSeqSrcIteratorNext(seq_src, itr))
-//        != BLAST_SEQSRC_EOF) {
-//    status = s_BlastSearchEngineCore(...);
-// }
-// ```
-//
-// NCBI reference: ncbi-blast/c++/src/algo/blast/api/prelim_stage.cpp:82-88
-// ```c
-// if (num_threads > 1) {
-//     SetNumberOfThreads(num_threads);
-// }
-// ```
-#[cfg(all(feature = "parallel", target_arch = "wasm32", feature = "wasm-threads"))]
-#[derive(Clone, Copy)]
-struct TblastxWasiParallelDecision {
-    parallel: bool,
-    worker_jobs: usize,
-    min_worker_jobs: usize,
-    min_subject_bases: usize,
-    serial_reason: &'static str,
-}
-
-// NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_engine.c:452-584
-// ```c
-// while (TRUE) {
-//    status = s_GetNextSubjectChunk(subject, &backup, kNucleotide,
-//                                   dbseq_chunk_overlap);
-//    if (status == SUBJECT_SPLIT_DONE) break;
-//    ...
-//    status = Blast_HSPListsMerge(&hsp_list, &combined_hsp_list, ...);
-// }
-// ```
-//
-// NCBI reference: ncbi-blast/c++/src/algo/blast/api/prelim_stage.cpp:82-88
-// ```c
-// if (num_threads > 1) {
-//     SetNumberOfThreads(num_threads);
-// }
-// ```
-#[cfg(all(feature = "parallel", target_arch = "wasm32", feature = "wasm-threads"))]
-fn tblastx_wasi_parallel_decision(
-    effective_threads: usize,
-    subject_records: usize,
-    subject_chunk_work_items: usize,
-    total_subject_bases: usize,
-    query_records: usize,
-    query_bases: usize,
-) -> TblastxWasiParallelDecision {
-    let worker_jobs = subject_records.max(subject_chunk_work_items);
-    let min_worker_jobs = tblastx_wasi_parallel_env_usize(
-        "LOSAT_TBLASTX_WASI_MIN_WORK_ITEMS",
-        TBLASTX_WASI_PARALLEL_MIN_WORK_ITEMS,
-    );
-    let min_subject_bases = effective_threads.saturating_mul(tblastx_wasi_parallel_env_usize(
-        "LOSAT_TBLASTX_WASI_MIN_SUBJECT_BASES_PER_THREAD",
-        TBLASTX_WASI_PARALLEL_MIN_SUBJECT_BASES_PER_THREAD,
-    ));
-
-    let serial_reason = if effective_threads <= 1 {
-        "effective_threads<=1"
-    } else if query_records == 0 || query_bases == 0 {
-        "query_bases=0"
-    } else if worker_jobs <= 1 {
-        "worker_jobs<=1"
-    } else if worker_jobs < min_worker_jobs {
-        "worker_jobs<threshold"
-    } else if total_subject_bases < min_subject_bases {
-        "subject_bases<threshold"
-    } else {
-        "parallel"
-    };
-
-    TblastxWasiParallelDecision {
-        parallel: serial_reason == "parallel",
-        worker_jobs,
-        min_worker_jobs,
-        min_subject_bases,
-        serial_reason,
-    }
-}
-
-// NCBI reference: ncbi-blast/c++/src/algo/blast/api/prelim_stage.cpp:82-88
-// ```c
-// if (num_threads > 1) {
-//     SetNumberOfThreads(num_threads);
-// }
-// ```
-#[cfg(all(feature = "parallel", target_arch = "wasm32", feature = "wasm-threads"))]
-fn tblastx_wasi_threads_debug_enabled() -> bool {
-    std::env::var("LOSAT_WASI_THREADS_DEBUG")
-        .map(|value| value == "1" || value.eq_ignore_ascii_case("true"))
-        .unwrap_or(false)
-}
-
-// NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_engine.c:452-584
-// ```c
-// BLAST_GetUngappedHSPList(init_hitlist, query_info, subject,
-//         hit_params->options, &hsp_list);
-// Blast_HSPListAdjustOffsets(hsp_list, backup.offset);
-// status = Blast_HSPListsMerge(&hsp_list, &combined_hsp_list,
-//      kHspNumMax, &(backup.offset), INT4_MIN, overlap, ...);
-// ```
-#[cfg(all(feature = "parallel", target_arch = "wasm32", feature = "wasm-threads"))]
-fn tblastx_report_wasi_threading(
-    requested_threads: usize,
-    effective_threads: usize,
-    parallel: bool,
-    subject_records: usize,
-    subject_chunk_work_items: usize,
-    total_subject_bases: usize,
-    query_records: usize,
-    query_bases: usize,
-    decision: TblastxWasiParallelDecision,
-    parallel_chunks: bool,
-    forced_parallel_chunks: bool,
-) {
-    if !tblastx_wasi_threads_debug_enabled() {
-        return;
-    }
-    let expected_spawned_workers = if parallel {
-        tblastx_thread_pool_spawned_workers(effective_threads)
-    } else {
-        0
-    };
-    eprintln!(
-        "[losat-wasi-threads] tblastx stage=search target_arch=wasm32 threaded_wasm=true \
-requested_threads={requested_threads} effective_threads={effective_threads} rayon_pool_threads={} \
-expected_spawned_workers={expected_spawned_workers} subject_records={subject_records} subject_chunk_work_items={subject_chunk_work_items} worker_jobs={} \
-total_subject_bases={total_subject_bases} query_records={query_records} query_bases={query_bases} \
-min_worker_jobs={} min_subject_bases={} parallel={} parallel_chunks={} forced_parallel_chunks={} \
-serial_reason={}",
-        if parallel {
-            effective_threads
-        } else {
-            0
-        },
-        decision.worker_jobs,
-        decision.min_worker_jobs,
-        decision.min_subject_bases,
-        parallel,
-        parallel_chunks,
-        forced_parallel_chunks,
-        if parallel && forced_parallel_chunks && !decision.parallel {
-            "forced_parallel_chunks"
-        } else {
-            decision.serial_reason
-        }
-    );
-}
-
 // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_aascan.c:75-127
 // ```c
 // while (s_DetermineScanningOffsets(subject, word_length, word_length, s_range)) {
@@ -777,7 +528,7 @@ struct TblastxInMemoryRun<'a> {
 }
 
 #[cfg(target_arch = "wasm32")]
-fn fasta_records_from_bytes(bytes: &[u8]) -> Vec<fasta::Record> {
+fn fasta_records_from_bytes(bytes: &[u8]) -> Result<Vec<fasta::Record>> {
     // NCBI reference: ncbi-blast/c++/src/algo/blast/api/blast_setup_cxx.cpp:486-651
     // ```c
     // void
@@ -789,8 +540,10 @@ fn fasta_records_from_bytes(bytes: &[u8]) -> Vec<fasta::Record> {
     // ```
     fasta::Reader::new(bytes)
         .records()
-        .filter_map(|record| record.ok())
-        .collect()
+        // NCBI reference: c++/src/objtools/readers/fasta.cpp:428-431
+        // FASTA_ERROR(LineNumber(), "CFastaReader: Expected defline around line " << LineNumber(), ...);
+        .collect::<std::result::Result<Vec<_>, _>>()
+        .context("failed to parse in-memory FASTA")
 }
 
 // NCBI reference: /mnt/c/Users/genom/GitHub/ncbi-blast/c++/src/algo/blast/blastinput/blast_input_aux.cpp:242-246
@@ -829,8 +582,8 @@ pub fn run_web_pair(args: TblastxArgs, query_fasta: &str, subject_fasta: &str) -
     //     }
     // }
     // ```
-    let queries = fasta_records_from_bytes(query_fasta.as_bytes());
-    let subjects = fasta_records_from_bytes(subject_fasta.as_bytes());
+    let queries = fasta_records_from_bytes(query_fasta.as_bytes()).context("query FASTA")?;
+    let subjects = fasta_records_from_bytes(subject_fasta.as_bytes()).context("subject FASTA")?;
     let mut output = Vec::new();
     run_internal(
         args,
@@ -847,7 +600,23 @@ pub fn run(args: TblastxArgs) -> Result<()> {
     run_internal(args, None)
 }
 
-fn run_internal(args: TblastxArgs, mut in_memory: Option<TblastxInMemoryRun<'_>>) -> Result<()> {
+// NCBI reference: c++/src/algo/blast/api/prelim_stage.cpp:145-188
+// TBlastThreads the_threads(GetNumberOfThreads());
+// (*thread)->Run(); (*thread)->Join(&result);
+fn run_internal(args: TblastxArgs, in_memory: Option<TblastxInMemoryRun<'_>>) -> Result<()> {
+    crate::utils::threading::with_search_pool(args.num_threads, "tblastx", |pool| {
+        run_in_pool(args, in_memory, pool)
+    })
+}
+
+// NCBI reference: c++/src/algo/blast/api/prelim_stage.cpp:145-188
+// TBlastThreads the_threads(GetNumberOfThreads());
+// (*thread)->Run(); (*thread)->Join(&result);
+fn run_in_pool(
+    args: TblastxArgs,
+    mut in_memory: Option<TblastxInMemoryRun<'_>>,
+    parallel_pool: &crate::utils::threading::SearchPool<'_>,
+) -> Result<()> {
     // NCBI reference: ncbi-blast/c++/src/algo/blast/core/aa_ungapped.c:575-582
     // ```c
     // score = s_BlastAaExtendTwoHit(matrix, subject, query,
@@ -886,43 +655,20 @@ fn run_internal(args: TblastxArgs, mut in_memory: Option<TblastxInMemoryRun<'_>>
     //     m_NumThreads = num_threads;
     // }
     // ```
-    let num_threads = {
-        #[cfg(all(target_arch = "wasm32", not(feature = "wasm-threads")))]
-        {
-            1
-        }
-        #[cfg(any(not(target_arch = "wasm32"), feature = "wasm-threads"))]
-        {
-            #[cfg(feature = "parallel")]
-            {
-                if args.num_threads == 0 {
-                    num_cpus::get()
-                } else {
-                    args.num_threads
-                }
-            }
-            #[cfg(not(feature = "parallel"))]
-            {
-                1
-            }
-        }
-    };
+    // NCBI reference: c++/src/algo/blast/api/prelim_stage.cpp:145-188
+    // TBlastThreads the_threads(GetNumberOfThreads());
+    // (*thread)->Run(); (*thread)->Join(&result);
+    let num_threads = parallel_pool.threads();
     // NCBI reference: ncbi-blast/c++/src/algo/blast/api/prelim_stage.cpp:82-88
     // ```c
     // if (num_threads > 1) {
     //     SetNumberOfThreads(num_threads);
     // }
     // ```
-    #[cfg(all(
-        feature = "parallel",
-        any(not(target_arch = "wasm32"), feature = "wasm-threads")
-    ))]
-    let requested_parallel = num_threads > 1;
-    #[cfg(any(
-        not(feature = "parallel"),
-        all(target_arch = "wasm32", not(feature = "wasm-threads"))
-    ))]
-    let requested_parallel = false;
+    // NCBI reference: c++/src/algo/blast/api/prelim_stage.cpp:145-188
+    // TBlastThreads the_threads(GetNumberOfThreads());
+    // (*thread)->Run(); (*thread)->Join(&result);
+    let requested_parallel = parallel_pool.enabled();
     // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_engine.c:1002-1003
     // ```c
     // status = s_BlastSetUpAuxStructures(..., aux_struct);
@@ -931,7 +677,7 @@ fn run_internal(args: TblastxArgs, mut in_memory: Option<TblastxInMemoryRun<'_>>
     // The scan-chunk experiment keeps the canonical two-hit state serial inside
     // each NCBI WordFinder search unit, so subject-level parallelism is disabled
     // while this gate is active.
-    let use_parallel_scan_chunks = std::env::var_os("LOSAT_TBLASTX_PARALLEL_SCAN_CHUNKS").is_some();
+    let use_serial_scan_chunks = std::env::var_os("LOSAT_TBLASTX_SERIAL_SCAN_CHUNKS").is_some();
     // NCBI reference: ncbi-blast/c++/src/algo/blast/api/prelim_stage.cpp:82-88
     // ```c
     // if (num_threads > 1) {
@@ -1187,106 +933,26 @@ fn run_internal(args: TblastxArgs, mut in_memory: Option<TblastxInMemoryRun<'_>>
     //    status = Blast_HSPListsMerge(&hsp_list, &combined_hsp_list, ...);
     // }
     // ```
-    #[cfg(all(feature = "parallel", target_arch = "wasm32", feature = "wasm-threads"))]
-    let (use_parallel, use_parallel_chunks) = {
-        let total_subject_bases = subjects_raw.iter().map(|r| r.seq().len()).sum::<usize>();
-        let query_bases = queries_raw.iter().map(|r| r.seq().len()).sum::<usize>();
-        let max_dbseq_len = tblastx_max_dbseq_len_for_run();
-        let subject_chunk_work_items = subjects_raw
-            .iter()
-            .map(|record| {
-                tblastx_estimated_subject_chunk_work_items(record.seq().len(), max_dbseq_len)
-            })
-            .max()
-            .unwrap_or(0);
-        let decision = tblastx_wasi_parallel_decision(
-            num_threads,
-            subjects_raw.len(),
-            subject_chunk_work_items,
-            total_subject_bases,
-            queries_raw.len(),
-            query_bases,
-        );
-        let forced_parallel_chunks = std::env::var_os("LOSAT_TBLASTX_PARALLEL_CHUNKS").is_some();
-        let use_parallel = requested_parallel
-            && (decision.parallel || (forced_parallel_chunks && num_threads > 1));
-        let use_parallel_chunks = requested_parallel
-            && !use_parallel_scan_chunks
-            && (forced_parallel_chunks || (decision.parallel && subject_chunk_work_items > 1));
-        tblastx_report_wasi_threading(
-            args.num_threads,
-            num_threads,
-            use_parallel,
-            subjects_raw.len(),
-            subject_chunk_work_items,
-            total_subject_bases,
-            queries_raw.len(),
-            query_bases,
-            decision,
-            use_parallel_chunks,
-            forced_parallel_chunks,
-        );
-        (use_parallel, use_parallel_chunks)
-    };
-
-    // NCBI reference: ncbi-blast/c++/src/algo/blast/api/prelim_stage.cpp:82-88
-    // ```c
-    // if (num_threads > 1) {
-    //     SetNumberOfThreads(num_threads);
-    // }
-    // ```
-    #[cfg(all(
-        feature = "parallel",
-        not(all(target_arch = "wasm32", feature = "wasm-threads"))
-    ))]
+    // NCBI reference: c++/src/algo/blast/api/prelim_stage.cpp:145-188
+    // TBlastThreads the_threads(GetNumberOfThreads());
+    // (*thread)->Run(); (*thread)->Join(&result);
     let use_parallel = requested_parallel;
-
-    // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_engine.c:452-584
-    // ```c
-    // BLAST_GetUngappedHSPList(init_hitlist, query_info, subject,
-    //         hit_params->options, &hsp_list);
-    // Blast_HSPListAdjustOffsets(hsp_list, backup.offset);
-    // status = Blast_HSPListsMerge(&hsp_list, &combined_hsp_list, ...);
-    // ```
-    #[cfg(all(
-        feature = "parallel",
-        not(all(target_arch = "wasm32", feature = "wasm-threads"))
-    ))]
     let use_parallel_chunks = requested_parallel
-        && !use_parallel_scan_chunks
-        && std::env::var_os("LOSAT_TBLASTX_PARALLEL_CHUNKS").is_some();
-
-    // NCBI reference: ncbi-blast/c++/include/algo/blast/blastinput/blast_args.hpp:1290-1296
-    // ```c
-    // #ifdef NCBI_NO_THREADS
-    //     m_NumThreads = CThreadable::kMinNumThreads;
-    //     m_MTMode = eNotSupported;
-    // #endif
-    // ```
-    #[cfg(not(feature = "parallel"))]
-    let use_parallel = false;
-    #[cfg(not(feature = "parallel"))]
-    let use_parallel_chunks = false;
-
-    // Keep the Rayon registry local to this TBLASTX run. Browser direct/WASI
-    // workers may process several pair jobs with different `-num_threads`
-    // values; a process-global pool would fail after the first initialization
-    // or keep using the first job's thread count.
-    // NCBI reference: ncbi-blast/c++/src/algo/blast/api/prelim_stage.cpp:82-88
-    // ```c
-    // if (num_threads > 1) {
-    //     SetNumberOfThreads(num_threads);
-    // }
-    // ```
-    #[cfg(all(
-        feature = "parallel",
-        any(not(target_arch = "wasm32"), feature = "wasm-threads")
-    ))]
-    let parallel_pool = if use_parallel {
-        Some(build_tblastx_thread_pool(num_threads)?)
-    } else {
-        None
-    };
+        && !use_serial_scan_chunks
+        && (std::env::var_os("LOSAT_TBLASTX_PARALLEL_CHUNKS").is_some()
+            || (cfg!(all(target_arch = "wasm32", feature = "wasm-threads"))
+                && subjects_raw.iter().any(|r| {
+                    tblastx_estimated_subject_chunk_work_items(
+                        r.seq().len(),
+                        tblastx_max_dbseq_len_for_run(),
+                    ) > 1
+                })));
+    crate::utils::threading::report_stage(
+        "tblastx",
+        "subjects",
+        subjects_raw.len(),
+        use_parallel && !use_serial_scan_chunks && subjects_raw.len() > 1,
+    );
 
     // NCBI reference: ncbi-blast/c++/include/algo/blast/core/blast_hits.h:153-166
     // ```c
@@ -1370,10 +1036,11 @@ fn run_internal(args: TblastxArgs, mut in_memory: Option<TblastxInMemoryRun<'_>>
     //    status = s_BlastSearchEngineCore(..., &hsp_list, ...);
     // }
     // ```
-    // Single-threaded NCBI runs the subject loop in-process, so we can
-    // accumulate hits directly without an mpsc queue.
+    // NCBI iterates subjects before reducing results. Only the parallel subject
+    // traversal sends to this queue; a single-subject caller retains its hits
+    // directly and must not keep a sender alive while joining the writer.
     #[cfg(all(feature = "parallel", not(target_arch = "wasm32")))]
-    let use_channel = use_parallel && !use_parallel_scan_chunks;
+    let use_channel = use_parallel && !use_serial_scan_chunks && subjects_raw.len() > 1;
     #[cfg(any(not(feature = "parallel"), target_arch = "wasm32"))]
     let use_channel = false;
 
@@ -1385,51 +1052,6 @@ fn run_internal(args: TblastxArgs, mut in_memory: Option<TblastxInMemoryRun<'_>>
     };
     let out_path = args.out.clone();
     let evalue_threshold = args.evalue;
-
-    // NCBI reference: ncbi-blast/c++/src/algo/blast/api/prelim_stage.cpp:82-88
-    // ```c
-    // if (num_threads > 1) {
-    //     SetNumberOfThreads(num_threads);
-    // }
-    // ```
-    #[cfg(all(feature = "parallel", not(target_arch = "wasm32")))]
-    let writer = if use_channel {
-        // NCBI reference: ncbi-blast/c++/include/algo/blast/core/blast_hits.h:153-166
-        // ```c
-        // typedef struct BlastHSPList {
-        //    Int4 oid;/**< The ordinal id of the subject sequence this HSP list is for */
-        //    Int4 query_index; /**< Index of the query which this HSPList corresponds to.
-        //                       Set to 0 if not applicable */
-        // } BlastHSPList;
-        // ```
-        let query_ids_out = query_ids.clone();
-        let subject_ids_out = subject_ids.clone();
-        let out_path = out_path.clone();
-        let rx = rx_opt.take().expect("rx must be available for writer");
-        Some(std::thread::spawn(move || -> Result<()> {
-            let mut all: Vec<Hit> = Vec::new();
-            while let Ok(h) = rx.recv() {
-                all.extend(h);
-            }
-            all.retain(|h| h.e_value <= evalue_threshold);
-            // NCBI reference: /mnt/c/Users/genom/GitHub/ncbi-blast/c++/src/algo/blast/api/blast_seqalign.cpp:1574-1577
-            // ```c
-            // // Sort HSPs with e-values as first priority and scores as
-            // // tie-breakers, since that is the order we want to see them in
-            // // in Seq-aligns.
-            // Blast_HSPListSortByEvalue(hsp_list);
-            // ```
-            write_output_ncbi_order_evalue_hsp_order(
-                all,
-                out_path.as_ref(),
-                &query_ids_out,
-                &subject_ids_out,
-            )?;
-            Ok(())
-        }))
-    } else {
-        None
-    };
 
     // Diagonal array sizing MUST match NCBI's `s_BlastDiagTableNew`:
     // it depends only on (query_length + window_size), not on subject length.
@@ -1509,7 +1131,258 @@ fn run_internal(args: TblastxArgs, mut in_memory: Option<TblastxInMemoryRun<'_>>
         state
     }
 
+    // NCBI reference: c++/src/algo/blast/api/seqsrc_multiseq.cpp:175-180,261-264;
+    // c++/src/algo/blast/core/blast_engine.c:1372-1374,1434-1443
+    // m_iTotalLength += (Int8) (*iter)->length;
+    // avg_length = (Uint4) (total_length / num_seqs);
+    // BlastInitialWordParametersUpdate(..., BlastSeqSrcGetAvgSeqLen(seq_src), ...);
+    // if (db_length == 0) { BLAST_OneSubjectUpdateParameters(...); }
+    let db_length_nucl = subjects_raw
+        .iter()
+        .map(|r| r.seq().len() as i64)
+        .sum::<i64>();
+    let db_num_seqs = subjects_raw.len() as i64;
+    // NCBI reference: c++/src/algo/blast/core/blast_setup.c:975-980
+    // if (avg_subject_length <= 0) return BLASTERR_SUBJECT_LENGTH_INVALID;
+    anyhow::ensure!(db_length_nucl / db_num_seqs > 0, "invalid subject length");
+    // NCBI reference: c++/src/algo/blast/core/blast_setup.c:535-560
+    // if (valid_context_found) { return 0; } else { return 1; }
+    anyhow::ensure!(
+        contexts_ref.iter().any(|ctx| ctx.is_valid),
+        "no valid query contexts"
+    );
+    // Precompute per-context cutoff scores using NCBI BLAST algorithm.
+    // Reference: ncbi-blast/c++/src/algo/blast/core/blast_parameters.c:280-419
+    //
+    // NCBI cutoff calculation for tblastx ungapped path:
+    // 1. gap_trigger from ungapped params (kbp_std)
+    // 2. cutoff_score_max from BlastHitSavingParametersNew (uses user's E-value)
+    // 3. Initial word cutoff: cutoff_score_for_update_tblastx with CUTOFF_E_TBLASTX=1e-300
+    // 4. Final cutoff = MIN(update_cutoff, gap_trigger, cutoff_score_max)
+    //
+    // The word cutoff uses the average subject nucleotide length.
+    let subject_len_nucl = db_length_nucl / db_num_seqs;
+    // NCBI: cutoff scores are stored per query context (no subject-frame dimension).
+    // Reference: ncbi-blast/c++/src/algo/blast/core/blast_parameters.c:320-324
+    // ```c
+    // BlastUngappedCutoffs *curr_cutoffs = parameters->cutoffs + context;
+    // ...
+    // curr_cutoffs->cutoff_score = new_cutoff;
+    // ```
+    let mut cutoff_scores: Vec<i32> = vec![0; contexts_ref.len()];
+    // NCBI word_params->cutoff_score_min = min of cutoffs across all contexts
+    // Reference: ncbi-blast/c++/src/algo/blast/core/blast_parameters.c:401-403
+    let mut cutoff_score_min = i32::MAX;
+
+    // =======================================================================
+    // NCBI Parity: Pre-compute length_adjustment and eff_searchsp per context
+    // =======================================================================
+    // NCBI stores these in query_info->contexts[ctx].length_adjustment and
+    // query_info->contexts[ctx].eff_searchsp via BLAST_CalcEffLengths
+    // (ncbi-blast/c++/src/algo/blast/core/blast_setup.c:700-850).
+    // Compute once for the complete subject set and share with all subject jobs.
+    // Reference: ncbi-blast/c++/src/algo/blast/core/blast_setup.c:846-847
+    //   query_info->contexts[index].eff_searchsp = effective_search_space;
+    //   query_info->contexts[index].length_adjustment = length_adjustment;
+    let mut length_adj_per_context: Vec<i64> = Vec::with_capacity(contexts_ref.len());
+    let mut eff_searchsp_per_context: Vec<i64> = Vec::with_capacity(contexts_ref.len());
+
+    for (ctx_idx, ctx) in contexts_ref.iter().enumerate() {
+        // NCBI reference: c++/src/algo/blast/core/blast_parameters.c:324-331;
+        // blast_setup.c:774-847: invalid contexts keep zero effective lengths.
+        // if (!query_info->contexts[context].is_valid) {
+        //     curr_cutoffs->cutoff_score = INT4_MAX; continue;
+        // }
+        if !ctx.is_valid || ctx.aa_len == 0 {
+            cutoff_scores[ctx_idx] = i32::MAX;
+            length_adj_per_context.push(0);
+            eff_searchsp_per_context.push(0);
+            continue;
+        }
+        // NCBI: per-context kbp_std[context] is used throughout cutoff/length calcs.
+        // Reference: ncbi-blast/c++/src/algo/blast/core/blast_stat.c:2778-2797
+        let ctx_params = &ctx.karlin_params;
+
+        // NCBI: query_length = query_info->contexts[context].query_length
+        let query_len_aa = ctx.aa_len as i64;
+
+        // NCBI: gap_trigger uses kbp_std[context]->Lambda/logK.
+        // Reference: ncbi-blast/c++/src/algo/blast/core/blast_parameters.c:340-345
+        let gap_trigger = gap_trigger_raw_score(GAP_TRIGGER_BIT_SCORE, ctx_params);
+
+        // =======================================================================
+        // NCBI Parity: Use compute_eff_lengths_tblastx to get BOTH
+        // length_adjustment and eff_searchsp from a single source of truth.
+        // This mirrors BLAST_CalcEffLengths which computes and stores both values.
+        // Reference: ncbi-blast/c++/src/algo/blast/core/blast_setup.c:821-847
+        // =======================================================================
+        let eff_lengths = compute_eff_lengths_tblastx(
+            query_len_aa,
+            db_length_nucl,
+            db_num_seqs,
+            ctx_params, // tblastx uses per-context ungapped params (kbp_gap is NULL)
+        );
+        let eff_searchsp = eff_lengths.eff_searchsp;
+        length_adj_per_context.push(eff_lengths.length_adjustment);
+        eff_searchsp_per_context.push(eff_searchsp);
+
+        // Step 1: Compute cutoff_score_max from BlastHitSavingParametersNew
+        // This uses the effective search space WITH length adjustment
+        // Reference: ncbi-blast/c++/src/algo/blast/core/blast_parameters.c:942-946
+        let cutoff_score_max = cutoff_score_max_for_tblastx(
+            eff_searchsp,
+            evalue_threshold, // User's E-value (typically 10.0)
+            ctx_params,
+        );
+
+        // Step 2: Compute per-subject cutoff using BlastInitialWordParametersUpdate
+        // This uses CUTOFF_E_TBLASTX=1e-300 and a simple searchsp formula
+        // Reference: ncbi-blast/c++/src/algo/blast/core/blast_parameters.c:348-374
+        let cutoff = cutoff_score_for_update_tblastx(
+            query_len_aa,
+            subject_len_nucl, // NUCLEOTIDE length, NOT divided by 3!
+            gap_trigger,
+            cutoff_score_max,
+            BLAST_GAP_DECAY_RATE, // 0.5
+            ctx_params,
+            1.0, // scale_factor (standard BLOSUM62)
+        );
+
+        // DEBUG: Print cutoff values for first context
+        static PRINTED: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+        if diag_enabled && ctx_idx == 0 && !PRINTED.swap(true, std::sync::atomic::Ordering::Relaxed)
+        {
+            eprintln!(
+                "[DEBUG CUTOFF] query_len_aa={}, subject_len_nucl={}",
+                query_len_aa, subject_len_nucl
+            );
+            eprintln!("[DEBUG CUTOFF] eff_searchsp={}", eff_searchsp);
+            eprintln!(
+                "[DEBUG CUTOFF] length_adjustment={}",
+                eff_lengths.length_adjustment
+            );
+            eprintln!("[DEBUG CUTOFF] cutoff_score_max={}", cutoff_score_max);
+            eprintln!("[DEBUG CUTOFF] gap_trigger={}", gap_trigger);
+            eprintln!("[DEBUG CUTOFF] final cutoff={}", cutoff);
+        }
+        // NCBI reference: /mnt/c/Users/genom/GitHub/ncbi-blast/c++/src/algo/blast/core/blast_parameters.c:943-946
+        // ```c
+        // BLAST_Cutoffs(&new_cutoff, &evalue, kbp, searchsp, FALSE, 0);
+        // params->cutoffs[context].cutoff_score = new_cutoff;
+        // params->cutoffs[context].cutoff_score_max = new_cutoff;
+        // ```
+        // NCBI reference: /mnt/c/Users/genom/GitHub/ncbi-blast/c++/src/algo/blast/core/blast_parameters.c:360-374
+        // ```c
+        // BLAST_Cutoffs(&new_cutoff, &cutoff_e, kbp,
+        //               MIN((Uint8)subj_length, (Uint8)query_length)*((Uint8)subj_length),
+        //               TRUE, gap_decay_rate);
+        // new_cutoff = MIN(new_cutoff, gap_trigger);
+        // new_cutoff = MIN(new_cutoff, hit_params->cutoffs[context].cutoff_score_max);
+        // ```
+        // Diagnostic-only dump of the same per-context values that feed
+        // word_params->cutoff_score_min and CalculateLinkHSPCutoffs.
+        if debug_cutoffs_all {
+            eprintln!(
+                "[DEBUG CUTOFF_ALL] ctx_idx={} q_frame={} query_len_aa={} subject_len_nucl={} eff_searchsp={} length_adjustment={} lambda={:.12e} k={:.12e} h={:.12e} cutoff_score_max={} gap_trigger={} word_cutoff={}",
+                ctx_idx,
+                ctx.frame,
+                query_len_aa,
+                subject_len_nucl,
+                eff_searchsp,
+                eff_lengths.length_adjustment,
+                ctx_params.lambda,
+                ctx_params.k,
+                ctx_params.h,
+                cutoff_score_max,
+                gap_trigger,
+                cutoff
+            );
+        }
+
+        // Track minimum cutoff for linking
+        cutoff_score_min = cutoff_score_min.min(cutoff);
+
+        // All subject frames use the same cutoff (NCBI: per-context cutoffs only).
+        cutoff_scores[ctx_idx] = cutoff;
+    }
+    // NCBI reference: /mnt/c/Users/genom/GitHub/ncbi-blast/c++/src/algo/blast/core/blast_parameters.c:401-416
+    // ```c
+    // if (new_cutoff < cutoff_min) {
+    //    cutoff_min = new_cutoff;
+    // }
+    // parameters->cutoff_score_min = cutoff_min;
+    // ```
+    if debug_cutoffs_all {
+        eprintln!(
+            "[DEBUG CUTOFF_ALL] word_params_cutoff_score_min={}",
+            cutoff_score_min
+        );
+    }
+
+    // NCBI reference: c++/src/algo/blast/core/blast_parameters.c:101-110
+    // if (kbp[index] && query_info->contexts[index].is_valid &&
+    //     kbp[index]->Lambda > 0.0 && kbp[index]->Lambda < min_lambda) { ... }
+    let context_params: Vec<KarlinParams> = contexts_ref
+        .iter()
+        .filter(|ctx| ctx.is_valid)
+        .map(|ctx| ctx.karlin_params)
+        .collect();
+    let linking_params_for_cutoff = find_smallest_lambda_params(&context_params)
+        .context("no valid query statistical parameters")?;
+
+    // NCBI reference: ncbi-blast/c++/src/algo/blast/api/prelim_stage.cpp:82-88
+    // ```c
+    // if (num_threads > 1) {
+    //     SetNumberOfThreads(num_threads);
+    // }
+    // ```
+    #[cfg(all(feature = "parallel", not(target_arch = "wasm32")))]
+    let writer = if use_channel {
+        // NCBI reference: ncbi-blast/c++/include/algo/blast/core/blast_hits.h:153-166
+        // ```c
+        // typedef struct BlastHSPList {
+        //    Int4 oid;/**< The ordinal id of the subject sequence this HSP list is for */
+        //    Int4 query_index; /**< Index of the query which this HSPList corresponds to.
+        //                       Set to 0 if not applicable */
+        // } BlastHSPList;
+        // ```
+        let query_ids_out = query_ids.clone();
+        let subject_ids_out = subject_ids.clone();
+        let out_path = out_path.clone();
+        let rx = rx_opt.take().expect("rx must be available for writer");
+        Some(std::thread::spawn(move || -> Result<()> {
+            let mut all: Vec<Hit> = Vec::new();
+            while let Ok(h) = rx.recv() {
+                all.extend(h);
+            }
+            all.retain(|h| h.e_value <= evalue_threshold);
+            // NCBI reference: /mnt/c/Users/genom/GitHub/ncbi-blast/c++/src/algo/blast/api/blast_seqalign.cpp:1574-1577
+            // ```c
+            // // Sort HSPs with e-values as first priority and scores as
+            // // tie-breakers, since that is the order we want to see them in
+            // // in Seq-aligns.
+            // Blast_HSPListSortByEvalue(hsp_list);
+            // ```
+            write_output_ncbi_order_evalue_hsp_order(
+                all,
+                out_path.as_ref(),
+                &query_ids_out,
+                &subject_ids_out,
+            )?;
+            Ok(())
+        }))
+    } else {
+        None
+    };
+
     let process_subject = |st: &mut WorkerState, (s_idx, s_rec): (usize, &fasta::Record)| {
+        // NCBI reference: c++/src/algo/blast/core/blast_engine.c:1318-1330,1429-1431
+        // return word_length * 3 + 2;
+        // if (subject->length < min_subj_seq_length) { ... continue; }
+        // Statistics include all records, including ones too short to search.
+        if s_rec.seq().len() < (wordsize * 3 + 2) as usize {
+            return;
+        }
         // NCBI: Creates ewp (diagonal table) ONCE per SUBJECT via BlastExtendWordNew
         // (blast_engine.c:1002). Each subject sequence gets a fresh diagonal array.
         // Reference: blast_extend.c:109-180 (BlastExtendWordNew) allocates with calloc,
@@ -1545,168 +1418,24 @@ fn run_internal(args: TblastxArgs, mut in_memory: Option<TblastxInMemoryRun<'_>>
         // [C] diag_offset = diag->offset;  (reset to window per-subject)
         let mut diag_offset: i32 = st.diag_offset;
 
-        // Precompute per-context cutoff scores using NCBI BLAST algorithm.
-        // Reference: ncbi-blast/c++/src/algo/blast/core/blast_parameters.c:280-419
-        //
-        // NCBI cutoff calculation for tblastx ungapped path:
-        // 1. gap_trigger from ungapped params (kbp_std)
-        // 2. cutoff_score_max from BlastHitSavingParametersNew (uses user's E-value)
-        // 3. Per-subject update: cutoff_score_for_update_tblastx with CUTOFF_E_TBLASTX=1e-300
-        // 4. Final cutoff = MIN(update_cutoff, gap_trigger, cutoff_score_max)
-        //
-        // For -subject mode, subject_len_nucl is used (not per-frame AA length).
+        // NCBI reference: c++/src/algo/blast/core/blast_engine.c:1448-1455
+        // CalculateLinkHSPCutoffs(program_number, query_info, gap_align->sbp,
+        //     hit_params->link_hsp_params, word_params, db_length, subject->length);
+        // Compute once before scanning; both linking passes read the same state.
         let subject_len_nucl = s_len as i64;
-        // NCBI: cutoff scores are stored per query context (no subject-frame dimension).
-        // Reference: ncbi-blast/c++/src/algo/blast/core/blast_parameters.c:320-324
-        // ```c
-        // BlastUngappedCutoffs *curr_cutoffs = parameters->cutoffs + context;
-        // ...
-        // curr_cutoffs->cutoff_score = new_cutoff;
-        // ```
-        let mut cutoff_scores: Vec<i32> = vec![0; contexts_ref.len()];
-        // NCBI word_params->cutoff_score_min = min of cutoffs across all contexts
-        // Reference: ncbi-blast/c++/src/algo/blast/core/blast_parameters.c:401-403
-        let mut cutoff_score_min = i32::MAX;
-
-        // =======================================================================
-        // NCBI Parity: Pre-compute length_adjustment and eff_searchsp per context
-        // =======================================================================
-        // NCBI stores these in query_info->contexts[ctx].length_adjustment and
-        // query_info->contexts[ctx].eff_searchsp via BLAST_CalcEffLengths
-        // (ncbi-blast/c++/src/algo/blast/core/blast_setup.c:700-850).
-        // We precompute them here and pass to sum_stats_linking for NCBI parity.
-        // Reference: ncbi-blast/c++/src/algo/blast/core/blast_setup.c:846-847
-        //   query_info->contexts[index].eff_searchsp = effective_search_space;
-        //   query_info->contexts[index].length_adjustment = length_adjustment;
-        let mut length_adj_per_context: Vec<i64> = Vec::with_capacity(contexts_ref.len());
-        let mut eff_searchsp_per_context: Vec<i64> = Vec::with_capacity(contexts_ref.len());
-
-        for (ctx_idx, ctx) in contexts_ref.iter().enumerate() {
-            // NCBI: per-context kbp_std[context] is used throughout cutoff/length calcs.
-            // Reference: ncbi-blast/c++/src/algo/blast/core/blast_stat.c:2778-2797
-            let ctx_params = &ctx.karlin_params;
-
-            // NCBI: query_length = query_info->contexts[context].query_length
-            let query_len_aa = ctx.aa_len as i64;
-
-            // NCBI: gap_trigger uses kbp_std[context]->Lambda/logK.
-            // Reference: ncbi-blast/c++/src/algo/blast/core/blast_parameters.c:340-345
-            let gap_trigger = gap_trigger_raw_score(GAP_TRIGGER_BIT_SCORE, ctx_params);
-
-            // =======================================================================
-            // NCBI Parity: Use compute_eff_lengths_subject_mode_tblastx to get BOTH
-            // length_adjustment and eff_searchsp from a single source of truth.
-            // This mirrors BLAST_CalcEffLengths which computes and stores both values.
-            // Reference: ncbi-blast/c++/src/algo/blast/core/blast_setup.c:821-847
-            // =======================================================================
-            let eff_lengths = compute_eff_lengths_subject_mode_tblastx(
-                query_len_aa,
+        let linking_params = LinkingParams {
+            subject_len_nucl,
+            gap_decay_rate: BLAST_GAP_DECAY_RATE,
+            cutoffs: calculate_link_hsp_cutoffs_ncbi(
+                avg_query_length,
                 subject_len_nucl,
-                ctx_params, // tblastx uses per-context ungapped params (kbp_gap is NULL)
-            );
-            let eff_searchsp = eff_lengths.eff_searchsp;
-            length_adj_per_context.push(eff_lengths.length_adjustment);
-            eff_searchsp_per_context.push(eff_searchsp);
-
-            // Step 1: Compute cutoff_score_max from BlastHitSavingParametersNew
-            // This uses the effective search space WITH length adjustment
-            // Reference: ncbi-blast/c++/src/algo/blast/core/blast_parameters.c:942-946
-            let cutoff_score_max = cutoff_score_max_for_tblastx(
-                eff_searchsp,
-                evalue_threshold, // User's E-value (typically 10.0)
-                ctx_params,
-            );
-
-            // Step 2: Compute per-subject cutoff using BlastInitialWordParametersUpdate
-            // This uses CUTOFF_E_TBLASTX=1e-300 and a simple searchsp formula
-            // Reference: ncbi-blast/c++/src/algo/blast/core/blast_parameters.c:348-374
-            let cutoff = cutoff_score_for_update_tblastx(
-                query_len_aa,
-                subject_len_nucl, // NUCLEOTIDE length, NOT divided by 3!
-                gap_trigger,
-                cutoff_score_max,
-                BLAST_GAP_DECAY_RATE, // 0.5
-                ctx_params,
-                1.0, // scale_factor (standard BLOSUM62)
-            );
-
-            // DEBUG: Print cutoff values for first context
-            static PRINTED: std::sync::atomic::AtomicBool =
-                std::sync::atomic::AtomicBool::new(false);
-            if diag_enabled
-                && ctx_idx == 0
-                && !PRINTED.swap(true, std::sync::atomic::Ordering::Relaxed)
-            {
-                eprintln!(
-                    "[DEBUG CUTOFF] query_len_aa={}, subject_len_nucl={}",
-                    query_len_aa, subject_len_nucl
-                );
-                eprintln!("[DEBUG CUTOFF] eff_searchsp={}", eff_searchsp);
-                eprintln!(
-                    "[DEBUG CUTOFF] length_adjustment={}",
-                    eff_lengths.length_adjustment
-                );
-                eprintln!("[DEBUG CUTOFF] cutoff_score_max={}", cutoff_score_max);
-                eprintln!("[DEBUG CUTOFF] gap_trigger={}", gap_trigger);
-                eprintln!("[DEBUG CUTOFF] final cutoff={}", cutoff);
-            }
-            // NCBI reference: /mnt/c/Users/genom/GitHub/ncbi-blast/c++/src/algo/blast/core/blast_parameters.c:943-946
-            // ```c
-            // BLAST_Cutoffs(&new_cutoff, &evalue, kbp, searchsp, FALSE, 0);
-            // params->cutoffs[context].cutoff_score = new_cutoff;
-            // params->cutoffs[context].cutoff_score_max = new_cutoff;
-            // ```
-            // NCBI reference: /mnt/c/Users/genom/GitHub/ncbi-blast/c++/src/algo/blast/core/blast_parameters.c:360-374
-            // ```c
-            // BLAST_Cutoffs(&new_cutoff, &cutoff_e, kbp,
-            //               MIN((Uint8)subj_length, (Uint8)query_length)*((Uint8)subj_length),
-            //               TRUE, gap_decay_rate);
-            // new_cutoff = MIN(new_cutoff, gap_trigger);
-            // new_cutoff = MIN(new_cutoff, hit_params->cutoffs[context].cutoff_score_max);
-            // ```
-            // Diagnostic-only dump of the same per-context values that feed
-            // word_params->cutoff_score_min and CalculateLinkHSPCutoffs.
-            if debug_cutoffs_all {
-                eprintln!(
-                    "[DEBUG CUTOFF_ALL] ctx_idx={} q_frame={} query_len_aa={} subject_len_nucl={} eff_searchsp={} length_adjustment={} lambda={:.12e} k={:.12e} h={:.12e} cutoff_score_max={} gap_trigger={} word_cutoff={}",
-                    ctx_idx,
-                    ctx.frame,
-                    query_len_aa,
-                    subject_len_nucl,
-                    eff_searchsp,
-                    eff_lengths.length_adjustment,
-                    ctx_params.lambda,
-                    ctx_params.k,
-                    ctx_params.h,
-                    cutoff_score_max,
-                    gap_trigger,
-                    cutoff
-                );
-            }
-
-            // Track minimum cutoff for linking
-            cutoff_score_min = cutoff_score_min.min(cutoff);
-
-            // All subject frames use the same cutoff (NCBI: per-context cutoffs only).
-            cutoff_scores[ctx_idx] = cutoff;
-        }
-        // If no contexts, use 0 as fallback
-        if cutoff_score_min == i32::MAX {
-            cutoff_score_min = 0;
-        }
-        // NCBI reference: /mnt/c/Users/genom/GitHub/ncbi-blast/c++/src/algo/blast/core/blast_parameters.c:401-416
-        // ```c
-        // if (new_cutoff < cutoff_min) {
-        //    cutoff_min = new_cutoff;
-        // }
-        // parameters->cutoff_score_min = cutoff_min;
-        // ```
-        if debug_cutoffs_all {
-            eprintln!(
-                "[DEBUG CUTOFF_ALL] word_params_cutoff_score_min={}",
-                cutoff_score_min
-            );
-        }
+                db_length_nucl,
+                cutoff_score_min,
+                1.0,
+                BLAST_GAP_DECAY_RATE,
+                &linking_params_for_cutoff,
+            ),
+        };
 
         // NCBI: Each subject frame gets its own init_hitlist that is reset between frames.
         // Reference: blast_engine.c:491 BlastInitHitListReset(init_hitlist)
@@ -2287,7 +2016,9 @@ fn run_internal(args: TblastxArgs, mut in_memory: Option<TblastxInMemoryRun<'_>>
                 TblastxChunkScanResult { chunk, hits, stats }
             };
 
-            if use_parallel_scan_chunks {
+            // NCBI reference: c++/src/algo/blast/core/aa_ungapped.c:492-505
+            // while (scan_range[1] <= scan_range[2]) { hits = scansub(...); }
+            if use_serial_scan_chunks {
                 loop {
                     // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_engine.c:452-584
                     // ```c
@@ -2319,6 +2050,14 @@ fn run_internal(args: TblastxArgs, mut in_memory: Option<TblastxInMemoryRun<'_>>
                     // NCBI search unit. The reducer still extends against `subject`,
                     // the full real chunk, and `Blast_ExtendWordExit` runs once below.
                     let scan_size = tblastx_scan_chunk_size_for_run(chunk.length, num_threads);
+                    // NCBI reference: c++/src/algo/blast/core/aa_ungapped.c:492-505
+                    // while (scan_range[1] <= scan_range[2]) { hits = scansub(...); }
+                    crate::utils::threading::report_stage(
+                        "tblastx",
+                        "serial_scan_chunks",
+                        chunk.length.div_ceil(scan_size),
+                        false,
+                    );
                     let result = scan_chunk(
                         chunk,
                         offset_pairs,
@@ -2361,6 +2100,14 @@ fn run_internal(args: TblastxArgs, mut in_memory: Option<TblastxInMemoryRun<'_>>
                             SubjectChunkStatus::Ok(chunk) => chunks.push(chunk),
                         }
                     }
+                    // NCBI reference: c++/src/algo/blast/core/blast_engine.c:452-584
+                    // status = s_GetNextSubjectChunk(subject, &backup, ...);
+                    crate::utils::threading::report_stage(
+                        "tblastx",
+                        "subject_chunks",
+                        chunks.len(),
+                        chunks.len() > 1,
+                    );
                     if chunks.len() <= 1 {
                         for chunk in chunks {
                             let result =
@@ -2524,16 +2271,6 @@ fn run_internal(args: TblastxArgs, mut in_memory: Option<TblastxInMemoryRun<'_>>
             stage_dump::dump_ungapped_hits("after_common_endpoint_purge", &combined_ungapped_hits);
         }
 
-        // NCBI CalculateLinkHSPCutoffs parameters. These are computed before
-        // both BLAST_LinkHsps calls below, matching the single per-subject
-        // CalculateLinkHSPCutoffs call in blast_engine.c:1448-1454.
-        let linking_params = LinkingParams {
-            avg_query_length,
-            subject_len_nucl,
-            cutoff_score_min,
-            scale_factor: 1.0,   // Standard BLOSUM62
-            gap_decay_rate: 0.5, // BLAST_GAP_DECAY_RATE
-        };
         // Build NCBI-style subject frame base offsets for sum-statistics linking.
         // In NCBI, HSP coords live in a concatenated translation buffer with sentinels.
         // LOSAT uses per-frame sequences; for linking we emulate absolute offsets by
@@ -2548,15 +2285,6 @@ fn run_internal(args: TblastxArgs, mut in_memory: Option<TblastxInMemoryRun<'_>>
             // Source: ncbi-blast/c++/src/algo/blast/core/blast_util.c:1098-1101
             base += f.aa_seq.len() as i32 - 1;
         }
-
-        // NCBI parity: s_BlastFindSmallestLambda selects smallest lambda across contexts.
-        // Reference: ncbi-blast/c++/src/algo/blast/core/blast_parameters.c:92-112
-        // Per-context kbp_std is computed from query composition (with check_ideal).
-        // Reference: ncbi-blast/c++/src/algo/blast/core/blast_stat.c:2778-2797
-        let context_params: Vec<KarlinParams> =
-            contexts_ref.iter().map(|ctx| ctx.karlin_params).collect();
-        let linking_params_for_cutoff =
-            find_smallest_lambda_params(&context_params).unwrap_or_else(|| params.clone());
 
         // NCBI reference: /mnt/c/Users/genom/GitHub/ncbi-blast/c++/src/algo/blast/core/blast_engine.c:870-899
         // ```c
@@ -3162,7 +2890,7 @@ fn run_internal(args: TblastxArgs, mut in_memory: Option<TblastxInMemoryRun<'_>>
     let mut threaded_wasi_subject_hit_batches: Option<Vec<(usize, Vec<Hit>)>> = None;
 
     #[cfg(all(feature = "parallel", target_arch = "wasm32", feature = "wasm-threads"))]
-    if use_parallel && !use_parallel_scan_chunks {
+    if use_parallel && !use_serial_scan_chunks && subjects_raw.len() > 1 {
         // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_engine.c:1409-1427
         // ```c
         // itr = BlastSeqSrcIteratorNewEx(MAX(BlastSeqSrcGetNumSeqs(seq_src)/100,1));
@@ -3183,9 +2911,7 @@ fn run_internal(args: TblastxArgs, mut in_memory: Option<TblastxInMemoryRun<'_>>
         //     Blast_HSPListSortByEvalue(hsp_list);
         // }
         // ```
-        let parallel_pool = parallel_pool
-            .as_ref()
-            .expect("parallel pool must exist when use_parallel is true");
+        let parallel_pool = parallel_pool;
         let subject_hit_batches: Vec<(usize, Vec<Hit>)> = parallel_pool.install(|| {
             subjects_raw
                 .par_iter()
@@ -3249,10 +2975,8 @@ fn run_internal(args: TblastxArgs, mut in_memory: Option<TblastxInMemoryRun<'_>>
     }
 
     #[cfg(all(feature = "parallel", not(target_arch = "wasm32")))]
-    if use_parallel && !use_parallel_scan_chunks {
-        let parallel_pool = parallel_pool
-            .as_ref()
-            .expect("parallel pool must exist when use_parallel is true");
+    if use_parallel && !use_serial_scan_chunks && subjects_raw.len() > 1 {
+        let parallel_pool = parallel_pool;
         parallel_pool.install(|| {
             subjects_raw.par_iter().enumerate().for_each_init(
                 || WorkerState {

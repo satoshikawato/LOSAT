@@ -35,7 +35,7 @@ import audit_tblastx_v010 as tblastx_audit
 
 ROOT = Path(__file__).resolve().parents[2]
 TESTS = ROOT / "LOSAT/tests"
-SCHEMA = "losat-wasm-perf-run-v1"
+SCHEMA = "losat-wasm-perf-run-v2"
 ORACLE_HASHES = {
     "blastn": "33b64bc67d3149cee2459b2f7766b363323df632cf12c099546de00aea9698b5",
     "blastp": "5ce267c04e4988c265357bfbedc64e809545b6fcfae7ff6775266fabbee8ba0e",
@@ -86,6 +86,42 @@ def validate_kind(kind, inspection):
         )
     if kind == "serial" and (threaded or any(m == "wasi" for m, _ in imports)):
         raise GateFailure("serial label on threaded artifact")
+
+
+# NCBI reference: c++/src/algo/blast/api/prelim_stage.cpp:145-188
+# TBlastThreads the_threads(GetNumberOfThreads()); (*thread)->Run(); (*thread)->Join(&result);
+# A stage with one job does not shrink the already constructed search pool.
+# Missing or contradictory records fail; old guessed evidence is not upgraded.
+def validate_thread_evidence(logtext, requested, kind):
+    pools = re.findall(r"\[losat-thread-pool\] program=(\w+) requested_threads=(\d+) pool_threads=(\d+) caller_participates=(\w+)", logtext)
+    if len(pools) != 1:
+        raise GateFailure("expected exactly one constructed-pool diagnostic")
+    program, recorded_request, pool, caller = pools[0]
+    pool = int(pool)
+    expected = 0 if requested == 1 else requested
+    if int(recorded_request) != requested or pool != expected or caller != "false":
+        raise GateFailure("requested/pool/caller diagnostic mismatch")
+    stages = [dict(program=p, stage=stage, work_items=int(items), parallel_selected=parallel == "true", measured_activity=None)
+              for p, stage, items, parallel in re.findall(r"\[losat-thread-stage\] program=(\w+) stage=([\w-]+) work_items=(\d+) parallel_selected=(true|false)", logtext)]
+    if any(stage["program"] != program or (stage["parallel_selected"] and (pool <= 1 or stage["work_items"] <= 1)) for stage in stages):
+        raise GateFailure("stage/pool diagnostic mismatch")
+    counts = None
+    if kind == "threaded":
+        events = [json.loads(line) for line in re.findall(r"\[losat-wasi-event\] ([^\n]+)", logtext)]
+        tids = {}
+        for event in ("spawn_attempt", "spawned", "ready", "exited"):
+            records = [e for e in events if e["event"] == event]
+            tids[event] = {e["tid"] for e in records}
+            if len(records) != expected or len(tids[event]) != expected:
+                raise GateFailure(f"host {event} count disagrees with pool")
+            if event == "exited" and any(e["code"] != 0 for e in records):
+                raise GateFailure("worker did not exit successfully")
+        if any(value != tids["spawn_attempt"] for value in tids.values()) or any(e["event"] == "spawn_rejected" for e in events):
+            raise GateFailure("host lifecycle records disagree")
+        counts = {event: len(value) for event, value in tids.items()}
+    return {"requested_threads": requested, "pool_threads": pool, "caller_participates": False,
+            "effective_compute_threads": requested, "thread_stages": stages,
+            "host_worker_counts": counts, "measured_activity": None}
 
 
 def read_cases(path):
@@ -297,7 +333,13 @@ def freeze(args):
             "version": capture([args.node, "--version"]),
             "flags": [],
             "runners": runners,
-            "runner_hashes": {p: digest(p) for p in runners.values()},
+            # NCBI reference: c++/src/objtools/align_format/tabular.cpp:1098-1108
+            # x_PrintField(*iter); ... m_Ostream << "\n";
+            # Freeze the memory adapter too: it affects the executed module.
+            "runner_hashes": {
+                p: digest(p)
+                for p in [*runners.values(), str(TESTS / "wasi_shared_memory.js")]
+            },
         },
         "hardware": {
             "os": platform.platform(),
@@ -836,31 +878,11 @@ def run(args):
                                     "traceback_alignment_greedy": float(alignment[2]),
                                 }
                             )
-                        sample["thread_diagnostics"] = re.findall(
-                            r"[^\n]*(?:effective_threads=|spawn tid=)[^\n]*", logtext
-                        )
-                        sample["spawned_helpers"] = (
-                            len(re.findall(r"spawn tid=", logtext))
-                            if kind == "threaded"
-                            else None
-                        )
-                        stages = []
-                        for line in sample["thread_diagnostics"]:
-                            match = re.search(r"effective_threads=(\d+)", line)
-                            if match:
-                                stages.append(
-                                    {
-                                        "log": line,
-                                        "effective_compute_threads": 1
-                                        if "parallel=false" in line
-                                        else int(match[1]),
-                                    }
-                                )
-                        sample["thread_stages"] = stages
-                        if stages:
-                            sample["effective_compute_threads"] = max(
-                                s["effective_compute_threads"] for s in stages
-                            )
+                        try:
+                            sample.update(validate_thread_evidence(logtext, entry["threads_requested"], kind))
+                        except (GateFailure, ValueError, KeyError) as error:
+                            status = sample["status"] = "THREAD_CONTRACT_FAIL"
+                            sample["thread_contract_error"] = str(error)
                     save_sample(sample)
                     if status != "PASS":
                         if oracle["status"] == "PASS" and result["raw_output_sha256"]:

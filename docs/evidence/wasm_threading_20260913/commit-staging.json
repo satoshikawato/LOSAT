@@ -1,0 +1,119 @@
+{
+  "scope": "Commit uses existing Git LF endings; archived validation retains actual working-tree bytes. No production tokens changed. Unrelated initial README edits stay unstaged.",
+  "normalized_files": [
+    {
+      "path": ".github/workflows/ci.yml",
+      "working_sha256": "e4db7be6d07c227deb697eda6ed8ca7aafea72ba7d4ccfb3e8bb7dbe417f8007",
+      "staged_sha256": "3dbd8a88f43af9fa7960d3170b8d6069f7f94b5e3c81cee5ce03a9bf9f02e949",
+      "change": "Index only: CRLF to existing repository LF; working file preserved"
+    },
+    {
+      "path": ".github/workflows/release-readiness.yml",
+      "working_sha256": "d0f4c45285eb7a81613cbd6e0eba49a03b1ceb28829b644dedd4d2c9dc91d270",
+      "staged_sha256": "9f984486b547dbab33a8949fef6c782606ecdb98ec9b4bb203eab7bda9a4d712",
+      "change": "Index only: CRLF to existing repository LF; working file preserved"
+    },
+    {
+      "path": "AGENTS.md",
+      "working_sha256": "0c0c7c081cb933819f1a28b9b7bb202aee02eae8a25b3578628cf153e933010b",
+      "staged_sha256": "0a02b7b847982dc349262163af0756d3207870308e67807a6fe9aebb69678d77",
+      "change": "Index only: CRLF to existing repository LF; working file preserved"
+    },
+    {
+      "path": "LOSAT/src/algorithm/blastn/blast_engine/run.rs",
+      "working_sha256": "0490004f446d7341dcc88efe42dd3a329343a9c1a07b8f49e7e29c8314f7146c",
+      "staged_sha256": "bdf24546fccf5f8480a8e9a057116244932b508dc7431c625764d4523d655be5",
+      "change": "Index only: CRLF to existing repository LF; working file preserved"
+    },
+    {
+      "path": "LOSAT/src/algorithm/blastp/blast_engine.rs",
+      "working_sha256": "1cd7e6661134956464a499d38b45489dc62845a8050ce538a4e384cc11c436e1",
+      "staged_sha256": "ed180749ffa74cf3e47c0a151c8737492588ff65e408ea6fbb2d390774159f05",
+      "change": "Index only: CRLF to existing repository LF; working file preserved"
+    },
+    {
+      "path": "LOSAT/src/algorithm/tblastx/blast_engine/mod.rs",
+      "working_sha256": "46649e04d16b968ff08599794fc693c639a676fc1e08e167cd25bae2ebc94e71",
+      "staged_sha256": "ffca56207c8d53d2eebbb209b205c2b7fad907a042a5941b98b21bb85f3bdda1",
+      "change": "Index only: CRLF to existing repository LF; working file preserved"
+    },
+    {
+      "path": "LOSAT/src/algorithm/tblastx/blast_engine/run_impl.rs",
+      "working_sha256": "f1c1eff81ff037fc7421f12893da68b2fafbf683431c9fbee69768349e69adef",
+      "staged_sha256": "15d5a9832e484c1eb5056b845ac455e2790b16f4ac07bfe49ba107a63b28395d",
+      "change": "Index only: CRLF to existing repository LF; working file preserved"
+    },
+    {
+      "path": "LOSAT/src/algorithm/tblastx/sum_stats_linking/linking.rs",
+      "working_sha256": "6547964ed758904f6b35147e3033509579d2a43871f125d95a4f03740510d094",
+      "staged_sha256": "4c7b5aa4e4ca571f65ffa436dd128da5428875895ec670057dbf8e25c427fa59",
+      "change": "Index only: CRLF to existing repository LF; working file preserved"
+    },
+    {
+      "path": "LOSAT/src/web_api.rs",
+      "working_sha256": "6476bd25f71c073d926bb39516e27facaf54cfbfdcaf743f389c130bed1d50d4",
+      "staged_sha256": "2b25e8f9904eb3dc696e06b641354978d277f4351da658024c99d0e738b7ed65",
+      "change": "Index only: CRLF to existing repository LF; working file preserved"
+    },
+    {
+      "path": "LOSAT/tests/certify_integrated_runtime_v010.py",
+      "working_sha256": "9324b50e3e20536b1d13672eef338561cfe55d69a7b53ba2f3105368e7a9b11e",
+      "staged_sha256": "e0fc9c9738118d87edaa3c3922ee94a3e3d40feb28621af6bfac148d717f029c",
+      "change": "Index only: CRLF to existing repository LF; working file preserved"
+    },
+    {
+      "path": "LOSAT/tests/certify_platform_native_v010.py",
+      "working_sha256": "b4e703ef65b07151da7d9fbc69e3807db9aa9faa56eaf0e89b0ffe6eaea3204a",
+      "staged_sha256": "30b5e30e4bc02546b36c4b5ce4e5f8539e5f4ed706c502b086b24104c6ed35bc",
+      "change": "Index only: CRLF to existing repository LF; working file preserved"
+    },
+    {
+      "path": "LOSAT/tests/prepare_release_candidate_v010.py",
+      "working_sha256": "ef53cedfec347e58c7b50c17530f4f4de0560230db7d35e8bd92c9e6c72a6112",
+      "staged_sha256": "1a0f2c2f0e5e3410c5b2c22fdf00e6751c09837a1bd562f41f33c25297745b97",
+      "change": "Index only: CRLF to existing repository LF; working file preserved"
+    },
+    {
+      "path": "LOSAT/tests/test_wasm_performance.py",
+      "working_sha256": "5561492bfcfe7efdafd77c3301bdbaa846cd3450123a2ab76b0a0af646144416",
+      "staged_sha256": "9af34152e2a395731de353181fe682b56abeb196083a3fa0f48a84e17e3b88d3",
+      "change": "Index only: CRLF to existing repository LF; working file preserved"
+    },
+    {
+      "path": "LOSAT/tests/unit/tblastx/run_engine.rs",
+      "working_sha256": "aec923739b798ef459a5596fd3644c4a8af4336ca9e4beba447bf530e5594972",
+      "staged_sha256": "882736efcfb199698f0c37f7f58e2645a311e71a7068df168e05e5abddbc18e9",
+      "change": "Index only: CRLF to existing repository LF; working file preserved"
+    },
+    {
+      "path": "LOSAT/tests/wasm_performance.py",
+      "working_sha256": "56678a78b55afcb0cdbf505dd296996a5653c2b3133263055c29ccde97f28efb",
+      "staged_sha256": "182ef99b377b8c16f5e0ffb19205e2a55427cea44e7497bb285d6f668b5c8573",
+      "change": "Index only: CRLF to existing repository LF; working file preserved"
+    },
+    {
+      "path": "RELEASE.md",
+      "working_sha256": "d5c93ae90292e1f3abcc0c4547e18b7dfa66999609f176eac1099112ac15452c",
+      "staged_sha256": "235a2dac3c77da85653dfb200e0317cf2995bb2f0aa34ee5ba847e6db81153cf",
+      "change": "Index only: CRLF to existing repository LF; working file preserved"
+    },
+    {
+      "path": "docs/evidence/wasm_threading_20260913/cold-performance.tsv",
+      "working_sha256": "cbdc7d6e011e3106bca909960ae086c0cf5b7e89c1eda74ac06295994fdf8e55",
+      "staged_sha256": "fd27a6e469b8d5ec7bf1296eaba5da1dfa43b8ae0bb1768ce2ede12c4c2bdbc8",
+      "change": "Index only: CRLF to existing repository LF; working file preserved"
+    },
+    {
+      "path": "docs/evidence/wasm_threading_20260913/reuse-performance.tsv",
+      "working_sha256": "a7c153177309441aa9ee19ef0d019b1a3064cd2f209b3a7d25a44b23d888b161",
+      "staged_sha256": "697e12dc2662a58a68b114f1c46cf62f6eaa56e7ca52d09b72ba11efdcc3bdcd",
+      "change": "Index only: CRLF to existing repository LF; working file preserved"
+    },
+    {
+      "path": "docs/losat_wasm_np_plan_20260906/STATUS.md",
+      "working_sha256": "78c22d97b928030d07aa015aae09f974c559132314af75476b4ccc2d5d657d8c",
+      "staged_sha256": "a6741f06fc2eea138f70aad4e74d3b256cdd72d94030146e2221222c43231339",
+      "change": "Index only: CRLF to existing repository LF; working file preserved"
+    }
+  ]
+}

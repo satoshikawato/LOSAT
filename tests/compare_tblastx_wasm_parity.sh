@@ -19,37 +19,14 @@ SUBJECT="$CRATE_DIR/tests/fasta/LC738875.fasta"
 OUTFMT="6"
 THREADS="1"
 
+# NCBI reference: c++/src/algo/blast/format/blast_format.cpp:68-96
+# m_Outfile(ostr);
+# Distinct Rust/WASI build paths and the shared host preserve this output stream.
 NATIVE_BIN="$CRATE_DIR/target/release/LOSAT"
-WASM_BIN="$CRATE_DIR/target/wasm32-wasip1/release/LOSAT.wasm"
-NODE_RUNNER="$SCRATCH_DIR/run_wasi.js"
+WASM_BIN="$CRATE_DIR/target/serial-command/wasm32-wasip1/release/LOSAT.wasm"
+NODE_RUNNER="$CRATE_DIR/tests/run_losat_wasi.js"
 
 mkdir -p "$SCRATCH_DIR"
-
-cat >"$NODE_RUNNER" <<'JS'
-const { WASI } = require('wasi');
-const fs = require('fs');
-
-const wasmPath = process.argv[2];
-const args = process.argv.slice(3);
-const wasi = new WASI({
-  version: 'preview1',
-  args: [wasmPath, ...args],
-  env: process.env,
-  preopens: { '/': '/' },
-});
-
-(async () => {
-  const bytes = fs.readFileSync(wasmPath);
-  const module = await WebAssembly.compile(bytes);
-  const instance = await WebAssembly.instantiate(module, {
-    wasi_snapshot_preview1: wasi.wasiImport,
-  });
-  wasi.start(instance);
-})().catch((err) => {
-  console.error(err);
-  process.exit(1);
-});
-JS
 
 run_native() {
   "$NATIVE_BIN" tblastx -query "$QUERY" -subject "$SUBJECT" -outfmt "$OUTFMT" -num_threads "$THREADS" -out "$1"
@@ -90,15 +67,16 @@ compare_sorted() {
 (
   cd "$CRATE_DIR"
   cargo build --release
-  cargo build --release --target wasm32-wasip1 --no-default-features
+  cargo build --release --bin LOSAT --target wasm32-wasip1 --no-default-features --target-dir target/serial-command
 )
 run_native "$SCRATCH_DIR/native.raw.out"
 run_wasm "$SCRATCH_DIR/wasm_simd.raw.out"
 
 (
   cd "$CRATE_DIR"
-  cargo build --release --target wasm32-wasip1 --no-default-features --features tblastx-wasm-scalar
+  cargo build --release --bin LOSAT --target wasm32-wasip1 --no-default-features --features tblastx-wasm-scalar --target-dir target/serial-command-scalar
 )
+WASM_BIN="$CRATE_DIR/target/serial-command-scalar/wasm32-wasip1/release/LOSAT.wasm"
 run_wasm "$SCRATCH_DIR/wasm_scalar.raw.out"
 
 if command -v "${NCBI_TBLASTX:-tblastx}" >/dev/null 2>&1; then

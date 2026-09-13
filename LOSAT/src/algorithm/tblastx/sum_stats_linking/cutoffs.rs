@@ -116,7 +116,7 @@ fn blast_nint(x: f64) -> i32 {
 pub fn calculate_link_hsp_cutoffs_ncbi(
     avg_query_length: i32,
     subject_len_nucl: i64,
-    db_length: i64, // 0 for -subject mode
+    db_length: i64, // Full nucleotide total, including local subjects
     cutoff_score_min: i32,
     scale_factor: f64,
     gap_decay_rate: f64,
@@ -152,12 +152,14 @@ pub fn calculate_link_hsp_cutoffs_ncbi(
     subject_length = subject_length.max(1);
 
     // NCBI: y_variable calculation with db_length > subject_length branch
-    // For -subject mode, db_length = 0, so we always use the else branch
+    // NCBI reference: c++/src/algo/blast/core/blast_parameters.c:1049-1056
+    // if (db_length > subject_length) { ... }
+    // Normal local-subject searches supply the full database length.
     let y_variable = if db_length > subject_length as i64 {
         // Database search mode
         ((db_length as f64) / (subject_length as f64)).ln() * params.k / gap_decay_rate
     } else {
-        // Subject mode (db_length == 0 or single sequence)
+        // Database length does not exceed the adjusted subject length
         (((subject_length + expected_length) as f64) / (subject_length as f64)).ln() * params.k
             / gap_decay_rate
     };
@@ -278,5 +280,35 @@ pub fn calculate_link_hsp_cutoffs_ncbi(
         cutoff_big_gap: final_cutoff_big,
         gap_prob,
         ignore_small_gaps,
+    }
+}
+
+#[cfg(test)]
+mod database_cutoff_tests {
+    use super::*;
+    // NCBI reference: c++/src/algo/blast/core/blast_parameters.c:998-1082
+    // if (db_length > subject_length) { y_variable = log((double)db_length / subject_length)*kbp->K/gap_decay_rate; }
+    // Expected values evaluated from the extracted NCBI C function.
+    #[test]
+    fn complete_database_changes_linking_cutoff() {
+        let params = KarlinParams {
+            lambda: 0.3176,
+            k: 0.134,
+            h: 0.4012,
+            alpha: 0.7916,
+            beta: -3.2,
+        };
+        for (q, subject, db, small, big, probability) in [
+            (300, 900, 0, 30, 22, 0.5),
+            (300, 900, 2700, 30, 30, 0.5),
+            (30, 90, 90, 0, 8, 0.0),
+            (30, 90, 2700, 0, 14, 0.0),
+        ] {
+            let c = calculate_link_hsp_cutoffs_ncbi(q, subject, db, 30, 1.0, 0.5, &params);
+            assert_eq!(
+                (c.cutoff_small_gap, c.cutoff_big_gap, c.gap_prob),
+                (small, big, probability)
+            );
+        }
     }
 }

@@ -102,7 +102,7 @@ pub struct EffLengthsResult {
     pub eff_searchsp: i64,
 }
 
-/// Calculate effective lengths for -subject mode (single subject as database).
+/// Calculate effective lengths for the complete local-subject database.
 ///
 /// This is the NCBI-parity function that computes BOTH length_adjustment and eff_searchsp
 /// in a single call, matching `BLAST_CalcEffLengths` from blast_setup.c:700-850.
@@ -114,7 +114,7 @@ pub struct EffLengthsResult {
 /// if (Blast_SubjectIsTranslated(program_number))
 ///    db_length = db_length/3;
 ///
-/// db_num_seqs = eff_len_params->real_num_seqs;  // = 1 for -subject mode
+/// db_num_seqs = eff_len_params->real_num_seqs;
 ///
 /// kbp = kbp_ptr[index];  // kbp_gap_std for gapped, kbp for ungapped
 ///
@@ -140,16 +140,25 @@ pub struct EffLengthsResult {
 ///
 /// # Returns
 /// `EffLengthsResult` containing both length_adjustment and eff_searchsp
-pub fn compute_eff_lengths_subject_mode_tblastx(
+pub fn compute_eff_lengths_tblastx(
     query_len_aa: i64,
     subject_len_nucl: i64,
+    db_num_seqs: i64,
     karlin_params: &KarlinParams,
 ) -> EffLengthsResult {
-    // NCBI blast_setup.c:734-735: db_length = db_length/3 for translated subjects (tblastx)
+    // NCBI reference: c++/src/algo/blast/core/blast_setup.c:734-740,785-847
+    // db_length = db_length/3;
+    // db_num_seqs = eff_len_params->real_num_seqs;
+    // if (query_info->contexts[index].is_valid && query_length > 0) { ... }
+    // Sum nucleotide lengths BEFORE translated division. Invalid contexts are
+    // excluded by the caller; empty contexts retain zero search space.
+    if query_len_aa <= 0 {
+        return EffLengthsResult {
+            length_adjustment: 0,
+            eff_searchsp: 0,
+        };
+    }
     let db_length = subject_len_nucl / 3;
-
-    // NCBI: db_num_seqs = 1 for -subject mode
-    let db_num_seqs: i64 = 1;
 
     // NCBI blast_setup.c:821-824: BLAST_ComputeLengthAdjustment(...)
     let result =
@@ -160,7 +169,7 @@ pub fn compute_eff_lengths_subject_mode_tblastx(
     let effective_db_length = (db_length - db_num_seqs * length_adjustment).max(1);
 
     // NCBI blast_setup.c:842-843: effective_search_space = effective_db_length * (query_length - length_adjustment)
-    let effective_query_length = (query_len_aa - length_adjustment).max(1);
+    let effective_query_length = query_len_aa - length_adjustment;
     let eff_searchsp = effective_db_length * effective_query_length;
 
     EffLengthsResult {
@@ -169,11 +178,11 @@ pub fn compute_eff_lengths_subject_mode_tblastx(
     }
 }
 
-/// Calculate effective search space for -subject mode (single subject as database).
+/// Calculate effective search space for the complete local-subject database.
 ///
 /// This is a convenience wrapper that returns only eff_searchsp.
 /// For cutoff and sum-stats that need length_adjustment too, use
-/// `compute_eff_lengths_subject_mode_tblastx()` instead.
+/// `compute_eff_lengths_tblastx()` instead.
 ///
 /// NCBI reference (verbatim from blast_setup.c:734-846):
 /// ```c
@@ -201,12 +210,13 @@ pub fn compute_eff_lengths_subject_mode_tblastx(
 ///
 /// # Returns
 /// Effective search space (eff_searchsp)
-pub fn compute_eff_searchsp_subject_mode_tblastx(
+pub fn compute_eff_searchsp_tblastx(
     query_len_aa: i64,
     subject_len_nucl: i64,
+    db_num_seqs: i64,
     gapped_params: &KarlinParams,
 ) -> i64 {
-    compute_eff_lengths_subject_mode_tblastx(query_len_aa, subject_len_nucl, gapped_params)
+    compute_eff_lengths_tblastx(query_len_aa, subject_len_nucl, db_num_seqs, gapped_params)
         .eff_searchsp
 }
 
@@ -513,7 +523,7 @@ pub fn cutoff_score_for_update_tblastx(
 /// CRITICAL: For tblastx, uses UNGAPPED params (kbp) since kbp_gap is NULL
 ///
 /// # Arguments
-/// * `eff_searchsp` - Effective search space (from compute_eff_searchsp_subject_mode_tblastx)
+/// * `eff_searchsp` - Effective search space (from compute_eff_searchsp_tblastx)
 /// * `evalue_threshold` - User's E-value threshold (typically 10.0)
 /// * `ungapped_params` - UNGAPPED Karlin-Altschul parameters (kbp for tblastx)
 ///
@@ -595,6 +605,7 @@ pub fn cutoff_score_word_params(gap_trigger: i32, cutoff_score_max: i32, scale_f
 pub fn compute_tblastx_cutoff_score(
     query_len_aa: i64,
     subject_len_nucl: i64,
+    db_num_seqs: i64,
     evalue_threshold: f64,
     gap_trigger_bits: f64,
     ungapped_params: &KarlinParams,
@@ -605,9 +616,10 @@ pub fn compute_tblastx_cutoff_score(
 
     // Step 2: Compute eff_searchsp using UNGAPPED params (tblastx has no kbp_gap!)
     // NCBI uses kbp_array = sbp->kbp (ungapped) when kbp_gap is NULL (tblastx case)
-    let eff_searchsp = compute_eff_searchsp_subject_mode_tblastx(
+    let eff_searchsp = compute_eff_searchsp_tblastx(
         query_len_aa,
         subject_len_nucl,
+        db_num_seqs,
         ungapped_params, // Use ungapped params, not gapped!
     );
 
@@ -623,6 +635,32 @@ pub fn compute_tblastx_cutoff_score(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    // NCBI reference: c++/src/algo/blast/core/blast_setup.c:734-847;
+    // blast_stat.c:5042-5126: BLAST_ComputeLengthAdjustment(...).
+    // effective_search_space = effective_db_length * (query_length - length_adjustment);
+    // Expected numbers were evaluated from the extracted NCBI C functions.
+    #[test]
+    fn complete_subject_set_effective_lengths() {
+        let params = blosum62_ungapped();
+        for (q, total, count, adjustment, space) in [
+            (300, 900, 1, 19, 78961),
+            (300, 2700, 3, 22, 231852),
+            (300, 2701, 3, 22, 231852),
+            (300, 2702, 3, 22, 231852),
+            (300, 2703, 3, 22, 232130),
+            (299, 2703, 3, 22, 231295),
+            (1, 2703, 3, 0, 901),
+            (100, 3003, 3, 19, 76464),
+            (0, 2703, 3, 0, 0),
+        ] {
+            let actual = compute_eff_lengths_tblastx(q, total, count, &params);
+            assert_eq!(
+                (actual.length_adjustment, actual.eff_searchsp),
+                (adjustment, space)
+            );
+        }
+    }
 
     /// BLOSUM62 ungapped params (kbp_std)
     fn blosum62_ungapped() -> KarlinParams {
@@ -696,6 +734,7 @@ mod tests {
         let cutoff = compute_tblastx_cutoff_score(
             query_len_aa,
             subject_len_nucl,
+            1,
             10.0, // evalue
             22.0, // gap_trigger_bits
             &ungapped,
@@ -724,6 +763,7 @@ mod tests {
         let cutoff = compute_tblastx_cutoff_score(
             query_len_aa,
             subject_len_nucl,
+            1,
             10.0, // evalue
             22.0, // gap_trigger_bits
             &ungapped,
@@ -804,7 +844,7 @@ mod tests {
 
         // Compute cutoff_score_max first (uses user E-value)
         let eff_searchsp =
-            compute_eff_searchsp_subject_mode_tblastx(query_len_aa, subject_len_nucl, &ungapped);
+            compute_eff_searchsp_tblastx(query_len_aa, subject_len_nucl, 1, &ungapped);
         let cutoff_score_max = cutoff_score_max_for_tblastx(eff_searchsp, 10.0, &ungapped);
 
         // Compute per-subject cutoff
@@ -868,6 +908,7 @@ mod tests {
         let old_cutoff = compute_tblastx_cutoff_score(
             query_len_aa,
             subject_len_nucl,
+            1,
             10.0, // user E-value
             22.0, // gap_trigger_bits
             &ungapped,
@@ -877,7 +918,7 @@ mod tests {
         // New method (uses CUTOFF_E_TBLASTX = 1e-300)
         let gap_trigger = gap_trigger_raw_score(22.0, &ungapped);
         let eff_searchsp =
-            compute_eff_searchsp_subject_mode_tblastx(query_len_aa, subject_len_nucl, &ungapped);
+            compute_eff_searchsp_tblastx(query_len_aa, subject_len_nucl, 1, &ungapped);
         let cutoff_score_max = cutoff_score_max_for_tblastx(eff_searchsp, 10.0, &ungapped);
         let new_cutoff = cutoff_score_for_update_tblastx(
             query_len_aa,
@@ -928,8 +969,7 @@ mod tests {
         let query_len_aa = 200_000i64; // ~600kb query
         let subject_len_nucl = 600_000i64; // 600kb subject
 
-        let result =
-            compute_eff_lengths_subject_mode_tblastx(query_len_aa, subject_len_nucl, &ungapped);
+        let result = compute_eff_lengths_tblastx(query_len_aa, subject_len_nucl, 1, &ungapped);
 
         // Verify no overflow occurred
         assert!(result.eff_searchsp > 0, "eff_searchsp should be positive");
@@ -973,8 +1013,7 @@ mod tests {
         let query_len_aa = 200_000i64;
         let subject_len_nucl = 600_000i64;
 
-        let eff_lengths =
-            compute_eff_lengths_subject_mode_tblastx(query_len_aa, subject_len_nucl, &ungapped);
+        let eff_lengths = compute_eff_lengths_tblastx(query_len_aa, subject_len_nucl, 1, &ungapped);
 
         let cutoff_max = cutoff_score_max_for_tblastx(
             eff_lengths.eff_searchsp,
@@ -1006,8 +1045,7 @@ mod tests {
         let subject_len_nucl = 600_000i64;
 
         let gap_trigger = gap_trigger_raw_score(22.0, &ungapped);
-        let eff_lengths =
-            compute_eff_lengths_subject_mode_tblastx(query_len_aa, subject_len_nucl, &ungapped);
+        let eff_lengths = compute_eff_lengths_tblastx(query_len_aa, subject_len_nucl, 1, &ungapped);
         let cutoff_score_max =
             cutoff_score_max_for_tblastx(eff_lengths.eff_searchsp, 10.0, &ungapped);
 
@@ -1045,8 +1083,7 @@ mod tests {
         let query_len_aa = 3_333_333i64; // ~10Mb query
         let subject_len_nucl = 10_000_000i64; // 10Mb subject
 
-        let result =
-            compute_eff_lengths_subject_mode_tblastx(query_len_aa, subject_len_nucl, &ungapped);
+        let result = compute_eff_lengths_tblastx(query_len_aa, subject_len_nucl, 1, &ungapped);
 
         // Verify no overflow occurred
         assert!(result.eff_searchsp > 0, "eff_searchsp should be positive");
@@ -1097,7 +1134,7 @@ mod tests {
                 desc, subject_len_nucl, expected_db_length, db_length
             );
 
-            // Verify that compute_eff_lengths_subject_mode_tblastx uses this calculation
+            // Verify that compute_eff_lengths_tblastx uses this calculation
             // For very small values, we need a reasonable query length
             let query_len_aa = if subject_len_nucl < 3 {
                 10i64
@@ -1105,8 +1142,7 @@ mod tests {
                 subject_len_nucl / 3
             };
 
-            let result =
-                compute_eff_lengths_subject_mode_tblastx(query_len_aa, subject_len_nucl, &ungapped);
+            let result = compute_eff_lengths_tblastx(query_len_aa, subject_len_nucl, 1, &ungapped);
 
             // Verify the internal calculation matches
             let computed_db_length = subject_len_nucl / 3;
@@ -1159,8 +1195,7 @@ mod tests {
         let subject_len_nucl = 10_000_000i64;
 
         let gap_trigger = gap_trigger_raw_score(22.0, &ungapped);
-        let eff_lengths =
-            compute_eff_lengths_subject_mode_tblastx(query_len_aa, subject_len_nucl, &ungapped);
+        let eff_lengths = compute_eff_lengths_tblastx(query_len_aa, subject_len_nucl, 1, &ungapped);
         let cutoff_score_max =
             cutoff_score_max_for_tblastx(eff_lengths.eff_searchsp, 10.0, &ungapped);
 

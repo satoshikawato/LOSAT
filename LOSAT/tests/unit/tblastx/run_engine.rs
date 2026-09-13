@@ -280,7 +280,7 @@ fn tblastx_parallel_chunks_matches_serial_on_real_chunk_boundaries() {
 // Blast_ExtendWordExit(ewp, subject->length);
 // ```
 #[test]
-fn tblastx_parallel_scan_chunks_matches_normal_on_ap027133_50k() {
+fn tblastx_serial_scan_chunks_matches_normal_on_ap027133_50k() {
     if !cfg!(debug_assertions) {
         return;
     }
@@ -288,7 +288,7 @@ fn tblastx_parallel_scan_chunks_matches_normal_on_ap027133_50k() {
     let query =
         PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/fasta/truncated/AP027133_50k.fasta");
     let subject = query.clone();
-    assert_parallel_scan_chunks_match_normal(
+    assert_serial_scan_chunks_match_normal(
         &query,
         &subject,
         &["-query_gencode", "1", "-db_gencode", "1", "-seg", "no"],
@@ -304,14 +304,14 @@ fn tblastx_parallel_scan_chunks_matches_normal_on_ap027133_50k() {
 // Blast_HSPListAdjustOffsets(hsp_list, backup.offset);
 // ```
 #[test]
-fn tblastx_parallel_scan_chunks_matches_normal_on_mjenmv() {
+fn tblastx_serial_scan_chunks_matches_normal_on_mjenmv() {
     if !cfg!(debug_assertions) {
         return;
     }
 
     let query = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/fasta/MjeNMV.fasta");
     let subject = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/fasta/MelaMJNV.fasta");
-    assert_parallel_scan_chunks_match_normal(
+    assert_serial_scan_chunks_match_normal(
         &query,
         &subject,
         &["-query_gencode", "1", "-db_gencode", "1", "-seg", "yes"],
@@ -319,14 +319,14 @@ fn tblastx_parallel_scan_chunks_matches_normal_on_mjenmv() {
     );
 }
 
-fn assert_parallel_scan_chunks_match_normal(
+fn assert_serial_scan_chunks_match_normal(
     query: &PathBuf,
     subject: &PathBuf,
     extra_args: &[&str],
     require_boundary_crossing_hsp: bool,
 ) {
-    let out_normal = temp_path("parallel_scan_chunks_normal", "txt");
-    let out_scan = temp_path("parallel_scan_chunks_enabled", "txt");
+    let out_normal = temp_path("serial_scan_chunks_normal", "txt");
+    let out_scan = temp_path("serial_scan_chunks_enabled", "txt");
     let chunk_size_aa = "600";
 
     let mut base_args = vec![
@@ -348,7 +348,7 @@ fn assert_parallel_scan_chunks_match_normal(
             "-out",
             out_normal.to_str().expect("normal output path UTF-8"),
         ])
-        .env_remove("LOSAT_TBLASTX_PARALLEL_SCAN_CHUNKS")
+        .env_remove("LOSAT_TBLASTX_SERIAL_SCAN_CHUNKS")
         .env_remove("LOSAT_TBLASTX_PARALLEL_CHUNKS")
         .env_remove("LOSAT_TBLASTX_TEST_SCAN_CHUNK_SIZE")
         .env_remove("LOSAT_TBLASTX_TEST_CHUNK_SIZE")
@@ -370,7 +370,7 @@ fn assert_parallel_scan_chunks_match_normal(
             "-out",
             out_scan.to_str().expect("scan output path UTF-8"),
         ])
-        .env("LOSAT_TBLASTX_PARALLEL_SCAN_CHUNKS", "1")
+        .env("LOSAT_TBLASTX_SERIAL_SCAN_CHUNKS", "1")
         .env("LOSAT_TBLASTX_TEST_SCAN_CHUNK_SIZE", chunk_size_aa)
         .env_remove("LOSAT_TBLASTX_PARALLEL_CHUNKS")
         .env_remove("LOSAT_TBLASTX_TEST_CHUNK_SIZE")
@@ -398,7 +398,7 @@ fn assert_parallel_scan_chunks_match_normal(
     }
     assert_eq!(
         normal_output, scan_output,
-        "LOSAT_TBLASTX_PARALLEL_SCAN_CHUNKS must preserve normal LOSAT output"
+        "LOSAT_TBLASTX_SERIAL_SCAN_CHUNKS must preserve normal LOSAT output"
     );
 
     let _ = fs::remove_file(out_normal);

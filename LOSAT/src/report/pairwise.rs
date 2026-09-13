@@ -163,12 +163,24 @@ pub fn write_subject_header<W: Write>(
     subject_title: Option<&str>,
     subject_length: Option<usize>,
 ) -> io::Result<()> {
-    // Subject defline
-    if let Some(title) = subject_title {
-        writeln!(writer, ">{} {}", subject_id, title)?;
-    } else {
-        writeln!(writer, ">{}", subject_id)?;
+    // NCBI reference: c++/src/objtools/align_format/showalign.cpp:2385-2388,2461-2471,340-359
+    // out << ">"; if (out.tellp() > 1L) out << " "; s_WrapOutputLine(out, alnDispParams->title);
+    let title = subject_title
+        .filter(|s| !s.is_empty())
+        .map_or_else(|| subject_id.to_string(), |t| format!("{subject_id} {t}"));
+    writer.write_all(b"> ")?;
+    let mut do_wrap = false;
+    for (i, &c) in title.as_bytes().iter().enumerate() {
+        if i > 0 && i % 60 == 0 {
+            do_wrap = true;
+        }
+        writer.write_all(&[c])?;
+        if do_wrap && (c.is_ascii_whitespace() || c == 11) {
+            writer.write_all(b"\n")?;
+            do_wrap = false;
+        }
     }
+    writeln!(writer)?;
 
     // Length line
     if let Some(len) = subject_length {
@@ -487,16 +499,32 @@ fn write_subject_summary_table<W: Write>(
     subject_hits: &std::collections::HashMap<u32, Vec<&PairwiseHit>>,
     subject_ids: &[Arc<str>],
 ) -> io::Result<()> {
-    writeln!(
+    // NCBI reference: c++/src/objtools/align_format/showdefline.cpp:668-709,760-829,929-959
+    // m_MaxScoreLen = kBits_size; m_MaxEvalueLen = kValue_size;
+    // AddSpace(out, m_LineLen+2); out << kScore; AddSpace(out,m_MaxScoreLen-kScore_size);
+    let max_score = subject_order
+        .iter()
+        .filter_map(|i| subject_hits.get(i)?.first())
+        .map(|h| format_bitscore_ncbi(h.hit.bit_score).len())
+        .max()
+        .unwrap_or(6)
+        .max(6);
+    let max_evalue = subject_order
+        .iter()
+        .filter_map(|i| subject_hits.get(i)?.first())
+        .map(|h| format_evalue_ncbi(h.hit.e_value).len())
+        .max()
+        .unwrap_or(5)
+        .max(5);
+    write_spaces(writer, 70)?;
+    writeln!(writer, "{:<max_score$}    E", "Score")?;
+    write!(
         writer,
-        "                                                                      Score     E"
+        "{:<69}",
+        "Sequences producing significant alignments:"
     )?;
-    writeln!(
-        writer,
-        "Sequences producing significant alignments:                          (Bits)  Value"
-    )?;
+    writeln!(writer, "{:<max_score$}  Value", "(Bits)")?;
     writeln!(writer)?;
-
     for s_idx in subject_order {
         let Some(shits) = subject_hits.get(s_idx) else {
             continue;
@@ -513,15 +541,19 @@ fn write_subject_summary_table<W: Write>(
             label.push(' ');
             label.push_str(title);
         }
-        if label.len() > 66 {
-            label.truncate(63);
-            label.push_str("...");
+        // NCBI reference: c++/src/objtools/align_format/showdefline.cpp:914-931
+        // actual_line_component = line_component.substr(0,m_LineLen-line_length-3); actual_line_component += kEllipsis;
+        // String widths are byte counts, including non-ASCII FASTA titles.
+        if label.len() > 68 {
+            writer.write_all(&label.as_bytes()[..65])?;
+            writer.write_all(b"...")?;
+        } else {
+            writer.write_all(label.as_bytes())?;
+            write_spaces(writer, 68 - label.len())?;
         }
-
         writeln!(
             writer,
-            "{:<66} {:>5}  {:<7}",
-            label,
+            "  {:<max_score$}  {:<max_evalue$}",
             format_bitscore_ncbi(best_hit.hit.bit_score),
             format_evalue_ncbi(best_hit.hit.e_value)
         )?;
@@ -676,16 +708,109 @@ fn write_blastp_pairwise_intro<W: Write>(writer: &mut W, version: &str) -> io::R
 //     << " sequences; " << NStr::UInt8ToString(nTotalLength,NStr::fWithCommas)
 //     << " total letters" << endl;
 // ```
+// NCBI reference: c++/src/corelib/ncbistr.cpp:5088-5340 (WrapIt, fWrap_FlatFile)
+// enum EScore { eForced, ePunct, eComma, eSpace, eNewline };
+// if (score >= best_score && score_pos > pos0) { best_pos = score_pos; best_score = score; }
+// NCBI reference: c++/src/objtools/align_format/align_format_util.cpp:279-291
+// NStr::Wrap(str, line_len, string_l, NStr::fWrap_FlatFile);
+fn write_flatfile_wrapped(writer: &mut impl Write, text: &str, width: usize) -> io::Result<()> {
+    let bytes = text.as_bytes();
+    let mut pos = 0;
+    // NCBI reference: c++/src/corelib/ncbistr.cpp:5100,5153-5157,5137
+    // SIZE_TYPE pos=0,len=str.size(),nl_pos=0; if(nl_pos<=pos) nl_pos=str.find('\n',pos);
+    // bool thisPartHasBackspace = false;
+    let mut newline = 0;
+    while pos < bytes.len() {
+        let mut has_backspace = false;
+        if newline <= pos {
+            newline = bytes[pos..]
+                .iter()
+                .position(|&c| c == b'\n')
+                .map_or(bytes.len(), |n| pos + n);
+        }
+        let pos0 = if newline - pos <= width { newline } else { pos };
+        let mut scan = pos0;
+        let mut column = 0;
+        let mut best = pos;
+        let mut best_score = 0;
+        while scan < bytes.len() && column <= width {
+            let c = bytes[scan];
+            let mut score = 0;
+            let mut score_pos = scan;
+            if c == b'\n' {
+                best = scan;
+                best_score = 4;
+                break;
+            }
+            if c.is_ascii_whitespace() || c == 11 {
+                score = 3;
+            } else if c == b',' && column < width && scan + 1 < bytes.len() {
+                score = 2;
+                score_pos += 1;
+            } else if c == b'-' && column < width && scan + 1 < bytes.len() {
+                score = 1;
+                score_pos += 1;
+            }
+            if score >= best_score && score_pos > pos0 {
+                best = score_pos;
+                best_score = score;
+            }
+            while scan + 1 < bytes.len() && bytes[scan + 1] == 8 {
+                scan += 1;
+                column = column.saturating_sub(1);
+                has_backspace = true;
+            }
+            scan += 1;
+            column += 1;
+        }
+        // NCBI reference: c++/src/corelib/ncbistr.cpp:5260-5266,5277-5300
+        // if (best_pos != len) { best_pos=len; thisPartHasBackspace=true; }
+        // if (thisPartHasBackspace) { /* eat backspaces and preceding characters */ }
+        if best_score != 4 && column <= width && best != bytes.len() {
+            best = bytes.len();
+            has_backspace = true;
+        }
+        let mut line = Vec::with_capacity(best - pos);
+        for &c in &bytes[pos..best] {
+            if has_backspace && c == 8 {
+                line.pop();
+            } else {
+                line.push(c);
+            }
+        }
+        writer.write_all(&line)?;
+        writer.write_all(b"\n")?;
+        pos = best;
+        if best_score == 3 {
+            while pos < bytes.len() && bytes[pos] == b' ' {
+                pos += 1;
+            }
+            if pos < bytes.len() && bytes[pos] == b'\n' {
+                pos += 1;
+            }
+        }
+        if best_score == 4 {
+            pos += 1;
+        }
+        while pos < bytes.len() && bytes[pos] == 8 {
+            pos += 1;
+        }
+    }
+    Ok(())
+}
+
 fn write_blastp_database_header<W: Write>(
     writer: &mut W,
     database_name: &str,
     database_num_sequences: usize,
     database_total_letters: usize,
 ) -> io::Result<()> {
-    writeln!(
+    // NCBI reference: c++/src/algo/blast/format/blastfmtutil.cpp:135-137
+    // str << dbString << definition_line << endl; x_WrapOutputLine(str.str(),line_len,out);
+    write_flatfile_wrapped(
         writer,
-        "Database: {}",
-        ensure_trailing_period(database_name)
+        &format!("Database: {}", ensure_trailing_period(database_name)),
+        68,
     )?;
     writeln!(
         writer,
@@ -711,10 +836,13 @@ fn write_blastp_query_header<W: Write>(
     query_name: &str,
     query_length: usize,
 ) -> io::Result<()> {
-    writeln!(writer, "Query= {}", query_name)?;
+    // NCBI reference: c++/src/objtools/align_format/align_format_util.cpp:729-746
+    // out << label << "= "; x_WrapOutputLine(all_id_str, line_len, out, html);
+    // out << "\nLength=" << cbs.GetInst().GetLength() << "\n";
+    write!(writer, "Query= ")?;
+    write_flatfile_wrapped(writer, query_name, 68)?;
     writeln!(writer)?;
     writeln!(writer, "Length={}", query_length)?;
-    writeln!(writer)?;
     Ok(())
 }
 
@@ -725,6 +853,9 @@ fn write_blastp_query_header<W: Write>(
 //           << "\n\n";
 // ```
 fn write_no_hits_found<W: Write>(writer: &mut W) -> io::Result<()> {
+    // NCBI reference: c++/src/algo/blast/format/blast_format.cpp:1510-1514
+    // m_Outfile << "\n\n" << "***** " << kNoHitsFound << " *****\n\n\n";
+    writeln!(writer)?;
     writeln!(writer)?;
     writeln!(writer, "***** No hits found *****")?;
     writeln!(writer)?;
@@ -812,11 +943,10 @@ fn write_blastp_final_footer<W: Write>(
     writer: &mut W,
     report: &BlastpPairwiseReport,
 ) -> io::Result<()> {
-    writeln!(
-        writer,
-        "  Database: {}",
-        ensure_trailing_period(&report.database_name)
-    )?;
+    // NCBI reference: c++/src/objtools/align_format/align_format_util.cpp:543-544
+    // out << "  Database: "; x_WrapOutputLine(dbinfo->definition, line_length, out);
+    write!(writer, "  Database: ")?;
+    write_flatfile_wrapped(writer, &ensure_trailing_period(&report.database_name), 68)?;
     writeln!(writer, "    Posted date:  Unknown")?;
     writeln!(
         writer,
@@ -921,6 +1051,9 @@ pub fn write_blastp_pairwise_report<W: Write>(
         }
 
         write_subject_summary_table(writer, &subject_order, &subject_hits, subject_ids)?;
+        // NCBI reference: c++/src/algo/blast/format/blast_format.cpp:1520-1589
+        // x_DisplayDeflines(aln_set, ...); ... display.DisplaySeqalign(m_Outfile);
+        writeln!(writer)?;
 
         for s_idx in subject_order {
             let subject_id = subject_ids
@@ -1168,13 +1301,33 @@ mod tests {
         }
     }
 
+    // NCBI reference: c++/src/corelib/ncbistr.cpp:5088-5340
+    // enum EScore { eForced, ePunct, eComma, eSpace, eNewline };
+    #[test]
+    fn flatfile_wrapping_preserves_ncbi_break_boundaries() {
+        for (input, width, expected) in [
+            ("abcd", 4, "abcd\n"),
+            ("abc-def", 4, "abc-\ndef\n"),
+            ("a b c", 4, "a b\nc\n"),
+            ("abcd ef", 4, "abcd\nef\n"),
+            ("a\n\nb", 4, "a\n\nb\n"),
+            ("abc\u{8}d", 4, "abd\n"),
+            ("ab\u{8}cd\nz", 68, "ab\u{8}cd\nz\n"),
+            ("abc,def", 4, "abc,\ndef\n"),
+        ] {
+            let mut output = Vec::new();
+            write_flatfile_wrapped(&mut output, input, width).unwrap();
+            assert_eq!(output, expected.as_bytes(), "{input:?}");
+        }
+    }
+
     #[test]
     fn test_write_subject_header() {
         let mut output = Vec::new();
         write_subject_header(&mut output, "seq1", Some("Test sequence"), Some(500)).unwrap();
         let output_str = String::from_utf8(output).unwrap();
 
-        assert!(output_str.contains(">seq1 Test sequence"));
+        assert!(output_str.contains("> seq1 Test sequence"));
         assert!(output_str.contains("Length=500"));
     }
 
@@ -1231,6 +1384,6 @@ mod tests {
 
         assert!(output_str.contains("TBLASTX"));
         assert!(output_str.contains("Query= test_query"));
-        assert!(output_str.contains(">subject1"));
+        assert!(output_str.contains("> subject1"));
     }
 }

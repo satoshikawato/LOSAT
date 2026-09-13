@@ -201,8 +201,8 @@ authoritative, current guidance for agent behavior in LOSAT.
 - `LOSAT_WASI_THREADS_DEBUG=1` threaded-WASI scheduling diagnostics.
 - `LOSAT_TBLASTX_PARALLEL_CHUNKS=1` force TBLASTX subject-chunk parallel path
   for diagnostics.
-- `LOSAT_TBLASTX_PARALLEL_SCAN_CHUNKS=1` diagnostic-only TBLASTX scan-interior
-  chunking; do not enable by default without parity proof.
+- `LOSAT_TBLASTX_SERIAL_SCAN_CHUNKS=1` diagnostic-only sequential TBLASTX
+  scan-interior chunking; this does not enable parallel scan work.
 
 ---
 

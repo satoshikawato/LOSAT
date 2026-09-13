@@ -84,8 +84,8 @@ pub(crate) use super::extension::{convert_coords, extend_hit_two_hit};
 pub(crate) use super::hsp_culling;
 pub(crate) use super::lookup::{build_ncbi_lookup, QueryContext};
 pub(crate) use super::ncbi_cutoffs::{
-    compute_eff_lengths_subject_mode_tblastx, cutoff_score_for_update_tblastx,
-    cutoff_score_max_for_tblastx, gap_trigger_raw_score, x_drop_raw_score, BLAST_GAP_DECAY_RATE,
+    compute_eff_lengths_tblastx, cutoff_score_for_update_tblastx, cutoff_score_max_for_tblastx,
+    gap_trigger_raw_score, x_drop_raw_score, BLAST_GAP_DECAY_RATE,
 };
 pub(crate) use super::reevaluate::{
     get_num_identities_and_positives_ungapped, hsp_test, reevaluate_ungapped_hit_ncbi_translated,
@@ -100,8 +100,8 @@ pub(crate) use super::stage_dump;
 // }
 // ```
 pub(crate) use super::sum_stats_linking::{
-    apply_sum_stats_even_gap_linking_with_parallel, compute_avg_query_length_ncbi,
-    find_smallest_lambda_params, LinkingParams,
+    apply_sum_stats_even_gap_linking_with_parallel, calculate_link_hsp_cutoffs_ncbi,
+    compute_avg_query_length_ncbi, find_smallest_lambda_params, LinkingParams,
 };
 pub(crate) use super::tracing::{
     trace_final_hit_if_match, trace_hsp_target, trace_match_target, trace_ungapped_hit_if_match,

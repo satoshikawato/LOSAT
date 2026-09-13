@@ -22,32 +22,17 @@ pub struct LinkHspCutoffs {
     pub ignore_small_gaps: bool,
 }
 
-/// Parameters required for NCBI-style linking
-/// These are computed once per subject and passed to linking
+/// NCBI reference: c++/src/algo/blast/core/blast_engine.c:1448-1455;
+/// c++/src/algo/blast/core/link_hsps.c:468-493
+/// CalculateLinkHSPCutoffs(..., db_length, subject->length);
+/// cutoff[0] = link_hsp_params->cutoff_small_gap;
+/// cutoff[1] = link_hsp_params->cutoff_big_gap;
+/// Per-subject state computed before search and shared by both linking passes.
 #[derive(Debug, Clone)]
 pub struct LinkingParams {
-    /// Average query length in AA (NCBI CalculateLinkHSPCutoffs formula)
-    pub avg_query_length: i32,
-    /// Subject length in nucleotides
     pub subject_len_nucl: i64,
-    /// Minimum cutoff score across all contexts for this subject
-    pub cutoff_score_min: i32,
-    /// Scale factor (typically 1.0 for standard BLOSUM62)
-    pub scale_factor: f64,
-    /// Gap decay rate
     pub gap_decay_rate: f64,
-}
-
-impl Default for LinkingParams {
-    fn default() -> Self {
-        Self {
-            avg_query_length: 100,
-            subject_len_nucl: 300,
-            cutoff_score_min: 0,
-            scale_factor: 1.0,
-            gap_decay_rate: BLAST_GAP_DECAY_RATE,
-        }
-    }
+    pub cutoffs: LinkHspCutoffs,
 }
 
 /// Find Karlin parameters with smallest Lambda from a list of context parameters

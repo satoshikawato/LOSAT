@@ -1,0 +1,95 @@
+name: WASI threading integration
+
+on:
+  workflow_call:
+    inputs:
+      candidate_sha:
+        type: string
+        default: ''
+
+permissions:
+  contents: read
+
+jobs:
+  integration:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 360
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.candidate_sha || github.sha }}
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: 1.92.0
+          targets: wasm32-wasip1,wasm32-wasip1-threads
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24.21.0
+      - name: Host and evidence parser tests
+        run: |
+          node --test LOSAT/tests/test_wasi_runners.js LOSAT/tests/test_wasi_shared_memory.js
+          python3 -m unittest discover -s LOSAT/tests -p test_wasm_performance.py
+      # NCBI reference: c++/src/algo/blast/api/prelim_stage.cpp:145-188
+      # TBlastThreads the_threads(GetNumberOfThreads()); (*thread)->Run(); (*thread)->Join(&result);
+      # Commands and CRT-initialized reactors have distinct artifacts and gates.
+      - name: Build separate artifacts in both orders
+        run: |
+          cd LOSAT
+          cargo build --release --locked --bin LOSAT
+          cargo build --release --locked --bin LOSAT --no-default-features --target-dir target/native-serial
+          cd ..
+          python3 LOSAT/tests/build_wasi_artifacts.py --target-dir LOSAT/target --output-dir .tmp/threading/artifacts
+          python3 LOSAT/tests/build_wasi_artifacts.py --target-dir LOSAT/target --output-dir .tmp/threading/reverse-artifacts --reverse-order
+      # NCBI is a comparison oracle only. Verify the frozen official executable
+      # identities before running searches; no production build invokes BLAST.
+      - name: Install fixed comparison oracle
+        run: |
+          mkdir -p .tmp/threading/oracle
+          cd .tmp/threading/oracle
+          curl --fail --location --retry 3 --output oracle.tar.gz 'https://ftp.ncbi.nlm.nih.gov/blast/executables/blast%2B/2.17.0/ncbi-blast-2.17.0%2B-x64-linux.tar.gz'
+          tar -xzf oracle.tar.gz
+          sha256sum oracle.tar.gz > archive.sha256
+          cat > executables.sha256 <<'CHECKSUMS'
+          33b64bc67d3149cee2459b2f7766b363323df632cf12c099546de00aea9698b5  ncbi-blast-2.17.0+/bin/blastn
+          5ce267c04e4988c265357bfbedc64e809545b6fcfae7ff6775266fabbee8ba0e  ncbi-blast-2.17.0+/bin/blastp
+          583e5d60bbd444ac455d20e0956c5aa0aeef675da8daee8204d8f9376ddb8804  ncbi-blast-2.17.0+/bin/tblastx
+          CHECKSUMS
+          sha256sum --check executables.sha256
+      - name: Real command and reactor matrix
+        run: |
+          python3 LOSAT/tests/check_wasm_threading.py \
+            --native LOSAT/target/release/LOSAT \
+            --native-serial LOSAT/target/native-serial/release/LOSAT \
+            --serial .tmp/threading/artifacts/losat-serial-command.wasm \
+            --threaded .tmp/threading/artifacts/losat-threaded-command.wasm \
+            --reactor .tmp/threading/artifacts/losat-threaded-reactor.wasm \
+            --serial-reactor .tmp/threading/artifacts/losat-serial-reactor.wasm \
+            --oracle-dir .tmp/threading/oracle/ncbi-blast-2.17.0+/bin \
+            --output-dir .tmp/threading/gates
+      - name: Frozen default and approved genetic-code regressions
+        run: |
+          python3 LOSAT/tests/check_wasm_threading_regressions.py \
+            --native LOSAT/target/release/LOSAT \
+            --serial .tmp/threading/artifacts/losat-serial-command.wasm \
+            --threaded .tmp/threading/artifacts/losat-threaded-command.wasm \
+            --oracle-dir .tmp/threading/oracle/ncbi-blast-2.17.0+/bin \
+            --jobs 3 --output-dir .tmp/threading/frozen-regressions
+          python3 LOSAT/tests/check_tblastx_thread_thresholds.py \
+            --native LOSAT/target/release/LOSAT \
+            --serial .tmp/threading/artifacts/losat-serial-command.wasm \
+            --threaded .tmp/threading/artifacts/losat-threaded-command.wasm \
+            --oracle .tmp/threading/oracle/ncbi-blast-2.17.0+/bin/tblastx \
+            --output-dir .tmp/threading/threshold-regressions
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: wasi-threading-evidence
+          path: |
+            .tmp/threading/artifacts
+            .tmp/threading/reverse-artifacts
+            .tmp/threading/gates
+            .tmp/threading/frozen-regressions
+            .tmp/threading/threshold-regressions
+            .tmp/threading/oracle/*.sha256
+          if-no-files-found: error
+          retention-days: 30

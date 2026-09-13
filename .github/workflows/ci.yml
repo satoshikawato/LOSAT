@@ -11,6 +11,7 @@ jobs:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
         with:
+          toolchain: 1.92.0
           components: clippy, rustfmt
       # NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_hits.c:1379-1381
       # calls qsort for HSP ordering. This fail-fast ratchet prevents LOSAT from
@@ -27,10 +28,4 @@ jobs:
       - run: cd LOSAT && cargo build --release
 
   wasm:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - uses: dtolnay/rust-toolchain@stable
-        with:
-          targets: wasm32-wasip1
-      - run: cd LOSAT && cargo build --release --target wasm32-wasip1 --no-default-features
+    uses: ./.github/workflows/wasm-threading.yml

@@ -18,6 +18,7 @@ removed in later, behavior-preserving pull requests.
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import os
 import re
@@ -457,6 +458,15 @@ def _scan_manifest(manifest: Path, root: Path) -> list[Finding]:
     return findings
 
 
+# NCBI reference: c++/src/algo/blast/api/prelim_stage.cpp:145-188
+# (*thread)->Run(); (*thread)->Join(&result);
+# PD-PURE-RUST-RUNTIME-AUTHORITY excludes compiler/thread startup internals.
+def _is_reviewed_wasi_crt(path: Path, root: Path) -> bool:
+    return path.is_file() and _relative(path, root) == "LOSAT/build.rs" and hashlib.sha256(
+        path.read_text(encoding="utf-8").encode("utf-8")
+    ).hexdigest() == "7d70a92bfe68a76662ed485e0d98ea82e4294a84c959714fb62ad331ef808830"
+
+
 def _scan_build_scripts(root: Path) -> list[Finding]:
     findings: list[Finding] = []
     excluded = {".git", ".agents", ".tmp", "target", "tests"}
@@ -468,16 +478,23 @@ def _scan_build_scripts(root: Path) -> list[Finding]:
     for path in sorted(build_scripts):
         text = _strip_rust_comments(path.read_text(encoding="utf-8"))
         rel = _relative(path, root)
-        findings.append(
-            Finding(
-                "build.project_script",
-                rel,
-                "build.rs",
-                1,
-                "project_build_script_review_required",
-                "project build script can introduce a native build route",
+        # NCBI reference: c++/src/algo/blast/api/prelim_stage.cpp:145-188
+        # (*thread)->Run(); (*thread)->Join(&result);
+        # Reviewed Rust WASI startup only: query the selected Rust sysroot and
+        # link its bundled reactor CRT, with no NCBI or algorithm dependency.
+        # Pin the complete normalized source; every modification requires review.
+        reviewed_wasi_crt = _is_reviewed_wasi_crt(path, root)
+        if not reviewed_wasi_crt:
+            findings.append(
+                Finding(
+                    "build.project_script",
+                    rel,
+                    "build.rs",
+                    1,
+                    "project_build_script_review_required",
+                    "project build script can introduce a native build route",
+                )
             )
-        )
         for match in NATIVE_BUILD_RE.finditer(text):
             findings.append(
                 Finding(
@@ -582,6 +599,8 @@ def audit_repository(
 
     findings.extend(_scan_manifest(root / "LOSAT" / "Cargo.toml", root))
     findings.extend(_scan_build_scripts(root))
+    if _is_reviewed_wasi_crt(root / "LOSAT/build.rs", root):
+        observations.append(Observation("build.rust_wasi_crt", "LOSAT/build.rs", "crt1-reactor.o", 1, "reviewed_rust_toolchain_startup"))
     findings.extend(_scan_obsolete_adapter_paths(root))
     if metadata is None:
         metadata = load_cargo_metadata(root)

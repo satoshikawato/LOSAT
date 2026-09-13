@@ -32,7 +32,6 @@ use crate::algorithm::tblastx::extension::convert_coords;
 use crate::algorithm::tblastx::lookup::QueryContext;
 use crate::algorithm::tblastx::ungapped_hit_sort::sort_ungapped_hits_by_index_replay;
 
-use super::cutoffs::calculate_link_hsp_cutoffs_ncbi;
 use super::params::LinkingParams;
 
 // ---------------------------------------------------------------------------
@@ -528,17 +527,11 @@ pub fn apply_sum_stats_even_gap_linking_with_parallel(
 
     let diag_enabled = diagnostics_enabled();
 
-    // Calculate cutoffs once for this subject using NCBI algorithm
-    // NCBI: CalculateLinkHSPCutoffs is called once per subject
-    let cutoffs = calculate_link_hsp_cutoffs_ncbi(
-        linking_params.avg_query_length,
-        linking_params.subject_len_nucl,
-        0, // db_length = 0 for -subject mode
-        linking_params.cutoff_score_min,
-        linking_params.scale_factor,
-        linking_params.gap_decay_rate,
-        params,
-    );
+    // NCBI reference: c++/src/algo/blast/core/link_hsps.c:488-493
+    // cutoff[0] = link_hsp_params->cutoff_small_gap;
+    // cutoff[1] = link_hsp_params->cutoff_big_gap;
+    // gap_prob = link_hsp_params->gap_prob;
+    let cutoffs = linking_params.cutoffs;
 
     // Debug output for cutoffs (controlled by LOSAT_DEBUG_CUTOFFS env var)
     static DEBUG_CUTOFFS_PRINTED: std::sync::atomic::AtomicBool =
@@ -547,9 +540,7 @@ pub fn apply_sum_stats_even_gap_linking_with_parallel(
         && !DEBUG_CUTOFFS_PRINTED.swap(true, std::sync::atomic::Ordering::SeqCst)
     {
         eprintln!("=== LOSAT Linking Cutoffs Debug ===");
-        eprintln!("  avg_query_length: {}", linking_params.avg_query_length);
         eprintln!("  subject_len_nucl: {}", linking_params.subject_len_nucl);
-        eprintln!("  cutoff_score_min: {}", linking_params.cutoff_score_min);
         eprintln!("  lambda: {:.6}", params.lambda);
         eprintln!("  K: {:.6}", params.k);
         eprintln!("  H: {:.6}", params.h);
@@ -644,6 +635,19 @@ pub fn apply_sum_stats_even_gap_linking_with_parallel(
     //
     // NCBI memory pooling: link_hsps.c:452-454 allocates lh_helper once with
     // MAX(1024, hspcnt+5) and reuses it across all frame groups.
+    // NCBI reference: c++/src/algo/blast/core/link_hsps.c:553-558
+    // for (frame_index=0; frame_index<num_query_frames; frame_index++) { ... }
+    crate::utils::threading::report_stage(
+        "tblastx",
+        "linking",
+        frame_groups.len(),
+        allow_parallel
+            && frame_groups.len() > 1
+            && cfg!(all(
+                feature = "parallel",
+                any(not(target_arch = "wasm32"), feature = "wasm-threads")
+            )),
+    );
     let initial_lh_size = (total_hits + 5).max(1024); // NCBI: MAX(1024, hspcnt+5)
 
     #[cfg(all(

@@ -319,7 +319,7 @@ pub fn format_bitscore_ncbi(bit_score: f64) -> String {
         (bit_score as i64).to_string()
     } else {
         // NCBI: "%4.1lf" -> one decimal place
-        format!("{:.1}", bit_score)
+        format!("{:4.1}", bit_score)
     }
 }
 
@@ -433,7 +433,7 @@ fn write_bitscore_ncbi<W: Write>(writer: &mut W, bit_score: f64) -> io::Result<(
     } else if bit_score > 99.9 {
         write!(writer, "{}", bit_score as i64)
     } else {
-        write!(writer, "{:.1}", bit_score)
+        write!(writer, "{:4.1}", bit_score)
     }
 }
 
@@ -1175,7 +1175,11 @@ mod tests {
     #[test]
     fn test_format_bitscore_ncbi_small() {
         // <= 99.9: "%4.1lf" - one decimal place
-        assert_eq!(format_bitscore_ncbi(0.0), "0.0");
+        assert_eq!(format_bitscore_ncbi(0.0), " 0.0");
+        assert_eq!(format_bitscore_ncbi(9.8), " 9.8");
+        let mut buffer = Vec::new();
+        write_bitscore_ncbi(&mut buffer, 9.8).unwrap();
+        assert_eq!(buffer, b" 9.8");
         assert_eq!(format_bitscore_ncbi(50.5), "50.5");
         assert_eq!(format_bitscore_ncbi(99.9), "99.9");
     }

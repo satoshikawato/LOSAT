@@ -114,7 +114,7 @@ python3 tests/compare_blastn_parity.py \
   --fresh-paired \
   --paired-output-dir /tmp/losat-blastn-v010-certification/paired-base \
   --losat-bin target/release/LOSAT \
-  --ncbi-bin /home/kawato/tools/ncbi-blast-oracle/ncbi-blast-2.17.0+/bin/blastn
+  --ncbi-bin /path/to/ncbi-blast/bin/blastn
 python3 tests/certify_blastn_v010.py \
   --manifest tests/blastn_parity_manifest.tsv \
   --paired-output-dir /tmp/losat-blastn-v010-certification/paired-base \
@@ -135,6 +135,10 @@ runtime code must fail explicitly for unsupported behavior rather than invoking
 NCBI tools as a fallback.
 
 ## Benchmark
+
+For a simple local native/Wasm comparison using the historical FASTA pairs and
+`.out` / `.log` plots, use [the everyday benchmark scripts](LOSAT/tests/README.md).
+They can run one selected pair without the full certification/performance suite.
 
 ### Hit Distribution
 

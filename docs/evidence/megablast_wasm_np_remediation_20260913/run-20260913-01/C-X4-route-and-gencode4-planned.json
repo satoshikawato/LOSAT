@@ -1,0 +1,10 @@
+{
+  "status": "PREPARED_NOT_EXECUTED",
+  "purpose": "Use the candidate artifacts for already required default-route and long code4 checks; retain original unexecuted drivers",
+  "prerequisite": "Threaded build/checks and performance qualification",
+  "drivers": {
+    "/tmp/losat-remediation-20260913-01/x4_daily_routes.py": "ae48c68cd8e15c5fe0fde3ec29e9101fb365d51d272a6aed608ff1c1c07ccf0f",
+    "/tmp/losat-remediation-20260913-01/evaluate_x4_daily_routes.py": "b3aa0c381f1977f5ff6dce375b3ebe89832cde6afd5ddcbe760c7991f44a654d",
+    "/tmp/losat-remediation-20260913-01/x4_gencode4.py": "0281e6f1899e48058b4901dc3506048508e4f826caf15ead5bb121c4d30bbe2f"
+  }
+}

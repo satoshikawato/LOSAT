@@ -1,0 +1,288 @@
+{
+  "candidate": "C-P1",
+  "status": "INTEGRATED_PENDING_FINAL_GATES",
+  "source": "/mnt/c/Users/genom/GitHub/LOSAT/LOSAT/src/algorithm/blastp/gapalign.rs",
+  "before_sha256": "d70563703948c8d6ae19b3cced19350d626e50f06f5fbd8e8c3e4bbcacf0ec96",
+  "after_sha256": "ae3d1cc128aa2049f56c72947f527920b27f2574f0ffb6dd9aff1504a0cc6fbd",
+  "isolated_source_sha256": "ae3d1cc128aa2049f56c72947f527920b27f2574f0ffb6dd9aff1504a0cc6fbd",
+  "checks": {
+    "main-confirmation": [
+      {
+        "case_id": "AP027078.AP027131.losatp",
+        "kind": "threaded",
+        "threads": 8,
+        "baseline_median": 8.235172936983872,
+        "candidate_median": 7.266585175995715,
+        "speedup_percent": 11.761595881469155,
+        "delta_seconds": -0.9685877609881572,
+        "nonregression_tolerance_seconds": 0.4117586468491936,
+        "nonregression_pass": true,
+        "rss_delta_bytes": -3428352,
+        "rss_tolerance_bytes": 31246745.6,
+        "rss_pass": true,
+        "baseline_range": [
+          8.06575646798592,
+          8.270164337998722
+        ],
+        "candidate_range": [
+          7.204816804995062,
+          7.440344217000529
+        ],
+        "baseline_count": 5,
+        "candidate_count": 5
+      },
+      {
+        "case_id": "AP027132.NZ_CP006932.losatp",
+        "kind": "threaded",
+        "threads": 8,
+        "baseline_median": 11.847617439983878,
+        "candidate_median": 10.372196413984057,
+        "speedup_percent": 12.453314208310806,
+        "delta_seconds": -1.4754210259998217,
+        "nonregression_tolerance_seconds": 0.592380871999194,
+        "nonregression_pass": true,
+        "rss_delta_bytes": -5140480,
+        "rss_tolerance_bytes": 32786841.6,
+        "rss_pass": true,
+        "baseline_range": [
+          11.599906585004646,
+          11.957083811983466
+        ],
+        "candidate_range": [
+          10.089056844997685,
+          11.12273753498448
+        ],
+        "baseline_count": 5,
+        "candidate_count": 5
+      }
+    ],
+    "native-controls": [
+      {
+        "case_id": "AP027078.AP027131.losatp",
+        "kind": "native",
+        "threads": 1,
+        "baseline_median": 30.49467599898344,
+        "candidate_median": 31.88583587098401,
+        "speedup_percent": -4.5619762349563775,
+        "delta_seconds": 1.3911598720005713,
+        "nonregression_tolerance_seconds": 1.5247337999491721,
+        "nonregression_pass": true,
+        "rss_delta_bytes": 73728,
+        "rss_tolerance_bytes": 16777216,
+        "rss_pass": true,
+        "baseline_range": [
+          30.327698084001895,
+          32.12874040901079
+        ],
+        "candidate_range": [
+          31.414516557008028,
+          33.71281706800801
+        ],
+        "baseline_count": 5,
+        "candidate_count": 5
+      },
+      {
+        "case_id": "AP027078.AP027131.losatp",
+        "kind": "native",
+        "threads": 8,
+        "baseline_median": 5.719274737988599,
+        "candidate_median": 5.60548813600326,
+        "speedup_percent": 1.9895285188792355,
+        "delta_seconds": -0.11378660198533908,
+        "nonregression_tolerance_seconds": 0.28596373689942994,
+        "nonregression_pass": true,
+        "rss_delta_bytes": -937984,
+        "rss_tolerance_bytes": 16777216,
+        "rss_pass": true,
+        "baseline_range": [
+          5.44456139599788,
+          5.873613000003388
+        ],
+        "candidate_range": [
+          5.524471084005199,
+          5.98410083699855
+        ],
+        "baseline_count": 5,
+        "candidate_count": 5
+      },
+      {
+        "case_id": "AP027132.NZ_CP006932.losatp",
+        "kind": "native",
+        "threads": 1,
+        "baseline_median": 48.296780208009295,
+        "candidate_median": 49.951306977978675,
+        "speedup_percent": -3.4257496314319624,
+        "delta_seconds": 1.6545267699693795,
+        "nonregression_tolerance_seconds": 2.414839010400465,
+        "nonregression_pass": true,
+        "rss_delta_bytes": -4096,
+        "rss_tolerance_bytes": 16777216,
+        "rss_pass": true,
+        "baseline_range": [
+          45.18356422201032,
+          48.785202123981435
+        ],
+        "candidate_range": [
+          47.67035337499692,
+          50.28153132199077
+        ],
+        "baseline_count": 5,
+        "candidate_count": 5
+      },
+      {
+        "case_id": "AP027132.NZ_CP006932.losatp",
+        "kind": "native",
+        "threads": 8,
+        "baseline_median": 8.562050632986939,
+        "candidate_median": 8.818120200012345,
+        "speedup_percent": -2.990750440541068,
+        "delta_seconds": 0.2560695670254063,
+        "nonregression_tolerance_seconds": 0.428102531649347,
+        "nonregression_pass": true,
+        "rss_delta_bytes": 1060864,
+        "rss_tolerance_bytes": 16777216,
+        "rss_pass": true,
+        "baseline_range": [
+          8.14702716100146,
+          8.980336317006731
+        ],
+        "candidate_range": [
+          8.306962937989738,
+          9.225464360002661
+        ],
+        "baseline_count": 5,
+        "candidate_count": 5
+      }
+    ],
+    "threaded1-controls": [
+      {
+        "case_id": "AP027078.AP027131.losatp",
+        "kind": "threaded",
+        "threads": 1,
+        "baseline_median": 36.89449034500285,
+        "candidate_median": 31.73037169102463,
+        "speedup_percent": 13.996991436087614,
+        "delta_seconds": -5.164118653978221,
+        "nonregression_tolerance_seconds": 1.8447245172501425,
+        "nonregression_pass": true,
+        "rss_delta_bytes": -241664,
+        "rss_tolerance_bytes": 16777216,
+        "rss_pass": true,
+        "baseline_range": [
+          36.54905003201566,
+          37.18997951198253
+        ],
+        "candidate_range": [
+          31.407909955014475,
+          32.1359713569982
+        ],
+        "baseline_count": 5,
+        "candidate_count": 5
+      },
+      {
+        "case_id": "AP027132.NZ_CP006932.losatp",
+        "kind": "threaded",
+        "threads": 1,
+        "baseline_median": 55.97071072499966,
+        "candidate_median": 47.786442942975555,
+        "speedup_percent": 14.62241175073833,
+        "delta_seconds": -8.184267782024108,
+        "nonregression_tolerance_seconds": 2.7985355362499833,
+        "nonregression_pass": true,
+        "rss_delta_bytes": -614400,
+        "rss_tolerance_bytes": 17738137.6,
+        "rss_pass": true,
+        "baseline_range": [
+          55.17676047500572,
+          56.36358601998654
+        ],
+        "candidate_range": [
+          47.38582637702348,
+          47.94137102999957
+        ],
+        "baseline_count": 5,
+        "candidate_count": 5
+      }
+    ],
+    "task-controls": [
+      {
+        "case_id": "AP027131.NZ_CP006932.losatp",
+        "kind": "threaded",
+        "threads": 8,
+        "baseline_median": 11.237340663996292,
+        "candidate_median": 9.86574303699308,
+        "speedup_percent": 12.205713682755215,
+        "delta_seconds": -1.3715976270032115,
+        "nonregression_tolerance_seconds": 0.5618670331998147,
+        "nonregression_pass": true,
+        "rss_delta_bytes": 15659008,
+        "rss_tolerance_bytes": 32447283.200000003,
+        "rss_pass": true,
+        "baseline_range": [
+          11.088556428992888,
+          11.450684824987547
+        ],
+        "candidate_range": [
+          9.70049444399774,
+          10.073807392007438
+        ],
+        "baseline_count": 5,
+        "candidate_count": 5
+      },
+      {
+        "case_id": "WSSV.PajaWSV.losatp",
+        "kind": "threaded",
+        "threads": 8,
+        "baseline_median": 1.2748430399806239,
+        "candidate_median": 1.1998068820103072,
+        "speedup_percent": 5.8859134510752975,
+        "delta_seconds": -0.07503615797031671,
+        "nonregression_tolerance_seconds": 0.0637421519990312,
+        "nonregression_pass": true,
+        "rss_delta_bytes": 4751360,
+        "rss_tolerance_bytes": 27752038.400000002,
+        "rss_pass": true,
+        "baseline_range": [
+          1.2358426059945486,
+          1.296086913003819
+        ],
+        "candidate_range": [
+          1.1595363469969016,
+          1.2096835240081418
+        ],
+        "baseline_count": 5,
+        "candidate_count": 5
+      },
+      {
+        "case_id": "SicyWSV.CoBV.losatp",
+        "kind": "threaded",
+        "threads": 8,
+        "baseline_median": 0.771622380008921,
+        "candidate_median": 0.7161360020108987,
+        "speedup_percent": 7.190872042537288,
+        "delta_seconds": -0.05548637799802236,
+        "nonregression_tolerance_seconds": 0.05,
+        "nonregression_pass": true,
+        "rss_delta_bytes": -12288,
+        "rss_tolerance_bytes": 27564441.6,
+        "rss_pass": true,
+        "baseline_range": [
+          0.7399330209882464,
+          0.78771509998478
+        ],
+        "candidate_range": [
+          0.7019344510044903,
+          0.7600788089912385
+        ],
+        "baseline_count": 5,
+        "candidate_count": 5
+      }
+    ]
+  },
+  "pending": [
+    "combined artifact builds and measurements",
+    "affected formats/thread contracts",
+    "command/reactor reuse and linear memory/scratch",
+    "final tests/lint/format and independent audit"
+  ]
+}

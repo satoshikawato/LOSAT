@@ -1,0 +1,6 @@
+{
+  "candidate": "C-X1",
+  "status": "REJECTED",
+  "reason": "All three exploratory medians were slower (-0.79%/-2.43%/-0.90%) despite lower logical copying; no input demonstrated a speed benefit. Raw/time-tolerance/RSS checks passed; no root integration.",
+  "next_hypothesis": "C-X2 preserves the original contiguous owned group kernel and limits stationary references to the final two sorts."
+}

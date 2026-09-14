@@ -1,0 +1,28 @@
+{
+  "candidate": "C-N4",
+  "status": "ACCEPTED",
+  "scope": "BLASTN candidate selected for integration under explicit short-input acceptance amendment; final integrated raw, time, memory/reuse and task gates remain required",
+  "base": "B1",
+  "source_sha256": "4fa1b9a4510078c42f6bfe64fcce2555b168e408d8b023c29117f6ecc67e66f3",
+  "replaces": "C-N1 (no combination; both independently implement endpoint shift improvement)",
+  "independent_controls": [
+    "C-N4-main-controls",
+    "C-N4-main-n8-controls",
+    "C-N4-task-controls",
+    "C-N4-lc-additional"
+  ],
+  "all_control_time_and_rss_pass": true,
+  "raw": "All 249 completed control/adoption output files independently compared to NCBI; exploration separate",
+  "main_n8_ap_improvement_percent": 42.06,
+  "main_n8_lc_initial_improvement_percent": 3.84,
+  "main_n8_lc_additional_improvement_percent": -0.5,
+  "lc_interpretation": "No stable >=5% claim; user explicitly accepts short-input outcome. Pooled ten-pair arithmetic is retained, not used to claim reliable 7.09%.",
+  "user_amendment": "user-acceptance-amendment.json",
+  "pending": [
+    "integration",
+    "final artifact build and gates",
+    "reuse and linear memory",
+    "other supported output formats"
+  ],
+  "recorded_utc": "2026-09-13T14:21:06.755491+00:00"
+}

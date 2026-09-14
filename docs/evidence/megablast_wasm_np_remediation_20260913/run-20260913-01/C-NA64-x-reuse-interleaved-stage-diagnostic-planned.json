@@ -1,0 +1,113 @@
+{
+  "purpose": "Fixed same-instance n8 stage diagnostic preserving all three interleaved cases. 4 ABBA processes x 3 calls x 3 cases = 36 jobs; all untimed with stage counters. Never substitutes for failed adoption samples.",
+  "cases": [
+    "MelaMJNV.PemoMJNVA.tlosatx",
+    "MjeNMV.MelaMJNV.tlosatx",
+    "AP027280.AP027280.tlosatx"
+  ],
+  "process_order": [
+    [
+      0,
+      "baseline"
+    ],
+    [
+      0,
+      "candidate"
+    ],
+    [
+      1,
+      "candidate"
+    ],
+    [
+      1,
+      "baseline"
+    ]
+  ],
+  "calls": 3,
+  "node_argv": [
+    "/tmp/losat-node-check/node-v24.21.0-linux-x64/bin/node",
+    "--no-liftoff",
+    "--no-wasm-tier-up"
+  ],
+  "environment": {
+    "LC_ALL": "C",
+    "NODE_NO_WARNINGS": "1",
+    "LOSAT_TIMING": "1"
+  },
+  "quiet_boundary": "No builds, benchmarks, archive creation or bulk leaf/hash audit while each search process is active. Light log/status reads only. Full source/artifact guards occur between processes.",
+  "bound_files": {
+    "/tmp/losat-remediation-20260913-01/diagnose_na64_x_reuse_interleaved.py": "20c2c79388f8d2d17908aec04d6476caf7a8eab4ef4dcd30a3dea2c1c4345c86",
+    "/tmp/losat-node-check/node-v24.21.0-linux-x64/bin/node": "7fde7b8afa198da66257f42ee2001d874c7355631e6d1579a5fb5ef1f246df4c",
+    "/mnt/c/Users/genom/GitHub/LOSAT/docs/evidence/megablast_wasm_np_remediation_20260913/run-20260913-01/C-NA64-x-reuse/reuse-engineering-checks.json": "114c403c21a1b6176964847adb0832b9c384680669f83aa3f4eb49a713702a6f",
+    "/mnt/c/Users/genom/GitHub/LOSAT/docs/evidence/megablast_wasm_np_remediation_20260913/run-20260913-01/C-NA64-x-reuse/oracle/MelaMJNV.PemoMJNVA.tlosatx/output.txt": "bbef153094025db89dd4a69b2a3c4246b0b8853396fe740bc7e1bd654db105b6",
+    "/mnt/c/Users/genom/GitHub/LOSAT/docs/evidence/megablast_wasm_np_remediation_20260913/run-20260913-01/C-NA64-x-reuse/oracle/MjeNMV.MelaMJNV.tlosatx/output.txt": "b309f77fee038f0559d870737ebeba732c11eba4f7e495f045acbfb831817fd7",
+    "/mnt/c/Users/genom/GitHub/LOSAT/docs/evidence/megablast_wasm_np_remediation_20260913/run-20260913-01/C-NA64-x-reuse/oracle/AP027280.AP027280.tlosatx/output.txt": "845d15661c2a30fa69e01bcd8140792e55a1fa06bbb52181632680435a08eda8",
+    "/mnt/c/Users/genom/GitHub/LOSAT/LOSAT/tests/fasta/MelaMJNV.fasta": "491f80b482acc96600773c3493358c0262dbf714cb5d76f8f5560a92ecccac1a",
+    "/mnt/c/Users/genom/GitHub/LOSAT/LOSAT/tests/fasta/PemoMJNVA.fasta": "e38d663db3478cec0694e419f00b769f1937c756f3a3f827711c24d531fb4a07",
+    "/mnt/c/Users/genom/GitHub/LOSAT/LOSAT/tests/fasta/MjeNMV.fasta": "f91873bd2957bfaefe377aa221ffd1e0b57e657e5d26ba86c52fce891ac0cedf",
+    "/mnt/c/Users/genom/GitHub/LOSAT/LOSAT/tests/fasta/AP027280.fasta": "14c68a026e685896afdc5366902999d5960589cf301a76b3f1a732a8f4708b6a",
+    "/mnt/c/Users/genom/GitHub/LOSAT/LOSAT/tests/analyze_tblastx_feature_overlap.py": "52729b4fe397952ae7ffc20156f882ff8080ae7c15522751e5e7d0bad88457d9",
+    "/mnt/c/Users/genom/GitHub/LOSAT/LOSAT/tests/analyze_tblastx_hit_gap.py": "8ca2c8b34815385aad95b80d5c7b217afc26c89bc683a81f55018df723f52824",
+    "/mnt/c/Users/genom/GitHub/LOSAT/LOSAT/tests/audit_blastp_v010.py": "6b94130e14cd90e5ac1b5510925f97c56ac6d24134d49727cfdadc1498954542",
+    "/mnt/c/Users/genom/GitHub/LOSAT/LOSAT/tests/audit_tblastx_v010.py": "3399cf51e9fc343001ba20135bff6dbea69e31a5ab7cb2c4f2045538a8a787e8",
+    "/mnt/c/Users/genom/GitHub/LOSAT/LOSAT/tests/benchmark_wasi_reuse.js": "a0effdc582f7fcc1dc8fc35736f031f6a85fb8597461393ef8bdda0ffdcfc32b",
+    "/mnt/c/Users/genom/GitHub/LOSAT/LOSAT/tests/benchmark_wasm_threading.py": "8b5288b374055ab86e513248117a00626b22e40539a473e707c59ee619c8ab3b",
+    "/mnt/c/Users/genom/GitHub/LOSAT/LOSAT/tests/build_wasi_artifacts.py": "5d006f67bacac7b1f06ab77c04072dadab4d3c592d62ff8ff697323124110e33",
+    "/mnt/c/Users/genom/GitHub/LOSAT/LOSAT/tests/certify_blastn_v010.py": "2e08d5b2ddbf58f592d84c728b19d1a37f4cb96ddbe3ca1bb0c6730889eb1b4c",
+    "/mnt/c/Users/genom/GitHub/LOSAT/LOSAT/tests/certify_integrated_runtime_v010.py": "9324b50e3e20536b1d13672eef338561cfe55d69a7b53ba2f3105368e7a9b11e",
+    "/mnt/c/Users/genom/GitHub/LOSAT/LOSAT/tests/certify_platform_native_v010.py": "b4e703ef65b07151da7d9fbc69e3807db9aa9faa56eaf0e89b0ffe6eaea3204a",
+    "/mnt/c/Users/genom/GitHub/LOSAT/LOSAT/tests/check_cli_v2_regression.py": "10190a1b067db21c0464a762950b32cb3ad647b4d73fe1ccbb35e839ad98bba9",
+    "/mnt/c/Users/genom/GitHub/LOSAT/LOSAT/tests/check_pure_rust_runtime_boundary.py": "547dac9401587d05aa9c9ea5b608df1d25a62fe0dc12ea698c50e0a34c9d2d8b",
+    "/mnt/c/Users/genom/GitHub/LOSAT/LOSAT/tests/check_tblastx_overlong_tail.py": "1695adc1dcc30b327634dabc9d5453116cf3e5b81e1a2e92ccab42613d6cfa5b",
+    "/mnt/c/Users/genom/GitHub/LOSAT/LOSAT/tests/check_tblastx_thread_thresholds.py": "8808bc7885fc22f69567c684a729eb3e746f603d3816cb59ebfc7a273c8b219d",
+    "/mnt/c/Users/genom/GitHub/LOSAT/LOSAT/tests/check_wasi_api_limits.js": "15eeefd76058f23137390b4209f873eae836be96341bb68052f2c96667a07903",
+    "/mnt/c/Users/genom/GitHub/LOSAT/LOSAT/tests/check_wasi_fault.js": "5d73bddf74955394ddc254692e0565b62eb0667407224bee43dce6a050ac9ba9",
+    "/mnt/c/Users/genom/GitHub/LOSAT/LOSAT/tests/check_wasi_reactor.js": "2d081553e1644a22ec52c8ff9056ff34951aa22b6116bebb2becb3ca8289366b",
+    "/mnt/c/Users/genom/GitHub/LOSAT/LOSAT/tests/check_wasm_threading.py": "0469f1bf27cccee8cdae759388d39b96d6c1fcb7ff844a0648358de0e482ae84",
+    "/mnt/c/Users/genom/GitHub/LOSAT/LOSAT/tests/check_wasm_threading_regressions.py": "ef7ab5378695fc5c70113124ea1374b46a2670b0c41bf3e73c4d66d0beb66f39",
+    "/mnt/c/Users/genom/GitHub/LOSAT/LOSAT/tests/compare_blastn_parity.py": "ee17add3e24242bbfaed0e4ede2f803230f0ccfb77588f7ac769fdd23a6ccf41",
+    "/mnt/c/Users/genom/GitHub/LOSAT/LOSAT/tests/comparison_data.py": "f50911ea621a2cf5f95244da3212e4560415e9285660aa4352e21ad01b16d93d",
+    "/mnt/c/Users/genom/GitHub/LOSAT/LOSAT/tests/find_tblastx_extra_hsp.py": "2f84e3dfc37ed53af2925239a8fdc081af9e539bad15473cbc080eed54875f66",
+    "/mnt/c/Users/genom/GitHub/LOSAT/LOSAT/tests/find_tblastx_missing_hsp.py": "12b0dc9ebcd3cac456e31ba6b2dd9710e1e3fa4882ab1bd08177d6ba6444d8d7",
+    "/mnt/c/Users/genom/GitHub/LOSAT/LOSAT/tests/plot_comparison.py": "d9f5813f08311d6cbff38e9796f10987c933f792a1fc752e89d4628e1f5130cb",
+    "/mnt/c/Users/genom/GitHub/LOSAT/LOSAT/tests/plot_execution_time.py": "1fadfb11382eb73acc094d7eb753b9735ba7db40d599f7eabe19722600e10548",
+    "/mnt/c/Users/genom/GitHub/LOSAT/LOSAT/tests/plot_overall_trend.py": "6e9bbf50532b4985dfe9ff0af0ad603b64f98415cb957a3566448621f75e4894",
+    "/mnt/c/Users/genom/GitHub/LOSAT/LOSAT/tests/prepare_release_candidate_v010.py": "ef53cedfec347e58c7b50c17530f4f4de0560230db7d35e8bd92c9e6c72a6112",
+    "/mnt/c/Users/genom/GitHub/LOSAT/LOSAT/tests/run_losat_wasi.js": "21311c960920364e3072605a8d5626478b99c010b30e07cab98461f4b5e2c729",
+    "/mnt/c/Users/genom/GitHub/LOSAT/LOSAT/tests/run_losat_wasi_threads.js": "faf39e6c83178530c3b21d49ee0929d67e6b9258061cc50c057876617c759c4b",
+    "/mnt/c/Users/genom/GitHub/LOSAT/LOSAT/tests/run_wasm_performance_warm.js": "d86792c0bbaee8458c71535f06db7210e8b1a6549a55767a2512e2af577e47f3",
+    "/mnt/c/Users/genom/GitHub/LOSAT/LOSAT/tests/summarize_wasm_performance.py": "19032f1e6e299384c7723f03befda6326c50206b8580bd2d6c37bb32d779025a",
+    "/mnt/c/Users/genom/GitHub/LOSAT/LOSAT/tests/test_audit_blastp_v010.py": "8ac630f7eb0fcf13138b0d473e749493fbeba073c40a7f0562234fae7a38e42a",
+    "/mnt/c/Users/genom/GitHub/LOSAT/LOSAT/tests/test_audit_tblastx_v010.py": "7d58b0c81e0e6539ef9445da8a93c4427dc0723cd1a58b30e395a19c0c8d0f51",
+    "/mnt/c/Users/genom/GitHub/LOSAT/LOSAT/tests/test_benchmark_wasi_reuse.js": "d381d567824ca86d576e61e63e119a0b8f3cde85d52404f67e4a52307c75373e",
+    "/mnt/c/Users/genom/GitHub/LOSAT/LOSAT/tests/test_benchmark_wasm_threading.py": "a5b3f33b4f19ace487be27e92c24c6bea78bea32e53cedbca0ce2145bcee2e54",
+    "/mnt/c/Users/genom/GitHub/LOSAT/LOSAT/tests/test_certify_blastn_v010.py": "c69c4e71ffbbb7f21ea2e1d44378721a4d864d4b54a9733836da4cf9244182f6",
+    "/mnt/c/Users/genom/GitHub/LOSAT/LOSAT/tests/test_certify_integrated_runtime_v010.py": "82a081a803170c0a2b4a1c4eb807c3d803536f4fe319df2fe81389a8071d0f23",
+    "/mnt/c/Users/genom/GitHub/LOSAT/LOSAT/tests/test_certify_platform_native_v010.py": "91979598ed0db1e08c791e7cb8ed7d6f4f2e2fc749a74af1a9c57a8c5c97e873",
+    "/mnt/c/Users/genom/GitHub/LOSAT/LOSAT/tests/test_check_pure_rust_runtime_boundary.py": "6d26c5b81ae8fb042436f351eb5785324e6a4cbb4db35e53397fc66c0724cf16",
+    "/mnt/c/Users/genom/GitHub/LOSAT/LOSAT/tests/test_compare_blastn_parity.py": "e8eddfaec1e80b52e13ba6ef16913adffed853fa96d96f27b06faa2b4fb304cd",
+    "/mnt/c/Users/genom/GitHub/LOSAT/LOSAT/tests/test_prepare_release_candidate_v010.py": "71d1f862c91800e0298e4e7df163e229433179c5dce46f6079b34b199fe72686",
+    "/mnt/c/Users/genom/GitHub/LOSAT/LOSAT/tests/test_simple_comparison.py": "c59f3df5779cab85c138faba6845f59007e0a81c996941a0f09232cc0fcb5385",
+    "/mnt/c/Users/genom/GitHub/LOSAT/LOSAT/tests/test_wasi_runners.js": "48371eaaeece9e3e7b640db8b4acb4cf8b188f0386e75c5b205ddabfcaa4b2a3",
+    "/mnt/c/Users/genom/GitHub/LOSAT/LOSAT/tests/test_wasi_shared_memory.js": "54924dc5fc8e3acac3588f675b8871a7725c4504f5e5ed6a6f50cff7da80ac9d",
+    "/mnt/c/Users/genom/GitHub/LOSAT/LOSAT/tests/test_wasm_performance.py": "bb18e186011a3d45a7729b3ca9959830e4c0093e4b1ae3cb47e7b26fc64a9278",
+    "/mnt/c/Users/genom/GitHub/LOSAT/LOSAT/tests/wasi_artifact.js": "37ca747261b090bf16720b2109a4511a57d90f4b67cf94c158b9bee9fc1d3f73",
+    "/mnt/c/Users/genom/GitHub/LOSAT/LOSAT/tests/wasi_shared_memory.js": "a11fad8fdd346b3a93edd35f783552d97cd5c5ccb08c491e732a6b8dae552e50",
+    "/mnt/c/Users/genom/GitHub/LOSAT/LOSAT/tests/wasi_thread_host.js": "69480b0d7128ea0f264700dad31f25253e09963867ac28b6b3997704c637a5c3",
+    "/mnt/c/Users/genom/GitHub/LOSAT/LOSAT/tests/wasm_performance.py": "596f10875001f2aa2a56ed023e7eb15f35a1ee0342ef5a714d53ccfeb2ae66ce",
+    "/tmp/losat-remediation-20260913-01/B1-target/threaded-reactor/wasm32-wasip1-threads/release/LOSAT.wasm": "803960a147118038ed46b0ced0a492457fa38176f17f54cb551db73dbefcb4e6",
+    "/mnt/c/Users/genom/GitHub/LOSAT/docs/evidence/megablast_wasm_np_remediation_20260913/run-20260913-01/C-NA64-x-reuse/reuse/session0-baseline-threaded-reactor-same-instance/jobs.json": "3065f5731dd53977b348a1f866be31e3c92620e63ec89301cb7d78d3c3b5b4e2",
+    "/mnt/c/Users/genom/GitHub/LOSAT/docs/evidence/megablast_wasm_np_remediation_20260913/run-20260913-01/C-NA64-x-reuse/reuse/session0-baseline-threaded-reactor-same-instance/process/command.json": "95a0eb07c7113590c9f524f65fcfc991273bd4ceb2b11a3f65bbbc709020a2a2",
+    "/mnt/c/Users/genom/GitHub/LOSAT/docs/evidence/megablast_wasm_np_remediation_20260913/run-20260913-01/C-NA64-x-reuse/reuse/session0-baseline-threaded-reactor-same-instance/process/output.txt": "ad66156fa73af3cc7fc6b5435d385138430db30552d3e4e8a6064e94aed9e8a0",
+    "/tmp/losat-remediation-20260913-01/C-NA64-artifacts/losat-threaded-reactor.wasm": "d58a40248c1a3de5d33b5ed1e30cc6ea9ee5926cd37a9c385fcc16e4dc39762f",
+    "/mnt/c/Users/genom/GitHub/LOSAT/docs/evidence/megablast_wasm_np_remediation_20260913/run-20260913-01/C-NA64-x-reuse/reuse/session0-candidate-threaded-reactor-same-instance/jobs.json": "ea16d1512eaec5c51600cc79f08943efd3cb320dffbb73d90f9faa944a26fbd3",
+    "/mnt/c/Users/genom/GitHub/LOSAT/docs/evidence/megablast_wasm_np_remediation_20260913/run-20260913-01/C-NA64-x-reuse/reuse/session0-candidate-threaded-reactor-same-instance/process/command.json": "0be193b63dd8fb2aaa44a430f9f46486922c64f3154f6e79fb105ff24e000971",
+    "/mnt/c/Users/genom/GitHub/LOSAT/docs/evidence/megablast_wasm_np_remediation_20260913/run-20260913-01/C-NA64-x-reuse/reuse/session0-candidate-threaded-reactor-same-instance/process/output.txt": "1328ee2ada0fc24e12c6b45ea97c82788a4f3873d6b4fea7753508fe3d87c936",
+    "/mnt/c/Users/genom/GitHub/LOSAT/docs/evidence/megablast_wasm_np_remediation_20260913/run-20260913-01/C-NA64-x-reuse/reuse/session1-candidate-threaded-reactor-same-instance/jobs.json": "f956ba429f3e295e6eadb56b043396f8cc7be5f1862af96e676804570b2622eb",
+    "/mnt/c/Users/genom/GitHub/LOSAT/docs/evidence/megablast_wasm_np_remediation_20260913/run-20260913-01/C-NA64-x-reuse/reuse/session1-candidate-threaded-reactor-same-instance/process/command.json": "d3ebda072cbfe8d424294ce792a3990f0f92d5a1136e453fb65a2e7a26e0c2f5",
+    "/mnt/c/Users/genom/GitHub/LOSAT/docs/evidence/megablast_wasm_np_remediation_20260913/run-20260913-01/C-NA64-x-reuse/reuse/session1-candidate-threaded-reactor-same-instance/process/output.txt": "d966ca9041b6675d96aa89b99472d5e9479a59a7956750ce361a61832eae90eb",
+    "/mnt/c/Users/genom/GitHub/LOSAT/docs/evidence/megablast_wasm_np_remediation_20260913/run-20260913-01/C-NA64-x-reuse/reuse/session1-baseline-threaded-reactor-same-instance/jobs.json": "86ad7a9982a28d8b87f36b415aa25732f2bcff15a659b29c33a99a046093df54",
+    "/mnt/c/Users/genom/GitHub/LOSAT/docs/evidence/megablast_wasm_np_remediation_20260913/run-20260913-01/C-NA64-x-reuse/reuse/session1-baseline-threaded-reactor-same-instance/process/command.json": "a9913f16f3366a1f587838a185ad8294a134f7906f31130acc55e380ba0eb312",
+    "/mnt/c/Users/genom/GitHub/LOSAT/docs/evidence/megablast_wasm_np_remediation_20260913/run-20260913-01/C-NA64-x-reuse/reuse/session1-baseline-threaded-reactor-same-instance/process/output.txt": "da4bfa48da1d39cbba6541ae2e35f99ab16aeb53a6762504fddeaa146ed2ac1f"
+  }
+}

@@ -1,0 +1,11 @@
+{
+  "status": "FAIL_TIME_NONREGRESSION",
+  "time_pass": 3,
+  "time_conditions": 12,
+  "rss_and_budget_pass": 4,
+  "actual_jobs": 144,
+  "actual_parent_records": 17,
+  "original_checks_sha256": "114c403c21a1b6176964847adb0832b9c384680669f83aa3f4eb49a713702a6f",
+  "excluded": 0,
+  "disposition": "Original records preserved. No native root config adoption or final success. Fixed stage diagnostic is separate, untimed and not a replacement cohort."
+}

@@ -1,0 +1,12 @@
+[
+  {
+    "run": "C-N1-exploration",
+    "status": "EXCLUDED_RUNNER_PATH_CONFOUND",
+    "reason": "Baseline runner and all worker imports were on /tmp (ext4), while candidate runner/imports were on repository DrvFS. Identical hashes do not equalize cold filesystem costs. Timing comparison excluded; raw parity, run completion and per-artifact samples retained."
+  },
+  {
+    "run": "C-N1-lc-confirmation",
+    "status": "EXCLUDED_RUNNER_PATH_CONFOUND",
+    "reason": "Baseline runner and all worker imports were on /tmp (ext4), while candidate runner/imports were on repository DrvFS. Identical hashes do not equalize cold filesystem costs. Timing comparison excluded; raw parity, run completion and per-artifact samples retained."
+  }
+]

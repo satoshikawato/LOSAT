@@ -1,0 +1,104 @@
+--- a/LOSAT/src/algorithm/blastn/filtering/purge_endpoints.rs
++++ b/LOSAT/src/algorithm/blastn/filtering/purge_endpoints.rs
+@@ -604,9 +604,13 @@
+                 start_removed += 1;
+             }
+ 
+-            for k in (i + j)..hsp_count {
+-                hsp_array[k] = hsp_array[k + 1].take();
+-            }
++            // NCBI reference: c++/src/algo/blast/core/blast_hits.c:2496-2499,2522-2525
++            // for (k=i+j; k<hsp_count; k++) hsp_array[k] = hsp_array[k+1];
++            // hsp_array[hsp_count] = hsp;
++            // The removed slot is already None. Rotate that hole to the tail
++            // in one slice operation, preserving every remaining HSP's order
++            // and the exact active-prefix boundary before installing the tail.
++            hsp_array[i + j..=hsp_count].rotate_left(1);
+             hsp_array[hsp_count] = tail_hsp;
+         }
+         i += j;
+@@ -695,9 +699,13 @@
+                 end_removed += 1;
+             }
+ 
+-            for k in (i + j)..hsp_count {
+-                hsp_array[k] = hsp_array[k + 1].take();
+-            }
++            // NCBI reference: c++/src/algo/blast/core/blast_hits.c:2496-2499,2522-2525
++            // for (k=i+j; k<hsp_count; k++) hsp_array[k] = hsp_array[k+1];
++            // hsp_array[hsp_count] = hsp;
++            // The removed slot is already None. Rotate that hole to the tail
++            // in one slice operation, preserving every remaining HSP's order
++            // and the exact active-prefix boundary before installing the tail.
++            hsp_array[i + j..=hsp_count].rotate_left(1);
+             hsp_array[hsp_count] = tail_hsp;
+         }
+         i += j;
+@@ -1014,6 +1022,67 @@
+         };
+ 
+         (make_hsp(g_ops, g_stats), make_hsp(s_ops, s_stats))
++    }
++
++    // NCBI reference: c++/src/algo/blast/core/blast_hits.c:2480-2535
++    // if (!purge && hsp->query.end > hsp_array[i]->query.end)
++    //     s_CutOffGapEditScript(hsp, ..., TRUE);
++    // for (k=i+j; k<hsp_count; k++) hsp_array[k] = hsp_array[k+1];
++    // hsp_array[hsp_count] = hsp;
++    // ... repeat for common ends with cut_begin=FALSE; return hsp_count;
++    // Repeated removals in both passes must keep the active order and the
++    // reverse removal order of live trimmed tail entries around NULL slots.
++    #[test]
++    fn common_endpoint_shifts_preserve_trimmed_tail_and_active_boundary() {
++        let make = |start: usize, end: usize, score: i32| {
++            let (_, mut h) = opaque_equal_endpoint_hsps();
++            h.query_frame = 1;
++            h.q_idx = 0;
++            h.s_idx = 0;
++            h.raw_score = score;
++            h.internal_q_offset_0 = start;
++            h.internal_s_offset_0 = start;
++            h.internal_q_end_0 = end;
++            h.internal_s_end_0 = end;
++            h.q_start = start + 1;
++            h.s_start = start + 1;
++            h.q_end = end;
++            h.s_end = end;
++            h.gap_info = Some(vec![GapEditOp::Sub((end - start) as u32)]);
++            h
++        };
++        let input = vec![
++            make(40, 50, 80),
++            make(0, 20, 90),
++            make(60, 70, 50),
++            make(0, 8, 80),
++            make(30, 50, 100),
++            make(0, 10, 100),
++            make(20, 50, 90),
++        ];
++        for purge in [false, true] {
++            let (result, active) = purge_hsps_for_subject_ex(input.clone(), purge);
++            assert_eq!(active, 3);
++            let spans: Vec<_> = result
++                .iter()
++                .map(|h| {
++                    assert_eq!(h.internal_q_offset_0, h.internal_s_offset_0);
++                    assert_eq!(h.internal_q_end_0, h.internal_s_end_0);
++                    assert_eq!(
++                        h.gap_info,
++                        Some(vec![GapEditOp::Sub(
++                            (h.internal_q_end_0 - h.internal_q_offset_0) as u32
++                        )])
++                    );
++                    (h.internal_q_offset_0, h.internal_q_end_0)
++                })
++                .collect();
++            let mut expected = vec![(0, 10), (30, 50), (60, 70)];
++            if !purge {
++                expected.extend([(20, 30), (10, 20)]);
++            }
++            assert_eq!(spans, expected);
++        }
+     }
+ 
+     // Test-only post-sort injection seam for the NCBI first-survivor loop.

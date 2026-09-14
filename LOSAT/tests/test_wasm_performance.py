@@ -191,6 +191,11 @@ class GateTests(unittest.TestCase):
             "import pathlib,sys;pathlib.Path(sys.argv[-1]).write_bytes(b'');sys.exit(7)"
         )
         self.assertEqual(result["status"], "BAD_EXIT")
+        # NCBI reference: c++/src/algo/blast/api/prelim_stage.cpp:178-188
+        # (*thread)->Join(&result);
+        # Exact recorded endpoints cover the same process lifetime on failure.
+        self.assertGreater(result["monotonic_end"], result["monotonic_start"])
+        self.assertEqual(result["wall_seconds"], result["monotonic_end"] - result["monotonic_start"])
         self.assertEqual(
             perf.raw_gate(result, hashlib.sha256(b"").hexdigest()), "BAD_EXIT"
         )

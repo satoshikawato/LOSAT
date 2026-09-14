@@ -15,15 +15,18 @@ TESTS = ROOT / 'LOSAT/tests'
 # A threshold sweep compares full raw rows, never only the number of HSPs.
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    for name in ['native', 'serial', 'threaded', 'oracle', 'output-dir']:
+    for name in ['native', 'threaded', 'oracle', 'output-dir']:
         parser.add_argument('--'+name, type=Path, required=True)
+    # NCBI reference: c++/include/algo/blast/blastinput/blast_args.hpp:1290-1296
+    # m_NumThreads = CThreadable::kMinNumThreads; m_MTMode = eNotSupported;
+    parser.add_argument('--serial', type=Path, help='opt in to serial compatibility checks')
     parser.add_argument('--node', default='node')
     args = parser.parse_args(); out = args.output_dir.resolve(); out.mkdir(parents=True, exist_ok=True)
     fixtures = out/'fixtures'; fixtures.mkdir(exist_ok=True)
     for name in ['LC738874.fasta', 'LC738875.fasta']:
         (fixtures/name).write_bytes((TESTS/'fasta'/name).read_bytes())
     metadata = dict(head=subprocess.check_output(['git','rev-parse','HEAD'],cwd=ROOT,text=True).strip(),
-        artifacts={name:{'path':str(getattr(args,name).resolve()),'sha256':digest(getattr(args,name))} for name in ['native','serial','threaded','oracle']},
+        artifacts={name:{'path':str(getattr(args,name).resolve()),'sha256':digest(getattr(args,name))} for name in ['native','serial','threaded','oracle'] if getattr(args,name)},
         fixtures={p.name:digest(p) for p in fixtures.iterdir()},
         node=subprocess.check_output([args.node,'-p','JSON.stringify(process.versions)'],text=True),
         runners={p.name:digest(p) for p in TESTS.glob('*.js')})
@@ -31,16 +34,22 @@ def main():
     env = {k:v for k,v in os.environ.items() if not k.startswith(('LOSAT_','RAYON_')) and k!='BL2SEQ_LEGACY'}
     env.update(LC_ALL='C',NODE_NO_WARNINGS='1')
     records=[]
+    # NCBI reference: c++/src/algo/blast/api/prelim_stage.cpp:173-180
+    # (*thread)->Run(); (*thread)->Join(&result);
+    prefixes = [
+        ('native',1,[str(args.native.resolve())]),
+        ('threaded',4,[args.node,str(TESTS/'run_losat_wasi_threads.js'),str(args.threaded.resolve())]),
+    ]
+    if args.serial:
+        prefixes.append(('serial',1,[args.node,str(TESTS/'run_losat_wasi.js'),str(args.serial.resolve())]))
     for threshold in [10,100,10000]:
         common=['-query',str(fixtures/'LC738874.fasta'),'-subject',str(fixtures/'LC738875.fasta'),'-outfmt','6','-evalue',str(threshold),'-out','{output}']
         oracle=execute([str(args.oracle.resolve()),*common,'-num_threads','1'],ROOT,out/f'e{threshold}'/'oracle',env,900)
         assert oracle['status']=='PASS'
         records.append({**oracle,'evalue':threshold,'kind':'oracle'})
-        for kind,n,prefix in [
-            ('native',1,[str(args.native.resolve())]),
-            ('serial',1,[args.node,str(TESTS/'run_losat_wasi.js'),str(args.serial.resolve())]),
-            ('threaded',4,[args.node,str(TESTS/'run_losat_wasi_threads.js'),str(args.threaded.resolve())]),
-        ]:
+        # NCBI reference: c++/src/algo/blast/core/blast_hits.c:1984-2003
+        # if (hsp->evalue > cutoff) { hsp_array[index] = Blast_HSPFree(hsp_array[index]); }
+        for kind,n,prefix in prefixes:
             directory=out/f'e{threshold}'/kind
             result=execute([*prefix,'tblastx',*common,'-num_threads',str(n)],ROOT,directory,{**env,'LOSAT_WASI_THREADS_DEBUG':'1'},900)
             result.update(evalue=threshold,kind=kind,threads=n,expected_sha256=oracle['raw_output_sha256'])

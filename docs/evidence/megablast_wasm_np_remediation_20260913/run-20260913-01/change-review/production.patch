@@ -1,0 +1,636 @@
+--- initial/LOSAT/.cargo/config.toml
++++ current/LOSAT/.cargo/config.toml
+@@ -12,7 +12,10 @@
+ target-dir = "target"
+ 
+ [alias]
+-build-web = "build --release --lib --target wasm32-wasip1 --no-default-features --target-dir target/serial-reactor"
++# NCBI reference: c++/src/algo/blast/api/prelim_stage.cpp:173-180
++# (*thread)->Run(); (*thread)->Join(&result);
++build-web = "build --release --lib --target wasm32-wasip1-threads --features wasm-threads --target-dir target/threaded-reactor"
++build-web-serial = "build --release --lib --target wasm32-wasip1 --no-default-features --target-dir target/serial-reactor"
+ build-web-unknown = "build --release --lib --target wasm32-unknown-unknown --no-default-features"
+ # NCBI reference: ncbi-blast/c++/src/algo/blast/blastinput/blast_args.cpp:3205-3222
+ # ```c
+@@ -28,7 +31,10 @@
+ # Command and reactor link different CRT entry points and use separate outputs.
+ build-web-threaded = "build --release --bin LOSAT --target wasm32-wasip1-threads --features wasm-threads --target-dir target/threaded-command"
+ build-web-threaded-reactor = "build --release --lib --target wasm32-wasip1-threads --features wasm-threads --target-dir target/threaded-reactor"
+-build-wasi-command = "build --release --bin LOSAT --target wasm32-wasip1 --no-default-features --target-dir target/serial-command"
++# NCBI reference: c++/src/algo/blast/api/prelim_stage.cpp:173-180
++# (*thread)->Run(); (*thread)->Join(&result);
++build-wasi-command = "build --release --bin LOSAT --target wasm32-wasip1-threads --features wasm-threads --target-dir target/threaded-command"
++build-wasi-command-serial = "build --release --bin LOSAT --target wasm32-wasip1 --no-default-features --target-dir target/serial-command"
+ 
+ # The Rust code only enters its wasm SIMD routines behind
+ # `cfg(all(target_arch = "wasm32", target_feature = "simd128"))`; this enables
+@@ -41,3 +47,12 @@
+ 
+ [target.wasm32-unknown-unknown]
+ rustflags = ["-C", "target-feature=+simd128"]
++
++# NCBI reference: c++/src/algo/blast/core/link_hsps.c:827-861
++# for (H2_index=H_index-1; H2_index>1;) { ... }
++# Align native x86_64 loop heads so unrelated function-size changes do not
++# displace the repeated helper scan from its measured fast alignment. This
++# changes instruction padding, preserving the same search operations/order.
++# Explicit target scope keeps command/reactor Wasm code generation unchanged.
++[target.'cfg(target_arch = "x86_64")']
++rustflags = ["-C", "llvm-args=-align-loops=64", "-C", "llvm-args=-max-bytes-for-alignment=63"]
+--- initial/LOSAT/Cargo.toml
++++ current/LOSAT/Cargo.toml
+@@ -68,9 +68,9 @@
+ # }
+ # ```
+ #
+-# Opt-in only: real Wasm threading requires the wasm32-wasip1-threads target
+-# and a WASI runtime that implements thread spawning. Plain wasm32-wasip1 and
+-# browser command-Wasm builds remain serial.
++# Standard WASI aliases and packaging select this feature together with the
++# wasm32-wasip1-threads target and a runtime that implements thread spawning.
++# Explicit wasm32-wasip1 and wasm32-unknown-unknown builds remain serial.
+ wasm-threads = ["parallel"]
+ # Diagnostic-only parity switch. NCBI BLAST has a single scalar C control flow
+ # for TBLASTX ungapped extension/reevaluation (aa_ungapped.c:846-921,
+--- initial/LOSAT/src/algorithm/blastn/blast_engine/run.rs
++++ current/LOSAT/src/algorithm/blastn/blast_engine/run.rs
+@@ -5254,9 +5254,22 @@
+     //     (Int4)(sbp->scale_factor *
+     //            ceil(word_options->x_dropoff * NCBIMATH_LN2 / kbp->Lambda));
+     // ```
+-    let x_dropoff_init = ((super::super::constants::X_DROP_UNGAPPED as f64 * NCBIMATH_LN2)
+-        / params_ungapped_for_closure.lambda)
+-        .ceil() as i32;
++    // NCBI reference: c++/src/algo/blast/api/blast_options_local_priv.cpp:49-54
++    // m_InitWordOpts.Reset((BlastInitialWordOptions*)calloc(1, sizeof(BlastInitialWordOptions)));
++    // NCBI reference: c++/src/algo/blast/api/blast_nucl_options.cpp:163-174
++    // SetInitialWordOptionsDefaults() { SetXDropoff(BLAST_UNGAPPED_X_DROPOFF_NUCL); ... }
++    // SetMBInitialWordOptionsDefaults() { SetWindowSize(BLAST_WINDOW_SIZE_NUCL); }
++    // NCBI reference: c++/src/algo/blast/api/disc_nucl_options.cpp:66-73
++    // SetMBInitialWordOptionsDefaults() { SetXDropoff(BLAST_UNGAPPED_X_DROPOFF_NUCL); ... }
++    // Traditional megablast retains the zero-initialized X-drop option. Its
++    // raw X-drop is the subject's word cutoff in ParametersUpdate below.
++    let x_dropoff_init = if args.task == "megablast" {
++        0
++    } else {
++        ((super::super::constants::X_DROP_UNGAPPED as f64 * NCBIMATH_LN2)
++            / params_ungapped_for_closure.lambda)
++            .ceil() as i32
++    };
+ 
+     // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_engine.c:478-536
+     // ```c
+--- initial/LOSAT/src/algorithm/blastn/constants.rs
++++ current/LOSAT/src/algorithm/blastn/constants.rs
+@@ -1,6 +1,10 @@
+ // NCBI BLAST compatible X-drop parameters
+ // Reference: ncbi-blast/c++/include/algo/blast/core/blast_options.h:122-148
+-pub const X_DROP_UNGAPPED: i32 = 20; // BLAST_UNGAPPED_X_DROPOFF_NUCL (blastn, megablast 共通)
++// NCBI reference: c++/src/algo/blast/api/blast_nucl_options.cpp:163-174;
++// c++/src/algo/blast/api/disc_nucl_options.cpp:66-73
++// SetXDropoff(BLAST_UNGAPPED_X_DROPOFF_NUCL); // blastn / dc-megablast
++// Traditional megablast leaves this option zero and uses the word cutoff.
++pub const X_DROP_UNGAPPED: i32 = 20;
+ pub const X_DROP_GAPPED_NUCL: i32 = 30; // BLAST_GAP_X_DROPOFF_NUCL (blastn, non-greedy)
+ pub const X_DROP_GAPPED_GREEDY: i32 = 25; // BLAST_GAP_X_DROPOFF_GREEDY (megablast, greedy)
+ pub const X_DROP_GAPPED_FINAL: i32 = 100; // BLAST_GAP_X_DROPOFF_FINAL_NUCL for final traceback (共通)
+--- initial/LOSAT/src/algorithm/blastn/filtering/purge_endpoints.rs
++++ current/LOSAT/src/algorithm/blastn/filtering/purge_endpoints.rs
+@@ -14,11 +14,14 @@
+ //!
+ //! Reference: blast_traceback.c:637-669
+ 
+-use super::super::hsp::{qsort_blastn_hsps_by, BlastnHsp};
++use super::super::hsp::BlastnHsp;
++// NCBI reference: c++/include/algo/blast/core/blast_hits.h:153-166
++// BlastHSP** hsp_array;
+ use super::super::tracing as blastn_trace;
+ use crate::common::GapEditOp;
+ use rustc_hash::FxHashMap;
+ use std::cmp::Ordering;
++use std::num::NonZeroUsize;
+ 
+ // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_hits.c:1122-1132
+ // ```c
+--- initial/LOSAT/src/algorithm/blastn/filtering/purge_endpoints.rs
++++ current/LOSAT/src/algorithm/blastn/filtering/purge_endpoints.rs
+@@ -499,6 +502,22 @@
+     result
+ }
+ 
++// NCBI reference: c++/include/algo/blast/core/blast_hits.h:153-166
++// BlastHSP** hsp_array;
++// A nonzero slot+1 is the Rust equivalent of a nullable HSP pointer.
++type HspHandle = Option<NonZeroUsize>;
++
++// NCBI reference: c++/src/algo/blast/core/blast_hits.c:2482-2487
++// hsp_array[i] && hsp_array[i+j] && hsp_array[i]->context == hsp_array[i+j]->context
++#[inline]
++fn hsp_for_handle(hsp_storage: &[Option<BlastnHsp>], handle: HspHandle) -> Option<&BlastnHsp> {
++    handle.map(|index| {
++        hsp_storage[index.get() - 1]
++            .as_ref()
++            .expect("live HSP handle must reference a populated arena slot")
++    })
++}
++
+ /// Purge HSPs with common endpoints for a single subject.
+ ///
+ /// NCBI reference: blast_hits.c:2455-2535
+--- initial/LOSAT/src/algorithm/blastn/filtering/purge_endpoints.rs
++++ current/LOSAT/src/algorithm/blastn/filtering/purge_endpoints.rs
+@@ -516,7 +535,14 @@
+     }
+ 
+     let initial_count = len;
+-    let mut hsp_array: Vec<Option<BlastnHsp>> = hits.into_iter().map(Some).collect();
++    // NCBI reference: c++/src/algo/blast/core/blast_hits.c:2471-2478
++    // hsp_array = hsp_list->hsp_array;
++    // qsort(hsp_array, hsp_count, sizeof(BlastHSP*), s_QueryOffsetCompareHSPs);
++    // Keep HSP payloads in fixed slots while sorting/shifting nullable handles.
++    // This arena never grows or reorders; only final materialization moves live HSPs.
++    let mut hsp_storage: Vec<Option<BlastnHsp>> = hits.into_iter().map(Some).collect();
++    let mut hsp_array: Vec<HspHandle> =
++        (0..len).map(|index| NonZeroUsize::new(index + 1)).collect();
+     let mut hsp_count = initial_count;
+     let mut start_removed = 0usize;
+     let mut end_removed = 0usize;
+--- initial/LOSAT/src/algorithm/blastn/filtering/purge_endpoints.rs
++++ current/LOSAT/src/algorithm/blastn/filtering/purge_endpoints.rs
+@@ -531,6 +557,7 @@
+     // qsort(hsp_array, hsp_count, sizeof(BlastHSP*), s_QueryOffsetCompareHSPs);
+     // ```
+     qsort_hsp_array_prefix_by(
++        &hsp_storage,
+         &mut hsp_array,
+         hsp_count,
+         compare_query_offset_hsps_for_common_endpoint,
+--- initial/LOSAT/src/algorithm/blastn/filtering/purge_endpoints.rs
++++ current/LOSAT/src/algorithm/blastn/filtering/purge_endpoints.rs
+@@ -561,10 +588,9 @@
+     let mut i = 0usize;
+     while i < hsp_count {
+         let j = 1usize;
+-        while i + j < hsp_count && same_common_start(&hsp_array, i, i + j) {
++        while i + j < hsp_count && same_common_start(&hsp_storage, &hsp_array, i, i + j) {
+             let (keeper_q_end, keeper_s_end) = {
+-                let keeper = hsp_array[i]
+-                    .as_ref()
++                let keeper = hsp_for_handle(&hsp_storage, hsp_array[i])
+                     .expect("same_common_start requires a keeper HSP");
+                 (keeper.internal_q_end_0, keeper.internal_s_end_0)
+             };
+--- initial/LOSAT/src/algorithm/blastn/filtering/purge_endpoints.rs
++++ current/LOSAT/src/algorithm/blastn/filtering/purge_endpoints.rs
+@@ -572,23 +598,30 @@
+             let removed = hsp_array[i + j].take();
+             let mut tail_hsp = None;
+ 
+-            if let Some(mut removed_hit) = removed {
+-                let keeper = hsp_array[i]
+-                    .as_ref()
+-                    .expect("same_common_start requires a keeper HSP");
++            if let Some(handle) = removed {
++                let removed_hit = hsp_for_handle(&hsp_storage, Some(handle))
++                    .expect("removed handle requires a live HSP");
++                let keeper = hsp_for_handle(&hsp_storage, hsp_array[i])
++                    .expect("common endpoint requires a keeper HSP");
+                 if !purge && removed_hit.internal_q_end_0 > keeper_q_end {
+                     trace_common_endpoint_purge_decision(
+                         "common_start",
+                         "trim_begin",
+                         purge,
+                         keeper,
+-                        &removed_hit,
++                        removed_hit,
+                         keeper_q_end,
+                         keeper_s_end,
+                     );
+-                    let _ =
+-                        cut_off_gap_edit_script(&mut removed_hit, keeper_q_end, keeper_s_end, true);
+-                    tail_hsp = Some(removed_hit);
++                    // NCBI reference: c++/src/algo/blast/core/blast_hits.c:2490-2492,2516-2518
++                    // s_CutOffGapEditScript(hsp, hsp_array[i]->query.end,
++                    //                      hsp_array[i]->subject.end, TRUE);
++                    // End immutable keeper/removed borrows before editing this one slot.
++                    let removed_hit = hsp_storage[handle.get() - 1]
++                        .as_mut()
++                        .expect("trimmed handle requires a live HSP");
++                    let _ = cut_off_gap_edit_script(removed_hit, keeper_q_end, keeper_s_end, true);
++                    tail_hsp = Some(handle);
+                     start_trimmed += 1;
+                 } else {
+                     trace_common_endpoint_purge_decision(
+--- initial/LOSAT/src/algorithm/blastn/filtering/purge_endpoints.rs
++++ current/LOSAT/src/algorithm/blastn/filtering/purge_endpoints.rs
+@@ -596,17 +629,26 @@
+                         "delete",
+                         purge,
+                         keeper,
+-                        &removed_hit,
++                        removed_hit,
+                         keeper_q_end,
+                         keeper_s_end,
+                     );
++                    // NCBI reference: c++/src/algo/blast/core/blast_hits.c:2494,2520
++                    // hsp = Blast_HSPFree(hsp);
++                    // Release owned script storage now, before shifting handles.
++                    drop(
++                        hsp_storage[handle.get() - 1]
++                            .take()
++                            .expect("deleted handle requires a live HSP"),
++                    );
+                 }
+                 start_removed += 1;
+             }
+ 
+-            for k in (i + j)..hsp_count {
+-                hsp_array[k] = hsp_array[k + 1].take();
+-            }
++            // NCBI reference: c++/src/algo/blast/core/blast_hits.c:2496-2499,2522-2525
++            // for (k=i+j; k<hsp_count; k++) hsp_array[k] = hsp_array[k+1];
++            // Move the same pointer-sized handles, including an empty last-slot range.
++            hsp_array.copy_within(i + j + 1..hsp_count + 1, i + j);
+             hsp_array[hsp_count] = tail_hsp;
+         }
+         i += j;
+--- initial/LOSAT/src/algorithm/blastn/filtering/purge_endpoints.rs
++++ current/LOSAT/src/algorithm/blastn/filtering/purge_endpoints.rs
+@@ -619,6 +661,7 @@
+     // qsort(hsp_array, hsp_count, sizeof(BlastHSP*), s_QueryEndCompareHSPs);
+     // ```
+     qsort_hsp_array_prefix_by(
++        &hsp_storage,
+         &mut hsp_array,
+         hsp_count,
+         compare_query_end_hsps_for_common_endpoint,
+--- initial/LOSAT/src/algorithm/blastn/filtering/purge_endpoints.rs
++++ current/LOSAT/src/algorithm/blastn/filtering/purge_endpoints.rs
+@@ -648,10 +691,9 @@
+     let mut i = 0usize;
+     while i < hsp_count {
+         let j = 1usize;
+-        while i + j < hsp_count && same_common_end(&hsp_array, i, i + j) {
++        while i + j < hsp_count && same_common_end(&hsp_storage, &hsp_array, i, i + j) {
+             let (keeper_q_offset, keeper_s_offset) = {
+-                let keeper = hsp_array[i]
+-                    .as_ref()
++                let keeper = hsp_for_handle(&hsp_storage, hsp_array[i])
+                     .expect("same_common_end requires a keeper HSP");
+                 (keeper.internal_q_offset_0, keeper.internal_s_offset_0)
+             };
+--- initial/LOSAT/src/algorithm/blastn/filtering/purge_endpoints.rs
++++ current/LOSAT/src/algorithm/blastn/filtering/purge_endpoints.rs
+@@ -659,27 +701,35 @@
+             let removed = hsp_array[i + j].take();
+             let mut tail_hsp = None;
+ 
+-            if let Some(mut removed_hit) = removed {
+-                let keeper = hsp_array[i]
+-                    .as_ref()
+-                    .expect("same_common_end requires a keeper HSP");
++            if let Some(handle) = removed {
++                let removed_hit = hsp_for_handle(&hsp_storage, Some(handle))
++                    .expect("removed handle requires a live HSP");
++                let keeper = hsp_for_handle(&hsp_storage, hsp_array[i])
++                    .expect("common endpoint requires a keeper HSP");
+                 if !purge && removed_hit.internal_q_offset_0 < keeper_q_offset {
+                     trace_common_endpoint_purge_decision(
+                         "common_end",
+                         "trim_end",
+                         purge,
+                         keeper,
+-                        &removed_hit,
++                        removed_hit,
+                         keeper_q_offset,
+                         keeper_s_offset,
+                     );
++                    // NCBI reference: c++/src/algo/blast/core/blast_hits.c:2490-2492,2516-2518
++                    // s_CutOffGapEditScript(hsp, hsp_array[i]->query.offset,
++                    //                      hsp_array[i]->subject.offset, FALSE);
++                    // End immutable keeper/removed borrows before editing this one slot.
++                    let removed_hit = hsp_storage[handle.get() - 1]
++                        .as_mut()
++                        .expect("trimmed handle requires a live HSP");
+                     let _ = cut_off_gap_edit_script(
+-                        &mut removed_hit,
++                        removed_hit,
+                         keeper_q_offset,
+                         keeper_s_offset,
+                         false,
+                     );
+-                    tail_hsp = Some(removed_hit);
++                    tail_hsp = Some(handle);
+                     end_trimmed += 1;
+                 } else {
+                     trace_common_endpoint_purge_decision(
+--- initial/LOSAT/src/algorithm/blastn/filtering/purge_endpoints.rs
++++ current/LOSAT/src/algorithm/blastn/filtering/purge_endpoints.rs
+@@ -687,17 +737,26 @@
+                         "delete",
+                         purge,
+                         keeper,
+-                        &removed_hit,
++                        removed_hit,
+                         keeper_q_offset,
+                         keeper_s_offset,
+                     );
++                    // NCBI reference: c++/src/algo/blast/core/blast_hits.c:2494,2520
++                    // hsp = Blast_HSPFree(hsp);
++                    // Release owned script storage now, before shifting handles.
++                    drop(
++                        hsp_storage[handle.get() - 1]
++                            .take()
++                            .expect("deleted handle requires a live HSP"),
++                    );
+                 }
+                 end_removed += 1;
+             }
+ 
+-            for k in (i + j)..hsp_count {
+-                hsp_array[k] = hsp_array[k + 1].take();
+-            }
++            // NCBI reference: c++/src/algo/blast/core/blast_hits.c:2496-2499,2522-2525
++            // for (k=i+j; k<hsp_count; k++) hsp_array[k] = hsp_array[k+1];
++            // Move the same pointer-sized handles, including an empty last-slot range.
++            hsp_array.copy_within(i + j + 1..hsp_count + 1, i + j);
+             hsp_array[hsp_count] = tail_hsp;
+         }
+         i += j;
+--- initial/LOSAT/src/algorithm/blastn/filtering/purge_endpoints.rs
++++ current/LOSAT/src/algorithm/blastn/filtering/purge_endpoints.rs
+@@ -717,8 +776,15 @@
+     let extra_start = hsp_count;
+     let mut hits = Vec::with_capacity(initial_count);
+     for slot in hsp_array {
+-        if let Some(hit) = slot {
+-            hits.push(hit);
++        if let Some(handle) = slot {
++            // NCBI reference: c++/src/algo/blast/core/blast_hits.c:2530-2535
++            // Blast_HSPListPurgeNullHSPs(hsp_list); return hsp_count;
++            // Materialize the live handle order once; missing/duplicate slots are errors.
++            hits.push(
++                hsp_storage[handle.get() - 1]
++                    .take()
++                    .expect("live output handle requires a unique HSP"),
++            );
+         }
+     }
+ 
+--- initial/LOSAT/src/algorithm/blastn/filtering/purge_endpoints.rs
++++ current/LOSAT/src/algorithm/blastn/filtering/purge_endpoints.rs
+@@ -751,34 +817,27 @@
+ // prefix normally contains only real HSPs, but preserve the NULL ordering when
+ // mirroring Blast_HSPListPurgeHSPsWithCommonEndpoints exactly.
+ fn qsort_hsp_array_prefix_by(
+-    hsp_array: &mut [Option<BlastnHsp>],
++    hsp_storage: &[Option<BlastnHsp>],
++    hsp_array: &mut [HspHandle],
+     hsp_count: usize,
+     compare: fn(&BlastnHsp, &BlastnHsp) -> Ordering,
+ ) {
+-    if hsp_count <= 1 {
+-        return;
+-    }
+     let prefix_len = hsp_count.min(hsp_array.len());
+-    let mut active = Vec::with_capacity(prefix_len);
+-    let mut null_count = 0usize;
+-    for slot in &mut hsp_array[..prefix_len] {
+-        if let Some(hit) = slot.take() {
+-            active.push(hit);
+-        } else {
+-            null_count += 1;
+-        }
+-    }
+-
+-    qsort_blastn_hsps_by(&mut active, compare);
+-
+-    let mut index = 0usize;
+-    for hit in active {
+-        hsp_array[index] = Some(hit);
+-        index += 1;
+-    }
+-    for slot in &mut hsp_array[index..index + null_count] {
+-        *slot = None;
+-    }
++    // NCBI reference: c++/src/algo/blast/core/blast_hits.c:2478,2504,2268-2387
++    // qsort(hsp_array, hsp_count, sizeof(BlastHSP*), s_QueryOffsetCompareHSPs);
++    // if (!h1 && !h2) return 0; else if (!h1) return 1; else if (!h2) return -1;
++    // Retain the existing Rust stable tie order, without adding an index tie-break.
++    hsp_array[..prefix_len].sort_by(|&lhs, &rhs| {
++        match (
++            hsp_for_handle(hsp_storage, lhs),
++            hsp_for_handle(hsp_storage, rhs),
++        ) {
++            (Some(a), Some(b)) => compare(a, b),
++            (Some(_), None) => Ordering::Less,
++            (None, Some(_)) => Ordering::Greater,
++            (None, None) => Ordering::Equal,
++        }
++    });
+ }
+ 
+ // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_hits.c:2482-2487
+--- initial/LOSAT/src/algorithm/blastn/filtering/purge_endpoints.rs
++++ current/LOSAT/src/algorithm/blastn/filtering/purge_endpoints.rs
+@@ -789,10 +848,19 @@
+ // hsp_array[i]->subject.offset == hsp_array[i+j]->subject.offset &&
+ // hsp_array[i]->subject.frame == hsp_array[i+j]->subject.frame
+ // ```
+-fn same_common_start(hsp_array: &[Option<BlastnHsp>], lhs: usize, rhs: usize) -> bool {
++fn same_common_start(
++    hsp_storage: &[Option<BlastnHsp>],
++    hsp_array: &[HspHandle],
++    lhs: usize,
++    rhs: usize,
++) -> bool {
+     let (Some(a), Some(b)) = (
+-        hsp_array.get(lhs).and_then(Option::as_ref),
+-        hsp_array.get(rhs).and_then(Option::as_ref),
++        hsp_array
++            .get(lhs)
++            .and_then(|&handle| hsp_for_handle(hsp_storage, handle)),
++        hsp_array
++            .get(rhs)
++            .and_then(|&handle| hsp_for_handle(hsp_storage, handle)),
+     ) else {
+         return false;
+     };
+--- initial/LOSAT/src/algorithm/blastn/filtering/purge_endpoints.rs
++++ current/LOSAT/src/algorithm/blastn/filtering/purge_endpoints.rs
+@@ -809,10 +877,19 @@
+ // hsp_array[i]->subject.end == hsp_array[i+j]->subject.end &&
+ // hsp_array[i]->subject.frame == hsp_array[i+j]->subject.frame
+ // ```
+-fn same_common_end(hsp_array: &[Option<BlastnHsp>], lhs: usize, rhs: usize) -> bool {
++fn same_common_end(
++    hsp_storage: &[Option<BlastnHsp>],
++    hsp_array: &[HspHandle],
++    lhs: usize,
++    rhs: usize,
++) -> bool {
+     let (Some(a), Some(b)) = (
+-        hsp_array.get(lhs).and_then(Option::as_ref),
+-        hsp_array.get(rhs).and_then(Option::as_ref),
++        hsp_array
++            .get(lhs)
++            .and_then(|&handle| hsp_for_handle(hsp_storage, handle)),
++        hsp_array
++            .get(rhs)
++            .and_then(|&handle| hsp_for_handle(hsp_storage, handle)),
+     ) else {
+         return false;
+     };
+--- initial/LOSAT/src/algorithm/blastp/gapalign.rs
++++ current/LOSAT/src/algorithm/blastp/gapalign.rs
+@@ -1812,7 +1812,18 @@
+         // The slice borrow ends after this ascending scan, before DP reserve.
+         let band_start = first_b_index;
+         let dp_band = &mut scratch.dp_mem[band_start..b_size];
+-        for (band_index, cell) in dp_band.iter_mut().enumerate() {
++        // NCBI reference: c++/src/algo/blast/core/blast_gapalign.c:513-518,531-540
++        // state_struct = s_GapGetState(&gap_align->state_struct,
++        //                b_size - first_b_index + num_extra_cells);
++        // edit_script_row = edit_script[a_index] - first_b_index;
++        // The allocator has cleared this row. Reserve the actual main band
++        // before borrowing spare capacity; reserve is relative to Vec length.
++        debug_assert!(edit_script_row.is_empty());
++        edit_script_row.reserve(dp_band.len());
++        let trace_band = &mut edit_script_row.spare_capacity_mut()[..dp_band.len()];
++        for (band_index, (cell, trace_cell)) in
++            dp_band.iter_mut().zip(trace_band.iter_mut()).enumerate()
++        {
+             let b_index = band_start + band_index;
+             let sc = if b_index < len2 {
+                 blastp_subject_residue::<REVERSE>(s_seq, 0, len2, b_index)
+--- initial/LOSAT/src/algorithm/blastp/gapalign.rs
++++ current/LOSAT/src/algorithm/blastp/gapalign.rs
+@@ -1882,9 +1893,21 @@
+             }
+ 
+             score_val = next_score;
+-            let row_idx = b_index.saturating_sub(orig_b_index);
+-            gap_trace_row_write(edit_script_row, row_idx, script);
+-        }
++            // NCBI reference: c++/src/algo/blast/core/blast_gapalign.c:634-635
++            // score = next_score; edit_script_row[b_index] = script;
++            trace_cell.write(script);
++        }
++
++        // NCBI reference: c++/src/algo/blast/core/blast_gapalign.c:563-575,634-639
++        // for (b_index = first_b_index; b_index < b_size; b_index++) {
++        //     if (matrix_index == FENCE_SENTRY) { ... break; }
++        //     ... edit_script_row[b_index] = script;
++        // }
++        // SAFETY: the row began empty and capacity covers the captured band.
++        // Every visited non-fence cell, including X-drop failures, wrote one
++        // byte. The only early break sets row_end_b_index before that write.
++        // Thus exactly this prefix is initialized; the spare borrow has ended.
++        unsafe { edit_script_row.set_len(row_end_b_index - band_start) };
+ 
+         // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_gapalign.c:638-639
+         // ```c
+--- initial/LOSAT/src/algorithm/blastp/gapalign.rs
++++ current/LOSAT/src/algorithm/blastp/gapalign.rs
+@@ -1917,7 +1940,7 @@
+             }
+         }
+ 
+-        // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_gapalign.c:658-665
++        // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_gapalign.c:666-669
+         // ```c
+         // /* update the memory allocator to reflect the exact number
+         //    of traceback cells this row needed */
+--- initial/LOSAT/src/algorithm/tblastx/sum_stats_linking/linking.rs
++++ current/LOSAT/src/algorithm/tblastx/sum_stats_linking/linking.rs
+@@ -267,6 +267,30 @@
+     // comparator-equal rows to the platform qsort implementation. Do not add
+     // frame or LOSAT insertion-order tie-breakers here.
+     sort_ungapped_hits_by_index_replay(hits, compare);
++}
++
++// NCBI reference: c++/src/algo/blast/core/link_hsps.c:990-994
++// qsort(link_hsp_array,total_number_of_hsps,sizeof(LinkHSPStruct*),
++//       s_RevCompareHSPsTransl);
++// qsort(link_hsp_array,total_number_of_hsps,sizeof(LinkHSPStruct*),
++//       s_FwdCompareHSPsTransl);
++// Keep the completed groups' payloads stationary during both final sorts.
++#[inline]
++fn sort_linked_hsp_references(
++    hits: &mut [&mut UngappedHit],
++    compare: fn(&UngappedHit, &UngappedHit) -> Ordering,
++) {
++    // NCBI reference: /mnt/c/Users/genom/GitHub/ncbi-blast/c++/src/algo/blast/core/link_hsps.c:483-486
++    // ```c
++    // qsort(link_hsp_array,total_number_of_hsps,sizeof(LinkHSPStruct*),
++    //       s_RevCompareHSPsTbx);
++    // ```
++    // NCBI's translated-query comparators are partial and NCBI delegates
++    // comparator-equal rows to the platform qsort implementation. Do not add
++    // frame or LOSAT insertion-order tie-breakers here.
++    // Keep every payload in the caller's fixed Vec. Stable ordering retains
++    // the same comparator-equal order as the previous index-replay sort.
++    hits.sort_by(|lhs, rhs| compare(lhs, rhs));
+ }
+ 
+ // ---------------------------------------------------------------------------
+--- initial/LOSAT/src/algorithm/tblastx/sum_stats_linking/linking.rs
++++ current/LOSAT/src/algorithm/tblastx/sum_stats_linking/linking.rs
+@@ -771,10 +795,20 @@
+     //    qsort(link_hsp_array, total_number_of_hsps,sizeof(LinkHSPStruct*),
+     //          s_FwdCompareHSPsTransl);
+     // ```
+-    sort_hsps_by_ncbi_link_order(&mut results, rev_compare_hsps_transl);
+-    sort_hsps_by_ncbi_link_order(&mut results, fwd_compare_hsps_transl);
+-
+-    replay_ncbi_output_list(results)
++    // NCBI reference: c++/src/algo/blast/core/link_hsps.c:990-994,1080-1085
++    // qsort(link_hsp_array,total_number_of_hsps,sizeof(LinkHSPStruct*), ...);
++    // hsp_list->hsp_array[index] = H->hsp;
++    // Preserve the existing empty/singleton replay shortcut. The owned group
++    // kernel and its contiguous payload layout are unchanged; only these
++    // adjacent final sorts and replay borrow stationary result records.
++    if results.len() <= 1 {
++        return results;
++    }
++    let mut references: Vec<&mut UngappedHit> = results.iter_mut().collect();
++    sort_linked_hsp_references(&mut references, rev_compare_hsps_transl);
++    sort_linked_hsp_references(&mut references, fwd_compare_hsps_transl);
++
++    replay_ncbi_output_list(references)
+ }
+ 
+ // NCBI reference: /mnt/c/Users/genom/GitHub/ncbi-blast/c++/src/algo/blast/core/link_hsps.c:1012-1028
+--- initial/LOSAT/src/algorithm/tblastx/sum_stats_linking/linking.rs
++++ current/LOSAT/src/algorithm/tblastx/sum_stats_linking/linking.rs
+@@ -802,9 +836,13 @@
+ //    if (H != NULL)
+ //       link = H->hsp_link.link[ordering_method];
+ // ```
+-fn replay_ncbi_output_list(sorted_hits: Vec<UngappedHit>) -> Vec<UngappedHit> {
++fn replay_ncbi_output_list(sorted_hits: Vec<&mut UngappedHit>) -> Vec<UngappedHit> {
+     if sorted_hits.len() <= 1 {
+-        return sorted_hits;
++        // NCBI reference: c++/src/algo/blast/core/link_hsps.c:1080-1085
++        // hsp_list->hsp_array[index] = H->hsp;
++        // Retain the existing singleton path, including a non-head singleton.
++        // Materialize once at this Rust ownership boundary.
++        return sorted_hits.into_iter().map(|hit| hit.clone()).collect();
+     }
+ 
+     let max_link_id = sorted_hits.iter().map(|h| h.link_id).max().unwrap_or(0);
+--- initial/LOSAT/src/algorithm/tblastx/sum_stats_linking/linking.rs
++++ current/LOSAT/src/algorithm/tblastx/sum_stats_linking/linking.rs
+@@ -846,7 +884,11 @@
+ 
+     replayed_indices
+         .into_iter()
+-        .map(|index| sorted_hits[index].clone())
++        // NCBI reference: c++/src/algo/blast/core/link_hsps.c:1080-1085
++        // hsp_list->hsp_array[index] = H->hsp;
++        // Preserve the complete replay, including all chain members. Only
++        // this final boundary copies payloads back into an owned result Vec.
++        .map(|index| (*sorted_hits[index]).clone())
+         .collect()
+ }
+ 

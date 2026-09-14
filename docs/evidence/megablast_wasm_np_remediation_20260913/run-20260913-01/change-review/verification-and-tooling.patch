@@ -1,0 +1,875 @@
+--- initial/.github/workflows/wasm-threading.yml
++++ current/.github/workflows/wasm-threading.yml
+@@ -6,6 +6,19 @@
+       candidate_sha:
+         type: string
+         default: ''
++      include_serial_compatibility:
++        type: boolean
++        default: false
++  workflow_dispatch:
++    inputs:
++      candidate_sha:
++        description: Candidate commit (blank uses the selected branch)
++        type: string
++        default: ''
++      include_serial_compatibility:
++        description: Also build and verify serial compatibility artifacts
++        type: boolean
++        default: false
+ 
+ permissions:
+   contents: read
+@@ -14,6 +27,8 @@
+   integration:
+     runs-on: ubuntu-24.04
+     timeout-minutes: 360
++    env:
++      INCLUDE_SERIAL_COMPATIBILITY: ${{ inputs.include_serial_compatibility }}
+     steps:
+       - uses: actions/checkout@v4
+         with:
+@@ -21,14 +36,25 @@
+       - uses: dtolnay/rust-toolchain@stable
+         with:
+           toolchain: 1.92.0
+-          targets: wasm32-wasip1,wasm32-wasip1-threads
++          targets: wasm32-wasip1-threads
++      # NCBI reference: c++/include/algo/blast/blastinput/blast_args.hpp:1290-1296
++      # m_NumThreads = CThreadable::kMinNumThreads; m_MTMode = eNotSupported;
++      - name: Install optional serial compatibility target
++        if: ${{ inputs.include_serial_compatibility }}
++        run: rustup target add wasm32-wasip1
+       - uses: actions/setup-node@v4
+         with:
+           node-version: 24.21.0
++      - uses: actions/setup-python@v5
++        with:
++          python-version: '3.12'
++      - name: Install comparison test dependencies
++        run: python3 -m pip install matplotlib pandas 'seaborn>=0.12'
+       - name: Host and evidence parser tests
+         run: |
+           node --test LOSAT/tests/test_wasi_runners.js LOSAT/tests/test_wasi_shared_memory.js
+           python3 -m unittest discover -s LOSAT/tests -p test_wasm_performance.py
++          python3 -m unittest discover -s LOSAT/tests -p test_simple_comparison.py
+       # NCBI reference: c++/src/algo/blast/api/prelim_stage.cpp:145-188
+       # TBlastThreads the_threads(GetNumberOfThreads()); (*thread)->Run(); (*thread)->Join(&result);
+       # Commands and CRT-initialized reactors have distinct artifacts and gates.
+@@ -36,10 +62,14 @@
+         run: |
+           cd LOSAT
+           cargo build --release --locked --bin LOSAT
+-          cargo build --release --locked --bin LOSAT --no-default-features --target-dir target/native-serial
++          compat_args=()
++          if [[ "$INCLUDE_SERIAL_COMPATIBILITY" == true ]]; then
++            cargo build --release --locked --bin LOSAT --no-default-features --target-dir target/native-serial
++            compat_args=(--include-serial)
++          fi
+           cd ..
+-          python3 LOSAT/tests/build_wasi_artifacts.py --target-dir LOSAT/target --output-dir .tmp/threading/artifacts
+-          python3 LOSAT/tests/build_wasi_artifacts.py --target-dir LOSAT/target --output-dir .tmp/threading/reverse-artifacts --reverse-order
++          python3 LOSAT/tests/build_wasi_artifacts.py --target-dir LOSAT/target --output-dir .tmp/threading/artifacts "${compat_args[@]}"
++          python3 LOSAT/tests/build_wasi_artifacts.py --target-dir LOSAT/target --output-dir .tmp/threading/reverse-artifacts --reverse-order "${compat_args[@]}"
+       # NCBI is a comparison oracle only. Verify the frozen official executable
+       # identities before running searches; no production build invokes BLAST.
+       - name: Install fixed comparison oracle
+@@ -57,29 +87,38 @@
+           sha256sum --check executables.sha256
+       - name: Real command and reactor matrix
+         run: |
++          # NCBI reference: c++/src/algo/blast/api/prelim_stage.cpp:173-180
++          # (*thread)->Run(); (*thread)->Join(&result);
++          compat_args=()
++          if [[ "$INCLUDE_SERIAL_COMPATIBILITY" == true ]]; then
++            compat_args=(--native-serial LOSAT/target/native-serial/release/LOSAT
++              --serial .tmp/threading/artifacts/losat-serial-command.wasm
++              --serial-reactor .tmp/threading/artifacts/losat-serial-reactor.wasm)
++          fi
+           python3 LOSAT/tests/check_wasm_threading.py \
+             --native LOSAT/target/release/LOSAT \
+-            --native-serial LOSAT/target/native-serial/release/LOSAT \
+-            --serial .tmp/threading/artifacts/losat-serial-command.wasm \
+             --threaded .tmp/threading/artifacts/losat-threaded-command.wasm \
+             --reactor .tmp/threading/artifacts/losat-threaded-reactor.wasm \
+-            --serial-reactor .tmp/threading/artifacts/losat-serial-reactor.wasm \
+             --oracle-dir .tmp/threading/oracle/ncbi-blast-2.17.0+/bin \
+-            --output-dir .tmp/threading/gates
++            --output-dir .tmp/threading/gates "${compat_args[@]}"
+       - name: Frozen default and approved genetic-code regressions
+         run: |
++          # NCBI reference: c++/src/algo/blast/api/prelim_stage.cpp:173-180
++          # (*thread)->Run(); (*thread)->Join(&result);
++          compat_args=()
++          if [[ "$INCLUDE_SERIAL_COMPATIBILITY" == true ]]; then
++            compat_args=(--serial .tmp/threading/artifacts/losat-serial-command.wasm)
++          fi
+           python3 LOSAT/tests/check_wasm_threading_regressions.py \
+             --native LOSAT/target/release/LOSAT \
+-            --serial .tmp/threading/artifacts/losat-serial-command.wasm \
+             --threaded .tmp/threading/artifacts/losat-threaded-command.wasm \
+             --oracle-dir .tmp/threading/oracle/ncbi-blast-2.17.0+/bin \
+-            --jobs 3 --output-dir .tmp/threading/frozen-regressions
++            --jobs 3 --output-dir .tmp/threading/frozen-regressions "${compat_args[@]}"
+           python3 LOSAT/tests/check_tblastx_thread_thresholds.py \
+             --native LOSAT/target/release/LOSAT \
+-            --serial .tmp/threading/artifacts/losat-serial-command.wasm \
+             --threaded .tmp/threading/artifacts/losat-threaded-command.wasm \
+             --oracle .tmp/threading/oracle/ncbi-blast-2.17.0+/bin/tblastx \
+-            --output-dir .tmp/threading/threshold-regressions
++            --output-dir .tmp/threading/threshold-regressions "${compat_args[@]}"
+       - uses: actions/upload-artifact@v4
+         if: always()
+         with:
+--- initial/LOSAT/tests/benchmark_wasm_threading.py
++++ current/LOSAT/tests/benchmark_wasm_threading.py
+@@ -77,12 +77,20 @@
+     p = argparse.ArgumentParser(description=__doc__)
+     for name in ['candidate-dir', 'artifacts', 'baseline-dir', 'baseline-runners', 'oracle-dir', 'output-dir']:
+         p.add_argument('--' + name, type=Path, required=True)
++    # NCBI reference: c++/src/algo/blast/api/prelim_stage.cpp:171-188
++    # (*thread)->Run(); (*thread)->Join(&result);
++    # Cold timing includes host/worker loading; allow equal runner filesystem paths.
++    p.add_argument('--candidate-runners', type=Path, default=TESTS,
++                   help='candidate JS runner directory; use the same path as baseline when host code is unchanged')
+     p.add_argument('--node', default='node')
+     p.add_argument('--node-arg', action='append', default=[], help='repeat as --node-arg=--flag; applies to both versions')
+     p.add_argument('--candidate-node-arg', action='append', default=[], help='additional candidate-only Node flags (P1)')
+     p.add_argument('--case', action='append', help='exact losat_stem from comparison_cases.tsv; omit for threading fixtures')
+     p.add_argument('--threads', type=int, nargs='+', default=[1, 2, 4, 8])
+-    p.add_argument('--kinds', nargs='+', choices=['native', 'serial', 'threaded'], default=['native', 'serial', 'threaded'])
++    # NCBI reference: c++/src/algo/blast/api/prelim_stage.cpp:173-180
++    # (*thread)->Run(); (*thread)->Join(&result);
++    # Serial compatibility measurements require an explicit --kinds serial.
++    p.add_argument('--kinds', nargs='+', choices=['native', 'serial', 'threaded'], default=['native', 'threaded'])
+     p.add_argument('--warmups', type=int, default=1)
+     p.add_argument('--repeats', type=int, default=5)
+     p.add_argument('--timeout', type=float, default=300)
+@@ -122,7 +130,10 @@
+     env.update(LC_ALL='C', NODE_NO_WARNINGS='1')
+     nodes = {'baseline':[args.node, *args.node_arg], 'candidate':[args.node, *args.node_arg, *args.candidate_node_arg]}
+     prefixes = {}
+-    for version, directory, runners in [('baseline', args.baseline_dir, args.baseline_runners), ('candidate', args.candidate_dir, TESTS)]:
++    # NCBI reference: c++/src/algo/blast/api/prelim_stage.cpp:171-188
++    # (*thread)->Run(); (*thread)->Join(&result);
++    # Select the actual host paths explicitly instead of mixing runner filesystems.
++    for version, directory, runners in [('baseline', args.baseline_dir, args.baseline_runners), ('candidate', args.candidate_dir, args.candidate_runners)]:
+         for kind in args.kinds:
+             if kind == 'native':
+                 prefix = [str((directory / 'native-command/release/LOSAT').resolve())]
+@@ -153,10 +164,20 @@
+         oracle_hashes={program:digest(args.oracle_dir/program) for program in ['blastn', 'blastp', 'tblastx']},
+         oracle_versions={program:subprocess.check_output([str(args.oracle_dir/program), '-version'], text=True).strip() for program in ['blastn', 'blastp', 'tblastx']},
+         baseline_runner_hashes={p.name:digest(p) for p in args.baseline_runners.glob('*.js')},
++        # NCBI reference: c++/src/algo/blast/api/prelim_stage.cpp:171-188
++        # (*thread)->Run(); (*thread)->Join(&result);
++        # Equal content hashes alone do not prove equal cold host-loading costs.
++        candidate_runner_hashes={p.name:digest(p) for p in args.candidate_runners.glob('*.js')},
++        runner_paths={'baseline':str(args.baseline_runners.resolve()), 'candidate':str(args.candidate_runners.resolve())},
+         environment={k:v for k,v in env.items() if k.startswith(('NODE_', 'LOSAT_', 'RAYON_')) or k == 'LC_ALL'},
+         artifacts={f'{version}-{kind}':{'path':prefix[-1], 'sha256':digest(prefix[-1])} for (version,kind),prefix in prefixes.items()},
+         fixtures={str(p):digest(p) for _,_,q,s,_ in cases for p in [q,s]}, runners={p.name:digest(p) for p in TESTS.iterdir() if p.suffix in {'.js', '.py'}},
+-        boundary='cold process includes Node startup, artifact validation, guard, compilation, workers, search, output, and teardown',
++        # NCBI reference: c++/src/algo/blast/api/prelim_stage.cpp:177-188
++        # (*thread)->Run(); (*thread)->Join(&result);
++        # Native invocation has no Node or Wasm compilation boundary.
++        boundary='cold process starts at process launch and ends after process exit; see boundary_by_kind',
++        boundary_by_kind={kind: ('native process startup, search, output, and exit' if kind == 'native' else
++            'Node startup, artifact validation, guard, Wasm compilation, workers when requested, search, output, and teardown') for kind in args.kinds},
+         linear_memory='not sampled in cold process; reuse records memory after invocation',
+         reuse_host='common current benchmark_wasi_reuse.js and host imports for both versions; hashes in runners',
+         elapsed_clock='CLOCK_MONOTONIC; realtime/GNU elapsed are adjustable-clock diagnostics',
+--- initial/LOSAT/tests/build_wasi_artifacts.py
++++ current/LOSAT/tests/build_wasi_artifacts.py
+@@ -1,5 +1,5 @@
+ #!/usr/bin/env python3
+-"""Build and inspect separate WASI commands/reactors; no oracle dependency."""
++"""Build threaded WASI commands/reactors, with explicit serial compatibility."""
+ import argparse
+ import hashlib
+ import json
+@@ -32,15 +32,32 @@
+     parser.add_argument("--target-dir", type=Path, required=True)
+     parser.add_argument("--node", default="node")
+     parser.add_argument("--reverse-order", action="store_true")
++    # NCBI reference: c++/include/algo/blast/blastinput/blast_args.hpp:1290-1296
++    # #ifdef NCBI_NO_THREADS
++    # m_NumThreads = CThreadable::kMinNumThreads; m_MTMode = eNotSupported;
++    # Serial artifacts are an explicit compatibility build, not the default.
++    parser.add_argument("--include-serial", action="store_true",
++                        help="also build serial command/reactor compatibility artifacts")
+     args = parser.parse_args()
+     out, target = args.output_dir.resolve(), args.target_dir.resolve()
+     out.mkdir(parents=True, exist_ok=True)
++    # NCBI reference: c++/src/app/blast/blastn_app.cpp:172-176
++    # CATCH_ALL(status); return status;
++    # Do not silently mix old compatibility outputs into a threaded bundle.
++    if not args.include_serial and any((out / name).exists() for name in
++                                      ["losat-serial-command.wasm", "losat-serial-reactor.wasm",
++                                       "losat-serial-command.json", "losat-serial-reactor.json",
++                                       "serial-command.build.log", "serial-reactor.build.log", "run_losat_wasi.js"]):
++        parser.error("output directory contains serial artifacts; use a fresh directory or --include-serial")
+     config = tomllib.loads((CRATE / ".cargo/config.toml").read_text())
+     rust = subprocess.check_output(["rustc", "-vV"], text=True)
+     sysroot = Path(subprocess.check_output(["rustc", "--print", "sysroot"], text=True).strip())
+     node = subprocess.check_output([args.node, "-p", "JSON.stringify(process.versions)"], text=True)
+     recorded, identities = {}, {}
+-    for kind in reversed(SPECS) if args.reverse_order else SPECS:
++    # NCBI reference: c++/src/algo/blast/api/prelim_stage.cpp:173-180
++    # (*thread)->Run(); (*thread)->Join(&result);
++    kinds = [kind for kind in SPECS if args.include_serial or kind.startswith("threaded-")]
++    for kind in reversed(kinds) if args.reverse_order else kinds:
+         triple, options, features = SPECS[kind]
+         argv = ["cargo", "build", "--release", "--locked", "--target", triple, *options, "--target-dir", str(target / kind)]
+         with (out / f"{kind}.build.log").open("w") as log:
+@@ -63,7 +80,12 @@
+         identities[kind] = identity
+         print(f"{kind}: {identity['sha256']}", flush=True)
+     runtime_files = {}
+-    for name in ["run_losat_wasi.js", "run_losat_wasi_threads.js", "wasi_thread_host.js", "wasi_artifact.js", "wasi_shared_memory.js"]:
++    # NCBI reference: c++/src/algo/blast/api/prelim_stage.cpp:173-180
++    # (*thread)->Run(); (*thread)->Join(&result);
++    runtime_names = ["run_losat_wasi_threads.js", "wasi_thread_host.js", "wasi_artifact.js", "wasi_shared_memory.js"]
++    if args.include_serial:
++        runtime_names.append("run_losat_wasi.js")
++    for name in runtime_names:
+         shutil.copyfile(CRATE / "tests" / name, out / name)
+         runtime_files[name] = digest(out / name)
+     (out / "runtime-files.json").write_text(json.dumps(runtime_files, indent=2) + "\n")
+--- initial/LOSAT/tests/check_tblastx_thread_thresholds.py
++++ current/LOSAT/tests/check_tblastx_thread_thresholds.py
+@@ -15,15 +15,18 @@
+ # A threshold sweep compares full raw rows, never only the number of HSPs.
+ def main():
+     parser = argparse.ArgumentParser(description=__doc__)
+-    for name in ['native', 'serial', 'threaded', 'oracle', 'output-dir']:
++    for name in ['native', 'threaded', 'oracle', 'output-dir']:
+         parser.add_argument('--'+name, type=Path, required=True)
++    # NCBI reference: c++/include/algo/blast/blastinput/blast_args.hpp:1290-1296
++    # m_NumThreads = CThreadable::kMinNumThreads; m_MTMode = eNotSupported;
++    parser.add_argument('--serial', type=Path, help='opt in to serial compatibility checks')
+     parser.add_argument('--node', default='node')
+     args = parser.parse_args(); out = args.output_dir.resolve(); out.mkdir(parents=True, exist_ok=True)
+     fixtures = out/'fixtures'; fixtures.mkdir(exist_ok=True)
+     for name in ['LC738874.fasta', 'LC738875.fasta']:
+         (fixtures/name).write_bytes((TESTS/'fasta'/name).read_bytes())
+     metadata = dict(head=subprocess.check_output(['git','rev-parse','HEAD'],cwd=ROOT,text=True).strip(),
+-        artifacts={name:{'path':str(getattr(args,name).resolve()),'sha256':digest(getattr(args,name))} for name in ['native','serial','threaded','oracle']},
++        artifacts={name:{'path':str(getattr(args,name).resolve()),'sha256':digest(getattr(args,name))} for name in ['native','serial','threaded','oracle'] if getattr(args,name)},
+         fixtures={p.name:digest(p) for p in fixtures.iterdir()},
+         node=subprocess.check_output([args.node,'-p','JSON.stringify(process.versions)'],text=True),
+         runners={p.name:digest(p) for p in TESTS.glob('*.js')})
+@@ -31,16 +34,22 @@
+     env = {k:v for k,v in os.environ.items() if not k.startswith(('LOSAT_','RAYON_')) and k!='BL2SEQ_LEGACY'}
+     env.update(LC_ALL='C',NODE_NO_WARNINGS='1')
+     records=[]
++    # NCBI reference: c++/src/algo/blast/api/prelim_stage.cpp:173-180
++    # (*thread)->Run(); (*thread)->Join(&result);
++    prefixes = [
++        ('native',1,[str(args.native.resolve())]),
++        ('threaded',4,[args.node,str(TESTS/'run_losat_wasi_threads.js'),str(args.threaded.resolve())]),
++    ]
++    if args.serial:
++        prefixes.append(('serial',1,[args.node,str(TESTS/'run_losat_wasi.js'),str(args.serial.resolve())]))
+     for threshold in [10,100,10000]:
+         common=['-query',str(fixtures/'LC738874.fasta'),'-subject',str(fixtures/'LC738875.fasta'),'-outfmt','6','-evalue',str(threshold),'-out','{output}']
+         oracle=execute([str(args.oracle.resolve()),*common,'-num_threads','1'],ROOT,out/f'e{threshold}'/'oracle',env,900)
+         assert oracle['status']=='PASS'
+         records.append({**oracle,'evalue':threshold,'kind':'oracle'})
+-        for kind,n,prefix in [
+-            ('native',1,[str(args.native.resolve())]),
+-            ('serial',1,[args.node,str(TESTS/'run_losat_wasi.js'),str(args.serial.resolve())]),
+-            ('threaded',4,[args.node,str(TESTS/'run_losat_wasi_threads.js'),str(args.threaded.resolve())]),
+-        ]:
++        # NCBI reference: c++/src/algo/blast/core/blast_hits.c:1984-2003
++        # if (hsp->evalue > cutoff) { hsp_array[index] = Blast_HSPFree(hsp_array[index]); }
++        for kind,n,prefix in prefixes:
+             directory=out/f'e{threshold}'/kind
+             result=execute([*prefix,'tblastx',*common,'-num_threads',str(n)],ROOT,directory,{**env,'LOSAT_WASI_THREADS_DEBUG':'1'},900)
+             result.update(evalue=threshold,kind=kind,threads=n,expected_sha256=oracle['raw_output_sha256'])
+--- initial/LOSAT/tests/check_wasi_reactor.js
++++ current/LOSAT/tests/check_wasi_reactor.js
+@@ -50,7 +50,7 @@
+   try {
+     for (const c of cases) {
+       let reference;
+-      for (const [i, n] of [1, 2, 4, 2, 1, 2, 2].entries()) {
++      for (const [i, n] of [1, 2, 4, 8, 2, 1, 2, 2].entries()) {
+         const response = runPair(host, c.program, c.seq, c.seq, "6", [...c.args, "-num_threads", String(n)]);
+         const events = await host.waitForWorkers();
+         save(`${c.id}-${i}-n${n}`, response, events);
+@@ -88,12 +88,18 @@
+       // API labels are a separate existing contract; compare unchanged bytes.
+       for (const format of c.program === "blastp" ? ["0", "7", "6 qseqid sseqid score bitscore qstart qend sstart send"] : c.program === "blastn" ? ["7"] : []) {
+         let expected;
+-        for (const n of [1, 2, 4]) {
++        for (const n of [1, 2, 4, 8]) {
+           const response = runPair(host, c.program, c.seq, c.seq, format, [...c.args, "-num_threads", String(n)]);
+           const events = await host.waitForWorkers(); save(`${c.id}-format-${format.split(" ")[0]}-n${n}`, response, events);
+           assert.equal(response.status, 0, response.error);
+           if (!expected) expected = response.result;
+           assert.deepEqual(response.result, expected);
++          // NCBI reference: c++/src/algo/blast/api/prelim_stage.cpp:177-188
++          // (*thread)->Run(); (*thread)->Join(&result);
++          for (const event of ["spawn_attempt", "spawned", "ready", "exited"]) {
++            assert.equal(events.filter(e => e.event === event).length, n === 1 ? 0 : n);
++          }
++          assert.ok(events.filter(e => e.event === "exited").every(e => e.code === 0));
+         }
+       }
+       const invalid = runPair(host, c.program, "invalid FASTA", c.seq, "6", [...c.args, "-num_threads", "1"]);
+--- initial/LOSAT/tests/check_wasm_threading.py
++++ current/LOSAT/tests/check_wasm_threading.py
+@@ -55,7 +55,10 @@
+     parser = argparse.ArgumentParser(description=__doc__)
+     parser.add_argument("--native", type=Path, required=True)
+     parser.add_argument("--native-serial", type=Path)
+-    parser.add_argument("--serial", type=Path, required=True)
++    # NCBI reference: c++/include/algo/blast/blastinput/blast_args.hpp:1290-1296
++    # #ifdef NCBI_NO_THREADS
++    # m_NumThreads = CThreadable::kMinNumThreads; m_MTMode = eNotSupported;
++    parser.add_argument("--serial", type=Path, help="opt in to serial compatibility checks")
+     parser.add_argument("--threaded", type=Path, required=True)
+     parser.add_argument("--reactor", type=Path, required=True)
+     parser.add_argument("--serial-reactor", type=Path)
+@@ -99,9 +102,11 @@
+         return data, result.stderr.decode()
+     prefixes = {
+         "native": [args.native.resolve()],
+-        "serial": [args.node, TESTS / "run_losat_wasi.js", args.serial.resolve()],
+         "threaded": [args.node, TESTS / "run_losat_wasi_threads.js", args.threaded.resolve()],
+     }
++    # NCBI reference: c++/include/algo/blast/blastinput/blast_args.hpp:1290-1296
++    # m_NumThreads = CThreadable::kMinNumThreads; m_MTMode = eNotSupported;
++    if args.serial: prefixes["serial"] = [args.node, TESTS / "run_losat_wasi.js", args.serial.resolve()]
+     if args.native_serial: prefixes["native-serial"] = [args.native_serial.resolve()]
+     cases = [("blastn", "blastn", "nuc1", "nuc1", 10), ("megablast", "blastn", "nuc1", "nuc3", 10),
+              ("blastp", "blastp", "aa3", "aa3", 10)]
+@@ -121,7 +126,7 @@
+         (out / "metadata.json").write_text(json.dumps(metadata, indent=2) + "\n")
+         reference, _ = execute(label + "/oracle", [oracle, *common, "-num_threads", "1"])
+         for kind, prefix in prefixes.items():
+-            for n in ([1] if kind in ["serial", "native-serial"] else [1, 2, 4]):
++            for n in ([1] if kind in ["serial", "native-serial"] else [1, 2, 4, 8]):
+                 data, log = execute(f"{label}/{kind}-n{n}", [*prefix, program, *common, "-num_threads", str(n)], {"LOSAT_WASI_THREADS_DEBUG": "1"})
+                 assert data == reference, f"raw output differs: {label}/{kind}-n{n}"
+                 validate_thread_evidence(log, n, "native" if kind == "native-serial" else kind)
+@@ -138,24 +143,46 @@
+         # stdout is the same sink content as the file route.
+         stdout_args = common[:-2] + ["-num_threads", "1"]
+         reference, _ = execute(f"stdout/{program}-native", [*prefixes["native"], *stdout_args])
+-        for kind in ["serial", "threaded"]:
++        # NCBI reference: c++/src/objtools/align_format/tabular.cpp:1098-1108
++        # x_PrintField(*iter); m_Ostream << "\n";
++        for kind in (kind for kind in ["serial", "threaded"] if kind in prefixes):
+             data, _ = execute(f"stdout/{program}-{kind}", [*prefixes[kind], *stdout_args])
+             assert data == reference
++    # NCBI reference: c++/src/algo/blast/blastinput/blast_args.cpp:2657-2660
++    # AddDefaultKey(kArgOutputFormat, ..., eString, ...);
++    # Unported format routes must reject explicitly before starting any worker.
++    for program, formats in [("blastn", ["0", "6 qseqid sseqid"]),
++                             ("tblastx", ["0", "7", "6 qseqid sseqid"])]:
++        for index, fmt in enumerate(formats):
++            for kind, prefix in prefixes.items():
++                n = 1 if kind in ["serial", "native-serial"] else 8
++                data, log = execute(f"unsupported-format/{program}-{index}-{kind}",
++                    [*prefix, program, "-query", inputs["nuc1"], "-subject", inputs["nuc1"],
++                     "-outfmt", fmt, "-num_threads", str(n), "-out", "{out}"],
++                    {"LOSAT_WASI_THREADS_DEBUG": "1"}, expected=1)
++                assert not data and ("unsupported" in log.lower() or "not implemented" in log.lower())
++                assert "spawn_attempt" not in log and "[losat-thread-pool]" not in log
+     format_failures = []
+-    for program, query, subject, formats in [
+-        ("blastp", "aa3", "aa3", ["0", "7", "6 std qlen slen positive ppos btop stitle"]),
+-        ("blastp", "aa-query-edge", "aa-subject-edge", ["0", "7", "6 std qlen slen positive ppos btop stitle", "7 qseqid qacc qaccver sseqid sacc saccver qlen slen score nident positive gaps frames qframe sframe qseq sseq btop stitle"]),
+-        ("blastn", "nuc3", "nuc3", ["7"]),
++    for program, query, subject, formats, task in [
++        ("blastp", "aa3", "aa3", ["0", "7", "6 std qlen slen positive ppos btop stitle"], None),
++        ("blastp", "aa-query-edge", "aa-subject-edge", ["0", "7", "6 std qlen slen positive ppos btop stitle", "7 qseqid qacc qaccver sseqid sacc saccver qlen slen score nident positive gaps frames qframe sframe qseq sseq btop stitle"], None),
++        ("blastn", "nuc3", "nuc3", ["7"], "megablast"),
++        ("blastn", "nuc3", "nuc3", ["7"], "blastn"),
+     ]:
+         for index, fmt in enumerate(formats):
+             common = ["-query", inputs[query], "-subject", inputs[subject], "-outfmt", fmt, "-out", "{out}"]
++            # NCBI reference: c++/src/algo/blast/blastinput/cmdline_flags.cpp:69
++            # const string kTask("task");
++            # Exercise both nucleotide tasks through their supported formatter.
++            if task: common += ["-task", task]
++            format_label = task or program
+             oracle = str(args.oracle_dir.resolve() / program) if args.oracle_dir else program
+-            reference, _ = execute(f"format/{program}-{query}-{index}/oracle", [oracle, *common])
++            reference, _ = execute(f"format/{format_label}-{query}-{index}/oracle", [oracle, *common])
+             for kind, prefix in prefixes.items():
+-                for n in ([1] if kind in ["serial", "native-serial"] else [1, 4]):
+-                    data, _ = execute(f"format/{program}-{query}-{index}/{kind}-n{n}", [*prefix, program, *common, "-num_threads", str(n)])
++                for n in ([1] if kind in ["serial", "native-serial"] else [1, 4, 8]):
++                    data, _ = execute(f"format/{format_label}-{query}-{index}/{kind}-n{n}", [*prefix, program, *common, "-num_threads", str(n)])
+                     if data != reference:
+-                        format_failures.append(dict(program=program, format=fmt, target=kind, threads=n, oracle_sha256=digest(reference), actual_sha256=digest(data)))
++                        format_failures.append(dict(program=program, task=task, format=fmt, target=kind, threads=n, oracle_sha256=digest(reference), actual_sha256=digest(data)))
+                         (out / "format-failures.json").write_text(json.dumps(format_failures, indent=2) + "\n")
+     for program, query in [("blastn", "nuc1"), ("tblastx", "nuc3"), ("blastp", "aa1")]:
+         target = out / "output-is-directory" / program
+@@ -174,7 +201,14 @@
+     for cap in ["0", "invalid", "1"]:
+         execute("reactor-cap/" + cap, [args.node, TESTS / "check_wasi_api_limits.js", args.reactor.resolve(), "threaded-reactor", out / "fixtures", out / ("reactor-cap-" + cap)], {"LOSAT_WASI_THREAD_CAP": cap, "LOSAT_WASI_THREADS_DEBUG": "1"})
+     # Artifact misclassification is rejected before entry/worker startup.
+-    for label, runner, artifact in [("serial-reactor", "run_losat_wasi.js", args.reactor), ("threaded-reactor", "run_losat_wasi_threads.js", args.reactor), ("threaded-serial", "run_losat_wasi_threads.js", args.serial), ("serial-threaded", "run_losat_wasi.js", args.threaded)]:
++    # NCBI reference: c++/src/app/blast/blastn_app.cpp:172-176
++    # CATCH_ALL(status); return status;
++    wrong_artifacts = [("threaded-reactor", "run_losat_wasi_threads.js", args.reactor)]
++    if args.serial:
++        wrong_artifacts += [("serial-reactor", "run_losat_wasi.js", args.reactor),
++                            ("threaded-serial", "run_losat_wasi_threads.js", args.serial),
++                            ("serial-threaded", "run_losat_wasi.js", args.threaded)]
++    for label, runner, artifact in wrong_artifacts:
+         _, log = execute("wrong-artifact/" + label, [args.node, TESTS / runner, artifact.resolve(), "--help"], {"LOSAT_WASI_THREADS_DEBUG": "1"}, expected=1)
+         assert "spawn_attempt" not in log
+     print(f"{len(rows)} command/oracle records; reactor lifecycle gates PASS; format failures={len(format_failures)}", flush=True)
+--- initial/LOSAT/tests/check_wasm_threading_regressions.py
++++ current/LOSAT/tests/check_wasm_threading_regressions.py
+@@ -23,8 +23,11 @@
+ # Preserve frozen fixture bytes/paths, formatting and order; no normalization.
+ def main():
+     p = argparse.ArgumentParser(description=__doc__)
+-    for name in ['native', 'serial', 'threaded', 'oracle-dir', 'output-dir']:
++    for name in ['native', 'threaded', 'oracle-dir', 'output-dir']:
+         p.add_argument('--' + name, type=Path, required=True)
++    # NCBI reference: c++/include/algo/blast/blastinput/blast_args.hpp:1290-1296
++    # m_NumThreads = CThreadable::kMinNumThreads; m_MTMode = eNotSupported;
++    p.add_argument('--serial', type=Path, help='opt in to serial compatibility checks')
+     p.add_argument('--node', default='node')
+     p.add_argument('--jobs',type=int,default=1,choices=[1,2,3])
+     p.add_argument('--timeout-seconds', type=int, default=3600, help='positive per-search correctness deadline; long genomes may exceed 900 seconds')
+@@ -40,7 +43,13 @@
+     environment = {k: v for k, v in os.environ.items() if not k.startswith(('LOSAT_', 'RAYON_')) and k != 'BL2SEQ_LEGACY'}
+     environment.update(LC_ALL='C', NODE_NO_WARNINGS='1')
+     records = []; record_lock=threading.Lock(); pending=[]
+-    metadata = dict(head=head, scope=__doc__, per_search_timeout_seconds=args.timeout_seconds, artifacts={name: {'path': str(value.resolve()), 'sha256': digest(value)} for name, value in [('native', args.native), ('serial', args.serial), ('threaded', args.threaded)]}, authority_sha256=native_authority.file_sha256)
++    # NCBI reference: c++/src/algo/blast/api/prelim_stage.cpp:173-180
++    # (*thread)->Run(); (*thread)->Join(&result);
++    metadata = dict(head=head, scope=__doc__, per_search_timeout_seconds=args.timeout_seconds, artifacts={name: {'path': str(value.resolve()), 'sha256': digest(value)} for name, value in [('native', args.native), ('serial', args.serial), ('threaded', args.threaded)] if value}, authority_sha256=native_authority.file_sha256)
++    prefixes = [('native', [str(args.native.resolve())]),
++                ('threaded', [args.node, str(TESTS/'run_losat_wasi_threads.js'), str(args.threaded.resolve())])]
++    if args.serial:
++        prefixes.append(('serial', [args.node, str(TESTS/'run_losat_wasi.js'), str(args.serial.resolve())]))
+     (out / 'metadata.json').write_text(json.dumps(metadata, indent=2))
+     def record(label, command, expected, env, threads=None, kind=None):
+         result = execute(command, ROOT, out / label, env, args.timeout_seconds)
+@@ -57,7 +66,9 @@
+             command = list(step.command)
+             count_index = command.index('-num_threads') + 1
+             original_n = int(command[count_index])
+-            for kind, prefix in [('native', [str(args.native.resolve())]), ('serial', [args.node, str(TESTS/'run_losat_wasi.js'), str(args.serial.resolve())]), ('threaded', [args.node, str(TESTS/'run_losat_wasi_threads.js'), str(args.threaded.resolve())])]:
++            # NCBI reference: c++/src/objtools/align_format/tabular.cpp:1098-1108
++            # x_PrintField(*iter); m_Ostream << "\n";
++            for kind, prefix in prefixes:
+                 if kind == 'serial' and original_n != 1: continue  # explicitly non-applicable frozen native-thread4 rows
+                 current = [*prefix, *command[1:]]
+                 n = 4 if kind == 'threaded' else original_n
+--- initial/LOSAT/tests/comparison_data.py
++++ current/LOSAT/tests/comparison_data.py
+@@ -30,13 +30,16 @@
+ NATIVE_SINGLE = "LOSAT native n1"
+ NATIVE_MULTI = f"LOSAT native n{LOSAT_THREADS}"
+ WASM_SINGLE = "LOSAT wasm serial n1"
++# NCBI reference: c++/src/algo/blast/blastinput/cmdline_flags.cpp:75
++# const string kArgNumThreads("num_threads");
++WASM_THREADED_SINGLE = "LOSAT wasm threads n1"
+ WASM_MULTI = f"LOSAT wasm threads n{LOSAT_THREADS}"
+ HUE_ORDER = list(dict.fromkeys([
+-    "BLAST+", NATIVE_SINGLE, NATIVE_MULTI, WASM_SINGLE, WASM_MULTI,
++    "BLAST+", NATIVE_SINGLE, NATIVE_MULTI, WASM_SINGLE, WASM_THREADED_SINGLE, WASM_MULTI,
+ ]))
+ CUSTOM_PALETTE = dict(zip(
+-    ["BLAST+", NATIVE_SINGLE, NATIVE_MULTI, WASM_SINGLE, WASM_MULTI],
+-    ["#4c72b0", "#dd8452", "#a15c2e", "#8a8f3b", "#565b22"],
++    ["BLAST+", NATIVE_SINGLE, NATIVE_MULTI, WASM_SINGLE, WASM_THREADED_SINGLE, WASM_MULTI],
++    ["#4c72b0", "#dd8452", "#a15c2e", "#8a8f3b", "#6e9c75", "#565b22"],
+ ))
+ MODE_ORDER = ["TBLASTX", "Megablast", "BLASTN", "BLASTP"]
+ 
+@@ -75,6 +78,10 @@
+     if LOSAT_THREADS != 1:
+         paths[NATIVE_MULTI] = f"{native}.n{LOSAT_THREADS}"
+     paths[WASM_SINGLE] = f"{native}.wasm"
++    # NCBI reference: c++/src/algo/blast/blastinput/cmdline_flags.cpp:75
++    # const string kArgNumThreads("num_threads");
++    if LOSAT_THREADS != 1:
++        paths[WASM_THREADED_SINGLE] = f"{native}.wasm.n1"
+     paths[WASM_MULTI] = f"{native}.wasm.n{LOSAT_THREADS}"
+     return {tool: Path(f"{stem}.{extension}") for tool, stem in paths.items()}
+ 
+@@ -136,7 +143,11 @@
+             "toolchain": {name: subprocess.check_output([name, "--version"], text=True).strip()
+                           for name in ("rustc", "cargo") if shutil.which(name)},
+             "node_versions": (subprocess.check_output([os.environ.get("NODE_BIN", "node"), "-p", "JSON.stringify(process.versions)"], text=True).strip()
+-                              if os.environ.get("RUN_LOSAT_WASM", "1") == "1" else None),
++                              if (os.environ.get("RUN_LOSAT_WASM") or "0") == "1" or (os.environ.get("RUN_LOSAT_WASM_THREADED") or "1") == "1" else None),
++            # NCBI reference: c++/src/algo/blast/blastinput/cmdline_flags.cpp:75
++            # const string kArgNumThreads("num_threads");
++            "enabled_runners": {name: (os.environ.get(name) or default) == "1" for name, default in
++                                [("RUN_NATIVE", "1"), ("RUN_NCBI", "1"), ("RUN_LOSAT_WASM", "0"), ("RUN_LOSAT_WASM_THREADED", "1")]},
+             "environment": {k:v for k,v in os.environ.items() if k.startswith(("LOSAT_", "RAYON_", "NODE_", "BENCHMARK_", "RUN_", "BUILD_")) or k in {"LC_ALL", "BL2SEQ_LEGACY"}},
+             "runner_hashes": {p.name: sha256(p) for p in SCRIPT_DIR.iterdir()
+                               if p.suffix in {".py", ".js", ".sh", ".tsv"}},
+--- initial/LOSAT/tests/megablast_xdrop.rs
++++ current/LOSAT/tests/megablast_xdrop.rs
+@@ -0,0 +1,62 @@
++//! Regression for the zero-initialized traditional megablast X-drop option.
++//! The complete output is from the fresh NCBI 2.17.0 oracle recorded in
++//! docs/evidence/megablast_wasm_np_remediation_20260913/run-20260913-01/.
++
++// NCBI reference: c++/src/algo/blast/api/blast_options_local_priv.cpp:49-54
++// m_InitWordOpts.Reset((BlastInitialWordOptions*)calloc(1, sizeof(BlastInitialWordOptions)));
++// NCBI reference: c++/src/algo/blast/api/blast_nucl_options.cpp:163-174
++// SetInitialWordOptionsDefaults() { SetXDropoff(BLAST_UNGAPPED_X_DROPOFF_NUCL); ... }
++// SetMBInitialWordOptionsDefaults() { SetWindowSize(BLAST_WINDOW_SIZE_NUCL); }
++// NCBI reference: c++/src/algo/blast/core/blast_parameters.c:380-383
++// if (curr_cutoffs->x_dropoff_init == 0) curr_cutoffs->x_dropoff = new_cutoff;
++// else curr_cutoffs->x_dropoff = curr_cutoffs->x_dropoff_init;
++// NCBI reference: c++/src/algo/blast/core/blast_gapalign.c:4012-4031
++// init_hsp->offsets.qs_offsets.q_off =
++//     init_hsp->ungapped_data->q_start + init_hsp->ungapped_data->length/2;
++// BLAST_GreedyGappedAlignment(...);
++// init_hsp->offsets.qs_offsets.q_off = gap_align->greedy_query_seed_start;
++// This fixture crosses an ungapped score valley at raw X-drop 13; using
++// blastn's 20-bit option (raw 11) changes the traceback seed and edit script.
++// Keep the full input: shortening it can change the automatic word cutoff.
++#[test]
++fn megablast_automatic_xdrop_preserves_oracle_scripts() {
++    let input =
++        std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fasta/NZ_CP006932.fasta");
++    let directory = std::env::temp_dir().join(format!(
++        "losat-megablast-xdrop-{}-{}",
++        std::process::id(),
++        std::time::SystemTime::now()
++            .duration_since(std::time::UNIX_EPOCH)
++            .unwrap()
++            .as_nanos()
++    ));
++    std::fs::create_dir(&directory).unwrap();
++    let output = directory.join("output.tsv");
++    let cli: LOSAT::cli::Cli = LOSAT::cli::try_parse_from([
++        "LOSAT",
++        "blastn",
++        "-query",
++        input.to_str().unwrap(),
++        "-subject",
++        input.to_str().unwrap(),
++        "-task",
++        "megablast",
++        "-num_threads",
++        "1",
++        "-outfmt",
++        "6",
++        "-out",
++        output.to_str().unwrap(),
++    ])
++    .unwrap();
++    let LOSAT::cli::Commands::Blastn(args) = cli.command else {
++        panic!("expected blastn command");
++    };
++    LOSAT::algorithm::blastn::run(args).unwrap();
++    let actual = std::fs::read(&output).unwrap();
++    std::fs::remove_dir_all(&directory).unwrap();
++    assert_eq!(
++        actual,
++        include_bytes!("fixtures/megablast_automatic_xdrop.outfmt6")
++    );
++}
+--- initial/LOSAT/tests/plot_execution_time.py
++++ current/LOSAT/tests/plot_execution_time.py
+@@ -14,7 +14,7 @@
+ # Thread suffixes describe requested counts, not inferred worker utilization.
+ from comparison_data import (
+     CUSTOM_PALETTE, HUE_ORDER, LOSAT_THREADS, MODE_ORDER, PLOT_DIR,
+-    NATIVE_SINGLE, NATIVE_MULTI, WASM_SINGLE, WASM_MULTI,
++    NATIVE_SINGLE, NATIVE_MULTI, WASM_SINGLE, WASM_THREADED_SINGLE, WASM_MULTI,
+     comparison_cases, completed_log, result_paths, successful_output, sha256,
+ )
+ 
+@@ -97,7 +97,11 @@
+     plt.close(g.fig)
+     print(f"Plot saved to {OUTPUT_IMAGE}")
+     summary = df.pivot(index=["Mode", "Task"], columns="Tool", values="Time (s)")
+-    ratios = [(WASM_SINGLE, NATIVE_SINGLE), (WASM_MULTI, NATIVE_MULTI)]
++    # NCBI reference: c++/src/algo/blast/blastinput/cmdline_flags.cpp:75
++    # const string kArgNumThreads("num_threads");
++    ratios = list(dict.fromkeys([(WASM_SINGLE, NATIVE_SINGLE),
++                                 (WASM_THREADED_SINGLE, NATIVE_SINGLE),
++                                 (WASM_MULTI, NATIVE_MULTI)]))
+     for numerator, denominator in ratios:
+         if {numerator, denominator}.issubset(summary.columns):
+             summary[f"Ratio ({numerator}/{denominator})"] = (
+--- initial/LOSAT/tests/run_comparison.sh
++++ current/LOSAT/tests/run_comparison.sh
+@@ -12,7 +12,7 @@
+ 
+ if [[ "${1:-}" == --help ]]; then
+     cat <<'HELP'
+-Usage: ./run_comparison.sh   (NCBI + native + serial/threaded Wasm)
++Usage: ./run_comparison.sh   (NCBI + native + threaded Wasm n1/nN)
+        ./run_wasm_comparison.sh   (Wasm only, same cases and filenames)
+ 
+ Program selections:
+@@ -34,8 +34,9 @@
+   BENCHMARK_TIMEOUT Maximum seconds per search (default: 600; GNU timeout)
+ 
+ Runner settings (0 disables, 1 enables):
+-  RUN_NATIVE=1 RUN_NCBI=1 RUN_LOSAT_WASM=1 RUN_LOSAT_WASM_THREADED=1
+-  BUILD_LOSAT_WASM=0 BUILD_LOSAT_WASM_THREADED=$BUILD_LOSAT_WASM
++  RUN_NATIVE=1 RUN_NCBI=1 RUN_LOSAT_WASM=0 RUN_LOSAT_WASM_THREADED=1
++  RUN_LOSAT_WASM=1 adds serial compatibility comparisons independently.
++  BUILD_LOSAT_WASM=0 BUILD_LOSAT_WASM_THREADED=0
+   LOSAT_BIN, LOSAT_WASM_BIN, LOSAT_WASM_THREADED_BIN override artifacts.
+   NODE_BIN=node selects the Node executable for both Wasm targets.
+   NODE_ARGS_JSON='[]' supplies common Node flags as a JSON argv array.
+@@ -61,6 +62,29 @@
+     case "$program" in tblastx|megablast|blastn|blastp) ;; *) echo "Unknown program: $program" >&2; exit 2;; esac
+ done
+ BENCHMARK_DIR="${BENCHMARK_DIR:-$SCRIPT_DIR/benchmark-runs/$(date -u +%Y%m%dT%H%M%S)-$$}"
++# NCBI reference: c++/src/algo/blast/blastinput/cmdline_flags.cpp:75
++# const string kArgNumThreads("num_threads");
++# Record the effective runner selections before creating any run metadata.
++RUN_NATIVE="${RUN_NATIVE:-1}"
++RUN_NCBI="${RUN_NCBI:-1}"
++# NCBI reference: c++/src/algo/blast/blastinput/cmdline_flags.cpp:75
++# const string kArgNumThreads("num_threads");
++# The threaded artifact handles both n1 and nN; serial is compatibility opt-in.
++RUN_LOSAT_WASM="${RUN_LOSAT_WASM:-0}"
++RUN_LOSAT_WASM_THREADED="${RUN_LOSAT_WASM_THREADED:-1}"
++BUILD_LOSAT_WASM="${BUILD_LOSAT_WASM:-0}"
++BUILD_LOSAT_WASM_THREADED="${BUILD_LOSAT_WASM_THREADED:-0}"
++for setting in RUN_NATIVE RUN_NCBI RUN_LOSAT_WASM RUN_LOSAT_WASM_THREADED BUILD_LOSAT_WASM BUILD_LOSAT_WASM_THREADED; do
++    [[ "${!setting}" == 0 || "${!setting}" == 1 ]] || { echo "$setting must be 0 or 1" >&2; exit 2; }
++done
++# NCBI reference: c++/src/app/blast/blastn_app.cpp:172-176
++# CATCH_ALL(status); return status;
++[[ "$RUN_NATIVE$RUN_NCBI$RUN_LOSAT_WASM$RUN_LOSAT_WASM_THREADED" != 0000 ]] || { echo 'No runners selected' >&2; exit 2; }
++# NCBI reference: c++/src/algo/blast/blastinput/cmdline_flags.cpp:75
++# const string kArgNumThreads("num_threads");
++# Record the effective runner selections before creating any run metadata.
++export RUN_NATIVE RUN_NCBI RUN_LOSAT_WASM RUN_LOSAT_WASM_THREADED
++export BUILD_LOSAT_WASM BUILD_LOSAT_WASM_THREADED
+ # NCBI reference: c++/src/objtools/align_format/tabular.cpp:1100-1108
+ # x_PrintField(*iter); ... m_Ostream << "\n";
+ # Record the effective locale used for every subsequent comparison invocation.
+@@ -79,16 +103,7 @@
+ LOSAT_WASM_BIN="${LOSAT_WASM_BIN:-$SCRIPT_DIR/../target/serial-command/wasm32-wasip1/release/LOSAT.wasm}"
+ LOSAT_WASM_THREADED_BIN="${LOSAT_WASM_THREADED_BIN:-$SCRIPT_DIR/../target/threaded-command/wasm32-wasip1-threads/release/LOSAT.wasm}"
+ NODE_BIN="${NODE_BIN:-node}"
+-RUN_NATIVE="${RUN_NATIVE:-1}"
+-RUN_NCBI="${RUN_NCBI:-1}"
+-RUN_LOSAT_WASM="${RUN_LOSAT_WASM:-1}"
+-RUN_LOSAT_WASM_THREADED="${RUN_LOSAT_WASM_THREADED:-1}"
+-BUILD_LOSAT_WASM="${BUILD_LOSAT_WASM:-0}"
+-BUILD_LOSAT_WASM_THREADED="${BUILD_LOSAT_WASM_THREADED:-$BUILD_LOSAT_WASM}"
+-for setting in RUN_NATIVE RUN_NCBI RUN_LOSAT_WASM RUN_LOSAT_WASM_THREADED BUILD_LOSAT_WASM BUILD_LOSAT_WASM_THREADED; do
+-    [[ "${!setting}" == 0 || "${!setting}" == 1 ]] || { echo "$setting must be 0 or 1" >&2; exit 2; }
+-done
+-[[ "$RUN_NATIVE$RUN_NCBI$RUN_LOSAT_WASM" != 000 ]] || { echo 'No runners selected' >&2; exit 2; }
++
+ 
+ selected() {
+     [[ ",$BENCHMARK_PROGRAMS," == *",$task,"* && "$losat_stem" == *"${BENCHMARK_CASE:-}"* ]]
+@@ -115,28 +130,32 @@
+ [[ "$count" -gt 0 ]] || { echo 'No matching comparison cases' >&2; exit 2; }
+ require_command timeout
+ if [[ "$RUN_NATIVE" == 1 ]]; then require_command "$LOSAT_BIN"; fi
+-if [[ "$RUN_LOSAT_WASM" == 1 ]]; then
++# NCBI reference: c++/src/algo/blast/api/prelim_stage.cpp:173-180
++# (*thread)->Run(); (*thread)->Join(&result);
++if [[ "$RUN_LOSAT_WASM" == 1 || "$RUN_LOSAT_WASM_THREADED" == 1 ]]; then
+     require_command "$NODE_BIN"
+     NODE_BIN="$(command -v "$NODE_BIN")"
+     "$NODE_BIN" -p '`Node: ${process.version}; V8: ${process.versions.v8}; executable: ${process.execPath}`'
+-    if [[ "$BUILD_LOSAT_WASM" == 1 || ( "$RUN_LOSAT_WASM_THREADED" == 1 && "$BUILD_LOSAT_WASM_THREADED" == 1 ) ]]; then
++    if [[ ( "$RUN_LOSAT_WASM" == 1 && "$BUILD_LOSAT_WASM" == 1 ) || ( "$RUN_LOSAT_WASM_THREADED" == 1 && "$BUILD_LOSAT_WASM_THREADED" == 1 ) ]]; then
+         printf 'Wasm compiler: '
+         rustc --version
+         printf 'Wasm build tool: '
+         cargo --version
+     fi
+-    if [[ "$BUILD_LOSAT_WASM" == 1 ]]; then
++    if [[ "$RUN_LOSAT_WASM" == 1 && "$BUILD_LOSAT_WASM" == 1 ]]; then
+         (cd .. && cargo build --release --bin LOSAT --target wasm32-wasip1 --no-default-features --target-dir target/serial-command)
+     fi
+     if [[ "$RUN_LOSAT_WASM_THREADED" == 1 && "$BUILD_LOSAT_WASM_THREADED" == 1 ]]; then
+         (cd .. && cargo build --release --bin LOSAT --target wasm32-wasip1-threads --features wasm-threads --target-dir target/threaded-command)
+     fi
+     # Require the exact requested command artifacts; never pick a stale deps/ file.
+-    "$NODE_BIN" - "$LOSAT_WASM_BIN" "$LOSAT_WASM_THREADED_BIN" "$RUN_LOSAT_WASM_THREADED" "$SCRIPT_DIR/wasi_artifact.js" <<'JS'
++    # NCBI reference: c++/src/app/blast/blastn_app.cpp:172-176
++    # CATCH_ALL(status); return status;
++    "$NODE_BIN" - "$LOSAT_WASM_BIN" "$LOSAT_WASM_THREADED_BIN" "$RUN_LOSAT_WASM" "$RUN_LOSAT_WASM_THREADED" "$SCRIPT_DIR/wasi_artifact.js" <<'JS'
+ const fs = require('fs');
+-const [serial, threaded, enabled, inspector] = process.argv.slice(2);
++const [serial, threaded, serialEnabled, threadedEnabled, inspector] = process.argv.slice(2);
+ const { inspectArtifact } = require(inspector);
+-for (const [path, threads] of [[serial, false], ...(enabled === '1' ? [[threaded, true]] : [])]) {
++for (const [path, threads] of [...(serialEnabled === '1' ? [[serial, false]] : []), ...(threadedEnabled === '1' ? [[threaded, true]] : [])]) {
+     inspectArtifact(fs.readFileSync(path), threads ? 'threaded-command' : 'serial-command');
+     console.log(`Wasm ${threads ? 'threaded' : 'serial'}: ${path}; modified: ${fs.statSync(path).mtime.toISOString()}`);
+ }
+@@ -200,16 +219,23 @@
+             run_timed "$LOSAT_OUT_DIR/$losat_stem.n$LOSAT_THREADS" "$LOSAT_BIN" "$program" "${args[@]}" -num_threads "$LOSAT_THREADS"
+         fi
+     fi
+-    if [[ "$RUN_LOSAT_WASM" == 1 ]]; then
++    # NCBI reference: c++/src/algo/blast/blastinput/cmdline_flags.cpp:75
++    # const string kArgNumThreads("num_threads");
++    if [[ "$RUN_LOSAT_WASM" == 1 || "$RUN_LOSAT_WASM_THREADED" == 1 ]]; then
+         # NCBI reference: c++/src/algo/blast/blastinput/cmdline_flags.cpp:46-75
+         # const string kArgQuery("query"); const string kArgSubject("subject");
+         # Select Node compilation before starting this command process; worker
+         # isolates inherit the same flags. BLASTN and BLASTP use common args only.
+         search_node_args=("${NODE_ARGS[@]}")
+         if [[ "$program" == tblastx ]]; then search_node_args=("${TBLASTX_NODE_ARGS[@]}"); fi
+-        run_timed "$LOSAT_OUT_DIR/$losat_stem.wasm" env NODE_NO_WARNINGS=1 "$NODE_BIN" "${search_node_args[@]}" "$SCRIPT_DIR/run_losat_wasi.js" "$LOSAT_WASM_BIN" "$program" "${args[@]}" -num_threads 1
++        if [[ "$RUN_LOSAT_WASM" == 1 ]]; then
++            run_timed "$LOSAT_OUT_DIR/$losat_stem.wasm" env NODE_NO_WARNINGS=1 "$NODE_BIN" "${search_node_args[@]}" "$SCRIPT_DIR/run_losat_wasi.js" "$LOSAT_WASM_BIN" "$program" "${args[@]}" -num_threads 1
++        fi
+         if [[ "$RUN_LOSAT_WASM_THREADED" == 1 ]]; then
+-            run_timed "$LOSAT_OUT_DIR/$losat_stem.wasm.n$LOSAT_THREADS" env NODE_NO_WARNINGS=1 "$NODE_BIN" "${search_node_args[@]}" "$SCRIPT_DIR/run_losat_wasi_threads.js" "$LOSAT_WASM_THREADED_BIN" "$program" "${args[@]}" -num_threads "$LOSAT_THREADS"
++            run_timed "$LOSAT_OUT_DIR/$losat_stem.wasm.n1" env NODE_NO_WARNINGS=1 "$NODE_BIN" "${search_node_args[@]}" "$SCRIPT_DIR/run_losat_wasi_threads.js" "$LOSAT_WASM_THREADED_BIN" "$program" "${args[@]}" -num_threads 1
++            if [[ "$LOSAT_THREADS" != 1 ]]; then
++                run_timed "$LOSAT_OUT_DIR/$losat_stem.wasm.n$LOSAT_THREADS" env NODE_NO_WARNINGS=1 "$NODE_BIN" "${search_node_args[@]}" "$SCRIPT_DIR/run_losat_wasi_threads.js" "$LOSAT_WASM_THREADED_BIN" "$program" "${args[@]}" -num_threads "$LOSAT_THREADS"
++            fi
+         fi
+     fi
+     if [[ "$RUN_NCBI" == 1 ]]; then
+--- initial/LOSAT/tests/test_simple_comparison.py
++++ current/LOSAT/tests/test_simple_comparison.py
+@@ -91,7 +91,7 @@
+     # Persist exactly the same argument array that the shell consumes.
+     def test_tblastx_profile_manifest_matches_nul_delimited_argv(self):
+         directory = self.root / "profile"
+-        with patch.dict(os.environ, {"RUN_LOSAT_WASM": "0", "NODE_ARGS_JSON": '["--trace-warnings"]'}, clear=True):
++        with patch.dict(os.environ, {"RUN_LOSAT_WASM": "0", "RUN_LOSAT_WASM_THREADED": "0", "NODE_ARGS_JSON": '["--trace-warnings"]'}, clear=True):
+             data.record_cli(["init", str(directory)])
+         manifest = json.loads((directory / "run.json").read_text())
+         flags = (directory / "node-tblastx-args.bin").read_bytes().split(b"\0")[:-1]
+@@ -199,7 +199,7 @@
+         binary = self.root / "fake-losat"
+         env = dict(os.environ, BENCHMARK_PROGRAMS="blastp", BENCHMARK_CASE="WSSV.PajaWSV",
+                    LOSAT_THREADS="4", LOSAT_BIN=str(binary), RUN_NATIVE="1", RUN_NCBI="0",
+-                   RUN_LOSAT_WASM="0", BENCHMARK_TIMEOUT="1")
++                   RUN_LOSAT_WASM="0", RUN_LOSAT_WASM_THREADED="0", BENCHMARK_TIMEOUT="1")
+         for number, (command, expected) in enumerate([("exit 7", 7), ("sleep 5", 124), ("exit 0", 125)]):
+             with self.subTest(command=command):
+                 directory = self.root / f"run-{number}"
+@@ -227,7 +227,7 @@
+         env = dict(os.environ, BENCHMARK_DIR=str(self.root / "run"),
+                    BENCHMARK_PROGRAMS="blastp", BENCHMARK_CASE="WSSV.PajaWSV",
+                    LOSAT_THREADS="4", LOSAT_BIN=str(binary),
+-                   RUN_NATIVE="1", RUN_NCBI="0", RUN_LOSAT_WASM="0")
++                   RUN_NATIVE="1", RUN_NCBI="0", RUN_LOSAT_WASM="0", RUN_LOSAT_WASM_THREADED="0")
+         result = subprocess.run(
+             ["bash", str(data.SCRIPT_DIR / "run_comparison.sh")],
+             env=env, capture_output=True, text=True, timeout=15,
+@@ -242,6 +242,66 @@
+         self.assertLess(result.stdout.index("Finished WSSV.PajaWSV.losatp:"),
+                         result.stdout.index("Running WSSV.PajaWSV.losatp.n4"))
+ 
++    # NCBI reference: c++/src/algo/blast/blastinput/cmdline_flags.cpp:75
++    # const string kArgNumThreads("num_threads");
++    # A synthetic Node process tests harness routing only; actual artifact
++    # validation and BLAST output remain covered by the real WASI gates.
++    def test_threaded_only_and_serial_compatibility_are_independent(self):
++        node = self.root / "fake-node"
++        node.write_text(f'''#!{sys.executable}
++import json, sys
++from pathlib import Path
++if sys.argv[1] == '-p':
++    print('{{}}')
++elif sys.argv[1] == '-':
++    sys.stdin.read()
++    serial, threaded, serial_enabled, threaded_enabled, inspector = sys.argv[2:]
++    for filename, enabled in [(serial, serial_enabled), (threaded, threaded_enabled)]:
++        if enabled == '1':
++            assert Path(filename).is_file(), filename
++else:
++    args = sys.argv[1:]
++    assert Path(args[0]).name in ['run_losat_wasi.js', 'run_losat_wasi_threads.js']
++    assert Path(args[1]).is_file()
++    Path(args[args.index('-out') + 1]).write_text({ROW!r})
++''')
++        node.chmod(0o755)
++        for serial_flag, threaded_flag, n in [(0, 1, 4), (0, 1, 1), (1, 0, 4), (1, 1, 4), (0, 0, 4), ("", "", 4)]:
++            serial_enabled = (str(serial_flag) or "0") == "1"
++            threaded_enabled = (str(threaded_flag) or "1") == "1"
++            with self.subTest(serial=serial_enabled, threaded=threaded_enabled, threads=n):
++                label = f"selected-{serial_flag}-{threaded_flag}-{n}"
++                directory = self.root / label
++                serial = self.root / f"{label}-serial.wasm"
++                threaded = self.root / f"{label}-threaded.wasm"
++                if serial_enabled: serial.write_bytes(b"synthetic serial fixture")
++                if threaded_enabled: threaded.write_bytes(b"synthetic threaded fixture")
++                env = dict(os.environ, BENCHMARK_DIR=str(directory),
++                           BENCHMARK_PROGRAMS="blastp", BENCHMARK_CASE="WSSV.PajaWSV",
++                           RUN_NATIVE="0", RUN_NCBI="0", RUN_LOSAT_WASM=str(serial_flag),
++                           RUN_LOSAT_WASM_THREADED=str(threaded_flag), LOSAT_THREADS=str(n),
++                           BUILD_LOSAT_WASM="0", BUILD_LOSAT_WASM_THREADED="0",
++                           LOSAT_WASM_BIN=str(serial), LOSAT_WASM_THREADED_BIN=str(threaded),
++                           NODE_BIN=str(node), NODE_ARGS_JSON="[]")
++                result = subprocess.run(["bash", str(data.SCRIPT_DIR / "run_comparison.sh")],
++                                        env=env, capture_output=True, text=True, timeout=30)
++                if not (serial_enabled or threaded_enabled):
++                    self.assertEqual(result.returncode, 2, result.stderr)
++                    self.assertIn("No runners selected", result.stderr)
++                    continue
++                self.assertEqual(result.returncode, 0, result.stderr)
++                expected = ({"WSSV.PajaWSV.losatp.wasm.out"} if serial_enabled else set())
++                if threaded_enabled:
++                    expected.add("WSSV.PajaWSV.losatp.wasm.n1.out")
++                    if n != 1: expected.add(f"WSSV.PajaWSV.losatp.wasm.n{n}.out")
++                self.assertEqual({p.name for p in (directory / "losat_out").glob("*.out")}, expected)
++                manifest = json.loads((directory / "run.json").read_text())
++                self.assertEqual(manifest["enabled_runners"]["RUN_LOSAT_WASM"], bool(serial_enabled))
++                self.assertEqual(manifest["enabled_runners"]["RUN_LOSAT_WASM_THREADED"], bool(threaded_enabled))
++                self.assertIsNotNone(manifest["node_versions"])
++                for output in (directory / "losat_out").glob("*.out"):
++                    self.assertTrue(data.successful_output(output))
++
+ 
+ if __name__ == "__main__":
+     unittest.main()
+--- initial/LOSAT/tests/test_wasm_performance.py
++++ current/LOSAT/tests/test_wasm_performance.py
+@@ -191,6 +191,11 @@
+             "import pathlib,sys;pathlib.Path(sys.argv[-1]).write_bytes(b'');sys.exit(7)"
+         )
+         self.assertEqual(result["status"], "BAD_EXIT")
++        # NCBI reference: c++/src/algo/blast/api/prelim_stage.cpp:178-188
++        # (*thread)->Join(&result);
++        # Exact recorded endpoints cover the same process lifetime on failure.
++        self.assertGreater(result["monotonic_end"], result["monotonic_start"])
++        self.assertEqual(result["wall_seconds"], result["monotonic_end"] - result["monotonic_start"])
+         self.assertEqual(
+             perf.raw_gate(result, hashlib.sha256(b"").hexdigest()), "BAD_EXIT"
+         )
+--- initial/LOSAT/tests/wasm_performance.py
++++ current/LOSAT/tests/wasm_performance.py
+@@ -492,7 +492,11 @@
+                 status, reason = "BAD_EXIT", f"subprocess exit {exit_code}"
+         except OSError as error:
+             status, reason = "BAD_EXIT", str(error)
+-    elapsed = time.monotonic() - start
++    # NCBI reference: c++/src/algo/blast/api/prelim_stage.cpp:178-188
++    # (*thread)->Join(&result);
++    # Record the exact existing elapsed-time endpoints for process overlap audits.
++    monotonic_end = time.monotonic()
++    elapsed = monotonic_end - start
+     realtime_elapsed = time.time() - realtime_start
+     boottime_elapsed = time.clock_gettime(time.CLOCK_BOOTTIME) - boottime_start if boottime_start is not None else None
+     process_ended_utc = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
+@@ -518,6 +522,8 @@
+         "reason": reason,
+         "exit_status": exit_code,
+         "wall_seconds": elapsed,
++        "monotonic_start": start,
++        "monotonic_end": monotonic_end,
+         "realtime_seconds": realtime_elapsed,
+         "boottime_seconds": boottime_elapsed,
+         "gnu_elapsed_seconds": gnu_elapsed,

@@ -1,0 +1,16 @@
+{
+  "purpose": "Frozen PR5 Gate A comparison; current correction is not certified against this contract",
+  "frozen": {
+    "path": "/mnt/c/Users/genom/LOSAT-certification-evidence/losat-pr5-integrated-5845d22-20260831-final/native/blastn/Sakai.MG1655.megablast.losat.out",
+    "sha256": "3f27c1f1396b59ecb7e78827b5da390e9c97a276c05cbc7a6c82f56bd0a03262",
+    "bytes": 536922
+  },
+  "current": {
+    "path": "/mnt/c/Users/genom/GitHub/LOSAT/docs/evidence/megablast_wasm_np_remediation_20260913/run-20260913-01/parity/B1-blastn-task-suite/Sakai.MG1655.megablast.losat.out",
+    "sha256": "2e15963c66e5f552088e468d17a1a86b779be61e7ed6331e57314f6e93c69ffa",
+    "bytes": 536880
+  },
+  "raw_equal": false,
+  "status": "FAIL_REQUIRES_AUTHORITY_REVIEW",
+  "gate_b": "NOT_RUN; no authority modifications"
+}

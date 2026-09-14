@@ -1,0 +1,17 @@
+--- isolated/LOSAT/src/algorithm/tblastx/sum_stats_linking/linking.rs
++++ integrated/LOSAT/src/algorithm/tblastx/sum_stats_linking/linking.rs
+@@ -2864,9 +2864,11 @@
+         );
+ 
+         println!("✓ Confirmed: LOSAT uses DESCENDING order for subject.offset (matches NCBI)");
+-    } // NCBI reference: c++/src/algo/blast/core/link_hsps.c:478-486,990-994
+-      // link_hsp_array[index]->hsp = hsp_array[index];
+-      // qsort(link_hsp_array,total_number_of_hsps,sizeof(LinkHSPStruct*), ...);
++    }
++
++    // NCBI reference: c++/src/algo/blast/core/link_hsps.c:478-486,990-994
++    // link_hsp_array[index]->hsp = hsp_array[index];
++    // qsort(link_hsp_array,total_number_of_hsps,sizeof(LinkHSPStruct*), ...);
+     #[test]
+     fn test_final_link_sorts_preserve_payloads_addresses_and_all_ties() {
+         use crate::algorithm::tblastx::ungapped_hit_sort::sort_ungapped_hits_by_index_replay;

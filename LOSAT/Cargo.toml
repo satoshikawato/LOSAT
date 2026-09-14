@@ -68,9 +68,9 @@ parallel = ["rayon", "num_cpus"]
 # }
 # ```
 #
-# Opt-in only: real Wasm threading requires the wasm32-wasip1-threads target
-# and a WASI runtime that implements thread spawning. Plain wasm32-wasip1 and
-# browser command-Wasm builds remain serial.
+# Standard WASI aliases and packaging select this feature together with the
+# wasm32-wasip1-threads target and a runtime that implements thread spawning.
+# Explicit wasm32-wasip1 and wasm32-unknown-unknown builds remain serial.
 wasm-threads = ["parallel"]
 # Diagnostic-only parity switch. NCBI BLAST has a single scalar C control flow
 # for TBLASTX ungapped extension/reevaluation (aa_ungapped.c:846-921,

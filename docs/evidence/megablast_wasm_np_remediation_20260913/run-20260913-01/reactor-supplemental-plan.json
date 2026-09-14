@@ -1,0 +1,59 @@
+{
+  "status": "PREDECLARED_NOT_EXECUTED",
+  "declared_utc": "2026-09-13T19:59:48.615163+00:00",
+  "driver": "/tmp/losat-remediation-20260913-01/supplemental_reactor.py",
+  "driver_sha256": "9fb716f5894005192a1c81c04bb6a90221fe9a89307e50ee58a6a268c4f39b05",
+  "original_group": "integrated-np-reuse",
+  "original_disposition": "FAIL_UNCHANGED: timing15/16; RSS4/4; actual reactor plateau14/16; command plateau16 is N/A",
+  "authority": "Plan section6 permits one additional5-sample confirmation when ambiguous. No speed/nonregression/RSS thresholds changed.",
+  "timing": {
+    "cases": 4,
+    "sessions": 2,
+    "order": [
+      "baseline",
+      "candidate",
+      "candidate",
+      "baseline"
+    ],
+    "warmups": 1,
+    "additional_measured_repeats": 5,
+    "processes": 4,
+    "jobs": 96,
+    "requirements": [
+      "additional median AND combined10 median per session/case pass unchanged max(5%,50ms)",
+      "additional process RSS passes max(10%,16MiB) and4GiB budget",
+      "all exact raw, worker lifecycle, bindings and order pass"
+    ],
+    "combined_boundary": "Two separate same-instance cohorts, not ten consecutive invocations in one instance",
+    "failure": "INCONCLUSIVE; no further confirmation"
+  },
+  "memory": {
+    "cases": [
+      "MjPMNV.MlPMNV.losatn.blastn",
+      "AP027132.NZ_CP006932.losatp"
+    ],
+    "sessions": 2,
+    "order": [
+      "baseline",
+      "candidate",
+      "candidate",
+      "baseline"
+    ],
+    "calls": 16,
+    "stable_final_calls": 8,
+    "processes": 4,
+    "jobs": 128,
+    "all_timed_false": true,
+    "independent_of_original_time_failure": true,
+    "failure": "FAIL_FIXED_OBSERVATION; no extension or retry",
+    "limits": "Finite high-water observation only. Original plateau fails remain. Scratch capacity and ownership are separate requirements."
+  },
+  "static_review": "ncbi_parity_auditor found no execution blocker at ed3cca2; three recommended pre-execution binding/metadata checks added to final script.",
+  "unexecuted_original_draft": "/tmp/losat-remediation-20260913-01/diagnose_reactor_highwater.py",
+  "unchanged": [
+    "production589-file frozen manifest",
+    "original samples/results/status",
+    "all timing/RSS thresholds",
+    "original evaluator"
+  ]
+}

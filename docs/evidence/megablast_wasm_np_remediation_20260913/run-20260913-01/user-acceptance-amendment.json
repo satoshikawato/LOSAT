@@ -1,0 +1,11 @@
+{
+  "recorded_utc": "2026-09-13T14:15:25.880369+00:00",
+  "user_instruction": "3.84%でもいいじゃん、ほかのやつはドカンと速くなったんだから。もともと短いわけでしょ",
+  "scope": "C-N4 short BLASTN main LC738874/LC738870; waive primary 5% floor, retain all nonregression, raw, RSS, memory/reuse gates",
+  "unchanged": "AP BLASTN and both BLASTP main 5% floor",
+  "initial_five_pair_speedup_percent": 3.84,
+  "additional_five_pair_speedup_percent": -0.5,
+  "additional_delta_ms": 3.723,
+  "pooled_ten_pair_speedup_percent": 7.087626325248331,
+  "interpretation": "Both cohorts pass nonregression; inconsistent short-input speed estimates are not sold as a reliable 7.09% gain. User accepts the practical short-input outcome alongside the large-input improvement."
+}

@@ -1,0 +1,76 @@
+[
+  {
+    "name": "threaded-routing-tests",
+    "argv": [
+      "/home/kawato/micromamba/bin/python",
+      "-m",
+      "unittest",
+      "discover",
+      "-s",
+      "LOSAT/tests",
+      "-p",
+      "test_simple_comparison.py"
+    ],
+    "cwd": "/mnt/c/Users/genom/GitHub/LOSAT",
+    "exit_status": 0,
+    "log": "/tmp/losat-remediation-20260913-01/threaded-routing-tests.log"
+  },
+  {
+    "name": "threaded-evidence-tests",
+    "argv": [
+      "/home/kawato/micromamba/bin/python",
+      "-m",
+      "unittest",
+      "discover",
+      "-s",
+      "LOSAT/tests",
+      "-p",
+      "test_wasm_performance.py"
+    ],
+    "cwd": "/mnt/c/Users/genom/GitHub/LOSAT",
+    "exit_status": 0,
+    "log": "/tmp/losat-remediation-20260913-01/threaded-evidence-tests.log"
+  },
+  {
+    "name": "threaded-shell-syntax",
+    "argv": [
+      "bash",
+      "-n",
+      "LOSAT/tests/run_comparison.sh"
+    ],
+    "cwd": "/mnt/c/Users/genom/GitHub/LOSAT",
+    "exit_status": 0,
+    "log": "/tmp/losat-remediation-20260913-01/threaded-shell-syntax.log"
+  },
+  {
+    "name": "x-cost-diagnostic-build",
+    "argv": [
+      "cargo",
+      "build",
+      "--release",
+      "--locked",
+      "--offline",
+      "--bin",
+      "LOSAT",
+      "--target",
+      "wasm32-wasip1-threads",
+      "--features",
+      "wasm-threads",
+      "--target-dir",
+      "/tmp/losat-remediation-20260913-01/x-cost-diagnostic-target/threaded-command"
+    ],
+    "cwd": "/tmp/losat-remediation-20260913-01/x-cost-diagnostic-source/LOSAT",
+    "exit_status": 0,
+    "log": "/tmp/losat-remediation-20260913-01/x-cost-diagnostic-build.log"
+  },
+  {
+    "name": "x-cost-diagnostic-runs",
+    "argv": [
+      "/home/kawato/micromamba/bin/python",
+      "/tmp/losat-remediation-20260913-01/x_cost_runs.py"
+    ],
+    "cwd": "/mnt/c/Users/genom/GitHub/LOSAT",
+    "exit_status": 0,
+    "log": "/tmp/losat-remediation-20260913-01/x-cost-diagnostic-runs.log"
+  }
+]

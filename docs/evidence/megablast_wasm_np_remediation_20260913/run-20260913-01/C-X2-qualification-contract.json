@@ -1,0 +1,9 @@
+{
+  "recorded_utc": "2026-09-13T16:11:52Z",
+  "scope": "User-requested reduction of TBLASTX payload movement; no TBLASTX speedup floor was specified.",
+  "acceptance": "Final two sorts remove four full-record clone occurrences per HSP for N>1. Require exact output/order and all pre-existing time/RSS/linear-memory nonregression gates. Five-pair component qualification remains required; do not label a flat/noisy whole-search result a speedup.",
+  "same_time_gate": "median delta <= max(5% baseline median, 50 ms)",
+  "same_rss_gate": "maximum RSS delta <= max(10% baseline maximum, 16 MiB)",
+  "boundary": "Initial owned sort, owned group kernel/layout and final replay output clones remain. C-X1 remains rejected; not stacked.",
+  "status_at_record": "3-pair exploration still running, no final exploration summary yet"
+}

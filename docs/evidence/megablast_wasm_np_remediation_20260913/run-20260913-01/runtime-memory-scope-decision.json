@@ -1,0 +1,16 @@
+{
+  "status": "USER_AUTHORIZED_SCOPE_ADJUSTMENT",
+  "recorded_utc": "2026-09-13T23:45:46Z",
+  "user_answer": "\u5171\u901aruntime\u306e\u8ab2\u984c\u3068\u3057\u3066\u5225\u4ef6\u306b\u6b8b\u3057\u3001\u4eca\u56de\u306f\u30e1\u30e2\u30ea\u304c\u60aa\u5316\u3057\u306a\u3044\u3053\u3068\u3092\u6761\u4ef6\u306b\u63a1\u7528\u3059\u308b",
+  "question_context": "Both baseline and candidate show linear-memory growth while the diagnostic observed equal retained live maxima.",
+  "deferred": "Absolute plateau of the shared runtime linear-memory allocation over repeated searches.",
+  "retained_requirements": [
+    "Original peak RSS nonregression max(10% of baseline maximum,16 MiB)",
+    "Existing process and linear-memory budgets",
+    "No increased observed retained allocator live maxima or block counts in the compared diagnostic",
+    "Actual scratch/capacity reuse checks",
+    "All raw output, lifecycle and time gates"
+  ],
+  "original_failures": "Preserved without rewriting their statuses.",
+  "boundary": "No claim that every observed linear-memory byte count is equal. Finite observations do not prove unlimited memory stability. No native time or speed-floor waiver."
+}

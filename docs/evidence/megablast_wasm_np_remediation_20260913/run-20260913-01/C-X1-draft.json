@@ -1,0 +1,7 @@
+{
+  "status": "DRAFT_UNBUILT",
+  "source": "/tmp/losat-remediation-20260913-01/C-X1-source",
+  "source_sha256": "b6203cb91d1c236c3a219f621480373692891176791b6b5eea932ecb245bcaa0",
+  "reason": "Prepared without build or execution while P controls run; baseline cost measurement and all qualification gates still required",
+  "review_followup": "Added recommended direct-group fixed-address/owner-update assertion with second-group scratch reuse; remains unbuilt."
+}

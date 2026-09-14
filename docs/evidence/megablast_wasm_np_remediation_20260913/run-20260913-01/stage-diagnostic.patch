@@ -1,0 +1,110 @@
+--- a/LOSAT/src/algorithm/blastn/blast_engine/run.rs
++++ b/LOSAT/src/algorithm/blastn/blast_engine/run.rs
+@@ -9012,6 +9012,11 @@
+             ))]
+             let mut speculative_results = Vec::new();
+             // NCBI reference: c++/src/algo/blast/core/blast_traceback.c:403-405,509-513,598-601
++            // BLAST_GappedAlignmentWithTraceback(...); BlastIntervalTreeAddHSP(...);
++            // Isolated diagnostics time the same pure computations and ordered replay.
++            #[cfg(all(feature = "parallel", any(not(target_arch = "wasm32"), feature = "wasm-threads")))]
++            let mut batch_diagnostics: Vec<(usize, f64, f64, f64, f64)> = Vec::new();
++            // NCBI reference: c++/src/algo/blast/core/blast_traceback.c:403-405,509-513,598-601
+             // ```c
+             // if (!BlastIntervalTreeContainsHSP(tree, hsp, query_info, ...)) {
+             //     BLAST_GappedAlignmentWithTraceback(...);
+@@ -9043,6 +9048,7 @@
+                     any(not(target_arch = "wasm32"), feature = "wasm-threads")
+                 ))]
+                 if speculative_traceback && prelim_index % SPECULATIVE_TRACEBACK_BATCH_SIZE == 0 {
++                    let batch_started = std::time::Instant::now();
+                     let batch_end =
+                         (prelim_index + SPECULATIVE_TRACEBACK_BATCH_SIZE).min(prelim_hits.len());
+                     let jobs: Vec<_> = (prelim_index..batch_end)
+@@ -9080,12 +9086,15 @@
+                             .par_iter_mut()
+                             .enumerate()
+                             .map(|(slot, scratch)| {
+-                                jobs.iter()
++                                let slot_started = std::time::Instant::now();
++                                let mut job_ns = Vec::new();
++                                let values = jobs.iter()
+                                     .skip(slot)
+                                     .step_by(num_threads)
+                                     .filter_map(|&index| {
+                                         let p = &prelim_hits[index];
+                                         let (qs, _, shift, slen, ss) = prepare_traceback(p)?;
++                                        let job_started = std::time::Instant::now();
+                                         let result =
+                                             extend_gapped_heuristic_with_traceback_with_scratch(
+                                                 &encoded_queries_blastna[p.context_idx as usize],
+@@ -9101,13 +9110,20 @@
+                                                 x_drop_final,
+                                                 scratch,
+                                             );
++                                        job_ns.push(job_started.elapsed().as_secs_f64());
+                                         Some((index, result))
+                                     })
+-                                    .collect::<Vec<_>>()
++                                    .collect::<Vec<_>>();
++                                (values, slot_started.elapsed().as_secs_f64(), job_ns)
+                             })
+                             .collect()
+                     });
+-                    for (index, result) in computed.into_iter().flatten() {
++                    let wall = batch_started.elapsed().as_secs_f64();
++                    let slot_sum: f64 = computed.iter().map(|x|x.1).sum();
++                    let slot_max = computed.iter().map(|x|x.1).fold(0.0_f64, f64::max);
++                    let job_max = computed.iter().flat_map(|x|x.2.iter().copied()).fold(0.0_f64, f64::max);
++                    batch_diagnostics.push((jobs.len(),wall,slot_sum,slot_max,job_max));
++                    for (index, result) in computed.into_iter().flat_map(|x|x.0) {
+                         speculative_results[index - prelim_index] = Some(result);
+                     }
+                 }
+@@ -9680,6 +9696,18 @@
+                 }
+             }
+ 
++            // NCBI reference: c++/src/algo/blast/core/blast_traceback.c:403-405,509-513,598-601
++            // BLAST_GappedAlignmentWithTraceback(...); BlastIntervalTreeAddHSP(...);
++            // Isolated diagnostics time the same pure computations and ordered replay.
++            #[cfg(all(feature = "parallel", any(not(target_arch = "wasm32"), feature = "wasm-threads")))]
++            {
++                let n = num_threads as f64;
++                let wall:f64=batch_diagnostics.iter().map(|r|r.1).sum();
++                let work:f64=batch_diagnostics.iter().map(|r|r.2).sum();
++                let tail:f64=batch_diagnostics.iter().map(|r|(r.3-r.2/n).max(0.0)).sum();
++                let largest:f64=batch_diagnostics.iter().map(|r|r.4).sum();
++                eprintln!("[BATCH_COST] batches={} jobs={} wall={} slot_work={} imbalance_bound={} max_job_sum={}",batch_diagnostics.len(),batch_diagnostics.iter().map(|r|r.0).sum::<usize>(),wall,work,tail,largest);
++            }
+             prelim_hits.clear();
+         }
+ 
+@@ -9921,6 +9949,7 @@
+                     ),
+                 );
+             }
++
+         }
+         local_hits.retain(|h| h.raw_score != i32::MIN);
+         let hits_step3 = local_hits.len();
+--- a/LOSAT/src/algorithm/blastp/blast_engine.rs
++++ b/LOSAT/src/algorithm/blastp/blast_engine.rs
+@@ -406,15 +406,10 @@
+ //                                       psi_options, db_options, hsp_stream, ...);
+ // ```
+ #[inline]
++// NCBI reference: c++/src/algo/blast/core/blast_kappa.c:3493-3503
++// BLAST_RedoAlignmentCore(...); // isolated stage timing only
+ fn blastp_timing_env_enabled() -> bool {
+-    #[cfg(target_arch = "wasm32")]
+-    {
+-        false
+-    }
+-    #[cfg(not(target_arch = "wasm32"))]
+-    {
+-        std::env::var_os("LOSAT_TIMING").is_some()
+-    }
++    std::env::var_os("LOSAT_TIMING").is_some()
+ }
+ 
+ // NCBI reference: /mnt/c/Users/genom/GitHub/ncbi-blast/c++/src/algo/blast/core/blast_engine.c:1633-1705

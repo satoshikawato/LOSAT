@@ -1,0 +1,9 @@
+{
+  "recorded_utc": "2026-09-13T17:23:44Z",
+  "status": "PREDECLARED_BEFORE_INTEGRATED_BUILD_OR_RUN",
+  "reason": "Avoid rerunning an unchanged baseline and the same expensive NCBI oracle twice. Current component gencode4 includes one official DB oracle and both B1/C-X2 native/threaded n1/n8. Final correctness instead runs the integrated candidate on all four target/thread conditions against that exact saved oracle, after binding input/tool/output hashes.",
+  "performance_boundary": "No gencode4 adoption timing or speedup claim; main/control performance cohorts are unchanged.",
+  "driver": "/tmp/losat-remediation-20260913-01/final_gencode4.py",
+  "driver_sha256": "2b228506b3fb4bf22b37d3c2f9c6576251c6e8336b6c020ef8a95acae874e92d",
+  "hash_guards": "Node, actual runner and imports, and integrated artifact hashes bound before and after each invocation"
+}

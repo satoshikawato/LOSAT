@@ -12,7 +12,10 @@
 target-dir = "target"
 
 [alias]
-build-web = "build --release --lib --target wasm32-wasip1 --no-default-features --target-dir target/serial-reactor"
+# NCBI reference: c++/src/algo/blast/api/prelim_stage.cpp:173-180
+# (*thread)->Run(); (*thread)->Join(&result);
+build-web = "build --release --lib --target wasm32-wasip1-threads --features wasm-threads --target-dir target/threaded-reactor"
+build-web-serial = "build --release --lib --target wasm32-wasip1 --no-default-features --target-dir target/serial-reactor"
 build-web-unknown = "build --release --lib --target wasm32-unknown-unknown --no-default-features"
 # NCBI reference: ncbi-blast/c++/src/algo/blast/blastinput/blast_args.cpp:3205-3222
 # ```c
@@ -28,7 +31,10 @@ build-web-unknown = "build --release --lib --target wasm32-unknown-unknown --no-
 # Command and reactor link different CRT entry points and use separate outputs.
 build-web-threaded = "build --release --bin LOSAT --target wasm32-wasip1-threads --features wasm-threads --target-dir target/threaded-command"
 build-web-threaded-reactor = "build --release --lib --target wasm32-wasip1-threads --features wasm-threads --target-dir target/threaded-reactor"
-build-wasi-command = "build --release --bin LOSAT --target wasm32-wasip1 --no-default-features --target-dir target/serial-command"
+# NCBI reference: c++/src/algo/blast/api/prelim_stage.cpp:173-180
+# (*thread)->Run(); (*thread)->Join(&result);
+build-wasi-command = "build --release --bin LOSAT --target wasm32-wasip1-threads --features wasm-threads --target-dir target/threaded-command"
+build-wasi-command-serial = "build --release --bin LOSAT --target wasm32-wasip1 --no-default-features --target-dir target/serial-command"
 
 # The Rust code only enters its wasm SIMD routines behind
 # `cfg(all(target_arch = "wasm32", target_feature = "simd128"))`; this enables
@@ -41,3 +47,12 @@ rustflags = ["-C", "target-feature=+simd128"]
 
 [target.wasm32-unknown-unknown]
 rustflags = ["-C", "target-feature=+simd128"]
+
+# NCBI reference: c++/src/algo/blast/core/link_hsps.c:827-861
+# for (H2_index=H_index-1; H2_index>1;) { ... }
+# Align native x86_64 loop heads so unrelated function-size changes do not
+# displace the repeated helper scan from its measured fast alignment. This
+# changes instruction padding, preserving the same search operations/order.
+# Explicit target scope keeps command/reactor Wasm code generation unchanged.
+[target.'cfg(target_arch = "x86_64")']
+rustflags = ["-C", "llvm-args=-align-loops=64", "-C", "llvm-args=-max-bytes-for-alignment=63"]

@@ -1,0 +1,112 @@
+{
+  "status": "PREDECLARED_NOT_EXECUTED",
+  "declared_utc": "2026-09-13T20:11:41.727860+00:00",
+  "driver": "/tmp/losat-remediation-20260913-01/supplemental_reactor_memory.py",
+  "driver_sha256": "f0488d4616676c91e0a973bf8b1a20570ed796c5633c86da7a9bba7fdb762fce",
+  "supersedes": "Two-case memory mode in reactor-supplemental-plan.json; it was never executed.",
+  "reason": "The one additional timing cohort observed P078 late growth in both candidate sessions, outside the originally proposed two memory inputs. Preserve original full four-case workload, including shortLC control.",
+  "trigger_evidence_sha256": "41fbea2bba5ccf9761e5a7fb9dc931220c406daefb7ba65b8efca81238d3d7a2",
+  "trigger_late_growth": [
+    {
+      "session": 0,
+      "version": "baseline",
+      "case_id": "MjPMNV.MlPMNV.losatn.blastn",
+      "memory_bytes": [
+        128188416,
+        133431296,
+        138674176,
+        138674176,
+        138674176,
+        143917056
+      ],
+      "memory_limit_bytes": 1073741824,
+      "stable_tail_length": 3,
+      "tail_stable": false,
+      "result": "/mnt/c/Users/genom/GitHub/LOSAT/docs/evidence/megablast_wasm_np_remediation_20260913/run-20260913-01/integrated-np-reactor-confirmation/session0-baseline/process/output.txt",
+      "result_sha256": "e5e531b23bda5936c56c5d74e459fb945a1c28973e1e85eaa36e35d5689ac9ef"
+    },
+    {
+      "session": 0,
+      "version": "candidate",
+      "case_id": "AP027078.AP027131.losatp",
+      "memory_bytes": [
+        68091904,
+        68485120,
+        68485120,
+        68485120,
+        68681728,
+        68747264
+      ],
+      "memory_limit_bytes": 1073741824,
+      "stable_tail_length": 3,
+      "tail_stable": false,
+      "result": "/mnt/c/Users/genom/GitHub/LOSAT/docs/evidence/megablast_wasm_np_remediation_20260913/run-20260913-01/integrated-np-reactor-confirmation/session0-candidate/process/output.txt",
+      "result_sha256": "fa79e173f321699b9637550700b9389d616e688540e2b8072b1633f174f0a94c"
+    },
+    {
+      "session": 1,
+      "version": "candidate",
+      "case_id": "MjPMNV.MlPMNV.losatn.blastn",
+      "memory_bytes": [
+        121569280,
+        126812160,
+        126812160,
+        126812160,
+        132055040,
+        132055040
+      ],
+      "memory_limit_bytes": 1073741824,
+      "stable_tail_length": 3,
+      "tail_stable": false,
+      "result": "/mnt/c/Users/genom/GitHub/LOSAT/docs/evidence/megablast_wasm_np_remediation_20260913/run-20260913-01/integrated-np-reactor-confirmation/session1-candidate/process/output.txt",
+      "result_sha256": "d22ac27427e3f478ed76fea4d1cac42f41c31fecb3e64732ad7907130ec791af"
+    },
+    {
+      "session": 1,
+      "version": "candidate",
+      "case_id": "AP027078.AP027131.losatp",
+      "memory_bytes": [
+        68616192,
+        68812800,
+        68812800,
+        68812800,
+        68812800,
+        68878336
+      ],
+      "memory_limit_bytes": 1073741824,
+      "stable_tail_length": 3,
+      "tail_stable": false,
+      "result": "/mnt/c/Users/genom/GitHub/LOSAT/docs/evidence/megablast_wasm_np_remediation_20260913/run-20260913-01/integrated-np-reactor-confirmation/session1-candidate/process/output.txt",
+      "result_sha256": "d22ac27427e3f478ed76fea4d1cac42f41c31fecb3e64732ad7907130ec791af"
+    }
+  ],
+  "cases": [
+    "MelaMJNV.PemoMJNVA.losatn.blastn",
+    "MjPMNV.MlPMNV.losatn.blastn",
+    "AP027078.AP027131.losatp",
+    "AP027132.NZ_CP006932.losatp"
+  ],
+  "sessions": 2,
+  "order": [
+    "baseline",
+    "candidate",
+    "candidate",
+    "baseline"
+  ],
+  "calls_per_case_instance": 16,
+  "required_stable_final_calls": 8,
+  "processes": 4,
+  "jobs": 256,
+  "all_timed_false": true,
+  "excluded_allowed": 0,
+  "memory_budget_bytes": 4294967296,
+  "requirements": [
+    "all raw outputs exact with same original oracles",
+    "same actual artifacts/Node/host/imports/options/thread8/per-case instances",
+    "every worker exactID/eventorder/exit0",
+    "exact non-overlapping process endpoints",
+    "all16 observed instance series have constant final8 calls"
+  ],
+  "failure": "FAIL_FIXED_OBSERVATION; no extension or retry",
+  "limits": "Original and supplemental six-call memory failures remain unchanged. This establishes only convergence within the fixed observation window; ownership and actual scratch capacity need separate evidence. No speed claim from this diagnostic."
+}

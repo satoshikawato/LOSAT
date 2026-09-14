@@ -1,0 +1,28 @@
+{
+  "status": "PACKAGING_LOG_EXCLUDED_SOURCE_AND_RAW_MEMBERS_VERIFIED",
+  "initial_verification": "FAIL: self-mutating packaging progress log size differed from its pre-write hash manifest",
+  "initial_archive": {
+    "path": "/mnt/c/Users/genom/GitHub/LOSAT/docs/evidence/megablast_wasm_np_remediation_20260913/run-20260913-01/remediation-handoff.tar.gz",
+    "bytes": 1316659281,
+    "sha256": "b6db38d2d614b9623ee7c8ab12ba6a9b312ae612f6bcad3e2285433c50a11e41",
+    "file_entries": 26655,
+    "portable_symlinks": 29,
+    "manifest": "handoff-file-map.json"
+  },
+  "retained_initial_archive": "/mnt/c/Users/genom/GitHub/LOSAT/docs/evidence/megablast_wasm_np_remediation_20260913/run-20260913-01/remediation-handoff-before-packaging-log-fix.tar.gz",
+  "excluded_member": "work/archive-handoff-progress.log",
+  "excluded_manifest_entry": {
+    "original_path": "/tmp/losat-remediation-20260913-01/archive-handoff-progress.log",
+    "sha256": "1ff008ab1fce520d635cf7d857c2e6b7f497ff72ae076dbeeefffde117e52f42",
+    "bytes": 299
+  },
+  "reason": "The archiver wrote progress into a file it had already hashed. Only this packaging log is excluded; no source, raw output or measured record is removed or corrected.",
+  "replacement": {
+    "path": "/mnt/c/Users/genom/GitHub/LOSAT/docs/evidence/megablast_wasm_np_remediation_20260913/run-20260913-01/remediation-handoff.tar.gz",
+    "bytes": 1316658503,
+    "sha256": "a4611e3a997cf8f14a475047288d913f39ddb2b5068e1ae82702a2a6b88b5a66",
+    "file_entries": 26654,
+    "portable_symlinks": 29,
+    "manifest": "handoff-file-map.json"
+  }
+}

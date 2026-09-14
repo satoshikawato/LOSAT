@@ -1,0 +1,123 @@
+--- a/LOSAT/src/utils/mod.rs
++++ b/LOSAT/src/utils/mod.rs
+@@ -6,3 +6,8 @@
+ // NCBI reference: c++/src/algo/blast/api/prelim_stage.cpp:177-188
+ // (*thread)->Run(); (*thread)->Join(&result);
+ pub mod threading;
++
++// NCBI reference: c++/src/algo/blast/core/blast_engine.c:1659-1668
++// /* Use a local diagnostics structure ... shared between multiple threads */
++// Isolated diagnostic: nested aggregate durations are not additive wall time.
++pub mod x_cost_diag;
+--- a/LOSAT/src/utils/x_cost_diag.rs
++++ b/LOSAT/src/utils/x_cost_diag.rs
+@@ -0,0 +1,32 @@
++// NCBI reference: c++/src/algo/blast/core/blast_engine.c:1659-1668
++// /* Use a local diagnostics structure ... shared between multiple threads */
++// Isolated diagnostic: nested aggregate durations are not additive wall time.
++use std::sync::atomic::{AtomicU64, Ordering::Relaxed};
++use std::time::Instant;
++static NS: [AtomicU64; 7] = [const { AtomicU64::new(0) }; 7];
++static CALLS: [AtomicU64; 7] = [const { AtomicU64::new(0) }; 7];
++static RECORDS: [AtomicU64; 7] = [const { AtomicU64::new(0) }; 7];
++static BYTES: [AtomicU64; 7] = [const { AtomicU64::new(0) }; 7];
++pub struct Scope { id: usize, records: u64, bytes: u64, start: Instant }
++impl Scope {
++    pub fn new(id: usize, records: usize, width: usize) -> Self {
++        Self { id, records: records as u64, bytes: records as u64 * width as u64, start: Instant::now() }
++    }
++}
++impl Drop for Scope {
++    fn drop(&mut self) {
++        NS[self.id].fetch_add(self.start.elapsed().as_nanos() as u64, Relaxed);
++        CALLS[self.id].fetch_add(1, Relaxed);
++        RECORDS[self.id].fetch_add(self.records, Relaxed);
++        BYTES[self.id].fetch_add(self.bytes, Relaxed);
++    }
++}
++pub struct Report;
++impl Drop for Report {
++    fn drop(&mut self) {
++        for (i, name) in ["x_sort_original_clone", "x_sort_indices", "x_sort_writeback_clone", "x_link_total", "x_chain_replay_clone", "x_sort_total", "x_link_sort_total"].iter().enumerate() {
++            eprintln!("[X_COST] name={} calls={} aggregate_ns={} records={} logical_clone_bytes={}", name, CALLS[i].load(Relaxed), NS[i].load(Relaxed), RECORDS[i].load(Relaxed), BYTES[i].load(Relaxed));
++        }
++        eprintln!("[X_COST] hsp_width={}", std::mem::size_of::<crate::algorithm::tblastx::chaining::UngappedHit>());
++    }
++}
+--- a/LOSAT/src/utils/threading.rs
++++ b/LOSAT/src/utils/threading.rs
+@@ -94,6 +94,10 @@
+     F: FnOnce(&SearchPool<'_>) -> Result<R> + Send,
+     R: Send,
+ {
++// NCBI reference: c++/src/algo/blast/core/blast_engine.c:1659-1668
++// /* Use a local diagnostics structure ... shared between multiple threads */
++// Isolated diagnostic: nested aggregate durations are not additive wall time.
++    let _x_cost_report = crate::utils::x_cost_diag::Report;
+     validate_threads(requested)?;
+     #[cfg(feature = "parallel")]
+     if requested > 1 {
+--- a/LOSAT/src/algorithm/tblastx/ungapped_hit_sort.rs
++++ b/LOSAT/src/algorithm/tblastx/ungapped_hit_sort.rs
+@@ -40,10 +40,22 @@
+         return;
+     }
+ 
++// NCBI reference: c++/src/algo/blast/core/blast_engine.c:1659-1668
++// /* Use a local diagnostics structure ... shared between multiple threads */
++// Isolated diagnostic: nested aggregate durations are not additive wall time.
++    let _sort_total = crate::utils::x_cost_diag::Scope::new(5, hits.len(), 0);
++    let copy_in = crate::utils::x_cost_diag::Scope::new(0, hits.len(), std::mem::size_of::<UngappedHit>());
+     let original = hits.to_vec();
++    drop(copy_in);
++    let index_sort = crate::utils::x_cost_diag::Scope::new(1, hits.len(), 0);
+     let mut indices: Vec<usize> = (0..original.len()).collect();
+     indices.sort_by(|&lhs_index, &rhs_index| compare(&original[lhs_index], &original[rhs_index]));
+ 
++// NCBI reference: c++/src/algo/blast/core/blast_engine.c:1659-1668
++// /* Use a local diagnostics structure ... shared between multiple threads */
++// Isolated diagnostic: nested aggregate durations are not additive wall time.
++    drop(index_sort);
++    let _copy_out = crate::utils::x_cost_diag::Scope::new(2, hits.len(), std::mem::size_of::<UngappedHit>());
+     for (dst, src) in indices.into_iter().enumerate() {
+         hits[dst] = original[src].clone();
+     }
+--- a/LOSAT/src/algorithm/tblastx/sum_stats_linking/linking.rs
++++ b/LOSAT/src/algorithm/tblastx/sum_stats_linking/linking.rs
+@@ -266,6 +266,13 @@
+     // NCBI's translated-query comparators are partial and NCBI delegates
+     // comparator-equal rows to the platform qsort implementation. Do not add
+     // frame or LOSAT insertion-order tie-breakers here.
++    // NCBI reference: c++/src/algo/blast/core/link_hsps.c:483-486,990-994
++    // qsort(link_hsp_array,total_number_of_hsps,sizeof(LinkHSPStruct*), ...);
++    // Isolated diagnostic: record actual full-record clones in linking sorts.
++    // This duration nests the global sort timers and must not be added to them.
++    let _link_sort = crate::utils::x_cost_diag::Scope::new(
++        6, if hits.len() > 1 { 2 * hits.len() } else { 0 },
++        std::mem::size_of::<UngappedHit>());
+     sort_ungapped_hits_by_index_replay(hits, compare);
+ }
+ 
+@@ -508,6 +515,11 @@
+     eff_searchsp_per_context: &[i64],
+     allow_parallel: bool,
+ ) -> Vec<UngappedHit> {
++// NCBI reference: c++/src/algo/blast/core/blast_engine.c:1659-1668
++// /* Use a local diagnostics structure ... shared between multiple threads */
++// Isolated diagnostic: nested aggregate durations are not additive wall time.
++    let _link_total = crate::utils::x_cost_diag::Scope::new(3, hits.len(), 0);
++
+     if hits.is_empty() {
+         return hits;
+     }
+@@ -844,6 +856,10 @@
+         }
+     }
+ 
++// NCBI reference: c++/src/algo/blast/core/blast_engine.c:1659-1668
++// /* Use a local diagnostics structure ... shared between multiple threads */
++// Isolated diagnostic: nested aggregate durations are not additive wall time.
++    let _replay_cost = crate::utils::x_cost_diag::Scope::new(4, replayed_indices.len(), std::mem::size_of::<UngappedHit>());
+     replayed_indices
+         .into_iter()
+         .map(|index| sorted_hits[index].clone())

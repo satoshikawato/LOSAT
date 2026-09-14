@@ -1,0 +1,42 @@
+[
+  {
+    "file": "run_losat_wasi.js",
+    "B1_path": "/tmp/losat-remediation-20260913-01/B1-artifacts/run_losat_wasi.js",
+    "candidate_path": "/mnt/c/Users/genom/GitHub/LOSAT/LOSAT/tests/run_losat_wasi.js",
+    "B1_sha256": "21311c960920364e3072605a8d5626478b99c010b30e07cab98461f4b5e2c729",
+    "candidate_sha256": "21311c960920364e3072605a8d5626478b99c010b30e07cab98461f4b5e2c729",
+    "equal": true
+  },
+  {
+    "file": "run_losat_wasi_threads.js",
+    "B1_path": "/tmp/losat-remediation-20260913-01/B1-artifacts/run_losat_wasi_threads.js",
+    "candidate_path": "/mnt/c/Users/genom/GitHub/LOSAT/LOSAT/tests/run_losat_wasi_threads.js",
+    "B1_sha256": "faf39e6c83178530c3b21d49ee0929d67e6b9258061cc50c057876617c759c4b",
+    "candidate_sha256": "faf39e6c83178530c3b21d49ee0929d67e6b9258061cc50c057876617c759c4b",
+    "equal": true
+  },
+  {
+    "file": "wasi_artifact.js",
+    "B1_path": "/tmp/losat-remediation-20260913-01/B1-artifacts/wasi_artifact.js",
+    "candidate_path": "/mnt/c/Users/genom/GitHub/LOSAT/LOSAT/tests/wasi_artifact.js",
+    "B1_sha256": "37ca747261b090bf16720b2109a4511a57d90f4b67cf94c158b9bee9fc1d3f73",
+    "candidate_sha256": "37ca747261b090bf16720b2109a4511a57d90f4b67cf94c158b9bee9fc1d3f73",
+    "equal": true
+  },
+  {
+    "file": "wasi_shared_memory.js",
+    "B1_path": "/tmp/losat-remediation-20260913-01/B1-artifacts/wasi_shared_memory.js",
+    "candidate_path": "/mnt/c/Users/genom/GitHub/LOSAT/LOSAT/tests/wasi_shared_memory.js",
+    "B1_sha256": "a11fad8fdd346b3a93edd35f783552d97cd5c5ccb08c491e732a6b8dae552e50",
+    "candidate_sha256": "a11fad8fdd346b3a93edd35f783552d97cd5c5ccb08c491e732a6b8dae552e50",
+    "equal": true
+  },
+  {
+    "file": "wasi_thread_host.js",
+    "B1_path": "/tmp/losat-remediation-20260913-01/B1-artifacts/wasi_thread_host.js",
+    "candidate_path": "/mnt/c/Users/genom/GitHub/LOSAT/LOSAT/tests/wasi_thread_host.js",
+    "B1_sha256": "69480b0d7128ea0f264700dad31f25253e09963867ac28b6b3997704c637a5c3",
+    "candidate_sha256": "69480b0d7128ea0f264700dad31f25253e09963867ac28b6b3997704c637a5c3",
+    "equal": true
+  }
+]

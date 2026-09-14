@@ -77,12 +77,20 @@ def main():
     p = argparse.ArgumentParser(description=__doc__)
     for name in ['candidate-dir', 'artifacts', 'baseline-dir', 'baseline-runners', 'oracle-dir', 'output-dir']:
         p.add_argument('--' + name, type=Path, required=True)
+    # NCBI reference: c++/src/algo/blast/api/prelim_stage.cpp:171-188
+    # (*thread)->Run(); (*thread)->Join(&result);
+    # Cold timing includes host/worker loading; allow equal runner filesystem paths.
+    p.add_argument('--candidate-runners', type=Path, default=TESTS,
+                   help='candidate JS runner directory; use the same path as baseline when host code is unchanged')
     p.add_argument('--node', default='node')
     p.add_argument('--node-arg', action='append', default=[], help='repeat as --node-arg=--flag; applies to both versions')
     p.add_argument('--candidate-node-arg', action='append', default=[], help='additional candidate-only Node flags (P1)')
     p.add_argument('--case', action='append', help='exact losat_stem from comparison_cases.tsv; omit for threading fixtures')
     p.add_argument('--threads', type=int, nargs='+', default=[1, 2, 4, 8])
-    p.add_argument('--kinds', nargs='+', choices=['native', 'serial', 'threaded'], default=['native', 'serial', 'threaded'])
+    # NCBI reference: c++/src/algo/blast/api/prelim_stage.cpp:173-180
+    # (*thread)->Run(); (*thread)->Join(&result);
+    # Serial compatibility measurements require an explicit --kinds serial.
+    p.add_argument('--kinds', nargs='+', choices=['native', 'serial', 'threaded'], default=['native', 'threaded'])
     p.add_argument('--warmups', type=int, default=1)
     p.add_argument('--repeats', type=int, default=5)
     p.add_argument('--timeout', type=float, default=300)
@@ -122,7 +130,10 @@ def run_benchmark(args, out):
     env.update(LC_ALL='C', NODE_NO_WARNINGS='1')
     nodes = {'baseline':[args.node, *args.node_arg], 'candidate':[args.node, *args.node_arg, *args.candidate_node_arg]}
     prefixes = {}
-    for version, directory, runners in [('baseline', args.baseline_dir, args.baseline_runners), ('candidate', args.candidate_dir, TESTS)]:
+    # NCBI reference: c++/src/algo/blast/api/prelim_stage.cpp:171-188
+    # (*thread)->Run(); (*thread)->Join(&result);
+    # Select the actual host paths explicitly instead of mixing runner filesystems.
+    for version, directory, runners in [('baseline', args.baseline_dir, args.baseline_runners), ('candidate', args.candidate_dir, args.candidate_runners)]:
         for kind in args.kinds:
             if kind == 'native':
                 prefix = [str((directory / 'native-command/release/LOSAT').resolve())]
@@ -153,10 +164,20 @@ def run_benchmark(args, out):
         oracle_hashes={program:digest(args.oracle_dir/program) for program in ['blastn', 'blastp', 'tblastx']},
         oracle_versions={program:subprocess.check_output([str(args.oracle_dir/program), '-version'], text=True).strip() for program in ['blastn', 'blastp', 'tblastx']},
         baseline_runner_hashes={p.name:digest(p) for p in args.baseline_runners.glob('*.js')},
+        # NCBI reference: c++/src/algo/blast/api/prelim_stage.cpp:171-188
+        # (*thread)->Run(); (*thread)->Join(&result);
+        # Equal content hashes alone do not prove equal cold host-loading costs.
+        candidate_runner_hashes={p.name:digest(p) for p in args.candidate_runners.glob('*.js')},
+        runner_paths={'baseline':str(args.baseline_runners.resolve()), 'candidate':str(args.candidate_runners.resolve())},
         environment={k:v for k,v in env.items() if k.startswith(('NODE_', 'LOSAT_', 'RAYON_')) or k == 'LC_ALL'},
         artifacts={f'{version}-{kind}':{'path':prefix[-1], 'sha256':digest(prefix[-1])} for (version,kind),prefix in prefixes.items()},
         fixtures={str(p):digest(p) for _,_,q,s,_ in cases for p in [q,s]}, runners={p.name:digest(p) for p in TESTS.iterdir() if p.suffix in {'.js', '.py'}},
-        boundary='cold process includes Node startup, artifact validation, guard, compilation, workers, search, output, and teardown',
+        # NCBI reference: c++/src/algo/blast/api/prelim_stage.cpp:177-188
+        # (*thread)->Run(); (*thread)->Join(&result);
+        # Native invocation has no Node or Wasm compilation boundary.
+        boundary='cold process starts at process launch and ends after process exit; see boundary_by_kind',
+        boundary_by_kind={kind: ('native process startup, search, output, and exit' if kind == 'native' else
+            'Node startup, artifact validation, guard, Wasm compilation, workers when requested, search, output, and teardown') for kind in args.kinds},
         linear_memory='not sampled in cold process; reuse records memory after invocation',
         reuse_host='common current benchmark_wasi_reuse.js and host imports for both versions; hashes in runners',
         elapsed_clock='CLOCK_MONOTONIC; realtime/GNU elapsed are adjustable-clock diagnostics',

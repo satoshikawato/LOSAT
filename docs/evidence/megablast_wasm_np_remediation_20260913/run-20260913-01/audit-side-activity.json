@@ -1,0 +1,6 @@
+{
+  "recorded_utc": "2026-09-13T18:12:43.946104+00:00",
+  "activity": "Independent read-only archive membership stat enumeration, 16539 planned entries; no archive build or large file hashing",
+  "phase_at_completion_report": "integrated-x-main oracle/diagnostic; measured cold group had not been observed to start",
+  "treatment": "Retain all samples, no numerical correction or automatic exclusion"
+}

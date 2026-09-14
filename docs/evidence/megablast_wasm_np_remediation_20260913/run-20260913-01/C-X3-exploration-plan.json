@@ -1,0 +1,15 @@
+{
+  "purpose": "Borrowed inner scan call-boundary exploration, not adopted",
+  "source": "/tmp/losat-remediation-20260913-01/C-X3-source",
+  "baseline": "integrated",
+  "changed_files": [
+    "LOSAT/src/algorithm/tblastx/sum_stats_linking/linking.rs"
+  ],
+  "source_sha256": "1b0d3c4d5fa69d9564c57c54b9d7434bd89eb682337e78e6a961910b55858bd9",
+  "planned_checks": [
+    "cargo fmt",
+    "focused linking tests",
+    "native release build",
+    "Mje native n1 B1/integrated/X3 one untimed run each with exact raw comparison"
+  ]
+}

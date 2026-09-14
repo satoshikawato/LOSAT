@@ -1,0 +1,17 @@
+[
+  "/home/kawato/micromamba/bin/python3",
+  "/mnt/c/Users/genom/GitHub/LOSAT/LOSAT/tests/compare_blastn_parity.py",
+  "--manifest",
+  "/mnt/c/Users/genom/GitHub/LOSAT/docs/evidence/megablast_wasm_np_remediation_20260913/run-20260913-01/megablast-current.tsv",
+  "--fresh-paired",
+  "--paired-output-dir",
+  "/mnt/c/Users/genom/GitHub/LOSAT/docs/evidence/megablast_wasm_np_remediation_20260913/run-20260913-01/parity/B0-native-n1",
+  "--losat-bin",
+  "/tmp/losat-remediation-20260913-01/B0-target/native/release/LOSAT",
+  "--ncbi-bin",
+  "/home/kawato/micromamba/bin/blastn",
+  "--fail-on-byte-diff",
+  "--limit",
+  "20",
+  "--print-refresh-commands"
+]

@@ -1,0 +1,41 @@
+[
+  {
+    "name": "x-threaded1-controls",
+    "argv": [
+      "python3",
+      "/tmp/losat-remediation-20260913-01/finish_na64_wasm_controls.py",
+      "x-threaded1-controls"
+    ],
+    "exit_status": 0,
+    "start_ns": 204810846666878,
+    "end_ns": 205742589294493,
+    "log": "/tmp/losat-remediation-20260913-01/C-NA64-remaining-x-threaded1-controls.log",
+    "log_sha256": "488b70f808aa3bb13083bcb8b7000fccd60d2d88e77b3a834c8c64679a7dd607"
+  },
+  {
+    "name": "x-thread-boundaries",
+    "argv": [
+      "python3",
+      "/tmp/losat-remediation-20260913-01/finish_na64_wasm_controls.py",
+      "x-thread-boundaries"
+    ],
+    "exit_status": 0,
+    "start_ns": 205746845481565,
+    "end_ns": 205952906276776,
+    "log": "/tmp/losat-remediation-20260913-01/C-NA64-remaining-x-thread-boundaries.log",
+    "log_sha256": "8b617a1f7fb806c89003740123b463d28ba10a44399393042857cc440ce63ef0"
+  },
+  {
+    "name": "x-reuse",
+    "argv": [
+      "python3",
+      "/tmp/losat-remediation-20260913-01/finish_na64_wasm_controls.py",
+      "x-reuse"
+    ],
+    "exit_status": 1,
+    "start_ns": 205956989874542,
+    "end_ns": 208245334932924,
+    "log": "/tmp/losat-remediation-20260913-01/C-NA64-remaining-x-reuse.log",
+    "log_sha256": "961977df62b142aae29e05b1cbe6e672cf3ed910158acd0123a90a9dd04a356e"
+  }
+]

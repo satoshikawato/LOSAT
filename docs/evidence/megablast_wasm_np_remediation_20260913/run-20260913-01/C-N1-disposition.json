@@ -1,0 +1,29 @@
+{
+  "candidate": "C-N1",
+  "status": "ACCEPTED",
+  "scope": "independently nonregressing component eligible for combination; not G-N adoption",
+  "production_integrated": false,
+  "evidence": [
+    "C-N1-fair-exploration",
+    "C-N1-main-controls",
+    "C-N1-native8-controls",
+    "C-N1-task-controls",
+    "audit-C-N1-static.md"
+  ],
+  "control_configurations": 14,
+  "control_repeats": 5,
+  "control_raw_time_rss_pass": true,
+  "main_n8_repeats": 3,
+  "primary_LC_speed_target_met": false,
+  "final_gates_pending": [
+    "fresh combined5-pair adoption",
+    "reuse/linear memory",
+    "affected formats and boundaries",
+    "final source builds and tests",
+    "independent final review"
+  ],
+  "excluded_timing_runs": [
+    "C-N1-exploration",
+    "C-N1-lc-confirmation"
+  ]
+}

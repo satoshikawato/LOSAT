@@ -1,0 +1,16 @@
+{
+  "default_kinds": [
+    "threaded-command",
+    "threaded-reactor"
+  ],
+  "compatibility_kinds": [
+    "serial-reactor",
+    "threaded-reactor",
+    "threaded-command",
+    "serial-command"
+  ],
+  "default_matches_reverse_compatibility": true,
+  "actual_bytes_and_runtime_sets_match_exercised_checkers": true,
+  "stale_compatibility_rejected": true,
+  "rejection_stderr": "usage: build_wasi_artifacts.py [-h] --output-dir OUTPUT_DIR\n                               --target-dir TARGET_DIR [--node NODE]\n                               [--reverse-order] [--include-serial]\nbuild_wasi_artifacts.py: error: output directory contains serial artifacts; use a fresh directory or --include-serial\n"
+}

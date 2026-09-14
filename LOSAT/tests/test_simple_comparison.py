@@ -91,7 +91,7 @@ class SimpleComparisonTests(unittest.TestCase):
     # Persist exactly the same argument array that the shell consumes.
     def test_tblastx_profile_manifest_matches_nul_delimited_argv(self):
         directory = self.root / "profile"
-        with patch.dict(os.environ, {"RUN_LOSAT_WASM": "0", "NODE_ARGS_JSON": '["--trace-warnings"]'}, clear=True):
+        with patch.dict(os.environ, {"RUN_LOSAT_WASM": "0", "RUN_LOSAT_WASM_THREADED": "0", "NODE_ARGS_JSON": '["--trace-warnings"]'}, clear=True):
             data.record_cli(["init", str(directory)])
         manifest = json.loads((directory / "run.json").read_text())
         flags = (directory / "node-tblastx-args.bin").read_bytes().split(b"\0")[:-1]
@@ -199,7 +199,7 @@ class SimpleComparisonTests(unittest.TestCase):
         binary = self.root / "fake-losat"
         env = dict(os.environ, BENCHMARK_PROGRAMS="blastp", BENCHMARK_CASE="WSSV.PajaWSV",
                    LOSAT_THREADS="4", LOSAT_BIN=str(binary), RUN_NATIVE="1", RUN_NCBI="0",
-                   RUN_LOSAT_WASM="0", BENCHMARK_TIMEOUT="1")
+                   RUN_LOSAT_WASM="0", RUN_LOSAT_WASM_THREADED="0", BENCHMARK_TIMEOUT="1")
         for number, (command, expected) in enumerate([("exit 7", 7), ("sleep 5", 124), ("exit 0", 125)]):
             with self.subTest(command=command):
                 directory = self.root / f"run-{number}"
@@ -227,7 +227,7 @@ class SimpleComparisonTests(unittest.TestCase):
         env = dict(os.environ, BENCHMARK_DIR=str(self.root / "run"),
                    BENCHMARK_PROGRAMS="blastp", BENCHMARK_CASE="WSSV.PajaWSV",
                    LOSAT_THREADS="4", LOSAT_BIN=str(binary),
-                   RUN_NATIVE="1", RUN_NCBI="0", RUN_LOSAT_WASM="0")
+                   RUN_NATIVE="1", RUN_NCBI="0", RUN_LOSAT_WASM="0", RUN_LOSAT_WASM_THREADED="0")
         result = subprocess.run(
             ["bash", str(data.SCRIPT_DIR / "run_comparison.sh")],
             env=env, capture_output=True, text=True, timeout=15,
@@ -241,6 +241,66 @@ class SimpleComparisonTests(unittest.TestCase):
             self.assertEqual(timing.parse_time(self.root / "run/losat_out" / f"{stem}.log"), float(seconds))
         self.assertLess(result.stdout.index("Finished WSSV.PajaWSV.losatp:"),
                         result.stdout.index("Running WSSV.PajaWSV.losatp.n4"))
+
+    # NCBI reference: c++/src/algo/blast/blastinput/cmdline_flags.cpp:75
+    # const string kArgNumThreads("num_threads");
+    # A synthetic Node process tests harness routing only; actual artifact
+    # validation and BLAST output remain covered by the real WASI gates.
+    def test_threaded_only_and_serial_compatibility_are_independent(self):
+        node = self.root / "fake-node"
+        node.write_text(f'''#!{sys.executable}
+import json, sys
+from pathlib import Path
+if sys.argv[1] == '-p':
+    print('{{}}')
+elif sys.argv[1] == '-':
+    sys.stdin.read()
+    serial, threaded, serial_enabled, threaded_enabled, inspector = sys.argv[2:]
+    for filename, enabled in [(serial, serial_enabled), (threaded, threaded_enabled)]:
+        if enabled == '1':
+            assert Path(filename).is_file(), filename
+else:
+    args = sys.argv[1:]
+    assert Path(args[0]).name in ['run_losat_wasi.js', 'run_losat_wasi_threads.js']
+    assert Path(args[1]).is_file()
+    Path(args[args.index('-out') + 1]).write_text({ROW!r})
+''')
+        node.chmod(0o755)
+        for serial_flag, threaded_flag, n in [(0, 1, 4), (0, 1, 1), (1, 0, 4), (1, 1, 4), (0, 0, 4), ("", "", 4)]:
+            serial_enabled = (str(serial_flag) or "0") == "1"
+            threaded_enabled = (str(threaded_flag) or "1") == "1"
+            with self.subTest(serial=serial_enabled, threaded=threaded_enabled, threads=n):
+                label = f"selected-{serial_flag}-{threaded_flag}-{n}"
+                directory = self.root / label
+                serial = self.root / f"{label}-serial.wasm"
+                threaded = self.root / f"{label}-threaded.wasm"
+                if serial_enabled: serial.write_bytes(b"synthetic serial fixture")
+                if threaded_enabled: threaded.write_bytes(b"synthetic threaded fixture")
+                env = dict(os.environ, BENCHMARK_DIR=str(directory),
+                           BENCHMARK_PROGRAMS="blastp", BENCHMARK_CASE="WSSV.PajaWSV",
+                           RUN_NATIVE="0", RUN_NCBI="0", RUN_LOSAT_WASM=str(serial_flag),
+                           RUN_LOSAT_WASM_THREADED=str(threaded_flag), LOSAT_THREADS=str(n),
+                           BUILD_LOSAT_WASM="0", BUILD_LOSAT_WASM_THREADED="0",
+                           LOSAT_WASM_BIN=str(serial), LOSAT_WASM_THREADED_BIN=str(threaded),
+                           NODE_BIN=str(node), NODE_ARGS_JSON="[]")
+                result = subprocess.run(["bash", str(data.SCRIPT_DIR / "run_comparison.sh")],
+                                        env=env, capture_output=True, text=True, timeout=30)
+                if not (serial_enabled or threaded_enabled):
+                    self.assertEqual(result.returncode, 2, result.stderr)
+                    self.assertIn("No runners selected", result.stderr)
+                    continue
+                self.assertEqual(result.returncode, 0, result.stderr)
+                expected = ({"WSSV.PajaWSV.losatp.wasm.out"} if serial_enabled else set())
+                if threaded_enabled:
+                    expected.add("WSSV.PajaWSV.losatp.wasm.n1.out")
+                    if n != 1: expected.add(f"WSSV.PajaWSV.losatp.wasm.n{n}.out")
+                self.assertEqual({p.name for p in (directory / "losat_out").glob("*.out")}, expected)
+                manifest = json.loads((directory / "run.json").read_text())
+                self.assertEqual(manifest["enabled_runners"]["RUN_LOSAT_WASM"], bool(serial_enabled))
+                self.assertEqual(manifest["enabled_runners"]["RUN_LOSAT_WASM_THREADED"], bool(threaded_enabled))
+                self.assertIsNotNone(manifest["node_versions"])
+                for output in (directory / "losat_out").glob("*.out"):
+                    self.assertTrue(data.successful_output(output))
 
 
 if __name__ == "__main__":

@@ -1,0 +1,306 @@
+{
+  "candidate": "C-X2",
+  "status": "INTEGRATED_PENDING_FINAL_GATES",
+  "before_sha256": "6547964ed758904f6b35147e3033509579d2a43871f125d95a4f03740510d094",
+  "after_sha256": "9bc8d672276a427a29e8a0f471389b8fedd538f65c935f967e282e79a8ff7933",
+  "isolated_sha256": "879a36c15c0bb4747562ba5829466e5f304b7c9b9d0445894e53845af3bf976a",
+  "difference_from_isolated": "One test reference comment separated from preceding brace and reindented; executable code unchanged. Fresh integrated builds/tests/measurements still required.",
+  "checks": {
+    "main-confirmation": [
+      {
+        "case_id": "MelaMJNV.PemoMJNVA.tlosatx",
+        "kind": "threaded",
+        "threads": 8,
+        "baseline_median": 4.144775354012381,
+        "candidate_median": 4.182247793010902,
+        "speedup_percent": -0.9040885403413856,
+        "delta_seconds": 0.037472438998520374,
+        "nonregression_tolerance_seconds": 0.20723876770061908,
+        "nonregression_pass": true,
+        "rss_delta_bytes": 12722176,
+        "rss_tolerance_bytes": 33130086.400000002,
+        "rss_pass": true,
+        "baseline_range": [
+          4.099305118987104,
+          4.187251844996354
+        ],
+        "candidate_range": [
+          4.111077251000097,
+          4.204432011989411
+        ],
+        "baseline_count": 5,
+        "candidate_count": 5
+      },
+      {
+        "case_id": "MjeNMV.MelaMJNV.tlosatx",
+        "kind": "threaded",
+        "threads": 8,
+        "baseline_median": 13.546580330003053,
+        "candidate_median": 13.367784653004492,
+        "speedup_percent": 1.3198583896672722,
+        "delta_seconds": -0.17879567699856125,
+        "nonregression_tolerance_seconds": 0.6773290165001526,
+        "nonregression_pass": true,
+        "rss_delta_bytes": -4882432,
+        "rss_tolerance_bytes": 34505932.800000004,
+        "rss_pass": true,
+        "baseline_range": [
+          13.269377853983315,
+          13.598451594996732
+        ],
+        "candidate_range": [
+          13.079122461989755,
+          13.648377006989904
+        ],
+        "baseline_count": 5,
+        "candidate_count": 5
+      },
+      {
+        "case_id": "AP027280.AP027280.tlosatx",
+        "kind": "threaded",
+        "threads": 8,
+        "baseline_median": 24.98090903100092,
+        "candidate_median": 25.08346367700142,
+        "speedup_percent": -0.4105320822121783,
+        "delta_seconds": 0.1025546460004989,
+        "nonregression_tolerance_seconds": 1.249045451550046,
+        "nonregression_pass": true,
+        "rss_delta_bytes": -6606848,
+        "rss_tolerance_bytes": 35964108.800000004,
+        "rss_pass": true,
+        "baseline_range": [
+          24.769964657985838,
+          25.380613098997856
+        ],
+        "candidate_range": [
+          24.568836382997688,
+          25.385115373996086
+        ],
+        "baseline_count": 5,
+        "candidate_count": 5
+      }
+    ],
+    "native-controls": [
+      {
+        "case_id": "MelaMJNV.PemoMJNVA.tlosatx",
+        "kind": "native",
+        "threads": 1,
+        "baseline_median": 3.75347620100365,
+        "candidate_median": 3.7362330420000944,
+        "speedup_percent": 0.45939172330292655,
+        "delta_seconds": -0.017243159003555775,
+        "nonregression_tolerance_seconds": 0.18767381005018252,
+        "nonregression_pass": true,
+        "rss_delta_bytes": 40960,
+        "rss_tolerance_bytes": 16777216,
+        "rss_pass": true,
+        "baseline_range": [
+          3.64644622799824,
+          3.839027191977948
+        ],
+        "candidate_range": [
+          3.6492639759962913,
+          3.7685323010082357
+        ],
+        "baseline_count": 5,
+        "candidate_count": 5
+      },
+      {
+        "case_id": "MelaMJNV.PemoMJNVA.tlosatx",
+        "kind": "native",
+        "threads": 8,
+        "baseline_median": 2.246866713016061,
+        "candidate_median": 2.231921448983485,
+        "speedup_percent": 0.6651602405251089,
+        "delta_seconds": -0.014945264032576233,
+        "nonregression_tolerance_seconds": 0.11234333565080307,
+        "nonregression_pass": true,
+        "rss_delta_bytes": -245760,
+        "rss_tolerance_bytes": 16777216,
+        "rss_pass": true,
+        "baseline_range": [
+          2.195452680985909,
+          2.257007108972175
+        ],
+        "candidate_range": [
+          2.180696457013255,
+          2.3167355650220998
+        ],
+        "baseline_count": 5,
+        "candidate_count": 5
+      },
+      {
+        "case_id": "MjeNMV.MelaMJNV.tlosatx",
+        "kind": "native",
+        "threads": 1,
+        "baseline_median": 17.227884039020864,
+        "candidate_median": 17.076840410009027,
+        "speedup_percent": 0.8767392946790631,
+        "delta_seconds": -0.15104362901183777,
+        "nonregression_tolerance_seconds": 0.8613942019510432,
+        "nonregression_pass": true,
+        "rss_delta_bytes": 2318336,
+        "rss_tolerance_bytes": 16777216,
+        "rss_pass": true,
+        "baseline_range": [
+          17.176412884000456,
+          18.074472298991168
+        ],
+        "candidate_range": [
+          16.91388801499852,
+          18.10318662598729
+        ],
+        "baseline_count": 5,
+        "candidate_count": 5
+      },
+      {
+        "case_id": "MjeNMV.MelaMJNV.tlosatx",
+        "kind": "native",
+        "threads": 8,
+        "baseline_median": 10.459178904013243,
+        "candidate_median": 10.4572145419952,
+        "speedup_percent": 0.01878122590760478,
+        "delta_seconds": -0.0019643620180431753,
+        "nonregression_tolerance_seconds": 0.5229589452006621,
+        "nonregression_pass": true,
+        "rss_delta_bytes": 1531904,
+        "rss_tolerance_bytes": 16777216,
+        "rss_pass": true,
+        "baseline_range": [
+          10.210936727002263,
+          10.536200000002282
+        ],
+        "candidate_range": [
+          10.19096491500386,
+          10.49466915501398
+        ],
+        "baseline_count": 5,
+        "candidate_count": 5
+      },
+      {
+        "case_id": "AP027280.AP027280.tlosatx",
+        "kind": "native",
+        "threads": 1,
+        "baseline_median": 31.250408459978644,
+        "candidate_median": 31.422907547996147,
+        "speedup_percent": -0.5519898667514012,
+        "delta_seconds": 0.1724990880175028,
+        "nonregression_tolerance_seconds": 1.5625204229989322,
+        "nonregression_pass": true,
+        "rss_delta_bytes": 4096,
+        "rss_tolerance_bytes": 16777216,
+        "rss_pass": true,
+        "baseline_range": [
+          30.440008915989893,
+          31.473657119990094
+        ],
+        "candidate_range": [
+          30.995366486982675,
+          31.666759479994653
+        ],
+        "baseline_count": 5,
+        "candidate_count": 5
+      },
+      {
+        "case_id": "AP027280.AP027280.tlosatx",
+        "kind": "native",
+        "threads": 8,
+        "baseline_median": 19.006661042018095,
+        "candidate_median": 18.686575084982906,
+        "speedup_percent": 1.6840725276658253,
+        "delta_seconds": -0.3200859570351895,
+        "nonregression_tolerance_seconds": 0.9503330521009048,
+        "nonregression_pass": true,
+        "rss_delta_bytes": -24440832,
+        "rss_tolerance_bytes": 16777216,
+        "rss_pass": true,
+        "baseline_range": [
+          18.808894171001157,
+          19.33677496900782
+        ],
+        "candidate_range": [
+          18.569593775988324,
+          19.44923956200364
+        ],
+        "baseline_count": 5,
+        "candidate_count": 5
+      }
+    ],
+    "threaded1-controls": [
+      {
+        "case_id": "MelaMJNV.PemoMJNVA.tlosatx",
+        "kind": "threaded",
+        "threads": 1,
+        "baseline_median": 5.590680640976643,
+        "candidate_median": 5.712183614989044,
+        "speedup_percent": -2.1733127290772147,
+        "delta_seconds": 0.12150297401240095,
+        "nonregression_tolerance_seconds": 0.27953403204883215,
+        "nonregression_pass": true,
+        "rss_delta_bytes": -6430720,
+        "rss_tolerance_bytes": 18860851.2,
+        "rss_pass": true,
+        "baseline_range": [
+          5.5281294570013415,
+          5.804799459001515
+        ],
+        "candidate_range": [
+          5.555511199985631,
+          5.775818836002145
+        ],
+        "baseline_count": 5,
+        "candidate_count": 5
+      },
+      {
+        "case_id": "MjeNMV.MelaMJNV.tlosatx",
+        "kind": "threaded",
+        "threads": 1,
+        "baseline_median": 21.057821549999062,
+        "candidate_median": 21.311891043995274,
+        "speedup_percent": -1.2065326576776059,
+        "delta_seconds": 0.25406949399621226,
+        "nonregression_tolerance_seconds": 1.0528910774999531,
+        "nonregression_pass": true,
+        "rss_delta_bytes": -2269184,
+        "rss_tolerance_bytes": 18547097.6,
+        "rss_pass": true,
+        "baseline_range": [
+          20.453707150008995,
+          22.88370010801009
+        ],
+        "candidate_range": [
+          20.886343329009833,
+          21.453753843990853
+        ],
+        "baseline_count": 5,
+        "candidate_count": 5
+      },
+      {
+        "case_id": "AP027280.AP027280.tlosatx",
+        "kind": "threaded",
+        "threads": 1,
+        "baseline_median": 41.32826731199748,
+        "candidate_median": 41.040117438009474,
+        "speedup_percent": 0.6972222469736944,
+        "delta_seconds": -0.2881498739880044,
+        "nonregression_tolerance_seconds": 2.066413365599874,
+        "nonregression_pass": true,
+        "rss_delta_bytes": -6610944,
+        "rss_tolerance_bytes": 19972505.6,
+        "rss_pass": true,
+        "baseline_range": [
+          40.81623515399406,
+          42.76405359400087
+        ],
+        "candidate_range": [
+          40.847599765023915,
+          41.882195653015515
+        ],
+        "baseline_count": 5,
+        "candidate_count": 5
+      }
+    ],
+    "thread-boundaries": [],
+    "gencode4": []
+  }
+}

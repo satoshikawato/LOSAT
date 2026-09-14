@@ -1,0 +1,14 @@
+# Keep the small review/index files in Git. Actual execution data and binaries
+# remain local and are preserved in the checksummed handoff archive.
+/*
+!/.gitignore
+!/*.md
+!/*.tsv
+!/*.json
+!/*.patch
+!/SHA256SUMS
+/handoff-file-map.json
+!/change-review/
+/change-review/*
+!/change-review/*.patch
+!/change-review/inventory.json

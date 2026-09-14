@@ -3,7 +3,8 @@
 Use `run_comparison.sh` and the three `plot_*.py` scripts for everyday checks.
 They share the 45 historical pairs in `comparison_cases.tsv` (TBLASTX, Megablast,
 BLASTN and BLASTP), and retain the familiar `.out` / Bash `time` `.log` filenames inside a fresh run
-directory. A small `run.json` and per-output `.run.json` bind status, argv and
+directory. The standard Wasm comparison uses the same threaded artifact for
+n1 and nN. A small `run.json` and per-output `.run.json` bind status, argv and
 file hashes to that run. `wasm_performance.py` remains available for detailed
 performance work; these quick checks do not require profiling or certification.
 
@@ -12,7 +13,6 @@ From the repository root:
 ```bash
 cd LOSAT
 cargo build --release --bin LOSAT
-cargo build --release --bin LOSAT --target wasm32-wasip1 --no-default-features --target-dir target/serial-command
 cargo build --release --bin LOSAT --target wasm32-wasip1-threads --features wasm-threads --target-dir target/threaded-command
 cd tests
 
@@ -51,7 +51,7 @@ export BENCHMARK_PROGRAMS=megablast,blastn,blastp
 ./run_comparison.sh
 ```
 
-This keeps the native, serial Wasm, threaded Wasm and NCBI runners enabled.
+This keeps the native, threaded Wasm n1/nN and NCBI runners enabled.
 The exported selection also applies to the plotting scripts. For nucleotide
 comparisons only, use `BENCHMARK_PROGRAMS=megablast,blastn`; for protein
 comparisons only, use `BENCHMARK_PROGRAMS=blastp`. Use
@@ -86,8 +86,12 @@ the scripts are launched elsewhere. The destination must not already exist. With
 creates a directory under `tests/benchmark-runs/` and prints its path; export
 that path as `BENCHMARK_DIR` before plotting. Existing run files are preserved.
 
-`RUN_LOSAT_WASM=0 ./run_comparison.sh` runs native and NCBI only.
-`RUN_LOSAT_WASM_THREADED=0` disables threaded Wasm. `RUN_NATIVE=0` and
+`RUN_LOSAT_WASM_THREADED=0 ./run_comparison.sh` runs native and NCBI only.
+`RUN_LOSAT_WASM=1` adds serial compatibility checks; it is independent of
+`RUN_LOSAT_WASM_THREADED`. Build that optional artifact with
+`cargo build-wasi-command-serial` or set `BUILD_LOSAT_WASM=1` together with
+`RUN_LOSAT_WASM=1`. `BUILD_LOSAT_WASM_THREADED=1` builds the standard threaded
+artifact independently. `RUN_NATIVE=0` and
 `RUN_NCBI=0` disable those runners. Plotting admits only successful outputs with matching run metadata, argv,
 log and output hashes. Runner switches do not import results from older runs. See `./run_comparison.sh --help` for binary
 overrides and optional Wasm build switches.
@@ -155,7 +159,7 @@ Each completed search immediately prints its measured wall time, for example
 print elapsed seconds and their exit status. The displayed seconds and the plot
 logs use the same Bash timer.
 
-The figures show BLAST+, native n1/nN, serial Wasm n1, and threaded Wasm nN.
+The figures show the available BLAST+, native n1/nN and threaded Wasm n1/nN results, plus serial Wasm n1 when compatibility comparisons are enabled.
 With `LOSAT_THREADS=1`, native n1 runs once and the two Wasm builds stay distinct.
 File naming remains compatible with previous results:
 
@@ -193,24 +197,24 @@ raw `.out` files separately with `cmp`/`diff` when investigating a discrepancy.
 
 ## Threading contract gates
 
-Use Rust 1.92.0 and Node 24.21.0 for the reproducible gates. Native, serial
-command, threaded command and threaded reactor are separate artifacts. Build
-all four Wasm kinds (including the internal serial reactor) in distinct target
-directories; `--reverse-order` verifies the opposite build order:
+Use Rust 1.92.0 and Node 24.21.0 for the reproducible gates. Native, threaded
+command and threaded reactor are separate artifacts. The default helper builds
+the two threaded Wasm kinds in distinct target directories; `--reverse-order`
+verifies the opposite build order:
 
 ```bash
 python build_wasi_artifacts.py --target-dir ../target --output-dir ../../.tmp/wasi-artifacts
 python check_wasm_threading.py --native ../target/release/LOSAT \
-  --native-serial ../target/native-serial/release/LOSAT \
-  --serial ../../.tmp/wasi-artifacts/losat-serial-command.wasm \
   --threaded ../../.tmp/wasi-artifacts/losat-threaded-command.wasm \
   --reactor ../../.tmp/wasi-artifacts/losat-threaded-reactor.wasm \
-  --serial-reactor ../../.tmp/wasi-artifacts/losat-serial-reactor.wasm \
   --output-dir ../../.tmp/threading-gates
 ```
 
-Build native without parallel support using `cargo build --release --bin LOSAT
---no-default-features --target-dir target/native-serial` from the crate directory.
+For compatibility checks, add `--include-serial` to the builder and pass
+`--serial` and `--serial-reactor` with those explicit artifacts to the checker.
+To also check native without parallel support, build it using
+`cargo build --release --bin LOSAT --no-default-features --target-dir target/native-serial`
+from the crate directory and pass `--native-serial` to the checker.
 The comparison gate requires NCBI BLAST+ 2.17.0 only as a test oracle. It retains
 raw bytes, argv, stderr, artifact identity, and worker lifecycle records.
 
@@ -253,3 +257,11 @@ and custom fields through both streaming and rendered-alignment paths. `qacc`
 and `qaccver` remain distinct columns. As in NCBI local FASTA searches, `stitle`
 is `N/A` when no ASN BLAST defline object exists; the FASTA description is still
 used by pairwise output.
+
+Standard artifact/CI defaults are threaded command and reactor. The reusable or
+manually dispatched `wasm-threading.yml` workflow accepts
+`include_serial_compatibility: true` to build and check serial compatibility.
+`build_wasi_artifacts.py --include-serial` and checker `--serial` arguments are
+explicit opt-ins. `benchmark_wasm_threading.py` defaults to native/threaded;
+include `serial` in `--kinds` when comparing the compatibility build. Frozen
+v0.1.0 certification and release contracts retain their historical target scope.

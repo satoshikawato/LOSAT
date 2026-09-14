@@ -1,0 +1,7 @@
+{
+  "source": "/tmp/losat-remediation-20260913-01/C-N4-source/LOSAT/src/algorithm/blastn/filtering/purge_endpoints.rs",
+  "sha256": "4fa1b9a4510078c42f6bfe64fcce2555b168e408d8b023c29117f6ecc67e66f3",
+  "base": "B1",
+  "changes": "fixed HSP arena with pointer-sized nullable handles; private helpers and boundary tests only",
+  "integrated": false
+}

@@ -1812,7 +1812,18 @@ fn align_ex_protein_impl<const BLOSUM62: bool, const REVERSE: bool>(
         // The slice borrow ends after this ascending scan, before DP reserve.
         let band_start = first_b_index;
         let dp_band = &mut scratch.dp_mem[band_start..b_size];
-        for (band_index, cell) in dp_band.iter_mut().enumerate() {
+        // NCBI reference: c++/src/algo/blast/core/blast_gapalign.c:513-518,531-540
+        // state_struct = s_GapGetState(&gap_align->state_struct,
+        //                b_size - first_b_index + num_extra_cells);
+        // edit_script_row = edit_script[a_index] - first_b_index;
+        // The allocator has cleared this row. Reserve the actual main band
+        // before borrowing spare capacity; reserve is relative to Vec length.
+        debug_assert!(edit_script_row.is_empty());
+        edit_script_row.reserve(dp_band.len());
+        let trace_band = &mut edit_script_row.spare_capacity_mut()[..dp_band.len()];
+        for (band_index, (cell, trace_cell)) in
+            dp_band.iter_mut().zip(trace_band.iter_mut()).enumerate()
+        {
             let b_index = band_start + band_index;
             let sc = if b_index < len2 {
                 blastp_subject_residue::<REVERSE>(s_seq, 0, len2, b_index)
@@ -1882,9 +1893,21 @@ fn align_ex_protein_impl<const BLOSUM62: bool, const REVERSE: bool>(
             }
 
             score_val = next_score;
-            let row_idx = b_index.saturating_sub(orig_b_index);
-            gap_trace_row_write(edit_script_row, row_idx, script);
+            // NCBI reference: c++/src/algo/blast/core/blast_gapalign.c:634-635
+            // score = next_score; edit_script_row[b_index] = script;
+            trace_cell.write(script);
         }
+
+        // NCBI reference: c++/src/algo/blast/core/blast_gapalign.c:563-575,634-639
+        // for (b_index = first_b_index; b_index < b_size; b_index++) {
+        //     if (matrix_index == FENCE_SENTRY) { ... break; }
+        //     ... edit_script_row[b_index] = script;
+        // }
+        // SAFETY: the row began empty and capacity covers the captured band.
+        // Every visited non-fence cell, including X-drop failures, wrote one
+        // byte. The only early break sets row_end_b_index before that write.
+        // Thus exactly this prefix is initialized; the spare borrow has ended.
+        unsafe { edit_script_row.set_len(row_end_b_index - band_start) };
 
         // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_gapalign.c:638-639
         // ```c
@@ -1917,7 +1940,7 @@ fn align_ex_protein_impl<const BLOSUM62: bool, const REVERSE: bool>(
             }
         }
 
-        // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_gapalign.c:658-665
+        // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_gapalign.c:666-669
         // ```c
         // /* update the memory allocator to reflect the exact number
         //    of traceback cells this row needed */
@@ -3950,5 +3973,51 @@ mod tests {
             }
         }
         assert!(saw_offset && saw_gap && saw_fence);
+    }
+    // NCBI reference: c++/src/algo/blast/core/blast_gapalign.c:563-575,634-639
+    // for (b_index = first_b_index; b_index < b_size; b_index++) {
+    //     if (matrix_index == FENCE_SENTRY) { ... break; }
+    //     ... edit_script_row[b_index] = script;
+    // }
+    // The fence cell is never written. Only the preceding initialized bytes
+    // may become visible when leaving the first main-band row.
+    #[test]
+    fn test_traceback_fence_exposes_only_initialized_prefix() {
+        for (reverse, capacity, gap_extend) in
+            [(false, 48, 1), (true, 48, 1), (false, 8, 0), (true, 8, 0)]
+        {
+            for fence_b_index in [0usize, 1, 7] {
+                let query = [ncbistdaa::A; 9];
+                let mut subject = query;
+                let fence_index = if reverse {
+                    7 - fence_b_index
+                } else {
+                    fence_b_index + 1
+                };
+                subject[fence_index] = FENCE_SENTRY;
+                let mut scratch = GapAlignScratch::new();
+                scratch.trace_rows = vec![vec![u8::MAX; capacity]; 2];
+                scratch.trace_offsets = vec![0; 2];
+                let mut fence = false;
+                let result = align_ex_protein(
+                    &query,
+                    &subject,
+                    8,
+                    8,
+                    BlastpScoreMatrix::standard(ScoringMatrix::Blosum62),
+                    11,
+                    gap_extend,
+                    100,
+                    reverse,
+                    &mut scratch,
+                    &mut fence,
+                );
+                assert!(fence);
+                assert!(result.3.is_empty());
+                assert_eq!(scratch.trace_rows_used, 2);
+                assert_eq!(scratch.trace_rows[1].len(), fence_b_index);
+                assert!(scratch.trace_rows[1].iter().all(|&byte| byte != u8::MAX));
+            }
+        }
     }
 }

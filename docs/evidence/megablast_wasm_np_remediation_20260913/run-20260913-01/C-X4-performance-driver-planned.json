@@ -1,0 +1,21 @@
+{
+  "status": "PREPARED_NOT_EXECUTED",
+  "driver": "/tmp/losat-remediation-20260913-01/qualify_x4_performance.py",
+  "sha256": "fcc4ad127089f996dc0cfce3870532dc0cc4c4c0ea3e1cfd0ebdc2ac5db1f669",
+  "prerequisite": "Complete native matrix and threaded build/contract/threshold checks",
+  "first_groups": [
+    "x-main",
+    "np-main"
+  ],
+  "remaining_groups": [
+    "x-threaded1-controls",
+    "np-threaded1-controls",
+    "np-native-controls",
+    "np-task-controls",
+    "x-thread-boundaries",
+    "np-thread-boundaries",
+    "x-reuse",
+    "np-reuse"
+  ],
+  "original_integrated_results_unchanged": true
+}

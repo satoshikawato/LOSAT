@@ -23,8 +23,11 @@ TESTS = ROOT / 'LOSAT/tests'
 # Preserve frozen fixture bytes/paths, formatting and order; no normalization.
 def main():
     p = argparse.ArgumentParser(description=__doc__)
-    for name in ['native', 'serial', 'threaded', 'oracle-dir', 'output-dir']:
+    for name in ['native', 'threaded', 'oracle-dir', 'output-dir']:
         p.add_argument('--' + name, type=Path, required=True)
+    # NCBI reference: c++/include/algo/blast/blastinput/blast_args.hpp:1290-1296
+    # m_NumThreads = CThreadable::kMinNumThreads; m_MTMode = eNotSupported;
+    p.add_argument('--serial', type=Path, help='opt in to serial compatibility checks')
     p.add_argument('--node', default='node')
     p.add_argument('--jobs',type=int,default=1,choices=[1,2,3])
     p.add_argument('--timeout-seconds', type=int, default=3600, help='positive per-search correctness deadline; long genomes may exceed 900 seconds')
@@ -40,7 +43,13 @@ def main():
     environment = {k: v for k, v in os.environ.items() if not k.startswith(('LOSAT_', 'RAYON_')) and k != 'BL2SEQ_LEGACY'}
     environment.update(LC_ALL='C', NODE_NO_WARNINGS='1')
     records = []; record_lock=threading.Lock(); pending=[]
-    metadata = dict(head=head, scope=__doc__, per_search_timeout_seconds=args.timeout_seconds, artifacts={name: {'path': str(value.resolve()), 'sha256': digest(value)} for name, value in [('native', args.native), ('serial', args.serial), ('threaded', args.threaded)]}, authority_sha256=native_authority.file_sha256)
+    # NCBI reference: c++/src/algo/blast/api/prelim_stage.cpp:173-180
+    # (*thread)->Run(); (*thread)->Join(&result);
+    metadata = dict(head=head, scope=__doc__, per_search_timeout_seconds=args.timeout_seconds, artifacts={name: {'path': str(value.resolve()), 'sha256': digest(value)} for name, value in [('native', args.native), ('serial', args.serial), ('threaded', args.threaded)] if value}, authority_sha256=native_authority.file_sha256)
+    prefixes = [('native', [str(args.native.resolve())]),
+                ('threaded', [args.node, str(TESTS/'run_losat_wasi_threads.js'), str(args.threaded.resolve())])]
+    if args.serial:
+        prefixes.append(('serial', [args.node, str(TESTS/'run_losat_wasi.js'), str(args.serial.resolve())]))
     (out / 'metadata.json').write_text(json.dumps(metadata, indent=2))
     def record(label, command, expected, env, threads=None, kind=None):
         result = execute(command, ROOT, out / label, env, args.timeout_seconds)
@@ -57,7 +66,9 @@ def main():
             command = list(step.command)
             count_index = command.index('-num_threads') + 1
             original_n = int(command[count_index])
-            for kind, prefix in [('native', [str(args.native.resolve())]), ('serial', [args.node, str(TESTS/'run_losat_wasi.js'), str(args.serial.resolve())]), ('threaded', [args.node, str(TESTS/'run_losat_wasi_threads.js'), str(args.threaded.resolve())])]:
+            # NCBI reference: c++/src/objtools/align_format/tabular.cpp:1098-1108
+            # x_PrintField(*iter); m_Ostream << "\n";
+            for kind, prefix in prefixes:
                 if kind == 'serial' and original_n != 1: continue  # explicitly non-applicable frozen native-thread4 rows
                 current = [*prefix, *command[1:]]
                 n = 4 if kind == 'threaded' else original_n

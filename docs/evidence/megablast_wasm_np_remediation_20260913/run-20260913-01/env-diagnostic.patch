@@ -1,0 +1,158 @@
+--- a/LOSAT/src/utils/mod.rs
++++ b/LOSAT/src/utils/mod.rs
+@@ -6,3 +6,8 @@
+ // NCBI reference: c++/src/algo/blast/api/prelim_stage.cpp:177-188
+ // (*thread)->Run(); (*thread)->Join(&result);
+ pub mod threading;
++
++// NCBI reference: c++/src/algo/blast/core/blast_engine.c:1659-1668
++// /* Use a local diagnostics structure ... shared between multiple threads */
++// Isolated diagnostic only; nested work durations are not additive wall time.
++pub mod env_diag;
+--- a/LOSAT/src/utils/threading.rs
++++ b/LOSAT/src/utils/threading.rs
+@@ -94,6 +94,10 @@
+     F: FnOnce(&SearchPool<'_>) -> Result<R> + Send,
+     R: Send,
+ {
++// NCBI reference: c++/src/algo/blast/core/blast_engine.c:1659-1668
++// /* Use a local diagnostics structure ... shared between multiple threads */
++// Isolated diagnostic only; nested work durations are not additive wall time.
++    let _env_report = crate::utils::env_diag::Report;
+     validate_threads(requested)?;
+     #[cfg(feature = "parallel")]
+     if requested > 1 {
+--- a/LOSAT/src/utils/env_diag.rs
++++ b/LOSAT/src/utils/env_diag.rs
+@@ -0,0 +1,25 @@
++// NCBI reference: c++/src/algo/blast/core/blast_engine.c:1659-1668
++// /* Use a local diagnostics structure ... shared between multiple threads */
++// Isolated diagnostic only; nested work durations are not additive wall time.
++use std::sync::atomic::{AtomicU64, Ordering::Relaxed};
++use std::time::Instant;
++static NS: [AtomicU64; 5] = [const { AtomicU64::new(0) }; 5];
++static CALLS: [AtomicU64; 5] = [const { AtomicU64::new(0) }; 5];
++pub struct Scope { id: usize, start: Instant }
++impl Scope { pub fn new(id: usize) -> Self { Self { id, start: Instant::now() } } }
++impl Drop for Scope { fn drop(&mut self) {
++    NS[self.id].fetch_add(self.start.elapsed().as_nanos() as u64, Relaxed);
++    CALLS[self.id].fetch_add(1, Relaxed);
++} }
++pub fn var(key: &str) -> Result<String, std::env::VarError> {
++    let _scope = Scope::new(0); std::env::var(key)
++}
++pub fn var_os(key: &str) -> Option<std::ffi::OsString> {
++    let _scope = Scope::new(0); std::env::var_os(key)
++}
++pub struct Report;
++impl Drop for Report { fn drop(&mut self) {
++    for (i, name) in ["n_gapped_env", "n_packed_kernel", "n_trace_forward", "n_trace_reverse", "n_trace_wrapper"].iter().enumerate() {
++        eprintln!("[ENV_COST] name={} calls={} aggregate_ns={}", name, CALLS[i].load(Relaxed), NS[i].load(Relaxed));
++    }
++} }
+--- a/LOSAT/src/algorithm/blastn/alignment/gapped.rs
++++ b/LOSAT/src/algorithm/blastn/alignment/gapped.rs
+@@ -780,7 +780,7 @@
+             s_length
+         };
+ 
+-        if std::env::var("LOSAT_DEBUG_COORDS").is_ok() {
++        if crate::utils::env_diag::var("LOSAT_DEBUG_COORDS").is_ok() {
+             eprintln!("[COORDS] dp_start: qs={}, ss={}", qs, ss);
+             eprintln!(
+                 "[COORDS] dp_left: q_consumed={}, s_consumed={}",
+@@ -889,7 +889,7 @@
+     let final_s_start = ss.saturating_sub(left_s_consumed);
+     let final_s_end = ss + seed_len + right_s_consumed;
+ 
+-    if std::env::var("LOSAT_DEBUG_COORDS").is_ok() {
++    if crate::utils::env_diag::var("LOSAT_DEBUG_COORDS").is_ok() {
+         eprintln!("[COORDS] seed: qs={}, ss={}, len={}", qs, ss, seed_len);
+         eprintln!(
+             "[COORDS] left: q_consumed={}, s_consumed={}",
+@@ -1075,7 +1075,7 @@
+     // Main DP loop - for each query position (row)
+     for a_index in 1..=m {
+         // Debug: track last few rows
+-        if std::env::var("LOSAT_DEBUG_COORDS").is_ok() && m > 1000 && a_index >= m.saturating_sub(2)
++        if crate::utils::env_diag::var("LOSAT_DEBUG_COORDS").is_ok() && m > 1000 && a_index >= m.saturating_sub(2)
+         {
+             eprintln!(
+                 "[DP_ROW] a_index={}/{}, first_b={}, b_size={}",
+@@ -1212,7 +1212,7 @@
+     // This matches NCBI's approach where stats are computed in traceback
+ 
+     // Debug: check offset values
+-    if std::env::var("LOSAT_DEBUG_COORDS").is_ok() {
++    if crate::utils::env_diag::var("LOSAT_DEBUG_COORDS").is_ok() {
+         eprintln!(
+             "[EXT_FWD] m={}, n={}, a_offset={}, b_offset={}, best_score={}",
+             m, n, a_offset, b_offset, best_score
+@@ -1282,6 +1282,11 @@
+     subject_byte_offset: isize,
+     gap_scratch: &mut GapAlignScratch,
+ ) -> (usize, usize, i32, usize) {
++// NCBI reference: c++/src/algo/blast/core/blast_engine.c:1659-1668
++// /* Use a local diagnostics structure ... shared between multiple threads */
++// Isolated diagnostic only; nested work durations are not additive wall time.
++    let _env_kernel_scope = crate::utils::env_diag::Scope::new(1);
++
+     // NCBI reference: blast_gapalign.c:3063-3074
+     let gap_open_extend = gap_open + gap_extend;
+     let mut x_dropoff = x_drop;
+@@ -1699,7 +1704,7 @@
+     // For score-only mode, we estimate stats from score and positions
+ 
+     // Debug: check offset values for extension
+-    if std::env::var("LOSAT_DEBUG_COORDS").is_ok() {
++    if crate::utils::env_diag::var("LOSAT_DEBUG_COORDS").is_ok() {
+         eprintln!("[EXT_{}] m={}, n={}, a_offset={}, b_offset={}, best_score={}, expected_perfect_score={}",
+             if reverse { "REV" } else { "FWD" },
+             m, n, a_offset, b_offset, best_score, (m.min(n) * reward as usize) as i32);
+@@ -1910,6 +1915,11 @@
+     usize,
+     Vec<GapEditOp>,
+ ) {
++// NCBI reference: c++/src/algo/blast/core/blast_engine.c:1659-1668
++// /* Use a local diagnostics structure ... shared between multiple threads */
++// Isolated diagnostic only; nested work durations are not additive wall time.
++    let _env_kernel_scope = crate::utils::env_diag::Scope::new(2);
++
+     // NCBI reference: blast_gapalign.c:364-733 ALIGN_EX function
+     // This is the traceback-capturing version (score_only = FALSE case)
+ 
+@@ -2538,6 +2548,11 @@
+         );
+     }
+ 
++
++// NCBI reference: c++/src/algo/blast/core/blast_engine.c:1659-1668
++// /* Use a local diagnostics structure ... shared between multiple threads */
++// Isolated diagnostic only; nested work durations are not additive wall time.
++    let _env_kernel_scope = crate::utils::env_diag::Scope::new(3);
+     let m = len1;
+     let n = len2;
+     if m == 0 || n == 0 {
+@@ -3065,8 +3080,8 @@
+ // ```
+ #[inline]
+ fn debug_coords_traceback_enabled(qs: usize, ss: usize) -> bool {
+-    let debug_all = std::env::var_os("LOSAT_DEBUG_COORDS").is_some();
+-    let Some(filter) = std::env::var_os("LOSAT_DEBUG_COORDS_START") else {
++    let debug_all = crate::utils::env_diag::var_os("LOSAT_DEBUG_COORDS").is_some();
++    let Some(filter) = crate::utils::env_diag::var_os("LOSAT_DEBUG_COORDS_START") else {
+         return debug_all;
+     };
+     let filter = filter.to_string_lossy();
+@@ -3103,6 +3118,11 @@
+     usize,
+     Vec<GapEditOp>,
+ ) {
++// NCBI reference: c++/src/algo/blast/core/blast_engine.c:1659-1668
++// /* Use a local diagnostics structure ... shared between multiple threads */
++// Isolated diagnostic only; nested work durations are not additive wall time.
++    let _env_kernel_scope = crate::utils::env_diag::Scope::new(4);
++
+     // Bounds validation
+     if qs >= q_seq.len() || ss >= s_seq.len() {
+         return (qs, qs, ss, ss, 0, 0, 0, 0, 0, Vec::new());

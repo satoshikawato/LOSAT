@@ -50,7 +50,7 @@ async function checkReactor(artifact, fixtures, output) {
   try {
     for (const c of cases) {
       let reference;
-      for (const [i, n] of [1, 2, 4, 2, 1, 2, 2].entries()) {
+      for (const [i, n] of [1, 2, 4, 8, 2, 1, 2, 2].entries()) {
         const response = runPair(host, c.program, c.seq, c.seq, "6", [...c.args, "-num_threads", String(n)]);
         const events = await host.waitForWorkers();
         save(`${c.id}-${i}-n${n}`, response, events);
@@ -88,12 +88,18 @@ async function checkReactor(artifact, fixtures, output) {
       // API labels are a separate existing contract; compare unchanged bytes.
       for (const format of c.program === "blastp" ? ["0", "7", "6 qseqid sseqid score bitscore qstart qend sstart send"] : c.program === "blastn" ? ["7"] : []) {
         let expected;
-        for (const n of [1, 2, 4]) {
+        for (const n of [1, 2, 4, 8]) {
           const response = runPair(host, c.program, c.seq, c.seq, format, [...c.args, "-num_threads", String(n)]);
           const events = await host.waitForWorkers(); save(`${c.id}-format-${format.split(" ")[0]}-n${n}`, response, events);
           assert.equal(response.status, 0, response.error);
           if (!expected) expected = response.result;
           assert.deepEqual(response.result, expected);
+          // NCBI reference: c++/src/algo/blast/api/prelim_stage.cpp:177-188
+          // (*thread)->Run(); (*thread)->Join(&result);
+          for (const event of ["spawn_attempt", "spawned", "ready", "exited"]) {
+            assert.equal(events.filter(e => e.event === event).length, n === 1 ? 0 : n);
+          }
+          assert.ok(events.filter(e => e.event === "exited").every(e => e.code === 0));
         }
       }
       const invalid = runPair(host, c.program, "invalid FASTA", c.seq, "6", [...c.args, "-num_threads", "1"]);

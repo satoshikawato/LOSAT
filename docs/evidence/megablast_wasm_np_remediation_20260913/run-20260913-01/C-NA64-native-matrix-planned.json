@@ -1,0 +1,17 @@
+{
+  "status": "PREPARED_NOT_EXECUTED",
+  "ordered_groups": [
+    "x-native-controls",
+    "np-native-controls"
+  ],
+  "driver": "/tmp/losat-remediation-20260913-01/qualify_na64_native.py",
+  "driver_sha256": "d89d6ee2a3e3655eedf2bcbb031d4b84a8bbc12e771b8abc2d6a957265ac1f09",
+  "argv": [
+    "python3",
+    "/tmp/losat-remediation-20260913-01/qualify_na64_native.py",
+    "x-native-controls",
+    "np-native-controls"
+  ],
+  "prerequisite": "Configured native build succeeds and actual flags/artifact are verified",
+  "original_failure_records_unchanged": true
+}

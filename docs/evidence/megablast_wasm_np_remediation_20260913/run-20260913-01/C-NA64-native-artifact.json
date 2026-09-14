@@ -1,0 +1,7 @@
+{
+  "path": "/tmp/losat-remediation-20260913-01/C-NA64-target/native/release/LOSAT",
+  "sha256": "a1ab28454b880fe913f88329056e852405c3ade8ba85e576be4a5a256b7624db",
+  "diagnostic_artifact_sha256": "a1ab28454b880fe913f88329056e852405c3ade8ba85e576be4a5a256b7624db",
+  "byte_identical_to_environment_flag_build": true,
+  "flags_source": "target cfg in Cargo config; no environment rustflag override"
+}

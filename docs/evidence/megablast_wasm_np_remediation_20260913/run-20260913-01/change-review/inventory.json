@@ -1,0 +1,216 @@
+[
+  {
+    "path": ".github/workflows/wasm-threading.yml",
+    "category": "verification-and-tooling",
+    "initial_sha256": "41820eff2ef155058e70dd91f4baf98ccbc3db16c18ddbc499f7945428f2f186",
+    "current_sha256": "f7f4fc061b93f70d3af054363598fba7937b80c3b4c4f30ad946c4d28433676f",
+    "initial_crlf": 0,
+    "current_crlf": 0,
+    "source_diff_line_endings": "LF for review only; on-disk source bytes preserved"
+  },
+  {
+    "path": "LOSAT/.cargo/config.toml",
+    "category": "production",
+    "initial_sha256": "66edf0dc4336dc08a79ba708b8eedb4fca96d050c68b1a909101b36d50417188",
+    "current_sha256": "c1ec32428d4c3e4362f53863a7fe674fd6a0829f688b8aebc30a64ceea733475",
+    "initial_crlf": 0,
+    "current_crlf": 0,
+    "source_diff_line_endings": "LF for review only; on-disk source bytes preserved"
+  },
+  {
+    "path": "LOSAT/Cargo.toml",
+    "category": "production",
+    "initial_sha256": "3033944d936581b1d559ad4510598243d8cbd99d0ef186c34c64098840040cad",
+    "current_sha256": "4556804c7be66a60fc6b19bd9f640b1d469d12bd8a9e5447177a5a3a66a8ad87",
+    "initial_crlf": 0,
+    "current_crlf": 0,
+    "source_diff_line_endings": "LF for review only; on-disk source bytes preserved"
+  },
+  {
+    "path": "LOSAT/src/algorithm/blastn/blast_engine/run.rs",
+    "category": "production",
+    "initial_sha256": "0490004f446d7341dcc88efe42dd3a329343a9c1a07b8f49e7e29c8314f7146c",
+    "current_sha256": "44dcaf140485ef651f119e50cbd61cba601880943d816f2fe3d61880e2b967ae",
+    "initial_crlf": 10806,
+    "current_crlf": 10819,
+    "source_diff_line_endings": "LF for review only; on-disk source bytes preserved"
+  },
+  {
+    "path": "LOSAT/src/algorithm/blastn/constants.rs",
+    "category": "production",
+    "initial_sha256": "fa17c93f9c668481c0bcca89900cbe1cde09d1a7a689109f160623a2f0c4d405",
+    "current_sha256": "3eed096f301d8819cbbdb891ee5236705e07cea0e76a0d6ae11a0c6c58fa5376",
+    "initial_crlf": 0,
+    "current_crlf": 0,
+    "source_diff_line_endings": "LF for review only; on-disk source bytes preserved"
+  },
+  {
+    "path": "LOSAT/src/algorithm/blastn/filtering/purge_endpoints.rs",
+    "category": "production",
+    "initial_sha256": "1a3ad466a73dc337629f945ff12a5d05b5602fb9097b69176a5e2c788f0ae3fb",
+    "current_sha256": "20c9e538ab5ee57d540e93be6bebc6af4c614f482b9bacf436ba48d939f5529a",
+    "initial_crlf": 1968,
+    "current_crlf": 2215,
+    "source_diff_line_endings": "LF for review only; on-disk source bytes preserved"
+  },
+  {
+    "path": "LOSAT/src/algorithm/blastp/gapalign.rs",
+    "category": "production",
+    "initial_sha256": "d70563703948c8d6ae19b3cced19350d626e50f06f5fbd8e8c3e4bbcacf0ec96",
+    "current_sha256": "ae3d1cc128aa2049f56c72947f527920b27f2574f0ffb6dd9aff1504a0cc6fbd",
+    "initial_crlf": 0,
+    "current_crlf": 0,
+    "source_diff_line_endings": "LF for review only; on-disk source bytes preserved"
+  },
+  {
+    "path": "LOSAT/src/algorithm/tblastx/sum_stats_linking/linking.rs",
+    "category": "production",
+    "initial_sha256": "6547964ed758904f6b35147e3033509579d2a43871f125d95a4f03740510d094",
+    "current_sha256": "9bc8d672276a427a29e8a0f471389b8fedd538f65c935f967e282e79a8ff7933",
+    "initial_crlf": 2826,
+    "current_crlf": 3016,
+    "source_diff_line_endings": "LF for review only; on-disk source bytes preserved"
+  },
+  {
+    "path": "LOSAT/tests/README.md",
+    "category": "documentation",
+    "initial_sha256": "6f2fbdc2404a5983cacd8a00d3f37bfa99eb0479f6211555e8b17ae31ac0e02a",
+    "current_sha256": "d45e0d88d20992a81ca5223b6def7c8d286d4ec55de2e6fdc9b2cbc47b71bde1",
+    "initial_crlf": 0,
+    "current_crlf": 0,
+    "source_diff_line_endings": "LF for review only; on-disk source bytes preserved"
+  },
+  {
+    "path": "LOSAT/tests/benchmark_wasm_threading.py",
+    "category": "verification-and-tooling",
+    "initial_sha256": "48265cc6556db7f5e6a8efcc8212e3f2f6d0f8a8dc8932ba4e8e79decdc9d42b",
+    "current_sha256": "8b5288b374055ab86e513248117a00626b22e40539a473e707c59ee619c8ab3b",
+    "initial_crlf": 0,
+    "current_crlf": 0,
+    "source_diff_line_endings": "LF for review only; on-disk source bytes preserved"
+  },
+  {
+    "path": "LOSAT/tests/build_wasi_artifacts.py",
+    "category": "verification-and-tooling",
+    "initial_sha256": "87668e6b6ea7a4ffae7499b9be705f1f830d0d594ddc36db81adfff6de0c2209",
+    "current_sha256": "5d006f67bacac7b1f06ab77c04072dadab4d3c592d62ff8ff697323124110e33",
+    "initial_crlf": 0,
+    "current_crlf": 0,
+    "source_diff_line_endings": "LF for review only; on-disk source bytes preserved"
+  },
+  {
+    "path": "LOSAT/tests/check_tblastx_thread_thresholds.py",
+    "category": "verification-and-tooling",
+    "initial_sha256": "21b4e45bb6c724551389eeff51116b39082b6d99c763d2310c7b4fae99a7337f",
+    "current_sha256": "8808bc7885fc22f69567c684a729eb3e746f603d3816cb59ebfc7a273c8b219d",
+    "initial_crlf": 0,
+    "current_crlf": 0,
+    "source_diff_line_endings": "LF for review only; on-disk source bytes preserved"
+  },
+  {
+    "path": "LOSAT/tests/check_wasi_reactor.js",
+    "category": "verification-and-tooling",
+    "initial_sha256": "d5aae0e1f8e9199389d2fbfea80f46897a72cfd1db028c45de3093de6004dab0",
+    "current_sha256": "2d081553e1644a22ec52c8ff9056ff34951aa22b6116bebb2becb3ca8289366b",
+    "initial_crlf": 0,
+    "current_crlf": 0,
+    "source_diff_line_endings": "LF for review only; on-disk source bytes preserved"
+  },
+  {
+    "path": "LOSAT/tests/check_wasm_threading.py",
+    "category": "verification-and-tooling",
+    "initial_sha256": "bde9c3b694226b4bb3d971995ab98c2726c152b0e08bacebab345cd1b26bc1ee",
+    "current_sha256": "0469f1bf27cccee8cdae759388d39b96d6c1fcb7ff844a0648358de0e482ae84",
+    "initial_crlf": 0,
+    "current_crlf": 0,
+    "source_diff_line_endings": "LF for review only; on-disk source bytes preserved"
+  },
+  {
+    "path": "LOSAT/tests/check_wasm_threading_regressions.py",
+    "category": "verification-and-tooling",
+    "initial_sha256": "b588d78f3af0f77345b489ffe55adf4d91f58c3735b1b38413c55d2283f0c198",
+    "current_sha256": "ef7ab5378695fc5c70113124ea1374b46a2670b0c41bf3e73c4d66d0beb66f39",
+    "initial_crlf": 0,
+    "current_crlf": 0,
+    "source_diff_line_endings": "LF for review only; on-disk source bytes preserved"
+  },
+  {
+    "path": "LOSAT/tests/comparison_data.py",
+    "category": "verification-and-tooling",
+    "initial_sha256": "742da1d0ed6924d9f194e9623878100215c4c3508101b7ca49b64b46b797876d",
+    "current_sha256": "f50911ea621a2cf5f95244da3212e4560415e9285660aa4352e21ad01b16d93d",
+    "initial_crlf": 0,
+    "current_crlf": 0,
+    "source_diff_line_endings": "LF for review only; on-disk source bytes preserved"
+  },
+  {
+    "path": "LOSAT/tests/megablast_xdrop.rs",
+    "category": "verification-and-tooling",
+    "initial_sha256": null,
+    "current_sha256": "6dceab0bf278eca349797df6bb122eb0af08e29d448698b16b831c3bd4c00d92",
+    "initial_crlf": 0,
+    "current_crlf": 0,
+    "source_diff_line_endings": "LF for review only; on-disk source bytes preserved"
+  },
+  {
+    "path": "LOSAT/tests/plot_execution_time.py",
+    "category": "verification-and-tooling",
+    "initial_sha256": "628ce65f93e27d78bb887e49f56a845e258cb9806209422461ad23bcca777b3f",
+    "current_sha256": "1fadfb11382eb73acc094d7eb753b9735ba7db40d599f7eabe19722600e10548",
+    "initial_crlf": 0,
+    "current_crlf": 0,
+    "source_diff_line_endings": "LF for review only; on-disk source bytes preserved"
+  },
+  {
+    "path": "LOSAT/tests/run_comparison.sh",
+    "category": "verification-and-tooling",
+    "initial_sha256": "f8591f2cd4c73b3f815e59582e08552d37450558b9378a2e1798f8ab963de901",
+    "current_sha256": "7ff8102a0951a36b5910391bcbc7b2b3ad2125cfb3876b5f529d67347ddb340b",
+    "initial_crlf": 0,
+    "current_crlf": 0,
+    "source_diff_line_endings": "LF for review only; on-disk source bytes preserved"
+  },
+  {
+    "path": "LOSAT/tests/test_simple_comparison.py",
+    "category": "verification-and-tooling",
+    "initial_sha256": "ef21350f869bd3fec010dec80ca1b3cda5775ad6b69156969886c5eebc171dc5",
+    "current_sha256": "c59f3df5779cab85c138faba6845f59007e0a81c996941a0f09232cc0fcb5385",
+    "initial_crlf": 0,
+    "current_crlf": 0,
+    "source_diff_line_endings": "LF for review only; on-disk source bytes preserved"
+  },
+  {
+    "path": "LOSAT/tests/test_wasm_performance.py",
+    "category": "verification-and-tooling",
+    "initial_sha256": "2d3ec1484dded1adfade7832b9742d7e5d6c575402d0e486f0e092791a454d18",
+    "current_sha256": "bb18e186011a3d45a7729b3ca9959830e4c0093e4b1ae3cb47e7b26fc64a9278",
+    "initial_crlf": 329,
+    "current_crlf": 334,
+    "source_diff_line_endings": "LF for review only; on-disk source bytes preserved"
+  },
+  {
+    "path": "LOSAT/tests/wasm_performance.py",
+    "category": "verification-and-tooling",
+    "initial_sha256": "844ab57bb4f4ff9b54a26c53aac857a27176e041bbe66b1b679f8de8d7396a13",
+    "current_sha256": "596f10875001f2aa2a56ed023e7eb15f35a1ee0342ef5a714d53ccfeb2ae66ce",
+    "initial_crlf": 1175,
+    "current_crlf": 1181,
+    "source_diff_line_endings": "LF for review only; on-disk source bytes preserved"
+  },
+  {
+    "path": "README.md",
+    "category": "documentation",
+    "initial_sha256": "1ca5e150b5bdc3725b2d20f378fe0e3ba2dc97c04d6904a020635a6d200b6e89",
+    "current_sha256": "37518f97ff83577b40fa7030fa04304b20cb7ac55ce8798bc5688ebd8458ca1c",
+    "initial_crlf": 241,
+    "current_crlf": 253,
+    "source_diff_line_endings": "LF for review only; on-disk source bytes preserved"
+  },
+  {
+    "path": "LOSAT/tests/fixtures/megablast_automatic_xdrop.outfmt6",
+    "category": "oracle-regression-fixture",
+    "bytes": 38401,
+    "current_sha256": "2e2fb3ef85081501224f81be0a82cf9715672f5229d3edb162ff114912920873",
+    "normalization": "NONE"
+  }
+]

@@ -1,0 +1,9 @@
+{
+  "registered_utc": "2026-09-13T14:09:57.007411+00:00",
+  "reason": "Initial five-pair main n8 result: LC improvement 3.84%, near but below 5%; perform the plan-mandated additional five pairs before classifying.",
+  "additional_pairs": 5,
+  "warmups": 1,
+  "source_unchanged": true,
+  "primary_decision": "Report both cohorts and pooled ten-pair uninstrumented medians/ranges. Do not use exploration or select a favorable cohort. A pooled improvement below 5% leaves LC unmet. An inconsistent result remains inconclusive.",
+  "other_gates_unchanged": true
+}

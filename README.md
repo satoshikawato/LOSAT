@@ -161,22 +161,34 @@ feature or target scope above.
 
 ## WebAssembly
 
-The crate can be built for command-style WASI targets. Plain `wasm32-wasip1`
-builds are serial. Threaded Wasm builds require `wasm32-wasip1-threads`, the
-`wasm-threads` feature, and a compatible runtime.
+The standard Wasm builds use `wasm32-wasip1-threads` with the `wasm-threads`
+feature. The same command artifact supports both `-num_threads 1` and multiple
+threads. A compatible runtime with shared-memory/thread support is required.
+This build default does not expand the historical certification scope above.
 
 ```bash
 cd LOSAT
-cargo build --release --bin LOSAT --target wasm32-wasip1 --no-default-features --target-dir target/serial-command
-cargo build --release --bin LOSAT --target wasm32-wasip1-threads --features wasm-threads --target-dir target/threaded-command
+cargo build-wasi-command
+node tests/run_losat_wasi_threads.js target/threaded-command/wasm32-wasip1-threads/release/LOSAT.wasm --help
 ```
 
-Use `cargo build-web-threaded-reactor` for the separate internal reactor artifact.
-`_start` commands and `_initialize` reactors are not interchangeable. The reactor
-links the selected Rust toolchain's `crt1-reactor.o`; initialize it once with
-`WASI.initialize`, then call the direct API. Build all four artifact kinds with
+Use `cargo build-web` (also named `build-web-threaded-reactor`) for the separate
+threaded reactor. `_start` commands and `_initialize` reactors are not
+interchangeable. The reactor links the selected Rust toolchain's
+`crt1-reactor.o`; initialize it once with `WASI.initialize`, then call the direct
+API. Build and inspect both standard artifacts with
 `python tests/build_wasi_artifacts.py --target-dir target --output-dir ../.tmp/wasi-artifacts`.
-The helper checks kind/imports/exports and records hashes and build metadata.
+The helper records kind/imports/exports, hashes and build metadata. Use a fresh
+output directory when changing the selected artifact kinds.
+
+Serial Wasm remains an explicit compatibility option:
+`cargo build-wasi-command-serial`, `cargo build-web-serial`, or
+`build_wasi_artifacts.py --include-serial` (all four artifact kinds).
+It uses the separate `run_losat_wasi.js` host and rejects multiple threads.
+The current gbdraw browser integration still uses this serial path for some AUTO
+workloads and fallback; switching its deployment to threaded-only is a separate
+consumer migration. Existing frozen v0.1.0 release/certification workflows retain
+their historical serial contract.
 
 `-num_threads 1` runs on the caller without a compute pool. A supported
 `-num_threads N` creates exactly N dedicated compute workers for that search and

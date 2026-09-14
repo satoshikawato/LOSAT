@@ -1,0 +1,107 @@
+--- integrated/linking.rs
++++ C-X4/linking.rs
+@@ -297,8 +297,13 @@
+ // Core structures
+ // ---------------------------------------------------------------------------
+ 
+-/// lh_helper structure (NCBI link_hsps.c:100-109)
+-/// This is the "hot" data used in the inner loop
++// NCBI reference: c++/src/algo/blast/core/link_hsps.c:100-109,850
++// typedef struct LinkHelpStruct { LinkHSPStruct* ptr; Int4 q_off_trim;
++//   Int4 s_off_trim; Int4 sum[eOrderingMethods]; Int4 maxsum1; Int4 next_larger; };
++// if(0) if(H2_helper->maxsum1<=H_hsp_sum)break;
++// maxsum1 has no enabled consumer. Omit that dead field and its maintenance;
++// keep the same stationary helper array, index domain and traversal. Removing
++// the field shrinks the frequently read record without adding a pruning test.
+ #[derive(Clone)]
+ struct LhHelper {
+     hsp_idx: usize, // Original HSP index (NCBI: ptr field)
+@@ -306,7 +311,6 @@
+     s_off_trim: i32,
+     sum: [i32; 2],      // sum for both indices (small gap, large gap)
+     next_larger: usize, // index of next HSP with larger sum[1]
+-    maxsum1: i32,       // NCBI: threshold for stopping link attempts (unused with if(0))
+ }
+ 
+ // NCBI c++/src/algo/blast/core/link_hsps.c:608-633,654-658:
+@@ -1200,7 +1204,6 @@
+     // - pool_lh_helpers[i+2]: corresponds to pool_hsp_links[i]
+     // NCBI `link_hsps.c` allocates `lh_helper` with `calloc`, so the sentinel
+     // entries are zero-initialized. We mirror that exactly (sums=0, next_larger=0).
+-    // NCBI line 576: lh_helper[0].maxsum1 = -10000;
+     // NCBI memory pooling: reuse pool_lh_helpers buffer instead of allocating fresh
+     // Resize to n+2 (group size + sentinels), clearing and reusing existing capacity
+     // NCBI uses calloc to allocate n+2 entries, all zero-initialized.
+@@ -1214,7 +1217,6 @@
+             s_off_trim: 0,
+             sum: [0, 0], // NCBI: calloc zero-initializes
+             next_larger: 0,
+-            maxsum1: 0, // Default; sentinels will override
+         },
+     );
+     // Initialize sentinels (indices 0 and 1)
+@@ -1224,7 +1226,6 @@
+         s_off_trim: 0,
+         sum: [0, 0], // NCBI: calloc zero-initializes
+         next_larger: 0,
+-        maxsum1: -10000, // NCBI line 576
+     };
+     pool_lh_helpers[1] = LhHelper {
+         hsp_idx: SENTINEL_IDX,
+@@ -1232,7 +1233,6 @@
+         s_off_trim: 0,
+         sum: [0, 0], // NCBI: calloc zero-initializes
+         next_larger: 0,
+-        maxsum1: -10000, // Will be reset to -10000 in each pass (line 1191)
+     };
+     // Remaining entries (2..n+2) will be populated during linking passes
+     // Use pool_lh_helpers directly throughout the function (all lh_helpers references replaced)
+@@ -1372,9 +1372,10 @@
+             // pool_lh_helpers[0] and [1] are sentinels; active HSPs occupy [2..lh_len).
+             let mut lh_len = 2usize;
+             let mut cur = active_head;
+-            // NCBI lines 669-671: track max sum[1] for maxsum1 calculation
+-            // Since LOSAT groups by frame, all HSPs have the same frame sign, so we track one max
+-            let mut running_max = -10000i32;
++            // NCBI reference: c++/src/algo/blast/core/link_hsps.c:669-671,850
++            // lh_helper[H_index].maxsum1=max[SIGN(s_frame)+1];
++            // if(0) if(H2_helper->maxsum1<=H_hsp_sum)break;
++            // The prefix maximum only feeds this disabled test; no state is needed.
+             while cur != SENTINEL_IDX {
+                 let hsp_idx = cur;
+ 
+@@ -1391,10 +1392,6 @@
+                     pool_hsp_links[hsp_idx].sum[0],
+                     pool_hsp_links[hsp_idx].sum[1],
+                 ];
+-
+-                // NCBI lines 669-671: update maxsum1
+-                running_max = running_max.max(pool_hsp_links[hsp_idx].sum[1]);
+-                pool_lh_helpers[lh_len].maxsum1 = running_max;
+ 
+                 // NCBI lines 675-684: compute next_larger
+                 // NCBI: while((cur_sum>=prev_sum) && (prev>0))
+@@ -1410,8 +1407,6 @@
+                 lh_len += 1;
+                 cur = next_cur;
+             }
+-            // NCBI line 688: lh_helper[1].maxsum1 = -10000;
+-            pool_lh_helpers[1].maxsum1 = -10000;
+             let _active_count = lh_len - 2;
+ 
+             best = [None, None];
+@@ -1746,10 +1741,10 @@
+                 pool_hsp_links[i].link[1] = h_link;
+                 pool_lh_helpers[h_lh_idx].sum[1] = new_sum;
+ 
+-                // NCBI line 874: lh_helper[H_index].maxsum1 = MAX(lh_helper[H_index-1].maxsum1, new_sum);
+-                // Note: maxsum1 is unused (NCBI line 850 is if(0)) but we compute it for strict parity
+-                pool_lh_helpers[h_lh_idx].maxsum1 =
+-                    pool_lh_helpers[h_lh_idx - 1].maxsum1.max(new_sum);
++                // NCBI reference: c++/src/algo/blast/core/link_hsps.c:850,874
++                // if(0) if(H2_helper->maxsum1<=H_hsp_sum)break;
++                // lh_helper[H_index].maxsum1=MAX(lh_helper[H_index-1].maxsum1,new_sum);
++                // This disabled-test-only prefix maximum has no live consumer.
+ 
+                 // Update next_larger for this entry (NCBI lines 876-884)
+                 //

@@ -1,0 +1,9 @@
+{
+  "path": "/mnt/c/Users/genom/GitHub/LOSAT/LOSAT/src/algorithm/blastn/filtering/purge_endpoints.rs",
+  "before_sha256": "1a3ad466a73dc337629f945ff12a5d05b5602fb9097b69176a5e2c788f0ae3fb",
+  "after_sha256": "20c9e538ab5ee57d540e93be6bebc6af4c614f482b9bacf436ba48d939f5529a",
+  "candidate_sha256": "4fa1b9a4510078c42f6bfe64fcce2555b168e408d8b023c29117f6ecc67e66f3",
+  "line_endings_preserved": true,
+  "integrated_utc": "2026-09-13T14:41:19.910056+00:00",
+  "final_integrated_gates": "pending"
+}

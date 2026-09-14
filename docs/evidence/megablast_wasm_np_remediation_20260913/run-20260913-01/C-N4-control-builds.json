@@ -1,0 +1,37 @@
+[
+  {
+    "name": "native-build",
+    "argv": [
+      "cargo",
+      "build",
+      "--release",
+      "--locked",
+      "--offline",
+      "--bin",
+      "LOSAT",
+      "--target-dir",
+      "/tmp/losat-remediation-20260913-01/C-N4-target/native"
+    ],
+    "cwd": "/tmp/losat-remediation-20260913-01/C-N4-source/LOSAT",
+    "exit_status": 0
+  },
+  {
+    "name": "serial-build",
+    "argv": [
+      "cargo",
+      "build",
+      "--release",
+      "--locked",
+      "--offline",
+      "--bin",
+      "LOSAT",
+      "--no-default-features",
+      "--target",
+      "wasm32-wasip1",
+      "--target-dir",
+      "/tmp/losat-remediation-20260913-01/C-N4-target/serial-command"
+    ],
+    "cwd": "/tmp/losat-remediation-20260913-01/C-N4-source/LOSAT",
+    "exit_status": 0
+  }
+]

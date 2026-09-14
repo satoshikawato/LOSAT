@@ -1,0 +1,7 @@
+{
+  "status": "PASS",
+  "archive_sha256": "a4611e3a997cf8f14a475047288d913f39ddb2b5068e1ae82702a2a6b88b5a66",
+  "actual_regular_files": 26654,
+  "actual_symlinks": 29,
+  "verification": "Every archive member is unique and matches the complete file map, actual size and SHA-256; no extraction or output normalization."
+}

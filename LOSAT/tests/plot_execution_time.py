@@ -14,7 +14,7 @@ import seaborn as sns
 # Thread suffixes describe requested counts, not inferred worker utilization.
 from comparison_data import (
     CUSTOM_PALETTE, HUE_ORDER, LOSAT_THREADS, MODE_ORDER, PLOT_DIR,
-    NATIVE_SINGLE, NATIVE_MULTI, WASM_SINGLE, WASM_MULTI,
+    NATIVE_SINGLE, NATIVE_MULTI, WASM_SINGLE, WASM_THREADED_SINGLE, WASM_MULTI,
     comparison_cases, completed_log, result_paths, successful_output, sha256,
 )
 
@@ -97,7 +97,11 @@ def main():
     plt.close(g.fig)
     print(f"Plot saved to {OUTPUT_IMAGE}")
     summary = df.pivot(index=["Mode", "Task"], columns="Tool", values="Time (s)")
-    ratios = [(WASM_SINGLE, NATIVE_SINGLE), (WASM_MULTI, NATIVE_MULTI)]
+    # NCBI reference: c++/src/algo/blast/blastinput/cmdline_flags.cpp:75
+    # const string kArgNumThreads("num_threads");
+    ratios = list(dict.fromkeys([(WASM_SINGLE, NATIVE_SINGLE),
+                                 (WASM_THREADED_SINGLE, NATIVE_SINGLE),
+                                 (WASM_MULTI, NATIVE_MULTI)]))
     for numerator, denominator in ratios:
         if {numerator, denominator}.issubset(summary.columns):
             summary[f"Ratio ({numerator}/{denominator})"] = (

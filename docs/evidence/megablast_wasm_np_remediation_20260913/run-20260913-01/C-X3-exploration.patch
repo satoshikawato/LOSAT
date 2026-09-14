@@ -1,0 +1,156 @@
+--- integrated/linking.rs
++++ C-X3/linking.rs
+@@ -898,6 +898,86 @@
+ 
+ use super::params::LinkHspCutoffs;
+ 
++// NCBI reference: c++/src/algo/blast/core/link_hsps.c:827-861
++// for (H2_index=H_index-1; H2_index>1;) {
++//   LinkHelpStruct * H2_helper=&lh_helper[H2_index];
++//   sum=H2_helper->sum[index]; next_larger=H2_helper->next_larger;
++//   b0=sum<=H_hsp_sum; H2_index--; if(b0) H2_index=next_larger;
++//   b1=q_off_t<=H_query_etrim; b2=s_off_t<=H_sub_etrim;
++//   if (!(b0|b1|b2)) { H2=H2_helper->ptr; H_hsp_sum=H2->hsp_link.sum[index]; }
++// }
++// Borrow the stationary helper/link pools. Keeping this scan out of the large
++// linking caller gives its scalar state a separate register/stack lifetime;
++// the candidate visitation, debug observations and update order are unchanged.
++#[inline(never)]
++#[allow(clippy::too_many_arguments)]
++fn scan_large_gap_predecessors(
++    pool_lh_helpers: &[LhHelper],
++    pool_hsp_links: &[HspLink],
++    group_hits: &[UngappedHit],
++    h_lh_idx: usize,
++    h_qe: i32,
++    h_se: i32,
++    mut h_sum: i32,
++    is_target_hsp: bool,
++) -> (i16, i32, f64, usize) {
++    let mut h_num = 0i16;
++    let mut h_xsum = 0.0f64;
++    let mut h_link = SENTINEL_IDX;
++    let mut j_lh_idx = h_lh_idx - 1;
++    while j_lh_idx > 1 {
++        // NCBI: H2_helper points to lh_helper[H2_index] at loop START
++        let current_idx = j_lh_idx; // Save before any modification
++        let helper = &pool_lh_helpers[current_idx];
++        let sum = helper.sum[1];
++        let next_larger = helper.next_larger;
++        let qo = helper.q_off_trim;
++        let so = helper.s_off_trim;
++
++        let b0 = sum <= h_sum;
++
++        // NCBI line 841: H2_index--
++        j_lh_idx -= 1;
++        if b0 {
++            j_lh_idx = next_larger;
++            if is_target_hsp {
++                eprintln!("  [SKIP] current_idx={}, sum={} <= h_sum={}, jump to next_larger={}",
++                    current_idx, sum, h_sum, next_larger);
++            }
++        }
++
++        let b1 = qo <= h_qe;
++        let b2 = so <= h_se;
++
++        // NCBI line 852: if (!(b0|b1|b2))
++        if !(b0 || b1 || b2) {
++            // Use saved current_idx (NCBI: H2 = H2_helper->ptr)
++            let j = helper.hsp_idx;
++            if is_target_hsp {
++                eprintln!("  [LINK] current_idx={}, j={}, sum={} > h_sum={}, linking to HSP {}",
++                    current_idx, j, sum, h_sum, j);
++                eprintln!(
++                    "    Linked HSP: q_aa={}-{}, s_aa={}-{}, score={}, num={}",
++                    group_hits[j].q_aa_start,
++                    group_hits[j].q_aa_end,
++                    group_hits[j].s_aa_start,
++                    group_hits[j].s_aa_end,
++                    pool_hsp_links[j].score,
++                    pool_hsp_links[j].num[1]
++                );
++            }
++            h_num = pool_hsp_links[j].num[1];
++            h_sum = pool_hsp_links[j].sum[1];
++            h_xsum = pool_hsp_links[j].xsum[1];
++            h_link = j;
++        } else if is_target_hsp {
++            eprintln!("  [SKIP] current_idx={}, conditions: b0={} (sum<={}), b1={} (qo<={}), b2={} (so<={})",
++                current_idx, b0, h_sum, b1, h_qe, b2, h_se);
++        }
++    }
++    (h_num, h_sum, h_xsum, h_link)
++}
++
+ /// NCBI-style HSP linking for moderate-sized groups
+ ///
+ /// # Arguments
+@@ -1653,59 +1733,13 @@
+                             }
+                         }
+ 
+-                        // Inner loop (NCBI lines 827-861)
+-                        // CRITICAL: Must save current_idx BEFORE decrement to access correct hsp_idx
+-                        let mut j_lh_idx = h_lh_idx - 1;
+-                        while j_lh_idx > 1 {
+-                            // NCBI: H2_helper points to lh_helper[H2_index] at loop START
+-                            let current_idx = j_lh_idx; // Save before any modification
+-                            let helper = &pool_lh_helpers[current_idx];
+-                            let sum = helper.sum[1];
+-                            let next_larger = helper.next_larger;
+-                            let qo = helper.q_off_trim;
+-                            let so = helper.s_off_trim;
+-
+-                            let b0 = sum <= h_sum;
+-
+-                            // NCBI line 841: H2_index--
+-                            j_lh_idx -= 1;
+-                            if b0 {
+-                                j_lh_idx = next_larger;
+-                                if is_target_hsp {
+-                                    eprintln!("  [SKIP] current_idx={}, sum={} <= h_sum={}, jump to next_larger={}",
+-                                        current_idx, sum, h_sum, next_larger);
+-                                }
+-                            }
+-
+-                            let b1 = qo <= h_qe;
+-                            let b2 = so <= h_se;
+-
+-                            // NCBI line 852: if (!(b0|b1|b2))
+-                            if !(b0 || b1 || b2) {
+-                                // Use saved current_idx (NCBI: H2 = H2_helper->ptr)
+-                                let j = helper.hsp_idx;
+-                                if is_target_hsp {
+-                                    eprintln!("  [LINK] current_idx={}, j={}, sum={} > h_sum={}, linking to HSP {}",
+-                                        current_idx, j, sum, h_sum, j);
+-                                    eprintln!(
+-                                        "    Linked HSP: q_aa={}-{}, s_aa={}-{}, score={}, num={}",
+-                                        group_hits[j].q_aa_start,
+-                                        group_hits[j].q_aa_end,
+-                                        group_hits[j].s_aa_start,
+-                                        group_hits[j].s_aa_end,
+-                                        pool_hsp_links[j].score,
+-                                        pool_hsp_links[j].num[1]
+-                                    );
+-                                }
+-                                h_num = pool_hsp_links[j].num[1];
+-                                h_sum = pool_hsp_links[j].sum[1];
+-                                h_xsum = pool_hsp_links[j].xsum[1];
+-                                h_link = j;
+-                            } else if is_target_hsp {
+-                                eprintln!("  [SKIP] current_idx={}, conditions: b0={} (sum<={}), b1={} (qo<={}), b2={} (so<={})",
+-                                    current_idx, b0, h_sum, b1, h_qe, b2, h_se);
+-                            }
+-                        }
++                        // NCBI reference: c++/src/algo/blast/core/link_hsps.c:827-861
++                        // H2_helper=&lh_helper[H2_index]; H2=H2_helper->ptr;
++                        // The scan borrows both fixed pools and returns the same selection.
++                        (h_num, h_sum, h_xsum, h_link) = scan_large_gap_predecessors(
++                            pool_lh_helpers, pool_hsp_links, &group_hits,
++                            h_lh_idx, h_qe, h_se, h_sum, is_target_hsp,
++                        );
+                     } else if is_target_hsp {
+                         eprintln!("[DEBUG_CHAINING] INDEX 1 (large gap): score {} <= cutoff_big {}, skipping",
+                             i_score, cutoff_big);

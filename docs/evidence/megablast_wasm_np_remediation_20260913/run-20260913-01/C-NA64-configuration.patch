@@ -1,0 +1,15 @@
+--- a/LOSAT/.cargo/config.toml
++++ b/LOSAT/.cargo/config.toml
+@@ -47,3 +47,12 @@
+ 
+ [target.wasm32-unknown-unknown]
+ rustflags = ["-C", "target-feature=+simd128"]
++
++# NCBI reference: c++/src/algo/blast/core/link_hsps.c:827-861
++# for (H2_index=H_index-1; H2_index>1;) { ... }
++# Align native x86_64 loop heads so unrelated function-size changes do not
++# displace the repeated helper scan from its measured fast alignment. This
++# changes instruction padding, preserving the same search operations/order.
++# Explicit target scope keeps command/reactor Wasm code generation unchanged.
++[target.'cfg(target_arch = "x86_64")']
++rustflags = ["-C", "llvm-args=-align-loops=64", "-C", "llvm-args=-max-bytes-for-alignment=63"]

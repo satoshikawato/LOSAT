@@ -1,0 +1,197 @@
+{
+  "status": "OBSERVED_NP_RETAINED_MEMORY_NONREGRESSION_CAPACITY_REVIEW_PENDING",
+  "decision_sha256": "7b74b56ee4186242e33ea7bfae6aaf26bde3ffbbcce0454ea2fc2cdf283496b2",
+  "source_bindings": {
+    "docs/evidence/megablast_wasm_np_remediation_20260913/run-20260913-01/allocator-diagnostic/search/descriptive-summary.json": "10bf3f26fb653b798f4f979abe78bb0df1d8cb0be4eeb4137e4cf2946fd077be",
+    "docs/evidence/megablast_wasm_np_remediation_20260913/run-20260913-01/allocator-diagnostic/search/allocation-observations.json": "8ff0d36051f9fe1f85a813203886e8337ffc5cc92b4257c901fda5c1ad1f5739",
+    "docs/evidence/megablast_wasm_np_remediation_20260913/run-20260913-01/integrated-np-reactor-highwater/memory-observations.json": "8c3b6cc2008918484272fe26bdfd3ee052f17257c778025274dfcd88eaaf5763",
+    "docs/evidence/megablast_wasm_np_remediation_20260913/run-20260913-01/integrated-np-reuse/reuse-engineering-checks.json": "859615a2ffa88a40ec820ff28963d8ad756bc8a4a37424d3cf63aa69582a4b5f"
+  },
+  "retained_pairs": [
+    {
+      "session": 0,
+      "case_id": "MelaMJNV.PemoMJNVA.losatn.blastn",
+      "baseline_live_max": 1419328,
+      "candidate_live_max": 1419328,
+      "baseline_blocks_max": 40,
+      "candidate_blocks_max": 40,
+      "baseline_final_live": 1419328,
+      "candidate_final_live": 1419328
+    },
+    {
+      "session": 0,
+      "case_id": "MjPMNV.MlPMNV.losatn.blastn",
+      "baseline_live_max": 6334528,
+      "candidate_live_max": 6334528,
+      "baseline_blocks_max": 40,
+      "candidate_blocks_max": 40,
+      "baseline_final_live": 6334528,
+      "candidate_final_live": 6334528
+    },
+    {
+      "session": 0,
+      "case_id": "AP027078.AP027131.losatp",
+      "baseline_live_max": 1616940,
+      "candidate_live_max": 1616940,
+      "baseline_blocks_max": 41,
+      "candidate_blocks_max": 41,
+      "baseline_final_live": 1616940,
+      "candidate_final_live": 1616940
+    },
+    {
+      "session": 0,
+      "case_id": "AP027132.NZ_CP006932.losatp",
+      "baseline_live_max": 2141132,
+      "candidate_live_max": 2141132,
+      "baseline_blocks_max": 41,
+      "candidate_blocks_max": 41,
+      "baseline_final_live": 2141132,
+      "candidate_final_live": 2141132
+    },
+    {
+      "session": 1,
+      "case_id": "MelaMJNV.PemoMJNVA.losatn.blastn",
+      "baseline_live_max": 1419328,
+      "candidate_live_max": 1419328,
+      "baseline_blocks_max": 40,
+      "candidate_blocks_max": 40,
+      "baseline_final_live": 1419328,
+      "candidate_final_live": 1419328
+    },
+    {
+      "session": 1,
+      "case_id": "MjPMNV.MlPMNV.losatn.blastn",
+      "baseline_live_max": 6334528,
+      "candidate_live_max": 6334528,
+      "baseline_blocks_max": 40,
+      "candidate_blocks_max": 40,
+      "baseline_final_live": 6334528,
+      "candidate_final_live": 6334528
+    },
+    {
+      "session": 1,
+      "case_id": "AP027078.AP027131.losatp",
+      "baseline_live_max": 1616940,
+      "candidate_live_max": 1616940,
+      "baseline_blocks_max": 41,
+      "candidate_blocks_max": 41,
+      "baseline_final_live": 1616940,
+      "candidate_final_live": 1616940
+    },
+    {
+      "session": 1,
+      "case_id": "AP027132.NZ_CP006932.losatp",
+      "baseline_live_max": 2141132,
+      "candidate_live_max": 2141132,
+      "baseline_blocks_max": 41,
+      "candidate_blocks_max": 41,
+      "baseline_final_live": 2141132,
+      "candidate_final_live": 2141132
+    }
+  ],
+  "linear_pairs": [
+    {
+      "session": 0,
+      "case_id": "MelaMJNV.PemoMJNVA.losatn.blastn",
+      "baseline_max": 47120384,
+      "candidate_max": 46858240,
+      "delta": -262144
+    },
+    {
+      "session": 0,
+      "case_id": "MjPMNV.MlPMNV.losatn.blastn",
+      "baseline_max": 138674176,
+      "candidate_max": 137297920,
+      "delta": -1376256
+    },
+    {
+      "session": 0,
+      "case_id": "AP027078.AP027131.losatp",
+      "baseline_max": 69271552,
+      "candidate_max": 69140480,
+      "delta": -131072
+    },
+    {
+      "session": 0,
+      "case_id": "AP027132.NZ_CP006932.losatp",
+      "baseline_max": 87031808,
+      "candidate_max": 87687168,
+      "delta": 655360
+    },
+    {
+      "session": 1,
+      "case_id": "MelaMJNV.PemoMJNVA.losatn.blastn",
+      "baseline_max": 47120384,
+      "candidate_max": 46530560,
+      "delta": -589824
+    },
+    {
+      "session": 1,
+      "case_id": "MjPMNV.MlPMNV.losatn.blastn",
+      "baseline_max": 143917056,
+      "candidate_max": 132055040,
+      "delta": -11862016
+    },
+    {
+      "session": 1,
+      "case_id": "AP027078.AP027131.losatp",
+      "baseline_max": 69337088,
+      "candidate_max": 69206016,
+      "delta": -131072
+    },
+    {
+      "session": 1,
+      "case_id": "AP027132.NZ_CP006932.losatp",
+      "baseline_max": 87490560,
+      "candidate_max": 87228416,
+      "delta": -262144
+    }
+  ],
+  "original_rss_checks": [
+    {
+      "session": 0,
+      "kind": "threaded-command",
+      "mode": "compiled-module",
+      "baseline_process_peak_rss_bytes": 1987371008,
+      "candidate_process_peak_rss_bytes": 1726664704,
+      "tolerance_bytes": 198737100.8,
+      "rss_pass": true,
+      "budget_bytes": 4294967296,
+      "budget_pass": true
+    },
+    {
+      "session": 0,
+      "kind": "threaded-reactor",
+      "mode": "same-instance",
+      "baseline_process_peak_rss_bytes": 562016256,
+      "candidate_process_peak_rss_bytes": 555483136,
+      "tolerance_bytes": 56201625.6,
+      "rss_pass": true,
+      "budget_bytes": 4294967296,
+      "budget_pass": true
+    },
+    {
+      "session": 1,
+      "kind": "threaded-command",
+      "mode": "compiled-module",
+      "baseline_process_peak_rss_bytes": 1955295232,
+      "candidate_process_peak_rss_bytes": 1651683328,
+      "tolerance_bytes": 195529523.20000002,
+      "rss_pass": true,
+      "budget_bytes": 4294967296,
+      "budget_pass": true
+    },
+    {
+      "session": 1,
+      "kind": "threaded-reactor",
+      "mode": "same-instance",
+      "baseline_process_peak_rss_bytes": 573571072,
+      "candidate_process_peak_rss_bytes": 555659264,
+      "tolerance_bytes": 57357107.2,
+      "rss_pass": true,
+      "budget_bytes": 4294967296,
+      "budget_pass": true
+    }
+  ],
+  "boundary": "Diagnostic usable bytes/blocks are equal at the observed boundary; allocated linear memory has a positive P132 session0 delta. Original fixed-window FAIL is preserved and its absolute plateau criterion is deferred by the user. Does not qualify unobserved TBLASTX allocator live bytes."
+}

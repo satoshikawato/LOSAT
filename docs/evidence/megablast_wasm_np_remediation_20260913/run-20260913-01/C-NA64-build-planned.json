@@ -1,0 +1,24 @@
+{
+  "argv": [
+    "cargo",
+    "build",
+    "--release",
+    "--locked",
+    "--offline",
+    "--bin",
+    "LOSAT",
+    "--target-dir",
+    "/tmp/losat-remediation-20260913-01/C-NA64-target/native"
+  ],
+  "cwd": "/tmp/losat-remediation-20260913-01/C-NA64-source/LOSAT",
+  "source_manifest_sha256": "08521898d5db4a4bc6b3fdff219b14e27a50f2c0d732f7bdebb1a1012316b801",
+  "driver_sha256": "f6e7e754487b71165fe62feafd9c20673ad752e0e91042bbc30257969b1221bf",
+  "environment_flag_overrides": {},
+  "configured_native_flags": [
+    "-C",
+    "llvm-args=-align-loops=64",
+    "-C",
+    "llvm-args=-max-bytes-for-alignment=63"
+  ],
+  "purpose": "Validate the ordinary cargo configuration before qualification"
+}

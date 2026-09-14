@@ -1,6 +1,10 @@
 // NCBI BLAST compatible X-drop parameters
 // Reference: ncbi-blast/c++/include/algo/blast/core/blast_options.h:122-148
-pub const X_DROP_UNGAPPED: i32 = 20; // BLAST_UNGAPPED_X_DROPOFF_NUCL (blastn, megablast 共通)
+// NCBI reference: c++/src/algo/blast/api/blast_nucl_options.cpp:163-174;
+// c++/src/algo/blast/api/disc_nucl_options.cpp:66-73
+// SetXDropoff(BLAST_UNGAPPED_X_DROPOFF_NUCL); // blastn / dc-megablast
+// Traditional megablast leaves this option zero and uses the word cutoff.
+pub const X_DROP_UNGAPPED: i32 = 20;
 pub const X_DROP_GAPPED_NUCL: i32 = 30; // BLAST_GAP_X_DROPOFF_NUCL (blastn, non-greedy)
 pub const X_DROP_GAPPED_GREEDY: i32 = 25; // BLAST_GAP_X_DROPOFF_GREEDY (megablast, greedy)
 pub const X_DROP_GAPPED_FINAL: i32 = 100; // BLAST_GAP_X_DROPOFF_FINAL_NUCL for final traceback (共通)

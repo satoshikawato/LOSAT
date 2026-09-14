@@ -1,0 +1,248 @@
+--- a/LOSAT/src/algorithm/tblastx/sum_stats_linking/linking.rs
++++ b/LOSAT/src/algorithm/tblastx/sum_stats_linking/linking.rs
+@@ -267,6 +267,30 @@
+     // comparator-equal rows to the platform qsort implementation. Do not add
+     // frame or LOSAT insertion-order tie-breakers here.
+     sort_ungapped_hits_by_index_replay(hits, compare);
++}
++
++// NCBI reference: c++/src/algo/blast/core/link_hsps.c:990-994
++// qsort(link_hsp_array,total_number_of_hsps,sizeof(LinkHSPStruct*),
++//       s_RevCompareHSPsTransl);
++// qsort(link_hsp_array,total_number_of_hsps,sizeof(LinkHSPStruct*),
++//       s_FwdCompareHSPsTransl);
++// Keep the completed groups' payloads stationary during both final sorts.
++#[inline]
++fn sort_linked_hsp_references(
++    hits: &mut [&mut UngappedHit],
++    compare: fn(&UngappedHit, &UngappedHit) -> Ordering,
++) {
++    // NCBI reference: /mnt/c/Users/genom/GitHub/ncbi-blast/c++/src/algo/blast/core/link_hsps.c:483-486
++    // ```c
++    // qsort(link_hsp_array,total_number_of_hsps,sizeof(LinkHSPStruct*),
++    //       s_RevCompareHSPsTbx);
++    // ```
++    // NCBI's translated-query comparators are partial and NCBI delegates
++    // comparator-equal rows to the platform qsort implementation. Do not add
++    // frame or LOSAT insertion-order tie-breakers here.
++    // Keep every payload in the caller's fixed Vec. Stable ordering retains
++    // the same comparator-equal order as the previous index-replay sort.
++    hits.sort_by(|lhs, rhs| compare(lhs, rhs));
+ }
+ 
+ // ---------------------------------------------------------------------------
+@@ -771,10 +795,20 @@
+     //    qsort(link_hsp_array, total_number_of_hsps,sizeof(LinkHSPStruct*),
+     //          s_FwdCompareHSPsTransl);
+     // ```
+-    sort_hsps_by_ncbi_link_order(&mut results, rev_compare_hsps_transl);
+-    sort_hsps_by_ncbi_link_order(&mut results, fwd_compare_hsps_transl);
+-
+-    replay_ncbi_output_list(results)
++    // NCBI reference: c++/src/algo/blast/core/link_hsps.c:990-994,1080-1085
++    // qsort(link_hsp_array,total_number_of_hsps,sizeof(LinkHSPStruct*), ...);
++    // hsp_list->hsp_array[index] = H->hsp;
++    // Preserve the existing empty/singleton replay shortcut. The owned group
++    // kernel and its contiguous payload layout are unchanged; only these
++    // adjacent final sorts and replay borrow stationary result records.
++    if results.len() <= 1 {
++        return results;
++    }
++    let mut references: Vec<&mut UngappedHit> = results.iter_mut().collect();
++    sort_linked_hsp_references(&mut references, rev_compare_hsps_transl);
++    sort_linked_hsp_references(&mut references, fwd_compare_hsps_transl);
++
++    replay_ncbi_output_list(references)
+ }
+ 
+ // NCBI reference: /mnt/c/Users/genom/GitHub/ncbi-blast/c++/src/algo/blast/core/link_hsps.c:1012-1028
+@@ -802,9 +836,13 @@
+ //    if (H != NULL)
+ //       link = H->hsp_link.link[ordering_method];
+ // ```
+-fn replay_ncbi_output_list(sorted_hits: Vec<UngappedHit>) -> Vec<UngappedHit> {
++fn replay_ncbi_output_list(sorted_hits: Vec<&mut UngappedHit>) -> Vec<UngappedHit> {
+     if sorted_hits.len() <= 1 {
+-        return sorted_hits;
++        // NCBI reference: c++/src/algo/blast/core/link_hsps.c:1080-1085
++        // hsp_list->hsp_array[index] = H->hsp;
++        // Retain the existing singleton path, including a non-head singleton.
++        // Materialize once at this Rust ownership boundary.
++        return sorted_hits.into_iter().map(|hit| hit.clone()).collect();
+     }
+ 
+     let max_link_id = sorted_hits.iter().map(|h| h.link_id).max().unwrap_or(0);
+@@ -846,7 +884,11 @@
+ 
+     replayed_indices
+         .into_iter()
+-        .map(|index| sorted_hits[index].clone())
++        // NCBI reference: c++/src/algo/blast/core/link_hsps.c:1080-1085
++        // hsp_list->hsp_array[index] = H->hsp;
++        // Preserve the complete replay, including all chain members. Only
++        // this final boundary copies payloads back into an owned result Vec.
++        .map(|index| (*sorted_hits[index]).clone())
+         .collect()
+ }
+ 
+@@ -2635,7 +2677,7 @@
+         single.link_id = 2;
+         single.start_of_chain = true;
+ 
+-        let replayed = replay_ncbi_output_list(vec![member, head, single]);
++        let replayed = replay_ncbi_output_list(vec![&mut member, &mut head, &mut single]);
+         let replayed_ids: Vec<usize> = replayed.iter().map(|hit| hit.link_id).collect();
+         assert_eq!(replayed_ids, vec![1, 0, 2]);
+     }
+@@ -2822,5 +2864,151 @@
+         );
+ 
+         println!("✓ Confirmed: LOSAT uses DESCENDING order for subject.offset (matches NCBI)");
++    } // NCBI reference: c++/src/algo/blast/core/link_hsps.c:478-486,990-994
++      // link_hsp_array[index]->hsp = hsp_array[index];
++      // qsort(link_hsp_array,total_number_of_hsps,sizeof(LinkHSPStruct*), ...);
++    #[test]
++    fn test_final_link_sorts_preserve_payloads_addresses_and_all_ties() {
++        use crate::algorithm::tblastx::ungapped_hit_sort::sort_ungapped_hits_by_index_replay;
++        let mut hits: Vec<_> = (0..96)
++            .map(|i| {
++                let mut hit = mock_hit(
++                    (i / 3 % 8) * 20,
++                    (i / 3 % 8) * 20 + 15,
++                    (i / 3 % 5) * 30,
++                    (i / 3 % 5) * 30 + 15,
++                    i as i32,
++                );
++                hit.ctx_idx = i / 24;
++                hit.s_frame = if i / 12 % 2 == 0 { -1 } else { 1 };
++                hit.link_id = i;
++                hit.e_value = f64::from_bits(0x3ff0000000000000 + i as u64);
++                hit
++            })
++            .collect();
++        sort_hsps_by_ncbi_link_order(&mut hits, rev_compare_hsps_tbx);
++        let mut expected = hits.clone();
++        let mut addresses = vec![std::ptr::null(); hits.len()];
++        for hit in &hits {
++            addresses[hit.link_id] = hit as *const UngappedHit;
++        }
++        let mut references: Vec<_> = hits.iter_mut().collect();
++        let comparators: [fn(&UngappedHit, &UngappedHit) -> Ordering; 2] =
++            [rev_compare_hsps_transl, fwd_compare_hsps_transl];
++        for compare in comparators {
++            sort_ungapped_hits_by_index_replay(&mut expected, compare);
++            sort_linked_hsp_references(&mut references, compare);
++            for (actual, original) in references.iter().zip(&expected) {
++                assert_eq!(&**actual as *const UngappedHit, addresses[actual.link_id]);
++                assert_eq!(format!("{:?}", **actual), format!("{original:?}"));
++                assert_eq!(actual.e_value.to_bits(), original.e_value.to_bits());
++            }
++        }
++    }
++
++    // NCBI reference: c++/src/algo/blast/core/link_hsps.c:1018-1020,1046-1056,1080-1085
++    // if (H->linked_set == TRUE && H->start_of_chain == FALSE) continue;
++    // H->next = (LinkHSPStruct*) link; H = H->next;
++    // hsp_list->hsp_array[index] = H->hsp;
++    // Preserve the existing Rust replay's singleton and repeated-index cases.
++    #[test]
++    fn test_link_reference_replay_singleton_and_repeated_indices() {
++        assert!(replay_ncbi_output_list(Vec::new()).is_empty());
++        let mut member = mock_hit(1, 10, 1, 10, 10);
++        member.link_id = 7;
++        member.linked_set = true;
++        member.start_of_chain = false;
++        let singleton = replay_ncbi_output_list(vec![&mut member]);
++        assert_eq!(singleton.len(), 1);
++        assert_eq!(format!("{:?}", singleton[0]), format!("{member:?}"));
++
++        let mut head_a = mock_hit(20, 30, 20, 30, 20);
++        head_a.link_id = 1;
++        head_a.start_of_chain = true;
++        head_a.linked_set = true;
++        head_a.chain_next_link_id = Some(7);
++        let mut head_b = head_a.clone();
++        head_b.link_id = 2;
++        let replayed = replay_ncbi_output_list(vec![&mut member, &mut head_a, &mut head_b]);
++        assert_eq!(
++            replayed.iter().map(|h| h.link_id).collect::<Vec<_>>(),
++            [1, 7, 2, 7]
++        );
++        assert_eq!(format!("{:?}", replayed[1]), format!("{:?}", replayed[3]));
++    }
++
++    // NCBI reference: c++/src/algo/blast/core/link_hsps.c:553-558,990-994,1080-1085
++    // hp_start->next = hp_frame_start[frame_index];
++    // qsort(link_hsp_array,total_number_of_hsps,sizeof(LinkHSPStruct*), ...);
++    // hsp_list->hsp_array[index] = H->hsp;
++    #[test]
++    fn test_final_link_replay_parallel_matches_sequential_complete_payloads() {
++        let params = KarlinParams::default();
++        let contexts: Vec<_> = (0..12)
++            .map(|index| QueryContext {
++                q_idx: (index / 6) as u32,
++                f_idx: (index % 6) as u8,
++                frame: [1, 2, 3, -1, -2, -3][index % 6],
++                aa_seq: Vec::new(),
++                aa_seq_nomask: None,
++                aa_len: 2000,
++                orig_len: 6000,
++                frame_base: (index * 2001) as i32,
++                is_valid: true,
++                karlin_params: params,
++            })
++            .collect();
++        let linking = LinkingParams {
++            subject_len_nucl: 6000,
++            gap_decay_rate: 0.5,
++            cutoffs: LinkHspCutoffs {
++                cutoff_small_gap: 20,
++                cutoff_big_gap: 20,
++                gap_prob: 0.5,
++                ignore_small_gaps: false,
++            },
++        };
++        let hits: Vec<_> = (0..96)
++            .map(|index| {
++                let position = (index % 12) * 30;
++                let mut hit = mock_hit(
++                    position,
++                    position + 20,
++                    position,
++                    position + 20,
++                    40 + (index % 4) as i32,
++                );
++                hit.ctx_idx = index / 8;
++                hit.q_idx = (hit.ctx_idx / 6) as u32;
++                hit.q_frame = contexts[hit.ctx_idx].frame;
++                hit.s_frame = if index / 4 % 2 == 0 { -1 } else { 1 };
++                hit.q_orig_len = 6000;
++                hit.s_orig_len = 6000;
++                hit.hsp_list_order = index;
++                hit
++            })
++            .collect();
++        for count in [0, 1, hits.len()] {
++            let run = |allow_parallel| {
++                apply_sum_stats_even_gap_linking_with_parallel(
++                    hits[..count].to_vec(),
++                    &params,
++                    &linking,
++                    &contexts,
++                    &[0; 6],
++                    &[0; 12],
++                    &[4_000_000; 12],
++                    allow_parallel,
++                )
++            };
++            let sequential = run(false);
++            let parallel = run(true);
++            assert_eq!(sequential.len(), count);
++            assert_eq!(parallel.len(), sequential.len());
++            for (a, b) in sequential.iter().zip(&parallel) {
++                assert_eq!(format!("{a:?}"), format!("{b:?}"));
++                assert_eq!(a.e_value.to_bits(), b.e_value.to_bits());
++            }
++        }
+     }
+ }

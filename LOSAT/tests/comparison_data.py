@@ -30,13 +30,16 @@ if LOSAT_THREADS < 1:
 NATIVE_SINGLE = "LOSAT native n1"
 NATIVE_MULTI = f"LOSAT native n{LOSAT_THREADS}"
 WASM_SINGLE = "LOSAT wasm serial n1"
+# NCBI reference: c++/src/algo/blast/blastinput/cmdline_flags.cpp:75
+# const string kArgNumThreads("num_threads");
+WASM_THREADED_SINGLE = "LOSAT wasm threads n1"
 WASM_MULTI = f"LOSAT wasm threads n{LOSAT_THREADS}"
 HUE_ORDER = list(dict.fromkeys([
-    "BLAST+", NATIVE_SINGLE, NATIVE_MULTI, WASM_SINGLE, WASM_MULTI,
+    "BLAST+", NATIVE_SINGLE, NATIVE_MULTI, WASM_SINGLE, WASM_THREADED_SINGLE, WASM_MULTI,
 ]))
 CUSTOM_PALETTE = dict(zip(
-    ["BLAST+", NATIVE_SINGLE, NATIVE_MULTI, WASM_SINGLE, WASM_MULTI],
-    ["#4c72b0", "#dd8452", "#a15c2e", "#8a8f3b", "#565b22"],
+    ["BLAST+", NATIVE_SINGLE, NATIVE_MULTI, WASM_SINGLE, WASM_THREADED_SINGLE, WASM_MULTI],
+    ["#4c72b0", "#dd8452", "#a15c2e", "#8a8f3b", "#6e9c75", "#565b22"],
 ))
 MODE_ORDER = ["TBLASTX", "Megablast", "BLASTN", "BLASTP"]
 
@@ -75,6 +78,10 @@ def result_paths(case, extension="out"):
     if LOSAT_THREADS != 1:
         paths[NATIVE_MULTI] = f"{native}.n{LOSAT_THREADS}"
     paths[WASM_SINGLE] = f"{native}.wasm"
+    # NCBI reference: c++/src/algo/blast/blastinput/cmdline_flags.cpp:75
+    # const string kArgNumThreads("num_threads");
+    if LOSAT_THREADS != 1:
+        paths[WASM_THREADED_SINGLE] = f"{native}.wasm.n1"
     paths[WASM_MULTI] = f"{native}.wasm.n{LOSAT_THREADS}"
     return {tool: Path(f"{stem}.{extension}") for tool, stem in paths.items()}
 
@@ -136,7 +143,11 @@ def record_cli(argv):
             "toolchain": {name: subprocess.check_output([name, "--version"], text=True).strip()
                           for name in ("rustc", "cargo") if shutil.which(name)},
             "node_versions": (subprocess.check_output([os.environ.get("NODE_BIN", "node"), "-p", "JSON.stringify(process.versions)"], text=True).strip()
-                              if os.environ.get("RUN_LOSAT_WASM", "1") == "1" else None),
+                              if (os.environ.get("RUN_LOSAT_WASM") or "0") == "1" or (os.environ.get("RUN_LOSAT_WASM_THREADED") or "1") == "1" else None),
+            # NCBI reference: c++/src/algo/blast/blastinput/cmdline_flags.cpp:75
+            # const string kArgNumThreads("num_threads");
+            "enabled_runners": {name: (os.environ.get(name) or default) == "1" for name, default in
+                                [("RUN_NATIVE", "1"), ("RUN_NCBI", "1"), ("RUN_LOSAT_WASM", "0"), ("RUN_LOSAT_WASM_THREADED", "1")]},
             "environment": {k:v for k,v in os.environ.items() if k.startswith(("LOSAT_", "RAYON_", "NODE_", "BENCHMARK_", "RUN_", "BUILD_")) or k in {"LC_ALL", "BL2SEQ_LEGACY"}},
             "runner_hashes": {p.name: sha256(p) for p in SCRIPT_DIR.iterdir()
                               if p.suffix in {".py", ".js", ".sh", ".tsv"}},

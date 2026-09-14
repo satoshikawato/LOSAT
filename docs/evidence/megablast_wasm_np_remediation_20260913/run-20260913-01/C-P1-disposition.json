@@ -1,0 +1,12 @@
+{
+  "candidate": "C-P1",
+  "status": "ACCEPTED_FOR_INTEGRATION",
+  "reason": "Both threaded n8 main targets exceed5%; all11 measured configurations pass declared raw/time/RSS controls and independent review.",
+  "boundary": "Final combined-source, formats, thread/reuse/linear-memory and Rust gates are pending; no native speedup claimed.",
+  "evidence_groups": [
+    "main-confirmation",
+    "native-controls",
+    "threaded1-controls",
+    "task-controls"
+  ]
+}

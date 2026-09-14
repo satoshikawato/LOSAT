@@ -1,0 +1,6 @@
+{
+  "candidate": "C-X2",
+  "status": "ACCEPTED_FOR_DATA_MOVEMENT_REDUCTION",
+  "reason": "Eliminates4N final-sort full-record clone occurrences for N>1; no TBLASTX whole-search speed floor or speedup claim. Exact output and all component time/RSS controls passed.",
+  "pending": "Integrated combination, affected formats/thresholds/reuse/capacity, final builds/tests and independent evidence audit"
+}

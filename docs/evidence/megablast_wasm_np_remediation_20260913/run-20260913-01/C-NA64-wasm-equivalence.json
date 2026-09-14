@@ -1,0 +1,69 @@
+{
+  "status": "EXACT_ARTIFACT_AND_RUNTIME_IDENTITY",
+  "files": {
+    "losat-threaded-command.wasm": {
+      "previous_path": "/tmp/losat-remediation-20260913-01/integrated-artifacts/losat-threaded-command.wasm",
+      "current_path": "/tmp/losat-remediation-20260913-01/C-NA64-artifacts/losat-threaded-command.wasm",
+      "sha256": "5b4f42831efa61ca73ead78f7675e53e5384ce713b9fa5ed5d481aeb3c052295",
+      "bytes": 2340707
+    },
+    "losat-threaded-reactor.wasm": {
+      "previous_path": "/tmp/losat-remediation-20260913-01/integrated-artifacts/losat-threaded-reactor.wasm",
+      "current_path": "/tmp/losat-remediation-20260913-01/C-NA64-artifacts/losat-threaded-reactor.wasm",
+      "sha256": "d58a40248c1a3de5d33b5ed1e30cc6ea9ee5926cd37a9c385fcc16e4dc39762f",
+      "bytes": 1903402
+    },
+    "run_losat_wasi_threads.js": {
+      "previous_path": "/tmp/losat-remediation-20260913-01/integrated-artifacts/run_losat_wasi_threads.js",
+      "current_path": "/tmp/losat-remediation-20260913-01/C-NA64-artifacts/run_losat_wasi_threads.js",
+      "sha256": "faf39e6c83178530c3b21d49ee0929d67e6b9258061cc50c057876617c759c4b",
+      "bytes": 591
+    },
+    "wasi_artifact.js": {
+      "previous_path": "/tmp/losat-remediation-20260913-01/integrated-artifacts/wasi_artifact.js",
+      "current_path": "/tmp/losat-remediation-20260913-01/C-NA64-artifacts/wasi_artifact.js",
+      "sha256": "37ca747261b090bf16720b2109a4511a57d90f4b67cf94c158b9bee9fc1d3f73",
+      "bytes": 3543
+    },
+    "wasi_shared_memory.js": {
+      "previous_path": "/tmp/losat-remediation-20260913-01/integrated-artifacts/wasi_shared_memory.js",
+      "current_path": "/tmp/losat-remediation-20260913-01/C-NA64-artifacts/wasi_shared_memory.js",
+      "sha256": "a11fad8fdd346b3a93edd35f783552d97cd5c5ccb08c491e732a6b8dae552e50",
+      "bytes": 9518
+    },
+    "wasi_thread_host.js": {
+      "previous_path": "/tmp/losat-remediation-20260913-01/integrated-artifacts/wasi_thread_host.js",
+      "current_path": "/tmp/losat-remediation-20260913-01/C-NA64-artifacts/wasi_thread_host.js",
+      "sha256": "69480b0d7128ea0f264700dad31f25253e09963867ac28b6b3997704c637a5c3",
+      "bytes": 11389
+    }
+  },
+  "wasm_fingerprints": [
+    {
+      "path": "/tmp/losat-remediation-20260913-01/C-NA64-target/threaded-command/wasm32-wasip1-threads/release/.fingerprint/LOSAT-6d50383942db85c2/bin-LOSAT.json",
+      "sha256": "9d69713e429261685cb7d9fe1838e0e4e9e91064e2dcf0a99973608115cd5384",
+      "rustflags": [
+        "-C",
+        "target-feature=+simd128"
+      ]
+    },
+    {
+      "path": "/tmp/losat-remediation-20260913-01/C-NA64-target/threaded-reactor/wasm32-wasip1-threads/release/.fingerprint/LOSAT-788aad8cea4e1864/lib-LOSAT.json",
+      "sha256": "9fa6b24a4760556c3f2c3699f6354e8a0dccc659b2cf20635fc005da508c0833",
+      "rustflags": [
+        "-C",
+        "target-feature=+simd128"
+      ]
+    }
+  ],
+  "source_manifest_sha256": "08521898d5db4a4bc6b3fdff219b14e27a50f2c0d732f7bdebb1a1012316b801",
+  "prior_source_manifest_sha256": "afc9f4748d4620126551e92ba52a0d9e8461882caf09bcc052ec8d47e44c0b83",
+  "historical_artifact_manifest_sha256": "06a2298b7f213319b75bbfddd3f8eaaa4e64a2ed85c956ffad26a876b71d827e",
+  "bundle_manifest_hashes": {
+    "/tmp/losat-remediation-20260913-01/C-NA64-artifacts/artifacts.json": "6c06d6c354071961a3b2d6695b5fd6ecd9719a04fba60e22cb27b341cdf2c4b7",
+    "/tmp/losat-remediation-20260913-01/C-NA64-artifacts/runtime-files.json": "670c8bced32f0fcb125cb10dbf630c2790805d146faeec9587de5beca2ff377a",
+    "/tmp/losat-remediation-20260913-01/integrated-artifacts/artifacts.json": "248283ddd3b2e68af478b3457344abf67162d84e48cef65f453d69a4249760c1",
+    "/tmp/losat-remediation-20260913-01/integrated-artifacts/runtime-files.json": "670c8bced32f0fcb125cb10dbf630c2790805d146faeec9587de5beca2ff377a"
+  },
+  "boundary": "Reuses only prior observations of these exact Wasm/runtime bytes and unchanged runner/input/options; native artifacts have separate fresh qualification. Original memory failures stay unchanged."
+}

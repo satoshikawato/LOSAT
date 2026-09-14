@@ -1,0 +1,14 @@
+{
+  "root": "/mnt/c/Users/genom/GitHub/ncbi-blast",
+  "head": "598d8ae6a72b923127ba2fbfaffd48e4c83bfbf4",
+  "files": {
+    "c++/src/algo/blast/api/blast_options_local_priv.cpp": "f2802a2cc0f66ef3342bbc3d28d1913b4e2806b91e3093a145e85f9223423a4f",
+    "c++/src/algo/blast/api/blast_nucl_options.cpp": "5c78e47ee0692e69f9f97f60b7a857448cce3dddbdaca66a8ebfaecd9574d370",
+    "c++/src/algo/blast/api/disc_nucl_options.cpp": "9804babc18e3d2b99a071bf3dfc51d9396433543f992c6e44cefb67c0c61949c",
+    "c++/src/algo/blast/core/na_ungapped.c": "8534c8609cbab9a13d3b660bb59b538419eda1b6daa3f8b13f2e3379274f477f",
+    "c++/src/algo/blast/core/blast_parameters.c": "68452202be7ef5ab09a13fb11f9837425131ea5c6f94bf02003379541207a1ef",
+    "c++/src/algo/blast/core/blast_gapalign.c": "335cc797cf5203688a5143dea13d7a96dbd5ba988852b56d4c1d72f025bd3854"
+  },
+  "diagnostic_only": true,
+  "official_oracle_replaced": false
+}

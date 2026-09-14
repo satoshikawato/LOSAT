@@ -1,0 +1,10 @@
+{
+  "source_manifest": "/mnt/c/Users/genom/GitHub/LOSAT/docs/evidence/megablast_wasm_np_remediation_20260913/run-20260913-01/C-NA64-source.json",
+  "source_manifest_sha256": "08521898d5db4a4bc6b3fdff219b14e27a50f2c0d732f7bdebb1a1012316b801",
+  "field": "build_and_rust_test_cwd",
+  "recorded_value": "/tmp/losat-remediation-20260913-01/integrated-source/LOSAT",
+  "actual_value": "/tmp/losat-remediation-20260913-01/C-NA64-source/LOSAT",
+  "reason": "Metadata field was copied from the original manifest; actual source snapshot and build argv/cwd use C-NA64. No source bytes, measured artifacts or prior frozen manifest are changed.",
+  "actual_build_record": "/mnt/c/Users/genom/GitHub/LOSAT/docs/evidence/megablast_wasm_np_remediation_20260913/run-20260913-01/C-NA64-build-result.json",
+  "validation_plan": "/mnt/c/Users/genom/GitHub/LOSAT/docs/evidence/megablast_wasm_np_remediation_20260913/run-20260913-01/C-NA64-build-validation-planned.json"
+}

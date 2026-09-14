@@ -1,0 +1,71 @@
+[
+  {
+    "name": "fmt-check",
+    "cwd": "/tmp/losat-remediation-20260913-01/C-NA64-source/LOSAT",
+    "argv": [
+      "cargo",
+      "fmt",
+      "--check"
+    ],
+    "exit_status": 0,
+    "start_ns": 204425956976674,
+    "end_ns": 204426486292905,
+    "log": "/tmp/losat-remediation-20260913-01/C-NA64-fmt-check.log"
+  },
+  {
+    "name": "rust-tests",
+    "cwd": "/tmp/losat-remediation-20260913-01/C-NA64-source/LOSAT",
+    "argv": [
+      "cargo",
+      "test",
+      "--all-features",
+      "--locked",
+      "--offline",
+      "--target-dir",
+      "/tmp/losat-remediation-20260913-01/C-NA64-target/native"
+    ],
+    "exit_status": 0,
+    "start_ns": 204438175262920,
+    "end_ns": 204623012625611,
+    "log": "/tmp/losat-remediation-20260913-01/C-NA64-rust-tests.log"
+  },
+  {
+    "name": "clippy",
+    "cwd": "/tmp/losat-remediation-20260913-01/C-NA64-source/LOSAT",
+    "argv": [
+      "cargo",
+      "clippy",
+      "--all-features",
+      "--all-targets",
+      "--locked",
+      "--offline",
+      "--target-dir",
+      "/tmp/losat-remediation-20260913-01/C-NA64-target/native",
+      "--",
+      "-D",
+      "warnings"
+    ],
+    "exit_status": 0,
+    "start_ns": 204627292491837,
+    "end_ns": 204637360514792,
+    "log": "/tmp/losat-remediation-20260913-01/C-NA64-clippy.log"
+  },
+  {
+    "name": "threaded-build",
+    "cwd": "/tmp/losat-remediation-20260913-01/C-NA64-source",
+    "argv": [
+      "python3",
+      "LOSAT/tests/build_wasi_artifacts.py",
+      "--target-dir",
+      "/tmp/losat-remediation-20260913-01/C-NA64-target",
+      "--output-dir",
+      "/tmp/losat-remediation-20260913-01/C-NA64-artifacts",
+      "--node",
+      "/tmp/losat-node-check/node-v24.21.0-linux-x64/bin/node"
+    ],
+    "exit_status": 0,
+    "start_ns": 204642983644253,
+    "end_ns": 204715132734360,
+    "log": "/tmp/losat-remediation-20260913-01/C-NA64-threaded-build.log"
+  }
+]

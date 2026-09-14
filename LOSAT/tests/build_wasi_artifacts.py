@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Build and inspect separate WASI commands/reactors; no oracle dependency."""
+"""Build threaded WASI commands/reactors, with explicit serial compatibility."""
 import argparse
 import hashlib
 import json
@@ -32,15 +32,32 @@ def main():
     parser.add_argument("--target-dir", type=Path, required=True)
     parser.add_argument("--node", default="node")
     parser.add_argument("--reverse-order", action="store_true")
+    # NCBI reference: c++/include/algo/blast/blastinput/blast_args.hpp:1290-1296
+    # #ifdef NCBI_NO_THREADS
+    # m_NumThreads = CThreadable::kMinNumThreads; m_MTMode = eNotSupported;
+    # Serial artifacts are an explicit compatibility build, not the default.
+    parser.add_argument("--include-serial", action="store_true",
+                        help="also build serial command/reactor compatibility artifacts")
     args = parser.parse_args()
     out, target = args.output_dir.resolve(), args.target_dir.resolve()
     out.mkdir(parents=True, exist_ok=True)
+    # NCBI reference: c++/src/app/blast/blastn_app.cpp:172-176
+    # CATCH_ALL(status); return status;
+    # Do not silently mix old compatibility outputs into a threaded bundle.
+    if not args.include_serial and any((out / name).exists() for name in
+                                      ["losat-serial-command.wasm", "losat-serial-reactor.wasm",
+                                       "losat-serial-command.json", "losat-serial-reactor.json",
+                                       "serial-command.build.log", "serial-reactor.build.log", "run_losat_wasi.js"]):
+        parser.error("output directory contains serial artifacts; use a fresh directory or --include-serial")
     config = tomllib.loads((CRATE / ".cargo/config.toml").read_text())
     rust = subprocess.check_output(["rustc", "-vV"], text=True)
     sysroot = Path(subprocess.check_output(["rustc", "--print", "sysroot"], text=True).strip())
     node = subprocess.check_output([args.node, "-p", "JSON.stringify(process.versions)"], text=True)
     recorded, identities = {}, {}
-    for kind in reversed(SPECS) if args.reverse_order else SPECS:
+    # NCBI reference: c++/src/algo/blast/api/prelim_stage.cpp:173-180
+    # (*thread)->Run(); (*thread)->Join(&result);
+    kinds = [kind for kind in SPECS if args.include_serial or kind.startswith("threaded-")]
+    for kind in reversed(kinds) if args.reverse_order else kinds:
         triple, options, features = SPECS[kind]
         argv = ["cargo", "build", "--release", "--locked", "--target", triple, *options, "--target-dir", str(target / kind)]
         with (out / f"{kind}.build.log").open("w") as log:
@@ -63,7 +80,12 @@ def main():
         identities[kind] = identity
         print(f"{kind}: {identity['sha256']}", flush=True)
     runtime_files = {}
-    for name in ["run_losat_wasi.js", "run_losat_wasi_threads.js", "wasi_thread_host.js", "wasi_artifact.js", "wasi_shared_memory.js"]:
+    # NCBI reference: c++/src/algo/blast/api/prelim_stage.cpp:173-180
+    # (*thread)->Run(); (*thread)->Join(&result);
+    runtime_names = ["run_losat_wasi_threads.js", "wasi_thread_host.js", "wasi_artifact.js", "wasi_shared_memory.js"]
+    if args.include_serial:
+        runtime_names.append("run_losat_wasi.js")
+    for name in runtime_names:
         shutil.copyfile(CRATE / "tests" / name, out / name)
         runtime_files[name] = digest(out / name)
     (out / "runtime-files.json").write_text(json.dumps(runtime_files, indent=2) + "\n")

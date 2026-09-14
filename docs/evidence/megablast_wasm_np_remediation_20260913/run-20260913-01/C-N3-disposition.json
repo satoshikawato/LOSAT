@@ -1,0 +1,13 @@
+{
+  "candidate": "C-N3",
+  "status": "INCONCLUSIVE",
+  "production_integrated": false,
+  "reason": "LC exploration6.20% improvement was not reproduced: first5pairs -3.29%, additional5pairs +4.26%, overlapping ranges and neither confirmation meets5%. Freeze without adoption or combination.",
+  "raw_pass": true,
+  "evidence": [
+    "C-N3-fair-exploration",
+    "C-N3-confirmation",
+    "C-N3-lc-additional"
+  ],
+  "next": "User-steered stable HSP storage investigation; G-N IN_PROGRESS"
+}

@@ -1,0 +1,1950 @@
+[
+  {
+    "status": "PASS",
+    "reason": null,
+    "exit_status": 0,
+    "wall_seconds": 0.2589708610030357,
+    "realtime_seconds": 0.2589762210845947,
+    "boottime_seconds": 0.25897616101428866,
+    "gnu_elapsed_seconds": 0.23,
+    "process_ended_utc": "2026-09-13T11:56:21Z",
+    "watchdog_clocks": {
+      "started": {
+        "monotonic": 162364.268466386,
+        "realtime": 1789300580.7678878
+      }
+    },
+    "realtime_clock_agreement": true,
+    "monotonic_clock_agreement": true,
+    "elapsed_clock": "CLOCK_MONOTONIC; realtime and GNU elapsed are adjustable-clock diagnostics",
+    "cpu_user_seconds": 0.18,
+    "cpu_system_seconds": 0.04,
+    "peak_rss_bytes": 88817664,
+    "output": "/mnt/c/Users/genom/GitHub/LOSAT/docs/evidence/megablast_wasm_np_remediation_20260913/run-20260913-01/parity/targets-r3/B0/NZ_CP006932.NZ_CP006932.megablast/native-n8/output.txt",
+    "raw_output_sha256": "ed126557e395031711c8bb604dbc036befcb25855ad9bf8919f0dfe2e1e12a92",
+    "raw_output_bytes": 38401,
+    "started_utc": "2026-09-13T11:56:20Z",
+    "ended_utc": "2026-09-13T11:56:21Z",
+    "timeout_seconds": 3600,
+    "unavailable_metrics": {},
+    "version": "B0",
+    "case": "NZ_CP006932.NZ_CP006932.megablast",
+    "kind": "native",
+    "threads": 8,
+    "artifact_sha256": "834a99ed11f6a4415df6f119d11736a16e50515d1f0f851fda9a3f687688a35f",
+    "oracle_equal": false,
+    "own_native_equal": true,
+    "diagnostic": true,
+    "thread_contract": {
+      "requested_threads": 8,
+      "pool_threads": 8,
+      "caller_participates": false,
+      "effective_compute_threads": 8,
+      "thread_stages": [
+        {
+          "program": "blastn",
+          "stage": "subjects",
+          "work_items": 1,
+          "parallel_selected": false,
+          "measured_activity": null
+        },
+        {
+          "program": "blastn",
+          "stage": "subject_chunks",
+          "work_items": 1,
+          "parallel_selected": false,
+          "measured_activity": null
+        }
+      ],
+      "host_worker_counts": null,
+      "measured_activity": null
+    }
+  },
+  {
+    "status": "PASS",
+    "reason": null,
+    "exit_status": 0,
+    "wall_seconds": 0.40376354701584205,
+    "realtime_seconds": 0.40376758575439453,
+    "boottime_seconds": 0.4037672679987736,
+    "gnu_elapsed_seconds": 0.38,
+    "process_ended_utc": "2026-09-13T11:56:21Z",
+    "watchdog_clocks": {
+      "started": {
+        "monotonic": 162364.577195548,
+        "realtime": 1789300581.0766175
+      }
+    },
+    "realtime_clock_agreement": true,
+    "monotonic_clock_agreement": true,
+    "elapsed_clock": "CLOCK_MONOTONIC; realtime and GNU elapsed are adjustable-clock diagnostics",
+    "cpu_user_seconds": 0.5,
+    "cpu_system_seconds": 0.05,
+    "peak_rss_bytes": 176443392,
+    "output": "/mnt/c/Users/genom/GitHub/LOSAT/docs/evidence/megablast_wasm_np_remediation_20260913/run-20260913-01/parity/targets-r3/B0/NZ_CP006932.NZ_CP006932.megablast/serial-n1/output.txt",
+    "raw_output_sha256": "ed126557e395031711c8bb604dbc036befcb25855ad9bf8919f0dfe2e1e12a92",
+    "raw_output_bytes": 38401,
+    "started_utc": "2026-09-13T11:56:21Z",
+    "ended_utc": "2026-09-13T11:56:21Z",
+    "timeout_seconds": 3600,
+    "unavailable_metrics": {},
+    "version": "B0",
+    "case": "NZ_CP006932.NZ_CP006932.megablast",
+    "kind": "serial",
+    "threads": 1,
+    "artifact_sha256": "f687af514acb81a62219237c25425412d24c8d5a527d11a988e41dc114c53940",
+    "oracle_equal": false,
+    "own_native_equal": true,
+    "diagnostic": true,
+    "thread_contract": {
+      "requested_threads": 1,
+      "pool_threads": 0,
+      "caller_participates": false,
+      "effective_compute_threads": 1,
+      "thread_stages": [
+        {
+          "program": "blastn",
+          "stage": "subjects",
+          "work_items": 1,
+          "parallel_selected": false,
+          "measured_activity": null
+        },
+        {
+          "program": "blastn",
+          "stage": "subject_chunks",
+          "work_items": 1,
+          "parallel_selected": false,
+          "measured_activity": null
+        }
+      ],
+      "host_worker_counts": null,
+      "measured_activity": null
+    }
+  },
+  {
+    "status": "PASS",
+    "reason": null,
+    "exit_status": 0,
+    "wall_seconds": 0.4370403219945729,
+    "realtime_seconds": 0.4370439052581787,
+    "boottime_seconds": 0.4370439980120864,
+    "gnu_elapsed_seconds": 0.42,
+    "process_ended_utc": "2026-09-13T11:56:21Z",
+    "watchdog_clocks": {
+      "started": {
+        "monotonic": 162365.031048803,
+        "realtime": 1789300581.5304701
+      }
+    },
+    "realtime_clock_agreement": true,
+    "monotonic_clock_agreement": true,
+    "elapsed_clock": "CLOCK_MONOTONIC; realtime and GNU elapsed are adjustable-clock diagnostics",
+    "cpu_user_seconds": 0.58,
+    "cpu_system_seconds": 0.02,
+    "peak_rss_bytes": 193769472,
+    "output": "/mnt/c/Users/genom/GitHub/LOSAT/docs/evidence/megablast_wasm_np_remediation_20260913/run-20260913-01/parity/targets-r3/B0/NZ_CP006932.NZ_CP006932.megablast/threaded-n1/output.txt",
+    "raw_output_sha256": "ed126557e395031711c8bb604dbc036befcb25855ad9bf8919f0dfe2e1e12a92",
+    "raw_output_bytes": 38401,
+    "started_utc": "2026-09-13T11:56:21Z",
+    "ended_utc": "2026-09-13T11:56:21Z",
+    "timeout_seconds": 3600,
+    "unavailable_metrics": {},
+    "version": "B0",
+    "case": "NZ_CP006932.NZ_CP006932.megablast",
+    "kind": "threaded",
+    "threads": 1,
+    "artifact_sha256": "13b88d349ec3449330b11428bb15e9a688448c4e144e756b6f038b4b9412a437",
+    "oracle_equal": false,
+    "own_native_equal": true,
+    "diagnostic": true,
+    "thread_contract": {
+      "requested_threads": 1,
+      "pool_threads": 0,
+      "caller_participates": false,
+      "effective_compute_threads": 1,
+      "thread_stages": [
+        {
+          "program": "blastn",
+          "stage": "subjects",
+          "work_items": 1,
+          "parallel_selected": false,
+          "measured_activity": null
+        },
+        {
+          "program": "blastn",
+          "stage": "subject_chunks",
+          "work_items": 1,
+          "parallel_selected": false,
+          "measured_activity": null
+        }
+      ],
+      "host_worker_counts": {
+        "spawn_attempt": 0,
+        "spawned": 0,
+        "ready": 0,
+        "exited": 0
+      },
+      "measured_activity": null
+    }
+  },
+  {
+    "status": "PASS",
+    "reason": null,
+    "exit_status": 0,
+    "wall_seconds": 0.637711974006379,
+    "realtime_seconds": 0.6377148628234863,
+    "boottime_seconds": 0.6377145330188796,
+    "gnu_elapsed_seconds": 0.62,
+    "process_ended_utc": "2026-09-13T11:56:22Z",
+    "watchdog_clocks": {
+      "started": {
+        "monotonic": 162365.514457408,
+        "realtime": 1789300582.0138788
+      }
+    },
+    "realtime_clock_agreement": true,
+    "monotonic_clock_agreement": true,
+    "elapsed_clock": "CLOCK_MONOTONIC; realtime and GNU elapsed are adjustable-clock diagnostics",
+    "cpu_user_seconds": 0.73,
+    "cpu_system_seconds": 0.11,
+    "peak_rss_bytes": 313417728,
+    "output": "/mnt/c/Users/genom/GitHub/LOSAT/docs/evidence/megablast_wasm_np_remediation_20260913/run-20260913-01/parity/targets-r3/B0/NZ_CP006932.NZ_CP006932.megablast/threaded-n8/output.txt",
+    "raw_output_sha256": "ed126557e395031711c8bb604dbc036befcb25855ad9bf8919f0dfe2e1e12a92",
+    "raw_output_bytes": 38401,
+    "started_utc": "2026-09-13T11:56:22Z",
+    "ended_utc": "2026-09-13T11:56:22Z",
+    "timeout_seconds": 3600,
+    "unavailable_metrics": {},
+    "version": "B0",
+    "case": "NZ_CP006932.NZ_CP006932.megablast",
+    "kind": "threaded",
+    "threads": 8,
+    "artifact_sha256": "13b88d349ec3449330b11428bb15e9a688448c4e144e756b6f038b4b9412a437",
+    "oracle_equal": false,
+    "own_native_equal": true,
+    "diagnostic": true,
+    "thread_contract": {
+      "requested_threads": 8,
+      "pool_threads": 8,
+      "caller_participates": false,
+      "effective_compute_threads": 8,
+      "thread_stages": [
+        {
+          "program": "blastn",
+          "stage": "subjects",
+          "work_items": 1,
+          "parallel_selected": false,
+          "measured_activity": null
+        },
+        {
+          "program": "blastn",
+          "stage": "subject_chunks",
+          "work_items": 1,
+          "parallel_selected": false,
+          "measured_activity": null
+        }
+      ],
+      "host_worker_counts": {
+        "spawn_attempt": 8,
+        "spawned": 8,
+        "ready": 8,
+        "exited": 8
+      },
+      "measured_activity": null
+    }
+  },
+  {
+    "status": "PASS",
+    "reason": null,
+    "exit_status": 0,
+    "wall_seconds": 0.9816164349904284,
+    "realtime_seconds": 0.9816193580627441,
+    "boottime_seconds": 0.981618838995928,
+    "gnu_elapsed_seconds": 0.96,
+    "process_ended_utc": "2026-09-13T11:56:23Z",
+    "watchdog_clocks": {
+      "started": {
+        "monotonic": 162366.215331322,
+        "realtime": 1789300582.714753
+      }
+    },
+    "realtime_clock_agreement": true,
+    "monotonic_clock_agreement": true,
+    "elapsed_clock": "CLOCK_MONOTONIC; realtime and GNU elapsed are adjustable-clock diagnostics",
+    "cpu_user_seconds": 0.88,
+    "cpu_system_seconds": 0.04,
+    "peak_rss_bytes": 233844736,
+    "output": "/mnt/c/Users/genom/GitHub/LOSAT/docs/evidence/megablast_wasm_np_remediation_20260913/run-20260913-01/parity/targets-r3/B0/EDL933.Sakai.megablast/native-n8/output.txt",
+    "raw_output_sha256": "300a925ef86f20af9c0eff53f1c73638bdf80d47f5153352086a3e7bfd416c0c",
+    "raw_output_bytes": 473032,
+    "started_utc": "2026-09-13T11:56:22Z",
+    "ended_utc": "2026-09-13T11:56:23Z",
+    "timeout_seconds": 3600,
+    "unavailable_metrics": {},
+    "version": "B0",
+    "case": "EDL933.Sakai.megablast",
+    "kind": "native",
+    "threads": 8,
+    "artifact_sha256": "834a99ed11f6a4415df6f119d11736a16e50515d1f0f851fda9a3f687688a35f",
+    "oracle_equal": true,
+    "own_native_equal": true,
+    "diagnostic": true,
+    "thread_contract": {
+      "requested_threads": 8,
+      "pool_threads": 8,
+      "caller_participates": false,
+      "effective_compute_threads": 8,
+      "thread_stages": [
+        {
+          "program": "blastn",
+          "stage": "subjects",
+          "work_items": 1,
+          "parallel_selected": false,
+          "measured_activity": null
+        },
+        {
+          "program": "blastn",
+          "stage": "subject_chunks",
+          "work_items": 2,
+          "parallel_selected": true,
+          "measured_activity": null
+        }
+      ],
+      "host_worker_counts": null,
+      "measured_activity": null
+    }
+  },
+  {
+    "status": "PASS",
+    "reason": null,
+    "exit_status": 0,
+    "wall_seconds": 1.4422247819893528,
+    "realtime_seconds": 3.96665358543396,
+    "boottime_seconds": 1.4422284309985116,
+    "gnu_elapsed_seconds": 3.95,
+    "process_ended_utc": "2026-09-13T11:56:27Z",
+    "watchdog_clocks": {
+      "started": {
+        "monotonic": 162367.247390808,
+        "realtime": 1789300583.746812
+      }
+    },
+    "realtime_clock_agreement": false,
+    "monotonic_clock_agreement": true,
+    "elapsed_clock": "CLOCK_MONOTONIC; realtime and GNU elapsed are adjustable-clock diagnostics",
+    "cpu_user_seconds": 1.56,
+    "cpu_system_seconds": 0.04,
+    "peak_rss_bytes": 316264448,
+    "output": "/mnt/c/Users/genom/GitHub/LOSAT/docs/evidence/megablast_wasm_np_remediation_20260913/run-20260913-01/parity/targets-r3/B0/EDL933.Sakai.megablast/serial-n1/output.txt",
+    "raw_output_sha256": "300a925ef86f20af9c0eff53f1c73638bdf80d47f5153352086a3e7bfd416c0c",
+    "raw_output_bytes": 473032,
+    "started_utc": "2026-09-13T11:56:23Z",
+    "ended_utc": "2026-09-13T11:56:27Z",
+    "timeout_seconds": 3600,
+    "unavailable_metrics": {},
+    "version": "B0",
+    "case": "EDL933.Sakai.megablast",
+    "kind": "serial",
+    "threads": 1,
+    "artifact_sha256": "f687af514acb81a62219237c25425412d24c8d5a527d11a988e41dc114c53940",
+    "oracle_equal": true,
+    "own_native_equal": true,
+    "diagnostic": true,
+    "thread_contract": {
+      "requested_threads": 1,
+      "pool_threads": 0,
+      "caller_participates": false,
+      "effective_compute_threads": 1,
+      "thread_stages": [
+        {
+          "program": "blastn",
+          "stage": "subjects",
+          "work_items": 1,
+          "parallel_selected": false,
+          "measured_activity": null
+        },
+        {
+          "program": "blastn",
+          "stage": "subject_chunks",
+          "work_items": 1,
+          "parallel_selected": false,
+          "measured_activity": null
+        },
+        {
+          "program": "blastn",
+          "stage": "subject_chunks",
+          "work_items": 1,
+          "parallel_selected": false,
+          "measured_activity": null
+        }
+      ],
+      "host_worker_counts": null,
+      "measured_activity": null
+    }
+  },
+  {
+    "status": "PASS",
+    "reason": null,
+    "exit_status": 0,
+    "wall_seconds": 1.4996020359976683,
+    "realtime_seconds": 1.4996051788330078,
+    "boottime_seconds": 1.4996046759770252,
+    "gnu_elapsed_seconds": 1.47,
+    "process_ended_utc": "2026-09-13T11:56:29Z",
+    "watchdog_clocks": {
+      "started": {
+        "monotonic": 162368.754586097,
+        "realtime": 1789300587.7784324
+      }
+    },
+    "realtime_clock_agreement": true,
+    "monotonic_clock_agreement": true,
+    "elapsed_clock": "CLOCK_MONOTONIC; realtime and GNU elapsed are adjustable-clock diagnostics",
+    "cpu_user_seconds": 1.58,
+    "cpu_system_seconds": 0.07,
+    "peak_rss_bytes": 321658880,
+    "output": "/mnt/c/Users/genom/GitHub/LOSAT/docs/evidence/megablast_wasm_np_remediation_20260913/run-20260913-01/parity/targets-r3/B0/EDL933.Sakai.megablast/threaded-n1/output.txt",
+    "raw_output_sha256": "300a925ef86f20af9c0eff53f1c73638bdf80d47f5153352086a3e7bfd416c0c",
+    "raw_output_bytes": 473032,
+    "started_utc": "2026-09-13T11:56:27Z",
+    "ended_utc": "2026-09-13T11:56:29Z",
+    "timeout_seconds": 3600,
+    "unavailable_metrics": {},
+    "version": "B0",
+    "case": "EDL933.Sakai.megablast",
+    "kind": "threaded",
+    "threads": 1,
+    "artifact_sha256": "13b88d349ec3449330b11428bb15e9a688448c4e144e756b6f038b4b9412a437",
+    "oracle_equal": true,
+    "own_native_equal": true,
+    "diagnostic": true,
+    "thread_contract": {
+      "requested_threads": 1,
+      "pool_threads": 0,
+      "caller_participates": false,
+      "effective_compute_threads": 1,
+      "thread_stages": [
+        {
+          "program": "blastn",
+          "stage": "subjects",
+          "work_items": 1,
+          "parallel_selected": false,
+          "measured_activity": null
+        },
+        {
+          "program": "blastn",
+          "stage": "subject_chunks",
+          "work_items": 1,
+          "parallel_selected": false,
+          "measured_activity": null
+        },
+        {
+          "program": "blastn",
+          "stage": "subject_chunks",
+          "work_items": 1,
+          "parallel_selected": false,
+          "measured_activity": null
+        }
+      ],
+      "host_worker_counts": {
+        "spawn_attempt": 0,
+        "spawned": 0,
+        "ready": 0,
+        "exited": 0
+      },
+      "measured_activity": null
+    }
+  },
+  {
+    "status": "PASS",
+    "reason": null,
+    "exit_status": 0,
+    "wall_seconds": 1.6450097119959537,
+    "realtime_seconds": 1.6450130939483643,
+    "boottime_seconds": 1.6450128279975615,
+    "gnu_elapsed_seconds": 1.63,
+    "process_ended_utc": "2026-09-13T11:56:30Z",
+    "watchdog_clocks": {
+      "started": {
+        "monotonic": 162370.298370184,
+        "realtime": 1789300589.3222165
+      }
+    },
+    "realtime_clock_agreement": true,
+    "monotonic_clock_agreement": true,
+    "elapsed_clock": "CLOCK_MONOTONIC; realtime and GNU elapsed are adjustable-clock diagnostics",
+    "cpu_user_seconds": 1.72,
+    "cpu_system_seconds": 0.15,
+    "peak_rss_bytes": 446132224,
+    "output": "/mnt/c/Users/genom/GitHub/LOSAT/docs/evidence/megablast_wasm_np_remediation_20260913/run-20260913-01/parity/targets-r3/B0/EDL933.Sakai.megablast/threaded-n8/output.txt",
+    "raw_output_sha256": "300a925ef86f20af9c0eff53f1c73638bdf80d47f5153352086a3e7bfd416c0c",
+    "raw_output_bytes": 473032,
+    "started_utc": "2026-09-13T11:56:29Z",
+    "ended_utc": "2026-09-13T11:56:30Z",
+    "timeout_seconds": 3600,
+    "unavailable_metrics": {},
+    "version": "B0",
+    "case": "EDL933.Sakai.megablast",
+    "kind": "threaded",
+    "threads": 8,
+    "artifact_sha256": "13b88d349ec3449330b11428bb15e9a688448c4e144e756b6f038b4b9412a437",
+    "oracle_equal": true,
+    "own_native_equal": true,
+    "diagnostic": true,
+    "thread_contract": {
+      "requested_threads": 8,
+      "pool_threads": 8,
+      "caller_participates": false,
+      "effective_compute_threads": 8,
+      "thread_stages": [
+        {
+          "program": "blastn",
+          "stage": "subjects",
+          "work_items": 1,
+          "parallel_selected": false,
+          "measured_activity": null
+        },
+        {
+          "program": "blastn",
+          "stage": "subject_chunks",
+          "work_items": 2,
+          "parallel_selected": true,
+          "measured_activity": null
+        }
+      ],
+      "host_worker_counts": {
+        "spawn_attempt": 8,
+        "spawned": 8,
+        "ready": 8,
+        "exited": 8
+      },
+      "measured_activity": null
+    }
+  },
+  {
+    "status": "PASS",
+    "reason": null,
+    "exit_status": 0,
+    "wall_seconds": 0.9423919629771262,
+    "realtime_seconds": 0.9423952102661133,
+    "boottime_seconds": 0.942394224985037,
+    "gnu_elapsed_seconds": 0.92,
+    "process_ended_utc": "2026-09-13T11:56:31Z",
+    "watchdog_clocks": {
+      "started": {
+        "monotonic": 162372.017934477,
+        "realtime": 1789300591.0417807
+      }
+    },
+    "realtime_clock_agreement": true,
+    "monotonic_clock_agreement": true,
+    "elapsed_clock": "CLOCK_MONOTONIC; realtime and GNU elapsed are adjustable-clock diagnostics",
+    "cpu_user_seconds": 0.8,
+    "cpu_system_seconds": 0.07,
+    "peak_rss_bytes": 230412288,
+    "output": "/mnt/c/Users/genom/GitHub/LOSAT/docs/evidence/megablast_wasm_np_remediation_20260913/run-20260913-01/parity/targets-r3/B0/Sakai.MG1655.megablast/native-n8/output.txt",
+    "raw_output_sha256": "82e6e0aa1fd52848f8839b1a20b06773fae140b03be7bb75ed25d418dabbd5fe",
+    "raw_output_bytes": 536518,
+    "started_utc": "2026-09-13T11:56:31Z",
+    "ended_utc": "2026-09-13T11:56:31Z",
+    "timeout_seconds": 3600,
+    "unavailable_metrics": {},
+    "version": "B0",
+    "case": "Sakai.MG1655.megablast",
+    "kind": "native",
+    "threads": 8,
+    "artifact_sha256": "834a99ed11f6a4415df6f119d11736a16e50515d1f0f851fda9a3f687688a35f",
+    "oracle_equal": false,
+    "own_native_equal": true,
+    "diagnostic": true,
+    "thread_contract": {
+      "requested_threads": 8,
+      "pool_threads": 8,
+      "caller_participates": false,
+      "effective_compute_threads": 8,
+      "thread_stages": [
+        {
+          "program": "blastn",
+          "stage": "subjects",
+          "work_items": 1,
+          "parallel_selected": false,
+          "measured_activity": null
+        },
+        {
+          "program": "blastn",
+          "stage": "subject_chunks",
+          "work_items": 1,
+          "parallel_selected": false,
+          "measured_activity": null
+        }
+      ],
+      "host_worker_counts": null,
+      "measured_activity": null
+    }
+  },
+  {
+    "status": "PASS",
+    "reason": null,
+    "exit_status": 0,
+    "wall_seconds": 1.3678709599771537,
+    "realtime_seconds": 1.3678739070892334,
+    "boottime_seconds": 1.3678736820002086,
+    "gnu_elapsed_seconds": 1.33,
+    "process_ended_utc": "2026-09-13T11:56:33Z",
+    "watchdog_clocks": {
+      "started": {
+        "monotonic": 162373.021971681,
+        "realtime": 1789300592.045818
+      }
+    },
+    "realtime_clock_agreement": true,
+    "monotonic_clock_agreement": true,
+    "elapsed_clock": "CLOCK_MONOTONIC; realtime and GNU elapsed are adjustable-clock diagnostics",
+    "cpu_user_seconds": 1.48,
+    "cpu_system_seconds": 0.04,
+    "peak_rss_bytes": 316878848,
+    "output": "/mnt/c/Users/genom/GitHub/LOSAT/docs/evidence/megablast_wasm_np_remediation_20260913/run-20260913-01/parity/targets-r3/B0/Sakai.MG1655.megablast/serial-n1/output.txt",
+    "raw_output_sha256": "82e6e0aa1fd52848f8839b1a20b06773fae140b03be7bb75ed25d418dabbd5fe",
+    "raw_output_bytes": 536518,
+    "started_utc": "2026-09-13T11:56:32Z",
+    "ended_utc": "2026-09-13T11:56:33Z",
+    "timeout_seconds": 3600,
+    "unavailable_metrics": {},
+    "version": "B0",
+    "case": "Sakai.MG1655.megablast",
+    "kind": "serial",
+    "threads": 1,
+    "artifact_sha256": "f687af514acb81a62219237c25425412d24c8d5a527d11a988e41dc114c53940",
+    "oracle_equal": false,
+    "own_native_equal": true,
+    "diagnostic": true,
+    "thread_contract": {
+      "requested_threads": 1,
+      "pool_threads": 0,
+      "caller_participates": false,
+      "effective_compute_threads": 1,
+      "thread_stages": [
+        {
+          "program": "blastn",
+          "stage": "subjects",
+          "work_items": 1,
+          "parallel_selected": false,
+          "measured_activity": null
+        },
+        {
+          "program": "blastn",
+          "stage": "subject_chunks",
+          "work_items": 1,
+          "parallel_selected": false,
+          "measured_activity": null
+        }
+      ],
+      "host_worker_counts": null,
+      "measured_activity": null
+    }
+  },
+  {
+    "status": "PASS",
+    "reason": null,
+    "exit_status": 0,
+    "wall_seconds": 1.4143864109937567,
+    "realtime_seconds": 1.4143891334533691,
+    "boottime_seconds": 1.4143888810067438,
+    "gnu_elapsed_seconds": 1.39,
+    "process_ended_utc": "2026-09-13T11:56:34Z",
+    "watchdog_clocks": {
+      "started": {
+        "monotonic": 162374.434403557,
+        "realtime": 1789300593.45825
+      }
+    },
+    "realtime_clock_agreement": true,
+    "monotonic_clock_agreement": true,
+    "elapsed_clock": "CLOCK_MONOTONIC; realtime and GNU elapsed are adjustable-clock diagnostics",
+    "cpu_user_seconds": 1.5,
+    "cpu_system_seconds": 0.07,
+    "peak_rss_bytes": 326975488,
+    "output": "/mnt/c/Users/genom/GitHub/LOSAT/docs/evidence/megablast_wasm_np_remediation_20260913/run-20260913-01/parity/targets-r3/B0/Sakai.MG1655.megablast/threaded-n1/output.txt",
+    "raw_output_sha256": "82e6e0aa1fd52848f8839b1a20b06773fae140b03be7bb75ed25d418dabbd5fe",
+    "raw_output_bytes": 536518,
+    "started_utc": "2026-09-13T11:56:33Z",
+    "ended_utc": "2026-09-13T11:56:34Z",
+    "timeout_seconds": 3600,
+    "unavailable_metrics": {},
+    "version": "B0",
+    "case": "Sakai.MG1655.megablast",
+    "kind": "threaded",
+    "threads": 1,
+    "artifact_sha256": "13b88d349ec3449330b11428bb15e9a688448c4e144e756b6f038b4b9412a437",
+    "oracle_equal": false,
+    "own_native_equal": true,
+    "diagnostic": true,
+    "thread_contract": {
+      "requested_threads": 1,
+      "pool_threads": 0,
+      "caller_participates": false,
+      "effective_compute_threads": 1,
+      "thread_stages": [
+        {
+          "program": "blastn",
+          "stage": "subjects",
+          "work_items": 1,
+          "parallel_selected": false,
+          "measured_activity": null
+        },
+        {
+          "program": "blastn",
+          "stage": "subject_chunks",
+          "work_items": 1,
+          "parallel_selected": false,
+          "measured_activity": null
+        }
+      ],
+      "host_worker_counts": {
+        "spawn_attempt": 0,
+        "spawned": 0,
+        "ready": 0,
+        "exited": 0
+      },
+      "measured_activity": null
+    }
+  },
+  {
+    "status": "PASS",
+    "reason": null,
+    "exit_status": 0,
+    "wall_seconds": 1.6367154189792927,
+    "realtime_seconds": 1.636718988418579,
+    "boottime_seconds": 1.6367187339928932,
+    "gnu_elapsed_seconds": 1.62,
+    "process_ended_utc": "2026-09-13T11:56:36Z",
+    "watchdog_clocks": {
+      "started": {
+        "monotonic": 162375.896748957,
+        "realtime": 1789300594.9205952
+      }
+    },
+    "realtime_clock_agreement": true,
+    "monotonic_clock_agreement": true,
+    "elapsed_clock": "CLOCK_MONOTONIC; realtime and GNU elapsed are adjustable-clock diagnostics",
+    "cpu_user_seconds": 1.68,
+    "cpu_system_seconds": 0.16,
+    "peak_rss_bytes": 442212352,
+    "output": "/mnt/c/Users/genom/GitHub/LOSAT/docs/evidence/megablast_wasm_np_remediation_20260913/run-20260913-01/parity/targets-r3/B0/Sakai.MG1655.megablast/threaded-n8/output.txt",
+    "raw_output_sha256": "82e6e0aa1fd52848f8839b1a20b06773fae140b03be7bb75ed25d418dabbd5fe",
+    "raw_output_bytes": 536518,
+    "started_utc": "2026-09-13T11:56:34Z",
+    "ended_utc": "2026-09-13T11:56:36Z",
+    "timeout_seconds": 3600,
+    "unavailable_metrics": {},
+    "version": "B0",
+    "case": "Sakai.MG1655.megablast",
+    "kind": "threaded",
+    "threads": 8,
+    "artifact_sha256": "13b88d349ec3449330b11428bb15e9a688448c4e144e756b6f038b4b9412a437",
+    "oracle_equal": false,
+    "own_native_equal": true,
+    "diagnostic": true,
+    "thread_contract": {
+      "requested_threads": 8,
+      "pool_threads": 8,
+      "caller_participates": false,
+      "effective_compute_threads": 8,
+      "thread_stages": [
+        {
+          "program": "blastn",
+          "stage": "subjects",
+          "work_items": 1,
+          "parallel_selected": false,
+          "measured_activity": null
+        },
+        {
+          "program": "blastn",
+          "stage": "subject_chunks",
+          "work_items": 1,
+          "parallel_selected": false,
+          "measured_activity": null
+        }
+      ],
+      "host_worker_counts": {
+        "spawn_attempt": 8,
+        "spawned": 8,
+        "ready": 8,
+        "exited": 8
+      },
+      "measured_activity": null
+    }
+  },
+  {
+    "status": "PASS",
+    "reason": null,
+    "exit_status": 0,
+    "wall_seconds": 0.26933427999028936,
+    "realtime_seconds": 0.26933717727661133,
+    "boottime_seconds": 0.26933672398445196,
+    "gnu_elapsed_seconds": 0.24,
+    "process_ended_utc": "2026-09-13T11:56:36Z",
+    "watchdog_clocks": {
+      "started": {
+        "monotonic": 162377.66886685,
+        "realtime": 1789300596.6927133
+      }
+    },
+    "realtime_clock_agreement": true,
+    "monotonic_clock_agreement": true,
+    "elapsed_clock": "CLOCK_MONOTONIC; realtime and GNU elapsed are adjustable-clock diagnostics",
+    "cpu_user_seconds": 0.18,
+    "cpu_system_seconds": 0.04,
+    "peak_rss_bytes": 89042944,
+    "output": "/mnt/c/Users/genom/GitHub/LOSAT/docs/evidence/megablast_wasm_np_remediation_20260913/run-20260913-01/parity/targets-r3/B1/NZ_CP006932.NZ_CP006932.megablast/native-n8/output.txt",
+    "raw_output_sha256": "2e2fb3ef85081501224f81be0a82cf9715672f5229d3edb162ff114912920873",
+    "raw_output_bytes": 38401,
+    "started_utc": "2026-09-13T11:56:36Z",
+    "ended_utc": "2026-09-13T11:56:36Z",
+    "timeout_seconds": 3600,
+    "unavailable_metrics": {},
+    "version": "B1",
+    "case": "NZ_CP006932.NZ_CP006932.megablast",
+    "kind": "native",
+    "threads": 8,
+    "artifact_sha256": "ae494b43e50ad15ae004d23ded13b325cfe8c3bc3b036928ca3302d2d2adf922",
+    "oracle_equal": true,
+    "own_native_equal": true,
+    "diagnostic": true,
+    "thread_contract": {
+      "requested_threads": 8,
+      "pool_threads": 8,
+      "caller_participates": false,
+      "effective_compute_threads": 8,
+      "thread_stages": [
+        {
+          "program": "blastn",
+          "stage": "subjects",
+          "work_items": 1,
+          "parallel_selected": false,
+          "measured_activity": null
+        },
+        {
+          "program": "blastn",
+          "stage": "subject_chunks",
+          "work_items": 1,
+          "parallel_selected": false,
+          "measured_activity": null
+        }
+      ],
+      "host_worker_counts": null,
+      "measured_activity": null
+    }
+  },
+  {
+    "status": "PASS",
+    "reason": null,
+    "exit_status": 0,
+    "wall_seconds": 0.38602924498263747,
+    "realtime_seconds": 0.3860318660736084,
+    "boottime_seconds": 0.38603142701322213,
+    "gnu_elapsed_seconds": 0.37,
+    "process_ended_utc": "2026-09-13T11:56:37Z",
+    "watchdog_clocks": {
+      "started": {
+        "monotonic": 162377.98037217,
+        "realtime": 1789300597.004218
+      }
+    },
+    "realtime_clock_agreement": true,
+    "monotonic_clock_agreement": true,
+    "elapsed_clock": "CLOCK_MONOTONIC; realtime and GNU elapsed are adjustable-clock diagnostics",
+    "cpu_user_seconds": 0.53,
+    "cpu_system_seconds": 0.01,
+    "peak_rss_bytes": 182329344,
+    "output": "/mnt/c/Users/genom/GitHub/LOSAT/docs/evidence/megablast_wasm_np_remediation_20260913/run-20260913-01/parity/targets-r3/B1/NZ_CP006932.NZ_CP006932.megablast/serial-n1/output.txt",
+    "raw_output_sha256": "2e2fb3ef85081501224f81be0a82cf9715672f5229d3edb162ff114912920873",
+    "raw_output_bytes": 38401,
+    "started_utc": "2026-09-13T11:56:36Z",
+    "ended_utc": "2026-09-13T11:56:37Z",
+    "timeout_seconds": 3600,
+    "unavailable_metrics": {},
+    "version": "B1",
+    "case": "NZ_CP006932.NZ_CP006932.megablast",
+    "kind": "serial",
+    "threads": 1,
+    "artifact_sha256": "cfc501d97ad1ddc2eaae4b229d23a4d81ef9909750a48924f43c7de3037dc7d9",
+    "oracle_equal": true,
+    "own_native_equal": true,
+    "diagnostic": true,
+    "thread_contract": {
+      "requested_threads": 1,
+      "pool_threads": 0,
+      "caller_participates": false,
+      "effective_compute_threads": 1,
+      "thread_stages": [
+        {
+          "program": "blastn",
+          "stage": "subjects",
+          "work_items": 1,
+          "parallel_selected": false,
+          "measured_activity": null
+        },
+        {
+          "program": "blastn",
+          "stage": "subject_chunks",
+          "work_items": 1,
+          "parallel_selected": false,
+          "measured_activity": null
+        }
+      ],
+      "host_worker_counts": null,
+      "measured_activity": null
+    }
+  },
+  {
+    "status": "PASS",
+    "reason": null,
+    "exit_status": 0,
+    "wall_seconds": 0.4384242339874618,
+    "realtime_seconds": 0.43842649459838867,
+    "boottime_seconds": 0.4384263270185329,
+    "gnu_elapsed_seconds": 0.43,
+    "process_ended_utc": "2026-09-13T11:56:37Z",
+    "watchdog_clocks": {
+      "started": {
+        "monotonic": 162378.424023459,
+        "realtime": 1789300597.4478698
+      }
+    },
+    "realtime_clock_agreement": true,
+    "monotonic_clock_agreement": true,
+    "elapsed_clock": "CLOCK_MONOTONIC; realtime and GNU elapsed are adjustable-clock diagnostics",
+    "cpu_user_seconds": 0.58,
+    "cpu_system_seconds": 0.01,
+    "peak_rss_bytes": 200527872,
+    "output": "/mnt/c/Users/genom/GitHub/LOSAT/docs/evidence/megablast_wasm_np_remediation_20260913/run-20260913-01/parity/targets-r3/B1/NZ_CP006932.NZ_CP006932.megablast/threaded-n1/output.txt",
+    "raw_output_sha256": "2e2fb3ef85081501224f81be0a82cf9715672f5229d3edb162ff114912920873",
+    "raw_output_bytes": 38401,
+    "started_utc": "2026-09-13T11:56:37Z",
+    "ended_utc": "2026-09-13T11:56:37Z",
+    "timeout_seconds": 3600,
+    "unavailable_metrics": {},
+    "version": "B1",
+    "case": "NZ_CP006932.NZ_CP006932.megablast",
+    "kind": "threaded",
+    "threads": 1,
+    "artifact_sha256": "20d604bb080eaa33f939086cecf68cc1a8349906dcec3548118b0bb6665a4d34",
+    "oracle_equal": true,
+    "own_native_equal": true,
+    "diagnostic": true,
+    "thread_contract": {
+      "requested_threads": 1,
+      "pool_threads": 0,
+      "caller_participates": false,
+      "effective_compute_threads": 1,
+      "thread_stages": [
+        {
+          "program": "blastn",
+          "stage": "subjects",
+          "work_items": 1,
+          "parallel_selected": false,
+          "measured_activity": null
+        },
+        {
+          "program": "blastn",
+          "stage": "subject_chunks",
+          "work_items": 1,
+          "parallel_selected": false,
+          "measured_activity": null
+        }
+      ],
+      "host_worker_counts": {
+        "spawn_attempt": 0,
+        "spawned": 0,
+        "ready": 0,
+        "exited": 0
+      },
+      "measured_activity": null
+    }
+  },
+  {
+    "status": "PASS",
+    "reason": null,
+    "exit_status": 0,
+    "wall_seconds": 0.6522306329861749,
+    "realtime_seconds": 0.6522338390350342,
+    "boottime_seconds": 0.6522331679880153,
+    "gnu_elapsed_seconds": 0.64,
+    "process_ended_utc": "2026-09-13T11:56:38Z",
+    "watchdog_clocks": {
+      "started": {
+        "monotonic": 162378.931533832,
+        "realtime": 1789300597.95538
+      }
+    },
+    "realtime_clock_agreement": true,
+    "monotonic_clock_agreement": true,
+    "elapsed_clock": "CLOCK_MONOTONIC; realtime and GNU elapsed are adjustable-clock diagnostics",
+    "cpu_user_seconds": 0.7,
+    "cpu_system_seconds": 0.16,
+    "peak_rss_bytes": 338378752,
+    "output": "/mnt/c/Users/genom/GitHub/LOSAT/docs/evidence/megablast_wasm_np_remediation_20260913/run-20260913-01/parity/targets-r3/B1/NZ_CP006932.NZ_CP006932.megablast/threaded-n8/output.txt",
+    "raw_output_sha256": "2e2fb3ef85081501224f81be0a82cf9715672f5229d3edb162ff114912920873",
+    "raw_output_bytes": 38401,
+    "started_utc": "2026-09-13T11:56:37Z",
+    "ended_utc": "2026-09-13T11:56:38Z",
+    "timeout_seconds": 3600,
+    "unavailable_metrics": {},
+    "version": "B1",
+    "case": "NZ_CP006932.NZ_CP006932.megablast",
+    "kind": "threaded",
+    "threads": 8,
+    "artifact_sha256": "20d604bb080eaa33f939086cecf68cc1a8349906dcec3548118b0bb6665a4d34",
+    "oracle_equal": true,
+    "own_native_equal": true,
+    "diagnostic": true,
+    "thread_contract": {
+      "requested_threads": 8,
+      "pool_threads": 8,
+      "caller_participates": false,
+      "effective_compute_threads": 8,
+      "thread_stages": [
+        {
+          "program": "blastn",
+          "stage": "subjects",
+          "work_items": 1,
+          "parallel_selected": false,
+          "measured_activity": null
+        },
+        {
+          "program": "blastn",
+          "stage": "subject_chunks",
+          "work_items": 1,
+          "parallel_selected": false,
+          "measured_activity": null
+        }
+      ],
+      "host_worker_counts": {
+        "spawn_attempt": 8,
+        "spawned": 8,
+        "ready": 8,
+        "exited": 8
+      },
+      "measured_activity": null
+    }
+  },
+  {
+    "status": "PASS",
+    "reason": null,
+    "exit_status": 0,
+    "wall_seconds": 0.49620692600728944,
+    "realtime_seconds": 0.49621009826660156,
+    "boottime_seconds": 0.49620951199904084,
+    "gnu_elapsed_seconds": 0.47,
+    "process_ended_utc": "2026-09-13T11:56:39Z",
+    "watchdog_clocks": {
+      "started": {
+        "monotonic": 162379.651738855,
+        "realtime": 1789300598.6755853
+      }
+    },
+    "realtime_clock_agreement": true,
+    "monotonic_clock_agreement": true,
+    "elapsed_clock": "CLOCK_MONOTONIC; realtime and GNU elapsed are adjustable-clock diagnostics",
+    "cpu_user_seconds": 0.62,
+    "cpu_system_seconds": 0.04,
+    "peak_rss_bytes": 223453184,
+    "output": "/mnt/c/Users/genom/GitHub/LOSAT/docs/evidence/megablast_wasm_np_remediation_20260913/run-20260913-01/parity/targets-r3/B1/NZ_CP006932.NZ_CP006932.megablast/threaded-n2/output.txt",
+    "raw_output_sha256": "2e2fb3ef85081501224f81be0a82cf9715672f5229d3edb162ff114912920873",
+    "raw_output_bytes": 38401,
+    "started_utc": "2026-09-13T11:56:38Z",
+    "ended_utc": "2026-09-13T11:56:39Z",
+    "timeout_seconds": 3600,
+    "unavailable_metrics": {},
+    "version": "B1",
+    "case": "NZ_CP006932.NZ_CP006932.megablast",
+    "kind": "threaded",
+    "threads": 2,
+    "artifact_sha256": "20d604bb080eaa33f939086cecf68cc1a8349906dcec3548118b0bb6665a4d34",
+    "oracle_equal": true,
+    "own_native_equal": true,
+    "diagnostic": true,
+    "thread_contract": {
+      "requested_threads": 2,
+      "pool_threads": 2,
+      "caller_participates": false,
+      "effective_compute_threads": 2,
+      "thread_stages": [
+        {
+          "program": "blastn",
+          "stage": "subjects",
+          "work_items": 1,
+          "parallel_selected": false,
+          "measured_activity": null
+        },
+        {
+          "program": "blastn",
+          "stage": "subject_chunks",
+          "work_items": 1,
+          "parallel_selected": false,
+          "measured_activity": null
+        }
+      ],
+      "host_worker_counts": {
+        "spawn_attempt": 2,
+        "spawned": 2,
+        "ready": 2,
+        "exited": 2
+      },
+      "measured_activity": null
+    }
+  },
+  {
+    "status": "PASS",
+    "reason": null,
+    "exit_status": 0,
+    "wall_seconds": 0.5502371689944994,
+    "realtime_seconds": 0.5502402782440186,
+    "boottime_seconds": 0.5502401799894869,
+    "gnu_elapsed_seconds": 0.52,
+    "process_ended_utc": "2026-09-13T11:56:39Z",
+    "watchdog_clocks": {
+      "started": {
+        "monotonic": 162380.214233693,
+        "realtime": 1789300599.23808
+      }
+    },
+    "realtime_clock_agreement": true,
+    "monotonic_clock_agreement": true,
+    "elapsed_clock": "CLOCK_MONOTONIC; realtime and GNU elapsed are adjustable-clock diagnostics",
+    "cpu_user_seconds": 0.64,
+    "cpu_system_seconds": 0.06,
+    "peak_rss_bytes": 253128704,
+    "output": "/mnt/c/Users/genom/GitHub/LOSAT/docs/evidence/megablast_wasm_np_remediation_20260913/run-20260913-01/parity/targets-r3/B1/NZ_CP006932.NZ_CP006932.megablast/threaded-n4/output.txt",
+    "raw_output_sha256": "2e2fb3ef85081501224f81be0a82cf9715672f5229d3edb162ff114912920873",
+    "raw_output_bytes": 38401,
+    "started_utc": "2026-09-13T11:56:39Z",
+    "ended_utc": "2026-09-13T11:56:39Z",
+    "timeout_seconds": 3600,
+    "unavailable_metrics": {},
+    "version": "B1",
+    "case": "NZ_CP006932.NZ_CP006932.megablast",
+    "kind": "threaded",
+    "threads": 4,
+    "artifact_sha256": "20d604bb080eaa33f939086cecf68cc1a8349906dcec3548118b0bb6665a4d34",
+    "oracle_equal": true,
+    "own_native_equal": true,
+    "diagnostic": true,
+    "thread_contract": {
+      "requested_threads": 4,
+      "pool_threads": 4,
+      "caller_participates": false,
+      "effective_compute_threads": 4,
+      "thread_stages": [
+        {
+          "program": "blastn",
+          "stage": "subjects",
+          "work_items": 1,
+          "parallel_selected": false,
+          "measured_activity": null
+        },
+        {
+          "program": "blastn",
+          "stage": "subject_chunks",
+          "work_items": 1,
+          "parallel_selected": false,
+          "measured_activity": null
+        }
+      ],
+      "host_worker_counts": {
+        "spawn_attempt": 4,
+        "spawned": 4,
+        "ready": 4,
+        "exited": 4
+      },
+      "measured_activity": null
+    }
+  },
+  {
+    "status": "PASS",
+    "reason": null,
+    "exit_status": 0,
+    "wall_seconds": 0.9905979059985839,
+    "realtime_seconds": 0.9906032085418701,
+    "boottime_seconds": 0.9906036530155689,
+    "gnu_elapsed_seconds": 0.97,
+    "process_ended_utc": "2026-09-13T11:56:40Z",
+    "watchdog_clocks": {
+      "started": {
+        "monotonic": 162380.820736658,
+        "realtime": 1789300599.8445826
+      }
+    },
+    "realtime_clock_agreement": true,
+    "monotonic_clock_agreement": true,
+    "elapsed_clock": "CLOCK_MONOTONIC; realtime and GNU elapsed are adjustable-clock diagnostics",
+    "cpu_user_seconds": 0.85,
+    "cpu_system_seconds": 0.07,
+    "peak_rss_bytes": 232361984,
+    "output": "/mnt/c/Users/genom/GitHub/LOSAT/docs/evidence/megablast_wasm_np_remediation_20260913/run-20260913-01/parity/targets-r3/B1/EDL933.Sakai.megablast/native-n8/output.txt",
+    "raw_output_sha256": "300a925ef86f20af9c0eff53f1c73638bdf80d47f5153352086a3e7bfd416c0c",
+    "raw_output_bytes": 473032,
+    "started_utc": "2026-09-13T11:56:39Z",
+    "ended_utc": "2026-09-13T11:56:40Z",
+    "timeout_seconds": 3600,
+    "unavailable_metrics": {},
+    "version": "B1",
+    "case": "EDL933.Sakai.megablast",
+    "kind": "native",
+    "threads": 8,
+    "artifact_sha256": "ae494b43e50ad15ae004d23ded13b325cfe8c3bc3b036928ca3302d2d2adf922",
+    "oracle_equal": true,
+    "own_native_equal": true,
+    "diagnostic": true,
+    "thread_contract": {
+      "requested_threads": 8,
+      "pool_threads": 8,
+      "caller_participates": false,
+      "effective_compute_threads": 8,
+      "thread_stages": [
+        {
+          "program": "blastn",
+          "stage": "subjects",
+          "work_items": 1,
+          "parallel_selected": false,
+          "measured_activity": null
+        },
+        {
+          "program": "blastn",
+          "stage": "subject_chunks",
+          "work_items": 2,
+          "parallel_selected": true,
+          "measured_activity": null
+        }
+      ],
+      "host_worker_counts": null,
+      "measured_activity": null
+    }
+  },
+  {
+    "status": "PASS",
+    "reason": null,
+    "exit_status": 0,
+    "wall_seconds": 1.4446299099945463,
+    "realtime_seconds": 1.4446330070495605,
+    "boottime_seconds": 1.444632651982829,
+    "gnu_elapsed_seconds": 1.41,
+    "process_ended_utc": "2026-09-13T11:56:42Z",
+    "watchdog_clocks": {
+      "started": {
+        "monotonic": 162381.884033546,
+        "realtime": 1789300600.9078796
+      }
+    },
+    "realtime_clock_agreement": true,
+    "monotonic_clock_agreement": true,
+    "elapsed_clock": "CLOCK_MONOTONIC; realtime and GNU elapsed are adjustable-clock diagnostics",
+    "cpu_user_seconds": 1.51,
+    "cpu_system_seconds": 0.09,
+    "peak_rss_bytes": 317870080,
+    "output": "/mnt/c/Users/genom/GitHub/LOSAT/docs/evidence/megablast_wasm_np_remediation_20260913/run-20260913-01/parity/targets-r3/B1/EDL933.Sakai.megablast/serial-n1/output.txt",
+    "raw_output_sha256": "300a925ef86f20af9c0eff53f1c73638bdf80d47f5153352086a3e7bfd416c0c",
+    "raw_output_bytes": 473032,
+    "started_utc": "2026-09-13T11:56:40Z",
+    "ended_utc": "2026-09-13T11:56:42Z",
+    "timeout_seconds": 3600,
+    "unavailable_metrics": {},
+    "version": "B1",
+    "case": "EDL933.Sakai.megablast",
+    "kind": "serial",
+    "threads": 1,
+    "artifact_sha256": "cfc501d97ad1ddc2eaae4b229d23a4d81ef9909750a48924f43c7de3037dc7d9",
+    "oracle_equal": true,
+    "own_native_equal": true,
+    "diagnostic": true,
+    "thread_contract": {
+      "requested_threads": 1,
+      "pool_threads": 0,
+      "caller_participates": false,
+      "effective_compute_threads": 1,
+      "thread_stages": [
+        {
+          "program": "blastn",
+          "stage": "subjects",
+          "work_items": 1,
+          "parallel_selected": false,
+          "measured_activity": null
+        },
+        {
+          "program": "blastn",
+          "stage": "subject_chunks",
+          "work_items": 1,
+          "parallel_selected": false,
+          "measured_activity": null
+        },
+        {
+          "program": "blastn",
+          "stage": "subject_chunks",
+          "work_items": 1,
+          "parallel_selected": false,
+          "measured_activity": null
+        }
+      ],
+      "host_worker_counts": null,
+      "measured_activity": null
+    }
+  },
+  {
+    "status": "PASS",
+    "reason": null,
+    "exit_status": 0,
+    "wall_seconds": 1.4655720500159077,
+    "realtime_seconds": 1.4655752182006836,
+    "boottime_seconds": 1.46557514500455,
+    "gnu_elapsed_seconds": 1.44,
+    "process_ended_utc": "2026-09-13T11:56:43Z",
+    "watchdog_clocks": {
+      "started": {
+        "monotonic": 162383.379451071,
+        "realtime": 1789300602.4032972
+      }
+    },
+    "realtime_clock_agreement": true,
+    "monotonic_clock_agreement": true,
+    "elapsed_clock": "CLOCK_MONOTONIC; realtime and GNU elapsed are adjustable-clock diagnostics",
+    "cpu_user_seconds": 1.59,
+    "cpu_system_seconds": 0.04,
+    "peak_rss_bytes": 330653696,
+    "output": "/mnt/c/Users/genom/GitHub/LOSAT/docs/evidence/megablast_wasm_np_remediation_20260913/run-20260913-01/parity/targets-r3/B1/EDL933.Sakai.megablast/threaded-n1/output.txt",
+    "raw_output_sha256": "300a925ef86f20af9c0eff53f1c73638bdf80d47f5153352086a3e7bfd416c0c",
+    "raw_output_bytes": 473032,
+    "started_utc": "2026-09-13T11:56:42Z",
+    "ended_utc": "2026-09-13T11:56:43Z",
+    "timeout_seconds": 3600,
+    "unavailable_metrics": {},
+    "version": "B1",
+    "case": "EDL933.Sakai.megablast",
+    "kind": "threaded",
+    "threads": 1,
+    "artifact_sha256": "20d604bb080eaa33f939086cecf68cc1a8349906dcec3548118b0bb6665a4d34",
+    "oracle_equal": true,
+    "own_native_equal": true,
+    "diagnostic": true,
+    "thread_contract": {
+      "requested_threads": 1,
+      "pool_threads": 0,
+      "caller_participates": false,
+      "effective_compute_threads": 1,
+      "thread_stages": [
+        {
+          "program": "blastn",
+          "stage": "subjects",
+          "work_items": 1,
+          "parallel_selected": false,
+          "measured_activity": null
+        },
+        {
+          "program": "blastn",
+          "stage": "subject_chunks",
+          "work_items": 1,
+          "parallel_selected": false,
+          "measured_activity": null
+        },
+        {
+          "program": "blastn",
+          "stage": "subject_chunks",
+          "work_items": 1,
+          "parallel_selected": false,
+          "measured_activity": null
+        }
+      ],
+      "host_worker_counts": {
+        "spawn_attempt": 0,
+        "spawned": 0,
+        "ready": 0,
+        "exited": 0
+      },
+      "measured_activity": null
+    }
+  },
+  {
+    "status": "PASS",
+    "reason": null,
+    "exit_status": 0,
+    "wall_seconds": 1.661044865992153,
+    "realtime_seconds": 1.6610491275787354,
+    "boottime_seconds": 1.6610491320025176,
+    "gnu_elapsed_seconds": 1.64,
+    "process_ended_utc": "2026-09-13T11:56:45Z",
+    "watchdog_clocks": {
+      "started": {
+        "monotonic": 162384.892692235,
+        "realtime": 1789300603.916538
+      }
+    },
+    "realtime_clock_agreement": true,
+    "monotonic_clock_agreement": true,
+    "elapsed_clock": "CLOCK_MONOTONIC; realtime and GNU elapsed are adjustable-clock diagnostics",
+    "cpu_user_seconds": 1.76,
+    "cpu_system_seconds": 0.13,
+    "peak_rss_bytes": 461697024,
+    "output": "/mnt/c/Users/genom/GitHub/LOSAT/docs/evidence/megablast_wasm_np_remediation_20260913/run-20260913-01/parity/targets-r3/B1/EDL933.Sakai.megablast/threaded-n8/output.txt",
+    "raw_output_sha256": "300a925ef86f20af9c0eff53f1c73638bdf80d47f5153352086a3e7bfd416c0c",
+    "raw_output_bytes": 473032,
+    "started_utc": "2026-09-13T11:56:43Z",
+    "ended_utc": "2026-09-13T11:56:45Z",
+    "timeout_seconds": 3600,
+    "unavailable_metrics": {},
+    "version": "B1",
+    "case": "EDL933.Sakai.megablast",
+    "kind": "threaded",
+    "threads": 8,
+    "artifact_sha256": "20d604bb080eaa33f939086cecf68cc1a8349906dcec3548118b0bb6665a4d34",
+    "oracle_equal": true,
+    "own_native_equal": true,
+    "diagnostic": true,
+    "thread_contract": {
+      "requested_threads": 8,
+      "pool_threads": 8,
+      "caller_participates": false,
+      "effective_compute_threads": 8,
+      "thread_stages": [
+        {
+          "program": "blastn",
+          "stage": "subjects",
+          "work_items": 1,
+          "parallel_selected": false,
+          "measured_activity": null
+        },
+        {
+          "program": "blastn",
+          "stage": "subject_chunks",
+          "work_items": 2,
+          "parallel_selected": true,
+          "measured_activity": null
+        }
+      ],
+      "host_worker_counts": {
+        "spawn_attempt": 8,
+        "spawned": 8,
+        "ready": 8,
+        "exited": 8
+      },
+      "measured_activity": null
+    }
+  },
+  {
+    "status": "PASS",
+    "reason": null,
+    "exit_status": 0,
+    "wall_seconds": 1.5145455579913687,
+    "realtime_seconds": 1.5145487785339355,
+    "boottime_seconds": 1.514547989005223,
+    "gnu_elapsed_seconds": 1.5,
+    "process_ended_utc": "2026-09-13T11:56:47Z",
+    "watchdog_clocks": {
+      "started": {
+        "monotonic": 162386.651541899,
+        "realtime": 1789300605.6753879
+      }
+    },
+    "realtime_clock_agreement": true,
+    "monotonic_clock_agreement": true,
+    "elapsed_clock": "CLOCK_MONOTONIC; realtime and GNU elapsed are adjustable-clock diagnostics",
+    "cpu_user_seconds": 1.66,
+    "cpu_system_seconds": 0.06,
+    "peak_rss_bytes": 367144960,
+    "output": "/mnt/c/Users/genom/GitHub/LOSAT/docs/evidence/megablast_wasm_np_remediation_20260913/run-20260913-01/parity/targets-r3/B1/EDL933.Sakai.megablast/threaded-n2/output.txt",
+    "raw_output_sha256": "300a925ef86f20af9c0eff53f1c73638bdf80d47f5153352086a3e7bfd416c0c",
+    "raw_output_bytes": 473032,
+    "started_utc": "2026-09-13T11:56:45Z",
+    "ended_utc": "2026-09-13T11:56:47Z",
+    "timeout_seconds": 3600,
+    "unavailable_metrics": {},
+    "version": "B1",
+    "case": "EDL933.Sakai.megablast",
+    "kind": "threaded",
+    "threads": 2,
+    "artifact_sha256": "20d604bb080eaa33f939086cecf68cc1a8349906dcec3548118b0bb6665a4d34",
+    "oracle_equal": true,
+    "own_native_equal": true,
+    "diagnostic": true,
+    "thread_contract": {
+      "requested_threads": 2,
+      "pool_threads": 2,
+      "caller_participates": false,
+      "effective_compute_threads": 2,
+      "thread_stages": [
+        {
+          "program": "blastn",
+          "stage": "subjects",
+          "work_items": 1,
+          "parallel_selected": false,
+          "measured_activity": null
+        },
+        {
+          "program": "blastn",
+          "stage": "subject_chunks",
+          "work_items": 2,
+          "parallel_selected": true,
+          "measured_activity": null
+        }
+      ],
+      "host_worker_counts": {
+        "spawn_attempt": 2,
+        "spawned": 2,
+        "ready": 2,
+        "exited": 2
+      },
+      "measured_activity": null
+    }
+  },
+  {
+    "status": "PASS",
+    "reason": null,
+    "exit_status": 0,
+    "wall_seconds": 1.7193399320240133,
+    "realtime_seconds": 1.7193431854248047,
+    "boottime_seconds": 1.7193429640028626,
+    "gnu_elapsed_seconds": 1.7,
+    "process_ended_utc": "2026-09-13T11:56:48Z",
+    "watchdog_clocks": {
+      "started": {
+        "monotonic": 162388.268738478,
+        "realtime": 1789300607.2925847
+      }
+    },
+    "realtime_clock_agreement": true,
+    "monotonic_clock_agreement": true,
+    "elapsed_clock": "CLOCK_MONOTONIC; realtime and GNU elapsed are adjustable-clock diagnostics",
+    "cpu_user_seconds": 1.74,
+    "cpu_system_seconds": 0.05,
+    "peak_rss_bytes": 387723264,
+    "output": "/mnt/c/Users/genom/GitHub/LOSAT/docs/evidence/megablast_wasm_np_remediation_20260913/run-20260913-01/parity/targets-r3/B1/EDL933.Sakai.megablast/threaded-n4/output.txt",
+    "raw_output_sha256": "300a925ef86f20af9c0eff53f1c73638bdf80d47f5153352086a3e7bfd416c0c",
+    "raw_output_bytes": 473032,
+    "started_utc": "2026-09-13T11:56:47Z",
+    "ended_utc": "2026-09-13T11:56:49Z",
+    "timeout_seconds": 3600,
+    "unavailable_metrics": {},
+    "version": "B1",
+    "case": "EDL933.Sakai.megablast",
+    "kind": "threaded",
+    "threads": 4,
+    "artifact_sha256": "20d604bb080eaa33f939086cecf68cc1a8349906dcec3548118b0bb6665a4d34",
+    "oracle_equal": true,
+    "own_native_equal": true,
+    "diagnostic": true,
+    "thread_contract": {
+      "requested_threads": 4,
+      "pool_threads": 4,
+      "caller_participates": false,
+      "effective_compute_threads": 4,
+      "thread_stages": [
+        {
+          "program": "blastn",
+          "stage": "subjects",
+          "work_items": 1,
+          "parallel_selected": false,
+          "measured_activity": null
+        },
+        {
+          "program": "blastn",
+          "stage": "subject_chunks",
+          "work_items": 2,
+          "parallel_selected": true,
+          "measured_activity": null
+        }
+      ],
+      "host_worker_counts": {
+        "spawn_attempt": 4,
+        "spawned": 4,
+        "ready": 4,
+        "exited": 4
+      },
+      "measured_activity": null
+    }
+  },
+  {
+    "status": "PASS",
+    "reason": null,
+    "exit_status": 0,
+    "wall_seconds": 0.9755099440226331,
+    "realtime_seconds": 0.975513219833374,
+    "boottime_seconds": 0.975512767006876,
+    "gnu_elapsed_seconds": 0.95,
+    "process_ended_utc": "2026-09-13T11:56:50Z",
+    "watchdog_clocks": {
+      "started": {
+        "monotonic": 162390.045926885,
+        "realtime": 1789300609.0697732
+      }
+    },
+    "realtime_clock_agreement": true,
+    "monotonic_clock_agreement": true,
+    "elapsed_clock": "CLOCK_MONOTONIC; realtime and GNU elapsed are adjustable-clock diagnostics",
+    "cpu_user_seconds": 0.82,
+    "cpu_system_seconds": 0.09,
+    "peak_rss_bytes": 228388864,
+    "output": "/mnt/c/Users/genom/GitHub/LOSAT/docs/evidence/megablast_wasm_np_remediation_20260913/run-20260913-01/parity/targets-r3/B1/Sakai.MG1655.megablast/native-n8/output.txt",
+    "raw_output_sha256": "89bc2da34d37c904066116493a666adde359ac4d6a2943d764fe333602117ae7",
+    "raw_output_bytes": 536518,
+    "started_utc": "2026-09-13T11:56:49Z",
+    "ended_utc": "2026-09-13T11:56:50Z",
+    "timeout_seconds": 3600,
+    "unavailable_metrics": {},
+    "version": "B1",
+    "case": "Sakai.MG1655.megablast",
+    "kind": "native",
+    "threads": 8,
+    "artifact_sha256": "ae494b43e50ad15ae004d23ded13b325cfe8c3bc3b036928ca3302d2d2adf922",
+    "oracle_equal": true,
+    "own_native_equal": true,
+    "diagnostic": true,
+    "thread_contract": {
+      "requested_threads": 8,
+      "pool_threads": 8,
+      "caller_participates": false,
+      "effective_compute_threads": 8,
+      "thread_stages": [
+        {
+          "program": "blastn",
+          "stage": "subjects",
+          "work_items": 1,
+          "parallel_selected": false,
+          "measured_activity": null
+        },
+        {
+          "program": "blastn",
+          "stage": "subject_chunks",
+          "work_items": 1,
+          "parallel_selected": false,
+          "measured_activity": null
+        }
+      ],
+      "host_worker_counts": null,
+      "measured_activity": null
+    }
+  },
+  {
+    "status": "PASS",
+    "reason": null,
+    "exit_status": 0,
+    "wall_seconds": 1.3796993870055303,
+    "realtime_seconds": 1.379702091217041,
+    "boottime_seconds": 1.3797019439807627,
+    "gnu_elapsed_seconds": 1.36,
+    "process_ended_utc": "2026-09-13T11:56:51Z",
+    "watchdog_clocks": {
+      "started": {
+        "monotonic": 162391.075465669,
+        "realtime": 1789300610.0993116
+      }
+    },
+    "realtime_clock_agreement": true,
+    "monotonic_clock_agreement": true,
+    "elapsed_clock": "CLOCK_MONOTONIC; realtime and GNU elapsed are adjustable-clock diagnostics",
+    "cpu_user_seconds": 1.46,
+    "cpu_system_seconds": 0.07,
+    "peak_rss_bytes": 316338176,
+    "output": "/mnt/c/Users/genom/GitHub/LOSAT/docs/evidence/megablast_wasm_np_remediation_20260913/run-20260913-01/parity/targets-r3/B1/Sakai.MG1655.megablast/serial-n1/output.txt",
+    "raw_output_sha256": "89bc2da34d37c904066116493a666adde359ac4d6a2943d764fe333602117ae7",
+    "raw_output_bytes": 536518,
+    "started_utc": "2026-09-13T11:56:50Z",
+    "ended_utc": "2026-09-13T11:56:51Z",
+    "timeout_seconds": 3600,
+    "unavailable_metrics": {},
+    "version": "B1",
+    "case": "Sakai.MG1655.megablast",
+    "kind": "serial",
+    "threads": 1,
+    "artifact_sha256": "cfc501d97ad1ddc2eaae4b229d23a4d81ef9909750a48924f43c7de3037dc7d9",
+    "oracle_equal": true,
+    "own_native_equal": true,
+    "diagnostic": true,
+    "thread_contract": {
+      "requested_threads": 1,
+      "pool_threads": 0,
+      "caller_participates": false,
+      "effective_compute_threads": 1,
+      "thread_stages": [
+        {
+          "program": "blastn",
+          "stage": "subjects",
+          "work_items": 1,
+          "parallel_selected": false,
+          "measured_activity": null
+        },
+        {
+          "program": "blastn",
+          "stage": "subject_chunks",
+          "work_items": 1,
+          "parallel_selected": false,
+          "measured_activity": null
+        }
+      ],
+      "host_worker_counts": null,
+      "measured_activity": null
+    }
+  },
+  {
+    "status": "PASS",
+    "reason": null,
+    "exit_status": 0,
+    "wall_seconds": 1.610960698017152,
+    "realtime_seconds": 1.610964298248291,
+    "boottime_seconds": 1.610963768005604,
+    "gnu_elapsed_seconds": 1.58,
+    "process_ended_utc": "2026-09-13T11:56:53Z",
+    "watchdog_clocks": {
+      "started": {
+        "monotonic": 162392.571712817,
+        "realtime": 1789300611.5955594
+      }
+    },
+    "realtime_clock_agreement": true,
+    "monotonic_clock_agreement": true,
+    "elapsed_clock": "CLOCK_MONOTONIC; realtime and GNU elapsed are adjustable-clock diagnostics",
+    "cpu_user_seconds": 1.56,
+    "cpu_system_seconds": 0.06,
+    "peak_rss_bytes": 326377472,
+    "output": "/mnt/c/Users/genom/GitHub/LOSAT/docs/evidence/megablast_wasm_np_remediation_20260913/run-20260913-01/parity/targets-r3/B1/Sakai.MG1655.megablast/threaded-n1/output.txt",
+    "raw_output_sha256": "89bc2da34d37c904066116493a666adde359ac4d6a2943d764fe333602117ae7",
+    "raw_output_bytes": 536518,
+    "started_utc": "2026-09-13T11:56:51Z",
+    "ended_utc": "2026-09-13T11:56:53Z",
+    "timeout_seconds": 3600,
+    "unavailable_metrics": {},
+    "version": "B1",
+    "case": "Sakai.MG1655.megablast",
+    "kind": "threaded",
+    "threads": 1,
+    "artifact_sha256": "20d604bb080eaa33f939086cecf68cc1a8349906dcec3548118b0bb6665a4d34",
+    "oracle_equal": true,
+    "own_native_equal": true,
+    "diagnostic": true,
+    "thread_contract": {
+      "requested_threads": 1,
+      "pool_threads": 0,
+      "caller_participates": false,
+      "effective_compute_threads": 1,
+      "thread_stages": [
+        {
+          "program": "blastn",
+          "stage": "subjects",
+          "work_items": 1,
+          "parallel_selected": false,
+          "measured_activity": null
+        },
+        {
+          "program": "blastn",
+          "stage": "subject_chunks",
+          "work_items": 1,
+          "parallel_selected": false,
+          "measured_activity": null
+        }
+      ],
+      "host_worker_counts": {
+        "spawn_attempt": 0,
+        "spawned": 0,
+        "ready": 0,
+        "exited": 0
+      },
+      "measured_activity": null
+    }
+  },
+  {
+    "status": "PASS",
+    "reason": null,
+    "exit_status": 0,
+    "wall_seconds": 1.6998630320013035,
+    "realtime_seconds": 1.699866533279419,
+    "boottime_seconds": 1.699865756003419,
+    "gnu_elapsed_seconds": 1.68,
+    "process_ended_utc": "2026-09-13T11:56:54Z",
+    "watchdog_clocks": {
+      "started": {
+        "monotonic": 162394.260793089,
+        "realtime": 1789300613.2846396
+      }
+    },
+    "realtime_clock_agreement": true,
+    "monotonic_clock_agreement": true,
+    "elapsed_clock": "CLOCK_MONOTONIC; realtime and GNU elapsed are adjustable-clock diagnostics",
+    "cpu_user_seconds": 1.77,
+    "cpu_system_seconds": 0.11,
+    "peak_rss_bytes": 441827328,
+    "output": "/mnt/c/Users/genom/GitHub/LOSAT/docs/evidence/megablast_wasm_np_remediation_20260913/run-20260913-01/parity/targets-r3/B1/Sakai.MG1655.megablast/threaded-n8/output.txt",
+    "raw_output_sha256": "89bc2da34d37c904066116493a666adde359ac4d6a2943d764fe333602117ae7",
+    "raw_output_bytes": 536518,
+    "started_utc": "2026-09-13T11:56:53Z",
+    "ended_utc": "2026-09-13T11:56:54Z",
+    "timeout_seconds": 3600,
+    "unavailable_metrics": {},
+    "version": "B1",
+    "case": "Sakai.MG1655.megablast",
+    "kind": "threaded",
+    "threads": 8,
+    "artifact_sha256": "20d604bb080eaa33f939086cecf68cc1a8349906dcec3548118b0bb6665a4d34",
+    "oracle_equal": true,
+    "own_native_equal": true,
+    "diagnostic": true,
+    "thread_contract": {
+      "requested_threads": 8,
+      "pool_threads": 8,
+      "caller_participates": false,
+      "effective_compute_threads": 8,
+      "thread_stages": [
+        {
+          "program": "blastn",
+          "stage": "subjects",
+          "work_items": 1,
+          "parallel_selected": false,
+          "measured_activity": null
+        },
+        {
+          "program": "blastn",
+          "stage": "subject_chunks",
+          "work_items": 1,
+          "parallel_selected": false,
+          "measured_activity": null
+        }
+      ],
+      "host_worker_counts": {
+        "spawn_attempt": 8,
+        "spawned": 8,
+        "ready": 8,
+        "exited": 8
+      },
+      "measured_activity": null
+    }
+  },
+  {
+    "status": "PASS",
+    "reason": null,
+    "exit_status": 0,
+    "wall_seconds": 1.4746708839957137,
+    "realtime_seconds": 1.4746739864349365,
+    "boottime_seconds": 1.4746736849774607,
+    "gnu_elapsed_seconds": 1.46,
+    "process_ended_utc": "2026-09-13T11:56:56Z",
+    "watchdog_clocks": {
+      "started": {
+        "monotonic": 162396.023154989,
+        "realtime": 1789300615.0470011
+      }
+    },
+    "realtime_clock_agreement": true,
+    "monotonic_clock_agreement": true,
+    "elapsed_clock": "CLOCK_MONOTONIC; realtime and GNU elapsed are adjustable-clock diagnostics",
+    "cpu_user_seconds": 1.51,
+    "cpu_system_seconds": 0.13,
+    "peak_rss_bytes": 363278336,
+    "output": "/mnt/c/Users/genom/GitHub/LOSAT/docs/evidence/megablast_wasm_np_remediation_20260913/run-20260913-01/parity/targets-r3/B1/Sakai.MG1655.megablast/threaded-n2/output.txt",
+    "raw_output_sha256": "89bc2da34d37c904066116493a666adde359ac4d6a2943d764fe333602117ae7",
+    "raw_output_bytes": 536518,
+    "started_utc": "2026-09-13T11:56:55Z",
+    "ended_utc": "2026-09-13T11:56:56Z",
+    "timeout_seconds": 3600,
+    "unavailable_metrics": {},
+    "version": "B1",
+    "case": "Sakai.MG1655.megablast",
+    "kind": "threaded",
+    "threads": 2,
+    "artifact_sha256": "20d604bb080eaa33f939086cecf68cc1a8349906dcec3548118b0bb6665a4d34",
+    "oracle_equal": true,
+    "own_native_equal": true,
+    "diagnostic": true,
+    "thread_contract": {
+      "requested_threads": 2,
+      "pool_threads": 2,
+      "caller_participates": false,
+      "effective_compute_threads": 2,
+      "thread_stages": [
+        {
+          "program": "blastn",
+          "stage": "subjects",
+          "work_items": 1,
+          "parallel_selected": false,
+          "measured_activity": null
+        },
+        {
+          "program": "blastn",
+          "stage": "subject_chunks",
+          "work_items": 1,
+          "parallel_selected": false,
+          "measured_activity": null
+        }
+      ],
+      "host_worker_counts": {
+        "spawn_attempt": 2,
+        "spawned": 2,
+        "ready": 2,
+        "exited": 2
+      },
+      "measured_activity": null
+    }
+  },
+  {
+    "status": "PASS",
+    "reason": null,
+    "exit_status": 0,
+    "wall_seconds": 1.5308078700036276,
+    "realtime_seconds": 1.530811071395874,
+    "boottime_seconds": 1.5308103839925025,
+    "gnu_elapsed_seconds": 1.51,
+    "process_ended_utc": "2026-09-13T11:56:58Z",
+    "watchdog_clocks": {
+      "started": {
+        "monotonic": 162397.547565771,
+        "realtime": 1789300616.571412
+      }
+    },
+    "realtime_clock_agreement": true,
+    "monotonic_clock_agreement": true,
+    "elapsed_clock": "CLOCK_MONOTONIC; realtime and GNU elapsed are adjustable-clock diagnostics",
+    "cpu_user_seconds": 1.66,
+    "cpu_system_seconds": 0.06,
+    "peak_rss_bytes": 384282624,
+    "output": "/mnt/c/Users/genom/GitHub/LOSAT/docs/evidence/megablast_wasm_np_remediation_20260913/run-20260913-01/parity/targets-r3/B1/Sakai.MG1655.megablast/threaded-n4/output.txt",
+    "raw_output_sha256": "89bc2da34d37c904066116493a666adde359ac4d6a2943d764fe333602117ae7",
+    "raw_output_bytes": 536518,
+    "started_utc": "2026-09-13T11:56:56Z",
+    "ended_utc": "2026-09-13T11:56:58Z",
+    "timeout_seconds": 3600,
+    "unavailable_metrics": {},
+    "version": "B1",
+    "case": "Sakai.MG1655.megablast",
+    "kind": "threaded",
+    "threads": 4,
+    "artifact_sha256": "20d604bb080eaa33f939086cecf68cc1a8349906dcec3548118b0bb6665a4d34",
+    "oracle_equal": true,
+    "own_native_equal": true,
+    "diagnostic": true,
+    "thread_contract": {
+      "requested_threads": 4,
+      "pool_threads": 4,
+      "caller_participates": false,
+      "effective_compute_threads": 4,
+      "thread_stages": [
+        {
+          "program": "blastn",
+          "stage": "subjects",
+          "work_items": 1,
+          "parallel_selected": false,
+          "measured_activity": null
+        },
+        {
+          "program": "blastn",
+          "stage": "subject_chunks",
+          "work_items": 1,
+          "parallel_selected": false,
+          "measured_activity": null
+        }
+      ],
+      "host_worker_counts": {
+        "spawn_attempt": 4,
+        "spawned": 4,
+        "ready": 4,
+        "exited": 4
+      },
+      "measured_activity": null
+    }
+  }
+]

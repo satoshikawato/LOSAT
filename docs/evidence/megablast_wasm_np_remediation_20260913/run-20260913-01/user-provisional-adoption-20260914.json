@@ -1,0 +1,12 @@
+{
+  "status": "USER_AUTHORIZED_PROVISIONAL_ADOPTION_AND_MEASUREMENT_STOP",
+  "instructions": [
+    "大丈夫だったでしょ？いいよこれで。計測はこれ以上繰り返さないで。まとめよう。",
+    "とりあえず採用しようよ。"
+  ],
+  "action": "Provisionally adopt current integrated C-N4/C-P1/C-X2 plus qualified C-NA64 native configuration. Stop measurement and preserve incomplete/failed gates. Do not claim all plan gates achieved.",
+  "original_x_reuse_time_gate": "FAIL_9_OF_12_UNCHANGED",
+  "remaining": "Six remaining groups and final native megablast recheck not run. Additional-five confirmation planned but never run.",
+  "interleaved_diagnostic": "Stopped by user instruction; parent exec exit130, partial evidence retained.",
+  "monotonic_ns": 209462576677568
+}

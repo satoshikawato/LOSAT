@@ -1,0 +1,74 @@
+{
+  "status": "PROVISIONALLY_ADOPTED_BY_USER_MEASUREMENTS_STOPPED",
+  "cold_conditions": 37,
+  "native_fresh_conditions": 14,
+  "root_files_matching_qualified_source": 589,
+  "main_speed_floors": [
+    {
+      "case_id": "MelaMJNV.PemoMJNVA.losatn.blastn",
+      "speedup_percent": -0.08145354145592254,
+      "required_minimum_percent": null,
+      "minimum_pass": true,
+      "waiver": "Explicit user acceptance of the short LC BLASTN result; nonregression and RSS still required"
+    },
+    {
+      "case_id": "MjPMNV.MlPMNV.losatn.blastn",
+      "speedup_percent": 46.37147741264276,
+      "required_minimum_percent": 5.0,
+      "minimum_pass": true,
+      "waiver": null
+    },
+    {
+      "case_id": "AP027078.AP027131.losatp",
+      "speedup_percent": 11.155601560076189,
+      "required_minimum_percent": 5.0,
+      "minimum_pass": true,
+      "waiver": null
+    },
+    {
+      "case_id": "AP027132.NZ_CP006932.losatp",
+      "speedup_percent": 11.403085786942846,
+      "required_minimum_percent": 5.0,
+      "minimum_pass": true,
+      "waiver": null
+    }
+  ],
+  "x_reuse": {
+    "raw_jobs": 144,
+    "raw_and_worker_status": "PASS",
+    "rss_and_budget_pass": "4/4",
+    "time_pass": "3/12",
+    "time_fail": "9/12",
+    "disposition": "FAIL retained; provisional adoption explicitly requested by user"
+  },
+  "unexecuted": [
+    "x-thresholds",
+    "x-gencode4",
+    "daily-routes",
+    "daily-route-validation",
+    "capacity-diagnostics",
+    "capacity-summary",
+    "final-native-megablast-recheck",
+    "additional-five-X-reuse-confirmation"
+  ],
+  "stopped": "36-job interleaved stage diagnostic stopped by user; partial records retained",
+  "full_plan_gate_status": "NOT_ALL_GATES_PASSED",
+  "certification": "Frozen authorities/deferred46 unchanged; not full release certification",
+  "bound_evidence": {
+    "docs/evidence/megablast_wasm_np_remediation_20260913/run-20260913-01/integrated-np-main/engineering-checks.json": "0944d5ccc718029e4c190351f8733b8c5fe34c1330a34db7c1c457eeba99f76b",
+    "docs/evidence/megablast_wasm_np_remediation_20260913/run-20260913-01/integrated-x-main/engineering-checks.json": "032359f12bbfb2f4869ad0f95b5fa7a00c98d22deb15327f459f2ab35ff48047",
+    "docs/evidence/megablast_wasm_np_remediation_20260913/run-20260913-01/C-NA64-np-native-controls/engineering-checks.json": "8c3146dbc9323fd71edd3c706edd36e313237fbd48b9aa4fbf7d7d5df1a5e1c4",
+    "docs/evidence/megablast_wasm_np_remediation_20260913/run-20260913-01/C-NA64-x-native-controls/engineering-checks.json": "2ac477cdaa64ba03a7be5af61152ae3457140cef485c308c3d2b9bb3409752b8",
+    "docs/evidence/megablast_wasm_np_remediation_20260913/run-20260913-01/integrated-np-threaded1-controls/engineering-checks.json": "9f66d9ec3ec4ca67d9e4180bdd0b78264703b3ba3cf6a89495b8f35a8ba939bb",
+    "docs/evidence/megablast_wasm_np_remediation_20260913/run-20260913-01/C-NA64-x-threaded1-controls/engineering-checks.json": "924872d0fa7d3a393a15d4acbc7651a4611af9009ea00d1333afb8e8555b177c",
+    "docs/evidence/megablast_wasm_np_remediation_20260913/run-20260913-01/integrated-np-task-controls/engineering-checks.json": "46e6e357b6e2a78aca533f7777f9f3c6d8ea63970a8fa1366901c2dbd1fce5da",
+    "docs/evidence/megablast_wasm_np_remediation_20260913/run-20260913-01/user-provisional-adoption-20260914.json": "6c12c3e931c5e44e4bacfee36cc24e2a4ae251dec041c3a49f7b011040abea39",
+    "docs/evidence/megablast_wasm_np_remediation_20260913/run-20260913-01/C-NA64-root-adoption.json": "de3068bc989f6da6a5266e7c318cb820d07ba211792b547466ea4c2edbe8debe",
+    "docs/evidence/megablast_wasm_np_remediation_20260913/run-20260913-01/C-NA64-x-reuse/reuse-engineering-checks.json": "114c403c21a1b6176964847adb0832b9c384680669f83aa3f4eb49a713702a6f",
+    "docs/evidence/megablast_wasm_np_remediation_20260913/run-20260913-01/C-NA64-x-reuse-gate-disposition.json": "eb400b96a132e0f0a0d0fc95f698cc02dc2d4053a88dc52099930072c92eecb9",
+    "docs/evidence/megablast_wasm_np_remediation_20260913/run-20260913-01/C-NA64-remaining-steps.json": "626bb08af7fd2328ea69660e2f8f8e2b649ff214c19cee508f6cfe66c429b546",
+    "docs/evidence/megablast_wasm_np_remediation_20260913/run-20260913-01/C-NA64-wasm-equivalence.json": "6472d21e0423b59b4028b1c17e1f3aa72085e4ad8bd6a09ee9d62ec85962a618",
+    "docs/evidence/megablast_wasm_np_remediation_20260913/run-20260913-01/C-NA64-cold-performance.tsv": "f57a205bc8726d2e79165986403d9be743a2215f12a2a140011d0c02f1f29403",
+    "docs/evidence/megablast_wasm_np_remediation_20260913/run-20260913-01/audit-C-NA64-final-acceptance.md": "e123cf7915b602f6eb92a7dca6b620f560f469a1e8b08410c3fb39fb35bed70b"
+  }
+}

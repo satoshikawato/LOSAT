@@ -1,0 +1,14 @@
+{
+  "status": "PREPARED_NOT_EXECUTED",
+  "purpose": "Extend unexecuted capacity observations to the actual helper pool on both versions; all diagnostic times excluded",
+  "driver_hashes": {
+    "/tmp/losat-remediation-20260913-01/prepare_x4_capacity_diagnostic.py": "78a2f8692517b869b1df4554e9ae8ae6d3c12faa5ce4510a3e223ceeffe945a2",
+    "/tmp/losat-remediation-20260913-01/x4_capacity_diagnostics.py": "6e4937a5dbc6b75897af4ed4cb75286341d47a6cd36020a875f9a64ff65d1cd2",
+    "/tmp/losat-remediation-20260913-01/summarize_x4_capacity.py": "74ba602b321c2104c8c98c16f186acf98d7fcf3501132a9894a9708fee447d73"
+  },
+  "additional_fields": [
+    "x_helper_capacity",
+    "x_helper_width"
+  ],
+  "original_drivers_unchanged": true
+}

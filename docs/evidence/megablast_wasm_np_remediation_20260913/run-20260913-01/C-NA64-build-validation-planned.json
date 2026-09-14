@@ -1,0 +1,61 @@
+{
+  "status": "PREPARED_NOT_EXECUTED",
+  "prerequisite": "All14 native X/NP matrix conditions pass",
+  "steps": [
+    {
+      "name": "fmt-check",
+      "cwd": "/tmp/losat-remediation-20260913-01/C-NA64-source/LOSAT",
+      "argv": [
+        "cargo",
+        "fmt",
+        "--check"
+      ]
+    },
+    {
+      "name": "rust-tests",
+      "cwd": "/tmp/losat-remediation-20260913-01/C-NA64-source/LOSAT",
+      "argv": [
+        "cargo",
+        "test",
+        "--all-features",
+        "--locked",
+        "--offline",
+        "--target-dir",
+        "/tmp/losat-remediation-20260913-01/C-NA64-target/native"
+      ]
+    },
+    {
+      "name": "clippy",
+      "cwd": "/tmp/losat-remediation-20260913-01/C-NA64-source/LOSAT",
+      "argv": [
+        "cargo",
+        "clippy",
+        "--all-features",
+        "--all-targets",
+        "--locked",
+        "--offline",
+        "--target-dir",
+        "/tmp/losat-remediation-20260913-01/C-NA64-target/native",
+        "--",
+        "-D",
+        "warnings"
+      ]
+    },
+    {
+      "name": "threaded-build",
+      "cwd": "/tmp/losat-remediation-20260913-01/C-NA64-source",
+      "argv": [
+        "python3",
+        "LOSAT/tests/build_wasi_artifacts.py",
+        "--target-dir",
+        "/tmp/losat-remediation-20260913-01/C-NA64-target",
+        "--output-dir",
+        "/tmp/losat-remediation-20260913-01/C-NA64-artifacts",
+        "--node",
+        "/tmp/losat-node-check/node-v24.21.0-linux-x64/bin/node"
+      ]
+    }
+  ],
+  "wasm_identity_requirement": "Actual command/reactor/runtime-file bytes must equal the original integrated bundle before reusing its previous Wasm observations",
+  "old_failures_unchanged": true
+}

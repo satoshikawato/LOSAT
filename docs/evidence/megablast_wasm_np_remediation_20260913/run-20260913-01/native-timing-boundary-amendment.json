@@ -1,0 +1,33 @@
+{
+  "recorded_utc": "2026-09-13T16:54:12Z",
+  "reason": "Independent C-X2 native audit found a fixed Wasm-specific metadata boundary description reused for native records.",
+  "interpretation": "Native samples measure direct native executable process launch through exit, including search/output. They contain no Node startup or Wasm compilation. Actual argv/sample timing/usage/raw bytes already reflect native execution and remain unchanged.",
+  "historical_metadata_preserved": true,
+  "affected_metadata": [
+    {
+      "path": "C-N1-main-controls/metadata.json",
+      "sha256": "2c7159496d7089cb7fdd63cac7b1e1e3c69ad0a26243ebd6290c30310858e58e"
+    },
+    {
+      "path": "C-N1-native8-controls/metadata.json",
+      "sha256": "a8e6cdd412d3175d3731547c13026d24d8ac30e142230626ded992cd9fb4486b"
+    },
+    {
+      "path": "C-N4-main-controls/metadata.json",
+      "sha256": "482caa45eac2e54f9b82387969b71bd11b37072849343ef141648eef4d2d922e"
+    },
+    {
+      "path": "C-N4-main-n8-controls/metadata.json",
+      "sha256": "3bc147156aedd15da261d50c17ad858499b7848591ca70b32cc5cf6030aaf05a"
+    },
+    {
+      "path": "C-P1-native-controls/metadata.json",
+      "sha256": "892827e4ffee6956e2d8df784509bbef32864a0b663c1346098f40a49069c04f"
+    },
+    {
+      "path": "C-X2-native-controls/metadata.json",
+      "sha256": "b3a6ace09ef164421aace3bc2026d7019dac539348754698c5ad581681d27e6e"
+    }
+  ],
+  "new_harness": "Generic process boundary plus explicit boundary_by_kind mapping; timing code unchanged."
+}

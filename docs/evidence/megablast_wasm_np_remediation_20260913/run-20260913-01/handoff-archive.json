@@ -1,0 +1,8 @@
+{
+  "path": "/mnt/c/Users/genom/GitHub/LOSAT/docs/evidence/megablast_wasm_np_remediation_20260913/run-20260913-01/remediation-handoff.tar.gz",
+  "bytes": 1316658503,
+  "sha256": "a4611e3a997cf8f14a475047288d913f39ddb2b5068e1ae82702a2a6b88b5a66",
+  "file_entries": 26654,
+  "portable_symlinks": 29,
+  "manifest": "handoff-file-map.json"
+}

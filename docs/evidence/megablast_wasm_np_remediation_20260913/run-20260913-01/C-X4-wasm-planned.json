@@ -1,0 +1,99 @@
+{
+  "status": "PLANNED_NOT_EXECUTED",
+  "prerequisite": "All six C-X4 native time/RSS conditions pass, with raw/source checks",
+  "purpose": "Threaded candidate build and focused output/lifecycle checks before Wasm performance qualification",
+  "steps": [
+    {
+      "name": "fmt-check",
+      "cwd": "/tmp/losat-remediation-20260913-01/C-X4-source/LOSAT",
+      "argv": [
+        "cargo",
+        "fmt",
+        "--check"
+      ]
+    },
+    {
+      "name": "all-rust-tests",
+      "cwd": "/tmp/losat-remediation-20260913-01/C-X4-source/LOSAT",
+      "argv": [
+        "cargo",
+        "test",
+        "--all-features",
+        "--locked",
+        "--offline",
+        "--target-dir",
+        "/tmp/losat-remediation-20260913-01/C-X4-target/native"
+      ]
+    },
+    {
+      "name": "clippy",
+      "cwd": "/tmp/losat-remediation-20260913-01/C-X4-source/LOSAT",
+      "argv": [
+        "cargo",
+        "clippy",
+        "--all-features",
+        "--all-targets",
+        "--locked",
+        "--offline",
+        "--target-dir",
+        "/tmp/losat-remediation-20260913-01/C-X4-target/native",
+        "--",
+        "-D",
+        "warnings"
+      ]
+    },
+    {
+      "name": "threaded-build",
+      "cwd": "/tmp/losat-remediation-20260913-01/C-X4-source",
+      "argv": [
+        "python3",
+        "LOSAT/tests/build_wasi_artifacts.py",
+        "--target-dir",
+        "/tmp/losat-remediation-20260913-01/C-X4-target",
+        "--output-dir",
+        "/tmp/losat-remediation-20260913-01/C-X4-artifacts",
+        "--node",
+        "/tmp/losat-node-check/node-v24.21.0-linux-x64/bin/node"
+      ]
+    },
+    {
+      "name": "threaded-contracts",
+      "cwd": "/mnt/c/Users/genom/GitHub/LOSAT",
+      "argv": [
+        "python3",
+        "LOSAT/tests/check_wasm_threading.py",
+        "--native",
+        "/tmp/losat-remediation-20260913-01/C-X4-target/native/release/LOSAT",
+        "--threaded",
+        "/tmp/losat-remediation-20260913-01/C-X4-artifacts/losat-threaded-command.wasm",
+        "--reactor",
+        "/tmp/losat-remediation-20260913-01/C-X4-artifacts/losat-threaded-reactor.wasm",
+        "--node",
+        "/tmp/losat-node-check/node-v24.21.0-linux-x64/bin/node",
+        "--oracle-dir",
+        "/home/kawato/micromamba/bin",
+        "--output-dir",
+        "/mnt/c/Users/genom/GitHub/LOSAT/docs/evidence/megablast_wasm_np_remediation_20260913/run-20260913-01/C-X4-threaded-contracts"
+      ]
+    },
+    {
+      "name": "tblastx-thresholds",
+      "cwd": "/mnt/c/Users/genom/GitHub/LOSAT",
+      "argv": [
+        "python3",
+        "LOSAT/tests/check_tblastx_thread_thresholds.py",
+        "--native",
+        "/tmp/losat-remediation-20260913-01/C-X4-target/native/release/LOSAT",
+        "--threaded",
+        "/tmp/losat-remediation-20260913-01/C-X4-artifacts/losat-threaded-command.wasm",
+        "--oracle",
+        "/home/kawato/micromamba/bin/tblastx",
+        "--node",
+        "/tmp/losat-node-check/node-v24.21.0-linux-x64/bin/node",
+        "--output-dir",
+        "/mnt/c/Users/genom/GitHub/LOSAT/docs/evidence/megablast_wasm_np_remediation_20260913/run-20260913-01/C-X4-tblastx-thresholds"
+      ]
+    }
+  ],
+  "prelaunch_update": "Add the broader unit/lint gate once the native parity/performance sweep has completed; no launched plan was changed."
+}

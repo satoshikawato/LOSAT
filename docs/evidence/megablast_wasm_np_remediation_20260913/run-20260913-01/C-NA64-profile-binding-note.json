@@ -1,0 +1,10 @@
+{
+  "scope": "Existing fingerprint metadata is not a historical compiler invocation capture for an already-linked executable.",
+  "observations": {
+    "bin_profile_all": 5353520049763563864,
+    "library_profile_original_integrated_alignment_diagnostic_and_C_NA64": 6418093726722172150,
+    "current_B1_library_profile": 2555309721207602560
+  },
+  "interpretation": "The current B1 library fingerprint may have been updated by later build selections. Do not infer a new causal difference in the measured B1 executable from this mutable cache file. The original integrated to alignment diagnostic to configured build has matching current library profiles; the latter two actual executables are byte-identical.",
+  "guard": "All claimed comparisons remain tied to actual executable hashes. No all-build-settings-only-flags assertion is made."
+}

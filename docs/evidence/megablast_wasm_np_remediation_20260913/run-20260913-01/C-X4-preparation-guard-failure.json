@@ -1,0 +1,7 @@
+{
+  "status": "FAILED_BEFORE_SOURCE_EDIT_OR_BUILD",
+  "reason": "Expected running_max comment block omitted an existing intervening comment; guard aborted before writing modified source",
+  "preserved_driver": "/tmp/losat-remediation-20260913-01/prepare_x4_guard_failure.py",
+  "preserved_snapshot": "/tmp/losat-remediation-20260913-01/C-X4-source-guard-failure",
+  "resolution": "Exact inspected comment anchor corrected; new C-X4-source prepared from unchanged frozen integrated source"
+}

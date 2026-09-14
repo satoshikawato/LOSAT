@@ -1,0 +1,83 @@
+{
+  "status": "PREPARED_NOT_EXECUTED",
+  "prerequisite": "Native14 condition gate, build/tests/clippy and exact Wasm equivalence pass",
+  "steps": [
+    {
+      "name": "x-threaded1-controls",
+      "argv": [
+        "python3",
+        "/tmp/losat-remediation-20260913-01/finish_na64_wasm_controls.py",
+        "x-threaded1-controls"
+      ],
+      "driver_sha256": "4b2c2df1d95cc5c81ce80bb6237563459ff20eb7731135652e3883d25585ed35"
+    },
+    {
+      "name": "x-thread-boundaries",
+      "argv": [
+        "python3",
+        "/tmp/losat-remediation-20260913-01/finish_na64_wasm_controls.py",
+        "x-thread-boundaries"
+      ],
+      "driver_sha256": "4b2c2df1d95cc5c81ce80bb6237563459ff20eb7731135652e3883d25585ed35"
+    },
+    {
+      "name": "x-reuse",
+      "argv": [
+        "python3",
+        "/tmp/losat-remediation-20260913-01/finish_na64_wasm_controls.py",
+        "x-reuse"
+      ],
+      "driver_sha256": "4b2c2df1d95cc5c81ce80bb6237563459ff20eb7731135652e3883d25585ed35"
+    },
+    {
+      "name": "x-gencode4",
+      "argv": [
+        "python3",
+        "/tmp/losat-remediation-20260913-01/na64_gencode4.py"
+      ],
+      "driver_sha256": "0a57d65246a95000b993ead3b6f600012fea4388f44db02d34b2360141d0567e"
+    },
+    {
+      "name": "daily-routes",
+      "argv": [
+        "python3",
+        "/tmp/losat-remediation-20260913-01/na64_daily_routes.py"
+      ],
+      "driver_sha256": "356a4e9df76fc83bc14f15cac1f015d05f48e400f1ef7a0f794ce488effab4ef"
+    },
+    {
+      "name": "daily-route-validation",
+      "argv": [
+        "python3",
+        "/tmp/losat-remediation-20260913-01/evaluate_na64_daily_routes.py"
+      ],
+      "driver_sha256": "3da210e6d64432938df911221940a121c97cda436e73373b1ea3c1c82a93d3a1"
+    },
+    {
+      "name": "capacity-diagnostics",
+      "argv": [
+        "python3",
+        "/tmp/losat-remediation-20260913-01/na64_capacity_diagnostics.py"
+      ],
+      "driver_sha256": "2e0ac040145654feb084e25b8ed0c935be2183bbceee68b96375076dc84881ea"
+    },
+    {
+      "name": "capacity-summary",
+      "argv": [
+        "python3",
+        "/tmp/losat-remediation-20260913-01/summarize_na64_capacity.py"
+      ],
+      "driver_sha256": "1b473561f40e3a159651e21d634622605545f425430f10298cf930e31e7d0620"
+    }
+  ],
+  "all_driver_hashes": {
+    "/tmp/losat-remediation-20260913-01/finish_na64_wasm_controls.py": "4b2c2df1d95cc5c81ce80bb6237563459ff20eb7731135652e3883d25585ed35",
+    "/tmp/losat-remediation-20260913-01/na64_daily_routes.py": "356a4e9df76fc83bc14f15cac1f015d05f48e400f1ef7a0f794ce488effab4ef",
+    "/tmp/losat-remediation-20260913-01/evaluate_na64_daily_routes.py": "3da210e6d64432938df911221940a121c97cda436e73373b1ea3c1c82a93d3a1",
+    "/tmp/losat-remediation-20260913-01/na64_gencode4.py": "0a57d65246a95000b993ead3b6f600012fea4388f44db02d34b2360141d0567e",
+    "/tmp/losat-remediation-20260913-01/prepare_na64_capacity_diagnostic.py": "270c40bf62be6d1c5bf9883e9d88b998b6565323ec66365b983cffcbce5ad2fa",
+    "/tmp/losat-remediation-20260913-01/na64_capacity_diagnostics.py": "2e0ac040145654feb084e25b8ed0c935be2183bbceee68b96375076dc84881ea",
+    "/tmp/losat-remediation-20260913-01/summarize_na64_capacity.py": "1b473561f40e3a159651e21d634622605545f425430f10298cf930e31e7d0620"
+  },
+  "old_drivers_and_failures_unchanged": true
+}

@@ -1,0 +1,15 @@
+[
+  {
+    "name": "x-native-controls",
+    "argv": [
+      "python",
+      "/tmp/losat-remediation-20260913-01/final_performance.py",
+      "x-native-controls"
+    ],
+    "started_utc": "2026-09-13T21:25:10Z",
+    "ended_utc": "2026-09-13T21:46:29Z",
+    "elapsed_seconds": 1244.9414709230186,
+    "exit_status": 1,
+    "log": "/tmp/losat-remediation-20260913-01/integrated-step-x-native-controls.log"
+  }
+]

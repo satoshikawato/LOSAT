@@ -1,0 +1,18 @@
+--- a/LOSAT/src/algorithm/blastn/blast_engine/run.rs
++++ b/LOSAT/src/algorithm/blastn/blast_engine/run.rs
+@@ -9020,12 +9020,14 @@
+             // }
+             // ```
+             // Scheduling only; ordered containment and insertion stay unchanged.
++            // Group more pure traceback jobs per existing pool barrier. Replay
++            // still performs each containment/identity/tree update in prelim order.
+             // Serial Wasm compiles out the speculative path and retains batch 8.
+             const SPECULATIVE_TRACEBACK_BATCH_SIZE: usize =
+                 if cfg!(all(target_arch = "wasm32", not(feature = "wasm-threads"))) {
+                     8
+                 } else {
+-                    16
++                    32
+                 };
+             for prelim_index in 0..prelim_hits.len() {
+                 // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_traceback.c:403-405,436-472,583-612

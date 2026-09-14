@@ -1,0 +1,344 @@
+{
+  "driver_sha256": "0a7216b95fbec592eed7cc5e9aa965839a1ea90ba8eb9eda630793259e998198",
+  "plan_sha256": "256efca08105e210e157716259933cb2e0b49ce480e330063632573baa97dcf4",
+  "source_manifest_sha256": "08521898d5db4a4bc6b3fdff219b14e27a50f2c0d732f7bdebb1a1012316b801",
+  "guard_sha256": "a4d88007b9a82c7533696e58a81358a38bb972946e93ddd743ea29b78c517dcd",
+  "native_gate_checks": [
+    {
+      "case_id": "MelaMJNV.PemoMJNVA.tlosatx",
+      "kind": "native",
+      "threads": 1,
+      "baseline_median": 3.6295855340140406,
+      "candidate_median": 3.572273562022019,
+      "speedup_percent": 1.5790224932001773,
+      "delta_seconds": -0.05731197199202143,
+      "nonregression_tolerance_seconds": 0.18147927670070205,
+      "nonregression_pass": true,
+      "rss_delta_bytes": 98304,
+      "rss_tolerance_bytes": 16777216,
+      "rss_pass": true,
+      "baseline_range": [
+        3.549061772006098,
+        3.8974639709922485
+      ],
+      "candidate_range": [
+        3.554346758988686,
+        3.840071310987696
+      ],
+      "baseline_count": 5,
+      "candidate_count": 5
+    },
+    {
+      "case_id": "MelaMJNV.PemoMJNVA.tlosatx",
+      "kind": "native",
+      "threads": 8,
+      "baseline_median": 2.212022834981326,
+      "candidate_median": 2.155660988006275,
+      "speedup_percent": 2.547977628609188,
+      "delta_seconds": -0.05636184697505087,
+      "nonregression_tolerance_seconds": 0.11060114174906631,
+      "nonregression_pass": true,
+      "rss_delta_bytes": 892928,
+      "rss_tolerance_bytes": 16777216,
+      "rss_pass": true,
+      "baseline_range": [
+        2.175649123004405,
+        2.252042608015472
+      ],
+      "candidate_range": [
+        2.1351747650187463,
+        2.191390499006957
+      ],
+      "baseline_count": 5,
+      "candidate_count": 5
+    },
+    {
+      "case_id": "MjeNMV.MelaMJNV.tlosatx",
+      "kind": "native",
+      "threads": 1,
+      "baseline_median": 16.838524569000583,
+      "candidate_median": 16.833425263001118,
+      "speedup_percent": 0.030283567770850173,
+      "delta_seconds": -0.005099305999465287,
+      "nonregression_tolerance_seconds": 0.8419262284500292,
+      "nonregression_pass": true,
+      "rss_delta_bytes": 61440,
+      "rss_tolerance_bytes": 16777216,
+      "rss_pass": true,
+      "baseline_range": [
+        16.554054491018178,
+        17.075710295990575
+      ],
+      "candidate_range": [
+        16.279888621007558,
+        17.411358067998663
+      ],
+      "baseline_count": 5,
+      "candidate_count": 5
+    },
+    {
+      "case_id": "MjeNMV.MelaMJNV.tlosatx",
+      "kind": "native",
+      "threads": 8,
+      "baseline_median": 10.206712219020119,
+      "candidate_median": 10.087494794017402,
+      "speedup_percent": 1.1680296499450238,
+      "delta_seconds": -0.11921742500271648,
+      "nonregression_tolerance_seconds": 0.510335610951006,
+      "nonregression_pass": true,
+      "rss_delta_bytes": -147456,
+      "rss_tolerance_bytes": 16777216,
+      "rss_pass": true,
+      "baseline_range": [
+        10.019466858007945,
+        10.385553382016951
+      ],
+      "candidate_range": [
+        9.909309463982936,
+        10.403868002002127
+      ],
+      "baseline_count": 5,
+      "candidate_count": 5
+    },
+    {
+      "case_id": "AP027280.AP027280.tlosatx",
+      "kind": "native",
+      "threads": 1,
+      "baseline_median": 30.075042401003884,
+      "candidate_median": 29.73896354599856,
+      "speedup_percent": 1.1174676016220908,
+      "delta_seconds": -0.33607885500532575,
+      "nonregression_tolerance_seconds": 1.5037521200501942,
+      "nonregression_pass": true,
+      "rss_delta_bytes": 73728,
+      "rss_tolerance_bytes": 16777216,
+      "rss_pass": true,
+      "baseline_range": [
+        29.632369075989118,
+        30.325754602992674
+      ],
+      "candidate_range": [
+        29.56451544398442,
+        30.120131482020952
+      ],
+      "baseline_count": 5,
+      "candidate_count": 5
+    },
+    {
+      "case_id": "AP027280.AP027280.tlosatx",
+      "kind": "native",
+      "threads": 8,
+      "baseline_median": 18.10163197197835,
+      "candidate_median": 18.015462317998754,
+      "speedup_percent": 0.47603251526153745,
+      "delta_seconds": -0.08616965397959575,
+      "nonregression_tolerance_seconds": 0.9050815985989176,
+      "nonregression_pass": true,
+      "rss_delta_bytes": -20377600,
+      "rss_tolerance_bytes": 16777216,
+      "rss_pass": true,
+      "baseline_range": [
+        17.94951655800105,
+        18.14867494002101
+      ],
+      "candidate_range": [
+        17.788198009016924,
+        18.18192110399832
+      ],
+      "baseline_count": 5,
+      "candidate_count": 5
+    },
+    {
+      "case_id": "MelaMJNV.PemoMJNVA.losatn.blastn",
+      "kind": "native",
+      "threads": 1,
+      "baseline_median": 0.46953260200098157,
+      "candidate_median": 0.4710803850030061,
+      "speedup_percent": -0.3296433507339991,
+      "delta_seconds": 0.0015477830020245165,
+      "nonregression_tolerance_seconds": 0.05,
+      "nonregression_pass": true,
+      "rss_delta_bytes": 4096,
+      "rss_tolerance_bytes": 16777216,
+      "rss_pass": true,
+      "baseline_range": [
+        0.45867230600561015,
+        0.47172949701780453
+      ],
+      "candidate_range": [
+        0.4507022589968983,
+        0.49638662801589817
+      ],
+      "baseline_count": 5,
+      "candidate_count": 5
+    },
+    {
+      "case_id": "MelaMJNV.PemoMJNVA.losatn.blastn",
+      "kind": "native",
+      "threads": 8,
+      "baseline_median": 0.35612010600743815,
+      "candidate_median": 0.3342762609827332,
+      "speedup_percent": 6.1338421100685325,
+      "delta_seconds": -0.021843845024704933,
+      "nonregression_tolerance_seconds": 0.05,
+      "nonregression_pass": true,
+      "rss_delta_bytes": 344064,
+      "rss_tolerance_bytes": 16777216,
+      "rss_pass": true,
+      "baseline_range": [
+        0.32881418301258236,
+        0.39866205101134256
+      ],
+      "candidate_range": [
+        0.3242095750174485,
+        0.36366845399606973
+      ],
+      "baseline_count": 5,
+      "candidate_count": 5
+    },
+    {
+      "case_id": "MjPMNV.MlPMNV.losatn.blastn",
+      "kind": "native",
+      "threads": 1,
+      "baseline_median": 10.528382454009261,
+      "candidate_median": 8.438492935005343,
+      "speedup_percent": 19.850053207442876,
+      "delta_seconds": -2.0898895190039184,
+      "nonregression_tolerance_seconds": 0.5264191227004631,
+      "nonregression_pass": true,
+      "rss_delta_bytes": -7249920,
+      "rss_tolerance_bytes": 16777216,
+      "rss_pass": true,
+      "baseline_range": [
+        10.238317194976844,
+        10.856617182987975
+      ],
+      "candidate_range": [
+        8.347186669008806,
+        8.63039612598368
+      ],
+      "baseline_count": 5,
+      "candidate_count": 5
+    },
+    {
+      "case_id": "MjPMNV.MlPMNV.losatn.blastn",
+      "kind": "native",
+      "threads": 8,
+      "baseline_median": 6.162598155991873,
+      "candidate_median": 4.088945772993611,
+      "speedup_percent": 33.64899561043189,
+      "delta_seconds": -2.0736523829982616,
+      "nonregression_tolerance_seconds": 0.30812990779959365,
+      "nonregression_pass": true,
+      "rss_delta_bytes": -561152,
+      "rss_tolerance_bytes": 16777216,
+      "rss_pass": true,
+      "baseline_range": [
+        6.0195607249916065,
+        6.658987509988947
+      ],
+      "candidate_range": [
+        3.985419795004418,
+        4.1358232850034256
+      ],
+      "baseline_count": 5,
+      "candidate_count": 5
+    },
+    {
+      "case_id": "AP027078.AP027131.losatp",
+      "kind": "native",
+      "threads": 1,
+      "baseline_median": 27.095780686009675,
+      "candidate_median": 28.126089689991204,
+      "speedup_percent": -3.802470266204616,
+      "delta_seconds": 1.0303090039815288,
+      "nonregression_tolerance_seconds": 1.3547890343004838,
+      "nonregression_pass": true,
+      "rss_delta_bytes": 225280,
+      "rss_tolerance_bytes": 16777216,
+      "rss_pass": true,
+      "baseline_range": [
+        26.57237124699168,
+        27.57556185001158
+      ],
+      "candidate_range": [
+        27.77394210800412,
+        29.304278340016026
+      ],
+      "baseline_count": 5,
+      "candidate_count": 5
+    },
+    {
+      "case_id": "AP027078.AP027131.losatp",
+      "kind": "native",
+      "threads": 8,
+      "baseline_median": 5.0019624840060715,
+      "candidate_median": 5.165809771977365,
+      "speedup_percent": -3.275660073325226,
+      "delta_seconds": 0.16384728797129355,
+      "nonregression_tolerance_seconds": 0.2500981242003036,
+      "nonregression_pass": true,
+      "rss_delta_bytes": -2519040,
+      "rss_tolerance_bytes": 16777216,
+      "rss_pass": true,
+      "baseline_range": [
+        4.846071982989088,
+        5.531635722989449
+      ],
+      "candidate_range": [
+        5.088392389006913,
+        5.55744372002664
+      ],
+      "baseline_count": 5,
+      "candidate_count": 5
+    },
+    {
+      "case_id": "AP027132.NZ_CP006932.losatp",
+      "kind": "native",
+      "threads": 1,
+      "baseline_median": 41.578226056008134,
+      "candidate_median": 42.96929886500584,
+      "speedup_percent": -3.3456761890799713,
+      "delta_seconds": 1.3910728089977056,
+      "nonregression_tolerance_seconds": 2.0789113028004067,
+      "nonregression_pass": true,
+      "rss_delta_bytes": 163840,
+      "rss_tolerance_bytes": 16777216,
+      "rss_pass": true,
+      "baseline_range": [
+        39.98961433299701,
+        42.623101008008234
+      ],
+      "candidate_range": [
+        42.19068885000888,
+        43.79312157200184
+      ],
+      "baseline_count": 5,
+      "candidate_count": 5
+    },
+    {
+      "case_id": "AP027132.NZ_CP006932.losatp",
+      "kind": "native",
+      "threads": 8,
+      "baseline_median": 7.9274338470131624,
+      "candidate_median": 7.992195683007594,
+      "speedup_percent": -0.8169331620323961,
+      "delta_seconds": 0.06476183599443175,
+      "nonregression_tolerance_seconds": 0.39637169235065817,
+      "nonregression_pass": true,
+      "rss_delta_bytes": 3121152,
+      "rss_tolerance_bytes": 16777216,
+      "rss_pass": true,
+      "baseline_range": [
+        7.367474166007014,
+        8.418065606005257
+      ],
+      "candidate_range": [
+        7.690290564991301,
+        8.22812809800962
+      ],
+      "baseline_count": 5,
+      "candidate_count": 5
+    }
+  ]
+}

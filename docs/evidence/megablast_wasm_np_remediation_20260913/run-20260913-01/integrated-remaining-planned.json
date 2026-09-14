@@ -1,0 +1,141 @@
+[
+  {
+    "name": "np-main",
+    "argv": [
+      "python",
+      "/tmp/losat-remediation-20260913-01/final_performance.py",
+      "np-main"
+    ],
+    "driver_sha256": "466ed200d5fc9653be015eb34407a0b38495e6a0685c76676a15b3b87f458f4b"
+  },
+  {
+    "name": "x-main",
+    "argv": [
+      "python",
+      "/tmp/losat-remediation-20260913-01/final_performance.py",
+      "x-main"
+    ],
+    "driver_sha256": "466ed200d5fc9653be015eb34407a0b38495e6a0685c76676a15b3b87f458f4b"
+  },
+  {
+    "name": "np-native-controls",
+    "argv": [
+      "python",
+      "/tmp/losat-remediation-20260913-01/final_performance.py",
+      "np-native-controls"
+    ],
+    "driver_sha256": "466ed200d5fc9653be015eb34407a0b38495e6a0685c76676a15b3b87f458f4b"
+  },
+  {
+    "name": "np-threaded1-controls",
+    "argv": [
+      "python",
+      "/tmp/losat-remediation-20260913-01/final_performance.py",
+      "np-threaded1-controls"
+    ],
+    "driver_sha256": "466ed200d5fc9653be015eb34407a0b38495e6a0685c76676a15b3b87f458f4b"
+  },
+  {
+    "name": "np-task-controls",
+    "argv": [
+      "python",
+      "/tmp/losat-remediation-20260913-01/final_performance.py",
+      "np-task-controls"
+    ],
+    "driver_sha256": "466ed200d5fc9653be015eb34407a0b38495e6a0685c76676a15b3b87f458f4b"
+  },
+  {
+    "name": "np-thread-boundaries",
+    "argv": [
+      "python",
+      "/tmp/losat-remediation-20260913-01/final_performance.py",
+      "np-thread-boundaries"
+    ],
+    "driver_sha256": "466ed200d5fc9653be015eb34407a0b38495e6a0685c76676a15b3b87f458f4b"
+  },
+  {
+    "name": "np-reuse",
+    "argv": [
+      "python",
+      "/tmp/losat-remediation-20260913-01/final_performance.py",
+      "np-reuse"
+    ],
+    "driver_sha256": "466ed200d5fc9653be015eb34407a0b38495e6a0685c76676a15b3b87f458f4b"
+  },
+  {
+    "name": "x-native-controls",
+    "argv": [
+      "python",
+      "/tmp/losat-remediation-20260913-01/final_performance.py",
+      "x-native-controls"
+    ],
+    "driver_sha256": "466ed200d5fc9653be015eb34407a0b38495e6a0685c76676a15b3b87f458f4b"
+  },
+  {
+    "name": "x-threaded1-controls",
+    "argv": [
+      "python",
+      "/tmp/losat-remediation-20260913-01/final_performance.py",
+      "x-threaded1-controls"
+    ],
+    "driver_sha256": "466ed200d5fc9653be015eb34407a0b38495e6a0685c76676a15b3b87f458f4b"
+  },
+  {
+    "name": "x-thread-boundaries",
+    "argv": [
+      "python",
+      "/tmp/losat-remediation-20260913-01/final_performance.py",
+      "x-thread-boundaries"
+    ],
+    "driver_sha256": "466ed200d5fc9653be015eb34407a0b38495e6a0685c76676a15b3b87f458f4b"
+  },
+  {
+    "name": "x-reuse",
+    "argv": [
+      "python",
+      "/tmp/losat-remediation-20260913-01/final_performance.py",
+      "x-reuse"
+    ],
+    "driver_sha256": "466ed200d5fc9653be015eb34407a0b38495e6a0685c76676a15b3b87f458f4b"
+  },
+  {
+    "name": "x-gencode4",
+    "argv": [
+      "python",
+      "/tmp/losat-remediation-20260913-01/final_gencode4.py"
+    ],
+    "driver_sha256": "2b228506b3fb4bf22b37d3c2f9c6576251c6e8336b6c020ef8a95acae874e92d"
+  },
+  {
+    "name": "daily-routes",
+    "argv": [
+      "python",
+      "/tmp/losat-remediation-20260913-01/final_daily_routes.py"
+    ],
+    "driver_sha256": "7ec1b9ef1fd912bfe80f58ab34a22ba03a4102f1fcd2069adf5edcb447f067dc"
+  },
+  {
+    "name": "daily-route-validation",
+    "argv": [
+      "python",
+      "/tmp/losat-remediation-20260913-01/evaluate_daily_routes.py"
+    ],
+    "driver_sha256": "ac0073b2c09c27a359f40dde9ff92bd5bd6d2e5344cf9b65a2cd2766b70d6528"
+  },
+  {
+    "name": "capacity-diagnostics",
+    "argv": [
+      "python",
+      "/tmp/losat-remediation-20260913-01/capacity_diagnostics.py"
+    ],
+    "driver_sha256": "897796c19c1a43b8306c04cd9ffdd19b3b11de1078219bd3009f22623e616155"
+  },
+  {
+    "name": "capacity-summary",
+    "argv": [
+      "python",
+      "/tmp/losat-remediation-20260913-01/summarize_capacity.py"
+    ],
+    "driver_sha256": "fb2b7bb616a414494b185d9f006c925a812da147055748c3210415228a0581ca"
+  }
+]

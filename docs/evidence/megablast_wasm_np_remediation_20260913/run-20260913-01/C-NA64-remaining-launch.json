@@ -1,0 +1,431 @@
+{
+  "status": "STARTED_INDEPENDENT_VALIDATION_NOT_ADOPTION",
+  "native_checks": [
+    {
+      "case_id": "MelaMJNV.PemoMJNVA.tlosatx",
+      "kind": "native",
+      "threads": 1,
+      "baseline_median": 3.6295855340140406,
+      "candidate_median": 3.572273562022019,
+      "speedup_percent": 1.5790224932001773,
+      "delta_seconds": -0.05731197199202143,
+      "nonregression_tolerance_seconds": 0.18147927670070205,
+      "nonregression_pass": true,
+      "rss_delta_bytes": 98304,
+      "rss_tolerance_bytes": 16777216,
+      "rss_pass": true,
+      "baseline_range": [
+        3.549061772006098,
+        3.8974639709922485
+      ],
+      "candidate_range": [
+        3.554346758988686,
+        3.840071310987696
+      ],
+      "baseline_count": 5,
+      "candidate_count": 5
+    },
+    {
+      "case_id": "MelaMJNV.PemoMJNVA.tlosatx",
+      "kind": "native",
+      "threads": 8,
+      "baseline_median": 2.212022834981326,
+      "candidate_median": 2.155660988006275,
+      "speedup_percent": 2.547977628609188,
+      "delta_seconds": -0.05636184697505087,
+      "nonregression_tolerance_seconds": 0.11060114174906631,
+      "nonregression_pass": true,
+      "rss_delta_bytes": 892928,
+      "rss_tolerance_bytes": 16777216,
+      "rss_pass": true,
+      "baseline_range": [
+        2.175649123004405,
+        2.252042608015472
+      ],
+      "candidate_range": [
+        2.1351747650187463,
+        2.191390499006957
+      ],
+      "baseline_count": 5,
+      "candidate_count": 5
+    },
+    {
+      "case_id": "MjeNMV.MelaMJNV.tlosatx",
+      "kind": "native",
+      "threads": 1,
+      "baseline_median": 16.838524569000583,
+      "candidate_median": 16.833425263001118,
+      "speedup_percent": 0.030283567770850173,
+      "delta_seconds": -0.005099305999465287,
+      "nonregression_tolerance_seconds": 0.8419262284500292,
+      "nonregression_pass": true,
+      "rss_delta_bytes": 61440,
+      "rss_tolerance_bytes": 16777216,
+      "rss_pass": true,
+      "baseline_range": [
+        16.554054491018178,
+        17.075710295990575
+      ],
+      "candidate_range": [
+        16.279888621007558,
+        17.411358067998663
+      ],
+      "baseline_count": 5,
+      "candidate_count": 5
+    },
+    {
+      "case_id": "MjeNMV.MelaMJNV.tlosatx",
+      "kind": "native",
+      "threads": 8,
+      "baseline_median": 10.206712219020119,
+      "candidate_median": 10.087494794017402,
+      "speedup_percent": 1.1680296499450238,
+      "delta_seconds": -0.11921742500271648,
+      "nonregression_tolerance_seconds": 0.510335610951006,
+      "nonregression_pass": true,
+      "rss_delta_bytes": -147456,
+      "rss_tolerance_bytes": 16777216,
+      "rss_pass": true,
+      "baseline_range": [
+        10.019466858007945,
+        10.385553382016951
+      ],
+      "candidate_range": [
+        9.909309463982936,
+        10.403868002002127
+      ],
+      "baseline_count": 5,
+      "candidate_count": 5
+    },
+    {
+      "case_id": "AP027280.AP027280.tlosatx",
+      "kind": "native",
+      "threads": 1,
+      "baseline_median": 30.075042401003884,
+      "candidate_median": 29.73896354599856,
+      "speedup_percent": 1.1174676016220908,
+      "delta_seconds": -0.33607885500532575,
+      "nonregression_tolerance_seconds": 1.5037521200501942,
+      "nonregression_pass": true,
+      "rss_delta_bytes": 73728,
+      "rss_tolerance_bytes": 16777216,
+      "rss_pass": true,
+      "baseline_range": [
+        29.632369075989118,
+        30.325754602992674
+      ],
+      "candidate_range": [
+        29.56451544398442,
+        30.120131482020952
+      ],
+      "baseline_count": 5,
+      "candidate_count": 5
+    },
+    {
+      "case_id": "AP027280.AP027280.tlosatx",
+      "kind": "native",
+      "threads": 8,
+      "baseline_median": 18.10163197197835,
+      "candidate_median": 18.015462317998754,
+      "speedup_percent": 0.47603251526153745,
+      "delta_seconds": -0.08616965397959575,
+      "nonregression_tolerance_seconds": 0.9050815985989176,
+      "nonregression_pass": true,
+      "rss_delta_bytes": -20377600,
+      "rss_tolerance_bytes": 16777216,
+      "rss_pass": true,
+      "baseline_range": [
+        17.94951655800105,
+        18.14867494002101
+      ],
+      "candidate_range": [
+        17.788198009016924,
+        18.18192110399832
+      ],
+      "baseline_count": 5,
+      "candidate_count": 5
+    },
+    {
+      "case_id": "MelaMJNV.PemoMJNVA.losatn.blastn",
+      "kind": "native",
+      "threads": 1,
+      "baseline_median": 0.46953260200098157,
+      "candidate_median": 0.4710803850030061,
+      "speedup_percent": -0.3296433507339991,
+      "delta_seconds": 0.0015477830020245165,
+      "nonregression_tolerance_seconds": 0.05,
+      "nonregression_pass": true,
+      "rss_delta_bytes": 4096,
+      "rss_tolerance_bytes": 16777216,
+      "rss_pass": true,
+      "baseline_range": [
+        0.45867230600561015,
+        0.47172949701780453
+      ],
+      "candidate_range": [
+        0.4507022589968983,
+        0.49638662801589817
+      ],
+      "baseline_count": 5,
+      "candidate_count": 5
+    },
+    {
+      "case_id": "MelaMJNV.PemoMJNVA.losatn.blastn",
+      "kind": "native",
+      "threads": 8,
+      "baseline_median": 0.35612010600743815,
+      "candidate_median": 0.3342762609827332,
+      "speedup_percent": 6.1338421100685325,
+      "delta_seconds": -0.021843845024704933,
+      "nonregression_tolerance_seconds": 0.05,
+      "nonregression_pass": true,
+      "rss_delta_bytes": 344064,
+      "rss_tolerance_bytes": 16777216,
+      "rss_pass": true,
+      "baseline_range": [
+        0.32881418301258236,
+        0.39866205101134256
+      ],
+      "candidate_range": [
+        0.3242095750174485,
+        0.36366845399606973
+      ],
+      "baseline_count": 5,
+      "candidate_count": 5
+    },
+    {
+      "case_id": "MjPMNV.MlPMNV.losatn.blastn",
+      "kind": "native",
+      "threads": 1,
+      "baseline_median": 10.528382454009261,
+      "candidate_median": 8.438492935005343,
+      "speedup_percent": 19.850053207442876,
+      "delta_seconds": -2.0898895190039184,
+      "nonregression_tolerance_seconds": 0.5264191227004631,
+      "nonregression_pass": true,
+      "rss_delta_bytes": -7249920,
+      "rss_tolerance_bytes": 16777216,
+      "rss_pass": true,
+      "baseline_range": [
+        10.238317194976844,
+        10.856617182987975
+      ],
+      "candidate_range": [
+        8.347186669008806,
+        8.63039612598368
+      ],
+      "baseline_count": 5,
+      "candidate_count": 5
+    },
+    {
+      "case_id": "MjPMNV.MlPMNV.losatn.blastn",
+      "kind": "native",
+      "threads": 8,
+      "baseline_median": 6.162598155991873,
+      "candidate_median": 4.088945772993611,
+      "speedup_percent": 33.64899561043189,
+      "delta_seconds": -2.0736523829982616,
+      "nonregression_tolerance_seconds": 0.30812990779959365,
+      "nonregression_pass": true,
+      "rss_delta_bytes": -561152,
+      "rss_tolerance_bytes": 16777216,
+      "rss_pass": true,
+      "baseline_range": [
+        6.0195607249916065,
+        6.658987509988947
+      ],
+      "candidate_range": [
+        3.985419795004418,
+        4.1358232850034256
+      ],
+      "baseline_count": 5,
+      "candidate_count": 5
+    },
+    {
+      "case_id": "AP027078.AP027131.losatp",
+      "kind": "native",
+      "threads": 1,
+      "baseline_median": 27.095780686009675,
+      "candidate_median": 28.126089689991204,
+      "speedup_percent": -3.802470266204616,
+      "delta_seconds": 1.0303090039815288,
+      "nonregression_tolerance_seconds": 1.3547890343004838,
+      "nonregression_pass": true,
+      "rss_delta_bytes": 225280,
+      "rss_tolerance_bytes": 16777216,
+      "rss_pass": true,
+      "baseline_range": [
+        26.57237124699168,
+        27.57556185001158
+      ],
+      "candidate_range": [
+        27.77394210800412,
+        29.304278340016026
+      ],
+      "baseline_count": 5,
+      "candidate_count": 5
+    },
+    {
+      "case_id": "AP027078.AP027131.losatp",
+      "kind": "native",
+      "threads": 8,
+      "baseline_median": 5.0019624840060715,
+      "candidate_median": 5.165809771977365,
+      "speedup_percent": -3.275660073325226,
+      "delta_seconds": 0.16384728797129355,
+      "nonregression_tolerance_seconds": 0.2500981242003036,
+      "nonregression_pass": true,
+      "rss_delta_bytes": -2519040,
+      "rss_tolerance_bytes": 16777216,
+      "rss_pass": true,
+      "baseline_range": [
+        4.846071982989088,
+        5.531635722989449
+      ],
+      "candidate_range": [
+        5.088392389006913,
+        5.55744372002664
+      ],
+      "baseline_count": 5,
+      "candidate_count": 5
+    },
+    {
+      "case_id": "AP027132.NZ_CP006932.losatp",
+      "kind": "native",
+      "threads": 1,
+      "baseline_median": 41.578226056008134,
+      "candidate_median": 42.96929886500584,
+      "speedup_percent": -3.3456761890799713,
+      "delta_seconds": 1.3910728089977056,
+      "nonregression_tolerance_seconds": 2.0789113028004067,
+      "nonregression_pass": true,
+      "rss_delta_bytes": 163840,
+      "rss_tolerance_bytes": 16777216,
+      "rss_pass": true,
+      "baseline_range": [
+        39.98961433299701,
+        42.623101008008234
+      ],
+      "candidate_range": [
+        42.19068885000888,
+        43.79312157200184
+      ],
+      "baseline_count": 5,
+      "candidate_count": 5
+    },
+    {
+      "case_id": "AP027132.NZ_CP006932.losatp",
+      "kind": "native",
+      "threads": 8,
+      "baseline_median": 7.9274338470131624,
+      "candidate_median": 7.992195683007594,
+      "speedup_percent": -0.8169331620323961,
+      "delta_seconds": 0.06476183599443175,
+      "nonregression_tolerance_seconds": 0.39637169235065817,
+      "nonregression_pass": true,
+      "rss_delta_bytes": 3121152,
+      "rss_tolerance_bytes": 16777216,
+      "rss_pass": true,
+      "baseline_range": [
+        7.367474166007014,
+        8.418065606005257
+      ],
+      "candidate_range": [
+        7.690290564991301,
+        8.22812809800962
+      ],
+      "baseline_count": 5,
+      "candidate_count": 5
+    }
+  ],
+  "bound_files": {
+    "/mnt/c/Users/genom/GitHub/LOSAT/docs/evidence/megablast_wasm_np_remediation_20260913/run-20260913-01/C-NA64-x-native-controls/run-status.json": "05d3ae39f570a3df5b02be08cfcb89b08a6b899b4214f48b6be9b2fb29d7bb13",
+    "/mnt/c/Users/genom/GitHub/LOSAT/docs/evidence/megablast_wasm_np_remediation_20260913/run-20260913-01/C-NA64-x-native-controls/excluded.json": "37517e5f3dc66819f61f5a7bb8ace1921282415f10551d2defa5c3eb0985b570",
+    "/mnt/c/Users/genom/GitHub/LOSAT/docs/evidence/megablast_wasm_np_remediation_20260913/run-20260913-01/C-NA64-x-native-controls/engineering-checks.json": "2ac477cdaa64ba03a7be5af61152ae3457140cef485c308c3d2b9bb3409752b8",
+    "/mnt/c/Users/genom/GitHub/LOSAT/docs/evidence/megablast_wasm_np_remediation_20260913/run-20260913-01/C-NA64-x-native-controls/metadata.json": "23aa4d5f490257d55c1cd14d4f5bd207823ef53aa679cc9a7830573109b29ddb",
+    "/mnt/c/Users/genom/GitHub/LOSAT/docs/evidence/megablast_wasm_np_remediation_20260913/run-20260913-01/C-NA64-x-native-controls/samples.json": "480b4a8c67291e1158e7bf1e4e2e4fc485a90ec0398712cf77f12da012784d74",
+    "/mnt/c/Users/genom/GitHub/LOSAT/docs/evidence/megablast_wasm_np_remediation_20260913/run-20260913-01/C-NA64-np-native-controls/run-status.json": "e25f03bdd28bf1454f1298cac6fd9f05b0325c289f45a2dec9d98bd3f5daee6e",
+    "/mnt/c/Users/genom/GitHub/LOSAT/docs/evidence/megablast_wasm_np_remediation_20260913/run-20260913-01/C-NA64-np-native-controls/excluded.json": "37517e5f3dc66819f61f5a7bb8ace1921282415f10551d2defa5c3eb0985b570",
+    "/mnt/c/Users/genom/GitHub/LOSAT/docs/evidence/megablast_wasm_np_remediation_20260913/run-20260913-01/C-NA64-np-native-controls/engineering-checks.json": "8c3146dbc9323fd71edd3c706edd36e313237fbd48b9aa4fbf7d7d5df1a5e1c4",
+    "/mnt/c/Users/genom/GitHub/LOSAT/docs/evidence/megablast_wasm_np_remediation_20260913/run-20260913-01/C-NA64-np-native-controls/metadata.json": "f03247c6cd9f04040402fc373b29f0dde8156392761d2920283d3b4576dae4a7",
+    "/mnt/c/Users/genom/GitHub/LOSAT/docs/evidence/megablast_wasm_np_remediation_20260913/run-20260913-01/C-NA64-np-native-controls/samples.json": "94e6e08f28c9eb8086f5c75958d9cb07cbbcf688e9cf80974e02bb0c131caed0",
+    "/mnt/c/Users/genom/GitHub/LOSAT/docs/evidence/megablast_wasm_np_remediation_20260913/run-20260913-01/C-NA64-native-build-binding.json": "71260265034e9a742445d9ba4d62414c5949f4f4b567b7fb6490b636460fc649",
+    "/mnt/c/Users/genom/GitHub/LOSAT/docs/evidence/megablast_wasm_np_remediation_20260913/run-20260913-01/C-NA64-native-artifact.json": "a3484057b6ed2a404f5ee4125f26819239214598c72278f40e499bbf09458b6d",
+    "/tmp/losat-remediation-20260913-01/C-NA64-target/native/release/LOSAT": "a1ab28454b880fe913f88329056e852405c3ade8ba85e576be4a5a256b7624db",
+    "/tmp/losat-remediation-20260913-01/C-NA64-target/native/release/.fingerprint/LOSAT-32b7b6b1eb508216/bin-LOSAT.json": "cf646a350be6dad78d5280c23be1b2b9e3277eadf70ae9510c87168f91e2aa72",
+    "/tmp/losat-remediation-20260913-01/integrated-artifacts/losat-threaded-command.wasm": "5b4f42831efa61ca73ead78f7675e53e5384ce713b9fa5ed5d481aeb3c052295",
+    "/tmp/losat-remediation-20260913-01/C-NA64-artifacts/losat-threaded-command.wasm": "5b4f42831efa61ca73ead78f7675e53e5384ce713b9fa5ed5d481aeb3c052295",
+    "/tmp/losat-remediation-20260913-01/integrated-artifacts/losat-threaded-reactor.wasm": "d58a40248c1a3de5d33b5ed1e30cc6ea9ee5926cd37a9c385fcc16e4dc39762f",
+    "/tmp/losat-remediation-20260913-01/C-NA64-artifacts/losat-threaded-reactor.wasm": "d58a40248c1a3de5d33b5ed1e30cc6ea9ee5926cd37a9c385fcc16e4dc39762f",
+    "/tmp/losat-remediation-20260913-01/integrated-artifacts/run_losat_wasi_threads.js": "faf39e6c83178530c3b21d49ee0929d67e6b9258061cc50c057876617c759c4b",
+    "/tmp/losat-remediation-20260913-01/C-NA64-artifacts/run_losat_wasi_threads.js": "faf39e6c83178530c3b21d49ee0929d67e6b9258061cc50c057876617c759c4b",
+    "/tmp/losat-remediation-20260913-01/integrated-artifacts/wasi_artifact.js": "37ca747261b090bf16720b2109a4511a57d90f4b67cf94c158b9bee9fc1d3f73",
+    "/tmp/losat-remediation-20260913-01/C-NA64-artifacts/wasi_artifact.js": "37ca747261b090bf16720b2109a4511a57d90f4b67cf94c158b9bee9fc1d3f73",
+    "/tmp/losat-remediation-20260913-01/integrated-artifacts/wasi_shared_memory.js": "a11fad8fdd346b3a93edd35f783552d97cd5c5ccb08c491e732a6b8dae552e50",
+    "/tmp/losat-remediation-20260913-01/C-NA64-artifacts/wasi_shared_memory.js": "a11fad8fdd346b3a93edd35f783552d97cd5c5ccb08c491e732a6b8dae552e50",
+    "/tmp/losat-remediation-20260913-01/integrated-artifacts/wasi_thread_host.js": "69480b0d7128ea0f264700dad31f25253e09963867ac28b6b3997704c637a5c3",
+    "/tmp/losat-remediation-20260913-01/C-NA64-artifacts/wasi_thread_host.js": "69480b0d7128ea0f264700dad31f25253e09963867ac28b6b3997704c637a5c3",
+    "/tmp/losat-remediation-20260913-01/C-NA64-target/threaded-command/wasm32-wasip1-threads/release/.fingerprint/LOSAT-6d50383942db85c2/bin-LOSAT.json": "9d69713e429261685cb7d9fe1838e0e4e9e91064e2dcf0a99973608115cd5384",
+    "/tmp/losat-remediation-20260913-01/C-NA64-target/threaded-reactor/wasm32-wasip1-threads/release/.fingerprint/LOSAT-788aad8cea4e1864/lib-LOSAT.json": "9fa6b24a4760556c3f2c3699f6354e8a0dccc659b2cf20635fc005da508c0833",
+    "/tmp/losat-remediation-20260913-01/integrated-artifacts/artifacts.json": "248283ddd3b2e68af478b3457344abf67162d84e48cef65f453d69a4249760c1",
+    "/tmp/losat-remediation-20260913-01/integrated-artifacts/runtime-files.json": "670c8bced32f0fcb125cb10dbf630c2790805d146faeec9587de5beca2ff377a",
+    "/tmp/losat-remediation-20260913-01/C-NA64-artifacts/artifacts.json": "6c06d6c354071961a3b2d6695b5fd6ecd9719a04fba60e22cb27b341cdf2c4b7",
+    "/tmp/losat-remediation-20260913-01/C-NA64-artifacts/runtime-files.json": "670c8bced32f0fcb125cb10dbf630c2790805d146faeec9587de5beca2ff377a",
+    "/tmp/losat-remediation-20260913-01/C-NA64-fmt-check.log": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "/tmp/losat-remediation-20260913-01/C-NA64-rust-tests.log": "0bf4718b6699512aa52ea5b88796273fb73ccd5896a3f98ee9c78083c70f73f2",
+    "/tmp/losat-remediation-20260913-01/C-NA64-clippy.log": "6c517f052694a4161d80b4d5cfa0a7a5180b3e0b256627dc6f0e1b4c78873e8f",
+    "/tmp/losat-remediation-20260913-01/C-NA64-threaded-build.log": "68b3382aed9681347d0e67f5e136abb9dcbcee3272520d67517b6c04ab9f0ec4",
+    "/mnt/c/Users/genom/GitHub/LOSAT/docs/evidence/megablast_wasm_np_remediation_20260913/run-20260913-01/C-NA64-build-validation-launch.json": "bfb44e732223936ee285d9a0c882e06e32be1cc1c52e6df5469a6ecbb14b8492",
+    "/mnt/c/Users/genom/GitHub/LOSAT/docs/evidence/megablast_wasm_np_remediation_20260913/run-20260913-01/C-NA64-build-validation-steps.json": "38927eff099615bc78931b111251309fc8224d1ee5ba1efe6caddc13aaae4b4b",
+    "/mnt/c/Users/genom/GitHub/LOSAT/docs/evidence/megablast_wasm_np_remediation_20260913/run-20260913-01/C-NA64-wasm-equivalence.json": "6472d21e0423b59b4028b1c17e1f3aa72085e4ad8bd6a09ee9d62ec85962a618",
+    "/mnt/c/Users/genom/GitHub/LOSAT/docs/evidence/megablast_wasm_np_remediation_20260913/run-20260913-01/integrated-np-reuse/reuse-engineering-checks.json": "859615a2ffa88a40ec820ff28963d8ad756bc8a4a37424d3cf63aa69582a4b5f",
+    "/mnt/c/Users/genom/GitHub/LOSAT/docs/evidence/megablast_wasm_np_remediation_20260913/run-20260913-01/integrated-np-reactor-highwater/run-status.json": "39d55db7cee0cc768de205c8637bcef3b7942f224d0270e01945976c5cf9cf56",
+    "/mnt/c/Users/genom/GitHub/LOSAT/docs/evidence/megablast_wasm_np_remediation_20260913/run-20260913-01/integrated-np-reactor-highwater/memory-observations.json": "8c3b6cc2008918484272fe26bdfd3ee052f17257c778025274dfcd88eaaf5763",
+    "/mnt/c/Users/genom/GitHub/LOSAT/docs/evidence/megablast_wasm_np_remediation_20260913/run-20260913-01/integrated-np-reactor-highwater/metadata.json": "4a22da755ef0be3eec1079acfcc9242011008ee0b885b8a26610204e09084e56",
+    "/mnt/c/Users/genom/GitHub/LOSAT/docs/evidence/megablast_wasm_np_remediation_20260913/run-20260913-01/integrated-np-reactor-highwater/samples.json": "65d580e23c47c34ef702128b609bdba5f301def81d52f60afbe3ac9a22da7fd4",
+    "/mnt/c/Users/genom/GitHub/LOSAT/docs/evidence/megablast_wasm_np_remediation_20260913/run-20260913-01/B1-identity.json": "15a4cfbe5e65fb0e2e5e6b00f8072ec4dc7287c567ef465908b5daf4295b81e8",
+    "/mnt/c/Users/genom/GitHub/LOSAT/docs/evidence/megablast_wasm_np_remediation_20260913/run-20260913-01/C-NA64-source.json": "08521898d5db4a4bc6b3fdff219b14e27a50f2c0d732f7bdebb1a1012316b801",
+    "/mnt/c/Users/genom/GitHub/LOSAT/docs/evidence/megablast_wasm_np_remediation_20260913/run-20260913-01/integrated-source.json": "afc9f4748d4620126551e92ba52a0d9e8461882caf09bcc052ec8d47e44c0b83",
+    "/mnt/c/Users/genom/GitHub/LOSAT/docs/evidence/megablast_wasm_np_remediation_20260913/run-20260913-01/C-NA64-build-validation-planned.json": "256efca08105e210e157716259933cb2e0b49ce480e330063632573baa97dcf4",
+    "/mnt/c/Users/genom/GitHub/LOSAT/docs/evidence/megablast_wasm_np_remediation_20260913/run-20260913-01/integrated-threaded-default/metadata.json": "06a2298b7f213319b75bbfddd3f8eaaa4e64a2ed85c956ffad26a876b71d827e",
+    "/tmp/losat-remediation-20260913-01/B1-source/LOSAT/Cargo.toml": "3033944d936581b1d559ad4510598243d8cbd99d0ef186c34c64098840040cad",
+    "/tmp/losat-remediation-20260913-01/B1-source/LOSAT/Cargo.lock": "7a81afba8adc0fee7efe2868103dd468fe274c7e28629df4dd360725336b26e8",
+    "/tmp/losat-remediation-20260913-01/B1-source/LOSAT/build.rs": "7d70a92bfe68a76662ed485e0d98ea82e4294a84c959714fb62ad331ef808830",
+    "/tmp/losat-remediation-20260913-01/B1-source/LOSAT/.cargo/config.toml": "66edf0dc4336dc08a79ba708b8eedb4fca96d050c68b1a909101b36d50417188",
+    "/tmp/losat-remediation-20260913-01/B1-artifacts/wasi_shared_memory.js": "a11fad8fdd346b3a93edd35f783552d97cd5c5ccb08c491e732a6b8dae552e50",
+    "/tmp/losat-remediation-20260913-01/B1-artifacts/losat-threaded-reactor.json": "fee40f8cafc43415ec0af5f8bf110d61b563ddb05316b59f90e56a3f72b5b6d3",
+    "/tmp/losat-remediation-20260913-01/B1-artifacts/artifacts.json": "463b33593a67417abe750738a9b75ef55588eed78abb06916fa80073846b57cc",
+    "/tmp/losat-remediation-20260913-01/B1-artifacts/losat-serial-command.wasm": "cfc501d97ad1ddc2eaae4b229d23a4d81ef9909750a48924f43c7de3037dc7d9",
+    "/tmp/losat-remediation-20260913-01/B1-artifacts/wasi_artifact.js": "37ca747261b090bf16720b2109a4511a57d90f4b67cf94c158b9bee9fc1d3f73",
+    "/tmp/losat-remediation-20260913-01/B1-artifacts/runtime-files.json": "1fb74b2c205b77722112a449678ad7065ee16a319b91303f065d0f9e2cc05460",
+    "/tmp/losat-remediation-20260913-01/B1-artifacts/run_losat_wasi_threads.js": "faf39e6c83178530c3b21d49ee0929d67e6b9258061cc50c057876617c759c4b",
+    "/tmp/losat-remediation-20260913-01/B1-artifacts/losat-threaded-command.wasm": "20d604bb080eaa33f939086cecf68cc1a8349906dcec3548118b0bb6665a4d34",
+    "/tmp/losat-remediation-20260913-01/B1-artifacts/wasi_thread_host.js": "69480b0d7128ea0f264700dad31f25253e09963867ac28b6b3997704c637a5c3",
+    "/tmp/losat-remediation-20260913-01/B1-artifacts/losat-threaded-command.json": "acc1bfc73ce61020e88bf20bebee7417e5250b993e908c2258d70321933d5acb",
+    "/tmp/losat-remediation-20260913-01/B1-artifacts/losat-serial-command.json": "0f546d2577b0655cc592b883417a6231556543b35bd9cfb5244064e073911a6f",
+    "/tmp/losat-remediation-20260913-01/B1-artifacts/losat-threaded-reactor.wasm": "803960a147118038ed46b0ced0a492457fa38176f17f54cb551db73dbefcb4e6",
+    "/tmp/losat-remediation-20260913-01/B1-artifacts/losat-serial-reactor.wasm": "376fd8468fdab0ad64a08769f041e626d95dc44f908720adfe70cf2574bba297",
+    "/tmp/losat-remediation-20260913-01/B1-artifacts/losat-serial-reactor.json": "75c558722be3efeb71c97786d88ed3b239e3d9d1475eaff72f732c7377b5dae3",
+    "/tmp/losat-remediation-20260913-01/B1-artifacts/run_losat_wasi.js": "21311c960920364e3072605a8d5626478b99c010b30e07cab98461f4b5e2c729",
+    "/tmp/losat-remediation-20260913-01/integrated-artifacts/losat-threaded-reactor.json": "116a3a75006954632662ccf504fa0356531d8cd572bc12e9410e682e9c749594",
+    "/tmp/losat-remediation-20260913-01/integrated-artifacts/losat-threaded-command.json": "d7b979e5e596fd2ba09d3c7a8c52943914328685932ce59337a3a33d253d0978",
+    "/mnt/c/Users/genom/GitHub/LOSAT/docs/evidence/megablast_wasm_np_remediation_20260913/run-20260913-01/C-NA64-source-metadata-correction.json": "05bc1dc130eb84f3a5bca8a9c5ad332248df5b82bd08211bd203b914b9180b3e",
+    "/mnt/c/Users/genom/GitHub/LOSAT/docs/evidence/megablast_wasm_np_remediation_20260913/run-20260913-01/runtime-memory-scope-decision.json": "7b74b56ee4186242e33ea7bfae6aaf26bde3ffbbcce0454ea2fc2cdf283496b2",
+    "/tmp/losat-remediation-20260913-01/finish_na64_wasm_controls.py": "2a501d2d9b28bdcf38abbe258e33cfbc46eaa161210acd775215363d91a95456",
+    "/tmp/losat-remediation-20260913-01/na64_daily_routes.py": "356a4e9df76fc83bc14f15cac1f015d05f48e400f1ef7a0f794ce488effab4ef",
+    "/tmp/losat-remediation-20260913-01/evaluate_na64_daily_routes.py": "85c5b37315f4412b54ff09eac69b5da7f7479ce13602dfaa4038b423c1083a5c",
+    "/tmp/losat-remediation-20260913-01/na64_gencode4.py": "0a57d65246a95000b993ead3b6f600012fea4388f44db02d34b2360141d0567e",
+    "/tmp/losat-remediation-20260913-01/prepare_na64_capacity_diagnostic.py": "c25d185f66fe3fa210c520e8ff911f2386afbf9cabfbd6a17ab4a1424413241c",
+    "/tmp/losat-remediation-20260913-01/na64_capacity_diagnostics.py": "3ab00dc94d1accbb4967b8483d8fd6e9653da46615fee1df6bd83cc880a0b3f8",
+    "/tmp/losat-remediation-20260913-01/summarize_na64_capacity.py": "1b473561f40e3a159651e21d634622605545f425430f10298cf930e31e7d0620",
+    "/tmp/losat-remediation-20260913-01/na64_evidence_guard.py": "a4d88007b9a82c7533696e58a81358a38bb972946e93ddd743ea29b78c517dcd",
+    "/tmp/losat-remediation-20260913-01/run_na64_remaining.py": "d14fcee49be1c4e0fc32b85ec2cc08dddaacc4779ee6fd4713cee58058ddfa21",
+    "/tmp/losat-remediation-20260913-01/evaluate_benchmark.py": "647fc95f665107edba8760ecb4c028e787e371cb4e8e0332808dd25b0eeac422",
+    "/tmp/losat-remediation-20260913-01/evaluate_reuse.py": "dccc294e3b57a8697950ef9293da7ae8466e7c3f606c20d33e94423e9f01077d",
+    "/tmp/losat-remediation-20260913-01/validate_na64_builds.py": "0a7216b95fbec592eed7cc5e9aa965839a1ea90ba8eb9eda630793259e998198",
+    "/tmp/losat-remediation-20260913-01/evaluate_reuse_runtime_scope.py": "54a5cdd77370147242817b9cbccdd0ce3f6961bd56d20d43ac6a69d555454d58",
+    "/mnt/c/Users/genom/GitHub/LOSAT/LOSAT/tests/check_tblastx_thread_thresholds.py": "8808bc7885fc22f69567c684a729eb3e746f603d3816cb59ebfc7a273c8b219d",
+    "/mnt/c/Users/genom/GitHub/LOSAT/docs/evidence/megablast_wasm_np_remediation_20260913/run-20260913-01/C-NA64-remaining-guarded-planned.json": "131dbe99b2847b7a43f1b538b6cfc97077615a0bf956976a2b0e0b7c0dc595da"
+  },
+  "original_memory_failures_unchanged": true
+}

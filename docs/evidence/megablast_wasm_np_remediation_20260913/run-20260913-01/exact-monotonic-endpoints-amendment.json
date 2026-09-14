@@ -1,0 +1,11 @@
+{
+  "status": "FOCUSED_TEST_PASS",
+  "reason": "Reuse process non-overlap must use exact measurement endpoints, not watchdog-start approximations. The original time.monotonic call is assigned to monotonic_end and reused for the unchanged elapsed calculation; no clock call, ordering, measurement boundary or timeout behavior is added.",
+  "historical_records": "Unchanged; new endpoint fields are required only by the fresh integrated reuse evaluator.",
+  "files": {
+    "LOSAT/tests/wasm_performance.py": "596f10875001f2aa2a56ed023e7eb15f35a1ee0342ef5a714d53ccfeb2ae66ce",
+    "LOSAT/tests/test_wasm_performance.py": "bb18e186011a3d45a7729b3ca9959830e4c0093e4b1ae3cb47e7b26fc64a9278"
+  },
+  "verification": "25 Python evidence tests passed from the workspace with complete integrated snapshot source/hash guards. The existing failed-process test checks exact monotonic endpoint arithmetic.",
+  "log": "/tmp/losat-remediation-20260913-01/integrated-python-evidence-tests.log"
+}

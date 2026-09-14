@@ -1,0 +1,20 @@
+{
+  "status": "REJECTED_FOR_ADOPTION",
+  "reason": "AP027280 self native n1 fails fixed five-pair time nonregression: baseline29.983601831s, candidate32.398969841s,8.05563% slower; disjoint ranges",
+  "passed_native_cells": [
+    "Mje n1",
+    "Mela n1"
+  ],
+  "failed_native_cells": [
+    "APself n1"
+  ],
+  "unexecuted": [
+    "all native n8",
+    "Wasm build/tests/performance",
+    "capacity",
+    "daily routes",
+    "long code4"
+  ],
+  "source_in_production": false,
+  "original_integrated_source_unchanged": true
+}

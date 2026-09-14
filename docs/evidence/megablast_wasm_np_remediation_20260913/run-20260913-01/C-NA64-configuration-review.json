@@ -1,0 +1,13 @@
+{
+  "root_config_sha256": "8c5150f6a7a11585fe5abbebf3ebeceb98f1e7f695611ca569964a1f543cffdb",
+  "candidate_config_sha256": "c1ec32428d4c3e4362f53863a7fe674fd6a0829f688b8aebc30a64ceea733475",
+  "patch_sha256": "c4657105643e6f5829f21f47eaa937ca101e850a7902c9dfe56b4864d5da07e7",
+  "scope": "One appended target cfg; existing threaded defaults and compatibility aliases retained",
+  "native_target": "x86_64",
+  "wasm_targets_unchanged": [
+    "wasm32-wasip1",
+    "wasm32-wasip1-threads",
+    "wasm32-unknown-unknown"
+  ],
+  "adopted_in_root": false
+}

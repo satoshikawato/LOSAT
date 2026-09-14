@@ -1,0 +1,244 @@
+[
+  {
+    "name": "fmt",
+    "argv": [
+      "cargo",
+      "fmt",
+      "--check"
+    ],
+    "cwd": "/tmp/losat-remediation-20260913-01/integrated-source/LOSAT",
+    "exit_status": 0,
+    "elapsed_seconds": 0.6144766279903706,
+    "log": "/tmp/losat-remediation-20260913-01/integrated-fmt.log"
+  },
+  {
+    "name": "reuse-evaluator-tests",
+    "argv": [
+      "python",
+      "/tmp/losat-remediation-20260913-01/test_final_reuse_evaluator.py"
+    ],
+    "cwd": "/mnt/c/Users/genom/GitHub/LOSAT",
+    "exit_status": 0,
+    "elapsed_seconds": 0.5387063609960023,
+    "log": "/tmp/losat-remediation-20260913-01/integrated-reuse-evaluator-tests.log"
+  },
+  {
+    "name": "python-evidence-tests",
+    "argv": [
+      "python",
+      "-m",
+      "unittest",
+      "test_wasm_performance",
+      "test_benchmark_wasm_threading"
+    ],
+    "cwd": "/mnt/c/Users/genom/GitHub/LOSAT/LOSAT/tests",
+    "exit_status": 0,
+    "elapsed_seconds": 3.88137989200186,
+    "log": "/tmp/losat-remediation-20260913-01/integrated-python-evidence-tests.log"
+  },
+  {
+    "name": "rust-tests",
+    "argv": [
+      "cargo",
+      "test",
+      "--all-features",
+      "--locked",
+      "--offline",
+      "--target-dir",
+      "/tmp/losat-remediation-20260913-01/integrated-target/native"
+    ],
+    "cwd": "/tmp/losat-remediation-20260913-01/integrated-source/LOSAT",
+    "exit_status": 0,
+    "elapsed_seconds": 203.3288322710141,
+    "log": "/tmp/losat-remediation-20260913-01/integrated-rust-tests.log"
+  },
+  {
+    "name": "clippy",
+    "argv": [
+      "cargo",
+      "clippy",
+      "--all-features",
+      "--all-targets",
+      "--locked",
+      "--offline",
+      "--target-dir",
+      "/tmp/losat-remediation-20260913-01/integrated-target/native",
+      "--",
+      "-D",
+      "warnings"
+    ],
+    "cwd": "/tmp/losat-remediation-20260913-01/integrated-source/LOSAT",
+    "exit_status": 0,
+    "elapsed_seconds": 11.89079521401436,
+    "log": "/tmp/losat-remediation-20260913-01/integrated-clippy.log"
+  },
+  {
+    "name": "native-build",
+    "argv": [
+      "cargo",
+      "build",
+      "--release",
+      "--bin",
+      "LOSAT",
+      "--locked",
+      "--offline",
+      "--target-dir",
+      "/tmp/losat-remediation-20260913-01/integrated-target/native"
+    ],
+    "cwd": "/tmp/losat-remediation-20260913-01/integrated-source/LOSAT",
+    "exit_status": 0,
+    "elapsed_seconds": 52.45390788500663,
+    "log": "/tmp/losat-remediation-20260913-01/integrated-native-build.log"
+  },
+  {
+    "name": "native-serial-build",
+    "argv": [
+      "cargo",
+      "build",
+      "--release",
+      "--locked",
+      "--offline",
+      "--bin",
+      "LOSAT",
+      "--no-default-features",
+      "--target-dir",
+      "/tmp/losat-remediation-20260913-01/integrated-target/native-serial"
+    ],
+    "cwd": "/tmp/losat-remediation-20260913-01/integrated-source/LOSAT",
+    "exit_status": 0,
+    "elapsed_seconds": 48.8627768419974,
+    "log": "/tmp/losat-remediation-20260913-01/integrated-native-serial-build.log"
+  },
+  {
+    "name": "default-artifact-build",
+    "argv": [
+      "python",
+      "LOSAT/tests/build_wasi_artifacts.py",
+      "--target-dir",
+      "/tmp/losat-remediation-20260913-01/integrated-target",
+      "--output-dir",
+      "/tmp/losat-remediation-20260913-01/integrated-artifacts",
+      "--node",
+      "/tmp/losat-node-check/node-v24.21.0-linux-x64/bin/node"
+    ],
+    "cwd": "/tmp/losat-remediation-20260913-01/integrated-source",
+    "exit_status": 0,
+    "elapsed_seconds": 83.58342505100882,
+    "log": "/tmp/losat-remediation-20260913-01/integrated-default-artifact-build.log"
+  },
+  {
+    "name": "compat-artifact-build",
+    "argv": [
+      "python",
+      "LOSAT/tests/build_wasi_artifacts.py",
+      "--target-dir",
+      "/tmp/losat-remediation-20260913-01/integrated-target",
+      "--output-dir",
+      "/tmp/losat-remediation-20260913-01/integrated-compat-artifacts",
+      "--node",
+      "/tmp/losat-node-check/node-v24.21.0-linux-x64/bin/node",
+      "--include-serial",
+      "--reverse-order"
+    ],
+    "cwd": "/tmp/losat-remediation-20260913-01/integrated-source",
+    "exit_status": 0,
+    "elapsed_seconds": 78.5992134900007,
+    "log": "/tmp/losat-remediation-20260913-01/integrated-compat-artifact-build.log"
+  },
+  {
+    "name": "threaded-default-contracts",
+    "argv": [
+      "python",
+      "LOSAT/tests/check_wasm_threading.py",
+      "--native",
+      "/tmp/losat-remediation-20260913-01/integrated-target/native/release/LOSAT",
+      "--threaded",
+      "/tmp/losat-remediation-20260913-01/integrated-artifacts/losat-threaded-command.wasm",
+      "--reactor",
+      "/tmp/losat-remediation-20260913-01/integrated-artifacts/losat-threaded-reactor.wasm",
+      "--node",
+      "/tmp/losat-node-check/node-v24.21.0-linux-x64/bin/node",
+      "--oracle-dir",
+      "/home/kawato/micromamba/bin",
+      "--output-dir",
+      "/mnt/c/Users/genom/GitHub/LOSAT/docs/evidence/megablast_wasm_np_remediation_20260913/run-20260913-01/integrated-threaded-default"
+    ],
+    "cwd": "/mnt/c/Users/genom/GitHub/LOSAT",
+    "exit_status": 0,
+    "elapsed_seconds": 62.064405982004246,
+    "log": "/tmp/losat-remediation-20260913-01/integrated-threaded-default-contracts.log"
+  },
+  {
+    "name": "compat-contracts",
+    "argv": [
+      "python",
+      "LOSAT/tests/check_wasm_threading.py",
+      "--native",
+      "/tmp/losat-remediation-20260913-01/integrated-target/native/release/LOSAT",
+      "--threaded",
+      "/tmp/losat-remediation-20260913-01/integrated-artifacts/losat-threaded-command.wasm",
+      "--reactor",
+      "/tmp/losat-remediation-20260913-01/integrated-artifacts/losat-threaded-reactor.wasm",
+      "--node",
+      "/tmp/losat-node-check/node-v24.21.0-linux-x64/bin/node",
+      "--oracle-dir",
+      "/home/kawato/micromamba/bin",
+      "--native-serial",
+      "/tmp/losat-remediation-20260913-01/integrated-target/native-serial/release/LOSAT",
+      "--serial",
+      "/tmp/losat-remediation-20260913-01/integrated-compat-artifacts/losat-serial-command.wasm",
+      "--serial-reactor",
+      "/tmp/losat-remediation-20260913-01/integrated-compat-artifacts/losat-serial-reactor.wasm",
+      "--output-dir",
+      "/mnt/c/Users/genom/GitHub/LOSAT/docs/evidence/megablast_wasm_np_remediation_20260913/run-20260913-01/integrated-compat"
+    ],
+    "cwd": "/mnt/c/Users/genom/GitHub/LOSAT",
+    "exit_status": 0,
+    "elapsed_seconds": 69.26580467598978,
+    "log": "/tmp/losat-remediation-20260913-01/integrated-compat-contracts.log"
+  },
+  {
+    "name": "tblastx-thresholds-default",
+    "argv": [
+      "python",
+      "LOSAT/tests/check_tblastx_thread_thresholds.py",
+      "--native",
+      "/tmp/losat-remediation-20260913-01/integrated-target/native/release/LOSAT",
+      "--threaded",
+      "/tmp/losat-remediation-20260913-01/integrated-artifacts/losat-threaded-command.wasm",
+      "--oracle",
+      "/home/kawato/micromamba/bin/tblastx",
+      "--node",
+      "/tmp/losat-node-check/node-v24.21.0-linux-x64/bin/node",
+      "--output-dir",
+      "/mnt/c/Users/genom/GitHub/LOSAT/docs/evidence/megablast_wasm_np_remediation_20260913/run-20260913-01/integrated-tblastx-thresholds-default"
+    ],
+    "cwd": "/mnt/c/Users/genom/GitHub/LOSAT",
+    "exit_status": 0,
+    "elapsed_seconds": 88.90329186699819,
+    "log": "/tmp/losat-remediation-20260913-01/integrated-tblastx-thresholds-default.log"
+  },
+  {
+    "name": "tblastx-thresholds",
+    "argv": [
+      "python",
+      "LOSAT/tests/check_tblastx_thread_thresholds.py",
+      "--native",
+      "/tmp/losat-remediation-20260913-01/integrated-target/native/release/LOSAT",
+      "--threaded",
+      "/tmp/losat-remediation-20260913-01/integrated-artifacts/losat-threaded-command.wasm",
+      "--serial",
+      "/tmp/losat-remediation-20260913-01/integrated-compat-artifacts/losat-serial-command.wasm",
+      "--oracle",
+      "/home/kawato/micromamba/bin/tblastx",
+      "--node",
+      "/tmp/losat-node-check/node-v24.21.0-linux-x64/bin/node",
+      "--output-dir",
+      "/mnt/c/Users/genom/GitHub/LOSAT/docs/evidence/megablast_wasm_np_remediation_20260913/run-20260913-01/integrated-tblastx-thresholds"
+    ],
+    "cwd": "/mnt/c/Users/genom/GitHub/LOSAT",
+    "exit_status": 0,
+    "elapsed_seconds": 123.58192431600764,
+    "log": "/tmp/losat-remediation-20260913-01/integrated-tblastx-thresholds.log"
+  }
+]

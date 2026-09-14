@@ -1,0 +1,6 @@
+{
+  "path": "/tmp/losat-remediation-20260913-01/C-X1-source/LOSAT/src/algorithm/tblastx/sum_stats_linking/linking.rs",
+  "sha256": "9616e08a7c5be3e0f9dfde633195b748653ced29a73cc544d275376e80e1e81b",
+  "baseline_sha256": "6547964ed758904f6b35147e3033509579d2a43871f125d95a4f03740510d094",
+  "focused_tests": "12 passed,0 failed,0 ignored; release linking tests"
+}

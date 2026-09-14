@@ -1,0 +1,431 @@
+--- initial/LOSAT/src/algorithm/blastn/filtering/purge_endpoints.rs
++++ current/LOSAT/src/algorithm/blastn/filtering/purge_endpoints.rs
+@@ -1016,6 +1093,169 @@
+         (make_hsp(g_ops, g_stats), make_hsp(s_ops, s_stats))
+     }
+ 
++    // NCBI reference: c++/src/algo/blast/core/blast_hits.c:2480-2535
++    // if (!purge && hsp->query.end > hsp_array[i]->query.end)
++    //     s_CutOffGapEditScript(hsp, ..., TRUE);
++    // for (k=i+j; k<hsp_count; k++) hsp_array[k] = hsp_array[k+1];
++    // hsp_array[hsp_count] = hsp;
++    // ... repeat for common ends with cut_begin=FALSE; return hsp_count;
++    // Repeated removals in both passes must keep the active order and the
++    // reverse removal order of live trimmed tail entries around NULL slots.
++    #[test]
++    fn common_endpoint_shifts_preserve_trimmed_tail_and_active_boundary() {
++        let make = |start: usize, end: usize, score: i32| {
++            let (_, mut h) = opaque_equal_endpoint_hsps();
++            h.query_frame = 1;
++            h.query_length = 128;
++            h.q_idx = 0;
++            h.s_idx = 0;
++            h.raw_score = score;
++            h.internal_q_offset_0 = start;
++            h.internal_s_offset_0 = start;
++            h.internal_q_end_0 = end;
++            h.internal_s_end_0 = end;
++            h.q_start = start + 1;
++            h.s_start = start + 1;
++            h.q_end = end;
++            h.s_end = end;
++            h.gap_info = Some(vec![GapEditOp::Sub((end - start) as u32)]);
++            h
++        };
++        let input = vec![
++            make(40, 50, 80),
++            make(0, 20, 90),
++            make(60, 70, 50),
++            make(0, 8, 80),
++            make(30, 50, 100),
++            make(0, 10, 100),
++            make(20, 50, 90),
++        ];
++        for purge in [false, true] {
++            let (result, active) = purge_hsps_for_subject_ex(input.clone(), purge);
++            assert_eq!(active, 3);
++            let spans: Vec<_> = result
++                .iter()
++                .map(|h| {
++                    assert_eq!(h.internal_q_offset_0, h.internal_s_offset_0);
++                    assert_eq!(h.internal_q_end_0, h.internal_s_end_0);
++                    assert_eq!(
++                        h.gap_info,
++                        Some(vec![GapEditOp::Sub(
++                            (h.internal_q_end_0 - h.internal_q_offset_0) as u32
++                        )])
++                    );
++                    (h.internal_q_offset_0, h.internal_q_end_0)
++                })
++                .collect();
++            let mut expected = vec![(0, 10), (30, 50), (60, 70)];
++            if !purge {
++                expected.extend([(20, 30), (10, 20)]);
++            }
++            assert_eq!(spans, expected);
++        }
++    }
++
++    // NCBI reference: c++/src/algo/blast/core/blast_hits.c:2478,2504,2268-2387
++    // qsort(hsp_array, hsp_count, sizeof(BlastHSP*), s_QueryOffsetCompareHSPs);
++    // if (!h1 && !h2) return 0; else if (!h1) return 1; else if (!h2) return -1;
++    #[test]
++    fn handle_sort_keeps_payload_addresses_equal_order_and_tail() {
++        let (a, b) = opaque_equal_endpoint_hsps();
++        let storage = vec![Some(a.clone()), Some(b.clone()), Some(a)];
++        let before: Vec<_> = storage
++            .iter()
++            .map(|h| {
++                let h = h.as_ref().unwrap();
++                (h as *const BlastnHsp, format!("{h:?}"))
++            })
++            .collect();
++        let mut handles = vec![
++            NonZeroUsize::new(2),
++            None,
++            NonZeroUsize::new(1),
++            NonZeroUsize::new(3),
++        ];
++        for compare in [
++            compare_query_offset_hsps_for_common_endpoint as fn(&BlastnHsp, &BlastnHsp) -> Ordering,
++            compare_query_end_hsps_for_common_endpoint,
++        ] {
++            qsort_hsp_array_prefix_by(&storage, &mut handles, 3, compare);
++            assert_eq!(
++                handles,
++                vec![
++                    NonZeroUsize::new(2),
++                    NonZeroUsize::new(1),
++                    None,
++                    NonZeroUsize::new(3)
++                ]
++            );
++            for (slot, (address, payload)) in storage.iter().zip(&before) {
++                let h = slot.as_ref().unwrap();
++                assert_eq!(h as *const BlastnHsp, *address);
++                assert_eq!(format!("{h:?}"), *payload);
++            }
++        }
++        assert_eq!(
++            std::mem::size_of::<HspHandle>(),
++            std::mem::size_of::<usize>()
++        );
++    }
++
++    // NCBI reference: c++/src/algo/blast/core/blast_hits.c:2490-2499,2516-2525
++    // s_CutOffGapEditScript(hsp, ..., TRUE); ... s_CutOffGapEditScript(hsp, ..., FALSE);
++    // for (k=i+j; k<hsp_count; k++) hsp_array[k] = hsp_array[k+1];
++    // Also complements unit_tests/api/blasthits_unit_test.cpp:1163-1204.
++    #[test]
++    fn final_active_slot_can_be_trimmed_or_deleted_in_either_pass() {
++        let make = |start: usize, end: usize, score: i32| {
++            let (_, mut h) = opaque_equal_endpoint_hsps();
++            h.query_frame = 1;
++            h.query_length = 128;
++            h.raw_score = score;
++            h.internal_q_offset_0 = start;
++            h.internal_s_offset_0 = start;
++            h.internal_q_end_0 = end;
++            h.internal_s_end_0 = end;
++            h.q_start = start + 1;
++            h.s_start = start + 1;
++            h.q_end = end;
++            h.s_end = end;
++            h.gap_info = Some(vec![GapEditOp::Sub((end - start) as u32)]);
++            h
++        };
++        for (keeper, removed, trimmed) in [
++            (make(0, 10, 100), make(0, 20, 90), Some((10, 20))),
++            (make(0, 10, 100), make(0, 8, 90), None),
++            (make(10, 20, 100), make(0, 20, 90), Some((0, 10))),
++            (make(10, 20, 100), make(15, 20, 90), None),
++        ] {
++            for purge in [false, true] {
++                let (result, active) =
++                    purge_hsps_for_subject_ex(vec![removed.clone(), keeper.clone()], purge);
++                assert_eq!(active, 1);
++                assert_eq!(format!("{:?}", result[0]), format!("{keeper:?}"));
++                let expected_tail = if purge { None } else { trimmed };
++                assert_eq!(result.len(), 1 + usize::from(expected_tail.is_some()));
++                if let Some((start, end)) = expected_tail {
++                    let tail = &result[1];
++                    assert_eq!(
++                        (
++                            tail.internal_q_offset_0,
++                            tail.internal_q_end_0,
++                            tail.internal_s_offset_0,
++                            tail.internal_s_end_0
++                        ),
++                        (start, end, start, end)
++                    );
++                    assert_eq!(
++                        tail.gap_info,
++                        Some(vec![GapEditOp::Sub((end - start) as u32)])
++                    );
++                }
++            }
++        }
++    }
++
+     // Test-only post-sort injection seam for the NCBI first-survivor loop.
+     // It intentionally omits qsort so tests can supply either permitted order
+     // without depending on the host libc's ordering of comparator-equal items.
+--- initial/LOSAT/src/algorithm/blastn/filtering/purge_endpoints.rs
++++ current/LOSAT/src/algorithm/blastn/filtering/purge_endpoints.rs
+@@ -1034,22 +1274,29 @@
+     // }
+     // ```
+     fn purge_after_injected_common_start_sort(post_sort_order: Vec<BlastnHsp>) -> Vec<BlastnHsp> {
+-        let mut hsp_array: Vec<Option<BlastnHsp>> = post_sort_order.into_iter().map(Some).collect();
++        let mut hsp_storage: Vec<_> = post_sort_order.into_iter().map(Some).collect();
++        let mut hsp_array: Vec<HspHandle> = (0..hsp_storage.len())
++            .map(|index| NonZeroUsize::new(index + 1))
++            .collect();
+         let mut hsp_count = hsp_array.len();
+         let mut i = 0usize;
+         while i < hsp_count {
+             let j = 1usize;
+-            while i + j < hsp_count && same_common_start(&hsp_array, i, i + j) {
++            while i + j < hsp_count && same_common_start(&hsp_storage, &hsp_array, i, i + j) {
+                 hsp_count -= 1;
+-                let _removed = hsp_array[i + j].take();
+-                for k in (i + j)..hsp_count {
+-                    hsp_array[k] = hsp_array[k + 1].take();
+-                }
++                let removed = hsp_array[i + j].take().unwrap();
++                drop(hsp_storage[removed.get() - 1].take().unwrap());
++                hsp_array.copy_within(i + j + 1..hsp_count + 1, i + j);
+                 hsp_array[hsp_count] = None;
+             }
+             i += j;
+         }
+-        hsp_array.into_iter().take(hsp_count).flatten().collect()
++        hsp_array
++            .into_iter()
++            .take(hsp_count)
++            .flatten()
++            .map(|index| hsp_storage[index.get() - 1].take().unwrap())
++            .collect()
+     }
+ 
+     // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_hits.c:2268-2387
+--- initial/LOSAT/src/algorithm/blastp/gapalign.rs
++++ current/LOSAT/src/algorithm/blastp/gapalign.rs
+@@ -3951,4 +3974,50 @@
+         }
+         assert!(saw_offset && saw_gap && saw_fence);
+     }
+-}
++    // NCBI reference: c++/src/algo/blast/core/blast_gapalign.c:563-575,634-639
++    // for (b_index = first_b_index; b_index < b_size; b_index++) {
++    //     if (matrix_index == FENCE_SENTRY) { ... break; }
++    //     ... edit_script_row[b_index] = script;
++    // }
++    // The fence cell is never written. Only the preceding initialized bytes
++    // may become visible when leaving the first main-band row.
++    #[test]
++    fn test_traceback_fence_exposes_only_initialized_prefix() {
++        for (reverse, capacity, gap_extend) in
++            [(false, 48, 1), (true, 48, 1), (false, 8, 0), (true, 8, 0)]
++        {
++            for fence_b_index in [0usize, 1, 7] {
++                let query = [ncbistdaa::A; 9];
++                let mut subject = query;
++                let fence_index = if reverse {
++                    7 - fence_b_index
++                } else {
++                    fence_b_index + 1
++                };
++                subject[fence_index] = FENCE_SENTRY;
++                let mut scratch = GapAlignScratch::new();
++                scratch.trace_rows = vec![vec![u8::MAX; capacity]; 2];
++                scratch.trace_offsets = vec![0; 2];
++                let mut fence = false;
++                let result = align_ex_protein(
++                    &query,
++                    &subject,
++                    8,
++                    8,
++                    BlastpScoreMatrix::standard(ScoringMatrix::Blosum62),
++                    11,
++                    gap_extend,
++                    100,
++                    reverse,
++                    &mut scratch,
++                    &mut fence,
++                );
++                assert!(fence);
++                assert!(result.3.is_empty());
++                assert_eq!(scratch.trace_rows_used, 2);
++                assert_eq!(scratch.trace_rows[1].len(), fence_b_index);
++                assert!(scratch.trace_rows[1].iter().all(|&byte| byte != u8::MAX));
++            }
++        }
++    }
++}
+--- initial/LOSAT/src/algorithm/tblastx/sum_stats_linking/linking.rs
++++ current/LOSAT/src/algorithm/tblastx/sum_stats_linking/linking.rs
+@@ -2635,7 +2677,7 @@
+         single.link_id = 2;
+         single.start_of_chain = true;
+ 
+-        let replayed = replay_ncbi_output_list(vec![member, head, single]);
++        let replayed = replay_ncbi_output_list(vec![&mut member, &mut head, &mut single]);
+         let replayed_ids: Vec<usize> = replayed.iter().map(|hit| hit.link_id).collect();
+         assert_eq!(replayed_ids, vec![1, 0, 2]);
+     }
+--- initial/LOSAT/src/algorithm/tblastx/sum_stats_linking/linking.rs
++++ current/LOSAT/src/algorithm/tblastx/sum_stats_linking/linking.rs
+@@ -2823,4 +2865,152 @@
+ 
+         println!("✓ Confirmed: LOSAT uses DESCENDING order for subject.offset (matches NCBI)");
+     }
++
++    // NCBI reference: c++/src/algo/blast/core/link_hsps.c:478-486,990-994
++    // link_hsp_array[index]->hsp = hsp_array[index];
++    // qsort(link_hsp_array,total_number_of_hsps,sizeof(LinkHSPStruct*), ...);
++    #[test]
++    fn test_final_link_sorts_preserve_payloads_addresses_and_all_ties() {
++        use crate::algorithm::tblastx::ungapped_hit_sort::sort_ungapped_hits_by_index_replay;
++        let mut hits: Vec<_> = (0..96)
++            .map(|i| {
++                let mut hit = mock_hit(
++                    (i / 3 % 8) * 20,
++                    (i / 3 % 8) * 20 + 15,
++                    (i / 3 % 5) * 30,
++                    (i / 3 % 5) * 30 + 15,
++                    i as i32,
++                );
++                hit.ctx_idx = i / 24;
++                hit.s_frame = if i / 12 % 2 == 0 { -1 } else { 1 };
++                hit.link_id = i;
++                hit.e_value = f64::from_bits(0x3ff0000000000000 + i as u64);
++                hit
++            })
++            .collect();
++        sort_hsps_by_ncbi_link_order(&mut hits, rev_compare_hsps_tbx);
++        let mut expected = hits.clone();
++        let mut addresses = vec![std::ptr::null(); hits.len()];
++        for hit in &hits {
++            addresses[hit.link_id] = hit as *const UngappedHit;
++        }
++        let mut references: Vec<_> = hits.iter_mut().collect();
++        let comparators: [fn(&UngappedHit, &UngappedHit) -> Ordering; 2] =
++            [rev_compare_hsps_transl, fwd_compare_hsps_transl];
++        for compare in comparators {
++            sort_ungapped_hits_by_index_replay(&mut expected, compare);
++            sort_linked_hsp_references(&mut references, compare);
++            for (actual, original) in references.iter().zip(&expected) {
++                assert_eq!(&**actual as *const UngappedHit, addresses[actual.link_id]);
++                assert_eq!(format!("{:?}", **actual), format!("{original:?}"));
++                assert_eq!(actual.e_value.to_bits(), original.e_value.to_bits());
++            }
++        }
++    }
++
++    // NCBI reference: c++/src/algo/blast/core/link_hsps.c:1018-1020,1046-1056,1080-1085
++    // if (H->linked_set == TRUE && H->start_of_chain == FALSE) continue;
++    // H->next = (LinkHSPStruct*) link; H = H->next;
++    // hsp_list->hsp_array[index] = H->hsp;
++    // Preserve the existing Rust replay's singleton and repeated-index cases.
++    #[test]
++    fn test_link_reference_replay_singleton_and_repeated_indices() {
++        assert!(replay_ncbi_output_list(Vec::new()).is_empty());
++        let mut member = mock_hit(1, 10, 1, 10, 10);
++        member.link_id = 7;
++        member.linked_set = true;
++        member.start_of_chain = false;
++        let singleton = replay_ncbi_output_list(vec![&mut member]);
++        assert_eq!(singleton.len(), 1);
++        assert_eq!(format!("{:?}", singleton[0]), format!("{member:?}"));
++
++        let mut head_a = mock_hit(20, 30, 20, 30, 20);
++        head_a.link_id = 1;
++        head_a.start_of_chain = true;
++        head_a.linked_set = true;
++        head_a.chain_next_link_id = Some(7);
++        let mut head_b = head_a.clone();
++        head_b.link_id = 2;
++        let replayed = replay_ncbi_output_list(vec![&mut member, &mut head_a, &mut head_b]);
++        assert_eq!(
++            replayed.iter().map(|h| h.link_id).collect::<Vec<_>>(),
++            [1, 7, 2, 7]
++        );
++        assert_eq!(format!("{:?}", replayed[1]), format!("{:?}", replayed[3]));
++    }
++
++    // NCBI reference: c++/src/algo/blast/core/link_hsps.c:553-558,990-994,1080-1085
++    // hp_start->next = hp_frame_start[frame_index];
++    // qsort(link_hsp_array,total_number_of_hsps,sizeof(LinkHSPStruct*), ...);
++    // hsp_list->hsp_array[index] = H->hsp;
++    #[test]
++    fn test_final_link_replay_parallel_matches_sequential_complete_payloads() {
++        let params = KarlinParams::default();
++        let contexts: Vec<_> = (0..12)
++            .map(|index| QueryContext {
++                q_idx: (index / 6) as u32,
++                f_idx: (index % 6) as u8,
++                frame: [1, 2, 3, -1, -2, -3][index % 6],
++                aa_seq: Vec::new(),
++                aa_seq_nomask: None,
++                aa_len: 2000,
++                orig_len: 6000,
++                frame_base: (index * 2001) as i32,
++                is_valid: true,
++                karlin_params: params,
++            })
++            .collect();
++        let linking = LinkingParams {
++            subject_len_nucl: 6000,
++            gap_decay_rate: 0.5,
++            cutoffs: LinkHspCutoffs {
++                cutoff_small_gap: 20,
++                cutoff_big_gap: 20,
++                gap_prob: 0.5,
++                ignore_small_gaps: false,
++            },
++        };
++        let hits: Vec<_> = (0..96)
++            .map(|index| {
++                let position = (index % 12) * 30;
++                let mut hit = mock_hit(
++                    position,
++                    position + 20,
++                    position,
++                    position + 20,
++                    40 + (index % 4) as i32,
++                );
++                hit.ctx_idx = index / 8;
++                hit.q_idx = (hit.ctx_idx / 6) as u32;
++                hit.q_frame = contexts[hit.ctx_idx].frame;
++                hit.s_frame = if index / 4 % 2 == 0 { -1 } else { 1 };
++                hit.q_orig_len = 6000;
++                hit.s_orig_len = 6000;
++                hit.hsp_list_order = index;
++                hit
++            })
++            .collect();
++        for count in [0, 1, hits.len()] {
++            let run = |allow_parallel| {
++                apply_sum_stats_even_gap_linking_with_parallel(
++                    hits[..count].to_vec(),
++                    &params,
++                    &linking,
++                    &contexts,
++                    &[0; 6],
++                    &[0; 12],
++                    &[4_000_000; 12],
++                    allow_parallel,
++                )
++            };
++            let sequential = run(false);
++            let parallel = run(true);
++            assert_eq!(sequential.len(), count);
++            assert_eq!(parallel.len(), sequential.len());
++            for (a, b) in sequential.iter().zip(&parallel) {
++                assert_eq!(format!("{a:?}"), format!("{b:?}"));
++                assert_eq!(a.e_value.to_bits(), b.e_value.to_bits());
++            }
++        }
++    }
+ }

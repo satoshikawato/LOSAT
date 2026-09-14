@@ -1,0 +1,10 @@
+{
+  "candidate": "C-N2",
+  "status": "REJECTED",
+  "production_integrated": false,
+  "reason": "LC main input has no measured cold improvement (median +0.37%); AP-only5.94% exploration does not advance the remaining LC goal. Do not combine this candidate.",
+  "evidence": "C-N2-fair-exploration",
+  "raw_pass": true,
+  "repetitions": 3,
+  "remaining_goal": "G-N IN_PROGRESS; investigate measured batch overhead with corrected filesystem boundary"
+}

@@ -12,7 +12,7 @@ cd "$SCRIPT_DIR"
 
 if [[ "${1:-}" == --help ]]; then
     cat <<'HELP'
-Usage: ./run_comparison.sh   (NCBI + native + serial/threaded Wasm)
+Usage: ./run_comparison.sh   (NCBI + native + threaded Wasm n1/nN)
        ./run_wasm_comparison.sh   (Wasm only, same cases and filenames)
 
 Program selections:
@@ -34,8 +34,9 @@ Environment (also read by the three plot_*.py scripts):
   BENCHMARK_TIMEOUT Maximum seconds per search (default: 600; GNU timeout)
 
 Runner settings (0 disables, 1 enables):
-  RUN_NATIVE=1 RUN_NCBI=1 RUN_LOSAT_WASM=1 RUN_LOSAT_WASM_THREADED=1
-  BUILD_LOSAT_WASM=0 BUILD_LOSAT_WASM_THREADED=$BUILD_LOSAT_WASM
+  RUN_NATIVE=1 RUN_NCBI=1 RUN_LOSAT_WASM=0 RUN_LOSAT_WASM_THREADED=1
+  RUN_LOSAT_WASM=1 adds serial compatibility comparisons independently.
+  BUILD_LOSAT_WASM=0 BUILD_LOSAT_WASM_THREADED=0
   LOSAT_BIN, LOSAT_WASM_BIN, LOSAT_WASM_THREADED_BIN override artifacts.
   NODE_BIN=node selects the Node executable for both Wasm targets.
   NODE_ARGS_JSON='[]' supplies common Node flags as a JSON argv array.
@@ -61,6 +62,29 @@ for program in "${programs[@]}"; do
     case "$program" in tblastx|megablast|blastn|blastp) ;; *) echo "Unknown program: $program" >&2; exit 2;; esac
 done
 BENCHMARK_DIR="${BENCHMARK_DIR:-$SCRIPT_DIR/benchmark-runs/$(date -u +%Y%m%dT%H%M%S)-$$}"
+# NCBI reference: c++/src/algo/blast/blastinput/cmdline_flags.cpp:75
+# const string kArgNumThreads("num_threads");
+# Record the effective runner selections before creating any run metadata.
+RUN_NATIVE="${RUN_NATIVE:-1}"
+RUN_NCBI="${RUN_NCBI:-1}"
+# NCBI reference: c++/src/algo/blast/blastinput/cmdline_flags.cpp:75
+# const string kArgNumThreads("num_threads");
+# The threaded artifact handles both n1 and nN; serial is compatibility opt-in.
+RUN_LOSAT_WASM="${RUN_LOSAT_WASM:-0}"
+RUN_LOSAT_WASM_THREADED="${RUN_LOSAT_WASM_THREADED:-1}"
+BUILD_LOSAT_WASM="${BUILD_LOSAT_WASM:-0}"
+BUILD_LOSAT_WASM_THREADED="${BUILD_LOSAT_WASM_THREADED:-0}"
+for setting in RUN_NATIVE RUN_NCBI RUN_LOSAT_WASM RUN_LOSAT_WASM_THREADED BUILD_LOSAT_WASM BUILD_LOSAT_WASM_THREADED; do
+    [[ "${!setting}" == 0 || "${!setting}" == 1 ]] || { echo "$setting must be 0 or 1" >&2; exit 2; }
+done
+# NCBI reference: c++/src/app/blast/blastn_app.cpp:172-176
+# CATCH_ALL(status); return status;
+[[ "$RUN_NATIVE$RUN_NCBI$RUN_LOSAT_WASM$RUN_LOSAT_WASM_THREADED" != 0000 ]] || { echo 'No runners selected' >&2; exit 2; }
+# NCBI reference: c++/src/algo/blast/blastinput/cmdline_flags.cpp:75
+# const string kArgNumThreads("num_threads");
+# Record the effective runner selections before creating any run metadata.
+export RUN_NATIVE RUN_NCBI RUN_LOSAT_WASM RUN_LOSAT_WASM_THREADED
+export BUILD_LOSAT_WASM BUILD_LOSAT_WASM_THREADED
 # NCBI reference: c++/src/objtools/align_format/tabular.cpp:1100-1108
 # x_PrintField(*iter); ... m_Ostream << "\n";
 # Record the effective locale used for every subsequent comparison invocation.
@@ -79,16 +103,7 @@ LOSAT_BIN="${LOSAT_BIN:-$SCRIPT_DIR/../target/release/LOSAT}"
 LOSAT_WASM_BIN="${LOSAT_WASM_BIN:-$SCRIPT_DIR/../target/serial-command/wasm32-wasip1/release/LOSAT.wasm}"
 LOSAT_WASM_THREADED_BIN="${LOSAT_WASM_THREADED_BIN:-$SCRIPT_DIR/../target/threaded-command/wasm32-wasip1-threads/release/LOSAT.wasm}"
 NODE_BIN="${NODE_BIN:-node}"
-RUN_NATIVE="${RUN_NATIVE:-1}"
-RUN_NCBI="${RUN_NCBI:-1}"
-RUN_LOSAT_WASM="${RUN_LOSAT_WASM:-1}"
-RUN_LOSAT_WASM_THREADED="${RUN_LOSAT_WASM_THREADED:-1}"
-BUILD_LOSAT_WASM="${BUILD_LOSAT_WASM:-0}"
-BUILD_LOSAT_WASM_THREADED="${BUILD_LOSAT_WASM_THREADED:-$BUILD_LOSAT_WASM}"
-for setting in RUN_NATIVE RUN_NCBI RUN_LOSAT_WASM RUN_LOSAT_WASM_THREADED BUILD_LOSAT_WASM BUILD_LOSAT_WASM_THREADED; do
-    [[ "${!setting}" == 0 || "${!setting}" == 1 ]] || { echo "$setting must be 0 or 1" >&2; exit 2; }
-done
-[[ "$RUN_NATIVE$RUN_NCBI$RUN_LOSAT_WASM" != 000 ]] || { echo 'No runners selected' >&2; exit 2; }
+
 
 selected() {
     [[ ",$BENCHMARK_PROGRAMS," == *",$task,"* && "$losat_stem" == *"${BENCHMARK_CASE:-}"* ]]
@@ -115,28 +130,32 @@ done < "$SCRIPT_DIR/comparison_cases.tsv"
 [[ "$count" -gt 0 ]] || { echo 'No matching comparison cases' >&2; exit 2; }
 require_command timeout
 if [[ "$RUN_NATIVE" == 1 ]]; then require_command "$LOSAT_BIN"; fi
-if [[ "$RUN_LOSAT_WASM" == 1 ]]; then
+# NCBI reference: c++/src/algo/blast/api/prelim_stage.cpp:173-180
+# (*thread)->Run(); (*thread)->Join(&result);
+if [[ "$RUN_LOSAT_WASM" == 1 || "$RUN_LOSAT_WASM_THREADED" == 1 ]]; then
     require_command "$NODE_BIN"
     NODE_BIN="$(command -v "$NODE_BIN")"
     "$NODE_BIN" -p '`Node: ${process.version}; V8: ${process.versions.v8}; executable: ${process.execPath}`'
-    if [[ "$BUILD_LOSAT_WASM" == 1 || ( "$RUN_LOSAT_WASM_THREADED" == 1 && "$BUILD_LOSAT_WASM_THREADED" == 1 ) ]]; then
+    if [[ ( "$RUN_LOSAT_WASM" == 1 && "$BUILD_LOSAT_WASM" == 1 ) || ( "$RUN_LOSAT_WASM_THREADED" == 1 && "$BUILD_LOSAT_WASM_THREADED" == 1 ) ]]; then
         printf 'Wasm compiler: '
         rustc --version
         printf 'Wasm build tool: '
         cargo --version
     fi
-    if [[ "$BUILD_LOSAT_WASM" == 1 ]]; then
+    if [[ "$RUN_LOSAT_WASM" == 1 && "$BUILD_LOSAT_WASM" == 1 ]]; then
         (cd .. && cargo build --release --bin LOSAT --target wasm32-wasip1 --no-default-features --target-dir target/serial-command)
     fi
     if [[ "$RUN_LOSAT_WASM_THREADED" == 1 && "$BUILD_LOSAT_WASM_THREADED" == 1 ]]; then
         (cd .. && cargo build --release --bin LOSAT --target wasm32-wasip1-threads --features wasm-threads --target-dir target/threaded-command)
     fi
     # Require the exact requested command artifacts; never pick a stale deps/ file.
-    "$NODE_BIN" - "$LOSAT_WASM_BIN" "$LOSAT_WASM_THREADED_BIN" "$RUN_LOSAT_WASM_THREADED" "$SCRIPT_DIR/wasi_artifact.js" <<'JS'
+    # NCBI reference: c++/src/app/blast/blastn_app.cpp:172-176
+    # CATCH_ALL(status); return status;
+    "$NODE_BIN" - "$LOSAT_WASM_BIN" "$LOSAT_WASM_THREADED_BIN" "$RUN_LOSAT_WASM" "$RUN_LOSAT_WASM_THREADED" "$SCRIPT_DIR/wasi_artifact.js" <<'JS'
 const fs = require('fs');
-const [serial, threaded, enabled, inspector] = process.argv.slice(2);
+const [serial, threaded, serialEnabled, threadedEnabled, inspector] = process.argv.slice(2);
 const { inspectArtifact } = require(inspector);
-for (const [path, threads] of [[serial, false], ...(enabled === '1' ? [[threaded, true]] : [])]) {
+for (const [path, threads] of [...(serialEnabled === '1' ? [[serial, false]] : []), ...(threadedEnabled === '1' ? [[threaded, true]] : [])]) {
     inspectArtifact(fs.readFileSync(path), threads ? 'threaded-command' : 'serial-command');
     console.log(`Wasm ${threads ? 'threaded' : 'serial'}: ${path}; modified: ${fs.statSync(path).mtime.toISOString()}`);
 }
@@ -200,16 +219,23 @@ while IFS=$'\t' read -r task query subject name losat_stem ncbi_stem query_genco
             run_timed "$LOSAT_OUT_DIR/$losat_stem.n$LOSAT_THREADS" "$LOSAT_BIN" "$program" "${args[@]}" -num_threads "$LOSAT_THREADS"
         fi
     fi
-    if [[ "$RUN_LOSAT_WASM" == 1 ]]; then
+    # NCBI reference: c++/src/algo/blast/blastinput/cmdline_flags.cpp:75
+    # const string kArgNumThreads("num_threads");
+    if [[ "$RUN_LOSAT_WASM" == 1 || "$RUN_LOSAT_WASM_THREADED" == 1 ]]; then
         # NCBI reference: c++/src/algo/blast/blastinput/cmdline_flags.cpp:46-75
         # const string kArgQuery("query"); const string kArgSubject("subject");
         # Select Node compilation before starting this command process; worker
         # isolates inherit the same flags. BLASTN and BLASTP use common args only.
         search_node_args=("${NODE_ARGS[@]}")
         if [[ "$program" == tblastx ]]; then search_node_args=("${TBLASTX_NODE_ARGS[@]}"); fi
-        run_timed "$LOSAT_OUT_DIR/$losat_stem.wasm" env NODE_NO_WARNINGS=1 "$NODE_BIN" "${search_node_args[@]}" "$SCRIPT_DIR/run_losat_wasi.js" "$LOSAT_WASM_BIN" "$program" "${args[@]}" -num_threads 1
+        if [[ "$RUN_LOSAT_WASM" == 1 ]]; then
+            run_timed "$LOSAT_OUT_DIR/$losat_stem.wasm" env NODE_NO_WARNINGS=1 "$NODE_BIN" "${search_node_args[@]}" "$SCRIPT_DIR/run_losat_wasi.js" "$LOSAT_WASM_BIN" "$program" "${args[@]}" -num_threads 1
+        fi
         if [[ "$RUN_LOSAT_WASM_THREADED" == 1 ]]; then
-            run_timed "$LOSAT_OUT_DIR/$losat_stem.wasm.n$LOSAT_THREADS" env NODE_NO_WARNINGS=1 "$NODE_BIN" "${search_node_args[@]}" "$SCRIPT_DIR/run_losat_wasi_threads.js" "$LOSAT_WASM_THREADED_BIN" "$program" "${args[@]}" -num_threads "$LOSAT_THREADS"
+            run_timed "$LOSAT_OUT_DIR/$losat_stem.wasm.n1" env NODE_NO_WARNINGS=1 "$NODE_BIN" "${search_node_args[@]}" "$SCRIPT_DIR/run_losat_wasi_threads.js" "$LOSAT_WASM_THREADED_BIN" "$program" "${args[@]}" -num_threads 1
+            if [[ "$LOSAT_THREADS" != 1 ]]; then
+                run_timed "$LOSAT_OUT_DIR/$losat_stem.wasm.n$LOSAT_THREADS" env NODE_NO_WARNINGS=1 "$NODE_BIN" "${search_node_args[@]}" "$SCRIPT_DIR/run_losat_wasi_threads.js" "$LOSAT_WASM_THREADED_BIN" "$program" "${args[@]}" -num_threads "$LOSAT_THREADS"
+            fi
         fi
     fi
     if [[ "$RUN_NCBI" == 1 ]]; then

@@ -1,0 +1,93 @@
+[
+  {
+    "name": "np-main",
+    "argv": [
+      "python",
+      "/tmp/losat-remediation-20260913-01/final_performance.py",
+      "np-main"
+    ],
+    "started_utc": "2026-09-13T18:02:03Z",
+    "ended_utc": "2026-09-13T18:10:03Z",
+    "elapsed_seconds": 480.66153926600236,
+    "exit_status": 0,
+    "log": "/tmp/losat-remediation-20260913-01/integrated-step-np-main.log"
+  },
+  {
+    "name": "x-main",
+    "argv": [
+      "python",
+      "/tmp/losat-remediation-20260913-01/final_performance.py",
+      "x-main"
+    ],
+    "started_utc": "2026-09-13T18:10:03Z",
+    "ended_utc": "2026-09-13T18:21:18Z",
+    "elapsed_seconds": 674.4440497460018,
+    "exit_status": 0,
+    "log": "/tmp/losat-remediation-20260913-01/integrated-step-x-main.log"
+  },
+  {
+    "name": "np-native-controls",
+    "argv": [
+      "python",
+      "/tmp/losat-remediation-20260913-01/final_performance.py",
+      "np-native-controls"
+    ],
+    "started_utc": "2026-09-13T18:21:18Z",
+    "ended_utc": "2026-09-13T18:47:36Z",
+    "elapsed_seconds": 1578.3669496490038,
+    "exit_status": 0,
+    "log": "/tmp/losat-remediation-20260913-01/integrated-step-np-native-controls.log"
+  },
+  {
+    "name": "np-threaded1-controls",
+    "argv": [
+      "python",
+      "/tmp/losat-remediation-20260913-01/final_performance.py",
+      "np-threaded1-controls"
+    ],
+    "started_utc": "2026-09-13T18:47:36Z",
+    "ended_utc": "2026-09-13T19:12:31Z",
+    "elapsed_seconds": 1483.985648937989,
+    "exit_status": 0,
+    "log": "/tmp/losat-remediation-20260913-01/integrated-step-np-threaded1-controls.log"
+  },
+  {
+    "name": "np-task-controls",
+    "argv": [
+      "python",
+      "/tmp/losat-remediation-20260913-01/final_performance.py",
+      "np-task-controls"
+    ],
+    "started_utc": "2026-09-13T19:12:31Z",
+    "ended_utc": "2026-09-13T19:20:04Z",
+    "elapsed_seconds": 446.39277624798706,
+    "exit_status": 0,
+    "log": "/tmp/losat-remediation-20260913-01/integrated-step-np-task-controls.log"
+  },
+  {
+    "name": "np-thread-boundaries",
+    "argv": [
+      "python",
+      "/tmp/losat-remediation-20260913-01/final_performance.py",
+      "np-thread-boundaries"
+    ],
+    "started_utc": "2026-09-13T19:20:04Z",
+    "ended_utc": "2026-09-13T19:26:53Z",
+    "elapsed_seconds": 401.4797663319914,
+    "exit_status": 0,
+    "log": "/tmp/losat-remediation-20260913-01/integrated-step-np-thread-boundaries.log"
+  },
+  {
+    "name": "np-reuse",
+    "argv": [
+      "python",
+      "/tmp/losat-remediation-20260913-01/final_performance.py",
+      "np-reuse"
+    ],
+    "started_utc": "2026-09-13T19:26:53Z",
+    "ended_utc": "2026-09-13T19:51:01Z",
+    "elapsed_seconds": 1423.0088239439938,
+    "exit_status": 1,
+    "log": "/tmp/losat-remediation-20260913-01/integrated-step-np-reuse.log"
+  }
+]

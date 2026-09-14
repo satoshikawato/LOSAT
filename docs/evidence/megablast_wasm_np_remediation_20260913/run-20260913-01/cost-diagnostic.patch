@@ -1,0 +1,243 @@
+--- a/LOSAT/src/utils/mod.rs
++++ b/LOSAT/src/utils/mod.rs
+@@ -6,3 +6,8 @@
+ // NCBI reference: c++/src/algo/blast/api/prelim_stage.cpp:177-188
+ // (*thread)->Run(); (*thread)->Join(&result);
+ pub mod threading;
++
++// NCBI reference: c++/src/algo/blast/core/blast_engine.c:1659-1668
++// /* Use a local diagnostics structure ... shared between multiple threads */
++// Isolated diagnostic; counters are not production search behavior.
++pub mod cost_diag;
+--- a/LOSAT/src/utils/cost_diag.rs
++++ b/LOSAT/src/utils/cost_diag.rs
+@@ -0,0 +1,14 @@
++// NCBI reference: c++/src/algo/blast/core/blast_engine.c:1659-1668
++// /* Use a local diagnostics structure ... shared between multiple threads */
++// Isolated diagnostic; counters are not production search behavior.
++use std::sync::atomic::{AtomicU64, Ordering::Relaxed};
++use std::time::Instant;
++static NS:[AtomicU64;3]=[const {AtomicU64::new(0)};3];
++static CALLS:[AtomicU64;3]=[const {AtomicU64::new(0)};3];
++static CELLS:[AtomicU64;3]=[const {AtomicU64::new(0)};3];
++static ROWS:[AtomicU64;3]=[const {AtomicU64::new(0)};3];
++pub struct Scope { pub id:usize, pub cells:u64, pub rows:u64, start:Instant }
++impl Scope {pub fn new(id:usize)->Self {Self{id,cells:0,rows:0,start:Instant::now()}}}
++impl Drop for Scope {fn drop(&mut self) {NS[self.id].fetch_add(self.start.elapsed().as_nanos() as u64,Relaxed);CALLS[self.id].fetch_add(1,Relaxed);CELLS[self.id].fetch_add(self.cells,Relaxed);ROWS[self.id].fetch_add(self.rows,Relaxed);}}
++pub struct Report;
++impl Drop for Report {fn drop(&mut self){for (i,name) in ["blastn_shift_slots","blastp_traceback","blastp_score_only"].iter().enumerate(){eprintln!("[COST] name={} calls={} aggregate_ns={} cells={} rows={}",name,CALLS[i].load(Relaxed),NS[i].load(Relaxed),CELLS[i].load(Relaxed),ROWS[i].load(Relaxed));}}}
+--- a/LOSAT/src/utils/threading.rs
++++ b/LOSAT/src/utils/threading.rs
+@@ -94,6 +94,10 @@
+     F: FnOnce(&SearchPool<'_>) -> Result<R> + Send,
+     R: Send,
+ {
++// NCBI reference: c++/src/algo/blast/core/blast_engine.c:1659-1668
++// /* Use a local diagnostics structure ... shared between multiple threads */
++// Isolated diagnostic; counters are not production search behavior.
++    let _cost_report=crate::utils::cost_diag::Report;
+     validate_threads(requested)?;
+     #[cfg(feature = "parallel")]
+     if requested > 1 {
+--- a/LOSAT/src/algorithm/blastp/blast_engine.rs
++++ b/LOSAT/src/algorithm/blastp/blast_engine.rs
+@@ -406,15 +406,10 @@
+ //                                       psi_options, db_options, hsp_stream, ...);
+ // ```
+ #[inline]
++// NCBI reference: c++/src/algo/blast/core/blast_kappa.c:3493-3503
++// BLAST_RedoAlignmentCore(...); // isolated stage timing only
+ fn blastp_timing_env_enabled() -> bool {
+-    #[cfg(target_arch = "wasm32")]
+-    {
+-        false
+-    }
+-    #[cfg(not(target_arch = "wasm32"))]
+-    {
+-        std::env::var_os("LOSAT_TIMING").is_some()
+-    }
++    std::env::var_os("LOSAT_TIMING").is_some()
+ }
+ 
+ // NCBI reference: /mnt/c/Users/genom/GitHub/ncbi-blast/c++/src/algo/blast/core/blast_engine.c:1633-1705
+--- a/LOSAT/src/algorithm/blastp/gapalign.rs
++++ b/LOSAT/src/algorithm/blastp/gapalign.rs
+@@ -1110,6 +1110,10 @@
+     x_drop: i32,
+     scratch: &mut GapAlignScratch,
+ ) -> (usize, usize, i32) {
++// NCBI reference: c++/src/algo/blast/core/blast_engine.c:1659-1668
++// /* Use a local diagnostics structure ... shared between multiple threads */
++// Isolated diagnostic; counters are not production search behavior.
++    let mut cost=crate::utils::cost_diag::Scope::new(2);
+     if len1 == 0 || len2 == 0 {
+         return (0, 0, 0);
+     }
+@@ -1173,6 +1177,7 @@
+     let mut first_b_index = 0usize;
+ 
+     for a_index in 1..=len1 {
++        cost.rows+=1;
+         let qc = blastp_query_residue::<REVERSE>(query, query_base, len1, a_index);
+         // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_gapalign.c:841-849
+         // ```c
+@@ -1187,6 +1192,7 @@
+         let mut last_b_index = first_b_index;
+ 
+         for b_index in first_b_index..b_size {
++            cost.cells+=1;
+             let sc = blastp_subject_residue::<REVERSE>(subject, subject_base, len2, b_index);
+             let score_gap_col = scratch.dp_mem[b_index].best_gap;
+             let next_score = scratch.dp_mem[b_index].best
+@@ -1686,6 +1692,10 @@
+     scratch: &mut GapAlignScratch,
+     fence_hit: &mut bool,
+ ) -> (usize, usize, i32, Vec<GapEditOp>) {
++// NCBI reference: c++/src/algo/blast/core/blast_engine.c:1659-1668
++// /* Use a local diagnostics structure ... shared between multiple threads */
++// Isolated diagnostic; counters are not production search behavior.
++    let mut cost=crate::utils::cost_diag::Scope::new(1);
+     if len1 == 0 || len2 == 0 {
+         return (0, 0, 0, Vec::new());
+     }
+@@ -1741,6 +1751,7 @@
+     let mut first_b_index = 0usize;
+ 
+     for a_index in 1..=len1 {
++        cost.rows+=1;
+         if a_index >= edit_script_num_rows {
+             edit_script_num_rows *= 2;
+             if scratch.trace_rows.len() < edit_script_num_rows {
+@@ -1835,6 +1846,7 @@
+                 *fence_hit = true;
+                 break;
+             }
++            cost.cells+=1;
+             let next_score =
+                 cell.best + blastp_score_from_row::<BLOSUM62>(score_matrix, matrix_row, qc, sc);
+ 
+--- a/LOSAT/src/algorithm/blastn/filtering/purge_endpoints.rs
++++ b/LOSAT/src/algorithm/blastn/filtering/purge_endpoints.rs
+@@ -604,9 +604,16 @@
+                 start_removed += 1;
+             }
+ 
++// NCBI reference: c++/src/algo/blast/core/blast_engine.c:1659-1668
++// /* Use a local diagnostics structure ... shared between multiple threads */
++// Isolated diagnostic; counters are not production search behavior.
++            let mut shift_cost=crate::utils::cost_diag::Scope::new(0);
++            shift_cost.cells=(hsp_count-(i+j)) as u64;
++            shift_cost.rows=std::mem::size_of::<Option<BlastnHsp>>() as u64;
+             for k in (i + j)..hsp_count {
+                 hsp_array[k] = hsp_array[k + 1].take();
+             }
++            drop(shift_cost);
+             hsp_array[hsp_count] = tail_hsp;
+         }
+         i += j;
+@@ -695,9 +702,16 @@
+                 end_removed += 1;
+             }
+ 
++// NCBI reference: c++/src/algo/blast/core/blast_engine.c:1659-1668
++// /* Use a local diagnostics structure ... shared between multiple threads */
++// Isolated diagnostic; counters are not production search behavior.
++            let mut shift_cost=crate::utils::cost_diag::Scope::new(0);
++            shift_cost.cells=(hsp_count-(i+j)) as u64;
++            shift_cost.rows=std::mem::size_of::<Option<BlastnHsp>>() as u64;
+             for k in (i + j)..hsp_count {
+                 hsp_array[k] = hsp_array[k + 1].take();
+             }
++            drop(shift_cost);
+             hsp_array[hsp_count] = tail_hsp;
+         }
+         i += j;
+--- a/LOSAT/src/algorithm/blastn/blast_engine/run.rs
++++ b/LOSAT/src/algorithm/blastn/blast_engine/run.rs
+@@ -9012,6 +9012,11 @@
+             ))]
+             let mut speculative_results = Vec::new();
+             // NCBI reference: c++/src/algo/blast/core/blast_traceback.c:403-405,509-513,598-601
++            // BLAST_GappedAlignmentWithTraceback(...); BlastIntervalTreeAddHSP(...);
++            // Isolated diagnostics time the same pure computations and ordered replay.
++            #[cfg(all(feature = "parallel", any(not(target_arch = "wasm32"), feature = "wasm-threads")))]
++            let mut batch_diagnostics: Vec<(usize, f64, f64, f64, f64)> = Vec::new();
++            // NCBI reference: c++/src/algo/blast/core/blast_traceback.c:403-405,509-513,598-601
+             // ```c
+             // if (!BlastIntervalTreeContainsHSP(tree, hsp, query_info, ...)) {
+             //     BLAST_GappedAlignmentWithTraceback(...);
+@@ -9043,6 +9048,7 @@
+                     any(not(target_arch = "wasm32"), feature = "wasm-threads")
+                 ))]
+                 if speculative_traceback && prelim_index % SPECULATIVE_TRACEBACK_BATCH_SIZE == 0 {
++                    let batch_started = std::time::Instant::now();
+                     let batch_end =
+                         (prelim_index + SPECULATIVE_TRACEBACK_BATCH_SIZE).min(prelim_hits.len());
+                     let jobs: Vec<_> = (prelim_index..batch_end)
+@@ -9080,12 +9086,15 @@
+                             .par_iter_mut()
+                             .enumerate()
+                             .map(|(slot, scratch)| {
+-                                jobs.iter()
++                                let slot_started = std::time::Instant::now();
++                                let mut job_ns = Vec::new();
++                                let values = jobs.iter()
+                                     .skip(slot)
+                                     .step_by(num_threads)
+                                     .filter_map(|&index| {
+                                         let p = &prelim_hits[index];
+                                         let (qs, _, shift, slen, ss) = prepare_traceback(p)?;
++                                        let job_started = std::time::Instant::now();
+                                         let result =
+                                             extend_gapped_heuristic_with_traceback_with_scratch(
+                                                 &encoded_queries_blastna[p.context_idx as usize],
+@@ -9101,13 +9110,20 @@
+                                                 x_drop_final,
+                                                 scratch,
+                                             );
++                                        job_ns.push(job_started.elapsed().as_secs_f64());
+                                         Some((index, result))
+                                     })
+-                                    .collect::<Vec<_>>()
++                                    .collect::<Vec<_>>();
++                                (values, slot_started.elapsed().as_secs_f64(), job_ns)
+                             })
+                             .collect()
+                     });
+-                    for (index, result) in computed.into_iter().flatten() {
++                    let wall = batch_started.elapsed().as_secs_f64();
++                    let slot_sum: f64 = computed.iter().map(|x|x.1).sum();
++                    let slot_max = computed.iter().map(|x|x.1).fold(0.0_f64, f64::max);
++                    let job_max = computed.iter().flat_map(|x|x.2.iter().copied()).fold(0.0_f64, f64::max);
++                    batch_diagnostics.push((jobs.len(),wall,slot_sum,slot_max,job_max));
++                    for (index, result) in computed.into_iter().flat_map(|x|x.0) {
+                         speculative_results[index - prelim_index] = Some(result);
+                     }
+                 }
+@@ -9680,6 +9696,18 @@
+                 }
+             }
+ 
++            // NCBI reference: c++/src/algo/blast/core/blast_traceback.c:403-405,509-513,598-601
++            // BLAST_GappedAlignmentWithTraceback(...); BlastIntervalTreeAddHSP(...);
++            // Isolated diagnostics time the same pure computations and ordered replay.
++            #[cfg(all(feature = "parallel", any(not(target_arch = "wasm32"), feature = "wasm-threads")))]
++            {
++                let n = num_threads as f64;
++                let wall:f64=batch_diagnostics.iter().map(|r|r.1).sum();
++                let work:f64=batch_diagnostics.iter().map(|r|r.2).sum();
++                let tail:f64=batch_diagnostics.iter().map(|r|(r.3-r.2/n).max(0.0)).sum();
++                let largest:f64=batch_diagnostics.iter().map(|r|r.4).sum();
++                eprintln!("[BATCH_COST] batches={} jobs={} wall={} slot_work={} imbalance_bound={} max_job_sum={}",batch_diagnostics.len(),batch_diagnostics.iter().map(|r|r.0).sum::<usize>(),wall,work,tail,largest);
++            }
+             prelim_hits.clear();
+         }
+ 
+@@ -9921,6 +9949,7 @@
+                     ),
+                 );
+             }
++
+         }
+         local_hits.retain(|h| h.raw_score != i32::MIN);
+         let hits_step3 = local_hits.len();

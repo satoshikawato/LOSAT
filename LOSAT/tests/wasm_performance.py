@@ -492,7 +492,11 @@ def execute(argv, cwd, directory, env, timeout):
                 status, reason = "BAD_EXIT", f"subprocess exit {exit_code}"
         except OSError as error:
             status, reason = "BAD_EXIT", str(error)
-    elapsed = time.monotonic() - start
+    # NCBI reference: c++/src/algo/blast/api/prelim_stage.cpp:178-188
+    # (*thread)->Join(&result);
+    # Record the exact existing elapsed-time endpoints for process overlap audits.
+    monotonic_end = time.monotonic()
+    elapsed = monotonic_end - start
     realtime_elapsed = time.time() - realtime_start
     boottime_elapsed = time.clock_gettime(time.CLOCK_BOOTTIME) - boottime_start if boottime_start is not None else None
     process_ended_utc = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
@@ -518,6 +522,8 @@ def execute(argv, cwd, directory, env, timeout):
         "reason": reason,
         "exit_status": exit_code,
         "wall_seconds": elapsed,
+        "monotonic_start": start,
+        "monotonic_end": monotonic_end,
         "realtime_seconds": realtime_elapsed,
         "boottime_seconds": boottime_elapsed,
         "gnu_elapsed_seconds": gnu_elapsed,

@@ -99,7 +99,8 @@ def validate_thread_evidence(logtext, requested, kind):
     program, recorded_request, pool, caller = pools[0]
     pool = int(pool)
     expected = 0 if requested == 1 else requested
-    if int(recorded_request) != requested or pool != expected or caller != "false":
+    expected_caller = "false" if requested == 1 else "true"
+    if int(recorded_request) != requested or pool != expected or caller != expected_caller:
         raise GateFailure("requested/pool/caller diagnostic mismatch")
     stages = [dict(program=p, stage=stage, work_items=int(items), parallel_selected=parallel == "true", measured_activity=None)
               for p, stage, items, parallel in re.findall(r"\[losat-thread-stage\] program=(\w+) stage=([\w-]+) work_items=(\d+) parallel_selected=(true|false)", logtext)]
@@ -112,14 +113,14 @@ def validate_thread_evidence(logtext, requested, kind):
         for event in ("spawn_attempt", "spawned", "ready", "exited"):
             records = [e for e in events if e["event"] == event]
             tids[event] = {e["tid"] for e in records}
-            if len(records) != expected or len(tids[event]) != expected:
+            if len(records) != requested - 1 or len(tids[event]) != requested - 1:
                 raise GateFailure(f"host {event} count disagrees with pool")
             if event == "exited" and any(e["code"] != 0 for e in records):
                 raise GateFailure("worker did not exit successfully")
         if any(value != tids["spawn_attempt"] for value in tids.values()) or any(e["event"] == "spawn_rejected" for e in events):
             raise GateFailure("host lifecycle records disagree")
         counts = {event: len(value) for event, value in tids.items()}
-    return {"requested_threads": requested, "pool_threads": pool, "caller_participates": False,
+    return {"requested_threads": requested, "pool_threads": pool, "caller_participates": caller == "true",
             "effective_compute_threads": requested, "thread_stages": stages,
             "host_worker_counts": counts, "measured_activity": None}
 

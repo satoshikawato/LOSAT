@@ -195,14 +195,15 @@ consumer migration. Existing frozen v0.1.0 release/certification workflows retai
 their historical serial contract.
 
 `-num_threads 1` runs on the caller without a compute pool. A supported
-`-num_threads N` creates exactly N dedicated compute workers for that search and
-joins them before returning. Unsupported targets, excessive requests, malformed
+`-num_threads N` uses exactly N compute threads in total: the caller occupies
+pool slot zero and N-1 child threads are joined before returning. The caller
+registration is cleared after every search, including errors. Unsupported targets, excessive requests, malformed
 caps, and spawn failures return errors. Explicit `LOSAT_WASI_THREAD_CAP` is a
 rejection limit; it never silently reduces N. Input size does not override N.
 
 Threaded command/reactor tests use Rust 1.92.0 and Node 24.21.0. See
 [threading tests](LOSAT/tests/README.md#threading-contract-gates) and the
-[remediation plan](docs/wasm_threading_remediation_plan_20260913.md).
+[total-thread contract](docs/wasm_total_threads_20260914.md).
 Browser-facing or embeddable Wasm APIs remain internal and are not release-stable
 in v0.1.0; these gates do not expand the frozen release certification scope.
 

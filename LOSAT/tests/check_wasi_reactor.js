@@ -58,7 +58,7 @@ async function checkReactor(artifact, fixtures, output) {
         if (!reference) reference = response.result;
         assert.deepEqual(response.result, reference, c.id);
         for (const event of ["spawn_attempt", "spawned", "ready", "exited"]) {
-          assert.equal(events.filter(e => e.event === event).length, n === 1 ? 0 : n, `${c.id} n${n} ${event}`);
+          assert.equal(events.filter(e => e.event === event).length, n - 1, `${c.id} n${n} ${event}`);
         }
         assert.ok(events.filter(e => e.event === "exited").every(e => e.code === 0));
       }
@@ -97,7 +97,7 @@ async function checkReactor(artifact, fixtures, output) {
           // NCBI reference: c++/src/algo/blast/api/prelim_stage.cpp:177-188
           // (*thread)->Run(); (*thread)->Join(&result);
           for (const event of ["spawn_attempt", "spawned", "ready", "exited"]) {
-            assert.equal(events.filter(e => e.event === event).length, n === 1 ? 0 : n);
+            assert.equal(events.filter(e => e.event === event).length, n - 1);
           }
           assert.ok(events.filter(e => e.event === "exited").every(e => e.code === 0));
         }
@@ -116,7 +116,7 @@ async function checkReactor(artifact, fixtures, output) {
       const response = runPair(host, "tblastx", nuc, nuc, "6", ["-num_threads", "2"]);
       const events = await host.waitForWorkers();
       assert.equal(response.status, 0, response.error);
-      assert.equal(events.filter(e=>e.event==="exited").length,2);
+      assert.equal(events.filter(e=>e.event==="exited").length,1);
       assert.equal(host.events.length,0);
       memorySizes.push(host.memory.buffer.byteLength);
       save(`repeat-stress-${i}`, response, events);

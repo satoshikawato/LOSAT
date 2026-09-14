@@ -218,8 +218,9 @@ from the crate directory and pass `--native-serial` to the checker.
 The comparison gate requires NCBI BLAST+ 2.17.0 only as a test oracle. It retains
 raw bytes, argv, stderr, artifact identity, and worker lifecycle records.
 
-Every supported explicit N > 1 creates exactly N dedicated compute workers.
-n1 creates none; serial targets reject n2/n4. Invalid or excessive requests and
+Every supported explicit N > 1 uses N total compute threads: the caller plus
+N-1 child workers. Diagnostics report pool_threads=N and caller_participates=true;
+host spawn/ready/exit counts are N-1. n1 creates no child workers; serial targets reject n2/n4. Invalid or excessive requests and
 invalid `LOSAT_WASI_THREAD_CAP` settings fail before spawning workers. Repeated
 reactor calls join all guest workers and await host exit events. Recoverable
 spawn rejection returns the underlying cause and clears old result bytes;

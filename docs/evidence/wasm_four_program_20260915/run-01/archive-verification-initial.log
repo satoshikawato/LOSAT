@@ -1,0 +1,29 @@
+archived 0 files
+archived 1000 files
+archived 2000 files
+archived 3000 files
+archived 4000 files
+archived 5000 files
+archived 6000 files
+archived 7000 files
+archived 8000 files
+archived 9000 files
+archived 10000 files
+archived 11000 files
+archived 12000 files
+archived 13000 files
+archived 14000 files
+archived 15000 files
+archived 16000 files
+archived 17000 files
+archived 18000 files
+archived 19000 files
+archived 20000 files
+archived 21000 files
+archived 22000 files
+archived 23000 files
+Traceback (most recent call last):
+  File "/tmp/losat-four-program-20260915/package_evidence.py", line 99, in <module>
+    assert (sha,size,member.mode)==(expected[member.name]['sha256'],expected[member.name]['bytes'],expected[member.name]['mode']), member.name
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+AssertionError: losat-four-program-20260915/C0/artifacts/losat-serial-command.wasm

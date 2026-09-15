@@ -1,0 +1,11 @@
+   Compiling LOSAT v0.1.0 (/tmp/losat-four-program-20260915/M1-source/LOSAT)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 5.33s
+     Running unittests src/lib.rs (/tmp/losat-four-program-20260915/unit-target/debug/deps/LOSAT-375c51a56549f105)
+
+running 3 tests
+test algorithm::blastn::alignment::greedy::tests::test_greedy_reverse_and_empty_boundary_cases ... ok
+test algorithm::blastn::alignment::greedy::tests::non_affine_fence_retains_written_scratch ... ok
+test algorithm::blastn::alignment::greedy::tests::test_greedy_traceback_ncbi_regression_cases ... ok
+
+test result: ok. 3 passed; 0 failed; 0 ignored; 0 measured; 427 filtered out; finished in 0.00s
+

@@ -107,7 +107,10 @@ const hash = bytes => crypto.createHash("sha256").update(bytes).digest("hex");
           expected_sha256:job.expected_sha256, raw_equal:hash(data) === job.expected_sha256,
           events, host_worker_counts:counts, memory_bytes:host.memory.buffer.byteLength });
         if (prepared) {
-          const expected = n === 1 ? 0 : n;
+          // NCBI reference: c++/src/algo/blast/core/blast_kappa.c:3429-3459
+          // #pragma omp parallel ... num_threads(actual_num_threads)
+          // LOSAT's existing total-thread contract includes the caller.
+          const expected = n - 1;
           const tids = events.filter(e=>e.event === "spawn_attempt").map(e=>e.tid).sort((a,b)=>a-b);
           for (const event of Object.keys(counts)) {
             assert.equal(counts[event], expected);

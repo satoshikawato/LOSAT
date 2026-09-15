@@ -1,0 +1,2153 @@
+{
+  "status": "STOPPED_BY_USER; three complete pairs summarized",
+  "selection": "Exactly repeats 1, 2, 3 for every condition; repeat 0 is warmup. No speed-based selection.",
+  "original_process_records": 513,
+  "timed_records_used": 270,
+  "completed_later_records_excluded": 54,
+  "exclusion_reason": "User ended measurement and specified three repetitions; interrupted repeat 4 is retained.",
+  "not_run": [
+    "final integrated controls timing",
+    "body timing",
+    "compiled-module reuse timing",
+    "same-reactor timing and memory window",
+    "TurboFan secondary timing",
+    "historical source rebuilds"
+  ],
+  "paired_conditions": [
+    {
+      "case": "AP027078.AP027131.losatp",
+      "kind": "native",
+      "threads": 1,
+      "baseline": {
+        "median_seconds": 29.694982029999665,
+        "samples": [
+          29.62342929100123,
+          35.87153520799984,
+          29.694982029999665
+        ],
+        "peak_rss_bytes": 68198400,
+        "raw_sha256": "5bdaa58908a96768c26c329ade49a97d4e2d705895e457709eae094b14c708d4",
+        "evidence": [
+          "/tmp/losat-four-program-20260915/integrated-cold/cold/repeat-1/AP027078.AP027131.losatp-baseline-native-n1/output.txt",
+          "/tmp/losat-four-program-20260915/integrated-cold/cold/repeat-2/AP027078.AP027131.losatp-baseline-native-n1/output.txt",
+          "/tmp/losat-four-program-20260915/integrated-cold/cold/repeat-3/AP027078.AP027131.losatp-baseline-native-n1/output.txt"
+        ]
+      },
+      "candidate": {
+        "median_seconds": 29.34927870899992,
+        "samples": [
+          29.34927870899992,
+          29.521481539999513,
+          28.696299032999377
+        ],
+        "peak_rss_bytes": 68177920,
+        "raw_sha256": "5bdaa58908a96768c26c329ade49a97d4e2d705895e457709eae094b14c708d4",
+        "evidence": [
+          "/tmp/losat-four-program-20260915/integrated-cold/cold/repeat-1/AP027078.AP027131.losatp-candidate-native-n1/output.txt",
+          "/tmp/losat-four-program-20260915/integrated-cold/cold/repeat-2/AP027078.AP027131.losatp-candidate-native-n1/output.txt",
+          "/tmp/losat-four-program-20260915/integrated-cold/cold/repeat-3/AP027078.AP027131.losatp-candidate-native-n1/output.txt"
+        ]
+      },
+      "improvement_percent": 1.164180940235949,
+      "five_percent_target_met": false,
+      "time_guard_pass": true,
+      "rss_guard_pass": true
+    },
+    {
+      "case": "AP027078.AP027131.losatp",
+      "kind": "native",
+      "threads": 8,
+      "baseline": {
+        "median_seconds": 6.59502572600104,
+        "samples": [
+          6.728576718000113,
+          6.59502572600104,
+          5.461987559003319
+        ],
+        "peak_rss_bytes": 99753984,
+        "raw_sha256": "5bdaa58908a96768c26c329ade49a97d4e2d705895e457709eae094b14c708d4",
+        "evidence": [
+          "/tmp/losat-four-program-20260915/integrated-cold/cold/repeat-1/AP027078.AP027131.losatp-baseline-native-n8/output.txt",
+          "/tmp/losat-four-program-20260915/integrated-cold/cold/repeat-2/AP027078.AP027131.losatp-baseline-native-n8/output.txt",
+          "/tmp/losat-four-program-20260915/integrated-cold/cold/repeat-3/AP027078.AP027131.losatp-baseline-native-n8/output.txt"
+        ]
+      },
+      "candidate": {
+        "median_seconds": 5.994217757997831,
+        "samples": [
+          5.994217757997831,
+          6.171487909999996,
+          5.2009466199997405
+        ],
+        "peak_rss_bytes": 100048896,
+        "raw_sha256": "5bdaa58908a96768c26c329ade49a97d4e2d705895e457709eae094b14c708d4",
+        "evidence": [
+          "/tmp/losat-four-program-20260915/integrated-cold/cold/repeat-1/AP027078.AP027131.losatp-candidate-native-n8/output.txt",
+          "/tmp/losat-four-program-20260915/integrated-cold/cold/repeat-2/AP027078.AP027131.losatp-candidate-native-n8/output.txt",
+          "/tmp/losat-four-program-20260915/integrated-cold/cold/repeat-3/AP027078.AP027131.losatp-candidate-native-n8/output.txt"
+        ]
+      },
+      "improvement_percent": 9.110017048675193,
+      "five_percent_target_met": true,
+      "time_guard_pass": true,
+      "rss_guard_pass": true
+    },
+    {
+      "case": "AP027078.AP027131.losatp",
+      "kind": "serial",
+      "threads": 1,
+      "baseline": {
+        "median_seconds": 31.1588728070019,
+        "samples": [
+          31.1588728070019,
+          33.66473223000139,
+          30.05648748599924
+        ],
+        "peak_rss_bytes": 155500544,
+        "raw_sha256": "5bdaa58908a96768c26c329ade49a97d4e2d705895e457709eae094b14c708d4",
+        "evidence": [
+          "/tmp/losat-four-program-20260915/integrated-cold/cold/repeat-1/AP027078.AP027131.losatp-baseline-serial-n1/output.txt",
+          "/tmp/losat-four-program-20260915/integrated-cold/cold/repeat-2/AP027078.AP027131.losatp-baseline-serial-n1/output.txt",
+          "/tmp/losat-four-program-20260915/integrated-cold/cold/repeat-3/AP027078.AP027131.losatp-baseline-serial-n1/output.txt"
+        ]
+      },
+      "candidate": {
+        "median_seconds": 30.312198294002883,
+        "samples": [
+          30.312198294002883,
+          30.887425541000994,
+          29.941527835999295
+        ],
+        "peak_rss_bytes": 148713472,
+        "raw_sha256": "5bdaa58908a96768c26c329ade49a97d4e2d705895e457709eae094b14c708d4",
+        "evidence": [
+          "/tmp/losat-four-program-20260915/integrated-cold/cold/repeat-1/AP027078.AP027131.losatp-candidate-serial-n1/output.txt",
+          "/tmp/losat-four-program-20260915/integrated-cold/cold/repeat-2/AP027078.AP027131.losatp-candidate-serial-n1/output.txt",
+          "/tmp/losat-four-program-20260915/integrated-cold/cold/repeat-3/AP027078.AP027131.losatp-candidate-serial-n1/output.txt"
+        ]
+      },
+      "improvement_percent": 2.7172822272593717,
+      "five_percent_target_met": false,
+      "time_guard_pass": true,
+      "rss_guard_pass": true
+    },
+    {
+      "case": "AP027078.AP027131.losatp",
+      "kind": "threaded",
+      "threads": 1,
+      "baseline": {
+        "median_seconds": 30.715644474003057,
+        "samples": [
+          30.715644474003057,
+          31.797620093999285,
+          29.888506991999748
+        ],
+        "peak_rss_bytes": 170205184,
+        "raw_sha256": "5bdaa58908a96768c26c329ade49a97d4e2d705895e457709eae094b14c708d4",
+        "evidence": [
+          "/tmp/losat-four-program-20260915/integrated-cold/cold/repeat-1/AP027078.AP027131.losatp-baseline-threaded-n1/output.txt",
+          "/tmp/losat-four-program-20260915/integrated-cold/cold/repeat-2/AP027078.AP027131.losatp-baseline-threaded-n1/output.txt",
+          "/tmp/losat-four-program-20260915/integrated-cold/cold/repeat-3/AP027078.AP027131.losatp-baseline-threaded-n1/output.txt"
+        ]
+      },
+      "candidate": {
+        "median_seconds": 30.47985078900092,
+        "samples": [
+          30.47985078900092,
+          31.341098618002434,
+          29.79258243699951
+        ],
+        "peak_rss_bytes": 171003904,
+        "raw_sha256": "5bdaa58908a96768c26c329ade49a97d4e2d705895e457709eae094b14c708d4",
+        "evidence": [
+          "/tmp/losat-four-program-20260915/integrated-cold/cold/repeat-1/AP027078.AP027131.losatp-candidate-threaded-n1/output.txt",
+          "/tmp/losat-four-program-20260915/integrated-cold/cold/repeat-2/AP027078.AP027131.losatp-candidate-threaded-n1/output.txt",
+          "/tmp/losat-four-program-20260915/integrated-cold/cold/repeat-3/AP027078.AP027131.losatp-candidate-threaded-n1/output.txt"
+        ]
+      },
+      "improvement_percent": 0.7676664092192689,
+      "five_percent_target_met": false,
+      "time_guard_pass": true,
+      "rss_guard_pass": true
+    },
+    {
+      "case": "AP027078.AP027131.losatp",
+      "kind": "threaded",
+      "threads": 8,
+      "baseline": {
+        "median_seconds": 7.947677721000218,
+        "samples": [
+          7.947677721000218,
+          8.585141665000265,
+          6.180791267001041
+        ],
+        "peak_rss_bytes": 299495424,
+        "raw_sha256": "5bdaa58908a96768c26c329ade49a97d4e2d705895e457709eae094b14c708d4",
+        "evidence": [
+          "/tmp/losat-four-program-20260915/integrated-cold/cold/repeat-1/AP027078.AP027131.losatp-baseline-threaded-n8/output.txt",
+          "/tmp/losat-four-program-20260915/integrated-cold/cold/repeat-2/AP027078.AP027131.losatp-baseline-threaded-n8/output.txt",
+          "/tmp/losat-four-program-20260915/integrated-cold/cold/repeat-3/AP027078.AP027131.losatp-baseline-threaded-n8/output.txt"
+        ]
+      },
+      "candidate": {
+        "median_seconds": 8.532981835996907,
+        "samples": [
+          8.532981835996907,
+          8.89623930900052,
+          7.415530637001211
+        ],
+        "peak_rss_bytes": 295849984,
+        "raw_sha256": "5bdaa58908a96768c26c329ade49a97d4e2d705895e457709eae094b14c708d4",
+        "evidence": [
+          "/tmp/losat-four-program-20260915/integrated-cold/cold/repeat-1/AP027078.AP027131.losatp-candidate-threaded-n8/output.txt",
+          "/tmp/losat-four-program-20260915/integrated-cold/cold/repeat-2/AP027078.AP027131.losatp-candidate-threaded-n8/output.txt",
+          "/tmp/losat-four-program-20260915/integrated-cold/cold/repeat-3/AP027078.AP027131.losatp-candidate-threaded-n8/output.txt"
+        ]
+      },
+      "improvement_percent": -7.3644671505757495,
+      "five_percent_target_met": false,
+      "time_guard_pass": false,
+      "rss_guard_pass": true
+    },
+    {
+      "case": "AP027132.NZ_CP006932.losatp",
+      "kind": "native",
+      "threads": 1,
+      "baseline": {
+        "median_seconds": 43.934452138997585,
+        "samples": [
+          43.934452138997585,
+          47.15999617600028,
+          43.64200957700086
+        ],
+        "peak_rss_bytes": 91013120,
+        "raw_sha256": "cd81f8fef3dff78fb48f5923de43c84f1af78d006aaa9a8cae2c2f1f20aed181",
+        "evidence": [
+          "/tmp/losat-four-program-20260915/integrated-cold/cold/repeat-1/AP027132.NZ_CP006932.losatp-baseline-native-n1/output.txt",
+          "/tmp/losat-four-program-20260915/integrated-cold/cold/repeat-2/AP027132.NZ_CP006932.losatp-baseline-native-n1/output.txt",
+          "/tmp/losat-four-program-20260915/integrated-cold/cold/repeat-3/AP027132.NZ_CP006932.losatp-baseline-native-n1/output.txt"
+        ]
+      },
+      "candidate": {
+        "median_seconds": 45.82630063800025,
+        "samples": [
+          43.759859502002655,
+          45.82630063800025,
+          47.803963370999554
+        ],
+        "peak_rss_bytes": 91070464,
+        "raw_sha256": "cd81f8fef3dff78fb48f5923de43c84f1af78d006aaa9a8cae2c2f1f20aed181",
+        "evidence": [
+          "/tmp/losat-four-program-20260915/integrated-cold/cold/repeat-1/AP027132.NZ_CP006932.losatp-candidate-native-n1/output.txt",
+          "/tmp/losat-four-program-20260915/integrated-cold/cold/repeat-2/AP027132.NZ_CP006932.losatp-candidate-native-n1/output.txt",
+          "/tmp/losat-four-program-20260915/integrated-cold/cold/repeat-3/AP027132.NZ_CP006932.losatp-candidate-native-n1/output.txt"
+        ]
+      },
+      "improvement_percent": -4.306070536665231,
+      "five_percent_target_met": false,
+      "time_guard_pass": true,
+      "rss_guard_pass": true
+    },
+    {
+      "case": "AP027132.NZ_CP006932.losatp",
+      "kind": "native",
+      "threads": 8,
+      "baseline": {
+        "median_seconds": 8.63267546499992,
+        "samples": [
+          8.63267546499992,
+          9.318068217002292,
+          8.489524861000973
+        ],
+        "peak_rss_bytes": 114929664,
+        "raw_sha256": "cd81f8fef3dff78fb48f5923de43c84f1af78d006aaa9a8cae2c2f1f20aed181",
+        "evidence": [
+          "/tmp/losat-four-program-20260915/integrated-cold/cold/repeat-1/AP027132.NZ_CP006932.losatp-baseline-native-n8/output.txt",
+          "/tmp/losat-four-program-20260915/integrated-cold/cold/repeat-2/AP027132.NZ_CP006932.losatp-baseline-native-n8/output.txt",
+          "/tmp/losat-four-program-20260915/integrated-cold/cold/repeat-3/AP027132.NZ_CP006932.losatp-baseline-native-n8/output.txt"
+        ]
+      },
+      "candidate": {
+        "median_seconds": 8.99688499200056,
+        "samples": [
+          8.99688499200056,
+          10.059206009998888,
+          8.685813386000518
+        ],
+        "peak_rss_bytes": 105070592,
+        "raw_sha256": "cd81f8fef3dff78fb48f5923de43c84f1af78d006aaa9a8cae2c2f1f20aed181",
+        "evidence": [
+          "/tmp/losat-four-program-20260915/integrated-cold/cold/repeat-1/AP027132.NZ_CP006932.losatp-candidate-native-n8/output.txt",
+          "/tmp/losat-four-program-20260915/integrated-cold/cold/repeat-2/AP027132.NZ_CP006932.losatp-candidate-native-n8/output.txt",
+          "/tmp/losat-four-program-20260915/integrated-cold/cold/repeat-3/AP027132.NZ_CP006932.losatp-candidate-native-n8/output.txt"
+        ]
+      },
+      "improvement_percent": -4.218964659070996,
+      "five_percent_target_met": false,
+      "time_guard_pass": true,
+      "rss_guard_pass": true
+    },
+    {
+      "case": "AP027132.NZ_CP006932.losatp",
+      "kind": "serial",
+      "threads": 1,
+      "baseline": {
+        "median_seconds": 45.83665706300235,
+        "samples": [
+          44.243358578998595,
+          46.791837882003165,
+          45.83665706300235
+        ],
+        "peak_rss_bytes": 163483648,
+        "raw_sha256": "cd81f8fef3dff78fb48f5923de43c84f1af78d006aaa9a8cae2c2f1f20aed181",
+        "evidence": [
+          "/tmp/losat-four-program-20260915/integrated-cold/cold/repeat-1/AP027132.NZ_CP006932.losatp-baseline-serial-n1/output.txt",
+          "/tmp/losat-four-program-20260915/integrated-cold/cold/repeat-2/AP027132.NZ_CP006932.losatp-baseline-serial-n1/output.txt",
+          "/tmp/losat-four-program-20260915/integrated-cold/cold/repeat-3/AP027132.NZ_CP006932.losatp-baseline-serial-n1/output.txt"
+        ]
+      },
+      "candidate": {
+        "median_seconds": 44.38095194500056,
+        "samples": [
+          44.38095194500056,
+          47.834374781003135,
+          43.65876192900032
+        ],
+        "peak_rss_bytes": 164700160,
+        "raw_sha256": "cd81f8fef3dff78fb48f5923de43c84f1af78d006aaa9a8cae2c2f1f20aed181",
+        "evidence": [
+          "/tmp/losat-four-program-20260915/integrated-cold/cold/repeat-1/AP027132.NZ_CP006932.losatp-candidate-serial-n1/output.txt",
+          "/tmp/losat-four-program-20260915/integrated-cold/cold/repeat-2/AP027132.NZ_CP006932.losatp-candidate-serial-n1/output.txt",
+          "/tmp/losat-four-program-20260915/integrated-cold/cold/repeat-3/AP027132.NZ_CP006932.losatp-candidate-serial-n1/output.txt"
+        ]
+      },
+      "improvement_percent": 3.175853588102914,
+      "five_percent_target_met": false,
+      "time_guard_pass": true,
+      "rss_guard_pass": true
+    },
+    {
+      "case": "AP027132.NZ_CP006932.losatp",
+      "kind": "threaded",
+      "threads": 1,
+      "baseline": {
+        "median_seconds": 47.32947002700166,
+        "samples": [
+          45.284234381000715,
+          49.292782013999386,
+          47.32947002700166
+        ],
+        "peak_rss_bytes": 182824960,
+        "raw_sha256": "cd81f8fef3dff78fb48f5923de43c84f1af78d006aaa9a8cae2c2f1f20aed181",
+        "evidence": [
+          "/tmp/losat-four-program-20260915/integrated-cold/cold/repeat-1/AP027132.NZ_CP006932.losatp-baseline-threaded-n1/output.txt",
+          "/tmp/losat-four-program-20260915/integrated-cold/cold/repeat-2/AP027132.NZ_CP006932.losatp-baseline-threaded-n1/output.txt",
+          "/tmp/losat-four-program-20260915/integrated-cold/cold/repeat-3/AP027132.NZ_CP006932.losatp-baseline-threaded-n1/output.txt"
+        ]
+      },
+      "candidate": {
+        "median_seconds": 45.46622531500179,
+        "samples": [
+          45.46622531500179,
+          49.06022048799787,
+          44.780304218998936
+        ],
+        "peak_rss_bytes": 182226944,
+        "raw_sha256": "cd81f8fef3dff78fb48f5923de43c84f1af78d006aaa9a8cae2c2f1f20aed181",
+        "evidence": [
+          "/tmp/losat-four-program-20260915/integrated-cold/cold/repeat-1/AP027132.NZ_CP006932.losatp-candidate-threaded-n1/output.txt",
+          "/tmp/losat-four-program-20260915/integrated-cold/cold/repeat-2/AP027132.NZ_CP006932.losatp-candidate-threaded-n1/output.txt",
+          "/tmp/losat-four-program-20260915/integrated-cold/cold/repeat-3/AP027132.NZ_CP006932.losatp-candidate-threaded-n1/output.txt"
+        ]
+      },
+      "improvement_percent": 3.936753804631406,
+      "five_percent_target_met": false,
+      "time_guard_pass": true,
+      "rss_guard_pass": true
+    },
+    {
+      "case": "AP027132.NZ_CP006932.losatp",
+      "kind": "threaded",
+      "threads": 8,
+      "baseline": {
+        "median_seconds": 10.915194005003286,
+        "samples": [
+          10.915194005003286,
+          11.446793805997004,
+          10.503145069000311
+        ],
+        "peak_rss_bytes": 317710336,
+        "raw_sha256": "cd81f8fef3dff78fb48f5923de43c84f1af78d006aaa9a8cae2c2f1f20aed181",
+        "evidence": [
+          "/tmp/losat-four-program-20260915/integrated-cold/cold/repeat-1/AP027132.NZ_CP006932.losatp-baseline-threaded-n8/output.txt",
+          "/tmp/losat-four-program-20260915/integrated-cold/cold/repeat-2/AP027132.NZ_CP006932.losatp-baseline-threaded-n8/output.txt",
+          "/tmp/losat-four-program-20260915/integrated-cold/cold/repeat-3/AP027132.NZ_CP006932.losatp-baseline-threaded-n8/output.txt"
+        ]
+      },
+      "candidate": {
+        "median_seconds": 10.77992465999705,
+        "samples": [
+          10.77992465999705,
+          10.917278876000637,
+          9.617422005998378
+        ],
+        "peak_rss_bytes": 315719680,
+        "raw_sha256": "cd81f8fef3dff78fb48f5923de43c84f1af78d006aaa9a8cae2c2f1f20aed181",
+        "evidence": [
+          "/tmp/losat-four-program-20260915/integrated-cold/cold/repeat-1/AP027132.NZ_CP006932.losatp-candidate-threaded-n8/output.txt",
+          "/tmp/losat-four-program-20260915/integrated-cold/cold/repeat-2/AP027132.NZ_CP006932.losatp-candidate-threaded-n8/output.txt",
+          "/tmp/losat-four-program-20260915/integrated-cold/cold/repeat-3/AP027132.NZ_CP006932.losatp-candidate-threaded-n8/output.txt"
+        ]
+      },
+      "improvement_percent": 1.2392756825415252,
+      "five_percent_target_met": false,
+      "time_guard_pass": true,
+      "rss_guard_pass": true
+    },
+    {
+      "case": "AP027280.AP027280.tlosatx",
+      "kind": "native",
+      "threads": 1,
+      "baseline": {
+        "median_seconds": 29.727951775999827,
+        "samples": [
+          29.727951775999827,
+          32.5566100420001,
+          29.480609177000588
+        ],
+        "peak_rss_bytes": 107393024,
+        "raw_sha256": "845d15661c2a30fa69e01bcd8140792e55a1fa06bbb52181632680435a08eda8",
+        "evidence": [
+          "/tmp/losat-four-program-20260915/integrated-cold/cold/repeat-1/AP027280.AP027280.tlosatx-baseline-native-n1/output.txt",
+          "/tmp/losat-four-program-20260915/integrated-cold/cold/repeat-2/AP027280.AP027280.tlosatx-baseline-native-n1/output.txt",
+          "/tmp/losat-four-program-20260915/integrated-cold/cold/repeat-3/AP027280.AP027280.tlosatx-baseline-native-n1/output.txt"
+        ]
+      },
+      "candidate": {
+        "median_seconds": 26.45153914399998,
+        "samples": [
+          26.45153914399998,
+          26.765645125000447,
+          25.834864782002114
+        ],
+        "peak_rss_bytes": 107397120,
+        "raw_sha256": "845d15661c2a30fa69e01bcd8140792e55a1fa06bbb52181632680435a08eda8",
+        "evidence": [
+          "/tmp/losat-four-program-20260915/integrated-cold/cold/repeat-1/AP027280.AP027280.tlosatx-candidate-native-n1/output.txt",
+          "/tmp/losat-four-program-20260915/integrated-cold/cold/repeat-2/AP027280.AP027280.tlosatx-candidate-native-n1/output.txt",
+          "/tmp/losat-four-program-20260915/integrated-cold/cold/repeat-3/AP027280.AP027280.tlosatx-candidate-native-n1/output.txt"
+        ]
+      },
+      "improvement_percent": 11.021319789158776,
+      "five_percent_target_met": true,
+      "time_guard_pass": true,
+      "rss_guard_pass": true
+    },
+    {
+      "case": "AP027280.AP027280.tlosatx",
+      "kind": "native",
+      "threads": 8,
+      "baseline": {
+        "median_seconds": 18.419365737998305,
+        "samples": [
+          18.419365737998305,
+          19.46905212600177,
+          17.666906337999535
+        ],
+        "peak_rss_bytes": 124588032,
+        "raw_sha256": "845d15661c2a30fa69e01bcd8140792e55a1fa06bbb52181632680435a08eda8",
+        "evidence": [
+          "/tmp/losat-four-program-20260915/integrated-cold/cold/repeat-1/AP027280.AP027280.tlosatx-baseline-native-n8/output.txt",
+          "/tmp/losat-four-program-20260915/integrated-cold/cold/repeat-2/AP027280.AP027280.tlosatx-baseline-native-n8/output.txt",
+          "/tmp/losat-four-program-20260915/integrated-cold/cold/repeat-3/AP027280.AP027280.tlosatx-baseline-native-n8/output.txt"
+        ]
+      },
+      "candidate": {
+        "median_seconds": 16.06256698300058,
+        "samples": [
+          16.431119053999282,
+          16.06256698300058,
+          15.777467283998703
+        ],
+        "peak_rss_bytes": 126812160,
+        "raw_sha256": "845d15661c2a30fa69e01bcd8140792e55a1fa06bbb52181632680435a08eda8",
+        "evidence": [
+          "/tmp/losat-four-program-20260915/integrated-cold/cold/repeat-1/AP027280.AP027280.tlosatx-candidate-native-n8/output.txt",
+          "/tmp/losat-four-program-20260915/integrated-cold/cold/repeat-2/AP027280.AP027280.tlosatx-candidate-native-n8/output.txt",
+          "/tmp/losat-four-program-20260915/integrated-cold/cold/repeat-3/AP027280.AP027280.tlosatx-candidate-native-n8/output.txt"
+        ]
+      },
+      "improvement_percent": 12.795222096794346,
+      "five_percent_target_met": true,
+      "time_guard_pass": true,
+      "rss_guard_pass": true
+    },
+    {
+      "case": "AP027280.AP027280.tlosatx",
+      "kind": "serial",
+      "threads": 1,
+      "baseline": {
+        "median_seconds": 43.91707109300114,
+        "samples": [
+          43.91707109300114,
+          48.39998178499809,
+          42.99849122899832
+        ],
+        "peak_rss_bytes": 178745344,
+        "raw_sha256": "845d15661c2a30fa69e01bcd8140792e55a1fa06bbb52181632680435a08eda8",
+        "evidence": [
+          "/tmp/losat-four-program-20260915/integrated-cold/cold/repeat-1/AP027280.AP027280.tlosatx-baseline-serial-n1/output.txt",
+          "/tmp/losat-four-program-20260915/integrated-cold/cold/repeat-2/AP027280.AP027280.tlosatx-baseline-serial-n1/output.txt",
+          "/tmp/losat-four-program-20260915/integrated-cold/cold/repeat-3/AP027280.AP027280.tlosatx-baseline-serial-n1/output.txt"
+        ]
+      },
+      "candidate": {
+        "median_seconds": 31.92704476400104,
+        "samples": [
+          31.92704476400104,
+          32.43666684500204,
+          31.78114899799766
+        ],
+        "peak_rss_bytes": 172584960,
+        "raw_sha256": "845d15661c2a30fa69e01bcd8140792e55a1fa06bbb52181632680435a08eda8",
+        "evidence": [
+          "/tmp/losat-four-program-20260915/integrated-cold/cold/repeat-1/AP027280.AP027280.tlosatx-candidate-serial-n1/output.txt",
+          "/tmp/losat-four-program-20260915/integrated-cold/cold/repeat-2/AP027280.AP027280.tlosatx-candidate-serial-n1/output.txt",
+          "/tmp/losat-four-program-20260915/integrated-cold/cold/repeat-3/AP027280.AP027280.tlosatx-candidate-serial-n1/output.txt"
+        ]
+      },
+      "improvement_percent": 27.30151631380285,
+      "five_percent_target_met": true,
+      "time_guard_pass": true,
+      "rss_guard_pass": true
+    },
+    {
+      "case": "AP027280.AP027280.tlosatx",
+      "kind": "threaded",
+      "threads": 1,
+      "baseline": {
+        "median_seconds": 44.26320403799764,
+        "samples": [
+          44.151180171000306,
+          44.26320403799764,
+          45.614336128001014
+        ],
+        "peak_rss_bytes": 193871872,
+        "raw_sha256": "845d15661c2a30fa69e01bcd8140792e55a1fa06bbb52181632680435a08eda8",
+        "evidence": [
+          "/tmp/losat-four-program-20260915/integrated-cold/cold/repeat-1/AP027280.AP027280.tlosatx-baseline-threaded-n1/output.txt",
+          "/tmp/losat-four-program-20260915/integrated-cold/cold/repeat-2/AP027280.AP027280.tlosatx-baseline-threaded-n1/output.txt",
+          "/tmp/losat-four-program-20260915/integrated-cold/cold/repeat-3/AP027280.AP027280.tlosatx-baseline-threaded-n1/output.txt"
+        ]
+      },
+      "candidate": {
+        "median_seconds": 39.361184183999285,
+        "samples": [
+          37.48661801799972,
+          42.69603129999814,
+          39.361184183999285
+        ],
+        "peak_rss_bytes": 200765440,
+        "raw_sha256": "845d15661c2a30fa69e01bcd8140792e55a1fa06bbb52181632680435a08eda8",
+        "evidence": [
+          "/tmp/losat-four-program-20260915/integrated-cold/cold/repeat-1/AP027280.AP027280.tlosatx-candidate-threaded-n1/output.txt",
+          "/tmp/losat-four-program-20260915/integrated-cold/cold/repeat-2/AP027280.AP027280.tlosatx-candidate-threaded-n1/output.txt",
+          "/tmp/losat-four-program-20260915/integrated-cold/cold/repeat-3/AP027280.AP027280.tlosatx-candidate-threaded-n1/output.txt"
+        ]
+      },
+      "improvement_percent": 11.074706317667891,
+      "five_percent_target_met": true,
+      "time_guard_pass": true,
+      "rss_guard_pass": true
+    },
+    {
+      "case": "AP027280.AP027280.tlosatx",
+      "kind": "threaded",
+      "threads": 8,
+      "baseline": {
+        "median_seconds": 74.28158200699909,
+        "samples": [
+          72.81228389700118,
+          74.36721286600005,
+          74.28158200699909
+        ],
+        "peak_rss_bytes": 314650624,
+        "raw_sha256": "845d15661c2a30fa69e01bcd8140792e55a1fa06bbb52181632680435a08eda8",
+        "evidence": [
+          "/tmp/losat-four-program-20260915/integrated-cold/cold/repeat-1/AP027280.AP027280.tlosatx-baseline-threaded-n8/output.txt",
+          "/tmp/losat-four-program-20260915/integrated-cold/cold/repeat-2/AP027280.AP027280.tlosatx-baseline-threaded-n8/output.txt",
+          "/tmp/losat-four-program-20260915/integrated-cold/cold/repeat-3/AP027280.AP027280.tlosatx-baseline-threaded-n8/output.txt"
+        ]
+      },
+      "candidate": {
+        "median_seconds": 63.58492279300117,
+        "samples": [
+          63.58492279300117,
+          81.2462750779996,
+          62.31757823999942
+        ],
+        "peak_rss_bytes": 326754304,
+        "raw_sha256": "845d15661c2a30fa69e01bcd8140792e55a1fa06bbb52181632680435a08eda8",
+        "evidence": [
+          "/tmp/losat-four-program-20260915/integrated-cold/cold/repeat-1/AP027280.AP027280.tlosatx-candidate-threaded-n8/output.txt",
+          "/tmp/losat-four-program-20260915/integrated-cold/cold/repeat-2/AP027280.AP027280.tlosatx-candidate-threaded-n8/output.txt",
+          "/tmp/losat-four-program-20260915/integrated-cold/cold/repeat-3/AP027280.AP027280.tlosatx-candidate-threaded-n8/output.txt"
+        ]
+      },
+      "improvement_percent": 14.40014997659856,
+      "five_percent_target_met": true,
+      "time_guard_pass": true,
+      "rss_guard_pass": true
+    },
+    {
+      "case": "EDL933.Sakai.losatn.megablast",
+      "kind": "native",
+      "threads": 1,
+      "baseline": {
+        "median_seconds": 1.5629459369993128,
+        "samples": [
+          1.7338481469996623,
+          1.5629459369993128,
+          1.071448992999649
+        ],
+        "peak_rss_bytes": 231350272,
+        "raw_sha256": "300a925ef86f20af9c0eff53f1c73638bdf80d47f5153352086a3e7bfd416c0c",
+        "evidence": [
+          "/tmp/losat-four-program-20260915/integrated-cold/cold/repeat-1/EDL933.Sakai.losatn.megablast-baseline-native-n1/output.txt",
+          "/tmp/losat-four-program-20260915/integrated-cold/cold/repeat-2/EDL933.Sakai.losatn.megablast-baseline-native-n1/output.txt",
+          "/tmp/losat-four-program-20260915/integrated-cold/cold/repeat-3/EDL933.Sakai.losatn.megablast-baseline-native-n1/output.txt"
+        ]
+      },
+      "candidate": {
+        "median_seconds": 1.4010150489993975,
+        "samples": [
+          1.4010150489993975,
+          1.478395342001022,
+          1.2873981169977924
+        ],
+        "peak_rss_bytes": 242343936,
+        "raw_sha256": "300a925ef86f20af9c0eff53f1c73638bdf80d47f5153352086a3e7bfd416c0c",
+        "evidence": [
+          "/tmp/losat-four-program-20260915/integrated-cold/cold/repeat-1/EDL933.Sakai.losatn.megablast-candidate-native-n1/output.txt",
+          "/tmp/losat-four-program-20260915/integrated-cold/cold/repeat-2/EDL933.Sakai.losatn.megablast-candidate-native-n1/output.txt",
+          "/tmp/losat-four-program-20260915/integrated-cold/cold/repeat-3/EDL933.Sakai.losatn.megablast-candidate-native-n1/output.txt"
+        ]
+      },
+      "improvement_percent": 10.360619914390966,
+      "five_percent_target_met": true,
+      "time_guard_pass": true,
+      "rss_guard_pass": true
+    },
+    {
+      "case": "EDL933.Sakai.losatn.megablast",
+      "kind": "native",
+      "threads": 8,
+      "baseline": {
+        "median_seconds": 1.4461276799993357,
+        "samples": [
+          1.4461276799993357,
+          1.6089699680014746,
+          1.1681848090011044
+        ],
+        "peak_rss_bytes": 231346176,
+        "raw_sha256": "300a925ef86f20af9c0eff53f1c73638bdf80d47f5153352086a3e7bfd416c0c",
+        "evidence": [
+          "/tmp/losat-four-program-20260915/integrated-cold/cold/repeat-1/EDL933.Sakai.losatn.megablast-baseline-native-n8/output.txt",
+          "/tmp/losat-four-program-20260915/integrated-cold/cold/repeat-2/EDL933.Sakai.losatn.megablast-baseline-native-n8/output.txt",
+          "/tmp/losat-four-program-20260915/integrated-cold/cold/repeat-3/EDL933.Sakai.losatn.megablast-baseline-native-n8/output.txt"
+        ]
+      },
+      "candidate": {
+        "median_seconds": 1.452087768997444,
+        "samples": [
+          1.6769120959979773,
+          1.452087768997444,
+          0.9859116340012406
+        ],
+        "peak_rss_bytes": 244752384,
+        "raw_sha256": "300a925ef86f20af9c0eff53f1c73638bdf80d47f5153352086a3e7bfd416c0c",
+        "evidence": [
+          "/tmp/losat-four-program-20260915/integrated-cold/cold/repeat-1/EDL933.Sakai.losatn.megablast-candidate-native-n8/output.txt",
+          "/tmp/losat-four-program-20260915/integrated-cold/cold/repeat-2/EDL933.Sakai.losatn.megablast-candidate-native-n8/output.txt",
+          "/tmp/losat-four-program-20260915/integrated-cold/cold/repeat-3/EDL933.Sakai.losatn.megablast-candidate-native-n8/output.txt"
+        ]
+      },
+      "improvement_percent": -0.4121412708254877,
+      "five_percent_target_met": false,
+      "time_guard_pass": true,
+      "rss_guard_pass": true
+    },
+    {
+      "case": "EDL933.Sakai.losatn.megablast",
+      "kind": "serial",
+      "threads": 1,
+      "baseline": {
+        "median_seconds": 2.178150125000684,
+        "samples": [
+          2.178150125000684,
+          2.2629305490008846,
+          1.5437303069993504
+        ],
+        "peak_rss_bytes": 318906368,
+        "raw_sha256": "300a925ef86f20af9c0eff53f1c73638bdf80d47f5153352086a3e7bfd416c0c",
+        "evidence": [
+          "/tmp/losat-four-program-20260915/integrated-cold/cold/repeat-1/EDL933.Sakai.losatn.megablast-baseline-serial-n1/output.txt",
+          "/tmp/losat-four-program-20260915/integrated-cold/cold/repeat-2/EDL933.Sakai.losatn.megablast-baseline-serial-n1/output.txt",
+          "/tmp/losat-four-program-20260915/integrated-cold/cold/repeat-3/EDL933.Sakai.losatn.megablast-baseline-serial-n1/output.txt"
+        ]
+      },
+      "candidate": {
+        "median_seconds": 1.9143647950004379,
+        "samples": [
+          1.9143647950004379,
+          2.1701900820007722,
+          1.6253555119983503
+        ],
+        "peak_rss_bytes": 338010112,
+        "raw_sha256": "300a925ef86f20af9c0eff53f1c73638bdf80d47f5153352086a3e7bfd416c0c",
+        "evidence": [
+          "/tmp/losat-four-program-20260915/integrated-cold/cold/repeat-1/EDL933.Sakai.losatn.megablast-candidate-serial-n1/output.txt",
+          "/tmp/losat-four-program-20260915/integrated-cold/cold/repeat-2/EDL933.Sakai.losatn.megablast-candidate-serial-n1/output.txt",
+          "/tmp/losat-four-program-20260915/integrated-cold/cold/repeat-3/EDL933.Sakai.losatn.megablast-candidate-serial-n1/output.txt"
+        ]
+      },
+      "improvement_percent": 12.11052107807139,
+      "five_percent_target_met": true,
+      "time_guard_pass": true,
+      "rss_guard_pass": true
+    },
+    {
+      "case": "EDL933.Sakai.losatn.megablast",
+      "kind": "threaded",
+      "threads": 1,
+      "baseline": {
+        "median_seconds": 2.419482730998425,
+        "samples": [
+          2.4221789609982807,
+          2.419482730998425,
+          1.6451230579987168
+        ],
+        "peak_rss_bytes": 338452480,
+        "raw_sha256": "300a925ef86f20af9c0eff53f1c73638bdf80d47f5153352086a3e7bfd416c0c",
+        "evidence": [
+          "/tmp/losat-four-program-20260915/integrated-cold/cold/repeat-1/EDL933.Sakai.losatn.megablast-baseline-threaded-n1/output.txt",
+          "/tmp/losat-four-program-20260915/integrated-cold/cold/repeat-2/EDL933.Sakai.losatn.megablast-baseline-threaded-n1/output.txt",
+          "/tmp/losat-four-program-20260915/integrated-cold/cold/repeat-3/EDL933.Sakai.losatn.megablast-baseline-threaded-n1/output.txt"
+        ]
+      },
+      "candidate": {
+        "median_seconds": 2.0461336900007154,
+        "samples": [
+          2.0461336900007154,
+          2.805219621001015,
+          1.6504123089980567
+        ],
+        "peak_rss_bytes": 353554432,
+        "raw_sha256": "300a925ef86f20af9c0eff53f1c73638bdf80d47f5153352086a3e7bfd416c0c",
+        "evidence": [
+          "/tmp/losat-four-program-20260915/integrated-cold/cold/repeat-1/EDL933.Sakai.losatn.megablast-candidate-threaded-n1/output.txt",
+          "/tmp/losat-four-program-20260915/integrated-cold/cold/repeat-2/EDL933.Sakai.losatn.megablast-candidate-threaded-n1/output.txt",
+          "/tmp/losat-four-program-20260915/integrated-cold/cold/repeat-3/EDL933.Sakai.losatn.megablast-candidate-threaded-n1/output.txt"
+        ]
+      },
+      "improvement_percent": 15.430944648389493,
+      "five_percent_target_met": true,
+      "time_guard_pass": true,
+      "rss_guard_pass": true
+    },
+    {
+      "case": "EDL933.Sakai.losatn.megablast",
+      "kind": "threaded",
+      "threads": 8,
+      "baseline": {
+        "median_seconds": 3.0142499949979538,
+        "samples": [
+          3.276368953000201,
+          3.0142499949979538,
+          2.028941690001375
+        ],
+        "peak_rss_bytes": 455909376,
+        "raw_sha256": "300a925ef86f20af9c0eff53f1c73638bdf80d47f5153352086a3e7bfd416c0c",
+        "evidence": [
+          "/tmp/losat-four-program-20260915/integrated-cold/cold/repeat-1/EDL933.Sakai.losatn.megablast-baseline-threaded-n8/output.txt",
+          "/tmp/losat-four-program-20260915/integrated-cold/cold/repeat-2/EDL933.Sakai.losatn.megablast-baseline-threaded-n8/output.txt",
+          "/tmp/losat-four-program-20260915/integrated-cold/cold/repeat-3/EDL933.Sakai.losatn.megablast-baseline-threaded-n8/output.txt"
+        ]
+      },
+      "candidate": {
+        "median_seconds": 3.0719626669997524,
+        "samples": [
+          3.0719626669997524,
+          3.7127528359997086,
+          1.8537181130013778
+        ],
+        "peak_rss_bytes": 460288000,
+        "raw_sha256": "300a925ef86f20af9c0eff53f1c73638bdf80d47f5153352086a3e7bfd416c0c",
+        "evidence": [
+          "/tmp/losat-four-program-20260915/integrated-cold/cold/repeat-1/EDL933.Sakai.losatn.megablast-candidate-threaded-n8/output.txt",
+          "/tmp/losat-four-program-20260915/integrated-cold/cold/repeat-2/EDL933.Sakai.losatn.megablast-candidate-threaded-n8/output.txt",
+          "/tmp/losat-four-program-20260915/integrated-cold/cold/repeat-3/EDL933.Sakai.losatn.megablast-candidate-threaded-n8/output.txt"
+        ]
+      },
+      "improvement_percent": -1.9146610963779007,
+      "five_percent_target_met": false,
+      "time_guard_pass": true,
+      "rss_guard_pass": true
+    },
+    {
+      "case": "MelaMJNV.PemoMJNVA.losatn.blastn",
+      "kind": "native",
+      "threads": 1,
+      "baseline": {
+        "median_seconds": 0.4778977659989323,
+        "samples": [
+          0.4778977659989323,
+          0.4553676830000768,
+          0.5173309170022549
+        ],
+        "peak_rss_bytes": 35225600,
+        "raw_sha256": "f7264639f1f1aa9b25e43e7da0cef44a40951de43b9ab9bc60cec3f565966b99",
+        "evidence": [
+          "/tmp/losat-four-program-20260915/integrated-cold/cold/repeat-1/MelaMJNV.PemoMJNVA.losatn.blastn-baseline-native-n1/output.txt",
+          "/tmp/losat-four-program-20260915/integrated-cold/cold/repeat-2/MelaMJNV.PemoMJNVA.losatn.blastn-baseline-native-n1/output.txt",
+          "/tmp/losat-four-program-20260915/integrated-cold/cold/repeat-3/MelaMJNV.PemoMJNVA.losatn.blastn-baseline-native-n1/output.txt"
+        ]
+      },
+      "candidate": {
+        "median_seconds": 0.48808555399955367,
+        "samples": [
+          0.49843619700186537,
+          0.48808555399955367,
+          0.4619444769996335
+        ],
+        "peak_rss_bytes": 35840000,
+        "raw_sha256": "f7264639f1f1aa9b25e43e7da0cef44a40951de43b9ab9bc60cec3f565966b99",
+        "evidence": [
+          "/tmp/losat-four-program-20260915/integrated-cold/cold/repeat-1/MelaMJNV.PemoMJNVA.losatn.blastn-candidate-native-n1/output.txt",
+          "/tmp/losat-four-program-20260915/integrated-cold/cold/repeat-2/MelaMJNV.PemoMJNVA.losatn.blastn-candidate-native-n1/output.txt",
+          "/tmp/losat-four-program-20260915/integrated-cold/cold/repeat-3/MelaMJNV.PemoMJNVA.losatn.blastn-candidate-native-n1/output.txt"
+        ]
+      },
+      "improvement_percent": -2.131792346701225,
+      "five_percent_target_met": false,
+      "time_guard_pass": true,
+      "rss_guard_pass": true
+    },
+    {
+      "case": "MelaMJNV.PemoMJNVA.losatn.blastn",
+      "kind": "native",
+      "threads": 8,
+      "baseline": {
+        "median_seconds": 0.4602494190003199,
+        "samples": [
+          0.4602494190003199,
+          0.49599799900170183,
+          0.41138336199946934
+        ],
+        "peak_rss_bytes": 40513536,
+        "raw_sha256": "f7264639f1f1aa9b25e43e7da0cef44a40951de43b9ab9bc60cec3f565966b99",
+        "evidence": [
+          "/tmp/losat-four-program-20260915/integrated-cold/cold/repeat-1/MelaMJNV.PemoMJNVA.losatn.blastn-baseline-native-n8/output.txt",
+          "/tmp/losat-four-program-20260915/integrated-cold/cold/repeat-2/MelaMJNV.PemoMJNVA.losatn.blastn-baseline-native-n8/output.txt",
+          "/tmp/losat-four-program-20260915/integrated-cold/cold/repeat-3/MelaMJNV.PemoMJNVA.losatn.blastn-baseline-native-n8/output.txt"
+        ]
+      },
+      "candidate": {
+        "median_seconds": 0.40146325600289856,
+        "samples": [
+          0.40146325600289856,
+          0.38805714800037094,
+          0.43925285400109715
+        ],
+        "peak_rss_bytes": 41246720,
+        "raw_sha256": "f7264639f1f1aa9b25e43e7da0cef44a40951de43b9ab9bc60cec3f565966b99",
+        "evidence": [
+          "/tmp/losat-four-program-20260915/integrated-cold/cold/repeat-1/MelaMJNV.PemoMJNVA.losatn.blastn-candidate-native-n8/output.txt",
+          "/tmp/losat-four-program-20260915/integrated-cold/cold/repeat-2/MelaMJNV.PemoMJNVA.losatn.blastn-candidate-native-n8/output.txt",
+          "/tmp/losat-four-program-20260915/integrated-cold/cold/repeat-3/MelaMJNV.PemoMJNVA.losatn.blastn-candidate-native-n8/output.txt"
+        ]
+      },
+      "improvement_percent": 12.772675112791502,
+      "five_percent_target_met": true,
+      "time_guard_pass": true,
+      "rss_guard_pass": true
+    },
+    {
+      "case": "MelaMJNV.PemoMJNVA.losatn.blastn",
+      "kind": "serial",
+      "threads": 1,
+      "baseline": {
+        "median_seconds": 1.5495306819975667,
+        "samples": [
+          1.5495306819975667,
+          1.6510553499974776,
+          1.5075498869991861
+        ],
+        "peak_rss_bytes": 124973056,
+        "raw_sha256": "f7264639f1f1aa9b25e43e7da0cef44a40951de43b9ab9bc60cec3f565966b99",
+        "evidence": [
+          "/tmp/losat-four-program-20260915/integrated-cold/cold/repeat-1/MelaMJNV.PemoMJNVA.losatn.blastn-baseline-serial-n1/output.txt",
+          "/tmp/losat-four-program-20260915/integrated-cold/cold/repeat-2/MelaMJNV.PemoMJNVA.losatn.blastn-baseline-serial-n1/output.txt",
+          "/tmp/losat-four-program-20260915/integrated-cold/cold/repeat-3/MelaMJNV.PemoMJNVA.losatn.blastn-baseline-serial-n1/output.txt"
+        ]
+      },
+      "candidate": {
+        "median_seconds": 1.668804345998069,
+        "samples": [
+          1.6997383490015636,
+          1.668804345998069,
+          1.5165181299998949
+        ],
+        "peak_rss_bytes": 124608512,
+        "raw_sha256": "f7264639f1f1aa9b25e43e7da0cef44a40951de43b9ab9bc60cec3f565966b99",
+        "evidence": [
+          "/tmp/losat-four-program-20260915/integrated-cold/cold/repeat-1/MelaMJNV.PemoMJNVA.losatn.blastn-candidate-serial-n1/output.txt",
+          "/tmp/losat-four-program-20260915/integrated-cold/cold/repeat-2/MelaMJNV.PemoMJNVA.losatn.blastn-candidate-serial-n1/output.txt",
+          "/tmp/losat-four-program-20260915/integrated-cold/cold/repeat-3/MelaMJNV.PemoMJNVA.losatn.blastn-candidate-serial-n1/output.txt"
+        ]
+      },
+      "improvement_percent": -7.697405762029927,
+      "five_percent_target_met": false,
+      "time_guard_pass": false,
+      "rss_guard_pass": true
+    },
+    {
+      "case": "MelaMJNV.PemoMJNVA.losatn.blastn",
+      "kind": "threaded",
+      "threads": 1,
+      "baseline": {
+        "median_seconds": 0.9327501849984401,
+        "samples": [
+          0.9327501849984401,
+          1.0360897990030935,
+          0.8054696810031601
+        ],
+        "peak_rss_bytes": 144228352,
+        "raw_sha256": "f7264639f1f1aa9b25e43e7da0cef44a40951de43b9ab9bc60cec3f565966b99",
+        "evidence": [
+          "/tmp/losat-four-program-20260915/integrated-cold/cold/repeat-1/MelaMJNV.PemoMJNVA.losatn.blastn-baseline-threaded-n1/output.txt",
+          "/tmp/losat-four-program-20260915/integrated-cold/cold/repeat-2/MelaMJNV.PemoMJNVA.losatn.blastn-baseline-threaded-n1/output.txt",
+          "/tmp/losat-four-program-20260915/integrated-cold/cold/repeat-3/MelaMJNV.PemoMJNVA.losatn.blastn-baseline-threaded-n1/output.txt"
+        ]
+      },
+      "candidate": {
+        "median_seconds": 0.8679992949982989,
+        "samples": [
+          0.8679992949982989,
+          1.1325819009980478,
+          0.7902953779994277
+        ],
+        "peak_rss_bytes": 149069824,
+        "raw_sha256": "f7264639f1f1aa9b25e43e7da0cef44a40951de43b9ab9bc60cec3f565966b99",
+        "evidence": [
+          "/tmp/losat-four-program-20260915/integrated-cold/cold/repeat-1/MelaMJNV.PemoMJNVA.losatn.blastn-candidate-threaded-n1/output.txt",
+          "/tmp/losat-four-program-20260915/integrated-cold/cold/repeat-2/MelaMJNV.PemoMJNVA.losatn.blastn-candidate-threaded-n1/output.txt",
+          "/tmp/losat-four-program-20260915/integrated-cold/cold/repeat-3/MelaMJNV.PemoMJNVA.losatn.blastn-candidate-threaded-n1/output.txt"
+        ]
+      },
+      "improvement_percent": 6.941932689110055,
+      "five_percent_target_met": true,
+      "time_guard_pass": true,
+      "rss_guard_pass": true
+    },
+    {
+      "case": "MelaMJNV.PemoMJNVA.losatn.blastn",
+      "kind": "threaded",
+      "threads": 8,
+      "baseline": {
+        "median_seconds": 1.5607421189997694,
+        "samples": [
+          1.5607421189997694,
+          1.9352564260007057,
+          1.4434174220004934
+        ],
+        "peak_rss_bytes": 251416576,
+        "raw_sha256": "f7264639f1f1aa9b25e43e7da0cef44a40951de43b9ab9bc60cec3f565966b99",
+        "evidence": [
+          "/tmp/losat-four-program-20260915/integrated-cold/cold/repeat-1/MelaMJNV.PemoMJNVA.losatn.blastn-baseline-threaded-n8/output.txt",
+          "/tmp/losat-four-program-20260915/integrated-cold/cold/repeat-2/MelaMJNV.PemoMJNVA.losatn.blastn-baseline-threaded-n8/output.txt",
+          "/tmp/losat-four-program-20260915/integrated-cold/cold/repeat-3/MelaMJNV.PemoMJNVA.losatn.blastn-baseline-threaded-n8/output.txt"
+        ]
+      },
+      "candidate": {
+        "median_seconds": 1.6577034439978888,
+        "samples": [
+          1.6577034439978888,
+          2.1497708360002434,
+          0.8279820040006598
+        ],
+        "peak_rss_bytes": 264314880,
+        "raw_sha256": "f7264639f1f1aa9b25e43e7da0cef44a40951de43b9ab9bc60cec3f565966b99",
+        "evidence": [
+          "/tmp/losat-four-program-20260915/integrated-cold/cold/repeat-1/MelaMJNV.PemoMJNVA.losatn.blastn-candidate-threaded-n8/output.txt",
+          "/tmp/losat-four-program-20260915/integrated-cold/cold/repeat-2/MelaMJNV.PemoMJNVA.losatn.blastn-candidate-threaded-n8/output.txt",
+          "/tmp/losat-four-program-20260915/integrated-cold/cold/repeat-3/MelaMJNV.PemoMJNVA.losatn.blastn-candidate-threaded-n8/output.txt"
+        ]
+      },
+      "improvement_percent": -6.212514150656666,
+      "five_percent_target_met": false,
+      "time_guard_pass": false,
+      "rss_guard_pass": true
+    },
+    {
+      "case": "MjPMNV.MlPMNV.losatn.blastn",
+      "kind": "native",
+      "threads": 1,
+      "baseline": {
+        "median_seconds": 8.84105640299822,
+        "samples": [
+          8.870680464002362,
+          8.721600138000213,
+          8.84105640299822
+        ],
+        "peak_rss_bytes": 107347968,
+        "raw_sha256": "9a30fc9c61c4eb33d79c638ce62a330884d1330f56e4ba4f49d54b6547228603",
+        "evidence": [
+          "/tmp/losat-four-program-20260915/integrated-cold/cold/repeat-1/MjPMNV.MlPMNV.losatn.blastn-baseline-native-n1/output.txt",
+          "/tmp/losat-four-program-20260915/integrated-cold/cold/repeat-2/MjPMNV.MlPMNV.losatn.blastn-baseline-native-n1/output.txt",
+          "/tmp/losat-four-program-20260915/integrated-cold/cold/repeat-3/MjPMNV.MlPMNV.losatn.blastn-baseline-native-n1/output.txt"
+        ]
+      },
+      "candidate": {
+        "median_seconds": 8.921009208002943,
+        "samples": [
+          8.921009208002943,
+          8.96449089700036,
+          8.786903822001477
+        ],
+        "peak_rss_bytes": 107982848,
+        "raw_sha256": "9a30fc9c61c4eb33d79c638ce62a330884d1330f56e4ba4f49d54b6547228603",
+        "evidence": [
+          "/tmp/losat-four-program-20260915/integrated-cold/cold/repeat-1/MjPMNV.MlPMNV.losatn.blastn-candidate-native-n1/output.txt",
+          "/tmp/losat-four-program-20260915/integrated-cold/cold/repeat-2/MjPMNV.MlPMNV.losatn.blastn-candidate-native-n1/output.txt",
+          "/tmp/losat-four-program-20260915/integrated-cold/cold/repeat-3/MjPMNV.MlPMNV.losatn.blastn-candidate-native-n1/output.txt"
+        ]
+      },
+      "improvement_percent": -0.9043354250925143,
+      "five_percent_target_met": false,
+      "time_guard_pass": true,
+      "rss_guard_pass": true
+    },
+    {
+      "case": "MjPMNV.MlPMNV.losatn.blastn",
+      "kind": "native",
+      "threads": 8,
+      "baseline": {
+        "median_seconds": 4.665271158999531,
+        "samples": [
+          5.1158075089988415,
+          4.665271158999531,
+          4.30792230699808
+        ],
+        "peak_rss_bytes": 139366400,
+        "raw_sha256": "9a30fc9c61c4eb33d79c638ce62a330884d1330f56e4ba4f49d54b6547228603",
+        "evidence": [
+          "/tmp/losat-four-program-20260915/integrated-cold/cold/repeat-1/MjPMNV.MlPMNV.losatn.blastn-baseline-native-n8/output.txt",
+          "/tmp/losat-four-program-20260915/integrated-cold/cold/repeat-2/MjPMNV.MlPMNV.losatn.blastn-baseline-native-n8/output.txt",
+          "/tmp/losat-four-program-20260915/integrated-cold/cold/repeat-3/MjPMNV.MlPMNV.losatn.blastn-baseline-native-n8/output.txt"
+        ]
+      },
+      "candidate": {
+        "median_seconds": 5.178615261000232,
+        "samples": [
+          5.178615261000232,
+          5.408580666000489,
+          4.191991056999541
+        ],
+        "peak_rss_bytes": 137392128,
+        "raw_sha256": "9a30fc9c61c4eb33d79c638ce62a330884d1330f56e4ba4f49d54b6547228603",
+        "evidence": [
+          "/tmp/losat-four-program-20260915/integrated-cold/cold/repeat-1/MjPMNV.MlPMNV.losatn.blastn-candidate-native-n8/output.txt",
+          "/tmp/losat-four-program-20260915/integrated-cold/cold/repeat-2/MjPMNV.MlPMNV.losatn.blastn-candidate-native-n8/output.txt",
+          "/tmp/losat-four-program-20260915/integrated-cold/cold/repeat-3/MjPMNV.MlPMNV.losatn.blastn-candidate-native-n8/output.txt"
+        ]
+      },
+      "improvement_percent": -11.003521221064203,
+      "five_percent_target_met": false,
+      "time_guard_pass": false,
+      "rss_guard_pass": true
+    },
+    {
+      "case": "MjPMNV.MlPMNV.losatn.blastn",
+      "kind": "serial",
+      "threads": 1,
+      "baseline": {
+        "median_seconds": 37.617359938001755,
+        "samples": [
+          36.891317493002134,
+          37.922703451000416,
+          37.617359938001755
+        ],
+        "peak_rss_bytes": 178987008,
+        "raw_sha256": "9a30fc9c61c4eb33d79c638ce62a330884d1330f56e4ba4f49d54b6547228603",
+        "evidence": [
+          "/tmp/losat-four-program-20260915/integrated-cold/cold/repeat-1/MjPMNV.MlPMNV.losatn.blastn-baseline-serial-n1/output.txt",
+          "/tmp/losat-four-program-20260915/integrated-cold/cold/repeat-2/MjPMNV.MlPMNV.losatn.blastn-baseline-serial-n1/output.txt",
+          "/tmp/losat-four-program-20260915/integrated-cold/cold/repeat-3/MjPMNV.MlPMNV.losatn.blastn-baseline-serial-n1/output.txt"
+        ]
+      },
+      "candidate": {
+        "median_seconds": 37.458220055999845,
+        "samples": [
+          37.08434764499907,
+          37.558969929999876,
+          37.458220055999845
+        ],
+        "peak_rss_bytes": 178876416,
+        "raw_sha256": "9a30fc9c61c4eb33d79c638ce62a330884d1330f56e4ba4f49d54b6547228603",
+        "evidence": [
+          "/tmp/losat-four-program-20260915/integrated-cold/cold/repeat-1/MjPMNV.MlPMNV.losatn.blastn-candidate-serial-n1/output.txt",
+          "/tmp/losat-four-program-20260915/integrated-cold/cold/repeat-2/MjPMNV.MlPMNV.losatn.blastn-candidate-serial-n1/output.txt",
+          "/tmp/losat-four-program-20260915/integrated-cold/cold/repeat-3/MjPMNV.MlPMNV.losatn.blastn-candidate-serial-n1/output.txt"
+        ]
+      },
+      "improvement_percent": 0.4230490450796983,
+      "five_percent_target_met": false,
+      "time_guard_pass": true,
+      "rss_guard_pass": true
+    },
+    {
+      "case": "MjPMNV.MlPMNV.losatn.blastn",
+      "kind": "threaded",
+      "threads": 1,
+      "baseline": {
+        "median_seconds": 13.69529071800207,
+        "samples": [
+          13.69529071800207,
+          13.795320552999328,
+          13.482327846999397
+        ],
+        "peak_rss_bytes": 193654784,
+        "raw_sha256": "9a30fc9c61c4eb33d79c638ce62a330884d1330f56e4ba4f49d54b6547228603",
+        "evidence": [
+          "/tmp/losat-four-program-20260915/integrated-cold/cold/repeat-1/MjPMNV.MlPMNV.losatn.blastn-baseline-threaded-n1/output.txt",
+          "/tmp/losat-four-program-20260915/integrated-cold/cold/repeat-2/MjPMNV.MlPMNV.losatn.blastn-baseline-threaded-n1/output.txt",
+          "/tmp/losat-four-program-20260915/integrated-cold/cold/repeat-3/MjPMNV.MlPMNV.losatn.blastn-baseline-threaded-n1/output.txt"
+        ]
+      },
+      "candidate": {
+        "median_seconds": 13.632409789999656,
+        "samples": [
+          13.632409789999656,
+          14.02633121600229,
+          13.562325413000508
+        ],
+        "peak_rss_bytes": 198144000,
+        "raw_sha256": "9a30fc9c61c4eb33d79c638ce62a330884d1330f56e4ba4f49d54b6547228603",
+        "evidence": [
+          "/tmp/losat-four-program-20260915/integrated-cold/cold/repeat-1/MjPMNV.MlPMNV.losatn.blastn-candidate-threaded-n1/output.txt",
+          "/tmp/losat-four-program-20260915/integrated-cold/cold/repeat-2/MjPMNV.MlPMNV.losatn.blastn-candidate-threaded-n1/output.txt",
+          "/tmp/losat-four-program-20260915/integrated-cold/cold/repeat-3/MjPMNV.MlPMNV.losatn.blastn-candidate-threaded-n1/output.txt"
+        ]
+      },
+      "improvement_percent": 0.4591427031173504,
+      "five_percent_target_met": false,
+      "time_guard_pass": true,
+      "rss_guard_pass": true
+    },
+    {
+      "case": "MjPMNV.MlPMNV.losatn.blastn",
+      "kind": "threaded",
+      "threads": 8,
+      "baseline": {
+        "median_seconds": 7.529270954000822,
+        "samples": [
+          7.556705915001658,
+          7.529270954000822,
+          5.6707473040005425
+        ],
+        "peak_rss_bytes": 334618624,
+        "raw_sha256": "9a30fc9c61c4eb33d79c638ce62a330884d1330f56e4ba4f49d54b6547228603",
+        "evidence": [
+          "/tmp/losat-four-program-20260915/integrated-cold/cold/repeat-1/MjPMNV.MlPMNV.losatn.blastn-baseline-threaded-n8/output.txt",
+          "/tmp/losat-four-program-20260915/integrated-cold/cold/repeat-2/MjPMNV.MlPMNV.losatn.blastn-baseline-threaded-n8/output.txt",
+          "/tmp/losat-four-program-20260915/integrated-cold/cold/repeat-3/MjPMNV.MlPMNV.losatn.blastn-baseline-threaded-n8/output.txt"
+        ]
+      },
+      "candidate": {
+        "median_seconds": 7.755591758002993,
+        "samples": [
+          7.755591758002993,
+          8.041708364002261,
+          5.736894768000639
+        ],
+        "peak_rss_bytes": 341381120,
+        "raw_sha256": "9a30fc9c61c4eb33d79c638ce62a330884d1330f56e4ba4f49d54b6547228603",
+        "evidence": [
+          "/tmp/losat-four-program-20260915/integrated-cold/cold/repeat-1/MjPMNV.MlPMNV.losatn.blastn-candidate-threaded-n8/output.txt",
+          "/tmp/losat-four-program-20260915/integrated-cold/cold/repeat-2/MjPMNV.MlPMNV.losatn.blastn-candidate-threaded-n8/output.txt",
+          "/tmp/losat-four-program-20260915/integrated-cold/cold/repeat-3/MjPMNV.MlPMNV.losatn.blastn-candidate-threaded-n8/output.txt"
+        ]
+      },
+      "improvement_percent": -3.0058793923721265,
+      "five_percent_target_met": false,
+      "time_guard_pass": true,
+      "rss_guard_pass": true
+    },
+    {
+      "case": "MjeNMV.MelaMJNV.tlosatx",
+      "kind": "native",
+      "threads": 1,
+      "baseline": {
+        "median_seconds": 16.747868309001205,
+        "samples": [
+          16.595226847999584,
+          17.16537475000223,
+          16.747868309001205
+        ],
+        "peak_rss_bytes": 96432128,
+        "raw_sha256": "b309f77fee038f0559d870737ebeba732c11eba4f7e495f045acbfb831817fd7",
+        "evidence": [
+          "/tmp/losat-four-program-20260915/integrated-cold/cold/repeat-1/MjeNMV.MelaMJNV.tlosatx-baseline-native-n1/output.txt",
+          "/tmp/losat-four-program-20260915/integrated-cold/cold/repeat-2/MjeNMV.MelaMJNV.tlosatx-baseline-native-n1/output.txt",
+          "/tmp/losat-four-program-20260915/integrated-cold/cold/repeat-3/MjeNMV.MelaMJNV.tlosatx-baseline-native-n1/output.txt"
+        ]
+      },
+      "candidate": {
+        "median_seconds": 14.441021161001117,
+        "samples": [
+          14.282867178000743,
+          14.549364177000825,
+          14.441021161001117
+        ],
+        "peak_rss_bytes": 96735232,
+        "raw_sha256": "b309f77fee038f0559d870737ebeba732c11eba4f7e495f045acbfb831817fd7",
+        "evidence": [
+          "/tmp/losat-four-program-20260915/integrated-cold/cold/repeat-1/MjeNMV.MelaMJNV.tlosatx-candidate-native-n1/output.txt",
+          "/tmp/losat-four-program-20260915/integrated-cold/cold/repeat-2/MjeNMV.MelaMJNV.tlosatx-candidate-native-n1/output.txt",
+          "/tmp/losat-four-program-20260915/integrated-cold/cold/repeat-3/MjeNMV.MelaMJNV.tlosatx-candidate-native-n1/output.txt"
+        ]
+      },
+      "improvement_percent": 13.773974725847733,
+      "five_percent_target_met": true,
+      "time_guard_pass": true,
+      "rss_guard_pass": true
+    },
+    {
+      "case": "MjeNMV.MelaMJNV.tlosatx",
+      "kind": "native",
+      "threads": 8,
+      "baseline": {
+        "median_seconds": 10.241741926998657,
+        "samples": [
+          10.179403138001362,
+          10.71085802900052,
+          10.241741926998657
+        ],
+        "peak_rss_bytes": 116269056,
+        "raw_sha256": "b309f77fee038f0559d870737ebeba732c11eba4f7e495f045acbfb831817fd7",
+        "evidence": [
+          "/tmp/losat-four-program-20260915/integrated-cold/cold/repeat-1/MjeNMV.MelaMJNV.tlosatx-baseline-native-n8/output.txt",
+          "/tmp/losat-four-program-20260915/integrated-cold/cold/repeat-2/MjeNMV.MelaMJNV.tlosatx-baseline-native-n8/output.txt",
+          "/tmp/losat-four-program-20260915/integrated-cold/cold/repeat-3/MjeNMV.MelaMJNV.tlosatx-baseline-native-n8/output.txt"
+        ]
+      },
+      "candidate": {
+        "median_seconds": 8.645299378000345,
+        "samples": [
+          9.005649594997521,
+          8.645299378000345,
+          8.55559819300106
+        ],
+        "peak_rss_bytes": 117805056,
+        "raw_sha256": "b309f77fee038f0559d870737ebeba732c11eba4f7e495f045acbfb831817fd7",
+        "evidence": [
+          "/tmp/losat-four-program-20260915/integrated-cold/cold/repeat-1/MjeNMV.MelaMJNV.tlosatx-candidate-native-n8/output.txt",
+          "/tmp/losat-four-program-20260915/integrated-cold/cold/repeat-2/MjeNMV.MelaMJNV.tlosatx-candidate-native-n8/output.txt",
+          "/tmp/losat-four-program-20260915/integrated-cold/cold/repeat-3/MjeNMV.MelaMJNV.tlosatx-candidate-native-n8/output.txt"
+        ]
+      },
+      "improvement_percent": 15.58760765871152,
+      "five_percent_target_met": true,
+      "time_guard_pass": true,
+      "rss_guard_pass": true
+    },
+    {
+      "case": "MjeNMV.MelaMJNV.tlosatx",
+      "kind": "serial",
+      "threads": 1,
+      "baseline": {
+        "median_seconds": 25.525345689999085,
+        "samples": [
+          25.07118082300076,
+          26.05445780199807,
+          25.525345689999085
+        ],
+        "peak_rss_bytes": 163635200,
+        "raw_sha256": "b309f77fee038f0559d870737ebeba732c11eba4f7e495f045acbfb831817fd7",
+        "evidence": [
+          "/tmp/losat-four-program-20260915/integrated-cold/cold/repeat-1/MjeNMV.MelaMJNV.tlosatx-baseline-serial-n1/output.txt",
+          "/tmp/losat-four-program-20260915/integrated-cold/cold/repeat-2/MjeNMV.MelaMJNV.tlosatx-baseline-serial-n1/output.txt",
+          "/tmp/losat-four-program-20260915/integrated-cold/cold/repeat-3/MjeNMV.MelaMJNV.tlosatx-baseline-serial-n1/output.txt"
+        ]
+      },
+      "candidate": {
+        "median_seconds": 19.824948862002202,
+        "samples": [
+          19.95685271199909,
+          19.824948862002202,
+          19.542942243999278
+        ],
+        "peak_rss_bytes": 161161216,
+        "raw_sha256": "b309f77fee038f0559d870737ebeba732c11eba4f7e495f045acbfb831817fd7",
+        "evidence": [
+          "/tmp/losat-four-program-20260915/integrated-cold/cold/repeat-1/MjeNMV.MelaMJNV.tlosatx-candidate-serial-n1/output.txt",
+          "/tmp/losat-four-program-20260915/integrated-cold/cold/repeat-2/MjeNMV.MelaMJNV.tlosatx-candidate-serial-n1/output.txt",
+          "/tmp/losat-four-program-20260915/integrated-cold/cold/repeat-3/MjeNMV.MelaMJNV.tlosatx-candidate-serial-n1/output.txt"
+        ]
+      },
+      "improvement_percent": 22.332300205557324,
+      "five_percent_target_met": true,
+      "time_guard_pass": true,
+      "rss_guard_pass": true
+    },
+    {
+      "case": "MjeNMV.MelaMJNV.tlosatx",
+      "kind": "threaded",
+      "threads": 1,
+      "baseline": {
+        "median_seconds": 25.500857221999468,
+        "samples": [
+          25.346882585999992,
+          26.25358658999903,
+          25.500857221999468
+        ],
+        "peak_rss_bytes": 186101760,
+        "raw_sha256": "b309f77fee038f0559d870737ebeba732c11eba4f7e495f045acbfb831817fd7",
+        "evidence": [
+          "/tmp/losat-four-program-20260915/integrated-cold/cold/repeat-1/MjeNMV.MelaMJNV.tlosatx-baseline-threaded-n1/output.txt",
+          "/tmp/losat-four-program-20260915/integrated-cold/cold/repeat-2/MjeNMV.MelaMJNV.tlosatx-baseline-threaded-n1/output.txt",
+          "/tmp/losat-four-program-20260915/integrated-cold/cold/repeat-3/MjeNMV.MelaMJNV.tlosatx-baseline-threaded-n1/output.txt"
+        ]
+      },
+      "candidate": {
+        "median_seconds": 22.015548106002825,
+        "samples": [
+          22.015548106002825,
+          21.771245174000796,
+          22.157714672997827
+        ],
+        "peak_rss_bytes": 183402496,
+        "raw_sha256": "b309f77fee038f0559d870737ebeba732c11eba4f7e495f045acbfb831817fd7",
+        "evidence": [
+          "/tmp/losat-four-program-20260915/integrated-cold/cold/repeat-1/MjeNMV.MelaMJNV.tlosatx-candidate-threaded-n1/output.txt",
+          "/tmp/losat-four-program-20260915/integrated-cold/cold/repeat-2/MjeNMV.MelaMJNV.tlosatx-candidate-threaded-n1/output.txt",
+          "/tmp/losat-four-program-20260915/integrated-cold/cold/repeat-3/MjeNMV.MelaMJNV.tlosatx-candidate-threaded-n1/output.txt"
+        ]
+      },
+      "improvement_percent": 13.667419434786227,
+      "five_percent_target_met": true,
+      "time_guard_pass": true,
+      "rss_guard_pass": true
+    },
+    {
+      "case": "MjeNMV.MelaMJNV.tlosatx",
+      "kind": "threaded",
+      "threads": 8,
+      "baseline": {
+        "median_seconds": 42.5917428640023,
+        "samples": [
+          41.624485090000235,
+          44.068218521002564,
+          42.5917428640023
+        ],
+        "peak_rss_bytes": 308527104,
+        "raw_sha256": "b309f77fee038f0559d870737ebeba732c11eba4f7e495f045acbfb831817fd7",
+        "evidence": [
+          "/tmp/losat-four-program-20260915/integrated-cold/cold/repeat-1/MjeNMV.MelaMJNV.tlosatx-baseline-threaded-n8/output.txt",
+          "/tmp/losat-four-program-20260915/integrated-cold/cold/repeat-2/MjeNMV.MelaMJNV.tlosatx-baseline-threaded-n8/output.txt",
+          "/tmp/losat-four-program-20260915/integrated-cold/cold/repeat-3/MjeNMV.MelaMJNV.tlosatx-baseline-threaded-n8/output.txt"
+        ]
+      },
+      "candidate": {
+        "median_seconds": 35.64044846899924,
+        "samples": [
+          36.118771628000104,
+          35.64044846899924,
+          35.255468866998854
+        ],
+        "peak_rss_bytes": 309473280,
+        "raw_sha256": "b309f77fee038f0559d870737ebeba732c11eba4f7e495f045acbfb831817fd7",
+        "evidence": [
+          "/tmp/losat-four-program-20260915/integrated-cold/cold/repeat-1/MjeNMV.MelaMJNV.tlosatx-candidate-threaded-n8/output.txt",
+          "/tmp/losat-four-program-20260915/integrated-cold/cold/repeat-2/MjeNMV.MelaMJNV.tlosatx-candidate-threaded-n8/output.txt",
+          "/tmp/losat-four-program-20260915/integrated-cold/cold/repeat-3/MjeNMV.MelaMJNV.tlosatx-candidate-threaded-n8/output.txt"
+        ]
+      },
+      "improvement_percent": 16.320755920223583,
+      "five_percent_target_met": true,
+      "time_guard_pass": true,
+      "rss_guard_pass": true
+    },
+    {
+      "case": "NZ_CP006932.NZ_CP006932.losatn.megablast",
+      "kind": "native",
+      "threads": 1,
+      "baseline": {
+        "median_seconds": 0.2513575650009443,
+        "samples": [
+          0.246812797999155,
+          0.5017929909990926,
+          0.2513575650009443
+        ],
+        "peak_rss_bytes": 89006080,
+        "raw_sha256": "2e2fb3ef85081501224f81be0a82cf9715672f5229d3edb162ff114912920873",
+        "evidence": [
+          "/tmp/losat-four-program-20260915/integrated-cold/cold/repeat-1/NZ_CP006932.NZ_CP006932.losatn.megablast-baseline-native-n1/output.txt",
+          "/tmp/losat-four-program-20260915/integrated-cold/cold/repeat-2/NZ_CP006932.NZ_CP006932.losatn.megablast-baseline-native-n1/output.txt",
+          "/tmp/losat-four-program-20260915/integrated-cold/cold/repeat-3/NZ_CP006932.NZ_CP006932.losatn.megablast-baseline-native-n1/output.txt"
+        ]
+      },
+      "candidate": {
+        "median_seconds": 0.41460994200315326,
+        "samples": [
+          0.41520640500311856,
+          0.41460994200315326,
+          0.25362086400127737
+        ],
+        "peak_rss_bytes": 90411008,
+        "raw_sha256": "2e2fb3ef85081501224f81be0a82cf9715672f5229d3edb162ff114912920873",
+        "evidence": [
+          "/tmp/losat-four-program-20260915/integrated-cold/cold/repeat-1/NZ_CP006932.NZ_CP006932.losatn.megablast-candidate-native-n1/output.txt",
+          "/tmp/losat-four-program-20260915/integrated-cold/cold/repeat-2/NZ_CP006932.NZ_CP006932.losatn.megablast-candidate-native-n1/output.txt",
+          "/tmp/losat-four-program-20260915/integrated-cold/cold/repeat-3/NZ_CP006932.NZ_CP006932.losatn.megablast-candidate-native-n1/output.txt"
+        ]
+      },
+      "improvement_percent": -64.94826483602976,
+      "five_percent_target_met": false,
+      "time_guard_pass": false,
+      "rss_guard_pass": true
+    },
+    {
+      "case": "NZ_CP006932.NZ_CP006932.losatn.megablast",
+      "kind": "native",
+      "threads": 8,
+      "baseline": {
+        "median_seconds": 0.2777486900013173,
+        "samples": [
+          0.28238514799886616,
+          0.2690455349984404,
+          0.2777486900013173
+        ],
+        "peak_rss_bytes": 90947584,
+        "raw_sha256": "2e2fb3ef85081501224f81be0a82cf9715672f5229d3edb162ff114912920873",
+        "evidence": [
+          "/tmp/losat-four-program-20260915/integrated-cold/cold/repeat-1/NZ_CP006932.NZ_CP006932.losatn.megablast-baseline-native-n8/output.txt",
+          "/tmp/losat-four-program-20260915/integrated-cold/cold/repeat-2/NZ_CP006932.NZ_CP006932.losatn.megablast-baseline-native-n8/output.txt",
+          "/tmp/losat-four-program-20260915/integrated-cold/cold/repeat-3/NZ_CP006932.NZ_CP006932.losatn.megablast-baseline-native-n8/output.txt"
+        ]
+      },
+      "candidate": {
+        "median_seconds": 0.23190928999974858,
+        "samples": [
+          0.3148542880007881,
+          0.23190928999974858,
+          0.22484262000216404
+        ],
+        "peak_rss_bytes": 92225536,
+        "raw_sha256": "2e2fb3ef85081501224f81be0a82cf9715672f5229d3edb162ff114912920873",
+        "evidence": [
+          "/tmp/losat-four-program-20260915/integrated-cold/cold/repeat-1/NZ_CP006932.NZ_CP006932.losatn.megablast-candidate-native-n8/output.txt",
+          "/tmp/losat-four-program-20260915/integrated-cold/cold/repeat-2/NZ_CP006932.NZ_CP006932.losatn.megablast-candidate-native-n8/output.txt",
+          "/tmp/losat-four-program-20260915/integrated-cold/cold/repeat-3/NZ_CP006932.NZ_CP006932.losatn.megablast-candidate-native-n8/output.txt"
+        ]
+      },
+      "improvement_percent": 16.503912224158938,
+      "five_percent_target_met": true,
+      "time_guard_pass": true,
+      "rss_guard_pass": true
+    },
+    {
+      "case": "NZ_CP006932.NZ_CP006932.losatn.megablast",
+      "kind": "serial",
+      "threads": 1,
+      "baseline": {
+        "median_seconds": 0.6734360839982401,
+        "samples": [
+          0.6734360839982401,
+          0.7941000820028421,
+          0.40350809099982143
+        ],
+        "peak_rss_bytes": 184442880,
+        "raw_sha256": "2e2fb3ef85081501224f81be0a82cf9715672f5229d3edb162ff114912920873",
+        "evidence": [
+          "/tmp/losat-four-program-20260915/integrated-cold/cold/repeat-1/NZ_CP006932.NZ_CP006932.losatn.megablast-baseline-serial-n1/output.txt",
+          "/tmp/losat-four-program-20260915/integrated-cold/cold/repeat-2/NZ_CP006932.NZ_CP006932.losatn.megablast-baseline-serial-n1/output.txt",
+          "/tmp/losat-four-program-20260915/integrated-cold/cold/repeat-3/NZ_CP006932.NZ_CP006932.losatn.megablast-baseline-serial-n1/output.txt"
+        ]
+      },
+      "candidate": {
+        "median_seconds": 0.5812430680016405,
+        "samples": [
+          0.5812430680016405,
+          0.956849214999238,
+          0.3936906499984616
+        ],
+        "peak_rss_bytes": 184516608,
+        "raw_sha256": "2e2fb3ef85081501224f81be0a82cf9715672f5229d3edb162ff114912920873",
+        "evidence": [
+          "/tmp/losat-four-program-20260915/integrated-cold/cold/repeat-1/NZ_CP006932.NZ_CP006932.losatn.megablast-candidate-serial-n1/output.txt",
+          "/tmp/losat-four-program-20260915/integrated-cold/cold/repeat-2/NZ_CP006932.NZ_CP006932.losatn.megablast-candidate-serial-n1/output.txt",
+          "/tmp/losat-four-program-20260915/integrated-cold/cold/repeat-3/NZ_CP006932.NZ_CP006932.losatn.megablast-candidate-serial-n1/output.txt"
+        ]
+      },
+      "improvement_percent": 13.68994299343789,
+      "five_percent_target_met": true,
+      "time_guard_pass": true,
+      "rss_guard_pass": true
+    },
+    {
+      "case": "NZ_CP006932.NZ_CP006932.losatn.megablast",
+      "kind": "threaded",
+      "threads": 1,
+      "baseline": {
+        "median_seconds": 0.5955792500026291,
+        "samples": [
+          0.5955792500026291,
+          0.6829557969977031,
+          0.4946501750018797
+        ],
+        "peak_rss_bytes": 198815744,
+        "raw_sha256": "2e2fb3ef85081501224f81be0a82cf9715672f5229d3edb162ff114912920873",
+        "evidence": [
+          "/tmp/losat-four-program-20260915/integrated-cold/cold/repeat-1/NZ_CP006932.NZ_CP006932.losatn.megablast-baseline-threaded-n1/output.txt",
+          "/tmp/losat-four-program-20260915/integrated-cold/cold/repeat-2/NZ_CP006932.NZ_CP006932.losatn.megablast-baseline-threaded-n1/output.txt",
+          "/tmp/losat-four-program-20260915/integrated-cold/cold/repeat-3/NZ_CP006932.NZ_CP006932.losatn.megablast-baseline-threaded-n1/output.txt"
+        ]
+      },
+      "candidate": {
+        "median_seconds": 0.5874333850006224,
+        "samples": [
+          0.5874333850006224,
+          0.7618842400006542,
+          0.4743783710000571
+        ],
+        "peak_rss_bytes": 207167488,
+        "raw_sha256": "2e2fb3ef85081501224f81be0a82cf9715672f5229d3edb162ff114912920873",
+        "evidence": [
+          "/tmp/losat-four-program-20260915/integrated-cold/cold/repeat-1/NZ_CP006932.NZ_CP006932.losatn.megablast-candidate-threaded-n1/output.txt",
+          "/tmp/losat-four-program-20260915/integrated-cold/cold/repeat-2/NZ_CP006932.NZ_CP006932.losatn.megablast-candidate-threaded-n1/output.txt",
+          "/tmp/losat-four-program-20260915/integrated-cold/cold/repeat-3/NZ_CP006932.NZ_CP006932.losatn.megablast-candidate-threaded-n1/output.txt"
+        ]
+      },
+      "improvement_percent": 1.3677214244738714,
+      "five_percent_target_met": false,
+      "time_guard_pass": true,
+      "rss_guard_pass": true
+    },
+    {
+      "case": "NZ_CP006932.NZ_CP006932.losatn.megablast",
+      "kind": "threaded",
+      "threads": 8,
+      "baseline": {
+        "median_seconds": 1.5920027720021608,
+        "samples": [
+          1.5920027720021608,
+          1.8724099250030122,
+          0.8543439720015158
+        ],
+        "peak_rss_bytes": 312659968,
+        "raw_sha256": "2e2fb3ef85081501224f81be0a82cf9715672f5229d3edb162ff114912920873",
+        "evidence": [
+          "/tmp/losat-four-program-20260915/integrated-cold/cold/repeat-1/NZ_CP006932.NZ_CP006932.losatn.megablast-baseline-threaded-n8/output.txt",
+          "/tmp/losat-four-program-20260915/integrated-cold/cold/repeat-2/NZ_CP006932.NZ_CP006932.losatn.megablast-baseline-threaded-n8/output.txt",
+          "/tmp/losat-four-program-20260915/integrated-cold/cold/repeat-3/NZ_CP006932.NZ_CP006932.losatn.megablast-baseline-threaded-n8/output.txt"
+        ]
+      },
+      "candidate": {
+        "median_seconds": 1.566444940999645,
+        "samples": [
+          1.566444940999645,
+          2.1025706590007758,
+          1.0223182970003108
+        ],
+        "peak_rss_bytes": 314335232,
+        "raw_sha256": "2e2fb3ef85081501224f81be0a82cf9715672f5229d3edb162ff114912920873",
+        "evidence": [
+          "/tmp/losat-four-program-20260915/integrated-cold/cold/repeat-1/NZ_CP006932.NZ_CP006932.losatn.megablast-candidate-threaded-n8/output.txt",
+          "/tmp/losat-four-program-20260915/integrated-cold/cold/repeat-2/NZ_CP006932.NZ_CP006932.losatn.megablast-candidate-threaded-n8/output.txt",
+          "/tmp/losat-four-program-20260915/integrated-cold/cold/repeat-3/NZ_CP006932.NZ_CP006932.losatn.megablast-candidate-threaded-n8/output.txt"
+        ]
+      },
+      "improvement_percent": 1.605388599315897,
+      "five_percent_target_met": false,
+      "time_guard_pass": true,
+      "rss_guard_pass": true
+    },
+    {
+      "case": "single-query-32-matches",
+      "kind": "native",
+      "threads": 1,
+      "baseline": {
+        "median_seconds": 0.03146150199972908,
+        "samples": [
+          0.03146150199972908,
+          0.03212197199900402,
+          0.030903176997526316
+        ],
+        "peak_rss_bytes": 6950912,
+        "raw_sha256": "a357fa148efd10c81cdf6c89d2c81c14048adfff521f08230d636970b98e66e0",
+        "evidence": [
+          "/tmp/losat-four-program-20260915/integrated-cold/cold/repeat-1/single-query-32-matches-baseline-native-n1/output.txt",
+          "/tmp/losat-four-program-20260915/integrated-cold/cold/repeat-2/single-query-32-matches-baseline-native-n1/output.txt",
+          "/tmp/losat-four-program-20260915/integrated-cold/cold/repeat-3/single-query-32-matches-baseline-native-n1/output.txt"
+        ]
+      },
+      "candidate": {
+        "median_seconds": 0.0320148179998796,
+        "samples": [
+          0.03074517299683066,
+          0.0320148179998796,
+          0.03211141499923542
+        ],
+        "peak_rss_bytes": 6983680,
+        "raw_sha256": "a357fa148efd10c81cdf6c89d2c81c14048adfff521f08230d636970b98e66e0",
+        "evidence": [
+          "/tmp/losat-four-program-20260915/integrated-cold/cold/repeat-1/single-query-32-matches-candidate-native-n1/output.txt",
+          "/tmp/losat-four-program-20260915/integrated-cold/cold/repeat-2/single-query-32-matches-candidate-native-n1/output.txt",
+          "/tmp/losat-four-program-20260915/integrated-cold/cold/repeat-3/single-query-32-matches-candidate-native-n1/output.txt"
+        ]
+      },
+      "improvement_percent": -1.7587081511724434,
+      "five_percent_target_met": false,
+      "time_guard_pass": true,
+      "rss_guard_pass": true
+    },
+    {
+      "case": "single-query-32-matches",
+      "kind": "native",
+      "threads": 8,
+      "baseline": {
+        "median_seconds": 0.012920262997795362,
+        "samples": [
+          0.012920262997795362,
+          0.013415408000582829,
+          0.01183660600145231
+        ],
+        "peak_rss_bytes": 8908800,
+        "raw_sha256": "a357fa148efd10c81cdf6c89d2c81c14048adfff521f08230d636970b98e66e0",
+        "evidence": [
+          "/tmp/losat-four-program-20260915/integrated-cold/cold/repeat-1/single-query-32-matches-baseline-native-n8/output.txt",
+          "/tmp/losat-four-program-20260915/integrated-cold/cold/repeat-2/single-query-32-matches-baseline-native-n8/output.txt",
+          "/tmp/losat-four-program-20260915/integrated-cold/cold/repeat-3/single-query-32-matches-baseline-native-n8/output.txt"
+        ]
+      },
+      "candidate": {
+        "median_seconds": 0.01290496600267943,
+        "samples": [
+          0.01207982699997956,
+          0.01345807799953036,
+          0.01290496600267943
+        ],
+        "peak_rss_bytes": 9003008,
+        "raw_sha256": "a357fa148efd10c81cdf6c89d2c81c14048adfff521f08230d636970b98e66e0",
+        "evidence": [
+          "/tmp/losat-four-program-20260915/integrated-cold/cold/repeat-1/single-query-32-matches-candidate-native-n8/output.txt",
+          "/tmp/losat-four-program-20260915/integrated-cold/cold/repeat-2/single-query-32-matches-candidate-native-n8/output.txt",
+          "/tmp/losat-four-program-20260915/integrated-cold/cold/repeat-3/single-query-32-matches-candidate-native-n8/output.txt"
+        ]
+      },
+      "improvement_percent": 0.11839538497430174,
+      "five_percent_target_met": false,
+      "time_guard_pass": true,
+      "rss_guard_pass": true
+    },
+    {
+      "case": "single-query-32-matches",
+      "kind": "serial",
+      "threads": 1,
+      "baseline": {
+        "median_seconds": 0.13956004500141717,
+        "samples": [
+          0.19699730300271767,
+          0.13956004500141717,
+          0.1113577450014418
+        ],
+        "peak_rss_bytes": 103710720,
+        "raw_sha256": "a357fa148efd10c81cdf6c89d2c81c14048adfff521f08230d636970b98e66e0",
+        "evidence": [
+          "/tmp/losat-four-program-20260915/integrated-cold/cold/repeat-1/single-query-32-matches-baseline-serial-n1/output.txt",
+          "/tmp/losat-four-program-20260915/integrated-cold/cold/repeat-2/single-query-32-matches-baseline-serial-n1/output.txt",
+          "/tmp/losat-four-program-20260915/integrated-cold/cold/repeat-3/single-query-32-matches-baseline-serial-n1/output.txt"
+        ]
+      },
+      "candidate": {
+        "median_seconds": 0.1598467840012745,
+        "samples": [
+          0.2718135609975434,
+          0.1598467840012745,
+          0.13400959800128476
+        ],
+        "peak_rss_bytes": 101388288,
+        "raw_sha256": "a357fa148efd10c81cdf6c89d2c81c14048adfff521f08230d636970b98e66e0",
+        "evidence": [
+          "/tmp/losat-four-program-20260915/integrated-cold/cold/repeat-1/single-query-32-matches-candidate-serial-n1/output.txt",
+          "/tmp/losat-four-program-20260915/integrated-cold/cold/repeat-2/single-query-32-matches-candidate-serial-n1/output.txt",
+          "/tmp/losat-four-program-20260915/integrated-cold/cold/repeat-3/single-query-32-matches-candidate-serial-n1/output.txt"
+        ]
+      },
+      "improvement_percent": -14.5362084109756,
+      "five_percent_target_met": false,
+      "time_guard_pass": true,
+      "rss_guard_pass": true
+    },
+    {
+      "case": "single-query-32-matches",
+      "kind": "threaded",
+      "threads": 1,
+      "baseline": {
+        "median_seconds": 0.18701904599947738,
+        "samples": [
+          0.26924696199785103,
+          0.18701904599947738,
+          0.17163730199899874
+        ],
+        "peak_rss_bytes": 117739520,
+        "raw_sha256": "a357fa148efd10c81cdf6c89d2c81c14048adfff521f08230d636970b98e66e0",
+        "evidence": [
+          "/tmp/losat-four-program-20260915/integrated-cold/cold/repeat-1/single-query-32-matches-baseline-threaded-n1/output.txt",
+          "/tmp/losat-four-program-20260915/integrated-cold/cold/repeat-2/single-query-32-matches-baseline-threaded-n1/output.txt",
+          "/tmp/losat-four-program-20260915/integrated-cold/cold/repeat-3/single-query-32-matches-baseline-threaded-n1/output.txt"
+        ]
+      },
+      "candidate": {
+        "median_seconds": 0.21797387700280524,
+        "samples": [
+          0.2791180109998095,
+          0.21797387700280524,
+          0.2066533189972688
+        ],
+        "peak_rss_bytes": 118128640,
+        "raw_sha256": "a357fa148efd10c81cdf6c89d2c81c14048adfff521f08230d636970b98e66e0",
+        "evidence": [
+          "/tmp/losat-four-program-20260915/integrated-cold/cold/repeat-1/single-query-32-matches-candidate-threaded-n1/output.txt",
+          "/tmp/losat-four-program-20260915/integrated-cold/cold/repeat-2/single-query-32-matches-candidate-threaded-n1/output.txt",
+          "/tmp/losat-four-program-20260915/integrated-cold/cold/repeat-3/single-query-32-matches-candidate-threaded-n1/output.txt"
+        ]
+      },
+      "improvement_percent": -16.551699768276197,
+      "five_percent_target_met": false,
+      "time_guard_pass": true,
+      "rss_guard_pass": true
+    },
+    {
+      "case": "single-query-32-matches",
+      "kind": "threaded",
+      "threads": 8,
+      "baseline": {
+        "median_seconds": 0.7459893780032871,
+        "samples": [
+          1.665484697001375,
+          0.7459893780032871,
+          0.5302533299982315
+        ],
+        "peak_rss_bytes": 242892800,
+        "raw_sha256": "a357fa148efd10c81cdf6c89d2c81c14048adfff521f08230d636970b98e66e0",
+        "evidence": [
+          "/tmp/losat-four-program-20260915/integrated-cold/cold/repeat-1/single-query-32-matches-baseline-threaded-n8/output.txt",
+          "/tmp/losat-four-program-20260915/integrated-cold/cold/repeat-2/single-query-32-matches-baseline-threaded-n8/output.txt",
+          "/tmp/losat-four-program-20260915/integrated-cold/cold/repeat-3/single-query-32-matches-baseline-threaded-n8/output.txt"
+        ]
+      },
+      "candidate": {
+        "median_seconds": 0.8484019290008291,
+        "samples": [
+          1.153106124002079,
+          0.8484019290008291,
+          0.8280634120019386
+        ],
+        "peak_rss_bytes": 243773440,
+        "raw_sha256": "a357fa148efd10c81cdf6c89d2c81c14048adfff521f08230d636970b98e66e0",
+        "evidence": [
+          "/tmp/losat-four-program-20260915/integrated-cold/cold/repeat-1/single-query-32-matches-candidate-threaded-n8/output.txt",
+          "/tmp/losat-four-program-20260915/integrated-cold/cold/repeat-2/single-query-32-matches-candidate-threaded-n8/output.txt",
+          "/tmp/losat-four-program-20260915/integrated-cold/cold/repeat-3/single-query-32-matches-candidate-threaded-n8/output.txt"
+        ]
+      },
+      "improvement_percent": -13.72841946780249,
+      "five_percent_target_met": false,
+      "time_guard_pass": false,
+      "rss_guard_pass": true
+    }
+  ],
+  "same_version_ratios": [
+    {
+      "case": "single-query-32-matches",
+      "kind": "threaded",
+      "threads": 8,
+      "version": "candidate",
+      "wasm_over_native": 65.74228315089535
+    },
+    {
+      "case": "single-query-32-matches",
+      "kind": "threaded",
+      "threads": 1,
+      "version": "candidate",
+      "wasm_over_native": 6.808530881032183
+    },
+    {
+      "case": "single-query-32-matches",
+      "kind": "serial",
+      "threads": 1,
+      "version": "candidate",
+      "wasm_over_native": 4.9928999753137955
+    },
+    {
+      "case": "single-query-32-matches",
+      "kind": "threaded",
+      "threads": 8,
+      "version": "baseline",
+      "wasm_over_native": 57.73794063871443
+    },
+    {
+      "case": "single-query-32-matches",
+      "kind": "threaded",
+      "threads": 1,
+      "version": "baseline",
+      "wasm_over_native": 5.944377544374323
+    },
+    {
+      "case": "single-query-32-matches",
+      "kind": "serial",
+      "threads": 1,
+      "version": "baseline",
+      "wasm_over_native": 4.435898991809703
+    },
+    {
+      "case": "AP027132.NZ_CP006932.losatp",
+      "kind": "threaded",
+      "threads": 8,
+      "version": "candidate",
+      "wasm_over_native": 1.1981841125658328
+    },
+    {
+      "case": "AP027132.NZ_CP006932.losatp",
+      "kind": "threaded",
+      "threads": 1,
+      "version": "candidate",
+      "wasm_over_native": 0.9921426054910513
+    },
+    {
+      "case": "AP027132.NZ_CP006932.losatp",
+      "kind": "serial",
+      "threads": 1,
+      "version": "candidate",
+      "wasm_over_native": 0.9684602799510906
+    },
+    {
+      "case": "AP027132.NZ_CP006932.losatp",
+      "kind": "threaded",
+      "threads": 8,
+      "version": "baseline",
+      "wasm_over_native": 1.2644045347537443
+    },
+    {
+      "case": "AP027132.NZ_CP006932.losatp",
+      "kind": "threaded",
+      "threads": 1,
+      "version": "baseline",
+      "wasm_over_native": 1.0772746153124453
+    },
+    {
+      "case": "AP027132.NZ_CP006932.losatp",
+      "kind": "serial",
+      "threads": 1,
+      "version": "baseline",
+      "wasm_over_native": 1.0432964298265668
+    },
+    {
+      "case": "AP027078.AP027131.losatp",
+      "kind": "threaded",
+      "threads": 8,
+      "version": "candidate",
+      "wasm_over_native": 1.4235355104695204
+    },
+    {
+      "case": "AP027078.AP027131.losatp",
+      "kind": "threaded",
+      "threads": 1,
+      "version": "candidate",
+      "wasm_over_native": 1.0385212901213245
+    },
+    {
+      "case": "AP027078.AP027131.losatp",
+      "kind": "serial",
+      "threads": 1,
+      "version": "candidate",
+      "wasm_over_native": 1.0328089693293787
+    },
+    {
+      "case": "AP027078.AP027131.losatp",
+      "kind": "threaded",
+      "threads": 8,
+      "version": "baseline",
+      "wasm_over_native": 1.2051018526988175
+    },
+    {
+      "case": "AP027078.AP027131.losatp",
+      "kind": "threaded",
+      "threads": 1,
+      "version": "baseline",
+      "wasm_over_native": 1.0343715461074283
+    },
+    {
+      "case": "AP027078.AP027131.losatp",
+      "kind": "serial",
+      "threads": 1,
+      "version": "baseline",
+      "wasm_over_native": 1.0492975808344764
+    },
+    {
+      "case": "AP027280.AP027280.tlosatx",
+      "kind": "threaded",
+      "threads": 8,
+      "version": "candidate",
+      "wasm_over_native": 3.9585779072731464
+    },
+    {
+      "case": "AP027280.AP027280.tlosatx",
+      "kind": "threaded",
+      "threads": 1,
+      "version": "candidate",
+      "wasm_over_native": 1.4880489172943876
+    },
+    {
+      "case": "AP027280.AP027280.tlosatx",
+      "kind": "serial",
+      "threads": 1,
+      "version": "candidate",
+      "wasm_over_native": 1.2070013994343718
+    },
+    {
+      "case": "AP027280.AP027280.tlosatx",
+      "kind": "threaded",
+      "threads": 8,
+      "version": "baseline",
+      "wasm_over_native": 4.032798037869436
+    },
+    {
+      "case": "AP027280.AP027280.tlosatx",
+      "kind": "threaded",
+      "threads": 1,
+      "version": "baseline",
+      "wasm_over_native": 1.488942271284647
+    },
+    {
+      "case": "AP027280.AP027280.tlosatx",
+      "kind": "serial",
+      "threads": 1,
+      "version": "baseline",
+      "wasm_over_native": 1.477298921362506
+    },
+    {
+      "case": "MjeNMV.MelaMJNV.tlosatx",
+      "kind": "threaded",
+      "threads": 8,
+      "version": "candidate",
+      "wasm_over_native": 4.12252334022039
+    },
+    {
+      "case": "MjeNMV.MelaMJNV.tlosatx",
+      "kind": "threaded",
+      "threads": 1,
+      "version": "candidate",
+      "wasm_over_native": 1.5245146351185463
+    },
+    {
+      "case": "MjeNMV.MelaMJNV.tlosatx",
+      "kind": "serial",
+      "threads": 1,
+      "version": "candidate",
+      "wasm_over_native": 1.372821813705302
+    },
+    {
+      "case": "MjeNMV.MelaMJNV.tlosatx",
+      "kind": "threaded",
+      "threads": 8,
+      "version": "baseline",
+      "wasm_over_native": 4.158642462150363
+    },
+    {
+      "case": "MjeNMV.MelaMJNV.tlosatx",
+      "kind": "threaded",
+      "threads": 1,
+      "version": "baseline",
+      "wasm_over_native": 1.522633015229403
+    },
+    {
+      "case": "MjeNMV.MelaMJNV.tlosatx",
+      "kind": "serial",
+      "threads": 1,
+      "version": "baseline",
+      "wasm_over_native": 1.5240951994039977
+    },
+    {
+      "case": "MjPMNV.MlPMNV.losatn.blastn",
+      "kind": "threaded",
+      "threads": 8,
+      "version": "candidate",
+      "wasm_over_native": 1.4976188357551448
+    },
+    {
+      "case": "MjPMNV.MlPMNV.losatn.blastn",
+      "kind": "threaded",
+      "threads": 1,
+      "version": "candidate",
+      "wasm_over_native": 1.5281241698271273
+    },
+    {
+      "case": "MjPMNV.MlPMNV.losatn.blastn",
+      "kind": "serial",
+      "threads": 1,
+      "version": "candidate",
+      "wasm_over_native": 4.198876963650758
+    },
+    {
+      "case": "MjPMNV.MlPMNV.losatn.blastn",
+      "kind": "threaded",
+      "threads": 8,
+      "version": "baseline",
+      "wasm_over_native": 1.6138978201677514
+    },
+    {
+      "case": "MjPMNV.MlPMNV.losatn.blastn",
+      "kind": "threaded",
+      "threads": 1,
+      "version": "baseline",
+      "wasm_over_native": 1.5490559152362902
+    },
+    {
+      "case": "MjPMNV.MlPMNV.losatn.blastn",
+      "kind": "serial",
+      "threads": 1,
+      "version": "baseline",
+      "wasm_over_native": 4.254848993525794
+    },
+    {
+      "case": "MelaMJNV.PemoMJNVA.losatn.blastn",
+      "kind": "threaded",
+      "threads": 8,
+      "version": "candidate",
+      "wasm_over_native": 4.129153588058181
+    },
+    {
+      "case": "MelaMJNV.PemoMJNVA.losatn.blastn",
+      "kind": "threaded",
+      "threads": 1,
+      "version": "candidate",
+      "wasm_over_native": 1.7783753030295435
+    },
+    {
+      "case": "MelaMJNV.PemoMJNVA.losatn.blastn",
+      "kind": "serial",
+      "threads": 1,
+      "version": "candidate",
+      "wasm_over_native": 3.4190816186286783
+    },
+    {
+      "case": "MelaMJNV.PemoMJNVA.losatn.blastn",
+      "kind": "threaded",
+      "threads": 8,
+      "version": "baseline",
+      "wasm_over_native": 3.3910789553841556
+    },
+    {
+      "case": "MelaMJNV.PemoMJNVA.losatn.blastn",
+      "kind": "threaded",
+      "threads": 1,
+      "version": "baseline",
+      "wasm_over_native": 1.9517776632597275
+    },
+    {
+      "case": "MelaMJNV.PemoMJNVA.losatn.blastn",
+      "kind": "serial",
+      "threads": 1,
+      "version": "baseline",
+      "wasm_over_native": 3.242389465367429
+    },
+    {
+      "case": "NZ_CP006932.NZ_CP006932.losatn.megablast",
+      "kind": "threaded",
+      "threads": 8,
+      "version": "candidate",
+      "wasm_over_native": 6.754558823414721
+    },
+    {
+      "case": "NZ_CP006932.NZ_CP006932.losatn.megablast",
+      "kind": "threaded",
+      "threads": 1,
+      "version": "candidate",
+      "wasm_over_native": 1.4168338129145845
+    },
+    {
+      "case": "NZ_CP006932.NZ_CP006932.losatn.megablast",
+      "kind": "serial",
+      "threads": 1,
+      "version": "candidate",
+      "wasm_over_native": 1.4019033532901146
+    },
+    {
+      "case": "NZ_CP006932.NZ_CP006932.losatn.megablast",
+      "kind": "threaded",
+      "threads": 8,
+      "version": "baseline",
+      "wasm_over_native": 5.731810191416601
+    },
+    {
+      "case": "NZ_CP006932.NZ_CP006932.losatn.megablast",
+      "kind": "threaded",
+      "threads": 1,
+      "version": "baseline",
+      "wasm_over_native": 2.369450268983914
+    },
+    {
+      "case": "NZ_CP006932.NZ_CP006932.losatn.megablast",
+      "kind": "serial",
+      "threads": 1,
+      "version": "baseline",
+      "wasm_over_native": 2.679195607244644
+    },
+    {
+      "case": "EDL933.Sakai.losatn.megablast",
+      "kind": "threaded",
+      "threads": 8,
+      "version": "candidate",
+      "wasm_over_native": 2.11554888939028
+    },
+    {
+      "case": "EDL933.Sakai.losatn.megablast",
+      "kind": "threaded",
+      "threads": 1,
+      "version": "candidate",
+      "wasm_over_native": 1.460465175918032
+    },
+    {
+      "case": "EDL933.Sakai.losatn.megablast",
+      "kind": "serial",
+      "threads": 1,
+      "version": "candidate",
+      "wasm_over_native": 1.3664127279486924
+    },
+    {
+      "case": "EDL933.Sakai.losatn.megablast",
+      "kind": "threaded",
+      "threads": 8,
+      "version": "baseline",
+      "wasm_over_native": 2.0843595186555994
+    },
+    {
+      "case": "EDL933.Sakai.losatn.megablast",
+      "kind": "threaded",
+      "threads": 1,
+      "version": "baseline",
+      "wasm_over_native": 1.548027141388889
+    },
+    {
+      "case": "EDL933.Sakai.losatn.megablast",
+      "kind": "serial",
+      "threads": 1,
+      "version": "baseline",
+      "wasm_over_native": 1.3936183417722667
+    }
+  ]
+}

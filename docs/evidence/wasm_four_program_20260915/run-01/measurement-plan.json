@@ -1,0 +1,75 @@
+{
+  "primary_runtime": "Node 26.8.2 default flags, command threaded Wasm n8, cold process",
+  "individual_performance": "one warmup plus five alternating baseline/candidate pairs for native n8 and threaded Wasm n8; whole-process monotonic time and peak RSS; same absolute runner paths",
+  "additional_pairs": "at most five once only if initial classification inconclusive",
+  "integrated_performance": "native/threaded n1,n8 plus explicit serial Wasm n1; same primary fixtures; report absolute times and same-version ratios; compiled-module/reactor reuse separate",
+  "browser": "normal Chromium/actual gbdraw service source; cold and repeated execution, serial/threaded, cancellation/recovery and workers; separate from primary Node timing",
+  "cutoffs": "5% target each main; regressions limited to max(5%,50ms), RSS max(10%,16MiB)",
+  "no_adoption_samples_run_yet": true,
+  "cpu_condition_before_first_adoption_sample": {
+    "affinity": [
+      0,
+      1,
+      2,
+      3,
+      4,
+      5,
+      6,
+      7
+    ],
+    "sequential_adoption_jobs": true,
+    "other_known_long_workload": "Only the fixed long code4 correctness oracle pinned to CPU31 may overlap; no compiler, browser, or unpinned validation runs during samples",
+    "declared_utc": "2026-09-15T03:39:21Z"
+  },
+  "coarse_body_scope": {
+    "role": "separate diagnostic builds only; never a substitute for diagnostic-free adoption samples",
+    "boundary": "engine call after CLI parse: configuration, file input, search, output; same two Instant reads in native/threaded Wasm, no inner timers",
+    "purpose": "same-version native/Wasm body ratios; body instrumentation and compiler/startup costs are separately identified"
+  },
+  "integrated_condition_detail_before_first_sample": {
+    "declared_utc": "2026-09-15T05:24:12Z",
+    "primary_fixtures": "eight plan primaries plus the predeclared P2 single-query fixture; native/threaded n1,n8 and serial n1; one warmup plus five alternating pairs",
+    "controls": "six supplementary controls, including long-query no-extension, at the primary adoption runtime threaded n8 and native n8; same warmup/pairs/guards",
+    "scope_reason": "plan section3 requests n1/n8 native ratios and explicit serial timing for primary fixtures. Full raw correctness matrices protect the other thread counts on controls; no control n1/serial performance claim will be made",
+    "body": "same nine primary fixtures; independent coarse-scope diagnostic builds native/threaded n1,n8; not production adoption timing",
+    "reuse": "same nine primary fixtures in separate per-case sessions; serial compiled-module n1, threaded compiled-module/reactor n1,n8; two AB/BA sessions with one warmup and five repeats per condition; fixed3600-second process deadline"
+  },
+  "reuse_failure_collection_before_first_reuse_sample": {
+    "declared_utc": "2026-09-15T05:30:33Z",
+    "policy": "A failed process/session keeps its original fixed 3600-second deadline and all failed/not-run rows. Other predeclared independent version/mode/session processes continue; no retries or extended windows. Any failure makes that case PARTIAL and is never PASS.",
+    "harness": "reuse_benchmark.py (temporary evidence harness); production runtime unchanged"
+  },
+  "historical_declaration_note": "no_adoption_samples_run_yet is the state at the original declaration, not live status. Default final cold orchestration began 2026-09-15T05:25:53Z; final status is reported in REPORT.md and archived run-status records.",
+  "user_stop_amendment": {
+    "status": "STOPPED_BY_USER",
+    "recorded_utc": "2026-09-15T07:33:56.962461+00:00",
+    "instruction": "\u5207\u308a\u4e0a\u3052\u3066\u3002\u6b21\u306b\u884c\u3053\u3046\u3088\u3002 / \uff13\u56de\u3084\u308c\u3070\u5341\u5206\u3060\u308d\u3002\u3082\u3046\u3002",
+    "eligible_repeats": [
+      1,
+      2,
+      3
+    ],
+    "warmup_repeat": 0,
+    "completed_later_samples_excluded": 54,
+    "selection": "First three complete A/B pairs for every condition, never fastest samples",
+    "stopped_processes": [
+      376627,
+      378444,
+      378445,
+      383486,
+      482360,
+      482362
+    ],
+    "process_absence_verified": true,
+    "not_run": [
+      "integrated controls timing",
+      "body timing",
+      "compiled-module reuse timing",
+      "same-reactor timing/memory window",
+      "TurboFan secondary timing",
+      "historical source rebuilds"
+    ],
+    "original_run_status": "RUNNING is the unmodified last checkpoint of an interrupted process, not a live job",
+    "outcome": "39/45 time guards,45/45 RSS guards; integrated all-program adoption NOT established"
+  }
+}

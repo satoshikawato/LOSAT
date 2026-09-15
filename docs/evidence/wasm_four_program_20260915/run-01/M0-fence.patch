@@ -1,0 +1,58 @@
+--- a/LOSAT/src/algorithm/blastn/alignment/greedy.rs
++++ b/LOSAT/src/algorithm/blastn/alignment/greedy.rs
+@@ -2561,6 +2561,13 @@
+                 seq1, seq2, len1, len2, seq1_index, seq2_index, reverse, rem, fence_hit,
+             );
+             if *fence_hit {
++                // NCBI reference: c++/src/algo/blast/core/greedy_align.c:523-526,571-576
++                // last_seq2_off[d - 1][diag_lower-1] = kInvalidOffset;
++                // if (fence_hit && *fence_hit) { return 0; }
++                // NCBI's row writes already reside in persistent scratch.
++                for row in &last_seq2_off {
++                    row.persist(non_affine_mem);
++                }
+                 return 0;
+             }
+ 
+@@ -3665,6 +3672,41 @@
+ #[cfg(test)]
+ mod tests {
+     use super::*;
++
++    // NCBI reference: c++/src/algo/blast/core/greedy_align.c:500-501,523-526,571-576
++    // last_seq2_off[0][diag_origin] = seq1_index;
++    // last_seq2_off[d - 1][diag_lower-1] = kInvalidOffset;
++    // last_seq2_off[d - 1][diag_lower] = kInvalidOffset;
++    // last_seq2_off[d - 1][diag_upper] = kInvalidOffset;
++    // last_seq2_off[d - 1][diag_upper+1] = kInvalidOffset;
++    // if (fence_hit && *fence_hit) { return 0; }
++    // C writes into persistent scratch before the fence return.
++    #[test]
++    fn non_affine_fence_retains_written_scratch() {
++        for traceback in [false, true] {
++            for reverse in [false, true] {
++                let mut mem = GreedyNonAffineMem::new();
++                mem.ensure_base_capacity(14);
++                mem.last_seq2_off[0].fill(123);
++                let mut edit = GapPrelimEditBlock::new();
++                let mut seed = GreedySeed::default();
++                let mut fence = false;
++                let (mut qlen, mut slen) = (0, 0);
++                let score = blast_greedy_align(
++                    &[0, 1, 0], 3, &[0, FENCE_SENTRY, 0], 3, reverse,
++                    20, 2, 4, &mut qlen, &mut slen, 4, &mut mem,
++                    traceback.then_some(&mut edit), 4, &mut fence, &mut seed,
++                );
++                assert!(fence);
++                assert_eq!((score, qlen, slen), (0, 1, 1));
++                assert_eq!(mem.last_seq2_off[0][6], 1);
++                for index in [4, 5, 7, 8] {
++                    assert_eq!(mem.last_seq2_off[0][index], INVALID_OFFSET);
++                }
++                assert_eq!(mem.last_seq2_off[0][3], 123);
++            }
++        }
++    }
+ 
+     #[test]
+     fn test_greedy_traceback_ncbi_regression_cases() {

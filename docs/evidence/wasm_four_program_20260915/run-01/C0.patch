@@ -1,0 +1,488 @@
+--- a/LOSAT/src/algorithm/blastn/alignment/greedy.rs
++++ b/LOSAT/src/algorithm/blastn/alignment/greedy.rs
+@@ -2561,6 +2561,13 @@
+                 seq1, seq2, len1, len2, seq1_index, seq2_index, reverse, rem, fence_hit,
+             );
+             if *fence_hit {
++                // NCBI reference: c++/src/algo/blast/core/greedy_align.c:523-526,571-576
++                // last_seq2_off[d - 1][diag_lower-1] = kInvalidOffset;
++                // if (fence_hit && *fence_hit) { return 0; }
++                // NCBI's row writes already reside in persistent scratch.
++                for row in &last_seq2_off {
++                    row.persist(non_affine_mem);
++                }
+                 return 0;
+             }
+ 
+@@ -3665,6 +3672,41 @@
+ #[cfg(test)]
+ mod tests {
+     use super::*;
++
++    // NCBI reference: c++/src/algo/blast/core/greedy_align.c:500-501,523-526,571-576
++    // last_seq2_off[0][diag_origin] = seq1_index;
++    // last_seq2_off[d - 1][diag_lower-1] = kInvalidOffset;
++    // last_seq2_off[d - 1][diag_lower] = kInvalidOffset;
++    // last_seq2_off[d - 1][diag_upper] = kInvalidOffset;
++    // last_seq2_off[d - 1][diag_upper+1] = kInvalidOffset;
++    // if (fence_hit && *fence_hit) { return 0; }
++    // C writes into persistent scratch before the fence return.
++    #[test]
++    fn non_affine_fence_retains_written_scratch() {
++        for traceback in [false, true] {
++            for reverse in [false, true] {
++                let mut mem = GreedyNonAffineMem::new();
++                mem.ensure_base_capacity(14);
++                mem.last_seq2_off[0].fill(123);
++                let mut edit = GapPrelimEditBlock::new();
++                let mut seed = GreedySeed::default();
++                let mut fence = false;
++                let (mut qlen, mut slen) = (0, 0);
++                let score = blast_greedy_align(
++                    &[0, 1, 0], 3, &[0, FENCE_SENTRY, 0], 3, reverse,
++                    20, 2, 4, &mut qlen, &mut slen, 4, &mut mem,
++                    traceback.then_some(&mut edit), 4, &mut fence, &mut seed,
++                );
++                assert!(fence);
++                assert_eq!((score, qlen, slen), (0, 1, 1));
++                assert_eq!(mem.last_seq2_off[0][6], 1);
++                for index in [4, 5, 7, 8] {
++                    assert_eq!(mem.last_seq2_off[0][index], INVALID_OFFSET);
++                }
++                assert_eq!(mem.last_seq2_off[0][3], 123);
++            }
++        }
++    }
+ 
+     #[test]
+     fn test_greedy_traceback_ncbi_regression_cases() {
+@@ -3848,3 +3890,48 @@
+         .is_none());
+     }
+ }
++
++// NCBI reference: c++/src/algo/blast/core/greedy_align.c:71-77,523-526,571-576,666-678
++// space->space_used = 0;
++// last_seq2_off[d - 1][diag_lower-1] = kInvalidOffset;
++// if (fence_hit && *fence_hit) { return 0; }
++// last_seq2_off[d + 1] = (Int4*) s_GetMBSpace(mem_pool, ...);
++// Diagnostic-only transcript compares every retained scratch cell after each call.
++#[cfg(test)]
++mod four_scratch_transcript {
++    use super::*;
++    #[test]
++    fn four_scratch_transcript() {
++        let mut mem = GreedyNonAffineMem::new();
++        let mut random = 0x20260915u32;
++        for iteration in 0..240 {
++            let qlen = [0,1,2,3,4,7,8,15,16,31,32,63,64,65][iteration % 14];
++            let slen = [65,64,63,32,31,16,15,8,7,4,3,2,1,0][iteration % 14];
++            let query: Vec<u8> = (0..qlen).map(|i| (i % 4) as u8).collect();
++            let mut subject: Vec<u8> = (0..slen).map(|i| {
++                random = random.wrapping_mul(1664525).wrapping_add(1013904223);
++                if random % 7 == 0 { ((random >> 8) % 16) as u8 } else {(i % 4) as u8}
++            }).collect();
++            if iteration % 13 == 0 && slen > 2 {subject[slen / 2] = FENCE_SENTRY;}
++            for reverse in [false,true] {
++                for traceback in [false,true] {
++                    for max_dist in [1,2,4,16,64] {
++                        let mut edit = GapPrelimEditBlock::new();
++                        let mut seed = GreedySeed::default();
++                        let (mut q, mut s, mut fence) = (0,0,false);
++                        let result=blast_greedy_align(&query,qlen as i32,&subject,slen as i32,reverse,20,2,4,&mut q,&mut s,max_dist,&mut mem,traceback.then_some(&mut edit),4,&mut fence,&mut seed);
++                        let mut hash=0xcbf29ce484222325u64;
++                        let mut absorb=|v:u64| {hash=(hash ^ v).wrapping_mul(0x100000001b3);};
++                        for row in [&mem.last_seq2_off[0],&mem.last_seq2_off[1],&mem.max_score,&mem.traceback_pool] {
++                            absorb(row.len() as u64);for &v in row {absorb(v as u64);}
++                        }
++                        absorb(mem.traceback_used as u64);
++                        absorb(edit.num_ops as u64);
++                        for op in &edit.edit_ops {absorb(op.num as u64);absorb(op.op_type as u64);}
++                        println!("SCRATCH {iteration} {reverse} {traceback} {max_dist} {result} {q} {s} {fence} {} {} {} {hash}",seed.start_q,seed.start_s,seed.match_length);
++                    }
++                }
++            }
++        }
++    }
++}
+--- a/LOSAT/src/algorithm/blastn/blast_engine/run.rs
++++ b/LOSAT/src/algorithm/blastn/blast_engine/run.rs
+@@ -80,10 +80,12 @@
+ };
+ use super::super::interval_tree::{BlastIntervalTree, IndexMethod, TreeHsp};
+ use super::super::lookup::{build_unmasked_ranges, reverse_complement};
++// NCBI reference: c++/src/algo/blast/core/blast_parameters.c:342-344,370-374
++// gap_trigger = (Int4)((kOptions->gap_trigger * NCBIMATH_LN2 + kbp->logK) / kbp->Lambda);
++// new_cutoff = MIN(new_cutoff, hit_params->cutoffs[context].cutoff_score_max);
+ use super::super::ncbi_cutoffs::{
+-    compute_blastn_cutoff_score, compute_blastn_ungapped_params_from_score_freq,
+-    compute_eff_lengths_subject_mode_blastn, cutoff_score_max_from_evalue,
+-    GAP_TRIGGER_BIT_SCORE_NUCL,
++    compute_blastn_ungapped_params_from_score_freq, cutoff_score_for_ungapped_extension,
++    cutoff_score_max_from_evalue, gap_trigger_raw_score, GAP_TRIGGER_BIT_SCORE_NUCL,
+ };
+ use super::super::tracing as blastn_trace;
+ use crate::utils::dust::MaskedInterval;
+@@ -5460,61 +5462,35 @@
+         // ```
+         // NCBI uses UNGAPPED params (kbp_std) for gap_trigger calculation
+         // and GAPPED params (kbp_gap) for cutoff_score_max calculation
+-        let subject_len = s_len_full as i64;
+         let mut cutoff_scores: Vec<i32> = Vec::with_capacity(queries.len());
+         let mut hit_saving_cutoff_scores: Vec<i32> = Vec::with_capacity(queries.len());
+-        for q_record in queries.iter() {
+-            // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_setup.c:821-843
+-            // ```c
+-            // BLAST_ComputeLengthAdjustment(..., query_length, db_length, ...);
+-            // effective_search_space = effective_db_length *
+-            //                         (query_length - length_adjustment);
+-            // ```
+-            // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_parameters.c:348-369
+-            // ```c
+-            // if (!gapped_calculation || sbp->matrix_only_scoring) {
+-            //     Int4 query_length = query_info->contexts[context].query_length;
+-            //     if (program_number == eBlastTypeBlastn) query_length *= 2;
+-            // } else {
+-            //     new_cutoff = gap_trigger;
+-            // }
+-            // ```
+-            let query_len = q_record.seq().len() as i64;
+-            // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_parameters.c:917-946
+-            // ```c
++        // NCBI reference: c++/src/app/blast/blast_app_util.cpp:206-211;
++        // c++/src/algo/blast/api/seqsrc_multiseq.cpp:175-181;
++        // c++/src/algo/blast/core/blast_engine.c:1434-1445
++        // db_adapter.Reset(new CLocalDbAdapter(subjects, opts_hndl, true));
++        // if (dbscan_mode) { ... m_iTotalLength += (Int8) (*iter)->length; }
++        // if (db_length == 0) { BLAST_OneSubjectUpdateParameters(...); }
++        // The CLI subject set has a nonzero total length. Its context search
++        // space is retained across subjects, just as for output statistics.
++        for query_idx in 0..queries.len() {
++            // NCBI reference: c++/src/algo/blast/core/blast_parameters.c:925-946
+             // searchsp = query_info->contexts[context].eff_searchsp;
+-            // ...
+             // BLAST_Cutoffs(&new_cutoff, &evalue, kbp, searchsp, FALSE, 0);
+-            // params->cutoffs[context].cutoff_score = new_cutoff;
+             // params->cutoffs[context].cutoff_score_max = new_cutoff;
+-            // ```
+-            // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_traceback.c:653-656
+-            // ```c
+-            // delete_hsp = Blast_HSPReevaluateWithAmbiguitiesGapped(hsp, query,
+-            //          query_length, subject, subject_length, hit_params,
+-            //          score_params, sbp);
+-            // ```
+-            // Trimmed-HSP reevaluation uses hit_params->cutoffs[].cutoff_score,
+-            // not the lower initial-word cutoff from BlastInitialWordParameters.
+-            let (_, hit_eff_searchsp) = compute_eff_lengths_subject_mode_blastn(
+-                query_len,
+-                subject_len,
++            // Both strand contexts share the same sequence length/search space.
++            let hit_saving_cutoff = cutoff_score_max_from_evalue(
++                evalue_threshold,
++                query_eff_searchsp[query_idx * 2],
+                 &params_gapped_for_closure,
+             );
+-            let hit_saving_cutoff = cutoff_score_max_from_evalue(
+-                evalue_threshold,
+-                hit_eff_searchsp,
+-                &params_gapped_for_closure,
+-            );
+-            let cutoff = compute_blastn_cutoff_score(
+-                query_len,
+-                subject_len,
+-                evalue_threshold,
+-                GAP_TRIGGER_BIT_SCORE_NUCL,
+-                &params_ungapped_for_closure, // UNGAPPED for gap_trigger (NCBI: kbp_std)
+-                &params_gapped_for_closure,   // GAPPED for cutoff_score_max (NCBI: kbp_gap)
+-                1.0,
+-            );
++            // NCBI reference: c++/src/algo/blast/core/blast_parameters.c:342-374
++            // gap_trigger = (Int4)((kOptions->gap_trigger * NCBIMATH_LN2 + kbp->logK) / kbp->Lambda);
++            // new_cutoff = gap_trigger;
++            // new_cutoff *= (Int4)sbp->scale_factor;
++            // new_cutoff = MIN(new_cutoff, hit_params->cutoffs[context].cutoff_score_max);
++            let gap_trigger =
++                gap_trigger_raw_score(GAP_TRIGGER_BIT_SCORE_NUCL, &params_ungapped_for_closure);
++            let cutoff = cutoff_score_for_ungapped_extension(gap_trigger, hit_saving_cutoff, 1.0);
+             cutoff_scores.push(cutoff);
+             hit_saving_cutoff_scores.push(hit_saving_cutoff);
+         }
+@@ -10671,6 +10647,86 @@
+         assert_eq!(bit_score, expected_bit_score);
+         assert_eq!(evalue, expected_evalue);
+     }
++    // NCBI reference: c++/src/app/blast/blast_app_util.cpp:204-210;
++    // c++/src/algo/blast/core/blast_parameters.c:925-946
++    // db_adapter.Reset(new CLocalDbAdapter(subjects, opts_hndl, true));
++    // searchsp = query_info->contexts[context].eff_searchsp;
++    // BLAST_Cutoffs(&new_cutoff, &evalue, kbp, searchsp, FALSE, 0);
++    // NCBI BLAST+ 2.17.0+ raw output is frozen for three unequal subjects.
++    // Their combined search space excludes weak word7 seeds which could grow
++    // into extra gapped HSPs under an incorrectly lowered per-subject cutoff.
++    #[test]
++    fn word7_uses_subject_set_cutoffs() {
++        use clap::Parser;
++        #[derive(Parser)]
++        struct Options {
++            #[command(flatten)]
++            blastn: BlastnArgs,
++        }
++        let sequence: String = include_str!(concat!(
++            env!("CARGO_MANIFEST_DIR"),
++            "/tests/fasta/small_test.fasta"
++        ))
++        .lines()
++        .filter(|line| !line.starts_with('>'))
++        .map(str::trim)
++        .collect();
++        let query: String = (0..3)
++            .map(|index| format!(">seq{index}\n{}\n", &sequence[..900]))
++            .collect();
++        let subject: String = [899, 900, 903]
++            .into_iter()
++            .enumerate()
++            .map(|(index, length)| format!(">seq{index}\n{}\n", &sequence[..length]))
++            .collect();
++        let expected = include_bytes!(concat!(
++            env!("CARGO_MANIFEST_DIR"),
++            "/tests/unit/helpers/ncbi_reference_data/blastn_word7_subject_set.out"
++        ));
++        let threads: &[usize] = if cfg!(feature = "parallel") {
++            &[1, 4]
++        } else {
++            &[1]
++        };
++        for n in threads {
++            let options = crate::cli::try_parse_from::<Options, _, _>([
++                "test",
++                "-query",
++                "memory-query",
++                "-subject",
++                "memory-subject",
++                "-task",
++                "blastn",
++                "-word_size",
++                "7",
++                "-outfmt",
++                "6",
++                "-num_threads",
++                &n.to_string(),
++            ])
++            .unwrap();
++            // NCBI reference: c++/src/algo/blast/api/blast_setup_cxx.cpp:836-847
++            // BlastSeqBlkSetSequence(subj, sequence.data.release(), ...);
++            let read_records = |fasta: &str| {
++                bio::io::fasta::Reader::new(fasta.as_bytes())
++                    .records()
++                    .collect::<std::result::Result<Vec<_>, _>>()
++                    .unwrap()
++            };
++            let mut output = Vec::new();
++            run_internal(
++                options.blastn,
++                Some(BlastnInMemoryRun {
++                    queries: read_records(&query),
++                    subjects: read_records(&subject),
++                    output: &mut output,
++                }),
++            )
++            .unwrap();
++            assert_eq!(output, expected.as_slice(), "n{n}");
++        }
++    }
++
+     // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_traceback.c:403-406,509-513,583-612
+     // ```c
+     // if (!BlastIntervalTreeContainsHSP(tree, hsp, query_info,
+--- /dev/null
++++ b/LOSAT/tests/unit/helpers/ncbi_reference_data/blastn_word7_subject_set.out
+@@ -0,0 +1,189 @@
++seq0	seq2	100.000	900	0	0	1	900	1	900	0.0	1624
++seq0	seq2	90.909	22	2	0	124	145	145	124	5.69e-04	31.9
++seq0	seq2	85.000	20	3	0	732	751	603	622	0.29	23.8
++seq0	seq2	100.000	12	0	0	777	788	535	546	0.29	22.9
++seq0	seq2	100.000	12	0	0	535	546	777	788	0.29	22.9
++seq0	seq2	75.758	33	6	1	106	136	223	255	1.0	22.0
++seq0	seq2	92.857	14	1	0	176	189	731	744	1.0	22.0
++seq0	seq2	87.500	16	2	0	114	129	282	297	1.0	21.1
++seq0	seq2	87.500	16	2	0	779	794	459	444	1.0	21.1
++seq0	seq2	72.500	40	10	1	579	618	154	192	3.6	20.2
++seq0	seq2	83.333	18	3	0	656	673	249	232	3.6	20.2
++seq0	seq2	72.500	40	10	1	154	192	579	618	3.6	20.2
++seq0	seq2	100.000	10	0	0	15	24	24	15	3.6	19.3
++seq0	seq2	86.667	15	2	0	777	791	279	293	3.6	19.3
++seq0	seq2	100.000	10	0	0	477	486	290	299	3.6	19.3
++seq0	seq2	100.000	10	0	0	438	447	305	314	3.6	19.3
++seq0	seq2	86.667	15	2	0	806	820	335	349	3.6	19.3
++seq0	seq2	100.000	10	0	0	433	442	442	433	3.6	19.3
++seq0	seq2	86.667	15	2	0	535	549	732	718	3.6	19.3
++seq0	seq2	80.000	20	4	0	361	380	747	728	3.6	19.3
++seq0	seq2	86.667	15	2	0	335	349	806	820	3.6	19.3
++seq0	seq1	100.000	900	0	0	1	900	1	900	0.0	1624
++seq0	seq1	90.909	22	2	0	124	145	145	124	5.69e-04	31.9
++seq0	seq1	85.000	20	3	0	732	751	603	622	0.29	23.8
++seq0	seq1	100.000	12	0	0	777	788	535	546	0.29	22.9
++seq0	seq1	100.000	12	0	0	535	546	777	788	0.29	22.9
++seq0	seq1	75.758	33	6	1	106	136	223	255	1.0	22.0
++seq0	seq1	92.857	14	1	0	176	189	731	744	1.0	22.0
++seq0	seq1	87.500	16	2	0	114	129	282	297	1.0	21.1
++seq0	seq1	87.500	16	2	0	779	794	459	444	1.0	21.1
++seq0	seq1	72.500	40	10	1	579	618	154	192	3.6	20.2
++seq0	seq1	83.333	18	3	0	656	673	249	232	3.6	20.2
++seq0	seq1	72.500	40	10	1	154	192	579	618	3.6	20.2
++seq0	seq1	100.000	10	0	0	15	24	24	15	3.6	19.3
++seq0	seq1	86.667	15	2	0	777	791	279	293	3.6	19.3
++seq0	seq1	100.000	10	0	0	477	486	290	299	3.6	19.3
++seq0	seq1	100.000	10	0	0	438	447	305	314	3.6	19.3
++seq0	seq1	86.667	15	2	0	806	820	335	349	3.6	19.3
++seq0	seq1	100.000	10	0	0	433	442	442	433	3.6	19.3
++seq0	seq1	86.667	15	2	0	535	549	732	718	3.6	19.3
++seq0	seq1	80.000	20	4	0	361	380	747	728	3.6	19.3
++seq0	seq1	86.667	15	2	0	335	349	806	820	3.6	19.3
++seq0	seq0	100.000	899	0	0	1	899	1	899	0.0	1622
++seq0	seq0	90.909	22	2	0	124	145	145	124	5.69e-04	31.9
++seq0	seq0	85.000	20	3	0	732	751	603	622	0.29	23.8
++seq0	seq0	100.000	12	0	0	777	788	535	546	0.29	22.9
++seq0	seq0	100.000	12	0	0	535	546	777	788	0.29	22.9
++seq0	seq0	75.758	33	6	1	106	136	223	255	1.0	22.0
++seq0	seq0	92.857	14	1	0	176	189	731	744	1.0	22.0
++seq0	seq0	87.500	16	2	0	114	129	282	297	1.0	21.1
++seq0	seq0	87.500	16	2	0	779	794	459	444	1.0	21.1
++seq0	seq0	72.500	40	10	1	579	618	154	192	3.6	20.2
++seq0	seq0	83.333	18	3	0	656	673	249	232	3.6	20.2
++seq0	seq0	72.500	40	10	1	154	192	579	618	3.6	20.2
++seq0	seq0	100.000	10	0	0	15	24	24	15	3.6	19.3
++seq0	seq0	86.667	15	2	0	777	791	279	293	3.6	19.3
++seq0	seq0	100.000	10	0	0	477	486	290	299	3.6	19.3
++seq0	seq0	100.000	10	0	0	438	447	305	314	3.6	19.3
++seq0	seq0	86.667	15	2	0	806	820	335	349	3.6	19.3
++seq0	seq0	100.000	10	0	0	433	442	442	433	3.6	19.3
++seq0	seq0	86.667	15	2	0	535	549	732	718	3.6	19.3
++seq0	seq0	80.000	20	4	0	361	380	747	728	3.6	19.3
++seq0	seq0	86.667	15	2	0	335	349	806	820	3.6	19.3
++seq1	seq2	100.000	900	0	0	1	900	1	900	0.0	1624
++seq1	seq2	90.909	22	2	0	124	145	145	124	5.69e-04	31.9
++seq1	seq2	85.000	20	3	0	732	751	603	622	0.29	23.8
++seq1	seq2	100.000	12	0	0	777	788	535	546	0.29	22.9
++seq1	seq2	100.000	12	0	0	535	546	777	788	0.29	22.9
++seq1	seq2	75.758	33	6	1	106	136	223	255	1.0	22.0
++seq1	seq2	92.857	14	1	0	176	189	731	744	1.0	22.0
++seq1	seq2	87.500	16	2	0	114	129	282	297	1.0	21.1
++seq1	seq2	87.500	16	2	0	779	794	459	444	1.0	21.1
++seq1	seq2	72.500	40	10	1	579	618	154	192	3.6	20.2
++seq1	seq2	83.333	18	3	0	656	673	249	232	3.6	20.2
++seq1	seq2	72.500	40	10	1	154	192	579	618	3.6	20.2
++seq1	seq2	100.000	10	0	0	15	24	24	15	3.6	19.3
++seq1	seq2	86.667	15	2	0	777	791	279	293	3.6	19.3
++seq1	seq2	100.000	10	0	0	477	486	290	299	3.6	19.3
++seq1	seq2	100.000	10	0	0	438	447	305	314	3.6	19.3
++seq1	seq2	86.667	15	2	0	806	820	335	349	3.6	19.3
++seq1	seq2	100.000	10	0	0	433	442	442	433	3.6	19.3
++seq1	seq2	86.667	15	2	0	535	549	732	718	3.6	19.3
++seq1	seq2	80.000	20	4	0	361	380	747	728	3.6	19.3
++seq1	seq2	86.667	15	2	0	335	349	806	820	3.6	19.3
++seq1	seq1	100.000	900	0	0	1	900	1	900	0.0	1624
++seq1	seq1	90.909	22	2	0	124	145	145	124	5.69e-04	31.9
++seq1	seq1	85.000	20	3	0	732	751	603	622	0.29	23.8
++seq1	seq1	100.000	12	0	0	777	788	535	546	0.29	22.9
++seq1	seq1	100.000	12	0	0	535	546	777	788	0.29	22.9
++seq1	seq1	75.758	33	6	1	106	136	223	255	1.0	22.0
++seq1	seq1	92.857	14	1	0	176	189	731	744	1.0	22.0
++seq1	seq1	87.500	16	2	0	114	129	282	297	1.0	21.1
++seq1	seq1	87.500	16	2	0	779	794	459	444	1.0	21.1
++seq1	seq1	72.500	40	10	1	579	618	154	192	3.6	20.2
++seq1	seq1	83.333	18	3	0	656	673	249	232	3.6	20.2
++seq1	seq1	72.500	40	10	1	154	192	579	618	3.6	20.2
++seq1	seq1	100.000	10	0	0	15	24	24	15	3.6	19.3
++seq1	seq1	86.667	15	2	0	777	791	279	293	3.6	19.3
++seq1	seq1	100.000	10	0	0	477	486	290	299	3.6	19.3
++seq1	seq1	100.000	10	0	0	438	447	305	314	3.6	19.3
++seq1	seq1	86.667	15	2	0	806	820	335	349	3.6	19.3
++seq1	seq1	100.000	10	0	0	433	442	442	433	3.6	19.3
++seq1	seq1	86.667	15	2	0	535	549	732	718	3.6	19.3
++seq1	seq1	80.000	20	4	0	361	380	747	728	3.6	19.3
++seq1	seq1	86.667	15	2	0	335	349	806	820	3.6	19.3
++seq1	seq0	100.000	899	0	0	1	899	1	899	0.0	1622
++seq1	seq0	90.909	22	2	0	124	145	145	124	5.69e-04	31.9
++seq1	seq0	85.000	20	3	0	732	751	603	622	0.29	23.8
++seq1	seq0	100.000	12	0	0	777	788	535	546	0.29	22.9
++seq1	seq0	100.000	12	0	0	535	546	777	788	0.29	22.9
++seq1	seq0	75.758	33	6	1	106	136	223	255	1.0	22.0
++seq1	seq0	92.857	14	1	0	176	189	731	744	1.0	22.0
++seq1	seq0	87.500	16	2	0	114	129	282	297	1.0	21.1
++seq1	seq0	87.500	16	2	0	779	794	459	444	1.0	21.1
++seq1	seq0	72.500	40	10	1	579	618	154	192	3.6	20.2
++seq1	seq0	83.333	18	3	0	656	673	249	232	3.6	20.2
++seq1	seq0	72.500	40	10	1	154	192	579	618	3.6	20.2
++seq1	seq0	100.000	10	0	0	15	24	24	15	3.6	19.3
++seq1	seq0	86.667	15	2	0	777	791	279	293	3.6	19.3
++seq1	seq0	100.000	10	0	0	477	486	290	299	3.6	19.3
++seq1	seq0	100.000	10	0	0	438	447	305	314	3.6	19.3
++seq1	seq0	86.667	15	2	0	806	820	335	349	3.6	19.3
++seq1	seq0	100.000	10	0	0	433	442	442	433	3.6	19.3
++seq1	seq0	86.667	15	2	0	535	549	732	718	3.6	19.3
++seq1	seq0	80.000	20	4	0	361	380	747	728	3.6	19.3
++seq1	seq0	86.667	15	2	0	335	349	806	820	3.6	19.3
++seq2	seq2	100.000	900	0	0	1	900	1	900	0.0	1624
++seq2	seq2	90.909	22	2	0	124	145	145	124	5.69e-04	31.9
++seq2	seq2	85.000	20	3	0	732	751	603	622	0.29	23.8
++seq2	seq2	100.000	12	0	0	777	788	535	546	0.29	22.9
++seq2	seq2	100.000	12	0	0	535	546	777	788	0.29	22.9
++seq2	seq2	75.758	33	6	1	106	136	223	255	1.0	22.0
++seq2	seq2	92.857	14	1	0	176	189	731	744	1.0	22.0
++seq2	seq2	87.500	16	2	0	114	129	282	297	1.0	21.1
++seq2	seq2	87.500	16	2	0	779	794	459	444	1.0	21.1
++seq2	seq2	72.500	40	10	1	579	618	154	192	3.6	20.2
++seq2	seq2	83.333	18	3	0	656	673	249	232	3.6	20.2
++seq2	seq2	72.500	40	10	1	154	192	579	618	3.6	20.2
++seq2	seq2	100.000	10	0	0	15	24	24	15	3.6	19.3
++seq2	seq2	86.667	15	2	0	777	791	279	293	3.6	19.3
++seq2	seq2	100.000	10	0	0	477	486	290	299	3.6	19.3
++seq2	seq2	100.000	10	0	0	438	447	305	314	3.6	19.3
++seq2	seq2	86.667	15	2	0	806	820	335	349	3.6	19.3
++seq2	seq2	100.000	10	0	0	433	442	442	433	3.6	19.3
++seq2	seq2	86.667	15	2	0	535	549	732	718	3.6	19.3
++seq2	seq2	80.000	20	4	0	361	380	747	728	3.6	19.3
++seq2	seq2	86.667	15	2	0	335	349	806	820	3.6	19.3
++seq2	seq1	100.000	900	0	0	1	900	1	900	0.0	1624
++seq2	seq1	90.909	22	2	0	124	145	145	124	5.69e-04	31.9
++seq2	seq1	85.000	20	3	0	732	751	603	622	0.29	23.8
++seq2	seq1	100.000	12	0	0	777	788	535	546	0.29	22.9
++seq2	seq1	100.000	12	0	0	535	546	777	788	0.29	22.9
++seq2	seq1	75.758	33	6	1	106	136	223	255	1.0	22.0
++seq2	seq1	92.857	14	1	0	176	189	731	744	1.0	22.0
++seq2	seq1	87.500	16	2	0	114	129	282	297	1.0	21.1
++seq2	seq1	87.500	16	2	0	779	794	459	444	1.0	21.1
++seq2	seq1	72.500	40	10	1	579	618	154	192	3.6	20.2
++seq2	seq1	83.333	18	3	0	656	673	249	232	3.6	20.2
++seq2	seq1	72.500	40	10	1	154	192	579	618	3.6	20.2
++seq2	seq1	100.000	10	0	0	15	24	24	15	3.6	19.3
++seq2	seq1	86.667	15	2	0	777	791	279	293	3.6	19.3
++seq2	seq1	100.000	10	0	0	477	486	290	299	3.6	19.3
++seq2	seq1	100.000	10	0	0	438	447	305	314	3.6	19.3
++seq2	seq1	86.667	15	2	0	806	820	335	349	3.6	19.3
++seq2	seq1	100.000	10	0	0	433	442	442	433	3.6	19.3
++seq2	seq1	86.667	15	2	0	535	549	732	718	3.6	19.3
++seq2	seq1	80.000	20	4	0	361	380	747	728	3.6	19.3
++seq2	seq1	86.667	15	2	0	335	349	806	820	3.6	19.3
++seq2	seq0	100.000	899	0	0	1	899	1	899	0.0	1622
++seq2	seq0	90.909	22	2	0	124	145	145	124	5.69e-04	31.9
++seq2	seq0	85.000	20	3	0	732	751	603	622	0.29	23.8
++seq2	seq0	100.000	12	0	0	777	788	535	546	0.29	22.9
++seq2	seq0	100.000	12	0	0	535	546	777	788	0.29	22.9
++seq2	seq0	75.758	33	6	1	106	136	223	255	1.0	22.0
++seq2	seq0	92.857	14	1	0	176	189	731	744	1.0	22.0
++seq2	seq0	87.500	16	2	0	114	129	282	297	1.0	21.1
++seq2	seq0	87.500	16	2	0	779	794	459	444	1.0	21.1
++seq2	seq0	72.500	40	10	1	579	618	154	192	3.6	20.2
++seq2	seq0	83.333	18	3	0	656	673	249	232	3.6	20.2
++seq2	seq0	72.500	40	10	1	154	192	579	618	3.6	20.2
++seq2	seq0	100.000	10	0	0	15	24	24	15	3.6	19.3
++seq2	seq0	86.667	15	2	0	777	791	279	293	3.6	19.3
++seq2	seq0	100.000	10	0	0	477	486	290	299	3.6	19.3
++seq2	seq0	100.000	10	0	0	438	447	305	314	3.6	19.3
++seq2	seq0	86.667	15	2	0	806	820	335	349	3.6	19.3
++seq2	seq0	100.000	10	0	0	433	442	442	433	3.6	19.3
++seq2	seq0	86.667	15	2	0	535	549	732	718	3.6	19.3
++seq2	seq0	80.000	20	4	0	361	380	747	728	3.6	19.3
++seq2	seq0	86.667	15	2	0	335	349	806	820	3.6	19.3

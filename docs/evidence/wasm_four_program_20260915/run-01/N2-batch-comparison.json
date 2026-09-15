@@ -1,0 +1,40 @@
+[
+  {
+    "case": "short",
+    "batches": 186,
+    "identical_jobs_and_scatter_indices": true,
+    "raw_equal": true,
+    "raw_sha256": "f7264639f1f1aa9b25e43e7da0cef44a40951de43b9ab9bc60cec3f565966b99",
+    "job_count_range": [
+      5,
+      16
+    ],
+    "empty_batches": 0,
+    "few_jobs_batches": 7,
+    "candidate_max_jobs_capacity": 16,
+    "candidate_max_results_capacity": 16,
+    "candidate_max_per_slot_capacity": 4,
+    "baseline_nonempty_slot_buffer_constructions": 1474,
+    "candidate_slot_buffers": 8,
+    "note": "capacity/construction counts, not an allocator-level measurement; allocator diagnostics reported separately"
+  },
+  {
+    "case": "large",
+    "batches": 4214,
+    "identical_jobs_and_scatter_indices": true,
+    "raw_equal": true,
+    "raw_sha256": "9a30fc9c61c4eb33d79c638ce62a330884d1330f56e4ba4f49d54b6547228603",
+    "job_count_range": [
+      0,
+      16
+    ],
+    "empty_batches": 9,
+    "few_jobs_batches": 145,
+    "candidate_max_jobs_capacity": 16,
+    "candidate_max_results_capacity": 16,
+    "candidate_max_per_slot_capacity": 4,
+    "baseline_nonempty_slot_buffer_constructions": 33276,
+    "candidate_slot_buffers": 8,
+    "note": "capacity/construction counts, not an allocator-level measurement; allocator diagnostics reported separately"
+  }
+]

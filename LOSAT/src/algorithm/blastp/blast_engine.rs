@@ -5305,22 +5305,39 @@ fn run_resolved_in_pool(
     // }
     // ```
     let kappa_redo_start = blastp_timing_start(timing_enabled);
+    // NCBI reference: c++/src/algo/blast/core/blast_kappa.c:2228-2236
+    // self->ungappedLambda = sbp->kbp_ideal->Lambda / scale_factor;
+    // status = s_GetStartFreqRatios(self->startFreqRatios, matrixName);
+    // if (status == 0) {
+    //     Blast_Int4MatrixFromFreq(self->startMatrix, self->cols,
+    //                              self->startFreqRatios, self->ungappedLambda);
+    // }
+    // This non-position-based initial matrix is invariant within this search.
+    // Initialize at the existing first params request, preserving no-hit/error
+    // boundaries, and clone completed values into independently mutable params.
+    let initial_matrix_info = std::sync::OnceLock::new();
     let build_redo_align_params = |q_idx: usize| -> Result<BlastRedoAlignParams> {
         let local_scaling_factor =
             blastp_local_scaling_factor(args.comp_based_stats.mode, args.scoring.matrix);
         let scaled_gapped_lambda = gapped_params.lambda / local_scaling_factor;
         let do_link_hsps = false;
-        let matrix_info = build_matrix_info(
-            args.scoring.matrix,
-            // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_kappa.c:2216-2231
-            // ```c
-            // self->ungappedLambda = sbp->kbp_ideal->Lambda / scale_factor;
-            // status = s_GetStartFreqRatios(self->startFreqRatios, matrixName);
-            // Blast_Int4MatrixFromFreq(self->startMatrix, self->cols,
-            //                          self->startFreqRatios, self->ungappedLambda);
-            // ```
-            ideal_ungapped_params.lambda / local_scaling_factor,
-        )?;
+        let matrix_info = initial_matrix_info
+            .get_or_init(|| {
+                build_matrix_info(
+                    args.scoring.matrix,
+                    // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_kappa.c:2216-2231
+                    // ```c
+                    // self->ungappedLambda = sbp->kbp_ideal->Lambda / scale_factor;
+                    // status = s_GetStartFreqRatios(self->startFreqRatios, matrixName);
+                    // Blast_Int4MatrixFromFreq(self->startMatrix, self->cols,
+                    //                          self->startFreqRatios, self->ungappedLambda);
+                    // ```
+                    ideal_ungapped_params.lambda / local_scaling_factor,
+                )
+            })
+            .as_ref()
+            .map_err(|error| anyhow::anyhow!("{error}"))?
+            .clone();
         Ok(BlastRedoAlignParams {
             // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_kappa.c:2216-2231
             // ```c
@@ -5519,56 +5536,77 @@ fn run_resolved_in_pool(
             // #pragma omp for schedule(static)
             // for (b = 0; b < numMatches; ++b) {
             // ```
+            // NCBI reference: c++/src/algo/blast/core/blast_kappa.c:2309-2336,3493-3504
+            // query_info->seq.data = &query_data[query_info->origin];
+            // query_info = query_info_tld[tid];
+            // Only immutable query preparation is shared within this search.
+            let query_workspace = std::sync::OnceLock::new();
             let pool = blastp_parallel_pool;
             let precomputed: Vec<Result<Option<BlastpPostprocessResult>>> = pool.install(|| {
                 local_matches
                     .par_iter()
-                    .map(|local_match| -> Result<Option<BlastpPostprocessResult>> {
-                        let mut kappa_preliminary_hits = Vec::with_capacity(local_match.hsps.len());
-                        kappa_preliminary_hits.extend(
-                            local_match
-                                .hsps
-                                .iter()
-                                .map(preliminary_hit_from_local_match_hsp),
-                        );
-                        if kappa_preliminary_hits.is_empty() {
-                            return Ok(None);
-                        }
+                    // NCBI reference: c++/src/algo/blast/core/blast_kappa.c:3329-3334,3493-3503
+                    // NRrecord_tld[i] = Blast_CompositionWorkspaceNew();
+                    // NRrecord = NRrecord_tld[tid];
+                    // Each Rayon work unit owns its mutable scratch. Initialization
+                    // count is scheduler-dependent, never assumed to equal threads.
+                    .map_init(
+                        || {
+                            (
+                                BlastCompositionWorkspace::new_blosum62(),
+                                GapAlignScratch::new(),
+                                Vec::new(),
+                            )
+                        },
+                        |(composition_workspace, kappa_gap_scratch, kappa_preliminary_hits),
+                         local_match|
+                         -> Result<Option<BlastpPostprocessResult>> {
+                            kappa_preliminary_hits.clear();
+                            kappa_preliminary_hits.extend(
+                                local_match
+                                    .hsps
+                                    .iter()
+                                    .map(preliminary_hit_from_local_match_hsp),
+                            );
+                            if kappa_preliminary_hits.is_empty() {
+                                return Ok(None);
+                            }
 
-                        let s_idx = local_match.oid;
-                        let subject = &subjects[s_idx as usize];
-                        let subject_raw = &subject.aa_seq[1..subject.aa_seq.len() - 1];
-                        let redo_align_params = build_redo_align_params(q_idx)?;
-                        let query_workspace = build_query_workspace(
-                            query_raw,
-                            ctx.aa_len as i32,
-                            search_spaces[q_idx].length_adjustment as i32,
-                            search_spaces[q_idx].effective_space,
-                        );
-                        let mut composition_workspace = BlastCompositionWorkspace::new_blosum62();
-                        let mut kappa_gap_scratch = GapAlignScratch::new();
-                        let mut kappa_subject_range_cache = BlastpKappaSubjectRangeCache::new();
+                            let s_idx = local_match.oid;
+                            let subject = &subjects[s_idx as usize];
+                            let subject_raw = &subject.aa_seq[1..subject.aa_seq.len() - 1];
+                            let redo_align_params = build_redo_align_params(q_idx)?;
+                            let query_workspace = query_workspace.get_or_init(|| {
+                                build_query_workspace(
+                                    query_raw,
+                                    ctx.aa_len as i32,
+                                    search_spaces[q_idx].length_adjustment as i32,
+                                    search_spaces[q_idx].effective_space,
+                                )
+                            });
+                            let mut kappa_subject_range_cache = BlastpKappaSubjectRangeCache::new();
 
-                        // NCBI reference: /mnt/c/Users/genom/GitHub/ncbi-blast/c++/src/algo/blast/core/blast_kappa.c:3577-3585
-                        // ```c
-                        // *pStatusCode = s_ResultHspToDistinctAlign(...);
-                        // ```
-                        postprocess_preliminary_hits(
-                            &kappa_preliminary_hits,
-                            &query_workspace,
-                            &mut composition_workspace,
-                            query_nomask,
-                            subject_raw,
-                            args.scoring.matrix,
-                            &gapped_params,
-                            &gapped_gumbel,
-                            &redo_align_params,
-                            args.evalue,
-                            &mut kappa_gap_scratch,
-                            &mut kappa_subject_range_cache,
-                        )
-                        .map(Some)
-                    })
+                            // NCBI reference: /mnt/c/Users/genom/GitHub/ncbi-blast/c++/src/algo/blast/core/blast_kappa.c:3577-3585
+                            // ```c
+                            // *pStatusCode = s_ResultHspToDistinctAlign(...);
+                            // ```
+                            postprocess_preliminary_hits(
+                                kappa_preliminary_hits,
+                                query_workspace,
+                                composition_workspace,
+                                query_nomask,
+                                subject_raw,
+                                args.scoring.matrix,
+                                &gapped_params,
+                                &gapped_gumbel,
+                                &redo_align_params,
+                                args.evalue,
+                                kappa_gap_scratch,
+                                &mut kappa_subject_range_cache,
+                            )
+                            .map(Some)
+                        },
+                    )
                     .collect()
             });
 

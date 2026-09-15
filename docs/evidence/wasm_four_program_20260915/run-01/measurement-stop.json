@@ -1,0 +1,32 @@
+{
+  "status": "STOPPED_BY_USER",
+  "recorded_utc": "2026-09-15T07:33:56.962461+00:00",
+  "instruction": "\u5207\u308a\u4e0a\u3052\u3066\u3002\u6b21\u306b\u884c\u3053\u3046\u3088\u3002 / \uff13\u56de\u3084\u308c\u3070\u5341\u5206\u3060\u308d\u3002\u3082\u3046\u3002",
+  "eligible_repeats": [
+    1,
+    2,
+    3
+  ],
+  "warmup_repeat": 0,
+  "completed_later_samples_excluded": 54,
+  "selection": "First three complete A/B pairs for every condition, never fastest samples",
+  "stopped_processes": [
+    376627,
+    378444,
+    378445,
+    383486,
+    482360,
+    482362
+  ],
+  "process_absence_verified": true,
+  "not_run": [
+    "integrated controls timing",
+    "body timing",
+    "compiled-module reuse timing",
+    "same-reactor timing/memory window",
+    "TurboFan secondary timing",
+    "historical source rebuilds"
+  ],
+  "original_run_status": "RUNNING is the unmodified last checkpoint of an interrupted process, not a live job",
+  "outcome": "39/45 time guards,45/45 RSS guards; integrated all-program adoption NOT established"
+}

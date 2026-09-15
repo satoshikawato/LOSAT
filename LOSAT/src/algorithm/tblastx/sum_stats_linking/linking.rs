@@ -1662,9 +1662,6 @@ fn link_hsp_group_ncbi(
                             let helper = &pool_lh_helpers[current_idx];
                             let sum = helper.sum[1];
                             let next_larger = helper.next_larger;
-                            let qo = helper.q_off_trim;
-                            let so = helper.s_off_trim;
-
                             let b0 = sum <= h_sum;
 
                             // NCBI line 841: H2_index--
@@ -1675,8 +1672,21 @@ fn link_hsp_group_ncbi(
                                     eprintln!("  [SKIP] current_idx={}, sum={} <= h_sum={}, jump to next_larger={}",
                                         current_idx, sum, h_sum, next_larger);
                                 }
+                                // NCBI reference: c++/src/algo/blast/core/link_hsps.c:838-859
+                                // b0 = sum <= H_hsp_sum;
+                                // H2_index--;
+                                // if (b0) { H2_index = next_larger; }
+                                // if (!(b0|b1|b2)) { H_hsp_link = H2; }
+                                // A true b0 cannot select this predecessor. Keep the
+                                // same jump, but defer coordinate loads to contenders.
+                                // Tracing still evaluates all three reported predicates.
+                                if !is_target_hsp {
+                                    continue;
+                                }
                             }
 
+                            let qo = helper.q_off_trim;
+                            let so = helper.s_off_trim;
                             let b1 = qo <= h_qe;
                             let b2 = so <= h_se;
 

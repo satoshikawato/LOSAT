@@ -1,0 +1,68 @@
+--- a/LOSAT/src/algorithm/blastp/blast_engine.rs
++++ b/LOSAT/src/algorithm/blastp/blast_engine.rs
+@@ -5519,12 +5519,24 @@
+             // #pragma omp for schedule(static)
+             // for (b = 0; b < numMatches; ++b) {
+             // ```
++            // NCBI reference: c++/src/algo/blast/core/blast_kappa.c:2309-2336,3493-3504
++            // query_info->seq.data = &query_data[query_info->origin];
++            // query_info = query_info_tld[tid];
++            // Only immutable query preparation is shared within this search.
++            let query_workspace = std::sync::OnceLock::new();
+             let pool = blastp_parallel_pool;
+             let precomputed: Vec<Result<Option<BlastpPostprocessResult>>> = pool.install(|| {
+                 local_matches
+                     .par_iter()
+-                    .map(|local_match| -> Result<Option<BlastpPostprocessResult>> {
+-                        let mut kappa_preliminary_hits = Vec::with_capacity(local_match.hsps.len());
++                    // NCBI reference: c++/src/algo/blast/core/blast_kappa.c:3329-3334,3493-3503
++                    // NRrecord_tld[i] = Blast_CompositionWorkspaceNew();
++                    // NRrecord = NRrecord_tld[tid];
++                    // Each Rayon work unit owns its mutable scratch. Initialization
++                    // count is scheduler-dependent, never assumed to equal threads.
++                    .map_init(
++                        || (BlastCompositionWorkspace::new_blosum62(), GapAlignScratch::new(), Vec::new()),
++                        |(composition_workspace, kappa_gap_scratch, kappa_preliminary_hits), local_match| -> Result<Option<BlastpPostprocessResult>> {
++                        kappa_preliminary_hits.clear();
+                         kappa_preliminary_hits.extend(
+                             local_match
+                                 .hsps
+@@ -5539,14 +5551,12 @@
+                         let subject = &subjects[s_idx as usize];
+                         let subject_raw = &subject.aa_seq[1..subject.aa_seq.len() - 1];
+                         let redo_align_params = build_redo_align_params(q_idx)?;
+-                        let query_workspace = build_query_workspace(
++                        let query_workspace = query_workspace.get_or_init(|| build_query_workspace(
+                             query_raw,
+                             ctx.aa_len as i32,
+                             search_spaces[q_idx].length_adjustment as i32,
+                             search_spaces[q_idx].effective_space,
+-                        );
+-                        let mut composition_workspace = BlastCompositionWorkspace::new_blosum62();
+-                        let mut kappa_gap_scratch = GapAlignScratch::new();
++                        ));
+                         let mut kappa_subject_range_cache = BlastpKappaSubjectRangeCache::new();
+ 
+                         // NCBI reference: /mnt/c/Users/genom/GitHub/ncbi-blast/c++/src/algo/blast/core/blast_kappa.c:3577-3585
+@@ -5554,9 +5564,9 @@
+                         // *pStatusCode = s_ResultHspToDistinctAlign(...);
+                         // ```
+                         postprocess_preliminary_hits(
+-                            &kappa_preliminary_hits,
+-                            &query_workspace,
+-                            &mut composition_workspace,
++                            kappa_preliminary_hits,
++                            query_workspace,
++                            composition_workspace,
+                             query_nomask,
+                             subject_raw,
+                             args.scoring.matrix,
+@@ -5564,7 +5574,7 @@
+                             &gapped_gumbel,
+                             &redo_align_params,
+                             args.evalue,
+-                            &mut kappa_gap_scratch,
++                            kappa_gap_scratch,
+                             &mut kappa_subject_range_cache,
+                         )
+                         .map(Some)

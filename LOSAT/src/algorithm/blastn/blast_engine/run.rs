@@ -65,8 +65,8 @@ use super::super::coordination::{
     prepare_sequence_data, read_queries, scan_subjects_metadata, subject_metadata_from_records,
 };
 use super::super::extension::{
-    build_nucl_score_table, extend_hit_ungapped_approx_ncbi, extend_hit_ungapped_exact_ncbi,
-    type_of_word,
+    build_nucl_score_table, build_query_four_base_bytes, extend_hit_ungapped_approx_ncbi,
+    extend_hit_ungapped_exact_ncbi, type_of_word,
 };
 use super::super::filtering::{
     blast_hsp_test_identity_and_length, hsp_test, purge_hsps_with_common_endpoints,
@@ -80,10 +80,12 @@ use super::super::hsp::{
 };
 use super::super::interval_tree::{BlastIntervalTree, IndexMethod, TreeHsp};
 use super::super::lookup::{build_unmasked_ranges, reverse_complement};
+// NCBI reference: c++/src/algo/blast/core/blast_parameters.c:342-344,370-374
+// gap_trigger = (Int4)((kOptions->gap_trigger * NCBIMATH_LN2 + kbp->logK) / kbp->Lambda);
+// new_cutoff = MIN(new_cutoff, hit_params->cutoffs[context].cutoff_score_max);
 use super::super::ncbi_cutoffs::{
-    compute_blastn_cutoff_score, compute_blastn_ungapped_params_from_score_freq,
-    compute_eff_lengths_subject_mode_blastn, cutoff_score_max_from_evalue,
-    GAP_TRIGGER_BIT_SCORE_NUCL,
+    compute_blastn_ungapped_params_from_score_freq, cutoff_score_for_ungapped_extension,
+    cutoff_score_max_from_evalue, gap_trigger_raw_score, GAP_TRIGGER_BIT_SCORE_NUCL,
 };
 use super::super::tracing as blastn_trace;
 use crate::utils::dust::MaskedInterval;
@@ -4837,6 +4839,18 @@ fn run_in_pool(
             query_concat_length,
         );
 
+    // NCBI reference: c++/src/algo/blast/core/na_ungapped.c:294,324,740-749
+    // Uint1 q_byte = (q[0] << 6) | (q[1] << 4) | (q[2] << 2) | q[3];
+    // if (word_params->matrix_only_scoring || word_length < 11)
+    //     s_NuclUngappedExtendExact(...);
+    // Use the same encoded concat/context slices as extension, including their
+    // sentinels. Exact-only word sizes do not allocate this search-local table.
+    let query_four_base = if config.effective_word_size >= 11 {
+        build_query_four_base_bytes(&encoded_query_concat_blastna)
+    } else {
+        Vec::new()
+    };
+
     // Finalize configuration with query-dependent parameters (adaptive lookup table selection)
     // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_nalookup.c:46-47
     // ```c
@@ -5460,61 +5474,35 @@ fn run_in_pool(
         // ```
         // NCBI uses UNGAPPED params (kbp_std) for gap_trigger calculation
         // and GAPPED params (kbp_gap) for cutoff_score_max calculation
-        let subject_len = s_len_full as i64;
         let mut cutoff_scores: Vec<i32> = Vec::with_capacity(queries.len());
         let mut hit_saving_cutoff_scores: Vec<i32> = Vec::with_capacity(queries.len());
-        for q_record in queries.iter() {
-            // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_setup.c:821-843
-            // ```c
-            // BLAST_ComputeLengthAdjustment(..., query_length, db_length, ...);
-            // effective_search_space = effective_db_length *
-            //                         (query_length - length_adjustment);
-            // ```
-            // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_parameters.c:348-369
-            // ```c
-            // if (!gapped_calculation || sbp->matrix_only_scoring) {
-            //     Int4 query_length = query_info->contexts[context].query_length;
-            //     if (program_number == eBlastTypeBlastn) query_length *= 2;
-            // } else {
-            //     new_cutoff = gap_trigger;
-            // }
-            // ```
-            let query_len = q_record.seq().len() as i64;
-            // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_parameters.c:917-946
-            // ```c
+        // NCBI reference: c++/src/app/blast/blast_app_util.cpp:206-211;
+        // c++/src/algo/blast/api/seqsrc_multiseq.cpp:175-181;
+        // c++/src/algo/blast/core/blast_engine.c:1434-1445
+        // db_adapter.Reset(new CLocalDbAdapter(subjects, opts_hndl, true));
+        // if (dbscan_mode) { ... m_iTotalLength += (Int8) (*iter)->length; }
+        // if (db_length == 0) { BLAST_OneSubjectUpdateParameters(...); }
+        // The CLI subject set has a nonzero total length. Its context search
+        // space is retained across subjects, just as for output statistics.
+        for query_idx in 0..queries.len() {
+            // NCBI reference: c++/src/algo/blast/core/blast_parameters.c:925-946
             // searchsp = query_info->contexts[context].eff_searchsp;
-            // ...
             // BLAST_Cutoffs(&new_cutoff, &evalue, kbp, searchsp, FALSE, 0);
-            // params->cutoffs[context].cutoff_score = new_cutoff;
             // params->cutoffs[context].cutoff_score_max = new_cutoff;
-            // ```
-            // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_traceback.c:653-656
-            // ```c
-            // delete_hsp = Blast_HSPReevaluateWithAmbiguitiesGapped(hsp, query,
-            //          query_length, subject, subject_length, hit_params,
-            //          score_params, sbp);
-            // ```
-            // Trimmed-HSP reevaluation uses hit_params->cutoffs[].cutoff_score,
-            // not the lower initial-word cutoff from BlastInitialWordParameters.
-            let (_, hit_eff_searchsp) = compute_eff_lengths_subject_mode_blastn(
-                query_len,
-                subject_len,
-                &params_gapped_for_closure,
-            );
+            // Both strand contexts share the same sequence length/search space.
             let hit_saving_cutoff = cutoff_score_max_from_evalue(
                 evalue_threshold,
-                hit_eff_searchsp,
+                query_eff_searchsp[query_idx * 2],
                 &params_gapped_for_closure,
             );
-            let cutoff = compute_blastn_cutoff_score(
-                query_len,
-                subject_len,
-                evalue_threshold,
-                GAP_TRIGGER_BIT_SCORE_NUCL,
-                &params_ungapped_for_closure, // UNGAPPED for gap_trigger (NCBI: kbp_std)
-                &params_gapped_for_closure,   // GAPPED for cutoff_score_max (NCBI: kbp_gap)
-                1.0,
-            );
+            // NCBI reference: c++/src/algo/blast/core/blast_parameters.c:342-374
+            // gap_trigger = (Int4)((kOptions->gap_trigger * NCBIMATH_LN2 + kbp->logK) / kbp->Lambda);
+            // new_cutoff = gap_trigger;
+            // new_cutoff *= (Int4)sbp->scale_factor;
+            // new_cutoff = MIN(new_cutoff, hit_params->cutoffs[context].cutoff_score_max);
+            let gap_trigger =
+                gap_trigger_raw_score(GAP_TRIGGER_BIT_SCORE_NUCL, &params_ungapped_for_closure);
+            let cutoff = cutoff_score_for_ungapped_extension(gap_trigger, hit_saving_cutoff, 1.0);
             cutoff_scores.push(cutoff);
             hit_saving_cutoff_scores.push(hit_saving_cutoff);
         }
@@ -6815,6 +6803,7 @@ fn run_in_pool(
                                 } else {
                                     extend_hit_ungapped_approx_ncbi(
                                         encoded_query_concat_blastna.as_slice(),
+                                        &query_four_base,
                                         search_seq_packed,
                                         q_off,
                                         s_off,
@@ -7862,6 +7851,9 @@ fn run_in_pool(
                                 } else {
                                     extend_hit_ungapped_approx_ncbi(
                                         q_seq_blastna,
+                                        &query_four_base[query_context_offsets[context_idx] as usize
+                                            ..query_context_offsets[context_idx] as usize
+                                                + q_seq_blastna.len().saturating_sub(3)],
                                         search_seq_packed,
                                         q_off,
                                         s_off,
@@ -9002,7 +8994,12 @@ fn run_in_pool(
                 any(not(target_arch = "wasm32"), feature = "wasm-threads")
             ))]
             let mut speculative_scratch: Vec<_> = if speculative_traceback {
-                (0..num_threads).map(|_| GapAlignScratch::new()).collect()
+                // NCBI reference: c++/src/algo/blast/core/blast_traceback.c:509-513
+                // BLAST_GappedAlignmentWithTraceback(...);
+                // Each independent scratch slot retains its intermediate results.
+                (0..num_threads)
+                    .map(|_| (GapAlignScratch::new(), Vec::new()))
+                    .collect()
             } else {
                 Vec::new()
             };
@@ -9011,6 +9008,16 @@ fn run_in_pool(
                 any(not(target_arch = "wasm32"), feature = "wasm-threads")
             ))]
             let mut speculative_results = Vec::new();
+            // NCBI reference: c++/src/algo/blast/core/blast_traceback.c:403-405,598-601
+            // if (!BlastIntervalTreeContainsHSP(tree, hsp, query_info, ...)) {
+            //     BlastIntervalTreeAddHSP(hsp, tree, query_info, eQueryAndSubject);
+            // }
+            // Reuse only batch storage; live ordered containment remains below.
+            #[cfg(all(
+                feature = "parallel",
+                any(not(target_arch = "wasm32"), feature = "wasm-threads")
+            ))]
+            let mut speculative_jobs = Vec::new();
             // NCBI reference: c++/src/algo/blast/core/blast_traceback.c:403-405,509-513,598-601
             // ```c
             // if (!BlastIntervalTreeContainsHSP(tree, hsp, query_info, ...)) {
@@ -9045,26 +9052,25 @@ fn run_in_pool(
                 if speculative_traceback && prelim_index % SPECULATIVE_TRACEBACK_BATCH_SIZE == 0 {
                     let batch_end =
                         (prelim_index + SPECULATIVE_TRACEBACK_BATCH_SIZE).min(prelim_hits.len());
-                    let jobs: Vec<_> = (prelim_index..batch_end)
-                        .filter(|&index| {
-                            let p = &prelim_hits[index];
-                            let h = TreeHsp {
-                                query_offset: p.prelim_qs as i32,
-                                query_end: p.prelim_qe as i32,
-                                subject_offset: p.prelim_ss as i32,
-                                subject_end: p.prelim_se as i32,
-                                score: p.prelim_score,
-                                query_frame: p.query_frame,
-                                query_length: query_contexts[p.context_idx as usize].seq.len()
-                                    as i32,
-                                query_context_offset: p.query_context_offset,
-                                subject_frame_sign: 1,
-                            };
-                            interval_tree
-                                .containing_hsp(&h, p.query_context_offset, min_diag_separation)
-                                .is_none()
-                        })
-                        .collect();
+                    speculative_jobs.clear();
+                    speculative_jobs.extend((prelim_index..batch_end).filter(|&index| {
+                        let p = &prelim_hits[index];
+                        let h = TreeHsp {
+                            query_offset: p.prelim_qs as i32,
+                            query_end: p.prelim_qe as i32,
+                            subject_offset: p.prelim_ss as i32,
+                            subject_end: p.prelim_se as i32,
+                            score: p.prelim_score,
+                            query_frame: p.query_frame,
+                            query_length: query_contexts[p.context_idx as usize].seq.len() as i32,
+                            query_context_offset: p.query_context_offset,
+                            subject_frame_sign: 1,
+                        };
+                        interval_tree
+                            .containing_hsp(&h, p.query_context_offset, min_diag_separation)
+                            .is_none()
+                    }));
+                    let jobs = &speculative_jobs;
                     // NCBI reference: c++/src/algo/blast/core/blast_traceback.c:509-513
                     // BLAST_GappedAlignmentWithTraceback(...);
                     crate::utils::threading::report_stage(
@@ -9073,42 +9079,56 @@ fn run_in_pool(
                         jobs.len(),
                         jobs.len() > 1,
                     );
-                    speculative_results = (prelim_index..batch_end).map(|_| None).collect();
+                    speculative_results.clear();
+                    speculative_results.resize_with(batch_end - prelim_index, || None);
                     let pool = parallel_pool;
-                    let computed: Vec<_> = pool.install(|| {
-                        speculative_scratch
-                            .par_iter_mut()
-                            .enumerate()
-                            .map(|(slot, scratch)| {
-                                jobs.iter()
-                                    .skip(slot)
-                                    .step_by(num_threads)
-                                    .filter_map(|&index| {
-                                        let p = &prelim_hits[index];
-                                        let (qs, _, shift, slen, ss) = prepare_traceback(p)?;
-                                        let result =
-                                            extend_gapped_heuristic_with_traceback_with_scratch(
-                                                &encoded_queries_blastna[p.context_idx as usize],
-                                                &s_seq_blastna[shift..shift + slen],
-                                                qs,
-                                                ss,
-                                                1,
-                                                reward,
-                                                penalty,
-                                                &score_matrix,
-                                                gap_open,
-                                                gap_extend,
-                                                x_drop_final,
-                                                scratch,
-                                            );
-                                        Some((index, result))
-                                    })
-                                    .collect::<Vec<_>>()
-                            })
-                            .collect()
+                    pool.install(|| {
+                        speculative_scratch.par_iter_mut().enumerate().for_each(
+                            |(slot, (scratch, results))| {
+                                results.clear();
+                                results.extend(
+                                    jobs.iter().skip(slot).step_by(num_threads).filter_map(
+                                        |&index| {
+                                            let p = &prelim_hits[index];
+                                            // NCBI reference: core/blast_traceback.c:436-472,509-513
+                                            // BlastGetStartForGappedAlignmentNucl(query, subject, hsp);
+                                            // AdjustSubjectRange(&s_start, &adjusted_s_length,
+                                            //                    q_start, query_length, &start_shift);
+                                            // BLAST_GappedAlignmentWithTraceback(...);
+                                            // Keep the exact preparation with its speculative DP.
+                                            let prepared = prepare_traceback(p)?;
+                                            let (qs, _, shift, slen, ss) = prepared;
+                                            let result =
+                                                extend_gapped_heuristic_with_traceback_with_scratch(
+                                                    &encoded_queries_blastna
+                                                        [p.context_idx as usize],
+                                                    &s_seq_blastna[shift..shift + slen],
+                                                    qs,
+                                                    ss,
+                                                    1,
+                                                    reward,
+                                                    penalty,
+                                                    &score_matrix,
+                                                    gap_open,
+                                                    gap_extend,
+                                                    x_drop_final,
+                                                    scratch,
+                                                );
+                                            Some((index, (prepared, result)))
+                                        },
+                                    ),
+                                );
+                            },
+                        )
                     });
-                    for (index, result) in computed.into_iter().flatten() {
-                        speculative_results[index - prelim_index] = Some(result);
+                    // NCBI reference: c++/src/algo/blast/core/blast_traceback.c:583-612
+                    // Blast_HSPUpdateWithTraceback(gap_align, hsp);
+                    // BlastIntervalTreeAddHSP(hsp, tree, query_info, eQueryAndSubject);
+                    // One owner restores each result to its original batch index.
+                    for (_, results) in &mut speculative_scratch {
+                        for (index, result) in results.drain(..) {
+                            speculative_results[index - prelim_index] = Some(result);
+                        }
                     }
                 }
 
@@ -9238,8 +9258,34 @@ fn run_in_pool(
                 // q_start = hsp->query.gapped_start;
                 // s_start = hsp->subject.gapped_start;
                 // ```
+                // NCBI reference: c++/src/algo/blast/core/blast_traceback.c:403-405,436-472
+                // if (!BlastIntervalTreeContainsHSP(tree, hsp, query_info, ...)) {
+                //     BlastGetStartForGappedAlignmentNucl(query, subject, hsp);
+                //     AdjustSubjectRange(&s_start, &adjusted_s_length,
+                //                        q_start, query_length, &start_shift);
+                // }
+                // Consume only after the live ordered containment check. An HSP
+                // skipped at batch start can become eligible after endpoint
+                // replacement, so missing results still prepare and run here.
+                #[cfg(all(
+                    feature = "parallel",
+                    any(not(target_arch = "wasm32"), feature = "wasm-threads")
+                ))]
+                let precomputed = if speculative_traceback {
+                    speculative_results[prelim_index % SPECULATIVE_TRACEBACK_BATCH_SIZE].take()
+                } else {
+                    None
+                };
+                #[cfg(not(all(
+                    feature = "parallel",
+                    any(not(target_arch = "wasm32"), feature = "wasm-threads")
+                )))]
+                let precomputed: Option<((usize, usize, usize, usize, usize), _)> = None;
                 let start_offsets_start = timing_enabled.then(std::time::Instant::now);
-                let prepared = prepare_traceback(prelim);
+                let prepared = precomputed
+                    .as_ref()
+                    .map(|(prepared, _)| *prepared)
+                    .or_else(|| prepare_traceback(prelim));
                 if let (Some(timing), Some(start)) = (timing_ref, start_offsets_start) {
                     BlastnTiming::record_duration(&timing.traceback_start_offsets_ns, start);
                 }
@@ -9298,10 +9344,6 @@ fn run_in_pool(
                         // ```
                         // N02 scheduling only: speculative values have no externally visible effects;
                         // the original ordered contains/materialize/add sequence remains authoritative.
-                        #[cfg(all(
-                            feature = "parallel",
-                            any(not(target_arch = "wasm32"), feature = "wasm-threads")
-                        ))]
                         // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_itree.c:273-286,558-585
                         // ```c
                         // if (in_hsp->score > tree_hsp->score) return in_hsp;
@@ -9310,19 +9352,7 @@ fn run_in_pool(
                         // ```
                         // Endpoint replacement can invalidate batch-start containment. A newly eligible
                         // HSP therefore runs the unchanged DP here, at its original sequential position.
-                        let precomputed = if speculative_traceback {
-                            speculative_results[prelim_index % SPECULATIVE_TRACEBACK_BATCH_SIZE]
-                                .take()
-                        } else {
-                            None
-                        };
-
-                        #[cfg(not(all(
-                            feature = "parallel",
-                            any(not(target_arch = "wasm32"), feature = "wasm-threads")
-                        )))]
-                        let precomputed = None;
-                        precomputed.unwrap_or_else(|| {
+                        precomputed.map(|(_, result)| result).unwrap_or_else(|| {
                             extend_gapped_heuristic_with_traceback_with_scratch(
                                 q_seq_blastna,
                                 adjusted_subject,
@@ -10671,6 +10701,86 @@ mod tests {
         assert_eq!(bit_score, expected_bit_score);
         assert_eq!(evalue, expected_evalue);
     }
+    // NCBI reference: c++/src/app/blast/blast_app_util.cpp:204-210;
+    // c++/src/algo/blast/core/blast_parameters.c:925-946
+    // db_adapter.Reset(new CLocalDbAdapter(subjects, opts_hndl, true));
+    // searchsp = query_info->contexts[context].eff_searchsp;
+    // BLAST_Cutoffs(&new_cutoff, &evalue, kbp, searchsp, FALSE, 0);
+    // NCBI BLAST+ 2.17.0+ raw output is frozen for three unequal subjects.
+    // Their combined search space excludes weak word7 seeds which could grow
+    // into extra gapped HSPs under an incorrectly lowered per-subject cutoff.
+    #[test]
+    fn word7_uses_subject_set_cutoffs() {
+        use clap::Parser;
+        #[derive(Parser)]
+        struct Options {
+            #[command(flatten)]
+            blastn: BlastnArgs,
+        }
+        let sequence: String = include_str!(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/tests/fasta/small_test.fasta"
+        ))
+        .lines()
+        .filter(|line| !line.starts_with('>'))
+        .map(str::trim)
+        .collect();
+        let query: String = (0..3)
+            .map(|index| format!(">seq{index}\n{}\n", &sequence[..900]))
+            .collect();
+        let subject: String = [899, 900, 903]
+            .into_iter()
+            .enumerate()
+            .map(|(index, length)| format!(">seq{index}\n{}\n", &sequence[..length]))
+            .collect();
+        let expected = include_bytes!(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/tests/unit/helpers/ncbi_reference_data/blastn_word7_subject_set.out"
+        ));
+        let threads: &[usize] = if cfg!(feature = "parallel") {
+            &[1, 4]
+        } else {
+            &[1]
+        };
+        for n in threads {
+            let options = crate::cli::try_parse_from::<Options, _, _>([
+                "test",
+                "-query",
+                "memory-query",
+                "-subject",
+                "memory-subject",
+                "-task",
+                "blastn",
+                "-word_size",
+                "7",
+                "-outfmt",
+                "6",
+                "-num_threads",
+                &n.to_string(),
+            ])
+            .unwrap();
+            // NCBI reference: c++/src/algo/blast/api/blast_setup_cxx.cpp:836-847
+            // BlastSeqBlkSetSequence(subj, sequence.data.release(), ...);
+            let read_records = |fasta: &str| {
+                bio::io::fasta::Reader::new(fasta.as_bytes())
+                    .records()
+                    .collect::<std::result::Result<Vec<_>, _>>()
+                    .unwrap()
+            };
+            let mut output = Vec::new();
+            run_internal(
+                options.blastn,
+                Some(BlastnInMemoryRun {
+                    queries: read_records(&query),
+                    subjects: read_records(&subject),
+                    output: &mut output,
+                }),
+            )
+            .unwrap();
+            assert_eq!(output, expected.as_slice(), "n{n}");
+        }
+    }
+
     // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_traceback.c:403-406,509-513,583-612
     // ```c
     // if (!BlastIntervalTreeContainsHSP(tree, hsp, query_info,
@@ -10701,8 +10811,13 @@ mod tests {
                 b"ACGT"[(state & 3) as usize]
             })
             .collect();
-        let mut subject = Vec::new();
-        for i in 0..10 {
+        // NCBI reference: c++/src/algo/blast/core/blast_gapalign.c:4170-4189
+        // if (subject_length < MAX_SUBJECT_OFFSET) { *start_shift = 0; return; }
+        // max_extension_left = query_offset + MAX_TOTAL_GAPS;
+        // *start_shift = s_offset - max_extension_left;
+        // Exercise a real subject shift and more than one 16-HSP batch.
+        let mut subject = vec![b'N'; 91_000];
+        for i in 0..20 {
             subject.extend_from_slice(&query[..240]);
             subject.extend_from_slice(b"GATTACA");
             subject.extend_from_slice(&query[240..512 - i * 13]);
@@ -10756,8 +10871,8 @@ mod tests {
         let sequential = execute(1, "6");
         let text = std::str::from_utf8(&sequential).unwrap();
         assert!(
-            text.lines().count() >= 10,
-            "must cross the eight-HSP batch boundary"
+            text.lines().count() >= 20,
+            "must cross the sixteen-HSP batch boundary"
         );
         assert!(text
             .lines()
@@ -10787,7 +10902,7 @@ mod tests {
                 &q,
                 &subj,
                 qs,
-                qs + if qs >= 240 { 7 } else { 0 },
+                91_000 + qs + if qs >= 240 { 7 } else { 0 },
                 1,
                 2,
                 -3,

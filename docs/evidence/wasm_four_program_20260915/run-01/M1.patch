@@ -1,0 +1,346 @@
+--- a/LOSAT/src/algorithm/blastn/alignment/greedy.rs
++++ b/LOSAT/src/algorithm/blastn/alignment/greedy.rs
+@@ -234,80 +234,59 @@
+ ///                          (diag_upper - diag_lower + 7) / 3);
+ /// last_seq2_off[d + 1] = last_seq2_off[d + 1] - diag_lower + 2;
+ /// ```
+-#[derive(Clone, Copy, Default)]
++#[derive(Clone, Copy)]
+ enum NonAffineGreedyRowStorage {
+-    #[default]
+-    None,
+     Base(usize),
+-    Pool {
+-        start: usize,
+-    },
+-}
+-
+-#[derive(Clone, Default)]
++    Pool { start: usize },
++}
++
++// NCBI reference: c++/src/algo/blast/core/greedy_align.c:673-678
++// last_seq2_off[d + 1] = (Int4*) s_GetMBSpace(mem_pool,
++//                          (diag_upper - diag_lower + 7) / 3);
++// last_seq2_off[d + 1] = last_seq2_off[d + 1] - diag_lower + 2;
++// Store only the biased row descriptor. The persistent scratch owns all cells.
++#[derive(Clone, Copy)]
+ struct NonAffineGreedyRow {
+     origin: i32,
+-    values: Vec<i32>,
++    len: usize,
+     storage: NonAffineGreedyRowStorage,
+ }
+ 
++// NCBI reference: c++/src/algo/blast/core/greedy_align.c:523-526,548-550,589
++// last_seq2_off[d - 1][diag_lower-1] = kInvalidOffset;
++// seq2_index = MAX(last_seq2_off[d - 1][k + 1], last_seq2_off[d - 1][k]) + 1;
++// last_seq2_off[d][k] = seq2_index;
+ impl NonAffineGreedyRow {
+-    fn from_base(origin: i32, values: &[i32], len: usize, base_index: usize) -> Self {
+-        Self {
+-            origin,
+-            values: values[..len].to_vec(),
+-            storage: NonAffineGreedyRowStorage::Base(base_index),
+-        }
+-    }
+-
+-    fn from_pool(origin: i32, values: Vec<i32>, start: usize) -> Self {
+-        Self {
+-            origin,
+-            values,
+-            storage: NonAffineGreedyRowStorage::Pool { start },
+-        }
++    fn from_base(origin: i32, len: usize, base_index: usize) -> Self {
++        Self { origin, len, storage: NonAffineGreedyRowStorage::Base(base_index) }
++    }
++
++    fn from_pool(origin: i32, len: usize, start: usize) -> Self {
++        Self { origin, len, storage: NonAffineGreedyRowStorage::Pool { start } }
+     }
+ 
+     #[inline]
+-    fn get(&self, diag: i32) -> i32 {
++    fn values<'a>(&self, mem: &'a GreedyNonAffineMem) -> &'a [i32] {
++        match self.storage {
++            NonAffineGreedyRowStorage::Base(index) => &mem.last_seq2_off[index][..self.len],
++            NonAffineGreedyRowStorage::Pool { start } => &mem.traceback_pool[start..start + self.len],
++        }
++    }
++
++    #[inline]
++    fn get(&self, mem: &GreedyNonAffineMem, diag: i32) -> i32 {
+         let idx = diag - self.origin;
+-        if idx < 0 {
+-            return INVALID_OFFSET;
+-        }
+-        self.values
+-            .get(idx as usize)
+-            .copied()
+-            .unwrap_or(INVALID_OFFSET)
++        if idx < 0 { return INVALID_OFFSET; }
++        self.values(mem).get(idx as usize).copied().unwrap_or(INVALID_OFFSET)
+     }
+ 
+     #[inline]
+-    fn set(&mut self, diag: i32, value: i32) {
++    fn set(&self, mem: &mut GreedyNonAffineMem, diag: i32, value: i32) {
+         let idx = diag - self.origin;
+-        debug_assert!(idx >= 0);
+-        let idx = idx as usize;
+-        debug_assert!(idx < self.values.len());
+-        self.values[idx] = value;
+-    }
+-
+-    fn persist(&self, mem: &mut GreedyNonAffineMem) {
++        debug_assert!(idx >= 0 && (idx as usize) < self.len);
+         match self.storage {
+-            NonAffineGreedyRowStorage::None => {}
+-            NonAffineGreedyRowStorage::Base(index) => {
+-                if index < mem.last_seq2_off.len() {
+-                    let len = self.values.len();
+-                    if mem.last_seq2_off[index].len() < len {
+-                        mem.last_seq2_off[index].resize(len, 0);
+-                    }
+-                    mem.last_seq2_off[index][..len].copy_from_slice(&self.values);
+-                }
+-            }
+-            NonAffineGreedyRowStorage::Pool { start } => {
+-                let end = start + self.values.len();
+-                if mem.traceback_pool.len() < end {
+-                    mem.traceback_pool.resize(end, 0);
+-                }
+-                mem.traceback_pool[start..end].copy_from_slice(&self.values);
+-            }
++            NonAffineGreedyRowStorage::Base(index) => mem.last_seq2_off[index][idx as usize] = value,
++            NonAffineGreedyRowStorage::Pool { start } => mem.traceback_pool[start + idx as usize] = value,
+         }
+     }
+ }
+@@ -387,7 +366,40 @@
+         self.traceback_used = 0;
+     }
+ 
+-    fn alloc_traceback_row(&mut self, int_len: usize) -> (usize, Vec<i32>) {
++    // NCBI reference: c++/src/algo/blast/core/greedy_align.c:548-550,666-678
++    // seq2_index = MAX(last_seq2_off[d - 1][k + 1], last_seq2_off[d - 1][k]) + 1;
++    // if (edit_block == NULL) last_seq2_off[d + 1] = last_seq2_off[d - 1];
++    // else last_seq2_off[d + 1] = (Int4*) s_GetMBSpace(mem_pool, ...);
++    // Consecutive rows are disjoint. Borrow them only within one distance;
++    // no reference survives the next pool allocation (which may move its Vec).
++    fn row_pair_mut(
++        &mut self,
++        previous: NonAffineGreedyRow,
++        current: NonAffineGreedyRow,
++    ) -> (&mut [i32], &mut [i32]) {
++        use NonAffineGreedyRowStorage::{Base, Pool};
++        match (previous.storage, current.storage) {
++            (Base(i), Base(j)) => {
++                let (left, right) = self.last_seq2_off.split_at_mut(1);
++                match (i, j) {
++                    (0, 1) => (&mut left[0][..previous.len], &mut right[0][..current.len]),
++                    (1, 0) => (&mut right[0][..previous.len], &mut left[0][..current.len]),
++                    _ => unreachable!("greedy rolling rows must be distinct"),
++                }
++            }
++            (Base(i), Pool { start }) => (
++                &mut self.last_seq2_off[i][..previous.len],
++                &mut self.traceback_pool[start..start + current.len],
++            ),
++            (Pool { start: p }, Pool { start: c }) => {
++                let (left, right) = self.traceback_pool.split_at_mut(c);
++                (&mut left[p..p + previous.len], &mut right[..current.len])
++            }
++            (Pool { .. }, Base(_)) => unreachable!("traceback rows never return to base storage"),
++        }
++    }
++
++    fn alloc_traceback_row(&mut self, int_len: usize) -> usize {
+         // NCBI reference: ncbi-blast/c++/src/algo/blast/core/greedy_align.c:99-125
+         // ```c
+         // out_ptr = pool->space_array + pool->space_used;
+@@ -402,7 +414,7 @@
+             self.traceback_pool.resize(end, 0);
+         }
+         self.traceback_used = end;
+-        (start, self.traceback_pool[start..end].to_vec())
++        start
+     }
+ }
+ 
+@@ -2316,20 +2328,21 @@
+ /// NCBI reference: ncbi-blast/c++/src/algo/blast/core/greedy_align.c:260-294
+ fn get_next_non_affine_tback(
+     last_seq2_off: &[NonAffineGreedyRow],
++    non_affine_mem: &GreedyNonAffineMem,
+     d: i32,
+     diag: i32,
+     seq2_index: &mut i32,
+ ) -> i32 {
+     let prev_row = &last_seq2_off[(d - 1) as usize];
+-    if prev_row.get(diag - 1) > prev_row.get(diag).max(prev_row.get(diag + 1)) {
+-        *seq2_index = prev_row.get(diag - 1);
++    if prev_row.get(non_affine_mem, diag - 1) > prev_row.get(non_affine_mem, diag).max(prev_row.get(non_affine_mem, diag + 1)) {
++        *seq2_index = prev_row.get(non_affine_mem, diag - 1);
+         return diag - 1;
+     }
+-    if prev_row.get(diag) > prev_row.get(diag + 1) {
+-        *seq2_index = prev_row.get(diag);
++    if prev_row.get(non_affine_mem, diag) > prev_row.get(non_affine_mem, diag + 1) {
++        *seq2_index = prev_row.get(non_affine_mem, diag);
+         return diag;
+     }
+-    *seq2_index = prev_row.get(diag + 1);
++    *seq2_index = prev_row.get(non_affine_mem, diag + 1);
+     diag + 1
+ }
+ 
+@@ -2412,13 +2425,11 @@
+     let mut last_seq2_off = Vec::with_capacity(rows);
+     last_seq2_off.push(NonAffineGreedyRow::from_base(
+         0,
+-        &non_affine_mem.last_seq2_off[0],
+         base_row_len,
+         0,
+     ));
+     last_seq2_off.push(NonAffineGreedyRow::from_base(
+         0,
+-        &non_affine_mem.last_seq2_off[1],
+         base_row_len,
+         1,
+     ));
+@@ -2455,7 +2466,7 @@
+         return 0;
+     }
+ 
+-    last_seq2_off[0].set(diag_origin, seq1_index);
++    last_seq2_off[0].set(non_affine_mem, diag_origin, seq1_index);
+     non_affine_mem.max_score[max_score_offset] = seq1_index * match_cost;
+     diag_lower = diag_origin - 1;
+     diag_upper = diag_origin + 1;
+@@ -2490,13 +2501,8 @@
+         // ```
+         // Consecutive distances use distinct rows, including the two rolling
+         // rows without traceback. Borrow their descriptors once per distance.
+-        let (previous_row, current_row) = if prev_row_idx < row_idx {
+-            let (before, after) = last_seq2_off.split_at_mut(row_idx);
+-            (&mut before[prev_row_idx], &mut after[0])
+-        } else {
+-            let (before, after) = last_seq2_off.split_at_mut(prev_row_idx);
+-            (&mut after[0], &mut before[row_idx])
+-        };
++        let previous_row = last_seq2_off[prev_row_idx];
++        let current_row = last_seq2_off[row_idx];
+ 
+         // NCBI reference: ncbi-blast/c++/src/algo/blast/core/greedy_align.c:523-526
+         // ```c
+@@ -2505,10 +2511,10 @@
+         // last_seq2_off[d - 1][diag_upper] = kInvalidOffset;
+         // last_seq2_off[d - 1][diag_upper+1] = kInvalidOffset;
+         // ```
+-        previous_row.set(diag_lower - 1, INVALID_OFFSET);
+-        previous_row.set(diag_lower, INVALID_OFFSET);
+-        previous_row.set(diag_upper, INVALID_OFFSET);
+-        previous_row.set(diag_upper + 1, INVALID_OFFSET);
++        previous_row.set(non_affine_mem, diag_lower - 1, INVALID_OFFSET);
++        previous_row.set(non_affine_mem, diag_lower, INVALID_OFFSET);
++        previous_row.set(non_affine_mem, diag_upper, INVALID_OFFSET);
++        previous_row.set(non_affine_mem, diag_upper + 1, INVALID_OFFSET);
+ 
+         let xdrop_score = {
+             let raw = non_affine_mem.max_score[d as usize] + (match_cost + mismatch_cost) * d
+@@ -2536,8 +2542,10 @@
+         let band_len = (tmp_diag_upper - tmp_diag_lower + 1) as usize;
+         let previous_start = (tmp_diag_lower - 1 - previous_row.origin) as usize;
+         let current_start = (tmp_diag_lower - current_row.origin) as usize;
+-        let previous = &previous_row.values[previous_start..previous_start + band_len + 2];
+-        let current = &mut current_row.values[current_start..current_start + band_len];
++        let (previous_values, current_values) =
++            non_affine_mem.row_pair_mut(previous_row, current_row);
++        let previous = &previous_values[previous_start..previous_start + band_len + 2];
++        let current = &mut current_values[current_start..current_start + band_len];
+         for (cell_index, (previous, cell)) in
+             previous.windows(3).zip(current.iter_mut()).enumerate()
+         {
+@@ -2565,9 +2573,6 @@
+                 // last_seq2_off[d - 1][diag_lower-1] = kInvalidOffset;
+                 // if (fence_hit && *fence_hit) { return 0; }
+                 // NCBI's row writes already reside in persistent scratch.
+-                for row in &last_seq2_off {
+-                    row.persist(non_affine_mem);
+-                }
+                 return 0;
+             }
+ 
+@@ -2643,7 +2648,7 @@
+             // three Int4 values, so the reachable Int4 row length is rounded
+             // down to that 3-Int4 allocation unit exactly as in NCBI.
+             let row_len = (((diag_upper - diag_lower + 7) / 3) * 3).max(0) as usize;
+-            let (pool_start, values) = non_affine_mem.alloc_traceback_row(row_len);
++            let pool_start = non_affine_mem.alloc_traceback_row(row_len);
+             // NCBI reference: ncbi-blast/c++/src/algo/blast/core/greedy_align.c:673-678
+             // ```c
+             // last_seq2_off[d + 1] = (Int4*) s_GetMBSpace(mem_pool,
+@@ -2652,27 +2657,21 @@
+             // ```
+             // At distance d, rows 0..=d already exist. Append d+1, including
+             // the last nonconverged iteration, preserving pool allocation and
+-            // snapshot/persist behavior on retries and fence returns.
++            // cell contents on retries and fence returns.
+             debug_assert_eq!(last_seq2_off.len(), (d + 1) as usize);
+             last_seq2_off.push(NonAffineGreedyRow::from_pool(
+                 diag_lower - 2,
+-                values,
++                row_len,
+                 pool_start,
+             ));
+         }
+     }
+ 
+     if !converged {
+-        for row in &last_seq2_off {
+-            row.persist(non_affine_mem);
+-        }
+         return -1;
+     }
+ 
+     if edit_block.is_none() {
+-        for row in &last_seq2_off {
+-            row.persist(non_affine_mem);
+-        }
+         return best_dist;
+     }
+ 
+@@ -2696,16 +2695,13 @@
+         edit_block
+             .as_mut()
+             .unwrap()
+-            .add(GapAlignOpType::Sub, last_seq2_off[0].get(diag_origin));
+-        for row in &last_seq2_off {
+-            row.persist(non_affine_mem);
+-        }
++            .add(GapAlignOpType::Sub, last_seq2_off[0].get(non_affine_mem, diag_origin));
+         return best_dist;
+     }
+ 
+     while d > 0 {
+         let mut new_seq2_index: i32 = 0;
+-        let new_diag = get_next_non_affine_tback(&last_seq2_off, d, best_diag, &mut new_seq2_index);
++        let new_diag = get_next_non_affine_tback(&last_seq2_off, non_affine_mem, d, best_diag, &mut new_seq2_index);
+ 
+         if new_diag == best_diag {
+             if seq2_index - new_seq2_index > 0 {
+@@ -2740,11 +2736,8 @@
+     edit_block
+         .as_mut()
+         .unwrap()
+-        .add(GapAlignOpType::Sub, last_seq2_off[0].get(diag_origin));
+-
+-    for row in &last_seq2_off {
+-        row.persist(non_affine_mem);
+-    }
++        .add(GapAlignOpType::Sub, last_seq2_off[0].get(non_affine_mem, diag_origin));
++
+ 
+     best_dist
+ }

@@ -1,0 +1,96 @@
+--- a/LOSAT/src/algorithm/blastn/blast_engine/run.rs
++++ b/LOSAT/src/algorithm/blastn/blast_engine/run.rs
+@@ -9002,7 +9002,10 @@
+                 any(not(target_arch = "wasm32"), feature = "wasm-threads")
+             ))]
+             let mut speculative_scratch: Vec<_> = if speculative_traceback {
+-                (0..num_threads).map(|_| GapAlignScratch::new()).collect()
++                // NCBI reference: c++/src/algo/blast/core/blast_traceback.c:509-513
++                // BLAST_GappedAlignmentWithTraceback(...);
++                // Each independent scratch slot retains its intermediate results.
++                (0..num_threads).map(|_| (GapAlignScratch::new(), Vec::new())).collect()
+             } else {
+                 Vec::new()
+             };
+@@ -9011,6 +9014,16 @@
+                 any(not(target_arch = "wasm32"), feature = "wasm-threads")
+             ))]
+             let mut speculative_results = Vec::new();
++            // NCBI reference: c++/src/algo/blast/core/blast_traceback.c:403-405,598-601
++            // if (!BlastIntervalTreeContainsHSP(tree, hsp, query_info, ...)) {
++            //     BlastIntervalTreeAddHSP(hsp, tree, query_info, eQueryAndSubject);
++            // }
++            // Reuse only batch storage; live ordered containment remains below.
++            #[cfg(all(
++                feature = "parallel",
++                any(not(target_arch = "wasm32"), feature = "wasm-threads")
++            ))]
++            let mut speculative_jobs = Vec::new();
+             // NCBI reference: c++/src/algo/blast/core/blast_traceback.c:403-405,509-513,598-601
+             // ```c
+             // if (!BlastIntervalTreeContainsHSP(tree, hsp, query_info, ...)) {
+@@ -9045,7 +9058,8 @@
+                 if speculative_traceback && prelim_index % SPECULATIVE_TRACEBACK_BATCH_SIZE == 0 {
+                     let batch_end =
+                         (prelim_index + SPECULATIVE_TRACEBACK_BATCH_SIZE).min(prelim_hits.len());
+-                    let jobs: Vec<_> = (prelim_index..batch_end)
++                    speculative_jobs.clear();
++                    speculative_jobs.extend((prelim_index..batch_end)
+                         .filter(|&index| {
+                             let p = &prelim_hits[index];
+                             let h = TreeHsp {
+@@ -9063,8 +9077,8 @@
+                             interval_tree
+                                 .containing_hsp(&h, p.query_context_offset, min_diag_separation)
+                                 .is_none()
+-                        })
+-                        .collect();
++                        }));
++                    let jobs = &speculative_jobs;
+                     // NCBI reference: c++/src/algo/blast/core/blast_traceback.c:509-513
+                     // BLAST_GappedAlignmentWithTraceback(...);
+                     crate::utils::threading::report_stage(
+@@ -9073,14 +9087,16 @@
+                         jobs.len(),
+                         jobs.len() > 1,
+                     );
+-                    speculative_results = (prelim_index..batch_end).map(|_| None).collect();
++                    speculative_results.clear();
++                    speculative_results.resize_with(batch_end - prelim_index, || None);
+                     let pool = parallel_pool;
+-                    let computed: Vec<_> = pool.install(|| {
++                    pool.install(|| {
+                         speculative_scratch
+                             .par_iter_mut()
+                             .enumerate()
+-                            .map(|(slot, scratch)| {
+-                                jobs.iter()
++                            .for_each(|(slot, (scratch, results))| {
++                                results.clear();
++                                results.extend(jobs.iter()
+                                     .skip(slot)
+                                     .step_by(num_threads)
+                                     .filter_map(|&index| {
+@@ -9102,13 +9118,17 @@
+                                                 scratch,
+                                             );
+                                         Some((index, result))
+-                                    })
+-                                    .collect::<Vec<_>>()
++                                    }));
+                             })
+-                            .collect()
+                     });
+-                    for (index, result) in computed.into_iter().flatten() {
+-                        speculative_results[index - prelim_index] = Some(result);
++                    // NCBI reference: c++/src/algo/blast/core/blast_traceback.c:583-612
++                    // Blast_HSPUpdateWithTraceback(gap_align, hsp);
++                    // BlastIntervalTreeAddHSP(hsp, tree, query_info, eQueryAndSubject);
++                    // One owner restores each result to its original batch index.
++                    for (_, results) in &mut speculative_scratch {
++                        for (index, result) in results.drain(..) {
++                            speculative_results[index - prelim_index] = Some(result);
++                        }
+                     }
+                 }
+ 

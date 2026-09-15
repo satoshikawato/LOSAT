@@ -1,0 +1,35 @@
+{
+  "note": "Commit uses the existing HEAD LF convention for linking.rs; its measured CRLF working file and archived source are preserved. All other owned production files are byte-identical to the measured integrated build. No algorithm or benchmark changed.",
+  "files": [
+    {
+      "path": "LOSAT/src/algorithm/blastn/alignment/greedy.rs",
+      "measured_worktree_sha256": "c0711b086f92332a3eecf25f95c154807710dce315bf82b20b506b5c44302bb8",
+      "commit_blob_sha256": "c0711b086f92332a3eecf25f95c154807710dce315bf82b20b506b5c44302bb8",
+      "difference": "none"
+    },
+    {
+      "path": "LOSAT/src/algorithm/blastn/blast_engine/run.rs",
+      "measured_worktree_sha256": "8a1a64e86a0fdca9d3576b83a5f3b0833aec9c8cfb76dc430903e8f4b7b6df77",
+      "commit_blob_sha256": "8a1a64e86a0fdca9d3576b83a5f3b0833aec9c8cfb76dc430903e8f4b7b6df77",
+      "difference": "none"
+    },
+    {
+      "path": "LOSAT/src/algorithm/blastn/extension.rs",
+      "measured_worktree_sha256": "185b0bf15808b62839a3a6377e1cbda0604b304bf6d7e4ff6c3fa8a9bb0dcf09",
+      "commit_blob_sha256": "185b0bf15808b62839a3a6377e1cbda0604b304bf6d7e4ff6c3fa8a9bb0dcf09",
+      "difference": "none"
+    },
+    {
+      "path": "LOSAT/src/algorithm/blastp/blast_engine.rs",
+      "measured_worktree_sha256": "9871f9f80b088ef180ef87eb79d57558097f5ff8ce394c45524edb2f6efc0096",
+      "commit_blob_sha256": "9871f9f80b088ef180ef87eb79d57558097f5ff8ce394c45524edb2f6efc0096",
+      "difference": "none"
+    },
+    {
+      "path": "LOSAT/src/algorithm/tblastx/sum_stats_linking/linking.rs",
+      "measured_worktree_sha256": "e9ad6da8849ac2c18be1f05889446302780178238bf55011c24a6d66a8e0647d",
+      "commit_blob_sha256": "b285bf748c66f66ce338c8ff94a126d0cd103155c62c2ae8e04e66004103651b",
+      "difference": "CRLF to LF only"
+    }
+  ]
+}

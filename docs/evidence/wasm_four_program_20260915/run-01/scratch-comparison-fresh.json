@@ -1,0 +1,9 @@
+{
+  "status": "PASS",
+  "transitions": 4800,
+  "transcript_sha256": "f35fece54c0132ca437459fe690d56697cee32660993606454eb6e74974fd006",
+  "baseline_log": "M0-scratch.log",
+  "candidate_log": "M1-scratch-fresh.log",
+  "candidate_executable_sha256": "6d5f7f0e63977dbf0801c4151510982ef87c1de446a64300a1f2e98ca98684fa",
+  "distinct_target_directories": true
+}

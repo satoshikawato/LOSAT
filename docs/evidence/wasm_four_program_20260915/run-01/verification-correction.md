@@ -1,0 +1,1 @@
+The initial M0/M1 differential transcript and N1 focused test used a shared Cargo target directory across copied crate paths. Cargo reused a stale test executable (M1 and N1 logs had no compile step). These initial results are INVALID and are excluded from acceptance. Re-run with separate target directories per source variant; release artifact builds already use separate targets.

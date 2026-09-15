@@ -1,0 +1,35 @@
+{
+  "allow_scoped_measurements": true,
+  "reviewed_utc": "2026-09-15T05:25:52Z",
+  "scope": "valid-query paths for declared four-program fixtures; no release/all-input certification",
+  "summary": {
+    "C0": {
+      "edge_supported_records": 150,
+      "edge_expected_unsupported_records": 12,
+      "matrix_records": 60,
+      "runtime_records": 317,
+      "long_code4_records": 9,
+      "browser_records": 25
+    },
+    "integrated": {
+      "edge_supported_records": 150,
+      "edge_expected_unsupported_records": 12,
+      "matrix_records": 130,
+      "runtime_records": 317,
+      "long_code4_records": 9,
+      "browser_records": 25
+    }
+  },
+  "preserved_boundaries": {
+    "original_word7_baseline": "PARITY_FAIL; corrected separately in C0",
+    "old_reuse_harness": "wrong child-count assertion; fixed after raw-equal reproduction",
+    "original_minus_flag_probe": "unsupported CLI option; corrected reverse-coordinate fixture uses supported default both strands",
+    "statistically_invalid_tblastx_query": "OPEN baseline exit-status discrepancy before X2 linking; original BAD_EXIT evidence preserved",
+    "reactor_growth_and_reuse_speed": "pending fixed-window measurements; original failures remain open"
+  },
+  "rust": {
+    "test": "625 passed, 3 ignored",
+    "clippy_all_targets_all_features": "PASS",
+    "fmt_check": "PASS"
+  }
+}

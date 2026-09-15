@@ -240,6 +240,45 @@ pub fn extend_hit_ungapped_exact_ncbi(
     }
 }
 
+// NCBI reference: c++/src/algo/blast/core/na_ungapped.c:292-294,322-324
+// Uint1 q_byte = (q[0] << 6) | (q[1] << 4) | (q[2] << 2) | q[3];
+// Retain NCBI's overlapping BLASTNA bit expression, including ambiguities.
+// Every starting phase has its own byte; this is not an ACGT encoding table.
+pub fn build_query_four_base_bytes(query: &[u8]) -> Vec<u8> {
+    query
+        .windows(4)
+        .map(|q| (q[0] << 6) | (q[1] << 4) | (q[2] << 2) | q[3])
+        .collect()
+}
+
+// NCBI reference: c++/src/algo/blast/core/na_ungapped.c:294,324
+// Uint1 q_byte = (q[0] << 6) | (q[1] << 4) | (q[2] << 2) | q[3];
+// C promotes each BLASTNA byte before truncating the expression to Uint1.
+#[cfg(test)]
+mod four_base_tests {
+    use super::build_query_four_base_bytes;
+
+    #[test]
+    fn every_blastna_word_and_starting_phase_matches_c_uint1_expression() {
+        for word in 0..65_536u32 {
+            let bases = [word >> 12, (word >> 8) & 15, (word >> 4) & 15, word & 15];
+            let expected = ((bases[0] << 6) | (bases[1] << 4) | (bases[2] << 2) | bases[3]) as u8;
+            for phase in 0..4 {
+                let mut query = vec![15; phase];
+                query.extend(bases.map(|base| base as u8));
+                assert_eq!(build_query_four_base_bytes(&query)[phase], expected);
+            }
+        }
+        for len in 0..8 {
+            let query = vec![15; len];
+            assert_eq!(
+                build_query_four_base_bytes(&query),
+                vec![255; len.saturating_sub(3)]
+            );
+        }
+    }
+}
+
 /// Approximate ungapped extension (4-base blocks) with optional exact recomputation.
 /// NCBI reference: ncbi-blast/c++/src/algo/blast/core/na_ungapped.c:261-349
 /// ```c
@@ -264,6 +303,7 @@ pub fn extend_hit_ungapped_exact_ncbi(
 /// ```
 pub fn extend_hit_ungapped_approx_ncbi(
     q_seq: &[u8],        // BLASTNA (1 byte/base)
+    q_four_base: &[u8],  // NCBI 4-base expression at every starting offset
     s_seq_packed: &[u8], // ncbi2na packed (4 bases/byte)
     q_off: usize,
     s_off: usize,
@@ -301,12 +341,9 @@ pub fn extend_hit_ungapped_approx_ncbi(
         // ```
         // SAFETY: q_idx >= 4 and s_idx > 0 are enforced by the loop guard.
         let s_byte = unsafe { *s_seq_packed.get_unchecked((s_idx - 1) as usize) };
-        let q_byte = unsafe {
-            (*q_seq.get_unchecked((q_idx - 4) as usize) << 6)
-                | (*q_seq.get_unchecked((q_idx - 3) as usize) << 4)
-                | (*q_seq.get_unchecked((q_idx - 2) as usize) << 2)
-                | *q_seq.get_unchecked((q_idx - 1) as usize)
-        };
+        // NCBI reference: c++/src/algo/blast/core/na_ungapped.c:294
+        // Uint1 q_byte = (q[-4] << 6) | (q[-3] << 4) | (q[-2] << 2) | q[-1];
+        let q_byte = q_four_base[(q_idx - 4) as usize];
         sum += score_table[(q_byte ^ s_byte) as usize];
         if sum > 0 {
             new_q = q_idx - 4;
@@ -339,12 +376,9 @@ pub fn extend_hit_ungapped_approx_ncbi(
         // SAFETY: q_idx + 3 and s_idx stay within bounds by the loop length
         // derived from query/subject lengths (NCBI uses the same limits).
         let s_byte = unsafe { *s_seq_packed.get_unchecked(s_idx as usize) };
-        let q_byte = unsafe {
-            (*q_seq.get_unchecked(q_idx as usize) << 6)
-                | (*q_seq.get_unchecked((q_idx + 1) as usize) << 4)
-                | (*q_seq.get_unchecked((q_idx + 2) as usize) << 2)
-                | *q_seq.get_unchecked((q_idx + 3) as usize)
-        };
+        // NCBI reference: c++/src/algo/blast/core/na_ungapped.c:324
+        // Uint1 q_byte = (q[0] << 6) | (q[1] << 4) | (q[2] << 2) | q[3];
+        let q_byte = q_four_base[q_idx as usize];
         sum += score_table[(q_byte ^ s_byte) as usize];
         if sum > 0 {
             new_q = q_idx + 3;

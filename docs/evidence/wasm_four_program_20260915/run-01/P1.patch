@@ -1,0 +1,44 @@
+--- a/LOSAT/src/algorithm/blastp/blast_engine.rs
++++ b/LOSAT/src/algorithm/blastp/blast_engine.rs
+@@ -5305,13 +5305,25 @@
+     // }
+     // ```
+     let kappa_redo_start = blastp_timing_start(timing_enabled);
++    // NCBI reference: c++/src/algo/blast/core/blast_kappa.c:2228-2236
++    // self->ungappedLambda = sbp->kbp_ideal->Lambda / scale_factor;
++    // status = s_GetStartFreqRatios(self->startFreqRatios, matrixName);
++    // if (status == 0) {
++    //     Blast_Int4MatrixFromFreq(self->startMatrix, self->cols,
++    //                              self->startFreqRatios, self->ungappedLambda);
++    // }
++    // This non-position-based initial matrix is invariant within this search.
++    // Initialize at the existing first params request, preserving no-hit/error
++    // boundaries, and clone completed values into independently mutable params.
++    let initial_matrix_info = std::sync::OnceLock::new();
+     let build_redo_align_params = |q_idx: usize| -> Result<BlastRedoAlignParams> {
+         let local_scaling_factor =
+             blastp_local_scaling_factor(args.comp_based_stats.mode, args.scoring.matrix);
+         let scaled_gapped_lambda = gapped_params.lambda / local_scaling_factor;
+         let do_link_hsps = false;
+-        let matrix_info = build_matrix_info(
+-            args.scoring.matrix,
++        let matrix_info = initial_matrix_info
++            .get_or_init(|| build_matrix_info(
++                args.scoring.matrix,
+             // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_kappa.c:2216-2231
+             // ```c
+             // self->ungappedLambda = sbp->kbp_ideal->Lambda / scale_factor;
+@@ -5319,8 +5331,11 @@
+             // Blast_Int4MatrixFromFreq(self->startMatrix, self->cols,
+             //                          self->startFreqRatios, self->ungappedLambda);
+             // ```
+-            ideal_ungapped_params.lambda / local_scaling_factor,
+-        )?;
++                ideal_ungapped_params.lambda / local_scaling_factor,
++            ))
++            .as_ref()
++            .map_err(|error| anyhow::anyhow!("{error}"))?
++            .clone();
+         Ok(BlastRedoAlignParams {
+             // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_kappa.c:2216-2231
+             // ```c

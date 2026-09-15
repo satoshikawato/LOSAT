@@ -1,0 +1,131 @@
+--- a/LOSAT/src/algorithm/blastn/blast_engine/run.rs
++++ b/LOSAT/src/algorithm/blastn/blast_engine/run.rs
+@@ -9085,7 +9085,14 @@
+                                     .step_by(num_threads)
+                                     .filter_map(|&index| {
+                                         let p = &prelim_hits[index];
+-                                        let (qs, _, shift, slen, ss) = prepare_traceback(p)?;
++                                        // NCBI reference: core/blast_traceback.c:436-472,509-513
++                                        // BlastGetStartForGappedAlignmentNucl(query, subject, hsp);
++                                        // AdjustSubjectRange(&s_start, &adjusted_s_length,
++                                        //                    q_start, query_length, &start_shift);
++                                        // BLAST_GappedAlignmentWithTraceback(...);
++                                        // Keep the exact preparation with its speculative DP.
++                                        let prepared = prepare_traceback(p)?;
++                                        let (qs, _, shift, slen, ss) = prepared;
+                                         let result =
+                                             extend_gapped_heuristic_with_traceback_with_scratch(
+                                                 &encoded_queries_blastna[p.context_idx as usize],
+@@ -9101,7 +9108,7 @@
+                                                 x_drop_final,
+                                                 scratch,
+                                             );
+-                                        Some((index, result))
++                                        Some((index, (prepared, result)))
+                                     })
+                                     .collect::<Vec<_>>()
+                             })
+@@ -9238,8 +9245,34 @@
+                 // q_start = hsp->query.gapped_start;
+                 // s_start = hsp->subject.gapped_start;
+                 // ```
++                // NCBI reference: c++/src/algo/blast/core/blast_traceback.c:403-405,436-472
++                // if (!BlastIntervalTreeContainsHSP(tree, hsp, query_info, ...)) {
++                //     BlastGetStartForGappedAlignmentNucl(query, subject, hsp);
++                //     AdjustSubjectRange(&s_start, &adjusted_s_length,
++                //                        q_start, query_length, &start_shift);
++                // }
++                // Consume only after the live ordered containment check. An HSP
++                // skipped at batch start can become eligible after endpoint
++                // replacement, so missing results still prepare and run here.
++                #[cfg(all(
++                    feature = "parallel",
++                    any(not(target_arch = "wasm32"), feature = "wasm-threads")
++                ))]
++                let precomputed = if speculative_traceback {
++                    speculative_results[prelim_index % SPECULATIVE_TRACEBACK_BATCH_SIZE].take()
++                } else {
++                    None
++                };
++                #[cfg(not(all(
++                    feature = "parallel",
++                    any(not(target_arch = "wasm32"), feature = "wasm-threads")
++                )))]
++                let precomputed: Option<((usize, usize, usize, usize, usize), _)> = None;
+                 let start_offsets_start = timing_enabled.then(std::time::Instant::now);
+-                let prepared = prepare_traceback(prelim);
++                let prepared = precomputed
++                    .as_ref()
++                    .map(|(prepared, _)| *prepared)
++                    .or_else(|| prepare_traceback(prelim));
+                 if let (Some(timing), Some(start)) = (timing_ref, start_offsets_start) {
+                     BlastnTiming::record_duration(&timing.traceback_start_offsets_ns, start);
+                 }
+@@ -9298,10 +9331,6 @@
+                         // ```
+                         // N02 scheduling only: speculative values have no externally visible effects;
+                         // the original ordered contains/materialize/add sequence remains authoritative.
+-                        #[cfg(all(
+-                            feature = "parallel",
+-                            any(not(target_arch = "wasm32"), feature = "wasm-threads")
+-                        ))]
+                         // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_itree.c:273-286,558-585
+                         // ```c
+                         // if (in_hsp->score > tree_hsp->score) return in_hsp;
+@@ -9310,19 +9339,7 @@
+                         // ```
+                         // Endpoint replacement can invalidate batch-start containment. A newly eligible
+                         // HSP therefore runs the unchanged DP here, at its original sequential position.
+-                        let precomputed = if speculative_traceback {
+-                            speculative_results[prelim_index % SPECULATIVE_TRACEBACK_BATCH_SIZE]
+-                                .take()
+-                        } else {
+-                            None
+-                        };
+-
+-                        #[cfg(not(all(
+-                            feature = "parallel",
+-                            any(not(target_arch = "wasm32"), feature = "wasm-threads")
+-                        )))]
+-                        let precomputed = None;
+-                        precomputed.unwrap_or_else(|| {
++                        precomputed.map(|(_, result)| result).unwrap_or_else(|| {
+                             extend_gapped_heuristic_with_traceback_with_scratch(
+                                 q_seq_blastna,
+                                 adjusted_subject,
+@@ -10701,8 +10718,13 @@
+                 b"ACGT"[(state & 3) as usize]
+             })
+             .collect();
+-        let mut subject = Vec::new();
+-        for i in 0..10 {
++        // NCBI reference: c++/src/algo/blast/core/blast_gapalign.c:4170-4189
++        // if (subject_length < MAX_SUBJECT_OFFSET) { *start_shift = 0; return; }
++        // max_extension_left = query_offset + MAX_TOTAL_GAPS;
++        // *start_shift = s_offset - max_extension_left;
++        // Exercise a real subject shift and more than one 16-HSP batch.
++        let mut subject = vec![b'N'; 91_000];
++        for i in 0..20 {
+             subject.extend_from_slice(&query[..240]);
+             subject.extend_from_slice(b"GATTACA");
+             subject.extend_from_slice(&query[240..512 - i * 13]);
+@@ -10756,8 +10778,8 @@
+         let sequential = execute(1, "6");
+         let text = std::str::from_utf8(&sequential).unwrap();
+         assert!(
+-            text.lines().count() >= 10,
+-            "must cross the eight-HSP batch boundary"
++            text.lines().count() >= 20,
++            "must cross the sixteen-HSP batch boundary"
+         );
+         assert!(text
+             .lines()
+@@ -10787,7 +10809,7 @@
+                 &q,
+                 &subj,
+                 qs,
+-                qs + if qs >= 240 { 7 } else { 0 },
++                91_000 + qs + if qs >= 240 { 7 } else { 0 },
+                 1,
+                 2,
+                 -3,

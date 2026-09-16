@@ -1,0 +1,7 @@
+{
+  "pid": 159129,
+  "command": "python tools/benchmark_protein_comparison.py run --source-root . --cases sparse-2 path-16 path-24 gallery-collinear gallery-collinear-off gallery-orthogroup --measure timing --warmups 1 --samples 21 --stages selector path_graph post_search metadata display_tables typed_serialization --output docs/internal/collinear_similarity_performance_plan_2026-09-15/results/data/s06-current-timing-final.json.gz ",
+  "start_boot_seconds": 4584.5,
+  "observed_monotonic": 4647.485975998,
+  "observed_boottime": 4647.485976651
+}

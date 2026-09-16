@@ -1,0 +1,18 @@
+--- I2b/linking.rs
++++ I3/linking.rs
+@@ -902,10 +902,11 @@
+ //     }
+ // }
+ // A call per HSP provides a repeated real function-entry boundary within a long
+-// group invocation. Native retains inlining. The original loop, trace timing, initial
+-// state and returned values are unchanged; all slices are borrowed, with no allocation.
+-#[cfg_attr(target_arch = "wasm32", inline(never))]
+-#[cfg_attr(not(target_arch = "wasm32"), inline(always))]
++// threaded-WASI group invocation. Native and plain WASI inline the indexed scan.
++// The loop, trace timing, initial state and returned values are unchanged;
++// all slices are borrowed, with no allocation.
++#[cfg_attr(all(losat_wasi_threads, feature = "wasm-threads"), inline(never))]
++#[cfg_attr(not(all(losat_wasi_threads, feature = "wasm-threads")), inline(always))]
+ #[allow(clippy::too_many_arguments)]
+ fn scan_large_gap_predecessors(
+     h_lh_idx: usize,

@@ -1,0 +1,126 @@
+{
+  "source_sha256": "451941f574da95bd3bda9c811696fbc6c7a369427d4a65e96c2cc03817fe2466",
+  "builds": [
+    {
+      "argv": [
+        "rustc",
+        "--edition=2021",
+        "-C",
+        "opt-level=3",
+        "/mnt/c/users/genom/github/losat/docs/evidence/wasm_remaining_work_20260915/run-03/scan-differential/harness.rs",
+        "-o",
+        "/mnt/c/users/genom/github/losat/docs/evidence/wasm_remaining_work_20260915/run-03/scan-differential/scan-native"
+      ],
+      "returncode": 0,
+      "stdout": "",
+      "stderr": ""
+    },
+    {
+      "argv": [
+        "rustc",
+        "--edition=2021",
+        "-C",
+        "opt-level=3",
+        "/mnt/c/users/genom/github/losat/docs/evidence/wasm_remaining_work_20260915/run-03/scan-differential/harness.rs",
+        "-o",
+        "/mnt/c/users/genom/github/losat/docs/evidence/wasm_remaining_work_20260915/run-03/scan-differential/scan-serial.wasm",
+        "--target",
+        "wasm32-wasip1"
+      ],
+      "returncode": 0,
+      "stdout": "",
+      "stderr": ""
+    }
+  ],
+  "runs": [
+    {
+      "argv": [
+        "/mnt/c/users/genom/github/losat/docs/evidence/wasm_remaining_work_20260915/run-03/scan-differential/scan-native",
+        "baseline",
+        "off"
+      ],
+      "returncode": 0,
+      "stdout_sha256": "94ca6b0eaa490357bc672dd1049ebb122378edcd9899d5462d2e949ae21116c8",
+      "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "argv": [
+        "/mnt/c/users/genom/github/losat/docs/evidence/wasm_remaining_work_20260915/run-03/scan-differential/scan-native",
+        "candidate",
+        "off"
+      ],
+      "returncode": 0,
+      "stdout_sha256": "94ca6b0eaa490357bc672dd1049ebb122378edcd9899d5462d2e949ae21116c8",
+      "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "argv": [
+        "/mnt/c/users/genom/github/losat/docs/evidence/wasm_remaining_work_20260915/run-03/scan-differential/scan-native",
+        "baseline",
+        "trace"
+      ],
+      "returncode": 0,
+      "stdout_sha256": "94ca6b0eaa490357bc672dd1049ebb122378edcd9899d5462d2e949ae21116c8",
+      "stderr_sha256": "67c0dc97d071df081bb16b43fdbe76386d77fcfb5101ba4919ae50ab1f77f1c8"
+    },
+    {
+      "argv": [
+        "/mnt/c/users/genom/github/losat/docs/evidence/wasm_remaining_work_20260915/run-03/scan-differential/scan-native",
+        "candidate",
+        "trace"
+      ],
+      "returncode": 0,
+      "stdout_sha256": "94ca6b0eaa490357bc672dd1049ebb122378edcd9899d5462d2e949ae21116c8",
+      "stderr_sha256": "67c0dc97d071df081bb16b43fdbe76386d77fcfb5101ba4919ae50ab1f77f1c8"
+    },
+    {
+      "argv": [
+        "node",
+        "/mnt/c/users/genom/github/losat/docs/evidence/wasm_remaining_work_20260915/run-03/work/baseline-source/LOSAT/tests/run_losat_wasi.js",
+        "/mnt/c/users/genom/github/losat/docs/evidence/wasm_remaining_work_20260915/run-03/scan-differential/scan-serial.wasm",
+        "baseline",
+        "off"
+      ],
+      "returncode": 0,
+      "stdout_sha256": "94ca6b0eaa490357bc672dd1049ebb122378edcd9899d5462d2e949ae21116c8",
+      "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "argv": [
+        "node",
+        "/mnt/c/users/genom/github/losat/docs/evidence/wasm_remaining_work_20260915/run-03/work/baseline-source/LOSAT/tests/run_losat_wasi.js",
+        "/mnt/c/users/genom/github/losat/docs/evidence/wasm_remaining_work_20260915/run-03/scan-differential/scan-serial.wasm",
+        "candidate",
+        "off"
+      ],
+      "returncode": 0,
+      "stdout_sha256": "94ca6b0eaa490357bc672dd1049ebb122378edcd9899d5462d2e949ae21116c8",
+      "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "argv": [
+        "node",
+        "/mnt/c/users/genom/github/losat/docs/evidence/wasm_remaining_work_20260915/run-03/work/baseline-source/LOSAT/tests/run_losat_wasi.js",
+        "/mnt/c/users/genom/github/losat/docs/evidence/wasm_remaining_work_20260915/run-03/scan-differential/scan-serial.wasm",
+        "baseline",
+        "trace"
+      ],
+      "returncode": 0,
+      "stdout_sha256": "94ca6b0eaa490357bc672dd1049ebb122378edcd9899d5462d2e949ae21116c8",
+      "stderr_sha256": "67c0dc97d071df081bb16b43fdbe76386d77fcfb5101ba4919ae50ab1f77f1c8"
+    },
+    {
+      "argv": [
+        "node",
+        "/mnt/c/users/genom/github/losat/docs/evidence/wasm_remaining_work_20260915/run-03/work/baseline-source/LOSAT/tests/run_losat_wasi.js",
+        "/mnt/c/users/genom/github/losat/docs/evidence/wasm_remaining_work_20260915/run-03/scan-differential/scan-serial.wasm",
+        "candidate",
+        "trace"
+      ],
+      "returncode": 0,
+      "stdout_sha256": "94ca6b0eaa490357bc672dd1049ebb122378edcd9899d5462d2e949ae21116c8",
+      "stderr_sha256": "67c0dc97d071df081bb16b43fdbe76386d77fcfb5101ba4919ae50ab1f77f1c8"
+    }
+  ],
+  "status": "PASS"
+}

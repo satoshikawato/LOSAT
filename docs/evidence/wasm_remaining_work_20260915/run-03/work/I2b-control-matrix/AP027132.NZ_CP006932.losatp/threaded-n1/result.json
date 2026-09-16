@@ -1,0 +1,31 @@
+{
+  "boottime_seconds": 45.12526106300038,
+  "cpu_system_seconds": 0.1,
+  "cpu_user_seconds": 47.8,
+  "elapsed_clock": "CLOCK_MONOTONIC; realtime and GNU elapsed are adjustable-clock diagnostics",
+  "ended_utc": "2026-09-16T02:24:08Z",
+  "exit_status": 0,
+  "gnu_elapsed_seconds": 49.66,
+  "monotonic_clock_agreement": true,
+  "monotonic_end": 2603.560727563,
+  "monotonic_start": 2558.43546968,
+  "output": "/mnt/c/users/genom/github/losat/docs/evidence/wasm_remaining_work_20260915/run-03/work/I2b-control-matrix/AP027132.NZ_CP006932.losatp/threaded-n1/output.txt",
+  "peak_rss_bytes": 186687488,
+  "process_ended_utc": "2026-09-16T02:24:08Z",
+  "raw_output_bytes": 530562,
+  "raw_output_sha256": "cd81f8fef3dff78fb48f5923de43c84f1af78d006aaa9a8cae2c2f1f20aed181",
+  "realtime_clock_agreement": false,
+  "realtime_seconds": 49.67936849594116,
+  "reason": null,
+  "started_utc": "2026-09-16T02:23:18Z",
+  "status": "PASS",
+  "timeout_seconds": 300,
+  "unavailable_metrics": {},
+  "wall_seconds": 45.125257882999904,
+  "watchdog_clocks": {
+    "started": {
+      "monotonic": 2558.441585592,
+      "realtime": 1789525398.5009403
+    }
+  }
+}

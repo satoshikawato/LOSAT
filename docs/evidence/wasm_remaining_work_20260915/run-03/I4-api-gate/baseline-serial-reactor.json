@@ -1,0 +1,149 @@
+{
+  "kind": "serial-reactor",
+  "sha256": "79c68f306d82c0552a561f3a583ca3cbcd7bd4655df0a170816a9e8507766fea",
+  "imports": [
+    {
+      "module": "wasi_snapshot_preview1",
+      "name": "random_get",
+      "kind": "function"
+    },
+    {
+      "module": "wasi_snapshot_preview1",
+      "name": "sched_yield",
+      "kind": "function"
+    },
+    {
+      "module": "wasi_snapshot_preview1",
+      "name": "clock_time_get",
+      "kind": "function"
+    },
+    {
+      "module": "wasi_snapshot_preview1",
+      "name": "path_filestat_get",
+      "kind": "function"
+    },
+    {
+      "module": "wasi_snapshot_preview1",
+      "name": "path_create_directory",
+      "kind": "function"
+    },
+    {
+      "module": "wasi_snapshot_preview1",
+      "name": "fd_read",
+      "kind": "function"
+    },
+    {
+      "module": "wasi_snapshot_preview1",
+      "name": "fd_write",
+      "kind": "function"
+    },
+    {
+      "module": "wasi_snapshot_preview1",
+      "name": "path_open",
+      "kind": "function"
+    },
+    {
+      "module": "wasi_snapshot_preview1",
+      "name": "environ_get",
+      "kind": "function"
+    },
+    {
+      "module": "wasi_snapshot_preview1",
+      "name": "environ_sizes_get",
+      "kind": "function"
+    },
+    {
+      "module": "wasi_snapshot_preview1",
+      "name": "fd_close",
+      "kind": "function"
+    },
+    {
+      "module": "wasi_snapshot_preview1",
+      "name": "fd_fdstat_get",
+      "kind": "function"
+    },
+    {
+      "module": "wasi_snapshot_preview1",
+      "name": "fd_prestat_get",
+      "kind": "function"
+    },
+    {
+      "module": "wasi_snapshot_preview1",
+      "name": "fd_prestat_dir_name",
+      "kind": "function"
+    },
+    {
+      "module": "wasi_snapshot_preview1",
+      "name": "proc_exit",
+      "kind": "function"
+    }
+  ],
+  "exports": [
+    {
+      "name": "memory",
+      "kind": "memory"
+    },
+    {
+      "name": "losat_web_alloc",
+      "kind": "function"
+    },
+    {
+      "name": "losat_web_clear",
+      "kind": "function"
+    },
+    {
+      "name": "losat_web_clear_fasta_store",
+      "kind": "function"
+    },
+    {
+      "name": "losat_web_dealloc",
+      "kind": "function"
+    },
+    {
+      "name": "losat_web_error_len",
+      "kind": "function"
+    },
+    {
+      "name": "losat_web_error_ptr",
+      "kind": "function"
+    },
+    {
+      "name": "losat_web_has_direct_api",
+      "kind": "function"
+    },
+    {
+      "name": "losat_web_release_fasta",
+      "kind": "function"
+    },
+    {
+      "name": "losat_web_result_len",
+      "kind": "function"
+    },
+    {
+      "name": "losat_web_result_ptr",
+      "kind": "function"
+    },
+    {
+      "name": "losat_web_run_pair",
+      "kind": "function"
+    },
+    {
+      "name": "losat_web_run_pair_handles",
+      "kind": "function"
+    },
+    {
+      "name": "losat_web_store_fasta",
+      "kind": "function"
+    },
+    {
+      "name": "_initialize",
+      "kind": "function"
+    }
+  ],
+  "memory": {
+    "imported": false,
+    "initial": 21,
+    "maximum": null,
+    "shared": false
+  }
+}

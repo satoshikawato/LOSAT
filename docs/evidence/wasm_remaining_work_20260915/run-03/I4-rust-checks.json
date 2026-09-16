@@ -1,0 +1,26 @@
+[
+  {
+    "command": "cargo test --offline --locked --jobs 8 --target-dir /tmp/losat-run03-standard-tests/I4",
+    "cwd": "/mnt/c/users/genom/github/losat/docs/evidence/wasm_remaining_work_20260915/run-03/work/I4-source/LOSAT",
+    "exit_status": 0,
+    "log": "I4-standard-suite.log",
+    "log_sha256": "977011a2417bcd325d8abce5f923d12c094a56a12a7a10803cd8b0e57cf60d88",
+    "source_manifest": "I4-source-manifest.json"
+  },
+  {
+    "command": "cargo clippy --offline --locked --release --jobs 8 --target-dir /tmp/losat-run03-build-cache/I4/native --lib --bin LOSAT",
+    "cwd": "/mnt/c/users/genom/github/losat/docs/evidence/wasm_remaining_work_20260915/run-03/work/I4-source/LOSAT",
+    "exit_status": 0,
+    "log": "I4-clippy.log",
+    "log_sha256": "2504772f2dec05ed8c2ec6ba1bdb2d512728cf50d912b48bda7059fa4081b7bc",
+    "source_manifest": "I4-source-manifest.json"
+  },
+  {
+    "command": "cargo fmt --check",
+    "cwd": "/mnt/c/users/genom/github/losat/docs/evidence/wasm_remaining_work_20260915/run-03/work/I4-source/LOSAT",
+    "exit_status": 0,
+    "log": "I4-format.log",
+    "log_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "source_manifest": "I4-source-manifest.json"
+  }
+]

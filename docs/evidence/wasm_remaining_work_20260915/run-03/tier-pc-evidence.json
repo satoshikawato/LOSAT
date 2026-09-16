@@ -1,0 +1,421 @@
+{
+  "baseline": {
+    "ranges": [
+      {
+        "name": "_ZN5LOSAT9algorithm7tblastx17sum_stats_linking7linking19link_hsp_group_ncbi17h3401281f418c37c1E",
+        "tier": "Liftoff",
+        "start": 34654322757120,
+        "end": 34654322818036,
+        "instruction_bytes": 60916
+      },
+      {
+        "name": "_ZN5LOSAT9algorithm7tblastx17sum_stats_linking7linking19link_hsp_group_ncbi17h3401281f418c37c1E",
+        "tier": "Liftoff",
+        "start": 34654322818112,
+        "end": 34654322879028,
+        "instruction_bytes": 60916
+      },
+      {
+        "name": "_ZN5LOSAT9algorithm7tblastx17sum_stats_linking7linking19link_hsp_group_ncbi17h3401281f418c37c1E",
+        "tier": "Liftoff",
+        "start": 34654322879104,
+        "end": 34654322940020,
+        "instruction_bytes": 60916
+      },
+      {
+        "name": "_ZN5LOSAT9algorithm7tblastx17sum_stats_linking7linking19link_hsp_group_ncbi17h3401281f418c37c1E",
+        "tier": "Liftoff",
+        "start": 34654322940096,
+        "end": 34654323001012,
+        "instruction_bytes": 60916
+      },
+      {
+        "name": "_ZN5LOSAT9algorithm7tblastx17sum_stats_linking7linking19link_hsp_group_ncbi17h3401281f418c37c1E",
+        "tier": "TurboFan",
+        "start": 34654323006080,
+        "end": 34654323054320,
+        "instruction_bytes": 48240
+      }
+    ],
+    "isolates": [
+      {
+        "log": "isolate-0x1e14e000-35941-v8.log",
+        "sha256": "17a1e9c7a33da3504555721547b0caf009bbbcbb576498d924e516b3962b6e1b",
+        "main_script_compiled": true,
+        "worker_entry_compiled": false,
+        "all_pc_samples": 61347,
+        "target_pc_samples": {
+          "Liftoff": 2124
+        },
+        "first_last_target_sample_us": {
+          "Liftoff": [
+            28376454,
+            68560236
+          ]
+        },
+        "registered_target_ranges": [
+          0,
+          1,
+          2,
+          3
+        ]
+      },
+      {
+        "log": "isolate-0x7fa9c4002000-35941-v8.log",
+        "sha256": "a423756998201ddb77a680cbcfc5cf0876ec54c31bef713191d1a34ce0c8bc62",
+        "main_script_compiled": false,
+        "worker_entry_compiled": true,
+        "all_pc_samples": 52964,
+        "target_pc_samples": {},
+        "first_last_target_sample_us": {},
+        "registered_target_ranges": [
+          0,
+          1,
+          2,
+          3
+        ]
+      },
+      {
+        "log": "isolate-0x7fa9fc002000-35941-v8.log",
+        "sha256": "cc0e3f89ab41aaaf641f086fea50810e17b705f315910f50bebba57017a5fca6",
+        "main_script_compiled": false,
+        "worker_entry_compiled": true,
+        "all_pc_samples": 54306,
+        "target_pc_samples": {},
+        "first_last_target_sample_us": {},
+        "registered_target_ranges": [
+          0,
+          1,
+          2,
+          3
+        ]
+      },
+      {
+        "log": "isolate-0x7faa34001000-35941-v8.log",
+        "sha256": "52f0cf13b34a9f6437219508b7fff6267459e1fb1c6b57f01da257fc453f46eb",
+        "main_script_compiled": false,
+        "worker_entry_compiled": true,
+        "all_pc_samples": 55962,
+        "target_pc_samples": {
+          "Liftoff": 5
+        },
+        "first_last_target_sample_us": {
+          "Liftoff": [
+            62511505,
+            62516820
+          ]
+        },
+        "registered_target_ranges": [
+          0,
+          1,
+          2,
+          3
+        ]
+      },
+      {
+        "log": "isolate-0x7faa68001000-35941-v8.log",
+        "sha256": "6f973760323f5c33b692344e58695ba6b12d2230f7ce17bfbf6dc684ec555f0b",
+        "main_script_compiled": false,
+        "worker_entry_compiled": true,
+        "all_pc_samples": 57359,
+        "target_pc_samples": {},
+        "first_last_target_sample_us": {},
+        "registered_target_ranges": [
+          0,
+          1,
+          2,
+          3
+        ]
+      },
+      {
+        "log": "isolate-0x7faaa0001000-35941-v8.log",
+        "sha256": "b2c0c30e5f148ea9976386c3be05fe21179dd85c8a516af82f654097a0008b93",
+        "main_script_compiled": false,
+        "worker_entry_compiled": true,
+        "all_pc_samples": 58301,
+        "target_pc_samples": {
+          "Liftoff": 3852
+        },
+        "first_last_target_sample_us": {
+          "Liftoff": [
+            47445143,
+            66950418
+          ]
+        },
+        "registered_target_ranges": [
+          0,
+          1,
+          2,
+          3
+        ]
+      },
+      {
+        "log": "isolate-0x7faad8001000-35941-v8.log",
+        "sha256": "449bc537f8c50b58c2a9c6613c942af05a6d0117776d39e155a456b8b3ffe971",
+        "main_script_compiled": false,
+        "worker_entry_compiled": true,
+        "all_pc_samples": 59008,
+        "target_pc_samples": {
+          "Liftoff": 6670
+        },
+        "first_last_target_sample_us": {
+          "Liftoff": [
+            60281135,
+            68402508
+          ]
+        },
+        "registered_target_ranges": [
+          0,
+          1,
+          2,
+          3
+        ]
+      },
+      {
+        "log": "isolate-0x7fab10001000-35941-v8.log",
+        "sha256": "e6c677256589f94f07cfb34f40ddbe129f187517bfd058fe2930fca5c75e7cdb",
+        "main_script_compiled": false,
+        "worker_entry_compiled": true,
+        "all_pc_samples": 59850,
+        "target_pc_samples": {
+          "Liftoff": 10407
+        },
+        "first_last_target_sample_us": {
+          "Liftoff": [
+            40057540,
+            52523297
+          ]
+        },
+        "registered_target_ranges": [
+          0,
+          1,
+          2,
+          3
+        ]
+      }
+    ],
+    "target_pc_samples": {
+      "Liftoff": 23058
+    },
+    "method": "top instruction PC only; code-registration required before a matching sample; sampled profiles do not count all calls or unprofiled execution"
+  },
+  "I1": {
+    "ranges": [
+      {
+        "name": "_ZN5LOSAT9algorithm7tblastx17sum_stats_linking7linking27scan_large_gap_predecessors17hc27b107bd82fe66eE",
+        "tier": "Liftoff",
+        "start": 21956308178560,
+        "end": 21956308182340,
+        "instruction_bytes": 3780
+      },
+      {
+        "name": "_ZN5LOSAT9algorithm7tblastx17sum_stats_linking7linking27scan_large_gap_predecessors17hc27b107bd82fe66eE",
+        "tier": "Liftoff",
+        "start": 21956308182400,
+        "end": 21956308186180,
+        "instruction_bytes": 3780
+      },
+      {
+        "name": "_ZN5LOSAT9algorithm7tblastx17sum_stats_linking7linking27scan_large_gap_predecessors17hc27b107bd82fe66eE",
+        "tier": "Liftoff",
+        "start": 21956308186240,
+        "end": 21956308190020,
+        "instruction_bytes": 3780
+      },
+      {
+        "name": "_ZN5LOSAT9algorithm7tblastx17sum_stats_linking7linking27scan_large_gap_predecessors17hc27b107bd82fe66eE",
+        "tier": "Liftoff",
+        "start": 21956308190080,
+        "end": 21956308193860,
+        "instruction_bytes": 3780
+      },
+      {
+        "name": "_ZN5LOSAT9algorithm7tblastx17sum_stats_linking7linking27scan_large_gap_predecessors17hc27b107bd82fe66eE",
+        "tier": "TurboFan",
+        "start": 21956308193920,
+        "end": 21956308197148,
+        "instruction_bytes": 3228
+      }
+    ],
+    "isolates": [
+      {
+        "log": "isolate-0x7f5840002000-36801-v8.log",
+        "sha256": "7725c9493cf071354a15d401cf56f5be965ba4311fa5383dbf58c3253eba8d61",
+        "main_script_compiled": false,
+        "worker_entry_compiled": true,
+        "all_pc_samples": 17321,
+        "target_pc_samples": {},
+        "first_last_target_sample_us": {},
+        "registered_target_ranges": [
+          0,
+          1,
+          2,
+          3,
+          4
+        ]
+      },
+      {
+        "log": "isolate-0x7f5880002000-36801-v8.log",
+        "sha256": "d8c7a660058820cb88d709a4de386b372f84a418d12a426db38571b18b75e6f5",
+        "main_script_compiled": false,
+        "worker_entry_compiled": true,
+        "all_pc_samples": 18175,
+        "target_pc_samples": {
+          "Liftoff": 843
+        },
+        "first_last_target_sample_us": {
+          "Liftoff": [
+            9906612,
+            11349518
+          ]
+        },
+        "registered_target_ranges": [
+          0,
+          1,
+          2,
+          3,
+          4
+        ]
+      },
+      {
+        "log": "isolate-0x7f58b8001000-36801-v8.log",
+        "sha256": "d3b8183bf3ab35f030de0e56fdfb724990d5034c656f7c8c58c81b730cb9db72",
+        "main_script_compiled": false,
+        "worker_entry_compiled": true,
+        "all_pc_samples": 21858,
+        "target_pc_samples": {},
+        "first_last_target_sample_us": {},
+        "registered_target_ranges": [
+          0,
+          1,
+          2,
+          3,
+          4
+        ]
+      },
+      {
+        "log": "isolate-0x7f58f0001000-36801-v8.log",
+        "sha256": "399fea11cc65302e06cf395208a085a0a2fafc323a266815c23227b7bf172783",
+        "main_script_compiled": false,
+        "worker_entry_compiled": true,
+        "all_pc_samples": 23353,
+        "target_pc_samples": {},
+        "first_last_target_sample_us": {},
+        "registered_target_ranges": [
+          0,
+          1,
+          2,
+          3,
+          4
+        ]
+      },
+      {
+        "log": "isolate-0x7f5928001000-36801-v8.log",
+        "sha256": "c961575012ff5b591bcc7835a256b4feb80d87c27ff37182a4997e337ed2121b",
+        "main_script_compiled": false,
+        "worker_entry_compiled": true,
+        "all_pc_samples": 24527,
+        "target_pc_samples": {
+          "TurboFan": 1
+        },
+        "first_last_target_sample_us": {
+          "TurboFan": [
+            29163223,
+            29163223
+          ]
+        },
+        "registered_target_ranges": [
+          0,
+          1,
+          2,
+          3,
+          4
+        ]
+      },
+      {
+        "log": "isolate-0x7f595c001000-36801-v8.log",
+        "sha256": "06cb3e8491e2416b27c3aa032af192ecd5f2a7bf3d60e237c3d98584369a0db9",
+        "main_script_compiled": false,
+        "worker_entry_compiled": true,
+        "all_pc_samples": 26228,
+        "target_pc_samples": {
+          "Liftoff": 786,
+          "TurboFan": 5107
+        },
+        "first_last_target_sample_us": {
+          "Liftoff": [
+            24638726,
+            25836185
+          ],
+          "TurboFan": [
+            25838323,
+            34133485
+          ]
+        },
+        "registered_target_ranges": [
+          0,
+          1,
+          2,
+          3,
+          4
+        ]
+      },
+      {
+        "log": "isolate-0x7f5b9c001000-36801-v8.log",
+        "sha256": "dd884c8c84cc3a4664de239eb1b22d93844b64d17fda969770b9a35f095393d4",
+        "main_script_compiled": false,
+        "worker_entry_compiled": true,
+        "all_pc_samples": 30293,
+        "target_pc_samples": {
+          "Liftoff": 1577,
+          "TurboFan": 2117
+        },
+        "first_last_target_sample_us": {
+          "Liftoff": [
+            25739817,
+            28269491
+          ],
+          "TurboFan": [
+            28271648,
+            36665136
+          ]
+        },
+        "registered_target_ranges": [
+          0,
+          1,
+          2,
+          3,
+          4
+        ]
+      },
+      {
+        "log": "isolate-0xa8e0000-36801-v8.log",
+        "sha256": "fc33db1efa65d4e93583aac7be7d5954de8d2b137f47a33e64156bd75aadbae6",
+        "main_script_compiled": true,
+        "worker_entry_compiled": false,
+        "all_pc_samples": 32305,
+        "target_pc_samples": {
+          "Liftoff": 1313
+        },
+        "first_last_target_sample_us": {
+          "Liftoff": [
+            25196361,
+            27543621
+          ]
+        },
+        "registered_target_ranges": [
+          0,
+          1,
+          2,
+          3,
+          4
+        ]
+      }
+    ],
+    "target_pc_samples": {
+      "Liftoff": 4519,
+      "TurboFan": 7225
+    },
+    "method": "top instruction PC only; code-registration required before a matching sample; sampled profiles do not count all calls or unprofiled execution"
+  }
+}

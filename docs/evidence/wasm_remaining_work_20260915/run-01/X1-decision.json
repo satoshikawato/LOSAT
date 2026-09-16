@@ -1,0 +1,14 @@
+{
+  "candidate": "X1",
+  "status": "rejected",
+  "reason": "All four default-Node body medians regressed (1.26%, 7.83%, 13.13%, 5.63%); target >=5% reduction not met.",
+  "timing_evidence": "X1-default-threaded/summary.json, 32 successful raw comparisons, warmup each plus3 alternating pairs per condition",
+  "excluded_changes": [
+    "scheduling",
+    "pruning",
+    "floating point",
+    "pool sizing",
+    "compile flags"
+  ],
+  "production_applied": false
+}

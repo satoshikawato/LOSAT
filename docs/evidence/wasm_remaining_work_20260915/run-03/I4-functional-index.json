@@ -1,0 +1,45 @@
+{
+  "command_runs": 79,
+  "long_code4_runs": 4,
+  "raw_manifests": [
+    {
+      "path": "work/I4-command-gate/runs.json",
+      "sha256": "ae15edbeca940c3aa87d1fdfc50048ef0b356af974f234b6243ecd50707f4191",
+      "runs": 60,
+      "status": "PASS"
+    },
+    {
+      "path": "work/I4-serial-focus/runs.json",
+      "sha256": "c97d100e18eb87ece660f76092051f4fc11eaff6dd0fe88b844319f2d77562eb",
+      "runs": 6,
+      "status": "PASS"
+    },
+    {
+      "path": "work/I4-serial-controls-raw/runs.json",
+      "sha256": "e8fe7e588acd2dd3d6def1d08077310bb4eea60753f1a4500eaf47e2aedda8c9",
+      "runs": 9,
+      "status": "PASS"
+    },
+    {
+      "path": "work/I4-n2-n4/runs.json",
+      "sha256": "c835757f303f3db18800111ea8eb176dd507c9962b1d10fccee0d9db3927413b",
+      "runs": 4,
+      "status": "PASS"
+    },
+    {
+      "path": "I4-long-code4/runs.json",
+      "sha256": "7edd07f1a70456b0399df7820643a48a8b9997964a2554656cb260dcd4a5fc5c",
+      "runs": 4,
+      "status": "PASS"
+    }
+  ],
+  "group_state": "I4-group-state/comparison.json",
+  "scan_state": "I4-scan",
+  "rust": "I4-rust-checks.json",
+  "api": "I4-api-gate/manifest.json",
+  "browser": [
+    "I4-browser-raw/manifest.json",
+    "I4-browser-thread-lifecycle-valid/manifest.json",
+    "I4-browser-serial-lifecycle/manifest.json"
+  ]
+}

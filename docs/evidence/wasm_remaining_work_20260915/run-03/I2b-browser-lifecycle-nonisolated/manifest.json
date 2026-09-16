@@ -1,0 +1,307 @@
+{
+  "version": "I2b",
+  "role": "correctness-only real consumer service/worker smoke; excludes timings",
+  "options": {
+    "version": "I2b",
+    "label": "I2b-browser-lifecycle-nonisolated",
+    "cases": [
+      "MelaMJNV.PemoMJNVA.tlosatx"
+    ],
+    "threads": [
+      8
+    ],
+    "mode": "auto",
+    "no_isolation": true,
+    "serial_kind": "reactor",
+    "repeat": 2,
+    "lifecycle": true
+  },
+  "csp": "     default-src 'self';     script-src 'self' 'unsafe-inline' 'unsafe-eval';     style-src 'self' 'unsafe-inline';     font-src 'self' data:;     img-src 'self' data: blob:;     connect-src 'self';     worker-src 'self' blob:;     object-src 'none';     base-uri 'self';     form-action 'self';     ",
+  "artifacts": {
+    "serial": {
+      "path": "/mnt/c/users/genom/github/losat/docs/evidence/wasm_remaining_work_20260915/run-03/work/I2b/artifacts/losat-serial-reactor.wasm",
+      "sha256": "75a17d01db657baeac7aa2166045ae0c606591c4318c34849ea34020c7b24d60"
+    },
+    "threaded": {
+      "path": "/mnt/c/users/genom/github/losat/docs/evidence/wasm_remaining_work_20260915/run-03/work/I2b/artifacts/losat-threaded-command.wasm",
+      "sha256": "86f85d75743d8661a5633326b2cb84862e5c986d1a26f34da41d0de9c9dfbab2"
+    }
+  },
+  "records": [
+    {
+      "case": "MelaMJNV.PemoMJNVA.tlosatx",
+      "repeat": 0,
+      "threads": 8,
+      "query_sha256": "491f80b482acc96600773c3493358c0262dbf714cb5d76f8f5560a92ecccac1a",
+      "subject_sha256": "e38d663db3478cec0694e419f00b769f1937c756f3a3f827711c24d531fb4a07",
+      "extra": [
+        "-query_gencode",
+        "1",
+        "-db_gencode",
+        "1"
+      ],
+      "status": "PASS",
+      "ok": true,
+      "statuses": [
+        {
+          "state": "fallback",
+          "message": "Using serial LOSAT: SharedArrayBuffer is unavailable.",
+          "mode": "serial",
+          "fallbackReason": "SharedArrayBuffer is unavailable."
+        }
+      ],
+      "raw_equal": true,
+      "output_sha256": "bbef153094025db89dd4a69b2a3c4246b0b8853396fe740bc7e1bd654db105b6"
+    },
+    {
+      "case": "MelaMJNV.PemoMJNVA.tlosatx",
+      "repeat": 1,
+      "threads": 8,
+      "query_sha256": "491f80b482acc96600773c3493358c0262dbf714cb5d76f8f5560a92ecccac1a",
+      "subject_sha256": "e38d663db3478cec0694e419f00b769f1937c756f3a3f827711c24d531fb4a07",
+      "extra": [
+        "-query_gencode",
+        "1",
+        "-db_gencode",
+        "1"
+      ],
+      "status": "PASS",
+      "ok": true,
+      "statuses": [
+        {
+          "state": "fallback",
+          "message": "Using serial LOSAT: SharedArrayBuffer is unavailable.",
+          "mode": "serial",
+          "fallbackReason": "SharedArrayBuffer is unavailable."
+        }
+      ],
+      "raw_equal": true,
+      "output_sha256": "bbef153094025db89dd4a69b2a3c4246b0b8853396fe740bc7e1bd654db105b6"
+    }
+  ],
+  "requests": [
+    "/qa.html",
+    "/js/services/losat.js",
+    "/js/config.js",
+    "/js/services/losat-runtime.js",
+    "/qa-artifacts/serial.wasm",
+    "/js/workers/losat-worker.js",
+    "/js/services/losat-runtime.js",
+    "/vendor/browser_wasi_shim/dist/index.js",
+    "/vendor/browser_wasi_shim/dist/wasi.js",
+    "/vendor/browser_wasi_shim/dist/fd.js",
+    "/vendor/browser_wasi_shim/dist/fs_mem.js",
+    "/vendor/browser_wasi_shim/dist/fs_opfs.js",
+    "/vendor/browser_wasi_shim/dist/strace.js",
+    "/vendor/browser_wasi_shim/dist/wasi_defs.js",
+    "/vendor/browser_wasi_shim/dist/debug.js",
+    "/js/workers/losat-worker.js",
+    "/js/services/losat-runtime.js",
+    "/vendor/browser_wasi_shim/dist/index.js",
+    "/vendor/browser_wasi_shim/dist/wasi.js",
+    "/vendor/browser_wasi_shim/dist/fd.js",
+    "/vendor/browser_wasi_shim/dist/fs_mem.js",
+    "/vendor/browser_wasi_shim/dist/fs_opfs.js",
+    "/vendor/browser_wasi_shim/dist/strace.js",
+    "/vendor/browser_wasi_shim/dist/wasi_defs.js",
+    "/vendor/browser_wasi_shim/dist/debug.js",
+    "/js/workers/losat-worker.js",
+    "/js/services/losat-runtime.js",
+    "/vendor/browser_wasi_shim/dist/index.js",
+    "/vendor/browser_wasi_shim/dist/wasi.js",
+    "/vendor/browser_wasi_shim/dist/fd.js",
+    "/vendor/browser_wasi_shim/dist/fs_mem.js",
+    "/vendor/browser_wasi_shim/dist/fs_opfs.js",
+    "/vendor/browser_wasi_shim/dist/strace.js",
+    "/vendor/browser_wasi_shim/dist/wasi_defs.js",
+    "/vendor/browser_wasi_shim/dist/debug.js"
+  ],
+  "served_sha256": {
+    "/mnt/c/users/genom/github/gbdraw/gbdraw/web/js/services/losat.js": "45dc6a52ca2a9fac67f05a7a13b8de82fd1d90c49c45f7bb176bafae7858fff9",
+    "/mnt/c/users/genom/github/gbdraw/gbdraw/web/js/config.js": "27fc26d8f5b682c65eca0eff9d7e9f490a104ff6aa454a6a9ce95f15d110fe20",
+    "/mnt/c/users/genom/github/gbdraw/gbdraw/web/js/services/losat-runtime.js": "8a8588556aab21df964e03769c645656522e62acc2dc045ebb0b26415623a99a",
+    "/mnt/c/users/genom/github/losat/docs/evidence/wasm_remaining_work_20260915/run-03/work/I2b/artifacts/losat-serial-reactor.wasm": "75a17d01db657baeac7aa2166045ae0c606591c4318c34849ea34020c7b24d60",
+    "/mnt/c/users/genom/github/gbdraw/gbdraw/web/js/workers/losat-worker.js": "5098d7d26f59c60578c59104dbfcaa52040d7f95581b084d8696aa84d65ca43c",
+    "/mnt/c/users/genom/github/gbdraw/gbdraw/web/vendor/browser_wasi_shim/dist/index.js": "7e2fd52ee3f728bb0b1d6e449724e0f13e3d586bb25bde6e02a66366175b5605",
+    "/mnt/c/users/genom/github/gbdraw/gbdraw/web/vendor/browser_wasi_shim/dist/fd.js": "9e82e1fc1bfd3e3573f64349dc42b4b624ed61d24e5c553f2bb4d041444f166c",
+    "/mnt/c/users/genom/github/gbdraw/gbdraw/web/vendor/browser_wasi_shim/dist/wasi.js": "168eb977a826f75ab0c39f9322f78cc58dbd5b233019ad1d6a7e940af8a7c4aa",
+    "/mnt/c/users/genom/github/gbdraw/gbdraw/web/vendor/browser_wasi_shim/dist/fs_mem.js": "85dbc9e0ee784d9ff8b55452644e00bf7058e32355aab974f8b71d7d85772324",
+    "/mnt/c/users/genom/github/gbdraw/gbdraw/web/vendor/browser_wasi_shim/dist/fs_opfs.js": "4b96aaeb5ac5986cf802cbf22b975c656682d22a38248160c96fc2ded5644869",
+    "/mnt/c/users/genom/github/gbdraw/gbdraw/web/vendor/browser_wasi_shim/dist/strace.js": "ece435d3784d928d02bff4d015b7cb686f8c06de8536ff9f8ebc38a8f403a3be",
+    "/mnt/c/users/genom/github/gbdraw/gbdraw/web/vendor/browser_wasi_shim/dist/wasi_defs.js": "0db0f42ba330749a7b05095ea1fd0ff63fd2b30e84cead30fe4c28359d15f194",
+    "/mnt/c/users/genom/github/gbdraw/gbdraw/web/vendor/browser_wasi_shim/dist/debug.js": "a91848ee180529e2a60c05dfb9584cad19cd4e1c6f391fdb76a938bcae4c0328"
+  },
+  "blocked_external": [],
+  "console": [
+    {
+      "type": "info",
+      "text": "Running 1 LOSAT worker."
+    },
+    {
+      "type": "log",
+      "text": "%c%s color: #265BA0 wasi: 0 0"
+    },
+    {
+      "type": "info",
+      "text": "Completed 1 LOSAT pair with 1 worker in 6.51s."
+    },
+    {
+      "type": "info",
+      "text": "Running 1 LOSAT worker."
+    },
+    {
+      "type": "info",
+      "text": "Completed 1 LOSAT pair with 1 worker in 5.60s."
+    },
+    {
+      "type": "info",
+      "text": "Running 1 LOSAT worker."
+    },
+    {
+      "type": "warning",
+      "text": "LOSAT Worker pool failed; falling back to sequential execution. Error: LOSAT pair #1: LOSAT program must be blastn, tblastx, or blastp.\n    at window.Worker.handleMessage (http://127.0.0.1:37019/js/services/losat.js:589:16)"
+    },
+    {
+      "type": "info",
+      "text": "Running 1 LOSAT pair sequentially."
+    },
+    {
+      "type": "info",
+      "text": "Running 1 LOSAT worker."
+    },
+    {
+      "type": "log",
+      "text": "%c%s color: #265BA0 wasi: 0 0"
+    },
+    {
+      "type": "info",
+      "text": "Completed 1 LOSAT pair with 1 worker in 5.12s."
+    },
+    {
+      "type": "info",
+      "text": "Running 1 LOSAT worker."
+    },
+    {
+      "type": "info",
+      "text": "Running 1 LOSAT worker."
+    },
+    {
+      "type": "log",
+      "text": "%c%s color: #265BA0 wasi: 0 0"
+    },
+    {
+      "type": "info",
+      "text": "Completed 1 LOSAT pair with 1 worker in 5.47s."
+    }
+  ],
+  "browser": "149.0.7827.55",
+  "invalid_input": {
+    "ok": false,
+    "error": "Error: LOSAT pair #1: LOSAT program must be blastn, tblastx, or blastp.",
+    "name": "Error",
+    "canceled": false,
+    "stack": "Error: LOSAT pair #1: LOSAT program must be blastn, tblastx, or blastp.\n    at runLosatPairsSequential (http://127.0.0.1:37019/js/services/losat.js:357:13)",
+    "statuses": [
+      {
+        "state": "fallback",
+        "message": "Using serial LOSAT: SharedArrayBuffer is unavailable.",
+        "mode": "serial",
+        "fallbackReason": "SharedArrayBuffer is unavailable."
+      }
+    ]
+  },
+  "invalid_input_recovery_sha256": "bbef153094025db89dd4a69b2a3c4246b0b8853396fe740bc7e1bd654db105b6",
+  "canceled": {
+    "ok": false,
+    "error": "AbortError: signal is aborted without reason",
+    "name": "AbortError",
+    "canceled": false,
+    "stack": "AbortError: signal is aborted without reason\n    at eval (eval at evaluate (:303:30), <anonymous>:1:14)\n    at eval (<anonymous>)\n    at UtilityScript.evaluate (<anonymous>:303:30)\n    at UtilityScript.<anonymous> (<anonymous>:1:44)",
+    "statuses": [
+      {
+        "state": "fallback",
+        "message": "Using serial LOSAT: SharedArrayBuffer is unavailable.",
+        "mode": "serial",
+        "fallbackReason": "SharedArrayBuffer is unavailable."
+      }
+    ]
+  },
+  "cancellation_recovery_sha256": "bbef153094025db89dd4a69b2a3c4246b0b8853396fe740bc7e1bd654db105b6",
+  "observed_worker_maximum": 1,
+  "pagehide_all_parent_workers_terminated": true,
+  "worker_events": [
+    {
+      "op": "parent-create",
+      "id": 0,
+      "url": "http://127.0.0.1:37019/js/workers/losat-worker.js"
+    },
+    {
+      "op": "parent-send",
+      "id": 0,
+      "type": "init"
+    },
+    {
+      "op": "parent-send",
+      "id": 0,
+      "type": "run"
+    },
+    {
+      "op": "parent-send",
+      "id": 0,
+      "type": "run"
+    },
+    {
+      "op": "parent-send",
+      "id": 0,
+      "type": "run"
+    },
+    {
+      "op": "parent-terminate",
+      "id": 0
+    },
+    {
+      "op": "parent-create",
+      "id": 1,
+      "url": "http://127.0.0.1:37019/js/workers/losat-worker.js"
+    },
+    {
+      "op": "parent-send",
+      "id": 1,
+      "type": "init"
+    },
+    {
+      "op": "parent-send",
+      "id": 1,
+      "type": "run"
+    },
+    {
+      "op": "parent-send",
+      "id": 1,
+      "type": "run"
+    },
+    {
+      "op": "parent-terminate",
+      "id": 1
+    },
+    {
+      "op": "parent-create",
+      "id": 2,
+      "url": "http://127.0.0.1:37019/js/workers/losat-worker.js"
+    },
+    {
+      "op": "parent-send",
+      "id": 2,
+      "type": "init"
+    },
+    {
+      "op": "parent-send",
+      "id": 2,
+      "type": "run"
+    },
+    {
+      "op": "parent-terminate",
+      "id": 2
+    }
+  ],
+  "status": "PASS"
+}

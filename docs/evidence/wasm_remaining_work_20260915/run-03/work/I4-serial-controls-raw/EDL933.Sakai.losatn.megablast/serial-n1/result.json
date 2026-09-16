@@ -1,0 +1,31 @@
+{
+  "boottime_seconds": 2.06127951399867,
+  "cpu_system_seconds": 0.13,
+  "cpu_user_seconds": 1.9,
+  "elapsed_clock": "CLOCK_MONOTONIC; realtime and GNU elapsed are adjustable-clock diagnostics",
+  "ended_utc": "2026-09-16T04:04:27Z",
+  "exit_status": 0,
+  "gnu_elapsed_seconds": 2.04,
+  "monotonic_clock_agreement": true,
+  "monotonic_end": 8248.329648645,
+  "monotonic_start": 8246.268372804,
+  "output": "/mnt/c/users/genom/github/losat/docs/evidence/wasm_remaining_work_20260915/run-03/work/I4-serial-controls-raw/EDL933.Sakai.losatn.megablast/serial-n1/output.txt",
+  "peak_rss_bytes": 334540800,
+  "process_ended_utc": "2026-09-16T04:04:27Z",
+  "raw_output_bytes": 473032,
+  "raw_output_sha256": "300a925ef86f20af9c0eff53f1c73638bdf80d47f5153352086a3e7bfd416c0c",
+  "realtime_clock_agreement": true,
+  "realtime_seconds": 2.0612804889678955,
+  "reason": null,
+  "started_utc": "2026-09-16T04:04:25Z",
+  "status": "PASS",
+  "timeout_seconds": 300,
+  "unavailable_metrics": {},
+  "wall_seconds": 2.061275841000679,
+  "watchdog_clocks": {
+    "started": {
+      "monotonic": 8246.274675449,
+      "realtime": 1789531465.7813804
+    }
+  }
+}

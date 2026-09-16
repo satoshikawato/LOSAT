@@ -5,7 +5,9 @@ const crypto = require("node:crypto");
 // CATCH_ALL(status); return status;
 // WASI ABI boundary: command uses _start; reactor uses _initialize once.
 // Inspect actual imports/exports and binary memory limits, never the filename.
-function inspectArtifact(bytes, expected) {
+// Module validation and ownership are Wasm-host concerns. Retain the validated
+// module for execution; each invocation still creates its own WASI instance.
+function prepareArtifact(bytes, expected) {
   const module = new WebAssembly.Module(bytes);
   const imports = WebAssembly.Module.imports(module);
   const exports = WebAssembly.Module.exports(module);
@@ -54,9 +56,15 @@ function inspectArtifact(bytes, expected) {
   if (!threaded && (memories[0].shared || names.has("wasi_thread_start"))) throw new Error("inconsistent serial artifact thread interface");
   const kind = `${threaded ? "threaded" : "serial"}-${command ? "command" : "reactor"}`;
   if (expected && kind !== expected) throw new Error(`expected ${expected}, got ${kind}`);
-  return { kind, sha256: crypto.createHash("sha256").update(bytes).digest("hex"), imports, exports, memory: memories[0] };
+  return { module, identity: { kind, sha256: crypto.createHash("sha256").update(bytes).digest("hex"), imports, exports, memory: memories[0] } };
 }
-module.exports = { inspectArtifact };
+// NCBI reference: c++/src/app/blast/blastn_app.cpp:172-176
+// CATCH_ALL(status); ... return status;
+// Preserve the metadata-only API and CLI JSON; validation errors still propagate.
+function inspectArtifact(bytes, expected) {
+  return prepareArtifact(bytes, expected).identity;
+}
+module.exports = { inspectArtifact, prepareArtifact };
 if (require.main === module) {
   try { console.log(JSON.stringify(inspectArtifact(require("node:fs").readFileSync(process.argv[2]), process.argv[3]), null, 2)); }
   catch (error) { console.error(error); process.exitCode = 1; }

@@ -1,0 +1,44 @@
+[
+  {
+    "kind": "native",
+    "trace": "off",
+    "version": "baseline",
+    "argv": [
+      "/mnt/c/users/genom/github/losat/docs/evidence/wasm_remaining_work_20260915/run-03/work/baselinestate/artifacts/losat-native-command"
+    ],
+    "artifact_sha256": "40cce87e86dcca2b9ac8764f33625db0dcb5d5011e9d1d03100fef85094e3b4a",
+    "status": "PASS",
+    "returncode": 0,
+    "stdout_sha256": "b4c965f481fe10c28397c738179b8ff88d584e105910bc7884174ae84041c7cf",
+    "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "cases": 352,
+    "rounds": 1927,
+    "visits": 11494
+  },
+  {
+    "kind": "native",
+    "trace": "off",
+    "version": "I1",
+    "argv": [
+      "/mnt/c/users/genom/github/losat/docs/evidence/wasm_remaining_work_20260915/run-03/work/I1state/artifacts/losat-native-command"
+    ],
+    "artifact_sha256": "170cf755e07761025f106ad881f84042da6404d05a3dd59368e03b9887458159",
+    "status": "PASS",
+    "returncode": 0,
+    "stdout_sha256": "b4c965f481fe10c28397c738179b8ff88d584e105910bc7884174ae84041c7cf",
+    "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "cases": 352,
+    "rounds": 1927,
+    "visits": 11494
+  },
+  {
+    "kind": "native",
+    "trace": "on",
+    "version": "baseline",
+    "argv": [
+      "/mnt/c/users/genom/github/losat/docs/evidence/wasm_remaining_work_20260915/run-03/work/baselinestate/artifacts/losat-native-command"
+    ],
+    "artifact_sha256": "40cce87e86dcca2b9ac8764f33625db0dcb5d5011e9d1d03100fef85094e3b4a",
+    "status": "RUNNING"
+  }
+]

@@ -1,0 +1,170 @@
+[
+  {
+    "path": "LOSAT/tests/unit/helpers.rs",
+    "sha256": "0b6f0adaa7f9aa750d915550e6856f2e64e3bba79ded0716e1fd6886a31fe984"
+  },
+  {
+    "path": "LOSAT/tests/unit/mod.rs",
+    "sha256": "f837418d2ecbbbc1329d584717c935bf22fee97ad9531198f04ac7db9a44a35b"
+  },
+  {
+    "path": "LOSAT/tests/unit/blastn/alignment.rs",
+    "sha256": "3fe9caa8a895558bd6c34ce8afc2cdb6aa68c0e79e31a00bbbc3ada03e6afc96"
+  },
+  {
+    "path": "LOSAT/tests/unit/blastn/args.rs",
+    "sha256": "85c0b970df99b6fc4697e8e207b24a6607924b0bf510cee8f5ae4be16ed13897"
+  },
+  {
+    "path": "LOSAT/tests/unit/blastn/constants.rs",
+    "sha256": "67595961e87f8457775dcb36bdfacf938435698da2088c119b3529c72adc460e"
+  },
+  {
+    "path": "LOSAT/tests/unit/blastn/extension.rs",
+    "sha256": "1a462e54167ac88bbf77357cabbde7043fd18e3c8cfe1d33a633b3fefdbb3e9f"
+  },
+  {
+    "path": "LOSAT/tests/unit/blastn/lookup.rs",
+    "sha256": "7227a5f07c175c02f8ed70537408ce1f4ce15368f98cef472b84d144c26f83a2"
+  },
+  {
+    "path": "LOSAT/tests/unit/blastn/mod.rs",
+    "sha256": "664aacb05d6402bfc9de805ce42f1c4a943780b59dbef48901433d0271bee8de"
+  },
+  {
+    "path": "LOSAT/tests/unit/common/chaining.rs",
+    "sha256": "18253d56b76d1ec6cff8ec9f284d5e950049df3df4acd93d199f4af1652b2f56"
+  },
+  {
+    "path": "LOSAT/tests/unit/common/diagnostics.rs",
+    "sha256": "4e96b6b6a01634dcdbed04d52cac40c1f6d32f95c5e6663847c3d06034e14968"
+  },
+  {
+    "path": "LOSAT/tests/unit/common/evalue.rs",
+    "sha256": "4f3bb3b298514f4bda2b768b8e5c4d0355e546ded1619dfb8c519abc2f3abf32"
+  },
+  {
+    "path": "LOSAT/tests/unit/common/evalue_ncbi.rs",
+    "sha256": "ae7f550816032a1cab68449603d145077af455e9dfafaec2d21858732af3d603"
+  },
+  {
+    "path": "LOSAT/tests/unit/common/mod.rs",
+    "sha256": "92c730b56fdd04d8e1b43755f963ba2beb8b31619b4ac5a2e2a15635f28ae367"
+  },
+  {
+    "path": "LOSAT/tests/unit/helpers/extract_ncbi_cases.py",
+    "sha256": "ffc00845bd90fcdb6e42acfb78ab95d0ce40ee682ccfcc6e0613d9926972ea51"
+  },
+  {
+    "path": "LOSAT/tests/unit/helpers/extract_ncbi_cases_enhanced.py",
+    "sha256": "86968467bc506f6db24169e2375dbf5fc814a24050883f4a1b1d2ba848642b7e"
+  },
+  {
+    "path": "LOSAT/tests/unit/helpers/generate_ncbi_reference.sh",
+    "sha256": "92e5ead5e28a5abf2284ad0fc3a773d99d0ba6ecf8732cb45a8e4675a9da5f4b"
+  },
+  {
+    "path": "LOSAT/tests/unit/helpers/ncbi_blast_comparison_test.rs",
+    "sha256": "bdb6f99f712e71ee1f56627eed3fda093d2bfe72f36bb06f43c84ba7384644b3"
+  },
+  {
+    "path": "LOSAT/tests/unit/helpers/ncbi_reference.rs",
+    "sha256": "4b95d45de322a823a9d787a45a44ae92b40d7cc13c56c393026d4c9382353412"
+  },
+  {
+    "path": "LOSAT/tests/unit/helpers/run_verification_example.sh",
+    "sha256": "0d1ff10fd3ab11ff19c3da55cfcb68c0dddcdd8d6a1ade4e36bee3cfb5beb9d2"
+  },
+  {
+    "path": "LOSAT/tests/unit/helpers/test_ncbi_comparison.rs",
+    "sha256": "c58a135839af834c9fb3e981f4c4d1837edc09e0358dae0875f20142548b081b"
+  },
+  {
+    "path": "LOSAT/tests/unit/helpers/test_ncbi_manual.rs",
+    "sha256": "b7a817a2032487e615115c7a839d0ee11f33349f7f9507b1d6949c03076f0581"
+  },
+  {
+    "path": "LOSAT/tests/unit/helpers/verify_ncbi_implementation.sh",
+    "sha256": "f49167093a0fe3d7443fd5b4222f912e85e5d1550ec989f276166648f801bbde"
+  },
+  {
+    "path": "LOSAT/tests/unit/stats/evalue_precision.rs",
+    "sha256": "faf17b6e3820bafbcbe6a04a176b3f5f37e22743a2d6203650257f944a292b2b"
+  },
+  {
+    "path": "LOSAT/tests/unit/stats/evalue_precision_fix_verification.rs",
+    "sha256": "9ea822b4dcb763566ad03eeeccfc0e14c6cc28fa68f6113ab70a58e8c3c03c26"
+  },
+  {
+    "path": "LOSAT/tests/unit/stats/mod.rs",
+    "sha256": "ddc455b42b6e173b0223ae54f2242606d17d2b448c479df9eff27fd1410f5a7c"
+  },
+  {
+    "path": "LOSAT/tests/unit/tblastx/args.rs",
+    "sha256": "5f456322dbe05f1919d8d588a5dc2754037583a744d32c76032dc3fe94a47361"
+  },
+  {
+    "path": "LOSAT/tests/unit/tblastx/chaining.rs",
+    "sha256": "c808c5c87e67311b688f2d9857f2d9ad4e765069a146624bd241b609fea972ff"
+  },
+  {
+    "path": "LOSAT/tests/unit/tblastx/constants.rs",
+    "sha256": "36f7a5ea5d2a362be2dd1a88a43ae6297ea2736e2c7177ac3e3153237e44a742"
+  },
+  {
+    "path": "LOSAT/tests/unit/tblastx/extension.rs",
+    "sha256": "1479c3c6ae68eaeb78528386148bf52e9f1b7f224d41655f369bbb1f5865b7d9"
+  },
+  {
+    "path": "LOSAT/tests/unit/tblastx/lookup.rs",
+    "sha256": "31ec9e6dacb04a7bccd97c559644aa7ecf4a971045fa3d8b0cd556d3ded05aab"
+  },
+  {
+    "path": "LOSAT/tests/unit/tblastx/mod.rs",
+    "sha256": "7328298545879e2a0504aed230409255b94726d7dee3542ee965f54dc590798b"
+  },
+  {
+    "path": "LOSAT/tests/unit/tblastx/run_engine.rs",
+    "sha256": "aec923739b798ef459a5596fd3644c4a8af4336ca9e4beba447bf530e5594972"
+  },
+  {
+    "path": "LOSAT/tests/unit/tblastx/translation.rs",
+    "sha256": "28522c164054c521547f85ad0a0e09b004ba0c3cdd9345e736993c45dcb3879c"
+  },
+  {
+    "path": "LOSAT/tests/unit/helpers/ncbi_reference_data/blastn_word7_subject_set.out",
+    "sha256": "7c1541325718a0328964b02d93419f64742c7b925bddbff659f50ee24fe5452c"
+  },
+  {
+    "path": "LOSAT/tests/unit/helpers/ncbi_reference_data/simple_test.log",
+    "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+  },
+  {
+    "path": "LOSAT/tests/unit/helpers/ncbi_reference_data/simple_test.out",
+    "sha256": "08688a6956e6b64920dac679b89348923d16ab3cc0bad4754a064c58adf4f53e"
+  },
+  {
+    "path": "LOSAT/tests/unit/helpers/ncbi_reference_data/simple_test2.log",
+    "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+  },
+  {
+    "path": "LOSAT/tests/unit/helpers/ncbi_reference_data/simple_test2.out",
+    "sha256": "08688a6956e6b64920dac679b89348923d16ab3cc0bad4754a064c58adf4f53e"
+  },
+  {
+    "path": "LOSAT/tests/unit/helpers/test_sequences/query.fasta",
+    "sha256": "d9d1e3d8bea478115a65584407ed5ed810526309382e1c0009e8e8ab27256351"
+  },
+  {
+    "path": "LOSAT/tests/unit/helpers/test_sequences/subject.fasta",
+    "sha256": "d9d1e3d8bea478115a65584407ed5ed810526309382e1c0009e8e8ab27256351"
+  },
+  {
+    "path": "LOSAT/tests/unit/helpers/__pycache__/extract_ncbi_cases.cpython-313.pyc",
+    "sha256": "41a6bf0c1e159ea1b37dd55ead917899d8ccab89e4ea676bc98298114e749ff7"
+  },
+  {
+    "path": "LOSAT/tests/unit/helpers/__pycache__/extract_ncbi_cases_enhanced.cpython-313.pyc",
+    "sha256": "99dcd97b01083130b580581de786eaac398365aa5e8ca16ced371cd34ba4895d"
+  }
+]

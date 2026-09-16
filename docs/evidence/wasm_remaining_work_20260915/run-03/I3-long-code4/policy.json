@@ -1,0 +1,61 @@
+{
+  "candidate": "I3",
+  "jobs": [
+    [
+      "native",
+      1
+    ],
+    [
+      "serial",
+      1
+    ],
+    [
+      "threaded",
+      1
+    ],
+    [
+      "threaded",
+      8
+    ]
+  ],
+  "concurrency": 2,
+  "timeout_seconds": 1800,
+  "oracle_origin": "frozen round-01 fresh NCBI DB oracle, not a fresh round-03 run",
+  "oracle_manifest": {
+    "deadline_seconds": 1800,
+    "argv": [
+      "/home/kawato/micromamba/bin/tblastx",
+      "-query",
+      "/tmp/losat-remaining-20260915/baseline-source/LOSAT/tests/fasta/AP027131.fasta",
+      "-db",
+      "/tmp/losat-remaining-20260915/long-code4/subject",
+      "-query_gencode",
+      "4",
+      "-db_gencode",
+      "4",
+      "-outfmt",
+      "6",
+      "-num_threads",
+      "1",
+      "-out",
+      "{output}"
+    ],
+    "db_argv": [
+      "/home/kawato/micromamba/bin/makeblastdb",
+      "-in",
+      "/tmp/losat-remaining-20260915/baseline-source/LOSAT/tests/fasta/AP027133.fasta",
+      "-dbtype",
+      "nucl",
+      "-parse_seqids",
+      "-out",
+      "/tmp/losat-remaining-20260915/long-code4/subject"
+    ],
+    "oracle_sha256": "9b6121d254d2c634114ac91c0bf4faa252b93532b1142cfb3ade2336fb830873",
+    "query_sha256": "8c9fe3f0547acf1683f9f867c80853e6cd79815d2e593637e70457c14edb11d1",
+    "subject_sha256": "fb47f4339e55347a9693dda49a0989ec2946fa9170a21cea7d418e3e95adeb3a",
+    "role": "correctness only; never speed sample"
+  },
+  "archive_sha256": "92fe4f5eec8e834795d9d86e4e48ee52bfbd0d9fce1abd9aa339adc9c1529336",
+  "oracle_output_sha256": "1da3bfe7d96d50a96726a44e2df98f5e81c05bee9cd655ad51bb8d44aa377963",
+  "role": "correctness only, no speed inference"
+}

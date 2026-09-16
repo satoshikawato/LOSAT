@@ -1,0 +1,29 @@
+[
+  {
+    "index": 1054,
+    "name": "_ZN5LOSAT9algorithm7tblastx17sum_stats_linking7linking19link_hsp_group_ncbi17h0f12c3febbccc79aE",
+    "wat_lines": 16961,
+    "wat_start_line": 804124,
+    "locals": 133,
+    "callee_lines": [],
+    "wasm_sha256": "ebaebea2ca6ad783a25e582cba9f7cecdb74cd0c31f571af13ff4dfe15c67363"
+  },
+  {
+    "index": 1067,
+    "name": "_ZN5LOSAT9algorithm7tblastx17sum_stats_linking7linking19link_hsp_group_ncbi28_$u7b$$u7b$closure$u7d$$u7d$17h6fe94b21805fd1f3E",
+    "wat_lines": 348,
+    "wat_start_line": 823162,
+    "locals": 4,
+    "callee_lines": [],
+    "wasm_sha256": "ebaebea2ca6ad783a25e582cba9f7cecdb74cd0c31f571af13ff4dfe15c67363"
+  },
+  {
+    "index": 1068,
+    "name": "_ZN5LOSAT9algorithm7tblastx17sum_stats_linking7linking19link_hsp_group_ncbi28_$u7b$$u7b$closure$u7d$$u7d$17heec060121350adedE",
+    "wat_lines": 316,
+    "wat_start_line": 823510,
+    "locals": 3,
+    "callee_lines": [],
+    "wasm_sha256": "ebaebea2ca6ad783a25e582cba9f7cecdb74cd0c31f571af13ff4dfe15c67363"
+  }
+]

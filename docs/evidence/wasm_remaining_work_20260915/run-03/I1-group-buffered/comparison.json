@@ -1,0 +1,14 @@
+{
+  "status": "PASS",
+  "targets": [
+    "native",
+    "serial",
+    "threaded"
+  ],
+  "cases": 352,
+  "trace": [
+    "off",
+    "on"
+  ],
+  "comparison": "byte-exact complete stdout/stderr within each target; typed sentinel indices serialized as Option; every f64 retained as bits"
+}

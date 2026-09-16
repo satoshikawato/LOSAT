@@ -1,0 +1,40 @@
+[
+  {
+    "index": 1340,
+    "name": "_ZN5LOSAT9algorithm7tblastx17sum_stats_linking7linking19link_hsp_group_ncbi17h3401281f418c37c1E",
+    "wat_lines": 15883,
+    "wat_start_line": 905787,
+    "locals": 125,
+    "callee_lines": [
+      "(call $_ZN5LOSAT9algorithm7tblastx17sum_stats_linking7linking27scan_large_gap_predecessors17hc27b107bd82fe66eE"
+    ],
+    "wasm_sha256": "95e58d009c060c196065bede76bbdaed998e1bd491f6fc4b615535c1bfb2ea22"
+  },
+  {
+    "index": 1368,
+    "name": "_ZN5LOSAT9algorithm7tblastx17sum_stats_linking7linking27scan_large_gap_predecessors17hc27b107bd82fe66eE",
+    "wat_lines": 1313,
+    "wat_start_line": 928124,
+    "locals": 18,
+    "callee_lines": [],
+    "wasm_sha256": "95e58d009c060c196065bede76bbdaed998e1bd491f6fc4b615535c1bfb2ea22"
+  },
+  {
+    "index": 1370,
+    "name": "_ZN5LOSAT9algorithm7tblastx17sum_stats_linking7linking19link_hsp_group_ncbi28_$u7b$$u7b$closure$u7d$$u7d$17hb30071d849083325E",
+    "wat_lines": 348,
+    "wat_start_line": 929727,
+    "locals": 4,
+    "callee_lines": [],
+    "wasm_sha256": "95e58d009c060c196065bede76bbdaed998e1bd491f6fc4b615535c1bfb2ea22"
+  },
+  {
+    "index": 1371,
+    "name": "_ZN5LOSAT9algorithm7tblastx17sum_stats_linking7linking19link_hsp_group_ncbi28_$u7b$$u7b$closure$u7d$$u7d$17h561b6f593537a954E",
+    "wat_lines": 316,
+    "wat_start_line": 930075,
+    "locals": 3,
+    "callee_lines": [],
+    "wasm_sha256": "95e58d009c060c196065bede76bbdaed998e1bd491f6fc4b615535c1bfb2ea22"
+  }
+]

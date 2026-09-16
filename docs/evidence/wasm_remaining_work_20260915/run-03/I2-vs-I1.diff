@@ -1,0 +1,185 @@
+--- I1/linking.rs
++++ I2/linking.rs
+@@ -920,71 +920,117 @@
+     mut h_xsum: f64,
+     mut h_link: usize,
+ ) -> (i32, i16, f64, usize) {
+-    // Inner loop (NCBI lines 827-861)
+-    // CRITICAL: Must save current_idx BEFORE decrement to access correct hsp_idx
+-    let mut j_lh_idx = h_lh_idx - 1;
+-    while j_lh_idx > 1 {
+-        // NCBI: H2_helper points to lh_helper[H2_index] at loop START
+-        let current_idx = j_lh_idx; // Save before any modification
+-        let helper = &pool_lh_helpers[current_idx];
+-        let sum = helper.sum[1];
+-        let next_larger = helper.next_larger;
+-        let b0 = sum <= h_sum;
+-
+-        // NCBI line 841: H2_index--
+-        j_lh_idx -= 1;
+-        if b0 {
+-            j_lh_idx = next_larger;
+-            if is_target_hsp {
+-                eprintln!(
+-                    "  [SKIP] current_idx={}, sum={} <= h_sum={}, jump to next_larger={}",
+-                    current_idx, sum, h_sum, next_larger
+-                );
+-            }
+-            // NCBI reference: c++/src/algo/blast/core/link_hsps.c:838-859
+-            // b0 = sum <= H_hsp_sum;
+-            // H2_index--;
+-            // if (b0) { H2_index = next_larger; }
+-            // if (!(b0|b1|b2)) { H_hsp_link = H2; }
+-            // A true b0 cannot select this predecessor. Keep the
+-            // same jump, but defer coordinate loads to contenders.
+-            // Tracing still evaluates all three reported predicates.
+-            if !is_target_hsp {
+-                continue;
+-            }
+-        }
+-
+-        let qo = helper.q_off_trim;
+-        let so = helper.s_off_trim;
+-        let b1 = qo <= h_qe;
+-        let b2 = so <= h_se;
+-
+-        // NCBI line 852: if (!(b0|b1|b2))
+-        if !(b0 || b1 || b2) {
+-            // Use saved current_idx (NCBI: H2 = H2_helper->ptr)
+-            let j = helper.hsp_idx;
+-            if is_target_hsp {
+-                eprintln!(
+-                    "  [LINK] current_idx={}, j={}, sum={} > h_sum={}, linking to HSP {}",
+-                    current_idx, j, sum, h_sum, j
+-                );
+-                eprintln!(
+-                    "    Linked HSP: q_aa={}-{}, s_aa={}-{}, score={}, num={}",
+-                    group_hits[j].q_aa_start,
+-                    group_hits[j].q_aa_end,
+-                    group_hits[j].s_aa_start,
+-                    group_hits[j].s_aa_end,
+-                    pool_hsp_links[j].score,
+-                    pool_hsp_links[j].num[1]
+-                );
+-            }
+-            h_num = pool_hsp_links[j].num[1];
+-            h_sum = pool_hsp_links[j].sum[1];
+-            h_xsum = pool_hsp_links[j].xsum[1];
+-            h_link = j;
+-        } else if is_target_hsp {
+-            eprintln!("  [SKIP] current_idx={}, conditions: b0={} (sum<={}), b1={} (qo<={}), b2={} (so<={})",
+-                current_idx, b0, h_sum, b1, h_qe, b2, h_se);
++    // NCBI reference: c++/src/algo/blast/core/link_hsps.c:675-684,876-885
++    // Int4 prev=H_index-1;
++    // while((cur_sum>=prev_sum) && (prev>0)) { prev=lh_helper[prev].next_larger; }
++    // lh_helper[H_index].next_larger=prev;
++    // Every jump is backward. A borrowed prefix excludes sentinels 0/1;
++    // its last element is the same predecessor and truncation is metadata-only.
++    // One macro owns the unchanged selection and tracing statements for both
++    // cursor representations. Native and plain WASI retain indexed traversal.
++    macro_rules! visit_predecessor {
++        (@jump indexed, $cursor:ident, $next:expr) => {
++            $cursor = $next;
++        };
++        (@jump prefix, $cursor:ident, $next:expr) => {
++            $cursor = &$cursor[..$next.saturating_sub(1)];
++        };
++        ($mode:ident, $source_helper:expr, $source_index:expr, $cursor:ident, $next_cursor:expr) => {{
++            let current_idx = $source_index;
++            let helper = $source_helper;
++            let sum = helper.sum[1];
++            let next_larger = helper.next_larger;
++            let b0 = sum <= h_sum;
++
++            // NCBI line 841: H2_index--
++            $cursor = $next_cursor;
++            if b0 {
++                visit_predecessor!(@jump $mode, $cursor, next_larger);
++                if is_target_hsp {
++                    eprintln!(
++                        "  [SKIP] current_idx={}, sum={} <= h_sum={}, jump to next_larger={}",
++                        current_idx, sum, h_sum, next_larger
++                    );
++                }
++                // NCBI reference: c++/src/algo/blast/core/link_hsps.c:838-859
++                // b0 = sum <= H_hsp_sum;
++                // H2_index--;
++                // if (b0) { H2_index = next_larger; }
++                // if (!(b0|b1|b2)) { H_hsp_link = H2; }
++                // A true b0 cannot select this predecessor. Keep the
++                // same jump, but defer coordinate loads to contenders.
++                // Tracing still evaluates all three reported predicates.
++                if !is_target_hsp {
++                    continue;
++                }
++            }
++
++            let qo = helper.q_off_trim;
++            let so = helper.s_off_trim;
++            let b1 = qo <= h_qe;
++            let b2 = so <= h_se;
++
++            // NCBI line 852: if (!(b0|b1|b2))
++            if !(b0 || b1 || b2) {
++                // Use saved current_idx (NCBI: H2 = H2_helper->ptr)
++                let j = helper.hsp_idx;
++                if is_target_hsp {
++                    eprintln!(
++                        "  [LINK] current_idx={}, j={}, sum={} > h_sum={}, linking to HSP {}",
++                        current_idx, j, sum, h_sum, j
++                    );
++                    eprintln!(
++                        "    Linked HSP: q_aa={}-{}, s_aa={}-{}, score={}, num={}",
++                        group_hits[j].q_aa_start,
++                        group_hits[j].q_aa_end,
++                        group_hits[j].s_aa_start,
++                        group_hits[j].s_aa_end,
++                        pool_hsp_links[j].score,
++                        pool_hsp_links[j].num[1]
++                    );
++                }
++                h_num = pool_hsp_links[j].num[1];
++                h_sum = pool_hsp_links[j].sum[1];
++                h_xsum = pool_hsp_links[j].xsum[1];
++                h_link = j;
++            } else if is_target_hsp {
++                eprintln!("  [SKIP] current_idx={}, conditions: b0={} (sum<={}), b1={} (qo<={}), b2={} (so<={})",
++                    current_idx, b0, h_sum, b1, h_qe, b2, h_se);
++            }
++        }};
++    }
++
++    #[cfg(all(
++        target_arch = "wasm32",
++        target_feature = "atomics",
++        feature = "wasm-threads"
++    ))]
++    {
++        // NCBI link_hsps.c:827: for(H2_index=H_index-1; H2_index>1;)
++        // Preserve the no-visit case before borrowing any helper slice.
++        if h_lh_idx - 1 > 1 {
++            let mut prefix = &pool_lh_helpers[2..h_lh_idx];
++            while let Some((helper, tail)) = prefix.split_last() {
++                let current_idx = prefix.len() + 1;
++                visit_predecessor!(prefix, helper, current_idx, prefix, tail);
++            }
++        }
++    }
++    #[cfg(not(all(
++        target_arch = "wasm32",
++        target_feature = "atomics",
++        feature = "wasm-threads"
++    )))]
++    {
++        let mut j_lh_idx = h_lh_idx - 1;
++        while j_lh_idx > 1 {
++            visit_predecessor!(
++                indexed,
++                &pool_lh_helpers[j_lh_idx],
++                j_lh_idx,
++                j_lh_idx,
++                j_lh_idx - 1
++            );
+         }
+     }
+     (h_sum, h_num, h_xsum, h_link)

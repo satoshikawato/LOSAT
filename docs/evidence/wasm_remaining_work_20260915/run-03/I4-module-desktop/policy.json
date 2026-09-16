@@ -1,0 +1,62 @@
+{
+  "versions": [
+    "baseline",
+    "I4"
+  ],
+  "mode": "compiled-module",
+  "kind": "threaded-command",
+  "cases": [
+    "MjeNMV.MelaMJNV.tlosatx",
+    "AP027280.AP027280.tlosatx"
+  ],
+  "threads": [
+    8,
+    1
+  ],
+  "sessions": [
+    "AB",
+    "BA"
+  ],
+  "warmup": 1,
+  "samples": 3,
+  "timeout_seconds": 600,
+  "flags": [],
+  "concurrency": "monitored normal-desktop background",
+  "affinity": [
+    0,
+    1,
+    2,
+    3,
+    4,
+    5,
+    6,
+    7,
+    8,
+    9,
+    10,
+    11,
+    12,
+    13,
+    14,
+    15,
+    16,
+    17,
+    18,
+    19,
+    20,
+    21,
+    22,
+    23,
+    24,
+    25,
+    26,
+    27,
+    28,
+    29,
+    30,
+    31
+  ],
+  "status": "COMPLETE",
+  "environment_policy": "/mnt/c/users/genom/github/losat/docs/evidence/wasm_remaining_work_20260915/run-03/I4-module-desktop-environment/policy.json",
+  "acceptance_requires_environment_pass": true
+}

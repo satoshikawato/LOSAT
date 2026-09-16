@@ -1,0 +1,450 @@
+[
+  {
+    "case": "MjeNMV.MelaMJNV.tlosatx",
+    "threads": 8,
+    "session": 0,
+    "wall_seconds": {
+      "baseline_samples": [
+        8.688774206000001,
+        8.483594711000006,
+        9.054348997000002
+      ],
+      "candidate_samples": [
+        8.394761753000003,
+        8.548302249,
+        8.697881932999998
+      ],
+      "baseline_median": 8.688774206000001,
+      "candidate_median": 8.548302249,
+      "candidate_over_baseline": 0.9838329373431066,
+      "regression_limit": 0.4344387103000001,
+      "pass_guard": true
+    },
+    "process_lifetime_peak_rss_bytes": {
+      "baseline_samples": [
+        312729600,
+        313036800,
+        313036800
+      ],
+      "candidate_samples": [
+        313843712,
+        313843712,
+        313843712
+      ],
+      "baseline_median": 313036800,
+      "candidate_median": 313843712,
+      "candidate_over_baseline": 1.0025776905462873,
+      "regression_limit": 31303680.0,
+      "pass_guard": true
+    },
+    "memory_bytes": {
+      "baseline_samples": [
+        101580800,
+        101580800,
+        101580800
+      ],
+      "candidate_samples": [
+        101580800,
+        101580800,
+        101580800
+      ],
+      "baseline_median": 101580800,
+      "candidate_median": 101580800,
+      "candidate_over_baseline": 1.0,
+      "regression_limit": 16777216,
+      "pass_guard": true
+    }
+  },
+  {
+    "case": "MjeNMV.MelaMJNV.tlosatx",
+    "threads": 8,
+    "session": 1,
+    "wall_seconds": {
+      "baseline_samples": [
+        8.971852165,
+        8.439761411000003,
+        8.259882506999995
+      ],
+      "candidate_samples": [
+        8.230017782000001,
+        8.575962135000001,
+        8.603076478000004
+      ],
+      "baseline_median": 8.439761411000003,
+      "candidate_median": 8.575962135000001,
+      "candidate_over_baseline": 1.0161379827423178,
+      "regression_limit": 0.42198807055000015,
+      "pass_guard": true
+    },
+    "process_lifetime_peak_rss_bytes": {
+      "baseline_samples": [
+        305299456,
+        310837248,
+        310837248
+      ],
+      "candidate_samples": [
+        311062528,
+        311062528,
+        311062528
+      ],
+      "baseline_median": 310837248,
+      "candidate_median": 311062528,
+      "candidate_over_baseline": 1.000724752266498,
+      "regression_limit": 31083724.8,
+      "pass_guard": true
+    },
+    "memory_bytes": {
+      "baseline_samples": [
+        102891520,
+        102891520,
+        102957056
+      ],
+      "candidate_samples": [
+        101580800,
+        102891520,
+        102957056
+      ],
+      "baseline_median": 102891520,
+      "candidate_median": 102891520,
+      "candidate_over_baseline": 1.0,
+      "regression_limit": 16777216,
+      "pass_guard": true
+    }
+  },
+  {
+    "case": "MjeNMV.MelaMJNV.tlosatx",
+    "threads": 1,
+    "session": 0,
+    "wall_seconds": {
+      "baseline_samples": [
+        13.261891925,
+        13.859568049999998,
+        13.852748097999998
+      ],
+      "candidate_samples": [
+        14.091900118,
+        13.498227899999998,
+        14.038700997000001
+      ],
+      "baseline_median": 13.852748097999998,
+      "candidate_median": 14.038700997000001,
+      "candidate_over_baseline": 1.0134235386137462,
+      "regression_limit": 0.6926374048999999,
+      "pass_guard": true
+    },
+    "process_lifetime_peak_rss_bytes": {
+      "baseline_samples": [
+        175579136,
+        177741824,
+        180174848
+      ],
+      "candidate_samples": [
+        181469184,
+        183631872,
+        186064896
+      ],
+      "baseline_median": 177741824,
+      "candidate_median": 183631872,
+      "candidate_over_baseline": 1.0331382218739917,
+      "regression_limit": 17774182.400000002,
+      "pass_guard": true
+    },
+    "memory_bytes": {
+      "baseline_samples": [
+        75628544,
+        75694080,
+        75694080
+      ],
+      "candidate_samples": [
+        75628544,
+        75694080,
+        75694080
+      ],
+      "baseline_median": 75694080,
+      "candidate_median": 75694080,
+      "candidate_over_baseline": 1.0,
+      "regression_limit": 16777216,
+      "pass_guard": true
+    }
+  },
+  {
+    "case": "MjeNMV.MelaMJNV.tlosatx",
+    "threads": 1,
+    "session": 1,
+    "wall_seconds": {
+      "baseline_samples": [
+        13.183067994999998,
+        14.097916518999995,
+        14.114499688999997
+      ],
+      "candidate_samples": [
+        13.822807976,
+        13.726973272999997,
+        13.001761080999996
+      ],
+      "baseline_median": 14.097916518999995,
+      "candidate_median": 13.726973272999997,
+      "candidate_over_baseline": 0.973688080398258,
+      "regression_limit": 0.7048958259499998,
+      "pass_guard": true
+    },
+    "process_lifetime_peak_rss_bytes": {
+      "baseline_samples": [
+        177643520,
+        179806208,
+        182239232
+      ],
+      "candidate_samples": [
+        180506624,
+        182669312,
+        185102336
+      ],
+      "baseline_median": 179806208,
+      "candidate_median": 182669312,
+      "candidate_over_baseline": 1.015923276686865,
+      "regression_limit": 17980620.8,
+      "pass_guard": true
+    },
+    "memory_bytes": {
+      "baseline_samples": [
+        75628544,
+        75694080,
+        75694080
+      ],
+      "candidate_samples": [
+        75628544,
+        75694080,
+        75694080
+      ],
+      "baseline_median": 75694080,
+      "candidate_median": 75694080,
+      "candidate_over_baseline": 1.0,
+      "regression_limit": 16777216,
+      "pass_guard": true
+    }
+  },
+  {
+    "case": "AP027280.AP027280.tlosatx",
+    "threads": 8,
+    "session": 0,
+    "wall_seconds": {
+      "baseline_samples": [
+        17.060597014000006,
+        17.027591526,
+        16.36477468500001
+      ],
+      "candidate_samples": [
+        15.537656917000005,
+        15.620948498999999,
+        15.642303766999998
+      ],
+      "baseline_median": 17.027591526,
+      "candidate_median": 15.620948498999999,
+      "candidate_over_baseline": 0.9173903705141065,
+      "regression_limit": 0.8513795762999999,
+      "pass_guard": true
+    },
+    "process_lifetime_peak_rss_bytes": {
+      "baseline_samples": [
+        314937344,
+        314937344,
+        316465152
+      ],
+      "candidate_samples": [
+        320737280,
+        321257472,
+        321257472
+      ],
+      "baseline_median": 314937344,
+      "candidate_median": 321257472,
+      "candidate_over_baseline": 1.0200678900753033,
+      "regression_limit": 31493734.400000002,
+      "pass_guard": true
+    },
+    "memory_bytes": {
+      "baseline_samples": [
+        104988672,
+        110755840,
+        114491392
+      ],
+      "candidate_samples": [
+        112328704,
+        112328704,
+        112328704
+      ],
+      "baseline_median": 110755840,
+      "candidate_median": 112328704,
+      "candidate_over_baseline": 1.0142011834319526,
+      "regression_limit": 16777216,
+      "pass_guard": true
+    }
+  },
+  {
+    "case": "AP027280.AP027280.tlosatx",
+    "threads": 8,
+    "session": 1,
+    "wall_seconds": {
+      "baseline_samples": [
+        15.941958107000007,
+        16.808534035000005,
+        17.12753579899999
+      ],
+      "candidate_samples": [
+        15.677628940000005,
+        15.571860350000001,
+        15.908662924000005
+      ],
+      "baseline_median": 16.808534035000005,
+      "candidate_median": 15.677628940000005,
+      "candidate_over_baseline": 0.9327183981276926,
+      "regression_limit": 0.8404267017500002,
+      "pass_guard": true
+    },
+    "process_lifetime_peak_rss_bytes": {
+      "baseline_samples": [
+        320692224,
+        320692224,
+        321347584
+      ],
+      "candidate_samples": [
+        311762944,
+        311762944,
+        311762944
+      ],
+      "baseline_median": 320692224,
+      "candidate_median": 311762944,
+      "candidate_over_baseline": 0.972156231639717,
+      "regression_limit": 32069222.400000002,
+      "pass_guard": true
+    },
+    "memory_bytes": {
+      "baseline_samples": [
+        112328704,
+        112328704,
+        112328704
+      ],
+      "candidate_samples": [
+        104988672,
+        110755840,
+        110755840
+      ],
+      "baseline_median": 112328704,
+      "candidate_median": 110755840,
+      "candidate_over_baseline": 0.9859976662777129,
+      "regression_limit": 16777216,
+      "pass_guard": true
+    }
+  },
+  {
+    "case": "AP027280.AP027280.tlosatx",
+    "threads": 1,
+    "session": 0,
+    "wall_seconds": {
+      "baseline_samples": [
+        28.412300895999998,
+        29.041873957999996,
+        28.224539835
+      ],
+      "candidate_samples": [
+        26.382654466000005,
+        26.413873121000012,
+        26.252647335000002
+      ],
+      "baseline_median": 28.412300895999998,
+      "candidate_median": 26.382654466000005,
+      "candidate_over_baseline": 0.9285645172691475,
+      "regression_limit": 1.4206150448,
+      "pass_guard": true
+    },
+    "process_lifetime_peak_rss_bytes": {
+      "baseline_samples": [
+        197918720,
+        201428992,
+        205148160
+      ],
+      "candidate_samples": [
+        195895296,
+        199610368,
+        203395072
+      ],
+      "baseline_median": 201428992,
+      "candidate_median": 199610368,
+      "candidate_over_baseline": 0.9909713890639933,
+      "regression_limit": 20142899.200000003,
+      "pass_guard": true
+    },
+    "memory_bytes": {
+      "baseline_samples": [
+        90505216,
+        90570752,
+        90570752
+      ],
+      "candidate_samples": [
+        90505216,
+        90570752,
+        90570752
+      ],
+      "baseline_median": 90570752,
+      "candidate_median": 90570752,
+      "candidate_over_baseline": 1.0,
+      "regression_limit": 16777216,
+      "pass_guard": true
+    }
+  },
+  {
+    "case": "AP027280.AP027280.tlosatx",
+    "threads": 1,
+    "session": 1,
+    "wall_seconds": {
+      "baseline_samples": [
+        26.443496202,
+        26.773823438999994,
+        26.834929707999994
+      ],
+      "candidate_samples": [
+        26.714014039,
+        26.505183909999992,
+        26.958999399999986
+      ],
+      "baseline_median": 26.773823438999994,
+      "candidate_median": 26.714014039,
+      "candidate_over_baseline": 0.997766124060082,
+      "regression_limit": 1.3386911719499999,
+      "pass_guard": true
+    },
+    "process_lifetime_peak_rss_bytes": {
+      "baseline_samples": [
+        203452416,
+        206897152,
+        210616320
+      ],
+      "candidate_samples": [
+        196005888,
+        199454720,
+        203235328
+      ],
+      "baseline_median": 206897152,
+      "candidate_median": 199454720,
+      "candidate_over_baseline": 0.9640283496990814,
+      "regression_limit": 20689715.200000003,
+      "pass_guard": true
+    },
+    "memory_bytes": {
+      "baseline_samples": [
+        90505216,
+        90570752,
+        90570752
+      ],
+      "candidate_samples": [
+        90505216,
+        90570752,
+        90570752
+      ],
+      "baseline_median": 90570752,
+      "candidate_median": 90570752,
+      "candidate_over_baseline": 1.0,
+      "regression_limit": 16777216,
+      "pass_guard": true
+    }
+  }
+]

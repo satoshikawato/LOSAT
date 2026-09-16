@@ -1,0 +1,7 @@
+{
+  "status": "EXTERNAL_WORKLOAD_OVERLAP",
+  "detected_utc": "2026-09-16T01:59:43.246626+00:00",
+  "external_pid": 20817,
+  "external_command": "python tools/benchmark_protein_comparison.py run --source-root . --cases sparse-2 path-16 path-24 gallery-collinear gallery-collinear-off gallery-orthogroup --measure timing --warmups 1 --samples 21",
+  "observation": "External benchmark first observed with elapsed 46 seconds while session 1 baseline was running; its lifetime also overlaps session 1 candidate. Both measurement processes had naturally exited before the attempted stop (kill reported no such process). Original samples, logs and summaries remain retained. Numerical guard results from the overlapping session are not acceptance evidence."
+}

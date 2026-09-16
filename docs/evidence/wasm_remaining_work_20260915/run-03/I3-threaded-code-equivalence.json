@@ -1,0 +1,12 @@
+[
+  {
+    "function": 1340,
+    "wat_sha256": "02d046486c9a92f8f3e29c87027383656b854f01a149e37e64fccc5b3a63582a",
+    "identical": true
+  },
+  {
+    "function": 1368,
+    "wat_sha256": "1a8d2b77c7d2d4a382b5a42a98e4270a350b7f0920e712037e5014e48847b23c",
+    "identical": true
+  }
+]

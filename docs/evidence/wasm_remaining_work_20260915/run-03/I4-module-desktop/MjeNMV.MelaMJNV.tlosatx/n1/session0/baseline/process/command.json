@@ -1,0 +1,20 @@
+{
+  "cwd": "/mnt/c/users/genom/github/losat",
+  "environment_overrides": {
+    "LOSAT_WASI_THREAD_CAP": "8",
+    "LOSAT_WASM_MEMORY_MAXIMUM_PAGES": "16384",
+    "NODE_NO_WARNINGS": "1"
+  },
+  "ordered_argv": [
+    "/home/kawato/.local/lib/nodejs/node-v26.8.2-linux-x64/bin/node",
+    "/mnt/c/users/genom/github/losat/docs/evidence/wasm_remaining_work_20260915/run-03/work/baseline-source/LOSAT/tests/benchmark_wasi_reuse.js",
+    "/mnt/c/users/genom/github/losat/docs/evidence/wasm_remaining_work_20260915/run-03/work/baseline/artifacts/losat-threaded-command.wasm",
+    "threaded-command",
+    "compiled-module",
+    "/mnt/c/users/genom/github/losat/docs/evidence/wasm_remaining_work_20260915/run-03/I4-module-desktop/MjeNMV.MelaMJNV.tlosatx/n1/session0/baseline/jobs.json",
+    "-out",
+    "/mnt/c/users/genom/github/losat/docs/evidence/wasm_remaining_work_20260915/run-03/I4-module-desktop/MjeNMV.MelaMJNV.tlosatx/n1/session0/baseline/process/output.txt"
+  ],
+  "shell": false,
+  "sink": "/mnt/c/users/genom/github/losat/docs/evidence/wasm_remaining_work_20260915/run-03/I4-module-desktop/MjeNMV.MelaMJNV.tlosatx/n1/session0/baseline/process/output.txt"
+}

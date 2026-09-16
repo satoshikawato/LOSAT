@@ -1,0 +1,47 @@
+{
+  "version": "I4",
+  "harness_sha256": "2d699e74b31e6c9719f90c6f0ff0e4e6a102d199c38259eb5b3a4fc2ab52de88",
+  "role": "correctness-only real consumer service/worker smoke; excludes timings",
+  "options": {
+    "version": "I4",
+    "label": "I4-browser-thread-lifecycle",
+    "cases": [
+      "threshold-10"
+    ],
+    "threads": [
+      8
+    ],
+    "mode": "threaded",
+    "no_isolation": false,
+    "serial_kind": "command",
+    "repeat": 1,
+    "lifecycle": true,
+    "timed": false,
+    "consumer_root": "docs/evidence/wasm_remaining_work_20260915/run-03/browser-consumer-source"
+  },
+  "csp": "     default-src 'self';     script-src 'self' 'unsafe-inline' 'unsafe-eval';     style-src 'self' 'unsafe-inline';     font-src 'self' data:;     img-src 'self' data: blob:;     connect-src 'self';     worker-src 'self' blob:;     object-src 'none';     base-uri 'self';     form-action 'self';     ",
+  "artifacts": {
+    "serial": {
+      "path": "/mnt/c/users/genom/github/losat/docs/evidence/wasm_remaining_work_20260915/run-03/work/I4/artifacts/losat-serial-command.wasm",
+      "sha256": "3e5cefaa40da4e86d0c3f8d249b7a3a81a53117e3c7b586915735338d98ff7fd"
+    },
+    "threaded": {
+      "path": "/mnt/c/users/genom/github/losat/docs/evidence/wasm_remaining_work_20260915/run-03/work/I4/artifacts/losat-threaded-command.wasm",
+      "sha256": "c6c679bb4f6cf34b7c4f3ad2dccdafd2fe4c7373d88c0b24d766436eac091e30"
+    }
+  },
+  "records": [],
+  "requests": [
+    "/qa.html"
+  ],
+  "served_sha256": {},
+  "blocked_external": [],
+  "console": [],
+  "browser": "149.0.7827.55",
+  "playwright": "1.61.0",
+  "browser_executable": "/home/kawato/.cache/ms-playwright/chromium-1228/chrome-linux64/chrome",
+  "explicit_browser_launch_options": {},
+  "debugger_domain_enabled_by_harness": false,
+  "status": "HARNESS_INPUT_ERROR",
+  "reason": "threshold-10 is absent from comparison_cases.tsv; failed before invoking LOSAT. Preserved; replacement uses registered MelaMJNV.PemoMJNVA.tlosatx."
+}

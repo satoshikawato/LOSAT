@@ -1,0 +1,55 @@
+[
+  {
+    "case": "MjeNMV.MelaMJNV.tlosatx",
+    "kind": "native",
+    "threads": 1,
+    "wall_seconds": {
+      "baseline_samples": [
+        13.389984425999955,
+        13.812481472999934,
+        13.496582722999847
+      ],
+      "candidate_samples": [
+        14.03671206800027,
+        13.552122839000276,
+        13.512503322000157
+      ],
+      "baseline_median": 13.496582722999847,
+      "candidate_median": 13.552122839000276,
+      "candidate_over_baseline": 1.0041151243348276,
+      "saved": -0.05554011600042941
+    },
+    "body_seconds": {
+      "baseline_samples": [
+        13.303613049,
+        13.727050813,
+        13.428056216
+      ],
+      "candidate_samples": [
+        13.976055238,
+        13.484499267,
+        13.440525125
+      ],
+      "baseline_median": 13.428056216,
+      "candidate_median": 13.484499267,
+      "candidate_over_baseline": 1.004203367195674,
+      "saved": -0.056443051000000466
+    },
+    "peak_rss_bytes": {
+      "baseline_samples": [
+        96010240,
+        96387072,
+        96260096
+      ],
+      "candidate_samples": [
+        95961088,
+        96219136,
+        96239616
+      ],
+      "baseline_median": 96260096,
+      "candidate_median": 96219136,
+      "candidate_over_baseline": 0.9995744861920769,
+      "saved": 40960
+    }
+  }
+]

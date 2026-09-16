@@ -1,0 +1,321 @@
+{
+  "version": "I4",
+  "harness_sha256": "2d699e74b31e6c9719f90c6f0ff0e4e6a102d199c38259eb5b3a4fc2ab52de88",
+  "role": "correctness-only real consumer service/worker smoke; excludes timings",
+  "options": {
+    "version": "I4",
+    "label": "I4-browser-raw",
+    "cases": [
+      "MjeNMV.MelaMJNV.tlosatx",
+      "AP027280.AP027280.tlosatx",
+      "AP027132.NZ_CP006932.losatp"
+    ],
+    "threads": [
+      8
+    ],
+    "mode": "threaded",
+    "no_isolation": false,
+    "serial_kind": "command",
+    "repeat": 1,
+    "lifecycle": false,
+    "timed": false,
+    "consumer_root": "docs/evidence/wasm_remaining_work_20260915/run-03/browser-consumer-source"
+  },
+  "csp": "     default-src 'self';     script-src 'self' 'unsafe-inline' 'unsafe-eval';     style-src 'self' 'unsafe-inline';     font-src 'self' data:;     img-src 'self' data: blob:;     connect-src 'self';     worker-src 'self' blob:;     object-src 'none';     base-uri 'self';     form-action 'self';     ",
+  "artifacts": {
+    "serial": {
+      "path": "/mnt/c/users/genom/github/losat/docs/evidence/wasm_remaining_work_20260915/run-03/work/I4/artifacts/losat-serial-command.wasm",
+      "sha256": "3e5cefaa40da4e86d0c3f8d249b7a3a81a53117e3c7b586915735338d98ff7fd"
+    },
+    "threaded": {
+      "path": "/mnt/c/users/genom/github/losat/docs/evidence/wasm_remaining_work_20260915/run-03/work/I4/artifacts/losat-threaded-command.wasm",
+      "sha256": "c6c679bb4f6cf34b7c4f3ad2dccdafd2fe4c7373d88c0b24d766436eac091e30"
+    }
+  },
+  "records": [
+    {
+      "case": "MjeNMV.MelaMJNV.tlosatx",
+      "repeat": 0,
+      "threads": 8,
+      "query_sha256": "f91873bd2957bfaefe377aa221ffd1e0b57e657e5d26ba86c52fce891ac0cedf",
+      "subject_sha256": "491f80b482acc96600773c3493358c0262dbf714cb5d76f8f5560a92ecccac1a",
+      "extra": [
+        "-query_gencode",
+        "1",
+        "-db_gencode",
+        "1"
+      ],
+      "status": "PASS",
+      "ok": true,
+      "statuses": [
+        {
+          "state": "running",
+          "message": "Running threaded LOSAT: 8 threads per job, 1 pair worker.",
+          "mode": "threaded",
+          "threadsPerJob": 8,
+          "pairWorkers": 1,
+          "totalBudget": 8
+        },
+        {
+          "state": "available",
+          "message": "Threaded LOSAT completed with 8 threads per job.",
+          "mode": "threaded",
+          "threadsPerJob": 8,
+          "pairWorkers": 1
+        }
+      ],
+      "wall_seconds": 15.055995000000111,
+      "raw_equal": true,
+      "output_sha256": "b309f77fee038f0559d870737ebeba732c11eba4f7e495f045acbfb831817fd7"
+    },
+    {
+      "case": "AP027280.AP027280.tlosatx",
+      "repeat": 0,
+      "threads": 8,
+      "query_sha256": "14c68a026e685896afdc5366902999d5960589cf301a76b3f1a732a8f4708b6a",
+      "subject_sha256": "14c68a026e685896afdc5366902999d5960589cf301a76b3f1a732a8f4708b6a",
+      "extra": [
+        "-query_gencode",
+        "1",
+        "-db_gencode",
+        "1"
+      ],
+      "status": "PASS",
+      "ok": true,
+      "statuses": [
+        {
+          "state": "running",
+          "message": "Running threaded LOSAT: 8 threads per job, 1 pair worker.",
+          "mode": "threaded",
+          "threadsPerJob": 8,
+          "pairWorkers": 1,
+          "totalBudget": 8
+        },
+        {
+          "state": "available",
+          "message": "Threaded LOSAT completed with 8 threads per job.",
+          "mode": "threaded",
+          "threadsPerJob": 8,
+          "pairWorkers": 1
+        }
+      ],
+      "wall_seconds": 23.950705000000074,
+      "raw_equal": true,
+      "output_sha256": "845d15661c2a30fa69e01bcd8140792e55a1fa06bbb52181632680435a08eda8"
+    },
+    {
+      "case": "AP027132.NZ_CP006932.losatp",
+      "repeat": 0,
+      "threads": 8,
+      "query_sha256": "f824a3ec3bfe0b18d912eac13caeced3197172641135ebc292429fb20d919ded",
+      "subject_sha256": "61b882399e10f26f1ba1daf27599370f265b678ae95cbb3bccdd443b34dd9e20",
+      "extra": [],
+      "status": "PASS",
+      "ok": true,
+      "statuses": [
+        {
+          "state": "running",
+          "message": "Running threaded LOSAT: 8 threads per job, 1 pair worker.",
+          "mode": "threaded",
+          "threadsPerJob": 8,
+          "pairWorkers": 1,
+          "totalBudget": 8
+        },
+        {
+          "state": "available",
+          "message": "Threaded LOSAT completed with 8 threads per job.",
+          "mode": "threaded",
+          "threadsPerJob": 8,
+          "pairWorkers": 1
+        }
+      ],
+      "wall_seconds": 10.102280000000261,
+      "raw_equal": true,
+      "output_sha256": "cd81f8fef3dff78fb48f5923de43c84f1af78d006aaa9a8cae2c2f1f20aed181"
+    }
+  ],
+  "requests": [
+    "/qa.html",
+    "/js/services/losat.js",
+    "/js/config.js",
+    "/js/services/losat-runtime.js",
+    "/qa-artifacts/threaded.wasm",
+    "/js/workers/losat-threaded-worker.js",
+    "/js/services/losat-runtime.js",
+    "/vendor/browser_wasi_shim/dist/index.js",
+    "/vendor/browser_wasi_shim/dist/wasi.js",
+    "/vendor/browser_wasi_shim/dist/fd.js",
+    "/vendor/browser_wasi_shim/dist/fs_mem.js",
+    "/vendor/browser_wasi_shim/dist/fs_opfs.js",
+    "/vendor/browser_wasi_shim/dist/strace.js",
+    "/vendor/browser_wasi_shim/dist/wasi_defs.js",
+    "/vendor/browser_wasi_shim/dist/debug.js",
+    "/js/workers/losat-wasi-thread-worker.js",
+    "/js/workers/losat-wasi-thread-worker.js",
+    "/js/workers/losat-wasi-thread-worker.js",
+    "/js/workers/losat-wasi-thread-worker.js",
+    "/js/workers/losat-wasi-thread-worker.js",
+    "/js/workers/losat-wasi-thread-worker.js",
+    "/js/workers/losat-wasi-thread-worker.js",
+    "/js/services/losat-runtime.js",
+    "/js/services/losat-runtime.js",
+    "/js/services/losat-runtime.js",
+    "/js/services/losat-runtime.js",
+    "/js/services/losat-runtime.js",
+    "/js/services/losat-runtime.js",
+    "/js/services/losat-runtime.js",
+    "/vendor/browser_wasi_shim/dist/index.js",
+    "/vendor/browser_wasi_shim/dist/index.js",
+    "/vendor/browser_wasi_shim/dist/index.js",
+    "/vendor/browser_wasi_shim/dist/index.js",
+    "/vendor/browser_wasi_shim/dist/index.js",
+    "/vendor/browser_wasi_shim/dist/index.js",
+    "/vendor/browser_wasi_shim/dist/index.js",
+    "/vendor/browser_wasi_shim/dist/wasi.js",
+    "/vendor/browser_wasi_shim/dist/fd.js",
+    "/vendor/browser_wasi_shim/dist/fs_mem.js",
+    "/vendor/browser_wasi_shim/dist/fs_opfs.js",
+    "/vendor/browser_wasi_shim/dist/strace.js",
+    "/vendor/browser_wasi_shim/dist/wasi_defs.js",
+    "/vendor/browser_wasi_shim/dist/wasi.js",
+    "/vendor/browser_wasi_shim/dist/fd.js",
+    "/vendor/browser_wasi_shim/dist/fs_mem.js",
+    "/vendor/browser_wasi_shim/dist/fs_opfs.js",
+    "/vendor/browser_wasi_shim/dist/strace.js",
+    "/vendor/browser_wasi_shim/dist/wasi_defs.js",
+    "/vendor/browser_wasi_shim/dist/wasi.js",
+    "/vendor/browser_wasi_shim/dist/fd.js",
+    "/vendor/browser_wasi_shim/dist/fs_mem.js",
+    "/vendor/browser_wasi_shim/dist/fs_opfs.js",
+    "/vendor/browser_wasi_shim/dist/strace.js",
+    "/vendor/browser_wasi_shim/dist/wasi.js",
+    "/vendor/browser_wasi_shim/dist/wasi_defs.js",
+    "/vendor/browser_wasi_shim/dist/fd.js",
+    "/vendor/browser_wasi_shim/dist/fs_mem.js",
+    "/vendor/browser_wasi_shim/dist/strace.js",
+    "/vendor/browser_wasi_shim/dist/fs_opfs.js",
+    "/vendor/browser_wasi_shim/dist/wasi_defs.js",
+    "/vendor/browser_wasi_shim/dist/wasi.js",
+    "/vendor/browser_wasi_shim/dist/fd.js",
+    "/vendor/browser_wasi_shim/dist/fs_mem.js",
+    "/vendor/browser_wasi_shim/dist/fs_opfs.js",
+    "/vendor/browser_wasi_shim/dist/strace.js",
+    "/vendor/browser_wasi_shim/dist/wasi_defs.js",
+    "/vendor/browser_wasi_shim/dist/wasi.js",
+    "/vendor/browser_wasi_shim/dist/fs_mem.js",
+    "/vendor/browser_wasi_shim/dist/fd.js",
+    "/vendor/browser_wasi_shim/dist/fs_opfs.js",
+    "/vendor/browser_wasi_shim/dist/strace.js",
+    "/vendor/browser_wasi_shim/dist/wasi_defs.js",
+    "/vendor/browser_wasi_shim/dist/wasi.js",
+    "/vendor/browser_wasi_shim/dist/fd.js",
+    "/vendor/browser_wasi_shim/dist/fs_mem.js",
+    "/vendor/browser_wasi_shim/dist/fs_opfs.js",
+    "/vendor/browser_wasi_shim/dist/strace.js",
+    "/vendor/browser_wasi_shim/dist/wasi_defs.js",
+    "/vendor/browser_wasi_shim/dist/debug.js",
+    "/vendor/browser_wasi_shim/dist/debug.js",
+    "/vendor/browser_wasi_shim/dist/debug.js",
+    "/vendor/browser_wasi_shim/dist/debug.js",
+    "/vendor/browser_wasi_shim/dist/debug.js",
+    "/vendor/browser_wasi_shim/dist/debug.js",
+    "/vendor/browser_wasi_shim/dist/debug.js"
+  ],
+  "served_sha256": {
+    "/mnt/c/users/genom/github/losat/docs/evidence/wasm_remaining_work_20260915/run-03/browser-consumer-source/js/services/losat.js": "45dc6a52ca2a9fac67f05a7a13b8de82fd1d90c49c45f7bb176bafae7858fff9",
+    "/mnt/c/users/genom/github/losat/docs/evidence/wasm_remaining_work_20260915/run-03/browser-consumer-source/js/config.js": "27fc26d8f5b682c65eca0eff9d7e9f490a104ff6aa454a6a9ce95f15d110fe20",
+    "/mnt/c/users/genom/github/losat/docs/evidence/wasm_remaining_work_20260915/run-03/browser-consumer-source/js/services/losat-runtime.js": "8a8588556aab21df964e03769c645656522e62acc2dc045ebb0b26415623a99a",
+    "/mnt/c/users/genom/github/losat/docs/evidence/wasm_remaining_work_20260915/run-03/work/I4/artifacts/losat-threaded-command.wasm": "c6c679bb4f6cf34b7c4f3ad2dccdafd2fe4c7373d88c0b24d766436eac091e30",
+    "/mnt/c/users/genom/github/losat/docs/evidence/wasm_remaining_work_20260915/run-03/browser-consumer-source/js/workers/losat-threaded-worker.js": "feb8c56dbd508706593b91690fea9078c06503adf5ee95349e9938fba3a4fd32",
+    "/mnt/c/users/genom/github/losat/docs/evidence/wasm_remaining_work_20260915/run-03/browser-consumer-source/vendor/browser_wasi_shim/dist/index.js": "7e2fd52ee3f728bb0b1d6e449724e0f13e3d586bb25bde6e02a66366175b5605",
+    "/mnt/c/users/genom/github/losat/docs/evidence/wasm_remaining_work_20260915/run-03/browser-consumer-source/vendor/browser_wasi_shim/dist/wasi.js": "168eb977a826f75ab0c39f9322f78cc58dbd5b233019ad1d6a7e940af8a7c4aa",
+    "/mnt/c/users/genom/github/losat/docs/evidence/wasm_remaining_work_20260915/run-03/browser-consumer-source/vendor/browser_wasi_shim/dist/fd.js": "9e82e1fc1bfd3e3573f64349dc42b4b624ed61d24e5c553f2bb4d041444f166c",
+    "/mnt/c/users/genom/github/losat/docs/evidence/wasm_remaining_work_20260915/run-03/browser-consumer-source/vendor/browser_wasi_shim/dist/fs_mem.js": "85dbc9e0ee784d9ff8b55452644e00bf7058e32355aab974f8b71d7d85772324",
+    "/mnt/c/users/genom/github/losat/docs/evidence/wasm_remaining_work_20260915/run-03/browser-consumer-source/vendor/browser_wasi_shim/dist/fs_opfs.js": "4b96aaeb5ac5986cf802cbf22b975c656682d22a38248160c96fc2ded5644869",
+    "/mnt/c/users/genom/github/losat/docs/evidence/wasm_remaining_work_20260915/run-03/browser-consumer-source/vendor/browser_wasi_shim/dist/strace.js": "ece435d3784d928d02bff4d015b7cb686f8c06de8536ff9f8ebc38a8f403a3be",
+    "/mnt/c/users/genom/github/losat/docs/evidence/wasm_remaining_work_20260915/run-03/browser-consumer-source/vendor/browser_wasi_shim/dist/wasi_defs.js": "0db0f42ba330749a7b05095ea1fd0ff63fd2b30e84cead30fe4c28359d15f194",
+    "/mnt/c/users/genom/github/losat/docs/evidence/wasm_remaining_work_20260915/run-03/browser-consumer-source/vendor/browser_wasi_shim/dist/debug.js": "a91848ee180529e2a60c05dfb9584cad19cd4e1c6f391fdb76a938bcae4c0328",
+    "/mnt/c/users/genom/github/losat/docs/evidence/wasm_remaining_work_20260915/run-03/browser-consumer-source/js/workers/losat-wasi-thread-worker.js": "eb6dcaeddecb995fa76e1d7ae39ac7a1e635cca1dad46c52a3db131916ef7c02"
+  },
+  "blocked_external": [],
+  "console": [
+    {
+      "type": "info",
+      "text": "Running threaded LOSAT with 1 pair worker and 8 threads per job."
+    },
+    {
+      "type": "log",
+      "text": "%c%s color: #265BA0 wasi: 3 73"
+    },
+    {
+      "type": "log",
+      "text": "%c%s color: #265BA0 wasi: 14 106"
+    },
+    {
+      "type": "log",
+      "text": "%c%s color: #265BA0 wasi: query.fa"
+    },
+    {
+      "type": "log",
+      "text": "%c%s color: #265BA0 wasi: subject.fa"
+    },
+    {
+      "type": "info",
+      "text": "Completed 1 threaded LOSAT pair with 1 pair worker and 8 threads per job in 14.94s."
+    },
+    {
+      "type": "info",
+      "text": "Running threaded LOSAT with 1 pair worker and 8 threads per job."
+    },
+    {
+      "type": "log",
+      "text": "%c%s color: #265BA0 wasi: 3 73"
+    },
+    {
+      "type": "log",
+      "text": "%c%s color: #265BA0 wasi: 14 106"
+    },
+    {
+      "type": "log",
+      "text": "%c%s color: #265BA0 wasi: query.fa"
+    },
+    {
+      "type": "log",
+      "text": "%c%s color: #265BA0 wasi: subject.fa"
+    },
+    {
+      "type": "info",
+      "text": "Completed 1 threaded LOSAT pair with 1 pair worker and 8 threads per job in 23.95s."
+    },
+    {
+      "type": "info",
+      "text": "Running threaded LOSAT with 1 pair worker and 8 threads per job."
+    },
+    {
+      "type": "log",
+      "text": "%c%s color: #265BA0 wasi: 3 73"
+    },
+    {
+      "type": "log",
+      "text": "%c%s color: #265BA0 wasi: 10 74"
+    },
+    {
+      "type": "log",
+      "text": "%c%s color: #265BA0 wasi: query.fa"
+    },
+    {
+      "type": "log",
+      "text": "%c%s color: #265BA0 wasi: subject.fa"
+    },
+    {
+      "type": "info",
+      "text": "Completed 1 threaded LOSAT pair with 1 pair worker and 8 threads per job in 10.10s."
+    }
+  ],
+  "browser": "149.0.7827.55",
+  "playwright": "1.61.0",
+  "browser_executable": "/home/kawato/.cache/ms-playwright/chromium-1228/chrome-linux64/chrome",
+  "explicit_browser_launch_options": {},
+  "debugger_domain_enabled_by_harness": false,
+  "status": "PASS"
+}

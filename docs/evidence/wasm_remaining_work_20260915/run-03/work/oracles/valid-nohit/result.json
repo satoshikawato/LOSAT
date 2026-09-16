@@ -1,0 +1,31 @@
+{
+  "boottime_seconds": 0.09958492800001295,
+  "cpu_system_seconds": 0.01,
+  "cpu_user_seconds": 0.07,
+  "elapsed_clock": "CLOCK_MONOTONIC; realtime and GNU elapsed are adjustable-clock diagnostics",
+  "ended_utc": "2026-09-15T23:05:24Z",
+  "exit_status": 0,
+  "gnu_elapsed_seconds": 0.08,
+  "monotonic_clock_agreement": true,
+  "monotonic_end": 1136.318892557,
+  "monotonic_start": 1136.219312739,
+  "output": "/mnt/c/users/genom/github/losat/docs/evidence/wasm_remaining_work_20260915/run-03/work/oracles/valid-nohit/output.txt",
+  "peak_rss_bytes": 70615040,
+  "process_ended_utc": "2026-09-15T23:05:24Z",
+  "raw_output_bytes": 0,
+  "raw_output_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+  "realtime_clock_agreement": true,
+  "realtime_seconds": 0.09958505630493164,
+  "reason": null,
+  "started_utc": "2026-09-15T23:05:24Z",
+  "status": "PASS",
+  "timeout_seconds": 300,
+  "unavailable_metrics": {},
+  "wall_seconds": 0.09957981799993831,
+  "watchdog_clocks": {
+    "started": {
+      "monotonic": 1136.224929719,
+      "realtime": 1789513524.4998357
+    }
+  }
+}

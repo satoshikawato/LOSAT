@@ -1,0 +1,2354 @@
+[
+  {
+    "case": "MjeNMV.MelaMJNV.tlosatx",
+    "threads": 8,
+    "session": 0,
+    "version": "baseline",
+    "argv": [
+      "python3",
+      "/mnt/c/users/genom/github/losat/docs/evidence/wasm_remaining_work_20260915/run-03/browser_smoke.py",
+      "--version",
+      "baseline",
+      "--label",
+      "I4-browser-desktop/MjeNMV.MelaMJNV.tlosatx/n8/session0/baseline",
+      "--cases",
+      "MjeNMV.MelaMJNV.tlosatx",
+      "--threads",
+      "8",
+      "--serial-kind",
+      "reactor",
+      "--repeat",
+      "4",
+      "--timed",
+      "--consumer-root",
+      "/mnt/c/users/genom/github/losat/docs/evidence/wasm_remaining_work_20260915/run-03/browser-consumer-source"
+    ],
+    "returncode": 0,
+    "timed_out": false,
+    "monotonic_start": 13843.586702371,
+    "monotonic_end": 13893.159329924,
+    "browser": "149.0.7827.55",
+    "artifact": {
+      "path": "/mnt/c/users/genom/github/losat/docs/evidence/wasm_remaining_work_20260915/run-03/work/baseline/artifacts/losat-threaded-command.wasm",
+      "sha256": "71a8b1b851c108eebac33414156108a1b2cc61b390ff3cb8562315626a5d70b9"
+    },
+    "samples": [
+      {
+        "case": "MjeNMV.MelaMJNV.tlosatx",
+        "repeat": 1,
+        "threads": 8,
+        "query_sha256": "f91873bd2957bfaefe377aa221ffd1e0b57e657e5d26ba86c52fce891ac0cedf",
+        "subject_sha256": "491f80b482acc96600773c3493358c0262dbf714cb5d76f8f5560a92ecccac1a",
+        "extra": [
+          "-query_gencode",
+          "1",
+          "-db_gencode",
+          "1"
+        ],
+        "status": "PASS",
+        "timed": true,
+        "browser_tree_peak_rss_bytes": 842190848,
+        "ok": true,
+        "statuses": [
+          {
+            "state": "running",
+            "message": "Running threaded LOSAT: 8 threads per job, 1 pair worker.",
+            "mode": "threaded",
+            "threadsPerJob": 8,
+            "pairWorkers": 1,
+            "totalBudget": 8
+          },
+          {
+            "state": "available",
+            "message": "Threaded LOSAT completed with 8 threads per job.",
+            "mode": "threaded",
+            "threadsPerJob": 8,
+            "pairWorkers": 1
+          }
+        ],
+        "wall_seconds": 8.109845000000671,
+        "raw_equal": true,
+        "output_sha256": "b309f77fee038f0559d870737ebeba732c11eba4f7e495f045acbfb831817fd7"
+      },
+      {
+        "case": "MjeNMV.MelaMJNV.tlosatx",
+        "repeat": 2,
+        "threads": 8,
+        "query_sha256": "f91873bd2957bfaefe377aa221ffd1e0b57e657e5d26ba86c52fce891ac0cedf",
+        "subject_sha256": "491f80b482acc96600773c3493358c0262dbf714cb5d76f8f5560a92ecccac1a",
+        "extra": [
+          "-query_gencode",
+          "1",
+          "-db_gencode",
+          "1"
+        ],
+        "status": "PASS",
+        "timed": true,
+        "browser_tree_peak_rss_bytes": 941404160,
+        "ok": true,
+        "statuses": [
+          {
+            "state": "running",
+            "message": "Running threaded LOSAT: 8 threads per job, 1 pair worker.",
+            "mode": "threaded",
+            "threadsPerJob": 8,
+            "pairWorkers": 1,
+            "totalBudget": 8
+          },
+          {
+            "state": "available",
+            "message": "Threaded LOSAT completed with 8 threads per job.",
+            "mode": "threaded",
+            "threadsPerJob": 8,
+            "pairWorkers": 1
+          }
+        ],
+        "wall_seconds": 8.412765000000595,
+        "raw_equal": true,
+        "output_sha256": "b309f77fee038f0559d870737ebeba732c11eba4f7e495f045acbfb831817fd7"
+      },
+      {
+        "case": "MjeNMV.MelaMJNV.tlosatx",
+        "repeat": 3,
+        "threads": 8,
+        "query_sha256": "f91873bd2957bfaefe377aa221ffd1e0b57e657e5d26ba86c52fce891ac0cedf",
+        "subject_sha256": "491f80b482acc96600773c3493358c0262dbf714cb5d76f8f5560a92ecccac1a",
+        "extra": [
+          "-query_gencode",
+          "1",
+          "-db_gencode",
+          "1"
+        ],
+        "status": "PASS",
+        "timed": true,
+        "browser_tree_peak_rss_bytes": 1053519872,
+        "ok": true,
+        "statuses": [
+          {
+            "state": "running",
+            "message": "Running threaded LOSAT: 8 threads per job, 1 pair worker.",
+            "mode": "threaded",
+            "threadsPerJob": 8,
+            "pairWorkers": 1,
+            "totalBudget": 8
+          },
+          {
+            "state": "available",
+            "message": "Threaded LOSAT completed with 8 threads per job.",
+            "mode": "threaded",
+            "threadsPerJob": 8,
+            "pairWorkers": 1
+          }
+        ],
+        "wall_seconds": 8.352405000001193,
+        "raw_equal": true,
+        "output_sha256": "b309f77fee038f0559d870737ebeba732c11eba4f7e495f045acbfb831817fd7"
+      }
+    ]
+  },
+  {
+    "case": "MjeNMV.MelaMJNV.tlosatx",
+    "threads": 8,
+    "session": 0,
+    "version": "I4",
+    "argv": [
+      "python3",
+      "/mnt/c/users/genom/github/losat/docs/evidence/wasm_remaining_work_20260915/run-03/browser_smoke.py",
+      "--version",
+      "I4",
+      "--label",
+      "I4-browser-desktop/MjeNMV.MelaMJNV.tlosatx/n8/session0/I4",
+      "--cases",
+      "MjeNMV.MelaMJNV.tlosatx",
+      "--threads",
+      "8",
+      "--serial-kind",
+      "reactor",
+      "--repeat",
+      "4",
+      "--timed",
+      "--consumer-root",
+      "/mnt/c/users/genom/github/losat/docs/evidence/wasm_remaining_work_20260915/run-03/browser-consumer-source"
+    ],
+    "returncode": 0,
+    "timed_out": false,
+    "monotonic_start": 13893.177680754,
+    "monotonic_end": 13929.084307769,
+    "browser": "149.0.7827.55",
+    "artifact": {
+      "path": "/mnt/c/users/genom/github/losat/docs/evidence/wasm_remaining_work_20260915/run-03/work/I4/artifacts/losat-threaded-command.wasm",
+      "sha256": "c6c679bb4f6cf34b7c4f3ad2dccdafd2fe4c7373d88c0b24d766436eac091e30"
+    },
+    "samples": [
+      {
+        "case": "MjeNMV.MelaMJNV.tlosatx",
+        "repeat": 1,
+        "threads": 8,
+        "query_sha256": "f91873bd2957bfaefe377aa221ffd1e0b57e657e5d26ba86c52fce891ac0cedf",
+        "subject_sha256": "491f80b482acc96600773c3493358c0262dbf714cb5d76f8f5560a92ecccac1a",
+        "extra": [
+          "-query_gencode",
+          "1",
+          "-db_gencode",
+          "1"
+        ],
+        "status": "PASS",
+        "timed": true,
+        "browser_tree_peak_rss_bytes": 839946240,
+        "ok": true,
+        "statuses": [
+          {
+            "state": "running",
+            "message": "Running threaded LOSAT: 8 threads per job, 1 pair worker.",
+            "mode": "threaded",
+            "threadsPerJob": 8,
+            "pairWorkers": 1,
+            "totalBudget": 8
+          },
+          {
+            "state": "available",
+            "message": "Threaded LOSAT completed with 8 threads per job.",
+            "mode": "threaded",
+            "threadsPerJob": 8,
+            "pairWorkers": 1
+          }
+        ],
+        "wall_seconds": 8.168990000000223,
+        "raw_equal": true,
+        "output_sha256": "b309f77fee038f0559d870737ebeba732c11eba4f7e495f045acbfb831817fd7"
+      },
+      {
+        "case": "MjeNMV.MelaMJNV.tlosatx",
+        "repeat": 2,
+        "threads": 8,
+        "query_sha256": "f91873bd2957bfaefe377aa221ffd1e0b57e657e5d26ba86c52fce891ac0cedf",
+        "subject_sha256": "491f80b482acc96600773c3493358c0262dbf714cb5d76f8f5560a92ecccac1a",
+        "extra": [
+          "-query_gencode",
+          "1",
+          "-db_gencode",
+          "1"
+        ],
+        "status": "PASS",
+        "timed": true,
+        "browser_tree_peak_rss_bytes": 963813376,
+        "ok": true,
+        "statuses": [
+          {
+            "state": "running",
+            "message": "Running threaded LOSAT: 8 threads per job, 1 pair worker.",
+            "mode": "threaded",
+            "threadsPerJob": 8,
+            "pairWorkers": 1,
+            "totalBudget": 8
+          },
+          {
+            "state": "available",
+            "message": "Threaded LOSAT completed with 8 threads per job.",
+            "mode": "threaded",
+            "threadsPerJob": 8,
+            "pairWorkers": 1
+          }
+        ],
+        "wall_seconds": 8.177525000000372,
+        "raw_equal": true,
+        "output_sha256": "b309f77fee038f0559d870737ebeba732c11eba4f7e495f045acbfb831817fd7"
+      },
+      {
+        "case": "MjeNMV.MelaMJNV.tlosatx",
+        "repeat": 3,
+        "threads": 8,
+        "query_sha256": "f91873bd2957bfaefe377aa221ffd1e0b57e657e5d26ba86c52fce891ac0cedf",
+        "subject_sha256": "491f80b482acc96600773c3493358c0262dbf714cb5d76f8f5560a92ecccac1a",
+        "extra": [
+          "-query_gencode",
+          "1",
+          "-db_gencode",
+          "1"
+        ],
+        "status": "PASS",
+        "timed": true,
+        "browser_tree_peak_rss_bytes": 1058664448,
+        "ok": true,
+        "statuses": [
+          {
+            "state": "running",
+            "message": "Running threaded LOSAT: 8 threads per job, 1 pair worker.",
+            "mode": "threaded",
+            "threadsPerJob": 8,
+            "pairWorkers": 1,
+            "totalBudget": 8
+          },
+          {
+            "state": "available",
+            "message": "Threaded LOSAT completed with 8 threads per job.",
+            "mode": "threaded",
+            "threadsPerJob": 8,
+            "pairWorkers": 1
+          }
+        ],
+        "wall_seconds": 8.276889999998733,
+        "raw_equal": true,
+        "output_sha256": "b309f77fee038f0559d870737ebeba732c11eba4f7e495f045acbfb831817fd7"
+      }
+    ]
+  },
+  {
+    "case": "MjeNMV.MelaMJNV.tlosatx",
+    "threads": 8,
+    "session": 1,
+    "version": "I4",
+    "argv": [
+      "python3",
+      "/mnt/c/users/genom/github/losat/docs/evidence/wasm_remaining_work_20260915/run-03/browser_smoke.py",
+      "--version",
+      "I4",
+      "--label",
+      "I4-browser-desktop/MjeNMV.MelaMJNV.tlosatx/n8/session1/I4",
+      "--cases",
+      "MjeNMV.MelaMJNV.tlosatx",
+      "--threads",
+      "8",
+      "--serial-kind",
+      "reactor",
+      "--repeat",
+      "4",
+      "--timed",
+      "--consumer-root",
+      "/mnt/c/users/genom/github/losat/docs/evidence/wasm_remaining_work_20260915/run-03/browser-consumer-source"
+    ],
+    "returncode": 0,
+    "timed_out": false,
+    "monotonic_start": 13929.101737892,
+    "monotonic_end": 13965.529051859,
+    "browser": "149.0.7827.55",
+    "artifact": {
+      "path": "/mnt/c/users/genom/github/losat/docs/evidence/wasm_remaining_work_20260915/run-03/work/I4/artifacts/losat-threaded-command.wasm",
+      "sha256": "c6c679bb4f6cf34b7c4f3ad2dccdafd2fe4c7373d88c0b24d766436eac091e30"
+    },
+    "samples": [
+      {
+        "case": "MjeNMV.MelaMJNV.tlosatx",
+        "repeat": 1,
+        "threads": 8,
+        "query_sha256": "f91873bd2957bfaefe377aa221ffd1e0b57e657e5d26ba86c52fce891ac0cedf",
+        "subject_sha256": "491f80b482acc96600773c3493358c0262dbf714cb5d76f8f5560a92ecccac1a",
+        "extra": [
+          "-query_gencode",
+          "1",
+          "-db_gencode",
+          "1"
+        ],
+        "status": "PASS",
+        "timed": true,
+        "browser_tree_peak_rss_bytes": 835174400,
+        "ok": true,
+        "statuses": [
+          {
+            "state": "running",
+            "message": "Running threaded LOSAT: 8 threads per job, 1 pair worker.",
+            "mode": "threaded",
+            "threadsPerJob": 8,
+            "pairWorkers": 1,
+            "totalBudget": 8
+          },
+          {
+            "state": "available",
+            "message": "Threaded LOSAT completed with 8 threads per job.",
+            "mode": "threaded",
+            "threadsPerJob": 8,
+            "pairWorkers": 1
+          }
+        ],
+        "wall_seconds": 8.498150000000372,
+        "raw_equal": true,
+        "output_sha256": "b309f77fee038f0559d870737ebeba732c11eba4f7e495f045acbfb831817fd7"
+      },
+      {
+        "case": "MjeNMV.MelaMJNV.tlosatx",
+        "repeat": 2,
+        "threads": 8,
+        "query_sha256": "f91873bd2957bfaefe377aa221ffd1e0b57e657e5d26ba86c52fce891ac0cedf",
+        "subject_sha256": "491f80b482acc96600773c3493358c0262dbf714cb5d76f8f5560a92ecccac1a",
+        "extra": [
+          "-query_gencode",
+          "1",
+          "-db_gencode",
+          "1"
+        ],
+        "status": "PASS",
+        "timed": true,
+        "browser_tree_peak_rss_bytes": 952066048,
+        "ok": true,
+        "statuses": [
+          {
+            "state": "running",
+            "message": "Running threaded LOSAT: 8 threads per job, 1 pair worker.",
+            "mode": "threaded",
+            "threadsPerJob": 8,
+            "pairWorkers": 1,
+            "totalBudget": 8
+          },
+          {
+            "state": "available",
+            "message": "Threaded LOSAT completed with 8 threads per job.",
+            "mode": "threaded",
+            "threadsPerJob": 8,
+            "pairWorkers": 1
+          }
+        ],
+        "wall_seconds": 8.20325,
+        "raw_equal": true,
+        "output_sha256": "b309f77fee038f0559d870737ebeba732c11eba4f7e495f045acbfb831817fd7"
+      },
+      {
+        "case": "MjeNMV.MelaMJNV.tlosatx",
+        "repeat": 3,
+        "threads": 8,
+        "query_sha256": "f91873bd2957bfaefe377aa221ffd1e0b57e657e5d26ba86c52fce891ac0cedf",
+        "subject_sha256": "491f80b482acc96600773c3493358c0262dbf714cb5d76f8f5560a92ecccac1a",
+        "extra": [
+          "-query_gencode",
+          "1",
+          "-db_gencode",
+          "1"
+        ],
+        "status": "PASS",
+        "timed": true,
+        "browser_tree_peak_rss_bytes": 1054294016,
+        "ok": true,
+        "statuses": [
+          {
+            "state": "running",
+            "message": "Running threaded LOSAT: 8 threads per job, 1 pair worker.",
+            "mode": "threaded",
+            "threadsPerJob": 8,
+            "pairWorkers": 1,
+            "totalBudget": 8
+          },
+          {
+            "state": "available",
+            "message": "Threaded LOSAT completed with 8 threads per job.",
+            "mode": "threaded",
+            "threadsPerJob": 8,
+            "pairWorkers": 1
+          }
+        ],
+        "wall_seconds": 8.291674999998882,
+        "raw_equal": true,
+        "output_sha256": "b309f77fee038f0559d870737ebeba732c11eba4f7e495f045acbfb831817fd7"
+      }
+    ]
+  },
+  {
+    "case": "MjeNMV.MelaMJNV.tlosatx",
+    "threads": 8,
+    "session": 1,
+    "version": "baseline",
+    "argv": [
+      "python3",
+      "/mnt/c/users/genom/github/losat/docs/evidence/wasm_remaining_work_20260915/run-03/browser_smoke.py",
+      "--version",
+      "baseline",
+      "--label",
+      "I4-browser-desktop/MjeNMV.MelaMJNV.tlosatx/n8/session1/baseline",
+      "--cases",
+      "MjeNMV.MelaMJNV.tlosatx",
+      "--threads",
+      "8",
+      "--serial-kind",
+      "reactor",
+      "--repeat",
+      "4",
+      "--timed",
+      "--consumer-root",
+      "/mnt/c/users/genom/github/losat/docs/evidence/wasm_remaining_work_20260915/run-03/browser-consumer-source"
+    ],
+    "returncode": 0,
+    "timed_out": false,
+    "monotonic_start": 13965.545348467,
+    "monotonic_end": 14011.935055736,
+    "browser": "149.0.7827.55",
+    "artifact": {
+      "path": "/mnt/c/users/genom/github/losat/docs/evidence/wasm_remaining_work_20260915/run-03/work/baseline/artifacts/losat-threaded-command.wasm",
+      "sha256": "71a8b1b851c108eebac33414156108a1b2cc61b390ff3cb8562315626a5d70b9"
+    },
+    "samples": [
+      {
+        "case": "MjeNMV.MelaMJNV.tlosatx",
+        "repeat": 1,
+        "threads": 8,
+        "query_sha256": "f91873bd2957bfaefe377aa221ffd1e0b57e657e5d26ba86c52fce891ac0cedf",
+        "subject_sha256": "491f80b482acc96600773c3493358c0262dbf714cb5d76f8f5560a92ecccac1a",
+        "extra": [
+          "-query_gencode",
+          "1",
+          "-db_gencode",
+          "1"
+        ],
+        "status": "PASS",
+        "timed": true,
+        "browser_tree_peak_rss_bytes": 845418496,
+        "ok": true,
+        "statuses": [
+          {
+            "state": "running",
+            "message": "Running threaded LOSAT: 8 threads per job, 1 pair worker.",
+            "mode": "threaded",
+            "threadsPerJob": 8,
+            "pairWorkers": 1,
+            "totalBudget": 8
+          },
+          {
+            "state": "available",
+            "message": "Threaded LOSAT completed with 8 threads per job.",
+            "mode": "threaded",
+            "threadsPerJob": 8,
+            "pairWorkers": 1
+          }
+        ],
+        "wall_seconds": 8.31059500000067,
+        "raw_equal": true,
+        "output_sha256": "b309f77fee038f0559d870737ebeba732c11eba4f7e495f045acbfb831817fd7"
+      },
+      {
+        "case": "MjeNMV.MelaMJNV.tlosatx",
+        "repeat": 2,
+        "threads": 8,
+        "query_sha256": "f91873bd2957bfaefe377aa221ffd1e0b57e657e5d26ba86c52fce891ac0cedf",
+        "subject_sha256": "491f80b482acc96600773c3493358c0262dbf714cb5d76f8f5560a92ecccac1a",
+        "extra": [
+          "-query_gencode",
+          "1",
+          "-db_gencode",
+          "1"
+        ],
+        "status": "PASS",
+        "timed": true,
+        "browser_tree_peak_rss_bytes": 965222400,
+        "ok": true,
+        "statuses": [
+          {
+            "state": "running",
+            "message": "Running threaded LOSAT: 8 threads per job, 1 pair worker.",
+            "mode": "threaded",
+            "threadsPerJob": 8,
+            "pairWorkers": 1,
+            "totalBudget": 8
+          },
+          {
+            "state": "available",
+            "message": "Threaded LOSAT completed with 8 threads per job.",
+            "mode": "threaded",
+            "threadsPerJob": 8,
+            "pairWorkers": 1
+          }
+        ],
+        "wall_seconds": 8.03990499999933,
+        "raw_equal": true,
+        "output_sha256": "b309f77fee038f0559d870737ebeba732c11eba4f7e495f045acbfb831817fd7"
+      },
+      {
+        "case": "MjeNMV.MelaMJNV.tlosatx",
+        "repeat": 3,
+        "threads": 8,
+        "query_sha256": "f91873bd2957bfaefe377aa221ffd1e0b57e657e5d26ba86c52fce891ac0cedf",
+        "subject_sha256": "491f80b482acc96600773c3493358c0262dbf714cb5d76f8f5560a92ecccac1a",
+        "extra": [
+          "-query_gencode",
+          "1",
+          "-db_gencode",
+          "1"
+        ],
+        "status": "PASS",
+        "timed": true,
+        "browser_tree_peak_rss_bytes": 1061740544,
+        "ok": true,
+        "statuses": [
+          {
+            "state": "running",
+            "message": "Running threaded LOSAT: 8 threads per job, 1 pair worker.",
+            "mode": "threaded",
+            "threadsPerJob": 8,
+            "pairWorkers": 1,
+            "totalBudget": 8
+          },
+          {
+            "state": "available",
+            "message": "Threaded LOSAT completed with 8 threads per job.",
+            "mode": "threaded",
+            "threadsPerJob": 8,
+            "pairWorkers": 1
+          }
+        ],
+        "wall_seconds": 8.476660000000148,
+        "raw_equal": true,
+        "output_sha256": "b309f77fee038f0559d870737ebeba732c11eba4f7e495f045acbfb831817fd7"
+      }
+    ]
+  },
+  {
+    "case": "MjeNMV.MelaMJNV.tlosatx",
+    "threads": 1,
+    "session": 0,
+    "version": "baseline",
+    "argv": [
+      "python3",
+      "/mnt/c/users/genom/github/losat/docs/evidence/wasm_remaining_work_20260915/run-03/browser_smoke.py",
+      "--version",
+      "baseline",
+      "--label",
+      "I4-browser-desktop/MjeNMV.MelaMJNV.tlosatx/n1/session0/baseline",
+      "--cases",
+      "MjeNMV.MelaMJNV.tlosatx",
+      "--threads",
+      "1",
+      "--serial-kind",
+      "reactor",
+      "--repeat",
+      "4",
+      "--timed",
+      "--consumer-root",
+      "/mnt/c/users/genom/github/losat/docs/evidence/wasm_remaining_work_20260915/run-03/browser-consumer-source"
+    ],
+    "returncode": 0,
+    "timed_out": false,
+    "monotonic_start": 14011.976244509,
+    "monotonic_end": 14069.585846283,
+    "browser": "149.0.7827.55",
+    "artifact": {
+      "path": "/mnt/c/users/genom/github/losat/docs/evidence/wasm_remaining_work_20260915/run-03/work/baseline/artifacts/losat-threaded-command.wasm",
+      "sha256": "71a8b1b851c108eebac33414156108a1b2cc61b390ff3cb8562315626a5d70b9"
+    },
+    "samples": [
+      {
+        "case": "MjeNMV.MelaMJNV.tlosatx",
+        "repeat": 1,
+        "threads": 1,
+        "query_sha256": "f91873bd2957bfaefe377aa221ffd1e0b57e657e5d26ba86c52fce891ac0cedf",
+        "subject_sha256": "491f80b482acc96600773c3493358c0262dbf714cb5d76f8f5560a92ecccac1a",
+        "extra": [
+          "-query_gencode",
+          "1",
+          "-db_gencode",
+          "1"
+        ],
+        "status": "PASS",
+        "timed": true,
+        "browser_tree_peak_rss_bytes": 708399104,
+        "ok": true,
+        "statuses": [
+          {
+            "state": "running",
+            "message": "Running threaded LOSAT: 1 thread per job, 1 pair worker.",
+            "mode": "threaded",
+            "threadsPerJob": 1,
+            "pairWorkers": 1,
+            "totalBudget": 1
+          },
+          {
+            "state": "available",
+            "message": "Threaded LOSAT completed with 1 thread per job.",
+            "mode": "threaded",
+            "threadsPerJob": 1,
+            "pairWorkers": 1
+          }
+        ],
+        "wall_seconds": 13.761269999999554,
+        "raw_equal": true,
+        "output_sha256": "b309f77fee038f0559d870737ebeba732c11eba4f7e495f045acbfb831817fd7"
+      },
+      {
+        "case": "MjeNMV.MelaMJNV.tlosatx",
+        "repeat": 2,
+        "threads": 1,
+        "query_sha256": "f91873bd2957bfaefe377aa221ffd1e0b57e657e5d26ba86c52fce891ac0cedf",
+        "subject_sha256": "491f80b482acc96600773c3493358c0262dbf714cb5d76f8f5560a92ecccac1a",
+        "extra": [
+          "-query_gencode",
+          "1",
+          "-db_gencode",
+          "1"
+        ],
+        "status": "PASS",
+        "timed": true,
+        "browser_tree_peak_rss_bytes": 732004352,
+        "ok": true,
+        "statuses": [
+          {
+            "state": "running",
+            "message": "Running threaded LOSAT: 1 thread per job, 1 pair worker.",
+            "mode": "threaded",
+            "threadsPerJob": 1,
+            "pairWorkers": 1,
+            "totalBudget": 1
+          },
+          {
+            "state": "available",
+            "message": "Threaded LOSAT completed with 1 thread per job.",
+            "mode": "threaded",
+            "threadsPerJob": 1,
+            "pairWorkers": 1
+          }
+        ],
+        "wall_seconds": 14.136684999998659,
+        "raw_equal": true,
+        "output_sha256": "b309f77fee038f0559d870737ebeba732c11eba4f7e495f045acbfb831817fd7"
+      },
+      {
+        "case": "MjeNMV.MelaMJNV.tlosatx",
+        "repeat": 3,
+        "threads": 1,
+        "query_sha256": "f91873bd2957bfaefe377aa221ffd1e0b57e657e5d26ba86c52fce891ac0cedf",
+        "subject_sha256": "491f80b482acc96600773c3493358c0262dbf714cb5d76f8f5560a92ecccac1a",
+        "extra": [
+          "-query_gencode",
+          "1",
+          "-db_gencode",
+          "1"
+        ],
+        "status": "PASS",
+        "timed": true,
+        "browser_tree_peak_rss_bytes": 755331072,
+        "ok": true,
+        "statuses": [
+          {
+            "state": "running",
+            "message": "Running threaded LOSAT: 1 thread per job, 1 pair worker.",
+            "mode": "threaded",
+            "threadsPerJob": 1,
+            "pairWorkers": 1,
+            "totalBudget": 1
+          },
+          {
+            "state": "available",
+            "message": "Threaded LOSAT completed with 1 thread per job.",
+            "mode": "threaded",
+            "threadsPerJob": 1,
+            "pairWorkers": 1
+          }
+        ],
+        "wall_seconds": 13.71425,
+        "raw_equal": true,
+        "output_sha256": "b309f77fee038f0559d870737ebeba732c11eba4f7e495f045acbfb831817fd7"
+      }
+    ]
+  },
+  {
+    "case": "MjeNMV.MelaMJNV.tlosatx",
+    "threads": 1,
+    "session": 0,
+    "version": "I4",
+    "argv": [
+      "python3",
+      "/mnt/c/users/genom/github/losat/docs/evidence/wasm_remaining_work_20260915/run-03/browser_smoke.py",
+      "--version",
+      "I4",
+      "--label",
+      "I4-browser-desktop/MjeNMV.MelaMJNV.tlosatx/n1/session0/I4",
+      "--cases",
+      "MjeNMV.MelaMJNV.tlosatx",
+      "--threads",
+      "1",
+      "--serial-kind",
+      "reactor",
+      "--repeat",
+      "4",
+      "--timed",
+      "--consumer-root",
+      "/mnt/c/users/genom/github/losat/docs/evidence/wasm_remaining_work_20260915/run-03/browser-consumer-source"
+    ],
+    "returncode": 0,
+    "timed_out": false,
+    "monotonic_start": 14069.599375477,
+    "monotonic_end": 14126.757748315,
+    "browser": "149.0.7827.55",
+    "artifact": {
+      "path": "/mnt/c/users/genom/github/losat/docs/evidence/wasm_remaining_work_20260915/run-03/work/I4/artifacts/losat-threaded-command.wasm",
+      "sha256": "c6c679bb4f6cf34b7c4f3ad2dccdafd2fe4c7373d88c0b24d766436eac091e30"
+    },
+    "samples": [
+      {
+        "case": "MjeNMV.MelaMJNV.tlosatx",
+        "repeat": 1,
+        "threads": 1,
+        "query_sha256": "f91873bd2957bfaefe377aa221ffd1e0b57e657e5d26ba86c52fce891ac0cedf",
+        "subject_sha256": "491f80b482acc96600773c3493358c0262dbf714cb5d76f8f5560a92ecccac1a",
+        "extra": [
+          "-query_gencode",
+          "1",
+          "-db_gencode",
+          "1"
+        ],
+        "status": "PASS",
+        "timed": true,
+        "browser_tree_peak_rss_bytes": 704335872,
+        "ok": true,
+        "statuses": [
+          {
+            "state": "running",
+            "message": "Running threaded LOSAT: 1 thread per job, 1 pair worker.",
+            "mode": "threaded",
+            "threadsPerJob": 1,
+            "pairWorkers": 1,
+            "totalBudget": 1
+          },
+          {
+            "state": "available",
+            "message": "Threaded LOSAT completed with 1 thread per job.",
+            "mode": "threaded",
+            "threadsPerJob": 1,
+            "pairWorkers": 1
+          }
+        ],
+        "wall_seconds": 13.511044999999925,
+        "raw_equal": true,
+        "output_sha256": "b309f77fee038f0559d870737ebeba732c11eba4f7e495f045acbfb831817fd7"
+      },
+      {
+        "case": "MjeNMV.MelaMJNV.tlosatx",
+        "repeat": 2,
+        "threads": 1,
+        "query_sha256": "f91873bd2957bfaefe377aa221ffd1e0b57e657e5d26ba86c52fce891ac0cedf",
+        "subject_sha256": "491f80b482acc96600773c3493358c0262dbf714cb5d76f8f5560a92ecccac1a",
+        "extra": [
+          "-query_gencode",
+          "1",
+          "-db_gencode",
+          "1"
+        ],
+        "status": "PASS",
+        "timed": true,
+        "browser_tree_peak_rss_bytes": 730247168,
+        "ok": true,
+        "statuses": [
+          {
+            "state": "running",
+            "message": "Running threaded LOSAT: 1 thread per job, 1 pair worker.",
+            "mode": "threaded",
+            "threadsPerJob": 1,
+            "pairWorkers": 1,
+            "totalBudget": 1
+          },
+          {
+            "state": "available",
+            "message": "Threaded LOSAT completed with 1 thread per job.",
+            "mode": "threaded",
+            "threadsPerJob": 1,
+            "pairWorkers": 1
+          }
+        ],
+        "wall_seconds": 14.034240000000224,
+        "raw_equal": true,
+        "output_sha256": "b309f77fee038f0559d870737ebeba732c11eba4f7e495f045acbfb831817fd7"
+      },
+      {
+        "case": "MjeNMV.MelaMJNV.tlosatx",
+        "repeat": 3,
+        "threads": 1,
+        "query_sha256": "f91873bd2957bfaefe377aa221ffd1e0b57e657e5d26ba86c52fce891ac0cedf",
+        "subject_sha256": "491f80b482acc96600773c3493358c0262dbf714cb5d76f8f5560a92ecccac1a",
+        "extra": [
+          "-query_gencode",
+          "1",
+          "-db_gencode",
+          "1"
+        ],
+        "status": "PASS",
+        "timed": true,
+        "browser_tree_peak_rss_bytes": 752214016,
+        "ok": true,
+        "statuses": [
+          {
+            "state": "running",
+            "message": "Running threaded LOSAT: 1 thread per job, 1 pair worker.",
+            "mode": "threaded",
+            "threadsPerJob": 1,
+            "pairWorkers": 1,
+            "totalBudget": 1
+          },
+          {
+            "state": "available",
+            "message": "Threaded LOSAT completed with 1 thread per job.",
+            "mode": "threaded",
+            "threadsPerJob": 1,
+            "pairWorkers": 1
+          }
+        ],
+        "wall_seconds": 14.353574999999255,
+        "raw_equal": true,
+        "output_sha256": "b309f77fee038f0559d870737ebeba732c11eba4f7e495f045acbfb831817fd7"
+      }
+    ]
+  },
+  {
+    "case": "MjeNMV.MelaMJNV.tlosatx",
+    "threads": 1,
+    "session": 1,
+    "version": "I4",
+    "argv": [
+      "python3",
+      "/mnt/c/users/genom/github/losat/docs/evidence/wasm_remaining_work_20260915/run-03/browser_smoke.py",
+      "--version",
+      "I4",
+      "--label",
+      "I4-browser-desktop/MjeNMV.MelaMJNV.tlosatx/n1/session1/I4",
+      "--cases",
+      "MjeNMV.MelaMJNV.tlosatx",
+      "--threads",
+      "1",
+      "--serial-kind",
+      "reactor",
+      "--repeat",
+      "4",
+      "--timed",
+      "--consumer-root",
+      "/mnt/c/users/genom/github/losat/docs/evidence/wasm_remaining_work_20260915/run-03/browser-consumer-source"
+    ],
+    "returncode": 0,
+    "timed_out": false,
+    "monotonic_start": 14126.777065914,
+    "monotonic_end": 14185.416213625,
+    "browser": "149.0.7827.55",
+    "artifact": {
+      "path": "/mnt/c/users/genom/github/losat/docs/evidence/wasm_remaining_work_20260915/run-03/work/I4/artifacts/losat-threaded-command.wasm",
+      "sha256": "c6c679bb4f6cf34b7c4f3ad2dccdafd2fe4c7373d88c0b24d766436eac091e30"
+    },
+    "samples": [
+      {
+        "case": "MjeNMV.MelaMJNV.tlosatx",
+        "repeat": 1,
+        "threads": 1,
+        "query_sha256": "f91873bd2957bfaefe377aa221ffd1e0b57e657e5d26ba86c52fce891ac0cedf",
+        "subject_sha256": "491f80b482acc96600773c3493358c0262dbf714cb5d76f8f5560a92ecccac1a",
+        "extra": [
+          "-query_gencode",
+          "1",
+          "-db_gencode",
+          "1"
+        ],
+        "status": "PASS",
+        "timed": true,
+        "browser_tree_peak_rss_bytes": 703500288,
+        "ok": true,
+        "statuses": [
+          {
+            "state": "running",
+            "message": "Running threaded LOSAT: 1 thread per job, 1 pair worker.",
+            "mode": "threaded",
+            "threadsPerJob": 1,
+            "pairWorkers": 1,
+            "totalBudget": 1
+          },
+          {
+            "state": "available",
+            "message": "Threaded LOSAT completed with 1 thread per job.",
+            "mode": "threaded",
+            "threadsPerJob": 1,
+            "pairWorkers": 1
+          }
+        ],
+        "wall_seconds": 14.316035000000149,
+        "raw_equal": true,
+        "output_sha256": "b309f77fee038f0559d870737ebeba732c11eba4f7e495f045acbfb831817fd7"
+      },
+      {
+        "case": "MjeNMV.MelaMJNV.tlosatx",
+        "repeat": 2,
+        "threads": 1,
+        "query_sha256": "f91873bd2957bfaefe377aa221ffd1e0b57e657e5d26ba86c52fce891ac0cedf",
+        "subject_sha256": "491f80b482acc96600773c3493358c0262dbf714cb5d76f8f5560a92ecccac1a",
+        "extra": [
+          "-query_gencode",
+          "1",
+          "-db_gencode",
+          "1"
+        ],
+        "status": "PASS",
+        "timed": true,
+        "browser_tree_peak_rss_bytes": 726839296,
+        "ok": true,
+        "statuses": [
+          {
+            "state": "running",
+            "message": "Running threaded LOSAT: 1 thread per job, 1 pair worker.",
+            "mode": "threaded",
+            "threadsPerJob": 1,
+            "pairWorkers": 1,
+            "totalBudget": 1
+          },
+          {
+            "state": "available",
+            "message": "Threaded LOSAT completed with 1 thread per job.",
+            "mode": "threaded",
+            "threadsPerJob": 1,
+            "pairWorkers": 1
+          }
+        ],
+        "wall_seconds": 14.09725,
+        "raw_equal": true,
+        "output_sha256": "b309f77fee038f0559d870737ebeba732c11eba4f7e495f045acbfb831817fd7"
+      },
+      {
+        "case": "MjeNMV.MelaMJNV.tlosatx",
+        "repeat": 3,
+        "threads": 1,
+        "query_sha256": "f91873bd2957bfaefe377aa221ffd1e0b57e657e5d26ba86c52fce891ac0cedf",
+        "subject_sha256": "491f80b482acc96600773c3493358c0262dbf714cb5d76f8f5560a92ecccac1a",
+        "extra": [
+          "-query_gencode",
+          "1",
+          "-db_gencode",
+          "1"
+        ],
+        "status": "PASS",
+        "timed": true,
+        "browser_tree_peak_rss_bytes": 748871680,
+        "ok": true,
+        "statuses": [
+          {
+            "state": "running",
+            "message": "Running threaded LOSAT: 1 thread per job, 1 pair worker.",
+            "mode": "threaded",
+            "threadsPerJob": 1,
+            "pairWorkers": 1,
+            "totalBudget": 1
+          },
+          {
+            "state": "available",
+            "message": "Threaded LOSAT completed with 1 thread per job.",
+            "mode": "threaded",
+            "threadsPerJob": 1,
+            "pairWorkers": 1
+          }
+        ],
+        "wall_seconds": 14.0845,
+        "raw_equal": true,
+        "output_sha256": "b309f77fee038f0559d870737ebeba732c11eba4f7e495f045acbfb831817fd7"
+      }
+    ]
+  },
+  {
+    "case": "MjeNMV.MelaMJNV.tlosatx",
+    "threads": 1,
+    "session": 1,
+    "version": "baseline",
+    "argv": [
+      "python3",
+      "/mnt/c/users/genom/github/losat/docs/evidence/wasm_remaining_work_20260915/run-03/browser_smoke.py",
+      "--version",
+      "baseline",
+      "--label",
+      "I4-browser-desktop/MjeNMV.MelaMJNV.tlosatx/n1/session1/baseline",
+      "--cases",
+      "MjeNMV.MelaMJNV.tlosatx",
+      "--threads",
+      "1",
+      "--serial-kind",
+      "reactor",
+      "--repeat",
+      "4",
+      "--timed",
+      "--consumer-root",
+      "/mnt/c/users/genom/github/losat/docs/evidence/wasm_remaining_work_20260915/run-03/browser-consumer-source"
+    ],
+    "returncode": 0,
+    "timed_out": false,
+    "monotonic_start": 14185.435488099,
+    "monotonic_end": 14243.255080345,
+    "browser": "149.0.7827.55",
+    "artifact": {
+      "path": "/mnt/c/users/genom/github/losat/docs/evidence/wasm_remaining_work_20260915/run-03/work/baseline/artifacts/losat-threaded-command.wasm",
+      "sha256": "71a8b1b851c108eebac33414156108a1b2cc61b390ff3cb8562315626a5d70b9"
+    },
+    "samples": [
+      {
+        "case": "MjeNMV.MelaMJNV.tlosatx",
+        "repeat": 1,
+        "threads": 1,
+        "query_sha256": "f91873bd2957bfaefe377aa221ffd1e0b57e657e5d26ba86c52fce891ac0cedf",
+        "subject_sha256": "491f80b482acc96600773c3493358c0262dbf714cb5d76f8f5560a92ecccac1a",
+        "extra": [
+          "-query_gencode",
+          "1",
+          "-db_gencode",
+          "1"
+        ],
+        "status": "PASS",
+        "timed": true,
+        "browser_tree_peak_rss_bytes": 712130560,
+        "ok": true,
+        "statuses": [
+          {
+            "state": "running",
+            "message": "Running threaded LOSAT: 1 thread per job, 1 pair worker.",
+            "mode": "threaded",
+            "threadsPerJob": 1,
+            "pairWorkers": 1,
+            "totalBudget": 1
+          },
+          {
+            "state": "available",
+            "message": "Threaded LOSAT completed with 1 thread per job.",
+            "mode": "threaded",
+            "threadsPerJob": 1,
+            "pairWorkers": 1
+          }
+        ],
+        "wall_seconds": 14.74472000000067,
+        "raw_equal": true,
+        "output_sha256": "b309f77fee038f0559d870737ebeba732c11eba4f7e495f045acbfb831817fd7"
+      },
+      {
+        "case": "MjeNMV.MelaMJNV.tlosatx",
+        "repeat": 2,
+        "threads": 1,
+        "query_sha256": "f91873bd2957bfaefe377aa221ffd1e0b57e657e5d26ba86c52fce891ac0cedf",
+        "subject_sha256": "491f80b482acc96600773c3493358c0262dbf714cb5d76f8f5560a92ecccac1a",
+        "extra": [
+          "-query_gencode",
+          "1",
+          "-db_gencode",
+          "1"
+        ],
+        "status": "PASS",
+        "timed": true,
+        "browser_tree_peak_rss_bytes": 735473664,
+        "ok": true,
+        "statuses": [
+          {
+            "state": "running",
+            "message": "Running threaded LOSAT: 1 thread per job, 1 pair worker.",
+            "mode": "threaded",
+            "threadsPerJob": 1,
+            "pairWorkers": 1,
+            "totalBudget": 1
+          },
+          {
+            "state": "available",
+            "message": "Threaded LOSAT completed with 1 thread per job.",
+            "mode": "threaded",
+            "threadsPerJob": 1,
+            "pairWorkers": 1
+          }
+        ],
+        "wall_seconds": 13.73900500000082,
+        "raw_equal": true,
+        "output_sha256": "b309f77fee038f0559d870737ebeba732c11eba4f7e495f045acbfb831817fd7"
+      },
+      {
+        "case": "MjeNMV.MelaMJNV.tlosatx",
+        "repeat": 3,
+        "threads": 1,
+        "query_sha256": "f91873bd2957bfaefe377aa221ffd1e0b57e657e5d26ba86c52fce891ac0cedf",
+        "subject_sha256": "491f80b482acc96600773c3493358c0262dbf714cb5d76f8f5560a92ecccac1a",
+        "extra": [
+          "-query_gencode",
+          "1",
+          "-db_gencode",
+          "1"
+        ],
+        "status": "PASS",
+        "timed": true,
+        "browser_tree_peak_rss_bytes": 757628928,
+        "ok": true,
+        "statuses": [
+          {
+            "state": "running",
+            "message": "Running threaded LOSAT: 1 thread per job, 1 pair worker.",
+            "mode": "threaded",
+            "threadsPerJob": 1,
+            "pairWorkers": 1,
+            "totalBudget": 1
+          },
+          {
+            "state": "available",
+            "message": "Threaded LOSAT completed with 1 thread per job.",
+            "mode": "threaded",
+            "threadsPerJob": 1,
+            "pairWorkers": 1
+          }
+        ],
+        "wall_seconds": 13.39977999999933,
+        "raw_equal": true,
+        "output_sha256": "b309f77fee038f0559d870737ebeba732c11eba4f7e495f045acbfb831817fd7"
+      }
+    ]
+  },
+  {
+    "case": "AP027280.AP027280.tlosatx",
+    "threads": 8,
+    "session": 0,
+    "version": "baseline",
+    "argv": [
+      "python3",
+      "/mnt/c/users/genom/github/losat/docs/evidence/wasm_remaining_work_20260915/run-03/browser_smoke.py",
+      "--version",
+      "baseline",
+      "--label",
+      "I4-browser-desktop/AP027280.AP027280.tlosatx/n8/session0/baseline",
+      "--cases",
+      "AP027280.AP027280.tlosatx",
+      "--threads",
+      "8",
+      "--serial-kind",
+      "reactor",
+      "--repeat",
+      "4",
+      "--timed",
+      "--consumer-root",
+      "/mnt/c/users/genom/github/losat/docs/evidence/wasm_remaining_work_20260915/run-03/browser-consumer-source"
+    ],
+    "returncode": 0,
+    "timed_out": false,
+    "monotonic_start": 14243.277019818,
+    "monotonic_end": 14332.239133205,
+    "browser": "149.0.7827.55",
+    "artifact": {
+      "path": "/mnt/c/users/genom/github/losat/docs/evidence/wasm_remaining_work_20260915/run-03/work/baseline/artifacts/losat-threaded-command.wasm",
+      "sha256": "71a8b1b851c108eebac33414156108a1b2cc61b390ff3cb8562315626a5d70b9"
+    },
+    "samples": [
+      {
+        "case": "AP027280.AP027280.tlosatx",
+        "repeat": 1,
+        "threads": 8,
+        "query_sha256": "14c68a026e685896afdc5366902999d5960589cf301a76b3f1a732a8f4708b6a",
+        "subject_sha256": "14c68a026e685896afdc5366902999d5960589cf301a76b3f1a732a8f4708b6a",
+        "extra": [
+          "-query_gencode",
+          "1",
+          "-db_gencode",
+          "1"
+        ],
+        "status": "PASS",
+        "timed": true,
+        "browser_tree_peak_rss_bytes": 900497408,
+        "ok": true,
+        "statuses": [
+          {
+            "state": "running",
+            "message": "Running threaded LOSAT: 8 threads per job, 1 pair worker.",
+            "mode": "threaded",
+            "threadsPerJob": 8,
+            "pairWorkers": 1,
+            "totalBudget": 8
+          },
+          {
+            "state": "available",
+            "message": "Threaded LOSAT completed with 8 threads per job.",
+            "mode": "threaded",
+            "threadsPerJob": 8,
+            "pairWorkers": 1
+          }
+        ],
+        "wall_seconds": 16.718189999999478,
+        "raw_equal": true,
+        "output_sha256": "845d15661c2a30fa69e01bcd8140792e55a1fa06bbb52181632680435a08eda8"
+      },
+      {
+        "case": "AP027280.AP027280.tlosatx",
+        "repeat": 2,
+        "threads": 8,
+        "query_sha256": "14c68a026e685896afdc5366902999d5960589cf301a76b3f1a732a8f4708b6a",
+        "subject_sha256": "14c68a026e685896afdc5366902999d5960589cf301a76b3f1a732a8f4708b6a",
+        "extra": [
+          "-query_gencode",
+          "1",
+          "-db_gencode",
+          "1"
+        ],
+        "status": "PASS",
+        "timed": true,
+        "browser_tree_peak_rss_bytes": 1038331904,
+        "ok": true,
+        "statuses": [
+          {
+            "state": "running",
+            "message": "Running threaded LOSAT: 8 threads per job, 1 pair worker.",
+            "mode": "threaded",
+            "threadsPerJob": 8,
+            "pairWorkers": 1,
+            "totalBudget": 8
+          },
+          {
+            "state": "available",
+            "message": "Threaded LOSAT completed with 8 threads per job.",
+            "mode": "threaded",
+            "threadsPerJob": 8,
+            "pairWorkers": 1
+          }
+        ],
+        "wall_seconds": 16.773154999999328,
+        "raw_equal": true,
+        "output_sha256": "845d15661c2a30fa69e01bcd8140792e55a1fa06bbb52181632680435a08eda8"
+      },
+      {
+        "case": "AP027280.AP027280.tlosatx",
+        "repeat": 3,
+        "threads": 8,
+        "query_sha256": "14c68a026e685896afdc5366902999d5960589cf301a76b3f1a732a8f4708b6a",
+        "subject_sha256": "14c68a026e685896afdc5366902999d5960589cf301a76b3f1a732a8f4708b6a",
+        "extra": [
+          "-query_gencode",
+          "1",
+          "-db_gencode",
+          "1"
+        ],
+        "status": "PASS",
+        "timed": true,
+        "browser_tree_peak_rss_bytes": 1130143744,
+        "ok": true,
+        "statuses": [
+          {
+            "state": "running",
+            "message": "Running threaded LOSAT: 8 threads per job, 1 pair worker.",
+            "mode": "threaded",
+            "threadsPerJob": 8,
+            "pairWorkers": 1,
+            "totalBudget": 8
+          },
+          {
+            "state": "available",
+            "message": "Threaded LOSAT completed with 8 threads per job.",
+            "mode": "threaded",
+            "threadsPerJob": 8,
+            "pairWorkers": 1
+          }
+        ],
+        "wall_seconds": 18.03815499999933,
+        "raw_equal": true,
+        "output_sha256": "845d15661c2a30fa69e01bcd8140792e55a1fa06bbb52181632680435a08eda8"
+      }
+    ]
+  },
+  {
+    "case": "AP027280.AP027280.tlosatx",
+    "threads": 8,
+    "session": 0,
+    "version": "I4",
+    "argv": [
+      "python3",
+      "/mnt/c/users/genom/github/losat/docs/evidence/wasm_remaining_work_20260915/run-03/browser_smoke.py",
+      "--version",
+      "I4",
+      "--label",
+      "I4-browser-desktop/AP027280.AP027280.tlosatx/n8/session0/I4",
+      "--cases",
+      "AP027280.AP027280.tlosatx",
+      "--threads",
+      "8",
+      "--serial-kind",
+      "reactor",
+      "--repeat",
+      "4",
+      "--timed",
+      "--consumer-root",
+      "/mnt/c/users/genom/github/losat/docs/evidence/wasm_remaining_work_20260915/run-03/browser-consumer-source"
+    ],
+    "returncode": 0,
+    "timed_out": false,
+    "monotonic_start": 14332.268621309,
+    "monotonic_end": 14400.473622578,
+    "browser": "149.0.7827.55",
+    "artifact": {
+      "path": "/mnt/c/users/genom/github/losat/docs/evidence/wasm_remaining_work_20260915/run-03/work/I4/artifacts/losat-threaded-command.wasm",
+      "sha256": "c6c679bb4f6cf34b7c4f3ad2dccdafd2fe4c7373d88c0b24d766436eac091e30"
+    },
+    "samples": [
+      {
+        "case": "AP027280.AP027280.tlosatx",
+        "repeat": 1,
+        "threads": 8,
+        "query_sha256": "14c68a026e685896afdc5366902999d5960589cf301a76b3f1a732a8f4708b6a",
+        "subject_sha256": "14c68a026e685896afdc5366902999d5960589cf301a76b3f1a732a8f4708b6a",
+        "extra": [
+          "-query_gencode",
+          "1",
+          "-db_gencode",
+          "1"
+        ],
+        "status": "PASS",
+        "timed": true,
+        "browser_tree_peak_rss_bytes": 906358784,
+        "ok": true,
+        "statuses": [
+          {
+            "state": "running",
+            "message": "Running threaded LOSAT: 8 threads per job, 1 pair worker.",
+            "mode": "threaded",
+            "threadsPerJob": 8,
+            "pairWorkers": 1,
+            "totalBudget": 8
+          },
+          {
+            "state": "available",
+            "message": "Threaded LOSAT completed with 8 threads per job.",
+            "mode": "threaded",
+            "threadsPerJob": 8,
+            "pairWorkers": 1
+          }
+        ],
+        "wall_seconds": 15.521960000000893,
+        "raw_equal": true,
+        "output_sha256": "845d15661c2a30fa69e01bcd8140792e55a1fa06bbb52181632680435a08eda8"
+      },
+      {
+        "case": "AP027280.AP027280.tlosatx",
+        "repeat": 2,
+        "threads": 8,
+        "query_sha256": "14c68a026e685896afdc5366902999d5960589cf301a76b3f1a732a8f4708b6a",
+        "subject_sha256": "14c68a026e685896afdc5366902999d5960589cf301a76b3f1a732a8f4708b6a",
+        "extra": [
+          "-query_gencode",
+          "1",
+          "-db_gencode",
+          "1"
+        ],
+        "status": "PASS",
+        "timed": true,
+        "browser_tree_peak_rss_bytes": 1013342208,
+        "ok": true,
+        "statuses": [
+          {
+            "state": "running",
+            "message": "Running threaded LOSAT: 8 threads per job, 1 pair worker.",
+            "mode": "threaded",
+            "threadsPerJob": 8,
+            "pairWorkers": 1,
+            "totalBudget": 8
+          },
+          {
+            "state": "available",
+            "message": "Threaded LOSAT completed with 8 threads per job.",
+            "mode": "threaded",
+            "threadsPerJob": 8,
+            "pairWorkers": 1
+          }
+        ],
+        "wall_seconds": 16.04543499999866,
+        "raw_equal": true,
+        "output_sha256": "845d15661c2a30fa69e01bcd8140792e55a1fa06bbb52181632680435a08eda8"
+      },
+      {
+        "case": "AP027280.AP027280.tlosatx",
+        "repeat": 3,
+        "threads": 8,
+        "query_sha256": "14c68a026e685896afdc5366902999d5960589cf301a76b3f1a732a8f4708b6a",
+        "subject_sha256": "14c68a026e685896afdc5366902999d5960589cf301a76b3f1a732a8f4708b6a",
+        "extra": [
+          "-query_gencode",
+          "1",
+          "-db_gencode",
+          "1"
+        ],
+        "status": "PASS",
+        "timed": true,
+        "browser_tree_peak_rss_bytes": 1134678016,
+        "ok": true,
+        "statuses": [
+          {
+            "state": "running",
+            "message": "Running threaded LOSAT: 8 threads per job, 1 pair worker.",
+            "mode": "threaded",
+            "threadsPerJob": 8,
+            "pairWorkers": 1,
+            "totalBudget": 8
+          },
+          {
+            "state": "available",
+            "message": "Threaded LOSAT completed with 8 threads per job.",
+            "mode": "threaded",
+            "threadsPerJob": 8,
+            "pairWorkers": 1
+          }
+        ],
+        "wall_seconds": 15.912154999999329,
+        "raw_equal": true,
+        "output_sha256": "845d15661c2a30fa69e01bcd8140792e55a1fa06bbb52181632680435a08eda8"
+      }
+    ]
+  },
+  {
+    "case": "AP027280.AP027280.tlosatx",
+    "threads": 8,
+    "session": 1,
+    "version": "I4",
+    "argv": [
+      "python3",
+      "/mnt/c/users/genom/github/losat/docs/evidence/wasm_remaining_work_20260915/run-03/browser_smoke.py",
+      "--version",
+      "I4",
+      "--label",
+      "I4-browser-desktop/AP027280.AP027280.tlosatx/n8/session1/I4",
+      "--cases",
+      "AP027280.AP027280.tlosatx",
+      "--threads",
+      "8",
+      "--serial-kind",
+      "reactor",
+      "--repeat",
+      "4",
+      "--timed",
+      "--consumer-root",
+      "/mnt/c/users/genom/github/losat/docs/evidence/wasm_remaining_work_20260915/run-03/browser-consumer-source"
+    ],
+    "returncode": 0,
+    "timed_out": false,
+    "monotonic_start": 14400.488216477,
+    "monotonic_end": 14468.044548455,
+    "browser": "149.0.7827.55",
+    "artifact": {
+      "path": "/mnt/c/users/genom/github/losat/docs/evidence/wasm_remaining_work_20260915/run-03/work/I4/artifacts/losat-threaded-command.wasm",
+      "sha256": "c6c679bb4f6cf34b7c4f3ad2dccdafd2fe4c7373d88c0b24d766436eac091e30"
+    },
+    "samples": [
+      {
+        "case": "AP027280.AP027280.tlosatx",
+        "repeat": 1,
+        "threads": 8,
+        "query_sha256": "14c68a026e685896afdc5366902999d5960589cf301a76b3f1a732a8f4708b6a",
+        "subject_sha256": "14c68a026e685896afdc5366902999d5960589cf301a76b3f1a732a8f4708b6a",
+        "extra": [
+          "-query_gencode",
+          "1",
+          "-db_gencode",
+          "1"
+        ],
+        "status": "PASS",
+        "timed": true,
+        "browser_tree_peak_rss_bytes": 898076672,
+        "ok": true,
+        "statuses": [
+          {
+            "state": "running",
+            "message": "Running threaded LOSAT: 8 threads per job, 1 pair worker.",
+            "mode": "threaded",
+            "threadsPerJob": 8,
+            "pairWorkers": 1,
+            "totalBudget": 8
+          },
+          {
+            "state": "available",
+            "message": "Threaded LOSAT completed with 8 threads per job.",
+            "mode": "threaded",
+            "threadsPerJob": 8,
+            "pairWorkers": 1
+          }
+        ],
+        "wall_seconds": 16.26427500000037,
+        "raw_equal": true,
+        "output_sha256": "845d15661c2a30fa69e01bcd8140792e55a1fa06bbb52181632680435a08eda8"
+      },
+      {
+        "case": "AP027280.AP027280.tlosatx",
+        "repeat": 2,
+        "threads": 8,
+        "query_sha256": "14c68a026e685896afdc5366902999d5960589cf301a76b3f1a732a8f4708b6a",
+        "subject_sha256": "14c68a026e685896afdc5366902999d5960589cf301a76b3f1a732a8f4708b6a",
+        "extra": [
+          "-query_gencode",
+          "1",
+          "-db_gencode",
+          "1"
+        ],
+        "status": "PASS",
+        "timed": true,
+        "browser_tree_peak_rss_bytes": 1009401856,
+        "ok": true,
+        "statuses": [
+          {
+            "state": "running",
+            "message": "Running threaded LOSAT: 8 threads per job, 1 pair worker.",
+            "mode": "threaded",
+            "threadsPerJob": 8,
+            "pairWorkers": 1,
+            "totalBudget": 8
+          },
+          {
+            "state": "available",
+            "message": "Threaded LOSAT completed with 8 threads per job.",
+            "mode": "threaded",
+            "threadsPerJob": 8,
+            "pairWorkers": 1
+          }
+        ],
+        "wall_seconds": 15.594285000000149,
+        "raw_equal": true,
+        "output_sha256": "845d15661c2a30fa69e01bcd8140792e55a1fa06bbb52181632680435a08eda8"
+      },
+      {
+        "case": "AP027280.AP027280.tlosatx",
+        "repeat": 3,
+        "threads": 8,
+        "query_sha256": "14c68a026e685896afdc5366902999d5960589cf301a76b3f1a732a8f4708b6a",
+        "subject_sha256": "14c68a026e685896afdc5366902999d5960589cf301a76b3f1a732a8f4708b6a",
+        "extra": [
+          "-query_gencode",
+          "1",
+          "-db_gencode",
+          "1"
+        ],
+        "status": "PASS",
+        "timed": true,
+        "browser_tree_peak_rss_bytes": 1123639296,
+        "ok": true,
+        "statuses": [
+          {
+            "state": "running",
+            "message": "Running threaded LOSAT: 8 threads per job, 1 pair worker.",
+            "mode": "threaded",
+            "threadsPerJob": 8,
+            "pairWorkers": 1,
+            "totalBudget": 8
+          },
+          {
+            "state": "available",
+            "message": "Threaded LOSAT completed with 8 threads per job.",
+            "mode": "threaded",
+            "threadsPerJob": 8,
+            "pairWorkers": 1
+          }
+        ],
+        "wall_seconds": 15.938044999999926,
+        "raw_equal": true,
+        "output_sha256": "845d15661c2a30fa69e01bcd8140792e55a1fa06bbb52181632680435a08eda8"
+      }
+    ]
+  },
+  {
+    "case": "AP027280.AP027280.tlosatx",
+    "threads": 8,
+    "session": 1,
+    "version": "baseline",
+    "argv": [
+      "python3",
+      "/mnt/c/users/genom/github/losat/docs/evidence/wasm_remaining_work_20260915/run-03/browser_smoke.py",
+      "--version",
+      "baseline",
+      "--label",
+      "I4-browser-desktop/AP027280.AP027280.tlosatx/n8/session1/baseline",
+      "--cases",
+      "AP027280.AP027280.tlosatx",
+      "--threads",
+      "8",
+      "--serial-kind",
+      "reactor",
+      "--repeat",
+      "4",
+      "--timed",
+      "--consumer-root",
+      "/mnt/c/users/genom/github/losat/docs/evidence/wasm_remaining_work_20260915/run-03/browser-consumer-source"
+    ],
+    "returncode": 0,
+    "timed_out": false,
+    "monotonic_start": 14468.065230388,
+    "monotonic_end": 14558.081278407,
+    "browser": "149.0.7827.55",
+    "artifact": {
+      "path": "/mnt/c/users/genom/github/losat/docs/evidence/wasm_remaining_work_20260915/run-03/work/baseline/artifacts/losat-threaded-command.wasm",
+      "sha256": "71a8b1b851c108eebac33414156108a1b2cc61b390ff3cb8562315626a5d70b9"
+    },
+    "samples": [
+      {
+        "case": "AP027280.AP027280.tlosatx",
+        "repeat": 1,
+        "threads": 8,
+        "query_sha256": "14c68a026e685896afdc5366902999d5960589cf301a76b3f1a732a8f4708b6a",
+        "subject_sha256": "14c68a026e685896afdc5366902999d5960589cf301a76b3f1a732a8f4708b6a",
+        "extra": [
+          "-query_gencode",
+          "1",
+          "-db_gencode",
+          "1"
+        ],
+        "status": "PASS",
+        "timed": true,
+        "browser_tree_peak_rss_bytes": 902508544,
+        "ok": true,
+        "statuses": [
+          {
+            "state": "running",
+            "message": "Running threaded LOSAT: 8 threads per job, 1 pair worker.",
+            "mode": "threaded",
+            "threadsPerJob": 8,
+            "pairWorkers": 1,
+            "totalBudget": 8
+          },
+          {
+            "state": "available",
+            "message": "Threaded LOSAT completed with 8 threads per job.",
+            "mode": "threaded",
+            "threadsPerJob": 8,
+            "pairWorkers": 1
+          }
+        ],
+        "wall_seconds": 16.71350500000082,
+        "raw_equal": true,
+        "output_sha256": "845d15661c2a30fa69e01bcd8140792e55a1fa06bbb52181632680435a08eda8"
+      },
+      {
+        "case": "AP027280.AP027280.tlosatx",
+        "repeat": 2,
+        "threads": 8,
+        "query_sha256": "14c68a026e685896afdc5366902999d5960589cf301a76b3f1a732a8f4708b6a",
+        "subject_sha256": "14c68a026e685896afdc5366902999d5960589cf301a76b3f1a732a8f4708b6a",
+        "extra": [
+          "-query_gencode",
+          "1",
+          "-db_gencode",
+          "1"
+        ],
+        "status": "PASS",
+        "timed": true,
+        "browser_tree_peak_rss_bytes": 1029275648,
+        "ok": true,
+        "statuses": [
+          {
+            "state": "running",
+            "message": "Running threaded LOSAT: 8 threads per job, 1 pair worker.",
+            "mode": "threaded",
+            "threadsPerJob": 8,
+            "pairWorkers": 1,
+            "totalBudget": 8
+          },
+          {
+            "state": "available",
+            "message": "Threaded LOSAT completed with 8 threads per job.",
+            "mode": "threaded",
+            "threadsPerJob": 8,
+            "pairWorkers": 1
+          }
+        ],
+        "wall_seconds": 17.16515499999933,
+        "raw_equal": true,
+        "output_sha256": "845d15661c2a30fa69e01bcd8140792e55a1fa06bbb52181632680435a08eda8"
+      },
+      {
+        "case": "AP027280.AP027280.tlosatx",
+        "repeat": 3,
+        "threads": 8,
+        "query_sha256": "14c68a026e685896afdc5366902999d5960589cf301a76b3f1a732a8f4708b6a",
+        "subject_sha256": "14c68a026e685896afdc5366902999d5960589cf301a76b3f1a732a8f4708b6a",
+        "extra": [
+          "-query_gencode",
+          "1",
+          "-db_gencode",
+          "1"
+        ],
+        "status": "PASS",
+        "timed": true,
+        "browser_tree_peak_rss_bytes": 1123319808,
+        "ok": true,
+        "statuses": [
+          {
+            "state": "running",
+            "message": "Running threaded LOSAT: 8 threads per job, 1 pair worker.",
+            "mode": "threaded",
+            "threadsPerJob": 8,
+            "pairWorkers": 1,
+            "totalBudget": 8
+          },
+          {
+            "state": "available",
+            "message": "Threaded LOSAT completed with 8 threads per job.",
+            "mode": "threaded",
+            "threadsPerJob": 8,
+            "pairWorkers": 1
+          }
+        ],
+        "wall_seconds": 16.755940000001342,
+        "raw_equal": true,
+        "output_sha256": "845d15661c2a30fa69e01bcd8140792e55a1fa06bbb52181632680435a08eda8"
+      }
+    ]
+  },
+  {
+    "case": "AP027280.AP027280.tlosatx",
+    "threads": 1,
+    "session": 0,
+    "version": "baseline",
+    "argv": [
+      "python3",
+      "/mnt/c/users/genom/github/losat/docs/evidence/wasm_remaining_work_20260915/run-03/browser_smoke.py",
+      "--version",
+      "baseline",
+      "--label",
+      "I4-browser-desktop/AP027280.AP027280.tlosatx/n1/session0/baseline",
+      "--cases",
+      "AP027280.AP027280.tlosatx",
+      "--threads",
+      "1",
+      "--serial-kind",
+      "reactor",
+      "--repeat",
+      "4",
+      "--timed",
+      "--consumer-root",
+      "/mnt/c/users/genom/github/losat/docs/evidence/wasm_remaining_work_20260915/run-03/browser-consumer-source"
+    ],
+    "returncode": 0,
+    "timed_out": false,
+    "monotonic_start": 14558.112850923,
+    "monotonic_end": 14673.933199822,
+    "browser": "149.0.7827.55",
+    "artifact": {
+      "path": "/mnt/c/users/genom/github/losat/docs/evidence/wasm_remaining_work_20260915/run-03/work/baseline/artifacts/losat-threaded-command.wasm",
+      "sha256": "71a8b1b851c108eebac33414156108a1b2cc61b390ff3cb8562315626a5d70b9"
+    },
+    "samples": [
+      {
+        "case": "AP027280.AP027280.tlosatx",
+        "repeat": 1,
+        "threads": 1,
+        "query_sha256": "14c68a026e685896afdc5366902999d5960589cf301a76b3f1a732a8f4708b6a",
+        "subject_sha256": "14c68a026e685896afdc5366902999d5960589cf301a76b3f1a732a8f4708b6a",
+        "extra": [
+          "-query_gencode",
+          "1",
+          "-db_gencode",
+          "1"
+        ],
+        "status": "PASS",
+        "timed": true,
+        "browser_tree_peak_rss_bytes": 742125568,
+        "ok": true,
+        "statuses": [
+          {
+            "state": "running",
+            "message": "Running threaded LOSAT: 1 thread per job, 1 pair worker.",
+            "mode": "threaded",
+            "threadsPerJob": 1,
+            "pairWorkers": 1,
+            "totalBudget": 1
+          },
+          {
+            "state": "available",
+            "message": "Threaded LOSAT completed with 1 thread per job.",
+            "mode": "threaded",
+            "threadsPerJob": 1,
+            "pairWorkers": 1
+          }
+        ],
+        "wall_seconds": 28.525425000000745,
+        "raw_equal": true,
+        "output_sha256": "845d15661c2a30fa69e01bcd8140792e55a1fa06bbb52181632680435a08eda8"
+      },
+      {
+        "case": "AP027280.AP027280.tlosatx",
+        "repeat": 2,
+        "threads": 1,
+        "query_sha256": "14c68a026e685896afdc5366902999d5960589cf301a76b3f1a732a8f4708b6a",
+        "subject_sha256": "14c68a026e685896afdc5366902999d5960589cf301a76b3f1a732a8f4708b6a",
+        "extra": [
+          "-query_gencode",
+          "1",
+          "-db_gencode",
+          "1"
+        ],
+        "status": "PASS",
+        "timed": true,
+        "browser_tree_peak_rss_bytes": 766468096,
+        "ok": true,
+        "statuses": [
+          {
+            "state": "running",
+            "message": "Running threaded LOSAT: 1 thread per job, 1 pair worker.",
+            "mode": "threaded",
+            "threadsPerJob": 1,
+            "pairWorkers": 1,
+            "totalBudget": 1
+          },
+          {
+            "state": "available",
+            "message": "Threaded LOSAT completed with 1 thread per job.",
+            "mode": "threaded",
+            "threadsPerJob": 1,
+            "pairWorkers": 1
+          }
+        ],
+        "wall_seconds": 28.386134999999776,
+        "raw_equal": true,
+        "output_sha256": "845d15661c2a30fa69e01bcd8140792e55a1fa06bbb52181632680435a08eda8"
+      },
+      {
+        "case": "AP027280.AP027280.tlosatx",
+        "repeat": 3,
+        "threads": 1,
+        "query_sha256": "14c68a026e685896afdc5366902999d5960589cf301a76b3f1a732a8f4708b6a",
+        "subject_sha256": "14c68a026e685896afdc5366902999d5960589cf301a76b3f1a732a8f4708b6a",
+        "extra": [
+          "-query_gencode",
+          "1",
+          "-db_gencode",
+          "1"
+        ],
+        "status": "PASS",
+        "timed": true,
+        "browser_tree_peak_rss_bytes": 787681280,
+        "ok": true,
+        "statuses": [
+          {
+            "state": "running",
+            "message": "Running threaded LOSAT: 1 thread per job, 1 pair worker.",
+            "mode": "threaded",
+            "threadsPerJob": 1,
+            "pairWorkers": 1,
+            "totalBudget": 1
+          },
+          {
+            "state": "available",
+            "message": "Threaded LOSAT completed with 1 thread per job.",
+            "mode": "threaded",
+            "threadsPerJob": 1,
+            "pairWorkers": 1
+          }
+        ],
+        "wall_seconds": 28.04281000000052,
+        "raw_equal": true,
+        "output_sha256": "845d15661c2a30fa69e01bcd8140792e55a1fa06bbb52181632680435a08eda8"
+      }
+    ]
+  },
+  {
+    "case": "AP027280.AP027280.tlosatx",
+    "threads": 1,
+    "session": 0,
+    "version": "I4",
+    "argv": [
+      "python3",
+      "/mnt/c/users/genom/github/losat/docs/evidence/wasm_remaining_work_20260915/run-03/browser_smoke.py",
+      "--version",
+      "I4",
+      "--label",
+      "I4-browser-desktop/AP027280.AP027280.tlosatx/n1/session0/I4",
+      "--cases",
+      "AP027280.AP027280.tlosatx",
+      "--threads",
+      "1",
+      "--serial-kind",
+      "reactor",
+      "--repeat",
+      "4",
+      "--timed",
+      "--consumer-root",
+      "/mnt/c/users/genom/github/losat/docs/evidence/wasm_remaining_work_20260915/run-03/browser-consumer-source"
+    ],
+    "returncode": 0,
+    "timed_out": false,
+    "monotonic_start": 14673.949592854,
+    "monotonic_end": 14777.300850373,
+    "browser": "149.0.7827.55",
+    "artifact": {
+      "path": "/mnt/c/users/genom/github/losat/docs/evidence/wasm_remaining_work_20260915/run-03/work/I4/artifacts/losat-threaded-command.wasm",
+      "sha256": "c6c679bb4f6cf34b7c4f3ad2dccdafd2fe4c7373d88c0b24d766436eac091e30"
+    },
+    "samples": [
+      {
+        "case": "AP027280.AP027280.tlosatx",
+        "repeat": 1,
+        "threads": 1,
+        "query_sha256": "14c68a026e685896afdc5366902999d5960589cf301a76b3f1a732a8f4708b6a",
+        "subject_sha256": "14c68a026e685896afdc5366902999d5960589cf301a76b3f1a732a8f4708b6a",
+        "extra": [
+          "-query_gencode",
+          "1",
+          "-db_gencode",
+          "1"
+        ],
+        "status": "PASS",
+        "timed": true,
+        "browser_tree_peak_rss_bytes": 739803136,
+        "ok": true,
+        "statuses": [
+          {
+            "state": "running",
+            "message": "Running threaded LOSAT: 1 thread per job, 1 pair worker.",
+            "mode": "threaded",
+            "threadsPerJob": 1,
+            "pairWorkers": 1,
+            "totalBudget": 1
+          },
+          {
+            "state": "available",
+            "message": "Threaded LOSAT completed with 1 thread per job.",
+            "mode": "threaded",
+            "threadsPerJob": 1,
+            "pairWorkers": 1
+          }
+        ],
+        "wall_seconds": 25.125195000000296,
+        "raw_equal": true,
+        "output_sha256": "845d15661c2a30fa69e01bcd8140792e55a1fa06bbb52181632680435a08eda8"
+      },
+      {
+        "case": "AP027280.AP027280.tlosatx",
+        "repeat": 2,
+        "threads": 1,
+        "query_sha256": "14c68a026e685896afdc5366902999d5960589cf301a76b3f1a732a8f4708b6a",
+        "subject_sha256": "14c68a026e685896afdc5366902999d5960589cf301a76b3f1a732a8f4708b6a",
+        "extra": [
+          "-query_gencode",
+          "1",
+          "-db_gencode",
+          "1"
+        ],
+        "status": "PASS",
+        "timed": true,
+        "browser_tree_peak_rss_bytes": 774840320,
+        "ok": true,
+        "statuses": [
+          {
+            "state": "running",
+            "message": "Running threaded LOSAT: 1 thread per job, 1 pair worker.",
+            "mode": "threaded",
+            "threadsPerJob": 1,
+            "pairWorkers": 1,
+            "totalBudget": 1
+          },
+          {
+            "state": "available",
+            "message": "Threaded LOSAT completed with 1 thread per job.",
+            "mode": "threaded",
+            "threadsPerJob": 1,
+            "pairWorkers": 1
+          }
+        ],
+        "wall_seconds": 25.05906000000052,
+        "raw_equal": true,
+        "output_sha256": "845d15661c2a30fa69e01bcd8140792e55a1fa06bbb52181632680435a08eda8"
+      },
+      {
+        "case": "AP027280.AP027280.tlosatx",
+        "repeat": 3,
+        "threads": 1,
+        "query_sha256": "14c68a026e685896afdc5366902999d5960589cf301a76b3f1a732a8f4708b6a",
+        "subject_sha256": "14c68a026e685896afdc5366902999d5960589cf301a76b3f1a732a8f4708b6a",
+        "extra": [
+          "-query_gencode",
+          "1",
+          "-db_gencode",
+          "1"
+        ],
+        "status": "PASS",
+        "timed": true,
+        "browser_tree_peak_rss_bytes": 799494144,
+        "ok": true,
+        "statuses": [
+          {
+            "state": "running",
+            "message": "Running threaded LOSAT: 1 thread per job, 1 pair worker.",
+            "mode": "threaded",
+            "threadsPerJob": 1,
+            "pairWorkers": 1,
+            "totalBudget": 1
+          },
+          {
+            "state": "available",
+            "message": "Threaded LOSAT completed with 1 thread per job.",
+            "mode": "threaded",
+            "threadsPerJob": 1,
+            "pairWorkers": 1
+          }
+        ],
+        "wall_seconds": 25.775044999999924,
+        "raw_equal": true,
+        "output_sha256": "845d15661c2a30fa69e01bcd8140792e55a1fa06bbb52181632680435a08eda8"
+      }
+    ]
+  },
+  {
+    "case": "AP027280.AP027280.tlosatx",
+    "threads": 1,
+    "session": 1,
+    "version": "I4",
+    "argv": [
+      "python3",
+      "/mnt/c/users/genom/github/losat/docs/evidence/wasm_remaining_work_20260915/run-03/browser_smoke.py",
+      "--version",
+      "I4",
+      "--label",
+      "I4-browser-desktop/AP027280.AP027280.tlosatx/n1/session1/I4",
+      "--cases",
+      "AP027280.AP027280.tlosatx",
+      "--threads",
+      "1",
+      "--serial-kind",
+      "reactor",
+      "--repeat",
+      "4",
+      "--timed",
+      "--consumer-root",
+      "/mnt/c/users/genom/github/losat/docs/evidence/wasm_remaining_work_20260915/run-03/browser-consumer-source"
+    ],
+    "returncode": 0,
+    "timed_out": false,
+    "monotonic_start": 14777.331167659,
+    "monotonic_end": 14881.092114888,
+    "browser": "149.0.7827.55",
+    "artifact": {
+      "path": "/mnt/c/users/genom/github/losat/docs/evidence/wasm_remaining_work_20260915/run-03/work/I4/artifacts/losat-threaded-command.wasm",
+      "sha256": "c6c679bb4f6cf34b7c4f3ad2dccdafd2fe4c7373d88c0b24d766436eac091e30"
+    },
+    "samples": [
+      {
+        "case": "AP027280.AP027280.tlosatx",
+        "repeat": 1,
+        "threads": 1,
+        "query_sha256": "14c68a026e685896afdc5366902999d5960589cf301a76b3f1a732a8f4708b6a",
+        "subject_sha256": "14c68a026e685896afdc5366902999d5960589cf301a76b3f1a732a8f4708b6a",
+        "extra": [
+          "-query_gencode",
+          "1",
+          "-db_gencode",
+          "1"
+        ],
+        "status": "PASS",
+        "timed": true,
+        "browser_tree_peak_rss_bytes": 738238464,
+        "ok": true,
+        "statuses": [
+          {
+            "state": "running",
+            "message": "Running threaded LOSAT: 1 thread per job, 1 pair worker.",
+            "mode": "threaded",
+            "threadsPerJob": 1,
+            "pairWorkers": 1,
+            "totalBudget": 1
+          },
+          {
+            "state": "available",
+            "message": "Threaded LOSAT completed with 1 thread per job.",
+            "mode": "threaded",
+            "threadsPerJob": 1,
+            "pairWorkers": 1
+          }
+        ],
+        "wall_seconds": 25.44038000000082,
+        "raw_equal": true,
+        "output_sha256": "845d15661c2a30fa69e01bcd8140792e55a1fa06bbb52181632680435a08eda8"
+      },
+      {
+        "case": "AP027280.AP027280.tlosatx",
+        "repeat": 2,
+        "threads": 1,
+        "query_sha256": "14c68a026e685896afdc5366902999d5960589cf301a76b3f1a732a8f4708b6a",
+        "subject_sha256": "14c68a026e685896afdc5366902999d5960589cf301a76b3f1a732a8f4708b6a",
+        "extra": [
+          "-query_gencode",
+          "1",
+          "-db_gencode",
+          "1"
+        ],
+        "status": "PASS",
+        "timed": true,
+        "browser_tree_peak_rss_bytes": 772124672,
+        "ok": true,
+        "statuses": [
+          {
+            "state": "running",
+            "message": "Running threaded LOSAT: 1 thread per job, 1 pair worker.",
+            "mode": "threaded",
+            "threadsPerJob": 1,
+            "pairWorkers": 1,
+            "totalBudget": 1
+          },
+          {
+            "state": "available",
+            "message": "Threaded LOSAT completed with 1 thread per job.",
+            "mode": "threaded",
+            "threadsPerJob": 1,
+            "pairWorkers": 1
+          }
+        ],
+        "wall_seconds": 25.08084500000067,
+        "raw_equal": true,
+        "output_sha256": "845d15661c2a30fa69e01bcd8140792e55a1fa06bbb52181632680435a08eda8"
+      },
+      {
+        "case": "AP027280.AP027280.tlosatx",
+        "repeat": 3,
+        "threads": 1,
+        "query_sha256": "14c68a026e685896afdc5366902999d5960589cf301a76b3f1a732a8f4708b6a",
+        "subject_sha256": "14c68a026e685896afdc5366902999d5960589cf301a76b3f1a732a8f4708b6a",
+        "extra": [
+          "-query_gencode",
+          "1",
+          "-db_gencode",
+          "1"
+        ],
+        "status": "PASS",
+        "timed": true,
+        "browser_tree_peak_rss_bytes": 797261824,
+        "ok": true,
+        "statuses": [
+          {
+            "state": "running",
+            "message": "Running threaded LOSAT: 1 thread per job, 1 pair worker.",
+            "mode": "threaded",
+            "threadsPerJob": 1,
+            "pairWorkers": 1,
+            "totalBudget": 1
+          },
+          {
+            "state": "available",
+            "message": "Threaded LOSAT completed with 1 thread per job.",
+            "mode": "threaded",
+            "threadsPerJob": 1,
+            "pairWorkers": 1
+          }
+        ],
+        "wall_seconds": 25.80320999999903,
+        "raw_equal": true,
+        "output_sha256": "845d15661c2a30fa69e01bcd8140792e55a1fa06bbb52181632680435a08eda8"
+      }
+    ]
+  },
+  {
+    "case": "AP027280.AP027280.tlosatx",
+    "threads": 1,
+    "session": 1,
+    "version": "baseline",
+    "argv": [
+      "python3",
+      "/mnt/c/users/genom/github/losat/docs/evidence/wasm_remaining_work_20260915/run-03/browser_smoke.py",
+      "--version",
+      "baseline",
+      "--label",
+      "I4-browser-desktop/AP027280.AP027280.tlosatx/n1/session1/baseline",
+      "--cases",
+      "AP027280.AP027280.tlosatx",
+      "--threads",
+      "1",
+      "--serial-kind",
+      "reactor",
+      "--repeat",
+      "4",
+      "--timed",
+      "--consumer-root",
+      "/mnt/c/users/genom/github/losat/docs/evidence/wasm_remaining_work_20260915/run-03/browser-consumer-source"
+    ],
+    "returncode": 0,
+    "timed_out": false,
+    "monotonic_start": 14881.123436779,
+    "monotonic_end": 14995.814244981,
+    "browser": "149.0.7827.55",
+    "artifact": {
+      "path": "/mnt/c/users/genom/github/losat/docs/evidence/wasm_remaining_work_20260915/run-03/work/baseline/artifacts/losat-threaded-command.wasm",
+      "sha256": "71a8b1b851c108eebac33414156108a1b2cc61b390ff3cb8562315626a5d70b9"
+    },
+    "samples": [
+      {
+        "case": "AP027280.AP027280.tlosatx",
+        "repeat": 1,
+        "threads": 1,
+        "query_sha256": "14c68a026e685896afdc5366902999d5960589cf301a76b3f1a732a8f4708b6a",
+        "subject_sha256": "14c68a026e685896afdc5366902999d5960589cf301a76b3f1a732a8f4708b6a",
+        "extra": [
+          "-query_gencode",
+          "1",
+          "-db_gencode",
+          "1"
+        ],
+        "status": "PASS",
+        "timed": true,
+        "browser_tree_peak_rss_bytes": 736600064,
+        "ok": true,
+        "statuses": [
+          {
+            "state": "running",
+            "message": "Running threaded LOSAT: 1 thread per job, 1 pair worker.",
+            "mode": "threaded",
+            "threadsPerJob": 1,
+            "pairWorkers": 1,
+            "totalBudget": 1
+          },
+          {
+            "state": "available",
+            "message": "Threaded LOSAT completed with 1 thread per job.",
+            "mode": "threaded",
+            "threadsPerJob": 1,
+            "pairWorkers": 1
+          }
+        ],
+        "wall_seconds": 27.95040499999933,
+        "raw_equal": true,
+        "output_sha256": "845d15661c2a30fa69e01bcd8140792e55a1fa06bbb52181632680435a08eda8"
+      },
+      {
+        "case": "AP027280.AP027280.tlosatx",
+        "repeat": 2,
+        "threads": 1,
+        "query_sha256": "14c68a026e685896afdc5366902999d5960589cf301a76b3f1a732a8f4708b6a",
+        "subject_sha256": "14c68a026e685896afdc5366902999d5960589cf301a76b3f1a732a8f4708b6a",
+        "extra": [
+          "-query_gencode",
+          "1",
+          "-db_gencode",
+          "1"
+        ],
+        "status": "PASS",
+        "timed": true,
+        "browser_tree_peak_rss_bytes": 771932160,
+        "ok": true,
+        "statuses": [
+          {
+            "state": "running",
+            "message": "Running threaded LOSAT: 1 thread per job, 1 pair worker.",
+            "mode": "threaded",
+            "threadsPerJob": 1,
+            "pairWorkers": 1,
+            "totalBudget": 1
+          },
+          {
+            "state": "available",
+            "message": "Threaded LOSAT completed with 1 thread per job.",
+            "mode": "threaded",
+            "threadsPerJob": 1,
+            "pairWorkers": 1
+          }
+        ],
+        "wall_seconds": 28.042984999999405,
+        "raw_equal": true,
+        "output_sha256": "845d15661c2a30fa69e01bcd8140792e55a1fa06bbb52181632680435a08eda8"
+      },
+      {
+        "case": "AP027280.AP027280.tlosatx",
+        "repeat": 3,
+        "threads": 1,
+        "query_sha256": "14c68a026e685896afdc5366902999d5960589cf301a76b3f1a732a8f4708b6a",
+        "subject_sha256": "14c68a026e685896afdc5366902999d5960589cf301a76b3f1a732a8f4708b6a",
+        "extra": [
+          "-query_gencode",
+          "1",
+          "-db_gencode",
+          "1"
+        ],
+        "status": "PASS",
+        "timed": true,
+        "browser_tree_peak_rss_bytes": 793174016,
+        "ok": true,
+        "statuses": [
+          {
+            "state": "running",
+            "message": "Running threaded LOSAT: 1 thread per job, 1 pair worker.",
+            "mode": "threaded",
+            "threadsPerJob": 1,
+            "pairWorkers": 1,
+            "totalBudget": 1
+          },
+          {
+            "state": "available",
+            "message": "Threaded LOSAT completed with 1 thread per job.",
+            "mode": "threaded",
+            "threadsPerJob": 1,
+            "pairWorkers": 1
+          }
+        ],
+        "wall_seconds": 28.02768499999866,
+        "raw_equal": true,
+        "output_sha256": "845d15661c2a30fa69e01bcd8140792e55a1fa06bbb52181632680435a08eda8"
+      }
+    ]
+  }
+]

@@ -1,0 +1,1255 @@
+{
+  "other_instruction_text_identical": true,
+  "changes": [
+    {
+      "wat_line": 425,
+      "kind": "i32_const",
+      "baseline": "(i32.const 1326890)",
+      "candidate": "(i32.const 1326858)"
+    },
+    {
+      "wat_line": 538,
+      "kind": "i32_const",
+      "baseline": "(i32.const 1326890)",
+      "candidate": "(i32.const 1326858)"
+    },
+    {
+      "wat_line": 615,
+      "kind": "i32_const",
+      "baseline": "(i32.const 1326890)",
+      "candidate": "(i32.const 1326858)"
+    },
+    {
+      "wat_line": 707,
+      "kind": "i32_const",
+      "baseline": "(i32.const 1326890)",
+      "candidate": "(i32.const 1326858)"
+    },
+    {
+      "wat_line": 772,
+      "kind": "i32_const",
+      "baseline": "(i32.const 1326890)",
+      "candidate": "(i32.const 1326858)"
+    },
+    {
+      "wat_line": 874,
+      "kind": "i32_const",
+      "baseline": "(i32.const 1326890)",
+      "candidate": "(i32.const 1326858)"
+    },
+    {
+      "wat_line": 1005,
+      "kind": "i32_const",
+      "baseline": "(i32.const 1326890)",
+      "candidate": "(i32.const 1326858)"
+    },
+    {
+      "wat_line": 1045,
+      "kind": "i32_const",
+      "baseline": "(i32.const 1326932)",
+      "candidate": "(i32.const 1326900)"
+    },
+    {
+      "wat_line": 1097,
+      "kind": "i32_const",
+      "baseline": "(i32.const 1326948)",
+      "candidate": "(i32.const 1326916)"
+    },
+    {
+      "wat_line": 2699,
+      "kind": "i32_const",
+      "baseline": "(i32.const 1326890)",
+      "candidate": "(i32.const 1326858)"
+    },
+    {
+      "wat_line": 4553,
+      "kind": "i32_const",
+      "baseline": "(i32.const 1241604)",
+      "candidate": "(i32.const 1241572)"
+    },
+    {
+      "wat_line": 4560,
+      "kind": "i32_const",
+      "baseline": "(i32.const 1241572)",
+      "candidate": "(i32.const 1241540)"
+    },
+    {
+      "wat_line": 4567,
+      "kind": "i32_const",
+      "baseline": "(i32.const 1241588)",
+      "candidate": "(i32.const 1241556)"
+    },
+    {
+      "wat_line": 4736,
+      "kind": "i32_const",
+      "baseline": "(i32.const 1241668)",
+      "candidate": "(i32.const 1241636)"
+    },
+    {
+      "wat_line": 4743,
+      "kind": "i32_const",
+      "baseline": "(i32.const 1241620)",
+      "candidate": "(i32.const 1241588)"
+    },
+    {
+      "wat_line": 4750,
+      "kind": "i32_const",
+      "baseline": "(i32.const 1241636)",
+      "candidate": "(i32.const 1241604)"
+    },
+    {
+      "wat_line": 4757,
+      "kind": "i32_const",
+      "baseline": "(i32.const 1241652)",
+      "candidate": "(i32.const 1241620)"
+    },
+    {
+      "wat_line": 4948,
+      "kind": "i32_const",
+      "baseline": "(i32.const 1326890)",
+      "candidate": "(i32.const 1326858)"
+    },
+    {
+      "wat_line": 5036,
+      "kind": "i32_const",
+      "baseline": "(i32.const 1326890)",
+      "candidate": "(i32.const 1326858)"
+    },
+    {
+      "wat_line": 5105,
+      "kind": "i32_const",
+      "baseline": "(i32.const 1326890)",
+      "candidate": "(i32.const 1326858)"
+    },
+    {
+      "wat_line": 5145,
+      "kind": "i32_const",
+      "baseline": "(i32.const 1326932)",
+      "candidate": "(i32.const 1326900)"
+    },
+    {
+      "wat_line": 5187,
+      "kind": "i32_const",
+      "baseline": "(i32.const 1326948)",
+      "candidate": "(i32.const 1326916)"
+    },
+    {
+      "wat_line": 5217,
+      "kind": "i32_const",
+      "baseline": "(i32.const 1326932)",
+      "candidate": "(i32.const 1326900)"
+    },
+    {
+      "wat_line": 5259,
+      "kind": "i32_const",
+      "baseline": "(i32.const 1326948)",
+      "candidate": "(i32.const 1326916)"
+    },
+    {
+      "wat_line": 5275,
+      "kind": "i32_const",
+      "baseline": "(i32.const 1326932)",
+      "candidate": "(i32.const 1326900)"
+    },
+    {
+      "wat_line": 5322,
+      "kind": "i32_const",
+      "baseline": "(i32.const 1326948)",
+      "candidate": "(i32.const 1326916)"
+    },
+    {
+      "wat_line": 5589,
+      "kind": "i32_const",
+      "baseline": "(i32.const 1326890)",
+      "candidate": "(i32.const 1326858)"
+    },
+    {
+      "wat_line": 5846,
+      "kind": "i32_const",
+      "baseline": "(i32.const 1326890)",
+      "candidate": "(i32.const 1326858)"
+    },
+    {
+      "wat_line": 6009,
+      "kind": "i32_const",
+      "baseline": "(i32.const 1326890)",
+      "candidate": "(i32.const 1326858)"
+    },
+    {
+      "wat_line": 6090,
+      "kind": "i32_const",
+      "baseline": "(i32.const 1326890)",
+      "candidate": "(i32.const 1326858)"
+    },
+    {
+      "wat_line": 6132,
+      "kind": "i32_const",
+      "baseline": "(i32.const 1326932)",
+      "candidate": "(i32.const 1326900)"
+    },
+    {
+      "wat_line": 6174,
+      "kind": "i32_const",
+      "baseline": "(i32.const 1326948)",
+      "candidate": "(i32.const 1326916)"
+    },
+    {
+      "wat_line": 6190,
+      "kind": "i32_const",
+      "baseline": "(i32.const 1326932)",
+      "candidate": "(i32.const 1326900)"
+    },
+    {
+      "wat_line": 6232,
+      "kind": "i32_const",
+      "baseline": "(i32.const 1326948)",
+      "candidate": "(i32.const 1326916)"
+    },
+    {
+      "wat_line": 6262,
+      "kind": "i32_const",
+      "baseline": "(i32.const 1326932)",
+      "candidate": "(i32.const 1326900)"
+    },
+    {
+      "wat_line": 6304,
+      "kind": "i32_const",
+      "baseline": "(i32.const 1326948)",
+      "candidate": "(i32.const 1326916)"
+    },
+    {
+      "wat_line": 6320,
+      "kind": "i32_const",
+      "baseline": "(i32.const 1326932)",
+      "candidate": "(i32.const 1326900)"
+    },
+    {
+      "wat_line": 6362,
+      "kind": "i32_const",
+      "baseline": "(i32.const 1326948)",
+      "candidate": "(i32.const 1326916)"
+    },
+    {
+      "wat_line": 6610,
+      "kind": "i32_const",
+      "baseline": "(i32.const 1326890)",
+      "candidate": "(i32.const 1326858)"
+    },
+    {
+      "wat_line": 6663,
+      "kind": "i32_const",
+      "baseline": "(i32.const 1326932)",
+      "candidate": "(i32.const 1326900)"
+    },
+    {
+      "wat_line": 6705,
+      "kind": "i32_const",
+      "baseline": "(i32.const 1326948)",
+      "candidate": "(i32.const 1326916)"
+    },
+    {
+      "wat_line": 6880,
+      "kind": "i32_const",
+      "baseline": "(i32.const 1326890)",
+      "candidate": "(i32.const 1326858)"
+    },
+    {
+      "wat_line": 6931,
+      "kind": "i32_const",
+      "baseline": "(i32.const 1326932)",
+      "candidate": "(i32.const 1326900)"
+    },
+    {
+      "wat_line": 6973,
+      "kind": "i32_const",
+      "baseline": "(i32.const 1326948)",
+      "candidate": "(i32.const 1326916)"
+    },
+    {
+      "wat_line": 7430,
+      "kind": "i32_const",
+      "baseline": "(i32.const 1326890)",
+      "candidate": "(i32.const 1326858)"
+    },
+    {
+      "wat_line": 7470,
+      "kind": "i32_const",
+      "baseline": "(i32.const 1326932)",
+      "candidate": "(i32.const 1326900)"
+    },
+    {
+      "wat_line": 7512,
+      "kind": "i32_const",
+      "baseline": "(i32.const 1326948)",
+      "candidate": "(i32.const 1326916)"
+    },
+    {
+      "wat_line": 7556,
+      "kind": "i32_const",
+      "baseline": "(i32.const 1326890)",
+      "candidate": "(i32.const 1326858)"
+    },
+    {
+      "wat_line": 7633,
+      "kind": "i32_const",
+      "baseline": "(i32.const 1326890)",
+      "candidate": "(i32.const 1326858)"
+    },
+    {
+      "wat_line": 7673,
+      "kind": "i32_const",
+      "baseline": "(i32.const 1326932)",
+      "candidate": "(i32.const 1326900)"
+    },
+    {
+      "wat_line": 7715,
+      "kind": "i32_const",
+      "baseline": "(i32.const 1326948)",
+      "candidate": "(i32.const 1326916)"
+    },
+    {
+      "wat_line": 7731,
+      "kind": "i32_const",
+      "baseline": "(i32.const 1326932)",
+      "candidate": "(i32.const 1326900)"
+    },
+    {
+      "wat_line": 7778,
+      "kind": "i32_const",
+      "baseline": "(i32.const 1326948)",
+      "candidate": "(i32.const 1326916)"
+    },
+    {
+      "wat_line": 7867,
+      "kind": "i32_const",
+      "baseline": "(i32.const 1326890)",
+      "candidate": "(i32.const 1326858)"
+    },
+    {
+      "wat_line": 7907,
+      "kind": "i32_const",
+      "baseline": "(i32.const 1326932)",
+      "candidate": "(i32.const 1326900)"
+    },
+    {
+      "wat_line": 7954,
+      "kind": "i32_const",
+      "baseline": "(i32.const 1326948)",
+      "candidate": "(i32.const 1326916)"
+    },
+    {
+      "wat_line": 8091,
+      "kind": "i32_const",
+      "baseline": "(i32.const 1326890)",
+      "candidate": "(i32.const 1326858)"
+    },
+    {
+      "wat_line": 8327,
+      "kind": "i32_const",
+      "baseline": "(i32.const 1241208)",
+      "candidate": "(i32.const 1241176)"
+    },
+    {
+      "wat_line": 8374,
+      "kind": "i32_const",
+      "baseline": "(i32.const 1326890)",
+      "candidate": "(i32.const 1326858)"
+    },
+    {
+      "wat_line": 8414,
+      "kind": "i32_const",
+      "baseline": "(i32.const 1326932)",
+      "candidate": "(i32.const 1326900)"
+    },
+    {
+      "wat_line": 8456,
+      "kind": "i32_const",
+      "baseline": "(i32.const 1326948)",
+      "candidate": "(i32.const 1326916)"
+    },
+    {
+      "wat_line": 8519,
+      "kind": "i32_const",
+      "baseline": "(i32.const 1326890)",
+      "candidate": "(i32.const 1326858)"
+    },
+    {
+      "wat_line": 8682,
+      "kind": "i32_const",
+      "baseline": "(i32.const 1326890)",
+      "candidate": "(i32.const 1326858)"
+    },
+    {
+      "wat_line": 8730,
+      "kind": "i32_const",
+      "baseline": "(i32.const 1241144)",
+      "candidate": "(i32.const 1241112)"
+    },
+    {
+      "wat_line": 8866,
+      "kind": "i32_const",
+      "baseline": "(i32.const 1241364)",
+      "candidate": "(i32.const 1241332)"
+    },
+    {
+      "wat_line": 8901,
+      "kind": "i32_const",
+      "baseline": "(i32.const 1326890)",
+      "candidate": "(i32.const 1326858)"
+    },
+    {
+      "wat_line": 8953,
+      "kind": "i32_const",
+      "baseline": "(i32.const 1326932)",
+      "candidate": "(i32.const 1326900)"
+    },
+    {
+      "wat_line": 8995,
+      "kind": "i32_const",
+      "baseline": "(i32.const 1326948)",
+      "candidate": "(i32.const 1326916)"
+    },
+    {
+      "wat_line": 9009,
+      "kind": "i32_const",
+      "baseline": "(i32.const 1241128)",
+      "candidate": "(i32.const 1241112)"
+    },
+    {
+      "wat_line": 9025,
+      "kind": "i32_const",
+      "baseline": "(i32.const 1326932)",
+      "candidate": "(i32.const 1326900)"
+    },
+    {
+      "wat_line": 9067,
+      "kind": "i32_const",
+      "baseline": "(i32.const 1326948)",
+      "candidate": "(i32.const 1326916)"
+    },
+    {
+      "wat_line": 9083,
+      "kind": "i32_const",
+      "baseline": "(i32.const 1326932)",
+      "candidate": "(i32.const 1326900)"
+    },
+    {
+      "wat_line": 9125,
+      "kind": "i32_const",
+      "baseline": "(i32.const 1326948)",
+      "candidate": "(i32.const 1326916)"
+    },
+    {
+      "wat_line": 9132,
+      "kind": "i32_const",
+      "baseline": "(i32.const 1241272)",
+      "candidate": "(i32.const 1241240)"
+    },
+    {
+      "wat_line": 9139,
+      "kind": "i32_const",
+      "baseline": "(i32.const 1241288)",
+      "candidate": "(i32.const 1241256)"
+    },
+    {
+      "wat_line": 9146,
+      "kind": "i32_const",
+      "baseline": "(i32.const 1241304)",
+      "candidate": "(i32.const 1241272)"
+    },
+    {
+      "wat_line": 9162,
+      "kind": "i32_const",
+      "baseline": "(i32.const 1326932)",
+      "candidate": "(i32.const 1326900)"
+    },
+    {
+      "wat_line": 9204,
+      "kind": "i32_const",
+      "baseline": "(i32.const 1326948)",
+      "candidate": "(i32.const 1326916)"
+    },
+    {
+      "wat_line": 9277,
+      "kind": "i32_const",
+      "baseline": "(i32.const 1241428)",
+      "candidate": "(i32.const 1241396)"
+    },
+    {
+      "wat_line": 9284,
+      "kind": "i32_const",
+      "baseline": "(i32.const 1241396)",
+      "candidate": "(i32.const 1241364)"
+    },
+    {
+      "wat_line": 9291,
+      "kind": "i32_const",
+      "baseline": "(i32.const 1241412)",
+      "candidate": "(i32.const 1241380)"
+    },
+    {
+      "wat_line": 9433,
+      "kind": "i32_const",
+      "baseline": "(i32.const 1241500)",
+      "candidate": "(i32.const 1241468)"
+    },
+    {
+      "wat_line": 9460,
+      "kind": "i32_const",
+      "baseline": "(i32.const 1326890)",
+      "candidate": "(i32.const 1326858)"
+    },
+    {
+      "wat_line": 9509,
+      "kind": "i32_const",
+      "baseline": "(i32.const 1241556)",
+      "candidate": "(i32.const 1241524)"
+    },
+    {
+      "wat_line": 9516,
+      "kind": "i32_const",
+      "baseline": "(i32.const 1241444)",
+      "candidate": "(i32.const 1241412)"
+    },
+    {
+      "wat_line": 9532,
+      "kind": "i32_const",
+      "baseline": "(i32.const 1326932)",
+      "candidate": "(i32.const 1326900)"
+    },
+    {
+      "wat_line": 9574,
+      "kind": "i32_const",
+      "baseline": "(i32.const 1326948)",
+      "candidate": "(i32.const 1326916)"
+    },
+    {
+      "wat_line": 9665,
+      "kind": "i32_const",
+      "baseline": "(i32.const 1241524)",
+      "candidate": "(i32.const 1241492)"
+    },
+    {
+      "wat_line": 9672,
+      "kind": "i32_const",
+      "baseline": "(i32.const 1241540)",
+      "candidate": "(i32.const 1241508)"
+    },
+    {
+      "wat_line": 10219,
+      "kind": "i32_const",
+      "baseline": "(i32.const 1241684)",
+      "candidate": "(i32.const 1241652)"
+    },
+    {
+      "wat_line": 10645,
+      "kind": "i32_const",
+      "baseline": "(i32.const 1241700)",
+      "candidate": "(i32.const 1241668)"
+    },
+    {
+      "wat_line": 10652,
+      "kind": "i32_const",
+      "baseline": "(i32.const 1241716)",
+      "candidate": "(i32.const 1241684)"
+    },
+    {
+      "wat_line": 10671,
+      "kind": "i32_const",
+      "baseline": "(i32.const 1241748)",
+      "candidate": "(i32.const 1241716)"
+    },
+    {
+      "wat_line": 10678,
+      "kind": "i32_const",
+      "baseline": "(i32.const 1241764)",
+      "candidate": "(i32.const 1241732)"
+    },
+    {
+      "wat_line": 10685,
+      "kind": "i32_const",
+      "baseline": "(i32.const 1241780)",
+      "candidate": "(i32.const 1241748)"
+    },
+    {
+      "wat_line": 11241,
+      "kind": "i32_const",
+      "baseline": "(i32.const 1241732)",
+      "candidate": "(i32.const 1241700)"
+    },
+    {
+      "wat_line": 11457,
+      "kind": "i32_const",
+      "baseline": "(i32.const 1244420)",
+      "candidate": "(i32.const 1244388)"
+    },
+    {
+      "wat_line": 11488,
+      "kind": "i32_const",
+      "baseline": "(i32.const 1326890)",
+      "candidate": "(i32.const 1326858)"
+    },
+    {
+      "wat_line": 11528,
+      "kind": "i32_const",
+      "baseline": "(i32.const 1326932)",
+      "candidate": "(i32.const 1326900)"
+    },
+    {
+      "wat_line": 11575,
+      "kind": "i32_const",
+      "baseline": "(i32.const 1326948)",
+      "candidate": "(i32.const 1326916)"
+    },
+    {
+      "wat_line": 11667,
+      "kind": "i32_const",
+      "baseline": "(i32.const 1241860)",
+      "candidate": "(i32.const 1241828)"
+    },
+    {
+      "wat_line": 11702,
+      "kind": "i32_const",
+      "baseline": "(i32.const 1326890)",
+      "candidate": "(i32.const 1326858)"
+    },
+    {
+      "wat_line": 11876,
+      "kind": "i32_const",
+      "baseline": "(i32.const 1242012)",
+      "candidate": "(i32.const 1241980)"
+    },
+    {
+      "wat_line": 11911,
+      "kind": "i32_const",
+      "baseline": "(i32.const 1326890)",
+      "candidate": "(i32.const 1326858)"
+    },
+    {
+      "wat_line": 11972,
+      "kind": "i32_const",
+      "baseline": "(i32.const 1242116)",
+      "candidate": "(i32.const 1242084)"
+    },
+    {
+      "wat_line": 12024,
+      "kind": "i32_const",
+      "baseline": "(i32.const 1326890)",
+      "candidate": "(i32.const 1326858)"
+    },
+    {
+      "wat_line": 12064,
+      "kind": "i32_const",
+      "baseline": "(i32.const 1326932)",
+      "candidate": "(i32.const 1326900)"
+    },
+    {
+      "wat_line": 12106,
+      "kind": "i32_const",
+      "baseline": "(i32.const 1326948)",
+      "candidate": "(i32.const 1326916)"
+    },
+    {
+      "wat_line": 12113,
+      "kind": "i32_const",
+      "baseline": "(i32.const 1242060)",
+      "candidate": "(i32.const 1242028)"
+    },
+    {
+      "wat_line": 12129,
+      "kind": "i32_const",
+      "baseline": "(i32.const 1326932)",
+      "candidate": "(i32.const 1326900)"
+    },
+    {
+      "wat_line": 12171,
+      "kind": "i32_const",
+      "baseline": "(i32.const 1326948)",
+      "candidate": "(i32.const 1326916)"
+    },
+    {
+      "wat_line": 12178,
+      "kind": "i32_const",
+      "baseline": "(i32.const 1242044)",
+      "candidate": "(i32.const 1242012)"
+    },
+    {
+      "wat_line": 12327,
+      "kind": "i32_const",
+      "baseline": "(i32.const 1242172)",
+      "candidate": "(i32.const 1242140)"
+    },
+    {
+      "wat_line": 12340,
+      "kind": "i32_const",
+      "baseline": "(i32.const 1242188)",
+      "candidate": "(i32.const 1242156)"
+    },
+    {
+      "wat_line": 12347,
+      "kind": "i32_const",
+      "baseline": "(i32.const 1242140)",
+      "candidate": "(i32.const 1242108)"
+    },
+    {
+      "wat_line": 12354,
+      "kind": "i32_const",
+      "baseline": "(i32.const 1242156)",
+      "candidate": "(i32.const 1242124)"
+    },
+    {
+      "wat_line": 12809,
+      "kind": "i32_const",
+      "baseline": "(i32.const 1242252)",
+      "candidate": "(i32.const 1242220)"
+    },
+    {
+      "wat_line": 12816,
+      "kind": "i32_const",
+      "baseline": "(i32.const 1242268)",
+      "candidate": "(i32.const 1242236)"
+    },
+    {
+      "wat_line": 12823,
+      "kind": "i32_const",
+      "baseline": "(i32.const 1242284)",
+      "candidate": "(i32.const 1242252)"
+    },
+    {
+      "wat_line": 12830,
+      "kind": "i32_const",
+      "baseline": "(i32.const 1242300)",
+      "candidate": "(i32.const 1242268)"
+    },
+    {
+      "wat_line": 12899,
+      "kind": "i32_const",
+      "baseline": "(i32.const 1242332)",
+      "candidate": "(i32.const 1242300)"
+    },
+    {
+      "wat_line": 13423,
+      "kind": "i32_const",
+      "baseline": "(i32.const 1242824)",
+      "candidate": "(i32.const 1242792)"
+    },
+    {
+      "wat_line": 13431,
+      "kind": "i32_const",
+      "baseline": "(i32.const 1242632)",
+      "candidate": "(i32.const 1242600)"
+    },
+    {
+      "wat_line": 13450,
+      "kind": "i32_const",
+      "baseline": "(i32.const 1326890)",
+      "candidate": "(i32.const 1326858)"
+    },
+    {
+      "wat_line": 13519,
+      "kind": "i32_const",
+      "baseline": "(i32.const 1243472)",
+      "candidate": "(i32.const 1243440)"
+    },
+    {
+      "wat_line": 13523,
+      "kind": "i32_const",
+      "baseline": "(i32.const 1243440)",
+      "candidate": "(i32.const 1243408)"
+    },
+    {
+      "wat_line": 13558,
+      "kind": "i32_const",
+      "baseline": "(i32.const 1326890)",
+      "candidate": "(i32.const 1326858)"
+    },
+    {
+      "wat_line": 13621,
+      "kind": "i32_const",
+      "baseline": "(i32.const 1244188)",
+      "candidate": "(i32.const 1244156)"
+    },
+    {
+      "wat_line": 13883,
+      "kind": "i32_const",
+      "baseline": "(i32.const 1324380)",
+      "candidate": "(i32.const 1324348)"
+    },
+    {
+      "wat_line": 13884,
+      "kind": "i32_const",
+      "baseline": "(i32.const 1324375)",
+      "candidate": "(i32.const 1324343)"
+    },
+    {
+      "wat_line": 13890,
+      "kind": "i32_const",
+      "baseline": "(i32.const 1324375)",
+      "candidate": "(i32.const 1324343)"
+    },
+    {
+      "wat_line": 13900,
+      "kind": "i32_const",
+      "baseline": "(i32.const 1244204)",
+      "candidate": "(i32.const 1244172)"
+    },
+    {
+      "wat_line": 14021,
+      "kind": "i32_const",
+      "baseline": "(i32.const 1326890)",
+      "candidate": "(i32.const 1326858)"
+    },
+    {
+      "wat_line": 14071,
+      "kind": "i32_const",
+      "baseline": "(i32.const 1242316)",
+      "candidate": "(i32.const 1242284)"
+    },
+    {
+      "wat_line": 14087,
+      "kind": "i32_const",
+      "baseline": "(i32.const 1326932)",
+      "candidate": "(i32.const 1326900)"
+    },
+    {
+      "wat_line": 14129,
+      "kind": "i32_const",
+      "baseline": "(i32.const 1326948)",
+      "candidate": "(i32.const 1326916)"
+    },
+    {
+      "wat_line": 14136,
+      "kind": "i32_const",
+      "baseline": "(i32.const 1242348)",
+      "candidate": "(i32.const 1242316)"
+    },
+    {
+      "wat_line": 14152,
+      "kind": "i32_const",
+      "baseline": "(i32.const 1326932)",
+      "candidate": "(i32.const 1326900)"
+    },
+    {
+      "wat_line": 14194,
+      "kind": "i32_const",
+      "baseline": "(i32.const 1326948)",
+      "candidate": "(i32.const 1326916)"
+    },
+    {
+      "wat_line": 14210,
+      "kind": "i32_const",
+      "baseline": "(i32.const 1326932)",
+      "candidate": "(i32.const 1326900)"
+    },
+    {
+      "wat_line": 14252,
+      "kind": "i32_const",
+      "baseline": "(i32.const 1326948)",
+      "candidate": "(i32.const 1326916)"
+    },
+    {
+      "wat_line": 14266,
+      "kind": "i32_const",
+      "baseline": "(i32.const 1242220)",
+      "candidate": "(i32.const 1242188)"
+    },
+    {
+      "wat_line": 14273,
+      "kind": "i32_const",
+      "baseline": "(i32.const 1242204)",
+      "candidate": "(i32.const 1242172)"
+    },
+    {
+      "wat_line": 14280,
+      "kind": "i32_const",
+      "baseline": "(i32.const 1241924)",
+      "candidate": "(i32.const 1241892)"
+    },
+    {
+      "wat_line": 14287,
+      "kind": "i32_const",
+      "baseline": "(i32.const 1241908)",
+      "candidate": "(i32.const 1241876)"
+    },
+    {
+      "wat_line": 14294,
+      "kind": "i32_const",
+      "baseline": "(i32.const 1241892)",
+      "candidate": "(i32.const 1241860)"
+    },
+    {
+      "wat_line": 14310,
+      "kind": "i32_const",
+      "baseline": "(i32.const 1326932)",
+      "candidate": "(i32.const 1326900)"
+    },
+    {
+      "wat_line": 14357,
+      "kind": "i32_const",
+      "baseline": "(i32.const 1326948)",
+      "candidate": "(i32.const 1326916)"
+    },
+    {
+      "wat_line": 14364,
+      "kind": "i32_const",
+      "baseline": "(i32.const 1241796)",
+      "candidate": "(i32.const 1241764)"
+    },
+    {
+      "wat_line": 14471,
+      "kind": "i32_const",
+      "baseline": "(i32.const 1243636)",
+      "candidate": "(i32.const 1243604)"
+    },
+    {
+      "wat_line": 14479,
+      "kind": "i32_const",
+      "baseline": "(i32.const 1243588)",
+      "candidate": "(i32.const 1243556)"
+    },
+    {
+      "wat_line": 14518,
+      "kind": "i32_const",
+      "baseline": "(i32.const 1326890)",
+      "candidate": "(i32.const 1326858)"
+    },
+    {
+      "wat_line": 14614,
+      "kind": "i32_const",
+      "baseline": "(i32.const 1243876)",
+      "candidate": "(i32.const 1243844)"
+    },
+    {
+      "wat_line": 14622,
+      "kind": "i32_const",
+      "baseline": "(i32.const 1243828)",
+      "candidate": "(i32.const 1243796)"
+    },
+    {
+      "wat_line": 14686,
+      "kind": "i32_const",
+      "baseline": "(i32.const 1326890)",
+      "candidate": "(i32.const 1326858)"
+    },
+    {
+      "wat_line": 15036,
+      "kind": "memory_offset",
+      "baseline": "(i32.load16_u offset=1275728 align=1",
+      "candidate": "(i32.load16_u offset=1275696 align=1"
+    },
+    {
+      "wat_line": 15069,
+      "kind": "memory_offset",
+      "baseline": "(i32.load16_u offset=1275728 align=1",
+      "candidate": "(i32.load16_u offset=1275696 align=1"
+    },
+    {
+      "wat_line": 15123,
+      "kind": "memory_offset",
+      "baseline": "(i32.load8_u offset=1275729",
+      "candidate": "(i32.load8_u offset=1275697"
+    },
+    {
+      "wat_line": 15162,
+      "kind": "memory_offset",
+      "baseline": "(i32.load8_u offset=1275728",
+      "candidate": "(i32.load8_u offset=1275696"
+    },
+    {
+      "wat_line": 15189,
+      "kind": "memory_offset",
+      "baseline": "(i32.load8_u offset=1275729",
+      "candidate": "(i32.load8_u offset=1275697"
+    },
+    {
+      "wat_line": 15284,
+      "kind": "memory_offset",
+      "baseline": "(i32.load8_u offset=1244046",
+      "candidate": "(i32.load8_u offset=1244014"
+    },
+    {
+      "wat_line": 15290,
+      "kind": "memory_offset",
+      "baseline": "(i32.load16_u offset=1244044 align=1",
+      "candidate": "(i32.load16_u offset=1244012 align=1"
+    },
+    {
+      "wat_line": 15314,
+      "kind": "i32_const",
+      "baseline": "(i32.const 1324380)",
+      "candidate": "(i32.const 1324348)"
+    },
+    {
+      "wat_line": 15315,
+      "kind": "i32_const",
+      "baseline": "(i32.const 1324375)",
+      "candidate": "(i32.const 1324343)"
+    },
+    {
+      "wat_line": 15328,
+      "kind": "i32_const",
+      "baseline": "(i32.const 1244076)",
+      "candidate": "(i32.const 1244044)"
+    },
+    {
+      "wat_line": 15447,
+      "kind": "i32_const",
+      "baseline": "(i32.const 1326890)",
+      "candidate": "(i32.const 1326858)"
+    },
+    {
+      "wat_line": 15525,
+      "kind": "i32_const",
+      "baseline": "(i32.const 1326932)",
+      "candidate": "(i32.const 1326900)"
+    },
+    {
+      "wat_line": 15567,
+      "kind": "i32_const",
+      "baseline": "(i32.const 1326948)",
+      "candidate": "(i32.const 1326916)"
+    },
+    {
+      "wat_line": 15574,
+      "kind": "i32_const",
+      "baseline": "(i32.const 1243756)",
+      "candidate": "(i32.const 1243724)"
+    },
+    {
+      "wat_line": 15590,
+      "kind": "i32_const",
+      "baseline": "(i32.const 1326932)",
+      "candidate": "(i32.const 1326900)"
+    },
+    {
+      "wat_line": 15632,
+      "kind": "i32_const",
+      "baseline": "(i32.const 1326948)",
+      "candidate": "(i32.const 1326916)"
+    },
+    {
+      "wat_line": 15639,
+      "kind": "i32_const",
+      "baseline": "(i32.const 1243772)",
+      "candidate": "(i32.const 1243740)"
+    },
+    {
+      "wat_line": 15646,
+      "kind": "i32_const",
+      "baseline": "(i32.const 1243996)",
+      "candidate": "(i32.const 1243964)"
+    },
+    {
+      "wat_line": 15653,
+      "kind": "i32_const",
+      "baseline": "(i32.const 1244012)",
+      "candidate": "(i32.const 1243980)"
+    },
+    {
+      "wat_line": 15660,
+      "kind": "i32_const",
+      "baseline": "(i32.const 1244028)",
+      "candidate": "(i32.const 1243996)"
+    },
+    {
+      "wat_line": 15688,
+      "kind": "i32_const",
+      "baseline": "(i32.const 1326932)",
+      "candidate": "(i32.const 1326900)"
+    },
+    {
+      "wat_line": 15730,
+      "kind": "i32_const",
+      "baseline": "(i32.const 1326948)",
+      "candidate": "(i32.const 1326916)"
+    },
+    {
+      "wat_line": 15831,
+      "kind": "i32_const",
+      "baseline": "(i32.const 1326932)",
+      "candidate": "(i32.const 1326900)"
+    },
+    {
+      "wat_line": 15883,
+      "kind": "i32_const",
+      "baseline": "(i32.const 1326948)",
+      "candidate": "(i32.const 1326916)"
+    },
+    {
+      "wat_line": 15906,
+      "kind": "i32_const",
+      "baseline": "(i32.const 1326932)",
+      "candidate": "(i32.const 1326900)"
+    },
+    {
+      "wat_line": 15958,
+      "kind": "i32_const",
+      "baseline": "(i32.const 1326948)",
+      "candidate": "(i32.const 1326916)"
+    },
+    {
+      "wat_line": 15974,
+      "kind": "i32_const",
+      "baseline": "(i32.const 1326932)",
+      "candidate": "(i32.const 1326900)"
+    },
+    {
+      "wat_line": 16026,
+      "kind": "i32_const",
+      "baseline": "(i32.const 1326948)",
+      "candidate": "(i32.const 1326916)"
+    },
+    {
+      "wat_line": 16042,
+      "kind": "i32_const",
+      "baseline": "(i32.const 1326932)",
+      "candidate": "(i32.const 1326900)"
+    },
+    {
+      "wat_line": 16094,
+      "kind": "i32_const",
+      "baseline": "(i32.const 1326948)",
+      "candidate": "(i32.const 1326916)"
+    },
+    {
+      "wat_line": 16110,
+      "kind": "i32_const",
+      "baseline": "(i32.const 1326932)",
+      "candidate": "(i32.const 1326900)"
+    },
+    {
+      "wat_line": 16162,
+      "kind": "i32_const",
+      "baseline": "(i32.const 1326948)",
+      "candidate": "(i32.const 1326916)"
+    },
+    {
+      "wat_line": 16178,
+      "kind": "i32_const",
+      "baseline": "(i32.const 1326932)",
+      "candidate": "(i32.const 1326900)"
+    },
+    {
+      "wat_line": 16230,
+      "kind": "i32_const",
+      "baseline": "(i32.const 1326948)",
+      "candidate": "(i32.const 1326916)"
+    },
+    {
+      "wat_line": 16246,
+      "kind": "i32_const",
+      "baseline": "(i32.const 1326932)",
+      "candidate": "(i32.const 1326900)"
+    },
+    {
+      "wat_line": 16298,
+      "kind": "i32_const",
+      "baseline": "(i32.const 1326948)",
+      "candidate": "(i32.const 1326916)"
+    },
+    {
+      "wat_line": 16305,
+      "kind": "i32_const",
+      "baseline": "(i32.const 1244896)",
+      "candidate": "(i32.const 1244864)"
+    },
+    {
+      "wat_line": 16312,
+      "kind": "i32_const",
+      "baseline": "(i32.const 1244880)",
+      "candidate": "(i32.const 1244848)"
+    },
+    {
+      "wat_line": 16357,
+      "kind": "i32_const",
+      "baseline": "(i32.const 1244492)",
+      "candidate": "(i32.const 1244460)"
+    },
+    {
+      "wat_line": 16405,
+      "kind": "i32_const",
+      "baseline": "(i32.const 1326890)",
+      "candidate": "(i32.const 1326858)"
+    },
+    {
+      "wat_line": 16445,
+      "kind": "i32_const",
+      "baseline": "(i32.const 1244660)",
+      "candidate": "(i32.const 1244628)"
+    },
+    {
+      "wat_line": 16453,
+      "kind": "i32_const",
+      "baseline": "(i32.const 1244612)",
+      "candidate": "(i32.const 1244580)"
+    },
+    {
+      "wat_line": 16531,
+      "kind": "i32_const",
+      "baseline": "(i32.const 1326890)",
+      "candidate": "(i32.const 1326858)"
+    },
+    {
+      "wat_line": 16593,
+      "kind": "i32_const",
+      "baseline": "(i32.const 1244660)",
+      "candidate": "(i32.const 1244628)"
+    },
+    {
+      "wat_line": 16601,
+      "kind": "i32_const",
+      "baseline": "(i32.const 1244832)",
+      "candidate": "(i32.const 1244800)"
+    },
+    {
+      "wat_line": 16664,
+      "kind": "i32_const",
+      "baseline": "(i32.const 1326890)",
+      "candidate": "(i32.const 1326858)"
+    },
+    {
+      "wat_line": 16704,
+      "kind": "i32_const",
+      "baseline": "(i32.const 1326932)",
+      "candidate": "(i32.const 1326900)"
+    },
+    {
+      "wat_line": 16746,
+      "kind": "i32_const",
+      "baseline": "(i32.const 1326948)",
+      "candidate": "(i32.const 1326916)"
+    },
+    {
+      "wat_line": 16762,
+      "kind": "i32_const",
+      "baseline": "(i32.const 1326932)",
+      "candidate": "(i32.const 1326900)"
+    },
+    {
+      "wat_line": 16804,
+      "kind": "i32_const",
+      "baseline": "(i32.const 1326948)",
+      "candidate": "(i32.const 1326916)"
+    },
+    {
+      "wat_line": 16820,
+      "kind": "i32_const",
+      "baseline": "(i32.const 1326932)",
+      "candidate": "(i32.const 1326900)"
+    },
+    {
+      "wat_line": 16862,
+      "kind": "i32_const",
+      "baseline": "(i32.const 1326948)",
+      "candidate": "(i32.const 1326916)"
+    },
+    {
+      "wat_line": 16892,
+      "kind": "i32_const",
+      "baseline": "(i32.const 1242236)",
+      "candidate": "(i32.const 1242204)"
+    }
+  ],
+  "other": [],
+  "scope": "Static constant and memory-offset values differ; not full-artifact equality or a performance result."
+}

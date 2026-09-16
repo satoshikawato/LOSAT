@@ -4,7 +4,7 @@ const assert = require("node:assert/strict");
 const crypto = require("node:crypto");
 const { performance } = require("node:perf_hooks");
 const { WASI } = require("node:wasi");
-const { inspectArtifact } = require("./wasi_artifact");
+const { prepareArtifact } = require("./wasi_artifact");
 const { prepareThreadHost } = require("./wasi_thread_host");
 const { runPair } = require("./check_wasi_reactor");
 const hash = bytes => crypto.createHash("sha256").update(bytes).digest("hex");
@@ -33,9 +33,11 @@ const hash = bytes => crypto.createHash("sha256").update(bytes).digest("hex");
     prepared = await prepareThreadHost(artifact, kind); ({ timings, identity } = prepared);
   } else {
     const start = performance.now(), bytes = fs.readFileSync(artifact);
-    identity = inspectArtifact(bytes, kind);
-    const inspected = performance.now(); module = await WebAssembly.compile(bytes);
-    timings = { validation_including_raw_compile_seconds:(inspected-start)/1000, guard_seconds:0, second_compile_seconds:(performance.now()-inspected)/1000 };
+    // NCBI reference: c++/src/app/blast/blastn_app.cpp:172-176
+    // CATCH_ALL(status); ... return status;
+    // Serial execution owns the inspected module; no second compile is requested.
+    ({ module, identity } = prepareArtifact(bytes, kind));
+    timings = { validation_including_raw_compile_seconds:(performance.now()-start)/1000, guard_seconds:0, second_compile_seconds:0 };
   }
   // NCBI reference: c++/src/algo/blast/api/seqsrc_multiseq.cpp:175-180
   // m_iTotalLength += (Int8) (*iter)->length;

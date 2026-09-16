@@ -1,0 +1,114 @@
+[
+  {
+    "case": "MjeNMV.MelaMJNV.tlosatx",
+    "threads": 8,
+    "session": 0,
+    "wall_seconds": {
+      "baseline_samples": [
+        9.472270095999999,
+        9.511463270999993,
+        9.414975230999996
+      ],
+      "candidate_samples": [
+        9.294128050999998,
+        9.232743169000003,
+        9.999024086
+      ],
+      "baseline_median": 9.472270095999999,
+      "candidate_median": 9.294128050999998,
+      "candidate_over_baseline": 0.9811933102419421,
+      "regression_limit": 0.4736135048,
+      "pass_guard": true
+    },
+    "process_lifetime_peak_rss_bytes": {
+      "baseline_samples": [
+        383590400,
+        463572992,
+        545505280
+      ],
+      "candidate_samples": [
+        383696896,
+        469639168,
+        552464384
+      ],
+      "baseline_median": 463572992,
+      "candidate_median": 469639168,
+      "candidate_over_baseline": 1.0130856976240756,
+      "regression_limit": 46357299.2,
+      "pass_guard": true
+    },
+    "memory_bytes": {
+      "baseline_samples": [
+        95485952,
+        95485952,
+        94371840
+      ],
+      "candidate_samples": [
+        95485952,
+        95485952,
+        95485952
+      ],
+      "baseline_median": 95485952,
+      "candidate_median": 95485952,
+      "candidate_over_baseline": 1.0,
+      "regression_limit": 16777216,
+      "pass_guard": true
+    }
+  },
+  {
+    "case": "MjeNMV.MelaMJNV.tlosatx",
+    "threads": 8,
+    "session": 1,
+    "wall_seconds": {
+      "baseline_samples": [
+        9.518283301000004,
+        9.518783647999998,
+        9.447842717
+      ],
+      "candidate_samples": [
+        9.660853924,
+        10.695297047,
+        10.033301404999994
+      ],
+      "baseline_median": 9.518283301000004,
+      "candidate_median": 10.033301404999994,
+      "candidate_over_baseline": 1.054108297443288,
+      "regression_limit": 0.4759141650500002,
+      "pass_guard": false
+    },
+    "process_lifetime_peak_rss_bytes": {
+      "baseline_samples": [
+        385085440,
+        463732736,
+        545423360
+      ],
+      "candidate_samples": [
+        383750144,
+        458924032,
+        544346112
+      ],
+      "baseline_median": 463732736,
+      "candidate_median": 458924032,
+      "candidate_over_baseline": 0.9896304409270774,
+      "regression_limit": 46373273.6,
+      "pass_guard": true
+    },
+    "memory_bytes": {
+      "baseline_samples": [
+        94371840,
+        94371840,
+        94371840
+      ],
+      "candidate_samples": [
+        95485952,
+        95485952,
+        95485952
+      ],
+      "baseline_median": 94371840,
+      "candidate_median": 95485952,
+      "candidate_over_baseline": 1.0118055555555556,
+      "regression_limit": 16777216,
+      "pass_guard": true
+    }
+  }
+]

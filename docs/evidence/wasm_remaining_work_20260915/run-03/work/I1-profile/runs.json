@@ -1,0 +1,39 @@
+[
+  {
+    "status": "PASS",
+    "reason": null,
+    "exit_status": 0,
+    "wall_seconds": 37.93580908800004,
+    "monotonic_start": 1429.625551414,
+    "monotonic_end": 1467.561360502,
+    "realtime_seconds": 39.37682771682739,
+    "boottime_seconds": 37.93581312299989,
+    "gnu_elapsed_seconds": 39.36,
+    "process_ended_utc": "2026-09-15T23:11:08Z",
+    "watchdog_clocks": {
+      "started": {
+        "monotonic": 1429.632741297,
+        "realtime": 1789513829.6210237
+      }
+    },
+    "realtime_clock_agreement": true,
+    "monotonic_clock_agreement": true,
+    "elapsed_clock": "CLOCK_MONOTONIC; realtime and GNU elapsed are adjustable-clock diagnostics",
+    "cpu_user_seconds": 27.02,
+    "cpu_system_seconds": 7.6,
+    "peak_rss_bytes": 314327040,
+    "output": "/mnt/c/users/genom/github/losat/docs/evidence/wasm_remaining_work_20260915/run-03/work/I1-profile/MjeNMV.MelaMJNV.tlosatx/threaded-n8/output.txt",
+    "raw_output_sha256": "b309f77fee038f0559d870737ebeba732c11eba4f7e495f045acbfb831817fd7",
+    "raw_output_bytes": 1728659,
+    "started_utc": "2026-09-15T23:10:29Z",
+    "ended_utc": "2026-09-15T23:11:09Z",
+    "timeout_seconds": 300,
+    "unavailable_metrics": {},
+    "case": "MjeNMV.MelaMJNV.tlosatx",
+    "kind": "threaded",
+    "threads": 8,
+    "artifact_sha256": "86ab290585570df5f4cf1dd295e8c460638c441a3239e3b0a855598115977374",
+    "oracle_output": "/mnt/c/users/genom/github/losat/docs/evidence/wasm_remaining_work_20260915/run-03/work/oracles/MjeNMV.MelaMJNV.tlosatx/output.txt",
+    "raw_equal": true
+  }
+]

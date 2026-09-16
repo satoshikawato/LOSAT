@@ -1,0 +1,27 @@
+{
+  "cwd": "/mnt/c/users/genom/github/losat",
+  "environment_overrides": {
+    "LOSAT_WASI_THREAD_CAP": "8",
+    "LOSAT_WASM_MEMORY_MAXIMUM_PAGES": "16384",
+    "NODE_NO_WARNINGS": "1"
+  },
+  "ordered_argv": [
+    "/home/kawato/micromamba/bin/blastn",
+    "-query",
+    "/mnt/c/users/genom/github/losat/docs/evidence/wasm_remaining_work_20260915/run-03/work/boundary-fixtures/nuc3.fasta",
+    "-subject",
+    "/mnt/c/users/genom/github/losat/docs/evidence/wasm_remaining_work_20260915/run-03/work/boundary-fixtures/unequal.fasta",
+    "-outfmt",
+    "6",
+    "-task",
+    "blastn",
+    "-word_size",
+    "7",
+    "-out",
+    "/mnt/c/users/genom/github/losat/docs/evidence/wasm_remaining_work_20260915/run-03/work/oracles/word7/output.txt",
+    "-num_threads",
+    "1"
+  ],
+  "shell": false,
+  "sink": "/mnt/c/users/genom/github/losat/docs/evidence/wasm_remaining_work_20260915/run-03/work/oracles/word7/output.txt"
+}

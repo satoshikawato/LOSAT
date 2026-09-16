@@ -45,7 +45,11 @@ const body = (instructions) => {
   return [...uleb(bytes.length), ...bytes];
 };
 
-function command({ threaded, status = 0, worker = null }) {
+// NCBI reference: c++/src/app/blast/blastn_app.cpp:172-176
+// CATCH_ALL(status); ... return status;
+// Entry/export/memory variations exercise Wasm ABI inspection only.
+function command({ threaded, status = 0, worker = null, entry = "_start",
+  aliases = [], exportMemory = true, memoryLimits = [1, 0, 1] }) {
   const types = vector([
     [0x60, 1, 0x7f, 0],                 // proc_exit(i32)
     [0x60, 0, 0],                       // _start()
@@ -57,7 +61,10 @@ function command({ threaded, status = 0, worker = null }) {
     imports.push([...name("env"), ...name("memory"), 2, 3, 21, ...uleb(16384)]);
     imports.push([...name("wasi"), ...name("thread-spawn"), 0, 2]);
   }
-  const exports = [[...name("memory"), 2, 0], [...name("_start"), 0, threaded ? 2 : 1]];
+  const exports = exportMemory ? [[...name("memory"), 2, 0]] : [];
+  for (const exported of [entry, ...aliases].filter(Boolean)) {
+    exports.push([...name(exported), 0, threaded ? 2 : 1]);
+  }
   const functions = [1];
   let main = [...i32(status), 0x10, 0];
   const bodies = [];
@@ -83,7 +90,7 @@ function command({ threaded, status = 0, worker = null }) {
     ...section(1, types),
     ...section(2, vector(imports)),
     ...section(3, vector(functions.map((type) => [type]))),
-    ...(threaded ? [] : section(5, [1, 0, 1])),
+    ...(threaded ? [] : section(5, memoryLimits)),
     ...section(7, vector(exports)),
     ...section(10, vector([body(main), ...bodies])),
   ]);
@@ -138,4 +145,67 @@ test("successful worker releases its parent and exits successfully", () => {
   const result = run({ threaded: true, worker: "success" });
   assert.equal(result.signal, null, result.stderr);
   assert.equal(result.status, 0, result.stderr);
+});
+
+// NCBI reference: c++/src/app/blast/blastn_app.cpp:172-176
+// CATCH_ALL(status); ... return status;
+// Check the Wasm-host preparation boundary independently from search behavior:
+// metadata stays serializable and the returned module executes with the same status.
+test("prepared serial module preserves metadata and executes the inspected bytes", async () => {
+  const { prepareArtifact, inspectArtifact } = require("./wasi_artifact");
+  const { WASI } = require("node:wasi");
+  const bytes = command({ threaded: false, status: 23 });
+  const prepared = prepareArtifact(bytes, "serial-command");
+  assert.ok(prepared.module instanceof WebAssembly.Module);
+  assert.deepEqual(prepared.identity, inspectArtifact(bytes, "serial-command"));
+  assert.deepEqual(Object.keys(JSON.parse(JSON.stringify(prepared.identity))),
+    ["kind", "sha256", "imports", "exports", "memory"]);
+  const wasi = new WASI({ version: "preview1", returnOnExit: true });
+  const instance = await WebAssembly.instantiate(prepared.module, {
+    wasi_snapshot_preview1: wasi.wasiImport,
+  });
+  assert.equal(wasi.start(instance), 23);
+  const secondWasi = new WASI({ version: "preview1", returnOnExit: true });
+  const second = await WebAssembly.instantiate(prepared.module, {
+    wasi_snapshot_preview1: secondWasi.wasiImport,
+  });
+  assert.notEqual(second.exports.memory, instance.exports.memory);
+  new Uint8Array(instance.exports.memory.buffer)[0] = 99;
+  assert.equal(new Uint8Array(second.exports.memory.buffer)[0], 0);
+  assert.equal(secondWasi.start(second), 23);
+});
+
+// NCBI reference: c++/src/app/blast/blastn_app.cpp:172-176
+// CATCH_ALL(status); ... return status;
+// Wasm validation and ABI errors remain errors in both public entry points.
+test("artifact preparation preserves validation and ABI rejection", () => {
+  const { prepareArtifact, inspectArtifact } = require("./wasi_artifact");
+  for (const inspect of [prepareArtifact, inspectArtifact]) {
+    const api = ["losat_web_run_pair", "losat_web_alloc", "losat_web_dealloc",
+      "losat_web_result_ptr", "losat_web_result_len", "losat_web_error_ptr", "losat_web_error_len"];
+    for (const threaded of [false, true]) {
+      const result = inspect(command({ threaded, entry: "_initialize", aliases: api }),
+        `${threaded ? "threaded" : "serial"}-reactor`);
+      assert.equal((result.identity || result).kind, `${threaded ? "threaded" : "serial"}-reactor`);
+    }
+    assert.throws(() => inspect(command({ threaded: false, entry: "_initialize", aliases: api.slice(1) })),
+      /reactor is missing direct API exports/);
+    assert.throws(() => inspect(command({ threaded: false, entry: null })),
+      /exactly one of _start or _initialize/);
+    assert.throws(() => inspect(command({ threaded: false, aliases: ["_initialize", ...api] })),
+      /exactly one of _start or _initialize/);
+    assert.throws(() => inspect(command({ threaded: false, exportMemory: false })),
+      /must export its single memory/);
+    assert.throws(() => inspect(command({ threaded: false, memoryLimits: [1, 1, 2, 1] })),
+      WebAssembly.CompileError);
+    assert.throws(() => inspect(command({ threaded: false, memoryLimits: [1, 3, 1, 2] })),
+      /inconsistent serial artifact thread interface/);
+    assert.throws(() => inspect(Buffer.from([0, 97, 115])), WebAssembly.CompileError);
+    assert.throws(() => inspect(command({ threaded: false }), "serial-reactor"),
+      /expected serial-reactor, got serial-command/);
+    assert.throws(() => inspect(command({ threaded: true }), "serial-command"),
+      /expected serial-command, got threaded-command/);
+    assert.throws(() => inspect(command({ threaded: true, worker: "missing-export" })),
+      /requires wasi_thread_start/);
+  }
 });

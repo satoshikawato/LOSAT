@@ -1,0 +1,14 @@
+{
+  "status": "PASS",
+  "invocation": [
+    "node",
+    "tests/web/losat-worker-lifecycle.test.mjs"
+  ],
+  "cwd": "/mnt/c/users/genom/github/gbdraw",
+  "observed_terminal_line": "LOSAT Worker lifecycle checks passed",
+  "evidence_kind": "parent tool result transcription; exit 0",
+  "sources": {
+    "/mnt/c/users/genom/github/gbdraw/tests/web/losat-worker-lifecycle.test.mjs": "404cc41ad842a859a47d2db815c459861c652aa18a76b161a7d1d370293040c9",
+    "/mnt/c/users/genom/github/gbdraw/gbdraw/web/js/services/losat.js": "45dc6a52ca2a9fac67f05a7a13b8de82fd1d90c49c45f7bb176bafae7858fff9"
+  }
+}

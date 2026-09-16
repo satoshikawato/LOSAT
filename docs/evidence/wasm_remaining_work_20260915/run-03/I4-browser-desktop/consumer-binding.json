@@ -1,0 +1,24 @@
+{
+  "consumer": {
+    "original_root": "/mnt/c/users/genom/github/gbdraw/gbdraw/web",
+    "snapshot_root": "/mnt/c/users/genom/github/losat/docs/evidence/wasm_remaining_work_20260915/run-03/browser-consumer-source",
+    "files": {
+      "js/services/losat.js": "45dc6a52ca2a9fac67f05a7a13b8de82fd1d90c49c45f7bb176bafae7858fff9",
+      "js/config.js": "27fc26d8f5b682c65eca0eff9d7e9f490a104ff6aa454a6a9ce95f15d110fe20",
+      "js/services/losat-runtime.js": "8a8588556aab21df964e03769c645656522e62acc2dc045ebb0b26415623a99a",
+      "js/workers/losat-threaded-worker.js": "feb8c56dbd508706593b91690fea9078c06503adf5ee95349e9938fba3a4fd32",
+      "vendor/browser_wasi_shim/dist/index.js": "7e2fd52ee3f728bb0b1d6e449724e0f13e3d586bb25bde6e02a66366175b5605",
+      "vendor/browser_wasi_shim/dist/fs_opfs.js": "4b96aaeb5ac5986cf802cbf22b975c656682d22a38248160c96fc2ded5644869",
+      "vendor/browser_wasi_shim/dist/fd.js": "9e82e1fc1bfd3e3573f64349dc42b4b624ed61d24e5c553f2bb4d041444f166c",
+      "vendor/browser_wasi_shim/dist/fs_mem.js": "85dbc9e0ee784d9ff8b55452644e00bf7058e32355aab974f8b71d7d85772324",
+      "vendor/browser_wasi_shim/dist/wasi.js": "168eb977a826f75ab0c39f9322f78cc58dbd5b233019ad1d6a7e940af8a7c4aa",
+      "vendor/browser_wasi_shim/dist/strace.js": "ece435d3784d928d02bff4d015b7cb686f8c06de8536ff9f8ebc38a8f403a3be",
+      "vendor/browser_wasi_shim/dist/wasi_defs.js": "0db0f42ba330749a7b05095ea1fd0ff63fd2b30e84cead30fe4c28359d15f194",
+      "vendor/browser_wasi_shim/dist/debug.js": "a91848ee180529e2a60c05dfb9584cad19cd4e1c6f391fdb76a938bcae4c0328",
+      "js/workers/losat-wasi-thread-worker.js": "eb6dcaeddecb995fa76e1d7ae39ac7a1e635cca1dad46c52a3db131916ef7c02",
+      "js/workers/losat-worker.js": "5098d7d26f59c60578c59104dbfcaa52040d7f95581b084d8696aa84d65ca43c",
+      "index.html": "ff6c082a0f80f42f08382b40b4862427d013fffaa77ea56d8eabb1bdd7dfdc63"
+    }
+  },
+  "harness_sha256": "2d699e74b31e6c9719f90c6f0ff0e4e6a102d199c38259eb5b3a4fc2ab52de88"
+}

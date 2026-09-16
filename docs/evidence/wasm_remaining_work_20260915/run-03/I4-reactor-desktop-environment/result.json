@@ -1,0 +1,9 @@
+{
+  "returncode": 0,
+  "status": "PASS",
+  "background_mean_cpu_cores": 0.03565557042441366,
+  "background_peak_interval_cpu_cores": 0.5378897643240048,
+  "seconds": 1135.0260146809997,
+  "policy_sha256": "a9191d157757f2d5272602c3160aa4436b7ffb9a02deb76a8cc6dcba40908632",
+  "caveat": "CPU bounds do not establish absence of I/O/cache/frequency interference"
+}

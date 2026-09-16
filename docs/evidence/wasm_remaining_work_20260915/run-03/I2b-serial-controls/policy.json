@@ -1,0 +1,68 @@
+{
+  "versions": [
+    "baselinebody",
+    "I2bbody"
+  ],
+  "body_boundary": "after CLI parse, immediately before Rust dispatch through preparation/search/output return",
+  "body_instrumentation": "two clock reads and one post-boundary stderr print",
+  "warmup_per_version": 1,
+  "pairs": 3,
+  "order": [
+    "AB",
+    "BA",
+    "AB"
+  ],
+  "threads": [
+    1
+  ],
+  "kinds": [
+    "serial"
+  ],
+  "cases": [
+    "MjeNMV.MelaMJNV.tlosatx",
+    "AP027280.AP027280.tlosatx"
+  ],
+  "flags": [],
+  "affinity": [
+    0,
+    1,
+    2,
+    3,
+    4,
+    5,
+    6,
+    7,
+    8,
+    9,
+    10,
+    11,
+    12,
+    13,
+    14,
+    15,
+    16,
+    17,
+    18,
+    19,
+    20,
+    21,
+    22,
+    23,
+    24,
+    25,
+    26,
+    27,
+    28,
+    29,
+    30,
+    31
+  ],
+  "timeout_seconds": 300,
+  "concurrency": "exclusive",
+  "time_guard": "max(5%, 50 ms) for body and whole process",
+  "rss_guard": "max(10%, 16 MiB)",
+  "status": "REGRESSION_FAIL",
+  "numerical_guard_status": "REGRESSION_FAIL",
+  "acceptance_status": "INVALID_EXTERNAL_WORKLOAD_OVERLAP",
+  "external_overlap": "external-overlap.json"
+}

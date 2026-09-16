@@ -1,0 +1,20 @@
+{
+  "argv": [
+    "node",
+    "--test",
+    "test_wasi_runners.js",
+    "test_wasi_shared_memory.js"
+  ],
+  "cwd": "/tmp/losat-remaining-20260915/H1-source/LOSAT/tests",
+  "status": "PASS",
+  "tests": 19,
+  "failed": 0,
+  "execution": "outside sandbox after unchanged baseline and candidate both failed spawnSync EPERM inside sandbox",
+  "log": "H1-node-tests-unsandboxed.log",
+  "source_manifest": "H1-source-manifest.json",
+  "excluded_failures": [
+    "H1-node-tests.log",
+    "H1-node-direct.log",
+    "baseline-node-direct.log"
+  ]
+}

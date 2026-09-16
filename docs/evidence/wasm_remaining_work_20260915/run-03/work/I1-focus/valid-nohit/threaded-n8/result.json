@@ -1,0 +1,31 @@
+{
+  "boottime_seconds": 0.9729486610001459,
+  "cpu_system_seconds": 0.09,
+  "cpu_user_seconds": 0.34,
+  "elapsed_clock": "CLOCK_MONOTONIC; realtime and GNU elapsed are adjustable-clock diagnostics",
+  "ended_utc": "2026-09-15T23:09:55Z",
+  "exit_status": 0,
+  "gnu_elapsed_seconds": 0.95,
+  "monotonic_clock_agreement": true,
+  "monotonic_end": 1397.176352802,
+  "monotonic_start": 1396.203406098,
+  "output": "/mnt/c/users/genom/github/losat/docs/evidence/wasm_remaining_work_20260915/run-03/work/I1-focus/valid-nohit/threaded-n8/output.txt",
+  "peak_rss_bytes": 207400960,
+  "process_ended_utc": "2026-09-15T23:09:55Z",
+  "raw_output_bytes": 0,
+  "raw_output_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+  "realtime_clock_agreement": true,
+  "realtime_seconds": 0.9729502201080322,
+  "reason": null,
+  "started_utc": "2026-09-15T23:09:54Z",
+  "status": "PASS",
+  "timeout_seconds": 300,
+  "unavailable_metrics": {},
+  "wall_seconds": 0.9729467040001509,
+  "watchdog_clocks": {
+    "started": {
+      "monotonic": 1396.212675077,
+      "realtime": 1789513794.936006
+    }
+  }
+}

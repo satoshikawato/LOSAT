@@ -1,0 +1,26 @@
+[
+  {
+    "archive": "verification.tar.gz",
+    "sha256": "92fe4f5eec8e834795d9d86e4e48ee52bfbd0d9fce1abd9aa339adc9c1529336",
+    "members": 996,
+    "status": "PASS"
+  },
+  {
+    "archive": "measurement.tar.gz",
+    "sha256": "0570a65347b6161cf463b0f646520353c45f5e9ff4d979ce48e2ccc32e33968c",
+    "members": 1029,
+    "status": "PASS"
+  },
+  {
+    "archive": "sources-and-diagnostics.tar.gz",
+    "sha256": "190804b9816d8f4d785d4662cab6277983db008a12e51930f2f6798c1abf1ec8",
+    "members": 182,
+    "status": "PASS"
+  },
+  {
+    "archive": "experimental-artifacts.tar.gz",
+    "sha256": "3e6ed4a6d2658aaafd373e21426a50c820616aaeb8dc5a47ac278aa44368fe2a",
+    "members": 12,
+    "status": "PASS"
+  }
+]

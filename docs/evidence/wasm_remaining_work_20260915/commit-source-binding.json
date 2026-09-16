@@ -1,0 +1,35 @@
+{
+  "normalization": "CRLF to LF in the Git index only; working files unchanged",
+  "files": [
+    {
+      "path": "LOSAT/src/algorithm/tblastx/sum_stats_linking/linking.rs",
+      "working_sha256": "7d23846ca169d5dadf355e0f2de8eefbc58d7f348aef64b258ae2eb5f07cf9ce",
+      "staged_content_sha256": "11fd4826ba95e337fdce1e1c087667903825b61d3048df79da777f826fb77d2b"
+    },
+    {
+      "path": "LOSAT/tests/benchmark_wasi_reuse.js",
+      "working_sha256": "8e02902c54c6b6aa24776ff0c745c5b8c43d227379a86c33d4ec0ac25ef2a2ae",
+      "staged_content_sha256": "8e02902c54c6b6aa24776ff0c745c5b8c43d227379a86c33d4ec0ac25ef2a2ae"
+    },
+    {
+      "path": "LOSAT/tests/check_wasi_api_limits.js",
+      "working_sha256": "34c3e1da1ced0aaf468baef2832fdbeb2cf93a1d027fbcf88d8a7dbd9d015a2c",
+      "staged_content_sha256": "34c3e1da1ced0aaf468baef2832fdbeb2cf93a1d027fbcf88d8a7dbd9d015a2c"
+    },
+    {
+      "path": "LOSAT/tests/run_losat_wasi.js",
+      "working_sha256": "4210e97a8b92ffba4c100558cf15ee54e62e1b75586f54a8fadbaced959bb610",
+      "staged_content_sha256": "4210e97a8b92ffba4c100558cf15ee54e62e1b75586f54a8fadbaced959bb610"
+    },
+    {
+      "path": "LOSAT/tests/test_wasi_runners.js",
+      "working_sha256": "ada5b00fbd89b7cd4c58256b3b7e2d7f54de863c55ba7abd649950c1ce8a2ce3",
+      "staged_content_sha256": "ada5b00fbd89b7cd4c58256b3b7e2d7f54de863c55ba7abd649950c1ce8a2ce3"
+    },
+    {
+      "path": "LOSAT/tests/wasi_artifact.js",
+      "working_sha256": "5f8dab1a7500c4e7a1f856e16b7edf125ce28dbf89b9ad711590c5ffcbe017b5",
+      "staged_content_sha256": "5f8dab1a7500c4e7a1f856e16b7edf125ce28dbf89b9ad711590c5ffcbe017b5"
+    }
+  ]
+}

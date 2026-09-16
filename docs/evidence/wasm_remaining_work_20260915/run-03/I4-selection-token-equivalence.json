@@ -1,0 +1,10 @@
+{
+  "selection_and_trace_tokens_equal": true,
+  "normalization": [
+    "explicit macro state identifiers lose their dollar prefix",
+    "advance dispatch corresponds to original cursor advancement",
+    "macro owner rename",
+    "comments and whitespace excluded; string literals preserved"
+  ],
+  "normalized_sha256": "3454a29fbe26c06b63e48ec76c05ab5a520c24b819c062912f344dac262454b8"
+}

@@ -1,0 +1,33 @@
+{
+  "checks": [
+    {
+      "argv": [
+        "git",
+        "diff",
+        "--check",
+        "--",
+        "LOSAT/src/algorithm/tblastx/sum_stats_linking/linking.rs"
+      ],
+      "returncode": 2,
+      "log": "I4-diff-check-0.log"
+    },
+    {
+      "argv": [
+        "git",
+        "-c",
+        "core.whitespace=cr-at-eol",
+        "diff",
+        "--check",
+        "--",
+        "LOSAT/src/algorithm/tblastx/sum_stats_linking/linking.rs"
+      ],
+      "returncode": 0,
+      "log": "I4-diff-check-1.log"
+    }
+  ],
+  "baseline_crlf_lines": 3006,
+  "production_crlf_lines": 2963,
+  "task_added_lines": 284,
+  "task_added_trailing_whitespace": false,
+  "explanation": "Default git diff check treats preserved pre-existing CRLF as trailing whitespace. No line-ending normalization was performed. Temporary cr-at-eol check passes; task-added lines have no trailing spaces/tabs."
+}

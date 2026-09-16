@@ -1,0 +1,6 @@
+{
+  "reason": "Initial isolated test snapshot omitted tests/fixtures; restored unchanged repository fixture after compile-only failure",
+  "files": {
+    "LOSAT/tests/fixtures/megablast_automatic_xdrop.outfmt6": "2e2fb3ef85081501224f81be0a82cf9715672f5229d3edb162ff114912920873"
+  }
+}

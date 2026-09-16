@@ -4,7 +4,7 @@
 
 const fs = require("fs");
 const { WASI } = require("wasi");
-const { inspectArtifact } = require("./wasi_artifact");
+const { prepareArtifact } = require("./wasi_artifact");
 
 // NCBI reference:
 // ncbi-blast/c++/src/algo/blast/blastinput/cmdline_flags.cpp:46-75
@@ -33,8 +33,8 @@ const wasi = new WASI({
   const bytes = fs.readFileSync(wasmPath);
   // NCBI reference: c++/src/app/blast/blastn_app.cpp:172-176
   // CATCH_ALL(status); return status;
-  inspectArtifact(bytes, "serial-command");
-  const module = await WebAssembly.compile(bytes);
+  // Module reuse is host preparation only; preserve validation and exit status.
+  const { module } = prepareArtifact(bytes, "serial-command");
   const instance = await WebAssembly.instantiate(module, {
     wasi_snapshot_preview1: wasi.wasiImport,
   });

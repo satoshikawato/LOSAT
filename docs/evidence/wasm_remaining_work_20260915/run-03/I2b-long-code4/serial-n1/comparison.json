@@ -1,0 +1,35 @@
+{
+  "status": "PASS",
+  "reason": null,
+  "exit_status": 0,
+  "wall_seconds": 143.40579677200003,
+  "monotonic_start": 2250.869184786,
+  "monotonic_end": 2394.274981558,
+  "realtime_seconds": 152.06102395057678,
+  "boottime_seconds": 143.4057986859998,
+  "gnu_elapsed_seconds": 152.04,
+  "process_ended_utc": "2026-09-16T02:20:22Z",
+  "watchdog_clocks": {
+    "started": {
+      "monotonic": 2250.877154089,
+      "realtime": 1789525070.839914
+    }
+  },
+  "realtime_clock_agreement": false,
+  "monotonic_clock_agreement": true,
+  "elapsed_clock": "CLOCK_MONOTONIC; realtime and GNU elapsed are adjustable-clock diagnostics",
+  "cpu_user_seconds": 152.93,
+  "cpu_system_seconds": 0.14,
+  "peak_rss_bytes": 296652800,
+  "output": "/mnt/c/users/genom/github/losat/docs/evidence/wasm_remaining_work_20260915/run-03/I2b-long-code4/serial-n1/output.txt",
+  "raw_output_sha256": "1da3bfe7d96d50a96726a44e2df98f5e81c05bee9cd655ad51bb8d44aa377963",
+  "raw_output_bytes": 2270680,
+  "started_utc": "2026-09-16T02:17:50Z",
+  "ended_utc": "2026-09-16T02:20:22Z",
+  "timeout_seconds": 1800,
+  "unavailable_metrics": {},
+  "kind": "serial",
+  "threads": 1,
+  "artifact_sha256": "5443e34924a7e3dd0f917bc5d49f12f08f8876db310758994b138df6a2431af7",
+  "raw_equal": true
+}

@@ -1,0 +1,61 @@
+{
+  "versions": [
+    "baseline",
+    "I2b"
+  ],
+  "mode": "compiled-module",
+  "kind": "threaded-command",
+  "cases": [
+    "MjeNMV.MelaMJNV.tlosatx"
+  ],
+  "threads": [
+    8
+  ],
+  "sessions": [
+    "AB",
+    "BA"
+  ],
+  "warmup": 1,
+  "samples": 3,
+  "timeout_seconds": 600,
+  "flags": [],
+  "concurrency": "exclusive",
+  "affinity": [
+    0,
+    1,
+    2,
+    3,
+    4,
+    5,
+    6,
+    7,
+    8,
+    9,
+    10,
+    11,
+    12,
+    13,
+    14,
+    15,
+    16,
+    17,
+    18,
+    19,
+    20,
+    21,
+    22,
+    23,
+    24,
+    25,
+    26,
+    27,
+    28,
+    29,
+    30,
+    31
+  ],
+  "status": "INVALID_EXTERNAL_WORKLOAD_OVERLAP",
+  "numerical_guard_status": "REGRESSION_FAIL",
+  "session_1_numerical_time_regression_percent": 5.4108297443288,
+  "acceptance_status": "INVALID_EXTERNAL_WORKLOAD_OVERLAP"
+}

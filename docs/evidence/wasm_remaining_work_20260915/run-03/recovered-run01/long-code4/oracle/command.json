@@ -1,0 +1,23 @@
+{
+  "cwd": "/mnt/c/Users/genom/GitHub/LOSAT",
+  "environment_overrides": {},
+  "ordered_argv": [
+    "/home/kawato/micromamba/bin/tblastx",
+    "-query",
+    "/tmp/losat-remaining-20260915/baseline-source/LOSAT/tests/fasta/AP027131.fasta",
+    "-db",
+    "/tmp/losat-remaining-20260915/long-code4/subject",
+    "-query_gencode",
+    "4",
+    "-db_gencode",
+    "4",
+    "-outfmt",
+    "6",
+    "-num_threads",
+    "1",
+    "-out",
+    "/tmp/losat-remaining-20260915/long-code4/oracle/output.txt"
+  ],
+  "shell": false,
+  "sink": "/tmp/losat-remaining-20260915/long-code4/oracle/output.txt"
+}

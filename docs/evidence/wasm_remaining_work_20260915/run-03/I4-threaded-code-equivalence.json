@@ -1,0 +1,17 @@
+{
+  "functions": [
+    {
+      "index": 1340,
+      "I2b_sha256": "02d046486c9a92f8f3e29c87027383656b854f01a149e37e64fccc5b3a63582a",
+      "I4_sha256": "02d046486c9a92f8f3e29c87027383656b854f01a149e37e64fccc5b3a63582a",
+      "equal": true
+    },
+    {
+      "index": 1368,
+      "I2b_sha256": "1a8d2b77c7d2d4a382b5a42a98e4270a350b7f0920e712037e5014e48847b23c",
+      "I4_sha256": "1a8d2b77c7d2d4a382b5a42a98e4270a350b7f0920e712037e5014e48847b23c",
+      "equal": true
+    }
+  ],
+  "scope": "Selected group/helper WAT only, not entire module or performance equivalence"
+}

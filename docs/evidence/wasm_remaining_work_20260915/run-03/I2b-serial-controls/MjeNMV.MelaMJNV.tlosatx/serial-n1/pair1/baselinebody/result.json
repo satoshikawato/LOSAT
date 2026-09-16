@@ -1,0 +1,31 @@
+{
+  "boottime_seconds": 14.444331456000327,
+  "cpu_system_seconds": 0.03,
+  "cpu_user_seconds": 15.3,
+  "elapsed_clock": "CLOCK_MONOTONIC; realtime and GNU elapsed are adjustable-clock diagnostics",
+  "ended_utc": "2026-09-16T02:59:05Z",
+  "exit_status": 0,
+  "gnu_elapsed_seconds": 16.56,
+  "monotonic_clock_agreement": true,
+  "monotonic_end": 4565.287725762,
+  "monotonic_start": 4550.843397895,
+  "output": "/mnt/c/users/genom/github/losat/docs/evidence/wasm_remaining_work_20260915/run-03/I2b-serial-controls/MjeNMV.MelaMJNV.tlosatx/serial-n1/pair1/baselinebody/output.txt",
+  "peak_rss_bytes": 157511680,
+  "process_ended_utc": "2026-09-16T02:59:05Z",
+  "raw_output_bytes": 1728659,
+  "raw_output_sha256": "b309f77fee038f0559d870737ebeba732c11eba4f7e495f045acbfb831817fd7",
+  "realtime_clock_agreement": false,
+  "realtime_seconds": 16.591912746429443,
+  "reason": null,
+  "started_utc": "2026-09-16T02:58:48Z",
+  "status": "PASS",
+  "timeout_seconds": 300,
+  "unavailable_metrics": {},
+  "wall_seconds": 14.444327867000538,
+  "watchdog_clocks": {
+    "started": {
+      "monotonic": 4550.850836329,
+      "realtime": 1789527528.713261
+    }
+  }
+}

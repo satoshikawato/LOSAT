@@ -1,0 +1,114 @@
+[
+  {
+    "case": "MjeNMV.MelaMJNV.tlosatx",
+    "threads": 8,
+    "session": 0,
+    "wall_seconds": {
+      "baseline_samples": [
+        9.157185955000001,
+        9.408776469999996,
+        9.542892992999993
+      ],
+      "candidate_samples": [
+        9.246873799999998,
+        8.978905981999997,
+        9.025414786000008
+      ],
+      "baseline_median": 9.408776469999996,
+      "candidate_median": 9.025414786000008,
+      "candidate_over_baseline": 0.9592548844982829,
+      "regression_limit": 0.4704388234999998,
+      "pass_guard": true
+    },
+    "process_lifetime_peak_rss_bytes": {
+      "baseline_samples": [
+        389804032,
+        470810624,
+        553938944
+      ],
+      "candidate_samples": [
+        396066816,
+        472596480,
+        557395968
+      ],
+      "baseline_median": 470810624,
+      "candidate_median": 472596480,
+      "candidate_over_baseline": 1.0037931514476615,
+      "regression_limit": 47081062.400000006,
+      "pass_guard": true
+    },
+    "memory_bytes": {
+      "baseline_samples": [
+        95485952,
+        95485952,
+        95485952
+      ],
+      "candidate_samples": [
+        95485952,
+        95485952,
+        95485952
+      ],
+      "baseline_median": 95485952,
+      "candidate_median": 95485952,
+      "candidate_over_baseline": 1.0,
+      "regression_limit": 16777216,
+      "pass_guard": true
+    }
+  },
+  {
+    "case": "MjeNMV.MelaMJNV.tlosatx",
+    "threads": 8,
+    "session": 1,
+    "wall_seconds": {
+      "baseline_samples": [
+        9.197112164000002,
+        9.197808585000002,
+        9.163494625999999
+      ],
+      "candidate_samples": [
+        9.072568804,
+        9.065871005999998,
+        9.425780979999999
+      ],
+      "baseline_median": 9.197112164000002,
+      "candidate_median": 9.072568804,
+      "candidate_over_baseline": 0.9864584276260652,
+      "regression_limit": 0.4598556082000001,
+      "pass_guard": true
+    },
+    "process_lifetime_peak_rss_bytes": {
+      "baseline_samples": [
+        390852608,
+        475148288,
+        558063616
+      ],
+      "candidate_samples": [
+        384905216,
+        468680704,
+        552861696
+      ],
+      "baseline_median": 475148288,
+      "candidate_median": 468680704,
+      "candidate_over_baseline": 0.9863882830616449,
+      "regression_limit": 47514828.800000004,
+      "pass_guard": true
+    },
+    "memory_bytes": {
+      "baseline_samples": [
+        95485952,
+        95485952,
+        95485952
+      ],
+      "candidate_samples": [
+        95485952,
+        95485952,
+        95485952
+      ],
+      "baseline_median": 95485952,
+      "candidate_median": 95485952,
+      "candidate_over_baseline": 1.0,
+      "regression_limit": 16777216,
+      "pass_guard": true
+    }
+  }
+]

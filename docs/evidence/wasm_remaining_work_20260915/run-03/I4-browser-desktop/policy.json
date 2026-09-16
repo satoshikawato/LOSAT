@@ -1,0 +1,63 @@
+{
+  "versions": [
+    "baseline",
+    "I4"
+  ],
+  "cases": [
+    "MjeNMV.MelaMJNV.tlosatx",
+    "AP027280.AP027280.tlosatx"
+  ],
+  "threads": [
+    8,
+    1
+  ],
+  "sessions": [
+    "AB",
+    "BA"
+  ],
+  "warmup": 1,
+  "samples": 3,
+  "timeout_seconds": 600,
+  "concurrency": "monitored normal-desktop background",
+  "affinity": [
+    0,
+    1,
+    2,
+    3,
+    4,
+    5,
+    6,
+    7,
+    8,
+    9,
+    10,
+    11,
+    12,
+    13,
+    14,
+    15,
+    16,
+    17,
+    18,
+    19,
+    20,
+    21,
+    22,
+    23,
+    24,
+    25,
+    26,
+    27,
+    28,
+    29,
+    30,
+    31
+  ],
+  "flags": [],
+  "interval": "actual gbdraw runLosatPairsParallel promise, including dispatch/input transfer/search/output and current host completion semantics",
+  "reuse": "same page/module and normal consumer worker ownership within each session; fresh browser for each version/session",
+  "memory_metric": "peak sampled sum of descendant RSS, shared pages per process, 50 ms observation; not Wasm linear-memory size",
+  "status": "COMPLETE",
+  "environment_policy": "/mnt/c/users/genom/github/losat/docs/evidence/wasm_remaining_work_20260915/run-03/I4-browser-desktop-environment/policy.json",
+  "acceptance_requires_environment_pass": true
+}

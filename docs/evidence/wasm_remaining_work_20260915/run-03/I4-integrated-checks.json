@@ -1,0 +1,23 @@
+[
+  {
+    "command": "cargo test --offline --locked --release --jobs 8 --target-dir /tmp/losat-run03-integrated-checks --lib large_gap_scan",
+    "cwd": "/mnt/c/users/genom/github/losat/LOSAT",
+    "exit_status": 0,
+    "log": "I4-integrated-focused.log",
+    "log_sha256": "c0c8b6ea3787a95321f642b442f6f09ca2de3d45a97f97cc982ff37ee8447d24"
+  },
+  {
+    "command": "cargo clippy --offline --locked --release --jobs 8 --target-dir /tmp/losat-run03-integrated-checks --lib --bin LOSAT",
+    "cwd": "/mnt/c/users/genom/github/losat/LOSAT",
+    "exit_status": 0,
+    "log": "I4-integrated-clippy.log",
+    "log_sha256": "675ef147e4bb5164512789498142b274ce94b65a5484a12f66f4a700add4f51d"
+  },
+  {
+    "command": "cargo fmt --check",
+    "cwd": "/mnt/c/users/genom/github/losat/LOSAT",
+    "exit_status": 0,
+    "log": "I4-integrated-format.log",
+    "log_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+  }
+]

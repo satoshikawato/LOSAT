@@ -1,0 +1,142 @@
+[
+  {
+    "status": "PASS",
+    "reason": null,
+    "exit_status": 0,
+    "wall_seconds": 127.08051914800035,
+    "monotonic_start": 2250.868860796,
+    "monotonic_end": 2377.949379944,
+    "realtime_seconds": 135.73574805259705,
+    "boottime_seconds": 127.08052234500019,
+    "gnu_elapsed_seconds": 135.72,
+    "process_ended_utc": "2026-09-16T02:20:06Z",
+    "watchdog_clocks": {
+      "started": {
+        "monotonic": 2250.87645589,
+        "realtime": 1789525070.8392158
+      }
+    },
+    "realtime_clock_agreement": false,
+    "monotonic_clock_agreement": true,
+    "elapsed_clock": "CLOCK_MONOTONIC; realtime and GNU elapsed are adjustable-clock diagnostics",
+    "cpu_user_seconds": 134.88,
+    "cpu_system_seconds": 0.11,
+    "peak_rss_bytes": 262279168,
+    "output": "/mnt/c/users/genom/github/losat/docs/evidence/wasm_remaining_work_20260915/run-03/I2b-long-code4/native-n1/output.txt",
+    "raw_output_sha256": "1da3bfe7d96d50a96726a44e2df98f5e81c05bee9cd655ad51bb8d44aa377963",
+    "raw_output_bytes": 2270680,
+    "started_utc": "2026-09-16T02:17:50Z",
+    "ended_utc": "2026-09-16T02:20:06Z",
+    "timeout_seconds": 1800,
+    "unavailable_metrics": {},
+    "kind": "native",
+    "threads": 1,
+    "artifact_sha256": "c81d48ca35c8ea76199ec9422f5ccae3317b18a808f81c0aeb327c2152d8bbc2",
+    "raw_equal": true
+  },
+  {
+    "status": "PASS",
+    "reason": null,
+    "exit_status": 0,
+    "wall_seconds": 143.40579677200003,
+    "monotonic_start": 2250.869184786,
+    "monotonic_end": 2394.274981558,
+    "realtime_seconds": 152.06102395057678,
+    "boottime_seconds": 143.4057986859998,
+    "gnu_elapsed_seconds": 152.04,
+    "process_ended_utc": "2026-09-16T02:20:22Z",
+    "watchdog_clocks": {
+      "started": {
+        "monotonic": 2250.877154089,
+        "realtime": 1789525070.839914
+      }
+    },
+    "realtime_clock_agreement": false,
+    "monotonic_clock_agreement": true,
+    "elapsed_clock": "CLOCK_MONOTONIC; realtime and GNU elapsed are adjustable-clock diagnostics",
+    "cpu_user_seconds": 152.93,
+    "cpu_system_seconds": 0.14,
+    "peak_rss_bytes": 296652800,
+    "output": "/mnt/c/users/genom/github/losat/docs/evidence/wasm_remaining_work_20260915/run-03/I2b-long-code4/serial-n1/output.txt",
+    "raw_output_sha256": "1da3bfe7d96d50a96726a44e2df98f5e81c05bee9cd655ad51bb8d44aa377963",
+    "raw_output_bytes": 2270680,
+    "started_utc": "2026-09-16T02:17:50Z",
+    "ended_utc": "2026-09-16T02:20:22Z",
+    "timeout_seconds": 1800,
+    "unavailable_metrics": {},
+    "kind": "serial",
+    "threads": 1,
+    "artifact_sha256": "5443e34924a7e3dd0f917bc5d49f12f08f8876db310758994b138df6a2431af7",
+    "raw_equal": true
+  },
+  {
+    "status": "PASS",
+    "reason": null,
+    "exit_status": 0,
+    "wall_seconds": 69.1955365509998,
+    "monotonic_start": 2394.353918783,
+    "monotonic_end": 2463.549455334,
+    "realtime_seconds": 73.60189032554626,
+    "boottime_seconds": 69.19553853199977,
+    "gnu_elapsed_seconds": 73.59,
+    "process_ended_utc": "2026-09-16T02:21:36Z",
+    "watchdog_clocks": {
+      "started": {
+        "monotonic": 2394.358234623,
+        "realtime": 1789525222.9762197
+      }
+    },
+    "realtime_clock_agreement": false,
+    "monotonic_clock_agreement": true,
+    "elapsed_clock": "CLOCK_MONOTONIC; realtime and GNU elapsed are adjustable-clock diagnostics",
+    "cpu_user_seconds": 224.94,
+    "cpu_system_seconds": 0.32,
+    "peak_rss_bytes": 465375232,
+    "output": "/mnt/c/users/genom/github/losat/docs/evidence/wasm_remaining_work_20260915/run-03/I2b-long-code4/threaded-n8/output.txt",
+    "raw_output_sha256": "1da3bfe7d96d50a96726a44e2df98f5e81c05bee9cd655ad51bb8d44aa377963",
+    "raw_output_bytes": 2270680,
+    "started_utc": "2026-09-16T02:20:22Z",
+    "ended_utc": "2026-09-16T02:21:36Z",
+    "timeout_seconds": 1800,
+    "unavailable_metrics": {},
+    "kind": "threaded",
+    "threads": 8,
+    "artifact_sha256": "86f85d75743d8661a5633326b2cb84862e5c986d1a26f34da41d0de9c9dfbab2",
+    "raw_equal": true
+  },
+  {
+    "status": "PASS",
+    "reason": null,
+    "exit_status": 0,
+    "wall_seconds": 165.69929164900032,
+    "monotonic_start": 2378.050953262,
+    "monotonic_end": 2543.750244911,
+    "realtime_seconds": 177.1406648159027,
+    "boottime_seconds": 165.6992960299999,
+    "gnu_elapsed_seconds": 177.12,
+    "process_ended_utc": "2026-09-16T02:23:03Z",
+    "watchdog_clocks": {
+      "started": {
+        "monotonic": 2378.055723871,
+        "realtime": 1789525206.673709
+      }
+    },
+    "realtime_clock_agreement": false,
+    "monotonic_clock_agreement": true,
+    "elapsed_clock": "CLOCK_MONOTONIC; realtime and GNU elapsed are adjustable-clock diagnostics",
+    "cpu_user_seconds": 177.13,
+    "cpu_system_seconds": 0.1,
+    "peak_rss_bytes": 305332224,
+    "output": "/mnt/c/users/genom/github/losat/docs/evidence/wasm_remaining_work_20260915/run-03/I2b-long-code4/threaded-n1/output.txt",
+    "raw_output_sha256": "1da3bfe7d96d50a96726a44e2df98f5e81c05bee9cd655ad51bb8d44aa377963",
+    "raw_output_bytes": 2270680,
+    "started_utc": "2026-09-16T02:20:06Z",
+    "ended_utc": "2026-09-16T02:23:03Z",
+    "timeout_seconds": 1800,
+    "unavailable_metrics": {},
+    "kind": "threaded",
+    "threads": 1,
+    "artifact_sha256": "86f85d75743d8661a5633326b2cb84862e5c986d1a26f34da41d0de9c9dfbab2",
+    "raw_equal": true
+  }
+]

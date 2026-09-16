@@ -1,0 +1,35 @@
+[
+  {
+    "name": "release-test-incomplete-fixtures",
+    "status": 101,
+    "reason": "isolated snapshot omitted tests/fixtures/megablast_automatic_xdrop.outfmt6; restored byte-identical original",
+    "log": "V0-cargo-test.log"
+  },
+  {
+    "name": "release-test-complete-fixtures",
+    "status": 101,
+    "reason": "baseline rlib/cdylib output filename collision and panic=abort versus test panic=unwind; no source/profile changes made",
+    "log": "V0-cargo-test-complete-fixtures.log"
+  },
+  {
+    "name": "standard-test",
+    "status": "PASS",
+    "argv": [
+      "cargo",
+      "test",
+      "--offline",
+      "--locked",
+      "--jobs",
+      "8",
+      "--target-dir",
+      "/tmp/losat-remaining-20260915/V0-tests"
+    ],
+    "cwd": "/tmp/losat-remaining-20260915/baseline-source/LOSAT",
+    "reason": "Repository documented cargo test command, isolated from release artifacts",
+    "log": "V0-cargo-test-standard.log",
+    "exit_status": 0,
+    "passed": 625,
+    "failed": 0,
+    "ignored": 3
+  }
+]

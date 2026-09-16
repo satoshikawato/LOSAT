@@ -1,0 +1,35 @@
+{
+  "host_files": {
+    "LOSAT/tests/wasi_artifact.js": {
+      "before_sha256": "37ca747261b090bf16720b2109a4511a57d90f4b67cf94c158b9bee9fc1d3f73",
+      "after_sha256": "5f8dab1a7500c4e7a1f856e16b7edf125ce28dbf89b9ad711590c5ffcbe017b5",
+      "matches_tested_candidate": true
+    },
+    "LOSAT/tests/run_losat_wasi.js": {
+      "before_sha256": "21311c960920364e3072605a8d5626478b99c010b30e07cab98461f4b5e2c729",
+      "after_sha256": "4210e97a8b92ffba4c100558cf15ee54e62e1b75586f54a8fadbaced959bb610",
+      "matches_tested_candidate": true
+    },
+    "LOSAT/tests/benchmark_wasi_reuse.js": {
+      "before_sha256": "8300c0948bdd8e2fa731a3f99ef742629a142689525fb0cfc0b2e988a5143086",
+      "after_sha256": "8e02902c54c6b6aa24776ff0c745c5b8c43d227379a86c33d4ec0ac25ef2a2ae",
+      "matches_tested_candidate": true
+    },
+    "LOSAT/tests/check_wasi_api_limits.js": {
+      "before_sha256": "15eeefd76058f23137390b4209f873eae836be96341bb68052f2c96667a07903",
+      "after_sha256": "34c3e1da1ced0aaf468baef2832fdbeb2cf93a1d027fbcf88d8a7dbd9d015a2c",
+      "matches_tested_candidate": true
+    },
+    "LOSAT/tests/test_wasi_runners.js": {
+      "before_sha256": "48371eaaeece9e3e7b640db8b4acb4cf8b188f0386e75c5b205ddabfcaa4b2a3",
+      "after_sha256": "ada5b00fbd89b7cd4c58256b3b7e2d7f54de863c55ba7abd649950c1ce8a2ce3",
+      "matches_tested_candidate": true
+    }
+  },
+  "production_rust_config_lock_build_inputs_equal_baseline": true,
+  "baseline_build_input_count": 158,
+  "rust_candidate_applied": false,
+  "accepted_candidate": "H1a",
+  "source_manifest": "H1-source-manifest.json",
+  "final_lifecycle_gates": "PASS"
+}

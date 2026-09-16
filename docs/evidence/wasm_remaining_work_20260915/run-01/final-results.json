@@ -1,0 +1,825 @@
+{
+  "native_ratios": [
+    {
+      "case": "MjeNMV.MelaMJNV.tlosatx",
+      "threads": 1,
+      "native_body_seconds": 14.294519789,
+      "native_wall_seconds": 14.298729044996435,
+      "wasm_body_seconds": 22.40580343,
+      "wasm_wall_seconds": 22.499924573996395,
+      "wasm_over_native": 1.5674400931776553
+    },
+    {
+      "case": "MjeNMV.MelaMJNV.tlosatx",
+      "threads": 8,
+      "native_body_seconds": 8.345541818,
+      "native_wall_seconds": 8.351939098996809,
+      "wasm_body_seconds": 35.077011523,
+      "wasm_wall_seconds": 35.17717029400228,
+      "wasm_over_native": 4.203083788681581
+    },
+    {
+      "case": "AP027280.AP027280.tlosatx",
+      "threads": 1,
+      "native_body_seconds": 27.10830871,
+      "native_wall_seconds": 27.11175804300001,
+      "wasm_body_seconds": 37.14675655,
+      "wasm_wall_seconds": 37.236877702998754,
+      "wasm_over_native": 1.3703088948628106
+    },
+    {
+      "case": "AP027280.AP027280.tlosatx",
+      "threads": 8,
+      "native_body_seconds": 18.126543552,
+      "native_wall_seconds": 18.131145355997432,
+      "wasm_body_seconds": 61.850280471,
+      "wasm_wall_seconds": 61.95253751499695,
+      "wasm_over_native": 3.4121386845522306
+    }
+  ],
+  "h1": [
+    {
+      "case": "valid-nohit",
+      "host_preparation_seconds": {
+        "baseline_samples": [
+          0.007480858000000002,
+          0.007540686000000001,
+          0.010897506
+        ],
+        "candidate_samples": [
+          0.004802645000000002,
+          0.004678777,
+          0.004699591999999999
+        ],
+        "baseline_median": 0.007540686000000001,
+        "candidate_median": 0.004699591999999999,
+        "candidate_over_baseline": 0.623231361178545,
+        "saved": 0.0028410940000000023
+      },
+      "wall_seconds": {
+        "baseline_samples": [
+          0.05120503199577797,
+          0.05080728299799375,
+          0.05359698699612636
+        ],
+        "candidate_samples": [
+          0.05160505199455656,
+          0.05039881999982754,
+          0.0490379339971696
+        ],
+        "baseline_median": 0.05120503199577797,
+        "candidate_median": 0.05039881999982754,
+        "candidate_over_baseline": 0.9842552193695161,
+        "saved": 0.0008062119959504344
+      },
+      "peak_rss_bytes": {
+        "baseline_samples": [
+          80871424,
+          79519744,
+          79831040
+        ],
+        "candidate_samples": [
+          74711040,
+          75149312,
+          75587584
+        ],
+        "baseline_median": 79831040,
+        "candidate_median": 75149312,
+        "candidate_over_baseline": 0.9413545407901488,
+        "saved": 4681728
+      }
+    },
+    {
+      "case": "single32",
+      "host_preparation_seconds": {
+        "baseline_samples": [
+          0.011843651000000002,
+          0.009224408,
+          0.010389278999999998
+        ],
+        "candidate_samples": [
+          0.0038710880000000004,
+          0.004508490000000002,
+          0.004616137
+        ],
+        "baseline_median": 0.010389278999999998,
+        "candidate_median": 0.004508490000000002,
+        "candidate_over_baseline": 0.4339560040691951,
+        "saved": 0.005880788999999996
+      },
+      "wall_seconds": {
+        "baseline_samples": [
+          0.10164653199899476,
+          0.10046857200359227,
+          0.0996923849961604
+        ],
+        "candidate_samples": [
+          0.0922025690015289,
+          0.09678475999680813,
+          0.09466076800163137
+        ],
+        "baseline_median": 0.10046857200359227,
+        "candidate_median": 0.09466076800163137,
+        "candidate_over_baseline": 0.9421928282034978,
+        "saved": 0.005807804001960903
+      },
+      "peak_rss_bytes": {
+        "baseline_samples": [
+          101990400,
+          102416384,
+          99840000
+        ],
+        "candidate_samples": [
+          100020224,
+          99991552,
+          100773888
+        ],
+        "baseline_median": 101990400,
+        "candidate_median": 100020224,
+        "candidate_over_baseline": 0.9806827309236947,
+        "saved": 1970176
+      }
+    },
+    {
+      "case": "word7",
+      "host_preparation_seconds": {
+        "baseline_samples": [
+          0.010897557,
+          0.0074545800000000014,
+          0.011148751999999998
+        ],
+        "candidate_samples": [
+          0.004451995999999998,
+          0.004387268000000002,
+          0.004407544999999999
+        ],
+        "baseline_median": 0.010897557,
+        "candidate_median": 0.004407544999999999,
+        "candidate_over_baseline": 0.4044525759305502,
+        "saved": 0.006490012000000002
+      },
+      "wall_seconds": {
+        "baseline_samples": [
+          0.11068013399926713,
+          0.10957699100254104,
+          0.11302003500168212
+        ],
+        "candidate_samples": [
+          0.11026616500021191,
+          0.12679909000144107,
+          0.12576374900527298
+        ],
+        "baseline_median": 0.11068013399926713,
+        "candidate_median": 0.12576374900527298,
+        "candidate_over_baseline": 1.1362811415290275,
+        "saved": -0.015083615006005857
+      },
+      "peak_rss_bytes": {
+        "baseline_samples": [
+          99364864,
+          97636352,
+          106246144
+        ],
+        "candidate_samples": [
+          99778560,
+          93401088,
+          101126144
+        ],
+        "baseline_median": 99364864,
+        "candidate_median": 99778560,
+        "candidate_over_baseline": 1.004163403273012,
+        "saved": -413696
+      }
+    },
+    {
+      "case": "EDL933.Sakai.losatn.megablast",
+      "host_preparation_seconds": {
+        "baseline_samples": [
+          0.010862193999999999,
+          0.010386315,
+          0.010460305999999999
+        ],
+        "candidate_samples": [
+          0.004363851999999998,
+          0.004357476,
+          0.005364791000000001
+        ],
+        "baseline_median": 0.010460305999999999,
+        "candidate_median": 0.004363851999999998,
+        "candidate_over_baseline": 0.4171820594923321,
+        "saved": 0.006096454000000001
+      },
+      "wall_seconds": {
+        "baseline_samples": [
+          1.3008145279964083,
+          1.2803787910015672,
+          1.3104810799995903
+        ],
+        "candidate_samples": [
+          1.2861155600039638,
+          1.3010936600039713,
+          1.3069890640035737
+        ],
+        "baseline_median": 1.3008145279964083,
+        "candidate_median": 1.3010936600039713,
+        "candidate_over_baseline": 1.0002145824800965,
+        "saved": -0.00027913200756302103
+      },
+      "peak_rss_bytes": {
+        "baseline_samples": [
+          335310848,
+          337285120,
+          345440256
+        ],
+        "candidate_samples": [
+          325971968,
+          332136448,
+          328212480
+        ],
+        "baseline_median": 337285120,
+        "candidate_median": 328212480,
+        "candidate_over_baseline": 0.9731009775942681,
+        "saved": 9072640
+      }
+    },
+    {
+      "case": "MelaMJNV.PemoMJNVA.losatn.blastn",
+      "host_preparation_seconds": {
+        "baseline_samples": [
+          0.00765676,
+          0.010728649000000002,
+          0.010621294999999998
+        ],
+        "candidate_samples": [
+          0.004511378000000001,
+          0.004405312000000002,
+          0.004677579999999999
+        ],
+        "baseline_median": 0.010621294999999998,
+        "candidate_median": 0.004511378000000001,
+        "candidate_over_baseline": 0.42474839461666414,
+        "saved": 0.006109916999999997
+      },
+      "wall_seconds": {
+        "baseline_samples": [
+          1.4894233380036894,
+          1.498815986997215,
+          1.4769076279990259
+        ],
+        "candidate_samples": [
+          1.480942973998026,
+          1.4680437730057747,
+          1.4949794730055146
+        ],
+        "baseline_median": 1.4894233380036894,
+        "candidate_median": 1.480942973998026,
+        "candidate_over_baseline": 0.9943062769400204,
+        "saved": 0.008480364005663432
+      },
+      "peak_rss_bytes": {
+        "baseline_samples": [
+          121614336,
+          125517824,
+          125132800
+        ],
+        "candidate_samples": [
+          120942592,
+          117854208,
+          117878784
+        ],
+        "baseline_median": 125132800,
+        "candidate_median": 117878784,
+        "candidate_over_baseline": 0.9420294599018003,
+        "saved": 7254016
+      }
+    }
+  ],
+  "x1": [
+    {
+      "case": "MjeNMV.MelaMJNV.tlosatx",
+      "kind": "threaded",
+      "threads": 1,
+      "wall_seconds": {
+        "baseline_samples": [
+          23.517232509002497,
+          22.431658711000637,
+          22.499924573996395
+        ],
+        "candidate_samples": [
+          22.781786927997018,
+          22.40452031300083,
+          23.687592422997113
+        ],
+        "baseline_median": 22.499924573996395,
+        "candidate_median": 22.781786927997018,
+        "candidate_over_baseline": 1.0125272577280715,
+        "saved": -0.2818623540006229
+      },
+      "body_seconds": {
+        "baseline_samples": [
+          23.427813736,
+          22.337604676,
+          22.40580343
+        ],
+        "candidate_samples": [
+          22.688396479,
+          22.31437647,
+          23.595398349
+        ],
+        "baseline_median": 22.40580343,
+        "candidate_median": 22.688396479,
+        "candidate_over_baseline": 1.0126124934498724,
+        "saved": -0.2825930490000026
+      },
+      "peak_rss_bytes": {
+        "baseline_samples": [
+          181538816,
+          181760000,
+          181661696
+        ],
+        "candidate_samples": [
+          185176064,
+          181358592,
+          181420032
+        ],
+        "baseline_median": 181661696,
+        "candidate_median": 181420032,
+        "candidate_over_baseline": 0.998669703050664,
+        "saved": 241664
+      }
+    },
+    {
+      "case": "MjeNMV.MelaMJNV.tlosatx",
+      "kind": "threaded",
+      "threads": 8,
+      "wall_seconds": {
+        "baseline_samples": [
+          37.211623589006194,
+          35.17717029400228,
+          35.08070448200306
+        ],
+        "candidate_samples": [
+          38.954063056997256,
+          36.882287201005965,
+          37.92464760700386
+        ],
+        "baseline_median": 35.17717029400228,
+        "candidate_median": 37.92464760700386,
+        "candidate_over_baseline": 1.0781039887528994,
+        "saved": -2.747477313001582
+      },
+      "body_seconds": {
+        "baseline_samples": [
+          37.108053449,
+          35.077011523,
+          34.980606209
+        ],
+        "candidate_samples": [
+          38.849047881,
+          36.77814778,
+          37.823078862
+        ],
+        "baseline_median": 35.077011523,
+        "candidate_median": 37.823078862,
+        "candidate_over_baseline": 1.078286810072158,
+        "saved": -2.7460673389999997
+      },
+      "peak_rss_bytes": {
+        "baseline_samples": [
+          305106944,
+          308015104,
+          304132096
+        ],
+        "candidate_samples": [
+          305520640,
+          310755328,
+          305647616
+        ],
+        "baseline_median": 305106944,
+        "candidate_median": 305647616,
+        "candidate_over_baseline": 1.001772073729007,
+        "saved": -540672
+      }
+    },
+    {
+      "case": "AP027280.AP027280.tlosatx",
+      "kind": "threaded",
+      "threads": 1,
+      "wall_seconds": {
+        "baseline_samples": [
+          41.78929487399728,
+          37.019431032000284,
+          37.236877702998754
+        ],
+        "candidate_samples": [
+          42.11723523099499,
+          42.75505048999912,
+          41.47782128200197
+        ],
+        "baseline_median": 37.236877702998754,
+        "candidate_median": 42.11723523099499,
+        "candidate_over_baseline": 1.1310624796988071,
+        "saved": -4.880357527996239
+      },
+      "body_seconds": {
+        "baseline_samples": [
+          41.693264496,
+          36.919871302,
+          37.14675655
+        ],
+        "candidate_samples": [
+          42.023955109,
+          42.662284193,
+          41.387648264
+        ],
+        "baseline_median": 37.14675655,
+        "candidate_median": 42.023955109,
+        "candidate_over_baseline": 1.1312954080509083,
+        "saved": -4.877198559
+      },
+      "peak_rss_bytes": {
+        "baseline_samples": [
+          193519616,
+          197537792,
+          195280896
+        ],
+        "candidate_samples": [
+          187293696,
+          191782912,
+          190201856
+        ],
+        "baseline_median": 195280896,
+        "candidate_median": 190201856,
+        "candidate_over_baseline": 0.9739911066364628,
+        "saved": 5079040
+      }
+    },
+    {
+      "case": "AP027280.AP027280.tlosatx",
+      "kind": "threaded",
+      "threads": 8,
+      "wall_seconds": {
+        "baseline_samples": [
+          61.95253751499695,
+          60.93732177199854,
+          66.53903247999551
+        ],
+        "candidate_samples": [
+          65.43214309799805,
+          64.9630653580025,
+          68.68439943100384
+        ],
+        "baseline_median": 61.95253751499695,
+        "candidate_median": 65.43214309799805,
+        "candidate_over_baseline": 1.0561656668568062,
+        "saved": -3.479605583001103
+      },
+      "body_seconds": {
+        "baseline_samples": [
+          61.850280471,
+          60.835935518,
+          66.437668495
+        ],
+        "candidate_samples": [
+          65.33305394,
+          64.864170068,
+          68.584434676
+        ],
+        "baseline_median": 61.850280471,
+        "candidate_median": 65.33305394,
+        "candidate_over_baseline": 1.0563097441511682,
+        "saved": -3.4827734690000014
+      },
+      "peak_rss_bytes": {
+        "baseline_samples": [
+          311087104,
+          316137472,
+          312418304
+        ],
+        "candidate_samples": [
+          306888704,
+          310583296,
+          304484352
+        ],
+        "baseline_median": 312418304,
+        "candidate_median": 306888704,
+        "candidate_over_baseline": 0.9823006529092483,
+        "saved": 5529600
+      }
+    }
+  ],
+  "turbofan_diagnostics": [
+    {
+      "status": "PASS",
+      "reason": null,
+      "exit_status": 0,
+      "wall_seconds": 17.250996301001578,
+      "monotonic_start": 37300.624913092,
+      "monotonic_end": 37317.875909393,
+      "realtime_seconds": 17.250999212265015,
+      "boottime_seconds": 17.25099935400067,
+      "gnu_elapsed_seconds": 17.25,
+      "process_ended_utc": "2026-09-15T11:23:22Z",
+      "watchdog_clocks": {
+        "started": {
+          "monotonic": 37300.625242,
+          "realtime": 1789471384.8640978
+        }
+      },
+      "realtime_clock_agreement": true,
+      "monotonic_clock_agreement": true,
+      "elapsed_clock": "CLOCK_MONOTONIC; realtime and GNU elapsed are adjustable-clock diagnostics",
+      "cpu_user_seconds": 17.5,
+      "cpu_system_seconds": 0.05,
+      "peak_rss_bytes": 182636544,
+      "output": "/tmp/losat-remaining-20260915/reference-turbofan/MjeNMV.MelaMJNV.tlosatx/n1/repeat0/baselinebody/output.txt",
+      "raw_output_sha256": "b309f77fee038f0559d870737ebeba732c11eba4f7e495f045acbfb831817fd7",
+      "raw_output_bytes": 1728659,
+      "started_utc": "2026-09-15T11:23:04Z",
+      "ended_utc": "2026-09-15T11:23:22Z",
+      "timeout_seconds": 300,
+      "unavailable_metrics": {},
+      "case": "MjeNMV.MelaMJNV.tlosatx",
+      "threads": 1,
+      "version": "baselinebody",
+      "repeat": 0,
+      "timed": false,
+      "artifact_sha256": "bf6b65689c8ddbdc2220b7bdc601c55454c9e84f899c8bf5ef0d3219e6a7c500",
+      "body_seconds": 16.953662527,
+      "raw_equal": true
+    },
+    {
+      "status": "PASS",
+      "reason": null,
+      "exit_status": 0,
+      "wall_seconds": 17.97287393300212,
+      "monotonic_start": 37317.880325579,
+      "monotonic_end": 37335.853199512,
+      "realtime_seconds": 18.886006593704224,
+      "boottime_seconds": 17.972876081999857,
+      "gnu_elapsed_seconds": 18.88,
+      "process_ended_utc": "2026-09-15T11:23:40Z",
+      "watchdog_clocks": {
+        "started": {
+          "monotonic": 37317.880710085,
+          "realtime": 1789471402.1195657
+        }
+      },
+      "realtime_clock_agreement": false,
+      "monotonic_clock_agreement": true,
+      "elapsed_clock": "CLOCK_MONOTONIC; realtime and GNU elapsed are adjustable-clock diagnostics",
+      "cpu_user_seconds": 18.42,
+      "cpu_system_seconds": 0.05,
+      "peak_rss_bytes": 183250944,
+      "output": "/tmp/losat-remaining-20260915/reference-turbofan/MjeNMV.MelaMJNV.tlosatx/n1/repeat0/X1v1body/output.txt",
+      "raw_output_sha256": "b309f77fee038f0559d870737ebeba732c11eba4f7e495f045acbfb831817fd7",
+      "raw_output_bytes": 1728659,
+      "started_utc": "2026-09-15T11:23:22Z",
+      "ended_utc": "2026-09-15T11:23:40Z",
+      "timeout_seconds": 300,
+      "unavailable_metrics": {},
+      "case": "MjeNMV.MelaMJNV.tlosatx",
+      "threads": 1,
+      "version": "X1v1body",
+      "repeat": 0,
+      "timed": false,
+      "artifact_sha256": "bd06b512d167d3cb906bddf31db24195ec586d2d6c49f62d3f3688669b7769c2",
+      "body_seconds": 17.658789806,
+      "raw_equal": true
+    },
+    {
+      "status": "PASS",
+      "reason": null,
+      "exit_status": 0,
+      "wall_seconds": 11.02645255200332,
+      "monotonic_start": 37335.856867753,
+      "monotonic_end": 37346.883320305,
+      "realtime_seconds": 11.02645468711853,
+      "boottime_seconds": 11.026454612001544,
+      "gnu_elapsed_seconds": 11.02,
+      "process_ended_utc": "2026-09-15T11:23:52Z",
+      "watchdog_clocks": {
+        "started": {
+          "monotonic": 37335.857184523,
+          "realtime": 1789471421.0091705
+        }
+      },
+      "realtime_clock_agreement": true,
+      "monotonic_clock_agreement": true,
+      "elapsed_clock": "CLOCK_MONOTONIC; realtime and GNU elapsed are adjustable-clock diagnostics",
+      "cpu_user_seconds": 18.63,
+      "cpu_system_seconds": 0.15,
+      "peak_rss_bytes": 322269184,
+      "output": "/tmp/losat-remaining-20260915/reference-turbofan/MjeNMV.MelaMJNV.tlosatx/n8/repeat0/baselinebody/output.txt",
+      "raw_output_sha256": "b309f77fee038f0559d870737ebeba732c11eba4f7e495f045acbfb831817fd7",
+      "raw_output_bytes": 1728659,
+      "started_utc": "2026-09-15T11:23:40Z",
+      "ended_utc": "2026-09-15T11:23:52Z",
+      "timeout_seconds": 300,
+      "unavailable_metrics": {},
+      "case": "MjeNMV.MelaMJNV.tlosatx",
+      "threads": 8,
+      "version": "baselinebody",
+      "repeat": 0,
+      "timed": false,
+      "artifact_sha256": "bf6b65689c8ddbdc2220b7bdc601c55454c9e84f899c8bf5ef0d3219e6a7c500",
+      "body_seconds": 10.715496538,
+      "raw_equal": true
+    },
+    {
+      "status": "PASS",
+      "reason": null,
+      "exit_status": 0,
+      "wall_seconds": 11.447349354006292,
+      "monotonic_start": 37346.886305297,
+      "monotonic_end": 37358.333654651,
+      "realtime_seconds": 12.163331747055054,
+      "boottime_seconds": 11.447351283000899,
+      "gnu_elapsed_seconds": 12.16,
+      "process_ended_utc": "2026-09-15T11:24:04Z",
+      "watchdog_clocks": {
+        "started": {
+          "monotonic": 37346.886597512,
+          "realtime": 1789471432.0385835
+        }
+      },
+      "realtime_clock_agreement": false,
+      "monotonic_clock_agreement": true,
+      "elapsed_clock": "CLOCK_MONOTONIC; realtime and GNU elapsed are adjustable-clock diagnostics",
+      "cpu_user_seconds": 19.28,
+      "cpu_system_seconds": 0.17,
+      "peak_rss_bytes": 326963200,
+      "output": "/tmp/losat-remaining-20260915/reference-turbofan/MjeNMV.MelaMJNV.tlosatx/n8/repeat0/X1v1body/output.txt",
+      "raw_output_sha256": "b309f77fee038f0559d870737ebeba732c11eba4f7e495f045acbfb831817fd7",
+      "raw_output_bytes": 1728659,
+      "started_utc": "2026-09-15T11:23:52Z",
+      "ended_utc": "2026-09-15T11:24:04Z",
+      "timeout_seconds": 300,
+      "unavailable_metrics": {},
+      "case": "MjeNMV.MelaMJNV.tlosatx",
+      "threads": 8,
+      "version": "X1v1body",
+      "repeat": 0,
+      "timed": false,
+      "artifact_sha256": "bd06b512d167d3cb906bddf31db24195ec586d2d6c49f62d3f3688669b7769c2",
+      "body_seconds": 11.132947073,
+      "raw_equal": true
+    },
+    {
+      "status": "PASS",
+      "reason": null,
+      "exit_status": 0,
+      "wall_seconds": 32.525846438999,
+      "monotonic_start": 37358.338026346,
+      "monotonic_end": 37390.863872785,
+      "realtime_seconds": 33.18106746673584,
+      "boottime_seconds": 32.525848386998405,
+      "gnu_elapsed_seconds": 33.18,
+      "process_ended_utc": "2026-09-15T11:24:37Z",
+      "watchdog_clocks": {
+        "started": {
+          "monotonic": 37358.338360353,
+          "realtime": 1789471444.206326
+        }
+      },
+      "realtime_clock_agreement": true,
+      "monotonic_clock_agreement": true,
+      "elapsed_clock": "CLOCK_MONOTONIC; realtime and GNU elapsed are adjustable-clock diagnostics",
+      "cpu_user_seconds": 33.2,
+      "cpu_system_seconds": 0.04,
+      "peak_rss_bytes": 197386240,
+      "output": "/tmp/losat-remaining-20260915/reference-turbofan/AP027280.AP027280.tlosatx/n1/repeat0/baselinebody/output.txt",
+      "raw_output_sha256": "845d15661c2a30fa69e01bcd8140792e55a1fa06bbb52181632680435a08eda8",
+      "raw_output_bytes": 3134850,
+      "started_utc": "2026-09-15T11:24:04Z",
+      "ended_utc": "2026-09-15T11:24:37Z",
+      "timeout_seconds": 300,
+      "unavailable_metrics": {},
+      "case": "AP027280.AP027280.tlosatx",
+      "threads": 1,
+      "version": "baselinebody",
+      "repeat": 0,
+      "timed": false,
+      "artifact_sha256": "bf6b65689c8ddbdc2220b7bdc601c55454c9e84f899c8bf5ef0d3219e6a7c500",
+      "body_seconds": 32.209537925,
+      "raw_equal": true
+    },
+    {
+      "status": "PASS",
+      "reason": null,
+      "exit_status": 0,
+      "wall_seconds": 36.85349443599989,
+      "monotonic_start": 37390.868366976,
+      "monotonic_end": 37427.721861412,
+      "realtime_seconds": 37.510093688964844,
+      "boottime_seconds": 36.853496053001436,
+      "gnu_elapsed_seconds": 37.5,
+      "process_ended_utc": "2026-09-15T11:25:14Z",
+      "watchdog_clocks": {
+        "started": {
+          "monotonic": 37390.868678298,
+          "realtime": 1789471477.3918626
+        }
+      },
+      "realtime_clock_agreement": true,
+      "monotonic_clock_agreement": true,
+      "elapsed_clock": "CLOCK_MONOTONIC; realtime and GNU elapsed are adjustable-clock diagnostics",
+      "cpu_user_seconds": 37.6,
+      "cpu_system_seconds": 0.06,
+      "peak_rss_bytes": 203317248,
+      "output": "/tmp/losat-remaining-20260915/reference-turbofan/AP027280.AP027280.tlosatx/n1/repeat0/X1v1body/output.txt",
+      "raw_output_sha256": "845d15661c2a30fa69e01bcd8140792e55a1fa06bbb52181632680435a08eda8",
+      "raw_output_bytes": 3134850,
+      "started_utc": "2026-09-15T11:24:37Z",
+      "ended_utc": "2026-09-15T11:25:14Z",
+      "timeout_seconds": 300,
+      "unavailable_metrics": {},
+      "case": "AP027280.AP027280.tlosatx",
+      "threads": 1,
+      "version": "X1v1body",
+      "repeat": 0,
+      "timed": false,
+      "artifact_sha256": "bd06b512d167d3cb906bddf31db24195ec586d2d6c49f62d3f3688669b7769c2",
+      "body_seconds": 36.54379574,
+      "raw_equal": true
+    },
+    {
+      "status": "PASS",
+      "reason": null,
+      "exit_status": 0,
+      "wall_seconds": 20.137104629000532,
+      "monotonic_start": 37427.726335038,
+      "monotonic_end": 37447.863439667,
+      "realtime_seconds": 20.81860089302063,
+      "boottime_seconds": 20.137106857000617,
+      "gnu_elapsed_seconds": 20.81,
+      "process_ended_utc": "2026-09-15T11:25:35Z",
+      "watchdog_clocks": {
+        "started": {
+          "monotonic": 37427.726777237,
+          "realtime": 1789471514.906559
+        }
+      },
+      "realtime_clock_agreement": true,
+      "monotonic_clock_agreement": true,
+      "elapsed_clock": "CLOCK_MONOTONIC; realtime and GNU elapsed are adjustable-clock diagnostics",
+      "cpu_user_seconds": 34.54,
+      "cpu_system_seconds": 0.19,
+      "peak_rss_bytes": 334237696,
+      "output": "/tmp/losat-remaining-20260915/reference-turbofan/AP027280.AP027280.tlosatx/n8/repeat0/baselinebody/output.txt",
+      "raw_output_sha256": "845d15661c2a30fa69e01bcd8140792e55a1fa06bbb52181632680435a08eda8",
+      "raw_output_bytes": 3134850,
+      "started_utc": "2026-09-15T11:25:14Z",
+      "ended_utc": "2026-09-15T11:25:35Z",
+      "timeout_seconds": 300,
+      "unavailable_metrics": {},
+      "case": "AP027280.AP027280.tlosatx",
+      "threads": 8,
+      "version": "baselinebody",
+      "repeat": 0,
+      "timed": false,
+      "artifact_sha256": "bf6b65689c8ddbdc2220b7bdc601c55454c9e84f899c8bf5ef0d3219e6a7c500",
+      "body_seconds": 19.821113338,
+      "raw_equal": true
+    },
+    {
+      "status": "PASS",
+      "reason": null,
+      "exit_status": 0,
+      "wall_seconds": 22.80233890999807,
+      "monotonic_start": 37447.867409665,
+      "monotonic_end": 37470.669748575,
+      "realtime_seconds": 22.80234122276306,
+      "boottime_seconds": 22.80234074400505,
+      "gnu_elapsed_seconds": 22.8,
+      "process_ended_utc": "2026-09-15T11:25:58Z",
+      "watchdog_clocks": {
+        "started": {
+          "monotonic": 37447.867705692,
+          "realtime": 1789471535.7289815
+        }
+      },
+      "realtime_clock_agreement": true,
+      "monotonic_clock_agreement": true,
+      "elapsed_clock": "CLOCK_MONOTONIC; realtime and GNU elapsed are adjustable-clock diagnostics",
+      "cpu_user_seconds": 39.64,
+      "cpu_system_seconds": 0.14,
+      "peak_rss_bytes": 330977280,
+      "output": "/tmp/losat-remaining-20260915/reference-turbofan/AP027280.AP027280.tlosatx/n8/repeat0/X1v1body/output.txt",
+      "raw_output_sha256": "845d15661c2a30fa69e01bcd8140792e55a1fa06bbb52181632680435a08eda8",
+      "raw_output_bytes": 3134850,
+      "started_utc": "2026-09-15T11:25:35Z",
+      "ended_utc": "2026-09-15T11:25:58Z",
+      "timeout_seconds": 300,
+      "unavailable_metrics": {},
+      "case": "AP027280.AP027280.tlosatx",
+      "threads": 8,
+      "version": "X1v1body",
+      "repeat": 0,
+      "timed": false,
+      "artifact_sha256": "bd06b512d167d3cb906bddf31db24195ec586d2d6c49f62d3f3688669b7769c2",
+      "body_seconds": 22.491871143,
+      "raw_equal": true
+    }
+  ]
+}

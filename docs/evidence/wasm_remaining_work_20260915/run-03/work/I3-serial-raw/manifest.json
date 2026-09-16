@@ -1,0 +1,370 @@
+{
+  "version": "I3",
+  "flags": [],
+  "affinity": [
+    0,
+    1,
+    2,
+    3,
+    4,
+    5,
+    6,
+    7,
+    8,
+    9,
+    10,
+    11,
+    12,
+    13,
+    14,
+    15,
+    16,
+    17,
+    18,
+    19,
+    20,
+    21,
+    22,
+    23,
+    24,
+    25,
+    26,
+    27,
+    28,
+    29,
+    30,
+    31
+  ],
+  "fixtures": [
+    {
+      "case": "MjeNMV.MelaMJNV.tlosatx",
+      "program": "tblastx",
+      "query": "/mnt/c/users/genom/github/losat/docs/evidence/wasm_remaining_work_20260915/run-03/work/baseline-source/LOSAT/tests/fasta/MjeNMV.fasta",
+      "subject": "/mnt/c/users/genom/github/losat/docs/evidence/wasm_remaining_work_20260915/run-03/work/baseline-source/LOSAT/tests/fasta/MelaMJNV.fasta",
+      "query_sha256": "f91873bd2957bfaefe377aa221ffd1e0b57e657e5d26ba86c52fce891ac0cedf",
+      "subject_sha256": "491f80b482acc96600773c3493358c0262dbf714cb5d76f8f5560a92ecccac1a",
+      "common": [
+        "-query",
+        "/mnt/c/users/genom/github/losat/docs/evidence/wasm_remaining_work_20260915/run-03/work/baseline-source/LOSAT/tests/fasta/MjeNMV.fasta",
+        "-subject",
+        "/mnt/c/users/genom/github/losat/docs/evidence/wasm_remaining_work_20260915/run-03/work/baseline-source/LOSAT/tests/fasta/MelaMJNV.fasta",
+        "-outfmt",
+        "6",
+        "-query_gencode",
+        "1",
+        "-db_gencode",
+        "1",
+        "-out",
+        "{output}"
+      ]
+    },
+    {
+      "case": "AP027280.AP027280.tlosatx",
+      "program": "tblastx",
+      "query": "/mnt/c/users/genom/github/losat/docs/evidence/wasm_remaining_work_20260915/run-03/work/baseline-source/LOSAT/tests/fasta/AP027280.fasta",
+      "subject": "/mnt/c/users/genom/github/losat/docs/evidence/wasm_remaining_work_20260915/run-03/work/baseline-source/LOSAT/tests/fasta/AP027280.fasta",
+      "query_sha256": "14c68a026e685896afdc5366902999d5960589cf301a76b3f1a732a8f4708b6a",
+      "subject_sha256": "14c68a026e685896afdc5366902999d5960589cf301a76b3f1a732a8f4708b6a",
+      "common": [
+        "-query",
+        "/mnt/c/users/genom/github/losat/docs/evidence/wasm_remaining_work_20260915/run-03/work/baseline-source/LOSAT/tests/fasta/AP027280.fasta",
+        "-subject",
+        "/mnt/c/users/genom/github/losat/docs/evidence/wasm_remaining_work_20260915/run-03/work/baseline-source/LOSAT/tests/fasta/AP027280.fasta",
+        "-outfmt",
+        "6",
+        "-query_gencode",
+        "1",
+        "-db_gencode",
+        "1",
+        "-out",
+        "{output}"
+      ]
+    },
+    {
+      "case": "MelaMJNV.PemoMJNVA.tlosatx",
+      "program": "tblastx",
+      "query": "/mnt/c/users/genom/github/losat/docs/evidence/wasm_remaining_work_20260915/run-03/work/baseline-source/LOSAT/tests/fasta/MelaMJNV.fasta",
+      "subject": "/mnt/c/users/genom/github/losat/docs/evidence/wasm_remaining_work_20260915/run-03/work/baseline-source/LOSAT/tests/fasta/PemoMJNVA.fasta",
+      "query_sha256": "491f80b482acc96600773c3493358c0262dbf714cb5d76f8f5560a92ecccac1a",
+      "subject_sha256": "e38d663db3478cec0694e419f00b769f1937c756f3a3f827711c24d531fb4a07",
+      "common": [
+        "-query",
+        "/mnt/c/users/genom/github/losat/docs/evidence/wasm_remaining_work_20260915/run-03/work/baseline-source/LOSAT/tests/fasta/MelaMJNV.fasta",
+        "-subject",
+        "/mnt/c/users/genom/github/losat/docs/evidence/wasm_remaining_work_20260915/run-03/work/baseline-source/LOSAT/tests/fasta/PemoMJNVA.fasta",
+        "-outfmt",
+        "6",
+        "-query_gencode",
+        "1",
+        "-db_gencode",
+        "1",
+        "-out",
+        "{output}"
+      ]
+    },
+    {
+      "case": "EDL933.Sakai.losatn.megablast",
+      "program": "blastn",
+      "query": "/mnt/c/users/genom/github/losat/docs/evidence/wasm_remaining_work_20260915/run-03/work/baseline-source/LOSAT/tests/fasta/EDL933.fna",
+      "subject": "/mnt/c/users/genom/github/losat/docs/evidence/wasm_remaining_work_20260915/run-03/work/baseline-source/LOSAT/tests/fasta/Sakai.fna",
+      "query_sha256": "53afb4ceb61826119e72b85a9467ba3d53091d709015b8fcd783df49f894d79d",
+      "subject_sha256": "a5ecd2fbab298838e7ebc1e6b4372b7e20470f9242638b6cd4422153926c1723",
+      "common": [
+        "-query",
+        "/mnt/c/users/genom/github/losat/docs/evidence/wasm_remaining_work_20260915/run-03/work/baseline-source/LOSAT/tests/fasta/EDL933.fna",
+        "-subject",
+        "/mnt/c/users/genom/github/losat/docs/evidence/wasm_remaining_work_20260915/run-03/work/baseline-source/LOSAT/tests/fasta/Sakai.fna",
+        "-outfmt",
+        "6",
+        "-task",
+        "megablast",
+        "-out",
+        "{output}"
+      ]
+    },
+    {
+      "case": "NZ_CP006932.NZ_CP006932.losatn.megablast",
+      "program": "blastn",
+      "query": "/mnt/c/users/genom/github/losat/docs/evidence/wasm_remaining_work_20260915/run-03/work/baseline-source/LOSAT/tests/fasta/NZ_CP006932.fasta",
+      "subject": "/mnt/c/users/genom/github/losat/docs/evidence/wasm_remaining_work_20260915/run-03/work/baseline-source/LOSAT/tests/fasta/NZ_CP006932.fasta",
+      "query_sha256": "2190d5bf137d0bed3e3093624303b24b29d0923e04b27069f10e5ca145892617",
+      "subject_sha256": "2190d5bf137d0bed3e3093624303b24b29d0923e04b27069f10e5ca145892617",
+      "common": [
+        "-query",
+        "/mnt/c/users/genom/github/losat/docs/evidence/wasm_remaining_work_20260915/run-03/work/baseline-source/LOSAT/tests/fasta/NZ_CP006932.fasta",
+        "-subject",
+        "/mnt/c/users/genom/github/losat/docs/evidence/wasm_remaining_work_20260915/run-03/work/baseline-source/LOSAT/tests/fasta/NZ_CP006932.fasta",
+        "-outfmt",
+        "6",
+        "-task",
+        "megablast",
+        "-out",
+        "{output}"
+      ]
+    },
+    {
+      "case": "MelaMJNV.PemoMJNVA.losatn.blastn",
+      "program": "blastn",
+      "query": "/mnt/c/users/genom/github/losat/docs/evidence/wasm_remaining_work_20260915/run-03/work/baseline-source/LOSAT/tests/fasta/LC738874.fasta",
+      "subject": "/mnt/c/users/genom/github/losat/docs/evidence/wasm_remaining_work_20260915/run-03/work/baseline-source/LOSAT/tests/fasta/LC738870.fasta",
+      "query_sha256": "491f80b482acc96600773c3493358c0262dbf714cb5d76f8f5560a92ecccac1a",
+      "subject_sha256": "e38d663db3478cec0694e419f00b769f1937c756f3a3f827711c24d531fb4a07",
+      "common": [
+        "-query",
+        "/mnt/c/users/genom/github/losat/docs/evidence/wasm_remaining_work_20260915/run-03/work/baseline-source/LOSAT/tests/fasta/LC738874.fasta",
+        "-subject",
+        "/mnt/c/users/genom/github/losat/docs/evidence/wasm_remaining_work_20260915/run-03/work/baseline-source/LOSAT/tests/fasta/LC738870.fasta",
+        "-outfmt",
+        "6",
+        "-task",
+        "blastn",
+        "-out",
+        "{output}"
+      ]
+    },
+    {
+      "case": "MjPMNV.MlPMNV.losatn.blastn",
+      "program": "blastn",
+      "query": "/mnt/c/users/genom/github/losat/docs/evidence/wasm_remaining_work_20260915/run-03/work/baseline-source/LOSAT/tests/fasta/AP027202.fasta",
+      "subject": "/mnt/c/users/genom/github/losat/docs/evidence/wasm_remaining_work_20260915/run-03/work/baseline-source/LOSAT/tests/fasta/LC738875.fasta",
+      "query_sha256": "7b3542ab08c30a01618aab45526e33f2464a7d6ade21e0c133681abbb53c4192",
+      "subject_sha256": "f397c2e82e5f7f7d12cebd0a62e2146000f0a13c9cbfc662ea0ba63c45d93e15",
+      "common": [
+        "-query",
+        "/mnt/c/users/genom/github/losat/docs/evidence/wasm_remaining_work_20260915/run-03/work/baseline-source/LOSAT/tests/fasta/AP027202.fasta",
+        "-subject",
+        "/mnt/c/users/genom/github/losat/docs/evidence/wasm_remaining_work_20260915/run-03/work/baseline-source/LOSAT/tests/fasta/LC738875.fasta",
+        "-outfmt",
+        "6",
+        "-task",
+        "blastn",
+        "-out",
+        "{output}"
+      ]
+    },
+    {
+      "case": "AP027078.AP027131.losatp",
+      "program": "blastp",
+      "query": "/mnt/c/users/genom/github/losat/docs/evidence/wasm_remaining_work_20260915/run-03/work/baseline-source/LOSAT/tests/fasta/AP027078.faa",
+      "subject": "/mnt/c/users/genom/github/losat/docs/evidence/wasm_remaining_work_20260915/run-03/work/baseline-source/LOSAT/tests/fasta/AP027131.faa",
+      "query_sha256": "3d589927308951648b0db6653b3b3b0291a18ef1b6e6585893b495bb4ae91866",
+      "subject_sha256": "f454d69ec8658655b003b543abb1a6a164826ef2d689b533f9a413369014db3b",
+      "common": [
+        "-query",
+        "/mnt/c/users/genom/github/losat/docs/evidence/wasm_remaining_work_20260915/run-03/work/baseline-source/LOSAT/tests/fasta/AP027078.faa",
+        "-subject",
+        "/mnt/c/users/genom/github/losat/docs/evidence/wasm_remaining_work_20260915/run-03/work/baseline-source/LOSAT/tests/fasta/AP027131.faa",
+        "-outfmt",
+        "6",
+        "-out",
+        "{output}"
+      ]
+    },
+    {
+      "case": "AP027132.NZ_CP006932.losatp",
+      "program": "blastp",
+      "query": "/mnt/c/users/genom/github/losat/docs/evidence/wasm_remaining_work_20260915/run-03/work/baseline-source/LOSAT/tests/fasta/AP027132.faa",
+      "subject": "/mnt/c/users/genom/github/losat/docs/evidence/wasm_remaining_work_20260915/run-03/work/baseline-source/LOSAT/tests/fasta/NZ_CP006932.faa",
+      "query_sha256": "f824a3ec3bfe0b18d912eac13caeced3197172641135ebc292429fb20d919ded",
+      "subject_sha256": "61b882399e10f26f1ba1daf27599370f265b678ae95cbb3bccdd443b34dd9e20",
+      "common": [
+        "-query",
+        "/mnt/c/users/genom/github/losat/docs/evidence/wasm_remaining_work_20260915/run-03/work/baseline-source/LOSAT/tests/fasta/AP027132.faa",
+        "-subject",
+        "/mnt/c/users/genom/github/losat/docs/evidence/wasm_remaining_work_20260915/run-03/work/baseline-source/LOSAT/tests/fasta/NZ_CP006932.faa",
+        "-outfmt",
+        "6",
+        "-out",
+        "{output}"
+      ]
+    },
+    {
+      "case": "threshold-10",
+      "program": "tblastx",
+      "query": "/mnt/c/users/genom/github/losat/docs/evidence/wasm_remaining_work_20260915/run-03/work/baseline-source/LOSAT/tests/fasta/LC738874.fasta",
+      "subject": "/mnt/c/users/genom/github/losat/docs/evidence/wasm_remaining_work_20260915/run-03/work/baseline-source/LOSAT/tests/fasta/LC738875.fasta",
+      "query_sha256": "491f80b482acc96600773c3493358c0262dbf714cb5d76f8f5560a92ecccac1a",
+      "subject_sha256": "f397c2e82e5f7f7d12cebd0a62e2146000f0a13c9cbfc662ea0ba63c45d93e15",
+      "common": [
+        "-query",
+        "/mnt/c/users/genom/github/losat/docs/evidence/wasm_remaining_work_20260915/run-03/work/baseline-source/LOSAT/tests/fasta/LC738874.fasta",
+        "-subject",
+        "/mnt/c/users/genom/github/losat/docs/evidence/wasm_remaining_work_20260915/run-03/work/baseline-source/LOSAT/tests/fasta/LC738875.fasta",
+        "-outfmt",
+        "6",
+        "-query_gencode",
+        "1",
+        "-db_gencode",
+        "1",
+        "-evalue",
+        "10",
+        "-out",
+        "{output}"
+      ]
+    },
+    {
+      "case": "threshold-100",
+      "program": "tblastx",
+      "query": "/mnt/c/users/genom/github/losat/docs/evidence/wasm_remaining_work_20260915/run-03/work/baseline-source/LOSAT/tests/fasta/LC738874.fasta",
+      "subject": "/mnt/c/users/genom/github/losat/docs/evidence/wasm_remaining_work_20260915/run-03/work/baseline-source/LOSAT/tests/fasta/LC738875.fasta",
+      "query_sha256": "491f80b482acc96600773c3493358c0262dbf714cb5d76f8f5560a92ecccac1a",
+      "subject_sha256": "f397c2e82e5f7f7d12cebd0a62e2146000f0a13c9cbfc662ea0ba63c45d93e15",
+      "common": [
+        "-query",
+        "/mnt/c/users/genom/github/losat/docs/evidence/wasm_remaining_work_20260915/run-03/work/baseline-source/LOSAT/tests/fasta/LC738874.fasta",
+        "-subject",
+        "/mnt/c/users/genom/github/losat/docs/evidence/wasm_remaining_work_20260915/run-03/work/baseline-source/LOSAT/tests/fasta/LC738875.fasta",
+        "-outfmt",
+        "6",
+        "-query_gencode",
+        "1",
+        "-db_gencode",
+        "1",
+        "-evalue",
+        "100",
+        "-out",
+        "{output}"
+      ]
+    },
+    {
+      "case": "threshold-10000",
+      "program": "tblastx",
+      "query": "/mnt/c/users/genom/github/losat/docs/evidence/wasm_remaining_work_20260915/run-03/work/baseline-source/LOSAT/tests/fasta/LC738874.fasta",
+      "subject": "/mnt/c/users/genom/github/losat/docs/evidence/wasm_remaining_work_20260915/run-03/work/baseline-source/LOSAT/tests/fasta/LC738875.fasta",
+      "query_sha256": "491f80b482acc96600773c3493358c0262dbf714cb5d76f8f5560a92ecccac1a",
+      "subject_sha256": "f397c2e82e5f7f7d12cebd0a62e2146000f0a13c9cbfc662ea0ba63c45d93e15",
+      "common": [
+        "-query",
+        "/mnt/c/users/genom/github/losat/docs/evidence/wasm_remaining_work_20260915/run-03/work/baseline-source/LOSAT/tests/fasta/LC738874.fasta",
+        "-subject",
+        "/mnt/c/users/genom/github/losat/docs/evidence/wasm_remaining_work_20260915/run-03/work/baseline-source/LOSAT/tests/fasta/LC738875.fasta",
+        "-outfmt",
+        "6",
+        "-query_gencode",
+        "1",
+        "-db_gencode",
+        "1",
+        "-evalue",
+        "10000",
+        "-out",
+        "{output}"
+      ]
+    },
+    {
+      "case": "single32",
+      "program": "blastp",
+      "query": "/mnt/c/users/genom/github/losat/docs/evidence/wasm_remaining_work_20260915/run-03/work/boundary-fixtures/query.faa",
+      "subject": "/mnt/c/users/genom/github/losat/docs/evidence/wasm_remaining_work_20260915/run-03/work/boundary-fixtures/subjects.faa",
+      "query_sha256": "3584e0535dbc65f8b71f32dcbb38251715307e0a46faa67bfa637baf81b2a66f",
+      "subject_sha256": "8f04f6c510fdd63d18b2db3a10a73be8f627149defe082d078d6a8dfe83dc3bb",
+      "common": [
+        "-query",
+        "/mnt/c/users/genom/github/losat/docs/evidence/wasm_remaining_work_20260915/run-03/work/boundary-fixtures/query.faa",
+        "-subject",
+        "/mnt/c/users/genom/github/losat/docs/evidence/wasm_remaining_work_20260915/run-03/work/boundary-fixtures/subjects.faa",
+        "-outfmt",
+        "6",
+        "-out",
+        "{output}"
+      ]
+    },
+    {
+      "case": "word7",
+      "program": "blastn",
+      "query": "/mnt/c/users/genom/github/losat/docs/evidence/wasm_remaining_work_20260915/run-03/work/boundary-fixtures/nuc3.fasta",
+      "subject": "/mnt/c/users/genom/github/losat/docs/evidence/wasm_remaining_work_20260915/run-03/work/boundary-fixtures/unequal.fasta",
+      "query_sha256": "eb57857f7213b30358558db8e8442401df0e76eb1f4f0cbe805e418b70e8fbd8",
+      "subject_sha256": "9754c108d5b93b0d1cea3a70758a4d255c20edcb7d5945aec4e1492181291c8a",
+      "common": [
+        "-query",
+        "/mnt/c/users/genom/github/losat/docs/evidence/wasm_remaining_work_20260915/run-03/work/boundary-fixtures/nuc3.fasta",
+        "-subject",
+        "/mnt/c/users/genom/github/losat/docs/evidence/wasm_remaining_work_20260915/run-03/work/boundary-fixtures/unequal.fasta",
+        "-outfmt",
+        "6",
+        "-task",
+        "blastn",
+        "-word_size",
+        "7",
+        "-out",
+        "{output}"
+      ]
+    },
+    {
+      "case": "valid-nohit",
+      "program": "tblastx",
+      "query": "/mnt/c/users/genom/github/losat/docs/evidence/wasm_remaining_work_20260915/run-03/work/boundary-fixtures/nuc1.fasta",
+      "subject": "/mnt/c/users/genom/github/losat/docs/evidence/wasm_remaining_work_20260915/run-03/work/boundary-fixtures/nohit.fasta",
+      "query_sha256": "6eb80dbc12192e998005cc59b63c8b5dc79242a3b1a3eebc467c8754328c78cc",
+      "subject_sha256": "6d18c644a3eb32585a8547e082fe47087a15e28a5177f3f469ccfe8cc2544b33",
+      "common": [
+        "-query",
+        "/mnt/c/users/genom/github/losat/docs/evidence/wasm_remaining_work_20260915/run-03/work/boundary-fixtures/nuc1.fasta",
+        "-subject",
+        "/mnt/c/users/genom/github/losat/docs/evidence/wasm_remaining_work_20260915/run-03/work/boundary-fixtures/nohit.fasta",
+        "-outfmt",
+        "6",
+        "-query_gencode",
+        "1",
+        "-db_gencode",
+        "1",
+        "-out",
+        "{output}"
+      ]
+    }
+  ],
+  "oracles": {
+    "blastn": {
+      "path": "/home/kawato/micromamba/bin/blastn",
+      "sha256": "0b88d4a00cb7fa579c203653151175b24c83d27fe240d420abe7b5261a3083d1"
+    },
+    "blastp": {
+      "path": "/home/kawato/micromamba/bin/blastp",
+      "sha256": "fdcbaa25cfdee5359231ae178713d2c28272e694614b847c5b2b7407c3d8a08b"
+    },
+    "tblastx": {
+      "path": "/home/kawato/micromamba/bin/tblastx",
+      "sha256": "9b6121d254d2c634114ac91c0bf4faa252b93532b1142cfb3ade2336fb830873"
+    }
+  }
+}

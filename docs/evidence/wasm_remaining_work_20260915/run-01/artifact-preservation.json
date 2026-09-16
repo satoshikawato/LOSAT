@@ -1,0 +1,26 @@
+[
+  {
+    "path": "/tmp/losat-remaining-20260915/baseline/native-command/release/LOSAT",
+    "recorded": "dba45c2535f1938267d57a2b4bbe765db2a6f99570c40667f47bb5acc33c189e",
+    "current": "dba45c2535f1938267d57a2b4bbe765db2a6f99570c40667f47bb5acc33c189e",
+    "equal": true
+  },
+  {
+    "path": "/tmp/losat-remaining-20260915/baseline/serial-command/wasm32-wasip1/release/LOSAT.wasm",
+    "recorded": "2333cde63243e08e3f564af90426e9e55095be164a23638802cbb2c3d9139f3b",
+    "current": "2333cde63243e08e3f564af90426e9e55095be164a23638802cbb2c3d9139f3b",
+    "equal": true
+  },
+  {
+    "path": "/tmp/losat-remaining-20260915/baseline/threaded-command/wasm32-wasip1-threads/release/LOSAT.wasm",
+    "recorded": "71a8b1b851c108eebac33414156108a1b2cc61b390ff3cb8562315626a5d70b9",
+    "current": "71a8b1b851c108eebac33414156108a1b2cc61b390ff3cb8562315626a5d70b9",
+    "equal": true
+  },
+  {
+    "path": "/tmp/losat-remaining-20260915/baseline/threaded-reactor/wasm32-wasip1-threads/release/LOSAT.wasm",
+    "recorded": "60040a26b9cce16f662b711574995886b595bf1c7a7459e72186f9c55c44d301",
+    "current": "60040a26b9cce16f662b711574995886b595bf1c7a7459e72186f9c55c44d301",
+    "equal": true
+  }
+]

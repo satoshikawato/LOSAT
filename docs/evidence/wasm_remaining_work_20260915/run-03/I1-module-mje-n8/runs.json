@@ -1,0 +1,1990 @@
+[
+  {
+    "case": "MjeNMV.MelaMJNV.tlosatx",
+    "threads": 8,
+    "session": 0,
+    "version": "baseline",
+    "artifact_sha256": "71a8b1b851c108eebac33414156108a1b2cc61b390ff3cb8562315626a5d70b9",
+    "process": {
+      "status": "PASS",
+      "reason": null,
+      "exit_status": 0,
+      "wall_seconds": 53.52331309200008,
+      "monotonic_start": 2599.824391834,
+      "monotonic_end": 2653.347704926,
+      "realtime_seconds": 56.71417546272278,
+      "boottime_seconds": 53.52331848299991,
+      "gnu_elapsed_seconds": 56.67,
+      "process_ended_utc": "2026-09-15T23:31:49Z",
+      "watchdog_clocks": {
+        "started": {
+          "monotonic": 2599.839091551,
+          "realtime": 1789515052.8330278
+        }
+      },
+      "realtime_clock_agreement": false,
+      "monotonic_clock_agreement": true,
+      "elapsed_clock": "CLOCK_MONOTONIC; realtime and GNU elapsed are adjustable-clock diagnostics",
+      "cpu_user_seconds": 108.1,
+      "cpu_system_seconds": 0.45,
+      "peak_rss_bytes": 564199424,
+      "output": "/mnt/c/users/genom/github/losat/docs/evidence/wasm_remaining_work_20260915/run-03/I1-module-mje-n8/MjeNMV.MelaMJNV.tlosatx/n8/session0/baseline/process/output.txt",
+      "raw_output_sha256": "881eba23599a0eecc5818e2082cc53cc398e27555599cd7de542b3cddcb6c456",
+      "raw_output_bytes": 23089,
+      "started_utc": "2026-09-15T23:30:52Z",
+      "ended_utc": "2026-09-15T23:31:49Z",
+      "timeout_seconds": 600,
+      "unavailable_metrics": {}
+    },
+    "report": {
+      "identity": {
+        "kind": "threaded-command",
+        "sha256": "71a8b1b851c108eebac33414156108a1b2cc61b390ff3cb8562315626a5d70b9",
+        "imports": [
+          {
+            "module": "env",
+            "name": "memory",
+            "kind": "memory"
+          },
+          {
+            "module": "wasi_snapshot_preview1",
+            "name": "args_sizes_get",
+            "kind": "function"
+          },
+          {
+            "module": "wasi_snapshot_preview1",
+            "name": "args_get",
+            "kind": "function"
+          },
+          {
+            "module": "wasi_snapshot_preview1",
+            "name": "fd_write",
+            "kind": "function"
+          },
+          {
+            "module": "wasi_snapshot_preview1",
+            "name": "clock_time_get",
+            "kind": "function"
+          },
+          {
+            "module": "wasi_snapshot_preview1",
+            "name": "fd_read",
+            "kind": "function"
+          },
+          {
+            "module": "wasi_snapshot_preview1",
+            "name": "sched_yield",
+            "kind": "function"
+          },
+          {
+            "module": "wasi_snapshot_preview1",
+            "name": "path_create_directory",
+            "kind": "function"
+          },
+          {
+            "module": "wasi_snapshot_preview1",
+            "name": "path_filestat_get",
+            "kind": "function"
+          },
+          {
+            "module": "wasi_snapshot_preview1",
+            "name": "path_open",
+            "kind": "function"
+          },
+          {
+            "module": "wasi_snapshot_preview1",
+            "name": "random_get",
+            "kind": "function"
+          },
+          {
+            "module": "wasi_snapshot_preview1",
+            "name": "environ_get",
+            "kind": "function"
+          },
+          {
+            "module": "wasi_snapshot_preview1",
+            "name": "environ_sizes_get",
+            "kind": "function"
+          },
+          {
+            "module": "wasi_snapshot_preview1",
+            "name": "fd_close",
+            "kind": "function"
+          },
+          {
+            "module": "wasi_snapshot_preview1",
+            "name": "fd_fdstat_get",
+            "kind": "function"
+          },
+          {
+            "module": "wasi_snapshot_preview1",
+            "name": "fd_prestat_get",
+            "kind": "function"
+          },
+          {
+            "module": "wasi_snapshot_preview1",
+            "name": "fd_prestat_dir_name",
+            "kind": "function"
+          },
+          {
+            "module": "wasi_snapshot_preview1",
+            "name": "proc_exit",
+            "kind": "function"
+          },
+          {
+            "module": "wasi",
+            "name": "thread-spawn",
+            "kind": "function"
+          }
+        ],
+        "exports": [
+          {
+            "name": "memory",
+            "kind": "memory"
+          },
+          {
+            "name": "_start",
+            "kind": "function"
+          },
+          {
+            "name": "__main_void",
+            "kind": "function"
+          },
+          {
+            "name": "losat_web_alloc",
+            "kind": "function"
+          },
+          {
+            "name": "losat_web_clear",
+            "kind": "function"
+          },
+          {
+            "name": "losat_web_clear_fasta_store",
+            "kind": "function"
+          },
+          {
+            "name": "losat_web_dealloc",
+            "kind": "function"
+          },
+          {
+            "name": "losat_web_error_len",
+            "kind": "function"
+          },
+          {
+            "name": "losat_web_error_ptr",
+            "kind": "function"
+          },
+          {
+            "name": "losat_web_has_direct_api",
+            "kind": "function"
+          },
+          {
+            "name": "losat_web_release_fasta",
+            "kind": "function"
+          },
+          {
+            "name": "losat_web_result_len",
+            "kind": "function"
+          },
+          {
+            "name": "losat_web_result_ptr",
+            "kind": "function"
+          },
+          {
+            "name": "losat_web_run_pair",
+            "kind": "function"
+          },
+          {
+            "name": "losat_web_run_pair_handles",
+            "kind": "function"
+          },
+          {
+            "name": "losat_web_store_fasta",
+            "kind": "function"
+          },
+          {
+            "name": "wasi_thread_start",
+            "kind": "function"
+          }
+        ],
+        "memory": {
+          "module": "env",
+          "name": "memory",
+          "imported": true,
+          "initial": 21,
+          "maximum": 16384,
+          "shared": true
+        }
+      },
+      "timings": {
+        "validation_including_raw_compile_seconds": 0.015781354999999997,
+        "guard_seconds": 0.04781787,
+        "guarded_compile_seconds": 0.0024387459999999947,
+        "input_load_seconds": 5.5460000000095985e-06,
+        "resident_input_bytes": 0,
+        "final_instance_close_seconds": 5.665000004228205e-06
+      },
+      "mode": "compiled-module",
+      "node_argv": [
+        "/home/kawato/.local/lib/nodejs/node-v26.8.2-linux-x64/bin/node"
+      ],
+      "instance_scope": "per-job",
+      "samples": [
+        {
+          "case_id": "MjeNMV.MelaMJNV.tlosatx",
+          "repeat": -1,
+          "timed": false,
+          "threads": 8,
+          "status": "PASS",
+          "eligible_for_timing": false,
+          "output": "/mnt/c/users/genom/github/losat/docs/evidence/wasm_remaining_work_20260915/run-03/I1-module-mje-n8/MjeNMV.MelaMJNV.tlosatx/n8/session0/baseline/raw--1.txt",
+          "exit_status": 0,
+          "instantiate_seconds": 0.0027347110000000042,
+          "invocation_including_io_and_api_copy_seconds": 24.161507974,
+          "host_exit_wait_seconds": 0.0015250959999975747,
+          "raw_output_sha256": "b309f77fee038f0559d870737ebeba732c11eba4f7e495f045acbfb831817fd7",
+          "expected_sha256": "b309f77fee038f0559d870737ebeba732c11eba4f7e495f045acbfb831817fd7",
+          "raw_equal": true,
+          "events": [
+            {
+              "event": "spawn_attempt",
+              "at_ms": 160.471622,
+              "tid": 1,
+              "attempt": 1
+            },
+            {
+              "event": "spawned",
+              "at_ms": 162.13588,
+              "tid": 1
+            },
+            {
+              "event": "ready",
+              "at_ms": 210.988405,
+              "tid": 1
+            },
+            {
+              "event": "spawn_attempt",
+              "at_ms": 211.040427,
+              "tid": 2,
+              "attempt": 2
+            },
+            {
+              "event": "spawned",
+              "at_ms": 211.377064,
+              "tid": 2
+            },
+            {
+              "event": "ready",
+              "at_ms": 259.452617,
+              "tid": 2
+            },
+            {
+              "event": "spawn_attempt",
+              "at_ms": 259.486975,
+              "tid": 3,
+              "attempt": 3
+            },
+            {
+              "event": "spawned",
+              "at_ms": 259.85181,
+              "tid": 3
+            },
+            {
+              "event": "ready",
+              "at_ms": 306.326809,
+              "tid": 3
+            },
+            {
+              "event": "spawn_attempt",
+              "at_ms": 306.373786,
+              "tid": 4,
+              "attempt": 4
+            },
+            {
+              "event": "spawned",
+              "at_ms": 306.675102,
+              "tid": 4
+            },
+            {
+              "event": "ready",
+              "at_ms": 351.539488,
+              "tid": 4
+            },
+            {
+              "event": "spawn_attempt",
+              "at_ms": 351.57629,
+              "tid": 5,
+              "attempt": 5
+            },
+            {
+              "event": "spawned",
+              "at_ms": 351.98003,
+              "tid": 5
+            },
+            {
+              "event": "ready",
+              "at_ms": 404.527414,
+              "tid": 5
+            },
+            {
+              "event": "spawn_attempt",
+              "at_ms": 404.576975,
+              "tid": 6,
+              "attempt": 6
+            },
+            {
+              "event": "spawned",
+              "at_ms": 404.912056,
+              "tid": 6
+            },
+            {
+              "event": "ready",
+              "at_ms": 464.694731,
+              "tid": 6
+            },
+            {
+              "event": "spawn_attempt",
+              "at_ms": 464.751574,
+              "tid": 7,
+              "attempt": 7
+            },
+            {
+              "event": "spawned",
+              "at_ms": 465.598795,
+              "tid": 7
+            },
+            {
+              "event": "ready",
+              "at_ms": 519.108374,
+              "tid": 7
+            },
+            {
+              "event": "exited",
+              "at_ms": 24317.167557,
+              "tid": 6,
+              "code": 0
+            },
+            {
+              "event": "exited",
+              "at_ms": 24317.230248,
+              "tid": 1,
+              "code": 0
+            },
+            {
+              "event": "exited",
+              "at_ms": 24317.257648,
+              "tid": 5,
+              "code": 0
+            },
+            {
+              "event": "exited",
+              "at_ms": 24317.278536,
+              "tid": 4,
+              "code": 0
+            },
+            {
+              "event": "exited",
+              "at_ms": 24317.32007,
+              "tid": 2,
+              "code": 0
+            },
+            {
+              "event": "exited",
+              "at_ms": 24317.341804,
+              "tid": 7,
+              "code": 0
+            },
+            {
+              "event": "exited",
+              "at_ms": 24317.354694,
+              "tid": 3,
+              "code": 0
+            }
+          ],
+          "host_worker_counts": {
+            "spawn_attempt": 7,
+            "spawned": 7,
+            "ready": 7,
+            "exited": 7
+          },
+          "memory_bytes": 94371840,
+          "thread_contract": "PASS",
+          "boundary": "compiled-module",
+          "wall_seconds": 24.165805806,
+          "realtime_seconds": 25.758,
+          "realtime_clock_agreement": false,
+          "elapsed_clock": "performance.now() (CLOCK_MONOTONIC); Date.now() is an adjustable-clock diagnostic",
+          "close_seconds": 3.80250000016531e-05,
+          "cpu_user_seconds": 57.63775,
+          "cpu_system_seconds": 0.147795,
+          "process_lifetime_peak_rss_bytes": 312729600,
+          "rss_after_bytes": 268095488
+        },
+        {
+          "case_id": "MjeNMV.MelaMJNV.tlosatx",
+          "repeat": 0,
+          "timed": true,
+          "threads": 8,
+          "status": "PASS",
+          "eligible_for_timing": true,
+          "output": "/mnt/c/users/genom/github/losat/docs/evidence/wasm_remaining_work_20260915/run-03/I1-module-mje-n8/MjeNMV.MelaMJNV.tlosatx/n8/session0/baseline/raw-0.txt",
+          "exit_status": 0,
+          "instantiate_seconds": 0.0018541459999978542,
+          "invocation_including_io_and_api_copy_seconds": 9.678366257000002,
+          "host_exit_wait_seconds": 0.0011165600000022096,
+          "raw_output_sha256": "b309f77fee038f0559d870737ebeba732c11eba4f7e495f045acbfb831817fd7",
+          "expected_sha256": "b309f77fee038f0559d870737ebeba732c11eba4f7e495f045acbfb831817fd7",
+          "raw_equal": true,
+          "events": [
+            {
+              "event": "spawn_attempt",
+              "at_ms": 24337.201016,
+              "tid": 1,
+              "attempt": 1
+            },
+            {
+              "event": "spawned",
+              "at_ms": 24337.629626,
+              "tid": 1
+            },
+            {
+              "event": "ready",
+              "at_ms": 24385.360414,
+              "tid": 1
+            },
+            {
+              "event": "spawn_attempt",
+              "at_ms": 24385.399413,
+              "tid": 2,
+              "attempt": 2
+            },
+            {
+              "event": "spawned",
+              "at_ms": 24385.753063,
+              "tid": 2
+            },
+            {
+              "event": "ready",
+              "at_ms": 24431.056696,
+              "tid": 2
+            },
+            {
+              "event": "spawn_attempt",
+              "at_ms": 24431.110949,
+              "tid": 3,
+              "attempt": 3
+            },
+            {
+              "event": "spawned",
+              "at_ms": 24431.429838,
+              "tid": 3
+            },
+            {
+              "event": "ready",
+              "at_ms": 24487.411454,
+              "tid": 3
+            },
+            {
+              "event": "spawn_attempt",
+              "at_ms": 24487.473119,
+              "tid": 4,
+              "attempt": 4
+            },
+            {
+              "event": "spawned",
+              "at_ms": 24487.794636,
+              "tid": 4
+            },
+            {
+              "event": "ready",
+              "at_ms": 24547.397387,
+              "tid": 4
+            },
+            {
+              "event": "spawn_attempt",
+              "at_ms": 24547.452882,
+              "tid": 5,
+              "attempt": 5
+            },
+            {
+              "event": "spawned",
+              "at_ms": 24547.850252,
+              "tid": 5
+            },
+            {
+              "event": "ready",
+              "at_ms": 24600.573904,
+              "tid": 5
+            },
+            {
+              "event": "spawn_attempt",
+              "at_ms": 24600.627214,
+              "tid": 6,
+              "attempt": 6
+            },
+            {
+              "event": "spawned",
+              "at_ms": 24600.978455,
+              "tid": 6
+            },
+            {
+              "event": "ready",
+              "at_ms": 24649.203887,
+              "tid": 6
+            },
+            {
+              "event": "spawn_attempt",
+              "at_ms": 24649.26804,
+              "tid": 7,
+              "attempt": 7
+            },
+            {
+              "event": "spawned",
+              "at_ms": 24649.600819,
+              "tid": 7
+            },
+            {
+              "event": "ready",
+              "at_ms": 24701.155362,
+              "tid": 7
+            },
+            {
+              "event": "exited",
+              "at_ms": 34015.587983,
+              "tid": 6,
+              "code": 0
+            },
+            {
+              "event": "exited",
+              "at_ms": 34015.634488,
+              "tid": 3,
+              "code": 0
+            },
+            {
+              "event": "exited",
+              "at_ms": 34015.728204,
+              "tid": 7,
+              "code": 0
+            },
+            {
+              "event": "exited",
+              "at_ms": 34015.755042,
+              "tid": 2,
+              "code": 0
+            },
+            {
+              "event": "exited",
+              "at_ms": 34015.771663,
+              "tid": 5,
+              "code": 0
+            },
+            {
+              "event": "exited",
+              "at_ms": 34015.788988,
+              "tid": 4,
+              "code": 0
+            },
+            {
+              "event": "exited",
+              "at_ms": 34015.803998,
+              "tid": 1,
+              "code": 0
+            }
+          ],
+          "host_worker_counts": {
+            "spawn_attempt": 7,
+            "spawned": 7,
+            "ready": 7,
+            "exited": 7
+          },
+          "memory_bytes": 94371840,
+          "thread_contract": "PASS",
+          "boundary": "compiled-module",
+          "wall_seconds": 9.681366307000003,
+          "realtime_seconds": 9.682,
+          "realtime_clock_agreement": true,
+          "elapsed_clock": "performance.now() (CLOCK_MONOTONIC); Date.now() is an adjustable-clock diagnostic",
+          "close_seconds": 2.9344000002311077e-05,
+          "cpu_user_seconds": 16.82029,
+          "cpu_system_seconds": 0.073345,
+          "process_lifetime_peak_rss_bytes": 396886016,
+          "rss_after_bytes": 355299328
+        },
+        {
+          "case_id": "MjeNMV.MelaMJNV.tlosatx",
+          "repeat": 1,
+          "timed": true,
+          "threads": 8,
+          "status": "PASS",
+          "eligible_for_timing": true,
+          "output": "/mnt/c/users/genom/github/losat/docs/evidence/wasm_remaining_work_20260915/run-03/I1-module-mje-n8/MjeNMV.MelaMJNV.tlosatx/n8/session0/baseline/raw-1.txt",
+          "exit_status": 0,
+          "instantiate_seconds": 0.004307682999999088,
+          "invocation_including_io_and_api_copy_seconds": 9.531981087,
+          "host_exit_wait_seconds": 0.0011148400000020047,
+          "raw_output_sha256": "b309f77fee038f0559d870737ebeba732c11eba4f7e495f045acbfb831817fd7",
+          "expected_sha256": "b309f77fee038f0559d870737ebeba732c11eba4f7e495f045acbfb831817fd7",
+          "raw_equal": true,
+          "events": [
+            {
+              "event": "spawn_attempt",
+              "at_ms": 34048.969379,
+              "tid": 1,
+              "attempt": 1
+            },
+            {
+              "event": "spawned",
+              "at_ms": 34049.553626,
+              "tid": 1
+            },
+            {
+              "event": "ready",
+              "at_ms": 34116.602035,
+              "tid": 1
+            },
+            {
+              "event": "spawn_attempt",
+              "at_ms": 34116.650063,
+              "tid": 2,
+              "attempt": 2
+            },
+            {
+              "event": "spawned",
+              "at_ms": 34116.977566,
+              "tid": 2
+            },
+            {
+              "event": "ready",
+              "at_ms": 34166.562495,
+              "tid": 2
+            },
+            {
+              "event": "spawn_attempt",
+              "at_ms": 34166.640649,
+              "tid": 3,
+              "attempt": 3
+            },
+            {
+              "event": "spawned",
+              "at_ms": 34166.989622,
+              "tid": 3
+            },
+            {
+              "event": "ready",
+              "at_ms": 34219.636758,
+              "tid": 3
+            },
+            {
+              "event": "spawn_attempt",
+              "at_ms": 34219.687928,
+              "tid": 4,
+              "attempt": 4
+            },
+            {
+              "event": "spawned",
+              "at_ms": 34220.013944,
+              "tid": 4
+            },
+            {
+              "event": "ready",
+              "at_ms": 34268.457541,
+              "tid": 4
+            },
+            {
+              "event": "spawn_attempt",
+              "at_ms": 34268.577125,
+              "tid": 5,
+              "attempt": 5
+            },
+            {
+              "event": "spawned",
+              "at_ms": 34268.894813,
+              "tid": 5
+            },
+            {
+              "event": "ready",
+              "at_ms": 34319.236331,
+              "tid": 5
+            },
+            {
+              "event": "spawn_attempt",
+              "at_ms": 34319.299119,
+              "tid": 6,
+              "attempt": 6
+            },
+            {
+              "event": "spawned",
+              "at_ms": 34319.645243,
+              "tid": 6
+            },
+            {
+              "event": "ready",
+              "at_ms": 34370.794813,
+              "tid": 6
+            },
+            {
+              "event": "spawn_attempt",
+              "at_ms": 34370.855589,
+              "tid": 7,
+              "attempt": 7
+            },
+            {
+              "event": "spawned",
+              "at_ms": 34371.174594,
+              "tid": 7
+            },
+            {
+              "event": "ready",
+              "at_ms": 34421.637718,
+              "tid": 7
+            },
+            {
+              "event": "exited",
+              "at_ms": 43581.36952,
+              "tid": 2,
+              "code": 0
+            },
+            {
+              "event": "exited",
+              "at_ms": 43581.395683,
+              "tid": 4,
+              "code": 0
+            },
+            {
+              "event": "exited",
+              "at_ms": 43581.410013,
+              "tid": 3,
+              "code": 0
+            },
+            {
+              "event": "exited",
+              "at_ms": 43581.42023,
+              "tid": 1,
+              "code": 0
+            },
+            {
+              "event": "exited",
+              "at_ms": 43581.431826,
+              "tid": 5,
+              "code": 0
+            },
+            {
+              "event": "exited",
+              "at_ms": 43581.441823,
+              "tid": 7,
+              "code": 0
+            },
+            {
+              "event": "exited",
+              "at_ms": 43581.450314,
+              "tid": 6,
+              "code": 0
+            }
+          ],
+          "host_worker_counts": {
+            "spawn_attempt": 7,
+            "spawned": 7,
+            "ready": 7,
+            "exited": 7
+          },
+          "memory_bytes": 94371840,
+          "thread_contract": "PASS",
+          "boundary": "compiled-module",
+          "wall_seconds": 9.537426703999998,
+          "realtime_seconds": 9.538,
+          "realtime_clock_agreement": true,
+          "elapsed_clock": "performance.now() (CLOCK_MONOTONIC); Date.now() is an adjustable-clock diagnostic",
+          "close_seconds": 2.309399999649031e-05,
+          "cpu_user_seconds": 16.809107,
+          "cpu_system_seconds": 0.06428,
+          "process_lifetime_peak_rss_bytes": 483508224,
+          "rss_after_bytes": 439861248
+        },
+        {
+          "case_id": "MjeNMV.MelaMJNV.tlosatx",
+          "repeat": 2,
+          "timed": true,
+          "threads": 8,
+          "status": "PASS",
+          "eligible_for_timing": true,
+          "output": "/mnt/c/users/genom/github/losat/docs/evidence/wasm_remaining_work_20260915/run-03/I1-module-mje-n8/MjeNMV.MelaMJNV.tlosatx/n8/session0/baseline/raw-2.txt",
+          "exit_status": 0,
+          "instantiate_seconds": 0.002325942000003124,
+          "invocation_including_io_and_api_copy_seconds": 9.846946291,
+          "host_exit_wait_seconds": 0.00048753299999953017,
+          "raw_output_sha256": "b309f77fee038f0559d870737ebeba732c11eba4f7e495f045acbfb831817fd7",
+          "expected_sha256": "b309f77fee038f0559d870737ebeba732c11eba4f7e495f045acbfb831817fd7",
+          "raw_equal": true,
+          "events": [
+            {
+              "event": "spawn_attempt",
+              "at_ms": 43604.683054,
+              "tid": 1,
+              "attempt": 1
+            },
+            {
+              "event": "spawned",
+              "at_ms": 43605.060067,
+              "tid": 1
+            },
+            {
+              "event": "ready",
+              "at_ms": 43663.137106,
+              "tid": 1
+            },
+            {
+              "event": "spawn_attempt",
+              "at_ms": 43663.198818,
+              "tid": 2,
+              "attempt": 2
+            },
+            {
+              "event": "spawned",
+              "at_ms": 43663.548183,
+              "tid": 2
+            },
+            {
+              "event": "ready",
+              "at_ms": 43719.026279,
+              "tid": 2
+            },
+            {
+              "event": "spawn_attempt",
+              "at_ms": 43719.082367,
+              "tid": 3,
+              "attempt": 3
+            },
+            {
+              "event": "spawned",
+              "at_ms": 43719.411764,
+              "tid": 3
+            },
+            {
+              "event": "ready",
+              "at_ms": 43773.50841,
+              "tid": 3
+            },
+            {
+              "event": "spawn_attempt",
+              "at_ms": 43773.558977,
+              "tid": 4,
+              "attempt": 4
+            },
+            {
+              "event": "spawned",
+              "at_ms": 43773.855402,
+              "tid": 4
+            },
+            {
+              "event": "ready",
+              "at_ms": 43827.930668,
+              "tid": 4
+            },
+            {
+              "event": "spawn_attempt",
+              "at_ms": 43827.991101,
+              "tid": 5,
+              "attempt": 5
+            },
+            {
+              "event": "spawned",
+              "at_ms": 43828.362055,
+              "tid": 5
+            },
+            {
+              "event": "ready",
+              "at_ms": 43882.168908,
+              "tid": 5
+            },
+            {
+              "event": "spawn_attempt",
+              "at_ms": 43882.24849,
+              "tid": 6,
+              "attempt": 6
+            },
+            {
+              "event": "spawned",
+              "at_ms": 43882.655774,
+              "tid": 6
+            },
+            {
+              "event": "ready",
+              "at_ms": 43938.350956,
+              "tid": 6
+            },
+            {
+              "event": "spawn_attempt",
+              "at_ms": 43938.435095,
+              "tid": 7,
+              "attempt": 7
+            },
+            {
+              "event": "spawned",
+              "at_ms": 43938.858693,
+              "tid": 7
+            },
+            {
+              "event": "ready",
+              "at_ms": 43993.606231,
+              "tid": 7
+            },
+            {
+              "event": "exited",
+              "at_ms": 53451.679077,
+              "tid": 5,
+              "code": 0
+            },
+            {
+              "event": "exited",
+              "at_ms": 53451.71343,
+              "tid": 7,
+              "code": 0
+            },
+            {
+              "event": "exited",
+              "at_ms": 53451.731086,
+              "tid": 2,
+              "code": 0
+            },
+            {
+              "event": "exited",
+              "at_ms": 53451.743662,
+              "tid": 1,
+              "code": 0
+            },
+            {
+              "event": "exited",
+              "at_ms": 53451.755987,
+              "tid": 6,
+              "code": 0
+            },
+            {
+              "event": "exited",
+              "at_ms": 53451.768589,
+              "tid": 3,
+              "code": 0
+            },
+            {
+              "event": "exited",
+              "at_ms": 53451.780927,
+              "tid": 4,
+              "code": 0
+            }
+          ],
+          "host_worker_counts": {
+            "spawn_attempt": 7,
+            "spawned": 7,
+            "ready": 7,
+            "exited": 7
+          },
+          "memory_bytes": 94371840,
+          "thread_contract": "PASS",
+          "boundary": "compiled-module",
+          "wall_seconds": 9.849780190000006,
+          "realtime_seconds": 11.449,
+          "realtime_clock_agreement": false,
+          "elapsed_clock": "performance.now() (CLOCK_MONOTONIC); Date.now() is an adjustable-clock diagnostic",
+          "close_seconds": 2.0424000002094546e-05,
+          "cpu_user_seconds": 16.699396,
+          "cpu_system_seconds": 0.135409,
+          "process_lifetime_peak_rss_bytes": 564199424,
+          "rss_after_bytes": 520724480
+        }
+      ]
+    }
+  },
+  {
+    "case": "MjeNMV.MelaMJNV.tlosatx",
+    "threads": 8,
+    "session": 0,
+    "version": "I1",
+    "artifact_sha256": "86ab290585570df5f4cf1dd295e8c460638c441a3239e3b0a855598115977374",
+    "process": {
+      "status": "PASS",
+      "reason": null,
+      "exit_status": 0,
+      "wall_seconds": 43.0377322559998,
+      "monotonic_start": 2653.562178442,
+      "monotonic_end": 2696.599910698,
+      "realtime_seconds": 44.57599139213562,
+      "boottime_seconds": 43.037735040999905,
+      "gnu_elapsed_seconds": 44.55,
+      "process_ended_utc": "2026-09-15T23:32:34Z",
+      "watchdog_clocks": {
+        "started": {
+          "monotonic": 2653.576353783,
+          "realtime": 1789515109.7611446
+        }
+      },
+      "realtime_clock_agreement": true,
+      "monotonic_clock_agreement": true,
+      "elapsed_clock": "CLOCK_MONOTONIC; realtime and GNU elapsed are adjustable-clock diagnostics",
+      "cpu_user_seconds": 77.43,
+      "cpu_system_seconds": 0.51,
+      "peak_rss_bytes": 542601216,
+      "output": "/mnt/c/users/genom/github/losat/docs/evidence/wasm_remaining_work_20260915/run-03/I1-module-mje-n8/MjeNMV.MelaMJNV.tlosatx/n8/session0/I1/process/output.txt",
+      "raw_output_sha256": "360e110b659cde01fe269da0005e9598d61052e6bb8b3bef2aa0ff62a846382a",
+      "raw_output_bytes": 23072,
+      "started_utc": "2026-09-15T23:31:49Z",
+      "ended_utc": "2026-09-15T23:32:34Z",
+      "timeout_seconds": 600,
+      "unavailable_metrics": {}
+    },
+    "report": {
+      "identity": {
+        "kind": "threaded-command",
+        "sha256": "86ab290585570df5f4cf1dd295e8c460638c441a3239e3b0a855598115977374",
+        "imports": [
+          {
+            "module": "env",
+            "name": "memory",
+            "kind": "memory"
+          },
+          {
+            "module": "wasi_snapshot_preview1",
+            "name": "args_sizes_get",
+            "kind": "function"
+          },
+          {
+            "module": "wasi_snapshot_preview1",
+            "name": "args_get",
+            "kind": "function"
+          },
+          {
+            "module": "wasi_snapshot_preview1",
+            "name": "fd_write",
+            "kind": "function"
+          },
+          {
+            "module": "wasi_snapshot_preview1",
+            "name": "clock_time_get",
+            "kind": "function"
+          },
+          {
+            "module": "wasi_snapshot_preview1",
+            "name": "fd_read",
+            "kind": "function"
+          },
+          {
+            "module": "wasi_snapshot_preview1",
+            "name": "sched_yield",
+            "kind": "function"
+          },
+          {
+            "module": "wasi_snapshot_preview1",
+            "name": "path_create_directory",
+            "kind": "function"
+          },
+          {
+            "module": "wasi_snapshot_preview1",
+            "name": "path_filestat_get",
+            "kind": "function"
+          },
+          {
+            "module": "wasi_snapshot_preview1",
+            "name": "path_open",
+            "kind": "function"
+          },
+          {
+            "module": "wasi_snapshot_preview1",
+            "name": "random_get",
+            "kind": "function"
+          },
+          {
+            "module": "wasi_snapshot_preview1",
+            "name": "environ_get",
+            "kind": "function"
+          },
+          {
+            "module": "wasi_snapshot_preview1",
+            "name": "environ_sizes_get",
+            "kind": "function"
+          },
+          {
+            "module": "wasi_snapshot_preview1",
+            "name": "fd_close",
+            "kind": "function"
+          },
+          {
+            "module": "wasi_snapshot_preview1",
+            "name": "fd_fdstat_get",
+            "kind": "function"
+          },
+          {
+            "module": "wasi_snapshot_preview1",
+            "name": "fd_prestat_get",
+            "kind": "function"
+          },
+          {
+            "module": "wasi_snapshot_preview1",
+            "name": "fd_prestat_dir_name",
+            "kind": "function"
+          },
+          {
+            "module": "wasi_snapshot_preview1",
+            "name": "proc_exit",
+            "kind": "function"
+          },
+          {
+            "module": "wasi",
+            "name": "thread-spawn",
+            "kind": "function"
+          }
+        ],
+        "exports": [
+          {
+            "name": "memory",
+            "kind": "memory"
+          },
+          {
+            "name": "_start",
+            "kind": "function"
+          },
+          {
+            "name": "__main_void",
+            "kind": "function"
+          },
+          {
+            "name": "losat_web_alloc",
+            "kind": "function"
+          },
+          {
+            "name": "losat_web_clear",
+            "kind": "function"
+          },
+          {
+            "name": "losat_web_clear_fasta_store",
+            "kind": "function"
+          },
+          {
+            "name": "losat_web_dealloc",
+            "kind": "function"
+          },
+          {
+            "name": "losat_web_error_len",
+            "kind": "function"
+          },
+          {
+            "name": "losat_web_error_ptr",
+            "kind": "function"
+          },
+          {
+            "name": "losat_web_has_direct_api",
+            "kind": "function"
+          },
+          {
+            "name": "losat_web_release_fasta",
+            "kind": "function"
+          },
+          {
+            "name": "losat_web_result_len",
+            "kind": "function"
+          },
+          {
+            "name": "losat_web_result_ptr",
+            "kind": "function"
+          },
+          {
+            "name": "losat_web_run_pair",
+            "kind": "function"
+          },
+          {
+            "name": "losat_web_run_pair_handles",
+            "kind": "function"
+          },
+          {
+            "name": "losat_web_store_fasta",
+            "kind": "function"
+          },
+          {
+            "name": "wasi_thread_start",
+            "kind": "function"
+          }
+        ],
+        "memory": {
+          "module": "env",
+          "name": "memory",
+          "imported": true,
+          "initial": 21,
+          "maximum": 16384,
+          "shared": true
+        }
+      },
+      "timings": {
+        "validation_including_raw_compile_seconds": 0.014453046,
+        "guard_seconds": 0.047395532000000004,
+        "guarded_compile_seconds": 0.002230983000000009,
+        "input_load_seconds": 4.639999999994871e-06,
+        "resident_input_bytes": 0,
+        "final_instance_close_seconds": 3.3519999997224657e-06
+      },
+      "mode": "compiled-module",
+      "node_argv": [
+        "/home/kawato/.local/lib/nodejs/node-v26.8.2-linux-x64/bin/node"
+      ],
+      "instance_scope": "per-job",
+      "samples": [
+        {
+          "case_id": "MjeNMV.MelaMJNV.tlosatx",
+          "repeat": -1,
+          "timed": false,
+          "threads": 8,
+          "status": "PASS",
+          "eligible_for_timing": false,
+          "output": "/mnt/c/users/genom/github/losat/docs/evidence/wasm_remaining_work_20260915/run-03/I1-module-mje-n8/MjeNMV.MelaMJNV.tlosatx/n8/session0/I1/raw--1.txt",
+          "exit_status": 0,
+          "instantiate_seconds": 0.004142825000000016,
+          "invocation_including_io_and_api_copy_seconds": 12.061840465,
+          "host_exit_wait_seconds": 0.004046833000000334,
+          "raw_output_sha256": "b309f77fee038f0559d870737ebeba732c11eba4f7e495f045acbfb831817fd7",
+          "expected_sha256": "b309f77fee038f0559d870737ebeba732c11eba4f7e495f045acbfb831817fd7",
+          "raw_equal": true,
+          "events": [
+            {
+              "event": "spawn_attempt",
+              "at_ms": 173.056321,
+              "tid": 1,
+              "attempt": 1
+            },
+            {
+              "event": "spawned",
+              "at_ms": 174.655417,
+              "tid": 1
+            },
+            {
+              "event": "ready",
+              "at_ms": 230.732991,
+              "tid": 1
+            },
+            {
+              "event": "spawn_attempt",
+              "at_ms": 230.801332,
+              "tid": 2,
+              "attempt": 2
+            },
+            {
+              "event": "spawned",
+              "at_ms": 231.228036,
+              "tid": 2
+            },
+            {
+              "event": "ready",
+              "at_ms": 285.609156,
+              "tid": 2
+            },
+            {
+              "event": "spawn_attempt",
+              "at_ms": 285.682678,
+              "tid": 3,
+              "attempt": 3
+            },
+            {
+              "event": "spawned",
+              "at_ms": 286.233226,
+              "tid": 3
+            },
+            {
+              "event": "ready",
+              "at_ms": 342.475208,
+              "tid": 3
+            },
+            {
+              "event": "spawn_attempt",
+              "at_ms": 342.556061,
+              "tid": 4,
+              "attempt": 4
+            },
+            {
+              "event": "spawned",
+              "at_ms": 343.045769,
+              "tid": 4
+            },
+            {
+              "event": "ready",
+              "at_ms": 397.313789,
+              "tid": 4
+            },
+            {
+              "event": "spawn_attempt",
+              "at_ms": 397.372461,
+              "tid": 5,
+              "attempt": 5
+            },
+            {
+              "event": "spawned",
+              "at_ms": 397.944967,
+              "tid": 5
+            },
+            {
+              "event": "ready",
+              "at_ms": 453.534969,
+              "tid": 5
+            },
+            {
+              "event": "spawn_attempt",
+              "at_ms": 453.582569,
+              "tid": 6,
+              "attempt": 6
+            },
+            {
+              "event": "spawned",
+              "at_ms": 453.930165,
+              "tid": 6
+            },
+            {
+              "event": "ready",
+              "at_ms": 507.485516,
+              "tid": 6
+            },
+            {
+              "event": "spawn_attempt",
+              "at_ms": 507.537435,
+              "tid": 7,
+              "attempt": 7
+            },
+            {
+              "event": "spawned",
+              "at_ms": 508.015853,
+              "tid": 7
+            },
+            {
+              "event": "ready",
+              "at_ms": 563.407586,
+              "tid": 7
+            },
+            {
+              "event": "exited",
+              "at_ms": 12229.483875,
+              "tid": 3,
+              "code": 0
+            },
+            {
+              "event": "exited",
+              "at_ms": 12229.550957,
+              "tid": 5,
+              "code": 0
+            },
+            {
+              "event": "exited",
+              "at_ms": 12229.579724,
+              "tid": 6,
+              "code": 0
+            },
+            {
+              "event": "exited",
+              "at_ms": 12229.604016,
+              "tid": 2,
+              "code": 0
+            },
+            {
+              "event": "exited",
+              "at_ms": 12229.64908,
+              "tid": 1,
+              "code": 0
+            },
+            {
+              "event": "exited",
+              "at_ms": 12229.671717,
+              "tid": 7,
+              "code": 0
+            },
+            {
+              "event": "exited",
+              "at_ms": 12229.685445,
+              "tid": 4,
+              "code": 0
+            }
+          ],
+          "host_worker_counts": {
+            "spawn_attempt": 7,
+            "spawned": 7,
+            "ready": 7,
+            "exited": 7
+          },
+          "memory_bytes": 94306304,
+          "thread_contract": "PASS",
+          "boundary": "compiled-module",
+          "wall_seconds": 12.070074312000001,
+          "realtime_seconds": 12.07,
+          "realtime_clock_agreement": true,
+          "elapsed_clock": "performance.now() (CLOCK_MONOTONIC); Date.now() is an adjustable-clock diagnostic",
+          "close_seconds": 4.418900000018766e-05,
+          "cpu_user_seconds": 24.641072,
+          "cpu_system_seconds": 0.116311,
+          "process_lifetime_peak_rss_bytes": 302149632,
+          "rss_after_bytes": 254550016
+        },
+        {
+          "case_id": "MjeNMV.MelaMJNV.tlosatx",
+          "repeat": 0,
+          "timed": true,
+          "threads": 8,
+          "status": "PASS",
+          "eligible_for_timing": true,
+          "output": "/mnt/c/users/genom/github/losat/docs/evidence/wasm_remaining_work_20260915/run-03/I1-module-mje-n8/MjeNMV.MelaMJNV.tlosatx/n8/session0/I1/raw-0.txt",
+          "exit_status": 0,
+          "instantiate_seconds": 0.002366305999999895,
+          "invocation_including_io_and_api_copy_seconds": 9.974256562999999,
+          "host_exit_wait_seconds": 0.0004973649999992631,
+          "raw_output_sha256": "b309f77fee038f0559d870737ebeba732c11eba4f7e495f045acbfb831817fd7",
+          "expected_sha256": "b309f77fee038f0559d870737ebeba732c11eba4f7e495f045acbfb831817fd7",
+          "raw_equal": true,
+          "events": [
+            {
+              "event": "spawn_attempt",
+              "at_ms": 12255.651513,
+              "tid": 1,
+              "attempt": 1
+            },
+            {
+              "event": "spawned",
+              "at_ms": 12256.051039,
+              "tid": 1
+            },
+            {
+              "event": "ready",
+              "at_ms": 12332.706007,
+              "tid": 1
+            },
+            {
+              "event": "spawn_attempt",
+              "at_ms": 12332.742063,
+              "tid": 2,
+              "attempt": 2
+            },
+            {
+              "event": "spawned",
+              "at_ms": 12333.169277,
+              "tid": 2
+            },
+            {
+              "event": "ready",
+              "at_ms": 12378.188575,
+              "tid": 2
+            },
+            {
+              "event": "spawn_attempt",
+              "at_ms": 12378.245413,
+              "tid": 3,
+              "attempt": 3
+            },
+            {
+              "event": "spawned",
+              "at_ms": 12378.552719,
+              "tid": 3
+            },
+            {
+              "event": "ready",
+              "at_ms": 12421.648663,
+              "tid": 3
+            },
+            {
+              "event": "spawn_attempt",
+              "at_ms": 12421.688509,
+              "tid": 4,
+              "attempt": 4
+            },
+            {
+              "event": "spawned",
+              "at_ms": 12421.950397,
+              "tid": 4
+            },
+            {
+              "event": "ready",
+              "at_ms": 12471.483565,
+              "tid": 4
+            },
+            {
+              "event": "spawn_attempt",
+              "at_ms": 12471.536632,
+              "tid": 5,
+              "attempt": 5
+            },
+            {
+              "event": "spawned",
+              "at_ms": 12471.911399,
+              "tid": 5
+            },
+            {
+              "event": "ready",
+              "at_ms": 12519.346416,
+              "tid": 5
+            },
+            {
+              "event": "spawn_attempt",
+              "at_ms": 12519.408828,
+              "tid": 6,
+              "attempt": 6
+            },
+            {
+              "event": "spawned",
+              "at_ms": 12519.756463,
+              "tid": 6
+            },
+            {
+              "event": "ready",
+              "at_ms": 12567.054224,
+              "tid": 6
+            },
+            {
+              "event": "spawn_attempt",
+              "at_ms": 12567.119747,
+              "tid": 7,
+              "attempt": 7
+            },
+            {
+              "event": "spawned",
+              "at_ms": 12567.457507,
+              "tid": 7
+            },
+            {
+              "event": "ready",
+              "at_ms": 12613.725628,
+              "tid": 7
+            },
+            {
+              "event": "exited",
+              "at_ms": 22229.940371,
+              "tid": 2,
+              "code": 0
+            },
+            {
+              "event": "exited",
+              "at_ms": 22229.971125,
+              "tid": 6,
+              "code": 0
+            },
+            {
+              "event": "exited",
+              "at_ms": 22230.027529,
+              "tid": 4,
+              "code": 0
+            },
+            {
+              "event": "exited",
+              "at_ms": 22230.045576,
+              "tid": 7,
+              "code": 0
+            },
+            {
+              "event": "exited",
+              "at_ms": 22230.057294,
+              "tid": 5,
+              "code": 0
+            },
+            {
+              "event": "exited",
+              "at_ms": 22230.069383,
+              "tid": 1,
+              "code": 0
+            },
+            {
+              "event": "exited",
+              "at_ms": 22230.079357,
+              "tid": 3,
+              "code": 0
+            }
+          ],
+          "host_worker_counts": {
+            "spawn_attempt": 7,
+            "spawned": 7,
+            "ready": 7,
+            "exited": 7
+          },
+          "memory_bytes": 94306304,
+          "thread_contract": "PASS",
+          "boundary": "compiled-module",
+          "wall_seconds": 9.977141888999999,
+          "realtime_seconds": 9.978,
+          "realtime_clock_agreement": true,
+          "elapsed_clock": "performance.now() (CLOCK_MONOTONIC); Date.now() is an adjustable-clock diagnostic",
+          "close_seconds": 2.1655000000464498e-05,
+          "cpu_user_seconds": 17.417605,
+          "cpu_system_seconds": 0.115561,
+          "process_lifetime_peak_rss_bytes": 382828544,
+          "rss_after_bytes": 339435520
+        },
+        {
+          "case_id": "MjeNMV.MelaMJNV.tlosatx",
+          "repeat": 1,
+          "timed": true,
+          "threads": 8,
+          "status": "PASS",
+          "eligible_for_timing": true,
+          "output": "/mnt/c/users/genom/github/losat/docs/evidence/wasm_remaining_work_20260915/run-03/I1-module-mje-n8/MjeNMV.MelaMJNV.tlosatx/n8/session0/I1/raw-1.txt",
+          "exit_status": 0,
+          "instantiate_seconds": 0.0019739079999999375,
+          "invocation_including_io_and_api_copy_seconds": 10.308580373,
+          "host_exit_wait_seconds": 0.0006428459999988263,
+          "raw_output_sha256": "b309f77fee038f0559d870737ebeba732c11eba4f7e495f045acbfb831817fd7",
+          "expected_sha256": "b309f77fee038f0559d870737ebeba732c11eba4f7e495f045acbfb831817fd7",
+          "raw_equal": true,
+          "events": [
+            {
+              "event": "spawn_attempt",
+              "at_ms": 22252.932749,
+              "tid": 1,
+              "attempt": 1
+            },
+            {
+              "event": "spawned",
+              "at_ms": 22253.317503,
+              "tid": 1
+            },
+            {
+              "event": "ready",
+              "at_ms": 22308.998186,
+              "tid": 1
+            },
+            {
+              "event": "spawn_attempt",
+              "at_ms": 22309.044811,
+              "tid": 2,
+              "attempt": 2
+            },
+            {
+              "event": "spawned",
+              "at_ms": 22309.353211,
+              "tid": 2
+            },
+            {
+              "event": "ready",
+              "at_ms": 22363.392874,
+              "tid": 2
+            },
+            {
+              "event": "spawn_attempt",
+              "at_ms": 22363.451035,
+              "tid": 3,
+              "attempt": 3
+            },
+            {
+              "event": "spawned",
+              "at_ms": 22363.773976,
+              "tid": 3
+            },
+            {
+              "event": "ready",
+              "at_ms": 22417.409416,
+              "tid": 3
+            },
+            {
+              "event": "spawn_attempt",
+              "at_ms": 22417.458143,
+              "tid": 4,
+              "attempt": 4
+            },
+            {
+              "event": "spawned",
+              "at_ms": 22417.745992,
+              "tid": 4
+            },
+            {
+              "event": "ready",
+              "at_ms": 22472.215942,
+              "tid": 4
+            },
+            {
+              "event": "spawn_attempt",
+              "at_ms": 22472.266849,
+              "tid": 5,
+              "attempt": 5
+            },
+            {
+              "event": "spawned",
+              "at_ms": 22472.58172,
+              "tid": 5
+            },
+            {
+              "event": "ready",
+              "at_ms": 22540.939821,
+              "tid": 5
+            },
+            {
+              "event": "spawn_attempt",
+              "at_ms": 22540.991198,
+              "tid": 6,
+              "attempt": 6
+            },
+            {
+              "event": "spawned",
+              "at_ms": 22541.298377,
+              "tid": 6
+            },
+            {
+              "event": "ready",
+              "at_ms": 22598.029086,
+              "tid": 6
+            },
+            {
+              "event": "spawn_attempt",
+              "at_ms": 22598.109606,
+              "tid": 7,
+              "attempt": 7
+            },
+            {
+              "event": "spawned",
+              "at_ms": 22599.140279,
+              "tid": 7
+            },
+            {
+              "event": "ready",
+              "at_ms": 22652.000271,
+              "tid": 7
+            },
+            {
+              "event": "exited",
+              "at_ms": 32561.730867,
+              "tid": 4,
+              "code": 0
+            },
+            {
+              "event": "exited",
+              "at_ms": 32561.75233,
+              "tid": 6,
+              "code": 0
+            },
+            {
+              "event": "exited",
+              "at_ms": 32561.763773,
+              "tid": 3,
+              "code": 0
+            },
+            {
+              "event": "exited",
+              "at_ms": 32561.772856,
+              "tid": 1,
+              "code": 0
+            },
+            {
+              "event": "exited",
+              "at_ms": 32561.790205,
+              "tid": 7,
+              "code": 0
+            },
+            {
+              "event": "exited",
+              "at_ms": 32561.80177,
+              "tid": 5,
+              "code": 0
+            },
+            {
+              "event": "exited",
+              "at_ms": 32561.810138,
+              "tid": 2,
+              "code": 0
+            }
+          ],
+          "host_worker_counts": {
+            "spawn_attempt": 7,
+            "spawned": 7,
+            "ready": 7,
+            "exited": 7
+          },
+          "memory_bytes": 94306304,
+          "thread_contract": "PASS",
+          "boundary": "compiled-module",
+          "wall_seconds": 10.311214258,
+          "realtime_seconds": 11.85,
+          "realtime_clock_agreement": false,
+          "elapsed_clock": "performance.now() (CLOCK_MONOTONIC); Date.now() is an adjustable-clock diagnostic",
+          "close_seconds": 1.7131000000517814e-05,
+          "cpu_user_seconds": 17.584485,
+          "cpu_system_seconds": 0.198337,
+          "process_lifetime_peak_rss_bytes": 461496320,
+          "rss_after_bytes": 417550336
+        },
+        {
+          "case_id": "MjeNMV.MelaMJNV.tlosatx",
+          "repeat": 2,
+          "timed": true,
+          "threads": 8,
+          "status": "PASS",
+          "eligible_for_timing": true,
+          "output": "/mnt/c/users/genom/github/losat/docs/evidence/wasm_remaining_work_20260915/run-03/I1-module-mje-n8/MjeNMV.MelaMJNV.tlosatx/n8/session0/I1/raw-2.txt",
+          "exit_status": 0,
+          "instantiate_seconds": 0.005881806999997934,
+          "invocation_including_io_and_api_copy_seconds": 10.363598585,
+          "host_exit_wait_seconds": 0.0008233220000038273,
+          "raw_output_sha256": "b309f77fee038f0559d870737ebeba732c11eba4f7e495f045acbfb831817fd7",
+          "expected_sha256": "b309f77fee038f0559d870737ebeba732c11eba4f7e495f045acbfb831817fd7",
+          "raw_equal": true,
+          "events": [
+            {
+              "event": "spawn_attempt",
+              "at_ms": 32592.103655,
+              "tid": 1,
+              "attempt": 1
+            },
+            {
+              "event": "spawned",
+              "at_ms": 32592.542948,
+              "tid": 1
+            },
+            {
+              "event": "ready",
+              "at_ms": 32648.68405,
+              "tid": 1
+            },
+            {
+              "event": "spawn_attempt",
+              "at_ms": 32648.729605,
+              "tid": 2,
+              "attempt": 2
+            },
+            {
+              "event": "spawned",
+              "at_ms": 32649.085516,
+              "tid": 2
+            },
+            {
+              "event": "ready",
+              "at_ms": 32702.557613,
+              "tid": 2
+            },
+            {
+              "event": "spawn_attempt",
+              "at_ms": 32702.612176,
+              "tid": 3,
+              "attempt": 3
+            },
+            {
+              "event": "spawned",
+              "at_ms": 32702.972046,
+              "tid": 3
+            },
+            {
+              "event": "ready",
+              "at_ms": 32756.274079,
+              "tid": 3
+            },
+            {
+              "event": "spawn_attempt",
+              "at_ms": 32756.326992,
+              "tid": 4,
+              "attempt": 4
+            },
+            {
+              "event": "spawned",
+              "at_ms": 32756.659148,
+              "tid": 4
+            },
+            {
+              "event": "ready",
+              "at_ms": 32810.809579,
+              "tid": 4
+            },
+            {
+              "event": "spawn_attempt",
+              "at_ms": 32810.862234,
+              "tid": 5,
+              "attempt": 5
+            },
+            {
+              "event": "spawned",
+              "at_ms": 32811.272284,
+              "tid": 5
+            },
+            {
+              "event": "ready",
+              "at_ms": 33007.956613,
+              "tid": 5
+            },
+            {
+              "event": "spawn_attempt",
+              "at_ms": 33008.074361,
+              "tid": 6,
+              "attempt": 6
+            },
+            {
+              "event": "spawned",
+              "at_ms": 33008.706887,
+              "tid": 6
+            },
+            {
+              "event": "ready",
+              "at_ms": 33302.396311,
+              "tid": 6
+            },
+            {
+              "event": "spawn_attempt",
+              "at_ms": 33302.460113,
+              "tid": 7,
+              "attempt": 7
+            },
+            {
+              "event": "spawned",
+              "at_ms": 33302.884669,
+              "tid": 7
+            },
+            {
+              "event": "ready",
+              "at_ms": 33359.611649,
+              "tid": 7
+            },
+            {
+              "event": "exited",
+              "at_ms": 42955.534436,
+              "tid": 1,
+              "code": 0
+            },
+            {
+              "event": "exited",
+              "at_ms": 42955.561711,
+              "tid": 2,
+              "code": 0
+            },
+            {
+              "event": "exited",
+              "at_ms": 42955.573012,
+              "tid": 4,
+              "code": 0
+            },
+            {
+              "event": "exited",
+              "at_ms": 42955.58189,
+              "tid": 3,
+              "code": 0
+            },
+            {
+              "event": "exited",
+              "at_ms": 42955.590905,
+              "tid": 6,
+              "code": 0
+            },
+            {
+              "event": "exited",
+              "at_ms": 42956.050427,
+              "tid": 5,
+              "code": 0
+            },
+            {
+              "event": "exited",
+              "at_ms": 42956.066116,
+              "tid": 7,
+              "code": 0
+            }
+          ],
+          "host_worker_counts": {
+            "spawn_attempt": 7,
+            "spawned": 7,
+            "ready": 7,
+            "exited": 7
+          },
+          "memory_bytes": 94306304,
+          "thread_contract": "PASS",
+          "boundary": "compiled-module",
+          "wall_seconds": 10.370315738000006,
+          "realtime_seconds": 10.37,
+          "realtime_clock_agreement": true,
+          "elapsed_clock": "performance.now() (CLOCK_MONOTONIC); Date.now() is an adjustable-clock diagnostic",
+          "close_seconds": 1.2024000003293622e-05,
+          "cpu_user_seconds": 17.649945,
+          "cpu_system_seconds": 0.06464,
+          "process_lifetime_peak_rss_bytes": 542601216,
+          "rss_after_bytes": 499175424
+        }
+      ]
+    }
+  }
+]

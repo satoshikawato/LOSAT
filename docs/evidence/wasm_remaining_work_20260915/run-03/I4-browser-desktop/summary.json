@@ -1,0 +1,314 @@
+[
+  {
+    "case": "MjeNMV.MelaMJNV.tlosatx",
+    "threads": 8,
+    "session": 0,
+    "wall_seconds": {
+      "baseline_samples": [
+        8.109845000000671,
+        8.412765000000595,
+        8.352405000001193
+      ],
+      "candidate_samples": [
+        8.168990000000223,
+        8.177525000000372,
+        8.276889999998733
+      ],
+      "baseline_median": 8.352405000001193,
+      "candidate_median": 8.177525000000372,
+      "candidate_over_baseline": 0.9790623179789778,
+      "regression_limit": 0.41762025000005965,
+      "pass_guard": true
+    },
+    "browser_tree_peak_rss_bytes": {
+      "baseline_samples": [
+        842190848,
+        941404160,
+        1053519872
+      ],
+      "candidate_samples": [
+        839946240,
+        963813376,
+        1058664448
+      ],
+      "baseline_median": 941404160,
+      "candidate_median": 963813376,
+      "candidate_over_baseline": 1.0238040333282572,
+      "regression_limit": 94140416.0,
+      "pass_guard": true
+    }
+  },
+  {
+    "case": "MjeNMV.MelaMJNV.tlosatx",
+    "threads": 8,
+    "session": 1,
+    "wall_seconds": {
+      "baseline_samples": [
+        8.31059500000067,
+        8.03990499999933,
+        8.476660000000148
+      ],
+      "candidate_samples": [
+        8.498150000000372,
+        8.20325,
+        8.291674999998882
+      ],
+      "baseline_median": 8.31059500000067,
+      "candidate_median": 8.291674999998882,
+      "candidate_over_baseline": 0.9977233880363816,
+      "regression_limit": 0.41552975000003356,
+      "pass_guard": true
+    },
+    "browser_tree_peak_rss_bytes": {
+      "baseline_samples": [
+        845418496,
+        965222400,
+        1061740544
+      ],
+      "candidate_samples": [
+        835174400,
+        952066048,
+        1054294016
+      ],
+      "baseline_median": 965222400,
+      "candidate_median": 952066048,
+      "candidate_over_baseline": 0.9863696159558667,
+      "regression_limit": 96522240.0,
+      "pass_guard": true
+    }
+  },
+  {
+    "case": "MjeNMV.MelaMJNV.tlosatx",
+    "threads": 1,
+    "session": 0,
+    "wall_seconds": {
+      "baseline_samples": [
+        13.761269999999554,
+        14.136684999998659,
+        13.71425
+      ],
+      "candidate_samples": [
+        13.511044999999925,
+        14.034240000000224,
+        14.353574999999255
+      ],
+      "baseline_median": 13.761269999999554,
+      "candidate_median": 14.034240000000224,
+      "candidate_over_baseline": 1.0198361052432428,
+      "regression_limit": 0.6880634999999777,
+      "pass_guard": true
+    },
+    "browser_tree_peak_rss_bytes": {
+      "baseline_samples": [
+        708399104,
+        732004352,
+        755331072
+      ],
+      "candidate_samples": [
+        704335872,
+        730247168,
+        752214016
+      ],
+      "baseline_median": 732004352,
+      "candidate_median": 730247168,
+      "candidate_over_baseline": 0.9975994896817225,
+      "regression_limit": 73200435.2,
+      "pass_guard": true
+    }
+  },
+  {
+    "case": "MjeNMV.MelaMJNV.tlosatx",
+    "threads": 1,
+    "session": 1,
+    "wall_seconds": {
+      "baseline_samples": [
+        14.74472000000067,
+        13.73900500000082,
+        13.39977999999933
+      ],
+      "candidate_samples": [
+        14.316035000000149,
+        14.09725,
+        14.0845
+      ],
+      "baseline_median": 13.73900500000082,
+      "candidate_median": 14.09725,
+      "candidate_over_baseline": 1.0260750323621806,
+      "regression_limit": 0.6869502500000411,
+      "pass_guard": true
+    },
+    "browser_tree_peak_rss_bytes": {
+      "baseline_samples": [
+        712130560,
+        735473664,
+        757628928
+      ],
+      "candidate_samples": [
+        703500288,
+        726839296,
+        748871680
+      ],
+      "baseline_median": 735473664,
+      "candidate_median": 726839296,
+      "candidate_over_baseline": 0.9882601261980741,
+      "regression_limit": 73547366.4,
+      "pass_guard": true
+    }
+  },
+  {
+    "case": "AP027280.AP027280.tlosatx",
+    "threads": 8,
+    "session": 0,
+    "wall_seconds": {
+      "baseline_samples": [
+        16.718189999999478,
+        16.773154999999328,
+        18.03815499999933
+      ],
+      "candidate_samples": [
+        15.521960000000893,
+        16.04543499999866,
+        15.912154999999329
+      ],
+      "baseline_median": 16.773154999999328,
+      "candidate_median": 15.912154999999329,
+      "candidate_over_baseline": 0.9486679757028399,
+      "regression_limit": 0.8386577499999665,
+      "pass_guard": true
+    },
+    "browser_tree_peak_rss_bytes": {
+      "baseline_samples": [
+        900497408,
+        1038331904,
+        1130143744
+      ],
+      "candidate_samples": [
+        906358784,
+        1013342208,
+        1134678016
+      ],
+      "baseline_median": 1038331904,
+      "candidate_median": 1013342208,
+      "candidate_over_baseline": 0.975932843916544,
+      "regression_limit": 103833190.4,
+      "pass_guard": true
+    }
+  },
+  {
+    "case": "AP027280.AP027280.tlosatx",
+    "threads": 8,
+    "session": 1,
+    "wall_seconds": {
+      "baseline_samples": [
+        16.71350500000082,
+        17.16515499999933,
+        16.755940000001342
+      ],
+      "candidate_samples": [
+        16.26427500000037,
+        15.594285000000149,
+        15.938044999999926
+      ],
+      "baseline_median": 16.755940000001342,
+      "candidate_median": 15.938044999999926,
+      "candidate_over_baseline": 0.951187757893538,
+      "regression_limit": 0.8377970000000672,
+      "pass_guard": true
+    },
+    "browser_tree_peak_rss_bytes": {
+      "baseline_samples": [
+        902508544,
+        1029275648,
+        1123319808
+      ],
+      "candidate_samples": [
+        898076672,
+        1009401856,
+        1123639296
+      ],
+      "baseline_median": 1029275648,
+      "candidate_median": 1009401856,
+      "candidate_over_baseline": 0.9806914775078794,
+      "regression_limit": 102927564.80000001,
+      "pass_guard": true
+    }
+  },
+  {
+    "case": "AP027280.AP027280.tlosatx",
+    "threads": 1,
+    "session": 0,
+    "wall_seconds": {
+      "baseline_samples": [
+        28.525425000000745,
+        28.386134999999776,
+        28.04281000000052
+      ],
+      "candidate_samples": [
+        25.125195000000296,
+        25.05906000000052,
+        25.775044999999924
+      ],
+      "baseline_median": 28.386134999999776,
+      "candidate_median": 25.125195000000296,
+      "candidate_over_baseline": 0.885122085130663,
+      "regression_limit": 1.419306749999989,
+      "pass_guard": true
+    },
+    "browser_tree_peak_rss_bytes": {
+      "baseline_samples": [
+        742125568,
+        766468096,
+        787681280
+      ],
+      "candidate_samples": [
+        739803136,
+        774840320,
+        799494144
+      ],
+      "baseline_median": 766468096,
+      "candidate_median": 774840320,
+      "candidate_over_baseline": 1.010923121319325,
+      "regression_limit": 76646809.60000001,
+      "pass_guard": true
+    }
+  },
+  {
+    "case": "AP027280.AP027280.tlosatx",
+    "threads": 1,
+    "session": 1,
+    "wall_seconds": {
+      "baseline_samples": [
+        27.95040499999933,
+        28.042984999999405,
+        28.02768499999866
+      ],
+      "candidate_samples": [
+        25.44038000000082,
+        25.08084500000067,
+        25.80320999999903
+      ],
+      "baseline_median": 28.02768499999866,
+      "candidate_median": 25.44038000000082,
+      "candidate_over_baseline": 0.9076875239607565,
+      "regression_limit": 1.401384249999933,
+      "pass_guard": true
+    },
+    "browser_tree_peak_rss_bytes": {
+      "baseline_samples": [
+        736600064,
+        771932160,
+        793174016
+      ],
+      "candidate_samples": [
+        738238464,
+        772124672,
+        797261824
+      ],
+      "baseline_median": 771932160,
+      "candidate_median": 772124672,
+      "candidate_over_baseline": 1.000249389790937,
+      "regression_limit": 77193216.0,
+      "pass_guard": true
+    }
+  }
+]

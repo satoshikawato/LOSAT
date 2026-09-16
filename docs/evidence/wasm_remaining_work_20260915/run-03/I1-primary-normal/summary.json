@@ -1,0 +1,214 @@
+[
+  {
+    "case": "MjeNMV.MelaMJNV.tlosatx",
+    "kind": "threaded",
+    "threads": 8,
+    "wall_seconds": {
+      "baseline_samples": [
+        22.803340229000014,
+        23.136695233999944,
+        22.475439096999935
+      ],
+      "candidate_samples": [
+        12.566032104999977,
+        12.329289891000144,
+        12.515454871999964
+      ],
+      "baseline_median": 22.803340229000014,
+      "candidate_median": 12.515454871999964,
+      "candidate_over_baseline": 0.5488430530928757,
+      "saved": 10.28788535700005
+    },
+    "body_seconds": {
+      "baseline_samples": [
+        22.629818217,
+        22.97976381,
+        22.277229567
+      ],
+      "candidate_samples": [
+        12.406592137,
+        12.177671394,
+        12.360356715
+      ],
+      "baseline_median": 22.629818217,
+      "candidate_median": 12.360356715,
+      "candidate_over_baseline": 0.546197790741184,
+      "saved": 10.269461502
+    },
+    "peak_rss_bytes": {
+      "baseline_samples": [
+        303939584,
+        305704960,
+        308445184
+      ],
+      "candidate_samples": [
+        305147904,
+        301793280,
+        300437504
+      ],
+      "baseline_median": 305704960,
+      "candidate_median": 301793280,
+      "candidate_over_baseline": 0.9872043947209754,
+      "saved": 3911680
+    }
+  },
+  {
+    "case": "MjeNMV.MelaMJNV.tlosatx",
+    "kind": "threaded",
+    "threads": 1,
+    "wall_seconds": {
+      "baseline_samples": [
+        16.67363105200002,
+        16.577824657000065,
+        16.41026683599989
+      ],
+      "candidate_samples": [
+        16.958965849999913,
+        16.901410055000042,
+        16.734931890000098
+      ],
+      "baseline_median": 16.577824657000065,
+      "candidate_median": 16.901410055000042,
+      "candidate_over_baseline": 1.0195191712239122,
+      "saved": -0.32358539799997743
+    },
+    "body_seconds": {
+      "baseline_samples": [
+        16.334351825,
+        16.420023235,
+        16.197498084
+      ],
+      "candidate_samples": [
+        16.777015325,
+        16.722760184,
+        16.570603282
+      ],
+      "baseline_median": 16.334351825,
+      "candidate_median": 16.722760184,
+      "candidate_over_baseline": 1.023778620857519,
+      "saved": -0.3884083589999996
+    },
+    "peak_rss_bytes": {
+      "baseline_samples": [
+        177012736,
+        184754176,
+        181637120
+      ],
+      "candidate_samples": [
+        179191808,
+        190078976,
+        178630656
+      ],
+      "baseline_median": 181637120,
+      "candidate_median": 179191808,
+      "candidate_over_baseline": 0.986537377381892,
+      "saved": 2445312
+    }
+  },
+  {
+    "case": "AP027280.AP027280.tlosatx",
+    "kind": "threaded",
+    "threads": 8,
+    "wall_seconds": {
+      "baseline_samples": [
+        42.284103548000076,
+        39.761988514999985,
+        40.92905777100009
+      ],
+      "candidate_samples": [
+        21.518048249999993,
+        20.96504899499996,
+        21.28421822900009
+      ],
+      "baseline_median": 40.92905777100009,
+      "candidate_median": 21.28421822900009,
+      "candidate_over_baseline": 0.5200270758268183,
+      "saved": 19.644839542
+    },
+    "body_seconds": {
+      "baseline_samples": [
+        42.134284024,
+        39.596337204,
+        40.763028853
+      ],
+      "candidate_samples": [
+        21.343820738,
+        20.798019787,
+        21.125362853
+      ],
+      "baseline_median": 40.763028853,
+      "candidate_median": 21.125362853,
+      "candidate_over_baseline": 0.5182481147115556,
+      "saved": 19.637666000000003
+    },
+    "peak_rss_bytes": {
+      "baseline_samples": [
+        315990016,
+        315801600,
+        314589184
+      ],
+      "candidate_samples": [
+        306864128,
+        311480320,
+        317472768
+      ],
+      "baseline_median": 315801600,
+      "candidate_median": 311480320,
+      "candidate_over_baseline": 0.9863164721141375,
+      "saved": 4321280
+    }
+  },
+  {
+    "case": "AP027280.AP027280.tlosatx",
+    "kind": "threaded",
+    "threads": 1,
+    "wall_seconds": {
+      "baseline_samples": [
+        31.165450226999837,
+        31.14939699200022,
+        31.279105921000337
+      ],
+      "candidate_samples": [
+        31.003074419999848,
+        31.098025338999832,
+        30.661713879000217
+      ],
+      "baseline_median": 31.165450226999837,
+      "candidate_median": 31.003074419999848,
+      "candidate_over_baseline": 0.9947898777069706,
+      "saved": 0.16237580699998944
+    },
+    "body_seconds": {
+      "baseline_samples": [
+        31.003697792,
+        30.918850517,
+        31.09526915
+      ],
+      "candidate_samples": [
+        30.837969581,
+        30.890229119,
+        30.505268022
+      ],
+      "baseline_median": 31.003697792,
+      "candidate_median": 30.837969581,
+      "candidate_over_baseline": 0.9946545663000635,
+      "saved": 0.16572821100000112
+    },
+    "peak_rss_bytes": {
+      "baseline_samples": [
+        190083072,
+        190078976,
+        190427136
+      ],
+      "candidate_samples": [
+        189902848,
+        189829120,
+        189624320
+      ],
+      "baseline_median": 190083072,
+      "candidate_median": 189829120,
+      "candidate_over_baseline": 0.9986639946559787,
+      "saved": 253952
+    }
+  }
+]

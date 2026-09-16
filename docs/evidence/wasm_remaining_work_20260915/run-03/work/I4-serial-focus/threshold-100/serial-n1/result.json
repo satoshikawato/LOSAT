@@ -1,0 +1,31 @@
+{
+  "boottime_seconds": 4.392844603999947,
+  "cpu_system_seconds": 0.01,
+  "cpu_user_seconds": 4.69,
+  "elapsed_clock": "CLOCK_MONOTONIC; realtime and GNU elapsed are adjustable-clock diagnostics",
+  "ended_utc": "2026-09-16T03:41:20Z",
+  "exit_status": 0,
+  "gnu_elapsed_seconds": 4.37,
+  "monotonic_clock_agreement": true,
+  "monotonic_end": 6948.822224375,
+  "monotonic_start": 6944.429383191,
+  "output": "/mnt/c/users/genom/github/losat/docs/evidence/wasm_remaining_work_20260915/run-03/work/I4-serial-focus/threshold-100/serial-n1/output.txt",
+  "peak_rss_bytes": 148557824,
+  "process_ended_utc": "2026-09-16T03:41:20Z",
+  "raw_output_bytes": 508077,
+  "raw_output_sha256": "f961ca114985f752998f02772e3679ed3679a9c4d1fcea9eb64b71a83d462654",
+  "realtime_clock_agreement": true,
+  "realtime_seconds": 4.392845392227173,
+  "reason": null,
+  "started_utc": "2026-09-16T03:41:16Z",
+  "status": "PASS",
+  "timeout_seconds": 300,
+  "unavailable_metrics": {},
+  "wall_seconds": 4.392841183999735,
+  "watchdog_clocks": {
+    "started": {
+      "monotonic": 6944.439543612,
+      "realtime": 1789530076.3210433
+    }
+  }
+}

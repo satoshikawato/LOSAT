@@ -1,0 +1,58 @@
+[
+  {
+    "version": "baselinebody",
+    "pair": -1,
+    "monotonic_start": 4477.119062013,
+    "monotonic_end": 4491.102608682,
+    "overlap_seconds": 0
+  },
+  {
+    "version": "I2bbody",
+    "pair": -1,
+    "monotonic_start": 4491.211502305,
+    "monotonic_end": 4506.384359342,
+    "overlap_seconds": 0
+  },
+  {
+    "version": "baselinebody",
+    "pair": 0,
+    "monotonic_start": 4506.507551957,
+    "monotonic_end": 4520.437501295,
+    "overlap_seconds": 0
+  },
+  {
+    "version": "I2bbody",
+    "pair": 0,
+    "monotonic_start": 4520.516806455,
+    "monotonic_end": 4535.7270425,
+    "overlap_seconds": 0
+  },
+  {
+    "version": "I2bbody",
+    "pair": 1,
+    "monotonic_start": 4535.803844181,
+    "monotonic_end": 4550.745158442,
+    "overlap_seconds": 0
+  },
+  {
+    "version": "baselinebody",
+    "pair": 1,
+    "monotonic_start": 4550.843397895,
+    "monotonic_end": 4565.287725762,
+    "overlap_seconds": 0
+  },
+  {
+    "version": "baselinebody",
+    "pair": 2,
+    "monotonic_start": 4565.377117508,
+    "monotonic_end": 4579.257725303,
+    "overlap_seconds": 0
+  },
+  {
+    "version": "I2bbody",
+    "pair": 2,
+    "monotonic_start": 4579.35337233,
+    "monotonic_end": 4594.754938707,
+    "overlap_seconds": 10.254938707000292
+  }
+]

@@ -1,0 +1,31 @@
+{
+  "boottime_seconds": 922.9726167199988,
+  "cpu_system_seconds": 0.45,
+  "cpu_user_seconds": 939.72,
+  "elapsed_clock": "CLOCK_MONOTONIC; realtime and GNU elapsed are adjustable-clock diagnostics",
+  "ended_utc": "2026-09-15T10:46:05Z",
+  "exit_status": 0,
+  "gnu_elapsed_seconds": 940.61,
+  "monotonic_clock_agreement": true,
+  "monotonic_end": 35125.181483053,
+  "monotonic_start": 34202.208869929,
+  "output": "/tmp/losat-remaining-20260915/long-code4/oracle/output.txt",
+  "peak_rss_bytes": 244719616,
+  "process_ended_utc": "2026-09-15T10:46:05Z",
+  "raw_output_bytes": 2270680,
+  "raw_output_sha256": "1da3bfe7d96d50a96726a44e2df98f5e81c05bee9cd655ad51bb8d44aa377963",
+  "realtime_clock_agreement": true,
+  "realtime_seconds": 940.6167588233948,
+  "reason": null,
+  "started_utc": "2026-09-15T10:30:25Z",
+  "status": "PASS",
+  "timeout_seconds": 1800,
+  "unavailable_metrics": {},
+  "wall_seconds": 922.972613123995,
+  "watchdog_clocks": {
+    "started": {
+      "monotonic": 34202.209377345,
+      "realtime": 1789468225.0444403
+    }
+  }
+}

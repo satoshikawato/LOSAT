@@ -1,0 +1,31 @@
+{
+  "boottime_seconds": 0.14382615400063514,
+  "cpu_system_seconds": 0.06,
+  "cpu_user_seconds": 0.11,
+  "elapsed_clock": "CLOCK_MONOTONIC; realtime and GNU elapsed are adjustable-clock diagnostics",
+  "ended_utc": "2026-09-16T04:14:04Z",
+  "exit_status": 0,
+  "gnu_elapsed_seconds": 0.13,
+  "monotonic_clock_agreement": true,
+  "monotonic_end": 8787.067517541,
+  "monotonic_start": 8786.923694732,
+  "output": "/mnt/c/users/genom/github/losat/docs/evidence/wasm_remaining_work_20260915/run-03/work/I4-command-gate/valid-nohit/threaded-n1/output.txt",
+  "peak_rss_bytes": 100966400,
+  "process_ended_utc": "2026-09-16T04:14:04Z",
+  "raw_output_bytes": 0,
+  "raw_output_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+  "realtime_clock_agreement": true,
+  "realtime_seconds": 0.14382672309875488,
+  "reason": null,
+  "started_utc": "2026-09-16T04:14:03Z",
+  "status": "PASS",
+  "timeout_seconds": 300,
+  "unavailable_metrics": {},
+  "wall_seconds": 0.14382280899917532,
+  "watchdog_clocks": {
+    "started": {
+      "monotonic": 8786.926786391,
+      "realtime": 1789532043.9933941
+    }
+  }
+}

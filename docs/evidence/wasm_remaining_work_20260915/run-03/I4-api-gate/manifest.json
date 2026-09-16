@@ -1,0 +1,108 @@
+{
+  "status": "PASS",
+  "runs": [
+    {
+      "argv": [
+        "node",
+        "/mnt/c/users/genom/github/losat/docs/evidence/wasm_remaining_work_20260915/run-03/work/baseline-source/LOSAT/tests/wasi_artifact.js",
+        "/mnt/c/users/genom/github/losat/docs/evidence/wasm_remaining_work_20260915/run-03/work/baseline/artifacts/losat-serial-command.wasm",
+        "serial-command"
+      ],
+      "returncode": 0,
+      "artifact_sha256": "2333cde63243e08e3f564af90426e9e55095be164a23638802cbb2c3d9139f3b"
+    },
+    {
+      "argv": [
+        "node",
+        "/mnt/c/users/genom/github/losat/docs/evidence/wasm_remaining_work_20260915/run-03/work/baseline-source/LOSAT/tests/wasi_artifact.js",
+        "/mnt/c/users/genom/github/losat/docs/evidence/wasm_remaining_work_20260915/run-03/work/baseline/artifacts/losat-threaded-command.wasm",
+        "threaded-command"
+      ],
+      "returncode": 0,
+      "artifact_sha256": "71a8b1b851c108eebac33414156108a1b2cc61b390ff3cb8562315626a5d70b9"
+    },
+    {
+      "argv": [
+        "node",
+        "/mnt/c/users/genom/github/losat/docs/evidence/wasm_remaining_work_20260915/run-03/work/baseline-source/LOSAT/tests/wasi_artifact.js",
+        "/mnt/c/users/genom/github/losat/docs/evidence/wasm_remaining_work_20260915/run-03/work/baseline/artifacts/losat-serial-reactor.wasm",
+        "serial-reactor"
+      ],
+      "returncode": 0,
+      "artifact_sha256": "79c68f306d82c0552a561f3a583ca3cbcd7bd4655df0a170816a9e8507766fea"
+    },
+    {
+      "argv": [
+        "node",
+        "/mnt/c/users/genom/github/losat/docs/evidence/wasm_remaining_work_20260915/run-03/work/baseline-source/LOSAT/tests/wasi_artifact.js",
+        "/mnt/c/users/genom/github/losat/docs/evidence/wasm_remaining_work_20260915/run-03/work/baseline/artifacts/losat-threaded-reactor.wasm",
+        "threaded-reactor"
+      ],
+      "returncode": 0,
+      "artifact_sha256": "60040a26b9cce16f662b711574995886b595bf1c7a7459e72186f9c55c44d301"
+    },
+    {
+      "argv": [
+        "node",
+        "/mnt/c/users/genom/github/losat/docs/evidence/wasm_remaining_work_20260915/run-03/work/baseline-source/LOSAT/tests/wasi_artifact.js",
+        "/mnt/c/users/genom/github/losat/docs/evidence/wasm_remaining_work_20260915/run-03/work/I4/artifacts/losat-serial-command.wasm",
+        "serial-command"
+      ],
+      "returncode": 0,
+      "artifact_sha256": "3e5cefaa40da4e86d0c3f8d249b7a3a81a53117e3c7b586915735338d98ff7fd"
+    },
+    {
+      "argv": [
+        "node",
+        "/mnt/c/users/genom/github/losat/docs/evidence/wasm_remaining_work_20260915/run-03/work/baseline-source/LOSAT/tests/wasi_artifact.js",
+        "/mnt/c/users/genom/github/losat/docs/evidence/wasm_remaining_work_20260915/run-03/work/I4/artifacts/losat-threaded-command.wasm",
+        "threaded-command"
+      ],
+      "returncode": 0,
+      "artifact_sha256": "c6c679bb4f6cf34b7c4f3ad2dccdafd2fe4c7373d88c0b24d766436eac091e30"
+    },
+    {
+      "argv": [
+        "node",
+        "/mnt/c/users/genom/github/losat/docs/evidence/wasm_remaining_work_20260915/run-03/work/baseline-source/LOSAT/tests/wasi_artifact.js",
+        "/mnt/c/users/genom/github/losat/docs/evidence/wasm_remaining_work_20260915/run-03/work/I4/artifacts/losat-serial-reactor.wasm",
+        "serial-reactor"
+      ],
+      "returncode": 0,
+      "artifact_sha256": "76959b7d39069458731a5ee00bcd80eed93b0b0f02f6ff2892ccb67bb1c2f89e"
+    },
+    {
+      "argv": [
+        "node",
+        "/mnt/c/users/genom/github/losat/docs/evidence/wasm_remaining_work_20260915/run-03/work/baseline-source/LOSAT/tests/wasi_artifact.js",
+        "/mnt/c/users/genom/github/losat/docs/evidence/wasm_remaining_work_20260915/run-03/work/I4/artifacts/losat-threaded-reactor.wasm",
+        "threaded-reactor"
+      ],
+      "returncode": 0,
+      "artifact_sha256": "3fa040cf5bfec972f884118ccfff0de03f9d1d83c965cb75e2fab1b26bf8e2f7"
+    },
+    {
+      "argv": [
+        "node",
+        "/mnt/c/users/genom/github/losat/docs/evidence/wasm_remaining_work_20260915/run-03/work/baseline-source/LOSAT/tests/check_wasi_api_limits.js",
+        "/mnt/c/users/genom/github/losat/docs/evidence/wasm_remaining_work_20260915/run-03/work/baseline/artifacts/losat-serial-reactor.wasm",
+        "serial-reactor",
+        "/mnt/c/users/genom/github/losat/docs/evidence/wasm_remaining_work_20260915/run-03/I4-api-gate/fixtures",
+        "/mnt/c/users/genom/github/losat/docs/evidence/wasm_remaining_work_20260915/run-03/I4-api-gate/baseline-limits"
+      ],
+      "returncode": 0
+    },
+    {
+      "argv": [
+        "node",
+        "/mnt/c/users/genom/github/losat/docs/evidence/wasm_remaining_work_20260915/run-03/work/baseline-source/LOSAT/tests/check_wasi_api_limits.js",
+        "/mnt/c/users/genom/github/losat/docs/evidence/wasm_remaining_work_20260915/run-03/work/I4/artifacts/losat-serial-reactor.wasm",
+        "serial-reactor",
+        "/mnt/c/users/genom/github/losat/docs/evidence/wasm_remaining_work_20260915/run-03/I4-api-gate/fixtures",
+        "/mnt/c/users/genom/github/losat/docs/evidence/wasm_remaining_work_20260915/run-03/I4-api-gate/I4-limits"
+      ],
+      "returncode": 0
+    }
+  ],
+  "scope": "4 ABI kinds, serial reactor success/error/success for 3 programs; no unlimited reuse or memory-fix claim"
+}

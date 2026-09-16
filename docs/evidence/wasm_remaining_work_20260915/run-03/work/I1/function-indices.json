@@ -1,0 +1,22 @@
+[
+  {
+    "index": 1340,
+    "name": "_ZN5LOSAT9algorithm7tblastx17sum_stats_linking7linking19link_hsp_group_ncbi17h3401281f418c37c1E",
+    "wat_lines": 15883,
+    "wat_start_line": 905787,
+    "locals": 125,
+    "callee_lines": [
+      "(call $_ZN5LOSAT9algorithm7tblastx17sum_stats_linking7linking27scan_large_gap_predecessors17hc27b107bd82fe66eE"
+    ],
+    "wasm_sha256": "86ab290585570df5f4cf1dd295e8c460638c441a3239e3b0a855598115977374"
+  },
+  {
+    "index": 1368,
+    "name": "_ZN5LOSAT9algorithm7tblastx17sum_stats_linking7linking27scan_large_gap_predecessors17hc27b107bd82fe66eE",
+    "wat_lines": 1264,
+    "wat_start_line": 928124,
+    "locals": 20,
+    "callee_lines": [],
+    "wasm_sha256": "86ab290585570df5f4cf1dd295e8c460638c441a3239e3b0a855598115977374"
+  }
+]

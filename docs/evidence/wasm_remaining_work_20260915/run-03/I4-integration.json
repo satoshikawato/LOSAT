@@ -1,0 +1,11 @@
+{
+  "status": "INTEGRATED",
+  "utc": "2026-09-16T06:06:29.834045+00:00",
+  "production_file": "/mnt/c/users/genom/github/losat/LOSAT/src/algorithm/tblastx/sum_stats_linking/linking.rs",
+  "baseline_sha256": "e9ad6da8849ac2c18be1f05889446302780178238bf55011c24a6d66a8e0647d",
+  "candidate_sha256": "7d23846ca169d5dadf355e0f2de8eefbc58d7f348aef64b258ae2eb5f07cf9ce",
+  "build_inputs_matched": 158,
+  "source_of_tested_artifacts": "work/I4-source/LOSAT",
+  "performance_and_test_artifacts": "work/I4/artifacts; matched body clocks in work/I4body/artifacts",
+  "scope": "Only linking.rs changed from frozen production baseline; all 158 production build inputs now match the fully tested candidate."
+}

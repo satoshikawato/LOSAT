@@ -1,0 +1,131 @@
+{
+  "source_sha256": "0dc451640056a7eef95db45117f5bf93250a3b5962f58180a3fd9004f8977a2e",
+  "candidate_linking_sha256": "2c1ec0ebda86e15282d3103d620fb0bc285f86045c91c6d5f595f1d77c7947c0",
+  "builds": [
+    {
+      "argv": [
+        "rustc",
+        "--edition=2021",
+        "-C",
+        "opt-level=3",
+        "/mnt/c/users/genom/github/losat/docs/evidence/wasm_remaining_work_20260915/run-03/I3-scan-native-threaded/harness.rs",
+        "-o",
+        "/mnt/c/users/genom/github/losat/docs/evidence/wasm_remaining_work_20260915/run-03/I3-scan-native-threaded/scan-native"
+      ],
+      "returncode": 0,
+      "stdout": "",
+      "stderr": ""
+    },
+    {
+      "argv": [
+        "rustc",
+        "--edition=2021",
+        "-C",
+        "opt-level=3",
+        "/mnt/c/users/genom/github/losat/docs/evidence/wasm_remaining_work_20260915/run-03/I3-scan-native-threaded/harness.rs",
+        "-o",
+        "/mnt/c/users/genom/github/losat/docs/evidence/wasm_remaining_work_20260915/run-03/I3-scan-native-threaded/scan-threaded.wasm",
+        "--target",
+        "wasm32-wasip1-threads",
+        "--cfg",
+        "feature=\"wasm-threads\"",
+        "--cfg",
+        "losat_wasi_threads"
+      ],
+      "returncode": 0,
+      "stdout": "",
+      "stderr": ""
+    }
+  ],
+  "runs": [
+    {
+      "argv": [
+        "/mnt/c/users/genom/github/losat/docs/evidence/wasm_remaining_work_20260915/run-03/I3-scan-native-threaded/scan-native",
+        "baseline",
+        "off"
+      ],
+      "returncode": 0,
+      "stdout_sha256": "b2a1aeb6b5319bb1a1697ad5063227fece356513478ee11b7b64d64f1ed5917d",
+      "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "argv": [
+        "/mnt/c/users/genom/github/losat/docs/evidence/wasm_remaining_work_20260915/run-03/I3-scan-native-threaded/scan-native",
+        "candidate",
+        "off"
+      ],
+      "returncode": 0,
+      "stdout_sha256": "b2a1aeb6b5319bb1a1697ad5063227fece356513478ee11b7b64d64f1ed5917d",
+      "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "argv": [
+        "/mnt/c/users/genom/github/losat/docs/evidence/wasm_remaining_work_20260915/run-03/I3-scan-native-threaded/scan-native",
+        "baseline",
+        "trace"
+      ],
+      "returncode": 0,
+      "stdout_sha256": "b2a1aeb6b5319bb1a1697ad5063227fece356513478ee11b7b64d64f1ed5917d",
+      "stderr_sha256": "67c0dc97d071df081bb16b43fdbe76386d77fcfb5101ba4919ae50ab1f77f1c8"
+    },
+    {
+      "argv": [
+        "/mnt/c/users/genom/github/losat/docs/evidence/wasm_remaining_work_20260915/run-03/I3-scan-native-threaded/scan-native",
+        "candidate",
+        "trace"
+      ],
+      "returncode": 0,
+      "stdout_sha256": "b2a1aeb6b5319bb1a1697ad5063227fece356513478ee11b7b64d64f1ed5917d",
+      "stderr_sha256": "67c0dc97d071df081bb16b43fdbe76386d77fcfb5101ba4919ae50ab1f77f1c8"
+    },
+    {
+      "argv": [
+        "node",
+        "/mnt/c/users/genom/github/losat/docs/evidence/wasm_remaining_work_20260915/run-03/work/baseline-source/LOSAT/tests/run_losat_wasi_threads.js",
+        "/mnt/c/users/genom/github/losat/docs/evidence/wasm_remaining_work_20260915/run-03/I3-scan-native-threaded/scan-threaded.wasm",
+        "baseline",
+        "off"
+      ],
+      "returncode": 0,
+      "stdout_sha256": "b2a1aeb6b5319bb1a1697ad5063227fece356513478ee11b7b64d64f1ed5917d",
+      "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "argv": [
+        "node",
+        "/mnt/c/users/genom/github/losat/docs/evidence/wasm_remaining_work_20260915/run-03/work/baseline-source/LOSAT/tests/run_losat_wasi_threads.js",
+        "/mnt/c/users/genom/github/losat/docs/evidence/wasm_remaining_work_20260915/run-03/I3-scan-native-threaded/scan-threaded.wasm",
+        "candidate",
+        "off"
+      ],
+      "returncode": 0,
+      "stdout_sha256": "b2a1aeb6b5319bb1a1697ad5063227fece356513478ee11b7b64d64f1ed5917d",
+      "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "argv": [
+        "node",
+        "/mnt/c/users/genom/github/losat/docs/evidence/wasm_remaining_work_20260915/run-03/work/baseline-source/LOSAT/tests/run_losat_wasi_threads.js",
+        "/mnt/c/users/genom/github/losat/docs/evidence/wasm_remaining_work_20260915/run-03/I3-scan-native-threaded/scan-threaded.wasm",
+        "baseline",
+        "trace"
+      ],
+      "returncode": 0,
+      "stdout_sha256": "b2a1aeb6b5319bb1a1697ad5063227fece356513478ee11b7b64d64f1ed5917d",
+      "stderr_sha256": "67c0dc97d071df081bb16b43fdbe76386d77fcfb5101ba4919ae50ab1f77f1c8"
+    },
+    {
+      "argv": [
+        "node",
+        "/mnt/c/users/genom/github/losat/docs/evidence/wasm_remaining_work_20260915/run-03/work/baseline-source/LOSAT/tests/run_losat_wasi_threads.js",
+        "/mnt/c/users/genom/github/losat/docs/evidence/wasm_remaining_work_20260915/run-03/I3-scan-native-threaded/scan-threaded.wasm",
+        "candidate",
+        "trace"
+      ],
+      "returncode": 0,
+      "stdout_sha256": "b2a1aeb6b5319bb1a1697ad5063227fece356513478ee11b7b64d64f1ed5917d",
+      "stderr_sha256": "67c0dc97d071df081bb16b43fdbe76386d77fcfb5101ba4919ae50ab1f77f1c8"
+    }
+  ],
+  "status": "PASS"
+}

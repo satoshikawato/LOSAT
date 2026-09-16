@@ -1,0 +1,26 @@
+{
+  "cwd": "/mnt/c/users/genom/github/losat",
+  "environment_overrides": {
+    "LOSAT_TIMING": "1",
+    "LOSAT_WASI_THREADS_DEBUG": "1",
+    "LOSAT_WASI_THREAD_CAP": "8",
+    "LOSAT_WASM_MEMORY_MAXIMUM_PAGES": "16384",
+    "NODE_NO_WARNINGS": "1"
+  },
+  "ordered_argv": [
+    "/mnt/c/users/genom/github/losat/docs/evidence/wasm_remaining_work_20260915/run-03/work/I2b/artifacts/losat-native-command",
+    "blastp",
+    "-query",
+    "/mnt/c/users/genom/github/losat/docs/evidence/wasm_remaining_work_20260915/run-03/work/baseline-source/LOSAT/tests/fasta/AP027132.faa",
+    "-subject",
+    "/mnt/c/users/genom/github/losat/docs/evidence/wasm_remaining_work_20260915/run-03/work/baseline-source/LOSAT/tests/fasta/NZ_CP006932.faa",
+    "-outfmt",
+    "6",
+    "-out",
+    "/mnt/c/users/genom/github/losat/docs/evidence/wasm_remaining_work_20260915/run-03/work/I2b-control-matrix/AP027132.NZ_CP006932.losatp/native-n1/output.txt",
+    "-num_threads",
+    "1"
+  ],
+  "shell": false,
+  "sink": "/mnt/c/users/genom/github/losat/docs/evidence/wasm_remaining_work_20260915/run-03/work/I2b-control-matrix/AP027132.NZ_CP006932.losatp/native-n1/output.txt"
+}

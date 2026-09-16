@@ -1,0 +1,26 @@
+{
+  "purpose": "prospective normal-desktop comparison, not an exclusive-machine study",
+  "command": [
+    "python3",
+    "docs/evidence/wasm_remaining_work_20260915/run-03/measure.py",
+    "--candidate",
+    "I4",
+    "--label",
+    "I4-primary-desktop",
+    "--kinds",
+    "threaded",
+    "--threads",
+    "8",
+    "1"
+  ],
+  "interval_seconds": 1,
+  "background_mean_cpu_cores_limit": 0.5,
+  "background_interval_cpu_cores_limit": 1.0,
+  "excluded_workloads": "external builds, tests, benchmarks, browser QA, compression",
+  "permitted_background": "editor, Git indexing, ordinary OS services",
+  "decision": "all timing/raw/memory guards AND environment validity must pass; no sample extension",
+  "previous_diagnostic": "I4-serial-git-diagnostic remains ineligible and is not pooled",
+  "limitation": "CPU bounds do not establish absence of I/O/cache/frequency interference",
+  "monitor_sha256": "dac3b6d940fbb1a0d3e8c73a16559149cfc37ca80a3510badb720b6ab97dd959",
+  "started_utc": "2026-09-16T04:21:17Z"
+}

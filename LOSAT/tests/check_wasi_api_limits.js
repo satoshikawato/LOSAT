@@ -2,7 +2,7 @@
 const fs = require("node:fs");
 const assert = require("node:assert/strict");
 const { WASI } = require("node:wasi");
-const { inspectArtifact } = require("./wasi_artifact");
+const { prepareArtifact } = require("./wasi_artifact");
 const { createThreadHost } = require("./wasi_thread_host");
 const { runPair } = require("./check_wasi_reactor");
 
@@ -14,9 +14,12 @@ const { runPair } = require("./check_wasi_reactor");
   fs.mkdirSync(output,{recursive:true});
   let host;
   if (kind === "serial-reactor") {
-    const bytes=fs.readFileSync(artifact); inspectArtifact(bytes,kind);
+    // NCBI reference: c++/src/app/blast/blastn_app.cpp:172-176
+    // CATCH_ALL(status); ... return status;
+    // Reuse the validated module; reactor initialization and ownership are unchanged.
+    const bytes=fs.readFileSync(artifact), {module}=prepareArtifact(bytes,kind);
     const wasi=new WASI({version:"preview1",env:process.env,preopens:{"/":"/"},returnOnExit:true});
-    const {instance}=await WebAssembly.instantiate(bytes,{wasi_snapshot_preview1:wasi.wasiImport});
+    const instance=await WebAssembly.instantiate(module,{wasi_snapshot_preview1:wasi.wasiImport});
     wasi.initialize(instance);
     host={instance,memory:instance.exports.memory,events:[],waitForWorkers:async()=>{},close:async()=>{}};
   } else host=await createThreadHost(artifact,kind);

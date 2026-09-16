@@ -1,0 +1,31 @@
+{
+  "boottime_seconds": 14.036716021999837,
+  "cpu_system_seconds": 0.01,
+  "cpu_user_seconds": 14.28,
+  "elapsed_clock": "CLOCK_MONOTONIC; realtime and GNU elapsed are adjustable-clock diagnostics",
+  "ended_utc": "2026-09-15T23:29:05Z",
+  "exit_status": 0,
+  "gnu_elapsed_seconds": 15.65,
+  "monotonic_clock_agreement": true,
+  "monotonic_end": 2497.001017723,
+  "monotonic_start": 2482.964305655,
+  "output": "/mnt/c/users/genom/github/losat/docs/evidence/wasm_remaining_work_20260915/run-03/I1-native-mje-n1/MjeNMV.MelaMJNV.tlosatx/native-n1/pair0/I1body/output.txt",
+  "peak_rss_bytes": 95961088,
+  "process_ended_utc": "2026-09-15T23:29:04Z",
+  "raw_output_bytes": 1728659,
+  "raw_output_sha256": "b309f77fee038f0559d870737ebeba732c11eba4f7e495f045acbfb831817fd7",
+  "realtime_clock_agreement": false,
+  "realtime_seconds": 15.665066480636597,
+  "reason": null,
+  "started_utc": "2026-09-15T23:28:49Z",
+  "status": "PASS",
+  "timeout_seconds": 300,
+  "unavailable_metrics": {},
+  "wall_seconds": 14.03671206800027,
+  "watchdog_clocks": {
+    "started": {
+      "monotonic": 2482.970854017,
+      "realtime": 1789514929.3374183
+    }
+  }
+}

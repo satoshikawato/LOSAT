@@ -1,0 +1,35 @@
+{
+  "status": "PASS",
+  "reason": null,
+  "exit_status": 0,
+  "wall_seconds": 127.50503399100035,
+  "monotonic_start": 5659.025083496,
+  "monotonic_end": 5786.530117487,
+  "realtime_seconds": 134.8296720981598,
+  "boottime_seconds": 127.50503705500068,
+  "gnu_elapsed_seconds": 134.79,
+  "process_ended_utc": "2026-09-16T03:20:45Z",
+  "watchdog_clocks": {
+    "started": {
+      "monotonic": 5659.039644545,
+      "realtime": 1789528710.2844787
+    }
+  },
+  "realtime_clock_agreement": false,
+  "monotonic_clock_agreement": true,
+  "elapsed_clock": "CLOCK_MONOTONIC; realtime and GNU elapsed are adjustable-clock diagnostics",
+  "cpu_user_seconds": 134.09,
+  "cpu_system_seconds": 0.08,
+  "peak_rss_bytes": 320286720,
+  "output": "/mnt/c/users/genom/github/losat/docs/evidence/wasm_remaining_work_20260915/run-03/I3-long-code4/threaded-n1/output.txt",
+  "raw_output_sha256": "1da3bfe7d96d50a96726a44e2df98f5e81c05bee9cd655ad51bb8d44aa377963",
+  "raw_output_bytes": 2270680,
+  "started_utc": "2026-09-16T03:18:30Z",
+  "ended_utc": "2026-09-16T03:20:45Z",
+  "timeout_seconds": 1800,
+  "unavailable_metrics": {},
+  "kind": "threaded",
+  "threads": 1,
+  "artifact_sha256": "95e58d009c060c196065bede76bbdaed998e1bd491f6fc4b615535c1bfb2ea22",
+  "raw_equal": true
+}

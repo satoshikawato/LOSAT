@@ -1,0 +1,32 @@
+{
+  "cwd": "/mnt/c/users/genom/github/losat",
+  "environment_overrides": {
+    "LOSAT_TIMING": "1",
+    "LOSAT_WASI_THREADS_DEBUG": "1",
+    "LOSAT_WASI_THREAD_CAP": "8",
+    "LOSAT_WASM_MEMORY_MAXIMUM_PAGES": "16384",
+    "NODE_NO_WARNINGS": "1"
+  },
+  "ordered_argv": [
+    "/home/kawato/.local/lib/nodejs/node-v26.8.2-linux-x64/bin/node",
+    "/mnt/c/users/genom/github/losat/docs/evidence/wasm_remaining_work_20260915/run-03/work/baseline-source/LOSAT/tests/run_losat_wasi_threads.js",
+    "/mnt/c/users/genom/github/losat/docs/evidence/wasm_remaining_work_20260915/run-03/work/I2b/artifacts/losat-threaded-command.wasm",
+    "tblastx",
+    "-query",
+    "/mnt/c/users/genom/github/losat/docs/evidence/wasm_remaining_work_20260915/run-03/work/boundary-fixtures/nuc1.fasta",
+    "-subject",
+    "/mnt/c/users/genom/github/losat/docs/evidence/wasm_remaining_work_20260915/run-03/work/boundary-fixtures/nohit.fasta",
+    "-outfmt",
+    "6",
+    "-query_gencode",
+    "1",
+    "-db_gencode",
+    "1",
+    "-out",
+    "/mnt/c/users/genom/github/losat/docs/evidence/wasm_remaining_work_20260915/run-03/work/I2b-focus/valid-nohit/threaded-n8/output.txt",
+    "-num_threads",
+    "8"
+  ],
+  "shell": false,
+  "sink": "/mnt/c/users/genom/github/losat/docs/evidence/wasm_remaining_work_20260915/run-03/work/I2b-focus/valid-nohit/threaded-n8/output.txt"
+}

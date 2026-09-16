@@ -15,7 +15,8 @@ import seaborn as sns
 from comparison_data import (
     CUSTOM_PALETTE, HUE_ORDER, LOSAT_THREADS, MODE_ORDER, PLOT_DIR,
     NATIVE_SINGLE, NATIVE_MULTI, WASM_SINGLE, WASM_THREADED_SINGLE, WASM_MULTI,
-    comparison_cases, completed_log, result_paths, successful_output, sha256,
+    NCBI_SINGLE,
+    comparison_cases, completed_log, result_paths, successful_output, sha256, require_plot_run,
 )
 
 OUTPUT_IMAGE = PLOT_DIR / "execution_time_comparison_all.png"
@@ -47,7 +48,9 @@ def main():
     # x_PrintField(*iter); ... m_Ostream << "\n";
     # Performance bars require raw equality, before any numeric plot parsing.
     for case in comparison_cases():
-        reference = result_paths(case)["BLAST+"]
+        # NCBI reference: c++/src/algo/blast/blastinput/cmdline_flags.cpp:75
+        # const string kArgNumThreads("num_threads");
+        reference = result_paths(case)[NCBI_SINGLE]
         if not successful_output(reference):
             continue
         expected_hash = sha256(reference)
@@ -90,7 +93,10 @@ def main():
     g.fig.suptitle(
         "Execution Time: BLAST+ vs LOSAT Native/Wasm\n"
         "One run per condition; includes startup and Wasm compilation\n"
-        f"BLAST+ requested threads: TBLASTX n{LOSAT_THREADS}, other tasks n1",
+        # NCBI reference: c++/src/algo/blast/blastinput/blast_args.cpp:3223-3239
+        # if (args.Exist(kArgSubject) && args[kArgSubject].HasValue() &&
+        #     m_NumThreads != CThreadable::kMinNumThreads) { m_NumThreads = ...; }
+        f"BLAST+ requested n1/n{LOSAT_THREADS}: TBLASTX -db; others -subject (effective n1)",
         y=1.12, fontsize=12,
     )
     g.fig.savefig(OUTPUT_IMAGE, bbox_inches="tight")
@@ -111,4 +117,7 @@ def main():
 
 
 if __name__ == "__main__":
+    # NCBI reference: c++/src/app/blast/blastn_app.cpp:172-176
+    # CATCH_ALL(status) ... return status;
+    require_plot_run()
     main()

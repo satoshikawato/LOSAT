@@ -10,7 +10,7 @@ import seaborn as sns
 # "qaccver saccver pident length mismatch gapopen qstart qend sstart send "
 # "evalue bitscore";
 # Compare these unchanged fields on a common cohort of query/subject pairs.
-from comparison_data import CUSTOM_PALETTE, HUE_ORDER, PLOT_DIR, comparison_cases, load_case
+from comparison_data import CUSTOM_PALETTE, HUE_ORDER, PLOT_DIR, comparison_cases, load_case, require_plot_run
 
 OUTPUT_IMAGE = PLOT_DIR / "overall_trend_comparison.png"
 
@@ -137,4 +137,7 @@ def main():
 
 
 if __name__ == "__main__":
+    # NCBI reference: c++/src/app/blast/blastn_app.cpp:172-176
+    # CATCH_ALL(status) ... return status;
+    require_plot_run()
     main()

@@ -12,7 +12,7 @@ import seaborn as sns
 # "qaccver saccver pident length mismatch gapopen qstart qend sstart send "
 # "evalue bitscore";
 # Plot those fields without changing or filtering the alignments.
-from comparison_data import CUSTOM_PALETTE, HUE_ORDER, PLOT_DIR, comparison_cases, load_case
+from comparison_data import CUSTOM_PALETTE, HUE_ORDER, PLOT_DIR, comparison_cases, load_case, require_plot_run
 
 
 def generate_comparison_plot(config):
@@ -114,4 +114,7 @@ def main():
 
 
 if __name__ == "__main__":
+    # NCBI reference: c++/src/app/blast/blastn_app.cpp:172-176
+    # CATCH_ALL(status) ... return status;
+    require_plot_run()
     main()

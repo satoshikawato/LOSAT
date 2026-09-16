@@ -16,14 +16,13 @@ cargo build --release --bin LOSAT
 cargo build --release --bin LOSAT --target wasm32-wasip1-threads --features wasm-threads --target-dir target/threaded-command
 cd tests
 
-export BENCHMARK_DIR="$(mktemp -d /tmp/losat-comparison.XXXXXX)/run"
 ./run_comparison.sh
 ./plot_overall_trend.py
 ./plot_comparison.py
 ./plot_execution_time.py
 ```
 
-Requirements: Bash 4+, GNU `timeout`, Node.js with WASI support (use a supported
+Requirements: Bash 4+, Node.js with WASI support (use a supported
 LTS version, such as Node 24), NCBI BLAST+ (`blastn`, `blastp`,
 `tblastx`, `makeblastdb`), Python 3 with `matplotlib`, `pandas` and `seaborn>=0.12`.
 `--bin LOSAT` builds the command artifact with `_start`; library Wasm artifacts
@@ -32,7 +31,6 @@ cannot run these CLI comparisons. Missing or incorrect artifacts fail explicitly
 To compare Wasm with a fresh NCBI oracle without running native LOSAT:
 
 ```bash
-export BENCHMARK_DIR="$(mktemp -d /tmp/losat-comparison.XXXXXX)/run"
 RUN_NATIVE=0 ./run_comparison.sh
 ./plot_overall_trend.py
 ./plot_comparison.py
@@ -47,25 +45,19 @@ To run LOSATN/BLASTN and LOSATP/BLASTP without TBLASTX, select both nucleotide
 tasks (`megablast` and `blastn`) and the protein task (`blastp`):
 
 ```bash
-export BENCHMARK_PROGRAMS=megablast,blastn,blastp
-./run_comparison.sh
+BENCHMARK_PROGRAMS=megablast,blastn,blastp ./run_comparison.sh
 ```
 
 This keeps the native, threaded Wasm n1/nN and NCBI runners enabled.
-The exported selection also applies to the plotting scripts. For nucleotide
+The plotting scripts automatically reuse the recorded selection. For nucleotide
 comparisons only, use `BENCHMARK_PROGRAMS=megablast,blastn`; for protein
 comparisons only, use `BENCHMARK_PROGRAMS=blastp`. Use
 `unset BENCHMARK_PROGRAMS` to restore the default selection of all programs.
 
-To run a small selection and keep previous results intact, use the same exported
-settings for execution and plotting:
+To run a small selection and keep previous results intact:
 
 ```bash
-export BENCHMARK_DIR="$(mktemp -d /tmp/losat-comparison.XXXXXX)/run"
-export BENCHMARK_PROGRAMS=blastp
-export BENCHMARK_CASE=WSSV.PajaWSV
-export LOSAT_THREADS=4
-./run_comparison.sh
+BENCHMARK_PROGRAMS=blastp BENCHMARK_CASE=WSSV.PajaWSV LOSAT_THREADS=4 ./run_comparison.sh
 ./plot_overall_trend.py
 ./plot_comparison.py
 ./plot_execution_time.py
@@ -75,16 +67,25 @@ export LOSAT_THREADS=4
 `BENCHMARK_CASE` matches a substring of `losat_stem` in the table. An unmatched
 selection is an error. By default all pairs run with `LOSAT_THREADS=8`.
 The complete set includes long genomes; use these filters for quick checks.
-Each search has a 600-second limit; set `BENCHMARK_TIMEOUT` to a larger positive
-number of seconds for slower cases. A timeout stops the run and is excluded from
-plots. Caught Wasm worker exceptions print their diagnostic and terminate the
+Searches run without a time limit. Failed searches stop the run and are excluded
+from plots. Caught Wasm worker exceptions print their diagnostic and terminate the
 command immediately (SIGTERM, shell exit 143), including while its main thread
-waits inside Wasm. Both Wasm runners preserve explicit WASI exit codes. The outer
-timeout still covers failures that cannot reach a JavaScript error handler.
-Relative `BENCHMARK_DIR` paths resolve from this `tests` directory, even when
-the scripts are launched elsewhere. The destination must not already exist. Without `BENCHMARK_DIR`, the runner
-creates a directory under `tests/benchmark-runs/` and prints its path; export
-that path as `BENCHMARK_DIR` before plotting. Existing run files are preserved.
+waits inside Wasm. Both Wasm runners preserve explicit WASI exit codes.
+No directory settings are needed for normal use. Each comparison saves into a
+new `tests/benchmark-runs/<timestamp>-<pid>/` directory containing `blast_out/`
+and `losat_out/`; the three plotting scripts save into that run's `plots/`.
+`tests/benchmark-runs/latest.json` records the latest default attempt. Plotting
+automatically reads that run and its program selection, case filter, and thread
+count. If it failed or is still running, plotting stops with an error instead of
+silently reading an older run. Existing run files are preserved.
+
+`BENCHMARK_DIR` is an optional override for a custom destination or for plotting
+an older run. Relative paths resolve from this `tests` directory, even when the
+scripts are launched elsewhere. A comparison destination must not already exist.
+Explicit destinations do not change the default latest-run selection. If you
+previously exported `BENCHMARK_DIR`, use `unset BENCHMARK_DIR` to return to the
+automatic location. Explicit program/case/thread settings override the recorded
+plotting defaults.
 
 `RUN_LOSAT_WASM_THREADED=0 ./run_comparison.sh` runs native and NCBI only.
 `RUN_LOSAT_WASM=1` adds serial compatibility checks; it is independent of
@@ -155,13 +156,14 @@ Run the host regression checks with
 exceptions, shared-memory growth, overlapping copies, and invalid ranges.
 
 Each completed search immediately prints its measured wall time, for example
-`Finished WSSV.PajaWSV.losatp.wasm: 7.446 s`. Failed searches and timeouts also
+`Finished WSSV.PajaWSV.losatp.wasm: 7.446 s`. Failed searches also
 print elapsed seconds and their exit status. The displayed seconds and the plot
 logs use the same Bash timer.
 
-The figures show the available BLAST+, native n1/nN and threaded Wasm n1/nN results, plus serial Wasm n1 when compatibility comparisons are enabled.
-With `LOSAT_THREADS=1`, native n1 runs once and the two Wasm builds stay distinct.
-File naming remains compatible with previous results:
+The figures show BLAST+ requested n1/nN, native n1/nN and threaded Wasm n1/nN results,
+plus serial Wasm n1 when compatibility comparisons are enabled.
+With `LOSAT_THREADS=1`, BLAST+ and native each run once and the two Wasm builds stay distinct.
+LOSAT file naming remains compatible with previous results:
 
 | Condition | LOSAT output/log stem |
 | --- | --- |
@@ -170,11 +172,30 @@ File naming remains compatible with previous results:
 | Serial Wasm n1 | `<losat_stem>.wasm` |
 | Threaded Wasm nN | `<losat_stem>.wasm.nN` |
 
-NCBI TBLASTX retains `.nN`; other NCBI filenames have no thread suffix and run
-with n1. TBLASTX uses a freshly prepared NCBI database of the same subject FASTA
-(outside the timer), preserving the historical database search and honoring
-`db_gencode=4`. LOSAT uses local `-subject`. This distinction follows NCBI
-`blast_args.cpp:1052–1054`, which applies `db_gencode` with `-db`.
+Every NCBI task writes `<ncbi_stem>.n1` and `<ncbi_stem>.nN` output/log files.
+BLASTP, BLASTN and megablast use `-subject`, matching LOSAT's local-subject
+search conditions. NCBI `blast_args.cpp:3223–3239` reduces these searches to
+one thread even when nN is requested. Both requested runs are retained, and
+the execution-time caption explicitly identifies their effective n1 behavior.
+
+TBLASTX retains `-db` to apply non-default subject genetic codes such as
+`db_gencode=4`, following NCBI `blast_args.cpp:1052–1054`. Each run prepares
+one `nucl` database per TBLASTX subject FASTA with `-parse_seqids`.
+Database preparation is outside the search timer; separate `.makeblastdb.log`
+and `.makeblastdb.json` files record its wall time, command, input hash, and
+tool identity. DBs are reused only within that run. Subject-only selections
+do not require `makeblastdb`. Task and genetic-code options remain unchanged.
+
+The TBLASTX, BLASTN and megablast fixtures each contain one subject sequence.
+Database searches distribute subject OIDs to search workers
+(`blast_engine.c:1411–1475`); a single subject therefore does not supply eight
+independent search jobs. In TBLASTX, frames and long-subject chunks are handled
+sequentially within that worker (`blast_engine.c:478–593,804–841`). The nN
+label records the requested count, not a claim that all workers are busy.
+
+Runs using the previous all-DB or single-oracle protocols cannot be plotted
+with the current target/thread labels. The plot scripts report that a fresh run is required;
+previous records and rendered figures remain historical evidence.
 
 Each condition has **one wall-time sample, including process startup and Wasm
 compilation**, with no warmup. Thread counts are requested counts; they are not
@@ -184,7 +205,8 @@ contains the plotted seconds and source log paths. New logs record exit status;
 failed or interrupted runs are excluded. Old logs without explicit successful
 status and matching provenance are historical evidence only and cannot be
 plotted as current results. Timing bars additionally require exact raw equality
-with the same run's NCBI oracle, including lexical numeric formatting.
+with the same run's NCBI n1 oracle for the selected target, including lexical numeric formatting.
+This check also applies to NCBI nN timing bars.
 
 Per-pair plots accept any available LOSAT series with NCBI. Overall distributions
 use only the intersection of pairs available across the series present in each

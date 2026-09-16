@@ -14,8 +14,53 @@ import re
 
 
 SCRIPT_DIR = Path(__file__).resolve().parent
-RESULT_DIR = SCRIPT_DIR / os.environ.get("BENCHMARK_DIR", ".")
+
+
+# NCBI reference: c++/src/algo/blast/blastinput/cmdline_flags.cpp:48,75
+# const string kArgOutput("out"); const string kArgNumThreads("num_threads");
+# This harness selects recorded output and settings; it never changes searches.
+def plot_run_settings():
+    selected_id = None
+    if os.environ.get("BENCHMARK_DIR"):
+        directory = SCRIPT_DIR / os.environ["BENCHMARK_DIR"]
+    else:
+        latest = SCRIPT_DIR / "benchmark-runs/latest.json"
+        if not latest.is_file():
+            return SCRIPT_DIR / "benchmark-runs", {}, None
+        selected = json.loads(latest.read_text())
+        directory = Path(selected["directory"])
+        selected_id = selected["run_id"]
+    manifest = directory / "run.json"
+    return directory.resolve(), json.loads(manifest.read_text()) if manifest.is_file() else {}, selected_id
+
+
+# Recording a new run must not load settings from a previous plotting run.
+# NCBI reference: c++/src/algo/blast/blastinput/cmdline_flags.cpp:48
+# const string kArgOutput("out");
+RESULT_DIR, RUN_MANIFEST, SELECTED_RUN_ID = (
+    (SCRIPT_DIR, {}, None) if __name__ == "__main__" else plot_run_settings()
+)
+RUN_ENVIRONMENT = RUN_MANIFEST.get("environment", {})
 PLOT_DIR = RESULT_DIR / "plots"
+
+# NCBI reference: c++/src/app/blast/blastn_app.cpp:172-176
+# CATCH_ALL(status) ... return status;
+# A failed/latest attempt must not silently select older successful evidence.
+def require_plot_run():
+    if not RUN_MANIFEST:
+        raise SystemExit(f"No comparison run metadata at {RESULT_DIR}. Run ./run_comparison.sh successfully first.")
+    if SELECTED_RUN_ID is not None and RUN_MANIFEST.get("run_id") != SELECTED_RUN_ID:
+        raise SystemExit(f"Latest comparison run ID does not match {RESULT_DIR}/run.json")
+    if RUN_MANIFEST.get("status") != "COMPLETE":
+        raise SystemExit(f"Comparison at {RESULT_DIR} did not complete (failed or still running); no plots generated.")
+    # NCBI reference: c++/src/algo/blast/blastinput/cmdline_flags.cpp:50-51,75
+    # const string kArgDb("db"); const string kArgSubject("subject");
+    # const string kArgNumThreads("num_threads");
+    # Previous all-DB or single-oracle runs cannot acquire the current target labels.
+    if RUN_MANIFEST.get("schema") != "losat-simple-comparison-v4":
+        raise SystemExit(f"Comparison at {RESULT_DIR} uses the previous target/thread protocol; rerun ./run_comparison.sh for the current BLAST+ target and n1/nN plots.")
+    print(f"Using comparison results: {RESULT_DIR}")
+
 
 # NCBI reference: c++/src/algo/blast/blastinput/cmdline_flags.cpp:75
 # const string kArgNumThreads("num_threads");
@@ -23,6 +68,7 @@ LOSAT_THREADS = int(
     os.environ.get("LOSAT_THREADS")
     or os.environ.get("LOSATP_THREADS")
     or os.environ.get("LOSAT_BLASTP_THREADS")
+    or RUN_ENVIRONMENT.get("LOSAT_THREADS")
     or "8"
 )
 if LOSAT_THREADS < 1:
@@ -34,12 +80,16 @@ WASM_SINGLE = "LOSAT wasm serial n1"
 # const string kArgNumThreads("num_threads");
 WASM_THREADED_SINGLE = "LOSAT wasm threads n1"
 WASM_MULTI = f"LOSAT wasm threads n{LOSAT_THREADS}"
+# NCBI reference: c++/src/algo/blast/blastinput/cmdline_flags.cpp:75
+# const string kArgNumThreads("num_threads");
+NCBI_SINGLE = "BLAST+ n1"
+NCBI_MULTI = f"BLAST+ n{LOSAT_THREADS}"
 HUE_ORDER = list(dict.fromkeys([
-    "BLAST+", NATIVE_SINGLE, NATIVE_MULTI, WASM_SINGLE, WASM_THREADED_SINGLE, WASM_MULTI,
+    NCBI_SINGLE, NCBI_MULTI, NATIVE_SINGLE, NATIVE_MULTI, WASM_SINGLE, WASM_THREADED_SINGLE, WASM_MULTI,
 ]))
 CUSTOM_PALETTE = dict(zip(
-    ["BLAST+", NATIVE_SINGLE, NATIVE_MULTI, WASM_SINGLE, WASM_THREADED_SINGLE, WASM_MULTI],
-    ["#4c72b0", "#dd8452", "#a15c2e", "#8a8f3b", "#6e9c75", "#565b22"],
+    [NCBI_SINGLE, NCBI_MULTI, NATIVE_SINGLE, NATIVE_MULTI, WASM_SINGLE, WASM_THREADED_SINGLE, WASM_MULTI],
+    ["#4c72b0", "#263f73", "#dd8452", "#a15c2e", "#8a8f3b", "#6e9c75", "#565b22"],
 ))
 MODE_ORDER = ["TBLASTX", "Megablast", "BLASTN", "BLASTP"]
 
@@ -51,10 +101,13 @@ COLUMNS = "qaccver saccver pident length mismatch gapopen qstart qend sstart sen
 
 
 def comparison_cases():
-    programs = os.environ.get("BENCHMARK_PROGRAMS", "tblastx,megablast,blastn,blastp").split(",")
+    # NCBI reference: c++/src/algo/blast/blastinput/cmdline_flags.cpp:46,51
+    # const string kArgQuery("query"); const string kArgSubject("subject");
+    # Plot the recorded input selection unless the user requests another subset.
+    programs = os.environ.get("BENCHMARK_PROGRAMS", RUN_ENVIRONMENT.get("BENCHMARK_PROGRAMS", "tblastx,megablast,blastn,blastp")).split(",")
     if set(programs) - {"tblastx", "megablast", "blastn", "blastp"}:
         raise ValueError(f"Unknown BENCHMARK_PROGRAMS: {programs}")
-    case_filter = os.environ.get("BENCHMARK_CASE", "")
+    case_filter = os.environ.get("BENCHMARK_CASE", RUN_ENVIRONMENT.get("BENCHMARK_CASE", ""))
     with (SCRIPT_DIR / "comparison_cases.tsv").open() as handle:
         cases = [row for row in csv.DictReader(handle, delimiter="\t")
                  if row["task"] in programs and case_filter in row["losat_stem"]]
@@ -73,8 +126,12 @@ def result_paths(case, extension="out"):
     single = str(native)
     if case["task"] == "tblastx":
         single += ".n1"
-        ncbi = f"{ncbi}.n{LOSAT_THREADS}"
-    paths = {"BLAST+": ncbi, NATIVE_SINGLE: single}
+    # NCBI reference: c++/src/algo/blast/blastinput/cmdline_flags.cpp:75
+    # const string kArgNumThreads("num_threads");
+    paths = {NCBI_SINGLE: f"{ncbi}.n1"}
+    if LOSAT_THREADS != 1:
+        paths[NCBI_MULTI] = f"{ncbi}.n{LOSAT_THREADS}"
+    paths[NATIVE_SINGLE] = single
     if LOSAT_THREADS != 1:
         paths[NATIVE_MULTI] = f"{native}.n{LOSAT_THREADS}"
     paths[WASM_SINGLE] = f"{native}.wasm"
@@ -129,8 +186,22 @@ def record_cli(argv):
     directory = Path(directory).resolve()
     if action == "init":
         directory.mkdir(parents=True, exist_ok=False)
+        # NCBI reference: c++/src/app/blast/blastn_app.cpp:172-176
+        # CATCH_ALL(status) ... return status;
+        # Register the attempt before metadata collection can fail. Only the
+        # default runner supplies a pointer; explicit output roots stay isolated.
+        run_id = uuid.uuid4().hex
+        if rest:
+            latest = Path(rest[0])
+            pending = latest.with_name(f".{latest.name}.{run_id}.tmp")
+            pending.write_text(json.dumps({"directory": str(directory), "run_id": run_id}) + "\n")
+            pending.replace(latest)
         (directory / "run.json").write_text(json.dumps({
-            "schema": "losat-simple-comparison-v2", "run_id": uuid.uuid4().hex,
+            # NCBI reference: c++/src/algo/blast/blastinput/cmdline_flags.cpp:50-51,75
+            # const string kArgDb("db"); const string kArgSubject("subject");
+            # const string kArgNumThreads("num_threads");
+            "schema": "losat-simple-comparison-v4", "run_id": run_id,
+            "status": "RUNNING",
             "started_utc": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
             "node_argv": [os.environ.get("NODE_BIN", "node"), *node_args()],
             # NCBI reference: c++/src/algo/blast/blastinput/cmdline_flags.cpp:46-75
@@ -158,16 +229,35 @@ def record_cli(argv):
         # Preserve argument boundaries for the program-specific host profile.
         (directory / "node-tblastx-args.bin").write_bytes(b"".join(x.encode() + b"\0" for x in node_args("tblastx")))
         return
-    stem = Path(rest[0]).resolve()
     manifest = json.loads((directory / "run.json").read_text())
+    # NCBI reference: c++/src/app/blast/blastn_app.cpp:172-176
+    # CATCH_ALL(status) ... return status;
+    # The shell reaches this only after every selected invocation succeeds.
+    if action == "complete":
+        manifest.update(status="COMPLETE", ended_utc=time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()))
+        pending = directory / ".run.json.tmp"
+        pending.write_text(json.dumps(manifest, indent=2) + "\n")
+        pending.replace(directory / "run.json")
+        return
+    stem = Path(rest[0]).resolve()
     record_path = stem.with_suffix(stem.suffix + ".run.json")
     if action == "database":
-        source, executable = rest[1:]
+        # NCBI reference: c++/src/app/blastdb/makeblastdb.cpp:236-247
+        # arg_desc->SetConstraint(kArgDbType, &(*new CArgAllow_Strings, "nucl", "prot"));
+        # arg_desc->AddFlag("parse_seqids", ...);
+        source, executable, dbtype = rest[1:]
+        if dbtype not in {"nucl", "prot"}:
+            raise ValueError(f"Unknown database molecule type: {dbtype}")
+        log = Path(str(stem) + ".makeblastdb.log")
+        elapsed = re.findall(r"^real\s+(\d+\.\d+)$", log.read_text(), re.M)
+        if not elapsed:
+            raise ValueError(f"Missing database preparation wall time: {log}")
         Path(str(stem) + ".makeblastdb.json").write_text(json.dumps({
             "run_id": manifest["run_id"], "input": source, "input_sha256": sha256(source),
             "executable": executable, "executable_sha256": sha256(executable),
             "version": subprocess.check_output([executable, "-version"], text=True).strip(),
-            "ordered_argv": [executable, "-in", source, "-dbtype", "nucl", "-parse_seqids", "-out", str(stem)],
+            "ordered_argv": [executable, "-in", source, "-dbtype", dbtype, "-parse_seqids", "-out", str(stem)],
+            "wall_seconds": float(elapsed[-1]), "log_sha256": sha256(log),
             "exit_status": 0,
         }, indent=2) + "\n")
         return
@@ -226,7 +316,9 @@ def load_case(case):
     import pandas as pd
 
     paths = result_paths(case)
-    if not successful_output(paths["BLAST+"]):
+    # NCBI reference: c++/src/algo/blast/blastinput/cmdline_flags.cpp:75
+    # const string kArgNumThreads("num_threads");
+    if not successful_output(paths[NCBI_SINGLE]):
         print(f"[Skip] {case['name']} ({case['mode']}): missing/failed NCBI output")
         return {}
     frames = {}

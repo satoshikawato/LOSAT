@@ -12,7 +12,7 @@ cd "$SCRIPT_DIR"
 
 if [[ "${1:-}" == --help ]]; then
     cat <<'HELP'
-Usage: ./run_comparison.sh   (NCBI + native + threaded Wasm n1/nN)
+Usage: ./run_comparison.sh   (NCBI + native + threaded Wasm, requested n1/nN)
        ./run_wasm_comparison.sh   (Wasm only, same cases and filenames)
 
 Program selections:
@@ -26,12 +26,11 @@ Program selections:
 Environment (also read by the three plot_*.py scripts):
   BENCHMARK_DIR       Results root containing blast_out/, losat_out/, plots/
                      (default: a new directory under tests/benchmark-runs/)
+                     Plots automatically read the latest default run.
                      Explicit BENCHMARK_DIR must not already exist.
   BENCHMARK_PROGRAMS Comma-separated tblastx,megablast,blastn,blastp (default: all)
   BENCHMARK_CASE     Substring of the LOSAT output stem (default: all pairs)
   LOSAT_THREADS     Requested multithread count (default: 8)
-
-  BENCHMARK_TIMEOUT Maximum seconds per search (default: 600; GNU timeout)
 
 Runner settings (0 disables, 1 enables):
   RUN_NATIVE=1 RUN_NCBI=1 RUN_LOSAT_WASM=0 RUN_LOSAT_WASM_THREADED=1
@@ -46,7 +45,10 @@ Runner settings (0 disables, 1 enables):
   BLASTN_BIN, BLASTP_BIN, TBLASTX_BIN, MAKEBLASTDB_BIN override NCBI tools.
 
 Each selected condition runs once. Wall time includes process startup and Wasm
-compilation. Missing artifacts or failed searches stop the run. See README.md.
+compilation. NCBI uses -db for TBLASTX and -subject for other tasks. Subject
+searches ignore nN and use one thread. TBLASTX databases are prepared outside
+search timing, with their own time logs. Missing artifacts or failed searches stop the run.
+See README.md.
 HELP
     exit 0
 fi
@@ -54,14 +56,19 @@ fi
 
 LOSAT_THREADS="${LOSAT_THREADS:-${LOSATP_THREADS:-${LOSAT_BLASTP_THREADS:-8}}}"
 [[ "$LOSAT_THREADS" =~ ^[1-9][0-9]*$ ]] || { echo 'LOSAT_THREADS must be positive' >&2; exit 2; }
-BENCHMARK_TIMEOUT="${BENCHMARK_TIMEOUT:-600}"
-[[ "$BENCHMARK_TIMEOUT" =~ ^[1-9][0-9]*$ ]] || { echo 'BENCHMARK_TIMEOUT must be positive seconds' >&2; exit 2; }
 BENCHMARK_PROGRAMS="${BENCHMARK_PROGRAMS:-tblastx,megablast,blastn,blastp}"
 IFS=',' read -ra programs <<< "$BENCHMARK_PROGRAMS"
 for program in "${programs[@]}"; do
     case "$program" in tblastx|megablast|blastn|blastp) ;; *) echo "Unknown program: $program" >&2; exit 2;; esac
 done
-BENCHMARK_DIR="${BENCHMARK_DIR:-$SCRIPT_DIR/benchmark-runs/$(date -u +%Y%m%dT%H%M%S)-$$}"
+# NCBI reference: c++/src/algo/blast/blastinput/cmdline_flags.cpp:48
+# const string kArgOutput("out");
+# Default runs advertise their location to subsequent plotting processes.
+latest_run_args=()
+if [[ -z "${BENCHMARK_DIR:-}" ]]; then
+    BENCHMARK_DIR="$SCRIPT_DIR/benchmark-runs/$(date -u +%Y%m%dT%H%M%S)-$$"
+    latest_run_args=("$SCRIPT_DIR/benchmark-runs/latest.json")
+fi
 # NCBI reference: c++/src/algo/blast/blastinput/cmdline_flags.cpp:75
 # const string kArgNumThreads("num_threads");
 # Record the effective runner selections before creating any run metadata.
@@ -89,7 +96,13 @@ export BUILD_LOSAT_WASM BUILD_LOSAT_WASM_THREADED
 # x_PrintField(*iter); ... m_Ostream << "\n";
 # Record the effective locale used for every subsequent comparison invocation.
 export LC_ALL=C
-python3 "$SCRIPT_DIR/comparison_data.py" init "$BENCHMARK_DIR"
+# NCBI reference: c++/src/algo/blast/blastinput/cmdline_flags.cpp:46,51,75
+# const string kArgQuery("query"); const string kArgSubject("subject");
+# const string kArgNumThreads("num_threads");
+# Preserve effective settings even when they were not exported by the caller.
+BENCHMARK_CASE="${BENCHMARK_CASE:-}"
+export BENCHMARK_PROGRAMS BENCHMARK_CASE LOSAT_THREADS
+python3 "$SCRIPT_DIR/comparison_data.py" init "$BENCHMARK_DIR" "${latest_run_args[@]}"
 BENCHMARK_DIR="$(cd "$BENCHMARK_DIR" && pwd)"
 mapfile -d '' -t NODE_ARGS < "$BENCHMARK_DIR/node-args.bin"
 # NCBI reference: c++/src/algo/blast/blastinput/cmdline_flags.cpp:46-75
@@ -119,6 +132,9 @@ while IFS=$'\t' read -r task query subject name losat_stem ncbi_stem query_genco
         [[ -s "$FASTA_DIR/$input" ]] || { echo "Missing FASTA: $input" >&2; exit 1; }
     done
     if [[ "$RUN_NCBI" == 1 ]]; then
+        # NCBI reference: c++/src/algo/blast/blastinput/cmdline_flags.cpp:50-51
+        # const string kArgDb("db"); const string kArgSubject("subject");
+        # Only the TBLASTX database oracle needs a database builder.
         case "$task" in
             tblastx) require_command "${TBLASTX_BIN:-tblastx}"; require_command "${MAKEBLASTDB_BIN:-makeblastdb}" ;;
             blastp) require_command "${BLASTP_BIN:-blastp}" ;;
@@ -128,7 +144,6 @@ while IFS=$'\t' read -r task query subject name losat_stem ncbi_stem query_genco
     count=$((count + 1))
 done < "$SCRIPT_DIR/comparison_cases.tsv"
 [[ "$count" -gt 0 ]] || { echo 'No matching comparison cases' >&2; exit 2; }
-require_command timeout
 if [[ "$RUN_NATIVE" == 1 ]]; then require_command "$LOSAT_BIN"; fi
 # NCBI reference: c++/src/algo/blast/api/prelim_stage.cpp:173-180
 # (*thread)->Run(); (*thread)->Join(&result);
@@ -175,9 +190,10 @@ run_timed() {
     echo 'simple_benchmark=1' > "$stem.log"
     # Capture Bash's timer separately from command output so the displayed
     # seconds and the plotted wall time come from exactly the same measurement.
-    # NCBI reference: c++/src/algo/blast/blastinput/cmdline_flags.cpp:48
-    # const string kArgOutput("out");
-    if { time timeout --kill-after=5s "$BENCHMARK_TIMEOUT" "$@" -out "$stem.out" >>"$stem.log" 2>&1; } 2>"$stem.time"; then
+    # NCBI reference: c++/src/app/blast/blastn_app.cpp:172-176
+    # CATCH_ALL(status) ... return status;
+    # Wait for the command to exit and preserve its own exit status.
+    if { time "$@" -out "$stem.out" >>"$stem.log" 2>&1; } 2>"$stem.time"; then
         status=0
     else
         status=$?
@@ -239,33 +255,42 @@ while IFS=$'\t' read -r task query subject name losat_stem ncbi_stem query_genco
         fi
     fi
     if [[ "$RUN_NCBI" == 1 ]]; then
-        ncbi_threads=1
+        # NCBI reference: c++/src/algo/blast/blastinput/blast_args.cpp:1052-1054
+        # if (m_Target == eDatabase && args[kArgDbGeneticCode] &&
+        #     (program == eTblastn || program == eTblastx)) {
+        #     opt.SetDbGeneticCode(args[kArgDbGeneticCode].AsInteger()); }
+        # Retain TBLASTX's database target for non-default subject genetic codes.
         case "$task" in
-            tblastx)
-                ncbi_bin="${TBLASTX_BIN:-tblastx}"
-                ncbi_threads="$LOSAT_THREADS"
-                ncbi_stem="$ncbi_stem.n$LOSAT_THREADS"
-                # NCBI reference: c++/src/algo/blast/blastinput/blast_args.cpp:1052-1054
-                # if (m_Target == eDatabase && args[kArgDbGeneticCode] &&
-                #     (program == eTblastn || program == eTblastx) ) {
-                #     opt.SetDbGeneticCode(args[kArgDbGeneticCode].AsInteger());
-                # Preserve the historical database oracle so code 4 is applied.
-                db="$BLAST_OUT_DIR/db/${subject%.*}"
-                if [[ -z "${prepared_dbs[$subject]:-}" ]]; then
-                    mkdir -p "$BLAST_OUT_DIR/db"
-                    if ! "${MAKEBLASTDB_BIN:-makeblastdb}" -in "$FASTA_DIR/$subject" -dbtype nucl -parse_seqids -out "$db" >"$db.makeblastdb.log" 2>&1; then
-                        echo "Database preparation failed; see $db.makeblastdb.log" >&2
-                        exit 1
-                    fi
-                    python3 "$SCRIPT_DIR/comparison_data.py" database "$BENCHMARK_DIR" "$db" "$FASTA_DIR/$subject" "$(command -v "${MAKEBLASTDB_BIN:-makeblastdb}")"
-                    prepared_dbs[$subject]=1
-                fi
-                args=(-query "$FASTA_DIR/$query" -db "$db" -outfmt 6 -query_gencode "$query_gencode" -db_gencode "$db_gencode")
-                ;;
+            tblastx) ncbi_bin="${TBLASTX_BIN:-tblastx}" ;;
             blastp) ncbi_bin="${BLASTP_BIN:-blastp}" ;;
             *) ncbi_bin="${BLASTN_BIN:-blastn}" ;;
         esac
-        run_timed "$BLAST_OUT_DIR/$ncbi_stem" "$ncbi_bin" "${args[@]}" -num_threads "$ncbi_threads"
+        if [[ "$task" == tblastx ]]; then
+            db="$BLAST_OUT_DIR/db/nucl/$subject"
+            if [[ -z "${prepared_dbs[$db]:-}" ]]; then
+                mkdir -p "${db%/*}"
+                if ! { time "${MAKEBLASTDB_BIN:-makeblastdb}" -in "$FASTA_DIR/$subject" -dbtype nucl -parse_seqids -out "$db"; } >"$db.makeblastdb.log" 2>&1; then
+                    echo "Database preparation failed; see $db.makeblastdb.log" >&2
+                    exit 1
+                fi
+                python3 "$SCRIPT_DIR/comparison_data.py" database "$BENCHMARK_DIR" "$db" "$FASTA_DIR/$subject" "$(command -v "${MAKEBLASTDB_BIN:-makeblastdb}")" nucl
+                prepared_dbs[$db]=1
+            fi
+            args[2]=-db
+            args[3]="$db"
+        fi
+        # NCBI reference: c++/src/algo/blast/blastinput/blast_args.cpp:3223-3239
+        # if (args.Exist(kArgSubject) && args[kArgSubject].HasValue() &&
+        #     m_NumThreads != CThreadable::kMinNumThreads) {
+        #     m_NumThreads = CThreadable::kMinNumThreads; ... }
+        # Record both requested counts; -subject explicitly reduces nN to one.
+        run_timed "$BLAST_OUT_DIR/$ncbi_stem.n1" "$ncbi_bin" "${args[@]}" -num_threads 1
+        if [[ "$LOSAT_THREADS" != 1 ]]; then
+            run_timed "$BLAST_OUT_DIR/$ncbi_stem.n$LOSAT_THREADS" "$ncbi_bin" "${args[@]}" -num_threads "$LOSAT_THREADS"
+        fi
     fi
 done < "$SCRIPT_DIR/comparison_cases.tsv"
+# NCBI reference: c++/src/app/blast/blastn_app.cpp:172-176
+# CATCH_ALL(status) ... return status;
+python3 "$SCRIPT_DIR/comparison_data.py" complete "$BENCHMARK_DIR"
 echo "Finished $count pairs. Results: $BENCHMARK_DIR"

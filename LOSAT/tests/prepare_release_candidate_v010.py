@@ -28,6 +28,25 @@ RUNTIME_INPUT_PATHS = (
     "LOSAT/Cargo.lock",
     "LOSAT/build.rs",
     "LOSAT/.cargo",
+    ".cargo",
+    "rust-toolchain.toml",
+    "rust-toolchain",
+    "LOSAT/tests/fasta",
+    "LOSAT/tests/fixtures",
+    "LOSAT/tests/compare_blastn_parity.py",
+    "LOSAT/tests/certify_blastn_v010.py",
+    "LOSAT/tests/audit_blastp_v010.py",
+    "LOSAT/tests/audit_tblastx_v010.py",
+    "LOSAT/tests/certify_integrated_runtime_v010.py",
+    "LOSAT/tests/certify_platform_native_v010.py",
+    "LOSAT/tests/prepare_release_candidate_v010.py",
+    "LOSAT/tests/check_pure_rust_runtime_boundary.py",
+    "LOSAT/tests/pure_rust_runtime_allowlist.tsv",
+    "LOSAT/tests/pure_rust_runtime_dependency_review.tsv",
+    "LOSAT/tests/run_losat_wasi.js",
+    "LOSAT/tests/wasi_artifact.js",
+    ".github/workflows/platform-native-certification.yml",
+    ".github/workflows/release-readiness.yml",
     "LOSAT/tests/blastn_parity_manifest.tsv",
     "LOSAT/tests/blastn_v010_source_exceptions.tsv",
     "LOSAT/tests/blastp_v010_parity_manifest.tsv",
@@ -169,6 +188,11 @@ def validate_candidate(
         )
 
     lineage = contract["certification_lineage"]
+    # NCBI format/blast_format.cpp:828-832: tabinfo.SetFields(...); tabinfo.Print();
+    # Revised raw-output authority requires fresh evidence, never a renamed old run.
+    if lineage["rerun_required"]:
+        raise ReleaseFailure("fresh integrated and cross-platform certification is required")
+    validate_clean_inputs(repo_root, candidate_sha)
     required_ancestors = (
         contract["integration_base_sha"],
         lineage["integrated_runtime"]["sha"],
@@ -186,6 +210,12 @@ def validate_candidate(
             )
 
     certified_runtime_sha = str(lineage["cross_platform_native"]["sha"])
+    if lineage["integrated_runtime"]["sha"] != certified_runtime_sha:
+        raise ReleaseFailure("integrated and native certifications must bind the same implementation SHA")
+    # NCBI format/blast_format.cpp:828-832: tabinfo.SetFields(...); tabinfo.Print();
+    # Allow only provenance changes after S; the existing contract owns semantics.
+    if certification_inputs(repo_root, certified_runtime_sha) != certification_inputs(repo_root, candidate_sha):
+        raise ReleaseFailure("candidate changes certified runtime/build/fixture/classifier/runner/contract semantics")
     runtime_diff = run_capture(
         [
             "git",
@@ -206,6 +236,32 @@ def validate_candidate(
         )
     if package_version(repo_root) != contract["package_version"]:
         raise ReleaseFailure("Cargo package version differs from the RC contract")
+
+
+# NCBI format/blast_format.cpp:828-832: tabinfo.SetFields(...); tabinfo.Print();
+# Bind all raw-output owners, fixture bytes and invocation/build inputs to one SHA.
+def validate_clean_inputs(repo_root: Path, expected_sha: str) -> None:
+    paths = (*RUNTIME_INPUT_PATHS, str(CONTRACT_PATH))
+    dirty = run_capture(["git", "diff", "--ignore-cr-at-eol", "--quiet", expected_sha, "--", *paths], repo_root)
+    untracked = run_capture(["git", "ls-files", "--others", "--exclude-standard", "--", *paths], repo_root)
+    require_success(untracked, "inspect untracked certification inputs")
+    if dirty.returncode or untracked.stdout.strip():
+        raise ReleaseFailure("certification runtime/build/fixture/classifier/runner/contract inputs are dirty")
+
+
+# NCBI format/blast_format.cpp:828-832: tabinfo.SetFields(...); tabinfo.Print();
+# Git object IDs preserve source identities across platform checkout line endings.
+def certification_inputs(repo_root: Path, sha: str) -> dict[str, object]:
+    tree = run_capture(["git", "ls-tree", "-r", sha, "--", *RUNTIME_INPUT_PATHS], repo_root)
+    require_success(tree, "record certification input tree")
+    contract_blob = run_capture(["git", "show", f"{sha}:{CONTRACT_PATH.as_posix()}"], repo_root)
+    require_success(contract_blob, "read certified contract semantics")
+    semantics = json.loads(contract_blob.stdout)
+    # These fields report measurements/publication, not algorithm or build semantics.
+    for key in ("certification_lineage", "certification_history", "publication"):
+        semantics.pop(key, None)
+    record = {"git_inputs": tree.stdout.splitlines(), "contract_semantics": semantics}
+    return {**record, "sha256": hashlib.sha256(json_bytes(record)).hexdigest()}
 
 
 def capture_toolchain(

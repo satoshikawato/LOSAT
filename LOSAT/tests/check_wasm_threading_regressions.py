@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
-"""Apply frozen PR5 raw-output expectations to current explicit artifacts.
+"""Apply approved canonical raw-output expectations to current explicit artifacts.
 
 This is a working-tree regression run, not a clean-SHA hosted certification.
-Gate A expectations and retained Linux oracle fingerprints are never updated.
+Gate A follows the committed canonical catalog; retained Linux oracle fingerprints remain independent.
 The existing hosted Gate B remains platform-specific and independently required.
 """
 import argparse
@@ -88,7 +88,17 @@ def main():
     (out/'metadata.json').write_text(json.dumps(metadata,indent=2))
     with ThreadPoolExecutor(max_workers=args.jobs) as executor:
         futures=[executor.submit(record,*job) for job in pending]
-        for future in futures: future.result()
+        # NCBI tabular.cpp:1098-1108: x_PrintField(*iter); m_Ostream << "\\n";
+        # Preserve every mismatch/timeout in the failure report, not just the first future.
+        failures = []
+        for future in futures:
+            try:
+                future.result()
+            except Exception as error:
+                failures.append(str(error))
+        if failures:
+            (out / 'failures.json').write_text(json.dumps(failures, indent=2))
+            raise RuntimeError(f'{len(failures)} regression failures:\n' + '\n'.join(failures))
     print(f'{len(records)} frozen regression records PASS', flush=True)
 
 if __name__ == '__main__': main()

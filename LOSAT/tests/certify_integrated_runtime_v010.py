@@ -22,10 +22,9 @@ from typing import Iterable, Sequence
 
 EXPECTED_NATIVE_COUNTS = {"blastn": 14, "blastp": 9, "tblastx": 20}
 EXPECTED_WASM_COUNTS = {"blastn": 14, "blastp": 7, "tblastx": 20}
-EXPECTED_BLASTN_CLASSIFICATIONS = {
-    "EXACT_TEXT": 13,
-    "SOURCE_UNDETERMINED_ACCEPTED": 1,
-}
+# NCBI api/blast_nucl_options.cpp:171-174: SetWindowSize(BLAST_WINDOW_SIZE_NUCL);
+# The corrected zero-initialized X-drop now requires raw equality in every BLASTN case.
+EXPECTED_BLASTN_CLASSIFICATIONS = {"EXACT_TEXT": 14}
 EXPECTED_TBLASTX_CLASSIFICATIONS = {"EXACT_TEXT": 14, "HSP_SET_DIFF": 6}
 BLASTP_THREAD_PAIRS = {
     "pairwise_default_thread4": "pairwise_default_serial",
@@ -167,40 +166,30 @@ def validate_git_identity(repo_root: Path, expected_sha: str) -> str:
         raise CertificationFailure(
             f"certification SHA mismatch: expected {expected_sha}, observed {observed}"
         )
-    output_paths = [
-        "LOSAT/src",
-        "LOSAT/build.rs",
-        "LOSAT/Cargo.toml",
-        "LOSAT/Cargo.lock",
-        "LOSAT/.cargo/config.toml",
-    ]
-    production_diff = subprocess.run(
-        [
-            "git",
-            "diff",
-            "--ignore-cr-at-eol",
-            "--quiet",
-            expected_sha,
-            "--",
-            *output_paths,
-        ],
-        cwd=repo_root,
-        check=False,
-    )
-    if production_diff.returncode != 0:
-        raise CertificationFailure(
-            "output-affecting production/build files differ from the certification SHA"
-        )
+    # NCBI format/blast_format.cpp:828-832: tabinfo.SetFields(...); tabinfo.Print();
+    release = load_authority("integrated_release_inputs", repo_root / "LOSAT/tests/prepare_release_candidate_v010.py")
+    try:
+        release.validate_clean_inputs(repo_root, expected_sha)
+    except release.ReleaseFailure as error:
+        raise CertificationFailure(str(error)) from error
     return observed
 
 
-def record_toolchain(repo_root: Path, output_dir: Path) -> dict[str, object]:
+def record_toolchain(repo_root: Path, output_dir: Path, node_command: str = "node") -> dict[str, object]:
     rustc = run_capture(["rustc", "-vV"], repo_root)
     cargo = run_capture(["cargo", "-V"], repo_root)
-    node = run_capture(["node", "--version"], repo_root)
+    node = run_capture([node_command, "--version"], repo_root)
     for name, completed in (("rustc", rustc), ("cargo", cargo), ("node", node)):
         if completed.returncode != 0:
             raise CertificationFailure(f"cannot record {name} identity")
+    # NCBI format/blast_format.cpp:828-832: tabinfo.SetFields(...); tabinfo.Print();
+    release = load_authority("integrated_toolchain_contract", repo_root / "LOSAT/tests/prepare_release_candidate_v010.py")
+    contract = release.load_contract(repo_root)
+    try:
+        release.capture_toolchain(repo_root, "x86_64-unknown-linux-gnu", contract,
+                                  require_native_host=True, node=node_command)
+    except release.ReleaseFailure as error:
+        raise CertificationFailure(str(error)) from error
     host = next(
         (line.removeprefix("host: ") for line in rustc.stdout.splitlines() if line.startswith("host: ")),
         "",
@@ -361,6 +350,14 @@ def certify(
         if not artifact.is_file():
             raise CertificationFailure(f"required certification artifact is missing: {artifact}")
 
+    # NCBI format/blast_format.cpp:828-832: tabinfo.SetFields(...); tabinfo.Print();
+    # One Gate A owner and one controlled lexical fixture root for all platforms.
+    platform_gate = load_authority("integrated_platform_gate", tests_dir / "certify_platform_native_v010.py")
+    catalog = platform_gate.load_catalog(repo_root, args.expected_sha)
+    steps = platform_gate.build_steps(repo_root, output_dir, catalog, native_bin,
+        {"blastn": args.blastn_oracle, "blastp": args.blastp_oracle, "tblastx": args.tblastx_oracle})
+    platform_gate.stage_required_fixtures(repo_root, args.expected_sha, steps, output_dir)
+
     node_environment = os.environ.copy()
     node_environment["NODE_NO_WARNINGS"] = "1"
     native_single_environment = os.environ.copy()
@@ -386,11 +383,7 @@ def certify(
     blastn_dir.mkdir(parents=True)
     for row in blastn_rows:
         case_id = row["case_id"]
-        command_row = dict(row)
-        command_row["query"] = str((repo_root / "LOSAT" / row["query"]).resolve())
-        command_row["subject"] = str(
-            (repo_root / "LOSAT" / row["subject"]).resolve()
-        )
+        command_row = platform_gate._blastn_command_row(repo_root, row)
         ncbi_output = blastn_dir / f"{case_id}.ncbi.out"
         losat_output = blastn_dir / f"{case_id}.losat.out"
         ncbi_command = blastn_compare.build_ncbi_command(
@@ -399,6 +392,8 @@ def certify(
         losat_command = blastn_compare.build_losat_command(
             command_row, native_bin, losat_output
         )
+        ncbi_command = platform_gate._adapt_fixture_arguments(ncbi_command, "blastn", repo_root)
+        losat_command = platform_gate._adapt_fixture_arguments(losat_command, "blastn", repo_root)
         run_logged(ncbi_command, repo_root, blastn_dir / f"{case_id}.ncbi")
         run_logged(losat_command, repo_root, blastn_dir / f"{case_id}.losat")
         native_outputs[("blastn", case_id)] = losat_output
@@ -528,6 +523,13 @@ def certify(
         EXPECTED_NATIVE_COUNTS,
         "native program counts",
     )
+
+    # NCBI format/blast_format.cpp:828-832: tabinfo.SetFields(...); tabinfo.Print();
+    # Paired oracle equality alone cannot replace the cross-platform canonical gate.
+    for row in native_contracts:
+        expected = catalog.canonical[(row["program"], row["case_id"])]["losat_sha256"]
+        if row["losat_sha256"] != expected:
+            raise CertificationFailure(f"Gate A canonical mismatch: {row['program']}/{row['case_id']}")
 
     serial_blastp_cases = [case for case in blastp_cases if case.num_threads == 1]
     assert_count(
@@ -833,7 +835,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         output_dir = validate_output_dir(args.output_dir)
         repo_root = args.repo_root.resolve()
         certified_sha = validate_git_identity(repo_root, args.expected_sha)
-        toolchain = record_toolchain(repo_root, output_dir)
+        toolchain = record_toolchain(repo_root, output_dir, args.node)
         oracle_specs = (
             OracleSpec(
                 "blastn",
@@ -887,6 +889,7 @@ def main(argv: Sequence[str] | None = None) -> int:
             "result": "INTEGRATED_RUNTIME_CERTIFIED",
             "certified_sha": certified_sha,
             "cert_toolchain": toolchain,
+            "certification_inputs": load_authority("integrated_input_identity", tests_dir / "prepare_release_candidate_v010.py").certification_inputs(repo_root, certified_sha),
             "oracle_identities": oracles,
             "zero_delegation": {
                 "temporary_project_owned_production_findings": 0,

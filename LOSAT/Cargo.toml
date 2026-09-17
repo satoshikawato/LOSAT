@@ -17,6 +17,8 @@ exclude = [
     "tests/__pycache__/",
     "tests/blast_db/",
     "tests/plots/",
+    # Validation-only generated runs are not source-package inputs.
+    "tests/benchmark-runs/",
     "tests/fasta/*.gb",
     "tests/fasta/*.fna",
     "tests/fasta/*.ndb",

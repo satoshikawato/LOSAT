@@ -1,0 +1,187 @@
+{
+  "run_id": 35089176534,
+  "candidate_sha": "89a85d6664a44c2dd41fe738158222c88c15b1e8",
+  "runs_sha256": "6183658d91f4d5890c85a1d19759ba8efac9a2c38cb0ac872d4bfcd6bd43b6e7",
+  "executions": 104,
+  "passed": 99,
+  "failures": [
+    {
+      "status": "PASS",
+      "reason": null,
+      "exit_status": 0,
+      "wall_seconds": 1.5636203809999643,
+      "monotonic_start": 405.3037909,
+      "monotonic_end": 406.867411281,
+      "realtime_seconds": 1.563624382019043,
+      "boottime_seconds": 1.5636240179999845,
+      "gnu_elapsed_seconds": 1.56,
+      "process_ended_utc": "2026-09-16T11:20:02Z",
+      "watchdog_clocks": {
+        "started": {
+          "monotonic": 405.307112966,
+          "realtime": 1789557600.813926
+        }
+      },
+      "realtime_clock_agreement": true,
+      "monotonic_clock_agreement": true,
+      "elapsed_clock": "CLOCK_MONOTONIC; realtime and GNU elapsed are adjustable-clock diagnostics",
+      "cpu_user_seconds": 1.46,
+      "cpu_system_seconds": 0.04,
+      "peak_rss_bytes": 240513024,
+      "output": "/home/runner/work/LOSAT/LOSAT/.tmp/threading/frozen-regressions/native/blastn/Sakai.MG1655.megablast/output.txt",
+      "raw_output_sha256": "ac8177764f35b2fb92777f8b1d01ea646cc55ae21b05f1f486ee231348a34a45",
+      "raw_output_bytes": 536922,
+      "started_utc": "2026-09-16T11:20:00Z",
+      "ended_utc": "2026-09-16T11:20:02Z",
+      "timeout_seconds": 3600,
+      "unavailable_metrics": {},
+      "label": "native/blastn/Sakai.MG1655.megablast",
+      "expected_sha256": "3f27c1f1396b59ecb7e78827b5da390e9c97a276c05cbc7a6c82f56bd0a03262",
+      "raw_equal": false
+    },
+    {
+      "status": "PASS",
+      "reason": null,
+      "exit_status": 0,
+      "wall_seconds": 3.076935993999996,
+      "monotonic_start": 406.869959677,
+      "monotonic_end": 409.946895671,
+      "realtime_seconds": 3.076939105987549,
+      "boottime_seconds": 3.0769396919999963,
+      "gnu_elapsed_seconds": 3.07,
+      "process_ended_utc": "2026-09-16T11:20:05Z",
+      "watchdog_clocks": {
+        "started": {
+          "monotonic": 406.872661071,
+          "realtime": 1789557602.379474
+        }
+      },
+      "realtime_clock_agreement": true,
+      "monotonic_clock_agreement": true,
+      "elapsed_clock": "CLOCK_MONOTONIC; realtime and GNU elapsed are adjustable-clock diagnostics",
+      "cpu_user_seconds": 3.06,
+      "cpu_system_seconds": 0.13,
+      "peak_rss_bytes": 384581632,
+      "output": "/home/runner/work/LOSAT/LOSAT/.tmp/threading/frozen-regressions/threaded/blastn/Sakai.MG1655.megablast/output.txt",
+      "raw_output_sha256": "ac8177764f35b2fb92777f8b1d01ea646cc55ae21b05f1f486ee231348a34a45",
+      "raw_output_bytes": 536922,
+      "started_utc": "2026-09-16T11:20:02Z",
+      "ended_utc": "2026-09-16T11:20:05Z",
+      "timeout_seconds": 3600,
+      "unavailable_metrics": {},
+      "label": "threaded/blastn/Sakai.MG1655.megablast",
+      "expected_sha256": "3f27c1f1396b59ecb7e78827b5da390e9c97a276c05cbc7a6c82f56bd0a03262",
+      "raw_equal": false
+    },
+    {
+      "status": "TIMEOUT",
+      "reason": "exceeded 3600s",
+      "exit_status": -9,
+      "wall_seconds": 3600.005057809,
+      "monotonic_start": 1219.626446803,
+      "monotonic_end": 4819.631504612,
+      "realtime_seconds": 3600.00506067276,
+      "boottime_seconds": 3600.005060304,
+      "gnu_elapsed_seconds": null,
+      "process_ended_utc": "2026-09-16T12:33:35Z",
+      "watchdog_clocks": {
+        "started": {
+          "monotonic": 1219.628339551,
+          "realtime": 1789558415.1351523
+        },
+        "fired": {
+          "monotonic": 4819.631191847,
+          "realtime": 1789562015.1380062
+        }
+      },
+      "realtime_clock_agreement": true,
+      "monotonic_clock_agreement": true,
+      "elapsed_clock": "CLOCK_MONOTONIC; realtime and GNU elapsed are adjustable-clock diagnostics",
+      "cpu_user_seconds": null,
+      "cpu_system_seconds": null,
+      "peak_rss_bytes": null,
+      "output": "/home/runner/work/LOSAT/LOSAT/.tmp/threading/frozen-regressions/threaded/tblastx/p11_avclpv_psclpv/output.txt",
+      "raw_output_sha256": null,
+      "raw_output_bytes": null,
+      "started_utc": "2026-09-16T11:33:35Z",
+      "ended_utc": "2026-09-16T12:33:35Z",
+      "timeout_seconds": 3600,
+      "unavailable_metrics": {
+        "cpu_user_seconds": "GNU time did not finish reporting (for example, process-group timeout)",
+        "cpu_system_seconds": "GNU time did not finish reporting (for example, process-group timeout)",
+        "peak_rss_bytes": "GNU time did not finish reporting (for example, process-group timeout)"
+      },
+      "label": "threaded/tblastx/p11_avclpv_psclpv",
+      "expected_sha256": "1eb11f5caa4d1030a016e67bafc90acaecb0a1fe76f9b11256fe1343f0571fe4",
+      "raw_equal": false
+    },
+    {
+      "status": "PASS",
+      "reason": null,
+      "exit_status": 0,
+      "wall_seconds": 1.6383121240005494,
+      "monotonic_start": 6546.30523656,
+      "monotonic_end": 6547.943548684,
+      "realtime_seconds": 1.6383156776428223,
+      "boottime_seconds": 1.6383154500008459,
+      "gnu_elapsed_seconds": 1.63,
+      "process_ended_utc": "2026-09-16T13:02:23Z",
+      "watchdog_clocks": {
+        "started": {
+          "monotonic": 6546.305998916,
+          "realtime": 1789563741.8128119
+        }
+      },
+      "realtime_clock_agreement": true,
+      "monotonic_clock_agreement": true,
+      "elapsed_clock": "CLOCK_MONOTONIC; realtime and GNU elapsed are adjustable-clock diagnostics",
+      "cpu_user_seconds": 1.59,
+      "cpu_system_seconds": 0.04,
+      "peak_rss_bytes": 239001600,
+      "output": "/home/runner/work/LOSAT/LOSAT/.tmp/threading/frozen-regressions/repeatability/blastn/Sakai.MG1655.megablast/2/output.txt",
+      "raw_output_sha256": "ac8177764f35b2fb92777f8b1d01ea646cc55ae21b05f1f486ee231348a34a45",
+      "raw_output_bytes": 536922,
+      "started_utc": "2026-09-16T13:02:21Z",
+      "ended_utc": "2026-09-16T13:02:23Z",
+      "timeout_seconds": 3600,
+      "unavailable_metrics": {},
+      "label": "repeatability/blastn/Sakai.MG1655.megablast/2",
+      "expected_sha256": "3f27c1f1396b59ecb7e78827b5da390e9c97a276c05cbc7a6c82f56bd0a03262",
+      "raw_equal": false
+    },
+    {
+      "status": "PASS",
+      "reason": null,
+      "exit_status": 0,
+      "wall_seconds": 1.6259938729999703,
+      "monotonic_start": 6547.94983805,
+      "monotonic_end": 6549.575831923,
+      "realtime_seconds": 1.6259968280792236,
+      "boottime_seconds": 1.6259970799992516,
+      "gnu_elapsed_seconds": 1.62,
+      "process_ended_utc": "2026-09-16T13:02:25Z",
+      "watchdog_clocks": {
+        "started": {
+          "monotonic": 6547.95067327,
+          "realtime": 1789563743.4574862
+        }
+      },
+      "realtime_clock_agreement": true,
+      "monotonic_clock_agreement": true,
+      "elapsed_clock": "CLOCK_MONOTONIC; realtime and GNU elapsed are adjustable-clock diagnostics",
+      "cpu_user_seconds": 1.58,
+      "cpu_system_seconds": 0.04,
+      "peak_rss_bytes": 241598464,
+      "output": "/home/runner/work/LOSAT/LOSAT/.tmp/threading/frozen-regressions/repeatability/blastn/Sakai.MG1655.megablast/3/output.txt",
+      "raw_output_sha256": "ac8177764f35b2fb92777f8b1d01ea646cc55ae21b05f1f486ee231348a34a45",
+      "raw_output_bytes": 536922,
+      "started_utc": "2026-09-16T13:02:23Z",
+      "ended_utc": "2026-09-16T13:02:25Z",
+      "timeout_seconds": 3600,
+      "unavailable_metrics": {},
+      "label": "repeatability/blastn/Sakai.MG1655.megablast/3",
+      "expected_sha256": "3f27c1f1396b59ecb7e78827b5da390e9c97a276c05cbc7a6c82f56bd0a03262",
+      "raw_equal": false
+    }
+  ]
+}

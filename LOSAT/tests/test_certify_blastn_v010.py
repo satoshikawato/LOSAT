@@ -101,7 +101,7 @@ class CertificationFixture:
 
     def certify(self, *, exception: bool = False):
         expected_cases = (
-            certification.EXPECTED_SOURCE_EXCEPTION_CASES
+            frozenset({EXCEPTION_CASE})  # Historical classifier characterization only.
             if exception
             else frozenset()
         )
@@ -115,6 +115,18 @@ class CertificationFixture:
 
 
 class CertifyBlastnV010Tests(unittest.TestCase):
+    # NCBI api/blast_nucl_options.cpp:171-174: SetWindowSize(BLAST_WINDOW_SIZE_NUCL);
+    # The old five-row footprint cannot rescue the corrected default X-drop case.
+    def test_current_sakai_requires_exact_bytes_and_no_exception(self) -> None:
+        self.assertEqual(certification.EXPECTED_SOURCE_EXCEPTION_CASES, frozenset())
+        with tempfile.TemporaryDirectory() as tmp:
+            fixture = CertificationFixture(Path(tmp), [EXCEPTION_CASE])
+            fixture.write_pair(EXCEPTION_CASE, *allowed_residual())
+            with self.assertRaisesRegex(certification.CertificationError, "not byte-exact"):
+                fixture.certify()
+            fixture.write_pair(EXCEPTION_CASE, tabular_row(1), tabular_row(1))
+            self.assertEqual(fixture.certify()[0].classification, "EXACT_TEXT")
+
     def test_all_exact_suite_passes(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             fixture = CertificationFixture(Path(tmp), ["exact.one", "exact.two"])

@@ -1,6 +1,35 @@
 # Product Decision: BLASTN common-endpoint equal-HSP policy
 
 - Decision ID: `PD-BLASTN-HSP-CANONICALIZATION`
+- Version: 1.3
+- Date: 2026-09-17
+- Status: Accepted by the maintainer during v0.1.0 distribution implementation
+
+## Current decision
+
+Keep the source-correct automatic megablast X-drop correction in
+`f5955c5952998e50c1262186212d8cfc1527eb1d`. Retire the active five-row Sakai
+output exception. All 14 declared Linux BLASTN cases now require exact raw
+NCBI output; current LOSAT native/Wasm outputs must also satisfy Gate A version
+2. This is an authority revision, not completed recertification.
+
+Fresh reproduction at `89a85d6664a44c2dd41fe738158222c88c15b1e8` and independent
+source review establish an upstream X-drop cause, not an unexplained survivor
+choice. NCBI `api/blast_options_local_priv.cpp:49-54` zero-initializes options;
+`api/blast_nucl_options.cpp:171-174` sets only the megablast window; and
+`core/blast_parameters.c:380-383` selects the subject cutoff for zero X-drop.
+See [the exact raw diff and review](../evidence/v010_distribution_20260917/AUTHORITY_REVIEW.md).
+
+The general NCBI comparator semantics and component tests below remain valid.
+They do not authorize the retired fixture discrepancy. No additional sort key,
+normalization, runtime compatibility branch, or other output exception is added.
+Gate B remains an independent exact platform fingerprint check. Old PR5/PR6
+measurements remain historical and must not certify the corrected implementation.
+
+## Historical Version 1.2 (superseded fixture classification)
+
+
+- Decision ID: `PD-BLASTN-HSP-CANONICALIZATION`
 - Version: 1.2
 - Date: 2026-09-02
 - Status: Accepted; Version 1.0 canonicalization requirement withdrawn for

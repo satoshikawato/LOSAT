@@ -1,5 +1,13 @@
 # Product Decision: Pure-Rust runtime authority
 
+Current revision (2026-09-17): the maintainer approved Gate A version 2 and
+fresh certification for the source-correct automatic megablast X-drop fix.
+The current canonical TSV supersedes the historical all-PR5-byte assertion
+below for Sakai only. This changes no production delegation boundary and adds
+no runtime exception. See PD-BLASTN-HSP-CANONICALIZATION 1.3 and
+PD-NCBI-PLATFORM-VARIANCE 1.1. Historical measurements below remain historical.
+
+
 - Decision ID: `PD-PURE-RUST-RUNTIME-AUTHORITY`
 - Version: 1.1
 - Date: 2026-09-02

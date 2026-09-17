@@ -1,5 +1,10 @@
 # BLASTN v0.1.0 Certification
 
+Historical certification record. As of 2026-09-17, the corrected runtime and
+approved Gate A version 2 require fresh integrated and cross-platform evidence.
+This record does not certify the current implementation.
+
+
 Status: native certified on 2026-08-29. Serial Wasm build verified with two
 required runtime cases; full-manifest Wasm runtime certification remains
 pending.

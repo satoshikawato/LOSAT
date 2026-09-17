@@ -1,4 +1,5 @@
-# Canonical LOSAT native output hashes from PR 5 integrated certification.
+# Canonical LOSAT native output hashes: Gate A version 2 (2026-09-17).
+# Revision: approved automatic megablast X-drop correction f5955c5952998e50c1262186212d8cfc1527eb1d; other 42 PR5 rows unchanged.
 # RUNTIME_CERT_SHA=5845d22ed9842449628a647f29b8c6762511ca59
 # PR5_EVIDENCE_MANIFEST_SHA256=b9fc98a376d2849274c86b4e4769d2ee38b76025adbb4d63d3da4a5e3e7cdb5c
 program	case_id	contract	classification	losat_sha256
@@ -12,7 +13,7 @@ blastn	MjeNMV.MelaMJNV.task_blastn	EXACT_TEXT	EXACT_TEXT	f83cb49246648cc641cbe63
 blastn	MjPMNV.MlPMNV.task_blastn	EXACT_TEXT	EXACT_TEXT	6664b0f838fdaafa1d2d93a373375bc68acd759d73d4a8db5ea05b481d3c520e
 blastn	NZ_CP006932.NZ_CP006932.task_blastn	EXACT_TEXT	EXACT_TEXT	723d7a8f515cb6d853758d4ccc7054c7cebd3b84ef5932f816d7b9bed0bab8c3
 blastn	EDL933.Sakai.megablast	EXACT_TEXT	EXACT_TEXT	3a000ebc6294d85b000112cee74f8de78fd9e932532e8c07a17d84f6f1379b16
-blastn	Sakai.MG1655.megablast	SOURCE_UNDETERMINED_ACCEPTED	SOURCE_UNDETERMINED_ACCEPTED	3f27c1f1396b59ecb7e78827b5da390e9c97a276c05cbc7a6c82f56bd0a03262
+blastn	Sakai.MG1655.megablast	EXACT_TEXT	EXACT_TEXT	ac8177764f35b2fb92777f8b1d01ea646cc55ae21b05f1f486ee231348a34a45
 blastn	compact.multi_query.outfmt6	EXACT_TEXT	EXACT_TEXT	ac4a20b64c8da3eaea725ed09dc89880294f58e971b7207c943489faacdbe03e
 blastn	compact.multi_query.outfmt7	EXACT_TEXT	EXACT_TEXT	261381e12bd500fe23c2caf7e7146acb310e7733d5246497b08c4c5ab058a70a
 blastn	compact.multi_query.no_hit.outfmt7	EXACT_TEXT	EXACT_TEXT	b5813f5d8b0ce88287d41333ae5540c3dfd2846069ddb2e4955d64e39dc45d3a

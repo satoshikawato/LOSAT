@@ -248,7 +248,7 @@ class PlatformCertificationTests(unittest.TestCase):
                     "gate_a_losat_canonical": {
                         "total": 43,
                         "passed": 43,
-                        "all_exact_pr5_raw_bytes": True,
+                        "all_exact_canonical_raw_bytes": True,
                     },
                     "gate_b_platform_native_ncbi_reference": {
                         "total": 6,
@@ -262,8 +262,8 @@ class PlatformCertificationTests(unittest.TestCase):
                         "all_repeatable": True,
                     },
                     "sakai_ratchet": {
-                        "expected_losat_parity_class": "SOURCE_UNDETERMINED_ACCEPTED",
-                        "observed_losat_parity_class": "SOURCE_UNDETERMINED_ACCEPTED",
+                        "expected_losat_parity_class": "EXACT_TEXT",
+                        "observed_losat_parity_class": "EXACT_TEXT",
                         "passed": True,
                     },
                     "tblastx_deviation_ratchet": {
@@ -329,7 +329,7 @@ class PlatformCertificationTests(unittest.TestCase):
                             if expected["kind"] == "matrix"
                             else "LOSAT_REPEATABILITY"
                         ),
-                        "classification": "CANONICAL_PR5_RAW_BYTES",
+                        "classification": "CANONICAL_GATE_A_RAW_BYTES",
                         "canonical_sha256": expected["expected_losat_sha256"],
                     }
                 output_rel = expected["output_rel"]
@@ -397,11 +397,11 @@ class PlatformCertificationTests(unittest.TestCase):
                 for row in self.catalog.canonical_rows
                 if row["program"] == "blastn"
             ),
-            Counter({"EXACT_TEXT": 13, "SOURCE_UNDETERMINED_ACCEPTED": 1}),
+            Counter({"EXACT_TEXT": 14}),
         )
         sakai = self.catalog.canonical[("blastn", "Sakai.MG1655.megablast")]
-        self.assertEqual(sakai["classification"], "SOURCE_UNDETERMINED_ACCEPTED")
-        self.assertEqual(sakai["contract"], "SOURCE_UNDETERMINED_ACCEPTED")
+        self.assertEqual(sakai["classification"], "EXACT_TEXT")
+        self.assertEqual(sakai["contract"], "EXACT_TEXT")
 
     def test_native_authority_has_exact_bounded_cardinalities(self) -> None:
         self.assertEqual(
@@ -1516,7 +1516,7 @@ class PlatformCertificationTests(unittest.TestCase):
             self.assertEqual(record["output_sha256"], raw_hash)
             self.assertEqual(
                 record["verification"]["classification"],
-                "CANONICAL_PR5_RAW_BYTES",
+                "CANONICAL_GATE_A_RAW_BYTES",
             )
 
     def test_gate_b_fingerprint_cannot_compensate_for_gate_a_failure(self) -> None:

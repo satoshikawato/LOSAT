@@ -53,11 +53,13 @@
       "effect": "compile portability only; no comparison condition or observable BLAST behavior changed",
       "coverage": "PR 6 certified all 43 canonical native contracts on macOS arm64 after this change; the cfg is inapplicable to Linux x64 and wasm32-wasip1"
     },
-    "rerun_required": false,
-    "rerun_reason": "PR 7 changes release tooling, focused tests, and release documentation only; runtime/build/contract authorities remain byte-identical to the PR 6 integration base"
+    "rerun_required": true,
+    "rerun_reason": "Current runtime/build inputs and approved Gate A version 2 require fresh integrated and cross-platform certification; historical PR5/PR6 records do not certify this candidate."
   },
   "public_cli": {
-    "blastp_tasks": ["blastp"],
+    "blastp_tasks": [
+      "blastp"
+    ],
     "blastp_default_task": "blastp"
   },
   "smoke": {

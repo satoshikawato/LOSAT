@@ -77,10 +77,13 @@ authoritative, current guidance for agent behavior in LOSAT.
 ### Program and target boundaries
 - PR 6 native certification has two non-interchangeable contracts under
   `PD-NCBI-PLATFORM-VARIANCE`: Gate A requires every LOSAT result to match the
-  frozen PR 5 raw bytes; Gate B requires each of six official NCBI searches to
+  current approved canonical manifest (version 2, 2026-09-17); Gate B requires each of six official NCBI searches to
   match its exact registered platform fingerprint. Never restore the old
   requirement that LOSAT equal platform-local NCBI bytes when those registered
-  fingerprints differ. Native fingerprints never become LOSAT expected output,
+  fingerprints differ. The approved automatic megablast X-drop correction changes only the Sakai
+  canonical row and class to EXACT_TEXT; the other 42 PR 5 rows are unchanged.
+  This revision requires fresh certification and does not relabel old evidence.
+  Native fingerprints never become LOSAT expected output,
   never authorize platform-specific LOSAT behavior, and never create a new
   parity exception. An unknown native fingerprint hard-fails and requires a new
   characterized authority version and review.

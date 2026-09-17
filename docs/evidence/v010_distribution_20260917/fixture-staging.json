@@ -1,0 +1,35 @@
+{
+  "inputs": [
+    {
+      "byte_length": 4708035,
+      "lexical_target_path": "/tmp/losat-pr5-runtime-cert-5845d22/LOSAT/tests/fasta/MG1655.fna",
+      "newline_profile": {
+        "bare_cr_count": 0,
+        "bare_lf_count": 66312,
+        "crlf_count": 0,
+        "lf_count": 66312
+      },
+      "physical_target_path": "/tmp/losat-pr5-runtime-cert-5845d22/LOSAT/tests/fasta/MG1655.fna",
+      "sha256": "6b195feda4c66140f6762742eb8b30c2652f02b45878b174f5b00ef85ecc95d7",
+      "source_git_object": "89a85d6664a44c2dd41fe738158222c88c15b1e8:LOSAT/tests/fasta/MG1655.fna",
+      "source_repo_relative": "LOSAT/tests/fasta/MG1655.fna"
+    },
+    {
+      "byte_length": 5577201,
+      "lexical_target_path": "/tmp/losat-pr5-runtime-cert-5845d22/LOSAT/tests/fasta/Sakai.fna",
+      "newline_profile": {
+        "bare_cr_count": 0,
+        "bare_lf_count": 78554,
+        "crlf_count": 0,
+        "lf_count": 78554
+      },
+      "physical_target_path": "/tmp/losat-pr5-runtime-cert-5845d22/LOSAT/tests/fasta/Sakai.fna",
+      "sha256": "d2144b241e49c16d5e09d3218f1d2f65bf424a4c813f2633874f983ac15d1999",
+      "source_git_object": "89a85d6664a44c2dd41fe738158222c88c15b1e8:LOSAT/tests/fasta/Sakai.fna",
+      "source_repo_relative": "LOSAT/tests/fasta/Sakai.fna"
+    }
+  ],
+  "lexical_root": "/tmp/losat-pr5-runtime-cert-5845d22/LOSAT",
+  "staged_input_count": 2,
+  "status": "VERIFIED"
+}

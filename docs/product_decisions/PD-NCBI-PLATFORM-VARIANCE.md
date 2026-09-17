@@ -1,8 +1,8 @@
 # Product Decision: Bounded native-NCBI platform variance
 
 - Decision ID: `PD-NCBI-PLATFORM-VARIANCE`
-- Version: 1.0
-- Date: 2026-09-02
+- Version: 1.1
+- Date: 2026-09-17
 - Status: Accepted
 
 ## Scope
@@ -12,9 +12,10 @@ Windows x64, macOS arm64, and macOS x64 release-certification jobs. It replaces
 the former requirement that one LOSAT output simultaneously equal the frozen
 Linux canonical bytes and every platform-local official NCBI binary output.
 
-It does not change LOSAT production code, the 43-case LOSAT canonical manifest,
-the existing BLASTN source-underdetermined class, or the accepted local-subject
-TBLASTX `db_gencode` deviation.
+The 2026-09-17 maintainer-approved revision changes only Gate A’s Sakai row
+and classification after the source-correct automatic X-drop fix. Gate B’s
+immutable JSON and exact fingerprints remain unchanged. Fresh certification is
+required; the PR5/PR6 results remain historical. The TBLASTX deviation is unchanged.
 
 ## Source and executable authorities
 
@@ -39,12 +40,15 @@ Release certification has two distinct gates.
 Each of the 43 LOSAT cases on each certified platform must satisfy:
 
 ```text
-SHA256(raw LOSAT output bytes) == frozen PR 5 canonical SHA256
+SHA256(raw LOSAT output bytes) == current approved canonical manifest SHA256
 ```
 
 Gate A permits no normalization, sorting, field tolerance, platform baseline,
 or platform key in production behavior. A native-NCBI fingerprint can never
-compensate for a Gate A failure and never becomes expected LOSAT output.
+compensate for a Gate A failure or automatically become expected LOSAT output.
+Version 2 of the existing canonical TSV retains 42 PR5 rows and adopts the
+independently source-reviewed corrected Sakai output (ac817776…a34a45).
+Historical PR5 hashes remain provenance, not evidence that the new SHA passed.
 
 ### Gate B — `PLATFORM_NATIVE_NCBI_REFERENCE`
 
@@ -77,11 +81,11 @@ The existing LOSAT parity class and the descriptive native-NCBI reference
 class are separate axes. Native-versus-LOSAT structured analysis is diagnostic
 and cannot rescue a Gate B raw mismatch.
 
-`Sakai.MG1655.megablast` remains `SOURCE_UNDETERMINED_ACCEPTED` only on the
-LOSAT parity axis. The TBLASTX d06 case remains
-`approved_db_gencode_deviation / HSP_SET_DIFF`; the accepted TBLASTX deviation
-ceiling remains exactly six. Native-NCBI platform variance creates no seventh
-deviation and no new LOSAT parity exception.
+`Sakai.MG1655.megablast` is `EXACT_TEXT` under current Gate A. Its immutable
+Gate B metadata retains the historical `SOURCE_UNDETERMINED_ACCEPTED` label;
+that label no longer determines current LOSAT classification. The current
+classification comes only from the canonical TSV. TBLASTX d06 remains
+`approved_db_gencode_deviation / HSP_SET_DIFF`, with exactly six deviations.
 
 ## Evidence authority
 

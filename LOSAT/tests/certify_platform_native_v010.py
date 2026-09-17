@@ -1401,7 +1401,8 @@ def load_catalog(repo_root: Path, candidate_sha: str) -> Catalog:
     )
     comments, data_lines = _canonical_lines(canonical_bytes)
     required_comments = {
-        "# Canonical LOSAT native output hashes from PR 5 integrated certification.",
+        "# Canonical LOSAT native output hashes: Gate A version 2 (2026-09-17).",
+        "# Revision: approved automatic megablast X-drop correction f5955c5952998e50c1262186212d8cfc1527eb1d; other 42 PR5 rows unchanged.",
         f"# RUNTIME_CERT_SHA={RUNTIME_CERT_SHA}",
         f"# PR5_EVIDENCE_MANIFEST_SHA256={PR5_EVIDENCE_MANIFEST_SHA256}",
     }
@@ -1463,11 +1464,11 @@ def load_catalog(repo_root: Path, candidate_sha: str) -> Catalog:
     blastn_classes = Counter(
         row["classification"] for row in canonical_rows if row["program"] == "blastn"
     )
-    if blastn_classes != Counter({"EXACT_TEXT": 13, "SOURCE_UNDETERMINED_ACCEPTED": 1}):
+    if blastn_classes != Counter({"EXACT_TEXT": 14}):
         raise CertificationFailure("BLASTN canonical classifications changed")
     sakai = canonical[("blastn", "Sakai.MG1655.megablast")]
-    if sakai["contract"] != "SOURCE_UNDETERMINED_ACCEPTED":
-        raise CertificationFailure("Sakai must not be represented as NCBI byte-exact")
+    if sakai["contract"] != "EXACT_TEXT":
+        raise CertificationFailure("Sakai requires exact output after automatic X-drop correction")
 
     blastp_classes = Counter(
         row["classification"] for row in canonical_rows if row["program"] == "blastp"
@@ -1948,19 +1949,9 @@ def validate_native_authority_catalog(
             raise CertificationFailure(
                 f"native representative is absent from Gate A: {key}"
             )
-        if (
-            representative["losat_contract"] != canonical["contract"]
-            or representative["losat_parity_class"] != canonical["classification"]
-        ):
-            raise CertificationFailure(
-                f"native authority changed the independent LOSAT parity axis: {key}"
-            )
-    sakai = authority.representatives[("blastn", "Sakai.MG1655.megablast")]
-    if (
-        sakai["losat_contract"] != "SOURCE_UNDETERMINED_ACCEPTED"
-        or sakai["losat_parity_class"] != "SOURCE_UNDETERMINED_ACCEPTED"
-    ):
-        raise CertificationFailure("Sakai LOSAT parity authority changed")
+    # NCBI api/blast_nucl_options.cpp:171-174: SetWindowSize(BLAST_WINDOW_SIZE_NUCL);
+    # Gate B's immutable labels describe PR5, not the revised Gate A classification.
+    # Its selector, fixture, argv and exact native fingerprint remain independently checked.
     d06 = authority.representatives[("tblastx", "d06_ap027131_ap027133_db4")]
     if (
         d06["losat_contract"] != "approved_db_gencode_deviation"
@@ -2317,24 +2308,12 @@ def validate_git_identity(repo_root: Path, expected_sha: str) -> str:
         raise CertificationFailure(
             f"certification SHA mismatch: expected {expected_sha}, observed {observed}"
         )
-    dirty = run_capture(
-        [
-            "git",
-            "diff",
-            "--ignore-cr-at-eol",
-            "--quiet",
-            "HEAD",
-            "--",
-            "LOSAT/src",
-            "LOSAT/build.rs",
-        "LOSAT/Cargo.toml",
-            "LOSAT/Cargo.lock",
-            "LOSAT/.cargo/config.toml",
-        ],
-        repo_root,
-    )
-    if dirty.returncode != 0:
-        raise CertificationFailure("tracked output-affecting files are dirty")
+    # NCBI format/blast_format.cpp:828-832: tabinfo.SetFields(...); tabinfo.Print();
+    release = load_authority("platform_release_inputs", repo_root / "LOSAT/tests/prepare_release_candidate_v010.py")
+    try:
+        release.validate_clean_inputs(repo_root, expected_sha)
+    except release.ReleaseFailure as error:
+        raise CertificationFailure(str(error)) from error
     return observed
 
 
@@ -2503,6 +2482,9 @@ def record_identity(
             "gate_b_native_ncbi_reference": 6,
         },
     }
+    # NCBI format/blast_format.cpp:828-832: tabinfo.SetFields(...); tabinfo.Print();
+    release = load_authority("platform_input_identity", repo_root / "LOSAT/tests/prepare_release_candidate_v010.py")
+    identity["certification_inputs"] = release.certification_inputs(repo_root, expected_sha)
     atomic_write_json(output_dir / "identity.json", identity)
     return identity
 
@@ -2743,7 +2725,7 @@ def _execute_step(
             "gate": (
                 "LOSAT_CANONICAL" if step.kind == "matrix" else "LOSAT_REPEATABILITY"
             ),
-            "classification": "CANONICAL_PR5_RAW_BYTES",
+            "classification": "CANONICAL_GATE_A_RAW_BYTES",
             "canonical_sha256": step.expected_losat_sha256,
         }
     else:
@@ -2819,6 +2801,7 @@ def finalize_evidence(
     steps: Sequence[SearchStep],
     completed: dict[str, dict[str, object]],
     executed_this_attempt: int,
+    catalog: Catalog,
 ) -> None:
     if len(completed) != 61:
         raise CertificationFailure(
@@ -2847,7 +2830,7 @@ def finalize_evidence(
                     "program": step.program,
                     "case_id": step.case_id,
                     "semantic_class": step.semantic_class,
-                    "classification": native_fingerprint["losat_parity_class"],
+                    "classification": catalog.canonical[(step.program, step.case_id)]["classification"],
                     "native_vs_losat_diagnostic": native_vs_losat["classification"],
                     "platform_diagnostic": native_vs_losat["platform_diagnostic"],
                     "native_fingerprint_classification": native_fingerprint[
@@ -2926,7 +2909,7 @@ def finalize_evidence(
         for row in oracle_rows
         if row["program"] == "tblastx" and row["case_id"] == "d06_ap027131_ap027133_db4"
     )
-    if sakai["classification"] != "SOURCE_UNDETERMINED_ACCEPTED":
+    if sakai["classification"] != "EXACT_TEXT":
         raise CertificationFailure("Sakai LOSAT parity ratchet changed")
     if d06["classification"] != "HSP_SET_DIFF":
         raise CertificationFailure("d06 LOSAT parity ratchet changed")
@@ -2943,7 +2926,7 @@ def finalize_evidence(
         "gate_a_losat_canonical": {
             "total": 43,
             "passed": 43,
-            "all_exact_pr5_raw_bytes": True,
+            "all_exact_canonical_raw_bytes": True,
         },
         "gate_b_platform_native_ncbi_reference": {
             "total": 6,
@@ -2963,7 +2946,7 @@ def finalize_evidence(
             "all_repeatable": True,
         },
         "sakai_ratchet": {
-            "expected_losat_parity_class": "SOURCE_UNDETERMINED_ACCEPTED",
+            "expected_losat_parity_class": "EXACT_TEXT",
             "observed_losat_parity_class": sakai["classification"],
             "passed": True,
         },
@@ -3355,7 +3338,7 @@ def aggregate_platform_evidence(
         if summary.get("gate_a_losat_canonical") != {
             "total": 43,
             "passed": 43,
-            "all_exact_pr5_raw_bytes": True,
+            "all_exact_canonical_raw_bytes": True,
         }:
             raise CertificationFailure(f"aggregate Gate A failed: {platform_id}")
         if summary.get("gate_b_platform_native_ncbi_reference") != {
@@ -3373,8 +3356,8 @@ def aggregate_platform_evidence(
         }:
             raise CertificationFailure(f"aggregate repeatability failed: {platform_id}")
         if summary.get("sakai_ratchet") != {
-            "expected_losat_parity_class": "SOURCE_UNDETERMINED_ACCEPTED",
-            "observed_losat_parity_class": "SOURCE_UNDETERMINED_ACCEPTED",
+            "expected_losat_parity_class": "EXACT_TEXT",
+            "observed_losat_parity_class": "EXACT_TEXT",
             "passed": True,
         }:
             raise CertificationFailure(f"aggregate Sakai ratchet failed: {platform_id}")
@@ -3443,7 +3426,7 @@ def aggregate_platform_evidence(
             if kind == "matrix":
                 expected_verification = {
                     "gate": "LOSAT_CANONICAL",
-                    "classification": "CANONICAL_PR5_RAW_BYTES",
+                    "classification": "CANONICAL_GATE_A_RAW_BYTES",
                     "canonical_sha256": expected_step["expected_losat_sha256"],
                 }
                 if (
@@ -3497,7 +3480,7 @@ def aggregate_platform_evidence(
             elif kind == "repeatability":
                 expected_verification = {
                     "gate": "LOSAT_REPEATABILITY",
-                    "classification": "CANONICAL_PR5_RAW_BYTES",
+                    "classification": "CANONICAL_GATE_A_RAW_BYTES",
                     "canonical_sha256": expected_step["expected_losat_sha256"],
                 }
                 if (
@@ -3673,7 +3656,7 @@ def certify(args: argparse.Namespace) -> None:
         completed[step.step_id] = record
         executed_this_attempt += 1
         _write_state(output_dir, platform_spec.platform_id, completed, status="RUNNING")
-    finalize_evidence(output_dir, identity, steps, completed, executed_this_attempt)
+    finalize_evidence(output_dir, identity, steps, completed, executed_this_attempt, catalog)
 
 
 def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:

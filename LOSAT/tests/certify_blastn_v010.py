@@ -37,7 +37,9 @@ PERMITTED_SOURCE_UNDETERMINED_FIELDS = frozenset(
     {"pident", "length", "mismatch", "gapopen"}
 )
 EXPECTED_MANIFEST_CASE_COUNT = 14
-EXPECTED_SOURCE_EXCEPTION_CASES = frozenset({"Sakai.MG1655.megablast"})
+# NCBI api/blast_nucl_options.cpp:171-174: SetWindowSize(BLAST_WINDOW_SIZE_NUCL);
+# The corrected automatic X-drop path has no active output exception.
+EXPECTED_SOURCE_EXCEPTION_CASES = frozenset()
 EXCEPTION_COLUMNS = (
     "case_id",
     "allowed_fields",

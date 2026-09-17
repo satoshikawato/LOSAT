@@ -1,5 +1,3 @@
-# NCBI reference: ncbi-blast-2.17.0+-src/c++/src/algo/blast/core/blast_hits.c:2268-2387,2455-2535
-# The common-endpoint comparators omit gap_info, C qsort may keep either comparator-equal edit script,
-# and the purge keeps the first survivor. This v0.1.0 exception freezes only the reviewed residual footprint.
+# No active BLASTN output exceptions after the approved automatic megablast X-drop correction.
+# Historical five-row footprint is retained in the 2026-09-17 authority review and Git history.
 case_id	allowed_fields	expected_differing_coord_keys	expected_pident_diffs	expected_length_diffs	expected_mismatch_diffs	expected_gapopen_diffs
-Sakai.MG1655.megablast	pident,length,mismatch,gapopen	5	2	2	2	5

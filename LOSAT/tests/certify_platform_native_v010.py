@@ -2537,6 +2537,7 @@ def _identity_resume_key(identity: dict[str, object]) -> dict[str, object]:
             program: value["sha256"] for program, value in identity["oracles"].items()
         },
         "canonical_manifest_sha256": identity["canonical_manifest"]["sha256"],
+        "certification_inputs": identity["certification_inputs"],
         "controlled_fixtures": identity["controlled_fixtures"],
     }
 
@@ -3163,6 +3164,7 @@ def aggregate_platform_evidence(
     expected_sha: str,
     authority: NativeAuthority,
     catalog: Catalog,
+    expected_inputs: dict[str, object],
 ) -> dict[str, object]:
     if not SHA_PATTERN.fullmatch(expected_sha):
         raise CertificationFailure(
@@ -3205,6 +3207,8 @@ def aggregate_platform_evidence(
                 f"aggregate required evidence is incomplete: {platform_id}"
             )
         identity = _strict_json_path(root / "identity.json", "platform identity")
+        if identity.get("certification_inputs") != expected_inputs:
+            raise CertificationFailure(f"aggregate certification inputs mismatch: {platform_id}")
         command_plan = _strict_json_path(root / "command_plan.json", "command plan")
         summary = _strict_json_path(root / "summary.json", "platform summary")
         state = _strict_json_path(root / "state.json", "platform state")
@@ -3527,6 +3531,7 @@ def aggregate_platform_evidence(
         "source_sha": expected_sha,
         "authority_version": authority.authority_version,
         "authority_file_sha256": authority.file_sha256,
+        "certification_inputs": expected_inputs,
         "expected_platform_ids": sorted(expected_platforms),
         "platform_count": 3,
         "search_executions_per_platform": 61,
@@ -3767,6 +3772,7 @@ def main(argv: Sequence[str] | None = None) -> int:
                 candidate_sha,
                 authority,
                 catalog,
+                load_authority("aggregate_inputs", repo_root / "LOSAT/tests/prepare_release_candidate_v010.py").certification_inputs(repo_root, candidate_sha),
             )
             print("CROSS_PLATFORM_NATIVE_CERTIFIED")
         return 0

@@ -22,39 +22,16 @@ from typing import Iterable, Sequence
 
 
 CONTRACT_PATH = Path("docs/release/v0.1.0_rc_contract.json")
+# NCBI format/blast_format.cpp:828-832: tabinfo.SetFields(...); tabinfo.Print();
+# Conservatively bind the entire validation tree, including transitive runner imports.
 RUNTIME_INPUT_PATHS = (
-    "LOSAT/src",
-    "LOSAT/Cargo.toml",
-    "LOSAT/Cargo.lock",
-    "LOSAT/build.rs",
-    "LOSAT/.cargo",
-    ".cargo",
-    "rust-toolchain.toml",
-    "rust-toolchain",
-    "LOSAT/tests/fasta",
-    "LOSAT/tests/fixtures",
-    "LOSAT/tests/compare_blastn_parity.py",
-    "LOSAT/tests/certify_blastn_v010.py",
-    "LOSAT/tests/audit_blastp_v010.py",
-    "LOSAT/tests/audit_tblastx_v010.py",
-    "LOSAT/tests/certify_integrated_runtime_v010.py",
-    "LOSAT/tests/certify_platform_native_v010.py",
-    "LOSAT/tests/prepare_release_candidate_v010.py",
-    "LOSAT/tests/check_pure_rust_runtime_boundary.py",
-    "LOSAT/tests/pure_rust_runtime_allowlist.tsv",
-    "LOSAT/tests/pure_rust_runtime_dependency_review.tsv",
-    "LOSAT/tests/run_losat_wasi.js",
-    "LOSAT/tests/wasi_artifact.js",
+    "LOSAT/src", "LOSAT/Cargo.toml", "LOSAT/Cargo.lock", "LOSAT/build.rs",
+    "LOSAT/.cargo", ".cargo", "rust-toolchain.toml", "rust-toolchain",
+    "LOSAT/tests", "docs/product_decisions",
     ".github/workflows/platform-native-certification.yml",
-    ".github/workflows/release-readiness.yml",
-    "LOSAT/tests/blastn_parity_manifest.tsv",
-    "LOSAT/tests/blastn_v010_source_exceptions.tsv",
-    "LOSAT/tests/blastp_v010_parity_manifest.tsv",
-    "LOSAT/tests/tblastx_v010_parity_manifest.tsv",
-    "LOSAT/tests/ncbi_platform_variance_v010.json",
-    "LOSAT/tests/platform_native_v010_canonical.tsv",
-    "docs/product_decisions",
+    ".github/workflows/release-readiness.yml", ".github/workflows/wasm-threading.yml",
 )
+
 OUTPUT_ENV_KEYS = (
     "CARGO_BUILD_RUSTFLAGS",
     "CARGO_ENCODED_RUSTFLAGS",
@@ -212,6 +189,22 @@ def validate_candidate(
     certified_runtime_sha = str(lineage["cross_platform_native"]["sha"])
     if lineage["integrated_runtime"]["sha"] != certified_runtime_sha:
         raise ReleaseFailure("integrated and native certifications must bind the same implementation SHA")
+    measured_digest = certification_inputs(repo_root, certified_runtime_sha)["sha256"]
+    # NCBI format/blast_format.cpp:828-832: tabinfo.SetFields(...); tabinfo.Print();
+    # Measured receipts prevent a SHA-only rewrite of old certification provenance.
+    for key, decision in (("integrated_runtime", "INTEGRATED_RUNTIME_CERTIFIED"),
+                          ("cross_platform_native", "CROSS_PLATFORM_NATIVE_CERTIFIED")):
+        receipt = lineage[key]
+        if receipt.get("decision") != decision or receipt.get("certification_input_sha256") != measured_digest:
+            raise ReleaseFailure(f"{key} lacks a matching measured certification input receipt")
+        evidence_hash = receipt.get("evidence_manifest_sha256", "")
+        if len(evidence_hash) != 64 or any(c not in "0123456789abcdef" for c in evidence_hash):
+            raise ReleaseFailure(f"{key} lacks a measured evidence manifest identity")
+    if (lineage["integrated_runtime"].get("native_contracts") != 43
+            or lineage["integrated_runtime"].get("serial_wasm_equalities") != 41
+            or lineage["cross_platform_native"].get("native_contracts_per_platform") != 43
+            or lineage["cross_platform_native"].get("platform_executions") != 183):
+        raise ReleaseFailure("certification receipt counts differ from the declared matrix")
     # NCBI format/blast_format.cpp:828-832: tabinfo.SetFields(...); tabinfo.Print();
     # Allow only provenance changes after S; the existing contract owns semantics.
     if certification_inputs(repo_root, certified_runtime_sha) != certification_inputs(repo_root, candidate_sha):

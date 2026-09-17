@@ -25,6 +25,18 @@ SPEC.loader.exec_module(integrated)
 
 
 class IntegratedRuntimeCertificationTests(unittest.TestCase):
+    # NCBI format/blast_format.cpp:794-808: m_SubjectTag enters tabinfo.PrintHeader.
+    def test_serial_blastn_keeps_controlled_native_fixture_paths(self) -> None:
+        root = "/tmp/losat-pr5-runtime-cert-5845d22/LOSAT/tests/fasta"
+        native = ["/build/LOSAT", "blastn", "-query", f"{root}/Sakai.fna",
+                  "-subject", f"{root}/MG1655.fna", "-outfmt", "7", "-out", "/native/out"]
+        command = integrated.serial_case_command("node18", Path("/repo/runner.js"),
+                                                 Path("/build/LOSAT.wasm"), native, Path("/wasm/out"))
+        self.assertEqual(command[:3], ["node18", "/repo/runner.js", "/build/LOSAT.wasm"])
+        self.assertEqual(command[3:-1], native[1:-1])
+        self.assertEqual(command[-1], "/wasm/out")
+        self.assertEqual(native[-1], "/native/out")
+
     def test_exact_matrix_and_repeatability_shape_is_frozen(self) -> None:
         self.assertEqual(integrated.EXPECTED_NATIVE_COUNTS, {"blastn": 14, "blastp": 9, "tblastx": 20})
         self.assertEqual(integrated.EXPECTED_WASM_COUNTS, {"blastn": 14, "blastp": 7, "tblastx": 20})

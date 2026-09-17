@@ -145,6 +145,13 @@ def wasm_command(node: str, runner: Path, wasm_bin: Path, losat_command: Sequenc
     return [node, str(runner), str(wasm_bin), *losat_command[1:]]
 
 
+# NCBI format/blast_format.cpp:794-808: m_SubjectTag enters tabinfo.PrintHeader.
+# Only execution target and output destination differ from the recorded native argv.
+def serial_case_command(node: str, runner: Path, wasm_bin: Path,
+                        native_command: Sequence[str], output: Path) -> list[str]:
+    return wasm_command(node, runner, wasm_bin, replace_output(native_command, "-out", output))
+
+
 def assert_count(actual: int, expected: int, label: str) -> None:
     if actual != expected:
         raise CertificationFailure(f"{label}: expected {expected}, observed {actual}")
@@ -351,6 +358,13 @@ def certify(
             raise CertificationFailure(f"required certification artifact is missing: {artifact}")
 
     # NCBI format/blast_format.cpp:828-832: tabinfo.SetFields(...); tabinfo.Print();
+    if runner != (tests_dir / "run_losat_wasi.js").resolve():
+        raise CertificationFailure("serial runner must be the committed certification runner")
+    executed_artifacts = {name: {"path": str(path), "sha256": sha256_path(path)}
+                          for name, path in (("native", native_bin), ("serial_wasm", wasm_bin), ("runner", runner))}
+    (output_dir / "executed-artifacts.json").write_text(json.dumps(executed_artifacts, indent=2) + "\n")
+
+    # NCBI format/blast_format.cpp:828-832: tabinfo.SetFields(...); tabinfo.Print();
     # One Gate A owner and one controlled lexical fixture root for all platforms.
     platform_gate = load_authority("integrated_platform_gate", tests_dir / "certify_platform_native_v010.py")
     catalog = platform_gate.load_catalog(repo_root, args.expected_sha)
@@ -546,35 +560,17 @@ def certify(
         for case in cases:
             case_id = case["case_id"] if program == "blastn" else case.case_id
             native_output = native_outputs[(program, case_id)]
-            if program == "blastn":
-                command_case = dict(case)
-                command_case["query"] = str(
-                    (repo_root / "LOSAT" / case["query"]).resolve()
-                )
-                command_case["subject"] = str(
-                    (repo_root / "LOSAT" / case["subject"]).resolve()
-                )
-                wasm_output = program_dir / f"{case_id}.losat.out"
-                losat_template = blastn_compare.build_losat_command(
-                    command_case, wasm_bin, wasm_output
-                )
-            elif program == "blastp":
-                _, losat_template = blastp_audit.build_commands(
-                    case, args.blastp_oracle, wasm_bin, program_dir
-                )
-                wasm_output = program_dir / f"{case_id}.losat.tsv"
-            else:
+            if program == "tblastx":
                 case_dir = program_dir / case_id
                 case_dir.mkdir()
                 wasm_output = case_dir / "losat.tsv"
-                _, losat_template = tblastx_audit.build_commands(
-                    case,
-                    args.tblastx_oracle,
-                    wasm_bin,
-                    case_dir / "unused.ncbi.tsv",
-                    wasm_output,
-                )
-            command = wasm_command(args.node, runner, wasm_bin, losat_template)
+            else:
+                suffix = "out" if program == "blastn" else "tsv"
+                wasm_output = program_dir / f"{case_id}.losat.{suffix}"
+            # NCBI format/blast_format.cpp:794-808: m_SubjectTag enters PrintHeader.
+            # Reuse the native argv so fixture spelling and every search option agree.
+            command = serial_case_command(args.node, runner, wasm_bin,
+                                          native_commands[(program, case_id)], wasm_output)
             log_prefix = (
                 program_dir / case_id
                 if program != "tblastx"
@@ -724,7 +720,13 @@ def certify(
             "status",
         ],
     )
+    # NCBI format/blast_format.cpp:828-832: tabinfo.SetFields(...); tabinfo.Print();
+    for artifact in executed_artifacts.values():
+        if sha256_path(Path(artifact["path"])) != artifact["sha256"]:
+            raise CertificationFailure("executed certification artifact changed during the campaign")
+    validate_git_identity(repo_root, args.expected_sha)
     return {
+        "executed_artifacts": executed_artifacts,
         "native_contracts": {
             "total": len(native_contracts),
             "by_program": dict(Counter(row["program"] for row in native_contracts)),

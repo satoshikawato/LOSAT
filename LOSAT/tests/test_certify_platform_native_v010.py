@@ -179,6 +179,7 @@ class PlatformCertificationTests(unittest.TestCase):
                 artifact / "identity.json",
                 {
                     "source_sha": "a" * 40,
+                    "certification_inputs": {"sha256": "1" * 64},
                     "platform_id": platform_id,
                     "authority_version": authority.authority_version,
                     "authority_file_sha256": authority.file_sha256,
@@ -228,6 +229,7 @@ class PlatformCertificationTests(unittest.TestCase):
                 artifact / "command_plan.json",
                 {
                     "source_sha": "a" * 40,
+                    "certification_inputs": {"sha256": "1" * 64},
                     "platform_id": platform_id,
                     "authority_version": authority.authority_version,
                     "authority_file_sha256": authority.file_sha256,
@@ -241,6 +243,7 @@ class PlatformCertificationTests(unittest.TestCase):
                 {
                     "decision": "PLATFORM_NATIVE_CERTIFIED",
                     "source_sha": "a" * 40,
+                    "certification_inputs": {"sha256": "1" * 64},
                     "platform_id": platform_id,
                     "authority_version": authority.authority_version,
                     "authority_file_sha256": authority.file_sha256,
@@ -342,6 +345,7 @@ class PlatformCertificationTests(unittest.TestCase):
                     {
                         "status": "VERIFIED",
                         "source_sha": "a" * 40,
+                    "certification_inputs": {"sha256": "1" * 64},
                         "platform_id": platform_id,
                         "authority_version": authority.authority_version,
                         "authority_file_sha256": authority.file_sha256,
@@ -1831,6 +1835,7 @@ class PlatformCertificationTests(unittest.TestCase):
                 "tblastx": {"sha256": "f" * 64},
             },
             "canonical_manifest": {"sha256": "1" * 64},
+            "certification_inputs": {"sha256": "1" * 64},
             "controlled_fixtures": {
                 "lexical_root": platform_cert.HISTORICAL_LEXICAL_ROOT,
                 "staged_input_count": 34,
@@ -1903,6 +1908,7 @@ class PlatformCertificationTests(unittest.TestCase):
                 "tblastx": {"sha256": "f" * 64},
             },
             "canonical_manifest": {"sha256": "1" * 64},
+            "certification_inputs": {"sha256": "1" * 64},
             "controlled_fixtures": {
                 "lexical_root": platform_cert.HISTORICAL_LEXICAL_ROOT,
                 "staged_input_count": 34,
@@ -2015,7 +2021,7 @@ class PlatformCertificationTests(unittest.TestCase):
             authority, catalog = self.create_aggregate_fixture(input_root)
             output = root / "aggregate.json"
             result = platform_cert.aggregate_platform_evidence(
-                input_root, output, "a" * 40, authority, catalog
+                input_root, output, "a" * 40, authority, catalog, {"sha256": "1" * 64}
             )
             self.assertEqual(result["decision"], "CROSS_PLATFORM_NATIVE_CERTIFIED")
             self.assertEqual(result["platform_count"], 3)
@@ -2047,6 +2053,7 @@ class PlatformCertificationTests(unittest.TestCase):
                     "a" * 40,
                     authority,
                     catalog,
+                    {"sha256": "1" * 64},
                 )
 
     def test_aggregate_rejects_every_required_evidence_subgate(self) -> None:
@@ -2156,6 +2163,7 @@ class PlatformCertificationTests(unittest.TestCase):
                         "a" * 40,
                         authority,
                         catalog,
+                        {"sha256": "1" * 64},
                     )
 
 

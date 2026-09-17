@@ -19,7 +19,7 @@ Before tagging:
 - Confirm the release scope in README, CHANGELOG, CLI help, and release notes.
 - Confirm NCBI BLAST+ is used only as a comparison oracle, never as LOSAT
   runtime, build, feature, fallback, or unsupported-feature implementation.
-- Run the native quality gate from a clean release branch.
+- Run the native quality gate from a clean work branch at the exact candidate SHA.
 - Enforce the committed certification gates for every supported program
   profile; use older broad comparison scripts only as diagnostics.
 - Record NCBI BLAST+ version, LOSAT commit, command lines, inputs, outputs,
@@ -110,20 +110,34 @@ review. Do not edit an artifact or checksum after the workflow creates it.
 
 ## Publish
 
-Only after the release note, artifacts, checksums, and parity evidence agree:
+Only after all gates pass, present the exact candidate SHA, handoff directory,
+release notes, checksums and workflow URLs for publication approval. Do not
+infer publication permission from a request to prepare or implement a release.
+Never rebuild, rename, recompress or overwrite a published asset.
+
+After explicit authorization, confirm the tag and Release do not already exist.
+Use the exact reviewed commit (not an implicit HEAD or nonexistent release branch):
 
 ```bash
-git tag -a v0.1.0 -m "LOSAT v0.1.0"
-git push origin release/v0.1.0
-git push origin v0.1.0
+git tag -a v0.1.0 <reviewed-candidate-SHA> -m "LOSAT v0.1.0"
+git push origin refs/tags/v0.1.0
+gh release create v0.1.0 --repo satoshikawato/LOSAT --verify-tag --draft \
+  --title "LOSAT v0.1.0" --notes-file <reviewed-public-release-notes>
+gh release upload v0.1.0 --repo satoshikawato/LOSAT <verified-handoff-files>
 ```
 
-If publishing to crates.io:
+Upload all six original artifacts, metadata/checksum sidecars, `SHA256SUMS`,
+`RC-HANDOFF.json` and `RC-HANDOFF.md`. Verify uploaded names/sizes/hashes and
+tag/candidate identity, then publish the reviewed draft. Download each fixed
+`https://github.com/satoshikawato/LOSAT/releases/download/v0.1.0/<asset>` URL
+without credentials and verify bytes and native execution on all four targets.
+crates.io, Bioconda, signing and notarization are outside this distribution.
 
-```bash
-cd LOSAT
-cargo publish
-```
+Linux release preparation assumes glibc 2.34 or newer; re-inspect the final ELF
+with `readelf --version-info` and execute on the declared minimum environment.
+Inspect macOS load-command deployment targets and Windows DLL imports on their
+runners. Runner OS labels alone do not establish minimum supported OS versions.
+Do not publish broader support claims than the measured artifact evidence.
 
 
 Threading remediation builds use separate `serial-command`, `threaded-command`,

@@ -512,11 +512,11 @@ class PlatformCertificationTests(unittest.TestCase):
         )
         self.assertEqual(
             hashlib.sha256(raw).hexdigest(),
-            "7e65cfb4de0dc575c47d059f1e29ddc9999fc50887ac769fb8f299a9ec97760c",
+            "68e5dbe793b78d102e3657e1a756f8b3667368bddef2d2c3beff6f6005d00b7a",
         )
         self.assertEqual(
             hashlib.sha256(raw.replace(b"\n", b"\r\n")).hexdigest(),
-            "199e123e7980b01a68c6ad9605b7c7dec7310e06e7d339b476def52b52c06e4e",
+            "d5887d77db2109efc4cf503a677111891f8285dbc972bb9d2dcbbf757a1ce257",
         )
         with mock.patch.object(
             platform_cert,

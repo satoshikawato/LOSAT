@@ -216,24 +216,6 @@ def validate_candidate(
     # Allow only provenance changes after S; the existing contract owns semantics.
     if certification_inputs(repo_root, certified_runtime_sha) != certification_inputs(repo_root, candidate_sha):
         raise ReleaseFailure("candidate changes certified runtime/build/fixture/classifier/runner/contract semantics")
-    runtime_diff = run_capture(
-        [
-            "git",
-            "diff",
-            "--ignore-cr-at-eol",
-            "--quiet",
-            certified_runtime_sha,
-            candidate_sha,
-            "--",
-            *RUNTIME_INPUT_PATHS,
-        ],
-        repo_root,
-    )
-    if runtime_diff.returncode != 0:
-        raise ReleaseFailure(
-            "candidate changes a runtime/build/contract authority after PR 6; "
-            "certification reuse is invalid"
-        )
     if package_version(repo_root) != contract["package_version"]:
         raise ReleaseFailure("Cargo package version differs from the RC contract")
 

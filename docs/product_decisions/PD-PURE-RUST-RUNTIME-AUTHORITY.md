@@ -89,8 +89,8 @@ output must not be normalized or reordered after generation to make a
 comparison pass.
 
 [`PD-NCBI-PLATFORM-VARIANCE`](PD-NCBI-PLATFORM-VARIANCE.md) defines the
-replacement dual release contract. LOSAT continues to match the frozen PR 5
-raw bytes in Gate A. Separately, each representative official NCBI execution
+replacement dual release contract. LOSAT matches the current approved canonical manifest
+raw bytes in Gate A (version 2, 2026-09-17). Separately, each representative official NCBI execution
 must match its exact finite platform fingerprint in Gate B. A platform-local
 NCBI fingerprint is never a LOSAT expected output, semantic tolerance, or
 product exception, and it cannot compensate for a LOSAT canonical-hash failure.

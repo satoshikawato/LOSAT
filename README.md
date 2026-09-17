@@ -19,7 +19,7 @@ workflow and is not copied back into source documentation.
 
 | Area | v0.1.0 status | Notes |
 | --- | --- | --- |
-| BLASTN `-task blastn` and `-task megablast` | Supported for the certified local profile | The [14-case certification](docs/release/blastn_v0.1.0_certification.md) covers 13 exact source-defined cases and one Version 1.2 source-underdetermined equal-HSP case. |
+| BLASTN `-task blastn` and `-task megablast` | Supported for the certified local profile | The [14-case certification](docs/release/blastn_v0.1.0_certification.md) historically covered 13 exact cases and one Sakai exception. Current Gate A version 2 requires 14 exact cases after the automatic X-drop correction; recertification is pending. |
 | BLASTP / LOSATP | Supported for the certified gbdraw local profiles | The [nine-case certification](docs/release/blastp_v0.1.0_certification.md) covers gbdraw P1-P3 local query/subject workflows with standard outfmt 6. |
 | TBLASTX / TLOSATX | Supported for the certified gbdraw local profiles | The [20-case certification](docs/release/tblastx_v0.1.0_certification.md) covers gbdraw P1-P2 local query/subject workflows and the approved `-db_gencode` behavior below. |
 | Native CLI | Supported candidate on Linux x64, Windows x64, macOS arm64, and macOS x64 | PR 6 certified all 43 declared native contracts against the frozen Linux LOSAT output on each non-Linux target. Exact-SHA release archives are produced and certified only by the final RC workflow. |
@@ -216,8 +216,8 @@ in v0.1.0; these gates do not expand the frozen release certification scope.
 - BLASTN support is limited to the local query/subject `megablast` and `blastn`
   profile in the committed certification manifest. `dc-megablast`, database
   search, and threaded-Wasm BLASTN certification remain outside this claim.
-  The one demonstrated source-underdetermined equal-HSP tie is governed by
-  [Product Decision Version 1.2](docs/product_decisions/PD-BLASTN-HSP-CANONICALIZATION.md)
+  The former Sakai residual is retired by the automatic X-drop correction in
+  [Product Decision Version 1.3](docs/product_decisions/PD-BLASTN-HSP-CANONICALIZATION.md)
   and the [durable certification record](docs/release/blastn_v0.1.0_certification.md).
 - BLASTP support is limited to the certified gbdraw P1-P3 local query/subject
   profiles with standard outfmt 6. Database/remote search, alternate tasks and

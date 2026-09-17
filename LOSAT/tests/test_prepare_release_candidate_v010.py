@@ -27,6 +27,51 @@ REPO_ROOT = Path(__file__).resolve().parents[2]
 
 
 class ReleaseCandidateTests(unittest.TestCase):
+    # NCBI format/blast_format.cpp:828-832: tabinfo.SetFields(...); tabinfo.Print();
+    # Output identity depends on fixture/classifier/runner/build inputs, not just Rust.
+    def test_certification_input_closure_and_provenance_only_changes(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            def git(*args):
+                return subprocess.check_output(["git", *args], cwd=root, text=True).strip()
+            git("init", "-q")
+            git("config", "user.email", "test@example.invalid")
+            git("config", "user.name", "Certification test")
+            paths = ["LOSAT/src/main.rs", "LOSAT/tests/fasta/q.fa",
+                     "LOSAT/tests/certify_blastn_v010.py", "LOSAT/tests/run_losat_wasi.js"]
+            for name in paths:
+                path = root / name
+                path.parent.mkdir(parents=True, exist_ok=True)
+                path.write_text("original\n")
+            contract = {"package_version": "0.1.0", "certification_lineage": {"sha": "old"}}
+            release.write_json(root / release.CONTRACT_PATH, contract)
+            git("add", ".")
+            git("commit", "-qm", "Initial inputs")
+            base = git("rev-parse", "HEAD")
+            release.validate_clean_inputs(root, base)
+            original = release.certification_inputs(root, base)
+            for name in paths:
+                path = root / name
+                path.write_text("changed\n")
+                with self.assertRaisesRegex(release.ReleaseFailure, "inputs are dirty"):
+                    release.validate_clean_inputs(root, base)
+                path.write_text("original\n")
+            untracked = root / "LOSAT/tests/fasta/new.fa"
+            untracked.write_text("new")
+            with self.assertRaisesRegex(release.ReleaseFailure, "inputs are dirty"):
+                release.validate_clean_inputs(root, base)
+            untracked.unlink()
+            contract["certification_lineage"]["sha"] = "measured"
+            release.write_json(root / release.CONTRACT_PATH, contract)
+            git("add", ".")
+            git("commit", "-qm", "Record provenance")
+            self.assertEqual(release.certification_inputs(root, "HEAD"), original)
+            contract["package_version"] = "changed"
+            release.write_json(root / release.CONTRACT_PATH, contract)
+            git("add", ".")
+            git("commit", "-qm", "Change semantics")
+            self.assertNotEqual(release.certification_inputs(root, "HEAD"), original)
+
     def test_contract_has_one_exact_artifact_per_supported_target(self) -> None:
         contract = release.load_contract(REPO_ROOT)
         observed = {

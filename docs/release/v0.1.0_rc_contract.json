@@ -29,32 +29,38 @@
   "certification_lineage": {
     "integrated_runtime": {
       "decision": "INTEGRATED_RUNTIME_CERTIFIED",
-      "sha": "5845d22ed9842449628a647f29b8c6762511ca59",
-      "evidence_manifest_sha256": "b9fc98a376d2849274c86b4e4769d2ee38b76025adbb4d63d3da4a5e3e7cdb5c",
+      "sha": "0dd6c2b83f437a940d5fcbea5ca8a247934b48f3",
+      "certification_input_sha256": "f8b70ffe832e266d1d2775ae8f408f550804c49b72fb37f19c3825eedbe4053f",
+      "evidence_manifest_sha256": "0e946e7313e28917dcd071e116c18d56586896ec7383ccfce5b74e80cd6598a6",
       "native_contracts": 43,
-      "serial_wasm_equalities": 41
+      "serial_wasm_equalities": 41,
+      "successful_search_slots": 153,
+      "repeatability_runs_per_target": 3,
+      "recovery": {
+        "missing_repeats_executed": 10,
+        "original_checkpoint_files_unchanged": 576,
+        "interrupted_attempt_restarted": "tblastx/p11_avclpv_psclpv/serial_wasm/run2",
+        "run_count_means": "completed runs",
+        "historical_inherited_environment_equality_established": false
+      }
     },
     "cross_platform_native": {
       "decision": "CROSS_PLATFORM_NATIVE_CERTIFIED",
-      "sha": "647e5f13c6f6c32f7877568e187125d7f71ece19",
-      "run_id": 33625511701,
+      "sha": "0dd6c2b83f437a940d5fcbea5ca8a247934b48f3",
+      "certification_input_sha256": "f8b70ffe832e266d1d2775ae8f408f550804c49b72fb37f19c3825eedbe4053f",
+      "evidence_manifest_sha256": "702c1644f10d84e6cb2bf60525537002ff39e0383ac0cf08a9d6a2a36c6454b3",
+      "run_id": 35182319346,
       "native_contracts_per_platform": 43,
       "platform_executions": 183
     },
-    "merge_ci": {
-      "sha": "77ce8248d8a06b2f412bf669dc6b89a3b858d322",
-      "run_id": 33699268200,
+    "implementation_ci": {
+      "sha": "0dd6c2b83f437a940d5fcbea5ca8a247934b48f3",
+      "run_id": 35182287486,
       "status": "completed",
       "conclusion": "success"
     },
-    "post_pr5_reviewed_change": {
-      "sha": "2e03e0ead4c5bbc1c3e279cb12f0eccc2608fd0a",
-      "scope": "aarch64-only standard-library feature-detection macro import",
-      "effect": "compile portability only; no comparison condition or observable BLAST behavior changed",
-      "coverage": "PR 6 certified all 43 canonical native contracts on macOS arm64 after this change; the cfg is inapplicable to Linux x64 and wasm32-wasip1"
-    },
-    "rerun_required": true,
-    "rerun_reason": "Current runtime/build inputs and approved Gate A version 2 require fresh integrated and cross-platform certification; historical PR5/PR6 records do not certify this candidate."
+    "rerun_required": false,
+    "rerun_reason": "Fresh integrated and three-platform measurements at the same implementation S passed independent raw-evidence review under Gate A version 2. Candidate reuse requires identical certified runtime/build/fixture/classifier/runner/toolchain/Product Decision/contract inputs; only provenance and release documentation may change."
   },
   "public_cli": {
     "blastp_tasks": [
@@ -161,5 +167,40 @@
     "bioconda_submission_performed": false,
     "signing_performed": false,
     "notarization_performed": false
-  }
+  },
+  "certification_history": [
+    {
+      "retained_before": "2026-09-17 Gate A version 2 recertification",
+      "lineage": {
+        "integrated_runtime": {
+          "decision": "INTEGRATED_RUNTIME_CERTIFIED",
+          "sha": "5845d22ed9842449628a647f29b8c6762511ca59",
+          "evidence_manifest_sha256": "b9fc98a376d2849274c86b4e4769d2ee38b76025adbb4d63d3da4a5e3e7cdb5c",
+          "native_contracts": 43,
+          "serial_wasm_equalities": 41
+        },
+        "cross_platform_native": {
+          "decision": "CROSS_PLATFORM_NATIVE_CERTIFIED",
+          "sha": "647e5f13c6f6c32f7877568e187125d7f71ece19",
+          "run_id": 33625511701,
+          "native_contracts_per_platform": 43,
+          "platform_executions": 183
+        },
+        "merge_ci": {
+          "sha": "77ce8248d8a06b2f412bf669dc6b89a3b858d322",
+          "run_id": 33699268200,
+          "status": "completed",
+          "conclusion": "success"
+        },
+        "post_pr5_reviewed_change": {
+          "sha": "2e03e0ead4c5bbc1c3e279cb12f0eccc2608fd0a",
+          "scope": "aarch64-only standard-library feature-detection macro import",
+          "effect": "compile portability only; no comparison condition or observable BLAST behavior changed",
+          "coverage": "PR 6 certified all 43 canonical native contracts on macOS arm64 after this change; the cfg is inapplicable to Linux x64 and wasm32-wasip1"
+        },
+        "rerun_required": true,
+        "rerun_reason": "Current runtime/build inputs and approved Gate A version 2 require fresh integrated and cross-platform certification; historical PR5/PR6 records do not certify this candidate."
+      }
+    }
+  ]
 }

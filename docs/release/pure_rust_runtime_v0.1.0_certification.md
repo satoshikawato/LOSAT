@@ -1,8 +1,8 @@
 # Pure-Rust runtime v0.1.0 integrated certification
 
-Historical certification record. As of 2026-09-17, the corrected runtime and
-approved Gate A version 2 require fresh integrated and cross-platform evidence.
-This record does not certify the current implementation.
+Historical certification record. The corrected runtime and approved Gate A
+version 2 are covered by the [2026-09-17 recertification](v0.1.0_recertification_20260917.md).
+Measurements below remain historical and are not relabeled as current evidence.
 
 
 ## Decision

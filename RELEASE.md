@@ -51,13 +51,21 @@ cargo publish --dry-run --locked \
 
 NCBI BLAST+ executables may be used only in this validation role.
 
-The merged PR 5/PR 6 evidence satisfies this gate for an exact-SHA candidate
-whose runtime, build, fixture, classifier, exception, and Product Decision
-inputs remain unchanged. Do not rerun the commands below solely because release
-documentation or artifact metadata changed. They remain the bounded
-recertification entry points if the post-merge gate finds an invalidating
-change; in that case, stop the ordinary RC path until the new evidence is
-formally reviewed.
+The approved Gate A version 2 requires fresh evidence for the corrected runtime.
+Historical PR 5/PR 6 records are retained as provenance and do not certify this
+candidate. First certify one clean implementation commit S with the standalone
+integrated entry point and the Windows/macOS platform workflow. Require the
+same S and certification-input digest in both completed receipts. Verify the
+actual evidence manifests before recording those receipts in the existing RC
+contract and clearing `rerun_required`.
+
+Then create the release candidate R with only certification-provenance and
+release-documentation updates. The release helper must verify S-to-R input
+identity; runtime, build, fixture, classifier, runner, toolchain/config or
+Product Decision changes require fresh certification. Documentation-only changes
+do not require repeating an otherwise valid certification. The program-specific
+commands below are diagnostics; they do not replace the complete integrated and
+cross-platform gates.
 
 ```bash
 cd LOSAT
@@ -83,9 +91,11 @@ python LOSAT/tests/audit_tblastx_v010.py \
 ## Artifact Gate
 
 Run `.github/workflows/release-readiness.yml` manually with the exact committed
-candidate SHA. Leave `run_integrated_certification` false unless the post-merge
-gate identifies an output-affecting runtime/build/contract change after the
-certified lineage.
+R after its certification receipts have been reviewed and recorded. Leave
+`run_integrated_certification` false when R reuses valid S evidence. Setting it
+true does not bypass pending or stale lineage: the quality/source-package gate
+runs before that optional job, so required recertification must first use the
+standalone entry point.
 
 The workflow must finish with one `LOSAT-v0.1.0-rc-<SHA>` handoff artifact. It
 contains:
@@ -145,5 +155,6 @@ Threading remediation builds use separate `serial-command`, `threaded-command`,
 checks that its input is a serial command before running or packaging it. The
 frozen v0.1.0 artifact contract remains serial-only. Threaded/reactor integration
 checks are additional regression evidence, not promotion into that contract.
-The Node 18 certification record is historical; current threading gates pin
-Rust 1.92.0 and Node 24.21.0 and retain their own artifact metadata.
+Integrated certification and serial release gates pin Node 18.19.1; threading
+gates pin Node 24.21.0 and retain their own artifact metadata. Both use Rust
+1.92.0. These runtime pins are separate contracts and must not be substituted.

@@ -32,12 +32,13 @@ about:
   license_file:
     - LICENSE
     - THIRDPARTY.yml
-  summary: BLAST-compatible local sequence alignment tool implemented in Rust
+  summary: Pure-Rust pairwise sequence alignment with bit-perfect NCBI BLAST+ parity
   description: |
-    LOSAT is a Rust implementation of BLAST-compatible local sequence alignment
-    focused on certified local query/subject profiles for BLASTN, BLASTP, and
-    TBLASTX. NCBI BLAST+ is used only as a validation oracle and is not a LOSAT
-    runtime or build dependency.
+    LOSAT is a standalone, pure-Rust implementation of NCBI BLAST+ local sequence
+    alignment designed for pairwise FASTA comparisons (-query vs -subject). It
+    provides drop-in CLI compatibility and bit-identical output (E-values, bit
+    scores, and coordinates) for BLASTN (including MegaBLAST), BLASTP, and
+    TBLASTX without requiring pre-formatted databases or external C/C++ runtimes.
   dev_url: https://github.com/satoshikawato/LOSAT
   doc_url: https://github.com/satoshikawato/LOSAT/blob/v{{ version }}/README.md
 

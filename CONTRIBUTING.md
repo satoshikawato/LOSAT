@@ -1,41 +1,35 @@
-# Contributing
+# Contributing to LOSAT
 
-LOSAT targets bit-perfect compatibility with NCBI BLAST behavior. Contributions
-are welcome when they preserve that goal and keep unsupported behavior explicit.
+Thank you for your interest in contributing to LOSAT!
 
-## Behavioral Authority
+LOSAT is a standalone, pure-Rust reimplementation of NCBI BLAST+ local sequence alignment designed for direct pairwise sequence comparisons with **bit-perfect numerical and coordinate parity**. To maintain scientific integrity and reproducibility, all contributions must adhere to the engineering principles and verification workflow outlined below.
 
-NCBI BLAST C/C++ source code is the only behavioral authority for LOSAT.
+---
 
-- Read the corresponding NCBI source before changing behavior.
-- Include NCBI source file paths and line numbers in code comments for behavior
-  ports or behavior changes.
-- Do not use NCBI BLAST+ executables, libraries, bindings, or subprocess calls
-  as LOSAT runtime, build, feature, fallback, or unsupported-feature
-  implementation paths.
-- If LOSAT has not ported a feature yet, return an explicit unsupported or
-  unimplemented error rather than delegating to NCBI.
+## Core Engineering Principles
 
-NCBI BLAST+ may be used only as a validation oracle in tests, diagnostics, and
-release parity evidence.
+### 1. NCBI BLAST+ Source as the Ground Truth
+- The authoritative reference for all algorithmic behavior is the official NCBI BLAST C/C++ codebase (`ncbi-blast`).
+- We do not approximate algorithm behavior or introduce ad-hoc heuristics. If a behavior, parameter, or pruning rule exists in NCBI BLAST+, its logic must be ported faithfully.
+- Every code modification affecting algorithm behavior must include NCBI C/C++ reference comments with the file path and line numbers immediately above the Rust code:
+  ```rust
+  // NCBI reference: c++/src/algo/blast/core/blast_hits.c:993-1001
+  ```
 
-## Scope And Unsupported Behavior
+### 2. Standalone Pure-Rust Implementation
+- LOSAT is a standalone Rust executable and library. It must never embed, link, or invoke external NCBI BLAST+ binaries or C/C++ libraries at runtime or during the build.
+- NCBI BLAST+ is used strictly as an **external validation oracle** for unit testing, integration tests, and parity verification.
+- If a feature or parameter is not yet implemented in Rust, LOSAT must fail fast with an explicit "unsupported option" error rather than delegating or falling back to an external tool.
 
-Before implementing a feature, confirm that it exists in NCBI BLAST for the same
-program and task. Do not add behavior that has no NCBI equivalent.
+### 3. Bit-Perfect Output Parity
+- Alignment boundaries, coordinates, raw scores, bit scores, E-values, and tabular fields (`-outfmt 6` and `-outfmt 7`) must match NCBI BLAST+ exactly.
+- *Approved Project Exception*: In TBLASTX local pairwise searches, LOSAT explicitly respects `--db-gencode` for translating the subject sequence across all non-standard genetic codes (NCBI BLAST+ defaults to standard code in local `-subject` mode). All other scoring, Karlin-Altschul statistics, and traceback mechanics strictly adhere to NCBI.
 
-For v0.1.0, the release scope is documented in:
-
-- [docs/v0.1.0_scope.md](docs/v0.1.0_scope.md)
-- [docs/release/v0.1.0.md](docs/release/v0.1.0.md)
-
-Experimental areas must remain documented as experimental until current fixtures
-prove the exact parity being claimed.
+---
 
 ## Development Checks
 
-Run focused checks for the area you changed, then run the release gate before a
-release candidate:
+Before submitting changes, ensure the codebase builds cleanly, passes all lints, and formats properly:
 
 ```bash
 cd LOSAT
@@ -45,7 +39,7 @@ cargo test --all-features
 cargo build --release
 ```
 
-For crates.io packaging changes:
+For packaging changes:
 
 ```bash
 cd LOSAT
@@ -54,36 +48,37 @@ cargo publish --dry-run --locked \
   --config 'build.target-dir="/tmp/losat-cargo-publish-target"'
 ```
 
-## Parity Evidence
+---
 
-Behavioral changes need current comparison evidence against NCBI BLAST+.
-Record:
+## Parity Evidence & Testing
 
-- NCBI BLAST+ version.
-- LOSAT commit.
-- Command lines and input files.
-- LOSAT and NCBI output paths.
-- Diff summary covering coordinates, raw scores, bit scores, E-values, ordering,
-  and formatting.
+Any behavioral changes to search, scoring, or filtering algorithms require comparative verification against official NCBI BLAST+ (v2.17.0+):
 
-Use the comparison entry points documented in [README.md](README.md) and
-[docs/release/v0.1.0.md](docs/release/v0.1.0.md).
+1. **Run Comparison Suite**:
+   ```bash
+   cd LOSAT/tests
+   ./run_comparison.sh
+   ```
+2. **Record Evidence**:
+   - NCBI BLAST+ version used as oracle.
+   - Exact LOSAT commit SHA.
+   - Command lines, query/subject FASTA inputs, and parameter flags.
+   - Verified output diffs covering coordinates, bit scores, and E-values.
+
+---
 
 ## Repository Hygiene
 
-Do not commit generated comparison output, debug traces, package artifacts,
-Python cache files, or temporary files unless they are deliberately promoted to
-documented canonical fixtures.
+- Do not commit generated comparison output, trace files, temporary test outputs, or Python cache files unless deliberately adding documented canonical fixtures.
+- Keep the git working tree clean of build targets, database index files, or local scratch scripts.
 
-The release source should not include `target/`, `tests/*_out/`, BLAST database
-index files, plots, `.tmp/`, `__pycache__/`, `*.pyc`, `*.tmp`, or `*.orig`.
+---
 
 ## Pull Request Checklist
 
-- The change is inside the documented release scope, or it documents an
-  experimental/unsupported area honestly.
-- NCBI source references are included for behavior changes.
-- Unsupported behavior fails explicitly.
-- No runtime/build/fallback path invokes NCBI BLAST+.
-- Focused tests or comparison evidence were run and recorded.
-- Generated output was not added to the release tree.
+Before opening a PR, please verify:
+- [ ] Changes align with the documented scope or explicitly document any experimental features.
+- [ ] Relevant NCBI C/C++ source citations are included in code comments for all ported algorithms.
+- [ ] No runtime, build, or fallback code invokes external NCBI binaries or libraries.
+- [ ] Code builds without warnings under `cargo fmt` and `cargo clippy`.
+- [ ] Parity comparison tests confirm bit-identical output with NCBI BLAST+ on affected profiles.

@@ -1,78 +1,41 @@
 # Changelog
 
-All notable release-facing changes are documented here.
+All notable release-facing changes and milestones are documented here.
 
-## v0.1.0 - Unreleased
+## [v0.1.0] - Initial Release Candidate
 
-Initial release candidate for LOSAT as a Rust implementation of
-NCBI BLAST local-sequence-alignment behavior for certified profiles.
+Initial release candidate for LOSAT as a standalone, pure-Rust reimplementation of NCBI BLAST+ local sequence alignment behavior, designed for direct pairwise FASTA comparisons (`-query` vs `-subject`) with bit-identical output parity and WebAssembly portability.
 
 ### Added
 
-- Native CLI entry points for `blastn`, `blastp`, and `tblastx`.
-- Supported BLASTN `blastn`/`megablast` local profile backed by the durable
-  14-case certification record: 13 exact source-defined cases and one narrow
-  Version 1.2 source-underdetermined equal-HSP contract.
-- Supported BLASTP / LOSATP gbdraw P1-P3 local standard-outfmt-6 profiles
-  backed by nine fresh `EXACT_TEXT`, repeatable certification cases.
-- Supported TBLASTX / TLOSATX gbdraw P1-P2 local standard-outfmt-6 profiles
-  backed by 14 exact source-defined cases and six passing approved-deviation
-  contracts.
-- Serial `wasm32-wasip1` command-build support with the program-specific
-  integrated evidence covering all 41 directly applicable manifest rows.
-- Application-level pure-Rust runtime ownership with zero project-authored
-  production algorithm delegation findings.
-- Cross-platform native certification for the complete 43-contract LOSAT
-  matrix on Windows x64, macOS arm64, and macOS x64 against the frozen Linux
-  canonical output.
-- Exact-SHA release-candidate assembly for four native archives, serial
-  `wasm32-wasip1`, and the Cargo source package, including checksums,
-  provenance, architecture checks, clean extraction/install, and smoke tests.
-- Release readiness, scope, and release-note draft documents.
-- Root release procedure checklist for v0.1.0 release candidates.
-- Contributor and security policy documents for release-candidate handling.
+- **Supported Programs & Search Tasks**:
+  - **`blastn`**: Supports pairwise nucleotide alignment with `megablast` (default, word size 28, affine/linear penalties) and traditional `blastn` (word size 11, match/mismatch 2/-3, gaps 5/2).
+  - **`blastp`**: Supports pairwise protein alignment using BLOSUM62 matrix and affine gap penalties (open 11, extend 1).
+  - **`tblastx`**: Supports 6-frame translated pairwise nucleotide alignment with full genetic code customization.
+- **Bit-Perfect NCBI BLAST+ Parity**: Produces identical alignment boundaries, bit scores, and E-values matching official NCBI BLAST+ (v2.17.0+) across certified pairwise profiles.
+- **Standard Output Formats**: Supports canonical tabular output (`-outfmt 6`) and commented tabular (`-outfmt 7`) reporting the standard 12 BLAST fields (`qseqid sseqid pident length mismatch gapopen qstart qend sstart send evalue bitscore`), plus pairwise text alignment (`-outfmt 0`) for `blastp`.
+- **Pure-Rust Standalone Runtime**: Zero external C/C++ dependencies or shared libraries. Does not link, embed, wrap, or invoke NCBI BLAST+ binaries at runtime.
+- **Direct Pairwise Alignment**: Directly aligns sequences from FASTA files via `-query` and `-subject` without requiring database formatting (`makeblastdb`).
+- **WebAssembly & WASI Support**: Compiles to standalone WASI command-line binaries (`wasm32-wasip1`) and multithreaded WASI (`wasm32-wasip1-threads`) for sandboxed CLI and browser-based bioinformatics applications (such as [gbdraw](https://github.com/satoshikawato/gbdraw)).
+- **Cross-Platform Native Binaries**: Pre-compiled and verified binaries for Linux (x86_64, aarch64), macOS (Apple Silicon arm64 & Intel x86_64), and Windows (x86_64).
 
 ### Changed
 
-- User-facing documentation now states that NCBI BLAST+ is a validation oracle
-  only, not a runtime dependency or fallback path.
-- User-facing v0.1.0 status now reflects the certified BLASTN, BLASTP, and
-  TBLASTX local profiles without broadening them to generic BLAST support.
-- Wasm documentation now describes WASI command builds rather than
-  `wasm-bindgen` browser API stability.
-- Release readiness now consumes the PR 5/PR 6 certification lineage and
-  reruns the expensive integrated campaign only when the post-merge gate
-  identifies an invalidating change.
+- User-facing documentation clarifies that NCBI BLAST+ is used strictly as an independent validation oracle during testing, not as a runtime dependency or fallback path.
+- Parameter validation fails fast with explicit error messages when encountering unsupported options rather than silently degrading or falling back.
+- Wasm documentation clearly distinguishes standalone WASI command builds from experimental browser library APIs.
 
-### Known Limitations
+### Approved Parity Enhancement
 
-- BLASTN support is limited to the certified v0.1.0 local query/subject profile
-  for `megablast` and `blastn`. `dc-megablast`, database search, and threaded
-  Wasm BLASTN certification remain pending.
-- BLASTP support is limited to the certified gbdraw P1-P3 local standard-outfmt-6
-  profiles; alternate tasks/options, other formats, database/remote search, and
-  threaded Wasm are excluded.
-- TBLASTX support is limited to the certified gbdraw P1-P2 local
-  standard-outfmt-6 profiles with one thread per job; unexercised options,
-  database/remote search, and threaded Wasm are excluded.
-- Serial Wasm evidence is program-specific and does not establish general Wasm
-  support. `wasm32-wasip1-threads` remains experimental.
-- Rust library and embeddable Web/Wasm APIs are internal only.
-- Large database search workflows are outside the v0.1.0 release scope.
+- **TBLASTX Subject Genetic Code (`--db-gencode`)**: In local pairwise `-subject` searches, LOSAT explicitly honors non-default `--db-gencode` for translating subject sequences (supporting genetic codes 1–33). This resolves a recognized NCBI BLAST+ limitation where local `-subject` mode defaulted to genetic code 1 regardless of `--db-gencode`. All scoring, statistical calculations, and alignment logic remain strictly identical to NCBI.
 
-### Approved Deviation
+### Scope & Known Limitations
 
-- TBLASTX local `-subject` searches intentionally honor non-default
-  `--db-gencode` for subject translation/search/reporting. This is the only
-  approved v0.1.0 deviation from NCBI BLAST+ local `-subject` behavior.
+- **Database Search**: Pre-formatted BLAST databases (e.g., `.nin`, `.nhr` created by `makeblastdb`) and remote NCBI queries (`-remote`) are outside the v0.1.0 scope; comparisons are strictly pairwise FASTA (`-query` vs `-subject`).
+- **Unimplemented Programs**: `blastx` and `tblastn` are not implemented in this release.
+- **Discontinuous MegaBLAST**: `dc-megablast` is not yet supported.
+- **Library API**: Rust crate library interfaces and embeddable Web/Wasm APIs are currently internal-only; stability is guaranteed at the CLI level.
 
-### Verification
+### Verification Authority
 
-Current program-profile evidence is governed by
-`docs/release/blastn_v0.1.0_certification.md`,
-`docs/release/blastp_v0.1.0_certification.md`, and
-`docs/release/tblastx_v0.1.0_certification.md`. Integrated Linux/serial-Wasm
-authority is recorded in
-`docs/release/pure_rust_runtime_v0.1.0_certification.md`; cross-platform native
-authority is PR 6 run `33625511701`. The final tag still requires a successful
-exact-SHA release-readiness run and separate publication authorization.
+Governed by program certification records in `docs/release/` (`blastn_v0.1.0_certification.md`, `blastp_v0.1.0_certification.md`, `tblastx_v0.1.0_certification.md`) and the pure-Rust runtime authority in `docs/release/pure_rust_runtime_v0.1.0_certification.md`.

@@ -17,7 +17,7 @@ use crate::algorithm::{blastn, blastp, tblastx};
 #[command(
     name = "losat",
     version,
-    about = "Local BLAST-compatible sequence searches"
+    about = "Pure-Rust pairwise sequence alignment tool with bit-perfect NCBI BLAST+ parity"
 )]
 pub struct Cli {
     #[command(subcommand)]
@@ -26,11 +26,11 @@ pub struct Cli {
 
 #[derive(Subcommand, Debug)]
 pub enum Commands {
-    /// Nucleotide vs nucleotide
+    /// Pairwise nucleotide alignment (megablast [default], blastn)
     Blastn(blastn::BlastnArgs),
-    /// Protein vs protein
+    /// Pairwise protein alignment (blastp)
     Blastp(blastp::BlastpArgs),
-    /// Translated nucleotide vs translated nucleotide
+    /// Pairwise 6-frame translated nucleotide alignment (tblastx)
     Tblastx(tblastx::TblastxArgs),
 }
 

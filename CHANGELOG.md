@@ -18,6 +18,7 @@ Initial release candidate for LOSAT as a standalone, pure-Rust reimplementation 
 - **Direct Pairwise Alignment**: Directly aligns sequences from FASTA files via `-query` and `-subject` without requiring database formatting (`makeblastdb`).
 - **WebAssembly & WASI Support**: Compiles to standalone WASI command-line binaries (`wasm32-wasip1`) and multithreaded WASI (`wasm32-wasip1-threads`) for sandboxed CLI and browser-based bioinformatics applications (such as [gbdraw](https://github.com/satoshikawato/gbdraw)).
 - **Cross-Platform Native Binaries**: Pre-compiled and verified binaries for Linux (x86_64, aarch64), macOS (Apple Silicon arm64 & Intel x86_64), and Windows (x86_64).
+- **Bioconda Distribution**: Officially available on Bioconda as `losat` (`conda install -c bioconda losat`) across Linux and macOS architectures.
 
 ### Changed
 

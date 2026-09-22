@@ -2,6 +2,8 @@
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 [![Rust](https://img.shields.io/badge/Rust-1.92%2B-orange.svg)](https://www.rust-lang.org)
+[![install with bioconda](https://img.shields.io/badge/install%20with-bioconda-brightgreen.svg?style=flat)](https://anaconda.org/bioconda/losat)
+[![Conda Version](https://img.shields.io/conda/vn/bioconda/losat.svg?style=flat)](https://anaconda.org/bioconda/losat)
 [![WebAssembly](https://img.shields.io/badge/Wasm-WASI%20%7C%20Web-purple.svg)](#webassembly-wasm-integration)
 
 **LOSAT** is a lightweight, pure-Rust reimplementation of the NCBI BLAST sequence alignment algorithm designed specifically for pairwise sequence-to-sequence comparisons (`-query` vs `-subject`).
@@ -36,8 +38,23 @@ It delivers bit-identical alignment scores, E-values, and coordinates matching N
 
 ## Installation
 
+### Bioconda (Recommended)
+
+LOSAT is available on [Bioconda](https://anaconda.org/bioconda/losat) for Linux and macOS:
+
+```bash
+# Using conda
+conda install -c bioconda -c conda-forge losat
+
+# Using mamba (recommended for fast dependency resolution)
+mamba install -c bioconda losat
+
+# Using pixi
+pixi add losat
+```
+
 ### Pre-built Binaries
-Download pre-compiled binaries for Linux (x86_64), macOS (Apple Silicon & Intel), and Windows from the [Releases](https://github.com/satoshikawato/LOSAT/releases) page.
+Download pre-compiled standalone binaries for Linux (x86_64, aarch64), macOS (Apple Silicon & Intel), and Windows from the [Releases](https://github.com/satoshikawato/LOSAT/releases) page.
 
 ### Build from Source
 Requires the [Rust toolchain](https://rustup.rs/) (edition 2021, Rust 1.92+ recommended):

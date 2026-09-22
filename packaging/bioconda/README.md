@@ -1,11 +1,17 @@
-# Bioconda packaging handoff for LOSAT v0.1.0
+# Bioconda packaging for LOSAT
 
-This directory prepares the upstream information needed to submit LOSAT to
-`bioconda/bioconda-recipes` after the `v0.1.0` tag exists.
+[![install with bioconda](https://img.shields.io/badge/install%20with-bioconda-brightgreen.svg?style=flat)](https://anaconda.org/bioconda/losat)
+[![Conda Version](https://img.shields.io/conda/vn/bioconda/losat.svg?style=flat)](https://anaconda.org/bioconda/losat)
 
-It is intentionally not a live Bioconda recipe yet. The tagged GitHub source
-archive does not exist before release, so its SHA-256 cannot be fixed honestly
-until after the tag is created.
+LOSAT is officially available on [Bioconda](https://anaconda.org/bioconda/losat) for Linux (`linux-64`, `linux-aarch64`) and macOS (`osx-64`, `osx-arm64`).
+
+```bash
+conda install -c bioconda -c conda-forge losat
+# or
+mamba install -c bioconda losat
+```
+
+This directory maintains the upstream packaging template and build script for `bioconda-recipes`.
 
 ## Intended Bioconda platform matrix
 

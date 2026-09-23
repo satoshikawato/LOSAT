@@ -1,0 +1,73 @@
+TBLASTN 2.17.0+
+
+
+Reference: Stephen F. Altschul, Thomas L. Madden, Alejandro A.
+Schaffer, Jinghui Zhang, Zheng Zhang, Webb Miller, and David J.
+Lipman (1997), "Gapped BLAST and PSI-BLAST: a new generation of
+protein database search programs", Nucleic Acids Res. 25:3389-3402.
+
+
+
+Database: /mnt/c/Users/genom/GitHub/LOSAT/docs/evidence/tlosan_stage_a/fixture
+s/subject_code32.fna
+           1 sequences; 360 total letters
+
+
+
+Query= q1 protein with spaced W codons
+
+Length=120
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+
+s_code32 translated subject                                           231     2e-85
+
+
+>s_code32 translated subject
+Length=360
+
+ Score = 231 bits (590),  Expect = 2e-85, Method: Compositional matrix adjust.
+ Identities = 115/120 (96%), Positives = 115/120 (96%), Gaps = 0/120 (0%)
+ Frame = +1
+
+Query  1    MTEYWLVVVGAGGVGKSWLTIQLIQNHFVWEYDPTIEDSYRKQWVIDGETCLLDILDTAG  60
+            MTEY LVVVGAGGVGKS LTIQLIQNHFV EYDPTIEDSYRKQ VIDGETCLLDILDTAG
+Sbjct  1    MTEY*LVVVGAGGVGKS*LTIQLIQNHFV*EYDPTIEDSYRKQ*VIDGETCLLDILDTAG  180
+
+Query  61   QEEYWAMRDQYMRTGEGFLCVFAINNTKSFEDIHQYREQIKRVKDSDDVPMVLVGNKCDL  120
+            QEEY AMRDQYMRTGEGFLCVFAINNTKSFEDIHQYREQIKRVKDSDDVPMVLVGNKCDL
+Sbjct  181  QEEY*AMRDQYMRTGEGFLCVFAINNTKSFEDIHQYREQIKRVKDSDDVPMVLVGNKCDL  360
+
+
+ Score = 12.3 bits (20),  Expect = 2.5, Method: Compositional matrix adjust.
+ Identities = 3/10 (30%), Positives = 5/10 (50%), Gaps = 0/10 (0%)
+ Frame = +3
+
+Query  3    EYWLVVVGAG  12
+             +W    G+G
+Sbjct  312  RFWWCSYGSG  341
+
+
+
+Lambda      K        H        a         alpha
+   0.322    0.139    0.450    0.792     4.96 
+
+Gapped
+Lambda      K        H        a         alpha    sigma
+   0.267   0.0410    0.140     1.90     42.6     43.6 
+
+Effective search space used: 11449
+
+
+  Database: /mnt/c/Users/genom/GitHub/LOSAT/docs/evidence/tlosan_stage_a/fixture
+s/subject_code32.fna
+    Posted date:  Sep 23, 2026  12:49 PM
+  Number of letters in database: 360
+  Number of sequences in database:  1
+
+
+
+Matrix: BLOSUM62
+Gap Penalties: Existence: 11, Extension: 1
+Neighboring words threshold: 13
+Window for multiple hits: 40

@@ -1,0 +1,45 @@
+make: Entering directory '/tmp/tmp.v49E5a0dWE/build/build/objects/genomecoll'
+Build session ID: e6050001-d73c-413e-825b-f0acf88e9953
+make[1]: Entering directory '/tmp/tmp.v49E5a0dWE/build/build/objects/genomecoll'
+cd /tmp/tmp.v49E5a0dWE/source/c++/src/objects/genomecoll  &&  /tmp/tmp.v49E5a0dWE/build/build/new_module.sh genome_collection all
+/usr/bin/make -w -f /tmp/tmp.v49E5a0dWE/source/c++/src/build-system/Makefile.module MODULE=genome_collection MODULE_PATH=objects/genomecoll MODULE_ASN=genome_collection.asn MODULE_IMPORT='objects/general/general objects/seqloc/seqloc objects/seqfeat/seqfeat objects/seq/seq' IMPDEPS='/tmp/tmp.v49E5a0dWE/source/c++/src/objects/general/general.asn /tmp/tmp.v49E5a0dWE/source/c++/src/objects/seqloc/seqloc.asn /tmp/tmp.v49E5a0dWE/source/c++/src/objects/seqfeat/seqfeat.asn /tmp/tmp.v49E5a0dWE/source/c++/src/objects/seq/seq.asn' IMPFILES='objects/general/general.asn objects/seqloc/seqloc.asn objects/seqfeat/seqfeat.asn objects/seq/seq.asn' top_srcdir=/tmp/tmp.v49E5a0dWE/source/c++ builddir=/tmp/tmp.v49E5a0dWE/build/build DATATOOL=/home/kawato/micromamba/bin/datatool DATATOOL_WRAPPER='' MODULE_SEARCH=/tmp/tmp.v49E5a0dWE/source/c++/src all
+make[2]: Entering directory '/tmp/tmp.v49E5a0dWE/source/c++/src/objects/genomecoll'
+/home/kawato/micromamba/bin/datatool -oR /tmp/tmp.v49E5a0dWE/source/c++ \
+    -opm /tmp/tmp.v49E5a0dWE/source/c++/src -m genome_collection.asn -M "objects/general/general.asn objects/seqloc/seqloc.asn objects/seqfeat/seqfeat.asn objects/seq/seq.asn" -oA \
+    -oc genome_collection -or objects/genomecoll -odi -od genome_collection.def -oex '' \
+    -ocvs -pch 'ncbi_pch.hpp' -fd genome_collection.dump \
+    
+datatool: 2.24.0
+make[2]: Leaving directory '/tmp/tmp.v49E5a0dWE/source/c++/src/objects/genomecoll'
+make[2]: Entering directory '/tmp/tmp.v49E5a0dWE/source/c++/src/objects/genomecoll'
+make[2]: Leaving directory '/tmp/tmp.v49E5a0dWE/source/c++/src/objects/genomecoll'
+cd /tmp/tmp.v49E5a0dWE/source/c++/src/objects/genomecoll  &&  /tmp/tmp.v49E5a0dWE/build/build/new_module.sh gencoll_client all
+Waiting for /tmp/tmp.v49E5a0dWE/source/c++/src/objects/genomecoll/make_asn.lock.
+Acquired /tmp/tmp.v49E5a0dWE/source/c++/src/objects/genomecoll/make_asn.lock for PID 3694088 (make_asn)
+/usr/bin/make -w -f /tmp/tmp.v49E5a0dWE/source/c++/src/build-system/Makefile.module MODULE=gencoll_client MODULE_PATH=objects/genomecoll MODULE_ASN=gencoll_client.asn MODULE_IMPORT='objects/genomecoll/genome_collection' IMPDEPS='/tmp/tmp.v49E5a0dWE/source/c++/src/objects/genomecoll/genome_collection.asn' IMPFILES='objects/genomecoll/genome_collection.asn' top_srcdir=/tmp/tmp.v49E5a0dWE/source/c++ builddir=/tmp/tmp.v49E5a0dWE/build/build DATATOOL=/home/kawato/micromamba/bin/datatool DATATOOL_WRAPPER='' MODULE_SEARCH=/tmp/tmp.v49E5a0dWE/source/c++/src all
+make[2]: Entering directory '/tmp/tmp.v49E5a0dWE/source/c++/src/objects/genomecoll'
+/home/kawato/micromamba/bin/datatool -oR /tmp/tmp.v49E5a0dWE/source/c++ \
+    -opm /tmp/tmp.v49E5a0dWE/source/c++/src -m gencoll_client.asn -M "objects/genomecoll/genome_collection.asn" -oA \
+    -oc gencoll_client -or objects/genomecoll -odi -od gencoll_client.def -oex '' \
+    -ocvs -pch 'ncbi_pch.hpp' -fd gencoll_client.dump \
+    
+datatool: 2.24.0
+make[2]: Leaving directory '/tmp/tmp.v49E5a0dWE/source/c++/src/objects/genomecoll'
+make[2]: Entering directory '/tmp/tmp.v49E5a0dWE/source/c++/src/objects/genomecoll'
+make[2]: Leaving directory '/tmp/tmp.v49E5a0dWE/source/c++/src/objects/genomecoll'
+/usr/bin/make -f /tmp/tmp.v49E5a0dWE/build/build/Makefile.lib.tmpl srcdir=/tmp/tmp.v49E5a0dWE/source/c++/src/objects/genomecoll TMPL=genome_collection -w export-headers
+make[2]: Entering directory '/tmp/tmp.v49E5a0dWE/build/build/objects/genomecoll'
+make[2]: Nothing to be done for 'export-headers'.
+make[2]: Leaving directory '/tmp/tmp.v49E5a0dWE/build/build/objects/genomecoll'
+/usr/bin/make -f /tmp/tmp.v49E5a0dWE/build/build/Makefile.lib.tmpl srcdir=/tmp/tmp.v49E5a0dWE/source/c++/src/objects/genomecoll TMPL=gencoll_client -w export-headers
+make[2]: Entering directory '/tmp/tmp.v49E5a0dWE/build/build/objects/genomecoll'
+make[2]: Nothing to be done for 'export-headers'.
+make[2]: Leaving directory '/tmp/tmp.v49E5a0dWE/build/build/objects/genomecoll'
+/usr/bin/make -f /tmp/tmp.v49E5a0dWE/build/build/Makefile.lib.tmpl srcdir=/tmp/tmp.v49E5a0dWE/source/c++/src/objects/genomecoll TMPL=genome_collection -w flag-stamps
+make[2]: Entering directory '/tmp/tmp.v49E5a0dWE/build/build/objects/genomecoll'
+make[2]: Leaving directory '/tmp/tmp.v49E5a0dWE/build/build/objects/genomecoll'
+/usr/bin/make -f /tmp/tmp.v49E5a0dWE/build/build/Makefile.lib.tmpl srcdir=/tmp/tmp.v49E5a0dWE/source/c++/src/objects/genomecoll TMPL=gencoll_client -w flag-stamps
+make[2]: Entering directory '/tmp/tmp.v49E5a0dWE/build/build/objects/genomecoll'
+make[2]: Leaving directory '/tmp/tmp.v49E5a0dWE/build/build/objects/genomecoll'
+make[1]: Leaving directory '/tmp/tmp.v49E5a0dWE/build/build/objects/genomecoll'
+make: Leaving directory '/tmp/tmp.v49E5a0dWE/build/build/objects/genomecoll'

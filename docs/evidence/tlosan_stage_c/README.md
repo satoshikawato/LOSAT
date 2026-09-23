@@ -1,5 +1,7 @@
 # TLOSAN v0.2.0 Stage C work record — incomplete
 
+**Continuation after `ad3e8381`:** [CONTINUATION_20260923.md](CONTINUATION_20260923.md) records the newer exact preliminary comparisons and the remaining Stage C gate. The status tables below describe the earlier checkpoint.
+
 Branch: feature/tlosan-tblastn-v0.2.0. Starting tree: clean at b478d701.
 NCBI source: 598d8ae6a72b923127ba2fbfaffd48e4c83bfbf4.
 NCBI executable: tblastn 2.17.0+, SHA-256

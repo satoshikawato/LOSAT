@@ -10,7 +10,10 @@ pub mod blast_engine;
 // if (Blast_QueryIsProtein(program_number)) BLAST_ScoreSetAmbigRes(sbp, 'X');
 // BLASTP and TBLASTN both encode an untranslated protein query in NCBISTDAA.
 pub(crate) mod encoding;
-mod extension;
+// NCBI reference: c++/src/algo/blast/core/aa_ungapped.c:217-228
+// status = s_BlastAaWordFinder_TwoHit(subject, query, ..., matrix, ...);
+// The same protein two-hit extension primitive is used by BLASTP and TBLASTN.
+pub(crate) mod extension;
 mod gapalign;
 mod hsp;
 // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_kappa.c:102-3691

@@ -94,6 +94,12 @@ pub struct TblastnArgs {
     // ```
     #[arg(long, default_value = "12 2.2 2.5", value_parser = parse_seg_filtering)]
     pub seg: SegSpec,
+    // NCBI reference: c++/src/algo/blast/blastinput/blast_args.cpp:1938-1942,2549-2557
+    // arg_desc.AddFlag(kArgUseLCaseMasking,
+    //     "Use lower case filtering in query and subject sequence(s)?", true);
+    // ReadSequencesToBlast(..., use_lcase_masks, subjects, ...);
+    #[arg(long)]
+    pub lcase_masking: bool,
     #[arg(long, default_value = "false", value_parser = ncbi_bool, action = clap::ArgAction::Set, num_args = 1)]
     pub soft_masking: bool,
     #[arg(long, default_value = "true", value_parser = ncbi_bool, action = clap::ArgAction::Set, num_args = 1)]
@@ -367,6 +373,15 @@ impl TblastnArgs {
 mod tests {
     use super::*;
     use crate::cli::{try_parse_from, Cli, Commands};
+
+    // NCBI reference: c++/src/algo/blast/blastinput/blast_args.cpp:1938-1942
+    // arg_desc.AddFlag(kArgUseLCaseMasking,
+    //     "Use lower case filtering in query and subject sequence(s)?", true);
+    #[test]
+    fn lcase_masking_flag_is_explicit() {
+        assert!(!parse(&[]).unwrap().lcase_masking);
+        assert!(parse(&["-lcase_masking"]).unwrap().lcase_masking);
+    }
 
     fn parse(extra: &[&str]) -> std::result::Result<TblastnArgs, clap::Error> {
         let mut argv = vec!["losat", "tblastn", "-query", "q.faa", "-subject", "s.fna"];

@@ -1,0 +1,8 @@
+Pinned NCBI source: 598d8ae6a72b923127ba2fbfaffd48e4c83bfbf4
+Stage A C++ API comparison-only DB search, code 32, one thread.
+Database statistics/headers are not local -subject oracles.
+Probes: ncbi_candidate_trace.c and ncbi_wordfinder_trace.c via LD_PRELOAD; never LOSAT runtime or build.
+Candidate probe SHA256: ce763167e30c1630bac05f15c5a86209d40c90c125ba4238447770a95d6634e3
+WordFinder probe SHA256: f52a2504526a7358c0f5250895af9f2b20c9fbb35ba8fb866245c4d3a7ff6d84
+code32_fmt6 output SHA256: 126fd98f7bea5a8bcf101d2328c9243ad90f6c5f35c3c7c5a8de18adf7c80026 (both probes byte-identical to Stage A unprobed output).
+Six WordFinder calls, 199 ordered candidate pairs, 2 saved initial HSPs.

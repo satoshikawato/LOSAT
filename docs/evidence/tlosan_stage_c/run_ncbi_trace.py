@@ -20,6 +20,7 @@ FIELDS = "6 qseqid sseqid score qstart qend sstart send sframe qseq sseq"
 def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("fixture_dir", type=Path)
+    parser.add_argument("--lcase-masking", action="store_true")
     args = parser.parse_args()
     fixture = args.fixture_dir.resolve()
     assert hashlib.sha256(NCBI.read_bytes()).hexdigest() == NCBI_SHA256
@@ -36,10 +37,13 @@ def main() -> None:
                    "-window_size", "40", "-gapopen", "11", "-gapextend", "1",
                    "-evalue", "10000", "-num_threads", "1", "-comp_based_stats", "0",
                    "-seg", "no", "-sum_stats", "false", "-outfmt", FIELDS]
+        if args.lcase_masking:
+            command.append('-lcase_masking')
         env = os.environ.copy()
         env["LD_PRELOAD"] = str(probe)
         result = subprocess.run(command, env=env, capture_output=True, check=True)
-        assert result.stdout == (fixture / "raw_isolation_fields.out").read_bytes()
+        expected_name = 'lowercase_fields.out' if args.lcase_masking else 'raw_isolation_fields.out'
+        assert result.stdout == (fixture / expected_name).read_bytes()
         (fixture / "raw_isolation_wordfinder_trace.out").write_bytes(result.stdout)
         (fixture / "raw_isolation_wordfinder_trace.stderr").write_bytes(result.stderr)
         lines = result.stderr.decode().splitlines()
@@ -62,7 +66,7 @@ def main() -> None:
             f"NCBI SHA256: {NCBI_SHA256}\n"
             f"Probe C SHA256: {hashlib.sha256((HERE / 'ncbi_wordfinder_trace.c').read_bytes()).hexdigest()}\n"
             "Source commit: 598d8ae6a72b923127ba2fbfaffd48e4c83bfbf4\n"
-            "NCBI final outfmt 6 bytes with probe equal the unprobed fixture.\n"
+            f'NCBI final outfmt 6 bytes with probe equal {expected_name}.\n'
             f"WordFinder calls: {len(calls)}; subjects: {len(names)}; frames per subject: 6\n"
             + "Command: " + repr(command) + "\n")
     paths = ["raw_isolation_wordfinder_trace.out",

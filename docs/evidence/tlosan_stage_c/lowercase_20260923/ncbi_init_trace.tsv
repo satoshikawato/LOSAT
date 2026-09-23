@@ -1,0 +1,3 @@
+call	subject	frame	init_index	q_seed	s_seed	q_start	s_start	length	raw_score
+0	upper	1	0	3	3	0	0	120	656
+12	middle	1	0	3	3	0	0	120	656

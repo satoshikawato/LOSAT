@@ -24,6 +24,165 @@ pub(super) struct Seed {
     pub subject_offset: u32,
 }
 
+// NCBI reference: c++/src/util/random_gen.cpp:98,227-230,287-308 and
+// c++/include/util/random_gen.hpp:224-241
+// static const size_t kStateOffset = 12;
+// m_State[0] = m_Seed = seed;
+// for (int i = 1; i < kStateSize; ++i)
+//     m_State[i] = 1103515245 * m_State[i-1] + 12345;
+// m_RJ = kStateOffset; m_RK = kStateSize - 1;
+// for (int i = 0; i < 10 * kStateSize; ++i) GetRand();
+// r = m_State[m_RK] + m_State[m_RJ--];
+// m_State[m_RK--] = r;
+// return r >> 1;
+struct NcbiRandom {
+    state: [u32; 33],
+    j: usize,
+    k: usize,
+}
+
+impl NcbiRandom {
+    fn new(seed: u32) -> Self {
+        let mut state = [0; 33];
+        state[0] = seed;
+        for i in 1..state.len() {
+            state[i] = state[i - 1]
+                .wrapping_mul(1_103_515_245)
+                .wrapping_add(12_345);
+        }
+        let mut random = Self {
+            state,
+            j: 12,
+            k: 32,
+        };
+        for _ in 0..330 {
+            random.get_rand();
+        }
+        random
+    }
+
+    fn get_rand(&mut self) -> u32 {
+        let value = self.state[self.k].wrapping_add(self.state[self.j]);
+        self.state[self.k] = value;
+        self.j = if self.j == 0 { 32 } else { self.j - 1 };
+        self.k = if self.k == 0 { 32 } else { self.k - 1 };
+        value >> 1
+    }
+}
+
+// NCBI reference: c++/src/algo/blast/core/blast_encoding.c:95-103 and
+// c++/src/algo/blast/api/blast_objmgr_tools.cpp:427-474,515-520
+// static unsigned char ctable[16] = {0xFF,0,1,0xFF,2,0xFF,0xFF,0xFF,
+//                                    3,0xFF,0xFF,0xFF,0xFF,0xFF,0xFF,0xFF};
+// CRandom random(base_length);
+// if (b == 0 || b == 0x0F) ncbi2na[i] = random.GetRand() & 0x3;
+// else { int pick = random.GetRand() % bitcount; /* pick a set bit */ }
+// The uncompressed ncbi4na sequence is retained by SetupSubjects_OMF for
+// traceback reevaluation; these resolved bases are preliminary-search input.
+pub(super) fn resolve_local_subject_ncbi2na(subject: &[u8]) -> Result<Vec<u8>> {
+    let seed = u32::try_from(subject.len())?;
+    let mut random = NcbiRandom::new(seed);
+    let mut resolved = Vec::with_capacity(subject.len());
+    for &base in subject {
+        let mask: u8 = match base.to_ascii_uppercase() {
+            b'A' => 1,
+            b'C' => 2,
+            b'G' => 4,
+            b'T' => 8,
+            b'M' => 3,
+            b'R' => 5,
+            b'S' => 6,
+            b'V' => 7,
+            b'W' => 9,
+            b'Y' => 10,
+            b'H' => 11,
+            b'K' => 12,
+            b'D' => 13,
+            b'B' => 14,
+            b'N' => 15,
+            b'-' => 0,
+            _ => bail!("TBLASTN subject base '{}' is not implemented", base as char),
+        };
+        let code = match mask {
+            1 => 0,
+            2 => 1,
+            4 => 2,
+            8 => 3,
+            0 | 15 => random.get_rand() % 4,
+            _ => {
+                let mut pick = random.get_rand() % mask.count_ones();
+                let mut code = 0;
+                for i in 0..4 {
+                    if mask & (1 << i) != 0 {
+                        if pick == 0 {
+                            code = i;
+                            break;
+                        }
+                        pick -= 1;
+                    }
+                }
+                code
+            }
+        };
+        resolved.push(b"ACGT"[code as usize]);
+    }
+    Ok(resolved)
+}
+
+// NCBI reference: c++/src/algo/blast/api/blast_setup_cxx.cpp:813-826
+// BlastSeqBlkSetSeqRanges(subj, (SSeqRange*) masked_ranges.get_data(),
+//                          masked_ranges.size() + 1, true, eSoftSubjMasking);
+// NCBI reference: c++/src/algo/blast/core/blast_util.c:201-219
+// tmp[0].left = 0;
+// tmp[num_seq_ranges - 1].right = seq_blk->length;
+// NCBI reference: c++/src/algo/blast/core/blast_engine.c:816-831
+// if (context == 0) { seq_ranges[i].left = backup.seq_ranges[i].left / 3;
+//                     seq_ranges[i].right = backup.seq_ranges[i].right / 3; }
+// else if (context == 3) { /* reverse ranges using subject->length */ }
+// NCBI reference: c++/src/algo/blast/core/masksubj.inl:51-71
+// range[1] = subject->seq_ranges[range[0]].left + word_length - lut_word_length;
+// range[2] = subject->seq_ranges[range[0]].right - lut_word_length;
+fn translated_scan_ranges(
+    subject: &[u8],
+    frame: i8,
+    frame_length: usize,
+    negative_first_length: usize,
+    mask_lowercase: bool,
+) -> Vec<(i32, i32)> {
+    if !mask_lowercase || !subject.iter().any(u8::is_ascii_lowercase) {
+        return vec![(0, frame_length as i32)];
+    }
+    let mut nucleotide_ranges = Vec::new();
+    let mut left = 0;
+    let mut index = 0;
+    while index < subject.len() {
+        if subject[index].is_ascii_lowercase() {
+            let start = index;
+            while index < subject.len() && subject[index].is_ascii_lowercase() {
+                index += 1;
+            }
+            nucleotide_ranges.push((left, start));
+            left = index - 1;
+        } else {
+            index += 1;
+        }
+    }
+    nucleotide_ranges.push((left, subject.len()));
+    if frame > 0 {
+        nucleotide_ranges
+            .into_iter()
+            .map(|(left, right)| ((left / 3) as i32, (right / 3) as i32))
+            .collect()
+    } else {
+        let length = negative_first_length as i32;
+        nucleotide_ranges
+            .into_iter()
+            .rev()
+            .map(|(left, right)| (length - (right / 3) as i32, length - (left / 3) as i32))
+            .collect()
+    }
+}
+
 // NCBI reference: c++/src/algo/blast/core/blast_engine.c:747-775,804-812,835-844
 // BLAST_GetAllTranslations(backup.sequence, eBlastEncodingNcbi2na,
 //                          backup.full_range.right, subject->gen_code_string,
@@ -44,9 +203,10 @@ pub(super) struct Seed {
 // while (scan_range[1] <= scan_range[2]) {
 //     hits = scansub(lookup_wrap, subject, offset_pairs, array_size, scan_range);
 // }
-// This entry admits uppercase unambiguous DNA only. NCBI resolves ambiguities during
+// This entry admits IUPAC DNA. NCBI resolves ambiguities during
 // ncbi2na encoding (blast_objmgr_tools.cpp:428-473) and preserves ncbi4na for
-// later reevaluation (blast_setup_cxx.cpp:742-745,830-853).
+// later reevaluation (blast_setup_cxx.cpp:742-745,830-853). The optional
+// lowercase scan ranges follow the local -lcase_masking path above.
 #[allow(dead_code)]
 pub(super) fn scan_unambiguous_blosum62_words(
     query: &[u8],
@@ -54,14 +214,16 @@ pub(super) fn scan_unambiguous_blosum62_words(
     db_gencode: u8,
     seg: Option<&SegParams>,
     threshold: i32,
+    mask_lowercase: bool,
 ) -> Result<Vec<Seed>> {
-    if !subject
-        .iter()
-        .all(|base| matches!(*base, b'A' | b'C' | b'G' | b'T'))
-    {
-        bail!("TBLASTN ambiguous or lowercase subject encoding/masking is not implemented");
-    }
     let code = GeneticCode::try_from_id(db_gencode).map_err(anyhow::Error::msg)?;
+    // NCBI reference: c++/src/algo/blast/core/blast_engine.c:1318-1334,1429-1432
+    // return word_length * 3 + 2;
+    // if (seq_arg.seq->length < min_subj_seq_length) { ... continue; }
+    if subject.len() < 3 * 3 + 2 {
+        return Ok(Vec::new());
+    }
+    let resolved_subject = resolve_local_subject_ncbi2na(subject)?;
     let query_frame = encode_protein_query_frame_with_seg(query, seg);
     let karlin = lookup_protein_params_ungapped(ScoringMatrix::Blosum62);
     let (lookup, _contexts) = build_ncbi_lookup(&[vec![query_frame]], threshold, &karlin, false);
@@ -69,22 +231,46 @@ pub(super) fn scan_unambiguous_blosum62_words(
     let mut pairs = vec![BlastOffsetPair::default(); (lookup.longest_chain.max(1) as usize) * 1024];
     let pair_capacity = i32::try_from(pairs.len()).expect("NCBI offset array fits Int4");
 
-    for frame in generate_frames(subject, &code) {
-        let mut scan_range = [0, 0, frame.aa_len as i32 - lookup.word_length as i32];
-        while scan_range[1] <= scan_range[2] {
-            let hits = s_blast_aa_scan_subject_one_range(
-                &lookup,
-                &frame.aa_seq[1..],
-                &mut pairs,
-                pair_capacity,
-                &mut scan_range,
-            );
-            for pair in pairs.iter().take(hits as usize) {
-                seeds.push(Seed {
-                    frame: frame.frame,
-                    query_offset: pair.q_off,
-                    subject_offset: pair.s_off,
-                });
+    let frames = generate_frames(&resolved_subject, &code);
+    let negative_first_length = frames
+        .iter()
+        .find(|frame| frame.frame == -1)
+        .map(|frame| frame.aa_len)
+        .unwrap_or(0);
+    for frame in frames {
+        let ranges = translated_scan_ranges(
+            subject,
+            frame.frame,
+            frame.aa_len,
+            negative_first_length,
+            mask_lowercase,
+        );
+        for (range_index, (left, right)) in ranges.into_iter().enumerate() {
+            // NCBI reference: c++/src/algo/blast/core/aa_ungapped.c:496-501
+            // scan_range[1] = subject->seq_ranges[0].left;
+            // scan_range[2] = subject->seq_ranges[0].right - wordsize;
+            // if (scan_range[2] < scan_range[1])
+            //     scan_range[2] = scan_range[1];
+            let mut end = right - lookup.word_length as i32;
+            if range_index == 0 && end < left {
+                end = left;
+            }
+            let mut scan_range = [0, left, end];
+            while scan_range[1] <= scan_range[2] {
+                let hits = s_blast_aa_scan_subject_one_range(
+                    &lookup,
+                    &frame.aa_seq[1..],
+                    &mut pairs,
+                    pair_capacity,
+                    &mut scan_range,
+                );
+                for pair in pairs.iter().take(hits as usize) {
+                    seeds.push(Seed {
+                        frame: frame.frame,
+                        query_offset: pair.q_off,
+                        subject_offset: pair.s_off,
+                    });
+                }
             }
         }
     }
@@ -112,6 +298,185 @@ mod tests {
             }
         }
         records
+    }
+
+    // NCBI reference: c++/src/algo/blast/api/blast_objmgr_tools.cpp:427-474
+    // CRandom random(base_length); ambiguous ncbi4na bases are picked once
+    // for the compressed ncbi2na preliminary subject.
+    // NCBI reference: c++/src/algo/blast/core/blast_engine.c:767-775,804-812
+    // BLAST_GetAllTranslations(backup.sequence, eBlastEncodingNcbi2na, ...);
+    // subject->sequence = translation_buffer + frame_offsets[context] + 1;
+    #[test]
+    fn ncbi_preliminary_subject_frames_match_all_fixture_bytes() {
+        let root = concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../docs/evidence/tlosan_stage_c/run_20260923/"
+        );
+        let records = read_fasta(&format!("{root}subjects.fna"));
+        let by_id: HashMap<_, _> = records.iter().map(|(id, dna)| (id.as_str(), dna)).collect();
+        let trace = fs::read_to_string(format!("{root}ncbi_frame_trace.tsv")).unwrap();
+        let mut compared = 0;
+        for line in trace.lines().skip(1) {
+            let columns: Vec<_> = line.split('\t').collect();
+            let subject_id = columns[1];
+            let frame: i8 = columns[2].parse().unwrap();
+            let resolved = resolve_local_subject_ncbi2na(by_id[subject_id]).unwrap();
+            let translated = generate_frames(&resolved, &GeneticCode::from_id(1));
+            let actual = translated.iter().find(|f| f.frame == frame).unwrap();
+            let actual_hex: String = actual.aa_seq[1..actual.aa_seq.len() - 1]
+                .iter()
+                .map(|base| format!("{base:02x}"))
+                .collect();
+            assert_eq!(
+                actual.aa_len,
+                columns[3].parse::<usize>().unwrap(),
+                "{subject_id}/{frame}"
+            );
+            assert_eq!(actual_hex, columns[4], "{subject_id}/{frame}");
+            compared += 1;
+        }
+        assert_eq!(compared, 78);
+    }
+
+    // NCBI reference: c++/src/algo/blast/core/aa_ungapped.c:478-505
+    // scansub = (TAaScanSubjectFunction)(lookup->scansub_callback);
+    // hits = scansub(lookup_wrap, subject, offset_pairs, array_size, scan_range);
+    // for (i = 0; i < hits; ++i) { query_offset = offset_pairs[i].qs_offsets.q_off;
+    //                            subject_offset = offset_pairs[i].qs_offsets.s_off; }
+    #[test]
+    fn ncbi_all_candidates_match_in_set_and_order() {
+        let root = concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../docs/evidence/tlosan_stage_c/run_20260923/"
+        );
+        let query = &read_fasta(&format!("{root}query.faa"))[0].1;
+        let records = read_fasta(&format!("{root}subjects.fna"));
+        let trace = fs::read_to_string(format!("{root}ncbi_candidates.tsv")).unwrap();
+        let expected: Vec<_> = trace
+            .lines()
+            .skip(1)
+            .map(|line| {
+                let fields: Vec<_> = line.split('\t').collect();
+                (
+                    fields[1].to_string(),
+                    fields[2].parse::<i8>().unwrap(),
+                    fields[4].parse::<u32>().unwrap(),
+                    fields[5].parse::<u32>().unwrap(),
+                )
+            })
+            .collect();
+        let mut actual = Vec::new();
+        for (id, subject) in &records {
+            let seeds =
+                scan_unambiguous_blosum62_words(query, subject, 1, None, 13, false).unwrap();
+            for seed in seeds {
+                actual.push((
+                    id.clone(),
+                    seed.frame,
+                    seed.query_offset,
+                    seed.subject_offset,
+                ));
+            }
+        }
+        assert_eq!(actual, expected);
+    }
+
+    // NCBI reference: c++/src/algo/blast/core/blast_engine.c:816-831
+    // if (context == 0) { /* convert subject scan ranges to AA */ }
+    // else if (context == 3) { /* reverse ranges for minus frames */ }
+    // NCBI reference: c++/src/algo/blast/core/masksubj.inl:51-71
+    // range[1] = subject->seq_ranges[range[0]].left + word_length - lut_word_length;
+    // range[2] = subject->seq_ranges[range[0]].right - lut_word_length;
+    #[test]
+    fn ncbi_lowercase_mask_candidates_match_in_set_and_order() {
+        let root = concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../docs/evidence/tlosan_stage_c/lowercase_20260923/"
+        );
+        let query = &read_fasta(&format!("{root}query.faa"))[0].1;
+        let records = read_fasta(&format!("{root}subjects.fna"));
+        let trace = fs::read_to_string(format!("{root}ncbi_candidates.tsv")).unwrap();
+        let expected: Vec<_> = trace
+            .lines()
+            .skip(1)
+            .map(|line| {
+                let f: Vec<_> = line.split('\t').collect();
+                (
+                    f[1].to_string(),
+                    f[2].parse::<i8>().unwrap(),
+                    f[4].parse::<u32>().unwrap(),
+                    f[5].parse::<u32>().unwrap(),
+                )
+            })
+            .collect();
+        let mut actual = Vec::new();
+        for (id, subject) in &records {
+            for seed in scan_unambiguous_blosum62_words(query, subject, 1, None, 13, true).unwrap()
+            {
+                actual.push((
+                    id.clone(),
+                    seed.frame,
+                    seed.query_offset,
+                    seed.subject_offset,
+                ));
+            }
+        }
+        if actual != expected {
+            let first = actual
+                .iter()
+                .zip(&expected)
+                .position(|(left, right)| left != right)
+                .unwrap_or(actual.len().min(expected.len()));
+            panic!("first lowercase candidate mismatch at {first}: Rust={:?}, NCBI={:?}; counts Rust={} NCBI={}",
+                   actual.get(first), expected.get(first), actual.len(), expected.len());
+        }
+    }
+
+    // NCBI reference: c++/src/algo/blast/api/blast_objmgr_tools.cpp:427-474
+    // CRandom random(base_length); each ambiguous 4na value consumes one GetRand().
+    // NCBI reference: c++/src/algo/blast/core/aa_ungapped.c:492-505
+    // hits = scansub(lookup_wrap, subject, offset_pairs, array_size, scan_range);
+    #[test]
+    fn ncbi_ambiguity_spectrum_frames_and_candidates_match() {
+        let root = concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../docs/evidence/tlosan_stage_c/ambiguity_20260923/"
+        );
+        let query = &read_fasta(&format!("{root}query.faa"))[0].1;
+        let subject = &read_fasta(&format!("{root}subjects.fna"))[0].1;
+        let resolved = resolve_local_subject_ncbi2na(subject).unwrap();
+        let actual_frames = generate_frames(&resolved, &GeneticCode::from_id(1));
+        let frame_trace = fs::read_to_string(format!("{root}ncbi_frame_trace.tsv")).unwrap();
+        for line in frame_trace.lines().skip(1) {
+            let f: Vec<_> = line.split('\t').collect();
+            let frame: i8 = f[2].parse().unwrap();
+            let actual = actual_frames.iter().find(|x| x.frame == frame).unwrap();
+            let hex: String = actual.aa_seq[1..actual.aa_seq.len() - 1]
+                .iter()
+                .map(|base| format!("{base:02x}"))
+                .collect();
+            assert_eq!(hex, f[4], "frame {frame}");
+        }
+        let trace = fs::read_to_string(format!("{root}ncbi_candidates.tsv")).unwrap();
+        let expected: Vec<_> = trace
+            .lines()
+            .skip(1)
+            .map(|line| {
+                let f: Vec<_> = line.split('\t').collect();
+                (
+                    f[2].parse::<i8>().unwrap(),
+                    f[4].parse::<u32>().unwrap(),
+                    f[5].parse::<u32>().unwrap(),
+                )
+            })
+            .collect();
+        let actual: Vec<_> = scan_unambiguous_blosum62_words(query, subject, 1, None, 13, false)
+            .unwrap()
+            .into_iter()
+            .map(|x| (x.frame, x.query_offset, x.subject_offset))
+            .collect();
+        assert_eq!(actual, expected);
+        assert_eq!(actual.len(), 181);
     }
 
     // NCBI reference: c++/src/algo/blast/core/blast_util.c:1080-1101
@@ -147,7 +512,8 @@ mod tests {
                 .map(|&aa| ncbistdaa_to_ascii(aa))
                 .collect();
             assert!(translated.contains(fields[9]), "{subject_id}: {translated}");
-            let seeds = scan_unambiguous_blosum62_words(query, subject, 1, None, 13).unwrap();
+            let seeds =
+                scan_unambiguous_blosum62_words(query, subject, 1, None, 13, false).unwrap();
             assert!(
                 seeds.iter().any(|seed| seed.frame == expected_frame
                     && seed.query_offset == 0
@@ -185,7 +551,8 @@ mod tests {
             let q_seed: u32 = fields[4].parse().unwrap();
             let s_seed: u32 = fields[5].parse().unwrap();
             let seeds =
-                scan_unambiguous_blosum62_words(query, by_id[subject_id], 1, None, 13).unwrap();
+                scan_unambiguous_blosum62_words(query, by_id[subject_id], 1, None, 13, false)
+                    .unwrap();
             assert!(
                 seeds.iter().any(|seed| seed.frame == frame
                     && seed.query_offset == q_seed
@@ -208,10 +575,16 @@ mod tests {
         );
         let query = &read_fasta(&format!("{root}query_low.faa"))[0].1;
         let subject = &read_fasta(&format!("{root}low_subject.fna"))[0].1;
-        let unmasked = scan_unambiguous_blosum62_words(query, subject, 1, None, 13).unwrap();
-        let masked =
-            scan_unambiguous_blosum62_words(query, subject, 1, Some(&SegParams::default()), 13)
-                .unwrap();
+        let unmasked = scan_unambiguous_blosum62_words(query, subject, 1, None, 13, false).unwrap();
+        let masked = scan_unambiguous_blosum62_words(
+            query,
+            subject,
+            1,
+            Some(&SegParams::default()),
+            13,
+            false,
+        )
+        .unwrap();
         println!(
             "fixture=low_complexity seg_off_seeds={} seg_on_seeds={}",
             unmasked.len(),
@@ -227,18 +600,57 @@ mod tests {
             .is_empty());
     }
 
+    // NCBI reference: c++/src/algo/blast/core/blast_engine.c:747-775,804-841
+    // BLAST_GetAllTranslations(..., subject->gen_code_string, ...);
+    // subject->frame = BLAST_ContextToFrame(eBlastTypeBlastx, context);
+    // NCBI reference: c++/src/algo/blast/core/aa_ungapped.c:478-505
+    // hits = scansub(lookup_wrap, subject, offset_pairs, array_size, scan_range);
+    #[test]
+    fn code32_api_oracle_candidates_match_in_set_and_order() {
+        let fixture = concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../docs/evidence/tlosan_stage_a/fixtures/"
+        );
+        let trace_root = concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../docs/evidence/tlosan_stage_c/code32_20260923/"
+        );
+        let query = &read_fasta(&format!("{fixture}query.faa"))[0].1;
+        let subject = &read_fasta(&format!("{fixture}subject_code32.fna"))[0].1;
+        let trace = fs::read_to_string(format!("{trace_root}ncbi_candidates.tsv")).unwrap();
+        let expected: Vec<_> = trace
+            .lines()
+            .skip(1)
+            .map(|line| {
+                let f: Vec<_> = line.split('\t').collect();
+                (
+                    f[0].parse::<i8>().unwrap(),
+                    f[2].parse::<u32>().unwrap(),
+                    f[3].parse::<u32>().unwrap(),
+                )
+            })
+            .collect();
+        let actual: Vec<_> = scan_unambiguous_blosum62_words(query, subject, 32, None, 13, false)
+            .unwrap()
+            .into_iter()
+            .map(|x| (x.frame, x.query_offset, x.subject_offset))
+            .collect();
+        assert_eq!(actual, expected);
+        assert_eq!(actual.len(), 199);
+    }
+
     // NCBI reference: c++/src/objects/seqfeat/gc.prt:340-347
     // id 32 , ncbieaa "FFLLSSSSYYWWCCWWLLLLPPPPHHQQRRRRIIIMTTTTNNKKSSRRVVVVAAAADDEEGGGG"
     #[test]
-    fn code_32_changes_search_words_and_ambiguity_fails_explicitly() {
+    fn code_32_changes_search_words_and_ambiguity_resolves() {
         let root = concat!(
             env!("CARGO_MANIFEST_DIR"),
             "/../docs/evidence/tlosan_stage_a/fixtures/"
         );
         let query = &read_fasta(&format!("{root}query.faa"))[0].1;
         let subject = &read_fasta(&format!("{root}subject_code32.fna"))[0].1;
-        let code1 = scan_unambiguous_blosum62_words(query, subject, 1, None, 13).unwrap();
-        let code32 = scan_unambiguous_blosum62_words(query, subject, 32, None, 13).unwrap();
+        let code1 = scan_unambiguous_blosum62_words(query, subject, 1, None, 13, false).unwrap();
+        let code32 = scan_unambiguous_blosum62_words(query, subject, 32, None, 13, false).unwrap();
         println!(
             "fixture=code32 code1_seeds={} code32_seeds={}",
             code1.len(),
@@ -248,7 +660,7 @@ mod tests {
         assert!(code32
             .iter()
             .any(|seed| seed.frame == 1 && seed.query_offset == 0 && seed.subject_offset == 0));
-        assert!(scan_unambiguous_blosum62_words(query, b"ATN", 32, None, 13).is_err());
-        assert!(scan_unambiguous_blosum62_words(query, b"atg", 32, None, 13).is_err());
+        assert!(scan_unambiguous_blosum62_words(query, b"ATN", 32, None, 13, false).is_ok());
+        assert!(scan_unambiguous_blosum62_words(query, b"atg", 32, None, 13, false).is_ok());
     }
 }

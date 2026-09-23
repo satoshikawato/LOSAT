@@ -6,4 +6,8 @@ mod scoring;
 //     status = s_BlastSearchEngineOneContext(...);
 // }
 mod search_seed;
+// NCBI c++/src/algo/blast/core/aa_ungapped.c:200-234:
+// status = s_BlastAaWordFinder_TwoHit(..., init_hitlist, ...);
+// Blast_InitHitListSortByScore(init_hitlist);
+mod search_init;
 pub use args::TblastnArgs;

@@ -3,7 +3,7 @@
 ## INSTRUCTION PROMPT
 
 `feature/tlosan-tblastn-v0.2.0` で TLOSAN v0.2.0 の段階 D を実行する。
-開始時にブランチと作業ツリー、[総合計画書](../tlosan_tblastn_v0.2.0_plan.md)、
+開始時にブランチと作業ツリー、総合計画書 `docs/tlosan_tblastn_v0.2.0_plan.md`、
 `AGENTS.md`、`verify-ncbi-parity-and-speed`、段階 A〜C の証拠を確認する。
 探索段階に既知の NCBI 相違が残るなら、その境界を解決してから統計を検証する。
 
@@ -25,3 +25,14 @@
 
 成果物は関数・実行順対応表、固定 fixture の raw/bit score・E-value・
 順位・削除順の比較、全残差の分類である。段階 E に表示だけの差を引き継ぐ。
+
+## 終了・引き継ぎ
+
+段階の完了条件を満たすまで必要な実装・検証・修正を続ける。
+作業終了時に変更と再実行可能な証拠を `feature/tlosan-tblastn-v0.2.0` へ
+コミットし、`origin/feature/tlosan-tblastn-v0.2.0` にプッシュする。
+最終回答にコミット SHA、プッシュ結果、検証結果、残件を記し、
+次セッション（E — 表示）でそのまま使える Codex 用
+INSTRUCTION PROMPT を全文で提示する。
+段階 D の完了条件が残る場合は、その解消を次プロンプトの最初の作業とし、
+完了や認証を宣言しない。

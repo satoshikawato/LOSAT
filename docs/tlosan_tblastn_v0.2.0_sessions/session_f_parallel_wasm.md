@@ -3,7 +3,7 @@
 ## INSTRUCTION PROMPT
 
 `feature/tlosan-tblastn-v0.2.0` で TLOSAN v0.2.0 の段階 F を実行する。
-開始時にブランチと作業ツリー、[総合計画書](../tlosan_tblastn_v0.2.0_plan.md)、
+開始時にブランチと作業ツリー、総合計画書 `docs/tlosan_tblastn_v0.2.0_plan.md`、
 `AGENTS.md`、`verify-ncbi-parity-and-speed`、段階 A〜E の証拠を確認する。
 段階 E の serial 出力契約が未確定なら並列化を始めない。
 
@@ -26,3 +26,14 @@
 成果物は target・thread ごとのコマンドと SHA-256、実際の並列稼働証拠、
 繰り返し実行の結果、未認証 target の明示である。段階 G に固定 fixture と
 出力 checksum を渡す。
+
+## 終了・引き継ぎ
+
+段階の完了条件を満たすまで必要な実装・検証・修正を続ける。
+作業終了時に変更と再実行可能な証拠を `feature/tlosan-tblastn-v0.2.0` へ
+コミットし、`origin/feature/tlosan-tblastn-v0.2.0` にプッシュする。
+最終回答にコミット SHA、プッシュ結果、検証結果、残件を記し、
+次セッション（G — 認証）でそのまま使える Codex 用
+INSTRUCTION PROMPT を全文で提示する。
+段階 F の完了条件が残る場合は、その解消を次プロンプトの最初の作業とし、
+完了や認証を宣言しない。

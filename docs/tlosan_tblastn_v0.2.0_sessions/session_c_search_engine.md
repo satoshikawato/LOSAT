@@ -3,7 +3,7 @@
 ## INSTRUCTION PROMPT
 
 `feature/tlosan-tblastn-v0.2.0` で TLOSAN v0.2.0 の段階 C を実行する。
-開始時にブランチと作業ツリー、[総合計画書](../tlosan_tblastn_v0.2.0_plan.md)、
+開始時にブランチと作業ツリー、総合計画書 `docs/tlosan_tblastn_v0.2.0_plan.md`、
 `AGENTS.md`、`verify-ncbi-parity-and-speed`、段階 A・B の証拠を確認する。
 段階 B の遺伝暗号検証が未完なら先に解消する。
 
@@ -24,3 +24,14 @@
 成果物は NCBI/LOSAT 呼び出し経路対応表、六フレームの固定 fixture、
 段階別差分、変更箇所のソースコメント、候補・HSP 段階の一致である。
 段階 D が扱う統計・連結の未解決を区別して引き継ぐ。
+
+## 終了・引き継ぎ
+
+段階の完了条件を満たすまで必要な実装・検証・修正を続ける。
+作業終了時に変更と再実行可能な証拠を `feature/tlosan-tblastn-v0.2.0` へ
+コミットし、`origin/feature/tlosan-tblastn-v0.2.0` にプッシュする。
+最終回答にコミット SHA、プッシュ結果、検証結果、残件を記し、
+次セッション（D — 統計・連結）でそのまま使える Codex 用
+INSTRUCTION PROMPT を全文で提示する。
+段階 C の完了条件が残る場合は、その解消を次プロンプトの最初の作業とし、
+完了や認証を宣言しない。

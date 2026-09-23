@@ -3,7 +3,7 @@
 ## INSTRUCTION PROMPT
 
 `feature/tlosan-tblastn-v0.2.0` で TLOSAN v0.2.0 の段階 E を実行する。
-開始時にブランチと作業ツリー、[総合計画書](../tlosan_tblastn_v0.2.0_plan.md)、
+開始時にブランチと作業ツリー、総合計画書 `docs/tlosan_tblastn_v0.2.0_plan.md`、
 `AGENTS.md`、`verify-ncbi-parity-and-speed`、段階 A〜D の証拠を確認する。
 探索・統計の既知差を表示の加工で隠さない。
 
@@ -25,3 +25,14 @@
 成果物は固定コマンド・入力 SHA-256・生バイト比較、非標準コードの
 限定差分の説明、0/6/7 の宣言済み範囲と未対応オプションの拒否表である。
 段階 F に serial の基準出力 SHA-256 を渡す。
+
+## 終了・引き継ぎ
+
+段階の完了条件を満たすまで必要な実装・検証・修正を続ける。
+作業終了時に変更と再実行可能な証拠を `feature/tlosan-tblastn-v0.2.0` へ
+コミットし、`origin/feature/tlosan-tblastn-v0.2.0` にプッシュする。
+最終回答にコミット SHA、プッシュ結果、検証結果、残件を記し、
+次セッション（F — 並列・Wasm）でそのまま使える Codex 用
+INSTRUCTION PROMPT を全文で提示する。
+段階 E の完了条件が残る場合は、その解消を次プロンプトの最初の作業とし、
+完了や認証を宣言しない。

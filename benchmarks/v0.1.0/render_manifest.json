@@ -1,31 +1,30 @@
 {
   "inputs": {
-    "alignment_results.tsv.gz": "5fd5beb14d87fdc536ac00d53a0a8d08a0c2d541d0d30029a46aeaa041fbcd18",
-    "execution_times.tsv": "c3b2c0318fe1002659cadb063583208445a570e7ccf748215fe94467dbd22d76",
-    "metadata.json": "14b9be2f0f33f7d2f904ea929ae4a4c0723d2e24fee8a702a237a5c07247f111"
+    "alignment_results.tsv.gz": "a45205fa4e3889a4d250cb07e81e780c3285afb17fb10d23a5fe53ac8c37fdee",
+    "execution_times.tsv": "42a63aa59f83e2a625d617715dc05723373723b610d3ed1c399850de8181d788",
+    "metadata.json": "d47ce721d7b898b9021da23f69f09ac0879008c527625012db554129e3b46596"
   },
   "outputs": {
-    "execution_time.png": "535f2a39f0a292e70d47da30c8e7162419091f4bdf6be5aadea020a4e154cf9f",
-    "hit_distribution.png": "37e1935c65c87eee163eb1bcdbec96f88fdc91b20b023b9337da3855cbb5e26d",
-    "plot_data.json": "b03806436a4a2866b3b5776d05421f0cc85dc3ff0f97ba2302d0cdb5a9f7821f"
+    "execution_time.png": "e9c82abd68d777a969d1cf11553e28cdad59a1249cd265718f3dc00868665352",
+    "hit_distribution.png": "52e3c332f7df348d1b879f87d82e7f0eafaf623d963c60eea6f02acf9d7622ee",
+    "plot_data.json": "f3b9861d7cbb633d0324bb2db0b18496109d08cfc3d5c85a97d664fa5ed4f4e9"
   },
   "plotted_rows": {
     "alignment": {
-      "blastn:LOSAT": 100825,
-      "blastn:NCBI BLAST+": 100825,
-      "blastp:LOSAT": 2814,
-      "blastp:NCBI BLAST+": 2814,
-      "tblastx:LOSAT": 656316,
-      "tblastx:NCBI BLAST+": 505912
+      "blastn:LOSAT": 105642,
+      "blastn:NCBI BLAST+": 105642,
+      "blastp:LOSAT": 76643,
+      "blastp:NCBI BLAST+": 76643,
+      "tblastx:LOSAT": 600530,
+      "tblastx:NCBI BLAST+": 600530
     },
     "execution_time": {
-      "final_v0.1.0_current_2026-09-03": 60,
-      "final_v0.1.0_full_performance_af3e2ea_2026-09-04": 180,
-      "historical_plot_2026_06": 219,
-      "pr93_performance_lineage": 4
+      "current_428c83cb_2026-09-23": 108,
+      "historical_plot_2026_06": 0,
+      "pr93_performance_lineage": 0
     }
   },
   "renderer_version": 2,
   "schema_version": 1,
-  "snapshot_id": "v0.1.0-full-performance-af3e2ea-2026-09-04"
+  "snapshot_id": "current_428c83cb_2026-09-23"
 }

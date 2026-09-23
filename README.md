@@ -128,19 +128,28 @@ LOSAT tblastx \
 ## Accuracy and Benchmarks
 
 ### Alignment Parity
-LOSAT is continuously audited against NCBI BLAST+ 2.17.0 across comprehensive biological test sets.
+LOSAT is continuously audited against NCBI BLAST+ 2.17.0 across the retained
+comparison fixtures. This is a compute-program comparison, not biological
+interpretation of the input sequences.
 
 ![Alignment Hit Distribution](benchmarks/v0.1.0/hit_distribution.png)
 
-LOSAT achieves exact row-by-row, coordinate-for-coordinate, and score-for-score parity with NCBI BLAST+ across BLASTN, BLASTP, and TBLASTX pairwise comparisons.
+The current plot contains 45 exact output pairs and 1,565,630 normalized rows.
+TBLASTX uses a prebuilt NCBI database (including matching `-db_gencode`), while
+BLASTN and BLASTP use NCBI local-subject output. The LOSAT side uses its local
+`-subject` interface.
 
 ### Execution Speed
-Benchmarked on an Intel Core i9-14900HX comparing NCBI BLAST+ 2.17.0, native LOSAT, and WebAssembly modes (single-threaded and 8-thread pool):
+Benchmarked on an Intel Core i9-14900HX comparing NCBI BLAST+ 2.17.0, native
+LOSAT, and WebAssembly modes (single-threaded and requested 8-thread
+configurations):
 
 ![Execution Time Benchmark](benchmarks/v0.1.0/execution_time.png)
 
-- **Native**: Matches or exceeds NCBI BLAST+ execution speeds across all three alignment modes.
-- **WebAssembly**: Threaded WASM provides near-native scaling, allowing compute-intensive genomic alignments directly in sandboxed or client-side environments.
+The figure reports the median of three retained wall-clock samples after one
+warmup, with the full three-sample range. Every timed NCBI search uses a prebuilt
+`-db`; database construction is excluded. Hit-distribution target selection is
+independent of these timing targets. Process and Wasm startup are included.
 
 *For complete reproducible datasets, scripts, and methodology, see the [Benchmark Documentation](benchmarks/v0.1.0/README.md).*
 

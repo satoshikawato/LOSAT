@@ -15,8 +15,7 @@ import seaborn as sns
 from comparison_data import (
     CUSTOM_PALETTE, HUE_ORDER, LOSAT_THREADS, MODE_ORDER, PLOT_DIR,
     NATIVE_SINGLE, NATIVE_MULTI, WASM_SINGLE, WASM_THREADED_SINGLE, WASM_MULTI,
-    NCBI_SINGLE,
-    comparison_cases, completed_log, result_paths, successful_output, sha256, require_plot_run,
+    comparison_cases, completed_log, result_paths, successful_output, require_plot_run,
 )
 
 OUTPUT_IMAGE = PLOT_DIR / "execution_time_comparison_all.png"
@@ -44,21 +43,15 @@ def parse_time(filepath):
 
 def main():
     data = []
-    # NCBI reference: c++/src/objtools/align_format/tabular.cpp:1100-1108
-    # x_PrintField(*iter); ... m_Ostream << "\n";
-    # Performance bars require raw equality, before any numeric plot parsing.
+    # NCBI reference: c++/src/algo/blast/blastinput/blast_args.cpp:3225-3236
+    # if (args.Exist(kArgSubject) && args[kArgSubject].HasValue() &&
+    #     m_NumThreads != CThreadable::kMinNumThreads) m_NumThreads = ...;
+    # Timing uses each successful recorded invocation independently. Output
+    # equality belongs to the separately selected hit-distribution oracle and
+    # must not discard a valid database-search wall time.
     for case in comparison_cases():
-        # NCBI reference: c++/src/algo/blast/blastinput/cmdline_flags.cpp:75
-        # const string kArgNumThreads("num_threads");
-        reference = result_paths(case)[NCBI_SINGLE]
-        if not successful_output(reference):
-            continue
-        expected_hash = sha256(reference)
         for tool, log in result_paths(case, "log").items():
             if not successful_output(log.with_suffix(".out")):
-                continue
-            if sha256(log.with_suffix(".out")) != expected_hash:
-                print(f"[Raw mismatch; excluded from timing] {log}")
                 continue
             seconds = parse_time(log)
             if seconds is None:
@@ -96,7 +89,7 @@ def main():
         # NCBI reference: c++/src/algo/blast/blastinput/blast_args.cpp:3223-3239
         # if (args.Exist(kArgSubject) && args[kArgSubject].HasValue() &&
         #     m_NumThreads != CThreadable::kMinNumThreads) { m_NumThreads = ...; }
-        f"BLAST+ requested n1/n{LOSAT_THREADS}: TBLASTX -db; others -subject (effective n1)",
+        f"BLAST+ n1/n{LOSAT_THREADS}: prebuilt -db searches; database construction excluded",
         y=1.12, fontsize=12,
     )
     g.fig.savefig(OUTPUT_IMAGE, bbox_inches="tight")

@@ -45,9 +45,11 @@ Runner settings (0 disables, 1 enables):
   BLASTN_BIN, BLASTP_BIN, TBLASTX_BIN, MAKEBLASTDB_BIN override NCBI tools.
 
 Each selected condition runs once. Wall time includes process startup and Wasm
-compilation. NCBI uses -db for TBLASTX and -subject for other tasks. Subject
-searches ignore nN and use one thread. TBLASTX databases are prepared outside
-search timing, with their own time logs. Missing artifacts or failed searches stop the run.
+compilation. All timed NCBI searches use a prebuilt -db so requested nN can be
+effective. Database preparation is outside search timing and has its own log.
+For hit-distribution plots, BLASTN/BLASTP also record one untabulated -subject
+oracle run; TBLASTX uses its -db n1 output so -db_gencode is effective. Missing
+artifacts or failed searches stop the run.
 See README.md.
 HELP
     exit 0
@@ -134,9 +136,10 @@ while IFS=$'\t' read -r task query subject name losat_stem ncbi_stem query_genco
     if [[ "$RUN_NCBI" == 1 ]]; then
         # NCBI reference: c++/src/algo/blast/blastinput/cmdline_flags.cpp:50-51
         # const string kArgDb("db"); const string kArgSubject("subject");
-        # Only the TBLASTX database oracle needs a database builder.
+        # Timed NCBI searches all use databases so requested threads remain active.
+        require_command "${MAKEBLASTDB_BIN:-makeblastdb}"
         case "$task" in
-            tblastx) require_command "${TBLASTX_BIN:-tblastx}"; require_command "${MAKEBLASTDB_BIN:-makeblastdb}" ;;
+            tblastx) require_command "${TBLASTX_BIN:-tblastx}" ;;
             blastp) require_command "${BLASTP_BIN:-blastp}" ;;
             *) require_command "${BLASTN_BIN:-blastn}" ;;
         esac
@@ -259,31 +262,41 @@ while IFS=$'\t' read -r task query subject name losat_stem ncbi_stem query_genco
         # if (m_Target == eDatabase && args[kArgDbGeneticCode] &&
         #     (program == eTblastn || program == eTblastx)) {
         #     opt.SetDbGeneticCode(args[kArgDbGeneticCode].AsInteger()); }
-        # Retain TBLASTX's database target for non-default subject genetic codes.
+        # TBLASTX's database target applies non-default subject genetic codes;
+        # every timed oracle target is a database so requested nN remains active.
         case "$task" in
             tblastx) ncbi_bin="${TBLASTX_BIN:-tblastx}" ;;
             blastp) ncbi_bin="${BLASTP_BIN:-blastp}" ;;
             *) ncbi_bin="${BLASTN_BIN:-blastn}" ;;
         esac
-        if [[ "$task" == tblastx ]]; then
-            db="$BLAST_OUT_DIR/db/nucl/$subject"
-            if [[ -z "${prepared_dbs[$db]:-}" ]]; then
-                mkdir -p "${db%/*}"
-                if ! { time "${MAKEBLASTDB_BIN:-makeblastdb}" -in "$FASTA_DIR/$subject" -dbtype nucl -parse_seqids -out "$db"; } >"$db.makeblastdb.log" 2>&1; then
-                    echo "Database preparation failed; see $db.makeblastdb.log" >&2
-                    exit 1
-                fi
-                python3 "$SCRIPT_DIR/comparison_data.py" database "$BENCHMARK_DIR" "$db" "$FASTA_DIR/$subject" "$(command -v "${MAKEBLASTDB_BIN:-makeblastdb}")" nucl
-                prepared_dbs[$db]=1
+        dbtype=nucl
+        [[ "$task" != blastp ]] || dbtype=prot
+        db="$BLAST_OUT_DIR/db/$dbtype/$subject"
+        if [[ -z "${prepared_dbs[$db]:-}" ]]; then
+            mkdir -p "${db%/*}"
+            if ! { time "${MAKEBLASTDB_BIN:-makeblastdb}" -in "$FASTA_DIR/$subject" -dbtype "$dbtype" -parse_seqids -out "$db"; } >"$db.makeblastdb.log" 2>&1; then
+                echo "Database preparation failed; see $db.makeblastdb.log" >&2
+                exit 1
             fi
-            args[2]=-db
-            args[3]="$db"
+            python3 "$SCRIPT_DIR/comparison_data.py" database "$BENCHMARK_DIR" "$db" "$FASTA_DIR/$subject" "$(command -v "${MAKEBLASTDB_BIN:-makeblastdb}")" "$dbtype"
+            prepared_dbs[$db]=1
         fi
+        # NCBI reference: c++/src/algo/blast/blastinput/blast_args.cpp:3225-3236
+        # if (args.Exist(kArgSubject) && args[kArgSubject].HasValue() &&
+        #     m_NumThreads != CThreadable::kMinNumThreads) { ...
+        #     ERR_POST(Warning << ... << "ignored when 'subject' is specified."); }
+        # Preserve local-subject NCBI rows only for non-TBLASTX distributions.
+        # They are stored separately and are never selected as timing samples.
+        if [[ "$task" != tblastx ]]; then
+            run_timed "$BLAST_OUT_DIR/$ncbi_stem.subject.n1" "$ncbi_bin" "${args[@]}" -num_threads 1
+        fi
+        args[2]=-db
+        args[3]="$db"
         # NCBI reference: c++/src/algo/blast/blastinput/blast_args.cpp:3223-3239
         # if (args.Exist(kArgSubject) && args[kArgSubject].HasValue() &&
         #     m_NumThreads != CThreadable::kMinNumThreads) {
         #     m_NumThreads = CThreadable::kMinNumThreads; ... }
-        # Record both requested counts; -subject explicitly reduces nN to one.
+        # Record both requested counts against -db, where NCBI can use nN.
         run_timed "$BLAST_OUT_DIR/$ncbi_stem.n1" "$ncbi_bin" "${args[@]}" -num_threads 1
         if [[ "$LOSAT_THREADS" != 1 ]]; then
             run_timed "$BLAST_OUT_DIR/$ncbi_stem.n$LOSAT_THREADS" "$ncbi_bin" "${args[@]}" -num_threads "$LOSAT_THREADS"

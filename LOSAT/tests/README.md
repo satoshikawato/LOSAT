@@ -22,8 +22,8 @@ cd tests
 ./plot_execution_time.py
 ```
 
-Requirements: Bash 4+, Node.js with WASI support (use a supported
-LTS version, such as Node 24), NCBI BLAST+ (`blastn`, `blastp`,
+Requirements: Bash 4+, a current Node.js release with WASI support (the current
+frozen snapshot used Node 26.8.2), NCBI BLAST+ (`blastn`, `blastp`,
 `tblastx`, `makeblastdb`), Python 3 with `matplotlib`, `pandas` and `seaborn>=0.12`.
 `--bin LOSAT` builds the command artifact with `_start`; library Wasm artifacts
 cannot run these CLI comparisons. Missing or incorrect artifacts fail explicitly.
@@ -71,6 +71,15 @@ Searches run without a time limit. Failed searches stop the run and are excluded
 from plots. Caught Wasm worker exceptions print their diagnostic and terminate the
 command immediately (SIGTERM, shell exit 143), including while its main thread
 waits inside Wasm. Both Wasm runners preserve explicit WASI exit codes.
+When an agent supervises a long benchmark command, it polls at ten-minute
+intervals to avoid wasting agent/tool tokens; short expected completions and
+immediate failure diagnosis are the only exceptions.
+Formal benchmark collection uses one untimed warmup followed by exactly three
+retained timed repetitions for each case and execution mode. Summaries use the
+median and full three-sample min-max range; no fastest-sample selection is
+allowed. Additional repetitions require an explicit request or evidence that
+the three retained samples are inconclusive. The everyday comparison command
+below remains a one-run diagnostic unless wrapped by that formal protocol.
 No directory settings are needed for normal use. Each comparison saves into a
 new `tests/benchmark-runs/<timestamp>-<pid>/` directory containing `blast_out/`
 and `losat_out/`; the three plotting scripts save into that run's `plots/`.
@@ -172,19 +181,20 @@ LOSAT file naming remains compatible with previous results:
 | Serial Wasm n1 | `<losat_stem>.wasm` |
 | Threaded Wasm nN | `<losat_stem>.wasm.nN` |
 
-Every NCBI task writes `<ncbi_stem>.n1` and `<ncbi_stem>.nN` output/log files.
-BLASTP, BLASTN and megablast use `-subject`, matching LOSAT's local-subject
-search conditions. NCBI `blast_args.cpp:3223–3239` reduces these searches to
-one thread even when nN is requested. Both requested runs are retained, and
-the execution-time caption explicitly identifies their effective n1 behavior.
+Every NCBI timing task writes database-search `<ncbi_stem>.n1` and
+`<ncbi_stem>.nN` output/log files. This avoids the NCBI
+`blast_args.cpp:3223–3239` rule that reduces local-subject searches to one
+thread. BLASTN and BLASTP also write `<ncbi_stem>.subject.n1` solely for hit
+distributions, where the local-subject target is intentionally retained.
+TBLASTX distributions use the database-search n1 output so non-default subject
+genetic codes such as `db_gencode=4` are applied, following NCBI
+`blast_args.cpp:1052–1054`.
 
-TBLASTX retains `-db` to apply non-default subject genetic codes such as
-`db_gencode=4`, following NCBI `blast_args.cpp:1052–1054`. Each run prepares
-one `nucl` database per TBLASTX subject FASTA with `-parse_seqids`.
-Database preparation is outside the search timer; separate `.makeblastdb.log`
-and `.makeblastdb.json` files record its wall time, command, input hash, and
-tool identity. DBs are reused only within that run. Subject-only selections
-do not require `makeblastdb`. Task and genetic-code options remain unchanged.
+Each run prepares a `nucl` or `prot` database per distinct NCBI subject FASTA
+with `-parse_seqids`. Database preparation is outside the search timer;
+separate `.makeblastdb.log` and `.makeblastdb.json` files record its wall time,
+command, input hash, and tool identity. DBs are reused only within that run.
+Task and genetic-code options remain unchanged.
 
 The TBLASTX, BLASTN and megablast fixtures each contain one subject sequence.
 Database searches distribute subject OIDs to search workers
@@ -193,7 +203,7 @@ independent search jobs. In TBLASTX, frames and long-subject chunks are handled
 sequentially within that worker (`blast_engine.c:478–593,804–841`). The nN
 label records the requested count, not a claim that all workers are busy.
 
-Runs using the previous all-DB or single-oracle protocols cannot be plotted
+Runs using previous mixed-target or single-oracle protocols cannot be plotted
 with the current target/thread labels. The plot scripts report that a fresh run is required;
 previous records and rendered figures remain historical evidence.
 
@@ -204,9 +214,10 @@ certification or repeated-sample speed claims. `plots/execution_times.tsv`
 contains the plotted seconds and source log paths. New logs record exit status;
 failed or interrupted runs are excluded. Old logs without explicit successful
 status and matching provenance are historical evidence only and cannot be
-plotted as current results. Timing bars additionally require exact raw equality
-with the same run's NCBI n1 oracle for the selected target, including lexical numeric formatting.
-This check also applies to NCBI nN timing bars.
+plotted as current results. Timing bars retain every successful,
+provenance-verified invocation independently of output equality. Output equality
+is checked separately using the target rules for hit-distribution plots; it does
+not discard a valid database-search wall time.
 
 Per-pair plots accept any available LOSAT series with NCBI. Overall distributions
 use only the intersection of pairs available across the series present in each

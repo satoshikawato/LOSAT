@@ -25,7 +25,8 @@ ROW = "q\ts\t100.000\t30\t0\t0\t1\t30\t1\t30\t1e-10\t50\n"
 
 # NCBI reference: c++/src/algo/blast/blastinput/cmdline_flags.cpp:50,75
 # const string kArgDb("db"); const string kArgNumThreads("num_threads");
-# Both recorded DB thread variants share the n1 raw-output reference.
+# Both recorded DB thread variants share the n1 raw-output reference;
+# distributions select their separately recorded subject oracle as needed.
 class SimpleComparisonTests(unittest.TestCase):
     def setUp(self):
         self.temp = tempfile.TemporaryDirectory()
@@ -118,6 +119,23 @@ class SimpleComparisonTests(unittest.TestCase):
         self.assertTrue(str(paths[data.NCBI_MULTI]).endswith(".n4.out"))
         self.assertTrue(str(paths[data.NATIVE_MULTI]).endswith(".n4.out"))
 
+    # NCBI reference: c++/src/algo/blast/blastinput/blast_args.cpp:1052-1054,3225-3236
+    # Database TBLASTX applies db_gencode; local-subject BLASTN/BLASTP remains
+    # a distribution-only oracle and cannot be relabeled as a threaded timing.
+    def test_distribution_oracle_target_is_program_specific(self):
+        tblastx = self.cases[0]
+        blastp = dict(tblastx, task="blastp", ncbi_stem="example.blastp")
+        self.assertEqual(
+            data.distribution_result_paths(tblastx)[data.NCBI_SINGLE],
+            data.result_paths(tblastx)[data.NCBI_SINGLE],
+        )
+        self.assertTrue(
+            str(data.distribution_result_paths(blastp)[data.NCBI_SINGLE]).endswith(
+                "example.blastp.subject.n1.out"
+            )
+        )
+        self.assertNotIn(data.NCBI_MULTI, data.distribution_result_paths(blastp))
+
     def test_zero_hits_are_present_and_failed_outputs_are_absent(self):
         self.write(self.cases[0], [data.NCBI_SINGLE, data.WASM_SINGLE], row="")
         frames = data.load_case(self.cases[0])
@@ -185,10 +203,10 @@ class SimpleComparisonTests(unittest.TestCase):
         path.with_suffix(".run.json").write_text(json.dumps(record))
         self.assertFalse(data.successful_output(path))
 
-    # NCBI reference: c++/src/objtools/align_format/tabular.cpp:1100-1108
-    # x_PrintField(*iter); m_Ostream << "\n";
-    # Numerically equivalent fields still violate the raw-output timing gate.
-    def test_timing_plot_excludes_lexically_different_output(self):
+    # NCBI reference: c++/src/algo/blast/blastinput/blast_args.cpp:3225-3236
+    # Local-subject searches reduce the requested thread count; database timing
+    # is therefore retained independently of output equality with other targets.
+    def test_timing_plot_keeps_successful_lexically_different_output(self):
         self.write(self.cases[0], [data.NCBI_SINGLE, data.NCBI_MULTI, data.WASM_SINGLE])
         for tool in (data.NCBI_MULTI, data.WASM_SINGLE):
             self.record(data.result_paths(self.cases[0])[tool], ROW.replace("1e-10", "1.0e-10"))
@@ -199,7 +217,10 @@ class SimpleComparisonTests(unittest.TestCase):
             timing.main()
         import pandas as pd
         rows = pd.read_csv(self.root / "plots/execution_times.tsv", sep="\t")
-        self.assertEqual(rows["Tool"].tolist(), [data.NCBI_SINGLE])
+        self.assertEqual(
+            rows["Tool"].tolist(),
+            [data.NCBI_SINGLE, data.NCBI_MULTI, data.WASM_SINGLE],
+        )
 
     # NCBI reference: c++/src/app/blast/blastn_app.cpp:172-176
     # CATCH_ALL(status) ... return status;
@@ -419,7 +440,7 @@ else:
     #     m_NumThreads != CThreadable::kMinNumThreads) { m_NumThreads = ...; }
     # opt.SetDbGeneticCode(args[kArgDbGeneticCode].AsInteger());
     # Exercise the shell boundary for every task, preserving translation options.
-    def test_subject_targets_and_tblastx_database_preserve_both_thread_counts(self):
+    def test_distribution_subjects_and_timing_databases_preserve_both_thread_counts(self):
         (self.scripts / "fasta/query.fna").write_text(">q\nACGTACGT\n")
         (self.scripts / "fasta/subject.fna").write_text(">s\nACGTACGT\n")
         header = "task\tquery\tsubject\tname\tlosat_stem\tncbi_stem\tquery_gencode\tdb_gencode\n"
@@ -439,7 +460,7 @@ else:
                     BLASTN_BIN=str(self.oracle), TBLASTX_BIN=str(self.oracle))
                 self.assertEqual(result.returncode, 0, result.stderr)
                 records = list((directory / "blast_out").glob("*.run.json"))
-                self.assertEqual(len(records), 5 if n == 1 else 10)
+                self.assertEqual(len(records), 8 if n == 1 else 13)
                 for task in tasks:
                     for threads in sorted({1, n}):
                         record = json.loads((directory / f"blast_out/{task}.n{threads}.run.json").read_text())
@@ -447,19 +468,21 @@ else:
                         self.assertEqual(args[args.index("-num_threads") + 1], str(threads))
                         if task in {"blastn", "megablast"}:
                             self.assertEqual(args[args.index("-task") + 1], task)
+                        self.assertNotIn("-subject", args)
+                        db = Path(args[args.index("-db") + 1])
+                        self.assertEqual(db.parent.name, "prot" if task == "blastp" else "nucl")
+                        self.assertIn(str(db) + ".synthetic", record["files"])
                         if task == "tblastx":
-                            self.assertNotIn("-subject", args)
-                            db = Path(args[args.index("-db") + 1])
-                            self.assertEqual(db.parent.name, "nucl")
-                            self.assertIn(str(db) + ".synthetic", record["files"])
                             for option in ("-query_gencode", "-db_gencode"):
                                 self.assertEqual(args[args.index(option) + 1], "4")
                         else:
-                            self.assertNotIn("-db", args)
+                            distribution = json.loads((directory / f"blast_out/{task}.subject.n1.run.json").read_text())
+                            distribution_args = distribution["ordered_argv"]
+                            self.assertNotIn("-db", distribution_args)
                             ext = "faa" if task == "blastp" else "fna"
-                            self.assertEqual(args[args.index("-subject") + 1], str(self.scripts / f"fasta/subject.{ext}"))
+                            self.assertEqual(distribution_args[distribution_args.index("-subject") + 1], str(self.scripts / f"fasta/subject.{ext}"))
                 builds = list((directory / "blast_out/db").rglob("*.makeblastdb.json"))
-                self.assertEqual(len(builds), 1)
+                self.assertEqual(len(builds), 2)
                 for build in builds:
                     record = json.loads(build.read_text())
                     args = record["ordered_argv"]
@@ -467,15 +490,16 @@ else:
                     self.assertGreaterEqual(record["wall_seconds"], 0)
         # NCBI reference: c++/src/algo/blast/blastinput/cmdline_flags.cpp:50-51
         # const string kArgDb("db"); const string kArgSubject("subject");
-        # A subject-only selection neither requires nor invokes makeblastdb.
-        directory = self.root / "subject-only"
+        # Even a non-TBLASTX timing selection requires a prepared database;
+        # the extra -subject output remains distribution-only.
+        directory = self.root / "blastn-blastp-db"
         result = self.run_comparison(
             BENCHMARK_DIR=str(directory), BENCHMARK_PROGRAMS="blastn,megablast,blastp",
             BENCHMARK_CASE="", RUN_NATIVE="0", BLASTN_BIN=str(self.oracle),
-            MAKEBLASTDB_BIN=str(self.root / "missing-makeblastdb"))
+            MAKEBLASTDB_BIN=str(self.makeblastdb))
         self.assertEqual(result.returncode, 0, result.stderr)
-        self.assertFalse((directory / "blast_out/db").exists())
-        self.assertEqual(len(list((directory / "blast_out").glob("*.run.json"))), 6)
+        self.assertTrue((directory / "blast_out/db").exists())
+        self.assertEqual(len(list((directory / "blast_out").glob("*.run.json"))), 9)
 
     # NCBI reference: c++/src/app/blast/blastn_app.cpp:172-176
     # CATCH_ALL(status) ... return status;
@@ -501,7 +525,7 @@ else:
         self.assertEqual(result.returncode, 0, result.stderr)
         path = self.latest() / "run.json"
         manifest = json.loads(path.read_text())
-        for schema in ("losat-simple-comparison-v2", "losat-simple-comparison-v3"):
+        for schema in ("losat-simple-comparison-v2", "losat-simple-comparison-v3", "losat-simple-comparison-v4"):
             with self.subTest(schema=schema):
                 manifest["schema"] = schema
                 path.write_text(json.dumps(manifest))

@@ -371,13 +371,11 @@ def render_hit_distribution(
         frameon=False,
         bbox_to_anchor=(0.5, 0.945),
     )
-    fig.suptitle(
-        "Certified v0.1.0 alignment-output distributions", fontsize=18, y=0.987
-    )
+    fig.suptitle("LOSAT vs NCBI BLAST+ hit distributions", fontsize=18, y=0.987)
     fig.text(
         0.5,
         0.957,
-        "Recovered PR 5 native evidence · LOSAT 5845d22 · NCBI BLAST+ 2.17.0 · contract-output weighting",
+        "Current native benchmark · TBLASTX: NCBI -db · BLASTN/BLASTP: NCBI -subject",
         ha="center",
         fontsize=10,
         color="#4b5563",
@@ -385,8 +383,7 @@ def render_hit_distribution(
     fig.text(
         0.5,
         0.012,
-        "Includes six approved local-subject non-default db-gencode deviation contracts and one source-undetermined BLASTN contract; this is not a parity score. "
-        "Duplicate BLASTP thread-4 outputs are retained in the snapshot but excluded here.",
+        "Paired outfmt 6 outputs match row-for-row for every plotted case. This figure characterizes computation output; it is not biological interpretation.",
         ha="center",
         va="bottom",
         fontsize=8.2,
@@ -522,7 +519,11 @@ def render_historical_timing_panel(axis, rows: list[dict[str, str]], mode: str) 
     axis.grid(False, axis="y")
 
 
-def summarize_current_timing(rows: list[dict[str, str]]) -> list[dict[str, object]]:
+def summarize_current_timing(
+    rows: list[dict[str, str]], timed_repetitions: int
+) -> list[dict[str, object]]:
+    if timed_repetitions < 1:
+        raise ValueError("timed repetitions must be positive")
     case_order = list(dict.fromkeys(row["case_id"] for row in rows))
     summaries: list[dict[str, object]] = []
     for case_id in case_order:
@@ -532,11 +533,12 @@ def summarize_current_timing(rows: list[dict[str, str]]) -> list[dict[str, objec
                 for row in rows
                 if row["case_id"] == case_id and row["mode"] == mode
             ]
-            if len(group) != 5:
+            if len(group) != timed_repetitions:
                 raise ValueError(
-                    f"current timing group must contain five samples: {case_id} {mode}"
+                    f"current timing group must contain {timed_repetitions} samples: {case_id} {mode}"
                 )
-            if {row["sample_index"] for row in group} != {"1", "2", "3", "4", "5"}:
+            expected_indexes = {str(index) for index in range(1, timed_repetitions + 1)}
+            if {row["sample_index"] for row in group} != expected_indexes:
                 raise ValueError(f"invalid sample indexes: {case_id} {mode}")
             if {row["warmup_count"] for row in group} != {"1"}:
                 raise ValueError(f"invalid warmup count: {case_id} {mode}")
@@ -599,18 +601,23 @@ def render_execution_time(
     if not isinstance(current_meta, dict):
         raise ValueError("current timing provenance must be an object")
     current = [row for row in rows if row["provenance_id"] == current_id]
-    if not history or not pr93 or not current:
-        raise ValueError(
-            "execution snapshot must contain current, historical, and PR 93 provenance groups"
-        )
-    summaries = summarize_current_timing(current)
+    if not current:
+        raise ValueError("execution snapshot must contain a current provenance group")
+    protocol = current_meta.get("protocol")
+    if not isinstance(protocol, dict):
+        raise ValueError("current timing provenance is missing its protocol")
+    timed_repetitions = int(protocol.get("timed_repetitions_per_tool_case", 0))
+    warmup_count = int(protocol.get("warmup_count_per_tool_case", 0))
+    summaries = summarize_current_timing(current, timed_repetitions)
     cases = list(dict.fromkeys(row["case_id"] for row in current))
     labels = {
         "PesePMNV.MjPMNV.task_blastn": "PesePMNV /\nMjPMNV",
         "Sakai.MG1655.megablast": "Sakai / MG1655†",
         "pairwise_default_serial": "Pairwise default",
+        "WSSV.PajaWSV.blastp": "WSSV / PajaWSV",
         "p03_mela_pemojnva": "p03 · MelaMJNV /\nPemoMJNVA",
         "d06_ap027131_ap027133_db4": "d06 · AP027131 /\nAP027133 (db4)‡",
+        "d04_ap027131_ap027133_code4": "d04 · AP027131 /\nAP027133 (code 4)",
         "p11_avclpv_psclpv": "p11 · AvCLPV /\nPsCLPV",
     }
     case_programs = {row["case_id"]: row["program"] for row in summaries}
@@ -689,10 +696,10 @@ def render_execution_time(
         axis.tick_params(axis="y", length=0, pad=8)
     for axis in list(axes.flat)[len(facets):]:
         fig.delaxes(axis)
-    fig.suptitle("LOSAT v0.1.0 execution time", fontsize=18, y=0.985)
+    fig.suptitle("LOSAT execution time", fontsize=18, y=0.985)
     fig.text(
         0.5, 0.945,
-        "Bars: median of five timed samples · Whiskers: retained min–max · Independent linear axes",
+        f"Bars: median of {timed_repetitions} timed samples · Whiskers: retained min–max · Independent linear axes",
         ha="center", fontsize=11, color="#4b5563",
     )
     fig.legend(
@@ -707,8 +714,8 @@ def render_execution_time(
     fig.text(
         0.5,
         0.064,
-        "Threaded Wasm: requested n8; effective threaded for BLASTP, effective serial for current BLASTN/TBLASTX probes.\n"
-        "† Source-undetermined accepted contract. ‡ Approved local-subject db-gencode deviation.",
+        "NCBI BLAST+ timings use prebuilt -db targets; database construction is excluded. Thread labels are requested configurations.\n"
+        "Hit-distribution target rules are independent of these timing targets.",
         ha="center",
         va="bottom",
         fontsize=8.5,
@@ -718,8 +725,8 @@ def render_execution_time(
     fig.text(
         0.5,
         0.012,
-        "Same-machine controlled benchmark · two WSL boot segments · binaries/toolchains revalidated after restart.\n"
-        f"Protocol warmup: 1 · resume warmups excluded · {len(history)} historical rows and {len(pr93)} PR 93 scalar values excluded from this figure.",
+        "Same-machine controlled benchmark · regular-file output · process startup and Wasm compilation included.\n"
+        f"Protocol warmup: {warmup_count} · retained timed repetitions: {timed_repetitions}.",
         ha="center",
         va="bottom",
         fontsize=8,

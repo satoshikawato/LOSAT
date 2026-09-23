@@ -99,6 +99,10 @@ class RendererTests(unittest.TestCase):
                                 "os": "unit-test OS",
                             },
                             "ncbi_version": "2.17.0+",
+                            "protocol": {
+                                "warmup_count_per_tool_case": 1,
+                                "timed_repetitions_per_tool_case": 3,
+                            },
                             "used_for_current_plot": True,
                         }
                     },
@@ -207,7 +211,7 @@ class RendererTests(unittest.TestCase):
                 ),
                 start=1,
             ):
-                for sample_index in range(1, 6):
+                for sample_index in range(1, 4):
                     seconds = mode_index + sample_index / 10
                     writer.writerow(
                         [
@@ -336,15 +340,15 @@ class RendererTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "checksum mismatch"):
             RENDERER.verified_dataset_path(self.snapshot, metadata, "execution_times")
 
-    def test_current_timing_uses_all_five_samples_and_median(self) -> None:
+    def test_current_timing_uses_all_configured_samples_and_median(self) -> None:
         rows = RENDERER.load_timing_rows(self.snapshot / "execution_times.tsv")
         current = [row for row in rows if row["provenance_id"] == "unit_current"]
-        summaries = RENDERER.summarize_current_timing(current)
+        summaries = RENDERER.summarize_current_timing(current, 3)
         self.assertEqual(len(summaries), 6)
-        self.assertEqual([summary["n"] for summary in summaries], [5] * 6)
+        self.assertEqual([summary["n"] for summary in summaries], [3] * 6)
         self.assertEqual(
             [summary["median"] for summary in summaries],
-            [1.3, 2.3, 3.3, 4.3, 5.3, 6.3],
+            [1.2, 2.2, 3.2, 4.2, 5.2, 6.2],
         )
         self.assertEqual(
             [summary["min"] for summary in summaries],
@@ -352,7 +356,7 @@ class RendererTests(unittest.TestCase):
         )
         self.assertEqual(
             [summary["max"] for summary in summaries],
-            [1.5, 2.5, 3.5, 4.5, 5.5, 6.5],
+            [1.3, 2.3, 3.3, 4.3, 5.3, 6.3],
         )
 
     # NCBI reference: ncbi-blast/c++/src/algo/blast/blastinput/blastn_args.cpp:48,55-61
@@ -389,12 +393,12 @@ class RendererTests(unittest.TestCase):
         expected_facets = {
             "TBLASTX": [
                 "p03_mela_pemojnva",
-                "d06_ap027131_ap027133_db4",
+                "d04_ap027131_ap027133_code4",
                 "p11_avclpv_psclpv",
             ],
             "BLASTN": ["PesePMNV.MjPMNV.task_blastn"],
             "Megablast": ["Sakai.MG1655.megablast"],
-            "BLASTP": ["pairwise_default_serial"],
+            "BLASTP": ["WSSV.PajaWSV.blastp"],
         }
         self.assertEqual(
             [axis.get_title() for axis in figure.axes], list(expected_facets)
@@ -441,9 +445,9 @@ class RendererTests(unittest.TestCase):
                 for case in cases for mode in RENDERER.TIMING_MODES
             )
             self.assertLess(axis.get_xlim()[1], facet_max * 1.25)
-        self.assertEqual(len(plot_data["current"]["samples"]), 180)
+        self.assertEqual(len(plot_data["current"]["samples"]), 108)
         self.assertEqual(len(plot_data["current"]["summaries"]), 36)
-        self.assertEqual([row["n"] for row in summaries], [5] * 36)
+        self.assertEqual([row["n"] for row in summaries], [3] * 36)
         self.assertEqual(plot_data, expected)
 
     def test_snapshot_file_cannot_escape_snapshot(self) -> None:

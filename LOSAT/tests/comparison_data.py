@@ -56,8 +56,8 @@ def require_plot_run():
     # NCBI reference: c++/src/algo/blast/blastinput/cmdline_flags.cpp:50-51,75
     # const string kArgDb("db"); const string kArgSubject("subject");
     # const string kArgNumThreads("num_threads");
-    # Previous all-DB or single-oracle runs cannot acquire the current target labels.
-    if RUN_MANIFEST.get("schema") != "losat-simple-comparison-v4":
+    # Previous mixed-target or single-oracle runs cannot acquire the current labels.
+    if RUN_MANIFEST.get("schema") != "losat-simple-comparison-v5":
         raise SystemExit(f"Comparison at {RESULT_DIR} uses the previous target/thread protocol; rerun ./run_comparison.sh for the current BLAST+ target and n1/nN plots.")
     print(f"Using comparison results: {RESULT_DIR}")
 
@@ -120,7 +120,7 @@ def comparison_cases():
 
 
 def result_paths(case, extension="out"):
-    """Keep n1/native, nN/native and serial/threaded Wasm distinct, including N=1."""
+    """Return timing paths; every NCBI timing path is a database search."""
     native = RESULT_DIR / "losat_out" / case["losat_stem"]
     ncbi = RESULT_DIR / "blast_out" / case["ncbi_stem"]
     single = str(native)
@@ -141,6 +141,28 @@ def result_paths(case, extension="out"):
         paths[WASM_THREADED_SINGLE] = f"{native}.wasm.n1"
     paths[WASM_MULTI] = f"{native}.wasm.n{LOSAT_THREADS}"
     return {tool: Path(f"{stem}.{extension}") for tool, stem in paths.items()}
+
+
+# NCBI reference: c++/src/algo/blast/blastinput/blast_args.cpp:1052-1054,3225-3236
+# if (m_Target == eDatabase && args[kArgDbGeneticCode] &&
+#     (program == eTblastn || program == eTblastx)) opt.SetDbGeneticCode(...);
+# if (args.Exist(kArgSubject) && args[kArgSubject].HasValue() &&
+#     m_NumThreads != CThreadable::kMinNumThreads) m_NumThreads = ...;
+# Use the DB oracle for TBLASTX distributions, but preserve local-subject
+# NCBI distributions for BLASTN and BLASTP independently of timing targets.
+def distribution_result_paths(case, extension="out"):
+    paths = result_paths(case, extension)
+    ncbi = RESULT_DIR / "blast_out" / case["ncbi_stem"]
+    reference = (
+        paths[NCBI_SINGLE]
+        if case["task"] == "tblastx"
+        else Path(f"{ncbi}.subject.n1.{extension}")
+    )
+    return {
+        tool: path
+        for tool, path in paths.items()
+        if tool not in {NCBI_SINGLE, NCBI_MULTI}
+    } | {NCBI_SINGLE: reference}
 
 
 # NCBI reference: c++/src/objtools/align_format/tabular.cpp:1100-1108
@@ -200,7 +222,7 @@ def record_cli(argv):
             # NCBI reference: c++/src/algo/blast/blastinput/cmdline_flags.cpp:50-51,75
             # const string kArgDb("db"); const string kArgSubject("subject");
             # const string kArgNumThreads("num_threads");
-            "schema": "losat-simple-comparison-v4", "run_id": run_id,
+            "schema": "losat-simple-comparison-v5", "run_id": run_id,
             "status": "RUNNING",
             "started_utc": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
             "node_argv": [os.environ.get("NODE_BIN", "node"), *node_args()],
@@ -315,7 +337,7 @@ def load_case(case):
     """Load available outputs, including valid zero-hit files, paired with NCBI."""
     import pandas as pd
 
-    paths = result_paths(case)
+    paths = distribution_result_paths(case)
     # NCBI reference: c++/src/algo/blast/blastinput/cmdline_flags.cpp:75
     # const string kArgNumThreads("num_threads");
     if not successful_output(paths[NCBI_SINGLE]):

@@ -119,6 +119,31 @@ authoritative, current guidance for agent behavior in LOSAT.
   be proven byte-identical on the relevant fixtures, keep it disabled or remove
   it.
 
+### Benchmark target protocol
+- Treat repository benchmark figures as compute-program benchmarks, not as
+  biological interpretation or downstream bioinformatics analysis.
+- While a long benchmark command is running, poll its status at ten-minute
+  intervals to conserve agent/tool tokens. Short expected completions and
+  immediate failure diagnosis are the only exceptions; do not busy-poll.
+- The standard formal benchmark protocol is one untimed warmup followed by
+  exactly three retained timed repetitions for every case and execution mode.
+  Report the median and the full three-sample min-max range; never select the
+  fastest sample. Add repetitions only when the user explicitly requests them
+  or the three retained samples are demonstrably inconclusive.
+- For NCBI BLAST+ execution-time measurements, prepare the subject with
+  `makeblastdb` before timing and run every timed BLASTN, BLASTP, and TBLASTX
+  search with `-db`. Exclude database-construction time from search wall time and
+  retain the database-build command, version, input checksum, and elapsed time as
+  separate provenance. Do not use `-subject` timings as multithreaded NCBI
+  results: NCBI reduces local-subject searches to one thread.
+- For hit-distribution figures, use NCBI `-subject` output for BLASTN and BLASTP,
+  but use NCBI `-db` output for TBLASTX. TBLASTX database searches must pass the
+  matching `-db_gencode`, including genetic code 4, so the plotted NCBI subject
+  translation is comparable to LOSAT's intentional local-subject behavior.
+- Keep timing targets and distribution targets in separately named outputs and
+  metadata. Never relabel a local-subject NCBI output as a threaded timing or a
+  BLASTN/BLASTP database output as the local-subject distribution oracle.
+
 ---
 
 ## Critical Parity Notes (TBLASTX)

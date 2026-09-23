@@ -6,7 +6,10 @@
 mod alignment;
 pub mod args;
 pub mod blast_engine;
-mod encoding;
+// NCBI c++/src/algo/blast/core/blast_setup.c:382-385:
+// if (Blast_QueryIsProtein(program_number)) BLAST_ScoreSetAmbigRes(sbp, 'X');
+// BLASTP and TBLASTN both encode an untranslated protein query in NCBISTDAA.
+pub(crate) mod encoding;
 mod extension;
 mod gapalign;
 mod hsp;

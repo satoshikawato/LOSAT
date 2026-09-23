@@ -1,0 +1,14 @@
+   Compiling LOSAT v0.1.0 (/mnt/c/Users/genom/GitHub/LOSAT/LOSAT)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 19.14s
+     Running unittests src/lib.rs (target/debug/deps/LOSAT-58175ff142d19059)
+
+running 4 tests
+fixture=code32 code1_seeds=160 code32_seeds=199
+test algorithm::tblastn::search_seed::tests::code_32_changes_search_words_and_ambiguity_fails_explicitly ... ok
+fixture=low_complexity seg_off_seeds=41536 seg_on_seeds=0
+test algorithm::tblastn::search_seed::tests::seg_suppresses_low_complexity_query_seeds ... ok
+test algorithm::tblastn::search_seed::tests::six_frame_translation_and_seed_coverage ... ok
+test algorithm::tblastn::search_seed::tests::ncbi_saved_init_seeds_exist_in_rust_word_scan ... ok
+
+test result: ok. 4 passed; 0 failed; 0 ignored; 0 measured; 437 filtered out; finished in 0.18s
+

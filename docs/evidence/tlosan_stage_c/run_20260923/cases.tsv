@@ -1,0 +1,14 @@
+subject	feature	length_nt
+plus1	frame 1	362
+plus2	frame 2	362
+plus3	frame 3	362
+minus1	frame 1	362
+minus2	frame 2	362
+minus3	frame 3	362
+partial_codon	partial_codon	362
+ambiguous	ambiguous	360
+internal_stop	internal_stop	360
+low_complexity	low_complexity	360
+no_hit	no_hit	360
+tie_a	tie_a	360
+tie_b	tie_b	360

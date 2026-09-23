@@ -468,6 +468,7 @@ fn redo_preliminary_blastp_hit(
         gap_extend,
         x_drop,
         gap_scratch,
+        None,
     )?;
 
     let alignment_len = aligned

@@ -2113,6 +2113,7 @@ pub(crate) fn blast_gapped_alignment_with_traceback(
         gap_extend,
         x_drop,
         &mut scratch,
+        None,
     )
 }
 
@@ -2122,6 +2123,9 @@ pub(crate) fn blast_gapped_alignment_with_traceback(
 // gapAlign->gap_x_dropoff = gapping_params->x_dropoff;
 // status = BLAST_GappedAlignmentWithTraceback(..., gapAlign, ...);
 // ```
+// NCBI c++/src/algo/blast/core/blast_gapalign.c:4549-4554,4620-4643:
+// Int2 BLAST_GappedAlignmentWithTraceback(..., Boolean * fence_hit);
+// if ((! (fence_hit && *fence_hit)) && ...) { /* right extension */ }
 pub(crate) fn blast_gapped_alignment_with_traceback_with_scratch(
     query: &[u8],
     subject: &[u8],
@@ -2133,6 +2137,7 @@ pub(crate) fn blast_gapped_alignment_with_traceback_with_scratch(
     gap_extend: i32,
     x_drop: i32,
     scratch: &mut GapAlignScratch,
+    mut fence_hit_out: Option<&mut bool>,
 ) -> Option<BlastpGapAlignResult> {
     if q_start >= query.len() || s_start >= subject.len() {
         return None;
@@ -2231,6 +2236,12 @@ pub(crate) fn blast_gapped_alignment_with_traceback_with_scratch(
         &mut subject_stop,
     );
 
+    // NCBI c++/src/algo/blast/core/blast_gapalign.c:4620-4643:
+    // if ((! (fence_hit && *fence_hit)) && ...) { /* right extension */ }
+    // The caller must see the fence flag before deciding whether to retry.
+    if let Some(out) = fence_hit_out.as_deref_mut() {
+        *out = fence_hit;
+    }
     if edit_script.is_empty() || query_stop <= query_start || subject_stop <= subject_start {
         return None;
     }

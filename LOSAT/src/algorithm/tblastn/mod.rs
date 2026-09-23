@@ -10,4 +10,9 @@ mod search_seed;
 // status = s_BlastAaWordFinder_TwoHit(..., init_hitlist, ...);
 // Blast_InitHitListSortByScore(init_hitlist);
 mod search_init;
+// NCBI c++/src/algo/blast/core/blast_engine.c:522-552:
+// aux_struct->GetGappedScore(..., init_hitlist, &hsp_list, ...);
+// Blast_HSPListPurgeHSPsWithCommonEndpoints(...);
+// Blast_HSPListSortByScore(hsp_list);
+mod search_gapped;
 pub use args::TblastnArgs;

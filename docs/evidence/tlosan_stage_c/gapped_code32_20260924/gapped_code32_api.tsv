@@ -1,0 +1,4 @@
+code	call	init_index	q_seed	s_seed	init_q_start	init_s_start	init_length	init_raw	hsp_index	hsp_raw	context	query_frame	q_start	q_end	q_gapped_start	subject_frame	s_start	s_end	s_gapped_start
+1	0	0	3	3	0	0	120	656	0	656	0	0	0	120	29	1	0	120	29
+32	0	0	3	3	0	0	120	656	0	656	0	0	0	120	29	1	0	120	29
+32	1	0	24	105	21	102	6	16	0	16	0	0	21	27	24	-3	102	108	105

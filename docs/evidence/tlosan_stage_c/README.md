@@ -1,6 +1,10 @@
 # TLOSAN v0.2.0 Stage C work record — incomplete
 
-**Continuation after `ad3e8381`:** [CONTINUATION_20260923.md](CONTINUATION_20260923.md) records the newer exact preliminary comparisons and the remaining Stage C gate. The status tables below describe the earlier checkpoint.
+**Latest checkpoint:** [CONTINUATION_20260924.md](CONTINUATION_20260924.md)
+records exact gapped HSP comparisons on bounded fixtures and the still-open
+Stage C gate.
+
+**Prior checkpoint after `ad3e8381`:** [CONTINUATION_20260923.md](CONTINUATION_20260923.md) records the exact preliminary comparisons. The status tables below describe the initial checkpoint.
 
 Branch: feature/tlosan-tblastn-v0.2.0. Starting tree: clean at b478d701.
 NCBI source: 598d8ae6a72b923127ba2fbfaffd48e4c83bfbf4.

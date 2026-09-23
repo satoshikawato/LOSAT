@@ -1,5 +1,9 @@
 # TLOSAN v0.2.0 Stage C continuation — still incomplete
 
+**Newer checkpoint:** [CONTINUATION_20260924.md](CONTINUATION_20260924.md)
+records the bounded gapped-HSP and traceback comparisons; Stage C remains
+incomplete.
+
 Branch: `feature/tlosan-tblastn-v0.2.0`; starting commit:
 `ad3e8381fbdda721a41e483e11f6e6f237a18014` (clean working tree).
 Authority: NCBI C/C++ commit `598d8ae6a72b923127ba2fbfaffd48e4c83bfbf4`;

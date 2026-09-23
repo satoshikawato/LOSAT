@@ -1,0 +1,5 @@
+call	oid	subject	pass	fence	status	count_before	count_after	index	before_raw	before_frame	before_q_start	before_q_end	before_s_start	before_s_end	after_raw	after_frame	after_q_start	after_q_end	after_s_start	after_s_end
+0	0	upper	1	1	0	1	1	0	656	1	0	120	0	120	656	1	0	120	0	120
+1	0	upper	2	0	0	1	1	0	656	1	0	120	0	120	656	1	0	120	0	120
+2	2	middle	1	1	0	1	1	0	656	1	0	120	0	120	656	1	0	120	0	120
+3	2	middle	2	0	0	1	1	0	656	1	0	120	0	120	656	1	0	120	0	120

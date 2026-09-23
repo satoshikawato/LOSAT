@@ -4,7 +4,7 @@ use std::ffi::OsString;
 
 use clap::{error::ErrorKind, CommandFactory, Parser, Subcommand};
 
-use crate::algorithm::{blastn, blastp, tblastx};
+use crate::algorithm::{blastn, blastp, tblastn, tblastx};
 
 // NCBI reference: c++/src/algo/blast/blastinput/cmdline_flags.cpp:46-94
 // ```c++
@@ -32,6 +32,10 @@ pub enum Commands {
     Blastp(blastp::BlastpArgs),
     /// Pairwise 6-frame translated nucleotide alignment (tblastx)
     Tblastx(tblastx::TblastxArgs),
+    // NCBI c++/src/algo/blast/blastinput/tblastn_args.cpp:47-52:
+    // static const string kProgram("tblastn"); SetTask("tblastn");
+    /// Protein query vs translated nucleotide subject (search unimplemented)
+    Tblastn(tblastn::TblastnArgs),
 }
 
 // NCBI reference: c++/src/algo/blast/blastinput/blast_args.cpp:166-170,203-207,332-349
@@ -76,6 +80,15 @@ where
             .get_arguments()
             .find(|arg| arg.get_long() == Some(name))
         else {
+            // NCBI c++/src/algo/blast/blastinput/tblastn_args.cpp:64-129:
+            // m_Args.push_back(arg) registers shared, formatting, DB, and PSI groups.
+            // The named NCBI options below have no Stage B Rust behavior.
+            if scope.get_name() == "tblastn" && is_unported_tblastn_arg(name) {
+                return Err(clap::Error::raw(
+                    ErrorKind::InvalidValue,
+                    format!("unsupported TBLASTN option '-{name}': Rust behavior is unimplemented"),
+                ));
+            }
             return Err(clap::Error::raw(
                 ErrorKind::UnknownArgument,
                 format!("unknown option or argument '{text}'; use -help for CLI v2 syntax"),
@@ -133,4 +146,56 @@ pub fn render_message(error: &clap::Error) -> String {
         .replace("'-h'", "'-help'")
         .replace("-h, --help", "-help")
         .replace("-V, --version", "--version")
+}
+
+// NCBI reference: c++/src/algo/blast/blastinput/tblastn_args.cpp:64-129
+// ```c++
+// m_BlastDbArgs.Reset(new CBlastDatabaseArgs);
+// arg.Reset(new CGenericSearchArgs(kQueryIsProtein));
+// m_HspFilteringArgs.Reset(new CHspFilteringArgs);
+// m_FormattingArgs.Reset(new CFormattingArgs);
+// m_PsiBlastArgs.Reset(new CPsiBlastArgs(CPsiBlastArgs::eNucleotideDb));
+// ```
+// Names are from the pinned 2.17.0+ -help and have no implemented Rust path yet.
+fn is_unported_tblastn_arg(name: &str) -> bool {
+    matches!(
+        name,
+        "query_loc"
+            | "show_gis"
+            | "num_descriptions"
+            | "num_alignments"
+            | "line_length"
+            | "html"
+            | "sorthits"
+            | "sorthsps"
+            | "lcase_masking"
+            | "gilist"
+            | "seqidlist"
+            | "negative_gilist"
+            | "negative_seqidlist"
+            | "taxids"
+            | "negative_taxids"
+            | "taxidlist"
+            | "negative_taxidlist"
+            | "no_taxid_expansion"
+            | "entrez_query"
+            | "db_soft_mask"
+            | "db_hard_mask"
+            | "qcov_hsp_perc"
+            | "max_hsps"
+            | "culling_limit"
+            | "best_hit_overhang"
+            | "best_hit_score_edge"
+            | "subject_besthit"
+            | "dbsize"
+            | "searchsp"
+            | "import_search_strategy"
+            | "export_search_strategy"
+            | "xdrop_ungap"
+            | "xdrop_gap"
+            | "xdrop_gap_final"
+            | "parse_deflines"
+            | "mt_mode"
+            | "use_sw_tback"
+    )
 }

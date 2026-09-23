@@ -17,7 +17,12 @@ fn parse(program: &str, extra: &[&str]) -> Result<Cli, clap::Error> {
 
 #[test]
 fn canonical_options_for_every_program() {
-    for (program, word) in [("blastn", "11"), ("blastp", "3"), ("tblastx", "3")] {
+    for (program, word) in [
+        ("blastn", "11"),
+        ("blastp", "3"),
+        ("tblastx", "3"),
+        ("tblastn", "3"),
+    ] {
         let cli = parse(
             program,
             &[
@@ -46,6 +51,13 @@ fn canonical_options_for_every_program() {
                 assert_eq!(a.max_target_seqs, 9);
             }
             Commands::Tblastx(a) => {
+                assert_eq!(a.num_threads, 4);
+                assert_eq!(a.evalue, 0.001);
+                assert_eq!(a.max_target_seqs, 9);
+            }
+            // NCBI tblastn_args.cpp:55-62: SetTask(kDefaultTask);
+            // blast_args.cpp:2726-2731: AddOptionalKey(kArgMaxTargetSequences, ...);
+            Commands::Tblastn(a) => {
                 assert_eq!(a.num_threads, 4);
                 assert_eq!(a.evalue, 0.001);
                 assert_eq!(a.max_target_seqs, 9);

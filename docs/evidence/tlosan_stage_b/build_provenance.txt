@@ -1,0 +1,10 @@
+branch: feature/tlosan-tblastn-v0.2.0
+starting parent: 55e656cddb8e0b41ed9d1ec625ca52aff7eb1436
+pinned NCBI commit: 598d8ae6a72b923127ba2fbfaffd48e4c83bfbf4
+platform: Linux-5.15.167.4-microsoft-standard-WSL2-x86_64-with-glibc2.39
+rustc: rustc 1.92.0 (ded5c06cf 2025-12-08)
+cargo: cargo 1.92.0 (344c4567c 2025-10-21)
+LOSAT release binary sha256: 5ca139c1fd397185f60d97fbacf6963338958f383f72a2c3e5b836504e3a5f40
+Stage A source checksum log: stage_a_source_checksum.log
+Stage A CLI output checksum log: stage_a_cli_checksum.log
+Stage A API output checksum log: stage_a_api_checksum.log

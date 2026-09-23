@@ -1,0 +1,15 @@
+   Compiling LOSAT v0.1.0 (/mnt/c/Users/genom/GitHub/LOSAT/LOSAT)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 49.27s
+     Running tests/cli_v2.rs (target/debug/deps/cli_v2-9181c57f9b0e26e7)
+
+running 8 tests
+test flags_and_value_tokens_are_not_reinterpreted ... ok
+test canonical_options_for_every_program ... ok
+test legacy_and_unsupported_syntax_is_unknown ... ok
+test defaults_and_task_overrides_remain_distinct ... ok
+test filtering_has_exactly_one_shared_value_grammar ... ok
+test composition_tokens_round_trip_and_reject_suffix_garbage ... ok
+test output_capabilities_fail_explicitly_and_help_is_canonical ... ok
+test numeric_values_are_validated_before_io ... ok
+
+test result: ok. 8 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.03s

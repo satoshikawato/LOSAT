@@ -10,4 +10,9 @@
 pub mod blastn;
 pub mod blastp;
 pub mod common;
+// NCBI reference: c++/src/algo/blast/blastinput/tblastn_args.cpp:45-62
+// static const string kProgram("tblastn");
+// static const char kDefaultTask[] = "tblastn";
+// SetTask(kDefaultTask);
+pub mod tblastn;
 pub mod tblastx;

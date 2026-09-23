@@ -1,7 +1,7 @@
 #![allow(warnings, clippy::all)]
 
 use anyhow::Result;
-use LOSAT::algorithm::{blastn, blastp, tblastx};
+use LOSAT::algorithm::{blastn, blastp, tblastn, tblastx};
 use LOSAT::cli::{Cli, Commands};
 
 fn main() -> Result<()> {
@@ -35,6 +35,12 @@ fn main() -> Result<()> {
         }
         Commands::Tblastx(args) => {
             tblastx::run(args)?;
+        }
+        // NCBI c++/src/app/blast/tblastn_app.cpp:288-301:
+        // results = lcl_blast.Run();
+        // formatter.PrintOneResultSet(**result, query);
+        Commands::Tblastn(args) => {
+            tblastn::TblastnArgs::run(args)?;
         }
     }
     Ok(())

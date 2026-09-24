@@ -2,6 +2,8 @@
 
 Branch: `feature/tlosan-tblastn-v0.2.0`; Stage C fixed-input gate: [STAGE_C_GATE_20260924.md](../tlosan_stage_c/STAGE_C_GATE_20260924.md). Pinned NCBI source: `598d8ae6a72b923127ba2fbfaffd48e4c83bfbf4`. This is a **Stage D diagnostic checkpoint, not a Stage D pass**. The Rust TBLASTN path still accepts NCBI-recorded C-stage parameters as comparison inputs and the public CLI still reports unimplemented. No Stage E work is authorized by this evidence.
 
+**2026-09-25 continuation:** [CHECKPOINT_KAPPA_REDO_20260925.md](CHECKPOINT_KAPPA_REDO_20260925.md) records the translated get-range connection, function-level redo/score/identity/heap comparisons, and the comparison-only local code-32 API oracle. It supersedes the open Kappa boundary below; the integrated C→D path and Stage E remain incomplete.
+
 **2026-09-24 correction:** [CHECKPOINT_PARAMETERS_LINKING_20260924.md](CHECKPOINT_PARAMETERS_LINKING_20260924.md) supersedes the call-state hypothesis in this note. A new comparison-only probe measured positive `BlastSeqSrcGetTotLen` in all six saved local `-subject` runs, so the conditional `BLAST_OneSubjectUpdateParameters` call at `blast_engine.c:1434-1443` did **not** run. The cutoffs supplied to Stage C were initialized before subject iteration. The row and remaining-work section below have been corrected to use the observed initial setup state.
 
 ## Reproduction and authority

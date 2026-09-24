@@ -884,14 +884,14 @@ struct TargetFrameTranslation {
     sequence: Vec<u8>,
 }
 
-struct TargetTranslation<'a> {
+pub(super) struct TargetTranslation<'a> {
     subject: &'a [u8],
     code: &'a GeneticCode,
     frames: [TargetFrameTranslation; 6],
 }
 
 impl<'a> TargetTranslation<'a> {
-    fn new(subject: &'a [u8], code: &'a GeneticCode) -> Self {
+    pub(super) fn new(subject: &'a [u8], code: &'a GeneticCode) -> Self {
         Self {
             subject,
             code,
@@ -913,7 +913,12 @@ impl<'a> TargetTranslation<'a> {
     // }
     // NCBI c++/src/algo/blast/core/blast_util.c:428-455:
     // prot_seq[0] = NULLB; ... prot_seq[index_prot] = NULLB;
-    fn get(&mut self, frame: i8, offset: i32, end: i32) -> Result<(&[u8], usize, usize)> {
+    pub(super) fn get(
+        &mut self,
+        frame: i8,
+        offset: i32,
+        end: i32,
+    ) -> Result<(&[u8], usize, usize)> {
         let context = if frame > 0 { frame - 1 } else { 2 - frame };
         let context = usize::try_from(context).context("invalid subject frame")?;
         if context >= self.frames.len() || frame == 0 {

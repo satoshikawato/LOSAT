@@ -21,4 +21,9 @@ mod stage_d_stats;
 // NCBI c++/src/algo/blast/core/link_hsps.c:1602-1810;
 // blast_engine.c:870-906: link the preliminary list and reap by prelim E-value.
 mod stage_d_linking;
+// NCBI core/blast_kappa.c:1896-1957 redoes translated-subject alignments.
+mod kappa;
+// NCBI composition_adjustment/compo_heap.c:252-275,330-391,439-466:
+// Kappa result records enter the NCBI comparator heap and pop in its order.
+mod kappa_heap;
 pub use args::TblastnArgs;

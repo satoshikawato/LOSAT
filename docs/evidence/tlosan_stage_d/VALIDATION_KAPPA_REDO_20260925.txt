@@ -1,0 +1,135 @@
+Pinned NCBI source 598d8ae6a72b923127ba2fbfaffd48e4c83bfbf4
+Stage C fixed-input gate retained; Stage D partial; Stage E blocked.
+
+$ cargo test --manifest-path LOSAT/Cargo.toml --lib algorithm::tblastn::kappa -- --nocapture  [cwd=.]
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 3.25s
+     Running unittests src/lib.rs (LOSAT/target/debug/deps/LOSAT-375c51a56549f105)
+
+running 7 tests
+test algorithm::tblastn::kappa_heap::tests::heap_threshold_ties_and_discarded_record_follow_ncbi_comparator ... ok
+test algorithm::tblastn::kappa::tests::postredo_containment_keeps_ncbi_score_frame_and_endpoint_order ... ok
+test algorithm::tblastn::kappa_heap::tests::saved_ncbi_local_subject_heap_rank_and_pop_order ... ok
+test algorithm::tblastn::kappa::tests::hard_seg_preliminary_hsp_redoes_to_ncbi_alignment ... ok
+test algorithm::tblastn::kappa::tests::code32_local_api_subject_translation_redo_and_scores_match_ncbi ... ok
+test algorithm::tblastn::kappa::tests::kappa_traceback_matches_ncbi_saved_inputs_and_edit_scripts ... ok
+test algorithm::tblastn::kappa::tests::multi_query_preliminary_hsps_redo_to_ncbi_alignment_order ... ok
+
+test result: ok. 7 passed; 0 failed; 0 ignored; 0 measured; 512 filtered out; finished in 0.24s
+
+exit=0
+
+$ cargo test --manifest-path LOSAT/Cargo.toml --lib core::composition_adjustment::redo_alignment::tests -- --nocapture  [cwd=.]
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 3.25s
+     Running unittests src/lib.rs (LOSAT/target/debug/deps/LOSAT-375c51a56549f105)
+
+running 18 tests
+test core::composition_adjustment::redo_alignment::tests::test_test_near_identical_rejects_low_identity_alignment ... ok
+test core::composition_adjustment::redo_alignment::tests::test_build_query_word_hashes_matches_ncbi_shift_hash ... ok
+test core::composition_adjustment::redo_alignment::tests::test_test_near_identical_accepts_high_identity_alignment ... ok
+test core::composition_adjustment::redo_alignment::tests::test_find_num_identical_accepts_short_hash_slice_for_9aa_window ... ok
+test core::composition_adjustment::redo_alignment::tests::test_test_near_identical_keeps_fraction_check_when_middle_slice_has_no_words ... ok
+test core::composition_adjustment::redo_alignment::tests::test_is_contained_requires_score_tolerance ... ok
+test core::composition_adjustment::redo_alignment::tests::test_location_compare_windows_sorts_by_query_then_subject ... ok
+test core::composition_adjustment::redo_alignment::tests::test_preliminary_test_near_identical_uses_cutoff_branch ... ok
+test core::composition_adjustment::redo_alignment::tests::test_distinct_alignments_sort_orders_ncbi_style ... ok
+test core::composition_adjustment::redo_alignment::tests::test_with_distinct_ends_keeps_best_shared_endpoint ... ok
+test core::composition_adjustment::redo_alignment::tests::test_with_distinct_ends_similar_endpoint_requires_same_frame ... ok
+test core::composition_adjustment::redo_alignment::tests::test_windows_from_protein_aligns_preserves_incoming_order_after_reverse_only ... ok
+test core::composition_adjustment::redo_alignment::tests::test_windows_from_protein_aligns_separates_queries_by_index ... ok
+test core::composition_adjustment::redo_alignment::tests::test_blast_redo_one_match_keeps_distinct_alignments_per_query_index ... ok
+test core::composition_adjustment::redo_alignment::tests::translated_redo_core_uses_ncbi_hard_seg_mode2_inputs ... ok
+test core::composition_adjustment::redo_alignment::tests::translated_kappa_seg_bytes_match_ncbi_mask_calls ... ok
+test core::composition_adjustment::redo_alignment::tests::translated_kappa_windows_match_ncbi_partial_translation_ranges ... ok
+test core::composition_adjustment::redo_alignment::tests::translated_get_range_order_and_seg_match_ncbi_saved_calls ... ok
+
+test result: ok. 18 passed; 0 failed; 0 ignored; 0 measured; 501 filtered out; finished in 0.18s
+
+exit=0
+
+$ cargo clippy --manifest-path LOSAT/Cargo.toml --lib --tests -- -D warnings  [cwd=.]
+   Compiling LOSAT v0.1.0 (/mnt/c/Users/genom/GitHub/LOSAT/LOSAT)
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 26.79s
+exit=0
+
+$ cargo fmt --manifest-path LOSAT/Cargo.toml --all -- --check  [cwd=.]
+exit=0
+
+$ bash -n docs/evidence/tlosan_stage_d/run_code32_local_api_oracle.sh  [cwd=.]
+exit=0
+
+$ python3 -m py_compile docs/evidence/tlosan_stage_d/run_ncbi_kappa_traceback_trace.py docs/evidence/tlosan_stage_d/kappa_heap_rejection_20260925/run_ncbi_heap_rejection_trace.py  [cwd=.]
+exit=0
+
+$ sha256sum -c outputs.sha256  [cwd=docs/evidence/tlosan_stage_d/kappa_traceback_20260924]
+manifest.txt: OK
+multi_query_20260924_default.tsv: OK
+run_20260923_default.tsv: OK
+seg_hard_query_20260924_default.tsv: OK
+exit=0
+
+$ sha256sum -c outputs.sha256  [cwd=docs/evidence/tlosan_stage_d/kappa_heap_rejection_20260925/run_20260925]
+manifest.txt: OK
+ncbi.out: OK
+ncbi.stderr: OK
+ncbi.trace: OK
+exit=0
+
+$ sha256sum -c outputs.sha256  [cwd=docs/evidence/tlosan_stage_d/code32_local_api_20260925_full]
+./cli_code1_fmt6.out: OK
+./cli_code1_traced.out: OK
+./code1_composition.out: OK
+./code1_fmt6.out: OK
+./code1_mode2.out: OK
+./code1_traced.out: OK
+./code32_composition.out: OK
+./code32_fmt6.out: OK
+./code32_mode2.out: OK
+./code32_traced.out: OK
+./cli_code1.trace: OK
+./code1.trace: OK
+./code1_composition.trace: OK
+./code1_mode2.trace: OK
+./code32.trace: OK
+./code32_composition.trace: OK
+./code32_mode2.trace: OK
+exit=0
+
+$ cargo run --quiet --manifest-path LOSAT/Cargo.toml -- tblastn -query docs/evidence/tlosan_stage_a/fixtures/query.faa -subject docs/evidence/tlosan_stage_a/fixtures/subject_code32.fna -db_gencode 32  [cwd=.]
+Error: TBLASTN local search is unimplemented (Stages C-E)
+exit=1
+
+$ cargo test --manifest-path LOSAT/Cargo.toml --lib algorithm::blastp::kappa -- --nocapture  [cwd=.]
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 2.39s
+     Running unittests src/lib.rs (LOSAT/target/debug/deps/LOSAT-375c51a56549f105)
+
+running 19 tests
+
+thread 'algorithm::blastp::kappa::tests::test_query_range_data_rejects_negative_begin_instead_of_clamping' (866349) panicked at src/core/composition_adjustment/redo_alignment.rs:279:14:
+NCBI blast_kappa.c requires non-negative query_range.begin: TryFromIntError(())
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+
+thread 'algorithm::blastp::kappa::tests::test_subject_range_data_rejects_negative_begin_instead_of_clamping' (866356) panicked at src/algorithm/blastp/kappa.rs:1017:10:
+NCBI blast_kappa.c requires non-negative subject_range.begin: TryFromIntError(())
+test algorithm::blastp::kappa::tests::test_recompute_num_identities_ungapped ... ok
+test algorithm::blastp::kappa::tests::test_recompute_num_identities_uses_query_nomask ... ok
+test algorithm::blastp::kappa::tests::test_subject_range_slice_has_fresh_leading_sentinel ... ok
+test algorithm::blastp::kappa::tests::test_adjust_evalues_for_composition_matches_ncbi_sequence_scaling ... ok
+test algorithm::blastp::kappa::tests::test_evaluate_and_purge_uses_spouge_for_gapped_blastp ... ok
+test algorithm::blastp::kappa::tests::test_normalize_scores_uses_blast_nint_and_scaled_bit_score ... ok
+test algorithm::blastp::kappa::tests::test_build_incoming_alignment_list_uses_truncating_scaled_score_and_query_index ... ok
+test algorithm::blastp::kappa::tests::test_hits_from_distinct_alignments_uses_edit_script_context ... ok
+test algorithm::blastp::kappa::tests::test_subject_seg_skips_exact_near_identical_subject ... ok
+test algorithm::blastp::kappa::tests::test_subject_seg_preserves_prior_not_biased_state ... ok
+test algorithm::blastp::kappa::tests::test_subject_range_near_identical_uses_original_range_offset ... ok
+test algorithm::blastp::kappa::tests::test_reap_contained_hits_discards_lower_scoring_inner_hit ... ok
+test algorithm::blastp::kappa::tests::test_reap_contained_hits_uses_internal_offsets_ncbi_style ... ok
+test algorithm::blastp::kappa::tests::test_evaluate_and_purge_uses_scaled_lambda_for_spouge ... ok
+test algorithm::blastp::kappa::tests::test_reap_contained_hits_requires_matching_subject_frame ... ok
+test algorithm::blastp::kappa::tests::test_subject_seg_masks_when_enabled_and_not_near_identical ... ok
+test algorithm::blastp::kappa::tests::test_redo_preliminary_blastp_hit_preserves_internal_offsets_with_ranges ... ok
+test algorithm::blastp::kappa::tests::test_subject_range_data_rejects_negative_begin_instead_of_clamping - should panic ... ok
+test algorithm::blastp::kappa::tests::test_query_range_data_rejects_negative_begin_instead_of_clamping - should panic ... ok
+
+test result: ok. 19 passed; 0 failed; 0 ignored; 0 measured; 500 filtered out; finished in 0.12s
+
+exit=0

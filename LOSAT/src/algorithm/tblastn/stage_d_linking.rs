@@ -50,7 +50,7 @@ struct WorkHsp {
 //     0 == (result = BLAST_CMP(hsp1->query.offset, hsp2->query.offset))) {
 //     result = BLAST_CMP(hsp2->query.end, hsp1->query.end);
 // }
-fn score_compare(a: &GappedHsp, b: &GappedHsp) -> Ordering {
+pub(super) fn score_compare(a: &GappedHsp, b: &GappedHsp) -> Ordering {
     b.score
         .cmp(&a.score)
         .then(a.s_start.cmp(&b.s_start))

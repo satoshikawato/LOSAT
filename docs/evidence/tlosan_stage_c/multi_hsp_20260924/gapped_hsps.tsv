@@ -1,0 +1,4 @@
+event	call	index	raw_score	context	query_frame	q_start	q_end	q_gapped_start	subject_frame	s_start	s_end	s_gapped_start
+GAPPED_HSP	0	0	656	0	0	0	120	29	3	146	266	175
+GAPPED_HSP	0	1	656	0	0	0	120	29	3	500	620	529
+GAPPED_HSP	1	0	26	0	0	12	19	15	-1	93	100	96

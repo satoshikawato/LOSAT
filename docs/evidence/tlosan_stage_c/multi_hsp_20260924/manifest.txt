@@ -1,0 +1,8 @@
+Comparison-only NCBI trace. Probe never linked or called by LOSAT.
+NCBI source commit: 598d8ae6a72b923127ba2fbfaffd48e4c83bfbf4
+NCBI binary SHA256: e3956f1e107a30439d56c8f72fae4267a7d62ebcc16e4f99d4baf2bdf00402e0
+Probe source SHA256: 07ea49ee0a3dd32e0b2dd119fe25c6f319222f5bf542204312d4fb4dddd1273e
+Subject length: 2364 nt
+Counts: {'GAPPED_HSP': 3, 'TARGET_TRANSLATION': 4, 'TRACEBACK_INPUT': 2, 'TRACEBACK_OUTPUT': 2, 'REEVAL_INPUT': 0, 'REEVAL_OUTPUT': 0, 'ENDPOINT_INPUT': 3, 'ENDPOINT_OUTPUT': 3}
+Final NCBI bytes unchanged by probe: yes
+Command: ['/home/kawato/micromamba/bin/tblastn', '-task', 'tblastn', '-query', '/mnt/c/Users/genom/GitHub/LOSAT/docs/evidence/tlosan_stage_c/multi_hsp_20260924/query.faa', '-subject', '/mnt/c/Users/genom/GitHub/LOSAT/docs/evidence/tlosan_stage_c/multi_hsp_20260924/subjects.fna', '-db_gencode', '1', '-matrix', 'BLOSUM62', '-word_size', '3', '-threshold', '13', '-window_size', '40', '-gapopen', '11', '-gapextend', '1', '-evalue', '10000', '-num_threads', '1', '-comp_based_stats', '0', '-seg', 'no', '-sum_stats', 'false', '-outfmt', '6 qseqid sseqid score qstart qend sstart send sframe qseq sseq']

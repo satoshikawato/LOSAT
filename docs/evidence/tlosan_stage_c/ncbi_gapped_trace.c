@@ -28,6 +28,43 @@ typedef struct {
     int32_t hspcnt, allocated, hsp_max, do_not_reallocate;
     double best_evalue;
 } HspList;
+/* Pinned c++/include/algo/blast/core/blast_def.h:311-319 and
+ * c++/include/algo/blast/core/ncbi_std.h:94:
+ *   Boolean partial; Int4 num_frames; Int4* range;
+ *   typedef Uint1 Boolean;
+ * Pinned c++/src/algo/blast/core/blast_hits.c:1147-1229:
+ *   start = target_t->range[2*context];
+ *   stop = target_t->range[2*context+1];
+ *   return target_t->translations[context] - target_t->range[2*context] + 1;
+ * Capture each HSP's actual translation window in the comparison oracle.
+ */
+typedef struct {
+    int32_t program_number;
+    const uint8_t *gen_code_string;
+    uint8_t **translations;
+    uint8_t partial;
+    int32_t num_frames;
+    int32_t *range;
+    void *subject_blk;
+} TargetTranslation;
+typedef const uint8_t *(*target_translation_fn)(TargetTranslation *, const Hsp *, int32_t *);
+const uint8_t *Blast_HSPGetTargetTranslation(TargetTranslation *target,
+                                             const Hsp *hsp,
+                                             int32_t *translated_length)
+{
+    target_translation_fn real = (target_translation_fn)dlsym(
+        RTLD_NEXT, "Blast_HSPGetTargetTranslation");
+    if (!real) return NULL;
+    const uint8_t *result = real(target, hsp, translated_length);
+    int context = hsp->subject.frame > 0 ? hsp->subject.frame - 1 :
+                  2 - hsp->subject.frame;
+    fprintf(stderr, "TARGET_TRANSLATION\t%d\t%d\t%d\t%d\t%d\t%d\t%d\n",
+            hsp->subject.frame, hsp->subject.offset, hsp->subject.end,
+            target->range[2 * context], target->range[2 * context + 1],
+            translated_length ? *translated_length : -1, target->partial);
+    return result;
+}
+
 /* Pinned c++/include/algo/blast/core/blast_parameters.h:129-136,153-209. */
 typedef struct { void *options; int32_t gap_x_dropoff, gap_x_dropoff_final; } ExtParams;
 typedef struct { int32_t cutoff_score, cutoff_score_max; } GappedCutoffs;
@@ -172,4 +209,71 @@ short Blast_TracebackFromHSPList(
                 hit->subject.offset, hit->subject.end);
     }
     return status;
+}
+
+/* Pinned c++/src/algo/blast/core/blast_traceback.c:401-409,585-603,
+ * 677-696 calls containment before traceback, HSPTest after alignment,
+ * and containment again after the score sort. Pinned blast_itree.c:931-953
+ * defines the containment predicate; blast_hits.h:356-359 defines HSPTest.
+ * Record the exact deletion predicate for the six-frame comparison case.
+ */
+typedef uint8_t (*contains_fn)(const void *, const Hsp *, const void *, int32_t);
+uint8_t BlastIntervalTreeContainsHSP(const void *tree, const Hsp *hsp,
+                                     const void *query_info, int32_t separation)
+{
+    contains_fn real = (contains_fn)dlsym(RTLD_NEXT, "BlastIntervalTreeContainsHSP");
+    if (!real) return 0;
+    uint8_t result = real(tree, hsp, query_info, separation);
+    if (hsp->score >= 0)
+        fprintf(stderr, "CONTAINS\t%d\t%d\t%d\t%d\t%d\t%d\n",
+                result, hsp->subject.frame, hsp->query.offset,
+                hsp->query.end, hsp->subject.offset, hsp->subject.end);
+    return result;
+}
+typedef uint8_t (*hsp_test_fn)(Hsp *, const void *, int32_t);
+uint8_t Blast_HSPTest(Hsp *hsp, const void *hit_options, int32_t align_length)
+{
+    hsp_test_fn real = (hsp_test_fn)dlsym(RTLD_NEXT, "Blast_HSPTest");
+    if (!real) return 0;
+    uint8_t result = real(hsp, hit_options, align_length);
+    if (hsp->score >= 0)
+        fprintf(stderr, "HSP_TEST\t%d\t%d\t%d\t%d\t%d\t%d\n",
+                result, align_length, hsp->query.offset, hsp->query.end,
+                hsp->subject.offset, hsp->subject.end);
+    return result;
+}
+
+/* Pinned c++/src/algo/blast/core/blast_traceback.c:635-666:
+ *   extra_start = Blast_HSPListPurgeHSPsWithCommonEndpoints(
+ *       program_number, hsp_list, FALSE);
+ * Pinned c++/src/algo/blast/core/blast_hits.c:2455-2537:
+ *   purge |= (program != eBlastTypeBlastn);
+ *   qsort(..., s_QueryOffsetCompareHSPs); ...
+ *   qsort(..., s_QueryEndCompareHSPs);
+ * Record list inputs, outputs, and returned count without changing NCBI.
+ */
+typedef int32_t (*purge_endpoints_fn)(int32_t, HspList *, uint8_t);
+int32_t Blast_HSPListPurgeHSPsWithCommonEndpoints(int32_t program,
+                                                   HspList *list,
+                                                   uint8_t purge)
+{
+    purge_endpoints_fn real = (purge_endpoints_fn)dlsym(
+        RTLD_NEXT, "Blast_HSPListPurgeHSPsWithCommonEndpoints");
+    if (!real) return -1;
+    fprintf(stderr, "ENDPOINT_INPUT\t%d\t%d\n", purge, list->hspcnt);
+    for (int32_t i = 0; i < list->hspcnt; ++i) {
+        Hsp *hit = list->hsp_array[i];
+        fprintf(stderr, "ENDPOINT_IN_HSP\t%d\t%d\t%d\t%d\t%d\t%d\t%d\n",
+                i, hit->score, hit->subject.frame, hit->query.offset,
+                hit->query.end, hit->subject.offset, hit->subject.end);
+    }
+    int32_t retained = real(program, list, purge);
+    fprintf(stderr, "ENDPOINT_OUTPUT\t%d\t%d\n", retained, list->hspcnt);
+    for (int32_t i = 0; i < list->hspcnt; ++i) {
+        Hsp *hit = list->hsp_array[i];
+        fprintf(stderr, "ENDPOINT_OUT_HSP\t%d\t%d\t%d\t%d\t%d\t%d\t%d\n",
+                i, hit->score, hit->subject.frame, hit->query.offset,
+                hit->query.end, hit->subject.offset, hit->subject.end);
+    }
+    return retained;
 }

@@ -73,9 +73,22 @@ typedef struct {
     double ecutoff, worst_evalue;
     void *array, *heap_array;
 } CompoHeap;
+/* Pinned NCBI core/blast_hits.h:169-186; core/blast_hits.c:3243-3297. */
+typedef struct {
+    int32_t hsplist_count, hsplist_max;
+    double worst_evalue;
+    int32_t low_score, heapified;
+    HspList **hsplist_array;
+    int32_t hsplist_current, num_hits;
+} HitList;
+typedef struct {
+    int32_t num_queries;
+    HitList **hitlist_array;
+} HspResults;
 static unsigned long redo_id;
 static unsigned long traceback_id;
 static int inside_redo;
+static int inside_final_results;
 static unsigned long active_redo;
 
 static void dump_bytes(const char *kind, unsigned long event, const uint8_t *data, int32_t length)
@@ -212,8 +225,75 @@ void *BlastCompo_HeapPop(CompoHeap *heap)
 {
     heap_pop_fn real = (heap_pop_fn)dlsym(RTLD_NEXT, "BlastCompo_HeapPop");
     HspList *list = (HspList *)real(heap);
+    inside_final_results = 1;
     fprintf(stderr, "K_TRACE_HEAP_POP\t%d\t%d\t%.17g\n",
             list ? list->oid : -1, heap->n,
             list ? list->best_evalue : -1.);
     return list;
+}
+
+/* Pinned NCBI core/blast_kappa.c:2494-2515;
+ * core/blast_hits.c:3243-3297,3420-3437. Comparison-only call order. */
+typedef int16_t (*hitlist_update_fn)(HitList *, HspList *);
+int16_t Blast_HitListUpdate(HitList *hitlist, HspList *list)
+{
+    hitlist_update_fn real = (hitlist_update_fn)dlsym(RTLD_NEXT, "Blast_HitListUpdate");
+    const int32_t oid = list->oid;
+    if (inside_final_results) {
+        fprintf(stderr, "K_TRACE_RESULT_UPDATE_IN\t%d\t%d\t%d\t%.17g\t%d\t%d\t%.17g\t%d\n",
+                oid, hitlist->hsplist_count, hitlist->hsplist_max,
+                hitlist->worst_evalue, hitlist->low_score, hitlist->heapified,
+                list->best_evalue, list->hspcnt ? list->hsp_array[0]->score : -1);
+    }
+    int16_t status = real(hitlist, list);
+    if (inside_final_results) {
+        fprintf(stderr, "K_TRACE_RESULT_UPDATE_OUT\t%d\t%d\t%d\t%.17g\t%d\t%d",
+                oid, status, hitlist->hsplist_count,
+                hitlist->worst_evalue, hitlist->low_score, hitlist->heapified);
+        for (int32_t i = 0; i < hitlist->hsplist_count; ++i)
+            fprintf(stderr, "\t%d", hitlist->hsplist_array[i]->oid);
+        fputc('\n', stderr);
+        for (int32_t i = 0; i < hitlist->hsplist_count; ++i) {
+            HspList *saved = hitlist->hsplist_array[i];
+            for (int32_t j = 0; j < saved->hspcnt; ++j) {
+                Hsp *h = saved->hsp_array[j];
+                fprintf(stderr,
+                        "K_TRACE_RESULT_HSP\t%d\t%d\t%d\t%d\t%.17g\t%d\t%d\t%d\t%d\t%d\t%d\n",
+                        i, saved->oid, j, h->score, h->evalue,
+                        h->query.offset, h->query.end,
+                        h->subject.offset, h->subject.end,
+                        h->subject.frame, h->num);
+            }
+        }
+    }
+    return status;
+}
+
+typedef int16_t (*reverse_results_fn)(HspResults *);
+int16_t Blast_HSPResultsReverseOrder(HspResults *results)
+{
+    reverse_results_fn real = (reverse_results_fn)dlsym(RTLD_NEXT, "Blast_HSPResultsReverseOrder");
+    if (inside_final_results) {
+        for (int32_t q = 0; q < results->num_queries; ++q) {
+            HitList *hitlist = results->hitlist_array[q];
+            fprintf(stderr, "K_TRACE_RESULT_REVERSE_IN\t%d\t%d", q,
+                    hitlist ? hitlist->hsplist_count : -1);
+            if (hitlist) for (int32_t i = 0; i < hitlist->hsplist_count; ++i)
+                fprintf(stderr, "\t%d", hitlist->hsplist_array[i]->oid);
+            fputc('\n', stderr);
+        }
+    }
+    int16_t status = real(results);
+    if (inside_final_results) {
+        for (int32_t q = 0; q < results->num_queries; ++q) {
+            HitList *hitlist = results->hitlist_array[q];
+            fprintf(stderr, "K_TRACE_RESULT_REVERSE_OUT\t%d\t%d", q,
+                    hitlist ? hitlist->hsplist_count : -1);
+            if (hitlist) for (int32_t i = 0; i < hitlist->hsplist_count; ++i)
+                fprintf(stderr, "\t%d", hitlist->hsplist_array[i]->oid);
+            fputc('\n', stderr);
+        }
+    }
+    inside_final_results = 0;
+    return status;
 }

@@ -26,4 +26,7 @@ mod kappa;
 // NCBI composition_adjustment/compo_heap.c:252-275,330-391,439-466:
 // Kappa result records enter the NCBI comparator heap and pop in its order.
 mod kappa_heap;
+// NCBI core/blast_kappa.c:2494-2515 and blast_hits.c:3243-3297,3420-3437:
+// popped lists enter Blast_HitListUpdate, then results are reversed.
+mod stage_d_results;
 pub use args::TblastnArgs;

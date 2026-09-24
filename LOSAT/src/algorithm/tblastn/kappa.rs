@@ -2074,6 +2074,7 @@ mod tests {
         // ```
         use crate::algorithm::tblastn::kappa_heap::{CompoHeap, CompoHeapRecord};
         use crate::algorithm::tblastn::stage_d_linking::score_compare;
+        use crate::algorithm::tblastn::stage_d_results::{KappaResultHitList, KappaResultList};
         use crate::core::composition_adjustment::adjust_scores::{
             build_matrix_info, read_aa_composition,
         };
@@ -2120,6 +2121,20 @@ mod tests {
         let mut scratch = GapAlignScratch::new();
         let mut workspace = BlastCompositionWorkspace::new_blosum62();
         let mut heap = CompoHeap::new(500, 0.002).unwrap();
+        let mut postredo_by_oid = HashMap::new();
+        let mut result = KappaResultHitList::new(500).unwrap();
+        let result_trace = std::fs::read_to_string(format!(
+            "{root}/tlosan_stage_d/kappa_result_order_20260925/run_20260923_default.tsv"
+        ))
+        .unwrap();
+        let result_in: Vec<_> = result_trace
+            .lines()
+            .filter(|line| line.starts_with("K_TRACE_RESULT_UPDATE_IN\t"))
+            .collect();
+        let result_out: Vec<_> = result_trace
+            .lines()
+            .filter(|line| line.starts_with("K_TRACE_RESULT_UPDATE_OUT\t"))
+            .collect();
         let code = GeneticCode::try_from_id(1).unwrap();
         for (redo_index, (oid, preliminary)) in retained.iter().enumerate() {
             let redo: Vec<_> = redo_rows[redo_index].split('\t').collect();
@@ -2261,12 +2276,14 @@ mod tests {
             assert_eq!(identities, heap_hsp[6].parse().unwrap());
             assert_eq!(postredo.hsps[0].hsp.frame, heap_hsp[8].parse().unwrap());
             assert!(heap.insert(candidate).is_none());
+            postredo_by_oid.insert(*oid as i32, postredo);
             assert!(params.gapping_params.context.get().is_none());
         }
         let pop_rows: Vec<_> = kappa_trace
             .lines()
             .filter(|line| line.starts_with("K_TRACE_HEAP_POP\t"))
             .collect();
+        let mut result_index = 0;
         for row in pop_rows {
             let f: Vec<_> = row.split('\t').collect();
             let popped = heap.pop();
@@ -2280,7 +2297,66 @@ mod tests {
                     popped.best_evalue.to_bits(),
                     f[3].parse::<f64>().unwrap().to_bits()
                 );
+                // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_kappa.c:2494-2515;
+                // core/blast_hits.c:3243-3297,3420-3437:
+                // while ((hsp_list = BlastCompo_HeapPop(heap)) != NULL)
+                //     Blast_HitListUpdate(hitlist, hsp_list);
+                // Blast_HSPResultsReverseOrder(results);
+                let expected_in: Vec<_> = result_in[result_index].split('\t').collect();
+                assert_eq!(popped.subject_index, expected_in[1].parse().unwrap());
+                assert_eq!(result.lists().len(), expected_in[2].parse().unwrap());
+                assert_eq!(
+                    result.worst_evalue().to_bits(),
+                    expected_in[4].parse::<f64>().unwrap().to_bits()
+                );
+                assert_eq!(result.low_score(), expected_in[5].parse().unwrap());
+                let hsps = postredo_by_oid.remove(&popped.subject_index).unwrap();
+                assert_eq!(hsps.hsps[0].hsp.score, expected_in[8].parse().unwrap());
+                result
+                    .update(KappaResultList {
+                        oid: popped.subject_index,
+                        hsps,
+                    })
+                    .unwrap();
+                let expected_out: Vec<_> = result_out[result_index].split('\t').collect();
+                assert_eq!(result.lists().len(), expected_out[3].parse().unwrap());
+                assert_eq!(
+                    result.worst_evalue().to_bits(),
+                    expected_out[4].parse::<f64>().unwrap().to_bits()
+                );
+                assert_eq!(result.low_score(), expected_out[5].parse().unwrap());
+                assert_eq!(
+                    result
+                        .lists()
+                        .iter()
+                        .map(|list| list.oid)
+                        .collect::<Vec<_>>(),
+                    expected_out[7..]
+                        .iter()
+                        .map(|value| value.parse::<i32>().unwrap())
+                        .collect::<Vec<_>>()
+                );
+                result_index += 1;
             }
         }
+        assert_eq!(result_index, result_in.len());
+        let reverse_out: Vec<_> = result_trace
+            .lines()
+            .find(|line| line.starts_with("K_TRACE_RESULT_REVERSE_OUT\t0\t"))
+            .unwrap()
+            .split('\t')
+            .collect();
+        result.reverse_order();
+        assert_eq!(
+            result
+                .lists()
+                .iter()
+                .map(|list| list.oid)
+                .collect::<Vec<_>>(),
+            reverse_out[3..]
+                .iter()
+                .map(|value| value.parse::<i32>().unwrap())
+                .collect::<Vec<_>>()
+        );
     }
 }

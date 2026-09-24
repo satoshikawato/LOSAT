@@ -1,0 +1,27 @@
+TBLASTN Stage D Kappa result hitlist checkpoint, 2026-09-25
+Pinned NCBI source: 598d8ae6a72b923127ba2fbfaffd48e4c83bfbf4
+Branch: feature/tlosan-tblastn-v0.2.0
+
+Comparison-only local-subject NCBI trace commands:
+$ python3 docs/evidence/tlosan_stage_d/run_ncbi_kappa_traceback_trace.py docs/evidence/tlosan_stage_d/kappa_result_order_20260925
+exit 0; original NCBI stdout and stderr unchanged for three saved cases.
+$ python3 docs/evidence/tlosan_stage_d/kappa_heap_rejection_20260925/run_ncbi_heap_rejection_trace.py docs/evidence/tlosan_stage_d/kappa_heap_rejection_20260925/result_order_20260925
+exit 0; original NCBI stdout and stderr unchanged; 10 result updates at
+max_target_seqs=2. Commands, binary/probe/input SHA-256 and output checksums
+are retained with each trace.
+$ (cd docs/evidence/tlosan_stage_d/kappa_result_order_20260925 && sha256sum -c outputs.sha256)
+4 files OK.
+$ (cd docs/evidence/tlosan_stage_d/kappa_heap_rejection_20260925/result_order_20260925 && sha256sum -c outputs.sha256)
+4 files OK.
+
+$ cargo test --manifest-path LOSAT/Cargo.toml --lib algorithm::tblastn::stage_d_results -- --nocapture
+2 passed, 0 failed, 521 filtered out. Includes local single-query hitlist
+replacement, within-list HSP fields/order, and three-query result call order.
+$ cargo test --manifest-path LOSAT/Cargo.toml --lib algorithm::tblastn::kappa::tests::multi_subject_stage_c_lists_enter_kappa_in_ncbi_stream_order -- --exact
+1 passed, 0 failed, 521 filtered out.
+$ cargo clippy --manifest-path LOSAT/Cargo.toml --lib --tests -- -D warnings
+exit 0.
+$ cargo fmt --manifest-path LOSAT/Cargo.toml --all -- --check
+exit 0.
+
+Stage D partial; Stage E not started; public CLI still unimplemented.

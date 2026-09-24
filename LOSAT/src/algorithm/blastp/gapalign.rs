@@ -876,6 +876,31 @@ fn stats_from_edit_ops_protein(
     }
 }
 
+// NCBI c++/src/algo/blast/core/blast_traceback.c:583-596:
+// Blast_HSPGetNumIdentitiesAndPositives(query_nomask,
+//     adjusted_subject, hsp, score_options, &align_length, sbp);
+// NCBI c++/src/algo/blast/core/blast_hits.c:767-811:
+// for each eGapAlignSub letter, if (*q == *s) num_ident++;
+// Reuse the same edit-script walk after SEG-masked traceback.
+pub(crate) fn protein_identities_from_edit_ops(
+    query_nomask: &[u8],
+    subject: &[u8],
+    query_start: usize,
+    subject_start: usize,
+    edit_ops: &[GapEditOp],
+    matrix: ScoringMatrix,
+) -> usize {
+    stats_from_edit_ops_protein(
+        query_nomask,
+        subject,
+        query_start,
+        subject_start,
+        edit_ops,
+        matrix,
+    )
+    .0
+}
+
 // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_hits.c:767-811
 // ```c
 // for (index=0; index<esp->size; index++)

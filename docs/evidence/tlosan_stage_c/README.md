@@ -1,6 +1,12 @@
 # TLOSAN v0.2.0 Stage C work record — incomplete
 
-**Latest Stage C checkpoint:** [CONTINUATION_20260924_CHUNK_MULTI.md](CONTINUATION_20260924_CHUNK_MULTI.md)
+**Stage C fixed-input gate:** [STAGE_C_GATE_20260924.md](STAGE_C_GATE_20260924.md)
+
+**Latest bounded continuation:** [CONTINUATION_20260924_MASKS.md](CONTINUATION_20260924_MASKS.md)
+
+**Previous bounded checkpoint:** [CONTINUATION_20260924_INTEGRATED.md](CONTINUATION_20260924_INTEGRATED.md)
+
+**Previous bounded checkpoint:** [CONTINUATION_20260924_CHUNK_MULTI.md](CONTINUATION_20260924_CHUNK_MULTI.md)
 records long multi-query function state, positive chunk endpoint deletion,
 append cap, and complete-path containment. Stage C remains open; D and E
 have not begun.

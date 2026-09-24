@@ -1,11 +1,18 @@
 //! Internal NCBI TBLASTN two-hit WordFinder path for the BLOSUM62/word-3 profile.
 //! The public search remains unsupported; this is a bounded Stage C diagnostic.
 
+#[cfg(test)]
 use super::search_seed::resolve_local_subject_ncbi2na;
+use super::search_seed::{
+    encode_tblastn_lookup_query, scan_protein_words_by_chunk, Seed, SeedScanEvent, TranslatedChunk,
+};
 use crate::algorithm::blastp::encoding::encode_protein_query_frame_with_seg;
 use crate::algorithm::blastp::extension::extend_two_hit;
+#[cfg(test)]
 use crate::algorithm::tblastx::translation::generate_frames;
+use crate::algorithm::tblastx::translation::QueryFrame;
 use crate::config::ScoringMatrix;
+#[cfg(test)]
 use crate::utils::genetic_code::GeneticCode;
 use crate::utils::seg::SegParams;
 use anyhow::{ensure, Result};
@@ -149,6 +156,94 @@ pub(super) fn find_protein_init_hsps_multi(
     matrix: ScoringMatrix,
     word_size: usize,
 ) -> Result<Vec<InitHsp>> {
+    let mut all_hits = Vec::new();
+    find_protein_init_hsps_by_chunk(
+        queries,
+        subject,
+        db_gencode,
+        seg,
+        threshold,
+        window,
+        x_dropoffs,
+        cutoff_scores,
+        mask_lowercase,
+        matrix,
+        word_size,
+        |event| {
+            if let InitStageEvent::Chunk(_, _, _, chunk_hits) = event {
+                all_hits.extend_from_slice(chunk_hits);
+            }
+            Ok(())
+        },
+    )?;
+    Ok(all_hits)
+}
+
+// NCBI c++/src/algo/blast/core/blast_engine.c:478-552,840-850:
+// WordFinder and GetGappedScore operate on one chunk; the frame's
+// HSPListAppend occurs before scanning the next translated frame.
+pub(super) enum InitStageEvent<'a> {
+    Chunk(&'a QueryFrame, TranslatedChunk, &'a [Seed], &'a [InitHsp]),
+    FrameEnd(&'a QueryFrame),
+}
+
+// NCBI c++/src/algo/blast/core/blast_engine.c:478-552,804-841:
+// BlastInitHitListReset(init_hitlist); WordFinder(..., init_hitlist, ...);
+// if (init_hitlist->total == 0) continue;
+// GetGappedScore(..., init_hitlist, &hsp_list, ...);
+// Deliver each score-sorted initial HSP list before the next chunk scan.
+pub(super) fn find_protein_init_hsps_by_chunk(
+    queries: &[&[u8]],
+    subject: &[u8],
+    db_gencode: u8,
+    seg: Option<&SegParams>,
+    threshold: i32,
+    window: i32,
+    x_dropoffs: &[i32],
+    cutoff_scores: &[i32],
+    mask_lowercase: bool,
+    matrix: ScoringMatrix,
+    word_size: usize,
+    on_event: impl FnMut(InitStageEvent<'_>) -> Result<()>,
+) -> Result<()> {
+    find_protein_init_hsps_by_chunk_with_mask_mode(
+        queries,
+        subject,
+        db_gencode,
+        seg,
+        threshold,
+        window,
+        x_dropoffs,
+        cutoff_scores,
+        mask_lowercase,
+        matrix,
+        word_size,
+        false,
+        on_event,
+    )
+}
+
+// NCBI c++/src/algo/blast/core/blast_setup.c:614-638:
+// mask_at_hash = SBlastFilterOptionsMaskAtHash(filter_options);
+// if (!mask_at_hash) BlastSetUp_MaskQuery(query_blk, ...);
+// BLAST_ComplementMaskLocations(..., filter_maskloc, lookup_segments);
+// Soft masking retains the unmasked WordFinder query while lookup still
+// excludes the SEG intervals used by the candidate scanner.
+pub(super) fn find_protein_init_hsps_by_chunk_with_mask_mode(
+    queries: &[&[u8]],
+    subject: &[u8],
+    db_gencode: u8,
+    seg: Option<&SegParams>,
+    threshold: i32,
+    window: i32,
+    x_dropoffs: &[i32],
+    cutoff_scores: &[i32],
+    mask_lowercase: bool,
+    matrix: ScoringMatrix,
+    word_size: usize,
+    soft_masking: bool,
+    mut on_event: impl FnMut(InitStageEvent<'_>) -> Result<()>,
+) -> Result<()> {
     // NCBI c++/src/algo/blast/core/aa_ungapped.c:547-583:
     // cutoffs = word_params->cutoffs + curr_context;
     // Require one cutoff per protein query for the indexed read.
@@ -156,9 +251,6 @@ pub(super) fn find_protein_init_hsps_multi(
         x_dropoffs.len() == queries.len() && cutoff_scores.len() == queries.len(),
         "one WordFinder x-drop and cutoff per query context"
     );
-    let resolved = resolve_local_subject_ncbi2na(subject)?;
-    let code = GeneticCode::try_from_id(db_gencode).map_err(anyhow::Error::msg)?;
-    let frames = generate_frames(&resolved, &code);
     // NCBI c++/src/algo/blast/core/blast_query_info.c:246-250:
     // last context's query_offset + query_length is the sequence length;
     // each preceding protein context ends with one NULLB separator.
@@ -166,10 +258,19 @@ pub(super) fn find_protein_init_hsps_multi(
     let mut context_offsets = Vec::with_capacity(queries.len());
     for query in queries {
         context_offsets.push(i32::try_from(query_sequence.len())?);
-        let frame = encode_protein_query_frame_with_seg(query, seg);
+        // NCBI c++/src/algo/blast/core/blast_setup.c:614-625:
+        // if (!mask_at_hash) BlastSetUp_MaskQuery(query_blk, ...);
+        let frame = if soft_masking {
+            encode_protein_query_frame_with_seg(query, None)
+        } else {
+            encode_tblastn_lookup_query(query, seg, mask_lowercase)
+        };
         query_sequence.extend_from_slice(&frame.aa_seq[1..]);
     }
-    let seeds = super::search_seed::scan_unambiguous_protein_words_multi(
+    let mut diagonals = Diagonals::new(query_sequence.len().saturating_sub(1), window);
+    let word_size_i32 = i32::try_from(word_size)?;
+
+    scan_protein_words_by_chunk(
         queries,
         subject,
         db_gencode,
@@ -178,35 +279,19 @@ pub(super) fn find_protein_init_hsps_multi(
         mask_lowercase,
         matrix,
         word_size,
-    )?;
-    let mut diagonals = Diagonals::new(query_sequence.len().saturating_sub(1), window);
-    let mut hits = Vec::new();
-    let mut seed_index = 0;
-    let word_size_i32 = i32::try_from(word_size)?;
-    let negative_first_length = frames
-        .iter()
-        .find(|frame| frame.frame == -1)
-        .map(|frame| frame.aa_len)
-        .unwrap_or(0);
-
-    for frame in frames {
-        // NCBI c++/src/algo/blast/core/blast_engine.c:478-552:
-        // WordFinder, GetGappedScore, and endpoint purge run per subject chunk.
-        for (chunk, _) in super::search_seed::translated_chunk_scan_ranges(
-            subject,
-            frame.frame,
-            frame.aa_len,
-            negative_first_length,
-            mask_lowercase,
-        )? {
-            let chunk_start = hits.len();
+        |scan_event| {
+            let (frame, chunk, seeds) = match scan_event {
+                SeedScanEvent::FrameEnd(frame) => {
+                    on_event(InitStageEvent::FrameEnd(frame))?;
+                    return Ok(());
+                }
+                SeedScanEvent::Chunk(frame, chunk, seeds) => (frame, chunk, seeds),
+            };
+            // NCBI c++/src/algo/blast/core/blast_engine.c:478-552:
+            // WordFinder and GetGappedScore run before the next chunk scan.
+            let mut hits = Vec::new();
             let subject_sequence = &frame.aa_seq[1 + chunk.offset..1 + chunk.offset + chunk.length];
-            while seed_index < seeds.len()
-                && seeds[seed_index].frame == frame.frame
-                && seeds[seed_index].chunk_offset == chunk.offset as u32
-            {
-                let seed = seeds[seed_index];
-                seed_index += 1;
+            for &seed in seeds {
                 let q = seed.query_offset as i32;
                 let s = seed.subject_offset as i32;
                 // NCBI reference: c++/src/algo/blast/core/aa_ungapped.c:516-547
@@ -303,7 +388,7 @@ pub(super) fn find_protein_init_hsps_multi(
             // Blast_InitHitListSortByScore(init_hitlist);
             // NCBI c++/src/algo/blast/core/blast_extend.c:273-313:
             // compare score DESC, subject start ASC, length DESC, query start ASC.
-            hits[chunk_start..].sort_unstable_by(|a, b| {
+            hits.sort_unstable_by(|a, b| {
                 b.score
                     .cmp(&a.score)
                     .then(a.s_start.cmp(&b.s_start))
@@ -313,9 +398,10 @@ pub(super) fn find_protein_init_hsps_multi(
             // NCBI c++/src/algo/blast/core/aa_ungapped.c:609-614:
             // Blast_ExtendWordExit(ewp, subject->length);
             diagonals.finish_frame(chunk.length);
-        }
-    }
-    Ok(hits)
+            on_event(InitStageEvent::Chunk(frame, chunk, seeds, &hits))?;
+            Ok(())
+        },
+    )
 }
 
 #[cfg(test)]

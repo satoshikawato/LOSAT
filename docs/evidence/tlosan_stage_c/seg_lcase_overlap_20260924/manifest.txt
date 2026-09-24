@@ -1,0 +1,9 @@
+Comparison-only pinned NCBI TBLASTN local -subject oracle.
+NCBI source commit: 598d8ae6a72b923127ba2fbfaffd48e4c83bfbf4
+NCBI binary SHA256: e3956f1e107a30439d56c8f72fae4267a7d62ebcc16e4f99d4baf2bdf00402e0
+LOSAT HEAD: bd4770e9509f841834a91e2fe4f146c7fe6e4ef2
+Queries: [('seg_lcase_overlap', 160)]; SEG=True.
+Subject: saved plus1, 362 nt.
+Probe source SHA256: gapped=53ec3b8d9901769a1a14fad3404cff391d7c7cd0a29929b14b0455eeb198b8fc, wordfinder=074b015577b2725031a8707c65b0597499794be60d64bc8e294ad0835fae8de4, candidate=ce763167e30c1630bac05f15c5a86209d40c90c125ba4238447770a95d6634e3, seg_state=f25613482cc0b336b4d89bc2626c9af2279a681f0bc780da1e8c442e45488936, context_cutoff=d1960e153a9b018eb7d1cf1ef5f85b01a67c2c59e2f3bd83a37c61bc78ef8e47
+Unprobed output equals all 5 probe outputs byte for byte: yes
+Command: ['/home/kawato/micromamba/bin/tblastn', '-task', 'tblastn', '-query', '/mnt/c/Users/genom/GitHub/LOSAT/docs/evidence/tlosan_stage_c/seg_lcase_overlap_20260924/query.faa', '-subject', '/mnt/c/Users/genom/GitHub/LOSAT/docs/evidence/tlosan_stage_c/seg_lcase_overlap_20260924/subjects.fna', '-db_gencode', '1', '-matrix', 'BLOSUM62', '-word_size', '3', '-threshold', '13', '-window_size', '40', '-gapopen', '11', '-gapextend', '1', '-evalue', '10000', '-num_threads', '1', '-comp_based_stats', '0', '-seg', '12 2.2 2.5', '-sum_stats', 'false', '-outfmt', '6 qseqid sseqid score qstart qend sstart send sframe qseq sseq', '-lcase_masking']

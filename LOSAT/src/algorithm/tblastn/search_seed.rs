@@ -4,12 +4,68 @@
 use crate::algorithm::blastp::encoding::encode_protein_query_frame_with_seg;
 use crate::algorithm::tblastx::blast_aascan::{s_blast_aa_scan_subject_one_range, BlastOffsetPair};
 use crate::algorithm::tblastx::lookup::{build_ncbi_lookup, build_ncbi_lookup_for_profile};
-use crate::algorithm::tblastx::translation::generate_frames;
+use crate::algorithm::tblastx::translation::{generate_frames, QueryFrame};
 use crate::config::ScoringMatrix;
 use crate::stats::lookup_protein_params_ungapped;
 use crate::utils::genetic_code::GeneticCode;
+use crate::utils::matrix::ncbistdaa;
 use crate::utils::seg::SegParams;
 use anyhow::{bail, Result};
+
+// NCBI c++/src/algo/blast/blastinput/blast_fasta_input.cpp:486-502;
+// c++/src/algo/blast/api/blast_setup_cxx.cpp:655-657;
+// c++/src/algo/blast/core/blast_filter.c:1241-1255;
+// c++/src/algo/blast/core/blast_setup.c:614-638:
+// BlastSeqLocAppend(filter_out, lcase_mask_slp);
+// BlastSeqLocCombine(filter_out, 0);
+// if (!mask_at_hash) BlastSetUp_MaskQuery(query_blk, ...);
+// BLAST_ComplementMaskLocations(..., filter_maskloc, lookup_segments);
+// query lowercase spans join the filtering locations; their complement
+// defines lookup segments, and hard masking replaces those residues with X.
+// Keep the unmasked copy for identity calculation after traceback.
+pub(super) fn encode_tblastn_lookup_query(
+    query: &[u8],
+    seg: Option<&SegParams>,
+    mask_lowercase: bool,
+) -> QueryFrame {
+    let mut frame = encode_protein_query_frame_with_seg(query, seg);
+    if !mask_lowercase {
+        return frame;
+    }
+    let mut start = None;
+    for (index, &residue) in query.iter().enumerate() {
+        if residue.is_ascii_lowercase() {
+            start.get_or_insert(index);
+        } else if let Some(left) = start.take() {
+            frame.seg_masks.push((left, index));
+        }
+    }
+    if let Some(left) = start {
+        frame.seg_masks.push((left, query.len()));
+    }
+    if frame.seg_masks.is_empty() {
+        return frame;
+    }
+    frame.seg_masks.sort_unstable_by_key(|&(left, _)| left);
+    let mut merged: Vec<(usize, usize)> = Vec::new();
+    for (left, right) in frame.seg_masks.drain(..) {
+        if let Some(last) = merged.last_mut() {
+            if left <= last.1 {
+                last.1 = last.1.max(right);
+                continue;
+            }
+        }
+        merged.push((left, right));
+    }
+    frame.seg_masks = merged;
+    if frame.aa_seq_nomask.is_none() {
+        frame.aa_seq_nomask = Some(frame.aa_seq.clone());
+    }
+    for &(left, right) in &frame.seg_masks {
+        frame.aa_seq[1 + left..1 + right].fill(ncbistdaa::X);
+    }
+    frame
+}
 
 // NCBI reference: c++/include/algo/blast/core/blast_def.h:141-150
 // typedef union BlastOffsetPair {
@@ -392,17 +448,63 @@ pub(super) fn scan_unambiguous_protein_words_multi(
     matrix: ScoringMatrix,
     word_length: usize,
 ) -> Result<Vec<Seed>> {
+    let mut seeds = Vec::new();
+    scan_protein_words_by_chunk(
+        queries,
+        subject,
+        db_gencode,
+        seg,
+        threshold,
+        mask_lowercase,
+        matrix,
+        word_length,
+        |event| {
+            if let SeedScanEvent::Chunk(_, _, chunk_seeds) = event {
+                seeds.extend_from_slice(chunk_seeds);
+            }
+            Ok(())
+        },
+    )?;
+    Ok(seeds)
+}
+
+// NCBI c++/src/algo/blast/core/blast_engine.c:478-493,804-850:
+// WordFinder is called for each available chunk, then HSPListAppend is
+// called once at the end of every subject frame, including empty frames.
+pub(super) enum SeedScanEvent<'a> {
+    Chunk(&'a QueryFrame, TranslatedChunk, &'a [Seed]),
+    FrameEnd(&'a QueryFrame),
+}
+
+// NCBI c++/src/algo/blast/core/blast_engine.c:478-493,804-850:
+// for each frame, s_BlastSearchEngineOneContext calls WordFinder for each
+// chunk before GetGappedScore; the frame HSP list is appended afterward.
+// NCBI c++/src/algo/blast/core/aa_ungapped.c:492-505:
+// hits = scansub(lookup_wrap, subject, offset_pairs, array_size, scan_range);
+// Deliver one ordered candidate stream at that exact chunk boundary.
+pub(super) fn scan_protein_words_by_chunk(
+    queries: &[&[u8]],
+    subject: &[u8],
+    db_gencode: u8,
+    seg: Option<&SegParams>,
+    threshold: i32,
+    mask_lowercase: bool,
+    matrix: ScoringMatrix,
+    word_length: usize,
+    mut on_event: impl FnMut(SeedScanEvent<'_>) -> Result<()>,
+) -> Result<()> {
     let code = GeneticCode::try_from_id(db_gencode).map_err(anyhow::Error::msg)?;
     // NCBI reference: c++/src/algo/blast/core/blast_engine.c:1318-1334,1429-1432
     // return word_length * 3 + 2;
     // if (seq_arg.seq->length < min_subj_seq_length) { ... continue; }
     if subject.len() < word_length * 3 + 2 {
-        return Ok(Vec::new());
+        return Ok(());
     }
     let resolved_subject = resolve_local_subject_ncbi2na(subject)?;
     let query_frames: Vec<_> = queries
         .iter()
-        .map(|query| vec![encode_protein_query_frame_with_seg(query, seg)])
+        // NCBI blast_filter.c:1241-1255 merges lowercase query and SEG masks.
+        .map(|query| vec![encode_tblastn_lookup_query(query, seg, mask_lowercase)])
         .collect();
     // NCBI c++/src/algo/blast/core/lookup_wrap.c:91-100:
     // BlastAaLookupTableNew(...); BlastAaLookupIndexQuery(..., sbp->matrix->data, ...);
@@ -415,7 +517,6 @@ pub(super) fn scan_unambiguous_protein_words_multi(
         matrix,
         word_length,
     );
-    let mut seeds = Vec::new();
     let mut pairs = vec![BlastOffsetPair::default(); (lookup.longest_chain.max(1) as usize) * 1024];
     let pair_capacity = i32::try_from(pairs.len()).expect("NCBI offset array fits Int4");
 
@@ -435,6 +536,7 @@ pub(super) fn scan_unambiguous_protein_words_multi(
             negative_first_length,
             mask_lowercase,
         )? {
+            let mut chunk_seeds = Vec::new();
             for (range_index, (left, right)) in ranges.into_iter().enumerate() {
                 // NCBI reference: c++/src/algo/blast/core/aa_ungapped.c:496-501
                 // scan_range[1] = subject->seq_ranges[0].left;
@@ -455,7 +557,7 @@ pub(super) fn scan_unambiguous_protein_words_multi(
                         &mut scan_range,
                     );
                     for pair in pairs.iter().take(hits as usize) {
-                        seeds.push(Seed {
+                        chunk_seeds.push(Seed {
                             frame: frame.frame,
                             chunk_offset: u32::try_from(chunk.offset)?,
                             query_offset: pair.q_off,
@@ -464,9 +566,13 @@ pub(super) fn scan_unambiguous_protein_words_multi(
                     }
                 }
             }
+            on_event(SeedScanEvent::Chunk(&frame, chunk, &chunk_seeds))?;
         }
+        // NCBI c++/src/algo/blast/core/blast_engine.c:840-850:
+        // Blast_HSPListAppend(&hsp_list_for_chunks, &hsp_list_out, kHspNumMax);
+        on_event(SeedScanEvent::FrameEnd(&frame))?;
     }
-    Ok(seeds)
+    Ok(())
 }
 
 #[cfg(test)]

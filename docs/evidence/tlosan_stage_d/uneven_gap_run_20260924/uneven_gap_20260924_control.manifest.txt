@@ -1,0 +1,9 @@
+Pinned NCBI source: 598d8ae6a72b923127ba2fbfaffd48e4c83bfbf4
+NCBI binary SHA256: e3956f1e107a30439d56c8f72fae4267a7d62ebcc16e4f99d4baf2bdf00402e0
+Probe source SHA256: 982280d0bcfc29c4088e69a3aea3bd768dba4defe7bb319669826c6a25ca938d
+Query SHA256: 2202085b84706261fddd907db426853c8e44b94d8e20631122332d518c9fa961
+Subject SHA256: d0341e339c7583412daafb2ff4a232aeaf4d96193b10fec580e55245f788a422
+Profile: control
+Command: /home/kawato/micromamba/bin/tblastn -task tblastn -query /mnt/c/Users/genom/GitHub/LOSAT/docs/evidence/tlosan_stage_d/uneven_gap_20260924/query.faa -subject /mnt/c/Users/genom/GitHub/LOSAT/docs/evidence/tlosan_stage_d/uneven_gap_20260924/subjects.fna -db_gencode 1 -num_threads 1 -outfmt 6 qseqid sseqid score bitscore evalue qstart qend sstart send sframe length -comp_based_stats 0 -sum_stats false
+Final output bytes unchanged by probe: yes
+D calls: 4

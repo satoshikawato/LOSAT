@@ -1542,6 +1542,15 @@ mod tests {
         find_blosum62_word3_init_hsps, find_blosum62_word3_init_hsps_multi,
         find_protein_init_hsps_multi,
     };
+    use crate::algorithm::tblastn::stage_d_linking::{
+        link_preliminary_hsps, reap_by_evalue, LinkedHspList,
+    };
+    use crate::algorithm::tblastn::stage_d_stats::{
+        local_parameters_for_call, LocalParameterCall, LocalParameterOptions,
+    };
+    use crate::config::ProteinScoringSpec;
+    use crate::stats::spouge::lookup_protein_gumbel_params;
+    use crate::stats::tables::{lookup_protein_params_gapped, lookup_protein_params_ungapped};
     use std::fs;
 
     // NCBI c++/src/algo/blast/core/blast_gapalign.c:3924-3927:
@@ -1581,6 +1590,291 @@ mod tests {
             }
         }
         records
+    }
+
+    // NCBI c++/src/algo/blast/core/link_hsps.c:1765-1810:
+    // Blast_HSPListSortByScore(hsp_list);
+    // hsp_list->best_evalue = hsp_list->hsp_array[0]->evalue;
+    // compare the saved ordered NCBI link output after a Rust C-to-D call.
+    fn assert_stage_d_link_list_matches_trace(list: &LinkedHspList, trace: &str, event: usize) {
+        let prefix = format!("D_HSP\t{event}\tlink_after\t");
+        let expected: Vec<_> = trace
+            .lines()
+            .filter(|line| line.starts_with(&prefix))
+            .collect();
+        assert_eq!(list.hsps.len(), expected.len());
+        for (actual, line) in list.hsps.iter().zip(expected) {
+            let f: Vec<_> = line.split('\t').collect();
+            assert_eq!(actual.context, f[4].parse::<usize>().unwrap());
+            assert_eq!(actual.hsp.frame, f[5].parse::<i8>().unwrap());
+            assert_eq!(actual.hsp.q_start, f[6].parse::<i32>().unwrap());
+            assert_eq!(actual.hsp.q_end, f[7].parse::<i32>().unwrap());
+            assert_eq!(actual.hsp.s_start, f[8].parse::<i32>().unwrap());
+            assert_eq!(actual.hsp.s_end, f[9].parse::<i32>().unwrap());
+            assert_eq!(actual.hsp.score, f[10].parse::<i32>().unwrap());
+            assert_eq!(actual.num, f[12].parse::<i32>().unwrap());
+            assert_eq!(
+                actual.evalue.to_bits(),
+                f[13].parse::<f64>().unwrap().to_bits()
+            );
+        }
+        let list_prefix = format!("D_LIST\t{event}\tlink_after\t");
+        let list_row = trace
+            .lines()
+            .find(|line| line.starts_with(&list_prefix))
+            .unwrap();
+        assert_eq!(
+            list.best_evalue.to_bits(),
+            list_row
+                .split('\t')
+                .nth(6)
+                .unwrap()
+                .parse::<f64>()
+                .unwrap()
+                .to_bits()
+        );
+    }
+
+    // NCBI c++/src/algo/blast/core/blast_setup.c:964-985;
+    // c++/src/algo/blast/core/blast_parameters.c:774-815,902-999,302-383;
+    // c++/src/algo/blast/core/blast_engine.c:1390-1445,870-885:
+    // initial hit/word/link cutoff state is computed before the preliminary
+    // search; the complete appended list is passed to BLAST_LinkHsps.
+    #[test]
+    fn computed_default_parameters_preserve_ncbi_preliminary_link_input() {
+        let root = concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../docs/evidence/tlosan_stage_c/multi_query_20260924/"
+        );
+        let queries = read_fasta(&format!("{root}query.faa"));
+        let refs: Vec<&[u8]> = queries
+            .iter()
+            .map(|(_, sequence)| sequence.as_slice())
+            .collect();
+        let subject = &read_fasta(&format!("{root}subjects.fna"))[0].1;
+        let gapped = lookup_protein_params_gapped(ScoringMatrix::Blosum62);
+        let ungapped = lookup_protein_params_ungapped(ScoringMatrix::Blosum62);
+        let gumbel = lookup_protein_gumbel_params(
+            &ProteinScoringSpec {
+                matrix: ScoringMatrix::Blosum62,
+                gap_open: 11,
+                gap_extend: 1,
+            },
+            (subject.len() / 3) as i64,
+        )
+        .unwrap();
+        let parameters = local_parameters_for_call(
+            &[(120, true), (70, true), (120, false)],
+            subject.len(),
+            &[gapped; 3],
+            &[ungapped; 3],
+            LocalParameterOptions {
+                expect_value: 10.0,
+                do_sum_stats: true,
+                max_intron_length: 0,
+                gap_trigger_bits: 22.0,
+                word_xdrop_bits: 7.0,
+                scale_factor: 1.0,
+                gumbel: Some(&gumbel),
+            },
+            LocalParameterCall::Initial {
+                min_subject_length: (subject.len() / 3) as i32,
+                composition_based_stats: 2,
+            },
+        );
+        let word_xdrop: Vec<_> = parameters.cutoffs.iter().map(|p| p.word_xdrop).collect();
+        let word_cutoff: Vec<_> = parameters.cutoffs.iter().map(|p| p.word_cutoff).collect();
+        let hit_cutoff: Vec<_> = parameters.cutoffs.iter().map(|p| p.hit_cutoff).collect();
+        assert_eq!(hit_cutoff, [19, 17, i32::MAX]);
+        assert_eq!(word_cutoff, [19, 17, i32::MAX]);
+        assert_eq!(word_xdrop, [16, 16, 0]);
+        let seg = SegParams::default();
+        let profile = PreliminaryProfile {
+            seg: Some(&seg),
+            soft_masking: false,
+            threshold: 13,
+            window: 40,
+            word_xdrop: &word_xdrop,
+            word_cutoff: &word_cutoff,
+            mask_lowercase: false,
+            matrix: ScoringMatrix::Blosum62,
+            word_size: 3,
+            gap_open: 11,
+            gap_extend: 1,
+            gap_xdrop: 38,
+            gapped_cutoff: &hit_cutoff,
+            hsp_num_max: i32::MAX as usize,
+        };
+        let (preliminary, _) =
+            preliminary_protein_hsps_in_ncbi_order(&refs, subject, 1, profile).unwrap();
+        let trace = fs::read_to_string(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../docs/evidence/tlosan_stage_d/run_20260924/multi_query_20260924_default.trace"
+        ))
+        .unwrap();
+        let expected: Vec<_> = trace
+            .lines()
+            .filter(|line| line.starts_with("D_HSP\t0\tlink_before\t"))
+            .map(|line| {
+                let f: Vec<_> = line.split('\t').collect();
+                (
+                    f[4].parse::<usize>().unwrap(),
+                    f[5].parse::<i8>().unwrap(),
+                    f[6].parse::<i32>().unwrap(),
+                    f[7].parse::<i32>().unwrap(),
+                    f[8].parse::<i32>().unwrap(),
+                    f[9].parse::<i32>().unwrap(),
+                    f[10].parse::<i32>().unwrap(),
+                )
+            })
+            .collect();
+        let actual: Vec<_> = preliminary
+            .iter()
+            .map(|(context, hsp)| {
+                (
+                    *context,
+                    hsp.frame,
+                    hsp.q_start,
+                    hsp.q_end,
+                    hsp.s_start,
+                    hsp.s_end,
+                    hsp.score,
+                )
+            })
+            .collect();
+        assert_eq!(actual, expected);
+        // NCBI link_hsps.c:1765-1810 and blast_engine.c:643-676:
+        // the scored Stage C list is linked before preliminary E-value reap.
+        let mut linked = link_preliminary_hsps(
+            &preliminary,
+            &[120, 70, 120],
+            &parameters.lengths,
+            subject.len() as i32,
+            &[gapped; 3],
+            &gumbel,
+            &parameters.link.unwrap(),
+        )
+        .unwrap();
+        assert_stage_d_link_list_matches_trace(&linked, &trace, 0);
+        reap_by_evalue(&mut linked, parameters.prelim_evalue);
+        assert_eq!(linked.hsps.len(), 20);
+    }
+
+    // NCBI c++/src/algo/blast/core/blast_setup.c:964-985;
+    // c++/src/algo/blast/core/blast_engine.c:478-586,870-885:
+    // the initial computed hit/word cutoffs feed the chunked preliminary search;
+    // the appended output is the link input before NCBI modifies num/E-value.
+    #[test]
+    fn computed_positive_uneven_gap_inputs_match_ncbi_link_before() {
+        let root = concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../docs/evidence/tlosan_stage_d/uneven_gap_20260924/"
+        );
+        let query = &read_fasta(&format!("{root}query.faa"))[0].1;
+        let subject = &read_fasta(&format!("{root}subjects.fna"))[0].1;
+        let gapped = lookup_protein_params_gapped(ScoringMatrix::Blosum62);
+        let ungapped = lookup_protein_params_ungapped(ScoringMatrix::Blosum62);
+        let gumbel = lookup_protein_gumbel_params(
+            &ProteinScoringSpec {
+                matrix: ScoringMatrix::Blosum62,
+                gap_open: 11,
+                gap_extend: 1,
+            },
+            (subject.len() / 3) as i64,
+        )
+        .unwrap();
+        let parameters = local_parameters_for_call(
+            &[(query.len(), true)],
+            subject.len(),
+            &[gapped],
+            &[ungapped],
+            LocalParameterOptions {
+                expect_value: 10.0,
+                do_sum_stats: true,
+                max_intron_length: 0,
+                gap_trigger_bits: 22.0,
+                word_xdrop_bits: 7.0,
+                scale_factor: 1.0,
+                gumbel: Some(&gumbel),
+            },
+            LocalParameterCall::Initial {
+                min_subject_length: (subject.len() / 3) as i32,
+                composition_based_stats: 2,
+            },
+        );
+        let word_xdrop = [parameters.cutoffs[0].word_xdrop];
+        let word_cutoff = [parameters.cutoffs[0].word_cutoff];
+        let gapped_cutoff = [parameters.cutoffs[0].hit_cutoff];
+        assert_eq!(word_cutoff, [10]);
+        let seg = SegParams::default();
+        let profile = PreliminaryProfile {
+            seg: Some(&seg),
+            soft_masking: false,
+            threshold: 13,
+            window: 40,
+            word_xdrop: &word_xdrop,
+            word_cutoff: &word_cutoff,
+            mask_lowercase: false,
+            matrix: ScoringMatrix::Blosum62,
+            word_size: 3,
+            gap_open: 11,
+            gap_extend: 1,
+            gap_xdrop: 38,
+            gapped_cutoff: &gapped_cutoff,
+            hsp_num_max: i32::MAX as usize,
+        };
+        let (preliminary, _) =
+            preliminary_protein_hsps_in_ncbi_order(&[query], subject, 1, profile).unwrap();
+        let trace = fs::read_to_string(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../docs/evidence/tlosan_stage_d/uneven_gap_run_20260924/uneven_gap_20260924_default.trace"
+        )).unwrap();
+        let expected: Vec<_> = trace
+            .lines()
+            .filter(|line| line.starts_with("D_HSP\t0\tlink_before\t"))
+            .map(|line| {
+                let f: Vec<_> = line.split('\t').collect();
+                (
+                    f[4].parse::<usize>().unwrap(),
+                    f[5].parse::<i8>().unwrap(),
+                    f[6].parse::<i32>().unwrap(),
+                    f[7].parse::<i32>().unwrap(),
+                    f[8].parse::<i32>().unwrap(),
+                    f[9].parse::<i32>().unwrap(),
+                    f[10].parse::<i32>().unwrap(),
+                )
+            })
+            .collect();
+        let actual: Vec<_> = preliminary
+            .iter()
+            .map(|(context, hsp)| {
+                (
+                    *context,
+                    hsp.frame,
+                    hsp.q_start,
+                    hsp.q_end,
+                    hsp.s_start,
+                    hsp.s_end,
+                    hsp.score,
+                )
+            })
+            .collect();
+        assert_eq!(actual, expected);
+        // NCBI link_hsps.c:1765-1810 and blast_engine.c:643-676:
+        // the scored Stage C list is linked before preliminary E-value reap.
+        let mut linked = link_preliminary_hsps(
+            &preliminary,
+            &[query.len() as i32],
+            &parameters.lengths,
+            subject.len() as i32,
+            &[gapped],
+            &gumbel,
+            &parameters.link.unwrap(),
+        )
+        .unwrap();
+        assert_stage_d_link_list_matches_trace(&linked, &trace, 0);
+        reap_by_evalue(&mut linked, parameters.prelim_evalue);
+        assert_eq!(linked.hsps.len(), 2);
     }
 
     // NCBI c++/src/algo/blast/core/blast_gapalign.c:2371-2468:

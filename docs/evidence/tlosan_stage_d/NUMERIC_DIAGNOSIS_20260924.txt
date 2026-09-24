@@ -1,0 +1,29 @@
+Pinned source: 598d8ae6a72b923127ba2fbfaffd48e4c83bfbf4
+Oracle: NCBI tblastn 2.17.0+, SHA256 e3956f1e107a30439d56c8f72fae4267a7d62ebcc16e4f99d4baf2bdf00402e0
+Fixture: docs/evidence/tlosan_stage_d/run_20260924/multi_query_20260924_default.trace
+
+Initial Rust diagnostic before the boost_erf.c expl precision fix:
+  cargo test --manifest-path LOSAT/Cargo.toml --lib algorithm::tblastn::stage_d_linking::tests::scaled_postredo_relink_and_reap_match_ncbi_trace
+  event 3, HSP 0, scaled raw score 20931
+  Rust linked E: 3.91537718207120181e-84, bits 3359242034342933127
+  NCBI linked E: 3.91537718207121095e-84, bits 3359242034342933147
+  Difference: 20 ULP
+  Rust StoE before gap-decay divisor: 3.5238394638640818e-84
+  NCBI StoE: 3.52383946386409e-84 (parameters_20260924/multi_query_20260924_default.spouge.tsv)
+
+Initial ErfC diagnostic with ordinary binary64 exp in Rust:
+  cargo test --manifest-path LOSAT/Cargo.toml --lib stats::spouge::tests::pinned_tblastn_erfc_calls_match_ncbi_double_bits
+  input z: 4.72043606275372607e0
+  Rust ErfC: 2.46046963214379796e-11, bits 4448164017270000502
+  NCBI ErfC: 2.46046963214379764e-11, bits 4448164017270000501
+  Pinned boost_erf.c:149,175,201,230 evaluates result *= expl(-z*z)/z;
+  the C long-double intermediate is assigned back to double.
+
+After the Rust double-double implementation of that intermediate expression:
+  all 428 saved NCBI ErfC calls and all 214 saved Spouge StoE calls compare equal by f64 bits;
+  both Stage D multi-query post-Kappa relink/reap events (3/5 and 6/8) compare equal by f64 bits,
+  list best E, HSP order, raw score, and deletion order.
+  The current validation command/results are saved in VALIDATION_20260924.txt.
+
+This records a source-driven diagnosis on these inputs; it is not a claim of
+all-input or cross-platform floating-point parity.

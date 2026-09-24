@@ -18,4 +18,7 @@ mod search_gapped;
 // NCBI c++/src/algo/blast/core/blast_setup.c:729-735,770-847:
 // translated db_length /= 3 before per-context length adjustment and search space.
 mod stage_d_stats;
+// NCBI c++/src/algo/blast/core/link_hsps.c:1602-1810;
+// blast_engine.c:870-906: link the preliminary list and reap by prelim E-value.
+mod stage_d_linking;
 pub use args::TblastnArgs;

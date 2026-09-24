@@ -1,0 +1,171 @@
+Stage D partial checkpoint local validation, 2026-09-24
+Pinned NCBI source: 598d8ae6a72b923127ba2fbfaffd48e4c83bfbf4
+No Stage D/E acceptance asserted.
+
+$ cargo fmt --manifest-path LOSAT/Cargo.toml -- --check
+exit code: 0
+
+$ cargo check --manifest-path LOSAT/Cargo.toml --lib
+    Checking LOSAT v0.1.0 (/mnt/c/Users/genom/GitHub/LOSAT/LOSAT)
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 12.07s
+exit code: 0
+
+$ cargo clippy --manifest-path LOSAT/Cargo.toml --lib
+   Compiling LOSAT v0.1.0 (/mnt/c/Users/genom/GitHub/LOSAT/LOSAT)
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 13.51s
+exit code: 0
+
+$ cargo test --manifest-path LOSAT/Cargo.toml --lib algorithm::tblastn
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 3.07s
+     Running unittests src/lib.rs (LOSAT/target/debug/deps/LOSAT-375c51a56549f105)
+
+running 70 tests
+test algorithm::tblastn::search_gapped::tests::protein_start_offset_window_boundaries_follow_ncbi ... ok
+test algorithm::tblastn::search_gapped::tests::blast_hsp_test_deletion_matches_ncbi_api ... ok
+test algorithm::tblastn::search_gapped::tests::preliminary_append_cap_and_tie_match_ncbi_api ... ok
+test algorithm::tblastn::search_gapped::tests::long_chunk_overlap_merge_matches_ncbi_input_score_and_order ... ok
+test algorithm::tblastn::search_gapped::tests::ambiguity_gapped_scores_offsets_and_order_match_ncbi ... ok
+test algorithm::tblastn::args::tests::lcase_masking_flag_is_explicit ... ok
+test algorithm::tblastn::args::tests::invalid_codes_are_explicit_errors ... ok
+test algorithm::tblastn::args::tests::unsupported_paths_and_ncbi_exclusions_are_rejected ... ok
+test algorithm::tblastn::args::tests::ordinary_defaults_and_code32_are_accepted ... ok
+test algorithm::tblastn::search_gapped::tests::code32_api_gapped_scores_offsets_and_order_match_ncbi ... ok
+test algorithm::tblastn::search_gapped::tests::nonzero_base_partial_traceback_without_fence_matches_ncbi ... ok
+test algorithm::tblastn::search_gapped::tests::lowercase_query_mask_matches_ncbi_candidates_hsps_and_traceback ... ok
+test algorithm::tblastn::search_gapped::tests::computed_positive_uneven_gap_inputs_match_ncbi_link_before ... ok
+test algorithm::tblastn::search_init::tests::alternate_matrix_word2_wordfinder_hsps_match_ncbi ... ok
+test algorithm::tblastn::search_gapped::tests::long_multi_hsp_partial_windows_and_retry_match_ncbi ... ok
+test algorithm::tblastn::search_gapped::tests::alternate_matrix_word2_gapped_and_append_match_ncbi ... ok
+test algorithm::tblastn::search_gapped::tests::lowercase_query_soft_mask_matches_ncbi_lookup_and_traceback ... ok
+test algorithm::tblastn::search_init::tests::code32_api_oracle_init_hsps_match_scores_internal_offsets_and_order ... ok
+test algorithm::tblastn::search_gapped::tests::internal_soft_seg_crossing_matches_ncbi_query_hsp_and_traceback ... ok
+test algorithm::tblastn::search_init::tests::ambiguity_spectrum_init_hsp_matches_ncbi ... ok
+test algorithm::tblastn::search_gapped::tests::internal_seg_crossing_traceback_uses_masked_score_and_unmasked_identity ... ok
+test algorithm::tblastn::search_gapped::tests::overlapping_seg_lowercase_soft_mask_matches_ncbi ... ok
+test algorithm::tblastn::search_gapped::tests::multi_query_preliminary_append_snapshots_match_ncbi ... ok
+test algorithm::tblastn::search_gapped::tests::lowercase_gapped_scores_offsets_and_order_match_ncbi ... ok
+test algorithm::tblastn::search_gapped::tests::multi_query_gapped_hsps_match_ncbi_context_scores_offsets_and_order ... ok
+test algorithm::tblastn::search_gapped::tests::hard_seg_query_bytes_and_integrated_hsp_match_ncbi ... ok
+test algorithm::tblastn::search_gapped::tests::overlapping_seg_and_lowercase_query_mask_matches_ncbi ... ok
+test algorithm::tblastn::search_gapped::tests::six_frame_merged_traceback_endpoint_deletion_matches_ncbi ... ok
+test algorithm::tblastn::search_gapped::tests::multi_query_traceback_lists_match_ncbi_post_fence_hsps ... ok
+test algorithm::tblastn::search_seed::tests::code32_api_oracle_candidates_match_in_set_and_order ... ok
+test algorithm::tblastn::search_init::tests::multi_query_wordfinder_hsps_match_ncbi_in_order ... ok
+test algorithm::tblastn::search_gapped::tests::computed_default_parameters_preserve_ncbi_preliminary_link_input ... ok
+test algorithm::tblastn::search_init::tests::lowercase_mask_init_hsps_match_ncbi_scores_and_internal_offsets ... ok
+test algorithm::tblastn::search_seed::tests::ncbi_preliminary_subject_frames_match_all_fixture_bytes ... ok
+test algorithm::tblastn::search_seed::tests::unmasked_long_translated_chunks_match_ncbi_wordfinder_calls ... ok
+test algorithm::tblastn::stage_d_linking::tests::scaled_postredo_relink_and_reap_match_ncbi_trace ... ok
+test algorithm::tblastn::stage_d_stats::tests::local_code1_context_lengths_match_ncbi_function_inputs ... ok
+test algorithm::tblastn::stage_d_stats::tests::computed_code1_default_link_parameters_match_stage_d_call ... ok
+test algorithm::tblastn::stage_d_stats::tests::positive_uneven_gap_pair_matches_ncbi_double_bits ... ok
+test algorithm::tblastn::stage_d_stats::tests::preliminary_individual_evalues_match_ncbi_double_bits ... ok
+test algorithm::tblastn::search_init::tests::real_wordfinder_distinct_context_xdrop_matches_ncbi ... ok
+test algorithm::tblastn::stage_d_stats::tests::computed_code1_control_parameters_match_stage_c_inputs ... ok
+test algorithm::tblastn::search_seed::tests::ncbi_ambiguity_spectrum_frames_and_candidates_match ... ok
+test algorithm::tblastn::stage_d_linking::tests::saved_code1_link_lists_match_ncbi_score_order_num_and_double_evalue ... ok
+test algorithm::tblastn::search_seed::tests::code_32_changes_search_words_and_ambiguity_resolves ... ok
+test algorithm::tblastn::search_gapped::tests::real_chunk_endpoint_deletion_and_append_cap_match_ncbi ... ok
+test algorithm::tblastn::search_gapped::tests::real_path_hsp_test_deletion_order_matches_ncbi ... ok
+test algorithm::tblastn::search_init::tests::wordfinder_cutoff_is_selected_per_query_context_at_score_boundary ... ok
+test algorithm::tblastn::search_gapped::tests::real_path_start_offset_failure_deletion_matches_ncbi ... ok
+test algorithm::tblastn::search_gapped::tests::real_path_start_offset_success_writeback_matches_ncbi ... ok
+test algorithm::tblastn::search_gapped::tests::alternate_matrix_traceback_positive_containment_matches_ncbi ... ok
+test algorithm::tblastn::search_seed::tests::multi_query_candidate_contexts_and_order_match_ncbi ... ok
+test algorithm::tblastn::search_seed::tests::ncbi_lowercase_mask_candidates_match_in_set_and_order ... ok
+test algorithm::tblastn::search_seed::tests::seg_suppresses_low_complexity_query_seeds ... ok
+test algorithm::tblastn::search_seed::tests::alternate_matrix_word2_candidates_and_contexts_match_ncbi ... ok
+test algorithm::tblastn::search_seed::tests::six_frame_translation_and_seed_coverage ... ok
+test algorithm::tblastn::search_gapped::tests::full_translation_traceback_matches_ncbi_post_fence_scores_and_offsets ... ok
+test algorithm::tblastn::search_gapped::tests::fixed_local_subject_gapped_scores_offsets_and_order_match_ncbi ... ok
+test algorithm::tblastn::search_seed::tests::ncbi_saved_init_seeds_exist_in_rust_word_scan ... ok
+test algorithm::tblastn::search_seed::tests::ncbi_all_candidates_match_in_set_and_order ... ok
+test algorithm::tblastn::search_init::tests::saved_init_hsps_match_ncbi_fixture_scores_and_internal_offsets ... ok
+test algorithm::tblastn::search_init::tests::long_subject_chunk_wordfinder_hsps_match_ncbi ... ok
+test algorithm::tblastn::search_seed::tests::long_multi_query_every_candidate_and_context_matches_ncbi ... ok
+test algorithm::tblastn::search_gapped::tests::long_subject_chunk_local_gapped_hsps_match_ncbi ... ok
+test algorithm::tblastn::search_init::tests::masked_chunk_boundary_wordfinder_hsp_matches_ncbi ... ok
+test algorithm::tblastn::search_gapped::tests::skipped_middle_chunk_preserves_both_hsps_and_all_append_rows ... ok
+test algorithm::tblastn::search_init::tests::masked_no_range_middle_chunk_skips_and_later_hsp_matches_ncbi ... ok
+test algorithm::tblastn::search_gapped::tests::long_multi_query_chunk_hsps_and_append_match_ncbi ... ok
+test algorithm::tblastn::search_gapped::tests::no_range_middle_chunk_gapped_and_merged_hsp_match_ncbi ... ok
+test algorithm::tblastn::search_seed::tests::long_subject_every_candidate_matches_ncbi_in_chunk_order ... ok
+
+test result: ok. 70 passed; 0 failed; 0 ignored; 0 measured; 436 filtered out; finished in 30.98s
+
+exit code: 0
+
+$ cargo test --manifest-path LOSAT/Cargo.toml --lib stats::spouge
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 3.64s
+     Running unittests src/lib.rs (LOSAT/target/debug/deps/LOSAT-375c51a56549f105)
+
+running 6 tests
+test stats::spouge::tests::test_lookup_protein_gumbel_params_blosum62_11_1 ... ok
+test stats::spouge::tests::test_blast_spouge_stoe_matches_ncbi_formula_for_representative_tail_inputs ... ok
+test stats::spouge::tests::test_blast_spouge_stoe_matches_ncbi_formula_for_scaled_lambda ... ok
+test stats::spouge::tests::test_blast_spouge_etos_matches_ncbi_formula_for_representative_evalues ... ok
+test stats::spouge::tests::pinned_tblastn_spouge_calls_match_ncbi_double_bits ... ok
+test stats::spouge::tests::pinned_tblastn_erfc_calls_match_ncbi_double_bits ... ok
+
+test result: ok. 6 passed; 0 failed; 0 ignored; 0 measured; 500 filtered out; finished in 0.11s
+
+exit code: 0
+
+$ (cd docs/evidence/tlosan_stage_d/parameters_20260924 && sha256sum -c outputs.sha256)
+manifest.txt: OK
+multi_query_20260924_control.hit_cutoffs.tsv: OK
+multi_query_20260924_control.parameters.tsv: OK
+multi_query_20260924_control.spouge.tsv: OK
+multi_query_20260924_control.word_cutoffs.tsv: OK
+multi_query_20260924_default.hit_cutoffs.tsv: OK
+multi_query_20260924_default.parameters.tsv: OK
+multi_query_20260924_default.spouge.tsv: OK
+multi_query_20260924_default.word_cutoffs.tsv: OK
+run_20260923_control.hit_cutoffs.tsv: OK
+run_20260923_control.parameters.tsv: OK
+run_20260923_control.spouge.tsv: OK
+run_20260923_control.word_cutoffs.tsv: OK
+run_20260923_default.hit_cutoffs.tsv: OK
+run_20260923_default.parameters.tsv: OK
+run_20260923_default.spouge.tsv: OK
+run_20260923_default.word_cutoffs.tsv: OK
+seg_hard_query_20260924_control.hit_cutoffs.tsv: OK
+seg_hard_query_20260924_control.parameters.tsv: OK
+seg_hard_query_20260924_control.spouge.tsv: OK
+seg_hard_query_20260924_control.word_cutoffs.tsv: OK
+seg_hard_query_20260924_default.hit_cutoffs.tsv: OK
+seg_hard_query_20260924_default.parameters.tsv: OK
+seg_hard_query_20260924_default.spouge.tsv: OK
+seg_hard_query_20260924_default.word_cutoffs.tsv: OK
+exit code: 0
+
+$ (cd docs/evidence/tlosan_stage_d/seqsrc_callstate_20260924 && sha256sum -c outputs.sha256)
+manifest.txt: OK
+multi_query_20260924_control.tsv: OK
+multi_query_20260924_default.tsv: OK
+run_20260923_control.tsv: OK
+run_20260923_default.tsv: OK
+seg_hard_query_20260924_control.tsv: OK
+seg_hard_query_20260924_default.tsv: OK
+exit code: 0
+
+$ (cd docs/evidence/tlosan_stage_d/erfc_20260924 && sha256sum -c outputs.sha256)
+manifest.txt: OK
+multi_query_20260924_control.tsv: OK
+multi_query_20260924_default.tsv: OK
+run_20260923_control.tsv: OK
+run_20260923_default.tsv: OK
+seg_hard_query_20260924_control.tsv: OK
+seg_hard_query_20260924_default.tsv: OK
+exit code: 0
+
+$ (cd docs/evidence/tlosan_stage_d/uneven_gap_run_20260924 && sha256sum -c outputs.sha256)
+uneven_gap_20260924_control.manifest.txt: OK
+uneven_gap_20260924_control.out: OK
+uneven_gap_20260924_control.trace: OK
+uneven_gap_20260924_default.manifest.txt: OK
+uneven_gap_20260924_default.out: OK
+uneven_gap_20260924_default.trace: OK
+exit code: 0
+
+Call-state runner positive/no-update assertions: replayed to /tmp/tlosan-seqsrc-replay-20260924 and byte-compared to saved files, exit code 0.

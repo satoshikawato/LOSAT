@@ -28,6 +28,113 @@ typedef struct {
     int32_t hspcnt, allocated, hsp_max, do_not_reallocate;
     double best_evalue;
 } HspList;
+/* Pinned c++/include/algo/blast/core/blast_query_info.h:60-99:
+ *   query_offset, query_length, eff_searchsp, length_adjustment,
+ *   query_index, frame, is_valid, segment_flags;
+ *   first_context, last_context, num_queries, contexts.
+ * Pinned blast_query_info.c:68-96 assigns one protein context per query.
+ */
+typedef struct {
+    int32_t query_offset, query_length;
+    int64_t eff_searchsp;
+    int32_t length_adjustment, query_index;
+    int8_t frame;
+    uint8_t is_valid;
+    int32_t segment_flags;
+} QueryContext;
+typedef struct {
+    int32_t first_context, last_context, num_queries;
+    QueryContext *contexts;
+    uint32_t max_length, min_length;
+    void *pattern_info;
+} QueryInfo;
+
+/* Pinned c++/src/algo/blast/core/blast_engine.c:840-850:
+ *   Blast_HSPListAppend(&hsp_list_for_chunks, &hsp_list_out, kHspNumMax);
+ * Pinned blast_hits.c:2809-2864 appends the new list, score-sorts the
+ * combined list, and enforces hsp_num_max. Log both input lists and the
+ * returned list so per-frame merging and any cap are observable.
+ */
+static void trace_append_list(const char *event, unsigned long call,
+                              const HspList *list)
+{
+    if (!list) return;
+    for (int32_t i = 0; i < list->hspcnt; ++i) {
+        const Hsp *hit = list->hsp_array[i];
+        fprintf(stderr, "%s\t%lu\t%d\t%d\t%d\t%d\t%d\t%d\t%d\t%d\n",
+                event, call, i, hit->context, hit->score, hit->subject.frame,
+                hit->query.offset, hit->query.end,
+                hit->subject.offset, hit->subject.end);
+    }
+}
+
+typedef short (*append_fn)(HspList **, HspList **, int32_t);
+short Blast_HSPListAppend(HspList **incoming, HspList **combined,
+                          int32_t hsp_num_max)
+{
+    static unsigned long call_index = 0;
+    append_fn real = (append_fn)dlsym(RTLD_NEXT, "Blast_HSPListAppend");
+    if (!real) return -1;
+    unsigned long call = call_index++;
+    fprintf(stderr, "APPEND_INPUT\t%lu\t%d\t%d\t%d\n", call,
+            hsp_num_max, *incoming ? (*incoming)->hspcnt : 0,
+            *combined ? (*combined)->hspcnt : 0);
+    trace_append_list("APPEND_IN_HSP", call, *incoming);
+    trace_append_list("APPEND_OLD_HSP", call, *combined);
+    short status = real(incoming, combined, hsp_num_max);
+    fprintf(stderr, "APPEND_OUTPUT\t%lu\t%d\t%d\t%d\n", call, status,
+            *incoming ? (*incoming)->hspcnt : 0,
+            *combined ? (*combined)->hspcnt : 0);
+    trace_append_list("APPEND_OUT_HSP", call, *combined);
+    return status;
+}
+/* Pinned c++/src/algo/blast/core/blast_engine.c:572-586:
+ *   Blast_HSPListAdjustOffsets(hsp_list, backup.offset);
+ *   Blast_HSPListsMerge(&hsp_list, &combined_hsp_list, kHspNumMax,
+ *                       &(backup.offset), INT4_MIN, overlap, ...);
+ * Pinned blast_hits.c:2857-3035 merges intersecting overlap HSPs before
+ * the frame-level Blast_HSPListAppend. Capture adjusted input and output.
+ */
+static void trace_merge_list(const char *event, unsigned long call,
+                             const HspList *list)
+{
+    if (!list) return;
+    for (int32_t i = 0; i < list->hspcnt; ++i) {
+        const Hsp *hit = list->hsp_array[i];
+        fprintf(stderr, "%s\t%lu\t%d\t%d\t%d\t%d\t%d\t%d\t%d\t%d\t%d\t%d\n",
+                event, call, i, hit->context, hit->score, hit->subject.frame,
+                hit->query.offset, hit->query.end, hit->query.gapped_start,
+                hit->subject.offset, hit->subject.end, hit->subject.gapped_start);
+    }
+}
+
+typedef short (*merge_fn)(HspList **, HspList **, int32_t, int32_t *,
+                          int32_t, int32_t, uint8_t, uint8_t);
+short Blast_HSPListsMerge(HspList **incoming, HspList **combined,
+                          int32_t hsp_num_max, int32_t *split_offsets,
+                          int32_t contexts_per_query, int32_t overlap,
+                          uint8_t allow_gap, uint8_t short_reads)
+{
+    static unsigned long call_index = 0;
+    merge_fn real = (merge_fn)dlsym(RTLD_NEXT, "Blast_HSPListsMerge");
+    if (!real) return -1;
+    unsigned long call = call_index++;
+    fprintf(stderr, "MERGE_INPUT\t%lu\t%d\t%d\t%d\t%d\t%d\t%d\t%d\t%d\n",
+            call, hsp_num_max, split_offsets ? split_offsets[0] : -1,
+            contexts_per_query, overlap, allow_gap, short_reads,
+            *incoming ? (*incoming)->hspcnt : 0,
+            *combined ? (*combined)->hspcnt : 0);
+    trace_merge_list("MERGE_IN_HSP", call, *incoming);
+    trace_merge_list("MERGE_OLD_HSP", call, *combined);
+    short status = real(incoming, combined, hsp_num_max, split_offsets,
+                        contexts_per_query, overlap, allow_gap, short_reads);
+    fprintf(stderr, "MERGE_OUTPUT\t%lu\t%d\t%d\t%d\n", call, status,
+            *incoming ? (*incoming)->hspcnt : 0,
+            *combined ? (*combined)->hspcnt : 0);
+    trace_merge_list("MERGE_OUT_HSP", call, *combined);
+    return status;
+}
+
 /* Pinned c++/include/algo/blast/core/blast_def.h:311-319 and
  * c++/include/algo/blast/core/ncbi_std.h:94:
  *   Boolean partial; Int4 num_frames; Int4* range;
@@ -99,6 +206,16 @@ short BLAST_GetGappedScore(int program, void *query, void *query_info,
     gapped_fn real = (gapped_fn)dlsym(RTLD_NEXT, "BLAST_GetGappedScore");
     if (!real) return -1;
     unsigned long call = call_index++;
+    QueryInfo *qinfo = (QueryInfo *)query_info;
+    fprintf(stderr, "QUERY_INFO\t%lu\t%d\t%d\t%d\n", call,
+            qinfo->first_context, qinfo->last_context, qinfo->num_queries);
+    for (int32_t context = qinfo->first_context;
+         context <= qinfo->last_context; ++context) {
+        QueryContext *q = &qinfo->contexts[context];
+        fprintf(stderr, "QUERY_CONTEXT\t%lu\t%d\t%d\t%d\t%d\t%d\t%d\n",
+                call, context, q->query_index, q->query_offset,
+                q->query_length, q->frame, q->is_valid);
+    }
     ExtParams *ext = (ExtParams *)ext_params;
     HitParams *hit = (HitParams *)hit_params;
     ScoreParams *scoring = (ScoreParams *)score_params;
@@ -189,12 +306,18 @@ short Blast_TracebackFromHSPList(
     traceback_fn real = (traceback_fn)dlsym(RTLD_NEXT, "Blast_TracebackFromHSPList");
     if (!real) return -1;
     fprintf(stderr, "TRACEBACK_INPUT\t%d\t%d\n", list->oid, list->hspcnt);
+    /* Pinned blast_traceback.c:1242-1261,1644-1684 passes the query-indexed
+     * HSP list through traceback and retries the same list after a fence. */
+    fprintf(stderr, "TRACEBACK_CONTEXT\t%d\t%d\n",
+            list->query_index, list->hspcnt);
     for (int32_t i = 0; i < list->hspcnt; ++i) {
         Hsp *hit = list->hsp_array[i];
         fprintf(stderr, "TRACEBACK_IN_HSP\t%d\t%d\t%d\t%d\t%d\t%d\t%d\t%d\n",
                 list->oid, i, hit->score, hit->subject.frame,
                 hit->query.offset, hit->query.end,
                 hit->subject.offset, hit->subject.end);
+        fprintf(stderr, "TRACEBACK_IN_CONTEXT_HSP\t%d\t%d\t%d\n",
+                list->query_index, i, hit->context);
     }
     short status = real(program, list, query, subject, query_info, gap_align,
                         score_block, score_params, ext_options, hit_params,

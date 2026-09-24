@@ -1,0 +1,9 @@
+Comparison-only pinned NCBI TBLASTN local -subject oracle.
+NCBI source commit: 598d8ae6a72b923127ba2fbfaffd48e4c83bfbf4
+NCBI binary SHA256: e3956f1e107a30439d56c8f72fae4267a7d62ebcc16e4f99d4baf2bdf00402e0
+LOSAT HEAD: 97ba376499a6c5a28b72c6f45d80a00fb4f002fd
+Queries: full=120 aa, internal70=70 aa (full[25:95]), no_hit_x=120 aa.
+Subject: saved six-frame sequence, 6377 nt.
+Probe source SHA256: gapped=53ec3b8d9901769a1a14fad3404cff391d7c7cd0a29929b14b0455eeb198b8fc, wordfinder=074b015577b2725031a8707c65b0597499794be60d64bc8e294ad0835fae8de4, candidate=ce763167e30c1630bac05f15c5a86209d40c90c125ba4238447770a95d6634e3
+Unprobed output equals all three probe outputs byte for byte: yes
+Command: ['/home/kawato/micromamba/bin/tblastn', '-task', 'tblastn', '-query', '/mnt/c/Users/genom/GitHub/LOSAT/docs/evidence/tlosan_stage_c/multi_query_20260924/query.faa', '-subject', '/mnt/c/Users/genom/GitHub/LOSAT/docs/evidence/tlosan_stage_c/multi_query_20260924/subjects.fna', '-db_gencode', '1', '-matrix', 'BLOSUM62', '-word_size', '3', '-threshold', '13', '-window_size', '40', '-gapopen', '11', '-gapextend', '1', '-evalue', '10000', '-num_threads', '1', '-comp_based_stats', '0', '-seg', 'no', '-sum_stats', 'false', '-outfmt', '6 qseqid sseqid score qstart qend sstart send sframe qseq sseq']

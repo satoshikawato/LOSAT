@@ -1,7 +1,7 @@
 //! Internal NCBI TBLASTN two-hit WordFinder path for the BLOSUM62/word-3 profile.
-//! Later gapped construction, chunk merging and traceback remain unimplemented.
+//! The public search remains unsupported; this is a bounded Stage C diagnostic.
 
-use super::search_seed::{resolve_local_subject_ncbi2na, scan_unambiguous_blosum62_words};
+use super::search_seed::resolve_local_subject_ncbi2na;
 use crate::algorithm::blastp::encoding::encode_protein_query_frame_with_seg;
 use crate::algorithm::blastp::extension::extend_two_hit_blosum62;
 use crate::algorithm::tblastx::translation::generate_frames;
@@ -79,25 +79,68 @@ pub(super) fn find_blosum62_word3_init_hsps(
     cutoff_score: i32,
     mask_lowercase: bool,
 ) -> Result<Vec<InitHsp>> {
+    find_blosum62_word3_init_hsps_multi(
+        &[query],
+        subject,
+        db_gencode,
+        seg,
+        threshold,
+        window,
+        x_dropoff,
+        cutoff_score,
+        mask_lowercase,
+    )
+}
+
+// NCBI c++/src/algo/blast/core/aa_ungapped.c:547-583:
+// curr_context = BSearchContextInfo(query_offset, query_info);
+// if (query_offset - diff <
+//     query_info->contexts[curr_context].query_offset) { ... continue; }
+// cutoffs = word_params->cutoffs + curr_context;
+// s_BlastAaExtendTwoHit(..., query, ..., query_offset, ...);
+// NCBI c++/src/algo/blast/core/blast_extend.c:46-65:
+// while (diag_array_length < (qlen+window_size)) diag_array_length <<= 1;
+// Keep one diagonal table for the concatenated protein queries.
+#[allow(dead_code)]
+pub(super) fn find_blosum62_word3_init_hsps_multi(
+    queries: &[&[u8]],
+    subject: &[u8],
+    db_gencode: u8,
+    seg: Option<&SegParams>,
+    threshold: i32,
+    window: i32,
+    x_dropoff: i32,
+    cutoff_score: i32,
+    mask_lowercase: bool,
+) -> Result<Vec<InitHsp>> {
     let resolved = resolve_local_subject_ncbi2na(subject)?;
     let code = GeneticCode::try_from_id(db_gencode).map_err(anyhow::Error::msg)?;
     let frames = generate_frames(&resolved, &code);
-    let query_frame = encode_protein_query_frame_with_seg(query, seg);
-    let query_sequence = &query_frame.aa_seq[1..query_frame.aa_seq.len() - 1];
-    let seeds = scan_unambiguous_blosum62_words(
-        query,
+    // NCBI c++/src/algo/blast/core/blast_query_info.c:246-250:
+    // last context's query_offset + query_length is the sequence length;
+    // each preceding protein context ends with one NULLB separator.
+    let mut query_sequence = Vec::new();
+    let mut context_offsets = Vec::with_capacity(queries.len());
+    for query in queries {
+        context_offsets.push(i32::try_from(query_sequence.len())?);
+        let frame = encode_protein_query_frame_with_seg(query, seg);
+        query_sequence.extend_from_slice(&frame.aa_seq[1..]);
+    }
+    let seeds = super::search_seed::scan_unambiguous_blosum62_words_multi(
+        queries,
         subject,
         db_gencode,
         seg,
         threshold,
         mask_lowercase,
     )?;
-    let mut diagonals = Diagonals::new(query.len(), window);
+    let mut diagonals = Diagonals::new(query_sequence.len().saturating_sub(1), window);
     let mut hits = Vec::new();
     let mut seed_index = 0;
     const WORD_SIZE: i32 = 3;
 
     for frame in frames {
+        let frame_start = hits.len();
         let subject_sequence = &frame.aa_seq[1..frame.aa_seq.len() - 1];
         while seed_index < seeds.len() && seeds[seed_index].frame == frame.frame {
             let seed = seeds[seed_index];
@@ -141,12 +184,17 @@ pub(super) fn find_blosum62_word3_init_hsps(
             //         last_hit + wordsize, subject_offset, query_offset,
             //         cutoffs->x_dropoff, ..., wordsize, &right_extend, &s_last_off);
             // if (score >= cutoffs->cutoff_score) BlastSaveInitHsp(...);
-            if q - diff < 0 {
+            // NCBI c++/src/algo/blast/core/aa_ungapped.c:562-579:
+            // curr_context = BSearchContextInfo(query_offset, query_info);
+            // if (query_offset - diff <
+            //     query_info->contexts[curr_context].query_offset) continue;
+            let context = context_offsets.partition_point(|&offset| offset <= q) - 1;
+            if q - diff < context_offsets[context] {
                 *last_hit = s + diagonals.offset;
                 continue;
             }
             let result = extend_two_hit_blosum62(
-                query_sequence,
+                &query_sequence,
                 subject_sequence,
                 (previous + WORD_SIZE) as usize,
                 s as usize,
@@ -181,6 +229,18 @@ pub(super) fn find_blosum62_word3_init_hsps(
                 *last_hit = s + diagonals.offset;
             }
         }
+        // NCBI c++/src/algo/blast/core/aa_ungapped.c:200-234:
+        // status = s_BlastAaWordFinder_TwoHit(..., init_hitlist, ...);
+        // Blast_InitHitListSortByScore(init_hitlist);
+        // NCBI c++/src/algo/blast/core/blast_extend.c:273-313:
+        // compare score DESC, subject start ASC, length DESC, query start ASC.
+        hits[frame_start..].sort_unstable_by(|a, b| {
+            b.score
+                .cmp(&a.score)
+                .then(a.s_start.cmp(&b.s_start))
+                .then(b.length.cmp(&a.length))
+                .then(a.q_start.cmp(&b.q_start))
+        });
         diagonals.finish_frame(frame.aa_len);
     }
     Ok(hits)
@@ -202,6 +262,60 @@ mod tests {
             }
         }
         records
+    }
+
+    // NCBI c++/src/algo/blast/core/aa_ungapped.c:562-583:
+    // BSearchContextInfo finds the query context before two-hit extension;
+    // the left word must remain within that context's query_offset.
+    // NCBI c++/src/algo/blast/core/aa_ungapped.c:200-234:
+    // Blast_InitHitListSortByScore(init_hitlist) fixes frame-local HSP order.
+    #[test]
+    fn multi_query_wordfinder_hsps_match_ncbi_in_order() {
+        let root = concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../docs/evidence/tlosan_stage_c/multi_query_20260924/"
+        );
+        let queries = read_fasta(&format!("{root}query.faa"));
+        let refs: Vec<&[u8]> = queries
+            .iter()
+            .map(|(_, sequence)| sequence.as_slice())
+            .collect();
+        let subject = &read_fasta(&format!("{root}subjects.fna"))[0].1;
+        let trace = fs::read_to_string(format!("{root}wordfinder.stderr")).unwrap();
+        let frame_order = [1, 2, 3, -1, -2, -3];
+        let expected: Vec<_> = trace
+            .lines()
+            .filter(|line| line.starts_with("INIT\t"))
+            .map(|line| {
+                let f: Vec<_> = line.split('\t').collect();
+                InitHsp {
+                    frame: frame_order[f[1].parse::<usize>().unwrap()],
+                    q_seed: f[3].parse().unwrap(),
+                    s_seed: f[4].parse().unwrap(),
+                    q_start: f[5].parse().unwrap(),
+                    s_start: f[6].parse().unwrap(),
+                    length: f[7].parse().unwrap(),
+                    score: f[8].parse().unwrap(),
+                }
+            })
+            .collect();
+        let actual =
+            find_blosum62_word3_init_hsps_multi(&refs, subject, 1, None, 13, 40, 16, 0, false)
+                .unwrap();
+        if actual != expected {
+            let first = actual
+                .iter()
+                .zip(&expected)
+                .position(|(left, right)| left != right)
+                .unwrap_or(actual.len().min(expected.len()));
+            panic!(
+                "first multi-query WordFinder difference at {first}: Rust={:?}, NCBI={:?}; counts Rust={} NCBI={}",
+                actual.get(first),
+                expected.get(first),
+                actual.len(),
+                expected.len()
+            );
+        }
     }
 
     // NCBI reference: c++/src/algo/blast/core/blast_engine.c:816-831

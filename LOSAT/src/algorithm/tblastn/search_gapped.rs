@@ -51,12 +51,62 @@ pub(super) fn gapped_blosum62_word3_hsps(
     gap_open: i32,
     gap_extend: i32,
     x_drop: i32,
+    cutoff_score: i32,
 ) -> Result<Vec<GappedHsp>> {
+    Ok(gapped_blosum62_word3_hsps_multi(
+        &[query],
+        subject,
+        db_gencode,
+        initial,
+        gap_open,
+        gap_extend,
+        x_drop,
+        &[cutoff_score],
+    )?
+    .into_iter()
+    .map(|(_, hsp)| hsp)
+    .collect())
+}
+
+// NCBI c++/src/algo/blast/core/blast_gapalign.c:2371-2468:
+// context = BSearchContextInfo(init_hsp->offsets.qs_offsets.q_off, query_info);
+// query_start = query_info->contexts[context].query_offset;
+// init_hsp->offsets.qs_offsets.q_off -= query_start;
+// init_hsp->ungapped_data->q_start -= query_start;
+// NCBI c++/src/algo/blast/core/blast_itree.c:212-229:
+// s_GetQueryStrandOffset(query_info, context) returns the protein context's
+// query_offset, which is also used by containment and insertion.
+#[allow(dead_code)]
+pub(super) fn gapped_blosum62_word3_hsps_multi(
+    queries: &[&[u8]],
+    subject: &[u8],
+    db_gencode: u8,
+    initial: &[InitHsp],
+    gap_open: i32,
+    gap_extend: i32,
+    x_drop: i32,
+    cutoff_scores: &[i32],
+) -> Result<Vec<(usize, GappedHsp)>> {
+    // NCBI c++/src/algo/blast/core/blast_gapalign.c:3924-3927:
+    // cutoff = hit_params->cutoffs[context].cutoff_score;
+    // Every query context must supply its own measured cutoff.
+    if cutoff_scores.len() != queries.len() {
+        bail!("one preliminary gapped cutoff is required per query context");
+    }
     let resolved = resolve_local_subject_ncbi2na(subject)?;
     let code = GeneticCode::try_from_id(db_gencode).map_err(anyhow::Error::msg)?;
     let frames = generate_frames(&resolved, &code);
-    let query_frame = encode_protein_query_frame_with_seg(query, None);
-    let query_sequence = &query_frame.aa_seq[1..query_frame.aa_seq.len() - 1];
+    let query_frames: Vec<_> = queries
+        .iter()
+        .map(|query| encode_protein_query_frame_with_seg(query, None))
+        .collect();
+    let mut context_offsets = Vec::with_capacity(queries.len());
+    let mut total_query_length = 0i32;
+    for query in queries {
+        context_offsets.push(total_query_length);
+        total_query_length += i32::try_from(query.len())? + 1;
+    }
+    total_query_length -= 1;
     let mut scratch = GapAlignScratch::new();
     let mut results = Vec::new();
 
@@ -85,26 +135,31 @@ pub(super) fn gapped_blosum62_word3_hsps(
         // BlastIntervalTreeAddHSP(new_hsp, tree, query_info, eQueryAndSubject);
         let mut tree = BlastIntervalTree::new(
             0,
-            i32::try_from(query.len())? + 1,
+            total_query_length + 1,
             0,
             i32::try_from(frame.aa_len)? + 1,
         );
         for hit in frame_initial {
+            let context =
+                context_offsets.partition_point(|&offset| offset <= hit.q_seed as i32) - 1;
+            let context_offset = context_offsets[context];
+            let query_sequence = &query_frames[context].aa_seq[1..1 + queries[context].len()];
             let initial_tree_hsp = TreeHsp {
-                query_offset: hit.q_start,
-                query_end: hit.q_start + hit.length,
+                query_offset: hit.q_start - context_offset,
+                query_end: hit.q_start - context_offset + hit.length,
                 subject_offset: hit.s_start,
                 subject_end: hit.s_start + hit.length,
                 score: hit.score,
                 query_frame: 0,
-                query_length: i32::try_from(query.len())?,
-                query_context_offset: 0,
+                query_length: i32::try_from(queries[context].len())?,
+                query_context_offset: context_offset,
                 subject_frame_sign: i32::from(frame.frame.signum()),
             };
-            if tree.contains_hsp(&initial_tree_hsp, 0, 0) {
+            if tree.contains_hsp(&initial_tree_hsp, context_offset, 0) {
                 continue;
             }
-            let q_start = usize::try_from(hit.q_start).context("negative initial query start")?;
+            let q_start = usize::try_from(hit.q_start - context_offset)
+                .context("negative context-local initial query start")?;
             let s_start = usize::try_from(hit.s_start).context("negative initial subject start")?;
             let length = usize::try_from(hit.length).context("negative initial HSP length")?;
             let q_gapped_start = blastp_get_start_for_gapped_alignment(
@@ -116,8 +171,8 @@ pub(super) fn gapped_blosum62_word3_hsps(
                 length,
                 ScoringMatrix::Blosum62,
             );
-            let s_gapped_start =
-                i64::from(hit.s_seed) + i64::try_from(q_gapped_start)? - i64::from(hit.q_seed);
+            let s_gapped_start = i64::from(hit.s_seed) + i64::try_from(q_gapped_start)?
+                - i64::from(hit.q_seed - u32::try_from(context_offset)?);
             let s_gapped_start =
                 usize::try_from(s_gapped_start).context("negative gapped subject start")?;
             let gapped = blastp_score_only_gapped_alignment_with_scratch(
@@ -132,13 +187,14 @@ pub(super) fn gapped_blosum62_word3_hsps(
                 BlastpGappedAlignmentMode::Exact,
                 &mut scratch,
             );
-            // NCBI c++/src/algo/blast/core/blast_gapalign.c:4057-4091:
+            // NCBI c++/src/algo/blast/core/blast_gapalign.c:3924-3927,4058:
+            // cutoff = hit_params->cutoffs[context].cutoff_score;
             // if (gap_align->score >= cutoff) {
             //     Blast_HSPInit(..., gap_align->score, ..., &new_hsp);
             //     Blast_HSPListSaveHSP(hsp_list, new_hsp);
             //     BlastIntervalTreeAddHSP(new_hsp, tree, query_info, eQueryAndSubject);
             // }
-            if gapped.score >= 0 {
+            if gapped.score >= cutoff_scores[context] {
                 let saved = GappedHsp {
                     frame: frame.frame,
                     score: gapped.score,
@@ -157,18 +213,269 @@ pub(super) fn gapped_blosum62_word3_hsps(
                         subject_end: saved.s_end,
                         score: saved.score,
                         query_frame: 0,
-                        query_length: i32::try_from(query.len())?,
-                        query_context_offset: 0,
+                        query_length: i32::try_from(queries[context].len())?,
+                        query_context_offset: context_offset,
                         subject_frame_sign: i32::from(frame.frame.signum()),
                     },
-                    0,
+                    context_offset,
                     IndexMethod::QueryAndSubject,
                 );
-                results.push(saved);
+                results.push((context, saved));
             }
         }
     }
     Ok(results)
+}
+
+// NCBI c++/src/algo/blast/core/blast_engine.c:522-552,804-850:
+// Blast_HSPListPurgeHSPsWithCommonEndpoints(program_number, hsp_list, TRUE);
+// Blast_HSPListSortByScore(hsp_list);
+// Blast_HSPListAppend(&hsp_list_for_chunks, &hsp_list_out, kHspNumMax);
+// NCBI c++/src/algo/blast/core/blast_hits.c:2268-2379,2455-2537:
+// sort by context, query/subject start, descending score/end; delete shared
+// starts in the same context and frame; repeat for shared ends.
+// This diagnostic records the list after each per-frame append.
+#[allow(dead_code)]
+fn preliminary_merged_hsps(
+    gapped: &[(usize, GappedHsp)],
+    hsp_num_max: usize,
+) -> Vec<Vec<(usize, GappedHsp)>> {
+    fn sort_by_score_if_needed(hsps: &mut [(usize, GappedHsp)]) {
+        if hsps
+            .windows(2)
+            .any(|pair| compare_gapped_score(&pair[0].1, &pair[1].1).is_gt())
+        {
+            hsps.sort_unstable_by(|a, b| compare_gapped_score(&a.1, &b.1));
+        }
+    }
+    let mut combined = Vec::new();
+    let mut snapshots = Vec::new();
+    for frame in [1, 2, 3, -1, -2, -3] {
+        let mut incoming: Vec<_> = gapped
+            .iter()
+            .copied()
+            .filter(|(_, hsp)| hsp.frame == frame)
+            .collect();
+        if incoming.is_empty() {
+            snapshots.push(combined.clone());
+            continue;
+        }
+        // NCBI blast_hits.c:2268-2317,2455-2499:
+        // s_QueryOffsetCompareHSPs sorts by context and starts; delete
+        // duplicate starts only when context and subject frame also agree.
+        incoming.sort_unstable_by(|a, b| {
+            a.0.cmp(&b.0)
+                .then(a.1.q_start.cmp(&b.1.q_start))
+                .then(a.1.s_start.cmp(&b.1.s_start))
+                .then(b.1.score.cmp(&a.1.score))
+                .then(b.1.q_end.cmp(&a.1.q_end))
+                .then(b.1.s_end.cmp(&a.1.s_end))
+        });
+        let mut i = 0;
+        while i + 1 < incoming.len() {
+            let a = incoming[i];
+            let b = incoming[i + 1];
+            if a.0 == b.0
+                && a.1.frame == b.1.frame
+                && a.1.q_start == b.1.q_start
+                && a.1.s_start == b.1.s_start
+            {
+                incoming.remove(i + 1);
+            } else {
+                i += 1;
+            }
+        }
+        // NCBI blast_hits.c:2318-2379,2505-2537:
+        // s_QueryEndCompareHSPs sorts by context and ends, then deletes
+        // shared ends in the same context and subject frame.
+        incoming.sort_unstable_by(|a, b| {
+            a.0.cmp(&b.0)
+                .then(a.1.q_end.cmp(&b.1.q_end))
+                .then(a.1.s_end.cmp(&b.1.s_end))
+                .then(b.1.score.cmp(&a.1.score))
+                .then(b.1.q_start.cmp(&a.1.q_start))
+                .then(b.1.s_start.cmp(&a.1.s_start))
+        });
+        i = 0;
+        while i + 1 < incoming.len() {
+            let a = incoming[i];
+            let b = incoming[i + 1];
+            if a.0 == b.0
+                && a.1.frame == b.1.frame
+                && a.1.q_end == b.1.q_end
+                && a.1.s_end == b.1.s_end
+            {
+                incoming.remove(i + 1);
+            } else {
+                i += 1;
+            }
+        }
+        sort_by_score_if_needed(&mut incoming);
+        // NCBI blast_hits.c:2809-2864:
+        // if (!combined_hsp_list) return the first list directly;
+        // new_hspcnt = MIN(combined->hspcnt + incoming->hspcnt, hsp_num_max);
+        // s_BlastHSPListsCombineByScore(incoming, combined, new_hspcnt).
+        if combined.is_empty() {
+            combined = incoming;
+        } else {
+            let retained = combined
+                .len()
+                .saturating_add(incoming.len())
+                .min(hsp_num_max);
+            if retained == combined.len() + incoming.len() {
+                combined.extend(incoming);
+                sort_by_score_if_needed(&mut combined);
+            } else {
+                sort_by_score_if_needed(&mut combined);
+                let mut selected = Vec::with_capacity(retained);
+                let mut old = 0;
+                let mut new = 0;
+                while selected.len() < retained {
+                    if old < combined.len()
+                        && (new >= incoming.len()
+                            || compare_gapped_score(&combined[old].1, &incoming[new].1).is_le())
+                    {
+                        selected.push(combined[old]);
+                        old += 1;
+                    } else {
+                        selected.push(incoming[new]);
+                        new += 1;
+                    }
+                }
+                combined = selected;
+            }
+        }
+        snapshots.push(combined.clone());
+    }
+    snapshots
+}
+
+// NCBI c++/src/algo/blast/core/blast_hits.c:1465-1537:
+// start_diag = query.offset - subject.offset;
+// end_diag = query.end - subject.end;
+// if (subject.frame differs) return FALSE;
+// if either new endpoint is inside the old HSP, score_density is
+// (old.score + new.score) / (old.query length + new.query length);
+// merged score = MAX((int)(score_density * merged query length), old.score).
+fn merge_two_chunk_hsps(old: &mut GappedHsp, new: &GappedHsp, allow_gap: bool) -> bool {
+    if !allow_gap && old.s_start - new.s_start - old.q_start + new.q_start != 0 {
+        return false;
+    }
+    if old.frame != new.frame {
+        return false;
+    }
+    let contained =
+        |q: i32, s: i32| old.q_start <= q && q <= old.q_end && old.s_start <= s && s <= old.s_end;
+    if !contained(new.q_start, new.s_start) && !contained(new.q_end, new.s_end) {
+        return false;
+    }
+    let density = f64::from(old.score + new.score)
+        / f64::from((old.q_end - old.q_start) + (new.q_end - new.q_start));
+    old.q_start = old.q_start.min(new.q_start);
+    old.s_start = old.s_start.min(new.s_start);
+    old.q_end = old.q_end.max(new.q_end);
+    old.s_end = old.s_end.max(new.s_end);
+    if new.score > old.score {
+        old.q_gapped_start = new.q_gapped_start;
+        old.s_gapped_start = new.s_gapped_start;
+        old.score = new.score;
+    }
+    old.score = ((density * f64::from(old.q_end - old.q_start)) as i32).max(old.score);
+    true
+}
+
+// NCBI c++/src/algo/blast/core/blast_engine.c:572-586:
+// Blast_HSPListAdjustOffsets(hsp_list, backup.offset);
+// overlap = backup.offset == hard_range.left ? 0 : DBSEQ_CHUNK_OVERLAP;
+// Blast_HSPListsMerge(&hsp_list, &combined_hsp_list, kHspNumMax,
+//                     &backup.offset, INT4_MIN, overlap, TRUE, FALSE);
+// NCBI c++/src/algo/blast/core/blast_hits.c:2857-3035:
+// move overlap HSPs to the front, match equal contexts whose diagonals
+// differ by less than 10, merge, purge the consumed new HSPs, combine by score.
+// Input HSP coordinates must already include the chunk offset.
+#[allow(dead_code)]
+fn merge_subject_chunk_hsps(
+    mut old: Vec<(usize, GappedHsp)>,
+    mut incoming: Vec<(usize, GappedHsp)>,
+    split_offset: i32,
+    overlap: i32,
+    hsp_num_max: usize,
+    allow_gap: bool,
+) -> Vec<(usize, GappedHsp)> {
+    if incoming.is_empty() {
+        return old;
+    }
+    if old.is_empty() {
+        return incoming;
+    }
+    let mut old_overlap = 0;
+    for index in 0..old.len() {
+        if old[index].1.s_end > split_offset {
+            old.swap(old_overlap, index);
+            old_overlap += 1;
+        }
+    }
+    let mut new_overlap = 0;
+    for index in 0..incoming.len() {
+        if incoming[index].1.s_start < split_offset + overlap {
+            incoming.swap(new_overlap, index);
+            new_overlap += 1;
+        }
+    }
+    let mut incoming: Vec<Option<(usize, GappedHsp)>> = incoming.into_iter().map(Some).collect();
+    for old_index in 0..old_overlap {
+        for new_index in 0..new_overlap {
+            let Some((context, candidate)) = incoming[new_index] else {
+                continue;
+            };
+            if old[old_index].0 != context {
+                continue;
+            }
+            let old_end_diag = old[old_index].1.q_end - old[old_index].1.s_end;
+            let new_start_diag = candidate.q_start - candidate.s_start;
+            if (old_end_diag - new_start_diag).abs() < 10
+                && merge_two_chunk_hsps(&mut old[old_index].1, &candidate, allow_gap)
+            {
+                incoming[new_index] = None;
+            }
+        }
+    }
+    let mut incoming: Vec<_> = incoming.into_iter().flatten().collect();
+    let retained = old.len().saturating_add(incoming.len()).min(hsp_num_max);
+    // NCBI blast_hits.c:2762-2807, 1330-1382:
+    // on no cap, append then SortByScore if out of order;
+    // on cap, sort both lists and merge score order, preferring old on ties.
+    let sorted = |hsps: &mut Vec<(usize, GappedHsp)>| {
+        if hsps
+            .windows(2)
+            .any(|pair| compare_gapped_score(&pair[0].1, &pair[1].1).is_gt())
+        {
+            hsps.sort_unstable_by(|a, b| compare_gapped_score(&a.1, &b.1));
+        }
+    };
+    if retained == old.len() + incoming.len() {
+        old.extend(incoming);
+        sorted(&mut old);
+        return old;
+    }
+    sorted(&mut old);
+    sorted(&mut incoming);
+    let mut selected = Vec::with_capacity(retained);
+    let mut old_index = 0;
+    let mut new_index = 0;
+    while selected.len() < retained {
+        if old_index < old.len()
+            && (new_index >= incoming.len()
+                || compare_gapped_score(&old[old_index].1, &incoming[new_index].1).is_le())
+        {
+            selected.push(old[old_index]);
+            old_index += 1;
+        } else {
+            selected.push(incoming[new_index]);
+            new_index += 1;
+        }
+    }
+    selected
 }
 
 // NCBI c++/src/algo/blast/core/blast_util.c:1268-1317:
@@ -403,6 +710,50 @@ pub(super) fn full_translation_traceback_blosum62(
     gap_extend: i32,
     x_drop_final: i32,
 ) -> Result<Vec<(GappedHsp, bool)>> {
+    full_translation_traceback_with_matrix(
+        query,
+        subject,
+        db_gencode,
+        gapped,
+        ScoringMatrix::Blosum62,
+        gap_open,
+        gap_extend,
+        x_drop_final,
+        0.0,
+        0,
+    )
+}
+
+// NCBI c++/src/algo/blast/core/blast_hits.c:993-1001:
+// return ((hsp->num_ident * 100.0 < align_length * percent_identity) ||
+//         align_length < hit_options->min_hit_length);
+fn blast_hsp_test(
+    num_ident: usize,
+    align_length: usize,
+    percent_identity: f64,
+    min_hit_length: i32,
+) -> bool {
+    (num_ident as f64) * 100.0 < (align_length as f64) * percent_identity
+        || (align_length as i64) < i64::from(min_hit_length)
+}
+
+// NCBI c++/src/algo/blast/core/blast_traceback.c:508-513:
+// BLAST_GappedAlignmentWithTraceback(program_number, query, adjusted_subject,
+//     gap_align, score_params, q_start, s_start, query_length,
+//     adjusted_s_length, fence_hit);
+#[allow(dead_code)]
+fn full_translation_traceback_with_matrix(
+    query: &[u8],
+    subject: &[u8],
+    db_gencode: u8,
+    gapped: &[GappedHsp],
+    matrix: ScoringMatrix,
+    gap_open: i32,
+    gap_extend: i32,
+    x_drop_final: i32,
+    percent_identity: f64,
+    min_hit_length: i32,
+) -> Result<Vec<(GappedHsp, bool)>> {
     let code = GeneticCode::try_from_id(db_gencode).map_err(anyhow::Error::msg)?;
     let query_frame = encode_protein_query_frame_with_seg(query, None);
     let query_sequence = &query_frame.aa_seq[1..query_frame.aa_seq.len() - 1];
@@ -444,7 +795,7 @@ pub(super) fn full_translation_traceback_blosum62(
                 subject_sequence,
                 q_start,
                 s_start,
-                ScoringMatrix::Blosum62,
+                matrix,
                 None,
                 gap_open,
                 gap_extend,
@@ -457,6 +808,24 @@ pub(super) fn full_translation_traceback_blosum62(
                 break;
             }
             let alignment = alignment.context("NCBI protein traceback returned no alignment")?;
+            // NCBI c++/src/algo/blast/core/blast_traceback.c:585-605:
+            // Blast_HSPGetNumIdentitiesAndPositives(..., &align_length, sbp);
+            // delete_hsp = Blast_HSPTest(hsp, hit_options, align_length);
+            // if (!delete_hsp) BlastIntervalTreeAddHSP(...);
+            // else hsp_array[index] = Blast_HSPFree(hsp);
+            let align_length: usize = alignment
+                .edit_script
+                .iter()
+                .map(|op| op.num() as usize)
+                .sum();
+            if blast_hsp_test(
+                alignment.num_ident,
+                align_length,
+                percent_identity,
+                min_hit_length,
+            ) {
+                continue;
+            }
             let saved = GappedHsp {
                 frame: hit.frame,
                 score: alignment.score,
@@ -505,8 +874,36 @@ pub(super) fn full_translation_traceback_blosum62(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::algorithm::tblastn::search_init::find_blosum62_word3_init_hsps;
+    use crate::algorithm::tblastn::search_init::{
+        find_blosum62_word3_init_hsps, find_blosum62_word3_init_hsps_multi,
+    };
     use std::fs;
+
+    // NCBI c++/src/algo/blast/core/blast_gapalign.c:3924-3927:
+    // cutoff = hit_params->cutoffs[context].cutoff_score;
+    // Read each query context's cutoff from the comparison-only probe.
+    fn multi_query_cutoffs() -> [i32; 3] {
+        let path = concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../docs/evidence/tlosan_stage_c/context_cutoffs_20260924/blosum62_word3.tsv"
+        );
+        let mut cutoffs = [None; 3];
+        let mut count = 0;
+        for line in fs::read_to_string(path).unwrap().lines() {
+            let f: Vec<_> = line.split('\t').collect();
+            let context: usize = f[2].parse().unwrap();
+            let value: i32 = f[4].parse().unwrap();
+            assert!(context < cutoffs.len());
+            if let Some(previous) = cutoffs[context] {
+                assert_eq!(previous, value);
+            } else {
+                cutoffs[context] = Some(value);
+            }
+            count += 1;
+        }
+        assert_eq!(count, 18);
+        cutoffs.map(Option::unwrap)
+    }
 
     fn read_fasta(path: &str) -> Vec<(String, Vec<u8>)> {
         let text = fs::read_to_string(path).unwrap();
@@ -519,6 +916,373 @@ mod tests {
             }
         }
         records
+    }
+
+    // NCBI c++/src/algo/blast/core/blast_gapalign.c:2371-2468:
+    // s_AdjustHspOffsetsAndGetQueryData converts global initial offsets to
+    // local query coordinates and preserves the context on Blast_HSPInit.
+    // NCBI c++/src/algo/blast/core/blast_gapalign.c:3908-3919,4057-4091:
+    // the frame-local tree checks containment before each saved gapped HSP.
+    #[test]
+    fn multi_query_gapped_hsps_match_ncbi_context_scores_offsets_and_order() {
+        let root = concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../docs/evidence/tlosan_stage_c/multi_query_20260924/"
+        );
+        let queries = read_fasta(&format!("{root}query.faa"));
+        let refs: Vec<&[u8]> = queries
+            .iter()
+            .map(|(_, sequence)| sequence.as_slice())
+            .collect();
+        let subject = &read_fasta(&format!("{root}subjects.fna"))[0].1;
+        let initial =
+            find_blosum62_word3_init_hsps_multi(&refs, subject, 1, None, 13, 40, 16, 0, false)
+                .unwrap();
+        let trace = fs::read_to_string(format!("{root}gapped_events.tsv")).unwrap();
+        let expected: Vec<_> = trace
+            .lines()
+            .filter(|line| line.starts_with("GAPPED_HSP\t"))
+            .map(|line| {
+                let f: Vec<_> = line.split('\t').collect();
+                assert_eq!(f[5], "0");
+                (
+                    f[4].parse::<usize>().unwrap(),
+                    GappedHsp {
+                        frame: f[9].parse().unwrap(),
+                        score: f[3].parse().unwrap(),
+                        q_start: f[6].parse().unwrap(),
+                        q_end: f[7].parse().unwrap(),
+                        q_gapped_start: f[8].parse().unwrap(),
+                        s_start: f[10].parse().unwrap(),
+                        s_end: f[11].parse().unwrap(),
+                        s_gapped_start: f[12].parse().unwrap(),
+                    },
+                )
+            })
+            .collect();
+        let actual = gapped_blosum62_word3_hsps_multi(
+            &refs,
+            subject,
+            1,
+            &initial,
+            11,
+            1,
+            38,
+            &multi_query_cutoffs(),
+        )
+        .unwrap();
+        if actual != expected {
+            let first = actual
+                .iter()
+                .zip(&expected)
+                .position(|(left, right)| left != right)
+                .unwrap_or(actual.len().min(expected.len()));
+            panic!(
+                "first multi-query gapped difference at {first}: Rust={:?}, NCBI={:?}; counts Rust={} NCBI={}",
+                actual.get(first),
+                expected.get(first),
+                actual.len(),
+                expected.len()
+            );
+        }
+    }
+
+    // NCBI c++/src/algo/blast/core/blast_engine.c:539-552,840-850:
+    // each frame is endpoint-purged, score-sorted, then appended to the
+    // cumulative list at kHspNumMax. Compare every append snapshot.
+    // NCBI c++/src/algo/blast/core/blast_hits.c:2809-2864:
+    // the first list is adopted and later lists are combined by score.
+    #[test]
+    fn multi_query_preliminary_append_snapshots_match_ncbi() {
+        let root = concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../docs/evidence/tlosan_stage_c/multi_query_20260924/"
+        );
+        let queries = read_fasta(&format!("{root}query.faa"));
+        let refs: Vec<&[u8]> = queries
+            .iter()
+            .map(|(_, sequence)| sequence.as_slice())
+            .collect();
+        let subject = &read_fasta(&format!("{root}subjects.fna"))[0].1;
+        let initial =
+            find_blosum62_word3_init_hsps_multi(&refs, subject, 1, None, 13, 40, 16, 0, false)
+                .unwrap();
+        let gapped = gapped_blosum62_word3_hsps_multi(
+            &refs,
+            subject,
+            1,
+            &initial,
+            11,
+            1,
+            38,
+            &multi_query_cutoffs(),
+        )
+        .unwrap();
+        let actual = preliminary_merged_hsps(&gapped, i32::MAX as usize);
+        let trace = fs::read_to_string(format!("{root}append_events.tsv")).unwrap();
+        let mut expected: Vec<Vec<(usize, i32, i8, i32, i32, i32, i32)>> = vec![Vec::new(); 6];
+        for line in trace
+            .lines()
+            .filter(|line| line.starts_with("APPEND_OUT_HSP\t"))
+        {
+            let f: Vec<_> = line.split('\t').collect();
+            expected[f[1].parse::<usize>().unwrap()].push((
+                f[3].parse().unwrap(),
+                f[4].parse().unwrap(),
+                f[5].parse().unwrap(),
+                f[6].parse().unwrap(),
+                f[7].parse().unwrap(),
+                f[8].parse().unwrap(),
+                f[9].parse().unwrap(),
+            ));
+        }
+        let actual: Vec<Vec<_>> = actual
+            .iter()
+            .map(|snapshot| {
+                snapshot
+                    .iter()
+                    .map(|(context, hsp)| {
+                        (
+                            *context,
+                            hsp.score,
+                            hsp.frame,
+                            hsp.q_start,
+                            hsp.q_end,
+                            hsp.s_start,
+                            hsp.s_end,
+                        )
+                    })
+                    .collect()
+            })
+            .collect();
+        assert_eq!(actual, expected);
+        assert_eq!(
+            actual.iter().map(Vec::len).collect::<Vec<_>>(),
+            [3, 5, 11, 19, 25, 31]
+        );
+    }
+
+    // NCBI c++/src/algo/blast/core/blast_traceback.c:259-312,635-721:
+    // query-indexed preliminary lists enter traceback independently;
+    // a fence retries the same original list on the full subject.
+    // NCBI c++/src/algo/blast/core/blast_traceback.c:1644-1684:
+    // only the second return with fence_hit=0 is retained here.
+    #[test]
+    fn multi_query_traceback_lists_match_ncbi_post_fence_hsps() {
+        let root = concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../docs/evidence/tlosan_stage_c/multi_query_20260924/"
+        );
+        let queries = read_fasta(&format!("{root}query.faa"));
+        let refs: Vec<&[u8]> = queries
+            .iter()
+            .map(|(_, sequence)| sequence.as_slice())
+            .collect();
+        let subject = &read_fasta(&format!("{root}subjects.fna"))[0].1;
+        let initial =
+            find_blosum62_word3_init_hsps_multi(&refs, subject, 1, None, 13, 40, 16, 0, false)
+                .unwrap();
+        let gapped = gapped_blosum62_word3_hsps_multi(
+            &refs,
+            subject,
+            1,
+            &initial,
+            11,
+            1,
+            38,
+            &multi_query_cutoffs(),
+        )
+        .unwrap();
+        let appended = preliminary_merged_hsps(&gapped, i32::MAX as usize)
+            .pop()
+            .unwrap();
+
+        let trace = fs::read_to_string(format!("{root}traceback_events.tsv")).unwrap();
+        let mut expected: Vec<Vec<(i32, i8, i32, i32, i32, i32)>> = vec![Vec::new(); refs.len()];
+        let mut context = 0usize;
+        let mut successful_pass = false;
+        for line in trace.lines() {
+            let f: Vec<_> = line.split('\t').collect();
+            match f[0] {
+                "TRACEBACK_CONTEXT" => context = f[1].parse().unwrap(),
+                "TRACEBACK_OUTPUT" => successful_pass = f[4] == "0",
+                "TRACEBACK_OUT_HSP" if successful_pass => expected[context].push((
+                    f[3].parse().unwrap(),
+                    f[4].parse().unwrap(),
+                    f[5].parse().unwrap(),
+                    f[6].parse().unwrap(),
+                    f[7].parse().unwrap(),
+                    f[8].parse().unwrap(),
+                )),
+                _ => {}
+            }
+        }
+        for context in [1usize, 0] {
+            let per_query: Vec<_> = appended
+                .iter()
+                .filter(|(index, _)| *index == context)
+                .map(|(_, hsp)| *hsp)
+                .collect();
+            let actual = full_translation_traceback_blosum62(
+                refs[context],
+                subject,
+                1,
+                &per_query,
+                11,
+                1,
+                64,
+            )
+            .unwrap();
+            let actual: Vec<_> = actual
+                .into_iter()
+                .map(|(hsp, full_retry)| {
+                    assert!(full_retry, "NCBI retried this list after a fence");
+                    (
+                        hsp.score,
+                        hsp.frame,
+                        hsp.q_start,
+                        hsp.q_end,
+                        hsp.s_start,
+                        hsp.s_end,
+                    )
+                })
+                .collect();
+            assert_eq!(actual, expected[context], "query context {context}");
+        }
+    }
+
+    // NCBI c++/src/algo/blast/core/blast_engine.c:572-586:
+    // adjust the new HSP's subject offsets, then merge with overlap 100.
+    // NCBI c++/src/algo/blast/core/blast_hits.c:2857-3035:
+    // only equal-context, close-diagonal overlap HSPs are merged.
+    // The pinned oracle records old/new lists immediately before each call.
+    #[test]
+    fn long_chunk_overlap_merge_matches_ncbi_input_score_and_order() {
+        let root = concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../docs/evidence/tlosan_stage_c/long_chunk_20260924/"
+        );
+        let trace = fs::read_to_string(format!("{root}gapped_events.tsv")).unwrap();
+        let parse_hsp = |line: &str| {
+            let f: Vec<_> = line.split('\t').collect();
+            (
+                f[3].parse::<usize>().unwrap(),
+                GappedHsp {
+                    score: f[4].parse().unwrap(),
+                    frame: f[5].parse().unwrap(),
+                    q_start: f[6].parse().unwrap(),
+                    q_end: f[7].parse().unwrap(),
+                    q_gapped_start: f[8].parse().unwrap(),
+                    s_start: f[9].parse().unwrap(),
+                    s_end: f[10].parse().unwrap(),
+                    s_gapped_start: f[11].parse().unwrap(),
+                },
+            )
+        };
+        let rows: Vec<_> = trace.lines().collect();
+        let for_call = |event: &str, call: usize| {
+            rows.iter()
+                .copied()
+                .filter(|line| {
+                    let mut fields = line.split('\t');
+                    fields.next() == Some(event)
+                        && fields.next() == Some(if call == 0 { "0" } else { "1" })
+                })
+                .map(&parse_hsp)
+                .collect::<Vec<_>>()
+        };
+        let first = merge_subject_chunk_hsps(
+            Vec::new(),
+            for_call("MERGE_IN_HSP", 0),
+            0,
+            0,
+            i32::MAX as usize,
+            true,
+        );
+        assert_eq!(first, for_call("MERGE_OUT_HSP", 0));
+        let old = for_call("MERGE_OLD_HSP", 1);
+        assert_eq!(first, old);
+        let second = merge_subject_chunk_hsps(
+            old,
+            for_call("MERGE_IN_HSP", 1),
+            4_999_900,
+            100,
+            i32::MAX as usize,
+            true,
+        );
+        assert_eq!(second, for_call("MERGE_OUT_HSP", 1));
+        assert_eq!(second[0].1.score, 660);
+    }
+
+    // NCBI c++/src/algo/blast/core/blast_hits.c:2762-2864:
+    // with hsp_num_max=3, sort both lists and select by ScoreCompareHSPs;
+    // when its five compared fields tie, choose the old list's HSP first.
+    // The expected rows come from the direct comparison-only NCBI C API.
+    #[test]
+    fn preliminary_append_cap_and_tie_match_ncbi_api() {
+        let path = concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../docs/evidence/tlosan_stage_c/append_cap_20260924/oracle.tsv"
+        );
+        let hsp = |context: usize, score: i32, frame: i8, start: i32| {
+            (
+                context,
+                GappedHsp {
+                    frame,
+                    score,
+                    q_start: 0,
+                    q_end: 20,
+                    q_gapped_start: 5,
+                    s_start: start,
+                    s_end: start + 20,
+                    s_gapped_start: start + 5,
+                },
+            )
+        };
+        let input = vec![
+            hsp(0, 100, 1, 100),
+            hsp(0, 80, 1, 300),
+            hsp(0, 60, 1, 500),
+            hsp(1, 90, 2, 200),
+            hsp(1, 80, 2, 300),
+            hsp(1, 70, 2, 400),
+        ];
+        let snapshots = preliminary_merged_hsps(&input, 3);
+        let actual: Vec<_> = snapshots[1]
+            .iter()
+            .enumerate()
+            .map(|(index, (context, hsp))| {
+                (
+                    index,
+                    *context,
+                    hsp.score,
+                    hsp.frame,
+                    hsp.q_start,
+                    hsp.q_end,
+                    hsp.s_start,
+                    hsp.s_end,
+                )
+            })
+            .collect();
+        let trace = fs::read_to_string(path).unwrap();
+        let expected: Vec<_> = trace
+            .lines()
+            .filter(|line| line.starts_with("CAP_HSP\t"))
+            .map(|line| {
+                let f: Vec<_> = line.split('\t').collect();
+                (
+                    f[1].parse::<usize>().unwrap(),
+                    f[2].parse::<usize>().unwrap(),
+                    f[3].parse::<i32>().unwrap(),
+                    f[4].parse::<i8>().unwrap(),
+                    f[5].parse::<i32>().unwrap(),
+                    f[6].parse::<i32>().unwrap(),
+                    f[7].parse::<i32>().unwrap(),
+                    f[8].parse::<i32>().unwrap(),
+                )
+            })
+            .collect();
+        assert_eq!(actual, expected);
     }
 
     // NCBI c++/src/algo/blast/core/blast_gapalign.c:3936-3953,4071-4091:
@@ -542,7 +1306,9 @@ mod tests {
             let initial =
                 find_blosum62_word3_init_hsps(query, subject, 1, None, 13, 40, 16, 0, lowercase)
                     .unwrap();
-            for hsp in gapped_blosum62_word3_hsps(query, subject, 1, &initial, 11, 1, 38).unwrap() {
+            for hsp in
+                gapped_blosum62_word3_hsps(query, subject, 1, &initial, 11, 1, 38, 0).unwrap()
+            {
                 actual.push((id.clone(), hsp));
             }
         }
@@ -604,7 +1370,8 @@ mod tests {
         let subject = &read_fasta(&format!("{fixture}subject_code32.fna"))[0].1;
         let initial =
             find_blosum62_word3_init_hsps(query, subject, 32, None, 13, 40, 16, 13, false).unwrap();
-        let actual = gapped_blosum62_word3_hsps(query, subject, 32, &initial, 11, 1, 38).unwrap();
+        let actual =
+            gapped_blosum62_word3_hsps(query, subject, 32, &initial, 11, 1, 38, 1).unwrap();
         let expected: Vec<GappedHsp> = fs::read_to_string(oracle)
             .unwrap()
             .lines()
@@ -653,7 +1420,7 @@ mod tests {
                 find_blosum62_word3_init_hsps(query, subject, 1, None, 13, 40, 16, 0, false)
                     .unwrap();
             let gapped =
-                gapped_blosum62_word3_hsps(query, subject, 1, &initial, 11, 1, 38).unwrap();
+                gapped_blosum62_word3_hsps(query, subject, 1, &initial, 11, 1, 38, 0).unwrap();
             for (hsp, fence_hit) in
                 full_translation_traceback_blosum62(query, subject, 1, &gapped, 11, 1, 64).unwrap()
             {
@@ -752,7 +1519,7 @@ mod tests {
             .collect();
         let initial =
             find_blosum62_word3_init_hsps(query, subject, 1, None, 13, 40, 16, 0, false).unwrap();
-        let gapped = gapped_blosum62_word3_hsps(query, subject, 1, &initial, 11, 1, 38).unwrap();
+        let gapped = gapped_blosum62_word3_hsps(query, subject, 1, &initial, 11, 1, 38, 0).unwrap();
         assert_eq!(gapped, expected);
         let actual =
             full_translation_traceback_blosum62(query, subject, 1, &gapped, 11, 1, 64).unwrap();
@@ -833,7 +1600,7 @@ mod tests {
         }
         let initial =
             find_blosum62_word3_init_hsps(query, subject, 1, None, 13, 40, 16, 0, false).unwrap();
-        let gapped = gapped_blosum62_word3_hsps(query, subject, 1, &initial, 11, 1, 12).unwrap();
+        let gapped = gapped_blosum62_word3_hsps(query, subject, 1, &initial, 11, 1, 12, 0).unwrap();
         let oracle_gapped: Vec<_> = fs::read_to_string(format!("{root}gapped_hsps.tsv"))
             .unwrap()
             .lines()
@@ -919,7 +1686,7 @@ mod tests {
             .collect();
         let initial =
             find_blosum62_word3_init_hsps(query, subject, 1, None, 13, 40, 16, 0, false).unwrap();
-        let gapped = gapped_blosum62_word3_hsps(query, subject, 1, &initial, 11, 1, 38).unwrap();
+        let gapped = gapped_blosum62_word3_hsps(query, subject, 1, &initial, 11, 1, 38, 0).unwrap();
         assert_eq!(gapped, expected_gapped);
         // NCBI c++/src/algo/blast/core/blast_traceback.c:503-589,635-666:
         // BLAST_GappedAlignmentWithTraceback(...);
@@ -1023,5 +1790,143 @@ mod tests {
             })
             .collect();
         assert_eq!(actual, expected);
+    }
+    // NCBI c++/src/algo/blast/core/blast_traceback.c:401-405,583-605:
+    // if (!BlastIntervalTreeContainsHSP(tree, hsp, query_info, ...)) {
+    //     BLAST_GappedAlignmentWithTraceback(...);
+    // } else hsp_array[index] = Blast_HSPFree(hsp);
+    // The pinned BLOSUM45/word-2 trace contains positive traceback-side
+    // containment, including the full-translation retry.
+    #[test]
+    fn alternate_matrix_traceback_positive_containment_matches_ncbi() {
+        use std::collections::HashMap;
+        let root = concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../docs/evidence/tlosan_stage_c/alternate_matrix_word2_20260924/"
+        );
+        let queries = read_fasta(&format!("{root}query.faa"));
+        let subject = &read_fasta(&format!("{root}subjects.fna"))[0].1;
+        let append_trace = fs::read_to_string(format!("{root}append_events.tsv")).unwrap();
+        let mut by_key = HashMap::new();
+        let mut appended = Vec::new();
+        for line in append_trace.lines() {
+            let f: Vec<_> = line.split('\t').collect();
+            if f[0] == "MERGE_OUT_HSP" {
+                let context: usize = f[3].parse().unwrap();
+                let hsp = GappedHsp {
+                    score: f[4].parse().unwrap(),
+                    frame: f[5].parse().unwrap(),
+                    q_start: f[6].parse().unwrap(),
+                    q_end: f[7].parse().unwrap(),
+                    q_gapped_start: f[8].parse().unwrap(),
+                    s_start: f[9].parse().unwrap(),
+                    s_end: f[10].parse().unwrap(),
+                    s_gapped_start: f[11].parse().unwrap(),
+                };
+                by_key.insert(
+                    (
+                        context,
+                        hsp.score,
+                        hsp.frame,
+                        hsp.q_start,
+                        hsp.q_end,
+                        hsp.s_start,
+                        hsp.s_end,
+                    ),
+                    hsp,
+                );
+            } else if f[0] == "APPEND_OUT_HSP" && f[1] == "5" {
+                appended.push((
+                    f[3].parse::<usize>().unwrap(),
+                    f[4].parse::<i32>().unwrap(),
+                    f[5].parse::<i8>().unwrap(),
+                    f[6].parse::<i32>().unwrap(),
+                    f[7].parse::<i32>().unwrap(),
+                    f[8].parse::<i32>().unwrap(),
+                    f[9].parse::<i32>().unwrap(),
+                ));
+            }
+        }
+        assert_eq!(appended.len(), 22);
+        let trace = fs::read_to_string(format!("{root}traceback_events.tsv")).unwrap();
+        let mut expected: Vec<Vec<(i32, i8, i32, i32, i32, i32)>> = vec![Vec::new(); queries.len()];
+        let mut context = 0usize;
+        let mut successful_pass = false;
+        let mut in_traceback = false;
+        let mut positive_containment = 0;
+        for line in trace.lines() {
+            let f: Vec<_> = line.split('\t').collect();
+            match f[0] {
+                "TRACEBACK_INPUT" => in_traceback = true,
+                "TRACEBACK_CONTEXT" => context = f[1].parse().unwrap(),
+                "CONTAINS" if in_traceback && f[1] == "1" => positive_containment += 1,
+                "TRACEBACK_OUTPUT" => successful_pass = f[4] == "0",
+                "TRACEBACK_OUT_HSP" if successful_pass => expected[context].push((
+                    f[3].parse().unwrap(),
+                    f[4].parse().unwrap(),
+                    f[5].parse().unwrap(),
+                    f[6].parse().unwrap(),
+                    f[7].parse().unwrap(),
+                    f[8].parse().unwrap(),
+                )),
+                _ => {}
+            }
+        }
+        assert!(positive_containment > 0);
+        for context in [1usize, 0] {
+            let per_query: Vec<_> = appended
+                .iter()
+                .filter(|entry| entry.0 == context)
+                .map(|entry| *by_key.get(entry).unwrap())
+                .collect();
+            let actual = full_translation_traceback_with_matrix(
+                &queries[context].1,
+                subject,
+                1,
+                &per_query,
+                ScoringMatrix::Blosum45,
+                14,
+                2,
+                88,
+                0.0,
+                0,
+            )
+            .unwrap();
+            let actual: Vec<_> = actual
+                .into_iter()
+                .map(|(hsp, _)| {
+                    (
+                        hsp.score,
+                        hsp.frame,
+                        hsp.q_start,
+                        hsp.q_end,
+                        hsp.s_start,
+                        hsp.s_end,
+                    )
+                })
+                .collect();
+            assert_eq!(actual, expected[context], "context {context}");
+        }
+    }
+    // NCBI c++/src/algo/blast/core/blast_hits.c:993-1001,1027-1032:
+    // return ((hsp->num_ident * 100.0 < align_length * percent_identity) ||
+    //         align_length < hit_options->min_hit_length);
+    // The direct API oracle checks equality, just-above equality, and length.
+    #[test]
+    fn blast_hsp_test_deletion_matches_ncbi_api() {
+        let path = concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../docs/evidence/tlosan_stage_c/hsp_test_20260924/oracle.tsv"
+        );
+        for line in fs::read_to_string(path).unwrap().lines() {
+            let f: Vec<_> = line.split('\t').collect();
+            let observed = blast_hsp_test(
+                f[1].parse().unwrap(),
+                f[2].parse().unwrap(),
+                f[3].parse().unwrap(),
+                f[4].parse().unwrap(),
+            );
+            assert_eq!(observed, f[5] == "1", "{line}");
+        }
     }
 }

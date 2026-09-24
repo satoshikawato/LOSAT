@@ -1,5 +1,5 @@
 //! Internal TBLASTN protein lookup and translated-subject seed stage.
-//! HSP construction and later stages are still unsupported.
+//! The public search remains unsupported; this is a bounded Stage C diagnostic.
 
 use crate::algorithm::blastp::encoding::encode_protein_query_frame_with_seg;
 use crate::algorithm::tblastx::blast_aascan::{s_blast_aa_scan_subject_one_range, BlastOffsetPair};
@@ -216,6 +216,32 @@ pub(super) fn scan_unambiguous_blosum62_words(
     threshold: i32,
     mask_lowercase: bool,
 ) -> Result<Vec<Seed>> {
+    scan_unambiguous_blosum62_words_multi(
+        &[query],
+        subject,
+        db_gencode,
+        seg,
+        threshold,
+        mask_lowercase,
+    )
+}
+
+// NCBI c++/src/algo/blast/core/blast_query_info.c:68-96:
+// retval->last_context = retval->num_queries * kNumContexts - 1;
+// contexts[i].query_index = Blast_GetQueryIndexFromContext(i, program);
+// NCBI c++/src/algo/blast/core/aa_ungapped.c:478-505:
+// scansub(lookup_wrap, subject, offset_pairs, array_size, scan_range);
+// The lookup receives all protein contexts before each subject frame scan;
+// scan order must retain the global query offsets from that shared lookup.
+#[allow(dead_code)]
+pub(super) fn scan_unambiguous_blosum62_words_multi(
+    queries: &[&[u8]],
+    subject: &[u8],
+    db_gencode: u8,
+    seg: Option<&SegParams>,
+    threshold: i32,
+    mask_lowercase: bool,
+) -> Result<Vec<Seed>> {
     let code = GeneticCode::try_from_id(db_gencode).map_err(anyhow::Error::msg)?;
     // NCBI reference: c++/src/algo/blast/core/blast_engine.c:1318-1334,1429-1432
     // return word_length * 3 + 2;
@@ -224,9 +250,12 @@ pub(super) fn scan_unambiguous_blosum62_words(
         return Ok(Vec::new());
     }
     let resolved_subject = resolve_local_subject_ncbi2na(subject)?;
-    let query_frame = encode_protein_query_frame_with_seg(query, seg);
+    let query_frames: Vec<_> = queries
+        .iter()
+        .map(|query| vec![encode_protein_query_frame_with_seg(query, seg)])
+        .collect();
     let karlin = lookup_protein_params_ungapped(ScoringMatrix::Blosum62);
-    let (lookup, _contexts) = build_ncbi_lookup(&[vec![query_frame]], threshold, &karlin, false);
+    let (lookup, _contexts) = build_ncbi_lookup(&query_frames, threshold, &karlin, false);
     let mut seeds = Vec::new();
     let mut pairs = vec![BlastOffsetPair::default(); (lookup.longest_chain.max(1) as usize) * 1024];
     let pair_capacity = i32::try_from(pairs.len()).expect("NCBI offset array fits Int4");
@@ -298,6 +327,89 @@ mod tests {
             }
         }
         records
+    }
+
+    // NCBI c++/src/algo/blast/core/blast_query_info.c:68-96:
+    // one context per protein query; query offsets advance by length + 1.
+    // NCBI c++/src/algo/blast/core/aa_ungapped.c:478-505:
+    // scansub emits the ordered global offset pairs for each subject frame.
+    // This comparison uses the unmodified candidate stream from the pinned
+    // local -subject oracle; no final-output filter is applied to candidates.
+    #[test]
+    fn multi_query_candidate_contexts_and_order_match_ncbi() {
+        let root = concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../docs/evidence/tlosan_stage_c/multi_query_20260924/"
+        );
+        let queries = read_fasta(&format!("{root}query.faa"));
+        let subject = &read_fasta(&format!("{root}subjects.fna"))[0].1;
+        let refs: Vec<&[u8]> = queries
+            .iter()
+            .map(|(_, sequence)| sequence.as_slice())
+            .collect();
+        let frames: Vec<_> = refs
+            .iter()
+            .map(|query| vec![encode_protein_query_frame_with_seg(query, None)])
+            .collect();
+        let karlin = lookup_protein_params_ungapped(ScoringMatrix::Blosum62);
+        let (_, contexts) = build_ncbi_lookup(&frames, 13, &karlin, false);
+        let actual_contexts: Vec<_> = contexts
+            .iter()
+            .map(|context| {
+                (
+                    context.q_idx as usize,
+                    context.frame_base,
+                    context.aa_len,
+                    context.is_valid,
+                )
+            })
+            .collect();
+        let trace = fs::read_to_string(format!("{root}query_context.tsv")).unwrap();
+        let expected_contexts: Vec<_> = trace
+            .lines()
+            .filter(|line| line.starts_with("QUERY_CONTEXT\t0\t"))
+            .map(|line| {
+                let f: Vec<_> = line.split('\t').collect();
+                (
+                    f[3].parse().unwrap(),
+                    f[4].parse().unwrap(),
+                    f[5].parse().unwrap(),
+                    f[7] == "1",
+                )
+            })
+            .collect();
+        assert_eq!(actual_contexts, expected_contexts);
+
+        let trace = fs::read_to_string(format!("{root}candidate.stderr")).unwrap();
+        let frame_order = [1, 2, 3, -1, -2, -3];
+        let expected: Vec<Seed> = trace
+            .lines()
+            .filter(|line| line.starts_with("CAND\t"))
+            .map(|line| {
+                let f: Vec<_> = line.split('\t').collect();
+                Seed {
+                    frame: frame_order[f[1].parse::<usize>().unwrap()],
+                    query_offset: f[3].parse().unwrap(),
+                    subject_offset: f[4].parse().unwrap(),
+                }
+            })
+            .collect();
+        let actual =
+            scan_unambiguous_blosum62_words_multi(&refs, subject, 1, None, 13, false).unwrap();
+        if actual != expected {
+            let first = actual
+                .iter()
+                .zip(&expected)
+                .position(|(left, right)| left != right)
+                .unwrap_or(actual.len().min(expected.len()));
+            panic!(
+                "first multi-query candidate difference at {first}: Rust={:?}, NCBI={:?}; counts Rust={} NCBI={}",
+                actual.get(first),
+                expected.get(first),
+                actual.len(),
+                expected.len()
+            );
+        }
     }
 
     // NCBI reference: c++/src/algo/blast/api/blast_objmgr_tools.cpp:427-474

@@ -1,0 +1,6 @@
+Comparison-only pinned NCBI Blast_HSPTest direct C API oracle.
+NCBI source commit: 598d8ae6a72b923127ba2fbfaffd48e4c83bfbf4
+NCBI libxblast.so SHA256: 5f95907da402bcbfe0dca1797ea9f7e6f73209c71914b6d04715c11b4a44647a
+C source SHA256: 15937cefde257a8c7cc798d25fa700c1a51444de804406b0bfae33051de2592c
+Compile: gcc -std=c11 -O2 -Wall -Wextra -o /tmp/tlosan-c-hsp-test-oracle docs/evidence/tlosan_stage_c/ncbi_hsp_test_oracle.c -ldl
+Run: /tmp/tlosan-c-hsp-test-oracle /home/kawato/micromamba/lib/ncbi-blast+/libxblast.so

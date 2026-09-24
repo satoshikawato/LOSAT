@@ -16,6 +16,14 @@
 #include <stdint.h>
 #include <stdio.h>
 
+/* Pinned c++/include/algo/blast/core/blast_def.h:242-247 and
+ * blast_engine.c:442-465,522-552: translated subject frame, length, and
+ * per-chunk WordFinder call are the inputs to the preliminary HSP list. */
+typedef struct {
+    uint8_t *sequence, *sequence_start;
+    int32_t length;
+    int16_t frame;
+} SubjectPrefix;
 typedef struct { int32_t q_start, s_start, length, score; } Ungapped;
 typedef struct { uint32_t q_off, s_off; Ungapped *ungapped_data; } InitHsp;
 typedef struct { int32_t total, allocated; InitHsp *init_hsp_array; int32_t do_not_reallocate; } InitHitList;
@@ -33,6 +41,9 @@ short BlastAaWordFinder(void* subject, void* query, void* query_info,
     short status = real(subject, query, query_info, lookup, matrix, word_params,
             ewp, offset_pairs, offset_array_size, init_hitlist, ungapped_stats);
     unsigned long call = call_index++;
+    SubjectPrefix *frame = (SubjectPrefix *)subject;
+    fprintf(stderr, "FRAME_CHUNK\t%lu\t%d\t%d\n",
+            call, frame->frame, frame->length);
     fprintf(stderr, "WORD_FINDER\t%lu\t%d\n", call, init_hitlist->total);
     for (int32_t i = 0; i < init_hitlist->total; ++i) {
         InitHsp* hit = &init_hitlist->init_hsp_array[i];

@@ -1,8 +1,10 @@
 # TLOSAN v0.2.0 Stage C work record — incomplete
 
-**Latest checkpoint:** [CONTINUATION_20260924.md](CONTINUATION_20260924.md)
-records exact gapped HSP comparisons on bounded fixtures and the still-open
-Stage C gate.
+**Latest checkpoint:** [CONTINUATION_20260924_97BA.md](CONTINUATION_20260924_97BA.md)
+records the multi-query function-state comparisons, the long-subject first
+chunk difference, and the still-open Stage C gate. The preceding records are
+[CONTINUATION_20260924_CF29.md](CONTINUATION_20260924_CF29.md) and
+[CONTINUATION_20260924.md](CONTINUATION_20260924.md).
 
 **Prior checkpoint after `ad3e8381`:** [CONTINUATION_20260923.md](CONTINUATION_20260923.md) records the exact preliminary comparisons. The status tables below describe the initial checkpoint.
 

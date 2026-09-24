@@ -81,6 +81,9 @@ def main() -> None:
         "wordfinder": HERE / "ncbi_wordfinder_trace.c",
         "gapped": HERE / "ncbi_gapped_trace.c",
         "ranges": HERE / "ncbi_chunk_ranges_trace.c",
+        # Pinned aa_ungapped.c:478-505 calls scansub for every chunk range;
+        # the probe records every emitted pair before two-hit extension.
+        "candidate": HERE / "ncbi_candidate_trace.c",
     }
     with tempfile.TemporaryDirectory(prefix="tlosan-c-longchunk-") as tmp:
         for name, source in sources.items():
@@ -116,18 +119,21 @@ def main() -> None:
         f"Input SHA256: query={sha(output / 'query.faa')} "
         f"subject={sha(output / 'subjects.fna')}\n"
         f"Probe source SHA256: {', '.join(f'{name}={sha(source)}' for name, source in sources.items())}\n"
-        "Unprobed output equals all three probe outputs byte for byte: yes\n"
+        "Unprobed output equals all four probe outputs byte for byte: yes\n"
         f"Command: {command!r}\n"
     )
     files = ["query.faa", "subjects.fna", "ncbi_output.out", "manifest.txt",
              "wordfinder.stderr", "gapped.stderr", "frame_chunks.tsv",
-             "gapped_events.tsv", "ranges.stderr", "chunk_ranges.tsv"]
+             "gapped_events.tsv", "ranges.stderr", "chunk_ranges.tsv",
+             "candidate.stderr"]
     (output / "outputs.sha256").write_text(
         "".join(f"{sha(output / name)}  {name}\n" for name in files)
     )
     print("nt", len(subject), "frame chunks",
           sum(line.startswith("FRAME_CHUNK\t") for line in
               (output / "frame_chunks.tsv").read_text().splitlines()),
+          "candidates", sum(line.startswith("CAND\t") for line in
+              (output / "candidate.stderr").read_text().splitlines()),
           "output lines", len(plain.stdout.splitlines()))
 
 

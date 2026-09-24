@@ -58,11 +58,14 @@ def main() -> None:
         "wordfinder": HERE / "ncbi_wordfinder_trace.c",
         "gapped": HERE / "ncbi_gapped_trace.c",
         "ranges": HERE / "ncbi_chunk_ranges_trace.c",
+        # Pinned aa_ungapped.c:478-505 scans every surviving chunk range.
+        "candidate": HERE / "ncbi_candidate_trace.c",
     }
     with tempfile.TemporaryDirectory(prefix="tlosan-no-range-") as tmp:
         traced = {name: run_probe(command, source, Path(tmp))
                   for name, source in sources.items()}
     assert all(result.stdout == plain.stdout for result in traced.values())
+    (output / "candidate.stderr").write_bytes(traced["candidate"].stderr)
     lines = [line for line in traced["wordfinder"].stderr.decode().splitlines()
              if line.startswith(("FRAME_CHUNK\t", "WORD_FINDER\t", "INIT\t"))]
     (output / "frame_chunks.tsv").write_text("\n".join(lines) + "\n")
@@ -83,10 +86,10 @@ def main() -> None:
         f"Input SHA256: query={sha(output / 'query.faa')} "
         f"subject={sha(output / 'subjects.fna')}\n"
         f"Probe source SHA256: {', '.join(f'{name}={sha(source)}' for name, source in sources.items())}\n"
-        "All three probed final outputs equal unprobed bytes: yes\n"
+        "All four probed final outputs equal unprobed bytes: yes\n"
         f"Command: {command!r}\n"
     )
-    names = ("query.faa", "ncbi_output.out", "frame_chunks.tsv", "chunk_ranges.tsv", "gapped_events.tsv", "manifest.txt")
+    names = ("query.faa", "ncbi_output.out", "frame_chunks.tsv", "chunk_ranges.tsv", "gapped_events.tsv", "candidate.stderr", "manifest.txt")
     (output / "retained.sha256").write_text(
         "".join(f"{sha(output / name)}  {name}\n" for name in names)
     )

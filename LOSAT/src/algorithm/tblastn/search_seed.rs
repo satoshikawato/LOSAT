@@ -1016,6 +1016,198 @@ mod tests {
         assert!(scan_unambiguous_blosum62_words(query, b"ATN", 32, None, 13, false).is_ok());
         assert!(scan_unambiguous_blosum62_words(query, b"atg", 32, None, 13, false).is_ok());
     }
+    // NCBI c++/src/algo/blast/core/blast_engine.c:804-841:
+    // for (context=first_context; context<=last_context; context++) {
+    //     status = s_BlastSearchEngineOneContext(...);
+    // }
+    // NCBI c++/src/algo/blast/core/aa_ungapped.c:495-505:
+    // scan_range[1] = subject->seq_ranges[0].left;
+    // scan_range[2] = subject->seq_ranges[0].right - wordsize;
+    // hits = scansub(lookup_wrap, subject, offset_pairs, array_size, scan_range);
+    #[test]
+    fn long_subject_every_candidate_matches_ncbi_in_chunk_order() {
+        let root = concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../docs/evidence/tlosan_stage_c/"
+        );
+        let inserts = read_fasta(&format!("{root}run_20260923/subjects.fna"));
+        let plus1 = &inserts.iter().find(|(id, _)| id == "plus1").unwrap().1;
+        let frame_order = [1, 2, 3, -1, -2, -3];
+        for (fixture, mask_lowercase) in [
+            ("long_chunk_20260924", false),
+            ("masked_chunk_boundary_20260924", true),
+        ] {
+            let query = &read_fasta(&format!("{root}{fixture}/query.faa"))[0].1;
+            let mut subject = Vec::with_capacity(15_000_962);
+            for _ in 0..4_999_950 {
+                subject.extend_from_slice(b"ATG");
+            }
+            subject.extend_from_slice(plus1);
+            for _ in 0..250 {
+                subject.extend_from_slice(b"ATG");
+            }
+            assert_eq!(subject.len(), 15_000_962);
+            if mask_lowercase {
+                subject[14_999_700..15_000_000].make_ascii_lowercase();
+            }
+            let trace = fs::read_to_string(format!(
+                "{root}ordered_candidates_20260924/{fixture}.stderr"
+            ))
+            .unwrap();
+            assert_eq!(
+                trace
+                    .lines()
+                    .filter(|line| line.starts_with("PARAM\t"))
+                    .count(),
+                12
+            );
+            assert_eq!(
+                trace
+                    .lines()
+                    .filter(|line| line.starts_with("END\t"))
+                    .count(),
+                12
+            );
+            let expected: Vec<_> = trace
+                .lines()
+                .filter(|line| line.starts_with("CAND\t"))
+                .map(|line| {
+                    let f: Vec<_> = line.split('\t').collect();
+                    let call: usize = f[1].parse().unwrap();
+                    Seed {
+                        frame: frame_order[call / 2],
+                        chunk_offset: if call % 2 == 0 { 0 } else { 4_999_900 },
+                        query_offset: f[3].parse().unwrap(),
+                        subject_offset: f[4].parse().unwrap(),
+                    }
+                })
+                .collect();
+            let actual = scan_unambiguous_blosum62_words_multi(
+                &[query.as_slice()],
+                &subject,
+                1,
+                None,
+                13,
+                mask_lowercase,
+            )
+            .unwrap();
+            if actual != expected {
+                let first = actual
+                    .iter()
+                    .zip(&expected)
+                    .position(|(left, right)| left != right)
+                    .unwrap_or(actual.len().min(expected.len()));
+                panic!(
+                    "{fixture}: first candidate difference at {first}: Rust={:?}, NCBI={:?}; counts Rust={} NCBI={}",
+                    actual.get(first), expected.get(first), actual.len(), expected.len()
+                );
+            }
+        }
+        // NCBI blast_engine.c:246-264,478-500,804-841:
+        // s_GetNextSubjectChunk skips a middle chunk with no soft range;
+        // each surviving chunk calls WordFinder in frame order.
+        for (fixture, early_hit) in [
+            ("no_range_middle_20260924", false),
+            ("no_range_two_hits_20260924", true),
+        ] {
+            let query = &read_fasta(&format!("{root}{fixture}/query.faa"))[0].1;
+            let mut subject = if early_hit {
+                let mut nt = b"ATG".repeat(4_998_450);
+                nt.extend_from_slice(plus1);
+                nt.push(b'A');
+                nt.extend_from_slice(&b"ATG".repeat(10_000_050 - 4_998_450 - 121));
+                nt.extend_from_slice(plus1);
+                nt
+            } else {
+                let mut nt = b"ATG".repeat(10_000_050);
+                nt.extend_from_slice(plus1);
+                nt
+            };
+            subject.extend_from_slice(&b"ATG".repeat(250));
+            assert_eq!(subject.len(), 30_001_262);
+            subject[14_997_000..30_000_000].make_ascii_lowercase();
+            let trace = fs::read_to_string(format!(
+                "{root}ordered_candidates_20260924/{fixture}.stderr"
+            ))
+            .unwrap();
+            let frames = [1, 1, 2, 2, 3, 3, -1, -1, -1, -2, -2, -2, -3, -3, -3];
+            let offsets = [
+                0, 9_999_800, 0, 9_999_800, 0, 9_999_800, 0, 4_999_900, 9_999_800, 0, 4_999_900,
+                9_999_800, 0, 4_999_900, 9_999_800,
+            ];
+            let range_trace =
+                fs::read_to_string(format!("{root}{fixture}/chunk_ranges.tsv")).unwrap();
+            let calls: Vec<_> = range_trace
+                .lines()
+                .filter(|line| line.starts_with("RANGE_CALL\t"))
+                .map(|line| {
+                    let f: Vec<_> = line.split('\t').collect();
+                    (f[2].parse::<i8>().unwrap(), f[3].parse::<usize>().unwrap())
+                })
+                .collect();
+            assert_eq!(calls.len(), 15);
+            for (call, (frame, length)) in calls.iter().enumerate() {
+                assert_eq!(*frame, frames[call]);
+                assert_eq!(
+                    *length,
+                    if offsets[call] == 9_999_800 {
+                        620
+                    } else {
+                        5_000_000
+                    }
+                );
+            }
+            assert_eq!(
+                trace
+                    .lines()
+                    .filter(|line| line.starts_with("PARAM\t"))
+                    .count(),
+                15
+            );
+            assert_eq!(
+                trace
+                    .lines()
+                    .filter(|line| line.starts_with("END\t"))
+                    .count(),
+                15
+            );
+            let expected: Vec<_> = trace
+                .lines()
+                .filter(|line| line.starts_with("CAND\t"))
+                .map(|line| {
+                    let f: Vec<_> = line.split('\t').collect();
+                    let call: usize = f[1].parse().unwrap();
+                    Seed {
+                        frame: frames[call],
+                        chunk_offset: offsets[call],
+                        query_offset: f[3].parse().unwrap(),
+                        subject_offset: f[4].parse().unwrap(),
+                    }
+                })
+                .collect();
+            let actual = scan_unambiguous_blosum62_words_multi(
+                &[query.as_slice()],
+                &subject,
+                1,
+                None,
+                13,
+                true,
+            )
+            .unwrap();
+            if actual != expected {
+                let first = actual
+                    .iter()
+                    .zip(&expected)
+                    .position(|(left, right)| left != right)
+                    .unwrap_or(actual.len().min(expected.len()));
+                panic!(
+                    "{fixture}: first candidate difference at {first}: Rust={:?}, NCBI={:?}; counts Rust={} NCBI={}",
+                    actual.get(first), expected.get(first), actual.len(), expected.len()
+                );
+            }
+        }
+    }
+
     // NCBI c++/src/algo/blast/core/blast_engine.c:246-264:
     // split only when offset + MAX_DBSEQ_LEN < hard-range right;
     // the next offset overlaps the first chunk by DBSEQ_CHUNK_OVERLAP.

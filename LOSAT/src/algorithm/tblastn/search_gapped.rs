@@ -884,6 +884,40 @@ fn full_translation_traceback_with_matrix(
     percent_identity: f64,
     min_hit_length: i32,
 ) -> Result<Vec<(GappedHsp, bool)>> {
+    full_translation_traceback_with_matrix_and_events(
+        query,
+        subject,
+        db_gencode,
+        gapped,
+        matrix,
+        gap_open,
+        gap_extend,
+        x_drop_final,
+        percent_identity,
+        min_hit_length,
+        None,
+    )
+}
+
+// NCBI c++/src/algo/blast/core/blast_traceback.c:585-605:
+// Blast_HSPUpdateWithTraceback(gap_align, hsp);
+// delete_hsp = Blast_HSPTest(hsp, hit_options, align_length);
+// if (delete_hsp) hsp_array[index] = Blast_HSPFree(hsp);
+// This diagnostic observer records the real call order and input offsets.
+#[allow(dead_code)]
+fn full_translation_traceback_with_matrix_and_events(
+    query: &[u8],
+    subject: &[u8],
+    db_gencode: u8,
+    gapped: &[GappedHsp],
+    matrix: ScoringMatrix,
+    gap_open: i32,
+    gap_extend: i32,
+    x_drop_final: i32,
+    percent_identity: f64,
+    min_hit_length: i32,
+    mut test_events: Option<&mut Vec<(bool, usize, usize, usize, usize, usize)>>,
+) -> Result<Vec<(GappedHsp, bool)>> {
     let code = GeneticCode::try_from_id(db_gencode).map_err(anyhow::Error::msg)?;
     let query_frame = encode_protein_query_frame_with_seg(query, None);
     let query_sequence = &query_frame.aa_seq[1..query_frame.aa_seq.len() - 1];
@@ -948,12 +982,25 @@ fn full_translation_traceback_with_matrix(
                 .iter()
                 .map(|op| op.num() as usize)
                 .sum();
-            if blast_hsp_test(
+            let delete_hsp = blast_hsp_test(
                 alignment.num_ident,
                 align_length,
                 percent_identity,
                 min_hit_length,
-            ) {
+            );
+            // NCBI blast_traceback.c:585-605 records updated HSP offsets
+            // before Blast_HSPTest and before Blast_HSPAdjustSubjectOffset.
+            if let Some(events) = test_events.as_deref_mut() {
+                events.push((
+                    delete_hsp,
+                    align_length,
+                    alignment.query_start,
+                    alignment.query_stop,
+                    alignment.subject_start + subject_base,
+                    alignment.subject_stop + subject_base,
+                ));
+            }
+            if delete_hsp {
                 continue;
             }
             let saved = GappedHsp {
@@ -1279,6 +1326,122 @@ mod tests {
                 })
                 .collect();
             assert_eq!(actual, expected[context], "query context {context}");
+        }
+    }
+
+    // NCBI c++/src/algo/blast/core/blast_traceback.c:585-605:
+    // Blast_HSPUpdateWithTraceback(gap_align, hsp);
+    // delete_hsp = Blast_HSPTest(hsp, hit_options, align_length);
+    // if (delete_hsp) hsp_array[index] = Blast_HSPFree(hsp);
+    // The comparison-only C API input sets percent_identity=100.0 during
+    // each real NCBI HSPTest call, yielding positive deletions.
+    #[test]
+    fn real_path_hsp_test_deletion_order_matches_ncbi() {
+        let root = concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../docs/evidence/tlosan_stage_c/"
+        );
+        let queries = read_fasta(&format!("{root}multi_query_20260924/query.faa"));
+        let refs: Vec<&[u8]> = queries
+            .iter()
+            .map(|(_, sequence)| sequence.as_slice())
+            .collect();
+        let subject = &read_fasta(&format!("{root}multi_query_20260924/subjects.fna"))[0].1;
+        let initial =
+            find_blosum62_word3_init_hsps_multi(&refs, subject, 1, None, 13, 40, 16, 0, false)
+                .unwrap();
+        let gapped = gapped_blosum62_word3_hsps_multi(
+            &refs,
+            subject,
+            1,
+            &initial,
+            11,
+            1,
+            38,
+            &multi_query_cutoffs(),
+        )
+        .unwrap();
+        let appended = preliminary_merged_hsps(&gapped, i32::MAX as usize)
+            .pop()
+            .unwrap();
+        let trace =
+            fs::read_to_string(format!("{root}hsp_test_real_path_20260924/trace.tsv")).unwrap();
+        let mut expected_tests = vec![Vec::new(); refs.len()];
+        let mut expected_output = vec![Vec::new(); refs.len()];
+        let mut context = 0usize;
+        let mut successful_pass = false;
+        for line in trace.lines() {
+            let f: Vec<_> = line.split('\t').collect();
+            match f[0] {
+                "TRACEBACK_CONTEXT" => context = f[1].parse().unwrap(),
+                "HSP_TEST" => expected_tests[context].push((
+                    f[1] == "1",
+                    f[2].parse::<usize>().unwrap(),
+                    f[3].parse::<usize>().unwrap(),
+                    f[4].parse::<usize>().unwrap(),
+                    f[5].parse::<usize>().unwrap(),
+                    f[6].parse::<usize>().unwrap(),
+                )),
+                "TRACEBACK_OUTPUT" => successful_pass = f[4] == "0",
+                "TRACEBACK_OUT_HSP" if successful_pass => expected_output[context].push((
+                    f[3].parse::<i32>().unwrap(),
+                    f[4].parse::<i8>().unwrap(),
+                    f[5].parse::<i32>().unwrap(),
+                    f[6].parse::<i32>().unwrap(),
+                    f[7].parse::<i32>().unwrap(),
+                    f[8].parse::<i32>().unwrap(),
+                )),
+                _ => {}
+            }
+        }
+        assert_eq!(expected_tests.iter().map(Vec::len).sum::<usize>(), 31);
+        assert_eq!(
+            expected_tests.iter().flatten().filter(|row| row.0).count(),
+            17
+        );
+        for context in [1usize, 0] {
+            let per_query: Vec<_> = appended
+                .iter()
+                .filter(|(index, _)| *index == context)
+                .map(|(_, hsp)| *hsp)
+                .collect();
+            let mut events = Vec::new();
+            let actual = full_translation_traceback_with_matrix_and_events(
+                refs[context],
+                subject,
+                1,
+                &per_query,
+                ScoringMatrix::Blosum62,
+                11,
+                1,
+                64,
+                100.0,
+                0,
+                Some(&mut events),
+            )
+            .unwrap();
+            assert_eq!(
+                events, expected_tests[context],
+                "query context {context} HSPTest order"
+            );
+            let actual: Vec<_> = actual
+                .into_iter()
+                .map(|(hsp, retried)| {
+                    assert!(retried);
+                    (
+                        hsp.score,
+                        hsp.frame,
+                        hsp.q_start,
+                        hsp.q_end,
+                        hsp.s_start,
+                        hsp.s_end,
+                    )
+                })
+                .collect();
+            assert_eq!(
+                actual, expected_output[context],
+                "query context {context} survivors"
+            );
         }
     }
 

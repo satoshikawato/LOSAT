@@ -1,0 +1,5 @@
+NCBI source commit: 598d8ae6a72b923127ba2fbfaffd48e4c83bfbf4
+NCBI binary SHA256: e3956f1e107a30439d56c8f72fae4267a7d62ebcc16e4f99d4baf2bdf00402e0
+Probe SHA256: 0e6dbfaeacaccab11af7ee8ed0277448200e2b7d9e967112ed7a6e4926953a88
+seg_hard_query_20260924_default command: ['/home/kawato/micromamba/bin/tblastn', '-task', 'tblastn', '-query', '/mnt/c/Users/genom/GitHub/LOSAT/docs/evidence/tlosan_stage_c/seg_hard_query_20260924/query.faa', '-subject', '/mnt/c/Users/genom/GitHub/LOSAT/docs/evidence/tlosan_stage_c/seg_hard_query_20260924/subjects.fna', '-db_gencode', '1', '-num_threads', '1', '-outfmt', '6 qseqid sseqid score bitscore evalue qstart qend sstart send sframe length']
+multi_query_20260924_default command: ['/home/kawato/micromamba/bin/tblastn', '-task', 'tblastn', '-query', '/mnt/c/Users/genom/GitHub/LOSAT/docs/evidence/tlosan_stage_c/multi_query_20260924/query.faa', '-subject', '/mnt/c/Users/genom/GitHub/LOSAT/docs/evidence/tlosan_stage_c/multi_query_20260924/subjects.fna', '-db_gencode', '1', '-num_threads', '1', '-outfmt', '6 qseqid sseqid score bitscore evalue qstart qend sstart send sframe length']

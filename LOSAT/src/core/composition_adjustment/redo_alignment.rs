@@ -14,6 +14,7 @@ use crate::common::GapEditOp;
 use crate::core::blast_stat::composition::compute_lambda_from_score_probs;
 use crate::utils::genetic_code::GeneticCode;
 use crate::utils::matrix::{aa_char_to_ncbistdaa, BLASTAA_SIZE};
+use crate::utils::seg::{SegMasker, SegParams};
 
 use super::adjust_scores::{
     blast_adjust_scores, blast_get_composition_range, read_aa_composition, AdjustedProteinMatrix,
@@ -1212,6 +1213,29 @@ fn translated_subject_composition(
     Ok(read_aa_composition(&data[left..right]))
 }
 
+// NCBI c++/src/algo/blast/core/blast_kappa.c:1417-1455,1530-1548:
+// #define BLASTP_MASK_RESIDUE 21
+// #define BLASTP_MASK_INSTRUCTIONS "S 10 1.8 2.1"
+// BlastSetUp_Filter(eBlastTypeTblastn, seqData->data, seqData->length, ...);
+// Blast_MaskTheResidues(seqData->data, seqData->length,
+//                        FALSE, mask_seqloc, FALSE, 0);
+#[allow(dead_code)] // TBLASTN enters this after translated range callbacks are connected.
+fn mask_translated_subject_seg(translation: &mut [u8]) -> Result<bool> {
+    if translation.len() < 2 || translation[0] != 0 || translation[translation.len() - 1] != 0 {
+        bail!("NCBI translated subject SEG data lacks sentinels");
+    }
+    let data_len = translation.len() - 1;
+    let data = &mut translation[1..data_len];
+    let masker = SegMasker::with_params(&SegParams::new(10, 1.8, 2.1));
+    let intervals = masker.mask_sequence(data);
+    for interval in &intervals {
+        for residue in &mut data[interval.start..interval.end] {
+            *residue = 21;
+        }
+    }
+    Ok(!intervals.is_empty())
+}
+
 // NCBI reference: ncbi-blast/c++/src/algo/blast/composition_adjustment/redo_alignment.c:738-787
 // ```c
 // static int
@@ -2209,6 +2233,54 @@ mod tests {
                 );
             }
         }
+    }
+
+    // NCBI core/blast_kappa.c:1417-1455,1530-1548:
+    // BLASTP_MASK_INSTRUCTIONS "S 10 1.8 2.1";
+    // Blast_MaskTheResidues(seqData->data, seqData->length, FALSE, ...);
+    #[test]
+    fn translated_kappa_seg_bytes_match_ncbi_mask_calls() {
+        let trace = std::fs::read_to_string(format!(
+            "{}/../docs/evidence/tlosan_stage_d/kappa_seg_20260924/multi_query_20260924_default.tsv",
+            env!("CARGO_MANIFEST_DIR")
+        ))
+        .unwrap();
+        let mut raw = std::collections::HashMap::new();
+        let decode = |hex: &str| -> Vec<u8> {
+            hex.as_bytes()
+                .chunks_exact(2)
+                .map(|pair| u8::from_str_radix(std::str::from_utf8(pair).unwrap(), 16).unwrap())
+                .collect()
+        };
+        for row in trace.lines() {
+            let fields: Vec<_> = row.split('\t').collect();
+            if fields[0] == "K_SEG_RAW" {
+                let residues = decode(fields[5]);
+                assert_eq!(residues.len(), fields[4].parse::<usize>().unwrap());
+                raw.insert(fields[1].parse::<usize>().unwrap(), residues);
+            }
+        }
+        let mut compared = 0;
+        for row in trace.lines() {
+            let fields: Vec<_> = row.split('\t').collect();
+            if fields[0] != "K_SEG_MASKED" {
+                continue;
+            }
+            let event = fields[1].parse::<usize>().unwrap();
+            let mut translated = Vec::with_capacity(raw[&event].len() + 2);
+            translated.push(0);
+            translated.extend_from_slice(&raw[&event]);
+            translated.push(0);
+            assert_eq!(translated.len() - 2, fields[2].parse::<usize>().unwrap());
+            assert!(mask_translated_subject_seg(&mut translated).unwrap());
+            assert_eq!(
+                &translated[1..translated.len() - 1],
+                decode(fields[3]),
+                "SEG event {event}"
+            );
+            compared += 1;
+        }
+        assert_eq!(compared, 7);
     }
 
     fn make_align(

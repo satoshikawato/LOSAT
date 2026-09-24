@@ -109,6 +109,13 @@ impl CompoHeap {
         self.worst_evalue
     }
 
+    // NCBI reference: ncbi-blast/c++/src/algo/blast/composition_adjustment/compo_heap.c:405-410:
+    // return self->n >= self->heapThreshold &&
+    //     self->worstEvalue <= self->ecutoff;
+    pub(super) fn filled_to_cutoff(&self) -> bool {
+        self.records.len() >= self.threshold && self.worst_evalue <= self.ecutoff
+    }
+
     // NCBI reference: ncbi-blast/c++/src/algo/blast/composition_adjustment/compo_heap.c:163-211,237-245
     // ```c
     // if (left <= n && s_CompoHeapRecordCompare(&heapArray[left], &heapArray[i]))
@@ -254,9 +261,76 @@ impl CompoHeap {
     }
 }
 
+// NCBI reference: ncbi-blast/c++/src/algo/blast/composition_adjustment/redo_alignment.c:64,
+// 1560-1582:
+// #define EVALUE_STRETCH 5
+// for (i = 0; i < numQueries; i++) {
+//     if (BlastCompo_HeapFilledToCutoff(&significantMatches[i])) {
+//         if (evalue <= EVALUE_STRETCH * significantMatches[i].ecutoff)
+//             return FALSE;
+//     } else return FALSE;
+// }
+// return TRUE;
+#[allow(dead_code)] // Used by TBLASTN Kappa before each redo in the gated D pipeline.
+pub(super) fn compo_early_termination(evalue: f64, heaps: &[CompoHeap]) -> bool {
+    for heap in heaps {
+        if !heap.filled_to_cutoff() || evalue <= 5.0 * heap.ecutoff {
+            return false;
+        }
+    }
+    true
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    // NCBI reference: ncbi-blast/c++/src/algo/blast/composition_adjustment/redo_alignment.c:64,
+    // 1560-1582; composition_adjustment/compo_heap.c:405-410:
+    // if (BlastCompo_HeapFilledToCutoff(&significantMatches[i])) {
+    //     if (evalue <= EVALUE_STRETCH * ecutoff) return FALSE;
+    // } else return FALSE;
+    // return TRUE;
+    #[test]
+    fn natural_112_subject_early_termination_matches_ncbi_call_state() {
+        let trace = std::fs::read_to_string(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../docs/evidence/tlosan_stage_d/kappa_heap_rejection_20260925/natural_c_d_early_20260925/early.tsv"
+        ))
+        .unwrap();
+        let mut redone = 0;
+        let mut terminated = 0;
+        for row in trace
+            .lines()
+            .filter(|line| line.starts_with("K_EARLY_EVAL\t"))
+        {
+            let f: Vec<_> = row.split('\t').collect();
+            assert_eq!(f[1], "0");
+            let evalue = f[2].parse().unwrap();
+            let n = f[3].parse().unwrap();
+            let threshold = f[4].parse().unwrap();
+            let worst_evalue = f[5].parse().unwrap();
+            let ecutoff = f[6].parse().unwrap();
+            let expected = f[7] == "1";
+            let mut heap = CompoHeap::new(threshold, ecutoff).unwrap();
+            heap.records = vec![
+                CompoHeapRecord {
+                    best_evalue: worst_evalue,
+                    best_score: 0,
+                    subject_index: 0,
+                };
+                n
+            ];
+            heap.worst_evalue = worst_evalue;
+            assert_eq!(compo_early_termination(evalue, &[heap]), expected);
+            if expected {
+                terminated += 1;
+            } else {
+                redone += 1;
+            }
+        }
+        assert_eq!((redone, terminated), (11, 16));
+    }
 
     // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_kappa.c:3705-3736,2500-2515;
     // composition_adjustment/compo_heap.c:252-275,330-391,439-466

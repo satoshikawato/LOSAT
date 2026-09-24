@@ -1,0 +1,36 @@
+TBLASTN Stage D natural 112-subject preliminary/early-termination checkpoint
+Date: 2026-09-25
+Pinned NCBI source: 598d8ae6a72b923127ba2fbfaffd48e4c83bfbf4
+Branch: feature/tlosan-tblastn-v0.2.0
+
+Comparison-only exact local -subject command uses code 1, one thread,
+composition mode 2, evalue 10, max_target_seqs 2. The two runners verified
+unchanged pinned NCBI stdout/stderr, retained command/probe/input SHA-256
+and output checksums:
+$ python3 docs/evidence/tlosan_stage_d/kappa_heap_rejection_20260925/run_ncbi_natural_c_d_trace.py docs/evidence/tlosan_stage_d/kappa_heap_rejection_20260925/natural_c_d_early_20260925
+exit 0.
+$ python3 docs/evidence/tlosan_stage_d/kappa_heap_rejection_20260925/run_ncbi_natural_mode2_trace.py docs/evidence/tlosan_stage_d/kappa_heap_rejection_20260925/natural_mode2_20260925
+exit 0.
+
+$ cargo test --manifest-path LOSAT/Cargo.toml --lib algorithm::tblastn::stage_d_linking::tests::natural_heap_replacement_fixture_matches_ncbi_preliminary_stream -- --exact
+1 passed, 0 failed, 524 filtered out. All 112 subjects, 27 stream lists,
+11 continued redo decisions, 16 early-terminated decisions, 10 inserts,
+one WouldInsert rejection; Rust-generated preliminary inputs.
+$ cargo test --manifest-path LOSAT/Cargo.toml --lib algorithm::tblastn::kappa_heap::tests::natural_112_subject_early_termination_matches_ncbi_call_state -- --exact
+1 passed, 0 failed, 524 filtered out.
+$ cargo test --manifest-path LOSAT/Cargo.toml --lib algorithm::tblastn::kappa::tests::kappa_traceback_matches_ncbi_saved_inputs_and_edit_scripts -- --exact
+1 passed, 0 failed, 524 filtered out. Includes all 12 real traceback calls
+from this fixture with saved NCBI adjusted-matrix inputs.
+
+$ cargo clippy --manifest-path LOSAT/Cargo.toml --lib --tests -- -D warnings
+exit 0.
+$ cargo fmt --manifest-path LOSAT/Cargo.toml --all -- --check
+exit 0.
+$ git diff --check
+exit 0.
+$ (cd docs/evidence/tlosan_stage_d/kappa_heap_rejection_20260925/natural_c_d_early_20260925 && sha256sum -c outputs.sha256)
+4 files OK.
+$ (cd docs/evidence/tlosan_stage_d/kappa_heap_rejection_20260925/natural_mode2_20260925 && sha256sum -c outputs.sha256)
+3 files OK.
+
+Stage D partial; Stage E not started; public CLI unimplemented.

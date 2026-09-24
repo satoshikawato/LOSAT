@@ -916,4 +916,294 @@ mod tests {
             }
         }
     }
+
+    // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_engine.c:870-906;
+    // c++/src/algo/blast/core/link_hsps.c:1765-1810;
+    // c++/src/algo/blast/core/blast_hspstream.c:144-152,289-319:
+    // BLAST_LinkHsps(..., hsp_list_out, ...);
+    // s_Blast_HSPListReapByPrelimEvalue(hsp_list_out, hit_params);
+    // Blast_HSPResultsReverseSort(hsp_stream->results);
+    // *hsp_list_out = hit_list->hsplist_array[last_hsplist_index];
+    #[test]
+    fn natural_heap_replacement_fixture_matches_ncbi_preliminary_stream() {
+        use crate::algorithm::tblastn::kappa_heap::{
+            compo_early_termination, CompoHeap, CompoHeapRecord,
+        };
+        use crate::algorithm::tblastn::search_gapped::{
+            preliminary_protein_hsps_in_ncbi_order, PreliminaryProfile,
+        };
+        use crate::utils::seg::SegParams;
+        use std::collections::{HashMap, HashSet};
+
+        let root = concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../docs/evidence/tlosan_stage_d/kappa_heap_rejection_20260925/"
+        );
+        let read_fasta = |name: &str| -> Vec<Vec<u8>> {
+            let mut records: Vec<Vec<u8>> = Vec::new();
+            for line in fs::read_to_string(format!("{root}{name}")).unwrap().lines() {
+                if line.starts_with('>') {
+                    records.push(Vec::new());
+                } else {
+                    records.last_mut().unwrap().extend(line.bytes());
+                }
+            }
+            records
+        };
+        let query = read_fasta("query.faa").remove(0);
+        let subjects = read_fasta("subjects.fna");
+        let total_nt: usize = subjects.iter().map(Vec::len).sum();
+        assert_eq!((query.len(), subjects.len(), total_nt), (120, 112, 40320));
+
+        let trace =
+            fs::read_to_string(format!("{root}natural_c_d_early_20260925/calls.tsv")).unwrap();
+        let params_trace =
+            fs::read_to_string(format!("{root}natural_c_d_early_20260925/parameters.tsv")).unwrap();
+        let early_trace =
+            fs::read_to_string(format!("{root}natural_c_d_early_20260925/early.tsv")).unwrap();
+        let kappa_trace =
+            fs::read_to_string(format!("{root}result_order_20260925/ncbi.trace")).unwrap();
+        let prelim_events: HashSet<usize> = trace
+            .lines()
+            .filter(|line| line.starts_with("D_CALL\t") && line.split('\t').nth(2) == Some("link"))
+            .take(subjects.len())
+            .map(|line| line.split('\t').nth(1).unwrap().parse().unwrap())
+            .collect();
+        assert_eq!(prelim_events.len(), 112);
+        let mut event_oid = HashMap::new();
+        for line in trace.lines().filter(|line| line.starts_with("D_LIST\t")) {
+            let f: Vec<_> = line.split('\t').collect();
+            let event: usize = f[1].parse().unwrap();
+            if prelim_events.contains(&event) && f[2] == "link_before" && f[3] != "NULL" {
+                event_oid.insert(event, f[3].parse::<usize>().unwrap());
+            }
+        }
+        let mut before: HashMap<usize, Vec<Vec<&str>>> = HashMap::new();
+        let mut after: HashMap<usize, Vec<Vec<&str>>> = HashMap::new();
+        for line in trace.lines().filter(|line| line.starts_with("D_HSP\t")) {
+            let f: Vec<_> = line.split('\t').collect();
+            let event: usize = f[1].parse().unwrap();
+            let Some(&oid) = event_oid.get(&event) else {
+                continue;
+            };
+            match f[2] {
+                "link_before" => before.entry(oid).or_default().push(f),
+                "link_after" => after.entry(oid).or_default().push(f),
+                _ => {}
+            }
+        }
+        let gapped = lookup_protein_params_gapped(ScoringMatrix::Blosum62);
+        let ungapped = lookup_protein_params_ungapped(ScoringMatrix::Blosum62);
+        let gumbel = lookup_protein_gumbel_params(
+            &ProteinScoringSpec {
+                matrix: ScoringMatrix::Blosum62,
+                gap_open: 11,
+                gap_extend: 1,
+            },
+            (total_nt / 3) as i64,
+        )
+        .unwrap();
+        let parameters = local_parameters_for_call(
+            &[(query.len(), true)],
+            total_nt,
+            &[gapped],
+            &[ungapped],
+            LocalParameterOptions {
+                expect_value: 10.0,
+                do_sum_stats: true,
+                max_intron_length: 0,
+                gap_trigger_bits: 22.0,
+                word_xdrop_bits: 7.0,
+                scale_factor: 1.0,
+                gumbel: Some(&gumbel),
+            },
+            LocalParameterCall::Initial {
+                min_subject_length: 120,
+                composition_based_stats: 2,
+            },
+        );
+        assert!(params_trace.contains("D_PARAM_CONTEXT\t0\t25\t25\n"));
+        assert_eq!(
+            (
+                parameters.cutoffs[0].word_cutoff,
+                parameters.cutoffs[0].hit_cutoff
+            ),
+            (25, 25)
+        );
+        let seg = SegParams::default();
+        let word_xdrop = [parameters.cutoffs[0].word_xdrop];
+        let word_cutoff = [parameters.cutoffs[0].word_cutoff];
+        let hit_cutoff = [parameters.cutoffs[0].hit_cutoff];
+        let profile = PreliminaryProfile {
+            seg: Some(&seg),
+            soft_masking: false,
+            threshold: 13,
+            window: 40,
+            word_xdrop: &word_xdrop,
+            word_cutoff: &word_cutoff,
+            mask_lowercase: false,
+            matrix: ScoringMatrix::Blosum62,
+            word_size: 3,
+            gap_open: 11,
+            gap_extend: 1,
+            gap_xdrop: 38,
+            gapped_cutoff: &hit_cutoff,
+            hsp_num_max: i32::MAX as usize,
+        };
+        let mut retained: Vec<(usize, LinkedHspList)> = Vec::new();
+        for (oid, subject) in subjects.iter().enumerate() {
+            let (preliminary, _) =
+                preliminary_protein_hsps_in_ncbi_order(&[&query], subject, 1, profile).unwrap();
+            let expected = before.get(&oid).map(Vec::as_slice).unwrap_or(&[]);
+            assert_eq!(preliminary.len(), expected.len(), "OID {oid} prelink count");
+            for ((context, hsp), row) in preliminary.iter().zip(expected) {
+                assert_eq!(*context, row[4].parse().unwrap(), "OID {oid} context");
+                assert_eq!(hsp.frame, row[5].parse().unwrap(), "OID {oid} frame");
+                assert_eq!(hsp.q_start, row[6].parse().unwrap(), "OID {oid} qstart");
+                assert_eq!(hsp.q_end, row[7].parse().unwrap(), "OID {oid} qend");
+                assert_eq!(hsp.s_start, row[8].parse().unwrap(), "OID {oid} sstart");
+                assert_eq!(hsp.s_end, row[9].parse().unwrap(), "OID {oid} send");
+                assert_eq!(hsp.score, row[10].parse().unwrap(), "OID {oid} score");
+                assert_eq!(
+                    hsp.s_gapped_start,
+                    row[16].parse().unwrap(),
+                    "OID {oid} gapped start"
+                );
+            }
+            if preliminary.is_empty() {
+                continue;
+            }
+            let mut linked = link_preliminary_hsps(
+                &preliminary,
+                &[query.len() as i32],
+                &parameters.lengths,
+                subject.len() as i32,
+                &[gapped],
+                &gumbel,
+                parameters.link.as_ref().unwrap(),
+            )
+            .unwrap();
+            let expected_linked = after.get(&oid).map(Vec::as_slice).unwrap_or(&[]);
+            assert_eq!(
+                linked.hsps.len(),
+                expected_linked.len(),
+                "OID {oid} linked count"
+            );
+            for (hsp, row) in linked.hsps.iter().zip(expected_linked) {
+                assert_eq!(
+                    hsp.hsp.score,
+                    row[10].parse().unwrap(),
+                    "OID {oid} linked score"
+                );
+                assert_eq!(hsp.num, row[12].parse().unwrap(), "OID {oid} linked num");
+                assert_eq!(
+                    hsp.evalue.to_bits(),
+                    row[13].parse::<f64>().unwrap().to_bits(),
+                    "OID {oid} linked E-value"
+                );
+            }
+            reap_by_evalue(&mut linked, parameters.prelim_evalue);
+            if !linked.hsps.is_empty() {
+                retained.push((oid, linked));
+            }
+        }
+        retained.sort_by(|(oid_a, a), (oid_b, b)| {
+            compare_preliminary_lists_for_kappa(*oid_a as i32, a, *oid_b as i32, b)
+        });
+        let expected_stream: Vec<_> = early_trace
+            .lines()
+            .filter(|line| line.starts_with("K_EARLY_STREAM\t0\t"))
+            .collect();
+        assert_eq!(retained.len(), 27);
+        assert_eq!(retained.len(), expected_stream.len());
+        for ((oid, linked), row) in retained.iter().zip(expected_stream) {
+            let f: Vec<_> = row.split('\t').collect();
+            assert_eq!(*oid, f[2].parse().unwrap());
+            assert_eq!(linked.hsps.len(), f[5].parse().unwrap());
+            assert_eq!(
+                linked.best_evalue.to_bits(),
+                f[4].parse::<f64>().unwrap().to_bits(),
+                "OID {oid} stream best E-value"
+            );
+        }
+        let early_decisions: Vec<_> = early_trace
+            .lines()
+            .filter(|line| line.starts_with("K_EARLY_EVAL\t"))
+            .collect();
+        assert_eq!(early_decisions.len(), retained.len());
+        // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_kappa.c:3383-3427,
+        // 3525-3535; composition_adjustment/redo_alignment.c:64,1560-1582;
+        // composition_adjustment/compo_heap.c:252-275,330-391,405-410:
+        // if (BlastCompo_EarlyTermination(localMatch->best_evalue,
+        //     redoneMatches, numQueries)) { Blast_HSPListFree(localMatch); continue; }
+        // if (BlastCompo_HeapWouldInsert(...)) BlastCompo_HeapInsert(...);
+        let would_rows: Vec<_> = kappa_trace
+            .lines()
+            .filter(|line| line.starts_with("K_TRACE_HEAP_WOULD\t"))
+            .collect();
+        let insert_rows: Vec<_> = kappa_trace
+            .lines()
+            .filter(|line| line.starts_with("K_TRACE_HEAP_INSERT\t"))
+            .collect();
+        let mut heap = CompoHeap::new(2, 0.002).unwrap();
+        let mut redo_index = 0;
+        let mut insert_index = 0;
+        for ((oid, linked), row) in retained.iter().zip(early_decisions) {
+            let f: Vec<_> = row.split('\t').collect();
+            assert_eq!(
+                linked.best_evalue.to_bits(),
+                f[2].parse::<f64>().unwrap().to_bits(),
+                "OID {oid} early-termination input"
+            );
+            assert_eq!(heap.len(), f[3].parse().unwrap(), "OID {oid} heap count");
+            assert_eq!(
+                heap.worst_evalue().to_bits(),
+                f[5].parse::<f64>().unwrap().to_bits(),
+                "OID {oid} heap worst E-value"
+            );
+            let terminated =
+                compo_early_termination(linked.best_evalue, std::slice::from_ref(&heap));
+            assert_eq!(terminated, f[7] == "1", "OID {oid} early decision");
+            if terminated {
+                continue;
+            }
+            let would: Vec<_> = would_rows[redo_index].split('\t').collect();
+            assert_eq!(*oid, would[1].parse::<usize>().unwrap());
+            let expected_prelim: Vec<_> = kappa_trace
+                .lines()
+                .filter(|line| line.starts_with(&format!("K_TRACE_PRELIM\t{redo_index}\t")))
+                .collect();
+            assert_eq!(linked.hsps.len(), expected_prelim.len());
+            for (linked, row) in linked.hsps.iter().zip(expected_prelim) {
+                let p: Vec<_> = row.split('\t').collect();
+                assert_eq!(linked.hsp.score, p[3].parse().unwrap());
+                assert_eq!(linked.hsp.frame, p[5].parse().unwrap());
+                assert_eq!(linked.hsp.q_start, p[6].parse().unwrap());
+                assert_eq!(linked.hsp.q_end, p[7].parse().unwrap());
+                assert_eq!(linked.hsp.q_gapped_start, p[8].parse().unwrap());
+                assert_eq!(linked.hsp.s_start, p[9].parse().unwrap());
+                assert_eq!(linked.hsp.s_end, p[10].parse().unwrap());
+                assert_eq!(linked.hsp.s_gapped_start, p[11].parse().unwrap());
+            }
+            let candidate = CompoHeapRecord {
+                subject_index: *oid as i32,
+                best_evalue: would[2].parse().unwrap(),
+                best_score: would[3].parse().unwrap(),
+            };
+            assert_eq!(heap.would_insert(candidate), would[9] == "1");
+            if would[9] == "1" {
+                let insert: Vec<_> = insert_rows[insert_index].split('\t').collect();
+                assert_eq!(*oid, insert[1].parse::<usize>().unwrap());
+                assert_eq!(
+                    candidate.best_evalue.to_bits(),
+                    insert[2].parse::<f64>().unwrap().to_bits()
+                );
+                assert_eq!(candidate.best_score, insert[3].parse().unwrap());
+                assert!(heap.insert(candidate).is_none());
+                insert_index += 1;
+            }
+            redo_index += 1;
+        }
+        assert_eq!((redo_index, insert_index, heap.len()), (11, 10, 10));
+    }
 }

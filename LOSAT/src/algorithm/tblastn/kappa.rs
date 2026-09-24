@@ -1701,6 +1701,11 @@ mod tests {
                 "code32_local_api_20260925_cli_calibrated/code32.trace",
                 "code32_local_api_20260925_cli_calibrated/code32_composition.trace",
             ),
+            (
+                "heap_replacement_112_subjects",
+                "kappa_heap_rejection_20260925/result_order_20260925/ncbi.trace",
+                "kappa_heap_rejection_20260925/natural_mode2_20260925/composition.tsv",
+            ),
         ] {
             let root = format!(
                 "{}/../docs/evidence/tlosan_stage_d",

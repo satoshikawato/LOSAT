@@ -35,8 +35,9 @@ def run_probe(command: list[str], source: Path, temp: Path) -> subprocess.Comple
 
 
 def main() -> None:
-    if len(sys.argv) != 2:
-        raise SystemExit("usage: run_long_chunk_trace.py NEW_OUTPUT_DIR")
+    if len(sys.argv) not in (2, 3) or (len(sys.argv) == 3 and sys.argv[2] != "--mask-boundary"):
+        raise SystemExit("usage: run_long_chunk_trace.py NEW_OUTPUT_DIR [--mask-boundary]")
+    mask_boundary = len(sys.argv) == 3
     output = Path(sys.argv[1]).resolve()
     output.mkdir(parents=True, exist_ok=False)
     assert subprocess.check_output(
@@ -56,6 +57,11 @@ def main() -> None:
     query = (HERE / "run_20260923/query.faa").read_bytes()
     subject = "ATG" * PREFIX_CODONS + insert + "ATG" * SUFFIX_CODONS
     assert len(subject) // 3 > 5_000_000
+    if mask_boundary:
+        # Pinned blast_engine.c:283-307: the first soft range's right end
+        # equals the second chunk's start at translated offset 4,999,900.
+        left, right = 4_999_900 * 3, 5_000_000 * 3
+        subject = subject[:left] + subject[left:right].lower() + subject[right:]
     (output / "query.faa").write_bytes(query)
     (output / "subjects.fna").write_text(">chunk_edge\n" + subject + "\n")
     command = [
@@ -67,11 +73,14 @@ def main() -> None:
         "-seg", "no", "-sum_stats", "false", "-outfmt",
         "6 qseqid sseqid score qstart qend sstart send sframe qseq sseq",
     ]
+    if mask_boundary:
+        command.append("-lcase_masking")
     plain = subprocess.run(command, capture_output=True, check=True)
     (output / "ncbi_output.out").write_bytes(plain.stdout)
     sources = {
         "wordfinder": HERE / "ncbi_wordfinder_trace.c",
         "gapped": HERE / "ncbi_gapped_trace.c",
+        "ranges": HERE / "ncbi_chunk_ranges_trace.c",
     }
     with tempfile.TemporaryDirectory(prefix="tlosan-c-longchunk-") as tmp:
         for name, source in sources.items():
@@ -88,22 +97,31 @@ def main() -> None:
         (output / name).write_text(
             "\n".join(line for line in lines if line.startswith(starts)) + "\n"
         )
+    range_lines = [line for line in (output / "ranges.stderr").read_text().splitlines()
+                   if line.startswith(("RANGE_CALL\t", "RANGE\t", "SET_RANGES\t", "SET_RANGE\t"))]
+    (output / "chunk_ranges.tsv").write_text("\n".join(range_lines) + "\n")
+    mask_line = (
+        "Lowercase mask: nucleotide [14999700,15000000), "
+        "translated +1 right edge 4999900.\n"
+        if mask_boundary else ""
+    )
     (output / "manifest.txt").write_text(
         "Comparison-only pinned NCBI local -subject TBLASTN chunk fixture.\n"
         f"NCBI source commit: {SOURCE_COMMIT}\n"
         f"NCBI binary SHA256: {NCBI_SHA256}\n"
         f"Prefix: ATG x {PREFIX_CODONS} codons; insert: saved plus1 362 nt; "
         f"suffix: ATG x {SUFFIX_CODONS} codons.\n"
+        f"{mask_line}"
         f"Subject length: {len(subject)} nt; first frame: {len(subject) // 3} residues.\n"
         f"Input SHA256: query={sha(output / 'query.faa')} "
         f"subject={sha(output / 'subjects.fna')}\n"
         f"Probe source SHA256: {', '.join(f'{name}={sha(source)}' for name, source in sources.items())}\n"
-        "Unprobed output equals both probe outputs byte for byte: yes\n"
+        "Unprobed output equals all three probe outputs byte for byte: yes\n"
         f"Command: {command!r}\n"
     )
     files = ["query.faa", "subjects.fna", "ncbi_output.out", "manifest.txt",
              "wordfinder.stderr", "gapped.stderr", "frame_chunks.tsv",
-             "gapped_events.tsv"]
+             "gapped_events.tsv", "ranges.stderr", "chunk_ranges.tsv"]
     (output / "outputs.sha256").write_text(
         "".join(f"{sha(output / name)}  {name}\n" for name in files)
     )

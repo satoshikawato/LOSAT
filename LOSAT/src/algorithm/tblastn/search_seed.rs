@@ -20,8 +20,54 @@ use anyhow::{bail, Result};
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(super) struct Seed {
     pub frame: i8,
+    // NCBI c++/src/algo/blast/core/blast_engine.c:241-250:
+    // backup.offset identifies this chunk before WordFinder returns local offsets.
+    pub chunk_offset: u32,
     pub query_offset: u32,
     pub subject_offset: u32,
+}
+
+// NCBI c++/src/algo/blast/core/blast_engine.c:246-264:
+// if (backup->offset + MAX_DBSEQ_LEN < hard_ranges[hm_index].right) {
+//     subject->length = MAX_DBSEQ_LEN;
+//     backup->next = backup->offset + MAX_DBSEQ_LEN - dbseq_chunk_overlap;
+// } else { subject->length = hard_ranges[hm_index].right - backup->offset; }
+// NCBI c++/include/algo/blast/core/blast_gapalign.h:54:
+// #define MAX_DBSEQ_LEN 5000000
+// NCBI c++/include/algo/blast/core/blast_hits.h:192:
+// #define DBSEQ_CHUNK_OVERLAP 100
+// This schedule covers the unmasked translated frame's single hard range.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(super) struct TranslatedChunk {
+    pub offset: usize,
+    pub length: usize,
+}
+
+// NCBI c++/src/algo/blast/core/blast_engine.c:246-264:
+// backup->offset = backup->next;
+// while (backup->next < backup->full_range.right) { s_GetNextSubjectChunk(...); }
+#[allow(dead_code)]
+pub(super) fn unmasked_translated_chunks(frame_length: usize) -> Vec<TranslatedChunk> {
+    const MAX_DBSEQ_LEN: usize = 5_000_000;
+    const DBSEQ_CHUNK_OVERLAP: usize = 100;
+    let mut chunks = Vec::new();
+    let mut offset = 0;
+    while offset < frame_length {
+        if offset + MAX_DBSEQ_LEN < frame_length {
+            chunks.push(TranslatedChunk {
+                offset,
+                length: MAX_DBSEQ_LEN,
+            });
+            offset += MAX_DBSEQ_LEN - DBSEQ_CHUNK_OVERLAP;
+        } else {
+            chunks.push(TranslatedChunk {
+                offset,
+                length: frame_length - offset,
+            });
+            break;
+        }
+    }
+    chunks
 }
 
 // NCBI reference: c++/src/util/random_gen.cpp:98,227-230,287-308 and
@@ -132,7 +178,14 @@ pub(super) fn resolve_local_subject_ncbi2na(subject: &[u8]) -> Result<Vec<u8>> {
 // NCBI reference: c++/src/algo/blast/api/blast_setup_cxx.cpp:813-826
 // BlastSeqBlkSetSeqRanges(subj, (SSeqRange*) masked_ranges.get_data(),
 //                          masked_ranges.size() + 1, true, eSoftSubjMasking);
-// NCBI reference: c++/src/algo/blast/core/blast_util.c:201-219
+// NCBI c++/src/algo/blast/blastinput/blast_fasta_input.cpp:489-502:
+// apply_mask_to_both_strands = true; PackedSeqLocToMaskedQueryRegions(...);
+// NCBI c++/src/algo/blast/api/blast_aux_priv.cpp:436-454:
+// if (assume_both_strands) do_pos = do_neg = true;
+// if (do_pos) mqr.push_back(...); if (do_neg) mqr.push_back(...);
+// NCBI c++/src/algo/blast/api/blast_setup_cxx.cpp:689-707,825-826:
+// both mask copies enter masked_ranges before BlastSeqBlkSetSeqRanges.
+// NCBI c++/src/algo/blast/core/blast_util.c:211-215:
 // tmp[0].left = 0;
 // tmp[num_seq_ranges - 1].right = seq_blk->length;
 // NCBI reference: c++/src/algo/blast/core/blast_engine.c:816-831
@@ -161,8 +214,13 @@ fn translated_scan_ranges(
             while index < subject.len() && subject[index].is_ascii_lowercase() {
                 index += 1;
             }
-            nucleotide_ranges.push((left, start));
-            left = index - 1;
+            // NCBI c++/src/algo/blast/api/blast_aux_priv.cpp:436-454:
+            // if (assume_both_strands) do_pos = do_neg = true;
+            // if (do_pos) mqr.push_back(...); if (do_neg) mqr.push_back(...);
+            for _ in 0..2 {
+                nucleotide_ranges.push((left, start));
+                left = index - 1;
+            }
         } else {
             index += 1;
         }
@@ -181,6 +239,70 @@ fn translated_scan_ranges(
             .map(|(left, right)| (length - (right / 3) as i32, length - (left / 3) as i32))
             .collect()
     }
+}
+
+// NCBI c++/src/algo/blast/core/blast_engine.c:259-310:
+// unsplit subjects keep backup.soft_ranges; split soft-masked subjects
+// advance sm_index while right < chunk start, include ranges with left < end,
+// clamp only the first left and last right, and skip SUBJECT_SPLIT_NO_RANGE.
+// NCBI c++/src/algo/blast/core/blast_engine.c:261-274:
+// without soft masking, each chunk has one range [0, subject->length].
+pub(super) fn translated_chunk_scan_ranges(
+    subject: &[u8],
+    frame: i8,
+    frame_length: usize,
+    negative_first_length: usize,
+    mask_lowercase: bool,
+) -> Result<Vec<(TranslatedChunk, Vec<(i32, i32)>)>> {
+    let frame_ranges = translated_scan_ranges(
+        subject,
+        frame,
+        frame_length,
+        negative_first_length,
+        mask_lowercase,
+    );
+    let soft_masked = mask_lowercase && subject.iter().any(u8::is_ascii_lowercase);
+    let mut sm_index = 0usize;
+    let mut calls = Vec::new();
+    for chunk in unmasked_translated_chunks(frame_length) {
+        if !soft_masked {
+            calls.push((chunk, vec![(0, i32::try_from(chunk.length)?)]));
+            continue;
+        }
+        if chunk.offset == 0 && chunk.length == frame_length {
+            calls.push((chunk, frame_ranges.clone()));
+            continue;
+        }
+        let start = i32::try_from(chunk.offset)?;
+        let end = i32::try_from(chunk.offset + chunk.length)?;
+        let mut i = sm_index;
+        while i < frame_ranges.len() && frame_ranges[i].1 < start {
+            i += 1;
+        }
+        if i == frame_ranges.len() {
+            bail!("NCBI translated soft-range sentinel is missing");
+        }
+        let first = i;
+        while i < frame_ranges.len() && frame_ranges[i].0 < end {
+            i += 1;
+        }
+        if i == 0 {
+            bail!("NCBI translated soft-range index underflow");
+        }
+        sm_index = i - 1;
+        if i == first {
+            continue;
+        }
+        let mut ranges: Vec<_> = frame_ranges[first..i]
+            .iter()
+            .map(|&(left, right)| (left - start, right - start))
+            .collect();
+        ranges[0].0 = ranges[0].0.max(0);
+        let last = ranges.len() - 1;
+        ranges[last].1 = ranges[last].1.min(i32::try_from(chunk.length)?);
+        calls.push((chunk, ranges));
+    }
+    Ok(calls)
 }
 
 // NCBI reference: c++/src/algo/blast/core/blast_engine.c:747-775,804-812,835-844
@@ -267,38 +389,42 @@ pub(super) fn scan_unambiguous_blosum62_words_multi(
         .map(|frame| frame.aa_len)
         .unwrap_or(0);
     for frame in frames {
-        let ranges = translated_scan_ranges(
+        // NCBI c++/src/algo/blast/core/blast_engine.c:478-500:
+        // SUBJECT_SPLIT_NO_RANGE skips WordFinder for this chunk.
+        for (chunk, ranges) in translated_chunk_scan_ranges(
             subject,
             frame.frame,
             frame.aa_len,
             negative_first_length,
             mask_lowercase,
-        );
-        for (range_index, (left, right)) in ranges.into_iter().enumerate() {
-            // NCBI reference: c++/src/algo/blast/core/aa_ungapped.c:496-501
-            // scan_range[1] = subject->seq_ranges[0].left;
-            // scan_range[2] = subject->seq_ranges[0].right - wordsize;
-            // if (scan_range[2] < scan_range[1])
-            //     scan_range[2] = scan_range[1];
-            let mut end = right - lookup.word_length as i32;
-            if range_index == 0 && end < left {
-                end = left;
-            }
-            let mut scan_range = [0, left, end];
-            while scan_range[1] <= scan_range[2] {
-                let hits = s_blast_aa_scan_subject_one_range(
-                    &lookup,
-                    &frame.aa_seq[1..],
-                    &mut pairs,
-                    pair_capacity,
-                    &mut scan_range,
-                );
-                for pair in pairs.iter().take(hits as usize) {
-                    seeds.push(Seed {
-                        frame: frame.frame,
-                        query_offset: pair.q_off,
-                        subject_offset: pair.s_off,
-                    });
+        )? {
+            for (range_index, (left, right)) in ranges.into_iter().enumerate() {
+                // NCBI reference: c++/src/algo/blast/core/aa_ungapped.c:496-501
+                // scan_range[1] = subject->seq_ranges[0].left;
+                // scan_range[2] = subject->seq_ranges[0].right - wordsize;
+                // if (scan_range[2] < scan_range[1])
+                //     scan_range[2] = scan_range[1];
+                let mut end = right - lookup.word_length as i32;
+                if range_index == 0 && end < left {
+                    end = left;
+                }
+                let mut scan_range = [0, left, end];
+                while scan_range[1] <= scan_range[2] {
+                    let hits = s_blast_aa_scan_subject_one_range(
+                        &lookup,
+                        &frame.aa_seq[1 + chunk.offset..],
+                        &mut pairs,
+                        pair_capacity,
+                        &mut scan_range,
+                    );
+                    for pair in pairs.iter().take(hits as usize) {
+                        seeds.push(Seed {
+                            frame: frame.frame,
+                            chunk_offset: u32::try_from(chunk.offset)?,
+                            query_offset: pair.q_off,
+                            subject_offset: pair.s_off,
+                        });
+                    }
                 }
             }
         }
@@ -389,6 +515,7 @@ mod tests {
                 let f: Vec<_> = line.split('\t').collect();
                 Seed {
                     frame: frame_order[f[1].parse::<usize>().unwrap()],
+                    chunk_offset: 0,
                     query_offset: f[3].parse().unwrap(),
                     subject_offset: f[4].parse().unwrap(),
                 }
@@ -774,5 +901,63 @@ mod tests {
             .any(|seed| seed.frame == 1 && seed.query_offset == 0 && seed.subject_offset == 0));
         assert!(scan_unambiguous_blosum62_words(query, b"ATN", 32, None, 13, false).is_ok());
         assert!(scan_unambiguous_blosum62_words(query, b"atg", 32, None, 13, false).is_ok());
+    }
+    // NCBI c++/src/algo/blast/core/blast_engine.c:246-264:
+    // split only when offset + MAX_DBSEQ_LEN < hard-range right;
+    // the next offset overlaps the first chunk by DBSEQ_CHUNK_OVERLAP.
+    #[test]
+    fn unmasked_long_translated_chunks_match_ncbi_wordfinder_calls() {
+        let rows = unmasked_translated_chunks(5_000_320);
+        assert_eq!(
+            rows,
+            vec![
+                TranslatedChunk {
+                    offset: 0,
+                    length: 5_000_000
+                },
+                TranslatedChunk {
+                    offset: 4_999_900,
+                    length: 420
+                },
+            ]
+        );
+        assert_eq!(
+            unmasked_translated_chunks(5_000_000),
+            vec![TranslatedChunk {
+                offset: 0,
+                length: 5_000_000
+            },]
+        );
+        assert_eq!(
+            unmasked_translated_chunks(5_000_001),
+            vec![
+                TranslatedChunk {
+                    offset: 0,
+                    length: 5_000_000
+                },
+                TranslatedChunk {
+                    offset: 4_999_900,
+                    length: 101
+                },
+            ]
+        );
+        let path = concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../docs/evidence/tlosan_stage_c/long_chunk_20260924/frame_chunks.tsv"
+        );
+        let trace = fs::read_to_string(path).unwrap();
+        let observed: Vec<(i8, usize)> = trace
+            .lines()
+            .filter(|line| line.starts_with("FRAME_CHUNK\t"))
+            .map(|line| {
+                let f: Vec<_> = line.split('\t').collect();
+                (f[2].parse().unwrap(), f[3].parse().unwrap())
+            })
+            .collect();
+        let expected: Vec<_> = [1, 2, 3, -1, -2, -3]
+            .into_iter()
+            .flat_map(|frame| rows.iter().map(move |chunk| (frame, chunk.length)))
+            .collect();
+        assert_eq!(observed, expected);
     }
 }

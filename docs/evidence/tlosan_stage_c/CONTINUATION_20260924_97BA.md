@@ -6,6 +6,11 @@ Pinned NCBI source: 598d8ae6a72b923127ba2fbfaffd48e4c83bfbf4.
 Comparison tblastn binary SHA-256:
 e3956f1e107a30439d56c8f72fae4267a7d62ebcc16e4f99d4baf2bdf00402e0.
 This follows [the cf29e853 checkpoint](CONTINUATION_20260924_CF29.md).
+**Historical checkpoint:** the later
+[chunk continuation](CONTINUATION_20260924_2E60.md) supersedes the
+whole-frame scan and first-remaining-difference statements below.
+Those statements describe the state at commit `2e607cca`, not the
+current branch. Stage C remains open in both records.
 The public TBLASTN CLI still exits with the explicit Stage C-E unimplemented error.
 
 **Stage C remains open. D and E have not begun. This is not TBLASTN

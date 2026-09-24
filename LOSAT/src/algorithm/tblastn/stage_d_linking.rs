@@ -442,6 +442,50 @@ pub(super) fn link_preliminary_hsps(
     Ok(LinkedHspList { hsps, best_evalue })
 }
 
+// NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_hits.c:1385-1404,3071-3115,3404-3417;
+// c++/src/algo/blast/core/blast_hspstream.c:144-152,289-319
+// ```c
+// if (h1->hspcnt == 0 && h2->hspcnt == 0) return 0;
+// else if (h1->hspcnt == 0) return 1;
+// else if (h2->hspcnt == 0) return -1;
+// if (evalue1 < 1.0e-180 && evalue2 < 1.0e-180) return 0;
+// if ((retval = s_EvalueComp(h1->best_evalue, h2->best_evalue)) != 0)
+//     return retval;
+// if (h1->hsp_array[0]->score > h2->hsp_array[0]->score) return -1;
+// if (h1->hsp_array[0]->score < h2->hsp_array[0]->score) return 1;
+// return BLAST_CMP(h2->oid, h1->oid);
+// Blast_HSPResultsReverseSort(results);
+// *hsp_list_out = hit_list->hsplist_array[last_hsplist_index];
+// ```
+// The reverse-sort array is consumed from its end, yielding this comparator's
+// ascending best-E-value, descending score, descending OID order.
+#[allow(dead_code)] // Used by the internal TBLASTN composition result pipeline.
+pub(super) fn compare_preliminary_lists_for_kappa(
+    oid_a: i32,
+    a: &LinkedHspList,
+    oid_b: i32,
+    b: &LinkedHspList,
+) -> Ordering {
+    match (a.hsps.is_empty(), b.hsps.is_empty()) {
+        (true, true) => return Ordering::Equal,
+        (true, false) => return Ordering::Greater,
+        (false, true) => return Ordering::Less,
+        (false, false) => {}
+    }
+    let evalue = if a.best_evalue < 1.0e-180 && b.best_evalue < 1.0e-180 {
+        Ordering::Equal
+    } else if a.best_evalue < b.best_evalue {
+        Ordering::Less
+    } else if a.best_evalue > b.best_evalue {
+        Ordering::Greater
+    } else {
+        Ordering::Equal
+    };
+    evalue
+        .then_with(|| b.hsps[0].hsp.score.cmp(&a.hsps[0].hsp.score))
+        .then_with(|| oid_b.cmp(&oid_a))
+}
+
 // NCBI c++/src/algo/blast/core/blast_engine.c:643-676 and
 // c++/src/algo/blast/core/blast_hits.c:1976-2010:
 // cutoff = hit_params->prelim_evalue;   /* preliminary pass */
@@ -464,6 +508,63 @@ mod tests {
     use crate::stats::spouge::lookup_protein_gumbel_params;
     use crate::stats::tables::{lookup_protein_params_gapped, lookup_protein_params_ungapped};
     use std::fs;
+
+    // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_hits.c:1385-1404,3071-3115;
+    // c++/src/algo/blast/core/blast_hspstream.c:144-152,289-319
+    // ```c
+    // if (evalue1 < 1.0e-180 && evalue2 < 1.0e-180) return 0;
+    // if (h1->hsp_array[0]->score > h2->hsp_array[0]->score) return -1;
+    // return BLAST_CMP(h2->oid, h1->oid);
+    // ```
+    #[test]
+    fn preliminary_kappa_stream_comparator_uses_evalue_score_and_oid() {
+        let list = |evalue: f64, score: i32| LinkedHspList {
+            hsps: vec![LinkedHsp {
+                context: 0,
+                hsp: GappedHsp {
+                    frame: 1,
+                    score,
+                    q_start: 0,
+                    q_end: 1,
+                    q_gapped_start: 0,
+                    s_start: 0,
+                    s_end: 1,
+                    s_gapped_start: 0,
+                },
+                num: 1,
+                evalue,
+            }],
+            best_evalue: evalue,
+        };
+        assert_eq!(
+            compare_preliminary_lists_for_kappa(0, &list(1e-90, 10), 1, &list(2e-90, 100)),
+            Ordering::Less
+        );
+        assert_eq!(
+            compare_preliminary_lists_for_kappa(0, &list(1e-90, 100), 1, &list(1e-90, 90)),
+            Ordering::Less
+        );
+        assert_eq!(
+            compare_preliminary_lists_for_kappa(2, &list(1e-90, 100), 1, &list(1e-90, 100)),
+            Ordering::Less
+        );
+        assert_eq!(
+            compare_preliminary_lists_for_kappa(0, &list(2e-181, 100), 1, &list(1e-181, 90)),
+            Ordering::Less
+        );
+        let empty = LinkedHspList {
+            hsps: Vec::new(),
+            best_evalue: f64::MAX,
+        };
+        assert_eq!(
+            compare_preliminary_lists_for_kappa(0, &empty, 1, &list(1e-90, 10)),
+            Ordering::Greater
+        );
+        assert_eq!(
+            compare_preliminary_lists_for_kappa(0, &empty, 1, &empty),
+            Ordering::Equal
+        );
+    }
 
     // NCBI c++/src/algo/blast/core/link_hsps.c:1602-1810;
     // c++/src/algo/blast/core/blast_engine.c:870-906:

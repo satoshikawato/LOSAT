@@ -2,6 +2,8 @@
 
 Branch: `feature/tlosan-tblastn-v0.2.0`; Stage C fixed-input gate: [STAGE_C_GATE_20260924.md](../tlosan_stage_c/STAGE_C_GATE_20260924.md). Pinned NCBI source: `598d8ae6a72b923127ba2fbfaffd48e4c83bfbf4`. This is a **Stage D diagnostic checkpoint, not a Stage D pass**. The Rust TBLASTN path still accepts NCBI-recorded C-stage parameters as comparison inputs and the public CLI still reports unimplemented. No Stage E work is authorized by this evidence.
 
+**2026-09-25 multi-subject continuation:** [CHECKPOINT_MULTI_SUBJECT_STAGE_D_20260925.md](CHECKPOINT_MULTI_SUBJECT_STAGE_D_20260925.md) records the natural 13-subject Stage C→Kappa→heap function/input/order comparison, and the hard-SEG C→D connection. Stage D remains partial and Stage E remains blocked.
+
 **2026-09-25 call-state correction:** [CHECKPOINT_C_D_CALLSTATE_20260925.md](CHECKPOINT_C_D_CALLSTATE_20260925.md) records the CLI-calibrated code-32 API oracle, positive TotLen, initial cutoff 9, two preliminary HSPs and the natural Stage C→D focused tests. It supersedes the earlier code-32 single-HSP API interpretation. Stage D remains partial; Stage E has not started.
 
 **2026-09-25 continuation:** [CHECKPOINT_KAPPA_REDO_20260925.md](CHECKPOINT_KAPPA_REDO_20260925.md) records the translated get-range connection, function-level redo/score/identity/heap comparisons, and the comparison-only local code-32 API oracle. It supersedes the open Kappa boundary below; the integrated C→D path and Stage E remain incomplete.

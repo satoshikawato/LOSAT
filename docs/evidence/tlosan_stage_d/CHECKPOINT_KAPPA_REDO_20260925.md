@@ -2,6 +2,8 @@
 
 Branch: `feature/tlosan-tblastn-v0.2.0`. Started from `490ea5b8f117f952dee164551da9582e0c9e7f5d`; pinned NCBI source: `598d8ae6a72b923127ba2fbfaffd48e4c83bfbf4`. The [Stage C fixed-input gate](../tlosan_stage_c/STAGE_C_GATE_20260924.md) remains the accepted C boundary. **Stage D is partial and has not passed. Stage E has not started.** The public TBLASTN CLI still returns `TBLASTN local search is unimplemented (Stages C-E)`.
 
+**Further natural-input continuation:** [CHECKPOINT_MULTI_SUBJECT_STAGE_D_20260925.md](CHECKPOINT_MULTI_SUBJECT_STAGE_D_20260925.md) connects the 13-subject saved fixture through the internal Rust Kappa heap and connects hard-SEG Stage C to redo. It supersedes the all-subject gap stated later in this historical checkpoint; Stage D still has not passed.
+
 **Code-32 oracle correction:** [CHECKPOINT_C_D_CALLSTATE_20260925.md](CHECKPOINT_C_D_CALLSTATE_20260925.md) supersedes the code-32 API call-state and single-HSP claims below. The older API bundle used pairwise `dbscan_mode=false`, unlike the local `-subject` CLI. The CLI-calibrated oracle has positive TotLen, initial cutoff 9, and two preliminary HSPs (656 and 16).
 
 ## New function/input/order evidence

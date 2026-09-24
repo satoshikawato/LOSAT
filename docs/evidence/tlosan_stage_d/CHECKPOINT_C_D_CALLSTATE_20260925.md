@@ -16,7 +16,7 @@ The [C++ API oracle](tblastn_code32_local_oracle.cpp) now passes `dbscan_mode=tr
 
 ## Gate status and next work
 
-The corrected code-32 call state and the two focused natural C→D tests pass. The other retained local fixtures have not all been carried through the same Rust source-order D pipeline. The full subject/result heap path, natural positive postredo containment and heap replacement fixtures, result post-pipes and all outfmt 0/6/7 byte comparisons remain open. Resolve new differences against fresh comparison-only NCBI traces and the pinned source. Do not open the public CLI until C, D and all three Stage E formats pass; do not claim completion or certification from this checkpoint.
+The corrected code-32 call state and the two focused natural C→D tests pass. The other retained local fixtures have not all been carried through the same Rust source-order D pipeline. A subsequent [13-subject continuation](CHECKPOINT_MULTI_SUBJECT_STAGE_D_20260925.md) now connects one natural all-subject Stage C→Kappa→heap path and hard-SEG preliminary search to redo. The general runtime path, natural positive postredo containment and heap replacement fixtures if reached, result post-pipes and all outfmt 0/6/7 byte comparisons remain open. Resolve new differences against fresh comparison-only NCBI traces and the pinned source. Do not open the public CLI until C, D and all three Stage E formats pass; do not claim completion or certification from this checkpoint.
 
 Reproduce the corrected code-32 oracle with a new output directory:
 

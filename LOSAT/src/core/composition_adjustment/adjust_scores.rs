@@ -1291,6 +1291,45 @@ pub struct BlastAdjustScoresResult {
     pub lambda_ratio: f64,
 }
 
+// NCBI c++/src/algo/blast/composition_adjustment/composition_adjustment.c:61,1204-1248:
+// static const int kCompositionMargin = 20;
+// left = start; for (i = left; i > 0; i--) if (subject_data[i-1] == eStopChar)
+//     { if (i + kCompositionMargin < left) left = i + kCompositionMargin; break; }
+// if (i == 0) left = 0;
+// right = finish; for (i = right; i < length; i++)
+//     if (subject_data[i] == eStopChar)
+//     { if (i - kCompositionMargin > right) right = i - kCompositionMargin; break; }
+// if (i == length) right = length;
+#[allow(dead_code)] // TBLASTN calls this after its translated-range callback is ported.
+pub(crate) fn blast_get_composition_range(
+    subject_data: &[u8],
+    start: usize,
+    finish: usize,
+) -> Result<(usize, usize)> {
+    if start > finish || finish > subject_data.len() {
+        anyhow::bail!("invalid NCBI translated composition interval");
+    }
+    let mut left = 0;
+    for i in (1..=start).rev() {
+        if subject_data[i - 1] == 25 {
+            left = if i + 20 < start { i + 20 } else { start };
+            break;
+        }
+    }
+    let mut right = subject_data.len();
+    for i in finish..subject_data.len() {
+        if subject_data[i] == 25 {
+            right = if i.saturating_sub(20) > finish {
+                i - 20
+            } else {
+                finish
+            };
+            break;
+        }
+    }
+    Ok((left, right))
+}
+
 // NCBI reference: ncbi-blast/c++/src/algo/blast/composition_adjustment/composition_adjustment.c:1170-1194
 // ```c
 // void Blast_ReadAaComposition(Blast_AminoAcidComposition * composition,
@@ -2897,6 +2936,148 @@ mod tests {
     ) -> Result<f64> {
         compute_lambda_from_score_probs(score_probs, min_score, max_score, lambda0)
             .map_err(anyhow::Error::msg)
+    }
+
+    // NCBI composition_adjustment/composition_adjustment.c:1204-1248:
+    // if (i + kCompositionMargin < left) left = i + kCompositionMargin;
+    // if (i - kCompositionMargin > right) right = i - kCompositionMargin;
+    #[test]
+    fn translated_composition_range_honors_stop_margin_strict_boundaries() {
+        let mut data = vec![1u8; 100];
+        assert_eq!(
+            blast_get_composition_range(&data, 50, 60).unwrap(),
+            (0, 100)
+        );
+        data[20] = 25;
+        data[80] = 25;
+        assert_eq!(
+            blast_get_composition_range(&data, 50, 60).unwrap(),
+            (41, 60)
+        );
+        assert_eq!(
+            blast_get_composition_range(&data, 50, 50).unwrap(),
+            (41, 60)
+        );
+        data[29] = 25;
+        assert_eq!(
+            blast_get_composition_range(&data, 50, 50).unwrap(),
+            (50, 60)
+        );
+    }
+
+    // NCBI composition_adjustment/redo_alignment.c:1234-1254;
+    // composition_adjustment/composition_adjustment.c:1414-1530:
+    // Blast_AdjustScores(matrix, query_composition, query.length,
+    //                    &subject_composition, subject.length,
+    //                    scaledMatrixInfo, compo_adjust_mode,
+    //                    RE_pseudocounts, NRrecord, &matrix_adjust_rule, ...);
+    #[test]
+    fn pinned_tblastn_mode2_adjustment_rules_match_ncbi_call_inputs() {
+        for case in [
+            "seg_hard_query_20260924_default",
+            "multi_query_20260924_default",
+        ] {
+            let trace = std::fs::read_to_string(format!(
+                "{}/../docs/evidence/tlosan_stage_d/kappa_composition_matrix_scores_20260924/{case}.tsv",
+                env!("CARGO_MANIFEST_DIR")
+            ))
+            .unwrap();
+            let rows: Vec<_> = trace.lines().collect();
+            assert_eq!(rows.len() % 6, 0);
+            // NCBI core/blast_kappa.c:2229-2236:
+            // self->ungappedLambda = sbp->kbp_ideal->Lambda / scale_factor;
+            // Blast_Int4MatrixFromFreq(self->startMatrix, self->cols,
+            //                          self->startFreqRatios, self->ungappedLambda);
+            let matrix_row: Vec<_> = rows[1].split('\t').collect();
+            assert_eq!(matrix_row[0], "K_MATRIX");
+            let matrix_lambda: f64 = matrix_row[5].parse().unwrap();
+            let matrix_info = build_matrix_info(ScoringMatrix::Blosum62, matrix_lambda).unwrap();
+            let mut workspace = BlastCompositionWorkspace::new_blosum62();
+            for block in rows.chunks_exact(6) {
+                let call: Vec<_> = block[0].split('\t').collect();
+                let matrix: Vec<_> = block[1].split('\t').collect();
+                let result: Vec<_> = block[4].split('\t').collect();
+                assert_eq!(matrix[0], "K_MATRIX");
+                assert_eq!(matrix[1], call[1]);
+                assert_eq!(matrix[2], "28");
+                assert_eq!(matrix[3], "28");
+                assert_eq!(matrix[4], "0");
+                assert_eq!(
+                    matrix[5].parse::<f64>().unwrap().to_bits(),
+                    matrix_lambda.to_bits()
+                );
+                assert_eq!(matrix_info.start_matrix[1][1], matrix[6].parse().unwrap());
+                assert_eq!(matrix_info.start_matrix[1][16], matrix[7].parse().unwrap());
+                assert_eq!(matrix_info.start_matrix[22][22], matrix[8].parse().unwrap());
+                assert_eq!(call[0], "K_COMP_CALL");
+                assert_eq!(call[4], "2");
+                assert_eq!(call[5], "20");
+                assert_eq!(result[0], "K_COMP_RESULT");
+                assert_eq!(call[1], result[1]);
+                assert_eq!(result[2], "0");
+                let compositions: Vec<_> = block[2..4]
+                    .iter()
+                    .enumerate()
+                    .map(|(idx, row)| {
+                        let fields: Vec<_> = row.split('\t').collect();
+                        assert_eq!(fields[0], "K_COMP");
+                        assert_eq!(fields[1], call[1]);
+                        assert_eq!(fields[2], if idx == 0 { "query" } else { "subject" });
+                        let mut comp = BlastAminoAcidComposition::empty();
+                        comp.num_true_amino_acids = fields[3].parse().unwrap();
+                        assert_eq!(fields.len(), 32);
+                        for (value, hex) in comp.prob.iter_mut().zip(&fields[4..]) {
+                            *value = f64::from_bits(u64::from_str_radix(hex, 16).unwrap());
+                        }
+                        comp
+                    })
+                    .collect();
+                let adjusted = blast_adjust_scores(
+                    &matrix_info,
+                    &compositions[0],
+                    call[2].parse().unwrap(),
+                    &compositions[1],
+                    call[3].parse().unwrap(),
+                    BlastCompoAdjustMode::CompositionMatrixAdjust,
+                    call[6].parse().unwrap(),
+                    &mut workspace,
+                    test_compute_lambda_from_score_probs,
+                )
+                .unwrap()
+                .unwrap();
+                assert_eq!(
+                    adjusted.matrix_adjust_rule as i32,
+                    result[3].parse().unwrap(),
+                    "{case}: call {}",
+                    call[1]
+                );
+                assert_eq!(
+                    adjusted.lambda_ratio.to_bits(),
+                    result[4].parse::<f64>().unwrap().to_bits(),
+                    "{case}: call {}",
+                    call[1]
+                );
+                let adjusted_row: Vec<_> = block[5].split('\t').collect();
+                assert_eq!(adjusted_row[0], "K_ADJUSTED");
+                assert_eq!(adjusted_row[1], call[1]);
+                assert_eq!(adjusted_row.len(), 2 + 28 * 28);
+                for (index, (observed, expected)) in adjusted
+                    .adjusted_matrix
+                    .scores
+                    .iter()
+                    .flatten()
+                    .zip(&adjusted_row[2..])
+                    .enumerate()
+                {
+                    assert_eq!(
+                        *observed,
+                        expected.parse::<i32>().unwrap(),
+                        "{case}: call {}, matrix index {index}",
+                        call[1]
+                    );
+                }
+            }
+        }
     }
 
     #[test]

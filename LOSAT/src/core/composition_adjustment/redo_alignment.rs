@@ -16,8 +16,8 @@ use crate::utils::genetic_code::GeneticCode;
 use crate::utils::matrix::{aa_char_to_ncbistdaa, BLASTAA_SIZE};
 
 use super::adjust_scores::{
-    blast_adjust_scores, read_aa_composition, AdjustedProteinMatrix, BlastAminoAcidComposition,
-    BlastCompositionWorkspace, BlastMatrixInfo,
+    blast_adjust_scores, blast_get_composition_range, read_aa_composition, AdjustedProteinMatrix,
+    BlastAminoAcidComposition, BlastCompositionWorkspace, BlastMatrixInfo,
 };
 
 #[inline]
@@ -1191,6 +1191,27 @@ fn translated_subject_window_sequence(
     Ok(translated)
 }
 
+// NCBI c++/src/algo/blast/composition_adjustment/redo_alignment.c:906-938:
+// start = align->matchStart - range->begin;
+// end = align->matchEnd - range->begin;
+// Blast_GetCompositionRange(&left, &right, data, length, start, end);
+// Blast_ReadAaComposition(composition, alphsize, &data[left], right-left);
+#[allow(dead_code)] // TBLASTN enters this after its translated-range callback is connected.
+fn translated_subject_composition(
+    translation: &[u8],
+    range: &BlastCompoSequenceRange,
+    align: &BlastCompoAlignment,
+) -> Result<BlastAminoAcidComposition> {
+    if translation.len() < 2 || translation[0] != 0 || translation[translation.len() - 1] != 0 {
+        bail!("NCBI translated subject data lacks sentinels");
+    }
+    let data = &translation[1..translation.len() - 1];
+    let start = usize::try_from(align.match_start - range.begin)?;
+    let finish = usize::try_from(align.match_end - range.begin)?;
+    let (left, right) = blast_get_composition_range(data, start, finish)?;
+    Ok(read_aa_composition(&data[left..right]))
+}
+
 // NCBI reference: ncbi-blast/c++/src/algo/blast/composition_adjustment/redo_alignment.c:738-787
 // ```c
 // static int
@@ -2146,6 +2167,45 @@ mod tests {
                     observed_hex, expected_hex,
                     "{case}: {:?}",
                     window.subject_range
+                );
+            }
+            // NCBI composition_adjustment/redo_alignment.c:906-938:
+            // Blast_GetCompositionRange(&left, &right, data, length, start, end);
+            // Blast_ReadAaComposition(composition, alphsize, &data[left], right-left);
+            let first_window = &actual[0];
+            let first_align = first_window.align.as_deref().unwrap();
+            let translated = translated_subject_window_sequence(
+                &subject_nt,
+                &first_window.subject_range,
+                &genetic_code,
+            )
+            .unwrap();
+            let observed = translated_subject_composition(
+                &translated,
+                &first_window.subject_range,
+                first_align,
+            )
+            .unwrap();
+            let composition_trace = std::fs::read_to_string(format!(
+                "{}/../docs/evidence/tlosan_stage_d/kappa_composition_matrix_scores_20260924/{case}.tsv",
+                env!("CARGO_MANIFEST_DIR")
+            ))
+            .unwrap();
+            let expected_row = composition_trace
+                .lines()
+                .find(|line| line.starts_with("K_COMP\t0\tsubject\t"))
+                .unwrap();
+            let fields: Vec<_> = expected_row.split('\t').collect();
+            assert_eq!(
+                observed.num_true_amino_acids,
+                fields[3].parse().unwrap(),
+                "{case}"
+            );
+            for (index, (value, bits)) in observed.prob.iter().zip(&fields[4..]).enumerate() {
+                assert_eq!(
+                    value.to_bits(),
+                    u64::from_str_radix(bits, 16).unwrap(),
+                    "{case}: composition index {index}"
                 );
             }
         }

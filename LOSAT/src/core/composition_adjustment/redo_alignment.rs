@@ -12,7 +12,8 @@ use std::ptr::NonNull;
 
 use crate::common::GapEditOp;
 use crate::core::blast_stat::composition::compute_lambda_from_score_probs;
-use crate::utils::matrix::BLASTAA_SIZE;
+use crate::utils::genetic_code::GeneticCode;
+use crate::utils::matrix::{aa_char_to_ncbistdaa, BLASTAA_SIZE};
 
 use super::adjust_scores::{
     blast_adjust_scores, read_aa_composition, AdjustedProteinMatrix, BlastAminoAcidComposition,
@@ -1082,6 +1083,114 @@ fn subject_compare_windows(w1: &WindowInfo, w2: &WindowInfo) -> Ordering {
     w1.query_range.context.cmp(&w2.query_range.context)
 }
 
+// NCBI c++/src/algo/blast/composition_adjustment/redo_alignment.c:80,626-751:
+// static const int kWindowBorder = 200;
+// translated_length = (sequence_length - ABS(frame) + 1)/3;
+// begin = MAX(0, align->matchStart - border);
+// end = MIN(translated_length, align->matchEnd + border);
+// windows[k] = s_WindowInfoNew(begin, end, frame, 0,
+//                              query_length, query_index, align_copy);
+// qsort(windows, hspcnt, sizeof(s_WindowInfo*), s_LocationCompareWindows);
+// if (same subject/query context && window->subject_range.end >=
+//     nextWindow->subject_range.begin) s_WindowInfoJoin(nextWindow, &windows[k]);
+// s_DistinctAlignmentsSort(&windows[k]->align, windows[k]->hspcnt);
+// qsort(windows, *nWindows, sizeof(s_WindowInfo*), s_SubjectCompareWindows);
+#[allow(dead_code)] // Entered by TBLASTN Kappa only after translated callbacks are ported.
+fn windows_from_translated_aligns(
+    alignments: &Option<Box<BlastCompoAlignment>>,
+    query_lengths: &[i32],
+    subject_nt_length: i32,
+    border: i32,
+) -> Result<Vec<WindowInfo>> {
+    let mut windows = Vec::with_capacity(distinct_alignments_length(alignments));
+    let mut current = alignments.as_deref();
+    while let Some(align) = current {
+        let query_index = usize::try_from(align.query_index)
+            .map_err(|_| anyhow::anyhow!("NCBI translated window query index is negative"))?;
+        let query_length = *query_lengths
+            .get(query_index)
+            .ok_or_else(|| anyhow::anyhow!("NCBI translated window query index is missing"))?;
+        let translated_length = (subject_nt_length - align.frame.abs() + 1) / 3;
+        windows.push(window_info_new(
+            (align.match_start - border).max(0),
+            (align.match_end + border).min(translated_length),
+            align.frame,
+            0,
+            query_length,
+            align.query_index,
+            Some(alignment_copy(align)),
+        ));
+        current = align.next.as_deref();
+    }
+    windows.sort_unstable_by(location_compare_windows);
+    let mut input = windows.into_iter().peekable();
+    let mut joined = Vec::new();
+    while let Some(window) = input.next() {
+        if let Some(next) = input.peek_mut() {
+            if window.subject_range.context == next.subject_range.context
+                && window.query_range.context == next.query_range.context
+                && window.subject_range.end >= next.subject_range.begin
+            {
+                window_info_join(next, window);
+                continue;
+            }
+        }
+        joined.push(window);
+    }
+    for window in &mut joined {
+        distinct_alignments_sort(&mut window.align);
+    }
+    joined.sort_unstable_by(subject_compare_windows);
+    Ok(joined)
+}
+
+// NCBI c++/src/algo/blast/core/blast_kappa.c:1504-1525;
+// c++/src/algo/blast/core/blast_util.c:428-454,1141-1205:
+// translation_start = frame > 0 ? 3 * range->begin
+//     : self->length - 3 * range->end + frame + 1;
+// num_nucleotides = 3 * (range->end - range->begin) + ABS(frame) - 1;
+// Blast_GetPartialTranslation(na_sequence + translation_start,
+//                             num_nucleotides, frame, genetic_code, ...);
+// BLAST_GetTranslation selects the strand and starts at ABS(frame)-1;
+// prot_seq[0] = NULLB; prot_seq[index_prot] = NULLB;
+#[allow(dead_code)] // Used after the TBLASTN translated-range callback is connected.
+fn translated_subject_window_sequence(
+    subject_nt: &[u8],
+    range: &BlastCompoSequenceRange,
+    genetic_code: &GeneticCode,
+) -> Result<Vec<u8>> {
+    let frame = range.context;
+    if frame == 0 || frame.abs() > 3 || range.begin < 0 || range.end < range.begin {
+        bail!("invalid NCBI translated subject window");
+    }
+    let full_length = i32::try_from(subject_nt.len())?;
+    let start = if frame > 0 {
+        3 * range.begin
+    } else {
+        full_length - 3 * range.end + frame + 1
+    };
+    let nucleotide_length = 3 * (range.end - range.begin) + frame.abs() - 1;
+    if start < 0 || nucleotide_length < 0 || start + nucleotide_length > full_length {
+        bail!("NCBI translated subject window exceeds nucleotide sequence");
+    }
+    let segment = &subject_nt[start as usize..(start + nucleotide_length) as usize];
+    let strand = if frame > 0 {
+        segment.to_vec()
+    } else {
+        bio::alphabets::dna::revcomp(segment)
+    };
+    let mut translated = Vec::with_capacity((range.end - range.begin) as usize + 2);
+    translated.push(0);
+    for codon in strand[(frame.abs() - 1) as usize..].chunks_exact(3) {
+        translated.push(aa_char_to_ncbistdaa(genetic_code.get(codon)));
+    }
+    translated.push(0);
+    if translated.len() != (range.end - range.begin) as usize + 2 {
+        bail!("NCBI translated subject window length differs");
+    }
+    Ok(translated)
+}
+
 // NCBI reference: ncbi-blast/c++/src/algo/blast/composition_adjustment/redo_alignment.c:738-787
 // ```c
 // static int
@@ -1918,6 +2027,129 @@ pub(crate) fn blast_redo_one_match_with_workspace<'seq>(
 mod tests {
     use super::BlastCompoAlignmentContext::PreliminaryHspIndex;
     use super::*;
+
+    // NCBI c++/src/algo/blast/composition_adjustment/redo_alignment.c:80,644-751;
+    // c++/src/algo/blast/core/blast_kappa.c:1498-1525:
+    // begin = MAX(0, align->matchStart - border);
+    // end = MIN(translated_length, align->matchEnd + border);
+    // num_nucleotides = 3*(range->end - range->begin) + ABS(frame) - 1;
+    // Compare ordered joined Rust windows to the pinned partial-translation calls.
+    #[test]
+    fn translated_kappa_windows_match_ncbi_partial_translation_ranges() {
+        for (case, query_lengths) in [
+            ("seg_hard_query_20260924_default", vec![160]),
+            ("multi_query_20260924_default", vec![120, 70, 120]),
+        ] {
+            let trace = std::fs::read_to_string(format!(
+                "{}/../docs/evidence/tlosan_stage_d/kappa_mode2_20260924/{case}.tsv",
+                env!("CARGO_MANIFEST_DIR")
+            ))
+            .unwrap();
+            let enter = trace
+                .lines()
+                .find(|line| line.starts_with("K_CALL\t0\tredo_enter\t"))
+                .unwrap();
+            let enter_fields: Vec<_> = enter.split('\t').collect();
+            let subject_nt_length: i32 = enter_fields[7].parse().unwrap();
+            let input_rows: Vec<_> = trace
+                .lines()
+                .filter(|line| line.starts_with("K_ALIGN\t0\tincoming\t"))
+                .collect();
+            assert_eq!(input_rows.len(), enter_fields[3].parse::<usize>().unwrap());
+            let mut input: Option<Box<BlastCompoAlignment>> = None;
+            for row in input_rows.into_iter().rev() {
+                let f: Vec<_> = row.split('\t').collect();
+                assert_eq!(f[6], "-1");
+                input = Some(Box::new(BlastCompoAlignment {
+                    score: f[5].parse().unwrap(),
+                    matrix_adjust_rule: EMatrixAdjustRule::DontAdjustMatrix,
+                    query_index: f[7].parse().unwrap(),
+                    query_start: f[8].parse().unwrap(),
+                    query_end: f[9].parse().unwrap(),
+                    match_start: f[10].parse().unwrap(),
+                    match_end: f[11].parse().unwrap(),
+                    frame: f[12].parse().unwrap(),
+                    context: None,
+                    next: input,
+                }));
+            }
+            let actual =
+                windows_from_translated_aligns(&input, &query_lengths, subject_nt_length, 200)
+                    .unwrap();
+            let mut expected = Vec::new();
+            let mut expected_translation = Vec::new();
+            let mut pending_translation = false;
+            for row in trace.lines() {
+                if row.starts_with("K_CALL\t0\tredo_return\t") {
+                    break;
+                }
+                if row.starts_with("K_TRANSLATED\t") {
+                    if pending_translation {
+                        expected_translation.push(row.split('\t').nth(2).unwrap().to_string());
+                        pending_translation = false;
+                    }
+                    continue;
+                }
+                if !row.contains("\tpartial_translation\t") {
+                    continue;
+                }
+                let f: Vec<_> = row.split('\t').collect();
+                assert_eq!(f[5], "0");
+                let value = (
+                    f[3].parse::<i32>().unwrap(),
+                    f[4].parse::<i32>().unwrap(),
+                    f[6].parse::<i32>().unwrap(),
+                );
+                if expected.last() != Some(&value) {
+                    expected.push(value);
+                    pending_translation = true;
+                }
+            }
+            let observed: Vec<_> = actual
+                .iter()
+                .map(|window| {
+                    let aa_length = window.subject_range.end - window.subject_range.begin;
+                    (
+                        3 * aa_length + window.subject_range.context.abs() - 1,
+                        window.subject_range.context,
+                        aa_length,
+                    )
+                })
+                .collect();
+            assert_eq!(observed, expected, "{case}");
+            assert_eq!(expected_translation.len(), actual.len(), "{case}");
+            let subject_fasta = std::fs::read_to_string(format!(
+                "{}/../docs/evidence/tlosan_stage_c/{}/subjects.fna",
+                env!("CARGO_MANIFEST_DIR"),
+                case.strip_suffix("_default").unwrap()
+            ))
+            .unwrap();
+            let subject_nt: Vec<u8> = subject_fasta
+                .lines()
+                .filter(|line| !line.starts_with('>'))
+                .flat_map(|line| line.bytes())
+                .collect();
+            assert_eq!(subject_nt.len(), subject_nt_length as usize, "{case}");
+            let genetic_code = GeneticCode::from_id(1);
+            for (window, expected_hex) in actual.iter().zip(expected_translation) {
+                let translated = translated_subject_window_sequence(
+                    &subject_nt,
+                    &window.subject_range,
+                    &genetic_code,
+                )
+                .unwrap();
+                let observed_hex = translated[1..translated.len() - 1]
+                    .iter()
+                    .map(|value| format!("{value:02x}"))
+                    .collect::<String>();
+                assert_eq!(
+                    observed_hex, expected_hex,
+                    "{case}: {:?}",
+                    window.subject_range
+                );
+            }
+        }
+    }
 
     fn make_align(
         score: i32,

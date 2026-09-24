@@ -548,7 +548,7 @@ mod tests {
 
         let root = concat!(
             env!("CARGO_MANIFEST_DIR"),
-            "/../docs/evidence/tlosan_stage_d/code32_local_api_20260925_full"
+            "/../docs/evidence/tlosan_stage_d/code32_local_api_20260925_cli_calibrated"
         );
         let stage_a = concat!(
             env!("CARGO_MANIFEST_DIR"),
@@ -570,12 +570,40 @@ mod tests {
         assert_eq!((query.len(), subject_nt.len()), (120, 360));
         let trace = std::fs::read_to_string(format!("{root}/code32.trace")).unwrap();
         let mode = std::fs::read_to_string(format!("{root}/code32_mode2.trace")).unwrap();
-        let prelim: Vec<_> = trace
+        // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_kappa.c:3577-3595
+        // ```c
+        // s_ResultHspToDistinctAlign(incoming_align_set, numAligns,
+        //     localMatch->hsp_array, localMatch->hspcnt, ...);
+        // incoming_aligns = incoming_align_set[frame_index];
+        // ```
+        let prelim_rows: Vec<_> = trace
             .lines()
-            .find(|line| line.starts_with("K_TRACE_PRELIM\t"))
-            .unwrap()
-            .split('\t')
+            .filter(|line| line.starts_with("K_TRACE_PRELIM\t"))
             .collect();
+        let ncbi_preliminary: Vec<GappedHsp> = prelim_rows
+            .iter()
+            .enumerate()
+            .map(|(index, row)| {
+                let f: Vec<_> = row.split('\t').collect();
+                assert_eq!(f[2].parse::<usize>().unwrap(), index);
+                assert_eq!(f[4], "0");
+                GappedHsp {
+                    frame: f[5].parse().unwrap(),
+                    score: f[3].parse().unwrap(),
+                    q_start: f[6].parse().unwrap(),
+                    q_end: f[7].parse().unwrap(),
+                    q_gapped_start: f[8].parse().unwrap(),
+                    s_start: f[9].parse().unwrap(),
+                    s_end: f[10].parse().unwrap(),
+                    s_gapped_start: f[11].parse().unwrap(),
+                }
+            })
+            .collect();
+        assert_eq!(ncbi_preliminary.len(), 2);
+        assert_eq!(
+            ncbi_preliminary.iter().map(|h| h.score).collect::<Vec<_>>(),
+            [656, 16]
+        );
         let call: Vec<_> = trace
             .lines()
             .find(|line| line.starts_with("K_TRACE_ENTER\t"))
@@ -600,24 +628,12 @@ mod tests {
             .unwrap()
             .split('\t')
             .collect();
-        assert_eq!(redo[3], "1");
+        assert_eq!(redo[3], "2");
         assert_eq!(redo[6], "1");
         assert_eq!(redo[7], "360");
         assert_eq!(redo[8], "2");
         assert_eq!(redo[9], "1");
         assert_eq!(redo[11], "288");
-        assert_eq!(prelim[3], "656");
-        assert_eq!(prelim[5], "1");
-        let hsp = GappedHsp {
-            frame: prelim[5].parse().unwrap(),
-            score: prelim[3].parse().unwrap(),
-            q_start: prelim[6].parse().unwrap(),
-            q_end: prelim[7].parse().unwrap(),
-            q_gapped_start: prelim[8].parse().unwrap(),
-            s_start: prelim[9].parse().unwrap(),
-            s_end: prelim[10].parse().unwrap(),
-            s_gapped_start: prelim[11].parse().unwrap(),
-        };
         let gapped = lookup_protein_params_gapped(ScoringMatrix::Blosum62);
         let ungapped = lookup_protein_params_ungapped(ScoringMatrix::Blosum62);
         let gumbel = lookup_protein_gumbel_params(
@@ -648,6 +664,87 @@ mod tests {
                 composition_based_stats: 2,
             },
         );
+        // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_engine.c:870-899;
+        // ncbi-blast/c++/src/algo/blast/core/blast_kappa.c:3577-3595
+        // ```c
+        // status = BLAST_LinkHsps(program_number, hsp_list_out, ...);
+        // status = s_Blast_HSPListReapByPrelimEvalue(hsp_list_out, hit_params);
+        // s_ResultHspToDistinctAlign(incoming_align_set, numAligns,
+        //     localMatch->hsp_array, localMatch->hspcnt, ...);
+        // ```
+        use crate::algorithm::tblastn::search_gapped::{
+            preliminary_protein_hsps_in_ncbi_order, PreliminaryProfile,
+        };
+        use crate::utils::seg::SegParams;
+        let search_query: Vec<_> = query_fasta
+            .lines()
+            .filter(|line| !line.starts_with('>'))
+            .flat_map(|line| line.bytes())
+            .collect();
+        let word_xdrop = [parameters.cutoffs[0].word_xdrop];
+        let word_cutoff = [parameters.cutoffs[0].word_cutoff];
+        let hit_cutoff = [parameters.cutoffs[0].hit_cutoff];
+        let seg = SegParams::default();
+        let profile = PreliminaryProfile {
+            seg: Some(&seg),
+            soft_masking: false,
+            threshold: 13,
+            window: 40,
+            word_xdrop: &word_xdrop,
+            word_cutoff: &word_cutoff,
+            mask_lowercase: false,
+            matrix: ScoringMatrix::Blosum62,
+            word_size: 3,
+            gap_open: 11,
+            gap_extend: 1,
+            gap_xdrop: 38,
+            gapped_cutoff: &hit_cutoff,
+            hsp_num_max: i32::MAX as usize,
+        };
+        let (stage_c_hsps, _) =
+            preliminary_protein_hsps_in_ncbi_order(&[&search_query], &subject_nt, 32, profile)
+                .unwrap();
+        assert_eq!(
+            stage_c_hsps,
+            ncbi_preliminary
+                .iter()
+                .copied()
+                .map(|hsp| (0, hsp))
+                .collect::<Vec<_>>()
+        );
+        let mut preliminary_linked = link_preliminary_hsps(
+            &stage_c_hsps,
+            &[query.len() as i32],
+            &parameters.lengths,
+            subject_nt.len() as i32,
+            &[gapped],
+            &gumbel,
+            parameters.link.as_ref().unwrap(),
+        )
+        .unwrap();
+        reap_by_evalue(&mut preliminary_linked, parameters.prelim_evalue);
+        assert_eq!(preliminary_linked.hsps.len(), 2);
+        let preliminary_hsps: Vec<_> = preliminary_linked
+            .hsps
+            .iter()
+            .map(|linked| linked.hsp)
+            .collect();
+        assert_eq!(preliminary_hsps, ncbi_preliminary);
+        let d_trace = std::fs::read_to_string(format!("{root}/code32_d.trace")).unwrap();
+        let linked_rows: Vec<_> = d_trace
+            .lines()
+            .filter(|line| line.starts_with("D_HSP\t0\tlink_after\t"))
+            .collect();
+        assert_eq!(linked_rows.len(), preliminary_linked.hsps.len());
+        for (linked, row) in preliminary_linked.hsps.iter().zip(linked_rows) {
+            let f: Vec<_> = row.split('\t').collect();
+            assert_eq!(linked.hsp.score, f[10].parse().unwrap());
+            assert_eq!(linked.num, f[12].parse().unwrap());
+            assert_eq!(
+                linked.evalue.to_bits(),
+                f[13].parse::<f64>().unwrap().to_bits()
+            );
+        }
         let query_info = BlastCompoQueryInfo {
             origin: 0,
             seq: BlastCompoSequenceData::from_ncbistdaa(&query),
@@ -696,7 +793,7 @@ mod tests {
             std::fs::read_to_string(format!("{root}/code32_composition.trace")).unwrap();
         let query_composition = read_aa_composition(&query);
         for which in ["query", "subject"] {
-            let prefix = format!("K_COMP\t0\t{which}\t");
+            let prefix = format!("K_COMP\t1\t{which}\t");
             let row: Vec<_> = comp_trace
                 .lines()
                 .find(|line| line.starts_with(&prefix))
@@ -727,7 +824,7 @@ mod tests {
         .unwrap();
         let result: Vec<_> = comp_trace
             .lines()
-            .find(|line| line.starts_with("K_COMP_RESULT\t0\t"))
+            .find(|line| line.starts_with("K_COMP_RESULT\t1\t"))
             .unwrap()
             .split('\t')
             .collect();
@@ -741,7 +838,7 @@ mod tests {
         );
         let matrix: Vec<_> = comp_trace
             .lines()
-            .find(|line| line.starts_with("K_ADJUSTED\t0\t"))
+            .find(|line| line.starts_with("K_ADJUSTED\t1\t"))
             .unwrap()
             .split('\t')
             .collect();
@@ -758,7 +855,7 @@ mod tests {
         let mut scratch = GapAlignScratch::new();
         let mut workspace = BlastCompositionWorkspace::new_blosum62();
         let redone = redo_preliminary_match(
-            &[hsp],
+            &preliminary_hsps,
             0,
             &[query_info],
             &subject_nt,
@@ -966,6 +1063,83 @@ mod tests {
                 composition_based_stats: 2,
             },
         );
+        // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_engine.c:870-899;
+        // ncbi-blast/c++/src/algo/blast/core/blast_kappa.c:3577-3595
+        // ```c
+        // status = BLAST_LinkHsps(program_number, hsp_list_out, ...);
+        // status = s_Blast_HSPListReapByPrelimEvalue(hsp_list_out, hit_params);
+        // s_ResultHspToDistinctAlign(incoming_align_set, numAligns,
+        //     localMatch->hsp_array, localMatch->hspcnt, ...);
+        // incoming_aligns = incoming_align_set[frame_index];
+        // ```
+        // Exercise the natural Stage C output through the same preliminary
+        // link/reap before passing its retained HSPs to Kappa.
+        use crate::algorithm::tblastn::search_gapped::{
+            preliminary_protein_hsps_in_ncbi_order, PreliminaryProfile,
+        };
+        use crate::utils::seg::SegParams;
+        let word_xdrop: Vec<_> = parameters.cutoffs.iter().map(|p| p.word_xdrop).collect();
+        let word_cutoff: Vec<_> = parameters.cutoffs.iter().map(|p| p.word_cutoff).collect();
+        let hit_cutoff: Vec<_> = parameters.cutoffs.iter().map(|p| p.hit_cutoff).collect();
+        let seg = SegParams::default();
+        let profile = PreliminaryProfile {
+            seg: Some(&seg),
+            soft_masking: false,
+            threshold: 13,
+            window: 40,
+            word_xdrop: &word_xdrop,
+            word_cutoff: &word_cutoff,
+            mask_lowercase: false,
+            matrix: ScoringMatrix::Blosum62,
+            word_size: 3,
+            gap_open: 11,
+            gap_extend: 1,
+            gap_xdrop: 38,
+            gapped_cutoff: &hit_cutoff,
+            hsp_num_max: i32::MAX as usize,
+        };
+        // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_setup.c:614-625;
+        // ncbi-blast/c++/src/algo/blast/core/blast_engine.c:484-525
+        // ```c
+        // BlastSetUp_MaskQuery(query_blk, ...);
+        // WordFinder(..., query, ...);
+        // ```
+        // Stage C encodes FASTA protein bytes for lookup; query_infos above
+        // hold the NCBISTDAA bytes consumed by Kappa.
+        let mut search_queries: Vec<Vec<u8>> = Vec::new();
+        for line in query_fasta.lines() {
+            if line.starts_with('>') {
+                search_queries.push(Vec::new());
+            } else {
+                search_queries.last_mut().unwrap().extend(line.bytes());
+            }
+        }
+        let query_refs: Vec<_> = search_queries.iter().map(Vec::as_slice).collect();
+        let (stage_c_hsps, _) =
+            preliminary_protein_hsps_in_ncbi_order(&query_refs, &subject_nt, 1, profile).unwrap();
+        assert_eq!(stage_c_hsps.len(), 21);
+        let mut preliminary_linked = link_preliminary_hsps(
+            &stage_c_hsps,
+            &query_lengths,
+            &parameters.lengths,
+            subject_nt.len() as i32,
+            &[gapped; 3],
+            &gumbel,
+            parameters.link.as_ref().unwrap(),
+        )
+        .unwrap();
+        reap_by_evalue(&mut preliminary_linked, parameters.prelim_evalue);
+        assert_eq!(preliminary_linked.hsps.len(), 20);
+        let stage_c_by_query: Vec<Vec<GappedHsp>> = (0..queries.len())
+            .map(|context| {
+                preliminary_linked
+                    .hsps
+                    .iter()
+                    .filter(|linked| linked.context == context)
+                    .map(|linked| linked.hsp)
+                    .collect()
+            })
+            .collect();
         let mut post_link = parameters.link.unwrap();
         post_link.cutoff_small_gap = 0;
         let redo_rows: Vec<_> = mode
@@ -999,6 +1173,16 @@ mod tests {
                     s_gapped_start: f[11].parse().unwrap(),
                 });
             }
+            // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_kappa.c:3577-3595
+            // ```c
+            // s_ResultHspToDistinctAlign(incoming_align_set, numAligns,
+            //     localMatch->hsp_array, localMatch->hspcnt, ...);
+            // incoming_aligns = incoming_align_set[frame_index];
+            // ```
+            // Compare all saved incoming fields, then redo the HSPs computed
+            // by Rust Stage C rather than substituting the trace as input.
+            assert_eq!(stage_c_by_query[redo_index], preliminary);
+            let preliminary = stage_c_by_query[redo_index].clone();
             let context = query_context.unwrap();
             assert_eq!(context, redo_index as i32);
             let first_call = call_trace
@@ -1381,21 +1565,38 @@ mod tests {
                 .map(|pair| u8::from_str_radix(std::str::from_utf8(pair).unwrap(), 16).unwrap())
                 .collect()
         }
-        for case in [
-            "seg_hard_query_20260924_default",
-            "multi_query_20260924_default",
+        // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_kappa.c:1896-1957;
+        // composition_adjustment/redo_alignment.c:1219-1254
+        // ```c
+        // status = BLAST_GappedAlignmentWithTraceback(..., &fence_hit);
+        // Blast_AdjustScores(matrix, query_composition, ..., &subject_composition,
+        //     ..., compo_adjust_mode, ...);
+        // ```
+        // Include both code-32 calls in the CLI-calibrated local-subject
+        // oracle, including the weak alignment removed after redo.
+        for (case, trace_path, matrix_path) in [
+            (
+                "seg_hard_query_20260924_default",
+                "kappa_traceback_20260924/seg_hard_query_20260924_default.tsv",
+                "kappa_composition_matrix_scores_20260924/seg_hard_query_20260924_default.tsv",
+            ),
+            (
+                "multi_query_20260924_default",
+                "kappa_traceback_20260924/multi_query_20260924_default.tsv",
+                "kappa_composition_matrix_scores_20260924/multi_query_20260924_default.tsv",
+            ),
+            (
+                "code32_local_subject",
+                "code32_local_api_20260925_cli_calibrated/code32.trace",
+                "code32_local_api_20260925_cli_calibrated/code32_composition.trace",
+            ),
         ] {
             let root = format!(
                 "{}/../docs/evidence/tlosan_stage_d",
                 env!("CARGO_MANIFEST_DIR")
             );
-            let trace =
-                std::fs::read_to_string(format!("{root}/kappa_traceback_20260924/{case}.tsv"))
-                    .unwrap();
-            let matrix_trace = std::fs::read_to_string(format!(
-                "{root}/kappa_composition_matrix_scores_20260924/{case}.tsv"
-            ))
-            .unwrap();
+            let trace = std::fs::read_to_string(format!("{root}/{trace_path}")).unwrap();
+            let matrix_trace = std::fs::read_to_string(format!("{root}/{matrix_path}")).unwrap();
             let matrices: Vec<_> = matrix_trace
                 .lines()
                 .filter(|line| line.starts_with("K_ADJUSTED\t"))

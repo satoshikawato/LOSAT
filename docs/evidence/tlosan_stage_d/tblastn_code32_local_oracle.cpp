@@ -139,10 +139,16 @@ int main(int argc, char** argv) {
     // NCBI c++/src/algo/blast/blastinput/blast_args.cpp:1048-1056:
     //   opt.SetDbGeneticCode(args[kArgDbGeneticCode].AsInteger());
     options->SetDbGeneticCode(code);
-    // NCBI c++/src/app/blast/tblastn_app.cpp:189-193,287-291:
-    //   InitializeSubject(db_args, m_OptsHndl, ..., db_adapter, scope);
-    //   CLocalBlast lcl_blast(query_factory, m_OptsHndl, db_adapter);
-    CRef<CLocalDbAdapter> db(new CLocalDbAdapter(sf, options));
+    // NCBI c++/src/app/blast/blast_app_util.cpp:203-210;
+    // c++/src/algo/blast/api/seqsrc_multiseq.cpp:175-180,290-297;
+    // c++/src/algo/blast/core/blast_engine.c:1407,1434-1443:
+    // ```c++
+    // db_adapter.Reset(new CLocalDbAdapter(subjects, opts_hndl, true));
+    // if (dbscan_mode) m_iTotalLength += (Int8) (*iter)->length;
+    // ```
+    // The CLI's local -subject path uses dbscan_mode=true. Its positive
+    // TotLen skips BLAST_OneSubjectUpdateParameters for this fixture.
+    CRef<CLocalDbAdapter> db(new CLocalDbAdapter(sf, options, true));
     BlastSeqSrc* local_source = db->MakeSeqSrc();
     selected_genetic_code = GenCodeSingletonFind(code);
     if (!selected_genetic_code) throw std::runtime_error("missing registered code");

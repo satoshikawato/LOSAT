@@ -1,0 +1,3 @@
+# Superseded comparison state
+
+This retained diagnostic bundle used the NCBI C++ API adapter in its default pairwise `dbscan_mode=false`. The subject source returned `BlastSeqSrcGetTotLen=0`; NCBI ran `BLAST_OneSubjectUpdateParameters` and searched with cutoff 19. The pinned local `-subject` CLI uses `dbscan_mode=true`, positive TotLen and initial cutoff 9 on this fixture. The code-1 final output happened to agree, but this bundle is not a code-32 local `-subject` oracle. Use [the CLI-calibrated bundle](../code32_local_api_20260925_cli_calibrated) and [checkpoint](../CHECKPOINT_C_D_CALLSTATE_20260925.md).

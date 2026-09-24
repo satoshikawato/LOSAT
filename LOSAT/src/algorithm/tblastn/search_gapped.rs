@@ -348,28 +348,28 @@ fn score_gapped_chunk(
 // This diagnostic keeps that function and input order while the public CLI
 // remains explicitly unimplemented through Stages C-E.
 #[derive(Clone, Copy)]
-struct PreliminaryProfile<'a> {
-    seg: Option<&'a SegParams>,
-    soft_masking: bool,
-    threshold: i32,
-    window: i32,
-    word_xdrop: &'a [i32],
-    word_cutoff: &'a [i32],
-    mask_lowercase: bool,
-    matrix: ScoringMatrix,
-    word_size: usize,
-    gap_open: i32,
-    gap_extend: i32,
-    gap_xdrop: i32,
-    gapped_cutoff: &'a [i32],
-    hsp_num_max: usize,
+pub(super) struct PreliminaryProfile<'a> {
+    pub(super) seg: Option<&'a SegParams>,
+    pub(super) soft_masking: bool,
+    pub(super) threshold: i32,
+    pub(super) window: i32,
+    pub(super) word_xdrop: &'a [i32],
+    pub(super) word_cutoff: &'a [i32],
+    pub(super) mask_lowercase: bool,
+    pub(super) matrix: ScoringMatrix,
+    pub(super) word_size: usize,
+    pub(super) gap_open: i32,
+    pub(super) gap_extend: i32,
+    pub(super) gap_xdrop: i32,
+    pub(super) gapped_cutoff: &'a [i32],
+    pub(super) hsp_num_max: usize,
 }
 
 // NCBI c++/src/algo/blast/core/blast_engine.c:478-586,804-850:
 // one chunk's WordFinder and gapped result precedes the next chunk's scan;
 // each frame's append precedes the next frame's scan.
 #[derive(Clone, Debug, PartialEq, Eq)]
-enum PreliminaryEvent {
+pub(super) enum PreliminaryEvent {
     Candidates(i8, usize, Vec<Seed>),
     Initial(i8, usize, Vec<InitHsp>),
     Gapped(i8, usize, Vec<(usize, GappedHsp)>),
@@ -382,7 +382,7 @@ enum PreliminaryEvent {
 // s_BlastSearchEngineOneContext handles each chunk's WordFinder, gapped
 // score, purge and merge before Blast_HSPListAppend for that frame.
 #[allow(dead_code)]
-fn preliminary_protein_hsps_in_ncbi_order(
+pub(super) fn preliminary_protein_hsps_in_ncbi_order(
     queries: &[&[u8]],
     subject: &[u8],
     db_gencode: u8,

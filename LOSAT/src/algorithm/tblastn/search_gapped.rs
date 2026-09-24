@@ -12,6 +12,7 @@ use crate::algorithm::blastp::gapalign::{
 use crate::algorithm::tblastx::translation::generate_frames;
 use crate::config::ScoringMatrix;
 use crate::utils::genetic_code::GeneticCode;
+use crate::utils::matrix::protein_score;
 use anyhow::{bail, Context, Result};
 
 // NCBI c++/include/algo/blast/core/blast_hits.h:96-103,126-143:
@@ -867,6 +868,75 @@ fn blast_hsp_test(
         || (align_length as i64) < i64::from(min_hit_length)
 }
 
+// NCBI c++/src/algo/blast/core/blast_gapalign.c:3248-3321:
+// if (q_length <= HSP_MAX_WINDOW) { *q_retval = q_start + q_length/2;
+//     *s_retval = s_start + q_length/2; return TRUE; }
+// score += sbp->matrix->data[*query_var][*subject_var];
+// if (score > max_score) { max_score = score; max_offset = index1; }
+// if (max_score > 0) { *q_retval = max_offset;
+//     *s_retval = max_offset - q_start + s_start; return TRUE; }
+// if (score > 0) { *q_retval = hsp->query.end - HSP_MAX_WINDOW/2;
+//     *s_retval = hsp->subject.end - HSP_MAX_WINDOW/2; return TRUE; }
+// return FALSE;
+fn blast_get_offsets_for_gapped_alignment_protein(
+    query: &[u8],
+    subject: &[u8],
+    q_start: usize,
+    q_end: usize,
+    s_start: usize,
+    s_end: usize,
+    matrix: ScoringMatrix,
+) -> Option<(usize, usize)> {
+    const HSP_MAX_WINDOW: usize = 11;
+    let q_length = q_end.checked_sub(q_start)?;
+    let s_length = s_end.checked_sub(s_start)?;
+    if q_end > query.len() || s_end > subject.len() {
+        return None;
+    }
+    if q_length <= HSP_MAX_WINDOW {
+        return Some((q_start + q_length / 2, s_start + q_length / 2));
+    }
+    // NCBI uses raw pointers; these are Rust bounds checks for the same reads.
+    if s_start.checked_add(HSP_MAX_WINDOW)? > subject.len() || s_end < HSP_MAX_WINDOW {
+        return None;
+    }
+    let mut score = 0i32;
+    for index in 0..HSP_MAX_WINDOW {
+        score += protein_score(matrix, query[q_start + index], subject[s_start + index]);
+    }
+    let mut max_score = score;
+    let mut max_offset = q_start + HSP_MAX_WINDOW - 1;
+    for index in (q_start + HSP_MAX_WINDOW)..(q_start + q_length.min(s_length)) {
+        let subject_index = s_start + index - q_start;
+        score -= protein_score(
+            matrix,
+            query[index - HSP_MAX_WINDOW],
+            subject[subject_index - HSP_MAX_WINDOW],
+        );
+        score += protein_score(matrix, query[index], subject[subject_index]);
+        if score > max_score {
+            max_score = score;
+            max_offset = index;
+        }
+    }
+    if max_score > 0 {
+        return Some((max_offset, max_offset - q_start + s_start));
+    }
+    score = 0;
+    for index in 0..HSP_MAX_WINDOW {
+        score += protein_score(
+            matrix,
+            query[q_end - HSP_MAX_WINDOW + index],
+            subject[s_end - HSP_MAX_WINDOW + index],
+        );
+    }
+    if score > 0 {
+        Some((q_end - HSP_MAX_WINDOW / 2, s_end - HSP_MAX_WINDOW / 2))
+    } else {
+        None
+    }
+}
+
 // NCBI c++/src/algo/blast/core/blast_traceback.c:508-513:
 // BLAST_GappedAlignmentWithTraceback(program_number, query, adjusted_subject,
 //     gap_align, score_params, q_start, s_start, query_length,
@@ -896,6 +966,7 @@ fn full_translation_traceback_with_matrix(
         percent_identity,
         min_hit_length,
         None,
+        None,
     )
 }
 
@@ -917,6 +988,7 @@ fn full_translation_traceback_with_matrix_and_events(
     percent_identity: f64,
     min_hit_length: i32,
     mut test_events: Option<&mut Vec<(bool, usize, usize, usize, usize, usize)>>,
+    mut start_events: Option<&mut Vec<(bool, i32, i32, i32, i32, i32, i32)>>,
 ) -> Result<Vec<(GappedHsp, bool)>> {
     let code = GeneticCode::try_from_id(db_gencode).map_err(anyhow::Error::msg)?;
     let query_frame = encode_protein_query_frame_with_seg(query, None);
@@ -948,10 +1020,51 @@ fn full_translation_traceback_with_matrix_and_events(
                 if pass == 0 { hit.s_start } else { -1 },
                 hit.s_end,
             )?;
-            let q_start = usize::try_from(hit.q_gapped_start)?;
-            let s_start = usize::try_from(hit.s_gapped_start)?
-                .checked_sub(subject_base)
-                .context("gapped start before translated window")?;
+            // NCBI c++/src/algo/blast/core/blast_traceback.c:436-449:
+            // if (hsp->query.gapped_start == 0 && hsp->subject.gapped_start == 0) {
+            //   retval = BlastGetOffsetsForGappedAlignment(...);
+            //   if (!retval) { hsp_array[index] = Blast_HSPFree(hsp); continue; }
+            // } else { q_start = hsp->query.gapped_start;
+            //          s_start = hsp->subject.gapped_start; }
+            let (q_start, s_start) = if hit.q_gapped_start == 0 && hit.s_gapped_start == 0 {
+                let q_offset = usize::try_from(hit.q_start)?;
+                let q_end = usize::try_from(hit.q_end)?;
+                let s_offset = usize::try_from(hit.s_start)?
+                    .checked_sub(subject_base)
+                    .context("HSP subject start before translated window")?;
+                let s_end = usize::try_from(hit.s_end)?
+                    .checked_sub(subject_base)
+                    .context("HSP subject end before translated window")?;
+                let start = blast_get_offsets_for_gapped_alignment_protein(
+                    query_sequence,
+                    subject_sequence,
+                    q_offset,
+                    q_end,
+                    s_offset,
+                    s_end,
+                    matrix,
+                );
+                if let Some(events) = start_events.as_deref_mut() {
+                    events.push((
+                        start.is_some(),
+                        hit.q_start,
+                        hit.q_end,
+                        hit.s_start,
+                        hit.s_end,
+                        start.map_or(-1, |row| row.0 as i32),
+                        start.map_or(-1, |row| (row.1 + subject_base) as i32),
+                    ));
+                }
+                let Some(start) = start else { continue };
+                start
+            } else {
+                (
+                    usize::try_from(hit.q_gapped_start)?,
+                    usize::try_from(hit.s_gapped_start)?
+                        .checked_sub(subject_base)
+                        .context("gapped start before translated window")?,
+                )
+            };
             let mut fence_hit = false;
             let mut scratch = GapAlignScratch::new();
             let alignment = blast_gapped_alignment_with_traceback_with_scratch(
@@ -1003,15 +1116,19 @@ fn full_translation_traceback_with_matrix_and_events(
             if delete_hsp {
                 continue;
             }
+            // NCBI c++/src/algo/blast/core/blast_traceback.c:446-448:
+            // hsp->query.gapped_start = q_start;
+            // hsp->subject.gapped_start = s_start;
+            // The Rust subject slice is rebased; restore its global offset.
             let saved = GappedHsp {
                 frame: hit.frame,
                 score: alignment.score,
                 q_start: i32::try_from(alignment.query_start)?,
                 q_end: i32::try_from(alignment.query_stop)?,
-                q_gapped_start: hit.q_gapped_start,
+                q_gapped_start: i32::try_from(q_start)?,
                 s_start: i32::try_from(alignment.subject_start + subject_base)?,
                 s_end: i32::try_from(alignment.subject_stop + subject_base)?,
-                s_gapped_start: hit.s_gapped_start,
+                s_gapped_start: i32::try_from(s_start + subject_base)?,
             };
             tree.add_hsp(
                 traceback_tree_hsp(&saved, query_length),
@@ -1418,6 +1535,7 @@ mod tests {
                 100.0,
                 0,
                 Some(&mut events),
+                None,
             )
             .unwrap();
             assert_eq!(
@@ -1443,6 +1561,241 @@ mod tests {
                 "query context {context} survivors"
             );
         }
+    }
+
+    // NCBI c++/src/algo/blast/core/blast_gapalign.c:3259-3321:
+    // q_length <= 11 returns the midpoint; a strictly positive sliding
+    // maximum wins; otherwise the terminal 11-residue window is tested.
+    #[test]
+    fn protein_start_offset_window_boundaries_follow_ncbi() {
+        let encode = |residues: &[u8]| {
+            let frame = encode_protein_query_frame_with_seg(residues, None);
+            frame.aa_seq[1..1 + residues.len()].to_vec()
+        };
+        let all_m = encode(&b"M".repeat(20));
+        assert_eq!(
+            blast_get_offsets_for_gapped_alignment_protein(
+                &all_m[..11],
+                &all_m[..11],
+                0,
+                11,
+                0,
+                11,
+                ScoringMatrix::Blosum62,
+            ),
+            Some((5, 5))
+        );
+        assert_eq!(
+            blast_get_offsets_for_gapped_alignment_protein(
+                &all_m,
+                &all_m,
+                0,
+                20,
+                0,
+                20,
+                ScoringMatrix::Blosum62,
+            ),
+            Some((10, 10))
+        );
+        let mut end_only = b"D".repeat(9);
+        end_only.extend_from_slice(&b"M".repeat(11));
+        let end_only = encode(&end_only);
+        assert_eq!(
+            blast_get_offsets_for_gapped_alignment_protein(
+                &end_only,
+                &all_m[..12],
+                0,
+                20,
+                0,
+                12,
+                ScoringMatrix::Blosum62,
+            ),
+            Some((15, 7))
+        );
+        let all_k = encode(&b"K".repeat(20));
+        assert_eq!(
+            blast_get_offsets_for_gapped_alignment_protein(
+                &all_k,
+                &all_m,
+                0,
+                20,
+                0,
+                20,
+                ScoringMatrix::Blosum62,
+            ),
+            None
+        );
+    }
+
+    // NCBI c++/src/algo/blast/core/blast_traceback.c:436-445:
+    // retval = BlastGetOffsetsForGappedAlignment(query, subject, sbp, hsp, ...);
+    // if (!retval) { hsp_array[index] = Blast_HSPFree(hsp); continue; }
+    // NCBI blast_gapalign.c:3259-3321: positive 11-residue window scores
+    // choose a start; two nonpositive endpoint windows return FALSE.
+    // NCBI blast_traceback.c:446-448: on TRUE, write q_start and s_start
+    // into the HSP before alignment; the real-path positive probe tests this.
+    fn compare_real_path_start_offset_with_ncbi(positive: bool) {
+        let root = concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../docs/evidence/tlosan_stage_c/"
+        );
+        let queries = read_fasta(&format!("{root}multi_query_20260924/query.faa"));
+        let refs: Vec<&[u8]> = queries
+            .iter()
+            .map(|(_, sequence)| sequence.as_slice())
+            .collect();
+        let subject = &read_fasta(&format!("{root}multi_query_20260924/subjects.fna"))[0].1;
+        let initial =
+            find_blosum62_word3_init_hsps_multi(&refs, subject, 1, None, 13, 40, 16, 0, false)
+                .unwrap();
+        let gapped = gapped_blosum62_word3_hsps_multi(
+            &refs,
+            subject,
+            1,
+            &initial,
+            11,
+            1,
+            38,
+            &multi_query_cutoffs(),
+        )
+        .unwrap();
+        let appended = preliminary_merged_hsps(&gapped, i32::MAX as usize)
+            .pop()
+            .unwrap();
+        let case = if positive {
+            "start_success_real_path_20260924"
+        } else {
+            "start_failure_real_path_20260924"
+        };
+        let trace = fs::read_to_string(format!("{root}{case}/trace.tsv")).unwrap();
+        let mut expected_output = vec![Vec::new(); refs.len()];
+        let mut expected_starts = Vec::new();
+        let mut expected_after = Vec::new();
+        let mut context = 0usize;
+        let mut successful_pass = false;
+        for line in trace.lines() {
+            let f: Vec<_> = line.split('\t').collect();
+            match f[0] {
+                "TRACEBACK_CONTEXT" => context = f[1].parse().unwrap(),
+                "START_RESULT" => expected_starts.push((
+                    f[1] == "1",
+                    f[2].parse::<i32>().unwrap(),
+                    f[3].parse::<i32>().unwrap(),
+                    f[4].parse::<i32>().unwrap(),
+                    f[5].parse::<i32>().unwrap(),
+                    f[6].parse::<i32>().unwrap(),
+                    f[7].parse::<i32>().unwrap(),
+                )),
+                "AFTER_START_HSP" => expected_after.push((
+                    f[2].parse::<i32>().unwrap(),
+                    f[3].parse::<i32>().unwrap(),
+                    f[4].parse::<i32>().unwrap(),
+                    f[5].parse::<i32>().unwrap(),
+                    f[6].parse::<i32>().unwrap(),
+                    f[7].parse::<i32>().unwrap(),
+                    f[8].parse::<i32>().unwrap(),
+                )),
+                "TRACEBACK_OUTPUT" => successful_pass = f[4] == "0",
+                "TRACEBACK_OUT_HSP" if successful_pass => expected_output[context].push((
+                    f[3].parse::<i32>().unwrap(),
+                    f[4].parse::<i8>().unwrap(),
+                    f[5].parse::<i32>().unwrap(),
+                    f[6].parse::<i32>().unwrap(),
+                    f[7].parse::<i32>().unwrap(),
+                    f[8].parse::<i32>().unwrap(),
+                )),
+                _ => {}
+            }
+        }
+        assert_eq!(expected_starts.len(), 2);
+        assert!(expected_starts.iter().all(|row| row.0 == positive));
+        for context in [1usize, 0] {
+            let mut per_query: Vec<_> = appended
+                .iter()
+                .filter(|(index, _)| *index == context)
+                .map(|(_, hsp)| *hsp)
+                .collect();
+            if context == 0 {
+                // Comparison-only NCBI input-state intervention in
+                // ncbi_start_failure_inject.c, before the traceback call.
+                per_query[0].q_start = 0;
+                per_query[0].q_end = if positive { 120 } else { 20 };
+                per_query[0].q_gapped_start = 0;
+                per_query[0].frame = 1;
+                per_query[0].s_start = if positive { 200 } else { 0 };
+                per_query[0].s_end = if positive { 320 } else { 20 };
+                per_query[0].s_gapped_start = 0;
+            }
+            let mut starts = Vec::new();
+            let actual = full_translation_traceback_with_matrix_and_events(
+                refs[context],
+                subject,
+                1,
+                &per_query,
+                ScoringMatrix::Blosum62,
+                11,
+                1,
+                64,
+                0.0,
+                0,
+                None,
+                Some(&mut starts),
+            )
+            .unwrap();
+            if context == 0 {
+                assert_eq!(starts, expected_starts);
+            } else {
+                assert!(starts.is_empty());
+            }
+            if context == 0 && positive {
+                let hsp = &actual[0].0;
+                let &(score, q_start, q_end, q_gap, s_start, s_end, s_gap) =
+                    expected_after.last().unwrap();
+                assert_eq!(
+                    (
+                        hsp.score,
+                        hsp.q_start,
+                        hsp.q_end,
+                        hsp.q_gapped_start,
+                        hsp.s_start,
+                        hsp.s_end,
+                        hsp.s_gapped_start
+                    ),
+                    (score, q_start, q_end, q_gap, s_start, s_end, s_gap),
+                    "NCBI successful acquired start writeback"
+                );
+            }
+            let actual: Vec<_> = actual
+                .into_iter()
+                .map(|(hsp, retried)| {
+                    assert!(retried);
+                    (
+                        hsp.score,
+                        hsp.frame,
+                        hsp.q_start,
+                        hsp.q_end,
+                        hsp.s_start,
+                        hsp.s_end,
+                    )
+                })
+                .collect();
+            assert_eq!(actual, expected_output[context], "query context {context}");
+        }
+    }
+
+    // NCBI c++/src/algo/blast/core/blast_traceback.c:436-445:
+    // if (!retval) { hsp_array[index] = Blast_HSPFree(hsp); continue; }
+    #[test]
+    fn real_path_start_offset_failure_deletion_matches_ncbi() {
+        compare_real_path_start_offset_with_ncbi(false);
+    }
+
+    // NCBI c++/src/algo/blast/core/blast_traceback.c:436-448:
+    // if (retval) { hsp->query.gapped_start = q_start;
+    //               hsp->subject.gapped_start = s_start; }
+    #[test]
+    fn real_path_start_offset_success_writeback_matches_ncbi() {
+        compare_real_path_start_offset_with_ncbi(true);
     }
 
     // NCBI c++/src/algo/blast/core/blast_engine.c:572-586:

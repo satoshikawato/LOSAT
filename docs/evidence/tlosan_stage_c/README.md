@@ -1,8 +1,12 @@
 # TLOSAN v0.2.0 Stage C work record — incomplete
 
-**Latest Stage C checkpoint:** [CONTINUATION_20260924_CAND_HSP.md](CONTINUATION_20260924_CAND_HSP.md)
-records exact long-subject candidate streams and real-path HSPTest deletions.
+**Latest Stage C checkpoint:** [CONTINUATION_20260924_START_FAILURE.md](CONTINUATION_20260924_START_FAILURE.md)
+records the exact start-offset failure, deletion, successful acquisition,
+and HSP writeback in NCBI traceback.
 Stage C remains open; D and E have not begun.
+
+**Previous bounded checkpoint:** [CONTINUATION_20260924_CAND_HSP.md](CONTINUATION_20260924_CAND_HSP.md)
+records exact long-subject candidate streams and real-path HSPTest deletions.
 
 **Previous interruption checkpoint:** [CONTINUATION_20260924_9077.md](CONTINUATION_20260924_9077.md)
 records the bounded BLOSUM45/word-2 candidate, WordFinder, gapped, and append

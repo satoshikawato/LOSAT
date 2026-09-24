@@ -1,0 +1,11 @@
+Comparison-only NCBI real traceback start-offset failure fixture.
+NCBI source commit: 598d8ae6a72b923127ba2fbfaffd48e4c83bfbf4
+NCBI binary SHA256: e3956f1e107a30439d56c8f72fae4267a7d62ebcc16e4f99d4baf2bdf00402e0
+Pinned source: blast_traceback.c:436-445; blast_gapalign.c:3248-3321.
+Intervention: at query-index 0 traceback entry, replace first HSP with query 0..20, subject +1 0..20, both gapped starts 0; preserve its pre-sorted score. This HSP input is artificial.
+Observed start acquisition: two FALSE returns, then deletion before HSPTest, once on the partial pass and once after full retry.
+Input SHA256: query=c5304b0567e07d7b4e3d59a63af6b3509eb1c42c017efa5deefe540c23d75aba subject=cb8622ee051aab5bdafbcca2a9d656de1f2cad16dff9bbe15fc1b7118a2ec1b3
+Probe source SHA256: inject=8b9bdbbdeba04082c55904605b9486fd239eee00b2b29873690910497fac558a gapped=53ec3b8d9901769a1a14fad3404cff391d7c7cd0a29929b14b0455eeb198b8fc
+Baseline output SHA256: 27f15ece134c1f89135b84b324177b98e8de6c09f7b6eb55d99b701947284cda
+Intervened output SHA256: 2a15b7f312000985b12d59eebddabbea6a06149159e5784989fde95df7db6f79
+Command: ['/home/kawato/micromamba/bin/tblastn', '-task', 'tblastn', '-query', '/mnt/c/Users/genom/GitHub/LOSAT/docs/evidence/tlosan_stage_c/multi_query_20260924/query.faa', '-subject', '/mnt/c/Users/genom/GitHub/LOSAT/docs/evidence/tlosan_stage_c/multi_query_20260924/subjects.fna', '-db_gencode', '1', '-matrix', 'BLOSUM62', '-word_size', '3', '-threshold', '13', '-window_size', '40', '-gapopen', '11', '-gapextend', '1', '-evalue', '10000', '-num_threads', '1', '-comp_based_stats', '0', '-seg', 'no', '-sum_stats', 'false', '-outfmt', '6 qseqid sseqid score qstart qend sstart send sframe qseq sseq']

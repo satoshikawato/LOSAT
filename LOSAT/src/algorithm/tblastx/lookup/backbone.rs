@@ -8,16 +8,42 @@ use super::{
     compute_backbone_size, compute_mask, compute_unmasked_intervals, encode_kmer_3, ilog2, pv_set,
     QueryContext, LOOKUP_ALPHABET_SIZE, LOOKUP_WORD_LENGTH, PV_ARRAY_BTS,
 };
+use crate::config::ScoringMatrix;
 use crate::stats::karlin_calc::{
     apply_check_ideal, compute_aa_composition, compute_karlin_params_ungapped,
-    compute_score_freq_profile, compute_std_aa_composition,
+    compute_score_freq_profile_for_matrix, compute_std_aa_composition,
 };
 use crate::stats::KarlinParams;
-use crate::utils::matrix::blosum62_ncbistdaa_score_row;
+use crate::utils::matrix::{blosum62_ncbistdaa_score_row, protein_score};
 
 pub const AA_HITS_PER_CELL: usize = 3;
 
 fn blosum62_ideal_karlin_params() -> KarlinParams {
+    ideal_karlin_params_for_matrix(ScoringMatrix::Blosum62, (-4, 11))
+}
+
+// NCBI c++/src/algo/blast/core/blast_stat.c:1506-1528:
+// for each finite matrix score, update sbp->loscore and sbp->hiscore.
+fn matrix_score_bounds(matrix: ScoringMatrix) -> (i32, i32) {
+    let mut low = i32::MAX;
+    let mut high = i32::MIN;
+    for query in 0..LOOKUP_ALPHABET_SIZE {
+        for subject in 0..LOOKUP_ALPHABET_SIZE {
+            let score = protein_score(matrix, query as u8, subject as u8);
+            if score > i16::MIN as i32 && score < i16::MAX as i32 {
+                low = low.min(score);
+                high = high.max(score);
+            }
+        }
+    }
+    (low, high)
+}
+
+// NCBI c++/src/algo/blast/core/blast_stat.c:2833-2848:
+// stdrfp = Blast_ResFreqNew(sbp); Blast_ResFreqStdComp(sbp, stdrfp);
+// sfp = Blast_ScoreFreqNew(sbp->loscore, sbp->hiscore);
+// BlastScoreFreqCalc(sbp, sfp, stdrfp, stdrfp);
+fn ideal_karlin_params_for_matrix(matrix: ScoringMatrix, bounds: (i32, i32)) -> KarlinParams {
     // NCBI reference: /mnt/c/Users/genom/GitHub/ncbi-blast/c++/src/algo/blast/core/blast_stat.c:2833-2848
     // ```c
     // stdrfp = Blast_ResFreqNew(sbp);
@@ -28,9 +54,10 @@ fn blosum62_ideal_karlin_params() -> KarlinParams {
     // Blast_KarlinBlkUngappedCalc(sbp->kbp_ideal, sfp);
     // ```
     let std_comp = compute_std_aa_composition();
-    let sfp = compute_score_freq_profile(&std_comp, &std_comp, -4, 11);
+    let sfp =
+        compute_score_freq_profile_for_matrix(&std_comp, &std_comp, bounds.0, bounds.1, matrix);
     compute_karlin_params_ungapped(&sfp)
-        .expect("BLOSUM62 ideal Karlin parameters must be computable")
+        .expect("standard protein matrix ideal Karlin parameters must be computable")
 }
 
 /// NCBI AaLookupBackboneCell - EXACT port
@@ -47,6 +74,18 @@ impl Default for BackboneCell {
             num_used: 0,
             entries: [0; AA_HITS_PER_CELL],
         }
+    }
+}
+
+// NCBI c++/src/algo/blast/core/blast_aalookup.c:562-603:
+// row = info->matrix[query_word[current_pos]];
+// score + row[i] controls neighboring word inclusion.
+#[inline(always)]
+fn lookup_matrix_score(matrix: ScoringMatrix, query: usize, subject: usize) -> i32 {
+    if matrix == ScoringMatrix::Blosum62 {
+        blosum62_ncbistdaa_score_row(query)[subject]
+    } else {
+        protein_score(matrix, query as u8, subject as u8)
     }
 }
 
@@ -147,6 +186,7 @@ struct NeighborInfo<'a> {
     offset_list: &'a [i32],
     threshold: i32,
     query_bias: i32,
+    matrix: ScoringMatrix,
     neighbor_added_count: usize,
     neighbor_words_generated: usize,
 }
@@ -297,6 +337,8 @@ fn prepare_lookup_query(
     std_comp: &[f64; LOOKUP_ALPHABET_SIZE],
     word_length: usize,
     check_ideal: bool,
+    matrix: ScoringMatrix,
+    bounds: (i32, i32),
 ) -> PreparedLookupQuery {
     let mut prepared = PreparedLookupQuery {
         concat_query: Vec::new(),
@@ -322,9 +364,11 @@ fn prepare_lookup_query(
                 .extend_from_slice(&lookup_segments);
 
             let ctx_comp = compute_aa_composition(&frame.aa_seq, frame.aa_len);
-            let score_min = -4;
-            let score_max = 11;
-            let sfp = compute_score_freq_profile(&ctx_comp, std_comp, score_min, score_max);
+            // NCBI c++/src/algo/blast/core/blast_stat.c:2778-2803:
+            // score frequencies use this score block's matrix and lo/hi scores.
+            let sfp = compute_score_freq_profile_for_matrix(
+                &ctx_comp, std_comp, bounds.0, bounds.1, matrix,
+            );
             // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_stat.c:2778-2803
             // ```c
             // loop_status = Blast_KarlinBlkUngappedCalc(kbp, sbp->sfp[context]);
@@ -394,7 +438,15 @@ pub(crate) fn prepare_blosum62_lookup_query_for_word_size(
 ) -> (Vec<u8>, Vec<(i32, i32)>, Vec<QueryContext>) {
     let ideal_params = blosum62_ideal_karlin_params();
     let std_comp = compute_std_aa_composition();
-    let prepared = prepare_lookup_query(queries, ideal_params, &std_comp, word_length, check_ideal);
+    let prepared = prepare_lookup_query(
+        queries,
+        ideal_params,
+        &std_comp,
+        word_length,
+        check_ideal,
+        ScoringMatrix::Blosum62,
+        (-4, 11),
+    );
     (
         prepared.concat_query,
         prepared.lookup_locations,
@@ -573,7 +625,9 @@ fn blast_lookup_index_query_exact_matches(
 fn blast_aa_add_word_hits_core(info: &mut NeighborInfo<'_>, score: i32, current_pos: usize) {
     let query_residue = info.query_word[current_pos] as usize;
     let score = score - info.row_max[query_residue];
-    let row = blosum62_ncbistdaa_score_row(query_residue);
+    // NCBI c++/src/algo/blast/core/blast_aalookup.c:562-563:
+    // row = info->matrix[query_word[current_pos]];
+    let matrix = info.matrix;
 
     if current_pos == info.wordsize - 1 {
         for residue in 0..info.alphabet_size {
@@ -582,7 +636,7 @@ fn blast_aa_add_word_hits_core(info: &mut NeighborInfo<'_>, score: i32, current_
             // for (i = 0; i < alphabet_size; i++) {
             //     if (score + row[i] >= threshold) {
             // ```
-            let residue_score = row[residue];
+            let residue_score = lookup_matrix_score(matrix, query_residue, residue);
             if score + residue_score >= info.threshold {
                 info.subject_word[current_pos] = residue as u8;
                 for &query_offset in lookup_chain_entries(info.offset_list) {
@@ -609,7 +663,7 @@ fn blast_aa_add_word_hits_core(info: &mut NeighborInfo<'_>, score: i32, current_
         //         subject_word[current_pos] = i;
         //         s_AddWordHitsCore(info, score + row[i], current_pos + 1);
         // ```
-        let residue_score = row[residue];
+        let residue_score = lookup_matrix_score(matrix, query_residue, residue);
         if score + residue_score >= info.threshold {
             info.subject_word[current_pos] = residue as u8;
             blast_aa_add_word_hits_core(info, score + residue_score, current_pos + 1);
@@ -647,6 +701,7 @@ fn blast_aa_add_word_hits(
     offset_list: &[i32],
     query_bias: i32,
     row_max: &[i32],
+    matrix: ScoringMatrix,
 ) -> (usize, usize, usize) {
     let query_offset = usize::try_from(offset_list[2]).expect("NCBI BLAST query offset must fit");
     let query_word = &query[query_offset..];
@@ -657,10 +712,12 @@ fn blast_aa_add_word_hits(
     // for (i = 1; i < lookup->word_length; i++)
     //     score += matrix[w[i]][w[i]];
     // ```
-    let mut self_score = blosum62_ncbistdaa_score_row(query_residue)[query_residue];
+    // NCBI c++/src/algo/blast/core/blast_aalookup.c:492-496:
+    // score = matrix[w[0]][w[0]]; then add each matrix[w[i]][w[i]].
+    let mut self_score = lookup_matrix_score(matrix, query_residue, query_residue);
     for residue in query_word.iter().take(word_length).skip(1) {
         let residue = *residue as usize;
-        self_score += blosum62_ncbistdaa_score_row(residue)[residue];
+        self_score += lookup_matrix_score(matrix, residue, residue);
     }
 
     let mut exact_added_count = 0usize;
@@ -691,6 +748,7 @@ fn blast_aa_add_word_hits(
         offset_list,
         threshold,
         query_bias,
+        matrix,
         neighbor_added_count: 0,
         neighbor_words_generated: 0,
     };
@@ -726,11 +784,33 @@ fn blast_aa_add_word_hits(
 pub fn build_ncbi_lookup(
     queries: &[Vec<QueryFrame>],
     threshold: i32,
-    _karlin_params: &crate::stats::KarlinParams, // Unused - computed per context, kept for API compatibility
+    karlin_params: &crate::stats::KarlinParams,
     check_ideal: bool,
 ) -> (BlastAaLookupTable, Vec<QueryContext>) {
+    build_ncbi_lookup_for_profile(
+        queries,
+        threshold,
+        karlin_params,
+        check_ideal,
+        ScoringMatrix::Blosum62,
+        LOOKUP_WORD_LENGTH,
+    )
+}
+
+// NCBI c++/src/algo/blast/core/blast_aalookup.c:227-245,438-465:
+// lookup->word_length = opt->word_size; lookup->threshold = opt->threshold;
+// row_max[i] = MAX(row_max[i], matrix[i][j]);
+// s_AddWordHits(lookup, matrix, query->sequence, ...);
+#[allow(dead_code)]
+pub(crate) fn build_ncbi_lookup_for_profile(
+    queries: &[Vec<QueryFrame>],
+    threshold: i32,
+    _karlin_params: &crate::stats::KarlinParams,
+    check_ideal: bool,
+    matrix: ScoringMatrix,
+    word_length: usize,
+) -> (BlastAaLookupTable, Vec<QueryContext>) {
     let diag_enabled = diagnostics_enabled();
-    let word_length = LOOKUP_WORD_LENGTH;
     let alphabet_size = LOOKUP_ALPHABET_SIZE; // 28
     let charsize = ilog2(alphabet_size) + 1; // 5
     let mask = compute_mask(word_length, charsize);
@@ -738,14 +818,27 @@ pub fn build_ncbi_lookup(
 
     // Compute ideal Karlin parameters (kbp_ideal) - used for check_ideal logic
     // Reference: NCBI blast_stat.c:2833-2848 Blast_ScoreBlkKbpIdealCalc
-    let ideal_params = blosum62_ideal_karlin_params();
+    let bounds = if matrix == ScoringMatrix::Blosum62 {
+        (-4, 11)
+    } else {
+        matrix_score_bounds(matrix)
+    };
+    let ideal_params = ideal_karlin_params_for_matrix(matrix, bounds);
 
     // Compute standard amino acid composition (for database/subject)
     // Reference: NCBI blast_stat.c:2759 Blast_ResFreqStdComp
     let std_comp = compute_std_aa_composition();
 
     let mut build_stats = LookupBuildStats::default();
-    let prepared = prepare_lookup_query(queries, ideal_params, &std_comp, word_length, check_ideal);
+    let prepared = prepare_lookup_query(
+        queries,
+        ideal_params,
+        &std_comp,
+        word_length,
+        check_ideal,
+        matrix,
+        bounds,
+    );
     build_stats.skipped_seg_mask = prepared.skipped_seg_mask;
     let PreparedLookupQuery {
         concat_query,
@@ -787,17 +880,15 @@ pub fn build_ncbi_lookup(
         .map(|ctx| ctx.frame_base + ctx.aa_len as i32)
         .unwrap_or(0);
 
-    // Row max for BLOSUM62 over the lookup alphabet.
-    // For NCBISTDAA residues, we compute max score against any other residue.
+    // NCBI c++/src/algo/blast/core/blast_aalookup.c:438-444:
+    // row_max[i] = matrix[i][0];
+    // for (j = 1; j < alphabet_size; j++) row_max[i] = MAX(row_max[i], matrix[i][j]);
     let row_max: Vec<i32> = (0..alphabet_size)
         .map(|i| {
-            let row = blosum62_ncbistdaa_score_row(i);
-            // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_aalookup.c:562-563
-            // ```c
-            // score -= info->row_max[query_word[current_pos]];
-            // row = info->matrix[query_word[current_pos]];
-            // ```
-            (0..alphabet_size).map(|j| row[j]).max().unwrap_or(-4)
+            (0..alphabet_size)
+                .map(|j| lookup_matrix_score(matrix, i, j))
+                .max()
+                .unwrap_or(i32::MIN)
         })
         .collect();
 
@@ -872,6 +963,7 @@ pub fn build_ncbi_lookup(
                 offset_list,
                 0,
                 &row_max,
+                matrix,
             );
         build_stats.exact_added_count += exact_added_count;
         build_stats.neighbor_added_count += neighbor_added_count;
@@ -1261,7 +1353,15 @@ mod tests {
     fn prepare_lookup_for_test(queries: Vec<Vec<QueryFrame>>) -> PreparedLookupQuery {
         let ideal_params = blosum62_ideal_karlin_params();
         let std_comp = compute_std_aa_composition();
-        prepare_lookup_query(&queries, ideal_params, &std_comp, LOOKUP_WORD_LENGTH, true)
+        prepare_lookup_query(
+            &queries,
+            ideal_params,
+            &std_comp,
+            LOOKUP_WORD_LENGTH,
+            true,
+            ScoringMatrix::Blosum62,
+            (-4, 11),
+        )
     }
 
     fn debruijn(alphabet_size: usize, order: usize) -> Vec<u8> {

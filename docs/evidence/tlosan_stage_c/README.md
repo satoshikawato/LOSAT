@@ -1,8 +1,9 @@
 # TLOSAN v0.2.0 Stage C work record — incomplete
 
-**Latest checkpoint:** [CONTINUATION_20260924_2E60.md](CONTINUATION_20260924_2E60.md)
-records long-subject chunk and mask input-state comparisons, including the
-still-open Stage C gate. The preceding records are
+**Latest interruption checkpoint:** [CONTINUATION_20260924_9077.md](CONTINUATION_20260924_9077.md)
+records the bounded BLOSUM45/word-2 candidate, WordFinder, gapped, and append
+comparisons and the still-open Stage C gate. The preceding records are
+[CONTINUATION_20260924_2E60.md](CONTINUATION_20260924_2E60.md),
 [CONTINUATION_20260924_97BA.md](CONTINUATION_20260924_97BA.md),
 [CONTINUATION_20260924_CF29.md](CONTINUATION_20260924_CF29.md), and
 [CONTINUATION_20260924.md](CONTINUATION_20260924.md).

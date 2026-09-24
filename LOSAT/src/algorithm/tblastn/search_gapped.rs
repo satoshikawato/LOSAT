@@ -116,6 +116,34 @@ fn gapped_blosum62_word3_hsps_multi_chunks(
     x_drop: i32,
     cutoff_scores: &[i32],
 ) -> Result<Vec<(usize, GappedHsp, usize)>> {
+    gapped_protein_hsps_multi_chunks(
+        queries,
+        subject,
+        db_gencode,
+        initial,
+        gap_open,
+        gap_extend,
+        x_drop,
+        cutoff_scores,
+        ScoringMatrix::Blosum62,
+    )
+}
+
+// NCBI c++/src/algo/blast/core/blast_gapalign.c:3924-3927,4058:
+// cutoff = hit_params->cutoffs[context].cutoff_score;
+// BLAST_GetGappedScore uses gap_align->sbp->matrix for the chosen profile.
+#[allow(dead_code)]
+fn gapped_protein_hsps_multi_chunks(
+    queries: &[&[u8]],
+    subject: &[u8],
+    db_gencode: u8,
+    initial: &[InitHsp],
+    gap_open: i32,
+    gap_extend: i32,
+    x_drop: i32,
+    cutoff_scores: &[i32],
+    matrix: ScoringMatrix,
+) -> Result<Vec<(usize, GappedHsp, usize)>> {
     // NCBI c++/src/algo/blast/core/blast_gapalign.c:3924-3927:
     // cutoff = hit_params->cutoffs[context].cutoff_score;
     // Every query context must supply its own measured cutoff.
@@ -208,7 +236,7 @@ fn gapped_blosum62_word3_hsps_multi_chunks(
                     length,
                     s_start,
                     length,
-                    ScoringMatrix::Blosum62,
+                    matrix,
                 );
                 let s_gapped_start = i64::from(hit.s_seed) + i64::try_from(q_gapped_start)?
                     - i64::from(hit.q_seed - u32::try_from(context_offset)?);
@@ -219,7 +247,7 @@ fn gapped_blosum62_word3_hsps_multi_chunks(
                     subject_sequence,
                     q_gapped_start,
                     s_gapped_start,
-                    ScoringMatrix::Blosum62,
+                    matrix,
                     gap_open,
                     gap_extend,
                     x_drop,
@@ -978,6 +1006,7 @@ mod tests {
     use super::*;
     use crate::algorithm::tblastn::search_init::{
         find_blosum62_word3_init_hsps, find_blosum62_word3_init_hsps_multi,
+        find_protein_init_hsps_multi,
     };
     use std::fs;
 
@@ -1892,6 +1921,133 @@ mod tests {
             })
             .collect();
         assert_eq!(actual, expected);
+    }
+    // NCBI c++/src/algo/blast/core/blast_gapalign.c:3924-3927,4057-4091:
+    // cutoff = hit_params->cutoffs[context].cutoff_score;
+    // BLAST_GetGappedScore saves each qualifying HSP in frame/chunk order.
+    // NCBI c++/src/algo/blast/core/blast_engine.c:539-586,840-850:
+    // purge, merge, and append follow each chunk's gapped extension.
+    #[test]
+    fn alternate_matrix_word2_gapped_and_append_match_ncbi() {
+        let root = concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../docs/evidence/tlosan_stage_c/alternate_matrix_word2_20260924/"
+        );
+        let queries = read_fasta(&format!("{root}query.faa"));
+        let refs: Vec<&[u8]> = queries.iter().map(|(_, seq)| seq.as_slice()).collect();
+        let subject = &read_fasta(&format!("{root}subjects.fna"))[0].1;
+        let initial = find_protein_init_hsps_multi(
+            &refs,
+            subject,
+            1,
+            None,
+            16,
+            60,
+            21,
+            0,
+            false,
+            ScoringMatrix::Blosum45,
+            2,
+        )
+        .unwrap();
+        let gapped = gapped_protein_hsps_multi_chunks(
+            &refs,
+            subject,
+            1,
+            &initial,
+            14,
+            2,
+            53,
+            &[0, 0, i32::MAX],
+            ScoringMatrix::Blosum45,
+        )
+        .unwrap();
+        let trace = fs::read_to_string(format!("{root}gapped_events.tsv")).unwrap();
+        let expected: Vec<_> = trace
+            .lines()
+            .filter(|line| line.starts_with("GAPPED_HSP\t"))
+            .map(|line| {
+                let f: Vec<_> = line.split('\t').collect();
+                assert_eq!(f[5], "0");
+                (
+                    f[4].parse::<usize>().unwrap(),
+                    GappedHsp {
+                        score: f[3].parse().unwrap(),
+                        frame: f[9].parse().unwrap(),
+                        q_start: f[6].parse().unwrap(),
+                        q_end: f[7].parse().unwrap(),
+                        q_gapped_start: f[8].parse().unwrap(),
+                        s_start: f[10].parse().unwrap(),
+                        s_end: f[11].parse().unwrap(),
+                        s_gapped_start: f[12].parse().unwrap(),
+                    },
+                    0usize,
+                )
+            })
+            .collect();
+        if gapped != expected {
+            let first = gapped
+                .iter()
+                .zip(&expected)
+                .position(|(left, right)| left != right)
+                .unwrap_or(gapped.len().min(expected.len()));
+            panic!(
+                "first BLOSUM45/word2 gapped difference at {first}: Rust={:?}, NCBI={:?}; counts Rust={} NCBI={}",
+                gapped.get(first), expected.get(first), gapped.len(), expected.len()
+            );
+        }
+
+        let frames = generate_frames(
+            &resolve_local_subject_ncbi2na(subject).unwrap(),
+            &GeneticCode::try_from_id(1).unwrap(),
+        );
+        let frame_lengths: Vec<_> = frames
+            .iter()
+            .map(|frame| (frame.frame, frame.aa_len))
+            .collect();
+        let snapshots =
+            preliminary_chunked_hsps(&gapped, &frame_lengths, i32::MAX as usize).unwrap();
+        let append_trace = fs::read_to_string(format!("{root}append_events.tsv")).unwrap();
+        let expected_snapshots: Vec<Vec<_>> = (0..6)
+            .map(|call| {
+                append_trace
+                    .lines()
+                    .filter(|line| line.starts_with(&format!("APPEND_OUT_HSP\t{call}\t")))
+                    .map(|line| {
+                        let f: Vec<_> = line.split('\t').collect();
+                        (
+                            f[3].parse::<usize>().unwrap(),
+                            f[4].parse::<i32>().unwrap(),
+                            f[5].parse::<i8>().unwrap(),
+                            f[6].parse::<i32>().unwrap(),
+                            f[7].parse::<i32>().unwrap(),
+                            f[8].parse::<i32>().unwrap(),
+                            f[9].parse::<i32>().unwrap(),
+                        )
+                    })
+                    .collect()
+            })
+            .collect();
+        let actual_snapshots: Vec<Vec<_>> = snapshots
+            .iter()
+            .map(|snapshot| {
+                snapshot
+                    .iter()
+                    .map(|(context, hsp)| {
+                        (
+                            *context,
+                            hsp.score,
+                            hsp.frame,
+                            hsp.q_start,
+                            hsp.q_end,
+                            hsp.s_start,
+                            hsp.s_end,
+                        )
+                    })
+                    .collect()
+            })
+            .collect();
+        assert_eq!(actual_snapshots, expected_snapshots);
     }
     // NCBI c++/src/algo/blast/core/blast_traceback.c:401-405,583-605:
     // if (!BlastIntervalTreeContainsHSP(tree, hsp, query_info, ...)) {

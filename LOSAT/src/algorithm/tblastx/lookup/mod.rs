@@ -17,9 +17,11 @@ mod backbone;
 pub mod compressed;
 
 // Re-export public types and functions
-pub(crate) use backbone::prepare_blosum62_lookup_query_for_word_size;
 pub use backbone::{
     build_direct_lookup, build_ncbi_lookup, BackboneCell, BlastAaLookupTable, AA_HITS_PER_CELL,
+};
+pub(crate) use backbone::{
+    build_ncbi_lookup_for_profile, prepare_blosum62_lookup_query_for_word_size,
 };
 
 use crate::stats::KarlinParams;

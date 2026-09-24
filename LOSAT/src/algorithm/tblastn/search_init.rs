@@ -3,8 +3,9 @@
 
 use super::search_seed::resolve_local_subject_ncbi2na;
 use crate::algorithm::blastp::encoding::encode_protein_query_frame_with_seg;
-use crate::algorithm::blastp::extension::extend_two_hit_blosum62;
+use crate::algorithm::blastp::extension::extend_two_hit;
 use crate::algorithm::tblastx::translation::generate_frames;
+use crate::config::ScoringMatrix;
 use crate::utils::genetic_code::GeneticCode;
 use crate::utils::seg::SegParams;
 use anyhow::Result;
@@ -116,6 +117,38 @@ pub(super) fn find_blosum62_word3_init_hsps_multi(
     cutoff_score: i32,
     mask_lowercase: bool,
 ) -> Result<Vec<InitHsp>> {
+    find_protein_init_hsps_multi(
+        queries,
+        subject,
+        db_gencode,
+        seg,
+        threshold,
+        window,
+        x_dropoff,
+        cutoff_score,
+        mask_lowercase,
+        ScoringMatrix::Blosum62,
+        3,
+    )
+}
+
+// NCBI c++/src/algo/blast/core/aa_ungapped.c:516-614:
+// diff < wordsize controls the second hit; s_BlastAaExtendTwoHit uses
+// wordsize and score_params->matrix before saving/sorting each HSP list.
+#[allow(dead_code)]
+pub(super) fn find_protein_init_hsps_multi(
+    queries: &[&[u8]],
+    subject: &[u8],
+    db_gencode: u8,
+    seg: Option<&SegParams>,
+    threshold: i32,
+    window: i32,
+    x_dropoff: i32,
+    cutoff_score: i32,
+    mask_lowercase: bool,
+    matrix: ScoringMatrix,
+    word_size: usize,
+) -> Result<Vec<InitHsp>> {
     let resolved = resolve_local_subject_ncbi2na(subject)?;
     let code = GeneticCode::try_from_id(db_gencode).map_err(anyhow::Error::msg)?;
     let frames = generate_frames(&resolved, &code);
@@ -129,18 +162,20 @@ pub(super) fn find_blosum62_word3_init_hsps_multi(
         let frame = encode_protein_query_frame_with_seg(query, seg);
         query_sequence.extend_from_slice(&frame.aa_seq[1..]);
     }
-    let seeds = super::search_seed::scan_unambiguous_blosum62_words_multi(
+    let seeds = super::search_seed::scan_unambiguous_protein_words_multi(
         queries,
         subject,
         db_gencode,
         seg,
         threshold,
         mask_lowercase,
+        matrix,
+        word_size,
     )?;
     let mut diagonals = Diagonals::new(query_sequence.len().saturating_sub(1), window);
     let mut hits = Vec::new();
     let mut seed_index = 0;
-    const WORD_SIZE: i32 = 3;
+    let word_size_i32 = i32::try_from(word_size)?;
     let negative_first_length = frames
         .iter()
         .find(|frame| frame.frame == -1)
@@ -194,7 +229,7 @@ pub(super) fn find_blosum62_word3_init_hsps_multi(
                     *last_hit = s + diagonals.offset;
                     continue;
                 }
-                if diff < WORD_SIZE {
+                if diff < word_size_i32 {
                     continue;
                 }
                 // NCBI reference: c++/src/algo/blast/core/aa_ungapped.c:550-588
@@ -213,14 +248,17 @@ pub(super) fn find_blosum62_word3_init_hsps_multi(
                     *last_hit = s + diagonals.offset;
                     continue;
                 }
-                let result = extend_two_hit_blosum62(
+                // NCBI c++/src/algo/blast/core/aa_ungapped.c:570-583,1089-1155:
+                // s_BlastAaExtendTwoHit(matrix, ..., wordsize, ...);
+                let result = extend_two_hit(
+                    matrix,
                     &query_sequence,
                     subject_sequence,
-                    (previous + WORD_SIZE) as usize,
+                    (previous + word_size_i32) as usize,
                     s as usize,
                     q as usize,
                     x_dropoff,
-                    WORD_SIZE as usize,
+                    word_size,
                 );
                 let Some(result) = result else {
                     continue;
@@ -245,7 +283,7 @@ pub(super) fn find_blosum62_word3_init_hsps_multi(
                 // } else { last_hit = subject_offset + diag_offset; }
                 if result.right_extend {
                     *flag = true;
-                    *last_hit = result.s_last_off - (WORD_SIZE - 1) + diagonals.offset;
+                    *last_hit = result.s_last_off - (word_size_i32 - 1) + diagonals.offset;
                 } else {
                     *last_hit = s + diagonals.offset;
                 }
@@ -318,6 +356,76 @@ mod tests {
             }
         }
         records
+    }
+
+    // NCBI c++/src/algo/blast/core/aa_ungapped.c:516-614:
+    // the selected matrix, wordsize, x-dropoff, and per-context cutoff
+    // determine two-hit extension before frame-local score sorting.
+    #[test]
+    fn alternate_matrix_word2_wordfinder_hsps_match_ncbi() {
+        let root = concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../docs/evidence/tlosan_stage_c/alternate_matrix_word2_20260924/"
+        );
+        let queries = read_fasta(&format!("{root}query.faa"));
+        let refs: Vec<&[u8]> = queries.iter().map(|(_, seq)| seq.as_slice()).collect();
+        let subject = &read_fasta(&format!("{root}subjects.fna"))[0].1;
+        let trace = fs::read_to_string(format!("{root}candidate.stderr")).unwrap();
+        let observed_cutoffs: Vec<_> = trace
+            .lines()
+            .filter(|line| line.starts_with("PARAM\t"))
+            .map(|line| {
+                let f: Vec<_> = line.split('\t').collect();
+                (
+                    f[2].parse::<i32>().unwrap(),
+                    f[3].parse::<i32>().unwrap(),
+                    f[4].parse::<i32>().unwrap(),
+                )
+            })
+            .collect();
+        assert_eq!(observed_cutoffs, [(21, 21, 0); 6]);
+        let trace = fs::read_to_string(format!("{root}wordfinder.stderr")).unwrap();
+        let frame_order = [1, 2, 3, -1, -2, -3];
+        let expected: Vec<_> = trace
+            .lines()
+            .filter(|line| line.starts_with("INIT\t"))
+            .map(|line| {
+                let f: Vec<_> = line.split('\t').collect();
+                InitHsp {
+                    frame: frame_order[f[1].parse::<usize>().unwrap()],
+                    chunk_offset: 0,
+                    q_seed: f[3].parse().unwrap(),
+                    s_seed: f[4].parse().unwrap(),
+                    q_start: f[5].parse().unwrap(),
+                    s_start: f[6].parse().unwrap(),
+                    length: f[7].parse().unwrap(),
+                    score: f[8].parse().unwrap(),
+                }
+            })
+            .collect();
+        let actual = find_protein_init_hsps_multi(
+            &refs,
+            subject,
+            1,
+            None,
+            16,
+            60,
+            21,
+            0,
+            false,
+            ScoringMatrix::Blosum45,
+            2,
+        )
+        .unwrap();
+        if actual != expected {
+            let first = actual
+                .iter()
+                .zip(&expected)
+                .position(|(left, right)| left != right)
+                .unwrap_or(actual.len().min(expected.len()));
+            panic!("first BLOSUM45/word-2 WordFinder difference at {first}: Rust={:?}, NCBI={:?}; counts Rust={} NCBI={}",
+            actual.get(first), expected.get(first), actual.len(), expected.len());
+        }
     }
 
     // NCBI c++/src/algo/blast/core/aa_ungapped.c:562-583:

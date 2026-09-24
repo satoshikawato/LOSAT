@@ -3,7 +3,7 @@
 
 use crate::algorithm::blastp::encoding::encode_protein_query_frame_with_seg;
 use crate::algorithm::tblastx::blast_aascan::{s_blast_aa_scan_subject_one_range, BlastOffsetPair};
-use crate::algorithm::tblastx::lookup::build_ncbi_lookup;
+use crate::algorithm::tblastx::lookup::{build_ncbi_lookup, build_ncbi_lookup_for_profile};
 use crate::algorithm::tblastx::translation::generate_frames;
 use crate::config::ScoringMatrix;
 use crate::stats::lookup_protein_params_ungapped;
@@ -364,11 +364,39 @@ pub(super) fn scan_unambiguous_blosum62_words_multi(
     threshold: i32,
     mask_lowercase: bool,
 ) -> Result<Vec<Seed>> {
+    scan_unambiguous_protein_words_multi(
+        queries,
+        subject,
+        db_gencode,
+        seg,
+        threshold,
+        mask_lowercase,
+        ScoringMatrix::Blosum62,
+        3,
+    )
+}
+
+// NCBI c++/src/algo/blast/core/blast_aalookup.c:227-245:
+// lookup->word_length = opt->word_size;
+// lookup->threshold = (Int4)opt->threshold;
+// NCBI c++/src/algo/blast/core/blast_engine.c:1318-1334,1429-1432:
+// return word_length * 3 + 2; reject shorter nucleotide subjects.
+#[allow(dead_code)]
+pub(super) fn scan_unambiguous_protein_words_multi(
+    queries: &[&[u8]],
+    subject: &[u8],
+    db_gencode: u8,
+    seg: Option<&SegParams>,
+    threshold: i32,
+    mask_lowercase: bool,
+    matrix: ScoringMatrix,
+    word_length: usize,
+) -> Result<Vec<Seed>> {
     let code = GeneticCode::try_from_id(db_gencode).map_err(anyhow::Error::msg)?;
     // NCBI reference: c++/src/algo/blast/core/blast_engine.c:1318-1334,1429-1432
     // return word_length * 3 + 2;
     // if (seq_arg.seq->length < min_subj_seq_length) { ... continue; }
-    if subject.len() < 3 * 3 + 2 {
+    if subject.len() < word_length * 3 + 2 {
         return Ok(Vec::new());
     }
     let resolved_subject = resolve_local_subject_ncbi2na(subject)?;
@@ -376,8 +404,17 @@ pub(super) fn scan_unambiguous_blosum62_words_multi(
         .iter()
         .map(|query| vec![encode_protein_query_frame_with_seg(query, seg)])
         .collect();
-    let karlin = lookup_protein_params_ungapped(ScoringMatrix::Blosum62);
-    let (lookup, _contexts) = build_ncbi_lookup(&query_frames, threshold, &karlin, false);
+    // NCBI c++/src/algo/blast/core/lookup_wrap.c:91-100:
+    // BlastAaLookupTableNew(...); BlastAaLookupIndexQuery(..., sbp->matrix->data, ...);
+    let karlin = lookup_protein_params_ungapped(matrix);
+    let (lookup, _contexts) = build_ncbi_lookup_for_profile(
+        &query_frames,
+        threshold,
+        &karlin,
+        false,
+        matrix,
+        word_length,
+    );
     let mut seeds = Vec::new();
     let mut pairs = vec![BlastOffsetPair::default(); (lookup.longest_chain.max(1) as usize) * 1024];
     let pair_capacity = i32::try_from(pairs.len()).expect("NCBI offset array fits Int4");
@@ -536,6 +573,83 @@ mod tests {
                 actual.len(),
                 expected.len()
             );
+        }
+    }
+
+    // NCBI c++/src/algo/blast/core/blast_aalookup.c:227-245,438-465:
+    // word_length and neighbor scores come from the selected options/matrix.
+    // NCBI c++/src/algo/blast/core/aa_ungapped.c:478-505:
+    // the subject scanner emits global query offsets in its observed order.
+    #[test]
+    fn alternate_matrix_word2_candidates_and_contexts_match_ncbi() {
+        let root = concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../docs/evidence/tlosan_stage_c/alternate_matrix_word2_20260924/"
+        );
+        let queries = read_fasta(&format!("{root}query.faa"));
+        let subject = &read_fasta(&format!("{root}subjects.fna"))[0].1;
+        let refs: Vec<&[u8]> = queries.iter().map(|(_, seq)| seq.as_slice()).collect();
+        let frames: Vec<_> = refs
+            .iter()
+            .map(|query| vec![encode_protein_query_frame_with_seg(query, None)])
+            .collect();
+        let karlin = lookup_protein_params_ungapped(ScoringMatrix::Blosum45);
+        let (lookup, contexts) =
+            build_ncbi_lookup_for_profile(&frames, 16, &karlin, false, ScoringMatrix::Blosum45, 2);
+        assert_eq!(lookup.word_length, 2);
+        let trace = fs::read_to_string(format!("{root}query_context.tsv")).unwrap();
+        let expected_contexts: Vec<_> = trace
+            .lines()
+            .filter(|line| line.starts_with("QUERY_CONTEXT\t0\t"))
+            .map(|line| {
+                let f: Vec<_> = line.split('\t').collect();
+                (
+                    f[3].parse::<usize>().unwrap(),
+                    f[4].parse::<i32>().unwrap(),
+                    f[5].parse::<usize>().unwrap(),
+                    f[7] == "1",
+                )
+            })
+            .collect();
+        let actual_contexts: Vec<_> = contexts
+            .iter()
+            .map(|ctx| (ctx.q_idx as usize, ctx.frame_base, ctx.aa_len, ctx.is_valid))
+            .collect();
+        assert_eq!(actual_contexts, expected_contexts);
+        let trace = fs::read_to_string(format!("{root}candidate.stderr")).unwrap();
+        let frame_order = [1, 2, 3, -1, -2, -3];
+        let expected: Vec<Seed> = trace
+            .lines()
+            .filter(|line| line.starts_with("CAND\t"))
+            .map(|line| {
+                let f: Vec<_> = line.split('\t').collect();
+                Seed {
+                    frame: frame_order[f[1].parse::<usize>().unwrap()],
+                    chunk_offset: 0,
+                    query_offset: f[3].parse().unwrap(),
+                    subject_offset: f[4].parse().unwrap(),
+                }
+            })
+            .collect();
+        let actual = scan_unambiguous_protein_words_multi(
+            &refs,
+            subject,
+            1,
+            None,
+            16,
+            false,
+            ScoringMatrix::Blosum45,
+            2,
+        )
+        .unwrap();
+        if actual != expected {
+            let first = actual
+                .iter()
+                .zip(&expected)
+                .position(|(left, right)| left != right)
+                .unwrap_or(actual.len().min(expected.len()));
+            panic!("first BLOSUM45/word-2 candidate difference at {first}: Rust={:?}, NCBI={:?}; counts Rust={} NCBI={}",
+                actual.get(first), expected.get(first), actual.len(), expected.len());
         }
     }
 

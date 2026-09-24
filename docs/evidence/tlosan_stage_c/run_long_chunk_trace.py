@@ -35,9 +35,10 @@ def run_probe(command: list[str], source: Path, temp: Path) -> subprocess.Comple
 
 
 def main() -> None:
-    if len(sys.argv) not in (2, 3) or (len(sys.argv) == 3 and sys.argv[2] != "--mask-boundary"):
-        raise SystemExit("usage: run_long_chunk_trace.py NEW_OUTPUT_DIR [--mask-boundary]")
-    mask_boundary = len(sys.argv) == 3
+    if len(sys.argv) not in (2, 3) or (len(sys.argv) == 3 and sys.argv[2] not in ("--mask-boundary", "--multi-query")):
+        raise SystemExit("usage: run_long_chunk_trace.py NEW_OUTPUT_DIR [--mask-boundary|--multi-query]")
+    mask_boundary = len(sys.argv) == 3 and sys.argv[2] == "--mask-boundary"
+    multi_query = len(sys.argv) == 3 and sys.argv[2] == "--multi-query"
     output = Path(sys.argv[1]).resolve()
     output.mkdir(parents=True, exist_ok=False)
     assert subprocess.check_output(
@@ -54,7 +55,8 @@ def main() -> None:
     insert = records["plus1"]
     assert len(insert) == 362
     assert PREFIX_CODONS < 5_000_000 < PREFIX_CODONS + len(insert) // 3
-    query = (HERE / "run_20260923/query.faa").read_bytes()
+    query = (HERE / ("multi_query_20260924/query.faa" if multi_query else
+                     "run_20260923/query.faa")).read_bytes()
     subject = "ATG" * PREFIX_CODONS + insert + "ATG" * SUFFIX_CODONS
     assert len(subject) // 3 > 5_000_000
     if mask_boundary:
@@ -85,6 +87,9 @@ def main() -> None:
         # the probe records every emitted pair before two-hit extension.
         "candidate": HERE / "ncbi_candidate_trace.c",
     }
+    if multi_query:
+        sources["context"] = HERE / "ncbi_context_cutoff_trace.c"
+        sources["wordcutoffs"] = HERE / "ncbi_wordfinder_context_cutoff_trace.c"
     with tempfile.TemporaryDirectory(prefix="tlosan-c-longchunk-") as tmp:
         for name, source in sources.items():
             traced = run_probe(command, source, Path(tmp))
@@ -103,6 +108,13 @@ def main() -> None:
     range_lines = [line for line in (output / "ranges.stderr").read_text().splitlines()
                    if line.startswith(("RANGE_CALL\t", "RANGE\t", "SET_RANGES\t", "SET_RANGE\t"))]
     (output / "chunk_ranges.tsv").write_text("\n".join(range_lines) + "\n")
+    if multi_query:
+        context_lines = [line for line in (output / "context.stderr").read_text().splitlines()
+                         if line.startswith("GAPPED_CONTEXT_CUTOFF\t")]
+        (output / "context_cutoffs.tsv").write_text("\n".join(context_lines) + "\n")
+        word_rows = [line for line in (output / "wordcutoffs.stderr").read_text().splitlines()
+                     if line.startswith("WORD_CONTEXT_CUTOFF\t")]
+        (output / "word_context_cutoffs.tsv").write_text("\n".join(word_rows) + "\n")
     mask_line = (
         "Lowercase mask: nucleotide [14999700,15000000), "
         "translated +1 right edge 4999900.\n"
@@ -115,17 +127,21 @@ def main() -> None:
         f"Prefix: ATG x {PREFIX_CODONS} codons; insert: saved plus1 362 nt; "
         f"suffix: ATG x {SUFFIX_CODONS} codons.\n"
         f"{mask_line}"
+        f"Query input: {'multi_query_20260924/query.faa' if multi_query else 'run_20260923/query.faa'}.\n"
         f"Subject length: {len(subject)} nt; first frame: {len(subject) // 3} residues.\n"
         f"Input SHA256: query={sha(output / 'query.faa')} "
         f"subject={sha(output / 'subjects.fna')}\n"
         f"Probe source SHA256: {', '.join(f'{name}={sha(source)}' for name, source in sources.items())}\n"
-        "Unprobed output equals all four probe outputs byte for byte: yes\n"
+        f"Unprobed output equals all {len(sources)} probe outputs byte for byte: yes\n"
         f"Command: {command!r}\n"
     )
     files = ["query.faa", "subjects.fna", "ncbi_output.out", "manifest.txt",
              "wordfinder.stderr", "gapped.stderr", "frame_chunks.tsv",
              "gapped_events.tsv", "ranges.stderr", "chunk_ranges.tsv",
              "candidate.stderr"]
+    if multi_query:
+        files.extend(["context.stderr", "context_cutoffs.tsv",
+                      "wordcutoffs.stderr", "word_context_cutoffs.tsv"])
     (output / "outputs.sha256").write_text(
         "".join(f"{sha(output / name)}  {name}\n" for name in files)
     )

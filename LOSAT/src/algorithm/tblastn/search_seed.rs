@@ -1016,6 +1016,161 @@ mod tests {
         assert!(scan_unambiguous_blosum62_words(query, b"ATN", 32, None, 13, false).is_ok());
         assert!(scan_unambiguous_blosum62_words(query, b"atg", 32, None, 13, false).is_ok());
     }
+    // NCBI c++/src/algo/blast/core/blast_query_info.c:68-96:
+    // each protein query receives one context; offsets advance length + 1,
+    // and the X-only third context is invalid for the lookup.
+    // NCBI c++/src/algo/blast/core/aa_ungapped.c:478-505 and
+    // c++/src/algo/blast/core/blast_engine.c:804-841:
+    // scansub emits every pair in frame/chunk order over both long chunks.
+    #[test]
+    fn long_multi_query_every_candidate_and_context_matches_ncbi() {
+        let root = concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../docs/evidence/tlosan_stage_c/"
+        );
+        let fixture = format!("{root}long_multi_query_20260924/");
+        let queries = read_fasta(&format!("{fixture}query.faa"));
+        let refs: Vec<&[u8]> = queries.iter().map(|(_, seq)| seq.as_slice()).collect();
+        let plus1 = read_fasta(&format!("{root}run_20260923/subjects.fna"))
+            .into_iter()
+            .find(|(id, _)| id == "plus1")
+            .unwrap()
+            .1;
+        let mut subject = Vec::with_capacity(15_000_962);
+        for _ in 0..4_999_950 {
+            subject.extend_from_slice(b"ATG");
+        }
+        subject.extend_from_slice(&plus1);
+        for _ in 0..250 {
+            subject.extend_from_slice(b"ATG");
+        }
+        assert_eq!(subject.len(), 15_000_962);
+        let frames: Vec<_> = refs
+            .iter()
+            .map(|query| vec![encode_protein_query_frame_with_seg(query, None)])
+            .collect();
+        let karlin = lookup_protein_params_ungapped(ScoringMatrix::Blosum62);
+        let (_, contexts) = build_ncbi_lookup(&frames, 13, &karlin, false);
+        let actual_contexts: Vec<_> = contexts
+            .iter()
+            .map(|c| (c.q_idx as usize, c.frame_base, c.aa_len, c.is_valid))
+            .collect();
+        let gapped_trace = fs::read_to_string(format!("{fixture}gapped_events.tsv")).unwrap();
+        let expected_contexts: Vec<_> = gapped_trace
+            .lines()
+            .filter(|line| line.starts_with("QUERY_CONTEXT\t0\t"))
+            .map(|line| {
+                let f: Vec<_> = line.split('\t').collect();
+                (
+                    f[3].parse().unwrap(),
+                    f[4].parse().unwrap(),
+                    f[5].parse().unwrap(),
+                    f[7] == "1",
+                )
+            })
+            .collect();
+        assert_eq!(actual_contexts, expected_contexts);
+        assert_eq!(
+            actual_contexts,
+            [(0, 0, 120, true), (1, 121, 70, true), (2, 192, 120, false)]
+        );
+        let trace = fs::read_to_string(format!("{fixture}candidate.stderr")).unwrap();
+        assert_eq!(
+            trace.lines().filter(|l| l.starts_with("PARAM\t")).count(),
+            12
+        );
+        assert_eq!(trace.lines().filter(|l| l.starts_with("END\t")).count(), 12);
+        // NCBI c++/src/algo/blast/core/aa_ungapped.c:478-505:
+        // scansub reads the same per-call scan
+        // parameters and chunk state before returning each ordered pair.
+        let params: Vec<_> = trace
+            .lines()
+            .filter(|l| l.starts_with("PARAM\t"))
+            .map(|line| {
+                let f: Vec<_> = line.split('\t').collect();
+                (
+                    f[1].parse::<usize>().unwrap(),
+                    f[2].parse::<i32>().unwrap(),
+                    f[3].parse::<i32>().unwrap(),
+                    f[4].parse::<i32>().unwrap(),
+                )
+            })
+            .collect();
+        assert_eq!(params.len(), 12);
+        for (call, row) in params.iter().enumerate() {
+            assert_eq!(*row, (call, 16, 16, 28));
+        }
+        let frame_order = [1, 2, 3, -1, -2, -3];
+        let chunk_rows = fs::read_to_string(format!("{fixture}frame_chunks.tsv")).unwrap();
+        let observed_chunks: Vec<_> = chunk_rows
+            .lines()
+            .filter(|line| line.starts_with("FRAME_CHUNK\t"))
+            .map(|line| {
+                let f: Vec<_> = line.split('\t').collect();
+                (
+                    f[1].parse::<usize>().unwrap(),
+                    f[2].parse::<i8>().unwrap(),
+                    f[3].parse::<usize>().unwrap(),
+                )
+            })
+            .collect();
+        assert_eq!(observed_chunks.len(), 12);
+        for (call, row) in observed_chunks.iter().enumerate() {
+            assert_eq!(
+                *row,
+                (
+                    call,
+                    frame_order[call / 2],
+                    if call % 2 == 0 { 5_000_000 } else { 420 }
+                )
+            );
+        }
+        let mut candidate_counts = [0usize; 12];
+        let expected: Vec<_> = trace
+            .lines()
+            .filter(|l| l.starts_with("CAND\t"))
+            .map(|line| {
+                let f: Vec<_> = line.split('\t').collect();
+                let call: usize = f[1].parse().unwrap();
+                candidate_counts[call] += 1;
+                Seed {
+                    frame: frame_order[call / 2],
+                    chunk_offset: if call % 2 == 0 { 0 } else { 4_999_900 },
+                    query_offset: f[3].parse().unwrap(),
+                    subject_offset: f[4].parse().unwrap(),
+                }
+            })
+            .collect();
+        assert_eq!(expected.len(), 394);
+        let ends: Vec<_> = trace
+            .lines()
+            .filter(|l| l.starts_with("END\t"))
+            .map(|line| {
+                let f: Vec<_> = line.split('\t').collect();
+                (
+                    f[1].parse::<usize>().unwrap(),
+                    f[2].parse::<usize>().unwrap(),
+                )
+            })
+            .collect();
+        assert_eq!(ends.len(), 12);
+        for (call, row) in ends.iter().enumerate() {
+            assert_eq!(*row, (call, candidate_counts[call]));
+        }
+        assert!(expected.iter().all(|seed| seed.query_offset < 192));
+        let actual =
+            scan_unambiguous_blosum62_words_multi(&refs, &subject, 1, None, 13, false).unwrap();
+        if actual != expected {
+            let first = actual
+                .iter()
+                .zip(&expected)
+                .position(|(left, right)| left != right)
+                .unwrap_or(actual.len().min(expected.len()));
+            panic!("first long multi-query candidate difference at {first}: Rust={:?}, NCBI={:?}; counts Rust={} NCBI={}",
+                   actual.get(first), expected.get(first), actual.len(), expected.len());
+        }
+    }
+
     // NCBI c++/src/algo/blast/core/blast_engine.c:804-841:
     // for (context=first_context; context<=last_context; context++) {
     //     status = s_BlastSearchEngineOneContext(...);

@@ -1,0 +1,10 @@
+Comparison-only pinned NCBI local -subject TBLASTN chunk fixture.
+NCBI source commit: 598d8ae6a72b923127ba2fbfaffd48e4c83bfbf4
+NCBI binary SHA256: e3956f1e107a30439d56c8f72fae4267a7d62ebcc16e4f99d4baf2bdf00402e0
+Prefix: ATG x 4999950 codons; insert: saved plus1 362 nt; suffix: ATG x 250 codons.
+Query input: multi_query_20260924/query.faa.
+Subject length: 15000962 nt; first frame: 5000320 residues.
+Input SHA256: query=c5304b0567e07d7b4e3d59a63af6b3509eb1c42c017efa5deefe540c23d75aba subject=1a73df75b776ecf57b05280910fc9891e1a527426b0975ea782c267d3e2b97c3
+Probe source SHA256: wordfinder=074b015577b2725031a8707c65b0597499794be60d64bc8e294ad0835fae8de4, gapped=53ec3b8d9901769a1a14fad3404cff391d7c7cd0a29929b14b0455eeb198b8fc, ranges=2fe153e96d909a8fe5d3ed941ff677d1dc57d90e5b9eaffcbacd0a177bc8ab5e, candidate=ce763167e30c1630bac05f15c5a86209d40c90c125ba4238447770a95d6634e3, context=a17cbea752db01560f7e07c33aa4c22b2cc4d6d60759a4a1db3b26cb0394b821, wordcutoffs=d1960e153a9b018eb7d1cf1ef5f85b01a67c2c59e2f3bd83a37c61bc78ef8e47
+Unprobed output equals all 6 probe outputs byte for byte: yes
+Command: ['/home/kawato/micromamba/bin/tblastn', '-task', 'tblastn', '-query', '/tmp/tlosan-c-long-multi-query-context-replay-20260924/query.faa', '-subject', '/tmp/tlosan-c-long-multi-query-context-replay-20260924/subjects.fna', '-db_gencode', '1', '-matrix', 'BLOSUM62', '-word_size', '3', '-threshold', '13', '-window_size', '40', '-gapopen', '11', '-gapextend', '1', '-evalue', '10000', '-num_threads', '1', '-comp_based_stats', '0', '-seg', 'no', '-sum_stats', 'false', '-outfmt', '6 qseqid sseqid score qstart qend sstart send sframe qseq sseq']

@@ -8,7 +8,7 @@ use crate::algorithm::tblastx::translation::generate_frames;
 use crate::config::ScoringMatrix;
 use crate::utils::genetic_code::GeneticCode;
 use crate::utils::seg::SegParams;
-use anyhow::Result;
+use anyhow::{ensure, Result};
 
 // NCBI reference: c++/include/algo/blast/core/blast_extend.h:142-163
 // typedef struct BlastUngappedData { Int4 q_start, s_start, length, score; } ...;
@@ -90,8 +90,8 @@ pub(super) fn find_blosum62_word3_init_hsps(
         seg,
         threshold,
         window,
-        x_dropoff,
-        cutoff_score,
+        &[x_dropoff],
+        &[cutoff_score],
         mask_lowercase,
     )
 }
@@ -113,8 +113,8 @@ pub(super) fn find_blosum62_word3_init_hsps_multi(
     seg: Option<&SegParams>,
     threshold: i32,
     window: i32,
-    x_dropoff: i32,
-    cutoff_score: i32,
+    x_dropoffs: &[i32],
+    cutoff_scores: &[i32],
     mask_lowercase: bool,
 ) -> Result<Vec<InitHsp>> {
     find_protein_init_hsps_multi(
@@ -124,8 +124,8 @@ pub(super) fn find_blosum62_word3_init_hsps_multi(
         seg,
         threshold,
         window,
-        x_dropoff,
-        cutoff_score,
+        x_dropoffs,
+        cutoff_scores,
         mask_lowercase,
         ScoringMatrix::Blosum62,
         3,
@@ -143,12 +143,19 @@ pub(super) fn find_protein_init_hsps_multi(
     seg: Option<&SegParams>,
     threshold: i32,
     window: i32,
-    x_dropoff: i32,
-    cutoff_score: i32,
+    x_dropoffs: &[i32],
+    cutoff_scores: &[i32],
     mask_lowercase: bool,
     matrix: ScoringMatrix,
     word_size: usize,
 ) -> Result<Vec<InitHsp>> {
+    // NCBI c++/src/algo/blast/core/aa_ungapped.c:547-583:
+    // cutoffs = word_params->cutoffs + curr_context;
+    // Require one cutoff per protein query for the indexed read.
+    ensure!(
+        x_dropoffs.len() == queries.len() && cutoff_scores.len() == queries.len(),
+        "one WordFinder x-drop and cutoff per query context"
+    );
     let resolved = resolve_local_subject_ncbi2na(subject)?;
     let code = GeneticCode::try_from_id(db_gencode).map_err(anyhow::Error::msg)?;
     let frames = generate_frames(&resolved, &code);
@@ -257,13 +264,16 @@ pub(super) fn find_protein_init_hsps_multi(
                     (previous + word_size_i32) as usize,
                     s as usize,
                     q as usize,
-                    x_dropoff,
+                    x_dropoffs[context],
                     word_size,
                 );
                 let Some(result) = result else {
                     continue;
                 };
-                if result.ungapped_data.score >= cutoff_score {
+                // NCBI c++/src/algo/blast/core/aa_ungapped.c:570-590:
+                // cutoffs = word_params->cutoffs + curr_context;
+                // if (score >= cutoffs->cutoff_score) BlastSaveInitHsp(...);
+                if result.ungapped_data.score >= cutoff_scores[context] {
                     hits.push(InitHsp {
                         frame: frame.frame,
                         chunk_offset: seed.chunk_offset,
@@ -410,8 +420,8 @@ mod tests {
             None,
             16,
             60,
-            21,
-            0,
+            &[21, 21, 0],
+            &[0, 0, i32::MAX],
             false,
             ScoringMatrix::Blosum45,
             2,
@@ -464,9 +474,18 @@ mod tests {
                 }
             })
             .collect();
-        let actual =
-            find_blosum62_word3_init_hsps_multi(&refs, subject, 1, None, 13, 40, 16, 0, false)
-                .unwrap();
+        let actual = find_blosum62_word3_init_hsps_multi(
+            &refs,
+            subject,
+            1,
+            None,
+            13,
+            40,
+            &[16, 16, 0],
+            &[0, 0, i32::MAX],
+            false,
+        )
+        .unwrap();
         if actual != expected {
             let first = actual
                 .iter()
@@ -480,6 +499,119 @@ mod tests {
                 actual.len(),
                 expected.len()
             );
+        }
+    }
+
+    // NCBI c++/src/algo/blast/core/aa_ungapped.c:570-590:
+    // cutoffs = word_params->cutoffs + curr_context;
+    // if (score >= cutoffs->cutoff_score) BlastSaveInitHsp(...);
+    // The saved natural multi-query fixture has score 20 in context 0 and
+    // score 393 in context 1, so equality and just-above cutoffs are distinct.
+    #[test]
+    fn wordfinder_cutoff_is_selected_per_query_context_at_score_boundary() {
+        let root = concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../docs/evidence/tlosan_stage_c/multi_query_20260924/"
+        );
+        let queries = read_fasta(&format!("{root}query.faa"));
+        let refs: Vec<&[u8]> = queries.iter().map(|(_, seq)| seq.as_slice()).collect();
+        let subject = &read_fasta(&format!("{root}subjects.fna"))[0].1;
+        let equal = find_blosum62_word3_init_hsps_multi(
+            &refs,
+            subject,
+            1,
+            None,
+            13,
+            40,
+            &[16, 16, 0],
+            &[20, 393, i32::MAX],
+            false,
+        )
+        .unwrap();
+        assert!(equal.iter().any(|h| h.score == 20 && h.q_seed < 121));
+        assert!(equal
+            .iter()
+            .any(|h| h.score == 393 && (121..192).contains(&h.q_seed)));
+        let above = find_blosum62_word3_init_hsps_multi(
+            &refs,
+            subject,
+            1,
+            None,
+            13,
+            40,
+            &[16, 16, 0],
+            &[21, 394, i32::MAX],
+            false,
+        )
+        .unwrap();
+        assert!(!above.iter().any(|h| h.score == 20 && h.q_seed < 121));
+        assert!(!above
+            .iter()
+            .any(|h| h.score == 393 && (121..192).contains(&h.q_seed)));
+    }
+
+    // NCBI c++/src/algo/blast/core/aa_ungapped.c:562-590:
+    // cutoffs = word_params->cutoffs + curr_context;
+    // s_BlastAaExtendTwoHit(..., cutoffs->x_dropoff, ...);
+    // The comparison-only real call changes context 1 x-drop from 16 to 1.
+    #[test]
+    fn real_wordfinder_distinct_context_xdrop_matches_ncbi() {
+        let root = concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../docs/evidence/tlosan_stage_c/"
+        );
+        let queries = read_fasta(&format!("{root}multi_query_20260924/query.faa"));
+        let refs: Vec<&[u8]> = queries.iter().map(|(_, seq)| seq.as_slice()).collect();
+        let subject = &read_fasta(&format!("{root}multi_query_20260924/subjects.fna"))[0].1;
+        let trace =
+            fs::read_to_string(format!("{root}word_xdrop_real_path_20260924/trace.tsv")).unwrap();
+        let injections: Vec<_> = trace
+            .lines()
+            .filter(|line| line.starts_with("WORD_XDROP_INJECT\t"))
+            .collect();
+        assert_eq!(injections.len(), 6);
+        for (call, line) in injections.iter().enumerate() {
+            assert_eq!(*line, format!("WORD_XDROP_INJECT\t{call}\t16\t1"));
+        }
+        let expected: Vec<_> = trace
+            .lines()
+            .filter(|line| line.starts_with("INIT\t"))
+            .map(|line| {
+                let f: Vec<_> = line.split('\t').collect();
+                let call: usize = f[1].parse().unwrap();
+                InitHsp {
+                    frame: [1, 2, 3, -1, -2, -3][call],
+                    chunk_offset: 0,
+                    q_seed: f[3].parse().unwrap(),
+                    s_seed: f[4].parse().unwrap(),
+                    q_start: f[5].parse().unwrap(),
+                    s_start: f[6].parse().unwrap(),
+                    length: f[7].parse().unwrap(),
+                    score: f[8].parse().unwrap(),
+                }
+            })
+            .collect();
+        assert_eq!(expected.len(), 32);
+        let actual = find_blosum62_word3_init_hsps_multi(
+            &refs,
+            subject,
+            1,
+            None,
+            13,
+            40,
+            &[16, 1, 0],
+            &[0, 0, i32::MAX],
+            false,
+        )
+        .unwrap();
+        if actual != expected {
+            let first = actual
+                .iter()
+                .zip(&expected)
+                .position(|(left, right)| left != right)
+                .unwrap_or(actual.len().min(expected.len()));
+            panic!("first distinct-context x-drop HSP difference at {first}: Rust={:?}, NCBI={:?}; counts Rust={} NCBI={}",
+                   actual.get(first), expected.get(first), actual.len(), expected.len());
         }
     }
 
@@ -697,8 +829,12 @@ mod tests {
                 }
             })
             .collect();
+        // NCBI c++/src/algo/blast/core/aa_ungapped.c:570-590:
+        // cutoffs = word_params->cutoffs + curr_context;
+        // if (score >= cutoffs->cutoff_score) BlastSaveInitHsp(...);
+        // Retained long-fixture PARAM rows give cutoff 28.
         let actual =
-            find_blosum62_word3_init_hsps(query, &subject, 1, None, 13, 40, 16, 0, false).unwrap();
+            find_blosum62_word3_init_hsps(query, &subject, 1, None, 13, 40, 16, 28, false).unwrap();
         assert_eq!(actual, expected);
     }
     // NCBI c++/src/algo/blast/core/blast_engine.c:283-310:
@@ -771,8 +907,12 @@ mod tests {
                 }
             })
             .collect();
+        // NCBI c++/src/algo/blast/core/aa_ungapped.c:570-590:
+        // cutoffs = word_params->cutoffs + curr_context;
+        // if (score >= cutoffs->cutoff_score) BlastSaveInitHsp(...);
+        // Retained long-fixture PARAM rows give cutoff 28.
         let actual =
-            find_blosum62_word3_init_hsps(query, &subject, 1, None, 13, 40, 16, 0, true).unwrap();
+            find_blosum62_word3_init_hsps(query, &subject, 1, None, 13, 40, 16, 28, true).unwrap();
         assert_eq!(actual, expected);
     }
     // NCBI c++/src/algo/blast/core/blast_engine.c:283-310,478-500:
@@ -857,8 +997,12 @@ mod tests {
                 }
             })
             .collect();
+        // NCBI c++/src/algo/blast/core/aa_ungapped.c:570-590:
+        // cutoffs = word_params->cutoffs + curr_context;
+        // if (score >= cutoffs->cutoff_score) BlastSaveInitHsp(...);
+        // Retained long-fixture PARAM rows give cutoff 30.
         let actual =
-            find_blosum62_word3_init_hsps(query, &subject, 1, None, 13, 40, 16, 0, true).unwrap();
+            find_blosum62_word3_init_hsps(query, &subject, 1, None, 13, 40, 16, 30, true).unwrap();
         assert_eq!(actual, expected);
     }
 }

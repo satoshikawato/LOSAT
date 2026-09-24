@@ -1,0 +1,10 @@
+Comparison-only NCBI real WordFinder per-context x-drop intervention.
+NCBI source commit: 598d8ae6a72b923127ba2fbfaffd48e4c83bfbf4
+NCBI binary SHA256: e3956f1e107a30439d56c8f72fae4267a7d62ebcc16e4f99d4baf2bdf00402e0
+Pinned source: aa_ungapped.c:562-590.
+Artificial input: each of six actual WordFinder calls receives context-1 x-drop 1 instead of 16; restored after each call.
+Input SHA256: query=c5304b0567e07d7b4e3d59a63af6b3509eb1c42c017efa5deefe540c23d75aba subject=cb8622ee051aab5bdafbcca2a9d656de1f2cad16dff9bbe15fc1b7118a2ec1b3
+Probe source SHA256: inject=ba0ad53880a78d70cd96501257716067bbd40c8b11f310a85545749956123beb wordfinder=074b015577b2725031a8707c65b0597499794be60d64bc8e294ad0835fae8de4
+Baseline output SHA256: 27f15ece134c1f89135b84b324177b98e8de6c09f7b6eb55d99b701947284cda
+Intervened output SHA256: 27f15ece134c1f89135b84b324177b98e8de6c09f7b6eb55d99b701947284cda
+Command: ['/home/kawato/micromamba/bin/tblastn', '-task', 'tblastn', '-query', '/mnt/c/Users/genom/GitHub/LOSAT/docs/evidence/tlosan_stage_c/multi_query_20260924/query.faa', '-subject', '/mnt/c/Users/genom/GitHub/LOSAT/docs/evidence/tlosan_stage_c/multi_query_20260924/subjects.fna', '-db_gencode', '1', '-matrix', 'BLOSUM62', '-word_size', '3', '-threshold', '13', '-window_size', '40', '-gapopen', '11', '-gapextend', '1', '-evalue', '10000', '-num_threads', '1', '-comp_based_stats', '0', '-seg', 'no', '-sum_stats', 'false', '-outfmt', '6 qseqid sseqid score qstart qend sstart send sframe qseq sseq']

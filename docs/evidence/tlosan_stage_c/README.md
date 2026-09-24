@@ -1,9 +1,12 @@
 # TLOSAN v0.2.0 Stage C work record — incomplete
 
-**Latest Stage C checkpoint:** [CONTINUATION_20260924_START_FAILURE.md](CONTINUATION_20260924_START_FAILURE.md)
-records the exact start-offset failure, deletion, successful acquisition,
-and HSP writeback in NCBI traceback.
-Stage C remains open; D and E have not begun.
+**Latest Stage C checkpoint:** [CONTINUATION_20260924_CHUNK_MULTI.md](CONTINUATION_20260924_CHUNK_MULTI.md)
+records long multi-query function state, positive chunk endpoint deletion,
+append cap, and complete-path containment. Stage C remains open; D and E
+have not begun.
+
+**Previous bounded checkpoint:** [CONTINUATION_20260924_START_FAILURE.md](CONTINUATION_20260924_START_FAILURE.md)
+records start-offset failure/deletion and successful HSP writeback.
 
 **Previous bounded checkpoint:** [CONTINUATION_20260924_CAND_HSP.md](CONTINUATION_20260924_CAND_HSP.md)
 records exact long-subject candidate streams and real-path HSPTest deletions.

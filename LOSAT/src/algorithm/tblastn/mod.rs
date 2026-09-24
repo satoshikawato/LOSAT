@@ -15,4 +15,7 @@ mod search_init;
 // Blast_HSPListPurgeHSPsWithCommonEndpoints(...);
 // Blast_HSPListSortByScore(hsp_list);
 mod search_gapped;
+// NCBI c++/src/algo/blast/core/blast_setup.c:729-735,770-847:
+// translated db_length /= 3 before per-context length adjustment and search space.
+mod stage_d_stats;
 pub use args::TblastnArgs;

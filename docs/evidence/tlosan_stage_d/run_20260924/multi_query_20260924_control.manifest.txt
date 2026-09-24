@@ -1,0 +1,9 @@
+Pinned NCBI source: 598d8ae6a72b923127ba2fbfaffd48e4c83bfbf4
+NCBI binary SHA256: e3956f1e107a30439d56c8f72fae4267a7d62ebcc16e4f99d4baf2bdf00402e0
+Probe source SHA256: 982280d0bcfc29c4088e69a3aea3bd768dba4defe7bb319669826c6a25ca938d
+Query SHA256: c5304b0567e07d7b4e3d59a63af6b3509eb1c42c017efa5deefe540c23d75aba
+Subject SHA256: cb8622ee051aab5bdafbcca2a9d656de1f2cad16dff9bbe15fc1b7118a2ec1b3
+Profile: control
+Command: /home/kawato/micromamba/bin/tblastn -task tblastn -query /mnt/c/Users/genom/GitHub/LOSAT/docs/evidence/tlosan_stage_c/multi_query_20260924/query.faa -subject /mnt/c/Users/genom/GitHub/LOSAT/docs/evidence/tlosan_stage_c/multi_query_20260924/subjects.fna -db_gencode 1 -num_threads 1 -outfmt 6 qseqid sseqid score bitscore evalue qstart qend sstart send sframe length -comp_based_stats 0 -sum_stats false
+Final output bytes unchanged by probe: yes
+D calls: 7

@@ -36,4 +36,7 @@ mod stage_d_results;
 // blast_traceback.c:1481-1499,1763-1776: preliminary lists enter Kappa,
 // then local results pass through the post-traceback pipes.
 mod stage_d_pipeline;
+// NCBI c++/src/algo/blast/format/blast_format.cpp:1411-1458:
+// PrintOneResultSet dispatches the retained search result to its output format.
+mod stage_e_report;
 pub use args::TblastnArgs;

@@ -1,0 +1,86 @@
+TBLASTN 2.17.0+
+
+
+Reference: Stephen F. Altschul, Thomas L. Madden, Alejandro A.
+Schaffer, Jinghui Zhang, Zheng Zhang, Webb Miller, and David J.
+Lipman (1997), "Gapped BLAST and PSI-BLAST: a new generation of
+protein database search programs", Nucleic Acids Res. 25:3389-3402.
+
+
+
+Database: User specified sequence set (Input:
+docs/evidence/tlosan_stage_c/multi_hsp_20260924/subjects.fna).
+           1 sequences; 2,364 total letters
+
+
+
+Query= q1
+
+Length=120
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+
+two_copies                                                            257     1e-92
+
+
+> two_copies
+Length=2364
+
+ Score = 257 bits (656),  Expect = 1e-92
+ Identities = 120/120 (100%), Positives = 120/120 (100%), Gaps = 0/120 (0%)
+ Frame = +3
+
+Query  1    MTEYWLVVVGAGGVGKSWLTIQLIQNHFVWEYDPTIEDSYRKQWVIDGETCLLDILDTAG  60
+            MTEYWLVVVGAGGVGKSWLTIQLIQNHFVWEYDPTIEDSYRKQWVIDGETCLLDILDTAG
+Sbjct  441  MTEYWLVVVGAGGVGKSWLTIQLIQNHFVWEYDPTIEDSYRKQWVIDGETCLLDILDTAG  620
+
+Query  61   QEEYWAMRDQYMRTGEGFLCVFAINNTKSFEDIHQYREQIKRVKDSDDVPMVLVGNKCDL  120
+            QEEYWAMRDQYMRTGEGFLCVFAINNTKSFEDIHQYREQIKRVKDSDDVPMVLVGNKCDL
+Sbjct  621  QEEYWAMRDQYMRTGEGFLCVFAINNTKSFEDIHQYREQIKRVKDSDDVPMVLVGNKCDL  800
+
+
+ Score = 257 bits (656),  Expect = 1e-92
+ Identities = 120/120 (100%), Positives = 120/120 (100%), Gaps = 0/120 (0%)
+ Frame = +3
+
+Query  1     MTEYWLVVVGAGGVGKSWLTIQLIQNHFVWEYDPTIEDSYRKQWVIDGETCLLDILDTAG  60
+             MTEYWLVVVGAGGVGKSWLTIQLIQNHFVWEYDPTIEDSYRKQWVIDGETCLLDILDTAG
+Sbjct  1503  MTEYWLVVVGAGGVGKSWLTIQLIQNHFVWEYDPTIEDSYRKQWVIDGETCLLDILDTAG  1682
+
+Query  61    QEEYWAMRDQYMRTGEGFLCVFAINNTKSFEDIHQYREQIKRVKDSDDVPMVLVGNKCDL  120
+             QEEYWAMRDQYMRTGEGFLCVFAINNTKSFEDIHQYREQIKRVKDSDDVPMVLVGNKCDL
+Sbjct  1683  QEEYWAMRDQYMRTGEGFLCVFAINNTKSFEDIHQYREQIKRVKDSDDVPMVLVGNKCDL  1862
+
+
+ Score = 14.6 bits (26),  Expect = 3.1
+ Identities = 3/7 (43%), Positives = 6/7 (86%), Gaps = 0/7 (0%)
+ Frame = -1
+
+Query  13    GVGKSWL  19
+             G+G +W+
+Sbjct  2085  GLGAAWI  2065
+
+
+
+Lambda      K        H        a         alpha
+   0.322    0.139    0.450    0.792     4.96 
+
+Gapped
+Lambda      K        H        a         alpha    sigma
+   0.267   0.0410    0.140     1.90     42.6     43.6 
+
+Effective search space used: 71628
+
+
+  Database: User specified sequence set (Input:
+docs/evidence/tlosan_stage_c/multi_hsp_20260924/subjects.fna).
+    Posted date:  Unknown
+  Number of letters in database: 2,364
+  Number of sequences in database:  1
+
+
+
+Matrix: BLOSUM62
+Gap Penalties: Existence: 11, Extension: 1
+Neighboring words threshold: 13
+Window for multiple hits: 40

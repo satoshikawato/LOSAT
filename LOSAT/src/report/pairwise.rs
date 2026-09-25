@@ -70,6 +70,13 @@ pub struct PairwiseHit {
     pub subject_length: Option<usize>,
     /// Subject description/title
     pub subject_title: Option<String>,
+    // NCBI c++/src/algo/blast/core/blast_kappa.c:331-342;
+    // c++/src/objtools/align_format/showalign.cpp:3599-3604:
+    // eCompoScaleOldMatrix => Method 1; other adjusted matrices => Method 2.
+    pub comp_adjust_method: Option<u8>,
+    // NCBI c++/src/objtools/align_format/showalign.cpp:3595-3598:
+    // if (aln_vec_info->sum_n > 0) out << "(" << sum_n << ")";
+    pub sum_n: Option<i32>,
 }
 
 impl From<Hit> for PairwiseHit {
@@ -86,6 +93,8 @@ impl From<Hit> for PairwiseHit {
             gaps: Some(gaps),
             subject_length: None,
             subject_title: None,
+            comp_adjust_method: None,
+            sum_n: None,
         }
     }
 }
@@ -261,7 +270,7 @@ pub fn write_hsp_info<W: Write>(
     if config.program.contains("blast") && !config.program.contains("blastn") {
         writeln!(
             writer,
-            " Identities = {}/{} ({:.0}%), Positives = {}/{} ({:.0}%), Gaps = {}/{} ({:.0}%)",
+            " Identities = {}/{} ({}%), Positives = {}/{} ({}%), Gaps = {}/{} ({}%)",
             num_ident,
             align_len,
             ident_pct,
@@ -1386,4 +1395,269 @@ mod tests {
         assert!(output_str.contains("Query= test_query"));
         assert!(output_str.contains("> subject1"));
     }
+}
+
+// NCBI c++/src/algo/blast/format/blast_format.cpp:348-445,1490-1589:
+// PrintProlog(); AcknowledgeBlastQuery(...); x_DisplayDeflines(...);
+// display.DisplaySeqalign(...); x_PrintOneQueryFooter(...);
+// This uses the local-subject database header and TBLASTN translated alignment.
+pub fn write_tblastn_pairwise_report<W: Write>(
+    hits: &[PairwiseHit],
+    writer: &mut W,
+    config: &PairwiseConfig,
+    queries: &[BlastpPairwiseQuery],
+    query_validity: &[bool],
+    subject_ids: &[Arc<str>],
+    report: &BlastpPairwiseReport,
+) -> io::Result<()> {
+    let mut writer = io::BufWriter::new(writer);
+    // NCBI c++/src/algo/blast/format/blast_format.cpp:372-424:
+    // BlastPrintVersionInfo(m_Program,...); BlastPrintReference(...);
+    writeln!(writer, "TBLASTN {}", report.version)?;
+    writeln!(writer)?;
+    writeln!(writer)?;
+    writeln!(
+        writer,
+        "Reference: Stephen F. Altschul, Thomas L. Madden, Alejandro A."
+    )?;
+    writeln!(
+        writer,
+        "Schaffer, Jinghui Zhang, Zheng Zhang, Webb Miller, and David J."
+    )?;
+    writeln!(
+        writer,
+        "Lipman (1997), \"Gapped BLAST and PSI-BLAST: a new generation of"
+    )?;
+    writeln!(
+        writer,
+        "protein database search programs\", Nucleic Acids Res. 25:3389-3402."
+    )?;
+    writeln!(writer)?;
+    writeln!(writer)?;
+    writeln!(writer)?;
+    write_blastp_database_header(
+        &mut writer,
+        &report.database_name,
+        report.database_num_sequences,
+        report.database_total_letters,
+    )?;
+
+    let mut hits_by_query: Vec<Vec<&PairwiseHit>> = vec![Vec::new(); queries.len()];
+    for hit in hits {
+        if let Some(bucket) = hits_by_query.get_mut(hit.hit.q_idx as usize) {
+            bucket.push(hit);
+        }
+    }
+    for (q_idx, query) in queries.iter().enumerate() {
+        write_blastp_query_header(&mut writer, &query.query_name, query.query_length)?;
+        let query_hits = &hits_by_query[q_idx];
+        if query_hits.is_empty() {
+            write_no_hits_found(&mut writer)?;
+            // NCBI blast_results.cpp:82-97 leaves both Karlin blocks null
+            // when there is no valid context. blast_format.cpp:445-477
+            // writes only the blank lines and zero search space in that case.
+            if !query_validity[q_idx] {
+                writeln!(writer)?;
+                writeln!(writer)?;
+                writeln!(writer)?;
+                writeln!(writer, "Effective search space used: 0")?;
+                writeln!(writer)?;
+                writeln!(writer)?;
+            } else {
+                write_blastp_query_footer(
+                    &mut writer,
+                    query.ungapped_karlin,
+                    report.gapped_karlin,
+                    report.gumbel,
+                    query.effective_search_space,
+                )?;
+            }
+            continue;
+        }
+        let mut subject_hits: std::collections::HashMap<u32, Vec<&PairwiseHit>> =
+            std::collections::HashMap::new();
+        let mut subject_order = Vec::new();
+        for hit in query_hits {
+            if !subject_hits.contains_key(&hit.hit.s_idx) {
+                subject_order.push(hit.hit.s_idx);
+            }
+            subject_hits.entry(hit.hit.s_idx).or_default().push(*hit);
+        }
+        write_subject_summary_table(&mut writer, &subject_order, &subject_hits, subject_ids)?;
+        writeln!(writer)?;
+        for s_idx in subject_order {
+            let shits = &subject_hits[&s_idx];
+            let first = shits[0];
+            write_subject_header(
+                &mut writer,
+                &subject_ids[s_idx as usize],
+                first.subject_title.as_deref(),
+                first.subject_length,
+            )?;
+            for hit in shits {
+                write_tblastn_hsp_info(&mut writer, hit)?;
+                write_tblastn_alignment(&mut writer, hit, config)?;
+                // NCBI c++/src/objtools/align_format/showalign.cpp:3650-3668:
+                // display leaves an extra blank line after each translated HSP.
+                writeln!(writer)?;
+            }
+        }
+        write_blastp_query_footer(
+            &mut writer,
+            query.ungapped_karlin,
+            report.gapped_karlin,
+            report.gumbel,
+            query.effective_search_space,
+        )?;
+    }
+    write_blastp_final_footer(&mut writer, report)?;
+    writer.flush()
+}
+
+// NCBI c++/src/objtools/align_format/showalign.cpp:3578-3604,2122-2149:
+// out << " Score = " << bit_score << " bits (" << score << ")";
+// if (comp_adjust) out << ", Method: Compositional matrix adjust.";
+// out << " Identities = ..." << " Positives = ..." << " Gaps = ...";
+// TBLASTN reports one translated subject frame, without a query frame.
+fn write_tblastn_hsp_info<W: Write>(writer: &mut W, hit: &PairwiseHit) -> io::Result<()> {
+    let h = &hit.hit;
+    let bits = format_bitscore_ncbi(h.bit_score);
+    let evalue = format_evalue_ncbi(h.e_value);
+    // NCBI c++/src/objtools/align_format/showalign.cpp:3599-3604:
+    // if (comp_adj_method == 1) out << ", Method: Composition-based stats.";
+    // else if (comp_adj_method == 2) out << ", Method: Compositional matrix adjust.";
+    let method = match hit.comp_adjust_method {
+        Some(1) => ", Method: Composition-based stats.",
+        Some(2) => ", Method: Compositional matrix adjust.",
+        _ => "",
+    };
+    // NCBI c++/src/algo/blast/api/blast_seqalign.cpp:1180-1182:
+    // if (hsp->num > 1) scores.push_back(s_MakeScore("sum_n", ..., hsp->num));
+    // NCBI c++/src/objtools/align_format/showalign.cpp:3595-3598:
+    // if (aln_vec_info->sum_n > 0) out << "(" << aln_vec_info->sum_n << ")";
+    let expect = hit
+        .sum_n
+        .filter(|&count| count > 1)
+        .map_or_else(|| "Expect".to_string(), |count| format!("Expect({count})"));
+    writeln!(
+        writer,
+        " Score = {} bits ({}),  {} = {}{}",
+        bits, h.raw_score, expect, evalue, method
+    )?;
+    let length = h.length;
+    // NCBI align_format_util.cpp:3152-3161:
+    // if (numerator == denominator) return 100;
+    // int retval = (int)(0.5 + 100.0*numerator/denominator);
+    // return min(99, retval);
+    let percent = |n: usize| -> usize {
+        if n == length {
+            100
+        } else if length == 0 {
+            0
+        } else {
+            ((0.5 + 100.0 * n as f64 / length as f64) as usize).min(99)
+        }
+    };
+    let positives = hit.positives.unwrap_or(h.num_positives);
+    let gaps = hit.gaps.unwrap_or_else(|| h.gap_letters());
+    writeln!(
+        writer,
+        " Identities = {}/{} ({:.0}%), Positives = {}/{} ({:.0}%), Gaps = {}/{} ({:.0}%)",
+        h.num_ident,
+        length,
+        percent(h.num_ident),
+        positives,
+        length,
+        percent(positives),
+        gaps,
+        length,
+        percent(gaps)
+    )?;
+    if let Some(frame) = hit.subject_frame {
+        if frame > 0 {
+            writeln!(writer, " Frame = +{frame}")?;
+        } else {
+            writeln!(writer, " Frame = {frame}")?;
+        }
+    }
+    writeln!(writer)?;
+    Ok(())
+}
+
+// NCBI c++/src/objtools/align_format/showalign.cpp:1600-1625,2122-2149:
+// AddSpace(out,maxStartLen-startLen+k_StartSequenceMargin); out << sequence;
+// if (sequence_standard[i]==sequence[i]) middle_line[i]=sequence[i];
+// else if (m_Matrix[...]>0) middle_line[i]='+';
+// NCBI c++/src/algo/blast/core/blast_hits.c:1087-1105:
+// translated subject offsets advance by CODON_LENGTH per aligned residue.
+fn write_tblastn_alignment<W: Write>(
+    writer: &mut W,
+    hit: &PairwiseHit,
+    config: &PairwiseConfig,
+) -> io::Result<()> {
+    let (Some(qseq), Some(sseq)) = (&hit.query_seq, &hit.subject_seq) else {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidData,
+            "missing TBLASTN alignment strings",
+        ));
+    };
+    let q = qseq.as_bytes();
+    let s = sseq.as_bytes();
+    if q.len() != s.len() {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidData,
+            "TBLASTN alignment string lengths differ",
+        ));
+    }
+    let max_pos = hit
+        .hit
+        .q_start
+        .max(hit.hit.q_end)
+        .max(hit.hit.s_start)
+        .max(hit.hit.s_end);
+    let width = digit_count(max_pos);
+    let direction: isize = if hit.subject_frame.unwrap_or(1) < 0 {
+        -1
+    } else {
+        1
+    };
+    let mut q_pos = hit.hit.q_start;
+    let mut s_pos = hit.hit.s_start as isize;
+    for (qpart, spart) in q
+        .chunks(config.line_length)
+        .zip(s.chunks(config.line_length))
+    {
+        let q_count = qpart.iter().filter(|&&c| c != b'-').count();
+        let s_count = spart.iter().filter(|&&c| c != b'-').count();
+        let q_end = q_pos + q_count.saturating_sub(1);
+        let s_end = s_pos + direction * (3 * s_count as isize - 1);
+        write!(writer, "Query  {}", q_pos)?;
+        write_spaces(writer, width - digit_count(q_pos) + 2)?;
+        writer.write_all(qpart)?;
+        write!(writer, "  {}\n", q_end)?;
+        write_spaces(writer, 7 + width + 2)?;
+        for (&qc, &sc) in qpart.iter().zip(spart) {
+            // NCBI c++/src/objtools/align_format/showalign.cpp:2122-2149:
+            // the displayed query preserves lowercase masking, while the
+            // protein matrix comparison uses its uppercase residue.
+            let query_residue = qc.to_ascii_uppercase();
+            let mid = if query_residue == sc {
+                query_residue
+            } else if is_positive_match(query_residue as char, sc as char, config.protein_matrix) {
+                b'+'
+            } else {
+                b' '
+            };
+            writer.write_all(&[mid])?;
+        }
+        writeln!(writer)?;
+        write!(writer, "Sbjct  {}", s_pos)?;
+        write_spaces(writer, width - digit_count(s_pos.unsigned_abs()) + 2)?;
+        writer.write_all(spart)?;
+        write!(writer, "  {}\n", s_end)?;
+        writeln!(writer)?;
+        q_pos = q_end + 1;
+        s_pos = s_end + direction;
+    }
+    Ok(())
 }

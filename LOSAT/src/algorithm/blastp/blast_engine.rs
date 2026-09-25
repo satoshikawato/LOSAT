@@ -2737,6 +2737,11 @@ fn build_pairwise_hits(
                 gaps: Some(gaps),
                 subject_length: Some(subjects[s_idx].aa_len),
                 subject_title: subject_titles[s_idx].clone(),
+                // NCBI core/blast_kappa.c:331-342: BLASTP method is handled by its writer.
+                comp_adjust_method: None,
+                // NCBI showalign.cpp:3595-3598: this optional Stage E field is
+                // consumed only by the TBLASTN writer; BLASTP keeps its writer.
+                sum_n: None,
             }
         })
         .collect()
@@ -6359,6 +6364,11 @@ mod tests {
             gaps: Some(1),
             subject_length: Some(30),
             subject_title: Some("subject description".to_string()),
+            // NCBI core/blast_kappa.c:331-342: BLASTP method is handled by its writer.
+            comp_adjust_method: None,
+            // NCBI showalign.cpp:3595-3598: this optional Stage E field is
+            // consumed only by the TBLASTN writer; BLASTP keeps its writer.
+            sum_n: None,
         }
     }
 

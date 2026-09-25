@@ -101,10 +101,52 @@ impl Default for LocalStageDScoring {
 #[derive(Default)]
 struct StageDBoundaryTrace {
     parameters: Option<LocalSubjectParameters>,
+    // NCBI c++/src/algo/blast/api/blast_results.cpp:72-115:
+    // s_InitializeKarlinBlk(sbp->kbp_std[ctx_index], &m_UngappedKarlinBlk);
+    ungapped_karlin: Vec<KarlinParams>,
+    query_validity: Vec<bool>,
     subject_nt_lengths: Vec<usize>,
     preliminary: Vec<(usize, Vec<(usize, GappedHsp)>)>,
     redo: Vec<(usize, usize, Vec<GappedHsp>)>,
     posttraceback_lengths: Vec<(usize, usize, i32)>,
+}
+
+// NCBI c++/src/algo/blast/core/blast_setup.c:1011-1024;
+// c++/src/algo/blast/format/blast_format.cpp:445-477:
+// BLAST_CalcEffLengths(...); BlastHitSavingParametersUpdate(...);
+// x_PrintOneQueryFooter(*results.GetAncillaryData());
+// Formatting consumes the same initial context lengths computed before search.
+pub(super) fn run_local_for_report(
+    queries: &[Vec<u8>],
+    subjects: &[Vec<u8>],
+    profile: LocalStageDProfile<'_>,
+    composition_mode2: bool,
+    do_sum_stats: bool,
+    scoring: LocalStageDScoring,
+) -> Result<(
+    Vec<KappaResultHitList>,
+    LocalSubjectParameters,
+    Vec<KarlinParams>,
+    Vec<bool>,
+)> {
+    let mut trace = StageDBoundaryTrace::default();
+    let results = run_local_search(
+        queries,
+        subjects,
+        profile,
+        composition_mode2,
+        do_sum_stats,
+        scoring,
+        Some(&mut trace),
+    )?;
+    Ok((
+        results,
+        trace
+            .parameters
+            .context("missing TBLASTN initial parameters")?,
+        trace.ungapped_karlin,
+        trace.query_validity,
+    ))
 }
 
 // NCBI c++/src/algo/blast/core/blast_engine.c:870-905;
@@ -345,6 +387,15 @@ fn run_local_search(
     );
     if let Some(ref mut trace) = observer {
         trace.parameters = Some(parameters.clone());
+        // NCBI c++/src/algo/blast/api/blast_results.cpp:72-115:
+        // s_InitializeKarlinBlk(sbp->kbp_std[ctx_index], &m_UngappedKarlinBlk);
+        trace.ungapped_karlin = contexts
+            .iter()
+            .map(|context| context.karlin_params)
+            .collect();
+        // NCBI blast_results.cpp:82-97: no valid context returns before
+        // Karlin block initialization and leaves search space at zero.
+        trace.query_validity = contexts.iter().map(|context| context.is_valid).collect();
         trace.subject_nt_lengths = subjects.iter().map(Vec::len).collect();
     }
     let link = parameters.link;

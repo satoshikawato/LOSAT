@@ -1,0 +1,6 @@
+{
+  "ncbi_executable_sha256": "e3956f1e107a30439d56c8f72fae4267a7d62ebcc16e4f99d4baf2bdf00402e0",
+  "ncbi_api_oracle_sha256": "d8e0f100143031db5121e13907ec34c31a84e258adbf3f92241976916f1536bb",
+  "losat_executable_sha256": "da85b0a87a0bc92fcfa1bcc92fb8aa76716424286468a60a92994d2ddfca5e87",
+  "ncbi_source_commit": "598d8ae6a72b923127ba2fbfaffd48e4c83bfbf4"
+}

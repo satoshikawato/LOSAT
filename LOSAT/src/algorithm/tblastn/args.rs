@@ -1,12 +1,17 @@
-//! Pinned NCBI TBLASTN option profile; no search engine is exposed yet.
-use anyhow::{bail, Result};
+//! Pinned NCBI TBLASTN local-subject search and Stage E report options.
+use anyhow::{bail, Context, Result};
+use bio::io::fasta;
 use clap::Args;
+use std::io::Write;
 use std::path::PathBuf;
 
 use crate::blastinput::value_parsers::*;
 use crate::utils::genetic_code::GeneticCode;
 
 use super::scoring::{matrix_params, suggested_threshold, suggested_window_size};
+use super::stage_d_pipeline::{run_local_for_report, LocalStageDProfile, LocalStageDScoring};
+use super::stage_e_report::render;
+use crate::config::ScoringMatrix;
 
 // NCBI reference: c++/src/algo/blast/blastinput/tblastn_args.cpp:45-125
 // ```c++
@@ -74,6 +79,15 @@ pub struct TblastnArgs {
     pub matrix: String,
     #[arg(long, value_parser = tblastn_threshold)]
     pub threshold: Option<f64>,
+    // NCBI c++/src/algo/blast/blastinput/blast_args.cpp:220-229,280-286:
+    // arg_desc.AddOptionalKey(kArgGappedXDropoff, "float_value", ...);
+    // arg_desc.AddOptionalKey(kArgFinalGappedXDropoff, "float_value", ...);
+    // opt.SetGapXDropoff(args[kArgGappedXDropoff].AsDouble());
+    // opt.SetGapXDropoffFinal(args[kArgFinalGappedXDropoff].AsDouble());
+    #[arg(long, value_parser = nonnegative_f64)]
+    pub xdrop_gap: Option<f64>,
+    #[arg(long, value_parser = nonnegative_f64)]
+    pub xdrop_gap_final: Option<f64>,
     #[arg(long, default_value = "2", value_parser = tblastn_composition)]
     pub comp_based_stats: String,
     #[arg(long, default_value = "0", value_parser = tblastn_outfmt)]
@@ -133,7 +147,7 @@ pub struct TblastnArgs {
 //     return BLASTERR_OPTION_VALUE_INVALID;
 // }
 // ```
-// No cutoff-score option is exposed on this Stage B TBLASTN profile.
+// No cutoff-score option is exposed on this local TBLASTN profile.
 fn tblastn_evalue(value: &str) -> std::result::Result<f64, String> {
     let evalue = nonnegative_f64(value)?;
     if evalue == 0.0 {
@@ -226,7 +240,7 @@ pub fn tblastn_outfmt(value: &str) -> std::result::Result<String, String> {
     if matches!(value, "0" | "6" | "7") {
         Ok(value.to_string())
     } else {
-        Err("unsupported TBLASTN outfmt: Stage E will implement 0, 6 and 7 output".into())
+        Err("unsupported TBLASTN outfmt: available formats are 0, 6 and 7".into())
     }
 }
 
@@ -357,15 +371,143 @@ impl TblastnArgs {
         Ok(())
     }
 
-    // NCBI reference: c++/src/app/blast/tblastn_app.cpp:288-301
-    // ```c++
+    // NCBI c++/src/app/blast/tblastn_app.cpp:288-301:
     // results = lcl_blast.Run();
     // formatter.PrintOneResultSet(**result, query);
-    // ```
-    // Search and reporting are absent until Stages C-E, so no successful result is possible.
+    // NCBI c++/src/algo/blast/format/blast_format.cpp:1411-1458:
+    // PrintOneResultSet dispatches the complete result to outfmt 0/6/7.
     pub fn run(self) -> Result<()> {
         self.validate()?;
-        bail!("TBLASTN local search is unimplemented (Stages C-E)")
+        // NCBI c++/src/algo/blast/blastinput/blast_args.cpp:838-866;
+        // core/blast_traceback.c:1481-1501:
+        // compo_mode selects ordinary traceback or composition redo.
+        // The Stage D port covers only these two choices.
+        let composition_mode2 = match self.comp_based_stats.chars().next() {
+            Some('0' | 'F' | 'f') => false,
+            Some('2') => true,
+            _ => bail!(
+                "unsupported TBLASTN -comp_based_stats value: {}",
+                self.comp_based_stats
+            ),
+        };
+        // NCBI c++/src/algo/blast/core/blast_options.c:903-936;
+        // core/blast_parameters.c:774-815:
+        // Unsupported scoring, intron, and ungapped branches fail before
+        // opening the output stream.
+        if self.max_intron_length != 0 {
+            bail!("unsupported TBLASTN -max_intron_length");
+        }
+        if self.ungapped {
+            bail!("unsupported TBLASTN -ungapped search");
+        }
+        if self.num_threads != 1 {
+            bail!("unsupported TBLASTN -num_threads until parallel search is implemented");
+        }
+        let matrix: ScoringMatrix = self.matrix.parse().map_err(anyhow::Error::msg)?;
+        let params = matrix_params(&self.matrix).context("missing TBLASTN matrix parameters")?;
+        let (gap_open, gap_extend) = (
+            self.gap_open.unwrap_or(params.preferred.0),
+            self.gap_extend.unwrap_or(params.preferred.1),
+        );
+        let threshold = self.effective_threshold();
+        let window = self.effective_window_size();
+        let profile_supported = (matrix == ScoringMatrix::Blosum62
+            && self.word_size == 3
+            && gap_open == 11
+            && gap_extend == 1
+            && threshold == 13.0
+            && window == 40)
+            || (matrix == ScoringMatrix::Blosum45
+                && !composition_mode2
+                && self.word_size == 2
+                && gap_open == 14
+                && gap_extend == 2
+                && threshold == 16.0
+                && window == 60);
+        if !profile_supported {
+            bail!("unsupported TBLASTN scoring and lookup option combination");
+        }
+        let query_path = self.query.as_ref().context("TBLASTN query file missing")?;
+        let subject_path = self
+            .subject
+            .as_ref()
+            .context("TBLASTN subject file missing")?;
+        // NCBI c++/src/algo/blast/blastinput/blast_input_aux.cpp:242-246:
+        // sequences = input->GetAllSeqs(*scope);
+        let read = |path: &std::path::Path| -> Result<Vec<fasta::Record>> {
+            fasta::Reader::from_file(path)
+                .with_context(|| format!("failed to open FASTA {}", path.display()))?
+                .records()
+                .collect::<std::result::Result<Vec<_>, _>>()
+                .with_context(|| format!("failed to read FASTA {}", path.display()))
+        };
+        let queries = read(query_path)?;
+        let subjects = read(subject_path)?;
+        let query_seqs: Vec<_> = queries.iter().map(|record| record.seq().to_vec()).collect();
+        let subject_seqs: Vec<_> = subjects
+            .iter()
+            .map(|record| record.seq().to_vec())
+            .collect();
+        let seg = self.seg.params();
+        let (results, lengths, ungapped_karlin, query_validity) = run_local_for_report(
+            &query_seqs,
+            &subject_seqs,
+            LocalStageDProfile {
+                seg: seg.as_ref(),
+                soft_masking: self.soft_masking,
+                mask_lowercase: self.lcase_masking,
+                genetic_code: self.db_gencode,
+                expect_value: self.evalue,
+                max_target_seqs: self.max_target_seqs,
+            },
+            composition_mode2,
+            self.sum_stats,
+            LocalStageDScoring {
+                matrix,
+                gap_open,
+                gap_extend,
+                word_size: self.word_size,
+                threshold: threshold as i32,
+                window: i32::try_from(window)?,
+                gap_xdrop_bits: self.xdrop_gap.unwrap_or(15.0),
+                final_xdrop_bits: self.xdrop_gap_final.unwrap_or(25.0),
+            },
+        )?;
+        // NCBI c++/src/algo/blast/format/blast_format.cpp:1411-1458:
+        // formatter.PrintOneResultSet(...) writes only after a valid result.
+        // Buffer the complete report so an error cannot leave partial success output.
+        let mut bytes = Vec::new();
+        render(
+            &mut bytes,
+            &self.outfmt,
+            &queries,
+            &subjects,
+            subject_path,
+            &results,
+            &lengths,
+            &ungapped_karlin,
+            &query_validity,
+            LocalStageDScoring {
+                matrix,
+                gap_open,
+                gap_extend,
+                word_size: self.word_size,
+                threshold: threshold as i32,
+                window: i32::try_from(window)?,
+                gap_xdrop_bits: self.xdrop_gap.unwrap_or(15.0),
+                final_xdrop_bits: self.xdrop_gap_final.unwrap_or(25.0),
+            },
+            self.db_gencode,
+            seg.as_ref(),
+            self.lcase_masking,
+        )?;
+        if let Some(path) = &self.out {
+            std::fs::write(path, bytes)
+                .with_context(|| format!("failed to write {}", path.display()))?;
+        } else {
+            std::io::stdout().write_all(&bytes)?;
+        }
+        Ok(())
     }
 }
 
@@ -517,6 +659,14 @@ mod tests {
             .to_string()
             .contains("not supported for BLOSUM62"));
         assert!(parse(&["-matrix", "PAM30"]).unwrap().validate().is_ok());
+        // NCBI blast_options.c:903-936 accepts PAM30, while the current
+        // Rust Stage D search profile explicitly rejects its unported path.
+        assert!(parse(&["-matrix", "PAM30"])
+            .unwrap()
+            .run()
+            .unwrap_err()
+            .to_string()
+            .contains("unsupported"));
         assert!(
             parse(&["-matrix", "PAM30", "-gapopen", "9", "-gapextend", "1"])
                 .unwrap()
@@ -543,6 +693,11 @@ mod tests {
             .unwrap_err()
             .to_string()
             .contains("Non-zero threshold required"));
+        // NCBI blast_format.cpp:1411-1458 dispatches these three
+        // implemented output paths from a complete local result set.
+        for format in ["0", "6", "7"] {
+            assert_eq!(parse(&["-outfmt", format]).unwrap().outfmt, format);
+        }
         assert!(parse(&["-outfmt", "5"]).is_err());
         assert!(parse(&["-outfmt", "6 qseq sseq"]).is_err());
         assert!(parse(&["-comp_based_stats", "bogus"])

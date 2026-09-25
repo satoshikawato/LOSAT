@@ -936,8 +936,8 @@ mod tests {
     fn natural_heap_replacement_fixture_matches_ncbi_preliminary_stream() {
         use crate::algorithm::blastp::gapalign::GapAlignScratch;
         use crate::algorithm::tblastn::kappa::{
-            normalize_postredo_scores, postredo_num_ident, reap_contained_postredo_hsps,
-            redo_preliminary_match,
+            convert_distinct_alignments, normalize_postredo_scores, postredo_converted_stats,
+            reap_contained_postredo_hsps, redo_preliminary_match,
         };
         use crate::algorithm::tblastn::kappa_heap::{
             compo_early_termination, CompoHeap, CompoHeapRecord,
@@ -995,6 +995,23 @@ mod tests {
             fs::read_to_string(format!("{root}result_order_20260925/ncbi.trace")).unwrap();
         let mode_trace =
             fs::read_to_string(format!("{root}natural_mode2_20260925/mode2.tsv")).unwrap();
+        // NCBI c++/src/algo/blast/core/blast_kappa.c:515-526;
+        // c++/src/algo/blast/core/blast_hits.c:767-811:
+        // Blast_HSPGetNumIdentitiesAndPositives(query, target_sequence, hsp,
+        //                                       scoring_options, 0, sbp);
+        // The broad local-subject run retains natural gapped HSPs for numeric checks.
+        let broad_report = fs::read_to_string(format!(
+            "{root}report_payload_20260925/report_fields_all.tsv"
+        ))
+        .unwrap();
+        let mut broad_by_oid: HashMap<usize, Vec<Vec<&str>>> = HashMap::new();
+        for row in broad_report.lines() {
+            let fields: Vec<_> = row.split('\t').collect();
+            if let Some(id) = fields[1].strip_prefix("weak_") {
+                let oid = id.parse::<usize>().unwrap() - 7;
+                broad_by_oid.entry(oid).or_default().push(fields);
+            }
+        }
         let prelim_events: HashSet<usize> = trace
             .lines()
             .filter(|line| line.starts_with("D_CALL\t") && line.split('\t').nth(2) == Some("link"))
@@ -1263,6 +1280,18 @@ mod tests {
         let mut heap = CompoHeap::new(2, 0.002).unwrap();
         let mut postredo_by_oid = HashMap::new();
         let mut redo_index = 0;
+        let mut edit_index = 0;
+        let edit_rows: Vec<_> = kappa_trace
+            .lines()
+            .filter(|line| line.starts_with("K_TRACE_EDIT\t"))
+            .collect();
+        assert_eq!(edit_rows.len(), 12);
+        let return_rows: Vec<_> = kappa_trace
+            .lines()
+            .filter(|line| line.starts_with("K_TRACE_RETURN\t"))
+            .map(|line| line.split('\t').collect::<Vec<_>>())
+            .collect();
+        assert_eq!(return_rows.len(), edit_rows.len());
         let mut insert_index = 0;
         let mut heap_hsp_index = 0;
         for ((oid, linked), row) in retained.iter().zip(early_decisions) {
@@ -1339,7 +1368,7 @@ mod tests {
             );
             let preliminary_hsps: Vec<_> = linked.hsps.iter().map(|hsp| hsp.hsp).collect();
             let subject = &subjects[*oid];
-            let redone = redo_preliminary_match(
+            let mut redone = redo_preliminary_match(
                 &preliminary_hsps,
                 0,
                 &query_infos,
@@ -1368,7 +1397,7 @@ mod tests {
                 expected_alignments.len(),
                 "OID {oid} redo count"
             );
-            let mut input = Vec::new();
+            let alignment_count = alignments.len();
             for (alignment, row) in alignments.iter().zip(expected_alignments) {
                 let f: Vec<_> = row.split('\t').collect();
                 assert_eq!(
@@ -1383,22 +1412,84 @@ mod tests {
                 assert_eq!(alignment.match_start, f[10].parse().unwrap());
                 assert_eq!(alignment.match_end, f[11].parse().unwrap());
                 assert_eq!(alignment.frame, f[12].parse().unwrap());
-                input.push((
-                    0,
-                    GappedHsp {
-                        frame: alignment.frame as i8,
-                        score: alignment.score,
-                        q_start: alignment.query_start,
-                        q_end: alignment.query_end,
-                        q_gapped_start: 0,
-                        s_start: alignment.match_start,
-                        s_end: alignment.match_end,
-                        s_gapped_start: 0,
-                    },
-                ));
             }
-            input.sort_by(|a, b| score_compare(&a.1, &b.1));
-            reap_contained_postredo_hsps(&mut input);
+            drop(alignments);
+            // NCBI c++/src/algo/blast/core/blast_kappa.c:305-358:
+            // GapEditScript * editScript = align->context; align->context = NULL;
+            // Blast_HSPInit(..., unknown_value, unknown_value, ..., &editScript, &new_hsp);
+            // Blast_HSPListSortByScore(hsp_list);
+            let converted =
+                convert_distinct_alignments(&mut redone.alignments_by_query[0]).unwrap();
+            assert_eq!(
+                converted.len(),
+                alignment_count,
+                "OID {oid} conversion count"
+            );
+            let encode = |script: &[GapEditOp]| -> String {
+                script
+                    .iter()
+                    .map(|op| match op {
+                        GapEditOp::Sub(n) => format!("3:{n}"),
+                        GapEditOp::Del(n) => format!("0:{n}"),
+                        GapEditOp::Ins(n) => format!("6:{n}"),
+                    })
+                    .collect::<Vec<_>>()
+                    .join("\t")
+            };
+            // NCBI c++/src/algo/blast/core/blast_kappa.c:305-358:
+            // Every editScript moves into its own new_hsp before HSP score sorting.
+            // Compare (score, endpoints, script) in sorted record order against
+            // the saved per-redo K_TRACE_RETURN and K_TRACE_EDIT pair.
+            let mut actual_edits: Vec<_> = converted
+                .iter()
+                .map(|value| {
+                    (
+                        value.hsp.score,
+                        value.hsp.q_start,
+                        value.hsp.q_end,
+                        value.hsp.s_start,
+                        value.hsp.s_end,
+                        encode(&value.edit_script),
+                    )
+                })
+                .collect();
+            let mut expected_edits: Vec<_> = return_rows
+                .iter()
+                .filter(|row| row[1].parse::<usize>().unwrap() == redo_index)
+                .map(|row| {
+                    let script_index: usize = row[2].parse().unwrap();
+                    (
+                        row[4].parse::<i32>().unwrap(),
+                        row[5].parse::<i32>().unwrap(),
+                        row[6].parse::<i32>().unwrap(),
+                        row[7].parse::<i32>().unwrap(),
+                        row[8].parse::<i32>().unwrap(),
+                        edit_rows[script_index]
+                            .split('\t')
+                            .skip(3)
+                            .collect::<Vec<_>>()
+                            .join("\t"),
+                    )
+                })
+                .collect();
+            assert_eq!(actual_edits.len(), expected_edits.len());
+            actual_edits.sort();
+            expected_edits.sort();
+            assert_eq!(
+                actual_edits, expected_edits,
+                "OID {oid} edit script paired with score and endpoints"
+            );
+            edit_index += converted.len();
+            let mut input: Vec<_> = converted
+                .iter()
+                .map(|value| (value.context, value.hsp))
+                .collect();
+            let survivor_indices = reap_contained_postredo_hsps(&mut input);
+            let mut owned: Vec<_> = converted.into_iter().map(Some).collect();
+            let retained_converted: Vec<_> = survivor_indices
+                .into_iter()
+                .map(|index| owned[index].take().unwrap())
+                .collect();
             let (link_event, reap_event) = postredo_events[redo_index];
             let list_prefix = format!("D_LIST\t{link_event}\tlink_before\t");
             let list: Vec<_> = trace
@@ -1432,33 +1523,6 @@ mod tests {
                 );
                 assert_eq!(hsp.score, row[10].parse().unwrap());
             }
-            // NCBI c++/src/algo/blast/core/blast_kappa.c:305-358:
-            // GapEditScript *editScript = align->context; align->context = NULL;
-            // Blast_HSPInit(..., &editScript, &new_hsp);
-            // This moves each distinct alignment's
-            // edit-script pointer into its BlastHSP; keep that identity
-            // while link/reap changes HSP order and membership.
-            let input_alignments: Vec<usize> = input
-                .iter()
-                .map(|(context, hsp)| {
-                    let matches: Vec<_> = alignments
-                        .iter()
-                        .enumerate()
-                        .filter(|(_, a)| {
-                            *context == a.query_index as usize
-                                && hsp.score == a.score
-                                && hsp.frame == a.frame as i8
-                                && hsp.q_start == a.query_start
-                                && hsp.q_end == a.query_end
-                                && hsp.s_start == a.match_start
-                                && hsp.s_end == a.match_end
-                        })
-                        .map(|(index, _)| index)
-                        .collect();
-                    assert_eq!(matches.len(), 1, "OID {oid} distinct alignment ownership");
-                    matches[0]
-                })
-                .collect();
             let mut postredo = link_preliminary_hsps(
                 &input,
                 &[query.len() as i32],
@@ -1509,33 +1573,44 @@ mod tests {
                 best_score: postredo.hsps[0].hsp.score,
             };
             assert_eq!(candidate.best_score, would[3].parse().unwrap());
-            let retained_alignments: Vec<_> = postredo
-                .hsps
-                .iter()
-                .map(|hsp| alignments[input_alignments[hsp.source_index]])
-                .collect();
             let bits = normalize_postredo_scores(&mut postredo, scaled.lambda, gapped.k.ln(), 32.0);
             let mut target = TargetTranslation::new(subject, &code);
-            let identities: Vec<_> = retained_alignments
+            let stats: Vec<_> = postredo
+                .hsps
                 .iter()
-                .map(|alignment| postredo_num_ident(alignment, &query_aa, &mut target).unwrap())
+                .map(|hsp| {
+                    postredo_converted_stats(
+                        &retained_converted[hsp.source_index],
+                        &query_aa,
+                        &mut target,
+                    )
+                    .unwrap()
+                })
                 .collect();
+            let identities: Vec<_> = stats.iter().map(|value| value.0).collect();
             // NCBI c++/src/algo/blast/core/blast_kappa.c:305-358,3687-3713:
             // Blast_HSPInit(..., &editScript, &new_hsp);
             // s_HSPListNormalizeScores(...); s_ComputeNumIdentities(...);
-            // The conversion transfers the edit script,
-            // then normalizes bit score and computes identities before heap insertion.
-            let report_payloads: Vec<_> = retained_alignments.iter().enumerate().map(|(index, alignment)| {
-                let Some(crate::core::composition_adjustment::redo_alignment::BlastCompoAlignmentContext::EditScript(script)) = alignment.context.as_ref() else {
-                    panic!("OID {oid} retained HSP lacks Kappa edit script");
-                };
-                KappaHspPayload {
-                    bit_score: bits[index],
-                    num_ident: i32::try_from(identities[index]).unwrap(),
-                    edit_script: script.clone(),
-                    matrix_adjust_rule: alignment.matrix_adjust_rule,
-                }
-            }).collect();
+            let mut owned: Vec<_> = retained_converted.into_iter().map(Some).collect();
+            let report_payloads: Vec<_> = postredo
+                .hsps
+                .iter()
+                .enumerate()
+                .map(|(index, hsp)| {
+                    let converted = owned[hsp.source_index].take().unwrap();
+                    KappaHspPayload {
+                        bit_score: bits[index],
+                        num_ident: i32::try_from(identities[index]).unwrap(),
+                        num_positives: stats[index].1,
+                        align_length: stats[index].2,
+                        mismatches: stats[index].3,
+                        gap_opens: stats[index].4,
+                        gap_letters: stats[index].5,
+                        edit_script: converted.edit_script,
+                        matrix_adjust_rule: converted.matrix_adjust_rule,
+                    }
+                })
+                .collect();
             assert_eq!(heap.would_insert(candidate), would[9] == "1");
             if would[9] == "1" {
                 let insert: Vec<_> = insert_rows[insert_index].split('\t').collect();
@@ -1545,6 +1620,97 @@ mod tests {
                     insert[2].parse::<f64>().unwrap().to_bits()
                 );
                 assert_eq!(candidate.best_score, insert[3].parse().unwrap());
+                // NCBI c++/src/algo/blast/core/blast_kappa.c:515-526,3687-3713:
+                // s_HSPListNormalizeScores(...); s_ComputeNumIdentities(...);
+                // The wider output has the same natural top-subject alignments,
+                // including the two-HSP OID 5 and gapped OIDs 9, 7, 2 and 1.
+                let broad_rows = broad_by_oid.get(oid).unwrap();
+                assert_eq!(
+                    broad_rows.len(),
+                    report_payloads.len(),
+                    "OID {oid} broad HSP count"
+                );
+                for ((hsp, payload), fields) in
+                    postredo.hsps.iter().zip(&report_payloads).zip(broad_rows)
+                {
+                    assert_eq!(
+                        hsp.hsp.score,
+                        fields[2].parse().unwrap(),
+                        "OID {oid} broad score"
+                    );
+                    assert_eq!(
+                        payload.num_ident,
+                        fields[3].parse().unwrap(),
+                        "OID {oid} broad identity"
+                    );
+                    assert_eq!(
+                        payload.num_positives,
+                        fields[4].parse().unwrap(),
+                        "OID {oid} positives"
+                    );
+                    assert_eq!(
+                        payload.align_length,
+                        fields[5].parse().unwrap(),
+                        "OID {oid} length"
+                    );
+                    assert_eq!(
+                        payload.mismatches,
+                        fields[6].parse().unwrap(),
+                        "OID {oid} mismatch"
+                    );
+                    assert_eq!(
+                        payload.gap_letters,
+                        fields[7].parse().unwrap(),
+                        "OID {oid} gaps"
+                    );
+                    assert_eq!(
+                        payload.gap_opens,
+                        fields[8].parse().unwrap(),
+                        "OID {oid} gap opens"
+                    );
+                    assert_eq!(
+                        hsp.hsp.frame,
+                        fields[13].parse().unwrap(),
+                        "OID {oid} frame"
+                    );
+                    // NCBI c++/src/algo/blast/api/blast_seqalign.cpp:1348-1383:
+                    // subject_loc->SetInt().SetFrom(3*hsp->subject.offset +
+                    //                               hsp->subject.frame - 1);
+                    // subject_loc->SetInt().SetTo(3*hsp->subject.end +
+                    //                             hsp->subject.frame - 2);
+                    // Negative frames use subject_length - 3*end + frame + 1
+                    // for from, and subject_length - 3*offset + frame for to.
+                    let frame = i32::from(hsp.hsp.frame);
+                    let length = subject.len() as i32;
+                    let (subject_start, subject_end) = if frame > 0 {
+                        (3 * hsp.hsp.s_start + frame, 3 * hsp.hsp.s_end + frame - 1)
+                    } else {
+                        (
+                            length - 3 * hsp.hsp.s_start + frame + 1,
+                            length - 3 * hsp.hsp.s_end + frame + 2,
+                        )
+                    };
+                    assert_eq!(
+                        hsp.hsp.q_start + 1,
+                        fields[9].parse().unwrap(),
+                        "OID {oid} query start"
+                    );
+                    assert_eq!(
+                        hsp.hsp.q_end,
+                        fields[10].parse().unwrap(),
+                        "OID {oid} query end"
+                    );
+                    assert_eq!(
+                        subject_start,
+                        fields[11].parse().unwrap(),
+                        "OID {oid} subject start"
+                    );
+                    assert_eq!(
+                        subject_end,
+                        fields[12].parse().unwrap(),
+                        "OID {oid} subject end"
+                    );
+                }
                 let expected_hsps: Vec<_> = heap_hsp_rows[heap_hsp_index..]
                     .iter()
                     .take_while(|row| row.split('\t').nth(1) == Some(would[1]))
@@ -1600,6 +1766,7 @@ mod tests {
         }
         assert_eq!((redo_index, insert_index, heap.len()), (11, 10, 10));
         assert_eq!(heap_hsp_index, heap_hsp_rows.len());
+        assert_eq!(edit_index, edit_rows.len());
 
         // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_kappa.c:2494-2515;
         // c++/src/algo/blast/core/blast_hits.c:3243-3297,3420-3437:
@@ -1752,6 +1919,33 @@ mod tests {
                 .map(|value| value.parse::<i32>().unwrap())
                 .collect::<Vec<_>>()
         );
+        // NCBI c++/src/algo/blast/core/blast_kappa.c:515-526;
+        // c++/src/algo/blast/core/blast_hits.c:767-811,966-989:
+        // Blast_HSPGetNumIdentitiesAndPositives(query, target_sequence, hsp,
+        //                                       scoring_options, 0, sbp);
+        // *num_pos_ptr = num_pos + num_ident;
+        let report_rows =
+            fs::read_to_string(format!("{root}report_payload_20260925/report_fields.tsv")).unwrap();
+        let report_rows: Vec<_> = report_rows.lines().collect();
+        assert_eq!(result.lists().len(), report_rows.len());
+        for (list, row) in result.lists().iter().zip(report_rows) {
+            let fields: Vec<_> = row.split('\t').collect();
+            let expected_id = match list.oid {
+                10 => "weak_17",
+                11 => "weak_18",
+                _ => unreachable!(),
+            };
+            assert_eq!(fields[1], expected_id);
+            let hsp = &list.hsps.hsps[0];
+            let payload = &list.payloads[0];
+            assert_eq!(hsp.hsp.score, fields[2].parse().unwrap());
+            assert_eq!(payload.num_ident, fields[3].parse().unwrap());
+            assert_eq!(payload.num_positives, fields[4].parse().unwrap());
+            assert_eq!(payload.align_length, fields[5].parse().unwrap());
+            assert_eq!(payload.mismatches, fields[6].parse().unwrap());
+            assert_eq!(payload.gap_letters, fields[7].parse().unwrap());
+            assert_eq!(payload.gap_opens, fields[8].parse().unwrap());
+        }
         let edits: Vec<_> = kappa_trace
             .lines()
             .filter(|line| line.starts_with("K_TRACE_EDIT\t"))

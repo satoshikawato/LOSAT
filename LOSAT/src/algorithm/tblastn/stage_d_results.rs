@@ -25,6 +25,17 @@ use super::stage_d_linking::{
 pub(super) struct KappaHspPayload {
     pub bit_score: f64,
     pub num_ident: i32,
+    // NCBI c++/src/algo/blast/core/blast_kappa.c:515-526;
+    // c++/src/algo/blast/core/blast_hits.c:767-811,966-989:
+    // Blast_HSPGetNumIdentitiesAndPositives(query, target_sequence, hsp,
+    //                                       scoring_options, 0, sbp);
+    // *num_pos_ptr = num_pos + num_ident;
+    // Alignment length and gap counts follow the same gap_info operation lengths.
+    pub num_positives: usize,
+    pub align_length: usize,
+    pub mismatches: usize,
+    pub gap_opens: usize,
+    pub gap_letters: usize,
     pub edit_script: Vec<GapEditOp>,
     pub matrix_adjust_rule: EMatrixAdjustRule,
 }

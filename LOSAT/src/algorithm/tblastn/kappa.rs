@@ -6,9 +6,10 @@ use std::ffi::c_void;
 use std::ptr::NonNull;
 
 use super::search_gapped::{GappedHsp, TargetTranslation};
+use super::stage_d_linking::score_compare;
 use crate::algorithm::blastp::gapalign::{
     blast_gapped_alignment_with_traceback_with_scratch, protein_identities_from_edit_ops,
-    GapAlignScratch,
+    stats_from_edit_ops_protein, GapAlignScratch,
 };
 use crate::config::ScoringMatrix;
 use crate::core::composition_adjustment::adjust_scores::{
@@ -107,9 +108,9 @@ pub(super) fn redo_one_alignment_from_local_starts(
 //     (((a <= c && b >= c) && (d <= f && e >= f)) ? TRUE : FALSE)
 // ```
 #[allow(dead_code)] // Entered after TBLASTN Kappa alignment conversion is in the public D pipeline.
-pub(super) fn reap_contained_postredo_hsps(hsps: &mut Vec<(usize, GappedHsp)>) {
+pub(super) fn reap_contained_postredo_hsps(hsps: &mut Vec<(usize, GappedHsp)>) -> Vec<usize> {
     if hsps.len() < 2 {
-        return;
+        return (0..hsps.len()).collect();
     }
     let mut keep = vec![true; hsps.len()];
     for read in 1..hsps.len() {
@@ -136,12 +137,67 @@ pub(super) fn reap_contained_postredo_hsps(hsps: &mut Vec<(usize, GappedHsp)>) {
             }
         }
     }
+    let retained_indices = keep
+        .iter()
+        .enumerate()
+        .filter_map(|(index, &selected)| selected.then_some(index))
+        .collect();
     let mut index = 0;
     hsps.retain(|_| {
         let selected = keep[index];
         index += 1;
         selected
     });
+    retained_indices
+}
+
+// NCBI c++/src/algo/blast/core/blast_kappa.c:305-358:
+// GapEditScript * editScript = align->context; align->context = NULL;
+// Blast_HSPInit(..., unknown_value, unknown_value, ..., &editScript, &new_hsp);
+// BlastCompo_AlignmentsFree(alignments, s_FreeEditScript);
+// Blast_HSPListSortByScore(hsp_list);
+#[derive(Debug)]
+pub(super) struct ConvertedKappaHsp {
+    pub context: usize,
+    pub hsp: GappedHsp,
+    pub edit_script: Vec<crate::common::GapEditOp>,
+    pub matrix_adjust_rule: EMatrixAdjustRule,
+}
+
+// NCBI c++/src/algo/blast/core/blast_kappa.c:305-358:
+// GapEditScript * editScript = align->context; align->context = NULL;
+// Blast_HSPInit(..., unknown_value, unknown_value, ..., &editScript, &new_hsp);
+// BlastCompo_AlignmentsFree(alignments, s_FreeEditScript);
+// Blast_HSPListSortByScore(hsp_list);
+pub(super) fn convert_distinct_alignments(
+    alignments: &mut Option<Box<BlastCompoAlignment>>,
+) -> Result<Vec<ConvertedKappaHsp>> {
+    let mut converted = Vec::new();
+    let mut current = alignments.take();
+    while let Some(mut alignment) = current {
+        current = alignment.next.take();
+        let Some(BlastCompoAlignmentContext::EditScript(edit_script)) = alignment.context.take()
+        else {
+            bail!("TBLASTN Kappa alignment has no edit script");
+        };
+        converted.push(ConvertedKappaHsp {
+            context: usize::try_from(alignment.query_index)?,
+            hsp: GappedHsp {
+                frame: i8::try_from(alignment.frame)?,
+                score: alignment.score,
+                q_start: alignment.query_start,
+                q_end: alignment.query_end,
+                q_gapped_start: 0,
+                s_start: alignment.match_start,
+                s_end: alignment.match_end,
+                s_gapped_start: 0,
+            },
+            edit_script,
+            matrix_adjust_rule: alignment.matrix_adjust_rule,
+        });
+    }
+    converted.sort_by(|a, b| score_compare(&a.hsp, &b.hsp));
+    Ok(converted)
 }
 
 // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_kappa.c:459-532;
@@ -178,6 +234,46 @@ pub(super) fn postredo_num_ident(
         subject_start,
         edit_script,
         ScoringMatrix::Blosum62,
+    ))
+}
+
+// NCBI c++/src/algo/blast/core/blast_kappa.c:515-526:
+// Blast_HSPGetNumIdentitiesAndPositives(query, target_sequence, hsp,
+//                                       scoring_options, 0, sbp);
+// c++/src/algo/blast/core/blast_hits.c:767-811:
+// align_length += esp->num[index];
+// if (*q == *s) num_ident++; else if (matrix[*q][*s] > 0) num_pos++;
+// *num_pos_ptr = num_pos + num_ident;
+pub(super) fn postredo_converted_stats(
+    converted: &ConvertedKappaHsp,
+    query_sequence: &[u8],
+    target: &mut TargetTranslation<'_>,
+) -> Result<(usize, usize, usize, usize, usize, usize)> {
+    let hsp = &converted.hsp;
+    let (subject, _, subject_base) = target.get(hsp.frame, hsp.s_start, hsp.s_end)?;
+    let subject_start = usize::try_from(hsp.s_start)?
+        .checked_sub(subject_base)
+        .context("TBLASTN positive subject offset before translation range")?;
+    let (ident, positive, mismatch, gap_opens, gap_letters) = stats_from_edit_ops_protein(
+        query_sequence,
+        subject,
+        usize::try_from(hsp.q_start)?,
+        subject_start,
+        &converted.edit_script,
+        ScoringMatrix::Blosum62,
+    );
+    let align_length = converted
+        .edit_script
+        .iter()
+        .map(|op| op.num() as usize)
+        .sum();
+    Ok((
+        ident,
+        positive,
+        align_length,
+        mismatch,
+        gap_opens,
+        gap_letters,
     ))
 }
 
@@ -363,6 +459,51 @@ pub(super) fn redo_preliminary_match(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    // NCBI c++/src/algo/blast/core/blast_kappa.c:321-357:
+    // GapEditScript * editScript = align->context; align->context = NULL;
+    // Blast_HSPInit(..., &editScript, &new_hsp);
+    // BlastCompo_AlignmentsFree(alignments, s_FreeEditScript);
+    // Each alignment transfers its own script, even when its numeric HSP
+    // fields are identical to another alignment.
+    #[test]
+    fn duplicate_numeric_alignments_keep_distinct_owned_scripts() {
+        let mut first = blast_compo_alignment_new(
+            100,
+            EMatrixAdjustRule::DontAdjustMatrix,
+            10,
+            19,
+            0,
+            20,
+            30,
+            1,
+            Some(BlastCompoAlignmentContext::EditScript(vec![
+                GapEditOp::Sub(9),
+                GapEditOp::Del(1),
+            ])),
+        );
+        first.next = Some(blast_compo_alignment_new(
+            100,
+            EMatrixAdjustRule::DontAdjustMatrix,
+            10,
+            19,
+            0,
+            20,
+            30,
+            1,
+            Some(BlastCompoAlignmentContext::EditScript(vec![
+                GapEditOp::Del(1),
+                GapEditOp::Sub(9),
+            ])),
+        ));
+        let mut alignments = Some(first);
+        let converted = convert_distinct_alignments(&mut alignments).unwrap();
+        assert!(alignments.is_none());
+        assert_eq!(converted.len(), 2);
+        let scripts: Vec<_> = converted.into_iter().map(|hsp| hsp.edit_script).collect();
+        assert!(scripts.contains(&vec![GapEditOp::Sub(9), GapEditOp::Del(1)]));
+        assert!(scripts.contains(&vec![GapEditOp::Del(1), GapEditOp::Sub(9)]));
+    }
     use crate::algorithm::tblastn::stage_d_kappa_params::{
         local_extension_final_xdrop, local_kappa_redo_params,
     };
@@ -2288,11 +2429,24 @@ mod tests {
             else {
                 panic!("OID {oid} Kappa HSP lacks an edit script");
             };
-            let report = KappaHspPayload {
-                bit_score: bits[0],
-                num_ident: i32::try_from(identities).unwrap(),
+            let converted = ConvertedKappaHsp {
+                context: 0,
+                hsp: postredo.hsps[0].hsp,
                 edit_script: script.clone(),
                 matrix_adjust_rule: align.matrix_adjust_rule,
+            };
+            let stats = postredo_converted_stats(&converted, &query_aa, &mut target).unwrap();
+            assert_eq!(stats.0, identities);
+            let report = KappaHspPayload {
+                bit_score: bits[0],
+                num_ident: i32::try_from(stats.0).unwrap(),
+                num_positives: stats.1,
+                align_length: stats.2,
+                mismatches: stats.3,
+                gap_opens: stats.4,
+                gap_letters: stats.5,
+                edit_script: converted.edit_script,
+                matrix_adjust_rule: converted.matrix_adjust_rule,
             };
             postredo_by_oid.insert(*oid as i32, (postredo, vec![report]));
             assert!(params.gapping_params.context.get().is_none());

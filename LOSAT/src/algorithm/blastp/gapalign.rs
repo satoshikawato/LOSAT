@@ -851,7 +851,7 @@ fn prune_terminal_gap_ops(
 // else if (matrix[*q][*s] > 0)
 //    num_pos ++;
 // ```
-fn stats_from_edit_ops_protein(
+pub(crate) fn stats_from_edit_ops_protein(
     q_seq: &[u8],
     s_seq: &[u8],
     q_start: usize,

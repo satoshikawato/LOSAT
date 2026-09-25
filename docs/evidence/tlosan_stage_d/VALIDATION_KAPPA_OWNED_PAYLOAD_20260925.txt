@@ -1,0 +1,53 @@
+TBLASTN Stage D owned Kappa payload checkpoint
+Date: 2026-09-25
+Starting LOSAT commit: 4e229304f3387cd29027df8de3214631b0997ff6
+Pinned NCBI source: 598d8ae6a72b923127ba2fbfaffd48e4c83bfbf4
+NCBI comparison-only executable: TBLASTN 2.17.0+
+NCBI executable SHA256: e3956f1e107a30439d56c8f72fae4267a7d62ebcc16e4f99d4baf2bdf00402e0
+Program/task: TBLASTN local -subject, code 1, one thread, composition mode 2, sum statistics true
+Natural fixture: 120-aa query, 112 subjects, 40320 nt; evalue 10
+NCBI source owners: core/blast_kappa.c:305-358,515-526,3661-3713;
+  core/blast_hits.c:745-835,966-989; api/blast_seqalign.cpp:1348-1383
+LOSAT owners: algorithm/tblastn/kappa.rs, stage_d_linking.rs,
+  stage_d_results.rs; algorithm/blastp/gapalign.rs
+First open boundary at start: edit-script ownership recovered by a unique numeric tuple
+  in a test-only path; gapped starts called placeholders; report metrics absent.
+Correction: direct alignment-context script transfer to sorted converted HSPs,
+  containment survivor indices then link source indices; NCBI's unknown_value=0
+  for gapped starts; positives, length, mismatch and gap fields retained.
+Accepted exception: none for code 1.
+Focused comparison: natural_heap_replacement_fixture_matches_ncbi_preliminary_stream
+  passed 1/1 after 12 score/endpoints/script associations and all 11 broad numeric
+  report-field and coordinate checks were added.
+TBLASTN focused suite: cargo test --manifest-path LOSAT/Cargo.toml --lib
+  algorithm::tblastn:: -- --quiet: 86 passed, 0 failed after final script
+  association, duplicate numeric-key ownership, and report-field coordinate
+  assertions. The exact 112-subject natural test separately passed 1/1.
+Lint: cargo clippy --manifest-path LOSAT/Cargo.toml --lib --tests --
+  -D warnings: passed after all report metric production changes and the
+  broad numeric and coordinate comparison; final rerun passed.
+Format and diff: cargo fmt --manifest-path LOSAT/Cargo.toml --all -- --check;
+  git diff --check: final rerun passed.
+NCBI comparison-only runner:
+  python3 docs/evidence/tlosan_stage_d/kappa_heap_rejection_20260925/run_ncbi_report_payload_trace.py
+    docs/evidence/tlosan_stage_d/kappa_heap_rejection_20260925/report_payload_20260925
+  Commands and input checksums are in report_payload_20260925/manifest.txt.
+  A fresh /tmp replay matched the retained directory byte for byte by diff -rq.
+  sha256sum -c outputs.sha256 passed for all five saved files.
+  report_fields.tsv SHA256: b4eefc6809e32daf8a1dfbdc79a69022128bfec3afe5eab1471c739f3ba2e7b5
+  report_fields_all.tsv SHA256: 6d985efe7be909584b74f56cc4cbfddee42524d71bfb3ae3ff95b55b11b9d8c2
+  The broad command changes max_target_seqs from 2 to 112. Every shared HSP
+  compared has matching subject, within-list order, score, frame and coordinates;
+  no across-option candidate/heap parity is inferred.
+Broader Stage D: not run as a gate; general local pipeline absent and known
+  positive branches and all 27 codes unverified.
+Stage E byte diff: not applicable; blocked until C/D full parity; public CLI gated.
+Native/Wasm: not applicable to this internal test-only path.
+Performance: not applicable; no optimization or timing claim.
+Independent read-only ncbi_parity_auditor: no concrete mismatch in source mapping,
+  transfer timing, zero starts or stats arithmetic. Audit follows only this
+  partial Stage D scope, not public TBLASTN completion or certification.
+  Follow-up audit checked both-strand 1-based coordinate formulas against
+  pinned blast_seqalign.cpp:1348-1383, including weak_12 reverse 354..280;
+  no mismatch found. The focused test passed 1/1 after that assertion.
+Remaining risk: see CHECKPOINT_KAPPA_OWNED_PAYLOAD_20260925.md.

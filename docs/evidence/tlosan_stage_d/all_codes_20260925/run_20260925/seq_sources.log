@@ -1,0 +1,101 @@
+make: Entering directory '/tmp/tlosan-allcodes-LV6PoP/build/build/objects/seq'
+Build session ID: 5e0a90fa-e927-4b3e-af9d-e3a968796f24
+/bin/mkdir -p `/usr/bin/dirname /tmp/tlosan-allcodes-LV6PoP/source/c++/src/objects/seq/test/Makefile.in`
+test -f /tmp/tlosan-allcodes-LV6PoP/source/c++/src/objects/seq/test/Makefile.in  ||  /bin/cp -p /tmp/tlosan-allcodes-LV6PoP/source/c++/src/build-system/Makefile.in.skel /tmp/tlosan-allcodes-LV6PoP/source/c++/src/objects/seq/test/Makefile.in
+/tmp/tlosan-allcodes-LV6PoP/source/c++/scripts/common/impl/update_configurable.sh /tmp/tlosan-allcodes-LV6PoP/build test/Makefile
+config.status: creating /tmp/tlosan-allcodes-LV6PoP/build/build/objects/seq/test/Makefile
+/bin/mkdir -p `/usr/bin/dirname /tmp/tlosan-allcodes-LV6PoP/source/c++/src/objects/seq/unit_test/Makefile.in`
+test -f /tmp/tlosan-allcodes-LV6PoP/source/c++/src/objects/seq/unit_test/Makefile.in  ||  /bin/cp -p /tmp/tlosan-allcodes-LV6PoP/source/c++/src/build-system/Makefile.in.skel /tmp/tlosan-allcodes-LV6PoP/source/c++/src/objects/seq/unit_test/Makefile.in
+/tmp/tlosan-allcodes-LV6PoP/source/c++/scripts/common/impl/update_configurable.sh /tmp/tlosan-allcodes-LV6PoP/build unit_test/Makefile
+config.status: creating /tmp/tlosan-allcodes-LV6PoP/build/build/objects/seq/unit_test/Makefile
+make[1]: Entering directory '/tmp/tlosan-allcodes-LV6PoP/build/build/objects/seq'
+/usr/bin/make -f /tmp/tlosan-allcodes-LV6PoP/source/c++/src/objects/seq/Makefile.sources builddir=/tmp/tlosan-allcodes-LV6PoP/build/build srcdir=/tmp/tlosan-allcodes-LV6PoP/source/c++/src/objects/seq -w all
+make[2]: Entering directory '/tmp/tlosan-allcodes-LV6PoP/build/build/objects/seq'
+status=0 ; \
+MAKE="/usr/bin/make -w"; \
+export MAKE; \
+for x in seqalign seqblock seqfeat seqloc seqres seqtable; do \
+    d=/tmp/tlosan-allcodes-LV6PoP/source/c++/src/objects/seq/../$x ; \
+    (cd $d  &&  /tmp/tlosan-allcodes-LV6PoP/build/build/new_module.sh) || status=9 ; \
+    test -f ${x}__.cpp  ||  \
+        echo "#include \"../$x/${x}__.cpp\""  > ${x}__.cpp ; \
+    test -f ${x}___.cpp  ||  \
+        echo "#include \"../$x/${x}___.cpp\"" > ${x}___.cpp ; \
+done ; \
+exit $status
+/usr/bin/make -w -f /tmp/tlosan-allcodes-LV6PoP/source/c++/src/build-system/Makefile.module MODULE=seqalign MODULE_PATH=objects/seqalign MODULE_ASN=seqalign.asn MODULE_IMPORT='objects/general/general objects/biblio/biblio objects/medline/medline objects/seqloc/seqloc' IMPDEPS='/tmp/tlosan-allcodes-LV6PoP/source/c++/src/objects/general/general.asn /tmp/tlosan-allcodes-LV6PoP/source/c++/src/objects/biblio/biblio.asn /tmp/tlosan-allcodes-LV6PoP/source/c++/src/objects/medline/medline.asn /tmp/tlosan-allcodes-LV6PoP/source/c++/src/objects/seqloc/seqloc.asn' IMPFILES='objects/general/general.asn objects/biblio/biblio.asn objects/medline/medline.asn objects/seqloc/seqloc.asn' top_srcdir=/tmp/tlosan-allcodes-LV6PoP/source/c++ builddir=/tmp/tlosan-allcodes-LV6PoP/build/build DATATOOL=/home/kawato/micromamba/bin/datatool DATATOOL_WRAPPER='' MODULE_SEARCH=/tmp/tlosan-allcodes-LV6PoP/source/c++/src
+make[3]: Entering directory '/tmp/tlosan-allcodes-LV6PoP/source/c++/src/objects/seqalign'
+/home/kawato/micromamba/bin/datatool -oR /tmp/tlosan-allcodes-LV6PoP/source/c++ \
+    -opm /tmp/tlosan-allcodes-LV6PoP/source/c++/src -m seqalign.asn -M "objects/general/general.asn objects/biblio/biblio.asn objects/medline/medline.asn objects/seqloc/seqloc.asn" -oA \
+    -oc seqalign -or objects/seqalign -odi -od seqalign.def -oex '' \
+    -ocvs -pch 'ncbi_pch.hpp' -fd seqalign.dump \
+    
+datatool: 2.24.0
+make[3]: Leaving directory '/tmp/tlosan-allcodes-LV6PoP/source/c++/src/objects/seqalign'
+/usr/bin/make -w -f /tmp/tlosan-allcodes-LV6PoP/source/c++/src/build-system/Makefile.module MODULE=seqblock MODULE_PATH=objects/seqblock MODULE_ASN=seqblock.asn MODULE_IMPORT='objects/general/general objects/biblio/biblio objects/medline/medline objects/seqloc/seqloc' IMPDEPS='/tmp/tlosan-allcodes-LV6PoP/source/c++/src/objects/general/general.asn /tmp/tlosan-allcodes-LV6PoP/source/c++/src/objects/biblio/biblio.asn /tmp/tlosan-allcodes-LV6PoP/source/c++/src/objects/medline/medline.asn /tmp/tlosan-allcodes-LV6PoP/source/c++/src/objects/seqloc/seqloc.asn' IMPFILES='objects/general/general.asn objects/biblio/biblio.asn objects/medline/medline.asn objects/seqloc/seqloc.asn' top_srcdir=/tmp/tlosan-allcodes-LV6PoP/source/c++ builddir=/tmp/tlosan-allcodes-LV6PoP/build/build DATATOOL=/home/kawato/micromamba/bin/datatool DATATOOL_WRAPPER='' MODULE_SEARCH=/tmp/tlosan-allcodes-LV6PoP/source/c++/src
+make[3]: Entering directory '/tmp/tlosan-allcodes-LV6PoP/source/c++/src/objects/seqblock'
+/home/kawato/micromamba/bin/datatool -oR /tmp/tlosan-allcodes-LV6PoP/source/c++ \
+    -opm /tmp/tlosan-allcodes-LV6PoP/source/c++/src -m seqblock.asn -M "objects/general/general.asn objects/biblio/biblio.asn objects/medline/medline.asn objects/seqloc/seqloc.asn" -oA \
+    -oc seqblock -or objects/seqblock -odi -od seqblock.def -oex '' \
+    -ocvs -pch 'ncbi_pch.hpp' -fd seqblock.dump \
+    
+datatool: 2.24.0
+make[3]: Leaving directory '/tmp/tlosan-allcodes-LV6PoP/source/c++/src/objects/seqblock'
+/usr/bin/make -w -f /tmp/tlosan-allcodes-LV6PoP/source/c++/src/build-system/Makefile.module MODULE=seqfeat MODULE_PATH=objects/seqfeat MODULE_ASN=seqfeat.asn MODULE_IMPORT='objects/general/general objects/biblio/biblio objects/medline/medline objects/pub/pub objects/seqloc/seqloc objects/seq/seq' IMPDEPS='/tmp/tlosan-allcodes-LV6PoP/source/c++/src/objects/general/general.asn /tmp/tlosan-allcodes-LV6PoP/source/c++/src/objects/biblio/biblio.asn /tmp/tlosan-allcodes-LV6PoP/source/c++/src/objects/medline/medline.asn /tmp/tlosan-allcodes-LV6PoP/source/c++/src/objects/pub/pub.asn /tmp/tlosan-allcodes-LV6PoP/source/c++/src/objects/seqloc/seqloc.asn /tmp/tlosan-allcodes-LV6PoP/source/c++/src/objects/seq/seq.asn' IMPFILES='objects/general/general.asn objects/biblio/biblio.asn objects/medline/medline.asn objects/pub/pub.asn objects/seqloc/seqloc.asn objects/seq/seq.asn' top_srcdir=/tmp/tlosan-allcodes-LV6PoP/source/c++ builddir=/tmp/tlosan-allcodes-LV6PoP/build/build DATATOOL=/home/kawato/micromamba/bin/datatool DATATOOL_WRAPPER='' MODULE_SEARCH=/tmp/tlosan-allcodes-LV6PoP/source/c++/src
+make[3]: Entering directory '/tmp/tlosan-allcodes-LV6PoP/source/c++/src/objects/seqfeat'
+/home/kawato/micromamba/bin/datatool -oR /tmp/tlosan-allcodes-LV6PoP/source/c++ \
+    -opm /tmp/tlosan-allcodes-LV6PoP/source/c++/src -m seqfeat.asn -M "objects/general/general.asn objects/biblio/biblio.asn objects/medline/medline.asn objects/pub/pub.asn objects/seqloc/seqloc.asn objects/seq/seq.asn" -oA \
+    -oc seqfeat -or objects/seqfeat -odi -od seqfeat.def -oex '' \
+    -ocvs -pch 'ncbi_pch.hpp' -fd seqfeat.dump \
+    
+datatool: 2.24.0
+make[3]: Leaving directory '/tmp/tlosan-allcodes-LV6PoP/source/c++/src/objects/seqfeat'
+/usr/bin/make -w -f /tmp/tlosan-allcodes-LV6PoP/source/c++/src/build-system/Makefile.module MODULE=seqloc MODULE_PATH=objects/seqloc MODULE_ASN=seqloc.asn MODULE_IMPORT='objects/general/general objects/biblio/biblio objects/seqfeat/seqfeat' IMPDEPS='/tmp/tlosan-allcodes-LV6PoP/source/c++/src/objects/general/general.asn /tmp/tlosan-allcodes-LV6PoP/source/c++/src/objects/biblio/biblio.asn /tmp/tlosan-allcodes-LV6PoP/source/c++/src/objects/seqfeat/seqfeat.asn' IMPFILES='objects/general/general.asn objects/biblio/biblio.asn objects/seqfeat/seqfeat.asn' top_srcdir=/tmp/tlosan-allcodes-LV6PoP/source/c++ builddir=/tmp/tlosan-allcodes-LV6PoP/build/build DATATOOL=/home/kawato/micromamba/bin/datatool DATATOOL_WRAPPER='' MODULE_SEARCH=/tmp/tlosan-allcodes-LV6PoP/source/c++/src
+make[3]: Entering directory '/tmp/tlosan-allcodes-LV6PoP/source/c++/src/objects/seqloc'
+/home/kawato/micromamba/bin/datatool -oR /tmp/tlosan-allcodes-LV6PoP/source/c++ \
+    -opm /tmp/tlosan-allcodes-LV6PoP/source/c++/src -m seqloc.asn -M "objects/general/general.asn objects/biblio/biblio.asn objects/seqfeat/seqfeat.asn" -oA \
+    -oc seqloc -or objects/seqloc -odi -od seqloc.def -oex '' \
+    -ocvs -pch 'ncbi_pch.hpp' -fd seqloc.dump \
+    
+datatool: 2.24.0
+make[3]: Leaving directory '/tmp/tlosan-allcodes-LV6PoP/source/c++/src/objects/seqloc'
+/usr/bin/make -w -f /tmp/tlosan-allcodes-LV6PoP/source/c++/src/build-system/Makefile.module MODULE=seqres MODULE_PATH=objects/seqres MODULE_ASN=seqres.asn MODULE_IMPORT='objects/general/general objects/biblio/biblio objects/medline/medline objects/seqloc/seqloc' IMPDEPS='/tmp/tlosan-allcodes-LV6PoP/source/c++/src/objects/general/general.asn /tmp/tlosan-allcodes-LV6PoP/source/c++/src/objects/biblio/biblio.asn /tmp/tlosan-allcodes-LV6PoP/source/c++/src/objects/medline/medline.asn /tmp/tlosan-allcodes-LV6PoP/source/c++/src/objects/seqloc/seqloc.asn' IMPFILES='objects/general/general.asn objects/biblio/biblio.asn objects/medline/medline.asn objects/seqloc/seqloc.asn' top_srcdir=/tmp/tlosan-allcodes-LV6PoP/source/c++ builddir=/tmp/tlosan-allcodes-LV6PoP/build/build DATATOOL=/home/kawato/micromamba/bin/datatool DATATOOL_WRAPPER='' MODULE_SEARCH=/tmp/tlosan-allcodes-LV6PoP/source/c++/src
+make[3]: Entering directory '/tmp/tlosan-allcodes-LV6PoP/source/c++/src/objects/seqres'
+/home/kawato/micromamba/bin/datatool -oR /tmp/tlosan-allcodes-LV6PoP/source/c++ \
+    -opm /tmp/tlosan-allcodes-LV6PoP/source/c++/src -m seqres.asn -M "objects/general/general.asn objects/biblio/biblio.asn objects/medline/medline.asn objects/seqloc/seqloc.asn" -oA \
+    -oc seqres -or objects/seqres -odi -od seqres.def -oex '' \
+    -ocvs -pch 'ncbi_pch.hpp' -fd seqres.dump \
+    
+datatool: 2.24.0
+make[3]: Leaving directory '/tmp/tlosan-allcodes-LV6PoP/source/c++/src/objects/seqres'
+/usr/bin/make -w -f /tmp/tlosan-allcodes-LV6PoP/source/c++/src/build-system/Makefile.module MODULE=seqtable MODULE_PATH=objects/seqtable MODULE_ASN=seqtable.asn MODULE_IMPORT='objects/general/general objects/seq/seq objects/seqloc/seqloc' IMPDEPS='/tmp/tlosan-allcodes-LV6PoP/source/c++/src/objects/general/general.asn /tmp/tlosan-allcodes-LV6PoP/source/c++/src/objects/seq/seq.asn /tmp/tlosan-allcodes-LV6PoP/source/c++/src/objects/seqloc/seqloc.asn' IMPFILES='objects/general/general.asn objects/seq/seq.asn objects/seqloc/seqloc.asn' top_srcdir=/tmp/tlosan-allcodes-LV6PoP/source/c++ builddir=/tmp/tlosan-allcodes-LV6PoP/build/build DATATOOL=/home/kawato/micromamba/bin/datatool DATATOOL_WRAPPER='' MODULE_SEARCH=/tmp/tlosan-allcodes-LV6PoP/source/c++/src
+make[3]: Entering directory '/tmp/tlosan-allcodes-LV6PoP/source/c++/src/objects/seqtable'
+/home/kawato/micromamba/bin/datatool -oR /tmp/tlosan-allcodes-LV6PoP/source/c++ \
+    -opm /tmp/tlosan-allcodes-LV6PoP/source/c++/src -m seqtable.asn -M "objects/general/general.asn objects/seq/seq.asn objects/seqloc/seqloc.asn" -oA \
+    -oc seqtable -or objects/seqtable -odi -od seqtable.def -oex '' \
+    -ocvs -pch 'ncbi_pch.hpp' -fd seqtable.dump \
+    
+datatool: 2.24.0
+make[3]: Leaving directory '/tmp/tlosan-allcodes-LV6PoP/source/c++/src/objects/seqtable'
+make[2]: Leaving directory '/tmp/tlosan-allcodes-LV6PoP/build/build/objects/seq'
+make[1]: Leaving directory '/tmp/tlosan-allcodes-LV6PoP/build/build/objects/seq'
+cd /tmp/tlosan-allcodes-LV6PoP/source/c++/src/objects/seq  &&  /tmp/tlosan-allcodes-LV6PoP/build/build/new_module.sh seq all
+/usr/bin/make -w -f /tmp/tlosan-allcodes-LV6PoP/source/c++/src/build-system/Makefile.module MODULE=seq MODULE_PATH=objects/seq MODULE_ASN=seq.asn MODULE_IMPORT='objects/general/general objects/biblio/biblio objects/pub/pub objects/medline/medline objects/seqloc/seqloc objects/seqblock/seqblock objects/seqalign/seqalign objects/seqfeat/seqfeat objects/seqres/seqres objects/seqtable/seqtable' IMPDEPS='/tmp/tlosan-allcodes-LV6PoP/source/c++/src/objects/general/general.asn /tmp/tlosan-allcodes-LV6PoP/source/c++/src/objects/biblio/biblio.asn /tmp/tlosan-allcodes-LV6PoP/source/c++/src/objects/pub/pub.asn /tmp/tlosan-allcodes-LV6PoP/source/c++/src/objects/medline/medline.asn /tmp/tlosan-allcodes-LV6PoP/source/c++/src/objects/seqloc/seqloc.asn /tmp/tlosan-allcodes-LV6PoP/source/c++/src/objects/seqblock/seqblock.asn /tmp/tlosan-allcodes-LV6PoP/source/c++/src/objects/seqalign/seqalign.asn /tmp/tlosan-allcodes-LV6PoP/source/c++/src/objects/seqfeat/seqfeat.asn /tmp/tlosan-allcodes-LV6PoP/source/c++/src/objects/seqres/seqres.asn /tmp/tlosan-allcodes-LV6PoP/source/c++/src/objects/seqtable/seqtable.asn' IMPFILES='objects/general/general.asn objects/biblio/biblio.asn objects/pub/pub.asn objects/medline/medline.asn objects/seqloc/seqloc.asn objects/seqblock/seqblock.asn objects/seqalign/seqalign.asn objects/seqfeat/seqfeat.asn objects/seqres/seqres.asn objects/seqtable/seqtable.asn' top_srcdir=/tmp/tlosan-allcodes-LV6PoP/source/c++ builddir=/tmp/tlosan-allcodes-LV6PoP/build/build DATATOOL=/home/kawato/micromamba/bin/datatool DATATOOL_WRAPPER='' MODULE_SEARCH=/tmp/tlosan-allcodes-LV6PoP/source/c++/src all
+make[1]: Entering directory '/tmp/tlosan-allcodes-LV6PoP/source/c++/src/objects/seq'
+/home/kawato/micromamba/bin/datatool -oR /tmp/tlosan-allcodes-LV6PoP/source/c++ \
+    -opm /tmp/tlosan-allcodes-LV6PoP/source/c++/src -m seq.asn -M "objects/general/general.asn objects/biblio/biblio.asn objects/pub/pub.asn objects/medline/medline.asn objects/seqloc/seqloc.asn objects/seqblock/seqblock.asn objects/seqalign/seqalign.asn objects/seqfeat/seqfeat.asn objects/seqres/seqres.asn objects/seqtable/seqtable.asn" -oA \
+    -oc seq -or objects/seq -odi -od seq.def -oex '' \
+    -ocvs -pch 'ncbi_pch.hpp' -fd seq.dump \
+    
+datatool: 2.24.0
+make[1]: Leaving directory '/tmp/tlosan-allcodes-LV6PoP/source/c++/src/objects/seq'
+make[1]: Entering directory '/tmp/tlosan-allcodes-LV6PoP/source/c++/src/objects/seq'
+make[1]: Leaving directory '/tmp/tlosan-allcodes-LV6PoP/source/c++/src/objects/seq'
+/usr/bin/make -f /tmp/tlosan-allcodes-LV6PoP/build/build/Makefile.lib.tmpl srcdir=/tmp/tlosan-allcodes-LV6PoP/source/c++/src/objects/seq TMPL=seq -w export-headers
+make[1]: Entering directory '/tmp/tlosan-allcodes-LV6PoP/build/build/objects/seq'
+make[1]: Nothing to be done for 'export-headers'.
+make[1]: Leaving directory '/tmp/tlosan-allcodes-LV6PoP/build/build/objects/seq'
+/usr/bin/make -f /tmp/tlosan-allcodes-LV6PoP/build/build/Makefile.lib.tmpl srcdir=/tmp/tlosan-allcodes-LV6PoP/source/c++/src/objects/seq TMPL=seq -w flag-stamps
+make[1]: Entering directory '/tmp/tlosan-allcodes-LV6PoP/build/build/objects/seq'
+make[1]: Leaving directory '/tmp/tlosan-allcodes-LV6PoP/build/build/objects/seq'
+make: Leaving directory '/tmp/tlosan-allcodes-LV6PoP/build/build/objects/seq'

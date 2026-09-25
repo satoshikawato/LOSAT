@@ -13,6 +13,7 @@ use crate::algorithm::blastp::gapalign::{
     BlastpGappedAlignmentMode, GapAlignScratch,
 };
 use crate::algorithm::tblastx::translation::{generate_frames, QueryFrame};
+use crate::common::GapEditOp;
 use crate::config::ScoringMatrix;
 use crate::utils::genetic_code::GeneticCode;
 use crate::utils::matrix::protein_score;
@@ -32,6 +33,18 @@ pub(super) struct GappedHsp {
     pub s_start: i32,
     pub s_end: i32,
     pub s_gapped_start: i32,
+}
+
+// NCBI c++/src/algo/blast/core/blast_traceback.c:503-536,583-605;
+// c++/include/algo/blast/core/blast_hits.h:126-143:
+// Blast_HSPUpdateWithTraceback(gap_align, hsp);
+// hsp->gap_info = gap_align->edit_script; gap_align->edit_script = NULL;
+// Keep the transferred script on the same Rust HSP through purge and pruning.
+#[derive(Clone, Debug)]
+pub(super) struct TracebackOwnedHsp {
+    pub hsp: GappedHsp,
+    pub retried: bool,
+    pub edit_script: Vec<GapEditOp>,
 }
 
 // NCBI c++/src/algo/blast/core/blast_engine.c:522-552:
@@ -1036,19 +1049,20 @@ fn traceback_tree_hsp(hsp: &GappedHsp, query_length: i32) -> TreeHsp {
 // subject.end DESC, query.offset ASC, query.end DESC.
 // This internal Stage C list has one protein query context; multi-query
 // context offsets remain a separate Stage C boundary.
-fn purge_traceback_common_endpoints(mut hsps: Vec<(GappedHsp, bool)>) -> Vec<(GappedHsp, bool)> {
+fn purge_traceback_common_endpoints(mut hsps: Vec<TracebackOwnedHsp>) -> Vec<TracebackOwnedHsp> {
     hsps.sort_unstable_by(|a, b| {
-        a.0.q_start
-            .cmp(&b.0.q_start)
-            .then(a.0.s_start.cmp(&b.0.s_start))
-            .then(b.0.score.cmp(&a.0.score))
-            .then(b.0.q_end.cmp(&a.0.q_end))
-            .then(b.0.s_end.cmp(&a.0.s_end))
+        a.hsp
+            .q_start
+            .cmp(&b.hsp.q_start)
+            .then(a.hsp.s_start.cmp(&b.hsp.s_start))
+            .then(b.hsp.score.cmp(&a.hsp.score))
+            .then(b.hsp.q_end.cmp(&a.hsp.q_end))
+            .then(b.hsp.s_end.cmp(&a.hsp.s_end))
     });
     let mut i = 0;
     while i + 1 < hsps.len() {
-        let a = hsps[i].0;
-        let b = hsps[i + 1].0;
+        let a = hsps[i].hsp;
+        let b = hsps[i + 1].hsp;
         if a.frame == b.frame && a.q_start == b.q_start && a.s_start == b.s_start {
             hsps.remove(i + 1);
         } else {
@@ -1056,17 +1070,18 @@ fn purge_traceback_common_endpoints(mut hsps: Vec<(GappedHsp, bool)>) -> Vec<(Ga
         }
     }
     hsps.sort_unstable_by(|a, b| {
-        a.0.q_end
-            .cmp(&b.0.q_end)
-            .then(a.0.s_end.cmp(&b.0.s_end))
-            .then(b.0.score.cmp(&a.0.score))
-            .then(b.0.q_start.cmp(&a.0.q_start))
-            .then(b.0.s_start.cmp(&a.0.s_start))
+        a.hsp
+            .q_end
+            .cmp(&b.hsp.q_end)
+            .then(a.hsp.s_end.cmp(&b.hsp.s_end))
+            .then(b.hsp.score.cmp(&a.hsp.score))
+            .then(b.hsp.q_start.cmp(&a.hsp.q_start))
+            .then(b.hsp.s_start.cmp(&a.hsp.s_start))
     });
     i = 0;
     while i + 1 < hsps.len() {
-        let a = hsps[i].0;
-        let b = hsps[i + 1].0;
+        let a = hsps[i].hsp;
+        let b = hsps[i + 1].hsp;
         if a.frame == b.frame && a.q_end == b.q_end && a.s_end == b.s_end {
             hsps.remove(i + 1);
         } else {
@@ -1077,9 +1092,9 @@ fn purge_traceback_common_endpoints(mut hsps: Vec<(GappedHsp, bool)>) -> Vec<(Ga
     // if (!Blast_HSPListIsSortedByScore(hsp_list)) qsort(..., ScoreCompareHSPs);
     if hsps
         .windows(2)
-        .any(|pair| compare_gapped_score(&pair[0].0, &pair[1].0).is_gt())
+        .any(|pair| compare_gapped_score(&pair[0].hsp, &pair[1].hsp).is_gt())
     {
-        hsps.sort_unstable_by(|a, b| compare_gapped_score(&a.0, &b.0));
+        hsps.sort_unstable_by(|a, b| compare_gapped_score(&a.hsp, &b.hsp));
     }
     hsps
 }
@@ -1303,11 +1318,66 @@ fn full_translation_traceback_with_matrix_and_events_with_mask_mode(
     seg: Option<&SegParams>,
     soft_masking: bool,
     mask_lowercase: bool,
+    test_events: Option<&mut Vec<(bool, usize, usize, usize, usize, usize)>>,
+    start_events: Option<&mut Vec<(bool, i32, i32, i32, i32, i32, i32)>>,
+    containment_events: Option<&mut Vec<(bool, i8, i32, i32, i32, i32)>>,
+    identity_events: Option<&mut Vec<(usize, usize)>>,
+) -> Result<Vec<(GappedHsp, bool)>> {
+    // NCBI c++/src/algo/blast/core/blast_traceback.c:583-605,675-693:
+    // Blast_HSPUpdateWithTraceback(...); Blast_HSPListSortByScore(...);
+    // return the retained HSPs in source order to existing Stage C observers.
+    Ok(
+        full_translation_traceback_with_matrix_and_events_with_mask_mode_owned(
+            query,
+            subject,
+            db_gencode,
+            gapped,
+            matrix,
+            gap_open,
+            gap_extend,
+            x_drop_final,
+            percent_identity,
+            min_hit_length,
+            seg,
+            soft_masking,
+            mask_lowercase,
+            test_events,
+            start_events,
+            containment_events,
+            identity_events,
+        )?
+        .0
+        .into_iter()
+        .map(|item| (item.hsp, item.retried))
+        .collect(),
+    )
+}
+
+// NCBI c++/src/algo/blast/core/blast_traceback.c:503-536,583-605,675-693:
+// hsp->gap_info = gap_align->edit_script; gap_align->edit_script = NULL;
+// Blast_HSPListSortByScore(hsp_list); purge contained HSPs afterward.
+// NCBI c++/src/algo/blast/core/blast_traceback.c:294,425-433,717-719;
+// core/blast_hits.c:1231-1235: the last translated_length returned while
+// visiting input HSPs becomes the posttraceback statistical subject length.
+pub(super) fn full_translation_traceback_with_matrix_and_events_with_mask_mode_owned(
+    query: &[u8],
+    subject: &[u8],
+    db_gencode: u8,
+    gapped: &[GappedHsp],
+    matrix: ScoringMatrix,
+    gap_open: i32,
+    gap_extend: i32,
+    x_drop_final: i32,
+    percent_identity: f64,
+    min_hit_length: i32,
+    seg: Option<&SegParams>,
+    soft_masking: bool,
+    mask_lowercase: bool,
     mut test_events: Option<&mut Vec<(bool, usize, usize, usize, usize, usize)>>,
     mut start_events: Option<&mut Vec<(bool, i32, i32, i32, i32, i32, i32)>>,
     mut containment_events: Option<&mut Vec<(bool, i8, i32, i32, i32, i32)>>,
     mut identity_events: Option<&mut Vec<(usize, usize)>>,
-) -> Result<Vec<(GappedHsp, bool)>> {
+) -> Result<(Vec<TracebackOwnedHsp>, i32)> {
     let code = GeneticCode::try_from_id(db_gencode).map_err(anyhow::Error::msg)?;
     // NCBI c++/src/algo/blast/core/blast_traceback.c:380-391,583-596:
     // query = query_blk->sequence + context_offset;
@@ -1334,6 +1404,9 @@ fn full_translation_traceback_with_matrix_and_events_with_mask_mode(
     let subject_limit = i32::try_from(subject.len() / 3)? + 1;
     let mut target = TargetTranslation::new(subject, &code);
     for pass in 0..2 {
+        // NCBI blast_traceback.c:294,425-433: initialized from raw subject
+        // length, then overwritten by each positive translated_length.
+        let mut stat_length = i32::try_from(subject.len())?;
         let mut results = Vec::new();
         let mut retry = false;
         // NCBI c++/src/algo/blast/core/blast_traceback.c:352-360,401-405,
@@ -1363,11 +1436,16 @@ fn full_translation_traceback_with_matrix_and_events_with_mask_mode(
             if contained {
                 continue;
             }
-            let (subject_sequence, _, subject_base) = target.get(
+            let (subject_sequence, translated_length, subject_base) = target.get(
                 hit.frame,
                 if pass == 0 { hit.s_start } else { -1 },
                 hit.s_end,
             )?;
+            // NCBI blast_traceback.c:425-433:
+            // if (subject_length > 0) stat_length = subject_length;
+            if translated_length > 0 {
+                stat_length = i32::try_from(translated_length)?;
+            }
             // NCBI c++/src/algo/blast/core/blast_traceback.c:436-449:
             // if (hsp->query.gapped_start == 0 && hsp->subject.gapped_start == 0) {
             //   retval = BlastGetOffsetsForGappedAlignment(...);
@@ -1494,7 +1572,11 @@ fn full_translation_traceback_with_matrix_and_events_with_mask_mode(
                 0,
                 IndexMethod::QueryAndSubject,
             );
-            results.push((saved, pass != 0));
+            results.push(TracebackOwnedHsp {
+                hsp: saved,
+                retried: pass != 0,
+                edit_script: alignment.edit_script,
+            });
         }
         if !retry {
             let mut results = purge_traceback_common_endpoints(results);
@@ -1505,7 +1587,8 @@ fn full_translation_traceback_with_matrix_and_events_with_mask_mode(
             //        hit_options->min_diag_separation)) Blast_HSPFree(hsp);
             // else BlastIntervalTreeAddHSP(hsp, tree, query_info, eQueryAndSubject);
             let mut final_tree = BlastIntervalTree::new(0, query_length + 1, 0, subject_limit);
-            results.retain(|(hsp, _)| {
+            results.retain(|item| {
+                let hsp = &item.hsp;
                 let tree_hsp = traceback_tree_hsp(hsp, query_length);
                 let contained = final_tree.contains_hsp(&tree_hsp, 0, 0);
                 // NCBI c++/src/algo/blast/core/blast_traceback.c:675-693:
@@ -1530,7 +1613,7 @@ fn full_translation_traceback_with_matrix_and_events_with_mask_mode(
                     true
                 }
             });
-            return Ok(results);
+            return Ok((results, stat_length));
         }
         if pass == 1 {
             bail!("NCBI full-subject TBLASTN traceback reached a fence");
@@ -1668,9 +1751,13 @@ mod tests {
             (subject.len() / 3) as i64,
         )
         .unwrap();
+        // NCBI c++/src/algo/blast/core/blast_setup.c:729-847:
+        // db_num_seqs = eff_len_params->real_num_seqs;
+        // BLAST_ComputeLengthAdjustment(..., db_length, db_num_seqs, ...);
         let parameters = local_parameters_for_call(
             &[(120, true), (70, true), (120, false)],
             subject.len(),
+            1,
             &[gapped; 3],
             &[ungapped; 3],
             LocalParameterOptions {
@@ -1788,9 +1875,13 @@ mod tests {
             (subject.len() / 3) as i64,
         )
         .unwrap();
+        // NCBI c++/src/algo/blast/core/blast_setup.c:729-847:
+        // db_num_seqs = eff_len_params->real_num_seqs;
+        // BLAST_ComputeLengthAdjustment(..., db_length, db_num_seqs, ...);
         let parameters = local_parameters_for_call(
             &[(query.len(), true)],
             subject.len(),
+            1,
             &[gapped],
             &[ungapped],
             LocalParameterOptions {

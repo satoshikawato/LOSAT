@@ -32,4 +32,8 @@ mod kappa_heap;
 // NCBI core/blast_kappa.c:2494-2515 and blast_hits.c:3243-3297,3420-3437:
 // popped lists enter Blast_HitListUpdate, then results are reversed.
 mod stage_d_results;
+// NCBI c++/src/algo/blast/core/blast_engine.c:870-905;
+// blast_traceback.c:1481-1499,1763-1776: preliminary lists enter Kappa,
+// then local results pass through the post-traceback pipes.
+mod stage_d_pipeline;
 pub use args::TblastnArgs;

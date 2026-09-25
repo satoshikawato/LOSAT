@@ -106,9 +106,11 @@ pub(super) enum LocalParameterCall {
 pub(super) fn local_subject_effective_lengths(
     query_contexts: &[(usize, bool)],
     subject_nt_length: usize,
+    db_num_seqs: usize,
     gapped_params: &[KarlinParams],
 ) -> Vec<LocalContextLength> {
     assert_eq!(query_contexts.len(), gapped_params.len());
+    assert!(db_num_seqs > 0);
     let db_length = (subject_nt_length / 3) as i64;
     query_contexts
         .iter()
@@ -127,9 +129,10 @@ pub(super) fn local_subject_effective_lengths(
                 };
             }
             let query_length = query_length as i64;
-            let adjustment = compute_length_adjustment_ncbi(query_length, db_length, 1, params)
-                .length_adjustment;
-            let effective_db_length = (db_length - adjustment).max(1);
+            let adjustment =
+                compute_length_adjustment_ncbi(query_length, db_length, db_num_seqs as i64, params)
+                    .length_adjustment;
+            let effective_db_length = (db_length - db_num_seqs as i64 * adjustment).max(1);
             LocalContextLength {
                 length_adjustment: adjustment,
                 eff_searchsp: effective_db_length * (query_length - adjustment),
@@ -151,6 +154,7 @@ pub(super) fn local_subject_effective_lengths(
 pub(super) fn local_parameters_for_call(
     query_contexts: &[(usize, bool)],
     subject_nt_length: usize,
+    db_num_seqs: usize,
     gapped_params: &[KarlinParams],
     ungapped_params: &[KarlinParams],
     options: LocalParameterOptions<'_>,
@@ -159,7 +163,12 @@ pub(super) fn local_parameters_for_call(
     assert!(!query_contexts.is_empty());
     assert_eq!(query_contexts.len(), gapped_params.len());
     assert_eq!(query_contexts.len(), ungapped_params.len());
-    let lengths = local_subject_effective_lengths(query_contexts, subject_nt_length, gapped_params);
+    let lengths = local_subject_effective_lengths(
+        query_contexts,
+        subject_nt_length,
+        db_num_seqs,
+        gapped_params,
+    );
     // NCBI c++/src/algo/blast/core/blast_setup.c:964-985,1011-1024:
     // initial creation passes min_subject_length and compositionBasedStats;
     // the conditional update passes subject_length and literal zero.
@@ -340,9 +349,13 @@ mod tests {
             (subject_length / 3) as i64,
         )
         .unwrap();
+        // NCBI c++/src/algo/blast/core/blast_setup.c:729-847:
+        // db_num_seqs = eff_len_params->real_num_seqs;
+        // BLAST_ComputeLengthAdjustment(..., db_length, db_num_seqs, ...);
         let result = local_parameters_for_call(
             &[(120, true), (70, true), (120, false)],
             subject_length,
+            1,
             &[gapped; 3],
             &[ungapped; 3],
             LocalParameterOptions {
@@ -478,9 +491,13 @@ mod tests {
             (subject_length / 3) as i64,
         )
         .unwrap();
+        // NCBI c++/src/algo/blast/core/blast_setup.c:729-847:
+        // db_num_seqs = eff_len_params->real_num_seqs;
+        // BLAST_ComputeLengthAdjustment(..., db_length, db_num_seqs, ...);
         let result = local_parameters_for_call(
             &[(120, true), (70, true), (120, false)],
             subject_length,
+            1,
             &[gapped; 3],
             &[ungapped; 3],
             LocalParameterOptions {
@@ -501,11 +518,29 @@ mod tests {
         assert_eq!(result.link.unwrap().cutoff_small_gap, 17, "{result:?}");
     }
 
+    // NCBI c++/src/algo/blast/core/blast_setup.c:729-847:
+    // db_num_seqs = eff_len_params->real_num_seqs;
+    // BLAST_ComputeLengthAdjustment(..., db_length, db_num_seqs, ...);
+    // effective_db_length = db_length - db_num_seqs * length_adjustment;
+    // The pinned natural two-subject trace records D_CONTEXT 0, 18, 22848.
+    #[test]
+    fn two_local_subjects_use_both_sequences_in_effective_search_space() {
+        let params = lookup_protein_params_gapped(ScoringMatrix::Blosum62);
+        assert_eq!(
+            local_subject_effective_lengths(&[(120, true)], 781, 2, &[params]),
+            vec![LocalContextLength {
+                length_adjustment: 18,
+                eff_searchsp: 22_848,
+                subject_stat_length: 260,
+            }]
+        );
+    }
+
     #[test]
     fn local_code1_context_lengths_match_ncbi_function_inputs() {
         let params = lookup_protein_params_gapped(ScoringMatrix::Blosum62);
         assert_eq!(
-            local_subject_effective_lengths(&[(160, true)], 362, &[params]),
+            local_subject_effective_lengths(&[(160, true)], 362, 1, &[params]),
             vec![LocalContextLength {
                 length_adjustment: 15,
                 eff_searchsp: 15225,
@@ -516,6 +551,7 @@ mod tests {
             local_subject_effective_lengths(
                 &[(120, true), (70, true), (120, false)],
                 6377,
+                1,
                 &[params; 3],
             ),
             vec![

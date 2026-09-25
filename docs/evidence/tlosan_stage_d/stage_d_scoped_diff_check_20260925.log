@@ -1,0 +1,3 @@
+command: git diff --cached --check -- <staged .rs/.py/.sh/.c/.cpp/.md files>
+source files: 28
+result: PASS

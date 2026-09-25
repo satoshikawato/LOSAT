@@ -66,6 +66,33 @@ pub fn lookup_protein_gumbel_params(
     db_length: i64,
 ) -> Option<BlastGumbelBlk> {
     match (spec.matrix, spec.gap_open, spec.gap_extend) {
+        // NCBI c++/src/algo/blast/core/blast_stat.c:183-192,3696-3742:
+        // {INT2_MAX, INT2_MAX, ..., 0.2291, ..., 0.9113, ..., 9.611060, 9.611060},
+        // {14, 2, ..., 0.195, ..., 1.9, ..., 0.685753, 60.736200, 61.102300};
+        // gbp->b = 2*G*(a_un-a); gbp->Beta = 2*G*(Alpha_un-Alpha);
+        // gbp->Tau = 2*G*(Alpha_un-Sigma);
+        (ScoringMatrix::Blosum45, 14, 2) => {
+            let g = (spec.gap_open + spec.gap_extend) as f64;
+            let a = 1.9;
+            let alpha = 60.736200;
+            let sigma = 61.102300;
+            let a_un = 0.9113;
+            let alpha_un = 9.611060;
+            Some(BlastGumbelBlk {
+                lambda: 0.195,
+                c: 0.685753,
+                g,
+                a,
+                alpha,
+                sigma,
+                a_un,
+                alpha_un,
+                b: 2.0 * g * (a_un - a),
+                beta: 2.0 * g * (alpha_un - alpha),
+                tau: 2.0 * g * (alpha_un - sigma),
+                db_length,
+            })
+        }
         (ScoringMatrix::Blosum62, 11, 1) => {
             let g = (spec.gap_open + spec.gap_extend) as f64;
             let a = 1.9;

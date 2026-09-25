@@ -299,11 +299,13 @@ pub(super) fn link_preliminary_hsps(
 ) -> Result<LinkedHspList> {
     // NCBI c++/src/algo/blast/core/link_hsps.c:1774-1777:
     // if (!hsp_list || hsp_list->hspcnt == 0) return 0;
-    // This internal helper is entered only for the nonempty branch.
-    ensure!(
-        !input.is_empty(),
-        "TBLASTN link helper requires nonempty HSP list"
-    );
+    // Preserve the Stage C-to-D call on an allocated empty subject list.
+    if input.is_empty() {
+        return Ok(LinkedHspList {
+            hsps: Vec::new(),
+            best_evalue: 0.0,
+        });
+    }
     ensure!(
         link.longest_intron > 0,
         "TBLASTN uneven-gap link parameters required"
@@ -516,6 +518,33 @@ mod tests {
     use crate::stats::tables::{lookup_protein_params_gapped, lookup_protein_params_ungapped};
     use std::fs;
 
+    // NCBI c++/src/algo/blast/core/blast_engine.c:870-905;
+    // c++/src/algo/blast/core/link_hsps.c:1774-1777:
+    // BLAST_LinkHsps is called for an allocated empty list and returns zero
+    // immediately without adding an HSP.
+    #[test]
+    fn empty_subject_list_enters_link_and_returns_empty() {
+        let gumbel = lookup_protein_gumbel_params(
+            &ProteinScoringSpec {
+                matrix: ScoringMatrix::Blosum62,
+                gap_open: 11,
+                gap_extend: 1,
+            },
+            120,
+        )
+        .unwrap();
+        let link = LocalLinkParameters {
+            gap_decay_rate: 0.1,
+            gap_size: 40,
+            overlap_size: 9,
+            longest_intron: 40,
+            cutoff_small_gap: 25,
+        };
+        let result = link_preliminary_hsps(&[], &[], &[], 360, &[], &gumbel, &link).unwrap();
+        assert!(result.hsps.is_empty());
+        assert_eq!(result.best_evalue.to_bits(), 0.0f64.to_bits());
+    }
+
     // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_hits.c:1385-1404,3071-3115;
     // c++/src/algo/blast/core/blast_hspstream.c:144-152,289-319
     // ```c
@@ -628,9 +657,13 @@ mod tests {
                 (subject_nt_length / 3) as i64,
             )
             .unwrap();
+            // NCBI c++/src/algo/blast/core/blast_setup.c:729-847:
+            // db_num_seqs = eff_len_params->real_num_seqs;
+            // BLAST_ComputeLengthAdjustment(..., db_length, db_num_seqs, ...);
             let parameters = local_parameters_for_call(
                 &query_contexts,
                 subject_nt_length,
+                1,
                 &vec![gapped; query_contexts.len()],
                 &vec![ungapped; query_contexts.len()],
                 LocalParameterOptions {
@@ -774,9 +807,13 @@ mod tests {
         )
         .unwrap();
         let query_contexts = [(120, true), (70, true), (120, false)];
+        // NCBI c++/src/algo/blast/core/blast_setup.c:729-847:
+        // db_num_seqs = eff_len_params->real_num_seqs;
+        // BLAST_ComputeLengthAdjustment(..., db_length, db_num_seqs, ...);
         let parameters = local_parameters_for_call(
             &query_contexts,
             6_377,
+            1,
             &[gapped; 3],
             &[ungapped; 3],
             LocalParameterOptions {
@@ -1052,9 +1089,13 @@ mod tests {
             (total_nt / 3) as i64,
         )
         .unwrap();
+        // NCBI c++/src/algo/blast/core/blast_setup.c:729-847:
+        // db_num_seqs = eff_len_params->real_num_seqs;
+        // BLAST_ComputeLengthAdjustment(..., db_length, db_num_seqs, ...);
         let parameters = local_parameters_for_call(
             &[(query.len(), true)],
             total_nt,
+            1,
             &[gapped],
             &[ungapped],
             LocalParameterOptions {
@@ -1602,6 +1643,9 @@ mod tests {
                         bit_score: bits[index],
                         num_ident: i32::try_from(identities[index]).unwrap(),
                         num_positives: stats[index].1,
+                        report_num_ident: identities[index],
+                        report_num_positives: stats[index].1,
+                        report_mismatches: stats[index].3,
                         align_length: stats[index].2,
                         mismatches: stats[index].3,
                         gap_opens: stats[index].4,

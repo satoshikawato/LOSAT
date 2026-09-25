@@ -249,6 +249,18 @@ pub(super) fn postredo_converted_stats(
     query_sequence: &[u8],
     target: &mut TargetTranslation<'_>,
 ) -> Result<(usize, usize, usize, usize, usize, usize)> {
+    postredo_converted_stats_with_matrix(converted, query_sequence, target, ScoringMatrix::Blosum62)
+}
+
+// NCBI c++/src/algo/blast/core/blast_hits.c:767-811;
+// blast_traceback.c:650-662; objtools/align_format/tabular.cpp:1003-1021:
+// identity uses aligned residues; positives use the selected scoring matrix.
+pub(super) fn postredo_converted_stats_with_matrix(
+    converted: &ConvertedKappaHsp,
+    query_sequence: &[u8],
+    target: &mut TargetTranslation<'_>,
+    matrix: ScoringMatrix,
+) -> Result<(usize, usize, usize, usize, usize, usize)> {
     let hsp = &converted.hsp;
     let (subject, _, subject_base) = target.get(hsp.frame, hsp.s_start, hsp.s_end)?;
     let subject_start = usize::try_from(hsp.s_start)?
@@ -260,7 +272,7 @@ pub(super) fn postredo_converted_stats(
         usize::try_from(hsp.q_start)?,
         subject_start,
         &converted.edit_script,
-        ScoringMatrix::Blosum62,
+        matrix,
     );
     let align_length = converted
         .edit_script
@@ -636,9 +648,13 @@ mod tests {
             (subject_nt.len() / 3) as i64,
         )
         .unwrap();
+        // NCBI c++/src/algo/blast/core/blast_setup.c:729-847:
+        // db_num_seqs = eff_len_params->real_num_seqs;
+        // BLAST_ComputeLengthAdjustment(..., db_length, db_num_seqs, ...);
         let parameters = local_parameters_for_call(
             &[(160, true)],
             subject_nt.len(),
+            1,
             &[gapped],
             &[ungapped],
             LocalParameterOptions {
@@ -904,9 +920,13 @@ mod tests {
             120,
         )
         .unwrap();
+        // NCBI c++/src/algo/blast/core/blast_setup.c:729-847:
+        // db_num_seqs = eff_len_params->real_num_seqs;
+        // BLAST_ComputeLengthAdjustment(..., db_length, db_num_seqs, ...);
         let parameters = local_parameters_for_call(
             &[(query.len(), true)],
             subject_nt.len(),
+            1,
             &[gapped],
             &[ungapped],
             LocalParameterOptions {
@@ -1301,9 +1321,13 @@ mod tests {
         )
         .unwrap();
         let query_lengths = [120, 70, 120];
+        // NCBI c++/src/algo/blast/core/blast_setup.c:729-847:
+        // db_num_seqs = eff_len_params->real_num_seqs;
+        // BLAST_ComputeLengthAdjustment(..., db_length, db_num_seqs, ...);
         let parameters = local_parameters_for_call(
             &[(120, true), (70, true), (120, false)],
             6_377,
+            1,
             &[gapped; 3],
             &[ungapped; 3],
             LocalParameterOptions {
@@ -2077,9 +2101,13 @@ mod tests {
             (total_nt_length / 3) as i64,
         )
         .unwrap();
+        // NCBI c++/src/algo/blast/core/blast_setup.c:729-847:
+        // db_num_seqs = eff_len_params->real_num_seqs;
+        // BLAST_ComputeLengthAdjustment(..., db_length, db_num_seqs, ...);
         let parameters = local_parameters_for_call(
             &[(query.len(), true)],
             total_nt_length,
+            1,
             &[gapped],
             &[ungapped],
             LocalParameterOptions {
@@ -2441,6 +2469,9 @@ mod tests {
                 bit_score: bits[0],
                 num_ident: i32::try_from(stats.0).unwrap(),
                 num_positives: stats.1,
+                report_num_ident: stats.0,
+                report_num_positives: stats.1,
+                report_mismatches: stats.3,
                 align_length: stats.2,
                 mismatches: stats.3,
                 gap_opens: stats.4,

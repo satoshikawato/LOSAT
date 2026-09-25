@@ -32,6 +32,14 @@ pub(super) struct KappaHspPayload {
     // *num_pos_ptr = num_pos + num_ident;
     // Alignment length and gap counts follow the same gap_info operation lengths.
     pub num_positives: usize,
+    // NCBI c++/src/objtools/align_format/tabular.cpp:971-1021,1090-1095:
+    // alnVec->GetWholeAlnSeqString(0, m_QuerySeq);
+    // alnVec->GetWholeAlnSeqString(1, m_SubjectSeq);
+    // if (m_QuerySeq[i] == m_SubjectSeq[i]) { ++num_ident; ++num_positives; }
+    // Report-time counts use sequence strings, after the core HSP counts above.
+    pub report_num_ident: usize,
+    pub report_num_positives: usize,
+    pub report_mismatches: usize,
     pub align_length: usize,
     pub mismatches: usize,
     pub gap_opens: usize,
@@ -142,6 +150,16 @@ impl KappaResultHitList {
     // }
     pub(super) fn reverse_order(&mut self) {
         self.lists.reverse();
+    }
+
+    // NCBI c++/src/algo/blast/core/blast_traceback.c:1763-1776;
+    // c++/src/algo/blast/core/blast_hits.c:3383-3400:
+    // if (BlastSeqSrcGetTotLen(seq_src) > 0)
+    //     Blast_HSPResultsSortByEvalue(results);
+    // qsort(hit_list->hsplist_array, hit_list->hsplist_count,
+    //       sizeof(BlastHSPList*), s_EvalueCompareHSPLists);
+    pub(super) fn sort_by_evalue_for_positive_totlen(&mut self) {
+        self.lists.sort_by(compare_result_lists);
     }
 
     // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_hits.h:169-181:

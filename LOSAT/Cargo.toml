@@ -2,7 +2,7 @@
 name = "LOSAT"
 version = "0.2.0"
 edition = "2021"
-description = "Lightweight, pure-Rust sequence alignment tool with bit-perfect NCBI BLAST+ parity for pairwise FASTA comparisons and WebAssembly"
+description = "Pure-Rust local pairwise BLAST tool with NCBI parity on certified fixtures and command-WASI support"
 license = "MIT"
 repository = "https://github.com/satoshikawato/LOSAT"
 readme = "../README.md"

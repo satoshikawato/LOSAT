@@ -8,7 +8,7 @@
 
 **LOSAT** is a lightweight, pure-Rust reimplementation of the NCBI BLAST sequence alignment algorithm designed specifically for pairwise sequence-to-sequence comparisons (`-query` vs `-subject`).
 
-It delivers bit-identical alignment scores, E-values, and coordinates matching NCBI BLAST+ without requiring external C/C++ libraries, BLAST+ installations, or pre-formatted database indices. Built for high portability, LOSAT runs natively on modern operating systems and compiles directly to WebAssembly for client-side, zero-install genomic analyses in web browsers and sandboxed runtimes.
+On certified pairwise profiles and fixtures, it matches NCBI BLAST+ alignment scores, E-values, coordinates, and output bytes without requiring external C/C++ libraries, BLAST+ installations, or pre-formatted database indices. Built for high portability, LOSAT runs natively on modern operating systems and compiles directly to WebAssembly for client-side, zero-install genomic analyses in web browsers and sandboxed runtimes.
 
 ---
 
@@ -17,7 +17,7 @@ It delivers bit-identical alignment scores, E-values, and coordinates matching N
 - **Bit-Perfect NCBI BLAST+ Parity**: Produces identical alignment coordinates, E-values, bit scores, and tabular records matching official NCBI BLAST+ (v2.17.0+) on certified profiles.
 - **Pure Rust, Zero Dependencies**: Standalone single executable. Does not wrap, link, or shell out to external NCBI binaries or libraries.
 - **Direct Pairwise Alignment**: Compares FASTA files directly via `-query` and `-subject` without running `makeblastdb`.
-- **WebAssembly Ready**: Compiles to WASI and web reactors with multithreading support, powering in-browser bioinformatics visualization tools like [gbdraw](https://github.com/satoshikawato/gbdraw).
+- **WebAssembly Ready**: Compiles to serial and threaded command-WASI. Browser/reactor APIs exist for integrations such as [gbdraw](https://github.com/satoshikawato/gbdraw), but they are outside the TBLASTN v0.2.0 certification.
 - **Corrected TBLASTX Genetic Codes**: Fully respects `--db-gencode` for translated subject sequences in pairwise searches (resolving NCBI BLAST+'s default fallback to standard code).
 - **High Performance**: Multithreaded execution via Rayon natively and shared-memory threading in WebAssembly (`wasm32-wasip1-threads`).
 
@@ -55,7 +55,7 @@ pixi add losat
 ```
 
 ### Pre-built Binaries
-Download pre-compiled standalone binaries for Linux (x86_64, aarch64), macOS (Apple Silicon & Intel), and Windows from the [Releases](https://github.com/satoshikawato/LOSAT/releases) page.
+Download existing pre-compiled standalone binaries for Linux (x86_64, aarch64), macOS (Apple Silicon & Intel), and Windows from the [Releases](https://github.com/satoshikawato/LOSAT/releases) page. The unpublished TBLASTN v0.2.0 candidate is available only by building this branch; existing Releases and Bioconda packages do not provide that candidate.
 
 ### Build from Source
 Requires the [Rust toolchain](https://rustup.rs/) (edition 2021, Rust 1.92+ recommended):

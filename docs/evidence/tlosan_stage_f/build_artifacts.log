@@ -1,0 +1,11 @@
+87fc615c1c1e78afc52f081a4744f1b01ceafd76270c9e1b37063f510c237339  LOSAT/target/release/LOSAT
+b68278ee51b6d4e5765d357b6ce07e02a2aae3f40a90ffb1aec0c765b19a57d7  LOSAT/target/serial-command/wasm32-wasip1/release/LOSAT.wasm
+ec76f820345d6a55310e973d271c985bc621782431aad8e594b02cae24e3fe8f  LOSAT/target/threaded-command/wasm32-wasip1-threads/release/LOSAT.wasm
+rustc 1.92.0 (ded5c06cf 2025-12-08)
+cargo 1.92.0 (344c4567c 2025-10-21)
+v26.8.2
+aarch64-apple-darwin
+wasm32-unknown-unknown
+wasm32-wasip1
+wasm32-wasip1-threads
+x86_64-unknown-linux-gnu

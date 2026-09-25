@@ -9,7 +9,9 @@ use crate::blastinput::value_parsers::*;
 use crate::utils::genetic_code::GeneticCode;
 
 use super::scoring::{matrix_params, suggested_threshold, suggested_window_size};
-use super::stage_d_pipeline::{run_local_for_report, LocalStageDProfile, LocalStageDScoring};
+use super::stage_d_pipeline::{
+    run_local_for_report_threads, LocalStageDProfile, LocalStageDScoring,
+};
 use super::stage_e_report::render;
 use crate::config::ScoringMatrix;
 
@@ -400,9 +402,11 @@ impl TblastnArgs {
         if self.ungapped {
             bail!("unsupported TBLASTN -ungapped search");
         }
-        if self.num_threads != 1 {
-            bail!("unsupported TBLASTN -num_threads until parallel search is implemented");
-        }
+        // NCBI c++/src/algo/blast/blastinput/blast_args.cpp:3152-3187:
+        // arg_desc.SetConstraint(kArgNumThreads, new CArgAllowValuesGreaterThanOrEqual(1));
+        // NCBI c++/src/algo/blast/api/prelim_stage.cpp:145-147:
+        // TBlastThreads the_threads(GetNumberOfThreads());
+        crate::utils::threading::validate_threads(self.num_threads)?;
         let matrix: ScoringMatrix = self.matrix.parse().map_err(anyhow::Error::msg)?;
         let params = matrix_params(&self.matrix).context("missing TBLASTN matrix parameters")?;
         let (gap_open, gap_extend) = (
@@ -449,7 +453,12 @@ impl TblastnArgs {
             .map(|record| record.seq().to_vec())
             .collect();
         let seg = self.seg.params();
-        let (results, lengths, ungapped_karlin, query_validity) = run_local_for_report(
+        // NCBI c++/src/algo/blast/api/prelim_stage.cpp:172-188:
+        // (*thread)->Run(); (*thread)->Join(&result);
+        // NCBI c++/src/algo/blast/format/blast_format.cpp:1411-1417:
+        // CBlastFormat::PrintOneResultSet(const blast::CSearchResults& results,
+        //                         CConstRef<blast::CBlastQueryVector> queries,
+        let (results, lengths, ungapped_karlin, query_validity) = run_local_for_report_threads(
             &query_seqs,
             &subject_seqs,
             LocalStageDProfile {
@@ -472,6 +481,7 @@ impl TblastnArgs {
                 gap_xdrop_bits: self.xdrop_gap.unwrap_or(15.0),
                 final_xdrop_bits: self.xdrop_gap_final.unwrap_or(25.0),
             },
+            self.num_threads,
         )?;
         // NCBI c++/src/algo/blast/format/blast_format.cpp:1411-1458:
         // formatter.PrintOneResultSet(...) writes only after a valid result.

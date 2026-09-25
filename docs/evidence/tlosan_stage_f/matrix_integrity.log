@@ -1,0 +1,9 @@
+native_physical 1794/1794 exact rows; 219 complete thread grids; native SHA 87fc615c1c1e78afc52f081a4744f1b01ceafd76270c9e1b37063f510c237339
+native_codes 396/396 exact rows; 81 complete thread grids; native SHA 87fc615c1c1e78afc52f081a4744f1b01ceafd76270c9e1b37063f510c237339
+native_codes_multi 810/810 exact rows; 81 complete thread grids; native SHA 87fc615c1c1e78afc52f081a4744f1b01ceafd76270c9e1b37063f510c237339
+codes_multi 27/27 retained generated subjects and input SHA-256 confirmed
+wasm 564/564 exact bytes; 102/102 complete target/thread grids; peak active 2/4/8; plain WASI n2 rejected
+Stage E long generated 27/27 exact complete reports
+output_file 12/12 exact retained files
+negative 14/14 explicit rejections
+no first-byte mismatch artifacts

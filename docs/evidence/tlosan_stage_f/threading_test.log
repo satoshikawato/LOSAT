@@ -1,0 +1,9 @@
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 2.47s
+     Running unittests src/lib.rs (LOSAT/target/debug/deps/LOSAT-375c51a56549f105)
+
+running 3 tests
+test utils::threading::tests::caller_registration_is_cleared_after_panic ... ok
+test utils::threading::tests::invalid_request_never_enters_search ... ok
+test utils::threading::tests::repeated_pools_include_caller_and_preserve_errors ... ok
+
+test result: ok. 3 passed; 0 failed; 0 ignored; 0 measured; 545 filtered out; finished in 0.04s

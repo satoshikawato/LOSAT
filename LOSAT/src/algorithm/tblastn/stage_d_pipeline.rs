@@ -2,8 +2,12 @@
 //! The public CLI remains gated while Stage D and Stage E are incomplete.
 
 use std::collections::HashMap;
+#[cfg(feature = "parallel")]
+use std::sync::atomic::{AtomicUsize, Ordering};
 
 use anyhow::{ensure, Context, Result};
+#[cfg(feature = "parallel")]
+use rayon::prelude::*;
 
 use super::kappa::{
     convert_distinct_alignments, normalize_postredo_scores, postredo_converted_stats,
@@ -44,6 +48,7 @@ use crate::stats::tables::{
 use crate::utils::genetic_code::GeneticCode;
 use crate::utils::matrix::aa_char_to_ncbistdaa;
 use crate::utils::seg::SegParams;
+use crate::utils::threading::{with_search_pool, SearchPool};
 
 // NCBI c++/src/algo/blast/core/blast_options.c:673-675;
 // c++/include/algo/blast/core/blast_options.h:128,144,163:
@@ -129,24 +134,61 @@ pub(super) fn run_local_for_report(
     Vec<KarlinParams>,
     Vec<bool>,
 )> {
-    let mut trace = StageDBoundaryTrace::default();
-    let results = run_local_search(
+    run_local_for_report_threads(
         queries,
         subjects,
         profile,
         composition_mode2,
         do_sum_stats,
         scoring,
-        Some(&mut trace),
-    )?;
-    Ok((
-        results,
-        trace
-            .parameters
-            .context("missing TBLASTN initial parameters")?,
-        trace.ungapped_karlin,
-        trace.query_validity,
-    ))
+        1,
+    )
+}
+
+// NCBI c++/src/algo/blast/api/prelim_stage.cpp:145-188:
+// TBlastThreads the_threads(GetNumberOfThreads());
+// (*thread)->Run(); (*thread)->Join(&result);
+// NCBI c++/src/algo/blast/core/blast_engine.c:1411-1414:
+// /* iterate over all subject sequences */
+// while ( (seq_arg.oid = BlastSeqSrcIteratorNext(seq_src, itr))
+//        != BLAST_SEQSRC_EOF) {
+//    Int4 stat_length;
+// The pool owns one search; ordered subject results enter the same Stage D stream.
+pub(super) fn run_local_for_report_threads(
+    queries: &[Vec<u8>],
+    subjects: &[Vec<u8>],
+    profile: LocalStageDProfile<'_>,
+    composition_mode2: bool,
+    do_sum_stats: bool,
+    scoring: LocalStageDScoring,
+    threads: usize,
+) -> Result<(
+    Vec<KappaResultHitList>,
+    LocalSubjectParameters,
+    Vec<KarlinParams>,
+    Vec<bool>,
+)> {
+    with_search_pool(threads, "tblastn", |pool| {
+        let mut trace = StageDBoundaryTrace::default();
+        let results = run_local_search_with_pool(
+            queries,
+            subjects,
+            profile,
+            composition_mode2,
+            do_sum_stats,
+            scoring,
+            Some(&mut trace),
+            Some(pool),
+        )?;
+        Ok((
+            results,
+            trace
+                .parameters
+                .context("missing TBLASTN initial parameters")?,
+            trace.ungapped_karlin,
+            trace.query_validity,
+        ))
+    })
 }
 
 // NCBI c++/src/algo/blast/core/blast_engine.c:870-905;
@@ -271,7 +313,38 @@ fn run_local_search(
     composition_mode2: bool,
     do_sum_stats: bool,
     scoring: LocalStageDScoring,
+    observer: Option<&mut StageDBoundaryTrace>,
+) -> Result<Vec<KappaResultHitList>> {
+    run_local_search_with_pool(
+        queries,
+        subjects,
+        profile,
+        composition_mode2,
+        do_sum_stats,
+        scoring,
+        observer,
+        None,
+    )
+}
+
+// NCBI c++/src/algo/blast/core/blast_engine.c:1411-1414,1469-1475:
+// while ( (seq_arg.oid = BlastSeqSrcIteratorNext(seq_src, itr))
+//        != BLAST_SEQSRC_EOF) {
+//      status =
+//          s_BlastSearchEngineCore(program_number, query, query_info,
+//                                  seq_arg.seq, lookup_wrap, gap_align,
+// NCBI c++/src/algo/blast/core/blast_engine.c:870-905:
+// BLAST_LinkHsps(...); s_Blast_HSPListReapByPrelimEvalue(...);
+// Preliminary work uses one immutable subject; linking and stream writes follow OID order.
+fn run_local_search_with_pool(
+    queries: &[Vec<u8>],
+    subjects: &[Vec<u8>],
+    profile: LocalStageDProfile<'_>,
+    composition_mode2: bool,
+    do_sum_stats: bool,
+    scoring: LocalStageDScoring,
     mut observer: Option<&mut StageDBoundaryTrace>,
+    pool: Option<&SearchPool<'_>>,
 ) -> Result<Vec<KappaResultHitList>> {
     ensure!(
         !queries.is_empty(),
@@ -459,10 +532,19 @@ fn run_local_search(
     };
     let mut preliminary_hitlists: Vec<Option<KappaResultHitList>> =
         (0..queries.len()).map(|_| None).collect();
-    for (oid, subject) in subjects.iter().enumerate() {
-        // NCBI c++/src/algo/blast/core/blast_engine.c:870-905:
-        // BLAST_LinkHsps(..., subject->length, ...);
-        // s_Blast_HSPListReapByPrelimEvalue(hsp_list_out, hit_params);
+    // NCBI c++/src/algo/blast/core/blast_engine.c:1469-1475,872-905:
+    //      status =
+    //          s_BlastSearchEngineCore(program_number, query, query_info,
+    //                                  seq_arg.seq, lookup_wrap, gap_align,
+    // if (hit_params->link_hsp_params) {
+    //     status = BLAST_LinkHsps(program_number, hsp_list_out, query_info,
+    //               subject->length, gap_align->sbp, hit_params->link_hsp_params,
+    //               score_options->gapped_calculation);
+    // }
+    // status = s_Blast_HSPListReapByPrelimEvalue(hsp_list_out, hit_params);
+    // Finish search, link/direct E-value and preliminary reap inside one subject
+    // job, before its OID-ordered list enters the shared collector.
+    let subject_core = |subject: &[u8]| -> Result<(Vec<(usize, GappedHsp)>, LinkedHspList)> {
         let (preliminary, _) = preliminary_protein_hsps_in_ncbi_order(
             &query_refs,
             subject,
@@ -472,14 +554,7 @@ fn run_local_search(
         // NCBI c++/src/algo/blast/core/blast_engine.c:870-905:
         // BLAST_LinkHsps(..., hsp_list_out, ...);
         // s_Blast_HSPListReapByPrelimEvalue(hsp_list_out, ...);
-        // Even an allocated empty subject list enters the link/E-value call.
-        if let Some(ref mut trace) = observer {
-            trace.preliminary.push((oid, preliminary.clone()));
-        }
-        // NCBI c++/src/algo/blast/core/blast_engine.c:870-899;
-        // c++/src/algo/blast/core/blast_hits.c:1811-1926:
-        // if (hit_params->link_hsp_params) BLAST_LinkHsps(...);
-        // else Blast_HSPListGetEvalues(..., gap_decay_rate=0, scaling_factor=1);
+        // Even an allocated empty subject list enters link/E-value.
         let mut linked = if let Some(link) = link {
             link_preliminary_hsps(
                 &preliminary,
@@ -507,9 +582,93 @@ fn run_local_search(
             )
         };
         reap_by_evalue(&mut linked, parameters.prelim_evalue);
-        // NCBI c++/src/algo/blast/core/blast_engine.c:899-905;
-        // c++/src/algo/blast/core/blast_hspstream.c:289-319:
-        // BlastHSPStreamWrite(...); query-indexed lists are consumed in
+        Ok((preliminary, linked))
+    };
+    // NCBI c++/src/algo/blast/core/blast_engine.c:1411-1414,1469-1475:
+    // while ( (seq_arg.oid = BlastSeqSrcIteratorNext(seq_src, itr))
+    //        != BLAST_SEQSRC_EOF) {
+    //      status =
+    //          s_BlastSearchEngineCore(program_number, query, query_info,
+    //                                  seq_arg.seq, lookup_wrap, gap_align,
+    // NCBI c++/src/algo/blast/api/prelim_stage.cpp:172-188:
+    // (*thread)->Run(); (*thread)->Join(&result);
+    // Each subject keeps the NCBI search-to-link-to-reap order. Indexed
+    // collection finishes before the OID-ordered shared collector below.
+    let parallel_selected = pool.is_some_and(SearchPool::enabled) && subjects.len() > 1;
+    crate::utils::threading::report_stage(
+        "tblastn",
+        "subject_core",
+        subjects.len(),
+        parallel_selected,
+    );
+    // NCBI c++/src/algo/blast/api/prelim_stage.cpp:145-145:
+    // TBlastThreads the_threads(GetNumberOfThreads());
+    // NCBI c++/src/algo/blast/core/blast_engine.c:1409-1414:
+    // itr = BlastSeqSrcIteratorNewEx(MAX(BlastSeqSrcGetNumSeqs(seq_src)/100,1));
+    // while ( (seq_arg.oid = BlastSeqSrcIteratorNext(seq_src, itr))
+    //        != BLAST_SEQSRC_EOF) {
+    // Keep at most one pool-sized batch of subject results before OID reduction;
+    // memory follows NCBI's bounded number of workers, not total subject count.
+    #[cfg(feature = "parallel")]
+    let mut parallel_batch = std::collections::VecDeque::new();
+    #[cfg(feature = "parallel")]
+    let diagnose = crate::utils::threading::diagnostics_enabled();
+    #[cfg(feature = "parallel")]
+    let active = AtomicUsize::new(0);
+    #[cfg(feature = "parallel")]
+    let peak = AtomicUsize::new(0);
+    #[cfg(feature = "parallel")]
+    let mut workers = std::collections::BTreeSet::new();
+    for (oid, subject) in subjects.iter().enumerate() {
+        // NCBI c++/src/algo/blast/core/blast_engine.c:870-905:
+        // BLAST_LinkHsps(..., subject->length, ...);
+        // s_Blast_HSPListReapByPrelimEvalue(hsp_list_out, hit_params);
+        #[cfg(feature = "parallel")]
+        let (preliminary, linked) = if parallel_selected {
+            if parallel_batch.is_empty() {
+                let pool = pool.expect("parallel pool selected");
+                let end = oid.saturating_add(pool.threads()).min(subjects.len());
+                let batch: Vec<_> = pool.install(|| {
+                    subjects[oid..end]
+                        .par_iter()
+                        .map(|subject| {
+                            if diagnose {
+                                let now = active.fetch_add(1, Ordering::SeqCst) + 1;
+                                peak.fetch_max(now, Ordering::SeqCst);
+                            }
+                            let result = subject_core(subject);
+                            if diagnose {
+                                active.fetch_sub(1, Ordering::SeqCst);
+                            }
+                            (result, rayon::current_thread_index())
+                        })
+                        .collect()
+                });
+                if diagnose {
+                    workers.extend(batch.iter().filter_map(|(_, worker)| *worker));
+                }
+                parallel_batch.extend(batch);
+            }
+            parallel_batch
+                .pop_front()
+                .context("missing ordered TBLASTN subject result")?
+                .0?
+        } else {
+            subject_core(subject)?
+        };
+        #[cfg(not(feature = "parallel"))]
+        let (preliminary, linked) = subject_core(subject)?;
+        // NCBI c++/src/algo/blast/core/blast_engine.c:870-905:
+        // BLAST_LinkHsps(..., hsp_list_out, ...);
+        // s_Blast_HSPListReapByPrelimEvalue(hsp_list_out, ...);
+        // The comparison-only trace retains pre-link HSP bytes by OID.
+        if let Some(ref mut trace) = observer {
+            trace.preliminary.push((oid, preliminary.clone()));
+        }
+        // NCBI c++/src/algo/blast/core/blast_engine.c:1553-1555:
+        // status = BlastHSPStreamWrite(hsp_stream, &hsp_list);
+        // NCBI c++/src/algo/blast/core/blast_hspstream.c:289-319:
+        // Query-indexed lists are consumed in
         // reverse-sorted order by BlastHSPStreamRead.
         for context in 0..queries.len() {
             let hsps: Vec<_> = linked
@@ -532,6 +691,16 @@ fn run_local_search(
                 })?;
             }
         }
+    }
+    // NCBI c++/src/algo/blast/core/blast_engine.c:1659-1668:
+    // /* Use a local diagnostics structure, because the one passed in an input
+    //    argument can be shared between multiple threads */
+    #[cfg(feature = "parallel")]
+    if parallel_selected && diagnose {
+        eprintln!(
+            "[losat-thread-activity] program=tblastn stage=subject_core work_items={} worker_slots={:?} peak_active={}",
+            subjects.len(), workers, peak.load(Ordering::SeqCst)
+        );
     }
     // NCBI c++/src/algo/blast/core/blast_hspstream.c:144-152,289-319:
     // Blast_HSPResultsReverseSort(results); stream reads from the end.

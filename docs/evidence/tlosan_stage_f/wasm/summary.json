@@ -1,0 +1,17 @@
+{
+  "comparison_count": 564,
+  "equal": 564,
+  "unique_case_formats": 102,
+  "by_target_thread": {
+    "serial:1": 102,
+    "threaded:1": 102,
+    "threaded:2": 120,
+    "threaded:4": 120,
+    "threaded:8": 120
+  },
+  "peak_active": {
+    "2": 2,
+    "4": 4,
+    "8": 8
+  }
+}

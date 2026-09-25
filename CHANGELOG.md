@@ -2,6 +2,13 @@
 
 All notable release-facing changes and milestones are documented here.
 
+## [v0.2.0] - TLOSAN release candidate (unpublished)
+
+- Added local `tblastn` search with 27 NCBI genetic-code IDs and outfmt 0/6/7. Code 32 and local selected subject translation follow the TBLASTN-only `PD-TLOSAN-LOCAL-GENCODE-32` decision.
+- Certified the [declared Stage G fixtures](docs/evidence/tlosan_stage_g/STAGE_G_CERTIFICATION_20260926.md) on Linux x64 native, serial command-WASI, and threaded command-WASI. This does not certify arbitrary inputs/options or other platforms.
+- Database search, `tblastn-fast`, PSI-TBLASTN, composition modes 1/3, and other unported options remain explicitly unsupported.
+- The v0.2.0 [release-readiness decision](docs/release/v0.2.0.md) governs packaging and handoff. No tag or distribution is implied by this entry.
+
 ## [v0.1.0] - Initial Release Candidate
 
 Initial release candidate for LOSAT as a standalone, pure-Rust reimplementation of NCBI BLAST+ local sequence alignment behavior, designed for direct pairwise FASTA comparisons (`-query` vs `-subject`) with bit-identical output parity and WebAssembly portability.

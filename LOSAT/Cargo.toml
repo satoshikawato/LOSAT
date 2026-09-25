@@ -1,6 +1,6 @@
 [package]
 name = "LOSAT"
-version = "0.1.0"
+version = "0.2.0"
 edition = "2021"
 description = "Lightweight, pure-Rust sequence alignment tool with bit-perfect NCBI BLAST+ parity for pairwise FASTA comparisons and WebAssembly"
 license = "MIT"
@@ -10,27 +10,8 @@ keywords = ["blast", "bioinformatics", "alignment", "wasm", "genomics"]
 categories = ["science::bioinformatics", "command-line-utilities"]
 exclude = [
     ".tmp/",
+    "tests/",
     "losat_out/",
-    "tests/losat_out/",
-    "tests/blast_out/",
-    "tests/ncbi_out/",
-    "tests/__pycache__/",
-    "tests/blast_db/",
-    "tests/plots/",
-    "tests/fasta/*.gb",
-    "tests/fasta/*.fna",
-    "tests/fasta/*.ndb",
-    "tests/fasta/*.nhd",
-    "tests/fasta/*.nhi",
-    "tests/fasta/*.nhr",
-    "tests/fasta/*.nin",
-    "tests/fasta/*.njs",
-    "tests/fasta/*.nog",
-    "tests/fasta/*.nos",
-    "tests/fasta/*.not",
-    "tests/fasta/*.nsq",
-    "tests/fasta/*.ntf",
-    "tests/fasta/*.nto",
     "LOSAT/",
     "**/*.pyc",
     "**/*.tmp",

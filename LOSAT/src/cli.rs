@@ -34,7 +34,7 @@ pub enum Commands {
     Tblastx(tblastx::TblastxArgs),
     // NCBI c++/src/algo/blast/blastinput/tblastn_args.cpp:47-52:
     // static const string kProgram("tblastn"); SetTask("tblastn");
-    /// Protein query vs translated nucleotide subject (search unimplemented)
+    /// Protein query vs translated nucleotide subject (local tblastn)
     Tblastn(tblastn::TblastnArgs),
 }
 

@@ -17,7 +17,7 @@ use crate::algorithm::{blastn, blastp, tblastn, tblastx};
 #[command(
     name = "losat",
     version,
-    about = "Pure-Rust pairwise alignment with NCBI BLAST+ parity on certified fixtures"
+    about = "Pure-Rust pairwise alignment with NCBI-verified fixtures and genetic-code exceptions"
 )]
 pub struct Cli {
     #[command(subcommand)]

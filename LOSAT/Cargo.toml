@@ -2,7 +2,7 @@
 name = "LOSAT"
 version = "0.2.0"
 edition = "2021"
-description = "Pure-Rust local pairwise BLAST tool with NCBI parity on certified fixtures and command-WASI support"
+description = "Pure-Rust local BLAST with NCBI-verified fixtures, genetic-code exceptions, and command-WASI support"
 license = "MIT"
 repository = "https://github.com/satoshikawato/LOSAT"
 readme = "../README.md"

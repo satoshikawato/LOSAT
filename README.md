@@ -8,13 +8,13 @@
 
 **LOSAT** is a lightweight, pure-Rust reimplementation of the NCBI BLAST sequence alignment algorithm designed specifically for pairwise sequence-to-sequence comparisons (`-query` vs `-subject`).
 
-On certified pairwise profiles and fixtures, it matches NCBI BLAST+ alignment scores, E-values, coordinates, and output bytes without requiring external C/C++ libraries, BLAST+ installations, or pre-formatted database indices. Built for high portability, LOSAT runs natively on modern operating systems and compiles directly to WebAssembly for client-side, zero-install genomic analyses in web browsers and sandboxed runtimes.
+On certified pairwise profiles and fixtures, LOSAT is checked against declared NCBI source, executable, or API oracle contracts for scores, E-values, coordinates, and output. Exact-byte parity applies where each contract requires it; documented local subject genetic-code exceptions apply to TBLASTX and TBLASTN. LOSAT runs without external C/C++ libraries, BLAST+ installations, or pre-formatted database indices. Built for high portability, LOSAT runs natively on modern operating systems and compiles directly to WebAssembly for client-side, zero-install genomic analyses in web browsers and sandboxed runtimes.
 
 ---
 
 ## Key Highlights
 
-- **Bit-Perfect NCBI BLAST+ Parity**: Produces identical alignment coordinates, E-values, bit scores, and tabular records matching official NCBI BLAST+ (v2.17.0+) on certified profiles.
+- **NCBI-Verified Certified Fixtures**: Matches the declared NCBI source, CLI, or API oracle contract on certified fixtures, including exact output bytes where required and the documented local subject genetic-code exceptions.
 - **Pure Rust, Zero Dependencies**: Standalone single executable. Does not wrap, link, or shell out to external NCBI binaries or libraries.
 - **Direct Pairwise Alignment**: Compares FASTA files directly via `-query` and `-subject` without running `makeblastdb`.
 - **WebAssembly Ready**: Compiles to serial and threaded command-WASI. Browser/reactor APIs exist for integrations such as [gbdraw](https://github.com/satoshikawato/gbdraw), but they are outside the TBLASTN v0.2.0 certification.

@@ -1,0 +1,15 @@
+# TBLASTN 2.17.0+
+# Query: BDT63274.1 hypothetical protein [Armadillidium vulgare clopovirus]
+# Database: User specified sequence set (Input: /mnt/c/Users/genom/GitHub/LOSAT/LOSAT/tests/fasta/AvCLPV.fasta)
+# Fields: query acc.ver, subject acc.ver, % identity, alignment length, mismatches, gap opens, q. start, q. end, s. start, s. end, evalue, bit score
+# 9 hits found
+BDT63274.1	LC738883.1	94.214	916	0	1	169	1031	7124	4377	0.0	1301
+BDT63274.1	LC738883.1	98.980	98	1	0	29	126	7833	7540	1.55e-36	144
+BDT63274.1	LC738883.1	32.394	284	137	3	487	770	247261	246575	2.05e-34	137
+BDT63274.1	LC738883.1	97.826	46	1	0	124	169	7369	7232	5.61e-21	94.0
+BDT63274.1	LC738883.1	58.824	17	7	0	391	407	143793	143843	1.5	26.6
+BDT63274.1	LC738883.1	38.636	44	21	1	294	337	373510	373623	3.5	25.4
+BDT63274.1	LC738883.1	52.381	21	10	0	67	87	19156	19094	4.0	25.0
+BDT63274.1	LC738883.1	50.000	16	8	0	210	225	204878	204925	5.6	24.6
+BDT63274.1	LC738883.1	42.424	33	15	2	387	418	147031	147120	6.6	24.6
+# BLAST processed 1 queries

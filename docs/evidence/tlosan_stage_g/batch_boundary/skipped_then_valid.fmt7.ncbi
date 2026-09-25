@@ -1,0 +1,10 @@
+# TBLASTN 2.17.0+
+# Query: invalid_long
+# Database: User specified sequence set (Input: /mnt/c/Users/genom/GitHub/LOSAT/docs/evidence/tlosan_stage_d/all_codes_20260925/fixtures/code1.fna)
+# TBLASTN 2.17.0+
+# Query: valid
+# Database: User specified sequence set (Input: /mnt/c/Users/genom/GitHub/LOSAT/docs/evidence/tlosan_stage_d/all_codes_20260925/fixtures/code1.fna)
+# Fields: query acc.ver, subject acc.ver, % identity, alignment length, mismatches, gap opens, q. start, q. end, s. start, s. end, evalue, bit score
+# 1 hits found
+valid	s_code1	100.000	120	0	0	1	120	1	360	1.04e-83	227
+# BLAST processed 2 queries

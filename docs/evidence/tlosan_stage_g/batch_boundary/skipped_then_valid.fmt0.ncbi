@@ -1,0 +1,85 @@
+TBLASTN 2.17.0+
+
+
+Reference: Stephen F. Altschul, Thomas L. Madden, Alejandro A.
+Schaffer, Jinghui Zhang, Zheng Zhang, Webb Miller, and David J.
+Lipman (1997), "Gapped BLAST and PSI-BLAST: a new generation of
+protein database search programs", Nucleic Acids Res. 25:3389-3402.
+
+
+
+Database: User specified sequence set (Input:
+/mnt/c/Users/genom/GitHub/LOSAT/docs/evidence/tlosan_stage_d/all_cod
+es_20260925/fixtures/code1.fna).
+           1 sequences; 360 total letters
+
+
+
+Query= invalid_long
+
+Length=20001
+
+
+***** No hits found *****
+
+
+
+Lambda      K        H
+   -1.00    -1.00    -1.00 
+
+Gapped
+Lambda      K        H
+   -1.00    -1.00    -1.00 
+
+Effective search space used: 0
+
+
+Query= valid
+
+Length=120
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+
+s_code1                                                               227     1e-83
+
+
+> s_code1
+Length=360
+
+ Score = 227 bits (578),  Expect = 1e-83, Method: Compositional matrix adjust.
+ Identities = 120/120 (100%), Positives = 120/120 (100%), Gaps = 0/120 (0%)
+ Frame = +1
+
+Query  1    MTEYWLvvvgaggvgWSWLTIQLIQNHFVWEYDPTWEDSYRKQWVIDGETCLLDIWDTAG  60
+            MTEYWLVVVGAGGVGWSWLTIQLIQNHFVWEYDPTWEDSYRKQWVIDGETCLLDIWDTAG
+Sbjct  1    MTEYWLVVVGAGGVGWSWLTIQLIQNHFVWEYDPTWEDSYRKQWVIDGETCLLDIWDTAG  180
+
+Query  61   QEEYWAMRDQYMRTGWGFLCVFAINNTKSFEDIHQWREQIKRVKDSDDVPMVLVGNKCDL  120
+            QEEYWAMRDQYMRTGWGFLCVFAINNTKSFEDIHQWREQIKRVKDSDDVPMVLVGNKCDL
+Sbjct  181  QEEYWAMRDQYMRTGWGFLCVFAINNTKSFEDIHQWREQIKRVKDSDDVPMVLVGNKCDL  360
+
+
+
+Lambda      K        H        a         alpha
+   0.323    0.138    0.502    0.792     4.96 
+
+Gapped
+Lambda      K        H        a         alpha    sigma
+   0.267   0.0410    0.140     1.90     42.6     43.6 
+
+Effective search space used: 11449
+
+
+  Database: User specified sequence set (Input:
+/mnt/c/Users/genom/GitHub/LOSAT/docs/evidence/tlosan_stage_d/all_cod
+es_20260925/fixtures/code1.fna).
+    Posted date:  Unknown
+  Number of letters in database: 360
+  Number of sequences in database:  1
+
+
+
+Matrix: BLOSUM62
+Gap Penalties: Existence: 11, Extension: 1
+Neighboring words threshold: 13
+Window for multiple hits: 40

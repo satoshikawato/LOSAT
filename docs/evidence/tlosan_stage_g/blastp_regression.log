@@ -1,0 +1,9 @@
+pairwise_default_serial	P1	EXACT_TEXT	rows=475/475	repeatability=REPEATABLE
+pairwise_limit1_serial	P1	EXACT_TEXT	rows=89/89	repeatability=REPEATABLE
+pairwise_limit5_serial	P1	EXACT_TEXT	rows=373/373	repeatability=REPEATABLE
+pairwise_nohit_serial	P1	EXACT_TEXT	rows=334/334	repeatability=REPEATABLE
+pairwise_default_thread4	P1	EXACT_TEXT	rows=475/475	repeatability=REPEATABLE
+all_hsp_forward_serial	P2,P3	EXACT_TEXT	rows=530/530	repeatability=REPEATABLE
+all_hsp_reverse_limit5_serial	P2,P3	EXACT_TEXT	rows=445/445	repeatability=REPEATABLE
+all_hsp_self_serial	P2,P3	EXACT_TEXT	rows=568/568	repeatability=REPEATABLE
+all_hsp_forward_thread4	P2,P3	EXACT_TEXT	rows=530/530	repeatability=REPEATABLE

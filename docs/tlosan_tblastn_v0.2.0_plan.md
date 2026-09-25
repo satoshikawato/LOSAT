@@ -1,6 +1,6 @@
 # TLOSAN（TBLASTN）v0.2.0 総合計画
 
-状態: 実装前の提案。TLOSAN は「LOSAT による NCBI TBLASTN の Rust 実装」を指す。
+状態: 段階 A〜G 実施済み。段階 G は宣言したローカル TBLASTN の fixture 範囲で独立監査を経て認証。全入力・全オプションや発売全体のパリティ主張ではない。証拠は [段階 G 認証記録](evidence/tlosan_stage_g/STAGE_G_CERTIFICATION_20260926.md)。TLOSAN は「LOSAT による NCBI TBLASTN の Rust 実装」を指す。
 この文書は既存の v0.1.0 認証を拡張したという主張ではない。
 
 実装作業ブランチ: **`feature/tlosan-tblastn-v0.2.0`**。2026-09-23 に

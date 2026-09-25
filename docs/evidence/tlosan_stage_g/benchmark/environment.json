@@ -1,0 +1,36 @@
+{
+  "query_source": "/mnt/c/Users/genom/GitHub/LOSAT/LOSAT/tests/fasta/AvCLPV.faa",
+  "query_source_sha256": "080057e81dae256b8a99955549e0f88361d3d9d20424d838fce51d173ad1f375",
+  "extracted_query": "/tmp/tlosan-stageg-final-benchmark-20260926/first_AvCLPV_protein.faa",
+  "extracted_query_sha256": "d93c130a8684410d25f62d89dbe8143bb459679e01a46e772c7d91fe74bb53f2",
+  "subject": "/mnt/c/Users/genom/GitHub/LOSAT/LOSAT/tests/fasta/AvCLPV.fasta",
+  "subject_sha256": "c3fd0330ac0c7877827b621c0d31e941a0f7d1a2ff11d0c5c8ae7ec453bba96b",
+  "outfmt": 6,
+  "output_sink": "/tmp/tlosan-stageg-final-benchmark-20260926/benchmark_result.out",
+  "executable_sha256": {
+    "losat_native": "02d0e8300007ed0b63566c57276f5407fe9e3adb004384dd347d037fbdad4118",
+    "losat_serial_wasm": "0a2a694dbcab0e1cb3dc562d41cb684cb10476d5d1767ec66216e03e88a68716",
+    "losat_threaded_wasm": "1631fc8d8e77d0fd54a57e32826ddddff00912051bb3c9d155b4ebb54192e560",
+    "ncbi_tblastn": "e3956f1e107a30439d56c8f72fae4267a7d62ebcc16e4f99d4baf2bdf00402e0",
+    "makeblastdb": "407bf59ec36ee6444104a90f28eab282e374a0dfe4c7ffee89a65d82dc51c4bf"
+  },
+  "ncbi_version": "tblastn: 2.17.0+\n Package: blast 2.17.0, build Aug 11 2025 09:46:06",
+  "makeblastdb_version": "makeblastdb: 2.17.0+\n Package: blast 2.17.0, build Aug 11 2025 09:46:06",
+  "db_build": {
+    "command": [
+      "/home/kawato/micromamba/bin/makeblastdb",
+      "-in",
+      "/mnt/c/Users/genom/GitHub/LOSAT/LOSAT/tests/fasta/AvCLPV.fasta",
+      "-dbtype",
+      "nucl",
+      "-out",
+      "/tmp/tlosan-stageg-final-benchmark-20260926/ncbi_db/AvCLPV"
+    ],
+    "elapsed_s": 0.058762483,
+    "exit": 0,
+    "subject_sha256": "c3fd0330ac0c7877827b621c0d31e941a0f7d1a2ff11d0c5c8ae7ec453bba96b",
+    "stdout_sha256": "5c83b03ad9db57df3ca59cc09a35b8f3287dd1616983ff21fa09e8dcd366e8c4",
+    "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+  },
+  "output_contract": "NCBI -db timing is separate from LOSAT local -subject parity and distribution outputs"
+}

@@ -38,10 +38,11 @@ pub(super) fn render(
     query_records: &[fasta::Record],
     subject_records: &[fasta::Record],
     subject_path: &Path,
-    hitlists: &[KappaResultHitList],
+    hitlists: &mut [KappaResultHitList],
     parameters: &LocalSubjectParameters,
     ungapped_karlin: &[crate::stats::tables::KarlinParams],
     query_validity: &[bool],
+    query_batch_skipped: &[bool],
     scoring: LocalStageDScoring,
     genetic_code: u8,
     seg: Option<&SegParams>,
@@ -51,6 +52,11 @@ pub(super) fn render(
         query_records.len() == hitlists.len(),
         "TBLASTN report query count mismatch"
     );
+    // NCBI c++/src/algo/blast/api/blast_seqalign.cpp:1572-1577:
+    // Blast_HSPListSortByEvalue(hsp_list); /* during Seq-align conversion */
+    for hitlist in hitlists.iter_mut() {
+        hitlist.sort_hsps_for_report();
+    }
     match outfmt {
         "6" | "7" => write_tabular(
             writer,
@@ -59,6 +65,7 @@ pub(super) fn render(
             subject_records,
             subject_path,
             hitlists,
+            query_batch_skipped,
         ),
         "0" => write_pairwise(
             writer,
@@ -69,6 +76,7 @@ pub(super) fn render(
             parameters,
             ungapped_karlin,
             query_validity,
+            query_batch_skipped,
             scoring,
             genetic_code,
             seg,
@@ -90,8 +98,17 @@ fn write_tabular(
     subject_records: &[fasta::Record],
     subject_path: &Path,
     hitlists: &[KappaResultHitList],
+    query_batch_skipped: &[bool],
 ) -> Result<()> {
-    for (query, hitlist) in query_records.iter().zip(hitlists) {
+    // NCBI c++/src/algo/blast/api/local_blast.cpp:177-224:
+    // a skipped batch has a null align set for each query it contains.
+    ensure!(
+        query_batch_skipped.len() == query_records.len(),
+        "TBLASTN batch validity count mismatch"
+    );
+    for ((query, hitlist), &search_skipped) in
+        query_records.iter().zip(hitlists).zip(query_batch_skipped)
+    {
         let hit_count: usize = hitlist
             .lists()
             .iter()
@@ -112,7 +129,16 @@ fn write_tabular(
             if hit_count > 0 {
                 writeln!(writer, "# Fields: query acc.ver, subject acc.ver, % identity, alignment length, mismatches, gap opens, q. start, q. end, s. start, s. end, evalue, bit score")?;
             }
-            writeln!(writer, "# {hit_count} hits found")?;
+            // NCBI c++/src/algo/blast/api/local_blast.cpp:177-180,204-208:
+            // if (status != 0) { CRef<CSeq_align_set> tmp_align;
+            //                    sa_vec.push_back(tmp_align); }
+            // NCBI c++/src/objtools/align_format/tabular.cpp:1266-1338:
+            // if (align_set) { m_Ostream << "# " << num_hits << " hits found\n"; }
+            // A skipped search has a null alignment set, so the count line
+            // is omitted. An ordinary searched no-hit query retains it.
+            if !search_skipped {
+                writeln!(writer, "# {hit_count} hits found")?;
+            }
         }
         for list in hitlist.lists() {
             let oid = usize::try_from(list.oid).context("negative TBLASTN subject OID")?;
@@ -215,7 +241,7 @@ mod tests {
             .collect();
         let seg = SegParams::default();
         for mode in [0, 2] {
-            let (results, parameters, ungapped_karlin, query_validity) = run_local_for_report(
+            let (mut results, parameters, ungapped_karlin, query_validity) = run_local_for_report(
                 &query_seqs,
                 &subject_seqs,
                 LocalStageDProfile {
@@ -239,10 +265,11 @@ mod tests {
                     &queries,
                     &subjects,
                     subject_path,
-                    &results,
+                    &mut results,
                     &parameters,
                     &ungapped_karlin,
                     &query_validity,
+                    &vec![false; queries.len()],
                     LocalStageDScoring::default(),
                     1,
                     Some(&seg),
@@ -284,6 +311,7 @@ fn write_pairwise(
     parameters: &LocalSubjectParameters,
     ungapped_karlin: &[crate::stats::tables::KarlinParams],
     query_validity: &[bool],
+    query_batch_skipped: &[bool],
     scoring: LocalStageDScoring,
     genetic_code: u8,
     seg: Option<&SegParams>,
@@ -448,6 +476,7 @@ fn write_pairwise(
         &config,
         &queries,
         &query_validity,
+        query_batch_skipped,
         &subject_ids,
         &report,
     )?;

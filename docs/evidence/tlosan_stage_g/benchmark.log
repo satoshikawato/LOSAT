@@ -1,0 +1,6 @@
+losat_native_1 warmup + 3 timed PASS
+losat_native_4 warmup + 3 timed PASS
+losat_wasi_serial_1 warmup + 3 timed PASS
+losat_wasi_threads_4 warmup + 3 timed PASS
+ncbi_db_1 warmup + 3 timed PASS
+ncbi_db_4 warmup + 3 timed PASS

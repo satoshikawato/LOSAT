@@ -1,0 +1,11 @@
+
+
+Building a new DB, current time: 09/26/2026 00:21:27
+New DB name:   /tmp/tlosan-stageg-final-benchmark-20260926/ncbi_db/AvCLPV
+New DB title:  /mnt/c/Users/genom/GitHub/LOSAT/LOSAT/tests/fasta/AvCLPV.fasta
+Sequence type: Nucleotide
+Keep MBits: T
+Maximum file size: 3000000000B
+Adding sequences from FASTA; added 1 sequences in 0.0055089 seconds.
+
+

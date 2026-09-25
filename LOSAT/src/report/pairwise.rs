@@ -886,6 +886,40 @@ fn write_no_hits_found<W: Write>(writer: &mut W) -> io::Result<()> {
 // m_Outfile << "Effective search space used: "
 //           << summary.GetSearchSpace() << "\n";
 // ```
+// NCBI c++/src/algo/blast/api/local_blast.cpp:177-180,204-208:
+// if (status != 0) {
+//     pair<double, double> tmp_pair(-1.0, -1.0);
+//     CRef<CBlastAncillaryData> tmp_ancillary_data(
+//         new CBlastAncillaryData(tmp_pair, tmp_pair, tmp_pair, 0));
+// }
+// NCBI c++/src/algo/blast/format/blast_format.cpp:451-478 and
+// c++/src/objtools/align_format/align_format_util.cpp:581-613:
+// PrintKAParameters emits both -1 Karlin blocks with no Gumbel columns.
+fn write_tblastn_unsearched_query_footer<W: Write>(writer: &mut W) -> io::Result<()> {
+    writeln!(writer)?;
+    writeln!(writer, "Lambda      K        H")?;
+    for _ in 0..3 {
+        write_ncbi_ka_field(writer, -1.0)?;
+    }
+    writeln!(writer)?;
+    writeln!(writer)?;
+    writeln!(writer, "Gapped")?;
+    writeln!(writer, "Lambda      K        H")?;
+    for _ in 0..3 {
+        write_ncbi_ka_field(writer, -1.0)?;
+    }
+    writeln!(writer)?;
+    writeln!(writer)?;
+    writeln!(writer, "Effective search space used: 0")?;
+    writeln!(writer)?;
+    writeln!(writer)?;
+    Ok(())
+}
+
+// NCBI c++/src/algo/blast/format/blast_format.cpp:445-478:
+// if (kbp_ungap) CBlastFormatUtil::PrintKAParameters(..., false, gbp);
+// if (kbp_gap) CBlastFormatUtil::PrintKAParameters(..., true, gbp);
+// m_Outfile << "Effective search space used: " << summary.GetSearchSpace() << "\n";
 fn write_blastp_query_footer<W: Write>(
     writer: &mut W,
     ungapped_karlin: KarlinParams,
@@ -1407,9 +1441,19 @@ pub fn write_tblastn_pairwise_report<W: Write>(
     config: &PairwiseConfig,
     queries: &[BlastpPairwiseQuery],
     query_validity: &[bool],
+    query_batch_skipped: &[bool],
     subject_ids: &[Arc<str>],
     report: &BlastpPairwiseReport,
 ) -> io::Result<()> {
+    // NCBI c++/src/algo/blast/api/local_blast.cpp:177-224:
+    // an all-invalid Run() batch carries -1 Karlin sentinel blocks only for
+    // its own queries, even if another batch of the input has valid contexts.
+    if query_batch_skipped.len() != queries.len() || query_validity.len() != queries.len() {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidInput,
+            "TBLASTN batch validity count mismatch",
+        ));
+    }
     let mut writer = io::BufWriter::new(writer);
     // NCBI c++/src/algo/blast/format/blast_format.cpp:372-424:
     // BlastPrintVersionInfo(m_Program,...); BlastPrintReference(...);
@@ -1456,7 +1500,14 @@ pub fn write_tblastn_pairwise_report<W: Write>(
             // NCBI blast_results.cpp:82-97 leaves both Karlin blocks null
             // when there is no valid context. blast_format.cpp:445-477
             // writes only the blank lines and zero search space in that case.
-            if !query_validity[q_idx] {
+            // NCBI c++/src/algo/blast/api/local_blast.cpp:177-180,204-208:
+            // if (m_PrelimSearch->CheckInternalData() != 0)
+            //     new CBlastAncillaryData(tmp_pair, tmp_pair, tmp_pair, 0);
+            // The all-invalid batch uses -1 sentinel blocks. An invalid query
+            // within a searched batch has null blocks (blast_results.cpp:82-103).
+            if query_batch_skipped[q_idx] {
+                write_tblastn_unsearched_query_footer(&mut writer)?;
+            } else if !query_validity[q_idx] {
                 writeln!(writer)?;
                 writeln!(writer)?;
                 writeln!(writer)?;

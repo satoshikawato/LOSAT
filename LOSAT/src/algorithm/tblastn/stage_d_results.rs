@@ -162,6 +162,18 @@ impl KappaResultHitList {
         self.lists.sort_by(compare_result_lists);
     }
 
+    // NCBI c++/src/algo/blast/api/blast_seqalign.cpp:1572-1577:
+    // for (int index = 0; index < hit_list->hsplist_count; index++) {
+    //     BlastHSPList* hsp_list = hit_list->hsplist_array[index];
+    //     Blast_HSPListSortByEvalue(hsp_list);
+    // }
+    // Sort at report conversion, after Kappa has finished using the list.
+    pub(super) fn sort_hsps_for_report(&mut self) {
+        for list in &mut self.lists {
+            sort_hsps_by_evalue(list);
+        }
+    }
+
     // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_hits.h:169-181:
     // Int4 hsplist_count, hsplist_max;
     // double worst_evalue; Int4 low_score; Boolean heapified;

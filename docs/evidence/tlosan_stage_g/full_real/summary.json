@@ -1,0 +1,10 @@
+{
+  "comparisons": 48,
+  "equal": 48,
+  "query_counts": {
+    "av_self_code1": 120,
+    "av_ps_code11": 120,
+    "ap_self_code4": 595,
+    "ap_cross_code4": 595
+  }
+}

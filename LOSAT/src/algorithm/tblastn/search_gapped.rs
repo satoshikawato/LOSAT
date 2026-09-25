@@ -570,7 +570,11 @@ fn sort_preliminary_by_score(hsps: &mut [(usize, GappedHsp)]) {
 fn purge_preliminary_common_endpoints(
     mut incoming: Vec<(usize, GappedHsp)>,
 ) -> Vec<(usize, GappedHsp)> {
-    incoming.sort_unstable_by(|a, b| {
+    // NCBI c++/src/algo/blast/core/blast_hits.c:2268-2323,2455-2492:
+    // qsort(..., s_QueryOffsetCompareHSPs) returns 0 for identical score,
+    // query/subject starts and ends. The pinned NCBI oracle retains the first
+    // score-355 HSP's gapped_start (192, 47944) on that exact comparator tie.
+    incoming.sort_by(|a, b| {
         a.0.cmp(&b.0)
             .then(a.1.q_start.cmp(&b.1.q_start))
             .then(a.1.s_start.cmp(&b.1.s_start))
@@ -592,7 +596,10 @@ fn purge_preliminary_common_endpoints(
             i += 1;
         }
     }
-    incoming.sort_unstable_by(|a, b| {
+    // NCBI c++/src/algo/blast/core/blast_hits.c:2330-2390,2497-2537:
+    // s_QueryEndCompareHSPs also returns 0 for these equal-endpoint HSPs;
+    // retain their arrival order through the second purge pass.
+    incoming.sort_by(|a, b| {
         a.0.cmp(&b.0)
             .then(a.1.q_end.cmp(&b.1.q_end))
             .then(a.1.s_end.cmp(&b.1.s_end))
@@ -1640,6 +1647,31 @@ mod tests {
     use crate::stats::spouge::lookup_protein_gumbel_params;
     use crate::stats::tables::{lookup_protein_params_gapped, lookup_protein_params_ungapped};
     use std::fs;
+
+    // NCBI c++/src/algo/blast/core/blast_hits.c:2268-2323,2455-2537:
+    // s_QueryOffsetCompareHSPs returns zero when score and both endpoints
+    // match. The pinned NCBI Stage G probe retained the earlier score-355
+    // gapped_start (192, 47944) over the later (270, 48024).
+    #[test]
+    fn common_endpoint_purge_keeps_first_tied_gapped_seed() {
+        let first = GappedHsp {
+            frame: 3,
+            score: 355,
+            q_start: 107,
+            q_end: 281,
+            q_gapped_start: 192,
+            s_start: 47852,
+            s_end: 48034,
+            s_gapped_start: 47944,
+        };
+        let later = GappedHsp {
+            q_gapped_start: 270,
+            s_gapped_start: 48024,
+            ..first
+        };
+        let survivors = purge_preliminary_common_endpoints(vec![(0, first), (0, later)]);
+        assert_eq!(survivors, vec![(0, first)]);
+    }
 
     // NCBI c++/src/algo/blast/core/blast_gapalign.c:3924-3927:
     // cutoff = hit_params->cutoffs[context].cutoff_score;

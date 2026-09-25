@@ -427,7 +427,15 @@ fn run_local_search_with_pool(
         .collect();
     let valid_contexts: Vec<_> = contexts.iter().map(|context| context.is_valid).collect();
     let gapped_by_context = vec![gapped; queries.len()];
-    let ungapped_by_context = vec![ungapped; queries.len()];
+    // NCBI c++/src/algo/blast/core/blast_stat.c:2777-2827;
+    // c++/src/algo/blast/core/blast_parameters.c:208-223,335-347:
+    // Blast_KarlinBlkUngappedCalc(kbp_std[context], sbp->sfp[context]);
+    // sbp->kbp = sbp->kbp_std;
+    // Word x-drop and gap trigger both use each query context's Karlin block.
+    let ungapped_by_context: Vec<_> = contexts
+        .iter()
+        .map(|context| context.karlin_params)
+        .collect();
     // NCBI c++/src/algo/blast/core/blast_stat.c:4091-4171;
     // core/blast_hits.c:1870-1895: gbp is optional; absent gbp selects
     // BLAST_KarlinStoE_simple with the context's effective search space.
@@ -470,6 +478,24 @@ fn run_local_search_with_pool(
         // Karlin block initialization and leaves search space at zero.
         trace.query_validity = contexts.iter().map(|context| context.is_valid).collect();
         trace.subject_nt_lengths = subjects.iter().map(Vec::len).collect();
+    }
+    // NCBI c++/src/algo/blast/api/local_blast.cpp:177-180,197-224:
+    // int status = m_PrelimSearch->CheckInternalData();
+    // if (status != 0) {
+    //     // Search was not run, but we send back an empty CSearchResultSet.
+    //     CRef<objects::CSeq_align_set> tmp_align;
+    //     sa_vec.push_back(tmp_align);
+    // }
+    // NCBI c++/src/algo/blast/api/prelim_stage.cpp:322-327:
+    // retval = BlastScoreBlkCheck(m_InternalData->m_ScoreBlk->GetPointer());
+    // NCBI c++/src/algo/blast/core/blast_stat.c:2815-2824:
+    // if (valid_context == FALSE) status = 1;
+    // Preserve the parameter/validity state for reporting, then skip subject
+    // search when every query context has failed Karlin setup.
+    if !valid_contexts.iter().any(|&valid| valid) {
+        return (0..queries.len())
+            .map(|_| KappaResultHitList::new(profile.max_target_seqs))
+            .collect();
     }
     let link = parameters.link;
     let word_xdrop: Vec<_> = parameters.cutoffs.iter().map(|v| v.word_xdrop).collect();
@@ -1200,6 +1226,98 @@ fn finish_local_mode0_no_sum_stats(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    // NCBI c++/src/algo/blast/core/blast_stat.c:2777-2827;
+    // c++/src/algo/blast/core/blast_parameters.c:208-223,335-347:
+    // sbp->kbp = sbp->kbp_std; x_dropoff_init uses kbp[context]->Lambda.
+    // c++/src/algo/blast/core/aa_ungapped.c:570-590:
+    // s_BlastAaExtendTwoHit(..., cutoffs->x_dropoff, ...);
+    // if (score >= cutoffs->cutoff_score) BlastSaveInitHsp(...);
+    // For BDT63307, NCBI's query-specific x-drop is 15; using the matrix
+    // average's 16 changes which gapped seed survives into Kappa traceback.
+    #[test]
+    fn query_specific_word_xdrop_preserves_ncbi_bdt63307_seed() {
+        let base = std::path::Path::new(concat!(env!("CARGO_MANIFEST_DIR"), "/tests/fasta"));
+        let queries: Vec<Vec<u8>> = bio::io::fasta::Reader::from_file(base.join("AvCLPV.faa"))
+            .unwrap()
+            .records()
+            .map(|r| r.unwrap().seq().to_vec())
+            .collect();
+        let subjects: Vec<Vec<u8>> = bio::io::fasta::Reader::from_file(base.join("AvCLPV.fasta"))
+            .unwrap()
+            .records()
+            .map(|r| r.unwrap().seq().to_vec())
+            .collect();
+        let seg = SegParams::default();
+        let mut trace = StageDBoundaryTrace::default();
+        let results = run_local_search(
+            &queries[33..34],
+            &subjects,
+            LocalStageDProfile {
+                seg: Some(&seg),
+                soft_masking: false,
+                mask_lowercase: false,
+                genetic_code: 1,
+                expect_value: 10.0,
+                max_target_seqs: 500,
+            },
+            true,
+            true,
+            LocalStageDScoring::default(),
+            Some(&mut trace),
+        )
+        .unwrap();
+        assert_eq!(trace.parameters.as_ref().unwrap().cutoffs[0].word_xdrop, 15);
+        assert_eq!(
+            trace.parameters.as_ref().unwrap().cutoffs[0].word_cutoff,
+            36
+        );
+        let hsp = trace
+            .preliminary
+            .iter()
+            .flat_map(|(_, hsps)| hsps)
+            .map(|(_, hsp)| hsp)
+            .find(|hsp| hsp.frame == -1 && hsp.s_start == 76752 && hsp.s_end == 76934)
+            .unwrap();
+        assert_eq!((hsp.q_gapped_start, hsp.s_gapped_start), (173, 76909));
+        assert!(!results[0].lists().is_empty());
+    }
+
+    // NCBI c++/src/algo/blast/api/local_blast.cpp:177-180,204-208:
+    // if (m_PrelimSearch->CheckInternalData() != 0) {
+    //     // Search was not run, but we send back an empty CSearchResultSet.
+    //     CRef<objects::CSeq_align_set> tmp_align;
+    //     sa_vec.push_back(tmp_align);
+    // }
+    // The pinned NCBI no-hit probe records context valid=0 for this query.
+    #[test]
+    fn all_invalid_query_skips_subject_search_and_returns_empty_hitlist() {
+        let queries = vec![vec![b'W'; 60]];
+        let subjects = vec![vec![b'A'; 600]];
+        let seg = SegParams::default();
+        let mut trace = StageDBoundaryTrace::default();
+        let results = run_local_search(
+            &queries,
+            &subjects,
+            LocalStageDProfile {
+                seg: Some(&seg),
+                soft_masking: false,
+                mask_lowercase: false,
+                genetic_code: 1,
+                expect_value: 10.0,
+                max_target_seqs: 500,
+            },
+            true,
+            true,
+            LocalStageDScoring::default(),
+            Some(&mut trace),
+        )
+        .unwrap();
+        assert_eq!(trace.query_validity, [false]);
+        assert!(trace.preliminary.is_empty());
+        assert_eq!(results.len(), 1);
+        assert!(results[0].lists().is_empty());
+    }
 
     // NCBI c++/src/algo/blast/core/blast_engine.c:728-729,804-813;
     // c++/src/algo/blast/core/blast_util.c:508-527,1070-1101:

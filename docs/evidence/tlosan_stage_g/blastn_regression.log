@@ -1,0 +1,408 @@
+paired_cwd: /mnt/c/Users/genom/GitHub/LOSAT/LOSAT
+paired_output_dir: /tmp/tlosan-stageg-final-blastn-20260926
+paired_ncbi: blastn -query tests/fasta/AP027152.fasta -subject tests/fasta/AP027202.fasta -task blastn -reward 2 -penalty -3 -gapopen 5 -gapextend 2 -word_size 11 -dust yes -soft_masking true -strand both -evalue 10 -max_target_seqs 500 -num_threads 1 -outfmt 7 -out /tmp/tlosan-stageg-final-blastn-20260926/PesePMNV.MjPMNV.task_blastn.ncbi.out
+paired_losat: /mnt/c/Users/genom/GitHub/LOSAT/LOSAT/target/release/LOSAT blastn -query tests/fasta/AP027152.fasta -subject tests/fasta/AP027202.fasta -task blastn -reward 2 -penalty=-3 -gapopen 5 -gapextend 2 -word_size 11 -num_threads 1 -evalue 10 -max_target_seqs 500 -outfmt 7 -out /tmp/tlosan-stageg-final-blastn-20260926/PesePMNV.MjPMNV.task_blastn.losat.out -dust yes
+paired_ncbi: blastn -query tests/fasta/LC738869.fasta -subject tests/fasta/AP027202.fasta -task blastn -reward 2 -penalty -3 -gapopen 5 -gapextend 2 -word_size 11 -dust yes -soft_masking true -strand both -evalue 10 -max_target_seqs 500 -num_threads 1 -outfmt 7 -out /tmp/tlosan-stageg-final-blastn-20260926/PmeNMV.MjPMNV.task_blastn.ncbi.out
+paired_losat: /mnt/c/Users/genom/GitHub/LOSAT/LOSAT/target/release/LOSAT blastn -query tests/fasta/LC738869.fasta -subject tests/fasta/AP027202.fasta -task blastn -reward 2 -penalty=-3 -gapopen 5 -gapextend 2 -word_size 11 -num_threads 1 -evalue 10 -max_target_seqs 500 -outfmt 7 -out /tmp/tlosan-stageg-final-blastn-20260926/PmeNMV.MjPMNV.task_blastn.losat.out -dust yes
+paired_ncbi: blastn -query tests/fasta/LC738869.fasta -subject tests/fasta/AP027152.fasta -task blastn -reward 2 -penalty -3 -gapopen 5 -gapextend 2 -word_size 11 -dust yes -soft_masking true -strand both -evalue 10 -max_target_seqs 500 -num_threads 1 -outfmt 7 -out /tmp/tlosan-stageg-final-blastn-20260926/PmeNMV.PesePMNV.task_blastn.ncbi.out
+paired_losat: /mnt/c/Users/genom/GitHub/LOSAT/LOSAT/target/release/LOSAT blastn -query tests/fasta/LC738869.fasta -subject tests/fasta/AP027152.fasta -task blastn -reward 2 -penalty=-3 -gapopen 5 -gapextend 2 -word_size 11 -num_threads 1 -evalue 10 -max_target_seqs 500 -outfmt 7 -out /tmp/tlosan-stageg-final-blastn-20260926/PmeNMV.PesePMNV.task_blastn.losat.out -dust yes
+paired_ncbi: blastn -query tests/fasta/LC738873.fasta -subject tests/fasta/LC738871.fasta -task blastn -reward 2 -penalty -3 -gapopen 5 -gapextend 2 -word_size 11 -dust yes -soft_masking true -strand both -evalue 10 -max_target_seqs 500 -num_threads 1 -outfmt 7 -out /tmp/tlosan-stageg-final-blastn-20260926/PeseMJNV.PemoMJNVB.task_blastn.ncbi.out
+paired_losat: /mnt/c/Users/genom/GitHub/LOSAT/LOSAT/target/release/LOSAT blastn -query tests/fasta/LC738873.fasta -subject tests/fasta/LC738871.fasta -task blastn -reward 2 -penalty=-3 -gapopen 5 -gapextend 2 -word_size 11 -num_threads 1 -evalue 10 -max_target_seqs 500 -outfmt 7 -out /tmp/tlosan-stageg-final-blastn-20260926/PeseMJNV.PemoMJNVB.task_blastn.losat.out -dust yes
+paired_ncbi: blastn -query tests/fasta/LC738874.fasta -subject tests/fasta/LC738870.fasta -task blastn -reward 2 -penalty -3 -gapopen 5 -gapextend 2 -word_size 11 -dust yes -soft_masking true -strand both -evalue 10 -max_target_seqs 500 -num_threads 1 -outfmt 7 -out /tmp/tlosan-stageg-final-blastn-20260926/MelaMJNV.PemoMJNVA.task_blastn.ncbi.out
+paired_losat: /mnt/c/Users/genom/GitHub/LOSAT/LOSAT/target/release/LOSAT blastn -query tests/fasta/LC738874.fasta -subject tests/fasta/LC738870.fasta -task blastn -reward 2 -penalty=-3 -gapopen 5 -gapextend 2 -word_size 11 -num_threads 1 -evalue 10 -max_target_seqs 500 -outfmt 7 -out /tmp/tlosan-stageg-final-blastn-20260926/MelaMJNV.PemoMJNVA.task_blastn.losat.out -dust yes
+paired_ncbi: blastn -query tests/fasta/LC738870.fasta -subject tests/fasta/LC738873.fasta -task blastn -reward 2 -penalty -3 -gapopen 5 -gapextend 2 -word_size 11 -dust yes -soft_masking true -strand both -evalue 10 -max_target_seqs 500 -num_threads 1 -outfmt 7 -out /tmp/tlosan-stageg-final-blastn-20260926/PemoMJNVA.PeseMJNV.task_blastn.ncbi.out
+paired_losat: /mnt/c/Users/genom/GitHub/LOSAT/LOSAT/target/release/LOSAT blastn -query tests/fasta/LC738870.fasta -subject tests/fasta/LC738873.fasta -task blastn -reward 2 -penalty=-3 -gapopen 5 -gapextend 2 -word_size 11 -num_threads 1 -evalue 10 -max_target_seqs 500 -outfmt 7 -out /tmp/tlosan-stageg-final-blastn-20260926/PemoMJNVA.PeseMJNV.task_blastn.losat.out -dust yes
+paired_ncbi: blastn -query tests/fasta/LC738868.fasta -subject tests/fasta/LC738874.fasta -task blastn -reward 2 -penalty -3 -gapopen 5 -gapextend 2 -word_size 11 -dust yes -soft_masking true -strand both -evalue 10 -max_target_seqs 500 -num_threads 1 -outfmt 7 -out /tmp/tlosan-stageg-final-blastn-20260926/MjeNMV.MelaMJNV.task_blastn.ncbi.out
+paired_losat: /mnt/c/Users/genom/GitHub/LOSAT/LOSAT/target/release/LOSAT blastn -query tests/fasta/LC738868.fasta -subject tests/fasta/LC738874.fasta -task blastn -reward 2 -penalty=-3 -gapopen 5 -gapextend 2 -word_size 11 -num_threads 1 -evalue 10 -max_target_seqs 500 -outfmt 7 -out /tmp/tlosan-stageg-final-blastn-20260926/MjeNMV.MelaMJNV.task_blastn.losat.out -dust yes
+paired_ncbi: blastn -query tests/fasta/AP027202.fasta -subject tests/fasta/LC738875.fasta -task blastn -reward 2 -penalty -3 -gapopen 5 -gapextend 2 -word_size 11 -dust yes -soft_masking true -strand both -evalue 10 -max_target_seqs 500 -num_threads 1 -outfmt 7 -out /tmp/tlosan-stageg-final-blastn-20260926/MjPMNV.MlPMNV.task_blastn.ncbi.out
+paired_losat: /mnt/c/Users/genom/GitHub/LOSAT/LOSAT/target/release/LOSAT blastn -query tests/fasta/AP027202.fasta -subject tests/fasta/LC738875.fasta -task blastn -reward 2 -penalty=-3 -gapopen 5 -gapextend 2 -word_size 11 -num_threads 1 -evalue 10 -max_target_seqs 500 -outfmt 7 -out /tmp/tlosan-stageg-final-blastn-20260926/MjPMNV.MlPMNV.task_blastn.losat.out -dust yes
+paired_ncbi: blastn -query tests/fasta/NZ_CP006932.fasta -subject tests/fasta/NZ_CP006932.fasta -task blastn -reward 2 -penalty -3 -gapopen 5 -gapextend 2 -word_size 11 -dust yes -soft_masking true -strand both -evalue 10 -max_target_seqs 500 -num_threads 1 -outfmt 7 -out /tmp/tlosan-stageg-final-blastn-20260926/NZ_CP006932.NZ_CP006932.task_blastn.ncbi.out
+paired_losat: /mnt/c/Users/genom/GitHub/LOSAT/LOSAT/target/release/LOSAT blastn -query tests/fasta/NZ_CP006932.fasta -subject tests/fasta/NZ_CP006932.fasta -task blastn -reward 2 -penalty=-3 -gapopen 5 -gapextend 2 -word_size 11 -num_threads 1 -evalue 10 -max_target_seqs 500 -outfmt 7 -out /tmp/tlosan-stageg-final-blastn-20260926/NZ_CP006932.NZ_CP006932.task_blastn.losat.out -dust yes
+paired_ncbi: blastn -query tests/fasta/EDL933.fna -subject tests/fasta/Sakai.fna -task megablast -reward 1 -penalty -2 -gapopen 0 -gapextend 0 -word_size 28 -dust yes -soft_masking true -strand both -evalue 10 -max_target_seqs 500 -num_threads 1 -outfmt 7 -out /tmp/tlosan-stageg-final-blastn-20260926/EDL933.Sakai.megablast.ncbi.out
+paired_losat: /mnt/c/Users/genom/GitHub/LOSAT/LOSAT/target/release/LOSAT blastn -query tests/fasta/EDL933.fna -subject tests/fasta/Sakai.fna -task megablast -reward 1 -penalty=-2 -gapopen 0 -gapextend 0 -word_size 28 -num_threads 1 -evalue 10 -max_target_seqs 500 -outfmt 7 -out /tmp/tlosan-stageg-final-blastn-20260926/EDL933.Sakai.megablast.losat.out -dust yes
+paired_ncbi: blastn -query tests/fasta/Sakai.fna -subject tests/fasta/MG1655.fna -task megablast -reward 1 -penalty -2 -gapopen 0 -gapextend 0 -word_size 28 -dust yes -soft_masking true -strand both -evalue 10 -max_target_seqs 500 -num_threads 1 -outfmt 7 -out /tmp/tlosan-stageg-final-blastn-20260926/Sakai.MG1655.megablast.ncbi.out
+paired_losat: /mnt/c/Users/genom/GitHub/LOSAT/LOSAT/target/release/LOSAT blastn -query tests/fasta/Sakai.fna -subject tests/fasta/MG1655.fna -task megablast -reward 1 -penalty=-2 -gapopen 0 -gapextend 0 -word_size 28 -num_threads 1 -evalue 10 -max_target_seqs 500 -outfmt 7 -out /tmp/tlosan-stageg-final-blastn-20260926/Sakai.MG1655.megablast.losat.out -dust yes
+paired_ncbi: blastn -query tests/fasta/blastn_parity_compact.fasta -subject tests/fasta/blastn_parity_compact.fasta -task blastn -reward 2 -penalty -3 -gapopen 5 -gapextend 2 -word_size 11 -dust yes -soft_masking true -strand both -evalue 10 -max_target_seqs 500 -num_threads 1 -outfmt 6 -out /tmp/tlosan-stageg-final-blastn-20260926/compact.multi_query.outfmt6.ncbi.out
+paired_losat: /mnt/c/Users/genom/GitHub/LOSAT/LOSAT/target/release/LOSAT blastn -query tests/fasta/blastn_parity_compact.fasta -subject tests/fasta/blastn_parity_compact.fasta -task blastn -reward 2 -penalty=-3 -gapopen 5 -gapextend 2 -word_size 11 -num_threads 1 -evalue 10 -max_target_seqs 500 -outfmt 6 -out /tmp/tlosan-stageg-final-blastn-20260926/compact.multi_query.outfmt6.losat.out -dust yes
+paired_ncbi: blastn -query tests/fasta/blastn_parity_compact.fasta -subject tests/fasta/blastn_parity_compact.fasta -task blastn -reward 2 -penalty -3 -gapopen 5 -gapextend 2 -word_size 11 -dust yes -soft_masking true -strand both -evalue 10 -max_target_seqs 500 -num_threads 1 -outfmt 7 -out /tmp/tlosan-stageg-final-blastn-20260926/compact.multi_query.outfmt7.ncbi.out
+paired_losat: /mnt/c/Users/genom/GitHub/LOSAT/LOSAT/target/release/LOSAT blastn -query tests/fasta/blastn_parity_compact.fasta -subject tests/fasta/blastn_parity_compact.fasta -task blastn -reward 2 -penalty=-3 -gapopen 5 -gapextend 2 -word_size 11 -num_threads 1 -evalue 10 -max_target_seqs 500 -outfmt 7 -out /tmp/tlosan-stageg-final-blastn-20260926/compact.multi_query.outfmt7.losat.out -dust yes
+paired_ncbi: blastn -query tests/fasta/blastn_parity_compact.fasta -subject tests/fasta/blastn_parity_compact.fasta -task blastn -reward 2 -penalty -3 -gapopen 5 -gapextend 2 -word_size 11 -dust yes -soft_masking true -strand both -evalue 1e-100 -max_target_seqs 500 -num_threads 1 -outfmt 7 -out /tmp/tlosan-stageg-final-blastn-20260926/compact.multi_query.no_hit.outfmt7.ncbi.out
+paired_losat: /mnt/c/Users/genom/GitHub/LOSAT/LOSAT/target/release/LOSAT blastn -query tests/fasta/blastn_parity_compact.fasta -subject tests/fasta/blastn_parity_compact.fasta -task blastn -reward 2 -penalty=-3 -gapopen 5 -gapextend 2 -word_size 11 -num_threads 1 -evalue 1e-100 -max_target_seqs 500 -outfmt 7 -out /tmp/tlosan-stageg-final-blastn-20260926/compact.multi_query.no_hit.outfmt7.losat.out -dust yes
+  raw_bytes: exact (18531 bytes)
+  raw_sha256_ncbi: cadccd5ba65c5632193b2866713328ca3689e684ab8718a773df8decf4d8284c
+  raw_sha256_losat: cadccd5ba65c5632193b2866713328ca3689e684ab8718a773df8decf4d8284c
+case: PesePMNV.MjPMNV.task_blastn
+  ncbi_hits: 241
+  losat_hits: 241
+  structured_row_count_equal: True
+  structured_duplicate_rows_ncbi: 0
+  structured_duplicate_rows_losat: 0
+  structured_row_multiset_equal: True
+  structured_row_order_equal: True
+  structured_equal: True
+  common_coord_keys: 241
+  ncbi_only: 0
+  losat_only: 0
+  ncbi_only_accumulated_length: 0
+  losat_only_accumulated_length: 0
+  same_coordinate_bitscore_diffs: 0
+  same_coordinate_evalue_diffs: 0
+  same_coordinate_pident_diffs: 0
+  same_coordinate_length_mismatch_gapopen_diffs: 0
+  score_bins_ncbi_only: {}
+  score_bins_losat_only: {}
+  identity_bins_ncbi_only: {}
+  identity_bins_losat_only: {}
+  length_bins_ncbi_only: {}
+  length_bins_losat_only: {}
+  raw_bytes: exact (16106 bytes)
+  raw_sha256_ncbi: 30717748c1eac9b994512c1117eb440d1c5a2ec7f05f45dcfe3d50bd3ca13177
+  raw_sha256_losat: 30717748c1eac9b994512c1117eb440d1c5a2ec7f05f45dcfe3d50bd3ca13177
+case: PmeNMV.MjPMNV.task_blastn
+  ncbi_hits: 208
+  losat_hits: 208
+  structured_row_count_equal: True
+  structured_duplicate_rows_ncbi: 0
+  structured_duplicate_rows_losat: 0
+  structured_row_multiset_equal: True
+  structured_row_order_equal: True
+  structured_equal: True
+  common_coord_keys: 208
+  ncbi_only: 0
+  losat_only: 0
+  ncbi_only_accumulated_length: 0
+  losat_only_accumulated_length: 0
+  same_coordinate_bitscore_diffs: 0
+  same_coordinate_evalue_diffs: 0
+  same_coordinate_pident_diffs: 0
+  same_coordinate_length_mismatch_gapopen_diffs: 0
+  score_bins_ncbi_only: {}
+  score_bins_losat_only: {}
+  identity_bins_ncbi_only: {}
+  identity_bins_losat_only: {}
+  length_bins_ncbi_only: {}
+  length_bins_losat_only: {}
+  raw_bytes: exact (106939 bytes)
+  raw_sha256_ncbi: aa2df5afde8454f4565b1c832c9fdc0b078b3f505a99f8a06112a8e7ada263c1
+  raw_sha256_losat: aa2df5afde8454f4565b1c832c9fdc0b078b3f505a99f8a06112a8e7ada263c1
+case: PmeNMV.PesePMNV.task_blastn
+  ncbi_hits: 1431
+  losat_hits: 1431
+  structured_row_count_equal: True
+  structured_duplicate_rows_ncbi: 0
+  structured_duplicate_rows_losat: 0
+  structured_row_multiset_equal: True
+  structured_row_order_equal: True
+  structured_equal: True
+  common_coord_keys: 1431
+  ncbi_only: 0
+  losat_only: 0
+  ncbi_only_accumulated_length: 0
+  losat_only_accumulated_length: 0
+  same_coordinate_bitscore_diffs: 0
+  same_coordinate_evalue_diffs: 0
+  same_coordinate_pident_diffs: 0
+  same_coordinate_length_mismatch_gapopen_diffs: 0
+  score_bins_ncbi_only: {}
+  score_bins_losat_only: {}
+  identity_bins_ncbi_only: {}
+  identity_bins_losat_only: {}
+  length_bins_ncbi_only: {}
+  length_bins_losat_only: {}
+  raw_bytes: exact (867597 bytes)
+  raw_sha256_ncbi: 01235a77f9b666c2fba84618d170ff70fe759870c704936480ab348e69a2feb8
+  raw_sha256_losat: 01235a77f9b666c2fba84618d170ff70fe759870c704936480ab348e69a2feb8
+case: PeseMJNV.PemoMJNVB.task_blastn
+  ncbi_hits: 11668
+  losat_hits: 11668
+  structured_row_count_equal: True
+  structured_duplicate_rows_ncbi: 0
+  structured_duplicate_rows_losat: 0
+  structured_row_multiset_equal: True
+  structured_row_order_equal: True
+  structured_equal: True
+  common_coord_keys: 11668
+  ncbi_only: 0
+  losat_only: 0
+  ncbi_only_accumulated_length: 0
+  losat_only_accumulated_length: 0
+  same_coordinate_bitscore_diffs: 0
+  same_coordinate_evalue_diffs: 0
+  same_coordinate_pident_diffs: 0
+  same_coordinate_length_mismatch_gapopen_diffs: 0
+  score_bins_ncbi_only: {}
+  score_bins_losat_only: {}
+  identity_bins_ncbi_only: {}
+  identity_bins_losat_only: {}
+  length_bins_ncbi_only: {}
+  length_bins_losat_only: {}
+  raw_bytes: exact (201371 bytes)
+  raw_sha256_ncbi: 338eb1fa9f090fbdc4068691080608cdd41af1ee85c57e2c3adaa4d1aaff3e7b
+  raw_sha256_losat: 338eb1fa9f090fbdc4068691080608cdd41af1ee85c57e2c3adaa4d1aaff3e7b
+case: MelaMJNV.PemoMJNVA.task_blastn
+  ncbi_hits: 2729
+  losat_hits: 2729
+  structured_row_count_equal: True
+  structured_duplicate_rows_ncbi: 0
+  structured_duplicate_rows_losat: 0
+  structured_row_multiset_equal: True
+  structured_row_order_equal: True
+  structured_equal: True
+  common_coord_keys: 2729
+  ncbi_only: 0
+  losat_only: 0
+  ncbi_only_accumulated_length: 0
+  losat_only_accumulated_length: 0
+  same_coordinate_bitscore_diffs: 0
+  same_coordinate_evalue_diffs: 0
+  same_coordinate_pident_diffs: 0
+  same_coordinate_length_mismatch_gapopen_diffs: 0
+  score_bins_ncbi_only: {}
+  score_bins_losat_only: {}
+  identity_bins_ncbi_only: {}
+  identity_bins_losat_only: {}
+  length_bins_ncbi_only: {}
+  length_bins_losat_only: {}
+  raw_bytes: exact (219682 bytes)
+  raw_sha256_ncbi: 19f2bc9c15512dd9ac03947dac6c01868c38acff5e6fcb672601d24dce833a31
+  raw_sha256_losat: 19f2bc9c15512dd9ac03947dac6c01868c38acff5e6fcb672601d24dce833a31
+case: PemoMJNVA.PeseMJNV.task_blastn
+  ncbi_hits: 2940
+  losat_hits: 2940
+  structured_row_count_equal: True
+  structured_duplicate_rows_ncbi: 0
+  structured_duplicate_rows_losat: 0
+  structured_row_multiset_equal: True
+  structured_row_order_equal: True
+  structured_equal: True
+  common_coord_keys: 2940
+  ncbi_only: 0
+  losat_only: 0
+  ncbi_only_accumulated_length: 0
+  losat_only_accumulated_length: 0
+  same_coordinate_bitscore_diffs: 0
+  same_coordinate_evalue_diffs: 0
+  same_coordinate_pident_diffs: 0
+  same_coordinate_length_mismatch_gapopen_diffs: 0
+  score_bins_ncbi_only: {}
+  score_bins_losat_only: {}
+  identity_bins_ncbi_only: {}
+  identity_bins_losat_only: {}
+  length_bins_ncbi_only: {}
+  length_bins_losat_only: {}
+  raw_bytes: exact (199098 bytes)
+  raw_sha256_ncbi: 780e6fc526f86d258a6830f90f5c593d5136fa5cdea4d4cb750ad4c5506e7bf1
+  raw_sha256_losat: 780e6fc526f86d258a6830f90f5c593d5136fa5cdea4d4cb750ad4c5506e7bf1
+case: MjeNMV.MelaMJNV.task_blastn
+  ncbi_hits: 2668
+  losat_hits: 2668
+  structured_row_count_equal: True
+  structured_duplicate_rows_ncbi: 0
+  structured_duplicate_rows_losat: 0
+  structured_row_multiset_equal: True
+  structured_row_order_equal: True
+  structured_equal: True
+  common_coord_keys: 2668
+  ncbi_only: 0
+  losat_only: 0
+  ncbi_only_accumulated_length: 0
+  losat_only_accumulated_length: 0
+  same_coordinate_bitscore_diffs: 0
+  same_coordinate_evalue_diffs: 0
+  same_coordinate_pident_diffs: 0
+  same_coordinate_length_mismatch_gapopen_diffs: 0
+  score_bins_ncbi_only: {}
+  score_bins_losat_only: {}
+  identity_bins_ncbi_only: {}
+  identity_bins_losat_only: {}
+  length_bins_ncbi_only: {}
+  length_bins_losat_only: {}
+  raw_bytes: exact (4238932 bytes)
+  raw_sha256_ncbi: ea96f79824e8ecd5a704a6df1950da122eeaee352646ec5cf92594d71ee58c96
+  raw_sha256_losat: ea96f79824e8ecd5a704a6df1950da122eeaee352646ec5cf92594d71ee58c96
+case: MjPMNV.MlPMNV.task_blastn
+  ncbi_hits: 54402
+  losat_hits: 54402
+  structured_row_count_equal: True
+  structured_duplicate_rows_ncbi: 0
+  structured_duplicate_rows_losat: 0
+  structured_row_multiset_equal: True
+  structured_row_order_equal: True
+  structured_equal: True
+  common_coord_keys: 54402
+  ncbi_only: 0
+  losat_only: 0
+  ncbi_only_accumulated_length: 0
+  losat_only_accumulated_length: 0
+  same_coordinate_bitscore_diffs: 0
+  same_coordinate_evalue_diffs: 0
+  same_coordinate_pident_diffs: 0
+  same_coordinate_length_mismatch_gapopen_diffs: 0
+  score_bins_ncbi_only: {}
+  score_bins_losat_only: {}
+  identity_bins_ncbi_only: {}
+  identity_bins_losat_only: {}
+  length_bins_ncbi_only: {}
+  length_bins_losat_only: {}
+  raw_bytes: exact (994351 bytes)
+  raw_sha256_ncbi: f68b187559ec9119b535a0d9e57910061a649ee7ae6d78a7c0b3dd74d990df01
+  raw_sha256_losat: f68b187559ec9119b535a0d9e57910061a649ee7ae6d78a7c0b3dd74d990df01
+case: NZ_CP006932.NZ_CP006932.task_blastn
+  ncbi_hits: 12340
+  losat_hits: 12340
+  structured_row_count_equal: True
+  structured_duplicate_rows_ncbi: 0
+  structured_duplicate_rows_losat: 0
+  structured_row_multiset_equal: True
+  structured_row_order_equal: True
+  structured_equal: True
+  common_coord_keys: 12340
+  ncbi_only: 0
+  losat_only: 0
+  ncbi_only_accumulated_length: 0
+  losat_only_accumulated_length: 0
+  same_coordinate_bitscore_diffs: 0
+  same_coordinate_evalue_diffs: 0
+  same_coordinate_pident_diffs: 0
+  same_coordinate_length_mismatch_gapopen_diffs: 0
+  score_bins_ncbi_only: {}
+  score_bins_losat_only: {}
+  identity_bins_ncbi_only: {}
+  identity_bins_losat_only: {}
+  length_bins_ncbi_only: {}
+  length_bins_losat_only: {}
+  raw_bytes: exact (473392 bytes)
+  raw_sha256_ncbi: 4b4b2501f1d87303c3060c5b0c100fbd381604a72e4df130e23701ff81e49fac
+  raw_sha256_losat: 4b4b2501f1d87303c3060c5b0c100fbd381604a72e4df130e23701ff81e49fac
+case: EDL933.Sakai.megablast
+  ncbi_hits: 5718
+  losat_hits: 5718
+  structured_row_count_equal: True
+  structured_duplicate_rows_ncbi: 0
+  structured_duplicate_rows_losat: 0
+  structured_row_multiset_equal: True
+  structured_row_order_equal: True
+  structured_equal: True
+  common_coord_keys: 5718
+  ncbi_only: 0
+  losat_only: 0
+  ncbi_only_accumulated_length: 0
+  losat_only_accumulated_length: 0
+  same_coordinate_bitscore_diffs: 0
+  same_coordinate_evalue_diffs: 0
+  same_coordinate_pident_diffs: 0
+  same_coordinate_length_mismatch_gapopen_diffs: 0
+  score_bins_ncbi_only: {}
+  score_bins_losat_only: {}
+  identity_bins_ncbi_only: {}
+  identity_bins_losat_only: {}
+  length_bins_ncbi_only: {}
+  length_bins_losat_only: {}
+  raw_bytes: exact (536880 bytes)
+  raw_sha256_ncbi: 2e15963c66e5f552088e468d17a1a86b779be61e7ed6331e57314f6e93c69ffa
+  raw_sha256_losat: 2e15963c66e5f552088e468d17a1a86b779be61e7ed6331e57314f6e93c69ffa
+case: Sakai.MG1655.megablast
+  ncbi_hits: 6476
+  losat_hits: 6476
+  structured_row_count_equal: True
+  structured_duplicate_rows_ncbi: 0
+  structured_duplicate_rows_losat: 0
+  structured_row_multiset_equal: True
+  structured_row_order_equal: True
+  structured_equal: True
+  common_coord_keys: 6476
+  ncbi_only: 0
+  losat_only: 0
+  ncbi_only_accumulated_length: 0
+  losat_only_accumulated_length: 0
+  same_coordinate_bitscore_diffs: 0
+  same_coordinate_evalue_diffs: 0
+  same_coordinate_pident_diffs: 0
+  same_coordinate_length_mismatch_gapopen_diffs: 0
+  score_bins_ncbi_only: {}
+  score_bins_losat_only: {}
+  identity_bins_ncbi_only: {}
+  identity_bins_losat_only: {}
+  length_bins_ncbi_only: {}
+  length_bins_losat_only: {}
+  raw_bytes: exact (154 bytes)
+  raw_sha256_ncbi: ac4a20b64c8da3eaea725ed09dc89880294f58e971b7207c943489faacdbe03e
+  raw_sha256_losat: ac4a20b64c8da3eaea725ed09dc89880294f58e971b7207c943489faacdbe03e
+case: compact.multi_query.outfmt6
+  ncbi_hits: 2
+  losat_hits: 2
+  structured_row_count_equal: True
+  structured_duplicate_rows_ncbi: 0
+  structured_duplicate_rows_losat: 0
+  structured_row_multiset_equal: True
+  structured_row_order_equal: True
+  structured_equal: True
+  common_coord_keys: 2
+  ncbi_only: 0
+  losat_only: 0
+  ncbi_only_accumulated_length: 0
+  losat_only_accumulated_length: 0
+  same_coordinate_bitscore_diffs: 0
+  same_coordinate_evalue_diffs: 0
+  same_coordinate_pident_diffs: 0
+  same_coordinate_length_mismatch_gapopen_diffs: 0
+  score_bins_ncbi_only: {}
+  score_bins_losat_only: {}
+  identity_bins_ncbi_only: {}
+  identity_bins_losat_only: {}
+  length_bins_ncbi_only: {}
+  length_bins_losat_only: {}
+  raw_bytes: exact (860 bytes)
+  raw_sha256_ncbi: 58b0673dc9379427777880c709b9edb35647806e78de74197899680fac402547
+  raw_sha256_losat: 58b0673dc9379427777880c709b9edb35647806e78de74197899680fac402547
+case: compact.multi_query.outfmt7
+  ncbi_hits: 2
+  losat_hits: 2
+  structured_row_count_equal: True
+  structured_duplicate_rows_ncbi: 0
+  structured_duplicate_rows_losat: 0
+  structured_row_multiset_equal: True
+  structured_row_order_equal: True
+  structured_equal: True
+  common_coord_keys: 2
+  ncbi_only: 0
+  losat_only: 0
+  ncbi_only_accumulated_length: 0
+  losat_only_accumulated_length: 0
+  same_coordinate_bitscore_diffs: 0
+  same_coordinate_evalue_diffs: 0
+  same_coordinate_pident_diffs: 0
+  same_coordinate_length_mismatch_gapopen_diffs: 0
+  score_bins_ncbi_only: {}
+  score_bins_losat_only: {}
+  identity_bins_ncbi_only: {}
+  identity_bins_losat_only: {}
+  length_bins_ncbi_only: {}
+  length_bins_losat_only: {}
+  raw_bytes: exact (408 bytes)
+  raw_sha256_ncbi: a685460a43cb83c416bd0b3e1f10e4736d12b2f37d44da382907427ef9c6283b
+  raw_sha256_losat: a685460a43cb83c416bd0b3e1f10e4736d12b2f37d44da382907427ef9c6283b
+case: compact.multi_query.no_hit.outfmt7
+  ncbi_hits: 0
+  losat_hits: 0
+  structured_row_count_equal: True
+  structured_duplicate_rows_ncbi: 0
+  structured_duplicate_rows_losat: 0
+  structured_row_multiset_equal: True
+  structured_row_order_equal: True
+  structured_equal: True
+  common_coord_keys: 0
+  ncbi_only: 0
+  losat_only: 0
+  ncbi_only_accumulated_length: 0
+  losat_only_accumulated_length: 0
+  same_coordinate_bitscore_diffs: 0
+  same_coordinate_evalue_diffs: 0
+  same_coordinate_pident_diffs: 0
+  same_coordinate_length_mismatch_gapopen_diffs: 0
+  score_bins_ncbi_only: {}
+  score_bins_losat_only: {}
+  identity_bins_ncbi_only: {}
+  identity_bins_losat_only: {}
+  length_bins_ncbi_only: {}
+  length_bins_losat_only: {}

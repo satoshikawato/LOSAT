@@ -1,0 +1,130 @@
+TBLASTN 2.17.0+
+
+
+Reference: Stephen F. Altschul, Thomas L. Madden, Alejandro A.
+Schaffer, Jinghui Zhang, Zheng Zhang, Webb Miller, and David J.
+Lipman (1997), "Gapped BLAST and PSI-BLAST: a new generation of
+protein database search programs", Nucleic Acids Res. 25:3389-3402.
+
+
+
+Database: User specified sequence set (Input:
+/mnt/c/Users/genom/GitHub/LOSAT/LOSAT/tests/fasta/AP027131.fasta).
+           1 sequences; 662,108 total letters
+
+
+
+Query= BDV02112.1 chromosomal replication initiator protein DnaA
+[Candidatus Hepatoplasma vulgare]
+
+Length=455
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+
+AP027131.1 MAG: Candidatus Hepatoplasma vulgare Av-JP DNA, comple...  803     0.0  
+
+
+> AP027131.1 MAG: Candidatus Hepatoplasma vulgare Av-JP DNA, complete 
+genome
+Length=662108
+
+ Score = 803 bits (2073),  Expect = 0.0, Method: Compositional matrix adjust.
+ Identities = 455/455 (100%), Positives = 455/455 (100%), Gaps = 0/455 (0%)
+ Frame = +2
+
+Query  1     MEKLSLIWKNIYESVAIEEEQKLTFELMMTDTNLEKIDDSNKLMVITTKNKIAEVIIKND  60
+             MEKLSLIWKNIYESVAIEEEQKLTFELMMTDTNLEKIDDSNKLMVITTKNKIAEVIIKND
+Sbjct  101   MEKLSLIWKNIYESVAIEEEQKLTFELMMTDTNLEKIDDSNKLMVITTKNKIAEVIIKND  280
+
+Query  61    FYNLLINAINKNYLDYKLEIFykdeysknkknnkeekieiktkdnYEPNERFTFDNFIAS  120
+             FYNLLINAINKNYLDYKLEIFYKDEYSKNKKNNKEEKIEIKTKDNYEPNERFTFDNFIAS
+Sbjct  281   FYNLLINAINKNYLDYKLEIFYKDEYSKNKKNNKEEKIEIKTKDNYEPNERFTFDNFIAS  460
+
+Query  121   KDNKLLYKAAITISKNRSKSWNPFFIHGKSGLGKTHILHAIANNAKEQKSYKSIKYIEAK  180
+             KDNKLLYKAAITISKNRSKSWNPFFIHGKSGLGKTHILHAIANNAKEQKSYKSIKYIEAK
+Sbjct  461   KDNKLLYKAAITISKNRSKSWNPFFIHGKSGLGKTHILHAIANNAKEQKSYKSIKYIEAK  640
+
+Query  181   DFGQIVVRATISGDRNVDKNLEEIKNEFLNYDLLLVDDIQFIQNRNKTKEIFFSIFDNFI  240
+             DFGQIVVRATISGDRNVDKNLEEIKNEFLNYDLLLVDDIQFIQNRNKTKEIFFSIFDNFI
+Sbjct  641   DFGQIVVRATISGDRNVDKNLEEIKNEFLNYDLLLVDDIQFIQNRNKTKEIFFSIFDNFI  820
+
+Query  241   KSDKKNKQIVVASDQEPEDLVSFEERFITRFKKGLLLGITPPDKETAIEILKMKIKNLEG  300
+             KSDKKNKQIVVASDQEPEDLVSFEERFITRFKKGLLLGITPPDKETAIEILKMKIKNLEG
+Sbjct  821   KSDKKNKQIVVASDQEPEDLVSFEERFITRFKKGLLLGITPPDKETAIEILKMKIKNLEG  1000
+
+Query  301   LNEIKIKDDAVEWIAVNYGKNVRFLEGALNKLLLFSINEDKNDFEINLSDVVNIFKESNS  360
+             LNEIKIKDDAVEWIAVNYGKNVRFLEGALNKLLLFSINEDKNDFEINLSDVVNIFKESNS
+Sbjct  1001  LNEIKIKDDAVEWIAVNYGKNVRFLEGALNKLLLFSINEDKNDFEINLSDVVNIFKESNS  1180
+
+Query  361   INKHITKENIIFTISKYFGISKSDLLGPTRKKEIVFARNISIYLIRELMNDSLIEIGRFF  420
+             INKHITKENIIFTISKYFGISKSDLLGPTRKKEIVFARNISIYLIRELMNDSLIEIGRFF
+Sbjct  1181  INKHITKENIIFTISKYFGISKSDLLGPTRKKEIVFARNISIYLIRELMNDSLIEIGRFF  1360
+
+Query  421   KRDHSTIIVSlnktkntintniklnETIQEIKKML  455
+             KRDHSTIIVSLNKTKNTINTNIKLNETIQEIKKML
+Sbjct  1361  KRDHSTIIVSLNKTKNTINTNIKLNETIQEIKKML  1465
+
+
+ Score = 28.9 bits (63),  Expect = 0.20, Method: Compositional matrix adjust.
+ Identities = 15/40 (38%), Positives = 24/40 (60%), Gaps = 2/40 (5%)
+ Frame = -2
+
+Query  384     DLLGPTRKKEI--VFARNISIYLIRELMNDSLIEIGRFFK  421
+                ++G T+   I  +FA  IS+ +I  ++N S +EI  FFK
+Sbjct  289246  SIIGVTKIDSICKIFASKISVTIISPIINASSVEISYFFK  289127
+
+
+ Score = 25.4 bits (54),  Expect = 2.3, Method: Compositional matrix adjust.
+ Identities = 10/26 (38%), Positives = 14/26 (54%), Gaps = 0/26 (0%)
+ Frame = +2
+
+Query  401     SIYLIRELMNDSLIEIGRFFKRDHST  426
+                I++I  L N S   +  FF+  HST
+Sbjct  177620  CIWIISSLGNRSCCGLSLFFRHAHST  177697
+
+
+ Score = 23.9 bits (50),  Expect = 6.8, Method: Compositional matrix adjust.
+ Identities = 21/83 (25%), Positives = 34/83 (41%), Gaps = 18/83 (22%)
+ Frame = -3
+
+Query  162     ANNAKEQKSYKSIKYIEAKDFGQIVVRATISGDRNVDKNLEEIKNEFLNYDLLLVDDIQF  221
+               A  + +  S+  I+ I A  F  I +          D+    +   +LNYD L++   Q 
+Sbjct  367794  AQPSNQGNSFTGIERISAYPFSNIQLN---------DRTTTTLSESYLNYDFLIIKS-QV  367645
+
+Query  222     IQNRNKTKEIFFSIFDNFIKSDK  244
+               I N+  T         N +K+DK
+Sbjct  367644  INNQQTTF--------NVVKTDK  367600
+
+
+ Score = 23.5 bits (49),  Expect = 7.7, Method: Compositional matrix adjust.
+ Identities = 20/46 (43%), Positives = 30/46 (65%), Gaps = 3/46 (7%)
+ Frame = +1
+
+Query  199    KNLEEIKNEFLNYDLLLVDDIQFIQNRNKTKEIFFSIFDNFIKSDK  244
+              KNL+ IKNE  N ++L +  I   +N +K K+ FF+I+  F+ SDK
+Sbjct  71821  KNLKTIKNELTNKNVLPI-YITLFKNIDKNKD-FFTIYLGFM-SDK  71949
+
+
+
+Lambda      K        H        a         alpha
+   0.318    0.137    0.375    0.792     4.96 
+
+Gapped
+Lambda      K        H        a         alpha    sigma
+   0.267   0.0410    0.140     1.90     42.6     43.6 
+
+Effective search space used: 83396250
+
+
+  Database: User specified sequence set (Input:
+/mnt/c/Users/genom/GitHub/LOSAT/LOSAT/tests/fasta/AP027131.fasta).
+    Posted date:  Unknown
+  Number of letters in database: 662,108
+  Number of sequences in database:  1
+
+
+
+Matrix: BLOSUM62
+Gap Penalties: Existence: 11, Extension: 1
+Neighboring words threshold: 13
+Window for multiple hits: 40

@@ -926,13 +926,30 @@ mod tests {
     // *hsp_list_out = hit_list->hsplist_array[last_hsplist_index];
     #[test]
     fn natural_heap_replacement_fixture_matches_ncbi_preliminary_stream() {
+        use crate::algorithm::blastp::gapalign::GapAlignScratch;
+        use crate::algorithm::tblastn::kappa::{
+            normalize_postredo_scores, postredo_num_ident, reap_contained_postredo_hsps,
+            redo_preliminary_match,
+        };
         use crate::algorithm::tblastn::kappa_heap::{
             compo_early_termination, CompoHeap, CompoHeapRecord,
         };
         use crate::algorithm::tblastn::search_gapped::{
-            preliminary_protein_hsps_in_ncbi_order, PreliminaryProfile,
+            preliminary_protein_hsps_in_ncbi_order, PreliminaryProfile, TargetTranslation,
         };
+        use crate::algorithm::tblastn::stage_d_results::{KappaResultHitList, KappaResultList};
+        use crate::core::composition_adjustment::adjust_scores::{
+            build_matrix_info, read_aa_composition, BlastCompositionWorkspace,
+        };
+        use crate::core::composition_adjustment::redo_alignment::{
+            build_query_word_hashes, BlastCompoAdjustMode, BlastCompoGappingParams,
+            BlastCompoQueryInfo, BlastCompoSequenceData, BlastRedoAlignParams,
+        };
+        use crate::stats::tables::KarlinParams;
+        use crate::utils::genetic_code::GeneticCode;
+        use crate::utils::matrix::{aa_char_to_ncbistdaa, BLASTAA_SIZE};
         use crate::utils::seg::SegParams;
+        use std::cell::Cell;
         use std::collections::{HashMap, HashSet};
 
         let root = concat!(
@@ -963,6 +980,8 @@ mod tests {
             fs::read_to_string(format!("{root}natural_c_d_early_20260925/early.tsv")).unwrap();
         let kappa_trace =
             fs::read_to_string(format!("{root}result_order_20260925/ncbi.trace")).unwrap();
+        let mode_trace =
+            fs::read_to_string(format!("{root}natural_mode2_20260925/mode2.tsv")).unwrap();
         let prelim_events: HashSet<usize> = trace
             .lines()
             .filter(|line| line.starts_with("D_CALL\t") && line.split('\t').nth(2) == Some("link"))
@@ -1145,9 +1164,71 @@ mod tests {
             .lines()
             .filter(|line| line.starts_with("K_TRACE_HEAP_INSERT\t"))
             .collect();
+        // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_kappa.c:3683-3705;
+        // s_HitlistReapContained(hsp_list->hsp_array, &hsp_list->hspcnt);
+        // s_HitlistEvaluateAndPurge(&best_score, &best_evalue, hsp_list, ...);
+        let postredo_calls: Vec<_> = trace
+            .lines()
+            .filter(|line| line.starts_with("D_CALL\t"))
+            .filter(|line| line.split('\t').nth(1).unwrap().parse::<usize>().unwrap() >= 142)
+            .collect();
+        assert_eq!(postredo_calls[0], "D_CALL\t142\tredo\t41\t1\t1\t1\t1");
+        let mut postredo_events = Vec::new();
+        for triple in postredo_calls[1..].chunks_exact(3) {
+            let first: Vec<_> = triple[0].split('\t').collect();
+            assert_eq!((first[2], first[9]), ("link", "0"));
+            assert_eq!(triple[1].split('\t').nth(2), Some("evalue"));
+            assert_eq!(triple[2].split('\t').nth(2), Some("reap"));
+            postredo_events.push((
+                first[1].parse::<usize>().unwrap(),
+                triple[2]
+                    .split('\t')
+                    .nth(1)
+                    .unwrap()
+                    .parse::<usize>()
+                    .unwrap(),
+            ));
+        }
+        assert_eq!(postredo_calls[1..].len(), 33);
+        assert_eq!(postredo_events.len(), 11);
+        let trace_hsps = |event: usize, stage: &str| -> Vec<Vec<&str>> {
+            trace
+                .lines()
+                .filter(|line| line.starts_with(&format!("D_HSP\t{event}\t{stage}\t")))
+                .map(|line| line.split('\t').collect())
+                .collect()
+        };
+        let heap_hsp_rows: Vec<_> = kappa_trace
+            .lines()
+            .filter(|line| line.starts_with("K_TRACE_HEAP_HSP\t"))
+            .collect();
+        let redo_rows: Vec<_> = mode_trace
+            .lines()
+            .filter(|line| line.contains("\tredo_enter\t"))
+            .collect();
+        assert_eq!((redo_rows.len(), heap_hsp_rows.len()), (11, 11));
+        let query_aa: Vec<_> = query.iter().copied().map(aa_char_to_ncbistdaa).collect();
+        let query_infos = [BlastCompoQueryInfo {
+            origin: 0,
+            seq: BlastCompoSequenceData::from_ncbistdaa(&query_aa),
+            composition: read_aa_composition(&query_aa),
+            eff_search_space: parameters.lengths[0].eff_searchsp as f64,
+            words: Some(build_query_word_hashes(&query_aa)),
+        }];
+        let scaled = KarlinParams {
+            lambda: gapped.lambda / 32.0,
+            ..gapped
+        };
+        let mut post_link = parameters.link.unwrap();
+        post_link.cutoff_small_gap = 0;
+        let code = GeneticCode::try_from_id(1).unwrap();
+        let mut scratch = GapAlignScratch::new();
+        let mut workspace = BlastCompositionWorkspace::new_blosum62();
         let mut heap = CompoHeap::new(2, 0.002).unwrap();
+        let mut postredo_by_oid = HashMap::new();
         let mut redo_index = 0;
         let mut insert_index = 0;
+        let mut heap_hsp_index = 0;
         for ((oid, linked), row) in retained.iter().zip(early_decisions) {
             let f: Vec<_> = row.split('\t').collect();
             assert_eq!(
@@ -1185,11 +1266,201 @@ mod tests {
                 assert_eq!(linked.hsp.s_end, p[10].parse().unwrap());
                 assert_eq!(linked.hsp.s_gapped_start, p[11].parse().unwrap());
             }
+            // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_kappa.c:3577-3736:
+            // Blast_RedoOneMatch(..., incoming_aligns, ..., kbp->Lambda, ...);
+            // s_HSPListFromDistinctAlignments(hsp_list, &alignments[context_index], ...);
+            // if (hsp_list->hspcnt > 1) s_HitlistReapContained(...);
+            // s_HitlistEvaluateAndPurge(&best_score, &best_evalue, ...);
+            // s_HSPListNormalizeScores(hsp_list, kbp->Lambda, kbp->logK, ...);
+            // s_ComputeNumIdentities(...);
+            let redo: Vec<_> = redo_rows[redo_index].split('\t').collect();
+            let call: Vec<_> = kappa_trace
+                .lines()
+                .find(|line| line.starts_with(&format!("K_TRACE_ENTER\t{redo_index}\t")))
+                .unwrap()
+                .split('\t')
+                .collect();
+            let params = BlastRedoAlignParams {
+                matrix_info: build_matrix_info(ScoringMatrix::Blosum62, 0.0099251861761165822)
+                    .unwrap(),
+                gapping_params: BlastCompoGappingParams {
+                    gap_open: call[9].parse().unwrap(),
+                    gap_extend: call[10].parse().unwrap(),
+                    decline_align: 0,
+                    x_dropoff: call[8].parse().unwrap(),
+                    context: Cell::new(None),
+                },
+                compo_adjust_mode: BlastCompoAdjustMode::CompositionMatrixAdjust,
+                alphsize: BLASTAA_SIZE as i32,
+                composition_test_index: 0,
+                unified_p: false,
+                log_k: 0.0,
+                score_divisor: 32.0,
+                restricted_alignment: false,
+                smith_waterman: false,
+                is_same_adjustment: false,
+                near_identical_cutoff: 1.74 * std::f64::consts::LN_2
+                    / redo[4].parse::<f64>().unwrap(),
+                position_based: false,
+                re_matrix_adjustment_pseudocounts: 20,
+                ccat_query_length: query.len() as i32,
+                query_is_translated: false,
+                subject_is_translated: true,
+                cutoff_score: redo[11].parse().unwrap(),
+                cutoff_evalue: 10.0,
+                do_link_hsps: true,
+            };
+            let preliminary_hsps: Vec<_> = linked.hsps.iter().map(|hsp| hsp.hsp).collect();
+            let subject = &subjects[*oid];
+            let redone = redo_preliminary_match(
+                &preliminary_hsps,
+                0,
+                &query_infos,
+                subject,
+                1,
+                &params,
+                redo[4].parse().unwrap(),
+                ScoringMatrix::Blosum62,
+                &mut scratch,
+                &mut workspace,
+            )
+            .unwrap();
+            let mut alignments = Vec::new();
+            let mut current = redone.alignments_by_query[0].as_deref();
+            while let Some(alignment) = current {
+                alignments.push(alignment);
+                current = alignment.next.as_deref();
+            }
+            let align_prefix = format!("K_ALIGN\t{}\tredone\t", redo[1]);
+            let expected_alignments: Vec<_> = mode_trace
+                .lines()
+                .filter(|line| line.starts_with(&align_prefix))
+                .collect();
+            assert_eq!(
+                alignments.len(),
+                expected_alignments.len(),
+                "OID {oid} redo count"
+            );
+            let mut input = Vec::new();
+            for (alignment, row) in alignments.iter().zip(expected_alignments) {
+                let f: Vec<_> = row.split('\t').collect();
+                assert_eq!(
+                    alignment.score,
+                    f[5].parse().unwrap(),
+                    "OID {oid} redo score"
+                );
+                assert_eq!(alignment.matrix_adjust_rule as i32, f[6].parse().unwrap());
+                assert_eq!(alignment.query_index, f[7].parse().unwrap());
+                assert_eq!(alignment.query_start, f[8].parse().unwrap());
+                assert_eq!(alignment.query_end, f[9].parse().unwrap());
+                assert_eq!(alignment.match_start, f[10].parse().unwrap());
+                assert_eq!(alignment.match_end, f[11].parse().unwrap());
+                assert_eq!(alignment.frame, f[12].parse().unwrap());
+                input.push((
+                    0,
+                    GappedHsp {
+                        frame: alignment.frame as i8,
+                        score: alignment.score,
+                        q_start: alignment.query_start,
+                        q_end: alignment.query_end,
+                        q_gapped_start: 0,
+                        s_start: alignment.match_start,
+                        s_end: alignment.match_end,
+                        s_gapped_start: 0,
+                    },
+                ));
+            }
+            input.sort_by(|a, b| score_compare(&a.1, &b.1));
+            reap_contained_postredo_hsps(&mut input);
+            let (link_event, reap_event) = postredo_events[redo_index];
+            let list_prefix = format!("D_LIST\t{link_event}\tlink_before\t");
+            let list: Vec<_> = trace
+                .lines()
+                .find(|line| line.starts_with(&list_prefix))
+                .unwrap()
+                .split('\t')
+                .collect();
+            assert_eq!(
+                *oid,
+                list[3].parse().unwrap(),
+                "OID {oid} postredo link order"
+            );
+            let before_redo_link = trace_hsps(link_event, "link_before");
+            assert_eq!(
+                input.len(),
+                before_redo_link.len(),
+                "OID {oid} containment count"
+            );
+            for ((context, hsp), row) in input.iter().zip(&before_redo_link) {
+                assert_eq!(*context, row[4].parse().unwrap());
+                assert_eq!(hsp.frame, row[5].parse().unwrap());
+                assert_eq!(
+                    (hsp.q_start, hsp.q_end, hsp.s_start, hsp.s_end),
+                    (
+                        row[6].parse().unwrap(),
+                        row[7].parse().unwrap(),
+                        row[8].parse().unwrap(),
+                        row[9].parse().unwrap()
+                    )
+                );
+                assert_eq!(hsp.score, row[10].parse().unwrap());
+            }
+            let mut postredo = link_preliminary_hsps(
+                &input,
+                &[query.len() as i32],
+                &parameters.lengths,
+                subject.len() as i32,
+                &[scaled],
+                &gumbel,
+                &post_link,
+            )
+            .unwrap();
+            let linked_redo = trace_hsps(link_event, "link_after");
+            assert_eq!(
+                postredo.hsps.len(),
+                linked_redo.len(),
+                "OID {oid} relink count"
+            );
+            for (hsp, row) in postredo.hsps.iter().zip(&linked_redo) {
+                assert_eq!(hsp.hsp.score, row[10].parse().unwrap());
+                assert_eq!(hsp.num, row[12].parse().unwrap());
+                assert_eq!(
+                    hsp.evalue.to_bits(),
+                    row[13].parse::<f64>().unwrap().to_bits()
+                );
+            }
+            reap_by_evalue(&mut postredo, 10.0);
+            let reaped_redo = trace_hsps(reap_event, "reap_after");
+            assert_eq!(
+                postredo.hsps.len(),
+                reaped_redo.len(),
+                "OID {oid} postredo reap count"
+            );
+            for (hsp, row) in postredo.hsps.iter().zip(&reaped_redo) {
+                assert_eq!(hsp.hsp.score, row[10].parse().unwrap());
+                assert_eq!(hsp.num, row[12].parse().unwrap());
+                assert_eq!(
+                    hsp.evalue.to_bits(),
+                    row[13].parse::<f64>().unwrap().to_bits()
+                );
+            }
+            assert_eq!(
+                postredo.best_evalue.to_bits(),
+                would[2].parse::<f64>().unwrap().to_bits(),
+                "OID {oid} postredo E-value"
+            );
             let candidate = CompoHeapRecord {
                 subject_index: *oid as i32,
-                best_evalue: would[2].parse().unwrap(),
-                best_score: would[3].parse().unwrap(),
+                best_evalue: postredo.best_evalue,
+                best_score: postredo.hsps[0].hsp.score,
             };
+            assert_eq!(candidate.best_score, would[3].parse().unwrap());
+            let bits = normalize_postredo_scores(&mut postredo, scaled.lambda, gapped.k.ln(), 32.0);
+            let mut target = TargetTranslation::new(subject, &code);
+            let identities: Vec<_> = alignments
+                .iter()
+                .map(|alignment| postredo_num_ident(alignment, &query_aa, &mut target).unwrap())
+                .collect();
             assert_eq!(heap.would_insert(candidate), would[9] == "1");
             if would[9] == "1" {
                 let insert: Vec<_> = insert_rows[insert_index].split('\t').collect();
@@ -1199,11 +1470,195 @@ mod tests {
                     insert[2].parse::<f64>().unwrap().to_bits()
                 );
                 assert_eq!(candidate.best_score, insert[3].parse().unwrap());
+                let expected_hsps: Vec<_> = heap_hsp_rows[heap_hsp_index..]
+                    .iter()
+                    .take_while(|row| row.split('\t').nth(1) == Some(would[1]))
+                    .collect();
+                assert_eq!(
+                    postredo.hsps.len(),
+                    expected_hsps.len(),
+                    "OID {oid} heap HSP count"
+                );
+                for (index, (hsp, row)) in
+                    postredo.hsps.iter().zip(expected_hsps.iter()).enumerate()
+                {
+                    let f: Vec<_> = row.split('\t').collect();
+                    assert_eq!(hsp.hsp.score, f[3].parse().unwrap(), "OID {oid} raw score");
+                    assert_eq!(
+                        bits[index].to_bits(),
+                        f[4].parse::<f64>().unwrap().to_bits(),
+                        "OID {oid} bit score"
+                    );
+                    assert_eq!(
+                        hsp.evalue.to_bits(),
+                        f[5].parse::<f64>().unwrap().to_bits(),
+                        "OID {oid} E-value"
+                    );
+                    assert_eq!(
+                        identities[index],
+                        f[6].parse().unwrap(),
+                        "OID {oid} identities"
+                    );
+                    assert_eq!(hsp.hsp.frame, f[8].parse().unwrap());
+                    assert_eq!(
+                        (
+                            hsp.hsp.q_start,
+                            hsp.hsp.q_end,
+                            hsp.hsp.s_start,
+                            hsp.hsp.s_end
+                        ),
+                        (
+                            f[9].parse().unwrap(),
+                            f[10].parse().unwrap(),
+                            f[11].parse().unwrap(),
+                            f[12].parse().unwrap()
+                        )
+                    );
+                    assert_eq!(hsp.num, f[13].parse().unwrap());
+                }
+                heap_hsp_index += expected_hsps.len();
                 assert!(heap.insert(candidate).is_none());
+                postredo_by_oid.insert(*oid as i32, postredo);
                 insert_index += 1;
             }
             redo_index += 1;
         }
         assert_eq!((redo_index, insert_index, heap.len()), (11, 10, 10));
+        assert_eq!(heap_hsp_index, heap_hsp_rows.len());
+
+        // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_kappa.c:2494-2515;
+        // c++/src/algo/blast/core/blast_hits.c:3243-3297,3420-3437:
+        // while ((hsp_list = BlastCompo_HeapPop(heap)) != NULL)
+        //     Blast_HitListUpdate(hitlist, hsp_list);
+        // Blast_HSPResultsReverseOrder(results);
+        let result_in: Vec<_> = kappa_trace
+            .lines()
+            .filter(|line| line.starts_with("K_TRACE_RESULT_UPDATE_IN\t"))
+            .collect();
+        let result_out: Vec<_> = kappa_trace
+            .lines()
+            .filter(|line| line.starts_with("K_TRACE_RESULT_UPDATE_OUT\t"))
+            .collect();
+        let mut payloads: Vec<Vec<Vec<&str>>> = Vec::new();
+        for line in kappa_trace.lines() {
+            if line.starts_with("K_TRACE_RESULT_UPDATE_OUT\t") {
+                payloads.push(Vec::new());
+            } else if line.starts_with("K_TRACE_RESULT_HSP\t") {
+                payloads
+                    .last_mut()
+                    .unwrap()
+                    .push(line.split('\t').collect());
+            }
+        }
+        let mut result = KappaResultHitList::new(2).unwrap();
+        for (index, (input, output)) in result_in.iter().zip(&result_out).enumerate() {
+            let incoming: Vec<_> = input.split('\t').collect();
+            let expected: Vec<_> = output.split('\t').collect();
+            let popped = heap.pop().unwrap();
+            assert_eq!(popped.subject_index, incoming[1].parse().unwrap());
+            assert_eq!(result.lists().len(), incoming[2].parse().unwrap());
+            assert_eq!(
+                result.worst_evalue().to_bits(),
+                incoming[4].parse::<f64>().unwrap().to_bits()
+            );
+            assert_eq!(result.low_score(), incoming[5].parse().unwrap());
+            let hsps = postredo_by_oid.remove(&popped.subject_index).unwrap();
+            assert_eq!(
+                hsps.best_evalue.to_bits(),
+                incoming[7].parse::<f64>().unwrap().to_bits()
+            );
+            assert_eq!(hsps.hsps[0].hsp.score, incoming[8].parse().unwrap());
+            result
+                .update(KappaResultList {
+                    oid: popped.subject_index,
+                    hsps,
+                })
+                .unwrap();
+            assert_eq!(result.lists().len(), expected[3].parse().unwrap());
+            assert_eq!(
+                result.worst_evalue().to_bits(),
+                expected[4].parse::<f64>().unwrap().to_bits()
+            );
+            assert_eq!(result.low_score(), expected[5].parse().unwrap());
+            assert_eq!(result.heapified(), expected[6] == "1");
+            assert_eq!(
+                result
+                    .lists()
+                    .iter()
+                    .map(|list| list.oid)
+                    .collect::<Vec<_>>(),
+                expected[7..]
+                    .iter()
+                    .map(|value| value.parse::<i32>().unwrap())
+                    .collect::<Vec<_>>()
+            );
+            let actual_payload: Vec<_> = result
+                .lists()
+                .iter()
+                .enumerate()
+                .flat_map(|(list_index, list)| {
+                    list.hsps
+                        .hsps
+                        .iter()
+                        .enumerate()
+                        .map(move |(hsp_index, hsp)| (list_index, list.oid, hsp_index, hsp))
+                })
+                .collect();
+            assert_eq!(actual_payload.len(), payloads[index].len());
+            for ((list_index, oid, hsp_index, hsp), row) in
+                actual_payload.iter().zip(&payloads[index])
+            {
+                assert_eq!(
+                    (*list_index, *oid, *hsp_index),
+                    (
+                        row[1].parse().unwrap(),
+                        row[2].parse().unwrap(),
+                        row[3].parse().unwrap()
+                    )
+                );
+                assert_eq!(hsp.hsp.score, row[4].parse().unwrap());
+                assert_eq!(
+                    hsp.evalue.to_bits(),
+                    row[5].parse::<f64>().unwrap().to_bits()
+                );
+                assert_eq!(
+                    (
+                        hsp.hsp.q_start,
+                        hsp.hsp.q_end,
+                        hsp.hsp.s_start,
+                        hsp.hsp.s_end
+                    ),
+                    (
+                        row[6].parse().unwrap(),
+                        row[7].parse().unwrap(),
+                        row[8].parse().unwrap(),
+                        row[9].parse().unwrap()
+                    )
+                );
+                assert_eq!(hsp.hsp.frame, row[10].parse().unwrap());
+                assert_eq!(hsp.num, row[11].parse().unwrap());
+            }
+        }
+        assert_eq!(result_in.len(), 10);
+        assert!(heap.pop().is_none());
+        assert!(postredo_by_oid.is_empty());
+        result.reverse_order();
+        let reverse: Vec<_> = kappa_trace
+            .lines()
+            .find(|line| line.starts_with("K_TRACE_RESULT_REVERSE_OUT\t0\t"))
+            .unwrap()
+            .split('\t')
+            .collect();
+        assert_eq!(
+            result
+                .lists()
+                .iter()
+                .map(|list| list.oid)
+                .collect::<Vec<_>>(),
+            reverse[3..]
+                .iter()
+                .map(|value| value.parse::<i32>().unwrap())
+                .collect::<Vec<_>>()
+        );
     }
 }

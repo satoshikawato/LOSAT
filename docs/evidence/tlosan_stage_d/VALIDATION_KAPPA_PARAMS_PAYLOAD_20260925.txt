@@ -1,0 +1,45 @@
+TBLASTN Stage D calculated Kappa inputs and retained HSP metadata
+Date: 2026-09-25
+Branch: feature/tlosan-tblastn-v0.2.0
+Starting LOSAT commit: c24815f40c68113a1768dbf51e7e78c05f902974
+Pinned NCBI source: 598d8ae6a72b923127ba2fbfaffd48e4c83bfbf4
+NCBI BLAST+ version: TBLASTN 2.17.0+
+Comparison-only executable SHA256: e3956f1e107a30439d56c8f72fae4267a7d62ebcc16e4f99d4baf2bdf00402e0
+
+Initial state:
+$ git status --short --branch
+## feature/tlosan-tblastn-v0.2.0...origin/feature/tlosan-tblastn-v0.2.0
+$ git rev-parse HEAD
+c24815f40c68113a1768dbf51e7e78c05f902974
+$ git ls-remote --heads origin feature/tlosan-tblastn-v0.2.0
+c24815f40c68113a1768dbf51e7e78c05f902974 refs/heads/feature/tlosan-tblastn-v0.2.0
+$ git -C /mnt/c/Users/genom/GitHub/ncbi-blast rev-parse HEAD
+598d8ae6a72b923127ba2fbfaffd48e4c83bfbf4
+
+Program/task and fixture: TBLASTN local -subject, composition mode 2, sum_stats true. Retained 112-subject fixture: 120-aa query; 112 subjects; 40,320 nt total; code 1; -evalue 10; -max_target_seqs 2; one thread. Additional saved hard-SEG, multi-query, 13-subject and CLI-calibrated code-32 API fixture tests. Code 32 oracle uses FindGeneticCode(32), not stock NCBI CLI code-32 output.
+NCBI source owner: core/blast_kappa.c:305-358,2352-2384,2418-2479,3099-3110,3687-3713; core/blast_parameters.c:457-463; core/blast_stat.c:2833-2852; core/blast_hits.c:1385-1455,3243-3297.
+LOSAT owners: algorithm/tblastn/stage_d_kappa_params.rs; stage_d_linking.rs; stage_d_results.rs; kappa.rs.
+First boundary at start: NCBI-recorded x-drop, gap costs, cutoff and ideal Lambda were used as redo comparison inputs; bit score, identity and edit script were absent from retained hitlist records.
+Accepted exception: none for code 1. Code 32 is checked only through the approved CLI-calibrated API oracle.
+
+Saved immutable NCBI trace SHA256 (no NCBI input/probe/executable change since the prior replay):
+89bfd5cc4be9190866792596b859b051edc2164dac0c92455d19ed74177beede  kappa_heap_rejection_20260925/natural_c_d_early_20260925/calls.tsv
+c6f1fcc730cb21dfcc9c7c8834ee98b0cbef5d49383c28ddb98ebd3f2ea61855  kappa_heap_rejection_20260925/natural_mode2_20260925/mode2.tsv
+dd31f60ceb5f155d27fe29a5f4e76953ab7af07bdf8e3ed37af7e0678822c23c  kappa_heap_rejection_20260925/result_order_20260925/ncbi.trace
+The unchanged NCBI runner replay/diff-rq results and exact source/command hashes are in VALIDATION_KAPPA_NATURAL_112_20260925.txt and the three linked manifests.
+
+$ cargo test --manifest-path LOSAT/Cargo.toml --lib algorithm::tblastn::
+85 passed; 0 failed. The five natural/retained Kappa comparisons now pass Rust-derived Kappa call parameters. The 112-subject result test compares all retained update bit-score bits and identities to K_TRACE_HEAP_HSP, and the final two edit scripts to K_TRACE_EDIT. The two new source-boundary tests cover first-valid versus minimum Lambda and option-dependent x-drop; these are synthetic source-rule tests, not new NCBI fixture-level parity claims.
+$ cargo clippy --manifest-path LOSAT/Cargo.toml --lib --tests -- -D warnings
+exit 0.
+$ cargo fmt --manifest-path LOSAT/Cargo.toml --all -- --check
+exit 0.
+$ git diff --check
+exit 0.
+Focused byte diff: not applicable; Stage E has not started and public TBLASTN CLI is gated.
+Broader comparison: not run; known Stage D general-path gaps remain. Existing fixed-input Stage C gate is unchanged.
+Native/Wasm comparison: not applicable to this internal D checkpoint; no general runtime path.
+Performance benchmark: not applicable; no optimization or performance claim.
+Output checksums: saved NCBI trace SHA256 above; no LOSAT public output exists.
+
+Independent read-only ncbi_parity_auditor found that the first candidate used minimum Lambda for near-identical cutoff, fixed default x-drop bits inside the builder, and evaluated a BLOSUM62 ideal Lambda before explicitly rejecting other matrices. These were corrected and rechecked by the auditor against the pinned source. Follow-up found no new concrete arithmetic defect in the corrected lines. The auditor confirmed that the general path still lacks actual CLI option-state wiring, direct alignment identity through the full pipeline, complete report fields, a positive multi-HSP sort fixture, and all-case D evidence. Do not infer D pass, E pass, TBLASTN completion, certification, or performance from this checkpoint.

@@ -4,6 +4,9 @@ use std::cmp::Ordering;
 
 use anyhow::{ensure, Result};
 
+use crate::common::GapEditOp;
+use crate::core::composition_adjustment::redo_alignment::EMatrixAdjustRule;
+
 use super::stage_d_linking::{
     compare_preliminary_lists_for_kappa, score_compare, LinkedHsp, LinkedHspList,
 };
@@ -12,10 +15,27 @@ use super::stage_d_linking::{
 // core/blast_kappa.c:2494-2515:
 // while (NULL != (hsp_list = BlastCompo_HeapPop(heap)))
 //     Blast_HitListUpdate(hitlist, hsp_list);
+// NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_kappa.c:305-358,
+// 3690-3706; core/blast_hits.h:126-143:
+// GapEditScript *editScript = align->context; align->context = NULL;
+// Blast_HSPInit(..., &editScript, &new_hsp);
+// new_hsp->num_ident = 0; /* filled after postredo evaluation */
+// s_HSPListNormalizeScores(...); s_ComputeNumIdentities(...);
+#[derive(Clone, Debug, PartialEq)]
+pub(super) struct KappaHspPayload {
+    pub bit_score: f64,
+    pub num_ident: i32,
+    pub edit_script: Vec<GapEditOp>,
+    pub matrix_adjust_rule: EMatrixAdjustRule,
+}
+
 #[derive(Clone, Debug)]
 pub(super) struct KappaResultList {
     pub oid: i32,
     pub hsps: LinkedHspList,
+    // One payload per HSP, in the same order as `hsps` after each sort.
+    // Empty only in the older numeric-only comparison fixtures.
+    pub payloads: Vec<KappaHspPayload>,
 }
 
 // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_hits.c:3125-3135,
@@ -67,6 +87,10 @@ impl KappaResultHitList {
             !incoming.hsps.hsps.is_empty(),
             "Kappa result list must contain an HSP"
         );
+        ensure!(
+            incoming.payloads.is_empty() || incoming.payloads.len() == incoming.hsps.hsps.len(),
+            "Kappa result payload count must match HSP count"
+        );
         refresh_best_evalue(&mut incoming.hsps);
         if self.lists.len() < self.max {
             self.worst_evalue = self.worst_evalue.max(incoming.hsps.best_evalue);
@@ -76,7 +100,7 @@ impl KappaResultHitList {
         }
         if !self.heapified {
             for list in &mut self.lists {
-                sort_hsps_by_evalue(&mut list.hsps);
+                sort_hsps_by_evalue(list);
                 refresh_best_evalue(&mut list.hsps);
             }
             for start in (0..self.lists.len() / 2).rev() {
@@ -84,7 +108,7 @@ impl KappaResultHitList {
             }
             self.heapified = true;
         }
-        sort_hsps_by_evalue(&mut incoming.hsps);
+        sort_hsps_by_evalue(&mut incoming);
         refresh_best_evalue(&mut incoming.hsps);
         let discarded = if compare_result_lists(&self.lists[0], &incoming) == Ordering::Less {
             incoming
@@ -145,8 +169,8 @@ fn refresh_best_evalue(list: &mut LinkedHspList) {
 // if (evalue1 < 1.0e-180 && evalue2 < 1.0e-180) return 0;
 // if ((retval = s_EvalueComp(h1->evalue, h2->evalue)) != 0) return retval;
 // return ScoreCompareHSPs(v1, v2);
-fn sort_hsps_by_evalue(list: &mut LinkedHspList) {
-    list.hsps.sort_by(|a: &LinkedHsp, b: &LinkedHsp| {
+fn sort_hsps_by_evalue(list: &mut KappaResultList) {
+    let compare = |a: &LinkedHsp, b: &LinkedHsp| {
         let evalue = if a.evalue < 1.0e-180 && b.evalue < 1.0e-180 {
             Ordering::Equal
         } else if a.evalue < b.evalue {
@@ -157,7 +181,23 @@ fn sort_hsps_by_evalue(list: &mut LinkedHspList) {
             Ordering::Equal
         };
         evalue.then_with(|| score_compare(&a.hsp, &b.hsp))
-    });
+    };
+    if list.payloads.is_empty() {
+        list.hsps.hsps.sort_by(compare);
+    } else {
+        // NCBI c++/src/algo/blast/core/blast_hits.c:1385-1455:
+        // return ScoreCompareHSPs(v1, v2); /* HSP pointer sort */
+        // Thus each
+        // bit score, identity count and edit script moves with its HSP.
+        let mut paired: Vec<_> = std::mem::take(&mut list.hsps.hsps)
+            .into_iter()
+            .zip(std::mem::take(&mut list.payloads))
+            .collect();
+        paired.sort_by(|a, b| compare(&a.0, &b.0));
+        let (hsps, payloads) = paired.into_iter().unzip();
+        list.hsps.hsps = hsps;
+        list.payloads = payloads;
+    }
 }
 
 // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_hits.c:3071-3111:
@@ -257,9 +297,11 @@ mod tests {
                                     },
                                     num: 1,
                                     evalue,
+                                    source_index: 0,
                                 }],
                                 best_evalue: evalue,
                             },
+                            payloads: Vec::new(),
                         })
                         .unwrap();
                     updates[query_index] += 1;
@@ -339,6 +381,7 @@ mod tests {
                     },
                     num: f[13].parse().unwrap(),
                     evalue: f[5].parse().unwrap(),
+                    source_index: 0,
                 });
             }
             let mut results = KappaResultHitList::new(hitlist_size).unwrap();
@@ -365,6 +408,7 @@ mod tests {
                         results.update(KappaResultList {
                             oid,
                             hsps: LinkedHspList { hsps, best_evalue: f[7].parse().unwrap() },
+                            payloads: Vec::new(),
                         }).unwrap();
                         updates += 1;
                     }

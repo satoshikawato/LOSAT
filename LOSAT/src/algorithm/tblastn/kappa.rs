@@ -363,6 +363,9 @@ pub(super) fn redo_preliminary_match(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::algorithm::tblastn::stage_d_kappa_params::{
+        local_extension_final_xdrop, local_kappa_redo_params,
+    };
     use crate::common::GapEditOp;
     use crate::utils::matrix::BLASTAA_SIZE;
 
@@ -411,6 +414,12 @@ mod tests {
         let expected: Vec<_> = mode_trace
             .lines()
             .find(|line| line.starts_with("K_ALIGN\t0\tredone\t"))
+            .unwrap()
+            .split('\t')
+            .collect();
+        let redo: Vec<_> = mode_trace
+            .lines()
+            .find(|line| line.contains("\tredo_enter\t"))
             .unwrap()
             .split('\t')
             .collect();
@@ -567,34 +576,32 @@ mod tests {
             linked_row[13].parse::<f64>().unwrap().to_bits()
         );
         let hsp = preliminary_linked.hsps[0].hsp;
-        let params = BlastRedoAlignParams {
-            matrix_info: build_matrix_info(ScoringMatrix::Blosum62, 0.0099251861761165822).unwrap(),
-            gapping_params: BlastCompoGappingParams {
-                gap_open: call[9].parse().unwrap(),
-                gap_extend: call[10].parse().unwrap(),
-                decline_align: 0,
-                x_dropoff: call[8].parse().unwrap(),
-                context: Cell::new(None),
-            },
-            compo_adjust_mode: BlastCompoAdjustMode::CompositionMatrixAdjust,
-            alphsize: BLASTAA_SIZE as i32,
-            composition_test_index: 0,
-            unified_p: false,
-            log_k: 0.0,
-            score_divisor: 32.0,
-            restricted_alignment: false,
-            smith_waterman: false,
-            is_same_adjustment: false,
-            near_identical_cutoff: 1.74 * 0.6931471805599453 / 0.0083437500000000005,
-            position_based: false,
-            re_matrix_adjustment_pseudocounts: 20,
-            ccat_query_length: 160,
-            query_is_translated: false,
-            subject_is_translated: true,
-            cutoff_score: 320,
-            cutoff_evalue: 10.0,
-            do_link_hsps: true,
-        };
+        // NCBI reference: core/blast_kappa.c:2352-2390,2418-2479:
+        // s_GetAlignParams reads the initial hit cutoffs and scaled score block.
+        let params = local_kappa_redo_params(
+            ScoringMatrix::Blosum62,
+            11,
+            1,
+            &[gapped],
+            &[true],
+            &parameters,
+            160,
+            BlastCompoAdjustMode::CompositionMatrixAdjust,
+            false,
+            10.0,
+            true,
+            25.0,
+            local_extension_final_xdrop(15.0, 25.0, gapped.lambda).unwrap(),
+        )
+        .unwrap();
+        assert_eq!(params.gapping_params.x_dropoff, call[8].parse().unwrap());
+        assert_eq!(params.gapping_params.gap_open, call[9].parse().unwrap());
+        assert_eq!(params.gapping_params.gap_extend, call[10].parse().unwrap());
+        assert_eq!(params.cutoff_score, redo[11].parse().unwrap());
+        assert_eq!(
+            (gapped.lambda / 32.0).to_bits(),
+            redo[4].parse::<f64>().unwrap().to_bits()
+        );
         let mut scratch = GapAlignScratch::new();
         let mut workspace = BlastCompositionWorkspace::new_blosum62();
         let redone = redo_preliminary_match(
@@ -604,7 +611,7 @@ mod tests {
             &subject_nt,
             1,
             &params,
-            0.0083437500000000005,
+            gapped.lambda / 32.0,
             ScoringMatrix::Blosum62,
             &mut scratch,
             &mut workspace,
@@ -863,34 +870,32 @@ mod tests {
             eff_search_space: parameters.lengths[0].eff_searchsp as f64,
             words: Some(build_query_word_hashes(&query)),
         };
-        let params = BlastRedoAlignParams {
-            matrix_info: build_matrix_info(ScoringMatrix::Blosum62, 0.0099251861761165822).unwrap(),
-            gapping_params: BlastCompoGappingParams {
-                gap_open: call[9].parse().unwrap(),
-                gap_extend: call[10].parse().unwrap(),
-                decline_align: 0,
-                x_dropoff: call[8].parse().unwrap(),
-                context: Cell::new(None),
-            },
-            compo_adjust_mode: BlastCompoAdjustMode::CompositionMatrixAdjust,
-            alphsize: BLASTAA_SIZE as i32,
-            composition_test_index: 0,
-            unified_p: false,
-            log_k: 0.0,
-            score_divisor: 32.0,
-            restricted_alignment: false,
-            smith_waterman: false,
-            is_same_adjustment: false,
-            near_identical_cutoff: 1.74 * std::f64::consts::LN_2 / redo[4].parse::<f64>().unwrap(),
-            position_based: false,
-            re_matrix_adjustment_pseudocounts: 20,
-            ccat_query_length: query.len() as i32,
-            query_is_translated: false,
-            subject_is_translated: true,
-            cutoff_score: redo[11].parse().unwrap(),
-            cutoff_evalue: 10.0,
-            do_link_hsps: true,
-        };
+        // NCBI reference: core/blast_kappa.c:2352-2390,2418-2479:
+        // s_GetAlignParams reads the initial hit cutoffs and scaled score block.
+        let params = local_kappa_redo_params(
+            ScoringMatrix::Blosum62,
+            11,
+            1,
+            &[gapped],
+            &[true],
+            &parameters,
+            query.len() as i32,
+            BlastCompoAdjustMode::CompositionMatrixAdjust,
+            false,
+            10.0,
+            true,
+            25.0,
+            local_extension_final_xdrop(15.0, 25.0, gapped.lambda).unwrap(),
+        )
+        .unwrap();
+        assert_eq!(params.gapping_params.x_dropoff, call[8].parse().unwrap());
+        assert_eq!(params.gapping_params.gap_open, call[9].parse().unwrap());
+        assert_eq!(params.gapping_params.gap_extend, call[10].parse().unwrap());
+        assert_eq!(params.cutoff_score, redo[11].parse().unwrap());
+        assert_eq!(
+            (gapped.lambda / 32.0).to_bits(),
+            redo[4].parse::<f64>().unwrap().to_bits()
+        );
         // NCBI reference: composition_adjustment/redo_alignment.c:1219-1254;
         // composition_adjustment/composition_adjustment.c:1414-1530
         // ```c
@@ -972,7 +977,7 @@ mod tests {
             &subject_nt,
             32,
             &params,
-            redo[4].parse().unwrap(),
+            gapped.lambda / 32.0,
             ScoringMatrix::Blosum62,
             &mut scratch,
             &mut workspace,
@@ -1301,35 +1306,32 @@ mod tests {
                 .find(|line| line.starts_with(&format!("K_TRACE_ENTER\t{redo_index}\t")))
                 .unwrap();
             let call: Vec<_> = first_call.split('\t').collect();
-            let params = BlastRedoAlignParams {
-                matrix_info: build_matrix_info(ScoringMatrix::Blosum62, 0.0099251861761165822)
-                    .unwrap(),
-                gapping_params: BlastCompoGappingParams {
-                    gap_open: call[9].parse().unwrap(),
-                    gap_extend: call[10].parse().unwrap(),
-                    decline_align: 0,
-                    x_dropoff: call[8].parse().unwrap(),
-                    context: Cell::new(None),
-                },
-                compo_adjust_mode: BlastCompoAdjustMode::CompositionMatrixAdjust,
-                alphsize: BLASTAA_SIZE as i32,
-                composition_test_index: 0,
-                unified_p: false,
-                log_k: 0.0,
-                score_divisor: 32.0,
-                restricted_alignment: false,
-                smith_waterman: false,
-                is_same_adjustment: false,
-                near_identical_cutoff: 1.74 * 0.6931471805599453 / redo[4].parse::<f64>().unwrap(),
-                position_based: false,
-                re_matrix_adjustment_pseudocounts: 20,
-                ccat_query_length: 120,
-                query_is_translated: false,
-                subject_is_translated: true,
-                cutoff_score: redo[11].parse().unwrap(),
-                cutoff_evalue: 10.0,
-                do_link_hsps: true,
-            };
+            // NCBI reference: core/blast_kappa.c:2352-2390,2418-2479:
+            // s_GetAlignParams reads the initial hit cutoffs and scaled score block.
+            let params = local_kappa_redo_params(
+                ScoringMatrix::Blosum62,
+                11,
+                1,
+                &[gapped; 3],
+                &[true, true, false],
+                &parameters,
+                120,
+                BlastCompoAdjustMode::CompositionMatrixAdjust,
+                false,
+                10.0,
+                true,
+                25.0,
+                local_extension_final_xdrop(15.0, 25.0, gapped.lambda).unwrap(),
+            )
+            .unwrap();
+            assert_eq!(params.gapping_params.x_dropoff, call[8].parse().unwrap());
+            assert_eq!(params.gapping_params.gap_open, call[9].parse().unwrap());
+            assert_eq!(params.gapping_params.gap_extend, call[10].parse().unwrap());
+            assert_eq!(params.cutoff_score, redo[11].parse().unwrap());
+            assert_eq!(
+                (gapped.lambda / 32.0).to_bits(),
+                redo[4].parse::<f64>().unwrap().to_bits()
+            );
             let mut scratch = GapAlignScratch::new();
             let mut workspace = BlastCompositionWorkspace::new_blosum62();
             let redone = redo_preliminary_match(
@@ -1339,7 +1341,7 @@ mod tests {
                 &subject_nt,
                 1,
                 &params,
-                redo[4].parse().unwrap(),
+                gapped.lambda / 32.0,
                 ScoringMatrix::Blosum62,
                 &mut scratch,
                 &mut workspace,
@@ -2079,7 +2081,9 @@ mod tests {
         // ```
         use crate::algorithm::tblastn::kappa_heap::{CompoHeap, CompoHeapRecord};
         use crate::algorithm::tblastn::stage_d_linking::score_compare;
-        use crate::algorithm::tblastn::stage_d_results::{KappaResultHitList, KappaResultList};
+        use crate::algorithm::tblastn::stage_d_results::{
+            KappaHspPayload, KappaResultHitList, KappaResultList,
+        };
         use crate::core::composition_adjustment::adjust_scores::{
             build_matrix_info, read_aa_composition,
         };
@@ -2149,36 +2153,32 @@ mod tests {
                 .unwrap()
                 .split('\t')
                 .collect();
-            let params = BlastRedoAlignParams {
-                matrix_info: build_matrix_info(ScoringMatrix::Blosum62, 0.0099251861761165822)
-                    .unwrap(),
-                gapping_params: BlastCompoGappingParams {
-                    gap_open: call[9].parse().unwrap(),
-                    gap_extend: call[10].parse().unwrap(),
-                    decline_align: 0,
-                    x_dropoff: call[8].parse().unwrap(),
-                    context: Cell::new(None),
-                },
-                compo_adjust_mode: BlastCompoAdjustMode::CompositionMatrixAdjust,
-                alphsize: BLASTAA_SIZE as i32,
-                composition_test_index: 0,
-                unified_p: false,
-                log_k: 0.0,
-                score_divisor: 32.0,
-                restricted_alignment: false,
-                smith_waterman: false,
-                is_same_adjustment: false,
-                near_identical_cutoff: 1.74 * std::f64::consts::LN_2
-                    / redo[4].parse::<f64>().unwrap(),
-                position_based: false,
-                re_matrix_adjustment_pseudocounts: 20,
-                ccat_query_length: query.len() as i32,
-                query_is_translated: false,
-                subject_is_translated: true,
-                cutoff_score: redo[11].parse().unwrap(),
-                cutoff_evalue: 10.0,
-                do_link_hsps: true,
-            };
+            // NCBI reference: core/blast_kappa.c:2352-2390,2418-2479:
+            // s_GetAlignParams reads the initial hit cutoffs and scaled score block.
+            let params = local_kappa_redo_params(
+                ScoringMatrix::Blosum62,
+                11,
+                1,
+                &[gapped],
+                &[true],
+                &parameters,
+                query.len() as i32,
+                BlastCompoAdjustMode::CompositionMatrixAdjust,
+                false,
+                10.0,
+                true,
+                25.0,
+                local_extension_final_xdrop(15.0, 25.0, gapped.lambda).unwrap(),
+            )
+            .unwrap();
+            assert_eq!(params.gapping_params.x_dropoff, call[8].parse().unwrap());
+            assert_eq!(params.gapping_params.gap_open, call[9].parse().unwrap());
+            assert_eq!(params.gapping_params.gap_extend, call[10].parse().unwrap());
+            assert_eq!(params.cutoff_score, redo[11].parse().unwrap());
+            assert_eq!(
+                (gapped.lambda / 32.0).to_bits(),
+                redo[4].parse::<f64>().unwrap().to_bits()
+            );
             let preliminary_hsps: Vec<_> =
                 preliminary.hsps.iter().map(|linked| linked.hsp).collect();
             let subject = &subjects[*oid].1;
@@ -2189,7 +2189,7 @@ mod tests {
                 subject,
                 1,
                 &params,
-                redo[4].parse().unwrap(),
+                gapped.lambda / 32.0,
                 ScoringMatrix::Blosum62,
                 &mut scratch,
                 &mut workspace,
@@ -2281,7 +2281,20 @@ mod tests {
             assert_eq!(identities, heap_hsp[6].parse().unwrap());
             assert_eq!(postredo.hsps[0].hsp.frame, heap_hsp[8].parse().unwrap());
             assert!(heap.insert(candidate).is_none());
-            postredo_by_oid.insert(*oid as i32, postredo);
+            // NCBI c++/src/algo/blast/core/blast_kappa.c:305-358,3687-3713:
+            // Blast_HSPInit(..., &editScript, &new_hsp);
+            // s_HSPListNormalizeScores(...); s_ComputeNumIdentities(...);
+            let Some(BlastCompoAlignmentContext::EditScript(script)) = align.context.as_ref()
+            else {
+                panic!("OID {oid} Kappa HSP lacks an edit script");
+            };
+            let report = KappaHspPayload {
+                bit_score: bits[0],
+                num_ident: i32::try_from(identities).unwrap(),
+                edit_script: script.clone(),
+                matrix_adjust_rule: align.matrix_adjust_rule,
+            };
+            postredo_by_oid.insert(*oid as i32, (postredo, vec![report]));
             assert!(params.gapping_params.context.get().is_none());
         }
         let pop_rows: Vec<_> = kappa_trace
@@ -2315,12 +2328,24 @@ mod tests {
                     expected_in[4].parse::<f64>().unwrap().to_bits()
                 );
                 assert_eq!(result.low_score(), expected_in[5].parse().unwrap());
-                let hsps = postredo_by_oid.remove(&popped.subject_index).unwrap();
+                let (hsps, payloads) = postredo_by_oid.remove(&popped.subject_index).unwrap();
                 assert_eq!(hsps.hsps[0].hsp.score, expected_in[8].parse().unwrap());
+                let saved_hsp: Vec<_> = heap_hsp_rows
+                    .iter()
+                    .find(|row| row.split('\t').nth(1) == Some(expected_in[1]))
+                    .unwrap()
+                    .split('\t')
+                    .collect();
+                assert_eq!(
+                    payloads[0].bit_score.to_bits(),
+                    saved_hsp[4].parse::<f64>().unwrap().to_bits()
+                );
+                assert_eq!(payloads[0].num_ident, saved_hsp[6].parse().unwrap());
                 result
                     .update(KappaResultList {
                         oid: popped.subject_index,
                         hsps,
+                        payloads,
                     })
                     .unwrap();
                 let expected_out: Vec<_> = result_out[result_index].split('\t').collect();

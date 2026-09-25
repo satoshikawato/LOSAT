@@ -2,6 +2,8 @@
 
 Branch: `feature/tlosan-tblastn-v0.2.0`; Stage C fixed-input gate: [STAGE_C_GATE_20260924.md](../tlosan_stage_c/STAGE_C_GATE_20260924.md). Pinned NCBI source: `598d8ae6a72b923127ba2fbfaffd48e4c83bfbf4`. This is a **Stage D diagnostic checkpoint, not a Stage D pass**. The Rust TBLASTN path still accepts NCBI-recorded C-stage parameters as comparison inputs and the public CLI still reports unimplemented. No Stage E work is authorized by this evidence.
 
+**2026-09-25 calculated Kappa inputs and retained metadata:** [CHECKPOINT_KAPPA_PARAMS_PAYLOAD_20260925.md](CHECKPOINT_KAPPA_PARAMS_PAYLOAD_20260925.md) replaces oracle-fed redo parameters in the focused natural fixtures with Rust calculations and carries bit score, identity, edit script, and matrix-adjustment rule through the 112-subject and 13-subject hitlists. Stage D remains partial; Stage E remains blocked.
+
 **2026-09-25 natural 112-subject Kappa continuation:** [CHECKPOINT_KAPPA_NATURAL_112_20260925.md](CHECKPOINT_KAPPA_NATURAL_112_20260925.md) connects Rust-generated preliminary HSPs through the saved 11 redo calls, postredo link/reap, heap, and retained hitlist fields. Kappa parameters remain partly comparison inputs and result records still lack report-ready edit scripts and metadata. Stage D remains partial; Stage E remains blocked.
 
 **2026-09-25 natural early-termination continuation:** [CHECKPOINT_KAPPA_EARLY_20260925.md](CHECKPOINT_KAPPA_EARLY_20260925.md) records all 112 natural preliminary subject checks, the exact 27-list Kappa stream and early-termination state, and 12 comparison-input traceback calls. Stage D remains partial; Stage E remains blocked.

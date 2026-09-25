@@ -19,6 +19,11 @@ pub(super) struct LinkedHsp {
     pub hsp: GappedHsp,
     pub num: i32,
     pub evalue: f64,
+    // NCBI c++/src/algo/blast/core/link_hsps.c:1098-1103,1765-1810:
+    // BlastHSP* hsp; /* HSP for the current link in the chain. */
+    // hsp_list->hsp_array[index]->num = 1;
+    // The Rust input position identifies the retained HSP value.
+    pub source_index: usize,
 }
 
 // NCBI c++/src/algo/blast/core/link_hsps.c:1802-1810:
@@ -309,7 +314,8 @@ pub(super) fn link_preliminary_hsps(
     );
     let mut work: Vec<WorkHsp> = input
         .iter()
-        .map(|&(context, hsp)| {
+        .enumerate()
+        .map(|(source_index, &(context, hsp))| {
             let kbp = &gapped_params[context];
             let evalue = blast_spouge_stoe(
                 hsp.score,
@@ -324,6 +330,7 @@ pub(super) fn link_preliminary_hsps(
                     hsp,
                     num: 1,
                     evalue,
+                    source_index,
                 },
                 prev: None,
                 next: None,
@@ -533,6 +540,7 @@ mod tests {
                 },
                 num: 1,
                 evalue,
+                source_index: 0,
             }],
             best_evalue: evalue,
         };
@@ -937,19 +945,24 @@ mod tests {
         use crate::algorithm::tblastn::search_gapped::{
             preliminary_protein_hsps_in_ncbi_order, PreliminaryProfile, TargetTranslation,
         };
-        use crate::algorithm::tblastn::stage_d_results::{KappaResultHitList, KappaResultList};
+        use crate::algorithm::tblastn::stage_d_kappa_params::{
+            local_extension_final_xdrop, local_kappa_redo_params,
+        };
+        use crate::algorithm::tblastn::stage_d_results::{
+            KappaHspPayload, KappaResultHitList, KappaResultList,
+        };
+        use crate::common::GapEditOp;
         use crate::core::composition_adjustment::adjust_scores::{
-            build_matrix_info, read_aa_composition, BlastCompositionWorkspace,
+            read_aa_composition, BlastCompositionWorkspace,
         };
         use crate::core::composition_adjustment::redo_alignment::{
-            build_query_word_hashes, BlastCompoAdjustMode, BlastCompoGappingParams,
-            BlastCompoQueryInfo, BlastCompoSequenceData, BlastRedoAlignParams,
+            build_query_word_hashes, BlastCompoAdjustMode, BlastCompoQueryInfo,
+            BlastCompoSequenceData,
         };
         use crate::stats::tables::KarlinParams;
         use crate::utils::genetic_code::GeneticCode;
-        use crate::utils::matrix::{aa_char_to_ncbistdaa, BLASTAA_SIZE};
+        use crate::utils::matrix::aa_char_to_ncbistdaa;
         use crate::utils::seg::SegParams;
-        use std::cell::Cell;
         use std::collections::{HashMap, HashSet};
 
         let root = concat!(
@@ -1219,6 +1232,29 @@ mod tests {
             lambda: gapped.lambda / 32.0,
             ..gapped
         };
+        // NCBI reference: core/blast_kappa.c:2352-2390,2418-2479:
+        // s_GetAlignParams reads the scaled score block, initial hit cutoffs,
+        // extension options and ideal matrix before subject redo calls.
+        let redo_params = local_kappa_redo_params(
+            ScoringMatrix::Blosum62,
+            11,
+            1,
+            &[gapped],
+            &[true],
+            &parameters,
+            query.len() as i32,
+            BlastCompoAdjustMode::CompositionMatrixAdjust,
+            false,
+            10.0,
+            true,
+            25.0,
+            local_extension_final_xdrop(15.0, 25.0, gapped.lambda).unwrap(),
+        )
+        .unwrap();
+        assert_eq!(
+            redo_params.matrix_info.ungapped_lambda.to_bits(),
+            0.0099251861761165822_f64.to_bits()
+        );
         let mut post_link = parameters.link.unwrap();
         post_link.cutoff_small_gap = 0;
         let code = GeneticCode::try_from_id(1).unwrap();
@@ -1280,36 +1316,27 @@ mod tests {
                 .unwrap()
                 .split('\t')
                 .collect();
-            let params = BlastRedoAlignParams {
-                matrix_info: build_matrix_info(ScoringMatrix::Blosum62, 0.0099251861761165822)
-                    .unwrap(),
-                gapping_params: BlastCompoGappingParams {
-                    gap_open: call[9].parse().unwrap(),
-                    gap_extend: call[10].parse().unwrap(),
-                    decline_align: 0,
-                    x_dropoff: call[8].parse().unwrap(),
-                    context: Cell::new(None),
-                },
-                compo_adjust_mode: BlastCompoAdjustMode::CompositionMatrixAdjust,
-                alphsize: BLASTAA_SIZE as i32,
-                composition_test_index: 0,
-                unified_p: false,
-                log_k: 0.0,
-                score_divisor: 32.0,
-                restricted_alignment: false,
-                smith_waterman: false,
-                is_same_adjustment: false,
-                near_identical_cutoff: 1.74 * std::f64::consts::LN_2
-                    / redo[4].parse::<f64>().unwrap(),
-                position_based: false,
-                re_matrix_adjustment_pseudocounts: 20,
-                ccat_query_length: query.len() as i32,
-                query_is_translated: false,
-                subject_is_translated: true,
-                cutoff_score: redo[11].parse().unwrap(),
-                cutoff_evalue: 10.0,
-                do_link_hsps: true,
-            };
+            assert_eq!(
+                redo_params.gapping_params.x_dropoff,
+                call[8].parse().unwrap()
+            );
+            assert_eq!(
+                redo_params.gapping_params.gap_open,
+                call[9].parse().unwrap()
+            );
+            assert_eq!(
+                redo_params.gapping_params.gap_extend,
+                call[10].parse().unwrap()
+            );
+            assert_eq!(
+                redo_params.score_divisor.to_bits(),
+                call[12].parse::<f64>().unwrap().to_bits()
+            );
+            assert_eq!(redo_params.cutoff_score, redo[11].parse().unwrap());
+            assert_eq!(
+                scaled.lambda.to_bits(),
+                redo[4].parse::<f64>().unwrap().to_bits()
+            );
             let preliminary_hsps: Vec<_> = linked.hsps.iter().map(|hsp| hsp.hsp).collect();
             let subject = &subjects[*oid];
             let redone = redo_preliminary_match(
@@ -1318,8 +1345,8 @@ mod tests {
                 &query_infos,
                 subject,
                 1,
-                &params,
-                redo[4].parse().unwrap(),
+                &redo_params,
+                scaled.lambda,
                 ScoringMatrix::Blosum62,
                 &mut scratch,
                 &mut workspace,
@@ -1405,6 +1432,33 @@ mod tests {
                 );
                 assert_eq!(hsp.score, row[10].parse().unwrap());
             }
+            // NCBI c++/src/algo/blast/core/blast_kappa.c:305-358:
+            // GapEditScript *editScript = align->context; align->context = NULL;
+            // Blast_HSPInit(..., &editScript, &new_hsp);
+            // This moves each distinct alignment's
+            // edit-script pointer into its BlastHSP; keep that identity
+            // while link/reap changes HSP order and membership.
+            let input_alignments: Vec<usize> = input
+                .iter()
+                .map(|(context, hsp)| {
+                    let matches: Vec<_> = alignments
+                        .iter()
+                        .enumerate()
+                        .filter(|(_, a)| {
+                            *context == a.query_index as usize
+                                && hsp.score == a.score
+                                && hsp.frame == a.frame as i8
+                                && hsp.q_start == a.query_start
+                                && hsp.q_end == a.query_end
+                                && hsp.s_start == a.match_start
+                                && hsp.s_end == a.match_end
+                        })
+                        .map(|(index, _)| index)
+                        .collect();
+                    assert_eq!(matches.len(), 1, "OID {oid} distinct alignment ownership");
+                    matches[0]
+                })
+                .collect();
             let mut postredo = link_preliminary_hsps(
                 &input,
                 &[query.len() as i32],
@@ -1455,12 +1509,33 @@ mod tests {
                 best_score: postredo.hsps[0].hsp.score,
             };
             assert_eq!(candidate.best_score, would[3].parse().unwrap());
+            let retained_alignments: Vec<_> = postredo
+                .hsps
+                .iter()
+                .map(|hsp| alignments[input_alignments[hsp.source_index]])
+                .collect();
             let bits = normalize_postredo_scores(&mut postredo, scaled.lambda, gapped.k.ln(), 32.0);
             let mut target = TargetTranslation::new(subject, &code);
-            let identities: Vec<_> = alignments
+            let identities: Vec<_> = retained_alignments
                 .iter()
                 .map(|alignment| postredo_num_ident(alignment, &query_aa, &mut target).unwrap())
                 .collect();
+            // NCBI c++/src/algo/blast/core/blast_kappa.c:305-358,3687-3713:
+            // Blast_HSPInit(..., &editScript, &new_hsp);
+            // s_HSPListNormalizeScores(...); s_ComputeNumIdentities(...);
+            // The conversion transfers the edit script,
+            // then normalizes bit score and computes identities before heap insertion.
+            let report_payloads: Vec<_> = retained_alignments.iter().enumerate().map(|(index, alignment)| {
+                let Some(crate::core::composition_adjustment::redo_alignment::BlastCompoAlignmentContext::EditScript(script)) = alignment.context.as_ref() else {
+                    panic!("OID {oid} retained HSP lacks Kappa edit script");
+                };
+                KappaHspPayload {
+                    bit_score: bits[index],
+                    num_ident: i32::try_from(identities[index]).unwrap(),
+                    edit_script: script.clone(),
+                    matrix_adjust_rule: alignment.matrix_adjust_rule,
+                }
+            }).collect();
             assert_eq!(heap.would_insert(candidate), would[9] == "1");
             if would[9] == "1" {
                 let insert: Vec<_> = insert_rows[insert_index].split('\t').collect();
@@ -1518,7 +1593,7 @@ mod tests {
                 }
                 heap_hsp_index += expected_hsps.len();
                 assert!(heap.insert(candidate).is_none());
-                postredo_by_oid.insert(*oid as i32, postredo);
+                postredo_by_oid.insert(*oid as i32, (postredo, report_payloads));
                 insert_index += 1;
             }
             redo_index += 1;
@@ -1562,7 +1637,7 @@ mod tests {
                 incoming[4].parse::<f64>().unwrap().to_bits()
             );
             assert_eq!(result.low_score(), incoming[5].parse().unwrap());
-            let hsps = postredo_by_oid.remove(&popped.subject_index).unwrap();
+            let (hsps, report_payloads) = postredo_by_oid.remove(&popped.subject_index).unwrap();
             assert_eq!(
                 hsps.best_evalue.to_bits(),
                 incoming[7].parse::<f64>().unwrap().to_bits()
@@ -1572,6 +1647,7 @@ mod tests {
                 .update(KappaResultList {
                     oid: popped.subject_index,
                     hsps,
+                    payloads: report_payloads,
                 })
                 .unwrap();
             assert_eq!(result.lists().len(), expected[3].parse().unwrap());
@@ -1637,6 +1713,22 @@ mod tests {
                 );
                 assert_eq!(hsp.hsp.frame, row[10].parse().unwrap());
                 assert_eq!(hsp.num, row[11].parse().unwrap());
+                let report = &result.lists()[*list_index].payloads[*hsp_index];
+                let heap_row: Vec<_> = heap_hsp_rows
+                    .iter()
+                    .find(|saved| {
+                        let saved: Vec<_> = saved.split('\t').collect();
+                        saved[1] == oid.to_string() && saved[2] == hsp_index.to_string()
+                    })
+                    .unwrap()
+                    .split('\t')
+                    .collect();
+                assert_eq!(
+                    report.bit_score.to_bits(),
+                    heap_row[4].parse::<f64>().unwrap().to_bits()
+                );
+                assert_eq!(report.num_ident, heap_row[6].parse().unwrap());
+                assert!(!report.edit_script.is_empty());
             }
         }
         assert_eq!(result_in.len(), 10);
@@ -1660,5 +1752,32 @@ mod tests {
                 .map(|value| value.parse::<i32>().unwrap())
                 .collect::<Vec<_>>()
         );
+        let edits: Vec<_> = kappa_trace
+            .lines()
+            .filter(|line| line.starts_with("K_TRACE_EDIT\t"))
+            .collect();
+        assert_eq!(edits.len(), 12);
+        for list in result.lists() {
+            let edit_index = match list.oid {
+                11 => 0,
+                10 => 1,
+                _ => unreachable!(),
+            };
+            let script = &list.payloads[0].edit_script;
+            let ops: Vec<_> = script
+                .iter()
+                .map(|op| match op {
+                    GapEditOp::Sub(n) => format!("3:{n}"),
+                    GapEditOp::Del(n) => format!("0:{n}"),
+                    GapEditOp::Ins(n) => format!("6:{n}"),
+                })
+                .collect();
+            let expected = format!(
+                "K_TRACE_EDIT\t{edit_index}\t{}\t{}",
+                script.len(),
+                ops.join("\t")
+            );
+            assert_eq!(expected, edits[edit_index]);
+        }
     }
 }

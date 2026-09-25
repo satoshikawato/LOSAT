@@ -1,0 +1,8 @@
+{
+  "serial_wasm_sha256": "912ea816dd5383b423011b02cacc32ade1d3c61cd02a391a4944f82b4b84eee5",
+  "threaded_wasm_sha256": "1b84612adc4e5aacadbf62dfd75ec6b10cf84cc652c19aacf535aa57739641b6",
+  "native_sha256": "6c50c85d4f14379e3d71952c7cc7c9c3f95976e4bc09921ab7cc421390500b40",
+  "node_version": "v26.8.2",
+  "real_matrix": "/tmp/tlosan-session-h-d-native-real",
+  "real_matrix_sha256": "56a17ba22f993a0afd0030b9c9bd34f6775ea96e28774c1039dc5d233a00071c"
+}

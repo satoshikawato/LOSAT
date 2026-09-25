@@ -1,0 +1,31 @@
+{
+  "losat_executable_sha256": "6c50c85d4f14379e3d71952c7cc7c9c3f95976e4bc09921ab7cc421390500b40",
+  "ncbi_executable_sha256": "e3956f1e107a30439d56c8f72fae4267a7d62ebcc16e4f99d4baf2bdf00402e0",
+  "api_executable_sha256": "d8e0f100143031db5121e13907ec34c31a84e258adbf3f92241976916f1536bb",
+  "ncbi_source_commit": "598d8ae6a72b923127ba2fbfaffd48e4c83bfbf4",
+  "formats": [
+    0,
+    6,
+    7
+  ],
+  "threads": [
+    1,
+    2,
+    4,
+    8
+  ],
+  "real_source_sha256": {
+    "av_code1": {
+      "query": "080057e81dae256b8a99955549e0f88361d3d9d20424d838fce51d173ad1f375",
+      "subject": "c3fd0330ac0c7877827b621c0d31e941a0f7d1a2ff11d0c5c8ae7ec453bba96b"
+    },
+    "ap_code4": {
+      "query": "7389181c47021a82770a2dfd5ec4ec78b8682d00867b196298cba4e2f1864084",
+      "subject": "184a9e3264cf522a1187716754cf9bca6dab8e882d76f9a267862751570bde80"
+    },
+    "av_code11": {
+      "query": "080057e81dae256b8a99955549e0f88361d3d9d20424d838fce51d173ad1f375",
+      "subject": "c3fd0330ac0c7877827b621c0d31e941a0f7d1a2ff11d0c5c8ae7ec453bba96b"
+    }
+  }
+}

@@ -1,0 +1,45 @@
+# Session H local artifact and release-readiness evidence
+
+**Decision: NO-GO for a LOSAT/TLOSAN v0.2.0 distribution.** The release candidate for the checks below is commit `005e3d4b6cba6b5808334088fe9595c89efe01f8` on `feature/tlosan-tblastn-v0.2.0`. The Stage G certification candidate is `3ee18789f22df6548f98edaf8017c9b5ba2696ec`. This evidence commit adds only records outside the Cargo package; no output-affecting Rust source or package input changed after the candidate commit.
+
+## Starting authority and scope
+
+The branch began Session H clean at the Stage G commit. `AGENTS.md`, the [TLOSAN plan](../../tlosan_tblastn_v0.2.0_plan.md), [Stage A](../tlosan_stage_a/README.md), [B](../tlosan_stage_b/README.md), [C](../tlosan_stage_c/STAGE_C_GATE_20260924.md), [D](../tlosan_stage_d/STAGE_D_GATE_20260925.md), [E](../tlosan_stage_e/STAGE_E_GATE_20260925.md), [F](../tlosan_stage_f/STAGE_F_GATE_20260925.md), and [G](../tlosan_stage_g/STAGE_G_CERTIFICATION_20260926.md) were inspected. `cd docs/evidence/tlosan_stage_g && sha256sum --check evidence.sha256` passed **213/213** entries. Stage G's independent auditor returned **SUPPORTED only for the declared, finite TBLASTN fixtures and fixed-build absolute performance**. There is no all-input, all-option, release-wide parity, or LOSAT-versus-NCBI speedup verdict.
+
+Session H changed the Cargo version and lockfile to `0.2.0`, removed stale `tblastn` help saying the search was unimplemented, qualified parity claims for the documented subject-code exceptions, included an MIT license text in the crate, and excluded repository tests/oracle scripts and scientific FASTA data from the distributable source package. No search, statistics, ordering, formatting, or NCBI comparison code changed. The Stage G binary hashes therefore remain historical identities; the v0.2.0 binaries below were freshly built and compared. The new candidate's pinned NCBI source/executable/API identities and accepted `PD-TLOSAN-LOCAL-GENCODE-32` exception are unchanged from Stage G.
+
+## Candidate artifacts
+
+Toolchain: Rust/Cargo `1.92.0`; local host `x86_64-unknown-linux-gnu`; WASI smoke host Node `v26.8.2`. [Machine-readable identities](artifacts.json) give full paths, byte counts, and checksums. All four rows are **local candidate artifacts**, not published archives.
+
+| File | Target and build | Bytes | SHA-256 |
+| --- | --- | ---: | --- |
+| `LOSAT/target/release/LOSAT` | Linux x64 native, release/default features | 3,481,432 | `6c50c85d4f14379e3d71952c7cc7c9c3f95976e4bc09921ab7cc421390500b40` |
+| `LOSAT/target/serial-command/wasm32-wasip1/release/LOSAT.wasm` | Serial command-WASI, no default features | 2,572,141 | `912ea816dd5383b423011b02cacc32ade1d3c61cd02a391a4944f82b4b84eee5` |
+| `LOSAT/target/threaded-command/wasm32-wasip1-threads/release/LOSAT.wasm` | Threaded command-WASI, `wasm-threads` | 2,863,184 | `1b84612adc4e5aacadbf62dfd75ec6b10cf84cc652c19aacf535aa57739641b6` |
+| `/tmp/tlosan-v020-cargo-package-target-d/package/LOSAT-0.2.0.crate` | Cargo source package from the committed candidate | 2,813,168 | `50009387f331797ad380c1d54df0b10ded3d9c93b7055b083010406c2e6cddb8` |
+
+The release and WASI build logs are [native](native_build.log), [serial](serial_build.log), [threaded](threaded_build.log), and [package](package.log). `cargo package --list --locked` retained [178 member names](package_list.txt); the archive contains `Cargo.toml`, lockfile, README, source, matrix data and MIT LICENSE, with no `tests/`, scientific FASTA, caches, target output, NCBI executable/library, or credential marker. Its 387 `/mnt/c/` local paths occur only in Rust source comments, predominantly NCBI reference provenance; the archive contains no executable local-path constant from this scan. The separate Cargo publish dry-run generated an **identical `.crate` checksum** and aborted upload as required by dry-run. [Dry-run log](publish_dry_run.log) records this. No package was uploaded.
+
+The native `file` check identified an x86-64 ELF; [dynamic dependencies](native_ldd.txt) contain ordinary GNU/Linux libraries and no NCBI runtime library. WASI module checks found `_start` in both modules: [serial](serial_wasi_identity.json) has private memory, while [threaded](threaded_wasi_identity.json) imports shared memory and `wasi.thread-spawn`. The copied WASI modules plus repository host files ran from `/tmp/tlosan-session-h-wasi-bundle-d`; both printed `losat 0.2.0` and produced the registered code-32 outfmt-6 SHA `0835fffadec3753e875f250c31ca075083f67a9ad91373d71bd5c197913010cf`.
+
+The `.crate` was extracted into a fresh `/tmp/tlosan-session-h-clean-install-d/` and installed offline with `cargo install --path ... --root ... --target-dir ... --offline --locked`. The installed CLI printed `losat 0.2.0`, its `tblastn` help named the local search, and an installed code-1 outfmt-6 search matched the registered **607-byte** stdout SHA `48483fc59eb06f6bd87e733c22896763e32a2a80027a0e5e5cdf0119deb30f52`. [Install log](clean_install.log) and [artifact JSON](artifacts.json) record this check. Cargo's package log warns that integration tests are omitted from the distributable crate because `tests/` is deliberately excluded; the Git checkout retains and runs them.
+
+## New-candidate parity and local gates
+
+- [Native 27-code matrix](native_codes/summary.json): **396/396** complete output comparisons against the registered NCBI CLI/API contracts; raw [rows](native_codes/comparison.jsonl) include the actual v0.2.0 binary SHA, commands, inputs, output hashes, and first-difference behavior.
+- [Native real/no-hit](native_real/summary.json): **72/72** stdout and stderr exact across representative codes 1/4/11/23 and invalid/valid no-hit. [Rows](native_real/comparison.jsonl) include command arrays and hashes.
+- [Command-WASI real/no-hit](wasm_real/summary.json): **90/90** stdout and stderr exact against those native/NCBI expectations. [Rows](wasm_real/comparison.jsonl) identify both module hashes and host commands.
+- [Code 32](code32_native_wasi.json): **9/9** native, serial-WASI and threaded-WASI output hashes match Stage G's selected-code NCBI API expectations for outfmt 0/6/7. The commands and hashes are retained per row; code 32 was never sent to the rejecting NCBI CLI.
+- [Unsupported paths](negative.log): **14/14** rejected explicitly on the new binary; [rows](negative_comparison.jsonl) preserve command and exit evidence.
+- Local quality: `cargo fmt --check`, `cargo clippy --all-targets --all-features --locked -- -D warnings`, `cargo test --all-features --locked`, three release builds, `cargo package --list --locked`, `cargo package --locked --offline`, and `cargo publish --dry-run --locked` all passed. The final candidate passed the complete [all-features suite](full_test.log) and [13 focused CLI tests](cli_test.log). The last command did not publish. Stage G's larger TBLASTN and cross-program gates are retained as bounded historical evidence because the candidate changes affect version/help and package contents rather than alignment behavior.
+
+The separate [partial TBLASTX 20-case audit log](tblastx_broad_partial_13_of_20.log) is **not a completed gate**: 11 exact cases and two approved local subject-code-deviation cases finished, and case 14 began. Its [NCBI oracle identity](tblastx_broad_oracle_identity.json) and the repository's `LOSAT/tests/tblastx_v010_parity_manifest.tsv` identify the comparison. This run predates the Session H version/help candidate and is outside Stage G's focused 12-case TBLASTX regression. A full LOSAT v0.2.0 release maintaining the existing TBLASTX supported profile must complete and review the candidate-specific supported-profile gate, applying only the approved TBLASTX subject-code exception.
+
+The [independent Session H read-only audit](INDEPENDENT_AUDIT.md) supports this documented NO-GO decision and the bounded candidate evidence. It does not certify a v0.2.0 release or enlarge Stage G fixture coverage.
+
+## Remaining release work
+
+The [release decision](../../release/v0.2.0.md) remains NO-GO because a v0.2.0 exact-candidate archive contract/workflow and handoff are absent, the v0.2.0 native target list still needs an explicit contract decision (Linux x64 only, or additional platform certification), and the existing TBLASTX supported-profile audit is incomplete. The local `.crate` and raw binaries are verified candidates, not a multi-target distribution. An independent auditor's Stage G verdict remains valid only for its declared fixtures; a final release-facing artifact/support verdict needs a fresh read-only review after the outstanding gates. No publication, tag, deployment, or distribution is included here.
+
+Replay the commands in [the release note](../../release/v0.2.0.md#reproduction-from-repository-root), use fresh temporary output directories, and verify this evidence directory with `sha256sum --check evidence.sha256` from inside it. The Stage G source/API oracle provenance and accepted exception are unchanged. A new non-code-only NCBI difference must be frozen at its first differing fixture and source call path, corrected, and retested before any GO decision.

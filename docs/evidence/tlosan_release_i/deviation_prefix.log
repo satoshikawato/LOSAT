@@ -1,0 +1,4 @@
+[1/7] d01_nz_self_code4: oracle
+[1/7] d01_nz_self_code4: native run 1
+[1/7] d01_nz_self_code4: HSP_SET_DIFF rows=62053/94440 contract=PASS repeatability=NOT_REQUIRED
+[2/7] d02_ap027132_nz_code4: oracle

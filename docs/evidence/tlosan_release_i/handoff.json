@@ -1,0 +1,110 @@
+{
+  "candidate_sha": "005e3d4b6cba6b5808334088fe9595c89efe01f8",
+  "contract_sha256": "2bf98d5fa461a6138f5fa6681ca9a50cba407d2c5f5fa35c8d963976e79d9bbf",
+  "source_package": {
+    "filename": "LOSAT-0.2.0.crate",
+    "bytes": 2813168,
+    "sha256": "50009387f331797ad380c1d54df0b10ded3d9c93b7055b083010406c2e6cddb8"
+  },
+  "artifacts": [
+    {
+      "id": "native_linux_x64",
+      "target": "x86_64-unknown-linux-gnu",
+      "filename": "LOSAT-0.2.0-x86_64-unknown-linux-gnu.tar.gz",
+      "archive_bytes": 1513369,
+      "archive_sha256": "5feb69c35e7a5aafea26bebdecd20f7b0fa2dfc3e362355e139958f0787e85b1",
+      "binary_sha256": "6c50c85d4f14379e3d71952c7cc7c9c3f95976e4bc09921ab7cc421390500b40",
+      "extracted_smoke": {
+        "version": "losat 0.2.0",
+        "command": [
+          "{extract_root}/LOSAT-0.2.0-x86_64-unknown-linux-gnu/LOSAT",
+          "tblastn",
+          "-task",
+          "tblastn",
+          "-query",
+          "{extract_root}/query.faa",
+          "-subject",
+          "{extract_root}/subject.fna",
+          "-db_gencode",
+          "32",
+          "-outfmt",
+          "6",
+          "-num_threads",
+          "1"
+        ],
+        "stdout_bytes": 53,
+        "stdout_sha256": "0835fffadec3753e875f250c31ca075083f67a9ad91373d71bd5c197913010cf",
+        "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+      }
+    },
+    {
+      "id": "serial_command_wasi",
+      "target": "wasm32-wasip1",
+      "filename": "LOSAT-0.2.0-wasm32-wasip1-command.tar.gz",
+      "archive_bytes": 909369,
+      "archive_sha256": "29c1a78afdadab1f32d1436abb09d0dff6ad0aa571cafa373561c052649ea36c",
+      "binary_sha256": "912ea816dd5383b423011b02cacc32ade1d3c61cd02a391a4944f82b4b84eee5",
+      "extracted_smoke": {
+        "version": "losat 0.2.0",
+        "command": [
+          "node",
+          "--no-warnings",
+          "--experimental-wasi-unstable-preview1",
+          "{extract_root}/LOSAT-0.2.0-wasm32-wasip1-command/run_losat_wasi.js",
+          "{extract_root}/LOSAT-0.2.0-wasm32-wasip1-command/LOSAT.wasm",
+          "tblastn",
+          "-task",
+          "tblastn",
+          "-query",
+          "{extract_root}/query.faa",
+          "-subject",
+          "{extract_root}/subject.fna",
+          "-db_gencode",
+          "32",
+          "-outfmt",
+          "6",
+          "-num_threads",
+          "1"
+        ],
+        "stdout_bytes": 53,
+        "stdout_sha256": "0835fffadec3753e875f250c31ca075083f67a9ad91373d71bd5c197913010cf",
+        "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+      }
+    },
+    {
+      "id": "threaded_command_wasi",
+      "target": "wasm32-wasip1-threads",
+      "filename": "LOSAT-0.2.0-wasm32-wasip1-threads-command.tar.gz",
+      "archive_bytes": 1011689,
+      "archive_sha256": "c826cb99ac7abd7f918c3be5fbb975463dbc0215ae09ce86579c3c41df49f6ef",
+      "binary_sha256": "1b84612adc4e5aacadbf62dfd75ec6b10cf84cc652c19aacf535aa57739641b6",
+      "extracted_smoke": {
+        "version": "losat 0.2.0",
+        "command": [
+          "node",
+          "--no-warnings",
+          "--experimental-wasi-unstable-preview1",
+          "{extract_root}/LOSAT-0.2.0-wasm32-wasip1-threads-command/run_losat_wasi_threads.js",
+          "{extract_root}/LOSAT-0.2.0-wasm32-wasip1-threads-command/LOSAT.wasm",
+          "tblastn",
+          "-task",
+          "tblastn",
+          "-query",
+          "{extract_root}/query.faa",
+          "-subject",
+          "{extract_root}/subject.fna",
+          "-db_gencode",
+          "32",
+          "-outfmt",
+          "6",
+          "-num_threads",
+          "4"
+        ],
+        "stdout_bytes": 53,
+        "stdout_sha256": "0835fffadec3753e875f250c31ca075083f67a9ad91373d71bd5c197913010cf",
+        "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+      }
+    }
+  ],
+  "status": "LOCAL_ARTIFACTS_VERIFIED"
+}

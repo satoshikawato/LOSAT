@@ -1,0 +1,8 @@
+case_id	profile_ids	contract	query	subject	query_gencode	db_gencode	gencode_args	num_threads	outfmt	repeatability_required	coverage_note
+d01_nz_self_code4	P2	approved_db_gencode_deviation	LOSAT/tests/fasta/NZ_CP006932.fasta	LOSAT/tests/fasta/NZ_CP006932.fasta	4	4	explicit	1	6	no	historical approved local-subject deviation
+d02_ap027132_nz_code4	P1,P2	approved_db_gencode_deviation	LOSAT/tests/fasta/AP027132.fasta	LOSAT/tests/fasta/NZ_CP006932.fasta	4	4	explicit	1	6	no	historical approved local-subject deviation
+d03_ap027078_ap027131_code4	P1,P2	approved_db_gencode_deviation	LOSAT/tests/fasta/AP027078.fasta	LOSAT/tests/fasta/AP027131.fasta	4	4	explicit	1	6	no	historical approved local-subject deviation
+d04_ap027131_ap027133_code4	P1,P2	approved_db_gencode_deviation	LOSAT/tests/fasta/AP027131.fasta	LOSAT/tests/fasta/AP027133.fasta	4	4	explicit	1	6	no	historical long-sequence approved-deviation regression
+d05_ap027133_ap027132_code4	P1,P2	approved_db_gencode_deviation	LOSAT/tests/fasta/AP027133.fasta	LOSAT/tests/fasta/AP027132.fasta	4	4	explicit	1	6	no	historical approved local-subject deviation
+p12_lc738874_lc738875_default	P1,P2	parity	LOSAT/tests/fasta/LC738874.fasta	LOSAT/tests/fasta/LC738875.fasta	1	1	implicit	1	6	yes	targeted default-options and serial Wasm comparison
+d06_ap027131_ap027133_db4	P1,P2	approved_db_gencode_deviation	LOSAT/tests/fasta/AP027131.fasta	LOSAT/tests/fasta/AP027133.fasta	1	4	explicit	1	6	yes	subject-only deviation and serial Wasm comparison

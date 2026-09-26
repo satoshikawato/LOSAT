@@ -1,0 +1,5 @@
+5feb69c35e7a5aafea26bebdecd20f7b0fa2dfc3e362355e139958f0787e85b1  LOSAT-0.2.0-x86_64-unknown-linux-gnu.tar.gz
+29c1a78afdadab1f32d1436abb09d0dff6ad0aa571cafa373561c052649ea36c  LOSAT-0.2.0-wasm32-wasip1-command.tar.gz
+c826cb99ac7abd7f918c3be5fbb975463dbc0215ae09ce86579c3c41df49f6ef  LOSAT-0.2.0-wasm32-wasip1-threads-command.tar.gz
+50009387f331797ad380c1d54df0b10ded3d9c93b7055b083010406c2e6cddb8  LOSAT-0.2.0.crate
+c9b52062f3f6c025e78583f932df38ae8b04542427bb53fdb66a6f5ba3eb943d  handoff.json

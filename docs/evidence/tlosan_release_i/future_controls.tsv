@@ -1,0 +1,5 @@
+case_id	profile_ids	contract	query	subject	query_gencode	db_gencode	gencode_args	num_threads	outfmt	repeatability_required	coverage_note
+p12_lc738874_lc738875_default	P1,P2	parity	LOSAT/tests/fasta/LC738874.fasta	LOSAT/tests/fasta/LC738875.fasta	1	1	implicit	1	6	yes	targeted default-options and serial Wasm comparison
+p13_mela_mje_reverse	P2	parity	LOSAT/tests/fasta/MelaMJNV.fasta	LOSAT/tests/fasta/MjeNMV.fasta	1	1	explicit	1	6	yes	reverse direction of p02
+p14_ap027131_ap027133_query4	P1,P2	parity	LOSAT/tests/fasta/AP027131.fasta	LOSAT/tests/fasta/AP027133.fasta	4	1	explicit	1	6	yes	non-default query code with default subject code
+d06_ap027131_ap027133_db4	P1,P2	approved_db_gencode_deviation	LOSAT/tests/fasta/AP027131.fasta	LOSAT/tests/fasta/AP027133.fasta	1	4	explicit	1	6	yes	subject-only deviation and serial Wasm comparison

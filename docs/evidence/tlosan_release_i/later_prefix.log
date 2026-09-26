@@ -1,0 +1,36 @@
+[1/9] p07_lvmjnv_trcumjnv: oracle
+[1/9] p07_lvmjnv_trcumjnv: native run 1
+[1/9] p07_lvmjnv_trcumjnv: native run 2
+[1/9] p07_lvmjnv_trcumjnv: native run 3
+[1/9] p07_lvmjnv_trcumjnv: EXACT_TEXT rows=3301/3301 contract=PASS repeatability=REPEATABLE
+[2/9] p08_trcumjnv_mellatmjnv: oracle
+[2/9] p08_trcumjnv_mellatmjnv: native run 1
+[2/9] p08_trcumjnv_mellatmjnv: native run 2
+[2/9] p08_trcumjnv_mellatmjnv: native run 3
+[2/9] p08_trcumjnv_mellatmjnv: EXACT_TEXT rows=5804/5804 contract=PASS repeatability=REPEATABLE
+[3/9] p09_mellatmjnv_meenmjnv: oracle
+[3/9] p09_mellatmjnv_meenmjnv: native run 1
+[3/9] p09_mellatmjnv_meenmjnv: native run 2
+[3/9] p09_mellatmjnv_meenmjnv: native run 3
+[3/9] p09_mellatmjnv_meenmjnv: EXACT_TEXT rows=18560/18560 contract=PASS repeatability=REPEATABLE
+[4/9] p10_meenmjnv_mejomjnv: oracle
+[4/9] p10_meenmjnv_mejomjnv: native run 1
+[4/9] p10_meenmjnv_mejomjnv: native run 2
+[4/9] p10_meenmjnv_mejomjnv: native run 3
+[4/9] p10_meenmjnv_mejomjnv: EXACT_TEXT rows=23240/23240 contract=PASS repeatability=REPEATABLE
+[5/9] p11_avclpv_psclpv: oracle
+[5/9] p11_avclpv_psclpv: native run 1
+[5/9] p11_avclpv_psclpv: native run 2
+[5/9] p11_avclpv_psclpv: native run 3
+[5/9] p11_avclpv_psclpv: EXACT_TEXT rows=9346/9346 contract=PASS repeatability=REPEATABLE
+[6/9] p12_lc738874_lc738875_default: oracle
+[6/9] p12_lc738874_lc738875_default: native run 1
+[6/9] p12_lc738874_lc738875_default: native run 2
+[6/9] p12_lc738874_lc738875_default: native run 3
+[6/9] p12_lc738874_lc738875_default: EXACT_TEXT rows=4319/4319 contract=PASS repeatability=REPEATABLE
+[7/9] p13_mela_mje_reverse: oracle
+[7/9] p13_mela_mje_reverse: native run 1
+[7/9] p13_mela_mje_reverse: native run 2
+[7/9] p13_mela_mje_reverse: native run 3
+[7/9] p13_mela_mje_reverse: EXACT_TEXT rows=22952/22952 contract=PASS repeatability=REPEATABLE
+[8/9] p14_ap027131_ap027133_query4: oracle

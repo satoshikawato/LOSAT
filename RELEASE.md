@@ -12,7 +12,7 @@ v0.1.0 gate lives in:
 
 ## v0.2.0 TLOSAN preparation
 
-The [v0.2.0 readiness record](docs/release/v0.2.0.md) defines the declared local TBLASTN scope, candidate checks, current distribution blockers, and reproducible commands. The v0.1.0 workflow and exact-SHA contract below are historical and must not be presented as a v0.2.0 artifact handoff.
+The [v0.2.0 readiness record](docs/release/v0.2.0.md) defines the declared local TBLASTN scope, final decision, and evidence. Its [exact-SHA contract](docs/release/v0.2.0_rc_contract.json), [archive assembler](docs/release/assemble_v020.py), and [extracted-artifact record](docs/evidence/tlosan_release_i/LOCAL_HANDOFF.md) govern the Linux x64 and command-WASI handoff. The v0.1.0 workflow and contract below are historical and do not certify v0.2.0 artifacts.
 
 ## v0.1.0 Release Candidate Gate
 
